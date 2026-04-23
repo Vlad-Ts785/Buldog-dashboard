@@ -5,9 +5,15 @@
 ## [Unreleased]
 
 ### Планируется
-- Dry run на 2 нишах (стоматология, внутренний tool отдела продаж)
 - Loom-видео 60-90 секунд в README
+- Альтернативные плейсхолдеры `marketing/funnel.md` и `products/pricing.md` под воронку услуг и прайс-лист (не только e-commerce/SaaS) - в v1.1.0
 - Первый публичный релиз v1.0.0
+
+## [0.5.0] - 2026-04-23
+
+### Исправлено (P1 - non-commercial ветка после dry run)
+- AUTOPILOT шаг 8 правило 7 теперь явно описывает что делать с каждым файлом в non-commercial режиме: заглушка «не применимо для некоммерческого проекта» с пояснением причины (`economics/unit-economics.md`, `economics/revenue.md`, `economics/forecast.md`, `marketing/funnel.md`, `marketing/competitors.md`, `assets/testimonials.md`). Пометка «(не применимо для некоммерческого)» в `INDEX.md`. Структура `.business/` остаётся целой - если проект перейдёт в коммерческий, достаточно заменить заглушки содержимым.
+- `marketing/content.md` добавлен в список заполняемых для non-commercial (обучающие материалы для пользователей).
 
 ## [0.4.0] - 2026-04-23
 

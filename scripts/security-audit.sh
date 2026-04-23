@@ -28,7 +28,8 @@ check() {
   local label="$1"
   shift
   local result
-  result=$(grep -rnE "$@" . --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=scripts 2>/dev/null)
+  # Исключаем scripts/ (сам аудит), .github/hooks/ (pre-commit hook использует те же regex-паттерны легитимно)
+  result=$(grep -rnE "$@" . --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=scripts --exclude-dir=hooks 2>/dev/null)
   if [ -n "$result" ]; then
     red "FAIL: $label"
     echo "$result"

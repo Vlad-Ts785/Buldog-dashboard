@@ -84,13 +84,14 @@ project_type: commercial | non-commercial
 > 5. Node.js backend
 > 6. Мобильное приложение (React Native / Flutter / Swift)
 > 7. Low-code (Make / n8n / Zapier)
-> 8. Ещё не знаю - определимся в процессе
+> 8. Другое - скажи мне какой стек (Go / Rust / Elixir / .NET / Java / что угодно)
+> 9. Ещё не знаю - определимся в процессе
 >
 > Выбери номер.»
 
 **Запомни во frontmatter:**
 ```
-stack: next | vue | svelte | python | node | mobile | low-code | unknown
+stack: next | vue | svelte | python | node | mobile | low-code | other:<название> | unknown
 ```
 
 **Обнови:** `last_completed_step: 3`
@@ -111,17 +112,17 @@ stack: next | vue | svelte | python | node | mobile | low-code | unknown
 
 ---
 
-# Шаг 5. 4 запрета безопасности (~5 мин)
+# Шаг 5. Запреты безопасности (~5 мин)
 
 **Скажи:**
 
 > «Теперь поставлю защиту от опасных команд - чтобы я случайно не удалил твои файлы и не утёк секреты.»
 
-**Выполни** промпт из `prompts/setup/03-security.md` - добавляет в `.claude/settings.json` секцию `permissions.deny` с 4 запретами:
-- `rm -rf` массовое удаление
-- `curl` + `export` утечка переменных
-- чтение `.env`
-- `wget` с переменными
+**Выполни** промпт из `prompts/setup/03-security.md` - добавляет в `.claude/settings.json` секцию `permissions.deny` с 4 концептуальными категориями запретов (в regex-терминах это 9 правил - `templates/claude-settings.json.example` для образца):
+- `rm -rf` массовое удаление (3 regex-варианта)
+- `curl` + `export` утечка переменных (2 regex-варианта)
+- чтение `.env` / `.env.local`
+- `wget` с переменными + `chmod 777`
 
 **Покажи пользователю итоговый `.claude/settings.json`** - он должен содержать и hooks, и запреты.
 

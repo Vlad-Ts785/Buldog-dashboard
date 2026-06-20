@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Дашборд парка техники</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  :root {
+    --bg:       #0f0f13;
+    --bg2:      #17171d;
+    --bg3:      #1e1e26;
+    --border:   rgba(255,255,255,0.07);
+    --text:     #e8e6df;
+    --muted:    #888780;
+    --green:    #1D9E75;
+    --green2:   #EAF3DE;
+    --red:      #E24B4A;
+    --amber:    #EF9F27;
+    --blue:     #378ADD;
+    --purple:   #7F77DD;
+    --radius:   12px;
+    --radius-sm:8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; line-height: 1.5; min-height: 100vh; }
+
+  /* NAV */
+  nav { display: flex; align-items: center; gap: 8px; padding: 0 24px; height: 56px; border-bottom: 1px solid var(--border); background: var(--bg2); position: sticky; top: 0; z-index: 100; }
+  .nav-logo { font-size: 15px; font-weight: 600; color: var(--text); margin-right: 16px; display: flex; align-items: center; gap: 8px; }
+  .nav-logo span { width: 28px; height: 28px; background: var(--green); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+  .nav-btn { padding: 6px 14px; border-radius: 20px; border: none; background: transparent; color: var(--muted); font-size: 13px; cursor: pointer; transition: all .15s; }
+  .nav-btn:hover { background: var(--bg3); color: var(--text); }
+  .nav-btn.active { background: var(--bg3); color: var(--text); font-weight: 500; }
+  .nav-spacer { flex: 1; }
+  .nav-updated { font-size: 12px; color: var(--muted); }
+  .nav-refresh { padding: 6px 12px; border-radius: 20px; border: 1px solid var(--border); background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; transition: all .15s; }
+  .nav-refresh:hover { border-color: rgba(255,255,255,0.2); color: var(--text); }
+
+  /* LAYOUT */
+  main { padding: 24px; max-width: 1400px; margin: 0 auto; }
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* GRID */
+  .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .grid-65 { display: grid; grid-template-columns: 1.8fr 1fr; gap: 16px; margin-bottom: 16px; }
+
+  /* CARDS */
+  .card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; }
+  .card-title { font-size: 12px; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 14px; }
+
+  /* KPI */
+  .kpi { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; }
+  .kpi-label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .kpi-value { font-size: 24px; font-weight: 600; color: var(--text); line-height: 1.2; }
+  .kpi-value.green { color: var(--green); }
+  .kpi-value.red { color: var(--red); }
+  .kpi-value.amber { color: var(--amber); }
+  .kpi-sub { font-size: 11px; color: var(--muted); margin-top: 5px; }
+
+  /* BADGE */
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 500; }
+  .badge.green { background: rgba(29,158,117,0.15); color: #4fd4a3; }
+  .badge.red { background: rgba(226,75,74,0.15); color: #f07b7a; }
+  .badge.amber { background: rgba(239,159,39,0.15); color: #f5be6a; }
+  .badge.blue { background: rgba(55,138,221,0.15); color: #7db9ee; }
+
+  /* PROGRESS BAR */
+  .prog-wrap { margin-bottom: 12px; }
+  .prog-header { display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 12px; }
+  .prog-name { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+  .prog-val { color: var(--muted); flex-shrink: 0; }
+  .prog-bg { height: 5px; background: var(--bg3); border-radius: 3px; overflow: hidden; }
+  .prog-fill { height: 100%; border-radius: 3px; transition: width .6s ease; }
+
+  /* STATUS BLOCKS */
+  .fleet-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .fleet-block { background: var(--bg3); border-radius: var(--radius-sm); padding: 12px 14px; }
+  .fleet-block-title { font-size: 11px; color: var(--muted); margin-bottom: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; }
+  .fleet-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 12px; }
+  .fleet-row:last-child { margin-bottom: 0; }
+  .fleet-row-label { color: var(--muted); }
+  .fleet-row-val { font-weight: 500; color: var(--text); }
+  .fleet-row-val.green { color: var(--green); }
+  .fleet-row-val.red { color: var(--red); }
+  .fleet-row-val.amber { color: var(--amber); }
+
+  /* ALERTS */
+  .alert { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: var(--radius-sm); margin-bottom: 8px; border: 1px solid; }
+  .alert:last-child { margin-bottom: 0; }
+  .alert.red { background: rgba(226,75,74,0.08); border-color: rgba(226,75,74,0.2); }
+  .alert.amber { background: rgba(239,159,39,0.08); border-color: rgba(239,159,39,0.2); }
+  .alert-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+  .alert-text { font-size: 12px; color: var(--text); line-height: 1.5; }
+  .alert-text b { font-weight: 500; }
+
+  /* TABLE */
+  .tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .tbl th { text-align: left; padding: 8px 10px; color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .tbl td { padding: 9px 10px; border-bottom: 1px solid rgba(255,255,255,0.04); color: var(--text); }
+  .tbl tr:last-child td { border-bottom: none; }
+  .tbl tr:hover td { background: var(--bg3); }
+  .tbl .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .tbl .green { color: #4fd4a3; }
+  .tbl .red { color: #f07b7a; }
+  .tbl .amber { color: #f5be6a; }
+
+  /* CHART */
+  .chart-wrap { position: relative; width: 100%; }
+
+  /* LOADING */
+  #loading { position: fixed; inset: 0; background: var(--bg); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; z-index: 999; }
+  .spinner { width: 36px; height: 36px; border: 3px solid var(--border); border-top-color: var(--green); border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-text { color: var(--muted); font-size: 13px; }
+
+  /* ERROR */
+  #error-block { display: none; background: rgba(226,75,74,0.1); border: 1px solid rgba(226,75,74,0.3); border-radius: var(--radius); padding: 20px; margin-bottom: 20px; color: #f07b7a; }
+  #api-url-input { width: 100%; padding: 10px 14px; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); font-size: 13px; margin-top: 8px; }
+
+  /* SECTION HEADER */
+  .sec-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .sec-title { font-size: 14px; font-weight: 500; color: var(--text); }
+  .sec-sub { font-size: 12px; color: var(--muted); }
+
+  @media (max-width: 768px) {
+    .kpi-grid { grid-template-columns: 1fr 1fr; }
+    .grid-2, .grid-3, .grid-65 { grid-template-columns: 1fr; }
+    .fleet-grid { grid-template-columns: 1fr; }
+    main { padding: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <div class="loading-text">Загружаем данные парка...</div>
+</div>
+
+<nav>
+  <div class="nav-logo">
+    <span>🚛</span>
+    Ярд Империал
+  </div>
+  <button class="nav-btn active" onclick="showPage('main')">Главная</button>
+  <button class="nav-btn" onclick="showPage('vehicles')">Машины</button>
+  <button class="nav-btn" onclick="showPage('managers')">Менеджеры</button>
+  <button class="nav-btn" onclick="showPage('drivers')">Водители</button>
+  <button class="nav-btn" onclick="showPage('risks')">Риски</button>
+  <div class="nav-spacer"></div>
+  <span class="nav-updated" id="nav-updated">—</span>
+  <button class="nav-refresh" onclick="loadData()">↻ Обновить</button>
+</nav>
+
+<main>
+  <div id="error-block">
+    <b>Нет данных.</b> Укажите URL вашего Apps Script Web App:
+    <input id="api-url-input" type="text" placeholder="https://script.google.com/macros/s/.../exec" oninput="setApiUrl(this.value)">
+    <div style="margin-top:8px;font-size:12px;color:var(--muted)">Развернуть → Новое развёртывание → Веб-приложение → Доступ: Все (анонимные)</div>
+  </div>
+
+  <!-- ГЛАВНАЯ -->
+  <div id="page-main" class="page active">
+    <div class="kpi-grid">
+      <div class="kpi">
+        <div class="kpi-label">Выручка (месяц)</div>
+        <div class="kpi-value" id="k-revenue">—</div>
+        <div class="kpi-sub" id="k-revenue-sub">Нарастающий итог</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Валовая прибыль</div>
+        <div class="kpi-value green" id="k-profit">—</div>
+        <div class="kpi-sub" id="k-margin">Маржа —</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">В работе сейчас</div>
+        <div class="kpi-value" id="k-working">—</div>
+        <div class="kpi-sub" id="k-working-sub">Тралы + длинномеры</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Продажи / план</div>
+        <div class="kpi-value amber" id="k-sales">—</div>
+        <div class="kpi-sub" id="k-sales-sub">Факт продаж</div>
+      </div>
+    </div>
+
+    <div class="grid-65">
+      <div class="card">
+        <div class="card-title">Структура затрат</div>
+        <div class="chart-wrap" style="height:220px"><canvas id="chart-costs" role="img" aria-label="Структура затрат парка"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Статус парка</div>
+        <div class="fleet-grid" id="fleet-status"></div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="sec-header">
+          <div class="sec-title">Топ менеджеров</div>
+          <div class="sec-sub">по выручке</div>
+        </div>
+        <div id="mgr-list"></div>
+      </div>
+      <div class="card">
+        <div class="sec-header">
+          <div class="sec-title">Алерты</div>
+          <div class="sec-sub" id="alert-count">—</div>
+        </div>
+        <div id="alerts-list"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="sec-header">
+        <div class="sec-title">Топ-10 машин по прибыли</div>
+        <div class="sec-sub">текущий месяц</div>
+      </div>
+      <div class="chart-wrap" style="height:280px"><canvas id="chart-vehicles" role="img" aria-label="Топ машин по валовой прибыли"></canvas></div>
+    </div>
+  </div>
+
+  <!-- МАШИНЫ -->
+  <div id="page-vehicles" class="page">
+    <div class="card">
+      <div class="sec-header">
+        <div class="sec-title">Все машины</div>
+        <div style="display:flex;gap:8px;">
+          <select id="filter-type" onchange="renderVehiclesTable()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;">
+            <option value="">Все типы</option>
+          </select>
+          <select id="sort-by" onchange="renderVehiclesTable()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;">
+            <option value="profit">По прибыли</option>
+            <option value="revenue">По выручке</option>
+            <option value="fines">По штрафам</option>
+          </select>
+        </div>
+      </div>
+      <div style="overflow-x:auto;">
+        <table class="tbl" id="vehicles-table">
+          <thead><tr>
+            <th>Госномер</th><th>Марка</th><th>Тип</th>
+            <th class="num">Выручка</th><th class="num">ФОТ</th>
+            <th class="num">Топливо</th><th class="num">Запчасти</th>
+            <th class="num">Штрафы</th><th class="num">Прибыль</th><th>Статус</th>
+          </tr></thead>
+          <tbody id="vehicles-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- МЕНЕДЖЕРЫ -->
+  <div id="page-managers" class="page">
+    <div class="kpi-grid" id="mgr-kpi"></div>
+    <div class="card">
+      <div class="sec-header">
+        <div class="sec-title">Выполнение плана</div>
+      </div>
+      <div class="chart-wrap" style="height:320px"><canvas id="chart-mgr" role="img" aria-label="Выполнение плана менеджерами"></canvas></div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <div class="sec-header"><div class="sec-title">Детализация</div></div>
+      <div style="overflow-x:auto;">
+        <table class="tbl">
+          <thead><tr>
+            <th>Менеджер</th><th class="num">План</th><th class="num">Факт</th>
+            <th class="num">Оплата</th><th class="num">Долг</th><th class="num">%</th><th>Статус</th>
+          </tr></thead>
+          <tbody id="mgr-table-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ВОДИТЕЛИ -->
+  <div id="page-drivers" class="page">
+    <div class="card">
+      <div class="sec-header"><div class="sec-title">Топ-10 водителей по выполнению плана</div></div>
+      <div class="chart-wrap" style="height:320px"><canvas id="chart-drivers" role="img" aria-label="Топ водителей по плану"></canvas></div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <div style="overflow-x:auto;">
+        <table class="tbl">
+          <thead><tr>
+            <th>Водитель</th><th>Машина</th><th>Тип</th>
+            <th class="num">План</th><th class="num">Факт</th><th class="num">%</th><th>Оценка</th>
+          </tr></thead>
+          <tbody id="drivers-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- РИСКИ -->
+  <div id="page-risks" class="page">
+    <div class="kpi-grid" id="risk-kpi"></div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="sec-header"><div class="sec-title">Убыточные машины</div></div>
+        <div id="loss-list"></div>
+      </div>
+      <div class="card">
+        <div class="sec-header"><div class="sec-title">Крупные штрафы</div></div>
+        <div id="fines-list"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="sec-header"><div class="sec-title">Все алерты</div></div>
+      <div id="all-alerts"></div>
+    </div>
+  </div>
+</main>
+
+<script>
+// ============================================================
+// ВСТАВЬТЕ ЗДЕСЬ URL ВАШЕГО WEB APP ПОСЛЕ ПУБЛИКАЦИИ
+// ============================================================
+let API_URL = localStorage.getItem('api_url') || 'https://script.google.com/macros/s/AKfycbxWi4wJWsSeHdgwrsC-d__EOrncLnkhDr6PgXohoPafY2Y2VtBPq_mGi9qd7mH-vzA00w/exec';
+
+let D = null; // глобальные данные
+
+function setApiUrl(url) {
+  API_URL = url.trim();
+  localStorage.setItem('api_url', API_URL);
+}
+
+async function loadData() {
+  if (!API_URL) {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('error-block').style.display = 'block';
+    return;
+  }
+  document.getElementById('loading').style.display = 'flex';
+  try {
+    const res = await fetch(API_URL);
+    D = await res.json();
+    if (D.error) throw new Error(D.error);
+    document.getElementById('error-block').style.display = 'none';
+    render();
+  } catch(e) {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('error-block').style.display = 'block';
+    document.getElementById('error-block').querySelector('b').textContent = 'Ошибка: ' + e.message;
+  }
+  document.getElementById('loading').style.display = 'none';
+}
+
+function render() {
+  const now = D.updated ? new Date(D.updated).toLocaleString('ru') : '—';
+  document.getElementById('nav-updated').textContent = 'Обновлено: ' + now;
+  renderMain();
+  renderVehiclesTable();
+  renderManagers();
+  renderDrivers();
+  renderRisks();
+}
+
+// ============================================================
+// ГЛАВНАЯ
+// ============================================================
+function renderMain() {
+  const s = D.summary || {};
+  const f = D.fleet || {};
+  const tralWorking = (f.trailers||{}).working || 0;
+  const truckWorking = (f.trucks||{}).working || 0;
+
+  setText('k-revenue', fmt(s.revenue));
+  setText('k-profit', fmt(s.profit));
+  setText('k-margin', 'Маржа ' + pct(s.margin));
+  const kp = document.getElementById('k-profit');
+  kp.className = 'kpi-value ' + (s.profit >= 0 ? 'green' : 'red');
+  setText('k-working', (tralWorking + truckWorking) + ' / ' + ((f.trailers||{}).total||36 + (f.trucks||{}).total||19));
+  setText('k-working-sub', 'Тралы ' + tralWorking + ' + Длинномеры ' + truckWorking);
+  setText('k-sales', pct(s.salesPct));
+  setText('k-sales-sub', fmt(s.salesFakt) + ' из ' + fmt(s.salesPlan));
+
+  renderFleetStatus();
+  renderCostChart();
+  renderVehicleChart();
+  renderMgrList();
+  renderAlerts();
+}
+
+function renderFleetStatus() {
+  const f = D.fleet || {};
+  const tr = f.trailers || {};
+  const tk = f.trucks || {};
+  document.getElementById('fleet-status').innerHTML = `
+    <div class="fleet-block">
+      <div class="fleet-block-title">Тралы (${tr.total||36} ед.)</div>
+      <div class="fleet-row"><span class="fleet-row-label">В работе</span><span class="fleet-row-val green">${tr.working||0}</span></div>
+      <div class="fleet-row"><span class="fleet-row-label">Ремонт</span><span class="fleet-row-val red">${tr.repair||0}</span></div>
+      <div class="fleet-row"><span class="fleet-row-label">Без водителя</span><span class="fleet-row-val amber">${tr.noDriver||0}</span></div>
+      <div class="fleet-row"><span class="fleet-row-label">Без заказа</span><span class="fleet-row-val">${tr.noOrder||0}</span></div>
+    </div>
+    <div class="fleet-block">
+      <div class="fleet-block-title">Длинномеры (${tk.total||19} ед.)</div>
+      <div class="fleet-row"><span class="fleet-row-label">В работе</span><span class="fleet-row-val green">${tk.working||0}</span></div>
+      <div class="fleet-row"><span class="fleet-row-label">Ремонт</span><span class="fleet-row-val red">${tk.repair||0}</span></div>
+      <div class="fleet-row"><span class="fleet-row-label">Без водителя</span><span class="fleet-row-val amber">${tk.noDriver||0}</span></div>
+      <div class="fleet-row"><span class="fleet-row-label">Без заказа</span><span class="fleet-row-val">${tk.noOrder||0}</span></div>
+    </div>`;
+}
+
+function renderCostChart() {
+  const s = D.summary || {};
+  const ctx = document.getElementById('chart-costs');
+  if (!ctx) return;
+  if (ctx._chart) ctx._chart.destroy();
+  ctx._chart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['ФОТ', 'Топливо', 'Запчасти', 'Штрафы', 'Проходные'],
+      datasets: [{
+        data: [
+          Math.abs(s.fot||0), Math.abs(s.fuel||0),
+          Math.abs(s.parts||0), Math.abs(s.fines||0), Math.abs(s.tolls||0)
+        ],
+        backgroundColor: ['#378ADD','#1D9E75','#EF9F27','#E24B4A','#7F77DD'],
+        borderWidth: 0, hoverOffset: 4
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, cutout: '68%',
+      plugins: {
+        legend: { position: 'right', labels: { color:'#888780', font:{size:12}, padding:14, boxWidth:10, boxHeight:10 } },
+        tooltip: { callbacks: { label: ctx => ' ' + fmt(ctx.raw) + ' руб.' } }
+      }
+    }
+  });
+}
+
+function renderVehicleChart() {
+  const v = (D.vehicles || []).slice().sort((a,b) => b.profit - a.profit).slice(0,12);
+  const ctx = document.getElementById('chart-vehicles');
+  if (!ctx) return;
+  if (ctx._chart) ctx._chart.destroy();
+  ctx._chart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: v.map(x => x.gos),
+      datasets: [{
+        data: v.map(x => x.profit),
+        backgroundColor: v.map(x => x.profit >= 0 ? '#1D9E75' : '#E24B4A'),
+        borderRadius: 4, borderSkipped: false,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => ' ' + fmt(ctx.raw) + ' руб.' } }
+      },
+      scales: {
+        x: { ticks: { color:'#888780', font:{size:11} }, grid: { color:'rgba(255,255,255,0.04)' } },
+        y: { ticks: { color:'#888780', callback: v => fmtK(v) }, grid: { color:'rgba(255,255,255,0.04)' } }
+      }
+    }
+  });
+}
+
+function renderMgrList() {
+  const mgrs = (D.managers || []).slice(0, 6);
+  const maxFakt = Math.max(...mgrs.map(m => m.fakt), 1);
+  document.getElementById('mgr-list').innerHTML = mgrs.map(m => {
+    const w = Math.round(m.fakt / maxFakt * 100);
+    const color = m.pct >= 80 ? '#1D9E75' : m.pct >= 50 ? '#EF9F27' : '#E24B4A';
+    const name = m.name.replace(/[+\d\-\s()]{7,}/g,'').trim().split(' ').slice(0,2).join(' ');
+    return `<div class="prog-wrap">
+      <div class="prog-header">
+        <span class="prog-name">${name}</span>
+        <span class="prog-val">${fmt(m.fakt)} · ${m.pct.toFixed(0)}%</span>
+      </div>
+      <div class="prog-bg"><div class="prog-fill" style="width:${w}%;background:${color}"></div></div>
+    </div>`;
+  }).join('');
+}
+
+function renderAlerts() {
+  const vehicles = D.vehicles || [];
+  const f = D.fleet || {};
+  const alerts = [];
+
+  vehicles.filter(v => v.profit < 0).forEach(v => {
+    alerts.push({ cls:'red', icon:'🔴', text:`<b>${v.gos}</b> (${v.type}) — убыток <b>${fmt(v.profit)} руб.</b>` });
+  });
+  vehicles.filter(v => Math.abs(v.fines) > 50000).forEach(v => {
+    alerts.push({ cls:'amber', icon:'⚠️', text:`<b>${v.gos}</b> — штраф <b>${fmt(Math.abs(v.fines))} руб.</b>` });
+  });
+  const repair = ((f.trailers||{}).repair||0) + ((f.trucks||{}).repair||0);
+  if (repair > 0) alerts.push({ cls:'amber', icon:'🔧', text:`В ремонте: <b>${repair} единиц</b> без выручки` });
+  const noDriver = ((f.trailers||{}).noDriver||0) + ((f.trucks||{}).noDriver||0);
+  if (noDriver > 0) alerts.push({ cls:'amber', icon:'👤', text:`Без водителя: <b>${noDriver} машин</b> — нужен найм` });
+
+  document.getElementById('alert-count').textContent = alerts.length + ' событий';
+  document.getElementById('alerts-list').innerHTML = alerts.length
+    ? alerts.map(a => `<div class="alert ${a.cls}"><span class="alert-icon">${a.icon}</span><span class="alert-text">${a.text}</span></div>`).join('')
+    : '<div style="color:var(--muted);font-size:13px;padding:8px 0">Всё в норме ✅</div>';
+}
+
+// ============================================================
+// МАШИНЫ
+// ============================================================
+function renderVehiclesTable() {
+  const type = document.getElementById('filter-type')?.value || '';
+  const sort = document.getElementById('sort-by')?.value || 'profit';
+  let vehicles = [...(D?.vehicles || [])];
+
+  // Заполняем фильтр типов
+  const sel = document.getElementById('filter-type');
+  if (sel && sel.options.length <= 1) {
+    const types = [...new Set(vehicles.map(v => v.type))].sort();
+    types.forEach(t => { const o = new Option(t, t); sel.add(o); });
+  }
+
+  if (type) vehicles = vehicles.filter(v => v.type === type);
+  vehicles.sort((a, b) => {
+    if (sort === 'profit') return b.profit - a.profit;
+    if (sort === 'revenue') return b.revenue - a.revenue;
+    if (sort === 'fines') return Math.abs(b.fines) - Math.abs(a.fines);
+    return 0;
+  });
+
+  document.getElementById('vehicles-body').innerHTML = vehicles.map(v => {
+    const pc = v.revenue > 0 ? (v.profit / v.revenue * 100) : 0;
+    const cls = v.profit < 0 ? 'red' : pc >= 50 ? 'green' : 'amber';
+    return `<tr>
+      <td><b>${v.gos}</b></td>
+      <td style="color:var(--muted)">${v.marka.split(' ')[0]}</td>
+      <td>${v.type}</td>
+      <td class="num">${fmt(v.revenue)}</td>
+      <td class="num" style="color:var(--muted)">${fmt(v.fot)}</td>
+      <td class="num" style="color:var(--muted)">${fmt(v.fuel)}</td>
+      <td class="num" style="color:var(--muted)">${fmt(v.parts)}</td>
+      <td class="num ${Math.abs(v.fines)>50000?'red':''}">${v.fines ? fmt(Math.abs(v.fines)) : '—'}</td>
+      <td class="num ${cls}"><b>${fmt(v.profit)}</b></td>
+      <td><span class="badge ${cls}">${v.profit<0?'Убыток':pc>=50?'Норма':'Слабо'}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+// ============================================================
+// МЕНЕДЖЕРЫ
+// ============================================================
+function renderManagers() {
+  const mgrs = D.managers || [];
+  const totalPlan = mgrs.reduce((s,m) => s + m.plan, 0);
+  const totalFakt = mgrs.reduce((s,m) => s + m.fakt, 0);
+  const totalPay  = mgrs.reduce((s,m) => s + m.payment, 0);
+  const above80   = mgrs.filter(m => m.pct >= 80).length;
+  const below50   = mgrs.filter(m => m.pct < 50).length;
+
+  document.getElementById('mgr-kpi').innerHTML = `
+    <div class="kpi"><div class="kpi-label">Общий план</div><div class="kpi-value">${fmt(totalPlan)}</div></div>
+    <div class="kpi"><div class="kpi-label">Факт продаж</div><div class="kpi-value amber">${fmt(totalFakt)}</div><div class="kpi-sub">${pct(totalFakt/totalPlan*100)} выполнения</div></div>
+    <div class="kpi"><div class="kpi-label">Поступило оплат</div><div class="kpi-value green">${fmt(totalPay)}</div><div class="kpi-sub">Долг: ${fmt(totalFakt - totalPay)}</div></div>
+    <div class="kpi"><div class="kpi-label">Выполняют план</div><div class="kpi-value">${above80} / ${mgrs.length}</div><div class="kpi-sub">${below50} менеджеров < 50%</div></div>`;
+
+  const sorted = [...mgrs].sort((a,b) => b.pct - a.pct);
+  const ctx = document.getElementById('chart-mgr');
+  if (ctx._chart) ctx._chart.destroy();
+  ctx._chart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: sorted.map(m => m.name.replace(/[+\d\-\s()]{7,}/g,'').trim().split(' ').slice(0,2).join(' ')),
+      datasets: [
+        { label: 'План', data: sorted.map(m => m.plan), backgroundColor: 'rgba(255,255,255,0.06)', borderRadius:4 },
+        { label: 'Факт', data: sorted.map(m => m.fakt), backgroundColor: sorted.map(m => m.pct>=80?'#1D9E75':m.pct>=50?'#EF9F27':'#E24B4A'), borderRadius:4 },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color:'#888780', font:{size:12}, boxWidth:10 } },
+        tooltip: { callbacks: { label: ctx => ' ' + fmt(ctx.raw) + ' руб.' } }
+      },
+      scales: {
+        x: { ticks: { color:'#888780', font:{size:11}, maxRotation:35 }, grid:{display:false} },
+        y: { ticks: { color:'#888780', callback: v => fmtK(v) }, grid: { color:'rgba(255,255,255,0.04)' } }
+      }
+    }
+  });
+
+  document.getElementById('mgr-table-body').innerHTML = sorted.map(m => {
+    const cls = m.pct >= 80 ? 'green' : m.pct >= 50 ? 'amber' : 'red';
+    const debt = m.fakt - m.payment;
+    const name = m.name.replace(/[+\d\-\s()]{7,}/g,'').trim();
+    return `<tr>
+      <td>${name}</td>
+      <td class="num">${fmt(m.plan)}</td>
+      <td class="num">${fmt(m.fakt)}</td>
+      <td class="num green">${fmt(m.payment)}</td>
+      <td class="num ${debt>500000?'red':'amber'}">${fmt(debt)}</td>
+      <td class="num ${cls}"><b>${m.pct.toFixed(1)}%</b></td>
+      <td><span class="badge ${cls}">${m.pct>=80?'Выполнен':m.pct>=50?'В процессе':'Отстаёт'}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+// ============================================================
+// ВОДИТЕЛИ
+// ============================================================
+function renderDrivers() {
+  const drivers = D.drivers || [];
+  const ctx = document.getElementById('chart-drivers');
+  if (ctx._chart) ctx._chart.destroy();
+  ctx._chart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: drivers.map(d => d.driver.split(' ').slice(0,2).join(' ')),
+      datasets: [
+        { label: 'План', data: drivers.map(d => d.plan), backgroundColor:'rgba(255,255,255,0.06)', borderRadius:4 },
+        { label: 'Факт', data: drivers.map(d => d.fakt), backgroundColor: drivers.map(d => d.pct>=0.9?'#1D9E75':d.pct>=0.6?'#EF9F27':'#E24B4A'), borderRadius:4 },
+      ]
+    },
+    options: {
+      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color:'#888780', font:{size:12}, boxWidth:10 } },
+        tooltip: { callbacks: { label: ctx => ' ' + fmt(ctx.raw) + ' руб.' } }
+      },
+      scales: {
+        x: { ticks: { color:'#888780', callback: v => fmtK(v) }, grid: { color:'rgba(255,255,255,0.04)' } },
+        y: { ticks: { color:'#888780', font:{size:12} }, grid:{display:false} }
+      }
+    }
+  });
+
+  document.getElementById('drivers-body').innerHTML = drivers.map(d => {
+    const pctVal = typeof d.pct === 'number' ? (d.pct > 1 ? d.pct : d.pct * 100) : 0;
+    const cls = pctVal >= 90 ? 'green' : pctVal >= 60 ? 'amber' : 'red';
+    return `<tr>
+      <td><b>${d.driver}</b></td>
+      <td style="color:var(--muted)">${d.gos}</td>
+      <td>${d.type}</td>
+      <td class="num">${fmt(d.plan)}</td>
+      <td class="num">${fmt(d.fakt)}</td>
+      <td class="num ${cls}"><b>${pctVal.toFixed(1)}%</b></td>
+      <td><span class="badge ${cls}">${pctVal>=90?'Отлично':pctVal>=60?'Хорошо':'Слабо'}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+// ============================================================
+// РИСКИ
+// ============================================================
+function renderRisks() {
+  const vehicles = D.vehicles || [];
+  const f = D.fleet || {};
+  const losses = vehicles.filter(v => v.profit < 0).sort((a,b) => a.profit - b.profit);
+  const bigFines = vehicles.filter(v => Math.abs(v.fines) > 30000).sort((a,b) => Math.abs(b.fines) - Math.abs(a.fines));
+  const repair = ((f.trailers||{}).repair||0) + ((f.trucks||{}).repair||0);
+  const noDriver = ((f.trailers||{}).noDriver||0) + ((f.trucks||{}).noDriver||0);
+
+  document.getElementById('risk-kpi').innerHTML = `
+    <div class="kpi"><div class="kpi-label">Убыточных машин</div><div class="kpi-value red">${losses.length}</div><div class="kpi-sub">Из ${vehicles.length} в отчёте</div></div>
+    <div class="kpi"><div class="kpi-label">В ремонте</div><div class="kpi-value amber">${repair}</div><div class="kpi-sub">Простой без выручки</div></div>
+    <div class="kpi"><div class="kpi-label">Без водителя</div><div class="kpi-value amber">${noDriver}</div><div class="kpi-sub">Требуется найм</div></div>
+    <div class="kpi"><div class="kpi-label">Крупных штрафов</div><div class="kpi-value red">${bigFines.length}</div><div class="kpi-sub">Свыше 30 000 руб.</div></div>`;
+
+  document.getElementById('loss-list').innerHTML = losses.length
+    ? losses.map(v => `<div class="alert red"><span class="alert-icon">🔴</span><div class="alert-text"><b>${v.gos}</b> ${v.type}<br>Убыток: <b>${fmt(v.profit)} руб.</b> · Выручка: ${fmt(v.revenue)}</div></div>`).join('')
+    : '<div style="color:var(--muted);font-size:13px">Убыточных машин нет ✅</div>';
+
+  document.getElementById('fines-list').innerHTML = bigFines.length
+    ? bigFines.map(v => `<div class="alert amber"><span class="alert-icon">⚠️</span><div class="alert-text"><b>${v.gos}</b> ${v.type}<br>Штраф: <b>${fmt(Math.abs(v.fines))} руб.</b></div></div>`).join('')
+    : '<div style="color:var(--muted);font-size:13px">Крупных штрафов нет ✅</div>';
+
+  const all = [
+    ...losses.map(v => `<div class="alert red"><span class="alert-icon">🔴</span><span class="alert-text"><b>${v.gos}</b> убыток ${fmt(v.profit)} руб.</span></div>`),
+    ...bigFines.map(v => `<div class="alert amber"><span class="alert-icon">⚠️</span><span class="alert-text"><b>${v.gos}</b> штраф ${fmt(Math.abs(v.fines))} руб.</span></div>`),
+    repair > 0 ? `<div class="alert amber"><span class="alert-icon">🔧</span><span class="alert-text">В ремонте <b>${repair}</b> единиц</span></div>` : '',
+    noDriver > 0 ? `<div class="alert amber"><span class="alert-icon">👤</span><span class="alert-text">Без водителя <b>${noDriver}</b> машин</span></div>` : '',
+  ].filter(Boolean);
+
+  document.getElementById('all-alerts').innerHTML = all.length
+    ? all.join('')
+    : '<div style="color:var(--muted);font-size:13px;padding:8px 0">Алертов нет ✅</div>';
+}
+
+// ============================================================
+// НАВИГАЦИЯ
+// ============================================================
+function showPage(id) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + id).classList.add('active');
+  event.target.classList.add('active');
+}
+
+// ============================================================
+// УТИЛИТЫ
+// ============================================================
+function fmt(n) {
+  return Math.round(n || 0).toLocaleString('ru') + ' ₽';
+}
+function fmtK(n) {
+  if (Math.abs(n) >= 1000000) return (n/1000000).toFixed(1) + 'M';
+  if (Math.abs(n) >= 1000) return (n/1000).toFixed(0) + 'K';
+  return Math.round(n);
+}
+function pct(n) { return (Math.round(n * 10) / 10).toFixed(1) + '%'; }
+function setText(id, val) { const el = document.getElementById(id); if (el) el.textContent = val; }
+
+// Запуск
+loadData();
+</script>
+</body>
+</html>

@@ -1,0 +1,1418 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ЯРД Империал — Панель управления</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+:root {
+  --bg:#0f0f13;--bg2:#17171d;--bg3:#1e1e26;--bg4:#252530;
+  --border:rgba(255,255,255,0.07);--text:#e8e6df;--muted:#888780;
+  --green:#1D9E75;--red:#E24B4A;--amber:#EF9F27;--blue:#378ADD;--purple:#7F77DD;
+  --radius:12px;--radius-sm:8px;
+  --sidebar:220px;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;display:flex;min-height:100vh;}
+
+/* ── SIDEBAR ───────────────────────────────────────────── */
+.sidebar{
+  width:var(--sidebar);min-width:var(--sidebar);
+  background:var(--bg2);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;
+  position:fixed;top:0;left:0;bottom:0;z-index:100;
+}
+.sidebar-logo{
+  padding:20px 18px 16px;
+  border-bottom:1px solid var(--border);
+}
+.sidebar-logo-label{
+  font-size:10px;font-weight:600;letter-spacing:.1em;
+  color:var(--muted);text-transform:uppercase;margin-bottom:8px;
+}
+.sidebar-logo-name{
+  display:flex;align-items:center;gap:10px;
+}
+.sidebar-logo-icon{
+  width:32px;height:32px;background:var(--green);border-radius:8px;
+  display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;
+}
+.sidebar-logo-text{font-size:15px;font-weight:600;color:var(--text);line-height:1.2;}
+
+.sidebar-nav{flex:1;padding:12px 8px;overflow-y:auto;}
+.sidebar-nav-section{
+  margin-top:16px;margin-bottom:4px;padding:0 12px;
+  display:flex;align-items:center;gap:8px;
+}
+.sidebar-nav-section-label{
+  font-size:10px;font-weight:600;letter-spacing:.08em;
+  color:var(--muted);text-transform:uppercase;white-space:nowrap;opacity:.7;
+}
+.sidebar-nav-section-line{
+  flex:1;height:1px;background:var(--border);
+}
+.sidebar-nav-item{
+  display:flex;align-items:center;gap:10px;
+  padding:9px 12px;border-radius:8px;
+  cursor:pointer;transition:all .15s;
+  font-size:13px;color:var(--muted);
+  margin-bottom:2px;border-left:2px solid transparent;
+}
+.sidebar-nav-item:hover{background:var(--bg3);color:var(--text);}
+.sidebar-nav-item.active{
+  background:var(--bg3);color:var(--text);font-weight:500;
+  border-left-color:var(--green);
+}
+.sidebar-nav-item.disabled{opacity:.4;pointer-events:none;}
+.sidebar-nav-icon{font-size:15px;width:18px;text-align:center;flex-shrink:0;}
+.sidebar-nav-badge{
+  margin-left:auto;font-size:10px;padding:2px 6px;
+  border-radius:10px;background:rgba(239,159,39,.15);color:var(--amber);
+}
+
+.sidebar-bottom{
+  padding:12px 16px;border-top:1px solid var(--border);
+}
+.sidebar-updated{font-size:11px;color:var(--muted);margin-bottom:8px;}
+.sidebar-refresh{
+  width:100%;padding:7px;border-radius:8px;
+  border:1px solid var(--border);background:transparent;
+  color:var(--muted);font-size:12px;cursor:pointer;transition:all .15s;
+}
+.sidebar-refresh:hover{border-color:var(--green);color:var(--green);}
+
+/* ── MAIN ──────────────────────────────────────────────── */
+.main-wrap{
+  margin-left:var(--sidebar);flex:1;
+  display:flex;flex-direction:column;min-height:100vh;
+}
+.page-header{
+  padding:24px 28px 0;
+  border-bottom:1px solid var(--border);
+  background:var(--bg);
+  position:sticky;top:0;z-index:50;
+}
+.page-header-title{font-size:22px;font-weight:600;color:var(--text);padding-bottom:16px;}
+
+main{padding:24px 28px;max-width:1400px;width:100%;}
+.page{display:none;}.page.active{display:block;}
+
+/* ── KPI GRID ──────────────────────────────────────────── */
+.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;}
+.kpi{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;}
+.kpi-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;font-weight:500;}
+.kpi-value{font-size:22px;font-weight:600;color:var(--text);line-height:1.2;}
+.kpi-value.green{color:var(--green);}
+.kpi-value.red{color:var(--red);}
+.kpi-value.amber{color:var(--amber);}
+.kpi-sub{font-size:11px;color:var(--muted);margin-top:4px;}
+.kpi-sub2{font-size:12px;color:var(--muted);margin-top:2px;}
+
+.kpi-prog-wrap{margin-top:10px;}
+.kpi-prog-header{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:5px;}
+.kpi-prog-bg{height:4px;background:var(--bg4);border-radius:3px;overflow:hidden;}
+.kpi-prog-fill{height:100%;border-radius:3px;transition:width .8s ease;}
+
+/* ── SECTION HEADER ────────────────────────────────────── */
+.sec-block{margin-bottom:8px;}
+.sec-block-title{
+  font-size:11px;font-weight:600;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--muted);
+  display:flex;align-items:center;gap:8px;margin-bottom:12px;
+}
+.sec-block-title::after{content:'';flex:1;height:1px;background:var(--border);}
+
+/* ── CARDS ─────────────────────────────────────────────── */
+.grid-65{display:grid;grid-template-columns:1.8fr 1fr;gap:16px;margin-bottom:16px;}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px;}
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;}
+.card-title{font-size:12px;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px;}
+.sec-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+.sec-title{font-size:14px;font-weight:500;color:var(--text);}
+.sec-sub{font-size:12px;color:var(--muted);}
+
+/* ── FLEET STATUS ───────────────────────────────────────── */
+.fleet-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.fleet-block{background:var(--bg3);border-radius:var(--radius-sm);padding:12px 14px;}
+.fleet-block-title{font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:500;text-transform:uppercase;letter-spacing:.04em;}
+.fleet-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:12px;}
+.fleet-row:last-child{margin-bottom:0;}
+.fleet-row-label{color:var(--muted);}
+.fleet-row-val{font-weight:500;color:var(--text);}
+.fleet-row-val.green{color:var(--green);}
+.fleet-row-val.red{color:var(--red);}
+.fleet-row-val.amber{color:var(--amber);}
+
+/* ── COST LEGEND ────────────────────────────────────────── */
+.cost-legend{display:flex;flex-direction:column;gap:7px;margin-top:12px;}
+.cost-row{display:flex;align-items:center;justify-content:space-between;font-size:12px;}
+.cost-left{display:flex;align-items:center;gap:8px;}
+.cost-dot{width:10px;height:10px;border-radius:2px;flex-shrink:0;}
+.cost-name{color:var(--text);}
+.cost-right{text-align:right;}
+.cost-pct{font-weight:600;color:var(--text);}
+.cost-sum{font-size:11px;color:var(--muted);}
+
+/* ── ALERTS ─────────────────────────────────────────────── */
+.alert{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:var(--radius-sm);margin-bottom:8px;border:1px solid;}
+.alert.red{background:rgba(226,75,74,.08);border-color:rgba(226,75,74,.2);}
+.alert.amber{background:rgba(239,159,39,.08);border-color:rgba(239,159,39,.2);}
+.alert.blue{background:rgba(55,138,221,.08);border-color:rgba(55,138,221,.2);}
+.alert-icon{font-size:14px;flex-shrink:0;margin-top:1px;}
+.alert-text{font-size:12px;color:var(--text);line-height:1.5;}
+.alert-text b{font-weight:500;}
+
+/* ── REPAIR LIST ────────────────────────────────────────── */
+.repair-item{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04);}
+.repair-item:last-child{border-bottom:none;}
+.repair-dot{width:6px;height:6px;border-radius:50%;background:var(--red);flex-shrink:0;}
+.repair-gos{font-weight:500;font-size:13px;}
+.repair-type{font-size:11px;color:var(--amber);}
+.repair-driver{font-size:11px;color:var(--muted);}
+
+/* ── PROGRESS BARS ──────────────────────────────────────── */
+.prog-wrap{margin-bottom:10px;}
+.prog-header{display:flex;justify-content:space-between;margin-bottom:4px;font-size:12px;}
+.prog-name{color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;}
+.prog-val{color:var(--muted);flex-shrink:0;font-size:11px;}
+.prog-bg{height:4px;background:var(--bg4);border-radius:3px;overflow:hidden;}
+.prog-fill{height:100%;border-radius:3px;transition:width .6s ease;}
+
+/* ── BADGE ──────────────────────────────────────────────── */
+.badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:500;}
+.badge.green{background:rgba(29,158,117,.15);color:#4fd4a3;}
+.badge.red{background:rgba(226,75,74,.15);color:#f07b7a;}
+.badge.amber{background:rgba(239,159,39,.15);color:#f5be6a;}
+.badge.blue{background:rgba(55,138,221,.15);color:#7db9ee;}
+
+/* ── TABLE ──────────────────────────────────────────────── */
+.tbl{width:100%;border-collapse:collapse;font-size:13px;}
+.tbl th{text-align:left;padding:8px 10px;color:var(--muted);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border);white-space:nowrap;}
+.tbl td{padding:9px 10px;border-bottom:1px solid rgba(255,255,255,.04);color:var(--text);}
+.tbl tr:last-child td{border-bottom:none;}
+.tbl tr:hover td{background:var(--bg3);}
+.tbl tfoot td{padding:9px 10px;border-top:2px solid var(--border);color:var(--text);font-size:12px;background:var(--bg3);}
+.tbl th.sortable{cursor:pointer;user-select:none;}.tbl th.sortable:hover{color:var(--text);}
+.tbl .num{text-align:right;font-variant-numeric:tabular-nums;}
+.tbl .green{color:#4fd4a3;}.tbl .red{color:#f07b7a;}.tbl .amber{color:#f5be6a;}.tbl .muted{color:var(--muted);font-size:11px;}
+
+/* ── CHART ──────────────────────────────────────────────── */
+.chart-wrap{position:relative;width:100%;}
+
+/* ── LOADING ────────────────────────────────────────────── */
+#loading{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;z-index:999;}
+.spinner{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--green);border-radius:50%;animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.loading-text{color:var(--muted);font-size:13px;}
+
+#error-block{display:none;background:rgba(226,75,74,.1);border:1px solid rgba(226,75,74,.3);border-radius:var(--radius);padding:16px 18px;margin-bottom:20px;color:#f07b7a;}
+#api-url-input{width:100%;padding:8px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:13px;margin-top:8px;}
+
+/* ── PAYMENT INPUT ──────────────────────────────────────── */
+.payment-edit{display:flex;align-items:center;gap:8px;margin-top:6px;}
+.payment-edit input{background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 10px;font-size:13px;width:150px;}
+
+/* ── COMING SOON ────────────────────────────────────────── */
+.coming-soon{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  min-height:400px;gap:16px;
+}
+.coming-soon-icon{font-size:48px;opacity:.3;}
+.coming-soon-title{font-size:18px;font-weight:500;color:var(--muted);}
+.coming-soon-desc{font-size:13px;color:var(--muted);opacity:.7;text-align:center;max-width:340px;line-height:1.6;}
+
+/* ── VEHICLE CARD ───────────────────────────────────────── */
+.vcard-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:200;display:none;}
+.vcard-overlay.open{display:block;}
+.vcard-panel{
+  position:fixed;top:0;right:0;bottom:0;width:500px;max-width:100vw;
+  background:var(--bg2);border-left:1px solid var(--border);
+  overflow-y:auto;z-index:201;
+  transform:translateX(105%);transition:transform .25s cubic-bezier(.4,0,.2,1);
+}
+.vcard-panel.open{transform:translateX(0);}
+.vcard-close{
+  position:absolute;top:14px;right:16px;background:var(--bg3);border:none;
+  color:var(--muted);font-size:14px;cursor:pointer;border-radius:8px;
+  width:30px;height:30px;display:flex;align-items:center;justify-content:center;
+}
+.vcard-close:hover{color:var(--text);}
+.vcard-header{padding:22px 24px 16px;border-bottom:1px solid var(--border);position:relative;}
+.vcard-gos{font-size:20px;font-weight:700;margin-bottom:4px;}
+.vcard-meta{font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.6;}
+.vcard-body{padding:20px 24px;}
+.vcard-kpis{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:20px;}
+.vcard-kpi{background:var(--bg3);border-radius:10px;padding:12px;}
+.vcard-kpi-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;}
+.vcard-kpi-val{font-size:15px;font-weight:600;}
+.vcard-sec{margin-bottom:20px;}
+.vcard-sec-title{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;}
+.vcard-cost-row{display:flex;align-items:center;gap:8px;margin-bottom:7px;}
+.vcard-cost-lbl{width:80px;font-size:12px;color:var(--muted);flex-shrink:0;}
+.vcard-cost-bar{flex:1;height:5px;background:var(--bg4);border-radius:3px;overflow:hidden;}
+.vcard-cost-fill{height:100%;border-radius:3px;}
+.vcard-cost-val{width:72px;text-align:right;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;}
+.vcard-stat-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;}
+.vcard-stat{background:var(--bg3);border-radius:8px;padding:10px 8px;text-align:center;}
+.vcard-stat-val{font-size:17px;font-weight:600;line-height:1.2;}
+.vcard-stat-lbl{font-size:9px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:.04em;}
+.tbl tr.clickable{cursor:pointer;}
+.tbl tr.clickable:hover td{background:var(--bg3);}
+
+/* ── PERIOD BUTTONS ─────────────────────────────────────── */
+.period-btn{padding:5px 13px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:12px;cursor:pointer;transition:all .15s;}
+.period-btn:hover{border-color:var(--green);color:var(--text);}
+.period-btn.active{background:var(--green);border-color:var(--green);color:#fff;font-weight:500;}
+
+/* ── RESPONSIVE ─────────────────────────────────────────── */
+@media(max-width:900px){
+  .sidebar{transform:translateX(-100%);}
+  .main-wrap{margin-left:0;}
+  .kpi-grid{grid-template-columns:1fr 1fr;}
+  .grid-2,.grid-3,.grid-65{grid-template-columns:1fr;}
+  .fleet-grid{grid-template-columns:1fr;}
+  main{padding:16px;}
+}
+</style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <div class="loading-text">Загружаем данные...</div>
+</div>
+
+<!-- ═══ SIDEBAR ═════════════════════════════════════════════ -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <div class="sidebar-logo-label">Админ панель</div>
+    <div class="sidebar-logo-name">
+      <div class="sidebar-logo-icon">🚛</div>
+      <div class="sidebar-logo-text">ЯРД<br>Империал</div>
+    </div>
+  </div>
+
+  <nav class="sidebar-nav">
+    <div class="sidebar-nav-item active" onclick="showPage('main',this)" data-page="main">
+      <span class="sidebar-nav-icon">📊</span> Панель
+    </div>
+
+    <div class="sidebar-nav-section">
+      <span class="sidebar-nav-section-label">Парк</span>
+      <div class="sidebar-nav-section-line"></div>
+    </div>
+    <div class="sidebar-nav-item" onclick="showPage('vehicles',this)" data-page="vehicles">
+      <span class="sidebar-nav-icon">🚛</span> Техника
+    </div>
+    <div class="sidebar-nav-item" onclick="showPage('drivers',this)" data-page="drivers">
+      <span class="sidebar-nav-icon">🏆</span> Водители
+    </div>
+    <div class="sidebar-nav-item" onclick="showPage('risks',this)" data-page="risks">
+      <span class="sidebar-nav-icon">⚠️</span> Риски
+      <span class="sidebar-nav-badge" id="risk-badge" style="display:none">0</span>
+    </div>
+    <div class="sidebar-nav-item" onclick="showPage('dynamics',this)" data-page="dynamics">
+      <span class="sidebar-nav-icon">📈</span> Динамика
+    </div>
+
+    <div class="sidebar-nav-section">
+      <span class="sidebar-nav-section-label">Продажи</span>
+      <div class="sidebar-nav-section-line"></div>
+    </div>
+    <div class="sidebar-nav-item" onclick="showPage('managers',this)" data-page="managers">
+      <span class="sidebar-nav-icon">👥</span> Менеджеры
+    </div>
+    <div class="sidebar-nav-item disabled" data-page="clients">
+      <span class="sidebar-nav-icon">🏢</span> Клиенты
+      <span class="sidebar-nav-badge">скоро</span>
+    </div>
+  </nav>
+
+  <div class="sidebar-bottom">
+    <div class="sidebar-updated" id="nav-updated">Нет данных</div>
+    <button class="sidebar-refresh" onclick="loadData()">↻ Обновить данные</button>
+  </div>
+</aside>
+
+<!-- ═══ MAIN WRAP ════════════════════════════════════════════ -->
+<div class="main-wrap">
+
+  <!-- Page header (sticky title) -->
+  <div class="page-header">
+    <div class="page-header-title" id="page-title">Панель управления</div>
+  </div>
+
+  <main>
+    <div id="error-block">
+      <b>Ошибка загрузки.</b> Укажите URL Apps Script:
+      <input id="api-url-input" type="text" placeholder="https://script.google.com/macros/s/.../exec" oninput="setApiUrl(this.value)">
+    </div>
+
+    <!-- ═══ ПАНЕЛЬ ═══════════════════════════════════════════ -->
+    <div id="page-main" class="page active">
+
+      <div class="kpi-grid">
+        <div class="kpi">
+          <div class="kpi-label">Общая выручка</div>
+          <div class="kpi-value amber" id="k-revenue-total">—</div>
+          <div class="kpi-sub2" id="k-revenue-park"></div>
+          <div class="kpi-prog-wrap">
+            <div class="kpi-prog-header"><span>Выполнение плана продаж</span><span id="k-revenue-pct">—</span></div>
+            <div class="kpi-prog-bg"><div class="kpi-prog-fill" id="k-revenue-bar" style="width:0%"></div></div>
+            <div class="kpi-sub" id="k-revenue-plan" style="margin-top:4px"></div>
+          </div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Валовая прибыль</div>
+          <div class="kpi-value green" id="k-profit">—</div>
+          <div class="kpi-sub2" id="k-margin"></div>
+          <div class="kpi-prog-wrap">
+            <div class="kpi-prog-header"><span>Выполнение плана ВП</span><span id="k-profit-pct">—</span></div>
+            <div class="kpi-prog-bg"><div class="kpi-prog-fill" id="k-profit-bar" style="width:0%"></div></div>
+            <div class="kpi-sub" id="k-profit-plan" style="margin-top:4px"></div>
+          </div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Поступления</div>
+          <div class="kpi-value" id="k-payment">—</div>
+          <div class="kpi-sub2" id="k-payment-nal"></div>
+          <div class="payment-edit">
+            <input type="number" id="payment-input" placeholder="Ввести вручную" oninput="updatePayment(this.value)">
+          </div>
+          <div class="kpi-sub" id="k-razneseno" style="margin-top:6px"></div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Техника в работе</div>
+          <div class="kpi-value" id="k-working">—</div>
+          <div class="kpi-sub2" id="k-working-detail"></div>
+          <div class="kpi-prog-wrap">
+            <div class="kpi-prog-header"><span>Загрузка парка</span><span id="k-working-pct">—</span></div>
+            <div class="kpi-prog-bg"><div class="kpi-prog-fill" id="k-working-bar" style="width:0%"></div></div>
+            <div class="kpi-sub" id="k-working-total" style="margin-top:4px"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-65">
+        <div>
+          <div class="grid-2" style="margin-bottom:16px">
+            <div class="card">
+              <div class="card-title">Структура затрат</div>
+              <div class="chart-wrap" style="height:160px"><canvas id="chart-costs"></canvas></div>
+              <div class="cost-legend" id="cost-legend"></div>
+            </div>
+            <div class="card">
+              <div class="card-title">Статус парка</div>
+              <div class="fleet-grid" id="fleet-status"></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="sec-header">
+              <div class="sec-title">Топ-10 машин по прибыли</div>
+              <div class="sec-sub">текущий месяц</div>
+            </div>
+            <div class="chart-wrap" style="height:240px"><canvas id="chart-vehicles"></canvas></div>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:16px;">
+          <div class="card">
+            <div class="sec-header">
+              <div class="sec-title">Алерты</div>
+              <div class="sec-sub" id="alert-count"></div>
+            </div>
+            <div id="alerts-list"></div>
+          </div>
+          <div class="card">
+            <div class="card-title">В ремонте</div>
+            <div id="repair-list"></div>
+          </div>
+          <div class="card">
+            <div class="card-title">Топ менеджеров</div>
+            <div id="mgr-list"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ ПАРК ══════════════════════════════════════════════ -->
+    <div id="page-vehicles" class="page">
+      <div class="card">
+        <div class="sec-header">
+          <div class="sec-title">Все машины</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <select id="filter-type" onchange="renderVehiclesTable()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;">
+              <option value="">Все типы</option>
+            </select>
+            <select id="filter-status" onchange="renderVehiclesTable()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;">
+              <option value="">Все статусы</option>
+              <option value="В работе">В работе</option>
+              <option value="Ремонт">Ремонт</option>
+              <option value="Без водителя">Без водителя</option>
+            </select>
+          </div>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="tbl">
+            <thead><tr id="vehicles-head"></tr></thead>
+            <tbody id="vehicles-body"></tbody>
+            <tfoot><tr id="vehicles-foot"></tr></tfoot>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ МЕНЕДЖЕРЫ ══════════════════════════════════════════ -->
+    <div id="page-managers" class="page">
+      <div class="kpi-grid" id="mgr-kpi"></div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title">Менеджеры по продажам</div>
+          <div class="chart-wrap" style="height:280px"><canvas id="chart-mgr-sales"></canvas></div>
+          <div style="overflow-x:auto;margin-top:14px;">
+            <table class="tbl"><thead><tr>
+              <th>Менеджер</th><th class="num">План</th><th class="num">Факт</th><th class="num">Оплата</th><th class="num">Долг</th><th class="num">%</th><th>Статус</th>
+            </tr></thead><tbody id="mgr-sales-body"></tbody></table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Логисты (внутренние перевозки)</div>
+          <div class="chart-wrap" style="height:280px"><canvas id="chart-mgr-log"></canvas></div>
+          <div style="overflow-x:auto;margin-top:14px;">
+            <table class="tbl"><thead><tr>
+              <th>Логист</th><th class="num">Факт выручки</th>
+            </tr></thead><tbody id="mgr-log-body"></tbody></table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ ВОДИТЕЛИ ════════════════════════════════════════════ -->
+    <div id="page-drivers" class="page">
+      <div class="card">
+        <div class="sec-header"><div class="sec-title">Топ-10 водителей по выполнению плана</div></div>
+        <div class="chart-wrap" style="height:320px"><canvas id="chart-drivers"></canvas></div>
+      </div>
+      <div class="card" style="margin-top:16px;">
+        <table class="tbl">
+          <thead><tr><th>Водитель</th><th>Машина</th><th>Тип</th><th class="num">План</th><th class="num">Факт</th><th class="num">%</th><th>Оценка</th></tr></thead>
+          <tbody id="drivers-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ═══ РИСКИ ════════════════════════════════════════════════ -->
+    <div id="page-risks" class="page">
+      <div class="kpi-grid" id="risk-kpi"></div>
+      <div class="grid-2">
+        <div class="card"><div class="card-title">Убыточные машины</div><div id="loss-list"></div></div>
+        <div class="card"><div class="card-title">Крупные штрафы</div><div id="fines-list"></div></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Все машины в ремонте</div>
+        <div style="overflow-x:auto;">
+          <table class="tbl"><thead><tr><th>Госномер</th><th>Тип</th><th>Статус</th><th>Водитель</th></tr></thead>
+          <tbody id="repair-table"></tbody></table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ ДИНАМИКА ════════════════════════════════════════════ -->
+    <div id="page-dynamics" class="page">
+      <div class="card" style="margin-bottom:16px;padding:14px 20px">
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+          <span style="color:var(--muted);font-size:13px;font-weight:500">Период:</span>
+          <div style="display:flex;gap:6px">
+            <button class="period-btn" onclick="setHistPeriod(1,this)">1 мес</button>
+            <button class="period-btn active" onclick="setHistPeriod(3,this)">3 мес</button>
+            <button class="period-btn" onclick="setHistPeriod(6,this)">6 мес</button>
+            <button class="period-btn" onclick="setHistPeriod(0,this)">Всё</button>
+          </div>
+          <span id="hist-period-label" style="color:var(--muted);font-size:12px"></span>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-title">Статусы машин по дням</div>
+        <div id="hist-status-loading" style="color:var(--muted);padding:20px 0;font-size:13px">Откройте вкладку — данные загрузятся автоматически</div>
+        <div id="hist-status-wrap" style="display:none;overflow-x:auto">
+          <table class="tbl" style="width:100%">
+            <thead><tr id="hist-status-head"></tr></thead>
+            <tbody id="hist-status-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title">Выручка и прибыль по месяцам</div>
+          <div id="hist-finance-loading" style="color:var(--muted);font-size:13px;padding:20px 0"></div>
+          <canvas id="chart-monthly-finance" style="display:none;max-height:260px"></canvas>
+        </div>
+        <div class="card">
+          <div class="card-title">Топливо и запчасти по месяцам</div>
+          <div id="hist-costs-loading" style="color:var(--muted);font-size:13px;padding:20px 0"></div>
+          <canvas id="chart-monthly-costs" style="display:none;max-height:260px"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ КЛИЕНТЫ ══════════════════════════════════════════════ -->
+    <div id="page-clients" class="page">
+      <div class="coming-soon">
+        <div class="coming-soon-icon">🏢</div>
+        <div class="coming-soon-title">База клиентов в разработке</div>
+        <div class="coming-soon-desc">Раздел появится после настройки выгрузки таблицы заказов из 1С. Здесь будут: история заказов по клиентам, выручка, менеджер, количество рейсов.</div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ═══ КАРТОЧКА МАШИНЫ ════════════════════════════════════ -->
+<div class="vcard-overlay" id="vcard-overlay" onclick="closeVehicleCard()"></div>
+<div class="vcard-panel" id="vcard-panel">
+  <button class="vcard-close" onclick="closeVehicleCard()">✕</button>
+  <div id="vcard-content"></div>
+</div>
+
+<script>
+const API_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbxWi4wJWsSeHdgwrsC-d__EOrncLnkhDr6PgXohoPafY2Y2VtBPq_mGi9qd7mH-vzA00w/exec';
+
+const SALES_MANAGERS = ['Ахтамова','Васин','Володин','Гуляева','Гуштюк','Дербенцева','Кан','Коньшина','Котельников','Махура','Прус-Роскошный','Савиток','Сильчев','Филипчук','Цегельников','Шейко'];
+const PROFIT_PLAN = 50400000;
+
+const PAGE_TITLES = {
+  main: 'Панель управления',
+  vehicles: 'Парк техники',
+  managers: 'Менеджеры',
+  drivers: 'Водители',
+  risks: 'Риски',
+  dynamics: 'Динамика',
+  clients: 'База клиентов',
+};
+
+let API_URL = localStorage.getItem('api_url') || API_URL_DEFAULT;
+let manualPayment = parseFloat(localStorage.getItem('manual_payment')) || 0;
+let D = null;
+let vehSort = {col:'profit', dir:-1};
+
+function setApiUrl(u){ API_URL = u.trim(); localStorage.setItem('api_url', API_URL); }
+
+function updatePayment(val) {
+  manualPayment = parseFloat(val) || 0;
+  localStorage.setItem('manual_payment', manualPayment);
+  if (D) renderKPI();
+}
+
+async function loadData() {
+  document.getElementById('loading').style.display = 'flex';
+  try {
+    const res = await fetch(API_URL);
+    D = await res.json();
+    if (D.error) throw new Error(D.error);
+    document.getElementById('error-block').style.display = 'none';
+    if (manualPayment > 0) document.getElementById('payment-input').value = manualPayment;
+    render();
+  } catch(e) {
+    document.getElementById('error-block').style.display = 'block';
+    document.getElementById('error-block').querySelector('b').textContent = 'Ошибка: ' + e.message;
+  }
+  document.getElementById('loading').style.display = 'none';
+}
+
+function render() {
+  const t = D.updated ? new Date(D.updated).toLocaleString('ru',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'}) : '';
+  setText('nav-updated', 'Обновлено: ' + t);
+  renderKPI();
+  renderMain();
+  renderVehiclesTable();
+  renderManagers();
+  renderDrivers();
+  renderRisks();
+}
+
+// ── KPI ────────────────────────────────────────────────────
+function renderKPI() {
+  const s = D.summary || {};
+  const f = D.fleet || {};
+  const tr = f.trailers || {};
+  const tk = f.trucks || {};
+
+  const totalRevenue = s.salesFakt || 0;
+  const salesPlan = s.salesPlan || 54000000;
+  const revPct = Math.min(salesPlan > 0 ? totalRevenue / salesPlan * 100 : 0, 100);
+  setText('k-revenue-total', fmtM(totalRevenue));
+  setText('k-revenue-park', 'Свой парк: ' + fmtM(s.revenue || 0));
+  setText('k-revenue-pct', pct(revPct));
+  setText('k-revenue-plan', 'План: ' + fmtM(salesPlan));
+  setBar('k-revenue-bar', revPct, revPct >= 80 ? 'var(--green)' : revPct >= 50 ? 'var(--amber)' : 'var(--red)');
+
+  const profit = s.profit || 0;
+  const profPct = Math.min(PROFIT_PLAN > 0 ? profit / PROFIT_PLAN * 100 : 0, 100);
+  const kp = document.getElementById('k-profit');
+  kp.textContent = fmtM(profit);
+  kp.className = 'kpi-value ' + (profit >= 0 ? 'green' : 'red');
+  setText('k-margin', 'Маржа ' + pct(s.margin || 0));
+  setText('k-profit-pct', pct(profPct));
+  setText('k-profit-plan', 'План: ' + fmtM(PROFIT_PLAN));
+  setBar('k-profit-bar', profPct, profit >= 0 ? 'var(--green)' : 'var(--red)');
+
+  const pay = manualPayment > 0 ? manualPayment : (s.salesPayment || 0);
+  setText('k-payment', fmtM(pay));
+  setText('k-payment-nal', s.salesPayNal > 0 ? 'Нал: ' + fmtM(s.salesPayNal) : '');
+  setText('k-razneseno', 'Разнесено: ' + fmtM(s.salesPayment || 0));
+
+  const working = (tr.working || 0) + (tk.working || 0);
+  const total = (tr.total || 36) + (tk.total || 19);
+  const workPct = total > 0 ? working / total * 100 : 0;
+  setText('k-working', working + ' / ' + total);
+  setText('k-working-detail', 'Тралы: ' + (tr.working || 0) + ' · Борта: ' + (tk.working || 0));
+  setText('k-working-pct', pct(workPct));
+  setText('k-working-total', 'Всего: ' + total + ' ед.');
+  setBar('k-working-bar', workPct, 'var(--blue)');
+}
+
+function setBar(id, v, color) {
+  const el = document.getElementById(id);
+  if (el) { el.style.width = Math.min(v, 100) + '%'; el.style.background = color; }
+}
+
+// ── ГЛАВНАЯ ────────────────────────────────────────────────
+function renderMain() {
+  renderFleetStatus();
+  renderCostChart();
+  renderVehicleChart();
+  renderMgrList();
+  renderAlerts();
+  renderRepairList();
+}
+
+function renderFleetStatus() {
+  const f = D.fleet || {}; const tr = f.trailers || {}; const tk = f.trucks || {};
+  document.getElementById('fleet-status').innerHTML = `
+    <div class="fleet-block">
+      <div class="fleet-block-title">Тралы · ${tr.total||36} ед.</div>
+      <div class="fleet-row"><span class="fleet-row-label">В работе</span><span class="fleet-row-val green">${tr.working||0}</span></div>
+      <div class="fleet-row"><span class="fleet-row-label">Ремонт</span><span class="fleet-row-val red">${tr.repair||0}</span></div>
+      <div class="fleet-row"><span class="fleet-row-label">Без водителя</span><span class="fleet-row-val amber">${tr.noDriver||0}</span></div>
+      <div class="fleet-row"><span class="fleet-row-label">Без заказа</span><span class="fleet-row-val">${tr.noOrder||0}</span></div>
+    </div>
+    <div class="fleet-block">
+      <div class="fleet-block-title">Длинномеры · ${tk.total||19} ед.</div>
+      <div class="fleet-row"><span class="fleet-row-label">В работе</span><span class="fleet-row-val green">${tk.working||0}</span></div>
+      <div class="fleet-row"><span class="fleet-row-label">Ремонт</span><span class="fleet-row-val red">${tk.repair||0}</span></div>
+      <div class="fleet-row"><span class="fleet-row-label">Без водителя</span><span class="fleet-row-val amber">${tk.noDriver||0}</span></div>
+      <div class="fleet-row"><span class="fleet-row-label">Без заказа</span><span class="fleet-row-val">${tk.noOrder||0}</span></div>
+    </div>`;
+}
+
+function renderCostChart() {
+  const s = D.summary || {};
+  const costs = [
+    {name:'ФОТ',       val:Math.abs(s.fot||0),   color:'#378ADD'},
+    {name:'Топливо',   val:Math.abs(s.fuel||0),  color:'#1D9E75'},
+    {name:'Запчасти',  val:Math.abs(s.parts||0), color:'#EF9F27'},
+    {name:'Штрафы',    val:Math.abs(s.fines||0), color:'#E24B4A'},
+    {name:'Проходные', val:Math.abs(s.tolls||0), color:'#7F77DD'},
+  ];
+  const total = costs.reduce((a,c) => a + c.val, 0);
+  const ctx = document.getElementById('chart-costs');
+  if (ctx._chart) ctx._chart.destroy();
+  ctx._chart = new Chart(ctx, {
+    type:'doughnut',
+    data:{labels:costs.map(c=>c.name),datasets:[{data:costs.map(c=>c.val),backgroundColor:costs.map(c=>c.color),borderWidth:0,hoverOffset:4}]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:'68%',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>' '+fmt(c.raw)}}}}
+  });
+  document.getElementById('cost-legend').innerHTML = costs.map(c => {
+    const p = total > 0 ? (c.val/total*100).toFixed(1) : '0';
+    return `<div class="cost-row">
+      <div class="cost-left"><div class="cost-dot" style="background:${c.color}"></div><span class="cost-name">${c.name}</span></div>
+      <div class="cost-right"><span class="cost-pct">${p}%</span> <span class="cost-sum">${fmtK(c.val)}</span></div>
+    </div>`;
+  }).join('');
+}
+
+function renderVehicleChart() {
+  const top = [...(D.vehicles||[])].sort((a,b) => b.profit - a.profit).slice(0, 12);
+  const ctx = document.getElementById('chart-vehicles');
+  if (ctx._chart) ctx._chart.destroy();
+  ctx._chart = new Chart(ctx, {
+    type:'bar',
+    data:{
+      labels: top.map(v => v.gos),
+      datasets:[{data:top.map(v=>v.profit),backgroundColor:top.map(v=>v.profit>=0?'#1D9E75':'#E24B4A'),borderRadius:4}]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{
+        label:c=>' '+fmt(c.raw),
+        afterLabel:c=>{const v=top[c.dataIndex];return v.driver?' '+v.driver.split(' ').slice(0,2).join(' '):''}
+      }}},
+      scales:{
+        x:{ticks:{color:'#888780',font:{size:11}},grid:{color:'rgba(255,255,255,0.04)'}},
+        y:{ticks:{color:'#888780',callback:v=>fmtK(v)},grid:{color:'rgba(255,255,255,0.04)'}}
+      }
+    }
+  });
+}
+
+function renderMgrList() {
+  const mgrs = (D.managers||[]).filter(m => isSales(m.name)).slice(0, 5);
+  const maxF = Math.max(...mgrs.map(m => m.fakt), 1);
+  document.getElementById('mgr-list').innerHTML = mgrs.map(m => {
+    const w = Math.round(m.fakt / maxF * 100);
+    const color = m.pct >= 80 ? '#1D9E75' : m.pct >= 50 ? '#EF9F27' : '#E24B4A';
+    return `<div class="prog-wrap">
+      <div class="prog-header"><span class="prog-name">${cleanName(m.name)}</span><span class="prog-val">${m.pct.toFixed(0)}%</span></div>
+      <div class="prog-bg"><div class="prog-fill" style="width:${w}%;background:${color}"></div></div>
+    </div>`;
+  }).join('');
+}
+
+function renderAlerts() {
+  const alerts = [];
+  (D.vehicles||[]).filter(x => x.profit < 0).forEach(x =>
+    alerts.push({cls:'red', icon:'🔴', text:`<b>${x.gos}</b> (${x.type}) — убыток <b>${fmt(x.profit)}</b>`}));
+  (D.vehicles||[]).filter(x => Math.abs(x.fines) > 50000).forEach(x =>
+    alerts.push({cls:'amber', icon:'⚠️', text:`<b>${x.gos}</b> — штраф <b>${fmt(Math.abs(x.fines))}</b>`}));
+  const f = D.fleet || {};
+  const rep = ((f.trailers||{}).repair||0) + ((f.trucks||{}).repair||0);
+  const nodrv = ((f.trailers||{}).noDriver||0) + ((f.trucks||{}).noDriver||0);
+  if (rep > 0) alerts.push({cls:'amber', icon:'🔧', text:`В ремонте <b>${rep}</b> ед.`});
+  if (nodrv > 0) alerts.push({cls:'blue', icon:'👤', text:`Без водителя <b>${nodrv}</b> машин`});
+
+  setText('alert-count', alerts.length + ' событий');
+
+  // Обновляем бейдж в сайдбаре
+  const badge = document.getElementById('risk-badge');
+  const critCount = (D.vehicles||[]).filter(x=>x.profit<0).length + (D.vehicles||[]).filter(x=>Math.abs(x.fines)>50000).length;
+  if (critCount > 0) { badge.textContent = critCount; badge.style.display = ''; }
+  else badge.style.display = 'none';
+
+  document.getElementById('alerts-list').innerHTML = alerts.length
+    ? alerts.map(a => `<div class="alert ${a.cls}"><span class="alert-icon">${a.icon}</span><span class="alert-text">${a.text}</span></div>`).join('')
+    : '<div style="color:var(--muted);font-size:13px;padding:8px 0">Всё в норме ✅</div>';
+}
+
+function renderRepairList() {
+  const repairs = D.repairs || [];
+  const el = document.getElementById('repair-list');
+  const list = repairs.length ? repairs : (D.vehicles||[]).filter(x => x.revenue === 0 && x.status?.toLowerCase().includes('ремонт'));
+  if (!list.length) { el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:8px">Нет данных</div>'; return; }
+  el.innerHTML = list.slice(0, 10).map(r => `
+    <div class="repair-item">
+      <div class="repair-dot"></div>
+      <div style="flex:1">
+        <div class="repair-gos">${r.gos}</div>
+        <div class="repair-type">${r.type||'—'}</div>
+        <div class="repair-driver">${r.driver||'—'}</div>
+      </div>
+      <span class="badge amber" style="font-size:10px">${r.status||'Ремонт'}</span>
+    </div>`).join('');
+}
+
+// ── ПАРК ───────────────────────────────────────────────────
+var VEH_COLS = [
+  {key:'gos',      label:'Госномер', num:false},
+  {key:'marka',    label:'Марка',    num:false},
+  {key:'type',     label:'Тип',      num:false},
+  {key:'status',   label:'Статус',   num:false},
+  {key:'revenue',  label:'Выручка',  num:true},
+  {key:'fot',      label:'ФОТ',      num:true},
+  {key:'fuel',     label:'Топливо',  num:true},
+  {key:'parts',    label:'Запчасти', num:true},
+  {key:'fines',    label:'Штрафы',   num:true},
+  {key:'profit',   label:'Прибыль',  num:true},
+  {key:'plan_pct', label:'% плана',  num:true},
+];
+
+function setVehSort(col) {
+  if (vehSort.col === col) { vehSort.dir *= -1; }
+  else { vehSort.col = col; vehSort.dir = VEH_COLS.find(function(c){return c.key===col;}).num ? -1 : 1; }
+  renderVehiclesTable();
+}
+
+function renderVehiclesTable() {
+  if (!D) return;
+
+  var type = document.getElementById('filter-type') ? document.getElementById('filter-type').value : '';
+  var status = document.getElementById('filter-status') ? document.getElementById('filter-status').value : '';
+  var vehicles = (D.vehicles || []).slice();
+
+  var sel = document.getElementById('filter-type');
+  if (sel && sel.options.length <= 1) {
+    var types = [];
+    vehicles.forEach(function(v){ if (v.type && types.indexOf(v.type) === -1) types.push(v.type); });
+    types.sort();
+    types.forEach(function(t){ sel.add(new Option(t, t)); });
+  }
+
+  if (type) vehicles = vehicles.filter(function(v){ return v.type === type; });
+  if (status) vehicles = vehicles.filter(function(v){ return v.status && v.status.indexOf(status) !== -1; });
+
+  var col = vehSort.col, dir = vehSort.dir;
+  vehicles.sort(function(a, b) {
+    var av, bv;
+    if (col === 'fines') {
+      av = Math.abs(a.fines||0); bv = Math.abs(b.fines||0);
+    } else if (col === 'plan_pct') {
+      av = a.plan > 0 ? a.profit / a.plan * 100 : -9999;
+      bv = b.plan > 0 ? b.profit / b.plan * 100 : -9999;
+    } else {
+      av = a[col]; bv = b[col];
+    }
+    if (typeof av === 'number') return (bv - av) * dir;
+    return String(av||'').localeCompare(String(bv||''), 'ru') * dir;
+  });
+
+  // Заголовки с сортировкой
+  var headHtml = '';
+  VEH_COLS.forEach(function(c) {
+    var active = vehSort.col === c.key;
+    var arrow = active ? (vehSort.dir === -1 ? ' ▼' : ' ▲') : ' ↕';
+    var arrowOpacity = active ? '1' : '0.3';
+    headHtml += '<th class="sortable' + (c.num ? ' num' : '') + '" onclick="setVehSort(\'' + c.key + '\')">' +
+      c.label + '<span style="font-size:10px;opacity:' + arrowOpacity + '">' + arrow + '</span></th>';
+  });
+  document.getElementById('vehicles-head').innerHTML = headHtml;
+
+  // Строки
+  var bodyHtml = '';
+  vehicles.forEach(function(v) {
+    var planPct = v.plan > 0 ? v.profit / v.plan * 100 : null;
+    var cls = v.profit < 0 ? 'red'
+            : planPct !== null ? (planPct >= 100 ? 'green' : planPct >= 80 ? 'amber' : 'red')
+            : (v.revenue > 0 && v.profit / v.revenue * 100 >= 50 ? 'green' : 'amber');
+    var planPctCls = planPct === null ? 'muted'
+                   : planPct >= 100 ? 'green' : planPct >= 80 ? 'amber' : 'red';
+    var planPctStr = planPct !== null ? planPct.toFixed(0) + '%' : '—';
+    var stCls = v.status && v.status.indexOf('Ремонт') !== -1 ? 'red' : v.status && v.status.indexOf('работе') !== -1 ? 'green' : 'amber';
+    var finesCls = Math.abs(v.fines||0) > 50000 ? 'red' : '';
+    var gosEsc = (v.gos||'').replace(/'/g,"\\'");
+    bodyHtml += '<tr class="clickable" onclick="openVehicleCard(\'' + gosEsc + '\')">' +
+      '<td><b>' + (v.gos||'') + '</b></td>' +
+      '<td class="muted">' + (v.marka||'').split(' ')[0] + '</td>' +
+      '<td>' + (v.type||'—') + '</td>' +
+      '<td><span class="badge ' + stCls + '">' + (v.status||'—') + '</span></td>' +
+      '<td class="num">' + fmt(v.revenue) + '</td>' +
+      '<td class="num muted">' + fmt(v.fot) + '</td>' +
+      '<td class="num muted">' + fmt(v.fuel) + '</td>' +
+      '<td class="num muted">' + fmt(v.parts) + '</td>' +
+      '<td class="num ' + finesCls + '">' + (v.fines ? fmt(Math.abs(v.fines)) : '—') + '</td>' +
+      '<td class="num ' + cls + '"><b>' + fmt(v.profit) + '</b></td>' +
+      '<td class="num ' + planPctCls + '"><b>' + planPctStr + '</b></td>' +
+      '</tr>';
+  });
+  document.getElementById('vehicles-body').innerHTML = bodyHtml;
+
+  // Итоги по отфильтрованным строкам
+  var tRev = 0, tFot = 0, tFuel = 0, tParts = 0, tFines = 0, tProfit = 0, tPlan = 0;
+  vehicles.forEach(function(v) {
+    tRev    += v.revenue || 0;
+    tFot    += v.fot     || 0;
+    tFuel   += v.fuel    || 0;
+    tParts  += v.parts   || 0;
+    tFines  += Math.abs(v.fines || 0);
+    tProfit += v.profit  || 0;
+    tPlan   += v.plan    || 0;
+  });
+  var tPlanPct = tPlan > 0 ? tProfit / tPlan * 100 : null;
+  var tPlanPctStr = tPlanPct !== null ? tPlanPct.toFixed(0) + '%' : '—';
+  var profCls = tProfit < 0 ? 'red' : tPlanPct !== null ? (tPlanPct >= 100 ? 'green' : tPlanPct >= 80 ? 'amber' : 'red') : 'green';
+  var tPlanPctCls = tPlanPct === null ? '' : tPlanPct >= 100 ? 'green' : tPlanPct >= 80 ? 'amber' : 'red';
+  document.getElementById('vehicles-foot').innerHTML =
+    '<td colspan="4" style="font-weight:600;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em">Итого (' + vehicles.length + ' машин)</td>' +
+    '<td class="num" style="font-weight:600">' + fmt(tRev) + '</td>' +
+    '<td class="num muted">' + fmt(tFot) + '</td>' +
+    '<td class="num muted">' + fmt(tFuel) + '</td>' +
+    '<td class="num muted">' + fmt(tParts) + '</td>' +
+    '<td class="num">' + fmt(tFines) + '</td>' +
+    '<td class="num ' + profCls + '" style="font-weight:600">' + fmt(tProfit) + '</td>' +
+    '<td class="num ' + tPlanPctCls + '" style="font-weight:600">' + tPlanPctStr + '</td>';
+}
+
+// ── МЕНЕДЖЕРЫ ──────────────────────────────────────────────
+function isSales(name) { return SALES_MANAGERS.some(m => name.includes(m)); }
+function cleanName(n) { return n.replace(/[\d\+\-\(\)\s]{6,}/g,'').trim().split(' ').slice(0,3).join(' '); }
+
+function renderManagers() {
+  if (!D) return;
+  const all = D.managers || [];
+  const sales = all.filter(m => isSales(m.name));
+  const logists = all.filter(m => !isSales(m.name));
+  const tP = sales.reduce((s,m) => s + m.plan, 0);
+  const tF = sales.reduce((s,m) => s + m.fakt, 0);
+  const tPay = sales.reduce((s,m) => s + m.payment, 0);
+  const a80 = sales.filter(m => m.pct >= 80).length;
+  const b50 = sales.filter(m => m.pct < 50).length;
+
+  document.getElementById('mgr-kpi').innerHTML = `
+    <div class="kpi"><div class="kpi-label">План (менеджеры)</div><div class="kpi-value amber">${fmtM(tP)}</div></div>
+    <div class="kpi"><div class="kpi-label">Факт продаж</div><div class="kpi-value">${fmtM(tF)}</div><div class="kpi-sub">${pct(tP>0?tF/tP*100:0)} от плана</div></div>
+    <div class="kpi"><div class="kpi-label">Поступило</div><div class="kpi-value green">${fmtM(tPay)}</div><div class="kpi-sub">Долг: ${fmtM(tF-tPay)}</div></div>
+    <div class="kpi"><div class="kpi-label">Выполняют ≥80%</div><div class="kpi-value">${a80} / ${sales.length}</div><div class="kpi-sub">${b50} менеджеров < 50%</div></div>`;
+
+  const sorted = [...sales].sort((a, b) => b.pct - a.pct);
+  renderMgrChart('chart-mgr-sales', sorted, true);
+  document.getElementById('mgr-sales-body').innerHTML = sorted.map(m => {
+    const cls = m.pct >= 80 ? 'green' : m.pct >= 50 ? 'amber' : 'red';
+    const debt = m.fakt - m.payment;
+    return `<tr>
+      <td>${cleanName(m.name)}</td>
+      <td class="num">${fmtK2(m.plan)}</td>
+      <td class="num">${fmtK2(m.fakt)}</td>
+      <td class="num green">${fmtK2(m.payment)}</td>
+      <td class="num ${debt > 500000 ? 'red' : 'amber'}">${fmtK2(debt)}</td>
+      <td class="num ${cls}"><b>${m.pct.toFixed(1)}%</b></td>
+      <td><span class="badge ${cls}">${m.pct>=80?'Выполнен':m.pct>=50?'В процессе':'Отстаёт'}</span></td>
+    </tr>`;
+  }).join('');
+
+  renderMgrChart('chart-mgr-log', logists, false);
+  document.getElementById('mgr-log-body').innerHTML = logists.map(m => `<tr>
+    <td>${cleanName(m.name)}</td>
+    <td class="num amber">${fmtK2(m.fakt)}</td>
+  </tr>`).join('');
+}
+
+function renderMgrChart(id, mgrs, showPlan) {
+  const ctx = document.getElementById(id); if (!ctx) return;
+  if (ctx._chart) ctx._chart.destroy();
+  const datasets = [];
+  if (showPlan) datasets.push({label:'План',data:mgrs.map(m=>m.plan),backgroundColor:'rgba(255,255,255,0.06)',borderRadius:3});
+  datasets.push({label:showPlan?'Факт':'Выручка',data:mgrs.map(m=>m.fakt),
+    backgroundColor:mgrs.map(m=>showPlan?(m.pct>=80?'#1D9E75':m.pct>=50?'#EF9F27':'#E24B4A'):'#378ADD'),borderRadius:3});
+  ctx._chart = new Chart(ctx, {
+    type:'bar',
+    data:{labels:mgrs.map(m=>cleanName(m.name).split(' ')[0]),datasets},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:'#888780',font:{size:12},boxWidth:10}},tooltip:{callbacks:{label:c=>' '+fmt(c.raw)}}},
+      scales:{x:{ticks:{color:'#888780',font:{size:11}},grid:{display:false}},y:{ticks:{color:'#888780',callback:v=>fmtK(v)},grid:{color:'rgba(255,255,255,0.04)'}}}}
+  });
+}
+
+// ── ВОДИТЕЛИ ───────────────────────────────────────────────
+function renderDrivers() {
+  if (!D) return;
+  const drivers = D.drivers || [];
+  const ctx = document.getElementById('chart-drivers');
+  if (ctx._chart) ctx._chart.destroy();
+  ctx._chart = new Chart(ctx, {
+    type:'bar',
+    data:{
+      labels:drivers.map(d => d.driver.split(' ').slice(0,2).join(' ')),
+      datasets:[
+        {label:'План',data:drivers.map(d=>d.plan),backgroundColor:'rgba(255,255,255,0.06)',borderRadius:3},
+        {label:'Факт',data:drivers.map(d=>d.fakt),backgroundColor:drivers.map(d=>{const p=d.pct>1?d.pct:d.pct*100;return p>=90?'#1D9E75':p>=60?'#EF9F27':'#E24B4A';}),borderRadius:3}
+      ]
+    },
+    options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:'#888780',font:{size:12},boxWidth:10}},tooltip:{callbacks:{label:c=>' '+fmt(c.raw)}}},
+      scales:{x:{ticks:{color:'#888780',callback:v=>fmtK(v)},grid:{color:'rgba(255,255,255,0.04)'}},y:{ticks:{color:'#ccc',font:{size:11}},grid:{display:false}}}}
+  });
+  document.getElementById('drivers-body').innerHTML = drivers.map(d => {
+    const pv = d.pct > 1 ? d.pct : d.pct * 100;
+    const cls = pv >= 90 ? 'green' : pv >= 60 ? 'amber' : 'red';
+    return `<tr>
+      <td><b>${d.driver}</b></td><td class="muted">${d.gos}</td><td>${d.type}</td>
+      <td class="num">${fmt(d.plan)}</td><td class="num">${fmt(d.fakt)}</td>
+      <td class="num ${cls}"><b>${pv.toFixed(1)}%</b></td>
+      <td><span class="badge ${cls}">${pv>=90?'Отлично':pv>=60?'Хорошо':'Слабо'}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+// ── РИСКИ ──────────────────────────────────────────────────
+function renderRisks() {
+  if (!D) return;
+  const v = D.vehicles || {}; const f = D.fleet || {};
+  const losses = (D.vehicles||[]).filter(x => x.profit < 0).sort((a,b) => a.profit - b.profit);
+  const bigFines = (D.vehicles||[]).filter(x => Math.abs(x.fines) > 50000).sort((a,b) => Math.abs(b.fines) - Math.abs(a.fines));
+  const rep = ((f.trailers||{}).repair||0) + ((f.trucks||{}).repair||0);
+  const noDriver = ((f.trailers||{}).noDriver||0) + ((f.trucks||{}).noDriver||0);
+  const repairs = D.repairs || [];
+
+  document.getElementById('risk-kpi').innerHTML = `
+    <div class="kpi"><div class="kpi-label">Убыточных машин</div><div class="kpi-value red">${losses.length}</div><div class="kpi-sub">из ${(D.vehicles||[]).length} в отчёте</div></div>
+    <div class="kpi"><div class="kpi-label">В ремонте</div><div class="kpi-value amber">${repairs.length||rep}</div><div class="kpi-sub">простой без выручки</div></div>
+    <div class="kpi"><div class="kpi-label">Без водителя</div><div class="kpi-value amber">${noDriver}</div><div class="kpi-sub">требуется найм</div></div>
+    <div class="kpi"><div class="kpi-label">Крупных штрафов</div><div class="kpi-value red">${bigFines.length}</div><div class="kpi-sub">свыше 50 000 ₽</div></div>`;
+
+  document.getElementById('loss-list').innerHTML = losses.length
+    ? losses.map(x => `<div class="alert red"><span class="alert-icon">🔴</span><div class="alert-text"><b>${x.gos}</b> · ${x.type}<br>Убыток: <b>${fmt(x.profit)}</b> · Выручка: ${fmt(x.revenue)}</div></div>`).join('')
+    : '<div style="color:var(--muted);font-size:13px;padding:8px">Убыточных машин нет ✅</div>';
+
+  document.getElementById('fines-list').innerHTML = bigFines.length
+    ? bigFines.map(x => `<div class="alert amber"><span class="alert-icon">⚠️</span><div class="alert-text"><b>${x.gos}</b> · ${x.type}<br>Штраф: <b>${fmt(Math.abs(x.fines))}</b></div></div>`).join('')
+    : '<div style="color:var(--muted);font-size:13px;padding:8px">Крупных штрафов нет ✅</div>';
+
+  document.getElementById('repair-table').innerHTML = (repairs.length ? repairs : (D.vehicles||[]).filter(x => x.status?.includes('Ремонт'))).map(r => `
+    <tr><td><b>${r.gos}</b></td><td>${r.type||'—'}</td>
+    <td><span class="badge amber">${r.status||'Ремонт'}</span></td>
+    <td class="muted">${r.driver||'—'}</td></tr>`).join('');
+}
+
+// ── КАРТОЧКА МАШИНЫ ────────────────────────────────────────
+var vcardChart = null;
+
+function openVehicleCard(gos) {
+  if (!D || !D.vehicles) return;
+  var v = D.vehicles.find(function(x) { return x.gos === gos; });
+  if (!v) return;
+  var vhist = (histData || []).filter(function(r) { return r.gos === gos; });
+  var driver = D.drivers ? D.drivers.find(function(d) { return d.gos === gos; }) : null;
+  document.getElementById('vcard-content').innerHTML = buildVehicleCard(v, vhist, driver);
+  document.getElementById('vcard-overlay').classList.add('open');
+  document.getElementById('vcard-panel').classList.add('open');
+  document.body.style.overflow = 'hidden';
+  if (vhist.length > 1) setTimeout(function() { renderVcardChart(vhist); }, 50);
+}
+
+function closeVehicleCard() {
+  document.getElementById('vcard-overlay').classList.remove('open');
+  document.getElementById('vcard-panel').classList.remove('open');
+  document.body.style.overflow = '';
+  if (vcardChart) { vcardChart.destroy(); vcardChart = null; }
+}
+
+function buildVehicleCard(v, vhist, driver) {
+  var stCls = v.status && v.status.indexOf('Ремонт') !== -1 ? 'red' : v.status && v.status.indexOf('работе') !== -1 ? 'green' : 'amber';
+  var planPct = v.plan > 0 ? v.profit / v.plan * 100 : null;
+  var planCls = planPct === null ? '' : planPct >= 100 ? 'green' : planPct >= 80 ? 'amber' : 'red';
+  var margin = v.revenue > 0 ? v.profit / v.revenue * 100 : 0;
+  var marginCls = margin >= 30 ? 'green' : margin >= 10 ? 'amber' : 'red';
+  var totalCosts = (v.fot||0) + (v.fuel||0) + (v.parts||0) + Math.abs(v.fines||0) + (v.tolls||0);
+
+  // Статусы из истории
+  var workDays=0, repairDays=0, noDriverDays=0, noOrderDays=0;
+  if (vhist.length) {
+    var dayMap = {};
+    vhist.forEach(function(r) { dayMap[r.date] = r.status; });
+    Object.keys(dayMap).forEach(function(d) {
+      var s = dayMap[d];
+      if (s.indexOf('работе') !== -1) workDays++;
+      else if (s.toLowerCase().indexOf('ремонт') !== -1) repairDays++;
+      else if (s.toLowerCase().indexOf('заказ') !== -1) noOrderDays++;
+      else if (s.toLowerCase().indexOf('водитель') !== -1) noDriverDays++;
+      else workDays++;
+    });
+  }
+  var totalDays = workDays + repairDays + noDriverDays + noOrderDays;
+  var loadPct = totalDays > 0 ? Math.round(workDays / totalDays * 100) : null;
+
+  // ── Header
+  var h = '<div class="vcard-header">';
+  h += '<div class="vcard-gos">' + (v.gos||'—') + '</div>';
+  h += '<div class="vcard-meta">';
+  h += (v.marka||'').split(' ').slice(0,2).join(' ');
+  if (v.trailer) h += '<br>Прицеп: ' + v.trailer;
+  if (driver && driver.driver) h += '<br>Водитель: <b style="color:var(--text)">' + driver.driver + '</b>';
+  h += '</div>';
+  h += '<div style="display:flex;gap:6px;flex-wrap:wrap">';
+  h += '<span class="badge blue">' + (v.type||'—') + '</span>';
+  h += '<span class="badge ' + stCls + '">' + (v.status||'—') + '</span>';
+  if (planPct !== null) h += '<span class="badge ' + planCls + '">' + Math.round(planPct) + '% плана</span>';
+  h += '</div></div>';
+
+  // ── KPI row
+  h += '<div class="vcard-body">';
+  h += '<div class="vcard-kpis">';
+  h += '<div class="vcard-kpi"><div class="vcard-kpi-label">Выручка</div><div class="vcard-kpi-val">' + fmtK2(v.revenue) + '</div></div>';
+  h += '<div class="vcard-kpi"><div class="vcard-kpi-label">Прибыль</div><div class="vcard-kpi-val ' + (v.profit < 0 ? 'red' : 'green') + '">' + fmtK2(v.profit) + '</div></div>';
+  h += '<div class="vcard-kpi"><div class="vcard-kpi-label">Рентабельность</div><div class="vcard-kpi-val ' + marginCls + '">' + Math.round(margin) + '%</div></div>';
+  h += '</div>';
+
+  // ── Расходы с прогресс-барами
+  h += '<div class="vcard-sec">';
+  h += '<div class="vcard-sec-title">Расходы · ' + fmtK2(totalCosts) + ' итого</div>';
+  var costs = [
+    {lbl:'ФОТ',     val:v.fot||0,              color:'var(--blue)'},
+    {lbl:'Топливо', val:v.fuel||0,             color:'var(--amber)'},
+    {lbl:'Запчасти',val:v.parts||0,            color:'var(--purple)'},
+    {lbl:'Штрафы',  val:Math.abs(v.fines||0),  color:'var(--red)'},
+    {lbl:'Платные дороги', val:v.tolls||0,     color:'var(--muted)'},
+  ];
+  costs.forEach(function(c) {
+    if (!c.val) return;
+    var pct = totalCosts > 0 ? (c.val / totalCosts * 100).toFixed(1) : 0;
+    h += '<div class="vcard-cost-row">';
+    h += '<div class="vcard-cost-lbl">' + c.lbl + '</div>';
+    h += '<div class="vcard-cost-bar"><div class="vcard-cost-fill" style="width:' + pct + '%;background:' + c.color + '"></div></div>';
+    h += '<div class="vcard-cost-val">' + fmtK2(c.val) + '</div>';
+    h += '</div>';
+  });
+  h += '</div>';
+
+  // ── История статусов
+  if (vhist.length) {
+    h += '<div class="vcard-sec">';
+    h += '<div class="vcard-sec-title">Статусы · ' + totalDays + ' дн в базе';
+    if (loadPct !== null) h += ' · загрузка <span style="color:var(--green)">' + loadPct + '%</span>';
+    h += '</div>';
+    h += '<div class="vcard-stat-grid">';
+    h += '<div class="vcard-stat"><div class="vcard-stat-val green">' + (workDays||'—') + '</div><div class="vcard-stat-lbl">В работе</div></div>';
+    h += '<div class="vcard-stat"><div class="vcard-stat-val red">' + (repairDays||'—') + '</div><div class="vcard-stat-lbl">Ремонт</div></div>';
+    h += '<div class="vcard-stat"><div class="vcard-stat-val amber">' + (noDriverDays||'—') + '</div><div class="vcard-stat-lbl">Без водителя</div></div>';
+    h += '<div class="vcard-stat"><div class="vcard-stat-val amber">' + (noOrderDays||'—') + '</div><div class="vcard-stat-lbl">Без заказа</div></div>';
+    h += '</div></div>';
+
+    // ── Мини-график прибыли
+    h += '<div class="vcard-sec">';
+    h += '<div class="vcard-sec-title">Динамика прибыли по месяцам</div>';
+    h += '<canvas id="vcard-chart" style="max-height:150px"></canvas>';
+    h += '</div>';
+  } else {
+    h += '<div style="color:var(--muted);font-size:12px;padding:8px 0 4px">История появится после деплоя Apps Script и открытия вкладки «Динамика»</div>';
+  }
+
+  h += '</div>';
+  return h;
+}
+
+function renderVcardChart(vhist) {
+  var byMonth = {};
+  vhist.forEach(function(r) {
+    var ym = r.date.substring(0,7);
+    if (!byMonth[ym] || r.date > byMonth[ym].date) byMonth[ym] = r;
+  });
+  var months = Object.keys(byMonth).sort();
+  if (months.length < 2) return;
+  var labels = months.map(function(m) {
+    var p = m.split('-');
+    return new Date(+p[0], +p[1]-1, 1).toLocaleDateString('ru', {month:'short'});
+  });
+  var profits = months.map(function(m) { return Math.round(byMonth[m].profit / 1000); });
+  var ctx = document.getElementById('vcard-chart');
+  if (!ctx) return;
+  if (vcardChart) vcardChart.destroy();
+  vcardChart = new Chart(ctx.getContext('2d'), {
+    type: 'line',
+    data: { labels: labels, datasets: [{
+      data: profits,
+      borderColor: '#1D9E75',
+      backgroundColor: 'rgba(29,158,117,0.1)',
+      borderWidth: 2, pointRadius: 4, fill: true, tension: 0.3,
+    }]},
+    options: {
+      responsive: true,
+      plugins: { legend: {display:false} },
+      scales: {
+        x: { ticks: {color:'#888780', font:{size:10}}, grid: {color:'rgba(255,255,255,0.04)'} },
+        y: { ticks: {color:'#888780', font:{size:10}, callback:function(v){return v+'К';}}, grid: {color:'rgba(255,255,255,0.04)'} }
+      }
+    }
+  });
+}
+
+// ── ДИНАМИКА ───────────────────────────────────────────────
+var histData = null;
+var histPeriod = 3;
+var histChartFinance = null;
+var histChartCosts = null;
+
+function loadHistoryData() {
+  if (histData !== null) { renderDynamics(); return; }
+  document.getElementById('hist-status-loading').textContent = 'Загрузка истории...';
+  document.getElementById('hist-finance-loading').textContent = 'Загрузка...';
+  document.getElementById('hist-costs-loading').textContent = 'Загрузка...';
+  fetch(API_URL + '?action=vehicle_history')
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      histData = d.history || [];
+      renderDynamics();
+    })
+    .catch(function() {
+      document.getElementById('hist-status-loading').textContent = 'Ошибка загрузки данных';
+    });
+}
+
+function setHistPeriod(months, btn) {
+  histPeriod = months;
+  document.querySelectorAll('.period-btn').forEach(function(b) { b.classList.remove('active'); });
+  if (btn) btn.classList.add('active');
+  if (histData !== null) renderDynamics();
+}
+
+function renderDynamics() {
+  if (!histData) return;
+  var filtered = histPeriod > 0 ? (function() {
+    var cutoff = new Date();
+    cutoff.setMonth(cutoff.getMonth() - histPeriod);
+    return histData.filter(function(r) { return new Date(r.date) >= cutoff; });
+  })() : histData.slice();
+
+  var label = document.getElementById('hist-period-label');
+  if (label && filtered.length) {
+    var dates = filtered.map(function(r) { return r.date; }).sort();
+    label.textContent = dates[0] + ' — ' + dates[dates.length-1] + ' (' + filtered.length + ' записей)';
+  } else if (label) {
+    label.textContent = 'нет данных';
+  }
+
+  renderStatusTable(filtered);
+  renderMonthlyCharts(filtered);
+}
+
+function renderStatusTable(data) {
+  var loading = document.getElementById('hist-status-loading');
+  var wrap = document.getElementById('hist-status-wrap');
+  if (!data.length) {
+    loading.textContent = 'Нет данных за выбранный период';
+    loading.style.display = '';
+    wrap.style.display = 'none';
+    return;
+  }
+
+  // Группируем по машине: один статус на дату (последняя запись дня)
+  var vmap = {};
+  data.forEach(function(r) {
+    if (!vmap[r.gos]) vmap[r.gos] = { gos: r.gos, type: r.type, days: {} };
+    if (!vmap[r.gos].days[r.date] || r.date >= vmap[r.gos].days[r.date].date) {
+      vmap[r.gos].days[r.date] = r.status;
+    }
+  });
+
+  var rows = Object.keys(vmap).map(function(gos) {
+    var v = vmap[gos];
+    var work = 0, repair = 0, noOrder = 0, noDriver = 0;
+    Object.keys(v.days).forEach(function(d) {
+      var s = v.days[d];
+      if (s.indexOf('работе') !== -1) work++;
+      else if (s.toLowerCase().indexOf('ремонт') !== -1) repair++;
+      else if (s.toLowerCase().indexOf('заказ') !== -1) noOrder++;
+      else if (s.toLowerCase().indexOf('водитель') !== -1 || s.toLowerCase().indexOf('водителя') !== -1) noDriver++;
+      else work++;
+    });
+    var total = Object.keys(v.days).length;
+    return { gos: gos, type: v.type, work: work, repair: repair, noOrder: noOrder, noDriver: noDriver, total: total };
+  });
+
+  rows.sort(function(a, b) { return (b.repair + b.noDriver) - (a.repair + a.noDriver); });
+
+  document.getElementById('hist-status-head').innerHTML =
+    '<th>Тип</th><th>Госномер</th>' +
+    '<th class="num" style="color:#4fd4a3">В работе</th>' +
+    '<th class="num" style="color:#f07b7a">Ремонт</th>' +
+    '<th class="num" style="color:#f5be6a">Без заказа</th>' +
+    '<th class="num" style="color:#f5be6a">Без водителя</th>' +
+    '<th class="num">Итого дней</th>';
+
+  var tbody = '';
+  rows.forEach(function(r) {
+    var repCls = r.repair >= 7 ? ' style="color:#f07b7a;font-weight:600"' : '';
+    tbody += '<tr>' +
+      '<td class="muted">' + (r.type || '—') + '</td>' +
+      '<td><b>' + r.gos + '</b></td>' +
+      '<td class="num green">' + (r.work || '—') + '</td>' +
+      '<td class="num"' + repCls + '>' + (r.repair || '—') + '</td>' +
+      '<td class="num amber">' + (r.noOrder || '—') + '</td>' +
+      '<td class="num amber">' + (r.noDriver || '—') + '</td>' +
+      '<td class="num muted">' + r.total + '</td>' +
+      '</tr>';
+  });
+
+  document.getElementById('hist-status-body').innerHTML = tbody;
+  loading.style.display = 'none';
+  wrap.style.display = '';
+}
+
+function renderMonthlyCharts(data) {
+  // Берём последнюю запись каждой машины за месяц (нарастающий итог → конец месяца = итог)
+  var byVehMonth = {};
+  data.forEach(function(r) {
+    var ym = r.date.substring(0, 7);
+    var key = r.gos + '|' + ym;
+    if (!byVehMonth[key] || r.date > byVehMonth[key].date) byVehMonth[key] = r;
+  });
+
+  var byMonth = {};
+  Object.keys(byVehMonth).forEach(function(k) {
+    var r = byVehMonth[k];
+    var ym = r.date.substring(0, 7);
+    if (!byMonth[ym]) byMonth[ym] = { revenue: 0, profit: 0, fuel: 0, parts: 0 };
+    byMonth[ym].revenue += r.revenue;
+    byMonth[ym].profit  += r.profit;
+    byMonth[ym].fuel    += r.fuel;
+    byMonth[ym].parts   += r.parts;
+  });
+
+  var months = Object.keys(byMonth).sort();
+  var flLoading = document.getElementById('hist-finance-loading');
+  var clLoading = document.getElementById('hist-costs-loading');
+
+  if (!months.length) {
+    flLoading.textContent = 'Нет данных';
+    clLoading.textContent = 'Нет данных';
+    return;
+  }
+
+  var labels = months.map(function(m) {
+    var p = m.split('-');
+    return new Date(+p[0], +p[1]-1, 1).toLocaleDateString('ru', {month:'short', year:'2-digit'});
+  });
+  var revenues  = months.map(function(m) { return Math.round(byMonth[m].revenue / 1000); });
+  var profits   = months.map(function(m) { return Math.round(byMonth[m].profit  / 1000); });
+  var fuels     = months.map(function(m) { return Math.round(byMonth[m].fuel    / 1000); });
+  var partsCost = months.map(function(m) { return Math.round(byMonth[m].parts   / 1000); });
+
+  var chartOpts = {
+    responsive: true,
+    plugins: { legend: { labels: { color: '#e8e6df', font: { size: 11 } } } },
+    scales: {
+      x: { ticks: { color: '#888780' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+      y: { ticks: { color: '#888780', callback: function(v) { return v + ' тыс'; } }, grid: { color: 'rgba(255,255,255,0.05)' } }
+    }
+  };
+
+  flLoading.style.display = 'none';
+  var c1 = document.getElementById('chart-monthly-finance');
+  c1.style.display = '';
+  if (histChartFinance) histChartFinance.destroy();
+  histChartFinance = new Chart(c1.getContext('2d'), {
+    type: 'bar',
+    data: { labels: labels, datasets: [
+      { label: 'Выручка, тыс ₽', data: revenues, backgroundColor: 'rgba(55,138,221,0.7)', borderRadius: 4 },
+      { label: 'Прибыль, тыс ₽', data: profits,  backgroundColor: 'rgba(29,158,117,0.7)',  borderRadius: 4 }
+    ]},
+    options: chartOpts
+  });
+
+  clLoading.style.display = 'none';
+  var c2 = document.getElementById('chart-monthly-costs');
+  c2.style.display = '';
+  if (histChartCosts) histChartCosts.destroy();
+  histChartCosts = new Chart(c2.getContext('2d'), {
+    type: 'bar',
+    data: { labels: labels, datasets: [
+      { label: 'Топливо, тыс ₽',  data: fuels,     backgroundColor: 'rgba(239,159,39,0.7)', borderRadius: 4 },
+      { label: 'Запчасти, тыс ₽', data: partsCost, backgroundColor: 'rgba(226,75,74,0.7)',  borderRadius: 4 }
+    ]},
+    options: chartOpts
+  });
+}
+
+// ── НАВИГАЦИЯ ──────────────────────────────────────────────
+function showPage(id, el) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.sidebar-nav-item').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + id).classList.add('active');
+  if (el) el.classList.add('active');
+  setText('page-title', PAGE_TITLES[id] || '');
+  if (id === 'dynamics') loadHistoryData();
+}
+
+// ── УТИЛИТЫ ────────────────────────────────────────────────
+function fmt(n) { return Math.round(n||0).toLocaleString('ru') + ' ₽'; }
+function fmtM(n) { const v=Math.abs(n||0);const s=(n||0)<0?'-':'';return v>=1000000?s+(v/1000000).toFixed(2)+' млн ₽':s+Math.round(v).toLocaleString('ru')+' ₽'; }
+function fmtK(n) { if(Math.abs(n)>=1000000)return(n/1000000).toFixed(1)+'M';if(Math.abs(n)>=1000)return(n/1000).toFixed(0)+'K';return Math.round(n); }
+function fmtK2(n) { if(Math.abs(n)>=1000000)return(n/1000000).toFixed(1)+' млн';if(Math.abs(n)>=1000)return(n/1000).toFixed(0)+' тыс';return Math.round(n); }
+function pct(n) { return (Math.round((n||0)*10)/10).toFixed(1)+'%'; }
+function setText(id, val) { const el=document.getElementById(id); if(el) el.textContent=val; }
+
+loadData();
+</script>
+</body>
+</html>

@@ -88,11 +88,17 @@ function runAll() {
   try { importReportFromGmail();   log.push('✅ Парк из 1С загружен'); }
   catch(e) { errors.push('❌ Парк из 1С: ' + e.message); }
 
+  try { importOrdersReport();      log.push('✅ Заказы загружены'); }
+  catch(e) { errors.push('❌ Заказы (импорт): ' + e.message); }
+
   try { importManagerReport();     log.push('✅ Менеджеры загружены'); }
   catch(e) { errors.push('❌ Менеджеры: ' + e.message); }
 
   try { normalizeReport();         log.push('✅ Нормализация выполнена'); }
   catch(e) { errors.push('❌ Нормализация: ' + e.message); }
+
+  try { normalizeOrders();         log.push('✅ Заказы нормализованы'); }
+  catch(e) { errors.push('❌ Заказы (норм.): ' + e.message); }
 
   try { createTopDriversByPlan();  log.push('✅ Топ водителей обновлён'); }
   catch(e) { errors.push('❌ Топ водителей: ' + e.message); }
@@ -339,14 +345,27 @@ function createTopDriversByPlan() {
   if (!sheet) throw new Error('Лист Штатка не найден');
 
   const lastRow = sheet.getLastRow();
-  const data = sheet.getRange(6, 1, lastRow - 5, 36).getValues();
+  const lastCol = sheet.getLastColumn();
+
+  // Ищем колонку «ВОДИТЕЛЬ 1» по заголовку в строке 5
+  const headerRow = sheet.getRange(5, 1, 1, lastCol).getValues()[0];
+  var driverCol = -1;
+  for (var h = 0; h < headerRow.length; h++) {
+    var hdr = String(headerRow[h] || '').trim().toUpperCase();
+    if (hdr === 'ВОДИТЕЛЬ 1' || hdr === 'ВОДИТЕЛЬ') { driverCol = h; break; }
+  }
+  // fallback: старый индекс
+  if (driverCol < 0) driverCol = 33;
+
+  const numCols = Math.max(driverCol + 1, 8); // минимум A-H
+  const data = sheet.getRange(6, 1, lastRow - 5, numCols).getValues();
 
   const vehicles = [];
   for (let row of data) {
     const plan    = parseFloat(row[5]) || 0;
     const fakt    = parseFloat(row[6]) || 0;
     const procent = parseFloat(row[7]) || 0;
-    const driver  = String(row[33] || '').trim();
+    const driver  = String(row[driverCol] || '').trim();
 
     if (procent <= 0) continue;
 
@@ -388,28 +407,23 @@ function createTopDriversByPlan() {
 // ============================================================
 function saveDailyStats() {
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-  const sheet = ss.getSheetByName('Штатка');
-  if (!sheet) throw new Error('Лист Штатка не найден');
 
-  const getVal = (range) => {
-    const val = sheet.getRange(range).getValue();
-    return (val === '' || val === null) ? 0 : Number(val);
-  };
+  // Используем getFleetStatus — тот же источник, что и дашборд
+  const fleet = getFleetStatus(getStaffData(ss));
+  const tr = fleet.trailers;
+  const tk = fleet.trucks;
 
-  // ИСПРАВЛЕНО: правильные ячейки для каждого показателя
-  const workTrails    = getVal('AG2');  // В работе тралы
-  const noDriverTrails= getVal('AG3');  // Без водителя тралы
-  const repairTrails  = getVal('AG4');  // Ремонт тралы
-  const noOrderTrails = getVal('AJ2');  // Без заказа тралы
+  const workTrails    = tr.working;
+  const repairTrails  = tr.repair;
+  const noDriverTrails= tr.noDriver;
+  const noOrderTrails = tr.noOrder;
+  const totalTrails   = tr.total;
 
-  const workLongs     = getVal('AH2');  // В работе длинномеры
-  const noDriverLongs = getVal('AH3');  // Без водителя длинномеры
-  const repairLongs   = getVal('AH4');  // Ремонт длинномеры
-  const noOrderLongs  = getVal('AK2');  // Без заказа длинномеры
-
-  // Всего = фиксированные значения (меняются редко при покупке/выводе)
-  const totalTrails = 36;
-  const totalLongs  = 19;
+  const workLongs     = tk.working;
+  const repairLongs   = tk.repair;
+  const noDriverLongs = tk.noDriver;
+  const noOrderLongs  = tk.noOrder;
+  const totalLongs    = tk.total;
 
   const simpleTrails = repairTrails + noDriverTrails + noOrderTrails;
   const simpleLongs  = repairLongs  + noDriverLongs  + noOrderLongs;
@@ -459,71 +473,76 @@ function saveDailyStats() {
 // Структура v2: Дата | Госномер | Тип | Статус | Выручка | ФОТ | Топливо | Запчасти | Штрафы | Проходные | Прибыль | План ВП
 // ============================================================
 function saveFinancialHistory() {
-  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-  const normSheet = ss.getSheetByName('Нормализованные_данные');
-  if (!normSheet) throw new Error('Нормализованные_данные не найдены');
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
 
-  const lastRow = normSheet.getLastRow();
-  if (lastRow < 2) return;
+  // Мастер-список: ВСЕ машины из Штатки (включая без выручки — ремонт, без водителя)
+  var staffData = getStaffData(ss);
+  if (Object.keys(staffData).length === 0) throw new Error('Штатка пуста или недоступна');
 
-  // Читаем все 15 колонок A-O: финансы + тип/статус/план из Штатки
-  const data = normSheet.getRange(2, 1, lastRow - 1, 15).getValues();
+  // Финансы: только машины с выручкой из Нормализованных_данных
+  var finMap = {};
+  var normSheet = ss.getSheetByName('Нормализованные_данные');
+  if (normSheet && normSheet.getLastRow() > 1) {
+    var normData = normSheet.getRange(2, 1, normSheet.getLastRow() - 1, 10).getValues();
+    for (var n = 0; n < normData.length; n++) {
+      var nr = normData[n];
+      var nGos = String(nr[0] || '').trim();
+      if (!nGos) continue;
+      finMap[normalizeGos(nGos)] = {
+        revenue: parseFloat(nr[3]) || 0,
+        fot:     parseFloat(nr[4]) || 0,
+        fuel:    parseFloat(nr[5]) || 0,
+        parts:   parseFloat(nr[6]) || 0,
+        fines:   parseFloat(nr[7]) || 0,
+        tolls:   parseFloat(nr[8]) || 0,
+        profit:  parseFloat(nr[9]) || 0,
+      };
+    }
+  }
 
-  let finSheet = ss.getSheetByName('История_финансов');
-
-  // Миграция: если лист существует, но со старым форматом (< 12 колонок) — чистим
+  var finSheet = ss.getSheetByName('История_финансов');
   if (finSheet) {
-    const ncols = finSheet.getLastColumn();
-    if (ncols < 12) finSheet.clear();
+    if (finSheet.getLastColumn() < 12) finSheet.clear();
   } else {
     finSheet = ss.insertSheet('История_финансов');
   }
 
   if (finSheet.getLastRow() === 0) {
-    const headers = ['Дата', 'Госномер', 'Тип', 'Статус', 'Выручка', 'ФОТ', 'Топливо', 'Запчасти', 'Штрафы', 'Проходные', 'Валовая прибыль', 'План ВП'];
-    finSheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
+    var hdrs = ['Дата','Госномер','Тип','Статус','Выручка','ФОТ','Топливо','Запчасти','Штрафы','Проходные','Валовая прибыль','План ВП'];
+    finSheet.getRange(1, 1, 1, hdrs.length).setValues([hdrs]).setFontWeight('bold');
   }
 
-  const today = new Date();
+  // Удаляем записи за сегодня — перезапишем актуальными
+  var today = new Date();
   today.setHours(0, 0, 0, 0);
-
-  // Удаляем записи за сегодня (перезаписываем свежими)
-  const finLastRow = finSheet.getLastRow();
+  var finLastRow = finSheet.getLastRow();
   if (finLastRow > 1) {
-    const existingDates = finSheet.getRange(2, 1, finLastRow - 1, 1).getValues();
-    let deleteFrom = -1;
-    for (let i = 0; i < existingDates.length; i++) {
-      if (existingDates[i][0] instanceof Date) {
-        const d = new Date(existingDates[i][0]);
+    var existingDates = finSheet.getRange(2, 1, finLastRow - 1, 1).getValues();
+    var deleteFrom = -1;
+    for (var di = 0; di < existingDates.length; di++) {
+      if (existingDates[di][0] instanceof Date) {
+        var d = new Date(existingDates[di][0]);
         d.setHours(0, 0, 0, 0);
-        if (d.getTime() === today.getTime()) { deleteFrom = i + 2; break; }
+        if (d.getTime() === today.getTime()) { deleteFrom = di + 2; break; }
       }
     }
-    if (deleteFrom > 0) {
-      finSheet.deleteRows(deleteFrom, finLastRow - deleteFrom + 1);
-    }
+    if (deleteFrom > 0) finSheet.deleteRows(deleteFrom, finLastRow - deleteFrom + 1);
   }
 
-  // Новая структура строки: тип/статус/план берём из Штатки (колонки M, N, O)
-  const rows = data
-    .filter(row => String(row[0] || '').trim())
-    .map(row => [
-      new Date(),               // Дата
-      row[0],                   // Госномер (A)
-      row[12] || row[2] || '',  // Тип из Штатки (M), fallback 1С (C)
-      row[13] || '',            // Статус из Штатки (N)
-      row[3],                   // Выручка (D)
-      row[4],                   // ФОТ (E)
-      row[5],                   // Топливо (F)
-      row[6],                   // Запчасти (G)
-      row[7],                   // Штрафы (H)
-      row[8],                   // Проходные (I)
-      row[9],                   // Прибыль (J)
-      row[14] || 0,             // План ВП (O)
+  // Строим строки: за основу берём Штатку, финансы джойним по госномеру
+  var rows = [];
+  var nowDate = new Date();
+  for (var gosClean in staffData) {
+    var v = staffData[gosClean];
+    var f = finMap[gosClean] || { revenue:0, fot:0, fuel:0, parts:0, fines:0, tolls:0, profit:0 };
+    rows.push([
+      nowDate, v.gosOriginal, v.type, v.status,
+      f.revenue, f.fot, f.fuel, f.parts, f.fines, f.tolls, f.profit, v.plan
     ]);
+  }
 
   if (rows.length > 0) {
-    finSheet.getRange(finSheet.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
+    finSheet.getRange(finSheet.getLastRow() + 1, 1, rows.length, 12).setValues(rows);
   }
 }
 
@@ -596,8 +615,8 @@ function buildSummaryText() {
     }
   }
 
-  // Статус парка — из Нормализованных_данных (колонки M=тип, N=статус)
-  var fleet = getFleetStatus(ss);
+  // Статус парка — из Штатки (все машины, включая без выручки)
+  var fleet = getFleetStatus(getStaffData(ss));
   var workT = fleet.trailers.working, repairT = fleet.trailers.repair, noDriverT = fleet.trailers.noDriver;
   var workL = fleet.trucks.working,   repairL = fleet.trucks.repair,   noDriverL = fleet.trucks.noDriver;
 
@@ -805,15 +824,20 @@ function doGet(e) {
     }
 
     const staffData = getStaffData(ss); // читаем Штатку один раз
+    // Карта госномер → марка из Штатки (для всех 55 машин, не только с выручкой)
+    var staffMarkas = {};
+    Object.values(staffData).forEach(function(v) { staffMarkas[v.gosOriginal] = v.marka; });
     const data = {
       updated:    new Date().toISOString(),
       summary:    getSummaryData(ss),
       vehicles:   getVehiclesData(ss),
       managers:   getManagersData(ss),
       drivers:    getDriversData(ss),
-      fleet:      getFleetStatus(ss),
+      fleet:      getFleetStatus(staffData),
       history:    getHistoryData(ss),
       repairs:    getRepairsData(staffData),
+      staffMarkas: staffMarkas,
+      orders:     getOrdersData(ss),
     };
     return ContentService
       .createTextOutput(JSON.stringify(data))
@@ -839,26 +863,39 @@ function getStaffData(ss) {
   const sheet = ss.getSheetByName('Штатка');
   if (!sheet) return {};
 
-  const lastRow = sheet.getLastRow();
+  var lastRow = sheet.getLastRow();
   if (lastRow < 6) return {};
 
-  // Колонки (0-based): A=0 Тип, B=1 Марка, C=2 Госномер тягача, E=4 Госномер прицепа, F=5 План ВП, AK=36 Статус
-  const data = sheet.getRange(6, 1, lastRow - 5, 37).getValues();
-  const map = {};
+  // Строка 5 — заголовки. Ищем колонки динамически,
+  // чтобы добавление колонок в исходную таблицу не ломало скрипт.
+  var lastCol = sheet.getLastColumn();
+  var headerRow = sheet.getRange(5, 1, 1, lastCol).getValues()[0];
+  var statusCol = 36; // fallback: AK
+  var driverCol = -1; // ВОДИТЕЛЬ 1
+  for (var h = 0; h < headerRow.length; h++) {
+    var hdr = String(headerRow[h] || '').trim();
+    if (hdr === 'Статус на сегодня') statusCol = h;
+    if (hdr.toUpperCase() === 'ВОДИТЕЛЬ 1' || hdr.toUpperCase() === 'ВОДИТЕЛЬ') driverCol = h;
+  }
+
+  var numCols = Math.max(statusCol + 1, driverCol + 1, 6);
+  var data = sheet.getRange(6, 1, lastRow - 5, numCols).getValues();
+  var map = {};
 
   for (var i = 0; i < data.length; i++) {
     var row = data[i];
-    var type       = String(row[0] || '').trim();   // A — модификация (ПР-8, ТКР-4, КР-3...)
-    var marka      = String(row[1] || '').trim();   // B — марка тягача
-    var gos        = String(row[2] || '').trim();   // C — госномер тягача
-    var trailerGos = String(row[4] || '').trim();   // E — госномер прицепа
-    var plan       = parseFloat(row[5]) || 0;       // F — план ВП на машину
-    var status     = String(row[36] || '').trim();  // AK — Статус на сегодня (index 36)
+    var type       = String(row[0] || '').trim();
+    var marka      = String(row[1] || '').trim();
+    var gos        = String(row[2] || '').trim();
+    var trailerGos = String(row[4] || '').trim();
+    var plan       = parseFloat(row[5]) || 0;
+    var status     = statusCol < row.length ? String(row[statusCol] || '').trim() : '';
+    var driver     = driverCol >= 0 && driverCol < row.length ? String(row[driverCol] || '').trim() : '';
 
     if (!gos || !type) continue;
 
     var gosClean = normalizeGos(gos);
-    map[gosClean] = { type: type, status: status, marka: marka, trailerGos: trailerGos, gosOriginal: gos, plan: plan };
+    map[gosClean] = { type: type, status: status, marka: marka, trailerGos: trailerGos, gosOriginal: gos, plan: plan, driver: driver };
   }
   return map;
 }
@@ -982,40 +1019,32 @@ function getDriversData(ss) {
   }));
 }
 
-function getFleetStatus(ss) {
-  var norm = ss.getSheetByName('Нормализованные_данные');
-  var empty = {
-    trailers: { total:36, working:0, noDriver:0, repair:0, noOrder:0 },
-    trucks:   { total:19, working:0, noDriver:0, repair:0, noOrder:0 },
-  };
-  if (!norm || norm.getLastRow() < 2) return empty;
+// staffData — результат getStaffData(ss). Считаем по всему парку (включая машины без выручки).
+// Длинномеры = тип начинается на "Борт", всё остальное = тралы.
+function getFleetStatus(staffData) {
+  var tWork=0, tRepair=0, tNoDrv=0, tNoOrder=0;
+  var lWork=0, lRepair=0, lNoDrv=0, lNoOrder=0;
 
-  var data = norm.getRange(2, 1, norm.getLastRow() - 1, 14).getValues();
-  var tWork=0, tRepair=0, tNoDriver=0, tNoOrder=0;
-  var lWork=0, lRepair=0, lNoDriver=0, lNoOrder=0;
-
-  for (var i = 0; i < data.length; i++) {
-    var type   = String(data[i][12] || '').trim();  // M — Тип из Штатки
-    var status = String(data[i][13] || '').trim();  // N — Статус из Штатки
-    if (!type && !status) continue;
-
-    // Длинномеры = только "Борт", всё остальное — тралы
+  for (var gos in staffData) {
+    var v = staffData[gos];
+    var type   = v.type   || '';
+    var status = v.status || '';
     var isTruck   = type === 'Борт' || type.indexOf('Борт') === 0;
-    var isWork    = status.indexOf('В работе') >= 0 || status.indexOf('в работе') >= 0;
-    var isRepair  = status.indexOf('Ремонт')   >= 0 || status.indexOf('ремонт')   >= 0;
+    var isWork    = status.indexOf('В работе')    >= 0;
+    var isRepair  = status.indexOf('Ремонт')      >= 0;
     var isNoDrv   = status.indexOf('Без водителя') >= 0;
     var isNoOrder = status.indexOf('Без заказа')   >= 0;
 
     if (isTruck) {
-      if (isWork) lWork++; else if (isRepair) lRepair++; else if (isNoDrv) lNoDriver++; else if (isNoOrder) lNoOrder++;
+      if (isWork) lWork++; else if (isRepair) lRepair++; else if (isNoDrv) lNoDrv++; else if (isNoOrder) lNoOrder++;
     } else {
-      if (isWork) tWork++; else if (isRepair) tRepair++; else if (isNoDrv) tNoDriver++; else if (isNoOrder) tNoOrder++;
+      if (isWork) tWork++; else if (isRepair) tRepair++; else if (isNoDrv) tNoDrv++; else if (isNoOrder) tNoOrder++;
     }
   }
 
   return {
-    trailers: { total:36, working:tWork, noDriver:tNoDriver, repair:tRepair, noOrder:tNoOrder },
-    trucks:   { total:19, working:lWork, noDriver:lNoDriver, repair:lRepair, noOrder:lNoOrder },
+    trailers: { total:36, working:tWork, noDriver:tNoDrv, repair:tRepair, noOrder:tNoOrder },
+    trucks:   { total:19, working:lWork, noDriver:lNoDrv, repair:lRepair, noOrder:lNoOrder },
   };
 }
 
@@ -1064,4 +1093,543 @@ function getVehicleHistory(ss) {
     });
   }
   return result;
+}
+
+// ============================================================
+// МОДУЛЬ ЗАКАЗОВ (встроен из orders_module.js)
+// ============================================================
+
+// ============================================================
+// МОДУЛЬ ЗАКАЗОВ — orders_module.js
+// Подключается к full_script_final.js автоматически (общее пространство GAS).
+//
+// Что добавить в full_script_final.js:
+//   runAll()  → вызовы importOrdersReport() и normalizeOrders()
+//   doGet()   → orders: getOrdersData(ss)
+// ============================================================
+
+// ── КОНФИГУРАЦИЯ ────────────────────────────────────────────
+const ORDERS_GMAIL_QUERY  = 'subject:"Рассылка Отчет таблица заказов" has:attachment newer_than:3d';
+const ORDERS_RAW_SHEET    = 'Заказы_сырые';
+const ORDERS_NORM_SHEET   = 'Заказы_данные';
+const ORDERS_ARCHIVE_PFX  = 'Заказы_';   // + YYYY-MM, например «Заказы_2026-05»
+
+// Внутренние заказчики — выручка есть, поступлений нет; считаем отдельно
+const INTERNAL_CLIENTS = [
+  'ТЕХНО ПАРК', 'ОТДЕЛ БУРОВЫХ РАБОТ', 'КРАНМАСТЕР',
+  'МЕГАКРАН', 'БАЗА ДМД', 'БУЛЬДОГ ООО', 'БАЗА'
+];
+
+// Менеджеры отдела — для фильтрации чужих строк
+const TRAL_MANAGERS = [
+  'Ахтамова', 'Гусейнова', 'Цуцурин',
+  'Котельников', 'Цегельников', 'Гуляева', 'Гуштюк',
+  'Дербенцева', 'Савиток', 'Филипчук', 'Шейко',
+  'Коньшина', 'Володин', 'Прус-Роскошный',
+  'Рыщанов', 'Суркова'
+];
+
+// Логисты отдела (Прус-Роскошный — двойная роль)
+const TRAL_LOGISTS = [
+  'Васин', 'Кан', 'Махура', 'Сильчев',
+  'Прус-Роскошный', 'Рыщанов', 'Ахтамова', 'Гусейнова'
+];
+
+// ── ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ─────────────────────────────────
+
+function ordCleanName(fullName) {
+  return String(fullName || '')
+    .replace(/\+?[78][\d\s\-\(\)]{8,}/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function ordParseNum(val) {
+  const n = parseFloat(val);
+  return isNaN(n) ? 0 : n;
+}
+
+function ordExtractPeriodMonth(rowArr) {
+  for (const cell of rowArr) {
+    const s = String(cell || '');
+    // Ищем паттерн ДД.ММ.ГГГГ
+    const m = s.match(/\d{2}\.(\d{2})\.(\d{4})/);
+    if (m) return m[2] + '-' + m[1];   // "2026-06"
+  }
+  return null;
+}
+
+function ordFormatDate(val) {
+  if (!val) return '';
+  if (val instanceof Date) {
+    return Utilities.formatDate(val, 'Europe/Moscow', 'yyyy-MM-dd');
+  }
+  const s = String(val);
+  const m = s.match(/(\d{2})\.(\d{2})\.(\d{4})/);
+  if (m) return m[3] + '-' + m[2] + '-' + m[1];
+  return s;
+}
+
+function ordMonthKey(val) {
+  const d = ordFormatDate(val);
+  return d ? d.slice(0, 7) : '';  // "2026-06"
+}
+
+function ordInList(name, list) {
+  const n = String(name || '');
+  return list.some(function(m) { return n.indexOf(m) >= 0; });
+}
+
+// ── ИМПОРТ: Gmail → Заказы_сырые ────────────────────────────
+
+function importOrdersReport() {
+  const threads = GmailApp.search(ORDERS_GMAIL_QUERY);
+  if (!threads.length) throw new Error('Письмо заказов не найдено за 3 дня');
+
+  const msgs = [];
+  for (const t of threads) for (const m of t.getMessages()) msgs.push(m);
+  msgs.sort(function(a, b) { return a.getDate() - b.getDate(); });
+  const latest = msgs[msgs.length - 1];
+
+  let att = null;
+  for (const a of latest.getAttachments()) {
+    if (a.getName().endsWith('.xlsx') || a.getName().endsWith('.xls')) { att = a; break; }
+  }
+  if (!att) throw new Error('Excel-вложение заказов не найдено');
+
+  // Конвертируем xlsx → Google Sheets временный файл
+  const tmp = Drive.Files.insert(
+    { title: 'tmp_orders_' + Date.now(), mimeType: MimeType.GOOGLE_SHEETS },
+    att.copyBlob()
+  );
+  const data = SpreadsheetApp.openById(tmp.id).getSheets()[0].getDataRange().getValues();
+  Drive.Files.remove(tmp.id);
+
+  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+
+  archiveOrdersIfNeeded(ss, data);
+
+  let raw = ss.getSheetByName(ORDERS_RAW_SHEET);
+  if (raw) raw.clear();
+  else      raw = ss.insertSheet(ORDERS_RAW_SHEET);
+
+  if (data.length > 0) {
+    raw.getRange(1, 1, data.length, data[0].length).setValues(data);
+  }
+
+  latest.markRead();
+  Logger.log('✅ Заказы импортированы: ' + data.length + ' строк, письмо от ' + latest.getDate());
+}
+
+// ── АРХИВАЦИЯ при смене месяца ───────────────────────────────
+
+function archiveOrdersIfNeeded(ss, newData) {
+  const raw = ss.getSheetByName(ORDERS_RAW_SHEET);
+  if (!raw || raw.getLastRow() < 5) return;
+
+  // Строка 2 в сыром листе содержит период
+  const existingPeriodRow = raw.getRange(2, 1, 1, 10).getValues()[0];
+  const existingMonth     = ordExtractPeriodMonth(existingPeriodRow);
+  const newMonth          = ordExtractPeriodMonth(newData[1] || []);
+
+  if (!existingMonth || !newMonth || existingMonth === newMonth) return;
+
+  const archiveName = ORDERS_ARCHIVE_PFX + existingMonth;
+  if (ss.getSheetByName(archiveName)) {
+    Logger.log('Архив ' + archiveName + ' уже существует, пропускаем');
+    return;
+  }
+
+  const archive     = ss.insertSheet(archiveName);
+  const existing    = raw.getDataRange().getValues();
+  archive.getRange(1, 1, existing.length, existing[0].length).setValues(existing);
+  Logger.log('✅ Архив создан: ' + archiveName + ' (' + existing.length + ' строк)');
+}
+
+// ── НОРМАЛИЗАЦИЯ: Заказы_сырые → Заказы_данные ──────────────
+
+function normalizeOrders() {
+  const ss  = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  const raw = ss.getSheetByName(ORDERS_RAW_SHEET);
+  if (!raw || raw.getLastRow() < 5) throw new Error('Нет сырых данных заказов');
+
+  const allData = raw.getDataRange().getValues();
+
+  // Строка 4 (индекс 3) — заголовки колонок
+  const headerRow = allData[3];
+  const col = {};
+  headerRow.forEach(function(h, i) {
+    const key = String(h || '').trim();
+    if (key) col[key] = i;
+  });
+
+  // Геттеры по имени колонки
+  const g   = function(row, name) { const i = col[name]; return i !== undefined ? row[i] : null; };
+  const str = function(row, name) { return String(g(row, name) || '').trim(); };
+  const num = function(row, name) { return ordParseNum(g(row, name)); };
+  const boo = function(row, name) { return str(row, name) === 'Да'; };
+
+  const normHeaders = [
+    'Номер заказа', 'Дата создания', 'Начало работ', 'Окончание работ',
+    'Тип оплаты', 'Проведен', 'Путевка', 'Есть реализация', 'Оригинал получен',
+    'Заказчик', 'Организация (наша)', 'Подразделение', 'Код подразд.', 'Внутренний',
+    'Отдел', 'Менеджер продаж', 'Менеджер снабжения', 'Старший менеджер',
+    'Ответственный', 'Водитель',
+    'Тип техники', 'Единица', 'Кол-во', 'Машина', 'Груз', 'Оборудование', 'Адрес',
+    'Найм', 'Стоимость найма', 'Часы найма',
+    'Сумма', 'Оплата итого', 'Оплата нал', 'Оплата ПП', 'Поступление',
+    'Прибыль', 'Прибыль от мин. прайса', 'Остаток', 'Баланс орг.', 'Оплачено поставщику',
+    'Договор', 'Отдел траллов', 'Месяц'
+  ];
+
+  const rows = [];
+
+  for (let i = 4; i < allData.length; i++) {
+    const row = allData[i];
+
+    const orderId = str(row, 'Номер');
+    if (!orderId) continue;
+    if (boo(row, 'Пометка удаления')) continue;
+
+    const manSales  = str(row, 'Менеджер по продажам');
+    const manSupply = str(row, 'Менеджер по снабжению');
+
+    // Фильтр: хотя бы один из менеджеров — наш сотрудник
+    const isTralDept = ordInList(manSales, TRAL_MANAGERS) || ordInList(manSupply, TRAL_LOGISTS);
+    if (!isTralDept) continue;
+
+    const customer   = str(row, 'Заказчик');
+    const divRaw     = str(row, 'Подразделение');
+    const divCode    = divRaw.replace(/\..+/, '').trim();  // "01", "05", "08"
+    const isInternal = ordInList(customer, INTERNAL_CLIENTS);
+
+    // Статус реализации: текст начинается с "Реализация" → документ создан
+    const realizRef  = str(row, 'Реализация');
+    const hasRealiz  = realizRef.indexOf('Реализация') === 0;
+
+    // Статус путевки: Нет или пусто → нет путевки
+    const waybillVal = str(row, 'Путевка');
+    const hasWaybill = waybillVal !== 'Нет' && waybillVal !== '';
+
+    // Найм: Привлеченная техника — Нет/пусто → нет найма
+    const hiredRaw   = str(row, 'Привлеченная техника');
+    const isHired    = hiredRaw !== 'Нет' && hiredRaw !== '';
+
+    // Дата начала работ для месяца
+    const dateStart  = g(row, 'Начало работ');
+    const monthKey   = ordMonthKey(dateStart);
+
+    rows.push([
+      orderId,
+      ordFormatDate(g(row, 'Дата')),
+      ordFormatDate(dateStart),
+      ordFormatDate(g(row, 'Окончание работ')),
+      str(row, 'Оплата'),
+      str(row, 'Проведен'),
+      hasWaybill ? 'Да' : 'Нет',
+      hasRealiz  ? 'Да' : 'Нет',
+      str(row, 'Оригинал получен'),
+      customer,
+      str(row, 'Организация'),
+      divRaw,
+      divCode,
+      isInternal ? 'Да' : 'Нет',
+      str(row, 'Отдел'),
+      ordCleanName(manSales),
+      ordCleanName(manSupply),
+      ordCleanName(str(row, 'Старший менеджер')),
+      ordCleanName(str(row, 'Ответственный')),
+      ordCleanName(str(row, 'Водитель')),
+      str(row, 'Тип техники'),
+      str(row, 'Единица измерения'),
+      num(row, 'Часы'),
+      str(row, 'Данные по машине'),
+      str(row, 'Груз'),
+      str(row, 'Оборудование техники'),
+      str(row, 'Адрес объекта'),
+      isHired ? hiredRaw : 'Нет',  // храним имя поставщика, не 'Да'
+      num(row, 'Стоимость привлеченной техники'),
+      num(row, 'Часы привлеченной техники'),
+      num(row, 'Сумма'),
+      num(row, 'Сумма оплаты'),
+      num(row, 'Сумма оплаты нал'),
+      num(row, 'Сумма оплаты по ПП'),
+      num(row, 'Поступление'),
+      num(row, 'Прибыль'),
+      num(row, 'Прибыль от мин. прайса'),
+      num(row, 'Сумма остаток'),
+      num(row, 'Баланс по организации'),
+      num(row, 'Поставщику оплачено'),
+      str(row, 'Договор'),
+      isTralDept ? 'Да' : 'Нет',
+      monthKey
+    ]);
+  }
+
+  let norm = ss.getSheetByName(ORDERS_NORM_SHEET);
+  if (norm) norm.clear();
+  else       norm = ss.insertSheet(ORDERS_NORM_SHEET);
+
+  norm.getRange(1, 1, 1, normHeaders.length)
+      .setValues([normHeaders])
+      .setFontWeight('bold')
+      .setBackground('#1e1e26')
+      .setFontColor('#888780');
+
+  if (rows.length > 0) {
+    norm.getRange(2, 1, rows.length, normHeaders.length).setValues(rows);
+    // Числовые колонки: Сумма → Оплачено поставщику (колонки 31-40, индексы 30-39)
+    norm.getRange(2, 31, rows.length, 10).setNumberFormat('#,##0');
+  }
+
+  norm.setFrozenRows(1);
+  norm.autoResizeColumns(1, 7);
+
+  Logger.log('✅ Заказы нормализованы: ' + rows.length + ' строк в ' + ORDERS_NORM_SHEET);
+}
+
+// ── API ДЛЯ ДАШБОРДА ─────────────────────────────────────────
+// Вызывается из doGet() основного скрипта: orders: getOrdersData(ss)
+
+function getOrdersData(ss) {
+  const norm = ss.getSheetByName(ORDERS_NORM_SHEET);
+  if (!norm || norm.getLastRow() < 2) return { error: 'Нет данных заказов' };
+
+  const rows = norm.getRange(2, 1, norm.getLastRow() - 1, 43).getValues();
+
+  const C = {
+    id:0, date_c:1, date_s:2, date_e:3,
+    pay_type:4, posted:5, waybill:6, realiz:7, orig:8,
+    customer:9, our_org:10, division:11, div_code:12, internal:13,
+    dept:14, mgr_s:15, mgr_l:16, mgr_sr:17, resp:18, driver:19,
+    equip:20, unit:21, qty:22, vehicle:23, cargo:24, equip_name:25, address:26,
+    hired:27, hired_cost:28, hired_qty:29,
+    amount:30, payment:31, cash:32, bank:33, pay_in:34,
+    profit:35, profit_min:36, balance:37, org_bal:38, paid_sup:39,
+    contract:40, tral_dept:41, month:42
+  };
+
+  const num      = function(row, k) { return ordParseNum(row[C[k]]); };
+  const str      = function(row, k) { return String(row[C[k]] || '').trim(); };
+  const yes      = function(row, k) { return str(row, k) === 'Да'; };
+  const isHiredR = function(row)    { return str(row, 'hired') !== 'Нет'; };
+  // Google Sheets возвращает Date-объекты при чтении ячеек с датами
+  const dateVal  = function(row, k) {
+    const v = row[C[k]];
+    if (!v) return '';
+    if (v instanceof Date) return Utilities.formatDate(v, 'Europe/Moscow', 'yyyy-MM-dd');
+    return String(v).trim();
+  };
+
+  let totalOrders=0, totalAmount=0, totalPayment=0, totalBalance=0;
+  let totalHiredCost=0, hiredProfit=0;
+  let internalAmount=0, internalOrders=0;
+  let tralOrders=0, tralAmount=0, longOrders=0, longAmount=0;
+  var noWaybillOwn=[0,0,0], noWaybillHired=[0,0,0], waybillNotPosted=[0,0,0], postedNoRealiz=[0,0,0], complete=[0,0,0];
+
+  const managerMap  = {};
+  const logistMap   = {};
+  const customerMap = {};
+  const dayMap      = {};
+  const supplierMap = {};
+  const driverMap   = {};
+  const problemOrders = [];
+
+  for (const row of rows) {
+    totalOrders++;
+    const amount    = num(row, 'amount');
+    const payment   = num(row, 'payment');   // Оплата итого (累计)
+    const payIn     = num(row, 'pay_in');    // Поступление за период
+    const profit    = num(row, 'profit');
+    const balance   = num(row, 'balance');
+    const isInt     = yes(row, 'internal');
+    const equip     = str(row, 'equip');
+    const isHired   = isHiredR(row);
+    const hiredCost = num(row, 'hired_cost');
+    const dateStr   = dateVal(row, 'date_s');
+    const mgrSales  = str(row, 'mgr_s');
+
+    totalAmount  += amount;
+    totalPayment += payment;
+    totalBalance += balance;
+    if (isHired) { totalHiredCost += hiredCost; hiredProfit += profit; }
+
+    if (isInt) { internalAmount += amount; internalOrders++; }
+    if (equip === 'Трал')      { tralOrders++;  tralAmount  += amount; }
+    if (equip === 'Длинномер') { longOrders++;  longAmount  += amount; }
+
+    // ── По менеджеру продаж ──
+    if (mgrSales && ordInList(mgrSales, TRAL_MANAGERS)) {
+      if (!managerMap[mgrSales]) {
+        managerMap[mgrSales] = { name: mgrSales, orders:0, amount:0, payment:0, profit:0, hired_orders:0, hired_cost:0, internal_orders:0, internal_amount:0, internal_payment:0 };
+      }
+      const m = managerMap[mgrSales];
+      m.orders++;
+      m.amount  += amount;
+      m.payment += payment;
+      if (isHired) m.profit += profit;   // прибыль только по найму
+      if (isInt) { m.internal_orders++; m.internal_amount += amount; m.internal_payment += payment; }
+      if (isHired) { m.hired_orders++; m.hired_cost += hiredCost; }
+    }
+
+    // ── По логисту ──
+    const mgrLog = str(row, 'mgr_l');
+    if (mgrLog && ordInList(mgrLog, TRAL_LOGISTS)) {
+      if (!logistMap[mgrLog]) {
+        logistMap[mgrLog] = { name: mgrLog, orders:0, amount:0, hired_orders:0, hired_cost:0, tral:0, long_:0 };
+      }
+      const l = logistMap[mgrLog];
+      l.orders++;
+      l.amount += amount;
+      if (equip === 'Трал')      l.tral++;
+      if (equip === 'Длинномер') l.long_++;
+      if (isHired) { l.hired_orders++; l.hired_cost += hiredCost; }
+    }
+
+    // ── По клиентам (внешние) ──
+    if (!isInt) {
+      const cust   = str(row, 'customer');
+      const dayNum = parseInt((dateStr || '').split('-')[2]) || 0;
+      if (!customerMap[cust]) {
+        customerMap[cust] = { name:cust, orders:0, amount:0, payment:0, balance:0, first_half:0, second_half:0, mgr_counts:{}, hired_amount:0 };
+      }
+      const cm = customerMap[cust];
+      cm.orders++;
+      cm.amount   += amount;
+      cm.payment  += payment;
+      cm.balance  += balance;
+      if (dayNum >= 1  && dayNum <= 15) cm.first_half++;   // кол-во заказов в 1-й пол.
+      if (dayNum >= 16) cm.second_half++;                   // кол-во заказов во 2-й пол.
+      const mgrKey = mgrSales || str(row, 'mgr_sr');
+      if (mgrKey) cm.mgr_counts[mgrKey] = (cm.mgr_counts[mgrKey] || 0) + 1;
+      if (isHired) cm.hired_amount += hiredCost;
+    }
+
+    // ── По дням ──
+    if (dateStr) {
+      if (!dayMap[dateStr]) dayMap[dateStr] = { date:dateStr, orders:0, amount:0, hired_cost:0, payment:0 };
+      dayMap[dateStr].orders++;
+      dayMap[dateStr].amount    += amount;
+      dayMap[dateStr].hired_cost += isHired ? hiredCost : 0;
+      dayMap[dateStr].payment   += payment;
+    }
+
+    // ── По поставщикам найма ──
+    if (isHired) {
+      const supplier = str(row, 'hired');
+      if (!supplierMap[supplier]) supplierMap[supplier] = { name:supplier, orders:0, revenue:0, cost:0 };
+      supplierMap[supplier].orders++;
+      supplierMap[supplier].revenue += amount;
+      supplierMap[supplier].cost    += hiredCost;
+    }
+
+    // ── Статус документов (внешние заказы, разбивка по декадам) ──
+    if (!isInt) {
+      const dayNum2 = parseInt((dateStr||'').split('-')[2]) || 0;
+      const dec = dayNum2 <= 10 ? 0 : dayNum2 <= 20 ? 1 : 2;
+      const hw  = yes(row, 'waybill');
+      const pst = yes(row, 'posted');
+      const hr  = yes(row, 'realiz');
+      let docStatus = '', docLabel = '';
+      if (!hw)       { if (isHired) noWaybillHired[dec]++; else noWaybillOwn[dec]++; docStatus='no_waybill'; docLabel='нет путёвки'; }
+      else if (!pst) { waybillNotPosted[dec]++;  docStatus='not_posted'; docLabel='не проведён'; }
+      else if (!hr)  { postedNoRealiz[dec]++;    docStatus='no_realiz';  docLabel='нет реализации'; }
+      else           { complete[dec]++; }
+
+      if (docStatus) {
+        problemOrders.push({
+          id: str(row,'id'), date: dateStr,
+          customer: str(row,'customer'), mgr: mgrSales,
+          amount: amount, balance: balance, status: docLabel, decade: dec + 1,
+        });
+      }
+    }
+
+    // ── По водителям ──
+    const driverName = ordCleanName(str(row, 'driver'));
+    if (driverName) {
+      if (!driverMap[driverName]) driverMap[driverName] = { name: driverName, orders: 0, amount: 0 };
+      driverMap[driverName].orders++;
+      driverMap[driverName].amount += amount;
+    }
+  }
+
+  // Строим by_customer с вычисленным главным менеджером
+  const customerList = Object.values(customerMap).map(function(c) {
+    const topMgr = Object.keys(c.mgr_counts).sort(function(a,b){ return c.mgr_counts[b]-c.mgr_counts[a]; })[0] || '';
+    return {
+      name: c.name, orders: c.orders, amount: c.amount, payment: c.payment, balance: c.balance,
+      first_half: c.first_half, second_half: c.second_half,
+      mgr: topMgr.split(' ')[0], hired_amount: c.hired_amount
+    };
+  }).sort(function(a,b){ return b.amount-a.amount; });
+
+  // Клиенты, пропавшие во 2-й половине
+  const lostCustomers = customerList.filter(function(c){ return c.first_half > 0 && c.second_half === 0; });
+
+  // Поставщики найма с маржой
+  const supplierList = Object.values(supplierMap).map(function(s) {
+    const margin = s.revenue - s.cost;
+    return {
+      name: s.name, orders: s.orders, revenue: s.revenue, cost: s.cost,
+      margin: margin, margin_pct: s.revenue > 0 ? Math.round(margin / s.revenue * 100) : 0
+    };
+  }).sort(function(a,b){ return b.revenue-a.revenue; });
+
+  const months = rows.map(function(r) {
+    const v = r[C.month];
+    if (!v) return '';
+    if (v instanceof Date) return Utilities.formatDate(v, 'Europe/Moscow', 'yyyy-MM');
+    return String(v).trim().slice(0, 7);
+  }).filter(Boolean);
+  const period = months[0] || '';
+
+  return {
+    period: period,
+    summary: {
+      total_orders:    totalOrders,
+      total_amount:    totalAmount,
+      total_payment:   totalPayment,
+      hired_profit:    hiredProfit,    // прибыль только по найму
+      total_hired_cost: totalHiredCost,
+      total_balance:   totalBalance,
+      internal_orders: internalOrders,
+      internal_amount: internalAmount,
+      tral_orders:     tralOrders,
+      tral_amount:     tralAmount,
+      long_orders:     longOrders,
+      long_amount:     longAmount,
+    },
+    doc_status: {
+      no_waybill:         noWaybillOwn[0]+noWaybillOwn[1]+noWaybillOwn[2]+noWaybillHired[0]+noWaybillHired[1]+noWaybillHired[2],
+      no_waybill_own:     noWaybillOwn[0]+noWaybillOwn[1]+noWaybillOwn[2],
+      no_waybill_hired:   noWaybillHired[0]+noWaybillHired[1]+noWaybillHired[2],
+      waybill_not_posted: waybillNotPosted[0]+waybillNotPosted[1]+waybillNotPosted[2],
+      posted_no_realiz:   postedNoRealiz[0]+postedNoRealiz[1]+postedNoRealiz[2],
+      complete:           complete[0]+complete[1]+complete[2],
+    },
+    doc_by_decade: [
+      { label:'1-10',  no_waybill_own:noWaybillOwn[0], no_waybill_hired:noWaybillHired[0], waybill_not_posted:waybillNotPosted[0], posted_no_realiz:postedNoRealiz[0], complete:complete[0] },
+      { label:'11-20', no_waybill_own:noWaybillOwn[1], no_waybill_hired:noWaybillHired[1], waybill_not_posted:waybillNotPosted[1], posted_no_realiz:postedNoRealiz[1], complete:complete[1] },
+      { label:'21+',   no_waybill_own:noWaybillOwn[2], no_waybill_hired:noWaybillHired[2], waybill_not_posted:waybillNotPosted[2], posted_no_realiz:postedNoRealiz[2], complete:complete[2] },
+    ],
+    by_manager:        Object.values(managerMap).sort(function(a,b){ return b.amount-a.amount; }),
+    by_logist:         Object.values(logistMap).sort(function(a,b){ return b.orders-a.orders; }),
+    by_customer:       customerList.slice(0, 30),
+    lost_customers:    lostCustomers,
+    by_hired_supplier: supplierList,
+    by_day:            Object.values(dayMap).sort(function(a,b){ return a.date.localeCompare(b.date); }),
+    problem_orders:    problemOrders.slice(0, 100),
+    by_driver:         Object.values(driverMap).sort(function(a,b){ return b.orders-a.orders; }).slice(0, 25),
+  };
+}
+
+// ── РУЧНОЙ ЗАПУСК: только импорт + нормализация ─────────────
+function runOrdersOnly() {
+  const log = [], errors = [];
+  try { importOrdersReport(); log.push('✅ Импорт заказов'); }
+  catch(e) { errors.push('❌ Импорт: ' + e.message); }
+  try { normalizeOrders();    log.push('✅ Нормализация заказов'); }
+  catch(e) { errors.push('❌ Нормализация: ' + e.message); }
+  Logger.log(log.concat(errors).join('\n'));
 }

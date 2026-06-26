@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>План-задание · Аналитика</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+:root{--bg:#0f0f13;--bg2:#17171d;--bg3:#1e1e26;--bg4:#252530;--border:rgba(255,255,255,0.07);--text:#e8e6df;--muted:#888780;--green:#1D9E75;--red:#E24B4A;--amber:#EF9F27;--blue:#378ADD;--purple:#7F77DD;--r:12px;--rs:8px;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;}
+nav{display:flex;align-items:center;gap:4px;padding:0 24px;height:52px;border-bottom:1px solid var(--border);background:var(--bg2);position:sticky;top:0;z-index:100;}
+.nav-logo{font-size:14px;font-weight:600;margin-right:16px;display:flex;align-items:center;gap:8px;}
+.nav-logo span{width:26px;height:26px;background:var(--amber);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:11px;color:#000;font-weight:700;}
+.nb{padding:5px 13px;border-radius:20px;border:none;background:transparent;color:var(--muted);font-size:12px;cursor:pointer;transition:all .15s;}
+.nb:hover{background:var(--bg3);color:var(--text);}
+.nb.active{background:var(--bg3);color:var(--text);font-weight:500;}
+.badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:500;}
+.badge.g{background:rgba(29,158,117,.15);color:#4fd4a3;}
+.badge.r{background:rgba(226,75,74,.15);color:#f07b7a;}
+.badge.a{background:rgba(239,159,39,.15);color:#f5be6a;}
+.badge.b{background:rgba(55,138,221,.15);color:#7db9ee;}
+.badge.p{background:rgba(127,119,221,.15);color:#aaa5e8;}
+main{padding:20px;max-width:1400px;margin:0 auto;}
+.page{display:none;}.page.active{display:block;}
+.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px;}
+.kpi{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:14px 16px;}
+.kpi-label{font-size:11px;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em;}
+.kpi-value{font-size:22px;font-weight:600;line-height:1.2;}
+.kpi-value.g{color:var(--green);}.kpi-value.a{color:var(--amber);}
+.kpi-sub{font-size:11px;color:var(--muted);margin-top:4px;}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px;}
+.grid-65{display:grid;grid-template-columns:1.7fr 1fr;gap:14px;margin-bottom:14px;}
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px;}
+.card-title{font-size:11px;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px;}
+.tbl{width:100%;border-collapse:collapse;font-size:12px;}
+.tbl th{text-align:left;padding:7px 10px;color:var(--muted);font-weight:500;font-size:10px;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border);white-space:nowrap;}
+.tbl td{padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.04);color:var(--text);}
+.tbl tr:last-child td{border-bottom:none;}
+.tbl tr:hover td{background:var(--bg3);}
+.tbl .num{text-align:right;font-variant-numeric:tabular-nums;}
+.tbl .g{color:#4fd4a3;}.tbl .r{color:#f07b7a;}.tbl .a{color:#f5be6a;}.tbl .m{color:var(--muted);font-size:11px;}
+.chart-wrap{position:relative;width:100%;}
+.prog-wrap{margin-bottom:8px;}
+.prog-header{display:flex;justify-content:space-between;margin-bottom:4px;font-size:12px;}
+.prog-name{color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px;}
+.prog-val{color:var(--muted);font-size:11px;white-space:nowrap;}
+.prog-bg{height:4px;background:var(--bg4);border-radius:3px;overflow:hidden;}
+.prog-fill{height:100%;border-radius:3px;}
+.info-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:12px;}
+.info-row:last-child{border-bottom:none;}
+.filter-row{display:flex;gap:8px;margin-bottom:12px;}
+.filter-row select{background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--rs);padding:5px 10px;font-size:11px;}
+@media(max-width:768px){.kpi-grid{grid-template-columns:1fr 1fr;}.grid-2,.grid-3,.grid-65{grid-template-columns:1fr;}main{padding:14px;}}
+</style>
+</head>
+<body>
+<nav>
+  <div class="nav-logo"><span>📋</span>План-задание</div>
+  <button class="nb active" onclick="showPage('overview',this)">Обзор</button>
+  <button class="nb" onclick="showPage('managers',this)">Менеджеры</button>
+  <button class="nb" onclick="showPage('customers',this)">Заказчики</button>
+  <button class="nb" onclick="showPage('vehicles',this)">Своя vs Наём</button>
+  <button class="nb" onclick="showPage('daily',this)">По дням</button>
+</nav>
+<main>
+
+<!-- ОБЗОР -->
+<div id="page-overview" class="page active">
+  <div class="kpi-grid">
+    <div class="kpi">
+      <div class="kpi-label">Общая выручка</div>
+      <div class="kpi-value a" id="k-total"></div>
+      <div class="kpi-sub" id="k-orders"></div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Наша техника</div>
+      <div class="kpi-value g" id="k-own"></div>
+      <div class="kpi-sub" id="k-own-pct"></div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Наёмная техника</div>
+      <div class="kpi-value" id="k-hired"></div>
+      <div class="kpi-sub" id="k-hired-sub"></div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Маржа (без ФОТ/топл.)</div>
+      <div class="kpi-value g" id="k-profit"></div>
+      <div class="kpi-sub" id="k-margin"></div>
+    </div>
+  </div>
+  <div class="grid-65">
+    <div>
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-title">Выручка по дням (своя + наём)</div>
+        <div class="chart-wrap" style="height:200px"><canvas id="chart-daily" role="img" aria-label="Выручка по дням"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Топ менеджеров по выручке</div>
+        <div id="mgr-progs"></div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div class="card">
+        <div class="card-title">Своя vs Наёмная техника</div>
+        <div class="chart-wrap" style="height:160px"><canvas id="chart-split" role="img" aria-label="Своя vs наёмная"></canvas></div>
+        <div id="split-legend" style="margin-top:10px"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">По типам техники</div>
+        <div id="type-list"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Топ-5 заказчиков</div>
+        <div id="top-cust"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- МЕНЕДЖЕРЫ -->
+<div id="page-managers" class="page">
+  <div class="card">
+    <div class="card-title">Все менеджеры · план-задание</div>
+    <div style="overflow-x:auto">
+      <table class="tbl">
+        <thead><tr>
+          <th>Менеджер</th><th class="num">Выручка</th><th class="num">Наша техника</th>
+          <th class="num">Наём (выр.)</th><th class="num">Затраты найма</th>
+          <th class="num">Прибыль*</th><th class="num">Заказов</th><th>Наём%</th>
+        </tr></thead>
+        <tbody id="mgr-table"></tbody>
+      </table>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:10px">* Прибыль из 1С без учёта ФОТ и топлива — для сравнения</div>
+  </div>
+  <div class="card" style="margin-top:14px">
+    <div class="card-title">Выручка: своя vs наёмная техника по менеджеру</div>
+    <div class="chart-wrap" style="height:320px"><canvas id="chart-mgr-split" role="img" aria-label="Менеджеры своя vs наём"></canvas></div>
+  </div>
+</div>
+
+<!-- ЗАКАЗЧИКИ -->
+<div id="page-customers" class="page">
+  <div class="card">
+    <div class="filter-row">
+      <select id="cust-filter-mgr" onchange="renderCustomers()">
+        <option value="">Все менеджеры</option>
+      </select>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="tbl">
+        <thead><tr>
+          <th>Заказчик</th><th class="num">Выручка</th><th class="num">Прибыль*</th>
+          <th class="num">Заказов</th><th>Менеджер</th>
+        </tr></thead>
+        <tbody id="cust-table"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- СВОЯ VS НАЁМ -->
+<div id="page-vehicles" class="page">
+  <div class="kpi-grid">
+    <div class="kpi">
+      <div class="kpi-label">Заказов наша техника</div>
+      <div class="kpi-value g" id="v-own-orders"></div>
+      <div class="kpi-sub" id="v-own-rev"></div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Заказов наёмная</div>
+      <div class="kpi-value a" id="v-hired-orders"></div>
+      <div class="kpi-sub" id="v-hired-rev"></div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Стоимость найма</div>
+      <div class="kpi-value r" id="v-hired-cost"></div>
+      <div class="kpi-sub" id="v-hired-margin"></div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Маржа на найм</div>
+      <div class="kpi-value" id="v-hired-profit-pct"></div>
+      <div class="kpi-sub">Выручка минус затраты</div>
+    </div>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">Наём по менеджерам (затраты)</div>
+      <div class="chart-wrap" style="height:300px"><canvas id="chart-hired-mgr" role="img" aria-label="Найм по менеджерам"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Детализация по найму</div>
+      <div style="overflow-x:auto">
+        <table class="tbl">
+          <thead><tr><th>Менеджер</th><th class="num">Выр. наём</th><th class="num">Затр. найма</th><th class="num">Маржа</th></tr></thead>
+          <tbody id="hired-table"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ПО ДНЯМ -->
+<div id="page-daily" class="page">
+  <div class="card">
+    <div class="card-title">Выручка по дням · июнь 2026</div>
+    <div class="chart-wrap" style="height:300px"><canvas id="chart-daily-detail" role="img" aria-label="Выручка по дням детально"></canvas></div>
+  </div>
+  <div class="card" style="margin-top:14px">
+    <table class="tbl">
+      <thead><tr><th>Дата</th><th class="num">Выручка</th><th class="num">Наша техника</th><th class="num">Наём</th><th class="num">Заказов</th></tr></thead>
+      <tbody id="daily-table"></tbody>
+    </table>
+  </div>
+</div>
+</main>
+
+<script>
+const DATA = {"summary": {"total_rev": 25660802, "own_rev": 21320502, "hired_rev": 3343220, "hired_cost": 2469930, "profit": 22662972, "orders": 478, "own_orders": 389, "hired_orders": 70, "own_pct": 83.1, "hired_pct": 13.0}, "managers": [{"name": "Ахтамова Лиана", "fullName": "Ахтамова Лиана 8-903-726-85-42", "total": 4532484, "own": 3979764, "hired_rev": 552720, "hired_cost": 332800, "profit": 4150684, "orders": 85, "margin": 91.6}, {"name": "Цегельников Вячеслав", "fullName": "Цегельников Вячеслав Владимирович 8-968-861-01-62", "total": 4497875, "own": 3649875, "hired_rev": 848000, "hired_cost": 658000, "profit": 3627875, "orders": 70, "margin": 80.7}, {"name": "Савиток Олеся", "fullName": "Савиток Олеся Анатольевна 8-985-150-11-85", "total": 4220140, "own": 2853260, "hired_rev": 808800, "hired_cost": 598875, "profit": 3601265, "orders": 111, "margin": 85.3}, {"name": "Филипчук Екатерина", "fullName": "Филипчук Екатерина Васильевна", "total": 2814500, "own": 2706000, "hired_rev": 38500, "hired_cost": 30000, "profit": 2682500, "orders": 30, "margin": 95.3}, {"name": "Котельников Данила", "fullName": "Котельников Данила Игоревич", "total": 2612300, "own": 2385100, "hired_rev": 227200, "hired_cost": 178000, "profit": 2383800, "orders": 45, "margin": 91.3}, {"name": "Прус-Роскошный Роман", "fullName": "Прус-Роскошный Роман Владимирович", "total": 2008500, "own": 1729500, "hired_rev": 0, "hired_cost": 0, "profit": 1968500, "orders": 34, "margin": 98.0}, {"name": "Гуштюк Ирина", "fullName": "Гуштюк Ирина Алексеевна", "total": 1654503, "own": 1589503, "hired_rev": 0, "hired_cost": 0, "profit": 1645903, "orders": 28, "margin": 99.5}, {"name": "Гуляева Лилия", "fullName": "Гуляева Лилия Александровна", "total": 1514500, "own": 730500, "hired_rev": 759000, "hired_cost": 585255, "profit": 929245, "orders": 46, "margin": 61.4}, {"name": "Коньшина Анастасия", "fullName": "Коньшина Анастасия Андреевна", "total": 651000, "own": 542000, "hired_rev": 109000, "hired_cost": 87000, "profit": 558000, "orders": 13, "margin": 85.7}, {"name": "Дербенцева Юлия", "fullName": "Дербенцева Юлия Валериевна", "total": 580000, "own": 580000, "hired_rev": 0, "hired_cost": 0, "profit": 533000, "orders": 5, "margin": 91.9}, {"name": "Сильчев Максим", "fullName": "Сильчев Максим Александрович 7 985 647-98-86", "total": 196000, "own": 196000, "hired_rev": 0, "hired_cost": 0, "profit": 196000, "orders": 1, "margin": 100.0}, {"name": "Шейко Елена", "fullName": "Шейко Елена Николаевна", "total": 162000, "own": 162000, "hired_rev": 0, "hired_cost": 0, "profit": 169200, "orders": 4, "margin": 104.4}, {"name": "Володин Илья", "fullName": "Володин Илья Александрович", "total": 111000, "own": 111000, "hired_rev": 0, "hired_cost": 0, "profit": 111000, "orders": 3, "margin": 100.0}, {"name": "Васин Максим", "fullName": "Васин Максим Анатольевич +7-926-707-15-40", "total": 106000, "own": 106000, "hired_rev": 0, "hired_cost": 0, "profit": 106000, "orders": 3, "margin": 100.0}], "customers": [{"name": "АРДЕНА БАЛТИК ЛОГИСТИКС ООО (Филипчук)", "total": 2078000, "profit": 1994000, "orders": 16, "manager": "Филипчук Екатерина"}, {"name": "МОСИНЖПРОЕКТ АО (ТЕНДЕР!!!)", "total": 1575252, "profit": 1242452, "orders": 14, "manager": "Ахтамова Лиана"}, {"name": "КОМПАНИЯ СИМ-АВТО ООО", "total": 1219000, "profit": 1173000, "orders": 16, "manager": "Котельников Данила"}, {"name": "МИП-СНАБЖЕНИЕ ООО (ТЕНДЕР!!!)", "total": 1159460, "profit": 1159460, "orders": 49, "manager": "Ахтамова Лиана"}, {"name": "СПЕЦГРУЗ ООО", "total": 795500, "profit": 789500, "orders": 16, "manager": "Прус-Роскошный Роман"}, {"name": "АЛМАЗ ООО Слава", "total": 730000, "profit": 687000, "orders": 6, "manager": "Цегельников Вячеслав"}, {"name": "СЛАВИНВЕСТСТРОЙ ООО", "total": 670000, "profit": 649000, "orders": 2, "manager": "Ахтамова Лиана"}, {"name": "СТРЕЛА ООО Савиток", "total": 634000, "profit": 477000, "orders": 19, "manager": "Савиток Олеся"}, {"name": "СТРОЙКОМПЛЕКС ООО (МВ)", "total": 598000, "profit": 378000, "orders": 17, "manager": "Савиток Олеся"}, {"name": "ОТДЕЛ БУРОВЫХ РАБОТ", "total": 563000, "profit": 557000, "orders": 5, "manager": "Сильчев Максим, Прус-Роскошный"}, {"name": "КОНТАКТСТРОЙ ООО ( 7100018036!)", "total": 556000, "profit": 349120, "orders": 18, "manager": "Гуляева Лилия"}, {"name": "КРОКУС АО    КПП 997450001 Барвиха", "total": 514000, "profit": 431000, "orders": 10, "manager": "Савиток Олеся"}, {"name": "ГЕОСПЕЦСТРОЙ АО", "total": 477680, "profit": 434680, "orders": 14, "manager": "Савиток Олеся"}, {"name": "ГРАНДМОТОРС АО", "total": 418500, "profit": 294500, "orders": 11, "manager": "Гуляева Лилия"}, {"name": "ЭКОТОРГ ООО (ША/ГИ)", "total": 412503, "profit": 412503, "orders": 9, "manager": "Гуштюк Ирина"}, {"name": "МТ ООО", "total": 400000, "profit": 360000, "orders": 8, "manager": "Цегельников Вячеслав"}, {"name": "ПРОСТО ТЕНТ ООО", "total": 358060, "profit": 358060, "orders": 7, "manager": "Савиток Олеся"}, {"name": "ЭК-СТРОЙ ООО", "total": 349000, "profit": 333000, "orders": 2, "manager": "Ахтамова Лиана"}, {"name": "ТРАЛ-ТЭК ООО", "total": 335000, "profit": 325000, "orders": 2, "manager": "Цегельников Вячеслав"}, {"name": "ГТС ООО (СК ГидроТехСтрой)", "total": 320000, "profit": 298000, "orders": 4, "manager": "Дербенцева Юлия"}], "types": [{"name": "Длинномер", "total": 6955315, "orders": 213, "own": 4777735, "hired": 1839500}, {"name": "Машина прикрытия", "total": 18000, "orders": 1, "own": 18000, "hired": 0}, {"name": "Трал", "total": 18662487, "orders": 263, "own": 16524767, "hired": 1503720}], "daily": [{"date": "01.06", "revenue": 1292032, "own": 962488, "hired": 329544, "orders": 30}, {"date": "02.06", "revenue": 1082666, "own": 817122, "hired": 265544, "orders": 23}, {"date": "03.06", "revenue": 1301285, "own": 1174285, "hired": 127000, "orders": 32}, {"date": "04.06", "revenue": 1837782, "own": 1665238, "hired": 172544, "orders": 35}, {"date": "05.06", "revenue": 1496780, "own": 1204780, "hired": 292000, "orders": 29}, {"date": "06.06", "revenue": 746875, "own": 593875, "hired": 153000, "orders": 17}, {"date": "07.06", "revenue": 396500, "own": 354500, "hired": 42000, "orders": 7}, {"date": "08.06", "revenue": 2140494, "own": 1896950, "hired": 243544, "orders": 36}, {"date": "09.06", "revenue": 1568306, "own": 1218306, "hired": 350000, "orders": 29}, {"date": "10.06", "revenue": 2100109, "own": 1627565, "hired": 472544, "orders": 40}, {"date": "11.06", "revenue": 1144000, "own": 1116000, "hired": 28000, "orders": 25}, {"date": "12.06", "revenue": 283600, "own": 250800, "hired": 32800, "orders": 10}, {"date": "13.06", "revenue": 1022000, "own": 1022000, "hired": 0, "orders": 14}, {"date": "14.06", "revenue": 470000, "own": 470000, "hired": 0, "orders": 6}, {"date": "15.06", "revenue": 2101215, "own": 1974215, "hired": 127000, "orders": 26}, {"date": "16.06", "revenue": 1238128, "own": 1050128, "hired": 163000, "orders": 28}, {"date": "17.06", "revenue": 2140843, "own": 1913643, "hired": 227200, "orders": 37}, {"date": "18.06", "revenue": 2226107, "own": 1968607, "hired": 257500, "orders": 33}, {"date": "19.06", "revenue": 1025600, "own": 40000, "hired": 60000, "orders": 20}, {"date": "20.06", "revenue": 46480, "own": 0, "hired": 0, "orders": 1}]};
+
+function showPage(id,btn){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nb').forEach(b=>b.classList.remove('active'));
+  document.getElementById('page-'+id).classList.add('active');
+  if(btn)btn.classList.add('active');
+}
+
+function fmt(n){return Math.round(n||0).toLocaleString('ru')+' ₽';}
+function fmtM(n){const v=Math.abs(n||0);const s=(n||0)<0?'-':'';return v>=1000000?s+(v/1000000).toFixed(2)+' млн':s+Math.round(v).toLocaleString('ru');}
+function fmtK(n){if(Math.abs(n)>=1000000)return(n/1000000).toFixed(1)+'M';if(Math.abs(n)>=1000)return(n/1000).toFixed(0)+'K';return Math.round(n);}
+function pct(n){return Math.round(n||0)+'%';}
+
+const s = DATA.summary;
+
+// KPI
+document.getElementById('k-total').textContent = fmtM(s.total_rev)+' ₽';
+document.getElementById('k-orders').textContent = s.orders+' заказов';
+document.getElementById('k-own').textContent = fmtM(s.own_rev)+' ₽';
+document.getElementById('k-own-pct').textContent = s.own_pct+'% от выручки · '+s.own_orders+' заказов';
+document.getElementById('k-hired').textContent = fmtM(s.hired_rev)+' ₽';
+document.getElementById('k-hired-sub').textContent = 'Затраты найма: '+fmtM(s.hired_cost)+' ₽';
+document.getElementById('k-profit').textContent = fmtM(s.profit)+' ₽';
+document.getElementById('k-margin').textContent = pct(s.total_rev>0?s.profit/s.total_rev*100:0)+' маржа';
+
+// По дням — главный
+(function(){
+  const ctx = document.getElementById('chart-daily');
+  new Chart(ctx,{
+    type:'bar',
+    data:{
+      labels:DATA.daily.map(d=>d.date),
+      datasets:[
+        {label:'Наша техника',data:DATA.daily.map(d=>d.own),backgroundColor:'#1D9E75',borderRadius:3,stack:'s'},
+        {label:'Наём',data:DATA.daily.map(d=>d.hired),backgroundColor:'#EF9F27',borderRadius:3,stack:'s'},
+      ]
+    },
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:'#888780',font:{size:11},boxWidth:10}},tooltip:{callbacks:{label:c=>' '+fmtK(c.raw)+' ₽'}}},
+      scales:{
+        x:{stacked:true,ticks:{color:'#888780',font:{size:10}},grid:{display:false}},
+        y:{stacked:true,ticks:{color:'#888780',callback:v=>fmtK(v)},grid:{color:'rgba(255,255,255,0.04)'}}
+      }
+    }
+  });
+})();
+
+// Прогресс менеджеры
+(function(){
+  const top = DATA.managers.slice(0,7);
+  const max = top[0]?.total||1;
+  document.getElementById('mgr-progs').innerHTML = top.map(m=>{
+    const w = Math.round(m.total/max*100);
+    const ownW = Math.round(m.own/m.total*100);
+    return `<div class="prog-wrap">
+      <div class="prog-header"><span class="prog-name">${m.name}</span><span class="prog-val">${fmtM(m.total)} ₽ · ${m.orders} зак.</span></div>
+      <div class="prog-bg" style="height:6px">
+        <div class="prog-fill" style="width:${w}%;background:linear-gradient(90deg,#1D9E75 ${ownW}%,#EF9F27 ${ownW}%)"></div>
+      </div>
+    </div>`;
+  }).join('');
+})();
+
+// Своя vs наём donut
+(function(){
+  const ctx = document.getElementById('chart-split');
+  new Chart(ctx,{
+    type:'doughnut',
+    data:{
+      labels:['Наша техника','Наём (выручка)','Без машины'],
+      datasets:[{
+        data:[s.own_rev, s.hired_rev, s.total_rev-s.own_rev-s.hired_rev],
+        backgroundColor:['#1D9E75','#EF9F27','#444441'],
+        borderWidth:0, hoverOffset:4
+      }]
+    },
+    options:{responsive:true,maintainAspectRatio:false,cutout:'68%',
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>' '+fmtM(c.raw)+' ₽'}}}}
+  });
+  document.getElementById('split-legend').innerHTML = [
+    {c:'#1D9E75',n:'Наша техника',v:s.own_rev,p:s.own_pct},
+    {c:'#EF9F27',n:'Наём',v:s.hired_rev,p:s.hired_pct},
+  ].map(x=>`<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:5px">
+    <span style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:2px;background:${x.c};display:inline-block"></span><span style="color:var(--muted)">${x.n}</span></span>
+    <span><b>${fmtM(x.v)}</b> <span style="color:var(--muted)">${x.p}%</span></span>
+  </div>`).join('');
+})();
+
+// По типам
+(function(){
+  document.getElementById('type-list').innerHTML = DATA.types.map(t=>`
+    <div class="info-row">
+      <span>${t.name}</span>
+      <span>${fmtM(t.total)} ₽ <span style="color:var(--muted);font-size:11px">(${t.orders} зак.)</span></span>
+    </div>`).join('');
+})();
+
+// Топ заказчики
+(function(){
+  document.getElementById('top-cust').innerHTML = DATA.customers.slice(0,5).map(c=>`
+    <div class="info-row">
+      <span style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px">${c.name}</span>
+      <span style="font-size:12px">${fmtM(c.total)} ₽</span>
+    </div>`).join('');
+})();
+
+// Менеджеры таблица
+(function(){
+  document.getElementById('mgr-table').innerHTML = DATA.managers.map(m=>{
+    const hiredPct = m.total>0?Math.round(m.hired_rev/m.total*100):0;
+    const cls = hiredPct>30?'r':hiredPct>15?'a':'g';
+    return `<tr>
+      <td><b>${m.name}</b></td>
+      <td class="num">${fmtM(m.total)}</td>
+      <td class="num g">${fmtM(m.own)}</td>
+      <td class="num a">${m.hired_rev>0?fmtM(m.hired_rev):'—'}</td>
+      <td class="num r">${m.hired_cost>0?fmtM(m.hired_cost):'—'}</td>
+      <td class="num">${fmtM(m.profit)}</td>
+      <td class="num m">${m.orders}</td>
+      <td><span class="badge ${cls}">${hiredPct}%</span></td>
+    </tr>`;
+  }).join('');
+
+  // График менеджеры своя vs наём
+  const ctx = document.getElementById('chart-mgr-split');
+  new Chart(ctx,{
+    type:'bar',
+    data:{
+      labels:DATA.managers.map(m=>m.name),
+      datasets:[
+        {label:'Наша техника',data:DATA.managers.map(m=>m.own),backgroundColor:'#1D9E75',borderRadius:3,stack:'s'},
+        {label:'Наём (выручка)',data:DATA.managers.map(m=>m.hired_rev),backgroundColor:'#EF9F27',borderRadius:3,stack:'s'},
+      ]
+    },
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:'#888780',font:{size:11},boxWidth:10}},tooltip:{callbacks:{label:c=>' '+fmtM(c.raw)+' ₽'}}},
+      scales:{
+        x:{stacked:true,ticks:{color:'#888780',font:{size:10},maxRotation:30},grid:{display:false}},
+        y:{stacked:true,ticks:{color:'#888780',callback:v=>fmtK(v)},grid:{color:'rgba(255,255,255,0.04)'}}
+      }
+    }
+  });
+})();
+
+// Заказчики
+function renderCustomers(){
+  const filter = document.getElementById('cust-filter-mgr')?.value||'';
+  let data = DATA.customers;
+  if(filter) data = data.filter(c=>c.manager.includes(filter));
+  document.getElementById('cust-table').innerHTML = data.map(c=>`<tr>
+    <td>${c.name}</td>
+    <td class="num">${fmtM(c.total)}</td>
+    <td class="num">${fmtM(c.profit)}</td>
+    <td class="num m">${c.orders}</td>
+    <td class="m">${c.manager}</td>
+  </tr>`).join('');
+}
+
+(function(){
+  const sel = document.getElementById('cust-filter-mgr');
+  const mgrs = [...new Set(DATA.customers.map(c=>c.manager))].sort();
+  mgrs.forEach(m=>{if(m)sel.add(new Option(m,m));});
+  renderCustomers();
+})();
+
+// Своя vs наём
+(function(){
+  document.getElementById('v-own-orders').textContent = s.own_orders+' заказов';
+  document.getElementById('v-own-rev').textContent = fmtM(s.own_rev)+' ₽ выручки';
+  document.getElementById('v-hired-orders').textContent = s.hired_orders+' заказов';
+  document.getElementById('v-hired-rev').textContent = fmtM(s.hired_rev)+' ₽ выручки';
+  document.getElementById('v-hired-cost').textContent = fmtM(s.hired_cost)+' ₽';
+  const hm = s.hired_rev-s.hired_cost;
+  document.getElementById('v-hired-margin').textContent = 'Маржа найма: '+fmtM(hm)+' ₽';
+  document.getElementById('v-hired-profit-pct').textContent = s.hired_rev>0?Math.round(hm/s.hired_rev*100)+'%':'—';
+
+  const hiredMgrs = DATA.managers.filter(m=>m.hired_cost>0).sort((a,b)=>b.hired_cost-a.hired_cost);
+  const ctx = document.getElementById('chart-hired-mgr');
+  new Chart(ctx,{
+    type:'bar',indexAxis:'y',
+    data:{
+      labels:hiredMgrs.map(m=>m.name),
+      datasets:[
+        {label:'Выручка наём',data:hiredMgrs.map(m=>m.hired_rev),backgroundColor:'#EF9F27',borderRadius:3},
+        {label:'Затраты найма',data:hiredMgrs.map(m=>m.hired_cost),backgroundColor:'#E24B4A',borderRadius:3},
+      ]
+    },
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:'#888780',font:{size:11},boxWidth:10}},tooltip:{callbacks:{label:c=>' '+fmtM(c.raw)+' ₽'}}},
+      scales:{x:{ticks:{color:'#888780',callback:v=>fmtK(v)},grid:{color:'rgba(255,255,255,0.04)'}},y:{ticks:{color:'#ccc',font:{size:11}},grid:{display:false}}}
+    }
+  });
+
+  document.getElementById('hired-table').innerHTML = hiredMgrs.map(m=>{
+    const margin = m.hired_rev-m.hired_cost;
+    const pctV = m.hired_rev>0?Math.round(margin/m.hired_rev*100):0;
+    return `<tr>
+      <td>${m.name}</td>
+      <td class="num a">${fmtM(m.hired_rev)}</td>
+      <td class="num r">${fmtM(m.hired_cost)}</td>
+      <td class="num ${margin>0?'g':'r'}">${fmtM(margin)} (${pctV}%)</td>
+    </tr>`;
+  }).join('');
+})();
+
+// По дням детально
+(function(){
+  const ctx = document.getElementById('chart-daily-detail');
+  new Chart(ctx,{
+    type:'bar',
+    data:{
+      labels:DATA.daily.map(d=>d.date),
+      datasets:[
+        {label:'Наша техника',data:DATA.daily.map(d=>d.own),backgroundColor:'#1D9E75',borderRadius:3,stack:'s'},
+        {label:'Наём',data:DATA.daily.map(d=>d.hired),backgroundColor:'#EF9F27',borderRadius:3,stack:'s'},
+      ]
+    },
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:'#888780',font:{size:11},boxWidth:10}},tooltip:{callbacks:{label:c=>' '+fmtM(c.raw)+' ₽'}}},
+      scales:{
+        x:{stacked:true,ticks:{color:'#888780',font:{size:11}},grid:{display:false}},
+        y:{stacked:true,ticks:{color:'#888780',callback:v=>fmtK(v)},grid:{color:'rgba(255,255,255,0.04)'}}
+      }
+    }
+  });
+
+  document.getElementById('daily-table').innerHTML = DATA.daily.map(d=>`<tr>
+    <td><b>${d.date}</b></td>
+    <td class="num">${fmtM(d.revenue)}</td>
+    <td class="num g">${fmtM(d.own)}</td>
+    <td class="num a">${d.hired>0?fmtM(d.hired):'—'}</td>
+    <td class="num m">${d.orders}</td>
+  </tr>`).join('');
+})();
+</script>
+</body>
+</html>

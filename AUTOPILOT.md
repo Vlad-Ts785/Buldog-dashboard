@@ -1,7 +1,7 @@
 ---
-completed: false
-last_completed_step: 0
-started_at: null
+completed: true
+last_completed_step: done
+started_at: 2026-06-23
 ---
 
 # AUTOPILOT - онбординг пользователя

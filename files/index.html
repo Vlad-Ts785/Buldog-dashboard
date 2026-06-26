@@ -336,6 +336,10 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
     <div class="sidebar-nav-item active" onclick="showPage('main',this)" data-page="main">
       <span class="sidebar-nav-icon">📊</span> Панель
     </div>
+    <div class="sidebar-nav-item" onclick="showPage('decisions',this)" data-page="decisions">
+      <span class="sidebar-nav-icon">🎯</span> Система решений
+      <span class="sidebar-nav-badge" id="decisions-badge" style="display:none">0</span>
+    </div>
 
     <div class="sidebar-nav-section">
       <span class="sidebar-nav-section-label">Парк</span>
@@ -395,6 +399,11 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
     <div id="error-block">
       <b>Ошибка загрузки.</b> Укажите URL Apps Script:
       <input id="api-url-input" type="text" placeholder="https://script.google.com/macros/s/.../exec" oninput="setApiUrl(this.value)">
+    </div>
+
+    <!-- ═══ СИСТЕМА РЕШЕНИЙ ══════════════════════════════════ -->
+    <div id="page-decisions" class="page">
+      <div id="decisions-content"><p style="color:var(--muted);padding:16px">Данные загружаются...</p></div>
     </div>
 
     <!-- ═══ ПАНЕЛЬ ═══════════════════════════════════════════ -->
@@ -751,6 +760,7 @@ const PROFIT_PLAN = 50400000;
 
 const PAGE_TITLES = {
   main: 'Панель управления',
+  decisions: 'Система решений — что делать сегодня',
   vehicles: 'Парк техники',
   managers: 'Менеджеры',
   drivers: 'Водители',
@@ -796,6 +806,7 @@ function render() {
   const t = D.updated ? new Date(D.updated).toLocaleString('ru',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'}) : '';
   setText('nav-updated', 'Обновлено: ' + t);
   renderKPI();
+  renderDecisions();
   renderMain();
   renderVehiclesTable();
   renderManagers();
@@ -851,6 +862,217 @@ function renderKPI() {
 function setBar(id, v, color) {
   const el = document.getElementById(id);
   if (el) { el.style.width = Math.min(v, 100) + '%'; el.style.background = color; }
+}
+
+// ── СИСТЕМА РЕШЕНИЙ ────────────────────────────────────────
+// Что делать, чтобы бизнес рос. Приоритет по денежному воздействию.
+function renderDecisions() {
+  if (!D || !D.orders) return;
+  var el = document.getElementById('decisions-content');
+  if (!el) return;
+  var o = D.orders, s = D.summary || {}, f = D.fleet || {}, v = D.vehicles || [];
+  var tr = f.trailers || {}, tk = f.trucks || {};
+  var os = o.summary || {};
+
+  var COL = { red:'#E24B4A', amber:'#EF9F27', green:'#1D9E75', blue:'#378ADD' };
+
+  function rub(n) { return Math.round(n||0).toLocaleString('ru-RU') + ' ₽'; }
+  function mln(n) { var x=Math.abs(n||0); var sg=(n||0)<0?'-':''; return x>=1000000 ? sg+(x/1000000).toFixed(1)+' млн ₽' : sg+Math.round(x).toLocaleString('ru-RU')+' ₽'; }
+
+  // ── расчёты ──
+  var billed = os.total_amount || 0;
+  var paid   = os.total_payment || 0;
+  var unpaid = Math.max(0, billed - paid);
+
+  var debtors = (o.by_customer || []).map(function(c){
+    return { name:c.name, unpaid:(c.amount||0)-(c.payment||0), mgr:c.mgr||'' };
+  }).filter(function(c){ return c.unpaid > 50000; })
+    .sort(function(a,b){ return b.unpaid-a.unpaid; });
+  var topDebtors = debtors.slice(0, 6);
+  var debtorsSum = debtors.reduce(function(a,c){ return a + c.unpaid; }, 0);
+
+  var ds = o.doc_status || {};
+  var docComplete = ds.complete || 0;
+  var docStuck = (ds.no_waybill||0) + (ds.waybill_not_posted||0) + (ds.posted_no_realiz||0);
+  var docTotal = docComplete + docStuck;
+  var decs = o.doc_by_decade || [];
+  var lastDec = decs.length ? decs[decs.length-1] : null;
+
+  var repair   = (tr.repair||0) + (tk.repair||0);
+  var noDriver = (tr.noDriver||0) + (tk.noDriver||0);
+  var working  = (tr.working||0) + (tk.working||0);
+  var fleetTotal = (tr.total||0) + (tk.total||0);
+  var revPerTruck = working > 0 ? (s.revenue||0)/working : 0;
+  var idleLossEst = revPerTruck * noDriver;
+
+  var hiredCost   = os.total_hired_cost || 0;
+  var hiredProfit = os.hired_profit || 0;
+  var hiredRev    = hiredCost + hiredProfit;
+  var hiredPct    = hiredRev > 0 ? hiredProfit/hiredRev*100 : 0;
+  var ownPct      = s.margin || 0;
+  var marginGapEst = hiredRev * Math.max(0, (ownPct - hiredPct))/100;
+
+  var lost = (o.lost_customers || []).slice().sort(function(a,b){ return (b.amount||0)-(a.amount||0); });
+  var topLost = lost.slice(0, 6);
+  var lostSum = lost.reduce(function(a,c){ return a+(c.amount||0); }, 0);
+
+  var badSup = (o.by_hired_supplier || []).filter(function(x){ return (x.revenue||0)>200000 && (x.margin_pct||0)<25; })
+    .sort(function(a,b){ return (a.margin_pct||0)-(b.margin_pct||0); }).slice(0, 5);
+
+  var lossVeh = v.filter(function(x){ return (x.profit||0)<0; }).sort(function(a,b){ return (a.profit||0)-(b.profit||0); });
+  var fined = v.filter(function(x){ return (x.fines||0)>20000; }).sort(function(a,b){ return (b.fines||0)-(a.fines||0); }).slice(0, 4);
+
+  var fakt = s.salesFakt || 0, plan = s.salesPlan || 0;
+  var planPct = plan>0 ? fakt/plan*100 : 0;
+  var dataDate = D.updated ? new Date(D.updated) : new Date();
+  var dayOfMonth = dataDate.getDate();
+  var dim = 30;
+  if (o.period) { var py=+o.period.slice(0,4), pm=+o.period.slice(5,7); if(py&&pm) dim = new Date(py, pm, 0).getDate(); }
+  var forecast = dayOfMonth>0 ? fakt/dayOfMonth*dim : fakt;
+  var forecastPct = plan>0 ? forecast/plan*100 : 0;
+  var mgrsBehind = (D.managers||[]).filter(function(m){ return (m.plan||0)>0 && (m.pct||0)<70; })
+    .sort(function(a,b){ return (a.pct||0)-(b.pct||0); }).slice(0, 6);
+
+  // ── строители HTML ──
+  function tile(label, value, sub, color) {
+    return '<div style="background:var(--bg2);border:1px solid var(--border);border-left:3px solid '+color+';border-radius:10px;padding:14px 16px">'+
+      '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">'+label+'</div>'+
+      '<div style="font-size:20px;font-weight:700;color:'+color+';line-height:1.1">'+value+'</div>'+
+      '<div style="font-size:11px;color:var(--muted);margin-top:4px">'+sub+'</div></div>';
+  }
+
+  function rowsList(rows) {
+    var h = '<div style="margin-top:10px">';
+    rows.forEach(function(r){
+      h += '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
+        '<div style="font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+r.left+
+        (r.sub ? ' <span style="font-size:11px;color:var(--muted)">'+r.sub+'</span>' : '')+'</div>'+
+        '<div style="font-size:13px;font-weight:600;white-space:nowrap;color:'+(r.color||'var(--text)')+'">'+r.right+'</div></div>';
+    });
+    return h + '</div>';
+  }
+
+  var n = 0;
+  function card(sev, icon, title, impact, bodyHtml, action) {
+    n++;
+    var color = COL[sev] || COL.blue;
+    var h = '<div class="card" style="border-left:3px solid '+color+';margin-bottom:14px;padding:16px 18px">';
+    h += '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">';
+    h += '<div style="display:flex;align-items:center;gap:10px">'+
+         '<span style="font-size:11px;font-weight:700;color:var(--muted);background:var(--bg3);border-radius:6px;padding:2px 8px">#'+n+'</span>'+
+         '<span style="font-size:16px">'+icon+'</span>'+
+         '<span style="font-size:15px;font-weight:600;color:var(--text)">'+title+'</span></div>';
+    if (impact) h += '<div style="font-size:17px;font-weight:700;color:'+color+';white-space:nowrap;text-align:right">'+impact+'</div>';
+    h += '</div>';
+    if (bodyHtml) h += '<div style="margin-top:4px">'+bodyHtml+'</div>';
+    if (action) h += '<div style="margin-top:12px;font-size:12px;color:var(--text);background:rgba(255,255,255,.03);border-radius:8px;padding:8px 10px">→ <b style="font-weight:600">Действие:</b> '+action+'</div>';
+    return h + '</div>';
+  }
+
+  // ── баннер ──
+  var html = '';
+  html += '<div style="font-size:13px;color:var(--muted);margin-bottom:14px;line-height:1.5">'+
+    'Список отсортирован по денежному воздействию - сверху то, где больше всего денег. Период: <b style="color:var(--text)">'+(o.period||'—')+'</b>.</div>';
+
+  html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">';
+  html += tile('Не собрано', mln(unpaid), 'выставлено '+mln(billed), unpaid>0?COL.red:COL.green);
+  html += tile('Зависло в документах', docStuck+' зак.', 'готовы только '+docComplete, docStuck>0?COL.red:COL.green);
+  html += tile('Простаивает техника', (repair+noDriver)+' ед.', repair+' ремонт · '+noDriver+' без вод.', (repair+noDriver)>0?COL.amber:COL.green);
+  html += tile('Найм на сторону', mln(hiredCost), 'маржа найма '+pct(hiredPct), COL.amber);
+  html += '</div>';
+
+  // ── 1. Собрать деньги ──
+  if (topDebtors.length) {
+    var dbody = '<div style="font-size:13px;color:var(--muted)">Выставлено '+mln(billed)+', собрано '+mln(paid)+'. Не собрано по клиентам (выручка минус оплата):</div>';
+    dbody += rowsList(topDebtors.map(function(c){ return { left:c.name, sub:c.mgr?'· '+c.mgr.split(' ')[0]:'', right:mln(c.unpaid), color:COL.red }; }));
+    html += card('red', '💸', 'Собрать деньги с клиентов', mln(debtorsSum),
+      dbody, 'Обзвонить топ-должников. Начать с <b>'+topDebtors[0].name+'</b> ('+mln(topDebtors[0].unpaid)+', '+(topDebtors[0].mgr||'').split(' ')[0]+').');
+  }
+
+  // ── 2. Документы ──
+  if (docStuck > 0) {
+    var dbody2 = '<div style="font-size:13px;color:var(--muted)">Полный пакет только у <b style="color:var(--text)">'+docComplete+'</b> из '+docTotal+' заказов. Без путёвки и реализации нельзя выставить счёт - деньги зависают.</div>';
+    dbody2 += rowsList([
+      { left:'Нет путёвки', sub:'(свои '+(ds.no_waybill_own||0)+' / найм '+(ds.no_waybill_hired||0)+')', right:(ds.no_waybill||0)+' зак.', color:COL.red },
+      { left:'Путёвка есть, не проведён', right:(ds.waybill_not_posted||0)+' зак.', color:COL.amber },
+      { left:'Проведён, нет реализации', right:(ds.posted_no_realiz||0)+' зак.', color:COL.amber }
+    ]);
+    var act2 = 'Запустить оформление документов.';
+    if (lastDec && (lastDec.no_waybill_own||0) > 10) act2 = 'Срочно: <b>'+lastDec.no_waybill_own+'</b> заказов своего парка без путёвки в декаде '+lastDec.label+' - оформить в первую очередь.';
+    html += card('red', '📋', 'Закрыть документы по заказам', docStuck+' зак.', dbody2, act2);
+  }
+
+  // ── 3. Простой техники ──
+  if (repair + noDriver > 0) {
+    var fbody = '<div style="font-size:13px;color:var(--muted)">В работе '+working+' из '+fleetTotal+' машин. ';
+    fbody += 'В ремонте <b style="color:'+COL.red+'">'+repair+'</b>, без водителя <b style="color:'+COL.amber+'">'+noDriver+'</b>.</div>';
+    if (noDriver > 0 && idleLossEst > 0) {
+      fbody += '<div style="font-size:12px;color:var(--muted);margin-top:8px">Оценка: '+noDriver+' машины без водителя - это до <b style="color:var(--text)">'+mln(idleLossEst)+'/мес</b> недополученной выручки (по средней выручке на работающую машину).</div>';
+    }
+    var act3 = noDriver>0 ? 'Нанять '+noDriver+' водителей - техника готова, некому ездить.' : 'Разобрать топ застрявших в ремонте: сроки и стоимость возврата в строй.';
+    html += card('amber', '🔧', 'Вернуть технику в работу', (repair+noDriver)+' ед. простаивает',
+      fbody, act3);
+  }
+
+  // ── 4. Найм vs свои ──
+  if (hiredCost > 500000) {
+    var hbody = '<div style="font-size:13px;color:var(--muted)">Заплачено наёмной технике <b style="color:var(--text)">'+mln(hiredCost)+'</b> при марже найма всего <b style="color:'+COL.amber+'">'+pct(hiredPct)+'</b>. Свой парк даёт <b style="color:'+COL.green+'">'+pct(ownPct)+'</b> маржи.</div>';
+    if (marginGapEst > 0) hbody += '<div style="font-size:12px;color:var(--muted);margin-top:8px">Если перевести этот объём на свой парк (вернуть из ремонта, посадить водителей) - потенциал доп. маржи до <b style="color:var(--text)">'+mln(marginGapEst)+'</b>.</div>';
+    html += card('amber', '🚚', 'Меньше найма - больше своего парка', mln(hiredCost)+' найма',
+      hbody, 'При следующих заказах - приоритет своей технике. Найм только когда свои реально заняты, не когда стоят в ремонте.');
+  }
+
+  // ── 5. Ушедшие клиенты ──
+  if (topLost.length) {
+    var lbody = '<div style="font-size:13px;color:var(--muted)"><b style="color:var(--text)">'+lost.length+'</b> клиентов заказывали в 1-й половине месяца и пропали во 2-й. Топ по сумме - вернуть в первую очередь:</div>';
+    lbody += rowsList(topLost.map(function(c){ return { left:c.name, sub:(c.mgr?'· '+c.mgr.split(' ')[0]:'')+' · '+(c.first_half||0)+' зак.', right:mln(c.amount), color:COL.amber }; }));
+    html += card('amber', '👋', 'Вернуть ушедших клиентов', mln(lostSum)+' / '+lost.length+' кл.',
+      lbody, 'Менеджерам обзвонить свои пропавшие клиенты. Старт с <b>'+topLost[0].name+'</b> ('+(topLost[0].mgr||'').split(' ')[0]+').');
+  }
+
+  // ── 6. План продаж ──
+  var planBody = '<div style="font-size:13px;color:var(--muted)">Факт <b style="color:var(--text)">'+mln(fakt)+'</b> из плана '+mln(plan)+' = <b style="color:'+(planPct>=80?COL.green:planPct>=50?COL.amber:COL.red)+'">'+pct(planPct)+'</b>. ';
+  planBody += 'Прогноз к концу месяца по темпу: <b style="color:'+(forecastPct>=100?COL.green:COL.amber)+'">'+mln(forecast)+'</b> ('+pct(forecastPct)+' плана).</div>';
+  if (mgrsBehind.length) {
+    planBody += '<div style="font-size:12px;color:var(--muted);margin-top:8px">Тянут вниз (ниже 70% плана):</div>';
+    planBody += rowsList(mgrsBehind.map(function(m){ return { left:(m.name||'').split(' ').slice(0,2).join(' '), right:pct(m.pct), color:COL.red }; }));
+  }
+  html += card(forecastPct>=100?'green':(planPct>=50?'amber':'red'), '🎯', 'Дожать план продаж', pct(planPct),
+    planBody, mgrsBehind.length ? 'Подтянуть отстающих менеджеров, начиная с самого низкого %.' : 'Темп хороший - удержать до конца месяца.');
+
+  // ── 7. Невыгодный найм ──
+  if (badSup.length) {
+    var sbody = '<div style="font-size:13px;color:var(--muted)">Поставщики найма с маржой ниже 25% при заметном обороте - на них зарабатываем мало:</div>';
+    sbody += rowsList(badSup.map(function(x){ return { left:x.name, sub:'оборот '+mln(x.revenue), right:pct(x.margin_pct)+' / '+mln(x.margin), color:COL.amber }; }));
+    html += card('amber', '📉', 'Пересмотреть невыгодный найм', badSup.length+' поставщ.',
+      sbody, 'Поднять цену клиенту по этим направлениям или найти поставщика дешевле. Начать с <b>'+badSup[0].name+'</b> ('+pct(badSup[0].margin_pct)+').');
+  }
+
+  // ── 8. Штрафы и убытки ──
+  if (fined.length || lossVeh.length) {
+    var pbody = '';
+    if (fined.length) {
+      pbody += '<div style="font-size:13px;color:var(--muted)">Машины с крупными штрафами:</div>';
+      pbody += rowsList(fined.map(function(x){ return { left:x.gos, sub:'· '+x.type, right:rub(x.fines), color:COL.red }; }));
+    }
+    if (lossVeh.length) {
+      pbody += '<div style="font-size:12px;color:var(--muted);margin-top:'+(fined.length?'10px':'0')+'">Убыточные машины: ';
+      pbody += lossVeh.slice(0,5).map(function(x){ return '<b style="color:var(--text)">'+x.gos+'</b> ('+x.type+', '+mln(x.profit)+(x.status?', '+x.status:'')+')'; }).join('; ');
+      pbody += '.</div>';
+    }
+    html += card('amber', '⚠️', 'Разобрать штрафы и убыточные машины', fined.length?rub(fined[0].fines):'',
+      pbody, fined.length ? 'Разобраться, почему у <b>'+fined[0].gos+'</b> штрафы на '+rub(fined[0].fines)+' - водитель, маршрут, перегруз.' : 'Проверить убыточные машины: ремонт, простой или штрафы съедают прибыль.');
+  }
+
+  // бейдж в сайдбаре = число «горячих» (красных) карточек
+  var hot = (topDebtors.length?1:0) + (docStuck>0?1:0);
+  var badge = document.getElementById('decisions-badge');
+  if (badge) {
+    if (hot > 0) { badge.style.display='inline-block'; badge.textContent = hot; }
+    else badge.style.display = 'none';
+  }
+
+  el.innerHTML = html;
 }
 
 // ── ГЛАВНАЯ ────────────────────────────────────────────────
@@ -2578,15 +2800,15 @@ function renderSalesSalary() {
   PURE_LOGISTS.forEach(function(sur) {
     var l = getL(sur);
     if (!l) return;
-    var margin = Math.max(0, (l.amount||0) - (l.hired_cost||0));
-    var bonus = Math.round(margin * 0.10);
+    var orders = l.orders||0;
+    var bonus = orders * 500;          // 500 ₽ за заказ
     logTotal += bonus;
     logHtml += '<tr>';
-    logHtml += '<td><b>'+capName(sur)+'</b></td>';
-    logHtml += '<td class="num">'+(l.orders||0)+'</td>';
+    logHtml += '<td><b>'+capName(sur)+'</b><div style="font-size:10px;color:var(--muted);margin-top:2px">500 руб./заказ</div></td>';
+    logHtml += '<td class="num">'+orders+'</td>';
     logHtml += '<td class="num">'+fr(l.amount||0)+'</td>';
     logHtml += '<td class="num muted">'+fr(l.hired_cost||0)+'</td>';
-    logHtml += '<td class="num" style="color:#1D9E75">'+fr(margin)+'</td>';
+    logHtml += '<td class="num muted">—</td>';
     logHtml += '<td class="num" style="font-weight:600;color:#EF9F27">'+fr(bonus)+'</td>';
     logHtml += '</tr>';
   });

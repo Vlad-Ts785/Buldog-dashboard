@@ -2374,7 +2374,7 @@ function renderSalesSalary() {
              mgrBonus:mgrBonus, above2m:above2m, memberCount:memberCount, total:total };
   }
 
-  // Рыщанов: 100к оклад + 50к если вал.прибыль >20М + 50к за каждые след. 5М
+  // Рыщанов: 100к оклад + 50к если ВП своего парка >20М + 50к за каждые след. 5М
   function calcRyschanow(grossProfit) {
     var oklad = 100000;
     var bonus = 0;
@@ -2385,10 +2385,10 @@ function renderSalesSalary() {
     return { oklad:oklad, bonus:bonus, total:oklad + bonus, grossProfit:grossProfit };
   }
 
-  // Валовая прибыль = прибыль собственного парка + маржа наёмной техники
-  var ownFleetProfit = (D.summary || {}).profit || 0;
-  var hiredTotalProfit = (D.orders.summary || {}).hired_profit || 0;
-  var grossProfit = ownFleetProfit + hiredTotalProfit;
+  // Валовая прибыль (ВП) = только собственный парк, считается чётко в Нормализованных_данных.
+  // Прибыль от наёмной техники - отдельный показатель, в ВП не входит.
+  // Зарплата Рыщанова считается от ВП собственного парка.
+  var grossProfit = (D.summary || {}).profit || 0;
 
   var DEPTS = [
     { color:'#1D9E75', bgA:'29,158,117', label:'Отдел Ахтамовой',  head:'ахтамова',  headName:'Ахтамова Лиана',  ownSales:true,  specialHead:false,
@@ -2459,15 +2459,15 @@ function renderSalesSalary() {
       var rNote = 'Оклад 100т';
       if (headRC.bonus > 0) {
         var rSteps = Math.floor((grossProfit - 20000000) / 5000000);
-        rNote += ' + 50т (вал.прибыль >20М)';
+        rNote += ' + 50т (ВП свой парк >20М)';
         if (rSteps > 0) rNote += ' + ' + rSteps + 'x50т (каждые 5М)';
       } else {
-        rNote += ' + бонус при вал.прибыли >20М';
+        rNote += ' + бонус при ВП своего парка >20М';
       }
       html += '<tr style="background:rgba('+dept.bgA+',.07)">';
       html += '<td><b>'+dept.headName+'</b> <span style="font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(255,255,255,.1);color:var(--muted)">рук.</span>';
       html += '<div style="font-size:10px;color:var(--muted);margin-top:2px">'+rNote+'</div></td>';
-      html += '<td class="num muted" style="font-size:11px" colspan="3">Вал.прибыль: '+fr(grossProfit)+'</td>';
+      html += '<td class="num muted" style="font-size:11px" colspan="3">ВП свой парк: '+fr(grossProfit)+'</td>';
       html += '<td class="num">'+fr(headRC.oklad)+'</td>';
       html += '<td class="num muted">—</td>';
       html += '<td class="num muted">—</td>';

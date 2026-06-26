@@ -69,12 +69,24 @@ function previewOrderReport() {
 // НАСТРОЙКИ — менять только здесь
 // ============================================================
 const CONFIG = {
-  SPREADSHEET_ID: '1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM',
-  TELEGRAM_TOKEN: '8818207527:AAHhoPM9txqeuWkZP0U2PBPXOJI0QkBg5gc',
-  TELEGRAM_CHAT_ID: '1829485641',  // @Vlad_Ts_777
+  SPREADSHEET_ID: '1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM',  // публичная ссылка, не секрет
+  TELEGRAM_CHAT_ID: '1829485641',  // @Vlad_Ts_777, не секрет
   ALERT_FINE_THRESHOLD: 50000,   // штраф выше этой суммы → алерт
   ALERT_LOSS_THRESHOLD: 0,       // прибыль ниже этого → алерт
 };
+
+// Токен Telegram НЕ хранится в коде (это секрет).
+// Задаётся один раз в редакторе Apps Script:
+//   Настройки проекта (шестерёнка) → Свойства скрипта → Добавить свойство
+//   Имя: TELEGRAM_TOKEN | Значение: <токен бота>
+// Локальная резервная копия токена лежит в .env (вне git).
+function getTelegramToken_() {
+  var token = PropertiesService.getScriptProperties().getProperty('TELEGRAM_TOKEN');
+  if (!token) {
+    throw new Error('TELEGRAM_TOKEN не задан. Настройки проекта → Свойства скрипта → добавь TELEGRAM_TOKEN.');
+  }
+  return token;
+}
 
 // ============================================================
 // ГЛАВНАЯ ТОЧКА ВХОДА — вешается на триггер каждые 6 часов
@@ -701,7 +713,7 @@ function buildManagersText() {
 // ОТПРАВКА В TELEGRAM
 // ============================================================
 function sendTelegram(text) {
-  const url = `https://api.telegram.org/bot${CONFIG.TELEGRAM_TOKEN}/sendMessage`;
+  const url = `https://api.telegram.org/bot${getTelegramToken_()}/sendMessage`;
   UrlFetchApp.fetch(url, {
     method: 'post',
     contentType: 'application/json',

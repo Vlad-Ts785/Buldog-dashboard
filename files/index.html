@@ -399,6 +399,8 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
     <div id="error-block">
       <b>Ошибка загрузки.</b> Укажите URL Apps Script:
       <input id="api-url-input" type="text" placeholder="https://script.google.com/macros/s/.../exec" oninput="setApiUrl(this.value)">
+      Укажите ключ доступа:
+      <input id="dashboard-key-input" type="password" placeholder="секретный ключ" oninput="setDashboardKey(this.value)">
     </div>
 
     <!-- ═══ СИСТЕМА РЕШЕНИЙ ══════════════════════════════════ -->
@@ -774,11 +776,13 @@ const PAGE_TITLES = {
 };
 
 let API_URL = localStorage.getItem('api_url') || API_URL_DEFAULT;
+let DASHBOARD_KEY = localStorage.getItem('dashboard_key') || '';
 let manualPayment = parseFloat(localStorage.getItem('manual_payment')) || 0;
 let D = null;
 let vehSort = {col:'profit', dir:-1};
 
 function setApiUrl(u){ API_URL = u.trim(); localStorage.setItem('api_url', API_URL); }
+function setDashboardKey(k){ DASHBOARD_KEY = k.trim(); localStorage.setItem('dashboard_key', DASHBOARD_KEY); }
 
 function updatePayment(val) {
   manualPayment = parseFloat(val) || 0;
@@ -789,7 +793,8 @@ function updatePayment(val) {
 async function loadData() {
   document.getElementById('loading').style.display = 'flex';
   try {
-    const mainRes = await fetch(API_URL);
+    const sep = API_URL.includes('?') ? '&' : '?';
+    const mainRes = await fetch(API_URL + sep + 'key=' + encodeURIComponent(DASHBOARD_KEY));
     D = await mainRes.json();
     if (D.error) throw new Error(D.error);
     document.getElementById('error-block').style.display = 'none';
@@ -1712,7 +1717,7 @@ var histChartCosts = null;
 
 function ensureHistData() {
   if (histData !== null) return Promise.resolve(histData);
-  return fetch(API_URL + '?action=vehicle_history')
+  return fetch(API_URL + '?action=vehicle_history&key=' + encodeURIComponent(DASHBOARD_KEY))
     .then(function(r) { return r.json(); })
     .then(function(d) { histData = d.history || []; return histData; })
     .catch(function() { histData = []; return histData; });

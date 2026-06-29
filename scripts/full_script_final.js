@@ -825,6 +825,13 @@ function setupTrigger() {
 // ============================================================
 
 function doGet(e) {
+  var providedKey = e && e.parameter ? (e.parameter.key || '') : '';
+  var secretKey = PropertiesService.getScriptProperties().getProperty('DASHBOARD_KEY');
+  if (!secretKey || providedKey !== secretKey) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ error: 'Доступ запрещён' }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
   try {
     // Отдельный endpoint для истории по машинам (тяжёлые данные, грузим лениво)

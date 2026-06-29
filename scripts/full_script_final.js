@@ -1479,6 +1479,10 @@ function getOrdersData(ss) {
     const dateStr   = dateVal(row, 'date_s');
     const mgrSales  = str(row, 'mgr_s');
 
+    // С июля 2026: 8%/8%/2%/2% от маржи найма платится только если маржа% по заказу >=23%
+    const marginPct      = (isHired && amount > 0) ? (profit / amount) : 0;
+    const marginQualifies = isHired && marginPct >= 0.23;
+
     totalAmount  += amount;
     totalPayment += payment;
     totalBalance += balance;
@@ -1491,7 +1495,9 @@ function getOrdersData(ss) {
     // ── По менеджеру продаж ──
     if (mgrSales && ordInList(mgrSales, TRAL_MANAGERS)) {
       if (!managerMap[mgrSales]) {
-        managerMap[mgrSales] = { name: mgrSales, orders:0, amount:0, payment:0, profit:0, hired_orders:0, hired_cost:0, internal_orders:0, internal_amount:0, internal_payment:0 };
+        managerMap[mgrSales] = { name: mgrSales, orders:0, amount:0, payment:0, profit:0, hired_orders:0, hired_cost:0,
+          internal_orders:0, internal_amount:0, internal_payment:0,
+          own_amount:0, hired_margin_qualified:0, hired_margin_unqualified:0 };
       }
       const m = managerMap[mgrSales];
       m.orders++;
@@ -1499,7 +1505,13 @@ function getOrdersData(ss) {
       m.payment += payment;
       if (isHired) m.profit += profit;   // прибыль только по найму
       if (isInt) { m.internal_orders++; m.internal_amount += amount; m.internal_payment += payment; }
-      if (isHired) { m.hired_orders++; m.hired_cost += hiredCost; }
+      if (isHired) {
+        m.hired_orders++; m.hired_cost += hiredCost;
+        if (marginQualifies) m.hired_margin_qualified += profit;
+        else m.hired_margin_unqualified += profit;
+      } else {
+        m.own_amount += amount;
+      }
       mgrDetail(mgrSales).rows_total++;
     }
 
@@ -1507,13 +1519,20 @@ function getOrdersData(ss) {
     const mgrLog = str(row, 'mgr_l');
     if (mgrLog && ordInList(mgrLog, TRAL_LOGISTS)) {
       if (!logistMap[mgrLog]) {
-        logistMap[mgrLog] = { name: mgrLog, orders:0, amount:0, hired_orders:0, hired_cost:0, tral:0, long_:0 };
+        logistMap[mgrLog] = { name: mgrLog, orders:0, amount:0, hired_orders:0, hired_cost:0, tral:0, long_:0,
+          own_amount:0, hired_margin_qualified:0, hired_margin_unqualified:0 };
       }
       const l = logistMap[mgrLog];
       l.orders++;
       l.amount += amount;
       if (equip === 'Трал')      l.tral++;
       if (equip === 'Длинномер') l.long_++;
+      if (isHired) {
+        if (marginQualifies) l.hired_margin_qualified += profit;
+        else l.hired_margin_unqualified += profit;
+      } else {
+        l.own_amount += amount;
+      }
       if (isHired) { l.hired_orders++; l.hired_cost += hiredCost; }
     }
 

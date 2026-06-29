@@ -1453,6 +1453,17 @@ function getOrdersData(ss) {
   const supplierMap = {};
   const driverMap   = {};
   const problemOrders = [];
+  const mgrDetailMap = {}; // персональная разбивка по менеджеру (для личной страницы)
+
+  function mgrDetail(name) {
+    if (!mgrDetailMap[name]) {
+      mgrDetailMap[name] = {
+        name: name, customers: {}, rows_total: 0, rows_complete: 0,
+        doc: { no_waybill_own:0, no_waybill_hired:0, waybill_not_posted:0, posted_no_realiz:0, complete:0 },
+      };
+    }
+    return mgrDetailMap[name];
+  }
 
   for (const row of rows) {
     totalOrders++;
@@ -1489,6 +1500,7 @@ function getOrdersData(ss) {
       if (isHired) m.profit += profit;   // прибыль только по найму
       if (isInt) { m.internal_orders++; m.internal_amount += amount; m.internal_payment += payment; }
       if (isHired) { m.hired_orders++; m.hired_cost += hiredCost; }
+      mgrDetail(mgrSales).rows_total++;
     }
 
     // ── По логисту ──
@@ -1522,6 +1534,21 @@ function getOrdersData(ss) {
       const mgrKey = mgrSales || str(row, 'mgr_sr');
       if (mgrKey) cm.mgr_counts[mgrKey] = (cm.mgr_counts[mgrKey] || 0) + 1;
       if (isHired) cm.hired_amount += hiredCost;
+
+      // Та же разбивка, но только для своего менеджера - не смешивается с другими
+      if (mgrSales && ordInList(mgrSales, TRAL_MANAGERS)) {
+        var md = mgrDetail(mgrSales);
+        if (!md.customers[cust]) {
+          md.customers[cust] = { name:cust, orders:0, amount:0, payment:0, balance:0, first_half:0, second_half:0 };
+        }
+        var mdc = md.customers[cust];
+        mdc.orders++;
+        mdc.amount   += amount;
+        mdc.payment  += payment;
+        mdc.balance  += balance;
+        if (dayNum >= 1  && dayNum <= 15) mdc.first_half++;
+        if (dayNum >= 16) mdc.second_half++;
+      }
     }
 
     // ── По дням ──
@@ -1554,6 +1581,14 @@ function getOrdersData(ss) {
       else if (!pst) { waybillNotPosted[dec]++;  docStatus='not_posted'; docLabel='не проведён'; }
       else if (!hr)  { postedNoRealiz[dec]++;    docStatus='no_realiz';  docLabel='нет реализации'; }
       else           { complete[dec]++; }
+
+      if (mgrSales && ordInList(mgrSales, TRAL_MANAGERS)) {
+        var md2 = mgrDetail(mgrSales).doc;
+        if (!hw)       { if (isHired) md2.no_waybill_hired++; else md2.no_waybill_own++; }
+        else if (!pst) md2.waybill_not_posted++;
+        else if (!hr)  md2.posted_no_realiz++;
+        else           { md2.complete++; mgrDetail(mgrSales).rows_complete++; }
+      }
 
       if (docStatus) {
         problemOrders.push({
@@ -1594,6 +1629,25 @@ function getOrdersData(ss) {
       margin: margin, margin_pct: s.revenue > 0 ? Math.round(margin / s.revenue * 100) : 0
     };
   }).sort(function(a,b){ return b.revenue-a.revenue; });
+
+  // Личная страница менеджера - отдельная разбивка, не смешанная с другими менеджерами
+  const managerDetail = {};
+  Object.keys(mgrDetailMap).forEach(function(name) {
+    const md = mgrDetailMap[name];
+    const custList = Object.values(md.customers).sort(function(a,b){ return b.amount-a.amount; });
+    managerDetail[name] = {
+      rows_total:    md.rows_total,
+      rows_complete: md.rows_complete,
+      rows_open:     md.rows_total - md.rows_complete,
+      doc:           md.doc,
+      top_customers: custList.slice(0, 10),
+      lost_customers: custList.filter(function(c){ return c.first_half > 0 && c.second_half === 0; }),
+      debtors: custList
+        .map(function(c){ return { name:c.name, unpaid:c.amount-c.payment, orders:c.orders }; })
+        .filter(function(c){ return c.unpaid > 0; })
+        .sort(function(a,b){ return b.unpaid-a.unpaid; }),
+    };
+  });
 
   const months = rows.map(function(r) {
     const v = r[C.month];
@@ -1638,8 +1692,9 @@ function getOrdersData(ss) {
     lost_customers:    lostCustomers,
     by_hired_supplier: supplierList,
     by_day:            Object.values(dayMap).sort(function(a,b){ return a.date.localeCompare(b.date); }),
-    problem_orders:    problemOrders.slice(0, 100),
+    problem_orders:    problemOrders.slice(0, 600),
     by_driver:         Object.values(driverMap).sort(function(a,b){ return b.orders-a.orders; }).slice(0, 25),
+    by_manager_detail: managerDetail,
   };
 }
 

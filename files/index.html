@@ -375,6 +375,9 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
     <div class="sidebar-nav-item" onclick="showPage('sales-salary',this)" data-page="sales-salary">
       <span class="sidebar-nav-icon">💰</span> Зарплата
     </div>
+    <div class="sidebar-nav-item" onclick="showPage('my-page',this)" data-page="my-page">
+      <span class="sidebar-nav-icon">🙋</span> Личная страница
+    </div>
     <div class="sidebar-nav-item disabled" data-page="clients">
       <span class="sidebar-nav-icon">🏢</span> Клиенты
       <span class="sidebar-nav-badge">скоро</span>
@@ -735,6 +738,11 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
       <div id="salary-content"><p style="color:var(--muted);padding:16px">Данные загружаются...</p></div>
     </div>
 
+    <!-- ═══ ЛИЧНАЯ СТРАНИЦА МЕНЕДЖЕРА ══════════════════════════ -->
+    <div id="page-my-page" class="page">
+      <div id="my-page-content"><p style="color:var(--muted);padding:16px">Данные загружаются...</p></div>
+    </div>
+
     <!-- ═══ КЛИЕНТЫ ══════════════════════════════════════════════ -->
     <div id="page-clients" class="page">
       <div class="coming-soon">
@@ -773,6 +781,7 @@ const PAGE_TITLES = {
   'sales-mgr': 'Менеджеры - заказы 1С',
   'sales-log': 'Логисты - найм техники',
   'sales-salary': 'Зарплата - коммерческий отдел',
+  'my-page': 'Личная страница менеджера',
 };
 
 let API_URL = localStorage.getItem('api_url') || API_URL_DEFAULT;
@@ -807,6 +816,103 @@ async function loadData() {
   document.getElementById('loading').style.display = 'none';
 }
 
+function renderMyPage() {
+  if (!D || !D.orders) return;
+  var el = document.getElementById('my-page-content');
+  if (!el) return;
+  var detail = (D.orders && D.orders.by_manager_detail) || {};
+  var names = Object.keys(detail).sort();
+  if (!names.length) { el.innerHTML = '<p style="color:var(--muted);padding:16px">Нет данных по менеджерам.</p>'; return; }
+
+  var sel = document.getElementById('my-page-mgr-select');
+  var current = (sel && detail[sel.value]) ? sel.value : names[0];
+  var d = detail[current];
+
+  var COL = { red:'#E24B4A', amber:'#EF9F27', green:'#1D9E75', blue:'#378ADD' };
+  function mln(n) { var x=Math.abs(n||0); var sg=(n||0)<0?'-':''; return x>=1000000 ? sg+(x/1000000).toFixed(1)+' млн ₽' : sg+Math.round(x).toLocaleString('ru-RU')+' ₽'; }
+  function tile(label, value, sub, color) {
+    return '<div style="background:var(--bg2);border:1px solid var(--border);border-left:3px solid '+color+';border-radius:10px;padding:14px 16px">'+
+      '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">'+label+'</div>'+
+      '<div style="font-size:20px;font-weight:700;color:'+color+';line-height:1.1">'+value+'</div>'+
+      '<div style="font-size:11px;color:var(--muted);margin-top:4px">'+sub+'</div></div>';
+  }
+  function rowsList(rows, emptyText) {
+    if (!rows.length) return '<div style="font-size:13px;color:var(--muted);padding:8px 0">'+(emptyText||'Пусто')+'</div>';
+    var h = '<div style="margin-top:6px">';
+    rows.forEach(function(r){
+      h += '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
+        '<div style="font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+r.left+
+        (r.sub ? ' <span style="font-size:11px;color:var(--muted)">'+r.sub+'</span>' : '')+'</div>'+
+        '<div style="font-size:13px;font-weight:600;white-space:nowrap;color:'+(r.color||'var(--text)')+'">'+r.right+'</div></div>';
+    });
+    return h + '</div>';
+  }
+  function block(title, bodyHtml) {
+    return '<div class="card" style="margin-bottom:14px;padding:16px 18px">'+
+      '<div style="font-size:14px;font-weight:600;margin-bottom:8px">'+title+'</div>'+bodyHtml+'</div>';
+  }
+
+  var mgrRow = (D.managers||[]).filter(function(m){ return m.name && m.name.indexOf(current) >= 0; })[0] || {};
+  var plan = mgrRow.plan||0, fakt = mgrRow.fakt||0, pct = mgrRow.pct||0;
+  var pctColor = pct>=80?COL.green:pct>=50?COL.amber:COL.red;
+
+  var doc = d.doc || {};
+  var docStuck = (doc.no_waybill_own||0)+(doc.no_waybill_hired||0)+(doc.waybill_not_posted||0)+(doc.posted_no_realiz||0);
+
+  var html = '';
+  html += '<div style="margin-bottom:16px;display:flex;align-items:center;gap:10px">';
+  html += '<label style="font-size:13px;color:var(--muted)">Менеджер (выбор для проверки - после входа по логину каждый увидит только себя):</label>';
+  html += '<select id="my-page-mgr-select" onchange="renderMyPage()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 10px;font-size:13px">';
+  names.forEach(function(n){ html += '<option value="'+n+'"'+(n===current?' selected':'')+'>'+n+'</option>'; });
+  html += '</select></div>';
+
+  // 1. План
+  html += block('План на текущий месяц',
+    '<div style="display:flex;gap:24px;align-items:baseline">'+
+    '<div><span style="font-size:22px;font-weight:700">'+mln(fakt)+'</span> <span style="color:var(--muted);font-size:13px">из '+mln(plan)+'</span></div>'+
+    '<div style="font-size:18px;font-weight:700;color:'+pctColor+'">'+pct.toFixed(0)+'%</div></div>');
+
+  // 6. Счётчики заказов
+  html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px">';
+  html += tile('Заказов всего', d.rows_total||0, 'в этом месяце', COL.blue);
+  html += tile('Заказов закрыто', d.rows_complete||0, 'полный пакет документов', COL.green);
+  html += tile('В работе', d.rows_open||0, 'документы не закрыты', docStuck>0?COL.amber:COL.green);
+  html += '</div>';
+
+  // 2. Топ заказчиков
+  html += block('Топ заказчиков (формируют план в этом месяце)',
+    rowsList((d.top_customers||[]).slice(0,8).map(function(c){
+      return { left:c.name, sub:c.orders+' зак.', right:mln(c.amount), color:'var(--text)' };
+    }), 'Нет заказов в этом месяце'));
+
+  // 3. Топ прошлого месяца - заглушка, требует чтения архива
+  html += block('Топ заказчиков прошлого месяца',
+    '<div style="font-size:13px;color:var(--muted)">В разработке - появится после доработки чтения архивных данных.</div>');
+
+  // 4. Кому позвонить
+  html += block('☎️ Кому позвонить (пропали во 2-й половине месяца)',
+    rowsList((d.lost_customers||[]).slice(0,8).map(function(c){
+      return { left:c.name, sub:c.first_half+' зак. в 1-й половине', right:mln(c.amount), color:COL.amber };
+    }), 'Никто не пропал - все клиенты на связи'));
+
+  // 5. Дебиторка
+  html += block('💸 Дебиторка по своим клиентам',
+    rowsList((d.debtors||[]).slice(0,8).map(function(c){
+      return { left:c.name, sub:c.orders+' зак.', right:mln(c.unpaid), color:COL.red };
+    }), 'Долгов нет'));
+
+  // 7. Воронка документов
+  html += block('📋 Воронка документов',
+    rowsList([
+      { left:'Нет путёвки', sub:'(свои '+(doc.no_waybill_own||0)+' / найм '+(doc.no_waybill_hired||0)+')', right:((doc.no_waybill_own||0)+(doc.no_waybill_hired||0))+' зак.', color:COL.red },
+      { left:'Путёвка есть, не проведён', right:(doc.waybill_not_posted||0)+' зак.', color:COL.amber },
+      { left:'Проведён, нет реализации', right:(doc.posted_no_realiz||0)+' зак.', color:COL.amber },
+      { left:'Полный пакет', right:(doc.complete||0)+' зак.', color:COL.green },
+    ]));
+
+  el.innerHTML = html;
+}
+
 function render() {
   const t = D.updated ? new Date(D.updated).toLocaleString('ru',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'}) : '';
   setText('nav-updated', 'Обновлено: ' + t);
@@ -821,6 +927,7 @@ function render() {
   renderSalesMgr();
   renderSalesLog();
   renderSalesSalary();
+  renderMyPage();
 }
 
 // ── KPI ────────────────────────────────────────────────────

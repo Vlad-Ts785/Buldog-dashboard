@@ -830,12 +830,6 @@ function renderMyPage() {
 
   var COL = { red:'#E24B4A', amber:'#EF9F27', green:'#1D9E75', blue:'#378ADD' };
   function mln(n) { var x=Math.abs(n||0); var sg=(n||0)<0?'-':''; return x>=1000000 ? sg+(x/1000000).toFixed(1)+' млн ₽' : sg+Math.round(x).toLocaleString('ru-RU')+' ₽'; }
-  function tile(label, value, sub, color) {
-    return '<div style="background:var(--bg2);border:1px solid var(--border);border-left:3px solid '+color+';border-radius:10px;padding:14px 16px">'+
-      '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">'+label+'</div>'+
-      '<div style="font-size:20px;font-weight:700;color:'+color+';line-height:1.1">'+value+'</div>'+
-      '<div style="font-size:11px;color:var(--muted);margin-top:4px">'+sub+'</div></div>';
-  }
   function rowsList(rows, emptyText) {
     if (!rows.length) return '<div style="font-size:13px;color:var(--muted);padding:8px 0">'+(emptyText||'Пусто')+'</div>';
     var h = '<div style="margin-top:6px">';
@@ -851,13 +845,46 @@ function renderMyPage() {
     return '<div class="card" style="margin-bottom:14px;padding:16px 18px">'+
       '<div style="font-size:14px;font-weight:600;margin-bottom:8px">'+title+'</div>'+bodyHtml+'</div>';
   }
+  function kpiCard(icon, label, value, sub, pctVal, color) {
+    var h = '<div class="card" style="padding:16px 18px;border-left:3px solid '+color+'">';
+    h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">';
+    h += '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">'+icon+' '+label+'</div>';
+    if (pctVal !== null) h += '<div style="font-size:13px;font-weight:700;color:'+color+'">'+Math.round(pctVal)+'%</div>';
+    h += '</div>';
+    h += '<div style="font-size:24px;font-weight:700;color:var(--text);line-height:1.1">'+value+'</div>';
+    h += '<div style="font-size:11px;color:var(--muted);margin-top:4px">'+sub+'</div>';
+    if (pctVal !== null) {
+      var barW = Math.min(Math.max(pctVal,0),100);
+      h += '<div style="height:6px;border-radius:3px;background:rgba(255,255,255,.08);margin-top:10px;overflow:hidden">'+
+           '<div style="width:'+barW+'%;height:100%;background:'+color+';border-radius:3px;transition:width .4s"></div></div>';
+    }
+    return h + '</div>';
+  }
 
   var mgrRow = (D.managers||[]).filter(function(m){ return m.name && m.name.indexOf(current) >= 0; })[0] || {};
-  var plan = mgrRow.plan||0, fakt = mgrRow.fakt||0, pct = mgrRow.pct||0;
-  var pctColor = pct>=80?COL.green:pct>=50?COL.amber:COL.red;
+  var plan = mgrRow.plan||0, fakt = mgrRow.fakt||0, planPct = mgrRow.pct||0;
+  var planColor = planPct>=80?COL.green:planPct>=50?COL.amber:COL.red;
 
   var doc = d.doc || {};
   var docStuck = (doc.no_waybill_own||0)+(doc.no_waybill_hired||0)+(doc.waybill_not_posted||0)+(doc.posted_no_realiz||0);
+  var docTotal = docStuck + (doc.complete||0);
+  var docPct = docTotal>0 ? (doc.complete||0)/docTotal*100 : null;
+  var docColor = docPct===null?COL.green:docPct>=70?COL.green:docPct>=40?COL.amber:COL.red;
+
+  var ordTotal = d.rows_total||0, ordDone = d.rows_complete||0;
+  var ordPct = ordTotal>0 ? ordDone/ordTotal*100 : null;
+  var ordColor = ordPct===null?COL.green:ordPct>=70?COL.green:ordPct>=40?COL.amber:COL.red;
+
+  // Заработал - та же формула, что на вкладке "Зарплата"
+  var allMgrs = D.orders.by_manager || [], allLogs = D.orders.by_logist || [];
+  var mgrIdx = {}; allMgrs.forEach(function(m){ mgrIdx[(m.name||'').trim().split(' ')[0].toLowerCase()] = m; });
+  var logIdx = {}; allLogs.forEach(function(l){ logIdx[(l.name||'').trim().split(' ')[0].toLowerCase()] = l; });
+  function getM(sur){ return mgrIdx[sur.toLowerCase()] || null; }
+  function getL(sur){ return logIdx[sur.toLowerCase()] || null; }
+  var sur = current.trim().split(' ')[0];
+  var sal = calcMgr(sur, true, getM, getL);
+  var earned = sal ? sal.total_sal : 0;
+  var earnedSub = sal ? ('оклад '+mln(sal.oklad)+' + комиссия '+mln(sal.ownComm + sal.hiredBonus + sal.bonus15m)) : 'нет данных по выручке';
 
   var html = '';
   html += '<div style="margin-bottom:16px;display:flex;align-items:center;gap:10px">';
@@ -866,17 +893,12 @@ function renderMyPage() {
   names.forEach(function(n){ html += '<option value="'+n+'"'+(n===current?' selected':'')+'>'+n+'</option>'; });
   html += '</select></div>';
 
-  // 1. План
-  html += block('План на текущий месяц',
-    '<div style="display:flex;gap:24px;align-items:baseline">'+
-    '<div><span style="font-size:22px;font-weight:700">'+mln(fakt)+'</span> <span style="color:var(--muted);font-size:13px">из '+mln(plan)+'</span></div>'+
-    '<div style="font-size:18px;font-weight:700;color:'+pctColor+'">'+pct.toFixed(0)+'%</div></div>');
-
-  // 6. Счётчики заказов
-  html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px">';
-  html += tile('Заказов всего', d.rows_total||0, 'в этом месяце', COL.blue);
-  html += tile('Заказов закрыто', d.rows_complete||0, 'полный пакет документов', COL.green);
-  html += tile('В работе', d.rows_open||0, 'документы не закрыты', docStuck>0?COL.amber:COL.green);
+  // 4 KPI-карточки
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:18px">';
+  html += kpiCard('📈', 'План продаж', mln(fakt), 'из '+mln(plan), planPct, planColor);
+  html += kpiCard('💰', 'Заработал сейчас', mln(earned), earnedSub, null, COL.green);
+  html += kpiCard('📦', 'Заказы закрыты', ordDone+' из '+ordTotal, 'полный пакет документов', ordPct, ordColor);
+  html += kpiCard('📋', 'Документы готовы', (doc.complete||0)+' из '+docTotal, 'путёвка → проведён → реализация', docPct, docColor);
   html += '</div>';
 
   // 2. Топ заказчиков
@@ -2611,6 +2633,65 @@ function renderSalesMgr() {
     tsBlock;
 }
 
+// Формула зарплаты менеджера - общая для вкладки "Зарплата" и личной страницы.
+function okladByRev(rev) {
+  if (rev >= 10000000) return 150000;
+  if (rev >= 8000000)  return 100000;
+  if (rev >= 5000000)  return 50000;
+  if (rev >= 2000000)  return 30000;
+  return 0;
+}
+
+function mgrRate(sur) {
+  var s = sur.toLowerCase();
+  return (s === 'цегельников' || s === 'савиток') ? 0.02 : 0.015;
+}
+
+function splitRev(m, isPrus) {
+  var total = (m.amount||0) - (isPrus ? (m.internal_amount||0) : 0);
+  var hiredCost = m.hired_cost||0;
+  var hiredMargin = m.profit||0;
+  var hiredRev = hiredMargin + hiredCost;
+  var ownRev = Math.max(0, total - hiredRev);
+  return { total:total, ownRev:ownRev, hiredMargin:hiredMargin, hiredCost:hiredCost };
+}
+
+// getM/getL - геттеры по фамилии из D.orders.by_manager/by_logist (см. вызовы ниже)
+function calcMgr(sur, includeOklad, getM, getL) {
+  var m = getM(sur);
+  if (!m) return null;
+  var isPrus = sur.toLowerCase() === 'прус-роскошный';
+  var sp = splitRev(m, isPrus);
+  var rate = mgrRate(sur);
+  var oklad = (includeOklad !== false) ? okladByRev(sp.total) : 0;
+  var ownComm = Math.round(sp.ownRev * rate);
+
+  var hiredBonus, logPart, nonLogPart, prusHiredPct;
+  if (isPrus) {
+    // Прус: 10% найм если маржа >1М, иначе 7%
+    prusHiredPct = sp.hiredMargin > 1000000 ? 0.10 : 0.07;
+    hiredBonus = sp.hiredMargin > 0 ? Math.round(sp.hiredMargin * prusHiredPct) : 0;
+    logPart = 0; nonLogPart = sp.hiredMargin;
+  } else {
+    // Остальные: если сам вёл как логист — 10%, иначе — 5%
+    var l = getL(sur);
+    var logMargin = l ? Math.max(0, (l.amount||0) - (l.hired_cost||0)) : 0;
+    logPart = Math.min(logMargin, sp.hiredMargin);
+    nonLogPart = Math.max(0, sp.hiredMargin - logPart);
+    hiredBonus = Math.round(nonLogPart * 0.05) + Math.round(logPart * 0.10);
+    prusHiredPct = null;
+  }
+
+  var bonus15m = sp.total >= 15000000 ? 100000 : 0;
+  var total_sal = oklad + ownComm + hiredBonus + bonus15m;
+  return {
+    sur:sur, total:sp.total, ownRev:sp.ownRev, hiredMargin:sp.hiredMargin,
+    oklad:oklad, ownComm:ownComm, hiredBonus:hiredBonus,
+    logPart:logPart, nonLogPart:nonLogPart, bonus15m:bonus15m,
+    total_sal:total_sal, rate:rate, isPrus:isPrus, prusHiredPct:prusHiredPct
+  };
+}
+
 function renderSalesSalary() {
   if (!D || !D.orders) return;
   var el = document.getElementById('salary-content');
@@ -2629,63 +2710,6 @@ function renderSalesSalary() {
   function getM(sur) { return mgrIdx[sur.toLowerCase()] || null; }
   function getL(sur) { return logIdx[sur.toLowerCase()] || null; }
   function fr(n) { return n ? Math.round(n).toLocaleString('ru-RU') + ' ₽' : '—'; }
-
-  function okladByRev(rev) {
-    if (rev >= 10000000) return 150000;
-    if (rev >= 8000000)  return 100000;
-    if (rev >= 5000000)  return 50000;
-    if (rev >= 2000000)  return 30000;
-    return 0;
-  }
-
-  function mgrRate(sur) {
-    var s = sur.toLowerCase();
-    return (s === 'цегельников' || s === 'савиток') ? 0.02 : 0.015;
-  }
-
-  function splitRev(m, isPrus) {
-    var total = (m.amount||0) - (isPrus ? (m.internal_amount||0) : 0);
-    var hiredCost = m.hired_cost||0;
-    var hiredMargin = m.profit||0;
-    var hiredRev = hiredMargin + hiredCost;
-    var ownRev = Math.max(0, total - hiredRev);
-    return { total:total, ownRev:ownRev, hiredMargin:hiredMargin, hiredCost:hiredCost };
-  }
-
-  function calcMgr(sur, includeOklad) {
-    var m = getM(sur);
-    if (!m) return null;
-    var isPrus = sur.toLowerCase() === 'прус-роскошный';
-    var sp = splitRev(m, isPrus);
-    var rate = mgrRate(sur);
-    var oklad = (includeOklad !== false) ? okladByRev(sp.total) : 0;
-    var ownComm = Math.round(sp.ownRev * rate);
-
-    var hiredBonus, logPart, nonLogPart, prusHiredPct;
-    if (isPrus) {
-      // Прус: 10% найм если маржа >1М, иначе 7%
-      prusHiredPct = sp.hiredMargin > 1000000 ? 0.10 : 0.07;
-      hiredBonus = sp.hiredMargin > 0 ? Math.round(sp.hiredMargin * prusHiredPct) : 0;
-      logPart = 0; nonLogPart = sp.hiredMargin;
-    } else {
-      // Остальные: если сам вёл как логист — 10%, иначе — 5%
-      var l = getL(sur);
-      var logMargin = l ? Math.max(0, (l.amount||0) - (l.hired_cost||0)) : 0;
-      logPart = Math.min(logMargin, sp.hiredMargin);
-      nonLogPart = Math.max(0, sp.hiredMargin - logPart);
-      hiredBonus = Math.round(nonLogPart * 0.05) + Math.round(logPart * 0.10);
-      prusHiredPct = null;
-    }
-
-    var bonus15m = sp.total >= 15000000 ? 100000 : 0;
-    var total_sal = oklad + ownComm + hiredBonus + bonus15m;
-    return {
-      sur:sur, total:sp.total, ownRev:sp.ownRev, hiredMargin:sp.hiredMargin,
-      oklad:oklad, ownComm:ownComm, hiredBonus:hiredBonus,
-      logPart:logPart, nonLogPart:nonLogPart, bonus15m:bonus15m,
-      total_sal:total_sal, rate:rate, isPrus:isPrus, prusHiredPct:prusHiredPct
-    };
-  }
 
   function calcHead(members, headSur) {
     var deptRev = 0, deptHired = 0, above2m = 0;
@@ -2767,13 +2791,13 @@ function renderSalesSalary() {
       headHC = null; headHM = null;
     } else {
       headHC = calcHead(dept.members, dept.head);
-      headHM = dept.ownSales ? calcMgr(dept.head, false) : null;
+      headHM = dept.ownSales ? calcMgr(dept.head, false, getM, getL) : null;
       headTotal = headHC.total + (headHM ? headHM.total_sal : 0);
       headRC = null;
     }
 
     var memberCalcs = dept.members.filter(function(s){ return s !== dept.head; }).map(function(sur){
-      return { sur:sur, calc:calcMgr(sur, true) };
+      return { sur:sur, calc:calcMgr(sur, true, getM, getL) };
     });
     var deptFund = headTotal + memberCalcs.reduce(function(s,mc){ return s + (mc.calc ? mc.calc.total_sal : 0); }, 0);
     totalPayroll += deptFund;

@@ -359,10 +359,6 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
     <div class="sidebar-nav-item" onclick="showPage('drivers',this)" data-page="drivers">
       <span class="sidebar-nav-icon">🏆</span> Водители
     </div>
-    <div class="sidebar-nav-item" onclick="showPage('risks',this)" data-page="risks">
-      <span class="sidebar-nav-icon">⚠️</span> Риски
-      <span class="sidebar-nav-badge" id="risk-badge" style="display:none">0</span>
-    </div>
     <div class="sidebar-nav-item" onclick="showPage('dynamics',this)" data-page="dynamics">
       <span class="sidebar-nav-icon">📈</span> Динамика
     </div>
@@ -539,6 +535,19 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           </table>
         </div>
       </div>
+
+      <div class="card" style="margin-top:16px;">
+        <div class="sec-header">
+          <div class="sec-title">Все машины в ремонте</div>
+          <div class="sec-sub" id="repair-block-count"></div>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="tbl">
+            <thead><tr><th>Госномер</th><th>Тип</th><th>Дней в ремонте</th><th>Водитель</th></tr></thead>
+            <tbody id="repair-block-table"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
 
     <!-- ═══ МЕНЕДЖЕРЫ ══════════════════════════════════════════ -->
@@ -584,22 +593,6 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           <thead><tr><th>#</th><th>Водитель</th><th class="num">Заказов</th><th class="num">Выручка</th><th></th></tr></thead>
           <tbody id="drivers-orders-body"></tbody>
         </table>
-      </div>
-    </div>
-
-    <!-- ═══ РИСКИ ════════════════════════════════════════════════ -->
-    <div id="page-risks" class="page">
-      <div class="kpi-grid" id="risk-kpi"></div>
-      <div class="grid-2">
-        <div class="card"><div class="card-title">Убыточные машины</div><div id="loss-list"></div></div>
-        <div class="card"><div class="card-title">Крупные штрафы</div><div id="fines-list"></div></div>
-      </div>
-      <div class="card">
-        <div class="card-title">Все машины в ремонте</div>
-        <div style="overflow-x:auto;">
-          <table class="tbl"><thead><tr><th>Госномер</th><th>Тип</th><th>Статус</th><th>Водитель</th></tr></thead>
-          <tbody id="repair-table"></tbody></table>
-        </div>
       </div>
     </div>
 
@@ -790,7 +783,6 @@ const PAGE_TITLES = {
   vehicles: 'Парк техники',
   managers: 'Менеджеры',
   drivers: 'Водители',
-  risks: 'Риски',
   dynamics: 'Динамика',
   clients: 'База клиентов',
   sales: 'Продажи - обзор',
@@ -1212,7 +1204,7 @@ function render() {
   renderVehiclesTable();
   renderManagers();
   renderDrivers();
-  renderRisks();
+  renderRepairBlock();
   renderSalesTabsForPeriod();
   renderMyPage();
 }
@@ -1732,12 +1724,6 @@ function renderAlerts() {
 
   setText('alert-count', alerts.length + ' событий');
 
-  // Обновляем бейдж в сайдбаре
-  const badge = document.getElementById('risk-badge');
-  const critCount = (D.vehicles||[]).filter(x=>x.profit<0).length + (D.vehicles||[]).filter(x=>Math.abs(x.fines)>50000).length;
-  if (critCount > 0) { badge.textContent = critCount; badge.style.display = ''; }
-  else badge.style.display = 'none';
-
   document.getElementById('alerts-list').innerHTML = alerts.length
     ? alerts.map(a => `<div class="alert ${a.cls}"><span class="alert-icon">${a.icon}</span><span class="alert-text">${a.text}</span></div>`).join('')
     : '<div style="color:var(--muted);font-size:13px;padding:8px 0">Всё в норме ✅</div>';
@@ -1766,6 +1752,7 @@ var VEH_COLS = [
   {key:'marka',    label:'Марка',    num:false},
   {key:'type',     label:'Тип',      num:false},
   {key:'status',   label:'Статус',   num:false},
+  {key:'driver',   label:'Водитель', num:false},
   {key:'revenue',  label:'Выручка',  num:true},
   {key:'fot',      label:'ФОТ',      num:true},
   {key:'fuel',     label:'Топливо',  num:true},
@@ -1843,6 +1830,7 @@ function renderVehiclesTable() {
       '<td class="muted">' + (v.marka||'').split(' ')[0] + '</td>' +
       '<td>' + (v.type||'—') + '</td>' +
       '<td><span class="badge ' + stCls + '">' + (v.status||'—') + '</span></td>' +
+      '<td class="muted">' + ((v.driver||'').trim().split(' ')[0] || '—') + '</td>' +
       '<td class="num">' + fmt(v.revenue) + '</td>' +
       '<td class="num muted">' + fmt(v.fot) + '</td>' +
       '<td class="num muted">' + fmt(v.fuel) + '</td>' +
@@ -1870,7 +1858,7 @@ function renderVehiclesTable() {
   var profCls = tProfit < 0 ? 'red' : tPlanPct !== null ? (tPlanPct >= 100 ? 'green' : tPlanPct >= 80 ? 'amber' : 'red') : 'green';
   var tPlanPctCls = tPlanPct === null ? '' : tPlanPct >= 100 ? 'green' : tPlanPct >= 80 ? 'amber' : 'red';
   document.getElementById('vehicles-foot').innerHTML =
-    '<td colspan="4" style="font-weight:600;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em">Итого (' + vehicles.length + ' машин)</td>' +
+    '<td colspan="5" style="font-weight:600;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em">Итого (' + vehicles.length + ' машин)</td>' +
     '<td class="num" style="font-weight:600">' + fmt(tRev) + '</td>' +
     '<td class="num muted">' + fmt(tFot) + '</td>' +
     '<td class="num muted">' + fmt(tFuel) + '</td>' +
@@ -2001,34 +1989,45 @@ function renderDrivers() {
   }).join('');
 }
 
-// ── РИСКИ ──────────────────────────────────────────────────
-function renderRisks() {
+// ── ВСЕ МАШИНЫ В РЕМОНТЕ (раздел "Техника") ─────────────────
+function renderRepairBlock() {
   if (!D) return;
-  const v = D.vehicles || {}; const f = D.fleet || {};
-  const losses = (D.vehicles||[]).filter(x => x.profit < 0).sort((a,b) => a.profit - b.profit);
-  const bigFines = (D.vehicles||[]).filter(x => Math.abs(x.fines) > 50000).sort((a,b) => Math.abs(b.fines) - Math.abs(a.fines));
-  const rep = ((f.trailers||{}).repair||0) + ((f.trucks||{}).repair||0);
-  const noDriver = ((f.trailers||{}).noDriver||0) + ((f.trucks||{}).noDriver||0);
   const repairs = D.repairs || [];
+  const countEl = document.getElementById('repair-block-count');
+  if (countEl) countEl.textContent = repairs.length + (repairs.length === 1 ? ' машина' : ' машин');
 
-  document.getElementById('risk-kpi').innerHTML = `
-    <div class="kpi"><div class="kpi-label">Убыточных машин</div><div class="kpi-value red">${losses.length}</div><div class="kpi-sub">из ${(D.vehicles||[]).length} в отчёте</div></div>
-    <div class="kpi"><div class="kpi-label">В ремонте</div><div class="kpi-value amber">${repairs.length||rep}</div><div class="kpi-sub">простой без выручки</div></div>
-    <div class="kpi"><div class="kpi-label">Без водителя</div><div class="kpi-value amber">${noDriver}</div><div class="kpi-sub">требуется найм</div></div>
-    <div class="kpi"><div class="kpi-label">Крупных штрафов</div><div class="kpi-value red">${bigFines.length}</div><div class="kpi-sub">свыше 50 000 ₽</div></div>`;
+  const body = document.getElementById('repair-block-table');
+  if (!body) return;
 
-  document.getElementById('loss-list').innerHTML = losses.length
-    ? losses.map(x => `<div class="alert red"><span class="alert-icon">🔴</span><div class="alert-text"><b>${x.gos}</b> · ${x.type}<br>Убыток: <b>${fmt(x.profit)}</b> · Выручка: ${fmt(x.revenue)}</div></div>`).join('')
-    : '<div style="color:var(--muted);font-size:13px;padding:8px">Убыточных машин нет ✅</div>';
+  if (!repairs.length) {
+    body.innerHTML = '<tr><td colspan="4" style="color:var(--muted);padding:12px">Нет машин в ремонте ✅</td></tr>';
+    return;
+  }
 
-  document.getElementById('fines-list').innerHTML = bigFines.length
-    ? bigFines.map(x => `<div class="alert amber"><span class="alert-icon">⚠️</span><div class="alert-text"><b>${x.gos}</b> · ${x.type}<br>Штраф: <b>${fmt(Math.abs(x.fines))}</b></div></div>`).join('')
-    : '<div style="color:var(--muted);font-size:13px;padding:8px">Крупных штрафов нет ✅</div>';
+  function daysWord(n) {
+    const n10 = n % 10, n100 = n % 100;
+    if (n100 >= 11 && n100 <= 14) return 'дней';
+    if (n10 === 1) return 'день';
+    if (n10 >= 2 && n10 <= 4) return 'дня';
+    return 'дней';
+  }
+  function row(r, days) {
+    const daysStr = days === null ? '…' : days + ' ' + daysWord(days);
+    return '<tr><td><b>' + r.gos + '</b></td><td>' + (r.type||'—') + '</td>' +
+      '<td>' + daysStr + '</td>' +
+      '<td class="muted">' + ((r.driver||'').trim().split(' ')[0] || '—') + '</td></tr>';
+  }
 
-  document.getElementById('repair-table').innerHTML = (repairs.length ? repairs : (D.vehicles||[]).filter(x => x.status?.includes('Ремонт'))).map(r => `
-    <tr><td><b>${r.gos}</b></td><td>${r.type||'—'}</td>
-    <td><span class="badge amber">${r.status||'Ремонт'}</span></td>
-    <td class="muted">${r.driver||'—'}</td></tr>`).join('');
+  // Сразу показываем список, дни считаем по истории - подгружаем её отдельно (тяжёлые данные)
+  body.innerHTML = repairs.map(function(r){ return row(r, null); }).join('');
+  ensureHistData().then(function(hist) {
+    const daysByGos = {};
+    hist.forEach(function(h) {
+      if (!h.status || h.status.toLowerCase().indexOf('ремонт') === -1) return;
+      daysByGos[h.gos] = (daysByGos[h.gos] || 0) + 1;
+    });
+    body.innerHTML = repairs.map(function(r){ return row(r, daysByGos[r.gos] || 0); }).join('');
+  });
 }
 
 // ── КАРТОЧКА МАШИНЫ ────────────────────────────────────────

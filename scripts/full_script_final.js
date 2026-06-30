@@ -999,7 +999,7 @@ function doGet(e) {
       updated:    new Date().toISOString(),
       role:       'admin',
       summary:    getSummaryData(ss),
-      vehicles:   getVehiclesData(ss),
+      vehicles:   getVehiclesData(ss, staffData),
       managers:   getManagersData(ss),
       drivers:    getDriversData(ss),
       fleet:      getFleetStatus(staffData),
@@ -1088,7 +1088,7 @@ function getRepairsData(staffData) {
 }
 
 // Нормализованные_данные = единственный источник (A-J финансы, M тип, N статус)
-function getVehiclesData(ss) {
+function getVehiclesData(ss, staffData) {
   var norm = ss.getSheetByName('Нормализованные_данные');
   if (!norm || norm.getLastRow() < 2) return [];
 
@@ -1098,6 +1098,7 @@ function getVehiclesData(ss) {
     var r = rows[i];
     var gos = String(r[0] || '').trim();
     if (!gos) continue;
+    var staffInfo = staffData ? staffData[normalizeGos(gos)] : null;
     result.push({
       gos:     gos,
       marka:   String(r[1] || ''),
@@ -1112,6 +1113,7 @@ function getVehiclesData(ss) {
       profit:  parseFloat(r[9]) || 0,
       trailer: String(r[10] || ''),
       plan:    parseFloat(r[14]) || 0,           // O — план ВП из Штатки
+      driver:  staffInfo ? staffInfo.driver : '',
     });
   }
   return result;

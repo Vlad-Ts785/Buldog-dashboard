@@ -830,17 +830,6 @@ function apiUrl(params) {
   return API_URL + sep + qs;
 }
 
-// POST-запросы с побочным эффектом (отправка сообщений) - отдельно от обычных GET-запросов данных.
-// text/plain в Content-Type - чтобы браузер не делал CORS-preflight, который Apps Script не обрабатывает.
-async function apiPost(body) {
-  const res = await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify(Object.assign({ key: DASHBOARD_KEY, id_token: ID_TOKEN }, body || {})),
-  });
-  return res.json();
-}
-
 async function sendDriverWaybillReport() {
   const statusEl = document.getElementById('drivers-telegram-status');
   if (!D || !D.orders) return;
@@ -853,11 +842,12 @@ async function sendDriverWaybillReport() {
     const pct = d.orders > 0 ? Math.round(d.no_waybill / d.orders * 100) : 0;
     return (i+1) + '. ' + d.name + ' — ' + d.no_waybill + ' из ' + d.orders + ' (' + pct + '%)';
   });
-  const text = '📋 *Не сданные путевые листы*\n\n' + lines.join('\n');
+  const text = '📋 Не сданные путевые листы\n\n' + lines.join('\n');
 
   if (statusEl) statusEl.textContent = 'Отправка...';
   try {
-    const data = await apiPost({ action: 'send_telegram_logists', text: text });
+    const res = await fetch(apiUrl({ action: 'send_telegram_logists', text: text }));
+    const data = await res.json();
     if (data.error) throw new Error(data.error);
     if (statusEl) statusEl.textContent = 'Отправлено ✅';
   } catch (e) {

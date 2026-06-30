@@ -985,6 +985,24 @@ function doGet(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
 
+    // Отправка отчёта в Telegram-группу логистов (только admin) - через GET, не POST,
+    // т.к. браузер блокирует POST на редиректе script.google.com → googleusercontent.com,
+    // а обычные GET-запросы (как везде в этом API) проходят без проблем.
+    if (action === 'send_telegram_logists') {
+      if (access.role !== 'admin') {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var text = e.parameter.text || '';
+      if (!CONFIG.TELEGRAM_LOGISTS_CHAT_ID) {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'TELEGRAM_LOGISTS_CHAT_ID не задан в CONFIG' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      if (!text) {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Пустое сообщение' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      sendTelegram(text, CONFIG.TELEGRAM_LOGISTS_CHAT_ID);
+      return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(ContentService.MimeType.JSON);
+    }
+
     // Менеджер - только его собственные данные, без доступа к остальному
     if (access.role === 'manager') {
       return ContentService
@@ -1016,39 +1034,6 @@ function doGet(e) {
     return ContentService
       .createTextOutput(JSON.stringify({ error: e.message }))
       .setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-// Действия, у которых есть побочный эффект (отправка сообщений) - через POST, не GET.
-// Та же проверка ключа + входа + роли, что и в doGet().
-function doPost(e) {
-  function err(msg, extra) {
-    var obj = Object.assign({ error: msg }, extra || {});
-    return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
-  }
-
-  var body = {};
-  try { body = JSON.parse(e.postData.contents); } catch (parseErr) { return err('Некорректный запрос'); }
-
-  var secretKey = PropertiesService.getScriptProperties().getProperty('DASHBOARD_KEY');
-  if (!secretKey || body.key !== secretKey) return err('Доступ запрещён');
-
-  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-  var email = verifyGoogleToken_(body.id_token || '');
-  if (!email) return err('Не авторизован', { needLogin: true });
-  var access = getAccessRole_(ss, email);
-  if (!access || access.role !== 'admin') return err('Доступ запрещён');
-
-  try {
-    if (body.action === 'send_telegram_logists') {
-      if (!CONFIG.TELEGRAM_LOGISTS_CHAT_ID) return err('TELEGRAM_LOGISTS_CHAT_ID не задан в CONFIG');
-      if (!body.text) return err('Пустое сообщение');
-      sendTelegram(body.text, CONFIG.TELEGRAM_LOGISTS_CHAT_ID);
-      return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(ContentService.MimeType.JSON);
-    }
-    return err('Неизвестное действие');
-  } catch (sendErr) {
-    return err(sendErr.message);
   }
 }
 

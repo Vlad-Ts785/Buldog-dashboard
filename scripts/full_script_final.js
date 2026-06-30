@@ -1716,6 +1716,19 @@ function aggregateOrdersRows(rows) {
   const driverMap   = {};
   const problemOrders = [];
   const mgrDetailMap = {}; // персональная разбивка по менеджеру (для личной страницы)
+  const internalMap  = {}; // вкладка "Внутренние перевозки" - по нашим предприятиям
+  const internalCargoMap = {}; // груз -> кол-во рейсов (только внутренние)
+  let internalTral = 0, internalLong = 0; // тип нашей техники (только внутренние)
+
+  // Каноничное имя внутреннего предприятия - чтобы варианты записи клиента схлопывались
+  // в одну группу (по совпадению с шаблоном из INTERNAL_CLIENTS).
+  function internalClientName(customer) {
+    const c = String(customer || '');
+    for (let i = 0; i < INTERNAL_CLIENTS.length; i++) {
+      if (c.indexOf(INTERNAL_CLIENTS[i]) >= 0) return INTERNAL_CLIENTS[i];
+    }
+    return customer || 'Прочее';
+  }
 
   function mgrDetail(name) {
     if (!mgrDetailMap[name]) {
@@ -1752,7 +1765,18 @@ function aggregateOrdersRows(rows) {
     totalBalance += balance;
     if (isHired) { totalHiredCost += hiredCost; hiredProfit += profit; }
 
-    if (isInt) { internalAmount += amount; internalOrders++; }
+    if (isInt) {
+      internalAmount += amount; internalOrders++;
+      // Разбивка для вкладки "Внутренние перевозки"
+      const entName = internalClientName(str(row, 'customer'));
+      if (!internalMap[entName]) internalMap[entName] = { name: entName, trips: 0, amount: 0 };
+      internalMap[entName].trips++;
+      internalMap[entName].amount += amount;
+      if (equip === 'Трал')      internalTral++;
+      if (equip === 'Длинномер') internalLong++;
+      const cargoName = str(row, 'cargo') || '(не указан)';
+      internalCargoMap[cargoName] = (internalCargoMap[cargoName] || 0) + 1;
+    }
     if (equip === 'Трал')      { tralOrders++;  tralAmount  += amount; }
     if (equip === 'Длинномер') { longOrders++;  longAmount  += amount; }
 
@@ -1996,6 +2020,16 @@ function aggregateOrdersRows(rows) {
       .filter(function(s){ return s.no_waybill > 0; })
       .sort(function(a,b){ return b.no_waybill-a.no_waybill; }),
     by_manager_detail: managerDetail,
+    internal: {
+      total_trips:  internalOrders,
+      total_amount: internalAmount,
+      by_enterprise: Object.values(internalMap).sort(function(a,b){ return b.amount-a.amount; }),
+      equip: { tral: internalTral, long: internalLong },
+      top_cargo: Object.keys(internalCargoMap)
+        .map(function(name){ return { name: name, trips: internalCargoMap[name] }; })
+        .sort(function(a,b){ return b.trips-a.trips; })
+        .slice(0, 8),
+    },
   };
 }
 

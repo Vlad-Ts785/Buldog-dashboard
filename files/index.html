@@ -666,6 +666,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           <button class="tab-btn" onclick="showCustTab('hire',this)">Наёмная техника</button>
           <button class="tab-btn" onclick="showCustTab('drivers',this)">Не сданные путевые листы</button>
           <button class="tab-btn" onclick="showCustTab('suppliers',this)">ТОП поставщиков без путевых листов</button>
+          <button class="tab-btn" onclick="showCustTab('internal',this)">Внутренние перевозки</button>
         </div>
         <div id="cust-tab-top" style="overflow-x:auto">
           <table class="tbl">
@@ -701,6 +702,35 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
             <thead><tr><th>#</th><th>Поставщик</th><th class="num">Не сдано</th><th class="num">Всего заказов</th><th class="num">% несдачи</th></tr></thead>
             <tbody id="cust-suppliers-body"></tbody>
           </table>
+        </div>
+        <div id="cust-tab-internal" style="display:none">
+          <div id="internal-kpi" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px"></div>
+          <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:18px 20px;display:flex;gap:24px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+            <div style="position:relative;width:180px;height:180px;flex-shrink:0">
+              <svg viewBox="0 0 180 180" width="180" height="180">
+                <circle cx="90" cy="90" r="62" fill="none" stroke="rgba(255,255,255,.05)" stroke-width="20"/>
+                <g id="internal-donut" transform="rotate(-90 90 90)"></g>
+              </svg>
+              <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
+                <div style="font-size:11px;color:var(--muted)">выручка</div>
+                <div id="internal-donut-center" style="font-size:18px;font-weight:700">—</div>
+              </div>
+            </div>
+            <div style="flex:1;min-width:240px" id="internal-bars"></div>
+          </div>
+          <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:18px 20px">
+            <div style="font-size:14px;font-weight:600;margin-bottom:16px">Что в основном возили</div>
+            <div style="display:flex;gap:28px;flex-wrap:wrap">
+              <div style="flex:1;min-width:220px">
+                <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px">Нашей техникой</div>
+                <div id="internal-equip"></div>
+              </div>
+              <div style="flex:1.4;min-width:260px">
+                <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px">Топ грузов</div>
+                <div id="internal-cargo"></div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       <div class="card">
@@ -2516,12 +2546,81 @@ function filterProblems(status, btn) {
 }
 
 function showCustTab(tab, btn) {
-  ['top','lost','hire','drivers','suppliers'].forEach(function(t) {
+  ['top','lost','hire','drivers','suppliers','internal'].forEach(function(t) {
     const el = document.getElementById('cust-tab-'+t);
     if (el) el.style.display = t===tab ? '' : 'none';
   });
   document.querySelectorAll('#cust-tab-bar .tab-btn').forEach(function(b){ b.classList.remove('active'); });
   if (btn) btn.classList.add('active');
+}
+
+// Вкладка "Внутренние перевозки" - кольцо по выручке + рейсы/сумма по предприятиям + что возили
+function renderInternalTransports(d) {
+  var COL = ['#1D9E75','#378ADD','#7F77DD','#EF9F27','#888780','#E24B4A','#1baf7a','#eb6834'];
+  var ent = (d.by_enterprise||[]).slice();
+  var totalTrips = d.total_trips||0, totalAmount = d.total_amount||0;
+
+  setText('internal-donut-center', totalAmount>=1000000 ? (totalAmount/1000000).toFixed(1)+' млн' : Math.round(totalAmount).toLocaleString('ru-RU'));
+  document.getElementById('internal-kpi').innerHTML =
+    '<div class="kpi"><div class="kpi-label">Всего рейсов внутри</div><div class="kpi-value">'+totalTrips+'</div></div>' +
+    '<div class="kpi"><div class="kpi-label">На сумму</div><div class="kpi-value">'+fmtK2(totalAmount)+'</div></div>' +
+    '<div class="kpi"><div class="kpi-label">Предприятий</div><div class="kpi-value">'+ent.length+'</div></div>';
+
+  // Кольцо по доле в выручке
+  var sumTotal = ent.reduce(function(a,e){ return a+(e.amount||0); }, 0) || 1;
+  var r=62, C=2*Math.PI*r, off=0, segs='';
+  ent.forEach(function(e, i){
+    var len = (e.amount||0)/sumTotal*C;
+    segs += '<circle cx="90" cy="90" r="'+r+'" fill="none" stroke="'+COL[i%COL.length]+'" stroke-width="20" stroke-dasharray="'+len+' '+(C-len)+'" stroke-dashoffset="'+(-off)+'"></circle>';
+    off += len;
+  });
+  document.getElementById('internal-donut').innerHTML = segs;
+
+  // Строки-заполнения по предприятиям
+  var maxAmt = ent.length ? Math.max.apply(null, ent.map(function(e){ return e.amount||0; })) : 1;
+  document.getElementById('internal-bars').innerHTML = ent.length
+    ? ent.map(function(e, i){
+        var w = Math.round((e.amount||0)/maxAmt*100), pct = Math.round((e.amount||0)/sumTotal*100);
+        return '<div style="margin-bottom:11px">'+
+          '<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:12px;margin-bottom:4px">'+
+            '<span style="display:flex;align-items:center;gap:6px"><span style="width:9px;height:9px;border-radius:2px;background:'+COL[i%COL.length]+';display:inline-block"></span>'+
+            '<span>'+e.name+'</span> <span style="color:var(--muted)">· '+e.trips+' рейсов</span></span>'+
+            '<span style="font-weight:600;white-space:nowrap">'+fmtK2(e.amount||0)+' <span style="color:var(--muted);font-weight:400">'+pct+'%</span></span>'+
+          '</div>'+
+          '<div style="height:7px;border-radius:4px;background:rgba(255,255,255,.06);overflow:hidden">'+
+            '<div style="width:'+w+'%;height:100%;background:'+COL[i%COL.length]+';border-radius:4px"></div></div>'+
+        '</div>';
+      }).join('')
+    : '<div style="color:var(--muted);font-size:13px;padding:8px 0">Внутренних перевозок нет</div>';
+
+  // Что возили: тип нашей техники
+  var eq = d.equip||{tral:0,long:0};
+  var eqMax = Math.max(eq.tral||0, eq.long||0, 1);
+  function eqRow(name, trips, color){
+    var w=Math.round(trips/eqMax*100);
+    return '<div style="margin-bottom:14px">'+
+      '<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:5px"><span>'+name+'</span>'+
+      '<span style="font-weight:600">'+trips+' <span style="color:var(--muted);font-weight:400">рейсов</span></span></div>'+
+      '<div style="height:9px;border-radius:5px;background:rgba(255,255,255,.06);overflow:hidden">'+
+        '<div style="width:'+w+'%;height:100%;background:'+color+';border-radius:5px"></div></div></div>';
+  }
+  document.getElementById('internal-equip').innerHTML =
+    eqRow('Тралы', eq.tral||0, '#1D9E75') + eqRow('Длинномеры', eq.long||0, '#7F77DD');
+
+  // Топ грузов
+  var cargo = d.top_cargo||[];
+  var cgMax = cargo.length ? Math.max.apply(null, cargo.map(function(c){ return c.trips||0; })) : 1;
+  document.getElementById('internal-cargo').innerHTML = cargo.length
+    ? cargo.map(function(c, i){
+        var w=Math.round((c.trips||0)/cgMax*100);
+        return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:9px">'+
+          '<span style="font-size:12px;color:var(--muted);width:16px;text-align:right">'+(i+1)+'</span>'+
+          '<span style="font-size:13px;width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+c.name+'</span>'+
+          '<div style="flex:1;height:7px;border-radius:4px;background:rgba(255,255,255,.06);overflow:hidden">'+
+            '<div style="width:'+w+'%;height:100%;background:#378ADD;border-radius:4px"></div></div>'+
+          '<span style="font-size:13px;font-weight:600;width:28px;text-align:right">'+c.trips+'</span></div>';
+      }).join('')
+    : '<div style="color:var(--muted);font-size:13px;padding:8px 0">Нет данных</div>';
 }
 
 function renderSales() {
@@ -2659,6 +2758,7 @@ function renderSales() {
   }
   renderNoWaybillTable('cust-drivers-body', o.by_driver_no_waybill || []);
   renderNoWaybillTable('cust-suppliers-body', o.by_supplier_no_waybill || []);
+  renderInternalTransports(o.internal || {});
 
   const suppliers = o.by_hired_supplier||[];
   document.getElementById('cust-hire-body').innerHTML = suppliers.length

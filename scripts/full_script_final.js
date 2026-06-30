@@ -1741,6 +1741,7 @@ function aggregateOrdersRows(rows) {
     const hiredCost = num(row, 'hired_cost');
     const dateStr   = dateVal(row, 'date_s');
     const mgrSales  = str(row, 'mgr_s');
+    const hw        = yes(row, 'waybill'); // есть ли путёвка - нужно в нескольких местах ниже
 
     // С июля 2026: 8%/8%/2%/2% от маржи найма платится только если маржа% по заказу >=23%
     const marginPct      = (isHired && amount > 0) ? (profit / amount) : 0;
@@ -1852,14 +1853,12 @@ function aggregateOrdersRows(rows) {
     // ── По поставщикам найма ──
     if (isHired) {
       const supplier = str(row, 'hired');
-      if (!supplierMap[supplier]) supplierMap[supplier] = { name:supplier, orders:0, revenue:0, cost:0 };
+      if (!supplierMap[supplier]) supplierMap[supplier] = { name:supplier, orders:0, revenue:0, cost:0, no_waybill:0 };
       supplierMap[supplier].orders++;
       supplierMap[supplier].revenue += amount;
       supplierMap[supplier].cost    += hiredCost;
+      if (!hw) supplierMap[supplier].no_waybill++;
     }
-
-    // Путёвка - читаем один раз, нужна и в статусе документов, и в разбивке по водителям
-    const hw = yes(row, 'waybill');
 
     // ── Статус документов (внешние заказы, разбивка по декадам) ──
     if (!isInt) {
@@ -1918,7 +1917,8 @@ function aggregateOrdersRows(rows) {
     const margin = s.revenue - s.cost;
     return {
       name: s.name, orders: s.orders, revenue: s.revenue, cost: s.cost,
-      margin: margin, margin_pct: s.revenue > 0 ? Math.round(margin / s.revenue * 100) : 0
+      margin: margin, margin_pct: s.revenue > 0 ? Math.round(margin / s.revenue * 100) : 0,
+      no_waybill: s.no_waybill,
     };
   }).sort(function(a,b){ return b.revenue-a.revenue; });
 
@@ -1992,6 +1992,9 @@ function aggregateOrdersRows(rows) {
       .filter(function(d){ return d.no_waybill > 0; })
       .sort(function(a,b){ return b.no_waybill-a.no_waybill; })
       .slice(0, 25),
+    by_supplier_no_waybill: supplierList
+      .filter(function(s){ return s.no_waybill > 0; })
+      .sort(function(a,b){ return b.no_waybill-a.no_waybill; }),
     by_manager_detail: managerDetail,
   };
 }

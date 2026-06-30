@@ -665,6 +665,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           <button class="tab-btn" onclick="showCustTab('lost',this)">Пропали во 2-й пол.</button>
           <button class="tab-btn" onclick="showCustTab('hire',this)">Наёмная техника</button>
           <button class="tab-btn" onclick="showCustTab('drivers',this)">Не сданные путевые листы</button>
+          <button class="tab-btn" onclick="showCustTab('suppliers',this)">ТОП поставщиков без путевых листов</button>
         </div>
         <div id="cust-tab-top" style="overflow-x:auto">
           <table class="tbl">
@@ -693,6 +694,12 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           <table class="tbl">
             <thead><tr><th>#</th><th>Водитель</th><th class="num">Не сдано</th><th class="num">Всего заказов</th><th class="num">% несдачи</th></tr></thead>
             <tbody id="cust-drivers-body"></tbody>
+          </table>
+        </div>
+        <div id="cust-tab-suppliers" style="display:none;overflow-x:auto">
+          <table class="tbl">
+            <thead><tr><th>#</th><th>Поставщик</th><th class="num">Не сдано</th><th class="num">Всего заказов</th><th class="num">% несдачи</th></tr></thead>
+            <tbody id="cust-suppliers-body"></tbody>
           </table>
         </div>
       </div>
@@ -2509,7 +2516,7 @@ function filterProblems(status, btn) {
 }
 
 function showCustTab(tab, btn) {
-  ['top','lost','hire','drivers'].forEach(function(t) {
+  ['top','lost','hire','drivers','suppliers'].forEach(function(t) {
     const el = document.getElementById('cust-tab-'+t);
     if (el) el.style.display = t===tab ? '' : 'none';
   });
@@ -2635,20 +2642,23 @@ function renderSales() {
   document.getElementById('cust-lost-body').innerHTML = (o.lost_customers||[]).map(custRow).join('') ||
     '<tr><td colspan="8" style="color:var(--green);padding:14px">Все клиенты активны во 2-й половине ✅</td></tr>';
 
-  const noWaybillDrivers = o.by_driver_no_waybill || [];
-  document.getElementById('cust-drivers-body').innerHTML = noWaybillDrivers.length
-    ? noWaybillDrivers.map(function(d, i) {
-        const pct = d.orders > 0 ? Math.round(d.no_waybill / d.orders * 100) : 0;
-        const pctCls = pct >= 50 ? 'red' : pct >= 25 ? 'amber' : '';
-        return '<tr>' +
-          '<td class="muted" style="font-size:12px">' + (i+1) + '</td>' +
-          '<td><b>' + d.name + '</b></td>' +
-          '<td class="num red"><b>' + d.no_waybill + '</b></td>' +
-          '<td class="num muted">' + d.orders + '</td>' +
-          '<td class="num ' + pctCls + '">' + pct + '%</td>' +
-        '</tr>';
-      }).join('')
-    : '<tr><td colspan="5" style="color:var(--green);padding:14px">Все путевые листы сданы ✅</td></tr>';
+  function renderNoWaybillTable(elId, list) {
+    document.getElementById(elId).innerHTML = list.length
+      ? list.map(function(d, i) {
+          const pct = d.orders > 0 ? Math.round(d.no_waybill / d.orders * 100) : 0;
+          const pctCls = pct >= 50 ? 'red' : pct >= 25 ? 'amber' : '';
+          return '<tr>' +
+            '<td class="muted" style="font-size:12px">' + (i+1) + '</td>' +
+            '<td><b>' + d.name + '</b></td>' +
+            '<td class="num red"><b>' + d.no_waybill + '</b></td>' +
+            '<td class="num muted">' + d.orders + '</td>' +
+            '<td class="num ' + pctCls + '">' + pct + '%</td>' +
+          '</tr>';
+        }).join('')
+      : '<tr><td colspan="5" style="color:var(--green);padding:14px">Все путевые листы сданы ✅</td></tr>';
+  }
+  renderNoWaybillTable('cust-drivers-body', o.by_driver_no_waybill || []);
+  renderNoWaybillTable('cust-suppliers-body', o.by_supplier_no_waybill || []);
 
   const suppliers = o.by_hired_supplier||[];
   document.getElementById('cust-hire-body').innerHTML = suppliers.length

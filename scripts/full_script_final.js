@@ -1566,6 +1566,7 @@ function aggregateOrdersRows(rows) {
     if (!mgrDetailMap[name]) {
       mgrDetailMap[name] = {
         name: name, customers: {}, rows_total: 0, rows_complete: 0,
+        tral_orders: 0, long_orders: 0,
         doc: { no_waybill_own:0, no_waybill_hired:0, waybill_not_posted:0, posted_no_realiz:0, complete:0 },
       };
     }
@@ -1619,7 +1620,10 @@ function aggregateOrdersRows(rows) {
       } else {
         m.own_amount += amount;
       }
-      mgrDetail(mgrSales).rows_total++;
+      var mgrDet = mgrDetail(mgrSales);
+      mgrDet.rows_total++;
+      if (equip === 'Трал')      mgrDet.tral_orders++;
+      if (equip === 'Длинномер') mgrDet.long_orders++;
     }
 
     // ── По логисту ──
@@ -1665,7 +1669,7 @@ function aggregateOrdersRows(rows) {
       if (mgrSales && ordInList(mgrSales, TRAL_MANAGERS)) {
         var md = mgrDetail(mgrSales);
         if (!md.customers[cust]) {
-          md.customers[cust] = { name:cust, orders:0, amount:0, payment:0, balance:0, first_half:0, second_half:0 };
+          md.customers[cust] = { name:cust, orders:0, amount:0, payment:0, balance:0, first_half:0, second_half:0, first_unpaid_date:null };
         }
         var mdc = md.customers[cust];
         mdc.orders++;
@@ -1674,6 +1678,10 @@ function aggregateOrdersRows(rows) {
         mdc.balance  += balance;
         if (dayNum >= 1  && dayNum <= 15) mdc.first_half++;
         if (dayNum >= 16) mdc.second_half++;
+        // Срок дебиторки - с даты самого раннего неоплаченного заказа этого клиента
+        if ((amount - payment) > 0.01 && dateStr) {
+          if (!mdc.first_unpaid_date || dateStr < mdc.first_unpaid_date) mdc.first_unpaid_date = dateStr;
+        }
       }
     }
 
@@ -1765,11 +1773,13 @@ function aggregateOrdersRows(rows) {
       rows_total:    md.rows_total,
       rows_complete: md.rows_complete,
       rows_open:     md.rows_total - md.rows_complete,
+      tral_orders:   md.tral_orders,
+      long_orders:   md.long_orders,
       doc:           md.doc,
       top_customers: custList.slice(0, 10),
       lost_customers: custList.filter(function(c){ return c.first_half > 0 && c.second_half === 0; }),
       debtors: custList
-        .map(function(c){ return { name:c.name, unpaid:c.amount-c.payment, orders:c.orders }; })
+        .map(function(c){ return { name:c.name, unpaid:c.amount-c.payment, orders:c.orders, first_unpaid_date:c.first_unpaid_date }; })
         .filter(function(c){ return c.unpaid > 0; })
         .sort(function(a,b){ return b.unpaid-a.unpaid; }),
     };

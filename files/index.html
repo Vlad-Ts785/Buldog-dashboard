@@ -1019,8 +1019,57 @@ function renderMyPage() {
   }
   debtCardHtml += '<div style="font-size:10px;color:var(--muted);margin-top:6px">'+debtSub+'</div></div>';
 
-  // Заглушка - четвёртое место в ряду, пока без идеи
-  var placeholderCardHtml = '<div class="card" style="border:1px dashed rgba(255,255,255,.15);background:transparent;padding:14px 16px;display:flex;align-items:center;justify-content:center;color:#5c5c58;font-size:11px;text-align:center;min-height:88px">Идея на подходе</div>';
+  // Карточка "Заказы по технике" - две шкалы: тралы и длинномеры
+  var tralCnt = d.tral_orders || 0;
+  var longCnt = d.long_orders || 0;
+  var maxEquip = Math.max(tralCnt, longCnt, 1);
+  function equipBarRow(label, count, color) {
+    var w = Math.round(count/maxEquip*100);
+    return '<div style="margin-bottom:7px">'+
+      '<div style="display:flex;justify-content:space-between;font-size:10.5px;margin-bottom:3px">'+
+      '<span style="color:var(--muted)">'+label+'</span><span style="font-weight:600;color:var(--text)">'+count+'</span></div>'+
+      '<div style="height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden">'+
+      '<div style="width:'+w+'%;height:100%;background:'+color+'"></div></div></div>';
+  }
+  var equipCardHtml = '<div class="card" style="padding:14px 16px;border-left:3px solid '+COL.blue+'">';
+  equipCardHtml += '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">🚛 Заказы по технике</div>';
+  equipCardHtml += equipBarRow('Тралы', tralCnt, COL.blue);
+  equipCardHtml += equipBarRow('Длинномеры', longCnt, '#8B5CF6');
+  equipCardHtml += '</div>';
+
+  // Большой блок "Дебиторская задолженность" - по контрагенту, со сроком от первого
+  // неоплаченного заказа
+  function daysWord(n) {
+    var n10 = n % 10, n100 = n % 100;
+    if (n100 >= 11 && n100 <= 14) return 'дней';
+    if (n10 === 1) return 'день';
+    if (n10 >= 2 && n10 <= 4) return 'дня';
+    return 'дней';
+  }
+  var todayDate = new Date();
+  function daysSince(dateStr) {
+    if (!dateStr) return null;
+    return Math.max(0, Math.floor((todayDate - new Date(dateStr)) / 86400000));
+  }
+  function debtRow(c) {
+    var days = daysSince(c.first_unpaid_date);
+    var ageColor = days===null ? 'var(--muted)' : days>=30?COL.red:days>=14?COL.amber:COL.green;
+    var ageLabel = days===null ? 'дата неизвестна' : (days===0 ? 'сегодня' : days+' '+daysWord(days));
+    return '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+c.name+'</div>'+
+        '<div style="font-size:11px;color:'+ageColor+';margin-top:2px">просрочка '+ageLabel+(c.first_unpaid_date?' · с '+c.first_unpaid_date:'')+'</div>'+
+      '</div>'+
+      '<div style="font-size:14px;font-weight:700;color:'+COL.red+';white-space:nowrap">'+mln(c.unpaid)+'</div>'+
+    '</div>';
+  }
+  var debtBlockHtml = '<div class="card" style="margin-bottom:14px;padding:16px 18px">';
+  debtBlockHtml += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">';
+  debtBlockHtml += '<span style="font-size:14px;font-weight:600">💸 Дебиторская задолженность</span>';
+  debtBlockHtml += '<span style="font-size:15px;font-weight:700;color:'+COL.red+'">'+mln(debtTotal)+'</span></div>';
+  debtBlockHtml += '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Срок считается от даты первого неоплаченного заказа по контрагенту</div>';
+  debtBlockHtml += debtors.length ? debtors.map(debtRow).join('') : '<div style="font-size:13px;color:var(--muted);padding:8px 0">Долгов нет</div>';
+  debtBlockHtml += '</div>';
 
   var html = '';
   html += '<div style="margin-bottom:16px;display:flex;align-items:center;gap:10px">';
@@ -1032,13 +1081,16 @@ function renderMyPage() {
   // Широкая шкала: факт + прогноз выполнения плана
   html += planProgressBar('Выполнение плана продаж', planPct, planForecastPct, fakt, planForecast, plan);
 
-  // 4 одинаковых блока в ряд: Заработал / Документы / Дебиторка / заглушка
+  // 4 одинаковых блока в ряд: Заработал / Документы / Дебиторка (кратко) / Заказы по технике
   html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px">';
   html += kpiCard('💰', 'Заработал сейчас', mln(earned), earnedSub, null, COL.green, tierGapHtml + forecastHtml);
   html += docsCardHtml;
   html += debtCardHtml;
-  html += placeholderCardHtml;
+  html += equipCardHtml;
   html += '</div>';
+
+  // Дебиторская задолженность - детально по контрагентам, со сроком просрочки
+  html += debtBlockHtml;
 
   // 2. Топ заказчиков
   html += block('Топ заказчиков (формируют план в этом месяце)',

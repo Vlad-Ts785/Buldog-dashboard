@@ -71,7 +71,7 @@ function previewOrderReport() {
 const CONFIG = {
   SPREADSHEET_ID: '1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM',  // публичная ссылка, не секрет
   TELEGRAM_CHAT_ID: '1829485641',  // @Vlad_Ts_777, не секрет
-  TELEGRAM_LOGISTS_CHAT_ID: '',    // ID группы логистов - вписать вручную (chat_id не секрет, но это не наш чат - не публикуем где попало)
+  TELEGRAM_LOGISTS_CHAT_ID: '-5072928374',  // группа "Кадры/Ремонт/База"
   ALERT_FINE_THRESHOLD: 50000,   // штраф выше этой суммы → алерт
   ALERT_LOSS_THRESHOLD: 0,       // прибыль ниже этого → алерт
 };

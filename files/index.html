@@ -897,7 +897,6 @@ function renderMyPage() {
 
   var mgrRow = (D.managers||[]).filter(function(m){ return m.name && m.name.indexOf(current) >= 0; })[0] || {};
   var plan = mgrRow.plan||0, fakt = mgrRow.fakt||0, planPct = mgrRow.pct||0;
-  var planColor = planPct>=80?COL.green:planPct>=50?COL.amber:COL.red;
 
   // Прогноз к концу месяца - тот же темп, что в "Системе решений": факт/день_месяца*дней_в_месяце
   var dataDate = D.updated ? new Date(D.updated) : new Date();
@@ -914,12 +913,6 @@ function renderMyPage() {
   var doc = d.doc || {};
   var docStuck = (doc.no_waybill_own||0)+(doc.no_waybill_hired||0)+(doc.waybill_not_posted||0)+(doc.posted_no_realiz||0);
   var docTotal = docStuck + (doc.complete||0);
-  var docPct = docTotal>0 ? (doc.complete||0)/docTotal*100 : null;
-  var docColor = docPct===null?COL.green:docPct>=70?COL.green:docPct>=40?COL.amber:COL.red;
-
-  var ordTotal = d.rows_total||0, ordDone = d.rows_complete||0;
-  var ordPct = ordTotal>0 ? ordDone/ordTotal*100 : null;
-  var ordColor = ordPct===null?COL.green:ordPct>=70?COL.green:ordPct>=40?COL.amber:COL.red;
 
   // Заработал - та же формула, что на вкладке "Зарплата"
   var allMgrs = D.orders.by_manager || [], allLogs = D.orders.by_logist || [];
@@ -980,6 +973,55 @@ function renderMyPage() {
     '<span style="font-size:10px;color:var(--muted)">Прогноз к концу месяца</span>'+
     '<span style="font-size:13px;font-weight:700;color:'+(earnedDiff>=0?COL.green:COL.red)+'">'+mln(earnedForecast)+' '+(earnedDiff>=0?'↑':'↓')+' '+earnedDiffSign+mln(earnedDiff)+'</span></div>';
 
+  // Карточка "Документы" - сегментированная полоса + точные цифры по каждой стадии
+  function miniBarRow(color, label, count) {
+    return '<div style="display:flex;justify-content:space-between;font-size:10.5px">'+
+      '<span style="display:flex;align-items:center;gap:5px;color:var(--muted)"><span style="width:7px;height:7px;border-radius:2px;background:'+color+';display:inline-block"></span>'+label+'</span>'+
+      '<span style="font-weight:600;color:var(--text)">'+count+'</span></div>';
+  }
+  var noWaybillCnt = (doc.no_waybill_own||0)+(doc.no_waybill_hired||0);
+  var notPostedCnt = doc.waybill_not_posted||0;
+  var notClosedCnt = doc.posted_no_realiz||0;
+  var completeCnt  = doc.complete||0;
+  var docAmber2 = '#BA7517';
+  function segPct(n) { return docTotal>0 ? Math.max(0, n/docTotal*100) : 0; }
+
+  var docsCardHtml = '<div class="card" style="padding:14px 16px;border-left:3px solid '+COL.blue+'">';
+  docsCardHtml += '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">📋 Документы</div>';
+  docsCardHtml += '<div style="font-size:21px;font-weight:700;color:var(--text)">'+completeCnt+' из '+docTotal+'</div>';
+  docsCardHtml += '<div style="height:6px;border-radius:3px;background:rgba(255,255,255,.08);margin-top:8px;overflow:hidden;display:flex">';
+  docsCardHtml += '<div style="width:'+segPct(noWaybillCnt)+'%;height:100%;background:'+COL.red+'"></div>';
+  docsCardHtml += '<div style="width:'+segPct(notPostedCnt)+'%;height:100%;background:'+COL.amber+'"></div>';
+  docsCardHtml += '<div style="width:'+segPct(notClosedCnt)+'%;height:100%;background:'+docAmber2+'"></div>';
+  docsCardHtml += '<div style="width:'+segPct(completeCnt)+'%;height:100%;background:'+COL.green+'"></div>';
+  docsCardHtml += '</div>';
+  docsCardHtml += '<div style="margin-top:9px;display:flex;flex-direction:column;gap:3px">';
+  docsCardHtml += miniBarRow(COL.red, 'Нет путёвки', noWaybillCnt);
+  docsCardHtml += miniBarRow(COL.amber, 'Не проведено', notPostedCnt);
+  docsCardHtml += miniBarRow(docAmber2, 'Не закрыта', notClosedCnt);
+  docsCardHtml += '</div></div>';
+
+  // Карточка "Дебиторка" - сумма + доля от выставленного + крупнейший должник
+  var debtors = d.debtors || [];
+  var debtTotal = debtors.reduce(function(s,c){ return s+(c.unpaid||0); }, 0);
+  var debtPct = fakt > 0 ? Math.min(100, debtTotal/fakt*100) : 0;
+  var debtTop = debtors[0];
+  var debtSub = debtors.length
+    ? (debtors.length+' '+(debtors.length===1?'клиент':'клиента')+(debtTop ? ' · крупнейший '+mln(debtTop.unpaid) : ''))
+    : 'Долгов нет';
+
+  var debtCardHtml = '<div class="card" style="padding:14px 16px;border-left:3px solid '+COL.red+'">';
+  debtCardHtml += '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">💸 Дебиторка</div>';
+  debtCardHtml += '<div style="font-size:21px;font-weight:700;color:var(--text)">'+mln(debtTotal)+'</div>';
+  if (debtTotal > 0) {
+    debtCardHtml += '<div style="height:6px;border-radius:3px;background:rgba(255,255,255,.08);margin-top:8px;overflow:hidden">'+
+      '<div style="width:'+debtPct+'%;height:100%;background:'+COL.red+'"></div></div>';
+  }
+  debtCardHtml += '<div style="font-size:10px;color:var(--muted);margin-top:6px">'+debtSub+'</div></div>';
+
+  // Заглушка - четвёртое место в ряду, пока без идеи
+  var placeholderCardHtml = '<div class="card" style="border:1px dashed rgba(255,255,255,.15);background:transparent;padding:14px 16px;display:flex;align-items:center;justify-content:center;color:#5c5c58;font-size:11px;text-align:center;min-height:88px">Идея на подходе</div>';
+
   var html = '';
   html += '<div style="margin-bottom:16px;display:flex;align-items:center;gap:10px">';
   html += '<label style="font-size:13px;color:var(--muted)">Менеджер (выбор для проверки - после входа по логину каждый увидит только себя):</label>';
@@ -990,12 +1032,12 @@ function renderMyPage() {
   // Широкая шкала: факт + прогноз выполнения плана
   html += planProgressBar('Выполнение плана продаж', planPct, planForecastPct, fakt, planForecast, plan);
 
-  // 4 KPI-карточки
-  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:18px">';
-  html += kpiCard('📈', 'План продаж', mln(fakt), 'из '+mln(plan), planPct, planColor);
+  // 4 одинаковых блока в ряд: Заработал / Документы / Дебиторка / заглушка
+  html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px">';
   html += kpiCard('💰', 'Заработал сейчас', mln(earned), earnedSub, null, COL.green, tierGapHtml + forecastHtml);
-  html += kpiCard('📦', 'Заказы закрыты', ordDone+' из '+ordTotal, 'полный пакет документов', ordPct, ordColor);
-  html += kpiCard('📋', 'Документы готовы', (doc.complete||0)+' из '+docTotal, 'путёвка → проведён → реализация', docPct, docColor);
+  html += docsCardHtml;
+  html += debtCardHtml;
+  html += placeholderCardHtml;
   html += '</div>';
 
   // 2. Топ заказчиков
@@ -1013,21 +1055,6 @@ function renderMyPage() {
     rowsList((d.lost_customers||[]).slice(0,8).map(function(c){
       return { left:c.name, sub:c.first_half+' зак. в 1-й половине', right:mln(c.amount), color:COL.amber };
     }), 'Никто не пропал - все клиенты на связи'));
-
-  // 5. Дебиторка
-  html += block('💸 Дебиторка по своим клиентам',
-    rowsList((d.debtors||[]).slice(0,8).map(function(c){
-      return { left:c.name, sub:c.orders+' зак.', right:mln(c.unpaid), color:COL.red };
-    }), 'Долгов нет'));
-
-  // 7. Воронка документов
-  html += block('📋 Воронка документов',
-    rowsList([
-      { left:'Нет путёвки', sub:'(свои '+(doc.no_waybill_own||0)+' / найм '+(doc.no_waybill_hired||0)+')', right:((doc.no_waybill_own||0)+(doc.no_waybill_hired||0))+' зак.', color:COL.red },
-      { left:'Путёвка есть, не проведён', right:(doc.waybill_not_posted||0)+' зак.', color:COL.amber },
-      { left:'Проведён, нет реализации', right:(doc.posted_no_realiz||0)+' зак.', color:COL.amber },
-      { left:'Полный пакет', right:(doc.complete||0)+' зак.', color:COL.green },
-    ]));
 
   el.innerHTML = html;
 }

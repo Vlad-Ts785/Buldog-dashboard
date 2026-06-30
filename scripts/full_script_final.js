@@ -986,20 +986,27 @@ function doGet(e) {
     }
 
     // Отправка отчёта в Telegram-группу логистов (только admin) - через GET, не POST,
-    // т.к. браузер блокирует POST на редиректе script.google.com → googleusercontent.com,
-    // а обычные GET-запросы (как везде в этом API) проходят без проблем.
+    // т.к. браузер блокирует POST на редиректе script.google.com → googleusercontent.com.
+    // Текст формирует сам сервер из своих данных - чтобы не передавать длинный текст
+    // через адресную строку (URL с кириллицей+токеном входа мог превышать лимит длины).
     if (action === 'send_telegram_logists') {
       if (access.role !== 'admin') {
         return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
       }
-      var text = e.parameter.text || '';
       if (!CONFIG.TELEGRAM_LOGISTS_CHAT_ID) {
         return ContentService.createTextOutput(JSON.stringify({ error: 'TELEGRAM_LOGISTS_CHAT_ID не задан в CONFIG' })).setMimeType(ContentService.MimeType.JSON);
       }
-      if (!text) {
-        return ContentService.createTextOutput(JSON.stringify({ error: 'Пустое сообщение' })).setMimeType(ContentService.MimeType.JSON);
+      var ordersForReport = getOrdersData(ss);
+      var noWaybillDrivers = (ordersForReport && ordersForReport.by_driver_no_waybill) || [];
+      if (!noWaybillDrivers.length) {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Нечего отправлять - все путевые листы сданы' })).setMimeType(ContentService.MimeType.JSON);
       }
-      sendTelegram(text, CONFIG.TELEGRAM_LOGISTS_CHAT_ID);
+      var reportLines = noWaybillDrivers.map(function(d, i) {
+        var pct = d.orders > 0 ? Math.round(d.no_waybill / d.orders * 100) : 0;
+        return (i+1) + '. ' + d.name + ' — ' + d.no_waybill + ' из ' + d.orders + ' (' + pct + '%)';
+      });
+      var reportText = '📋 Не сданные путевые листы\n\n' + reportLines.join('\n');
+      sendTelegram(reportText, CONFIG.TELEGRAM_LOGISTS_CHAT_ID);
       return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(ContentService.MimeType.JSON);
     }
 

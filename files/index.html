@@ -832,21 +832,10 @@ function apiUrl(params) {
 
 async function sendDriverWaybillReport() {
   const statusEl = document.getElementById('drivers-telegram-status');
-  if (!D || !D.orders) return;
-  const drivers = D.orders.by_driver_no_waybill || [];
-  if (!drivers.length) {
-    if (statusEl) statusEl.textContent = 'Нечего отправлять - все путевые листы сданы';
-    return;
-  }
-  const lines = drivers.map(function(d, i) {
-    const pct = d.orders > 0 ? Math.round(d.no_waybill / d.orders * 100) : 0;
-    return (i+1) + '. ' + d.name + ' — ' + d.no_waybill + ' из ' + d.orders + ' (' + pct + '%)';
-  });
-  const text = '📋 Не сданные путевые листы\n\n' + lines.join('\n');
-
+  // Текст отчёта собирает сам сервер из своих данных - запрос короткий, без лимитов длины URL
   if (statusEl) statusEl.textContent = 'Отправка...';
   try {
-    const res = await fetch(apiUrl({ action: 'send_telegram_logists', text: text }));
+    const res = await fetch(apiUrl({ action: 'send_telegram_logists' }));
     const data = await res.json();
     if (data.error) throw new Error(data.error);
     if (statusEl) statusEl.textContent = 'Отправлено ✅';

@@ -664,6 +664,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           <button class="tab-btn active" onclick="showCustTab('top',this)">Топ заказчики</button>
           <button class="tab-btn" onclick="showCustTab('lost',this)">Пропали во 2-й пол.</button>
           <button class="tab-btn" onclick="showCustTab('hire',this)">Наёмная техника</button>
+          <button class="tab-btn" onclick="showCustTab('drivers',this)">Не сданные путевые листы</button>
         </div>
         <div id="cust-tab-top" style="overflow-x:auto">
           <table class="tbl">
@@ -682,6 +683,12 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           <table class="tbl">
             <thead><tr><th>Партнёр (исполнитель)</th><th class="num">Выручка</th><th class="num">Затраты</th><th class="num">Маржа</th><th class="num">%</th><th class="num">Зак.</th><th style="min-width:130px">Шкала маржи</th></tr></thead>
             <tbody id="cust-hire-body"></tbody>
+          </table>
+        </div>
+        <div id="cust-tab-drivers" style="display:none;overflow-x:auto">
+          <table class="tbl">
+            <thead><tr><th>#</th><th>Водитель</th><th class="num">Не сдано</th><th class="num">Всего заказов</th><th class="num">% несдачи</th></tr></thead>
+            <tbody id="cust-drivers-body"></tbody>
           </table>
         </div>
       </div>
@@ -2484,7 +2491,7 @@ function filterProblems(status, btn) {
 }
 
 function showCustTab(tab, btn) {
-  ['top','lost','hire'].forEach(function(t) {
+  ['top','lost','hire','drivers'].forEach(function(t) {
     const el = document.getElementById('cust-tab-'+t);
     if (el) el.style.display = t===tab ? '' : 'none';
   });
@@ -2609,6 +2616,21 @@ function renderSales() {
   document.getElementById('cust-top-body').innerHTML  = (o.by_customer||[]).map(custRow).join('') || noData;
   document.getElementById('cust-lost-body').innerHTML = (o.lost_customers||[]).map(custRow).join('') ||
     '<tr><td colspan="8" style="color:var(--green);padding:14px">Все клиенты активны во 2-й половине ✅</td></tr>';
+
+  const noWaybillDrivers = o.by_driver_no_waybill || [];
+  document.getElementById('cust-drivers-body').innerHTML = noWaybillDrivers.length
+    ? noWaybillDrivers.map(function(d, i) {
+        const pct = d.orders > 0 ? Math.round(d.no_waybill / d.orders * 100) : 0;
+        const pctCls = pct >= 50 ? 'red' : pct >= 25 ? 'amber' : '';
+        return '<tr>' +
+          '<td class="muted" style="font-size:12px">' + (i+1) + '</td>' +
+          '<td><b>' + d.name + '</b></td>' +
+          '<td class="num red"><b>' + d.no_waybill + '</b></td>' +
+          '<td class="num muted">' + d.orders + '</td>' +
+          '<td class="num ' + pctCls + '">' + pct + '%</td>' +
+        '</tr>';
+      }).join('')
+    : '<tr><td colspan="5" style="color:var(--green);padding:14px">Все путевые листы сданы ✅</td></tr>';
 
   const suppliers = o.by_hired_supplier||[];
   document.getElementById('cust-hire-body').innerHTML = suppliers.length

@@ -1832,11 +1832,13 @@ function aggregateOrdersRows(rows) {
       supplierMap[supplier].cost    += hiredCost;
     }
 
+    // Путёвка - читаем один раз, нужна и в статусе документов, и в разбивке по водителям
+    const hw = yes(row, 'waybill');
+
     // ── Статус документов (внешние заказы, разбивка по декадам) ──
     if (!isInt) {
       const dayNum2 = parseInt((dateStr||'').split('-')[2]) || 0;
       const dec = dayNum2 <= 10 ? 0 : dayNum2 <= 20 ? 1 : 2;
-      const hw  = yes(row, 'waybill');
       const pst = yes(row, 'posted');
       const hr  = yes(row, 'realiz');
       let docStatus = '', docLabel = '';
@@ -1865,9 +1867,10 @@ function aggregateOrdersRows(rows) {
     // ── По водителям ──
     const driverName = ordCleanName(str(row, 'driver'));
     if (driverName) {
-      if (!driverMap[driverName]) driverMap[driverName] = { name: driverName, orders: 0, amount: 0 };
+      if (!driverMap[driverName]) driverMap[driverName] = { name: driverName, orders: 0, amount: 0, no_waybill: 0 };
       driverMap[driverName].orders++;
       driverMap[driverName].amount += amount;
+      if (!hw) driverMap[driverName].no_waybill++;
     }
   }
 
@@ -1959,6 +1962,10 @@ function aggregateOrdersRows(rows) {
     by_day:            Object.values(dayMap).sort(function(a,b){ return a.date.localeCompare(b.date); }),
     problem_orders:    problemOrders.slice(0, 600),
     by_driver:         Object.values(driverMap).sort(function(a,b){ return b.orders-a.orders; }).slice(0, 25),
+    by_driver_no_waybill: Object.values(driverMap)
+      .filter(function(d){ return d.no_waybill > 0; })
+      .sort(function(a,b){ return b.no_waybill-a.no_waybill; })
+      .slice(0, 25),
     by_manager_detail: managerDetail,
   };
 }

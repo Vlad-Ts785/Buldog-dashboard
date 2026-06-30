@@ -71,6 +71,7 @@ function previewOrderReport() {
 const CONFIG = {
   SPREADSHEET_ID: '1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM',  // публичная ссылка, не секрет
   TELEGRAM_CHAT_ID: '1829485641',  // @Vlad_Ts_777, не секрет
+  TELEGRAM_LOGISTS_CHAT_ID: '',    // ID группы логистов - вписать вручную (chat_id не секрет, но это не наш чат - не публикуем где попало)
   ALERT_FINE_THRESHOLD: 50000,   // штраф выше этой суммы → алерт
   ALERT_LOSS_THRESHOLD: 0,       // прибыль ниже этого → алерт
 };
@@ -716,13 +717,13 @@ function buildManagersText() {
 // ============================================================
 // ОТПРАВКА В TELEGRAM
 // ============================================================
-function sendTelegram(text) {
+function sendTelegram(text, chatId) {
   const url = `https://api.telegram.org/bot${getTelegramToken_()}/sendMessage`;
   UrlFetchApp.fetch(url, {
     method: 'post',
     contentType: 'application/json',
     payload: JSON.stringify({
-      chat_id: CONFIG.TELEGRAM_CHAT_ID,
+      chat_id: chatId || CONFIG.TELEGRAM_CHAT_ID,
       text: text,
       parse_mode: 'Markdown'
     })
@@ -1015,6 +1016,39 @@ function doGet(e) {
     return ContentService
       .createTextOutput(JSON.stringify({ error: e.message }))
       .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+// Действия, у которых есть побочный эффект (отправка сообщений) - через POST, не GET.
+// Та же проверка ключа + входа + роли, что и в doGet().
+function doPost(e) {
+  function err(msg, extra) {
+    var obj = Object.assign({ error: msg }, extra || {});
+    return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+  }
+
+  var body = {};
+  try { body = JSON.parse(e.postData.contents); } catch (parseErr) { return err('Некорректный запрос'); }
+
+  var secretKey = PropertiesService.getScriptProperties().getProperty('DASHBOARD_KEY');
+  if (!secretKey || body.key !== secretKey) return err('Доступ запрещён');
+
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var email = verifyGoogleToken_(body.id_token || '');
+  if (!email) return err('Не авторизован', { needLogin: true });
+  var access = getAccessRole_(ss, email);
+  if (!access || access.role !== 'admin') return err('Доступ запрещён');
+
+  try {
+    if (body.action === 'send_telegram_logists') {
+      if (!CONFIG.TELEGRAM_LOGISTS_CHAT_ID) return err('TELEGRAM_LOGISTS_CHAT_ID не задан в CONFIG');
+      if (!body.text) return err('Пустое сообщение');
+      sendTelegram(body.text, CONFIG.TELEGRAM_LOGISTS_CHAT_ID);
+      return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(ContentService.MimeType.JSON);
+    }
+    return err('Неизвестное действие');
+  } catch (sendErr) {
+    return err(sendErr.message);
   }
 }
 

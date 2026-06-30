@@ -1226,7 +1226,14 @@ function importOrdersReport() {
 
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
 
-  archiveOrdersIfNeeded(ss, data);
+  const archiveResult = archiveOrdersIfNeeded(ss, data);
+  if (archiveResult.action === 'archive_only') {
+    // Запоздавшая коррекция за уже прошедший месяц - текущую (живую) таблицу не трогаем,
+    // обновлён только архив прошлого месяца. См. archiveOrdersIfNeeded().
+    Logger.log('Поздняя коррекция за ' + archiveResult.month + ' - архив обновлён, текущий месяц не тронут');
+    latest.markRead();
+    return;
+  }
 
   let raw = ss.getSheetByName(ORDERS_RAW_SHEET);
   if (raw) raw.clear();
@@ -1242,27 +1249,45 @@ function importOrdersReport() {
 
 // ── АРХИВАЦИЯ при смене месяца ───────────────────────────────
 
+// Возвращает { action: 'normal' } если можно обычным образом перезаписать живую таблицу,
+// или { action: 'archive_only', month } если это запоздавшая коррекция за прошедший месяц -
+// тогда живую таблицу трогать нельзя, нужно только обновить архив этого месяца.
 function archiveOrdersIfNeeded(ss, newData) {
   const raw = ss.getSheetByName(ORDERS_RAW_SHEET);
-  if (!raw || raw.getLastRow() < 5) return;
+  if (!raw || raw.getLastRow() < 5) return { action: 'normal' };
 
   // Строка 2 в сыром листе содержит период
   const existingPeriodRow = raw.getRange(2, 1, 1, 10).getValues()[0];
   const existingMonth     = ordExtractPeriodMonth(existingPeriodRow);
   const newMonth          = ordExtractPeriodMonth(newData[1] || []);
 
-  if (!existingMonth || !newMonth || existingMonth === newMonth) return;
+  if (!existingMonth || !newMonth || existingMonth === newMonth) return { action: 'normal' };
 
-  const archiveName = ORDERS_ARCHIVE_PFX + existingMonth;
-  if (ss.getSheetByName(archiveName)) {
-    Logger.log('Архив ' + archiveName + ' уже существует, пропускаем');
-    return;
+  if (newMonth < existingMonth) {
+    // Пришедший отчёт за месяц РАНЬШЕ текущего живого - это поздняя коррекция
+    // (бухгалтерия ещё доделывает прошлый месяц). Текущий месяц на дашборде не трогаем,
+    // только обновляем архив того прошлого месяца свежими цифрами.
+    writeArchiveSheet(ss, ORDERS_ARCHIVE_PFX + newMonth, newData);
+    return { action: 'archive_only', month: newMonth };
   }
 
-  const archive     = ss.insertSheet(archiveName);
-  const existing    = raw.getDataRange().getValues();
-  archive.getRange(1, 1, existing.length, existing[0].length).setValues(existing);
-  Logger.log('✅ Архив создан: ' + archiveName + ' (' + existing.length + ' строк)');
+  // newMonth > existingMonth - обычный переход на новый месяц
+  const archiveName = ORDERS_ARCHIVE_PFX + existingMonth;
+  if (!ss.getSheetByName(archiveName)) {
+    const existing = raw.getDataRange().getValues();
+    writeArchiveSheet(ss, archiveName, existing);
+    Logger.log('✅ Архив создан: ' + archiveName + ' (' + existing.length + ' строк)');
+  }
+  return { action: 'normal' };
+}
+
+function writeArchiveSheet(ss, archiveName, data) {
+  let archive = ss.getSheetByName(archiveName);
+  if (archive) archive.clear();
+  else archive = ss.insertSheet(archiveName);
+  if (data.length > 0) {
+    archive.getRange(1, 1, data.length, data[0].length).setValues(data);
+  }
 }
 
 // ── НОРМАЛИЗАЦИЯ: Заказы_сырые → Заказы_данные ──────────────

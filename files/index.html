@@ -394,8 +394,15 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 <div class="main-wrap">
 
   <!-- Page header (sticky title) -->
-  <div class="page-header">
+  <div class="page-header" style="display:flex;align-items:baseline;justify-content:space-between;gap:16px">
     <div class="page-header-title" id="page-title">Панель управления</div>
+    <div id="period-selector-wrap" style="display:none;align-items:center;gap:8px;padding-bottom:16px">
+      <label style="font-size:12px;color:var(--muted)">Период:</label>
+      <select id="period-select" onchange="changePeriod(this.value)" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 10px;font-size:13px">
+        <option value="">Текущий месяц</option>
+      </select>
+      <span id="period-status" style="font-size:11px;color:var(--muted)"></span>
+    </div>
   </div>
 
   <main>
@@ -1035,11 +1042,72 @@ function render() {
   renderManagers();
   renderDrivers();
   renderRisks();
+  renderSalesTabsForPeriod();
+  renderMyPage();
+}
+
+// ── ВЫБОР ПЕРИОДА (Заказы / Менеджеры / Логисты / Зарплата) ──
+let selectedPeriod = null;     // null = текущий месяц
+let periodOrdersData = null;   // D.orders за выбранный период (архив), если не текущий
+let periodGrossProfit = null;  // ВП своего парка за период (для Рыщанова), из Истории_финансов
+let availablePeriods = [];
+
+async function loadAvailablePeriods() {
+  try {
+    const sep = API_URL.includes('?') ? '&' : '?';
+    const res = await fetch(API_URL + sep + 'action=available_periods&key=' + encodeURIComponent(DASHBOARD_KEY));
+    const data = await res.json();
+    availablePeriods = data.periods || [];
+    const sel = document.getElementById('period-select');
+    if (sel) {
+      sel.innerHTML = '<option value="">Текущий месяц</option>' +
+        availablePeriods.map(function(p){ return '<option value="'+p+'">'+p+'</option>'; }).join('');
+      sel.value = selectedPeriod || '';
+    }
+  } catch(e) { /* список периодов необязателен - молча пропускаем */ }
+}
+
+async function changePeriod(period) {
+  selectedPeriod = period || null;
+  const status = document.getElementById('period-status');
+  if (!selectedPeriod) {
+    periodOrdersData = null;
+    periodGrossProfit = null;
+    if (status) status.textContent = '';
+    renderSalesTabsForPeriod();
+    return;
+  }
+  if (status) status.textContent = 'Загрузка...';
+  try {
+    const sep = API_URL.includes('?') ? '&' : '?';
+    const res = await fetch(API_URL + sep + 'action=orders_period&period=' + encodeURIComponent(selectedPeriod) + '&key=' + encodeURIComponent(DASHBOARD_KEY));
+    const data = await res.json();
+    if (data.orders && data.orders.error) throw new Error(data.orders.error);
+    periodOrdersData = data.orders;
+    periodGrossProfit = (data.summary && typeof data.summary.profit === 'number') ? data.summary.profit : null;
+    if (status) status.textContent = '';
+    renderSalesTabsForPeriod();
+  } catch(e) {
+    if (status) status.textContent = 'Ошибка: ' + e.message;
+  }
+}
+
+// Подменяет D.orders/D.summary.profit на выбранный период только на время рендера
+// этих 4 вкладок, синхронно, и сразу возвращает обратно - другие вкладки не задеты.
+function renderSalesTabsForPeriod() {
+  if (!D) return;
+  const realOrders = D.orders;
+  const realProfit = D.summary ? D.summary.profit : undefined;
+  if (selectedPeriod && periodOrdersData) {
+    D.orders = periodOrdersData;
+    if (D.summary && periodGrossProfit !== null) D.summary.profit = periodGrossProfit;
+  }
   renderSales();
   renderSalesMgr();
   renderSalesLog();
   renderSalesSalary();
-  renderMyPage();
+  D.orders = realOrders;
+  if (D.summary) D.summary.profit = realProfit;
 }
 
 // ── KPI ────────────────────────────────────────────────────
@@ -3299,6 +3367,8 @@ function renderSalesLog() {
 }
 
 // ── НАВИГАЦИЯ ──────────────────────────────────────────────
+const PERIOD_PAGES = ['sales', 'sales-mgr', 'sales-log', 'sales-salary'];
+
 function showPage(id, el) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.sidebar-nav-item').forEach(b => b.classList.remove('active'));
@@ -3306,6 +3376,12 @@ function showPage(id, el) {
   if (el) el.classList.add('active');
   setText('page-title', PAGE_TITLES[id] || '');
   if (id === 'dynamics') loadHistoryData();
+
+  var wrap = document.getElementById('period-selector-wrap');
+  if (wrap) {
+    wrap.style.display = PERIOD_PAGES.indexOf(id) >= 0 ? 'flex' : 'none';
+    if (PERIOD_PAGES.indexOf(id) >= 0 && !availablePeriods.length) loadAvailablePeriods();
+  }
 }
 
 // ── УТИЛИТЫ ────────────────────────────────────────────────

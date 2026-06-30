@@ -842,6 +842,29 @@ function doGet(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
 
+    // Список месяцев, по которым есть архив заказов - для выпадающего списка периода
+    if (action === 'available_periods') {
+      return ContentService
+        .createTextOutput(JSON.stringify({ periods: getAvailablePeriods(ss) }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // Данные за прошлый период (вкладки Заказы/Менеджеры/Логисты/Зарплата)
+    if (action === 'orders_period') {
+      var period = e.parameter.period || '';
+      if (!/^\d{4}-\d{2}$/.test(period)) {
+        return ContentService
+          .createTextOutput(JSON.stringify({ error: 'Некорректный период' }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+      return ContentService
+        .createTextOutput(JSON.stringify({
+          orders:  getOrdersDataForPeriod(ss, period),
+          summary: { profit: getGrossProfitForPeriod(ss, period) },
+        }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
     const staffData = getStaffData(ss); // читаем Штатку один раз
     // Карта госномер → марка из Штатки (для всех 55 машин, не только с выручкой)
     var staffMarkas = {};
@@ -1114,6 +1137,28 @@ function getVehicleHistory(ss) {
   return result;
 }
 
+// Валовая прибыль своего парка за прошлый период (для зарплаты Рыщанова на вкладке "Зарплата"
+// при выборе периода). Берёт последний день внутри месяца - там накопительный итог за весь месяц.
+function getGrossProfitForPeriod(ss, period) {
+  var hist = ss.getSheetByName('История_финансов');
+  if (!hist || hist.getLastRow() < 2) return null;
+  var lastRow = hist.getLastRow();
+  var data = hist.getRange(2, 1, lastRow - 1, 11).getValues();
+
+  var lastDateKey = '';
+  var sumByDate = {};
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    if (!(row[0] instanceof Date)) continue;
+    var dateKey = Utilities.formatDate(row[0], 'Europe/Moscow', 'yyyy-MM-dd');
+    if (dateKey.slice(0, 7) !== period) continue;
+    if (!sumByDate[dateKey]) sumByDate[dateKey] = 0;
+    sumByDate[dateKey] += parseFloat(row[10]) || 0;
+    if (dateKey > lastDateKey) lastDateKey = dateKey;
+  }
+  return lastDateKey ? sumByDate[lastDateKey] : null;
+}
+
 // ============================================================
 // МОДУЛЬ ЗАКАЗОВ (встроен из orders_module.js)
 // ============================================================
@@ -1297,7 +1342,34 @@ function normalizeOrders() {
   const raw = ss.getSheetByName(ORDERS_RAW_SHEET);
   if (!raw || raw.getLastRow() < 5) throw new Error('Нет сырых данных заказов');
 
-  const allData = raw.getDataRange().getValues();
+  const parsed = parseOrdersRawRows(raw.getDataRange().getValues());
+
+  let norm = ss.getSheetByName(ORDERS_NORM_SHEET);
+  if (norm) norm.clear();
+  else       norm = ss.insertSheet(ORDERS_NORM_SHEET);
+
+  norm.getRange(1, 1, 1, parsed.headers.length)
+      .setValues([parsed.headers])
+      .setFontWeight('bold')
+      .setBackground('#1e1e26')
+      .setFontColor('#888780');
+
+  if (parsed.rows.length > 0) {
+    norm.getRange(2, 1, parsed.rows.length, parsed.headers.length).setValues(parsed.rows);
+    // Числовые колонки: Сумма → Оплачено поставщику (колонки 31-40, индексы 30-39)
+    norm.getRange(2, 31, parsed.rows.length, 10).setNumberFormat('#,##0');
+  }
+
+  norm.setFrozenRows(1);
+  norm.autoResizeColumns(1, 7);
+
+  Logger.log('✅ Заказы нормализованы: ' + parsed.rows.length + ' строк в ' + ORDERS_NORM_SHEET);
+}
+
+// Чистая функция: сырые строки (как из Заказы_сырые или архива Заказы_YYYY-MM) -> нормализованные.
+// Не трогает листы - используется и для текущего месяца, и для разбора архивов "на лету".
+function parseOrdersRawRows(allData) {
+  if (!allData || allData.length < 5) return { headers: [], rows: [] };
 
   // Строка 4 (индекс 3) — заголовки колонок
   const headerRow = allData[3];
@@ -1410,26 +1482,7 @@ function normalizeOrders() {
     ]);
   }
 
-  let norm = ss.getSheetByName(ORDERS_NORM_SHEET);
-  if (norm) norm.clear();
-  else       norm = ss.insertSheet(ORDERS_NORM_SHEET);
-
-  norm.getRange(1, 1, 1, normHeaders.length)
-      .setValues([normHeaders])
-      .setFontWeight('bold')
-      .setBackground('#1e1e26')
-      .setFontColor('#888780');
-
-  if (rows.length > 0) {
-    norm.getRange(2, 1, rows.length, normHeaders.length).setValues(rows);
-    // Числовые колонки: Сумма → Оплачено поставщику (колонки 31-40, индексы 30-39)
-    norm.getRange(2, 31, rows.length, 10).setNumberFormat('#,##0');
-  }
-
-  norm.setFrozenRows(1);
-  norm.autoResizeColumns(1, 7);
-
-  Logger.log('✅ Заказы нормализованы: ' + rows.length + ' строк в ' + ORDERS_NORM_SHEET);
+  return { headers: normHeaders, rows: rows };
 }
 
 // ── API ДЛЯ ДАШБОРДА ─────────────────────────────────────────
@@ -1440,7 +1493,36 @@ function getOrdersData(ss) {
   if (!norm || norm.getLastRow() < 2) return { error: 'Нет данных заказов' };
 
   const rows = norm.getRange(2, 1, norm.getLastRow() - 1, 43).getValues();
+  return aggregateOrdersRows(rows);
+}
 
+// Архивные данные за прошлый период (?action=orders_period&period=YYYY-MM)
+function getOrdersDataForPeriod(ss, period) {
+  const sheetName = ORDERS_ARCHIVE_PFX + period;
+  const archive = ss.getSheetByName(sheetName);
+  if (!archive || archive.getLastRow() < 5) return { error: 'Нет архива за ' + period };
+
+  const parsed = parseOrdersRawRows(archive.getDataRange().getValues());
+  if (parsed.rows.length === 0) return { error: 'Архив за ' + period + ' пуст' };
+  return aggregateOrdersRows(parsed.rows);
+}
+
+// Список месяцев, по которым есть архив (для выпадающего списка на дашборде)
+function getAvailablePeriods(ss) {
+  const sheets = ss.getSheets();
+  const periods = [];
+  const re = new RegExp('^' + ORDERS_ARCHIVE_PFX + '(\\d{4}-\\d{2})$');
+  sheets.forEach(function(s) {
+    const m = s.getName().match(re);
+    if (m) periods.push(m[1]);
+  });
+  periods.sort().reverse();
+  return periods;
+}
+
+// Чистая функция: нормализованные строки заказов -> агрегированный JSON для дашборда.
+// Используется и для текущего месяца (Заказы_данные), и для архивов прошлых периодов.
+function aggregateOrdersRows(rows) {
   const C = {
     id:0, date_c:1, date_s:2, date_e:3,
     pay_type:4, posted:5, waybill:6, realiz:7, orig:8,

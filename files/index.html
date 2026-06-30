@@ -322,6 +322,14 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   <div class="loading-text">Строим грандиозные планы ...</div>
 </div>
 
+<!-- ═══ ЭКРАН ВХОДА ═════════════════════════════════════════ -->
+<div id="login-screen" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:1000;flex-direction:column;align-items:center;justify-content:center;gap:18px">
+  <div style="font-size:20px;font-weight:600;color:var(--text)">ЯРД Империал — Дашборд</div>
+  <div id="login-error" style="display:none;font-size:13px;color:var(--red);background:rgba(226,75,74,.1);border:1px solid rgba(226,75,74,.3);border-radius:8px;padding:10px 16px;max-width:340px;text-align:center"></div>
+  <div id="google-signin-btn"></div>
+  <div style="font-size:12px;color:var(--muted)">Войдите через рабочий Google-аккаунт</div>
+</div>
+
 <!-- ═══ SIDEBAR ═════════════════════════════════════════════ -->
 <aside class="sidebar">
   <div class="sidebar-logo">
@@ -387,6 +395,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   <div class="sidebar-bottom">
     <div class="sidebar-updated" id="nav-updated">Нет данных</div>
     <button class="sidebar-refresh" onclick="loadData()">↻ Обновить данные</button>
+    <button class="sidebar-refresh" onclick="logoutUser()" style="margin-top:6px">Выйти</button>
   </div>
 </aside>
 
@@ -806,13 +815,74 @@ function updatePayment(val) {
   if (D) renderKPI();
 }
 
+// ── ВХОД ЧЕРЕЗ GOOGLE ────────────────────────────────────────
+const GOOGLE_CLIENT_ID = '872723319158-cmr4v5v31fk3uv8ass3vvdch7at66n8e.apps.googleusercontent.com';
+let ID_TOKEN = sessionStorage.getItem('id_token') || '';
+
+// Собирает URL запроса к API с ключом и токеном входа - используется везде вместо ручной склейки
+function apiUrl(params) {
+  const p = Object.assign({ key: DASHBOARD_KEY, id_token: ID_TOKEN }, params || {});
+  const qs = Object.keys(p).map(function(k){ return k + '=' + encodeURIComponent(p[k] || ''); }).join('&');
+  const sep = API_URL.includes('?') ? '&' : '?';
+  return API_URL + sep + qs;
+}
+
+function showLoginScreen(errorText) {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('login-screen').style.display = 'flex';
+  const sidebar = document.querySelector('.sidebar');
+  const mainWrap = document.querySelector('.main-wrap');
+  if (sidebar) sidebar.style.display = 'none';
+  if (mainWrap) mainWrap.style.display = 'none';
+  const errEl = document.getElementById('login-error');
+  if (errorText) { errEl.textContent = errorText; errEl.style.display = 'block'; }
+  else { errEl.style.display = 'none'; }
+  if (window.google && google.accounts && google.accounts.id) {
+    google.accounts.id.renderButton(
+      document.getElementById('google-signin-btn'),
+      { theme: 'filled_black', size: 'large', text: 'signin_with' }
+    );
+  }
+}
+
+function hideLoginScreen() {
+  document.getElementById('login-screen').style.display = 'none';
+  const sidebar = document.querySelector('.sidebar');
+  const mainWrap = document.querySelector('.main-wrap');
+  if (sidebar) sidebar.style.display = '';
+  if (mainWrap) mainWrap.style.display = '';
+}
+
+function handleCredentialResponse(response) {
+  ID_TOKEN = response.credential;
+  sessionStorage.setItem('id_token', ID_TOKEN);
+  loadData();
+}
+
+function logoutUser() {
+  ID_TOKEN = '';
+  sessionStorage.removeItem('id_token');
+  D = null;
+  if (window.google && google.accounts && google.accounts.id) google.accounts.id.disableAutoSelect();
+  showLoginScreen();
+}
+
+// Вызывается самой библиотекой Google (через ?onload= в URL скрипта) - надёжнее, чем
+// полагаться на window.load, который может сработать раньше, чем загрузится сама библиотека.
+function initGoogleSignIn() {
+  google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, callback: handleCredentialResponse });
+  if (ID_TOKEN) loadData();
+  else showLoginScreen();
+}
+
 async function loadData() {
   document.getElementById('loading').style.display = 'flex';
   try {
-    const sep = API_URL.includes('?') ? '&' : '?';
-    const mainRes = await fetch(API_URL + sep + 'key=' + encodeURIComponent(DASHBOARD_KEY));
+    const mainRes = await fetch(apiUrl({}));
     D = await mainRes.json();
+    if (D.needLogin) { ID_TOKEN = ''; sessionStorage.removeItem('id_token'); showLoginScreen(D.error); return; }
     if (D.error) throw new Error(D.error);
+    hideLoginScreen();
     document.getElementById('error-block').style.display = 'none';
     if (manualPayment > 0) document.getElementById('payment-input').value = manualPayment;
     render();
@@ -827,13 +897,20 @@ function renderMyPage() {
   if (!D || !D.orders) return;
   var el = document.getElementById('my-page-content');
   if (!el) return;
+  var isManagerRole = D.role === 'manager';
   var detail = (D.orders && D.orders.by_manager_detail) || {};
   var names = Object.keys(detail).sort();
   if (!names.length) { el.innerHTML = '<p style="color:var(--muted);padding:16px">Нет данных по менеджерам.</p>'; return; }
 
-  var sel = document.getElementById('my-page-mgr-select');
-  var current = (sel && detail[sel.value]) ? sel.value : names[0];
+  var current;
+  if (isManagerRole) {
+    current = D.managerName; // менеджер видит только себя, выбора нет
+  } else {
+    var sel = document.getElementById('my-page-mgr-select');
+    current = (sel && detail[sel.value]) ? sel.value : names[0];
+  }
   var d = detail[current];
+  if (!d) { el.innerHTML = '<p style="color:var(--muted);padding:16px">Нет данных за этот месяц.</p>'; return; }
 
   var COL = { red:'#E24B4A', amber:'#EF9F27', green:'#1D9E75', blue:'#378ADD' };
   function mln(n) { var x=Math.abs(n||0); var sg=(n||0)<0?'-':''; return x>=1000000 ? sg+(x/1000000).toFixed(1)+' млн ₽' : sg+Math.round(x).toLocaleString('ru-RU')+' ₽'; }
@@ -1072,11 +1149,15 @@ function renderMyPage() {
   debtBlockHtml += '</div>';
 
   var html = '';
-  html += '<div style="margin-bottom:16px;display:flex;align-items:center;gap:10px">';
-  html += '<label style="font-size:13px;color:var(--muted)">Менеджер (выбор для проверки - после входа по логину каждый увидит только себя):</label>';
-  html += '<select id="my-page-mgr-select" onchange="renderMyPage()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 10px;font-size:13px">';
-  names.forEach(function(n){ html += '<option value="'+n+'"'+(n===current?' selected':'')+'>'+n+'</option>'; });
-  html += '</select></div>';
+  if (isManagerRole) {
+    html += '<div style="margin-bottom:16px;font-size:15px;font-weight:600">'+current+'</div>';
+  } else {
+    html += '<div style="margin-bottom:16px;display:flex;align-items:center;gap:10px">';
+    html += '<label style="font-size:13px;color:var(--muted)">Менеджер (выбор для проверки - после входа по логину каждый увидит только себя):</label>';
+    html += '<select id="my-page-mgr-select" onchange="renderMyPage()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 10px;font-size:13px">';
+    names.forEach(function(n){ html += '<option value="'+n+'"'+(n===current?' selected':'')+'>'+n+'</option>'; });
+    html += '</select></div>';
+  }
 
   // Широкая шкала: факт + прогноз выполнения плана
   html += planProgressBar('Выполнение плана продаж', planPct, planForecastPct, fakt, planForecast, plan);
@@ -1114,6 +1195,14 @@ function renderMyPage() {
 function render() {
   const t = D.updated ? new Date(D.updated).toLocaleString('ru',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'}) : '';
   setText('nav-updated', 'Обновлено: ' + t);
+  applyRoleUI();
+
+  if (D.role === 'manager') {
+    // Менеджеру урезанные данные с сервера - другие вкладки на них упадут, не рендерим их
+    renderMyPage();
+    return;
+  }
+
   renderKPI();
   renderDecisions();
   renderMain();
@@ -1125,6 +1214,26 @@ function render() {
   renderMyPage();
 }
 
+// Показывает/скрывает пункты сайдбара в зависимости от роли. Менеджер видит только
+// свою личную страницу - сервер и так не отдаёт ему данных для остальных вкладок,
+// но скрыть пункты меню тоже нужно, чтобы интерфейс не предлагал недоступное.
+function applyRoleUI() {
+  const sidebarLabel = document.querySelector('.sidebar-logo-label');
+  if (D.role === 'manager') {
+    if (sidebarLabel) sidebarLabel.textContent = D.managerName || 'Менеджер';
+    document.querySelectorAll('.sidebar-nav-item').forEach(function(item) {
+      const page = item.getAttribute('data-page');
+      item.style.display = (page === 'my-page') ? '' : 'none';
+    });
+    document.querySelectorAll('.sidebar-nav-section').forEach(function(s){ s.style.display = 'none'; });
+    showPage('my-page');
+  } else {
+    if (sidebarLabel) sidebarLabel.textContent = 'Админ панель';
+    document.querySelectorAll('.sidebar-nav-item').forEach(function(item) { item.style.display = ''; });
+    document.querySelectorAll('.sidebar-nav-section').forEach(function(s){ s.style.display = ''; });
+  }
+}
+
 // ── ВЫБОР ПЕРИОДА (Заказы / Менеджеры / Логисты / Зарплата) ──
 let selectedPeriod = null;     // null = текущий месяц
 let periodOrdersData = null;   // D.orders за выбранный период (архив), если не текущий
@@ -1133,8 +1242,7 @@ let availablePeriods = [];
 
 async function loadAvailablePeriods() {
   try {
-    const sep = API_URL.includes('?') ? '&' : '?';
-    const res = await fetch(API_URL + sep + 'action=available_periods&key=' + encodeURIComponent(DASHBOARD_KEY));
+    const res = await fetch(apiUrl({ action: 'available_periods' }));
     const data = await res.json();
     availablePeriods = data.periods || [];
     const sel = document.getElementById('period-select');
@@ -1158,8 +1266,7 @@ async function changePeriod(period) {
   }
   if (status) status.textContent = 'Загрузка...';
   try {
-    const sep = API_URL.includes('?') ? '&' : '?';
-    const res = await fetch(API_URL + sep + 'action=orders_period&period=' + encodeURIComponent(selectedPeriod) + '&key=' + encodeURIComponent(DASHBOARD_KEY));
+    const res = await fetch(apiUrl({ action: 'orders_period', period: selectedPeriod }));
     const data = await res.json();
     if (data.orders && data.orders.error) throw new Error(data.orders.error);
     periodOrdersData = data.orders;
@@ -2083,7 +2190,7 @@ var histChartCosts = null;
 
 function ensureHistData() {
   if (histData !== null) return Promise.resolve(histData);
-  return fetch(API_URL + '?action=vehicle_history&key=' + encodeURIComponent(DASHBOARD_KEY))
+  return fetch(apiUrl({ action: 'vehicle_history' }))
     .then(function(r) { return r.json(); })
     .then(function(d) { histData = d.history || []; return histData; })
     .catch(function() { histData = []; return histData; });
@@ -3470,8 +3577,10 @@ function fmtK(n) { if(Math.abs(n)>=1000000)return(n/1000000).toFixed(1)+'M';if(M
 function fmtK2(n) { if(Math.abs(n)>=1000000)return(n/1000000).toFixed(1)+' млн';if(Math.abs(n)>=1000)return(n/1000).toFixed(0)+' тыс';return Math.round(n); }
 function pct(n) { return (Math.round((n||0)*10)/10).toFixed(1)+'%'; }
 function setText(id, val) { const el=document.getElementById(id); if(el) el.textContent=val; }
-
-loadData();
 </script>
+<!-- Подключаем после основного скрипта, без async/defer - гарантирует, что initGoogleSignIn()
+     уже объявлена к моменту, когда библиотека Google готова и мы её вызываем. -->
+<script src="https://accounts.google.com/gsi/client"></script>
+<script>initGoogleSignIn();</script>
 </body>
 </html>

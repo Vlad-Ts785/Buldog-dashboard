@@ -75,6 +75,10 @@ const CONFIG = {
   ALERT_LOSS_THRESHOLD: 0,       // прибыль ниже этого → алерт
 };
 
+// Google OAuth Client ID - не секрет (Google сам рекомендует класть его в открытый код сайта,
+// подделать его бесполезно без контроля над зарегистрированными origin'ами).
+const GOOGLE_CLIENT_ID = '872723319158-cmr4v5v31fk3uv8ass3vvdch7at66n8e.apps.googleusercontent.com';
+
 // Токен Telegram НЕ хранится в коде (это секрет).
 // Задаётся один раз в редакторе Apps Script:
 //   Настройки проекта (шестерёнка) → Свойства скрипта → Добавить свойство
@@ -817,6 +821,96 @@ function setupTrigger() {
 }
 
 // ============================================================
+// АВТОРИЗАЦИЯ ЧЕРЕЗ GOOGLE — вход + роли (admin / manager)
+// ============================================================
+
+// Запустить вручную ОДИН РАЗ. Создаёт лист "Доступ" - туда вписать вручную
+// email каждого менеджера, его имя ТОЧНО как оно встречается в заказах
+// (колонка "Менеджер по продажам" в 1С, например "Ахтамова Лиана"), и роль.
+function setupAccessSheet() {
+  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  if (ss.getSheetByName('Доступ')) {
+    Logger.log('Лист «Доступ» уже существует - ничего не делаю.');
+    return;
+  }
+  const sheet = ss.insertSheet('Доступ');
+  const headers = ['Email', 'Имя менеджера (как в заказах)', 'Роль (admin/manager)'];
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
+  sheet.setColumnWidth(1, 260);
+  sheet.setColumnWidth(2, 260);
+  sheet.setColumnWidth(3, 170);
+  Logger.log('✅ Лист «Доступ» создан. Заполни email/имя/роль вручную (по строке на человека).');
+}
+
+// Проверяет id_token через Google, возвращает email (в нижнем регистре) или null.
+function verifyGoogleToken_(idToken) {
+  if (!idToken) return null;
+  try {
+    const resp = UrlFetchApp.fetch(
+      'https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(idToken),
+      { muteHttpExceptions: true }
+    );
+    if (resp.getResponseCode() !== 200) return null;
+    const info = JSON.parse(resp.getContentText());
+    if (info.aud !== GOOGLE_CLIENT_ID) return null;       // токен выписан не для нашего приложения
+    if (!info.email || info.email_verified !== 'true') return null;
+    return String(info.email).trim().toLowerCase();
+  } catch (e) {
+    return null;
+  }
+}
+
+// Ищет email в листе "Доступ", возвращает {name, role} или null.
+function getAccessRole_(ss, email) {
+  const sheet = ss.getSheetByName('Доступ');
+  if (!sheet || sheet.getLastRow() < 2) return null;
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
+  for (let i = 0; i < data.length; i++) {
+    const rowEmail = String(data[i][0] || '').trim().toLowerCase();
+    if (rowEmail && rowEmail === email) {
+      return {
+        name: String(data[i][1] || '').trim(),
+        role: String(data[i][2] || '').trim().toLowerCase(),
+      };
+    }
+  }
+  return null;
+}
+
+// Урезанный набор данных для роли "manager" - только его собственные цифры,
+// без доступа к данным других людей и компании в целом.
+function getManagerView_(ss, managerName) {
+  const orders = getOrdersData(ss);
+  if (orders.error) return { error: orders.error };
+
+  const myDetail = (orders.by_manager_detail || {})[managerName] || null;
+  const myManagerRow = (orders.by_manager || []).filter(function(m) { return m.name === managerName; });
+  const myLogistRow  = (orders.by_logist  || []).filter(function(m) { return m.name === managerName; });
+
+  const allManagers = getManagersData(ss);
+  const sur = managerName.trim().split(' ')[0].toLowerCase();
+  const myPlanRow = allManagers.filter(function(m) {
+    return m.name && m.name.trim().split(' ')[0].toLowerCase() === sur;
+  });
+
+  const detailWrapped = {};
+  if (myDetail) detailWrapped[managerName] = myDetail;
+
+  return {
+    updated: new Date().toISOString(),
+    role: 'manager',
+    managerName: managerName,
+    managers: myPlanRow,
+    orders: {
+      period: orders.period,
+      by_manager: myManagerRow,
+      by_logist: myLogistRow,
+      by_manager_detail: detailWrapped,
+    },
+  };
+}
+
+// ============================================================
 // API ДЛЯ ДАШБОРДА — читает Штатку для статусов и типов
 // ============================================================
 // ============================================================
@@ -833,24 +927,49 @@ function doGet(e) {
       .setMimeType(ContentService.MimeType.JSON);
   }
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
+
+  // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём
+  var idToken = e && e.parameter ? (e.parameter.id_token || '') : '';
+  var email = verifyGoogleToken_(idToken);
+  if (!email) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ error: 'Не авторизован', needLogin: true }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  var access = getAccessRole_(ss, email);
+  if (!access || !access.role) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ error: 'У этого аккаунта нет доступа к дашборду', needLogin: true }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
   try {
-    // Отдельный endpoint для истории по машинам (тяжёлые данные, грузим лениво)
+    // Отдельный endpoint для истории по машинам (тяжёлые данные, грузим лениво) - только admin
     var action = e && e.parameter ? (e.parameter.action || '') : '';
     if (action === 'vehicle_history') {
+      if (access.role !== 'admin') {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
+      }
       return ContentService
         .createTextOutput(JSON.stringify({ history: getVehicleHistory(ss) }))
         .setMimeType(ContentService.MimeType.JSON);
     }
 
-    // Список месяцев, по которым есть архив заказов - для выпадающего списка периода
+    // Список месяцев, по которым есть архив заказов - для выпадающего списка периода (только admin)
     if (action === 'available_periods') {
+      if (access.role !== 'admin') {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
+      }
       return ContentService
         .createTextOutput(JSON.stringify({ periods: getAvailablePeriods(ss) }))
         .setMimeType(ContentService.MimeType.JSON);
     }
 
-    // Данные за прошлый период (вкладки Заказы/Менеджеры/Логисты/Зарплата)
+    // Данные за прошлый период (вкладки Заказы/Менеджеры/Логисты/Зарплата, только admin)
     if (action === 'orders_period') {
+      if (access.role !== 'admin') {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
+      }
       var period = e.parameter.period || '';
       if (!/^\d{4}-\d{2}$/.test(period)) {
         return ContentService
@@ -865,12 +984,20 @@ function doGet(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
 
+    // Менеджер - только его собственные данные, без доступа к остальному
+    if (access.role === 'manager') {
+      return ContentService
+        .createTextOutput(JSON.stringify(getManagerView_(ss, access.name)))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
     const staffData = getStaffData(ss); // читаем Штатку один раз
     // Карта госномер → марка из Штатки (для всех 55 машин, не только с выручкой)
     var staffMarkas = {};
     Object.values(staffData).forEach(function(v) { staffMarkas[v.gosOriginal] = v.marka; });
     const data = {
       updated:    new Date().toISOString(),
+      role:       'admin',
       summary:    getSummaryData(ss),
       vehicles:   getVehiclesData(ss),
       managers:   getManagersData(ss),

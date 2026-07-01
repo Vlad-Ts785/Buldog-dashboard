@@ -319,7 +319,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   <div id="loading-logo-wrap">
     <img id="loading-logo" src="logo.png" alt="ЯРД" onerror="this.style.display='none'">
   </div>
-  <div class="loading-text">Строим грандиозные планы ...</div>
+  <div class="loading-text" id="loading-text">Прогреваем дизель…</div>
 </div>
 
 <!-- ═══ ЭКРАН ВХОДА ═════════════════════════════════════════ -->
@@ -855,6 +855,44 @@ function updatePayment(val) {
   if (D) renderKPI();
 }
 
+// ── ФРАЗЫ НА ЗАГРУЗКЕ ────────────────────────────────────────
+const LOADING_PHRASES = [
+  'Прогреваем дизель…',
+  'Готовим ковш экскаватора…',
+  'Раскладываем аппарели трала…',
+  'Подкачиваем покрышки…',
+  'Цепляем трал к тягачу…',
+  'Выставляем аутригеры крана…',
+  'Стропим негабарит…',
+  'Будим водителей…',
+  'Согласуем маршрут с ГИБДД…',
+  'Поднимаем стрелу крана…',
+  'Заливаем солярку под пробку…',
+  'Меряем габариты груза…',
+  'Считаем тонно-километры…',
+  'Собираем путевые листы…',
+  'Грузим экскаватор на трал…',
+  'Разворачиваем длинномер…',
+  'Затягиваем такелаж…',
+  'Пломбируем баки…',
+];
+let loadingPhraseTimer = null;
+function startLoadingPhrases() {
+  const el = document.getElementById('loading-text');
+  if (!el) return;
+  const pool = LOADING_PHRASES.slice().sort(function(){ return Math.random() - 0.5; });
+  let i = 0;
+  el.textContent = pool[0];
+  clearInterval(loadingPhraseTimer);
+  loadingPhraseTimer = setInterval(function() {
+    i = (i + 1) % pool.length;
+    el.style.transition = 'opacity .25s';
+    el.style.opacity = '0';
+    setTimeout(function(){ el.textContent = pool[i]; el.style.opacity = '1'; }, 250);
+  }, 1600);
+}
+function stopLoadingPhrases() { clearInterval(loadingPhraseTimer); loadingPhraseTimer = null; }
+
 // ── ВХОД ЧЕРЕЗ GOOGLE ────────────────────────────────────────
 const GOOGLE_CLIENT_ID = '872723319158-cmr4v5v31fk3uv8ass3vvdch7at66n8e.apps.googleusercontent.com';
 let ID_TOKEN = sessionStorage.getItem('id_token') || '';
@@ -883,6 +921,7 @@ async function sendDriverWaybillReport() {
 
 function showLoginScreen(errorText) {
   document.getElementById('loading').style.display = 'none';
+  stopLoadingPhrases();
   document.getElementById('login-screen').style.display = 'flex';
   const sidebar = document.querySelector('.sidebar');
   const mainWrap = document.querySelector('.main-wrap');
@@ -927,6 +966,7 @@ function logoutUser() {
 // Вызывается самой библиотекой Google (через ?onload= в URL скрипта) - надёжнее, чем
 // полагаться на window.load, который может сработать раньше, чем загрузится сама библиотека.
 function initGoogleSignIn() {
+  startLoadingPhrases();
   google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, callback: handleCredentialResponse });
   if (ID_TOKEN) loadData();
   else showLoginScreen();
@@ -934,6 +974,7 @@ function initGoogleSignIn() {
 
 async function loadData() {
   document.getElementById('loading').style.display = 'flex';
+  startLoadingPhrases();
   try {
     const mainRes = await fetch(apiUrl({}));
     D = await mainRes.json();
@@ -948,6 +989,7 @@ async function loadData() {
     document.getElementById('error-block').querySelector('b').textContent = 'Ошибка: ' + e.message;
   }
   document.getElementById('loading').style.display = 'none';
+  stopLoadingPhrases();
 }
 
 function renderMyPage() {

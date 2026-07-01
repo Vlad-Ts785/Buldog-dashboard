@@ -1356,6 +1356,45 @@ const TRAL_LOGISTS = [
 
 // ── ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ─────────────────────────────────
 
+// Груз в 1С - свободный текст ("Экскаватор Hitachi", "экскав.", "Экск-р").
+// Сводим к категории по ключевому слову, чтобы в топе грузов не было дублей.
+// Порядок важен: более узкие слова проверяем раньше (автокран до крана).
+const CARGO_KEYWORDS = [
+  { cat: 'Кран',              words: ['кран', 'автокран', 'гусеничный кран'] },
+  { cat: 'Экскаватор',        words: ['экскав', 'эксков'] },
+  { cat: 'Бульдозер',         words: ['бульдоз', 'бульдоз'] },
+  { cat: 'Погрузчик',         words: ['погрузчик', 'фронтальн'] },
+  { cat: 'Каток',             words: ['каток'] },
+  { cat: 'Грейдер',           words: ['грейдер', 'автогрейдер'] },
+  { cat: 'Самосвал',          words: ['самосвал'] },
+  { cat: 'Трактор',           words: ['трактор'] },
+  { cat: 'Буровая установка', words: ['буров', 'бур установ', 'убр', 'бкм'] },
+  { cat: 'Трубоукладчик',     words: ['трубоуклад'] },
+  { cat: 'Бытовка / вагон',   words: ['бытов', 'вагон', 'блок-контейнер', 'модул'] },
+  { cat: 'Ёмкость / резервуар', words: ['ёмкост', 'емкост', 'резервуар', 'цистерн'] },
+  { cat: 'Трубы',             words: ['труб'] },
+  { cat: 'Плиты / блоки',     words: ['плит', 'блок фбс', 'жби'] },
+  { cat: 'Сваи',              words: ['свая', 'свай'] },
+  { cat: 'Генератор / ДГУ',   words: ['генератор', 'дгу', 'дизельн'] },
+  { cat: 'Опалубка',          words: ['опалубк'] },
+  { cat: 'Металлоконструкции', words: ['металлоконстр', 'м/к', 'мк '] },
+];
+
+function normalizeCargo(text) {
+  const t = String(text || '').trim();
+  if (!t) return '(не указан)';
+  const low = t.toLowerCase();
+  for (let i = 0; i < CARGO_KEYWORDS.length; i++) {
+    const words = CARGO_KEYWORDS[i].words;
+    for (let j = 0; j < words.length; j++) {
+      if (low.indexOf(words[j]) >= 0) return CARGO_KEYWORDS[i].cat;
+    }
+  }
+  // Не распознали - берём первое слово с заглавной, чтобы схлопнуть хотя бы регистр
+  const firstWord = t.split(/[\s,;.]+/)[0];
+  return firstWord.charAt(0).toUpperCase() + firstWord.slice(1).toLowerCase();
+}
+
 function ordCleanName(fullName) {
   return String(fullName || '')
     .replace(/\+?[78][\d\s\-\(\)]{8,}/g, '')
@@ -1774,7 +1813,7 @@ function aggregateOrdersRows(rows) {
       internalMap[entName].amount += amount;
       if (equip === 'Трал')      internalTral++;
       if (equip === 'Длинномер') internalLong++;
-      const cargoName = str(row, 'cargo') || '(не указан)';
+      const cargoName = normalizeCargo(str(row, 'cargo'));
       internalCargoMap[cargoName] = (internalCargoMap[cargoName] || 0) + 1;
     }
     if (equip === 'Трал')      { tralOrders++;  tralAmount  += amount; }

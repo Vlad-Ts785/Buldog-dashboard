@@ -224,7 +224,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .tbl tfoot td{padding:9px 10px;border-top:2px solid var(--border);color:var(--text);font-size:12px;background:var(--bg3);}
 .tbl th.sortable{cursor:pointer;user-select:none;}.tbl th.sortable:hover{color:var(--text);}
 .tbl .num{text-align:right;font-variant-numeric:tabular-nums;}
-.tbl .green{color:#4fd4a3;}.tbl .red{color:#f07b7a;}.tbl .amber{color:#f5be6a;}.tbl .muted{color:var(--muted);font-size:11px;}
+.tbl .green{color:#4fd4a3;}.tbl .red{color:#f07b7a;}.tbl .amber{color:#f5be6a;}.tbl .blue{color:#7db9ee;}.tbl .muted{color:var(--muted);font-size:11px;}
 
 /* ── CHART ──────────────────────────────────────────────── */
 .chart-wrap{position:relative;width:100%;}
@@ -512,6 +512,14 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 
     <!-- ═══ ПАРК ══════════════════════════════════════════════ -->
     <div id="page-vehicles" class="page">
+      <div class="card" style="margin-bottom:16px">
+        <div class="sec-header" style="margin-bottom:2px">
+          <div class="sec-title">Расход топлива к выручке</div>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:14px">Сколько копеек топлива в каждом рубле выручки. Свой парк, текущий месяц.</div>
+        <div id="fuel-cards" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px"></div>
+      </div>
+
       <div class="card">
         <div class="sec-header">
           <div class="sec-title">Все машины</div>
@@ -1872,8 +1880,61 @@ function setVehSort(col) {
   renderVehiclesTable();
 }
 
+// Длинномер = тип "Борт" (как в getFleetStatus на бэкенде), остальное = трал
+function isLongVehicle(t) { t = t || ''; return t === 'Борт' || t.indexOf('Борт') === 0; }
+
+// Расход топлива к выручке по группам (весь парк / тралы / длинномеры)
+function computeFuelStats(vehicles) {
+  var g = { all:{fuel:0,rev:0}, tral:{fuel:0,rev:0}, long:{fuel:0,rev:0} };
+  (vehicles||[]).forEach(function(v){
+    var rev=v.revenue||0, fuel=v.fuel||0;
+    g.all.fuel+=fuel; g.all.rev+=rev;
+    if (isLongVehicle(v.type)) { g.long.fuel+=fuel; g.long.rev+=rev; }
+    else { g.tral.fuel+=fuel; g.tral.rev+=rev; }
+  });
+  function pct(o){ return o.rev>0 ? o.fuel/o.rev*100 : 0; }
+  g.all.pct=pct(g.all); g.tral.pct=pct(g.tral); g.long.pct=pct(g.long);
+  return g;
+}
+
+// Цвет ячейки топлива: относительно среднего по своей группе.
+// зелёный = около среднего, красный = заметно выше, синий = заметно ниже / ноль.
+function fuelCellClass(v, fuelStats) {
+  var rev = v.revenue||0;
+  if (rev <= 0) return 'muted';
+  var groupAvg = isLongVehicle(v.type) ? fuelStats.long.pct : fuelStats.tral.pct;
+  if (groupAvg <= 0) return 'muted';
+  var ratio = (v.fuel||0)/rev*100 / groupAvg;
+  if (ratio > 1.35) return 'red';
+  if (ratio < 0.65) return 'blue';
+  return 'green';
+}
+
+function renderFuelAnalysis() {
+  var el = document.getElementById('fuel-cards');
+  if (!el || !D || !D.vehicles) return;
+  var s = computeFuelStats(D.vehicles);
+  function mln(n){ var x=Math.abs(n); return x>=1000000 ? (x/1000000).toFixed(2)+' млн' : Math.round(x).toLocaleString('ru-RU'); }
+  function card(name, o) {
+    var pct = o.pct, pctStr = pct.toFixed(1);
+    var barW = Math.min(pct*3, 100);
+    var tone = pct>=18 ? 'var(--red)' : pct>=14 ? 'var(--amber)' : 'var(--green)';
+    return '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:14px 16px">'+
+      '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">'+name+'</div>'+
+      '<div style="display:flex;align-items:baseline;gap:6px"><span style="font-size:30px;font-weight:700;color:'+tone+'">'+pctStr+'</span><span style="font-size:16px;color:'+tone+'">%</span></div>'+
+      '<div style="font-size:11px;color:var(--muted);margin-top:2px">от выручки</div>'+
+      '<div style="height:6px;border-radius:3px;background:rgba(255,255,255,.06);margin-top:12px;overflow:hidden"><div style="width:'+barW+'%;height:100%;background:'+tone+';border-radius:3px"></div></div>'+
+      '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:10px"><span>топливо</span><span style="color:var(--text);font-weight:600">'+mln(o.fuel)+' ₽</span></div>'+
+      '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:3px"><span>выручка</span><span style="color:var(--text);font-weight:600">'+mln(o.rev)+' ₽</span></div>'+
+    '</div>';
+  }
+  el.innerHTML = card('Весь парк', s.all) + card('Тралы', s.tral) + card('Длинномеры', s.long);
+}
+
 function renderVehiclesTable() {
   if (!D) return;
+  renderFuelAnalysis();
+  var fuelStats = computeFuelStats(D.vehicles || []);
 
   var type = document.getElementById('filter-type') ? document.getElementById('filter-type').value : '';
   var status = document.getElementById('filter-status') ? document.getElementById('filter-status').value : '';
@@ -1937,7 +1998,7 @@ function renderVehiclesTable() {
       '<td class="muted">' + ((v.driver||'').trim().split(' ')[0] || '—') + '</td>' +
       '<td class="num">' + fmt(v.revenue) + '</td>' +
       '<td class="num muted">' + fmt(v.fot) + '</td>' +
-      '<td class="num muted">' + fmt(v.fuel) + '</td>' +
+      '<td class="num ' + fuelCellClass(v, fuelStats) + '"><b>' + fmt(v.fuel) + '</b></td>' +
       '<td class="num muted">' + fmt(v.parts) + '</td>' +
       '<td class="num ' + finesCls + '">' + (v.fines ? fmt(Math.abs(v.fines)) : '—') + '</td>' +
       '<td class="num ' + cls + '"><b>' + fmt(v.profit) + '</b></td>' +

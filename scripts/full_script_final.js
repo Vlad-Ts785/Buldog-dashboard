@@ -1046,6 +1046,27 @@ function doGet(e) {
       }
     }
 
+    if (action === 'vehicles_period') {
+      if (access.role !== 'admin') {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var vpFrom = e.parameter.from || '';
+      var vpTo = e.parameter.to || '';
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(vpFrom) || !/^\d{4}-\d{2}-\d{2}$/.test(vpTo)) {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Некорректный диапазон дат' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var vpFromP = vpFrom.split('-').map(Number);
+      var vpToP = vpTo.split('-').map(Number);
+      var vpStaffData = getStaffData(ss);
+      var vpVehicles = aggregateFinHistoryForRange(ss, vpStaffData,
+        new Date(vpFromP[0], vpFromP[1] - 1, vpFromP[2]),
+        new Date(vpToP[0], vpToP[1] - 1, vpToP[2]));
+      return ContentService.createTextOutput(JSON.stringify({
+        vehicles: vpVehicles,
+        drivers: deriveDriversFromVehicles(vpVehicles)
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
     // Менеджер - только его собственные данные, без доступа к остальному
     if (access.role === 'manager') {
       return ContentService
@@ -1057,13 +1078,15 @@ function doGet(e) {
     // Карта госномер → марка из Штатки (для всех 55 машин, не только с выручкой)
     var staffMarkas = {};
     Object.values(staffData).forEach(function(v) { staffMarkas[v.gosOriginal] = v.marka; });
+    var defaultRange = getCurrentMonthRange_();
+    var vehiclesData = aggregateFinHistoryForRange(ss, staffData, defaultRange.from, defaultRange.to);
     const data = {
       updated:    new Date().toISOString(),
       role:       'admin',
       summary:    getSummaryData(ss),
-      vehicles:   getVehiclesData(ss, staffData),
+      vehicles:   vehiclesData,
       managers:   getManagersData(ss),
-      drivers:    getDriversData(ss),
+      drivers:    deriveDriversFromVehicles(vehiclesData),
       fleet:      getFleetStatus(staffData),
       history:    getHistoryData(ss),
       repairs:    getRepairsData(staffData),
@@ -1413,35 +1436,87 @@ function getRepairsData(staffData) {
 }
 
 // Нормализованные_данные = единственный источник (A-J финансы, M тип, N статус)
-function getVehiclesData(ss, staffData) {
-  var norm = ss.getSheetByName('Нормализованные_данные');
-  if (!norm || norm.getLastRow() < 2) return [];
+// Строит массив машин (страница "Техника") агрегацией "Истории_финансов" за диапазон дат.
+// Снимок в Истории_финансов кумулятивный (итог с начала месяца - так же, как
+// Нормализованные_данные, которые 1С каждый месяц обнуляет) - поэтому для каждой пары
+// (машина, месяц) внутри диапазона берём САМЫЙ ПОЗДНИЙ снимок, и суммируем по месяцам, если
+// диапазон пересекает границу месяца (2026-07-02: раньше "Техника" читала Нормализованные_данные
+// напрямую, а "Водители" - отдельный лист, который 1С обновляет только на текущий месяц - отсюда
+// был рассинхрон после смены месяца. Теперь один источник для обеих страниц).
+// Тип/статус - из самого свежего снимка в диапазоне. Марка/прицеп/водитель - "текущее состояние"
+// из Штатки (staffData), не историзируются - как и сцепка тягач+прицеп в остальном проекте.
+function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate) {
+  var hist = ss.getSheetByName('История_финансов');
+  if (!hist || hist.getLastRow() < 2) return [];
 
-  var rows = norm.getRange(2, 1, norm.getLastRow() - 1, 15).getValues();
-  var result = [];
-  for (var i = 0; i < rows.length; i++) {
-    var r = rows[i];
-    var gos = String(r[0] || '').trim();
+  var from = new Date(fromDate); from.setHours(0, 0, 0, 0);
+  var to = new Date(toDate); to.setHours(23, 59, 59, 999);
+
+  var data = hist.getRange(2, 1, hist.getLastRow() - 1, 12).getValues();
+  var byVehicleMonth = {}; // gos -> { 'YYYY-MM': {date, row} }
+  for (var i = 0; i < data.length; i++) {
+    var r = data[i];
+    var d = r[0] instanceof Date ? r[0] : new Date(r[0]);
+    if (isNaN(d.getTime()) || d < from || d > to) continue;
+    var gos = String(r[1] || '').trim();
     if (!gos) continue;
-    var staffInfo = staffData ? staffData[normalizeGos(gos)] : null;
-    result.push({
-      gos:     gos,
-      marka:   String(r[1] || ''),
-      type:    String(r[12] || ''),              // M — Тип из Штатки
-      status:  String(r[13] || ''),              // N — Статус из Штатки
-      revenue: parseFloat(r[3]) || 0,
-      fot:     Math.abs(parseFloat(r[4]) || 0),
-      fuel:    Math.abs(parseFloat(r[5]) || 0),
-      parts:   Math.abs(parseFloat(r[6]) || 0),
-      fines:   Math.abs(parseFloat(r[7]) || 0),
-      tolls:   Math.abs(parseFloat(r[8]) || 0),
-      profit:  parseFloat(r[9]) || 0,
-      trailer: String(r[10] || ''),
-      plan:    parseFloat(r[14]) || 0,           // O — план ВП из Штатки
-      driver:  staffInfo ? staffInfo.driver : '',
-    });
+    var monthKey = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    if (!byVehicleMonth[gos]) byVehicleMonth[gos] = {};
+    var existing = byVehicleMonth[gos][monthKey];
+    if (!existing || d > existing.date) byVehicleMonth[gos][monthKey] = { date: d, row: r };
   }
+
+  var result = [];
+  Object.keys(byVehicleMonth).forEach(function(gos) {
+    var months = byVehicleMonth[gos];
+    var agg = { gos: gos, marka: '', type: '', status: '', revenue: 0, fot: 0, fuel: 0, parts: 0,
+      fines: 0, tolls: 0, profit: 0, trailer: '', plan: 0, driver: '' };
+    var latestDate = null, latestRow = null;
+    Object.keys(months).forEach(function(mk) {
+      var r = months[mk].row;
+      agg.revenue += parseFloat(r[4]) || 0;
+      agg.fot     += Math.abs(parseFloat(r[5]) || 0);
+      agg.fuel    += Math.abs(parseFloat(r[6]) || 0);
+      agg.parts   += Math.abs(parseFloat(r[7]) || 0);
+      agg.fines   += Math.abs(parseFloat(r[8]) || 0);
+      agg.tolls   += Math.abs(parseFloat(r[9]) || 0);
+      agg.profit  += parseFloat(r[10]) || 0;
+      agg.plan    += parseFloat(r[11]) || 0;
+      var d = months[mk].date;
+      if (!latestDate || d > latestDate) { latestDate = d; latestRow = r; }
+    });
+    agg.type = String(latestRow[2] || '');
+    agg.status = String(latestRow[3] || '');
+    var staffInfo = staffData ? staffData[normalizeGos(gos)] : null;
+    if (staffInfo) {
+      agg.marka = staffInfo.marka;
+      agg.trailer = staffInfo.trailerGos;
+      agg.driver = staffInfo.driver;
+    }
+    result.push(agg);
+  });
   return result;
+}
+
+// "Топ" водителей (страница "Водители") - производный от того же массива машин, не отдельный
+// лист (раньше читали "ТОП_водителей_по_плану", который 1С обновляет только на текущий месяц -
+// источник рассинхрона с "Техникой"). Берём машины с назначенным водителем и планом > 0.
+function deriveDriversFromVehicles(vehicles) {
+  return vehicles
+    .filter(function(v) { return v.driver && v.plan > 0; })
+    .map(function(v) {
+      return { marka: v.marka, gos: v.gos, type: v.type, plan: v.plan, fakt: v.revenue,
+        pct: v.plan > 0 ? v.revenue / v.plan : 0, driver: v.driver };
+    })
+    .sort(function(a, b) { return b.fakt - a.fakt; });
+}
+
+// Диапазон по умолчанию для "Техники"/"Водителей" без выбора периода - с начала текущего
+// месяца (по Москве) по сегодня.
+function getCurrentMonthRange_() {
+  var todayStr = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM-dd');
+  var p = todayStr.split('-').map(Number);
+  return { from: new Date(p[0], p[1] - 1, 1), to: new Date(p[0], p[1] - 1, p[2]) };
 }
 
 function getSummaryData(ss) {
@@ -1500,19 +1575,6 @@ function getManagersData(ss) {
     payNal:  parseFloat(row[4]) || 0,
     pct:     parseFloat(row[5]) || 0,
   })).sort((a,b) => b.fakt - a.fakt);
-}
-
-function getDriversData(ss) {
-  const drv = ss.getSheetByName('ТОП_водителей_по_плану');
-  if (!drv || drv.getLastRow() < 2) return [];
-  const data = drv.getRange(2, 1, drv.getLastRow()-1, 7).getValues();
-  return data.map(row => ({
-    marka:  row[0], gos: row[1], type: row[2],
-    plan:   parseFloat(row[3]) || 0,
-    fakt:   parseFloat(row[4]) || 0,
-    pct:    parseFloat(row[5]) || 0,
-    driver: row[6],
-  }));
 }
 
 // staffData — результат getStaffData(ss). Считаем по всему парку (включая машины без выручки).

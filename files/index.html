@@ -411,6 +411,15 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
       </select>
       <span id="period-status" style="font-size:11px;color:var(--muted)"></span>
     </div>
+    <div id="range-selector-wrap" style="display:none;align-items:center;gap:8px;padding-bottom:16px;flex-wrap:wrap">
+      <label style="font-size:12px;color:var(--muted)">Период:</label>
+      <input id="range-from" type="date" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 10px;font-size:13px">
+      <span style="color:var(--muted);font-size:12px">—</span>
+      <input id="range-to" type="date" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 10px;font-size:13px">
+      <button onclick="applyVehiclesRange()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer">Показать</button>
+      <button onclick="resetVehiclesRange()" style="background:transparent;border:none;color:var(--muted);font-size:12px;cursor:pointer;text-decoration:underline">Текущий месяц</button>
+      <span id="range-status" style="font-size:11px;color:var(--muted)"></span>
+    </div>
   </div>
 
   <main>
@@ -615,10 +624,6 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
     <!-- ═══ ВОДИТЕЛИ ════════════════════════════════════════════ -->
     <div id="page-drivers" class="page">
       <div class="card">
-        <div class="sec-header"><div class="sec-title">Топ-10 водителей по выполнению плана</div></div>
-        <div class="chart-wrap" style="height:320px"><canvas id="chart-drivers"></canvas></div>
-      </div>
-      <div class="card" style="margin-top:16px;">
         <table class="tbl">
           <thead><tr><th>Водитель</th><th>Машина</th><th>Тип</th><th class="num">Заказов</th><th class="num">План</th><th class="num">Факт</th><th class="num">%</th><th>Оценка</th></tr></thead>
           <tbody id="drivers-body"></tbody>
@@ -1436,6 +1441,53 @@ function renderSalesTabsForPeriod() {
   renderSalesSalary();
   D.orders = realOrders;
   if (D.summary) D.summary.profit = realProfit;
+}
+
+// ── ВЫБОР ДИАПАЗОНА (Техника / Водители) ────────────────────
+// vehiclesRangeData = null значит "текущий месяц" (то, что и так пришло в основном payload).
+let vehiclesRangeData = null; // { vehicles:[...], drivers:[...] } за выбранный диапазон
+
+async function applyVehiclesRange() {
+  const from = document.getElementById('range-from').value;
+  const to = document.getElementById('range-to').value;
+  const status = document.getElementById('range-status');
+  if (!from || !to) { if (status) status.textContent = 'Укажите обе даты'; return; }
+  if (status) status.textContent = 'Загрузка...';
+  try {
+    const res = await fetch(apiUrl({ action: 'vehicles_period', from: from, to: to }));
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    vehiclesRangeData = data;
+    if (status) status.textContent = '';
+    renderRangePages();
+  } catch (e) {
+    if (status) status.textContent = 'Ошибка: ' + e.message;
+  }
+}
+
+function resetVehiclesRange() {
+  vehiclesRangeData = null;
+  document.getElementById('range-from').value = '';
+  document.getElementById('range-to').value = '';
+  const status = document.getElementById('range-status');
+  if (status) status.textContent = '';
+  renderRangePages();
+}
+
+// Подменяет D.vehicles/D.drivers на выбранный диапазон только на время рендера
+// "Техники" и "Водителей", синхронно, и сразу возвращает обратно.
+function renderRangePages() {
+  if (!D) return;
+  const realVehicles = D.vehicles;
+  const realDrivers = D.drivers;
+  if (vehiclesRangeData) {
+    D.vehicles = vehiclesRangeData.vehicles;
+    D.drivers = vehiclesRangeData.drivers;
+  }
+  renderVehiclesTable();
+  renderDrivers();
+  D.vehicles = realVehicles;
+  D.drivers = realDrivers;
 }
 
 // ── KPI ────────────────────────────────────────────────────
@@ -2328,21 +2380,6 @@ function renderMgrChart(id, mgrs, showPlan) {
 function renderDrivers() {
   if (!D) return;
   const drivers = D.drivers || [];
-  const ctx = document.getElementById('chart-drivers');
-  if (ctx._chart) ctx._chart.destroy();
-  ctx._chart = new Chart(ctx, {
-    type:'bar',
-    data:{
-      labels:drivers.map(d => d.driver.split(' ').slice(0,2).join(' ')),
-      datasets:[
-        {label:'План',data:drivers.map(d=>d.plan),backgroundColor:'rgba(255,255,255,0.06)',borderRadius:3},
-        {label:'Факт',data:drivers.map(d=>d.fakt),backgroundColor:drivers.map(d=>{const p=d.pct*100;return p>=90?'#1D9E75':p>=60?'#EF9F27':'#E24B4A';}),borderRadius:3}
-      ]
-    },
-    options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{labels:{color:'#888780',font:{size:12},boxWidth:10}},tooltip:{callbacks:{label:c=>' '+fmt(c.raw)}}},
-      scales:{x:{ticks:{color:'#888780',callback:v=>fmtK(v)},grid:{color:'rgba(255,255,255,0.04)'}},y:{ticks:{color:'#ccc',font:{size:11}},grid:{display:false}}}}
-  });
   // Словарь заказов по фамилии водителя
   var drvOrderMap = {};
   ((D.orders && D.orders.by_driver) || []).forEach(function(x) {
@@ -4057,6 +4094,7 @@ function renderSalesLog() {
 
 // ── НАВИГАЦИЯ ──────────────────────────────────────────────
 const PERIOD_PAGES = ['sales', 'sales-mgr', 'sales-log', 'sales-salary'];
+const RANGE_PAGES = ['vehicles', 'drivers'];
 
 function showPage(id, el) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -4072,6 +4110,9 @@ function showPage(id, el) {
     wrap.style.display = PERIOD_PAGES.indexOf(id) >= 0 ? 'flex' : 'none';
     if (PERIOD_PAGES.indexOf(id) >= 0 && !availablePeriods.length) loadAvailablePeriods();
   }
+
+  var rangeWrap = document.getElementById('range-selector-wrap');
+  if (rangeWrap) rangeWrap.style.display = RANGE_PAGES.indexOf(id) >= 0 ? 'flex' : 'none';
 }
 
 // ── УТИЛИТЫ ────────────────────────────────────────────────

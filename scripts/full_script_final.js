@@ -1382,7 +1382,7 @@ const CARGO_KEYWORDS = [
 
 function normalizeCargo(text) {
   const t = String(text || '').trim();
-  if (!t) return '(не указан)';
+  if (!t) return 'Прочие грузы';   // пустой груз - в общую корзину
   const low = t.toLowerCase();
   for (let i = 0; i < CARGO_KEYWORDS.length; i++) {
     const words = CARGO_KEYWORDS[i].words;
@@ -1390,9 +1390,8 @@ function normalizeCargo(text) {
       if (low.indexOf(words[j]) >= 0) return CARGO_KEYWORDS[i].cat;
     }
   }
-  // Не распознали - берём первое слово с заглавной, чтобы схлопнуть хотя бы регистр
-  const firstWord = t.split(/[\s,;.]+/)[0];
-  return firstWord.charAt(0).toUpperCase() + firstWord.slice(1).toLowerCase();
+  // Не распознали (сборная солянка) - тоже в "Прочие грузы"
+  return 'Прочие грузы';
 }
 
 function ordCleanName(fullName) {
@@ -1758,6 +1757,14 @@ function aggregateOrdersRows(rows) {
   const internalMap  = {}; // вкладка "Внутренние перевозки" - по нашим предприятиям
   const internalCargoMap = {}; // груз -> кол-во рейсов (только внутренние)
   let internalTral = 0, internalLong = 0; // тип нашей техники (только внутренние)
+  const cargoTralMap = {}; // категория груза -> {trips, amount} (тралы, все заказы)
+  const cargoLongMap = {}; // категория груза -> {trips, amount} (длинномеры)
+
+  function addCargo(map, cat, amount) {
+    if (!map[cat]) map[cat] = { name: cat, trips: 0, amount: 0 };
+    map[cat].trips++;
+    map[cat].amount += amount;
+  }
 
   // Каноничное имя внутреннего предприятия - чтобы варианты записи клиента схлопывались
   // в одну группу (по совпадению с шаблоном из INTERNAL_CLIENTS).
@@ -1816,8 +1823,8 @@ function aggregateOrdersRows(rows) {
       const cargoName = normalizeCargo(str(row, 'cargo'));
       internalCargoMap[cargoName] = (internalCargoMap[cargoName] || 0) + 1;
     }
-    if (equip === 'Трал')      { tralOrders++;  tralAmount  += amount; }
-    if (equip === 'Длинномер') { longOrders++;  longAmount  += amount; }
+    if (equip === 'Трал')      { tralOrders++;  tralAmount  += amount; addCargo(cargoTralMap, normalizeCargo(str(row, 'cargo')), amount); }
+    if (equip === 'Длинномер') { longOrders++;  longAmount  += amount; addCargo(cargoLongMap, normalizeCargo(str(row, 'cargo')), amount); }
 
     // ── По менеджеру продаж ──
     if (mgrSales && ordInList(mgrSales, TRAL_MANAGERS)) {
@@ -2006,6 +2013,15 @@ function aggregateOrdersRows(rows) {
     };
   });
 
+  // Топ грузов: сортируем по числу рейсов, "Прочие грузы" всегда в конец
+  function sortCargo(map) {
+    return Object.values(map).sort(function(a, b) {
+      if (a.name === 'Прочие грузы') return 1;
+      if (b.name === 'Прочие грузы') return -1;
+      return b.trips - a.trips;
+    });
+  }
+
   const months = rows.map(function(r) {
     const v = r[C.month];
     if (!v) return '';
@@ -2030,6 +2046,8 @@ function aggregateOrdersRows(rows) {
       long_orders:     longOrders,
       long_amount:     longAmount,
     },
+    top_cargo_tral: sortCargo(cargoTralMap),
+    top_cargo_long: sortCargo(cargoLongMap),
     doc_status: {
       no_waybill:         noWaybillOwn[0]+noWaybillOwn[1]+noWaybillOwn[2]+noWaybillHired[0]+noWaybillHired[1]+noWaybillHired[2],
       no_waybill_own:     noWaybillOwn[0]+noWaybillOwn[1]+noWaybillOwn[2],

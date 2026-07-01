@@ -651,7 +651,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 
     <!-- ═══ ПРОДАЖИ ОБЗОР ══════════════════════════════════════ -->
     <div id="page-sales" class="page">
-      <div class="kpi-grid" style="grid-template-columns:1.6fr 1fr 1fr;margin-bottom:16px" id="sales-kpi"></div>
+      <div class="kpi-grid" style="grid-template-columns:1fr 1.35fr 1.35fr;align-items:start;margin-bottom:16px" id="sales-kpi"></div>
       <div class="card" style="margin-bottom:16px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
           <div class="card-title" style="margin-bottom:0" id="sales-period-label">Выручка по дням</div>
@@ -2726,6 +2726,33 @@ function renderInternalTransports(d) {
     : '<div style="color:var(--muted);font-size:13px;padding:8px 0">Нет данных</div>';
 }
 
+// Блок "Топ грузов" (тралы / длинномеры) - категория, рейсы, сумма, доля
+function cargoTopBlock(title, list, totalTrips) {
+  var COL = ['#1D9E75','#378ADD','#7F77DD','#EF9F27','#E24B4A','#1baf7a','#eb6834','#888780'];
+  var rows = (list || []).slice(0, 7);
+  var totTrips = (list || []).reduce(function(a,c){ return a+(c.trips||0); }, 0) || 1;
+  var maxTrips = rows.length ? Math.max.apply(null, rows.map(function(c){ return c.trips||0; })) : 1;
+  var body = rows.length
+    ? rows.map(function(c, i){
+        var w = Math.round((c.trips||0)/maxTrips*100), pct = Math.round((c.trips||0)/totTrips*100);
+        var color = c.name === 'Прочие грузы' ? '#888780' : COL[i % COL.length];
+        return '<div style="margin-bottom:9px">'+
+          '<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:12px;margin-bottom:3px">'+
+            '<span style="display:flex;align-items:center;gap:6px;min-width:0"><span style="width:8px;height:8px;border-radius:2px;background:'+color+';display:inline-block;flex-shrink:0"></span>'+
+            '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+c.name+'</span></span>'+
+            '<span style="white-space:nowrap"><b>'+(c.trips||0)+'</b> <span style="color:var(--muted)">рейс. · '+fmtK2(c.amount||0)+' · '+pct+'%</span></span>'+
+          '</div>'+
+          '<div style="height:6px;border-radius:3px;background:rgba(255,255,255,.06);overflow:hidden"><div style="width:'+w+'%;height:100%;background:'+color+';border-radius:3px"></div></div>'+
+        '</div>';
+      }).join('')
+    : '<div style="color:var(--muted);font-size:12px;padding:8px 0">Нет данных</div>';
+  return '<div class="kpi" style="min-width:0">'+
+    '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px">'+
+      '<span class="kpi-label">'+title+'</span>'+
+      '<span style="font-size:11px;color:var(--muted)">'+totalTrips+' зак.</span>'+
+    '</div>'+ body +'</div>';
+}
+
 function renderSales() {
   if (!D || !D.orders) {
     document.getElementById('sales-kpi').innerHTML =
@@ -2749,7 +2776,6 @@ function renderSales() {
   })();
 
   const tA = s.tral_amount||0, lA = s.long_amount||0, totA = tA+lA||1;
-  const recv = (s.total_amount||0) - (s.total_payment||0);
   document.getElementById('sales-kpi').innerHTML =
     '<div class="kpi">' +
       '<div class="kpi-label">Заказов</div>' +
@@ -2767,17 +2793,8 @@ function renderSales() {
         '<div class="prog-bg"><div class="prog-fill" style="width:' + (lA/totA*100).toFixed(0) + '%;background:var(--green)"></div></div>' +
       '</div>' +
     '</div>' +
-    '<div class="kpi">' +
-      '<div class="kpi-label">Выручка (1С)</div>' +
-      '<div class="kpi-value amber">' + fmtM(s.total_amount||0) + '</div>' +
-      '<div class="kpi-sub">Внутренние: ' + fmtM(s.internal_amount||0) + '</div>' +
-      '<div class="kpi-sub">Найм (затраты): ' + fmtM(s.total_hired_cost||0) + '</div>' +
-    '</div>' +
-    '<div class="kpi">' +
-      '<div class="kpi-label">Поступления</div>' +
-      '<div class="kpi-value green">' + fmtM(s.total_payment||0) + '</div>' +
-      '<div class="kpi-sub">Дебиторка: <span style="color:var(--red)">' + fmtM(recv) + '</span></div>' +
-    '</div>';
+    cargoTopBlock('Топ грузов — тралы', o.top_cargo_tral || [], s.tral_orders || 0) +
+    cargoTopBlock('Топ грузов — длинномеры', o.top_cargo_long || [], s.long_orders || 0);
 
   // Воронка по декадам
   var decades = o.doc_by_decade || [];

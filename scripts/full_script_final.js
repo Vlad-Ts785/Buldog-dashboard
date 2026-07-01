@@ -1437,6 +1437,29 @@ function ordInList(name, list) {
   return list.some(function(m) { return n.indexOf(m) >= 0; });
 }
 
+// Разбивает сырые данные отчёта на группы по месяцу (ключ - "2026-06" и т.д.),
+// используя ту же колонку "Начало работ", что и normalizeOrders() при подсчёте monthKey.
+// Нужна с тех пор, как 1С стала слать отчёт за 2 месяца сразу (прошлый + текущий) -
+// раньше в файле был ровно один месяц, теперь может быть несколько.
+// Возвращает {} если формат файла не распознан (нет строки заголовков на нужном месте).
+function splitOrdersRawByMonth(data) {
+  if (!data || data.length < 5) return {};
+  const headerRow = data[3]; // строка 4 (индекс 3) - как в parseOrdersRawRows
+  const col = {};
+  headerRow.forEach(function(h, i) { const key = String(h || '').trim(); if (key) col[key] = i; });
+  const dateColIdx = col['Начало работ'];
+  if (dateColIdx === undefined) return {};
+
+  const buckets = {};
+  for (let i = 4; i < data.length; i++) {
+    const month = ordMonthKey(data[i][dateColIdx]);
+    if (!month) continue; // строка без даты - пропускаем, к месяцам не относится
+    if (!buckets[month]) buckets[month] = [];
+    buckets[month].push(data[i]);
+  }
+  return buckets;
+}
+
 // ── ИМПОРТ: Gmail → Заказы_сырые ────────────────────────────
 
 function importOrdersReport() {
@@ -1464,6 +1487,39 @@ function importOrdersReport() {
 
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
 
+  // С 1С теперь может приходить сразу несколько месяцев в одном файле (прошлый + текущий -
+  // окно для коррекций до 5-6 числа). Определяем, сколько разных месяцев реально в файле.
+  const monthBuckets = splitOrdersRawByMonth(data);
+  const monthsPresent = Object.keys(monthBuckets).sort(); // по возрастанию "2026-06" < "2026-07"
+
+  if (monthsPresent.length > 1) {
+    // Несколько месяцев в одном файле - разносим каждый в свой лист.
+    // Самый поздний месяц = текущий рабочий (живая таблица), остальные - обновление архивов
+    // (именно то, что нужно для коррекций прошлого месяца в начале следующего).
+    const liveMonth = monthsPresent[monthsPresent.length - 1];
+    const headerRows = data.slice(0, 4); // строки 1-4 (заголовки/шапка отчёта) - общие для всех кусков
+
+    monthsPresent.forEach(function(month) {
+      const monthData = headerRows.concat(monthBuckets[month]);
+      if (month === liveMonth) {
+        let raw = ss.getSheetByName(ORDERS_RAW_SHEET);
+        if (raw) raw.clear();
+        else      raw = ss.insertSheet(ORDERS_RAW_SHEET);
+        raw.getRange(1, 1, monthData.length, monthData[0].length).setValues(monthData);
+        Logger.log('✅ Текущий месяц ' + month + ': ' + monthBuckets[month].length + ' строк -> живая таблица');
+      } else {
+        writeArchiveSheet(ss, ORDERS_ARCHIVE_PFX + month, monthData);
+        Logger.log('✅ Обновлён архив ' + month + ': ' + monthBuckets[month].length + ' строк');
+      }
+    });
+
+    latest.markRead();
+    Logger.log('✅ Заказы импортированы (отчёт за несколько месяцев): ' + monthsPresent.join(', '));
+    return;
+  }
+
+  // Один месяц в файле (или формат не распознан splitOrdersRawByMonth) - старое поведение,
+  // без изменений: обычная архивация при переходе на новый месяц / поздняя коррекция.
   const archiveResult = archiveOrdersIfNeeded(ss, data);
   if (archiveResult.action === 'archive_only') {
     // Запоздавшая коррекция за уже прошедший месяц - текущую (живую) таблицу не трогаем,

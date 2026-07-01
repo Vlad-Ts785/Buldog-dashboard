@@ -1971,7 +1971,7 @@ let shtatkaMonth = null;   // "2026-07" - null пока не открыли вк
 let shtatkaData = null;    // { vehicles:[...], grid:{...} } - последний загруженный ответ
 let shtatkaPickerTarget = null;
 const SHTATKA_MONTH_NAMES = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
-const SHTATKA_STATUS_VALUES = ['0','1','2','3','4','5','Р','Б','РВ'];
+const SHTATKA_STATUS_VALUES = ['0','1','2','3','4','5','Р','В','РВ'];
 
 function shtatkaDefaultMonth() {
   const d = new Date();
@@ -2013,9 +2013,15 @@ function shtatkaCellStyle(status) {
   if (!status)        return { bg: 'transparent',              color: 'var(--muted)' };
   if (status === 'РВ') return { bg: 'rgba(226,75,74,.42)',      color: '#ffe3e3' };
   if (status === 'Р')  return { bg: 'rgba(226,75,74,.20)',      color: '#f07b7a' };
-  if (status === 'Б')  return { bg: 'rgba(239,159,39,.20)',     color: '#f5be6a' };
+  if (status === 'В')  return { bg: 'rgba(239,159,39,.20)',     color: '#f5be6a' };
   if (status === '0')  return { bg: 'rgba(255,255,255,.04)',    color: 'var(--muted)' };
   return { bg: 'rgba(29,158,117,.20)', color: '#4fd4a3' }; // 1-5 заказов
+}
+
+// Та же логика, что и в getFleetStatus() на бэкенде: тип содержит "Борт" или "Длинномер" -> Длинномер, иначе Трал.
+function shtatkaEquipGroup(type) {
+  const t = String(type || '');
+  return (t.indexOf('Борт') >= 0 || t.indexOf('Длинномер') >= 0) ? 'Длинномер' : 'Трал';
 }
 
 function renderShtatkaTable() {
@@ -2036,12 +2042,21 @@ function renderShtatkaTable() {
   }
 
   let bodyHtml = '';
+  let prevGroup = null;
   vehicles.forEach(function(v) {
+    const group = shtatkaEquipGroup(v.type);
+    if (group !== prevGroup) {
+      const label = group === 'Длинномер' ? '🚚 Длинномеры' : '🚛 Тралы';
+      bodyHtml += '<tr><td colspan="' + (2 + days) + '" style="position:sticky;left:0;background:var(--bg1);' +
+        'color:var(--muted);font-size:11px;font-weight:600;padding:6px 8px;border-top:1px solid var(--border)">' + label + '</td></tr>';
+      prevGroup = group;
+    }
     const gosEsc = String(v.gos).replace(/'/g, "\\'");
     bodyHtml += '<tr>' +
       '<td style="position:sticky;left:0;background:var(--bg2);z-index:1"><b>' + v.gos + '</b>' +
         '<div style="font-size:10px;color:var(--muted)">' + (v.type||'') + '</div></td>' +
-      '<td class="muted" style="font-size:10px">' + ((v.driver||'').trim().split(' ')[0] || '—') + '</td>';
+      '<td class="muted" style="font-size:10px;cursor:pointer" onclick="shtatkaOpenDriverPicker(\'' + gosEsc + '\',this)" title="Сменить водителя">' +
+        ((v.driver||'').trim().split(' ')[0] || '—') + '</td>';
     for (let d = 1; d <= days; d++) {
       const dateStr = shtatkaMonth + '-' + String(d).padStart(2,'0');
       const status = (grid[v.gos] || {})[dateStr] || '';
@@ -2060,7 +2075,11 @@ function shtatkaOpenPicker(gos, dateStr, cellEl) {
   const rect = cellEl.getBoundingClientRect();
   picker.style.left = Math.max(4, Math.min(rect.left, window.innerWidth - 140)) + 'px';
   picker.style.top = (rect.bottom + 4) + 'px';
-  document.getElementById('shtatka-picker-buttons').innerHTML = SHTATKA_STATUS_VALUES.map(function(v) {
+  const buttonsEl = document.getElementById('shtatka-picker-buttons');
+  buttonsEl.style.display = 'grid';
+  buttonsEl.style.gridTemplateColumns = 'repeat(3,1fr)';
+  buttonsEl.style.width = 'auto';
+  buttonsEl.innerHTML = SHTATKA_STATUS_VALUES.map(function(v) {
     return '<button onclick="shtatkaPickStatus(\'' + v + '\')" style="padding:6px;font-size:12px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text)">' + v + '</button>';
   }).join('');
   picker.style.display = 'block';
@@ -2091,6 +2110,52 @@ async function shtatkaPickStatus(status) {
     cellEl.textContent = status;
     cellEl.style.background = st.bg;
     cellEl.style.color = st.color;
+  } catch (e) {
+    cellEl.textContent = prevText;
+    alert('Ошибка записи: ' + e.message);
+  }
+}
+
+// Пересадка водителя - список вариантов берём из самой Штатки (ВОДИТЕЛЬ 1/2/3 этой машины),
+// плюс поле для ручного ввода, если нужного водителя среди них нет.
+function shtatkaOpenDriverPicker(gos, cellEl) {
+  const v = (shtatkaData.vehicles || []).find(function(x) { return x.gos === gos; });
+  const options = (v && v.drivers) ? v.drivers : [];
+  shtatkaPickerTarget = { gos: gos, cellEl: cellEl };
+  const picker = document.getElementById('shtatka-picker');
+  const rect = cellEl.getBoundingClientRect();
+  picker.style.left = Math.max(4, Math.min(rect.left, window.innerWidth - 220)) + 'px';
+  picker.style.top = (rect.bottom + 4) + 'px';
+  const buttonsHtml = options.map(function(d) {
+    const dEsc = d.replace(/'/g, "\\'");
+    return '<button onclick="shtatkaPickDriver(\'' + dEsc + '\')" style="display:block;width:100%;text-align:left;padding:6px 8px;font-size:12px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text);margin-bottom:4px">' + d + '</button>';
+  }).join('');
+  const emptyHtml = options.length ? '' : '<div style="font-size:11px;color:var(--muted);padding:2px 0 6px">В Штатке нет других водителей на эту машину - впиши руками</div>';
+  const buttonsEl = document.getElementById('shtatka-picker-buttons');
+  buttonsEl.style.display = 'block';
+  buttonsEl.style.width = '200px';
+  buttonsEl.innerHTML = buttonsHtml + emptyHtml +
+    '<input id="shtatka-driver-input" type="text" placeholder="Другой водитель…" ' +
+    'style="width:100%;box-sizing:border-box;margin-top:2px;padding:6px 8px;font-size:12px;background:var(--bg1);border:1px solid var(--border);border-radius:4px;color:var(--text)" ' +
+    'onkeydown="if(event.key===\'Enter\')shtatkaPickDriver(this.value)">';
+  picker.style.display = 'block';
+}
+
+async function shtatkaPickDriver(driverName) {
+  const picker = document.getElementById('shtatka-picker');
+  picker.style.display = 'none';
+  if (!shtatkaPickerTarget || !driverName || !driverName.trim()) return;
+  const gos = shtatkaPickerTarget.gos, cellEl = shtatkaPickerTarget.cellEl;
+  const name = driverName.trim();
+  const prevText = cellEl.textContent;
+  cellEl.textContent = '…';
+  try {
+    const res = await fetch(apiUrl({ action: 'shtatka_set_driver', gos: gos, driver: name }));
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    const v = (shtatkaData.vehicles || []).find(function(x) { return x.gos === gos; });
+    if (v) v.driver = name;
+    cellEl.textContent = name.split(' ')[0] || '—';
   } catch (e) {
     cellEl.textContent = prevText;
     alert('Ошибка записи: ' + e.message);

@@ -1034,6 +1034,18 @@ function doGet(e) {
       }
     }
 
+    if (action === 'shtatka_set_driver') {
+      if (access.role !== 'admin') {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      try {
+        setShtatkaDriver(ss, e.parameter.gos, e.parameter.driver);
+        return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(ContentService.MimeType.JSON);
+      } catch (shtatkaErr) {
+        return ContentService.createTextOutput(JSON.stringify({ error: shtatkaErr.message })).setMimeType(ContentService.MimeType.JSON);
+      }
+    }
+
     // Менеджер - только его собственные данные, без доступа к остальному
     if (access.role === 'manager') {
       return ContentService
@@ -1091,13 +1103,17 @@ function getStaffData(ss) {
   var headerRow = sheet.getRange(5, 1, 1, lastCol).getValues()[0];
   var statusCol = 36; // fallback: AK
   var driverCol = -1; // ВОДИТЕЛЬ 1
+  var driver2Col = -1;
+  var driver3Col = -1;
   for (var h = 0; h < headerRow.length; h++) {
     var hdr = String(headerRow[h] || '').trim();
     if (hdr === 'Статус на сегодня') statusCol = h;
     if (hdr.toUpperCase() === 'ВОДИТЕЛЬ 1' || hdr.toUpperCase() === 'ВОДИТЕЛЬ') driverCol = h;
+    if (hdr.toUpperCase() === 'ВОДИТЕЛЬ 2') driver2Col = h;
+    if (hdr.toUpperCase() === 'ВОДИТЕЛЬ 3') driver3Col = h;
   }
 
-  var numCols = Math.max(statusCol + 1, driverCol + 1, 6);
+  var numCols = Math.max(statusCol + 1, driverCol + 1, driver2Col + 1, driver3Col + 1, 6);
   var data = sheet.getRange(6, 1, lastRow - 5, numCols).getValues();
   var map = {};
 
@@ -1110,11 +1126,13 @@ function getStaffData(ss) {
     var plan       = parseFloat(row[5]) || 0;
     var status     = statusCol < row.length ? String(row[statusCol] || '').trim() : '';
     var driver     = driverCol >= 0 && driverCol < row.length ? String(row[driverCol] || '').trim() : '';
+    var driver2    = driver2Col >= 0 && driver2Col < row.length ? String(row[driver2Col] || '').trim() : '';
+    var driver3    = driver3Col >= 0 && driver3Col < row.length ? String(row[driver3Col] || '').trim() : '';
 
     if (!gos || !type) continue;
 
     var gosClean = normalizeGos(gos);
-    map[gosClean] = { type: type, status: status, marka: marka, trailerGos: trailerGos, gosOriginal: gos, plan: plan, driver: driver };
+    map[gosClean] = { type: type, status: status, marka: marka, trailerGos: trailerGos, gosOriginal: gos, plan: plan, driver: driver, driver2: driver2, driver3: driver3, rowIndex: i };
   }
   return map;
 }
@@ -1127,7 +1145,7 @@ function getStaffData(ss) {
 // ============================================================
 
 const SHTATKA_HISTORY_SHEET = 'Штатка_история';
-const SHTATKA_STATUS_VALUES = ['0','1','2','3','4','5','Р','Б','РВ']; // допустимые значения статуса
+const SHTATKA_STATUS_VALUES = ['0','1','2','3','4','5','Р','В','РВ']; // допустимые значения статуса (В = без водителя, реальная буква из Штатки, не Б)
 
 function isValidShtatkaStatus(status) {
   return SHTATKA_STATUS_VALUES.indexOf(String(status || '').trim()) >= 0;
@@ -1136,16 +1154,37 @@ function isValidShtatkaStatus(status) {
 // Ищет в шапке Штатки (строка 5) колонки-дни месяца - заголовки вида "01.06.", "15.07." и т.д.
 // Позиция этих колонок плавает (зависит от числа дней в месяце), поэтому ищем по паттерну,
 // не по фиксированной букве. Год в заголовке не указан - передаём отдельно.
+// Ячейка может быть отформатирована как настоящая дата - тогда getValues() отдаёт объект Date,
+// а не строку "01.07." - обрабатываем оба варианта.
+// Штатка держит фиксированные 31 колонку-день (лишние для короткого месяца сворачиваются,
+// не удаляются) - если в такой свёрнутой колонке окажется несуществующая дата (например
+// "31.06."), и Date, и сам Sheets молча перекатят её на 1-е число следующего месяца, из-за
+// чего дата задвоится с уже существующей реальной колонкой. Берём только первое вхождение
+// каждой даты, чтобы такой перекат не создал две записи на одну дату в истории.
 function findShtatkaDayColumns(ss) {
   const sheet = ss.getSheetByName('Штатка');
   if (!sheet) return [];
   const lastCol = sheet.getLastColumn();
   const headerRow = sheet.getRange(5, 1, 1, lastCol).getValues()[0];
   const result = [];
+  const seen = {};
   for (let h = 0; h < headerRow.length; h++) {
-    const hdr = String(headerRow[h] || '').trim();
-    const m = hdr.match(/^(\d{2})\.(\d{2})\.?$/);
-    if (m) result.push({ col: h, day: parseInt(m[1], 10), month: parseInt(m[2], 10) });
+    const raw = headerRow[h];
+    let day, month;
+    if (raw instanceof Date) {
+      day = raw.getDate();
+      month = raw.getMonth() + 1;
+    } else {
+      const hdr = String(raw || '').trim();
+      const m = hdr.match(/^(\d{2})\.(\d{2})\.?$/);
+      if (!m) continue;
+      day = parseInt(m[1], 10);
+      month = parseInt(m[2], 10);
+    }
+    const key = month + '-' + day;
+    if (seen[key]) continue;
+    seen[key] = true;
+    result.push({ col: h, day: day, month: month });
   }
   return result;
 }
@@ -1153,7 +1192,10 @@ function findShtatkaDayColumns(ss) {
 // Разовая миграция: переносит текущую "широкую" сетку Штатки (дни-колонки) в
 // Штатка_история. Идемпотентна - сначала чистит целевой месяц, потом пишет заново,
 // можно запускать повторно без дублей. Год не хранится в заголовках сетки - передаём явно.
+// Кнопка "Выполнить" в редакторе Apps Script не умеет передавать аргументы - при запуске
+// оттуда year всегда undefined, поэтому подставляем текущий год по умолчанию.
 function migrateShtatkaGridToHistory(year) {
+  year = year || new Date().getFullYear();
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
   const sheet = ss.getSheetByName('Штатка');
   if (!sheet) throw new Error('Лист Штатка не найден');
@@ -1222,15 +1264,57 @@ function removeShtatkaHistoryForMonths(histSheet, monthKeys) {
   }
 }
 
+// Разовая уборка: первый прогон migrateShtatkaGridToHistory() был запущен кнопкой "Выполнить"
+// без аргумента - year получился undefined, и часть строк записалась с датой "undefined-MM-DD".
+// Эта функция удаляет такие битые строки. Запустить один раз, затем заново
+// migrateShtatkaGridToHistory() (уже с исправленным годом по умолчанию).
+function cleanupUndefinedShtatkaHistory() {
+  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(SHTATKA_HISTORY_SHEET);
+  if (!sheet) { Logger.log('Лист Штатка_история не найден - нечего чистить'); return 0; }
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) { Logger.log('Лист пуст - нечего чистить'); return 0; }
+  const data = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
+  const keep = data.filter(function(r) { return String(r[0]).indexOf('undefined') !== 0; });
+  const removed = data.length - keep.length;
+  sheet.getRange(2, 1, lastRow - 1, 3).clearContent();
+  if (keep.length > 0) sheet.getRange(2, 1, keep.length, 3).setValues(keep);
+  Logger.log('🧹 Удалено битых строк: ' + removed + ', осталось корректных: ' + keep.length);
+  return removed;
+}
+
+// Разовая настройка: ставит два ежедневных триггера (12:00 и 19:00), которые сами гоняют
+// migrateShtatkaGridToHistory() - Штатка в вебе теперь просто витрина (Влад работает в
+// оригинальной Excel-таблице, данные приходят через IMPORTRANGE), обновляется автоматически,
+// без ручных запусков. Идемпотентна - сначала удаляет свои же старые триггеры, чтобы не
+// наплодить дублей при повторном запуске. atHour() даёт срабатывание где-то в течение
+// указанного часа, не строго в 12:00:00 - это стандартное поведение триггеров Apps Script.
+// Время берётся по часовому поясу проекта (Настройки проекта -> Часовой пояс) - если там
+// стоит не Europe/Moscow, стоит поправить перед запуском этой функции.
+function setupShtatkaAutoMigration() {
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'migrateShtatkaGridToHistory') {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
+  ScriptApp.newTrigger('migrateShtatkaGridToHistory').timeBased().atHour(12).everyDays(1).create();
+  ScriptApp.newTrigger('migrateShtatkaGridToHistory').timeBased().atHour(19).everyDays(1).create();
+  Logger.log('✅ Настроены автозапуски миграции Штатки: 12:00 и 19:00 ежедневно');
+}
+
 // Данные для страницы "Штатка" в дашборде: список машин (парк грузовиков - тралы/длинномеры,
 // та же фильтрация, что и везде: тип+госномер тягача обязательны) + статусы за месяц.
+// Порядок машин - как в самой Штатке (Влад к нему привык), не пересортировываем.
 function getShtatkaGridData(ss, monthKey) {
   const staffData = getStaffData(ss);
   const vehicles = Object.values(staffData)
     .map(function(v) {
-      return { gos: v.gosOriginal, type: v.type, marka: v.marka, driver: v.driver, trailerGos: v.trailerGos };
-    })
-    .sort(function(a, b) { return a.gos.localeCompare(b.gos, 'ru'); });
+      const drivers = [v.driver, v.driver2, v.driver3].filter(function(d) {
+        return d && d.toLowerCase() !== 'не требуется';
+      });
+      const uniqueDrivers = drivers.filter(function(d, i) { return drivers.indexOf(d) === i; });
+      return { gos: v.gosOriginal, type: v.type, marka: v.marka, driver: v.driver, trailerGos: v.trailerGos, drivers: uniqueDrivers };
+    });
 
   const histSheet = ss.getSheetByName(SHTATKA_HISTORY_SHEET);
   const grid = {}; // { "О 894 ХМ 797": { "2026-07-01": "Р", ... } }
@@ -1274,6 +1358,40 @@ function setShtatkaStatus(ss, gos, dateStr, status) {
     }
   }
   histSheet.appendRow([dateStr, gosTrim, status]);
+}
+
+// Смена водителя на машине (вахта закончилась, пересадка) - это "текущее состояние" машины,
+// как и сцепка тягач+прицеп, а не факт за конкретный день. Поэтому пишем прямо в лист Штатка
+// (колонка "ВОДИТЕЛЬ 1"), а не в историю - следующий getStaffData()/getShtatkaGridData() сразу
+// увидят новое значение.
+function setShtatkaDriver(ss, gos, driverName) {
+  const gosTrim = String(gos || '').trim();
+  if (!gosTrim) throw new Error('Не указан госномер');
+  const driverTrim = String(driverName || '').trim();
+  if (!driverTrim) throw new Error('Не указан водитель');
+
+  const sheet = ss.getSheetByName('Штатка');
+  if (!sheet) throw new Error('Лист Штатка не найден');
+
+  const lastCol = sheet.getLastColumn();
+  const headerRow = sheet.getRange(5, 1, 1, lastCol).getValues()[0];
+  let driverCol = -1;
+  for (let h = 0; h < headerRow.length; h++) {
+    const hdr = String(headerRow[h] || '').trim().toUpperCase();
+    if (hdr === 'ВОДИТЕЛЬ 1' || hdr === 'ВОДИТЕЛЬ') { driverCol = h; break; }
+  }
+  if (driverCol < 0) throw new Error('Колонка "ВОДИТЕЛЬ 1" не найдена в шапке Штатки');
+
+  const gosClean = normalizeGos(gosTrim);
+  const lastRow = sheet.getLastRow();
+  const gosColumn = sheet.getRange(6, 3, lastRow - 5, 1).getValues();
+  for (let i = 0; i < gosColumn.length; i++) {
+    if (normalizeGos(String(gosColumn[i][0] || '')) === gosClean) {
+      sheet.getRange(6 + i, driverCol + 1).setValue(driverTrim);
+      return;
+    }
+  }
+  throw new Error('Машина с госномером ' + gosTrim + ' не найдена в Штатке');
 }
 
 // Список машин в ремонте из Штатки

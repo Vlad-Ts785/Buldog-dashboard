@@ -3289,7 +3289,6 @@ function renderSalesMgr() {
   // в коде. См. plans/2026-07-02-manager-revenue-single-source.md.
   // "Внутренние перевозки" - та же строка листа (ключ "Внутренние"), см. summary.internal_plan.
   var PLAN_INT = (D.orders.summary && D.orders.summary.internal_plan) || 0;
-  var PLAN_DIR = 60000000;
 
   // Прогноз к концу месяца - тот же темп, что у водителей/менеджеров (Личная страница):
   // факт/день_месяца*дней_в_месяце.
@@ -3333,6 +3332,14 @@ function renderSalesMgr() {
   var intAmt = sum.internal_amount || 0;
   var intOrd = sum.internal_orders || 0;
 
+  // Общий план (раньше зашитая константа 60М, без понятного происхождения) - теперь сумма
+  // 4 реальных целей, каждая из своей строки в "Планы_менеджеров" (Влад, 2026-07-04):
+  // Гусейнова (руководитель) + Ахтамова (руководитель) + Цуцурин (дирекция) + Внутренние.
+  var headAhtamova = get('Ахтамова');
+  var headGuseinova = get('Гусейнова');
+  var PLAN_DIR = (headAhtamova ? (headAhtamova.plan||0) : 0) + (headGuseinova ? (headGuseinova.plan||0) : 0) +
+    (tsM ? (tsM.plan||0) : 0) + PLAN_INT;
+
   var totalActual = dStats[0].amount + dStats[1].amount + dStats[2].amount + intAmt + tsAmt;
   var overallPct = PLAN_DIR > 0 ? Math.round(totalActual / PLAN_DIR * 100) : 0;
   var pctColor = overallPct >= 100 ? '#1D9E75' : overallPct >= 80 ? '#EF9F27' : '#E24B4A';
@@ -3374,6 +3381,12 @@ function renderSalesMgr() {
     if (st.plan > 0) {
       var bw2 = Math.min(planPct, 100);
       h += '<div style="height:4px;border-radius:2px;background:var(--border);margin:6px 0"><div style="width:'+bw2+'%;height:100%;border-radius:2px;background:'+color+'"></div></div>';
+      // Прогноз к концу месяца по темпу - тот же приём, что и на общей шкале сверху
+      // (Влад, 2026-07-04: "у каждой команды должен быть этот же прогноз").
+      var cardForecast = st.amount * pacePaceRatio;
+      var cardForecastPct = Math.round(cardForecast / st.plan * 100);
+      var fCol = cardForecastPct >= 100 ? '#1D9E75' : cardForecastPct >= 70 ? '#EF9F27' : '#E24B4A';
+      h += '<div style="font-size:11px;color:var(--muted);margin-bottom:4px">Прогноз: <b style="color:'+fCol+'">'+fmtN(cardForecast)+'</b> <span style="color:'+fCol+'">('+cardForecastPct+'%)</span></div>';
     }
     if (showSbor) {
       var bw3 = Math.min(sborPct, 100);
@@ -3398,7 +3411,7 @@ function renderSalesMgr() {
   kpiHtml += '<span style="font-size:13px;font-weight:600">Выполнение плана продаж</span>';
   kpiHtml += '<span style="text-align:right">' +
     '<span style="font-size:20px;font-weight:700;color:'+pctColor+'">'+overallPct+'%</span>' +
-    '<span style="font-size:11px;color:var(--muted);margin-left:6px">'+fmtN(totalActual)+' из '+fmtN(PLAN_DIR)+'</span>' +
+    '<span style="font-size:17px;font-weight:600;color:var(--muted);margin-left:8px">'+fmtN(totalActual)+' из '+fmtN(PLAN_DIR)+'</span>' +
   '</span>';
   kpiHtml += '</div>';
   // Полоса + маркер прогноза к концу месяца (тот же приём, что в planProgressBar на

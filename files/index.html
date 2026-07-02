@@ -422,6 +422,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
       <input id="range-to" type="date" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 10px;font-size:13px">
       <button onclick="applyVehiclesRange()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer">Показать</button>
       <button onclick="resetVehiclesRange()" style="background:transparent;border:none;color:var(--muted);font-size:12px;cursor:pointer;text-decoration:underline">Текущий месяц</button>
+      <button onclick="setVehiclesRangePreviousMonth()" style="background:transparent;border:none;color:var(--muted);font-size:12px;cursor:pointer;text-decoration:underline">Прошлый месяц</button>
       <span id="range-status" style="font-size:11px;color:var(--muted)"></span>
     </div>
   </div>
@@ -1450,6 +1451,7 @@ function renderSalesTabsForPeriod() {
 // ── ВЫБОР ДИАПАЗОНА (Техника / Водители) ────────────────────
 // vehiclesRangeData = null значит "текущий месяц" (то, что и так пришло в основном payload).
 let vehiclesRangeData = null; // { vehicles:[...], drivers:[...] } за выбранный диапазон
+let vehiclesRangeTo = null;   // Date конца выбранного диапазона - null значит "по сегодня"
 
 async function applyVehiclesRange() {
   const from = document.getElementById('range-from').value;
@@ -1462,6 +1464,8 @@ async function applyVehiclesRange() {
     const data = await res.json();
     if (data.error) throw new Error(data.error);
     vehiclesRangeData = data;
+    const toParts = to.split('-').map(Number);
+    vehiclesRangeTo = new Date(toParts[0], toParts[1] - 1, toParts[2]);
     if (status) status.textContent = '';
     renderRangePages();
   } catch (e) {
@@ -1471,11 +1475,24 @@ async function applyVehiclesRange() {
 
 function resetVehiclesRange() {
   vehiclesRangeData = null;
+  vehiclesRangeTo = null;
   document.getElementById('range-from').value = '';
   document.getElementById('range-to').value = '';
   const status = document.getElementById('range-status');
   if (status) status.textContent = '';
   renderRangePages();
+}
+
+// Быстрый выбор "прошлый месяц" - весь предыдущий календарный месяц целиком (уже закрыт,
+// поэтому потом в renderDrivers() прогноз для него = факту, без экстраполяции).
+function setVehiclesRangePreviousMonth() {
+  const today = new Date();
+  const prevMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+  const prevMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
+  function toInputDate(d) { return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+  document.getElementById('range-from').value = toInputDate(prevMonthStart);
+  document.getElementById('range-to').value = toInputDate(prevMonthEnd);
+  applyVehiclesRange();
 }
 
 // Подменяет D.vehicles/D.drivers на выбранный диапазон только на время рендера
@@ -2392,15 +2409,19 @@ function renderDrivers() {
   });
 
   // Прогноз к концу месяца - тот же темп, что у менеджеров (Личная страница/Система решений):
-  // факт/день_месяца*дней_в_месяце
-  const dataDate = D.updated ? new Date(D.updated) : new Date();
-  const dayOfMonth = dataDate.getDate();
-  let dim = 30;
-  if (D.orders && D.orders.period) {
-    const py = +D.orders.period.slice(0,4), pm = +D.orders.period.slice(5,7);
-    if (py && pm) dim = new Date(py, pm, 0).getDate();
+  // факт/день_месяца*дней_в_месяце. Но только пока месяц ещё идёт - если выбран ЗАКРЫТЫЙ
+  // период (например прошлый месяц целиком), экстраполировать нечего - факт уже финальный,
+  // прогноз = факту (иначе получаются дикие цифры, см. находку Влада 2026-07-02).
+  const today = new Date();
+  const periodEnd = vehiclesRangeTo || today; // null (текущий месяц по умолчанию) -> сегодня
+  const isOngoing = periodEnd.getFullYear() === today.getFullYear() &&
+    periodEnd.getMonth() === today.getMonth() && periodEnd.getDate() === today.getDate();
+  let paceRatio = 1;
+  if (isOngoing) {
+    const dayOfMonth = periodEnd.getDate();
+    const dim = new Date(periodEnd.getFullYear(), periodEnd.getMonth() + 1, 0).getDate();
+    paceRatio = dayOfMonth > 0 ? (dim / dayOfMonth) : 1;
   }
-  const paceRatio = dayOfMonth > 0 ? (dim / dayOfMonth) : 1;
 
   document.getElementById('drivers-body').innerHTML = drivers.map(d => {
     const pv = d.pct * 100;

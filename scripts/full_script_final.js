@@ -2269,7 +2269,13 @@ function getManagerPlans_(ss, monthKey) {
   const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
   const plans = {};
   data.forEach(function(r) {
-    const mk = String(r[0] || '').trim();
+    // "2026-07" похоже на дату - Google Таблицы могут молча превратить ячейку в
+    // объект Date (1 июля) вместо текста, что при ручном вводе, что через setValues().
+    // Проверено на реальных данных (2026-07-02) - именно так и произошло, план был
+    // 0 у всех менеджеров из-за этого несовпадения типов.
+    const mk = r[0] instanceof Date
+      ? Utilities.formatDate(r[0], 'Europe/Moscow', 'yyyy-MM')
+      : String(r[0] || '').trim();
     if (mk !== monthKey) return;
     const name = String(r[1] || '').trim().toLowerCase();
     if (!name) return;

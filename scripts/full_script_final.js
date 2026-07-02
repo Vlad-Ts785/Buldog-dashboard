@@ -108,8 +108,10 @@ function runAll() {
   try { importOrdersReport();      log.push('✅ Заказы загружены'); }
   catch(e) { errors.push('❌ Заказы (импорт): ' + e.message); }
 
-  try { importManagerReport();     log.push('✅ Менеджеры загружены'); }
-  catch(e) { errors.push('❌ Менеджеры: ' + e.message); }
+  // importManagerReport() отключён 2026-07-02 - выручка менеджеров теперь берётся из
+  // таблицы заказов (единый источник, см. plans/2026-07-02-manager-revenue-single-source.md),
+  // отдельное письмо от 1С больше не нужно - заодно меньше обращений к Gmail-квоте.
+  // Функция и лист "Менеджеры_данные" оставлены нетронутыми на случай отката.
 
   try { normalizeReport();         log.push('✅ Нормализация выполнена'); }
   catch(e) { errors.push('❌ Нормализация: ' + e.message); }
@@ -709,24 +711,6 @@ function buildAlertsText() {
 // ============================================================
 // СВОДКА — строит основное сообщение для Telegram
 // ============================================================
-// Менеджеры по продажам
-const SALES_MANAGERS_LIST = [
-  'Ахтамова', 'Володин', 'Гуляева', 'Гуштюк', 'Дербенцева',
-  'Коньшина', 'Котельников', 'Савиток', 'Филипчук', 'Цегельников', 'Шейко'
-];
-
-// Логисты (внутренние перевозки)
-const LOGISTS_LIST = [
-  'Васин', 'Кан', 'Махура', 'Прус-Роскошный', 'Сильчев'
-];
-
-function isSalesManager(name) {
-  return SALES_MANAGERS_LIST.some(m => name.includes(m));
-}
-
-function isLogist(name) {
-  return LOGISTS_LIST.some(m => name.includes(m));
-}
 
 function buildSummaryText() {
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
@@ -766,32 +750,27 @@ function buildSummaryText() {
 // ============================================================
 // ОТДЕЛЬНОЕ СООБЩЕНИЕ ПО МЕНЕДЖЕРАМ И ЛОГИСТАМ
 // ============================================================
+// Факт/план менеджеров и логистов - из таблицы заказов (by_manager/by_logist уже
+// разделены по ролям при агрегации), план - из "Планы_менеджеров". Один источник
+// вместо отдельного листа Менеджеры_данные (см. plans/2026-07-02-manager-revenue-single-source.md).
 function buildManagersText() {
   var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-  var mgrSheet = ss.getSheetByName('Менеджеры_данные');
-  if (!mgrSheet || mgrSheet.getLastRow() < 2) return '';
+  var ordersData = getOrdersData(ss);
+  if (!ordersData || ordersData.error) return '';
 
-  var data = mgrSheet.getRange(2, 1, mgrSheet.getLastRow() - 1, 6).getValues();
-  var managers = [];
-  var logists = [];
-
-  for (var i = 0; i < data.length; i++) {
-    var row = data[i];
-    var name = String(row[0] || '').trim();
-    var plan = parseFloat(row[1]) || 0;
-    var fakt = parseFloat(row[2]) || 0;
-    var pay  = parseFloat(row[3]) || 0;
-    var pct  = parseFloat(row[5]) || 0;
-    var parts = name.replace(/[0-9\+\-\(\)\s]{5,}/g, '').trim().split(' ');
-    var shortName = parts[0] + (parts[1] ? ' ' + parts[1][0] + '.' : '');
-    var icon = pct >= 80 ? '🟢' : pct >= 50 ? '🟡' : '🔴';
-
-    if (isSalesManager(name)) {
-      managers.push({ shortName: shortName, plan: plan, fakt: fakt, pay: pay, pct: pct, icon: icon });
-    } else if (isLogist(name)) {
-      logists.push({ shortName: shortName, fakt: fakt });
-    }
+  function shortNameOf(name) {
+    var parts = String(name || '').replace(/[0-9\+\-\(\)\s]{5,}/g, '').trim().split(' ');
+    return parts[0] + (parts[1] ? ' ' + parts[1][0] + '.' : '');
   }
+
+  var managers = (ordersData.by_manager || []).map(function(m) {
+    var pct = m.pct || 0;
+    var icon = pct >= 80 ? '🟢' : pct >= 50 ? '🟡' : '🔴';
+    return { shortName: shortNameOf(m.name), plan: m.plan || 0, fakt: m.amount || 0, pay: m.payment || 0, pct: pct, icon: icon };
+  });
+  var logists = (ordersData.by_logist || []).map(function(l) {
+    return { shortName: shortNameOf(l.name), fakt: l.amount || 0 };
+  });
 
   managers.sort(function(a, b) { return b.pct - a.pct; });
 
@@ -997,14 +976,10 @@ function getManagerView_(ss, managerName) {
   if (orders.error) return { error: orders.error };
 
   const myDetail = (orders.by_manager_detail || {})[managerName] || null;
+  // by_manager уже содержит план/факт/% (joinManagerPlans_ внутри getOrdersData) -
+  // отдельный поход в Менеджеры_данные больше не нужен, план и факт из одного места.
   const myManagerRow = (orders.by_manager || []).filter(function(m) { return m.name === managerName; });
   const myLogistRow  = (orders.by_logist  || []).filter(function(m) { return m.name === managerName; });
-
-  const allManagers = getManagersData(ss);
-  const sur = managerName.trim().split(' ')[0].toLowerCase();
-  const myPlanRow = allManagers.filter(function(m) {
-    return m.name && m.name.trim().split(' ')[0].toLowerCase() === sur;
-  });
 
   const detailWrapped = {};
   if (myDetail) detailWrapped[managerName] = myDetail;
@@ -1013,7 +988,7 @@ function getManagerView_(ss, managerName) {
     updated: new Date().toISOString(),
     role: 'manager',
     managerName: managerName,
-    managers: myPlanRow,
+    managers: myManagerRow,
     orders: {
       period: orders.period,
       by_manager: myManagerRow,
@@ -1192,18 +1167,18 @@ function doGet(e) {
     Object.values(staffData).forEach(function(v) { staffMarkas[v.gosOriginal] = v.marka; });
     var defaultRange = getCurrentMonthRange_();
     var vehiclesData = aggregateFinHistoryForRange(ss, staffData, defaultRange.from, defaultRange.to);
+    var ordersData = getOrdersData(ss);
     const data = {
       updated:    new Date().toISOString(),
       role:       'admin',
-      summary:    getSummaryData(ss),
+      summary:    getSummaryData(ss, ordersData),
       vehicles:   vehiclesData,
-      managers:   getManagersData(ss),
       drivers:    deriveDriversFromVehicles(vehiclesData),
       fleet:      getFleetStatus(staffData),
       history:    getHistoryData(ss),
       repairs:    getRepairsData(staffData),
       staffMarkas: staffMarkas,
-      orders:     getOrdersData(ss),
+      orders:     ordersData,
     };
     return ContentService
       .createTextOutput(JSON.stringify(data))
@@ -1667,7 +1642,13 @@ function getCurrentMonthRange_() {
   return { from: new Date(p[0], p[1] - 1, 1), to: new Date(p[0], p[1] - 1, p[2]) };
 }
 
-function getSummaryData(ss) {
+// ordersData - уже посчитанный getOrdersData(ss) (с проставленными планами через
+// joinManagerPlans_) - передаётся, чтобы не считать заказы дважды за один запрос.
+// Продажи менеджеров (salesFakt/salesPlan/salesPayment) теперь считаются из таблицы
+// заказов (by_manager) - один источник вместо отдельного листа Менеджеры_данные
+// (см. plans/2026-07-02-manager-revenue-single-source.md - раньше давало рассинхрон
+// после смены месяца).
+function getSummaryData(ss, ordersData) {
   const norm = ss.getSheetByName('Нормализованные_данные');
   if (!norm || norm.getLastRow() < 2) return {};
 
@@ -1686,17 +1667,14 @@ function getSummaryData(ss) {
     if (p < 0) lossCount++;
   }
 
-  const mgr = ss.getSheetByName('Менеджеры_данные');
+  const byManager = (ordersData && ordersData.by_manager) || [];
   let totalPlan=0, totalFakt=0, totalPayment=0, totalPayNal=0;
-  if (mgr && mgr.getLastRow() > 1) {
-    const mgrData = mgr.getRange(2, 1, mgr.getLastRow()-1, 6).getValues();
-    for (let row of mgrData) {
-      totalPlan    += parseFloat(row[1]) || 0;
-      totalFakt    += parseFloat(row[2]) || 0;
-      totalPayment += parseFloat(row[3]) || 0;
-      totalPayNal  += parseFloat(row[4]) || 0;
-    }
-  }
+  byManager.forEach(function(m) {
+    totalPlan    += m.plan || 0;
+    totalFakt    += m.amount || 0;
+    totalPayment += m.payment || 0;
+    totalPayNal  += m.cash || 0;
+  });
 
   return {
     revenue, profit, fot, fuel, parts, fines, tolls,
@@ -1709,20 +1687,6 @@ function getSummaryData(ss) {
     salesPct: totalPlan > 0 ? (totalFakt/totalPlan*100) : 0,
     profitPlan: 50400000, // план ВП из Штатки
   };
-}
-
-function getManagersData(ss) {
-  const mgr = ss.getSheetByName('Менеджеры_данные');
-  if (!mgr || mgr.getLastRow() < 2) return [];
-  const data = mgr.getRange(2, 1, mgr.getLastRow()-1, 6).getValues();
-  return data.map(row => ({
-    name:    row[0],
-    plan:    parseFloat(row[1]) || 0,
-    fakt:    parseFloat(row[2]) || 0,
-    payment: parseFloat(row[3]) || 0,
-    payNal:  parseFloat(row[4]) || 0,
-    pct:     parseFloat(row[5]) || 0,
-  })).sort((a,b) => b.fakt - a.fakt);
 }
 
 // staffData — результат getStaffData(ss). Считаем по всему парку (включая машины без выручки).
@@ -2251,7 +2215,9 @@ function getOrdersData(ss) {
   if (!norm || norm.getLastRow() < 2) return { error: 'Нет данных заказов' };
 
   const rows = norm.getRange(2, 1, norm.getLastRow() - 1, 43).getValues();
-  return aggregateOrdersRows(rows);
+  const result = aggregateOrdersRows(rows);
+  const monthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+  return joinManagerPlans_(ss, result, monthKey);
 }
 
 // Архивные данные за прошлый период (?action=orders_period&period=YYYY-MM)
@@ -2262,7 +2228,76 @@ function getOrdersDataForPeriod(ss, period) {
 
   const parsed = parseOrdersRawRows(archive.getDataRange().getValues());
   if (parsed.rows.length === 0) return { error: 'Архив за ' + period + ' пуст' };
-  return aggregateOrdersRows(parsed.rows);
+  const result = aggregateOrdersRows(parsed.rows);
+  return joinManagerPlans_(ss, result, period);
+}
+
+// ── ПЛАНЫ МЕНЕДЖЕРОВ (лист "Планы_менеджеров", Влад вводит вручную каждый месяц) ──
+// Месяц (YYYY-MM) | Менеджер (фамилия) | План. Один источник плана - не константа в коде,
+// чтобы план можно было менять по месяцам без правки скрипта. См.
+// plans/2026-07-02-manager-revenue-single-source.md.
+function getManagerPlans_(ss, monthKey) {
+  const sheet = ss.getSheetByName('Планы_менеджеров');
+  if (!sheet || sheet.getLastRow() < 2) return {};
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
+  const plans = {};
+  data.forEach(function(r) {
+    const mk = String(r[0] || '').trim();
+    if (mk !== monthKey) return;
+    const name = String(r[1] || '').trim().toLowerCase();
+    if (!name) return;
+    plans[name] = parseFloat(r[2]) || 0;
+  });
+  return plans;
+}
+
+// Проставляет .plan каждому менеджеру в by_manager (мутирует ordersResult).
+function joinManagerPlans_(ss, ordersResult, monthKey) {
+  if (!ordersResult || !ordersResult.by_manager) return ordersResult;
+  const plans = getManagerPlans_(ss, monthKey);
+  ordersResult.by_manager.forEach(function(m) {
+    const key = String(m.name || '').trim().split(' ')[0].toLowerCase();
+    m.plan = plans[key] || 0;
+    m.pct = m.plan > 0 ? (m.amount / m.plan * 100) : 0;
+  });
+  return ordersResult;
+}
+
+// Разовая функция: Влад запускает один раз при переезде на "Планы_менеджеров", чтобы
+// перенести туда текущие цифры (раньше зашитые в MGR_PLANS во фронтенде) за текущий месяц.
+// Дальше план на новый месяц Влад дописывает в этот лист вручную - здесь ничего запускать
+// больше не нужно.
+function seedManagerPlansForCurrentMonth() {
+  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  const monthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+  const CURRENT_PLANS = {
+    'ахтамова': 8000000, 'цегельников': 10000000, 'гуштюк': 5000000, 'дербенцева': 650000,
+    'шейко': 650000, 'гусейнова': 0, 'савиток': 10000000, 'филипчук': 2000000,
+    'котельников': 5000000, 'гуляева': 3000000, 'коньшина': 2000000, 'володин': 2000000,
+    'рыщанов': 0, 'прус-роскошный': 2650000, 'суркова': 0, 'цуцурин': 6000000
+  };
+
+  let sheet = ss.getSheetByName('Планы_менеджеров');
+  if (!sheet) {
+    sheet = ss.insertSheet('Планы_менеджеров');
+    sheet.getRange(1, 1, 1, 3).setValues([['Месяц', 'Менеджер', 'План']]).setFontWeight('bold');
+  }
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    const existing = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    const alreadySeeded = existing.some(function(r) { return String(r[0]).trim() === monthKey; });
+    if (alreadySeeded) {
+      Logger.log('План за ' + monthKey + ' уже есть в "Планы_менеджеров" - ничего не делаю (запусти вручную для нового месяца, скопировав строки).');
+      return;
+    }
+  }
+
+  const rows = Object.keys(CURRENT_PLANS).map(function(name) {
+    return [monthKey, name.charAt(0).toUpperCase() + name.slice(1), CURRENT_PLANS[name]];
+  });
+  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, 3).setValues(rows);
+  Logger.log('✅ Планы_менеджеров: добавлено ' + rows.length + ' строк за ' + monthKey);
 }
 
 // Список месяцев, по которым есть архив (для выпадающего списка на дашборде)
@@ -2394,7 +2429,7 @@ function aggregateOrdersRows(rows) {
     // ── По менеджеру продаж ──
     if (mgrSales && ordInList(mgrSales, TRAL_MANAGERS)) {
       if (!managerMap[mgrSales]) {
-        managerMap[mgrSales] = { name: mgrSales, orders:0, amount:0, payment:0, profit:0, hired_orders:0, hired_cost:0,
+        managerMap[mgrSales] = { name: mgrSales, orders:0, amount:0, payment:0, cash:0, profit:0, hired_orders:0, hired_cost:0,
           internal_orders:0, internal_amount:0, internal_payment:0,
           own_amount:0, hired_margin_qualified:0, hired_margin_unqualified:0 };
       }
@@ -2402,6 +2437,7 @@ function aggregateOrdersRows(rows) {
       m.orders++;
       m.amount  += amount;
       m.payment += payment;
+      m.cash    += num(row, 'cash');
       if (isHired) m.profit += profit;   // прибыль только по найму
       if (isInt) { m.internal_orders++; m.internal_amount += amount; m.internal_payment += payment; }
       if (isHired) {

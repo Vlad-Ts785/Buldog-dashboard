@@ -601,31 +601,6 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
       </div>
     </div>
 
-    <!-- ═══ МЕНЕДЖЕРЫ ══════════════════════════════════════════ -->
-    <div id="page-managers" class="page">
-      <div class="kpi-grid" id="mgr-kpi"></div>
-      <div class="grid-2">
-        <div class="card">
-          <div class="card-title">Менеджеры по продажам</div>
-          <div class="chart-wrap" style="height:280px"><canvas id="chart-mgr-sales"></canvas></div>
-          <div style="overflow-x:auto;margin-top:14px;">
-            <table class="tbl"><thead><tr>
-              <th>Менеджер</th><th class="num">План</th><th class="num">Факт</th><th class="num">Оплата</th><th class="num">Долг</th><th class="num">%</th><th>Статус</th>
-            </tr></thead><tbody id="mgr-sales-body"></tbody></table>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-title">Логисты (внутренние перевозки)</div>
-          <div class="chart-wrap" style="height:280px"><canvas id="chart-mgr-log"></canvas></div>
-          <div style="overflow-x:auto;margin-top:14px;">
-            <table class="tbl"><thead><tr>
-              <th>Логист</th><th class="num">Факт выручки</th>
-            </tr></thead><tbody id="mgr-log-body"></tbody></table>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <!-- ═══ ВОДИТЕЛИ ════════════════════════════════════════════ -->
     <div id="page-drivers" class="page">
       <div class="card">
@@ -1126,8 +1101,8 @@ function renderMyPage() {
     return h;
   }
 
-  var mgrRow = (D.managers||[]).filter(function(m){ return m.name && m.name.indexOf(current) >= 0; })[0] || {};
-  var plan = mgrRow.plan||0, fakt = mgrRow.fakt||0, planPct = mgrRow.pct||0;
+  var mgrRow = (D.orders.by_manager||[]).filter(function(m){ return m.name && m.name.indexOf(current) >= 0; })[0] || {};
+  var plan = mgrRow.plan||0, fakt = mgrRow.amount||0, planPct = mgrRow.pct||0;
 
   // Прогноз к концу месяца - тот же темп, что в "Системе решений": факт/день_месяца*дней_в_месяце
   var dataDate = D.updated ? new Date(D.updated) : new Date();
@@ -1361,7 +1336,6 @@ function render() {
   renderDecisions();
   renderMain();
   renderVehiclesTable();
-  renderManagers();
   renderDrivers();
   renderRepairBlock();
   renderSalesTabsForPeriod();
@@ -1626,7 +1600,7 @@ function renderDecisions() {
   if (o.period) { var py=+o.period.slice(0,4), pm=+o.period.slice(5,7); if(py&&pm) dim = new Date(py, pm, 0).getDate(); }
   var forecast = dayOfMonth>0 ? fakt/dayOfMonth*dim : fakt;
   var forecastPct = plan>0 ? forecast/plan*100 : 0;
-  var mgrsBehind = (D.managers||[]).filter(function(m){ return (m.plan||0)>0 && (m.pct||0)<70; })
+  var mgrsBehind = (D.orders.by_manager||[]).filter(function(m){ return (m.plan||0)>0 && (m.pct||0)<70; })
     .sort(function(a,b){ return (a.pct||0)-(b.pct||0); }).slice(0, 6);
 
   // ── строители HTML ──
@@ -1921,10 +1895,10 @@ function renderVehicleChart() {
 }
 
 function renderMgrList() {
-  const mgrs = (D.managers||[]).filter(m => isSales(m.name)).slice(0, 5);
-  const maxF = Math.max(...mgrs.map(m => m.fakt), 1);
+  const mgrs = (D.orders.by_manager||[]).filter(m => isSales(m.name)).sort((a,b) => b.amount-a.amount).slice(0, 5);
+  const maxF = Math.max(...mgrs.map(m => m.amount), 1);
   document.getElementById('mgr-list').innerHTML = mgrs.map(m => {
-    const w = Math.round(m.fakt / maxF * 100);
+    const w = Math.round(m.amount / maxF * 100);
     const color = m.pct >= 80 ? '#1D9E75' : m.pct >= 50 ? '#EF9F27' : '#E24B4A';
     return `<div class="prog-wrap">
       <div class="prog-header"><span class="prog-name">${cleanName(m.name)}</span><span class="prog-val">${m.pct.toFixed(0)}%</span></div>
@@ -2344,61 +2318,6 @@ function renderVehiclesTable() {
 function isSales(name) { return SALES_MANAGERS.some(m => name.includes(m)); }
 function cleanName(n) { return n.replace(/[\d\+\-\(\)\s]{6,}/g,'').trim().split(' ').slice(0,3).join(' '); }
 
-function renderManagers() {
-  if (!D) return;
-  const all = D.managers || [];
-  const sales = all.filter(m => isSales(m.name));
-  const logists = all.filter(m => !isSales(m.name));
-  const tP = sales.reduce((s,m) => s + m.plan, 0);
-  const tF = sales.reduce((s,m) => s + m.fakt, 0);
-  const tPay = sales.reduce((s,m) => s + m.payment, 0);
-  const a80 = sales.filter(m => m.pct >= 80).length;
-  const b50 = sales.filter(m => m.pct < 50).length;
-
-  document.getElementById('mgr-kpi').innerHTML = `
-    <div class="kpi"><div class="kpi-label">План (менеджеры)</div><div class="kpi-value amber">${fmtM(tP)}</div></div>
-    <div class="kpi"><div class="kpi-label">Факт продаж</div><div class="kpi-value">${fmtM(tF)}</div><div class="kpi-sub">${pct(tP>0?tF/tP*100:0)} от плана</div></div>
-    <div class="kpi"><div class="kpi-label">Поступило</div><div class="kpi-value green">${fmtM(tPay)}</div><div class="kpi-sub">Долг: ${fmtM(tF-tPay)}</div></div>
-    <div class="kpi"><div class="kpi-label">Выполняют ≥80%</div><div class="kpi-value">${a80} / ${sales.length}</div><div class="kpi-sub">${b50} менеджеров < 50%</div></div>`;
-
-  const sorted = [...sales].sort((a, b) => b.pct - a.pct);
-  renderMgrChart('chart-mgr-sales', sorted, true);
-  document.getElementById('mgr-sales-body').innerHTML = sorted.map(m => {
-    const cls = m.pct >= 80 ? 'green' : m.pct >= 50 ? 'amber' : 'red';
-    const debt = m.fakt - m.payment;
-    return `<tr>
-      <td>${cleanName(m.name)}</td>
-      <td class="num">${fmtK2(m.plan)}</td>
-      <td class="num">${fmtK2(m.fakt)}</td>
-      <td class="num green">${fmtK2(m.payment)}</td>
-      <td class="num ${debt > 500000 ? 'red' : 'amber'}">${fmtK2(debt)}</td>
-      <td class="num ${cls}"><b>${m.pct.toFixed(1)}%</b></td>
-      <td><span class="badge ${cls}">${m.pct>=80?'Выполнен':m.pct>=50?'В процессе':'Отстаёт'}</span></td>
-    </tr>`;
-  }).join('');
-
-  renderMgrChart('chart-mgr-log', logists, false);
-  document.getElementById('mgr-log-body').innerHTML = logists.map(m => `<tr>
-    <td>${cleanName(m.name)}</td>
-    <td class="num amber">${fmtK2(m.fakt)}</td>
-  </tr>`).join('');
-}
-
-function renderMgrChart(id, mgrs, showPlan) {
-  const ctx = document.getElementById(id); if (!ctx) return;
-  if (ctx._chart) ctx._chart.destroy();
-  const datasets = [];
-  if (showPlan) datasets.push({label:'План',data:mgrs.map(m=>m.plan),backgroundColor:'rgba(255,255,255,0.06)',borderRadius:3});
-  datasets.push({label:showPlan?'Факт':'Выручка',data:mgrs.map(m=>m.fakt),
-    backgroundColor:mgrs.map(m=>showPlan?(m.pct>=80?'#1D9E75':m.pct>=50?'#EF9F27':'#E24B4A'):'#378ADD'),borderRadius:3});
-  ctx._chart = new Chart(ctx, {
-    type:'bar',
-    data:{labels:mgrs.map(m=>cleanName(m.name).split(' ')[0]),datasets},
-    options:{responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{labels:{color:'#888780',font:{size:12},boxWidth:10}},tooltip:{callbacks:{label:c=>' '+fmt(c.raw)}}},
-      scales:{x:{ticks:{color:'#888780',font:{size:11}},grid:{display:false}},y:{ticks:{color:'#888780',callback:v=>fmtK(v)},grid:{color:'rgba(255,255,255,0.04)'}}}}
-  });
-}
 
 // ── ВОДИТЕЛИ ───────────────────────────────────────────────
 function renderDrivers() {
@@ -3355,13 +3274,9 @@ function renderSalesMgr() {
 
   function fmtN(n) { return n ? Math.round(n).toLocaleString('ru-RU') : '—'; }
 
-  // Планы менеджеров
-  var MGR_PLANS = {
-    'ахтамова':8000000,'цегельников':10000000,'гуштюк':5000000,'дербенцева':650000,'шейко':650000,
-    'гусейнова':0,'савиток':10000000,'филипчук':2000000,'котельников':5000000,'гуляева':3000000,'коньшина':2000000,'володин':2000000,
-    'рыщанов':0,'прус-роскошный':2650000,'суркова':0,
-    'цуцурин':6000000
-  };
+  // План теперь приходит с сервера вместе с фактом (D.orders.by_manager[].plan, из листа
+  // "Планы_менеджеров" - Влад вводит вручную каждый месяц) - единый источник, не константа
+  // в коде. См. plans/2026-07-02-manager-revenue-single-source.md.
   var PLAN_INT = 10000000;
   var PLAN_DIR = 60000000;
 
@@ -3383,7 +3298,7 @@ function renderSalesMgr() {
       s.amount  += m ? (m.amount||0)  - (ip?(m.internal_amount||0):0)  : 0;
       s.payment += m ? (m.payment||0) - (ip?(m.internal_payment||0):0) : 0;
       s.profit  += m ? (m.profit||0) : 0;
-      s.plan    += MGR_PLANS[sur.toLowerCase()] || 0;
+      s.plan    += m ? (m.plan||0) : 0;
     });
     return s;
   }
@@ -3547,7 +3462,7 @@ function renderSalesMgr() {
       var m = get(sur);
       var isHead = (sur === cfg.head);
       var isPrus = sur.toLowerCase() === 'прус-роскошный';
-      var plan = MGR_PLANS[sur.toLowerCase()] || 0;
+      var plan = m ? (m.plan||0) : 0;
       if (!m && isHead) { h += mgrRow(null, cfg.head, false, plan); }
       else if (m) { h += mgrRow(m, isHead ? cleanName(m.name) : null, isPrus, plan); }
     });

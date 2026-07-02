@@ -474,13 +474,13 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           <div class="kpi-sub" id="k-razneseno" style="margin-top:6px"></div>
         </div>
         <div class="kpi">
-          <div class="kpi-label">Техника в работе</div>
-          <div class="kpi-value" id="k-working">—</div>
-          <div class="kpi-sub2" id="k-working-detail"></div>
+          <div class="kpi-label">Маржинальная прибыль</div>
+          <div class="kpi-value" id="k-margin-pct">—</div>
+          <div class="kpi-sub2" id="k-margin-detail"></div>
           <div class="kpi-prog-wrap">
-            <div class="kpi-prog-header"><span>Загрузка парка</span><span id="k-working-pct">—</span></div>
-            <div class="kpi-prog-bg"><div class="kpi-prog-fill" id="k-working-bar" style="width:0%"></div></div>
-            <div class="kpi-sub" id="k-working-total" style="margin-top:4px"></div>
+            <div class="kpi-prog-header"><span>Прибыль от выручки</span><span id="k-margin-badge">—</span></div>
+            <div class="kpi-prog-bg"><div class="kpi-prog-fill" id="k-margin-bar" style="width:0%"></div></div>
+            <div class="kpi-sub" id="k-margin-abs" style="margin-top:4px"></div>
           </div>
         </div>
       </div>
@@ -733,6 +733,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           <table class="tbl">
             <thead><tr><th>Партнёр (исполнитель)</th><th class="num">Выручка</th><th class="num">Затраты</th><th class="num">Маржа</th><th class="num">%</th><th class="num">Зак.</th><th style="min-width:130px">Шкала маржи</th></tr></thead>
             <tbody id="cust-hire-body"></tbody>
+            <tfoot><tr id="cust-hire-foot"></tr></tfoot>
           </table>
         </div>
         <div id="cust-tab-drivers" style="display:none;overflow-x:auto">
@@ -1543,14 +1544,15 @@ function renderKPI() {
   setText('k-payment-nal', s.salesPayNal > 0 ? 'Нал: ' + fmtM(s.salesPayNal) : '');
   setText('k-razneseno', 'Разнесено: ' + fmtM(s.salesPayment || 0));
 
-  const working = (tr.working || 0) + (tk.working || 0);
-  const total = (tr.total || 36) + (tk.total || 19);
-  const workPct = total > 0 ? working / total * 100 : 0;
-  setText('k-working', working + ' / ' + total);
-  setText('k-working-detail', 'Тралы: ' + (tr.working || 0) + ' · Борта: ' + (tk.working || 0));
-  setText('k-working-pct', pct(workPct));
-  setText('k-working-total', 'Всего: ' + total + ' ед.');
-  setBar('k-working-bar', workPct, 'var(--blue)');
+  const marginPct = s.margin || 0;
+  const marginColor = marginPct >= 30 ? 'var(--green)' : marginPct >= 15 ? 'var(--amber)' : 'var(--red)';
+  const km = document.getElementById('k-margin-pct');
+  km.textContent = pct(marginPct);
+  km.className = 'kpi-value ' + (marginPct >= 30 ? 'green' : marginPct >= 15 ? 'amber' : 'red');
+  setText('k-margin-detail', marginPct >= 30 ? 'Хорошая маржа' : marginPct >= 15 ? 'Средняя маржа' : 'Низкая маржа');
+  setText('k-margin-badge', pct(marginPct));
+  setText('k-margin-abs', 'ВП ' + fmtM(profit) + ' из выручки ' + fmtM(s.revenue || 0));
+  setBar('k-margin-bar', Math.min(marginPct, 100), marginColor);
 }
 
 function setBar(id, v, color) {
@@ -3211,6 +3213,27 @@ function renderSales() {
         '</tr>';
       }).join('')
     : '<tr><td colspan="7" class="muted" style="padding:14px">Нет данных по найму</td></tr>';
+
+  const hireFoot = document.getElementById('cust-hire-foot');
+  if (hireFoot) {
+    if (suppliers.length) {
+      const tRev = suppliers.reduce(function(s,x){ return s+(x.revenue||0); }, 0);
+      const tCost = suppliers.reduce(function(s,x){ return s+(x.cost||0); }, 0);
+      const tMargin = suppliers.reduce(function(s,x){ return s+(x.margin||0); }, 0);
+      const tOrders = suppliers.reduce(function(s,x){ return s+(x.orders||0); }, 0);
+      const tMarginPct = tRev > 0 ? Math.round(tMargin/tRev*100) : 0;
+      hireFoot.innerHTML =
+        '<td style="font-weight:600">Итого (' + suppliers.length + ' партнёров)</td>' +
+        '<td class="num" style="font-weight:600">' + fmtK2(tRev) + '</td>' +
+        '<td class="num red" style="font-weight:600">' + fmtK2(tCost) + '</td>' +
+        '<td class="num green" style="font-weight:600">' + fmtK2(tMargin) + '</td>' +
+        '<td class="num" style="font-weight:600">' + tMarginPct + '%</td>' +
+        '<td class="num" style="font-weight:600">' + tOrders + '</td>' +
+        '<td></td>';
+    } else {
+      hireFoot.innerHTML = '';
+    }
+  }
 
   // Сохраняем все проблемные заказы для фильтрации
   window._allProblems = (o.problem_orders||[]);

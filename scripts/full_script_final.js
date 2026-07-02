@@ -2266,6 +2266,24 @@ function joinManagerPlans_(ss, ordersResult, monthKey) {
   return ordersResult;
 }
 
+// ВРЕМЕННАЯ диагностика (2026-07-02) - запустить прямо в редакторе (Выполнить), не через
+// веб-деплой, чтобы понять - видит ли сам скрипт актуальный план из листа. Удалить после
+// того, как разберёмся с багом "план не обновился на дашборде".
+function debugCheckManagerPlans_() {
+  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  const monthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+  const plans = getManagerPlans_(ss, monthKey);
+  Logger.log('Месяц (monthKey): ' + monthKey);
+  Logger.log('План Савиток из листа "Планы_менеджеров": ' + plans['савиток']);
+  Logger.log('План Филипчук из листа "Планы_менеджеров": ' + plans['филипчук']);
+  const ordersData = getOrdersData(ss);
+  const found = (ordersData.by_manager || []).filter(function(m) {
+    var n = String(m.name || '').toLowerCase();
+    return n.indexOf('савиток') >= 0 || n.indexOf('филипчук') >= 0;
+  });
+  Logger.log('by_manager (после join): ' + JSON.stringify(found));
+}
+
 // Разовая функция: Влад запускает один раз при переезде на "Планы_менеджеров", чтобы
 // перенести туда текущие цифры (раньше зашитые в MGR_PLANS во фронтенде) за текущий месяц.
 // Дальше план на новый месяц Влад дописывает в этот лист вручную - здесь ничего запускать

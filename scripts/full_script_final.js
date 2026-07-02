@@ -102,7 +102,7 @@ function runAll() {
 
   log.push('🚀 Запуск обновления: ' + new Date().toLocaleString('ru'));
 
-  try { importReportFromGmail();   log.push('✅ Парк из 1С загружен'); }
+  try { importParkReports();       log.push('✅ Парк из 1С загружен'); }
   catch(e) { errors.push('❌ Парк из 1С: ' + e.message); }
 
   try { importOrdersReport();      log.push('✅ Заказы загружены'); }
@@ -154,44 +154,156 @@ function runAll() {
 }
 
 // ============================================================
-// ИМПОРТ ПАРКА ИЗ 1С (Gmail → Данные_1С)
+// ИМПОРТ ПАРКА ИЗ 1С (Gmail → Данные_1С / Данные_1С_история)
+// С 2026-07-02 1С шлёт ДВА письма в день - "Отчет парк июнь от ДД.ММ.ГГГГ" (прошлый месяц,
+// обновляется корректировками до 5-6 числа) и "Отчет парк июль от ДД.ММ.ГГГГ" (текущий).
+// Слово месяца в теме - это период отчёта, дата после "от" - просто дата отправки.
 // ============================================================
-function importReportFromGmail() {
-  const query = 'from:v.tsutsurin@yard-imperial.ru subject:"Отчет парк" has:attachment newer_than:3d';
-  const threads = GmailApp.search(query);
-  if (threads.length === 0) throw new Error('Письмо не найдено за последние 3 дня');
+var RU_MONTHS_ = { 'январь':1,'февраль':2,'март':3,'апрель':4,'май':5,'июнь':6,'июль':7,
+  'август':8,'сентябрь':9,'октябрь':10,'ноябрь':11,'декабрь':12 };
 
-  let allMessages = [];
-  for (let thread of threads)
-    for (let msg of thread.getMessages()) allMessages.push(msg);
-  allMessages.sort((a, b) => a.getDate() - b.getDate());
-  const latestMessage = allMessages[allMessages.length - 1];
+// "Отчет парк июнь от 02.07.2026" -> 6. null, если слово месяца не распознано (не должно
+// ронять весь импорт - просто это письмо пропускается).
+function parseMonthFromParkSubject_(subject) {
+  var m = String(subject || '').match(/Отчет\s+парк\s+(\S+)\s+от/i);
+  if (!m) return null;
+  var word = m[1].toLowerCase().replace(/[^а-яё]/g, '');
+  return RU_MONTHS_[word] || null;
+}
 
-  let reportFile = null;
-  for (let att of latestMessage.getAttachments()) {
-    if (att.getName().endsWith('.xlsx') || att.getName().endsWith('.xls')) {
-      reportFile = att; break;
-    }
+// Сверяет месяц письма с сегодняшним календарным месяцем (по Москве) - текущий/прошлый/
+// ни один из двух (например, письмо за месяц двухмесячной давности - игнорируем).
+function classifyParkMonth_(monthNum) {
+  var todayStr = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM-dd');
+  var p = todayStr.split('-').map(Number);
+  var curYear = p[0], curMonth = p[1];
+  var prevMonth = curMonth - 1, prevYear = curYear;
+  if (prevMonth < 1) { prevMonth = 12; prevYear = curYear - 1; }
+  if (monthNum === curMonth) return { type: 'current', year: curYear, month: curMonth };
+  if (monthNum === prevMonth) return { type: 'previous', year: prevYear, month: prevMonth };
+  return null;
+}
+
+function importParkReports() {
+  var query = 'from:v.tsutsurin@yard-imperial.ru subject:"Отчет парк" has:attachment newer_than:3d';
+  var threads = GmailApp.search(query);
+  if (threads.length === 0) throw new Error('Письма "Отчет парк" не найдены за последние 3 дня');
+
+  var allMessages = [];
+  for (var t = 0; t < threads.length; t++) {
+    var msgs = threads[t].getMessages();
+    for (var m = 0; m < msgs.length; m++) allMessages.push(msgs[m]);
   }
-  if (!reportFile) throw new Error('Excel-вложение не найдено');
+  allMessages.sort(function(a, b) { return b.getDate() - a.getDate(); }); // новые сначала
 
-  const tempFile = Drive.Files.insert(
-    { title: 'temp_park_' + Date.now(), mimeType: MimeType.GOOGLE_SHEETS },
-    reportFile.copyBlob()
-  );
-  const data = SpreadsheetApp.openById(tempFile.id).getSheets()[0].getDataRange().getValues();
-  Drive.Files.remove(tempFile.id);
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var handled = {}; // 'current'/'previous' -> true - обрабатываем только САМОЕ СВЕЖЕЕ письмо каждого типа
+  var results = [];
 
-  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-  const targetSheet = ss.getSheetByName('Данные_1С');
-  if (!targetSheet) throw new Error('Лист Данные_1С не найден');
+  for (var i = 0; i < allMessages.length; i++) {
+    var msg = allMessages[i];
+    var monthNum = parseMonthFromParkSubject_(msg.getSubject());
+    if (!monthNum) continue; // тема не распознана - пропускаем, не ломаем остальное
+    var cls = classifyParkMonth_(monthNum);
+    if (!cls || handled[cls.type]) continue;
+    handled[cls.type] = true;
 
-  targetSheet.clear();
-  if (data && data.length > 0)
-    targetSheet.getRange(1, 1, data.length, data[0].length).setValues(data);
+    var reportFile = null;
+    var atts = msg.getAttachments();
+    for (var a = 0; a < atts.length; a++) {
+      var name = atts[a].getName();
+      if (name.endsWith('.xlsx') || name.endsWith('.xls')) { reportFile = atts[a]; break; }
+    }
+    if (!reportFile) { results.push(cls.type + ': Excel-вложение не найдено, пропущено'); continue; }
 
-  latestMessage.markRead();
+    var tempFile = Drive.Files.insert(
+      { title: 'temp_park_' + cls.type + '_' + Date.now(), mimeType: MimeType.GOOGLE_SHEETS },
+      reportFile.copyBlob()
+    );
+    var data = SpreadsheetApp.openById(tempFile.id).getSheets()[0].getDataRange().getValues();
+    Drive.Files.remove(tempFile.id);
+
+    if (cls.type === 'current') {
+      var targetSheet = ss.getSheetByName('Данные_1С');
+      if (!targetSheet) throw new Error('Лист Данные_1С не найден');
+      targetSheet.clear();
+      if (data && data.length > 0) targetSheet.getRange(1, 1, data.length, data[0].length).setValues(data);
+      results.push('current: Данные_1С обновлены (' + data.length + ' строк)');
+    } else {
+      var written = writeParkHistoryForMonth_(ss, cls.year, cls.month, data);
+      results.push('previous: Данные_1С_история обновлена за ' + cls.year + '-' + String(cls.month).padStart(2, '0') + ' (' + written + ' машин)');
+    }
+    msg.markRead();
+  }
+
+  if (results.length === 0) throw new Error('Ни одно письмо не распознано (проверь темы писем)');
   Utilities.sleep(2000);
+  return results;
+}
+
+function getOrCreateParkHistorySheet_(ss) {
+  var sheet = ss.getSheetByName('Данные_1С_история');
+  if (!sheet) {
+    sheet = ss.insertSheet('Данные_1С_история');
+    var headers = ['Месяц', 'Госномер', 'Тип', 'Статус', 'Выручка', 'ФОТ', 'Топливо', 'Запчасти',
+      'Штрафы', 'Проходные', 'Валовая прибыль', 'План ВП'];
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
+  }
+  return sheet;
+}
+
+// Разбирает "сырые" строки отчёта парка (та же логика, что normalizeReport(), но пишет в
+// архив по завершённому месяцу, а не в живой Данные_1С) и идемпотентно записывает в
+// Данные_1С_история - чистит этот месяц перед записью, т.к. "прошлый месяц" 1С присылает
+// каждый день с уточнёнными цифрами, пока корректировки идут (до 5-6 числа).
+function writeParkHistoryForMonth_(ss, year, month, rawData) {
+  var staffData = getStaffData(ss);
+  var monthKey = year + '-' + String(month).padStart(2, '0');
+  var skipKeywords = ['Итого', 'ПР-4', 'ПР-5', 'ПР-3', 'ТКР-4', 'КР-3', 'П-3', 'К-3',
+    'Длинномер', 'Единица техники', 'Тягач', 'Параметры:', 'ПР-8'];
+
+  var newRows = [];
+  for (var i = 2; i < rawData.length; i++) {
+    var row = rawData[i];
+    var fullName = String(row[0] || '').trim();
+    if (!fullName) continue;
+
+    var skip = false;
+    for (var k = 0; k < skipKeywords.length; k++) {
+      var kw = skipKeywords[k];
+      if (fullName === kw || fullName.indexOf(kw + ' ') === 0 ||
+          (fullName.indexOf(kw) >= 0 && !fullName.match(/[А-ЯA-Z]\d{3}/i))) { skip = true; break; }
+    }
+    if (skip) continue;
+
+    var revenue = parseFloat(row[5]) || 0;
+    var profit = parseFloat(row[12]) || 0;
+    if (revenue === 0 && profit === 0) continue;
+
+    var gosRaw = extractGosNumber(fullName);
+    if (!gosRaw) continue;
+    var gosFormatted = formatGosNumber(gosRaw);
+    var staffInfo = staffData[normalizeGos(gosFormatted)] || {};
+
+    newRows.push([
+      monthKey, gosFormatted, staffInfo.type || '', staffInfo.status || '',
+      revenue, parseFloat(row[6]) || 0, parseFloat(row[7]) || 0, parseFloat(row[8]) || 0,
+      parseFloat(row[9]) || 0, parseFloat(row[10]) || 0, profit, staffInfo.plan || 0
+    ]);
+  }
+
+  var histSheet = getOrCreateParkHistorySheet_(ss);
+  var lastRow = histSheet.getLastRow();
+  if (lastRow > 1) {
+    var existing = histSheet.getRange(2, 1, lastRow - 1, 12).getValues();
+    var keep = existing.filter(function(r) { return String(r[0]) !== monthKey; });
+    histSheet.getRange(2, 1, lastRow - 1, 12).clearContent();
+    if (keep.length > 0) histSheet.getRange(2, 1, keep.length, 12).setValues(keep);
+  }
+  if (newRows.length > 0) {
+    histSheet.getRange(histSheet.getLastRow() + 1, 1, newRows.length, 12).setValues(newRows);
+  }
+  return newRows.length;
 }
 
 // ============================================================
@@ -1435,45 +1547,81 @@ function getRepairsData(staffData) {
   return repairs;
 }
 
-// Нормализованные_данные = единственный источник (A-J финансы, M тип, N статус)
-// Строит массив машин (страница "Техника") агрегацией "Истории_финансов" за диапазон дат.
-// Снимок в Истории_финансов кумулятивный (итог с начала месяца - так же, как
-// Нормализованные_данные, которые 1С каждый месяц обнуляет) - поэтому для каждой пары
-// (машина, месяц) внутри диапазона берём САМЫЙ ПОЗДНИЙ снимок, и суммируем по месяцам, если
-// диапазон пересекает границу месяца (2026-07-02: раньше "Техника" читала Нормализованные_данные
-// напрямую, а "Водители" - отдельный лист, который 1С обновляет только на текущий месяц - отсюда
-// был рассинхрон после смены месяца. Теперь один источник для обеих страниц).
-// Тип/статус - из самого свежего снимка в диапазоне. Марка/прицеп/водитель - "текущее состояние"
-// из Штатки (staffData), не историзируются - как и сцепка тягач+прицеп в остальном проекте.
+// Строит массив машин (страница "Техника") за диапазон дат, по месяцам. Для каждого
+// затронутого месяца - сначала пробуем "Данные_1С_история" (авторитетно: пишется из
+// отдельного письма 1С "за прошлый месяц", см. importParkReports()/writeParkHistoryForMonth_()).
+// Если архива за этот месяц ещё нет (обычно - текущий, ещё не завершённый месяц) - откат на
+// подневные снимки "Истории_финансов" (последний снимок в диапазоне внутри месяца - снимки
+// кумулятивные, не дельта за день). И архив, и снимки хранятся в одном порядке колонок
+// ([2]=Тип,[3]=Статус,[4]=Выручка,[5]=ФОТ,[6]=Топливо,[7]=Запчасти,[8]=Штрафы,[9]=Проходные,
+// [10]=Валовая прибыль,[11]=План ВП) - можно обрабатывать одинаково независимо от источника.
+// Марка/прицеп/водитель - "текущее состояние" из Штатки (staffData), не историзируются.
 function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate) {
-  var hist = ss.getSheetByName('История_финансов');
-  if (!hist || hist.getLastRow() < 2) return [];
-
   var from = new Date(fromDate); from.setHours(0, 0, 0, 0);
   var to = new Date(toDate); to.setHours(23, 59, 59, 999);
 
-  var data = hist.getRange(2, 1, hist.getLastRow() - 1, 12).getValues();
-  var byVehicleMonth = {}; // gos -> { 'YYYY-MM': {date, row} }
-  for (var i = 0; i < data.length; i++) {
-    var r = data[i];
-    var d = r[0] instanceof Date ? r[0] : new Date(r[0]);
-    if (isNaN(d.getTime()) || d < from || d > to) continue;
-    var gos = String(r[1] || '').trim();
-    if (!gos) continue;
-    var monthKey = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
-    if (!byVehicleMonth[gos]) byVehicleMonth[gos] = {};
-    var existing = byVehicleMonth[gos][monthKey];
-    if (!existing || d > existing.date) byVehicleMonth[gos][monthKey] = { date: d, row: r };
+  var monthKeys = [];
+  var cursor = new Date(from.getFullYear(), from.getMonth(), 1);
+  while (cursor <= to) {
+    monthKeys.push(cursor.getFullYear() + '-' + String(cursor.getMonth() + 1).padStart(2, '0'));
+    cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
   }
 
+  // Данные_1С_история - авторитетный источник для месяцев, где он уже есть
+  var parkHistByMonth = {}; // monthKey -> { gos -> row }
+  var parkHist = ss.getSheetByName('Данные_1С_история');
+  if (parkHist && parkHist.getLastRow() > 1) {
+    var phData = parkHist.getRange(2, 1, parkHist.getLastRow() - 1, 12).getValues();
+    phData.forEach(function(r) {
+      var mk = String(r[0] || '').trim();
+      if (monthKeys.indexOf(mk) === -1) return;
+      var gos = String(r[1] || '').trim();
+      if (!gos) return;
+      if (!parkHistByMonth[mk]) parkHistByMonth[mk] = {};
+      parkHistByMonth[mk][gos] = r;
+    });
+  }
+
+  // Для месяцев без архива - откат на подневные снимки Истории_финансов
+  var monthsNeedingFallback = monthKeys.filter(function(mk) { return !parkHistByMonth[mk]; });
+  var fallbackByVehicleMonth = {}; // gos -> { monthKey -> {date, row} }
+  if (monthsNeedingFallback.length > 0) {
+    var hist = ss.getSheetByName('История_финансов');
+    if (hist && hist.getLastRow() > 1) {
+      var data = hist.getRange(2, 1, hist.getLastRow() - 1, 12).getValues();
+      for (var i = 0; i < data.length; i++) {
+        var r = data[i];
+        var d = r[0] instanceof Date ? r[0] : new Date(r[0]);
+        if (isNaN(d.getTime()) || d < from || d > to) continue;
+        var mk = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+        if (monthsNeedingFallback.indexOf(mk) === -1) continue;
+        var gos = String(r[1] || '').trim();
+        if (!gos) continue;
+        if (!fallbackByVehicleMonth[gos]) fallbackByVehicleMonth[gos] = {};
+        var existing = fallbackByVehicleMonth[gos][mk];
+        if (!existing || d > existing.date) fallbackByVehicleMonth[gos][mk] = { date: d, row: r };
+      }
+    }
+  }
+
+  var allGos = {};
+  Object.keys(parkHistByMonth).forEach(function(mk) {
+    Object.keys(parkHistByMonth[mk]).forEach(function(g) { allGos[g] = true; });
+  });
+  Object.keys(fallbackByVehicleMonth).forEach(function(g) { allGos[g] = true; });
+
   var result = [];
-  Object.keys(byVehicleMonth).forEach(function(gos) {
-    var months = byVehicleMonth[gos];
+  Object.keys(allGos).forEach(function(gos) {
     var agg = { gos: gos, marka: '', type: '', status: '', revenue: 0, fot: 0, fuel: 0, parts: 0,
       fines: 0, tolls: 0, profit: 0, trailer: '', plan: 0, driver: '' };
-    var latestDate = null, latestRow = null;
-    Object.keys(months).forEach(function(mk) {
-      var r = months[mk].row;
+    monthKeys.forEach(function(mk) {
+      var r = null;
+      if (parkHistByMonth[mk] && parkHistByMonth[mk][gos]) {
+        r = parkHistByMonth[mk][gos];
+      } else if (fallbackByVehicleMonth[gos] && fallbackByVehicleMonth[gos][mk]) {
+        r = fallbackByVehicleMonth[gos][mk].row;
+      }
+      if (!r) return;
       agg.revenue += parseFloat(r[4]) || 0;
       agg.fot     += Math.abs(parseFloat(r[5]) || 0);
       agg.fuel    += Math.abs(parseFloat(r[6]) || 0);
@@ -1482,11 +1630,11 @@ function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate) {
       agg.tolls   += Math.abs(parseFloat(r[9]) || 0);
       agg.profit  += parseFloat(r[10]) || 0;
       agg.plan    += parseFloat(r[11]) || 0;
-      var d = months[mk].date;
-      if (!latestDate || d > latestDate) { latestDate = d; latestRow = r; }
+      // monthKeys в хронологическом порядке - последнее непустое значение перезаписывает
+      // предыдущее, то есть в итоге остаётся самое свежее (без отдельного сравнения дат)
+      if (r[2]) agg.type = String(r[2]);
+      if (r[3]) agg.status = String(r[3]);
     });
-    agg.type = String(latestRow[2] || '');
-    agg.status = String(latestRow[3] || '');
     var staffInfo = staffData ? staffData[normalizeGos(gos)] : null;
     if (staffInfo) {
       agg.marka = staffInfo.marka;

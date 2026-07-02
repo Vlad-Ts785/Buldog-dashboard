@@ -698,6 +698,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
             <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted)"><div style="width:9px;height:9px;border-radius:2px;background:#1D9E75"></div>Выручка</div>
             <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted)"><div style="width:9px;height:9px;border-radius:2px;background:#EF9F27"></div>Найм</div>
             <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted)"><div style="width:20px;height:2px;background:#378ADD;border-radius:1px;margin:0 -5px"></div>Поступило (линия)</div>
+            <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted)"><div style="width:20px;height:2px;background:#7F77DD;border-radius:1px;margin:0 -5px"></div>Заказов (линия)</div>
           </div>
         </div>
         <div class="chart-wrap" style="height:140px"><canvas id="chart-sales-day"></canvas></div>
@@ -3277,7 +3278,22 @@ function renderSales() {
             pointBackgroundColor: '#378ADD',
             tension: 0.3,
             fill: false,
-            order: 0
+            order: 0,
+            yAxisID: 'y'
+          },
+          {
+            label: 'Заказов',
+            type: 'line',
+            data: days.map(function(d){ return d.orders||0; }),
+            borderColor: '#7F77DD',
+            backgroundColor: 'transparent',
+            borderWidth: 2,
+            pointRadius: 3,
+            pointBackgroundColor: '#7F77DD',
+            tension: 0.3,
+            fill: false,
+            order: 0,
+            yAxisID: 'y1'
           }
         ]
       },
@@ -3286,13 +3302,15 @@ function renderSales() {
         plugins: {
           legend: { display: false },
           tooltip: { callbacks: { label: function(c){
+            if (c.dataset.label === 'Заказов') return ' Заказов: ' + c.raw;
             var prefix = c.dataset.label === 'Поступило' ? ' Поступило: ' : c.dataset.label === 'Найм' ? ' Найм: ' : ' Выручка: ';
             return prefix + fmtK(c.raw) + ' ₽';
           } } }
         },
         scales: {
           x: { stacked: true, ticks: { color: '#888780', font: { size: 10 } }, grid: { display: false } },
-          y: { stacked: true, max: yMax, ticks: { color: '#888780', callback: function(v){ return fmtK(v); } }, grid: { color: 'rgba(255,255,255,0.04)' } }
+          y: { stacked: true, max: yMax, ticks: { color: '#888780', callback: function(v){ return fmtK(v); } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+          y1: { position: 'right', beginAtZero: true, ticks: { color: '#7F77DD', font: { size: 10 } }, grid: { display: false } }
         }
       }
     });

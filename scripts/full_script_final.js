@@ -1624,12 +1624,15 @@ function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate) {
 // "Топ" водителей (страница "Водители") - производный от того же массива машин, не отдельный
 // лист (раньше читали "ТОП_водителей_по_плану", который 1С обновляет только на текущий месяц -
 // источник рассинхрона с "Техникой"). Берём машины с назначенным водителем и планом > 0.
+// v.plan - это "План ВП" (валовая прибыль) из Штатки, поэтому факт для сравнения тоже
+// должен быть по валовой прибыли (v.profit), а не по выручке - иначе план и факт в разных
+// единицах (Влад, 2026-07-02).
 function deriveDriversFromVehicles(vehicles) {
   return vehicles
     .filter(function(v) { return v.driver && v.plan > 0; })
     .map(function(v) {
-      return { marka: v.marka, gos: v.gos, type: v.type, plan: v.plan, fakt: v.revenue,
-        pct: v.plan > 0 ? v.revenue / v.plan : 0, driver: v.driver };
+      return { marka: v.marka, gos: v.gos, type: v.type, plan: v.plan, fakt: v.profit,
+        pct: v.plan > 0 ? v.profit / v.plan : 0, driver: v.driver };
     })
     .sort(function(a, b) { return b.fakt - a.fakt; });
 }

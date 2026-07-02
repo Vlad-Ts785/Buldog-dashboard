@@ -1471,20 +1471,19 @@ function setVehiclesRangePreviousMonth() {
   applyVehiclesRange();
 }
 
-// Подменяет D.vehicles/D.drivers на выбранный диапазон только на время рендера
-// "Техники" и "Водителей", синхронно, и сразу возвращает обратно.
+// "Активные" данные для Техники/Водителей - выбранный диапазон, если он есть, иначе
+// текущий месяц по умолчанию. Читать ИМЕННО через эти функции везде (renderVehiclesTable,
+// renderFuelAnalysis, renderDrivers), а не D.vehicles/D.drivers напрямую - иначе смена
+// фильтра типа/статуса в таблице (которая дёргает renderVehiclesTable() отдельно от
+// renderRangePages()) молча сбрасывала выбранный период обратно на текущий месяц
+// (Влад, 2026-07-02).
+function activeVehiclesData() { return vehiclesRangeData ? vehiclesRangeData.vehicles : (D.vehicles || []); }
+function activeDriversData()  { return vehiclesRangeData ? vehiclesRangeData.drivers  : (D.drivers  || []); }
+
 function renderRangePages() {
   if (!D) return;
-  const realVehicles = D.vehicles;
-  const realDrivers = D.drivers;
-  if (vehiclesRangeData) {
-    D.vehicles = vehiclesRangeData.vehicles;
-    D.drivers = vehiclesRangeData.drivers;
-  }
   renderVehiclesTable();
   renderDrivers();
-  D.vehicles = realVehicles;
-  D.drivers = realDrivers;
 }
 
 // ── KPI ────────────────────────────────────────────────────
@@ -1997,8 +1996,8 @@ function fuelCellClass(v, fuelStats) {
 
 function renderFuelAnalysis() {
   var el = document.getElementById('fuel-cards');
-  if (!el || !D || !D.vehicles) return;
-  var s = computeFuelStats(D.vehicles);
+  if (!el || !D) return;
+  var s = computeFuelStats(activeVehiclesData());
   function mln(n){ var x=Math.abs(n); return x>=1000000 ? (x/1000000).toFixed(2)+' млн' : Math.round(x).toLocaleString('ru-RU'); }
   function card(name, o) {
     var pct = o.pct, pctStr = pct.toFixed(1);
@@ -2215,11 +2214,11 @@ async function shtatkaPickDriver(driverName) {
 function renderVehiclesTable() {
   if (!D) return;
   renderFuelAnalysis();
-  var fuelStats = computeFuelStats(D.vehicles || []);
+  var fuelStats = computeFuelStats(activeVehiclesData());
 
   var type = document.getElementById('filter-type') ? document.getElementById('filter-type').value : '';
   var status = document.getElementById('filter-status') ? document.getElementById('filter-status').value : '';
-  var vehicles = (D.vehicles || []).slice();
+  var vehicles = activeVehiclesData().slice();
 
   var sel = document.getElementById('filter-type');
   if (sel && sel.options.length <= 1) {
@@ -2322,7 +2321,7 @@ function cleanName(n) { return n.replace(/[\d\+\-\(\)\s]{6,}/g,'').trim().split(
 // ── ВОДИТЕЛИ ───────────────────────────────────────────────
 function renderDrivers() {
   if (!D) return;
-  const drivers = D.drivers || [];
+  const drivers = activeDriversData();
   // Словарь заказов по фамилии водителя
   var drvOrderMap = {};
   ((D.orders && D.orders.by_driver) || []).forEach(function(x) {

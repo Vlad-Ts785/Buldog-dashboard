@@ -3310,6 +3310,13 @@ function renderSalesMgr() {
   var HEAD_FULL = { 'Цуцурин':'Цуцурин Владислав Дмитриевич','Ахтамова':'Ахтамова Лиана Анатольевна','Гусейнова':'Гусейнова Айнур','Рыщанов':'Рыщанов Рустем' };
 
   // Статистика отдела (коммерческие)
+  // Сырая карта планов (фамилия -> план) - план менеджера существует независимо от того,
+  // есть ли у него заказы В ЭТОМ периоде (начало месяца - ни одного заказа ещё не закрыто,
+  // но план уже есть). Через by_manager такого менеджера не найти - план тихо выпадал бы
+  // из суммы отдела (Влад, 2026-07-04: "по-прежнему 16 млн" - вот откуда).
+  var mplans = D.orders.managerPlans || {};
+  function planOf(sur) { return mplans[sur.toLowerCase()] || 0; }
+
   function calcDept(members) {
     var s = {orders:0,amount:0,payment:0,profit:0,plan:0};
     members.forEach(function(sur) {
@@ -3319,7 +3326,7 @@ function renderSalesMgr() {
       s.amount  += m ? (m.amount||0)  - (ip?(m.internal_amount||0):0)  : 0;
       s.payment += m ? (m.payment||0) - (ip?(m.internal_payment||0):0) : 0;
       s.profit  += m ? (m.profit||0) : 0;
-      s.plan    += m ? (m.plan||0) : 0;
+      s.plan    += planOf(sur);
     });
     return s;
   }
@@ -3336,9 +3343,8 @@ function renderSalesMgr() {
   // 4 реальных целей, каждая из своей строки в "Планы_менеджеров" (Влад, 2026-07-04):
   // Гусейнова (руководитель) + Ахтамова (руководитель) + Цуцурин (дирекция) + Внутренние.
   // dStats[0].plan/dStats[1].plan - это уже сумма ВСЕЙ команды (руководитель + все
-  // подчинённые), ровно то же число, что показано на карточке отдела как "План" - не личная
-  // строка одного руководителя (та меньше, отсюда был баг - план выходил 16М вместо 75М).
-  var PLAN_DIR = (dStats[0].plan||0) + (dStats[1].plan||0) + (tsM ? (tsM.plan||0) : 0) + PLAN_INT;
+  // подчинённые), ровно то же число, что показано на карточке отдела как "План".
+  var PLAN_DIR = (dStats[0].plan||0) + (dStats[1].plan||0) + planOf('Цуцурин') + PLAN_INT;
 
   var totalActual = dStats[0].amount + dStats[1].amount + dStats[2].amount + intAmt + tsAmt;
   var overallPct = PLAN_DIR > 0 ? Math.round(totalActual / PLAN_DIR * 100) : 0;
@@ -3457,13 +3463,19 @@ function renderSalesMgr() {
     var barW = Math.min(pct, 100);
     var barC = pct >= 80 ? '#1D9E75' : pct >= 60 ? '#EF9F27' : '#E24B4A';
     var pctC = pct >= 80 ? 'color:#1D9E75' : pct >= 60 ? 'color:#EF9F27' : 'color:#E24B4A';
+    // Прогноз по темпу - у каждого менеджера в таблице, не только на общей шкале/карточках
+    // отдела (Влад, 2026-07-04: "у каждого менеджера тоже должен быть прогноз").
+    var forecast = amount * pacePaceRatio;
+    var forecastPct = Math.round(forecast / plan * 100);
+    var fCol = forecastPct >= 100 ? '#1D9E75' : forecastPct >= 70 ? '#EF9F27' : '#E24B4A';
     return '<div style="display:flex;align-items:center;gap:5px;margin-top:3px">' +
       '<div style="flex:1;min-width:40px;height:3px;border-radius:2px;background:rgba(255,255,255,0.1)">' +
         '<div style="width:'+barW+'%;height:100%;border-radius:2px;background:'+barC+'"></div>' +
       '</div>' +
       '<span style="font-size:10px;font-weight:500;'+pctC+'">'+pct+'%</span>' +
       '<span style="font-size:10px;color:var(--muted)">из '+fmtN(plan)+'</span>' +
-    '</div>';
+    '</div>' +
+    '<div style="font-size:10px;color:var(--muted);margin-top:2px">Прогноз: <span style="color:'+fCol+';font-weight:500">'+fmtN(forecast)+' ('+forecastPct+'%)</span></div>';
   }
 
   function mgrRow(m, isHead, isPrus, plan) {
@@ -3513,7 +3525,7 @@ function renderSalesMgr() {
       var m = get(sur);
       var isHead = (sur === cfg.head);
       var isPrus = sur.toLowerCase() === 'прус-роскошный';
-      var plan = m ? (m.plan||0) : 0;
+      var plan = planOf(sur);
       if (!m && isHead) { h += mgrRow(null, cfg.head, false, plan); }
       else if (m) { h += mgrRow(m, isHead ? cleanName(m.name) : null, isPrus, plan); }
     });

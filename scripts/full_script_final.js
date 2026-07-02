@@ -2301,6 +2301,11 @@ function joinManagerPlans_(ss, ordersResult, monthKey) {
   if (ordersResult.summary) {
     ordersResult.summary.internal_plan = plans['внутренние'] || 0;
   }
+  // Сырая карта планов (фамилия -> план), отдельно от by_manager - план менеджера/директора
+  // существует независимо от того, есть ли у него заказы В ЭТОМ периоде (например только
+  // начался месяц, ни одного заказа ещё не закрыто) - по by_manager такого менеджера вообще
+  // не найти, план бы тихо выпал из суммы отдела (Влад, 2026-07-04: "по-прежнему 16 млн").
+  ordersResult.managerPlans = plans;
   return ordersResult;
 }
 

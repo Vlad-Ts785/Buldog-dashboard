@@ -2284,15 +2284,23 @@ function getManagerPlans_(ss, monthKey) {
   return plans;
 }
 
-// Проставляет .plan каждому менеджеру в by_manager (мутирует ordersResult).
+// Проставляет .plan каждому менеджеру в by_manager (мутирует ordersResult). Заодно план
+// "Внутренних перевозок" - та же строка "Планы_менеджеров", ключ "Внутренние" (не человек,
+// но механизм тот же самый - Влад сам вписывает план в тот же лист, без отдельной константы
+// в коде, см. Влад 2026-07-03: "откуда цифра 10 миллионов - установить план").
 function joinManagerPlans_(ss, ordersResult, monthKey) {
-  if (!ordersResult || !ordersResult.by_manager) return ordersResult;
+  if (!ordersResult) return ordersResult;
   const plans = getManagerPlans_(ss, monthKey);
-  ordersResult.by_manager.forEach(function(m) {
-    const key = String(m.name || '').trim().split(' ')[0].toLowerCase();
-    m.plan = plans[key] || 0;
-    m.pct = m.plan > 0 ? (m.amount / m.plan * 100) : 0;
-  });
+  if (ordersResult.by_manager) {
+    ordersResult.by_manager.forEach(function(m) {
+      const key = String(m.name || '').trim().split(' ')[0].toLowerCase();
+      m.plan = plans[key] || 0;
+      m.pct = m.plan > 0 ? (m.amount / m.plan * 100) : 0;
+    });
+  }
+  if (ordersResult.summary) {
+    ordersResult.summary.internal_plan = plans['внутренние'] || 0;
+  }
   return ordersResult;
 }
 

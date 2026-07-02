@@ -3287,8 +3287,20 @@ function renderSalesMgr() {
   // План теперь приходит с сервера вместе с фактом (D.orders.by_manager[].plan, из листа
   // "Планы_менеджеров" - Влад вводит вручную каждый месяц) - единый источник, не константа
   // в коде. См. plans/2026-07-02-manager-revenue-single-source.md.
-  var PLAN_INT = 10000000;
+  // "Внутренние перевозки" - та же строка листа (ключ "Внутренние"), см. summary.internal_plan.
+  var PLAN_INT = (D.orders.summary && D.orders.summary.internal_plan) || 0;
   var PLAN_DIR = 60000000;
+
+  // Прогноз к концу месяца - тот же темп, что у водителей/менеджеров (Личная страница):
+  // факт/день_месяца*дней_в_месяце.
+  var paceDataDate = D.updated ? new Date(D.updated) : new Date();
+  var pcDayOfMonth = paceDataDate.getDate();
+  var pcDim = 30;
+  if (D.orders.period) {
+    var pcP = D.orders.period.split('-').map(Number);
+    if (pcP[0] && pcP[1]) pcDim = new Date(pcP[0], pcP[1], 0).getDate();
+  }
+  var pacePaceRatio = pcDayOfMonth > 0 ? (pcDim / pcDayOfMonth) : 1;
 
   // Конфиг отделов (для карточек и таблиц)
   var DEPT_CFG = [
@@ -3324,6 +3336,9 @@ function renderSalesMgr() {
   var totalActual = dStats[0].amount + dStats[1].amount + dStats[2].amount + intAmt + tsAmt;
   var overallPct = PLAN_DIR > 0 ? Math.round(totalActual / PLAN_DIR * 100) : 0;
   var pctColor = overallPct >= 100 ? '#1D9E75' : overallPct >= 80 ? '#EF9F27' : '#E24B4A';
+  var totalForecast = totalActual * pacePaceRatio;
+  var forecastPct = PLAN_DIR > 0 ? Math.round(totalForecast / PLAN_DIR * 100) : 0;
+  var forecastPos = Math.max(0, Math.min(forecastPct, 100));
 
   // Ширины сегментов составной шкалы (% от 60М)
   function bw(v) { return Math.max(0, Math.min(40, Math.round(v / PLAN_DIR * 100))); }
@@ -3339,7 +3354,9 @@ function renderSalesMgr() {
     var planPct = st.plan > 0 ? Math.round(st.amount / st.plan * 100) : 0;
     var sborPct = st.amount > 0 ? Math.round(st.payment / st.amount * 100) : 0;
     var badgeC = planPct >= 100 ? '#1D9E75' : planPct >= 70 ? '#EF9F27' : '#E24B4A';
-    var memberSub = (cfg.members || []).filter(function(s){ return s!==cfg.head; }).join(' · ');
+    // Показываем только тех, у кого есть заказы в этом периоде - иначе ушедшие сотрудники
+    // (или те, у кого пока просто нет заказов) висят в подписи навсегда (Влад, 2026-07-03).
+    var memberSub = (cfg.members || []).filter(function(s){ return s!==cfg.head && get(s); }).join(' · ');
     var h = '<div class="card" style="padding:14px">';
     h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">';
     h +=   '<div>';
@@ -3379,28 +3396,39 @@ function renderSalesMgr() {
   var kpiHtml = '<div class="card" style="margin-bottom:14px;padding:16px">';
   kpiHtml += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">';
   kpiHtml += '<span style="font-size:13px;font-weight:600">Выполнение плана продаж</span>';
-  kpiHtml += '<span style="font-size:20px;font-weight:700;color:'+pctColor+'">'+overallPct+'%</span>';
+  kpiHtml += '<span style="text-align:right">' +
+    '<span style="font-size:20px;font-weight:700;color:'+pctColor+'">'+overallPct+'%</span>' +
+    '<span style="font-size:11px;color:var(--muted);margin-left:6px">'+fmtN(totalActual)+' из '+fmtN(PLAN_DIR)+'</span>' +
+  '</span>';
   kpiHtml += '</div>';
-  kpiHtml += '<div style="height:12px;border-radius:6px;overflow:hidden;display:flex;background:rgba(255,255,255,0.07)">'+barSegs+'</div>';
+  // Полоса + маркер прогноза к концу месяца (тот же приём, что в planProgressBar на
+  // Личной странице) - показывает, к какому итогу мы идём при текущем темпе.
+  kpiHtml += '<div style="position:relative;margin-top:16px">';
+  kpiHtml +=   '<div style="height:12px;border-radius:6px;overflow:hidden;display:flex;background:rgba(255,255,255,0.07)">'+barSegs+'</div>';
+  kpiHtml +=   '<div style="position:absolute;top:-4px;width:2px;height:20px;background:var(--text);left:'+forecastPos+'%"></div>';
+  kpiHtml +=   '<div style="position:absolute;top:-18px;transform:translateX(-50%);font-size:10px;font-weight:600;color:var(--text);white-space:nowrap;left:'+forecastPos+'%">'+forecastPct+'%</div>';
+  kpiHtml += '</div>';
+  kpiHtml += '<div style="font-size:11px;color:var(--muted);margin-top:6px">Прогноз к концу месяца: <b style="color:var(--text)">'+fmtN(totalForecast)+'</b> ('+forecastPct+'% плана)</div>';
   kpiHtml += '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;font-size:11px;color:var(--muted)">';
   var legLabels = [
-    {c:'#1D9E75',l:'Ахтамова: '+fmtN(dStats[0].amount)},
-    {c:'#378ADD',l:'Гусейнова: '+fmtN(dStats[1].amount)},
-    {c:'#BA7517',l:'Рыщанов: '+fmtN(dStats[2].amount)},
-    {c:'#8B5CF6',l:'Внутренние: '+fmtN(intAmt)},
-    {c:'#888780',l:'Цуцурин: '+fmtN(tsAmt)},
+    {c:'#1D9E75',l:'Ахтамова: '+fmtN(dStats[0].amount), show:dStats[0].orders>0},
+    {c:'#378ADD',l:'Гусейнова: '+fmtN(dStats[1].amount), show:dStats[1].orders>0},
+    {c:'#BA7517',l:'Рыщанов: '+fmtN(dStats[2].amount), show:dStats[2].orders>0},
+    {c:'#8B5CF6',l:'Внутренние: '+fmtN(intAmt), show:true},
+    {c:'#888780',l:'Цуцурин: '+fmtN(tsAmt), show:true},
   ];
   legLabels.forEach(function(leg){
+    if (!leg.show) return;
     kpiHtml += '<span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:'+leg.c+'"></span>'+leg.l+'</span>';
   });
   kpiHtml += '</div></div>';
 
-  // 4 сводных карточки
+  // 4 сводных карточки - отдел не показываем, если за этот период у него вообще нет
+  // заказов (например ушёл в найм/уволился весь состав, как отдел Рыщанова с июля) -
+  // при этом за прошлые периоды, где заказы были, карточка появится сама (Влад, 2026-07-03).
   kpiHtml += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:4px">';
-  kpiHtml += summaryCard(DEPT_CFG[0], dStats[0], true);
-  kpiHtml += summaryCard(DEPT_CFG[1], dStats[1], true);
-  kpiHtml += summaryCard(DEPT_CFG[2], dStats[2], true);
-  // Внутренние перевозки
+  DEPT_CFG.forEach(function(cfg, i){ if (dStats[i].orders > 0) kpiHtml += summaryCard(cfg, dStats[i], true); });
+  // Внутренние перевозки - отдельная категория, не человек, показываем всегда.
   kpiHtml += summaryCard(
     {name:'Внутренние перевозки', color:'#8B5CF6', head:null, members:[]},
     {orders:intOrd, amount:intAmt, payment:0, profit:null, plan:PLAN_INT},
@@ -3449,7 +3477,7 @@ function renderSalesMgr() {
 
   function deptBlock(cfg, st) {
     var color = cfg.color;
-    var memberList = cfg.members.filter(function(s){ return s!==cfg.head; }).join(' · ');
+    var memberList = cfg.members.filter(function(s){ return s!==cfg.head && get(s); }).join(' · ');
     var h = '<div class="card" style="margin-bottom:16px;padding:0;overflow:hidden">';
     h += '<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border);background:rgba(255,255,255,0.03);border-left:3px solid '+color+'">';
     h += '<div style="flex:1">';
@@ -3517,11 +3545,9 @@ function renderSalesMgr() {
   tsBlock += mgrRow(tsM, tsM ? cleanName(tsM.name) : 'Цуцурин', false);
   tsBlock += '</tbody></table></div></div>';
 
-  document.getElementById('sales-mgr-depts').innerHTML =
-    deptBlock(DEPT_CFG[0], dStats[0]) +
-    deptBlock(DEPT_CFG[1], dStats[1]) +
-    deptBlock(DEPT_CFG[2], dStats[2]) +
-    tsBlock;
+  var deptsHtml = '';
+  DEPT_CFG.forEach(function(cfg, i){ if (dStats[i].orders > 0) deptsHtml += deptBlock(cfg, dStats[i]); });
+  document.getElementById('sales-mgr-depts').innerHTML = deptsHtml + tsBlock;
 }
 
 // Формула зарплаты менеджера - общая для вкладки "Зарплата" и личной страницы.

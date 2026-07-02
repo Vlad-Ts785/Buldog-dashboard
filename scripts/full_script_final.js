@@ -8,16 +8,18 @@
 function debugCheckManagerPlans() {
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
   const monthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
-  const plans = getManagerPlans_(ss, monthKey);
-  Logger.log('Месяц (monthKey): ' + monthKey);
-  Logger.log('План Савиток из листа "Планы_менеджеров": ' + plans['савиток']);
-  Logger.log('План Филипчук из листа "Планы_менеджеров": ' + plans['филипчук']);
-  const ordersData = getOrdersData(ss);
-  const found = (ordersData.by_manager || []).filter(function(m) {
-    var n = String(m.name || '').toLowerCase();
-    return n.indexOf('савиток') >= 0 || n.indexOf('филипчук') >= 0;
+  Logger.log('Месяц (monthKey), с которым сравниваем: "' + monthKey + '"');
+
+  const sheet = ss.getSheetByName('Планы_менеджеров');
+  if (!sheet) { Logger.log('Лист "Планы_менеджеров" НЕ НАЙДЕН'); return; }
+  const raw = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
+  Logger.log('Сырые строки листа (значение колонки "Месяц", её тип, вся строка):');
+  raw.forEach(function(r) {
+    Logger.log('  "' + r[0] + '" | тип: ' + (r[0] instanceof Date ? 'Date' : typeof r[0]) + ' | строка: ' + JSON.stringify(r));
   });
-  Logger.log('by_manager (после join): ' + JSON.stringify(found));
+
+  const plans = getManagerPlans_(ss, monthKey);
+  Logger.log('Итоговый plans (все ключи): ' + JSON.stringify(plans));
 }
 
 // ============================================================

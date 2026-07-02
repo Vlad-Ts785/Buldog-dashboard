@@ -929,7 +929,10 @@ let ID_TOKEN = localStorage.getItem('id_token') || '';
 
 // Собирает URL запроса к API с ключом и токеном входа - используется везде вместо ручной склейки
 function apiUrl(params) {
-  const p = Object.assign({ key: DASHBOARD_KEY, id_token: ID_TOKEN }, params || {});
+  // "_" - метка времени, чтобы URL всегда был уникальным и браузер не отдавал закэшированный
+  // ответ вместо свежего запроса к серверу (без этого повторный fetch() на тот же набор
+  // параметров иногда мог тихо вернуть старые данные - Влад, 2026-07-03).
+  const p = Object.assign({ key: DASHBOARD_KEY, id_token: ID_TOKEN, _: Date.now() }, params || {});
   const qs = Object.keys(p).map(function(k){ return k + '=' + encodeURIComponent(p[k] || ''); }).join('&');
   const sep = API_URL.includes('?') ? '&' : '?';
   return API_URL + sep + qs;

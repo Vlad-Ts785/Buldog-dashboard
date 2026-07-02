@@ -2486,13 +2486,19 @@ function aggregateOrdersRows(rows) {
     }
 
     // ── По поставщикам найма ──
+    // Воронка "нет путёвки" не считает внутренние перевозки (свои же компании -
+    // ТЕХНОПАРК, МЕГАКРАН, ОТДЕЛ БУРОВЫХ РАБОТ и т.п., см. INTERNAL_CLIENTS) - Влад попросил
+    // явно, 2026-07-02: по ним путёвки не спрашивают, их наличие в воронке только шумит.
+    // Заказы/выручка поставщика при этом считаются как обычно - искажается только сам счётчик
+    // "нет путёвки".
     if (isHired) {
       const supplier = str(row, 'hired');
+      const isInternalOrder = isInt || ordInList(str(row, 'customer'), INTERNAL_CLIENTS);
       if (!supplierMap[supplier]) supplierMap[supplier] = { name:supplier, orders:0, revenue:0, cost:0, no_waybill:0 };
       supplierMap[supplier].orders++;
       supplierMap[supplier].revenue += amount;
       supplierMap[supplier].cost    += hiredCost;
-      if (!hw) supplierMap[supplier].no_waybill++;
+      if (!hw && !isInternalOrder) supplierMap[supplier].no_waybill++;
     }
 
     // ── Статус документов (внешние заказы, разбивка по декадам) ──
@@ -2525,12 +2531,15 @@ function aggregateOrdersRows(rows) {
     }
 
     // ── По водителям ──
+    // Та же логика, что у поставщиков выше - внутренние перевозки не считаем в воронку
+    // "нет путёвки" (Влад, 2026-07-02), заказы/выручка водителя считаются как обычно.
     const driverName = ordCleanName(str(row, 'driver'));
     if (driverName) {
+      const isInternalOrder = isInt || ordInList(str(row, 'customer'), INTERNAL_CLIENTS);
       if (!driverMap[driverName]) driverMap[driverName] = { name: driverName, orders: 0, amount: 0, no_waybill: 0 };
       driverMap[driverName].orders++;
       driverMap[driverName].amount += amount;
-      if (!hw) driverMap[driverName].no_waybill++;
+      if (!hw && !isInternalOrder) driverMap[driverName].no_waybill++;
     }
   }
 

@@ -5,7 +5,7 @@
 // сам скрипт актуальный план из листа "Планы_менеджеров". Удалить после того, как
 // разберёмся с багом "план не обновился на дашборде".
 // ============================================================
-function debugCheckManagerPlans_() {
+function debugCheckManagerPlans() {
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
   const monthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
   const plans = getManagerPlans_(ss, monthKey);

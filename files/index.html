@@ -625,7 +625,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
     <div id="page-drivers" class="page">
       <div class="card">
         <table class="tbl">
-          <thead><tr><th>Водитель</th><th>Машина</th><th>Тип</th><th class="num">Заказов</th><th class="num">План</th><th class="num">Факт</th><th class="num">%</th><th>Оценка</th></tr></thead>
+          <thead><tr><th>Водитель</th><th>Машина</th><th>Тип</th><th class="num">Заказов</th><th class="num">План</th><th class="num">Факт</th><th class="num">%</th><th class="num">Прогноз</th><th>Оценка</th></tr></thead>
           <tbody id="drivers-body"></tbody>
         </table>
       </div>
@@ -2386,16 +2386,32 @@ function renderDrivers() {
     var key = x.name.trim().split(' ')[0].toLowerCase();
     drvOrderMap[key] = (drvOrderMap[key] || 0) + x.orders;
   });
+
+  // Прогноз к концу месяца - тот же темп, что у менеджеров (Личная страница/Система решений):
+  // факт/день_месяца*дней_в_месяце
+  const dataDate = D.updated ? new Date(D.updated) : new Date();
+  const dayOfMonth = dataDate.getDate();
+  let dim = 30;
+  if (D.orders && D.orders.period) {
+    const py = +D.orders.period.slice(0,4), pm = +D.orders.period.slice(5,7);
+    if (py && pm) dim = new Date(py, pm, 0).getDate();
+  }
+  const paceRatio = dayOfMonth > 0 ? (dim / dayOfMonth) : 1;
+
   document.getElementById('drivers-body').innerHTML = drivers.map(d => {
     const pv = d.pct * 100;
     const cls = pv >= 90 ? 'green' : pv >= 60 ? 'amber' : 'red';
     var surname = d.driver.trim().split(' ')[0].toLowerCase();
     var ordCnt = drvOrderMap[surname] != null ? drvOrderMap[surname] : '—';
+    const forecast = d.fakt * paceRatio;
+    const forecastPct = d.plan > 0 ? forecast / d.plan * 100 : 0;
+    const fCls = forecastPct >= 95 ? 'green' : forecastPct >= 70 ? 'amber' : 'red';
     return `<tr>
       <td><b>${d.driver}</b></td><td class="muted">${d.gos}</td><td>${d.type}</td>
       <td class="num">${ordCnt}</td>
       <td class="num">${fmt(d.plan)}</td><td class="num">${fmt(d.fakt)}</td>
       <td class="num ${cls}"><b>${pv.toFixed(1)}%</b></td>
+      <td class="num ${fCls}">${fmt(forecast)} <span class="muted">(${forecastPct.toFixed(0)}%)</span></td>
       <td><span class="badge ${cls}">${pv>=90?'Отлично':pv>=60?'Хорошо':'Слабо'}</span></td>
     </tr>`;
   }).join('');

@@ -2385,8 +2385,14 @@ function renderDrivers() {
     periodEnd.getMonth() === today.getMonth() && periodEnd.getDate() === today.getDate();
   let paceRatio = 1;
   if (isOngoing) {
-    const dayOfMonth = periodEnd.getDate();
-    const dim = new Date(periodEnd.getFullYear(), periodEnd.getMonth() + 1, 0).getDate();
+    // d.fakt тут - валовая прибыль из Нормализованные_данные/История_финансов (парк-отчёт 1С),
+    // а он обычно отстаёт на день (см. "Прогноз ВП", Влад 2026-07-04) - фактически это данные
+    // за вчера, не за сегодня. Темп считаем от вчера, иначе прогноз занижается. В отличие от
+    // "По менеджерам"/Панели - там факт из таблицы заказов, она свежая, там "сегодня" верно.
+    const paceDate = new Date(today);
+    paceDate.setDate(paceDate.getDate() - 1);
+    const dayOfMonth = paceDate.getDate();
+    const dim = new Date(paceDate.getFullYear(), paceDate.getMonth() + 1, 0).getDate();
     paceRatio = dayOfMonth > 0 ? (dim / dayOfMonth) : 1;
   }
 

@@ -478,7 +478,11 @@ function normalizeReport() {
   // Прогноз по темпу - тот же расчёт, что уже используется на Панели/"По менеджерам":
   // факт/день_месяца*дней_в_месяце. Влад, 2026-07-04: "нужна колонка по прогнозу плана
   // по валовой прибыли" - прямо в таблицу, не только на дашборде.
+  // День берём "вчера", а не сегодня - Нормализованные_данные обычно отстаёт на день
+  // (отчёт "Отчет парк" от 1С приходит с лагом, см. переписку 2026-07-04), то есть в
+  // моменте это фактически данные ЗА ВЧЕРА - если делить факт на "сегодня", темп занижается.
   const todayForForecast = new Date();
+  todayForForecast.setDate(todayForForecast.getDate() - 1);
   const dayOfMonthForForecast = todayForForecast.getDate();
   const daysInMonthForForecast = new Date(todayForForecast.getFullYear(), todayForForecast.getMonth() + 1, 0).getDate();
   const forecastPaceRatio = dayOfMonthForForecast > 0 ? (daysInMonthForForecast / dayOfMonthForForecast) : 1;

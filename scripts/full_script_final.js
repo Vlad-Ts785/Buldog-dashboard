@@ -2111,16 +2111,39 @@ function ordInList(name, list) {
 // Нужна с тех пор, как 1С стала слать отчёт за 2 месяца сразу (прошлый + текущий) -
 // раньше в файле был ровно один месяц, теперь может быть несколько.
 // Возвращает {} если формат файла не распознан (нет строки заголовков на нужном месте).
+// Обычно заголовки колонок - строка 4 (индекс 3), первые 3 строки - "Параметры:"/"Отбор:"/
+// пусто. Но у архива "Заказы_2026-06" эти 3 строки оказались потеряны (заголовки лежали в
+// строке 1) - из-за этого parseOrdersRawRows/splitOrdersRawByMonth брали ЗА ЗАГОЛОВКИ
+// строку с реальными данными, ни одна колонка не находилась, и весь месяц молча
+// распознавался как пустой (Влад, 2026-07-04: "выбираю июнь на Зарплате - не подтягивается").
+// Ищем строку заголовков по содержимому (есть "Номер" и "Заказчик"), а не по фиксированному
+// индексу - устойчиво к обоим вариантам структуры.
+function findOrdersHeaderRowIndex_(allData) {
+  var limit = Math.min(allData.length, 10);
+  for (var i = 0; i < limit; i++) {
+    var row = allData[i] || [];
+    var hasNomer = false, hasZakazchik = false;
+    for (var j = 0; j < row.length; j++) {
+      var cell = String(row[j] || '').trim();
+      if (cell === 'Номер') hasNomer = true;
+      if (cell === 'Заказчик') hasZakazchik = true;
+    }
+    if (hasNomer && hasZakazchik) return i;
+  }
+  return 3; // не нашли по содержимому - старое поведение как подстраховка
+}
+
 function splitOrdersRawByMonth(data) {
   if (!data || data.length < 5) return {};
-  const headerRow = data[3]; // строка 4 (индекс 3) - как в parseOrdersRawRows
+  const headerRowIdx = findOrdersHeaderRowIndex_(data);
+  const headerRow = data[headerRowIdx];
   const col = {};
   headerRow.forEach(function(h, i) { const key = String(h || '').trim(); if (key) col[key] = i; });
   const dateColIdx = col['Начало работ'];
   if (dateColIdx === undefined) return {};
 
   const buckets = {};
-  for (let i = 4; i < data.length; i++) {
+  for (let i = headerRowIdx + 1; i < data.length; i++) {
     const month = ordMonthKey(data[i][dateColIdx]);
     if (!month) continue; // строка без даты - пропускаем, к месяцам не относится
     if (!buckets[month]) buckets[month] = [];
@@ -2166,7 +2189,10 @@ function importOrdersReport() {
     // Самый поздний месяц = текущий рабочий (живая таблица), остальные - обновление архивов
     // (именно то, что нужно для коррекций прошлого месяца в начале следующего).
     const liveMonth = monthsPresent[monthsPresent.length - 1];
-    const headerRows = data.slice(0, 4); // строки 1-4 (заголовки/шапка отчёта) - общие для всех кусков
+    // Строки до заголовков включительно (обычно 1-4) - общие для всех кусков. По индексу,
+    // найденному по содержимому (см. findOrdersHeaderRowIndex_), а не жёстко "4" - иначе при
+    // сдвинутой структуре архив получает те же битые заголовки, что уже ловили на "Заказы_2026-06".
+    const headerRows = data.slice(0, findOrdersHeaderRowIndex_(data) + 1);
 
     monthsPresent.forEach(function(month) {
       const monthData = headerRows.concat(monthBuckets[month]);
@@ -2289,8 +2315,10 @@ function normalizeOrders() {
 function parseOrdersRawRows(allData) {
   if (!allData || allData.length < 5) return { headers: [], rows: [] };
 
-  // Строка 4 (индекс 3) — заголовки колонок
-  const headerRow = allData[3];
+  // Обычно заголовки колонок - строка 4 (индекс 3), но см. findOrdersHeaderRowIndex_ -
+  // ищем по содержимому, не по фиксированному индексу.
+  const headerRowIdx = findOrdersHeaderRowIndex_(allData);
+  const headerRow = allData[headerRowIdx];
   const col = {};
   headerRow.forEach(function(h, i) {
     const key = String(h || '').trim();
@@ -2318,7 +2346,7 @@ function parseOrdersRawRows(allData) {
 
   const rows = [];
 
-  for (let i = 4; i < allData.length; i++) {
+  for (let i = headerRowIdx + 1; i < allData.length; i++) {
     const row = allData[i];
 
     const orderId = str(row, 'Номер');

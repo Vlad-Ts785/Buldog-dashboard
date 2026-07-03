@@ -473,6 +473,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
             <div class="kpi-prog-header"><span>Выполнение плана ВП</span><span id="k-profit-pct">—</span></div>
             <div class="kpi-prog-bg"><div class="kpi-prog-fill" id="k-profit-bar" style="width:0%"></div></div>
             <div class="kpi-sub" id="k-profit-plan" style="margin-top:4px"></div>
+            <div class="kpi-sub" id="k-profit-forecast" style="margin-top:2px"></div>
             <div class="kpi-sub" id="k-net-profit-est" style="margin-top:2px"></div>
           </div>
         </div>
@@ -878,7 +879,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 const API_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbxWi4wJWsSeHdgwrsC-d__EOrncLnkhDr6PgXohoPafY2Y2VtBPq_mGi9qd7mH-vzA00w/exec';
 
 const SALES_MANAGERS = ['Ахтамова','Васин','Володин','Гуляева','Гуштюк','Дербенцева','Кан','Коньшина','Котельников','Махура','Прус-Роскошный','Савиток','Сильчев','Филипчук','Цегельников','Шейко'];
-const PROFIT_PLAN = 50400000;
+const PROFIT_PLAN = 30000000; // план ВП на июль 2026, установлен Владом 2026-07-04
 
 // Коэффициент "чистая прибыль / наша валовая прибыль" - калибровано по факту БДР
 // (финотдел) за январь-май 2026: январь/февраль давали глубокий минус из-за высокой
@@ -1585,6 +1586,23 @@ function renderKPI() {
   setText('k-profit-pct', pct(profPct));
   setText('k-profit-plan', 'План: ' + fmt(PROFIT_PLAN));
   setBar('k-profit-bar', profPct, profit >= 0 ? 'var(--green)' : 'var(--red)');
+
+  // Прогноз ВП по темпу - тот же принцип, что и везде (см. "Прогноз ВП" в Нормализованные_
+  // данные, страница "Водители"): наша ВП идёт из Нормализованные_данные (парк-отчёт 1С),
+  // который обычно отстаёт на день - темп считаем от вчера, а не от сегодня, иначе прогноз
+  // занижается. Влад, 2026-07-04: "сделай прогнозы по той методике, которую мы обычно
+  // применяем".
+  (function() {
+    var paceDate = new Date();
+    paceDate.setDate(paceDate.getDate() - 1);
+    var dayOfMonth = paceDate.getDate();
+    var dim = new Date(paceDate.getFullYear(), paceDate.getMonth() + 1, 0).getDate();
+    var paceRatio = dayOfMonth > 0 ? (dim / dayOfMonth) : 1;
+    var profitForecast = profit * paceRatio;
+    var profitForecastPct = PROFIT_PLAN > 0 ? (profitForecast / PROFIT_PLAN * 100) : 0;
+    var fCol = profitForecastPct >= 100 ? 'var(--green)' : profitForecastPct >= 70 ? 'var(--amber)' : 'var(--red)';
+    setHTML('k-profit-forecast', 'Прогноз: <b style="color:' + fCol + '">' + fmt(profitForecast) + '</b> (' + Math.round(profitForecastPct) + '%)');
+  })();
 
   // Чистая прибыль (оценочная) = наша ВП × коэффициент, откалиброванный по БДР
   // (см. NET_PROFIT_COEFFICIENT выше). Явно помечено как оценка - это не точный расчёт.

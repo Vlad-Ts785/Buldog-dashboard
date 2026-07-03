@@ -482,7 +482,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           <div class="kpi-sub" id="k-razneseno" style="margin-top:6px"></div>
         </div>
         <div class="kpi">
-          <div class="kpi-label">Маржинальная прибыль</div>
+          <div class="kpi-label">Маржа найма</div>
           <div class="kpi-value" id="k-margin-pct">—</div>
           <div class="kpi-sub2" id="k-margin-detail"></div>
           <div class="kpi-prog-wrap">
@@ -1503,39 +1503,47 @@ function renderKPI() {
   const f = D.fleet || {};
   const tr = f.trailers || {};
   const tk = f.trucks || {};
+  const os = (D.orders && D.orders.summary) || {};
 
+  // Полные (не сокращённые до "млн") числа в 4 блоках Панели - Влад, 2026-07-04.
   const totalRevenue = s.salesFakt || 0;
-  const salesPlan = s.salesPlan || 54000000;
+  const salesPlan = s.salesPlan || 0; // план из "Планы_менеджеров" - если пуст, честный 0, не угадываем
   const revPct = Math.min(salesPlan > 0 ? totalRevenue / salesPlan * 100 : 0, 100);
-  setText('k-revenue-total', fmtM(totalRevenue));
-  setText('k-revenue-park', 'Свой парк: ' + fmtM(s.revenue || 0));
+  setText('k-revenue-total', fmt(totalRevenue));
+  setText('k-revenue-park', 'Свой парк: ' + fmt(s.revenue || 0));
   setText('k-revenue-pct', pct(revPct));
-  setText('k-revenue-plan', 'План: ' + fmtM(salesPlan));
+  setText('k-revenue-plan', 'План: ' + fmt(salesPlan));
   setBar('k-revenue-bar', revPct, revPct >= 80 ? 'var(--green)' : revPct >= 50 ? 'var(--amber)' : 'var(--red)');
 
   const profit = s.profit || 0;
   const profPct = Math.min(PROFIT_PLAN > 0 ? profit / PROFIT_PLAN * 100 : 0, 100);
   const kp = document.getElementById('k-profit');
-  kp.textContent = fmtM(profit);
+  kp.textContent = fmt(profit);
   kp.className = 'kpi-value ' + (profit >= 0 ? 'green' : 'red');
   setText('k-margin', 'Маржа ' + pct(s.margin || 0));
   setText('k-profit-pct', pct(profPct));
-  setText('k-profit-plan', 'План: ' + fmtM(PROFIT_PLAN));
+  setText('k-profit-plan', 'План: ' + fmt(PROFIT_PLAN));
   setBar('k-profit-bar', profPct, profit >= 0 ? 'var(--green)' : 'var(--red)');
 
   const pay = manualPayment > 0 ? manualPayment : (s.salesPayment || 0);
-  setText('k-payment', fmtM(pay));
-  setText('k-payment-nal', s.salesPayNal > 0 ? 'Нал: ' + fmtM(s.salesPayNal) : '');
-  setText('k-razneseno', 'Разнесено: ' + fmtM(s.salesPayment || 0));
+  setText('k-payment', fmt(pay));
+  setText('k-payment-nal', s.salesPayNal > 0 ? 'Нал: ' + fmt(s.salesPayNal) : '');
+  setText('k-razneseno', 'Разнесено: ' + fmt(s.salesPayment || 0));
 
-  const marginPct = s.margin || 0;
+  // Блок 4 - маржа по НАЁМНОЙ технике (не по своему парку - тот уже есть в блоке 2 "Валовая
+  // прибыль" подписью "Маржа"). Те же поля, что уже используются везде для найма
+  // (hired_profit/total_hired_cost - см. [[project-profit-rule]]), не новый источник.
+  const hiredProfit = os.hired_profit || 0;
+  const hiredCost = os.total_hired_cost || 0;
+  const hiredRevenue = hiredCost + hiredProfit;
+  const marginPct = hiredRevenue > 0 ? (hiredProfit / hiredRevenue * 100) : 0;
   const marginColor = marginPct >= 30 ? 'var(--green)' : marginPct >= 15 ? 'var(--amber)' : 'var(--red)';
   const km = document.getElementById('k-margin-pct');
   km.textContent = pct(marginPct);
   km.className = 'kpi-value ' + (marginPct >= 30 ? 'green' : marginPct >= 15 ? 'amber' : 'red');
-  setText('k-margin-detail', marginPct >= 30 ? 'Хорошая маржа' : marginPct >= 15 ? 'Средняя маржа' : 'Низкая маржа');
+  setText('k-margin-detail', marginPct >= 30 ? 'Хорошая маржа найма' : marginPct >= 15 ? 'Средняя маржа найма' : 'Низкая маржа найма');
   setText('k-margin-badge', pct(marginPct));
-  setText('k-margin-abs', 'ВП ' + fmtM(profit) + ' из выручки ' + fmtM(s.revenue || 0));
+  setText('k-margin-abs', 'Прибыль найма ' + fmt(hiredProfit) + ' из выручки найма ' + fmt(hiredRevenue));
   setBar('k-margin-bar', Math.min(marginPct, 100), marginColor);
 }
 

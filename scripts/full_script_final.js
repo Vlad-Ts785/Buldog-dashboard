@@ -1697,11 +1697,16 @@ function getSummaryData(ss, ordersData) {
   const byManager = (ordersData && ordersData.by_manager) || [];
   let totalPlan=0, totalFakt=0, totalPayment=0, totalPayNal=0;
   byManager.forEach(function(m) {
-    totalPlan    += m.plan || 0;
     totalFakt    += m.amount || 0;
     totalPayment += m.payment || 0;
     totalPayNal  += m.cash || 0;
   });
+  // План суммируем из ПОЛНОЙ карты планов (managerPlans), а не только по_manager - иначе
+  // менеджер без единого заказа в этом периоде (месяц только начался) тихо теряет свой план
+  // из общей суммы, план "Общей выручки" занижается (та же причина, что вчера дала 16 млн
+  // вместо 77 на странице "По менеджерам" - см. plans/2026-07-02-manager-revenue-single-source.md).
+  const allPlans = (ordersData && ordersData.managerPlans) || {};
+  Object.keys(allPlans).forEach(function(k) { totalPlan += allPlans[k] || 0; });
 
   return {
     revenue, profit, fot, fuel, parts, fines, tolls,

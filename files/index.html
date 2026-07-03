@@ -473,6 +473,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
             <div class="kpi-prog-header"><span>Выполнение плана ВП</span><span id="k-profit-pct">—</span></div>
             <div class="kpi-prog-bg"><div class="kpi-prog-fill" id="k-profit-bar" style="width:0%"></div></div>
             <div class="kpi-sub" id="k-profit-plan" style="margin-top:4px"></div>
+            <div class="kpi-sub" id="k-net-profit-est" style="margin-top:2px"></div>
           </div>
         </div>
         <div class="kpi">
@@ -878,6 +879,14 @@ const API_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbxWi4wJWsSeHdgw
 
 const SALES_MANAGERS = ['Ахтамова','Васин','Володин','Гуляева','Гуштюк','Дербенцева','Кан','Коньшина','Котельников','Махура','Прус-Роскошный','Савиток','Сильчев','Филипчук','Цегельников','Шейко'];
 const PROFIT_PLAN = 50400000;
+
+// Коэффициент "чистая прибыль / наша валовая прибыль" - калибровано по факту БДР
+// (финотдел) за январь-май 2026: январь/февраль давали глубокий минус из-за высокой
+// лизинговой нагрузки, к маю она упала в 5 раз (лизинг ~1.1М против ~5.6М в январе) и
+// коэффициент вышел на +29%. Влад решил взять 30% как рабочую оценку на 2-е полугодие -
+// лизинговая нагрузка расти не должна. Пересчитать, когда придёт БДР за июнь (сверить
+// оценку с фактом) - см. память "bdr-net-profit-coefficient".
+const NET_PROFIT_COEFFICIENT = 0.30;
 
 const PAGE_TITLES = {
   main: 'Панель управления',
@@ -1576,6 +1585,11 @@ function renderKPI() {
   setText('k-profit-pct', pct(profPct));
   setText('k-profit-plan', 'План: ' + fmt(PROFIT_PLAN));
   setBar('k-profit-bar', profPct, profit >= 0 ? 'var(--green)' : 'var(--red)');
+
+  // Чистая прибыль (оценочная) = наша ВП × коэффициент, откалиброванный по БДР
+  // (см. NET_PROFIT_COEFFICIENT выше). Явно помечено как оценка - это не точный расчёт.
+  const netProfitEst = profit * NET_PROFIT_COEFFICIENT;
+  setHTML('k-net-profit-est', 'Чистая прибыль (оценочная, ' + Math.round(NET_PROFIT_COEFFICIENT * 100) + '%): <b style="color:' + (netProfitEst >= 0 ? 'var(--green)' : 'var(--red)') + '">' + fmt(netProfitEst) + '</b>');
 
   const pay = manualPayment > 0 ? manualPayment : (s.salesPayment || 0);
   setText('k-payment', fmt(pay));

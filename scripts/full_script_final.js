@@ -695,15 +695,15 @@ function saveFinancialHistory() {
   }
 
   var finSheet = ss.getSheetByName('История_финансов');
-  if (finSheet) {
-    if (finSheet.getLastColumn() < 12) finSheet.clear();
-  } else {
-    finSheet = ss.insertSheet('История_финансов');
-  }
+  if (!finSheet) finSheet = ss.insertSheet('История_финансов');
 
   if (finSheet.getLastRow() === 0) {
-    var hdrs = ['Дата','Госномер','Тип','Статус','Выручка','ФОТ','Топливо','Запчасти','Штрафы','Проходные','Валовая прибыль','План ВП'];
+    var hdrs = ['Дата','Госномер','Тип','Статус','Выручка','ФОТ','Топливо','Запчасти','Штрафы','Проходные','Валовая прибыль','План ВП','Водитель'];
     finSheet.getRange(1, 1, 1, hdrs.length).setValues([hdrs]).setFontWeight('bold');
+  } else if (finSheet.getLastColumn() < 13) {
+    // Добавлена колонка "Водитель" (2026-07-04) - старые строки без неё не трогаем,
+    // задним числом водителя не восстановить, история просто начинает копиться с сегодня.
+    finSheet.getRange(1, 13).setValue('Водитель').setFontWeight('bold');
   }
 
   // Удаляем записи за сегодня — перезапишем актуальными
@@ -731,12 +731,12 @@ function saveFinancialHistory() {
     var f = finMap[gosClean] || { revenue:0, fot:0, fuel:0, parts:0, fines:0, tolls:0, profit:0 };
     rows.push([
       nowDate, v.gosOriginal, v.type, v.status,
-      f.revenue, f.fot, f.fuel, f.parts, f.fines, f.tolls, f.profit, v.plan
+      f.revenue, f.fot, f.fuel, f.parts, f.fines, f.tolls, f.profit, v.plan, v.driver || ''
     ]);
   }
 
   if (rows.length > 0) {
-    finSheet.getRange(finSheet.getLastRow() + 1, 1, rows.length, 12).setValues(rows);
+    finSheet.getRange(finSheet.getLastRow() + 1, 1, rows.length, 13).setValues(rows);
   }
 }
 
@@ -1103,6 +1103,32 @@ function doGet(e) {
       }
       return ContentService
         .createTextOutput(JSON.stringify({ history: getVehicleHistory(ss) }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // График в карточке машины: выручка + кол-во заказов по дням за выбранный период
+    // (?action=vehicle_orders_history&gos=...&from=YYYY-MM-DD&to=YYYY-MM-DD). Источник - таблица
+    // заказов (текущий месяц + архивы), не Нормализованные_данные/История_финансов - у тех
+    // может быть лаг в свежести (см. переписку с Владом 2026-07-04 про "Отчет парк"), а тут
+    // нужны именно точные дневные цифры за произвольный выбранный период.
+    if (action === 'vehicle_orders_history') {
+      if (access.role !== 'admin') {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var vohGos = e.parameter.gos || '';
+      var vohFrom = e.parameter.from || '';
+      var vohTo = e.parameter.to || '';
+      if (!vohGos || !/^\d{4}-\d{2}-\d{2}$/.test(vohFrom) || !/^\d{4}-\d{2}-\d{2}$/.test(vohTo)) {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Некорректные параметры' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var vohFromP = vohFrom.split('-').map(Number);
+      var vohToP = vohTo.split('-').map(Number);
+      return ContentService
+        .createTextOutput(JSON.stringify({
+          days: getVehicleOrdersHistory_(ss, vohGos,
+            new Date(vohFromP[0], vohFromP[1] - 1, vohFromP[2]),
+            new Date(vohToP[0], vohToP[1] - 1, vohToP[2])),
+        }))
         .setMimeType(ContentService.MimeType.JSON);
     }
 
@@ -1648,6 +1674,26 @@ function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate) {
   });
   Object.keys(fallbackByVehicleMonth).forEach(function(g) { allGos[g] = true; });
 
+  // Водитель ЗА ВЫБРАННЫЙ ПЕРИОД, а не сегодняшний живой - Данные_1С_история этого не хранит,
+  // поэтому смотрим отдельно в История_финансов (там есть колонка "Водитель" с 2026-07-04) -
+  // берём самую позднюю запись внутри диапазона [from, to]. Влад, 2026-07-04: карточка машины
+  // должна показывать данные именно за выбранный период, а не "как сейчас".
+  var driverByGos = {};
+  var histForDriver = ss.getSheetByName('История_финансов');
+  if (histForDriver && histForDriver.getLastRow() > 1 && histForDriver.getLastColumn() >= 13) {
+    var dData = histForDriver.getRange(2, 1, histForDriver.getLastRow() - 1, 13).getValues();
+    for (var di = 0; di < dData.length; di++) {
+      var dr = dData[di];
+      var dd = dr[0] instanceof Date ? dr[0] : new Date(dr[0]);
+      if (isNaN(dd.getTime()) || dd < from || dd > to) continue;
+      var dGos = String(dr[1] || '').trim();
+      var dDriver = String(dr[12] || '').trim();
+      if (!dGos || !dDriver) continue;
+      var existingD = driverByGos[dGos];
+      if (!existingD || dd > existingD.date) driverByGos[dGos] = { date: dd, driver: dDriver };
+    }
+  }
+
   var result = [];
   Object.keys(allGos).forEach(function(gos) {
     var agg = { gos: gos, marka: '', type: '', status: '', revenue: 0, fot: 0, fuel: 0, parts: 0,
@@ -1677,8 +1723,9 @@ function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate) {
     if (staffInfo) {
       agg.marka = staffInfo.marka;
       agg.trailer = staffInfo.trailerGos;
-      agg.driver = staffInfo.driver;
+      agg.driver = staffInfo.driver; // фолбэк - сегодняшний водитель, если истории ещё нет
     }
+    if (driverByGos[gos]) agg.driver = driverByGos[gos].driver; // приоритет - водитель за сам период
     result.push(agg);
   });
   return result;
@@ -1817,7 +1864,8 @@ function getVehicleHistory(ss) {
   var hist = ss.getSheetByName('История_финансов');
   if (!hist || hist.getLastRow() < 2) return [];
   var lastRow = hist.getLastRow();
-  var data = hist.getRange(2, 1, lastRow - 1, 12).getValues();
+  var lastCol = Math.min(hist.getLastColumn(), 13);
+  var data = hist.getRange(2, 1, lastRow - 1, lastCol).getValues();
   var result = [];
   for (var i = 0; i < data.length; i++) {
     var row = data[i];
@@ -1835,9 +1883,60 @@ function getVehicleHistory(ss) {
       tolls:   Math.abs(parseFloat(row[9]) || 0),
       profit:  parseFloat(row[10]) || 0,
       plan:    parseFloat(row[11]) || 0,
+      driver:  String(row[12] || '').trim(),
     });
   }
   return result;
+}
+
+// Выручка + количество заказов по дням для конкретной машины за произвольный диапазон дат -
+// для графика в карточке машины (см. vehicle_orders_history выше). Источник - таблица заказов
+// (текущий месяц "Заказы_данные" + архивы "Заказы_YYYY-MM"), госномер матчим по полю "Машина"
+// (там полное описание техники, гос.номер внутри строки - та же логика, что и в normalizeReport()).
+function getVehicleOrdersHistory_(ss, gos, fromDate, toDate) {
+  var gosClean = normalizeGos(gos);
+  var from = new Date(fromDate); from.setHours(0, 0, 0, 0);
+  var to = new Date(toDate); to.setHours(23, 59, 59, 999);
+
+  var monthKeys = [];
+  var cursor = new Date(from.getFullYear(), from.getMonth(), 1);
+  while (cursor <= to) {
+    monthKeys.push(cursor.getFullYear() + '-' + String(cursor.getMonth() + 1).padStart(2, '0'));
+    cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+  }
+
+  var currentMonthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+  var byDate = {}; // date -> {date, revenue, orders}
+
+  monthKeys.forEach(function(mk) {
+    var rows;
+    if (mk === currentMonthKey) {
+      var live = ss.getSheetByName(ORDERS_NORM_SHEET);
+      if (!live || live.getLastRow() < 2) return;
+      rows = live.getRange(2, 1, live.getLastRow() - 1, 43).getValues();
+    } else {
+      var archive = ss.getSheetByName(ORDERS_ARCHIVE_PFX + mk);
+      if (!archive || archive.getLastRow() < 5) return;
+      rows = parseOrdersRawRows(archive.getDataRange().getValues()).rows;
+    }
+    rows.forEach(function(row) {
+      var machine = String(row[23] || '');
+      var rawGos = extractGosNumber(machine);
+      if (!rawGos || normalizeGos(rawGos) !== gosClean) return;
+      var rawDate = row[2]; // "Начало работ"
+      var dateStr = rawDate instanceof Date
+        ? Utilities.formatDate(rawDate, 'Europe/Moscow', 'yyyy-MM-dd')
+        : String(rawDate || '').trim();
+      if (!dateStr) return;
+      var d = new Date(dateStr + 'T00:00:00');
+      if (isNaN(d.getTime()) || d < from || d > to) return;
+      if (!byDate[dateStr]) byDate[dateStr] = { date: dateStr, revenue: 0, orders: 0 };
+      byDate[dateStr].revenue += ordParseNum(row[30]);
+      byDate[dateStr].orders++;
+    });
+  });
+
+  return Object.values(byDate).sort(function(a, b) { return a.date.localeCompare(b.date); });
 }
 
 // Валовая прибыль своего парка за прошлый период (для зарплаты Рыщанова на вкладке "Зарплата"

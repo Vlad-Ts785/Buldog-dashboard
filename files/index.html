@@ -2474,19 +2474,44 @@ function renderRepairBlock() {
 // ── КАРТОЧКА МАШИНЫ ────────────────────────────────────────
 var vcardChart = null;
 
+// Границы выбранного периода на странице "Парк техники" (range-from/range-to) - если поля
+// пустые, значит выбран "текущий месяц" по умолчанию. Карточка машины должна показывать
+// данные именно за эти границы, а не всегда за сегодня (Влад, 2026-07-04).
+function getSelectedVehiclePeriod_() {
+  var fromEl = document.getElementById('range-from');
+  var toEl = document.getElementById('range-to');
+  var fromVal = fromEl ? fromEl.value : '';
+  var toVal = toEl ? toEl.value : '';
+  if (fromVal && toVal) return { from: fromVal, to: toVal };
+  var today = new Date();
+  var pad = function(n) { return String(n).padStart(2, '0'); };
+  var y = today.getFullYear(), m = today.getMonth() + 1, d = today.getDate();
+  return { from: y + '-' + pad(m) + '-01', to: y + '-' + pad(m) + '-' + pad(d) };
+}
+
 function openVehicleCard(gos) {
-  if (!D || !D.vehicles) return;
-  var v = D.vehicles.find(function(x) { return x.gos === gos; });
+  if (!D) return;
+  var v = activeVehiclesData().find(function(x) { return x.gos === gos; });
   if (!v) return;
-  var driver = D.drivers ? D.drivers.find(function(d) { return d.gos === gos; }) : null;
-  var vhist = (histData || []).filter(function(r) { return r.gos === gos; });
-  document.getElementById('vcard-content').innerHTML = buildVehicleCard(v, vhist, driver);
+  var driver = activeDriversData().find(function(d) { return d.gos === gos; });
+  var period = getSelectedVehiclePeriod_();
+
+  document.getElementById('vcard-content').innerHTML = buildVehicleCard(v, [], driver, 0);
   document.getElementById('vcard-overlay').classList.add('open');
   document.getElementById('vcard-panel').classList.add('open');
   document.body.style.overflow = 'hidden';
-  ensureHistData().then(function(hd) {
-    var vh = hd.filter(function(r) { return r.gos === gos; });
-    if (vh.length > 1) setTimeout(function() { renderVcardChart(vh); }, 50);
+
+  var ordersFetch = fetch(apiUrl({ action: 'vehicle_orders_history', gos: gos, from: period.from, to: period.to }))
+    .then(function(r) { return r.json(); })
+    .then(function(data) { return data.days || []; })
+    .catch(function() { return []; });
+
+  Promise.all([ensureHistData(), ordersFetch]).then(function(res) {
+    var hd = res[0], days = res[1];
+    var vhist = hd.filter(function(r) { return r.gos === gos && r.date >= period.from && r.date <= period.to; });
+    var totalOrders = days.reduce(function(s, x) { return s + (x.orders || 0); }, 0);
+    document.getElementById('vcard-content').innerHTML = buildVehicleCard(v, vhist, driver, totalOrders);
+    if (days.length > 1) setTimeout(function() { renderVcardChart(days); }, 50);
   });
 }
 
@@ -2497,7 +2522,7 @@ function closeVehicleCard() {
   if (vcardChart) { vcardChart.destroy(); vcardChart = null; }
 }
 
-function buildVehicleCard(v, vhist, driver) {
+function buildVehicleCard(v, vhist, driver, orderCount) {
   var stCls = v.status && v.status.indexOf('Ремонт') !== -1 ? 'red' : v.status && v.status.indexOf('работе') !== -1 ? 'green' : 'amber';
   var planPct = v.plan > 0 ? v.profit / v.plan * 100 : null;
   var planCls = planPct === null ? '' : planPct >= 100 ? 'green' : planPct >= 80 ? 'amber' : 'red';
@@ -2538,10 +2563,11 @@ function buildVehicleCard(v, vhist, driver) {
 
   // ── KPI row
   h += '<div class="vcard-body">';
-  h += '<div class="vcard-kpis">';
+  h += '<div class="vcard-kpis" style="grid-template-columns:1fr 1fr;row-gap:10px">';
   h += '<div class="vcard-kpi"><div class="vcard-kpi-label">Выручка</div><div class="vcard-kpi-val">' + fmtK2(v.revenue) + '</div></div>';
   h += '<div class="vcard-kpi"><div class="vcard-kpi-label">Прибыль</div><div class="vcard-kpi-val ' + (v.profit < 0 ? 'red' : 'green') + '">' + fmtK2(v.profit) + '</div></div>';
   h += '<div class="vcard-kpi"><div class="vcard-kpi-label">Рентабельность</div><div class="vcard-kpi-val ' + marginCls + '">' + Math.round(margin) + '%</div></div>';
+  h += '<div class="vcard-kpi"><div class="vcard-kpi-label">Заказов</div><div class="vcard-kpi-val" id="vcard-orders-count">' + (orderCount||0) + '</div></div>';
   h += '</div>';
 
   // ── Расходы с прогресс-барами
@@ -2565,7 +2591,7 @@ function buildVehicleCard(v, vhist, driver) {
   });
   h += '</div>';
 
-  // ── История статусов
+  // ── История статусов (из Штатки, "Статус на сегодня" по дням выбранного периода)
   if (vhist.length) {
     h += '<div class="vcard-sec">';
     h += '<div class="vcard-sec-title">Статусы · ' + totalDays + ' дн в базе';
@@ -2577,41 +2603,36 @@ function buildVehicleCard(v, vhist, driver) {
     h += '<div class="vcard-stat"><div class="vcard-stat-val amber">' + (noDriverDays||'—') + '</div><div class="vcard-stat-lbl">Без водителя</div></div>';
     h += '<div class="vcard-stat"><div class="vcard-stat-val amber">' + (noOrderDays||'—') + '</div><div class="vcard-stat-lbl">Без заказа</div></div>';
     h += '</div></div>';
-
-    // ── Мини-график прибыли
-    h += '<div class="vcard-sec">';
-    h += '<div class="vcard-sec-title">Динамика прибыли по дням</div>';
-    h += '<canvas id="vcard-chart" style="max-height:150px"></canvas>';
-    h += '</div>';
-  } else {
-    h += '<div style="color:var(--muted);font-size:12px;padding:8px 0 4px">История появится после деплоя Apps Script и открытия вкладки «Динамика»</div>';
   }
+
+  // ── Мини-график выручки и количества заказов по дням (за выбранный период) - не зависит
+  // от истории статусов, источник - таблица заказов (см. getVehicleOrdersHistory_).
+  h += '<div class="vcard-sec">';
+  h += '<div class="vcard-sec-title">Выручка и заказы по дням</div>';
+  h += '<canvas id="vcard-chart" style="max-height:150px"></canvas>';
+  h += '</div>';
 
   h += '</div>';
   return h;
 }
 
-function renderVcardChart(vhist) {
-  // Один рекорд на дату (последний), сортируем по дате
-  var dayMap = {};
-  vhist.forEach(function(r) {
-    if (!dayMap[r.date] || r.date > dayMap[r.date].date) dayMap[r.date] = r;
+function renderVcardChart(days) {
+  // days - [{date, revenue, orders}], уже за выбранный период, сортируем по дате
+  var sorted = days.slice().sort(function(a, b) { return a.date.localeCompare(b.date); });
+  if (sorted.length < 2) return;
+  var labels = sorted.map(function(r) {
+    return new Date(r.date + 'T00:00:00').toLocaleDateString('ru', {day:'numeric', month:'short'});
   });
-  var days = Object.keys(dayMap).sort();
-  if (days.length < 2) return;
-  var labels = days.map(function(d) {
-    return new Date(d + 'T00:00:00').toLocaleDateString('ru', {day:'numeric', month:'short'});
-  });
-  var profits  = days.map(function(d) { return Math.round(dayMap[d].profit  / 1000); });
-  var revenues = days.map(function(d) { return Math.round(dayMap[d].revenue / 1000); });
+  var revenues = sorted.map(function(r) { return Math.round(r.revenue / 1000); });
+  var orders   = sorted.map(function(r) { return r.orders; });
   var ctx = document.getElementById('vcard-chart');
   if (!ctx) return;
   if (vcardChart) vcardChart.destroy();
   vcardChart = new Chart(ctx.getContext('2d'), {
     type: 'line',
     data: { labels: labels, datasets: [
-      { label: 'Прибыль',  data: profits,  borderColor: '#1D9E75', backgroundColor: 'rgba(29,158,117,0.1)', borderWidth: 2, pointRadius: 4, fill: true,  tension: 0.3 },
-      { label: 'Выручка',  data: revenues, borderColor: '#EF9F27', backgroundColor: 'transparent',          borderWidth: 2, pointRadius: 4, fill: false, tension: 0.3 },
+      { label: 'Выручка (тыс ₽)',    data: revenues, borderColor: '#EF9F27', backgroundColor: 'rgba(239,159,39,0.1)', borderWidth: 2, pointRadius: 4, fill: true,  tension: 0.3, yAxisID: 'y' },
+      { label: 'Количество заказов', data: orders,   borderColor: '#378ADD', backgroundColor: 'transparent',          borderWidth: 2, pointRadius: 4, fill: false, tension: 0.3, yAxisID: 'y1' },
     ]},
     options: {
       responsive: true,
@@ -2619,7 +2640,8 @@ function renderVcardChart(vhist) {
       plugins: { legend: { labels: { color: '#888780', font: { size: 10 }, boxWidth: 12 } } },
       scales: {
         x: { ticks: { color: '#888780', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
-        y: { ticks: { color: '#888780', font: { size: 10 }, callback: function(v) { return v + 'К'; } }, grid: { color: 'rgba(255,255,255,0.04)' } }
+        y: { position: 'left', ticks: { color: '#888780', font: { size: 10 }, callback: function(v) { return v + 'К'; } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        y1: { position: 'right', ticks: { color: '#888780', font: { size: 10 }, stepSize: 1 }, grid: { display: false } }
       }
     }
   });

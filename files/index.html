@@ -1512,7 +1512,15 @@ function renderKPI() {
   const salesPlan = s.salesPlan || 0; // план из "Планы_менеджеров" - если пуст, честный 0, не угадываем
   const revPct = Math.min(salesPlan > 0 ? totalRevenue / salesPlan * 100 : 0, 100);
   setText('k-revenue-total', fmt(totalRevenue));
-  setText('k-revenue-park', 'Свой парк: ' + fmt(s.revenue || 0));
+  // "Свой парк" тут - из таблицы заказов (os.own_amount), тот же источник, что и на
+  // "Обзор заказов" ("Выручка свой парк") - НЕ из Нормализованные_данные (s.revenue).
+  // У Нормализованные_данные (1С-отчёт "парк") своя дата прихода письма - на практике
+  // отстаёт от заказов на день и больше, из-за чего тут показывало 2.0М, а на "Обзор
+  // заказов" честные 3.38М за те же дни - расхождение было не в математике, а в том, что
+  // делители смотрели на разные даты. Валовая прибыль своего парка (D.summary.profit)
+  // по-прежнему считается из Нормализованные_данные - это единственный надёжный источник
+  // ВП, см. project-profit-rule. Влад, 2026-07-04: "эти данные должны быть одинаковые".
+  setText('k-revenue-park', 'Свой парк: ' + fmt(os.own_amount || 0));
   setText('k-revenue-pct', pct(revPct));
   setText('k-revenue-plan', 'План: ' + fmt(salesPlan));
   setBar('k-revenue-bar', revPct, revPct >= 80 ? 'var(--green)' : revPct >= 50 ? 'var(--amber)' : 'var(--red)');

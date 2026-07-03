@@ -470,9 +470,18 @@ function normalizeReport() {
   const headers = [
     'Госномер (ключ)', 'Марка', 'Тип техники', 'Выручка', 'ФОТ',
     'Топливо', 'Запчасти', 'Штрафы', 'Проходные', 'Валовая прибыль',
-    'Прицеп', 'Гос. номер прицепа', 'Тип из Штатки', 'Статус из Штатки', 'План ВП'
+    'Прицеп', 'Гос. номер прицепа', 'Тип из Штатки', 'Статус из Штатки', 'План ВП',
+    'Прогноз ВП'
   ];
   normSheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
+
+  // Прогноз по темпу - тот же расчёт, что уже используется на Панели/"По менеджерам":
+  // факт/день_месяца*дней_в_месяце. Влад, 2026-07-04: "нужна колонка по прогнозу плана
+  // по валовой прибыли" - прямо в таблицу, не только на дашборде.
+  const todayForForecast = new Date();
+  const dayOfMonthForForecast = todayForForecast.getDate();
+  const daysInMonthForForecast = new Date(todayForForecast.getFullYear(), todayForForecast.getMonth() + 1, 0).getDate();
+  const forecastPaceRatio = dayOfMonthForForecast > 0 ? (daysInMonthForForecast / dayOfMonthForForecast) : 1;
 
   const skipKeywords = ['Итого','ПР-4','ПР-5','ПР-3','ТКР-4','КР-3','П-3','К-3',
                         'Длинномер','Единица техники','Тягач','Параметры:','ПР-8'];
@@ -518,12 +527,14 @@ function normalizeReport() {
       staffInfo.type       || '',              // M — тип из Штатки (ПР-8, ТКР-4, КР-3...)
       staffInfo.status     || '',              // N — статус из Штатки (В работе / Ремонт)
       staffInfo.plan       || 0,              // O — план ВП из Штатки (колонка F)
+      Math.round(profit * forecastPaceRatio), // P — прогноз ВП по темпу на конец месяца
     ]);
   }
 
   if (vehicles.length === 0) throw new Error('Нет данных о машинах');
   normSheet.getRange(2, 1, vehicles.length, headers.length).setValues(vehicles);
   normSheet.getRange(2, 4, vehicles.length, 7).setNumberFormat('#,##0.00');
+  normSheet.getRange(2, 16, vehicles.length, 1).setNumberFormat('#,##0');
   normSheet.setColumnWidths(1, 1, 140);
   normSheet.autoResizeColumns(2, 3);
 }

@@ -461,6 +461,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
             <div class="kpi-prog-header"><span>Выполнение плана продаж</span><span id="k-revenue-pct">—</span></div>
             <div class="kpi-prog-bg"><div class="kpi-prog-fill" id="k-revenue-bar" style="width:0%"></div></div>
             <div class="kpi-sub" id="k-revenue-plan" style="margin-top:4px"></div>
+            <div class="kpi-sub" id="k-revenue-forecast" style="margin-top:2px"></div>
           </div>
         </div>
         <div class="kpi">
@@ -1515,6 +1516,23 @@ function renderKPI() {
   setText('k-revenue-pct', pct(revPct));
   setText('k-revenue-plan', 'План: ' + fmt(salesPlan));
   setBar('k-revenue-bar', revPct, revPct >= 80 ? 'var(--green)' : revPct >= 50 ? 'var(--amber)' : 'var(--red)');
+
+  // Прогноз по темпу - тот же расчёт, что на "По менеджерам"/"Личной странице":
+  // факт/день_месяца*дней_в_месяце. Влад, 2026-07-04: "добавь прогноз выполнения плана".
+  (function() {
+    var dataDate = D.updated ? new Date(D.updated) : new Date();
+    var dayOfMonth = dataDate.getDate();
+    var dim = 30;
+    if (D.orders && D.orders.period) {
+      var py = +D.orders.period.slice(0,4), pm = +D.orders.period.slice(5,7);
+      if (py && pm) dim = new Date(py, pm, 0).getDate();
+    }
+    var paceRatio = dayOfMonth > 0 ? (dim / dayOfMonth) : 1;
+    var forecast = totalRevenue * paceRatio;
+    var forecastPct = salesPlan > 0 ? (forecast / salesPlan * 100) : 0;
+    var fCol = forecastPct >= 100 ? 'var(--green)' : forecastPct >= 70 ? 'var(--amber)' : 'var(--red)';
+    setHTML('k-revenue-forecast', 'Прогноз: <b style="color:' + fCol + '">' + fmt(forecast) + '</b> (' + Math.round(forecastPct) + '%)');
+  })();
 
   const profit = s.profit || 0;
   const profPct = Math.min(PROFIT_PLAN > 0 ? profit / PROFIT_PLAN * 100 : 0, 100);
@@ -4228,6 +4246,7 @@ function fmtK(n) { if(Math.abs(n)>=1000000)return(n/1000000).toFixed(1)+'M';if(M
 function fmtK2(n) { if(Math.abs(n)>=1000000)return(n/1000000).toFixed(1)+' млн';if(Math.abs(n)>=1000)return(n/1000).toFixed(0)+' тыс';return Math.round(n); }
 function pct(n) { return (Math.round((n||0)*10)/10).toFixed(1)+'%'; }
 function setText(id, val) { const el=document.getElementById(id); if(el) el.textContent=val; }
+function setHTML(id, val) { const el=document.getElementById(id); if(el) el.innerHTML=val; }
 </script>
 <!-- Подключаем после основного скрипта, без async/defer - гарантирует, что initGoogleSignIn()
      уже объявлена к моменту, когда библиотека Google готова и мы её вызываем. -->

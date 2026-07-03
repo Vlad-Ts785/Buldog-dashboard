@@ -225,6 +225,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .badge.green{background:rgba(29,158,117,.15);color:#4fd4a3;}
 .badge.red{background:rgba(226,75,74,.15);color:#f07b7a;}
 .badge.amber{background:rgba(239,159,39,.15);color:#f5be6a;}
+.badge.orange{background:rgba(186,117,23,.18);color:#e0954a;}
 .badge.blue{background:rgba(55,138,221,.15);color:#7db9ee;}
 
 /* ── TABLE ──────────────────────────────────────────────── */
@@ -236,7 +237,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .tbl tfoot td{padding:9px 10px;border-top:2px solid var(--border);color:var(--text);font-size:12px;background:var(--bg3);}
 .tbl th.sortable{cursor:pointer;user-select:none;}.tbl th.sortable:hover{color:var(--text);}
 .tbl .num{text-align:right;font-variant-numeric:tabular-nums;}
-.tbl .green{color:#4fd4a3;}.tbl .red{color:#f07b7a;}.tbl .amber{color:#f5be6a;}.tbl .blue{color:#7db9ee;}.tbl .muted{color:var(--muted);font-size:11px;}
+.tbl .green{color:#4fd4a3;}.tbl .red{color:#f07b7a;}.tbl .amber{color:#f5be6a;}.tbl .orange{color:#e0954a;}.tbl .blue{color:#7db9ee;}.tbl .muted{color:var(--muted);font-size:11px;}
 
 /* ── CHART ──────────────────────────────────────────────── */
 .chart-wrap{position:relative;width:100%;}
@@ -2365,6 +2366,15 @@ function cleanName(n) { return n.replace(/[\d\+\-\(\)\s]{6,}/g,'').trim().split(
 
 
 // ── ВОДИТЕЛИ ───────────────────────────────────────────────
+// "Оценка" по прогнозу (не по факту на сегодня) - подсказывает действие, а не просто
+// оценивает качество. 4 уровня, согласовано с Владом 2026-07-04.
+function driverForecastStatus_(forecastPct) {
+  if (forecastPct >= 100) return { cls: 'green',  label: 'Идёт по плану' };
+  if (forecastPct >= 80)  return { cls: 'amber',  label: 'Добавить заказов' };
+  if (forecastPct >= 50)  return { cls: 'orange', label: 'Загрузить срочно' };
+  return { cls: 'red', label: 'Простой — разобраться' };
+}
+
 function renderDrivers() {
   if (!D) return;
   const drivers = activeDriversData();
@@ -2403,14 +2413,16 @@ function renderDrivers() {
     var ordCnt = drvOrderMap[surname] != null ? drvOrderMap[surname] : '—';
     const forecast = d.fakt * paceRatio;
     const forecastPct = d.plan > 0 ? forecast / d.plan * 100 : 0;
-    const fCls = forecastPct >= 95 ? 'green' : forecastPct >= 70 ? 'amber' : 'red';
+    // "Оценка" - по прогнозу, не по факту на сегодня, и формулирует действие, а не просто
+    // качество (Влад, 2026-07-04: "статус должен отражать действие").
+    const status = driverForecastStatus_(forecastPct);
     return `<tr>
       <td><b>${d.driver}</b></td><td class="muted">${d.gos}</td><td>${d.type}</td>
       <td class="num">${ordCnt}</td>
       <td class="num">${fmt(d.plan)}</td><td class="num">${fmt(d.fakt)}</td>
       <td class="num ${cls}"><b>${pv.toFixed(1)}%</b></td>
-      <td class="num ${fCls}">${fmt(forecast)} <span class="muted">(${forecastPct.toFixed(0)}%)</span></td>
-      <td><span class="badge ${cls}">${pv>=90?'Отлично':pv>=60?'Хорошо':'Слабо'}</span></td>
+      <td class="num ${status.cls}">${fmt(forecast)} <span class="muted">(${forecastPct.toFixed(0)}%)</span></td>
+      <td><span class="badge ${status.cls}">${status.label}</span></td>
     </tr>`;
   }).join('');
 

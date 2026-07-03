@@ -980,13 +980,30 @@ function apiUrl(params) {
   return API_URL + sep + qs;
 }
 
+// Общий wrapper над fetch(apiUrl(...)) для всех запросов КРОМЕ самого первого (loadData()
+// сама разбирает needLogin). ID_TOKEN живёт ~1 час (обычный срок жизни Google id_token) - если
+// дашборд открыт дольше и потом нажать, например, "Прошлый месяц" на Технике, второй запрос
+// уходит с уже протухшим токеном и раньше падал с сырым "Ошибка: Не авторизован", без
+// подсказки, что делать (Влад, 2026-07-04). Теперь при needLogin сразу разлогиниваем и
+// показываем экран входа - как и при самой первой загрузке.
+async function apiFetchJson(params) {
+  const res = await fetch(apiUrl(params));
+  const data = await res.json();
+  if (data.needLogin) {
+    ID_TOKEN = '';
+    localStorage.removeItem('id_token');
+    showLoginScreen(data.error);
+    throw new Error(data.error || 'Не авторизован - обновите страницу и войдите заново');
+  }
+  return data;
+}
+
 async function sendDriverWaybillReport() {
   const statusEl = document.getElementById('drivers-telegram-status');
   // Текст отчёта собирает сам сервер из своих данных - запрос короткий, без лимитов длины URL
   if (statusEl) statusEl.textContent = 'Отправка...';
   try {
-    const res = await fetch(apiUrl({ action: 'send_telegram_logists' }));
-    const data = await res.json();
+    const data = await apiFetchJson({ action: 'send_telegram_logists' });
     if (data.error) throw new Error(data.error);
     if (statusEl) statusEl.textContent = 'Отправлено ✅';
   } catch (e) {
@@ -1424,8 +1441,7 @@ let availablePeriods = [];
 
 async function loadAvailablePeriods() {
   try {
-    const res = await fetch(apiUrl({ action: 'available_periods' }));
-    const data = await res.json();
+    const data = await apiFetchJson({ action: 'available_periods' });
     availablePeriods = data.periods || [];
     const sel = document.getElementById('period-select');
     if (sel) {
@@ -1448,8 +1464,7 @@ async function changePeriod(period) {
   }
   if (status) status.textContent = 'Загрузка...';
   try {
-    const res = await fetch(apiUrl({ action: 'orders_period', period: selectedPeriod }));
-    const data = await res.json();
+    const data = await apiFetchJson({ action: 'orders_period', period: selectedPeriod });
     if (data.orders && data.orders.error) throw new Error(data.orders.error);
     periodOrdersData = data.orders;
     periodGrossProfit = (data.summary && typeof data.summary.profit === 'number') ? data.summary.profit : null;
@@ -1490,8 +1505,7 @@ async function applyVehiclesRange() {
   if (!from || !to) { if (status) status.textContent = 'Укажите обе даты'; return; }
   if (status) status.textContent = 'Загрузка...';
   try {
-    const res = await fetch(apiUrl({ action: 'vehicles_period', from: from, to: to }));
-    const data = await res.json();
+    const data = await apiFetchJson({ action: 'vehicles_period', from: from, to: to });
     if (data.error) throw new Error(data.error);
     vehiclesRangeData = data;
     const toParts = to.split('-').map(Number);
@@ -2205,8 +2219,7 @@ async function loadShtatkaData() {
   const statusEl = document.getElementById('shtatka-status');
   if (statusEl) statusEl.textContent = 'Загрузка...';
   try {
-    const res = await fetch(apiUrl({ action: 'shtatka_grid', month: shtatkaMonth }));
-    const data = await res.json();
+    const data = await apiFetchJson({ action: 'shtatka_grid', month: shtatkaMonth });
     if (data.error) throw new Error(data.error);
     shtatkaData = data;
     renderShtatkaTable();
@@ -2308,8 +2321,7 @@ async function shtatkaPickStatus(status) {
   const prevText = cellEl.textContent;
   cellEl.textContent = '…';
   try {
-    const res = await fetch(apiUrl({ action: 'shtatka_set_status', gos: gos, date: date, status: status }));
-    const data = await res.json();
+    const data = await apiFetchJson({ action: 'shtatka_set_status', gos: gos, date: date, status: status });
     if (data.error) throw new Error(data.error);
     if (!shtatkaData.grid[gos]) shtatkaData.grid[gos] = {};
     shtatkaData.grid[gos][date] = status;
@@ -2357,8 +2369,7 @@ async function shtatkaPickDriver(driverName) {
   const prevText = cellEl.textContent;
   cellEl.textContent = '…';
   try {
-    const res = await fetch(apiUrl({ action: 'shtatka_set_driver', gos: gos, driver: name }));
-    const data = await res.json();
+    const data = await apiFetchJson({ action: 'shtatka_set_driver', gos: gos, driver: name });
     if (data.error) throw new Error(data.error);
     const v = (shtatkaData.vehicles || []).find(function(x) { return x.gos === gos; });
     if (v) v.driver = name;
@@ -2652,8 +2663,7 @@ function openVehicleCard(gos) {
   document.getElementById('vcard-panel').classList.add('open');
   document.body.style.overflow = 'hidden';
 
-  var ordersFetch = fetch(apiUrl({ action: 'vehicle_orders_history', gos: gos, from: period.from, to: period.to }))
-    .then(function(r) { return r.json(); })
+  var ordersFetch = apiFetchJson({ action: 'vehicle_orders_history', gos: gos, from: period.from, to: period.to })
     .then(function(data) { return data.days || []; })
     .catch(function() { return []; });
 
@@ -2806,8 +2816,7 @@ var histChartCosts = null;
 
 function ensureHistData() {
   if (histData !== null) return Promise.resolve(histData);
-  return fetch(apiUrl({ action: 'vehicle_history' }))
-    .then(function(r) { return r.json(); })
+  return apiFetchJson({ action: 'vehicle_history' })
     .then(function(d) { histData = d.history || []; return histData; })
     .catch(function() { histData = []; return histData; });
 }

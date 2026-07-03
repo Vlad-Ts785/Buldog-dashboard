@@ -441,8 +441,6 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
     <div id="error-block">
       <b>Ошибка загрузки.</b> Укажите URL Apps Script:
       <input id="api-url-input" type="text" placeholder="https://script.google.com/macros/s/.../exec" oninput="setApiUrl(this.value)">
-      Укажите ключ доступа:
-      <input id="dashboard-key-input" type="password" placeholder="секретный ключ" oninput="setDashboardKey(this.value)">
     </div>
 
     <!-- ═══ СИСТЕМА РЕШЕНИЙ ══════════════════════════════════ -->
@@ -896,13 +894,11 @@ const PAGE_TITLES = {
 };
 
 let API_URL = localStorage.getItem('api_url') || API_URL_DEFAULT;
-let DASHBOARD_KEY = localStorage.getItem('dashboard_key') || '';
 let manualPayment = parseFloat(localStorage.getItem('manual_payment')) || 0;
 let D = null;
 let vehSort = {col:'profit', dir:-1};
 
 function setApiUrl(u){ API_URL = u.trim(); localStorage.setItem('api_url', API_URL); }
-function setDashboardKey(k){ DASHBOARD_KEY = k.trim(); localStorage.setItem('dashboard_key', DASHBOARD_KEY); }
 
 function updatePayment(val) {
   manualPayment = parseFloat(val) || 0;
@@ -952,12 +948,15 @@ function stopLoadingPhrases() { clearInterval(loadingPhraseTimer); loadingPhrase
 const GOOGLE_CLIENT_ID = '872723319158-cmr4v5v31fk3uv8ass3vvdch7at66n8e.apps.googleusercontent.com';
 let ID_TOKEN = localStorage.getItem('id_token') || '';
 
-// Собирает URL запроса к API с ключом и токеном входа - используется везде вместо ручной склейки
+// Собирает URL запроса к API с токеном входа - используется везде вместо ручной склейки.
+// Раньше требовался ещё и статический "ключ доступа" - убран (Влад, 2026-07-04: "у нас уже
+// авторизация идёт по почте, зачем это надо") - единственный гейт теперь Google-логин + лист
+// "Доступ".
 function apiUrl(params) {
   // "_" - метка времени, чтобы URL всегда был уникальным и браузер не отдавал закэшированный
   // ответ вместо свежего запроса к серверу (без этого повторный fetch() на тот же набор
   // параметров иногда мог тихо вернуть старые данные - Влад, 2026-07-03).
-  const p = Object.assign({ key: DASHBOARD_KEY, id_token: ID_TOKEN, _: Date.now() }, params || {});
+  const p = Object.assign({ id_token: ID_TOKEN, _: Date.now() }, params || {});
   const qs = Object.keys(p).map(function(k){ return k + '=' + encodeURIComponent(p[k] || ''); }).join('&');
   const sep = API_URL.includes('?') ? '&' : '?';
   return API_URL + sep + qs;

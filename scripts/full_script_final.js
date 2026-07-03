@@ -1096,13 +1096,6 @@ function getManagerView_(ss, managerName) {
 // ============================================================
 
 function doGet(e) {
-  var providedKey = e && e.parameter ? (e.parameter.key || '') : '';
-  var secretKey = PropertiesService.getScriptProperties().getProperty('DASHBOARD_KEY');
-  if (!secretKey || providedKey !== secretKey) {
-    return ContentService
-      .createTextOutput(JSON.stringify({ error: 'Доступ запрещён' }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
 
   // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём

@@ -368,7 +368,8 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
     <div class="sidebar-nav-item" onclick="showPage('vehicles',this)" data-page="vehicles">
       <span class="sidebar-nav-icon">🚛</span> Техника
     </div>
-    <div class="sidebar-nav-item" onclick="showPage('shtatka',this)" data-page="shtatka">
+    <!-- Скрыта по просьбе Влада, 2026-07-04 - "пока". Не удалена, страница/код рабочие. -->
+    <div class="sidebar-nav-item" onclick="showPage('shtatka',this)" data-page="shtatka" style="display:none">
       <span class="sidebar-nav-icon">📋</span> Штатка
     </div>
     <div class="sidebar-nav-item" onclick="showPage('drivers',this)" data-page="drivers">
@@ -693,7 +694,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
       <div class="card" style="margin-bottom:16px">
         <div class="tab-bar" id="cust-tab-bar">
           <button class="tab-btn active" onclick="showCustTab('top',this)">Топ заказчики</button>
-          <button class="tab-btn" onclick="showCustTab('lost',this)">Пропали во 2-й пол.</button>
+          <button class="tab-btn" onclick="showCustTab('lost',this)">Пропавшие клиенты</button>
           <button class="tab-btn" onclick="showCustTab('hire',this)">Наёмная техника</button>
           <button class="tab-btn" onclick="showCustTab('drivers',this)">Не сданные путевые листы</button>
           <button class="tab-btn" onclick="showCustTab('suppliers',this)">ТОП поставщиков без путевых листов</button>
@@ -701,14 +702,14 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
         </div>
         <div id="cust-tab-top" style="overflow-x:auto">
           <table class="tbl">
-            <thead><tr><th>#</th><th>Заказчик</th><th class="num">Выручка</th><th class="num">Оплата</th><th class="num" title="заказов в 1-й половине месяца">1-я пол.</th><th class="num" title="заказов во 2-й половине месяца">2-я пол.</th><th>Менеджер</th><th class="num">Найм</th></tr></thead>
+            <thead><tr><th>#</th><th>Заказчик</th><th class="num">Выручка</th><th class="num">Оплата</th><th class="num" title="заказов в 1-й половине месяца">1-я пол.</th><th class="num" title="заказов во 2-й половине месяца">2-я пол.</th><th>Менеджер</th><th class="num" title="маржа в деньгах по наёмным заказам этого клиента">Маржа найма</th></tr></thead>
             <tbody id="cust-top-body"></tbody>
           </table>
         </div>
         <div id="cust-tab-lost" style="display:none;overflow-x:auto">
-          <div style="color:var(--muted);font-size:12px;padding:0 0 10px">Клиенты с выручкой в 1-15 числах, которых нет с 16-го</div>
+          <div style="color:var(--muted);font-size:12px;padding:0 0 10px">Клиенты без единого заказа 15+ дней (учтён и этот, и прошлый месяц)</div>
           <table class="tbl">
-            <thead><tr><th>#</th><th>Заказчик</th><th class="num">Выручка</th><th class="num">Оплата</th><th class="num" title="заказов в 1-й половине месяца">1-я пол.</th><th class="num" title="заказов во 2-й половине месяца">2-я пол.</th><th>Менеджер</th><th class="num">Найм</th></tr></thead>
+            <thead><tr><th>#</th><th>Заказчик</th><th>Менеджер</th><th class="num">Последний заказ</th><th class="num">Дней тишины</th><th class="num" title="заказов за последние 2 месяца">Зак. (2 мес.)</th><th class="num" title="сумма за последние 2 месяца">Сумма (2 мес.)</th></tr></thead>
             <tbody id="cust-lost-body"></tbody>
           </table>
         </div>
@@ -3024,22 +3025,42 @@ function renderSales() {
     setText('sales-period-label', label);
   })();
 
-  const tA = s.tral_amount||0, lA = s.long_amount||0, totA = tA+lA||1;
+  // Блок "Заказов" - все заказы (свой парк + наём), с разбивкой по технике (трал/длинномер)
+  // и по деньгам (выручка/прибыль своего парка отдельно от найма) - Влад, 2026-07-04.
+  function ordersSplitBar(label, ownCnt, hiredCnt) {
+    var tot = ownCnt + hiredCnt || 1;
+    var ownW = Math.round(ownCnt / tot * 100);
+    return '<div style="margin-bottom:7px">' +
+      '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">' +
+        '<span style="color:var(--muted)">' + label + '</span>' +
+        '<span><b style="color:var(--blue)">' + ownCnt + '</b> <span style="color:var(--muted)">свой</span> · ' +
+          '<b style="color:var(--amber)">' + hiredCnt + '</b> <span style="color:var(--muted)">наём</span></span>' +
+      '</div>' +
+      '<div style="height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden;display:flex">' +
+        '<div style="width:' + ownW + '%;height:100%;background:var(--blue)"></div>' +
+        '<div style="width:' + (100 - ownW) + '%;height:100%;background:var(--amber)"></div>' +
+      '</div></div>';
+  }
+  function ordersMoneyRow(label, value, color) {
+    return '<div style="display:flex;justify-content:space-between;font-size:11.5px">' +
+      '<span style="color:var(--muted)">' + label + '</span>' +
+      '<span style="font-weight:600;color:' + color + '">' + fmtM(value) + '</span></div>';
+  }
+  var ownFleetProfit = (D.summary && D.summary.profit) || 0; // ВП своего парка - один источник (Нормализованные_данные)
+  var hiredMarginAbs = s.hired_profit || 0;
   document.getElementById('sales-kpi').innerHTML =
     '<div class="kpi">' +
-      '<div class="kpi-label">Заказов</div>' +
+      '<div class="kpi-label">Заказов (свой парк + наём)</div>' +
       '<div class="kpi-value">' + (s.total_orders||0) + '</div>' +
       '<div style="margin-top:10px">' +
-        '<div class="prog-header" style="margin-bottom:3px">' +
-          '<span style="font-size:11px;color:var(--muted)">Тралы · ' + (s.tral_orders||0) + ' зак.</span>' +
-          '<span style="font-size:11px;color:var(--muted)">' + fmtM(tA) + '</span>' +
-        '</div>' +
-        '<div class="prog-bg" style="margin-bottom:8px"><div class="prog-fill" style="width:' + (tA/totA*100).toFixed(0) + '%;background:var(--blue)"></div></div>' +
-        '<div class="prog-header" style="margin-bottom:3px">' +
-          '<span style="font-size:11px;color:var(--muted)">Длинномеры · ' + (s.long_orders||0) + ' зак.</span>' +
-          '<span style="font-size:11px;color:var(--muted)">' + fmtM(lA) + '</span>' +
-        '</div>' +
-        '<div class="prog-bg"><div class="prog-fill" style="width:' + (lA/totA*100).toFixed(0) + '%;background:var(--green)"></div></div>' +
+        ordersSplitBar('Тралы · ' + (s.tral_orders||0) + ' зак.', s.own_tral_orders||0, s.hired_tral_orders||0) +
+        ordersSplitBar('Длинномеры · ' + (s.long_orders||0) + ' зак.', s.own_long_orders||0, s.hired_long_orders||0) +
+      '</div>' +
+      '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:5px">' +
+        ordersMoneyRow('Выручка свой парк', s.own_amount||0, 'var(--text)') +
+        ordersMoneyRow('Выручка наём', s.hired_amount||0, 'var(--amber)') +
+        ordersMoneyRow('Валовая (свой парк)', ownFleetProfit, ownFleetProfit>=0?'var(--green)':'var(--red)') +
+        ordersMoneyRow('Маржа (наём)', hiredMarginAbs, 'var(--green)') +
       '</div>' +
     '</div>' +
     cargoTopBlock('Топ грузов — тралы', o.top_cargo_tral || [], s.tral_orders || 0) +
@@ -3094,6 +3115,8 @@ function renderSales() {
 
   function custRow(c, i) {
     var s2cls = !c.second_half && c.first_half ? 'red' : '';
+    var hm = c.hired_margin||0;
+    var hmCls = hm > 0 ? 'green' : hm < 0 ? 'red' : '';
     return '<tr>' +
       '<td class="muted" style="font-size:12px">' + (i+1) + '</td>' +
       '<td><b>' + c.name + '</b></td>' +
@@ -3102,13 +3125,30 @@ function renderSales() {
       '<td class="num">' + (c.first_half||'—') + '</td>' +
       '<td class="num ' + s2cls + '">' + (c.second_half||'—') + '</td>' +
       '<td class="muted">' + (c.mgr||'—') + '</td>' +
-      '<td class="num ' + ((c.hired_amount||0)>0?'amber':'') + '">' + ((c.hired_amount||0)>0 ? fmtK2(c.hired_amount) : '—') + '</td>' +
+      '<td class="num ' + hmCls + '">' + (hm ? fmtK2(hm) : '—') + '</td>' +
     '</tr>';
   }
   const noData = '<tr><td colspan="8" class="muted" style="padding:14px">Нет данных</td></tr>';
   document.getElementById('cust-top-body').innerHTML  = (o.by_customer||[]).map(custRow).join('') || noData;
-  document.getElementById('cust-lost-body').innerHTML = (o.lost_customers||[]).map(custRow).join('') ||
-    '<tr><td colspan="8" style="color:var(--green);padding:14px">Все клиенты активны во 2-й половине ✅</td></tr>';
+
+  // Пропавшие клиенты - теперь по факту "сколько дней нет заказов" (использует и текущий,
+  // и прошлый месяц), а не грубое "1-я половина была, 2-й нет" - см. computeLostCustomers_
+  // в скрипте. Влад, 2026-07-04.
+  function lostCustRow(c, i) {
+    var days = c.days_since;
+    var dCls = days >= 30 ? 'red' : days >= 20 ? 'amber' : '';
+    return '<tr>' +
+      '<td class="muted" style="font-size:12px">' + (i+1) + '</td>' +
+      '<td><b>' + c.name + '</b></td>' +
+      '<td class="muted">' + (c.mgr||'—') + '</td>' +
+      '<td class="num muted">' + (c.last_date||'—') + '</td>' +
+      '<td class="num ' + dCls + '"><b>' + days + '</b></td>' +
+      '<td class="num muted">' + (c.orders_total||0) + '</td>' +
+      '<td class="num">' + fmtK2(c.amount_total||0) + '</td>' +
+    '</tr>';
+  }
+  document.getElementById('cust-lost-body').innerHTML = (o.lost_customers||[]).map(lostCustRow).join('') ||
+    '<tr><td colspan="7" style="color:var(--green);padding:14px">Пропавших клиентов нет ✅</td></tr>';
 
   function renderNoWaybillTable(elId, list) {
     document.getElementById(elId).innerHTML = list.length

@@ -2229,6 +2229,8 @@ function getOrdersData(ss) {
   const rows = norm.getRange(2, 1, norm.getLastRow() - 1, 43).getValues();
   const result = aggregateOrdersRows(rows);
   const monthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+  const smartLost = computeLostCustomers_(ss, rows, monthKey);
+  if (smartLost) result.lost_customers = smartLost;
   return joinManagerPlans_(ss, result, monthKey);
 }
 
@@ -2241,7 +2243,63 @@ function getOrdersDataForPeriod(ss, period) {
   const parsed = parseOrdersRawRows(archive.getDataRange().getValues());
   if (parsed.rows.length === 0) return { error: 'Архив за ' + period + ' пуст' };
   const result = aggregateOrdersRows(parsed.rows);
+  const smartLost = computeLostCustomers_(ss, parsed.rows, period);
+  if (smartLost) result.lost_customers = smartLost;
   return joinManagerPlans_(ss, result, period);
+}
+
+// Клиенты, у которых давно не было заказов - используем и текущий, и прошлый месяц (архив
+// "Заказы_YYYY-MM"), чтобы не путать "ещё не успел заказать в начале месяца" с реально
+// пропавшим клиентом. Раньше "пропавшие" считались только как "1-я половина месяца была,
+// 2-й нет" - в начале нового месяца это давало почти всех клиентов подряд (2-й половины
+// просто ещё не было). Влад, 2026-07-04: "у нас теперь есть два месяца, может эффективнее
+// отражать". Если архива за прошлый месяц ещё нет - возвращаем null, вызывающий код
+// оставит старую (внутримесячную) эвристику из aggregateOrdersRows.
+function computeLostCustomers_(ss, currentRows, monthKey) {
+  const parts = String(monthKey || '').split('-');
+  let py = parseInt(parts[0], 10), pm = parseInt(parts[1], 10) - 1;
+  if (!py || !pm) return null;
+  if (pm < 1) { pm = 12; py -= 1; }
+  const prevMonthKey = py + '-' + String(pm).padStart(2, '0');
+  const prevSheet = ss.getSheetByName(ORDERS_ARCHIVE_PFX + prevMonthKey);
+  if (!prevSheet || prevSheet.getLastRow() < 5) return null;
+  const prevRows = parseOrdersRawRows(prevSheet.getDataRange().getValues()).rows;
+  if (!prevRows.length) return null;
+
+  // Индексы колонок те же, что и C-карта в aggregateOrdersRows: customer:9, internal:13,
+  // mgr_s:15, date_s:2, amount:30.
+  const custMap = {};
+  function ingest(rows) {
+    rows.forEach(function(row) {
+      if (String(row[13] || '').trim() === 'Да') return; // внутренние перевозки не считаем
+      const cust = String(row[9] || '').trim();
+      if (!cust) return;
+      const rawDate = row[2];
+      const dateStr = rawDate instanceof Date
+        ? Utilities.formatDate(rawDate, 'Europe/Moscow', 'yyyy-MM-dd')
+        : String(rawDate || '').trim();
+      if (!custMap[cust]) custMap[cust] = { name: cust, last_date: '', mgr: '', orders_total: 0, amount_total: 0 };
+      const c = custMap[cust];
+      c.orders_total++;
+      c.amount_total += ordParseNum(row[30]);
+      if (dateStr && dateStr > c.last_date) { c.last_date = dateStr; c.mgr = String(row[15] || '').trim(); }
+    });
+  }
+  ingest(prevRows);
+  ingest(currentRows);
+
+  const today = new Date();
+  return Object.values(custMap)
+    .map(function(c) {
+      const days = c.last_date ? Math.floor((today - new Date(c.last_date)) / 86400000) : null;
+      return {
+        name: c.name, mgr: c.mgr.split(' ')[0], last_date: c.last_date,
+        days_since: days, orders_total: c.orders_total, amount_total: c.amount_total,
+      };
+    })
+    .filter(function(c) { return c.days_since !== null && c.days_since >= 15; })
+    .sort(function(a, b) { return b.days_since - a.days_since; })
+    .slice(0, 40);
 }
 
 // ── ПЛАНЫ МЕНЕДЖЕРОВ (лист "Планы_менеджеров", Влад вводит вручную каждый месяц) ──
@@ -2375,6 +2433,8 @@ function aggregateOrdersRows(rows) {
   let totalHiredCost=0, hiredProfit=0;
   let internalAmount=0, internalOrders=0;
   let tralOrders=0, tralAmount=0, longOrders=0, longAmount=0;
+  let ownAmount=0, hiredAmountRev=0;
+  let ownTralOrders=0, ownLongOrders=0, hiredTralOrders=0, hiredLongOrders=0;
   var noWaybillOwn=[0,0,0], noWaybillHired=[0,0,0], waybillNotPosted=[0,0,0], postedNoRealiz=[0,0,0], complete=[0,0,0];
 
   const managerMap  = {};
@@ -2440,7 +2500,8 @@ function aggregateOrdersRows(rows) {
     totalAmount  += amount;
     totalPayment += payment;
     totalBalance += balance;
-    if (isHired) { totalHiredCost += hiredCost; hiredProfit += profit; }
+    if (isHired) { totalHiredCost += hiredCost; hiredProfit += profit; hiredAmountRev += amount; }
+    else         { ownAmount += amount; }
 
     if (isInt) {
       internalAmount += amount; internalOrders++;
@@ -2454,8 +2515,14 @@ function aggregateOrdersRows(rows) {
       const cargoName = normalizeCargo(str(row, 'cargo'));
       internalCargoMap[cargoName] = (internalCargoMap[cargoName] || 0) + 1;
     }
-    if (equip === 'Трал')      { tralOrders++;  tralAmount  += amount; addCargo(cargoTralMap, normalizeCargo(str(row, 'cargo')), amount); }
-    if (equip === 'Длинномер') { longOrders++;  longAmount  += amount; addCargo(cargoLongMap, normalizeCargo(str(row, 'cargo')), amount); }
+    if (equip === 'Трал') {
+      tralOrders++; tralAmount += amount; addCargo(cargoTralMap, normalizeCargo(str(row, 'cargo')), amount);
+      if (isHired) hiredTralOrders++; else ownTralOrders++;
+    }
+    if (equip === 'Длинномер') {
+      longOrders++; longAmount += amount; addCargo(cargoLongMap, normalizeCargo(str(row, 'cargo')), amount);
+      if (isHired) hiredLongOrders++; else ownLongOrders++;
+    }
 
     // ── По менеджеру продаж ──
     if (mgrSales && ordInList(mgrSales, TRAL_MANAGERS)) {
@@ -2510,7 +2577,7 @@ function aggregateOrdersRows(rows) {
       const cust   = str(row, 'customer');
       const dayNum = parseInt((dateStr || '').split('-')[2]) || 0;
       if (!customerMap[cust]) {
-        customerMap[cust] = { name:cust, orders:0, amount:0, payment:0, balance:0, first_half:0, second_half:0, mgr_counts:{}, hired_amount:0 };
+        customerMap[cust] = { name:cust, orders:0, amount:0, payment:0, balance:0, first_half:0, second_half:0, mgr_counts:{}, hired_margin:0 };
       }
       const cm = customerMap[cust];
       cm.orders++;
@@ -2521,7 +2588,9 @@ function aggregateOrdersRows(rows) {
       if (dayNum >= 16) cm.second_half++;                   // кол-во заказов во 2-й пол.
       const mgrKey = mgrSales || str(row, 'mgr_sr');
       if (mgrKey) cm.mgr_counts[mgrKey] = (cm.mgr_counts[mgrKey] || 0) + 1;
-      if (isHired) cm.hired_amount += hiredCost;
+      // Маржа найма по клиенту (сумма - стоимость привлечённой техники), не сумма закупки
+      // у поставщика - Влад, 2026-07-04: "колонка найм должна отражать маржу в деньгах".
+      if (isHired) cm.hired_margin += profit;
 
       // Та же разбивка, но только для своего менеджера - не смешивается с другими
       if (mgrSales && ordInList(mgrSales, TRAL_MANAGERS)) {
@@ -2616,7 +2685,7 @@ function aggregateOrdersRows(rows) {
     return {
       name: c.name, orders: c.orders, amount: c.amount, payment: c.payment, balance: c.balance,
       first_half: c.first_half, second_half: c.second_half,
-      mgr: topMgr.split(' ')[0], hired_amount: c.hired_amount
+      mgr: topMgr.split(' ')[0], hired_margin: c.hired_margin
     };
   }).sort(function(a,b){ return b.amount-a.amount; });
 
@@ -2686,6 +2755,12 @@ function aggregateOrdersRows(rows) {
       tral_amount:     tralAmount,
       long_orders:     longOrders,
       long_amount:     longAmount,
+      own_amount:        ownAmount,        // выручка своего парка (не найм)
+      hired_amount:      hiredAmountRev,   // выручка по наёмным заказам (сумма клиенту, не оплата поставщику)
+      own_tral_orders:   ownTralOrders,
+      own_long_orders:   ownLongOrders,
+      hired_tral_orders: hiredTralOrders,
+      hired_long_orders: hiredLongOrders,
     },
     top_cargo_tral: sortCargo(cargoTralMap),
     top_cargo_long: sortCargo(cargoLongMap),

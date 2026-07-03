@@ -137,7 +137,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 
 /* ── CARDS ─────────────────────────────────────────────── */
 .grid-65{display:grid;grid-template-columns:2.1fr 0.85fr;gap:16px;margin-bottom:16px;}
-.grid-2{display:grid;grid-template-columns:0.85fr 1.15fr;gap:16px;margin-bottom:16px;}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;}
 .grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px;}
 .card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;}
 .card-title{font-size:12px;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px;}
@@ -498,44 +498,48 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
         </div>
       </div>
 
-      <div class="grid-65">
-        <div>
-          <div class="grid-2" style="margin-bottom:16px">
-            <div class="card">
-              <div class="card-title">Структура затрат</div>
-              <div class="chart-wrap" style="height:160px"><canvas id="chart-costs"></canvas></div>
-              <div class="cost-legend" id="cost-legend"></div>
-            </div>
-            <div class="card">
-              <div class="card-title">Статус парка</div>
-              <div id="fleet-status"></div>
-            </div>
-          </div>
-          <div class="card">
-            <div class="sec-header">
-              <div class="sec-title">Топ-10 машин по прибыли</div>
-              <div class="sec-sub">текущий месяц</div>
-            </div>
-            <div class="chart-wrap" style="height:240px"><canvas id="chart-vehicles"></canvas></div>
-          </div>
+      <!-- Строка 2: Структура затрат и Статус парка - равная ширина (Влад, 2026-07-04) -->
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title">Структура затрат</div>
+          <div class="chart-wrap" style="height:160px"><canvas id="chart-costs"></canvas></div>
+          <div class="cost-legend" id="cost-legend"></div>
         </div>
+        <div class="card">
+          <div class="card-title">Статус парка</div>
+          <div id="fleet-status"></div>
+        </div>
+      </div>
 
-        <div style="display:flex;flex-direction:column;gap:16px;">
-          <div class="card">
-            <div class="sec-header">
-              <div class="sec-title">Алерты</div>
-              <div class="sec-sub" id="alert-count"></div>
-            </div>
-            <div id="alerts-list"></div>
+      <!-- Строка 3: машины в ремонте, на всю ширину, с днями в ремонте -->
+      <div class="card" style="margin-bottom:16px">
+        <div class="sec-header">
+          <div class="sec-title">🔧 Машины в ремонте</div>
+          <div class="sec-sub" id="main-repair-count"></div>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="tbl">
+            <thead><tr><th>Госномер</th><th>Тип</th><th>Дней в ремонте</th><th>Водитель</th></tr></thead>
+            <tbody id="main-repair-table"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Алерты временно убраны (Влад, 2026-07-04) - renderAlerts() оставлена в коде,
+           но не вызывается для этой страницы. -->
+
+      <!-- Строка 4: Топ-10 машин по прибыли и Топ менеджеров -->
+      <div class="grid-2" style="margin-bottom:0">
+        <div class="card">
+          <div class="sec-header">
+            <div class="sec-title">Топ-10 машин по прибыли</div>
+            <div class="sec-sub">текущий месяц</div>
           </div>
-          <div class="card">
-            <div class="card-title">В ремонте</div>
-            <div id="repair-list"></div>
-          </div>
-          <div class="card">
-            <div class="card-title">Топ менеджеров</div>
-            <div id="mgr-list"></div>
-          </div>
+          <div class="chart-wrap" style="height:240px"><canvas id="chart-vehicles"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-title">🏆 Топ менеджеров</div>
+          <div id="mgr-list"></div>
         </div>
       </div>
     </div>
@@ -878,7 +882,9 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 <script>
 const API_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbxWi4wJWsSeHdgwrsC-d__EOrncLnkhDr6PgXohoPafY2Y2VtBPq_mGi9qd7mH-vzA00w/exec';
 
-const SALES_MANAGERS = ['Ахтамова','Васин','Володин','Гуляева','Гуштюк','Дербенцева','Кан','Коньшина','Котельников','Махура','Прус-Роскошный','Савиток','Сильчев','Филипчук','Цегельников','Шейко'];
+// "Гусейнова" отсутствовала в списке - Топ менеджеров молча не показывал её (нашёл при
+// проверке редизайна виджета, 2026-07-04). Добавлена.
+const SALES_MANAGERS = ['Ахтамова','Васин','Володин','Гуляева','Гусейнова','Гуштюк','Дербенцева','Кан','Коньшина','Котельников','Махура','Прус-Роскошный','Савиток','Сильчев','Филипчук','Цегельников','Шейко'];
 const PROFIT_PLAN = 30000000; // план ВП на июль 2026, установлен Владом 2026-07-04
 
 // Коэффициент "чистая прибыль / наша валовая прибыль" - калибровано по факту БДР
@@ -1853,8 +1859,9 @@ function renderMain() {
   renderCostChart();
   renderVehicleChart();
   renderMgrList();
-  renderAlerts();
-  renderRepairList();
+  renderMainRepairTable();
+  // renderAlerts() временно убрана со страницы (Влад, 2026-07-04) - функция осталась в коде,
+  // на случай если понадобится вернуть.
 }
 
 function renderFleetStatus() {
@@ -1996,15 +2003,38 @@ function renderVehicleChart() {
   });
 }
 
+// Топ менеджеров - было скучно (просто имя + бар + %), добавили ранг медалями, абсолютную
+// сумму и прогноз по темпу (та же методика, что на "По менеджерам"/Панели) - Влад, 2026-07-04.
 function renderMgrList() {
-  const mgrs = (D.orders.by_manager||[]).filter(m => isSales(m.name)).sort((a,b) => b.amount-a.amount).slice(0, 5);
-  const maxF = Math.max(...mgrs.map(m => m.amount), 1);
-  document.getElementById('mgr-list').innerHTML = mgrs.map(m => {
-    const w = Math.round(m.amount / maxF * 100);
-    const color = m.pct >= 80 ? '#1D9E75' : m.pct >= 50 ? '#EF9F27' : '#E24B4A';
+  const mgrs = (D.orders.by_manager||[]).filter(m => isSales(m.name)).sort((a,b) => b.amount-a.amount).slice(0, 6);
+
+  const dataDate = D.updated ? new Date(D.updated) : new Date();
+  const dayOfMonth = dataDate.getDate();
+  let dim = 30;
+  if (D.orders.period) {
+    const p = D.orders.period.split('-').map(Number);
+    if (p[0] && p[1]) dim = new Date(p[0], p[1], 0).getDate();
+  }
+  const paceRatio = dayOfMonth > 0 ? (dim / dayOfMonth) : 1;
+  const ranks = ['🥇','🥈','🥉'];
+
+  document.getElementById('mgr-list').innerHTML = mgrs.map((m, i) => {
+    const pct = m.pct || 0;
+    const color = pct >= 80 ? '#1D9E75' : pct >= 50 ? '#EF9F27' : '#E24B4A';
+    const forecast = (m.amount||0) * paceRatio;
+    const forecastPct = m.plan > 0 ? (forecast / m.plan * 100) : 0;
+    const fColor = forecastPct >= 100 ? '#1D9E75' : forecastPct >= 70 ? '#EF9F27' : '#E24B4A';
+    const rankBadge = ranks[i] || ('<span style="color:var(--muted);font-size:11px">#' + (i+1) + '</span>');
     return `<div class="prog-wrap">
-      <div class="prog-header"><span class="prog-name">${cleanName(m.name)}</span><span class="prog-val">${m.pct.toFixed(0)}%</span></div>
-      <div class="prog-bg"><div class="prog-fill" style="width:${w}%;background:${color}"></div></div>
+      <div class="prog-header">
+        <span class="prog-name"><span style="margin-right:6px">${rankBadge}</span>${cleanName(m.name)}</span>
+        <span class="prog-val" style="font-weight:700">${fmtK2(m.amount)}</span>
+      </div>
+      <div class="prog-bg"><div class="prog-fill" style="width:${Math.min(pct,100)}%;background:${color}"></div></div>
+      <div style="display:flex;justify-content:space-between;margin-top:3px;font-size:10.5px;color:var(--muted)">
+        <span>${pct.toFixed(0)}% плана</span>
+        <span>Прогноз: <b style="color:${fColor}">${Math.round(forecastPct)}%</b></span>
+      </div>
     </div>`;
   }).join('');
 }
@@ -2028,21 +2058,46 @@ function renderAlerts() {
     : '<div style="color:var(--muted);font-size:13px;padding:8px 0">Всё в норме ✅</div>';
 }
 
-function renderRepairList() {
+// Полная таблица "Машины в ремонте" на Панели, строка 3 - с днями в ремонте (Влад,
+// 2026-07-04). Та же логика подсчёта дней, что и в renderRepairBlock() на "Технике"
+// (дни считаем по Истории_финансов - подгружаем лениво, сначала показываем без дней).
+function renderMainRepairTable() {
+  if (!D) return;
   const repairs = D.repairs || [];
-  const el = document.getElementById('repair-list');
-  const list = repairs.length ? repairs : (D.vehicles||[]).filter(x => x.revenue === 0 && x.status?.toLowerCase().includes('ремонт'));
-  if (!list.length) { el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:8px">Нет данных</div>'; return; }
-  el.innerHTML = list.slice(0, 10).map(r => `
-    <div class="repair-item">
-      <div class="repair-dot"></div>
-      <div style="flex:1">
-        <div class="repair-gos">${r.gos}</div>
-        <div class="repair-type">${r.type||'—'}</div>
-        <div class="repair-driver">${r.driver||'—'}</div>
-      </div>
-      <span class="badge amber" style="font-size:10px">${r.status||'Ремонт'}</span>
-    </div>`).join('');
+  const countEl = document.getElementById('main-repair-count');
+  if (countEl) countEl.textContent = repairs.length + (repairs.length === 1 ? ' машина' : ' машин');
+
+  const body = document.getElementById('main-repair-table');
+  if (!body) return;
+
+  if (!repairs.length) {
+    body.innerHTML = '<tr><td colspan="4" style="color:var(--muted);padding:12px">Нет машин в ремонте ✅</td></tr>';
+    return;
+  }
+
+  function daysWord(n) {
+    const n10 = n % 10, n100 = n % 100;
+    if (n100 >= 11 && n100 <= 14) return 'дней';
+    if (n10 === 1) return 'день';
+    if (n10 >= 2 && n10 <= 4) return 'дня';
+    return 'дней';
+  }
+  function row(r, days) {
+    const daysStr = days === null ? '…' : days + ' ' + daysWord(days);
+    return '<tr><td><b>' + r.gos + '</b></td><td>' + (r.type||'—') + '</td>' +
+      '<td>' + daysStr + '</td>' +
+      '<td class="muted">' + ((r.driver||'').trim().split(' ')[0] || '—') + '</td></tr>';
+  }
+
+  body.innerHTML = repairs.map(function(r){ return row(r, null); }).join('');
+  ensureHistData().then(function(hist) {
+    const daysByGos = {};
+    hist.forEach(function(h) {
+      if (!h.status || h.status.toLowerCase().indexOf('ремонт') === -1) return;
+      daysByGos[h.gos] = (daysByGos[h.gos] || 0) + 1;
+    });
+    body.innerHTML = repairs.map(function(r){ return row(r, daysByGos[r.gos] || 0); }).join('');
+  });
 }
 
 // ── ПАРК ───────────────────────────────────────────────────

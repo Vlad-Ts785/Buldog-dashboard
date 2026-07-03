@@ -361,7 +361,11 @@ function writeParkHistoryForMonth_(ss, year, month, rawData) {
   var lastRow = histSheet.getLastRow();
   if (lastRow > 1) {
     var existing = histSheet.getRange(2, 1, lastRow - 1, 12).getValues();
-    var keep = existing.filter(function(r) { return String(r[0]) !== monthKey; });
+    // Колонка "Месяц" - Google Таблицы молча превращают текст "2026-06" в объект Date (тот же
+    // трюк, что уже ловили в getManagerPlans_ и getManagerPlans_/"Планы_менеджеров") - сравнение
+    // "как есть" никогда не совпадало с monthKey, старые строки за месяц НЕ удалялись и копились
+    // при каждом запуске, пока идут корректировки (найдено Владом 2026-07-04 - 13 дублей подряд).
+    var keep = existing.filter(function(r) { return parkHistMonthKey_(r[0]) !== monthKey; });
     histSheet.getRange(2, 1, lastRow - 1, 12).clearContent();
     if (keep.length > 0) histSheet.getRange(2, 1, keep.length, 12).setValues(keep);
   }
@@ -369,6 +373,13 @@ function writeParkHistoryForMonth_(ss, year, month, rawData) {
     histSheet.getRange(histSheet.getLastRow() + 1, 1, newRows.length, 12).setValues(newRows);
   }
   return newRows.length;
+}
+
+// "Месяц" в Данные_1С_история может быть и текстом "2026-06", и объектом Date (Google Таблицы
+// переформатируют сами) - приводим к единому текстовому виду для сравнения.
+function parkHistMonthKey_(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, 'Europe/Moscow', 'yyyy-MM');
+  return String(v || '').trim();
 }
 
 // ============================================================
@@ -1637,7 +1648,10 @@ function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate) {
   if (parkHist && parkHist.getLastRow() > 1) {
     var phData = parkHist.getRange(2, 1, parkHist.getLastRow() - 1, 12).getValues();
     phData.forEach(function(r) {
-      var mk = String(r[0] || '').trim();
+      // "Месяц" - Date или текст, см. parkHistMonthKey_ (тот же баг, что уже чинили в
+      // writeParkHistoryForMonth_ - без этого archives вообще никогда не совпадали с
+      // monthKeys, и авторитетный источник молча не использовался ни разу).
+      var mk = parkHistMonthKey_(r[0]);
       if (monthKeys.indexOf(mk) === -1) return;
       var gos = String(r[1] || '').trim();
       if (!gos) return;

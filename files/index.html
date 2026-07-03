@@ -615,6 +615,20 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
     <!-- ═══ ВОДИТЕЛИ ════════════════════════════════════════════ -->
     <div id="page-drivers" class="page">
       <div class="card">
+        <div class="sec-header">
+          <div class="sec-title">Водители</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <select id="filter-driver-type" onchange="renderDrivers()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;">
+              <option value="">Все типы</option>
+            </select>
+            <select id="filter-driver-status" onchange="renderDrivers()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;">
+              <option value="">Все статусы</option>
+              <option value="В работе">В работе</option>
+              <option value="Ремонт">Ремонт</option>
+              <option value="Без водителя">Без водителя</option>
+            </select>
+          </div>
+        </div>
         <table class="tbl">
           <thead><tr><th>Водитель</th><th>Машина</th><th>Тип</th><th class="num">Заказов</th><th class="num">План</th><th class="num">Факт</th><th class="num">%</th><th class="num">Прогноз</th><th>Оценка</th></tr></thead>
           <tbody id="drivers-body"></tbody>
@@ -2377,7 +2391,29 @@ function driverForecastStatus_(forecastPct) {
 
 function renderDrivers() {
   if (!D) return;
-  const drivers = activeDriversData();
+  const driversAll = activeDriversData();
+
+  // Фильтры "Тип"/"Статус" - те же, что на "Технике" (Влад, 2026-07-04). Статуса в самих
+  // drivers нет (это машины С водителем и планом>0), дотягиваем по госномеру из таблицы машин.
+  var statusByGos = {};
+  activeVehiclesData().forEach(function(v) { if (v.gos) statusByGos[v.gos] = v.status || ''; });
+
+  var typeSel = document.getElementById('filter-driver-type');
+  if (typeSel && typeSel.options.length <= 1) {
+    var driverTypes = [];
+    driversAll.forEach(function(d){ if (d.type && driverTypes.indexOf(d.type) === -1) driverTypes.push(d.type); });
+    driverTypes.sort();
+    driverTypes.forEach(function(t){ typeSel.add(new Option(t, t)); });
+  }
+  var typeVal = typeSel ? typeSel.value : '';
+  var statusVal = document.getElementById('filter-driver-status') ? document.getElementById('filter-driver-status').value : '';
+
+  const drivers = driversAll.filter(function(d) {
+    if (typeVal && d.type !== typeVal) return false;
+    if (statusVal && (statusByGos[d.gos] || '').indexOf(statusVal) === -1) return false;
+    return true;
+  });
+
   // Словарь заказов по фамилии водителя
   var drvOrderMap = {};
   ((D.orders && D.orders.by_driver) || []).forEach(function(x) {

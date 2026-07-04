@@ -3458,10 +3458,26 @@ function renderSales() {
       if (lbl) lbl.textContent = lbl.textContent + outlierNote;
     }
 
+    // День недели под датой + подсветка выходных/праздников красным (Влад, 2026-07-04).
+    // Праздники - только фиксированные даты по Трудовому кодексу РФ (без учёта ежегодных
+    // "переносов" рабочих дней - это публикуется отдельным постановлением правительства
+    // на каждый год, сюда не зашито).
+    var WEEKDAY_SHORT_ = ['вс','пн','вт','ср','чт','пт','сб']; // Date.getDay(): 0=вс..6=сб
+    var FIXED_HOLIDAYS_ = ['01-01','01-02','01-03','01-04','01-05','01-06','01-07','01-08',
+      '02-23','03-08','05-01','05-09','06-12','11-04'];
+    function dayInfo_(dateStr) {
+      var d = dateStr ? new Date(dateStr + 'T00:00:00') : null;
+      if (!d || isNaN(d.getTime())) return { num: '', weekday: '', isOff: false };
+      var mmdd = String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+      var isWeekend = d.getDay() === 0 || d.getDay() === 6;
+      return { num: d.getDate(), weekday: WEEKDAY_SHORT_[d.getDay()], isOff: isWeekend || FIXED_HOLIDAYS_.indexOf(mmdd) >= 0 };
+    }
+    var dayInfos_ = days.map(function(d){ return dayInfo_(d.date); });
+
     ctx._chart = new Chart(ctx, {
       type: 'bar',
       data: {
-        labels: days.map(function(d){ return parseInt((d.date||'').split('-')[2])||''; }),
+        labels: dayInfos_.map(function(di){ return [String(di.num), di.weekday]; }),
         datasets: [
           {
             label: 'Найм',
@@ -3516,7 +3532,7 @@ function renderSales() {
           } } }
         },
         scales: {
-          x: { stacked: true, ticks: { color: '#888780', font: { size: 10 } }, grid: { display: false } },
+          x: { stacked: true, ticks: { color: function(c){ var di = dayInfos_[c.index]; return di && di.isOff ? '#E24B4A' : '#888780'; }, font: { size: 10 } }, grid: { display: false } },
           y: { stacked: true, max: yMax, ticks: { color: '#888780', callback: function(v){ return fmtK(v); } }, grid: { color: 'rgba(255,255,255,0.04)' } },
           y1: { position: 'right', beginAtZero: true, ticks: { color: '#7F77DD', font: { size: 10 } }, grid: { display: false } }
         }

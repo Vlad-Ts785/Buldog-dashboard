@@ -1267,18 +1267,29 @@ function doGet(e) {
     // Кэш 30 мин (CacheService) - исторический кусок (2020-05.2026) статичен и больше не
     // изменится, а без кэша каждое открытие вкладки заново перечитывает и парсит десятки
     // тысяч строк - именно это делало вкладку медленной (Влад, 2026-07-06).
+    // ?from=YYYY-MM-DD&to=YYYY-MM-DD - опциональный период (Влад, 2026-07-06: "должен быть
+    // выбор периода") - фильтруем строки ДО расчёта, весь остальной код (топ-клиенты,
+    // сегменты, win-back, сезонность) естественно пересчитывается относительно этого куска,
+    // т.к. ref_date/period_start и так берутся из переданных rows, а не жёстко "сегодня".
+    // ?segment=... - фильтр топ-клиентов по сегменту (см. computeClientAnalytics_).
     if (action === 'client_analytics') {
       if (access.role !== 'admin') {
         return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
       }
+      var caFrom = /^\d{4}-\d{2}-\d{2}$/.test(e.parameter.from || '') ? e.parameter.from : '';
+      var caTo   = /^\d{4}-\d{2}-\d{2}$/.test(e.parameter.to || '')   ? e.parameter.to   : '';
+      var caSegment = e.parameter.segment || '';
       var caCache = CacheService.getScriptCache();
-      var caCached = caCache.get('client_analytics_v2');
+      var caCacheKey = 'client_analytics_v3_' + (caFrom || 'all') + '_' + (caTo || 'all') + '_' + (caSegment || 'all');
+      var caCached = caCache.get(caCacheKey);
       if (caCached) {
         return ContentService.createTextOutput(caCached).setMimeType(ContentService.MimeType.JSON);
       }
       var caRows = getClientAnalyticsRows_(ss);
-      var caJson = JSON.stringify(computeClientAnalytics_(caRows));
-      try { if (caJson.length < 95000) caCache.put('client_analytics_v2', caJson, 1800); } catch (cacheErr) { /* кэш - не критично, отдаём результат в любом случае */ }
+      if (caFrom) caRows = caRows.filter(function(r) { return r.date >= caFrom; });
+      if (caTo)   caRows = caRows.filter(function(r) { return r.date <= caTo; });
+      var caJson = JSON.stringify(computeClientAnalytics_(caRows, { segment: caSegment }));
+      try { if (caJson.length < 95000) caCache.put(caCacheKey, caJson, 1800); } catch (cacheErr) { /* кэш - не критично, отдаём результат в любом случае */ }
       return ContentService.createTextOutput(caJson).setMimeType(ContentService.MimeType.JSON);
     }
 
@@ -2048,7 +2059,8 @@ const ORDERS_ARCHIVE_PFX  = 'Заказы_';   // + YYYY-MM, например «
 const INTERNAL_CLIENTS = [
   'ТЕХНО ПАРК', 'ОТДЕЛ БУРОВЫХ РАБОТ', 'КРАНМАСТЕР',
   'МЕГАКРАН', 'БАЗА ДМД', 'БУЛЬДОГ ООО', 'БАЗА',
-  'УМИАТ ЯРД' // Влад, 2026-07-05: тег "(НАШ)" в 1С, найдено при анализе клиентской базы
+  'УМИАТ ЯРД', // Влад, 2026-07-05: тег "(НАШ)" в 1С, найдено при анализе клиентской базы
+  'ОТДЕЛ ЭКСКАВАТОРОВ ДМД', 'ОТДЕЛ КРАНОВ ДМД', 'ТД ЯРД' // Влад, 2026-07-06: старые внутренние КА, сейчас это ТЕХНО ПАРК (НАШ)
 ];
 
 // Менеджеры отдела — для фильтрации чужих строк
@@ -3165,7 +3177,8 @@ function clientSegment_(days) {
 // Методика 1-в-1 из .business/clients/analyze_clients.py (согласована и проверена на разовом
 // анализе 2026-07-04..05) - топ-клиенты, концентрация (Парето), сегменты по давности, win-back,
 // растущие/снижающиеся, сезонность по месяцам (только полные календарные годы).
-function computeClientAnalytics_(rows) {
+function computeClientAnalytics_(rows, opts) {
+  opts = opts || {};
   if (!rows.length) return { error: 'Нет данных для клиентской аналитики' };
 
   var refDate = rows.reduce(function(max, r) { return r.date > max ? r.date : max; }, '');
@@ -3221,7 +3234,7 @@ function computeClientAnalytics_(rows) {
 
   // Растущие/снижающиеся - последние 180 дней vs предыдущие 180 дней от refDate.
   // ВАЖНО (см. чат с Владом 2026-07-05): это сравнение чувствительно к сезонности - если
-  // окно half-year落 на границу высокого/низкого сезона, "падение" может быть сезонным
+  // окно half-year падает на границу высокого/низкого сезона, "падение" может быть сезонным
   // артефактом, а не реальным трендом. Показывать на дашборде с этой оговоркой, не как
   // прямой сигнал тревоги.
   var d6  = addDays_(refDate, -180);
@@ -3275,7 +3288,13 @@ function computeClientAnalytics_(rows) {
     top10_pct: totalRevenue ? top10Revenue / totalRevenue * 100 : 0,
     top20_pct: totalRevenue ? top20Revenue / totalRevenue * 100 : 0,
     clients_for_80pct: clientsFor80,
-    top_clients: customers.slice(0, 100),
+    // Фильтр по сегменту (?segment=Отток (давно)) - Влад, 2026-07-06: "хочу выбрать например
+    // только отток". Без фильтра - топ-100 по выручке среди всех; с фильтром - топ-300 среди
+    // клиентов именно этого сегмента (без фильтра по сегменту топ-100 почти всегда состоит из
+    // активных клиентов - у отточных просто редко бывает высокая выручка, чтобы попасть в топ).
+    top_clients: opts.segment
+      ? customers.filter(function(c) { return c.segment === opts.segment; }).slice(0, 300)
+      : customers.slice(0, 100),
     segments: Object.keys(segMap).map(function(k) { return segMap[k]; }),
     winback: winback.slice(0, 200),
     growing: growing.slice(0, 100),

@@ -858,6 +858,16 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
     <div id="page-clients" class="page">
       <div id="clients-loading" style="color:var(--muted);padding:16px">Загрузка клиентской аналитики...</div>
       <div id="clients-body" style="display:none">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+          <label style="font-size:12px;color:var(--muted)">Период:</label>
+          <input id="clients-range-from" type="date" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 10px;font-size:13px">
+          <span style="color:var(--muted);font-size:12px">—</span>
+          <input id="clients-range-to" type="date" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 10px;font-size:13px">
+          <button onclick="applyClientsRange()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer">Показать</button>
+          <button onclick="resetClientsRange()" style="background:transparent;border:none;color:var(--muted);font-size:12px;cursor:pointer;text-decoration:underline">Весь период</button>
+          <button onclick="setClientsRangeLastYear()" style="background:transparent;border:none;color:var(--muted);font-size:12px;cursor:pointer;text-decoration:underline">Последние 12 мес</button>
+          <span id="clients-range-status" style="font-size:11px;color:var(--muted)"></span>
+        </div>
         <div class="kpi-grid" id="clients-kpi"></div>
         <div class="kpi-grid" id="clients-segments" style="margin-top:-8px"></div>
         <div class="card" style="margin-top:16px;margin-bottom:16px">
@@ -4468,21 +4478,80 @@ var managerProfileCache = {};
 var managerProfileCurrent = '';
 var clientsSeasonChart = null;
 var mgrYearChart = null, mgrSeasonChart = null, mgrWeekdayChart = null;
+var clientsRangeFrom = '';
+var clientsRangeTo = '';
+var clientsSegmentFilter = '';
+
+// Родительный падеж - "4 июля 2026", не "2026-07-04" (Влад, 2026-07-06: формат дат неудобный).
+const RU_MONTHS_GENITIVE = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+function fmtDateRu(dateStr) {
+  if (!dateStr) return '—';
+  var parts = String(dateStr).split('-');
+  if (parts.length !== 3) return dateStr;
+  var y = parts[0], m = parseInt(parts[1], 10), d = parseInt(parts[2], 10);
+  if (!m || !d || m < 1 || m > 12) return dateStr;
+  return d + ' ' + RU_MONTHS_GENITIVE[m-1] + ' ' + y;
+}
 
 function loadClientsData() {
   if (clientsData !== null) { renderClientsBody(); return; }
+  fetchClientsData();
+}
+
+// Общий запрос с текущим периодом/сегментом - используется и первой загрузкой, и при смене
+// периода (сегмент трогает только вкладку "Топ клиенты" отдельным лёгким запросом, см.
+// setClientsSegmentFilter, чтобы не перезагружать всю страницу ради одного фильтра).
+function fetchClientsData() {
   document.getElementById('clients-loading').style.display = 'block';
   document.getElementById('clients-loading').textContent = 'Загрузка клиентской аналитики...';
   document.getElementById('clients-body').style.display = 'none';
-  apiFetchJson({ action: 'client_analytics' })
+  var params = { action: 'client_analytics' };
+  if (clientsRangeFrom) params.from = clientsRangeFrom;
+  if (clientsRangeTo) params.to = clientsRangeTo;
+  if (clientsSegmentFilter) params.segment = clientsSegmentFilter;
+  apiFetchJson(params)
     .then(function(d) {
       if (d.error) throw new Error(d.error);
       clientsData = d;
+      var status = document.getElementById('clients-range-status');
+      if (status) status.textContent = '';
       renderClientsBody();
     })
     .catch(function(e) {
+      document.getElementById('clients-loading').style.display = 'block';
+      document.getElementById('clients-body').style.display = 'none';
       document.getElementById('clients-loading').textContent = 'Ошибка загрузки: ' + e.message;
     });
+}
+
+function applyClientsRange() {
+  var from = document.getElementById('clients-range-from').value;
+  var to = document.getElementById('clients-range-to').value;
+  var status = document.getElementById('clients-range-status');
+  if (!from || !to) { if (status) status.textContent = 'Укажите обе даты'; return; }
+  clientsRangeFrom = from;
+  clientsRangeTo = to;
+  if (status) status.textContent = 'Загрузка...';
+  fetchClientsData();
+}
+
+function resetClientsRange() {
+  clientsRangeFrom = '';
+  clientsRangeTo = '';
+  document.getElementById('clients-range-from').value = '';
+  document.getElementById('clients-range-to').value = '';
+  var status = document.getElementById('clients-range-status');
+  if (status) status.textContent = '';
+  fetchClientsData();
+}
+
+function setClientsRangeLastYear() {
+  var today = new Date();
+  var from = new Date(today.getFullYear() - 1, today.getMonth(), today.getDate() + 1);
+  function toInputDate(d) { return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+  document.getElementById('clients-range-from').value = toInputDate(from);
+  document.getElementById('clients-range-to').value = toInputDate(today);
+  applyClientsRange();
 }
 
 function renderClientsBody() {
@@ -4498,7 +4567,7 @@ function renderClientsBody() {
 function renderClientsKpi() {
   var c = clientsData;
   document.getElementById('clients-kpi').innerHTML =
-    '<div class="kpi"><div class="kpi-label">Период</div><div class="kpi-value" style="font-size:15px">' + c.period_start + ' — ' + c.ref_date + '</div></div>' +
+    '<div class="kpi"><div class="kpi-label">Период</div><div class="kpi-value" style="font-size:15px">' + fmtDateRu(c.period_start) + ' — ' + fmtDateRu(c.ref_date) + '</div></div>' +
     '<div class="kpi"><div class="kpi-label">Клиентов</div><div class="kpi-value">' + c.total_clients.toLocaleString('ru-RU') + '</div></div>' +
     '<div class="kpi"><div class="kpi-label">Выручка</div><div class="kpi-value amber">' + fmtM(c.total_revenue) + '</div></div>' +
     '<div class="kpi"><div class="kpi-label">Топ-10 клиентов</div><div class="kpi-value">' + pct(c.top10_pct) + '</div><div class="kpi-sub">выручки</div></div>';
@@ -4551,11 +4620,52 @@ function showClientsTab(tab, btn) {
   }
   var el = document.getElementById('clients-tab-content');
   if (!clientsData) return;
-  if (tab === 'top') el.innerHTML = renderClientsTable_(clientsData.top_clients, 'top');
+  if (tab === 'top') el.innerHTML = renderClientsSegmentFilter_() + renderClientsTable_(clientsData.top_clients, 'top');
   else if (tab === 'winback') el.innerHTML = renderClientsTable_(clientsData.winback, 'winback');
   else if (tab === 'growing') el.innerHTML = renderTrendTable_(clientsData.growing, 'growing');
   else if (tab === 'declining') el.innerHTML = renderTrendTable_(clientsData.declining, 'declining');
   else if (tab === 'manager') renderManagerTab_();
+}
+
+// Фильтр по сегменту для "Топ клиенты" (Влад, 2026-07-06: "хочу выбрать например только
+// отток") - без фильтра бэкенд отдаёт топ-100 по выручке среди ВСЕХ клиентов (там почти
+// всегда только активные - у отточных редко высокая выручка, чтобы попасть в топ-100), с
+// фильтром - топ-300 именно внутри выбранного сегмента.
+function renderClientsSegmentFilter_() {
+  var options = [
+    { v: '', label: 'Все сегменты' },
+    { v: 'Активный', label: 'Активный' },
+    { v: 'Под риском', label: 'Под риском' },
+    { v: 'Отток (до года)', label: 'Отток (до года)' },
+    { v: 'Отток (давно)', label: 'Отток (давно)' },
+  ];
+  var opts = options.map(function(o) {
+    var sel = o.v === clientsSegmentFilter ? ' selected' : '';
+    return '<option value="' + o.v + '"' + sel + '>' + o.label + '</option>';
+  }).join('');
+  return '<div style="margin-bottom:12px"><select onchange="setClientsSegmentFilter(this.value)" ' +
+    'style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 10px;font-size:13px">' +
+    opts + '</select></div>';
+}
+
+// Лёгкий запрос - обновляет только список "Топ клиенты" под текущим сегментом, не всю
+// страницу (KPI/сегменты/сезонность от сегмента не зависят, перезагружать их незачем).
+function setClientsSegmentFilter(value) {
+  clientsSegmentFilter = value;
+  var el = document.getElementById('clients-tab-content');
+  el.innerHTML = '<p style="color:var(--muted);padding:16px">Загрузка...</p>';
+  var params = { action: 'client_analytics', segment: clientsSegmentFilter };
+  if (clientsRangeFrom) params.from = clientsRangeFrom;
+  if (clientsRangeTo) params.to = clientsRangeTo;
+  apiFetchJson(params)
+    .then(function(d) {
+      if (d.error) throw new Error(d.error);
+      clientsData.top_clients = d.top_clients;
+      showClientsTab('top');
+    })
+    .catch(function(e) {
+      el.innerHTML = '<p style="color:var(--red);padding:16px">Ошибка: ' + e.message + '</p>';
+    });
 }
 
 function segBadgeClass_(seg) {
@@ -4571,10 +4681,10 @@ function renderClientsTable_(list, mode) {
     if (mode === 'top') {
       return '<tr><td>' + (i+1) + '</td><td>' + c.name + '</td><td class="num">' + c.orders + '</td>' +
         '<td class="num">' + fmt(c.revenue) + '</td><td class="num">' + fmt(c.avg_order_value) + '</td>' +
-        '<td>' + c.last_order + '</td><td class="num ' + segBadgeClass_(c.segment) + '">' + c.segment + '</td></tr>';
+        '<td>' + fmtDateRu(c.last_order) + '</td><td class="num ' + segBadgeClass_(c.segment) + '">' + c.segment + '</td></tr>';
     }
     return '<tr><td>' + (i+1) + '</td><td>' + c.name + '</td><td class="num">' + c.orders + '</td>' +
-      '<td class="num">' + fmt(c.revenue) + '</td><td>' + c.last_order + '</td>' +
+      '<td class="num">' + fmt(c.revenue) + '</td><td>' + fmtDateRu(c.last_order) + '</td>' +
       '<td class="num amber">' + c.recency_days + ' дн</td></tr>';
   }).join('');
   var head = mode === 'top'

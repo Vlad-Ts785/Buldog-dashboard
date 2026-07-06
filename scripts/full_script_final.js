@@ -1262,6 +1262,33 @@ function doGet(e) {
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
+    // Клиентская аналитика: топ-клиенты, win-back, растущие/снижающиеся, сезонность
+    // (только admin - см. plans/2026-07-05-client-analytics-on-dashboard.md)
+    if (action === 'client_analytics') {
+      if (access.role !== 'admin') {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var caRows = getClientAnalyticsRows_(ss);
+      return ContentService
+        .createTextOutput(JSON.stringify(computeClientAnalytics_(caRows)))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // Личный профиль менеджера (?action=manager_profile&manager=Цегельников) - только admin
+    if (action === 'manager_profile') {
+      if (access.role !== 'admin') {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var mpName = e.parameter.manager || '';
+      if (!mpName) {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Не указан менеджер' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var mpRows = getClientAnalyticsRows_(ss);
+      return ContentService
+        .createTextOutput(JSON.stringify(computeManagerProfile_(mpRows, mpName)))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
     // Менеджер - только его собственные данные, без доступа к остальному
     if (access.role === 'manager') {
       return ContentService
@@ -2005,7 +2032,8 @@ const ORDERS_ARCHIVE_PFX  = 'Заказы_';   // + YYYY-MM, например «
 // Внутренние заказчики — выручка есть, поступлений нет; считаем отдельно
 const INTERNAL_CLIENTS = [
   'ТЕХНО ПАРК', 'ОТДЕЛ БУРОВЫХ РАБОТ', 'КРАНМАСТЕР',
-  'МЕГАКРАН', 'БАЗА ДМД', 'БУЛЬДОГ ООО', 'БАЗА'
+  'МЕГАКРАН', 'БАЗА ДМД', 'БУЛЬДОГ ООО', 'БАЗА',
+  'УМИАТ ЯРД' // Влад, 2026-07-05: тег "(НАШ)" в 1С, найдено при анализе клиентской базы
 ];
 
 // Менеджеры отдела — для фильтрации чужих строк
@@ -3015,6 +3043,300 @@ function aggregateOrdersRows(rows) {
         .sort(function(a,b){ return b.trips-a.trips; })
         .slice(0, 8),
     },
+  };
+}
+
+// ── КЛИЕНТСКАЯ АНАЛИТИКА (Фаза 2, план plans/2026-07-05-client-analytics-on-dashboard.md) ──
+// Склеивает историю (2020 - 31.05.2026, разовая выгрузка, нормализована отдельным скриптом
+// scripts/client_history_normalize.js в таблице Влада) с живыми данными самого дашборда
+// (Заказы_данные + архивы Заказы_YYYY-MM, июнь 2026+). Граница фиксированная - HISTORY_CUTOFF,
+// не "последняя дата в файле" - см. план, почему (Влад просил приоритет живых данных за июнь,
+// т.к. отчёт 1С по текущему месяцу ещё дозаписывается/корректируется).
+
+const CLIENT_HISTORY_SHEET_ID   = '1nXMXVxLiOK-7CXdSSFr7NcoCUvvyEDCjPyGhE0dv8es';
+const CLIENT_HISTORY_SHEET_NAME = 'Нормализованные_история_заказов';
+// Должно совпадать с HISTORY_CUTOFF в scripts/client_history_normalize.js - если там меняют,
+// менять и здесь, иначе либо задвоятся заказы на границе, либо появится дыра в данных.
+const CLIENT_HISTORY_CUTOFF = '2026-05-31';
+
+// Собирает единый список строк {customer, mgrSales, mgrSupply, equip, amount, profit, date}
+// из истории (чужая таблица, только <= CLIENT_HISTORY_CUTOFF) и из живых данных дашборда
+// (Заказы_данные + все архивы, только > CLIENT_HISTORY_CUTOFF - защита от задвоения, даже если
+// исторический лист вдруг снова будет содержать более поздние даты).
+function getClientAnalyticsRows_(ss) {
+  const rows = [];
+
+  try {
+    const histSS = SpreadsheetApp.openById(CLIENT_HISTORY_SHEET_ID);
+    const histSheet = histSS.getSheetByName(CLIENT_HISTORY_SHEET_NAME);
+    if (histSheet && histSheet.getLastRow() > 1) {
+      const data = histSheet.getRange(2, 1, histSheet.getLastRow() - 1, 8).getValues();
+      data.forEach(function(r) {
+        // Номер(0), Заказчик(1), Менеджер по продажам(2), Менеджер по снабжению(3),
+        // Тип техники(4), Сумма(5), Прибыль(6), Начало(7)
+        const dateStr = String(r[7] || '').trim();
+        if (!dateStr || dateStr > CLIENT_HISTORY_CUTOFF) return;
+        rows.push({
+          customer: String(r[1] || '').trim(),
+          mgrSales: String(r[2] || '').trim(),
+          mgrSupply: String(r[3] || '').trim(),
+          equip: String(r[4] || '').trim(),
+          amount: ordParseNum(r[5]),
+          profit: ordParseNum(r[6]),
+          date: dateStr,
+        });
+      });
+    }
+  } catch (histErr) {
+    Logger.log('Не удалось прочитать историческую таблицу клиентов: ' + histErr);
+  }
+
+  function ingestLiveRows_(parsedRows) {
+    parsedRows.forEach(function(row) {
+      const isInternal = String(row[13] || '').trim() === 'Да';
+      if (isInternal) return;
+      const dateStr = ordFormatDate(row[2]); // 'Начало работ'
+      if (!dateStr || dateStr <= CLIENT_HISTORY_CUTOFF) return; // уже покрыто историей
+      rows.push({
+        customer: String(row[9] || '').trim(),
+        mgrSales: String(row[15] || '').trim(),
+        mgrSupply: String(row[16] || '').trim(),
+        equip: String(row[20] || '').trim(),
+        amount: ordParseNum(row[30]),
+        profit: ordParseNum(row[35]),
+        date: dateStr,
+      });
+    });
+  }
+
+  const normSheet = ss.getSheetByName(ORDERS_NORM_SHEET);
+  if (normSheet && normSheet.getLastRow() > 1) {
+    ingestLiveRows_(normSheet.getRange(2, 1, normSheet.getLastRow() - 1, 43).getValues());
+  }
+
+  getAvailablePeriods(ss).forEach(function(period) {
+    const archive = ss.getSheetByName(ORDERS_ARCHIVE_PFX + period);
+    if (!archive || archive.getLastRow() < 5) return;
+    const parsed = parseOrdersRawRows(archive.getDataRange().getValues());
+    ingestLiveRows_(parsed.rows);
+  });
+
+  return rows;
+}
+
+function daysBetween_(dateStr, refStr) {
+  return Math.round((new Date(refStr) - new Date(dateStr)) / 86400000);
+}
+
+function addDays_(dateStr, delta) {
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() + delta);
+  return Utilities.formatDate(d, 'Europe/Moscow', 'yyyy-MM-dd');
+}
+
+function clientSegment_(days) {
+  if (days <= 30) return 'Активный';
+  if (days <= 90) return 'Под риском';
+  if (days <= 365) return 'Отток (до года)';
+  return 'Отток (давно)';
+}
+
+// Методика 1-в-1 из .business/clients/analyze_clients.py (согласована и проверена на разовом
+// анализе 2026-07-04..05) - топ-клиенты, концентрация (Парето), сегменты по давности, win-back,
+// растущие/снижающиеся, сезонность по месяцам (только полные календарные годы).
+function computeClientAnalytics_(rows) {
+  if (!rows.length) return { error: 'Нет данных для клиентской аналитики' };
+
+  var refDate = rows.reduce(function(max, r) { return r.date > max ? r.date : max; }, '');
+  var periodStart = rows.reduce(function(min, r) { return r.date < min ? r.date : min; }, refDate);
+
+  var byCustomer = {};
+  rows.forEach(function(r) {
+    if (!byCustomer[r.customer]) {
+      byCustomer[r.customer] = {
+        name: r.customer, orders: 0, revenue: 0, profit: 0,
+        first_order: r.date, last_order: r.date,
+      };
+    }
+    var c = byCustomer[r.customer];
+    c.orders++;
+    c.revenue += r.amount;
+    c.profit  += r.profit;
+    if (r.date < c.first_order) c.first_order = r.date;
+    if (r.date > c.last_order)  c.last_order  = r.date;
+  });
+
+  var customers = Object.keys(byCustomer).map(function(k) { return byCustomer[k]; });
+  customers.forEach(function(c) {
+    c.recency_days     = daysBetween_(c.last_order, refDate);
+    c.avg_order_value  = c.orders ? c.revenue / c.orders : 0;
+    c.segment          = clientSegment_(c.recency_days);
+  });
+  customers.sort(function(a, b) { return b.revenue - a.revenue; });
+
+  var totalRevenue = customers.reduce(function(s, c) { return s + c.revenue; }, 0);
+  var top10Revenue = customers.slice(0, 10).reduce(function(s, c) { return s + c.revenue; }, 0);
+  var top20Count   = Math.ceil(customers.length * 0.2);
+  var top20Revenue = customers.slice(0, top20Count).reduce(function(s, c) { return s + c.revenue; }, 0);
+
+  var cum = 0, clientsFor80 = customers.length;
+  for (var i = 0; i < customers.length; i++) {
+    cum += customers[i].revenue;
+    if (cum >= totalRevenue * 0.8) { clientsFor80 = i + 1; break; }
+  }
+
+  var segMap = {};
+  customers.forEach(function(c) {
+    if (!segMap[c.segment]) segMap[c.segment] = { segment: c.segment, clients: 0, revenue: 0 };
+    segMap[c.segment].clients++;
+    segMap[c.segment].revenue += c.revenue;
+  });
+
+  // Win-back: та же методика, что в analyze_clients.py - молчит 60+ дней, было хотя бы 3
+  // заказа и от 300к исторической выручки (не разовый мелкий клиент).
+  var winback = customers
+    .filter(function(c) { return c.recency_days > 60 && c.orders >= 3 && c.revenue >= 300000; })
+    .sort(function(a, b) { return b.revenue - a.revenue; });
+
+  // Растущие/снижающиеся - последние 180 дней vs предыдущие 180 дней от refDate.
+  // ВАЖНО (см. чат с Владом 2026-07-05): это сравнение чувствительно к сезонности - если
+  // окно half-year落 на границу высокого/низкого сезона, "падение" может быть сезонным
+  // артефактом, а не реальным трендом. Показывать на дашборде с этой оговоркой, не как
+  // прямой сигнал тревоги.
+  var d6  = addDays_(refDate, -180);
+  var d12 = addDays_(refDate, -360);
+  var last6Map = {}, prev6Map = {};
+  rows.forEach(function(r) {
+    if (r.date > d6) { last6Map[r.customer] = (last6Map[r.customer] || 0) + r.amount; }
+    else if (r.date > d12 && r.date <= d6) { prev6Map[r.customer] = (prev6Map[r.customer] || 0) + r.amount; }
+  });
+  var trendNames = {};
+  Object.keys(last6Map).forEach(function(k) { trendNames[k] = true; });
+  Object.keys(prev6Map).forEach(function(k) { trendNames[k] = true; });
+  var trend = Object.keys(trendNames).map(function(name) {
+    var last6 = last6Map[name] || 0, prev6 = prev6Map[name] || 0;
+    return { name: name, last6: last6, prev6: prev6, delta: last6 - prev6 };
+  });
+  var growing = trend
+    .filter(function(t) { return t.prev6 >= 100000 && t.delta > 0; })
+    .sort(function(a, b) { return b.delta - a.delta; });
+  var declining = trend
+    .filter(function(t) { return t.prev6 >= 200000 && t.delta < 0; })
+    .sort(function(a, b) { return a.delta - b.delta; });
+
+  // Сезонность - только полные календарные годы (отсекаем первый/последний неполный),
+  // как в analyze_clients.py, иначе частичные края искажают средние по месяцам.
+  var yearsSeen = {};
+  rows.forEach(function(r) { yearsSeen[r.date.slice(0, 4)] = true; });
+  var yearsList = Object.keys(yearsSeen).sort();
+  var fullYears = yearsList.length > 2 ? yearsList.slice(1, -1) : yearsList;
+  var monthRevenue = {};
+  rows.forEach(function(r) {
+    if (fullYears.indexOf(r.date.slice(0, 4)) === -1) return;
+    var m = r.date.slice(5, 7);
+    monthRevenue[m] = (monthRevenue[m] || 0) + r.amount;
+  });
+  var seasonality = [];
+  for (var mi = 1; mi <= 12; mi++) {
+    var mk = (mi < 10 ? '0' : '') + mi;
+    seasonality.push({
+      month: mk,
+      revenue_per_year: fullYears.length ? (monthRevenue[mk] || 0) / fullYears.length : 0,
+    });
+  }
+
+  return {
+    ref_date: refDate,
+    period_start: periodStart,
+    total_clients: customers.length,
+    total_revenue: totalRevenue,
+    total_orders: rows.length,
+    top10_pct: totalRevenue ? top10Revenue / totalRevenue * 100 : 0,
+    top20_pct: totalRevenue ? top20Revenue / totalRevenue * 100 : 0,
+    clients_for_80pct: clientsFor80,
+    top_clients: customers.slice(0, 100),
+    segments: Object.keys(segMap).map(function(k) { return segMap[k]; }),
+    winback: winback.slice(0, 200),
+    growing: growing.slice(0, 100),
+    declining: declining.slice(0, 100),
+    seasonality: seasonality,
+    full_years_used: fullYears,
+  };
+}
+
+// Рейтинг менеджеров по выручке - для "место среди менеджеров" в личном профиле.
+function computeManagerRanking_(rows) {
+  var byMgr = {};
+  TRAL_MANAGERS.forEach(function(m) { byMgr[m] = { name: m, revenue: 0, clients: {} }; });
+  rows.forEach(function(r) {
+    TRAL_MANAGERS.forEach(function(m) {
+      if (r.mgrSales.indexOf(m) >= 0) {
+        byMgr[m].revenue += r.amount;
+        byMgr[m].clients[r.customer] = true;
+      }
+    });
+  });
+  return Object.keys(byMgr).map(function(m) {
+    return { name: byMgr[m].name, revenue: byMgr[m].revenue, clients: Object.keys(byMgr[m].clients).length };
+  }).sort(function(a, b) { return b.revenue - a.revenue; });
+}
+
+// Личный профиль менеджера (как показывался Владу в чате для Цегельникова) - фильтр по
+// подстроке в "Менеджер по продажам", остальное - та же логика computeClientAnalytics_
+// плюс разбивка по годам/дням недели/типу техники и место в рейтинге.
+function computeManagerProfile_(allRows, managerName) {
+  var rows = allRows.filter(function(r) { return r.mgrSales.indexOf(managerName) >= 0; });
+  if (!rows.length) return { error: 'Нет данных по менеджеру "' + managerName + '"' };
+
+  var base = computeClientAnalytics_(rows);
+
+  var byYear = {};
+  rows.forEach(function(r) {
+    var y = r.date.slice(0, 4);
+    if (!byYear[y]) byYear[y] = { year: y, orders: 0, revenue: 0 };
+    byYear[y].orders++;
+    byYear[y].revenue += r.amount;
+  });
+
+  var wdNames = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']; // JS Date.getDay(): 0 = воскресенье
+  var byWeekday = {};
+  rows.forEach(function(r) {
+    var wd = wdNames[new Date(r.date).getDay()];
+    if (!byWeekday[wd]) byWeekday[wd] = { weekday: wd, orders: 0, revenue: 0 };
+    byWeekday[wd].orders++;
+    byWeekday[wd].revenue += r.amount;
+  });
+
+  var byEquip = {};
+  rows.forEach(function(r) {
+    var eq = r.equip || 'Прочее';
+    if (!byEquip[eq]) byEquip[eq] = { equip: eq, orders: 0, revenue: 0 };
+    byEquip[eq].orders++;
+    byEquip[eq].revenue += r.amount;
+  });
+
+  var ranking = computeManagerRanking_(allRows);
+  var rank = ranking.findIndex(function(m) { return m.name === managerName; }) + 1;
+
+  return {
+    manager: managerName,
+    rank: rank || null,
+    total_managers: ranking.length,
+    total_orders: rows.length,
+    total_revenue: base.total_revenue,
+    total_clients: base.total_clients,
+    top10_pct: base.top10_pct,
+    top20_pct: base.top20_pct,
+    clients_for_80pct: base.clients_for_80pct,
+    top_clients: base.top_clients,
+    segments: base.segments,
+    winback: base.winback,
+    growing: base.growing,
+    declining: base.declining,
+    seasonality: base.seasonality,
+    by_year: Object.keys(byYear).sort().map(function(y) { return byYear[y]; }),
+    by_weekday: Object.keys(byWeekday).map(function(k) { return byWeekday[k]; }),
+    by_equip: Object.keys(byEquip).map(function(k) { return byEquip[k]; }).sort(function(a, b) { return b.revenue - a.revenue; }),
   };
 }
 

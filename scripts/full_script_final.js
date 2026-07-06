@@ -1263,18 +1263,27 @@ function doGet(e) {
     }
 
     // Клиентская аналитика: топ-клиенты, win-back, растущие/снижающиеся, сезонность
-    // (только admin - см. plans/2026-07-05-client-analytics-on-dashboard.md)
+    // (только admin - см. plans/2026-07-05-client-analytics-on-dashboard.md).
+    // Кэш 30 мин (CacheService) - исторический кусок (2020-05.2026) статичен и больше не
+    // изменится, а без кэша каждое открытие вкладки заново перечитывает и парсит десятки
+    // тысяч строк - именно это делало вкладку медленной (Влад, 2026-07-06).
     if (action === 'client_analytics') {
       if (access.role !== 'admin') {
         return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
       }
+      var caCache = CacheService.getScriptCache();
+      var caCached = caCache.get('client_analytics_v2');
+      if (caCached) {
+        return ContentService.createTextOutput(caCached).setMimeType(ContentService.MimeType.JSON);
+      }
       var caRows = getClientAnalyticsRows_(ss);
-      return ContentService
-        .createTextOutput(JSON.stringify(computeClientAnalytics_(caRows)))
-        .setMimeType(ContentService.MimeType.JSON);
+      var caJson = JSON.stringify(computeClientAnalytics_(caRows));
+      try { if (caJson.length < 95000) caCache.put('client_analytics_v2', caJson, 1800); } catch (cacheErr) { /* кэш - не критично, отдаём результат в любом случае */ }
+      return ContentService.createTextOutput(caJson).setMimeType(ContentService.MimeType.JSON);
     }
 
-    // Личный профиль менеджера (?action=manager_profile&manager=Цегельников) - только admin
+    // Личный профиль менеджера (?action=manager_profile&manager=Цегельников) - только admin,
+    // тот же кэш на 30 мин, отдельный ключ на каждого менеджера.
     if (action === 'manager_profile') {
       if (access.role !== 'admin') {
         return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
@@ -1283,10 +1292,16 @@ function doGet(e) {
       if (!mpName) {
         return ContentService.createTextOutput(JSON.stringify({ error: 'Не указан менеджер' })).setMimeType(ContentService.MimeType.JSON);
       }
+      var mpCache = CacheService.getScriptCache();
+      var mpCacheKey = 'manager_profile_v2_' + mpName;
+      var mpCached = mpCache.get(mpCacheKey);
+      if (mpCached) {
+        return ContentService.createTextOutput(mpCached).setMimeType(ContentService.MimeType.JSON);
+      }
       var mpRows = getClientAnalyticsRows_(ss);
-      return ContentService
-        .createTextOutput(JSON.stringify(computeManagerProfile_(mpRows, mpName)))
-        .setMimeType(ContentService.MimeType.JSON);
+      var mpJson = JSON.stringify(computeManagerProfile_(mpRows, mpName));
+      try { if (mpJson.length < 95000) mpCache.put(mpCacheKey, mpJson, 1800); } catch (cacheErr) { /* кэш - не критично */ }
+      return ContentService.createTextOutput(mpJson).setMimeType(ContentService.MimeType.JSON);
     }
 
     // Менеджер - только его собственные данные, без доступа к остальному
@@ -3074,7 +3089,13 @@ function getClientAnalyticsRows_(ss) {
       data.forEach(function(r) {
         // Номер(0), Заказчик(1), Менеджер по продажам(2), Менеджер по снабжению(3),
         // Тип техники(4), Сумма(5), Прибыль(6), Начало(7)
-        const dateStr = String(r[7] || '').trim();
+        // ordFormatDate(), не String() - Google Sheets сама конвертирует строки вида
+        // "2026-05-15" в настоящие Date-объекты при записи (setValues), если колонка не
+        // зафиксирована как текст. Наивный String(r[7]) на Date-объекте даёт мусор вида
+        // "Fri May 15 2026 00:00:00 GMT+0300..." - сравнение с CUTOFF ломается, почти все
+        // исторические строки отсеивались как "позже cutoff". Баг 2026-07-06 - именно из-за
+        // этого на дашборде оставались только живые июнь/июль, вся история 2020-2026 терялась.
+        const dateStr = ordFormatDate(r[7]);
         if (!dateStr || dateStr > CLIENT_HISTORY_CUTOFF) return;
         rows.push({
           customer: String(r[1] || '').trim(),

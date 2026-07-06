@@ -1285,10 +1285,23 @@ function doGet(e) {
       if (caCached) {
         return ContentService.createTextOutput(caCached).setMimeType(ContentService.MimeType.JSON);
       }
-      var caRows = getClientAnalyticsRows_(ss);
-      if (caFrom) caRows = caRows.filter(function(r) { return r.date >= caFrom; });
-      if (caTo)   caRows = caRows.filter(function(r) { return r.date <= caTo; });
-      var caJson = JSON.stringify(computeClientAnalytics_(caRows, { segment: caSegment }));
+      // Быстрый путь - предпосчитанный агрегат истории (см. getClientHistoryAggregate_) вместо
+      // построчного парсинга 72 тыс. строк. ОТКАТ: если агрегата ещё нет (лист не создан
+      // buildClientHistoryAggregate() в таблице "мега база") - используем старый путь как
+      // раньше, ничего не падает. Если после появления агрегата что-то пойдёт не так -
+      // откатить в 1 строку: заменить caHistAgg на null здесь же.
+      var caResult;
+      var caHistAgg = getClientHistoryAggregate_();
+      if (caHistAgg) {
+        var caLiveRows = getClientLiveRows_(ss);
+        caResult = computeClientAnalyticsFromAggregate_(caHistAgg, caLiveRows, { segment: caSegment, from: caFrom, to: caTo });
+      } else {
+        var caRows = getClientAnalyticsRows_(ss);
+        if (caFrom) caRows = caRows.filter(function(r) { return r.date >= caFrom; });
+        if (caTo)   caRows = caRows.filter(function(r) { return r.date <= caTo; });
+        caResult = computeClientAnalytics_(caRows, { segment: caSegment });
+      }
+      var caJson = JSON.stringify(caResult);
       try { if (caJson.length < 95000) caCache.put(caCacheKey, caJson, 1800); } catch (cacheErr) { /* кэш - не критично, отдаём результат в любом случае */ }
       return ContentService.createTextOutput(caJson).setMimeType(ContentService.MimeType.JSON);
     }
@@ -3090,39 +3103,12 @@ const CLIENT_HISTORY_CUTOFF = '2026-05-31';
 // из истории (чужая таблица, только <= CLIENT_HISTORY_CUTOFF) и из живых данных дашборда
 // (Заказы_данные + все архивы, только > CLIENT_HISTORY_CUTOFF - защита от задвоения, даже если
 // исторический лист вдруг снова будет содержать более поздние даты).
-function getClientAnalyticsRows_(ss) {
+// Только живая часть (Заказы_данные + архивы, > CLIENT_HISTORY_CUTOFF) - лёгкая, читает
+// только СВОЮ таблицу, без похода в чужую (историческую). Используется новым
+// (агрегатным) путём для client_analytics, где история приходит отдельно и заранее
+// посчитанной - см. getClientHistoryAggregate_/computeClientAnalyticsFromAggregate_.
+function getClientLiveRows_(ss) {
   const rows = [];
-
-  try {
-    const histSS = SpreadsheetApp.openById(CLIENT_HISTORY_SHEET_ID);
-    const histSheet = histSS.getSheetByName(CLIENT_HISTORY_SHEET_NAME);
-    if (histSheet && histSheet.getLastRow() > 1) {
-      const data = histSheet.getRange(2, 1, histSheet.getLastRow() - 1, 8).getValues();
-      data.forEach(function(r) {
-        // Номер(0), Заказчик(1), Менеджер по продажам(2), Менеджер по снабжению(3),
-        // Тип техники(4), Сумма(5), Прибыль(6), Начало(7)
-        // ordFormatDate(), не String() - Google Sheets сама конвертирует строки вида
-        // "2026-05-15" в настоящие Date-объекты при записи (setValues), если колонка не
-        // зафиксирована как текст. Наивный String(r[7]) на Date-объекте даёт мусор вида
-        // "Fri May 15 2026 00:00:00 GMT+0300..." - сравнение с CUTOFF ломается, почти все
-        // исторические строки отсеивались как "позже cutoff". Баг 2026-07-06 - именно из-за
-        // этого на дашборде оставались только живые июнь/июль, вся история 2020-2026 терялась.
-        const dateStr = ordFormatDate(r[7]);
-        if (!dateStr || dateStr > CLIENT_HISTORY_CUTOFF) return;
-        rows.push({
-          customer: String(r[1] || '').trim(),
-          mgrSales: String(r[2] || '').trim(),
-          mgrSupply: String(r[3] || '').trim(),
-          equip: String(r[4] || '').trim(),
-          amount: ordParseNum(r[5]),
-          profit: ordParseNum(r[6]),
-          date: dateStr,
-        });
-      });
-    }
-  } catch (histErr) {
-    Logger.log('Не удалось прочитать историческую таблицу клиентов: ' + histErr);
-  }
 
   function ingestLiveRows_(parsedRows) {
     parsedRows.forEach(function(row) {
@@ -3157,6 +3143,139 @@ function getClientAnalyticsRows_(ss) {
   return rows;
 }
 
+// Историческая часть (чужая таблица, <= CLIENT_HISTORY_CUTOFF) в виде сырых строк -
+// используется старым путём (manager_profile). Держим отдельно от getClientLiveRows_,
+// чтобы новый (агрегатный) путь мог не читать эти 72 тыс. строк вообще.
+function getClientHistoryRawRows_() {
+  const rows = [];
+  try {
+    const histSS = SpreadsheetApp.openById(CLIENT_HISTORY_SHEET_ID);
+    const histSheet = histSS.getSheetByName(CLIENT_HISTORY_SHEET_NAME);
+    if (histSheet && histSheet.getLastRow() > 1) {
+      const data = histSheet.getRange(2, 1, histSheet.getLastRow() - 1, 8).getValues();
+      data.forEach(function(r) {
+        // Номер(0), Заказчик(1), Менеджер по продажам(2), Менеджер по снабжению(3),
+        // Тип техники(4), Сумма(5), Прибыль(6), Начало(7)
+        // ordFormatDate(), не String() - Google Sheets сама конвертирует строки вида
+        // "2026-05-15" в настоящие Date-объекты при записи (setValues), если колонка не
+        // зафиксирована как текст. Наивный String(r[7]) на Date-объекте даёт мусор вида
+        // "Fri May 15 2026 00:00:00 GMT+0300..." - сравнение с CUTOFF ломается, почти все
+        // исторические строки отсеивались как "позже cutoff". Баг 2026-07-06 - именно из-за
+        // этого на дашборде оставались только живые июнь/июль, вся история 2020-2026 терялась.
+        const dateStr = ordFormatDate(r[7]);
+        if (!dateStr || dateStr > CLIENT_HISTORY_CUTOFF) return;
+        rows.push({
+          customer: String(r[1] || '').trim(),
+          mgrSales: String(r[2] || '').trim(),
+          mgrSupply: String(r[3] || '').trim(),
+          equip: String(r[4] || '').trim(),
+          amount: ordParseNum(r[5]),
+          profit: ordParseNum(r[6]),
+          date: dateStr,
+        });
+      });
+    }
+  } catch (histErr) {
+    Logger.log('Не удалось прочитать историческую таблицу клиентов: ' + histErr);
+  }
+  return rows;
+}
+
+// Старый комбинированный путь (история построчно + живое) - используется manager_profile.
+// Держим НЕТРОНУТЫМ ради отката: если агрегатный путь (Фаза 4) даст сбой, client_analytics
+// можно откатить на этот же путь буквально одной строкой в doGet (см. план).
+function getClientAnalyticsRows_(ss) {
+  return getClientHistoryRawRows_().concat(getClientLiveRows_(ss));
+}
+
+const CLIENT_HISTORY_AGGREGATE_SHEET_NAME = 'История_клиентов_агрегат';
+
+// Читает предпосчитанный агрегат по клиентам (см. buildClientHistoryAggregate() в
+// scripts/client_history_normalize.js - отдельный разовый прогон в таблице "мега база",
+// не автоматический). ~5 тыс. строк вместо 72 тыс. сырых - на порядок быстрее, чем
+// getClientHistoryRawRows_(). Формат строки: Заказчик|Заказов|Выручка|Прибыль|
+// Первый_заказ|Последний_заказ|ПоДням(JSON: {"YYYY-MM-DD":{"o":N,"r":R,"p":P}}).
+// Возвращает null, если агрегата ещё нет (лист не создан) - вызывающий код должен
+// откатиться на getClientAnalyticsRows_ в этом случае, не падать.
+function getClientHistoryAggregate_() {
+  try {
+    const histSS = SpreadsheetApp.openById(CLIENT_HISTORY_SHEET_ID);
+    const sheet = histSS.getSheetByName(CLIENT_HISTORY_AGGREGATE_SHEET_NAME);
+    if (!sheet || sheet.getLastRow() < 2) return null;
+    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 7).getValues();
+    const agg = {};
+    data.forEach(function(r) {
+      const name = String(r[0] || '').trim();
+      if (!name) return;
+      let daily = {};
+      try { daily = JSON.parse(r[6] || '{}'); } catch (parseErr) { daily = {}; }
+      agg[name] = {
+        name: name,
+        orders: ordParseNum(r[1]),
+        revenue: ordParseNum(r[2]),
+        profit: ordParseNum(r[3]),
+        first_order: ordFormatDate(r[4]),
+        last_order: ordFormatDate(r[5]),
+        daily: daily,
+      };
+    });
+    return agg;
+  } catch (aggErr) {
+    Logger.log('Не удалось прочитать агрегат истории клиентов: ' + aggErr);
+    return null;
+  }
+}
+
+// Новый (быстрый) путь для client_analytics - byCustomer и pseudoRows строятся из
+// предпосчитанного агрегата (уже сгруппирован по клиенту и по дню) + живых строк, вместо
+// построчного парсинга 72 тыс. исторических строк на каждый запрос. from/to (опционально) -
+// точная фильтрация по дням, т.к. агрегат хранит дневную (не месячную) детализацию -
+// день - минимальная единица, которая нужна и растущим/снижающимся (окно 180 дней), и
+// произвольному периоду с самой страницы.
+function computeClientAnalyticsFromAggregate_(historyAgg, liveRows, opts) {
+  opts = opts || {};
+  const from = opts.from || '';
+  const to   = opts.to   || '';
+
+  const byCustomer = {};
+  const pseudoRows = [];
+  let totalOrders = 0;
+
+  Object.keys(historyAgg).forEach(function(name) {
+    const h = historyAgg[name];
+    Object.keys(h.daily).forEach(function(date) {
+      if (from && date < from) return;
+      if (to && date > to) return;
+      const d = h.daily[date];
+      if (!byCustomer[name]) {
+        byCustomer[name] = { name: name, orders: 0, revenue: 0, profit: 0, first_order: date, last_order: date };
+      }
+      const c = byCustomer[name];
+      c.orders += d.o; c.revenue += d.r; c.profit += (d.p || 0);
+      if (date < c.first_order) c.first_order = date;
+      if (date > c.last_order)  c.last_order  = date;
+      totalOrders += d.o;
+      pseudoRows.push({ customer: name, date: date, amount: d.r });
+    });
+  });
+
+  liveRows.forEach(function(r) {
+    if (from && r.date < from) return;
+    if (to && r.date > to) return;
+    if (!byCustomer[r.customer]) {
+      byCustomer[r.customer] = { name: r.customer, orders: 0, revenue: 0, profit: 0, first_order: r.date, last_order: r.date };
+    }
+    const c = byCustomer[r.customer];
+    c.orders++; c.revenue += r.amount; c.profit += r.profit;
+    if (r.date < c.first_order) c.first_order = r.date;
+    if (r.date > c.last_order)  c.last_order  = r.date;
+    totalOrders++;
+    pseudoRows.push({ customer: r.customer, date: r.date, amount: r.amount });
+  });
+
+  return finishClientAnalytics_(byCustomer, pseudoRows, opts, totalOrders);
+}
+
 function daysBetween_(dateStr, refStr) {
   return Math.round((new Date(refStr) - new Date(dateStr)) / 86400000);
 }
@@ -3177,30 +3296,19 @@ function clientSegment_(days) {
 // Методика 1-в-1 из .business/clients/analyze_clients.py (согласована и проверена на разовом
 // анализе 2026-07-04..05) - топ-клиенты, концентрация (Парето), сегменты по давности, win-back,
 // растущие/снижающиеся, сезонность по месяцам (только полные календарные годы).
-function computeClientAnalytics_(rows, opts) {
+// Общая часть расчёта - топ-клиенты/сегменты/win-back из уже собранной карты по клиенту,
+// растущие-снижающиеся/сезонность из плоского списка {customer,date,amount}. Не знает,
+// собраны ли byCustomer/pseudoRows из сырых строк или из предпосчитанного агрегата -
+// вызывается из обоих путей (computeClientAnalytics_ ниже и computeClientAnalyticsFromAggregate_,
+// см. план plans/2026-07-05-client-analytics-on-dashboard.md, раздел "Фаза 4").
+function finishClientAnalytics_(byCustomer, pseudoRows, opts, totalOrdersCount) {
   opts = opts || {};
-  if (!rows.length) return { error: 'Нет данных для клиентской аналитики' };
-
-  var refDate = rows.reduce(function(max, r) { return r.date > max ? r.date : max; }, '');
-  var periodStart = rows.reduce(function(min, r) { return r.date < min ? r.date : min; }, refDate);
-
-  var byCustomer = {};
-  rows.forEach(function(r) {
-    if (!byCustomer[r.customer]) {
-      byCustomer[r.customer] = {
-        name: r.customer, orders: 0, revenue: 0, profit: 0,
-        first_order: r.date, last_order: r.date,
-      };
-    }
-    var c = byCustomer[r.customer];
-    c.orders++;
-    c.revenue += r.amount;
-    c.profit  += r.profit;
-    if (r.date < c.first_order) c.first_order = r.date;
-    if (r.date > c.last_order)  c.last_order  = r.date;
-  });
-
   var customers = Object.keys(byCustomer).map(function(k) { return byCustomer[k]; });
+  if (!customers.length) return { error: 'Нет данных для клиентской аналитики' };
+
+  var refDate = customers.reduce(function(max, c) { return c.last_order > max ? c.last_order : max; }, '');
+  var periodStart = customers.reduce(function(min, c) { return c.first_order < min ? c.first_order : min; }, refDate);
+
   customers.forEach(function(c) {
     c.recency_days     = daysBetween_(c.last_order, refDate);
     c.avg_order_value  = c.orders ? c.revenue / c.orders : 0;
@@ -3240,7 +3348,7 @@ function computeClientAnalytics_(rows, opts) {
   var d6  = addDays_(refDate, -180);
   var d12 = addDays_(refDate, -360);
   var last6Map = {}, prev6Map = {};
-  rows.forEach(function(r) {
+  pseudoRows.forEach(function(r) {
     if (r.date > d6) { last6Map[r.customer] = (last6Map[r.customer] || 0) + r.amount; }
     else if (r.date > d12 && r.date <= d6) { prev6Map[r.customer] = (prev6Map[r.customer] || 0) + r.amount; }
   });
@@ -3261,11 +3369,11 @@ function computeClientAnalytics_(rows, opts) {
   // Сезонность - только полные календарные годы (отсекаем первый/последний неполный),
   // как в analyze_clients.py, иначе частичные края искажают средние по месяцам.
   var yearsSeen = {};
-  rows.forEach(function(r) { yearsSeen[r.date.slice(0, 4)] = true; });
+  pseudoRows.forEach(function(r) { yearsSeen[r.date.slice(0, 4)] = true; });
   var yearsList = Object.keys(yearsSeen).sort();
   var fullYears = yearsList.length > 2 ? yearsList.slice(1, -1) : yearsList;
   var monthRevenue = {};
-  rows.forEach(function(r) {
+  pseudoRows.forEach(function(r) {
     if (fullYears.indexOf(r.date.slice(0, 4)) === -1) return;
     var m = r.date.slice(5, 7);
     monthRevenue[m] = (monthRevenue[m] || 0) + r.amount;
@@ -3284,7 +3392,7 @@ function computeClientAnalytics_(rows, opts) {
     period_start: periodStart,
     total_clients: customers.length,
     total_revenue: totalRevenue,
-    total_orders: rows.length,
+    total_orders: totalOrdersCount != null ? totalOrdersCount : customers.reduce(function(s, c) { return s + c.orders; }, 0),
     top10_pct: totalRevenue ? top10Revenue / totalRevenue * 100 : 0,
     top20_pct: totalRevenue ? top20Revenue / totalRevenue * 100 : 0,
     clients_for_80pct: clientsFor80,
@@ -3302,6 +3410,32 @@ function computeClientAnalytics_(rows, opts) {
     seasonality: seasonality,
     full_years_used: fullYears,
   };
+}
+
+// Старый путь - строит byCustomer/pseudoRows из сырых строк {customer,mgrSales,...,amount,date}.
+// Используется для manager_profile (там объём строк на порядок меньше - фильтр по одному
+// менеджеру, пересчитывать 72 тыс. строк на каждый клик не так дорого, как для всей базы).
+function computeClientAnalytics_(rows, opts) {
+  opts = opts || {};
+  if (!rows.length) return { error: 'Нет данных для клиентской аналитики' };
+
+  var byCustomer = {};
+  rows.forEach(function(r) {
+    if (!byCustomer[r.customer]) {
+      byCustomer[r.customer] = {
+        name: r.customer, orders: 0, revenue: 0, profit: 0,
+        first_order: r.date, last_order: r.date,
+      };
+    }
+    var c = byCustomer[r.customer];
+    c.orders++;
+    c.revenue += r.amount;
+    c.profit  += r.profit;
+    if (r.date < c.first_order) c.first_order = r.date;
+    if (r.date > c.last_order)  c.last_order  = r.date;
+  });
+
+  return finishClientAnalytics_(byCustomer, rows, opts, rows.length);
 }
 
 // Рейтинг менеджеров по выручке - для "место среди менеджеров" в личном профиле.

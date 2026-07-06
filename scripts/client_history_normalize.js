@@ -235,3 +235,87 @@ function resetClientHistoryProgress() {
   props.deleteProperty(PROP_COUNTERS);
   Logger.log('Прогресс сброшен - следующий запуск normalizeClientHistory() начнёт с начала.');
 }
+
+// ── АГРЕГАТ ПО КЛИЕНТАМ (Влад, 2026-07-06: "хочу, чтобы загрузка была мгновенной") ──
+// Читает уже очищенный лист (CLEAN_SHEET_NAME, ~72 тыс. строк) и группирует по (клиент, день) -
+// вместо 72 тыс. сырых строк дашборд будет читать ~5 тыс. строк (по одной на клиента) с
+// компактной JSON-разбивкой по дням. Запускать ЗАНОВО каждый раз после normalizeClientHistory()
+// (если тот перезапускался - например, поменялся HISTORY_CUTOFF, список INTERNAL_CLIENTS
+// и т.п.) - агрегат сам по себе не подтягивает изменения автоматически.
+const AGGREGATE_SHEET_NAME = 'История_клиентов_агрегат';
+const AGG_READ_BATCH_SIZE = 15000;
+
+function buildClientHistoryAggregate() {
+  const startTime = Date.now();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const clean = ss.getSheetByName(CLEAN_SHEET_NAME);
+  if (!clean || clean.getLastRow() < 2) throw new Error('Нет очищенного листа "' + CLEAN_SHEET_NAME + '" - сначала запусти normalizeClientHistory()');
+
+  const lastRow = clean.getLastRow();
+  Logger.log('Строк в очищенном листе: ' + (lastRow - 1));
+
+  // byCustomer[name] = { orders, revenue, profit, first, last, daily: { 'YYYY-MM-DD': {o,r,p} } }
+  const byCustomer = {};
+
+  for (let batchStart = 2; batchStart <= lastRow; batchStart += AGG_READ_BATCH_SIZE) {
+    const numRows = Math.min(AGG_READ_BATCH_SIZE, lastRow - batchStart + 1);
+    // Колонки очищенного листа: Номер(1), Заказчик(2), Менеджер по продажам(3),
+    // Менеджер по снабжению(4), Тип техники(5), Сумма(6), Прибыль(7), Начало(8)
+    const batch = clean.getRange(batchStart, 2, numRows, 7).getValues(); // Заказчик..Начало
+
+    for (let i = 0; i < batch.length; i++) {
+      const row = batch[i];
+      const name = String(row[0] || '').trim();
+      if (!name) continue;
+      const revenue = parseNum_(row[4]);
+      const profit  = parseNum_(row[5]);
+      const dateStr = formatDate_(row[6]);
+      if (!dateStr) continue;
+
+      if (!byCustomer[name]) {
+        byCustomer[name] = { orders: 0, revenue: 0, profit: 0, first: dateStr, last: dateStr, daily: {} };
+      }
+      const c = byCustomer[name];
+      c.orders++;
+      c.revenue += revenue;
+      c.profit  += profit;
+      if (dateStr < c.first) c.first = dateStr;
+      if (dateStr > c.last)  c.last  = dateStr;
+      if (!c.daily[dateStr]) c.daily[dateStr] = { o: 0, r: 0, p: 0 };
+      c.daily[dateStr].o++;
+      c.daily[dateStr].r += revenue;
+      c.daily[dateStr].p += profit;
+    }
+    Logger.log('Обработано строк: ' + Math.min(batchStart - 2 + numRows, lastRow - 1) + ' из ' + (lastRow - 1) + ' (' + Math.round((Date.now() - startTime) / 1000) + ' сек)');
+  }
+
+  const names = Object.keys(byCustomer);
+  Logger.log('Уникальных клиентов: ' + names.length);
+
+  let agg = ss.getSheetByName(AGGREGATE_SHEET_NAME);
+  if (agg) agg.clear();
+  else agg = ss.insertSheet(AGGREGATE_SHEET_NAME);
+
+  const outHeaders = ['Заказчик', 'Заказов', 'Выручка', 'Прибыль', 'Первый_заказ', 'Последний_заказ', 'ПоДням'];
+  agg.getRange(1, 1, 1, outHeaders.length).setValues([outHeaders]).setFontWeight('bold');
+  agg.setFrozenRows(1);
+
+  const out = names.map(function(name) {
+    const c = byCustomer[name];
+    return [name, c.orders, c.revenue, c.profit, c.first, c.last, JSON.stringify(c.daily)];
+  });
+
+  const AGG_WRITE_BATCH_SIZE = 1000;
+  for (let writeStart = 0; writeStart < out.length; writeStart += AGG_WRITE_BATCH_SIZE) {
+    const chunk = out.slice(writeStart, writeStart + AGG_WRITE_BATCH_SIZE);
+    agg.getRange(2 + writeStart, 1, chunk.length, outHeaders.length).setValues(chunk);
+  }
+  agg.getRange(2, 2, out.length, 2).setNumberFormat('#,##0');
+
+  const totalRevenue = names.reduce(function(s, n) { return s + byCustomer[n].revenue; }, 0);
+  const totalOrders = names.reduce(function(s, n) { return s + byCustomer[n].orders; }, 0);
+  const maxDailyLen = out.reduce(function(m, r) { return Math.max(m, String(r[6]).length); }, 0);
+  Logger.log('ГОТОВО. Агрегат: ' + out.length + ' клиентов | ' + totalOrders + ' заказов | выручка ' + Math.round(totalRevenue));
+  Logger.log('Самая большая JSON-ячейка "ПоДням": ' + maxDailyLen + ' символов (лимит ячейки Google Sheets - 50 000)');
+  Logger.log('Время выполнения: ' + Math.round((Date.now() - startTime) / 1000) + ' сек');
+}

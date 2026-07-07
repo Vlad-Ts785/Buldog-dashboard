@@ -1284,10 +1284,9 @@ function doGet(e) {
       var caTo   = /^\d{4}-\d{2}-\d{2}$/.test(e.parameter.to || '')   ? e.parameter.to   : '';
       var caSegment = e.parameter.segment || '';
       var caCache = CacheService.getScriptCache();
-      // v5 - реальный источник битых дат найден и исправлен в client_history_normalize.js
-      // (formatDate_ instanceof Date), агрегат перестроен - смена версии сбрасывает
-      // всё ещё закэшированный битый ответ v4.
-      var caCacheKey = 'client_analytics_v5_' + (caFrom || 'all') + '_' + (caTo || 'all') + '_' + (caSegment || 'all');
+      // v6 - добавлено поле "Менеджер" (ответственный) в top_clients - старый кэш v5 не
+      // содержит эту колонку, сбрасываем.
+      var caCacheKey = 'client_analytics_v6_' + (caFrom || 'all') + '_' + (caTo || 'all') + '_' + (caSegment || 'all');
       var caCached = caCache.get(caCacheKey);
       if (caCached) {
         return ContentService.createTextOutput(caCached).setMimeType(ContentService.MimeType.JSON);
@@ -1324,7 +1323,7 @@ function doGet(e) {
         return ContentService.createTextOutput(JSON.stringify({ error: 'Не указан менеджер' })).setMimeType(ContentService.MimeType.JSON);
       }
       var mpCache = CacheService.getScriptCache();
-      var mpCacheKey = 'manager_profile_v2_' + mpName;
+      var mpCacheKey = 'manager_profile_v3_' + mpName; // v3 - добавлено поле "Менеджер" в top_clients
       var mpCached = mpCache.get(mpCacheKey);
       if (mpCached) {
         return ContentService.createTextOutput(mpCached).setMimeType(ContentService.MimeType.JSON);
@@ -3267,13 +3266,14 @@ function getClientHistoryAggregate_() {
     const histSS = SpreadsheetApp.openById(CLIENT_HISTORY_SHEET_ID);
     const sheet = histSS.getSheetByName(CLIENT_HISTORY_AGGREGATE_SHEET_NAME);
     if (!sheet || sheet.getLastRow() < 2) return null;
-    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 7).getValues();
+    // 8 колонок: Заказчик|Заказов|Выручка|Прибыль|Первый_заказ|Последний_заказ|Менеджер|ПоДням
+    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 8).getValues();
     const agg = {};
     data.forEach(function(r) {
       const name = String(r[0] || '').trim();
       if (!name) return;
       let daily = {};
-      try { daily = JSON.parse(r[6] || '{}'); } catch (parseErr) { daily = {}; }
+      try { daily = JSON.parse(r[7] || '{}'); } catch (parseErr) { daily = {}; }
       agg[name] = {
         name: name,
         orders: ordParseNum(r[1]),
@@ -3281,6 +3281,7 @@ function getClientHistoryAggregate_() {
         profit: ordParseNum(r[3]),
         first_order: ordFormatDate(r[4]),
         last_order: ordFormatDate(r[5]),
+        manager: String(r[6] || '').trim(),
         daily: daily,
       };
     });
@@ -3331,7 +3332,13 @@ function computeClientAnalyticsFromAggregate_(historyAgg, liveRows, opts) {
       if (to && date > to) return;
       const d = h.daily[date];
       if (!byCustomer[name]) {
-        byCustomer[name] = { name: name, orders: 0, revenue: 0, profit: 0, first_order: date, last_order: date };
+        // Менеджер - Влад, 2026-07-07: "после колонки клиент нужен ответственный менеджер".
+        // История хранит только ОДНОГО менеджера на клиента (привязан к его самому позднему
+        // историческому заказу, см. buildClientHistoryAggregate) - не по дням, поэтому при
+        // фильтре по периоду это может показать менеджера чуть неточно (не обязательно того,
+        // кто вёл именно последний заказ ВНУТРИ выбранного периода) - приемлемый компромисс,
+        // живые строки ниже почти всегда переопределяют на более свежего менеджера.
+        byCustomer[name] = { name: name, orders: 0, revenue: 0, profit: 0, first_order: date, last_order: date, manager: h.manager || '' };
       }
       const c = byCustomer[name];
       c.orders += d.o; c.revenue += d.r; c.profit += (d.p || 0);
@@ -3351,12 +3358,12 @@ function computeClientAnalyticsFromAggregate_(historyAgg, liveRows, opts) {
     if (from && r.date < from) return;
     if (to && r.date > to) return;
     if (!byCustomer[r.customer]) {
-      byCustomer[r.customer] = { name: r.customer, orders: 0, revenue: 0, profit: 0, first_order: r.date, last_order: r.date };
+      byCustomer[r.customer] = { name: r.customer, orders: 0, revenue: 0, profit: 0, first_order: r.date, last_order: r.date, manager: r.mgrSales };
     }
     const c = byCustomer[r.customer];
     c.orders++; c.revenue += r.amount; c.profit += r.profit;
     if (r.date < c.first_order) c.first_order = r.date;
-    if (r.date > c.last_order)  c.last_order  = r.date;
+    if (r.date >= c.last_order) { c.last_order = r.date; c.manager = r.mgrSales; }
     totalOrders++;
     pseudoRows.push({ customer: r.customer, date: r.date, amount: r.amount });
   });
@@ -3514,7 +3521,7 @@ function computeClientAnalytics_(rows, opts) {
     if (!byCustomer[r.customer]) {
       byCustomer[r.customer] = {
         name: r.customer, orders: 0, revenue: 0, profit: 0,
-        first_order: r.date, last_order: r.date,
+        first_order: r.date, last_order: r.date, manager: r.mgrSales,
       };
     }
     var c = byCustomer[r.customer];
@@ -3522,7 +3529,7 @@ function computeClientAnalytics_(rows, opts) {
     c.revenue += r.amount;
     c.profit  += r.profit;
     if (r.date < c.first_order) c.first_order = r.date;
-    if (r.date > c.last_order)  c.last_order  = r.date;
+    if (r.date >= c.last_order) { c.last_order = r.date; c.manager = r.mgrSales; }
   });
 
   return finishClientAnalytics_(byCustomer, rows, opts, rows.length);

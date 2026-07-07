@@ -1881,9 +1881,12 @@ function getSummaryData(ss, ordersData) {
   }
 
   const byManager = (ordersData && ordersData.by_manager) || [];
-  let totalPlan=0, totalFakt=0, totalPayment=0, totalPayNal=0;
+  let totalPlan=0, totalFakt=0, totalFaktThruYesterday=0, totalPayment=0, totalPayNal=0;
   byManager.forEach(function(m) {
     totalFakt    += m.amount || 0;
+    // Числитель прогноза - только "по вчера" (Влад, 2026-07-08), см. isThruYesterday в
+    // aggregateOrdersRows. salesFakt (живой факт) не трогаем - используется для отображения.
+    totalFaktThruYesterday += m.amount_thru_yesterday || 0;
     totalPayment += m.payment || 0;
     totalPayNal  += m.cash || 0;
   });
@@ -1904,6 +1907,7 @@ function getSummaryData(ss, ordersData) {
     lossCount, vehicleCount: data.length,
     salesPlan: totalPlan,
     salesFakt: totalFakt,
+    salesFaktThruYesterday: totalFaktThruYesterday,
     salesPayment: totalPayment,
     salesPayNal: totalPayNal,
     salesPct: totalPlan > 0 ? (totalFakt/totalPlan*100) : 0,
@@ -2779,9 +2783,21 @@ function aggregateOrdersRows(rows) {
     return String(v).trim();
   };
 
-  let totalOrders=0, totalAmount=0, totalPayment=0, totalBalance=0;
+  // "Выручка по вчера" - отдельный числитель для прогноза (Влад, 2026-07-08: "живую выручку
+  // показываем как есть, а прогноз считаем по вчерашнему дню"). Часть менеджеров вносит заказы
+  // в тот же день (не за вчера, как остальные) - их сегодняшняя (ещё неполная) выручка иначе
+  // попадает в числитель прогноза, а знаменатель (calcPaceRatio_ на фронтенде) уже считает
+  // сегодняшний день незавершённым - числитель и знаменатель расходились, прогноз завышался.
+  // "Факт" на дашборде везде остаётся живым (totalAmount/m.amount, без изменений).
+  const yesterdayStr = (function() {
+    var d = new Date();
+    d.setDate(d.getDate() - 1);
+    return Utilities.formatDate(d, 'Europe/Moscow', 'yyyy-MM-dd');
+  })();
+
+  let totalOrders=0, totalAmount=0, totalAmountThruYesterday=0, totalPayment=0, totalBalance=0;
   let totalHiredCost=0, hiredProfit=0;
-  let internalAmount=0, internalOrders=0;
+  let internalAmount=0, internalAmountThruYesterday=0, internalOrders=0;
   let tralOrders=0, tralAmount=0, longOrders=0, longAmount=0;
   let ownAmount=0, hiredAmountRev=0;
   let ownTralOrders=0, ownLongOrders=0, hiredTralOrders=0, hiredLongOrders=0;
@@ -2846,8 +2862,10 @@ function aggregateOrdersRows(rows) {
     // С июля 2026: 8%/8%/2%/2% от маржи найма платится только если маржа% по заказу >=23%
     const marginPct      = (isHired && amount > 0) ? (profit / amount) : 0;
     const marginQualifies = isHired && marginPct >= 0.23;
+    const isThruYesterday = dateStr !== '' && dateStr <= yesterdayStr;
 
     totalAmount  += amount;
+    if (isThruYesterday) totalAmountThruYesterday += amount;
     totalPayment += payment;
     totalBalance += balance;
     if (isHired) { totalHiredCost += hiredCost; hiredProfit += profit; hiredAmountRev += amount; }
@@ -2855,6 +2873,7 @@ function aggregateOrdersRows(rows) {
 
     if (isInt) {
       internalAmount += amount; internalOrders++;
+      if (isThruYesterday) internalAmountThruYesterday += amount;
       // Разбивка для вкладки "Внутренние перевозки"
       const entName = internalClientName(str(row, 'customer'));
       if (!internalMap[entName]) internalMap[entName] = { name: entName, trips: 0, amount: 0 };
@@ -2877,17 +2896,21 @@ function aggregateOrdersRows(rows) {
     // ── По менеджеру продаж ──
     if (mgrSales && ordInList(mgrSales, TRAL_MANAGERS)) {
       if (!managerMap[mgrSales]) {
-        managerMap[mgrSales] = { name: mgrSales, orders:0, amount:0, payment:0, cash:0, profit:0, hired_orders:0, hired_cost:0,
-          internal_orders:0, internal_amount:0, internal_payment:0,
+        managerMap[mgrSales] = { name: mgrSales, orders:0, amount:0, amount_thru_yesterday:0, payment:0, cash:0, profit:0, hired_orders:0, hired_cost:0,
+          internal_orders:0, internal_amount:0, internal_amount_thru_yesterday:0, internal_payment:0,
           own_amount:0, hired_margin_qualified:0, hired_margin_unqualified:0 };
       }
       const m = managerMap[mgrSales];
       m.orders++;
       m.amount  += amount;
+      if (isThruYesterday) m.amount_thru_yesterday += amount;
       m.payment += payment;
       m.cash    += num(row, 'cash');
       if (isHired) m.profit += profit;   // прибыль только по найму
-      if (isInt) { m.internal_orders++; m.internal_amount += amount; m.internal_payment += payment; }
+      if (isInt) {
+        m.internal_orders++; m.internal_amount += amount; m.internal_payment += payment;
+        if (isThruYesterday) m.internal_amount_thru_yesterday += amount;
+      }
       if (isHired) {
         m.hired_orders++; m.hired_cost += hiredCost;
         if (marginQualifies) m.hired_margin_qualified += profit;
@@ -3095,12 +3118,14 @@ function aggregateOrdersRows(rows) {
     summary: {
       total_orders:    totalOrders,
       total_amount:    totalAmount,
+      total_amount_thru_yesterday: totalAmountThruYesterday, // числитель прогноза, см. isThruYesterday выше
       total_payment:   totalPayment,
       hired_profit:    hiredProfit,    // прибыль только по найму
       total_hired_cost: totalHiredCost,
       total_balance:   totalBalance,
       internal_orders: internalOrders,
       internal_amount: internalAmount,
+      internal_amount_thru_yesterday: internalAmountThruYesterday,
       tral_orders:     tralOrders,
       tral_amount:     tralAmount,
       long_orders:     longOrders,

@@ -1200,8 +1200,13 @@ function renderMyPage() {
 
   // Прогноз к концу месяца - единая функция calcPaceRatio_() для всего дашборда (Влад,
   // 2026-07-05: менеджеры вносят заказы сегодня за вчера, темп считаем от вчера везде).
+  // Числитель прогноза - amount_thru_yesterday, а не живой факт (Влад, 2026-07-08: "живую
+  // выручку показываем как есть, а прогноз считаем по вчерашнему дню") - у части менеджеров
+  // заказы попадают в таблицу день в день, их сегодняшняя (ещё неполная) выручка иначе
+  // завышала бы прогноз при знаменателе, который уже считает сегодняшний день незавершённым.
   var paceRatio = calcPaceRatio_(D.orders.period);
-  var planForecast = fakt * paceRatio;
+  var faktForPace = mgrRow.amount_thru_yesterday != null ? mgrRow.amount_thru_yesterday : fakt;
+  var planForecast = faktForPace * paceRatio;
   var planForecastPct = plan > 0 ? planForecast/plan*100 : 0;
 
   var doc = d.doc || {};
@@ -1597,9 +1602,11 @@ function renderKPI() {
   setText('k-revenue-plan', 'План: ' + fmt(salesPlan));
   setBar('k-revenue-bar', revPct, revPct >= 80 ? 'var(--green)' : revPct >= 50 ? 'var(--amber)' : 'var(--red)');
 
-  // Прогноз по темпу - единая функция calcPaceRatio_() для всего дашборда.
+  // Прогноз по темпу - единая функция calcPaceRatio_() для всего дашборда. Числитель -
+  // salesFaktThruYesterday, не живой totalRevenue (Влад, 2026-07-08 - см. calcPaceRatio_).
   (function() {
-    var forecast = totalRevenue * calcPaceRatio_(D.orders && D.orders.period);
+    var faktForPace = s.salesFaktThruYesterday != null ? s.salesFaktThruYesterday : totalRevenue;
+    var forecast = faktForPace * calcPaceRatio_(D.orders && D.orders.period);
     var forecastPct = salesPlan > 0 ? (forecast / salesPlan * 100) : 0;
     var fCol = forecastPct >= 100 ? 'var(--green)' : forecastPct >= 70 ? 'var(--amber)' : 'var(--red)';
     setHTML('k-revenue-forecast', 'Прогноз: <b style="color:' + fCol + '">' + fmt(forecast) + '</b> (' + Math.round(forecastPct) + '%)');
@@ -1715,7 +1722,9 @@ function renderDecisions() {
 
   var fakt = s.salesFakt || 0, plan = s.salesPlan || 0;
   var planPct = plan>0 ? fakt/plan*100 : 0;
-  var forecast = fakt * calcPaceRatio_(o.period);
+  // Прогноз - числитель "по вчера" (Влад, 2026-07-08), см. calcPaceRatio_ и getSummaryData.
+  var faktForPace = s.salesFaktThruYesterday != null ? s.salesFaktThruYesterday : fakt;
+  var forecast = faktForPace * calcPaceRatio_(o.period);
   var forecastPct = plan>0 ? forecast/plan*100 : 0;
   var mgrsBehind = (D.orders.by_manager||[]).filter(function(m){ return (m.plan||0)>0 && (m.pct||0)<70; })
     .sort(function(a,b){ return (a.pct||0)-(b.pct||0); }).slice(0, 6);
@@ -2023,7 +2032,9 @@ function renderMgrList() {
   document.getElementById('mgr-list').innerHTML = mgrs.map((m, i) => {
     const pct = m.pct || 0;
     const color = pct >= 80 ? '#1D9E75' : pct >= 50 ? '#EF9F27' : '#E24B4A';
-    const forecast = (m.amount||0) * paceRatio;
+    // Числитель прогноза - amount_thru_yesterday, живой m.amount остаётся для суммы (Влад, 2026-07-08).
+    const faktForPace = m.amount_thru_yesterday != null ? m.amount_thru_yesterday : (m.amount||0);
+    const forecast = faktForPace * paceRatio;
     const forecastPct = m.plan > 0 ? (forecast / m.plan * 100) : 0;
     const fColor = forecastPct >= 100 ? '#1D9E75' : forecastPct >= 70 ? '#EF9F27' : '#E24B4A';
     const rankBadge = ranks[i] || ('<span style="color:var(--muted);font-size:11px">#' + (i+1) + '</span>');
@@ -3569,12 +3580,17 @@ function renderSalesMgr() {
   function planOf(sur) { return mplans[sur.toLowerCase()] || 0; }
 
   function calcDept(members) {
-    var s = {orders:0,amount:0,payment:0,profit:0,plan:0};
+    var s = {orders:0,amount:0,amount_thru_yesterday:0,payment:0,profit:0,plan:0};
     members.forEach(function(sur) {
       var m = get(sur);
       var ip = sur.toLowerCase() === 'прус-роскошный';
       s.orders  += m ? (m.orders||0)  - (ip?(m.internal_orders||0):0)  : 0;
       s.amount  += m ? (m.amount||0)  - (ip?(m.internal_amount||0):0)  : 0;
+      // Числитель прогноза - та же логика, что и amount, но по "amount_thru_yesterday"
+      // (Влад, 2026-07-08). Фолбэк на amount, если бэкенд ещё не передеплоен.
+      var mThru = m ? (m.amount_thru_yesterday != null ? m.amount_thru_yesterday : m.amount||0) : 0;
+      var mIntThru = ip && m ? (m.internal_amount_thru_yesterday != null ? m.internal_amount_thru_yesterday : (m.internal_amount||0)) : 0;
+      s.amount_thru_yesterday += mThru - mIntThru;
       s.payment += m ? (m.payment||0) - (ip?(m.internal_payment||0):0) : 0;
       s.profit  += m ? (m.profit||0) : 0;
       s.plan    += planOf(sur);
@@ -3588,6 +3604,7 @@ function renderSalesMgr() {
   var tsOrd = tsM ? (tsM.orders||0) : 0;
   var sum = D.orders.summary || {};
   var intAmt = sum.internal_amount || 0;
+  var intAmtThru = sum.internal_amount_thru_yesterday != null ? sum.internal_amount_thru_yesterday : intAmt;
   var intOrd = sum.internal_orders || 0;
 
   // Общий факт/план - берём из ТОГО ЖЕ ИСТОЧНИКА, что и Панель (D.summary.salesFakt/salesPlan,
@@ -3601,7 +3618,10 @@ function renderSalesMgr() {
   var totalActual = (D.summary && D.summary.salesFakt) || 0;
   var overallPct = PLAN_DIR > 0 ? Math.round(totalActual / PLAN_DIR * 100) : 0;
   var pctColor = overallPct >= 100 ? '#1D9E75' : overallPct >= 80 ? '#EF9F27' : '#E24B4A';
-  var totalForecast = totalActual * pacePaceRatio;
+  // Числитель прогноза - salesFaktThruYesterday, живой totalActual остаётся для % плана выше
+  // (Влад, 2026-07-08 - см. calcPaceRatio_).
+  var totalActualForPace = (D.summary && D.summary.salesFaktThruYesterday != null) ? D.summary.salesFaktThruYesterday : totalActual;
+  var totalForecast = totalActualForPace * pacePaceRatio;
   var forecastPct = PLAN_DIR > 0 ? Math.round(totalForecast / PLAN_DIR * 100) : 0;
   var forecastPos = Math.max(0, Math.min(forecastPct, 100));
 
@@ -3640,8 +3660,9 @@ function renderSalesMgr() {
       var bw2 = Math.min(planPct, 100);
       h += '<div style="height:4px;border-radius:2px;background:var(--border);margin:6px 0"><div style="width:'+bw2+'%;height:100%;border-radius:2px;background:'+color+'"></div></div>';
       // Прогноз к концу месяца по темпу - тот же приём, что и на общей шкале сверху
-      // (Влад, 2026-07-04: "у каждой команды должен быть этот же прогноз").
-      var cardForecast = st.amount * pacePaceRatio;
+      // (Влад, 2026-07-04: "у каждой команды должен быть этот же прогноз"). Числитель -
+      // amount_thru_yesterday (Влад, 2026-07-08), выручка в таблице выше (st.amount) - живая.
+      var cardForecast = (st.amount_thru_yesterday != null ? st.amount_thru_yesterday : st.amount) * pacePaceRatio;
       var cardForecastPct = Math.round(cardForecast / st.plan * 100);
       var fCol = cardForecastPct >= 100 ? '#1D9E75' : cardForecastPct >= 70 ? '#EF9F27' : '#E24B4A';
       h += '<div style="font-size:11px;color:var(--muted);margin-bottom:4px">Прогноз: <b style="color:'+fCol+'">'+fmtN(cardForecast)+'</b> <span style="color:'+fCol+'">('+cardForecastPct+'%)</span></div>';
@@ -3702,22 +3723,23 @@ function renderSalesMgr() {
   // Внутренние перевозки - отдельная категория, не человек, показываем всегда.
   kpiHtml += summaryCard(
     {name:'Внутренние перевозки', color:'#8B5CF6', head:null, members:[]},
-    {orders:intOrd, amount:intAmt, payment:0, profit:null, plan:PLAN_INT},
+    {orders:intOrd, amount:intAmt, amount_thru_yesterday:intAmtThru, payment:0, profit:null, plan:PLAN_INT},
     false
   );
   kpiHtml += '</div>';
   document.getElementById('sales-mgr-kpi').innerHTML = kpiHtml;
 
   // === Детальные таблицы по отделам ===
-  function planBar(amount, plan) {
+  function planBar(amount, plan, amountForPace) {
     if (!plan) return '';
     var pct = Math.round(amount / plan * 100);
     var barW = Math.min(pct, 100);
     var barC = pct >= 80 ? '#1D9E75' : pct >= 60 ? '#EF9F27' : '#E24B4A';
     var pctC = pct >= 80 ? 'color:#1D9E75' : pct >= 60 ? 'color:#EF9F27' : 'color:#E24B4A';
     // Прогноз по темпу - у каждого менеджера в таблице, не только на общей шкале/карточках
-    // отдела (Влад, 2026-07-04: "у каждого менеджера тоже должен быть прогноз").
-    var forecast = amount * pacePaceRatio;
+    // отдела (Влад, 2026-07-04: "у каждого менеджера тоже должен быть прогноз"). Числитель -
+    // amountForPace (amount_thru_yesterday), amount в таблице выше - живой (Влад, 2026-07-08).
+    var forecast = (amountForPace != null ? amountForPace : amount) * pacePaceRatio;
     var forecastPct = Math.round(forecast / plan * 100);
     var fCol = forecastPct >= 100 ? '#1D9E75' : forecastPct >= 70 ? '#EF9F27' : '#E24B4A';
     return '<div style="display:flex;align-items:center;gap:5px;margin-top:3px">' +
@@ -3741,9 +3763,14 @@ function renderSalesMgr() {
     var payment = (m.payment||0) - (isPrus?(m.internal_payment||0):0);
     var profit  = m.profit||0;
     var name    = cleanName(m.name);
+    // Числитель прогноза - amount_thru_yesterday, та же поправка на внутренние заказы Прус
+    // (Влад, 2026-07-08). Фолбэк на amount, если бэкенд ещё не передеплоен.
+    var mAmountThru = m.amount_thru_yesterday != null ? m.amount_thru_yesterday : (m.amount||0);
+    var mIntThru = isPrus ? (m.internal_amount_thru_yesterday != null ? m.internal_amount_thru_yesterday : (m.internal_amount||0)) : 0;
+    var amountForPace = mAmountThru - mIntThru;
     var hTag = isHead ? ' <span style="font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(29,158,117,.15);color:#1D9E75">рук.</span>' : '';
     return '<tr>' +
-      '<td><b>'+name+'</b>'+hTag+ planBar(amount, plan) +'</td>' +
+      '<td><b>'+name+'</b>'+hTag+ planBar(amount, plan, amountForPace) +'</td>' +
       '<td class="num">'+orders+'</td>' +
       '<td class="num">'+fmtN(amount)+'</td>' +
       '<td class="num green">'+fmtN(payment)+'</td>' +

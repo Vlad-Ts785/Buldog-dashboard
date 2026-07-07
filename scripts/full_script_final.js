@@ -1284,9 +1284,10 @@ function doGet(e) {
       var caTo   = /^\d{4}-\d{2}-\d{2}$/.test(e.parameter.to || '')   ? e.parameter.to   : '';
       var caSegment = e.parameter.segment || '';
       var caCache = CacheService.getScriptCache();
-      // v4 - смена версии ключа специально сбрасывает старый кэш (там мог быть уже
-      // закэширован "битый" ответ с невалидными датами до фикса 2026-07-07).
-      var caCacheKey = 'client_analytics_v4_' + (caFrom || 'all') + '_' + (caTo || 'all') + '_' + (caSegment || 'all');
+      // v5 - реальный источник битых дат найден и исправлен в client_history_normalize.js
+      // (formatDate_ instanceof Date), агрегат перестроен - смена версии сбрасывает
+      // всё ещё закэшированный битый ответ v4.
+      var caCacheKey = 'client_analytics_v5_' + (caFrom || 'all') + '_' + (caTo || 'all') + '_' + (caSegment || 'all');
       var caCached = caCache.get(caCacheKey);
       if (caCached) {
         return ContentService.createTextOutput(caCached).setMimeType(ContentService.MimeType.JSON);
@@ -3288,52 +3289,6 @@ function getClientHistoryAggregate_() {
     Logger.log('Не удалось прочитать агрегат истории клиентов: ' + aggErr);
     return null;
   }
-}
-
-// Временная диагностика (2026-07-07) - выяснить, почему на дашборде вместо ~4964 клиентов
-// показывает ~228: агрегат сам по себе цел (Влад проверил - 4962 строки в таблице), значит
-// проблема либо в JSON.parse "ПоДням", либо в фильтре isValidDateStr_ (см. ниже), который
-// мог начать отбрасывать МНОГО дат, а не единичные. Запускать через Apps Script (▶), смотреть
-// Журнал выполнения. Удалить после отладки.
-function debugAggregateDiag() {
-  const agg = getClientHistoryAggregate_();
-  if (!agg) { Logger.log('getClientHistoryAggregate_() вернул null - агрегат не читается вообще'); return; }
-  const names = Object.keys(agg);
-  Logger.log('Клиентов в агрегате (agg): ' + names.length);
-
-  let emptyDaily = 0, totalDailyKeys = 0, validDailyKeys = 0, invalidDailyKeys = 0;
-  const invalidSamples = [];
-  names.forEach(function(name) {
-    const daily = agg[name].daily;
-    const keys = Object.keys(daily);
-    if (keys.length === 0) { emptyDaily++; return; }
-    keys.forEach(function(k) {
-      totalDailyKeys++;
-      if (/^\d{4}-\d{2}-\d{2}$/.test(k)) {
-        validDailyKeys++;
-      } else {
-        invalidDailyKeys++;
-        if (invalidSamples.length < 5) invalidSamples.push(name + ' -> ' + JSON.stringify(k));
-      }
-    });
-  });
-  Logger.log('Клиентов с ПУСТЫМ daily (JSON.parse не удался или реально нет дней): ' + emptyDaily);
-  Logger.log('Всего ключей дат в daily по всем клиентам: ' + totalDailyKeys);
-  Logger.log('Из них валидных (YYYY-MM-DD): ' + validDailyKeys + ' | невалидных: ' + invalidDailyKeys);
-  if (invalidSamples.length) {
-    Logger.log('Примеры невалидных ключей:');
-    invalidSamples.forEach(function(s) { Logger.log('  ' + s); });
-  }
-
-  // Отдельно смотрим на пару конкретных клиентов, которых точно должно быть много (по
-  // выручке) - если их daily пустой или почти пустой, это прямое подтверждение проблемы.
-  ['ГПБ КОМПЛЕКТ (АО) (ЦВД)', 'ПРОЕКТ-ДЕВЕЛОПМЕНТ ЦВВ', 'ПИК-ИНДУСТРИЯ АО'].forEach(function(n) {
-    if (agg[n]) {
-      Logger.log('"' + n + '": daily-ключей ' + Object.keys(agg[n].daily).length + ', orders(из шапки строки)=' + agg[n].orders + ', revenue=' + agg[n].revenue);
-    } else {
-      Logger.log('"' + n + '" НЕ НАЙДЕН в agg (нет такого ключа вообще)');
-    }
-  });
 }
 
 // Дата обязана выглядеть как YYYY-MM-DD - иначе строковые сравнения (date < c.first_order

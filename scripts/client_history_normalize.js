@@ -300,9 +300,20 @@ function buildClientHistoryAggregate() {
   agg.getRange(1, 1, 1, outHeaders.length).setValues([outHeaders]).setFontWeight('bold');
   agg.setFrozenRows(1);
 
+  // Округляем суммы до целых рублей перед JSON.stringify - дробные "Сумма"/"Прибыль" в 1С
+  // (копейки, 1065+ строк с ними в реальных данных) плюс накопление через += на многих
+  // строках в день дают "грязные" хвосты вида 76000.00000000001 (обычное поведение чисел
+  // с плавающей точкой в JS) - это раздувает JSON минимум в 2-3 раза и упёрлось в лимит
+  // ячейки Google Sheets (50 000 символов) на первом же реальном прогоне 2026-07-07.
+  // Копейки в аналитике не нужны - округление не теряет ничего важного.
   const out = names.map(function(name) {
     const c = byCustomer[name];
-    return [name, c.orders, c.revenue, c.profit, c.first, c.last, JSON.stringify(c.daily)];
+    const roundedDaily = {};
+    Object.keys(c.daily).forEach(function(date) {
+      const d = c.daily[date];
+      roundedDaily[date] = { o: d.o, r: Math.round(d.r), p: Math.round(d.p) };
+    });
+    return [name, c.orders, Math.round(c.revenue), Math.round(c.profit), c.first, c.last, JSON.stringify(roundedDaily)];
   });
 
   const AGG_WRITE_BATCH_SIZE = 1000;

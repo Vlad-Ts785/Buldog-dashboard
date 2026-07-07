@@ -4627,30 +4627,42 @@ function showClientsTab(tab, btn) {
 // отток") - без фильтра бэкенд отдаёт топ-100 по выручке среди ВСЕХ клиентов (там почти
 // всегда только активные - у отточных редко высокая выручка, чтобы попасть в топ-100), с
 // фильтром - топ-300 именно внутри выбранного сегмента.
+var clientsManagerFilter = '';
+
 function renderClientsSegmentFilter_() {
-  var options = [
+  var segOptions = [
     { v: '', label: 'Все сегменты' },
     { v: 'Активный', label: 'Активный' },
     { v: 'Под риском', label: 'Под риском' },
     { v: 'Отток (до года)', label: 'Отток (до года)' },
     { v: 'Отток (давно)', label: 'Отток (давно)' },
   ];
-  var opts = options.map(function(o) {
+  var segOpts = segOptions.map(function(o) {
     var sel = o.v === clientsSegmentFilter ? ' selected' : '';
     return '<option value="' + o.v + '"' + sel + '>' + o.label + '</option>';
   }).join('');
-  return '<div style="margin-bottom:12px"><select onchange="setClientsSegmentFilter(this.value)" ' +
-    'style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 10px;font-size:13px">' +
-    opts + '</select></div>';
+
+  // Влад, 2026-07-07: "выпадающий список по менеджерам, чтобы выбрать менеджера и посмотреть
+  // только по нему" - список менеджеров переиспользован из SALES_MANAGERS (используется и в
+  // профиле менеджера), не заведён отдельно.
+  var mgrOpts = '<option value="">Все менеджеры</option>' + SALES_MANAGERS.map(function(m) {
+    var sel = m === clientsManagerFilter ? ' selected' : '';
+    return '<option value="' + m + '"' + sel + '>' + m + '</option>';
+  }).join('');
+
+  var selStyle = 'background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 10px;font-size:13px';
+  return '<div style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap">' +
+    '<select onchange="setClientsSegmentFilter(this.value)" style="' + selStyle + '">' + segOpts + '</select>' +
+    '<select onchange="setClientsManagerFilter(this.value)" style="' + selStyle + '">' + mgrOpts + '</select>' +
+    '</div>';
 }
 
-// Лёгкий запрос - обновляет только список "Топ клиенты" под текущим сегментом, не всю
-// страницу (KPI/сегменты/сезонность от сегмента не зависят, перезагружать их незачем).
-function setClientsSegmentFilter(value) {
-  clientsSegmentFilter = value;
+// Лёгкий запрос - обновляет только список "Топ клиенты" под текущими фильтрами, не всю
+// страницу (KPI/сегменты/сезонность от них не зависят, перезагружать их незачем).
+function fetchClientsTopFiltered_() {
   var el = document.getElementById('clients-tab-content');
   el.innerHTML = '<p style="color:var(--muted);padding:16px">Загрузка...</p>';
-  var params = { action: 'client_analytics', segment: clientsSegmentFilter };
+  var params = { action: 'client_analytics', segment: clientsSegmentFilter, manager: clientsManagerFilter };
   if (clientsRangeFrom) params.from = clientsRangeFrom;
   if (clientsRangeTo) params.to = clientsRangeTo;
   apiFetchJson(params)
@@ -4662,6 +4674,16 @@ function setClientsSegmentFilter(value) {
     .catch(function(e) {
       el.innerHTML = '<p style="color:var(--red);padding:16px">Ошибка: ' + e.message + '</p>';
     });
+}
+
+function setClientsSegmentFilter(value) {
+  clientsSegmentFilter = value;
+  fetchClientsTopFiltered_();
+}
+
+function setClientsManagerFilter(value) {
+  clientsManagerFilter = value;
+  fetchClientsTopFiltered_();
 }
 
 function segBadgeClass_(seg) {

@@ -1284,9 +1284,10 @@ function doGet(e) {
       var caTo   = /^\d{4}-\d{2}-\d{2}$/.test(e.parameter.to || '')   ? e.parameter.to   : '';
       var caSegment = e.parameter.segment || '';
       var caCache = CacheService.getScriptCache();
-      // v6 - добавлено поле "Менеджер" (ответственный) в top_clients - старый кэш v5 не
-      // содержит эту колонку, сбрасываем.
-      var caCacheKey = 'client_analytics_v6_' + (caFrom || 'all') + '_' + (caTo || 'all') + '_' + (caSegment || 'all');
+      var caManager = e.parameter.manager || '';
+      // v7 - фильтр по менеджеру в топ-клиентах + сброс кэша (v6 мог закэшировать сломанный
+      // ответ в окне между деплоем кода и пересборкой агрегата с колонкой "Менеджер").
+      var caCacheKey = 'client_analytics_v7_' + (caFrom || 'all') + '_' + (caTo || 'all') + '_' + (caSegment || 'all') + '_' + (caManager || 'all');
       var caCached = caCache.get(caCacheKey);
       if (caCached) {
         return ContentService.createTextOutput(caCached).setMimeType(ContentService.MimeType.JSON);
@@ -1300,12 +1301,12 @@ function doGet(e) {
       var caHistAgg = getClientHistoryAggregate_();
       if (caHistAgg) {
         var caLiveRows = getClientLiveRows_(ss);
-        caResult = computeClientAnalyticsFromAggregate_(caHistAgg, caLiveRows, { segment: caSegment, from: caFrom, to: caTo });
+        caResult = computeClientAnalyticsFromAggregate_(caHistAgg, caLiveRows, { segment: caSegment, from: caFrom, to: caTo, manager: caManager });
       } else {
         var caRows = getClientAnalyticsRows_(ss);
         if (caFrom) caRows = caRows.filter(function(r) { return r.date >= caFrom; });
         if (caTo)   caRows = caRows.filter(function(r) { return r.date <= caTo; });
-        caResult = computeClientAnalytics_(caRows, { segment: caSegment });
+        caResult = computeClientAnalytics_(caRows, { segment: caSegment, manager: caManager });
       }
       var caJson = JSON.stringify(caResult);
       try { if (caJson.length < 95000) caCache.put(caCacheKey, caJson, 1800); } catch (cacheErr) { /* кэш - не критично, отдаём результат в любом случае */ }
@@ -3494,12 +3495,18 @@ function finishClientAnalytics_(byCustomer, pseudoRows, opts, totalOrdersCount) 
     top20_pct: totalRevenue ? top20Revenue / totalRevenue * 100 : 0,
     clients_for_80pct: clientsFor80,
     // Фильтр по сегменту (?segment=Отток (давно)) - Влад, 2026-07-06: "хочу выбрать например
-    // только отток". Без фильтра - топ-100 по выручке среди всех; с фильтром - топ-300 среди
-    // клиентов именно этого сегмента (без фильтра по сегменту топ-100 почти всегда состоит из
-    // активных клиентов - у отточных просто редко бывает высокая выручка, чтобы попасть в топ).
-    top_clients: opts.segment
-      ? customers.filter(function(c) { return c.segment === opts.segment; }).slice(0, 300)
-      : customers.slice(0, 100),
+    // только отток". Фильтр по менеджеру (?manager=Цегельников) - Влад, 2026-07-07: "выпадающий
+    // список по менеджерам, чтобы выбрать менеджера и посмотреть только по нему" - сравнение
+    // подстрокой, т.к. c.manager хранит полное "ФИО +телефон", а параметр приходит фамилией.
+    // Без фильтров - топ-100 по выручке среди всех; с любым фильтром - топ-300 среди отфильтрованных
+    // (без фильтра топ-100 почти всегда - активные высокодоходные клиенты одних и тех же
+    // менеджеров, у отточных/у менеджеров с мелкими клиентами редко высокая выручка для топ-100).
+    top_clients: (function() {
+      var filtered = customers;
+      if (opts.segment) filtered = filtered.filter(function(c) { return c.segment === opts.segment; });
+      if (opts.manager) filtered = filtered.filter(function(c) { return String(c.manager || '').indexOf(opts.manager) >= 0; });
+      return (opts.segment || opts.manager) ? filtered.slice(0, 300) : filtered.slice(0, 100);
+    })(),
     segments: Object.keys(segMap).map(function(k) { return segMap[k]; }),
     winback: winback.slice(0, 200),
     growing: growing.slice(0, 100),

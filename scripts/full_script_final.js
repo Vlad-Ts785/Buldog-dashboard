@@ -794,13 +794,27 @@ function cleanManagerName_(name) {
   return String(name || '').replace(/[\d\+\-\(\)\s]{6,}/g, '').trim().split(' ').slice(0, 3).join(' ');
 }
 
+// Короткие имена юрлиц группы - для колонок в ДЗ_данные и разбивки на дашборде
+// (Влад, 2026-07-08: "разбита по нашим... контрагентам: сколько на Бульдоге, сколько на
+// Ярде"). Ключ - точное название строки юрлица в отчёте 1С.
+const DEBT_ORG_SHORT_NAMES = {
+  '01. ЯРД ИМПЕРИАЛ ООО': 'Ярд Империал',
+  '03. СТРОЙТРАНС ООО':   'Стройтранс',
+  '05. ТЕХНО ПАРК ООО':   'Техно Парк',
+  '06. МЕГАКРАН ООО':     'Мегакран',
+  '08. БУЛЬДОГ ООО':      'Бульдог',
+};
+const DEBT_ORG_KEYS = Object.keys(DEBT_ORG_SHORT_NAMES);
+
 // Разбирает сырую 2D-выгрузку отчёта "Взаиморасчёты" в плоский список по клиентам.
 // Документ-строки (Отдел+Менеджер заполнены) дают долг(G)/дату/менеджера. Контрагент-строки
 // (только колонка A) дают аванс(H)/гарантийный платёж(I)/депозит(J) - эти три колонки НЕ
 // встречаются на уровне документа, только на уровне контрагента (проверено на образце).
-// Один контрагент может повторяться под разными юрлицами - суммируем по имени (см. план).
+// Один контрагент может повторяться под разными юрлицами (165 из ~3800 в образце) -
+// суммируем по имени для общих итогов, но и сохраняем разбивку по юрлицу отдельно (см. план).
 function parseDebtRawRows_(rawData) {
   const customers = {};
+  let currentOrg = null;
   let currentContragent = null;
 
   for (let r = 9; r < rawData.length; r++) { // строка 10 в Excel (1-индекс) = индекс 9
@@ -809,7 +823,7 @@ function parseDebtRawRows_(rawData) {
     if (!a) continue;
     if (a === 'Итого') break;
 
-    if (/^\d{2}\.\s/.test(a)) { currentContragent = null; continue; } // строка юрлица
+    if (/^\d{2}\.\s/.test(a)) { currentOrg = a; currentContragent = null; continue; } // строка юрлица
 
     const dept = String(row[3] || '').trim();
     if (dept) {
@@ -825,12 +839,19 @@ function parseDebtRawRows_(rawData) {
       // строка контрагента
       currentContragent = a;
       if (!customers[a]) {
-        customers[a] = { contragent: a, debt: 0, advance: 0, guaranteePayment: 0, guaranteeDeposit: 0, docs: [] };
+        customers[a] = { contragent: a, debt: 0, advance: 0, guaranteePayment: 0, guaranteeDeposit: 0, docs: [], byOrg: {} };
       }
-      customers[a].debt             += ordParseNum(row[6]);
-      customers[a].advance          += ordParseNum(row[7]);
-      customers[a].guaranteePayment += ordParseNum(row[8]);
-      customers[a].guaranteeDeposit += ordParseNum(row[9]);
+      const c = customers[a];
+      const debt = ordParseNum(row[6]), advance = ordParseNum(row[7]);
+      c.debt             += debt;
+      c.advance          += advance;
+      c.guaranteePayment += ordParseNum(row[8]);
+      c.guaranteeDeposit += ordParseNum(row[9]);
+      if (currentOrg) {
+        if (!c.byOrg[currentOrg]) c.byOrg[currentOrg] = { debt: 0, advance: 0 };
+        c.byOrg[currentOrg].debt    += debt;
+        c.byOrg[currentOrg].advance += advance;
+      }
     }
   }
 
@@ -845,6 +866,13 @@ function parseDebtRawRows_(rawData) {
       if (x.date < oldestDate) oldestDate = x.date;
       if (x.date >= latestDate) { latestDate = x.date; latestManager = x.manager; }
     });
+    // Баланс по каждому юрлицу отдельно (долг-аванс), в фиксированном порядке DEBT_ORG_KEYS -
+    // проще писать в лист и читать обратно, чем произвольный JSON (см. план).
+    const byOrgBalance = {};
+    DEBT_ORG_KEYS.forEach(function(orgKey) {
+      const o = c.byOrg[orgKey];
+      byOrgBalance[orgKey] = o ? (o.debt - o.advance) : 0;
+    });
     result.push({
       contragent: c.contragent,
       manager: latestManager, // менеджер самого свежего документа - тот же приём, что и в client_history
@@ -857,6 +885,7 @@ function parseDebtRawRows_(rawData) {
       balance: c.debt - c.advance,
       lastDocDate: latestDate,
       oldestUnpaidDate: oldestDate,
+      byOrgBalance: byOrgBalance,
     });
   });
 
@@ -894,15 +923,21 @@ function importDebtReport() {
   if (sheet) sheet.clear();
   else sheet = ss.insertSheet(DEBT_RAW_SHEET);
 
+  // Балансы по юрлицам - фиксированные колонки в конце, по одной на каждое юрлицо группы
+  // (Влад, 2026-07-08: "разбита... сколько на Бульдоге, сколько на Ярде"). Порядок = DEBT_ORG_KEYS.
+  const orgHeaders = DEBT_ORG_KEYS.map(function(k) { return 'Баланс: ' + DEBT_ORG_SHORT_NAMES[k]; });
   const headers = ['Контрагент', 'Менеджер', 'Сумма долга', 'Сумма аванса', 'Гарантийный платёж',
-    'Гарантийный депозит', 'Баланс (долг-аванс)', 'Дата последнего документа', 'Дата старейшего неоплаченного'];
+    'Гарантийный депозит', 'Баланс (долг-аванс)', 'Дата последнего документа', 'Дата старейшего неоплаченного']
+    .concat(orgHeaders);
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
   const rows = parsed.map(function(c) {
     return [c.contragent, c.manager, c.debt, c.advance, c.guaranteePayment, c.guaranteeDeposit,
-      c.balance, c.lastDocDate, c.oldestUnpaidDate];
+      c.balance, c.lastDocDate, c.oldestUnpaidDate]
+      .concat(DEBT_ORG_KEYS.map(function(k) { return c.byOrgBalance[k]; }));
   });
   sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
   sheet.getRange(2, 3, rows.length, 5).setNumberFormat('#,##0');
+  sheet.getRange(2, 10, rows.length, DEBT_ORG_KEYS.length).setNumberFormat('#,##0');
 
   latest.markRead();
   Logger.log('✅ ДЗ импортирована: ' + parsed.length + ' клиентов');
@@ -957,14 +992,23 @@ function getDebtData(ss) {
   const sheet = ss.getSheetByName(DEBT_RAW_SHEET);
   if (!sheet || sheet.getLastRow() < 2) return null;
 
-  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 9).getValues();
+  const numCols = 9 + DEBT_ORG_KEYS.length;
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, numCols).getValues();
   const customers = data.map(function(r) {
+    // Разбивка по юрлицам - только те, где баланс не нулевой (большинство клиентов
+    // работают только через одно юрлицо, показывать пустые строки незачем).
+    const byOrg = [];
+    DEBT_ORG_KEYS.forEach(function(orgKey, i) {
+      const v = parseFloat(r[9 + i]) || 0;
+      if (v !== 0) byOrg.push({ org: DEBT_ORG_SHORT_NAMES[orgKey], balance: v });
+    });
     return {
       contragent: String(r[0] || ''), manager: String(r[1] || ''),
       debt: parseFloat(r[2]) || 0, advance: parseFloat(r[3]) || 0,
       guaranteePayment: parseFloat(r[4]) || 0, guaranteeDeposit: parseFloat(r[5]) || 0,
       balance: parseFloat(r[6]) || 0,
       lastDocDate: ordFormatDate(r[7]), oldestUnpaidDate: ordFormatDate(r[8]),
+      byOrg: byOrg,
     };
   }).filter(function(c) { return c.balance > 0; }) // только реальные должники (баланс > 0)
     .sort(function(a, b) { return b.balance - a.balance; });

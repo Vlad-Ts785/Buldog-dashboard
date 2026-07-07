@@ -866,7 +866,12 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           <div class="chart-wrap" style="height:220px"><canvas id="chart-debt-history"></canvas></div>
         </div>
         <div class="card" style="margin-bottom:16px">
-          <div class="card-title">Должники</div>
+          <div class="sec-header">
+            <div class="sec-title">Должники</div>
+            <select id="filter-debt-manager" onchange="renderDebt()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;">
+              <option value="">Все менеджеры</option>
+            </select>
+          </div>
           <div style="overflow-x:auto">
             <table class="tbl">
               <thead><tr>
@@ -4547,11 +4552,31 @@ function renderDebt() {
     });
   }
 
+  // Фильтр по менеджеру (Влад, 2026-07-08: "должен быть выпадающий список менеджеров") -
+  // тот же приём, что фильтры Тип/Статус на "Водителях"/"Технике".
+  var mgrSel = document.getElementById('filter-debt-manager');
+  if (mgrSel && mgrSel.options.length <= 1) {
+    var mgrNames = (debt.by_manager||[]).map(function(m){ return m.name; }).filter(Boolean);
+    mgrNames.forEach(function(n){ mgrSel.add(new Option(cleanName(n), n)); });
+  }
+  var mgrFilterVal = mgrSel ? mgrSel.value : '';
+  var customersFiltered = mgrFilterVal
+    ? debt.by_customer.filter(function(c){ return c.manager === mgrFilterVal; })
+    : debt.by_customer;
+
   // Возраст долга - светофор по дням с даты старейшего неоплаченного документа.
   function ageCls(days) { return days > 90 ? 'red' : days > 60 ? 'amber' : days > 30 ? 'amber' : 'green'; }
-  document.getElementById('debt-customers-body').innerHTML = debt.by_customer.map(function(c) {
+  document.getElementById('debt-customers-body').innerHTML = customersFiltered.map(function(c) {
+    // Разбивка по юрлицам группы - только если контрагент реально работает больше чем через
+    // одно юрлицо (Влад, 2026-07-08: "сколько на Бульдоге, сколько на Ярде"). У большинства
+    // клиентов только одно юрлицо - для них строка не нужна, не захламляем таблицу.
+    var byOrgLine = '';
+    if (c.byOrg && c.byOrg.length > 1) {
+      byOrgLine = '<div class="muted" style="font-size:10.5px;margin-top:2px">' +
+        c.byOrg.map(function(o){ return o.org + ': ' + fmt(o.balance); }).join(' · ') + '</div>';
+    }
     return '<tr>' +
-      '<td><b>' + c.contragent + '</b></td>' +
+      '<td><b>' + c.contragent + '</b>' + byOrgLine + '</td>' +
       '<td class="muted">' + cleanName(c.manager) + '</td>' +
       '<td class="num"><b>' + fmt(c.balance) + '</b></td>' +
       '<td class="num ' + ageCls(c.daysOverdue) + '">' + c.daysOverdue + '</td>' +

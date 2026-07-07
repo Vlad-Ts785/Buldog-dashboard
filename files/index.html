@@ -402,6 +402,9 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
     <div class="sidebar-nav-item" onclick="showPage('clients',this)" data-page="clients">
       <span class="sidebar-nav-icon">🏢</span> Клиенты
     </div>
+    <div class="sidebar-nav-item" onclick="showPage('debt',this)" data-page="debt">
+      <span class="sidebar-nav-icon">💸</span> ДЗ
+    </div>
   </nav>
 
   <div class="sidebar-bottom">
@@ -850,6 +853,42 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
       <div id="salary-content"><p style="color:var(--muted);padding:16px">Данные загружаются...</p></div>
     </div>
 
+    <!-- ═══ ДЗ (ДЕБИТОРСКАЯ ЗАДОЛЖЕННОСТЬ) ═════════════════════ -->
+    <div id="page-debt" class="page">
+      <div id="debt-empty" style="display:none;color:var(--muted);padding:16px">
+        Данные ДЗ ещё не загружены - отчёт 1С импортируется раз в день. Если это первый запуск,
+        нужно один раз вручную выполнить importDebtReport() в редакторе Apps Script.
+      </div>
+      <div id="debt-body">
+        <div class="kpi-grid" id="debt-kpi"></div>
+        <div class="card" style="margin-top:16px;margin-bottom:16px">
+          <div class="card-title">ДЗ по дням</div>
+          <div class="chart-wrap" style="height:220px"><canvas id="chart-debt-history"></canvas></div>
+        </div>
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-title">Должники</div>
+          <div style="overflow-x:auto">
+            <table class="tbl">
+              <thead><tr>
+                <th>Контрагент</th><th>Менеджер</th>
+                <th class="num">Баланс</th><th class="num">Дней просрочки</th>
+              </tr></thead>
+              <tbody id="debt-customers-body"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">По менеджерам</div>
+          <div style="overflow-x:auto">
+            <table class="tbl">
+              <thead><tr><th>Менеджер</th><th class="num">Должников</th><th class="num">Баланс</th></tr></thead>
+              <tbody id="debt-managers-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ═══ ЛИЧНАЯ СТРАНИЦА МЕНЕДЖЕРА ══════════════════════════ -->
     <div id="page-my-page" class="page">
       <div id="my-page-content"><p style="color:var(--muted);padding:16px">Данные загружаются...</p></div>
@@ -933,6 +972,7 @@ const PAGE_TITLES = {
   'sales-log': 'Логисты - найм техники',
   'sales-salary': 'Зарплата - коммерческий отдел',
   'my-page': 'Личная страница менеджера',
+  debt: 'Дебиторская задолженность',
 };
 
 let API_URL = localStorage.getItem('api_url') || API_URL_DEFAULT;
@@ -1434,6 +1474,7 @@ function render() {
   renderRepairBlock();
   renderSalesTabsForPeriod();
   renderMyPage();
+  renderDebt();
 }
 
 // Показывает/скрывает пункты сайдбара в зависимости от роли. Менеджер видит только
@@ -4459,6 +4500,73 @@ function renderSalesLog() {
   }).join('');
 }
 
+// ── ДЗ (дебиторская задолженность, plans/2026-07-08-debt-receivables-tab.md) ──
+function renderDebt() {
+  if (!D) return;
+  const debt = D.debt;
+  const emptyEl = document.getElementById('debt-empty');
+  const bodyEl = document.getElementById('debt-body');
+  if (!debt || !debt.by_customer) {
+    if (emptyEl) emptyEl.style.display = 'block';
+    if (bodyEl) bodyEl.style.display = 'none';
+    return;
+  }
+  if (emptyEl) emptyEl.style.display = 'none';
+  if (bodyEl) bodyEl.style.display = 'block';
+
+  const s = debt.summary || {};
+  document.getElementById('debt-kpi').innerHTML =
+    '<div class="kpi"><div class="kpi-label">Общая ДЗ</div><div class="kpi-value amber">' + fmt(s.total_balance||0) + '</div></div>' +
+    '<div class="kpi"><div class="kpi-label">Должников</div><div class="kpi-value">' + (s.debtor_count||0) + '</div></div>' +
+    '<div class="kpi"><div class="kpi-label">Просрочка 30-60 дн.</div><div class="kpi-value" style="color:var(--amber)">' + fmt(s.overdue_30_60||0) + '</div></div>' +
+    '<div class="kpi"><div class="kpi-label">Просрочка 60-90 дн.</div><div class="kpi-value" style="color:#EF9F27">' + fmt(s.overdue_60_90||0) + '</div></div>' +
+    '<div class="kpi"><div class="kpi-label">Просрочка &gt;90 дн.</div><div class="kpi-value red">' + fmt(s.overdue_90_plus||0) + '</div></div>';
+
+  // История - линия по дням (та же логика построения, что и "Выручка по дням" на "Обзоре")
+  const hist = debt.history || [];
+  const ctx = document.getElementById('chart-debt-history');
+  if (ctx && hist.length) {
+    if (ctx._chart) ctx._chart.destroy();
+    ctx._chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: hist.map(function(h){ return h.date.slice(8,10) + '.' + h.date.slice(5,7); }),
+        datasets: [{
+          label: 'ДЗ (баланс)', data: hist.map(function(h){ return h.balance; }),
+          borderColor: '#EF9F27', backgroundColor: 'rgba(239,159,39,0.12)', fill: true, tension: 0.25, pointRadius: 2,
+        }]
+      },
+      options: {
+        responsive:true, maintainAspectRatio:false,
+        plugins:{legend:{display:false}, tooltip:{callbacks:{label:function(c){ return ' ' + fmt(c.raw); }}}},
+        scales:{
+          x:{ticks:{color:'#888780',font:{size:11}}, grid:{display:false}},
+          y:{ticks:{color:'#888780',callback:v=>fmtK(v)}, grid:{color:'rgba(255,255,255,0.04)'}}
+        }
+      }
+    });
+  }
+
+  // Возраст долга - светофор по дням с даты старейшего неоплаченного документа.
+  function ageCls(days) { return days > 90 ? 'red' : days > 60 ? 'amber' : days > 30 ? 'amber' : 'green'; }
+  document.getElementById('debt-customers-body').innerHTML = debt.by_customer.map(function(c) {
+    return '<tr>' +
+      '<td><b>' + c.contragent + '</b></td>' +
+      '<td class="muted">' + cleanName(c.manager) + '</td>' +
+      '<td class="num"><b>' + fmt(c.balance) + '</b></td>' +
+      '<td class="num ' + ageCls(c.daysOverdue) + '">' + c.daysOverdue + '</td>' +
+    '</tr>';
+  }).join('');
+
+  document.getElementById('debt-managers-body').innerHTML = (debt.by_manager||[]).map(function(m) {
+    return '<tr>' +
+      '<td><b>' + cleanName(m.name) + '</b></td>' +
+      '<td class="num">' + m.customers + '</td>' +
+      '<td class="num">' + fmt(m.balance) + '</td>' +
+    '</tr>';
+  }).join('');
+}
+
 // ── НАВИГАЦИЯ ──────────────────────────────────────────────
 const PERIOD_PAGES = ['sales', 'sales-mgr', 'sales-log', 'sales-salary'];
 const RANGE_PAGES = ['vehicles', 'drivers'];
@@ -4766,7 +4874,7 @@ function renderClientsTable_(list, mode) {
         c.label + '<span style="font-size:10px;opacity:' + arrowOpacity + '">' + arrow + '</span></th>';
     }).join('');
     var rows = sorted.map(function(c, i) {
-      return '<tr><td>' + (i+1) + '</td><td>' + c.name + '</td><td>' + (c.manager || '—') + '</td>' +
+      return '<tr><td>' + (i+1) + '</td><td>' + c.name + '</td><td>' + (c.manager ? cleanName(c.manager) : '—') + '</td>' +
         '<td class="num">' + c.orders + '</td><td class="num">' + fmt(c.revenue) + '</td>' +
         '<td class="num">' + fmt(c.avg_order_value) + '</td><td>' + fmtDateRu(c.last_order) + '</td>' +
         '<td class="num ' + segBadgeClass_(c.segment) + '">' + c.segment + '</td></tr>';

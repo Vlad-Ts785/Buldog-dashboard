@@ -191,6 +191,15 @@ function runAll() {
   try { saveFinancialHistory();    log.push('✅ Финансовая история сохранена'); }
   catch(e) { errors.push('❌ Фин. история: ' + e.message); }
 
+  // 1С шлёт отчёт ДЗ раз в день в 15:00 (Влад, 2026-07-08) - в остальные прогоны письма
+  // просто не будет, importDebtReport() кинет ошибку "не найдено за 2 дня", которая
+  // безопасно уходит в errors и не ломает остальной пайплайн. saveDebtHistory() читает уже
+  // сохранённые данные - не зависит от того, обновились ли они в этом самом прогоне.
+  try { importDebtReport();        log.push('✅ ДЗ импортирована'); }
+  catch(e) { errors.push('❌ ДЗ (импорт): ' + e.message); }
+  try { saveDebtHistory();         log.push('✅ История ДЗ сохранена'); }
+  catch(e) { errors.push('❌ История ДЗ: ' + e.message); }
+
   // Алерты и сводка — собираем данные один раз
   let alertsText = '';
   let summaryText = '';
@@ -764,6 +773,245 @@ function saveFinancialHistory() {
   if (rows.length > 0) {
     finSheet.getRange(finSheet.getLastRow() + 1, 1, rows.length, 13).setValues(rows);
   }
+}
+
+// ============================================================
+// ДЕБИТОРСКАЯ ЗАДОЛЖЕННОСТЬ (Gmail → ДЗ_данные → История_ДЗ)
+// 1С шлёт письмо раз в день в 15:00 (Влад, 2026-07-08). Источник - 3-уровневая иерархия
+// Юрлицо -> Контрагент -> Документ (см. plans/2026-07-08-debt-receivables-tab.md для
+// полного разбора структуры и решений по фильтрации). Юрлицо НЕ фильтруем (трал-бизнес
+// размазан по всем 5 компаниям группы - тендеры/переходный период до перевода всего на
+// Бульдог), фильтруем только по менеджеру (TRAL_MANAGERS, как везде).
+// ============================================================
+const DEBT_RAW_SHEET = 'ДЗ_данные';
+const DEBT_HISTORY_SHEET = 'История_ДЗ';
+
+// Убирает телефон из имени менеджера ("Савиток Олеся Анатольевна 8-985-150-11-85" ->
+// "Савиток Олеся Анатольевна") - та же логика, что фронтендный cleanName() (files/index.html).
+// Влад, 2026-07-08: "это вообще нужно везде исключать... у менеджера есть фамилия имя
+// отчество, и всё, больше ничего не надо".
+function cleanManagerName_(name) {
+  return String(name || '').replace(/[\d\+\-\(\)\s]{6,}/g, '').trim().split(' ').slice(0, 3).join(' ');
+}
+
+// Разбирает сырую 2D-выгрузку отчёта "Взаиморасчёты" в плоский список по клиентам.
+// Документ-строки (Отдел+Менеджер заполнены) дают долг(G)/дату/менеджера. Контрагент-строки
+// (только колонка A) дают аванс(H)/гарантийный платёж(I)/депозит(J) - эти три колонки НЕ
+// встречаются на уровне документа, только на уровне контрагента (проверено на образце).
+// Один контрагент может повторяться под разными юрлицами - суммируем по имени (см. план).
+function parseDebtRawRows_(rawData) {
+  const customers = {};
+  let currentContragent = null;
+
+  for (let r = 9; r < rawData.length; r++) { // строка 10 в Excel (1-индекс) = индекс 9
+    const row = rawData[r];
+    const a = String(row[0] || '').trim();
+    if (!a) continue;
+    if (a === 'Итого') break;
+
+    if (/^\d{2}\.\s/.test(a)) { currentContragent = null; continue; } // строка юрлица
+
+    const dept = String(row[3] || '').trim();
+    if (dept) {
+      // строка документа
+      if (!currentContragent || !customers[currentContragent]) continue;
+      const manager = cleanManagerName_(row[5]);
+      if (!manager || !ordInList(manager, TRAL_MANAGERS)) continue;
+      const dateMatch = a.match(/от (\d{2})\.(\d{2})\.(\d{4})/);
+      if (!dateMatch) continue;
+      const docDate = dateMatch[3] + '-' + dateMatch[2] + '-' + dateMatch[1];
+      customers[currentContragent].docs.push({ manager: manager, date: docDate, debt: ordParseNum(row[6]) });
+    } else {
+      // строка контрагента
+      currentContragent = a;
+      if (!customers[a]) {
+        customers[a] = { contragent: a, debt: 0, advance: 0, guaranteePayment: 0, guaranteeDeposit: 0, docs: [] };
+      }
+      customers[a].debt             += ordParseNum(row[6]);
+      customers[a].advance          += ordParseNum(row[7]);
+      customers[a].guaranteePayment += ordParseNum(row[8]);
+      customers[a].guaranteeDeposit += ordParseNum(row[9]);
+    }
+  }
+
+  const result = [];
+  Object.keys(customers).forEach(function(name) {
+    const c = customers[name];
+    if (!c.docs.length) return; // ни одного документа от трал-менеджера - не наш клиент
+    const unpaidDocs = c.docs.filter(function(x) { return x.debt > 0; });
+    const datedDocs = unpaidDocs.length ? unpaidDocs : c.docs;
+    let oldestDate = datedDocs[0].date, latestDate = datedDocs[0].date, latestManager = datedDocs[0].manager;
+    datedDocs.forEach(function(x) {
+      if (x.date < oldestDate) oldestDate = x.date;
+      if (x.date >= latestDate) { latestDate = x.date; latestManager = x.manager; }
+    });
+    result.push({
+      contragent: c.contragent,
+      manager: latestManager, // менеджер самого свежего документа - тот же приём, что и в client_history
+      debt: c.debt,
+      advance: c.advance,
+      guaranteePayment: c.guaranteePayment,
+      guaranteeDeposit: c.guaranteeDeposit,
+      // Чистый баланс = долг минус аванс (Влад, 2026-07-08: "гарантийные" колонки - это
+      // зарплатный механизм, не часть клиентского долга - в баланс их не включаем).
+      balance: c.debt - c.advance,
+      lastDocDate: latestDate,
+      oldestUnpaidDate: oldestDate,
+    });
+  });
+
+  return result.sort(function(a, b) { return b.balance - a.balance; });
+}
+
+function importDebtReport() {
+  const query = 'subject:"Отчет по дебиторской задолженности" has:attachment newer_than:2d';
+  const threads = GmailApp.search(query);
+  if (!threads.length) throw new Error('Письмо ДЗ не найдено за 2 дня');
+
+  const msgs = [];
+  for (const t of threads) for (const m of t.getMessages()) msgs.push(m);
+  msgs.sort(function(a, b) { return b.getDate() - a.getDate(); });
+  const latest = msgs[0];
+
+  let att = null;
+  for (const a of latest.getAttachments()) {
+    if (a.getName().endsWith('.xlsx') || a.getName().endsWith('.xls')) { att = a; break; }
+  }
+  if (!att) throw new Error('Excel-вложение ДЗ не найдено');
+
+  const tmp = Drive.Files.insert(
+    { title: 'tmp_debt_' + Date.now(), mimeType: MimeType.GOOGLE_SHEETS },
+    att.copyBlob()
+  );
+  const data = SpreadsheetApp.openById(tmp.id).getSheets()[0].getDataRange().getValues();
+  Drive.Files.remove(tmp.id);
+
+  const parsed = parseDebtRawRows_(data);
+  if (!parsed.length) throw new Error('ДЗ: после разбора и фильтрации не осталось ни одного клиента - проверь формат файла');
+
+  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  let sheet = ss.getSheetByName(DEBT_RAW_SHEET);
+  if (sheet) sheet.clear();
+  else sheet = ss.insertSheet(DEBT_RAW_SHEET);
+
+  const headers = ['Контрагент', 'Менеджер', 'Сумма долга', 'Сумма аванса', 'Гарантийный платёж',
+    'Гарантийный депозит', 'Баланс (долг-аванс)', 'Дата последнего документа', 'Дата старейшего неоплаченного'];
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
+  const rows = parsed.map(function(c) {
+    return [c.contragent, c.manager, c.debt, c.advance, c.guaranteePayment, c.guaranteeDeposit,
+      c.balance, c.lastDocDate, c.oldestUnpaidDate];
+  });
+  sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
+  sheet.getRange(2, 3, rows.length, 5).setNumberFormat('#,##0');
+
+  latest.markRead();
+  Logger.log('✅ ДЗ импортирована: ' + parsed.length + ' клиентов');
+}
+
+// Дневной снимок общей ДЗ - идемпотентно (перезаписывает сегодняшнюю строку), т.к. runAll()
+// гоняется несколько раз в день, а отчёт от 1С обновляется только раз в день в 15:00 - без
+// идемпотентности накопились бы дубли за каждый прогон, как уже было с Данные_1С_история
+// (см. writeParkHistoryForMonth_, тот же урок).
+function saveDebtHistory() {
+  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  const debtSheet = ss.getSheetByName(DEBT_RAW_SHEET);
+  if (!debtSheet || debtSheet.getLastRow() < 2) return;
+
+  const data = debtSheet.getRange(2, 1, debtSheet.getLastRow() - 1, 9).getValues();
+  let totalBalance = 0, totalDebt = 0, debtorCount = 0;
+  data.forEach(function(r) {
+    const balance = parseFloat(r[6]) || 0;
+    if (balance > 0) debtorCount++;
+    totalBalance += balance;
+    totalDebt += parseFloat(r[2]) || 0;
+  });
+
+  let histSheet = ss.getSheetByName(DEBT_HISTORY_SHEET);
+  if (!histSheet) {
+    histSheet = ss.insertSheet(DEBT_HISTORY_SHEET);
+    histSheet.getRange(1, 1, 1, 4).setValues([['Дата', 'Баланс (долг-аванс)', 'Сумма долга', 'Кол-во должников']]).setFontWeight('bold');
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const lastRow = histSheet.getLastRow();
+  let todayRowIndex = -1;
+  if (lastRow > 1) {
+    const dates = histSheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    for (let i = 0; i < dates.length; i++) {
+      if (dates[i][0] instanceof Date) {
+        const d = new Date(dates[i][0]);
+        d.setHours(0, 0, 0, 0);
+        if (d.getTime() === today.getTime()) { todayRowIndex = i + 2; break; }
+      }
+    }
+  }
+
+  const newRow = [new Date(), totalBalance, totalDebt, debtorCount];
+  if (todayRowIndex > 0) histSheet.getRange(todayRowIndex, 1, 1, 4).setValues([newRow]);
+  else histSheet.appendRow(newRow);
+}
+
+// Агрегация ДЗ для дашборда - читает уже посчитанный ДЗ_данные (см. importDebtReport).
+function getDebtData(ss) {
+  const sheet = ss.getSheetByName(DEBT_RAW_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) return null;
+
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 9).getValues();
+  const customers = data.map(function(r) {
+    return {
+      contragent: String(r[0] || ''), manager: String(r[1] || ''),
+      debt: parseFloat(r[2]) || 0, advance: parseFloat(r[3]) || 0,
+      guaranteePayment: parseFloat(r[4]) || 0, guaranteeDeposit: parseFloat(r[5]) || 0,
+      balance: parseFloat(r[6]) || 0,
+      lastDocDate: ordFormatDate(r[7]), oldestUnpaidDate: ordFormatDate(r[8]),
+    };
+  }).filter(function(c) { return c.balance > 0; }) // только реальные должники (баланс > 0)
+    .sort(function(a, b) { return b.balance - a.balance; });
+
+  const todayStr = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM-dd');
+  function daysSince(dateStr) {
+    if (!dateStr) return 0;
+    const d1 = new Date(dateStr + 'T00:00:00'), d2 = new Date(todayStr + 'T00:00:00');
+    return Math.round((d2 - d1) / 86400000);
+  }
+  customers.forEach(function(c) { c.daysOverdue = daysSince(c.oldestUnpaidDate); });
+
+  const byManagerMap = {};
+  customers.forEach(function(c) {
+    if (!byManagerMap[c.manager]) byManagerMap[c.manager] = { name: c.manager, balance: 0, customers: 0 };
+    byManagerMap[c.manager].balance += c.balance;
+    byManagerMap[c.manager].customers++;
+  });
+
+  const totalBalance = customers.reduce(function(s, c) { return s + c.balance; }, 0);
+  const overdue30 = customers.filter(function(c) { return c.daysOverdue > 30 && c.daysOverdue <= 60; }).reduce(function(s,c){return s+c.balance;}, 0);
+  const overdue60 = customers.filter(function(c) { return c.daysOverdue > 60 && c.daysOverdue <= 90; }).reduce(function(s,c){return s+c.balance;}, 0);
+  const overdue90 = customers.filter(function(c) { return c.daysOverdue > 90; }).reduce(function(s,c){return s+c.balance;}, 0);
+
+  const histSheet = ss.getSheetByName(DEBT_HISTORY_SHEET);
+  let history = [];
+  if (histSheet && histSheet.getLastRow() > 1) {
+    history = histSheet.getRange(2, 1, histSheet.getLastRow() - 1, 4).getValues()
+      .filter(function(r) { return r[0] instanceof Date; })
+      .map(function(r) {
+        return { date: Utilities.formatDate(r[0], 'Europe/Moscow', 'yyyy-MM-dd'), balance: r[1] || 0, debt: r[2] || 0, debtors: r[3] || 0 };
+      })
+      .sort(function(a, b) { return a.date.localeCompare(b.date); });
+  }
+
+  return {
+    summary: {
+      total_balance: totalBalance,
+      debtor_count: customers.length,
+      overdue_30_60: overdue30,
+      overdue_60_90: overdue60,
+      overdue_90_plus: overdue90,
+    },
+    by_customer: customers,
+    by_manager: Object.values(byManagerMap).sort(function(a, b) { return b.balance - a.balance; }),
+    history: history,
+  };
 }
 
 // ============================================================
@@ -1365,6 +1613,7 @@ function doGet(e) {
       repairs:    getRepairsData(staffData),
       staffMarkas: staffMarkas,
       orders:     ordersData,
+      debt:       getDebtData(ss),
     };
     return ContentService
       .createTextOutput(JSON.stringify(data))

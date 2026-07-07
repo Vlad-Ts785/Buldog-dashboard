@@ -1196,15 +1196,9 @@ function renderMyPage() {
   var mgrRow = (D.orders.by_manager||[]).filter(function(m){ return m.name && m.name.indexOf(current) >= 0; })[0] || {};
   var plan = mgrRow.plan||0, fakt = mgrRow.amount||0, planPct = mgrRow.pct||0;
 
-  // Прогноз к концу месяца - тот же темп, что в "Системе решений": факт/день_месяца*дней_в_месяце
-  var dataDate = D.updated ? new Date(D.updated) : new Date();
-  var dayOfMonth = dataDate.getDate();
-  var dim = 30;
-  if (D.orders.period) {
-    var py = +D.orders.period.slice(0,4), pm = +D.orders.period.slice(5,7);
-    if (py && pm) dim = new Date(py, pm, 0).getDate();
-  }
-  var paceRatio = dayOfMonth > 0 ? (dim / dayOfMonth) : 1;
+  // Прогноз к концу месяца - единая функция calcPaceRatio_() для всего дашборда (Влад,
+  // 2026-07-05: менеджеры вносят заказы сегодня за вчера, темп считаем от вчера везде).
+  var paceRatio = calcPaceRatio_(D.orders.period);
   var planForecast = fakt * paceRatio;
   var planForecastPct = plan > 0 ? planForecast/plan*100 : 0;
 
@@ -1601,18 +1595,9 @@ function renderKPI() {
   setText('k-revenue-plan', 'План: ' + fmt(salesPlan));
   setBar('k-revenue-bar', revPct, revPct >= 80 ? 'var(--green)' : revPct >= 50 ? 'var(--amber)' : 'var(--red)');
 
-  // Прогноз по темпу - тот же расчёт, что на "По менеджерам"/"Личной странице":
-  // факт/день_месяца*дней_в_месяце. Влад, 2026-07-04: "добавь прогноз выполнения плана".
+  // Прогноз по темпу - единая функция calcPaceRatio_() для всего дашборда.
   (function() {
-    var dataDate = D.updated ? new Date(D.updated) : new Date();
-    var dayOfMonth = dataDate.getDate();
-    var dim = 30;
-    if (D.orders && D.orders.period) {
-      var py = +D.orders.period.slice(0,4), pm = +D.orders.period.slice(5,7);
-      if (py && pm) dim = new Date(py, pm, 0).getDate();
-    }
-    var paceRatio = dayOfMonth > 0 ? (dim / dayOfMonth) : 1;
-    var forecast = totalRevenue * paceRatio;
+    var forecast = totalRevenue * calcPaceRatio_(D.orders && D.orders.period);
     var forecastPct = salesPlan > 0 ? (forecast / salesPlan * 100) : 0;
     var fCol = forecastPct >= 100 ? 'var(--green)' : forecastPct >= 70 ? 'var(--amber)' : 'var(--red)';
     setHTML('k-revenue-forecast', 'Прогноз: <b style="color:' + fCol + '">' + fmt(forecast) + '</b> (' + Math.round(forecastPct) + '%)');
@@ -1628,18 +1613,9 @@ function renderKPI() {
   setText('k-profit-plan', 'План: ' + fmt(PROFIT_PLAN));
   setBar('k-profit-bar', profPct, profit >= 0 ? 'var(--green)' : 'var(--red)');
 
-  // Прогноз ВП по темпу - тот же принцип, что и везде (см. "Прогноз ВП" в Нормализованные_
-  // данные, страница "Водители"): наша ВП идёт из Нормализованные_данные (парк-отчёт 1С),
-  // который обычно отстаёт на день - темп считаем от вчера, а не от сегодня, иначе прогноз
-  // занижается. Влад, 2026-07-04: "сделай прогнозы по той методике, которую мы обычно
-  // применяем".
+  // Прогноз ВП по темпу - та же единая calcPaceRatio_().
   (function() {
-    var paceDate = new Date();
-    paceDate.setDate(paceDate.getDate() - 1);
-    var dayOfMonth = paceDate.getDate();
-    var dim = new Date(paceDate.getFullYear(), paceDate.getMonth() + 1, 0).getDate();
-    var paceRatio = dayOfMonth > 0 ? (dim / dayOfMonth) : 1;
-    var profitForecast = profit * paceRatio;
+    var profitForecast = profit * calcPaceRatio_(D.orders && D.orders.period);
     var profitForecastPct = PROFIT_PLAN > 0 ? (profitForecast / PROFIT_PLAN * 100) : 0;
     var fCol = profitForecastPct >= 100 ? 'var(--green)' : profitForecastPct >= 70 ? 'var(--amber)' : 'var(--red)';
     setHTML('k-profit-forecast', 'Прогноз: <b style="color:' + fCol + '">' + fmt(profitForecast) + '</b> (' + Math.round(profitForecastPct) + '%)');
@@ -1737,11 +1713,7 @@ function renderDecisions() {
 
   var fakt = s.salesFakt || 0, plan = s.salesPlan || 0;
   var planPct = plan>0 ? fakt/plan*100 : 0;
-  var dataDate = D.updated ? new Date(D.updated) : new Date();
-  var dayOfMonth = dataDate.getDate();
-  var dim = 30;
-  if (o.period) { var py=+o.period.slice(0,4), pm=+o.period.slice(5,7); if(py&&pm) dim = new Date(py, pm, 0).getDate(); }
-  var forecast = dayOfMonth>0 ? fakt/dayOfMonth*dim : fakt;
+  var forecast = fakt * calcPaceRatio_(o.period);
   var forecastPct = plan>0 ? forecast/plan*100 : 0;
   var mgrsBehind = (D.orders.by_manager||[]).filter(function(m){ return (m.plan||0)>0 && (m.pct||0)<70; })
     .sort(function(a,b){ return (a.pct||0)-(b.pct||0); }).slice(0, 6);
@@ -2043,14 +2015,7 @@ function renderVehicleChart() {
 function renderMgrList() {
   const mgrs = (D.orders.by_manager||[]).filter(m => isSales(m.name)).sort((a,b) => b.amount-a.amount).slice(0, 6);
 
-  const dataDate = D.updated ? new Date(D.updated) : new Date();
-  const dayOfMonth = dataDate.getDate();
-  let dim = 30;
-  if (D.orders.period) {
-    const p = D.orders.period.split('-').map(Number);
-    if (p[0] && p[1]) dim = new Date(p[0], p[1], 0).getDate();
-  }
-  const paceRatio = dayOfMonth > 0 ? (dim / dayOfMonth) : 1;
+  const paceRatio = calcPaceRatio_(D.orders.period);
   const ranks = ['🥇','🥈','🥉'];
 
   document.getElementById('mgr-list').innerHTML = mgrs.map((m, i) => {
@@ -2550,26 +2515,14 @@ function renderDrivers() {
     drvOrderMap[key] = (drvOrderMap[key] || 0) + x.orders;
   });
 
-  // Прогноз к концу месяца - тот же темп, что у менеджеров (Личная страница/Система решений):
-  // факт/день_месяца*дней_в_месяце. Но только пока месяц ещё идёт - если выбран ЗАКРЫТЫЙ
-  // период (например прошлый месяц целиком), экстраполировать нечего - факт уже финальный,
-  // прогноз = факту (иначе получаются дикие цифры, см. находку Влада 2026-07-02).
+  // Прогноз к концу месяца - единая calcPaceRatio_(). Но только пока месяц ещё идёт - если
+  // выбран ЗАКРЫТЫЙ период (например прошлый месяц целиком), экстраполировать нечего - факт
+  // уже финальный, прогноз = факту (иначе получаются дикие цифры, см. находку Влада 2026-07-02).
   const today = new Date();
   const periodEnd = vehiclesRangeTo || today; // null (текущий месяц по умолчанию) -> сегодня
   const isOngoing = periodEnd.getFullYear() === today.getFullYear() &&
     periodEnd.getMonth() === today.getMonth() && periodEnd.getDate() === today.getDate();
-  let paceRatio = 1;
-  if (isOngoing) {
-    // d.fakt тут - валовая прибыль из Нормализованные_данные/История_финансов (парк-отчёт 1С),
-    // а он обычно отстаёт на день (см. "Прогноз ВП", Влад 2026-07-04) - фактически это данные
-    // за вчера, не за сегодня. Темп считаем от вчера, иначе прогноз занижается. В отличие от
-    // "По менеджерам"/Панели - там факт из таблицы заказов, она свежая, там "сегодня" верно.
-    const paceDate = new Date(today);
-    paceDate.setDate(paceDate.getDate() - 1);
-    const dayOfMonth = paceDate.getDate();
-    const dim = new Date(paceDate.getFullYear(), paceDate.getMonth() + 1, 0).getDate();
-    paceRatio = dayOfMonth > 0 ? (dim / dayOfMonth) : 1;
-  }
+  let paceRatio = isOngoing ? calcPaceRatio_() : 1;
 
   document.getElementById('drivers-body').innerHTML = drivers.map(d => {
     const pv = d.pct * 100;
@@ -3583,16 +3536,9 @@ function renderSalesMgr() {
   // "Внутренние перевозки" - та же строка листа (ключ "Внутренние"), см. summary.internal_plan.
   var PLAN_INT = (D.orders.summary && D.orders.summary.internal_plan) || 0;
 
-  // Прогноз к концу месяца - тот же темп, что у водителей/менеджеров (Личная страница):
-  // факт/день_месяца*дней_в_месяце.
-  var paceDataDate = D.updated ? new Date(D.updated) : new Date();
-  var pcDayOfMonth = paceDataDate.getDate();
-  var pcDim = 30;
-  if (D.orders.period) {
-    var pcP = D.orders.period.split('-').map(Number);
-    if (pcP[0] && pcP[1]) pcDim = new Date(pcP[0], pcP[1], 0).getDate();
-  }
-  var pacePaceRatio = pcDayOfMonth > 0 ? (pcDim / pcDayOfMonth) : 1;
+  // Прогноз к концу месяца - единая функция calcPaceRatio_() для всего дашборда. Используется
+  // на всех трёх уровнях этой страницы: общая шкала сверху, карточки отделов, строки менеджеров.
+  var pacePaceRatio = calcPaceRatio_(D.orders.period);
 
   // Конфиг отделов (для карточек и таблиц)
   var DEPT_CFG = [
@@ -4794,6 +4740,29 @@ function renderManagerProfileBody_(name) {
 }
 
 // ── УТИЛИТЫ ────────────────────────────────────────────────
+
+// Единый расчёт темпа выполнения плана для ВСЕХ прогнозов на дашборде (Влад, 2026-07-05).
+// Раньше "вчера" (минус день) применяли только к данным из Нормализованные_данные/История_
+// финансов (парк-отчёт 1С - физически отстаёт на день). Влад уточнил: то же самое верно и
+// для таблицы заказов - менеджеры вносят заказы сегодня ЗА ВЧЕРА, не в реальном времени, то
+// есть данные "на сегодня" на самом деле отражают вчерашний день независимо от источника.
+// Поэтому теперь везде считаем темп от вчера, единой функцией, а не 5+ раз одним и тем же
+// кодом по отдельности (та же причина, по которой раньше разъехались Панель и "По менеджерам" -
+// дублирующийся расчёт легко незаметно разойтись).
+function calcPaceRatio_(period) {
+  var d = D && D.updated ? new Date(D.updated) : new Date();
+  d.setDate(d.getDate() - 1);
+  var dayOfMonth = d.getDate();
+  var dim;
+  if (period) {
+    var p = String(period).split('-').map(Number);
+    dim = (p[0] && p[1]) ? new Date(p[0], p[1], 0).getDate() : new Date(d.getFullYear(), d.getMonth()+1, 0).getDate();
+  } else {
+    dim = new Date(d.getFullYear(), d.getMonth()+1, 0).getDate();
+  }
+  return dayOfMonth > 0 ? (dim / dayOfMonth) : 1;
+}
+
 function fmt(n) { return Math.round(n||0).toLocaleString('ru') + ' ₽'; }
 function fmtM(n) { const v=Math.abs(n||0);const s=(n||0)<0?'-':'';return v>=1000000?s+(v/1000000).toFixed(2)+' млн ₽':s+Math.round(v).toLocaleString('ru')+' ₽'; }
 function fmtK(n) { if(Math.abs(n)>=1000000)return(n/1000000).toFixed(1)+'M';if(Math.abs(n)>=1000)return(n/1000).toFixed(0)+'K';return Math.round(n); }

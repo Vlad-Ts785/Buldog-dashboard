@@ -4566,7 +4566,7 @@ function renderDebt() {
 
   // Возраст долга - светофор по дням с даты старейшего неоплаченного документа.
   function ageCls(days) { return days > 90 ? 'red' : days > 60 ? 'amber' : days > 30 ? 'amber' : 'green'; }
-  document.getElementById('debt-customers-body').innerHTML = customersFiltered.map(function(c) {
+  document.getElementById('debt-customers-body').innerHTML = customersFiltered.map(function(c, i) {
     // Разбивка по юрлицам группы - только если контрагент реально работает больше чем через
     // одно юрлицо (Влад, 2026-07-08: "сколько на Бульдоге, сколько на Ярде"). У большинства
     // клиентов только одно юрлицо - для них строка не нужна, не захламляем таблицу.
@@ -4575,12 +4575,24 @@ function renderDebt() {
       byOrgLine = '<div class="muted" style="font-size:10.5px;margin-top:2px">' +
         c.byOrg.map(function(o){ return o.org + ': ' + fmt(o.balance); }).join(' · ') + '</div>';
     }
-    return '<tr>' +
-      '<td><b>' + c.contragent + '</b>' + byOrgLine + '</td>' +
+    // Детальная структура долга по клику (Влад, 2026-07-09: "чтобы можно было задать
+    // правильные вопросы менеджеру") - список неоплаченных документов, от старых к новым.
+    var docsHtml = (c.unpaidDocs && c.unpaidDocs.length)
+      ? c.unpaidDocs.map(function(d) {
+          return '<tr><td style="padding:3px 10px 3px 0;white-space:nowrap">' + fmtDateRu(d.date) + '</td>' +
+            '<td style="padding:3px 10px 3px 0" class="muted">' + d.desc + '</td>' +
+            '<td style="padding:3px 0" class="num">' + fmt(d.debt) + '</td></tr>';
+        }).join('')
+      : '<tr><td colspan="3" class="muted" style="padding:6px 0">Нет данных по документам</td></tr>';
+    return '<tr class="debt-row-toggle" onclick="toggleDebtDetail(' + i + ')" style="cursor:pointer">' +
+      '<td><span id="debt-arrow-' + i + '" class="muted" style="display:inline-block;width:14px">▸</span><b>' + c.contragent + '</b>' + byOrgLine + '</td>' +
       '<td class="muted">' + cleanName(c.manager) + '</td>' +
       '<td class="num"><b>' + fmt(c.balance) + '</b></td>' +
       '<td class="num ' + ageCls(c.daysOverdue) + '">' + c.daysOverdue + '</td>' +
-    '</tr>';
+    '</tr>' +
+    '<tr id="debt-detail-' + i + '" style="display:none"><td colspan="4" style="padding:0 0 10px 28px">' +
+      '<table style="width:100%;font-size:11.5px;border-collapse:collapse">' + docsHtml + '</table>' +
+    '</td></tr>';
   }).join('');
 
   document.getElementById('debt-managers-body').innerHTML = (debt.by_manager||[]).map(function(m) {
@@ -4590,6 +4602,15 @@ function renderDebt() {
       '<td class="num">' + fmt(m.balance) + '</td>' +
     '</tr>';
   }).join('');
+}
+
+function toggleDebtDetail(i) {
+  var row = document.getElementById('debt-detail-' + i);
+  var arrow = document.getElementById('debt-arrow-' + i);
+  if (!row) return;
+  var show = row.style.display === 'none';
+  row.style.display = show ? 'table-row' : 'none';
+  if (arrow) arrow.textContent = show ? '▾' : '▸';
 }
 
 // ── НАВИГАЦИЯ ──────────────────────────────────────────────

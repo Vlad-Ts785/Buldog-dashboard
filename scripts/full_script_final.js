@@ -834,7 +834,10 @@ function parseDebtRawRows_(rawData) {
       const dateMatch = a.match(/от (\d{2})\.(\d{2})\.(\d{4})/);
       if (!dateMatch) continue;
       const docDate = dateMatch[3] + '-' + dateMatch[2] + '-' + dateMatch[1];
-      customers[currentContragent].docs.push({ manager: manager, date: docDate, debt: ordParseNum(row[6]) });
+      // Описание документа без "от ДД.ММ.ГГГГ ЧЧ:ММ:СС" в хвосте - дата уже отдельным полем
+      // (Влад, 2026-07-09: "видеть детальную структуру долга" по каждому контрагенту).
+      const docDesc = a.replace(/\s*от \d{2}\.\d{2}\.\d{4}.*$/, '');
+      customers[currentContragent].docs.push({ manager: manager, date: docDate, desc: docDesc, debt: ordParseNum(row[6]) });
     } else {
       // строка контрагента
       currentContragent = a;
@@ -886,6 +889,12 @@ function parseDebtRawRows_(rawData) {
       lastDocDate: latestDate,
       oldestUnpaidDate: oldestDate,
       byOrgBalance: byOrgBalance,
+      // Детальная структура долга - по каким именно документам/периодам он образовался
+      // (Влад, 2026-07-09: "чтобы можно было задать правильные вопросы менеджеру"), только
+      // ещё не закрытые (debt>0), от старых к новым.
+      unpaidDocs: unpaidDocs
+        .map(function(x) { return { date: x.date, desc: x.desc, debt: x.debt }; })
+        .sort(function(a, b) { return a.date.localeCompare(b.date); }),
     });
   });
 
@@ -926,14 +935,18 @@ function importDebtReport() {
   // Балансы по юрлицам - фиксированные колонки в конце, по одной на каждое юрлицо группы
   // (Влад, 2026-07-08: "разбита... сколько на Бульдоге, сколько на Ярде"). Порядок = DEBT_ORG_KEYS.
   const orgHeaders = DEBT_ORG_KEYS.map(function(k) { return 'Баланс: ' + DEBT_ORG_SHORT_NAMES[k]; });
+  // Последняя колонка - JSON со списком неоплаченных документов (дата/описание/сумма), для
+  // детальной структуры долга по клику на контрагента (Влад, 2026-07-09). Хранить как JSON
+  // в одной ячейке проще, чем заводить отдельный лист - список короткий (обычно до 20-30
+  // документов на клиента).
   const headers = ['Контрагент', 'Менеджер', 'Сумма долга', 'Сумма аванса', 'Гарантийный платёж',
     'Гарантийный депозит', 'Баланс (долг-аванс)', 'Дата последнего документа', 'Дата старейшего неоплаченного']
-    .concat(orgHeaders);
+    .concat(orgHeaders, ['Документы (JSON)']);
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
   const rows = parsed.map(function(c) {
     return [c.contragent, c.manager, c.debt, c.advance, c.guaranteePayment, c.guaranteeDeposit,
       c.balance, c.lastDocDate, c.oldestUnpaidDate]
-      .concat(DEBT_ORG_KEYS.map(function(k) { return c.byOrgBalance[k]; }));
+      .concat(DEBT_ORG_KEYS.map(function(k) { return c.byOrgBalance[k]; }), [JSON.stringify(c.unpaidDocs)]);
   });
   sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
   sheet.getRange(2, 3, rows.length, 5).setNumberFormat('#,##0');
@@ -992,8 +1005,9 @@ function getDebtData(ss) {
   const sheet = ss.getSheetByName(DEBT_RAW_SHEET);
   if (!sheet || sheet.getLastRow() < 2) return null;
 
-  const numCols = 9 + DEBT_ORG_KEYS.length;
+  const numCols = 9 + DEBT_ORG_KEYS.length + 1; // + колонка "Документы (JSON)"
   const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, numCols).getValues();
+  const docsColIdx = 9 + DEBT_ORG_KEYS.length;
   const customers = data.map(function(r) {
     // Разбивка по юрлицам - только те, где баланс не нулевой (большинство клиентов
     // работают только через одно юрлицо, показывать пустые строки незачем).
@@ -1002,6 +1016,10 @@ function getDebtData(ss) {
       const v = parseFloat(r[9 + i]) || 0;
       if (v !== 0) byOrg.push({ org: DEBT_ORG_SHORT_NAMES[orgKey], balance: v });
     });
+    // Детальная структура долга по документам - клик по контрагенту на дашборде
+    // (Влад, 2026-07-09). Если JSON битый/пустой - просто пустой список, не роняем весь ответ.
+    let unpaidDocs = [];
+    try { unpaidDocs = JSON.parse(r[docsColIdx] || '[]'); } catch (parseErr) { unpaidDocs = []; }
     return {
       contragent: String(r[0] || ''), manager: String(r[1] || ''),
       debt: parseFloat(r[2]) || 0, advance: parseFloat(r[3]) || 0,
@@ -1009,6 +1027,7 @@ function getDebtData(ss) {
       balance: parseFloat(r[6]) || 0,
       lastDocDate: ordFormatDate(r[7]), oldestUnpaidDate: ordFormatDate(r[8]),
       byOrg: byOrg,
+      unpaidDocs: unpaidDocs,
     };
   }).filter(function(c) { return c.balance > 0; }) // только реальные должники (баланс > 0)
     .sort(function(a, b) { return b.balance - a.balance; });

@@ -463,6 +463,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
             <div class="kpi-sub" id="k-revenue-plan" style="margin-top:4px"></div>
             <div class="kpi-sub" id="k-revenue-forecast" style="margin-top:2px"></div>
           </div>
+          <div id="k-revenue-compare" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:4px"></div>
         </div>
         <div class="kpi">
           <div class="kpi-label">Валовая прибыль</div>
@@ -1610,6 +1611,31 @@ function renderKPI() {
     var forecastPct = salesPlan > 0 ? (forecast / salesPlan * 100) : 0;
     var fCol = forecastPct >= 100 ? 'var(--green)' : forecastPct >= 70 ? 'var(--amber)' : 'var(--red)';
     setHTML('k-revenue-forecast', 'Прогноз: <b style="color:' + fCol + '">' + fmt(forecast) + '</b> (' + Math.round(forecastPct) + '%)');
+  })();
+
+  // Сравнение "на ту же дату" - прошлый месяц и тот же месяц год назад (Влад, 2026-07-08).
+  // totalRevenue уже "на сегодня" (живая), backend режет прошлые периоды по тому же числу
+  // месяца - см. getRevenueDateComparison_. Строка не показывается, если данных нет (совсем
+  // новый месяц без архива, или ещё не собран агрегат истории клиентов).
+  (function() {
+    var cmp = s.revenueComparison || {};
+    var compareEl = document.getElementById('k-revenue-compare');
+    if (!compareEl) return;
+    var lines = [];
+    function addLine(value, label) {
+      if (value == null || value <= 0) return;
+      var diffPct = Math.round((totalRevenue - value) / value * 100);
+      var up = diffPct >= 0;
+      var color = up ? 'var(--green)' : 'var(--red)';
+      var sign = up ? '+' : '';
+      lines.push('<div style="font-size:11px;color:' + color + ';display:flex;align-items:center;gap:5px">' +
+        '<span aria-hidden="true">' + (up ? '▲' : '▼') + '</span><span>' + sign + diffPct + '% к ' + label + '</span></div>');
+    }
+    var now = new Date(D.updated || Date.now());
+    addLine(cmp.prev_month, 'прошлому месяцу');
+    var lastYearDate = new Date(now.getFullYear() - 1, now.getMonth(), 1);
+    addLine(cmp.prev_year, RU_MONTHS_DATIVE[lastYearDate.getMonth()] + ' ' + lastYearDate.getFullYear());
+    compareEl.innerHTML = lines.join('');
   })();
 
   const profit = s.profit || 0;
@@ -4482,6 +4508,8 @@ var CLIENT_TOP_COLS = [
 
 // Родительный падеж - "4 июля 2026", не "2026-07-04" (Влад, 2026-07-06: формат дат неудобный).
 const RU_MONTHS_GENITIVE = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+// Дательный падеж - "к июлю 2025" (сравнение выручки на Панели, Влад, 2026-07-08).
+const RU_MONTHS_DATIVE = ['январю','февралю','марту','апрелю','маю','июню','июлю','августу','сентябрю','октябрю','ноябрю','декабрю'];
 function fmtDateRu(dateStr) {
   if (!dateStr) return '—';
   // Если формат не YYYY-MM-DD (найден баг 2026-07-07 - бэкенд иногда присылал сырой

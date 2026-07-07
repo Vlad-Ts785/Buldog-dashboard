@@ -1912,6 +1912,7 @@ function getSummaryData(ss, ordersData) {
     salesPayNal: totalPayNal,
     salesPct: totalPlan > 0 ? (totalFakt/totalPlan*100) : 0,
     profitPlan: 50400000, // план ВП из Штатки
+    revenueComparison: getRevenueDateComparison_(ss), // "на ту же дату" - прошлый месяц/год (Влад, 2026-07-08)
   };
 }
 
@@ -2246,6 +2247,81 @@ function ordMonthKey(val) {
 function ordInList(name, list) {
   const n = String(name || '');
   return list.some(function(m) { return n.indexOf(m) >= 0; });
+}
+
+// Выручка менеджеров продаж (TRAL_MANAGERS) за месяц, но только по число месяца <= maxDay -
+// для сравнения "Панели" с прошлым месяцем на ту же календарную дату (Влад, 2026-07-08).
+// rows - строки в том же формате, что принимает aggregateOrdersRows (col 2 = Начало работ,
+// col 15 = Менеджер по продажам, col 30 = Сумма) - тот же источник и методика, что и живая
+// выручка на Панели (salesFakt), чтобы сравнение было корректным.
+function sumManagerRevenueThruDay_(rows, maxDay) {
+  let total = 0;
+  rows.forEach(function(row) {
+    const mgr = String(row[15] || '').trim();
+    if (!mgr || !ordInList(mgr, TRAL_MANAGERS)) return;
+    const rawDate = row[2];
+    const dateStr = rawDate instanceof Date
+      ? Utilities.formatDate(rawDate, 'Europe/Moscow', 'yyyy-MM-dd')
+      : String(rawDate || '').trim();
+    if (!dateStr) return;
+    const day = parseInt(dateStr.split('-')[2], 10) || 0;
+    if (day < 1 || day > maxDay) return;
+    total += ordParseNum(row[30]);
+  });
+  return total;
+}
+
+// Сравнение выручки "на ту же дату" - прошлый месяц и тот же месяц год назад, оба обрезаны по
+// тому же числу месяца, что и сегодня (иначе неполный текущий месяц сравнивался бы с полным
+// прошлым - нечестно). Прошлый месяц - из своего архива заказов (тот же источник/методика,
+// что и живая выручка на Панели). Год назад - из отдельной исторической базы клиентов
+// (2020-05.2026), т.к. свой архив на дашборде ведётся только с конца июня 2026 - данных за
+// прошлый год там физически нет. Влад, 2026-07-08: "бери выручку из истории, не надо ничего
+// подписывать" - в отличие от текущей живой выручки (только TRAL_MANAGERS), историческая база
+// включает и заказы логистов - методика чуть шире, но по просьбе Влада это не помечаем в UI.
+function getRevenueDateComparison_(ss) {
+  const now = new Date();
+  const currentDay = parseInt(Utilities.formatDate(now, 'Europe/Moscow', 'd'), 10);
+  const result = { prev_month: null, prev_year: null, day: currentDay };
+
+  try {
+    const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevMonthKey = Utilities.formatDate(prevMonthDate, 'Europe/Moscow', 'yyyy-MM');
+    const archive = ss.getSheetByName(ORDERS_ARCHIVE_PFX + prevMonthKey);
+    if (archive && archive.getLastRow() >= 5) {
+      const rows = parseOrdersRawRows(archive.getDataRange().getValues()).rows;
+      result.prev_month = sumManagerRevenueThruDay_(rows, currentDay);
+    }
+  } catch (e1) { /* архива нет или не распознан - просто не показываем строку */ }
+
+  try {
+    const lastYearDate = new Date(now.getFullYear() - 1, now.getMonth(), 1);
+    const yKey = lastYearDate.getFullYear() + '-' + String(lastYearDate.getMonth() + 1).padStart(2, '0');
+    const cache = CacheService.getScriptCache();
+    const cacheKey = 'yoy_revenue_v1_' + yKey + '_' + currentDay;
+    const cached = cache.get(cacheKey);
+    if (cached !== null) {
+      result.prev_year = parseFloat(cached);
+    } else {
+      const agg = getClientHistoryAggregate_();
+      if (agg) {
+        const monthPrefix = yKey + '-';
+        let total = 0;
+        Object.keys(agg).forEach(function(name) {
+          const daily = agg[name].daily || {};
+          Object.keys(daily).forEach(function(dateStr) {
+            if (!isValidDateStr_(dateStr) || dateStr.indexOf(monthPrefix) !== 0) return;
+            const day = parseInt(dateStr.split('-')[2], 10) || 0;
+            if (day >= 1 && day <= currentDay) total += (daily[dateStr].r || 0);
+          });
+        });
+        result.prev_year = total;
+        try { cache.put(cacheKey, String(total), 21600); } catch (cacheErr) { /* кэш не критичен */ }
+      }
+    }
+  } catch (e2) { /* исторический агрегат недоступен - просто не показываем строку */ }
+
+  return result;
 }
 
 // Разбивает сырые данные отчёта на группы по месяцу (ключ - "2026-06" и т.д.),

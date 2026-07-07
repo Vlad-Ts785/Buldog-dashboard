@@ -1262,6 +1262,72 @@ function doGet(e) {
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
+    // Клиентская аналитика: топ-клиенты, win-back, растущие/снижающиеся, сезонность
+    // (только admin - см. plans/2026-07-05-client-analytics-on-dashboard.md).
+    // Кэш 30 мин (CacheService) - исторический кусок (2020-05.2026) статичен и больше не
+    // изменится, а без кэша каждое открытие вкладки заново перечитывает и парсит десятки
+    // тысяч строк - именно это делало вкладку медленной (Влад, 2026-07-06).
+    // ?from=YYYY-MM-DD&to=YYYY-MM-DD - опциональный период (Влад, 2026-07-06: "должен быть
+    // выбор периода") - фильтруем строки ДО расчёта, весь остальной код (топ-клиенты,
+    // сегменты, win-back, сезонность) естественно пересчитывается относительно этого куска,
+    // т.к. ref_date/period_start и так берутся из переданных rows, а не жёстко "сегодня".
+    // ?segment=... - фильтр топ-клиентов по сегменту (см. computeClientAnalytics_).
+    if (action === 'client_analytics') {
+      if (access.role !== 'admin') {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var caFrom = /^\d{4}-\d{2}-\d{2}$/.test(e.parameter.from || '') ? e.parameter.from : '';
+      var caTo   = /^\d{4}-\d{2}-\d{2}$/.test(e.parameter.to || '')   ? e.parameter.to   : '';
+      var caSegment = e.parameter.segment || '';
+      var caCache = CacheService.getScriptCache();
+      var caCacheKey = 'client_analytics_v3_' + (caFrom || 'all') + '_' + (caTo || 'all') + '_' + (caSegment || 'all');
+      var caCached = caCache.get(caCacheKey);
+      if (caCached) {
+        return ContentService.createTextOutput(caCached).setMimeType(ContentService.MimeType.JSON);
+      }
+      // Быстрый путь - предпосчитанный агрегат истории (см. getClientHistoryAggregate_) вместо
+      // построчного парсинга 72 тыс. строк. ОТКАТ: если агрегата ещё нет (лист не создан
+      // buildClientHistoryAggregate() в таблице "мега база") - используем старый путь как
+      // раньше, ничего не падает. Если после появления агрегата что-то пойдёт не так -
+      // откатить в 1 строку: заменить caHistAgg на null здесь же.
+      var caResult;
+      var caHistAgg = getClientHistoryAggregate_();
+      if (caHistAgg) {
+        var caLiveRows = getClientLiveRows_(ss);
+        caResult = computeClientAnalyticsFromAggregate_(caHistAgg, caLiveRows, { segment: caSegment, from: caFrom, to: caTo });
+      } else {
+        var caRows = getClientAnalyticsRows_(ss);
+        if (caFrom) caRows = caRows.filter(function(r) { return r.date >= caFrom; });
+        if (caTo)   caRows = caRows.filter(function(r) { return r.date <= caTo; });
+        caResult = computeClientAnalytics_(caRows, { segment: caSegment });
+      }
+      var caJson = JSON.stringify(caResult);
+      try { if (caJson.length < 95000) caCache.put(caCacheKey, caJson, 1800); } catch (cacheErr) { /* кэш - не критично, отдаём результат в любом случае */ }
+      return ContentService.createTextOutput(caJson).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // Личный профиль менеджера (?action=manager_profile&manager=Цегельников) - только admin,
+    // тот же кэш на 30 мин, отдельный ключ на каждого менеджера.
+    if (action === 'manager_profile') {
+      if (access.role !== 'admin') {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var mpName = e.parameter.manager || '';
+      if (!mpName) {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Не указан менеджер' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var mpCache = CacheService.getScriptCache();
+      var mpCacheKey = 'manager_profile_v2_' + mpName;
+      var mpCached = mpCache.get(mpCacheKey);
+      if (mpCached) {
+        return ContentService.createTextOutput(mpCached).setMimeType(ContentService.MimeType.JSON);
+      }
+      var mpRows = getClientAnalyticsRows_(ss);
+      var mpJson = JSON.stringify(computeManagerProfile_(mpRows, mpName));
+      try { if (mpJson.length < 95000) mpCache.put(mpCacheKey, mpJson, 1800); } catch (cacheErr) { /* кэш - не критично */ }
+      return ContentService.createTextOutput(mpJson).setMimeType(ContentService.MimeType.JSON);
+    }
+
     // Менеджер - только его собственные данные, без доступа к остальному
     if (access.role === 'manager') {
       return ContentService
@@ -2005,7 +2071,9 @@ const ORDERS_ARCHIVE_PFX  = 'Заказы_';   // + YYYY-MM, например «
 // Внутренние заказчики — выручка есть, поступлений нет; считаем отдельно
 const INTERNAL_CLIENTS = [
   'ТЕХНО ПАРК', 'ОТДЕЛ БУРОВЫХ РАБОТ', 'КРАНМАСТЕР',
-  'МЕГАКРАН', 'БАЗА ДМД', 'БУЛЬДОГ ООО', 'БАЗА'
+  'МЕГАКРАН', 'БАЗА ДМД', 'БУЛЬДОГ ООО', 'БАЗА',
+  'УМИАТ ЯРД', // Влад, 2026-07-05: тег "(НАШ)" в 1С, найдено при анализе клиентской базы
+  'ОТДЕЛ ЭКСКАВАТОРОВ ДМД', 'ОТДЕЛ КРАНОВ ДМД', 'ТД ЯРД' // Влад, 2026-07-06: старые внутренние КА, сейчас это ТЕХНО ПАРК (НАШ)
 ];
 
 // Менеджеры отдела — для фильтрации чужих строк
@@ -3015,6 +3083,434 @@ function aggregateOrdersRows(rows) {
         .sort(function(a,b){ return b.trips-a.trips; })
         .slice(0, 8),
     },
+  };
+}
+
+// ── КЛИЕНТСКАЯ АНАЛИТИКА (Фаза 2, план plans/2026-07-05-client-analytics-on-dashboard.md) ──
+// Склеивает историю (2020 - 31.05.2026, разовая выгрузка, нормализована отдельным скриптом
+// scripts/client_history_normalize.js в таблице Влада) с живыми данными самого дашборда
+// (Заказы_данные + архивы Заказы_YYYY-MM, июнь 2026+). Граница фиксированная - HISTORY_CUTOFF,
+// не "последняя дата в файле" - см. план, почему (Влад просил приоритет живых данных за июнь,
+// т.к. отчёт 1С по текущему месяцу ещё дозаписывается/корректируется).
+
+const CLIENT_HISTORY_SHEET_ID   = '1nXMXVxLiOK-7CXdSSFr7NcoCUvvyEDCjPyGhE0dv8es';
+const CLIENT_HISTORY_SHEET_NAME = 'Нормализованные_история_заказов';
+// Должно совпадать с HISTORY_CUTOFF в scripts/client_history_normalize.js - если там меняют,
+// менять и здесь, иначе либо задвоятся заказы на границе, либо появится дыра в данных.
+const CLIENT_HISTORY_CUTOFF = '2026-05-31';
+
+// Собирает единый список строк {customer, mgrSales, mgrSupply, equip, amount, profit, date}
+// из истории (чужая таблица, только <= CLIENT_HISTORY_CUTOFF) и из живых данных дашборда
+// (Заказы_данные + все архивы, только > CLIENT_HISTORY_CUTOFF - защита от задвоения, даже если
+// исторический лист вдруг снова будет содержать более поздние даты).
+// Только живая часть (Заказы_данные + архивы, > CLIENT_HISTORY_CUTOFF) - лёгкая, читает
+// только СВОЮ таблицу, без похода в чужую (историческую). Используется новым
+// (агрегатным) путём для client_analytics, где история приходит отдельно и заранее
+// посчитанной - см. getClientHistoryAggregate_/computeClientAnalyticsFromAggregate_.
+function getClientLiveRows_(ss) {
+  const rows = [];
+
+  function ingestLiveRows_(parsedRows) {
+    parsedRows.forEach(function(row) {
+      const isInternal = String(row[13] || '').trim() === 'Да';
+      if (isInternal) return;
+      const dateStr = ordFormatDate(row[2]); // 'Начало работ'
+      if (!dateStr || dateStr <= CLIENT_HISTORY_CUTOFF) return; // уже покрыто историей
+      rows.push({
+        customer: String(row[9] || '').trim(),
+        mgrSales: String(row[15] || '').trim(),
+        mgrSupply: String(row[16] || '').trim(),
+        equip: String(row[20] || '').trim(),
+        amount: ordParseNum(row[30]),
+        profit: ordParseNum(row[35]),
+        date: dateStr,
+      });
+    });
+  }
+
+  const normSheet = ss.getSheetByName(ORDERS_NORM_SHEET);
+  if (normSheet && normSheet.getLastRow() > 1) {
+    ingestLiveRows_(normSheet.getRange(2, 1, normSheet.getLastRow() - 1, 43).getValues());
+  }
+
+  getAvailablePeriods(ss).forEach(function(period) {
+    const archive = ss.getSheetByName(ORDERS_ARCHIVE_PFX + period);
+    if (!archive || archive.getLastRow() < 5) return;
+    const parsed = parseOrdersRawRows(archive.getDataRange().getValues());
+    ingestLiveRows_(parsed.rows);
+  });
+
+  return rows;
+}
+
+// Историческая часть (чужая таблица, <= CLIENT_HISTORY_CUTOFF) в виде сырых строк -
+// используется старым путём (manager_profile). Держим отдельно от getClientLiveRows_,
+// чтобы новый (агрегатный) путь мог не читать эти 72 тыс. строк вообще.
+function getClientHistoryRawRows_() {
+  const rows = [];
+  try {
+    const histSS = SpreadsheetApp.openById(CLIENT_HISTORY_SHEET_ID);
+    const histSheet = histSS.getSheetByName(CLIENT_HISTORY_SHEET_NAME);
+    if (histSheet && histSheet.getLastRow() > 1) {
+      const data = histSheet.getRange(2, 1, histSheet.getLastRow() - 1, 8).getValues();
+      data.forEach(function(r) {
+        // Номер(0), Заказчик(1), Менеджер по продажам(2), Менеджер по снабжению(3),
+        // Тип техники(4), Сумма(5), Прибыль(6), Начало(7)
+        // ordFormatDate(), не String() - Google Sheets сама конвертирует строки вида
+        // "2026-05-15" в настоящие Date-объекты при записи (setValues), если колонка не
+        // зафиксирована как текст. Наивный String(r[7]) на Date-объекте даёт мусор вида
+        // "Fri May 15 2026 00:00:00 GMT+0300..." - сравнение с CUTOFF ломается, почти все
+        // исторические строки отсеивались как "позже cutoff". Баг 2026-07-06 - именно из-за
+        // этого на дашборде оставались только живые июнь/июль, вся история 2020-2026 терялась.
+        const dateStr = ordFormatDate(r[7]);
+        if (!dateStr || dateStr > CLIENT_HISTORY_CUTOFF) return;
+        rows.push({
+          customer: String(r[1] || '').trim(),
+          mgrSales: String(r[2] || '').trim(),
+          mgrSupply: String(r[3] || '').trim(),
+          equip: String(r[4] || '').trim(),
+          amount: ordParseNum(r[5]),
+          profit: ordParseNum(r[6]),
+          date: dateStr,
+        });
+      });
+    }
+  } catch (histErr) {
+    Logger.log('Не удалось прочитать историческую таблицу клиентов: ' + histErr);
+  }
+  return rows;
+}
+
+// Старый комбинированный путь (история построчно + живое) - используется manager_profile.
+// Держим НЕТРОНУТЫМ ради отката: если агрегатный путь (Фаза 4) даст сбой, client_analytics
+// можно откатить на этот же путь буквально одной строкой в doGet (см. план).
+function getClientAnalyticsRows_(ss) {
+  return getClientHistoryRawRows_().concat(getClientLiveRows_(ss));
+}
+
+const CLIENT_HISTORY_AGGREGATE_SHEET_NAME = 'История_клиентов_агрегат';
+
+// Читает предпосчитанный агрегат по клиентам (см. buildClientHistoryAggregate() в
+// scripts/client_history_normalize.js - отдельный разовый прогон в таблице "мега база",
+// не автоматический). ~5 тыс. строк вместо 72 тыс. сырых - на порядок быстрее, чем
+// getClientHistoryRawRows_(). Формат строки: Заказчик|Заказов|Выручка|Прибыль|
+// Первый_заказ|Последний_заказ|ПоДням(JSON: {"YYYY-MM-DD":{"o":N,"r":R,"p":P}}).
+// Возвращает null, если агрегата ещё нет (лист не создан) - вызывающий код должен
+// откатиться на getClientAnalyticsRows_ в этом случае, не падать.
+function getClientHistoryAggregate_() {
+  try {
+    const histSS = SpreadsheetApp.openById(CLIENT_HISTORY_SHEET_ID);
+    const sheet = histSS.getSheetByName(CLIENT_HISTORY_AGGREGATE_SHEET_NAME);
+    if (!sheet || sheet.getLastRow() < 2) return null;
+    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 7).getValues();
+    const agg = {};
+    data.forEach(function(r) {
+      const name = String(r[0] || '').trim();
+      if (!name) return;
+      let daily = {};
+      try { daily = JSON.parse(r[6] || '{}'); } catch (parseErr) { daily = {}; }
+      agg[name] = {
+        name: name,
+        orders: ordParseNum(r[1]),
+        revenue: ordParseNum(r[2]),
+        profit: ordParseNum(r[3]),
+        first_order: ordFormatDate(r[4]),
+        last_order: ordFormatDate(r[5]),
+        daily: daily,
+      };
+    });
+    return agg;
+  } catch (aggErr) {
+    Logger.log('Не удалось прочитать агрегат истории клиентов: ' + aggErr);
+    return null;
+  }
+}
+
+// Новый (быстрый) путь для client_analytics - byCustomer и pseudoRows строятся из
+// предпосчитанного агрегата (уже сгруппирован по клиенту и по дню) + живых строк, вместо
+// построчного парсинга 72 тыс. исторических строк на каждый запрос. from/to (опционально) -
+// точная фильтрация по дням, т.к. агрегат хранит дневную (не месячную) детализацию -
+// день - минимальная единица, которая нужна и растущим/снижающимся (окно 180 дней), и
+// произвольному периоду с самой страницы.
+function computeClientAnalyticsFromAggregate_(historyAgg, liveRows, opts) {
+  opts = opts || {};
+  const from = opts.from || '';
+  const to   = opts.to   || '';
+
+  const byCustomer = {};
+  const pseudoRows = [];
+  let totalOrders = 0;
+
+  Object.keys(historyAgg).forEach(function(name) {
+    const h = historyAgg[name];
+    Object.keys(h.daily).forEach(function(date) {
+      if (from && date < from) return;
+      if (to && date > to) return;
+      const d = h.daily[date];
+      if (!byCustomer[name]) {
+        byCustomer[name] = { name: name, orders: 0, revenue: 0, profit: 0, first_order: date, last_order: date };
+      }
+      const c = byCustomer[name];
+      c.orders += d.o; c.revenue += d.r; c.profit += (d.p || 0);
+      if (date < c.first_order) c.first_order = date;
+      if (date > c.last_order)  c.last_order  = date;
+      totalOrders += d.o;
+      pseudoRows.push({ customer: name, date: date, amount: d.r });
+    });
+  });
+
+  liveRows.forEach(function(r) {
+    if (from && r.date < from) return;
+    if (to && r.date > to) return;
+    if (!byCustomer[r.customer]) {
+      byCustomer[r.customer] = { name: r.customer, orders: 0, revenue: 0, profit: 0, first_order: r.date, last_order: r.date };
+    }
+    const c = byCustomer[r.customer];
+    c.orders++; c.revenue += r.amount; c.profit += r.profit;
+    if (r.date < c.first_order) c.first_order = r.date;
+    if (r.date > c.last_order)  c.last_order  = r.date;
+    totalOrders++;
+    pseudoRows.push({ customer: r.customer, date: r.date, amount: r.amount });
+  });
+
+  return finishClientAnalytics_(byCustomer, pseudoRows, opts, totalOrders);
+}
+
+function daysBetween_(dateStr, refStr) {
+  return Math.round((new Date(refStr) - new Date(dateStr)) / 86400000);
+}
+
+function addDays_(dateStr, delta) {
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() + delta);
+  return Utilities.formatDate(d, 'Europe/Moscow', 'yyyy-MM-dd');
+}
+
+function clientSegment_(days) {
+  if (days <= 30) return 'Активный';
+  if (days <= 90) return 'Под риском';
+  if (days <= 365) return 'Отток (до года)';
+  return 'Отток (давно)';
+}
+
+// Методика 1-в-1 из .business/clients/analyze_clients.py (согласована и проверена на разовом
+// анализе 2026-07-04..05) - топ-клиенты, концентрация (Парето), сегменты по давности, win-back,
+// растущие/снижающиеся, сезонность по месяцам (только полные календарные годы).
+// Общая часть расчёта - топ-клиенты/сегменты/win-back из уже собранной карты по клиенту,
+// растущие-снижающиеся/сезонность из плоского списка {customer,date,amount}. Не знает,
+// собраны ли byCustomer/pseudoRows из сырых строк или из предпосчитанного агрегата -
+// вызывается из обоих путей (computeClientAnalytics_ ниже и computeClientAnalyticsFromAggregate_,
+// см. план plans/2026-07-05-client-analytics-on-dashboard.md, раздел "Фаза 4").
+function finishClientAnalytics_(byCustomer, pseudoRows, opts, totalOrdersCount) {
+  opts = opts || {};
+  var customers = Object.keys(byCustomer).map(function(k) { return byCustomer[k]; });
+  if (!customers.length) return { error: 'Нет данных для клиентской аналитики' };
+
+  var refDate = customers.reduce(function(max, c) { return c.last_order > max ? c.last_order : max; }, '');
+  var periodStart = customers.reduce(function(min, c) { return c.first_order < min ? c.first_order : min; }, refDate);
+
+  customers.forEach(function(c) {
+    c.recency_days     = daysBetween_(c.last_order, refDate);
+    c.avg_order_value  = c.orders ? c.revenue / c.orders : 0;
+    c.segment          = clientSegment_(c.recency_days);
+  });
+  customers.sort(function(a, b) { return b.revenue - a.revenue; });
+
+  var totalRevenue = customers.reduce(function(s, c) { return s + c.revenue; }, 0);
+  var top10Revenue = customers.slice(0, 10).reduce(function(s, c) { return s + c.revenue; }, 0);
+  var top20Count   = Math.ceil(customers.length * 0.2);
+  var top20Revenue = customers.slice(0, top20Count).reduce(function(s, c) { return s + c.revenue; }, 0);
+
+  var cum = 0, clientsFor80 = customers.length;
+  for (var i = 0; i < customers.length; i++) {
+    cum += customers[i].revenue;
+    if (cum >= totalRevenue * 0.8) { clientsFor80 = i + 1; break; }
+  }
+
+  var segMap = {};
+  customers.forEach(function(c) {
+    if (!segMap[c.segment]) segMap[c.segment] = { segment: c.segment, clients: 0, revenue: 0 };
+    segMap[c.segment].clients++;
+    segMap[c.segment].revenue += c.revenue;
+  });
+
+  // Win-back: та же методика, что в analyze_clients.py - молчит 60+ дней, было хотя бы 3
+  // заказа и от 300к исторической выручки (не разовый мелкий клиент).
+  var winback = customers
+    .filter(function(c) { return c.recency_days > 60 && c.orders >= 3 && c.revenue >= 300000; })
+    .sort(function(a, b) { return b.revenue - a.revenue; });
+
+  // Растущие/снижающиеся - последние 180 дней vs предыдущие 180 дней от refDate.
+  // ВАЖНО (см. чат с Владом 2026-07-05): это сравнение чувствительно к сезонности - если
+  // окно half-year падает на границу высокого/низкого сезона, "падение" может быть сезонным
+  // артефактом, а не реальным трендом. Показывать на дашборде с этой оговоркой, не как
+  // прямой сигнал тревоги.
+  var d6  = addDays_(refDate, -180);
+  var d12 = addDays_(refDate, -360);
+  var last6Map = {}, prev6Map = {};
+  pseudoRows.forEach(function(r) {
+    if (r.date > d6) { last6Map[r.customer] = (last6Map[r.customer] || 0) + r.amount; }
+    else if (r.date > d12 && r.date <= d6) { prev6Map[r.customer] = (prev6Map[r.customer] || 0) + r.amount; }
+  });
+  var trendNames = {};
+  Object.keys(last6Map).forEach(function(k) { trendNames[k] = true; });
+  Object.keys(prev6Map).forEach(function(k) { trendNames[k] = true; });
+  var trend = Object.keys(trendNames).map(function(name) {
+    var last6 = last6Map[name] || 0, prev6 = prev6Map[name] || 0;
+    return { name: name, last6: last6, prev6: prev6, delta: last6 - prev6 };
+  });
+  var growing = trend
+    .filter(function(t) { return t.prev6 >= 100000 && t.delta > 0; })
+    .sort(function(a, b) { return b.delta - a.delta; });
+  var declining = trend
+    .filter(function(t) { return t.prev6 >= 200000 && t.delta < 0; })
+    .sort(function(a, b) { return a.delta - b.delta; });
+
+  // Сезонность - только полные календарные годы (отсекаем первый/последний неполный),
+  // как в analyze_clients.py, иначе частичные края искажают средние по месяцам.
+  var yearsSeen = {};
+  pseudoRows.forEach(function(r) { yearsSeen[r.date.slice(0, 4)] = true; });
+  var yearsList = Object.keys(yearsSeen).sort();
+  var fullYears = yearsList.length > 2 ? yearsList.slice(1, -1) : yearsList;
+  var monthRevenue = {};
+  pseudoRows.forEach(function(r) {
+    if (fullYears.indexOf(r.date.slice(0, 4)) === -1) return;
+    var m = r.date.slice(5, 7);
+    monthRevenue[m] = (monthRevenue[m] || 0) + r.amount;
+  });
+  var seasonality = [];
+  for (var mi = 1; mi <= 12; mi++) {
+    var mk = (mi < 10 ? '0' : '') + mi;
+    seasonality.push({
+      month: mk,
+      revenue_per_year: fullYears.length ? (monthRevenue[mk] || 0) / fullYears.length : 0,
+    });
+  }
+
+  return {
+    ref_date: refDate,
+    period_start: periodStart,
+    total_clients: customers.length,
+    total_revenue: totalRevenue,
+    total_orders: totalOrdersCount != null ? totalOrdersCount : customers.reduce(function(s, c) { return s + c.orders; }, 0),
+    top10_pct: totalRevenue ? top10Revenue / totalRevenue * 100 : 0,
+    top20_pct: totalRevenue ? top20Revenue / totalRevenue * 100 : 0,
+    clients_for_80pct: clientsFor80,
+    // Фильтр по сегменту (?segment=Отток (давно)) - Влад, 2026-07-06: "хочу выбрать например
+    // только отток". Без фильтра - топ-100 по выручке среди всех; с фильтром - топ-300 среди
+    // клиентов именно этого сегмента (без фильтра по сегменту топ-100 почти всегда состоит из
+    // активных клиентов - у отточных просто редко бывает высокая выручка, чтобы попасть в топ).
+    top_clients: opts.segment
+      ? customers.filter(function(c) { return c.segment === opts.segment; }).slice(0, 300)
+      : customers.slice(0, 100),
+    segments: Object.keys(segMap).map(function(k) { return segMap[k]; }),
+    winback: winback.slice(0, 200),
+    growing: growing.slice(0, 100),
+    declining: declining.slice(0, 100),
+    seasonality: seasonality,
+    full_years_used: fullYears,
+  };
+}
+
+// Старый путь - строит byCustomer/pseudoRows из сырых строк {customer,mgrSales,...,amount,date}.
+// Используется для manager_profile (там объём строк на порядок меньше - фильтр по одному
+// менеджеру, пересчитывать 72 тыс. строк на каждый клик не так дорого, как для всей базы).
+function computeClientAnalytics_(rows, opts) {
+  opts = opts || {};
+  if (!rows.length) return { error: 'Нет данных для клиентской аналитики' };
+
+  var byCustomer = {};
+  rows.forEach(function(r) {
+    if (!byCustomer[r.customer]) {
+      byCustomer[r.customer] = {
+        name: r.customer, orders: 0, revenue: 0, profit: 0,
+        first_order: r.date, last_order: r.date,
+      };
+    }
+    var c = byCustomer[r.customer];
+    c.orders++;
+    c.revenue += r.amount;
+    c.profit  += r.profit;
+    if (r.date < c.first_order) c.first_order = r.date;
+    if (r.date > c.last_order)  c.last_order  = r.date;
+  });
+
+  return finishClientAnalytics_(byCustomer, rows, opts, rows.length);
+}
+
+// Рейтинг менеджеров по выручке - для "место среди менеджеров" в личном профиле.
+function computeManagerRanking_(rows) {
+  var byMgr = {};
+  TRAL_MANAGERS.forEach(function(m) { byMgr[m] = { name: m, revenue: 0, clients: {} }; });
+  rows.forEach(function(r) {
+    TRAL_MANAGERS.forEach(function(m) {
+      if (r.mgrSales.indexOf(m) >= 0) {
+        byMgr[m].revenue += r.amount;
+        byMgr[m].clients[r.customer] = true;
+      }
+    });
+  });
+  return Object.keys(byMgr).map(function(m) {
+    return { name: byMgr[m].name, revenue: byMgr[m].revenue, clients: Object.keys(byMgr[m].clients).length };
+  }).sort(function(a, b) { return b.revenue - a.revenue; });
+}
+
+// Личный профиль менеджера (как показывался Владу в чате для Цегельникова) - фильтр по
+// подстроке в "Менеджер по продажам", остальное - та же логика computeClientAnalytics_
+// плюс разбивка по годам/дням недели/типу техники и место в рейтинге.
+function computeManagerProfile_(allRows, managerName) {
+  var rows = allRows.filter(function(r) { return r.mgrSales.indexOf(managerName) >= 0; });
+  if (!rows.length) return { error: 'Нет данных по менеджеру "' + managerName + '"' };
+
+  var base = computeClientAnalytics_(rows);
+
+  var byYear = {};
+  rows.forEach(function(r) {
+    var y = r.date.slice(0, 4);
+    if (!byYear[y]) byYear[y] = { year: y, orders: 0, revenue: 0 };
+    byYear[y].orders++;
+    byYear[y].revenue += r.amount;
+  });
+
+  var wdNames = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']; // JS Date.getDay(): 0 = воскресенье
+  var byWeekday = {};
+  rows.forEach(function(r) {
+    var wd = wdNames[new Date(r.date).getDay()];
+    if (!byWeekday[wd]) byWeekday[wd] = { weekday: wd, orders: 0, revenue: 0 };
+    byWeekday[wd].orders++;
+    byWeekday[wd].revenue += r.amount;
+  });
+
+  var byEquip = {};
+  rows.forEach(function(r) {
+    var eq = r.equip || 'Прочее';
+    if (!byEquip[eq]) byEquip[eq] = { equip: eq, orders: 0, revenue: 0 };
+    byEquip[eq].orders++;
+    byEquip[eq].revenue += r.amount;
+  });
+
+  var ranking = computeManagerRanking_(allRows);
+  var rank = ranking.findIndex(function(m) { return m.name === managerName; }) + 1;
+
+  return {
+    manager: managerName,
+    rank: rank || null,
+    total_managers: ranking.length,
+    total_orders: rows.length,
+    total_revenue: base.total_revenue,
+    total_clients: base.total_clients,
+    top10_pct: base.top10_pct,
+    top20_pct: base.top20_pct,
+    clients_for_80pct: base.clients_for_80pct,
+    top_clients: base.top_clients,
+    segments: base.segments,
+    winback: base.winback,
+    growing: base.growing,
+    declining: base.declining,
+    seasonality: base.seasonality,
+    by_year: Object.keys(byYear).sort().map(function(y) { return byYear[y]; }),
+    by_weekday: Object.keys(byWeekday).map(function(k) { return byWeekday[k]; }),
+    by_equip: Object.keys(byEquip).map(function(k) { return byEquip[k]; }).sort(function(a, b) { return b.revenue - a.revenue; }),
   };
 }
 

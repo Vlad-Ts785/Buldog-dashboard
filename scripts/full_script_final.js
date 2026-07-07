@@ -1252,13 +1252,17 @@ function doGet(e) {
       }
       var vpFromP = vpFrom.split('-').map(Number);
       var vpToP = vpTo.split('-').map(Number);
+      var vpFromDate = new Date(vpFromP[0], vpFromP[1] - 1, vpFromP[2]);
+      var vpToDate = new Date(vpToP[0], vpToP[1] - 1, vpToP[2]);
       var vpStaffData = getStaffData(ss);
-      var vpVehicles = aggregateFinHistoryForRange(ss, vpStaffData,
-        new Date(vpFromP[0], vpFromP[1] - 1, vpFromP[2]),
-        new Date(vpToP[0], vpToP[1] - 1, vpToP[2]));
+      var vpVehicles = aggregateFinHistoryForRange(ss, vpStaffData, vpFromDate, vpToDate);
       return ContentService.createTextOutput(JSON.stringify({
         vehicles: vpVehicles,
-        drivers: deriveDriversFromVehicles(vpVehicles)
+        drivers: deriveDriversFromVehicles(vpVehicles),
+        // Кол-во заказов по водителю ЗА ВЫБРАННЫЙ ПЕРИОД (не за текущий месяц) - раньше
+        // страница "Водители" всегда брала D.orders.by_driver (текущий месяц), из-за чего
+        // при выборе прошлого периода счётчик заказов был неверным/пустым (Влад, 2026-07-07).
+        driverOrderCounts: getDriverOrderCounts_(ss, vpFromDate, vpToDate)
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
@@ -1830,7 +1834,7 @@ function deriveDriversFromVehicles(vehicles) {
     .filter(function(v) { return v.driver && v.plan > 0; })
     .map(function(v) {
       return { marka: v.marka, gos: v.gos, type: v.type, plan: v.plan, fakt: v.profit,
-        pct: v.plan > 0 ? v.profit / v.plan : 0, driver: v.driver };
+        pct: v.plan > 0 ? v.profit / v.plan : 0, driver: v.driver, status: v.status || '' };
     })
     .sort(function(a, b) { return b.fakt - a.fakt; });
 }
@@ -2025,6 +2029,55 @@ function getVehicleOrdersHistory_(ss, gos, fromDate, toDate) {
   });
 
   return Object.values(byDate).sort(function(a, b) { return a.date.localeCompare(b.date); });
+}
+
+// Кол-во заказов по водителю за произвольный диапазон дат - для страницы "Водители" при
+// выборе периода (иначе колонка "Заказов" всегда показывала текущий месяц, независимо от
+// выбранного - Влад, 2026-07-07: "количество заказов за июнь не верное"). Та же логика
+// источника, что и getVehicleOrdersHistory_ - текущий месяц из "Заказы_данные", прошлые -
+// из архивов "Заказы_YYYY-MM". Ключ - фамилия (первое слово ФИО, нижний регистр), как и на
+// фронтенде (d.driver.trim().split(' ')[0].toLowerCase()).
+function getDriverOrderCounts_(ss, fromDate, toDate) {
+  var from = new Date(fromDate); from.setHours(0, 0, 0, 0);
+  var to = new Date(toDate); to.setHours(23, 59, 59, 999);
+
+  var monthKeys = [];
+  var cursor = new Date(from.getFullYear(), from.getMonth(), 1);
+  while (cursor <= to) {
+    monthKeys.push(cursor.getFullYear() + '-' + String(cursor.getMonth() + 1).padStart(2, '0'));
+    cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+  }
+
+  var currentMonthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+  var counts = {};
+
+  monthKeys.forEach(function(mk) {
+    var rows;
+    if (mk === currentMonthKey) {
+      var live = ss.getSheetByName(ORDERS_NORM_SHEET);
+      if (!live || live.getLastRow() < 2) return;
+      rows = live.getRange(2, 1, live.getLastRow() - 1, 43).getValues();
+    } else {
+      var archive = ss.getSheetByName(ORDERS_ARCHIVE_PFX + mk);
+      if (!archive || archive.getLastRow() < 5) return;
+      rows = parseOrdersRawRows(archive.getDataRange().getValues()).rows;
+    }
+    rows.forEach(function(row) {
+      var driver = String(row[19] || '').trim();
+      if (!driver) return;
+      var rawDate = row[2]; // "Начало работ"
+      var dateStr = rawDate instanceof Date
+        ? Utilities.formatDate(rawDate, 'Europe/Moscow', 'yyyy-MM-dd')
+        : String(rawDate || '').trim();
+      if (!dateStr) return;
+      var d = new Date(dateStr + 'T00:00:00');
+      if (isNaN(d.getTime()) || d < from || d > to) return;
+      var key = driver.split(' ')[0].toLowerCase();
+      counts[key] = (counts[key] || 0) + 1;
+    });
+  });
+
+  return counts;
 }
 
 // Валовая прибыль своего парка за прошлый период (для зарплаты Рыщанова на вкладке "Зарплата"

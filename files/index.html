@@ -635,7 +635,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           </div>
         </div>
         <table class="tbl">
-          <thead><tr><th>Водитель</th><th>Машина</th><th>Тип</th><th class="num">Заказов</th><th class="num">План</th><th class="num">Факт</th><th class="num">%</th><th class="num">Прогноз</th><th>Оценка</th></tr></thead>
+          <thead><tr><th>Водитель</th><th>Машина</th><th>Тип</th><th>Статус</th><th class="num">Заказов</th><th class="num">План</th><th class="num">Факт</th><th class="num">%</th><th class="num">Прогноз</th><th>Оценка</th></tr></thead>
           <tbody id="drivers-body"></tbody>
         </table>
       </div>
@@ -2508,12 +2508,19 @@ function renderDrivers() {
     return true;
   });
 
-  // Словарь заказов по фамилии водителя
+  // Словарь заказов по фамилии водителя - ЗА ВЫБРАННЫЙ ПЕРИОД, если период выбран (с сервера,
+  // driverOrderCounts - см. vehicles_period). Раньше тут всегда брали D.orders.by_driver
+  // (текущий месяц), из-за чего при выборе прошлого периода счётчик был неверным
+  // (Влад, 2026-07-07: "количество заказов за июнь не верное").
   var drvOrderMap = {};
-  ((D.orders && D.orders.by_driver) || []).forEach(function(x) {
-    var key = x.name.trim().split(' ')[0].toLowerCase();
-    drvOrderMap[key] = (drvOrderMap[key] || 0) + x.orders;
-  });
+  if (vehiclesRangeData && vehiclesRangeData.driverOrderCounts) {
+    drvOrderMap = vehiclesRangeData.driverOrderCounts;
+  } else {
+    ((D.orders && D.orders.by_driver) || []).forEach(function(x) {
+      var key = x.name.trim().split(' ')[0].toLowerCase();
+      drvOrderMap[key] = (drvOrderMap[key] || 0) + x.orders;
+    });
+  }
 
   // Прогноз к концу месяца - единая calcPaceRatio_(). Но только пока месяц ещё идёт - если
   // выбран ЗАКРЫТЫЙ период (например прошлый месяц целиком), экстраполировать нечего - факт
@@ -2534,8 +2541,11 @@ function renderDrivers() {
     // "Оценка" - по прогнозу, не по факту на сегодня, и формулирует действие, а не просто
     // качество (Влад, 2026-07-04: "статус должен отражать действие").
     const status = driverForecastStatus_(forecastPct);
+    var vStatus = statusByGos[d.gos] || '';
+    var stCls = vStatus.indexOf('Ремонт') !== -1 ? 'red' : vStatus.indexOf('работе') !== -1 ? 'green' : 'amber';
     return `<tr>
       <td><b>${d.driver}</b></td><td class="muted">${d.gos}</td><td>${d.type}</td>
+      <td><span class="badge ${stCls}">${vStatus || '—'}</span></td>
       <td class="num">${ordCnt}</td>
       <td class="num">${fmt(d.plan)}</td><td class="num">${fmt(d.fakt)}</td>
       <td class="num ${cls}"><b>${pv.toFixed(1)}%</b></td>

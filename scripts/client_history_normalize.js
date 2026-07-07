@@ -64,9 +64,23 @@ function parseNum_(val) {
 
 // Тот же формат, что ordFormatDate() в full_script_final.js - для согласованности между
 // историческим и живым листами дашборда.
+//
+// Найдено 2026-07-07 (диагностика debugAggregateDiag на дашборде): buildClientHistoryAggregate()
+// читает "Начало" из уже записанного листа "Нормализованные_история_заказов" (эта же
+// колонка сама была записана как чистая строка "YYYY-MM-DD", Google Таблицы автоматически
+// конвертируют её в настоящую дату при setValues) - и на этом ВТОРОМ чтении instanceof Date
+// сработал только для 315 из 36 577 значений (0.86%), остальные ушли в ветку String(val),
+// дав "Sun Jan 05 2020 11:00:00 GMT+0300..." (обычный Date.prototype.toString()) - именно
+// это ломало "Период"/сегменты на дашборде. Точный механизм, почему instanceof иногда не
+// срабатывает на объекте, полученном через getValues(), не выяснили - но проверка "по
+// утиной типизации" (есть ли методы getFullYear/getMonth/getDate) ловит оба случая
+// одинаково надёжно и безопасна для обычных строк (у них таких методов просто нет).
 function formatDate_(val) {
   if (!val) return '';
-  if (val instanceof Date) {
+  const looksLikeDate = val instanceof Date ||
+    (typeof val === 'object' && typeof val.getFullYear === 'function' &&
+     typeof val.getMonth === 'function' && typeof val.getDate === 'function');
+  if (looksLikeDate) {
     return Utilities.formatDate(val, 'Europe/Moscow', 'yyyy-MM-dd');
   }
   const s = String(val);
@@ -254,7 +268,10 @@ function buildClientHistoryAggregate() {
   const lastRow = clean.getLastRow();
   Logger.log('Строк в очищенном листе: ' + (lastRow - 1));
 
-  // byCustomer[name] = { orders, revenue, profit, first, last, daily: { 'YYYY-MM-DD': {o,r,p} } }
+  // byCustomer[name] = { orders, revenue, profit, first, last, lastManager,
+  //                       daily: { 'YYYY-MM-DD': {o,r,p} } }
+  // lastManager - "Менеджер по продажам" привязанный к САМОМУ ПОЗДНЕМУ заказу клиента -
+  // Влад, 2026-07-07: "после колонки клиент нужен ответственный менеджер" на дашборде.
   const byCustomer = {};
 
   for (let batchStart = 2; batchStart <= lastRow; batchStart += AGG_READ_BATCH_SIZE) {
@@ -267,20 +284,21 @@ function buildClientHistoryAggregate() {
       const row = batch[i];
       const name = String(row[0] || '').trim();
       if (!name) continue;
+      const mgrSales = String(row[1] || '').trim();
       const revenue = parseNum_(row[4]);
       const profit  = parseNum_(row[5]);
       const dateStr = formatDate_(row[6]);
       if (!dateStr) continue;
 
       if (!byCustomer[name]) {
-        byCustomer[name] = { orders: 0, revenue: 0, profit: 0, first: dateStr, last: dateStr, daily: {} };
+        byCustomer[name] = { orders: 0, revenue: 0, profit: 0, first: dateStr, last: dateStr, lastManager: mgrSales, daily: {} };
       }
       const c = byCustomer[name];
       c.orders++;
       c.revenue += revenue;
       c.profit  += profit;
       if (dateStr < c.first) c.first = dateStr;
-      if (dateStr > c.last)  c.last  = dateStr;
+      if (dateStr >= c.last) { c.last = dateStr; c.lastManager = mgrSales; }
       if (!c.daily[dateStr]) c.daily[dateStr] = { o: 0, r: 0, p: 0 };
       c.daily[dateStr].o++;
       c.daily[dateStr].r += revenue;
@@ -296,7 +314,7 @@ function buildClientHistoryAggregate() {
   if (agg) agg.clear();
   else agg = ss.insertSheet(AGGREGATE_SHEET_NAME);
 
-  const outHeaders = ['Заказчик', 'Заказов', 'Выручка', 'Прибыль', 'Первый_заказ', 'Последний_заказ', 'ПоДням'];
+  const outHeaders = ['Заказчик', 'Заказов', 'Выручка', 'Прибыль', 'Первый_заказ', 'Последний_заказ', 'Менеджер', 'ПоДням'];
   agg.getRange(1, 1, 1, outHeaders.length).setValues([outHeaders]).setFontWeight('bold');
   agg.setFrozenRows(1);
 
@@ -351,7 +369,7 @@ function buildClientHistoryAggregate() {
       json = weeklyJson;
       degradedCount++;
     }
-    return [name, c.orders, Math.round(c.revenue), Math.round(c.profit), c.first, c.last, json];
+    return [name, c.orders, Math.round(c.revenue), Math.round(c.profit), c.first, c.last, c.lastManager, json];
   });
   Logger.log('Клиентов со свёрнутой (недельной вместо дневной) разбивкой: ' + degradedCount);
 
@@ -364,7 +382,7 @@ function buildClientHistoryAggregate() {
 
   const totalRevenue = names.reduce(function(s, n) { return s + byCustomer[n].revenue; }, 0);
   const totalOrders = names.reduce(function(s, n) { return s + byCustomer[n].orders; }, 0);
-  const maxDailyLen = out.reduce(function(m, r) { return Math.max(m, String(r[6]).length); }, 0);
+  const maxDailyLen = out.reduce(function(m, r) { return Math.max(m, String(r[7]).length); }, 0);
   Logger.log('ГОТОВО. Агрегат: ' + out.length + ' клиентов | ' + totalOrders + ' заказов | выручка ' + Math.round(totalRevenue));
   Logger.log('Самая большая JSON-ячейка "ПоДням": ' + maxDailyLen + ' символов (лимит ячейки Google Sheets - 50 000)');
   Logger.log('Время выполнения: ' + Math.round((Date.now() - startTime) / 1000) + ' сек');

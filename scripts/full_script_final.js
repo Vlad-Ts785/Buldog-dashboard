@@ -1289,9 +1289,10 @@ function doGet(e) {
       var caTo   = /^\d{4}-\d{2}-\d{2}$/.test(e.parameter.to || '')   ? e.parameter.to   : '';
       var caSegment = e.parameter.segment || '';
       var caCache = CacheService.getScriptCache();
-      // v4 - смена версии ключа специально сбрасывает старый кэш (там мог быть уже
-      // закэширован "битый" ответ с невалидными датами до фикса 2026-07-07).
-      var caCacheKey = 'client_analytics_v4_' + (caFrom || 'all') + '_' + (caTo || 'all') + '_' + (caSegment || 'all');
+      var caManager = e.parameter.manager || '';
+      // v7 - фильтр по менеджеру в топ-клиентах + сброс кэша (v6 мог закэшировать сломанный
+      // ответ в окне между деплоем кода и пересборкой агрегата с колонкой "Менеджер").
+      var caCacheKey = 'client_analytics_v7_' + (caFrom || 'all') + '_' + (caTo || 'all') + '_' + (caSegment || 'all') + '_' + (caManager || 'all');
       var caCached = caCache.get(caCacheKey);
       if (caCached) {
         return ContentService.createTextOutput(caCached).setMimeType(ContentService.MimeType.JSON);
@@ -1305,12 +1306,12 @@ function doGet(e) {
       var caHistAgg = getClientHistoryAggregate_();
       if (caHistAgg) {
         var caLiveRows = getClientLiveRows_(ss);
-        caResult = computeClientAnalyticsFromAggregate_(caHistAgg, caLiveRows, { segment: caSegment, from: caFrom, to: caTo });
+        caResult = computeClientAnalyticsFromAggregate_(caHistAgg, caLiveRows, { segment: caSegment, from: caFrom, to: caTo, manager: caManager });
       } else {
         var caRows = getClientAnalyticsRows_(ss);
         if (caFrom) caRows = caRows.filter(function(r) { return r.date >= caFrom; });
         if (caTo)   caRows = caRows.filter(function(r) { return r.date <= caTo; });
-        caResult = computeClientAnalytics_(caRows, { segment: caSegment });
+        caResult = computeClientAnalytics_(caRows, { segment: caSegment, manager: caManager });
       }
       var caJson = JSON.stringify(caResult);
       try { if (caJson.length < 95000) caCache.put(caCacheKey, caJson, 1800); } catch (cacheErr) { /* кэш - не критично, отдаём результат в любом случае */ }
@@ -1328,7 +1329,7 @@ function doGet(e) {
         return ContentService.createTextOutput(JSON.stringify({ error: 'Не указан менеджер' })).setMimeType(ContentService.MimeType.JSON);
       }
       var mpCache = CacheService.getScriptCache();
-      var mpCacheKey = 'manager_profile_v2_' + mpName;
+      var mpCacheKey = 'manager_profile_v3_' + mpName; // v3 - добавлено поле "Менеджер" в top_clients
       var mpCached = mpCache.get(mpCacheKey);
       if (mpCached) {
         return ContentService.createTextOutput(mpCached).setMimeType(ContentService.MimeType.JSON);
@@ -3271,13 +3272,14 @@ function getClientHistoryAggregate_() {
     const histSS = SpreadsheetApp.openById(CLIENT_HISTORY_SHEET_ID);
     const sheet = histSS.getSheetByName(CLIENT_HISTORY_AGGREGATE_SHEET_NAME);
     if (!sheet || sheet.getLastRow() < 2) return null;
-    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 7).getValues();
+    // 8 колонок: Заказчик|Заказов|Выручка|Прибыль|Первый_заказ|Последний_заказ|Менеджер|ПоДням
+    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 8).getValues();
     const agg = {};
     data.forEach(function(r) {
       const name = String(r[0] || '').trim();
       if (!name) return;
       let daily = {};
-      try { daily = JSON.parse(r[6] || '{}'); } catch (parseErr) { daily = {}; }
+      try { daily = JSON.parse(r[7] || '{}'); } catch (parseErr) { daily = {}; }
       agg[name] = {
         name: name,
         orders: ordParseNum(r[1]),
@@ -3285,6 +3287,7 @@ function getClientHistoryAggregate_() {
         profit: ordParseNum(r[3]),
         first_order: ordFormatDate(r[4]),
         last_order: ordFormatDate(r[5]),
+        manager: String(r[6] || '').trim(),
         daily: daily,
       };
     });
@@ -3335,7 +3338,13 @@ function computeClientAnalyticsFromAggregate_(historyAgg, liveRows, opts) {
       if (to && date > to) return;
       const d = h.daily[date];
       if (!byCustomer[name]) {
-        byCustomer[name] = { name: name, orders: 0, revenue: 0, profit: 0, first_order: date, last_order: date };
+        // Менеджер - Влад, 2026-07-07: "после колонки клиент нужен ответственный менеджер".
+        // История хранит только ОДНОГО менеджера на клиента (привязан к его самому позднему
+        // историческому заказу, см. buildClientHistoryAggregate) - не по дням, поэтому при
+        // фильтре по периоду это может показать менеджера чуть неточно (не обязательно того,
+        // кто вёл именно последний заказ ВНУТРИ выбранного периода) - приемлемый компромисс,
+        // живые строки ниже почти всегда переопределяют на более свежего менеджера.
+        byCustomer[name] = { name: name, orders: 0, revenue: 0, profit: 0, first_order: date, last_order: date, manager: h.manager || '' };
       }
       const c = byCustomer[name];
       c.orders += d.o; c.revenue += d.r; c.profit += (d.p || 0);
@@ -3355,12 +3364,12 @@ function computeClientAnalyticsFromAggregate_(historyAgg, liveRows, opts) {
     if (from && r.date < from) return;
     if (to && r.date > to) return;
     if (!byCustomer[r.customer]) {
-      byCustomer[r.customer] = { name: r.customer, orders: 0, revenue: 0, profit: 0, first_order: r.date, last_order: r.date };
+      byCustomer[r.customer] = { name: r.customer, orders: 0, revenue: 0, profit: 0, first_order: r.date, last_order: r.date, manager: r.mgrSales };
     }
     const c = byCustomer[r.customer];
     c.orders++; c.revenue += r.amount; c.profit += r.profit;
     if (r.date < c.first_order) c.first_order = r.date;
-    if (r.date > c.last_order)  c.last_order  = r.date;
+    if (r.date >= c.last_order) { c.last_order = r.date; c.manager = r.mgrSales; }
     totalOrders++;
     pseudoRows.push({ customer: r.customer, date: r.date, amount: r.amount });
   });
@@ -3491,12 +3500,18 @@ function finishClientAnalytics_(byCustomer, pseudoRows, opts, totalOrdersCount) 
     top20_pct: totalRevenue ? top20Revenue / totalRevenue * 100 : 0,
     clients_for_80pct: clientsFor80,
     // Фильтр по сегменту (?segment=Отток (давно)) - Влад, 2026-07-06: "хочу выбрать например
-    // только отток". Без фильтра - топ-100 по выручке среди всех; с фильтром - топ-300 среди
-    // клиентов именно этого сегмента (без фильтра по сегменту топ-100 почти всегда состоит из
-    // активных клиентов - у отточных просто редко бывает высокая выручка, чтобы попасть в топ).
-    top_clients: opts.segment
-      ? customers.filter(function(c) { return c.segment === opts.segment; }).slice(0, 300)
-      : customers.slice(0, 100),
+    // только отток". Фильтр по менеджеру (?manager=Цегельников) - Влад, 2026-07-07: "выпадающий
+    // список по менеджерам, чтобы выбрать менеджера и посмотреть только по нему" - сравнение
+    // подстрокой, т.к. c.manager хранит полное "ФИО +телефон", а параметр приходит фамилией.
+    // Без фильтров - топ-100 по выручке среди всех; с любым фильтром - топ-300 среди отфильтрованных
+    // (без фильтра топ-100 почти всегда - активные высокодоходные клиенты одних и тех же
+    // менеджеров, у отточных/у менеджеров с мелкими клиентами редко высокая выручка для топ-100).
+    top_clients: (function() {
+      var filtered = customers;
+      if (opts.segment) filtered = filtered.filter(function(c) { return c.segment === opts.segment; });
+      if (opts.manager) filtered = filtered.filter(function(c) { return String(c.manager || '').indexOf(opts.manager) >= 0; });
+      return (opts.segment || opts.manager) ? filtered.slice(0, 300) : filtered.slice(0, 100);
+    })(),
     segments: Object.keys(segMap).map(function(k) { return segMap[k]; }),
     winback: winback.slice(0, 200),
     growing: growing.slice(0, 100),
@@ -3518,7 +3533,7 @@ function computeClientAnalytics_(rows, opts) {
     if (!byCustomer[r.customer]) {
       byCustomer[r.customer] = {
         name: r.customer, orders: 0, revenue: 0, profit: 0,
-        first_order: r.date, last_order: r.date,
+        first_order: r.date, last_order: r.date, manager: r.mgrSales,
       };
     }
     var c = byCustomer[r.customer];
@@ -3526,7 +3541,7 @@ function computeClientAnalytics_(rows, opts) {
     c.revenue += r.amount;
     c.profit  += r.profit;
     if (r.date < c.first_order) c.first_order = r.date;
-    if (r.date > c.last_order)  c.last_order  = r.date;
+    if (r.date >= c.last_order) { c.last_order = r.date; c.manager = r.mgrSales; }
   });
 
   return finishClientAnalytics_(byCustomer, rows, opts, rows.length);

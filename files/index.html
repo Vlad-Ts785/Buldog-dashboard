@@ -865,6 +865,8 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           <input id="clients-range-to" type="date" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 10px;font-size:13px">
           <button onclick="applyClientsRange()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer">Показать</button>
           <button onclick="resetClientsRange()" style="background:transparent;border:none;color:var(--muted);font-size:12px;cursor:pointer;text-decoration:underline">Весь период</button>
+          <button id="clients-preset-this-year" onclick="setClientsRangeThisYear()" style="background:transparent;border:none;color:var(--muted);font-size:12px;cursor:pointer;text-decoration:underline">Этот год</button>
+          <button onclick="setClientsRangeLastTwoYears()" style="background:transparent;border:none;color:var(--muted);font-size:12px;cursor:pointer;text-decoration:underline">Последние 2 года</button>
           <button onclick="setClientsRangeLastYear()" style="background:transparent;border:none;color:var(--muted);font-size:12px;cursor:pointer;text-decoration:underline">Последние 12 мес</button>
           <span id="clients-range-status" style="font-size:11px;color:var(--muted)"></span>
         </div>
@@ -4438,6 +4440,18 @@ var mgrYearChart = null, mgrSeasonChart = null, mgrWeekdayChart = null;
 var clientsRangeFrom = '';
 var clientsRangeTo = '';
 var clientsSegmentFilter = '';
+// Сортировка "Топ клиенты" - Влад, 2026-07-07: "хочу фильтровать по выручке, по заказам,
+// по последнему заказу". Сортировка на уже загруженных данных, без похода на сервер.
+var clientsTopSort = { col: 'revenue', dir: 1 };
+var CLIENT_TOP_COLS = [
+  { key: 'name',            label: 'Клиент',          num: false },
+  { key: 'manager',         label: 'Менеджер',        num: false },
+  { key: 'orders',          label: 'Заказов',         num: true },
+  { key: 'revenue',         label: 'Выручка',         num: true },
+  { key: 'avg_order_value', label: 'Ср. чек',         num: true },
+  { key: 'last_order',      label: 'Последний заказ', num: false },
+  { key: 'segment',         label: 'Сегмент',         num: false },
+];
 
 // Родительный падеж - "4 июля 2026", не "2026-07-04" (Влад, 2026-07-06: формат дат неудобный).
 const RU_MONTHS_GENITIVE = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
@@ -4514,10 +4528,32 @@ function setClientsRangeLastYear() {
   applyClientsRange();
 }
 
+// Влад, 2026-07-07: "пусть будут ссылки, которые устанавливают период 2026 год, последние
+// два года". Год берётся из текущей даты, не захардкожен - кнопка называется "Этот год" на
+// разметке, подпись переписывается на реальный год при каждом рендере (см. renderClientsBody).
+function setClientsRangeThisYear() {
+  var today = new Date();
+  function toInputDate(d) { return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+  document.getElementById('clients-range-from').value = today.getFullYear() + '-01-01';
+  document.getElementById('clients-range-to').value = toInputDate(today);
+  applyClientsRange();
+}
+
+function setClientsRangeLastTwoYears() {
+  var today = new Date();
+  var from = new Date(today.getFullYear() - 2, today.getMonth(), today.getDate() + 1);
+  function toInputDate(d) { return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+  document.getElementById('clients-range-from').value = toInputDate(from);
+  document.getElementById('clients-range-to').value = toInputDate(today);
+  applyClientsRange();
+}
+
 function renderClientsBody() {
   if (!clientsData) return;
   document.getElementById('clients-loading').style.display = 'none';
   document.getElementById('clients-body').style.display = 'block';
+  var yearBtn = document.getElementById('clients-preset-this-year');
+  if (yearBtn) yearBtn.textContent = new Date().getFullYear() + ' год';
   renderClientsKpi();
   renderClientsSegments();
   renderClientsSeasonality();
@@ -4591,30 +4627,42 @@ function showClientsTab(tab, btn) {
 // отток") - без фильтра бэкенд отдаёт топ-100 по выручке среди ВСЕХ клиентов (там почти
 // всегда только активные - у отточных редко высокая выручка, чтобы попасть в топ-100), с
 // фильтром - топ-300 именно внутри выбранного сегмента.
+var clientsManagerFilter = '';
+
 function renderClientsSegmentFilter_() {
-  var options = [
+  var segOptions = [
     { v: '', label: 'Все сегменты' },
     { v: 'Активный', label: 'Активный' },
     { v: 'Под риском', label: 'Под риском' },
     { v: 'Отток (до года)', label: 'Отток (до года)' },
     { v: 'Отток (давно)', label: 'Отток (давно)' },
   ];
-  var opts = options.map(function(o) {
+  var segOpts = segOptions.map(function(o) {
     var sel = o.v === clientsSegmentFilter ? ' selected' : '';
     return '<option value="' + o.v + '"' + sel + '>' + o.label + '</option>';
   }).join('');
-  return '<div style="margin-bottom:12px"><select onchange="setClientsSegmentFilter(this.value)" ' +
-    'style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 10px;font-size:13px">' +
-    opts + '</select></div>';
+
+  // Влад, 2026-07-07: "выпадающий список по менеджерам, чтобы выбрать менеджера и посмотреть
+  // только по нему" - список менеджеров переиспользован из SALES_MANAGERS (используется и в
+  // профиле менеджера), не заведён отдельно.
+  var mgrOpts = '<option value="">Все менеджеры</option>' + SALES_MANAGERS.map(function(m) {
+    var sel = m === clientsManagerFilter ? ' selected' : '';
+    return '<option value="' + m + '"' + sel + '>' + m + '</option>';
+  }).join('');
+
+  var selStyle = 'background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 10px;font-size:13px';
+  return '<div style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap">' +
+    '<select onchange="setClientsSegmentFilter(this.value)" style="' + selStyle + '">' + segOpts + '</select>' +
+    '<select onchange="setClientsManagerFilter(this.value)" style="' + selStyle + '">' + mgrOpts + '</select>' +
+    '</div>';
 }
 
-// Лёгкий запрос - обновляет только список "Топ клиенты" под текущим сегментом, не всю
-// страницу (KPI/сегменты/сезонность от сегмента не зависят, перезагружать их незачем).
-function setClientsSegmentFilter(value) {
-  clientsSegmentFilter = value;
+// Лёгкий запрос - обновляет только список "Топ клиенты" под текущими фильтрами, не всю
+// страницу (KPI/сегменты/сезонность от них не зависят, перезагружать их незачем).
+function fetchClientsTopFiltered_() {
   var el = document.getElementById('clients-tab-content');
   el.innerHTML = '<p style="color:var(--muted);padding:16px">Загрузка...</p>';
-  var params = { action: 'client_analytics', segment: clientsSegmentFilter };
+  var params = { action: 'client_analytics', segment: clientsSegmentFilter, manager: clientsManagerFilter };
   if (clientsRangeFrom) params.from = clientsRangeFrom;
   if (clientsRangeTo) params.to = clientsRangeTo;
   apiFetchJson(params)
@@ -4628,6 +4676,16 @@ function setClientsSegmentFilter(value) {
     });
 }
 
+function setClientsSegmentFilter(value) {
+  clientsSegmentFilter = value;
+  fetchClientsTopFiltered_();
+}
+
+function setClientsManagerFilter(value) {
+  clientsManagerFilter = value;
+  fetchClientsTopFiltered_();
+}
+
 function segBadgeClass_(seg) {
   if (seg === 'Активный') return 'green';
   if (seg === 'Под риском') return 'amber';
@@ -4637,20 +4695,48 @@ function segBadgeClass_(seg) {
 
 function renderClientsTable_(list, mode) {
   if (!list || !list.length) return '<p style="color:var(--muted);padding:16px">Нет данных</p>';
+
+  if (mode === 'top') {
+    var col = clientsTopSort.col, dir = clientsTopSort.dir;
+    var sorted = list.slice().sort(function(a, b) {
+      var av = a[col], bv = b[col];
+      if (typeof av === 'number') return (bv - av) * dir;
+      return String(av || '').localeCompare(String(bv || ''), 'ru') * dir;
+    });
+    var headHtml = '<th>#</th>' + CLIENT_TOP_COLS.map(function(c) {
+      var active = clientsTopSort.col === c.key;
+      var arrow = active ? (clientsTopSort.dir === -1 ? ' ▼' : ' ▲') : ' ↕';
+      var arrowOpacity = active ? '1' : '0.3';
+      return '<th class="sortable' + (c.num ? ' num' : '') + '" onclick="setClientsTopSort(\'' + c.key + '\')">' +
+        c.label + '<span style="font-size:10px;opacity:' + arrowOpacity + '">' + arrow + '</span></th>';
+    }).join('');
+    var rows = sorted.map(function(c, i) {
+      return '<tr><td>' + (i+1) + '</td><td>' + c.name + '</td><td>' + (c.manager || '—') + '</td>' +
+        '<td class="num">' + c.orders + '</td><td class="num">' + fmt(c.revenue) + '</td>' +
+        '<td class="num">' + fmt(c.avg_order_value) + '</td><td>' + fmtDateRu(c.last_order) + '</td>' +
+        '<td class="num ' + segBadgeClass_(c.segment) + '">' + c.segment + '</td></tr>';
+    }).join('');
+    return '<div class="card"><div style="overflow-x:auto"><table class="tbl"><thead><tr>' + headHtml + '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
+  }
+
   var rows = list.map(function(c, i) {
-    if (mode === 'top') {
-      return '<tr><td>' + (i+1) + '</td><td>' + c.name + '</td><td class="num">' + c.orders + '</td>' +
-        '<td class="num">' + fmt(c.revenue) + '</td><td class="num">' + fmt(c.avg_order_value) + '</td>' +
-        '<td>' + fmtDateRu(c.last_order) + '</td><td class="num ' + segBadgeClass_(c.segment) + '">' + c.segment + '</td></tr>';
-    }
     return '<tr><td>' + (i+1) + '</td><td>' + c.name + '</td><td class="num">' + c.orders + '</td>' +
       '<td class="num">' + fmt(c.revenue) + '</td><td>' + fmtDateRu(c.last_order) + '</td>' +
       '<td class="num amber">' + c.recency_days + ' дн</td></tr>';
   }).join('');
-  var head = mode === 'top'
-    ? '<tr><th>#</th><th>Клиент</th><th class="num">Заказов</th><th class="num">Выручка</th><th class="num">Ср. чек</th><th>Последний заказ</th><th class="num">Сегмент</th></tr>'
-    : '<tr><th>#</th><th>Клиент</th><th class="num">Заказов</th><th class="num">Выручка (всё время)</th><th>Последний заказ</th><th class="num">Молчит</th></tr>';
+  var head = '<tr><th>#</th><th>Клиент</th><th class="num">Заказов</th><th class="num">Выручка (всё время)</th><th>Последний заказ</th><th class="num">Молчит</th></tr>';
   return '<div class="card"><div style="overflow-x:auto"><table class="tbl"><thead>' + head + '</thead><tbody>' + rows + '</tbody></table></div></div>';
+}
+
+function setClientsTopSort(col) {
+  if (clientsTopSort.col === col) { clientsTopSort.dir *= -1; }
+  else {
+    clientsTopSort.col = col;
+    // dir=1 - по числовым колонкам это убывание (больше сверху, нужное для "топ клиентов"),
+    // по текстовым - А-Я. Для "Последний заказ" исключение - сначала свежие (убывание дат).
+    clientsTopSort.dir = (col === 'last_order') ? -1 : 1;
+  }
+  showClientsTab('top');
 }
 
 function renderTrendTable_(list, mode) {

@@ -3632,14 +3632,15 @@ function renderSalesMgr() {
   var intAmt = sum.internal_amount || 0;
   var intOrd = sum.internal_orders || 0;
 
-  // Общий план (раньше зашитая константа 60М, без понятного происхождения) - теперь сумма
-  // 4 реальных целей, каждая из своей строки в "Планы_менеджеров" (Влад, 2026-07-04):
-  // Гусейнова (руководитель) + Ахтамова (руководитель) + Цуцурин (дирекция) + Внутренние.
-  // dStats[0].plan/dStats[1].plan - это уже сумма ВСЕЙ команды (руководитель + все
-  // подчинённые), ровно то же число, что показано на карточке отдела как "План".
-  var PLAN_DIR = (dStats[0].plan||0) + (dStats[1].plan||0) + planOf('Цуцурин') + PLAN_INT;
-
-  var totalActual = dStats[0].amount + dStats[1].amount + dStats[2].amount + intAmt + tsAmt;
+  // Общий факт/план - берём из ТОГО ЖЕ ИСТОЧНИКА, что и Панель (D.summary.salesFakt/salesPlan,
+  // считает getSummaryData() на бэкенде), а не пересчитываем заново на фронтенде. Раньше
+  // totalActual/PLAN_DIR собирались отдельно из dStats+intAmt+tsAmt - и из-за того, что
+  // "внутренние" заказы менеджеров, кроме Прус-Роскошного, считались и в личной сумме
+  // менеджера (dStats[...].amount), и ЕЩЁ РАЗ в intAmt, итог был выше, чем на Панели
+  // (Влад, 2026-07-04: "50 862 486 vs 48 847 486 - нужно прийти к одному стандарту").
+  // dStats[...].plan (для отдельных карточек отделов) не трогали - там своя, корректная логика.
+  var PLAN_DIR = (D.summary && D.summary.salesPlan) || 0;
+  var totalActual = (D.summary && D.summary.salesFakt) || 0;
   var overallPct = PLAN_DIR > 0 ? Math.round(totalActual / PLAN_DIR * 100) : 0;
   var pctColor = overallPct >= 100 ? '#1D9E75' : overallPct >= 80 ? '#EF9F27' : '#E24B4A';
   var totalForecast = totalActual * pacePaceRatio;

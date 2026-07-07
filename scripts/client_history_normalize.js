@@ -64,9 +64,23 @@ function parseNum_(val) {
 
 // Тот же формат, что ordFormatDate() в full_script_final.js - для согласованности между
 // историческим и живым листами дашборда.
+//
+// Найдено 2026-07-07 (диагностика debugAggregateDiag на дашборде): buildClientHistoryAggregate()
+// читает "Начало" из уже записанного листа "Нормализованные_история_заказов" (эта же
+// колонка сама была записана как чистая строка "YYYY-MM-DD", Google Таблицы автоматически
+// конвертируют её в настоящую дату при setValues) - и на этом ВТОРОМ чтении instanceof Date
+// сработал только для 315 из 36 577 значений (0.86%), остальные ушли в ветку String(val),
+// дав "Sun Jan 05 2020 11:00:00 GMT+0300..." (обычный Date.prototype.toString()) - именно
+// это ломало "Период"/сегменты на дашборде. Точный механизм, почему instanceof иногда не
+// срабатывает на объекте, полученном через getValues(), не выяснили - но проверка "по
+// утиной типизации" (есть ли методы getFullYear/getMonth/getDate) ловит оба случая
+// одинаково надёжно и безопасна для обычных строк (у них таких методов просто нет).
 function formatDate_(val) {
   if (!val) return '';
-  if (val instanceof Date) {
+  const looksLikeDate = val instanceof Date ||
+    (typeof val === 'object' && typeof val.getFullYear === 'function' &&
+     typeof val.getMonth === 'function' && typeof val.getDate === 'function');
+  if (looksLikeDate) {
     return Utilities.formatDate(val, 'Europe/Moscow', 'yyyy-MM-dd');
   }
   const s = String(val);

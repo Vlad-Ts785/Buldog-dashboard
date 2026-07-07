@@ -300,10 +300,60 @@ function buildClientHistoryAggregate() {
   agg.getRange(1, 1, 1, outHeaders.length).setValues([outHeaders]).setFontWeight('bold');
   agg.setFrozenRows(1);
 
+  // Понедельник той недели, в которую попадает dateStr - используется только как ЗАПАСНОЙ
+  // ключ группировки для клиентов-выбросов (см. ниже), формат остаётся YYYY-MM-DD, поэтому
+  // весь остальной код (сравнения строк на дашборде) не нуждается в изменениях.
+  function weekStartKey_(dateStr) {
+    const d = new Date(dateStr);
+    const day = d.getDay(); // 0=Вс,1=Пн,...,6=Сб
+    const diff = (day === 0 ? -6 : 1) - day;
+    d.setDate(d.getDate() + diff);
+    return Utilities.formatDate(d, 'Europe/Moscow', 'yyyy-MM-dd');
+  }
+
+  // Округляем суммы до целых рублей перед JSON.stringify - дробные "Сумма"/"Прибыль" в 1С
+  // (копейки, 1065+ строк с ними в реальных данных) плюс накопление через += на многих
+  // строках в день дают "грязные" хвосты вида 76000.00000000001 (обычное поведение чисел
+  // с плавающей точкой в JS) - раздувает JSON в разы. Копейки в аналитике не нужны -
+  // округление не теряет ничего важного. НО даже после округления реальные данные
+  // 2026-07-07 показали, что у отдельных клиентов дневная разбивка всё равно превышает
+  // лимит ячейки Google Sheets (50 000 симв.) - видимо, уникальных дней у них больше, чем
+  // показывала локальная выгрузка на момент прикидки. Защита: если после округления всё
+  // равно не влезает - сворачиваем ИМЕННО ЭТОГО клиента в недельные бакеты (~7x меньше
+  // записей) вместо дневных - точность растущих/снижающихся для него будет чуть грубее,
+  // но это единичные выбросы, не вся база, и без этой защиты весь прогон падает целиком.
+  const CELL_LIMIT_SAFE = 45000;
+  let degradedCount = 0;
   const out = names.map(function(name) {
     const c = byCustomer[name];
-    return [name, c.orders, c.revenue, c.profit, c.first, c.last, JSON.stringify(c.daily)];
+    const roundedDaily = {};
+    Object.keys(c.daily).forEach(function(date) {
+      const d = c.daily[date];
+      roundedDaily[date] = { o: d.o, r: Math.round(d.r), p: Math.round(d.p) };
+    });
+    let json = JSON.stringify(roundedDaily);
+    if (json.length > CELL_LIMIT_SAFE) {
+      const weekly = {};
+      Object.keys(c.daily).forEach(function(date) {
+        const wk = weekStartKey_(date);
+        const d = c.daily[date];
+        if (!weekly[wk]) weekly[wk] = { o: 0, r: 0, p: 0 };
+        weekly[wk].o += d.o; weekly[wk].r += d.r; weekly[wk].p += d.p;
+      });
+      Object.keys(weekly).forEach(function(wk) {
+        weekly[wk].r = Math.round(weekly[wk].r);
+        weekly[wk].p = Math.round(weekly[wk].p);
+      });
+      const weeklyJson = JSON.stringify(weekly);
+      Logger.log('ВНИМАНИЕ: "' + name + '" - дневная разбивка (' + Object.keys(roundedDaily).length +
+        ' дней, ' + json.length + ' симв.) не влезла в ячейку, свёрнута в недельную (' +
+        Object.keys(weekly).length + ' недель, ' + weeklyJson.length + ' симв.)');
+      json = weeklyJson;
+      degradedCount++;
+    }
+    return [name, c.orders, Math.round(c.revenue), Math.round(c.profit), c.first, c.last, json];
   });
+  Logger.log('Клиентов со свёрнутой (недельной вместо дневной) разбивкой: ' + degradedCount);
 
   const AGG_WRITE_BATCH_SIZE = 1000;
   for (let writeStart = 0; writeStart < out.length; writeStart += AGG_WRITE_BATCH_SIZE) {

@@ -4487,10 +4487,13 @@ var clientsSegmentFilter = '';
 const RU_MONTHS_GENITIVE = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
 function fmtDateRu(dateStr) {
   if (!dateStr) return '—';
+  // Если формат не YYYY-MM-DD (найден баг 2026-07-07 - бэкенд иногда присылал сырой
+  // JS Date.toString() вроде "Wed Sep 30 2020 10:00:00 GMT+0300...") - лучше показать "—",
+  // чем выводить нечитаемый мусор в интерфейсе.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateStr))) return '—';
   var parts = String(dateStr).split('-');
-  if (parts.length !== 3) return dateStr;
   var y = parts[0], m = parseInt(parts[1], 10), d = parseInt(parts[2], 10);
-  if (!m || !d || m < 1 || m > 12) return dateStr;
+  if (!m || !d || m < 1 || m > 12) return '—';
   return d + ' ' + RU_MONTHS_GENITIVE[m-1] + ' ' + y;
 }
 

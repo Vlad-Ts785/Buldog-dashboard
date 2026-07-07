@@ -1280,7 +1280,9 @@ function doGet(e) {
       var caTo   = /^\d{4}-\d{2}-\d{2}$/.test(e.parameter.to || '')   ? e.parameter.to   : '';
       var caSegment = e.parameter.segment || '';
       var caCache = CacheService.getScriptCache();
-      var caCacheKey = 'client_analytics_v3_' + (caFrom || 'all') + '_' + (caTo || 'all') + '_' + (caSegment || 'all');
+      // v4 - смена версии ключа специально сбрасывает старый кэш (там мог быть уже
+      // закэширован "битый" ответ с невалидными датами до фикса 2026-07-07).
+      var caCacheKey = 'client_analytics_v4_' + (caFrom || 'all') + '_' + (caTo || 'all') + '_' + (caSegment || 'all');
       var caCached = caCache.get(caCacheKey);
       if (caCached) {
         return ContentService.createTextOutput(caCached).setMimeType(ContentService.MimeType.JSON);
@@ -2155,7 +2157,16 @@ function ordExtractPeriodMonth(rowArr) {
 
 function ordFormatDate(val) {
   if (!val) return '';
-  if (val instanceof Date) {
+  // instanceof Date может не сработать для значений, пришедших через
+  // SpreadsheetApp.openById() (чужая таблица) - на практике поймали 2026-07-07 случай,
+  // когда дата дошла до фронтенда как "Wed Sep 30 2020 10:00:00 GMT+0300..." (типичный
+  // Date.prototype.toString()), а не как чистая строка - похоже, объект не прошёл
+  // instanceof-проверку. Доп. проверка по "утиной типизации" - безопасна, ничего не меняет
+  // для обычных строк (у них просто нет getFullYear/getMonth/getDate).
+  const looksLikeDate = val instanceof Date ||
+    (typeof val === 'object' && typeof val.getFullYear === 'function' &&
+     typeof val.getMonth === 'function' && typeof val.getDate === 'function');
+  if (looksLikeDate) {
     return Utilities.formatDate(val, 'Europe/Moscow', 'yyyy-MM-dd');
   }
   const s = String(val);
@@ -3226,6 +3237,18 @@ function getClientHistoryAggregate_() {
   }
 }
 
+// Дата обязана выглядеть как YYYY-MM-DD - иначе строковые сравнения (date < c.first_order
+// и т.п.) дают полную кашу молча. Баг 2026-07-07: на дашборде "Период" показал "Wed Sep 30
+// 2020 10:00:00 GMT+0300..." - это ровно то, что даёт JS Date.prototype.toString(), то есть
+// где-то объект-дата прошёл мимо ordFormatDate. Не нашли точную причину (похоже на известный
+// нюанс с датами при чтении ЧУЖОЙ таблицы через SpreadsheetApp.openById - объект может не
+// проходить instanceof Date, если пришёл из другого контекста выполнения), но неважно откуда
+// именно - невалидный ключ теперь просто отбрасывается с предупреждением в лог, а не портит
+// refDate/сегменты для всех клиентов сразу.
+function isValidDateStr_(s) {
+  return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+}
+
 // Новый (быстрый) путь для client_analytics - byCustomer и pseudoRows строятся из
 // предпосчитанного агрегата (уже сгруппирован по клиенту и по дню) + живых строк, вместо
 // построчного парсинга 72 тыс. исторических строк на каждый запрос. from/to (опционально) -
@@ -3240,10 +3263,16 @@ function computeClientAnalyticsFromAggregate_(historyAgg, liveRows, opts) {
   const byCustomer = {};
   const pseudoRows = [];
   let totalOrders = 0;
+  let badDateCount = 0;
 
   Object.keys(historyAgg).forEach(function(name) {
     const h = historyAgg[name];
     Object.keys(h.daily).forEach(function(date) {
+      if (!isValidDateStr_(date)) {
+        badDateCount++;
+        if (badDateCount <= 5) Logger.log('Пропущен невалидный ключ даты у "' + name + '": ' + JSON.stringify(date));
+        return;
+      }
       if (from && date < from) return;
       if (to && date > to) return;
       const d = h.daily[date];
@@ -3260,6 +3289,11 @@ function computeClientAnalyticsFromAggregate_(historyAgg, liveRows, opts) {
   });
 
   liveRows.forEach(function(r) {
+    if (!isValidDateStr_(r.date)) {
+      badDateCount++;
+      if (badDateCount <= 5) Logger.log('Пропущена невалидная дата в живой строке "' + r.customer + '": ' + JSON.stringify(r.date));
+      return;
+    }
     if (from && r.date < from) return;
     if (to && r.date > to) return;
     if (!byCustomer[r.customer]) {
@@ -3272,6 +3306,8 @@ function computeClientAnalyticsFromAggregate_(historyAgg, liveRows, opts) {
     totalOrders++;
     pseudoRows.push({ customer: r.customer, date: r.date, amount: r.amount });
   });
+
+  if (badDateCount > 0) Logger.log('ВСЕГО пропущено записей с невалидной датой: ' + badDateCount);
 
   return finishClientAnalytics_(byCustomer, pseudoRows, opts, totalOrders);
 }

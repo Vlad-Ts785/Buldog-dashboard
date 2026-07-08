@@ -837,7 +837,7 @@ function parseDebtRawRows_(rawData) {
       // Описание документа без "от ДД.ММ.ГГГГ ЧЧ:ММ:СС" в хвосте - дата уже отдельным полем
       // (Влад, 2026-07-09: "видеть детальную структуру долга" по каждому контрагенту).
       const docDesc = a.replace(/\s*от \d{2}\.\d{2}\.\d{4}.*$/, '');
-      customers[currentContragent].docs.push({ manager: manager, date: docDate, desc: docDesc, debt: ordParseNum(row[6]) });
+      customers[currentContragent].docs.push({ manager: manager, date: docDate, desc: docDesc, debt: ordParseNum(row[6]), org: currentOrg });
     } else {
       // строка контрагента
       currentContragent = a;
@@ -869,13 +869,21 @@ function parseDebtRawRows_(rawData) {
       if (x.date < oldestDate) oldestDate = x.date;
       if (x.date >= latestDate) { latestDate = x.date; latestManager = x.manager; }
     });
-    // Баланс по каждому юрлицу отдельно (долг-аванс), в фиксированном порядке DEBT_ORG_KEYS -
-    // проще писать в лист и читать обратно, чем произвольный JSON (см. план).
+    // Баланс по каждому юрлицу ОТДЕЛЬНО (долг-аванс внутри самого юрлица - это законно,
+    // тот же контрагент с тем же юрлицом), в фиксированном порядке DEBT_ORG_KEYS.
     const byOrgBalance = {};
     DEBT_ORG_KEYS.forEach(function(orgKey) {
       const o = c.byOrg[orgKey];
       byOrgBalance[orgKey] = o ? (o.debt - o.advance) : 0;
     });
+    // Итоговый баланс = сумма ТОЛЬКО положительных остатков по юрлицам (Влад, 2026-07-09:
+    // "плюс с минусом мы не сводим, показываем только долг"). Раньше баланс считался как
+    // общий долг минус общий аванс ПО ВСЕМ юрлицам сразу - из-за этого аванс, накопленный
+    // на одном юрлице (например Техно Парк, где мы держим больше денег клиента, чем он
+    // должен), ошибочно уменьшал реальный долг на другом юрлице (Бульдог) - разные
+    // юридические лица, гасить долг одного авансом другого нельзя.
+    let balance = 0;
+    DEBT_ORG_KEYS.forEach(function(orgKey) { if (byOrgBalance[orgKey] > 0) balance += byOrgBalance[orgKey]; });
     result.push({
       contragent: c.contragent,
       manager: latestManager, // менеджер самого свежего документа - тот же приём, что и в client_history
@@ -883,17 +891,15 @@ function parseDebtRawRows_(rawData) {
       advance: c.advance,
       guaranteePayment: c.guaranteePayment,
       guaranteeDeposit: c.guaranteeDeposit,
-      // Чистый баланс = долг минус аванс (Влад, 2026-07-08: "гарантийные" колонки - это
-      // зарплатный механизм, не часть клиентского долга - в баланс их не включаем).
-      balance: c.debt - c.advance,
+      balance: balance,
       lastDocDate: latestDate,
       oldestUnpaidDate: oldestDate,
       byOrgBalance: byOrgBalance,
-      // Детальная структура долга - по каким именно документам/периодам он образовался
-      // (Влад, 2026-07-09: "чтобы можно было задать правильные вопросы менеджеру"), только
-      // ещё не закрытые (debt>0), от старых к новым.
+      // Детальная структура долга - по каким именно документам/периодам он образовался, с
+      // указанием юрлица у каждого документа (Влад, 2026-07-09: "видно, какая на Бульдоге,
+      // какая на Ярде"), только ещё не закрытые (debt>0), от старых к новым.
       unpaidDocs: unpaidDocs
-        .map(function(x) { return { date: x.date, desc: x.desc, debt: x.debt }; })
+        .map(function(x) { return { date: x.date, desc: x.desc, debt: x.debt, org: DEBT_ORG_SHORT_NAMES[x.org] || x.org }; })
         .sort(function(a, b) { return a.date.localeCompare(b.date); }),
     });
   });
@@ -1014,12 +1020,13 @@ function getDebtData(ss) {
   const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, numCols).getValues();
   const docsColIdx = 9 + DEBT_ORG_KEYS.length;
   const customers = data.map(function(r) {
-    // Разбивка по юрлицам - только те, где баланс не нулевой (большинство клиентов
-    // работают только через одно юрлицо, показывать пустые строки незачем).
+    // Разбивка по юрлицам - только положительные (Влад, 2026-07-09: "показываем только
+    // долг" - отрицательный остаток на одном юрлице не гасит долг на другом, поэтому и в
+    // разбивке ему не место, только запутывает).
     const byOrg = [];
     DEBT_ORG_KEYS.forEach(function(orgKey, i) {
       const v = parseFloat(r[9 + i]) || 0;
-      if (v !== 0) byOrg.push({ org: DEBT_ORG_SHORT_NAMES[orgKey], balance: v });
+      if (v > 0) byOrg.push({ org: DEBT_ORG_SHORT_NAMES[orgKey], balance: v });
     });
     // Детальная структура долга по документам - клик по контрагенту на дашборде
     // (Влад, 2026-07-09). Если JSON битый/пустой - просто пустой список, не роняем весь ответ.
@@ -1057,6 +1064,19 @@ function getDebtData(ss) {
   const overdue60 = customers.filter(function(c) { return c.daysOverdue > 60 && c.daysOverdue <= 90; }).reduce(function(s,c){return s+c.balance;}, 0);
   const overdue90 = customers.filter(function(c) { return c.daysOverdue > 90; }).reduce(function(s,c){return s+c.balance;}, 0);
 
+  // Общий долг по юрлицам (Влад, 2026-07-09: "32602... эта сумма должна быть разбита: на
+  // сколько в Бульдоге, сколько в Ярде") - сумма положительных остатков по каждому юрлицу
+  // среди РЕАЛЬНЫХ должников (customers уже отфильтрован на balance>0 выше).
+  const byOrgMap = {};
+  customers.forEach(function(c) {
+    (c.byOrg || []).forEach(function(o) {
+      byOrgMap[o.org] = (byOrgMap[o.org] || 0) + o.balance;
+    });
+  });
+  const byOrg = Object.keys(byOrgMap)
+    .map(function(org) { return { org: org, balance: byOrgMap[org] }; })
+    .sort(function(a, b) { return b.balance - a.balance; });
+
   const histSheet = ss.getSheetByName(DEBT_HISTORY_SHEET);
   let history = [];
   if (histSheet && histSheet.getLastRow() > 1) {
@@ -1075,6 +1095,7 @@ function getDebtData(ss) {
       overdue_30_60: overdue30,
       overdue_60_90: overdue60,
       overdue_90_plus: overdue90,
+      by_org: byOrg,
     },
     by_customer: customers,
     by_manager: Object.values(byManagerMap).sort(function(a, b) { return b.balance - a.balance; }),

@@ -1080,6 +1080,10 @@ function getDebtData(ss) {
   });
 
   const totalBalance = customers.reduce(function(s, c) { return s + c.balance; }, 0);
+  // "Текущая" (0-30 дн.) добавлена, чтобы 4 корзины давали ровно totalBalance (Влад,
+  // 2026-07-10: "сумма этих чисел меньше, чем общее ДЗ... должно всё биться") - раньше
+  // просрочка 0-30 дней вообще никуда не попадала, отсюда и расхождение с "Общая ДЗ".
+  const current0_30 = customers.filter(function(c) { return c.daysOverdue <= 30; }).reduce(function(s,c){return s+c.balance;}, 0);
   const overdue30 = customers.filter(function(c) { return c.daysOverdue > 30 && c.daysOverdue <= 60; }).reduce(function(s,c){return s+c.balance;}, 0);
   const overdue60 = customers.filter(function(c) { return c.daysOverdue > 60 && c.daysOverdue <= 90; }).reduce(function(s,c){return s+c.balance;}, 0);
   const overdue90 = customers.filter(function(c) { return c.daysOverdue > 90; }).reduce(function(s,c){return s+c.balance;}, 0);
@@ -1122,6 +1126,7 @@ function getDebtData(ss) {
     summary: {
       total_balance: totalBalance,
       debtor_count: customers.length,
+      current_0_30: current0_30,
       overdue_30_60: overdue30,
       overdue_60_90: overdue60,
       overdue_90_plus: overdue90,

@@ -24,9 +24,9 @@
 ├── CLAUDE.md                <- этот файл
 ├── .claude/                 <- settings.json (безопасность + хуки), skills
 ├── files/
-│   └── index.html           <- основной дашборд (dashboard_v3), GitHub Pages
+│   └── index.html           <- основной дашборд (dashboard_v3), GitHub Pages, ~5100 строк
 ├── scripts/
-│   └── full_script_final.js <- Apps Script (~826 строк), деплоится в Google
+│   └── full_script_final.js <- Apps Script (~4100 строк), деплоится в Google
 ├── .business/               <- второй мозг бизнеса (НЕ в git - приватное)
 ├── plans/                   <- технические планы (один план = одна функция)
 ├── retrospectives/          <- рефлексии после каждой сессии
@@ -44,6 +44,8 @@
 | Архитектура данных | см. секцию ниже |
 | Текущая фича / план | `plans/<актуальный>.md` |
 | История сессий | `retrospectives/` |
+| Дебиторская задолженность (ДЗ) | `plans/2026-07-08-debt-receivables-tab.md` |
+| Как задеплоить Apps Script быстро | `clasp` подключен, см. секцию "Деплой" ниже |
 
 ## Стек
 
@@ -56,7 +58,7 @@ HTML/CSS/JS (vanilla, без фреймворков) + Google Apps Script + GitH
        |
   Apps Script (парсит Gmail)
        |
-  Google Sheets (14 листов)
+  Google Sheets (20+ листов)
        |
   doGet() JSON API
   /           \
@@ -65,7 +67,9 @@ HTML/CSS/JS (vanilla, без фреймворков) + Google Apps Script + GitH
 ```
 
 **Ключевые листы:** Штатка (ЖИВОЙ документ - статусы машин), Нормализованные_данные,
-Менеджеры_данные, История_показателей, История_финансов.
+Менеджеры_данные, История_показателей, История_финансов, Заказы_данные (+ архивы
+Заказы_YYYY-MM), Планы_менеджеров, ДЗ_данные + История_ДЗ (дебиторка, отчёт 1С раз в
+день в 15:00, см. `plans/2026-07-08-debt-receivables-tab.md`).
 
 **Штатка - критические колонки:** A=тип, C=госномер, AF=статус машины,
 AG2/3/4=тралы, AH2/3/4=длинномеры, AJ2/AK2=без заказа.
@@ -113,7 +117,35 @@ AG2/3/4=тралы, AH2/3/4=длинномеры, AJ2/AK2=без заказа.
 ## Ограничения Apps Script
 
 - НЕ использовать template literals (backtick) внутри `.map()` - SyntaxError
-- После изменений: Развернуть -> Управление развёртываниями -> Новая версия -> Развернуть
+
+## Деплой Apps Script
+
+**Через `clasp` (быстрее, предпочтительно)** - подключен с 2026-07-06, авторизован как
+`dlinnomertral@gmail.com`. Код клонирован в СОСЕДНЮЮ папку (НЕ внутри этого репозитория):
+`C:\Users\Redmi\Desktop\my-project\Дашборд_Apps_Script\` (локальный файл называется
+`full_script_final.js.js`). На этой машине (Node.js без глобального `window`) обязателен
+обход бага в `gaxios`/`google-auth-library` (старый `node-fetch` несовместим) - файл
+`C:\Users\Redmi\.clasp-fix\force-native-fetch.js` уже создан, просто:
+```bash
+export NODE_OPTIONS="--require C:/Users/Redmi/.clasp-fix/force-native-fetch.js"
+cp scripts/full_script_final.js "C:/Users/Redmi/Desktop/my-project/Дашборд_Apps_Script/full_script_final.js.js"
+cd "C:/Users/Redmi/Desktop/my-project/Дашборд_Apps_Script"
+clasp push
+clasp create-version "описание"
+clasp list-deployments   # найти deployment ID = хвост URL в API_URL_DEFAULT (files/index.html) между /s/ и /exec
+clasp redeploy <deploymentId> --versionNumber <N> --description "..."
+```
+Deployment ID живого `/exec` (на дату 2026-07-10):
+`AKfycbxWi4wJWsSeHdgwrsC-d__EOrncLnkhDr6PgXohoPafY2Y2VtBPq_mGi9qd7mH-vzA00w` - сверяй с
+`API_URL_DEFAULT` в `files/index.html`, он мог измениться.
+
+**Вручную через браузер (запасной путь)** - Развернуть -> Управление развёртываниями ->
+Новая версия -> Развернуть.
+
+**В обоих случаях** - `clasp push`/ручное сохранение только обновляет код редактора. Если
+менялась функция вроде `setupTrigger()`, которая должна быть ВЫПОЛНЕНА (не только
+задеплоена), это отдельный шаг - попроси Влада запустить её вручную в редакторе (Выполнить
+-> выбрать функцию -> Выполнить), скрипты не умеют вызывать сами себя через clasp.
 
 ## Язык
 

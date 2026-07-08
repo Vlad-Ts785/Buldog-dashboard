@@ -827,10 +827,14 @@ function parseDebtRawRows_(rawData) {
 
     const dept = String(row[3] || '').trim();
     if (dept) {
-      // строка документа
+      // строка документа - менеджера НЕ фильтруем по TRAL_MANAGERS (список менеджеров в
+      // самом отчёте 1С уже задаёт Влад в параметрах отчёта - "Менеджер В списке..." см.
+      // план; если фильтровать ещё и здесь по своему списку, при добавлении в 1С уволенных
+      // сотрудников их долг тихо терялся бы, пока не обновишь TRAL_MANAGERS вручную - Влад,
+      // 2026-07-10: "сегодня загружу всех менеджеров, которые когда-либо были").
       if (!currentContragent || !customers[currentContragent]) continue;
       const manager = cleanManagerName_(row[5]);
-      if (!manager || !ordInList(manager, TRAL_MANAGERS)) continue;
+      if (!manager) continue;
       const dateMatch = a.match(/от (\d{2})\.(\d{2})\.(\d{4})/);
       if (!dateMatch) continue;
       const docDate = dateMatch[3] + '-' + dateMatch[2] + '-' + dateMatch[1];
@@ -971,8 +975,10 @@ function saveDebtHistory() {
   const debtSheet = ss.getSheetByName(DEBT_RAW_SHEET);
   if (!debtSheet || debtSheet.getLastRow() < 2) return;
 
-  const data = debtSheet.getRange(2, 1, debtSheet.getLastRow() - 1, 9).getValues();
+  const numCols = 9 + DEBT_ORG_KEYS.length;
+  const data = debtSheet.getRange(2, 1, debtSheet.getLastRow() - 1, numCols).getValues();
   let totalBalance = 0, totalDebt = 0, debtorCount = 0;
+  const orgTotals = DEBT_ORG_KEYS.map(function() { return 0; });
   // Только реальные должники (баланс > 0) - та же граница, что и в getDebtData() (Влад,
   // 2026-07-09: цифра в графике "ДЗ по дням" не совпадала с "Общая ДЗ" в KPI - раньше тут
   // суммировались ВСЕ клиенты, включая тех, у кого баланс отрицательный (мы держим больше
@@ -983,12 +989,26 @@ function saveDebtHistory() {
     debtorCount++;
     totalBalance += balance;
     totalDebt += parseFloat(r[2]) || 0;
+    // По юрлицам - только положительные (та же логика, что и балансов в getDebtData) -
+    // нужно для истории и стрелок тенденций по каждому юрлицу (Влад, 2026-07-10).
+    DEBT_ORG_KEYS.forEach(function(orgKey, i) {
+      const v = parseFloat(r[9 + i]) || 0;
+      if (v > 0) orgTotals[i] += v;
+    });
   });
 
+  const orgHeaders = DEBT_ORG_KEYS.map(function(k) { return DEBT_ORG_SHORT_NAMES[k]; });
+  const allHeaders = ['Дата', 'Баланс (долг-аванс)', 'Сумма долга', 'Кол-во должников'].concat(orgHeaders);
   let histSheet = ss.getSheetByName(DEBT_HISTORY_SHEET);
   if (!histSheet) {
     histSheet = ss.insertSheet(DEBT_HISTORY_SHEET);
-    histSheet.getRange(1, 1, 1, 4).setValues([['Дата', 'Баланс (долг-аванс)', 'Сумма долга', 'Кол-во должников']]).setFontWeight('bold');
+    histSheet.getRange(1, 1, 1, allHeaders.length).setValues([allHeaders]).setFontWeight('bold');
+  } else if (histSheet.getLastColumn() < allHeaders.length) {
+    // Старый лист без колонок по юрлицам - дописываем недостающие заголовки, старые строки
+    // просто останутся с пустыми значениями в них (Влад, 2026-07-10: "стрелки тенденций...
+    // по каждому юрлицу").
+    const missing = allHeaders.slice(histSheet.getLastColumn());
+    histSheet.getRange(1, histSheet.getLastColumn() + 1, 1, missing.length).setValues([missing]).setFontWeight('bold');
   }
 
   const today = new Date();
@@ -1006,8 +1026,8 @@ function saveDebtHistory() {
     }
   }
 
-  const newRow = [new Date(), totalBalance, totalDebt, debtorCount];
-  if (todayRowIndex > 0) histSheet.getRange(todayRowIndex, 1, 1, 4).setValues([newRow]);
+  const newRow = [new Date(), totalBalance, totalDebt, debtorCount].concat(orgTotals);
+  if (todayRowIndex > 0) histSheet.getRange(todayRowIndex, 1, 1, newRow.length).setValues([newRow]);
   else histSheet.appendRow(newRow);
 }
 
@@ -1080,10 +1100,20 @@ function getDebtData(ss) {
   const histSheet = ss.getSheetByName(DEBT_HISTORY_SHEET);
   let history = [];
   if (histSheet && histSheet.getLastRow() > 1) {
-    history = histSheet.getRange(2, 1, histSheet.getLastRow() - 1, 4).getValues()
+    const histNumCols = 4 + DEBT_ORG_KEYS.length;
+    history = histSheet.getRange(2, 1, histSheet.getLastRow() - 1, histNumCols).getValues()
       .filter(function(r) { return r[0] instanceof Date; })
       .map(function(r) {
-        return { date: Utilities.formatDate(r[0], 'Europe/Moscow', 'yyyy-MM-dd'), balance: r[1] || 0, debt: r[2] || 0, debtors: r[3] || 0 };
+        // Разбивка по юрлицам за этот день - для стрелок тенденций по каждому юрлицу
+        // (Влад, 2026-07-10). Старые строки (записаны до этой колонки) дадут 0 - не страшно,
+        // тренд для них просто не посчитается (см. фронтенд).
+        const byOrgDay = {};
+        DEBT_ORG_KEYS.forEach(function(k, i) { byOrgDay[DEBT_ORG_SHORT_NAMES[k]] = parseFloat(r[4 + i]) || 0; });
+        return {
+          date: Utilities.formatDate(r[0], 'Europe/Moscow', 'yyyy-MM-dd'),
+          balance: r[1] || 0, debt: r[2] || 0, debtors: r[3] || 0,
+          byOrg: byOrgDay,
+        };
       })
       .sort(function(a, b) { return a.date.localeCompare(b.date); });
   }

@@ -890,7 +890,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           </div>
           <div style="overflow-x:auto">
             <table class="tbl">
-              <thead><tr>
+              <thead><tr id="debt-customers-thead-row">
                 <th>Контрагент</th><th>Менеджер</th>
                 <th class="num">Баланс</th><th class="num">Дней просрочки</th>
               </tr></thead>
@@ -4555,6 +4555,24 @@ function toggleDebtAgeLimit() {
   renderDebt();
 }
 
+// Сортировка таблицы "Должники" (Влад, 2026-07-12: "хочу фильтр сортировки, например
+// чтобы отсортировать по дням") - тот же приём, что "Топ клиенты" (clientsTopSort).
+const DEBT_COLS = [
+  { key: 'contragent',  label: 'Контрагент',      num: false },
+  { key: 'manager',     label: 'Менеджер',        num: false },
+  { key: 'balance',     label: 'Баланс',          num: true },
+  { key: 'daysOverdue', label: 'Дней просрочки',  num: true },
+];
+let debtSort = { col: 'balance', dir: -1 };
+function setDebtSort(col) {
+  if (debtSort.col === col) { debtSort.dir *= -1; }
+  else {
+    debtSort.col = col;
+    debtSort.dir = (col === 'contragent' || col === 'manager') ? 1 : -1; // текст - А-Я, числа - по убыванию
+  }
+  renderDebt();
+}
+
 // Пересчитывает summary/by_manager с нуля из уже отфильтрованного по возрасту списка
 // клиентов - backend-агрегаты (D.debt.summary/by_manager) всегда считаются по ВСЕМ
 // долгам без ограничения возраста, для фильтра нужен свой пересчёт на фронтенде.
@@ -4651,22 +4669,56 @@ function renderDebt() {
     '</div>';
 
   // История - линия по дням (та же логика построения, что и "Выручка по дням" на "Обзоре").
-  // hist уже получен выше (для стрелок тенденций в KPI).
+  // hist уже получен выше (для стрелок тенденций в KPI). Показывает ВСЕ долги без учёта
+  // фильтра "до 600 дней" (Влад, 2026-07-12: "хорошо что график будет показывать реальную
+  // картину с учётом всех долгов") - использует debt.history напрямую, не agg.
+  // Плюс линии по топ-10 контрагентам по текущему балансу (Влад: "должен иметь линии по
+  // всем контрагентам, а не только общий") - показывать линию на каждого из 100+ должников
+  // было бы нечитаемым шумом, поэтому топ-10 + агрегированная линия "Остальные".
   const ctx = document.getElementById('chart-debt-history');
   if (ctx && hist.length) {
     if (ctx._chart) ctx._chart.destroy();
+    const histTopCustomers = debt.history_top_customers || [];
+    const debtChartColors = ['#378ADD','#1D9E75','#E24B4A','#8B5CF6','#F472B6','#22D3EE','#A3E635','#FB923C','#94A3B8','#C084FC'];
+    const dateIdx = {}; hist.forEach(function(h, idx) { dateIdx[h.date] = idx; });
+    const topSumsByDate = hist.map(function() { return 0; });
+    const datasets = [{
+      label: 'Общая ДЗ', data: hist.map(function(h){ return h.balance; }),
+      borderColor: '#EF9F27', backgroundColor: 'rgba(239,159,39,0.12)', fill: true, tension: 0.25, pointRadius: 2, borderWidth: 2.5,
+    }];
+    histTopCustomers.forEach(function(tc, ci) {
+      const seriesByDate = {};
+      tc.history.forEach(function(p) { seriesByDate[p.date] = p.balance; });
+      const seriesData = hist.map(function(h) {
+        const v = seriesByDate[h.date] || 0;
+        topSumsByDate[dateIdx[h.date]] += v;
+        return v;
+      });
+      const shortName = tc.contragent.length > 22 ? tc.contragent.slice(0, 22) + '…' : tc.contragent;
+      datasets.push({
+        label: shortName, data: seriesData, borderColor: debtChartColors[ci % debtChartColors.length],
+        backgroundColor: 'transparent', fill: false, tension: 0.25, pointRadius: 0, borderWidth: 1.3,
+      });
+    });
+    // "Остальные" = общий баланс минус сумма топ-10 за тот же день - чтобы сумма всех линий
+    // (кроме "Общая ДЗ") давала ровно "Общую ДЗ", видно, сколько за пределами топ-10.
+    const restData = hist.map(function(h, idx) { return Math.max(0, h.balance - topSumsByDate[idx]); });
+    datasets.push({
+      label: 'Остальные', data: restData, borderColor: '#888780', backgroundColor: 'transparent',
+      fill: false, tension: 0.25, pointRadius: 0, borderWidth: 1.3, borderDash: [4, 3],
+    });
     ctx._chart = new Chart(ctx, {
       type: 'line',
       data: {
         labels: hist.map(function(h){ return h.date.slice(8,10) + '.' + h.date.slice(5,7); }),
-        datasets: [{
-          label: 'ДЗ (баланс)', data: hist.map(function(h){ return h.balance; }),
-          borderColor: '#EF9F27', backgroundColor: 'rgba(239,159,39,0.12)', fill: true, tension: 0.25, pointRadius: 2,
-        }]
+        datasets: datasets
       },
       options: {
         responsive:true, maintainAspectRatio:false,
-        plugins:{legend:{display:false}, tooltip:{callbacks:{label:function(c){ return ' ' + fmt(c.raw); }}}},
+        plugins:{
+          legend:{display:true, position:'bottom', labels:{color:'#888780', font:{size:10}, boxWidth:10}},
+          tooltip:{callbacks:{label:function(c){ return ' ' + c.dataset.label + ': ' + fmt(c.raw); }}}
+        },
         scales:{
           x:{ticks:{color:'#888780',font:{size:11}}, grid:{display:false}},
           y:{ticks:{color:'#888780',callback:v=>fmtK(v)}, grid:{color:'rgba(255,255,255,0.04)'}}
@@ -4686,6 +4738,21 @@ function renderDebt() {
   var customersFiltered = mgrFilterVal
     ? ageFiltered.filter(function(c){ return c.manager === mgrFilterVal; })
     : ageFiltered;
+  customersFiltered = customersFiltered.slice().sort(function(a, b) {
+    var av = a[debtSort.col], bv = b[debtSort.col];
+    if (typeof av === 'number') return (bv - av) * debtSort.dir;
+    return String(av||'').localeCompare(String(bv||''), 'ru') * debtSort.dir;
+  });
+  var debtTheadRow = document.getElementById('debt-customers-thead-row');
+  if (debtTheadRow) {
+    debtTheadRow.innerHTML = DEBT_COLS.map(function(c) {
+      var active = debtSort.col === c.key;
+      var arrow = active ? (debtSort.dir === -1 ? ' ▼' : ' ▲') : ' ↕';
+      var arrowOpacity = active ? '1' : '0.3';
+      return '<th class="sortable' + (c.num?' num':'') + '" onclick="setDebtSort(\'' + c.key + '\')">' +
+        c.label + '<span style="font-size:10px;opacity:' + arrowOpacity + '">' + arrow + '</span></th>';
+    }).join('');
+  }
 
   // Возраст долга - светофор по дням с даты старейшего неоплаченного документа.
   function ageCls(days) { return days > 90 ? 'red' : days > 60 ? 'amber' : days > 30 ? 'amber' : 'green'; }

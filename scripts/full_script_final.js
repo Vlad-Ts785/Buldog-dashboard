@@ -785,6 +785,10 @@ function saveFinancialHistory() {
 // ============================================================
 const DEBT_RAW_SHEET = 'ДЗ_данные';
 const DEBT_HISTORY_SHEET = 'История_ДЗ';
+// Дневная история ПО КАЖДОМУ КОНТРАГЕНТУ (Влад, 2026-07-12: "график должен иметь линии по
+// всем контрагентам, а не только общий") - отдельный лист, растёт на 1 строку в день на
+// каждого реального должника (balance>0).
+const DEBT_CUSTOMER_HISTORY_SHEET = 'История_ДЗ_по_контрагентам';
 
 // Убирает телефон из имени менеджера ("Савиток Олеся Анатольевна 8-985-150-11-85" ->
 // "Савиток Олеся Анатольевна") - та же логика, что фронтендный cleanName() (files/index.html).
@@ -1069,6 +1073,50 @@ function saveDebtHistory() {
   const newRow = [new Date(), totalBalance, totalDebt, debtorCount].concat(orgTotals);
   if (todayRowIndex > 0) histSheet.getRange(todayRowIndex, 1, 1, newRow.length).setValues([newRow]);
   else histSheet.appendRow(newRow);
+
+  saveDebtCustomerHistory_(ss, data);
+}
+
+// Дневной снимок ПО КАЖДОМУ КОНТРАГЕНТУ (Влад, 2026-07-12: "график должен иметь линии по
+// всем контрагентам, а не только общий") - идемпотентно, удаляет сегодняшние строки перед
+// записью новых (та же логика, что и общая история выше). data - уже прочитанные строки
+// ДЗ_данные, повторно не читаем.
+function saveDebtCustomerHistory_(ss, data) {
+  let custHistSheet = ss.getSheetByName(DEBT_CUSTOMER_HISTORY_SHEET);
+  if (!custHistSheet) {
+    custHistSheet = ss.insertSheet(DEBT_CUSTOMER_HISTORY_SHEET);
+    custHistSheet.getRange(1, 1, 1, 3).setValues([['Дата', 'Контрагент', 'Баланс']]).setFontWeight('bold');
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const lastRow = custHistSheet.getLastRow();
+  if (lastRow > 1) {
+    const dates = custHistSheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    let deleteFrom = -1, deleteCount = 0;
+    for (let i = 0; i < dates.length; i++) {
+      if (dates[i][0] instanceof Date) {
+        const d = new Date(dates[i][0]);
+        d.setHours(0, 0, 0, 0);
+        if (d.getTime() === today.getTime()) {
+          if (deleteFrom < 0) deleteFrom = i + 2;
+          deleteCount++;
+        }
+      }
+    }
+    if (deleteFrom > 0) custHistSheet.deleteRows(deleteFrom, deleteCount);
+  }
+
+  const now = new Date();
+  const rows = [];
+  data.forEach(function(r) {
+    const balance = parseFloat(r[6]) || 0;
+    if (balance <= 0) return; // только реальные должники
+    rows.push([now, String(r[0] || ''), balance]);
+  });
+  if (rows.length > 0) {
+    custHistSheet.getRange(custHistSheet.getLastRow() + 1, 1, rows.length, 3).setValues(rows);
+  }
 }
 
 // Агрегация ДЗ для дашборда - читает уже посчитанный ДЗ_данные (см. importDebtReport).
@@ -1183,6 +1231,32 @@ function getDebtData(ss) {
       .sort(function(a, b) { return a.date.localeCompare(b.date); });
   }
 
+  // История по каждому контрагенту (Влад, 2026-07-12: "график должен иметь линии по всем
+  // контрагентам, а не только общий") - топ-N по ТЕКУЩЕМУ балансу (не по всем ~130+
+  // должникам сразу - линия на каждого была бы нечитаемым шумом на графике). "Остальные"
+  // (баланс минус сумма топ-N) считает фронтенд из общей history, которая уже есть.
+  const DEBT_HISTORY_TOP_N = 10;
+  const topCustomerNames = customers.slice(0, DEBT_HISTORY_TOP_N).map(function(c) { return c.contragent; });
+  const custHistSheet = ss.getSheetByName(DEBT_CUSTOMER_HISTORY_SHEET);
+  let historyByCustomer = [];
+  if (custHistSheet && custHistSheet.getLastRow() > 1) {
+    const custHistData = custHistSheet.getRange(2, 1, custHistSheet.getLastRow() - 1, 3).getValues();
+    const byName = {};
+    custHistData.forEach(function(r) {
+      if (!(r[0] instanceof Date)) return;
+      const name = String(r[1] || '');
+      if (topCustomerNames.indexOf(name) < 0) return;
+      const dateStr = Utilities.formatDate(r[0], 'Europe/Moscow', 'yyyy-MM-dd');
+      if (!byName[name]) byName[name] = [];
+      byName[name].push({ date: dateStr, balance: parseFloat(r[2]) || 0 });
+    });
+    historyByCustomer = topCustomerNames
+      .filter(function(name) { return byName[name]; })
+      .map(function(name) {
+        return { contragent: name, history: byName[name].sort(function(a, b) { return a.date.localeCompare(b.date); }) };
+      });
+  }
+
   return {
     summary: {
       total_balance: totalBalance,
@@ -1198,6 +1272,7 @@ function getDebtData(ss) {
     by_customer: customers,
     by_manager: Object.values(byManagerMap).sort(function(a, b) { return b.balance - a.balance; }),
     history: history,
+    history_top_customers: historyByCustomer,
   };
 }
 

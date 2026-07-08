@@ -4663,15 +4663,17 @@ function renderDebt() {
           var isOldUnclosed = d.desc && d.desc.indexOf('Таблица заказов') === 0 && d.date < currentMonthStart;
           var covered = d.covered || 0;
           sumDocDebt += d.debt; sumDocCovered += covered;
-          // FIFO-ОЦЕНКА погашения авансом (Влад, 2026-07-11) - именно оценка, не факт: 1С
-          // не даёт данные, к какому документу привязан аванс/поступление. Условно гасим
-          // самые старые документы первыми - см. backend parseDebtRawRows_.
+          // Погашение авансом "по хронологии 1С" (Влад, 2026-07-11/12) - 1С сам ведёт учёт
+          // как бегущий остаток по датам (не привязывает поступление к конкретному
+          // документу), поэтому гасим самые старые документы поступлениями первыми - это
+          // повторяет ту же логику, что видно в самой 1С при развороте по датам, а не
+          // произвольное предположение. См. backend parseDebtRawRows_.
           var isFullyCovered = d.debt > 0 && covered >= d.debt;
           var isPartlyCovered = covered > 0 && covered < d.debt;
           var coveredBadge = isFullyCovered
-            ? ' <span class="badge muted" style="font-size:9.5px">вероятно оплачено (оценка)</span>'
+            ? ' <span class="badge muted" style="font-size:9.5px">вероятно оплачено (по хронологии 1С)</span>'
             : isPartlyCovered
-              ? ' <span class="badge amber" style="font-size:9.5px">частично покрыто: ' + fmt(covered) + '</span>'
+              ? ' <span class="badge amber" style="font-size:9.5px">частично покрыто (по хронологии 1С): ' + fmt(covered) + '</span>'
               : '';
           var fadedStyle = isFullyCovered ? 'text-decoration:line-through;opacity:0.55;' : '';
           var rowStyle = isOldUnclosed ? ' style="background:rgba(226,75,74,0.18)"' : '';
@@ -4688,7 +4690,7 @@ function renderDebt() {
     // (Влад, 2026-07-11: "в выпадающем списке сумма долга не сходится с балансом").
     var reconcileLine = (c.unpaidDocs && c.unpaidDocs.length)
       ? '<div class="muted" style="font-size:10.5px;margin-top:6px;padding-top:6px;border-top:1px solid var(--border)">' +
-          'Итого по документам: ' + fmt(sumDocDebt) + ' · Аванс/поступления (FIFO-оценка): −' + fmt(sumDocCovered) +
+          'Итого по документам: ' + fmt(sumDocDebt) + ' · Аванс/поступления (по хронологии 1С): −' + fmt(sumDocCovered) +
           ' · Открыто по факту: <b>' + fmt(sumDocDebt - sumDocCovered) + '</b></div>'
       : '';
     return '<tr class="debt-row-toggle" onclick="toggleDebtDetail(' + i + ')" style="cursor:pointer">' +

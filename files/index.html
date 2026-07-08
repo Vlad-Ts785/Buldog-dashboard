@@ -875,6 +875,11 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
         нужно один раз вручную выполнить importDebtReport() в редакторе Apps Script.
       </div>
       <div id="debt-body">
+        <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+          <button id="debt-age-toggle-btn" onclick="toggleDebtAgeLimit()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:6px 12px;font-size:12px;cursor:pointer">
+            Показать все долги (включая &gt;600 дней)
+          </button>
+        </div>
         <div class="kpi-grid" id="debt-kpi"></div>
         <div class="card" style="margin-top:16px;margin-bottom:16px">
           <div class="sec-header">
@@ -4537,6 +4542,44 @@ function renderSalesLog() {
 }
 
 // ── ДЗ (дебиторская задолженность, plans/2026-07-08-debt-receivables-tab.md) ──
+// Порог "старого" долга - 600 дней (Влад, 2026-07-12): "изначально экран должен
+// показывать долги до 600 дней... если кнопку нажал - тогда все долги". Влияет на ВСЕ
+// таблицы и расчёты на странице ДЗ (KPI, должники, по менеджерам), КРОМЕ графика "ДЗ по
+// дням" - там историческая череда снимков без разбивки по возрасту на каждый день в
+// прошлом, применить тот же фильтр ретроактивно нечем.
+const DEBT_AGE_LIMIT_DAYS = 600;
+let debtShowAllAges = false; // false = по умолчанию, только долги до 600 дней
+
+function toggleDebtAgeLimit() {
+  debtShowAllAges = !debtShowAllAges;
+  renderDebt();
+}
+
+// Пересчитывает summary/by_manager с нуля из уже отфильтрованного по возрасту списка
+// клиентов - backend-агрегаты (D.debt.summary/by_manager) всегда считаются по ВСЕМ
+// долгам без ограничения возраста, для фильтра нужен свой пересчёт на фронтенде.
+function computeDebtAggregates_(customers) {
+  let totalBalance = 0, current30 = 0, over30 = 0, over60 = 0, over90 = 0;
+  const byOrgMap = {}, byManagerMap = {};
+  customers.forEach(function(c) {
+    totalBalance += c.balance;
+    if (c.daysOverdue <= 30) current30 += c.balance;
+    else if (c.daysOverdue <= 60) over30 += c.balance;
+    else if (c.daysOverdue <= 90) over60 += c.balance;
+    else over90 += c.balance;
+    (c.byOrg||[]).forEach(function(o) { byOrgMap[o.org] = (byOrgMap[o.org]||0) + o.balance; });
+    if (!byManagerMap[c.manager]) byManagerMap[c.manager] = { name: c.manager, balance: 0, customers: 0 };
+    byManagerMap[c.manager].balance += c.balance;
+    byManagerMap[c.manager].customers++;
+  });
+  const byOrg = Object.keys(byOrgMap).map(function(org){ return {org:org, balance:byOrgMap[org]}; }).sort(function(a,b){return b.balance-a.balance;});
+  const byManager = Object.values(byManagerMap).sort(function(a,b){return b.balance-a.balance;});
+  return {
+    summary: { total_balance: totalBalance, debtor_count: customers.length, current_0_30: current30, overdue_30_60: over30, overdue_60_90: over60, overdue_90_plus: over90, by_org: byOrg },
+    by_manager: byManager,
+  };
+}
+
 function renderDebt() {
   if (!D) return;
   const debt = D.debt;
@@ -4550,7 +4593,20 @@ function renderDebt() {
   if (emptyEl) emptyEl.style.display = 'none';
   if (bodyEl) bodyEl.style.display = 'block';
 
-  const s = debt.summary || {};
+  const ageToggleBtn = document.getElementById('debt-age-toggle-btn');
+  if (ageToggleBtn) {
+    ageToggleBtn.textContent = debtShowAllAges
+      ? 'Показать только до ' + DEBT_AGE_LIMIT_DAYS + ' дней'
+      : 'Показать все долги (включая >' + DEBT_AGE_LIMIT_DAYS + ' дней)';
+    ageToggleBtn.style.background = debtShowAllAges ? 'var(--amber)' : 'var(--bg3)';
+    ageToggleBtn.style.color = debtShowAllAges ? '#000' : 'var(--text)';
+  }
+  const ageFiltered = debtShowAllAges
+    ? debt.by_customer
+    : debt.by_customer.filter(function(c){ return c.daysOverdue <= DEBT_AGE_LIMIT_DAYS; });
+  const agg = computeDebtAggregates_(ageFiltered);
+
+  const s = agg.summary;
 
   // Стрелки тенденций - сегодня vs вчера, по общей сумме и по каждому юрлицу (Влад,
   // 2026-07-10: "на каждый день должна сохраняться история... также стрелки тенденций на
@@ -4628,8 +4684,8 @@ function renderDebt() {
   }
   var mgrFilterVal = mgrSel ? mgrSel.value : '';
   var customersFiltered = mgrFilterVal
-    ? debt.by_customer.filter(function(c){ return c.manager === mgrFilterVal; })
-    : debt.by_customer;
+    ? ageFiltered.filter(function(c){ return c.manager === mgrFilterVal; })
+    : ageFiltered;
 
   // Возраст долга - светофор по дням с даты старейшего неоплаченного документа.
   function ageCls(days) { return days > 90 ? 'red' : days > 60 ? 'amber' : days > 30 ? 'amber' : 'green'; }
@@ -4704,7 +4760,7 @@ function renderDebt() {
     '</td></tr>';
   }).join('');
 
-  document.getElementById('debt-managers-body').innerHTML = (debt.by_manager||[]).map(function(m) {
+  document.getElementById('debt-managers-body').innerHTML = (agg.by_manager||[]).map(function(m) {
     return '<tr>' +
       '<td><b>' + cleanName(m.name) + '</b></td>' +
       '<td class="num">' + m.customers + '</td>' +

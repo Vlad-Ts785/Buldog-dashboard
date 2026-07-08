@@ -862,10 +862,6 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
       <div id="debt-body">
         <div class="kpi-grid" id="debt-kpi"></div>
         <div class="card" style="margin-top:16px;margin-bottom:16px">
-          <div class="card-title">ДЗ по дням</div>
-          <div class="chart-wrap" style="height:220px"><canvas id="chart-debt-history"></canvas></div>
-        </div>
-        <div class="card" style="margin-bottom:16px">
           <div class="sec-header">
             <div class="sec-title">Должники</div>
             <select id="filter-debt-manager" onchange="renderDebt()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;">
@@ -882,7 +878,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
             </table>
           </div>
         </div>
-        <div class="card">
+        <div class="card" style="margin-bottom:16px">
           <div class="card-title">По менеджерам</div>
           <div style="overflow-x:auto">
             <table class="tbl">
@@ -890,6 +886,10 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
               <tbody id="debt-managers-body"></tbody>
             </table>
           </div>
+        </div>
+        <div class="card">
+          <div class="card-title">ДЗ по дням</div>
+          <div class="chart-wrap" style="height:220px"><canvas id="chart-debt-history"></canvas></div>
         </div>
       </div>
     </div>
@@ -4520,12 +4520,19 @@ function renderDebt() {
   if (bodyEl) bodyEl.style.display = 'block';
 
   const s = debt.summary || {};
+  // Просрочка - раньше 3 отдельные карточки (30-60/60-90/90+), Влад 2026-07-09: "объединить
+  // в один блок с короткой, средней и длинной". Одна карточка, три строки внутри.
   document.getElementById('debt-kpi').innerHTML =
     '<div class="kpi"><div class="kpi-label">Общая ДЗ</div><div class="kpi-value amber">' + fmt(s.total_balance||0) + '</div></div>' +
     '<div class="kpi"><div class="kpi-label">Должников</div><div class="kpi-value">' + (s.debtor_count||0) + '</div></div>' +
-    '<div class="kpi"><div class="kpi-label">Просрочка 30-60 дн.</div><div class="kpi-value" style="color:var(--amber)">' + fmt(s.overdue_30_60||0) + '</div></div>' +
-    '<div class="kpi"><div class="kpi-label">Просрочка 60-90 дн.</div><div class="kpi-value" style="color:#EF9F27">' + fmt(s.overdue_60_90||0) + '</div></div>' +
-    '<div class="kpi"><div class="kpi-label">Просрочка &gt;90 дн.</div><div class="kpi-value red">' + fmt(s.overdue_90_plus||0) + '</div></div>';
+    '<div class="kpi">' +
+      '<div class="kpi-label">Просрочка</div>' +
+      '<table style="width:100%;font-size:12px;border-collapse:collapse;margin-top:4px">' +
+        '<tr><td class="muted" style="padding:2px 0">Короткая (30-60 дн.)</td><td class="num" style="color:var(--amber);font-weight:600">' + fmt(s.overdue_30_60||0) + '</td></tr>' +
+        '<tr><td class="muted" style="padding:2px 0">Средняя (60-90 дн.)</td><td class="num" style="color:#EF9F27;font-weight:600">' + fmt(s.overdue_60_90||0) + '</td></tr>' +
+        '<tr><td class="muted" style="padding:2px 0">Длинная (&gt;90 дн.)</td><td class="num" style="color:var(--red);font-weight:600">' + fmt(s.overdue_90_plus||0) + '</td></tr>' +
+      '</table>' +
+    '</div>';
 
   // История - линия по дням (та же логика построения, что и "Выручка по дням" на "Обзоре")
   const hist = debt.history || [];

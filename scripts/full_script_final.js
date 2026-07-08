@@ -967,9 +967,14 @@ function saveDebtHistory() {
 
   const data = debtSheet.getRange(2, 1, debtSheet.getLastRow() - 1, 9).getValues();
   let totalBalance = 0, totalDebt = 0, debtorCount = 0;
+  // Только реальные должники (баланс > 0) - та же граница, что и в getDebtData() (Влад,
+  // 2026-07-09: цифра в графике "ДЗ по дням" не совпадала с "Общая ДЗ" в KPI - раньше тут
+  // суммировались ВСЕ клиенты, включая тех, у кого баланс отрицательный (мы держим больше
+  // аванса, чем они должны) - это гасило итог до ~11М вместо ~33М "живых" должников).
   data.forEach(function(r) {
     const balance = parseFloat(r[6]) || 0;
-    if (balance > 0) debtorCount++;
+    if (balance <= 0) return;
+    debtorCount++;
     totalBalance += balance;
     totalDebt += parseFloat(r[2]) || 0;
   });

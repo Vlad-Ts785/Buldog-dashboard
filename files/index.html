@@ -4653,6 +4653,7 @@ function renderDebt() {
     // Юрлицо у каждого документа - показываем всегда (Влад, 2026-07-10), не только когда
     // документы относятся к разным юрлицам.
     var showDocOrg = true;
+    var sumDocDebt = 0, sumDocCovered = 0;
     var docsHtml = (c.unpaidDocs && c.unpaidDocs.length)
       ? c.unpaidDocs.map(function(d) {
           // Не закрытый документом заказ ("Таблица заказов" - ещё не оформлен как
@@ -4660,15 +4661,36 @@ function renderDebt() {
           // 2026-07-11): "вижу, что заказ в прошлом месяце даже не закрыт... нужно
           // обратить внимание в первую очередь - закрыть, а уже потом получить деньги".
           var isOldUnclosed = d.desc && d.desc.indexOf('Таблица заказов') === 0 && d.date < currentMonthStart;
+          var covered = d.covered || 0;
+          sumDocDebt += d.debt; sumDocCovered += covered;
+          // FIFO-ОЦЕНКА погашения авансом (Влад, 2026-07-11) - именно оценка, не факт: 1С
+          // не даёт данные, к какому документу привязан аванс/поступление. Условно гасим
+          // самые старые документы первыми - см. backend parseDebtRawRows_.
+          var isFullyCovered = d.debt > 0 && covered >= d.debt;
+          var isPartlyCovered = covered > 0 && covered < d.debt;
+          var coveredBadge = isFullyCovered
+            ? ' <span class="badge muted" style="font-size:9.5px">вероятно оплачено (оценка)</span>'
+            : isPartlyCovered
+              ? ' <span class="badge amber" style="font-size:9.5px">частично покрыто: ' + fmt(covered) + '</span>'
+              : '';
+          var fadedStyle = isFullyCovered ? 'text-decoration:line-through;opacity:0.55;' : '';
           var rowStyle = isOldUnclosed ? ' style="background:rgba(226,75,74,0.18)"' : '';
           var textCls = isOldUnclosed ? '' : 'muted';
-          return '<tr' + rowStyle + '><td style="padding:3px 10px 3px 0;white-space:nowrap" class="' + (isOldUnclosed?'red':'') + '">' +
+          return '<tr' + rowStyle + '><td style="' + fadedStyle + 'padding:3px 10px 3px 0;white-space:nowrap" class="' + (isOldUnclosed?'red':'') + '">' +
               (isOldUnclosed ? '<b>' + fmtDateRu(d.date) + '</b>' : fmtDateRu(d.date)) + '</td>' +
-            (showDocOrg ? '<td style="padding:3px 10px 3px 0" class="' + textCls + '">' + (d.org||'—') + '</td>' : '') +
-            '<td style="padding:3px 10px 3px 0" class="' + (isOldUnclosed?'red':'muted') + '">' + (isOldUnclosed ? '<b>' + d.desc + ' — не закрыт документом</b>' : d.desc) + '</td>' +
-            '<td style="padding:3px 0" class="num ' + (isOldUnclosed?'red':'') + '">' + fmt(d.debt) + '</td></tr>';
+            (showDocOrg ? '<td style="' + fadedStyle + 'padding:3px 10px 3px 0" class="' + textCls + '">' + (d.org||'—') + '</td>' : '') +
+            '<td style="' + fadedStyle + 'padding:3px 10px 3px 0" class="' + (isOldUnclosed?'red':'muted') + '">' + (isOldUnclosed ? '<b>' + d.desc + ' — не закрыт документом</b>' : d.desc) + coveredBadge + '</td>' +
+            '<td style="' + fadedStyle + 'padding:3px 0" class="num ' + (isOldUnclosed?'red':'') + '">' + fmt(d.debt) + '</td></tr>';
         }).join('')
       : '<tr><td colspan="' + (showDocOrg?4:3) + '" class="muted" style="padding:6px 0">Нет данных по документам</td></tr>';
+    // Сверка: сумма по документам (гросс, без учёта аванса) естественно больше "Баланса" -
+    // аванс/поступления в 1С не привязаны к конкретному документу, показываем это явно
+    // (Влад, 2026-07-11: "в выпадающем списке сумма долга не сходится с балансом").
+    var reconcileLine = (c.unpaidDocs && c.unpaidDocs.length)
+      ? '<div class="muted" style="font-size:10.5px;margin-top:6px;padding-top:6px;border-top:1px solid var(--border)">' +
+          'Итого по документам: ' + fmt(sumDocDebt) + ' · Аванс/поступления (FIFO-оценка): −' + fmt(sumDocCovered) +
+          ' · Открыто по факту: <b>' + fmt(sumDocDebt - sumDocCovered) + '</b></div>'
+      : '';
     return '<tr class="debt-row-toggle" onclick="toggleDebtDetail(' + i + ')" style="cursor:pointer">' +
       '<td><span id="debt-arrow-' + i + '" class="muted" style="display:inline-block;width:14px">▸</span><b>' + c.contragent + '</b>' + byOrgLine + '</td>' +
       '<td class="muted">' + cleanName(c.manager) + '</td>' +
@@ -4676,7 +4698,7 @@ function renderDebt() {
       '<td class="num ' + ageCls(c.daysOverdue) + '">' + c.daysOverdue + '</td>' +
     '</tr>' +
     '<tr id="debt-detail-' + i + '" style="display:none"><td colspan="4" style="padding:0 0 10px 28px">' +
-      '<table style="width:100%;font-size:11.5px;border-collapse:collapse">' + docsHtml + '</table>' +
+      '<table style="width:100%;font-size:11.5px;border-collapse:collapse">' + docsHtml + '</table>' + reconcileLine +
     '</td></tr>';
   }).join('');
 

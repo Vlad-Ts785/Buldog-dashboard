@@ -888,6 +888,27 @@ function parseDebtRawRows_(rawData) {
     // юридические лица, гасить долг одного авансом другого нельзя.
     let balance = 0;
     DEBT_ORG_KEYS.forEach(function(orgKey) { if (byOrgBalance[orgKey] > 0) balance += byOrgBalance[orgKey]; });
+
+    // FIFO-ОЦЕНКА погашенных документов (Влад, 2026-07-11, по явному запросу - именно
+    // ОЦЕНКА, не факт: 1С не даёт данные, к какому документу привязан аванс/поступление -
+    // "мастер"-строки поступлений не связаны ни с отделом/менеджером, ни по номеру
+    // документа с "Реализацией", проверено на реальной выгрузке). Условно гасим САМЫЕ
+    // СТАРЫЕ документы авансом первыми - стандартное допущение ФИФО. Считаем ОТДЕЛЬНО по
+    // каждому юрлицу (тот же принцип, что и баланс - аванс одного юрлица не может гасить
+    // документ другого).
+    const docsByOrg = {};
+    unpaidDocs.forEach(function(x) { (docsByOrg[x.org] = docsByOrg[x.org] || []).push(x); });
+    Object.keys(docsByOrg).forEach(function(orgKey) {
+      const orgAdvance = (c.byOrg[orgKey] && c.byOrg[orgKey].advance) || 0;
+      let remaining = orgAdvance;
+      const sorted = docsByOrg[orgKey].slice().sort(function(a, b) { return a.date.localeCompare(b.date); });
+      sorted.forEach(function(x) {
+        const covered = Math.min(x.debt, Math.max(0, remaining));
+        x.covered = covered;
+        remaining -= covered;
+      });
+    });
+
     result.push({
       contragent: c.contragent,
       manager: latestManager, // менеджер самого свежего документа - тот же приём, что и в client_history
@@ -901,9 +922,11 @@ function parseDebtRawRows_(rawData) {
       byOrgBalance: byOrgBalance,
       // Детальная структура долга - по каким именно документам/периодам он образовался, с
       // указанием юрлица у каждого документа (Влад, 2026-07-09: "видно, какая на Бульдоге,
-      // какая на Ярде"), только ещё не закрытые (debt>0), от старых к новым.
+      // какая на Ярде"), только ещё не закрытые (debt>0), от старых к новым. covered -
+      // FIFO-оценка того, сколько из этого документа уже покрыто авансом (см. выше) -
+      // ОЦЕНКА, не факт.
       unpaidDocs: unpaidDocs
-        .map(function(x) { return { date: x.date, desc: x.desc, debt: x.debt, org: DEBT_ORG_SHORT_NAMES[x.org] || x.org }; })
+        .map(function(x) { return { date: x.date, desc: x.desc, debt: x.debt, covered: x.covered || 0, org: DEBT_ORG_SHORT_NAMES[x.org] || x.org }; })
         .sort(function(a, b) { return a.date.localeCompare(b.date); }),
     });
   });

@@ -1039,7 +1039,7 @@ function getDebtData(ss) {
   const numCols = 9 + DEBT_ORG_KEYS.length + 1; // + колонка "Документы (JSON)"
   const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, numCols).getValues();
   const docsColIdx = 9 + DEBT_ORG_KEYS.length;
-  const customers = data.map(function(r) {
+  const allCustomers = data.map(function(r) {
     // Разбивка по юрлицам - только положительные (Влад, 2026-07-09: "показываем только
     // долг" - отрицательный остаток на одном юрлице не гасит долг на другом, поэтому и в
     // разбивке ему не место, только запутывает).
@@ -1061,8 +1061,29 @@ function getDebtData(ss) {
       byOrg: byOrg,
       unpaidDocs: unpaidDocs,
     };
-  }).filter(function(c) { return c.balance > 0; }) // только реальные должники (баланс > 0)
+  });
+  // Только реальные должники (баланс > 0) - для самой вкладки ДЗ.
+  const customers = allCustomers.filter(function(c) { return c.balance > 0; })
     .sort(function(a, b) { return b.balance - a.balance; });
+
+  // "Долгие заказы, не закрытые документами" - для карточки на Панели (Влад, 2026-07-11:
+  // "я открываю контрагента, вижу, что заказ в прошлом месяце даже не закрыт... нужно
+  // обратить внимание в первую очередь"). "Таблица заказов" в 1С = заказ ещё не оформлен
+  // как "Реализация (акт, накладная, УПД)" - бумажно не закрыт. Считаем по ВСЕМ клиентам
+  // (allCustomers, не только customers с положительным балансом) - это про незакрытые
+  // документы, а не про то, кто должен денег (у клиента может быть баланс <=0 в целом, но
+  // конкретный заказ всё равно висит незакрытым).
+  const todayForMonth = new Date();
+  const currentMonthStart = todayForMonth.getFullYear() + '-' + String(todayForMonth.getMonth() + 1).padStart(2, '0') + '-01';
+  let oldUnclosedCount = 0, oldUnclosedAmount = 0;
+  allCustomers.forEach(function(c) {
+    (c.unpaidDocs || []).forEach(function(d) {
+      if (d.desc && d.desc.indexOf('Таблица заказов') === 0 && d.date && d.date < currentMonthStart) {
+        oldUnclosedCount++;
+        oldUnclosedAmount += d.debt;
+      }
+    });
+  });
 
   const todayStr = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM-dd');
   function daysSince(dateStr) {
@@ -1131,6 +1152,8 @@ function getDebtData(ss) {
       overdue_60_90: overdue60,
       overdue_90_plus: overdue90,
       by_org: byOrg,
+      old_unclosed_orders_count: oldUnclosedCount,
+      old_unclosed_orders_amount: oldUnclosedAmount,
     },
     by_customer: customers,
     by_manager: Object.values(byManagerMap).sort(function(a, b) { return b.balance - a.balance; }),

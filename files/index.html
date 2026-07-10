@@ -480,14 +480,11 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
             <div class="kpi-sub" id="k-net-profit-est" style="margin-top:2px"></div>
           </div>
         </div>
-        <div class="kpi">
-          <div class="kpi-label">Поступления</div>
-          <div class="kpi-value" id="k-payment">—</div>
-          <div class="kpi-sub2" id="k-payment-nal"></div>
-          <div class="payment-edit">
-            <input type="number" id="payment-input" placeholder="Ввести вручную" oninput="updatePayment(this.value)">
-          </div>
-          <div class="kpi-sub" id="k-razneseno" style="margin-top:6px"></div>
+        <div class="kpi" id="k-debt-card" onclick="showPage('debt')" style="cursor:pointer">
+          <div class="kpi-label">Дебиторская задолженность</div>
+          <div class="kpi-value amber" id="k-debt-total">—</div>
+          <div class="kpi-sub" id="k-debt-breakdown" style="margin-top:6px;line-height:1.7"></div>
+          <div style="position:relative;height:44px;margin-top:10px"><canvas id="chart-debt-mini"></canvas></div>
         </div>
         <div class="kpi">
           <div class="kpi-label">Маржа найма</div>
@@ -875,9 +872,12 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
         нужно один раз вручную выполнить importDebtReport() в редакторе Apps Script.
       </div>
       <div id="debt-body">
-        <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px">
           <button id="debt-age-toggle-btn" onclick="toggleDebtAgeLimit()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:6px 12px;font-size:12px;cursor:pointer">
             Показать все долги (включая &gt;600 дней)
+          </button>
+          <button id="debt-bankrupt-toggle-btn" onclick="toggleDebtBankruptFilter()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:6px 12px;font-size:12px;cursor:pointer">
+            Показать банкротов
           </button>
         </div>
         <div class="kpi-grid" id="debt-kpi"></div>
@@ -1030,17 +1030,10 @@ const PAGE_TITLES = {
 };
 
 let API_URL = localStorage.getItem('api_url') || API_URL_DEFAULT;
-let manualPayment = parseFloat(localStorage.getItem('manual_payment')) || 0;
 let D = null;
 let vehSort = {col:'profit', dir:-1};
 
 function setApiUrl(u){ API_URL = u.trim(); localStorage.setItem('api_url', API_URL); }
-
-function updatePayment(val) {
-  manualPayment = parseFloat(val) || 0;
-  localStorage.setItem('manual_payment', manualPayment);
-  if (D) renderKPI();
-}
 
 // ── ФРАЗЫ НА ЗАГРУЗКЕ ────────────────────────────────────────
 const LOADING_PHRASES = [
@@ -1192,7 +1185,6 @@ async function loadData() {
     if (D.error) throw new Error(D.error);
     hideLoginScreen();
     document.getElementById('error-block').style.display = 'none';
-    if (manualPayment > 0) document.getElementById('payment-input').value = manualPayment;
     render();
   } catch(e) {
     document.getElementById('error-block').style.display = 'block';
@@ -1756,10 +1748,7 @@ function renderKPI() {
   const netProfitEst = profit * NET_PROFIT_COEFFICIENT;
   setHTML('k-net-profit-est', 'Чистая прибыль (оценочная, ' + Math.round(NET_PROFIT_COEFFICIENT * 100) + '%): <b style="color:' + (netProfitEst >= 0 ? 'var(--green)' : 'var(--red)') + '">' + fmt(netProfitEst) + '</b>');
 
-  const pay = manualPayment > 0 ? manualPayment : (s.salesPayment || 0);
-  setText('k-payment', fmt(pay));
-  setText('k-payment-nal', s.salesPayNal > 0 ? 'Нал: ' + fmt(s.salesPayNal) : '');
-  setText('k-razneseno', 'Разнесено: ' + fmt(s.salesPayment || 0));
+  renderDebtMiniCard();
 
   // Блок 4 - маржа по НАЁМНОЙ технике (не по своему парку - тот уже есть в блоке 2 "Валовая
   // прибыль" подписью "Маржа"). Те же поля, что уже используются везде для найма
@@ -1781,6 +1770,60 @@ function renderKPI() {
 function setBar(id, v, color) {
   const el = document.getElementById(id);
   if (el) { el.style.width = Math.min(v, 100) + '%'; el.style.background = color; }
+}
+
+// Карточка "Дебиторская задолженность" на Панели - заменила "Поступления" (Влад,
+// 2026-07-16: "выведи на панель... сумму от 0 до 90 дней... динамику в виде графика").
+// Всегда "чистый" снимок без переключателей (те - рабочий инструмент вкладки ДЗ, тут -
+// быстрый обзор): без банкротов (Влад: "чтобы не показывало банкротов вообще нигде") и
+// без учёта 600-дневного фильтра (для 0-90 дней он в принципе не может сработать).
+function renderDebtMiniCard() {
+  var debt = D.debt;
+  var totalEl = document.getElementById('k-debt-total');
+  var breakdownEl = document.getElementById('k-debt-breakdown');
+  if (!debt || !debt.by_customer) {
+    if (totalEl) totalEl.textContent = '—';
+    if (breakdownEl) breakdownEl.textContent = '';
+    return;
+  }
+  var customers = debt.by_customer.filter(function(c) { return c.status !== 'Банкрот'; });
+  var current30 = 0, over30 = 0, over60 = 0;
+  customers.forEach(function(c) {
+    if (c.daysOverdue <= 30) current30 += c.balance;
+    else if (c.daysOverdue <= 60) over30 += c.balance;
+    else if (c.daysOverdue <= 90) over60 += c.balance;
+  });
+  var total = current30 + over30 + over60;
+  if (totalEl) totalEl.textContent = fmt(total);
+  if (breakdownEl) breakdownEl.innerHTML =
+    'Текущая: ' + fmt(current30) + '<br>Короткая: ' + fmt(over30) + '<br>Средняя: ' + fmt(over60);
+
+  // Мини-график - долг 0-90 дней по дням (debt.history[].debt0to90, копится с момента
+  // деплоя этой фичи, как и вся остальная история ДЗ - старые дни дадут 0).
+  var ctx = document.getElementById('chart-debt-mini');
+  var hist = (debt.history || []).filter(function(h) { return h.debt0to90 > 0; });
+  if (ctx && hist.length >= 2) {
+    if (ctx._chart) ctx._chart.destroy();
+    ctx._chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: hist.map(function(h){ return h.date; }),
+        datasets: [{
+          data: hist.map(function(h){ return h.debt0to90; }),
+          borderColor: '#EF9F27', backgroundColor: 'rgba(239,159,39,0.12)',
+          fill: true, tension: 0.35, pointRadius: 0, borderWidth: 2,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        scales: { x: { display: false }, y: { display: false } },
+      }
+    });
+  } else if (ctx && ctx._chart) {
+    ctx._chart.destroy();
+    ctx._chart = null;
+  }
 }
 
 // ── СИСТЕМА РЕШЕНИЙ ────────────────────────────────────────
@@ -4584,6 +4627,16 @@ function toggleDebtAgeLimit() {
   renderDebt();
 }
 
+// Банкроты (Влад, 2026-07-16): "есть фирмы, которые уже никогда не оживут... чтобы при
+// нажатии не показывало банкротов вообще нигде" - по умолчанию скрыты ВЕЗДЕ (в отличие от
+// 600-дневного фильтра, который не трогает график истории - банкроты исключены и из него,
+// но НАВСЕГДА с момента внедрения, а не по этому переключателю, см. backend saveDebtHistory()).
+let debtHideBankrupt = true; // true = по умолчанию, банкроты скрыты
+function toggleDebtBankruptFilter() {
+  debtHideBankrupt = !debtHideBankrupt;
+  renderDebt();
+}
+
 // Фильтр по клику на корзину просрочки в KPI (Влад, 2026-07-14: "хочу фильтр на этот
 // диапазон, можно по нажатию в блоке"). Повторный клик по активной корзине снимает фильтр.
 // 'dead' (Влад, 2026-07-16: "в блок просрочка добавь мёртвая - это от 600 дней и больше")
@@ -4637,7 +4690,7 @@ function toggleDebtChanges(orgScope) {
 // должник, претензия, суд, исполнительный лист, и срок сколько уже стоит такой статус";
 // добавлен "В графике" 2026-07-16). Список синхронизирован с DEBT_STATUS_OPTIONS в
 // scripts/full_script_final.js.
-const DEBT_STATUS_OPTIONS = ['Должник', 'Претензия', 'Вх. претензия', 'Поручение', 'Суд', 'Исполнительный лист', 'В графике'];
+const DEBT_STATUS_OPTIONS = ['Должник', 'Претензия', 'Вх. претензия', 'Поручение', 'Суд', 'Исполнительный лист', 'В графике', 'Банкрот'];
 async function debtSetStatus(selectEl, contragent) {
   var status = selectEl.value;
   if (!status) return; // "—" - сброс статуса пока не поддержан backend'ом
@@ -4687,31 +4740,44 @@ function setDebtSort(col) {
 // долгам без ограничения возраста, для фильтра нужен свой пересчёт на фронтенде.
 function computeDebtAggregates_(customers) {
   let totalBalance = 0, current30 = 0, over30 = 0, over60 = 0, over90 = 0;
-  const byOrgMap = {}, byManagerMap = {}, byStatusMap = {};
+  const byOrgMap = {}, byManagerMap = {};
   customers.forEach(function(c) {
     totalBalance += c.balance;
     if (c.daysOverdue <= 30) current30 += c.balance;
     else if (c.daysOverdue <= 60) over30 += c.balance;
     else if (c.daysOverdue <= 90) over60 += c.balance;
     else if (c.daysOverdue < DEBT_AGE_LIMIT_DAYS) over90 += c.balance;
-    // 600+ дней - "Мёртвая" - не считаем здесь, берётся из debt.summary.overdue_dead
-    // (backend всегда считает её по ПОЛНОМУ списку, независимо от фильтра возраста).
+    // 600+ дней - "Мёртвая" - не считаем здесь, см. debtDeadAndStatus_() (всегда по
+    // ПОЛНОМУ списку, независимо от фильтра возраста).
     (c.byOrg||[]).forEach(function(o) { byOrgMap[o.org] = (byOrgMap[o.org]||0) + o.balance; });
     if (!byManagerMap[c.manager]) byManagerMap[c.manager] = { name: c.manager, balance: 0, customers: 0 };
     byManagerMap[c.manager].balance += c.balance;
     byManagerMap[c.manager].customers++;
+  });
+  const byOrg = Object.keys(byOrgMap).map(function(org){ return {org:org, balance:byOrgMap[org]}; }).sort(function(a,b){return b.balance-a.balance;});
+  const byManager = Object.values(byManagerMap).sort(function(a,b){return b.balance-a.balance;});
+  return {
+    summary: { total_balance: totalBalance, debtor_count: customers.length, current_0_30: current30, overdue_30_60: over30, overdue_60_90: over60, overdue_90_plus: over90, by_org: byOrg },
+    by_manager: byManager,
+  };
+}
+
+// "Мёртвая" (600+ дней) и "По статусам" - ВСЕГДА по ПОЛНОМУ списку (не зависят от
+// переключателя 600-дневного возраста - Влад, 2026-07-09/16), но с учётом фильтра
+// банкротов (customers сюда приходит уже bankruptFiltered, не debt.by_customer напрямую).
+function debtDeadAndStatus_(customers) {
+  let overdueDead = 0;
+  const byStatusMap = {};
+  customers.forEach(function(c) {
+    if (c.daysOverdue >= DEBT_AGE_LIMIT_DAYS) overdueDead += c.balance;
     const statusKey = c.status || '(без статуса)';
     if (!byStatusMap[statusKey]) byStatusMap[statusKey] = { status: statusKey, balance: 0, customers: 0 };
     byStatusMap[statusKey].balance += c.balance;
     byStatusMap[statusKey].customers++;
   });
-  const byOrg = Object.keys(byOrgMap).map(function(org){ return {org:org, balance:byOrgMap[org]}; }).sort(function(a,b){return b.balance-a.balance;});
-  const byManager = Object.values(byManagerMap).sort(function(a,b){return b.balance-a.balance;});
-  const byStatus = Object.values(byStatusMap).sort(function(a,b){return b.balance-a.balance;});
   return {
-    summary: { total_balance: totalBalance, debtor_count: customers.length, current_0_30: current30, overdue_30_60: over30, overdue_60_90: over60, overdue_90_plus: over90, by_org: byOrg },
-    by_manager: byManager,
-    by_status: byStatus,
+    overdue_dead: overdueDead,
+    by_status: Object.values(byStatusMap).sort(function(a,b){ return b.balance - a.balance; }),
   };
 }
 
@@ -4875,16 +4941,30 @@ function renderDebt() {
     ageToggleBtn.style.background = debtShowAllAges ? 'var(--amber)' : 'var(--bg3)';
     ageToggleBtn.style.color = debtShowAllAges ? '#000' : 'var(--text)';
   }
+  const bankruptToggleBtn = document.getElementById('debt-bankrupt-toggle-btn');
+  if (bankruptToggleBtn) {
+    bankruptToggleBtn.textContent = debtHideBankrupt ? 'Показать банкротов' : 'Скрыть банкротов';
+    bankruptToggleBtn.style.background = debtHideBankrupt ? 'var(--bg3)' : 'var(--red)';
+    bankruptToggleBtn.style.color = debtHideBankrupt ? 'var(--text)' : '#fff';
+  }
+  // Банкроты (Влад, 2026-07-16: "чтобы не показывало банкротов вообще нигде") - фильтруются
+  // ПЕРВЫМИ, до фильтра возраста, т.к. должны быть скрыты из ВСЕГО (в отличие от 600-дневного
+  // фильтра, который не трогает график истории - банкроты исключены и из него, но уже на
+  // бэкенде при записи, см. saveDebtHistory()).
+  const bankruptFiltered = debtHideBankrupt
+    ? debt.by_customer.filter(function(c){ return c.status !== 'Банкрот'; })
+    : debt.by_customer;
   const ageFiltered = debtShowAllAges
-    ? debt.by_customer
-    : debt.by_customer.filter(function(c){ return c.daysOverdue <= DEBT_AGE_LIMIT_DAYS; });
+    ? bankruptFiltered
+    : bankruptFiltered.filter(function(c){ return c.daysOverdue <= DEBT_AGE_LIMIT_DAYS; });
   const agg = computeDebtAggregates_(ageFiltered);
 
   const s = agg.summary;
-  // "Мёртвая" (600+ дней) - всегда из ПОЛНОГО backend-списка, независимо от переключателя
-  // возраста на фронтенде (Влад, 2026-07-16), иначе при выключенном "показать все долги"
-  // эта корзина всегда показывала бы 0.
-  s.overdue_dead = (debt.summary && debt.summary.overdue_dead) || 0;
+  // "Мёртвая" (600+ дней) и "По статусам" - всегда из ПОЛНОГО списка вне зависимости от
+  // переключателя возраста (Влад, 2026-07-16), но С УЧЁТОМ фильтра банкротов (bankruptFiltered,
+  // не debt.by_customer напрямую) - иначе банкрот вылезал бы обратно именно тут.
+  const deadAndStatus = debtDeadAndStatus_(bankruptFiltered);
+  s.overdue_dead = deadAndStatus.overdue_dead;
 
   // Стрелки тенденций - сегодня vs вчера, по общей сумме и по каждому юрлицу (Влад,
   // 2026-07-10: "на каждый день должна сохраняться история... также стрелки тенденций на
@@ -4943,7 +5023,7 @@ function renderDebt() {
   // Как и "Мёртвая" - берём из ПОЛНОГО backend-списка, а не agg (ageFiltered), т.к. статус -
   // ручная классификация и не должна прятаться за фильтром возраста долга (Влад привёл в
   // пример именно "Исполнительный лист", который часто ставится на очень старых долгах).
-  var byStatus = (debt.by_status && debt.by_status.length) ? debt.by_status : (agg.by_status || []);
+  var byStatus = deadAndStatus.by_status || [];
   var byStatusHtml = byStatus.length
     ? '<table style="width:100%;table-layout:fixed;font-size:12px;border-collapse:collapse;margin-top:6px">' +
         byStatus.map(function(x) { return statusRow_(x.status, x.balance, x.customers); }).join('') +
@@ -4970,9 +5050,10 @@ function renderDebt() {
   // "Что изменилось со вчера" - drill-down по клику на стрелку тренда (Влад, 2026-07-15).
   // С 2026-07-16 - если кликнули на стрелку конкретного юрлица (debtChangesOrgScope), берём
   // диф только по нему из debt.debt_changes_by_org, иначе - общий debt.debt_changes.
-  var debtChanges = debtChangesOrgScope
+  var debtChanges = (debtChangesOrgScope
     ? ((debt.debt_changes_by_org || {})[debtChangesOrgScope] || [])
-    : (debt.debt_changes || []);
+    : (debt.debt_changes || [])
+  ).filter(function(x) { return !debtHideBankrupt || x.status !== 'Банкрот'; });
   var changesCard = document.getElementById('debt-changes-card');
   if (changesCard) changesCard.style.display = (debtChangesVisible && debtChanges.length) ? '' : 'none';
   if (debtChangesVisible) {
@@ -5134,10 +5215,11 @@ function renderDebt() {
   // депозиты, гарантийные платежи не нужны"). По ВСЕМ клиентам, не только реальным
   // должникам - клиент с полностью покрытым долгом уже не входит в "Должники", но депозит
   // по нему всё равно стоит показать.
-  var guarantees = debt.guarantees || [];
+  var guarantees = (debt.guarantees || []).filter(function(g) { return !debtHideBankrupt || g.status !== 'Банкрот'; });
   var guaranteesCard = document.getElementById('debt-guarantees-card');
   if (guaranteesCard) guaranteesCard.style.display = guarantees.length ? '' : 'none';
-  document.getElementById('debt-guarantees-total').textContent = fmt((debt.summary && debt.summary.guarantees_total) || 0);
+  var guaranteesTotal = guarantees.reduce(function(s, g) { return s + g.guaranteeDeposit; }, 0);
+  document.getElementById('debt-guarantees-total').textContent = fmt(guaranteesTotal);
   document.getElementById('debt-guarantees-body').innerHTML = guarantees.map(function(g) {
     return '<tr>' +
       '<td><b>' + g.contragent + '</b></td>' +

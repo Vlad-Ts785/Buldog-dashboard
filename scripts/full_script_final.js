@@ -1076,9 +1076,21 @@ function saveDebtHistory() {
   if (!debtSheet || debtSheet.getLastRow() < 2) return;
 
   const numCols = 9 + DEBT_ORG_KEYS.length;
-  const data = debtSheet.getRange(2, 1, debtSheet.getLastRow() - 1, numCols).getValues();
-  let totalBalance = 0, totalDebt = 0, debtorCount = 0;
+  const rawData = debtSheet.getRange(2, 1, debtSheet.getLastRow() - 1, numCols).getValues();
+  // Банкроты исключены из истории НАЧИНАЯ С ЭТОГО МОМЕНТА (Влад, 2026-07-16: "чтобы при
+  // нажатии не показывало банкротов вообще нигде" - в отличие от фильтра "600 дней", этот
+  // распространяется и на график, т.к. банкрот - деньги, которых точно не будет, а не
+  // просто старый долг). Задним числом уже записанные дни не поправить - как и всегда с
+  // изменением логики истории в этом проекте.
+  const debtStatusesForHist = getDebtStatuses_(ss);
+  const data = rawData.filter(function(r) {
+    const st = debtStatusesForHist[String(r[0] || '')];
+    return !st || st.status !== 'Банкрот';
+  });
+
+  let totalBalance = 0, totalDebt = 0, debtorCount = 0, sum0to90 = 0;
   const orgTotals = DEBT_ORG_KEYS.map(function() { return 0; });
+  const todayStrHist = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM-dd');
   // Только реальные должники (баланс > 0) - та же граница, что и в getDebtData() (Влад,
   // 2026-07-09: цифра в графике "ДЗ по дням" не совпадала с "Общая ДЗ" в KPI - раньше тут
   // суммировались ВСЕ клиенты, включая тех, у кого баланс отрицательный (мы держим больше
@@ -1095,10 +1107,20 @@ function saveDebtHistory() {
       const v = parseFloat(r[9 + i]) || 0;
       if (v > 0) orgTotals[i] += v;
     });
+    // Долг 0-90 дней (текущая+короткая+средняя) - для карточки "Дебиторская задолженность"
+    // на Панели (Влад, 2026-07-16: "выведи... сумму от 0 до 90 дней... динамику в виде
+    // графика"). oldestUnpaidDate (r[8]) уже посчитан при импорте, дни считаем так же, как
+    // в getDebtData().
+    const oldestUnpaidDate = ordFormatDate(r[8]);
+    if (oldestUnpaidDate) {
+      const d1 = new Date(oldestUnpaidDate + 'T00:00:00'), d2 = new Date(todayStrHist + 'T00:00:00');
+      const daysOverdue = Math.round((d2 - d1) / 86400000);
+      if (daysOverdue <= 90) sum0to90 += balance;
+    }
   });
 
   const orgHeaders = DEBT_ORG_KEYS.map(function(k) { return DEBT_ORG_SHORT_NAMES[k]; });
-  const allHeaders = ['Дата', 'Баланс (долг-аванс)', 'Сумма долга', 'Кол-во должников'].concat(orgHeaders);
+  const allHeaders = ['Дата', 'Баланс (долг-аванс)', 'Сумма долга', 'Кол-во должников'].concat(orgHeaders, ['ДЗ 0-90 дней']);
   let histSheet = ss.getSheetByName(DEBT_HISTORY_SHEET);
   if (!histSheet) {
     histSheet = ss.insertSheet(DEBT_HISTORY_SHEET);
@@ -1126,7 +1148,7 @@ function saveDebtHistory() {
     }
   }
 
-  const newRow = [new Date(), totalBalance, totalDebt, debtorCount].concat(orgTotals);
+  const newRow = [new Date(), totalBalance, totalDebt, debtorCount].concat(orgTotals, [sum0to90]);
   if (todayRowIndex > 0) histSheet.getRange(todayRowIndex, 1, 1, newRow.length).setValues([newRow]);
   else histSheet.appendRow(newRow);
 
@@ -1200,7 +1222,7 @@ function saveDebtCustomerHistory_(ss, data) {
 // перезаписывается импортом ДЗ_данные (тот полностью перезаписывается 1С-отчётом каждый
 // день), одна строка на контрагента.
 const DEBT_STATUS_SHEET = 'ДЗ_Статусы';
-const DEBT_STATUS_OPTIONS = ['Должник', 'Претензия', 'Вх. претензия', 'Поручение', 'Суд', 'Исполнительный лист', 'В графике'];
+const DEBT_STATUS_OPTIONS = ['Должник', 'Претензия', 'Вх. претензия', 'Поручение', 'Суд', 'Исполнительный лист', 'В графике', 'Банкрот'];
 
 function isValidDebtStatus_(status) {
   return DEBT_STATUS_OPTIONS.indexOf(status) >= 0;
@@ -1343,12 +1365,16 @@ function getDebtData(ss) {
     const d1 = new Date(dateStr + 'T00:00:00'), d2 = new Date(todayStr + 'T00:00:00');
     return Math.round((d2 - d1) / 86400000);
   }
-  customers.forEach(function(c) { c.daysOverdue = daysSince(c.oldestUnpaidDate); });
+  // Бегут по allCustomers (не только customers с балансом>0), чтобы статус/дни просрочки
+  // были доступны и в "Гарантии" (та таблица строится из allCustomers - у контрагента может
+  // быть депозит, даже если долг уже полностью закрыт) - иначе банкрота с депозитом было бы
+  // нечем распознать при скрытии банкротов (см. ниже).
+  allCustomers.forEach(function(c) { c.daysOverdue = daysSince(c.oldestUnpaidDate); });
 
   // Статус взыскания (Влад, 2026-07-14: "должник, претензия, суд, исполнительный лист... и
-  // срок сколько уже стоит такой статус").
+  // срок сколько уже стоит такой статус"; добавлен "Банкрот" 2026-07-16).
   const debtStatuses = getDebtStatuses_(ss);
-  customers.forEach(function(c) {
+  allCustomers.forEach(function(c) {
     const st = debtStatuses[c.contragent];
     c.status = st ? st.status : '';
     c.statusSince = st ? st.since : '';
@@ -1362,7 +1388,7 @@ function getDebtData(ss) {
   // в приоритете, см. debtStatuses выше), и НЕ пишется в ДЗ_Статусы - пересчитывается
   // заново при каждом запросе по daysOverdue, поэтому при переходе за 30 дней автоматически
   // становится пустым, без ручной очистки.
-  customers.forEach(function(c) {
+  allCustomers.forEach(function(c) {
     if (!c.status && c.daysOverdue <= 30) {
       c.status = 'В графике';
       c.statusAuto = true;
@@ -1419,7 +1445,7 @@ function getDebtData(ss) {
   const histSheet = ss.getSheetByName(DEBT_HISTORY_SHEET);
   let history = [];
   if (histSheet && histSheet.getLastRow() > 1) {
-    const histNumCols = 4 + DEBT_ORG_KEYS.length;
+    const histNumCols = 4 + DEBT_ORG_KEYS.length + 1; // + "ДЗ 0-90 дней"
     history = histSheet.getRange(2, 1, histSheet.getLastRow() - 1, histNumCols).getValues()
       .filter(function(r) { return r[0] instanceof Date; })
       .map(function(r) {
@@ -1432,6 +1458,10 @@ function getDebtData(ss) {
           date: Utilities.formatDate(r[0], 'Europe/Moscow', 'yyyy-MM-dd'),
           balance: r[1] || 0, debt: r[2] || 0, debtors: r[3] || 0,
           byOrg: byOrgDay,
+          // Долг 0-90 дней - для мини-графика на карточке "Дебиторская задолженность" на
+          // Панели (Влад, 2026-07-16). Строки до этой колонки дадут 0 - копится с момента
+          // деплоя, как и всё остальное в этой истории.
+          debt0to90: parseFloat(r[4 + DEBT_ORG_KEYS.length]) || 0,
         };
       })
       .sort(function(a, b) { return a.date.localeCompare(b.date); });
@@ -1445,7 +1475,8 @@ function getDebtData(ss) {
   const guarantees = allCustomers
     .filter(function(c) { return (c.guaranteeDeposit || 0) > 0; })
     .map(function(c) {
-      return { contragent: c.contragent, manager: c.manager, guaranteeDeposit: c.guaranteeDeposit };
+      // status - чтобы фронтенд мог скрыть банкротов и здесь тоже (Влад, 2026-07-16: "нигде").
+      return { contragent: c.contragent, manager: c.manager, guaranteeDeposit: c.guaranteeDeposit, status: c.status };
     })
     .sort(function(a, b) { return b.guaranteeDeposit - a.guaranteeDeposit; });
   const guaranteesTotal = guarantees.reduce(function(s, g) { return s + g.guaranteeDeposit; }, 0);
@@ -1493,7 +1524,7 @@ function getDebtData(ss) {
         const prevBal = prevByName[c.contragent] || 0;
         const diff = c.balance - prevBal;
         if (Math.round(diff) !== 0) {
-          debtChanges.push({ contragent: c.contragent, manager: c.manager, yesterday: prevBal, today: c.balance, diff: diff });
+          debtChanges.push({ contragent: c.contragent, manager: c.manager, yesterday: prevBal, today: c.balance, diff: diff, status: c.status });
         }
       });
       // Контрагенты, которые ВЧЕРА были в списке (с балансом), а СЕГОДНЯ полностью закрыли
@@ -1519,7 +1550,7 @@ function getDebtData(ss) {
           const prevBal = prevForOrg[c.contragent] || 0;
           const diff = todayOrgBal - prevBal;
           if (Math.round(diff) !== 0) {
-            orgChanges.push({ contragent: c.contragent, manager: c.manager, yesterday: prevBal, today: todayOrgBal, diff: diff });
+            orgChanges.push({ contragent: c.contragent, manager: c.manager, yesterday: prevBal, today: todayOrgBal, diff: diff, status: c.status });
           }
         });
         Object.keys(prevForOrg).forEach(function(name) {

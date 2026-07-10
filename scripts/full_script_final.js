@@ -1188,7 +1188,7 @@ function saveDebtCustomerHistory_(ss, data) {
 // перезаписывается импортом ДЗ_данные (тот полностью перезаписывается 1С-отчётом каждый
 // день), одна строка на контрагента.
 const DEBT_STATUS_SHEET = 'ДЗ_Статусы';
-const DEBT_STATUS_OPTIONS = ['Должник', 'Претензия', 'Суд', 'Исполнительный лист', 'В графике'];
+const DEBT_STATUS_OPTIONS = ['Должник', 'Претензия', 'Вх. претензия', 'Поручение', 'Суд', 'Исполнительный лист', 'В графике'];
 
 function isValidDebtStatus_(status) {
   return DEBT_STATUS_OPTIONS.indexOf(status) >= 0;

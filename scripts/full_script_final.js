@@ -866,21 +866,31 @@ function parseDebtRawRows_(rawData) {
       // строка контрагента
       currentContragent = a;
       if (!customers[a]) {
-        customers[a] = { contragent: a, debt: 0, advance: 0, guaranteePayment: 0, guaranteeDeposit: 0, docs: [], byOrg: {} };
+        customers[a] = { contragent: a, debt: 0, advance: 0, guaranteePayment: 0, guaranteeDeposit: 0, ourDebt: 0, docs: [], byOrg: {} };
       }
       const c = customers[a];
       const debt = ordParseNum(row[6]), advance = ordParseNum(row[7]);
       const gPayment = ordParseNum(row[8]), gDeposit = ordParseNum(row[9]);
+      // "Сумма нашего долга" (колонка L, row[11]) - взаимозачёт (Влад, 2026-07-16: "мы
+      // арендная компания, наши клиенты в том числе партнёры... они оказывали нам услуги,
+      // давали экскаваторы, поэтому это как взаимозачёт"). Деньги реально поступили на наш
+      // счёт ("Поступление на расчётный счёт..." под этим контрагентом), 1С пока не
+      // разнесла их по актам, поэтому висят отдельной колонкой - но фактически гасят долг
+      // клиента. Проверено арифметикой самой 1С: Итог(K) + Сумма_нашего_долга(L) =
+      // Общий_итог(N) - на примере "АРТ-СТРОЙ ООО": -563 375 + 578 375 = 15 000.
+      const ourDebt = ordParseNum(row[11]);
       c.debt             += debt;
       c.advance          += advance;
       c.guaranteePayment += gPayment;
       c.guaranteeDeposit += gDeposit;
+      c.ourDebt           += ourDebt;
       if (currentOrg) {
-        if (!c.byOrg[currentOrg]) c.byOrg[currentOrg] = { debt: 0, advance: 0, guaranteePayment: 0, guaranteeDeposit: 0 };
+        if (!c.byOrg[currentOrg]) c.byOrg[currentOrg] = { debt: 0, advance: 0, guaranteePayment: 0, guaranteeDeposit: 0, ourDebt: 0 };
         c.byOrg[currentOrg].debt             += debt;
         c.byOrg[currentOrg].advance          += advance;
         c.byOrg[currentOrg].guaranteePayment += gPayment;
         c.byOrg[currentOrg].guaranteeDeposit += gDeposit;
+        c.byOrg[currentOrg].ourDebt          += ourDebt;
       }
     }
   }
@@ -908,7 +918,7 @@ function parseDebtRawRows_(rawData) {
     const byOrgBalance = {};
     DEBT_ORG_KEYS.forEach(function(orgKey) {
       const o = c.byOrg[orgKey];
-      byOrgBalance[orgKey] = o ? (o.debt - o.advance - o.guaranteePayment - o.guaranteeDeposit) : 0;
+      byOrgBalance[orgKey] = o ? (o.debt - o.advance - o.guaranteePayment - o.guaranteeDeposit - o.ourDebt) : 0;
     });
     // Итоговый баланс = сумма ТОЛЬКО положительных остатков по юрлицам (Влад, 2026-07-09:
     // "плюс с минусом мы не сводим, показываем только долг"). Раньше баланс считался как
@@ -928,14 +938,15 @@ function parseDebtRawRows_(rawData) {
     // СТАРЫЕ документы поступлениями первыми - повторяет ту же хронологическую логику, не
     // произвольное предположение. Считаем ОТДЕЛЬНО по каждому юрлицу (тот же принцип, что и
     // баланс - аванс одного юрлица не может гасить документ другого).
-    // Пул покрытия = аванс + гарантийный платёж + гарантийный депозит (Влад, 2026-07-13) -
-    // все три одинаково закрывают документы, просто разными деньгами (клиента или гарантией/
-    // зарплатой менеджера) - см. комментарий у byOrgBalance выше.
+    // Пул покрытия = аванс + гарантийный платёж + гарантийный депозит + "сумма нашего долга"
+    // (взаимозачёт, Влад, 2026-07-16) - все четыре одинаково закрывают документы, просто
+    // разными деньгами (клиента, гарантией/зарплатой менеджера, или встречной услугой типа
+    // аренды экскаватора) - см. комментарий у byOrgBalance выше.
     const docsByOrg = {};
     unpaidDocs.forEach(function(x) { (docsByOrg[x.org] = docsByOrg[x.org] || []).push(x); });
     Object.keys(docsByOrg).forEach(function(orgKey) {
       const orgCoverage = c.byOrg[orgKey]
-        ? (c.byOrg[orgKey].advance + c.byOrg[orgKey].guaranteePayment + c.byOrg[orgKey].guaranteeDeposit)
+        ? (c.byOrg[orgKey].advance + c.byOrg[orgKey].guaranteePayment + c.byOrg[orgKey].guaranteeDeposit + c.byOrg[orgKey].ourDebt)
         : 0;
       let remaining = orgCoverage;
       const sorted = docsByOrg[orgKey].slice().sort(function(a, b) { return a.date.localeCompare(b.date); });
@@ -969,6 +980,7 @@ function parseDebtRawRows_(rawData) {
       advance: c.advance,
       guaranteePayment: c.guaranteePayment,
       guaranteeDeposit: c.guaranteeDeposit,
+      ourDebt: c.ourDebt,
       balance: balance,
       lastDocDate: latestDate,
       oldestUnpaidDate: oldestDate,

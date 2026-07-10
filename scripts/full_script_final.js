@@ -792,6 +792,12 @@ const DEBT_HISTORY_SHEET = 'История_ДЗ';
 // снова нужен посуточный снимок баланса по каждому клиенту, не только по юрлицам.
 const DEBT_CUSTOMER_HISTORY_SHEET = 'История_ДЗ_по_контрагентам';
 
+// Порог "мёртвой" ДЗ (Влад, 2026-07-10/16) - долги старше этого возраста по умолчанию
+// скрыты из таблиц/расчётов на фронтенде (кнопка-переключатель), а с 2026-07-16 ещё и
+// образуют отдельную корзину "Мёртвая" в блоке "Просрочка". Держать в синхроне с
+// DEBT_AGE_LIMIT_DAYS в files/index.html.
+const DEBT_AGE_LIMIT_DAYS = 600;
+
 // Убирает телефон из имени менеджера ("Савиток Олеся Анатольевна 8-985-150-11-85" ->
 // "Савиток Олеся Анатольевна") - та же логика, что фронтендный cleanName() (files/index.html).
 // Влад, 2026-07-08: "это вообще нужно везде исключать... у менеджера есть фамилия имя
@@ -1103,15 +1109,30 @@ function saveDebtHistory() {
   saveDebtCustomerHistory_(ss, data);
 }
 
-// Дневной снимок баланса ПО КАЖДОМУ КОНТРАГЕНТУ - для drill-down "что изменилось" по клику
-// на стрелку тренда (Влад, 2026-07-15). Идемпотентно - удаляет сегодняшние строки перед
-// записью новых (та же логика, что и общая история выше). data - уже прочитанные строки
-// ДЗ_данные, повторно не читаем.
+// Дневной снимок баланса ПО КАЖДОМУ КОНТРАГЕНТУ И ЮРЛИЦУ - для drill-down "что изменилось"
+// по клику на стрелку тренда (Влад, 2026-07-15, уточнение 2026-07-16: "если кликаю на
+// Бульдог - хочу видеть только Бульдог изменения"). Одна строка на (контрагент, юрлицо) -
+// "Итого" по контрагенту считается на чтении суммированием его строк по юрлицам, отдельно
+// не храним. Идемпотентно - удаляет сегодняшние строки перед записью новых. data - уже
+// прочитанные строки ДЗ_данные, повторно не читаем.
+// Ёмкость: ~140 должников × ~1.2 (часть работает через несколько юрлиц) ≈ 170 строк/день
+// ≈ 62 тыс. строк/год ≈ 245 тыс. ячеек/год - при лимите книги 10 млн ячеек (общий на все
+// листы) не проблема даже на десятилетия вперёд (Влад, 2026-07-16: "выдержит ли табличка").
 function saveDebtCustomerHistory_(ss, data) {
   let custHistSheet = ss.getSheetByName(DEBT_CUSTOMER_HISTORY_SHEET);
   if (!custHistSheet) {
     custHistSheet = ss.insertSheet(DEBT_CUSTOMER_HISTORY_SHEET);
-    custHistSheet.getRange(1, 1, 1, 3).setValues([['Дата', 'Контрагент', 'Баланс']]).setFontWeight('bold');
+    custHistSheet.getRange(1, 1, 1, 4).setValues([['Дата', 'Контрагент', 'Юрлицо', 'Баланс']]).setFontWeight('bold');
+  } else if (custHistSheet.getLastColumn() < 4) {
+    // Старый лист без колонки "Юрлицо" (до 2026-07-16, всего ~1 день данных). Просто
+    // дописать заголовок недостаточно - у старых строк баланс УЖЕ физически лежит в
+    // колонке 3 (которая станет "Юрлицо"), а не в новой колонке 4 - это исказило бы
+    // разбор (строка "50000" прочиталась бы как название юрлица). Т.к. это всего один
+    // день недавних данных, безопаснее удалить старые строки, чем читать их неверно.
+    const oldLastRow = custHistSheet.getLastRow();
+    if (oldLastRow > 1) custHistSheet.deleteRows(2, oldLastRow - 1);
+    custHistSheet.getRange(1, 4).setValue('Баланс').setFontWeight('bold');
+    custHistSheet.getRange(1, 3).setValue('Юрлицо').setFontWeight('bold');
   }
 
   const today = new Date();
@@ -1138,10 +1159,14 @@ function saveDebtCustomerHistory_(ss, data) {
   data.forEach(function(r) {
     const balance = parseFloat(r[6]) || 0;
     if (balance <= 0) return; // только реальные должники
-    rows.push([now, String(r[0] || ''), balance]);
+    const name = String(r[0] || '');
+    DEBT_ORG_KEYS.forEach(function(orgKey, i) {
+      const orgBalance = parseFloat(r[9 + i]) || 0;
+      if (orgBalance > 0) rows.push([now, name, DEBT_ORG_SHORT_NAMES[orgKey], orgBalance]);
+    });
   });
   if (rows.length > 0) {
-    custHistSheet.getRange(custHistSheet.getLastRow() + 1, 1, rows.length, 3).setValues(rows);
+    custHistSheet.getRange(custHistSheet.getLastRow() + 1, 1, rows.length, 4).setValues(rows);
   }
 }
 
@@ -1151,7 +1176,7 @@ function saveDebtCustomerHistory_(ss, data) {
 // перезаписывается импортом ДЗ_данные (тот полностью перезаписывается 1С-отчётом каждый
 // день), одна строка на контрагента.
 const DEBT_STATUS_SHEET = 'ДЗ_Статусы';
-const DEBT_STATUS_OPTIONS = ['Должник', 'Претензия', 'Суд', 'Исполнительный лист'];
+const DEBT_STATUS_OPTIONS = ['Должник', 'Претензия', 'Суд', 'Исполнительный лист', 'В графике'];
 
 function isValidDebtStatus_(status) {
   return DEBT_STATUS_OPTIONS.indexOf(status) >= 0;
@@ -1305,6 +1330,20 @@ function getDebtData(ss) {
     c.comment = st ? st.comment : '';
   });
 
+  // 4-й блок КПЭ "По статусам" (Влад, 2026-07-16: "нужен четвёртый блок где будут суммы по
+  // статусам, например сумма всех статусов Исполнительный лист") - сумма долга и кол-во
+  // должников на каждый статус, плюс отдельно те, у кого статус вообще не проставлен.
+  const byStatusMap = {};
+  customers.forEach(function(c) {
+    const key = c.status || '(без статуса)';
+    if (!byStatusMap[key]) byStatusMap[key] = { status: key, balance: 0, customers: 0 };
+    byStatusMap[key].balance += c.balance;
+    byStatusMap[key].customers++;
+  });
+  const byStatus = Object.keys(byStatusMap)
+    .map(function(k) { return byStatusMap[k]; })
+    .sort(function(a, b) { return b.balance - a.balance; });
+
   const byManagerMap = {};
   customers.forEach(function(c) {
     if (!byManagerMap[c.manager]) byManagerMap[c.manager] = { name: c.manager, balance: 0, customers: 0 };
@@ -1319,7 +1358,11 @@ function getDebtData(ss) {
   const current0_30 = customers.filter(function(c) { return c.daysOverdue <= 30; }).reduce(function(s,c){return s+c.balance;}, 0);
   const overdue30 = customers.filter(function(c) { return c.daysOverdue > 30 && c.daysOverdue <= 60; }).reduce(function(s,c){return s+c.balance;}, 0);
   const overdue60 = customers.filter(function(c) { return c.daysOverdue > 60 && c.daysOverdue <= 90; }).reduce(function(s,c){return s+c.balance;}, 0);
-  const overdue90 = customers.filter(function(c) { return c.daysOverdue > 90; }).reduce(function(s,c){return s+c.balance;}, 0);
+  const overdue90 = customers.filter(function(c) { return c.daysOverdue > 90 && c.daysOverdue < DEBT_AGE_LIMIT_DAYS; }).reduce(function(s,c){return s+c.balance;}, 0);
+  // "Мёртвая" (Влад, 2026-07-16: "в блок просрочка добавь мёртвая - это от 600 дней и
+  // больше") - считаем от ПОЛНОГО allCustomers (не customers, отфильтрованного по
+  // 600-дневному лимиту фронтендом), иначе эта корзина всегда показывала бы 0.
+  const deadDebt = allCustomers.filter(function(c) { return c.balance > 0 && c.daysOverdue >= DEBT_AGE_LIMIT_DAYS; }).reduce(function(s,c){return s+c.balance;}, 0);
 
   // Общий долг по юрлицам (Влад, 2026-07-09: "32602... эта сумма должна быть разбита: на
   // сколько в Бульдоге, сколько в Ярде") - сумма положительных остатков по каждому юрлицу
@@ -1369,13 +1412,18 @@ function getDebtData(ss) {
   const guaranteesTotal = guarantees.reduce(function(s, g) { return s + g.guaranteeDeposit; }, 0);
 
   // Drill-down "что изменилось" по клику на стрелку тренда (Влад, 2026-07-15: "при нажатии
-  // на -5% +23% видеть какие именно изменения были, кто и как уменьшил или увеличил ДЗ") -
+  // на -5% +23% видеть какие именно изменения были, кто и как уменьшил или увеличил ДЗ";
+  // уточнение 2026-07-16: "если кликаю на Бульдог - хочу видеть только Бульдог изменения") -
   // сравниваем ЖИВОЙ баланс сейчас с последним записанным снимком за ПРОШЛЫЙ (не сегодняшний
-  // - тот мог быть ещё не записан) день.
+  // - тот мог быть ещё не записан) день. Считаем и общий diff (по всем юрлицам), и отдельно
+  // diff по каждому юрлицу.
   const custHistSheet = ss.getSheetByName(DEBT_CUSTOMER_HISTORY_SHEET);
   let debtChanges = [];
+  const debtChangesByOrg = {};
   if (custHistSheet && custHistSheet.getLastRow() > 1) {
-    const custHistData = custHistSheet.getRange(2, 1, custHistSheet.getLastRow() - 1, 3).getValues();
+    const custHistNumCols = Math.min(4, custHistSheet.getLastColumn());
+    const hasOrgCol = custHistNumCols >= 4;
+    const custHistData = custHistSheet.getRange(2, 1, custHistSheet.getLastRow() - 1, custHistNumCols).getValues();
     let prevDateKey = null;
     custHistData.forEach(function(r) {
       if (!(r[0] instanceof Date)) return;
@@ -1383,16 +1431,27 @@ function getDebtData(ss) {
       if (key < todayStr && (!prevDateKey || key > prevDateKey)) prevDateKey = key;
     });
     if (prevDateKey) {
-      const prevBalanceByName = {};
+      const prevByName = {};         // {контрагент: баланс вчера, сумма по всем юрлицам}
+      const prevByNameOrg = {};      // {юрлицо: {контрагент: баланс вчера в этом юрлице}}
       custHistData.forEach(function(r) {
         if (!(r[0] instanceof Date)) return;
         const key = Utilities.formatDate(r[0], 'Europe/Moscow', 'yyyy-MM-dd');
-        if (key === prevDateKey) prevBalanceByName[String(r[1] || '')] = parseFloat(r[2]) || 0;
+        if (key !== prevDateKey) return;
+        const name = String(r[1] || '');
+        const org = hasOrgCol ? String(r[2] || '') : '';
+        const bal = parseFloat(r[hasOrgCol ? 3 : 2]) || 0;
+        prevByName[name] = (prevByName[name] || 0) + bal;
+        if (org) {
+          if (!prevByNameOrg[org]) prevByNameOrg[org] = {};
+          prevByNameOrg[org][name] = (prevByNameOrg[org][name] || 0) + bal;
+        }
       });
+
+      // Общий diff (по всем юрлицам сразу) - для клика на общую сумму "Общая ДЗ".
       const seen = {};
       customers.forEach(function(c) {
         seen[c.contragent] = true;
-        const prevBal = prevBalanceByName[c.contragent] || 0;
+        const prevBal = prevByName[c.contragent] || 0;
         const diff = c.balance - prevBal;
         if (Math.round(diff) !== 0) {
           debtChanges.push({ contragent: c.contragent, manager: c.manager, yesterday: prevBal, today: c.balance, diff: diff });
@@ -1400,12 +1459,38 @@ function getDebtData(ss) {
       });
       // Контрагенты, которые ВЧЕРА были в списке (с балансом), а СЕГОДНЯ полностью закрыли
       // долг (выпали из customers, т.к. баланс<=0 теперь) - это тоже изменение.
-      Object.keys(prevBalanceByName).forEach(function(name) {
+      Object.keys(prevByName).forEach(function(name) {
         if (seen[name]) return;
-        const prevBal = prevBalanceByName[name];
+        const prevBal = prevByName[name];
         if (prevBal > 0) debtChanges.push({ contragent: name, manager: '', yesterday: prevBal, today: 0, diff: -prevBal });
       });
       debtChanges.sort(function(a, b) { return Math.abs(b.diff) - Math.abs(a.diff); });
+
+      // Diff ОТДЕЛЬНО ПО КАЖДОМУ ЮРЛИЦУ (Влад: "кликаю на Бульдог - вижу только Бульдог").
+      DEBT_ORG_KEYS.forEach(function(orgKey) {
+        const orgName = DEBT_ORG_SHORT_NAMES[orgKey];
+        const prevForOrg = prevByNameOrg[orgName] || {};
+        const orgChanges = [];
+        const seenOrg = {};
+        customers.forEach(function(c) {
+          var todayOrgBal = 0;
+          (c.byOrg || []).forEach(function(o) { if (o.org === orgName) todayOrgBal = o.balance; });
+          if (todayOrgBal === 0 && !prevForOrg[c.contragent]) return; // не участвовал в этом юрлице
+          seenOrg[c.contragent] = true;
+          const prevBal = prevForOrg[c.contragent] || 0;
+          const diff = todayOrgBal - prevBal;
+          if (Math.round(diff) !== 0) {
+            orgChanges.push({ contragent: c.contragent, manager: c.manager, yesterday: prevBal, today: todayOrgBal, diff: diff });
+          }
+        });
+        Object.keys(prevForOrg).forEach(function(name) {
+          if (seenOrg[name]) return;
+          const prevBal = prevForOrg[name];
+          if (prevBal > 0) orgChanges.push({ contragent: name, manager: '', yesterday: prevBal, today: 0, diff: -prevBal });
+        });
+        orgChanges.sort(function(a, b) { return Math.abs(b.diff) - Math.abs(a.diff); });
+        if (orgChanges.length) debtChangesByOrg[orgName] = orgChanges;
+      });
     }
   }
 
@@ -1417,6 +1502,7 @@ function getDebtData(ss) {
       overdue_30_60: overdue30,
       overdue_60_90: overdue60,
       overdue_90_plus: overdue90,
+      overdue_dead: deadDebt,
       by_org: byOrg,
       old_unclosed_orders_count: oldUnclosedCount,
       old_unclosed_orders_amount: oldUnclosedAmount,
@@ -1424,9 +1510,11 @@ function getDebtData(ss) {
     },
     by_customer: customers,
     by_manager: Object.values(byManagerMap).sort(function(a, b) { return b.balance - a.balance; }),
+    by_status: byStatus,
     guarantees: guarantees,
     history: history,
     debt_changes: debtChanges,
+    debt_changes_by_org: debtChangesByOrg,
   };
 }
 

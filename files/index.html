@@ -883,7 +883,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
         <div class="kpi-grid" id="debt-kpi"></div>
         <div class="card" id="debt-changes-card" style="margin-top:16px;display:none">
           <div class="sec-header">
-            <div class="sec-title">Что изменилось со вчера</div>
+            <div class="sec-title" id="debt-changes-title">Что изменилось со вчера</div>
             <div class="sec-sub" id="debt-changes-sub"></div>
           </div>
           <div style="overflow-x:auto">
@@ -4586,30 +4586,58 @@ function toggleDebtAgeLimit() {
 
 // Фильтр по клику на корзину просрочки в KPI (Влад, 2026-07-14: "хочу фильтр на этот
 // диапазон, можно по нажатию в блоке"). Повторный клик по активной корзине снимает фильтр.
-let debtBucketFilter = ''; // '' | '0-30' | '30-60' | '60-90' | '90+'
+// 'dead' (Влад, 2026-07-16: "в блок просрочка добавь мёртвая - это от 600 дней и больше")
+// - долги 600+ дней, обычно скрытые фильтром возраста, поэтому клик по этой корзине
+// дополнительно включает показ всех долгов (см. setDebtBucketFilter).
+let debtBucketFilter = ''; // '' | '0-30' | '30-60' | '60-90' | '90+' | 'dead'
 function setDebtBucketFilter(bucket) {
   debtBucketFilter = (debtBucketFilter === bucket) ? '' : bucket;
+  if (debtBucketFilter === 'dead') debtShowAllAges = true; // иначе строки 600+ дней просто скрыты
   renderDebt();
 }
 function debtInBucket_(days, bucket) {
   if (bucket === '0-30') return days <= 30;
   if (bucket === '30-60') return days > 30 && days <= 60;
   if (bucket === '60-90') return days > 60 && days <= 90;
-  if (bucket === '90+') return days > 90;
+  if (bucket === '90+') return days > 90 && days < DEBT_AGE_LIMIT_DAYS;
+  if (bucket === 'dead') return days >= DEBT_AGE_LIMIT_DAYS;
   return true;
 }
 
+// Фильтр по клику на статус в 4-м блоке KPI (Влад, 2026-07-16: "нужен четвёртый блок где
+// будут суммы по статусам... так же по нажатию выбор всех по статусу").
+let debtStatusFilter = ''; // '' | 'Должник' | ... | '(без статуса)'
+function setDebtStatusFilter(status) {
+  debtStatusFilter = (debtStatusFilter === status) ? '' : status;
+  // Статус - ручная классификация, не должна зависеть от возраста долга (пример самого
+  // Влада - "Исполнительный лист" часто как раз на очень старых долгах) - показываем все
+  // возрасты, иначе сумма в блоке разойдётся с тем, что реально попадёт в таблицу.
+  if (debtStatusFilter) debtShowAllAges = true;
+  renderDebt();
+}
+
 // "Что изменилось со вчера" (Влад, 2026-07-15) - разворачивается по клику на стрелку тренда.
+// С 2026-07-16 - по клику на стрелку конкретного юрлица показывает изменения ТОЛЬКО по
+// нему (Влад: "если я кликаю на бульдог - хочу видеть только бульдог изменения"), пустой
+// orgScope = общая ДЗ (сумма по всем юрлицам).
 let debtChangesVisible = false;
-function toggleDebtChanges() {
-  debtChangesVisible = !debtChangesVisible;
+let debtChangesOrgScope = '';
+function toggleDebtChanges(orgScope) {
+  orgScope = orgScope || '';
+  if (debtChangesVisible && debtChangesOrgScope === orgScope) {
+    debtChangesVisible = false;
+  } else {
+    debtChangesVisible = true;
+    debtChangesOrgScope = orgScope;
+  }
   renderDebt();
 }
 
 // Статус взыскания по контрагенту (Влад, 2026-07-14: "проставлять вручную статус...
-// должник, претензия, суд, исполнительный лист, и срок сколько уже стоит такой статус").
-// Список синхронизирован с DEBT_STATUS_OPTIONS в scripts/full_script_final.js.
-const DEBT_STATUS_OPTIONS = ['Должник', 'Претензия', 'Суд', 'Исполнительный лист'];
+// должник, претензия, суд, исполнительный лист, и срок сколько уже стоит такой статус";
+// добавлен "В графике" 2026-07-16). Список синхронизирован с DEBT_STATUS_OPTIONS в
+// scripts/full_script_final.js.
+const DEBT_STATUS_OPTIONS = ['Должник', 'Претензия', 'Суд', 'Исполнительный лист', 'В графике'];
 async function debtSetStatus(selectEl, contragent) {
   var status = selectEl.value;
   if (!status) return; // "—" - сброс статуса пока не поддержан backend'ом
@@ -4659,23 +4687,31 @@ function setDebtSort(col) {
 // долгам без ограничения возраста, для фильтра нужен свой пересчёт на фронтенде.
 function computeDebtAggregates_(customers) {
   let totalBalance = 0, current30 = 0, over30 = 0, over60 = 0, over90 = 0;
-  const byOrgMap = {}, byManagerMap = {};
+  const byOrgMap = {}, byManagerMap = {}, byStatusMap = {};
   customers.forEach(function(c) {
     totalBalance += c.balance;
     if (c.daysOverdue <= 30) current30 += c.balance;
     else if (c.daysOverdue <= 60) over30 += c.balance;
     else if (c.daysOverdue <= 90) over60 += c.balance;
-    else over90 += c.balance;
+    else if (c.daysOverdue < DEBT_AGE_LIMIT_DAYS) over90 += c.balance;
+    // 600+ дней - "Мёртвая" - не считаем здесь, берётся из debt.summary.overdue_dead
+    // (backend всегда считает её по ПОЛНОМУ списку, независимо от фильтра возраста).
     (c.byOrg||[]).forEach(function(o) { byOrgMap[o.org] = (byOrgMap[o.org]||0) + o.balance; });
     if (!byManagerMap[c.manager]) byManagerMap[c.manager] = { name: c.manager, balance: 0, customers: 0 };
     byManagerMap[c.manager].balance += c.balance;
     byManagerMap[c.manager].customers++;
+    const statusKey = c.status || '(без статуса)';
+    if (!byStatusMap[statusKey]) byStatusMap[statusKey] = { status: statusKey, balance: 0, customers: 0 };
+    byStatusMap[statusKey].balance += c.balance;
+    byStatusMap[statusKey].customers++;
   });
   const byOrg = Object.keys(byOrgMap).map(function(org){ return {org:org, balance:byOrgMap[org]}; }).sort(function(a,b){return b.balance-a.balance;});
   const byManager = Object.values(byManagerMap).sort(function(a,b){return b.balance-a.balance;});
+  const byStatus = Object.values(byStatusMap).sort(function(a,b){return b.balance-a.balance;});
   return {
     summary: { total_balance: totalBalance, debtor_count: customers.length, current_0_30: current30, overdue_30_60: over30, overdue_60_90: over60, overdue_90_plus: over90, by_org: byOrg },
     by_manager: byManager,
+    by_status: byStatus,
   };
 }
 
@@ -4830,6 +4866,10 @@ function renderDebt() {
   const agg = computeDebtAggregates_(ageFiltered);
 
   const s = agg.summary;
+  // "Мёртвая" (600+ дней) - всегда из ПОЛНОГО backend-списка, независимо от переключателя
+  // возраста на фронтенде (Влад, 2026-07-16), иначе при выключенном "показать все долги"
+  // эта корзина всегда показывала бы 0.
+  s.overdue_dead = (debt.summary && debt.summary.overdue_dead) || 0;
 
   // Стрелки тенденций - сегодня vs вчера, по общей сумме и по каждому юрлицу (Влад,
   // 2026-07-10: "на каждый день должна сохраняться история... также стрелки тенденций на
@@ -4841,16 +4881,16 @@ function renderDebt() {
   var histPrev = hist.length > 1 ? hist[hist.length-2] : null;
   // Стрелка кликабельна - открывает "Что изменилось со вчера" (Влад, 2026-07-15: "при
   // нажатии на -5% +23% видеть какие именно изменения были, кто и как уменьшил или
-  // увеличил ДЗ"). Один и тот же список debt.debt_changes на любую стрелку - это дневной
-  // диф по ВСЕМ клиентам, не только по тому юрлицу/сумме, на которую кликнули (детальной
-  // разбивки "именно по этому юрлицу" сейчас нет - список общий).
-  function trendHtml(curr, prev) {
+  // увеличил ДЗ"). С 2026-07-16 - стрелка на конкретном юрлице открывает диф ТОЛЬКО по
+  // этому юрлицу (orgScope), стрелка на общей сумме - диф по всем сразу.
+  function trendHtml(curr, prev, orgScope) {
     if (prev == null || prev === 0) return '';
     var diffPct = Math.round((curr - prev) / prev * 100);
     if (diffPct === 0) return '';
     var up = diffPct > 0; // рост долга
     var color = up ? 'var(--red)' : 'var(--green)';
-    return ' <span onclick="event.stopPropagation();toggleDebtChanges()" style="font-size:11px;color:' + color + ';cursor:pointer;text-decoration:underline dotted">' + (up?'▲+':'▼') + diffPct + '%</span>';
+    var scopeArg = orgScope ? "'" + orgScope.replace(/'/g,"\\'") + "'" : '';
+    return ' <span onclick="event.stopPropagation();toggleDebtChanges(' + scopeArg + ')" style="font-size:11px;color:' + color + ';cursor:pointer;text-decoration:underline dotted">' + (up?'▲+':'▼') + diffPct + '%</span>';
   }
   var totalTrend = histPrev ? trendHtml(s.total_balance||0, histPrev.balance) : '';
 
@@ -4858,7 +4898,7 @@ function renderDebt() {
   // разбита: сколько в Бульдоге, сколько в Ярде") - прямо под общей суммой в той же карточке.
   var byOrgHtml = (s.by_org && s.by_org.length)
     ? '<div style="margin-top:8px">' + s.by_org.map(function(o) {
-        var t = histPrev ? trendHtml(o.balance, histPrev.byOrg ? histPrev.byOrg[o.org] : null) : '';
+        var t = histPrev ? trendHtml(o.balance, histPrev.byOrg ? histPrev.byOrg[o.org] : null, o.org) : '';
         return '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:11px;color:var(--muted);padding:2px 0">' +
           '<span style="white-space:nowrap">' + o.org + '</span><span style="font-variant-numeric:tabular-nums;white-space:nowrap">' + fmt(o.balance) + t + '</span></div>';
       }).join('') + '</div>'
@@ -4876,6 +4916,24 @@ function renderDebt() {
       '<td class="muted" style="padding:4px 8px 4px 0;white-space:nowrap">' + (active ? '▸ ' : '') + label + '</td>' +
       '<td class="num" style="color:' + color + ';font-weight:600;padding:4px 0;font-variant-numeric:tabular-nums;width:110px">' + fmt(value||0) + '</td></tr>';
   }
+  // 4-й блок КПЭ "По статусам" (Влад, 2026-07-16: "нужен четвёртый блок где будут суммы по
+  // статусам... так же по нажатию выбор всех по статусу").
+  function statusRow_(status, value, count) {
+    var active = debtStatusFilter === status;
+    var safeStatus = status.replace(/'/g, "\\'");
+    return '<tr onclick="setDebtStatusFilter(\'' + safeStatus + '\')" style="cursor:pointer' + (active ? ';background:rgba(255,255,255,0.07)' : '') + '">' +
+      '<td class="muted" style="padding:4px 8px 4px 0;white-space:nowrap">' + (active ? '▸ ' : '') + status + ' <span style="opacity:.6">(' + count + ')</span></td>' +
+      '<td class="num" style="font-weight:600;padding:4px 0;font-variant-numeric:tabular-nums;width:110px">' + fmt(value||0) + '</td></tr>';
+  }
+  // Как и "Мёртвая" - берём из ПОЛНОГО backend-списка, а не agg (ageFiltered), т.к. статус -
+  // ручная классификация и не должна прятаться за фильтром возраста долга (Влад привёл в
+  // пример именно "Исполнительный лист", который часто ставится на очень старых долгах).
+  var byStatus = (debt.by_status && debt.by_status.length) ? debt.by_status : (agg.by_status || []);
+  var byStatusHtml = byStatus.length
+    ? '<table style="width:100%;table-layout:fixed;font-size:12px;border-collapse:collapse;margin-top:6px">' +
+        byStatus.map(function(x) { return statusRow_(x.status, x.balance, x.customers); }).join('') +
+      '</table>'
+    : '<div class="muted" style="font-size:12px;margin-top:6px">Статусы не проставлены</div>';
   document.getElementById('debt-kpi').innerHTML =
     '<div class="kpi"><div class="kpi-label">Общая ДЗ</div><div class="kpi-value amber">' + fmt(s.total_balance||0) + totalTrend + '</div>' + byOrgHtml + '</div>' +
     '<div class="kpi"><div class="kpi-label">Должников</div><div class="kpi-value">' + (s.debtor_count||0) + '</div></div>' +
@@ -4885,15 +4943,25 @@ function renderDebt() {
         bucketRow_('0-30', 'Текущая (0-30 дн.)', 'var(--green)', s.current_0_30) +
         bucketRow_('30-60', 'Короткая (30-60 дн.)', 'var(--amber)', s.overdue_30_60) +
         bucketRow_('60-90', 'Средняя (60-90 дн.)', '#EF9F27', s.overdue_60_90) +
-        bucketRow_('90+', 'Длинная (&gt;90 дн.)', 'var(--red)', s.overdue_90_plus) +
+        bucketRow_('90+', 'Длинная (90-600 дн.)', 'var(--red)', s.overdue_90_plus) +
+        bucketRow_('dead', 'Мёртвая (600+ дн.)', '#9333EA', s.overdue_dead) +
       '</table>' +
+    '</div>' +
+    '<div class="kpi">' +
+      '<div class="kpi-label">По статусам' + (debtStatusFilter ? ' <span class="muted" style="font-weight:400;text-transform:none">(фильтр активен - клик снова снимает)</span>' : '') + '</div>' +
+      byStatusHtml +
     '</div>';
 
   // "Что изменилось со вчера" - drill-down по клику на стрелку тренда (Влад, 2026-07-15).
-  var debtChanges = debt.debt_changes || [];
+  // С 2026-07-16 - если кликнули на стрелку конкретного юрлица (debtChangesOrgScope), берём
+  // диф только по нему из debt.debt_changes_by_org, иначе - общий debt.debt_changes.
+  var debtChanges = debtChangesOrgScope
+    ? ((debt.debt_changes_by_org || {})[debtChangesOrgScope] || [])
+    : (debt.debt_changes || []);
   var changesCard = document.getElementById('debt-changes-card');
   if (changesCard) changesCard.style.display = (debtChangesVisible && debtChanges.length) ? '' : 'none';
   if (debtChangesVisible) {
+    setText('debt-changes-title', debtChangesOrgScope ? 'Что изменилось со вчера — ' + debtChangesOrgScope : 'Что изменилось со вчера — все юрлица');
     var upCount = debtChanges.filter(function(x){ return x.diff > 0; }).length;
     var downCount = debtChanges.filter(function(x){ return x.diff < 0; }).length;
     setText('debt-changes-sub', 'выросло у ' + upCount + ', снизилось у ' + downCount);
@@ -4969,6 +5037,9 @@ function renderDebt() {
     : ageFiltered;
   if (debtBucketFilter) {
     customersFiltered = customersFiltered.filter(function(c){ return debtInBucket_(c.daysOverdue, debtBucketFilter); });
+  }
+  if (debtStatusFilter) {
+    customersFiltered = customersFiltered.filter(function(c){ return (c.status || '(без статуса)') === debtStatusFilter; });
   }
   customersFiltered = customersFiltered.slice().sort(function(a, b) {
     var av = a[debtSort.col], bv = b[debtSort.col];

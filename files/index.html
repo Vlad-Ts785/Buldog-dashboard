@@ -2705,9 +2705,17 @@ function renderDrivers() {
   // driverOrderCounts - см. vehicles_period). Раньше тут всегда брали D.orders.by_driver
   // (текущий месяц), из-за чего при выборе прошлого периода счётчик был неверным
   // (Влад, 2026-07-07: "количество заказов за июнь не верное").
+  // Дефолтный вид (без выбора периода) раньше тоже падал на D.orders.by_driver - тот
+  // ОБРЕЗАН до топ-25 по количеству заказов ПО ВСЕЙ КОМПАНИИ (см. getOrdersData на бэкенде),
+  // из-за чего водитель с высокой выручкой, но малым числом дорогих рейсов, показывал "—"
+  // (Влад, 2026-07-16: "по некоторым машинам показывает —"). Теперь бэкенд всегда шлёт
+  // D.driverOrderCounts - тот же полный (без обрезки) счётчик, что и driverOrderCounts
+  // внутри vehicles_period, просто за дефолтный диапазон (текущий месяц).
   var drvOrderMap = {};
   if (vehiclesRangeData && vehiclesRangeData.driverOrderCounts) {
     drvOrderMap = vehiclesRangeData.driverOrderCounts;
+  } else if (D.driverOrderCounts) {
+    drvOrderMap = D.driverOrderCounts;
   } else {
     ((D.orders && D.orders.by_driver) || []).forEach(function(x) {
       var key = x.name.trim().split(' ')[0].toLowerCase();

@@ -2214,6 +2214,13 @@ function doGet(e) {
       staffMarkas: staffMarkas,
       orders:     ordersData,
       debt:       getDebtData(ss),
+      // Колонка "Заказов" на "Водителях" в ДЕФОЛТНОМ виде (без выбора периода) раньше падала
+      // на orders.by_driver, который обрезан до топ-25 ПО ВСЕЙ КОМПАНИИ (см. по_driver ниже
+      // в getOrdersData) - водитель с высокой выручкой, но малым числом дорогих рейсов, в
+      // топ-25 по КОЛИЧЕСТВУ не попадал и показывал "—", хотя факт был ненулевой (Влад,
+      // 2026-07-16: "по некоторым машинам по количеству заказов показывает —"). Тут - тот же
+      // ПОЛНЫЙ (без обрезки) счётчик, что уже считается для action=vehicles_period.
+      driverOrderCounts: getDriverOrderCounts_(ss, defaultRange.from, defaultRange.to),
     };
     return ContentService
       .createTextOutput(JSON.stringify(data))

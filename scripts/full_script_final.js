@@ -854,14 +854,17 @@ function parseDebtRawRows_(rawData) {
       }
       const c = customers[a];
       const debt = ordParseNum(row[6]), advance = ordParseNum(row[7]);
+      const gPayment = ordParseNum(row[8]), gDeposit = ordParseNum(row[9]);
       c.debt             += debt;
       c.advance          += advance;
-      c.guaranteePayment += ordParseNum(row[8]);
-      c.guaranteeDeposit += ordParseNum(row[9]);
+      c.guaranteePayment += gPayment;
+      c.guaranteeDeposit += gDeposit;
       if (currentOrg) {
-        if (!c.byOrg[currentOrg]) c.byOrg[currentOrg] = { debt: 0, advance: 0 };
-        c.byOrg[currentOrg].debt    += debt;
-        c.byOrg[currentOrg].advance += advance;
+        if (!c.byOrg[currentOrg]) c.byOrg[currentOrg] = { debt: 0, advance: 0, guaranteePayment: 0, guaranteeDeposit: 0 };
+        c.byOrg[currentOrg].debt             += debt;
+        c.byOrg[currentOrg].advance          += advance;
+        c.byOrg[currentOrg].guaranteePayment += gPayment;
+        c.byOrg[currentOrg].guaranteeDeposit += gDeposit;
       }
     }
   }
@@ -877,19 +880,27 @@ function parseDebtRawRows_(rawData) {
       if (x.date < oldestDate) oldestDate = x.date;
       if (x.date >= latestDate) { latestDate = x.date; latestManager = x.manager; }
     });
-    // Баланс по каждому юрлицу ОТДЕЛЬНО (долг-аванс внутри самого юрлица - это законно,
-    // тот же контрагент с тем же юрлицом), в фиксированном порядке DEBT_ORG_KEYS.
+    // Баланс по каждому юрлицу ОТДЕЛЬНО (долг минус аванс И минус гарантийные колонки -
+    // всё внутри самого юрлица, это законно, тот же контрагент с тем же юрлицом), в
+    // фиксированном порядке DEBT_ORG_KEYS. Гарантийный платёж/депозит вычитаются из долга
+    // (Влад, 2026-07-13, на примере "СТАЛЬ ТРЕЙД ООО": "показывает долг, но долг закрыт
+    // менеджером - у него удержали из ЗП 47125") - подтверждено на реальных данных: обе
+    // колонки часто ТОЧНО равны сумме долга того же контрагента (например "АЛДОКС ООО" -
+    // долг 106 000, гарантийный депозит 106 000) - долг уже покрыт, просто не деньгами
+    // клиента, а гарантией (депозит - удержано из зарплаты менеджера; платёж - вероятно,
+    // гарантия от самого клиента при заключении договора).
     const byOrgBalance = {};
     DEBT_ORG_KEYS.forEach(function(orgKey) {
       const o = c.byOrg[orgKey];
-      byOrgBalance[orgKey] = o ? (o.debt - o.advance) : 0;
+      byOrgBalance[orgKey] = o ? (o.debt - o.advance - o.guaranteePayment - o.guaranteeDeposit) : 0;
     });
     // Итоговый баланс = сумма ТОЛЬКО положительных остатков по юрлицам (Влад, 2026-07-09:
     // "плюс с минусом мы не сводим, показываем только долг"). Раньше баланс считался как
     // общий долг минус общий аванс ПО ВСЕМ юрлицам сразу - из-за этого аванс, накопленный
     // на одном юрлице (например Техно Парк, где мы держим больше денег клиента, чем он
     // должен), ошибочно уменьшал реальный долг на другом юрлице (Бульдог) - разные
-    // юридические лица, гасить долг одного авансом другого нельзя.
+    // юридические лица, гасить долг одного авансом другого нельзя. Та же логика теперь и
+    // для гарантийных колонок - юрлицо А не может закрыть долг юрлица Б.
     let balance = 0;
     DEBT_ORG_KEYS.forEach(function(orgKey) { if (byOrgBalance[orgKey] > 0) balance += byOrgBalance[orgKey]; });
 
@@ -901,11 +912,16 @@ function parseDebtRawRows_(rawData) {
     // СТАРЫЕ документы поступлениями первыми - повторяет ту же хронологическую логику, не
     // произвольное предположение. Считаем ОТДЕЛЬНО по каждому юрлицу (тот же принцип, что и
     // баланс - аванс одного юрлица не может гасить документ другого).
+    // Пул покрытия = аванс + гарантийный платёж + гарантийный депозит (Влад, 2026-07-13) -
+    // все три одинаково закрывают документы, просто разными деньгами (клиента или гарантией/
+    // зарплатой менеджера) - см. комментарий у byOrgBalance выше.
     const docsByOrg = {};
     unpaidDocs.forEach(function(x) { (docsByOrg[x.org] = docsByOrg[x.org] || []).push(x); });
     Object.keys(docsByOrg).forEach(function(orgKey) {
-      const orgAdvance = (c.byOrg[orgKey] && c.byOrg[orgKey].advance) || 0;
-      let remaining = orgAdvance;
+      const orgCoverage = c.byOrg[orgKey]
+        ? (c.byOrg[orgKey].advance + c.byOrg[orgKey].guaranteePayment + c.byOrg[orgKey].guaranteeDeposit)
+        : 0;
+      let remaining = orgCoverage;
       const sorted = docsByOrg[orgKey].slice().sort(function(a, b) { return a.date.localeCompare(b.date); });
       sorted.forEach(function(x) {
         const covered = Math.min(x.debt, Math.max(0, remaining));

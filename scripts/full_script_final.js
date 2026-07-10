@@ -3692,6 +3692,11 @@ function getAvailablePeriods(ss) {
   return periods;
 }
 
+// Настройка воронки документов (Влад, 2026-07-16): "если нет путёвки, но при этом уже
+// есть реализация - не считаем как нет путёвки, все предыдущие стадии пройдены". Легко
+// откатить одной строкой - поставь false, если цифры после теста покажутся неправильными.
+const WAYBILL_SKIP_IF_REALIZ = true;
+
 // Чистая функция: нормализованные строки заказов -> агрегированный JSON для дашборда.
 // Используется и для текущего месяца (Заказы_данные), и для архивов прошлых периодов.
 function aggregateOrdersRows(rows) {
@@ -3952,15 +3957,20 @@ function aggregateOrdersRows(rows) {
       const dec = dayNum2 <= 10 ? 0 : dayNum2 <= 20 ? 1 : 2;
       const pst = yes(row, 'posted');
       const hr  = yes(row, 'realiz');
+      // Если реализация уже есть - все предыдущие стадии (путёвка, проведение) считаются
+      // пройденными, даже если сами флаги этого не показывают (WAYBILL_SKIP_IF_REALIZ выше).
+      const skipToComplete = WAYBILL_SKIP_IF_REALIZ && hr;
       let docStatus = '', docLabel = '';
-      if (!hw)       { if (isHired) noWaybillHired[dec]++; else noWaybillOwn[dec]++; docStatus='no_waybill'; docLabel='нет путёвки'; }
+      if (skipToComplete) { complete[dec]++; }
+      else if (!hw)       { if (isHired) noWaybillHired[dec]++; else noWaybillOwn[dec]++; docStatus='no_waybill'; docLabel='нет путёвки'; }
       else if (!pst) { waybillNotPosted[dec]++;  docStatus='not_posted'; docLabel='не проведён'; }
       else if (!hr)  { postedNoRealiz[dec]++;    docStatus='no_realiz';  docLabel='нет реализации'; }
       else           { complete[dec]++; }
 
       if (mgrSales && ordInList(mgrSales, TRAL_MANAGERS)) {
         var md2 = mgrDetail(mgrSales).doc;
-        if (!hw)       { if (isHired) md2.no_waybill_hired++; else md2.no_waybill_own++; }
+        if (skipToComplete) { md2.complete++; mgrDetail(mgrSales).rows_complete++; }
+        else if (!hw)       { if (isHired) md2.no_waybill_hired++; else md2.no_waybill_own++; }
         else if (!pst) md2.waybill_not_posted++;
         else if (!hr)  md2.posted_no_realiz++;
         else           { md2.complete++; mgrDetail(mgrSales).rows_complete++; }

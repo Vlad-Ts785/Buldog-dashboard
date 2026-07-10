@@ -1732,7 +1732,12 @@ function renderKPI() {
   const kp = document.getElementById('k-profit');
   kp.textContent = fmt(profit);
   kp.className = 'kpi-value ' + (profit >= 0 ? 'green' : 'red');
-  setText('k-margin', 'Маржа ' + pct(s.margin || 0));
+  // Маржа - ВП своего парка (s.profit) к ОБЩЕЙ выручке компании (totalRevenue, включает и
+  // наёмные заказы), а не к выручке только своего парка (s.margin с бэкенда) - иначе цифра
+  // получается сильно завышенной (Влад, 2026-07-16: "показывает 72%, а должно быть 27 с
+  // чем-то") - ВП считается только по своему парку, но знаменатель должен быть весь бизнес.
+  const grossMarginPct = totalRevenue > 0 ? (profit / totalRevenue * 100) : 0;
+  setText('k-margin', 'Маржа ' + pct(grossMarginPct));
   setText('k-profit-pct', pct(profPct));
   setText('k-profit-plan', 'План: ' + fmt(PROFIT_PLAN));
   setBar('k-profit-bar', profPct, profit >= 0 ? 'var(--green)' : 'var(--red)');
@@ -1747,8 +1752,12 @@ function renderKPI() {
 
   // Чистая прибыль (оценочная) = наша ВП × коэффициент, откалиброванный по БДР
   // (см. NET_PROFIT_COEFFICIENT выше). Явно помечено как оценка - это не точный расчёт.
+  // Маржинальность чистой прибыли (Влад, 2026-07-16: "внизу по чистой прибыли должна быть
+  // маржинальность") - тот же принцип, что и "Маржа" выше: к ОБЩЕЙ выручке компании, не
+  // только своего парка.
   const netProfitEst = profit * NET_PROFIT_COEFFICIENT;
-  setHTML('k-net-profit-est', 'Чистая прибыль (оценочная, ' + Math.round(NET_PROFIT_COEFFICIENT * 100) + '%): <b style="color:' + (netProfitEst >= 0 ? 'var(--green)' : 'var(--red)') + '">' + fmt(netProfitEst) + '</b>');
+  const netMarginPct = totalRevenue > 0 ? (netProfitEst / totalRevenue * 100) : 0;
+  setHTML('k-net-profit-est', 'Чистая прибыль (оценочная, ' + Math.round(NET_PROFIT_COEFFICIENT * 100) + '% от ВП): <b style="color:' + (netProfitEst >= 0 ? 'var(--green)' : 'var(--red)') + '">' + fmt(netProfitEst) + '</b> · маржа ' + pct(netMarginPct));
 
   renderDebtMiniCard();
 

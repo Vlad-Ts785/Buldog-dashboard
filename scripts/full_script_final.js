@@ -3977,10 +3977,14 @@ function aggregateOrdersRows(rows) {
       }
 
       if (docStatus) {
+        // Водитель (свой парк) или наёмник (наёмный парк) - Влад, 2026-07-16: "должен быть
+        // указан водитель, если это свой парк, и наёмник, если это наёмный парк".
         problemOrders.push({
           id: str(row,'id'), date: dateStr,
           customer: str(row,'customer'), mgr: mgrSales,
           amount: amount, balance: balance, status: docLabel, decade: dec + 1,
+          is_hired: isHired,
+          executor: isHired ? str(row,'hired') : ordCleanName(str(row,'driver')),
         });
       }
     }

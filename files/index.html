@@ -881,6 +881,21 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           </button>
         </div>
         <div class="kpi-grid" id="debt-kpi"></div>
+        <div class="card" id="debt-changes-card" style="margin-top:16px;display:none">
+          <div class="sec-header">
+            <div class="sec-title">Что изменилось со вчера</div>
+            <div class="sec-sub" id="debt-changes-sub"></div>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="tbl">
+              <thead><tr>
+                <th>Контрагент</th><th>Менеджер</th>
+                <th class="num">Было</th><th class="num">Стало</th><th class="num">Изменение</th>
+              </tr></thead>
+              <tbody id="debt-changes-body"></tbody>
+            </table>
+          </div>
+        </div>
         <div class="card" style="margin-top:16px;margin-bottom:16px">
           <div class="sec-header">
             <div class="sec-title">Должники</div>
@@ -909,14 +924,13 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
         </div>
         <div class="card" id="debt-guarantees-card" style="margin-bottom:16px;display:none">
           <div class="sec-header">
-            <div class="sec-title">Гарантийные платежи/депозиты</div>
+            <div class="sec-title">Гарантийные депозиты</div>
             <div class="sec-sub">Итого: <b id="debt-guarantees-total">—</b></div>
           </div>
           <div style="overflow-x:auto">
             <table class="tbl">
               <thead><tr>
-                <th>Контрагент</th><th>Менеджер</th>
-                <th class="num">Гарантийный платёж</th><th class="num">Гарантийный депозит</th><th class="num">Итого</th>
+                <th>Контрагент</th><th>Менеджер</th><th class="num">Гарантийный депозит</th>
               </tr></thead>
               <tbody id="debt-guarantees-body"></tbody>
             </table>
@@ -4585,6 +4599,13 @@ function debtInBucket_(days, bucket) {
   return true;
 }
 
+// "Что изменилось со вчера" (Влад, 2026-07-15) - разворачивается по клику на стрелку тренда.
+let debtChangesVisible = false;
+function toggleDebtChanges() {
+  debtChangesVisible = !debtChangesVisible;
+  renderDebt();
+}
+
 // Статус взыскания по контрагенту (Влад, 2026-07-14: "проставлять вручную статус...
 // должник, претензия, суд, исполнительный лист, и срок сколько уже стоит такой статус").
 // Список синхронизирован с DEBT_STATUS_OPTIONS в scripts/full_script_final.js.
@@ -4602,6 +4623,11 @@ async function debtSetStatus(selectEl, contragent) {
     // подтянется при следующей полной загрузке дашборда.
     if (c) { c.status = status; c.statusDays = 0; }
     renderDebt();
+    // Карточка контрагента (#vcard-panel) не входит в renderDebt() - если она открыта и
+    // выбор статуса пришёл оттуда же, перерисовать и её, иначе останется со старым статусом.
+    if (c && document.getElementById('vcard-panel').classList.contains('open')) {
+      document.getElementById('vcard-content').innerHTML = buildDebtCard_(c);
+    }
   } catch (e) {
     alert('Ошибка записи статуса: ' + e.message);
   } finally {
@@ -4653,6 +4679,130 @@ function computeDebtAggregates_(customers) {
   };
 }
 
+// Список неоплаченных документов контрагента (дата/юрлицо/описание/сумма, с подсветкой
+// незакрытых заказов прошлых месяцев и FIFO-оценкой погашения) + строка сверки сумм -
+// используется и в разворачивании строки таблицы "Должники", и в карточке контрагента
+// (Влад, 2026-07-15: "какое-то типа карточки клиента нужно сделать") - раньше было только
+// в одном месте, вынесено в функцию, чтобы не дублировать сложную логику.
+function buildDebtDocsHtml_(c, currentMonthStart) {
+  var showDocOrg = true;
+  var sumDocDebt = 0, sumDocCovered = 0;
+  var docsHtml = (c.unpaidDocs && c.unpaidDocs.length)
+    ? c.unpaidDocs.map(function(d) {
+        // Не закрытый документом заказ ("Таблица заказов" - ещё не оформлен как
+        // "Реализация") из прошлого месяца или раньше - ярко подсвечиваем (Влад,
+        // 2026-07-11): "вижу, что заказ в прошлом месяце даже не закрыт... нужно
+        // обратить внимание в первую очередь - закрыть, а уже потом получить деньги".
+        var isOldUnclosed = d.desc && d.desc.indexOf('Таблица заказов') === 0 && d.date < currentMonthStart;
+        var covered = d.covered || 0;
+        sumDocDebt += d.debt; sumDocCovered += covered;
+        // Погашение авансом "по хронологии 1С" (Влад, 2026-07-11/12) - 1С сам ведёт учёт
+        // как бегущий остаток по датам (не привязывает поступление к конкретному
+        // документу), поэтому гасим самые старые документы поступлениями первыми - это
+        // повторяет ту же логику, что видно в самой 1С при развороте по датам, а не
+        // произвольное предположение. См. backend parseDebtRawRows_.
+        var isFullyCovered = d.debt > 0 && covered >= d.debt;
+        var isPartlyCovered = covered > 0 && covered < d.debt;
+        var coveredBadge = isFullyCovered
+          ? ' <span class="badge muted" style="font-size:9.5px">вероятно оплачено (по хронологии 1С)</span>'
+          : isPartlyCovered
+            ? ' <span class="badge amber" style="font-size:9.5px">частично покрыто (по хронологии 1С): ' + fmt(covered) + '</span>'
+            : '';
+        var fadedStyle = isFullyCovered ? 'text-decoration:line-through;opacity:0.55;' : '';
+        var rowStyle = isOldUnclosed ? ' style="background:rgba(226,75,74,0.18)"' : '';
+        var textCls = isOldUnclosed ? '' : 'muted';
+        return '<tr' + rowStyle + '><td style="' + fadedStyle + 'padding:3px 10px 3px 0;white-space:nowrap" class="' + (isOldUnclosed?'red':'') + '">' +
+            (isOldUnclosed ? '<b>' + fmtDateRu(d.date) + '</b>' : fmtDateRu(d.date)) + '</td>' +
+          (showDocOrg ? '<td style="' + fadedStyle + 'padding:3px 10px 3px 0" class="' + textCls + '">' + (d.org||'—') + '</td>' : '') +
+          '<td style="' + fadedStyle + 'padding:3px 10px 3px 0" class="' + (isOldUnclosed?'red':'muted') + '">' + (isOldUnclosed ? '<b>' + d.desc + ' — не закрыт документом</b>' : d.desc) + coveredBadge + '</td>' +
+          '<td style="' + fadedStyle + 'padding:3px 0" class="num ' + (isOldUnclosed?'red':'') + '">' + fmt(d.debt) + '</td></tr>';
+      }).join('')
+    : '<tr><td colspan="' + (showDocOrg?4:3) + '" class="muted" style="padding:6px 0">Нет данных по документам</td></tr>';
+  // Сверка: сумма по документам (гросс, без учёта аванса) естественно больше "Баланса" -
+  // аванс/поступления в 1С не привязаны к конкретному документу, показываем это явно
+  // (Влад, 2026-07-11: "в выпадающем списке сумма долга не сходится с балансом").
+  var reconcileLine = (c.unpaidDocs && c.unpaidDocs.length)
+    ? '<div class="muted" style="font-size:10.5px;margin-top:6px;padding-top:6px;border-top:1px solid var(--border)">' +
+        'Итого по документам: ' + fmt(sumDocDebt) + ' · Аванс/поступления (по хронологии 1С): −' + fmt(sumDocCovered) +
+        ' · Открыто по факту: <b>' + fmt(sumDocDebt - sumDocCovered) + '</b></div>'
+    : '';
+  return { docsHtml: docsHtml, reconcileLine: reconcileLine };
+}
+
+// ── КАРТОЧКА КОНТРАГЕНТА (ДЗ) ─────────────────────────────────
+// Переиспользует ту же модальную панель, что и карточка машины (#vcard-overlay/#vcard-panel)
+// - Влад, 2026-07-15: "какое-то типа карточки клиента нужно сделать, как у нас в водителях".
+function openDebtCard(contragent) {
+  if (!D || !D.debt) return;
+  var c = (D.debt.by_customer || []).find(function(x) { return x.contragent === contragent; });
+  if (!c) return;
+  document.getElementById('vcard-content').innerHTML = buildDebtCard_(c);
+  document.getElementById('vcard-overlay').classList.add('open');
+  document.getElementById('vcard-panel').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function buildDebtCard_(c) {
+  var todayForCard = new Date();
+  var currentMonthStart = todayForCard.getFullYear() + '-' + String(todayForCard.getMonth()+1).padStart(2,'0') + '-01';
+  var docs = buildDebtDocsHtml_(c, currentMonthStart);
+  var byOrgHtml = (c.byOrg && c.byOrg.length)
+    ? c.byOrg.map(function(o){ return '<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);padding:2px 0"><span>' + o.org + '</span><span>' + fmt(o.balance) + '</span></div>'; }).join('')
+    : '';
+  var statusOptionsHtml = '<option value=""' + (!c.status?' selected':'') + '>—</option>' +
+    DEBT_STATUS_OPTIONS.map(function(opt) {
+      return '<option value="' + opt + '"' + (c.status===opt?' selected':'') + '>' + opt + '</option>';
+    }).join('');
+  var contragentEsc = c.contragent.replace(/'/g, "\\'");
+  var commentEsc = (c.comment || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  return '<div style="padding:20px">' +
+    '<div style="font-size:17px;font-weight:700;margin-bottom:4px">' + c.contragent + '</div>' +
+    '<div class="muted" style="font-size:13px;margin-bottom:16px">' + cleanName(c.manager) + '</div>' +
+    '<div style="display:flex;gap:24px;margin-bottom:16px">' +
+      '<div><div class="muted" style="font-size:11px;text-transform:uppercase">Баланс</div><div style="font-size:20px;font-weight:700;color:var(--amber)">' + fmt(c.balance) + '</div></div>' +
+      '<div><div class="muted" style="font-size:11px;text-transform:uppercase">Дней просрочки</div><div style="font-size:20px;font-weight:700">' + c.daysOverdue + '</div></div>' +
+    '</div>' +
+    (byOrgHtml ? '<div style="margin-bottom:16px;padding:10px 12px;background:var(--bg3);border-radius:8px">' + byOrgHtml + '</div>' : '') +
+    '<div style="margin-bottom:16px">' +
+      '<div class="muted" style="font-size:11px;text-transform:uppercase;margin-bottom:6px">Статус взыскания</div>' +
+      '<select id="debt-card-status" onchange="debtSetStatus(this,\'' + contragentEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 10px;font-size:13px;width:100%">' +
+        statusOptionsHtml +
+      '</select>' +
+      (c.status ? '<div class="muted" style="font-size:11px;margin-top:4px">Статус стоит ' + c.statusDays + ' дн. (с ' + fmtDateRu(c.statusSince) + ')</div>' : '') +
+    '</div>' +
+    '<div style="margin-bottom:16px">' +
+      '<div class="muted" style="font-size:11px;text-transform:uppercase;margin-bottom:6px">Комментарий</div>' +
+      '<textarea id="debt-card-comment" rows="4" placeholder="Свободный текст - переговоры, договорённости, что угодно"' +
+        ' style="width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px 10px;font-size:13px;font-family:inherit;resize:vertical">' + commentEsc + '</textarea>' +
+      '<button onclick="debtSaveComment(\'' + contragentEsc + '\')" style="margin-top:6px;background:var(--amber);border:none;color:#000;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer">Сохранить</button>' +
+      '<span id="debt-card-comment-status" class="muted" style="font-size:11px;margin-left:8px"></span>' +
+    '</div>' +
+    '<div>' +
+      '<div class="muted" style="font-size:11px;text-transform:uppercase;margin-bottom:6px">Документы</div>' +
+      '<table style="width:100%;font-size:11.5px;border-collapse:collapse">' + docs.docsHtml + '</table>' + docs.reconcileLine +
+    '</div>' +
+  '</div>';
+}
+
+async function debtSaveComment(contragent) {
+  var textarea = document.getElementById('debt-card-comment');
+  var statusEl = document.getElementById('debt-card-comment-status');
+  if (!textarea) return;
+  var comment = textarea.value;
+  if (statusEl) statusEl.textContent = 'Сохраняю...';
+  try {
+    var data = await apiFetchJson({ action: 'debt_set_comment', contragent: contragent, comment: comment });
+    if (data.error) throw new Error(data.error);
+    var c = (D.debt.by_customer || []).find(function(x){ return x.contragent === contragent; });
+    if (c) c.comment = comment;
+    if (statusEl) statusEl.textContent = 'Сохранено ✓';
+    renderDebt(); // обновить точку-индикатор комментария в таблице
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Ошибка: ' + e.message;
+  }
+}
+
 function renderDebt() {
   if (!D) return;
   const debt = D.debt;
@@ -4689,47 +4839,76 @@ function renderDebt() {
   var hist = debt.history || [];
   var histLatest = hist.length ? hist[hist.length-1] : null;
   var histPrev = hist.length > 1 ? hist[hist.length-2] : null;
+  // Стрелка кликабельна - открывает "Что изменилось со вчера" (Влад, 2026-07-15: "при
+  // нажатии на -5% +23% видеть какие именно изменения были, кто и как уменьшил или
+  // увеличил ДЗ"). Один и тот же список debt.debt_changes на любую стрелку - это дневной
+  // диф по ВСЕМ клиентам, не только по тому юрлицу/сумме, на которую кликнули (детальной
+  // разбивки "именно по этому юрлицу" сейчас нет - список общий).
   function trendHtml(curr, prev) {
     if (prev == null || prev === 0) return '';
     var diffPct = Math.round((curr - prev) / prev * 100);
     if (diffPct === 0) return '';
     var up = diffPct > 0; // рост долга
     var color = up ? 'var(--red)' : 'var(--green)';
-    return ' <span style="font-size:11px;color:' + color + '">' + (up?'▲+':'▼') + diffPct + '%</span>';
+    return ' <span onclick="event.stopPropagation();toggleDebtChanges()" style="font-size:11px;color:' + color + ';cursor:pointer;text-decoration:underline dotted">' + (up?'▲+':'▼') + diffPct + '%</span>';
   }
   var totalTrend = histPrev ? trendHtml(s.total_balance||0, histPrev.balance) : '';
 
   // Разбивка общей ДЗ по юрлицам группы (Влад, 2026-07-09: "32602... эта сумма должна быть
   // разбита: сколько в Бульдоге, сколько в Ярде") - прямо под общей суммой в той же карточке.
   var byOrgHtml = (s.by_org && s.by_org.length)
-    ? '<div style="margin-top:6px">' + s.by_org.map(function(o) {
+    ? '<div style="margin-top:8px">' + s.by_org.map(function(o) {
         var t = histPrev ? trendHtml(o.balance, histPrev.byOrg ? histPrev.byOrg[o.org] : null) : '';
-        return '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);padding:1px 0">' +
-          '<span>' + o.org + '</span><span>' + fmt(o.balance) + t + '</span></div>';
+        return '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:11px;color:var(--muted);padding:2px 0">' +
+          '<span style="white-space:nowrap">' + o.org + '</span><span style="font-variant-numeric:tabular-nums;white-space:nowrap">' + fmt(o.balance) + t + '</span></div>';
       }).join('') + '</div>'
     : '';
   // Просрочка - раньше 3 отдельные карточки (30-60/60-90/90+), Влад 2026-07-09: "объединить
   // в один блок с короткой, средней и длинной". Одна карточка, три строки внутри. Клик по
   // строке - фильтр таблицы "Должники" по этому диапазону (Влад, 2026-07-14: "хочу фильтр
   // на этот диапазон, можно по нажатию в блоке").
+  // Ровные колонки (Влад, 2026-07-15: "приведи блоки в нормальный вид, ровный и красивый") -
+  // table-layout:fixed + фиксированная ширина колонки суммы + табличные цифры (моноширинные
+  // цифры одной высоты), чтобы суммы не "прыгали" по горизонтали от строки к строке.
   function bucketRow_(bucket, label, color, value) {
     var active = debtBucketFilter === bucket;
-    return '<tr onclick="setDebtBucketFilter(\'' + bucket + '\')" style="cursor:pointer' + (active ? ';background:rgba(255,255,255,0.06)' : '') + '">' +
-      '<td class="muted" style="padding:2px 4px 2px 0">' + (active ? '▸ ' : '') + label + '</td>' +
-      '<td class="num" style="color:' + color + ';font-weight:600;padding:2px 0">' + fmt(value||0) + '</td></tr>';
+    return '<tr onclick="setDebtBucketFilter(\'' + bucket + '\')" style="cursor:pointer' + (active ? ';background:rgba(255,255,255,0.07)' : '') + '">' +
+      '<td class="muted" style="padding:4px 8px 4px 0;white-space:nowrap">' + (active ? '▸ ' : '') + label + '</td>' +
+      '<td class="num" style="color:' + color + ';font-weight:600;padding:4px 0;font-variant-numeric:tabular-nums;width:110px">' + fmt(value||0) + '</td></tr>';
   }
   document.getElementById('debt-kpi').innerHTML =
     '<div class="kpi"><div class="kpi-label">Общая ДЗ</div><div class="kpi-value amber">' + fmt(s.total_balance||0) + totalTrend + '</div>' + byOrgHtml + '</div>' +
     '<div class="kpi"><div class="kpi-label">Должников</div><div class="kpi-value">' + (s.debtor_count||0) + '</div></div>' +
     '<div class="kpi">' +
       '<div class="kpi-label">Просрочка' + (debtBucketFilter ? ' <span class="muted" style="font-weight:400;text-transform:none">(фильтр активен - клик снова снимает)</span>' : '') + '</div>' +
-      '<table style="width:100%;font-size:12px;border-collapse:collapse;margin-top:4px">' +
+      '<table style="width:100%;table-layout:fixed;font-size:12px;border-collapse:collapse;margin-top:6px">' +
         bucketRow_('0-30', 'Текущая (0-30 дн.)', 'var(--green)', s.current_0_30) +
         bucketRow_('30-60', 'Короткая (30-60 дн.)', 'var(--amber)', s.overdue_30_60) +
         bucketRow_('60-90', 'Средняя (60-90 дн.)', '#EF9F27', s.overdue_60_90) +
         bucketRow_('90+', 'Длинная (&gt;90 дн.)', 'var(--red)', s.overdue_90_plus) +
       '</table>' +
     '</div>';
+
+  // "Что изменилось со вчера" - drill-down по клику на стрелку тренда (Влад, 2026-07-15).
+  var debtChanges = debt.debt_changes || [];
+  var changesCard = document.getElementById('debt-changes-card');
+  if (changesCard) changesCard.style.display = (debtChangesVisible && debtChanges.length) ? '' : 'none';
+  if (debtChangesVisible) {
+    var upCount = debtChanges.filter(function(x){ return x.diff > 0; }).length;
+    var downCount = debtChanges.filter(function(x){ return x.diff < 0; }).length;
+    setText('debt-changes-sub', 'выросло у ' + upCount + ', снизилось у ' + downCount);
+    document.getElementById('debt-changes-body').innerHTML = debtChanges.map(function(x) {
+      var up = x.diff > 0;
+      var color = up ? 'var(--red)' : 'var(--green)';
+      return '<tr>' +
+        '<td><b>' + x.contragent + '</b></td>' +
+        '<td class="muted">' + (x.manager ? cleanName(x.manager) : '—') + '</td>' +
+        '<td class="num muted">' + fmt(x.yesterday) + '</td>' +
+        '<td class="num">' + fmt(x.today) + '</td>' +
+        '<td class="num" style="color:' + color + ';font-weight:600">' + (up?'+':'') + fmt(x.diff) + '</td>' +
+      '</tr>';
+    }).join('');
+  }
 
   // История - линия по дням (та же логика построения, что и "Выручка по дням" на "Обзоре").
   // hist уже получен выше (для стрелок тенденций в KPI). Показывает ВСЕ долги без учёта
@@ -4824,51 +5003,7 @@ function renderDebt() {
       ? ' <span class="muted" style="font-size:10.5px">— ' +
         c.byOrg.map(function(o){ return o.org + ': ' + fmt(o.balance); }).join(' · ') + '</span>'
       : '';
-    // Детальная структура долга по клику (Влад, 2026-07-09: "чтобы можно было задать
-    // правильные вопросы менеджеру") - список неоплаченных документов, от старых к новым.
-    // Юрлицо у каждого документа - показываем всегда (Влад, 2026-07-10), не только когда
-    // документы относятся к разным юрлицам.
-    var showDocOrg = true;
-    var sumDocDebt = 0, sumDocCovered = 0;
-    var docsHtml = (c.unpaidDocs && c.unpaidDocs.length)
-      ? c.unpaidDocs.map(function(d) {
-          // Не закрытый документом заказ ("Таблица заказов" - ещё не оформлен как
-          // "Реализация") из прошлого месяца или раньше - ярко подсвечиваем (Влад,
-          // 2026-07-11): "вижу, что заказ в прошлом месяце даже не закрыт... нужно
-          // обратить внимание в первую очередь - закрыть, а уже потом получить деньги".
-          var isOldUnclosed = d.desc && d.desc.indexOf('Таблица заказов') === 0 && d.date < currentMonthStart;
-          var covered = d.covered || 0;
-          sumDocDebt += d.debt; sumDocCovered += covered;
-          // Погашение авансом "по хронологии 1С" (Влад, 2026-07-11/12) - 1С сам ведёт учёт
-          // как бегущий остаток по датам (не привязывает поступление к конкретному
-          // документу), поэтому гасим самые старые документы поступлениями первыми - это
-          // повторяет ту же логику, что видно в самой 1С при развороте по датам, а не
-          // произвольное предположение. См. backend parseDebtRawRows_.
-          var isFullyCovered = d.debt > 0 && covered >= d.debt;
-          var isPartlyCovered = covered > 0 && covered < d.debt;
-          var coveredBadge = isFullyCovered
-            ? ' <span class="badge muted" style="font-size:9.5px">вероятно оплачено (по хронологии 1С)</span>'
-            : isPartlyCovered
-              ? ' <span class="badge amber" style="font-size:9.5px">частично покрыто (по хронологии 1С): ' + fmt(covered) + '</span>'
-              : '';
-          var fadedStyle = isFullyCovered ? 'text-decoration:line-through;opacity:0.55;' : '';
-          var rowStyle = isOldUnclosed ? ' style="background:rgba(226,75,74,0.18)"' : '';
-          var textCls = isOldUnclosed ? '' : 'muted';
-          return '<tr' + rowStyle + '><td style="' + fadedStyle + 'padding:3px 10px 3px 0;white-space:nowrap" class="' + (isOldUnclosed?'red':'') + '">' +
-              (isOldUnclosed ? '<b>' + fmtDateRu(d.date) + '</b>' : fmtDateRu(d.date)) + '</td>' +
-            (showDocOrg ? '<td style="' + fadedStyle + 'padding:3px 10px 3px 0" class="' + textCls + '">' + (d.org||'—') + '</td>' : '') +
-            '<td style="' + fadedStyle + 'padding:3px 10px 3px 0" class="' + (isOldUnclosed?'red':'muted') + '">' + (isOldUnclosed ? '<b>' + d.desc + ' — не закрыт документом</b>' : d.desc) + coveredBadge + '</td>' +
-            '<td style="' + fadedStyle + 'padding:3px 0" class="num ' + (isOldUnclosed?'red':'') + '">' + fmt(d.debt) + '</td></tr>';
-        }).join('')
-      : '<tr><td colspan="' + (showDocOrg?4:3) + '" class="muted" style="padding:6px 0">Нет данных по документам</td></tr>';
-    // Сверка: сумма по документам (гросс, без учёта аванса) естественно больше "Баланса" -
-    // аванс/поступления в 1С не привязаны к конкретному документу, показываем это явно
-    // (Влад, 2026-07-11: "в выпадающем списке сумма долга не сходится с балансом").
-    var reconcileLine = (c.unpaidDocs && c.unpaidDocs.length)
-      ? '<div class="muted" style="font-size:10.5px;margin-top:6px;padding-top:6px;border-top:1px solid var(--border)">' +
-          'Итого по документам: ' + fmt(sumDocDebt) + ' · Аванс/поступления (по хронологии 1С): −' + fmt(sumDocCovered) +
-          ' · Открыто по факту: <b>' + fmt(sumDocDebt - sumDocCovered) + '</b></div>'
-      : '';
+    var docs = buildDebtDocsHtml_(c, currentMonthStart);
     // Статус взыскания (Влад, 2026-07-14: "проставлять вручную статус... должник,
     // претензия, суд, исполнительный лист, и срок сколько уже стоит такой статус").
     var statusOptionsHtml = '<option value=""' + (!c.status?' selected':'') + '>—</option>' +
@@ -4881,15 +5016,22 @@ function renderDebt() {
       '</select>' +
       (c.status ? '<div class="muted" style="font-size:9.5px;margin-top:2px">' + c.statusDays + ' дн.</div>' : '') +
     '</td>';
+    // Карточка контрагента (Влад, 2026-07-15: "хочу вносить ручные комментарии по
+    // контрагенту... какое-то типа карточки клиента, как у нас в водителях") - открывается
+    // отдельной кнопкой, не мешает обычному клику по строке (тот по-прежнему разворачивает
+    // список документов inline).
+    var cardBtn = '<button onclick="event.stopPropagation();openDebtCard(\'' + c.contragent.replace(/'/g,"\\'") + '\')" ' +
+      'style="background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:0 4px" title="Карточка контрагента">📝' +
+      (c.comment ? '<span style="color:var(--amber)">●</span>' : '') + '</button>';
     return '<tr class="debt-row-toggle" onclick="toggleDebtDetail(' + i + ')" style="cursor:pointer">' +
-      '<td><span id="debt-arrow-' + i + '" class="muted" style="display:inline-block;width:14px">▸</span><b>' + c.contragent + '</b>' + byOrgLine + '</td>' +
+      '<td>' + cardBtn + '<span id="debt-arrow-' + i + '" class="muted" style="display:inline-block;width:14px">▸</span><b>' + c.contragent + '</b>' + byOrgLine + '</td>' +
       '<td class="muted">' + cleanName(c.manager) + '</td>' +
       '<td class="num"><b>' + fmt(c.balance) + '</b></td>' +
       '<td class="num ' + ageCls(c.daysOverdue) + '">' + c.daysOverdue + '</td>' +
       statusCell +
     '</tr>' +
     '<tr id="debt-detail-' + i + '" style="display:none"><td colspan="5" style="padding:0 0 10px 28px">' +
-      '<table style="width:100%;font-size:11.5px;border-collapse:collapse">' + docsHtml + '</table>' + reconcileLine +
+      '<table style="width:100%;font-size:11.5px;border-collapse:collapse">' + docs.docsHtml + '</table>' + docs.reconcileLine +
     '</td></tr>';
   }).join('');
 
@@ -4901,10 +5043,11 @@ function renderDebt() {
     '</tr>';
   }).join('');
 
-  // Гарантийные платежи/депозиты - отдельная таблица (Влад, 2026-07-14: "хочу отдельной
-  // табличкой внизу все гарантийные депозиты и сумма их"). По ВСЕМ клиентам, не только
-  // реальным должникам - клиент с полностью покрытым долгом уже не входит в "Должники", но
-  // депозит по нему всё равно стоит показать.
+  // Гарантийные ДЕПОЗИТЫ - отдельная таблица (Влад, 2026-07-14: "хочу отдельной табличкой
+  // внизу все гарантийные депозиты и сумма их"; уточнение 2026-07-15: "нужно видеть только
+  // депозиты, гарантийные платежи не нужны"). По ВСЕМ клиентам, не только реальным
+  // должникам - клиент с полностью покрытым долгом уже не входит в "Должники", но депозит
+  // по нему всё равно стоит показать.
   var guarantees = debt.guarantees || [];
   var guaranteesCard = document.getElementById('debt-guarantees-card');
   if (guaranteesCard) guaranteesCard.style.display = guarantees.length ? '' : 'none';
@@ -4913,9 +5056,7 @@ function renderDebt() {
     return '<tr>' +
       '<td><b>' + g.contragent + '</b></td>' +
       '<td class="muted">' + cleanName(g.manager) + '</td>' +
-      '<td class="num">' + (g.guaranteePayment ? fmt(g.guaranteePayment) : '—') + '</td>' +
-      '<td class="num">' + (g.guaranteeDeposit ? fmt(g.guaranteeDeposit) : '—') + '</td>' +
-      '<td class="num"><b>' + fmt(g.total) + '</b></td>' +
+      '<td class="num"><b>' + fmt(g.guaranteeDeposit) + '</b></td>' +
     '</tr>';
   }).join('');
 }

@@ -575,6 +575,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <select id="filter-type" onchange="renderVehiclesTable()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;">
               <option value="">Все типы</option>
+              <option value="__all_tral__">Все тралы</option>
             </select>
             <select id="filter-status" onchange="renderVehiclesTable()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;">
               <option value="">Все статусы</option>
@@ -641,6 +642,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <select id="filter-driver-type" onchange="renderDrivers()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;">
               <option value="">Все типы</option>
+              <option value="__all_tral__">Все тралы</option>
             </select>
             <select id="filter-driver-status" onchange="renderDrivers()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;">
               <option value="">Все статусы</option>
@@ -2141,12 +2143,22 @@ function renderFleetStatus() {
       '</div>' +
     '</div>';
 
+  // Клик по блоку - переход на "Технику" с готовым фильтром по типу (Влад, 2026-07-16:
+  // "нажимаю на тралы, меня перебрасывает в технику, и сразу фильтр стоит на все тралы";
+  // то же для длинномеров -> "Борт"). Тот же приём, что карточки на Панели (ДЗ, Маржа найма).
   document.getElementById('fleet-status').innerHTML =
     '<div class="fleet-grid">' +
-      '<div class="fleet-block"><div class="fleet-block-title">Тралы · ' + (tr.total||36) + ' ед.</div>' + trRows + '</div>' +
-      '<div class="fleet-block"><div class="fleet-block-title">Длинномеры · ' + (tk.total||19) + ' ед.</div>' + tkRows + '</div>' +
+      '<div class="fleet-block" style="cursor:pointer" onclick="goToVehiclesWithType(TRAL_ALL_FILTER)"><div class="fleet-block-title">Тралы · ' + (tr.total||36) + ' ед.</div>' + trRows + '</div>' +
+      '<div class="fleet-block" style="cursor:pointer" onclick="goToVehiclesWithType(\'Борт\')"><div class="fleet-block-title">Длинномеры · ' + (tk.total||19) + ' ед.</div>' + tkRows + '</div>' +
     '</div>' +
     footer;
+}
+
+function goToVehiclesWithType(typeVal) {
+  showPage('vehicles');
+  var sel = document.getElementById('filter-type');
+  if (sel) sel.value = typeVal;
+  renderVehiclesTable();
 }
 
 function renderCostChart() {
@@ -2559,6 +2571,21 @@ async function shtatkaPickDriver(driverName) {
   }
 }
 
+// "Все тралы" - агрегатный тип в фильтрах Техники/Водителей (Влад, 2026-07-16: "тралы
+// подразделяются на категории ПР/ТКР/КР/Рапид, но их много, все это тралы - должна быть
+// категория 'только тралы'"). Правило то же, что уже используется на бэкенде для карточки
+// "Статус парка" (getFleetStatus): длинномер - это тип "Борт" (или начинающийся с "Борт"),
+// всё остальное - трал. Не перечисляем подтипы тралов вручную (ПР-3/4/5/8, ТКР-4, КР-3,
+// Рапид...) - список может пополниться новыми кодами, а "не Борт" не сломается.
+const TRAL_ALL_FILTER = '__all_tral__';
+function vehicleTypeMatches_(type, filterVal) {
+  if (!filterVal) return true;
+  var t = type || '';
+  var isDlinnomer = t === 'Борт' || t.indexOf('Борт') === 0;
+  if (filterVal === TRAL_ALL_FILTER) return !isDlinnomer;
+  return t === filterVal;
+}
+
 function renderVehiclesTable() {
   if (!D) return;
   renderFuelAnalysis();
@@ -2568,15 +2595,18 @@ function renderVehiclesTable() {
   var status = document.getElementById('filter-status') ? document.getElementById('filter-status').value : '';
   var vehicles = activeVehiclesData().slice();
 
+  // options.length <= 2 - учитывает статичные "Все типы" + "Все тралы" (Влад, 2026-07-16),
+  // раньше было <= 1, из-за добавления второй статичной опции реальные типы техники
+  // переставали подгружаться в список вообще.
   var sel = document.getElementById('filter-type');
-  if (sel && sel.options.length <= 1) {
+  if (sel && sel.options.length <= 2) {
     var types = [];
     vehicles.forEach(function(v){ if (v.type && types.indexOf(v.type) === -1) types.push(v.type); });
     types.sort();
     types.forEach(function(t){ sel.add(new Option(t, t)); });
   }
 
-  if (type) vehicles = vehicles.filter(function(v){ return v.type === type; });
+  if (type) vehicles = vehicles.filter(function(v){ return vehicleTypeMatches_(v.type, type); });
   if (status) vehicles = vehicles.filter(function(v){ return v.status && v.status.indexOf(status) !== -1; });
 
   var col = vehSort.col, dir = vehSort.dir;
@@ -2685,8 +2715,10 @@ function renderDrivers() {
   var statusByGos = {};
   activeVehiclesData().forEach(function(v) { if (v.gos) statusByGos[v.gos] = v.status || ''; });
 
+  // options.length <= 2 - учитывает статичные "Все типы" + "Все тралы" (см. тот же приём
+  // и комментарий в renderVehiclesTable()).
   var typeSel = document.getElementById('filter-driver-type');
-  if (typeSel && typeSel.options.length <= 1) {
+  if (typeSel && typeSel.options.length <= 2) {
     var driverTypes = [];
     driversAll.forEach(function(d){ if (d.type && driverTypes.indexOf(d.type) === -1) driverTypes.push(d.type); });
     driverTypes.sort();
@@ -2696,7 +2728,7 @@ function renderDrivers() {
   var statusVal = document.getElementById('filter-driver-status') ? document.getElementById('filter-driver-status').value : '';
 
   const drivers = driversAll.filter(function(d) {
-    if (typeVal && d.type !== typeVal) return false;
+    if (typeVal && !vehicleTypeMatches_(d.type, typeVal)) return false;
     if (statusVal && (statusByGos[d.gos] || '').indexOf(statusVal) === -1) return false;
     return true;
   });

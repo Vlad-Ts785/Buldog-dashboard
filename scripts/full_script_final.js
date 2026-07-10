@@ -1045,18 +1045,22 @@ function importDebtReport() {
   // детальной структуры долга по клику на контрагента (Влад, 2026-07-09). Хранить как JSON
   // в одной ячейке проще, чем заводить отдельный лист - список короткий (обычно до 20-30
   // документов на клиента).
+  // "Сумма нашего долга" добавлена В КОНЕЦ (перед JSON), а не между существующими колонками
+  // - чтобы не сдвигать индексы, на которые уже завязаны saveDebtHistory()/
+  // saveDebtCustomerHistory_() (обе читают только первые 9+orgs колонок, этой не касаются).
   const headers = ['Контрагент', 'Менеджер', 'Сумма долга', 'Сумма аванса', 'Гарантийный платёж',
     'Гарантийный депозит', 'Баланс (долг-аванс)', 'Дата последнего документа', 'Дата старейшего неоплаченного']
-    .concat(orgHeaders, ['Документы (JSON)']);
+    .concat(orgHeaders, ['Сумма нашего долга (взаимозачёт)', 'Документы (JSON)']);
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
   const rows = parsed.map(function(c) {
     return [c.contragent, c.manager, c.debt, c.advance, c.guaranteePayment, c.guaranteeDeposit,
       c.balance, c.lastDocDate, c.oldestUnpaidDate]
-      .concat(DEBT_ORG_KEYS.map(function(k) { return c.byOrgBalance[k]; }), [JSON.stringify(c.unpaidDocs)]);
+      .concat(DEBT_ORG_KEYS.map(function(k) { return c.byOrgBalance[k]; }), [c.ourDebt, JSON.stringify(c.unpaidDocs)]);
   });
   sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
   sheet.getRange(2, 3, rows.length, 5).setNumberFormat('#,##0');
   sheet.getRange(2, 10, rows.length, DEBT_ORG_KEYS.length).setNumberFormat('#,##0');
+  sheet.getRange(2, 10 + DEBT_ORG_KEYS.length, rows.length, 1).setNumberFormat('#,##0');
 
   latest.markRead();
   Logger.log('✅ ДЗ импортирована: ' + parsed.length + ' клиентов');
@@ -1282,9 +1286,10 @@ function getDebtData(ss) {
   const sheet = ss.getSheetByName(DEBT_RAW_SHEET);
   if (!sheet || sheet.getLastRow() < 2) return null;
 
-  const numCols = 9 + DEBT_ORG_KEYS.length + 1; // + колонка "Документы (JSON)"
+  const numCols = 9 + DEBT_ORG_KEYS.length + 2; // + "Сумма нашего долга" + "Документы (JSON)"
   const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, numCols).getValues();
-  const docsColIdx = 9 + DEBT_ORG_KEYS.length;
+  const ourDebtColIdx = 9 + DEBT_ORG_KEYS.length;
+  const docsColIdx = ourDebtColIdx + 1;
   const allCustomers = data.map(function(r) {
     // Разбивка по юрлицам - только положительные (Влад, 2026-07-09: "показываем только
     // долг" - отрицательный остаток на одном юрлице не гасит долг на другом, поэтому и в
@@ -1302,6 +1307,7 @@ function getDebtData(ss) {
       contragent: String(r[0] || ''), manager: String(r[1] || ''),
       debt: parseFloat(r[2]) || 0, advance: parseFloat(r[3]) || 0,
       guaranteePayment: parseFloat(r[4]) || 0, guaranteeDeposit: parseFloat(r[5]) || 0,
+      ourDebt: parseFloat(r[ourDebtColIdx]) || 0,
       balance: parseFloat(r[6]) || 0,
       lastDocDate: ordFormatDate(r[7]), oldestUnpaidDate: ordFormatDate(r[8]),
       byOrg: byOrg,

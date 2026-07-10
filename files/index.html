@@ -4757,9 +4757,24 @@ function buildDebtDocsHtml_(c, currentMonthStart) {
   // Сверка: сумма по документам (гросс, без учёта аванса) естественно больше "Баланса" -
   // аванс/поступления в 1С не привязаны к конкретному документу, показываем это явно
   // (Влад, 2026-07-11: "в выпадающем списке сумма долга не сходится с балансом").
+  // Расшифровка ИЗ ЧЕГО состоит покрытие (Влад, 2026-07-16, на примере "ВЕРТА ЛОДЖИСТИКС
+  // ООО": "хочу чтобы было видно, что был гарантийный депозит") - раньше одна общая строка
+  // "Аванс/поступления", непонятно каким именно способом закрыт долг. Показываем только
+  // ненулевые составляющие (клиентские тотал-суммы - для контрагента в одном юрлице это
+  // ровно то, что покрыло именно эти документы; для мульти-юрлицного клиента - сумма по
+  // всем его юрлицам сразу, ориентировочно).
+  var coverageParts = [
+    ['Аванс', c.advance],
+    ['Гарантийный платёж', c.guaranteePayment],
+    ['Гарантийный депозит', c.guaranteeDeposit],
+    ['Взаимозачёт', c.ourDebt],
+  ].filter(function(p) { return p[1] > 0; });
+  var coverageLabel = coverageParts.length
+    ? coverageParts.map(function(p) { return p[0] + ' −' + fmt(p[1]); }).join(' · ')
+    : 'Аванс/поступления (по хронологии 1С): −' + fmt(sumDocCovered);
   var reconcileLine = (c.unpaidDocs && c.unpaidDocs.length)
     ? '<div class="muted" style="font-size:10.5px;margin-top:6px;padding-top:6px;border-top:1px solid var(--border)">' +
-        'Итого по документам: ' + fmt(sumDocDebt) + ' · Аванс/поступления (по хронологии 1С): −' + fmt(sumDocCovered) +
+        'Итого по документам: ' + fmt(sumDocDebt) + ' · ' + coverageLabel +
         ' · Открыто по факту: <b>' + fmt(sumDocDebt - sumDocCovered) + '</b></div>'
     : '';
   return { docsHtml: docsHtml, reconcileLine: reconcileLine };

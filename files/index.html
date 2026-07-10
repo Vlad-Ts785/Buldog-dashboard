@@ -826,7 +826,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           <table class="tbl">
             <thead><tr>
               <th>Номер</th><th>Дата</th><th>Декада</th><th>Клиент</th><th>Менеджер</th>
-              <th>Водитель</th><th>Наёмник</th>
+              <th>Водитель/наёмник</th>
               <th class="num">Сумма</th><th class="num">Остаток</th><th>Статус</th>
             </tr></thead>
             <tbody id="sales-problems-body"></tbody>
@@ -3322,24 +3322,23 @@ function filterProblems(status, btn) {
     ? filtered.slice(0,100).map(function(p) {
         var st = p.status||'';
         var stCls = st.indexOf('путёвки') >= 0 ? 'red' : 'amber';
-        // Водитель (свой парк) / Наёмник (наёмный парк) - в двух отдельных колонках, каждая
-        // заполнена только для своего типа (Влад, 2026-07-16).
-        var driverCell = !p.is_hired && p.executor ? cleanName(p.executor) : '—';
-        var hiredCell  = p.is_hired && p.executor ? p.executor : '—';
+        // Один столбик (Влад, 2026-07-16: "мне нужен будет один столбик... 2 столбика из-за
+        // того что много колонок, есть переходы на следующую строку, некрасиво") - водитель,
+        // если свой парк, наёмник, если наёмный, в одной и той же ячейке.
+        var executorCell = p.executor ? (p.is_hired ? p.executor : cleanName(p.executor)) : '—';
         return '<tr>' +
           '<td><b>' + (p.id||'—') + '</b></td>' +
           '<td class="muted">' + (p.date||'—') + '</td>' +
           '<td class="muted" style="font-size:11px">' + (decadeLabel[p.decade||0]||'—') + '</td>' +
           '<td>' + (p.customer||'').substring(0,24) + '</td>' +
           '<td class="muted">' + (p.mgr||'').split(' ').slice(0,2).join(' ') + '</td>' +
-          '<td class="muted">' + driverCell + '</td>' +
-          '<td class="muted">' + hiredCell + '</td>' +
+          '<td class="muted">' + executorCell + '</td>' +
           '<td class="num">' + fmtK2(p.amount||0) + '</td>' +
           '<td class="num ' + ((p.balance||0)>0?'red':'') + '">' + ((p.balance||0)>0?fmtK2(p.balance):'—') + '</td>' +
           '<td><span class="badge ' + stCls + '">' + st + '</span></td>' +
         '</tr>';
       }).join('')
-    : '<tr><td colspan="10" style="color:var(--green);padding:14px">Нет проблемных заказов ✅</td></tr>';
+    : '<tr><td colspan="9" style="color:var(--green);padding:14px">Нет проблемных заказов ✅</td></tr>';
   setText('sales-problems-count', filtered.length + ' из ' + all.length + ' заказов');
 }
 

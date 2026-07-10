@@ -2718,7 +2718,7 @@ function renderDrivers() {
     drvOrderMap = D.driverOrderCounts;
   } else {
     ((D.orders && D.orders.by_driver) || []).forEach(function(x) {
-      var key = x.name.trim().split(' ')[0].toLowerCase();
+      var key = x.name.trim().split(' ').slice(0, 2).join(' ').toLowerCase();
       drvOrderMap[key] = (drvOrderMap[key] || 0) + x.orders;
     });
   }
@@ -2735,8 +2735,11 @@ function renderDrivers() {
   document.getElementById('drivers-body').innerHTML = drivers.map(d => {
     const pv = d.pct * 100;
     const cls = pv >= 90 ? 'green' : pv >= 60 ? 'amber' : 'red';
-    var surname = d.driver.trim().split(' ')[0].toLowerCase();
-    var ordCnt = drvOrderMap[surname] != null ? drvOrderMap[surname] : '—';
+    // Фамилия + имя, не только фамилия (Влад, 2026-07-10, на примере "Шленсков Сергей" и
+    // "Шленсков Максим" - два разных водителя с одной фамилией схлопывались в один
+    // счётчик заказов; см. тот же приём в getDriverOrderCounts_, scripts/full_script_final.js).
+    var nameKey = d.driver.trim().split(' ').slice(0, 2).join(' ').toLowerCase();
+    var ordCnt = drvOrderMap[nameKey] != null ? drvOrderMap[nameKey] : '—';
     const forecast = d.fakt * paceRatio;
     const forecastPct = d.plan > 0 ? forecast / d.plan * 100 : 0;
     // "Оценка" - по прогнозу, не по факту на сегодня, и формулирует действие, а не просто

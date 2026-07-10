@@ -2941,7 +2941,11 @@ function getDriverOrderCounts_(ss, fromDate, toDate) {
       if (!dateStr) return;
       var d = new Date(dateStr + 'T00:00:00');
       if (isNaN(d.getTime()) || d < from || d > to) return;
-      var key = driver.split(' ')[0].toLowerCase();
+      // Фамилия + имя, не только фамилия (Влад, 2026-07-10, на примере "Шленсков Сергей" и
+      // "Шленсков Максим" - два разных человека с одной фамилией схлопывались в один
+      // счётчик, у "Сергея" реально 2 заказа за месяц на его машине, дашборд показывал 11 -
+      // это была сумма обоих Шленсковых). См. тот же приём на фронтенде, files/index.html.
+      var key = driver.split(' ').slice(0, 2).join(' ').toLowerCase();
       counts[key] = (counts[key] || 0) + 1;
     });
   });

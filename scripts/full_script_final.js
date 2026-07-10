@@ -862,6 +862,14 @@ function parseDebtRawRows_(rawData) {
       // (Влад, 2026-07-09: "видеть детальную структуру долга" по каждому контрагенту).
       const docDesc = a.replace(/\s*от \d{2}\.\d{2}\.\d{4}.*$/, '');
       customers[currentContragent].docs.push({ manager: manager, date: docDate, desc: docDesc, debt: ordParseNum(row[6]), org: currentOrg });
+      // Метка "есть хотя бы один документ от РЕАЛЬНОГО менеджера" (Влад, 2026-07-16, на
+      // примере "ГЛАВГОРСТРОЙ ООО": "там даже менеджера моего нет... такие ситуации нам не
+      // нужны") - у некоторых контрагентов ВСЕ документы - это банковские "Поступление"/
+      // "Списание" под псевдо-менеджером master, без единого реального акта (Реализация/
+      // Таблица заказов). Такой контрагент - не настоящий должник трал-бизнеса, а
+      // административная запись 1С (часто с отрицательным "авансом", который наша формула
+      // долг-аванс превращает в фиктивный положительный долг).
+      if (manager.toLowerCase() !== 'master') customers[currentContragent].hasRealManagerDoc = true;
     } else {
       // строка контрагента
       currentContragent = a;
@@ -898,7 +906,7 @@ function parseDebtRawRows_(rawData) {
   const result = [];
   Object.keys(customers).forEach(function(name) {
     const c = customers[name];
-    if (!c.docs.length) return; // ни одного документа от трал-менеджера - не наш клиент
+    if (!c.hasRealManagerDoc) return; // ни одного документа от РЕАЛЬНОГО менеджера (только master) - не наш клиент
     const unpaidDocs = c.docs.filter(function(x) { return x.debt > 0; });
     const datedDocs = unpaidDocs.length ? unpaidDocs : c.docs;
     let oldestDate = datedDocs[0].date, latestDate = datedDocs[0].date, latestManager = datedDocs[0].manager;

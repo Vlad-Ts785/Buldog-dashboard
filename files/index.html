@@ -705,7 +705,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
       </div>
 
       <div class="card">
-        <div class="card-title">Тенденция статусов парка по месяцам</div>
+        <div class="card-title">Тенденция статусов парка по дням</div>
         <div id="hist-trend-loading" style="color:var(--muted);font-size:13px;padding:20px 0">Загрузка...</div>
         <canvas id="chart-status-trend" style="display:none;max-height:300px"></canvas>
       </div>
@@ -2930,7 +2930,7 @@ function buildVehicleCard(v, vhist, driver, orderCount) {
       if (s.indexOf('работе') !== -1) workDays++;
       else if (s.toLowerCase().indexOf('ремонт') !== -1) repairDays++;
       else if (s.toLowerCase().indexOf('заказ') !== -1) noOrderDays++;
-      else if (s.toLowerCase().indexOf('водитель') !== -1) noDriverDays++;
+      else if (s.toLowerCase().indexOf('водителя') !== -1) noDriverDays++;
       else workDays++;
     });
   }
@@ -3106,7 +3106,7 @@ function renderDynamics() {
       if (s.indexOf('работе') !== -1) work++;
       else if (s.indexOf('ремонт') !== -1) repair++;
       else if (s.indexOf('заказ') !== -1) noOrder++;
-      else if (s.indexOf('водитель') !== -1) noDriver++;
+      else if (s.indexOf('водителя') !== -1) noDriver++;
       else work++;
     });
     return { gos: gos, type: v.type || '', marka: markaMap[gos] || '', work: work, repair: repair, noOrder: noOrder, noDriver: noDriver, total: Object.keys(v.days).length };
@@ -3220,55 +3220,53 @@ function renderStatusTable() {
 
 var histChartTrend = null;
 
+// Дневная детализация (Влад, 2026-07-16: "месяц - это слишком большой срез, я должен
+// каждый день видеть график изменения") - раньше на график попадала всего одна точка за
+// месяц (статус в последний день месяца), теперь по точке на КАЖДЫЙ день в выбранном
+// периоде (тот же raw-массив по дням, что уже кормит таблицу "Штатка" на этой странице -
+// пересчитывать/запрашивать заново не нужно).
 function renderStatusTrend(data) {
   var loading = document.getElementById('hist-trend-loading');
   var canvas  = document.getElementById('chart-status-trend');
 
-  // Для каждого месяца берём последнюю дату, считаем статусы всех машин за этот день
-  var lastDateByMonth = {};
-  data.forEach(function(r) {
-    var ym = r.date.substring(0, 7);
-    if (!lastDateByMonth[ym] || r.date > lastDateByMonth[ym]) lastDateByMonth[ym] = r.date;
-  });
+  var days = [];
+  var seenDays = {};
+  data.forEach(function(r) { if (!seenDays[r.date]) { seenDays[r.date] = true; days.push(r.date); } });
+  days.sort();
 
-  var months = Object.keys(lastDateByMonth).sort();
-  if (!months.length) {
+  if (!days.length) {
     loading.textContent = 'Нет данных за выбранный период';
     canvas.style.display = 'none';
     return;
   }
 
-  // Для каждого месяца считаем кол-во машин по статусу в последний день месяца
-  var byMonth = {};
-  months.forEach(function(ym) {
-    byMonth[ym] = { work: 0, repair: 0, noDriver: 0, noOrder: 0 };
-  });
+  // Для каждого дня считаем кол-во машин по статусу в этот день
+  var byDay = {};
+  days.forEach(function(d) { byDay[d] = { work: 0, repair: 0, noDriver: 0, noOrder: 0 }; });
 
-  // Последняя запись каждой машины за каждый месяц
-  var lastPerVehMonth = {};
+  // Последняя запись каждой машины за каждый день (на случай, если статус за день менялся
+  // несколько раз - берём финальное состояние дня, а не первое попавшееся).
+  var lastPerVehDay = {};
   data.forEach(function(r) {
-    var ym = r.date.substring(0, 7);
-    var key = r.gos + '|' + ym;
-    if (!lastPerVehMonth[key] || r.date > lastPerVehMonth[key].date) {
-      lastPerVehMonth[key] = r;
+    var key = r.gos + '|' + r.date;
+    if (!lastPerVehDay[key] || r.date >= lastPerVehDay[key].date) {
+      lastPerVehDay[key] = r;
     }
   });
 
-  Object.keys(lastPerVehMonth).forEach(function(key) {
-    var r = lastPerVehMonth[key];
-    var ym = r.date.substring(0, 7);
+  Object.keys(lastPerVehDay).forEach(function(key) {
+    var r = lastPerVehDay[key];
     var s = (r.status || '').toLowerCase();
-    if (s.indexOf('работе') !== -1)       byMonth[ym].work++;
-    else if (s.indexOf('ремонт') !== -1)  byMonth[ym].repair++;
-    else if (s.indexOf('водитель') !== -1) byMonth[ym].noDriver++;
-    else if (s.indexOf('заказ') !== -1)   byMonth[ym].noOrder++;
-    else                                   byMonth[ym].work++;
+    if (s.indexOf('работе') !== -1)       byDay[r.date].work++;
+    else if (s.indexOf('ремонт') !== -1)  byDay[r.date].repair++;
+    else if (s.indexOf('водителя') !== -1) byDay[r.date].noDriver++;
+    else if (s.indexOf('заказ') !== -1)   byDay[r.date].noOrder++;
+    else                                   byDay[r.date].work++;
   });
 
-  var labels = months.map(function(m) {
-    var p = m.split('-');
-    return new Date(+p[0], +p[1]-1, 1).toLocaleDateString('ru', { month: 'long', year: '2-digit' });
-  });
+  // Короткий формат "ДД.ММ" (не полное "31 июля"), как на графике "ДЗ по дням" - иначе
+  // на плотной дневной оси подписи месяцами целиком сливаются друг с другом.
+  var labels = days.map(function(d) { return d.slice(8,10) + '.' + d.slice(5,7); });
 
   loading.style.display = 'none';
   canvas.style.display = '';
@@ -3279,10 +3277,10 @@ function renderStatusTrend(data) {
     data: {
       labels: labels,
       datasets: [
-        { label: 'В работе',     data: months.map(function(m) { return byMonth[m].work;     }), borderColor: '#1D9E75', backgroundColor: 'rgba(29,158,117,0.1)', tension: 0.3, fill: true,  pointRadius: 4, borderWidth: 2 },
-        { label: 'Ремонт',       data: months.map(function(m) { return byMonth[m].repair;   }), borderColor: '#E24B4A', backgroundColor: 'rgba(226,75,74,0.08)',  tension: 0.3, fill: false, pointRadius: 4, borderWidth: 2 },
-        { label: 'Без водителя', data: months.map(function(m) { return byMonth[m].noDriver; }), borderColor: '#EF9F27', backgroundColor: 'rgba(239,159,39,0.08)', tension: 0.3, fill: false, pointRadius: 4, borderWidth: 2 },
-        { label: 'Без заказа',   data: months.map(function(m) { return byMonth[m].noOrder;  }), borderColor: '#6c8ebf', backgroundColor: 'rgba(108,142,191,0.08)',tension: 0.3, fill: false, pointRadius: 4, borderWidth: 2 }
+        { label: 'В работе',     data: days.map(function(d) { return byDay[d].work;     }), borderColor: '#1D9E75', backgroundColor: 'rgba(29,158,117,0.1)', tension: 0.3, fill: true,  pointRadius: 0, borderWidth: 2 },
+        { label: 'Ремонт',       data: days.map(function(d) { return byDay[d].repair;   }), borderColor: '#E24B4A', backgroundColor: 'rgba(226,75,74,0.08)',  tension: 0.3, fill: false, pointRadius: 0, borderWidth: 2 },
+        { label: 'Без водителя', data: days.map(function(d) { return byDay[d].noDriver; }), borderColor: '#EF9F27', backgroundColor: 'rgba(239,159,39,0.08)', tension: 0.3, fill: false, pointRadius: 0, borderWidth: 2 },
+        { label: 'Без заказа',   data: days.map(function(d) { return byDay[d].noOrder;  }), borderColor: '#6c8ebf', backgroundColor: 'rgba(108,142,191,0.08)',tension: 0.3, fill: false, pointRadius: 0, borderWidth: 2 }
       ]
     },
     options: {
@@ -3293,7 +3291,7 @@ function renderStatusTrend(data) {
         tooltip: { backgroundColor: '#1a1a22', titleColor: '#e8e6df', bodyColor: '#9e9b94', borderColor: 'rgba(255,255,255,0.1)', borderWidth: 1 }
       },
       scales: {
-        x: { ticks: { color: '#888780' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+        x: { ticks: { color: '#888780', maxRotation: 0, autoSkip: true, maxTicksLimit: 12 }, grid: { color: 'rgba(255,255,255,0.05)' } },
         y: { ticks: { color: '#888780', stepSize: 1 }, grid: { color: 'rgba(255,255,255,0.05)' }, min: 0 }
       }
     }

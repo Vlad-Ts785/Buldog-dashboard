@@ -907,6 +907,21 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
             </table>
           </div>
         </div>
+        <div class="card" id="debt-guarantees-card" style="margin-bottom:16px;display:none">
+          <div class="sec-header">
+            <div class="sec-title">Гарантийные платежи/депозиты</div>
+            <div class="sec-sub">Итого: <b id="debt-guarantees-total">—</b></div>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="tbl">
+              <thead><tr>
+                <th>Контрагент</th><th>Менеджер</th>
+                <th class="num">Гарантийный платёж</th><th class="num">Гарантийный депозит</th><th class="num">Итого</th>
+              </tr></thead>
+              <tbody id="debt-guarantees-body"></tbody>
+            </table>
+          </div>
+        </div>
         <div class="card">
           <div class="card-title">ДЗ по дням</div>
           <div class="chart-wrap" style="height:220px"><canvas id="chart-debt-history"></canvas></div>
@@ -4555,6 +4570,45 @@ function toggleDebtAgeLimit() {
   renderDebt();
 }
 
+// Фильтр по клику на корзину просрочки в KPI (Влад, 2026-07-14: "хочу фильтр на этот
+// диапазон, можно по нажатию в блоке"). Повторный клик по активной корзине снимает фильтр.
+let debtBucketFilter = ''; // '' | '0-30' | '30-60' | '60-90' | '90+'
+function setDebtBucketFilter(bucket) {
+  debtBucketFilter = (debtBucketFilter === bucket) ? '' : bucket;
+  renderDebt();
+}
+function debtInBucket_(days, bucket) {
+  if (bucket === '0-30') return days <= 30;
+  if (bucket === '30-60') return days > 30 && days <= 60;
+  if (bucket === '60-90') return days > 60 && days <= 90;
+  if (bucket === '90+') return days > 90;
+  return true;
+}
+
+// Статус взыскания по контрагенту (Влад, 2026-07-14: "проставлять вручную статус...
+// должник, претензия, суд, исполнительный лист, и срок сколько уже стоит такой статус").
+// Список синхронизирован с DEBT_STATUS_OPTIONS в scripts/full_script_final.js.
+const DEBT_STATUS_OPTIONS = ['Должник', 'Претензия', 'Суд', 'Исполнительный лист'];
+async function debtSetStatus(selectEl, contragent) {
+  var status = selectEl.value;
+  if (!status) return; // "—" - сброс статуса пока не поддержан backend'ом
+  selectEl.disabled = true;
+  try {
+    var data = await apiFetchJson({ action: 'debt_set_status', contragent: contragent, status: status });
+    if (data.error) throw new Error(data.error);
+    var c = (D.debt.by_customer || []).find(function(x){ return x.contragent === contragent; });
+    // Счётчик дней сбрасывается на бэкенде ТОЛЬКО если статус реально изменился - здесь для
+    // простоты сразу показываем 0, точное число (если статус на самом деле не менялся)
+    // подтянется при следующей полной загрузке дашборда.
+    if (c) { c.status = status; c.statusDays = 0; }
+    renderDebt();
+  } catch (e) {
+    alert('Ошибка записи статуса: ' + e.message);
+  } finally {
+    selectEl.disabled = false;
+  }
+}
+
 // Сортировка таблицы "Должники" (Влад, 2026-07-12: "хочу фильтр сортировки, например
 // чтобы отсортировать по дням") - тот же приём, что "Топ клиенты" (clientsTopSort).
 const DEBT_COLS = [
@@ -4562,6 +4616,7 @@ const DEBT_COLS = [
   { key: 'manager',     label: 'Менеджер',        num: false },
   { key: 'balance',     label: 'Баланс',          num: true },
   { key: 'daysOverdue', label: 'Дней просрочки',  num: true },
+  { key: 'status',      label: 'Статус',          num: false },
 ];
 let debtSort = { col: 'balance', dir: -1 };
 function setDebtSort(col) {
@@ -4654,17 +4709,25 @@ function renderDebt() {
       }).join('') + '</div>'
     : '';
   // Просрочка - раньше 3 отдельные карточки (30-60/60-90/90+), Влад 2026-07-09: "объединить
-  // в один блок с короткой, средней и длинной". Одна карточка, три строки внутри.
+  // в один блок с короткой, средней и длинной". Одна карточка, три строки внутри. Клик по
+  // строке - фильтр таблицы "Должники" по этому диапазону (Влад, 2026-07-14: "хочу фильтр
+  // на этот диапазон, можно по нажатию в блоке").
+  function bucketRow_(bucket, label, color, value) {
+    var active = debtBucketFilter === bucket;
+    return '<tr onclick="setDebtBucketFilter(\'' + bucket + '\')" style="cursor:pointer' + (active ? ';background:rgba(255,255,255,0.06)' : '') + '">' +
+      '<td class="muted" style="padding:2px 4px 2px 0">' + (active ? '▸ ' : '') + label + '</td>' +
+      '<td class="num" style="color:' + color + ';font-weight:600;padding:2px 0">' + fmt(value||0) + '</td></tr>';
+  }
   document.getElementById('debt-kpi').innerHTML =
     '<div class="kpi"><div class="kpi-label">Общая ДЗ</div><div class="kpi-value amber">' + fmt(s.total_balance||0) + totalTrend + '</div>' + byOrgHtml + '</div>' +
     '<div class="kpi"><div class="kpi-label">Должников</div><div class="kpi-value">' + (s.debtor_count||0) + '</div></div>' +
     '<div class="kpi">' +
-      '<div class="kpi-label">Просрочка</div>' +
+      '<div class="kpi-label">Просрочка' + (debtBucketFilter ? ' <span class="muted" style="font-weight:400;text-transform:none">(фильтр активен - клик снова снимает)</span>' : '') + '</div>' +
       '<table style="width:100%;font-size:12px;border-collapse:collapse;margin-top:4px">' +
-        '<tr><td class="muted" style="padding:2px 0">Текущая (0-30 дн.)</td><td class="num" style="color:var(--green);font-weight:600">' + fmt(s.current_0_30||0) + '</td></tr>' +
-        '<tr><td class="muted" style="padding:2px 0">Короткая (30-60 дн.)</td><td class="num" style="color:var(--amber);font-weight:600">' + fmt(s.overdue_30_60||0) + '</td></tr>' +
-        '<tr><td class="muted" style="padding:2px 0">Средняя (60-90 дн.)</td><td class="num" style="color:#EF9F27;font-weight:600">' + fmt(s.overdue_60_90||0) + '</td></tr>' +
-        '<tr><td class="muted" style="padding:2px 0">Длинная (&gt;90 дн.)</td><td class="num" style="color:var(--red);font-weight:600">' + fmt(s.overdue_90_plus||0) + '</td></tr>' +
+        bucketRow_('0-30', 'Текущая (0-30 дн.)', 'var(--green)', s.current_0_30) +
+        bucketRow_('30-60', 'Короткая (30-60 дн.)', 'var(--amber)', s.overdue_30_60) +
+        bucketRow_('60-90', 'Средняя (60-90 дн.)', '#EF9F27', s.overdue_60_90) +
+        bucketRow_('90+', 'Длинная (&gt;90 дн.)', 'var(--red)', s.overdue_90_plus) +
       '</table>' +
     '</div>';
 
@@ -4672,40 +4735,27 @@ function renderDebt() {
   // hist уже получен выше (для стрелок тенденций в KPI). Показывает ВСЕ долги без учёта
   // фильтра "до 600 дней" (Влад, 2026-07-12: "хорошо что график будет показывать реальную
   // картину с учётом всех долгов") - использует debt.history напрямую, не agg.
-  // Плюс линии по топ-10 контрагентам по текущему балансу (Влад: "должен иметь линии по
-  // всем контрагентам, а не только общий") - показывать линию на каждого из 100+ должников
-  // было бы нечитаемым шумом, поэтому топ-10 + агрегированная линия "Остальные".
+  // Плюс линии по КАЖДОМУ ЮРЛИЦУ группы (Влад, 2026-07-14: "не график по клиентам, а
+  // график линию по долгу каждого нашего юрлица - Бульдог, Стройтранс, Ярд" - уточнение
+  // предыдущего запроса про "линии по контрагентам", там на самом деле имелись в виду
+  // наши 5 юрлиц, не клиенты) - используем разбивку по юрлицам, которая уже есть в каждой
+  // точке истории (hist[].byOrg), отдельный лист по клиентам за 2026-07-12 больше не нужен.
   const ctx = document.getElementById('chart-debt-history');
   if (ctx && hist.length) {
     if (ctx._chart) ctx._chart.destroy();
-    const histTopCustomers = debt.history_top_customers || [];
-    const debtChartColors = ['#378ADD','#1D9E75','#E24B4A','#8B5CF6','#F472B6','#22D3EE','#A3E635','#FB923C','#94A3B8','#C084FC'];
-    const dateIdx = {}; hist.forEach(function(h, idx) { dateIdx[h.date] = idx; });
-    const topSumsByDate = hist.map(function() { return 0; });
+    const debtOrgColors = { 'Бульдог':'#378ADD', 'Ярд Империал':'#1D9E75', 'Стройтранс':'#E24B4A', 'Техно Парк':'#8B5CF6', 'Мегакран':'#F472B6' };
+    const orgNames = {};
+    hist.forEach(function(h) { Object.keys(h.byOrg || {}).forEach(function(o) { orgNames[o] = true; }); });
     const datasets = [{
       label: 'Общая ДЗ', data: hist.map(function(h){ return h.balance; }),
       borderColor: '#EF9F27', backgroundColor: 'rgba(239,159,39,0.12)', fill: true, tension: 0.25, pointRadius: 2, borderWidth: 2.5,
     }];
-    histTopCustomers.forEach(function(tc, ci) {
-      const seriesByDate = {};
-      tc.history.forEach(function(p) { seriesByDate[p.date] = p.balance; });
-      const seriesData = hist.map(function(h) {
-        const v = seriesByDate[h.date] || 0;
-        topSumsByDate[dateIdx[h.date]] += v;
-        return v;
-      });
-      const shortName = tc.contragent.length > 22 ? tc.contragent.slice(0, 22) + '…' : tc.contragent;
+    Object.keys(orgNames).forEach(function(org) {
       datasets.push({
-        label: shortName, data: seriesData, borderColor: debtChartColors[ci % debtChartColors.length],
-        backgroundColor: 'transparent', fill: false, tension: 0.25, pointRadius: 0, borderWidth: 1.3,
+        label: org, data: hist.map(function(h) { return (h.byOrg && h.byOrg[org]) || 0; }),
+        borderColor: debtOrgColors[org] || '#94A3B8', backgroundColor: 'transparent',
+        fill: false, tension: 0.25, pointRadius: 0, borderWidth: 1.5,
       });
-    });
-    // "Остальные" = общий баланс минус сумма топ-10 за тот же день - чтобы сумма всех линий
-    // (кроме "Общая ДЗ") давала ровно "Общую ДЗ", видно, сколько за пределами топ-10.
-    const restData = hist.map(function(h, idx) { return Math.max(0, h.balance - topSumsByDate[idx]); });
-    datasets.push({
-      label: 'Остальные', data: restData, borderColor: '#888780', backgroundColor: 'transparent',
-      fill: false, tension: 0.25, pointRadius: 0, borderWidth: 1.3, borderDash: [4, 3],
     });
     ctx._chart = new Chart(ctx, {
       type: 'line',
@@ -4738,6 +4788,9 @@ function renderDebt() {
   var customersFiltered = mgrFilterVal
     ? ageFiltered.filter(function(c){ return c.manager === mgrFilterVal; })
     : ageFiltered;
+  if (debtBucketFilter) {
+    customersFiltered = customersFiltered.filter(function(c){ return debtInBucket_(c.daysOverdue, debtBucketFilter); });
+  }
   customersFiltered = customersFiltered.slice().sort(function(a, b) {
     var av = a[debtSort.col], bv = b[debtSort.col];
     if (typeof av === 'number') return (bv - av) * debtSort.dir;
@@ -4816,13 +4869,26 @@ function renderDebt() {
           'Итого по документам: ' + fmt(sumDocDebt) + ' · Аванс/поступления (по хронологии 1С): −' + fmt(sumDocCovered) +
           ' · Открыто по факту: <b>' + fmt(sumDocDebt - sumDocCovered) + '</b></div>'
       : '';
+    // Статус взыскания (Влад, 2026-07-14: "проставлять вручную статус... должник,
+    // претензия, суд, исполнительный лист, и срок сколько уже стоит такой статус").
+    var statusOptionsHtml = '<option value=""' + (!c.status?' selected':'') + '>—</option>' +
+      DEBT_STATUS_OPTIONS.map(function(opt) {
+        return '<option value="' + opt + '"' + (c.status===opt?' selected':'') + '>' + opt + '</option>';
+      }).join('');
+    var statusCell = '<td onclick="event.stopPropagation()">' +
+      '<select onchange="debtSetStatus(this,\'' + c.contragent.replace(/'/g,"\\'") + '\')" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:3px 6px;font-size:11px;max-width:140px">' +
+        statusOptionsHtml +
+      '</select>' +
+      (c.status ? '<div class="muted" style="font-size:9.5px;margin-top:2px">' + c.statusDays + ' дн.</div>' : '') +
+    '</td>';
     return '<tr class="debt-row-toggle" onclick="toggleDebtDetail(' + i + ')" style="cursor:pointer">' +
       '<td><span id="debt-arrow-' + i + '" class="muted" style="display:inline-block;width:14px">▸</span><b>' + c.contragent + '</b>' + byOrgLine + '</td>' +
       '<td class="muted">' + cleanName(c.manager) + '</td>' +
       '<td class="num"><b>' + fmt(c.balance) + '</b></td>' +
       '<td class="num ' + ageCls(c.daysOverdue) + '">' + c.daysOverdue + '</td>' +
+      statusCell +
     '</tr>' +
-    '<tr id="debt-detail-' + i + '" style="display:none"><td colspan="4" style="padding:0 0 10px 28px">' +
+    '<tr id="debt-detail-' + i + '" style="display:none"><td colspan="5" style="padding:0 0 10px 28px">' +
       '<table style="width:100%;font-size:11.5px;border-collapse:collapse">' + docsHtml + '</table>' + reconcileLine +
     '</td></tr>';
   }).join('');
@@ -4832,6 +4898,24 @@ function renderDebt() {
       '<td><b>' + cleanName(m.name) + '</b></td>' +
       '<td class="num">' + m.customers + '</td>' +
       '<td class="num">' + fmt(m.balance) + '</td>' +
+    '</tr>';
+  }).join('');
+
+  // Гарантийные платежи/депозиты - отдельная таблица (Влад, 2026-07-14: "хочу отдельной
+  // табличкой внизу все гарантийные депозиты и сумма их"). По ВСЕМ клиентам, не только
+  // реальным должникам - клиент с полностью покрытым долгом уже не входит в "Должники", но
+  // депозит по нему всё равно стоит показать.
+  var guarantees = debt.guarantees || [];
+  var guaranteesCard = document.getElementById('debt-guarantees-card');
+  if (guaranteesCard) guaranteesCard.style.display = guarantees.length ? '' : 'none';
+  document.getElementById('debt-guarantees-total').textContent = fmt((debt.summary && debt.summary.guarantees_total) || 0);
+  document.getElementById('debt-guarantees-body').innerHTML = guarantees.map(function(g) {
+    return '<tr>' +
+      '<td><b>' + g.contragent + '</b></td>' +
+      '<td class="muted">' + cleanName(g.manager) + '</td>' +
+      '<td class="num">' + (g.guaranteePayment ? fmt(g.guaranteePayment) : '—') + '</td>' +
+      '<td class="num">' + (g.guaranteeDeposit ? fmt(g.guaranteeDeposit) : '—') + '</td>' +
+      '<td class="num"><b>' + fmt(g.total) + '</b></td>' +
     '</tr>';
   }).join('');
 }

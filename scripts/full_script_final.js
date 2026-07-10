@@ -785,10 +785,12 @@ function saveFinancialHistory() {
 // ============================================================
 const DEBT_RAW_SHEET = 'ДЗ_данные';
 const DEBT_HISTORY_SHEET = 'История_ДЗ';
-// Дневная история ПО КАЖДОМУ КОНТРАГЕНТУ (Влад, 2026-07-12: "график должен иметь линии по
-// всем контрагентам, а не только общий") - отдельный лист, растёт на 1 строку в день на
-// каждого реального должника (balance>0).
-const DEBT_CUSTOMER_HISTORY_SHEET = 'История_ДЗ_по_контрагентам';
+// Лист "История_ДЗ_по_контрагентам" (2026-07-12) и функция saveDebtCustomerHistory_ -
+// УДАЛЕНЫ 2026-07-14: Влад уточнил, что хотел линии по КАЖДОМУ ЮРЛИЦУ группы (Бульдог/
+// Ярд/Стройтранс/...), не по клиентам - "не график по клиентам, а график по каждому
+// нашему контрагенту Бульдог Стройтранс Ярд". Разбивка по юрлицам уже есть в
+// DEBT_HISTORY_SHEET (см. orgTotals в saveDebtHistory) - отдельный лист был не нужен, лист
+// в таблице (если остался от 2026-07-12) можно удалить вручную, дашборд его больше не читает.
 
 // Убирает телефон из имени менеджера ("Савиток Олеся Анатольевна 8-985-150-11-85" ->
 // "Савиток Олеся Анатольевна") - та же логика, что фронтендный cleanName() (files/index.html).
@@ -830,7 +832,15 @@ function parseDebtRawRows_(rawData) {
     if (/^\d{2}\.\s/.test(a)) { currentOrg = a; currentContragent = null; continue; } // строка юрлица
 
     const dept = String(row[3] || '').trim();
-    if (dept) {
+    // Строки "Поступление..." под менеджером "master" НЕ имеют заполненный "Отдел" (как и
+    // строки контрагента) - без этой проверки они ошибочно принимались за НОВОГО
+    // контрагента, и следующие за ними реальные документы уходили не тому клиенту (Влад,
+    // 2026-07-14, на скриншоте: "Поступление на расчётный счёт ... — Техно Парк: 29 800 ₽"
+    // выглядело как отдельный контрагент с долгом - подтверждённый баг). Распознаём такую
+    // строку по паттерну "... от ДД.ММ.ГГГГ ЧЧ:ММ:СС" даже без "Отдела" - это документ,
+    // просто без привязки к конкретному менеджеру, не новый контрагент.
+    const looksLikeDocRow = dept !== '' || /от\s+\d{2}\.\d{2}\.\d{4}\s+\d{1,2}:\d{2}/.test(a);
+    if (looksLikeDocRow) {
       // строка документа - менеджера НЕ фильтруем по TRAL_MANAGERS (список менеджеров в
       // самом отчёте 1С уже задаёт Влад в параметрах отчёта - "Менеджер В списке..." см.
       // план; если фильтровать ещё и здесь по своему списку, при добавлении в 1С уволенных
@@ -1089,50 +1099,65 @@ function saveDebtHistory() {
   const newRow = [new Date(), totalBalance, totalDebt, debtorCount].concat(orgTotals);
   if (todayRowIndex > 0) histSheet.getRange(todayRowIndex, 1, 1, newRow.length).setValues([newRow]);
   else histSheet.appendRow(newRow);
-
-  saveDebtCustomerHistory_(ss, data);
 }
 
-// Дневной снимок ПО КАЖДОМУ КОНТРАГЕНТУ (Влад, 2026-07-12: "график должен иметь линии по
-// всем контрагентам, а не только общий") - идемпотентно, удаляет сегодняшние строки перед
-// записью новых (та же логика, что и общая история выше). data - уже прочитанные строки
-// ДЗ_данные, повторно не читаем.
-function saveDebtCustomerHistory_(ss, data) {
-  let custHistSheet = ss.getSheetByName(DEBT_CUSTOMER_HISTORY_SHEET);
-  if (!custHistSheet) {
-    custHistSheet = ss.insertSheet(DEBT_CUSTOMER_HISTORY_SHEET);
-    custHistSheet.getRange(1, 1, 1, 3).setValues([['Дата', 'Контрагент', 'Баланс']]).setFontWeight('bold');
-  }
+// ── СТАТУС ВЗЫСКАНИЯ ПО КОНТРАГЕНТУ (Влад, 2026-07-14) ────────────────────
+// "Хочу по каждому контрагенту проставлять вручную статус... должник, претензия, суд,
+// исполнительный лист, и срок сколько уже стоит такой статус". Отдельный лист - НЕ
+// перезаписывается импортом ДЗ_данные (тот полностью перезаписывается 1С-отчётом каждый
+// день), одна строка на контрагента.
+const DEBT_STATUS_SHEET = 'ДЗ_Статусы';
+const DEBT_STATUS_OPTIONS = ['Должник', 'Претензия', 'Суд', 'Исполнительный лист'];
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const lastRow = custHistSheet.getLastRow();
+function isValidDebtStatus_(status) {
+  return DEBT_STATUS_OPTIONS.indexOf(status) >= 0;
+}
+
+// {contragent: {status, since}} - since = дата, с которой стоит ИМЕННО этот статус (не
+// дата создания строки - см. setDebtStatus_, дата обновляется только при смене статуса).
+function getDebtStatuses_(ss) {
+  const sheet = ss.getSheetByName(DEBT_STATUS_SHEET);
+  const result = {};
+  if (!sheet || sheet.getLastRow() < 2) return result;
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
+  data.forEach(function(r) {
+    const name = String(r[0] || '').trim();
+    if (!name) return;
+    result[name] = {
+      status: String(r[1] || ''),
+      since: r[2] instanceof Date ? Utilities.formatDate(r[2], 'Europe/Moscow', 'yyyy-MM-dd') : String(r[2] || ''),
+    };
+  });
+  return result;
+}
+
+// Дата "с какого числа" обновляется, ТОЛЬКО если статус реально изменился - повторная
+// установка того же статуса (например, повторный клик по тому же значению в выпадающем
+// списке) не сбрасывает счётчик "сколько дней уже стоит статус".
+function setDebtStatus_(ss, contragent, status) {
+  const name = String(contragent || '').trim();
+  if (!name) throw new Error('Не указан контрагент');
+  if (!isValidDebtStatus_(status)) throw new Error('Недопустимый статус: ' + status);
+
+  let sheet = ss.getSheetByName(DEBT_STATUS_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(DEBT_STATUS_SHEET);
+    sheet.getRange(1, 1, 1, 3).setValues([['Контрагент', 'Статус', 'Дата установки']]).setFontWeight('bold');
+  }
+  const today = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM-dd');
+  const lastRow = sheet.getLastRow();
   if (lastRow > 1) {
-    const dates = custHistSheet.getRange(2, 1, lastRow - 1, 1).getValues();
-    let deleteFrom = -1, deleteCount = 0;
-    for (let i = 0; i < dates.length; i++) {
-      if (dates[i][0] instanceof Date) {
-        const d = new Date(dates[i][0]);
-        d.setHours(0, 0, 0, 0);
-        if (d.getTime() === today.getTime()) {
-          if (deleteFrom < 0) deleteFrom = i + 2;
-          deleteCount++;
+    const data = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+    for (let i = 0; i < data.length; i++) {
+      if (String(data[i][0] || '').trim() === name) {
+        if (String(data[i][1] || '') !== status) {
+          sheet.getRange(i + 2, 2, 1, 2).setValues([[status, today]]);
         }
+        return;
       }
     }
-    if (deleteFrom > 0) custHistSheet.deleteRows(deleteFrom, deleteCount);
   }
-
-  const now = new Date();
-  const rows = [];
-  data.forEach(function(r) {
-    const balance = parseFloat(r[6]) || 0;
-    if (balance <= 0) return; // только реальные должники
-    rows.push([now, String(r[0] || ''), balance]);
-  });
-  if (rows.length > 0) {
-    custHistSheet.getRange(custHistSheet.getLastRow() + 1, 1, rows.length, 3).setValues(rows);
-  }
+  sheet.appendRow([name, status, today]);
 }
 
 // Агрегация ДЗ для дашборда - читает уже посчитанный ДЗ_данные (см. importDebtReport).
@@ -1197,6 +1222,16 @@ function getDebtData(ss) {
   }
   customers.forEach(function(c) { c.daysOverdue = daysSince(c.oldestUnpaidDate); });
 
+  // Статус взыскания (Влад, 2026-07-14: "должник, претензия, суд, исполнительный лист... и
+  // срок сколько уже стоит такой статус").
+  const debtStatuses = getDebtStatuses_(ss);
+  customers.forEach(function(c) {
+    const st = debtStatuses[c.contragent];
+    c.status = st ? st.status : '';
+    c.statusSince = st ? st.since : '';
+    c.statusDays = st ? daysSince(st.since) : 0;
+  });
+
   const byManagerMap = {};
   customers.forEach(function(c) {
     if (!byManagerMap[c.manager]) byManagerMap[c.manager] = { name: c.manager, balance: 0, customers: 0 };
@@ -1247,31 +1282,21 @@ function getDebtData(ss) {
       .sort(function(a, b) { return a.date.localeCompare(b.date); });
   }
 
-  // История по каждому контрагенту (Влад, 2026-07-12: "график должен иметь линии по всем
-  // контрагентам, а не только общий") - топ-N по ТЕКУЩЕМУ балансу (не по всем ~130+
-  // должникам сразу - линия на каждого была бы нечитаемым шумом на графике). "Остальные"
-  // (баланс минус сумма топ-N) считает фронтенд из общей history, которая уже есть.
-  const DEBT_HISTORY_TOP_N = 10;
-  const topCustomerNames = customers.slice(0, DEBT_HISTORY_TOP_N).map(function(c) { return c.contragent; });
-  const custHistSheet = ss.getSheetByName(DEBT_CUSTOMER_HISTORY_SHEET);
-  let historyByCustomer = [];
-  if (custHistSheet && custHistSheet.getLastRow() > 1) {
-    const custHistData = custHistSheet.getRange(2, 1, custHistSheet.getLastRow() - 1, 3).getValues();
-    const byName = {};
-    custHistData.forEach(function(r) {
-      if (!(r[0] instanceof Date)) return;
-      const name = String(r[1] || '');
-      if (topCustomerNames.indexOf(name) < 0) return;
-      const dateStr = Utilities.formatDate(r[0], 'Europe/Moscow', 'yyyy-MM-dd');
-      if (!byName[name]) byName[name] = [];
-      byName[name].push({ date: dateStr, balance: parseFloat(r[2]) || 0 });
-    });
-    historyByCustomer = topCustomerNames
-      .filter(function(name) { return byName[name]; })
-      .map(function(name) {
-        return { contragent: name, history: byName[name].sort(function(a, b) { return a.date.localeCompare(b.date); }) };
-      });
-  }
+  // Все клиенты с гарантийным платежом/депозитом (не только реальные должники - клиент с
+  // полностью покрытым долгом уже не входит в customers, но депозит по нему всё ещё стоит
+  // показать) - Влад, 2026-07-14: "хочу отдельной табличкой внизу все гарантийные депозиты
+  // и сумма их".
+  const guarantees = allCustomers
+    .filter(function(c) { return (c.guaranteePayment || 0) > 0 || (c.guaranteeDeposit || 0) > 0; })
+    .map(function(c) {
+      return {
+        contragent: c.contragent, manager: c.manager,
+        guaranteePayment: c.guaranteePayment, guaranteeDeposit: c.guaranteeDeposit,
+        total: (c.guaranteePayment || 0) + (c.guaranteeDeposit || 0),
+      };
+    })
+    .sort(function(a, b) { return b.total - a.total; });
+  const guaranteesTotal = guarantees.reduce(function(s, g) { return s + g.total; }, 0);
 
   return {
     summary: {
@@ -1284,11 +1309,12 @@ function getDebtData(ss) {
       by_org: byOrg,
       old_unclosed_orders_count: oldUnclosedCount,
       old_unclosed_orders_amount: oldUnclosedAmount,
+      guarantees_total: guaranteesTotal,
     },
     by_customer: customers,
     by_manager: Object.values(byManagerMap).sort(function(a, b) { return b.balance - a.balance; }),
+    guarantees: guarantees,
     history: history,
-    history_top_customers: historyByCustomer,
   };
 }
 
@@ -1769,6 +1795,18 @@ function doGet(e) {
         return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(ContentService.MimeType.JSON);
       } catch (shtatkaErr) {
         return ContentService.createTextOutput(JSON.stringify({ error: shtatkaErr.message })).setMimeType(ContentService.MimeType.JSON);
+      }
+    }
+
+    if (action === 'debt_set_status') {
+      if (access.role !== 'admin') {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      try {
+        setDebtStatus_(ss, e.parameter.contragent, e.parameter.status);
+        return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(ContentService.MimeType.JSON);
+      } catch (debtStatusErr) {
+        return ContentService.createTextOutput(JSON.stringify({ error: debtStatusErr.message })).setMimeType(ContentService.MimeType.JSON);
       }
     }
 

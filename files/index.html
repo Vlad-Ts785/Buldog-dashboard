@@ -472,6 +472,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           <div class="kpi-label">Валовая прибыль</div>
           <div class="kpi-value green" id="k-profit">—</div>
           <div class="kpi-sub2" id="k-margin"></div>
+          <div id="k-profit-breakdown" style="margin-top:8px"></div>
           <div class="kpi-prog-wrap">
             <div class="kpi-prog-header"><span>Выполнение плана ВП</span><span id="k-profit-pct">—</span></div>
             <div class="kpi-prog-bg"><div class="kpi-prog-fill" id="k-profit-bar" style="width:0%"></div></div>
@@ -1740,6 +1741,26 @@ function renderKPI() {
   // чем-то") - ВП считается только по своему парку, но знаменатель должен быть весь бизнес.
   const grossMarginPct = totalRevenue > 0 ? (profit / totalRevenue * 100) : 0;
   setText('k-margin', 'Маржа ' + pct(grossMarginPct));
+
+  // Разбивка ВП своего парка по сегментам - тралы/длинномеры отдельно, каждый со своей
+  // маржой (Влад, 2026-07-17: "валовая прибыль отражается некорректно, нужно разделить
+  // длинномеры и валовую прибыль трала"). Маржа сегмента - к ОБЩЕЙ выручке сегмента
+  // (свой+наём, os.tral_amount/long_amount), тот же принцип, что и общая "Маржа" выше -
+  // не к выручке только своего парка, иначе цифра завышена.
+  (function() {
+    var profitTral = s.profit_tral || 0, profitLong = s.profit_long || 0;
+    var tralRevenue = os.tral_amount || 0, longRevenue = os.long_amount || 0;
+    var tralMarginPct = tralRevenue > 0 ? (profitTral / tralRevenue * 100) : 0;
+    var longMarginPct = longRevenue > 0 ? (profitLong / longRevenue * 100) : 0;
+    function segRow(label, value, marginPct) {
+      return '<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:11px;color:var(--muted);padding:2px 0">' +
+        '<span>' + label + '</span>' +
+        '<span style="font-variant-numeric:tabular-nums"><b style="color:' + (value>=0?'var(--green)':'var(--red)') + '">' + fmt(value) + '</b> · маржа ' + Math.round(marginPct) + '%</span>' +
+      '</div>';
+    }
+    setHTML('k-profit-breakdown', segRow('Тралы', profitTral, tralMarginPct) + segRow('Длинномеры', profitLong, longMarginPct));
+  })();
+
   setText('k-profit-pct', pct(profPct));
   setText('k-profit-plan', 'План: ' + fmt(PROFIT_PLAN));
   setBar('k-profit-bar', profPct, profit >= 0 ? 'var(--green)' : 'var(--red)');
@@ -3453,6 +3474,10 @@ function renderSales() {
     var tot = ownCnt + hiredCnt || 1;
     var ownW = Math.round(ownCnt / tot * 100);
     var avgCheck = orderCnt > 0 ? revenue / orderCnt : 0;
+    // Маржа ВП сегмента - к выручке ВСЕГО сегмента (свой+наём), тот же принцип, что общая
+    // "Маржа" на Панели (Влад, 2026-07-17: "в заказах можно добавить маржу по валовой
+    // прибыли тоже").
+    var ownMarginPct = revenue > 0 ? (ownProfit / revenue * 100) : 0;
     var problemColor = problemPct >= 20 ? 'var(--red)' : problemPct >= 8 ? 'var(--amber)' : 'var(--green)';
     function row(l, v, color) {
       return '<tr><td style="color:var(--muted);padding:4px 0;font-size:12px">' + l + '</td>' +
@@ -3473,6 +3498,7 @@ function renderSales() {
       '<table style="width:100%;border-collapse:collapse">' +
         row('Выручка', fmt(revenue), 'var(--text)') +
         row('Валовая прибыль (свой парк)', fmt(ownProfit), ownProfit>=0?'var(--green)':'var(--red)') +
+        row('Маржа ВП', Math.round(ownMarginPct)+'%', ownProfit>=0?'var(--green)':'var(--red)') +
         row('Маржа (наём)', fmt(hiredMargin), 'var(--green)') +
         row('Средний чек', fmt(avgCheck), 'var(--text)') +
         row('Проблемных заказов', Math.round(problemPct)+'%', problemColor) +

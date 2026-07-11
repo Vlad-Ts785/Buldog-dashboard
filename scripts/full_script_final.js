@@ -2734,12 +2734,19 @@ function getSummaryData(ss, ordersData) {
   const norm = ss.getSheetByName('Нормализованные_данные');
   if (!norm || norm.getLastRow() < 2) return {};
 
-  const data = norm.getRange(2, 1, norm.getLastRow() - 1, 10).getValues();
+  // 13 колонок (не 10) - нужна колонка M (индекс 12, "Тип из Штатки") для разбивки по
+  // сегментам, см. комментарий ниже.
+  const data = norm.getRange(2, 1, norm.getLastRow() - 1, 13).getValues();
   let revenue=0, profit=0, fot=0, fuel=0, parts=0, fines=0, tolls=0, lossCount=0;
-  // ВП своего парка по сегментам (Влад, 2026-07-17: карточка "Заказов" вместо "Топ грузов") -
-  // тралы/длинномеры делим тем же правилом, что и "Статус парка"/фильтр "Все тралы":
-  // "Длинномер" (колонка C - "Тип техники", уже посчитана detectType() при построении этого
-  // листа) - длинномер, всё остальное (ПР-3/4/5/8, ТКР-4, КР-3, Рапид...) - трал.
+  // ВП своего парка по сегментам (Влад, 2026-07-17: "по длинномерам показывает ноль, всё
+  // уходит на трал - проверь логику"). Баг: изначально делил по колонке C ("Тип техники" -
+  // detectType(fullName), угадывает тип по строке названия машины из 1С) - ненадёжный
+  // источник, детектит только явные "ПР-4"/"ТКР-4"/... коды в названии, "Борт"/"Длинномер"
+  // там почти никогда не встречается, поэтому всегда попадал в "иначе = Трал".
+  // Исправлено на колонку M (индекс 12, "Тип из Штатки" - staffInfo.type при построении
+  // листа) - ТОТ ЖЕ авторитетный источник и то же правило ("Борт" = длинномер), что уже
+  // использует "Статус парка" (getFleetStatus) и фильтр "Все тралы" - разбивка теперь
+  // согласована по всему дашборду, а не третий отдельный классификатор.
   let profitTral=0, profitLong=0, revenueTral=0, revenueLong=0;
 
   for (let row of data) {
@@ -2753,9 +2760,10 @@ function getSummaryData(ss, ordersData) {
     const p  = parseFloat(row[9]) || 0;
     profit  += p;
     if (p < 0) lossCount++;
-    const vehType = String(row[2] || '');
-    if (vehType === 'Длинномер') { profitLong += p; revenueLong += rev; }
-    else                          { profitTral += p; revenueTral += rev; }
+    const staffType = String(row[12] || '');
+    const isDlinnomer = staffType === 'Борт' || staffType.indexOf('Борт') === 0;
+    if (isDlinnomer) { profitLong += p; revenueLong += rev; }
+    else              { profitTral += p; revenueTral += rev; }
   }
 
   const byManager = (ordersData && ordersData.by_manager) || [];

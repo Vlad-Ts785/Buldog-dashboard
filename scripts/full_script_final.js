@@ -2874,7 +2874,7 @@ function getVehicleOrdersHistory_(ss, gos, fromDate, toDate) {
     if (mk === currentMonthKey) {
       var live = ss.getSheetByName(ORDERS_NORM_SHEET);
       if (!live || live.getLastRow() < 2) return;
-      rows = live.getRange(2, 1, live.getLastRow() - 1, 43).getValues();
+      rows = live.getRange(2, 1, live.getLastRow() - 1, 44).getValues();
     } else {
       var archive = ss.getSheetByName(ORDERS_ARCHIVE_PFX + mk);
       if (!archive || archive.getLastRow() < 5) return;
@@ -2925,7 +2925,7 @@ function getDriverOrderCounts_(ss, fromDate, toDate) {
     if (mk === currentMonthKey) {
       var live = ss.getSheetByName(ORDERS_NORM_SHEET);
       if (!live || live.getLastRow() < 2) return;
-      rows = live.getRange(2, 1, live.getLastRow() - 1, 43).getValues();
+      rows = live.getRange(2, 1, live.getLastRow() - 1, 44).getValues();
     } else {
       var archive = ss.getSheetByName(ORDERS_ARCHIVE_PFX + mk);
       if (!archive || archive.getLastRow() < 5) return;
@@ -3409,6 +3409,11 @@ function parseOrdersRawRows(allData) {
   const num = function(row, name) { return ordParseNum(g(row, name)); };
   const boo = function(row, name) { return str(row, name) === 'Да'; };
 
+  // "Вариант расчёта" добавлен В КОНЕЦ (не между существующими) - чтобы не сдвигать
+  // индексы колонки C в aggregateOrdersRows() и хардкод "43" в чтении ORDERS_NORM_SHEET
+  // (Влад, 2026-07-16: "строчки где вариант расчета Прочее - служебные, не коммерческие,
+  // не должны участвовать в документообороте/воронке"). В сыром отчёте 1С колонка может
+  // называться "Вариант расчета" или "Вариант расчёта" - пробуем оба варианта написания.
   const normHeaders = [
     'Номер заказа', 'Дата создания', 'Начало работ', 'Окончание работ',
     'Тип оплаты', 'Проведен', 'Путевка', 'Есть реализация', 'Оригинал получен',
@@ -3419,7 +3424,7 @@ function parseOrdersRawRows(allData) {
     'Найм', 'Стоимость найма', 'Часы найма',
     'Сумма', 'Оплата итого', 'Оплата нал', 'Оплата ПП', 'Поступление',
     'Прибыль', 'Прибыль от мин. прайса', 'Остаток', 'Баланс орг.', 'Оплачено поставщику',
-    'Договор', 'Отдел траллов', 'Месяц'
+    'Договор', 'Отдел траллов', 'Месяц', 'Вариант расчёта'
   ];
 
   const rows = [];
@@ -3502,7 +3507,8 @@ function parseOrdersRawRows(allData) {
       num(row, 'Поставщику оплачено'),
       str(row, 'Договор'),
       isTralDept ? 'Да' : 'Нет',
-      monthKey
+      monthKey,
+      str(row, 'Вариант расчета') || str(row, 'Вариант расчёта')
     ]);
   }
 
@@ -3516,7 +3522,7 @@ function getOrdersData(ss) {
   const norm = ss.getSheetByName(ORDERS_NORM_SHEET);
   if (!norm || norm.getLastRow() < 2) return { error: 'Нет данных заказов' };
 
-  const rows = norm.getRange(2, 1, norm.getLastRow() - 1, 43).getValues();
+  const rows = norm.getRange(2, 1, norm.getLastRow() - 1, 44).getValues();
   const result = aggregateOrdersRows(rows);
   const monthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
   const smartLost = computeLostCustomers_(ss, rows, monthKey);
@@ -3697,6 +3703,15 @@ function getAvailablePeriods(ss) {
 // откатить одной строкой - поставь false, если цифры после теста покажутся неправильными.
 const WAYBILL_SKIP_IF_REALIZ = true;
 
+// Служебные строки (Влад, 2026-07-16): "есть строчки системные - где-то нужно водителю
+// смену закрыть для зарплаты, где-то ещё для чего-то - строчка 'прочее', она не участвует
+// в коммерческой системе и в документообороте, на них нет ни путёвки, ни выручки, это
+// нормально". Такие строки помечены в 1С колонкой "Вариант расчёта" = "Прочее" (в отличие
+// от реальных коммерческих - "Наличный"/"Безналичный") - при включённом флаге полностью
+// исключаем их из воронки документов (ни как проблему, ни как "готово"). Легко откатить -
+// поставь false.
+const FUNNEL_EXCLUDE_OTHER_PAYMENT_VARIANT = true;
+
 // Чистая функция: нормализованные строки заказов -> агрегированный JSON для дашборда.
 // Используется и для текущего месяца (Заказы_данные), и для архивов прошлых периодов.
 function aggregateOrdersRows(rows) {
@@ -3709,7 +3724,7 @@ function aggregateOrdersRows(rows) {
     hired:27, hired_cost:28, hired_qty:29,
     amount:30, payment:31, cash:32, bank:33, pay_in:34,
     profit:35, profit_min:36, balance:37, org_bal:38, paid_sup:39,
-    contract:40, tral_dept:41, month:42
+    contract:40, tral_dept:41, month:42, payment_variant:43
   };
 
   const num      = function(row, k) { return ordParseNum(row[C[k]]); };
@@ -3952,7 +3967,9 @@ function aggregateOrdersRows(rows) {
     }
 
     // ── Статус документов (внешние заказы, разбивка по декадам) ──
-    if (!isInt) {
+    const paymentVariant = str(row, 'payment_variant');
+    const isServiceRow = FUNNEL_EXCLUDE_OTHER_PAYMENT_VARIANT && paymentVariant === 'Прочее';
+    if (!isInt && !isServiceRow) {
       const dayNum2 = parseInt((dateStr||'').split('-')[2]) || 0;
       const dec = dayNum2 <= 10 ? 0 : dayNum2 <= 20 ? 1 : 2;
       const pst = yes(row, 'posted');
@@ -4175,7 +4192,7 @@ function getClientLiveRows_(ss) {
 
   const normSheet = ss.getSheetByName(ORDERS_NORM_SHEET);
   if (normSheet && normSheet.getLastRow() > 1) {
-    ingestLiveRows_(normSheet.getRange(2, 1, normSheet.getLastRow() - 1, 43).getValues());
+    ingestLiveRows_(normSheet.getRange(2, 1, normSheet.getLastRow() - 1, 44).getValues());
   }
 
   getAvailablePeriods(ss).forEach(function(period) {

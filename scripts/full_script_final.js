@@ -923,10 +923,19 @@ function parseDebtRawRows_(rawData) {
     // долг 106 000, гарантийный депозит 106 000) - долг уже покрыт, просто не деньгами
     // клиента, а гарантией (депозит - удержано из зарплаты менеджера; платёж - вероятно,
     // гарантия от самого клиента при заключении договора).
+    // Каждая "гасящая" колонка зажата снизу нулём (Math.max(0, ...)) - Влад, 2026-07-17, на
+    // примере "ЮУСК ООО": в 1С "Сумма аванса" по Техно Парку пришла ОТРИЦАТЕЛЬНОЙ (-103 000,
+    // мастер-строка "на авансе"), и наивное debt-advance превращало вычитание отрицательного
+    // числа в СЛОЖЕНИЕ - 0 - (-103000) = +103 000 фиктивного долга, который затем ещё и
+    // суммировался в общий баланс (210 000 Бульдог + 103 000 Техно Парк = 313 000 вместо
+    // верных 210 000). "Мы не учитываем эти отрицательные суммы в таком контексте" (Влад) -
+    // раз колонка меньше нуля, она ничего не гасит, но и долг не создаёт.
     const byOrgBalance = {};
     DEBT_ORG_KEYS.forEach(function(orgKey) {
       const o = c.byOrg[orgKey];
-      byOrgBalance[orgKey] = o ? (o.debt - o.advance - o.guaranteePayment - o.guaranteeDeposit - o.ourDebt) : 0;
+      byOrgBalance[orgKey] = o
+        ? (o.debt - Math.max(0, o.advance) - Math.max(0, o.guaranteePayment) - Math.max(0, o.guaranteeDeposit) - Math.max(0, o.ourDebt))
+        : 0;
     });
     // Итоговый баланс = сумма ТОЛЬКО положительных остатков по юрлицам (Влад, 2026-07-09:
     // "плюс с минусом мы не сводим, показываем только долг"). Раньше баланс считался как
@@ -953,8 +962,12 @@ function parseDebtRawRows_(rawData) {
     const docsByOrg = {};
     unpaidDocs.forEach(function(x) { (docsByOrg[x.org] = docsByOrg[x.org] || []).push(x); });
     Object.keys(docsByOrg).forEach(function(orgKey) {
-      const orgCoverage = c.byOrg[orgKey]
-        ? (c.byOrg[orgKey].advance + c.byOrg[orgKey].guaranteePayment + c.byOrg[orgKey].guaranteeDeposit + c.byOrg[orgKey].ourDebt)
+      // Та же защита от отрицательных значений, что и в byOrgBalance выше - отрицательный
+      // аванс/гарантия не должен УМЕНЬШАТЬ пул покрытия (тем самым как бы "требуя" покрыть
+      // ещё и его) - просто не участвует.
+      const o = c.byOrg[orgKey];
+      const orgCoverage = o
+        ? (Math.max(0, o.advance) + Math.max(0, o.guaranteePayment) + Math.max(0, o.guaranteeDeposit) + Math.max(0, o.ourDebt))
         : 0;
       let remaining = orgCoverage;
       const sorted = docsByOrg[orgKey].slice().sort(function(a, b) { return a.date.localeCompare(b.date); });

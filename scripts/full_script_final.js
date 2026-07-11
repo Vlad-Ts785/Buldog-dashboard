@@ -3712,6 +3712,14 @@ const WAYBILL_SKIP_IF_REALIZ = true;
 // поставь false.
 const FUNNEL_EXCLUDE_OTHER_PAYMENT_VARIANT = true;
 
+// Наличные расчёты (Влад, 2026-07-16, после подтверждения "Прочее" - работает): "то, что за
+// наличку - там не может быть реализации и не может быть проведения, поэтому можно их не
+// считывать, наличие путевого листа мне тоже не интересно" - структурно у наличных заказов
+// никогда не будет ни путёвки, ни проведения, ни реализации, проверять эти флаги для них
+// бессмысленно. Отдельный переключатель от "Прочее" - разные причины, легче откатить
+// независимо друг от друга.
+const FUNNEL_EXCLUDE_CASH_PAYMENTS = true;
+
 // Чистая функция: нормализованные строки заказов -> агрегированный JSON для дашборда.
 // Используется и для текущего месяца (Заказы_данные), и для архивов прошлых периодов.
 function aggregateOrdersRows(rows) {
@@ -3968,7 +3976,8 @@ function aggregateOrdersRows(rows) {
 
     // ── Статус документов (внешние заказы, разбивка по декадам) ──
     const paymentVariant = str(row, 'payment_variant');
-    const isServiceRow = FUNNEL_EXCLUDE_OTHER_PAYMENT_VARIANT && paymentVariant === 'Прочее';
+    const isServiceRow = (FUNNEL_EXCLUDE_OTHER_PAYMENT_VARIANT && paymentVariant === 'Прочее') ||
+                         (FUNNEL_EXCLUDE_CASH_PAYMENTS && paymentVariant === 'Наличный');
     if (!isInt && !isServiceRow) {
       const dayNum2 = parseInt((dateStr||'').split('-')[2]) || 0;
       const dec = dayNum2 <= 10 ? 0 : dayNum2 <= 20 ? 1 : 2;

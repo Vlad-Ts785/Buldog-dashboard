@@ -3790,6 +3790,12 @@ function aggregateOrdersRows(rows) {
     d.setDate(d.getDate() - 1);
     return Utilities.formatDate(d, 'Europe/Moscow', 'yyyy-MM-dd');
   })();
+  // Динамика "сегодня vs вчера" по менеджеру (Влад, 2026-07-17: "то же самое по менеджерам
+  // в количестве заказов - на сколько увеличилось по сравнению с предыдущим днём... по
+  // нажатию показать какие именно заказы"). Отдельная история не нужна - "Дата создания"
+  // (date_c) у заказа не меняется задним числом, поэтому "прибавилось со вчера" = "заказы,
+  // созданные сегодня" - считается прямо из текущих живых данных, без нового листа истории.
+  const todayStr = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM-dd');
 
   let totalOrders=0, totalAmount=0, totalAmountThruYesterday=0, totalPayment=0, totalBalance=0;
   let totalHiredCost=0, hiredProfit=0, hiredProfitTral=0, hiredProfitLong=0;
@@ -3905,7 +3911,8 @@ function aggregateOrdersRows(rows) {
       if (!managerMap[mgrSales]) {
         managerMap[mgrSales] = { name: mgrSales, orders:0, amount:0, amount_thru_yesterday:0, payment:0, cash:0, profit:0, hired_orders:0, hired_cost:0,
           internal_orders:0, internal_amount:0, internal_amount_thru_yesterday:0, internal_payment:0,
-          own_amount:0, hired_margin_qualified:0, hired_margin_unqualified:0 };
+          own_amount:0, hired_margin_qualified:0, hired_margin_unqualified:0,
+          today_new_orders:0, today_new_amount:0, today_new_list:[] };
       }
       const m = managerMap[mgrSales];
       m.orders++;
@@ -3917,6 +3924,12 @@ function aggregateOrdersRows(rows) {
       if (isInt) {
         m.internal_orders++; m.internal_amount += amount; m.internal_payment += payment;
         if (isThruYesterday) m.internal_amount_thru_yesterday += amount;
+      }
+      // Заказы, добавленные сегодня (Влад, 2026-07-17) - для стрелки динамики и drill-down.
+      if (dateVal(row, 'date_c') === todayStr) {
+        m.today_new_orders++;
+        m.today_new_amount += amount;
+        m.today_new_list.push({ id: str(row,'id'), customer: str(row,'customer'), amount: amount });
       }
       if (isHired) {
         m.hired_orders++; m.hired_cost += hiredCost;

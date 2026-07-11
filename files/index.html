@@ -840,6 +840,18 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
     <!-- ═══ МЕНЕДЖЕРЫ (ЗАКАЗЫ 1С) ═════════════════════════════ -->
     <div id="page-sales-mgr" class="page">
       <div id="sales-mgr-kpi" style="margin-bottom:12px"></div>
+      <div class="card" id="mgr-today-card" style="margin-bottom:16px;display:none">
+        <div class="sec-header">
+          <div class="sec-title" id="mgr-today-title">Что добавилось сегодня</div>
+          <div class="sec-sub" id="mgr-today-sub"></div>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="tbl">
+            <thead><tr><th>Заказ</th><th>Клиент</th><th class="num">Сумма</th></tr></thead>
+            <tbody id="mgr-today-body"></tbody>
+          </table>
+        </div>
+      </div>
       <div id="sales-mgr-depts"></div>
     </div>
 
@@ -3805,6 +3817,28 @@ function renderSales() {
   }
 }
 
+// "Что добавилось сегодня" - drill-down по клику на стрелку динамики в "По менеджерам"
+// (Влад, 2026-07-17). window._mgrTodayData заполняется в renderSalesMgr()/mgrRow() при
+// каждом рендере - здесь просто читаем уже готовые today_new_list по имени менеджера.
+var mgrTodayVisible = false, mgrTodayKey = '';
+function toggleMgrToday(name) {
+  if (mgrTodayVisible && mgrTodayKey === name) { mgrTodayVisible = false; }
+  else { mgrTodayVisible = true; mgrTodayKey = name; }
+  var card = document.getElementById('mgr-today-card');
+  if (!card) return;
+  if (!mgrTodayVisible) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  var m = (window._mgrTodayData || {})[name];
+  var list = (m && m.today_new_list) || [];
+  setText('mgr-today-title', 'Что добавилось сегодня — ' + cleanName(name));
+  setText('mgr-today-sub', list.length + ' ' + (list.length===1?'заказ':'заказов') + ' · ' + fmt(m ? (m.today_new_amount||0) : 0));
+  document.getElementById('mgr-today-body').innerHTML = list.length
+    ? list.map(function(o) {
+        return '<tr><td>'+(o.id||'—')+'</td><td class="muted">'+(o.customer||'').substring(0,40)+'</td><td class="num">'+fmt(o.amount||0)+'</td></tr>';
+      }).join('')
+    : '<tr><td colspan="3" class="muted">Нет данных</td></tr>';
+}
+
 function renderSalesMgr() {
   if (!D || !D.orders) return;
   var allMgrs = D.orders.by_manager || [];
@@ -3817,6 +3851,9 @@ function renderSalesMgr() {
   var mgrIdx = {};
   allMgrs.forEach(function(m) { mgrIdx[String(m.name||'').trim().split(' ')[0].toLowerCase()] = m; });
   function get(sur) { return mgrIdx[sur.toLowerCase()] || null; }
+
+  // Данные для drill-down "что добавилось сегодня" (см. toggleMgrToday) - по полному имени.
+  window._mgrTodayData = {};
 
   function fmtN(n) { return n ? Math.round(n).toLocaleString('ru-RU') : '—'; }
 
@@ -4036,10 +4073,22 @@ function renderSalesMgr() {
     var mIntThru = isPrus ? (m.internal_amount_thru_yesterday != null ? m.internal_amount_thru_yesterday : (m.internal_amount||0)) : 0;
     var amountForPace = mAmountThru - mIntThru;
     var hTag = isHead ? ' <span style="font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(29,158,117,.15);color:#1D9E75">рук.</span>' : '';
+    // Динамика "сегодня vs вчера" (Влад, 2026-07-17: "то же самое по менеджерам в количестве
+    // заказов... по нажатию показать какие именно заказы; также по выручке") - клик
+    // открывает drill-down со списком заказов, добавленных сегодня (см. toggleMgrToday).
+    window._mgrTodayData[m.name] = m;
+    var escName = String(m.name||'').replace(/'/g,"\\'");
+    var todayOrders = m.today_new_orders || 0, todayAmount = m.today_new_amount || 0;
+    var ordersBadge = todayOrders > 0
+      ? ' <span onclick="event.stopPropagation();toggleMgrToday(\''+escName+'\')" style="font-size:10px;color:var(--green);cursor:pointer;text-decoration:underline dotted;white-space:nowrap">▲+'+todayOrders+'</span>'
+      : '';
+    var amountBadge = todayAmount > 0
+      ? ' <span onclick="event.stopPropagation();toggleMgrToday(\''+escName+'\')" style="font-size:10px;color:var(--green);cursor:pointer;text-decoration:underline dotted;white-space:nowrap">▲+'+fmtN(todayAmount)+'</span>'
+      : '';
     return '<tr>' +
       '<td><b>'+name+'</b>'+hTag+ planBar(amount, plan, amountForPace) +'</td>' +
-      '<td class="num">'+orders+'</td>' +
-      '<td class="num">'+fmtN(amount)+'</td>' +
+      '<td class="num">'+orders+ordersBadge+'</td>' +
+      '<td class="num">'+fmtN(amount)+amountBadge+'</td>' +
       '<td class="num green">'+fmtN(payment)+'</td>' +
       '<td class="num '+(profit>0?'green':profit<0?'red':'muted')+'">'+fmtN(profit)+'</td>' +
       '<td class="num muted">'+((m.hired_orders||0)||'—')+'</td>' +

@@ -713,7 +713,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 
     <!-- ═══ ПРОДАЖИ ОБЗОР ══════════════════════════════════════ -->
     <div id="page-sales" class="page">
-      <div class="kpi-grid" style="grid-template-columns:1fr 1.35fr 1.35fr;align-items:start;margin-bottom:16px" id="sales-kpi"></div>
+      <div class="card" style="margin-bottom:16px" id="sales-orders-card"></div>
       <div class="card" style="margin-bottom:16px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
           <div class="card-title" style="margin-bottom:0" id="sales-period-label">Выручка по дням</div>
@@ -3421,37 +3421,10 @@ function renderInternalTransports(d) {
     : '<div style="color:var(--muted);font-size:13px;padding:8px 0">Нет данных</div>';
 }
 
-// Блок "Топ грузов" (тралы / длинномеры) - категория, рейсы, сумма, доля
-function cargoTopBlock(title, list, totalTrips) {
-  var COL = ['#1D9E75','#378ADD','#7F77DD','#EF9F27','#E24B4A','#1baf7a','#eb6834','#888780'];
-  var rows = (list || []).slice(0, 7);
-  var totTrips = (list || []).reduce(function(a,c){ return a+(c.trips||0); }, 0) || 1;
-  var maxTrips = rows.length ? Math.max.apply(null, rows.map(function(c){ return c.trips||0; })) : 1;
-  var body = rows.length
-    ? rows.map(function(c, i){
-        var w = Math.round((c.trips||0)/maxTrips*100), pct = Math.round((c.trips||0)/totTrips*100);
-        var color = c.name === 'Прочие грузы' ? '#888780' : COL[i % COL.length];
-        return '<div style="margin-bottom:9px">'+
-          '<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:12px;margin-bottom:3px">'+
-            '<span style="display:flex;align-items:center;gap:6px;min-width:0"><span style="width:8px;height:8px;border-radius:2px;background:'+color+';display:inline-block;flex-shrink:0"></span>'+
-            '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+c.name+'</span></span>'+
-            '<span style="white-space:nowrap"><b>'+(c.trips||0)+'</b> <span style="color:var(--muted)">рейс. · '+fmtK2(c.amount||0)+' · '+pct+'%</span></span>'+
-          '</div>'+
-          '<div style="height:6px;border-radius:3px;background:rgba(255,255,255,.06);overflow:hidden"><div style="width:'+w+'%;height:100%;background:'+color+';border-radius:3px"></div></div>'+
-        '</div>';
-      }).join('')
-    : '<div style="color:var(--muted);font-size:12px;padding:8px 0">Нет данных</div>';
-  return '<div class="kpi" style="min-width:0">'+
-    '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px">'+
-      '<span class="kpi-label">'+title+'</span>'+
-      '<span style="font-size:11px;color:var(--muted)">'+totalTrips+' зак.</span>'+
-    '</div>'+ body +'</div>';
-}
-
 function renderSales() {
   if (!D || !D.orders) {
-    document.getElementById('sales-kpi').innerHTML =
-      '<div class="kpi"><div class="kpi-label">Данные заказов</div><div class="kpi-value" style="color:var(--muted)">Нет данных</div><div class="kpi-sub">Задеплойте GAS и запустите runAll()</div></div>';
+    document.getElementById('sales-orders-card').innerHTML =
+      '<div class="kpi-label">Данные заказов</div><div class="kpi-value" style="color:var(--muted)">Нет данных</div><div class="kpi-sub">Задеплойте GAS и запустите runAll()</div>';
     return;
   }
   const o = D.orders;
@@ -3472,44 +3445,57 @@ function renderSales() {
 
   // Блок "Заказов" - все заказы (свой парк + наём), с разбивкой по технике (трал/длинномер)
   // и по деньгам (выручка/прибыль своего парка отдельно от найма) - Влад, 2026-07-04.
-  function ordersSplitBar(label, ownCnt, hiredCnt) {
+  // Карточка "Заказов" на всю ширину вместо "Топ грузов" (Влад, 2026-07-17: "эта информация
+  // ничего не даёт, не позволяет принимать решения") - по каждому сегменту (тралы/
+  // длинномеры) показываем то, что реально ведёт к решениям: выручку, прибыль, средний
+  // чек, долю проблемных заказов - вместо категорий груза.
+  function segmentCol(label, orderCnt, ownCnt, hiredCnt, revenue, ownProfit, hiredMargin, problemPct) {
     var tot = ownCnt + hiredCnt || 1;
     var ownW = Math.round(ownCnt / tot * 100);
-    return '<div style="margin-bottom:7px">' +
-      '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">' +
-        '<span style="color:var(--muted)">' + label + '</span>' +
-        '<span><b style="color:var(--blue)">' + ownCnt + '</b> <span style="color:var(--muted)">свой</span> · ' +
-          '<b style="color:var(--amber)">' + hiredCnt + '</b> <span style="color:var(--muted)">наём</span></span>' +
+    var avgCheck = orderCnt > 0 ? revenue / orderCnt : 0;
+    var problemColor = problemPct >= 20 ? 'var(--red)' : problemPct >= 8 ? 'var(--amber)' : 'var(--green)';
+    function row(l, v, color) {
+      return '<tr><td style="color:var(--muted);padding:4px 0;font-size:12px">' + l + '</td>' +
+        '<td class="num" style="font-weight:600;color:' + color + ';padding:4px 0;font-size:12px">' + v + '</td></tr>';
+    }
+    return '<div>' +
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">' +
+        '<div style="font-size:14px;font-weight:600">' + label + '</div>' +
+        '<div style="font-size:12px;color:var(--muted)">' + orderCnt + ' зак.</div>' +
       '</div>' +
-      '<div style="height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden;display:flex">' +
+      '<div style="height:8px;border-radius:4px;background:rgba(255,255,255,.08);overflow:hidden;display:flex;margin-bottom:6px">' +
         '<div style="width:' + ownW + '%;height:100%;background:var(--blue)"></div>' +
         '<div style="width:' + (100 - ownW) + '%;height:100%;background:var(--amber)"></div>' +
-      '</div></div>';
-  }
-  function ordersMoneyRow(label, value, color) {
-    return '<div style="display:flex;justify-content:space-between;font-size:11.5px">' +
-      '<span style="color:var(--muted)">' + label + '</span>' +
-      '<span style="font-weight:600;color:' + color + '">' + fmtM(value) + '</span></div>';
-  }
-  var ownFleetProfit = (D.summary && D.summary.profit) || 0; // ВП своего парка - один источник (Нормализованные_данные)
-  var hiredMarginAbs = s.hired_profit || 0;
-  document.getElementById('sales-kpi').innerHTML =
-    '<div class="kpi">' +
-      '<div class="kpi-label">Заказов (свой парк + наём)</div>' +
-      '<div class="kpi-value">' + (s.total_orders||0) + '</div>' +
-      '<div style="margin-top:10px">' +
-        ordersSplitBar('Тралы · ' + (s.tral_orders||0) + ' зак.', s.own_tral_orders||0, s.hired_tral_orders||0) +
-        ordersSplitBar('Длинномеры · ' + (s.long_orders||0) + ' зак.', s.own_long_orders||0, s.hired_long_orders||0) +
       '</div>' +
-      '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:5px">' +
-        ordersMoneyRow('Выручка свой парк', s.own_amount||0, 'var(--text)') +
-        ordersMoneyRow('Выручка наём', s.hired_amount||0, 'var(--amber)') +
-        ordersMoneyRow('Валовая (свой парк)', ownFleetProfit, ownFleetProfit>=0?'var(--green)':'var(--red)') +
-        ordersMoneyRow('Маржа (наём)', hiredMarginAbs, 'var(--green)') +
+      '<div style="font-size:11px;color:var(--muted);margin-bottom:16px">' +
+        '<b style="color:var(--blue)">' + ownCnt + '</b> свой · <b style="color:var(--amber)">' + hiredCnt + '</b> наём' +
       '</div>' +
+      '<table style="width:100%;border-collapse:collapse">' +
+        row('Выручка', fmt(revenue), 'var(--text)') +
+        row('Валовая прибыль (свой парк)', fmt(ownProfit), ownProfit>=0?'var(--green)':'var(--red)') +
+        row('Маржа (наём)', fmt(hiredMargin), 'var(--green)') +
+        row('Средний чек', fmt(avgCheck), 'var(--text)') +
+        row('Проблемных заказов', Math.round(problemPct)+'%', problemColor) +
+      '</table>' +
+    '</div>';
+  }
+  var tralProblemPct = s.funnel_tral_total > 0 ? (s.funnel_tral_problem||0) / s.funnel_tral_total * 100 : 0;
+  var longProblemPct = s.funnel_long_total > 0 ? (s.funnel_long_problem||0) / s.funnel_long_total * 100 : 0;
+  document.getElementById('sales-orders-card').innerHTML =
+    '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:18px">' +
+      '<div class="card-title" style="margin-bottom:0">Заказов (свой парк + наём)</div>' +
+      '<div style="font-size:22px;font-weight:600">' + (s.total_orders||0) + '</div>' +
     '</div>' +
-    cargoTopBlock('Топ грузов — тралы', o.top_cargo_tral || [], s.tral_orders || 0) +
-    cargoTopBlock('Топ грузов — длинномеры', o.top_cargo_long || [], s.long_orders || 0);
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0">' +
+      '<div style="padding-right:24px">' +
+        segmentCol('Тралы', s.tral_orders||0, s.own_tral_orders||0, s.hired_tral_orders||0,
+          s.tral_amount||0, (D.summary&&D.summary.profit_tral)||0, s.hired_profit_tral||0, tralProblemPct) +
+      '</div>' +
+      '<div style="padding-left:24px;border-left:1px solid var(--border)">' +
+        segmentCol('Длинномеры', s.long_orders||0, s.own_long_orders||0, s.hired_long_orders||0,
+          s.long_amount||0, (D.summary&&D.summary.profit_long)||0, s.hired_profit_long||0, longProblemPct) +
+      '</div>' +
+    '</div>';
 
   // Воронка по декадам
   var decades = o.doc_by_decade || [];

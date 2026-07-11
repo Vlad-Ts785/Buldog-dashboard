@@ -2736,9 +2736,15 @@ function getSummaryData(ss, ordersData) {
 
   const data = norm.getRange(2, 1, norm.getLastRow() - 1, 10).getValues();
   let revenue=0, profit=0, fot=0, fuel=0, parts=0, fines=0, tolls=0, lossCount=0;
+  // ВП своего парка по сегментам (Влад, 2026-07-17: карточка "Заказов" вместо "Топ грузов") -
+  // тралы/длинномеры делим тем же правилом, что и "Статус парка"/фильтр "Все тралы":
+  // "Длинномер" (колонка C - "Тип техники", уже посчитана detectType() при построении этого
+  // листа) - длинномер, всё остальное (ПР-3/4/5/8, ТКР-4, КР-3, Рапид...) - трал.
+  let profitTral=0, profitLong=0, revenueTral=0, revenueLong=0;
 
   for (let row of data) {
-    revenue += parseFloat(row[3]) || 0;
+    const rev = parseFloat(row[3]) || 0;
+    revenue += rev;
     fot     += parseFloat(row[4]) || 0;
     fuel    += parseFloat(row[5]) || 0;
     parts   += parseFloat(row[6]) || 0;
@@ -2747,6 +2753,9 @@ function getSummaryData(ss, ordersData) {
     const p  = parseFloat(row[9]) || 0;
     profit  += p;
     if (p < 0) lossCount++;
+    const vehType = String(row[2] || '');
+    if (vehType === 'Длинномер') { profitLong += p; revenueLong += rev; }
+    else                          { profitTral += p; revenueTral += rev; }
   }
 
   const byManager = (ordersData && ordersData.by_manager) || [];
@@ -2773,6 +2782,8 @@ function getSummaryData(ss, ordersData) {
   return {
     revenue, profit, fot, fuel, parts, fines, tolls,
     margin: revenue > 0 ? (profit/revenue*100) : 0,
+    profit_tral: profitTral, profit_long: profitLong,
+    own_revenue_tral: revenueTral, own_revenue_long: revenueLong,
     lossCount, vehicleCount: data.length,
     salesPlan: totalPlan,
     salesFakt: totalFakt,
@@ -3773,11 +3784,16 @@ function aggregateOrdersRows(rows) {
   })();
 
   let totalOrders=0, totalAmount=0, totalAmountThruYesterday=0, totalPayment=0, totalBalance=0;
-  let totalHiredCost=0, hiredProfit=0;
+  let totalHiredCost=0, hiredProfit=0, hiredProfitTral=0, hiredProfitLong=0;
   let internalAmount=0, internalAmountThruYesterday=0, internalOrders=0;
   // Счётчики исключённых из воронки документов строк - для сверки с "Заказов (свой парк +
   // наём)" (Влад, 2026-07-17: "всё должно сходиться по суммам, давай подобьёмся").
   let excludedOtherPayment=0, excludedCashPayment=0;
+  // % проблемных заказов по сегменту (Влад, 2026-07-17: карточка "Заказов" вместо "Топ
+  // грузов") - считаем только среди строк, реально попавших в воронку (не внутренние/
+  // служебные/наличные), иначе процент будет несопоставим с тем, что показывает сама
+  // воронка документов.
+  let funnelTralTotal=0, funnelLongTotal=0, funnelTralProblem=0, funnelLongProblem=0;
   let tralOrders=0, tralAmount=0, longOrders=0, longAmount=0;
   let ownAmount=0, hiredAmountRev=0;
   let ownTralOrders=0, ownLongOrders=0, hiredTralOrders=0, hiredLongOrders=0;
@@ -3848,8 +3864,11 @@ function aggregateOrdersRows(rows) {
     if (isThruYesterday) totalAmountThruYesterday += amount;
     totalPayment += payment;
     totalBalance += balance;
-    if (isHired) { totalHiredCost += hiredCost; hiredProfit += profit; hiredAmountRev += amount; }
-    else         { ownAmount += amount; }
+    if (isHired) {
+      totalHiredCost += hiredCost; hiredProfit += profit; hiredAmountRev += amount;
+      // Маржа найма по сегменту (Влад, 2026-07-17: карточка "Заказов" вместо "Топ грузов").
+      if (equip === 'Длинномер') hiredProfitLong += profit; else hiredProfitTral += profit;
+    } else { ownAmount += amount; }
 
     if (isInt) {
       internalAmount += amount; internalOrders++;
@@ -4009,6 +4028,9 @@ function aggregateOrdersRows(rows) {
       else if (!hr)  { postedNoRealiz[dec]++;    docStatus='no_realiz';  docLabel='нет реализации'; }
       else           { complete[dec]++; }
 
+      if (equip === 'Длинномер') { funnelLongTotal++; if (docStatus) funnelLongProblem++; }
+      else                        { funnelTralTotal++; if (docStatus) funnelTralProblem++; }
+
       if (mgrSales && ordInList(mgrSales, TRAL_MANAGERS)) {
         var md2 = mgrDetail(mgrSales).doc;
         if (skipToComplete) { md2.complete++; mgrDetail(mgrSales).rows_complete++; }
@@ -4140,6 +4162,13 @@ function aggregateOrdersRows(rows) {
       own_long_orders:   ownLongOrders,
       hired_tral_orders: hiredTralOrders,
       hired_long_orders: hiredLongOrders,
+      // Карточка "Заказов" вместо "Топ грузов" (Влад, 2026-07-17).
+      hired_profit_tral: hiredProfitTral,
+      hired_profit_long: hiredProfitLong,
+      funnel_tral_total:   funnelTralTotal,
+      funnel_long_total:   funnelLongTotal,
+      funnel_tral_problem: funnelTralProblem,
+      funnel_long_problem: funnelLongProblem,
     },
     top_cargo_tral: sortCargo(cargoTralMap),
     top_cargo_long: sortCargo(cargoLongMap),

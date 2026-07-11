@@ -729,6 +729,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
       <div class="card" style="margin-bottom:16px">
         <div class="card-title">Воронка документов</div>
         <div id="sales-doc-decades"></div>
+        <div id="sales-doc-reconcile" class="muted" style="font-size:11px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)"></div>
       </div>
       <div class="card" style="margin-bottom:16px">
         <div class="tab-bar" id="cust-tab-bar">
@@ -827,7 +828,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
             <thead><tr>
               <th>Номер</th><th>Дата</th><th>Декада</th><th>Клиент</th><th>Менеджер</th>
               <th>Водитель/наёмник</th>
-              <th class="num">Сумма</th><th class="num">Остаток</th><th>Статус</th>
+              <th class="num">Сумма</th><th class="num">Оплата</th><th>Статус</th>
             </tr></thead>
             <tbody id="sales-problems-body"></tbody>
           </table>
@@ -3334,7 +3335,7 @@ function filterProblems(status, btn) {
           '<td class="muted">' + (p.mgr||'').split(' ').slice(0,2).join(' ') + '</td>' +
           '<td class="muted">' + executorCell + '</td>' +
           '<td class="num">' + fmtK2(p.amount||0) + '</td>' +
-          '<td class="num ' + ((p.balance||0)>0?'red':'') + '">' + ((p.balance||0)>0?fmtK2(p.balance):'—') + '</td>' +
+          '<td class="num">' + ((p.payment||0)>0?fmtK2(p.payment):'—') + '</td>' +
           '<td><span class="badge ' + stCls + '">' + st + '</span></td>' +
         '</tr>';
       }).join('')
@@ -3555,6 +3556,21 @@ function renderSales() {
     });
     decHtml += '</tbody></table>';
     document.getElementById('sales-doc-decades').innerHTML = decHtml;
+  }
+
+  // Сверка с "Заказов (свой парк + наём)" (Влад, 2026-07-17: "давай подобьёмся, чтобы было
+  // понимание, где что, какие цифры видно, какие нет") - воронка считает только внешние
+  // коммерческие заказы, остальное исключено по трём разным причинам (см. doc_status на
+  // бэкенде). Показываем прямо под таблицей, чтобы 357 = воронка + исключения сходилось.
+  var funnelTotal = (ds.no_waybill||0) + (ds.waybill_not_posted||0) + (ds.posted_no_realiz||0) + (ds.complete||0);
+  var reconcileEl = document.getElementById('sales-doc-reconcile');
+  if (reconcileEl) {
+    reconcileEl.innerHTML =
+      'Всего заказов: <b>' + (s.total_orders||0) + '</b>' +
+      ' · В воронке: <b>' + funnelTotal + '</b>' +
+      ' · Внутренние (не в воронке): ' + (ds.excluded_internal||0) +
+      ' · Наличные (не в воронке): ' + (ds.excluded_cash||0) +
+      ' · Служебные "Прочее" (не в воронке): ' + (ds.excluded_other||0);
   }
 
   function custRow(c, i) {

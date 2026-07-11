@@ -3762,6 +3762,9 @@ function aggregateOrdersRows(rows) {
   let totalOrders=0, totalAmount=0, totalAmountThruYesterday=0, totalPayment=0, totalBalance=0;
   let totalHiredCost=0, hiredProfit=0;
   let internalAmount=0, internalAmountThruYesterday=0, internalOrders=0;
+  // Счётчики исключённых из воронки документов строк - для сверки с "Заказов (свой парк +
+  // наём)" (Влад, 2026-07-17: "всё должно сходиться по суммам, давай подобьёмся").
+  let excludedOtherPayment=0, excludedCashPayment=0;
   let tralOrders=0, tralAmount=0, longOrders=0, longAmount=0;
   let ownAmount=0, hiredAmountRev=0;
   let ownTralOrders=0, ownLongOrders=0, hiredTralOrders=0, hiredLongOrders=0;
@@ -4008,11 +4011,23 @@ function aggregateOrdersRows(rows) {
         problemOrders.push({
           id: str(row,'id'), date: dateStr,
           customer: str(row,'customer'), mgr: mgrSales,
-          amount: amount, balance: balance, status: docLabel, decade: dec + 1,
+          // "Остаток" в таблице (Влад, 2026-07-17: "хочу видеть оплату по заказам, а не то,
+          // что ты считаешь") - показываем именно payment ("Оплата итого"), не balance
+          // ("Сумма остаток") - это то, что реально спрашивали.
+          amount: amount, payment: payment, status: docLabel, decade: dec + 1,
           is_hired: isHired,
           executor: isHired ? str(row,'hired') : ordCleanName(str(row,'driver')),
         });
       }
+    } else if (!isInt && isServiceRow) {
+      // !isInt здесь обязателен - иначе строка, которая одновременно и внутренняя, и
+      // "Прочее"/наличная, попала бы в оба счётчика сразу (internalOrders ниже + этот),
+      // и сверка "Всего заказов = воронка + исключения" перестала бы сходиться.
+      // Счётчики для сверки с "Заказов (свой парк + наём)" (Влад, 2026-07-17) - внутренние
+      // считаются отдельно через internalOrders (см. блок выше), тут только две наши новые
+      // причины исключения из воронки.
+      if (paymentVariant === 'Прочее') excludedOtherPayment++;
+      else if (paymentVariant === 'Наличный') excludedCashPayment++;
     }
 
     // ── По водителям ──
@@ -4122,6 +4137,12 @@ function aggregateOrdersRows(rows) {
       waybill_not_posted: waybillNotPosted[0]+waybillNotPosted[1]+waybillNotPosted[2],
       posted_no_realiz:   postedNoRealiz[0]+postedNoRealiz[1]+postedNoRealiz[2],
       complete:           complete[0]+complete[1]+complete[2],
+      // Сверка с "Заказов (свой парк + наём)" (Влад, 2026-07-17: "давай подобьёмся, чтобы
+      // было понимание, где что") - воронка считает только внешние коммерческие заказы,
+      // остальное сюда не попадает по разным причинам:
+      excluded_internal: internalOrders,       // внутренние перевозки (свои же компании)
+      excluded_other:    excludedOtherPayment, // служебные строки ("Вариант расчёта" = Прочее)
+      excluded_cash:     excludedCashPayment,  // наличные расчёты (структурно без документооборота)
     },
     doc_by_decade: [
       { label:'1-10',  no_waybill_own:noWaybillOwn[0], no_waybill_hired:noWaybillHired[0], waybill_not_posted:waybillNotPosted[0], posted_no_realiz:postedNoRealiz[0], complete:complete[0] },

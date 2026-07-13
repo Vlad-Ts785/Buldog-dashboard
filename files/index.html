@@ -897,7 +897,18 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
             Показать банкротов
           </button>
         </div>
-        <div class="kpi-grid" id="debt-kpi"></div>
+        <div class="kpi-grid" id="debt-kpi">
+          <div class="kpi" id="debt-kpi-total"></div>
+          <div class="kpi" id="debt-kpi-chart">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+              <div class="kpi-label" style="margin-bottom:0">ДЗ по дням</div>
+              <div class="muted" style="font-size:11px;white-space:nowrap">Должников: <b id="debt-kpi-debtor-count" style="color:var(--text)">—</b></div>
+            </div>
+            <div class="chart-wrap" style="height:150px"><canvas id="chart-debt-history"></canvas></div>
+          </div>
+          <div class="kpi" id="debt-kpi-overdue"></div>
+          <div class="kpi" id="debt-kpi-status"></div>
+        </div>
         <div class="card" id="debt-changes-card" style="margin-top:16px;display:none">
           <div class="sec-header">
             <div class="sec-title" id="debt-changes-title">Что изменилось со вчера</div>
@@ -952,10 +963,6 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
               <tbody id="debt-guarantees-body"></tbody>
             </table>
           </div>
-        </div>
-        <div class="card">
-          <div class="card-title">ДЗ по дням</div>
-          <div class="chart-wrap" style="height:220px"><canvas id="chart-debt-history"></canvas></div>
         </div>
       </div>
     </div>
@@ -5165,23 +5172,25 @@ function renderDebt() {
         byStatus.map(function(x) { return statusRow_(x.status, x.balance, x.customers); }).join('') +
       '</table>'
     : '<div class="muted" style="font-size:12px;margin-top:6px">Статусы не проставлены</div>';
-  document.getElementById('debt-kpi').innerHTML =
-    '<div class="kpi"><div class="kpi-label">Общая ДЗ</div><div class="kpi-value amber">' + fmt(s.total_balance||0) + totalTrend + '</div>' + byOrgHtml + '</div>' +
-    '<div class="kpi"><div class="kpi-label">Должников</div><div class="kpi-value">' + (s.debtor_count||0) + '</div></div>' +
-    '<div class="kpi">' +
-      '<div class="kpi-label">Просрочка' + (debtBucketFilter ? ' <span class="muted" style="font-weight:400;text-transform:none">(фильтр активен - клик снова снимает)</span>' : '') + '</div>' +
-      '<table style="width:100%;table-layout:fixed;font-size:12px;border-collapse:collapse;margin-top:6px">' +
-        bucketRow_('0-30', 'Текущая (0-30 дн.)', 'var(--green)', s.current_0_30) +
-        bucketRow_('30-60', 'Короткая (30-60 дн.)', 'var(--amber)', s.overdue_30_60) +
-        bucketRow_('60-90', 'Средняя (60-90 дн.)', '#EF9F27', s.overdue_60_90) +
-        bucketRow_('90+', 'Длинная (90-600 дн.)', 'var(--red)', s.overdue_90_plus) +
-        bucketRow_('dead', 'Мёртвая (600+ дн.)', '#9333EA', s.overdue_dead) +
-      '</table>' +
-    '</div>' +
-    '<div class="kpi">' +
-      '<div class="kpi-label">По статусам' + (debtStatusFilter ? ' <span class="muted" style="font-weight:400;text-transform:none">(фильтр активен - клик снова снимает)</span>' : '') + '</div>' +
-      byStatusHtml +
-    '</div>';
+  // Блок 2 верхней строки KPI - раньше здесь была цифра "Должников", теперь график "ДЗ по
+  // дням" (Влад, 2026-07-17: "график по дебиторской задолженности выведи в блок 2 в самом
+  // верху вместо должники"). Сама цифра должников переехала в свободное место - подзаголовок
+  // рядом с заголовком графика, не отдельным блоком.
+  setText('debt-kpi-debtor-count', s.debtor_count||0);
+  document.getElementById('debt-kpi-total').innerHTML =
+    '<div class="kpi-label">Общая ДЗ</div><div class="kpi-value amber">' + fmt(s.total_balance||0) + totalTrend + '</div>' + byOrgHtml;
+  document.getElementById('debt-kpi-overdue').innerHTML =
+    '<div class="kpi-label">Просрочка' + (debtBucketFilter ? ' <span class="muted" style="font-weight:400;text-transform:none">(фильтр активен - клик снова снимает)</span>' : '') + '</div>' +
+    '<table style="width:100%;table-layout:fixed;font-size:12px;border-collapse:collapse;margin-top:6px">' +
+      bucketRow_('0-30', 'Текущая (0-30 дн.)', 'var(--green)', s.current_0_30) +
+      bucketRow_('30-60', 'Короткая (30-60 дн.)', 'var(--amber)', s.overdue_30_60) +
+      bucketRow_('60-90', 'Средняя (60-90 дн.)', '#EF9F27', s.overdue_60_90) +
+      bucketRow_('90+', 'Длинная (90-600 дн.)', 'var(--red)', s.overdue_90_plus) +
+      bucketRow_('dead', 'Мёртвая (600+ дн.)', '#9333EA', s.overdue_dead) +
+    '</table>';
+  document.getElementById('debt-kpi-status').innerHTML =
+    '<div class="kpi-label">По статусам' + (debtStatusFilter ? ' <span class="muted" style="font-weight:400;text-transform:none">(фильтр активен - клик снова снимает)</span>' : '') + '</div>' +
+    byStatusHtml;
 
   // "Что изменилось со вчера" - drill-down по клику на стрелку тренда (Влад, 2026-07-15).
   // С 2026-07-16 - если кликнули на стрелку конкретного юрлица (debtChangesOrgScope), берём
@@ -5248,11 +5257,15 @@ function renderDebt() {
       label: 'Общая ДЗ', data: hist.map(function(h){ return h.balance; }),
       borderColor: '#EF9F27', backgroundColor: 'rgba(239,159,39,0.12)', fill: true, tension: 0.25, pointRadius: 2, borderWidth: 2.5,
     }];
+    // Точки на линиях юрлиц (Влад, 2026-07-17: "в графике по всем нашим фирмам должны быть
+    // точки с информацией как в общей ДЗ") - раньше pointRadius:0 у линий юрлиц, из-за чего
+    // навести курсор и увидеть подсказку было почти невозможно (в отличие от "Общая ДЗ" с
+    // pointRadius:2). mode:'index' ниже - наводишь на день, видишь сразу все юрлица.
     Object.keys(orgNames).forEach(function(org) {
       datasets.push({
         label: org, data: hist.map(function(h) { return (h.byOrg && h.byOrg[org]) || 0; }),
         borderColor: debtOrgColors[org] || '#94A3B8', backgroundColor: 'transparent',
-        fill: false, tension: 0.25, pointRadius: 0, borderWidth: 1.5,
+        fill: false, tension: 0.25, pointRadius: 2, borderWidth: 1.5,
       });
     });
     ctx._chart = new Chart(ctx, {
@@ -5263,6 +5276,7 @@ function renderDebt() {
       },
       options: {
         responsive:true, maintainAspectRatio:false,
+        interaction: { mode: 'index', intersect: false },
         plugins:{
           legend:{display:true, position:'bottom', labels:{color:'#888780', font:{size:10}, boxWidth:10}},
           tooltip:{callbacks:{label:function(c){ return ' ' + c.dataset.label + ': ' + fmt(c.raw); }}}

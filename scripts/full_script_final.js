@@ -1537,7 +1537,9 @@ function getDebtData(ss) {
         const prevBal = prevByName[c.contragent] || 0;
         const diff = c.balance - prevBal;
         if (Math.round(diff) !== 0) {
-          debtChanges.push({ contragent: c.contragent, manager: c.manager, yesterday: prevBal, today: c.balance, diff: diff, status: c.status });
+          // Дней в статусе должника (Влад, 2026-07-17: "долг растёт, а он и так уже должник
+          // давно - это помогает принимать решения") - тот же daysOverdue, что в таблице.
+          debtChanges.push({ contragent: c.contragent, manager: c.manager, yesterday: prevBal, today: c.balance, diff: diff, status: c.status, days_overdue: c.daysOverdue });
         }
       });
       // Контрагенты, которые ВЧЕРА были в списке (с балансом), а СЕГОДНЯ полностью закрыли
@@ -1563,7 +1565,7 @@ function getDebtData(ss) {
           const prevBal = prevForOrg[c.contragent] || 0;
           const diff = todayOrgBal - prevBal;
           if (Math.round(diff) !== 0) {
-            orgChanges.push({ contragent: c.contragent, manager: c.manager, yesterday: prevBal, today: todayOrgBal, diff: diff, status: c.status });
+            orgChanges.push({ contragent: c.contragent, manager: c.manager, yesterday: prevBal, today: todayOrgBal, diff: diff, status: c.status, days_overdue: c.daysOverdue });
           }
         });
         Object.keys(prevForOrg).forEach(function(name) {

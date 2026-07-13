@@ -157,6 +157,92 @@ function getTelegramToken_() {
 }
 
 // ============================================================
+// БИТРИКС24 — источник лидов/сделок (Авито/сайт/звонки), см.
+// plans/2026-07-12-bitrix24-crm-integration.md
+// ============================================================
+// Входящий вебхук НЕ хранится в коде (это секрет, права ограничены только
+// CRM + user_brief). Задаётся один раз в редакторе Apps Script:
+//   Настройки проекта (шестерёнка) → Свойства скрипта → Добавить свойство
+//   Имя: BITRIX24_WEBHOOK_URL | Значение: https://b24-XXXXXX.bitrix24.ru/rest/1/XXXXXXXXXXXXXXXX/
+function getBitrixWebhookUrl_() {
+  var url = PropertiesService.getScriptProperties().getProperty('BITRIX24_WEBHOOK_URL');
+  if (!url) {
+    throw new Error('BITRIX24_WEBHOOK_URL не задан. Настройки проекта → Свойства скрипта → добавь BITRIX24_WEBHOOK_URL.');
+  }
+  return url;
+}
+
+function bitrixCall_(method, params) {
+  var url = getBitrixWebhookUrl_() + method + '.json';
+  var resp = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(params || {}),
+    muteHttpExceptions: true,
+  });
+  var body = JSON.parse(resp.getContentText());
+  if (body.error) {
+    throw new Error('Bitrix24 API (' + method + '): ' + body.error + ' - ' + (body.error_description || ''));
+  }
+  return body;
+}
+
+// Постранично забирает все сделки (Битрикс24 отдаёт по 50 за раз через поле "next").
+function getBitrixDeals_() {
+  var deals = [];
+  var start = 0;
+  while (true) {
+    var body = bitrixCall_('crm.deal.list', {
+      select: ['ID', 'TITLE', 'SOURCE_ID', 'STAGE_ID', 'CATEGORY_ID', 'DATE_CREATE', 'OPPORTUNITY', 'ASSIGNED_BY_ID', 'CLOSED'],
+      start: start,
+    });
+    deals = deals.concat(body.result);
+    if (body.next === undefined || body.next === null) break;
+    start = body.next;
+  }
+  return deals;
+}
+
+// Сводка по лидам/сделкам для вкладки "Маркетинг". Стадии пока не размечены как
+// успех/отказ/отложено (Влад настраивает воронку в Битрикс24 отдельно, см. план) -
+// считаем сырые счётчики по SOURCE_ID/STAGE_ID, детальную классификацию добавим
+// когда воронка будет зафиксирована.
+function getBitrixMarketingData_() {
+  var deals = getBitrixDeals_();
+
+  var bySource = {};
+  var byStage = {};
+  var revenueTotal = 0;
+
+  deals.forEach(function (d) {
+    var source = d.SOURCE_ID || 'Не указан';
+    bySource[source] = (bySource[source] || 0) + 1;
+
+    var stage = d.STAGE_ID || 'Не указан';
+    byStage[stage] = (byStage[stage] || 0) + 1;
+
+    revenueTotal += parseFloat(d.OPPORTUNITY || 0);
+  });
+
+  return {
+    updated: new Date().toISOString(),
+    total: deals.length,
+    revenueTotal: revenueTotal,
+    bySource: bySource,
+    byStage: byStage,
+  };
+}
+
+// Запустить вручную ОДИН РАЗ после того, как задан BITRIX24_WEBHOOK_URL, чтобы
+// проверить подключение до того, как заводить его в doGet. Смотреть результат
+// в журнале выполнения редактора (Logger).
+function testBitrixMarketing() {
+  var data = getBitrixMarketingData_();
+  Logger.log(JSON.stringify(data, null, 2));
+  return data;
+}
+
+// ============================================================
 // ГЛАВНАЯ ТОЧКА ВХОДА — вешается на триггер каждые 6 часов
 // ============================================================
 function runAll() {
@@ -2106,6 +2192,18 @@ function doGet(e) {
         return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(ContentService.MimeType.JSON);
       } catch (debtCommentErr) {
         return ContentService.createTextOutput(JSON.stringify({ error: debtCommentErr.message })).setMimeType(ContentService.MimeType.JSON);
+      }
+    }
+
+    // Лиды/сделки из Битрикс24 (Авито/сайт/звонки) - см. plans/2026-07-12-bitrix24-crm-integration.md
+    if (action === 'marketing') {
+      if (access.role !== 'admin') {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      try {
+        return ContentService.createTextOutput(JSON.stringify(getBitrixMarketingData_())).setMimeType(ContentService.MimeType.JSON);
+      } catch (marketingErr) {
+        return ContentService.createTextOutput(JSON.stringify({ error: marketingErr.message })).setMimeType(ContentService.MimeType.JSON);
       }
     }
 

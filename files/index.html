@@ -5202,9 +5202,18 @@ function renderDebt() {
       setText('debt-changes-sub', 'Изменений нет (или ещё не накопилось истории за вчера)');
       document.getElementById('debt-changes-body').innerHTML = '<tr><td colspan="5" class="muted" style="padding:10px 0">Нет данных за вчера по этому юрлицу</td></tr>';
     } else {
-      var upCount = debtChanges.filter(function(x){ return x.diff > 0; }).length;
-      var downCount = debtChanges.filter(function(x){ return x.diff < 0; }).length;
-      setText('debt-changes-sub', 'выросло у ' + upCount + ', снизилось у ' + downCount);
+      // Суммы по +/- и сальдо (Влад, 2026-07-17: "видеть сумму по + и сумму по -, и сальдо") -
+      // красное = ДЗ увеличивается (плохо), зелёное = уменьшается (хорошо) - тот же цвет,
+      // что уже у каждой строки таблицы ниже.
+      var upRows = debtChanges.filter(function(x){ return x.diff > 0; });
+      var downRows = debtChanges.filter(function(x){ return x.diff < 0; });
+      var sumUp = upRows.reduce(function(s,x){ return s+x.diff; }, 0);
+      var sumDown = downRows.reduce(function(s,x){ return s+x.diff; }, 0);
+      var saldo = sumUp + sumDown;
+      setHTML('debt-changes-sub',
+        'Выросло: <b style="color:var(--red)">+' + fmt(sumUp) + '</b> (у ' + upRows.length + ') · ' +
+        'Снизилось: <b style="color:var(--green)">' + fmt(sumDown) + '</b> (у ' + downRows.length + ') · ' +
+        'Сальдо: <b style="color:' + (saldo>=0?'var(--red)':'var(--green)') + '">' + (saldo>0?'+':'') + fmt(saldo) + '</b>');
       document.getElementById('debt-changes-body').innerHTML = debtChanges.map(function(x) {
         var up = x.diff > 0;
         var color = up ? 'var(--red)' : 'var(--green)';

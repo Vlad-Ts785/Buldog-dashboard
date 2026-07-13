@@ -2459,8 +2459,13 @@ function findShtatkaDayColumns(ss) {
 // можно запускать повторно без дублей. Год не хранится в заголовках сетки - передаём явно.
 // Кнопка "Выполнить" в редакторе Apps Script не умеет передавать аргументы - при запуске
 // оттуда year всегда undefined, поэтому подставляем текущий год по умолчанию.
+// Автозапуск по триггеру (setupShtatkaAutoMigration, 12:00 и 19:00) вызывает эту же функцию,
+// но триггеры Apps Script передают служебный объект события первым аргументом - "year ||
+// новый год" не срабатывал (объект истинный), и в дату попадало "[object Object]" вместо
+// числа года (Влад, 2026-07-17: увидел мусор в Штатка_история). Годится только настоящее
+// число года - что угодно другое (объект, undefined, строка) откатывается на текущий год.
 function migrateShtatkaGridToHistory(year) {
-  year = year || new Date().getFullYear();
+  year = (typeof year === 'number' && year > 2000) ? year : new Date().getFullYear();
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
   const sheet = ss.getSheetByName('Штатка');
   if (!sheet) throw new Error('Лист Штатка не найден');
@@ -2529,10 +2534,14 @@ function removeShtatkaHistoryForMonths(histSheet, monthKeys) {
   }
 }
 
-// Разовая уборка: первый прогон migrateShtatkaGridToHistory() был запущен кнопкой "Выполнить"
-// без аргумента - year получился undefined, и часть строк записалась с датой "undefined-MM-DD".
-// Эта функция удаляет такие битые строки. Запустить один раз, затем заново
-// migrateShtatkaGridToHistory() (уже с исправленным годом по умолчанию).
+// Разовая уборка битых строк в Штатка_история. Было два известных источника мусора:
+// 1) первый прогон migrateShtatkaGridToHistory() запустили кнопкой "Выполнить" без аргумента -
+//    year получился undefined, дата записалась как "undefined-MM-DD";
+// 2) автозапуск по триггеру передавал служебный объект события вместо года - дата стала
+//    "[object Object]-MM-DD" (Влад, 2026-07-17, см. фикс в migrateShtatkaGridToHistory).
+// Вместо двух точечных проверок - общая: оставляем только строки с датой в формате yyyy-MM-dd,
+// это ловит оба варианта порчи и любой третий, который мы ещё не видели. Запустить один раз,
+// затем заново migrateShtatkaGridToHistory() (уже с исправленным годом по умолчанию).
 function cleanupUndefinedShtatkaHistory() {
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
   const sheet = ss.getSheetByName(SHTATKA_HISTORY_SHEET);
@@ -2540,12 +2549,52 @@ function cleanupUndefinedShtatkaHistory() {
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) { Logger.log('Лист пуст - нечего чистить'); return 0; }
   const data = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
-  const keep = data.filter(function(r) { return String(r[0]).indexOf('undefined') !== 0; });
+  const keep = data.filter(function(r) {
+    const dateStr = r[0] instanceof Date ? Utilities.formatDate(r[0], 'Europe/Moscow', 'yyyy-MM-dd') : String(r[0]);
+    return /^\d{4}-\d{2}-\d{2}$/.test(dateStr);
+  });
   const removed = data.length - keep.length;
   sheet.getRange(2, 1, lastRow - 1, 3).clearContent();
   if (keep.length > 0) sheet.getRange(2, 1, keep.length, 3).setValues(keep);
   Logger.log('🧹 Удалено битых строк: ' + removed + ', осталось корректных: ' + keep.length);
   return removed;
+}
+
+// Разовая проверка: за выходные (11 и 12 июля) Влад проставлял статусы в Штатке вручную прямо
+// в клетках, а не через выпадающий список (Влад, 2026-07-17: "мог где-то пропустить, проверь
+// эти даты"). Сверяет список активных машин (тот же фильтр, что и везде - getStaffData) с тем,
+// что реально попало в Штатка_история за эти даты, и выводит в лог госномера без статуса.
+// Запустить один раз в редакторе (Выполнить -> checkShtatkaHistoryGaps), результат - в
+// журнале выполнения (Виджет "Выполнения" слева или Ctrl+Enter после запуска).
+function checkShtatkaHistoryGaps() {
+  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  const dates = ['2026-07-11', '2026-07-12'];
+  const staffData = getStaffData(ss);
+  const activeGos = Object.keys(staffData).map(function(k) { return staffData[k].gosOriginal; });
+
+  const found = {};
+  dates.forEach(function(d) { found[d] = {}; });
+  const histSheet = ss.getSheetByName(SHTATKA_HISTORY_SHEET);
+  if (histSheet && histSheet.getLastRow() > 1) {
+    const data = histSheet.getRange(2, 1, histSheet.getLastRow() - 1, 3).getValues();
+    data.forEach(function(r) {
+      const dateStr = r[0] instanceof Date ? Utilities.formatDate(r[0], 'Europe/Moscow', 'yyyy-MM-dd') : String(r[0]);
+      if (dates.indexOf(dateStr) === -1) return;
+      const gos = String(r[1] || '').trim();
+      const status = String(r[2] || '').trim();
+      if (gos && isValidShtatkaStatus(status)) found[dateStr][normalizeGos(gos)] = status;
+    });
+  }
+
+  const report = [];
+  dates.forEach(function(d) {
+    const missing = activeGos.filter(function(gos) { return !found[d][normalizeGos(gos)]; });
+    report.push(d + ': статус проставлен у ' + (activeGos.length - missing.length) + ' из ' + activeGos.length +
+      (missing.length ? '. НЕТ статуса у: ' + missing.join(', ') : '. Пропусков нет.'));
+  });
+  const text = report.join('\n');
+  Logger.log(text);
+  return text;
 }
 
 // Разовая настройка: ставит два ежедневных триггера (12:00 и 19:00), которые сами гоняют

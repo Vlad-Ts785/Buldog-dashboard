@@ -5190,24 +5190,33 @@ function renderDebt() {
     ? ((debt.debt_changes_by_org || {})[debtChangesOrgScope] || [])
     : (debt.debt_changes || [])
   ).filter(function(x) { return !debtHideBankrupt || x.status !== 'Банкрот'; });
+  // Раньше панель оставалась скрытой, если debtChanges пуст (Влад, 2026-07-17: "иногда кликаю
+  // - ничего не отражается") - клик выглядел сломанным, хотя на самом деле изменений просто
+  // не было. Теперь панель ВСЕГДА открывается по клику - если данных нет, показываем это
+  // явно текстом, а не молчим.
   var changesCard = document.getElementById('debt-changes-card');
-  if (changesCard) changesCard.style.display = (debtChangesVisible && debtChanges.length) ? '' : 'none';
+  if (changesCard) changesCard.style.display = debtChangesVisible ? '' : 'none';
   if (debtChangesVisible) {
     setText('debt-changes-title', debtChangesOrgScope ? 'Что изменилось со вчера — ' + debtChangesOrgScope : 'Что изменилось со вчера — все юрлица');
-    var upCount = debtChanges.filter(function(x){ return x.diff > 0; }).length;
-    var downCount = debtChanges.filter(function(x){ return x.diff < 0; }).length;
-    setText('debt-changes-sub', 'выросло у ' + upCount + ', снизилось у ' + downCount);
-    document.getElementById('debt-changes-body').innerHTML = debtChanges.map(function(x) {
-      var up = x.diff > 0;
-      var color = up ? 'var(--red)' : 'var(--green)';
-      return '<tr>' +
-        '<td><b>' + x.contragent + '</b></td>' +
-        '<td class="muted">' + (x.manager ? cleanName(x.manager) : '—') + '</td>' +
-        '<td class="num muted">' + fmt(x.yesterday) + '</td>' +
-        '<td class="num">' + fmt(x.today) + '</td>' +
-        '<td class="num" style="color:' + color + ';font-weight:600">' + (up?'+':'') + fmt(x.diff) + '</td>' +
-      '</tr>';
-    }).join('');
+    if (!debtChanges.length) {
+      setText('debt-changes-sub', 'Изменений нет (или ещё не накопилось истории за вчера)');
+      document.getElementById('debt-changes-body').innerHTML = '<tr><td colspan="5" class="muted" style="padding:10px 0">Нет данных за вчера по этому юрлицу</td></tr>';
+    } else {
+      var upCount = debtChanges.filter(function(x){ return x.diff > 0; }).length;
+      var downCount = debtChanges.filter(function(x){ return x.diff < 0; }).length;
+      setText('debt-changes-sub', 'выросло у ' + upCount + ', снизилось у ' + downCount);
+      document.getElementById('debt-changes-body').innerHTML = debtChanges.map(function(x) {
+        var up = x.diff > 0;
+        var color = up ? 'var(--red)' : 'var(--green)';
+        return '<tr>' +
+          '<td><b>' + x.contragent + '</b></td>' +
+          '<td class="muted">' + (x.manager ? cleanName(x.manager) : '—') + '</td>' +
+          '<td class="num muted">' + fmt(x.yesterday) + '</td>' +
+          '<td class="num">' + fmt(x.today) + '</td>' +
+          '<td class="num" style="color:' + color + ';font-weight:600">' + (up?'+':'') + fmt(x.diff) + '</td>' +
+        '</tr>';
+      }).join('');
+    }
   }
 
   // История - линия по дням (та же логика построения, что и "Выручка по дням" на "Обзоре").

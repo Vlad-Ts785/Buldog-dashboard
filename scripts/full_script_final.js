@@ -2100,10 +2100,15 @@ function doGet(e) {
           .createTextOutput(JSON.stringify({ error: 'Некорректный период' }))
           .setMimeType(ContentService.MimeType.JSON);
       }
+      var gp = getGrossProfitForPeriod(ss, period);
       return ContentService
         .createTextOutput(JSON.stringify({
           orders:  getOrdersDataForPeriod(ss, period),
-          summary: { profit: getGrossProfitForPeriod(ss, period) },
+          summary: {
+            profit:      gp ? gp.profit : null,
+            profit_tral: gp ? gp.profit_tral : null,
+            profit_long: gp ? gp.profit_long : null,
+          },
         }))
         .setMimeType(ContentService.MimeType.JSON);
     }
@@ -3134,26 +3139,30 @@ function getDriverOrderCounts_(ss, fromDate, toDate) {
   return counts;
 }
 
-// Валовая прибыль своего парка за прошлый период (для зарплаты Рыщанова на вкладке "Зарплата"
-// при выборе периода). Берёт последний день внутри месяца - там накопительный итог за весь месяц.
+// Валовая прибыль своего парка за прошлый период (для зарплаты Рыщанова и карточки "Заказов"
+// при выборе периода), с разбивкой по сегментам трал/длинномер (Влад, 2026-07-18: карточка
+// "Длинномеры" на "Заказов" не обновлялась при смене периода на июнь - профит оставался от
+// текущего месяца, потому что раньше функция считала только один общий итог без разбивки).
+// Источник и логика - те же, что у "Парк техники" за произвольный диапазон
+// (aggregateFinHistoryForRange: авторитетный архив Данные_1С_история для закрытых месяцев,
+// иначе подневный фолбэк на История_финансов) - чтобы цифры сходились между "Заказов" и
+// "Парк техники" за один и тот же период, а не расходились как две разные методики.
 function getGrossProfitForPeriod(ss, period) {
-  var hist = ss.getSheetByName('История_финансов');
-  if (!hist || hist.getLastRow() < 2) return null;
-  var lastRow = hist.getLastRow();
-  var data = hist.getRange(2, 1, lastRow - 1, 11).getValues();
+  var parts = period.split('-').map(Number);
+  if (parts.length !== 2) return null;
+  var monthStart = new Date(parts[0], parts[1] - 1, 1);
+  var monthEnd = new Date(parts[0], parts[1], 0); // последний день месяца
+  var staffData = getStaffData(ss);
+  var vehicles = aggregateFinHistoryForRange(ss, staffData, monthStart, monthEnd);
+  if (!vehicles.length) return null;
 
-  var lastDateKey = '';
-  var sumByDate = {};
-  for (var i = 0; i < data.length; i++) {
-    var row = data[i];
-    if (!(row[0] instanceof Date)) continue;
-    var dateKey = Utilities.formatDate(row[0], 'Europe/Moscow', 'yyyy-MM-dd');
-    if (dateKey.slice(0, 7) !== period) continue;
-    if (!sumByDate[dateKey]) sumByDate[dateKey] = 0;
-    sumByDate[dateKey] += parseFloat(row[10]) || 0;
-    if (dateKey > lastDateKey) lastDateKey = dateKey;
-  }
-  return lastDateKey ? sumByDate[lastDateKey] : null;
+  var profit = 0, profitTral = 0, profitLong = 0;
+  vehicles.forEach(function(v) {
+    var isDlinnomer = v.type === 'Борт' || v.type.indexOf('Борт') === 0;
+    profit += v.profit;
+    if (isDlinnomer) profitLong += v.profit; else profitTral += v.profit;
+  });
+  return { profit: profit, profit_tral: profitTral, profit_long: profitLong };
 }
 
 // ============================================================

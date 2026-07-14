@@ -1559,6 +1559,8 @@ function applyRoleUI() {
 let selectedPeriod = null;     // null = текущий месяц
 let periodOrdersData = null;   // D.orders за выбранный период (архив), если не текущий
 let periodGrossProfit = null;  // ВП своего парка за период (для Рыщанова), из Истории_финансов
+let periodProfitTral = null;   // то же, но по тралам - для карточки "Заказов" (2026-07-18)
+let periodProfitLong = null;   // то же, но по длинномерам
 let availablePeriods = [];
 
 async function loadAvailablePeriods() {
@@ -1580,6 +1582,8 @@ async function changePeriod(period) {
   if (!selectedPeriod) {
     periodOrdersData = null;
     periodGrossProfit = null;
+    periodProfitTral = null;
+    periodProfitLong = null;
     if (status) status.textContent = '';
     renderSalesTabsForPeriod();
     return;
@@ -1590,6 +1594,8 @@ async function changePeriod(period) {
     if (data.orders && data.orders.error) throw new Error(data.orders.error);
     periodOrdersData = data.orders;
     periodGrossProfit = (data.summary && typeof data.summary.profit === 'number') ? data.summary.profit : null;
+    periodProfitTral = (data.summary && typeof data.summary.profit_tral === 'number') ? data.summary.profit_tral : null;
+    periodProfitLong = (data.summary && typeof data.summary.profit_long === 'number') ? data.summary.profit_long : null;
     if (status) status.textContent = '';
     renderSalesTabsForPeriod();
   } catch(e) {
@@ -1597,15 +1603,21 @@ async function changePeriod(period) {
   }
 }
 
-// Подменяет D.orders/D.summary.profit на выбранный период только на время рендера
-// этих 4 вкладок, синхронно, и сразу возвращает обратно - другие вкладки не задеты.
+// Подменяет D.orders/D.summary.profit(_tral/_long) на выбранный период только на время рендера
+// этих 4 вкладок, синхронно, и сразу возвращает обратно - другие вкладки не задеты. profit_tral/
+// profit_long добавлены 2026-07-18 - раньше карточка "Длинномеры" на "Заказов" не обновлялась
+// при смене периода (Влад: "давай тут проверим июнь" - профит остался от текущего месяца).
 function renderSalesTabsForPeriod() {
   if (!D) return;
   const realOrders = D.orders;
   const realProfit = D.summary ? D.summary.profit : undefined;
+  const realProfitTral = D.summary ? D.summary.profit_tral : undefined;
+  const realProfitLong = D.summary ? D.summary.profit_long : undefined;
   if (selectedPeriod && periodOrdersData) {
     D.orders = periodOrdersData;
     if (D.summary && periodGrossProfit !== null) D.summary.profit = periodGrossProfit;
+    if (D.summary && periodProfitTral !== null) D.summary.profit_tral = periodProfitTral;
+    if (D.summary && periodProfitLong !== null) D.summary.profit_long = periodProfitLong;
   }
   renderSales();
   renderSalesMgr();
@@ -1613,6 +1625,8 @@ function renderSalesTabsForPeriod() {
   renderSalesSalary();
   D.orders = realOrders;
   if (D.summary) D.summary.profit = realProfit;
+  if (D.summary) D.summary.profit_tral = realProfitTral;
+  if (D.summary) D.summary.profit_long = realProfitLong;
 }
 
 // ── ВЫБОР ДИАПАЗОНА (Техника / Водители) ────────────────────

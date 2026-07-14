@@ -2962,17 +2962,12 @@ function getFleetStatus(staffData) {
   for (var gos in staffData) {
     var v = staffData[gos];
     var type   = v.type   || '';
-    // "Статус на сегодня" в Штатке хранит короткий код (число заказов за день или Р/В/РВ), не
-    // текстовое описание "В работе"/"Ремонт" - схема сменилась в переходе на Штатка_история
-    // (2026-07-01, см. SHTATKA_STATUS_VALUES), а эта функция осталась со старой проверкой и
-    // тихо считала все машины нулями (Влад, 2026-07-17: "Статус парка" показывал 0 везде).
-    // 'РВ' считаем ремонтом - машина всё равно не может выехать, даже если найдётся водитель.
-    var status    = String(v.status || '').trim();
+    var status = v.status || '';
     var isTruck   = type === 'Борт' || type.indexOf('Борт') === 0;
-    var isRepair  = status === 'Р' || status === 'РВ';
-    var isNoDrv   = status === 'В';
-    var isNoOrder = status === '0';
-    var isWork    = status === '1' || status === '2' || status === '3' || status === '4' || status === '5';
+    var isWork    = status.indexOf('В работе')    >= 0;
+    var isRepair  = status.indexOf('Ремонт')      >= 0;
+    var isNoDrv   = status.indexOf('Без водителя') >= 0;
+    var isNoOrder = status.indexOf('Без заказа')   >= 0;
 
     if (isTruck) {
       if (isWork) lWork++; else if (isRepair) lRepair++; else if (isNoDrv) lNoDrv++; else if (isNoOrder) lNoOrder++;

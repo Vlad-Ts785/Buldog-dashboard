@@ -471,6 +471,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           <div class="kpi-label">Дебиторская задолженность</div>
           <div class="kpi-value amber" id="k-debt-total">—</div>
           <div class="kpi-sub" id="k-debt-breakdown" style="margin-top:6px;line-height:1.7"></div>
+          <div class="kpi-sub" id="k-debt-week-saldo" style="margin-top:4px"></div>
           <div style="position:relative;height:44px;margin-top:10px"><canvas id="chart-debt-mini"></canvas></div>
         </div>
         <div class="kpi" onclick="showPage('sales');showCustTab('hire', document.getElementById('cust-tab-btn-hire'))" style="cursor:pointer">
@@ -1807,6 +1808,35 @@ function renderDebtMiniCard() {
   if (totalEl) totalEl.textContent = fmt(total);
   if (breakdownEl) breakdownEl.innerHTML =
     'Текущая: ' + fmt(current30) + '<br>Короткая: ' + fmt(over30) + '<br>Средняя: ' + fmt(over60);
+
+  // Сальдо за неделю (Влад, 2026-07-19: "сальдо неделя выведи мне на панель куда-нибудь в
+  // блок дебиторская задолженность" - тот же смысл, что кнопка "Неделя" в "Что изменилось"
+  // на вкладке ДЗ, но сразу на глазах, без захода на вкладку). Полная ДЗ (все возрасты, без
+  // банкротов - customers уже так отфильтрован выше), не только 0-90 дней как totalEl -
+  // иначе сальдо не билось бы с тем, что покажет сама вкладка ДЗ.
+  var weekSaldoEl = document.getElementById('k-debt-week-saldo');
+  if (weekSaldoEl) {
+    var fullBalanceNow = customers.reduce(function(s, c) { return s + c.balance; }, 0);
+    var allHist = debt.history || [];
+    var todayDateStr = new Date().toLocaleDateString('sv-SE');
+    var weekTargetDate = new Date(todayDateStr + 'T00:00:00');
+    weekTargetDate.setDate(weekTargetDate.getDate() - 7);
+    var weekAgoEntry = null, weekAgoDiff = Infinity;
+    allHist.forEach(function(h) {
+      if (!h.date) return;
+      var d = Math.abs(new Date(h.date + 'T00:00:00').getTime() - weekTargetDate.getTime());
+      if (d < weekAgoDiff) { weekAgoDiff = d; weekAgoEntry = h; }
+    });
+    // Нет точки истории хотя бы приблизительно неделю назад (копится только с 2026-07-16) -
+    // не выдумываем сальдо из воздуха, просто не показываем строку.
+    if (weekAgoEntry && weekAgoDiff <= 4 * 86400000) {
+      var weekSaldo = fullBalanceNow - weekAgoEntry.balance;
+      var wUp = weekSaldo > 0; // рост долга - плохо
+      weekSaldoEl.innerHTML = 'Сальдо за неделю: <b style="color:' + (wUp ? 'var(--red)' : 'var(--green)') + '">' + (weekSaldo > 0 ? '+' : '') + fmt(weekSaldo) + '</b>';
+    } else {
+      weekSaldoEl.innerHTML = '';
+    }
+  }
 
   // Мини-график - долг 0-90 дней по дням (debt.history[].debt0to90, копится с момента
   // деплоя этой фичи, как и вся остальная история ДЗ - старые дни дадут 0).

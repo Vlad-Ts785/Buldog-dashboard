@@ -438,7 +438,12 @@ function writeParkHistoryForMonth_(ss, year, month, rawData) {
 
     var revenue = parseFloat(row[5]) || 0;
     var profit = parseFloat(row[12]) || 0;
-    if (revenue === 0 && profit === 0) continue;
+    // Раньше строка с нулевой выручкой и нулевой ВП за весь месяц пропускалась целиком -
+    // предполагалось, что это мусорная строка отчёта. На деле так же выглядит настоящая
+    // машина, простоявшая весь месяц в ремонте без единого заказа (Влад, 2026-07-19: "не все
+    // тралы показывает как ремонтные, которые в штатке отмечены как ремонт" - именно такие
+    // машины пропадали из архива). Мусорные строки уже отсеяны выше по skipKeywords, а ниже -
+    // по валидному госномеру (gosRaw), поэтому отдельный фильтр по выручке/прибыли не нужен.
 
     var gosRaw = extractGosNumber(fullName);
     if (!gosRaw) continue;
@@ -2668,6 +2673,21 @@ function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate) {
     Object.keys(parkHistByMonth[mk]).forEach(function(g) { allGos[g] = true; });
   });
   Object.keys(fallbackByVehicleMonth).forEach(function(g) { allGos[g] = true; });
+  // Штатка - источник истины по составу парка (Влад, 2026-07-19: "не все тралы показывает
+  // как ремонтные, которые в штатке отмечены как ремонт" - машина, у которой за весь период
+  // не было ни одной строки в 1С-истории (простояла в ремонте, ни одного заказа), раньше
+  // выпадала из allGos и пропадала из таблицы целиком, хотя "Статус парка" на Панели
+  // (getFleetStatus) считает её верно - читает staffData напрямую, а не через историю).
+  // Госномер в истории не всегда хранится в normalizeGos()-формате (пробелы/кириллица) -
+  // сверяем по нормализованному виду, иначе одна и та же машина могла бы попасть в allGos
+  // дважды: раз под "сырым" ключом из истории, раз под нормализованным ключом из Штатки.
+  if (staffData) {
+    var coveredNormalized_ = {};
+    Object.keys(allGos).forEach(function(g) { coveredNormalized_[normalizeGos(g)] = true; });
+    Object.keys(staffData).forEach(function(g) { // g уже нормализован, см. getStaffData
+      if (!coveredNormalized_[g]) allGos[g] = true;
+    });
+  }
 
   // Водитель ЗА ВЫБРАННЫЙ ПЕРИОД, а не сегодняшний живой - Данные_1С_история этого не хранит,
   // поэтому смотрим отдельно в История_финансов (там есть колонка "Водитель" с 2026-07-04) -
@@ -2693,6 +2713,7 @@ function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate) {
   Object.keys(allGos).forEach(function(gos) {
     var agg = { gos: gos, marka: '', type: '', status: '', revenue: 0, fot: 0, fuel: 0, parts: 0,
       fines: 0, tolls: 0, profit: 0, trailer: '', plan: 0, driver: '' };
+    var foundHistoryRow = false;
     monthKeys.forEach(function(mk) {
       var r = null;
       if (parkHistByMonth[mk] && parkHistByMonth[mk][gos]) {
@@ -2701,6 +2722,7 @@ function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate) {
         r = fallbackByVehicleMonth[gos][mk].row;
       }
       if (!r) return;
+      foundHistoryRow = true;
       agg.revenue += parseFloat(r[4]) || 0;
       agg.fot     += Math.abs(parseFloat(r[5]) || 0);
       agg.fuel    += Math.abs(parseFloat(r[6]) || 0);
@@ -2719,6 +2741,14 @@ function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate) {
       agg.marka = staffInfo.marka;
       agg.trailer = staffInfo.trailerGos;
       agg.driver = staffInfo.driver; // фолбэк - сегодняшний водитель, если истории ещё нет
+      // Ни одной строки в 1С-истории за период - берём тип/статус/госномер напрямую из
+      // Штатки, иначе машина попадёт в таблицу пустой строкой (или вообще не попадёт бы,
+      // см. allGos выше).
+      if (!foundHistoryRow) {
+        if (!agg.type) agg.type = staffInfo.type;
+        if (!agg.status) agg.status = staffInfo.status;
+        agg.gos = staffInfo.gosOriginal || agg.gos;
+      }
     }
     if (driverByGos[gos]) agg.driver = driverByGos[gos].driver; // приоритет - водитель за сам период
     result.push(agg);

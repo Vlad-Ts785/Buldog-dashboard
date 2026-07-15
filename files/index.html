@@ -1811,31 +1811,23 @@ function renderDebtMiniCard() {
 
   // Сальдо за неделю (Влад, 2026-07-19: "сальдо неделя выведи мне на панель куда-нибудь в
   // блок дебиторская задолженность" - тот же смысл, что кнопка "Неделя" в "Что изменилось"
-  // на вкладке ДЗ, но сразу на глазах, без захода на вкладку). Полная ДЗ (все возрасты, без
-  // банкротов - customers уже так отфильтрован выше), не только 0-90 дней как totalEl -
-  // иначе сальдо не билось бы с тем, что покажет сама вкладка ДЗ.
+  // на вкладке ДЗ). Раньше считали здесь же из разницы двух точек debt.history (суммарный
+  // баланс дня) - число не совпадало с тем, что показывает сама кнопка "Неделя" на вкладке
+  // ДЗ (Влад, 2026-07-19: "расчитывал эту цифру видеть, а там какая-то другая"), т.к. та
+  // считает сальдо СУММОЙ diff'ов по каждому контрагенту (action=debt_changes_period), а не
+  // разницей двух общих итогов - при пропусках в истории или новых/закрывшихся контрагентах
+  // это два разных числа. Теперь дёргаем ТОТ ЖЕ бэкенд-запрос - гарантированно то же число.
   var weekSaldoEl = document.getElementById('k-debt-week-saldo');
   if (weekSaldoEl) {
-    var fullBalanceNow = customers.reduce(function(s, c) { return s + c.balance; }, 0);
-    var allHist = debt.history || [];
-    var todayDateStr = new Date().toLocaleDateString('sv-SE');
-    var weekTargetDate = new Date(todayDateStr + 'T00:00:00');
-    weekTargetDate.setDate(weekTargetDate.getDate() - 7);
-    var weekAgoEntry = null, weekAgoDiff = Infinity;
-    allHist.forEach(function(h) {
-      if (!h.date) return;
-      var d = Math.abs(new Date(h.date + 'T00:00:00').getTime() - weekTargetDate.getTime());
-      if (d < weekAgoDiff) { weekAgoDiff = d; weekAgoEntry = h; }
-    });
-    // Нет точки истории хотя бы приблизительно неделю назад (копится только с 2026-07-16) -
-    // не выдумываем сальдо из воздуха, просто не показываем строку.
-    if (weekAgoEntry && weekAgoDiff <= 4 * 86400000) {
-      var weekSaldo = fullBalanceNow - weekAgoEntry.balance;
+    weekSaldoEl.innerHTML = '';
+    apiFetchJson({ action: 'debt_changes_period', days: 7 }).then(function(periodData) {
+      if (periodData.error || !weekSaldoEl.isConnected) return;
+      var changes = (periodData.debt_changes || []).filter(function(x) { return x.status !== 'Банкрот'; });
+      if (!changes.length) return;
+      var weekSaldo = changes.reduce(function(s, x) { return s + x.diff; }, 0);
       var wUp = weekSaldo > 0; // рост долга - плохо
       weekSaldoEl.innerHTML = 'Сальдо за неделю: <b style="color:' + (wUp ? 'var(--red)' : 'var(--green)') + '">' + (weekSaldo > 0 ? '+' : '') + fmt(weekSaldo) + '</b>';
-    } else {
-      weekSaldoEl.innerHTML = '';
-    }
+    }).catch(function() { /* не критично для основного экрана - молча оставляем пусто */ });
   }
 
   // Мини-график - долг 0-90 дней по дням (debt.history[].debt0to90, копится с момента

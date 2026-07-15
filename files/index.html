@@ -875,9 +875,10 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
         <div class="card" style="margin-top:16px;margin-bottom:16px">
           <div class="sec-header">
             <div class="sec-title">Должники</div>
-            <select id="filter-debt-manager" onchange="renderDebt()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;">
-              <option value="">Все менеджеры</option>
-            </select>
+            <div class="debt-mgr-filter" style="position:relative">
+              <button type="button" id="debt-mgr-filter-btn" onclick="toggleDebtMgrDropdown(event)" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;cursor:pointer;white-space:nowrap">Все менеджеры ▾</button>
+              <div id="debt-mgr-filter-panel" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px;z-index:50;min-width:220px;max-height:280px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.4)"></div>
+            </div>
           </div>
           <div style="overflow-x:auto">
             <table class="tbl">
@@ -4560,10 +4561,13 @@ function toggleDebtBankruptFilter() {
 // 'dead' (Влад, 2026-07-16: "в блок просрочка добавь мёртвая - это от 600 дней и больше")
 // - долги 600+ дней, обычно скрытые фильтром возраста, поэтому клик по этой корзине
 // дополнительно включает показ всех долгов (см. setDebtBucketFilter).
-let debtBucketFilter = ''; // '' | '0-30' | '30-60' | '60-90' | '90+' | 'dead'
+// Множественный выбор корзин (Влад, 2026-07-19: "хочу выбрать несколько, увидеть по ним в
+// целом информацию" - раньше был одиночный выбор, повторный клик снимал только его же).
+let debtBucketFilters = new Set(); // элементы: '0-30' | '30-60' | '60-90' | '90+' | 'dead'
 function setDebtBucketFilter(bucket) {
-  debtBucketFilter = (debtBucketFilter === bucket) ? '' : bucket;
-  if (debtBucketFilter === 'dead') debtShowAllAges = true; // иначе строки 600+ дней просто скрыты
+  if (debtBucketFilters.has(bucket)) debtBucketFilters.delete(bucket);
+  else debtBucketFilters.add(bucket);
+  if (debtBucketFilters.has('dead')) debtShowAllAges = true; // иначе строки 600+ дней просто скрыты
   renderDebt();
 }
 function debtInBucket_(days, bucket) {
@@ -4574,6 +4578,29 @@ function debtInBucket_(days, bucket) {
   if (bucket === 'dead') return days >= DEBT_AGE_LIMIT_DAYS;
   return true;
 }
+
+// Множественный выбор менеджеров (Влад, 2026-07-19: "мне нужно, чтобы я мог выбрать
+// несколько менеджеров... хочу видеть дебиторскую задолженность не только по сотрудникам,
+// но и по отделу" - выбирает несколько людей из одного отдела руками, группировка по
+// отделам не хардкодится). Пусто = все менеджеры. Панель поверх кнопки, закрывается по
+// клику вне неё.
+let debtManagerFilters = new Set();
+function debtMgrToggle(name) {
+  if (debtManagerFilters.has(name)) debtManagerFilters.delete(name);
+  else debtManagerFilters.add(name);
+  renderDebt();
+}
+function toggleDebtMgrDropdown(ev) {
+  ev.stopPropagation();
+  var panel = document.getElementById('debt-mgr-filter-panel');
+  if (!panel) return;
+  panel.style.display = (panel.style.display === 'none') ? 'block' : 'none';
+}
+document.addEventListener('click', function(ev) {
+  var panel = document.getElementById('debt-mgr-filter-panel');
+  if (!panel || panel.style.display === 'none') return;
+  if (!panel.contains(ev.target) && ev.target.id !== 'debt-mgr-filter-btn') panel.style.display = 'none';
+});
 
 // Фильтр по клику на статус в 4-м блоке KPI (Влад, 2026-07-16: "нужен четвёртый блок где
 // будут суммы по статусам... так же по нажатию выбор всех по статусу").
@@ -4924,7 +4951,7 @@ function renderDebt() {
   // table-layout:fixed + фиксированная ширина колонки суммы + табличные цифры (моноширинные
   // цифры одной высоты), чтобы суммы не "прыгали" по горизонтали от строки к строке.
   function bucketRow_(bucket, label, color, value) {
-    var active = debtBucketFilter === bucket;
+    var active = debtBucketFilters.has(bucket);
     return '<tr onclick="setDebtBucketFilter(\'' + bucket + '\')" style="cursor:pointer' + (active ? ';background:rgba(255,255,255,0.07)' : '') + '">' +
       '<td class="muted" style="padding:4px 8px 4px 0;white-space:nowrap">' + (active ? '▸ ' : '') + label + '</td>' +
       '<td class="num" style="color:' + color + ';font-weight:600;padding:4px 0;font-variant-numeric:tabular-nums;width:110px">' + fmt(value||0) + '</td></tr>';
@@ -4955,7 +4982,7 @@ function renderDebt() {
   document.getElementById('debt-kpi-total').innerHTML =
     '<div class="kpi-label">Общая ДЗ</div><div class="kpi-value amber">' + fmt(s.total_balance||0) + totalTrend + '</div>' + byOrgHtml;
   document.getElementById('debt-kpi-overdue').innerHTML =
-    '<div class="kpi-label">Просрочка' + (debtBucketFilter ? ' <span class="muted" style="font-weight:400;text-transform:none">(фильтр активен - клик снова снимает)</span>' : '') + '</div>' +
+    '<div class="kpi-label">Просрочка' + (debtBucketFilters.size ? ' <span class="muted" style="font-weight:400;text-transform:none">(фильтр активен - клик снова снимает)</span>' : '') + '</div>' +
     '<table style="width:100%;table-layout:fixed;font-size:12px;border-collapse:collapse;margin-top:6px">' +
       bucketRow_('0-30', 'Текущая (0-30 дн.)', 'var(--green)', s.current_0_30) +
       bucketRow_('30-60', 'Короткая (30-60 дн.)', 'var(--amber)', s.overdue_30_60) +
@@ -5064,19 +5091,33 @@ function renderDebt() {
     });
   }
 
-  // Фильтр по менеджеру (Влад, 2026-07-08: "должен быть выпадающий список менеджеров") -
-  // тот же приём, что фильтры Тип/Статус на "Водителях"/"Технике".
-  var mgrSel = document.getElementById('filter-debt-manager');
-  if (mgrSel && mgrSel.options.length <= 1) {
-    var mgrNames = (debt.by_manager||[]).map(function(m){ return m.name; }).filter(Boolean);
-    mgrNames.forEach(function(n){ mgrSel.add(new Option(cleanName(n), n)); });
+  // Фильтр по менеджеру (Влад, 2026-07-08: "должен быть выпадающий список менеджеров",
+  // 2026-07-19: "мне нужно, чтобы я мог выбрать несколько менеджеров... хочу видеть ДЗ не
+  // только по сотрудникам, но и по отделу" - чекбокс-панель вместо одиночного <select>,
+  // список перестраивается на каждый рендер, т.к. это дешевле, чем следить за диффом опций).
+  var mgrPanel = document.getElementById('debt-mgr-filter-panel');
+  var mgrNames = (debt.by_manager||[]).map(function(m){ return m.name; }).filter(Boolean);
+  if (mgrPanel) {
+    mgrPanel.innerHTML = mgrNames.map(function(n){
+      var checked = debtManagerFilters.has(n) ? ' checked' : '';
+      var safe = n.replace(/'/g,"\\'");
+      return '<label style="display:flex;align-items:center;gap:6px;padding:4px 6px;font-size:12px;cursor:pointer;border-radius:4px">' +
+        '<input type="checkbox" onchange="debtMgrToggle(\'' + safe + '\')"' + checked + '>' + cleanName(n) + '</label>';
+    }).join('');
   }
-  var mgrFilterVal = mgrSel ? mgrSel.value : '';
-  var customersFiltered = mgrFilterVal
-    ? ageFiltered.filter(function(c){ return c.manager === mgrFilterVal; })
+  var mgrBtn = document.getElementById('debt-mgr-filter-btn');
+  if (mgrBtn) {
+    mgrBtn.textContent = !debtManagerFilters.size ? 'Все менеджеры ▾'
+      : debtManagerFilters.size === 1 ? cleanName(Array.from(debtManagerFilters)[0]) + ' ▾'
+      : 'Менеджеров: ' + debtManagerFilters.size + ' ▾';
+  }
+  var customersFiltered = debtManagerFilters.size
+    ? ageFiltered.filter(function(c){ return debtManagerFilters.has(c.manager); })
     : ageFiltered;
-  if (debtBucketFilter) {
-    customersFiltered = customersFiltered.filter(function(c){ return debtInBucket_(c.daysOverdue, debtBucketFilter); });
+  if (debtBucketFilters.size) {
+    customersFiltered = customersFiltered.filter(function(c){
+      return Array.from(debtBucketFilters).some(function(b){ return debtInBucket_(c.daysOverdue, b); });
+    });
   }
   if (debtStatusFilter) {
     customersFiltered = customersFiltered.filter(function(c){ return (c.status || '(без статуса)') === debtStatusFilter; });

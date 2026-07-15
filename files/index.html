@@ -861,6 +861,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           <div class="sec-header">
             <div class="sec-title" id="debt-changes-title">Что изменилось со вчера</div>
             <div class="sec-sub" id="debt-changes-sub"></div>
+            <div id="debt-changes-period-sel" style="display:flex;gap:6px;margin-top:8px"></div>
           </div>
           <div style="overflow-x:auto">
             <table class="tbl">
@@ -4631,6 +4632,38 @@ function toggleDebtChanges(orgScope) {
   renderDebt();
 }
 
+// Период сравнения "Что изменилось" (Влад, 2026-07-19: "хочу не только в разрезе одного дня
+// в сравнении с вчера, но и более широких диапазонах - пусть это будет неделя для начала").
+// 1 день - данные уже есть в основном ответе дашборда (debt.debt_changes), сеть не нужна.
+// Любой другой период - отдельный запрос action=debt_changes_period&days=N (см. бэкенд
+// getDebtData/compareDaysBack), результат кэшируется в debtChangesPeriodData до следующей
+// смены периода/переоткрытия панели.
+const DEBT_CHANGES_PERIODS = [
+  { days: 1, label: 'День' },
+  { days: 7, label: 'Неделя' },
+];
+let debtChangesPeriodDays = 1;
+let debtChangesPeriodData = null;
+let debtChangesPeriodLoading = false;
+async function setDebtChangesPeriod(days) {
+  if (debtChangesPeriodDays === days) return;
+  debtChangesPeriodDays = days;
+  debtChangesPeriodData = null;
+  if (days === 1) { renderDebt(); return; }
+  debtChangesPeriodLoading = true;
+  renderDebt();
+  try {
+    var data = await apiFetchJson({ action: 'debt_changes_period', days: days });
+    if (data.error) throw new Error(data.error);
+    debtChangesPeriodData = data;
+  } catch (periodErr) {
+    debtChangesPeriodData = { error: periodErr.message };
+  } finally {
+    debtChangesPeriodLoading = false;
+    renderDebt();
+  }
+}
+
 // Статус взыскания по контрагенту (Влад, 2026-07-14: "проставлять вручную статус...
 // должник, претензия, суд, исполнительный лист, и срок сколько уже стоит такой статус";
 // добавлен "В графике" 2026-07-16). Список синхронизирован с DEBT_STATUS_OPTIONS в
@@ -4917,8 +4950,25 @@ function renderDebt() {
   // снижение - хорошо (зелёный) - обратная логика от выручки. Пока истории меньше 2 точек
   // (только начали копить) - стрелка просто не показывается, не выдумываем тренд из ничего.
   var hist = debt.history || [];
+  // "Вчера" - последняя запись СТРОГО ДО сегодня, а не hist[length-2] "вслепую" (Влад,
+  // 2026-07-19: "-24% как снижение, если ДЗ выросла" - баг: если снимок за сегодня уже
+  // записан (1С прислала отчёт), hist[length-1] это СЕГОДНЯ, и hist[length-2] - вчера,
+  // верно; но если снимок за сегодня ещё не записан, hist[length-1] сам уже "вчера", а
+  // hist[length-2] - позавчера, и сравнение съезжало на день без предупреждения).
+  var todayDateStr = new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD, как в history[].date
   var histLatest = hist.length ? hist[hist.length-1] : null;
-  var histPrev = hist.length > 1 ? hist[hist.length-2] : null;
+  var histPrev = (histLatest && histLatest.date === todayDateStr)
+    ? (hist.length > 1 ? hist[hist.length-2] : null)
+    : histLatest;
+  // Сравниваем "как есть" (без фильтра возраста) - история и "Что изменилось со вчера"
+  // всегда считают ПОЛНУЮ ДЗ (включая 600+ дней), а s.total_balance/s.by_org зависят от
+  // переключателя "Показать все долги" - раньше стрелка молча сравнивала отфильтрованное
+  // "сегодня" с неотфильтрованным "вчера" (Влад, 2026-07-19: увидел -24% при факте +213 857 -
+  // "Мёртвая" корзина ~9.9М как раз объясняла разницу). fullAgg - тот же bankruptFiltered,
+  // что и "Мёртвая"/"По статусам" ниже, без ограничения по возрасту.
+  var fullAgg = computeDebtAggregates_(bankruptFiltered);
+  var fullByOrgMap = {};
+  (fullAgg.summary.by_org || []).forEach(function(o){ fullByOrgMap[o.org] = o.balance; });
   // Стрелка кликабельна - открывает "Что изменилось со вчера" (Влад, 2026-07-15: "при
   // нажатии на -5% +23% видеть какие именно изменения были, кто и как уменьшил или
   // увеличил ДЗ"). С 2026-07-16 - стрелка на конкретном юрлице открывает диф ТОЛЬКО по
@@ -4932,13 +4982,13 @@ function renderDebt() {
     var scopeArg = orgScope ? "'" + orgScope.replace(/'/g,"\\'") + "'" : '';
     return ' <span onclick="event.stopPropagation();toggleDebtChanges(' + scopeArg + ')" style="font-size:11px;color:' + color + ';cursor:pointer;text-decoration:underline dotted">' + (up?'▲+':'▼') + diffPct + '%</span>';
   }
-  var totalTrend = histPrev ? trendHtml(s.total_balance||0, histPrev.balance) : '';
+  var totalTrend = histPrev ? trendHtml(fullAgg.summary.total_balance||0, histPrev.balance) : '';
 
   // Разбивка общей ДЗ по юрлицам группы (Влад, 2026-07-09: "32602... эта сумма должна быть
   // разбита: сколько в Бульдоге, сколько в Ярде") - прямо под общей суммой в той же карточке.
   var byOrgHtml = (s.by_org && s.by_org.length)
     ? '<div style="margin-top:8px">' + s.by_org.map(function(o) {
-        var t = histPrev ? trendHtml(o.balance, histPrev.byOrg ? histPrev.byOrg[o.org] : null, o.org) : '';
+        var t = histPrev ? trendHtml(fullByOrgMap[o.org] || 0, histPrev.byOrg ? histPrev.byOrg[o.org] : null, o.org) : '';
         return '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:11px;color:var(--muted);padding:2px 0">' +
           '<span style="white-space:nowrap">' + o.org + '</span><span style="font-variant-numeric:tabular-nums;white-space:nowrap">' + fmt(o.balance) + t + '</span></div>';
       }).join('') + '</div>'
@@ -4997,9 +5047,16 @@ function renderDebt() {
   // "Что изменилось со вчера" - drill-down по клику на стрелку тренда (Влад, 2026-07-15).
   // С 2026-07-16 - если кликнули на стрелку конкретного юрлица (debtChangesOrgScope), берём
   // диф только по нему из debt.debt_changes_by_org, иначе - общий debt.debt_changes.
+  // С 2026-07-19 - период сравнения не только "вчера": debtChangesPeriodDays=1 берёт diff из
+  // основного ответа (уже есть, сеть не нужна), >1 - из debtChangesPeriodData, подгруженной
+  // отдельным запросом (см. setDebtChangesPeriod) - иначе основной ответ дашборда пришлось бы
+  // делать тяжелее ради диапазона, который открывают редко.
+  var changesSource = debtChangesPeriodDays === 1
+    ? { debt_changes: debt.debt_changes, debt_changes_by_org: debt.debt_changes_by_org, debt_changes_compare_date: debt.debt_changes_compare_date }
+    : (debtChangesPeriodData || {});
   var debtChanges = (debtChangesOrgScope
-    ? ((debt.debt_changes_by_org || {})[debtChangesOrgScope] || [])
-    : (debt.debt_changes || [])
+    ? ((changesSource.debt_changes_by_org || {})[debtChangesOrgScope] || [])
+    : (changesSource.debt_changes || [])
   ).filter(function(x) { return !debtHideBankrupt || x.status !== 'Банкрот'; });
   // Раньше панель оставалась скрытой, если debtChanges пуст (Влад, 2026-07-17: "иногда кликаю
   // - ничего не отражается") - клик выглядел сломанным, хотя на самом деле изменений просто
@@ -5008,10 +5065,27 @@ function renderDebt() {
   var changesCard = document.getElementById('debt-changes-card');
   if (changesCard) changesCard.style.display = debtChangesVisible ? '' : 'none';
   if (debtChangesVisible) {
-    setText('debt-changes-title', debtChangesOrgScope ? 'Что изменилось со вчера — ' + debtChangesOrgScope : 'Что изменилось со вчера — все юрлица');
-    if (!debtChanges.length) {
-      setText('debt-changes-sub', 'Изменений нет (или ещё не накопилось истории за вчера)');
-      document.getElementById('debt-changes-body').innerHTML = '<tr><td colspan="6" class="muted" style="padding:10px 0">Нет данных за вчера по этому юрлицу</td></tr>';
+    var periodSelEl = document.getElementById('debt-changes-period-sel');
+    if (periodSelEl) {
+      periodSelEl.innerHTML = DEBT_CHANGES_PERIODS.map(function(p) {
+        var active = debtChangesPeriodDays === p.days;
+        return '<button onclick="event.stopPropagation();setDebtChangesPeriod(' + p.days + ')" style="background:' + (active ? 'var(--amber)' : 'var(--bg3)') + ';color:' + (active ? '#000' : 'var(--text)') + ';border:1px solid var(--border);border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer">' + p.label + '</button>';
+      }).join('');
+    }
+    var compareDateStr = changesSource.debt_changes_compare_date
+      ? new Date(changesSource.debt_changes_compare_date + 'T00:00:00').toLocaleDateString('ru', {day:'2-digit', month:'2-digit'})
+      : '';
+    var titleSuffix = compareDateStr ? ' (с ' + compareDateStr + ')' : '';
+    setText('debt-changes-title', (debtChangesOrgScope ? 'Что изменилось — ' + debtChangesOrgScope : 'Что изменилось — все юрлица') + titleSuffix);
+    if (debtChangesPeriodDays !== 1 && debtChangesPeriodLoading) {
+      setText('debt-changes-sub', 'Загрузка...');
+      document.getElementById('debt-changes-body').innerHTML = '';
+    } else if (debtChangesPeriodDays !== 1 && changesSource.error) {
+      setText('debt-changes-sub', 'Ошибка загрузки: ' + changesSource.error);
+      document.getElementById('debt-changes-body').innerHTML = '';
+    } else if (!debtChanges.length) {
+      setText('debt-changes-sub', 'Изменений нет (или ещё не накопилось истории за этот период)');
+      document.getElementById('debt-changes-body').innerHTML = '<tr><td colspan="6" class="muted" style="padding:10px 0">Нет данных за выбранный период по этому юрлицу</td></tr>';
     } else {
       // Суммы по +/- и сальдо (Влад, 2026-07-17: "видеть сумму по + и сумму по -, и сальдо") -
       // красное = ДЗ увеличивается (плохо), зелёное = уменьшается (хорошо) - тот же цвет,

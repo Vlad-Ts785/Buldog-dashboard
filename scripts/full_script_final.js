@@ -1408,7 +1408,13 @@ function setDebtComment_(ss, contragent, comment) {
 }
 
 // Агрегация ДЗ для дашборда - читает уже посчитанный ДЗ_данные (см. importDebtReport).
-function getDebtData(ss) {
+// compareDaysBack - за сколько дней назад искать точку сравнения для "Что изменилось"
+// (Влад, 2026-07-19: "хочу не только в разрезе одного дня в сравнении с вчера, но и более
+// широких диапазонах - пусть это будет неделя для начала") - по умолчанию 1 (вчера, как
+// раньше). Для >1 берём БЛИЖАЙШУЮ доступную дату к цели (сбор истории мог прерваться на
+// день-два), а не требуем точного совпадения - иначе "неделя" часто осталась бы пустой.
+function getDebtData(ss, compareDaysBack) {
+  compareDaysBack = compareDaysBack || 1;
   const sheet = ss.getSheetByName(DEBT_RAW_SHEET);
   if (!sheet || sheet.getLastRow() < 2) return null;
 
@@ -1594,16 +1600,34 @@ function getDebtData(ss) {
   const custHistSheet = ss.getSheetByName(DEBT_CUSTOMER_HISTORY_SHEET);
   let debtChanges = [];
   const debtChangesByOrg = {};
+  let debtChangesCompareDate = null; // дата точки сравнения - показываем на фронте ("vs 12.07")
   if (custHistSheet && custHistSheet.getLastRow() > 1) {
     const custHistNumCols = Math.min(4, custHistSheet.getLastColumn());
     const hasOrgCol = custHistNumCols >= 4;
     const custHistData = custHistSheet.getRange(2, 1, custHistSheet.getLastRow() - 1, custHistNumCols).getValues();
-    let prevDateKey = null;
+    const availableDateKeys = {};
     custHistData.forEach(function(r) {
       if (!(r[0] instanceof Date)) return;
       const key = Utilities.formatDate(r[0], 'Europe/Moscow', 'yyyy-MM-dd');
-      if (key < todayStr && (!prevDateKey || key > prevDateKey)) prevDateKey = key;
+      if (key < todayStr) availableDateKeys[key] = true;
     });
+    const sortedDateKeys = Object.keys(availableDateKeys).sort();
+    let prevDateKey = null;
+    if (compareDaysBack <= 1) {
+      // "Вчера" - последняя доступная дата до сегодня (как раньше).
+      prevDateKey = sortedDateKeys.length ? sortedDateKeys[sortedDateKeys.length - 1] : null;
+    } else {
+      // Более широкий период (неделя и т.п.) - ближайшая доступная дата к цели, а не точное
+      // совпадение (сбор истории мог прерваться на день-два).
+      const targetDate = new Date(todayStr + 'T00:00:00');
+      targetDate.setDate(targetDate.getDate() - compareDaysBack);
+      let bestDiff = Infinity;
+      sortedDateKeys.forEach(function(k) {
+        const diff = Math.abs(new Date(k + 'T00:00:00').getTime() - targetDate.getTime());
+        if (diff < bestDiff) { bestDiff = diff; prevDateKey = k; }
+      });
+    }
+    debtChangesCompareDate = prevDateKey;
     if (prevDateKey) {
       const prevByName = {};         // {контрагент: баланс вчера, сумма по всем юрлицам}
       const prevByNameOrg = {};      // {юрлицо: {контрагент: баланс вчера в этом юрлице}}
@@ -1691,6 +1715,8 @@ function getDebtData(ss) {
     history: history,
     debt_changes: debtChanges,
     debt_changes_by_org: debtChangesByOrg,
+    debt_changes_compare_date: debtChangesCompareDate,
+    debt_changes_days_back: compareDaysBack,
   };
 }
 
@@ -2203,6 +2229,30 @@ function doGet(e) {
         // страница "Водители" всегда брала D.orders.by_driver (текущий месяц), из-за чего
         // при выборе прошлого периода счётчик заказов был неверным/пустым (Влад, 2026-07-07).
         driverOrderCounts: getDriverOrderCounts_(ss, vpFromDate, vpToDate)
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // "Что изменилось" на более широком диапазоне, чем "со вчера" (Влад, 2026-07-19: "хочу не
+    // только в разрезе одного дня в сравнении с вчера, но и более широких диапазонах - пусть
+    // это будет неделя для начала"). ?days=7 - сколько дней назад искать точку сравнения (см.
+    // compareDaysBack в getDebtData). Лёгкий ответ - только сам диф, не весь платёж ДЗ целиком.
+    if (action === 'debt_changes_period') {
+      if (access.role !== 'admin') {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var dcpDays = parseInt(e.parameter.days, 10);
+      if (!dcpDays || dcpDays < 1 || dcpDays > 365) {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Некорректный период' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var dcpDebt = getDebtData(ss, dcpDays);
+      if (!dcpDebt) {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Нет данных по ДЗ' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      return ContentService.createTextOutput(JSON.stringify({
+        debt_changes: dcpDebt.debt_changes,
+        debt_changes_by_org: dcpDebt.debt_changes_by_org,
+        debt_changes_compare_date: dcpDebt.debt_changes_compare_date,
+        debt_changes_days_back: dcpDebt.debt_changes_days_back,
       })).setMimeType(ContentService.MimeType.JSON);
     }
 

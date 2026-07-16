@@ -2874,6 +2874,7 @@ function getSummaryData(ss, ordersData) {
 
   const byManager = (ordersData && ordersData.by_manager) || [];
   let totalPlan=0, totalFakt=0, totalFaktThruYesterday=0, totalPayment=0, totalPayNal=0;
+  let mgrInternal=0, mgrInternalThruYesterday=0;
   byManager.forEach(function(m) {
     totalFakt    += m.amount || 0;
     // Числитель прогноза - только "по вчера" (Влад, 2026-07-08), см. isThruYesterday в
@@ -2881,7 +2882,19 @@ function getSummaryData(ss, ordersData) {
     totalFaktThruYesterday += m.amount_thru_yesterday || 0;
     totalPayment += m.payment || 0;
     totalPayNal  += m.cash || 0;
+    mgrInternal  += m.internal_amount || 0;
+    mgrInternalThruYesterday += m.internal_amount_thru_yesterday || 0;
   });
+  // Внутренние перевозки ведут ЛОГИСТЫ (Влад, 2026-07-19), а их нет в TRAL_MANAGERS - значит
+  // их заказы не попадают в by_manager и не входили в общий факт, ХОТЯ план "Внутренние"
+  // (5 млн) в salesPlan прибавляется. Факт и план были в разном масштабе: Влад увидел
+  // "29 912 408 из 70 000 000" вместо ожидаемых ~32.1М (14.7 Ахтамова + 15.2 Гусейнова +
+  // 2.2 внутренние). Прибавляем только ТУ ЧАСТЬ внутренних, которой ещё нет в суммах
+  // менеджеров - часть внутренних заказов может вестись самими менеджерами (они в TRAL_MANAGERS,
+  // и тогда их внутренние уже сидят в m.amount, см. фикс 2026-07-04), такие второй раз не берём.
+  const ordSummary = (ordersData && ordersData.summary) || {};
+  totalFakt += Math.max(0, (ordSummary.internal_amount || 0) - mgrInternal);
+  totalFaktThruYesterday += Math.max(0, (ordSummary.internal_amount_thru_yesterday || 0) - mgrInternalThruYesterday);
   // План суммируем из ПОЛНОЙ карты планов (managerPlans, не только по_manager) - менеджер без
   // единого заказа в этом периоде иначе тихо теряет план из суммы. НО считаем только АКТИВНЫЕ
   // отделы (те же имена, что в DEPT_CFG на фронтенде, "По менеджерам") - иначе в сумму лезут

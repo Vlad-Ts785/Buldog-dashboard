@@ -4151,12 +4151,19 @@ function splitOrdersRawByMonth(data) {
   const col = {};
   headerRow.forEach(function(h, i) { const key = String(h || '').trim(); if (key) col[key] = i; });
   const dateColIdx = col['Начало работ'];
-  if (dateColIdx === undefined) return {};
+  const createdColIdx = col['Дата создания'];
+  if (dateColIdx === undefined && createdColIdx === undefined) return {};
 
   const buckets = {};
   for (let i = headerRowIdx + 1; i < data.length; i++) {
-    const month = ordMonthKey(data[i][dateColIdx]);
-    if (!month) continue; // строка без даты - пропускаем, к месяцам не относится
+    // "Начало работ" пусто, если заказ создан, но рейс ещё не начался - обычное дело в
+    // середине месяца (Влад, 2026-07-24: "куда-то пропали все данные" - в "Заказы_сырые"
+    // осталась 1 строка из десятков в письме). Раньше такая строка молча выпадала из ВСЕХ
+    // месячных корзин целиком - не "не туда попадала", а исчезала насовсем. Фолбэк на
+    // "Дата создания" - она у заказа есть всегда.
+    let month = dateColIdx !== undefined ? ordMonthKey(data[i][dateColIdx]) : '';
+    if (!month && createdColIdx !== undefined) month = ordMonthKey(data[i][createdColIdx]);
+    if (!month) continue; // ни одной даты нет вообще - действительно не строка заказа
     if (!buckets[month]) buckets[month] = [];
     buckets[month].push(data[i]);
   }

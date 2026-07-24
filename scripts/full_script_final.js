@@ -187,13 +187,44 @@ function bitrixCall_(method, params) {
   return body;
 }
 
+// Разворачивает вложенный объект в плоский вид с квадратными скобками, как ждёт PHP:
+// {fields: {LIST: {n0: {VALUE: 'x'}}}} -> {'fields[LIST][n0][VALUE]': 'x'}
+function flattenParams_(obj, prefix, out) {
+  Object.keys(obj).forEach(function (k) {
+    var key = prefix ? prefix + '[' + k + ']' : k;
+    var v = obj[k];
+    if (v !== null && typeof v === 'object') flattenParams_(v, key, out);
+    else out[key] = v;
+  });
+  return out;
+}
+
+// Тот же вызов, но form-urlencoded вместо JSON. Методы crm.*.userfield.* не понимают
+// вложенный JSON (молча отвечают result:true и ничего не делают, либо ругаются, что
+// обязательное поле не найдено) - им нужен именно PHP-формат fields[KEY][sub].
+// Проверено на живом портале 2026-07-16: JSON-вариант создал поля БЕЗ подписей и
+// БЕЗ значений списка, из-за чего они не отрисовывались на карточке вообще.
+function bitrixCallForm_(method, params) {
+  var url = getBitrixWebhookUrl_() + method + '.json';
+  var resp = UrlFetchApp.fetch(url, {
+    method: 'post',
+    payload: flattenParams_(params || {}, '', {}),
+    muteHttpExceptions: true,
+  });
+  var body = JSON.parse(resp.getContentText());
+  if (body.error) {
+    throw new Error('Bitrix24 API (' + method + '): ' + body.error + ' - ' + (body.error_description || ''));
+  }
+  return body;
+}
+
 // Постранично забирает все сделки (Битрикс24 отдаёт по 50 за раз через поле "next").
 function getBitrixDeals_() {
   var deals = [];
   var start = 0;
   while (true) {
     var body = bitrixCall_('crm.deal.list', {
-      select: ['ID', 'TITLE', 'SOURCE_ID', 'STAGE_ID', 'CATEGORY_ID', 'DATE_CREATE', 'OPPORTUNITY', 'ASSIGNED_BY_ID', 'CLOSED'],
+      select: ['ID', 'TITLE', 'SOURCE_ID', 'STAGE_ID', 'STAGE_SEMANTIC_ID', 'CATEGORY_ID', 'DATE_CREATE', 'DATE_MODIFY', 'OPPORTUNITY', 'ASSIGNED_BY_ID', 'CLOSED', 'UF_CRM_LOSE_REASON', 'UF_CRM_ORDER_1C_ID'],
       start: start,
     });
     deals = deals.concat(body.result);
@@ -212,7 +243,14 @@ function getBitrixMarketingData_() {
 
   var bySource = {};
   var byStage = {};
-  var revenueTotal = 0;
+  // Раньше тут была одна сумма revenueTotal по ВСЕМ сделкам подряд - включая
+  // открытые и отказы. Получалось число, которое выглядит как выручка, но ей не
+  // является (2,99 млн при реальных 183 тыс закрытых). Разделено на три:
+  // wonRevenue - реально закрытые деньги, pipelineOpen - что ещё в работе,
+  // lostAmount - сколько унесли отказы.
+  var wonRevenue = 0;
+  var pipelineOpen = 0;
+  var lostAmount = 0;
 
   deals.forEach(function (d) {
     var source = d.SOURCE_ID || 'Не указан';
@@ -221,16 +259,710 @@ function getBitrixMarketingData_() {
     var stage = d.STAGE_ID || 'Не указан';
     byStage[stage] = (byStage[stage] || 0) + 1;
 
-    revenueTotal += parseFloat(d.OPPORTUNITY || 0);
+    var sum = parseFloat(d.OPPORTUNITY || 0);
+    // STAGE_SEMANTIC_ID: S = успех, F = провал, P = в процессе. Надёжнее, чем
+    // сверять STAGE_ID со списком стадий - воронку правят руками, коды стадий
+    // вроде UC_YQ3O03 появляются на ходу, а семантика остаётся.
+    if (d.STAGE_SEMANTIC_ID === 'S') wonRevenue += sum;
+    else if (d.STAGE_SEMANTIC_ID === 'F') lostAmount += sum;
+    else pipelineOpen += sum;
   });
 
   return {
     updated: new Date().toISOString(),
     total: deals.length,
-    revenueTotal: revenueTotal,
+    wonRevenue: wonRevenue,
+    pipelineOpen: pipelineOpen,
+    lostAmount: lostAmount,
     bySource: bySource,
     byStage: byStage,
   };
+}
+
+// Показывает все открытые линии и их ключевые настройки. Читалка, ничего не меняет -
+// нужна, чтобы сверять состояние после правок (и потому что с машины Влада прямые
+// запросы к Битриксу режет VPN, см. план).
+function showBitrixLines() {
+  var lines = bitrixCall_('imopenlines.config.list.get', {}).result || [];
+  lines.forEach(function (l) {
+    Logger.log(
+      '[' + l.ID + '] ' + l.LINE_NAME +
+      ' | активна: ' + l.ACTIVE +
+      ' | распределение: ' + l.QUEUE_TYPE +
+      ' | переход, сек: ' + l.QUEUE_TIME +
+      ' | проверять доступность: ' + l.CHECK_AVAILABLE +
+      ' | лимит чатов: ' + l.MAX_CHAT +
+      ' | источник: ' + l.CRM_SOURCE
+    );
+  });
+}
+
+// Чинит мёртвые линии: включает проверку доступности оператора там, где она снята.
+// Линии 3 ("Открытая линия 2 (Узнать источник)?") и 5 ("Открытая линия 3") активны,
+// но за всё время не привели ни одного лида - при этом у них снята та же галочка,
+// из-за которой обращения уходили к отсутствующим сотрудникам. Если туда когда-нибудь
+// подключат канал, он не должен наступить на те же грабли.
+// НЕ выключает сами линии - выключение живой линии тихо роняет входящие сообщения
+// клиентов, это решение Влада, а не моё.
+function fixBitrixDeadLines() {
+  var lines = bitrixCall_('imopenlines.config.list.get', {}).result || [];
+  var fixed = 0;
+
+  lines.forEach(function (l) {
+    if (l.CHECK_AVAILABLE === 'Y') return;
+    bitrixCall_('imopenlines.config.update', {
+      CONFIG_ID: l.ID,
+      PARAMS: { CHECK_AVAILABLE: 'Y' }
+    });
+    Logger.log('Включил проверку доступности: [' + l.ID + '] ' + l.LINE_NAME);
+    fixed++;
+  });
+
+  if (fixed === 0) Logger.log('Все линии уже с проверкой доступности - править нечего.');
+
+  Logger.log('--- Состояние после правки ---');
+  showBitrixLines();
+}
+
+// РАЗОВАЯ настройка: заводит поле "Причина брака" на ЛИДЕ и выводит его на карточку.
+// Дыра, найденная 2026-07-17: обязательная "Причина отказа" стоит на СДЕЛКЕ (стадия
+// ОТКАЗ), но лид, помеченный "Некачественный", сделкой не становится НИКОГДА - умирает
+// раньше, и причину никто не спрашивает. На момент находки так молча ушли 12 реальных
+// обращений из 31 (плюс 3 теста Влада), то есть каждый третий лид.
+// Сразу form-urlencoded: JSON-вызовы crm.*.userfield.* Битрикс принимает (result:true),
+// но подписи и значения списка молча игнорирует - обожглись на этом с полями сделки.
+// Идемпотентна: если поле уже есть, значения не задваивает.
+function setupBitrixLeadJunkReason() {
+  var NAME = 'JUNK_REASON';
+  var LABEL = 'Причина брака';
+  var VALUES = [
+    'Спам / реклама',
+    'Ошиблись номером',
+    'Недозвон - клиент не отвечает',
+    'Не наш профиль - не возим такое',
+    'Ищет работу',
+    'Дубль',
+    'Другое'
+  ];
+
+  var all = bitrixCall_('crm.lead.userfield.list', {}).result || [];
+  var found = all.filter(function (f) { return f.FIELD_NAME === 'UF_CRM_' + NAME; })[0];
+
+  if (!found) {
+    var created = bitrixCallForm_('crm.lead.userfield.add', {
+      fields: {
+        FIELD_NAME: NAME,
+        USER_TYPE_ID: 'enumeration',
+        XML_ID: NAME,
+        MANDATORY: 'N',
+        SHOW_FILTER: 'Y',
+        SHOW_IN_LIST: 'Y',
+        EDIT_IN_LIST: 'Y'
+      }
+    });
+    Logger.log('Поле создано, ID ' + created.result);
+    all = bitrixCall_('crm.lead.userfield.list', {}).result || [];
+    found = all.filter(function (f) { return f.FIELD_NAME === 'UF_CRM_' + NAME; })[0];
+  } else {
+    Logger.log('Поле уже есть, ID ' + found.ID + ' - обновляю');
+  }
+
+  var before = bitrixCall_('crm.lead.userfield.get', { id: found.ID }).result;
+
+  bitrixCallForm_('crm.lead.userfield.update', {
+    id: found.ID,
+    fields: {
+      EDIT_FORM_LABEL: { ru: LABEL, en: LABEL },
+      LIST_COLUMN_LABEL: { ru: LABEL, en: LABEL },
+      LIST_FILTER_LABEL: { ru: LABEL, en: LABEL }
+    }
+  });
+
+  if ((before.LIST || []).length === 0) {
+    var listParam = {};
+    VALUES.forEach(function (v, i) {
+      listParam['n' + i] = { VALUE: v, SORT: String((i + 1) * 10), DEF: 'N' };
+    });
+    bitrixCallForm_('crm.lead.userfield.update', { id: found.ID, fields: { LIST: listParam } });
+  } else {
+    Logger.log('Значения списка уже есть (' + before.LIST.length + ') - не трогаю');
+  }
+
+  // Выводим на ОБЩИЙ вид карточки лида. Своя карточка менеджерам запрещена правами,
+  // поэтому общий вид - единственный, который они увидят.
+  var SECTION = 'yard_lead_result';
+  var cfg = bitrixCall_('crm.lead.details.configuration.get', { scope: 'C' }).result || [];
+  if (!cfg.some(function (s) { return s.name === SECTION; })) {
+    var section = {
+      name: SECTION,
+      title: 'Итог лида',
+      type: 'section',
+      elements: [{ name: 'UF_CRM_' + NAME, optionFlags: '0' }]
+    };
+    bitrixCall_('crm.lead.details.configuration.set', { scope: 'C', data: [section].concat(cfg) });
+    Logger.log('Секция "Итог лида" добавлена на карточку');
+  } else {
+    Logger.log('Секция "Итог лида" уже на карточке');
+  }
+
+  // Проверяем чтением, а не верим коду ответа
+  var after = bitrixCall_('crm.lead.userfield.get', { id: found.ID }).result;
+  var vals = (after.LIST || []).map(function (x) { return x.VALUE; });
+  var cfgAfter = bitrixCall_('crm.lead.details.configuration.get', { scope: 'C' }).result || [];
+  var onCard = cfgAfter.some(function (s) {
+    return (s.elements || []).some(function (e) { return e.name === 'UF_CRM_' + NAME; });
+  });
+
+  Logger.log('--- ПРОВЕРКА ---');
+  Logger.log('Поле: UF_CRM_' + NAME + ' (ID ' + found.ID + ')');
+  Logger.log('Значений в списке: ' + vals.length + ' [' + vals.join(' | ') + ']');
+  Logger.log('На карточке лида: ' + onCard);
+  Logger.log('--- Дальше руками: сделать поле обязательным на статусе "Некачественный" ---');
+}
+
+// Показывает роботов/бизнес-процессы на ЛИДАХ и СДЕЛКАХ. Ищем робота, который сам
+// создаёт сделку из лида - он бы объяснил четыре пустые сделки, родившиеся 16.07 в
+// 16:56-16:58 из четырёх разных лидов без единого звонка.
+// Версия про автоперезвон Манго проверена и ОТВЕРГНУТА: в это окно звонили два
+// клиента, и оба - НЕ те, по которым задвоились сделки (2026-07-17).
+function showBitrixLeadRobots() {
+  var TYPES = [
+    { title: 'ЛИДЫ',   dt: ['crm', 'CCrmDocumentLead', 'LEAD'] },
+    { title: 'СДЕЛКИ', dt: ['crm', 'CCrmDocumentDeal', 'DEAL'] }
+  ];
+
+  TYPES.forEach(function (t) {
+    Logger.log('=== ' + t.title + ' ===');
+    var list;
+    try {
+      list = bitrixCall_('bizproc.workflow.template.list', {
+        select: ['ID', 'NAME', 'DOCUMENT_TYPE', 'AUTO_EXECUTE', 'ACTIVE', 'MODIFIED'],
+        filter: { DOCUMENT_TYPE: t.dt }
+      }).result || [];
+    } catch (e) {
+      Logger.log('  ошибка: ' + e.message);
+      return;
+    }
+    if (!list.length) { Logger.log('  шаблонов нет'); return; }
+    list.forEach(function (w) {
+      Logger.log('  #' + w.ID + ' | ' + w.NAME +
+        ' | активен: ' + w.ACTIVE +
+        ' | автозапуск: ' + w.AUTO_EXECUTE +
+        ' | изменён: ' + (w.MODIFIED || '-'));
+    });
+  });
+
+  // Триггеры автоматизации CRM - они запускают роботов по внешним событиям
+  Logger.log('=== ТРИГГЕРЫ АВТОМАТИЗАЦИИ ===');
+  try {
+    var trg = bitrixCall_('crm.automation.trigger.list', {}).result || [];
+    Logger.log(trg.length ? JSON.stringify(trg) : '  своих триггеров нет');
+  } catch (e) {
+    Logger.log('  ошибка: ' + e.message);
+  }
+}
+
+// ПОЛНАЯ РАЗВЕДКА Битрикса - один запуск, весь актуальный снимок. Влад просит
+// "зайди и исследуй всё" (2026-07-17). Читалка, ничего не меняет. Идёт через
+// Apps Script - прямой curl с машины Влада режет VPN.
+function exploreBitrixFull() {
+  // --- Справочники: имена стадий, имена людей, названия причин отказа ---
+  var stageName = {};
+  try {
+    (bitrixCall_('crm.dealcategory.stage.list', {}).result || []).forEach(function (s) { stageName[s.STATUS_ID] = s.NAME; });
+  } catch (e) { Logger.log('стадии: ' + e.message); }
+
+  var userName = {};
+  try {
+    (bitrixCall_('user.get', { FILTER: { ACTIVE: 'Y' } }).result || []).forEach(function (u) {
+      userName[u.ID] = ((u.LAST_NAME || '') + ' ' + (u.NAME || '')).trim() || u.EMAIL || ('ID' + u.ID);
+    });
+  } catch (e) { Logger.log('юзеры: ' + e.message); }
+
+  var reasonName = {};
+  try {
+    var rf = bitrixCall_('crm.deal.userfield.list', { filter: { FIELD_NAME: 'UF_CRM_LOSE_REASON' } }).result || [];
+    if (rf[0] && rf[0].LIST) rf[0].LIST.forEach(function (x) { reasonName[x.ID] = x.VALUE; });
+  } catch (e) { Logger.log('причины: ' + e.message); }
+
+  var deals = getBitrixDeals_();
+  var now = new Date();
+  var today = now.toISOString().slice(0, 10);
+
+  Logger.log('╔══════════ СНИМОК БИТРИКСА ' + now.toLocaleString('ru') + ' ══════════╗');
+  Logger.log('ВСЕГО СДЕЛОК: ' + deals.length);
+
+  // По стадиям
+  var byStage = {}, byStageSum = {};
+  deals.forEach(function (d) {
+    byStage[d.STAGE_ID] = (byStage[d.STAGE_ID] || 0) + 1;
+    byStageSum[d.STAGE_ID] = (byStageSum[d.STAGE_ID] || 0) + parseFloat(d.OPPORTUNITY || 0);
+  });
+  Logger.log('\n── ВОРОНКА ──');
+  Object.keys(byStage).forEach(function (s) {
+    Logger.log('  ' + String(byStage[s]).padStart(3) + ' | ' + (stageName[s] || s).slice(0, 30).padEnd(30) + ' | ' + Math.round(byStageSum[s]).toLocaleString('ru') + ' руб');
+  });
+
+  // По источникам
+  var bySource = {};
+  deals.forEach(function (d) { var s = d.SOURCE_ID || '(пусто)'; bySource[s] = (bySource[s] || 0) + 1; });
+  Logger.log('\n── ИСТОЧНИКИ ──');
+  Object.keys(bySource).sort(function (a, b) { return bySource[b] - bySource[a]; }).forEach(function (s) {
+    Logger.log('  ' + String(bySource[s]).padStart(3) + ' | ' + s);
+  });
+
+  // По ответственным
+  var byUser = {};
+  deals.forEach(function (d) { var u = userName[d.ASSIGNED_BY_ID] || ('ID' + d.ASSIGNED_BY_ID); byUser[u] = (byUser[u] || 0) + 1; });
+  Logger.log('\n── ПО ОТВЕТСТВЕННЫМ ──');
+  Object.keys(byUser).sort(function (a, b) { return byUser[b] - byUser[a]; }).forEach(function (u) {
+    Logger.log('  ' + String(byUser[u]).padStart(3) + ' | ' + u);
+  });
+
+  // Заполняемость наших полей
+  var lost = deals.filter(function (d) { return d.STAGE_ID === 'LOSE'; });
+  var won = deals.filter(function (d) { return d.STAGE_ID === 'WON'; });
+  var withReason = lost.filter(function (d) { return d.UF_CRM_LOSE_REASON; });
+  var with1C = won.filter(function (d) { return d.UF_CRM_ORDER_1C_ID; });
+  Logger.log('\n── ДИСЦИПЛИНА ЗАПОЛНЕНИЯ ──');
+  Logger.log('  Причина отказа: ' + withReason.length + ' из ' + lost.length + ' отказов');
+  Logger.log('  Номер 1С: ' + with1C.length + ' из ' + won.length + ' успешных');
+
+  // Раскладка причин отказа
+  if (withReason.length) {
+    var byReason = {};
+    lost.forEach(function (d) {
+      var r = d.UF_CRM_LOSE_REASON ? (reasonName[d.UF_CRM_LOSE_REASON] || d.UF_CRM_LOSE_REASON) : '(не указана)';
+      byReason[r] = (byReason[r] || 0) + 1;
+    });
+    Logger.log('  Раскладка отказов:');
+    Object.keys(byReason).sort(function (a, b) { return byReason[b] - byReason[a]; }).forEach(function (r) {
+      Logger.log('    ' + String(byReason[r]).padStart(3) + ' | ' + r);
+    });
+  }
+
+  // Нулевые сделки в NEW (бывшие лиды, разобрать)
+  var newZero = deals.filter(function (d) { return d.STAGE_ID === 'NEW' && parseFloat(d.OPPORTUNITY || 0) === 0; });
+  Logger.log('\n── К РАЗБОРУ ──');
+  Logger.log('  Сделок в "Новые заявки" с суммой 0: ' + newZero.length);
+
+  // Зависшие открытые сделки
+  var stale = deals.filter(function (d) {
+    if (d.CLOSED === 'Y') return false;
+    var mod = new Date(d.DATE_MODIFY);
+    return (now - mod) / 86400000 > 2;
+  });
+  Logger.log('  Открытых сделок без движения >2 дней: ' + stale.length);
+
+  // Дубли
+  var byTitle = {};
+  deals.forEach(function (d) { (byTitle[d.TITLE] = byTitle[d.TITLE] || []).push(d); });
+  var dups = Object.keys(byTitle).filter(function (t) { return byTitle[t].length > 1; });
+  Logger.log('  Дублей по названию: ' + dups.length + (dups.length ? ' (' + dups.join('; ') + ')' : ''));
+
+  // Создано сегодня
+  Logger.log('  Создано сегодня: ' + deals.filter(function (d) { return (d.DATE_CREATE || '').slice(0, 10) === today; }).length);
+
+  // Активные лиды (должно быть 0 после переключения режима)
+  try {
+    var leads = bitrixCall_('crm.lead.list', { select: ['ID'], filter: { '!STATUS_ID': ['CONVERTED', 'JUNK'] } }).result || [];
+    Logger.log('  Активных лидов: ' + leads.length + ' (после режима "без лидов" должно быть 0)');
+  } catch (e) { Logger.log('  лиды: ' + e.message); }
+
+  // Открытые линии
+  Logger.log('\n── ОТКРЫТЫЕ ЛИНИИ ──');
+  try {
+    (bitrixCall_('imopenlines.config.list.get', {}).result || []).forEach(function (l) {
+      Logger.log('  [' + l.ID + '] ' + l.LINE_NAME + ' | активна:' + l.ACTIVE + ' | доступность:' + l.CHECK_AVAILABLE + ' | переход,сек:' + l.QUEUE_TIME + ' | источник:' + l.CRM_SOURCE);
+    });
+  } catch (e) { Logger.log('  линии: ' + e.message); }
+
+  Logger.log('╚═══════════════════════════════════════════════════╝');
+}
+
+// Полная сводка после переключения в режим "без лидов" (Влад переключил 2026-07-17).
+// При переходе Битрикс конвертирует все лиды в сделки. Проверяем: не потерялось ли,
+// не наплодило ли дублей, где теперь висят бывшие лиды, сколько осталось лидов (должно
+// быть 0 активных). Читалка, ничего не меняет.
+function checkBitrixAfterModeSwitch() {
+  var deals = getBitrixDeals_();
+  Logger.log('=== ВСЕГО СДЕЛОК: ' + deals.length + ' ===');
+
+  // Разбивка по стадиям
+  var byStage = {};
+  var byStageSum = {};
+  deals.forEach(function (d) {
+    var s = d.STAGE_ID;
+    byStage[s] = (byStage[s] || 0) + 1;
+    byStageSum[s] = (byStageSum[s] || 0) + parseFloat(d.OPPORTUNITY || 0);
+  });
+  Logger.log('--- ПО СТАДИЯМ ---');
+  Object.keys(byStage).forEach(function (s) {
+    Logger.log('  ' + String(byStage[s]).padStart(3) + ' | ' + s + ' | сумма: ' + Math.round(byStageSum[s]).toLocaleString('ru'));
+  });
+
+  // Разбивка по источникам
+  var bySource = {};
+  deals.forEach(function (d) { var s = d.SOURCE_ID || '(пусто)'; bySource[s] = (bySource[s] || 0) + 1; });
+  Logger.log('--- ПО ИСТОЧНИКАМ ---');
+  Object.keys(bySource).sort(function (a, b) { return bySource[b] - bySource[a]; }).forEach(function (s) {
+    Logger.log('  ' + String(bySource[s]).padStart(3) + ' | ' + s);
+  });
+
+  // Свежие сделки за сегодня (бывшие лиды приезжают с сегодняшней датой модификации)
+  var today = new Date().toISOString().slice(0, 10);
+  var todayDeals = deals.filter(function (d) { return (d.DATE_CREATE || '').slice(0, 10) === today; });
+  Logger.log('--- Создано сегодня (' + today + '): ' + todayDeals.length + ' сделок ---');
+
+  // Дубли по названию
+  var byTitle = {};
+  deals.forEach(function (d) { (byTitle[d.TITLE] = byTitle[d.TITLE] || []).push(d); });
+  var dups = Object.keys(byTitle).filter(function (t) { return byTitle[t].length > 1; });
+  Logger.log('--- ДУБЛИ ПО НАЗВАНИЮ: ' + dups.length + ' групп ---');
+  dups.forEach(function (t) {
+    Logger.log('  "' + t + '" x' + byTitle[t].length + ': #' + byTitle[t].map(function (d) { return d.ID; }).join(', #'));
+  });
+
+  // Остались ли активные лиды
+  var leads = bitrixCall_('crm.lead.list', { select: ['ID', 'STATUS_ID'], filter: { '!STATUS_ID': ['CONVERTED', 'JUNK'] } }).result || [];
+  Logger.log('--- Активных лидов осталось: ' + leads.length + ' (должно быть 0) ---');
+
+  Logger.log('=== Проверь глазами: все сделки на месте, дублей нет, лиды пусты ===');
+}
+
+// Проверяет гипотезу про автоперезвон Манго (Влад, 2026-07-17: "Рагим настроил в Манго
+// автоперезвон - если пропустили звонок, Манго звонит менеджеру, тот берёт трубку, и
+// Манго звонит клиенту"). Если дубли рождает автообзвон, в 16:56-16:58 16.07 должны
+// лежать звонки. Если звонков нет - виноват человек, а не система.
+// Показывает звонки за 16.07 с 16:30 до 17:10 и кто их создал.
+function checkBitrixCallBurst() {
+  var from = '2026-07-16T16:30:00+03:00';
+  var to   = '2026-07-16T17:10:00+03:00';
+
+  var acts = [];
+  var start = 0;
+  while (true) {
+    var body = bitrixCall_('crm.activity.list', {
+      filter: { '>=CREATED': from, '<=CREATED': to },
+      select: ['ID', 'SUBJECT', 'TYPE_ID', 'DIRECTION', 'CREATED', 'AUTHOR_ID',
+               'OWNER_TYPE_ID', 'OWNER_ID', 'PROVIDER_ID', 'COMPLETED'],
+      order: { CREATED: 'ASC' },
+      start: start
+    });
+    acts = acts.concat(body.result || []);
+    if (body.next === undefined || body.next === null) break;
+    start = body.next;
+  }
+
+  Logger.log('Дел/звонков за 16.07 16:30-17:10: ' + acts.length);
+  // TYPE_ID: 1=встреча, 2=звонок, 3=задача, 4=письмо. DIRECTION: 1=входящий, 2=исходящий
+  var TYPE = { '1': 'встреча', '2': 'ЗВОНОК', '3': 'задача', '4': 'письмо' };
+  var DIR  = { '1': 'входящий', '2': 'исходящий' };
+
+  acts.forEach(function (a) {
+    Logger.log(
+      a.CREATED.slice(11, 16) +
+      ' | ' + (TYPE[a.TYPE_ID] || ('тип ' + a.TYPE_ID)) +
+      ' | ' + (DIR[a.DIRECTION] || '-') +
+      ' | автор: ' + a.AUTHOR_ID +
+      ' | ' + (a.PROVIDER_ID || '') +
+      ' | ' + String(a.SUBJECT || '').slice(0, 55)
+    );
+  });
+
+  var calls = acts.filter(function (a) { return String(a.TYPE_ID) === '2'; });
+  Logger.log('--- ВЫВОД ---');
+  Logger.log('Звонков в этом окне: ' + calls.length);
+  Logger.log(calls.length > 0
+    ? 'Звонки ЕСТЬ -> версия про автоперезвон Манго правдоподобна'
+    : 'Звонков НЕТ -> дубли создал ЧЕЛОВЕК руками, автоперезвон ни при чём');
+}
+
+// РАЗОВАЯ чистка: удаляет 6 задвоенных сделок, найденных findBitrixDuplicates
+// (Влад разрешил 2026-07-17). Все они - повторная конвертация одного и того же лида:
+// четыре пустышки с 0 руб из трёхминутного залпа 16.07 в 16:56-16:58, и две копии
+// отказа на 20 000. Оригиналы живы и остаются.
+// НЕ трогаю "Дмитрий - Авито чат" (#39/#45) - там РАЗНЫЕ лиды, это может быть
+// настоящее повторное обращение, а не дубль. Решает Влад глазами.
+// Перед удалением сверяет сделку с ожиданием - если данные разошлись, пропускает.
+function cleanBitrixDuplicates() {
+  var TO_DELETE = [
+    { id: '89', title: '7 495 988-96-97 - Входящий звонок', sum: 0,     stage: 'PREPARATION' },
+    { id: '91', title: '7 902 413-19-87 - Входящий звонок', sum: 0,     stage: 'PREPARATION' },
+    { id: '93', title: '7 925 460-41-53 - Входящий звонок', sum: 0,     stage: 'PREPARATION' },
+    { id: '95', title: '7 925 460-41-53 - Входящий звонок', sum: 0,     stage: 'PREPARATION' },
+    { id: '73', title: '7 977 455-51-61 - Входящий звонок', sum: 20000, stage: 'LOSE' },
+    { id: '77', title: '7 977 455-51-61 - Входящий звонок', sum: 20000, stage: 'LOSE' }
+  ];
+
+  var deleted = 0, skipped = 0;
+
+  TO_DELETE.forEach(function (want) {
+    var d;
+    try {
+      d = bitrixCall_('crm.deal.get', { id: want.id }).result;
+    } catch (e) {
+      Logger.log('#' + want.id + ': не найдена (уже удалена?) - пропускаю');
+      skipped++;
+      return;
+    }
+    if (!d) { Logger.log('#' + want.id + ': пусто - пропускаю'); skipped++; return; }
+
+    var sumNow = Math.round(parseFloat(d.OPPORTUNITY || 0));
+    if (d.TITLE !== want.title || sumNow !== want.sum || d.STAGE_ID !== want.stage) {
+      Logger.log('#' + want.id + ': ДАННЫЕ РАЗОШЛИСЬ, НЕ УДАЛЯЮ.' +
+        ' ожидал [' + want.title + ' | ' + want.sum + ' | ' + want.stage + ']' +
+        ' нашёл [' + d.TITLE + ' | ' + sumNow + ' | ' + d.STAGE_ID + ']');
+      skipped++;
+      return;
+    }
+
+    bitrixCall_('crm.deal.delete', { id: want.id });
+    Logger.log('УДАЛЕНА #' + want.id + ' | ' + d.TITLE + ' | ' + sumNow + ' руб | ' + d.STAGE_ID);
+    deleted++;
+  });
+
+  Logger.log('--- Удалено: ' + deleted + ', пропущено: ' + skipped + ' ---');
+  Logger.log('--- Проверяю, что дублей больше нет ---');
+  findBitrixDuplicates();
+}
+
+// Ищет задвоенные сделки и контакты. Влад заметил на канбане две сделки с одним
+// номером в одну минуту (2026-07-17). В данных нашлось хуже: "7 977 455-51-61" висит
+// ТРИЖДЫ, причём с одинаковой суммой 20 000 - значит размножилась вместе с данными,
+// а не заведена заново руками.
+// Задача диагностики - понять, откуда растут дубли:
+//   разные LEAD_ID -> каждый входящий звонок плодит новый лид (настройки телефонии)
+//   один LEAD_ID   -> лид сконвертирован в сделку несколько раз (конвертация)
+// Плюс проверяем, не плодятся ли контакты - тогда засоряется клиентская база.
+function findBitrixDuplicates() {
+  var deals = [];
+  var start = 0;
+  while (true) {
+    var body = bitrixCall_('crm.deal.list', {
+      select: ['ID', 'TITLE', 'DATE_CREATE', 'STAGE_ID', 'OPPORTUNITY', 'ASSIGNED_BY_ID',
+               'LEAD_ID', 'CONTACT_ID', 'COMPANY_ID', 'SOURCE_ID'],
+      order: { ID: 'ASC' },
+      start: start
+    });
+    deals = deals.concat(body.result);
+    if (body.next === undefined || body.next === null) break;
+    start = body.next;
+  }
+  Logger.log('Всего сделок: ' + deals.length);
+
+  var byTitle = {};
+  deals.forEach(function (d) {
+    (byTitle[d.TITLE] = byTitle[d.TITLE] || []).push(d);
+  });
+
+  var dups = Object.keys(byTitle).filter(function (t) { return byTitle[t].length > 1; });
+  Logger.log('Названий с дублями: ' + dups.length + '\n');
+
+  dups.forEach(function (t) {
+    var arr = byTitle[t];
+    Logger.log('>>> ' + t + ' (' + arr.length + ' сделок)');
+    arr.forEach(function (d) {
+      Logger.log('    #' + d.ID + ' | ' + d.DATE_CREATE.slice(0, 16) +
+        ' | ' + d.STAGE_ID + ' | ' + d.OPPORTUNITY +
+        ' | ЛИД: ' + (d.LEAD_ID || 'нет') +
+        ' | КОНТАКТ: ' + (d.CONTACT_ID || 'нет'));
+    });
+    var leads = arr.map(function (d) { return String(d.LEAD_ID || 'нет'); });
+    var contacts = arr.map(function (d) { return String(d.CONTACT_ID || 'нет'); });
+    var uniqLeads = leads.filter(function (v, i) { return leads.indexOf(v) === i; });
+    var uniqContacts = contacts.filter(function (v, i) { return contacts.indexOf(v) === i; });
+    Logger.log('    ВЫВОД: лидов ' + uniqLeads.length + ', контактов ' + uniqContacts.length +
+      ' -> ' + (uniqLeads.length > 1 ? 'РАЗНЫЕ лиды (плодит телефония/линия)' : 'ОДИН лид (виновата конвертация)') +
+      (uniqContacts.length > 1 ? ' + КОНТАКТЫ ТОЖЕ ДУБЛИРУЮТСЯ' : ''));
+    Logger.log('');
+  });
+
+  // Дубли в клиентской базе по телефону
+  var contacts = [];
+  start = 0;
+  while (true) {
+    var cb = bitrixCall_('crm.contact.list', { select: ['ID', 'NAME', 'PHONE', 'DATE_CREATE'], start: start });
+    contacts = contacts.concat(cb.result);
+    if (cb.next === undefined || cb.next === null) break;
+    start = cb.next;
+  }
+  var byPhone = {};
+  contacts.forEach(function (c) {
+    (c.PHONE || []).forEach(function (p) {
+      var num = String(p.VALUE).replace(/\D/g, '').slice(-10);
+      if (num) (byPhone[num] = byPhone[num] || []).push(c.ID);
+    });
+  });
+  var dupPhones = Object.keys(byPhone).filter(function (p) { return byPhone[p].length > 1; });
+  Logger.log('=== КОНТАКТЫ ===');
+  Logger.log('Всего контактов: ' + contacts.length + ' | телефонов с дублями: ' + dupPhones.length);
+  dupPhones.forEach(function (p) {
+    Logger.log('  ...' + p + ' -> контакты #' + byPhone[p].join(', #'));
+  });
+}
+
+// Показывает, в каком виде карточки лежат наши поля: в ОБЩЕМ (виден всем) или только
+// в личном виде конкретного человека. Влад правил карточку руками через "Выбрать поле",
+// и Битрикс мог сохранить это только ему - тогда менеджеры полей не увидят, а вся
+// настройка окажется бесполезной. Читалка, ничего не меняет.
+function checkBitrixCardScopes() {
+  var WANT = ['UF_CRM_LOSE_REASON', 'UF_CRM_ORDER_1C_ID'];
+
+  function fieldsOf(cfg) {
+    var names = [];
+    (cfg || []).forEach(function (s) {
+      (s.elements || []).forEach(function (e) { names.push(e.name); });
+    });
+    return names;
+  }
+
+  var common = bitrixCall_('crm.deal.details.configuration.get', { scope: 'C' }).result;
+  var cNames = fieldsOf(common);
+  Logger.log('=== ОБЩИЙ вид карточки (scope C) - его видят все, у кого нет своего ===');
+  Logger.log('  секции: ' + (common || []).map(function (s) { return s.name; }).join(', '));
+  WANT.forEach(function (f) {
+    Logger.log('  ' + f + ': ' + (cNames.indexOf(f) >= 0 ? 'ЕСТЬ' : 'НЕТ !!!'));
+  });
+
+  // Личные виды сотрудников. У менеджеров "свой вид карточки" запрещён правами, но
+  // если личный вид всё же сохранён, он перебьёт общий - это и надо поймать.
+  var users = bitrixCall_('user.get', { FILTER: { ACTIVE: 'Y' } }).result || [];
+  Logger.log('=== ЛИЧНЫЕ виды (scope P) ===');
+  users.forEach(function (u) {
+    var name = ((u.LAST_NAME || '') + ' ' + (u.NAME || '')).trim() || u.EMAIL;
+    var personal;
+    try {
+      personal = bitrixCall_('crm.deal.details.configuration.get', { scope: 'P', userId: u.ID }).result;
+    } catch (e) {
+      Logger.log('  ' + name + ': ошибка чтения - ' + e.message);
+      return;
+    }
+    if (!personal || !personal.length) {
+      Logger.log('  ' + name + ': личного вида нет -> видит ОБЩИЙ (это хорошо)');
+      return;
+    }
+    var pNames = fieldsOf(personal);
+    var miss = WANT.filter(function (f) { return pNames.indexOf(f) === -1; });
+    Logger.log('  ' + name + ': ЕСТЬ личный вид' +
+      (miss.length ? ' -> в нём НЕТ полей: ' + miss.join(', ') : ' -> наши поля в нём есть'));
+  });
+
+  Logger.log('--- Если у кого-то есть личный вид без наших полей - запусти forceBitrixCommonCard() ---');
+}
+
+// Сбрасывает личные виды карточки у всех и переводит всех на общий вид. Применять,
+// если checkBitrixCardScopes() показал, что у кого-то свой вид без наших полей.
+// Осторожно: чужие личные настройки карточки при этом пропадут.
+function forceBitrixCommonCard() {
+  bitrixCall_('crm.deal.details.configuration.forceCommonScopeForAll', {});
+  Logger.log('Все переведены на общий вид карточки. Проверяю результат:');
+  checkBitrixCardScopes();
+}
+
+// Чинит поля "Причина отказа" и "Номер заказа 1С": проставляет подписи и значения
+// выпадающего списка. Оба поля были созданы через JSON-вызов, который Битрикс принял
+// (result: true), но подписи и список молча проигнорировал - поля оказались БЕЗ
+// названий, из-за чего не отрисовывались на карточке и висели в "Скрытых полях"
+// пустыми чекбоксами (скриншот Влада, 2026-07-16). Настройка карточки при этом
+// читалась как успешная - проверка через API врала, потому что смотрела не на тот
+// слой. Лечится вызовом в form-urlencoded (см. bitrixCallForm_).
+// Идемпотентна: значения списка добавляются только если он пуст.
+function fixBitrixFields() {
+  var WANT = [
+    {
+      name: 'UF_CRM_LOSE_REASON',
+      label: 'Причина отказа',
+      values: ['Недозвон', 'Дорого, нашли дешевле', 'Неактуально, закрыли потребность',
+               'Неквалифицированный лид', 'Спам / нецелевое обращение', 'Другое']
+    },
+    { name: 'UF_CRM_ORDER_1C_ID', label: 'Номер заказа 1С', values: null }
+  ];
+
+  var all = bitrixCall_('crm.deal.userfield.list', {}).result || [];
+
+  WANT.forEach(function (want) {
+    var found = all.filter(function (f) { return f.FIELD_NAME === want.name; })[0];
+    if (!found) { Logger.log('НЕ НАЙДЕНО поле ' + want.name + ' - пропускаю'); return; }
+
+    var before = bitrixCall_('crm.deal.userfield.get', { id: found.ID }).result;
+    Logger.log('=== ' + want.name + ' (ID ' + found.ID + ') ===');
+    Logger.log('  БЫЛО подпись: "' + (before.EDIT_FORM_LABEL || '(пусто)') + '"' +
+               ' | значений списка: ' + ((before.LIST || []).length));
+
+    // 1. Подписи
+    bitrixCallForm_('crm.deal.userfield.update', {
+      id: found.ID,
+      fields: {
+        EDIT_FORM_LABEL: { ru: want.label, en: want.label },
+        LIST_COLUMN_LABEL: { ru: want.label, en: want.label },
+        LIST_FILTER_LABEL: { ru: want.label, en: want.label }
+      }
+    });
+
+    // 2. Значения выпадающего списка - только если список пуст, иначе задвоим
+    if (want.values && (before.LIST || []).length === 0) {
+      var listParam = {};
+      want.values.forEach(function (v, i) {
+        listParam['n' + i] = { VALUE: v, SORT: String((i + 1) * 10), DEF: 'N' };
+      });
+      bitrixCallForm_('crm.deal.userfield.update', { id: found.ID, fields: { LIST: listParam } });
+    }
+
+    // 3. Проверяем чтением, а не верим коду ответа - именно на этом я обжёгся
+    var after = bitrixCall_('crm.deal.userfield.get', { id: found.ID }).result;
+    Logger.log('  СТАЛО подпись: "' + (after.EDIT_FORM_LABEL || '(ПУСТО - НЕ ПОЧИНИЛОСЬ)') + '"');
+    if (want.values) {
+      var vals = (after.LIST || []).map(function (x) { return x.VALUE; });
+      Logger.log('  СТАЛО значений списка: ' + vals.length + ' [' + vals.join(' | ') + ']');
+    }
+  });
+
+  Logger.log('--- Готово. Обнови карточку сделки в браузере (F5) и проверь секцию "Итог сделки" ---');
+}
+
+// Выключает мёртвые линии 3 и 5 (Влад разрешил 2026-07-16). Обе активны, но за всё
+// время не привели ни одного лида. Выключение обратимо - ACTIVE обратно в 'Y'.
+// Линии 1 (Авито) и 7 (Онлайн-чат сайта) НЕ трогаем, они рабочие.
+function disableBitrixDeadLines() {
+  var DEAD = ['3', '5'];
+  var lines = bitrixCall_('imopenlines.config.list.get', {}).result || [];
+
+  lines.forEach(function (l) {
+    if (DEAD.indexOf(String(l.ID)) === -1) return;
+    if (l.ACTIVE === 'N') { Logger.log('[' + l.ID + '] уже выключена'); return; }
+    bitrixCall_('imopenlines.config.update', {
+      CONFIG_ID: l.ID,
+      PARAMS: { ACTIVE: 'N' }
+    });
+    Logger.log('Выключил: [' + l.ID + '] ' + l.LINE_NAME);
+  });
+
+  Logger.log('--- Состояние после ---');
+  showBitrixLines();
+}
+
+// Разведка: какие методы API мне вообще доступны с текущими правами. Нужно, чтобы
+// не гадать, можно ли через REST сделать обязательные поля по стадиям, роботов на
+// стадию и права доступа CRM - или это только интерфейс.
+function probeBitrixMethods() {
+  var all = bitrixCall_('methods', {}).result || [];
+  Logger.log('Всего методов доступно: ' + all.length);
+
+  var groups = {
+    'ПРАВА ДОСТУПА (permission/role)': /permission|role/i,
+    'РОБОТЫ / БИЗНЕС-ПРОЦЕССЫ (bizproc)': /bizproc|robot|trigger/i,
+    'НАСТРОЙКИ ПОЛЕЙ (fields/settings/userfield)': /userfield|fields|settings|configuration/i,
+    'СТАДИИ / СТАТУСЫ (status/category)': /status|category|stage/i,
+    'ДЕЛА / ЗАДАЧИ (activity/task)': /activity|task/i
+  };
+
+  Object.keys(groups).forEach(function (title) {
+    var re = groups[title];
+    var found = all.filter(function (m) { return re.test(m); });
+    Logger.log('--- ' + title + ' (' + found.length + ') ---');
+    Logger.log(found.join(', ') || '(ничего)');
+  });
 }
 
 // Запустить вручную ОДИН РАЗ после того, как задан BITRIX24_WEBHOOK_URL, чтобы
@@ -240,6 +972,47 @@ function testBitrixMarketing() {
   var data = getBitrixMarketingData_();
   Logger.log(JSON.stringify(data, null, 2));
   return data;
+}
+
+// РАЗОВАЯ настройка: выводит поля "Причина отказа" и "Номер заказа 1С" на карточку
+// сделки в Битрикс24. Поля были созданы через API, но лежали в базе невидимыми -
+// в общем виде карточки их не было, поэтому за 4 дня работы причина отказа не
+// заполнилась НИ РАЗУ из 11 отказов (менеджеры физически не видели поле).
+// Своя карточка менеджерам запрещена в правах, поэтому пишем в общий вид (scope C).
+// Идемпотентна: повторный запуск ничего не дублирует.
+// Запускать вручную из редактора, результат смотреть в журнале выполнения.
+function setupBitrixCard() {
+  var SECTION = 'yard_result';
+  var current = bitrixCall_('crm.deal.details.configuration.get', { scope: 'C' }).result || [];
+
+  var already = current.some(function (s) { return s.name === SECTION; });
+  if (already) {
+    Logger.log('Секция "Итог сделки" уже есть на карточке - ничего не делаю.');
+    return;
+  }
+
+  var section = {
+    name: SECTION,
+    title: 'Итог сделки',
+    type: 'section',
+    elements: [
+      { name: 'UF_CRM_LOSE_REASON', optionFlags: '0' },
+      { name: 'UF_CRM_ORDER_1C_ID', optionFlags: '0' }
+    ]
+  };
+  var data = [section].concat(current);
+
+  bitrixCall_('crm.deal.details.configuration.set', { scope: 'C', data: data });
+
+  // Проверяем результат чтением, а не верим коду ответа
+  var after = bitrixCall_('crm.deal.details.configuration.get', { scope: 'C' }).result || [];
+  var names = [];
+  after.forEach(function (s) {
+    (s.elements || []).forEach(function (e) { names.push(e.name); });
+  });
+  Logger.log('Секций на карточке: ' + after.length + ' (' + after.map(function (s) { return s.name; }).join(', ') + ')');
+  Logger.log('Причина отказа на карточке: ' + (names.indexOf('UF_CRM_LOSE_REASON') >= 0));
+  Logger.log('Номер заказа 1С на карточке: ' + (names.indexOf('UF_CRM_ORDER_1C_ID') >= 0));
 }
 
 // ============================================================

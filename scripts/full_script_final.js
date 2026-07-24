@@ -1336,17 +1336,12 @@ function normalizeReport() {
   // Читаем Штатку — карта госномер → {type, status, trailerGos}
   const staffData = getStaffData(ss);
 
-  let normSheet = ss.getSheetByName('Нормализованные_данные');
-  if (normSheet) normSheet.clear();
-  else normSheet = ss.insertSheet('Нормализованные_данные');
-
   const headers = [
     'Госномер (ключ)', 'Марка', 'Тип техники', 'Выручка', 'ФОТ',
     'Топливо', 'Запчасти', 'Штрафы', 'Проходные', 'Валовая прибыль',
     'Прицеп', 'Гос. номер прицепа', 'Тип из Штатки', 'Статус из Штатки', 'План ВП',
     'Прогноз ВП'
   ];
-  normSheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
 
   // Прогноз по темпу - тот же расчёт, что уже используется на Панели/"По менеджерам":
   // факт/день_месяца*дней_в_месяце. Влад, 2026-07-04: "нужна колонка по прогнозу плана
@@ -1408,7 +1403,17 @@ function normalizeReport() {
     ]);
   }
 
-  if (vehicles.length === 0) throw new Error('Нет данных о машинах');
+  // Проверяем результат ПЕРЕД тем, как трогать лист (Влад, 2026-07-24: "куда-то пропали все
+  // данные" - раньше normSheet.clear() шёл ДО этой проверки, поэтому битый/пустой отчёт от
+  // 1С стирал вчерашние рабочие данные и ничем не заменял их - весь дашборд обнулялся до
+  // следующего успешного прогона). Если сегодня разобрать нечего - оставляем лист как есть
+  // (вчерашние, чуть устаревшие, но живые данные) вместо того, чтобы обнулить дашборд.
+  if (vehicles.length === 0) throw new Error('Нет данных о машинах - лист Нормализованные_данные не тронут, остались прежние данные');
+
+  let normSheet = ss.getSheetByName('Нормализованные_данные');
+  if (normSheet) normSheet.clear();
+  else normSheet = ss.insertSheet('Нормализованные_данные');
+  normSheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
   normSheet.getRange(2, 1, vehicles.length, headers.length).setValues(vehicles);
   normSheet.getRange(2, 4, vehicles.length, 7).setNumberFormat('#,##0.00');
   normSheet.getRange(2, 16, vehicles.length, 1).setNumberFormat('#,##0');
@@ -4294,6 +4299,14 @@ function normalizeOrders() {
 
   const parsed = parseOrdersRawRows(raw.getDataRange().getValues());
 
+  // Проверяем результат ПЕРЕД тем, как трогать лист (Влад, 2026-07-24: "куда-то пропали все
+  // данные" - раньше norm.clear() шёл ДО этой проверки, поэтому битый/пустой сырой отчёт
+  // (изменился формат, съехали заголовки) стирал вчерашние рабочие "Заказы_данные" и не
+  // писал взамен ничего, кроме заголовков - весь "Обзор заказов"/"По менеджерам" обнулялся
+  // до следующего успешного прогона). Если сегодня разобрать нечего - оставляем лист как
+  // есть (вчерашние, чуть устаревшие, но живые данные) вместо того, чтобы обнулить дашборд.
+  if (parsed.rows.length === 0) throw new Error('Заказы не распознаны (0 строк) - лист ' + ORDERS_NORM_SHEET + ' не тронут, остались прежние данные');
+
   let norm = ss.getSheetByName(ORDERS_NORM_SHEET);
   if (norm) norm.clear();
   else       norm = ss.insertSheet(ORDERS_NORM_SHEET);
@@ -4304,11 +4317,9 @@ function normalizeOrders() {
       .setBackground('#1e1e26')
       .setFontColor('#888780');
 
-  if (parsed.rows.length > 0) {
-    norm.getRange(2, 1, parsed.rows.length, parsed.headers.length).setValues(parsed.rows);
-    // Числовые колонки: Сумма → Оплачено поставщику (колонки 31-40, индексы 30-39)
-    norm.getRange(2, 31, parsed.rows.length, 10).setNumberFormat('#,##0');
-  }
+  norm.getRange(2, 1, parsed.rows.length, parsed.headers.length).setValues(parsed.rows);
+  // Числовые колонки: Сумма → Оплачено поставщику (колонки 31-40, индексы 30-39)
+  norm.getRange(2, 31, parsed.rows.length, 10).setNumberFormat('#,##0');
 
   norm.setFrozenRows(1);
   norm.autoResizeColumns(1, 7);

@@ -552,18 +552,11 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 
     <!-- ═══ ГЛОБАЛЬНАЯ СТАТИСТИКА (Влад, 2026-08-04) ═══════════ -->
     <div id="page-global-stats" class="page">
-      <div class="card" style="margin-bottom:16px;padding:14px 20px">
-        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
-          <span style="color:var(--muted);font-size:13px;font-weight:500">Месяц:</span>
-          <select id="gs-month-select" onchange="setGlobalStatsMonth(this.value)"
-            style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:6px 12px;font-size:13px;cursor:pointer">
-          </select>
-        </div>
-      </div>
-
       <div id="gs-loading" style="color:var(--muted);padding:20px 0;font-size:13px">Откройте вкладку — данные загрузятся автоматически</div>
 
       <div id="gs-body" style="display:none">
+        <!-- Сводка "в целом" - сумма по всем накопленным месяцам, без выбора периода -->
+        <div class="sec-title" style="margin-bottom:10px" id="gs-totals-title">Итого за весь период</div>
         <div class="kpi-grid">
           <div class="kpi">
             <div class="kpi-label">Выручка</div>
@@ -592,9 +585,39 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           </div>
         </div>
 
+        <!-- Тренд по месяцам - весь накопленный период сразу, без переключателя -->
         <div class="card" style="margin-top:16px">
           <div class="card-title">Динамика по месяцам</div>
           <div class="chart-wrap" style="height:280px"><canvas id="chart-global-stats"></canvas></div>
+        </div>
+
+        <!-- Полная таблица по месяцам - все ключевые цифры сразу, без клика -->
+        <div class="card" style="margin-top:16px">
+          <div class="card-title">Разбивка по месяцам</div>
+          <div style="overflow-x:auto">
+            <table class="tbl" style="white-space:nowrap">
+              <thead><tr>
+                <th>Месяц</th>
+                <th class="num">Выручка</th>
+                <th class="num">План</th>
+                <th class="num">% плана</th>
+                <th class="num">ВП</th>
+                <th class="num">Маржа ВП</th>
+                <th class="num">— Тралы</th>
+                <th class="num">— Длинномеры</th>
+                <th class="num">Затраты</th>
+                <th class="num">— ФОТ</th>
+                <th class="num">— Топливо</th>
+                <th class="num">— Запчасти</th>
+                <th class="num">— Штрафы</th>
+                <th class="num">— Проходные</th>
+                <th class="num">Прибыль найма</th>
+                <th class="num">Маржа найма</th>
+              </tr></thead>
+              <tbody id="gs-table-body"></tbody>
+              <tfoot><tr id="gs-table-foot" style="border-top:2px solid var(--border);font-weight:600"></tr></tfoot>
+            </table>
+          </div>
         </div>
       </div>
     </div>
@@ -2938,28 +2961,23 @@ function renderVcardChart(days) {
   });
 }
 
-// ── ГЛОБАЛЬНАЯ СТАТИСТИКА (Влад, 2026-08-04: "хочу видеть эти данные по каждому выбранному
-// месяцу и в динамике по году") - см. plans/2026-08-04-global-stats-page.md. Данные - готовая
-// сводка из История_месяцев (см. action=global_stats на бэкенде), без пересчёта на лету.
+// ── ГЛОБАЛЬНАЯ СТАТИСТИКА (Влад, 2026-08-04: "не нужно выбирать из месяцев, хочу на одной
+// странице одной загрузкой видеть все ключевые данные по месяцам и в целом" - первая версия
+// с выбором одного месяца оказалась мимо цели, переделано на сводку+график+таблицу разом).
+// См. plans/2026-08-04-global-stats-page.md. Данные - готовая сводка из История_месяцев
+// (см. action=global_stats на бэкенде), без пересчёта на лету и без похода за каждый месяц отдельно.
 var globalStatsMonths = null; // [{month, revenue, salesPlan, profit, profitTral, profitLong, fot, fuel, parts, fines, tolls, hiredProfit, hiredRevenue}]
-var globalStatsSelectedMonth = null;
 var globalStatsChart = null;
 
 function loadGlobalStatsData() {
   if (globalStatsMonths !== null) { renderGlobalStats(); return; }
   apiFetchJson({ action: 'global_stats' }).then(function(d) {
     globalStatsMonths = d.months || [];
-    if (globalStatsMonths.length) globalStatsSelectedMonth = globalStatsMonths[globalStatsMonths.length - 1].month;
     renderGlobalStats();
   }).catch(function() {
     globalStatsMonths = [];
     document.getElementById('gs-loading').textContent = 'Ошибка загрузки данных';
   });
-}
-
-function setGlobalStatsMonth(month) {
-  globalStatsSelectedMonth = month;
-  renderGlobalStats();
 }
 
 function renderGlobalStats() {
@@ -2970,50 +2988,49 @@ function renderGlobalStats() {
   document.getElementById('gs-loading').style.display = 'none';
   document.getElementById('gs-body').style.display = '';
 
-  var sel = document.getElementById('gs-month-select');
-  if (sel && sel.options.length !== globalStatsMonths.length) {
-    sel.innerHTML = globalStatsMonths.map(function(m) {
-      return '<option value="' + m.month + '">' + m.month + '</option>';
-    }).join('');
-  }
-  if (sel) sel.value = globalStatsSelectedMonth;
+  // Сводка "в целом" - сумма по ВСЕМ накопленным месяцам сразу, без выбора периода.
+  var t = { revenue:0, salesPlan:0, profit:0, profitTral:0, profitLong:0,
+    fot:0, fuel:0, parts:0, fines:0, tolls:0, hiredProfit:0, hiredRevenue:0 };
+  globalStatsMonths.forEach(function(m) {
+    t.revenue += m.revenue||0; t.salesPlan += m.salesPlan||0;
+    t.profit += m.profit||0; t.profitTral += m.profitTral||0; t.profitLong += m.profitLong||0;
+    t.fot += m.fot||0; t.fuel += m.fuel||0; t.parts += m.parts||0; t.fines += m.fines||0; t.tolls += m.tolls||0;
+    t.hiredProfit += m.hiredProfit||0; t.hiredRevenue += m.hiredRevenue||0;
+  });
+  var firstMonth = globalStatsMonths[0].month, lastMonth = globalStatsMonths[globalStatsMonths.length-1].month;
+  setText('gs-totals-title', 'Итого за период ' + firstMonth + ' — ' + lastMonth);
 
-  var m = globalStatsMonths.find(function(x) { return x.month === globalStatsSelectedMonth; }) || globalStatsMonths[globalStatsMonths.length - 1];
-
-  // Выручка + план продаж
-  setText('gs-revenue', fmt(m.revenue));
-  var revPct = m.salesPlan > 0 ? Math.min(m.revenue / m.salesPlan * 100, 100) : 0;
+  setText('gs-revenue', fmt(t.revenue));
+  var revPct = t.salesPlan > 0 ? Math.min(t.revenue / t.salesPlan * 100, 100) : 0;
   setText('gs-revenue-pct', pct(revPct));
   setBar('gs-revenue-bar', revPct, revPct >= 80 ? 'var(--green)' : revPct >= 50 ? 'var(--amber)' : 'var(--red)');
-  setText('gs-revenue-plan', 'План: ' + fmt(m.salesPlan));
+  setText('gs-revenue-plan', 'План: ' + fmt(t.salesPlan));
 
-  // Валовая прибыль + маржа (к выручке) + разбивка тралы/длинномеры
   var profitEl = document.getElementById('gs-profit');
-  profitEl.textContent = fmt(m.profit);
-  profitEl.className = 'kpi-value ' + (m.profit >= 0 ? 'green' : 'red');
-  var marginPct = m.revenue > 0 ? (m.profit / m.revenue * 100) : 0;
+  profitEl.textContent = fmt(t.profit);
+  profitEl.className = 'kpi-value ' + (t.profit >= 0 ? 'green' : 'red');
+  var marginPct = t.revenue > 0 ? (t.profit / t.revenue * 100) : 0;
   setText('gs-margin', 'Маржа ' + pct(marginPct));
   setHTML('gs-profit-breakdown',
-    '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);padding:2px 0"><span>Тралы</span><b style="color:var(--green)">' + fmt(m.profitTral) + '</b></div>' +
-    '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);padding:2px 0"><span>Длинномеры</span><b style="color:var(--green)">' + fmt(m.profitLong) + '</b></div>');
+    '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);padding:2px 0"><span>Тралы</span><b style="color:var(--green)">' + fmt(t.profitTral) + '</b></div>' +
+    '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);padding:2px 0"><span>Длинномеры</span><b style="color:var(--green)">' + fmt(t.profitLong) + '</b></div>');
 
-  // Затраты по категориям - те же 5, что в "Структуре затрат" на Панели
-  var totalCosts = (m.fot||0) + (m.fuel||0) + (m.parts||0) + (m.fines||0) + (m.tolls||0);
+  var totalCosts = t.fot + t.fuel + t.parts + t.fines + t.tolls;
   setText('gs-costs-total', fmt(totalCosts));
   function costRow(label, val) {
     return '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);padding:2px 0"><span>' + label + '</span><b style="color:var(--text)">' + fmt(val) + '</b></div>';
   }
   setHTML('gs-costs-breakdown',
-    costRow('ФОТ', m.fot) + costRow('Топливо', m.fuel) + costRow('Запчасти', m.parts) + costRow('Штрафы', m.fines) + costRow('Проходные', m.tolls));
+    costRow('ФОТ', t.fot) + costRow('Топливо', t.fuel) + costRow('Запчасти', t.parts) + costRow('Штрафы', t.fines) + costRow('Проходные', t.tolls));
 
-  // Маржа найма - те же поля, что уже используются на Панели/"По логистам" (hired_profit/hired_revenue)
-  var hireMarginPct = m.hiredRevenue > 0 ? (m.hiredProfit / m.hiredRevenue * 100) : 0;
+  var hireMarginPct = t.hiredRevenue > 0 ? (t.hiredProfit / t.hiredRevenue * 100) : 0;
   var hireEl = document.getElementById('gs-hire-margin-pct');
   hireEl.textContent = pct(hireMarginPct);
   hireEl.className = 'kpi-value ' + (hireMarginPct >= 30 ? 'green' : hireMarginPct >= 15 ? 'amber' : 'red');
-  setText('gs-hire-detail', 'Прибыль найма ' + fmt(m.hiredProfit) + ' из выручки найма ' + fmt(m.hiredRevenue));
+  setText('gs-hire-detail', 'Прибыль найма ' + fmt(t.hiredProfit) + ' из выручки найма ' + fmt(t.hiredRevenue));
 
   renderGlobalStatsChart();
+  renderGlobalStatsTable(t);
 }
 
 function renderGlobalStatsChart() {
@@ -3026,6 +3043,7 @@ function renderGlobalStatsChart() {
       labels: globalStatsMonths.map(function(m) { return m.month; }),
       datasets: [
         { label: 'Выручка', data: globalStatsMonths.map(function(m){ return m.revenue; }), borderColor: '#EF9F27', backgroundColor: 'rgba(239,159,39,0.1)', tension: 0.3, fill: true, pointRadius: 3, borderWidth: 2 },
+        { label: 'План продаж', data: globalStatsMonths.map(function(m){ return m.salesPlan || null; }), borderColor: '#888780', borderDash: [5,4], tension: 0.3, fill: false, pointRadius: 2, borderWidth: 1.5 },
         { label: 'Валовая прибыль', data: globalStatsMonths.map(function(m){ return m.profit; }), borderColor: '#1D9E75', backgroundColor: 'rgba(29,158,117,0.1)', tension: 0.3, fill: true, pointRadius: 3, borderWidth: 2 },
       ]
     },
@@ -3042,6 +3060,45 @@ function renderGlobalStatsChart() {
       }
     }
   });
+}
+
+// Полная таблица - каждый месяц своей строкой, все ключевые цифры разом (Влад: "не нужно
+// выбирать из месяцев"). t - уже посчитанные итоги (renderGlobalStats), для строки "Итого".
+function renderGlobalStatsTable(t) {
+  function row(m, isTotal) {
+    var costs = (m.fot||0) + (m.fuel||0) + (m.parts||0) + (m.fines||0) + (m.tolls||0);
+    var revPct = m.salesPlan > 0 ? (m.revenue / m.salesPlan * 100) : null;
+    var marginPct = m.revenue > 0 ? (m.profit / m.revenue * 100) : null;
+    var hireMarginPct = m.hiredRevenue > 0 ? (m.hiredProfit / m.hiredRevenue * 100) : null;
+    var revPctCls = revPct === null ? 'muted' : revPct >= 100 ? 'green' : revPct >= 80 ? 'amber' : 'red';
+    var marginCls = marginPct === null ? 'muted' : marginPct >= 20 ? 'green' : marginPct >= 10 ? 'amber' : 'red';
+    var hireCls = hireMarginPct === null ? 'muted' : hireMarginPct >= 30 ? 'green' : hireMarginPct >= 15 ? 'amber' : 'red';
+    var labelCell = isTotal
+      ? '<td style="font-weight:600;color:var(--muted);text-transform:uppercase;font-size:11px;letter-spacing:.04em">Итого</td>'
+      : '<td><b>' + m.month + '</b></td>';
+    return '<tr' + (isTotal ? '' : ' class="clickable"') + '>' +
+      labelCell +
+      '<td class="num" style="font-weight:' + (isTotal?'600':'500') + '">' + fmt(m.revenue) + '</td>' +
+      '<td class="num muted">' + (m.salesPlan ? fmt(m.salesPlan) : '—') + '</td>' +
+      '<td class="num ' + revPctCls + '">' + (revPct === null ? '—' : Math.round(revPct) + '%') + '</td>' +
+      '<td class="num green" style="font-weight:' + (isTotal?'600':'500') + '">' + fmt(m.profit) + '</td>' +
+      '<td class="num ' + marginCls + '">' + (marginPct === null ? '—' : Math.round(marginPct) + '%') + '</td>' +
+      '<td class="num muted">' + fmt(m.profitTral) + '</td>' +
+      '<td class="num muted">' + fmt(m.profitLong) + '</td>' +
+      '<td class="num red">' + fmt(costs) + '</td>' +
+      '<td class="num muted">' + fmt(m.fot) + '</td>' +
+      '<td class="num muted">' + fmt(m.fuel) + '</td>' +
+      '<td class="num muted">' + fmt(m.parts) + '</td>' +
+      '<td class="num muted">' + fmt(m.fines) + '</td>' +
+      '<td class="num muted">' + fmt(m.tolls) + '</td>' +
+      '<td class="num">' + fmt(m.hiredProfit) + '</td>' +
+      '<td class="num ' + hireCls + '">' + (hireMarginPct === null ? '—' : Math.round(hireMarginPct) + '%') + '</td>' +
+    '</tr>';
+  }
+  // Новые месяцы сверху - удобнее видеть свежее, не листать вниз.
+  var sorted = globalStatsMonths.slice().sort(function(a,b){ return b.month.localeCompare(a.month); });
+  document.getElementById('gs-table-body').innerHTML = sorted.map(function(m){ return row(m, false); }).join('');
+  document.getElementById('gs-table-foot').innerHTML = row(t, true).replace('<tr>', '').replace('</tr>', '');
 }
 
 // ── ДИНАМИКА ───────────────────────────────────────────────

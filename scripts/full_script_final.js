@@ -4016,7 +4016,14 @@ const MONTH_SUMMARY_HEADERS = [
 // (ещё не завершённого) месяца, и для архивного - getGrossProfitForPeriod уже сам решает,
 // брать ли Данные_1С_история или посуточные снимки Истории_финансов.
 function computeMonthSummary_(ss, monthKey) {
-  var ordersData = getOrdersDataForPeriod(ss, monthKey);
+  // Заказы - ДВА разных источника в зависимости от месяца (Влад, 2026-08-04:
+  // backfillMonthSummaries() пропустил август с "нет данных"). getOrdersDataForPeriod читает
+  // ТОЛЬКО архивный лист "Заказы_YYYY-MM" - для текущего, ещё не заархивированного месяца
+  // такого листа не существует, функция всегда возвращала error. getGrossProfitForPeriod
+  // ниже такой проблемы не имеет - aggregateFinHistoryForRange сам умеет и в живые, и в
+  // архивные данные, поэтому раньше это осталось незамеченным.
+  var currentMonthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+  var ordersData = (monthKey === currentMonthKey) ? getOrdersData(ss) : getOrdersDataForPeriod(ss, monthKey);
   if (!ordersData || ordersData.error) return null;
   var sfp = computeSalesFaktPlan_(ordersData);
   var gp = getGrossProfitForPeriod(ss, monthKey) || {};

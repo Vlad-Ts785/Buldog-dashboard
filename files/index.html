@@ -1517,6 +1517,11 @@ let periodOrdersData = null;   // D.orders за выбранный период 
 let periodGrossProfit = null;  // ВП своего парка за период (для Рыщанова), из Истории_финансов
 let periodProfitTral = null;   // то же, но по тралам - для карточки "Заказов" (2026-07-18)
 let periodProfitLong = null;   // то же, но по длинномерам
+// Факт/план продаж за период (Влад, 2026-08-04: верхняя полоса "Выполнение плана продаж" на
+// "По менеджерам" всегда показывала текущий месяц, даже при выборе прошлого периода).
+let periodSalesFakt = null;
+let periodSalesPlan = null;
+let periodSalesFaktThruYesterday = null;
 let availablePeriods = [];
 
 async function loadAvailablePeriods() {
@@ -1540,6 +1545,9 @@ async function changePeriod(period) {
     periodGrossProfit = null;
     periodProfitTral = null;
     periodProfitLong = null;
+    periodSalesFakt = null;
+    periodSalesPlan = null;
+    periodSalesFaktThruYesterday = null;
     if (status) status.textContent = '';
     renderSalesTabsForPeriod();
     return;
@@ -1552,6 +1560,9 @@ async function changePeriod(period) {
     periodGrossProfit = (data.summary && typeof data.summary.profit === 'number') ? data.summary.profit : null;
     periodProfitTral = (data.summary && typeof data.summary.profit_tral === 'number') ? data.summary.profit_tral : null;
     periodProfitLong = (data.summary && typeof data.summary.profit_long === 'number') ? data.summary.profit_long : null;
+    periodSalesFakt = (data.summary && typeof data.summary.salesFakt === 'number') ? data.summary.salesFakt : null;
+    periodSalesPlan = (data.summary && typeof data.summary.salesPlan === 'number') ? data.summary.salesPlan : null;
+    periodSalesFaktThruYesterday = (data.summary && typeof data.summary.salesFaktThruYesterday === 'number') ? data.summary.salesFaktThruYesterday : null;
     if (status) status.textContent = '';
     renderSalesTabsForPeriod();
   } catch(e) {
@@ -1569,11 +1580,17 @@ function renderSalesTabsForPeriod() {
   const realProfit = D.summary ? D.summary.profit : undefined;
   const realProfitTral = D.summary ? D.summary.profit_tral : undefined;
   const realProfitLong = D.summary ? D.summary.profit_long : undefined;
+  const realSalesFakt = D.summary ? D.summary.salesFakt : undefined;
+  const realSalesPlan = D.summary ? D.summary.salesPlan : undefined;
+  const realSalesFaktThruYesterday = D.summary ? D.summary.salesFaktThruYesterday : undefined;
   if (selectedPeriod && periodOrdersData) {
     D.orders = periodOrdersData;
     if (D.summary && periodGrossProfit !== null) D.summary.profit = periodGrossProfit;
     if (D.summary && periodProfitTral !== null) D.summary.profit_tral = periodProfitTral;
     if (D.summary && periodProfitLong !== null) D.summary.profit_long = periodProfitLong;
+    if (D.summary && periodSalesFakt !== null) D.summary.salesFakt = periodSalesFakt;
+    if (D.summary && periodSalesPlan !== null) D.summary.salesPlan = periodSalesPlan;
+    if (D.summary && periodSalesFaktThruYesterday !== null) D.summary.salesFaktThruYesterday = periodSalesFaktThruYesterday;
   }
   renderSales();
   renderSalesMgr();
@@ -1583,6 +1600,9 @@ function renderSalesTabsForPeriod() {
   if (D.summary) D.summary.profit = realProfit;
   if (D.summary) D.summary.profit_tral = realProfitTral;
   if (D.summary) D.summary.profit_long = realProfitLong;
+  if (D.summary) D.summary.salesFakt = realSalesFakt;
+  if (D.summary) D.summary.salesPlan = realSalesPlan;
+  if (D.summary) D.summary.salesFaktThruYesterday = realSalesFaktThruYesterday;
 }
 
 // ── ВЫБОР ДИАПАЗОНА (Техника / Водители) ────────────────────
@@ -5766,13 +5786,20 @@ function renderManagerProfileBody_(name) {
 function calcPaceRatio_(period) {
   var d = D && D.updated ? new Date(D.updated) : new Date();
   d.setDate(d.getDate() - 1);
-  var dayOfMonth = d.getDate();
-  var dim;
-  if (period) {
+  var liveMonthKey = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2, '0');
+  var dim, dayOfMonth;
+  if (period && period !== liveMonthKey) {
+    // Выбранный период - уже ЗАКРЫТЫЙ прошлый месяц, не текущий - весь месяц прошёл целиком,
+    // прогноз должен равняться факту (Влад, 2026-08-04: "Прогноз: 314 332 273 (967%)" для
+    // июля - раньше dayOfMonth всегда брался от РЕАЛЬНОЙ сегодняшней даты (день августа),
+    // даже когда выбран июль, из-за чего полный месячный факт экстраполировался так, будто
+    // прошло всего 3-4 дня).
     var p = String(period).split('-').map(Number);
-    dim = (p[0] && p[1]) ? new Date(p[0], p[1], 0).getDate() : new Date(d.getFullYear(), d.getMonth()+1, 0).getDate();
+    dim = (p[0] && p[1]) ? new Date(p[0], p[1], 0).getDate() : 30;
+    dayOfMonth = dim;
   } else {
     dim = new Date(d.getFullYear(), d.getMonth()+1, 0).getDate();
+    dayOfMonth = d.getDate();
   }
   return dayOfMonth > 0 ? (dim / dayOfMonth) : 1;
 }

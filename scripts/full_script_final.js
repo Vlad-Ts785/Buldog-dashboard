@@ -2926,13 +2926,21 @@ function doGet(e) {
           .setMimeType(ContentService.MimeType.JSON);
       }
       var gp = getGrossProfitForPeriod(ss, period);
+      var periodOrders = getOrdersDataForPeriod(ss, period);
+      // Факт/план продаж за этот период - тем же расчётом, что и текущий месяц (Влад,
+      // 2026-08-04: верхняя полоса "Выполнение плана продаж" не совпадала с карточками
+      // отделов при выборе периода). Пропускаем, если period сам вернул ошибку.
+      var sfp = (periodOrders && !periodOrders.error) ? computeSalesFaktPlan_(periodOrders) : null;
       return ContentService
         .createTextOutput(JSON.stringify({
-          orders:  getOrdersDataForPeriod(ss, period),
+          orders:  periodOrders,
           summary: {
             profit:      gp ? gp.profit : null,
             profit_tral: gp ? gp.profit_tral : null,
             profit_long: gp ? gp.profit_long : null,
+            salesFakt:   sfp ? sfp.salesFakt : null,
+            salesPlan:   sfp ? sfp.salesPlan : null,
+            salesFaktThruYesterday: sfp ? sfp.salesFaktThruYesterday : null,
           },
         }))
         .setMimeType(ContentService.MimeType.JSON);
@@ -3624,6 +3632,57 @@ function getCurrentMonthRange_() {
   return { from: new Date(p[0], p[1] - 1, 1), to: new Date(p[0], p[1] - 1, p[2]) };
 }
 
+// Факт/план продаж (по менеджерам + внутренние, без задвоения) - вынесено в отдельную
+// функцию, чтобы ОДИН И ТОТ ЖЕ расчёт использовался и для текущего месяца (getSummaryData),
+// и для архивного периода (action=orders_period). Раньше верхняя полоса "Выполнение плана
+// продаж" на "По менеджерам" всегда читала D.summary.salesFakt/salesPlan текущего месяца,
+// даже когда в выпадающем списке выбран прошлый период - карточки отделов ниже (которые
+// берут план/факт из D.orders, а он подменяется на период) показывали июль, а полоса сверху -
+// живой август (Влад, 2026-08-04: "почему-то показывает факт августа").
+function computeSalesFaktPlan_(ordersData) {
+  const byManager = (ordersData && ordersData.by_manager) || [];
+  let totalPlan=0, totalFakt=0, totalFaktThruYesterday=0, totalPayment=0, totalPayNal=0;
+  let mgrInternal=0, mgrInternalThruYesterday=0;
+  byManager.forEach(function(m) {
+    totalFakt    += m.amount || 0;
+    // Числитель прогноза - только "по вчера" (Влад, 2026-07-08), см. isThruYesterday в
+    // aggregateOrdersRows. salesFakt (живой факт) не трогаем - используется для отображения.
+    totalFaktThruYesterday += m.amount_thru_yesterday || 0;
+    totalPayment += m.payment || 0;
+    totalPayNal  += m.cash || 0;
+    mgrInternal  += m.internal_amount || 0;
+    mgrInternalThruYesterday += m.internal_amount_thru_yesterday || 0;
+  });
+  // Внутренние перевозки ведут ЛОГИСТЫ (Влад, 2026-07-19), а их нет в TRAL_MANAGERS - значит
+  // их заказы не попадают в by_manager и не входили в общий факт, ХОТЯ план "Внутренние"
+  // (5 млн) в salesPlan прибавляется. Факт и план были в разном масштабе: Влад увидел
+  // "29 912 408 из 70 000 000" вместо ожидаемых ~32.1М (14.7 Ахтамова + 15.2 Гусейнова +
+  // 2.2 внутренние). Прибавляем только ТУ ЧАСТЬ внутренних, которой ещё нет в суммах
+  // менеджеров - часть внутренних заказов может вестись самими менеджерами (они в TRAL_MANAGERS,
+  // и тогда их внутренние уже сидят в m.amount, см. фикс 2026-07-04), такие второй раз не берём.
+  const ordSummary = (ordersData && ordersData.summary) || {};
+  totalFakt += Math.max(0, (ordSummary.internal_amount || 0) - mgrInternal);
+  totalFaktThruYesterday += Math.max(0, (ordSummary.internal_amount_thru_yesterday || 0) - mgrInternalThruYesterday);
+  // План суммируем из ПОЛНОЙ карты планов (managerPlans, не только по_manager) - менеджер без
+  // единого заказа в этом периоде иначе тихо теряет план из суммы. НО считаем только АКТИВНЫЕ
+  // отделы (те же имена, что в DEPT_CFG на фронтенде, "По менеджерам") - иначе в сумму лезут
+  // Рыщанов/Прус-Роскошный/Суркова, чей отдел больше не продаёт, и план на Панели (77.65М)
+  // расходится с "По менеджерам" (75М) - см. Влад 2026-07-04.
+  const activePlanKeys = ['ахтамова','цегельников','гуштюк','дербенцева','шейко',
+    'гусейнова','савиток','филипчук','котельников','гуляева','коньшина','володин',
+    'цуцурин','внутренние'];
+  const allPlans = (ordersData && ordersData.managerPlans) || {};
+  activePlanKeys.forEach(function(k) { totalPlan += allPlans[k] || 0; });
+
+  return {
+    salesPlan: totalPlan,
+    salesFakt: totalFakt,
+    salesFaktThruYesterday: totalFaktThruYesterday,
+    salesPayment: totalPayment,
+    salesPayNal: totalPayNal,
+  };
+}
+
 // ordersData - уже посчитанный getOrdersData(ss) (с проставленными планами через
 // joinManagerPlans_) - передаётся, чтобы не считать заказы дважды за один запрос.
 // Продажи менеджеров (salesFakt/salesPlan/salesPayment) теперь считаются из таблицы
@@ -3666,39 +3725,7 @@ function getSummaryData(ss, ordersData) {
     else              { profitTral += p; revenueTral += rev; }
   }
 
-  const byManager = (ordersData && ordersData.by_manager) || [];
-  let totalPlan=0, totalFakt=0, totalFaktThruYesterday=0, totalPayment=0, totalPayNal=0;
-  let mgrInternal=0, mgrInternalThruYesterday=0;
-  byManager.forEach(function(m) {
-    totalFakt    += m.amount || 0;
-    // Числитель прогноза - только "по вчера" (Влад, 2026-07-08), см. isThruYesterday в
-    // aggregateOrdersRows. salesFakt (живой факт) не трогаем - используется для отображения.
-    totalFaktThruYesterday += m.amount_thru_yesterday || 0;
-    totalPayment += m.payment || 0;
-    totalPayNal  += m.cash || 0;
-    mgrInternal  += m.internal_amount || 0;
-    mgrInternalThruYesterday += m.internal_amount_thru_yesterday || 0;
-  });
-  // Внутренние перевозки ведут ЛОГИСТЫ (Влад, 2026-07-19), а их нет в TRAL_MANAGERS - значит
-  // их заказы не попадают в by_manager и не входили в общий факт, ХОТЯ план "Внутренние"
-  // (5 млн) в salesPlan прибавляется. Факт и план были в разном масштабе: Влад увидел
-  // "29 912 408 из 70 000 000" вместо ожидаемых ~32.1М (14.7 Ахтамова + 15.2 Гусейнова +
-  // 2.2 внутренние). Прибавляем только ТУ ЧАСТЬ внутренних, которой ещё нет в суммах
-  // менеджеров - часть внутренних заказов может вестись самими менеджерами (они в TRAL_MANAGERS,
-  // и тогда их внутренние уже сидят в m.amount, см. фикс 2026-07-04), такие второй раз не берём.
-  const ordSummary = (ordersData && ordersData.summary) || {};
-  totalFakt += Math.max(0, (ordSummary.internal_amount || 0) - mgrInternal);
-  totalFaktThruYesterday += Math.max(0, (ordSummary.internal_amount_thru_yesterday || 0) - mgrInternalThruYesterday);
-  // План суммируем из ПОЛНОЙ карты планов (managerPlans, не только по_manager) - менеджер без
-  // единого заказа в этом периоде иначе тихо теряет план из суммы. НО считаем только АКТИВНЫЕ
-  // отделы (те же имена, что в DEPT_CFG на фронтенде, "По менеджерам") - иначе в сумму лезут
-  // Рыщанов/Прус-Роскошный/Суркова, чей отдел больше не продаёт, и план на Панели (77.65М)
-  // расходится с "По менеджерам" (75М) - см. Влад 2026-07-04.
-  const activePlanKeys = ['ахтамова','цегельников','гуштюк','дербенцева','шейко',
-    'гусейнова','савиток','филипчук','котельников','гуляева','коньшина','володин',
-    'цуцурин','внутренние'];
-  const allPlans = (ordersData && ordersData.managerPlans) || {};
-  activePlanKeys.forEach(function(k) { totalPlan += allPlans[k] || 0; });
+  const sfp = computeSalesFaktPlan_(ordersData);
 
   return {
     revenue, profit, fot, fuel, parts, fines, tolls,
@@ -3706,12 +3733,12 @@ function getSummaryData(ss, ordersData) {
     profit_tral: profitTral, profit_long: profitLong,
     own_revenue_tral: revenueTral, own_revenue_long: revenueLong,
     lossCount, vehicleCount: data.length,
-    salesPlan: totalPlan,
-    salesFakt: totalFakt,
-    salesFaktThruYesterday: totalFaktThruYesterday,
-    salesPayment: totalPayment,
-    salesPayNal: totalPayNal,
-    salesPct: totalPlan > 0 ? (totalFakt/totalPlan*100) : 0,
+    salesPlan: sfp.salesPlan,
+    salesFakt: sfp.salesFakt,
+    salesFaktThruYesterday: sfp.salesFaktThruYesterday,
+    salesPayment: sfp.salesPayment,
+    salesPayNal: sfp.salesPayNal,
+    salesPct: sfp.salesPlan > 0 ? (sfp.salesFakt/sfp.salesPlan*100) : 0,
     profitPlan: 50400000, // план ВП из Штатки
     revenueComparison: getRevenueDateComparison_(ss), // "на ту же дату" - прошлый месяц/год (Влад, 2026-07-08)
   };
@@ -4655,12 +4682,17 @@ function seedManagerPlansForCurrentMonth() {
 
 // Список месяцев, по которым есть архив (для выпадающего списка на дашборде)
 function getAvailablePeriods(ss) {
+  // Текущий календарный месяц исключаем, даже если под его именем случайно завалялся
+  // архивный лист (Влад, 2026-08-04: "2026-08" в выпадающем списке дублировал "Текущий
+  // месяц" и падал с "Архив за 2026-08 пуст" - в списке архивов ему в принципе не место,
+  // "Текущий месяц" уже его покрывает).
+  const currentMonthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
   const sheets = ss.getSheets();
   const periods = [];
   const re = new RegExp('^' + ORDERS_ARCHIVE_PFX + '(\\d{4}-\\d{2})$');
   sheets.forEach(function(s) {
     const m = s.getName().match(re);
-    if (m) periods.push(m[1]);
+    if (m && m[1] !== currentMonthKey) periods.push(m[1]);
   });
   periods.sort().reverse();
   return periods;

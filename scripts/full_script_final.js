@@ -2953,8 +2953,11 @@ function doGet(e) {
     }
 
     // "Глобальная статистика" (Влад, 2026-08-04) - сводка по месяцам из История_месяцев.
-    // Текущий месяц пересчитывается ЖИВЬЁМ (не из кэша) - чтобы точка на графике не отставала
-    // от последнего runAll(), если сегодняшний прогон saveMonthSummary_ ещё не случился.
+    // ТОЛЬКО чтение готового кэша, без пересчёта текущего месяца на лету (Влад: "не хочу
+    // чтобы страница долго грузилась... покажи данные мгновенно" - раньше здесь ещё раз
+    // разбирались заказы+парк заново при КАЖДОМ открытии страницы, хотя runAll() уже
+    // посчитал то же самое минуты/часы назад). Текущий месяц отстаёт максимум на один
+    // прогон runAll() - приемлемая цена за мгновенную загрузку.
     if (action === 'global_stats') {
       if (access.role !== 'admin') {
         return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
@@ -2965,18 +2968,12 @@ function doGet(e) {
         var msData = msSheet.getRange(2, 1, msSheet.getLastRow() - 1, MONTH_SUMMARY_HEADERS.length).getValues();
         msMonths = msData.filter(function(r) { return r[0]; }).map(function(r) {
           return {
-            month: String(r[0]), revenue: r[1] || 0, salesPlan: r[2] || 0,
+            month: monthKeyFrom_(r[0]), revenue: r[1] || 0, salesPlan: r[2] || 0,
             profit: r[3] || 0, profitTral: r[4] || 0, profitLong: r[5] || 0,
             fot: r[6] || 0, fuel: r[7] || 0, parts: r[8] || 0, fines: r[9] || 0, tolls: r[10] || 0,
             hiredProfit: r[11] || 0, hiredRevenue: r[12] || 0,
           };
         });
-      }
-      var msCurrentKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
-      var msLive = computeMonthSummary_(ss, msCurrentKey);
-      if (msLive) {
-        var msIdx = msMonths.findIndex(function(m) { return m.month === msCurrentKey; });
-        if (msIdx >= 0) msMonths[msIdx] = msLive; else msMonths.push(msLive);
       }
       msMonths.sort(function(a, b) { return a.month.localeCompare(b.month); });
       return ContentService.createTextOutput(JSON.stringify({ months: msMonths })).setMimeType(ContentService.MimeType.JSON);
@@ -4048,12 +4045,34 @@ function computeMonthSummary_(ss, monthKey) {
   };
 }
 
+// "2026-07" в колонке А может молча превратиться в объект Date при записи/чтении - тот же
+// баг, что уже ловили в Планах_менеджеров/Штатка_история (см. project_apps_script_date_
+// instanceof_gotcha). Утиная типизация вместо instanceof - надёжнее (см. ordFormatDate ниже).
+// Обязательно применять и на запись (сверка дублей), и на чтение (action=global_stats) -
+// иначе один починенный конец наступает на тот же баг с другого.
+function monthKeyFrom_(val) {
+  if (!val) return '';
+  var looksLikeDate = val instanceof Date ||
+    (typeof val === 'object' && typeof val.getFullYear === 'function' && typeof val.getMonth === 'function');
+  if (looksLikeDate) return Utilities.formatDate(val, 'Europe/Moscow', 'yyyy-MM');
+  // .replace(/^'/, '') - ведущий апостроф-принудитель текста (см. saveMonthSummary_) может как
+  // отсекаться самими Таблицами при записи через API, так и остаться буквальным символом -
+  // поведение не проверено на 100%, поэтому разбираем оба варианта, а не полагаемся на один.
+  var s = String(val).trim().replace(/^'/, '');
+  var m = s.match(/^(\d{4})-(\d{2})/);
+  return m ? (m[1] + '-' + m[2]) : s;
+}
+
 function ensureMonthSummarySheet_(ss) {
   var sheet = ss.getSheetByName(MONTH_SUMMARY_SHEET);
   if (!sheet) {
     sheet = ss.insertSheet(MONTH_SUMMARY_SHEET);
     sheet.getRange(1, 1, 1, MONTH_SUMMARY_HEADERS.length).setValues([MONTH_SUMMARY_HEADERS]).setFontWeight('bold');
   }
+  // Колонка "Месяц" - текстовый формат, чтобы Таблицы не конвертировали "2026-07" в дату
+  // молча при следующей записи (сама конвертация УЖЕ произошла для старых строк - это не
+  // чинит их задним числом, для этого см. cleanupMonthSummaries()).
+  sheet.getRange(2, 1, Math.max(sheet.getMaxRows() - 1, 1), 1).setNumberFormat('@');
   return sheet;
 }
 
@@ -4071,17 +4090,47 @@ function saveMonthSummary_(ss, monthKey) {
   if (lastRow > 1) {
     var monthCol = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
     for (var i = 0; i < monthCol.length; i++) {
-      if (String(monthCol[i][0] || '').trim() === monthKey) { rowIndex = i + 2; break; }
+      // monthKeyFrom_, не String() напрямую - иначе если ячейка уже стала датой, сравнение
+      // никогда не совпадёт и строка задвоится при каждом runAll() (ровно так и вышло с
+      // августом, Влад, 2026-08-04: "запись сразу два раза").
+      if (monthKeyFrom_(monthCol[i][0]) === monthKey) { rowIndex = i + 2; break; }
     }
   }
   var row = [
-    summary.month, summary.revenue, summary.salesPlan, summary.profit, summary.profitTral, summary.profitLong,
+    "'" + summary.month, summary.revenue, summary.salesPlan, summary.profit, summary.profitTral, summary.profitLong,
     summary.fot, summary.fuel, summary.parts, summary.fines, summary.tolls,
     summary.hiredProfit, summary.hiredRevenue, new Date(),
   ];
   if (rowIndex > 0) sheet.getRange(rowIndex, 1, 1, row.length).setValues([row]);
   else sheet.appendRow(row);
   return true;
+}
+
+// Разово - чинит уже накопленные строки История_месяцев: убирает дубли (одна и та же строка
+// записана дважды под "2026-07" и под датой-мусором Date.toString()) и приводит колонку
+// "Месяц" к чистому тексту. Влад запускает вручную ОДИН РАЗ после этого фикса (2026-08-04),
+// дальше не нужно - saveMonthSummary_ сам больше не задваивает строки.
+function cleanupMonthSummaries() {
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var sheet = ss.getSheetByName(MONTH_SUMMARY_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) { Logger.log('История_месяцев пуста - нечего чистить'); return; }
+
+  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, MONTH_SUMMARY_HEADERS.length).getValues();
+  var byMonth = {}; // последняя (самая нижняя = самая свежая запись) строка на каждый месяц
+  data.forEach(function(r) {
+    var key = monthKeyFrom_(r[0]);
+    if (!key) return;
+    r[0] = key; // сразу нормализуем текст в самой строке
+    byMonth[key] = r; // более поздняя строка в data перезапишет более раннюю - остаётся свежая
+  });
+
+  var cleanRows = Object.keys(byMonth).sort().map(function(k) { return byMonth[k]; });
+  sheet.getRange(2, 1, sheet.getMaxRows() - 1, MONTH_SUMMARY_HEADERS.length).clearContent();
+  if (cleanRows.length) {
+    sheet.getRange(2, 1, cleanRows.length, MONTH_SUMMARY_HEADERS.length).setValues(cleanRows);
+  }
+  ensureMonthSummarySheet_(ss); // текстовый формат колонки "Месяц" на будущее
+  Logger.log('История_месяцев: было ' + data.length + ' строк, осталось ' + cleanRows.length + ' (' + Object.keys(byMonth).sort().join(', ') + ')');
 }
 
 // Разово - добить историю по всем месяцам, за которые уже есть архив заказов (плюс текущий

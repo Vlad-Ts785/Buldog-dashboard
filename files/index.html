@@ -555,38 +555,8 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
       <div id="gs-loading" style="color:var(--muted);padding:20px 0;font-size:13px">Откройте вкладку — данные загрузятся автоматически</div>
 
       <div id="gs-body" style="display:none">
-        <!-- Сводка "в целом" - сумма по всем накопленным месяцам, без выбора периода -->
-        <div class="sec-title" style="margin-bottom:10px" id="gs-totals-title">Итого за весь период</div>
-        <div class="kpi-grid">
-          <div class="kpi">
-            <div class="kpi-label">Выручка</div>
-            <div class="kpi-value amber" id="gs-revenue">—</div>
-            <div class="kpi-prog-wrap">
-              <div class="kpi-prog-header"><span>Выполнение плана продаж</span><span id="gs-revenue-pct">—</span></div>
-              <div class="kpi-prog-bg"><div class="kpi-prog-fill" id="gs-revenue-bar" style="width:0%"></div></div>
-              <div class="kpi-sub" id="gs-revenue-plan" style="margin-top:4px"></div>
-            </div>
-          </div>
-          <div class="kpi">
-            <div class="kpi-label">Валовая прибыль</div>
-            <div class="kpi-value green" id="gs-profit">—</div>
-            <div class="kpi-sub2" id="gs-margin"></div>
-            <div id="gs-profit-breakdown" style="margin-top:8px"></div>
-          </div>
-          <div class="kpi">
-            <div class="kpi-label">Затраты</div>
-            <div class="kpi-value red" id="gs-costs-total">—</div>
-            <div id="gs-costs-breakdown" style="margin-top:8px"></div>
-          </div>
-          <div class="kpi">
-            <div class="kpi-label">Маржа найма</div>
-            <div class="kpi-value" id="gs-hire-margin-pct">—</div>
-            <div class="kpi-sub2" id="gs-hire-detail"></div>
-          </div>
-        </div>
-
         <!-- Тренд по месяцам - весь накопленный период сразу, без переключателя -->
-        <div class="card" style="margin-top:16px">
+        <div class="card">
           <div class="card-title">Динамика по месяцам</div>
           <div class="chart-wrap" style="height:280px"><canvas id="chart-global-stats"></canvas></div>
         </div>
@@ -2988,7 +2958,8 @@ function renderGlobalStats() {
   document.getElementById('gs-loading').style.display = 'none';
   document.getElementById('gs-body').style.display = '';
 
-  // Сводка "в целом" - сумма по ВСЕМ накопленным месяцам сразу, без выбора периода.
+  // Сумма по ВСЕМ накопленным месяцам сразу - только для строки "Итого" в таблице ниже
+  // (верхние карточки-сводки убраны, Влад 2026-08-04: "верхние блоки 4 штуки не нужны").
   var t = { revenue:0, salesPlan:0, profit:0, profitTral:0, profitLong:0,
     fot:0, fuel:0, parts:0, fines:0, tolls:0, hiredProfit:0, hiredRevenue:0 };
   globalStatsMonths.forEach(function(m) {
@@ -2997,37 +2968,6 @@ function renderGlobalStats() {
     t.fot += m.fot||0; t.fuel += m.fuel||0; t.parts += m.parts||0; t.fines += m.fines||0; t.tolls += m.tolls||0;
     t.hiredProfit += m.hiredProfit||0; t.hiredRevenue += m.hiredRevenue||0;
   });
-  var firstMonth = globalStatsMonths[0].month, lastMonth = globalStatsMonths[globalStatsMonths.length-1].month;
-  setText('gs-totals-title', 'Итого за период ' + firstMonth + ' — ' + lastMonth);
-
-  setText('gs-revenue', fmt(t.revenue));
-  var revPct = t.salesPlan > 0 ? Math.min(t.revenue / t.salesPlan * 100, 100) : 0;
-  setText('gs-revenue-pct', pct(revPct));
-  setBar('gs-revenue-bar', revPct, revPct >= 80 ? 'var(--green)' : revPct >= 50 ? 'var(--amber)' : 'var(--red)');
-  setText('gs-revenue-plan', 'План: ' + fmt(t.salesPlan));
-
-  var profitEl = document.getElementById('gs-profit');
-  profitEl.textContent = fmt(t.profit);
-  profitEl.className = 'kpi-value ' + (t.profit >= 0 ? 'green' : 'red');
-  var marginPct = t.revenue > 0 ? (t.profit / t.revenue * 100) : 0;
-  setText('gs-margin', 'Маржа ' + pct(marginPct));
-  setHTML('gs-profit-breakdown',
-    '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);padding:2px 0"><span>Тралы</span><b style="color:var(--green)">' + fmt(t.profitTral) + '</b></div>' +
-    '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);padding:2px 0"><span>Длинномеры</span><b style="color:var(--green)">' + fmt(t.profitLong) + '</b></div>');
-
-  var totalCosts = t.fot + t.fuel + t.parts + t.fines + t.tolls;
-  setText('gs-costs-total', fmt(totalCosts));
-  function costRow(label, val) {
-    return '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);padding:2px 0"><span>' + label + '</span><b style="color:var(--text)">' + fmt(val) + '</b></div>';
-  }
-  setHTML('gs-costs-breakdown',
-    costRow('ФОТ', t.fot) + costRow('Топливо', t.fuel) + costRow('Запчасти', t.parts) + costRow('Штрафы', t.fines) + costRow('Проходные', t.tolls));
-
-  var hireMarginPct = t.hiredRevenue > 0 ? (t.hiredProfit / t.hiredRevenue * 100) : 0;
-  var hireEl = document.getElementById('gs-hire-margin-pct');
-  hireEl.textContent = pct(hireMarginPct);
-  hireEl.className = 'kpi-value ' + (hireMarginPct >= 30 ? 'green' : hireMarginPct >= 15 ? 'amber' : 'red');
-  setText('gs-hire-detail', 'Прибыль найма ' + fmt(t.hiredProfit) + ' из выручки найма ' + fmt(t.hiredRevenue));
 
   renderGlobalStatsChart();
   renderGlobalStatsTable(t);
@@ -3040,7 +2980,7 @@ function renderGlobalStatsChart() {
   globalStatsChart = new Chart(ctx, {
     type: 'line',
     data: {
-      labels: globalStatsMonths.map(function(m) { return m.month; }),
+      labels: globalStatsMonths.map(function(m) { return formatMonthLabel(m.month); }),
       datasets: [
         { label: 'Выручка', data: globalStatsMonths.map(function(m){ return m.revenue; }), borderColor: '#EF9F27', backgroundColor: 'rgba(239,159,39,0.1)', tension: 0.3, fill: true, pointRadius: 3, borderWidth: 2 },
         { label: 'План продаж', data: globalStatsMonths.map(function(m){ return m.salesPlan || null; }), borderColor: '#888780', borderDash: [5,4], tension: 0.3, fill: false, pointRadius: 2, borderWidth: 1.5 },
@@ -3075,7 +3015,7 @@ function renderGlobalStatsTable(t) {
     var hireCls = hireMarginPct === null ? 'muted' : hireMarginPct >= 30 ? 'green' : hireMarginPct >= 15 ? 'amber' : 'red';
     var labelCell = isTotal
       ? '<td style="font-weight:600;color:var(--muted);text-transform:uppercase;font-size:11px;letter-spacing:.04em">Итого</td>'
-      : '<td><b>' + m.month + '</b></td>';
+      : '<td><b>' + formatMonthLabel(m.month) + '</b></td>';
     return '<tr' + (isTotal ? '' : ' class="clickable"') + '>' +
       labelCell +
       '<td class="num" style="font-weight:' + (isTotal?'600':'500') + '">' + fmt(m.revenue) + '</td>' +
@@ -5607,6 +5547,16 @@ var CLIENT_TOP_COLS = [
 const RU_MONTHS_GENITIVE = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
 // Дательный падеж - "к июлю 2025" (сравнение выручки на Панели, Влад, 2026-07-08).
 const RU_MONTHS_DATIVE = ['январю','февралю','марту','апрелю','маю','июню','июлю','августу','сентябрю','октябрю','ноябрю','декабрю'];
+// Именительный падеж - "Июль 2026", не "2026-07" (Влад, 2026-08-04: "Глобальная статистика" -
+// "нормальные читаемые для человека названия, а не машинный формат").
+const RU_MONTHS_NOMINATIVE = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+function formatMonthLabel(monthKey) {
+  var m = String(monthKey || '').match(/^(\d{4})-(\d{2})$/);
+  if (!m) return monthKey || '—'; // не распознали формат - лучше показать как есть, чем ничего
+  var mon = parseInt(m[2], 10);
+  if (mon < 1 || mon > 12) return monthKey;
+  return RU_MONTHS_NOMINATIVE[mon - 1] + ' ' + m[1];
+}
 function fmtDateRu(dateStr) {
   if (!dateStr) return '—';
   // Если формат не YYYY-MM-DD (найден баг 2026-07-07 - бэкенд иногда присылал сырой

@@ -1063,6 +1063,12 @@ function runAll() {
   try { saveFinancialHistory();    log.push('✅ Финансовая история сохранена'); }
   catch(e) { errors.push('❌ Фин. история: ' + e.message); }
 
+  // Сводка текущего месяца для "Глобальной статистики" (Влад, 2026-08-04) - после
+  // saveFinancialHistory, чтобы Данные_1С_история/История_финансов на этот момент уже
+  // содержали сегодняшний снимок, а Заказы_данные/Нормализованные_данные - свежий импорт.
+  try { saveMonthSummary_(SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID), Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM')); log.push('✅ Сводка месяца сохранена'); }
+  catch(e) { errors.push('❌ Сводка месяца: ' + e.message); }
+
   // 1С шлёт отчёт ДЗ раз в день в 15:00 (Влад, 2026-07-08) - в остальные прогоны письма
   // просто не будет, importDebtReport() кинет ошибку "не найдено за 2 дня", которая
   // безопасно уходит в errors и не ломает остальной пайплайн. saveDebtHistory() читает уже
@@ -2946,6 +2952,36 @@ function doGet(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
 
+    // "Глобальная статистика" (Влад, 2026-08-04) - сводка по месяцам из История_месяцев.
+    // Текущий месяц пересчитывается ЖИВЬЁМ (не из кэша) - чтобы точка на графике не отставала
+    // от последнего runAll(), если сегодняшний прогон saveMonthSummary_ ещё не случился.
+    if (action === 'global_stats') {
+      if (access.role !== 'admin') {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var msSheet = ss.getSheetByName(MONTH_SUMMARY_SHEET);
+      var msMonths = [];
+      if (msSheet && msSheet.getLastRow() > 1) {
+        var msData = msSheet.getRange(2, 1, msSheet.getLastRow() - 1, MONTH_SUMMARY_HEADERS.length).getValues();
+        msMonths = msData.filter(function(r) { return r[0]; }).map(function(r) {
+          return {
+            month: String(r[0]), revenue: r[1] || 0, salesPlan: r[2] || 0,
+            profit: r[3] || 0, profitTral: r[4] || 0, profitLong: r[5] || 0,
+            fot: r[6] || 0, fuel: r[7] || 0, parts: r[8] || 0, fines: r[9] || 0, tolls: r[10] || 0,
+            hiredProfit: r[11] || 0, hiredRevenue: r[12] || 0,
+          };
+        });
+      }
+      var msCurrentKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+      var msLive = computeMonthSummary_(ss, msCurrentKey);
+      if (msLive) {
+        var msIdx = msMonths.findIndex(function(m) { return m.month === msCurrentKey; });
+        if (msIdx >= 0) msMonths[msIdx] = msLive; else msMonths.push(msLive);
+      }
+      msMonths.sort(function(a, b) { return a.month.localeCompare(b.month); });
+      return ContentService.createTextOutput(JSON.stringify({ months: msMonths })).setMimeType(ContentService.MimeType.JSON);
+    }
+
     // Отправка отчёта в Telegram-группу логистов (только admin) - через GET, не POST,
     // т.к. браузер блокирует POST на редиректе script.google.com → googleusercontent.com.
     // Текст формирует сам сервер из своих данных - чтобы не передавать длинный текст
@@ -3942,13 +3978,119 @@ function getGrossProfitForPeriod(ss, period) {
   var vehicles = aggregateFinHistoryForRange(ss, staffData, monthStart, monthEnd);
   if (!vehicles.length) return null;
 
-  var profit = 0, profitTral = 0, profitLong = 0;
+  // Затраты по категориям добавлены для "Глобальной статистики" (Влад, 2026-08-04: "маржу по
+  // найму, выручку, затраты") - те же поля, что уже есть в каждой vehicles-строке
+  // (aggregateFinHistoryForRange), раньше просто не суммировались здесь, только ВП.
+  var profit = 0, profitTral = 0, profitLong = 0, revenue = 0, fot = 0, fuel = 0, parts2 = 0, fines = 0, tolls = 0;
   vehicles.forEach(function(v) {
     var isDlinnomer = v.type === 'Борт' || v.type.indexOf('Борт') === 0;
     profit += v.profit;
+    revenue += v.revenue || 0;
+    fot += v.fot || 0;
+    fuel += v.fuel || 0;
+    parts2 += v.parts || 0;
+    fines += v.fines || 0;
+    tolls += v.tolls || 0;
     if (isDlinnomer) profitLong += v.profit; else profitTral += v.profit;
   });
-  return { profit: profit, profit_tral: profitTral, profit_long: profitLong };
+  return {
+    profit: profit, profit_tral: profitTral, profit_long: profitLong,
+    revenue: revenue, fot: fot, fuel: fuel, parts: parts2, fines: fines, tolls: tolls,
+  };
+}
+
+// ============================================================
+// ГЛОБАЛЬНАЯ СТАТИСТИКА — сводка по месяцам (см. plans/2026-08-04-global-stats-page.md)
+// Влад, 2026-08-04: "хочу видеть эти данные по каждому выбранному месяцу и в динамике по
+// году" - лист "История_месяцев" копит одну строку на месяц, чтобы график по году не
+// пересчитывал архивы заказов + Данные_1С_история заново при каждом открытии страницы.
+// ============================================================
+const MONTH_SUMMARY_SHEET = 'История_месяцев';
+const MONTH_SUMMARY_HEADERS = [
+  'Месяц', 'Выручка', 'План продаж', 'ВП', 'ВП тралы', 'ВП длинномеры',
+  'ФОТ', 'Топливо', 'Запчасти', 'Штрафы', 'Проходные',
+  'Прибыль найма', 'Выручка найма', 'Обновлено',
+];
+
+// Считает сводку за месяц - НЕ пишет в лист, чистая функция. Работает и для текущего
+// (ещё не завершённого) месяца, и для архивного - getGrossProfitForPeriod уже сам решает,
+// брать ли Данные_1С_история или посуточные снимки Истории_финансов.
+function computeMonthSummary_(ss, monthKey) {
+  var ordersData = getOrdersDataForPeriod(ss, monthKey);
+  if (!ordersData || ordersData.error) return null;
+  var sfp = computeSalesFaktPlan_(ordersData);
+  var gp = getGrossProfitForPeriod(ss, monthKey) || {};
+  var os = ordersData.summary || {};
+  var hiredProfit = os.hired_profit || 0;
+  var hiredCost = os.total_hired_cost || 0;
+
+  return {
+    month: monthKey,
+    revenue: sfp.salesFakt,
+    salesPlan: sfp.salesPlan,
+    profit: gp.profit || 0,
+    profitTral: gp.profit_tral || 0,
+    profitLong: gp.profit_long || 0,
+    fot: gp.fot || 0,
+    fuel: gp.fuel || 0,
+    parts: gp.parts || 0,
+    fines: gp.fines || 0,
+    tolls: gp.tolls || 0,
+    hiredProfit: hiredProfit,
+    hiredRevenue: hiredCost + hiredProfit,
+  };
+}
+
+function ensureMonthSummarySheet_(ss) {
+  var sheet = ss.getSheetByName(MONTH_SUMMARY_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(MONTH_SUMMARY_SHEET);
+    sheet.getRange(1, 1, 1, MONTH_SUMMARY_HEADERS.length).setValues([MONTH_SUMMARY_HEADERS]).setFontWeight('bold');
+  }
+  return sheet;
+}
+
+// Идемпотентно - находит существующую строку месяца и перезаписывает, иначе добавляет новую
+// (тот же приём, что setDebtStatus_/findOrCreateDebtStatusRow_ - без дублей при повторных
+// запусках). Вызывается на каждом runAll() для ТЕКУЩЕГО месяца (держит его свежим внутри дня)
+// и вручную через backfillMonthSummaries() для уже прошедших месяцев.
+function saveMonthSummary_(ss, monthKey) {
+  var summary = computeMonthSummary_(ss, monthKey);
+  if (!summary) return false; // нет данных за месяц - не пишем пустую/нулевую строку поверх
+
+  var sheet = ensureMonthSummarySheet_(ss);
+  var lastRow = sheet.getLastRow();
+  var rowIndex = -1;
+  if (lastRow > 1) {
+    var monthCol = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    for (var i = 0; i < monthCol.length; i++) {
+      if (String(monthCol[i][0] || '').trim() === monthKey) { rowIndex = i + 2; break; }
+    }
+  }
+  var row = [
+    summary.month, summary.revenue, summary.salesPlan, summary.profit, summary.profitTral, summary.profitLong,
+    summary.fot, summary.fuel, summary.parts, summary.fines, summary.tolls,
+    summary.hiredProfit, summary.hiredRevenue, new Date(),
+  ];
+  if (rowIndex > 0) sheet.getRange(rowIndex, 1, 1, row.length).setValues([row]);
+  else sheet.appendRow(row);
+  return true;
+}
+
+// Разово - добить историю по всем месяцам, за которые уже есть архив заказов (плюс текущий
+// живой месяц). Влад запускает вручную в редакторе один раз (имя БЕЗ подчёркивания в конце -
+// см. project_apps_script_trailing_underscore, иначе не видно в списке "Выполнить").
+function backfillMonthSummaries() {
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var currentMonthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+  var months = getAvailablePeriods(ss); // архивные месяцы (текущий туда не попадает, см. фикс 2026-08-04)
+  months.push(currentMonthKey);
+  var done = [], skipped = [];
+  months.forEach(function(m) {
+    if (saveMonthSummary_(ss, m)) done.push(m); else skipped.push(m);
+  });
+  Logger.log('История_месяцев: посчитано ' + done.join(', ') + (skipped.length ? '; пропущено (нет данных): ' + skipped.join(', ') : ''));
+  return { done: done, skipped: skipped };
 }
 
 // ============================================================

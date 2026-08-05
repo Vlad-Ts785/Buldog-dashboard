@@ -3475,50 +3475,6 @@ function setupShtatkaAutoMigration() {
   Logger.log('✅ Настроены автозапуски миграции Штатки: 12:00 и 19:00 ежедневно');
 }
 
-// РАЗОВЫЙ ХЕЛПЕР (2026-08-05): передвижка Штатки с июля на август. Влад вручную выключил оба
-// триггера migrateShtatkaGridToHistory() через UI, очистил статусы и переписал заголовки
-// колонок K:AO с "01.07."..."31.07." на "01.08."..."31.08." (чтобы триггер не зацепил
-// недоделанное состояние посреди правки и не затёр архив за июль перезаписью). Эта функция
-// делает финальный шаг одним запуском: 1) лог числа строк в Штатка_история по месяцам ДО -
-// sanity-check, что июль на месте; 2) один прогон миграции текущей (свежей/пустой) сетки за
-// август - создаёт первую запись под ключом "2026-08", июль не трогает (см. monthsAffected в
-// migrateShtatkaGridToHistory - считается только из заголовков, актуальных прямо сейчас);
-// 3) заново ставит оба триггера. Запустить один раз в редакторе (Выполнить ->
-// finishShtatkaAugustRollover), результат смотреть в логе (Ctrl+Enter). После подтверждения
-// результата - удалить эту функцию как одноразовую (правило 3 в CLAUDE.md).
-function finishShtatkaAugustRollover() {
-  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-  const histSheet = ss.getSheetByName(SHTATKA_HISTORY_SHEET);
-
-  function countByMonth() {
-    const byMonth = {};
-    if (histSheet && histSheet.getLastRow() > 1) {
-      const data = histSheet.getRange(2, 1, histSheet.getLastRow() - 1, 3).getValues();
-      data.forEach(function(r) {
-        const dateStr = r[0] instanceof Date ? Utilities.formatDate(r[0], 'Europe/Moscow', 'yyyy-MM-dd') : String(r[0]);
-        const month = dateStr.slice(0, 7);
-        byMonth[month] = (byMonth[month] || 0) + 1;
-      });
-    }
-    return byMonth;
-  }
-
-  const before = 'ДО: строк в Штатка_история по месяцам - ' + JSON.stringify(countByMonth());
-  Logger.log(before);
-
-  const migrated = migrateShtatkaGridToHistory();
-  const afterMigration = 'Снят снимок августа: ' + migrated + ' записей. ПОСЛЕ: ' + JSON.stringify(countByMonth());
-  Logger.log(afterMigration);
-
-  setupShtatkaAutoMigration();
-  const triggersMsg = 'Триггеры migrateShtatkaGridToHistory заново поставлены (12:00 и 19:00)';
-  Logger.log(triggersMsg);
-
-  const result = before + '\n' + afterMigration + '\n' + triggersMsg;
-  Logger.log('=== ИТОГ ===\n' + result);
-  return result;
-}
-
 // Список машин в ремонте из Штатки
 function getRepairsData(staffData) {
   const repairs = [];

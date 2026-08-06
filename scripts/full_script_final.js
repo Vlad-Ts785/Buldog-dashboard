@@ -3722,6 +3722,18 @@ function computeSalesFaktPlan_(ordersData) {
 // заказов (by_manager) - один источник вместо отдельного листа Менеджеры_данные
 // (см. plans/2026-07-02-manager-revenue-single-source.md - раньше давало рассинхрон
 // после смены месяца).
+// Приказ № 01/07/26 от 01.07.2026 "Об утверждении мотивации руководителя отдела логистики
+// Тралы и длинномеры" (Гонтюрев А.А.): Рыщанову +1% от ВП, наработанной ЭТИМИ ТРЕМЯ
+// конкретными тягачами (не всем парком). Действует с 01.07.2026. На бумаге приказа
+// рукописная пометка "До 1.11.26" - дата истечения/пересмотра, см. RISCHANOV_ORDER_UNTIL
+// ниже. Госномера нормализованы через normalizeGos(), сверены с живой Штаткой 2026-08-06.
+const RISCHANOV_SPECIAL_TRALS_GOS = [
+  normalizeGos('В776ЕТ797'), // Скания В 776 ЕТ 797 + файмон корыто 4 оси УУ 4720 77
+  normalizeGos('М800АЕ797'), // Скания М 800 АЕ 797 + файмон корыто 4 оси УХ 5545 77
+  normalizeGos('О894ХМ797'), // Скания О 894 ХМ 797 + файмон 8-осный ХУ 5875 77
+];
+const RISCHANOV_ORDER_UNTIL = new Date('2026-11-01T00:00:00+03:00'); // рукописная пометка на приказе - сверить с Владом ближе к сроку, не начислять без нового приказа
+
 function getSummaryData(ss, ordersData) {
   const norm = ss.getSheetByName('Нормализованные_данные');
   if (!norm || norm.getLastRow() < 2) return {};
@@ -3740,6 +3752,7 @@ function getSummaryData(ss, ordersData) {
   // использует "Статус парка" (getFleetStatus) и фильтр "Все тралы" - разбивка теперь
   // согласована по всему дашборду, а не третий отдельный классификатор.
   let profitTral=0, profitLong=0, revenueTral=0, revenueLong=0;
+  let specialTralsProfit=0; // приказ №01/07/26 - ВП трёх конкретных тягачей Рыщанова
 
   for (let row of data) {
     const rev = parseFloat(row[3]) || 0;
@@ -3756,15 +3769,19 @@ function getSummaryData(ss, ordersData) {
     const isDlinnomer = staffType === 'Борт' || staffType.indexOf('Борт') === 0;
     if (isDlinnomer) { profitLong += p; revenueLong += rev; }
     else              { profitTral += p; revenueTral += rev; }
+    if (RISCHANOV_SPECIAL_TRALS_GOS.indexOf(normalizeGos(row[0])) >= 0) specialTralsProfit += p;
   }
 
   const sfp = computeSalesFaktPlan_(ordersData);
+  const rischanovOrderActive = new Date() < RISCHANOV_ORDER_UNTIL;
 
   return {
     revenue, profit, fot, fuel, parts, fines, tolls,
     margin: revenue > 0 ? (profit/revenue*100) : 0,
     profit_tral: profitTral, profit_long: profitLong,
     own_revenue_tral: revenueTral, own_revenue_long: revenueLong,
+    special_trals_profit: rischanovOrderActive ? specialTralsProfit : 0, // приказ №01/07/26, до 01.11.2026
+    special_trals_bonus_active: rischanovOrderActive,
     lossCount, vehicleCount: data.length,
     salesPlan: sfp.salesPlan,
     salesFakt: sfp.salesFakt,
@@ -4713,19 +4730,35 @@ function parseOrdersRawRows(allData) {
 // managerMap/logistMap/hiredProfit) и "Сумма - Стоимость привлечённой техники" (так считает
 // маржу таблица "Наёмная техника"/партнёры в supplierMap) - Влад заметил, что карточки
 // "Маржа (наём)" (тралы+длинномеры) и таблица партнёров дают разные итоги за один месяц.
-// Печатает в лог оба итога, разницу и до 15 конкретных заказов с наибольшим расхождением
-// (Прибыль(1С) минус (Сумма-Затраты)), чтобы увидеть - это пропуски в 1С (Прибыль не
-// заполнена) или реальная доп.статья затрат внутри поля "Прибыль". Удалить после разбора.
-function diagnoseHiredMarginMismatch() {
+// Первый прогон (без периода) гонял по ЖИВОМУ листу (Заказы_данные = текущий месяц,
+// август) - Влад справедливо указал, что это некорректная проверка: свежие заказы за
+// вчера ещё не имеют внесённой стоимости найма, это нормально для текущего месяца и не
+// объясняет расхождение в ЗАКРЫТОМ июле. Поэтому теперь функция принимает period
+// ("2026-07") и читает архив (ORDERS_ARCHIVE_PFX+period), где все стоимости давно внесены.
+// Также добавлена прямая проверка гипотезы Влада: "если бы затраты не были внесены, в
+// таблице поставщиков было бы видно 100% маржу - я бы заметил" - считаем margin_pct по
+// каждому поставщику и явно печатаем всех с margin_pct >=90%, чтобы либо подтвердить, либо
+// опровергнуть. Удалить после разбора причины.
+function diagnoseHiredMarginMismatch(period) {
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-  const norm = ss.getSheetByName(ORDERS_NORM_SHEET);
-  if (!norm || norm.getLastRow() < 2) { Logger.log('Нет данных заказов'); return; }
-  const rows = norm.getRange(2, 1, norm.getLastRow() - 1, 44).getValues();
+  let rows;
+  if (period) {
+    const archive = ss.getSheetByName(ORDERS_ARCHIVE_PFX + period);
+    if (!archive || archive.getLastRow() < 5) { Logger.log('Нет архива за ' + period); return; }
+    rows = parseOrdersRawRows(archive.getDataRange().getValues()).rows;
+    Logger.log('Читаю архив ' + ORDERS_ARCHIVE_PFX + period + ', строк: ' + rows.length);
+  } else {
+    const norm = ss.getSheetByName(ORDERS_NORM_SHEET);
+    if (!norm || norm.getLastRow() < 2) { Logger.log('Нет данных заказов'); return; }
+    rows = norm.getRange(2, 1, norm.getLastRow() - 1, 44).getValues();
+    Logger.log('Читаю живой лист ' + ORDERS_NORM_SHEET + ' (текущий месяц), строк: ' + rows.length);
+  }
 
   const C = { id:0, customer:9, equip:20, hired:27, hired_cost:28, amount:30, profit:35 };
 
   let sumProfit = 0, sumAmount = 0, sumHiredCost = 0, hiredCount = 0, zeroProfit = 0;
   const mismatches = [];
+  const bySupplier = {}; // тест гипотезы Влада: margin_pct по поставщику
   rows.forEach(function(row) {
     const hiredRaw = String(row[C.hired] || '').trim();
     const isHired = hiredRaw !== '' && hiredRaw !== 'Нет';
@@ -4742,6 +4775,10 @@ function diagnoseHiredMarginMismatch() {
       mismatches.push({ id: row[C.id], customer: row[C.customer], equip: row[C.equip],
         amount: amount, hired_cost: hiredCost, profit: profit, expected: expected, diff: diff });
     }
+    if (!bySupplier[hiredRaw]) bySupplier[hiredRaw] = { revenue:0, cost:0, profit:0 };
+    bySupplier[hiredRaw].revenue += amount;
+    bySupplier[hiredRaw].cost    += hiredCost;
+    bySupplier[hiredRaw].profit  += profit;
   });
 
   Logger.log('Наёмных заказов: ' + hiredCount + ' (из них Прибыль=0 при ненулевой Сумме: ' + zeroProfit + ')');
@@ -4755,8 +4792,22 @@ function diagnoseHiredMarginMismatch() {
       ' Затраты=' + m.hired_cost + ' Прибыль(1С)=' + m.profit +
       ' Ожидалось(Сумма-Затраты)=' + m.expected + ' Разница=' + m.diff);
   });
+
+  Logger.log('--- Проверка гипотезы: поставщики с margin_pct (revenue-cost/revenue) >=90% ---');
+  var suspects = 0;
+  Object.keys(bySupplier).forEach(function(name) {
+    var s = bySupplier[name];
+    var marginPctOld = s.revenue > 0 ? Math.round((s.revenue - s.cost) / s.revenue * 100) : 0;
+    if (marginPctOld >= 90) {
+      suspects++;
+      Logger.log(name + ': Выручка=' + s.revenue + ' Затраты=' + s.cost + ' Прибыль(1С)=' + s.profit +
+        ' margin_pct(revenue-cost)=' + marginPctOld + '%');
+    }
+  });
+  Logger.log('Поставщиков с margin_pct>=90%: ' + suspects + ' из ' + Object.keys(bySupplier).length);
+
   return { hiredCount: hiredCount, sumProfit: sumProfit, sumAmount: sumAmount, sumHiredCost: sumHiredCost,
-    mismatchCount: mismatches.length, zeroProfit: zeroProfit };
+    mismatchCount: mismatches.length, zeroProfit: zeroProfit, suspects: suspects };
 }
 
 // ── API ДЛЯ ДАШБОРДА ─────────────────────────────────────────
@@ -5086,9 +5137,15 @@ function aggregateOrdersRows(rows) {
     const mgrSales  = str(row, 'mgr_s');
     const hw        = yes(row, 'waybill'); // есть ли путёвка - нужно в нескольких местах ниже
 
-    // С июля 2026: 8%/8%/2%/2% от маржи найма платится только если маржа% по заказу >=23%
-    const marginPct      = (isHired && amount > 0) ? (profit / amount) : 0;
-    const marginQualifies = isHired && marginPct >= 0.23;
+    // С июля 2026: 8%/8%/2%/2% от маржи найма платится только если маржа найма >=23% -
+    // порог проверяется ПО КОМПАНИИ ЗА МЕСЯЦ ЦЕЛИКОМ (тот же % что и KPI "Маржа найма" на
+    // дашборде = hiredProfit/hiredAmountRev), не по каждому заказу отдельно - Влад,
+    // 2026-07-07, инцидент с ошибочной построчной проверкой (см. project_salary_rules).
+    // Регрессия найдена 2026-08-06: построчная проверка снова оказалась в коде (видимо,
+    // откатилась при параллельном clasp push мимо git). Здесь только копим сумму маржи
+    // на менеджера/логиста БЕЗ деления на квалиф./неквалиф. - решение "весь месяц
+    // квалифицируется или нет" принимается один раз ПОСЛЕ цикла по всем строкам
+    // (см. companyMarginQualifies ниже, после цикла for).
     const isThruYesterday = dateStr !== '' && dateStr <= yesterdayStr;
 
     totalAmount  += amount;
@@ -5128,7 +5185,7 @@ function aggregateOrdersRows(rows) {
       if (!managerMap[mgrSales]) {
         managerMap[mgrSales] = { name: mgrSales, orders:0, amount:0, amount_thru_yesterday:0, payment:0, cash:0, profit:0, hired_orders:0, hired_cost:0,
           internal_orders:0, internal_amount:0, internal_amount_thru_yesterday:0, internal_payment:0,
-          own_amount:0, hired_margin_qualified:0, hired_margin_unqualified:0,
+          own_amount:0, hired_margin_total:0, hired_margin_qualified:0, hired_margin_unqualified:0,
           today_new_orders:0, today_new_amount:0, today_new_list:[] };
       }
       const m = managerMap[mgrSales];
@@ -5149,9 +5206,7 @@ function aggregateOrdersRows(rows) {
         m.today_new_list.push({ id: str(row,'id'), customer: str(row,'customer'), amount: amount });
       }
       if (isHired) {
-        m.hired_orders++; m.hired_cost += hiredCost;
-        if (marginQualifies) m.hired_margin_qualified += profit;
-        else m.hired_margin_unqualified += profit;
+        m.hired_orders++; m.hired_cost += hiredCost; m.hired_margin_total += profit;
       } else {
         m.own_amount += amount;
       }
@@ -5166,7 +5221,7 @@ function aggregateOrdersRows(rows) {
     if (mgrLog && ordInList(mgrLog, TRAL_LOGISTS)) {
       if (!logistMap[mgrLog]) {
         logistMap[mgrLog] = { name: mgrLog, orders:0, amount:0, hired_orders:0, hired_cost:0, tral:0, long_:0,
-          own_amount:0, hired_margin_qualified:0, hired_margin_unqualified:0 };
+          own_amount:0, hired_margin_total:0, hired_margin_qualified:0, hired_margin_unqualified:0 };
       }
       const l = logistMap[mgrLog];
       l.orders++;
@@ -5174,8 +5229,7 @@ function aggregateOrdersRows(rows) {
       if (equip === 'Трал')      l.tral++;
       if (equip === 'Длинномер') l.long_++;
       if (isHired) {
-        if (marginQualifies) l.hired_margin_qualified += profit;
-        else l.hired_margin_unqualified += profit;
+        l.hired_margin_total += profit;
       } else {
         l.own_amount += amount;
       }
@@ -5240,10 +5294,11 @@ function aggregateOrdersRows(rows) {
     if (isHired) {
       const supplier = str(row, 'hired');
       const isInternalOrder = isInt || ordInList(str(row, 'customer'), INTERNAL_CLIENTS);
-      if (!supplierMap[supplier]) supplierMap[supplier] = { name:supplier, orders:0, revenue:0, cost:0, no_waybill:0 };
+      if (!supplierMap[supplier]) supplierMap[supplier] = { name:supplier, orders:0, revenue:0, cost:0, profit:0, no_waybill:0 };
       supplierMap[supplier].orders++;
       supplierMap[supplier].revenue += amount;
       supplierMap[supplier].cost    += hiredCost;
+      supplierMap[supplier].profit  += profit;
       if (!hw && !isInternalOrder) supplierMap[supplier].no_waybill++;
     }
 
@@ -5316,6 +5371,21 @@ function aggregateOrdersRows(rows) {
     }
   }
 
+  // Порог 23% - по компании за месяц ЦЕЛИКОМ (см. комментарий в начале цикла выше). Считаем
+  // ОДИН РАЗ по итогам всех строк, затем разово раскладываем накопленный hired_margin_total
+  // каждого менеджера/логиста в qualified/unqualified - весь наём месяца либо весь считается,
+  // либо весь нет, единообразно для всех.
+  const companyMarginPct = hiredAmountRev > 0 ? (hiredProfit / hiredAmountRev) : 0;
+  const companyMarginQualifies = companyMarginPct >= 0.23;
+  Object.values(managerMap).forEach(function(m) {
+    if (companyMarginQualifies) { m.hired_margin_qualified = m.hired_margin_total; m.hired_margin_unqualified = 0; }
+    else { m.hired_margin_qualified = 0; m.hired_margin_unqualified = m.hired_margin_total; }
+  });
+  Object.values(logistMap).forEach(function(l) {
+    if (companyMarginQualifies) { l.hired_margin_qualified = l.hired_margin_total; l.hired_margin_unqualified = 0; }
+    else { l.hired_margin_qualified = 0; l.hired_margin_unqualified = l.hired_margin_total; }
+  });
+
   // Строим by_customer с вычисленным главным менеджером
   const customerList = Object.values(customerMap).map(function(c) {
     const topMgr = Object.keys(c.mgr_counts).sort(function(a,b){ return c.mgr_counts[b]-c.mgr_counts[a]; })[0] || '';
@@ -5329,9 +5399,15 @@ function aggregateOrdersRows(rows) {
   // Клиенты, пропавшие во 2-й половине
   const lostCustomers = customerList.filter(function(c){ return c.first_half > 0 && c.second_half === 0; });
 
-  // Поставщики найма с маржой
+  // Поставщики найма с маржой. Маржа = накопленное поле "Прибыль" 1С (s.profit), НЕ
+  // revenue-cost - диагностика 2026-08-06 (diagnoseHiredMarginMismatch) показала, что колонка
+  // "Стоимость привлечённой техники" не всегда заполняется в отчёте 1С (пример - заказ
+  // #471953 МАШРЕЗЕРВ: Затраты=0 хотя Прибыль(1С)=95000 при Сумме=110000 - 1С корректно
+  // видит реальную стоимость найма, наша колонка "Затраты" её не получила), из-за чего
+  // revenue-cost завышал маржу. "Прибыль" - тот же надёжный источник, что уже кормит
+  // зарплату (hiredProfit/managerMap/logistMap) - теперь везде одно число.
   const supplierList = Object.values(supplierMap).map(function(s) {
-    const margin = s.revenue - s.cost;
+    const margin = s.profit;
     return {
       name: s.name, orders: s.orders, revenue: s.revenue, cost: s.cost,
       margin: margin, margin_pct: s.revenue > 0 ? Math.round(margin / s.revenue * 100) : 0,
@@ -5385,6 +5461,8 @@ function aggregateOrdersRows(rows) {
       total_amount_thru_yesterday: totalAmountThruYesterday, // числитель прогноза, см. isThruYesterday выше
       total_payment:   totalPayment,
       hired_profit:    hiredProfit,    // прибыль только по найму
+      hired_margin_pct: companyMarginPct,           // = hiredProfit/hiredAmountRev, порог 23% для 8/8/2/2
+      hired_margin_qualifies: companyMarginQualifies,
       total_hired_cost: totalHiredCost,
       total_balance:   totalBalance,
       internal_orders: internalOrders,

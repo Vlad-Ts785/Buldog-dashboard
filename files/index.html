@@ -4116,12 +4116,12 @@ function renderSalesSalary() {
   }
 
   function calcHead(members, headSur, useNewRules) {
-    var deptRev = 0, deptHired = 0, deptQualMargin = 0, deptExtraCosts = 0, above2m = 0;
-    var memberCount = members.length;
+    var deptRev = 0, deptHired = 0, deptQualMargin = 0, deptExtraCosts = 0, above2m = 0, activeCount = 0;
     members.forEach(function(sur) {
       if (sur.toLowerCase() === headSur.toLowerCase()) return;
       var m = getM(sur);
-      if (!m) return;
+      if (!m || !(m.amount||0)) return; // не активен (нет выручки за период - скорее всего уволен) - не считаем ни в выручку отдела, ни в численность команды
+      activeCount++;
       if (useNewRules) {
         deptRev += (m.amount||0);
         deptQualMargin += (m.hired_margin_qualified||0);
@@ -4137,10 +4137,24 @@ function renderSalesSalary() {
     });
     var pct08   = Math.round(deptRev * 0.008);
     var margin2 = useNewRules ? Math.round(deptQualMargin * 0.02) : (deptHired > 0 ? Math.round(deptHired * 0.02) : 0);
-    var mgrBonus = memberCount > 4 ? above2m * 20000 : 0;
+    // Премия за укомплектованность (Влад, 2026-08-06): "если в команде 4 менеджера [не считая
+    // руководителя] - за всех, кто делает больше 2 млн, по 20 тыс; если условие 4 человека не
+    // выдержано - ноль". Считаем только АКТИВНЫХ (есть выручка за месяц) - уволенный без
+    // выручки не должен ни спасать, ни портить численность команды.
+    var mgrBonus = activeCount >= 4 ? above2m * 20000 : 0;
     var total = 20000 + pct08 + margin2 + mgrBonus;
     return { deptRev:deptRev, deptHired:deptHired, deptQualMargin:deptQualMargin, deptExtraCosts:deptExtraCosts, pct08:pct08, margin2:margin2,
-             mgrBonus:mgrBonus, above2m:above2m, memberCount:memberCount, total:total };
+             mgrBonus:mgrBonus, above2m:above2m, memberCount:activeCount, total:total };
+  }
+
+  // Премия за объём >30М (Влад, 2026-08-06, только для Ахтамовой/Гусейновой - НЕ для
+  // Рыщанова): "после 30 млн выручки платим по 10 тыс за каждые 10 млн, то есть 32 456 737 -
+  // премия 30 тыс, 20 999 999 - премия ноль, 40 787 768 - премия 40 тыс". Не "превышение над
+  // 30М", а floor(выручка/10М)×10т, но ТОЛЬКО если выручка вообще перешла порог 30М - иначе 0.
+  // Проверено на всех трёх примерах Влада.
+  function calcVolumeBonus(deptRevTotal) {
+    if ((deptRevTotal||0) < 30000000) return 0;
+    return Math.floor(deptRevTotal / 10000000) * 10000;
   }
 
   // Рыщанов: 100к оклад + 50к если ВП своего парка >20М + 50к за каждые след. 5М
@@ -4257,7 +4271,11 @@ function renderSalesSalary() {
     } else {
       headHC = calcHead(dept.members, dept.head, useNewRules);
       headHM = dept.ownSales ? calcMgr(dept.head, false, getM, getL, useNewRules) : null;
-      headTotal = headHC.total + (headHM ? headHM.total_sal : 0);
+      // Премия за объём >30М (Влад, 2026-08-06) - только Ахтамова/Гусейнова, не Рыщанов
+      // (тот в этой ветке не оказывается - specialHead:false отсекает). Выручка отдела ЦЕЛИКОМ
+      // (менеджеры + личные продажи руководителя), не только "итого мен.".
+      var volumeBonus = useNewRules ? calcVolumeBonus(headHC.deptRev + (headHM ? (headHM.total||0) : 0)) : 0;
+      headTotal = headHC.total + (headHM ? headHM.total_sal : 0) + volumeBonus;
       headRC = null;
     }
 
@@ -4367,6 +4385,13 @@ function renderSalesSalary() {
       html += '<td class="num">'+(headHC.mgrBonus ? fr(headHC.mgrBonus) : '—')+'</td>';
       html += '<td class="num" style="font-weight:700;color:'+dept.color+'">'+fr(headHC.total)+'</td>';
       html += '</tr>';
+      if (volumeBonus) {
+        var deptRevTotal = headHC.deptRev + (headHM ? (headHM.total||0) : 0);
+        html += '<tr style="background:rgba(255,255,255,.02)">';
+        html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">Премия за объём (выручка отдела ≥30М): '+fr(deptRevTotal)+'</td>';
+        html += '<td colspan="9" class="num muted" style="font-size:11px">10т × '+Math.floor(deptRevTotal/10000000)+' (по 10М) = '+fr(volumeBonus)+'</td>';
+        html += '</tr>';
+      }
 
       if (headHM) {
         var headRateBadge = (headHM.rate*100).toString().replace('.', ',') + '%';
@@ -4397,13 +4422,14 @@ function renderSalesSalary() {
       }
     }
 
-    // Менеджеры отдела. Без данных за период (нет выручки) - строку не рисуем вовсе, не
-    // "нет данных" - скорее всего человек уволен (Влад, 2026-08-06: пример - Дербенцева,
-    // Коньшина, Володин).
+    // Менеджеры отдела. Без данных ИЛИ с нулевой выручкой за период - строку не рисуем вовсе,
+    // не "нет данных" - скорее всего человек уволен (Влад, 2026-08-06: пример - Дербенцева,
+    // Коньшина, Володин). !c.total ловит случай, когда запись в by_manager технически ЕСТЬ
+    // (m не null), но amount=0 - без этой проверки такие строки всё равно рендерились пустыми.
     memberCalcs.forEach(function(mc) {
       var sur = mc.sur;
       var c = mc.calc;
-      if (!c) return;
+      if (!c || !c.total) return;
       var rate = mgrRate(sur);
       var isDual = DUAL_LOGISTS.indexOf(sur.toLowerCase()) >= 0;
       html += '<tr>';

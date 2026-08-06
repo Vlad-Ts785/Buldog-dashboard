@@ -4578,6 +4578,93 @@ function mergeRawOrderRows_(existingData, newData) {
   return headerRows.concat(order.map(function(id) { return map[id]; }));
 }
 
+
+// РАЗОВЫЙ ХЕЛПЕР БЭКФИЛЛА (2026-08-06): дописывает заказы №468973 (40 000₽) и №469551 (0₽,
+// служебная строка) в архив Заказы_2026-07 - оба отсутствовали ВЕЗДЕ (см. diagnoseSavitokJuly/
+// findMissingSavitokOrders), причина - окно коррекции 1С "прошлый+текущий месяц" длится
+// только до 5-6 числа, заказ №468973 создан 30.06 (в это окно, видимо, не попал ни в один
+// наш прогон), к сегодняшнему дню 1С уже не пришлёт его снова ни в одном отчёте - слияние
+// (mergeRawOrderRows_, см. выше) чинит это НА БУДУЩЕЕ, но не восстанавливает задним числом
+// то, что мы вообще ни разу не видели.
+//
+// Данные подтверждены Владом (выгрузка 1С + скриншот карточки заказа, 2026-08-06). Поля,
+// для которых нет надёжного 1:1 соответствия с колонками архива (Организация, Подразделение,
+// Отдел, Старший менеджер и т.п. - не используются нигде в расчётах выручки/прибыли/зарплаты)
+// оставлены пустыми - не критично, и строка автоматически обновится, если 1С когда-нибудь
+// снова пришлёт этот заказ (тот же mergeRawOrderRows_ подхватит свежие данные по номеру).
+//
+// Читает РЕАЛЬНУЮ шапку архива по именам колонок (не жёстко по индексу) - формат 1С может
+// сдвигать колонки между отчётами, см. findOrdersHeaderRowIndex_. Идемпотентна - если номер
+// уже есть в архиве, повторно не добавляет (безопасно перезапускать). Удалить после проверки.
+function backfillMissingSavitokOrders() {
+  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  const archiveName = ORDERS_ARCHIVE_PFX + '2026-07';
+  const sheet = ss.getSheetByName(archiveName);
+  if (!sheet) throw new Error('Нет листа ' + archiveName);
+
+  const allData = sheet.getDataRange().getValues();
+  const headerIdx = findOrdersHeaderRowIndex_(allData);
+  const headerRow = allData[headerIdx];
+  const colOf = {};
+  headerRow.forEach(function(h, i) { var k = String(h || '').trim(); if (k) colOf[k] = i; });
+
+  // Уже есть? (идемпотентность)
+  const numCol = colOf['Номер'];
+  if (numCol === undefined) throw new Error('Колонка "Номер" не найдена в шапке архива');
+  const existingIds = {};
+  allData.slice(headerIdx + 1).forEach(function(row) { existingIds[String(row[numCol] || '').trim()] = true; });
+
+  function buildRow(values) {
+    const row = new Array(headerRow.length).fill('');
+    Object.keys(values).forEach(function(name) {
+      if (name in colOf) row[colOf[name]] = values[name];
+      else Logger.log('⚠️ Колонка "' + name + '" не найдена в шапке архива - значение "' + values[name] + '" пропущено');
+    });
+    return row;
+  }
+
+  const order468973 = {
+    'Номер': '468973',
+    'Дата': '30.06.2026',
+    'Начало работ': '01.07.2026',
+    'Окончание работ': '01.07.2026',
+    'Менеджер по продажам': 'Савиток Олеся Анатольевна 8-985-150-11-85',
+    'Менеджер по снабжению': 'Махура Николай Геннадьевич +7 989 581 8582',
+    'Водитель': 'Егоров Сергей Степанович',
+    'Заказчик': 'ГЕОСПЕЦСТРОЙ АО',
+    'Тип техники': 'Трал',
+    'Оборудование техники': 'Трал габарит',
+    'Данные по машине': 'КАМАЗ 5490-S5 Х981СА750',
+    'Груз': 'Экскаватор Zoomlion ZE215E/ZE215E-10',
+    'Путевка': 'Да',
+    'Привлеченная техника': 'Нет',
+    'Сумма': 40000,
+    'Прибыль': 40000,
+    'Договор': 'Договор № 01/01/25Т/2025 от 01.01.2025'
+  };
+  const order469551 = {
+    'Номер': '469551',
+    'Начало работ': '03.07.2026',
+    'Окончание работ': '03.07.2026',
+    'Менеджер по продажам': 'Савиток Олеся Анатольевна 8-985-150-11-85',
+    'Путевка': 'Нет',
+    'Привлеченная техника': 'Нет',
+    'Договор': 'Договор № 10011 от 10.04.2025',
+    'Вариант расчета': 'Прочее'
+  };
+
+  const toAdd = [];
+  [order468973, order469551].forEach(function(o) {
+    if (existingIds[o['Номер']]) { Logger.log('Заказ №' + o['Номер'] + ' уже есть в архиве - пропущен'); return; }
+    toAdd.push(buildRow(o));
+  });
+
+  if (toAdd.length === 0) { Logger.log('Оба заказа уже есть - ничего не добавлено'); return; }
+
+  sheet.getRange(sheet.getLastRow() + 1, 1, toAdd.length, headerRow.length).setValues(toAdd);
+  Logger.log('✅ Добавлено строк: ' + toAdd.length + ' в ' + archiveName);
+}
+
 // ── АРХИВАЦИЯ при смене месяца ───────────────────────────────
 
 // Возвращает { action: 'normal' } если можно обычным образом перезаписать живую таблицу,

@@ -762,7 +762,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
         </div>
         <div id="cust-tab-hire" style="display:none;overflow-x:auto">
           <table class="tbl">
-            <thead><tr><th>Партнёр (исполнитель)</th><th class="num">Выручка</th><th class="num">Затраты</th><th class="num">Маржа</th><th class="num">%</th><th class="num">Зак.</th><th style="min-width:130px">Шкала маржи</th></tr></thead>
+            <thead><tr><th>Партнёр (исполнитель)</th><th class="num">Выручка</th><th class="num" title="Что заплатили перевозчику - раньше называлось 'Затраты'">Стоимость найма</th><th class="num" title="Вознаграждения, спецразрешение и т.п. из 1С - раньше не показывались отдельно">Затраты</th><th class="num">Маржа</th><th class="num">%</th><th class="num">Зак.</th><th style="min-width:130px">Шкала маржи</th></tr></thead>
             <tbody id="cust-hire-body"></tbody>
             <tfoot><tr id="cust-hire-foot"></tr></tfoot>
           </table>
@@ -3422,6 +3422,7 @@ function renderSales() {
           '<td><b>' + sup.name + '</b></td>' +
           '<td class="num">' + fmtK2(sup.revenue||0) + '</td>' +
           '<td class="num red">' + fmtK2(sup.cost||0) + '</td>' +
+          '<td class="num amber">' + fmtK2(sup.extra_costs||0) + '</td>' +
           '<td class="num green">' + fmtK2(sup.margin||0) + '</td>' +
           '<td class="num" style="color:' + mc + '">' + mp + '%</td>' +
           '<td class="num muted">' + (sup.orders||0) + '</td>' +
@@ -3433,13 +3434,14 @@ function renderSales() {
           '</div></td>' +
         '</tr>';
       }).join('')
-    : '<tr><td colspan="7" class="muted" style="padding:14px">Нет данных по найму</td></tr>';
+    : '<tr><td colspan="8" class="muted" style="padding:14px">Нет данных по найму</td></tr>';
 
   const hireFoot = document.getElementById('cust-hire-foot');
   if (hireFoot) {
     if (suppliers.length) {
       const tRev = suppliers.reduce(function(s,x){ return s+(x.revenue||0); }, 0);
       const tCost = suppliers.reduce(function(s,x){ return s+(x.cost||0); }, 0);
+      const tExtra = suppliers.reduce(function(s,x){ return s+(x.extra_costs||0); }, 0);
       const tMargin = suppliers.reduce(function(s,x){ return s+(x.margin||0); }, 0);
       const tOrders = suppliers.reduce(function(s,x){ return s+(x.orders||0); }, 0);
       const tMarginPct = tRev > 0 ? Math.round(tMargin/tRev*100) : 0;
@@ -3447,6 +3449,7 @@ function renderSales() {
         '<td style="font-weight:600">Итого (' + suppliers.length + ' партнёров)</td>' +
         '<td class="num" style="font-weight:600">' + fmtK2(tRev) + '</td>' +
         '<td class="num red" style="font-weight:600">' + fmtK2(tCost) + '</td>' +
+        '<td class="num amber" style="font-weight:600">' + fmtK2(tExtra) + '</td>' +
         '<td class="num green" style="font-weight:600">' + fmtK2(tMargin) + '</td>' +
         '<td class="num" style="font-weight:600">' + tMarginPct + '%</td>' +
         '<td class="num" style="font-weight:600">' + tOrders + '</td>' +
@@ -3982,17 +3985,23 @@ function calcMgr(sur, includeOklad, getM, getL, useNewRules) {
   var rate = mgrRate(sur);
 
   if (useNewRules) {
-    var total = m.amount || 0; // "месячный оборот" по приказу - вся выручка, свой парк + найм
-    var ownAmount = m.own_amount || 0;
+    var total = m.amount || 0; // "месячный оборот" по приказу (для ступени оклада) - вся выручка, свой парк + найм
+    var ownAmount = m.own_amount || 0; // валовая выручка своего парка - показываем как есть, для контекста
+    // База % комиссии своего парка - НЕ валовая выручка, а выручка минус три статьи затрат 1С
+    // (Вознаграждение 1/2, Спецразрешение и т.п.) - Влад, 2026-08-06: "зарплата по своему
+    // парку считается от выручки минус эти затраты, и уже умножаем на %". own_profit уже
+    // содержит это вычитание (см. aggregateOrdersRows на бэкенде - own_profit = Прибыль по
+    // не-наёмным заказам, та же логика, что и "Прибыль" 1С для найма).
+    var ownProfitBase = m.own_profit || 0;
     var qualMargin = m.hired_margin_qualified || 0;
     var unqualMargin = m.hired_margin_unqualified || 0;
     var oklad = (includeOklad !== false) ? okladByRev(total) : 0;
-    var ownComm = Math.round(ownAmount * rate);
+    var ownComm = Math.round(ownProfitBase * rate);
     var hiredBonus = Math.round(qualMargin * 0.08);
     var bonus15m = total >= 15000000 ? 100000 : 0;
     var total_sal = oklad + ownComm + hiredBonus + bonus15m;
     return {
-      sur:sur, total:total, ownRev:ownAmount, hiredMargin:qualMargin, hiredMarginUnqual:unqualMargin,
+      sur:sur, total:total, ownRev:ownAmount, ownProfitBase:ownProfitBase, hiredMargin:qualMargin, hiredMarginUnqual:unqualMargin,
       oklad:oklad, ownComm:ownComm, hiredBonus:hiredBonus,
       logPart:0, nonLogPart:0, bonus15m:bonus15m,
       total_sal:total_sal, rate:rate, isPrus:false, prusHiredPct:null, newRules:true
@@ -4356,6 +4365,12 @@ function renderSalesSalary() {
         html += '<td class="num">'+(headHM.bonus15m ? fr(headHM.bonus15m) : '—')+'</td>';
         html += '<td class="num" style="font-weight:700;color:'+dept.color+'">'+fr(headHM.total_sal)+'</td>';
         html += '</tr>';
+        if (headHM.newRules && headHM.ownProfitBase !== undefined && Math.abs(headHM.ownProfitBase - headHM.ownRev) > 1) {
+          html += '<tr style="background:rgba(255,255,255,.02)">';
+          html += '<td style="padding-left:44px;font-size:11px;color:var(--muted)">База % своего парка: '+fr(headHM.ownRev)+' выручка минус вознаграждения/спецразрешение = <b>'+fr(headHM.ownProfitBase)+'</b></td>';
+          html += '<td colspan="8" class="num muted" style="font-size:11px">'+(headHM.rate*100).toString().replace('.', ',')+'% × '+fr(headHM.ownProfitBase)+' = '+fr(headHM.ownComm)+'</td>';
+          html += '</tr>';
+        }
         html += hiredBreakdownRow(headHM, 44);
         html += '<tr style="border-top:1px solid rgba(255,255,255,.06)">';
         html += '<td colspan="8" style="font-size:12px;color:var(--muted);text-align:right;padding-right:12px">Итого '+dept.headName.split(' ')[0]+'</td>';
@@ -4391,6 +4406,15 @@ function renderSalesSalary() {
       html += '<td class="num">'+(c.bonus15m ? fr(c.bonus15m) : '—')+'</td>';
       html += '<td class="num" style="font-weight:600;color:'+dept.color+'">'+fr(c.total_sal)+'</td>';
       html += '</tr>';
+      // Комиссия своего парка считается не с валовой выручки, а с выручки минус вознаграждения/
+      // спецразрешение (см. ownProfitBase в calcMgr) - показываем базу, если она отличается от
+      // валовой выручки, чтобы не выглядело как расхождение в цифрах.
+      if (c.newRules && c.ownProfitBase !== undefined && Math.abs(c.ownProfitBase - c.ownRev) > 1) {
+        html += '<tr style="background:rgba(255,255,255,.02)">';
+        html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">База % своего парка: '+fr(c.ownRev)+' выручка минус вознаграждения/спецразрешение = <b>'+fr(c.ownProfitBase)+'</b></td>';
+        html += '<td colspan="8" class="num muted" style="font-size:11px">'+(c.rate*100).toString().replace('.', ',')+'% × '+fr(c.ownProfitBase)+' = '+fr(c.ownComm)+'</td>';
+        html += '</tr>';
+      }
       // Суб-строка разбивки найма только для НЕ-Пруса (у Пруса единая ставка, и только до июля)
       if (!c.isPrus) {
         html += hiredBreakdownRow(c, 24);

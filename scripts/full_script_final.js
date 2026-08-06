@@ -5191,7 +5191,7 @@ function aggregateOrdersRows(rows) {
       if (!managerMap[mgrSales]) {
         managerMap[mgrSales] = { name: mgrSales, orders:0, amount:0, amount_thru_yesterday:0, payment:0, cash:0, profit:0, hired_orders:0, hired_cost:0,
           internal_orders:0, internal_amount:0, internal_amount_thru_yesterday:0, internal_payment:0,
-          own_amount:0, hired_margin_total:0, hired_margin_qualified:0, hired_margin_unqualified:0,
+          own_amount:0, own_profit:0, hired_margin_total:0, hired_margin_qualified:0, hired_margin_unqualified:0,
           today_new_orders:0, today_new_amount:0, today_new_list:[] };
       }
       const m = managerMap[mgrSales];
@@ -5214,7 +5214,13 @@ function aggregateOrdersRows(rows) {
       if (isHired) {
         m.hired_orders++; m.hired_cost += hiredCost; m.hired_margin_total += profit;
       } else {
-        m.own_amount += amount;
+        // own_profit = "Сумма" минус три статьи затрат 1С (Вознаграждение 1/2, Спецразрешение
+        // и т.п. - НДС-корректировки при работе с поставщиками без НДС и др.), которые уже
+        // нетто в поле "Прибыль" (Стоимость привлечённого тут 0 - заказ не наёмный). Влад,
+        // 2026-08-06: "зарплата по своему парку считается от выручки минус эти затраты, и уже
+        // умножаем на %" - own_amount оставлен для отображения (валовая выручка), own_profit -
+        // база для % комиссии (см. calcMgr на фронтенде).
+        m.own_amount += amount; m.own_profit += profit;
       }
       var mgrDet = mgrDetail(mgrSales);
       mgrDet.rows_total++;
@@ -5300,11 +5306,19 @@ function aggregateOrdersRows(rows) {
     if (isHired) {
       const supplier = str(row, 'hired');
       const isInternalOrder = isInt || ordInList(str(row, 'customer'), INTERNAL_CLIENTS);
-      if (!supplierMap[supplier]) supplierMap[supplier] = { name:supplier, orders:0, revenue:0, cost:0, profit:0, no_waybill:0 };
+      if (!supplierMap[supplier]) supplierMap[supplier] = { name:supplier, orders:0, revenue:0, cost:0, extra_costs:0, profit:0, no_waybill:0 };
       supplierMap[supplier].orders++;
       supplierMap[supplier].revenue += amount;
-      supplierMap[supplier].cost    += hiredCost;
+      supplierMap[supplier].cost    += hiredCost; // "Стоимость найма" - что заплатили перевозчику
       supplierMap[supplier].profit  += profit;
+      // "Затраты" (новый смысл, Влад 2026-08-06) - сумма трёх статей 1С (Вознаграждение 1/2,
+      // Спецразрешение и т.п. - включая НДС-корректировки при работе с поставщиками без НДС),
+      // которые в саму Заказы_данные отдельными колонками не приходят, только нетто внутри
+      // "Прибыль". Выводим обратным счётом: Сумма - Стоимость найма - Прибыль = эти затраты
+      // (сверено с живым заказом 1С #470632 ТД ДЗЖБИ: 50000-35000-7300=7700, совпадает с
+      // "Сумма вознаграждения 2" в 1С день в день). margin (см. supplierList ниже) остаётся
+      // равен "Прибыль" - именно эта сумма и есть маржа с учётом всех затрат.
+      supplierMap[supplier].extra_costs += (amount - hiredCost - profit);
       if (!hw && !isInternalOrder) supplierMap[supplier].no_waybill++;
     }
 
@@ -5406,16 +5420,19 @@ function aggregateOrdersRows(rows) {
   const lostCustomers = customerList.filter(function(c){ return c.first_half > 0 && c.second_half === 0; });
 
   // Поставщики найма с маржой. Маржа = накопленное поле "Прибыль" 1С (s.profit), НЕ
-  // revenue-cost - диагностика 2026-08-06 (diagnoseHiredMarginMismatch) показала, что колонка
-  // "Стоимость привлечённой техники" не всегда заполняется в отчёте 1С (пример - заказ
-  // #471953 МАШРЕЗЕРВ: Затраты=0 хотя Прибыль(1С)=95000 при Сумме=110000 - 1С корректно
-  // видит реальную стоимость найма, наша колонка "Затраты" её не получила), из-за чего
-  // revenue-cost завышал маржу. "Прибыль" - тот же надёжный источник, что уже кормит
-  // зарплату (hiredProfit/managerMap/logistMap) - теперь везде одно число.
+  // revenue-cost - диагностика 2026-08-06 (diagnoseHiredMarginMismatch, архив июля) нашла
+  // причину расхождения: в 1С у заказов найма есть ещё три статьи затрат сверх "Стоимости
+  // привлечённой техники" (Вознаграждение 1, Вознаграждение 2, Спецразрешение - в т.ч.
+  // НДС-корректировки при работе с поставщиками без НДС), которые в Заказы_данные отдельно
+  // не приходят, только нетто внутри "Прибыль" (Влад подтвердил на живом заказе 1С #470632
+  // ТД ДЗЖБИ: Сумма 50000 - Стоимость найма 35000 - Вознаграждение2 7700 = Прибыль 7300).
+  // cost = "Стоимость найма" (что заплатили перевозчику), extra_costs = эти три статьи
+  // (выведены обратным счётом, см. supplierMap выше). margin = profit = revenue - cost -
+  // extra_costs - тот же источник, что уже кормит зарплату (hiredProfit/managerMap/logistMap).
   const supplierList = Object.values(supplierMap).map(function(s) {
     const margin = s.profit;
     return {
-      name: s.name, orders: s.orders, revenue: s.revenue, cost: s.cost,
+      name: s.name, orders: s.orders, revenue: s.revenue, cost: s.cost, extra_costs: s.extra_costs,
       margin: margin, margin_pct: s.revenue > 0 ? Math.round(margin / s.revenue * 100) : 0,
       no_waybill: s.no_waybill,
     };

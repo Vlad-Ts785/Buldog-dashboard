@@ -4816,6 +4816,38 @@ function diagnoseHiredMarginMismatchJuly() {
   return diagnoseHiredMarginMismatch('2026-07');
 }
 
+
+// РАЗОВЫЙ ДИАГНОСТИЧЕСКИЙ ХЕЛПЕР (2026-08-06): ищет заказы №468973 и №469551 (отсутствуют в
+// Заказы_2026-07, см. diagnoseSavitokJuly) по ВСЕМ листам "Заказы_*" (все архивы + живой
+// Заказы_данные) - проверяем, не осели ли они в другом месяце по ошибке распределения
+// (был похожий баг в splitOrdersRawByMonth(), версии 134-135), или их действительно нет
+// нигде (гэп на стороне отчёта 1С, см. project_1c_orders_report_period_monthly_shift).
+function findMissingSavitokOrders() {
+  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  const targets = ['468973', '469551'];
+  const sheets = ss.getSheets().filter(function(s) { return s.getName().indexOf('Заказы_') === 0; });
+  Logger.log('Ищу в ' + sheets.length + ' листах: ' + sheets.map(function(s){return s.getName();}).join(', '));
+
+  targets.forEach(function(target) {
+    var found = [];
+    sheets.forEach(function(sheet) {
+      var lastRow = sheet.getLastRow();
+      if (lastRow < 2) return;
+      var lastCol = sheet.getLastColumn();
+      var data = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+      data.forEach(function(row, i) {
+        for (var c = 0; c < row.length; c++) {
+          if (String(row[c]).trim() === target) {
+            found.push(sheet.getName() + ' строка ' + (i+1) + ' колонка ' + (c+1));
+            break;
+          }
+        }
+      });
+    });
+    Logger.log('Заказ №' + target + ': ' + (found.length ? found.join(' | ') : 'НЕ НАЙДЕН нигде'));
+  });
+}
+
 // РАЗОВЫЙ ДИАГНОСТИЧЕСКИЙ ХЕЛПЕР (2026-08-06, только читает): сверка выручки Савиток за июль.
 // Влад выгрузил список заказов менеджера прямо из 1С (234 строки, "Сверка.xlsx", сумма
 // "Сумма" = 10 596 690 - совпадает с отчётом "План-факт" 1С). На дашборде за тот же период

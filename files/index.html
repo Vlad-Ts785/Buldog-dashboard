@@ -4046,6 +4046,16 @@ function calcLogist(sur, getL, useNewRules) {
   };
 }
 
+// Васин - особая формула (Влад, 2026-08-06): не как остальные логисты (500₽/заявка + 8%
+// маржи найма), а 2.5% от валовой прибыли (ВП) длинномеров ЦЕЛИКОМ ПО КОМПАНИИ
+// (D.summary.profit_long - тот же источник, что уже использует Рыщанов для своей ВП), не
+// только его личные заказы. Не зависит от того, есть ли у Васина в этом периоде свои
+// заявки - формула привязана к результату всей группы длинномеров.
+function calcVasin(profitLong) {
+  var bonus = Math.round((profitLong||0) * 0.025);
+  return { sur:'васин', profitLong:(profitLong||0), bonus:bonus, total: bonus };
+}
+
 function renderSalesSalary() {
   if (!D || !D.orders) return;
   var el = document.getElementById('salary-content');
@@ -4122,7 +4132,11 @@ function renderSalesSalary() {
 
   // Рыщанов: 100к оклад + 50к если ВП своего парка >20М + 50к за каждые след. 5М
   // С июля 2026: + 2% от квалифицирующей маржи найма, которую сгенерировали все логисты
-  function calcRyschanow(grossProfit, qualMarginAllLogists, useNewRules) {
+  // С 01.07.2026 (приказ №01/07/26, Гонтюрев А.А., действует до 01.11.2026 - см.
+  // RISCHANOV_ORDER_UNTIL в backend): + 1% от ВП трёх конкретных тралов (не всего парка) -
+  // приходит с бэкенда уже посчитанным в D.summary.special_trals_profit (0, если приказ
+  // истёк по дате).
+  function calcRyschanow(grossProfit, qualMarginAllLogists, useNewRules, specialTralsProfit) {
     var oklad = 100000;
     var bonus = 0;
     if (grossProfit > 20000000) {
@@ -4130,8 +4144,10 @@ function renderSalesSalary() {
       bonus = 50000 + steps * 50000;
     }
     var hiredCut = useNewRules ? Math.round((qualMarginAllLogists||0) * 0.02) : 0;
+    var specialTralsBonus = Math.round((specialTralsProfit||0) * 0.01);
     return { oklad:oklad, bonus:bonus, hiredCut:hiredCut, qualMarginAllLogists:(qualMarginAllLogists||0),
-             total:oklad + bonus + hiredCut, grossProfit:grossProfit };
+             specialTralsBonus:specialTralsBonus, specialTralsProfit:(specialTralsProfit||0),
+             total:oklad + bonus + hiredCut + specialTralsBonus, grossProfit:grossProfit };
   }
 
   // Валовая прибыль (ВП) = только собственный парк, считается чётко в Нормализованных_данных.
@@ -4159,8 +4175,11 @@ function renderSalesSalary() {
     { color:'#378ADD', bgA:'55,138,221', label:'Отдел Гусейновой', head:'гусейнова', headName:'Гусейнова Айнур', ownSales:true, specialHead:false,
       members:['гусейнова','савиток','филипчук','котельников','гуляева','коньшина','володин'] },
     { color:'#BA7517', bgA:'186,117,23', label:'Отдел Рыщанова',   head:'рыщанов',   headName:'Рыщанов Рустем',  ownSales:false, specialHead:true,
-      // С июля Прус не менеджер - убираем из списка продавцов отдела
-      members: useNewRules ? ['рыщанов','суркова'] : ['рыщанов','прус-роскошный','суркова'] },
+      // С июля - весь отдел логистики одним блоком: Рыщанов (рук.) + все логисты
+      // (Влад, 2026-08-06: "это и есть отдел логистики"). members тут - только для шапки
+      // карточки (subNames) и списка "кто в отделе"; сами строки таблицы логисты/Васин
+      // рендерятся отдельным кодом ниже (calcLogist/calcVasin - другая формула, не calcMgr).
+      members: useNewRules ? ['рыщанов'].concat(ALL_LOGISTS) : ['рыщанов','прус-роскошный','суркова'] },
   ];
 
   var totalPayroll = 0;
@@ -4189,8 +4208,26 @@ function renderSalesSalary() {
   DEPTS.forEach(function(dept) {
     var headTotal, headHC, headHM, headRC;
 
+    // Логисты внутри «Отдел Рыщанова» (с июля) - отдельная формула, не calcMgr. Считаем ДО
+    // deptFund, чтобы фонд отдела включал их бонусы. Васин - особая формула (calcVasin), все
+    // остальные - обычный calcLogist (500₽/заявка + 8% квалиф. маржи найма).
+    var logistCalcs = [];
+    if (dept.specialHead && useNewRules) {
+      ALL_LOGISTS.forEach(function(sur) {
+        if (sur === 'васин') {
+          var profitLong = (D.summary||{}).profit_long || 0;
+          logistCalcs.push({ sur:sur, isVasin:true, calc: calcVasin(profitLong) });
+        } else {
+          var lc = calcLogist(sur, getL, true);
+          if (lc) logistCalcs.push({ sur:sur, isVasin:false, calc:lc });
+        }
+      });
+    }
+    var logistTotal = logistCalcs.reduce(function(s,lc){ return s + (lc.calc ? lc.calc.total : 0); }, 0);
+
     if (dept.specialHead) {
-      headRC = calcRyschanow(grossProfit, qualMarginAllLogists, useNewRules);
+      var specialTralsProfit = (D.summary||{}).special_trals_profit || 0;
+      headRC = calcRyschanow(grossProfit, qualMarginAllLogists, useNewRules, specialTralsProfit);
       headTotal = headRC.total;
       headHC = null; headHM = null;
     } else {
@@ -4203,13 +4240,21 @@ function renderSalesSalary() {
     var memberCalcs = dept.members.filter(function(s){ return s !== dept.head; }).map(function(sur){
       return { sur:sur, calc:calcMgr(sur, true, getM, getL, useNewRules) };
     });
-    var deptFund = headTotal + memberCalcs.reduce(function(s,mc){ return s + (mc.calc ? mc.calc.total_sal : 0); }, 0);
+    var deptFund = headTotal + memberCalcs.reduce(function(s,mc){ return s + (mc.calc ? mc.calc.total_sal : 0); }, 0) + logistTotal;
     totalPayroll += deptFund;
 
     html += '<div class="card" style="margin-bottom:16px;padding:0;overflow:hidden">';
     html += '<div style="border-left:3px solid '+dept.color+';padding:12px 16px;background:rgba(255,255,255,.03);display:flex;align-items:center;justify-content:space-between">';
     html += '<div><div style="font-size:13px;font-weight:600;color:'+dept.color+'">'+dept.label+'</div>';
-    var subNames = dept.members.filter(function(s){ return s!==dept.head; }).map(capName).join(' · ');
+    // Уволенные (нет данных за период) не попадают в шапку - Влад, 2026-08-06. Васин -
+    // исключение: его формула не зависит от личных заявок, скрывать его по "нет заказов"
+    // нельзя (см. calcVasin).
+    var subNames = dept.members.filter(function(s){
+      if (s === dept.head) return false;
+      if (s === 'васин') return true;
+      var mChk = getM(s), lChk = getL(s);
+      return !!((mChk && (mChk.amount||0) > 0) || (lChk && (lChk.orders||0) > 0));
+    }).map(capName).join(' · ');
     html += '<div style="font-size:11px;color:var(--muted);margin-top:2px">'+subNames+'</div></div>';
     html += '<div style="text-align:right"><div style="font-size:11px;color:var(--muted)">Фонд отдела</div>';
     html += '<div style="font-size:15px;font-weight:700;color:'+dept.color+'">'+fr(deptFund)+'</div></div></div>';
@@ -4227,6 +4272,7 @@ function renderSalesSalary() {
         rNote += ' + бонус при ВП своего парка >20М';
       }
       if (useNewRules) rNote += ' + 2% маржи найма логистов (маржа ≥23%)';
+      if (headRC.specialTralsBonus) rNote += ' + 1% ВП 3 спецтралов (приказ №01/07/26)';
       html += '<tr style="background:rgba('+dept.bgA+',.07)">';
       html += '<td><b>'+dept.headName+'</b> <span style="font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(255,255,255,.1);color:var(--muted)">рук.</span>';
       html += '<div style="font-size:10px;color:var(--muted);margin-top:2px">'+rNote+'</div></td>';
@@ -4237,6 +4283,46 @@ function renderSalesSalary() {
       html += '<td class="num">'+(headRC.bonus ? fr(headRC.bonus) : '—')+'</td>';
       html += '<td class="num" style="font-weight:700;color:'+dept.color+'">'+fr(headRC.total)+'</td>';
       html += '</tr>';
+      if (headRC.specialTralsBonus) {
+        html += '<tr style="background:rgba(255,255,255,.02)">';
+        html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">Приказ №01/07/26 - 1% от ВП 3 тралов (В776ЕТ797, М800АЕ797, О894ХМ797), до 01.11.2026</td>';
+        html += '<td colspan="8" class="num muted" style="font-size:11px">ВП спецтралов '+fr(headRC.specialTralsProfit)+' × 1% = '+fr(headRC.specialTralsBonus)+'</td>';
+        html += '</tr>';
+      }
+      // Логисты отдела - строки внутри той же таблицы (см. logistCalcs выше)
+      logistCalcs.forEach(function(lc) {
+        var sur = lc.sur, c = lc.calc;
+        html += '<tr>';
+        html += '<td style="padding-left:16px"><b>'+capName(sur)+'</b>';
+        html += '<div style="font-size:10px;color:var(--muted);margin-top:2px">'+(lc.isVasin
+          ? '2.5% от ВП длинномеров (компания)'
+          : '500 руб./заявка своя техника + 8% маржи найма (≥23%)')+'</div></td>';
+        if (lc.isVasin) {
+          html += '<td class="num muted" colspan="7" style="font-size:11px">ВП длинномеров (компания): '+fr(c.profitLong)+' × 2.5%</td>';
+          html += '<td class="num" style="font-weight:600;color:'+dept.color+'">'+fr(c.total)+'</td>';
+        } else {
+          var l = getL(sur);
+          html += '<td class="num">'+(l.amount?fr(l.amount):'—')+'</td>';
+          html += '<td class="num">'+c.ownOrders+' <span style="font-size:10px;color:var(--muted)">заявок</span></td>';
+          html += '<td class="num" style="color:#1D9E75">'+fr(c.qualMargin)+'</td>';
+          html += '<td class="num muted">—</td>';
+          html += '<td class="num">'+(c.flatBonus?fr(c.flatBonus):'—')+'</td>';
+          html += '<td class="num">'+(c.marginBonus?fr(c.marginBonus):'—')+'</td>';
+          html += '<td class="num muted">—</td>';
+          html += '<td class="num" style="font-weight:600;color:'+dept.color+'">'+fr(c.total)+'</td>';
+        }
+        html += '</tr>';
+        if (!lc.isVasin && (c.qualMargin || c.unqualMargin)) {
+          html += '<tr style="background:rgba(255,255,255,.02)">';
+          html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">';
+          if (c.qualMargin) html += '<span style="color:#1D9E75;font-weight:500">'+fr(c.qualMargin)+'</span> маржа ≥23% <span style="background:rgba(29,158,117,.15);color:#1D9E75;padding:1px 4px;border-radius:3px;font-size:10px">8%</span>';
+          if (c.qualMargin && c.unqualMargin) html += ' &nbsp;/&nbsp; ';
+          if (c.unqualMargin) html += '<span style="color:var(--muted)">'+fr(c.unqualMargin)+'</span> маржа &lt;23% <span style="background:rgba(255,255,255,.08);color:var(--muted);padding:1px 4px;border-radius:3px;font-size:10px">0%</span>';
+          html += '</td>';
+          html += '<td colspan="8" class="num muted" style="font-size:11px">500₽×'+c.ownOrders+' = '+fr(c.flatBonus)+' + 8% = '+fr(c.marginBonus)+'</td>';
+          html += '</tr>';
+        }
+      });
     } else {
       // Обычный руководитель (Ахтамова, Гусейнова)
       var headNote = useNewRules
@@ -4278,36 +4364,35 @@ function renderSalesSalary() {
       }
     }
 
-    // Менеджеры отдела
+    // Менеджеры отдела. Без данных за период (нет выручки) - строку не рисуем вовсе, не
+    // "нет данных" - скорее всего человек уволен (Влад, 2026-08-06: пример - Дербенцева,
+    // Коньшина, Володин).
     memberCalcs.forEach(function(mc) {
       var sur = mc.sur;
       var c = mc.calc;
+      if (!c) return;
       var rate = mgrRate(sur);
       var isDual = DUAL_LOGISTS.indexOf(sur.toLowerCase()) >= 0;
       html += '<tr>';
       html += '<td><b>'+capName(sur)+'</b>';
       if (rate === 0.02) html += ' <span style="font-size:10px;padding:1px 4px;border-radius:3px;background:rgba(55,138,221,.18);color:#378ADD">2%</span>';
       if (isDual) html += ' <span style="font-size:10px;padding:1px 4px;border-radius:3px;background:rgba(239,159,39,.15);color:#EF9F27">лог.</span>';
-      if (c && c.isPrus) {
+      if (c.isPrus) {
         var prusNote = c.hiredMargin > 1000000 ? 'найм >1М: 10% маржи' : 'найм до 1М: 7% маржи';
         html += '<div style="font-size:10px;color:var(--muted);margin-top:2px">'+prusNote+'</div>';
       }
       html += '</td>';
-      if (!c) {
-        html += '<td colspan="8" class="num muted">нет данных</td>';
-      } else {
-        html += '<td class="num">'+fr(c.total)+'</td>';
-        html += '<td class="num">'+fr(c.ownRev)+'</td>';
-        html += '<td class="num">'+fr(c.hiredMargin)+'</td>';
-        html += '<td class="num">'+fr(c.oklad)+'</td>';
-        html += '<td class="num">'+fr(c.ownComm)+'</td>';
-        html += '<td class="num">'+(c.hiredBonus ? fr(c.hiredBonus) : '—')+'</td>';
-        html += '<td class="num">'+(c.bonus15m ? fr(c.bonus15m) : '—')+'</td>';
-        html += '<td class="num" style="font-weight:600;color:'+dept.color+'">'+fr(c.total_sal)+'</td>';
-      }
+      html += '<td class="num">'+fr(c.total)+'</td>';
+      html += '<td class="num">'+fr(c.ownRev)+'</td>';
+      html += '<td class="num">'+fr(c.hiredMargin)+'</td>';
+      html += '<td class="num">'+fr(c.oklad)+'</td>';
+      html += '<td class="num">'+fr(c.ownComm)+'</td>';
+      html += '<td class="num">'+(c.hiredBonus ? fr(c.hiredBonus) : '—')+'</td>';
+      html += '<td class="num">'+(c.bonus15m ? fr(c.bonus15m) : '—')+'</td>';
+      html += '<td class="num" style="font-weight:600;color:'+dept.color+'">'+fr(c.total_sal)+'</td>';
       html += '</tr>';
       // Суб-строка разбивки найма только для НЕ-Пруса (у Пруса единая ставка, и только до июля)
-      if (c && !c.isPrus) {
+      if (!c.isPrus) {
         html += hiredBreakdownRow(c, 24);
       }
     });
@@ -4319,41 +4404,15 @@ function renderSalesSalary() {
     html += '</tbody></table></div></div>';
   });
 
-  // Логисты: чистые + Прус (2-я роль) + Суркова (2-я роль)
+  // Логисты (только для просмотра ПРОШЛЫХ периодов, до июля 2026 - "чистые" + Прус (2-я роль)
+  // + Суркова (2-я роль)). С июля логисты консолидированы внутрь карточки "Отдел Рыщанова"
+  // (см. logistCalcs в DEPTS.forEach выше, Влад 2026-08-06: "это и есть отдел логистики") -
+  // этот блок для useNewRules больше ничего не рендерит, отдельной карточки "Логисты" в
+  // новых периодах нет.
   var logHtml = '';
   var logTotal = 0;
 
-  if (useNewRules) {
-    // С июля - единая формула для всех: 500р/заказ своя техника + 8% квалиф. маржи найма
-    var DUAL_ROLE_LOGISTS = ['суркова']; // Прус с июля больше не дублирует роль менеджера
-    ALL_LOGISTS.forEach(function(sur) {
-      var lc = calcLogist(sur, getL, true);
-      if (!lc) return;
-      var l = getL(sur);
-      var isDual = DUAL_ROLE_LOGISTS.indexOf(sur.toLowerCase()) >= 0;
-      logTotal += lc.total;
-      logHtml += '<tr'+(isDual ? ' style="background:rgba(186,117,23,.05)"' : '')+'>';
-      logHtml += '<td><b>'+capName(sur)+'</b>';
-      if (isDual) logHtml += ' <span style="font-size:10px;padding:1px 4px;border-radius:3px;background:rgba(239,159,39,.15);color:#EF9F27">2-я роль</span>';
-      logHtml += '<div style="font-size:10px;color:var(--muted);margin-top:2px">500 руб./заказ своя техника + 8% маржи найма (≥23%)</div></td>';
-      logHtml += '<td class="num">'+lc.ownOrders+' <span style="font-size:10px;color:var(--muted)">своя техника</span></td>';
-      logHtml += '<td class="num">'+fr(l.amount||0)+'</td>';
-      logHtml += '<td class="num muted">'+fr(l.hired_cost||0)+'</td>';
-      logHtml += '<td class="num" style="color:#1D9E75">'+fr(lc.qualMargin)+'</td>';
-      logHtml += '<td class="num" style="font-weight:600;color:#EF9F27">'+fr(lc.total)+'</td>';
-      logHtml += '</tr>';
-      if (lc.qualMargin || lc.unqualMargin) {
-        logHtml += '<tr style="background:rgba(255,255,255,.02)">';
-        logHtml += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">';
-        if (lc.qualMargin) logHtml += '<span style="color:#1D9E75;font-weight:500">'+fr(lc.qualMargin)+'</span> маржа ≥23% <span style="background:rgba(29,158,117,.15);color:#1D9E75;padding:1px 4px;border-radius:3px;font-size:10px">8%</span>';
-        if (lc.qualMargin && lc.unqualMargin) logHtml += ' &nbsp;/&nbsp; ';
-        if (lc.unqualMargin) logHtml += '<span style="color:var(--muted)">'+fr(lc.unqualMargin)+'</span> маржа &lt;23% <span style="background:rgba(255,255,255,.08);color:var(--muted);padding:1px 4px;border-radius:3px;font-size:10px">0%</span>';
-        logHtml += '</td>';
-        logHtml += '<td colspan="5" class="num muted" style="font-size:11px">500₽×'+lc.ownOrders+' = '+fr(lc.flatBonus)+' + 8% = '+fr(lc.marginBonus)+'</td>';
-        logHtml += '</tr>';
-      }
-    });
-  } else {
+  if (!useNewRules) {
     PURE_LOGISTS.forEach(function(sur) {
       var l = getL(sur);
       if (!l) return;
@@ -4413,9 +4472,7 @@ function renderSalesSalary() {
     html += '<div class="card" style="margin-bottom:16px;padding:0;overflow:hidden">';
     html += '<div style="border-left:3px solid #EF9F27;padding:12px 16px;background:rgba(255,255,255,.03)">';
     html += '<div style="font-size:13px;font-weight:600;color:#EF9F27">Логисты</div>';
-    html += '<div style="font-size:11px;color:var(--muted);margin-top:2px">'+(useNewRules
-      ? 'Суркова - дополнительно к роли менеджера. Прус-Роскошный с июля только логист.'
-      : 'Прус-Роскошный и Суркова - дополнительно к роли менеджера')+'</div></div>';
+    html += '<div style="font-size:11px;color:var(--muted);margin-top:2px">Прус-Роскошный и Суркова - дополнительно к роли менеджера (правила до июля 2026)</div></div>';
     html += '<div style="overflow-x:auto"><table class="tbl"><thead><tr>';
     html += '<th>Логист</th><th class="num">Заявок</th><th class="num">Выручка</th>';
     html += '<th class="num">Стоим. найма</th><th class="num">Маржа</th><th class="num">Бонус</th>';
@@ -4461,11 +4518,26 @@ function renderSalesSalary() {
   var warningHtml = '<div style="font-size:11px;color:var(--muted);margin-top:10px;padding:8px 10px;background:rgba(239,159,39,.07);border:1px solid rgba(239,159,39,.2);border-radius:6px">' +
     'Приближённый расчёт: вознаграждения 1/2 и спецразрешения не вычитаются из базы (поле не передаётся API). Фактические суммы будут ниже.' +
     '</div>';
+  // Баннер порога 23% - по компании за месяц целиком (не по заказу, см. companyMarginPct
+  // в aggregateOrdersRows). Виден только для useNewRules периодов, до июля этого правила не было.
+  var marginBannerHtml = '';
+  if (useNewRules) {
+    var ordSum = D.orders.summary || {};
+    var hmPct = (ordSum.hired_margin_pct||0) * 100;
+    var hmOk = !!ordSum.hired_margin_qualifies;
+    marginBannerHtml = '<div style="font-size:12px;margin-top:10px;padding:8px 10px;border-radius:6px;' +
+      (hmOk ? 'background:rgba(29,158,117,.08);border:1px solid rgba(29,158,117,.25);color:#1D9E75'
+            : 'background:rgba(255,255,255,.04);border:1px solid var(--border);color:var(--muted)') + '">' +
+      'Маржа найма за месяц: <b>' + hmPct.toFixed(1) + '%</b> ' +
+      (hmOk ? '(≥23% - весь наём месяца квалифицируется на 8/8/2/2)'
+            : '(&lt;23% - никто не получает % с найма этот месяц)') +
+      '</div>';
+  }
   var summaryHtml = '<div class="card" style="margin-bottom:16px;padding:16px">';
   summaryHtml += '<div style="display:flex;justify-content:space-between;align-items:center">';
   summaryHtml += '<div style="font-size:14px;font-weight:600">Фонд оплаты труда - коммерческий отдел</div>';
   summaryHtml += '<div style="font-size:22px;font-weight:700;color:#1D9E75">'+fr(totalPayroll)+'</div>';
-  summaryHtml += '</div>'+warningHtml+'</div>';
+  summaryHtml += '</div>'+marginBannerHtml+warningHtml+'</div>';
 
   el.innerHTML = summaryHtml + html;
 }

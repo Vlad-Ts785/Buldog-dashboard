@@ -4518,6 +4518,66 @@ function importOrdersReport() {
   Logger.log('✅ Заказы импортированы: ' + data.length + ' строк, письмо от ' + latest.getDate());
 }
 
+// ── СЛИЯНИЕ ВМЕСТО ПЕРЕЗАПИСИ (2026-08-06) ────────────────────
+// Найдено при разборе расхождения 40 000₽ у Савиток за июль (заказ №468973, создан 30.06 в
+// 10:24, "Начало работ" 01.07) - весь импорт заказов раньше был "взял сегодняшний файл 1С,
+// стёр всё, записал заново" на каждом шаге (Заказы_сырые/Заказы_данные/архивы). Если 1С хоть
+// один день не включит в отчёт заказ, который мы уже видели (например, окно коррекции
+// "прошлый+текущий месяц" длится только до 5-6 числа - см. комментарий в
+// importOrdersReport()) - заказ исчезал НАВСЕГДА, даже если раньше был у нас сохранён.
+// Теперь запись всегда СЛИВАЕТСЯ с уже сохранёнными данными по ключу "Номер заказа": известный
+// id, которого нет в свежем отчёте - остаётся как был; известный id, что есть в свежем отчёте -
+// обновляется свежими данными (1С может дозаполнить прибыль/путёвку задним числом); новый id -
+// добавляется. См. plans/2026-08-06-orders-import-merge-not-replace.md.
+
+// Слияние НОРМАЛИЗОВАННЫХ строк (44 колонки, id всегда в колонке 0) - для Заказы_данные.
+function mergeNormalizedOrderRows_(existingRows, newRows) {
+  const map = {};
+  const order = [];
+  function addRows(rows) {
+    rows.forEach(function(row) {
+      const id = String(row[0] || '').trim();
+      if (!id) return;
+      if (!(id in map)) order.push(id);
+      map[id] = row;
+    });
+  }
+  addRows(existingRows || []);
+  addRows(newRows || []);
+  return order.map(function(id) { return map[id]; });
+}
+
+// Слияние СЫРЫХ строк 1С (raw-формат, шапка в начале, позиция колонки "Номер" ищем по
+// заголовку - формат 1С может сдвигать колонки между отчётами) - для архивов Заказы_YYYY-MM.
+// Если что-то пошло не так (нет колонки "Номер", лист раньше был пуст) - просто отдаём newData
+// как есть (старое поведение), ничем не рискуем.
+function mergeRawOrderRows_(existingData, newData) {
+  if (!existingData || existingData.length < 5) return newData;
+  const newHeaderIdx = findOrdersHeaderRowIndex_(newData);
+  const newHeaderRow = newData[newHeaderIdx] || [];
+  let idCol = -1;
+  newHeaderRow.forEach(function(h, i) { if (String(h || '').trim() === 'Номер') idCol = i; });
+  if (idCol < 0) return newData;
+
+  const existingHeaderIdx = findOrdersHeaderRowIndex_(existingData);
+  if (existingHeaderIdx < 0 || existingData.length <= existingHeaderIdx + 1) return newData;
+
+  const headerRows = newData.slice(0, newHeaderIdx + 1);
+  const map = {};
+  const order = [];
+  function addRows(rows) {
+    rows.forEach(function(row) {
+      const id = String(row[idCol] || '').trim();
+      if (!id) return;
+      if (!(id in map)) order.push(id);
+      map[id] = row;
+    });
+  }
+  addRows(existingData.slice(existingHeaderIdx + 1));
+  addRows(newData.slice(newHeaderIdx + 1));
+  return headerRows.concat(order.map(function(id) { return map[id]; }));
+}
+
 // ── АРХИВАЦИЯ при смене месяца ───────────────────────────────
 
 // Возвращает { action: 'normal' } если можно обычным образом перезаписать живую таблицу,
@@ -4554,10 +4614,14 @@ function archiveOrdersIfNeeded(ss, newData) {
 
 function writeArchiveSheet(ss, archiveName, data) {
   let archive = ss.getSheetByName(archiveName);
+  let toWrite = data;
+  if (archive && archive.getLastRow() >= 5) {
+    toWrite = mergeRawOrderRows_(archive.getDataRange().getValues(), data);
+  }
   if (archive) archive.clear();
   else archive = ss.insertSheet(archiveName);
-  if (data.length > 0) {
-    archive.getRange(1, 1, data.length, data[0].length).setValues(data);
+  if (toWrite.length > 0) {
+    archive.getRange(1, 1, toWrite.length, toWrite[0].length).setValues(toWrite);
   }
 }
 
@@ -4579,6 +4643,14 @@ function normalizeOrders() {
   if (parsed.rows.length === 0) throw new Error('Заказы не распознаны (0 строк) - лист ' + ORDERS_NORM_SHEET + ' не тронут, остались прежние данные');
 
   let norm = ss.getSheetByName(ORDERS_NORM_SHEET);
+  // Слияние с уже сохранёнными строками ДО очистки листа - иначе заказ, который сегодняшний
+  // отчёт 1С почему-то не прислал, но который мы уже видели раньше, потерялся бы навсегда
+  // (см. mergeNormalizedOrderRows_ выше и plans/2026-08-06-orders-import-merge-not-replace.md).
+  const existingRows = (norm && norm.getLastRow() > 1)
+    ? norm.getRange(2, 1, norm.getLastRow() - 1, parsed.headers.length).getValues()
+    : [];
+  const mergedRows = mergeNormalizedOrderRows_(existingRows, parsed.rows);
+
   if (norm) norm.clear();
   else       norm = ss.insertSheet(ORDERS_NORM_SHEET);
 
@@ -4588,14 +4660,17 @@ function normalizeOrders() {
       .setBackground('#1e1e26')
       .setFontColor('#888780');
 
-  norm.getRange(2, 1, parsed.rows.length, parsed.headers.length).setValues(parsed.rows);
-  // Числовые колонки: Сумма → Оплачено поставщику (колонки 31-40, индексы 30-39)
-  norm.getRange(2, 31, parsed.rows.length, 10).setNumberFormat('#,##0');
+  norm.getRange(2, 1, mergedRows.length, parsed.headers.length).setValues(mergedRows);
+  // Числовые колонки: Сумма → Оплачено поставщику (колонки 31-40, индексы 30-39). Диапазон -
+  // по mergedRows.length (не parsed.rows.length) - иначе строки, сохранённые слиянием из
+  // прошлого прогона, останутся без числового формата.
+  norm.getRange(2, 31, mergedRows.length, 10).setNumberFormat('#,##0');
 
   norm.setFrozenRows(1);
   norm.autoResizeColumns(1, 7);
 
-  Logger.log('✅ Заказы нормализованы: ' + parsed.rows.length + ' строк в ' + ORDERS_NORM_SHEET);
+  Logger.log('✅ Заказы нормализованы: ' + mergedRows.length + ' строк в ' + ORDERS_NORM_SHEET +
+    ' (из них новых/обновлённых из сегодняшнего отчёта: ' + parsed.rows.length + ')');
 }
 
 // Чистая функция: сырые строки (как из Заказы_сырые или архива Заказы_YYYY-MM) -> нормализованные.

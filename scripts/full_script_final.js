@@ -4708,6 +4708,57 @@ function parseOrdersRawRows(allData) {
   return { headers: normHeaders, rows: rows };
 }
 
+// РАЗОВЫЙ ДИАГНОСТИЧЕСКИЙ ХЕЛПЕР (2026-08-06, только читает, ничего не меняет): выясняем
+// природу расхождения между суммой поля "Прибыль" (1С, построчно, кормит зарплату через
+// managerMap/logistMap/hiredProfit) и "Сумма - Стоимость привлечённой техники" (так считает
+// маржу таблица "Наёмная техника"/партнёры в supplierMap) - Влад заметил, что карточки
+// "Маржа (наём)" (тралы+длинномеры) и таблица партнёров дают разные итоги за один месяц.
+// Печатает в лог оба итога, разницу и до 15 конкретных заказов с наибольшим расхождением
+// (Прибыль(1С) минус (Сумма-Затраты)), чтобы увидеть - это пропуски в 1С (Прибыль не
+// заполнена) или реальная доп.статья затрат внутри поля "Прибыль". Удалить после разбора.
+function diagnoseHiredMarginMismatch() {
+  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  const norm = ss.getSheetByName(ORDERS_NORM_SHEET);
+  if (!norm || norm.getLastRow() < 2) { Logger.log('Нет данных заказов'); return; }
+  const rows = norm.getRange(2, 1, norm.getLastRow() - 1, 44).getValues();
+
+  const C = { id:0, customer:9, equip:20, hired:27, hired_cost:28, amount:30, profit:35 };
+
+  let sumProfit = 0, sumAmount = 0, sumHiredCost = 0, hiredCount = 0, zeroProfit = 0;
+  const mismatches = [];
+  rows.forEach(function(row) {
+    const hiredRaw = String(row[C.hired] || '').trim();
+    const isHired = hiredRaw !== '' && hiredRaw !== 'Нет';
+    if (!isHired) return;
+    hiredCount++;
+    const amount    = parseFloat(row[C.amount]) || 0;
+    const hiredCost = parseFloat(row[C.hired_cost]) || 0;
+    const profit    = parseFloat(row[C.profit]) || 0;
+    if (profit === 0 && amount !== 0) zeroProfit++;
+    sumAmount += amount; sumHiredCost += hiredCost; sumProfit += profit;
+    const expected = amount - hiredCost;
+    const diff = profit - expected;
+    if (Math.abs(diff) > 1) {
+      mismatches.push({ id: row[C.id], customer: row[C.customer], equip: row[C.equip],
+        amount: amount, hired_cost: hiredCost, profit: profit, expected: expected, diff: diff });
+    }
+  });
+
+  Logger.log('Наёмных заказов: ' + hiredCount + ' (из них Прибыль=0 при ненулевой Сумме: ' + zeroProfit + ')');
+  Logger.log('Сумма Прибыль (1С): ' + sumProfit);
+  Logger.log('Сумма Сумма-Затраты: ' + (sumAmount - sumHiredCost) + ' (Сумма=' + sumAmount + ', Затраты=' + sumHiredCost + ')');
+  Logger.log('Разница (Прибыль минус Сумма-Затраты): ' + (sumProfit - (sumAmount - sumHiredCost)));
+  Logger.log('Заказов с расхождением >1₽: ' + mismatches.length);
+  mismatches.sort(function(a,b){ return Math.abs(b.diff) - Math.abs(a.diff); });
+  mismatches.slice(0, 15).forEach(function(m) {
+    Logger.log('#' + m.id + ' ' + m.customer + ' [' + m.equip + '] Сумма=' + m.amount +
+      ' Затраты=' + m.hired_cost + ' Прибыль(1С)=' + m.profit +
+      ' Ожидалось(Сумма-Затраты)=' + m.expected + ' Разница=' + m.diff);
+  });
+  return { hiredCount: hiredCount, sumProfit: sumProfit, sumAmount: sumAmount, sumHiredCost: sumHiredCost,
+    mismatchCount: mismatches.length, zeroProfit: zeroProfit };
+}
+
 // ── API ДЛЯ ДАШБОРДА ─────────────────────────────────────────
 // Вызывается из doGet() основного скрипта: orders: getOrdersData(ss)
 

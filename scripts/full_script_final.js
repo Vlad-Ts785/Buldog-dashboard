@@ -4810,6 +4810,12 @@ function diagnoseHiredMarginMismatch(period) {
     mismatchCount: mismatches.length, zeroProfit: zeroProfit, suspects: suspects };
 }
 
+// Обёртка без аргументов - кнопка "Выполнить" в редакторе не передаёт параметры, выбрать
+// эту функцию из списка и просто нажать "Выполнить". Удалить вместе с diagnoseHiredMarginMismatch.
+function diagnoseHiredMarginMismatchJuly() {
+  return diagnoseHiredMarginMismatch('2026-07');
+}
+
 // ── API ДЛЯ ДАШБОРДА ─────────────────────────────────────────
 // Вызывается из doGet() основного скрипта: orders: getOrdersData(ss)
 

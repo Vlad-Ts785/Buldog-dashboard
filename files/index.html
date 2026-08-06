@@ -3995,6 +3995,7 @@ function calcMgr(sur, includeOklad, getM, getL, useNewRules) {
     var ownProfitBase = m.own_profit || 0;
     var qualMargin = m.hired_margin_qualified || 0;
     var unqualMargin = m.hired_margin_unqualified || 0;
+    var hiredExtraCosts = m.hired_extra_costs || 0; // "Затраты" - вознаграждения/спецразрешение по найму (справочно, колонка "Затраты")
     var oklad = (includeOklad !== false) ? okladByRev(total) : 0;
     var ownComm = Math.round(ownProfitBase * rate);
     var hiredBonus = Math.round(qualMargin * 0.08);
@@ -4002,6 +4003,7 @@ function calcMgr(sur, includeOklad, getM, getL, useNewRules) {
     var total_sal = oklad + ownComm + hiredBonus + bonus15m;
     return {
       sur:sur, total:total, ownRev:ownAmount, ownProfitBase:ownProfitBase, hiredMargin:qualMargin, hiredMarginUnqual:unqualMargin,
+      hiredExtraCosts:hiredExtraCosts,
       oklad:oklad, ownComm:ownComm, hiredBonus:hiredBonus,
       logPart:0, nonLogPart:0, bonus15m:bonus15m,
       total_sal:total_sal, rate:rate, isPrus:false, prusHiredPct:null, newRules:true
@@ -4047,10 +4049,11 @@ function calcLogist(sur, getL, useNewRules) {
   var flatBonus = ownOrders * 500;
   var qualMargin = useNewRules ? (l.hired_margin_qualified||0) : 0;
   var unqualMargin = useNewRules ? (l.hired_margin_unqualified||0) : 0;
+  var hiredExtraCosts = useNewRules ? (l.hired_extra_costs||0) : 0;
   var marginBonus = useNewRules ? Math.round(qualMargin * 0.08) : 0;
   return {
     sur:sur, ownOrders:ownOrders, flatBonus:flatBonus,
-    qualMargin:qualMargin, unqualMargin:unqualMargin, marginBonus:marginBonus,
+    qualMargin:qualMargin, unqualMargin:unqualMargin, hiredExtraCosts:hiredExtraCosts, marginBonus:marginBonus,
     total: flatBonus + marginBonus
   };
 }
@@ -4094,7 +4097,7 @@ function renderSalesSalary() {
       if (c.hiredMarginUnqual) parts.push('<span style="color:var(--muted)">'+fr(c.hiredMarginUnqual)+'</span> маржа &lt;23% <span style="background:rgba(255,255,255,.08);color:var(--muted);padding:1px 4px;border-radius:3px;font-size:10px">0%</span>');
       var h = '<tr style="background:rgba(255,255,255,.02)">';
       h += '<td style="padding-left:'+indent+'px;font-size:11px;color:var(--muted)">'+parts.join(' &nbsp;/&nbsp; ')+'</td>';
-      h += '<td colspan="8" class="num muted" style="font-size:11px">8% × '+fr(c.hiredMargin)+' = '+fr(c.hiredBonus)+'</td>';
+      h += '<td colspan="9" class="num muted" style="font-size:11px">8% × '+fr(c.hiredMargin)+' = '+fr(c.hiredBonus)+'</td>';
       h += '</tr>';
       return h;
     }
@@ -4105,7 +4108,7 @@ function renderSalesSalary() {
       h2 += ' &nbsp;/&nbsp; ';
       h2 += '<span style="color:var(--text)">'+fr(c.nonLogPart)+'</span> — логист другой <span style="background:rgba(255,255,255,.08);color:var(--muted);padding:1px 4px;border-radius:3px;font-size:10px">5%</span>';
       h2 += '</td>';
-      h2 += '<td colspan="8" class="num muted" style="font-size:11px">'+fr(Math.round(c.logPart*0.1))+' + '+fr(Math.round(c.nonLogPart*0.05))+' = '+fr(c.hiredBonus)+'</td>';
+      h2 += '<td colspan="9" class="num muted" style="font-size:11px">'+fr(Math.round(c.logPart*0.1))+' + '+fr(Math.round(c.nonLogPart*0.05))+' = '+fr(c.hiredBonus)+'</td>';
       h2 += '</tr>';
       return h2;
     }
@@ -4113,7 +4116,7 @@ function renderSalesSalary() {
   }
 
   function calcHead(members, headSur, useNewRules) {
-    var deptRev = 0, deptHired = 0, deptQualMargin = 0, above2m = 0;
+    var deptRev = 0, deptHired = 0, deptQualMargin = 0, deptExtraCosts = 0, above2m = 0;
     var memberCount = members.length;
     members.forEach(function(sur) {
       if (sur.toLowerCase() === headSur.toLowerCase()) return;
@@ -4122,6 +4125,7 @@ function renderSalesSalary() {
       if (useNewRules) {
         deptRev += (m.amount||0);
         deptQualMargin += (m.hired_margin_qualified||0);
+        deptExtraCosts += (m.hired_extra_costs||0);
         if ((m.amount||0) >= 2000000) above2m++;
       } else {
         var isPrus = sur.toLowerCase() === 'прус-роскошный';
@@ -4135,7 +4139,7 @@ function renderSalesSalary() {
     var margin2 = useNewRules ? Math.round(deptQualMargin * 0.02) : (deptHired > 0 ? Math.round(deptHired * 0.02) : 0);
     var mgrBonus = memberCount > 4 ? above2m * 20000 : 0;
     var total = 20000 + pct08 + margin2 + mgrBonus;
-    return { deptRev:deptRev, deptHired:deptHired, deptQualMargin:deptQualMargin, pct08:pct08, margin2:margin2,
+    return { deptRev:deptRev, deptHired:deptHired, deptQualMargin:deptQualMargin, deptExtraCosts:deptExtraCosts, pct08:pct08, margin2:margin2,
              mgrBonus:mgrBonus, above2m:above2m, memberCount:memberCount, total:total };
   }
 
@@ -4198,13 +4202,24 @@ function renderSalesSalary() {
     return s.charAt(0).toUpperCase() + s.slice(1);
   }
 
+  // Влад, 2026-08-06: разделить визуально "базу, от которой считается зарплата" (выручка,
+  // маржа найма, затраты - входные данные) от "уже посчитанной зарплаты" (оклад/проценты/
+  // итого - результат). Групповая шапка + вертикальная граница перед "Оклад" - без разбивки
+  // на два физически разных стола, чтобы не плодить лишние таблицы на каждую строку.
   function tblHead() {
-    return '<thead><tr>' +
+    return '<thead>' +
+      '<tr>' +
+        '<th></th>' +
+        '<th colspan="4" class="num" style="font-size:10px;font-weight:600;color:var(--muted);letter-spacing:.04em">БАЗА</th>' +
+        '<th colspan="5" class="num" style="font-size:10px;font-weight:600;color:var(--muted);letter-spacing:.04em;border-left:2px solid var(--border)">РАСЧЁТ ЗАРПЛАТЫ</th>' +
+      '</tr>' +
+      '<tr>' +
       '<th>Сотрудник</th>' +
       '<th class="num">Выр. всего</th>' +
       '<th class="num">Собст.</th>' +
       '<th class="num">Найм марж.</th>' +
-      '<th class="num">Оклад</th>' +
+      '<th class="num">Затраты</th>' +
+      '<th class="num" style="border-left:2px solid var(--border)">Оклад</th>' +
       '<th class="num">% парк</th>' +
       '<th class="num">% найм</th>' +
       '<th class="num">Прочее</th>' +
@@ -4268,7 +4283,7 @@ function renderSalesSalary() {
     html += '<div style="text-align:right"><div style="font-size:11px;color:var(--muted)">Фонд отдела</div>';
     html += '<div style="font-size:15px;font-weight:700;color:'+dept.color+'">'+fr(deptFund)+'</div></div></div>';
 
-    html += '<div style="overflow-x:auto"><table class="tbl" style="min-width:860px">'+tblHead()+'<tbody>';
+    html += '<div style="overflow-x:auto"><table class="tbl" style="min-width:960px">'+tblHead()+'<tbody>';
 
     if (dept.specialHead) {
       // Рыщанов: особая формула
@@ -4285,8 +4300,8 @@ function renderSalesSalary() {
       html += '<tr style="background:rgba('+dept.bgA+',.07)">';
       html += '<td><b>'+dept.headName+'</b> <span style="font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(255,255,255,.1);color:var(--muted)">рук.</span>';
       html += '<div style="font-size:10px;color:var(--muted);margin-top:2px">'+rNote+'</div></td>';
-      html += '<td class="num muted" style="font-size:11px" colspan="3">ВП свой парк: '+fr(grossProfit)+'</td>';
-      html += '<td class="num">'+fr(headRC.oklad)+'</td>';
+      html += '<td class="num muted" style="font-size:11px" colspan="4">ВП свой парк: '+fr(grossProfit)+'</td>';
+      html += '<td class="num" style="border-left:2px solid var(--border)">'+fr(headRC.oklad)+'</td>';
       html += '<td class="num muted">—</td>';
       html += '<td class="num">'+(headRC.hiredCut ? fr(headRC.hiredCut) : '—')+'</td>';
       html += '<td class="num">'+(headRC.bonus ? fr(headRC.bonus) : '—')+'</td>';
@@ -4295,7 +4310,7 @@ function renderSalesSalary() {
       if (headRC.specialTralsBonus) {
         html += '<tr style="background:rgba(255,255,255,.02)">';
         html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">Приказ №01/07/26 - 1% от ВП 3 тралов (В776ЕТ797, М800АЕ797, О894ХМ797), до 01.11.2026</td>';
-        html += '<td colspan="8" class="num muted" style="font-size:11px">ВП спецтралов '+fr(headRC.specialTralsProfit)+' × 1% = '+fr(headRC.specialTralsBonus)+'</td>';
+        html += '<td colspan="9" class="num muted" style="font-size:11px">ВП спецтралов '+fr(headRC.specialTralsProfit)+' × 1% = '+fr(headRC.specialTralsBonus)+'</td>';
         html += '</tr>';
       }
       // Логисты отдела - строки внутри той же таблицы (см. logistCalcs выше)
@@ -4307,14 +4322,15 @@ function renderSalesSalary() {
           ? '2.5% от ВП длинномеров (компания)'
           : '500 руб./заявка своя техника + 8% маржи найма (≥23%)')+'</div></td>';
         if (lc.isVasin) {
-          html += '<td class="num muted" colspan="7" style="font-size:11px">ВП длинномеров (компания): '+fr(c.profitLong)+' × 2.5%</td>';
+          html += '<td class="num muted" colspan="8" style="font-size:11px">ВП длинномеров (компания): '+fr(c.profitLong)+' × 2.5%</td>';
           html += '<td class="num" style="font-weight:600;color:'+dept.color+'">'+fr(c.total)+'</td>';
         } else {
           var l = getL(sur);
           html += '<td class="num">'+(l.amount?fr(l.amount):'—')+'</td>';
           html += '<td class="num">'+c.ownOrders+' <span style="font-size:10px;color:var(--muted)">заявок</span></td>';
           html += '<td class="num" style="color:#1D9E75">'+fr(c.qualMargin)+'</td>';
-          html += '<td class="num muted">—</td>';
+          html += '<td class="num amber">'+(c.hiredExtraCosts?fr(c.hiredExtraCosts):'—')+'</td>';
+          html += '<td class="num muted" style="border-left:2px solid var(--border)">—</td>';
           html += '<td class="num">'+(c.flatBonus?fr(c.flatBonus):'—')+'</td>';
           html += '<td class="num">'+(c.marginBonus?fr(c.marginBonus):'—')+'</td>';
           html += '<td class="num muted">—</td>';
@@ -4328,7 +4344,7 @@ function renderSalesSalary() {
           if (c.qualMargin && c.unqualMargin) html += ' &nbsp;/&nbsp; ';
           if (c.unqualMargin) html += '<span style="color:var(--muted)">'+fr(c.unqualMargin)+'</span> маржа &lt;23% <span style="background:rgba(255,255,255,.08);color:var(--muted);padding:1px 4px;border-radius:3px;font-size:10px">0%</span>';
           html += '</td>';
-          html += '<td colspan="8" class="num muted" style="font-size:11px">500₽×'+c.ownOrders+' = '+fr(c.flatBonus)+' + 8% = '+fr(c.marginBonus)+'</td>';
+          html += '<td colspan="9" class="num muted" style="font-size:11px">500₽×'+c.ownOrders+' = '+fr(c.flatBonus)+' + 8% = '+fr(c.marginBonus)+'</td>';
           html += '</tr>';
         }
       });
@@ -4344,7 +4360,8 @@ function renderSalesSalary() {
       html += '<td class="num muted" style="font-size:11px">'+fr(headHC.deptRev)+'<div style="font-size:10px;color:var(--muted)">итого мен.</div></td>';
       html += '<td class="num muted" style="font-size:11px">—</td>';
       html += '<td class="num muted" style="font-size:11px">'+fr(useNewRules ? headHC.deptQualMargin : headHC.deptHired)+'<div style="font-size:10px;color:var(--muted)">найм мен.</div></td>';
-      html += '<td class="num">'+fr(20000)+'</td>';
+      html += '<td class="num amber" style="font-size:11px">'+(headHC.deptExtraCosts?fr(headHC.deptExtraCosts):'—')+'</td>';
+      html += '<td class="num" style="border-left:2px solid var(--border)">'+fr(20000)+'</td>';
       html += '<td class="num">'+fr(headHC.pct08)+'</td>';
       html += '<td class="num">'+fr(headHC.margin2)+'</td>';
       html += '<td class="num">'+(headHC.mgrBonus ? fr(headHC.mgrBonus) : '—')+'</td>';
@@ -4359,7 +4376,8 @@ function renderSalesSalary() {
         html += '<td class="num">'+fr(headHM.total)+'</td>';
         html += '<td class="num">'+fr(headHM.ownRev)+'</td>';
         html += '<td class="num">'+fr(headHM.hiredMargin)+'</td>';
-        html += '<td class="num muted">—</td>';
+        html += '<td class="num amber">'+(headHM.hiredExtraCosts?fr(headHM.hiredExtraCosts):'—')+'</td>';
+        html += '<td class="num muted" style="border-left:2px solid var(--border)">—</td>';
         html += '<td class="num">'+fr(headHM.ownComm)+'</td>';
         html += '<td class="num">'+(headHM.hiredBonus ? fr(headHM.hiredBonus) : '—')+'</td>';
         html += '<td class="num">'+(headHM.bonus15m ? fr(headHM.bonus15m) : '—')+'</td>';
@@ -4368,12 +4386,12 @@ function renderSalesSalary() {
         if (headHM.newRules && headHM.ownProfitBase !== undefined && Math.abs(headHM.ownProfitBase - headHM.ownRev) > 1) {
           html += '<tr style="background:rgba(255,255,255,.02)">';
           html += '<td style="padding-left:44px;font-size:11px;color:var(--muted)">База % своего парка: '+fr(headHM.ownRev)+' выручка минус вознаграждения/спецразрешение = <b>'+fr(headHM.ownProfitBase)+'</b></td>';
-          html += '<td colspan="8" class="num muted" style="font-size:11px">'+(headHM.rate*100).toString().replace('.', ',')+'% × '+fr(headHM.ownProfitBase)+' = '+fr(headHM.ownComm)+'</td>';
+          html += '<td colspan="9" class="num muted" style="font-size:11px">'+(headHM.rate*100).toString().replace('.', ',')+'% × '+fr(headHM.ownProfitBase)+' = '+fr(headHM.ownComm)+'</td>';
           html += '</tr>';
         }
         html += hiredBreakdownRow(headHM, 44);
         html += '<tr style="border-top:1px solid rgba(255,255,255,.06)">';
-        html += '<td colspan="8" style="font-size:12px;color:var(--muted);text-align:right;padding-right:12px">Итого '+dept.headName.split(' ')[0]+'</td>';
+        html += '<td colspan="9" style="font-size:12px;color:var(--muted);text-align:right;padding-right:12px">Итого '+dept.headName.split(' ')[0]+'</td>';
         html += '<td class="num" style="font-weight:700;color:'+dept.color+'">'+fr(headTotal)+'</td>';
         html += '</tr>';
       }
@@ -4400,7 +4418,8 @@ function renderSalesSalary() {
       html += '<td class="num">'+fr(c.total)+'</td>';
       html += '<td class="num">'+fr(c.ownRev)+'</td>';
       html += '<td class="num">'+fr(c.hiredMargin)+'</td>';
-      html += '<td class="num">'+fr(c.oklad)+'</td>';
+      html += '<td class="num amber">'+(c.hiredExtraCosts?fr(c.hiredExtraCosts):'—')+'</td>';
+      html += '<td class="num" style="border-left:2px solid var(--border)">'+fr(c.oklad)+'</td>';
       html += '<td class="num">'+fr(c.ownComm)+'</td>';
       html += '<td class="num">'+(c.hiredBonus ? fr(c.hiredBonus) : '—')+'</td>';
       html += '<td class="num">'+(c.bonus15m ? fr(c.bonus15m) : '—')+'</td>';
@@ -4412,7 +4431,7 @@ function renderSalesSalary() {
       if (c.newRules && c.ownProfitBase !== undefined && Math.abs(c.ownProfitBase - c.ownRev) > 1) {
         html += '<tr style="background:rgba(255,255,255,.02)">';
         html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">База % своего парка: '+fr(c.ownRev)+' выручка минус вознаграждения/спецразрешение = <b>'+fr(c.ownProfitBase)+'</b></td>';
-        html += '<td colspan="8" class="num muted" style="font-size:11px">'+(c.rate*100).toString().replace('.', ',')+'% × '+fr(c.ownProfitBase)+' = '+fr(c.ownComm)+'</td>';
+        html += '<td colspan="9" class="num muted" style="font-size:11px">'+(c.rate*100).toString().replace('.', ',')+'% × '+fr(c.ownProfitBase)+' = '+fr(c.ownComm)+'</td>';
         html += '</tr>';
       }
       // Суб-строка разбивки найма только для НЕ-Пруса (у Пруса единая ставка, и только до июля)
@@ -4422,7 +4441,7 @@ function renderSalesSalary() {
     });
 
     html += '<tr style="background:rgba(255,255,255,.03);border-top:1px solid var(--border)">';
-    html += '<td colspan="8" style="font-size:12px;color:var(--muted);padding:8px 12px">Фонд оплаты отдела</td>';
+    html += '<td colspan="9" style="font-size:12px;color:var(--muted);padding:8px 12px">Фонд оплаты отдела</td>';
     html += '<td class="num" style="font-weight:700;color:'+dept.color+';padding:8px 12px">'+fr(deptFund)+'</td>';
     html += '</tr>';
     html += '</tbody></table></div></div>';

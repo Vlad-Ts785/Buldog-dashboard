@@ -6716,6 +6716,7 @@ function aggregateOrdersRows(rows) {
         managerMap[mgrSales] = { name: mgrSales, orders:0, amount:0, amount_thru_yesterday:0, payment:0, cash:0, profit:0, hired_orders:0, hired_cost:0,
           internal_orders:0, internal_amount:0, internal_amount_thru_yesterday:0, internal_payment:0,
           own_amount:0, own_profit:0, hired_margin_total:0, hired_margin_qualified:0, hired_margin_unqualified:0,
+          hired_extra_costs:0,
           today_new_orders:0, today_new_amount:0, today_new_list:[] };
       }
       const m = managerMap[mgrSales];
@@ -6737,6 +6738,9 @@ function aggregateOrdersRows(rows) {
       }
       if (isHired) {
         m.hired_orders++; m.hired_cost += hiredCost; m.hired_margin_total += profit;
+        // "Затраты" (Влад, 2026-08-06) - те же три статьи 1С (Вознаграждение 1/2,
+        // Спецразрешение и т.п.), что и в supplierMap - выведены обратным счётом.
+        m.hired_extra_costs += (amount - hiredCost - profit);
       } else {
         // own_profit = "Сумма" минус три статьи затрат 1С (Вознаграждение 1/2, Спецразрешение
         // и т.п. - НДС-корректировки при работе с поставщиками без НДС и др.), которые уже
@@ -6757,7 +6761,8 @@ function aggregateOrdersRows(rows) {
     if (mgrLog && ordInList(mgrLog, TRAL_LOGISTS)) {
       if (!logistMap[mgrLog]) {
         logistMap[mgrLog] = { name: mgrLog, orders:0, amount:0, hired_orders:0, hired_cost:0, tral:0, long_:0,
-          own_amount:0, hired_margin_total:0, hired_margin_qualified:0, hired_margin_unqualified:0 };
+          own_amount:0, hired_margin_total:0, hired_margin_qualified:0, hired_margin_unqualified:0,
+          hired_extra_costs:0 };
       }
       const l = logistMap[mgrLog];
       l.orders++;
@@ -6766,6 +6771,7 @@ function aggregateOrdersRows(rows) {
       if (equip === 'Длинномер') l.long_++;
       if (isHired) {
         l.hired_margin_total += profit;
+        l.hired_extra_costs += (amount - hiredCost - profit);
       } else {
         l.own_amount += amount;
       }

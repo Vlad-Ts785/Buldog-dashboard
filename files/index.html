@@ -1562,6 +1562,7 @@ let periodOrdersData = null;   // D.orders за выбранный период 
 let periodGrossProfit = null;  // ВП своего парка за период (для Рыщанова), из Истории_финансов
 let periodProfitTral = null;   // то же, но по тралам - для карточки "Заказов" (2026-07-18)
 let periodProfitLong = null;   // то же, но по длинномерам
+let periodSpecialTralsProfit = null; // ВП 3 спецтралов (приказ №01/07/26) за период - Влад, 2026-08-06: "непонятно, как считало" - раньше не переключался с текущим месяцем, теперь то же самое, что profit_tral/profit_long
 // Факт/план продаж за период (Влад, 2026-08-04: верхняя полоса "Выполнение плана продаж" на
 // "По менеджерам" всегда показывала текущий месяц, даже при выборе прошлого периода).
 let periodSalesFakt = null;
@@ -1590,6 +1591,7 @@ async function changePeriod(period) {
     periodGrossProfit = null;
     periodProfitTral = null;
     periodProfitLong = null;
+    periodSpecialTralsProfit = null;
     periodSalesFakt = null;
     periodSalesPlan = null;
     periodSalesFaktThruYesterday = null;
@@ -1605,6 +1607,7 @@ async function changePeriod(period) {
     periodGrossProfit = (data.summary && typeof data.summary.profit === 'number') ? data.summary.profit : null;
     periodProfitTral = (data.summary && typeof data.summary.profit_tral === 'number') ? data.summary.profit_tral : null;
     periodProfitLong = (data.summary && typeof data.summary.profit_long === 'number') ? data.summary.profit_long : null;
+    periodSpecialTralsProfit = (data.summary && typeof data.summary.special_trals_profit === 'number') ? data.summary.special_trals_profit : null;
     periodSalesFakt = (data.summary && typeof data.summary.salesFakt === 'number') ? data.summary.salesFakt : null;
     periodSalesPlan = (data.summary && typeof data.summary.salesPlan === 'number') ? data.summary.salesPlan : null;
     periodSalesFaktThruYesterday = (data.summary && typeof data.summary.salesFaktThruYesterday === 'number') ? data.summary.salesFaktThruYesterday : null;
@@ -1625,6 +1628,7 @@ function renderSalesTabsForPeriod() {
   const realProfit = D.summary ? D.summary.profit : undefined;
   const realProfitTral = D.summary ? D.summary.profit_tral : undefined;
   const realProfitLong = D.summary ? D.summary.profit_long : undefined;
+  const realSpecialTralsProfit = D.summary ? D.summary.special_trals_profit : undefined;
   const realSalesFakt = D.summary ? D.summary.salesFakt : undefined;
   const realSalesPlan = D.summary ? D.summary.salesPlan : undefined;
   const realSalesFaktThruYesterday = D.summary ? D.summary.salesFaktThruYesterday : undefined;
@@ -1633,6 +1637,7 @@ function renderSalesTabsForPeriod() {
     if (D.summary && periodGrossProfit !== null) D.summary.profit = periodGrossProfit;
     if (D.summary && periodProfitTral !== null) D.summary.profit_tral = periodProfitTral;
     if (D.summary && periodProfitLong !== null) D.summary.profit_long = periodProfitLong;
+    if (D.summary && periodSpecialTralsProfit !== null) D.summary.special_trals_profit = periodSpecialTralsProfit;
     if (D.summary && periodSalesFakt !== null) D.summary.salesFakt = periodSalesFakt;
     if (D.summary && periodSalesPlan !== null) D.summary.salesPlan = periodSalesPlan;
     if (D.summary && periodSalesFaktThruYesterday !== null) D.summary.salesFaktThruYesterday = periodSalesFaktThruYesterday;
@@ -1645,6 +1650,7 @@ function renderSalesTabsForPeriod() {
   if (D.summary) D.summary.profit = realProfit;
   if (D.summary) D.summary.profit_tral = realProfitTral;
   if (D.summary) D.summary.profit_long = realProfitLong;
+  if (D.summary) D.summary.special_trals_profit = realSpecialTralsProfit;
   if (D.summary) D.summary.salesFakt = realSalesFakt;
   if (D.summary) D.summary.salesPlan = realSalesPlan;
   if (D.summary) D.summary.salesFaktThruYesterday = realSalesFaktThruYesterday;
@@ -3445,12 +3451,16 @@ function renderSales() {
       const tMargin = suppliers.reduce(function(s,x){ return s+(x.margin||0); }, 0);
       const tOrders = suppliers.reduce(function(s,x){ return s+(x.orders||0); }, 0);
       const tMarginPct = tRev > 0 ? Math.round(tMargin/tRev*100) : 0;
+      // Влад, 2026-08-06: "в итого хочу видеть полные цифры без сокращений, но без копеек" -
+      // остальные строки таблицы (по партнёрам) остаются сокращёнными (млн/тыс, fmtK2) для
+      // компактности, "Итого" - целиком, с разделителями разрядов.
+      function fullNum(n) { return Math.round(n||0).toLocaleString('ru-RU'); }
       hireFoot.innerHTML =
         '<td style="font-weight:600">Итого (' + suppliers.length + ' партнёров)</td>' +
-        '<td class="num" style="font-weight:600">' + fmtK2(tRev) + '</td>' +
-        '<td class="num red" style="font-weight:600">' + fmtK2(tCost) + '</td>' +
-        '<td class="num amber" style="font-weight:600">' + fmtK2(tExtra) + '</td>' +
-        '<td class="num green" style="font-weight:600">' + fmtK2(tMargin) + '</td>' +
+        '<td class="num" style="font-weight:600">' + fullNum(tRev) + '</td>' +
+        '<td class="num red" style="font-weight:600">' + fullNum(tCost) + '</td>' +
+        '<td class="num amber" style="font-weight:600">' + fullNum(tExtra) + '</td>' +
+        '<td class="num green" style="font-weight:600">' + fullNum(tMargin) + '</td>' +
         '<td class="num" style="font-weight:600">' + tMarginPct + '%</td>' +
         '<td class="num" style="font-weight:600">' + tOrders + '</td>' +
         '<td></td>';

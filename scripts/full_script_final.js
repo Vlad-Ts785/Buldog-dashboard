@@ -2944,6 +2944,7 @@ function doGet(e) {
             profit:      gp ? gp.profit : null,
             profit_tral: gp ? gp.profit_tral : null,
             profit_long: gp ? gp.profit_long : null,
+            special_trals_profit: gp ? gp.special_trals_profit : null, // приказ №01/07/26, за ВЫБРАННЫЙ период - раньше не передавался, зарплата Рыщанова за прошлые периоды показывала ВП спецтралов текущего месяца
             salesFakt:   sfp ? sfp.salesFakt : null,
             salesPlan:   sfp ? sfp.salesPlan : null,
             salesFaktThruYesterday: sfp ? sfp.salesFaktThruYesterday : null,
@@ -3934,6 +3935,7 @@ function getGrossProfitForPeriod(ss, period) {
   // найму, выручку, затраты") - те же поля, что уже есть в каждой vehicles-строке
   // (aggregateFinHistoryForRange), раньше просто не суммировались здесь, только ВП.
   var profit = 0, profitTral = 0, profitLong = 0, revenue = 0, fot = 0, fuel = 0, parts2 = 0, fines = 0, tolls = 0;
+  var specialTralsProfit = 0; // приказ №01/07/26 - ВП трёх конкретных тягачей Рыщанова, см. RISCHANOV_SPECIAL_TRALS_GOS
   vehicles.forEach(function(v) {
     var isDlinnomer = v.type === 'Борт' || v.type.indexOf('Борт') === 0;
     profit += v.profit;
@@ -3944,10 +3946,12 @@ function getGrossProfitForPeriod(ss, period) {
     fines += v.fines || 0;
     tolls += v.tolls || 0;
     if (isDlinnomer) profitLong += v.profit; else profitTral += v.profit;
+    if (RISCHANOV_SPECIAL_TRALS_GOS.indexOf(normalizeGos(v.gos)) >= 0) specialTralsProfit += v.profit;
   });
   return {
     profit: profit, profit_tral: profitTral, profit_long: profitLong,
     revenue: revenue, fot: fot, fuel: fuel, parts: parts2, fines: fines, tolls: tolls,
+    special_trals_profit: specialTralsProfit,
   };
 }
 
@@ -5975,6 +5979,50 @@ function parseOrdersRawRows(allData) {
 // теперь дедуплицирует по номеру при каждой записи - новых задвоений быть не должно. Эта
 // функция проверяет ФАКТ на любой месяц: считает заказы по номеру, ищет дубли и "мусорные"
 // номера (не похожие на настоящий номер заказа - не 4-8-значное число).
+// РАЗОВЫЙ ДИАГНОСТИЧЕСКИЙ ХЕЛПЕР (2026-08-06, только читает): почему "маржа найма логистов"
+// у Рыщанова (сумма hired_margin_qualified по ЛОГИСТАМ - Васин/Кан/Махура/Сильчев/
+// Прус-Роскошный/Суркова) меньше, чем "Маржа" в таблице "Наёмная техника" (вся компания
+// целиком, по поставщику найма, без разбора кто вёл заказ снабжением). Влад, 2026-08-06:
+// "непонятно, почему расчёт идёт от 1,2 миллиона, если наёмом сделали 1.7". Группирует
+// прибыль по наёмным заказам ЗА МЕСЯЦ по значению "Менеджер по снабжению" - показывает, куда
+// делась разница (обычно это заказы, где снабжением занимался сам менеджер продаж/руководитель,
+// а не штатный логист, либо поле вообще пустое).
+function diagnoseLogistMarginGap(month) {
+  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  const archive = ss.getSheetByName(ORDERS_ARCHIVE_PFX + month);
+  if (!archive || archive.getLastRow() < 5) { Logger.log('Нет архива за ' + month); return; }
+  const rows = parseOrdersRawRows(archive.getDataRange().getValues()).rows;
+
+  const byMgrL = {};
+  let totalHiredProfit = 0, hiredCount = 0;
+  const LOGIST_LIST = ['Васин', 'Кан', 'Махура', 'Сильчев', 'Прус-Роскошный', 'Суркова'];
+  rows.forEach(function(row) {
+    const hiredRaw = String(row[27] || '').trim(); // индекс "hired" в нормализованном формате
+    const isHired = hiredRaw !== '' && hiredRaw !== 'Нет';
+    if (!isHired) return;
+    hiredCount++;
+    const profit = parseFloat(row[35]) || 0; // индекс "profit"
+    totalHiredProfit += profit;
+    const mgrL = String(row[16] || '').trim() || '(пусто)'; // индекс "mgr_l"
+    byMgrL[mgrL] = (byMgrL[mgrL] || 0) + profit;
+  });
+
+  let logistSum = 0;
+  Object.keys(byMgrL).forEach(function(name) {
+    if (LOGIST_LIST.some(function(l) { return name.indexOf(l) >= 0; })) logistSum += byMgrL[name];
+  });
+
+  Logger.log('Наёмных заказов: ' + hiredCount + ', сумма Прибыль по всем: ' + totalHiredProfit);
+  Logger.log('Из них у "штатных" логистов (' + LOGIST_LIST.join('/') + '): ' + logistSum);
+  Logger.log('Разница (не у логистов - у менеджеров/руководителей/пусто): ' + (totalHiredProfit - logistSum));
+  Logger.log('--- Разбивка по "Менеджер по снабжению" ---');
+  Object.keys(byMgrL).sort(function(a,b){ return byMgrL[b]-byMgrL[a]; }).forEach(function(name) {
+    Logger.log(name + ': ' + byMgrL[name]);
+  });
+}
+
+function diagnoseLogistMarginGapJuly() { return diagnoseLogistMarginGap('2026-07'); }
+
 function diagnoseArchiveDuplicates(month) {
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
   const sheet = ss.getSheetByName(ORDERS_ARCHIVE_PFX + month);

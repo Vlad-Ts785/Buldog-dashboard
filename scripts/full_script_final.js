@@ -4562,19 +4562,31 @@ function mergeRawOrderRows_(existingData, newData) {
   const existingHeaderIdx = findOrdersHeaderRowIndex_(existingData);
   if (existingHeaderIdx < 0 || existingData.length <= existingHeaderIdx + 1) return newData;
 
+  // БАГ (найден 2026-08-06, Влад заметил задвоение выручки за июль): idCol найден из ШАПКИ
+  // НОВОГО отчёта, но раньше применялся и к старым строкам тоже. Если 1С хоть раз сдвинула
+  // колонки между отчётами - старые строки читались по неверной позиции, получали "мусорный"
+  // номер вместо реального, и тот же самый заказ задваивался (одна копия под настоящим
+  // номером из нового отчёта, вторая - под мусорным из старого). Теперь позиция колонки
+  // "Номер" ищется ОТДЕЛЬНО в шапке existingData - как она реально лежит в уже сохранённых
+  // строках, а не как в сегодняшнем отчёте.
+  const existingHeaderRow = existingData[existingHeaderIdx] || [];
+  let existingIdCol = -1;
+  existingHeaderRow.forEach(function(h, i) { if (String(h || '').trim() === 'Номер') existingIdCol = i; });
+  if (existingIdCol < 0) return newData; // не нашли колонку в старых данных - не рискуем, просто заменяем
+
   const headerRows = newData.slice(0, newHeaderIdx + 1);
   const map = {};
   const order = [];
-  function addRows(rows) {
+  function addRows(rows, col) {
     rows.forEach(function(row) {
-      const id = String(row[idCol] || '').trim();
+      const id = String(row[col] || '').trim();
       if (!id) return;
       if (!(id in map)) order.push(id);
       map[id] = row;
     });
   }
-  addRows(existingData.slice(existingHeaderIdx + 1));
-  addRows(newData.slice(newHeaderIdx + 1));
+  addRows(existingData.slice(existingHeaderIdx + 1), existingIdCol);
+  addRows(newData.slice(newHeaderIdx + 1), idCol);
   return headerRows.concat(order.map(function(id) { return map[id]; }));
 }
 
@@ -6021,6 +6033,67 @@ function diagnoseHiredMarginMismatchJuly() {
   return diagnoseHiredMarginMismatch('2026-07');
 }
 
+
+
+// РАЗОВЫЙ ДИАГНОСТИЧЕСКИЙ ХЕЛПЕР (2026-08-06): проверка задвоения в архиве Заказы_2026-07 -
+// Влад заметил, что суммы по менеджерам за июль выглядят завышенными. Причина найдена и
+// исправлена в mergeRawOrderRows_ (баг: позиция колонки "Номер" бралась только из НОВОГО
+// отчёта и ошибочно применялась и к уже сохранённым старым строкам - если 1С хоть раз
+// сдвинула колонки, старые строки получали "мусорный" номер вместо настоящего, и реальный
+// заказ задваивался). Эта функция проверяет ФАКТ: считает заказы по номеру, ищет дубли и
+// "мусорные" номера (не похожие на настоящий номер заказа - не 5-7-значное число).
+function diagnoseJulyArchiveDuplicates() {
+  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(ORDERS_ARCHIVE_PFX + '2026-07');
+  if (!sheet) { Logger.log('Нет листа Заказы_2026-07'); return; }
+  const allData = sheet.getDataRange().getValues();
+  const headerIdx = findOrdersHeaderRowIndex_(allData);
+  const headerRow = allData[headerIdx];
+  let numCol = -1, sumCol = -1, custCol = -1, mgrCol = -1;
+  headerRow.forEach(function(h, i) {
+    var k = String(h || '').trim();
+    if (k === 'Номер') numCol = i;
+    if (k === 'Сумма') sumCol = i;
+    if (k === 'Заказчик') custCol = i;
+    if (k === 'Менеджер по продажам') mgrCol = i;
+  });
+  Logger.log('Колонки: Номер=' + numCol + ' Сумма=' + sumCol + ' Заказчик=' + custCol + ' Менеджер=' + mgrCol);
+  if (numCol < 0) { Logger.log('Колонка "Номер" не найдена'); return; }
+
+  const rows = allData.slice(headerIdx + 1);
+  Logger.log('Всего строк данных в листе: ' + rows.length);
+
+  const byId = {};
+  let garbageCount = 0;
+  const garbageSample = [];
+  rows.forEach(function(row, i) {
+    const id = String(row[numCol] || '').trim();
+    if (!id) return;
+    if (!/^\d{4,8}$/.test(id)) {
+      garbageCount++;
+      if (garbageSample.length < 10) garbageSample.push('строка ' + (i+headerIdx+2) + ': "' + id + '" (Сумма=' + row[sumCol] + ', Заказчик=' + row[custCol] + ')');
+    }
+    if (!byId[id]) byId[id] = [];
+    byId[id].push({ row: i+headerIdx+2, amount: parseFloat(row[sumCol])||0, customer: String(row[custCol]||''), mgr: String(row[mgrCol]||'') });
+  });
+
+  const dupIds = Object.keys(byId).filter(function(id){ return byId[id].length > 1; });
+  Logger.log('Уникальных номеров заказов: ' + Object.keys(byId).length);
+  Logger.log('Номеров с ДУБЛЯМИ (>1 строки на один номер): ' + dupIds.length);
+  Logger.log('Строк с "мусорным" номером (не 4-8-значное число): ' + garbageCount);
+  garbageSample.forEach(function(g) { Logger.log('  мусор: ' + g); });
+
+  let dupExtraSum = 0;
+  dupIds.slice(0, 20).forEach(function(id) {
+    const entries = byId[id];
+    const sum = entries.reduce(function(s,e){ return s+e.amount; }, 0);
+    dupExtraSum += sum - entries[0].amount; // сколько лишнего сверх одной копии
+    Logger.log('Дубль №' + id + ' (' + entries.length + ' раз): ' + entries.map(function(e){ return 'стр.'+e.row+'='+e.amount+'₽/'+e.mgr; }).join(' | '));
+  });
+  Logger.log('Итого "лишней" суммы от дублей (по первым 20 показанным): ' + dupExtraSum);
+
+  return { totalRows: rows.length, uniqueIds: Object.keys(byId).length, dupCount: dupIds.length, garbageCount: garbageCount };
+}
 
 // РАЗОВЫЙ ДИАГНОСТИЧЕСКИЙ ХЕЛПЕР (2026-08-06): ищет заказы №468973 и №469551 (отсутствуют в
 // Заказы_2026-07, см. diagnoseSavitokJuly) по ВСЕМ листам "Заказы_*" (все архивы + живой

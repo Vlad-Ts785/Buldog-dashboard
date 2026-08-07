@@ -4211,7 +4211,20 @@ function renderSalesSalary() {
 
   var totalPayroll = 0;
 
+  // Влад, 2026-08-06: "сделай, чтобы у всех людей была фамилия и имя" - раньше показывали
+  // только фамилию. Имена собраны из выгрузок 1С за это время - у кого не нашли (Дербенцева,
+  // Коньшина - уже уволены, скрыты по нулевой выручке) остаётся фолбэк на одну фамилию.
+  var FULL_NAME = {
+    'ахтамова':'Ахтамова Лиана', 'гусейнова':'Гусейнова Айнур', 'рыщанов':'Рыщанов Рустем',
+    'цегельников':'Цегельников Вячеслав', 'гуштюк':'Гуштюк Ирина', 'котельников':'Котельников Данила',
+    'гуляева':'Гуляева Лилия', 'филипчук':'Филипчук Екатерина', 'шейко':'Шейко Елена',
+    'кан':'Кан Михаил', 'махура':'Махура Николай', 'сильчев':'Сильчев Максим',
+    'васин':'Васин Максим', 'прус-роскошный':'Прус-Роскошный Роман', 'суркова':'Суркова Анастасия',
+    'володин':'Володин Илья', 'савиток':'Савиток Олеся'
+  };
   function capName(s) {
+    var key = s.toLowerCase();
+    if (FULL_NAME[key]) return FULL_NAME[key];
     if (s === 'прус-роскошный') return 'Прус-Роскошный';
     return s.charAt(0).toUpperCase() + s.slice(1);
   }
@@ -4224,7 +4237,7 @@ function renderSalesSalary() {
     return '<thead>' +
       '<tr>' +
         '<th></th>' +
-        '<th colspan="4" class="num" style="font-size:10px;font-weight:600;color:var(--muted);letter-spacing:.04em">БАЗА</th>' +
+        '<th colspan="4" class="num" style="font-size:10px;font-weight:600;color:var(--muted);letter-spacing:.04em">БАЗА РАСЧЁТА</th>' +
         '<th colspan="5" class="num" style="font-size:10px;font-weight:600;color:var(--muted);letter-spacing:.04em;border-left:2px solid var(--border)">РАСЧЁТ ЗАРПЛАТЫ</th>' +
       '</tr>' +
       '<tr>' +
@@ -4236,7 +4249,7 @@ function renderSalesSalary() {
       '<th class="num" style="border-left:2px solid var(--border)">Оклад</th>' +
       '<th class="num">% парк</th>' +
       '<th class="num">% найм</th>' +
-      '<th class="num">Прочее</th>' +
+      '<th class="num">Премия</th>' +
       '<th class="num">ИТОГО</th>' +
       '</tr></thead>';
   }
@@ -4325,6 +4338,19 @@ function renderSalesSalary() {
       html += '<td class="num">'+(headRC.bonus ? fr(headRC.bonus) : '—')+'</td>';
       html += '<td class="num" style="font-weight:700;color:'+dept.color+'">'+fr(headRC.total)+'</td>';
       html += '</tr>';
+      if (headRC.bonus) {
+        var rStepsDetail = Math.floor((grossProfit - 20000000) / 5000000);
+        html += '<tr style="background:rgba(255,255,255,.02)">';
+        html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">Премия за ВП своего парка: '+fr(grossProfit)+' (нужно &gt;20М) - 50т за порог'+(rStepsDetail>0?' + '+rStepsDetail+'×50т за каждые следующие 5М':'')+'</td>';
+        html += '<td colspan="9" class="num muted" style="font-size:11px">50т'+(rStepsDetail>0?' + '+rStepsDetail+'×50т':'')+' = '+fr(headRC.bonus)+'</td>';
+        html += '</tr>';
+      }
+      if (headRC.hiredCut) {
+        html += '<tr style="background:rgba(255,255,255,.02)">';
+        html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">Премия за маржу найма логистов (маржа ≥23%): '+fr(headRC.qualMarginAllLogists)+'</td>';
+        html += '<td colspan="9" class="num muted" style="font-size:11px">2% × '+fr(headRC.qualMarginAllLogists)+' = '+fr(headRC.hiredCut)+'</td>';
+        html += '</tr>';
+      }
       if (headRC.specialTralsBonus) {
         html += '<tr style="background:rgba(255,255,255,.02)">';
         html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">Приказ №01/07/26 - 1% от ВП 3 тралов (В776ЕТ797, М800АЕ797, О894ХМ797), до 01.11.2026</td>';
@@ -4367,11 +4393,14 @@ function renderSalesSalary() {
         }
       });
     } else {
-      // Обычный руководитель (Ахтамова, Гусейнова)
+      // Обычный руководитель (Ахтамова, Гусейнова). "Премия" в шапке строки - сумма ВСЕХ
+      // премиальных компонентов (укомплектованность + объём), раскладка построчно ниже -
+      // Влад, 2026-08-06: "хочу видеть части премии - за что 30 тысяч, за что 80 тысяч".
+      var headPremiaTotal = headHC.mgrBonus + volumeBonus;
+      var headRowTotal = headHC.total + volumeBonus; // строка руководителя целиком, включая объём (который считается вне calcHead - там нет личных продаж)
       var headNote = useNewRules
         ? 'Оклад 20т + 0.8% вырч.мен. + 2% найм мен. (маржа ≥23%)'
         : 'Оклад 20т + 0.8% вырч.мен. + 2% найм мен.';
-      if (headHC.mgrBonus) headNote += ' + бонус ('+headHC.above2m+' мен. >2М)';
       html += '<tr style="background:rgba('+dept.bgA+',.07)">';
       html += '<td><b>'+dept.headName+'</b> <span style="font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(255,255,255,.1);color:var(--muted)">рук.</span>';
       html += '<div style="font-size:10px;color:var(--muted);margin-top:2px">'+headNote+'</div></td>';
@@ -4382,13 +4411,19 @@ function renderSalesSalary() {
       html += '<td class="num" style="border-left:2px solid var(--border)">'+fr(20000)+'</td>';
       html += '<td class="num">'+fr(headHC.pct08)+'</td>';
       html += '<td class="num">'+fr(headHC.margin2)+'</td>';
-      html += '<td class="num">'+(headHC.mgrBonus ? fr(headHC.mgrBonus) : '—')+'</td>';
-      html += '<td class="num" style="font-weight:700;color:'+dept.color+'">'+fr(headHC.total)+'</td>';
+      html += '<td class="num">'+(headPremiaTotal ? fr(headPremiaTotal) : '—')+'</td>';
+      html += '<td class="num" style="font-weight:700;color:'+dept.color+'">'+fr(headRowTotal)+'</td>';
       html += '</tr>';
+      if (headHC.mgrBonus) {
+        html += '<tr style="background:rgba(255,255,255,.02)">';
+        html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">Премия за укомплектованность отдела: '+headHC.memberCount+' активных менеджеров (нужно ≥4), из них '+headHC.above2m+' сделали &gt;2М</td>';
+        html += '<td colspan="9" class="num muted" style="font-size:11px">20т × '+headHC.above2m+' = '+fr(headHC.mgrBonus)+'</td>';
+        html += '</tr>';
+      }
       if (volumeBonus) {
         var deptRevTotal = headHC.deptRev + (headHM ? (headHM.total||0) : 0);
         html += '<tr style="background:rgba(255,255,255,.02)">';
-        html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">Премия за объём (выручка отдела ≥30М): '+fr(deptRevTotal)+'</td>';
+        html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">Премия за объём: выручка отдела '+fr(deptRevTotal)+' (нужно ≥30М)</td>';
         html += '<td colspan="9" class="num muted" style="font-size:11px">10т × '+Math.floor(deptRevTotal/10000000)+' (по 10М) = '+fr(volumeBonus)+'</td>';
         html += '</tr>';
       }

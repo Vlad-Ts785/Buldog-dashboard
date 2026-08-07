@@ -5841,17 +5841,19 @@ function parseOrdersRawRows(allData) {
 
 
 
-// РАЗОВЫЙ ДИАГНОСТИЧЕСКИЙ ХЕЛПЕР (2026-08-06): проверка задвоения в архиве Заказы_2026-07 -
-// Влад заметил, что суммы по менеджерам за июль выглядят завышенными. Причина найдена и
-// исправлена в mergeRawOrderRows_ (баг: позиция колонки "Номер" бралась только из НОВОГО
-// отчёта и ошибочно применялась и к уже сохранённым старым строкам - если 1С хоть раз
-// сдвинула колонки, старые строки получали "мусорный" номер вместо настоящего, и реальный
-// заказ задваивался). Эта функция проверяет ФАКТ: считает заказы по номеру, ищет дубли и
-// "мусорные" номера (не похожие на настоящий номер заказа - не 5-7-значное число).
-function diagnoseJulyArchiveDuplicates() {
+// РАЗОВЫЙ ДИАГНОСТИЧЕСКИЙ ХЕЛПЕР (2026-08-06, параметризован по месяцу): проверка задвоения
+// в архиве Заказы_YYYY-MM - в июле весь датасет (1133 заказа) оказался записан дважды подряд
+// (2266 строк, суммы копий совпадали 1:1) - уже исправлено (dedupeJulyArchive). Причина
+// первичной порчи не установлена железно (первая версия mergeRawOrderRows_ была не совсем
+// верной - позиция колонки "Номер" бралась только из НОВОГО отчёта и ошибочно применялась и
+// к старым строкам - исправлено), но фикс на mergeRawOrderRows_/mergeNormalizedOrderRows_
+// теперь дедуплицирует по номеру при каждой записи - новых задвоений быть не должно. Эта
+// функция проверяет ФАКТ на любой месяц: считает заказы по номеру, ищет дубли и "мусорные"
+// номера (не похожие на настоящий номер заказа - не 4-8-значное число).
+function diagnoseArchiveDuplicates(month) {
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-  const sheet = ss.getSheetByName(ORDERS_ARCHIVE_PFX + '2026-07');
-  if (!sheet) { Logger.log('Нет листа Заказы_2026-07'); return; }
+  const sheet = ss.getSheetByName(ORDERS_ARCHIVE_PFX + month);
+  if (!sheet) { Logger.log('Нет листа ' + ORDERS_ARCHIVE_PFX + month); return; }
   const allData = sheet.getDataRange().getValues();
   const headerIdx = findOrdersHeaderRowIndex_(allData);
   const headerRow = allData[headerIdx];
@@ -5901,16 +5903,20 @@ function diagnoseJulyArchiveDuplicates() {
   return { totalRows: rows.length, uniqueIds: Object.keys(byId).length, dupCount: dupIds.length, garbageCount: garbageCount };
 }
 
-// РАЗОВЫЙ ХЕЛПЕР ОЧИСТКИ (2026-08-06): убирает дубли из архива Заказы_2026-07, найденные
-// diagnoseJulyArchiveDuplicates - весь датасет (1133 заказа) оказался записан дважды подряд
-// (2266 строк), суммы у копий один в один совпадают - оставляем ПЕРВОЕ вхождение каждого
-// номера заказа, остальное отбрасываем. Ничего не теряем: копии идентичны. Не трогает
-// заголовок и порядок оставшихся строк. Идемпотентна - повторный запуск на уже чистом
-// листе ничего не изменит (дублей не найдёт). Удалить после проверки результата.
-function dedupeJulyArchive() {
+function diagnoseJulyArchiveDuplicates() { return diagnoseArchiveDuplicates('2026-07'); }
+function diagnoseJuneArchiveDuplicates() { return diagnoseArchiveDuplicates('2026-06'); }
+
+// РАЗОВЫЙ ХЕЛПЕР ОЧИСТКИ (2026-08-06, параметризован по месяцу): убирает дубли из архива
+// Заказы_YYYY-MM, найденные diagnoseArchiveDuplicates - оставляет ПЕРВОЕ вхождение каждого
+// номера заказа, остальное отбрасывает. Безопасно только когда копии идентичны (как в июле -
+// суммы совпадали 1:1); если найдутся дубли с РАЗНЫМИ суммами - функция всё равно оставит
+// первую версию и отбросит остальные, проверьте лог diagnoseArchiveDuplicates заранее, что
+// это не тот случай. Идемпотентна - повторный запуск на уже чистом листе ничего не изменит.
+// Удалить после проверки результата.
+function dedupeArchive(month) {
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-  const sheet = ss.getSheetByName(ORDERS_ARCHIVE_PFX + '2026-07');
-  if (!sheet) { Logger.log('Нет листа Заказы_2026-07'); return; }
+  const sheet = ss.getSheetByName(ORDERS_ARCHIVE_PFX + month);
+  if (!sheet) { Logger.log('Нет листа ' + ORDERS_ARCHIVE_PFX + month); return; }
   const allData = sheet.getDataRange().getValues();
   const headerIdx = findOrdersHeaderRowIndex_(allData);
   const headerRow = allData[headerIdx];
@@ -5941,6 +5947,9 @@ function dedupeJulyArchive() {
   Logger.log('✅ Готово. Строк в листе теперь: ' + finalData.length + ' (было ' + allData.length + ')');
   return { before: dataRows.length, after: keep.length, dropped: dropped };
 }
+
+function dedupeJulyArchive() { return dedupeArchive('2026-07'); }
+function dedupeJuneArchive() { return dedupeArchive('2026-06'); }
 
 
 

@@ -5901,6 +5901,47 @@ function diagnoseJulyArchiveDuplicates() {
   return { totalRows: rows.length, uniqueIds: Object.keys(byId).length, dupCount: dupIds.length, garbageCount: garbageCount };
 }
 
+// РАЗОВЫЙ ХЕЛПЕР ОЧИСТКИ (2026-08-06): убирает дубли из архива Заказы_2026-07, найденные
+// diagnoseJulyArchiveDuplicates - весь датасет (1133 заказа) оказался записан дважды подряд
+// (2266 строк), суммы у копий один в один совпадают - оставляем ПЕРВОЕ вхождение каждого
+// номера заказа, остальное отбрасываем. Ничего не теряем: копии идентичны. Не трогает
+// заголовок и порядок оставшихся строк. Идемпотентна - повторный запуск на уже чистом
+// листе ничего не изменит (дублей не найдёт). Удалить после проверки результата.
+function dedupeJulyArchive() {
+  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(ORDERS_ARCHIVE_PFX + '2026-07');
+  if (!sheet) { Logger.log('Нет листа Заказы_2026-07'); return; }
+  const allData = sheet.getDataRange().getValues();
+  const headerIdx = findOrdersHeaderRowIndex_(allData);
+  const headerRow = allData[headerIdx];
+  let numCol = -1;
+  headerRow.forEach(function(h, i) { if (String(h || '').trim() === 'Номер') numCol = i; });
+  if (numCol < 0) { Logger.log('Колонка "Номер" не найдена'); return; }
+
+  const headerRows = allData.slice(0, headerIdx + 1);
+  const dataRows = allData.slice(headerIdx + 1);
+
+  const seen = {};
+  const keep = [];
+  let dropped = 0;
+  dataRows.forEach(function(row) {
+    const id = String(row[numCol] || '').trim();
+    if (id && seen[id]) { dropped++; return; } // уже видели этот номер - вторая (и далее) копия отбрасывается
+    if (id) seen[id] = true;
+    keep.push(row);
+  });
+
+  Logger.log('Было строк: ' + dataRows.length + ', уникальных номеров: ' + Object.keys(seen).length + ', отброшено дублей: ' + dropped);
+
+  if (dropped === 0) { Logger.log('Дублей не найдено - лист не тронут'); return { before: dataRows.length, after: keep.length, dropped: 0 }; }
+
+  sheet.clear();
+  const finalData = headerRows.concat(keep);
+  sheet.getRange(1, 1, finalData.length, finalData[0].length).setValues(finalData);
+  Logger.log('✅ Готово. Строк в листе теперь: ' + finalData.length + ' (было ' + allData.length + ')');
+  return { before: dataRows.length, after: keep.length, dropped: dropped };
+}
+
 
 
 // ── API ДЛЯ ДАШБОРДА ─────────────────────────────────────────

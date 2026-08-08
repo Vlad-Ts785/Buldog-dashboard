@@ -4127,6 +4127,11 @@ function renderSalesSalary() {
 
   function calcHead(members, headSur, useNewRules) {
     var deptRev = 0, deptHired = 0, deptQualMargin = 0, deptExtraCosts = 0, above2m = 0, activeCount = 0;
+    // Влад, 2026-08-08: "0.8% для руководителя - не со всей выручки команды (найм тоже), а
+    // только со своего парка команды минус их затраты" - та же логика, что ownProfitBase в
+    // calcMgr для личных продаж (own_amount/own_profit уже разделены и очищены от 1С-затрат
+    // на бэкенде, см. aggregateOrdersRows).
+    var deptOwnRev = 0, deptOwnProfitBase = 0;
     members.forEach(function(sur) {
       if (sur.toLowerCase() === headSur.toLowerCase()) return;
       var m = getM(sur);
@@ -4136,6 +4141,8 @@ function renderSalesSalary() {
         deptRev += (m.amount||0);
         deptQualMargin += (m.hired_margin_qualified||0);
         deptExtraCosts += (m.hired_extra_costs||0);
+        deptOwnRev += (m.own_amount||0);
+        deptOwnProfitBase += (m.own_profit||0);
         if ((m.amount||0) >= 2000000) above2m++;
       } else {
         var isPrus = sur.toLowerCase() === 'прус-роскошный';
@@ -4145,7 +4152,10 @@ function renderSalesSalary() {
         if (sp.total >= 2000000) above2m++;
       }
     });
-    var pct08   = Math.round(deptRev * 0.008);
+    // До июля 2026 own_profit как база % не выделялся отдельным правилом (см. ownProfitBase в
+    // calcMgr) - для прошлых периодов оставляем старую формулу (вся выручка команды), для
+    // новых правил - только свой парк минус затраты.
+    var pct08   = useNewRules ? Math.round(deptOwnProfitBase * 0.008) : Math.round(deptRev * 0.008);
     var margin2 = useNewRules ? Math.round(deptQualMargin * 0.02) : (deptHired > 0 ? Math.round(deptHired * 0.02) : 0);
     // Премия за укомплектованность (Влад, 2026-08-06): "если в команде 4 менеджера [не считая
     // руководителя] - за всех, кто делает больше 2 млн, по 20 тыс; если условие 4 человека не
@@ -4153,7 +4163,8 @@ function renderSalesSalary() {
     // выручки не должен ни спасать, ни портить численность команды.
     var mgrBonus = activeCount >= 4 ? above2m * 20000 : 0;
     var total = 20000 + pct08 + margin2 + mgrBonus;
-    return { deptRev:deptRev, deptHired:deptHired, deptQualMargin:deptQualMargin, deptExtraCosts:deptExtraCosts, pct08:pct08, margin2:margin2,
+    return { deptRev:deptRev, deptHired:deptHired, deptQualMargin:deptQualMargin, deptExtraCosts:deptExtraCosts,
+             deptOwnRev:deptOwnRev, deptOwnProfitBase:deptOwnProfitBase, pct08:pct08, margin2:margin2,
              mgrBonus:mgrBonus, above2m:above2m, memberCount:activeCount, total:total };
   }
 
@@ -4429,8 +4440,14 @@ function renderSalesSalary() {
       // как ownProfitBase/hiredBreakdownRow ниже для личных продаж.
       if (headHC.pct08) {
         html += '<tr style="background:rgba(255,255,255,.02)">';
-        html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">% с команды: 0.8% от выручки менеджеров (без личных продаж рук.)</td>';
-        html += '<td colspan="9" class="num muted" style="font-size:11px">0.8% × '+fr(headHC.deptRev)+' = '+fr(headHC.pct08)+'</td>';
+        if (useNewRules) {
+          var headTeamCosts = headHC.deptOwnRev - headHC.deptOwnProfitBase;
+          html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">База % с команды: '+fr(headHC.deptOwnRev)+' выручка своего парка команды минус '+fr(headTeamCosts)+' затраты = <b>'+fr(headHC.deptOwnProfitBase)+'</b></td>';
+          html += '<td colspan="9" class="num muted" style="font-size:11px">0.8% × '+fr(headHC.deptOwnProfitBase)+' = '+fr(headHC.pct08)+'</td>';
+        } else {
+          html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">% с команды: 0.8% от выручки менеджеров (без личных продаж рук.)</td>';
+          html += '<td colspan="9" class="num muted" style="font-size:11px">0.8% × '+fr(headHC.deptRev)+' = '+fr(headHC.pct08)+'</td>';
+        }
         html += '</tr>';
       }
       if (headHC.margin2) {

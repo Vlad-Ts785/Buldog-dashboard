@@ -2846,6 +2846,30 @@ function getManagerView_(ss, managerName) {
   };
 }
 
+// Урезанный набор данных для роли "logist" (2026-08-10, по аналогии с getManagerView_ выше) -
+// только собственные заказы/маржа/сделки, без доступа к данным других людей и компании в целом.
+function getLogistView_(ss, logistName) {
+  const orders = getOrdersData(ss);
+  if (orders.error) return { error: orders.error };
+
+  const myDetail = (orders.logist_detail || {})[logistName] || null;
+  const myLogistRow = (orders.by_logist || []).filter(function(l) { return l.name === logistName; });
+
+  const detailWrapped = {};
+  if (myDetail) detailWrapped[logistName] = myDetail;
+
+  return {
+    updated: new Date().toISOString(),
+    role: 'logist',
+    logistName: logistName,
+    orders: {
+      period: orders.period,
+      by_logist: myLogistRow,
+      logist_detail: detailWrapped,
+    },
+  };
+}
+
 // ============================================================
 // API ДЛЯ ДАШБОРДА — читает Штатку для статусов и типов
 // ============================================================
@@ -3165,6 +3189,13 @@ function doGet(e) {
     if (access.role === 'manager') {
       return ContentService
         .createTextOutput(JSON.stringify(getManagerView_(ss, access.name)))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // Логист (2026-08-10) - та же логика, что и manager выше, но своя урезанная выдача
+    if (access.role === 'logist') {
+      return ContentService
+        .createTextOutput(JSON.stringify(getLogistView_(ss, access.name)))
         .setMimeType(ContentService.MimeType.JSON);
     }
 
@@ -6495,6 +6526,7 @@ function aggregateOrdersRows(rows) {
   const driverMap   = {};
   const problemOrders = [];
   const mgrDetailMap = {}; // персональная разбивка по менеджеру (для личной страницы)
+  const logistDetailMap = {}; // персональная разбивка по логисту (для личной страницы, 2026-08-10)
   const internalMap  = {}; // вкладка "Внутренние перевозки" - по нашим предприятиям
   const internalCargoMap = {}; // груз -> кол-во рейсов (только внутренние)
   let internalTral = 0, internalLong = 0; // тип нашей техники (только внутренние)
@@ -6526,6 +6558,17 @@ function aggregateOrdersRows(rows) {
       };
     }
     return mgrDetailMap[name];
+  }
+
+  // Личная страница логиста (2026-08-10, Прус-Роскошный и остальные) - маржа по поставщикам
+  // именно его сделок + воронка документов по поставщику + список сделок. Отдельная структура
+  // от logistMap (та копит только суммарные цифры для зарплаты/списков) - тут нужна разбивка
+  // по каждому поставщику, которую больше нигде не считаем.
+  function logistDetail(name) {
+    if (!logistDetailMap[name]) {
+      logistDetailMap[name] = { name: name, suppliers: {}, deals: [] };
+    }
+    return logistDetailMap[name];
   }
 
   for (const row of rows) {
@@ -6726,6 +6769,26 @@ function aggregateOrdersRows(rows) {
       // равен "Прибыль" - именно эта сумма и есть маржа с учётом всех затрат.
       supplierMap[supplier].extra_costs += (amount - hiredCost - profit);
       if (!hw && !isInternalOrder) supplierMap[supplier].no_waybill++;
+
+      // Та же разбивка по поставщику, но только для СВОЕГО логиста (личная страница,
+      // 2026-08-10) - не смешивается с чужими сделками, как mgrDetail выше для менеджеров.
+      if (mgrLog && ordInList(mgrLog, TRAL_LOGISTS)) {
+        var ld = logistDetail(mgrLog);
+        if (!ld.suppliers[supplier]) {
+          ld.suppliers[supplier] = { name:supplier, orders:0, revenue:0, cost:0, extra_costs:0, profit:0,
+            no_waybill:0, not_posted:0, no_realiz:0, complete:0 };
+        }
+        var lds = ld.suppliers[supplier];
+        lds.orders++;
+        lds.revenue += amount;
+        lds.cost    += hiredCost;
+        lds.profit  += profit;
+        lds.extra_costs += (amount - hiredCost - profit);
+        ld.deals.push({
+          id: str(row,'id'), date: dateStr, customer: str(row,'customer'), supplier: supplier,
+          amount: amount, cost: hiredCost, margin: profit,
+        });
+      }
     }
 
     // ── Статус документов (внешние заказы, разбивка по декадам) ──
@@ -6757,6 +6820,20 @@ function aggregateOrdersRows(rows) {
         else if (!pst) md2.waybill_not_posted++;
         else if (!hr)  md2.posted_no_realiz++;
         else           { md2.complete++; mgrDetail(mgrSales).rows_complete++; }
+      }
+
+      // Воронка документов ПО ПОСТАВЩИКУ, только для найма своего логиста (личная страница,
+      // 2026-08-10) - та же классификация (skipToComplete/hw/pst/hr), что и общая воронка выше,
+      // просто на запись supplierMap этого логиста (уже создана в блоке "По поставщикам найма").
+      if (isHired && mgrLog && ordInList(mgrLog, TRAL_LOGISTS)) {
+        var lds2 = logistDetail(mgrLog).suppliers[str(row, 'hired')];
+        if (lds2) {
+          if (skipToComplete) { lds2.complete++; }
+          else if (!hw)       { lds2.no_waybill++; }
+          else if (!pst)      { lds2.not_posted++; }
+          else if (!hr)       { lds2.no_realiz++; }
+          else                { lds2.complete++; }
+        }
       }
 
       if (docStatus) {
@@ -6865,6 +6942,26 @@ function aggregateOrdersRows(rows) {
     };
   });
 
+  // Личная страница логиста (2026-08-10) - маржа по поставщикам его собственных сделок +
+  // воронка документов по поставщику + список сделок. margin/margin_pct считаются так же, как
+  // в supplierList выше (margin = "Прибыль" из 1С, не revenue-cost) - те же цифры, что видно
+  // на общей вкладке "Наёмная техника", просто отфильтрованные на одного логиста.
+  const logistDetailOut = {};
+  Object.keys(logistDetailMap).forEach(function(name) {
+    const ld = logistDetailMap[name];
+    const supList = Object.values(ld.suppliers).map(function(s) {
+      return {
+        name: s.name, orders: s.orders, revenue: s.revenue, cost: s.cost, extra_costs: s.extra_costs,
+        margin: s.profit, margin_pct: s.revenue > 0 ? Math.round(s.profit / s.revenue * 100) : 0,
+        no_waybill: s.no_waybill, not_posted: s.not_posted, no_realiz: s.no_realiz, complete: s.complete,
+      };
+    }).sort(function(a,b){ return b.revenue - a.revenue; });
+    logistDetailOut[name] = {
+      by_supplier: supList,
+      deals: ld.deals.sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); }).slice(0, 300),
+    };
+  });
+
   // Топ грузов: сортируем по числу рейсов, "Прочие грузы" всегда в конец
   function sortCargo(map) {
     return Object.values(map).sort(function(a, b) {
@@ -6952,6 +7049,7 @@ function aggregateOrdersRows(rows) {
       .filter(function(s){ return s.no_waybill > 0; })
       .sort(function(a,b){ return b.no_waybill-a.no_waybill; }),
     by_manager_detail: managerDetail,
+    logist_detail:     logistDetailOut,
     internal: {
       total_trips:  internalOrders,
       total_amount: internalAmount,

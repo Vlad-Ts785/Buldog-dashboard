@@ -6129,7 +6129,11 @@ function diagnoseOwnCostsForManager(managerSur, period) {
   let total = 0, count = 0;
   Logger.log('Заказы своего парка (БЕЗ найма) - ' + managerSur + ', ' + period + ':');
   rows.forEach(function(row) {
-    if (String(row[15] || '').trim().toLowerCase() !== managerSur) return; // mgr_s
+    // По ВХОЖДЕНИЮ фамилии, не точное равенство - в 1С "Менеджер продаж" (mgr_s) хранится
+    // как полное ФИО ("Шейко Елена"), не одна фамилия (та же логика, что ordInList/TRAL_MANAGERS
+    // использует в самом дашборде для сопоставления). Первый прогон (2026-08-10) с точным
+    // равенством дал 0 заказов именно поэтому - не баг дашборда, баг этой диагностики.
+    if (String(row[15] || '').trim().toLowerCase().indexOf(managerSur) < 0) return; // mgr_s
     const hiredRaw = String(row[27] || '').trim(); // Найм
     if (hiredRaw !== 'Нет' && hiredRaw !== '') return; // затраты своего парка - только НЕ-наёмные заказы
     const amount = parseFloat(row[30]) || 0; // Сумма

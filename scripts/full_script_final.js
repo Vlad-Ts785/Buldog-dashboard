@@ -3194,13 +3194,6 @@ function doGet(e) {
       // 2026-07-16: "по некоторым машинам по количеству заказов показывает —"). Тут - тот же
       // ПОЛНЫЙ (без обрезки) счётчик, что уже считается для action=vehicles_period.
       driverOrderCounts: getDriverOrderCounts_(ss, defaultRange.from, defaultRange.to),
-      // Влад, 2026-08-10: "выпадающий список периода сначала пустой, месяцы появляются с
-      // задержкой" - раньше фронт после загрузки страницы делал ВТОРОЙ отдельный запрос
-      // (action=available_periods) только при первом заходе на вкладку с выбором периода, а
-      // каждый запрос к doGet() платит свою цену (открытие таблицы + проверка токена через
-      // Google). getAvailablePeriods(ss) сам по себе дешёвый (просто список листов, без чтения
-      // ячеек) - отдаём его сразу с основным ответом, второй round-trip больше не нужен.
-      periods: getAvailablePeriods(ss),
     };
     return ContentService
       .createTextOutput(JSON.stringify(data))
@@ -4109,11 +4102,46 @@ const TRAL_MANAGERS = [
   'Рыщанов', 'Суркова'
 ];
 
-// Логисты отдела (Прус-Роскошный — двойная роль)
+// Логисты отдела (Прус-Роскошный — двойная роль). РЕГРЕССИЯ (2026-08-07): Суркова снова
+// пропала из списка - тот же баг уже чинили 2026-07-07 (см. память project-salary-rules,
+// "Суркова отсутствовала в TRAL_LOGISTS" - её заказы с mgr_l="Суркова" никогда не попадали в
+// logistMap, вся её маржа найма молча исчезала из qualMarginAllLogists/её собственной
+// зарплаты). Похоже, откатилось при одном из прямых clasp push мимо git - см. координацию
+// между сессиями в CLAUDE.md. Возвращена.
 const TRAL_LOGISTS = [
-  'Васин', 'Кан', 'Махура', 'Сильчев',
+  'Васин', 'Кан', 'Махура', 'Сильчев', 'Суркова',
   'Прус-Роскошный', 'Рыщанов', 'Ахтамова', 'Гусейнова'
 ];
+
+// ПОСТОЯННЫЙ ИНСТРУМЕНТ (не одноразовый, не удалять) - регрессионный смоук-тест. Проверяет
+// конкретные факты, которые уже ДВАЖДЫ откатывались в этом файле (порог 23% - по компании, не
+// по заказу; Суркова в TRAL_LOGISTS) - оба раза стоило реальных денег (недоплата Сурковой,
+// заниженная база 2% Рыщанова), оба раза обнаружено не сразу, а когда Влад заметил странные
+// цифры. Похоже на риск параллельных clasp push мимо git (см. project_clasp_setup, инцидент
+// 2026-07-07 и его повтор 2026-08-07). Запускать вручную, когда цифры зарплаты выглядят
+// подозрительно, или просто периодически - секунды на проверку против часов на разбор задним
+// числом. Список проверок можно пополнять по мере находок новых регрессий.
+function verifyKnownFixes() {
+  var problems = [];
+
+  if (TRAL_LOGISTS.indexOf('Суркова') < 0) {
+    problems.push('TRAL_LOGISTS не содержит "Суркова" - её маржа найма молча исчезает из зарплаты (регрессия, было 2026-07-07 и 2026-08-07)');
+  }
+
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var testData = getOrdersData(ss);
+  if (testData && testData.summary && typeof testData.summary.hired_margin_qualifies !== 'boolean') {
+    problems.push('summary.hired_margin_qualifies отсутствует/не boolean - похоже, проверка порога 23% "по компании целиком" пропала из aggregateOrdersRows (регрессия, было 2026-07-07 и 2026-08-06)');
+  }
+
+  if (problems.length === 0) {
+    Logger.log('✅ Все известные фиксы на месте (' + 2 + ' проверки пройдены)');
+  } else {
+    Logger.log('⚠️ НАЙДЕНЫ РЕГРЕССИИ (' + problems.length + '):');
+    problems.forEach(function(p) { Logger.log('  - ' + p); });
+  }
+  return problems;
+}
 
 // ── ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ─────────────────────────────────
 
@@ -4437,13 +4465,29 @@ function importOrdersReport() {
 // обновляется свежими данными (1С может дозаполнить прибыль/путёвку задним числом); новый id -
 // добавляется. См. plans/2026-08-06-orders-import-merge-not-replace.md.
 
+// КОРЕНЬ БАГА ЗАДВОЕНИЯ АРХИВОВ (найден 2026-08-07, см. project_salary_rules): 1С экспортирует
+// "Номер заказа" как ТЕКСТ с ведущими нулями ("000469109"), а Google Таблицы при записи
+// (setValues) молча превращают то же значение в чистое число (469109), теряя нули - при
+// следующем слиянии String(469109)="469109" НЕ РАВНО "000469109", хотя это один и тот же
+// заказ. Раньше (до слияния, просто "стереть и переписать") это не имело значения - никто не
+// сравнивал старый номер с новым. Канонический вид - распарсить как целое число и обратно в
+// строку: схлопывает оба варианта в одно значение независимо от формата на входе. Использовать
+// ВЕЗДЕ, где "Номер" сравнивается на равенство (слияние, дедупликация, бэкфилл, диагностика) -
+// не только там, где нашли симптом.
+function normalizeOrderId_(val) {
+  const s = String(val || '').trim();
+  if (!s) return '';
+  const n = parseInt(s, 10);
+  return isNaN(n) ? s : String(n);
+}
+
 // Слияние НОРМАЛИЗОВАННЫХ строк (44 колонки, id всегда в колонке 0) - для Заказы_данные.
 function mergeNormalizedOrderRows_(existingRows, newRows) {
   const map = {};
   const order = [];
   function addRows(rows) {
     rows.forEach(function(row) {
-      const id = String(row[0] || '').trim();
+      const id = normalizeOrderId_(row[0]);
       if (!id) return;
       if (!(id in map)) order.push(id);
       map[id] = row;
@@ -4469,13 +4513,10 @@ function mergeRawOrderRows_(existingData, newData) {
   const existingHeaderIdx = findOrdersHeaderRowIndex_(existingData);
   if (existingHeaderIdx < 0 || existingData.length <= existingHeaderIdx + 1) return newData;
 
-  // БАГ (найден 2026-08-06, Влад заметил задвоение выручки за июль): idCol найден из ШАПКИ
-  // НОВОГО отчёта, но раньше применялся и к старым строкам тоже. Если 1С хоть раз сдвинула
-  // колонки между отчётами - старые строки читались по неверной позиции, получали "мусорный"
-  // номер вместо реального, и тот же самый заказ задваивался (одна копия под настоящим
-  // номером из нового отчёта, вторая - под мусорным из старого). Теперь позиция колонки
-  // "Номер" ищется ОТДЕЛЬНО в шапке existingData - как она реально лежит в уже сохранённых
-  // строках, а не как в сегодняшнем отчёте.
+  // Позиция колонки "Номер" ищется ОТДЕЛЬНО в шапке existingData - как она реально лежит в
+  // уже сохранённых строках, а не как в сегодняшнем отчёте (первый найденный баг 2026-08-06:
+  // 1С может сдвигать колонки между отчётами - тогда общий idCol на оба набора читал бы
+  // старые строки по неверной позиции).
   const existingHeaderRow = existingData[existingHeaderIdx] || [];
   let existingIdCol = -1;
   existingHeaderRow.forEach(function(h, i) { if (String(h || '').trim() === 'Номер') existingIdCol = i; });
@@ -4486,7 +4527,7 @@ function mergeRawOrderRows_(existingData, newData) {
   const order = [];
   function addRows(rows, col) {
     rows.forEach(function(row) {
-      const id = String(row[col] || '').trim();
+      const id = normalizeOrderId_(row[col]); // см. normalizeOrderId_ - без этого "469109" (число, уже записанное нами) и "000469109" (текст из свежего отчёта 1С) считались бы разными заказами - настоящая причина задвоения 2026-08-07
       if (!id) return;
       if (!(id in map)) order.push(id);
       map[id] = row;
@@ -4533,7 +4574,7 @@ function backfillOrders_(month, orders) {
   const numCol = colOf['Номер'];
   if (numCol === undefined) throw new Error('Колонка "Номер" не найдена в шапке архива');
   const existingIds = {};
-  allData.slice(headerIdx + 1).forEach(function(row) { existingIds[String(row[numCol] || '').trim()] = true; });
+  allData.slice(headerIdx + 1).forEach(function(row) { existingIds[normalizeOrderId_(row[numCol])] = true; });
 
   function buildRow(values) {
     const row = new Array(headerRow.length).fill('');
@@ -4546,7 +4587,7 @@ function backfillOrders_(month, orders) {
 
   const toAdd = [];
   orders.forEach(function(o) {
-    if (existingIds[o['Номер']]) { Logger.log('Заказ №' + o['Номер'] + ' уже есть в архиве - пропущен'); return; }
+    if (existingIds[normalizeOrderId_(o['Номер'])]) { Logger.log('Заказ №' + o['Номер'] + ' уже есть в архиве - пропущен'); return; }
     toAdd.push(buildRow(o));
   });
 
@@ -5710,7 +5751,7 @@ function diagnoseJuneCompanyWide() {
   const ourMap = {};
   let ourTotal = 0, ourRows = 0;
   allData.slice(headerIdx + 1).forEach(function(row) {
-    const id = String(row[numCol] || '').trim();
+    const id = normalizeOrderId_(row[numCol]);
     if (!id) return;
     const amount = parseFloat(row[sumCol]) || 0;
     ourMap[id] = (ourMap[id] || 0) + amount;
@@ -5720,7 +5761,7 @@ function diagnoseJuneCompanyWide() {
 
   const refMap = {}, refMgr = {};
   let refTotal = 0;
-  JUNE_REFERENCE.forEach(function(r) { refMap[r[0]] = r[1]; refMgr[r[0]] = r[2]; refTotal += r[1]; });
+  JUNE_REFERENCE.forEach(function(r) { var rid = normalizeOrderId_(r[0]); refMap[rid] = r[1]; refMgr[rid] = r[2]; refTotal += r[1]; });
 
   Logger.log('Строк в архиве Заказы_2026-06: ' + ourRows + ' (всего строк листа, включая другие отделы)');
   Logger.log('Заказов в выгрузке 1С (эталон, отдел Тралы): ' + JUNE_REFERENCE.length);
@@ -6030,6 +6071,39 @@ function diagnoseLogistMarginGap(month) {
 
 function diagnoseLogistMarginGapJuly() { return diagnoseLogistMarginGap('2026-07'); }
 
+// РАЗОВЫЙ ДИАГНОСТИЧЕСКИЙ ХЕЛПЕР (2026-08-07, только читает): вызывает ТУ ЖЕ САМУЮ функцию,
+// что и настоящий дашборд (aggregateOrdersRows), на архиве Заказы_2026-07 - чтобы сверить
+// qualMarginAllLogists (база 2% Рыщанова) напрямую, без риска расхождения между диагностикой
+// и реальным расчётом (как уже было с diagnoseLogistMarginGap - там своя отдельная логика).
+// Печатает: общую квалифицирующую маржу найма по компании (summary), сумму по каждому
+// логисту из by_logist (после фикса TRAL_LOGISTS - Суркова снова должна быть) и их сумму,
+// чтобы сравнить с company-wide.
+function diagnoseLogistMarginConsistencyJuly() {
+  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  const archive = ss.getSheetByName(ORDERS_ARCHIVE_PFX + '2026-07');
+  if (!archive || archive.getLastRow() < 5) { Logger.log('Нет архива за 2026-07'); return; }
+  const rows = parseOrdersRawRows(archive.getDataRange().getValues()).rows;
+  const result = aggregateOrdersRows(rows);
+  const s = result.summary;
+
+  Logger.log('Строк в архиве: ' + rows.length);
+  Logger.log('summary.hired_profit (вся маржа найма по компании): ' + s.hired_profit);
+  Logger.log('summary.hired_margin_pct: ' + (s.hired_margin_pct * 100).toFixed(1) + '%');
+  Logger.log('summary.hired_margin_qualifies: ' + s.hired_margin_qualifies);
+
+  let logistSum = 0, logistSumQual = 0;
+  Logger.log('--- by_logist ---');
+  (result.by_logist || []).forEach(function(l) {
+    logistSum += l.hired_margin_qualified + l.hired_margin_unqualified;
+    logistSumQual += l.hired_margin_qualified;
+    Logger.log(l.name + ': всего маржи найма=' + (l.hired_margin_qualified + l.hired_margin_unqualified) +
+      ' (квалиф.=' + l.hired_margin_qualified + ', неквалиф.=' + l.hired_margin_unqualified + ')');
+  });
+  Logger.log('Сумма по всем логистам (всего): ' + logistSum);
+  Logger.log('Сумма по всем логистам (только квалиф. - это и есть база 2% Рыщанова): ' + logistSumQual);
+  Logger.log('Разница с summary.hired_profit: ' + (s.hired_profit - logistSum));
+}
+
 function diagnoseArchiveDuplicates(month) {
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
   const sheet = ss.getSheetByName(ORDERS_ARCHIVE_PFX + month);
@@ -6055,7 +6129,7 @@ function diagnoseArchiveDuplicates(month) {
   let garbageCount = 0;
   const garbageSample = [];
   rows.forEach(function(row, i) {
-    const id = String(row[numCol] || '').trim();
+    const id = normalizeOrderId_(row[numCol]);
     if (!id) return;
     if (!/^\d{4,8}$/.test(id)) {
       garbageCount++;
@@ -6111,7 +6185,7 @@ function dedupeArchive(month) {
   const keep = [];
   let dropped = 0;
   dataRows.forEach(function(row) {
-    const id = String(row[numCol] || '').trim();
+    const id = normalizeOrderId_(row[numCol]);
     if (id && seen[id]) { dropped++; return; } // уже видели этот номер - вторая (и далее) копия отбрасывается
     if (id) seen[id] = true;
     keep.push(row);

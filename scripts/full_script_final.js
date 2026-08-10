@@ -6111,6 +6111,40 @@ function diagnoseLogistMarginConsistencyJuly() {
   Logger.log('Разница с summary.hired_profit: ' + (s.hired_profit - logistSum));
 }
 
+// РАЗОВЫЙ ДИАГНОСТИЧЕСКИЙ ХЕЛПЕР (2026-08-10, только читает): Влад спросил "откуда у Шейко
+// за июль 1300 в затратах". Колонка "Затраты" в зарплате (своего парка, не найм) = own_amount
+// минус own_profit, то есть сумма (amount - Прибыль) по ВСЕМ её заказам БЕЗ найма за месяц -
+// три статьи затрат 1С (Вознаграждение 1/2, Спецразрешение и НДС-корректировки), выведенные
+// обратным счётом (см. m.own_profit в aggregateOrdersRows). Печатает построчно каждый такой
+// заказ, чтобы найти, какой именно дал разницу. Запускать вручную (Выполнить в редакторе),
+// параметр - фамилия и период, чтобы использовать повторно для любого сотрудника/месяца.
+function diagnoseOwnCostsForManager(managerSur, period) {
+  managerSur = (managerSur || 'Шейко').trim().toLowerCase();
+  period = period || '2026-07';
+  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  const archive = ss.getSheetByName(ORDERS_ARCHIVE_PFX + period);
+  if (!archive || archive.getLastRow() < 5) { Logger.log('Нет архива за ' + period); return; }
+  const rows = parseOrdersRawRows(archive.getDataRange().getValues()).rows;
+
+  let total = 0, count = 0;
+  Logger.log('Заказы своего парка (БЕЗ найма) - ' + managerSur + ', ' + period + ':');
+  rows.forEach(function(row) {
+    if (String(row[15] || '').trim().toLowerCase() !== managerSur) return; // mgr_s
+    const hiredRaw = String(row[27] || '').trim(); // Найм
+    if (hiredRaw !== 'Нет' && hiredRaw !== '') return; // затраты своего парка - только НЕ-наёмные заказы
+    const amount = parseFloat(row[30]) || 0; // Сумма
+    const profit = parseFloat(row[35]) || 0; // Прибыль
+    const diff = amount - profit;
+    total += diff;
+    count++;
+    if (diff) Logger.log('Заказ №' + row[0] + ': Сумма=' + amount + ', Прибыль=' + profit + ', разница=' + diff);
+  });
+  Logger.log('Всего заказов своего парка: ' + count);
+  Logger.log('ИТОГО разница (это и есть "Затраты" в зарплате): ' + total);
+}
+
+function diagnoseSheykoJulyOwnCosts() { return diagnoseOwnCostsForManager('Шейко', '2026-07'); }
+
 function diagnoseArchiveDuplicates(month) {
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
   const sheet = ss.getSheetByName(ORDERS_ARCHIVE_PFX + month);

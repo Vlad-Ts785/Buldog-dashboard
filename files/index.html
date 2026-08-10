@@ -1572,8 +1572,16 @@ let availablePeriods = [];
 
 async function loadAvailablePeriods() {
   try {
-    const data = await apiFetchJson({ action: 'available_periods' });
-    availablePeriods = data.periods || [];
+    // Влад, 2026-08-10: основной ответ (loadData) теперь уже содержит D.periods - отдельный
+    // запрос action=available_periods (со своей задержкой на открытие таблицы + проверку
+    // токена) нужен только как запасной путь, если по какой-то причине D.periods не пришёл
+    // (например, старая версия задеплоенного Apps Script).
+    if (D && D.periods) {
+      availablePeriods = D.periods;
+    } else {
+      const data = await apiFetchJson({ action: 'available_periods' });
+      availablePeriods = data.periods || [];
+    }
     const sel = document.getElementById('period-select');
     if (sel) {
       sel.innerHTML = '<option value="">Текущий месяц</option>' +

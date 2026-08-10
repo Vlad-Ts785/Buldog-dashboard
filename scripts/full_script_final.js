@@ -3194,6 +3194,13 @@ function doGet(e) {
       // 2026-07-16: "по некоторым машинам по количеству заказов показывает —"). Тут - тот же
       // ПОЛНЫЙ (без обрезки) счётчик, что уже считается для action=vehicles_period.
       driverOrderCounts: getDriverOrderCounts_(ss, defaultRange.from, defaultRange.to),
+      // Влад, 2026-08-10: "выпадающий список периода сначала пустой, месяцы появляются с
+      // задержкой" - раньше фронт после загрузки страницы делал ВТОРОЙ отдельный запрос
+      // (action=available_periods) только при первом заходе на вкладку с выбором периода, а
+      // каждый запрос к doGet() платит свою цену (открытие таблицы + проверка токена через
+      // Google). getAvailablePeriods(ss) сам по себе дешёвый (просто список листов, без чтения
+      // ячеек) - отдаём его сразу с основным ответом, второй round-trip больше не нужен.
+      periods: getAvailablePeriods(ss),
     };
     return ContentService
       .createTextOutput(JSON.stringify(data))

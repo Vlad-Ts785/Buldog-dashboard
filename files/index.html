@@ -4069,10 +4069,19 @@ function calcLogist(sur, getL, useNewRules) {
   var unqualMargin = useNewRules ? (l.hired_margin_unqualified||0) : 0;
   var hiredExtraCosts = useNewRules ? (l.hired_extra_costs||0) : 0;
   var marginBonus = useNewRules ? Math.round(qualMargin * 0.08) : 0;
+  // Влад, 2026-08-10: оклад 20т всем логистам (кроме Васина - отдельная формула, см.
+  // calcVasin), + премия 30т, если маржа найма (квалифицирующая + неквалифицирующая вместе)
+  // больше 1М. Влад: "у нас любая маржа квалифицируется, если по команде в целом маржа
+  // ≥23%" - qualMargin/unqualMargin делят одну и ту же сумму по ставке (8%/0%), порог 1М
+  // считаем от суммы обеих, не только от квалифицирующей части.
+  var totalMargin = qualMargin + unqualMargin;
+  var oklad = useNewRules ? 20000 : 0;
+  var bonus1m = useNewRules && totalMargin > 1000000 ? 30000 : 0;
   return {
     sur:sur, ownOrders:ownOrders, flatBonus:flatBonus,
     qualMargin:qualMargin, unqualMargin:unqualMargin, hiredExtraCosts:hiredExtraCosts, marginBonus:marginBonus,
-    total: flatBonus + marginBonus
+    totalMargin:totalMargin, oklad:oklad, bonus1m:bonus1m,
+    total: oklad + flatBonus + marginBonus + bonus1m
   };
 }
 
@@ -4393,7 +4402,7 @@ function renderSalesSalary() {
         html += '<td style="padding-left:16px"><b>'+capName(sur)+'</b>';
         html += '<div style="font-size:10px;color:var(--muted);margin-top:2px">'+(lc.isVasin
           ? '2.5% от ВП длинномеров (компания)'
-          : '500 руб./заявка своя техника + 8% маржи найма (≥23%)')+'</div></td>';
+          : 'Оклад 20т + 500 руб./заявка своя техника + 8% маржи найма (≥23%) + 30т если маржа найма >1М')+'</div></td>';
         if (lc.isVasin) {
           html += '<td class="num muted" colspan="8" style="font-size:11px">ВП длинномеров (компания): '+fr(c.profitLong)+' × 2.5%</td>';
           html += '<td class="num" style="font-weight:600;color:'+dept.color+'">'+fr(c.total)+'</td>';
@@ -4403,13 +4412,19 @@ function renderSalesSalary() {
           html += '<td class="num">'+c.ownOrders+' <span style="font-size:10px;color:var(--muted)">заявок</span></td>';
           html += '<td class="num" style="color:#1D9E75">'+fr(c.qualMargin)+'</td>';
           html += '<td class="num amber">'+(c.hiredExtraCosts?fr(c.hiredExtraCosts):'—')+'</td>';
-          html += '<td class="num muted" style="border-left:2px solid var(--border)">—</td>';
+          html += '<td class="num" style="border-left:2px solid var(--border)">'+fr(c.oklad)+'</td>';
           html += '<td class="num">'+(c.flatBonus?fr(c.flatBonus):'—')+'</td>';
           html += '<td class="num">'+(c.marginBonus?fr(c.marginBonus):'—')+'</td>';
-          html += '<td class="num muted">—</td>';
+          html += '<td class="num">'+(c.bonus1m?fr(c.bonus1m):'—')+'</td>';
           html += '<td class="num" style="font-weight:600;color:'+dept.color+'">'+fr(c.total)+'</td>';
         }
         html += '</tr>';
+        if (!lc.isVasin && c.bonus1m) {
+          html += '<tr style="background:rgba(255,255,255,.02)">';
+          html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">Премия за маржу найма >1М: '+fr(c.totalMargin)+' (квалиф. + неквалиф.)</td>';
+          html += '<td colspan="9" class="num muted" style="font-size:11px">'+fr(c.bonus1m)+'</td>';
+          html += '</tr>';
+        }
         if (!lc.isVasin && (c.qualMargin || c.unqualMargin)) {
           html += '<tr style="background:rgba(255,255,255,.02)">';
           html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">';

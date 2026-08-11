@@ -1598,11 +1598,31 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
 
   var html = selectorHtml;
 
-  // KPI-шапка: найм (заказы/выручка), маржа найма, документы
-  html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px">';
+  // KPI-шапка: найм (заказы/выручка), маржа найма, документы + 4-й блок "Общая
+  // маржинальность по направлению" - Влад, 2026-08-10: "точно так же, как у нас сделано
+  // на главной панели маржа найма" - воспроизводит один в один разметку и пороги карточки
+  // "Маржа найма" на Панели управления (k-margin-pct/k-margin-detail/k-margin-badge/
+  // k-margin-bar/k-margin-abs, см. renderKPI выше), только числитель/знаменатель - его
+  // собственные (totalMargin/totalRevenue), а не по компании целиком.
+  html += '<div class="kpi-grid" style="margin-bottom:18px">';
   html += kpiCard('🚚', 'Заказов по найму', String(totalOrders), mln(totalRevenue)+' выручка'+(lRow ? ' · всего заказов '+(lRow.orders||0) : ''), COL.blue);
   html += kpiCard('💹', 'Маржа найма', mln(totalMargin), totalMarginPct+'% от выручки найма', COL.green);
   html += kpiCard('📋', 'Документы', fun.complete+' из '+funTotal, funTotal>0 ? Math.round(fun.complete/funTotal*100)+'% готово' : 'Нет заказов в воронке', COL.blue);
+  (function() {
+    var mp = totalMarginPct;
+    var mColorVar = mp >= 30 ? 'var(--green)' : mp >= 15 ? 'var(--amber)' : 'var(--red)';
+    var mColorCls = mp >= 30 ? 'green' : mp >= 15 ? 'amber' : 'red';
+    var mDetail = mp >= 30 ? 'Хорошая маржа найма' : mp >= 15 ? 'Средняя маржа найма' : 'Низкая маржа найма';
+    html += '<div class="kpi">'+
+      '<div class="kpi-label">Общая маржинальность по направлению</div>'+
+      '<div class="kpi-value '+mColorCls+'">'+mp+'%</div>'+
+      '<div class="kpi-sub2">'+mDetail+'</div>'+
+      '<div class="kpi-prog-wrap">'+
+        '<div class="kpi-prog-header"><span>Прибыль от выручки</span><span>'+mp+'%</span></div>'+
+        '<div class="kpi-prog-bg"><div class="kpi-prog-fill" style="width:'+Math.min(mp,100)+'%;background:'+mColorVar+'"></div></div>'+
+        '<div class="kpi-sub" style="margin-top:4px">Прибыль найма '+mln(totalMargin)+' из выручки найма '+mln(totalRevenue)+'</div>'+
+      '</div></div>';
+  })();
   html += '</div>';
 
   // 1. Маржа по поставщикам - те же колонки и шкала, что на "Заказы → Наёмная техника",
@@ -1666,7 +1686,7 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
       '<tbody>'+funRows+'</tbody>'+
     '</table></div>');
 
-  // 3. Его сделки - последние 40 из архива (полный список приходит с бэкенда до 300 записей)
+  // 3. Мои сделки - последние 40 из архива (полный список приходит с бэкенда до 300 записей)
   var dealsShown = deals.slice(0, 40);
   var dealRows = !dealsShown.length
     ? '<tr><td colspan="6" class="muted" style="padding:14px">Сделок в этом месяце нет</td></tr>'
@@ -1680,7 +1700,7 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
           '<td class="num green">'+fmtK2(dl.margin||0)+'</td>'+
         '</tr>';
       }).join('');
-  html += block('🤝 Его сделки'+(deals.length>dealsShown.length ? ' <span style="font-size:11px;color:var(--muted);font-weight:400">(показаны последние '+dealsShown.length+' из '+deals.length+')</span>' : ''),
+  html += block('🤝 Мои сделки'+(deals.length>dealsShown.length ? ' <span style="font-size:11px;color:var(--muted);font-weight:400">(показаны последние '+dealsShown.length+' из '+deals.length+')</span>' : ''),
     '<div style="overflow-x:auto"><table class="tbl">'+
       '<thead><tr><th>Дата</th><th>Заказчик</th><th>Поставщик</th><th class="num">Сумма</th><th class="num">Стоимость найма</th><th class="num">Маржа</th></tr></thead>'+
       '<tbody>'+dealRows+'</tbody>'+

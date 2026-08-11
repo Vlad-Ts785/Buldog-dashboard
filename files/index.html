@@ -5819,24 +5819,31 @@ function renderDebt() {
   // Банкроты (Влад, 2026-07-16: "чтобы не показывало банкротов вообще нигде") - фильтруются
   // ПЕРВЫМИ, до фильтра возраста, т.к. должны быть скрыты из ВСЕГО (в отличие от 600-дневного
   // фильтра, который не трогает график истории - банкроты исключены и из него, но уже на
-  // бэкенде при записи, см. saveDebtHistory()). "Долг отдела кранов/экскаваторов" (2026-08-10)
-  // исключается ТАК ЖЕ (из всего), но БЕЗ переключателя - эти долги просто не наши, показывать
-  // их обратно незачем (в отличие от банкротов, тут нет сценария "временно посмотреть").
-  const bankruptFiltered = (debtHideBankrupt
+  // бэкенде при записи, см. saveDebtHistory()).
+  const bankruptFiltered = debtHideBankrupt
     ? debt.by_customer.filter(function(c){ return c.status !== 'Банкрот'; })
-    : debt.by_customer
-  ).filter(function(c){ return DEBT_STATUS_EXCLUDE_FROM_TOTAL.indexOf(c.status) < 0; });
+    : debt.by_customer;
+  // "Долг отдела кранов/экскаваторов" (2026-08-10) - НЕ то же самое, что банкроты: это не
+  // "скрыть везде", а "не считать в Общую ДЗ" (Влад, 2026-08-11: "должна всё-таки фигурировать
+  // в 4-м блоке" - контрагент по-прежнему виден в таблице "Должники" и в "По статусам", просто
+  // его сумма не идёт в Общую ДЗ/корзины возраста/юрлица/менеджеров). ownDeptFiltered - только
+  // для ТЕХ агрегатов, bankruptFiltered - для таблицы и "По статусам", как раньше.
+  const ownDeptFiltered = bankruptFiltered.filter(function(c){ return DEBT_STATUS_EXCLUDE_FROM_TOTAL.indexOf(c.status) < 0; });
   const ageFiltered = debtShowAllAges
     ? bankruptFiltered
     : bankruptFiltered.filter(function(c){ return c.daysOverdue <= DEBT_AGE_LIMIT_DAYS; });
-  const agg = computeDebtAggregates_(ageFiltered);
+  const ageFilteredOwnDept = debtShowAllAges
+    ? ownDeptFiltered
+    : ownDeptFiltered.filter(function(c){ return c.daysOverdue <= DEBT_AGE_LIMIT_DAYS; });
+  const agg = computeDebtAggregates_(ageFilteredOwnDept);
 
   const s = agg.summary;
-  // "Мёртвая" (600+ дней) и "По статусам" - всегда из ПОЛНОГО списка вне зависимости от
-  // переключателя возраста (Влад, 2026-07-16), но С УЧЁТОМ фильтра банкротов (bankruptFiltered,
-  // не debt.by_customer напрямую) - иначе банкрот вылезал бы обратно именно тут.
+  // "Мёртвая" (600+ дней) - часть Общей ДЗ, поэтому считаем БЕЗ кранов/экскаваторов
+  // (ownDeptFiltered), как и agg выше - иначе "корзины не бьются" с Общей ДЗ (см.
+  // project_data_consistency_principle). "По статусам" - навигационный список, должен
+  // показывать ВСЕ статусы, включая кранов/экскаваторов (bankruptFiltered, полный).
+  s.overdue_dead = debtDeadAndStatus_(ownDeptFiltered).overdue_dead;
   const deadAndStatus = debtDeadAndStatus_(bankruptFiltered);
-  s.overdue_dead = deadAndStatus.overdue_dead;
 
   // Стрелки тенденций - сегодня vs вчера, по общей сумме и по каждому юрлицу (Влад,
   // 2026-07-10: "на каждый день должна сохраняться история... также стрелки тенденций на
@@ -5858,9 +5865,10 @@ function renderDebt() {
   // всегда считают ПОЛНУЮ ДЗ (включая 600+ дней), а s.total_balance/s.by_org зависят от
   // переключателя "Показать все долги" - раньше стрелка молча сравнивала отфильтрованное
   // "сегодня" с неотфильтрованным "вчера" (Влад, 2026-07-19: увидел -24% при факте +213 857 -
-  // "Мёртвая" корзина ~9.9М как раз объясняла разницу). fullAgg - тот же bankruptFiltered,
-  // что и "Мёртвая"/"По статусам" ниже, без ограничения по возрасту.
-  var fullAgg = computeDebtAggregates_(bankruptFiltered);
+  // "Мёртвая" корзина ~9.9М как раз объясняла разницу). fullAgg - тот же ownDeptFiltered,
+  // что и s.total_balance выше (без кранов/экскаваторов, иначе трендовая стрелка сравнивала бы
+  // разные по составу суммы), без ограничения по возрасту.
+  var fullAgg = computeDebtAggregates_(ownDeptFiltered);
   var fullByOrgMap = {};
   (fullAgg.summary.by_org || []).forEach(function(o){ fullByOrgMap[o.org] = o.balance; });
   // Стрелка кликабельна - открывает "Что изменилось со вчера" (Влад, 2026-07-15: "при

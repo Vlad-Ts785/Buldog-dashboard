@@ -2014,22 +2014,34 @@ function renderMyPageVasin(el, current, selectorHtml) {
     return { v: v, forecast: forecast, forecastPct: forecastPct, status: status };
   });
 
-  // Задачи на сегодня (Влад, 2026-08-11) - максимум 5, автособранные из тех же данных, что
-  // уже на странице: (1) топ-3 водителя без путевых листов - один общий пункт; (2) машины,
-  // отстающие по прогнозу ВП (Загрузить срочно/Простой — разобраться), худшие сначала.
+  // Задачи на сегодня (Влад, 2026-08-11, уточнение 2026-08-11) - максимум 5, автособранные из
+  // тех же данных, что уже на странице, строго по слотам:
+  // 1) путевые листы - топ-3 водителя без путевых, один общий пункт;
+  // 2-3) "Добавить заказы" - машины с прогнозом >80% (status.cls==='amber', тот же порог, что
+  //    уже красит статус в таблице ниже), худшие (ближе к 80%) сначала;
+  // 4-5) "Простой — разобраться" - машины с прогнозом <=80% (orange/red), но ТОЛЬКО если у
+  //    машины есть хоть какая-то выручка - Влад: "машины, у которых ноль по выручке, писать
+  //    задачи не нужно, там и так понятно, что случилось - нет водителя либо ремонт".
   var tasks = [];
   if (driversNoWaybill.length) {
     var wbNames = driversNoWaybill.slice(0,3).map(function(dr){ return dr.name.split(' ')[0]; });
     tasks.push({ icon:'📋', text: 'Запросить путевые листы: '+wbNames.join(', ') });
   }
   vehiclesF
-    .filter(function(x){ return x.status.cls === 'red' || x.status.cls === 'orange'; })
+    .filter(function(x){ return x.status.cls === 'amber'; })
     .sort(function(a,b){ return (a.forecastPct||0) - (b.forecastPct||0); })
+    .slice(0, 2)
     .forEach(function(x) {
-      if (tasks.length >= 5) return;
       var who = (x.v.driver||'').trim().split(' ')[0] || x.v.gos;
-      var action = x.status.cls === 'red' ? 'срочно разобраться в причине простоя' : 'загрузить заказами';
-      tasks.push({ icon: x.status.cls==='red' ? '🔴' : '🟠', text: who+' — прогноз выполнения ВП: '+Math.round(x.forecastPct)+'% — '+action });
+      tasks.push({ icon:'🟡', text: who+' — прогноз выполнения ВП: '+Math.round(x.forecastPct)+'% — добавить заказы' });
+    });
+  vehiclesF
+    .filter(function(x){ return (x.status.cls === 'orange' || x.status.cls === 'red') && (x.v.revenue||0) > 0; })
+    .sort(function(a,b){ return (a.forecastPct||0) - (b.forecastPct||0); })
+    .slice(0, 2)
+    .forEach(function(x) {
+      var who = (x.v.driver||'').trim().split(' ')[0] || x.v.gos;
+      tasks.push({ icon:'🔴', text: who+' — простой, разобраться в причине (прогноз '+Math.round(x.forecastPct)+'%)' });
     });
   tasks = tasks.slice(0, 5);
 

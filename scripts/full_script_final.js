@@ -3370,6 +3370,16 @@ function normalizeGos(gos) {
     .replace(/Т/g,'T').replace(/У/g,'Y').replace(/Х/g,'X');
 }
 
+// Машины, полностью исключённые из ВСЕХ расчётов дашборда (2026-08-11, Влад: "убери из всех
+// расчётов, её нет, она в аресте" - госномер "А 840 КО 797", SCANIA). Единая точка исключения -
+// getStaffData ниже (состав парка - источник для статуса парка/"Техники"/"Водителей"/личной
+// страницы Васина) + aggregateFinHistoryForRange (двойная защита - вдруг в истории остались
+// строки без записи в Штатке, например если её ещё не убрали из листа физически).
+const EXCLUDED_VEHICLE_GOS = ['A840KO797'];
+function isExcludedVehicleGos_(gos) {
+  return EXCLUDED_VEHICLE_GOS.indexOf(normalizeGos(gos)) >= 0;
+}
+
 // Читаем Штатку один раз — возвращаем карту госномер → {type, status, marka}
 function getStaffData(ss) {
   const sheet = ss.getSheetByName('Штатка');
@@ -3411,6 +3421,7 @@ function getStaffData(ss) {
     var driver3    = driver3Col >= 0 && driver3Col < row.length ? String(row[driver3Col] || '').trim() : '';
 
     if (!gos || !type) continue;
+    if (isExcludedVehicleGos_(gos)) continue;
 
     var gosClean = normalizeGos(gos);
     map[gosClean] = { type: type, status: status, marka: marka, trailerGos: trailerGos, gosOriginal: gos, plan: plan, driver: driver, driver2: driver2, driver3: driver3, rowIndex: i };
@@ -3650,9 +3661,9 @@ function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate) {
 
   var allGos = {};
   Object.keys(parkHistByMonth).forEach(function(mk) {
-    Object.keys(parkHistByMonth[mk]).forEach(function(g) { allGos[g] = true; });
+    Object.keys(parkHistByMonth[mk]).forEach(function(g) { if (!isExcludedVehicleGos_(g)) allGos[g] = true; });
   });
-  Object.keys(fallbackByVehicleMonth).forEach(function(g) { allGos[g] = true; });
+  Object.keys(fallbackByVehicleMonth).forEach(function(g) { if (!isExcludedVehicleGos_(g)) allGos[g] = true; });
   // Штатка - источник истины по составу парка (Влад, 2026-07-19: "не все тралы показывает
   // как ремонтные, которые в штатке отмечены как ремонт" - машина, у которой за весь период
   // не было ни одной строки в 1С-истории (простояла в ремонте, ни одного заказа), раньше

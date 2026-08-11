@@ -2886,6 +2886,56 @@ function buildLogistView_(orders, logistName) {
 function getLogistView_(ss, logistName) { return buildLogistView_(getOrdersData(ss), logistName); }
 function getLogistViewForPeriod_(ss, logistName, period) { return buildLogistView_(getOrdersDataForPeriod(ss, period), logistName); }
 
+// Личная страница логиста-длинномерщика (2026-08-11, Васин Максим - см.
+// plans/2026-08-11-vasin-long-haul-page.md). Принципиально другой набор данных, чем у
+// "наёмных" логистов (buildLogistView_ выше) - Васин не брокер найма, у него 2.5% от ВП
+// ВСЕХ длинномеров компании (собственный парк, calcVasin на фронтенде). Объединяет ДВА
+// разных источника, которые раньше не смешивались на одной странице: aggregateFinHistoryForRange
+// (прибыль по каждой машине, тот же источник, что вкладка "Техника") + aggregateOrdersRows
+// (воронка/сделки/несданные путёвки по сегменту "Длинномер" - поля long_funnel/
+// by_driver_no_waybill_long/all_long_deals, см. выше в aggregateOrdersRows). period - 'YYYY-MM'
+// или '' (пусто = текущий месяц).
+function getLongHaulDetail_(ss, period) {
+  var isCurrent = !period;
+  var range = isCurrent ? getCurrentMonthRange_() : monthKeyToRange_(period);
+  var staffData = getStaffData(ss);
+  var vehicles = aggregateFinHistoryForRange(ss, staffData, range.from, range.to)
+    .filter(function(v) { return v.type === 'Борт' || v.type.indexOf('Борт') === 0; }) // длинномер = тип "Борт" (тот же предикат, что getFleetStatus/isLongVehicle)
+    .sort(function(a, b) { return b.profit - a.profit; });
+
+  var orders = isCurrent ? getOrdersData(ss) : getOrdersDataForPeriod(ss, period);
+  if (orders.error) return { error: orders.error };
+
+  // ВП длинномеров ЦЕЛИКОМ ПО КОМПАНИИ - тот же источник, что уже использует calcVasin на
+  // фронтенде для текущего месяца (D.summary.profit_long, только раньше он не доходил до
+  // урезанной роли logist), для прошлого - тот же getGrossProfitForPeriod, что вкладки
+  // Продажи/Менеджеры/Логисты/Зарплата (action=orders_period) уже используют для admin.
+  var profitLong = null;
+  if (isCurrent) {
+    var sd = getSummaryData(ss, orders);
+    profitLong = (sd && typeof sd.profit_long === 'number') ? sd.profit_long : null;
+  } else {
+    var gp = getGrossProfitForPeriod(ss, period);
+    profitLong = (gp && typeof gp.profit_long === 'number') ? gp.profit_long : null;
+  }
+
+  return {
+    period: orders.period,
+    vehicles: vehicles,
+    funnel: orders.long_funnel || { no_waybill:0, not_posted:0, no_realiz:0, complete:0 },
+    driver_no_waybill: orders.by_driver_no_waybill_long || [],
+    deals: orders.all_long_deals || [],
+    summary: {
+      long_orders:       (orders.summary && orders.summary.long_orders) || 0,
+      long_amount:        (orders.summary && orders.summary.long_amount) || 0,
+      own_long_orders:    (orders.summary && orders.summary.own_long_orders) || 0,
+      hired_long_orders:  (orders.summary && orders.summary.hired_long_orders) || 0,
+      hired_profit_long:  (orders.summary && orders.summary.hired_profit_long) || 0,
+      profit_long: profitLong,
+    },
+  };
+}
+
 // ============================================================
 // API ДЛЯ ДАШБОРДА — читает Штатку для статусов и типов
 // ============================================================
@@ -3217,6 +3267,20 @@ function doGet(e) {
         ? getManagerViewForPeriod_(ss, access.name, mppPeriod)
         : getLogistViewForPeriod_(ss, access.name, mppPeriod);
       return ContentService.createTextOutput(JSON.stringify(mppResult)).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // Личная страница логиста-длинномерщика (2026-08-11, Васин) - доступна admin и любому
+    // logist (по направлению "Длинномер" целиком, не по фамилии - тот же принцип, что "Общие
+    // сделки" у Прус). period пустой = текущий месяц.
+    if (action === 'long_haul_detail') {
+      if (access.role !== 'admin' && access.role !== 'logist') {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var lhdPeriod = e.parameter.period || '';
+      if (lhdPeriod && !/^\d{4}-\d{2}$/.test(lhdPeriod)) {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Некорректный период' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      return ContentService.createTextOutput(JSON.stringify(getLongHaulDetail_(ss, lhdPeriod))).setMimeType(ContentService.MimeType.JSON);
     }
 
     // Менеджер - только его собственные данные, без доступа к остальному
@@ -3674,6 +3738,13 @@ function getCurrentMonthRange_() {
   var todayStr = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM-dd');
   var p = todayStr.split('-').map(Number);
   return { from: new Date(p[0], p[1] - 1, 1), to: new Date(p[0], p[1] - 1, p[2]) };
+}
+
+// 'YYYY-MM' -> диапазон с 1-го по последнее число месяца (2026-08-11, личная страница
+// Васина - "прошлый месяц" на aggregateFinHistoryForRange нужен целиком, не по сегодня).
+function monthKeyToRange_(period) {
+  var p = period.split('-').map(Number);
+  return { from: new Date(p[0], p[1] - 1, 1), to: new Date(p[0], p[1], 0) };
 }
 
 // Факт/план продаж (по менеджерам + внутренние, без задвоения) - вынесено в отдельную
@@ -6551,6 +6622,10 @@ function aggregateOrdersRows(rows) {
   let ownAmount=0, hiredAmountRev=0;
   let ownTralOrders=0, ownLongOrders=0, hiredTralOrders=0, hiredLongOrders=0;
   var noWaybillOwn=[0,0,0], noWaybillHired=[0,0,0], waybillNotPosted=[0,0,0], postedNoRealiz=[0,0,0], complete=[0,0,0];
+  // Личная страница логиста-длинномерщика (2026-08-11, Васин) - воронка путевых листов и
+  // список сделок ЦЕЛИКОМ по сегменту "Длинномер", независимо от исполнителя.
+  var longFunnel = { no_waybill:0, not_posted:0, no_realiz:0, complete:0 };
+  var allLongDeals = [];
 
   const managerMap  = {};
   const logistMap   = {};
@@ -6842,6 +6917,20 @@ function aggregateOrdersRows(rows) {
       }
     }
 
+    // ── Сделки по длинномерам ЦЕЛИКОМ (2026-08-11, личная страница Васина) ──
+    // Влад: "видеть все сделки по длинномерам, независимо от того, только он ли выполнял
+    // заказ" - КАЖДАЯ строка с equip==='Длинномер', свой парк и наём вместе, независимо от
+    // того, кто менеджер/логист/водитель.
+    if (equip === 'Длинномер') {
+      allLongDeals.push({
+        id: str(row,'id'), date: dateStr, customer: str(row,'customer'),
+        amount: amount, profit: profit,
+        manager: mgrSales, logist: mgrLog,
+        executor: isHired ? str(row,'hired') : ordCleanName(str(row,'driver')),
+        is_hired: isHired,
+      });
+    }
+
     // ── Статус документов (внешние заказы, разбивка по декадам) ──
     const paymentVariant = str(row, 'payment_variant');
     const isServiceRow = (FUNNEL_EXCLUDE_OTHER_PAYMENT_VARIANT && paymentVariant === 'Прочее') ||
@@ -6871,6 +6960,17 @@ function aggregateOrdersRows(rows) {
         else if (!pst) md2.waybill_not_posted++;
         else if (!hr)  md2.posted_no_realiz++;
         else           { md2.complete++; mgrDetail(mgrSales).rows_complete++; }
+      }
+
+      // Воронка путевых листов ПО СЕГМЕНТУ "Длинномер" целиком по компании (2026-08-11,
+      // личная страница Васина) - та же классификация, что общая воронка выше, без доп.
+      // условий (как funnelLongTotal/funnelLongProblem чуть выше в цикле).
+      if (equip === 'Длинномер') {
+        if (skipToComplete) { longFunnel.complete++; }
+        else if (!hw)       { longFunnel.no_waybill++; }
+        else if (!pst)      { longFunnel.not_posted++; }
+        else if (!hr)       { longFunnel.no_realiz++; }
+        else                { longFunnel.complete++; }
       }
 
       // Воронка документов ПО ПОСТАВЩИКУ - общекорпоративная (2026-08-10, "Общие сделки" на
@@ -6934,10 +7034,17 @@ function aggregateOrdersRows(rows) {
     const driverName = ordCleanName(str(row, 'driver'));
     if (driverName) {
       const isInternalOrder = isInt || ordInList(str(row, 'customer'), INTERNAL_CLIENTS);
-      if (!driverMap[driverName]) driverMap[driverName] = { name: driverName, orders: 0, amount: 0, no_waybill: 0 };
+      if (!driverMap[driverName]) {
+        driverMap[driverName] = { name: driverName, orders: 0, amount: 0, no_waybill: 0,
+          orders_long: 0, no_waybill_long: 0 }; // сегмент "Длинномер" (2026-08-11, страница Васина)
+      }
       driverMap[driverName].orders++;
       driverMap[driverName].amount += amount;
       if (!hw && !isInternalOrder) driverMap[driverName].no_waybill++;
+      if (equip === 'Длинномер') {
+        driverMap[driverName].orders_long++;
+        if (!hw && !isInternalOrder) driverMap[driverName].no_waybill_long++;
+      }
     }
   }
 
@@ -7125,6 +7232,15 @@ function aggregateOrdersRows(rows) {
     by_supplier_no_waybill: supplierList
       .filter(function(s){ return s.no_waybill > 0; })
       .sort(function(a,b){ return b.no_waybill-a.no_waybill; }),
+    // Длинномеры целиком (2026-08-11, личная страница Васина) - см. getLongHaulDetail_.
+    by_driver_no_waybill_long: Object.values(driverMap)
+      .filter(function(d){ return d.no_waybill_long > 0; })
+      .map(function(d){ return { name: d.name, orders: d.orders_long, no_waybill: d.no_waybill_long }; })
+      .sort(function(a,b){ return b.no_waybill-a.no_waybill; }),
+    long_funnel: longFunnel,
+    all_long_deals: allLongDeals
+      .sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); })
+      .slice(0, 500),
     by_manager_detail: managerDetail,
     logist_detail:     logistDetailOut,
     all_hired_deals:   allHiredDealsOut,

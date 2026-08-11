@@ -1224,9 +1224,32 @@ async function loadData() {
 function positionLabel(name, type) {
   var sur = (name||'').trim().split(' ')[0].toLowerCase();
   if (type === 'logist') {
-    return sur === 'рыщанов' ? 'Руководитель отдела логистики' : 'Логист';
+    if (sur === 'рыщанов') return 'Руководитель отдела логистики';
+    if (sur === 'васин')   return 'Логист (длинномеры)';
+    return 'Логист';
   }
   return (sur === 'ахтамова' || sur === 'гусейнова') ? 'Руководитель отдела продаж' : 'Менеджер по продажам';
+}
+
+// Кто сейчас выбран на личной странице - вынесено отдельно (2026-08-11), т.к. и
+// renderMyPage(), и setMyPagePeriod() (для роутинга Васина на свой источник данных, см. ниже)
+// независимо должны знать "кого сейчас смотрим", без дублирования логики дропдауна/ролей.
+function myPageCurrentEntry_() {
+  if (!D || !D.orders) return null;
+  if (D.role === 'manager') return { name: D.managerName, type: 'manager' };
+  if (D.role === 'logist')  return { name: D.logistName,  type: 'logist'  };
+  // Из ростеров by_manager/by_logist, не из by_manager_detail/logist_detail - см. комментарий
+  // в renderMyPage() (баг с Васиным, 2026-08-11).
+  var entries = (D.orders.by_manager || []).map(function(m){ return {name:m.name, type:'manager'}; })
+    .concat((D.orders.by_logist || []).map(function(l){ return {name:l.name, type:'logist'}; }));
+  if (!entries.length) return null;
+  entries.sort(function(a,b){ return a.name.localeCompare(b.name, 'ru'); });
+  var sel = document.getElementById('my-page-mgr-select');
+  var selVal = sel ? sel.value : '';
+  return entries.filter(function(en){ return (en.name+'::'+en.type) === selVal; })[0] || entries[0];
+}
+function isVasinEntry_(entry) {
+  return !!entry && entry.type === 'logist' && entry.name.trim().split(' ')[0].toLowerCase() === 'васин';
 }
 
 // Переключатель "Свои продажи" / "Общие сделки" на личной странице логиста (Влад, 2026-08-10:
@@ -1256,6 +1279,10 @@ function prevMonthKey_() {
 async function setMyPagePeriod(period) {
   if (myPagePeriodLoading) return;
   if (!period) { myPagePeriod = null; renderMyPage(); return; }
+  // Васин - отдельный источник данных (getLongHaulDetail_, не orders_period/my_page_period),
+  // см. renderMyPageVasin() ниже - она сама лениво подгружает vasinDetailCache по myPagePeriod.
+  // Тут просто переключаем период, без бесполезного запроса к чужому формату ответа.
+  if (isVasinEntry_(myPageCurrentEntry_())) { myPagePeriod = period; renderMyPage(); return; }
   if (myPagePeriodCache[period]) { myPagePeriod = period; renderMyPage(); return; }
   myPagePeriodLoading = true;
   renderMyPage(); // сразу перерисовать - кнопка покажет "Загрузка..." (см. periodToggleHtml)
@@ -1310,19 +1337,23 @@ function renderMyPage() {
     var isLogistRole  = D.role === 'logist';
     var mgrDetailAll = (D.orders && D.orders.by_manager_detail) || {};
     var logDetailAll = (D.orders && D.orders.logist_detail) || {};
-    var entries = Object.keys(mgrDetailAll).map(function(n){ return {name:n, type:'manager'}; })
-      .concat(Object.keys(logDetailAll).map(function(n){ return {name:n, type:'logist'}; }));
+    // Список для дропдауна - из ростеров by_manager/by_logist (кто угодно с хоть одним
+    // заказом за период), а НЕ из by_manager_detail/logist_detail (2026-08-11, баг с
+    // Васиным - он почти никогда не попадает в logist_detail, там только наёмные сделки,
+    // а Васин работает своим парком - без этого фикса он вообще не появлялся в дропдауне).
+    var entries = (((D.orders && D.orders.by_manager) || []).map(function(m){ return {name:m.name, type:'manager'}; }))
+      .concat(((D.orders && D.orders.by_logist) || []).map(function(l){ return {name:l.name, type:'logist'}; }));
     entries.sort(function(a,b){ return a.name.localeCompare(b.name, 'ru'); });
-    if (!entries.length) { el.innerHTML = '<p style="color:var(--muted);padding:16px">Нет данных по сотрудникам'+(myPagePeriod?' за выбранный месяц':'')+'.</p>'; return; }
-
-    var current;
-    if (isManagerRole)      current = { name: D.managerName, type: 'manager' }; // видит только себя, выбора нет
-    else if (isLogistRole)  current = { name: D.logistName,  type: 'logist'  };
-    else {
-      var sel = document.getElementById('my-page-mgr-select');
-      var selVal = sel ? sel.value : '';
-      current = entries.filter(function(en){ return (en.name+'::'+en.type) === selVal; })[0] || entries[0];
+    // Пустой entries - ок для manager/logist ролей (свой D.managerName/logistName не зависит
+    // от by_manager_detail/logist_detail - у Васина, например, logist_detail почти всегда
+    // пуст, он не брокер найма, но страница у него всё равно должна открыться). Останавливаем
+    // рендер только в admin-предпросмотре, где реально нечего выбрать в дропдауне.
+    if (!entries.length && D.role !== 'manager' && D.role !== 'logist') {
+      el.innerHTML = '<p style="color:var(--muted);padding:16px">Нет данных по сотрудникам'+(myPagePeriod?' за выбранный месяц':'')+'.</p>'; return;
     }
+
+    var current = myPageCurrentEntry_();
+    if (!current) { el.innerHTML = '<p style="color:var(--muted);padding:16px">Нет данных за этот месяц.</p>'; return; }
 
     // Шапка "личной страницы" - ФИО (что реально есть в данных, без выдумывания отчества) +
     // должность, вместо сырого имени (Влад, 2026-08-10).
@@ -1355,7 +1386,10 @@ function renderMyPage() {
       selectorHtml += '</select></div>';
     }
 
-    if (current.type === 'logist') {
+    if (isVasinEntry_(current)) {
+      // Васин - другая роль (не брокер найма), другой источник данных - см. renderMyPageVasin.
+      renderMyPageVasin(el, current.name, selectorHtml);
+    } else if (current.type === 'logist') {
       renderMyPageLogist(el, current.name, selectorHtml, logDetailAll[current.name] || null);
     } else {
       renderMyPageManager(el, current.name, selectorHtml, mgrDetailAll[current.name] || null);
@@ -1661,23 +1695,16 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
       '<div style="font-size:11px;color:var(--muted);margin-top:4px">'+sub+'</div></div>';
   }
 
+  // Васин сюда больше не попадает - у него отдельная страница (renderMyPageVasin, другая
+  // формула зарплаты - 2.5% от ВП длинномеров компании, не наёмная маржа), см. диспетчер выше.
   var sur = current.trim().split(' ')[0];
-  var isVasin = sur.toLowerCase() === 'васин';
   var allLogs = (D.orders && D.orders.by_logist) || [];
   var logIdx = {};
   allLogs.forEach(function(l){ logIdx[(l.name||'').trim().split(' ')[0].toLowerCase()] = l; });
   function getL(s) { return logIdx[s.toLowerCase()] || null; }
   var useNewRules = isNewRulesPeriod((D.orders||{}).period);
   var lRow = getL(sur);
-
-  // Зарплата - те же функции, что и на вкладке "Зарплата" (calcLogist/calcVasin), без
-  // дублирования формулы. Васин считается от ВП длинномеров ЦЕЛИКОМ ПО КОМПАНИИ
-  // (D.summary.profit_long) - при урезанном ответе роли logist этого поля нет, показываем
-  // предупреждение вместо расчёта, а не тихий ноль.
-  var vasinProfitLong = D.summary ? D.summary.profit_long : null;
-  var salary = isVasin
-    ? (vasinProfitLong != null ? calcVasin(vasinProfitLong) : null)
-    : calcLogist(sur, getL, useNewRules);
+  var salary = calcLogist(sur, getL, useNewRules);
 
   // Переключатель "Свои продажи" / "Общие сделки" (Влад, 2026-08-10) - "Общие сделки" читает
   // общекорпоративные поля (by_hired_supplier/all_hired_deals), которые уже приходят и в
@@ -1824,21 +1851,10 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
       '<tbody>'+dealRows+'</tbody>'+
     '</table></div>');
 
-  // 4. Расчёт зарплаты - та же формула, что на вкладке "Зарплата" (calcLogist/calcVasin)
+  // 4. Расчёт зарплаты - та же формула, что на вкладке "Зарплата" (calcLogist)
   var salaryBody;
   if (!salary) {
-    salaryBody = '<div style="font-size:13px;color:var(--muted)">'+
-      (isVasin && vasinProfitLong == null
-        ? 'Формула Васина считается от ВП длинномеров всей компании - это поле доступно только в админ-просмотре, не в урезанном личном входе.'
-        : 'Нет данных для расчёта за этот период.')+
-      '</div>';
-  } else if (isVasin) {
-    salaryBody = '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
-      '<span style="font-size:13px;color:var(--muted)">2.5% от ВП длинномеров компании ('+mln(salary.profitLong)+')</span>'+
-      '<span style="font-size:13px;font-weight:600">'+fr(salary.bonus)+'</span></div>'+
-      '<div style="display:flex;justify-content:space-between;padding-top:10px;margin-top:4px;border-top:1px solid var(--border)">'+
-      '<span style="font-size:14px;font-weight:700">Итого</span>'+
-      '<span style="font-size:16px;font-weight:700;color:'+COL.green+'">'+fr(salary.total)+'</span></div>';
+    salaryBody = '<div style="font-size:13px;color:var(--muted)">Нет данных для расчёта за этот период.</div>';
   } else {
     salaryBody = ''+
       '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
@@ -1853,6 +1869,171 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
       (salary.bonus1m ? '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
         '<span style="font-size:13px;color:var(--muted)">Премия за маржу найма &gt;1М</span>'+
         '<span style="font-size:13px;font-weight:600">'+fr(salary.bonus1m)+'</span></div>' : '')+
+      '<div style="display:flex;justify-content:space-between;padding-top:10px;margin-top:4px;border-top:1px solid var(--border)">'+
+      '<span style="font-size:14px;font-weight:700">Итого</span>'+
+      '<span style="font-size:16px;font-weight:700;color:'+COL.green+'">'+fr(salary.total)+'</span></div>';
+  }
+  html += block('💰 Расчёт зарплаты', salaryBody);
+
+  el.innerHTML = html;
+}
+
+// Личная страница логиста-длинномерщика (2026-08-11, Васин Максим - см.
+// plans/2026-08-11-vasin-long-haul-page.md). Принципиально другой набор данных, чем у
+// "наёмных" логистов (renderMyPageLogist выше) - не брокер найма, у него 2.5% от ВП ВСЕХ
+// длинномеров компании (собственный парк, calcVasin). Источник - action=long_haul_detail
+// (getLongHaulDetail_ на бэкенде), НЕ D.orders/myPagePeriodCache - свой кэш и свой жизненный
+// цикл загрузки (лениво, при отсутствии данных за период в кэше).
+let vasinDetailCache = {}; // 'current' | 'YYYY-MM' -> ответ long_haul_detail
+let vasinDetailLoading = false;
+
+function renderMyPageVasin(el, current, selectorHtml) {
+  var cacheKey = myPagePeriod || 'current';
+  var d = vasinDetailCache[cacheKey];
+
+  if (!d) {
+    el.innerHTML = selectorHtml + '<p style="color:var(--muted);padding:16px">Загрузка данных по длинномерам…</p>';
+    if (!vasinDetailLoading) {
+      vasinDetailLoading = true;
+      apiFetchJson({ action: 'long_haul_detail', period: myPagePeriod || '' }).then(function(data) {
+        vasinDetailLoading = false;
+        if (data.error) {
+          el.innerHTML = selectorHtml + '<p style="color:var(--red);padding:16px">Ошибка: '+data.error+'</p>';
+          return;
+        }
+        vasinDetailCache[cacheKey] = data;
+        renderMyPage(); // перерисовать целиком - теперь кэш есть, дальше уже синхронно
+      }).catch(function(e) {
+        vasinDetailLoading = false;
+        el.innerHTML = selectorHtml + '<p style="color:var(--red);padding:16px">Ошибка: '+e.message+'</p>';
+      });
+    }
+    return;
+  }
+
+  var COL = { red:'#E24B4A', amber:'#EF9F27', green:'#1D9E75', blue:'#378ADD' };
+  function mln(n) { var x=Math.abs(n||0); var sg=(n||0)<0?'-':''; return x>=1000000 ? sg+(x/1000000).toFixed(1)+' млн ₽' : sg+Math.round(x).toLocaleString('ru-RU')+' ₽'; }
+  function fr(n) { return n ? Math.round(n).toLocaleString('ru-RU')+' ₽' : '—'; }
+  function block(title, bodyHtml) {
+    return '<div class="card" style="margin-bottom:14px;padding:16px 18px">'+
+      '<div style="font-size:14px;font-weight:600;margin-bottom:8px">'+title+'</div>'+bodyHtml+'</div>';
+  }
+  function kpiCard(icon, label, value, sub, color) {
+    return '<div class="card" style="padding:16px 18px;border-left:3px solid '+color+'">'+
+      '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">'+icon+' '+label+'</div>'+
+      '<div style="font-size:24px;font-weight:700;color:var(--text);line-height:1.1">'+value+'</div>'+
+      '<div style="font-size:11px;color:var(--muted);margin-top:4px">'+sub+'</div></div>';
+  }
+
+  var s = d.summary || {};
+  var vehicles = d.vehicles || [];
+  var funnel = d.funnel || { no_waybill:0, not_posted:0, no_realiz:0, complete:0 };
+  var funTotal = (funnel.no_waybill||0)+(funnel.not_posted||0)+(funnel.no_realiz||0)+(funnel.complete||0);
+  var driversNoWaybill = d.driver_no_waybill || [];
+  var deals = d.deals || [];
+
+  var salary = (s.profit_long != null) ? calcVasin(s.profit_long) : null;
+
+  var html = selectorHtml;
+
+  // KPI-шапка: заказы/выручка длинномеров, ВП длинномеров компании (база зарплаты), документы
+  html += '<div class="kpi-grid" style="margin-bottom:18px">';
+  html += kpiCard('🚚', 'Заказов (длинномеры)', String(s.long_orders||0), 'свой парк '+(s.own_long_orders||0)+' · наём '+(s.hired_long_orders||0), COL.blue);
+  html += kpiCard('💰', 'Выручка (длинномеры)', mln(s.long_amount||0), 'маржа найма '+mln(s.hired_profit_long||0), COL.green);
+  html += kpiCard('📈', 'ВП длинномеров (компания)', s.profit_long!=null ? mln(s.profit_long) : '—', 'база зарплаты (2.5%)', COL.green);
+  html += kpiCard('📋', 'Документы', funnel.complete+' из '+funTotal, funTotal>0 ? Math.round(funnel.complete/funTotal*100)+'% готово' : 'Нет заказов в воронке', COL.blue);
+  html += '</div>';
+
+  // 1. ВП по каждой машине - те же колонки, что вкладка "Техника"
+  var vehRows = !vehicles.length
+    ? '<tr><td colspan="7" class="muted" style="padding:14px">Нет машин-длинномеров за этот период</td></tr>'
+    : vehicles.map(function(v) {
+        var planPct = v.plan > 0 ? v.profit / v.plan * 100 : null;
+        var cls = v.profit < 0 ? 'red' : planPct !== null ? (planPct>=100?'green':planPct>=80?'amber':'red') : 'muted';
+        var stCls = v.status && v.status.indexOf('Ремонт') !== -1 ? 'red' : v.status && v.status.indexOf('работе') !== -1 ? 'green' : 'amber';
+        return '<tr>'+
+          '<td><b>'+(v.gos||'')+'</b></td>'+
+          '<td class="muted">'+(v.marka||'').split(' ')[0]+'</td>'+
+          '<td><span class="badge '+stCls+'">'+(v.status||'—')+'</span></td>'+
+          '<td class="muted">'+((v.driver||'').trim().split(' ')[0] || '—')+'</td>'+
+          '<td class="num">'+fmtK2(v.revenue||0)+'</td>'+
+          '<td class="num '+cls+'"><b>'+fmtK2(v.profit||0)+'</b></td>'+
+          '<td class="num '+cls+'">'+(planPct!==null ? planPct.toFixed(0)+'%' : '—')+'</td>'+
+        '</tr>';
+      }).join('');
+  html += block('🚛 Валовая прибыль по каждой машине',
+    '<div style="overflow-x:auto"><table class="tbl">'+
+      '<thead><tr><th>Госномер</th><th>Марка</th><th>Статус</th><th>Водитель</th><th class="num">Выручка</th><th class="num">Прибыль</th><th class="num">% плана</th></tr></thead>'+
+      '<tbody>'+vehRows+'</tbody>'+
+    '</table></div>');
+
+  // 2. Воронка путевых листов - один общий срез по сегменту (не по поставщику, как у
+  // наёмных логистов - тут все машины свои)
+  function segPct(n) { return funTotal>0 ? Math.max(0, n/funTotal*100) : 0; }
+  var funnelHtml = '<div style="height:8px;border-radius:4px;background:rgba(255,255,255,.08);overflow:hidden;display:flex;margin-bottom:12px">'+
+    '<div style="width:'+segPct(funnel.no_waybill)+'%;height:100%;background:'+COL.red+'"></div>'+
+    '<div style="width:'+segPct(funnel.not_posted)+'%;height:100%;background:'+COL.amber+'"></div>'+
+    '<div style="width:'+segPct(funnel.no_realiz)+'%;height:100%;background:#BA7517"></div>'+
+    '<div style="width:'+segPct(funnel.complete)+'%;height:100%;background:'+COL.green+'"></div>'+
+  '</div>'+
+  '<div style="display:flex;gap:20px;flex-wrap:wrap;font-size:12px">'+
+    '<span style="color:'+COL.red+'">Нет путёвки: <b>'+(funnel.no_waybill||0)+'</b></span>'+
+    '<span style="color:'+COL.amber+'">Не проведён: <b>'+(funnel.not_posted||0)+'</b></span>'+
+    '<span style="color:#BA7517">Нет реализации: <b>'+(funnel.no_realiz||0)+'</b></span>'+
+    '<span style="color:'+COL.green+'">Готово: <b>'+(funnel.complete||0)+'</b></span>'+
+  '</div>';
+  html += block('📋 Воронка путевых листов (длинномеры)', funnelHtml);
+
+  // 3. Не сдали путевые листы - по водителям, тот же стиль, что "Обзор заказов"
+  var noWbRows = !driversNoWaybill.length
+    ? '<tr><td colspan="4" style="color:var(--green);padding:14px">Все путевые листы сданы ✅</td></tr>'
+    : driversNoWaybill.map(function(dr, i) {
+        var pct = dr.orders > 0 ? Math.round(dr.no_waybill / dr.orders * 100) : 0;
+        var pctCls = pct >= 50 ? 'red' : pct >= 25 ? 'amber' : '';
+        return '<tr>'+
+          '<td class="muted" style="font-size:12px">'+(i+1)+'</td>'+
+          '<td><b>'+dr.name+'</b></td>'+
+          '<td class="num red"><b>'+dr.no_waybill+'</b></td>'+
+          '<td class="num muted">'+dr.orders+'</td>'+
+          '<td class="num '+pctCls+'">'+pct+'%</td>'+
+        '</tr>';
+      }).join('');
+  html += block('☎️ Не сдали путевые листы (водители, длинномеры)',
+    '<div style="overflow-x:auto"><table class="tbl">'+
+      '<thead><tr><th>#</th><th>Водитель</th><th class="num">Не сдано</th><th class="num">Заказов (длинномеры)</th><th class="num">% несдачи</th></tr></thead>'+
+      '<tbody>'+noWbRows+'</tbody>'+
+    '</table></div>');
+
+  // 4. Все сделки по длинномерам - независимо от исполнителя (Влад: "видеть все сделки по
+  // длинномерам, независимо от того, только он ли выполнял заказ")
+  var dealsShown = deals.slice(0, 40);
+  var dealRows = !dealsShown.length
+    ? '<tr><td colspan="7" class="muted" style="padding:14px">Сделок в этом месяце нет</td></tr>'
+    : dealsShown.map(function(dl) {
+        return '<tr>'+
+          '<td class="muted" style="font-size:12px">'+(dl.date||'—')+'</td>'+
+          '<td>'+(dl.customer||'—')+'</td>'+
+          '<td class="muted">'+((dl.manager||'').split(' ')[0] || '—')+'</td>'+
+          '<td class="muted">'+(dl.executor||'—')+'</td>'+
+          '<td><span class="badge '+(dl.is_hired?'amber':'green')+'">'+(dl.is_hired?'Наём':'Свой парк')+'</span></td>'+
+          '<td class="num">'+fmtK2(dl.amount||0)+'</td>'+
+          '<td class="num green">'+fmtK2(dl.profit||0)+'</td>'+
+        '</tr>';
+      }).join('');
+  html += block('🤝 Все сделки по длинномерам'+(deals.length>dealsShown.length ? ' <span style="font-size:11px;color:var(--muted);font-weight:400">(показаны последние '+dealsShown.length+' из '+deals.length+(deals.length>=500?'+':'')+')</span>' : ''),
+    '<div style="overflow-x:auto"><table class="tbl">'+
+      '<thead><tr><th>Дата</th><th>Заказчик</th><th>Менеджер</th><th>Исполнитель</th><th>Тип</th><th class="num">Сумма</th><th class="num">Прибыль</th></tr></thead>'+
+      '<tbody>'+dealRows+'</tbody>'+
+    '</table></div>');
+
+  // 5. Расчёт зарплаты - calcVasin (2.5% от ВП длинномеров компании)
+  var salaryBody;
+  if (!salary) {
+    salaryBody = '<div style="font-size:13px;color:var(--muted)">Нет данных для расчёта за этот период.</div>';
+  } else {
+    salaryBody = '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
+      '<span style="font-size:13px;color:var(--muted)">2.5% от ВП длинномеров компании ('+mln(salary.profitLong)+')</span>'+
+      '<span style="font-size:13px;font-weight:600">'+fr(salary.bonus)+'</span></div>'+
       '<div style="display:flex;justify-content:space-between;padding-top:10px;margin-top:4px;border-top:1px solid var(--border)">'+
       '<span style="font-size:14px;font-weight:700">Итого</span>'+
       '<span style="font-size:16px;font-weight:700;color:'+COL.green+'">'+fr(salary.total)+'</span></div>';

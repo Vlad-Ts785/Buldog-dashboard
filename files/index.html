@@ -2105,7 +2105,7 @@ function renderDebtMiniCard() {
     if (breakdownEl) breakdownEl.textContent = '';
     return;
   }
-  var customers = debt.by_customer.filter(function(c) { return c.status !== 'Банкрот'; });
+  var customers = debt.by_customer.filter(function(c) { return c.status !== 'Банкрот' && DEBT_STATUS_EXCLUDE_FROM_TOTAL.indexOf(c.status) < 0; });
   var current30 = 0, over30 = 0, over60 = 0;
   customers.forEach(function(c) {
     if (c.daysOverdue <= 30) current30 += c.balance;
@@ -2130,7 +2130,7 @@ function renderDebtMiniCard() {
     weekSaldoEl.innerHTML = '';
     apiFetchJson({ action: 'debt_changes_period', days: 7 }).then(function(periodData) {
       if (periodData.error || !weekSaldoEl.isConnected) return;
-      var changes = (periodData.debt_changes || []).filter(function(x) { return x.status !== 'Банкрот'; });
+      var changes = (periodData.debt_changes || []).filter(function(x) { return x.status !== 'Банкрот' && DEBT_STATUS_EXCLUDE_FROM_TOTAL.indexOf(x.status) < 0; });
       if (!changes.length) return;
       var weekSaldo = changes.reduce(function(s, x) { return s + x.diff; }, 0);
       var wUp = weekSaldo > 0; // рост долга - плохо
@@ -5135,9 +5135,14 @@ async function setDebtChangesPeriod(days) {
 
 // Статус взыскания по контрагенту (Влад, 2026-07-14: "проставлять вручную статус...
 // должник, претензия, суд, исполнительный лист, и срок сколько уже стоит такой статус";
-// добавлен "В графике" 2026-07-16). Список синхронизирован с DEBT_STATUS_OPTIONS в
-// scripts/full_script_final.js.
-const DEBT_STATUS_OPTIONS = ['Должник', 'Претензия', 'Вх. претензия', 'Поручение', 'Суд', 'Исполнительный лист', 'В графике', 'Банкрот'];
+// добавлен "В графике" 2026-07-16, "Долг отдела кранов"/"Долг отдела экскаваторов" 2026-08-10).
+// Список синхронизирован с DEBT_STATUS_OPTIONS в scripts/full_script_final.js.
+const DEBT_STATUS_OPTIONS = ['Должник', 'Претензия', 'Вх. претензия', 'Поручение', 'Суд', 'Исполнительный лист', 'В графике', 'Банкрот', 'Долг отдела кранов', 'Долг отдела экскаваторов'];
+// Влад, 2026-08-10: "когда ставится такой статус, нужно, чтобы сумма вычиталась из общей
+// суммы ДЗ" - долг реально принадлежит другому отделу компании (краны/экскаваторы), не тралам.
+// В отличие от "Банкрот" (тоже исключается из сумм, но по переключателю debtHideBankrupt,
+// можно временно показать обратно) - эти два статуса вычитаются ВСЕГДА, без переключателя.
+const DEBT_STATUS_EXCLUDE_FROM_TOTAL = ['Долг отдела кранов', 'Долг отдела экскаваторов'];
 async function debtSetStatus(selectEl, contragent) {
   var status = selectEl.value;
   if (!status) return; // "—" - сброс статуса пока не поддержан backend'ом
@@ -5397,10 +5402,13 @@ function renderDebt() {
   // Банкроты (Влад, 2026-07-16: "чтобы не показывало банкротов вообще нигде") - фильтруются
   // ПЕРВЫМИ, до фильтра возраста, т.к. должны быть скрыты из ВСЕГО (в отличие от 600-дневного
   // фильтра, который не трогает график истории - банкроты исключены и из него, но уже на
-  // бэкенде при записи, см. saveDebtHistory()).
-  const bankruptFiltered = debtHideBankrupt
+  // бэкенде при записи, см. saveDebtHistory()). "Долг отдела кранов/экскаваторов" (2026-08-10)
+  // исключается ТАК ЖЕ (из всего), но БЕЗ переключателя - эти долги просто не наши, показывать
+  // их обратно незачем (в отличие от банкротов, тут нет сценария "временно посмотреть").
+  const bankruptFiltered = (debtHideBankrupt
     ? debt.by_customer.filter(function(c){ return c.status !== 'Банкрот'; })
-    : debt.by_customer;
+    : debt.by_customer
+  ).filter(function(c){ return DEBT_STATUS_EXCLUDE_FROM_TOTAL.indexOf(c.status) < 0; });
   const ageFiltered = debtShowAllAges
     ? bankruptFiltered
     : bankruptFiltered.filter(function(c){ return c.daysOverdue <= DEBT_AGE_LIMIT_DAYS; });
@@ -5526,7 +5534,7 @@ function renderDebt() {
   var debtChanges = (debtChangesOrgScope
     ? ((changesSource.debt_changes_by_org || {})[debtChangesOrgScope] || [])
     : (changesSource.debt_changes || [])
-  ).filter(function(x) { return !debtHideBankrupt || x.status !== 'Банкрот'; });
+  ).filter(function(x) { return (!debtHideBankrupt || x.status !== 'Банкрот') && DEBT_STATUS_EXCLUDE_FROM_TOTAL.indexOf(x.status) < 0; });
   // Раньше панель оставалась скрытой, если debtChanges пуст (Влад, 2026-07-17: "иногда кликаю
   // - ничего не отражается") - клик выглядел сломанным, хотя на самом деле изменений просто
   // не было. Теперь панель ВСЕГДА открывается по клику - если данных нет, показываем это

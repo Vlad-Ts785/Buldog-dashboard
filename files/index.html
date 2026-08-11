@@ -1279,27 +1279,43 @@ function prevMonthKey_() {
 async function setMyPagePeriod(period) {
   if (myPagePeriodLoading) return;
   if (!period) { myPagePeriod = null; renderMyPage(); return; }
-  // Васин - отдельный источник данных (getLongHaulDetail_, не orders_period/my_page_period),
-  // см. renderMyPageVasin() ниже - она сама лениво подгружает vasinDetailCache по myPagePeriod.
-  // Тут просто переключаем период, без бесполезного запроса к чужому формату ответа.
-  if (isVasinEntry_(myPageCurrentEntry_())) { myPagePeriod = period; renderMyPage(); return; }
   if (myPagePeriodCache[period]) { myPagePeriod = period; renderMyPage(); return; }
   myPagePeriodLoading = true;
   renderMyPage(); // сразу перерисовать - кнопка покажет "Загрузка..." (см. periodToggleHtml)
   try {
     var data;
     if (D.role === 'admin') {
-      data = await apiFetchJson({ action: 'orders_period', period: period });
+      // Васин (2026-08-11) - admin-предпросмотр прошлого месяца донагружает машины через уже
+      // существующий action=vehicles_period (тот же, что "Техника") - только для него, чтобы
+      // не тратить лишний запрос на остальных сотрудников, у которых машин на странице нет.
+      var wantVehicles = isVasinEntry_(myPageCurrentEntry_());
+      var reqs = [ apiFetchJson({ action: 'orders_period', period: period }) ];
+      if (wantVehicles) {
+        var r = monthKeyToRangeStr_(period);
+        reqs.push(apiFetchJson({ action: 'vehicles_period', from: r.from, to: r.to }));
+      }
+      var results = await Promise.all(reqs);
+      data = results[0];
       if (data.orders && data.orders.error) throw new Error(data.orders.error);
       myPagePeriodCache[period] = {
         orders: data.orders,
         profitLong: (data.summary && typeof data.summary.profit_long === 'number') ? data.summary.profit_long : null,
+        vehicles: (wantVehicles && results[1] && results[1].vehicles) ? results[1].vehicles : null,
       };
     } else {
+      // my_page_period (роль manager/logist) - для Васина в orders.long_haul уже приходит
+      // вся его бандл-структура (машины/воронка/сделки/ВП), без отдельного запроса
+      // (2026-08-11 - раньше был второй самостоятельный fetch на action=long_haul_detail,
+      // который внутри заново гонял тяжёлый getOrdersData - вдвое медленнее без причины).
       data = await apiFetchJson({ action: 'my_page_period', period: period });
       if (data.error) throw new Error(data.error);
       if (data.orders && data.orders.error) throw new Error(data.orders.error);
-      myPagePeriodCache[period] = { orders: data.orders, profitLong: null };
+      var lh = data.orders && data.orders.long_haul;
+      myPagePeriodCache[period] = {
+        orders: data.orders,
+        profitLong: (lh && lh.summary && typeof lh.summary.profit_long === 'number') ? lh.summary.profit_long : null,
+        vehicles: null, // для logist-роли машины уже внутри orders.long_haul.vehicles, отдельно не нужны
+      };
     }
     myPagePeriod = period;
   } catch (e) {
@@ -1308,6 +1324,16 @@ async function setMyPagePeriod(period) {
     myPagePeriodLoading = false;
     renderMyPage();
   }
+}
+
+// 'YYYY-MM' -> {from, to} строками 'YYYY-MM-DD' (для action=vehicles_period, тот же формат,
+// что уже использует "Техника"). Отдельно от monthKeyToRange_ на бэкенде - тот отдаёт Date.
+function monthKeyToRangeStr_(period) {
+  var p = period.split('-').map(Number);
+  var from = new Date(p[0], p[1]-1, 1);
+  var to = new Date(p[0], p[1], 0);
+  function fmt2(d) { return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+  return { from: fmt2(from), to: fmt2(to) };
 }
 
 // Диспетчер личной страницы (2026-08-10): раньше страница была только для менеджеров
@@ -1320,16 +1346,22 @@ function renderMyPage() {
   var el = document.getElementById('my-page-content');
   if (!el) return;
 
-  // Подмена D.orders/D.summary.profit_long на выбранный период - только на время этого
-  // рендера, синхронно, с возвратом обратно в конце (тот же приём, что renderSalesTabsForPeriod
-  // для вкладок Продажи/Менеджеры/Логисты/Зарплата, см. выше). Не трогаем ничего, если период
-  // не выбран или ещё не подгрузился в кэш.
+  // Подмена D.orders/D.summary.profit_long/D.vehicles на выбранный период - только на время
+  // этого рендера, синхронно, с возвратом обратно в конце (тот же приём, что
+  // renderSalesTabsForPeriod для вкладок Продажи/Менеджеры/Логисты/Зарплата, см. выше).
+  // D.vehicles (2026-08-11) - только для admin-предпросмотра Васина за прошлый месяц (см.
+  // setMyPagePeriod), для остальных periodEntry.vehicles всегда null, подмена не срабатывает.
   var realOrders = D.orders;
   var realProfitLong = D.summary ? D.summary.profit_long : undefined;
+  var realVehicles = D.vehicles;
   var periodEntry = myPagePeriod ? myPagePeriodCache[myPagePeriod] : null;
   if (periodEntry) {
     D.orders = periodEntry.orders;
     if (D.summary && periodEntry.profitLong != null) D.summary.profit_long = periodEntry.profitLong;
+    // Машины подгружаются только когда за периодом заходили именно на Васина (см.
+    // setMyPagePeriod) - если их для этого periodEntry нет, показываем пусто, а не машины
+    // текущего (live) месяца по ошибке.
+    D.vehicles = periodEntry.vehicles || [];
   }
 
   try {
@@ -1397,6 +1429,7 @@ function renderMyPage() {
   } finally {
     D.orders = realOrders;
     if (D.summary) D.summary.profit_long = realProfitLong;
+    D.vehicles = realVehicles;
   }
 }
 
@@ -1879,38 +1912,15 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
 }
 
 // Личная страница логиста-длинномерщика (2026-08-11, Васин Максим - см.
-// plans/2026-08-11-vasin-long-haul-page.md). Принципиально другой набор данных, чем у
-// "наёмных" логистов (renderMyPageLogist выше) - не брокер найма, у него 2.5% от ВП ВСЕХ
-// длинномеров компании (собственный парк, calcVasin). Источник - action=long_haul_detail
-// (getLongHaulDetail_ на бэкенде), НЕ D.orders/myPagePeriodCache - свой кэш и свой жизненный
-// цикл загрузки (лениво, при отсутствии данных за период в кэше).
-let vasinDetailCache = {}; // 'current' | 'YYYY-MM' -> ответ long_haul_detail
-let vasinDetailLoading = false;
-
+// plans/2026-08-11-vasin-long-haul-page.md, plans/2026-08-11-vasin-perf-and-forecast.md).
+// Синхронная, как renderMyPageManager/renderMyPageLogist - НЕ делает свой отдельный запрос.
+// Роль logist (сам Васин) - бандл уже пришёл целиком в D.orders.long_haul (см.
+// buildLogistView_ на бэкенде - переиспользует уже загруженный orders, без второго
+// getOrdersData). Роль admin - собирается прямо тут из уже загруженных D.orders/D.vehicles/
+// D.summary (те же данные, что видит весь остальной дашборд) - ноль лишних запросов на
+// текущий месяц; на прошлый месяц D.vehicles донагружается в setMyPagePeriod через уже
+// существующий action=vehicles_period, только когда выбран именно Васин.
 function renderMyPageVasin(el, current, selectorHtml) {
-  var cacheKey = myPagePeriod || 'current';
-  var d = vasinDetailCache[cacheKey];
-
-  if (!d) {
-    el.innerHTML = selectorHtml + '<p style="color:var(--muted);padding:16px">Загрузка данных по длинномерам…</p>';
-    if (!vasinDetailLoading) {
-      vasinDetailLoading = true;
-      apiFetchJson({ action: 'long_haul_detail', period: myPagePeriod || '' }).then(function(data) {
-        vasinDetailLoading = false;
-        if (data.error) {
-          el.innerHTML = selectorHtml + '<p style="color:var(--red);padding:16px">Ошибка: '+data.error+'</p>';
-          return;
-        }
-        vasinDetailCache[cacheKey] = data;
-        renderMyPage(); // перерисовать целиком - теперь кэш есть, дальше уже синхронно
-      }).catch(function(e) {
-        vasinDetailLoading = false;
-        el.innerHTML = selectorHtml + '<p style="color:var(--red);padding:16px">Ошибка: '+e.message+'</p>';
-      });
-    }
-    return;
-  }
-
   var COL = { red:'#E24B4A', amber:'#EF9F27', green:'#1D9E75', blue:'#378ADD' };
   function mln(n) { var x=Math.abs(n||0); var sg=(n||0)<0?'-':''; return x>=1000000 ? sg+(x/1000000).toFixed(1)+' млн ₽' : sg+Math.round(x).toLocaleString('ru-RU')+' ₽'; }
   function fr(n) { return n ? Math.round(n).toLocaleString('ru-RU')+' ₽' : '—'; }
@@ -1924,6 +1934,53 @@ function renderMyPageVasin(el, current, selectorHtml) {
       '<div style="font-size:24px;font-weight:700;color:var(--text);line-height:1.1">'+value+'</div>'+
       '<div style="font-size:11px;color:var(--muted);margin-top:4px">'+sub+'</div></div>';
   }
+  function planProgressBar(label, factPct, forecastPct, factVal, forecastVal, planVal) {
+    var color = factPct>=80?COL.green:factPct>=50?COL.amber:COL.red;
+    var statusText, statusColor;
+    if (forecastPct >= 105) { statusText = 'Идём с опережением плана'; statusColor = COL.green; }
+    else if (forecastPct >= 95) { statusText = 'Идём по плану'; statusColor = COL.green; }
+    else { statusText = 'Отставание от плана'; statusColor = COL.red; }
+    var factBarW = Math.min(Math.max(factPct,0),100);
+    var forecastPos = Math.min(Math.max(forecastPct,0),100);
+    var h = '<div class="card" style="margin-bottom:18px;padding:18px 20px">';
+    h += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">';
+    h += '<span style="font-size:14px;font-weight:600">'+label+'</span>';
+    h += '<span style="font-size:13px;font-weight:700;color:'+statusColor+'">'+statusText+'</span>';
+    h += '</div>';
+    h += '<div style="position:relative;height:16px;border-radius:8px;background:rgba(255,255,255,.07);margin:14px 0 10px;overflow:visible">';
+    h += '<div style="position:absolute;left:0;top:0;height:100%;border-radius:8px;background:'+color+';width:'+factBarW+'%;transition:width .4s"></div>';
+    h += '<div style="position:absolute;top:-4px;width:2px;height:24px;background:var(--text);left:'+forecastPos+'%"></div>';
+    h += '<div style="position:absolute;top:-20px;transform:translateX(-50%);font-size:11px;font-weight:600;color:var(--text);white-space:nowrap;left:'+forecastPos+'%">'+Math.round(forecastPct)+'%</div>';
+    h += '</div>';
+    h += '<div style="display:flex;gap:20px;flex-wrap:wrap;font-size:12px;color:var(--muted)">';
+    h += '<span>Факт: <b style="color:var(--text)">'+mln(factVal)+'</b> ('+Math.round(factPct)+'%)</span>';
+    h += '<span>Прогноз к концу месяца: <b style="color:var(--text)">'+mln(forecastVal)+'</b> ('+Math.round(forecastPct)+'%)</span>';
+    h += '<span>План: <b style="color:var(--text)">'+mln(planVal)+'</b></span>';
+    h += '</div></div>';
+    return h;
+  }
+
+  var d;
+  if (D.role === 'logist') {
+    d = (D.orders && D.orders.long_haul) || null;
+    if (!d) { el.innerHTML = selectorHtml + '<p style="color:var(--muted);padding:16px">Нет данных за этот месяц.</p>'; return; }
+  } else {
+    var os = (D.orders && D.orders.summary) || {};
+    d = {
+      vehicles: (D.vehicles || [])
+        .filter(function(v){ return v.type === 'Борт' || (v.type||'').indexOf('Борт') === 0; })
+        .sort(function(a,b){ return (b.profit||0) - (a.profit||0); }),
+      funnel: (D.orders && D.orders.long_funnel) || { no_waybill:0, not_posted:0, no_realiz:0, complete:0 },
+      driver_no_waybill: (D.orders && D.orders.by_driver_no_waybill_long) || [],
+      deals: (D.orders && D.orders.all_long_deals) || [],
+      summary: {
+        long_orders: os.long_orders||0, long_amount: os.long_amount||0,
+        own_long_orders: os.own_long_orders||0, hired_long_orders: os.hired_long_orders||0,
+        hired_profit_long: os.hired_profit_long||0,
+        profit_long: (D.summary && typeof D.summary.profit_long === 'number') ? D.summary.profit_long : null,
+      },
+    };
+  }
 
   var s = d.summary || {};
   var vehicles = d.vehicles || [];
@@ -1934,7 +1991,23 @@ function renderMyPageVasin(el, current, selectorHtml) {
 
   var salary = (s.profit_long != null) ? calcVasin(s.profit_long) : null;
 
+  // Выполнение плана ВП (длинномеры) - Влад, 2026-08-11: "прогноз по плану, по выполнению
+  // плана валовой прибыли". Факт/план - суммой по ТОЙ ЖЕ таблице машин, что ниже на странице
+  // (Σprofit/Σplan) - гарантированно совпадает с таблицей, один источник, не рассинхрон с
+  // отдельно взятым profit_long (тот - агрегат другого среза, Нормализованные_данные/История).
+  // Прогноз - calcPaceRatio_(), тот же приём, что "Выполнение плана продаж" у менеджера.
+  var vehFact = vehicles.reduce(function(a,v){ return a+(v.profit||0); }, 0);
+  var vehPlan = vehicles.reduce(function(a,v){ return a+(v.plan||0); }, 0);
+  var vehPlanPct = vehPlan > 0 ? vehFact/vehPlan*100 : 0;
+  var paceRatio = calcPaceRatio_((D.orders||{}).period);
+  var vehForecast = vehFact * paceRatio;
+  var vehForecastPct = vehPlan > 0 ? vehForecast/vehPlan*100 : 0;
+
   var html = selectorHtml;
+
+  if (vehPlan > 0) {
+    html += planProgressBar('Выполнение плана ВП (длинномеры)', vehPlanPct, vehForecastPct, vehFact, vehForecast, vehPlan);
+  }
 
   // KPI-шапка: заказы/выручка длинномеров, ВП длинномеров компании (база зарплаты), документы
   html += '<div class="kpi-grid" style="margin-bottom:18px">';

@@ -2855,63 +2855,34 @@ function buildManagerView_(orders, managerName) {
 function getManagerView_(ss, managerName) { return buildManagerView_(getOrdersData(ss), managerName); }
 function getManagerViewForPeriod_(ss, managerName, period) { return buildManagerView_(getOrdersDataForPeriod(ss, period), managerName); }
 
-// Урезанный набор данных для роли "logist" (2026-08-10, по аналогии с buildManagerView_ выше) -
-// только собственные заказы/маржа/сделки, без доступа к данным других людей и компании в целом.
-function buildLogistView_(orders, logistName) {
-  if (orders.error) return { error: orders.error };
-
-  const myDetail = (orders.logist_detail || {})[logistName] || null;
-  const myLogistRow = (orders.by_logist || []).filter(function(l) { return l.name === logistName; });
-
-  const detailWrapped = {};
-  if (myDetail) detailWrapped[logistName] = myDetail;
-
-  return {
-    updated: new Date().toISOString(),
-    role: 'logist',
-    logistName: logistName,
-    orders: {
-      period: orders.period,
-      by_logist: myLogistRow,
-      logist_detail: detailWrapped,
-      // "Общие сделки" (2026-08-10, Влад: "он видит абсолютно всю ситуацию по направлению") -
-      // осознанно расширенный доступ ТОЛЬКО по направлению найма (кто угодно с ролью logist
-      // в листе "Доступ" увидит это), но НЕ вся компания - ни зарплаты остальных, ни выручка
-      // менеджеров, ни что-либо за пределами наёмного парка сюда не попадает.
-      by_hired_supplier: orders.by_hired_supplier || [],
-      all_hired_deals:   orders.all_hired_deals || [],
-    },
-  };
+function isVasinName_(name) {
+  return (name||'').trim().split(' ')[0].toLowerCase() === 'васин';
 }
-function getLogistView_(ss, logistName) { return buildLogistView_(getOrdersData(ss), logistName); }
-function getLogistViewForPeriod_(ss, logistName, period) { return buildLogistView_(getOrdersDataForPeriod(ss, period), logistName); }
 
 // Личная страница логиста-длинномерщика (2026-08-11, Васин Максим - см.
-// plans/2026-08-11-vasin-long-haul-page.md). Принципиально другой набор данных, чем у
-// "наёмных" логистов (buildLogistView_ выше) - Васин не брокер найма, у него 2.5% от ВП
-// ВСЕХ длинномеров компании (собственный парк, calcVasin на фронтенде). Объединяет ДВА
-// разных источника, которые раньше не смешивались на одной странице: aggregateFinHistoryForRange
-// (прибыль по каждой машине, тот же источник, что вкладка "Техника") + aggregateOrdersRows
-// (воронка/сделки/несданные путёвки по сегменту "Длинномер" - поля long_funnel/
-// by_driver_no_waybill_long/all_long_deals, см. выше в aggregateOrdersRows). period - 'YYYY-MM'
-// или '' (пусто = текущий месяц).
-function getLongHaulDetail_(ss, period) {
-  var isCurrent = !period;
-  var range = isCurrent ? getCurrentMonthRange_() : monthKeyToRange_(period);
+// plans/2026-08-11-vasin-long-haul-page.md, plans/2026-08-11-vasin-perf-and-forecast.md).
+// Принципиально другой набор данных, чем у "наёмных" логистов - Васин не брокер найма, у него
+// 2.5% от ВП ВСЕХ длинномеров компании (собственный парк, calcVasin на фронтенде). Объединяет
+// ДВА разных источника: aggregateFinHistoryForRange (прибыль по каждой машине, тот же
+// источник, что вкладка "Техника") + УЖЕ ЗАГРУЖЕННЫЙ orders (воронка/сделки/несданные путёвки
+// по сегменту "Длинномер" - поля long_funnel/by_driver_no_waybill_long/all_long_deals, см.
+// aggregateOrdersRows) - orders передаётся снаружи, НЕ грузится здесь заново (2026-08-11,
+// фикс перфоманса - раньше buildLogistView_ уже гонял getOrdersData ОДИН раз, а это же самое
+// делалось ЕЩЁ РАЗ отдельным запросом action=long_haul_detail, вдвое медленнее, чем нужно).
+// period - 'YYYY-MM' или falsy (текущий месяц).
+function buildLongHaulBundle_(ss, orders, period) {
+  var range = period ? monthKeyToRange_(period) : getCurrentMonthRange_();
   var staffData = getStaffData(ss);
   var vehicles = aggregateFinHistoryForRange(ss, staffData, range.from, range.to)
     .filter(function(v) { return v.type === 'Борт' || v.type.indexOf('Борт') === 0; }) // длинномер = тип "Борт" (тот же предикат, что getFleetStatus/isLongVehicle)
     .sort(function(a, b) { return b.profit - a.profit; });
-
-  var orders = isCurrent ? getOrdersData(ss) : getOrdersDataForPeriod(ss, period);
-  if (orders.error) return { error: orders.error };
 
   // ВП длинномеров ЦЕЛИКОМ ПО КОМПАНИИ - тот же источник, что уже использует calcVasin на
   // фронтенде для текущего месяца (D.summary.profit_long, только раньше он не доходил до
   // урезанной роли logist), для прошлого - тот же getGrossProfitForPeriod, что вкладки
   // Продажи/Менеджеры/Логисты/Зарплата (action=orders_period) уже используют для admin.
   var profitLong = null;
-  if (isCurrent) {
+  if (!period) {
     var sd = getSummaryData(ss, orders);
     profitLong = (sd && typeof sd.profit_long === 'number') ? sd.profit_long : null;
   } else {
@@ -2920,7 +2891,6 @@ function getLongHaulDetail_(ss, period) {
   }
 
   return {
-    period: orders.period,
     vehicles: vehicles,
     funnel: orders.long_funnel || { no_waybill:0, not_posted:0, no_realiz:0, complete:0 },
     driver_no_waybill: orders.by_driver_no_waybill_long || [],
@@ -2935,6 +2905,55 @@ function getLongHaulDetail_(ss, period) {
     },
   };
 }
+
+// Явный endpoint (action=long_haul_detail) - используется только admin-предпросмотром для
+// ПРОШЛОГО периода (текущий месяц и вход самого Васина теперь получают long_haul бесплатно
+// внутри buildLogistView_/основного admin-ответа, без второго запроса - см. ниже).
+function getLongHaulDetail_(ss, period) {
+  var orders = period ? getOrdersDataForPeriod(ss, period) : getOrdersData(ss);
+  if (orders.error) return { error: orders.error };
+  var bundle = buildLongHaulBundle_(ss, orders, period);
+  bundle.period = orders.period;
+  return bundle;
+}
+
+// Урезанный набор данных для роли "logist" (2026-08-10, по аналогии с buildManagerView_ выше) -
+// только собственные заказы/маржа/сделки, без доступа к данным других людей и компании в целом.
+// ss/period (2026-08-11) - опциональны, нужны только чтобы приложить long_haul для Васина
+// (buildLongHaulBundle_ переиспользует уже загруженный orders, без повторного getOrdersData).
+function buildLogistView_(orders, logistName, ss, period) {
+  if (orders.error) return { error: orders.error };
+
+  const myDetail = (orders.logist_detail || {})[logistName] || null;
+  const myLogistRow = (orders.by_logist || []).filter(function(l) { return l.name === logistName; });
+
+  const detailWrapped = {};
+  if (myDetail) detailWrapped[logistName] = myDetail;
+
+  const ordersOut = {
+    period: orders.period,
+    by_logist: myLogistRow,
+    logist_detail: detailWrapped,
+    // "Общие сделки" (2026-08-10, Влад: "он видит абсолютно всю ситуацию по направлению") -
+    // осознанно расширенный доступ ТОЛЬКО по направлению найма (кто угодно с ролью logist
+    // в листе "Доступ" увидит это), но НЕ вся компания - ни зарплаты остальных, ни выручка
+    // менеджеров, ни что-либо за пределами наёмного парка сюда не попадает.
+    by_hired_supplier: orders.by_hired_supplier || [],
+    all_hired_deals:   orders.all_hired_deals || [],
+  };
+  if (ss && isVasinName_(logistName)) {
+    ordersOut.long_haul = buildLongHaulBundle_(ss, orders, period || null);
+  }
+
+  return {
+    updated: new Date().toISOString(),
+    role: 'logist',
+    logistName: logistName,
+    orders: ordersOut,
+  };
+}
+function getLogistView_(ss, logistName) { return buildLogistView_(getOrdersData(ss), logistName, ss, null); }
+function getLogistViewForPeriod_(ss, logistName, period) { return buildLogistView_(getOrdersDataForPeriod(ss, period), logistName, ss, period); }
 
 // ============================================================
 // API ДЛЯ ДАШБОРДА — читает Штатку для статусов и типов

@@ -2899,6 +2899,7 @@ function buildLongHaulBundle_(ss, orders, period) {
       long_orders:       (orders.summary && orders.summary.long_orders) || 0,
       long_amount:        (orders.summary && orders.summary.long_amount) || 0,
       own_long_orders:    (orders.summary && orders.summary.own_long_orders) || 0,
+      own_long_amount:    (orders.summary && orders.summary.own_long_amount) || 0,
       hired_long_orders:  (orders.summary && orders.summary.hired_long_orders) || 0,
       hired_profit_long:  (orders.summary && orders.summary.hired_profit_long) || 0,
       profit_long: profitLong,
@@ -6640,6 +6641,7 @@ function aggregateOrdersRows(rows) {
   let tralOrders=0, tralAmount=0, longOrders=0, longAmount=0;
   let ownAmount=0, hiredAmountRev=0;
   let ownTralOrders=0, ownLongOrders=0, hiredTralOrders=0, hiredLongOrders=0;
+  let ownLongAmount=0; // выручка ТОЛЬКО собственного парка длинномеров (2026-08-11, страница Васина - убрать наём)
   var noWaybillOwn=[0,0,0], noWaybillHired=[0,0,0], waybillNotPosted=[0,0,0], postedNoRealiz=[0,0,0], complete=[0,0,0];
   // Личная страница логиста-длинномерщика (2026-08-11, Васин) - воронка путевых листов и
   // список сделок ЦЕЛИКОМ по сегменту "Длинномер", независимо от исполнителя.
@@ -6755,7 +6757,7 @@ function aggregateOrdersRows(rows) {
     }
     if (equip === 'Длинномер') {
       longOrders++; longAmount += amount; addCargo(cargoLongMap, normalizeCargo(str(row, 'cargo')), amount);
-      if (isHired) hiredLongOrders++; else ownLongOrders++;
+      if (isHired) hiredLongOrders++; else { ownLongOrders++; ownLongAmount += amount; }
     }
 
     // ── По менеджеру продаж ──
@@ -7201,6 +7203,7 @@ function aggregateOrdersRows(rows) {
       tral_amount:     tralAmount,
       long_orders:     longOrders,
       long_amount:     longAmount,
+      own_long_amount: ownLongAmount, // выручка ТОЛЬКО собственного парка длинномеров (страница Васина - без наёма)
       own_amount:        ownAmount,        // выручка своего парка (не найм)
       hired_amount:      hiredAmountRev,   // выручка по наёмным заказам (сумма клиенту, не оплата поставщику)
       own_tral_orders:   ownTralOrders,

@@ -1975,8 +1975,8 @@ function renderMyPageVasin(el, current, selectorHtml) {
       deals: (D.orders && D.orders.all_long_deals) || [],
       summary: {
         long_orders: os.long_orders||0, long_amount: os.long_amount||0,
-        own_long_orders: os.own_long_orders||0, hired_long_orders: os.hired_long_orders||0,
-        hired_profit_long: os.hired_profit_long||0,
+        own_long_orders: os.own_long_orders||0, own_long_amount: os.own_long_amount||0,
+        hired_long_orders: os.hired_long_orders||0, hired_profit_long: os.hired_profit_long||0,
         profit_long: (D.summary && typeof D.summary.profit_long === 'number') ? D.summary.profit_long : null,
       },
     };
@@ -2003,24 +2003,67 @@ function renderMyPageVasin(el, current, selectorHtml) {
   var vehForecast = vehFact * paceRatio;
   var vehForecastPct = vehPlan > 0 ? vehForecast/vehPlan*100 : 0;
 
+  // Прогноз ПО КАЖДОЙ МАШИНЕ (Влад, 2026-08-11: "прогноз... по каждой машине, по примеру
+  // того, как у нас сделано на вкладке Водители") - тот же driverForecastStatus_ (module
+  // scope, см. renderDrivers выше), та же классификация "Идёт по плану/Добавить заказов/
+  // Загрузить срочно/Простой — разобраться", тот же paceRatio, что и в широкой шкале выше.
+  var vehiclesF = vehicles.map(function(v) {
+    var forecast = (v.profit||0) * paceRatio;
+    var forecastPct = v.plan > 0 ? forecast / v.plan * 100 : null;
+    var status = forecastPct !== null ? driverForecastStatus_(forecastPct) : { cls:'muted', label:'Нет плана' };
+    return { v: v, forecast: forecast, forecastPct: forecastPct, status: status };
+  });
+
+  // Задачи на сегодня (Влад, 2026-08-11) - максимум 5, автособранные из тех же данных, что
+  // уже на странице: (1) топ-3 водителя без путевых листов - один общий пункт; (2) машины,
+  // отстающие по прогнозу ВП (Загрузить срочно/Простой — разобраться), худшие сначала.
+  var tasks = [];
+  if (driversNoWaybill.length) {
+    var wbNames = driversNoWaybill.slice(0,3).map(function(dr){ return dr.name.split(' ')[0]; });
+    tasks.push({ icon:'📋', text: 'Запросить путевые листы: '+wbNames.join(', ') });
+  }
+  vehiclesF
+    .filter(function(x){ return x.status.cls === 'red' || x.status.cls === 'orange'; })
+    .sort(function(a,b){ return (a.forecastPct||0) - (b.forecastPct||0); })
+    .forEach(function(x) {
+      if (tasks.length >= 5) return;
+      var who = (x.v.driver||'').trim().split(' ')[0] || x.v.gos;
+      var action = x.status.cls === 'red' ? 'срочно разобраться в причине простоя' : 'загрузить заказами';
+      tasks.push({ icon: x.status.cls==='red' ? '🔴' : '🟠', text: who+' — прогноз выполнения ВП: '+Math.round(x.forecastPct)+'% — '+action });
+    });
+  tasks = tasks.slice(0, 5);
+
   var html = selectorHtml;
 
   if (vehPlan > 0) {
     html += planProgressBar('Выполнение плана ВП (длинномеры)', vehPlanPct, vehForecastPct, vehFact, vehForecast, vehPlan);
   }
 
-  // KPI-шапка: заказы/выручка длинномеров, ВП длинномеров компании (база зарплаты), документы
+  // KPI-шапка: заказы/выручка/ВП/документы - ТОЛЬКО собственный парк (Влад, 2026-08-11:
+  // "убрать информацию по наёмной технике, у Василия только собственный парк"), наём нигде
+  // на этой странице больше не показываем.
   html += '<div class="kpi-grid" style="margin-bottom:18px">';
-  html += kpiCard('🚚', 'Заказов (длинномеры)', String(s.long_orders||0), 'свой парк '+(s.own_long_orders||0)+' · наём '+(s.hired_long_orders||0), COL.blue);
-  html += kpiCard('💰', 'Выручка (длинномеры)', mln(s.long_amount||0), 'маржа найма '+mln(s.hired_profit_long||0), COL.green);
+  html += kpiCard('🚚', 'Заказов (свой парк)', String(s.own_long_orders||0), vehicles.length+' машин в работе', COL.blue);
+  html += kpiCard('💰', 'Выручка (свой парк)', mln(s.own_long_amount||0), vehicles.length ? 'в среднем '+mln((s.own_long_amount||0)/vehicles.length)+' на машину' : '', COL.green);
   html += kpiCard('📈', 'ВП длинномеров (компания)', s.profit_long!=null ? mln(s.profit_long) : '—', 'база зарплаты (2.5%)', COL.green);
   html += kpiCard('📋', 'Документы', funnel.complete+' из '+funTotal, funTotal>0 ? Math.round(funnel.complete/funTotal*100)+'% готово' : 'Нет заказов в воронке', COL.blue);
   html += '</div>';
 
-  // 1. ВП по каждой машине - те же колонки, что вкладка "Техника"
-  var vehRows = !vehicles.length
-    ? '<tr><td colspan="7" class="muted" style="padding:14px">Нет машин-длинномеров за этот период</td></tr>'
-    : vehicles.map(function(v) {
+  // Задачи на сегодня - между 4 KPI-блоками и таблицей машин (Влад, 2026-08-11)
+  if (tasks.length) {
+    html += block('✅ Задачи на сегодня',
+      '<div>'+tasks.map(function(t){
+        return '<div style="display:flex;align-items:baseline;gap:8px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
+          '<span>'+t.icon+'</span><span style="font-size:13px;color:var(--text)">'+t.text+'</span></div>';
+      }).join('')+'</div>');
+  }
+
+  // 1. ВП по каждой машине - те же колонки, что вкладка "Техника" + прогноз/статус, как на
+  // "Водителях" (план/факт/%/прогноз к концу месяца/оценка-действие)
+  var vehRows = !vehiclesF.length
+    ? '<tr><td colspan="9" class="muted" style="padding:14px">Нет машин-длинномеров за этот период</td></tr>'
+    : vehiclesF.map(function(x) {
+        var v = x.v;
         var planPct = v.plan > 0 ? v.profit / v.plan * 100 : null;
         var cls = v.profit < 0 ? 'red' : planPct !== null ? (planPct>=100?'green':planPct>=80?'amber':'red') : 'muted';
         var stCls = v.status && v.status.indexOf('Ремонт') !== -1 ? 'red' : v.status && v.status.indexOf('работе') !== -1 ? 'green' : 'amber';
@@ -2030,13 +2073,15 @@ function renderMyPageVasin(el, current, selectorHtml) {
           '<td><span class="badge '+stCls+'">'+(v.status||'—')+'</span></td>'+
           '<td class="muted">'+((v.driver||'').trim().split(' ')[0] || '—')+'</td>'+
           '<td class="num">'+fmtK2(v.revenue||0)+'</td>'+
+          '<td class="num">'+fmtK2(v.plan||0)+'</td>'+
           '<td class="num '+cls+'"><b>'+fmtK2(v.profit||0)+'</b></td>'+
-          '<td class="num '+cls+'">'+(planPct!==null ? planPct.toFixed(0)+'%' : '—')+'</td>'+
+          '<td class="num '+x.status.cls+'">'+(x.forecastPct!==null ? fmtK2(x.forecast)+' <span class="muted">('+x.forecastPct.toFixed(0)+'%)</span>' : '—')+'</td>'+
+          '<td><span class="badge '+x.status.cls+'">'+x.status.label+'</span></td>'+
         '</tr>';
       }).join('');
   html += block('🚛 Валовая прибыль по каждой машине',
     '<div style="overflow-x:auto"><table class="tbl">'+
-      '<thead><tr><th>Госномер</th><th>Марка</th><th>Статус</th><th>Водитель</th><th class="num">Выручка</th><th class="num">Прибыль</th><th class="num">% плана</th></tr></thead>'+
+      '<thead><tr><th>Госномер</th><th>Марка</th><th>Статус</th><th>Водитель</th><th class="num">Выручка</th><th class="num">План ВП</th><th class="num">Факт ВП</th><th class="num">Прогноз</th><th>Оценка</th></tr></thead>'+
       '<tbody>'+vehRows+'</tbody>'+
     '</table></div>');
 
@@ -2077,25 +2122,25 @@ function renderMyPageVasin(el, current, selectorHtml) {
       '<tbody>'+noWbRows+'</tbody>'+
     '</table></div>');
 
-  // 4. Все сделки по длинномерам - независимо от исполнителя (Влад: "видеть все сделки по
-  // длинномерам, независимо от того, только он ли выполнял заказ")
-  var dealsShown = deals.slice(0, 40);
+  // 4. Сделки собственного парка по длинномерам - Влад, 2026-08-11: "убрать информацию по
+  // наёмной технике, у Василия только собственный парк" - наёмные сделки отфильтрованы
+  // (all_long_deals с бэкенда содержит и то, и то - фильтр только на этой странице).
+  var ownDeals = deals.filter(function(dl){ return !dl.is_hired; });
+  var dealsShown = ownDeals.slice(0, 40);
   var dealRows = !dealsShown.length
-    ? '<tr><td colspan="7" class="muted" style="padding:14px">Сделок в этом месяце нет</td></tr>'
+    ? '<tr><td colspan="5" class="muted" style="padding:14px">Сделок в этом месяце нет</td></tr>'
     : dealsShown.map(function(dl) {
         return '<tr>'+
           '<td class="muted" style="font-size:12px">'+(dl.date||'—')+'</td>'+
           '<td>'+(dl.customer||'—')+'</td>'+
           '<td class="muted">'+((dl.manager||'').split(' ')[0] || '—')+'</td>'+
-          '<td class="muted">'+(dl.executor||'—')+'</td>'+
-          '<td><span class="badge '+(dl.is_hired?'amber':'green')+'">'+(dl.is_hired?'Наём':'Свой парк')+'</span></td>'+
           '<td class="num">'+fmtK2(dl.amount||0)+'</td>'+
           '<td class="num green">'+fmtK2(dl.profit||0)+'</td>'+
         '</tr>';
       }).join('');
-  html += block('🤝 Все сделки по длинномерам'+(deals.length>dealsShown.length ? ' <span style="font-size:11px;color:var(--muted);font-weight:400">(показаны последние '+dealsShown.length+' из '+deals.length+(deals.length>=500?'+':'')+')</span>' : ''),
+  html += block('🤝 Сделки собственного парка (длинномеры)'+(ownDeals.length>dealsShown.length ? ' <span style="font-size:11px;color:var(--muted);font-weight:400">(показаны последние '+dealsShown.length+' из '+ownDeals.length+')</span>' : ''),
     '<div style="overflow-x:auto"><table class="tbl">'+
-      '<thead><tr><th>Дата</th><th>Заказчик</th><th>Менеджер</th><th>Исполнитель</th><th>Тип</th><th class="num">Сумма</th><th class="num">Прибыль</th></tr></thead>'+
+      '<thead><tr><th>Дата</th><th>Заказчик</th><th>Менеджер</th><th class="num">Сумма</th><th class="num">Прибыль</th></tr></thead>'+
       '<tbody>'+dealRows+'</tbody>'+
     '</table></div>');
 

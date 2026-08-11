@@ -1236,6 +1236,53 @@ function positionLabel(name, type) {
 let myPageLogistScope = 'own'; // 'own' | 'company'
 function setMyPageLogistScope(scope) { myPageLogistScope = scope; renderMyPage(); }
 
+// Выбор периода на личной странице (2026-08-11, Влад: "нужно сделать ещё выбор периода:
+// текущий месяц и прошлый месяц"). Admin получает данные через уже существующий
+// action=orders_period (та же инфраструктура, что и вкладки Продажи/Менеджеры/Логисты/
+// Зарплата), роли manager/logist - через новый урезанный action=my_page_period
+// (getManagerViewForPeriod_/getLogistViewForPeriod_ на бэкенде - те же ограничения доступа,
+// что и обычный вход этих ролей, просто за другой месяц).
+let myPagePeriod = null;       // null = текущий месяц, иначе 'YYYY-MM' (прошлый месяц)
+let myPagePeriodCache = {};    // period -> {orders, profitLong} - кэш, чтобы не дёргать API повторно при переключении туда-обратно
+let myPagePeriodLoading = false;
+
+function prevMonthKey_() {
+  var d = new Date();
+  d.setDate(1); // сначала на 1-е число - иначе setMonth(-1) в последний день длинного месяца может перескочить на 2 месяца назад
+  d.setMonth(d.getMonth() - 1);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+
+async function setMyPagePeriod(period) {
+  if (myPagePeriodLoading) return;
+  if (!period) { myPagePeriod = null; renderMyPage(); return; }
+  if (myPagePeriodCache[period]) { myPagePeriod = period; renderMyPage(); return; }
+  myPagePeriodLoading = true;
+  renderMyPage(); // сразу перерисовать - кнопка покажет "Загрузка..." (см. periodToggleHtml)
+  try {
+    var data;
+    if (D.role === 'admin') {
+      data = await apiFetchJson({ action: 'orders_period', period: period });
+      if (data.orders && data.orders.error) throw new Error(data.orders.error);
+      myPagePeriodCache[period] = {
+        orders: data.orders,
+        profitLong: (data.summary && typeof data.summary.profit_long === 'number') ? data.summary.profit_long : null,
+      };
+    } else {
+      data = await apiFetchJson({ action: 'my_page_period', period: period });
+      if (data.error) throw new Error(data.error);
+      if (data.orders && data.orders.error) throw new Error(data.orders.error);
+      myPagePeriodCache[period] = { orders: data.orders, profitLong: null };
+    }
+    myPagePeriod = period;
+  } catch (e) {
+    alert('Не удалось загрузить прошлый месяц: ' + e.message);
+  } finally {
+    myPagePeriodLoading = false;
+    renderMyPage();
+  }
+}
+
 // Диспетчер личной страницы (2026-08-10): раньше страница была только для менеджеров
 // (by_manager_detail), теперь объединяет менеджеров и логистов (logist_detail) в один
 // выпадающий список для admin-предпросмотра, с автовыбором своей записи для ролей
@@ -1245,51 +1292,77 @@ function renderMyPage() {
   if (!D || !D.orders) return;
   var el = document.getElementById('my-page-content');
   if (!el) return;
-  var isManagerRole = D.role === 'manager';
-  var isLogistRole  = D.role === 'logist';
-  var mgrDetailAll = (D.orders && D.orders.by_manager_detail) || {};
-  var logDetailAll = (D.orders && D.orders.logist_detail) || {};
-  var entries = Object.keys(mgrDetailAll).map(function(n){ return {name:n, type:'manager'}; })
-    .concat(Object.keys(logDetailAll).map(function(n){ return {name:n, type:'logist'}; }));
-  entries.sort(function(a,b){ return a.name.localeCompare(b.name, 'ru'); });
-  if (!entries.length) { el.innerHTML = '<p style="color:var(--muted);padding:16px">Нет данных по сотрудникам.</p>'; return; }
 
-  var current;
-  if (isManagerRole)      current = { name: D.managerName, type: 'manager' }; // видит только себя, выбора нет
-  else if (isLogistRole)  current = { name: D.logistName,  type: 'logist'  };
-  else {
-    var sel = document.getElementById('my-page-mgr-select');
-    var selVal = sel ? sel.value : '';
-    current = entries.filter(function(en){ return (en.name+'::'+en.type) === selVal; })[0] || entries[0];
+  // Подмена D.orders/D.summary.profit_long на выбранный период - только на время этого
+  // рендера, синхронно, с возвратом обратно в конце (тот же приём, что renderSalesTabsForPeriod
+  // для вкладок Продажи/Менеджеры/Логисты/Зарплата, см. выше). Не трогаем ничего, если период
+  // не выбран или ещё не подгрузился в кэш.
+  var realOrders = D.orders;
+  var realProfitLong = D.summary ? D.summary.profit_long : undefined;
+  var periodEntry = myPagePeriod ? myPagePeriodCache[myPagePeriod] : null;
+  if (periodEntry) {
+    D.orders = periodEntry.orders;
+    if (D.summary && periodEntry.profitLong != null) D.summary.profit_long = periodEntry.profitLong;
   }
 
-  // Шапка "личной страницы" - ФИО (что реально есть в данных, без выдумывания отчества) +
-  // должность, вместо сырого имени (Влад, 2026-08-10).
-  var headerHtml = '<div style="margin-bottom:'+(isManagerRole||isLogistRole?'16':'8')+'px">'+
-    '<div style="font-size:19px;font-weight:700;color:var(--text)">'+current.name+'</div>'+
-    '<div style="font-size:13px;color:var(--muted);margin-top:2px">'+positionLabel(current.name, current.type)+'</div>'+
-  '</div>';
+  try {
+    var isManagerRole = D.role === 'manager';
+    var isLogistRole  = D.role === 'logist';
+    var mgrDetailAll = (D.orders && D.orders.by_manager_detail) || {};
+    var logDetailAll = (D.orders && D.orders.logist_detail) || {};
+    var entries = Object.keys(mgrDetailAll).map(function(n){ return {name:n, type:'manager'}; })
+      .concat(Object.keys(logDetailAll).map(function(n){ return {name:n, type:'logist'}; }));
+    entries.sort(function(a,b){ return a.name.localeCompare(b.name, 'ru'); });
+    if (!entries.length) { el.innerHTML = '<p style="color:var(--muted);padding:16px">Нет данных по сотрудникам'+(myPagePeriod?' за выбранный месяц':'')+'.</p>'; return; }
 
-  var selectorHtml;
-  if (isManagerRole || isLogistRole) {
-    selectorHtml = headerHtml;
-  } else {
-    selectorHtml = headerHtml +
-      '<div style="margin-bottom:16px;display:flex;align-items:center;gap:10px">'+
-      '<label style="font-size:13px;color:var(--muted)">Сотрудник (выбор для проверки - после входа по логину каждый увидит только себя):</label>'+
-      '<select id="my-page-mgr-select" onchange="renderMyPage()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 10px;font-size:13px">';
-    entries.forEach(function(en){
-      var val = en.name+'::'+en.type;
-      var label = en.name + (en.type==='logist' ? ' · логист' : '');
-      selectorHtml += '<option value="'+val+'"'+(val===(current.name+'::'+current.type)?' selected':'')+'>'+label+'</option>';
-    });
-    selectorHtml += '</select></div>';
-  }
+    var current;
+    if (isManagerRole)      current = { name: D.managerName, type: 'manager' }; // видит только себя, выбора нет
+    else if (isLogistRole)  current = { name: D.logistName,  type: 'logist'  };
+    else {
+      var sel = document.getElementById('my-page-mgr-select');
+      var selVal = sel ? sel.value : '';
+      current = entries.filter(function(en){ return (en.name+'::'+en.type) === selVal; })[0] || entries[0];
+    }
 
-  if (current.type === 'logist') {
-    renderMyPageLogist(el, current.name, selectorHtml, logDetailAll[current.name] || null);
-  } else {
-    renderMyPageManager(el, current.name, selectorHtml, mgrDetailAll[current.name] || null);
+    // Шапка "личной страницы" - ФИО (что реально есть в данных, без выдумывания отчества) +
+    // должность, вместо сырого имени (Влад, 2026-08-10).
+    var headerHtml = '<div style="margin-bottom:'+(isManagerRole||isLogistRole?'16':'8')+'px">'+
+      '<div style="font-size:19px;font-weight:700;color:var(--text)">'+current.name+'</div>'+
+      '<div style="font-size:13px;color:var(--muted);margin-top:2px">'+positionLabel(current.name, current.type)+'</div>'+
+    '</div>';
+
+    // Переключатель периода (2026-08-11) - "Текущий месяц" / "Прошлый месяц", доступен всем
+    // ролям (admin-предпросмотр и реальный вход manager/logist).
+    var loadingPeriod = myPagePeriodLoading && !myPagePeriodCache[prevMonthKey_()];
+    var periodToggleHtml = '<div class="tab-bar" style="margin-bottom:14px">'+
+      '<button class="tab-btn'+(!myPagePeriod?' active':'')+'" onclick="setMyPagePeriod(null)">Текущий месяц</button>'+
+      '<button class="tab-btn'+(myPagePeriod?' active':'')+'" '+(loadingPeriod?'disabled':'')+' onclick="setMyPagePeriod(\''+prevMonthKey_()+'\')">'+(loadingPeriod?'Загрузка…':'Прошлый месяц')+'</button>'+
+    '</div>';
+
+    var selectorHtml;
+    if (isManagerRole || isLogistRole) {
+      selectorHtml = headerHtml + periodToggleHtml;
+    } else {
+      selectorHtml = headerHtml + periodToggleHtml +
+        '<div style="margin-bottom:16px;display:flex;align-items:center;gap:10px">'+
+        '<label style="font-size:13px;color:var(--muted)">Сотрудник (выбор для проверки - после входа по логину каждый увидит только себя):</label>'+
+        '<select id="my-page-mgr-select" onchange="renderMyPage()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 10px;font-size:13px">';
+      entries.forEach(function(en){
+        var val = en.name+'::'+en.type;
+        var label = en.name + (en.type==='logist' ? ' · логист' : '');
+        selectorHtml += '<option value="'+val+'"'+(val===(current.name+'::'+current.type)?' selected':'')+'>'+label+'</option>';
+      });
+      selectorHtml += '</select></div>';
+    }
+
+    if (current.type === 'logist') {
+      renderMyPageLogist(el, current.name, selectorHtml, logDetailAll[current.name] || null);
+    } else {
+      renderMyPageManager(el, current.name, selectorHtml, mgrDetailAll[current.name] || null);
+    }
+  } finally {
+    D.orders = realOrders;
+    if (D.summary) D.summary.profit_long = realProfitLong;
   }
 }
 

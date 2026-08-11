@@ -2822,10 +2822,12 @@ function getAccessRole_(ss, email) {
   return null;
 }
 
-// Урезанный набор данных для роли "manager" - только его собственные цифры,
-// без доступа к данным других людей и компании в целом.
-function getManagerView_(ss, managerName) {
-  const orders = getOrdersData(ss);
+// Урезанный набор данных для роли "manager" - только его собственные цифры, без доступа к
+// данным других людей и компании в целом. orders - уже загруженный результат getOrdersData
+// (текущий месяц) ИЛИ getOrdersDataForPeriod (2026-08-11, выбор периода на личной странице -
+// "текущий/прошлый месяц" - вынесено в отдельную функцию, чтобы не дублировать фильтрацию
+// между getManagerView_ (текущий месяц) и getManagerViewForPeriod_ (архив) ниже).
+function buildManagerView_(orders, managerName) {
   if (orders.error) return { error: orders.error };
 
   const myDetail = (orders.by_manager_detail || {})[managerName] || null;
@@ -2850,11 +2852,12 @@ function getManagerView_(ss, managerName) {
     },
   };
 }
+function getManagerView_(ss, managerName) { return buildManagerView_(getOrdersData(ss), managerName); }
+function getManagerViewForPeriod_(ss, managerName, period) { return buildManagerView_(getOrdersDataForPeriod(ss, period), managerName); }
 
-// Урезанный набор данных для роли "logist" (2026-08-10, по аналогии с getManagerView_ выше) -
+// Урезанный набор данных для роли "logist" (2026-08-10, по аналогии с buildManagerView_ выше) -
 // только собственные заказы/маржа/сделки, без доступа к данным других людей и компании в целом.
-function getLogistView_(ss, logistName) {
-  const orders = getOrdersData(ss);
+function buildLogistView_(orders, logistName) {
   if (orders.error) return { error: orders.error };
 
   const myDetail = (orders.logist_detail || {})[logistName] || null;
@@ -2880,6 +2883,8 @@ function getLogistView_(ss, logistName) {
     },
   };
 }
+function getLogistView_(ss, logistName) { return buildLogistView_(getOrdersData(ss), logistName); }
+function getLogistViewForPeriod_(ss, logistName, period) { return buildLogistView_(getOrdersDataForPeriod(ss, period), logistName); }
 
 // ============================================================
 // API ДЛЯ ДАШБОРДА — читает Штатку для статусов и типов
@@ -3194,6 +3199,24 @@ function doGet(e) {
       var mpJson = JSON.stringify(computeManagerProfile_(mpRows, mpName));
       try { if (mpJson.length < 95000) mpCache.put(mpCacheKey, mpJson, 1800); } catch (cacheErr) { /* кэш - не критично */ }
       return ContentService.createTextOutput(mpJson).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // Личная страница - выбор периода для ролей manager/logist (2026-08-11, Влад: "нужно
+    // сделать ещё выбор периода: текущий месяц и прошлый месяц"). Аналог action=orders_period,
+    // но урезанный под ту же логику, что и обычный вход этих ролей (только свои цифры) -
+    // admin для периода на sales-вкладках по-прежнему использует action=orders_period целиком.
+    if (action === 'my_page_period') {
+      if (access.role !== 'manager' && access.role !== 'logist') {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var mppPeriod = e.parameter.period || '';
+      if (!/^\d{4}-\d{2}$/.test(mppPeriod)) {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Некорректный период' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var mppResult = access.role === 'manager'
+        ? getManagerViewForPeriod_(ss, access.name, mppPeriod)
+        : getLogistViewForPeriod_(ss, access.name, mppPeriod);
+      return ContentService.createTextOutput(JSON.stringify(mppResult)).setMimeType(ContentService.MimeType.JSON);
     }
 
     // Менеджер - только его собственные данные, без доступа к остальному

@@ -2871,6 +2871,12 @@ function getLogistView_(ss, logistName) {
       period: orders.period,
       by_logist: myLogistRow,
       logist_detail: detailWrapped,
+      // "Общие сделки" (2026-08-10, Влад: "он видит абсолютно всю ситуацию по направлению") -
+      // осознанно расширенный доступ ТОЛЬКО по направлению найма (кто угодно с ролью logist
+      // в листе "Доступ" увидит это), но НЕ вся компания - ни зарплаты остальных, ни выручка
+      // менеджеров, ни что-либо за пределами наёмного парка сюда не попадает.
+      by_hired_supplier: orders.by_hired_supplier || [],
+      all_hired_deals:   orders.all_hired_deals || [],
     },
   };
 }
@@ -6528,6 +6534,7 @@ function aggregateOrdersRows(rows) {
   const customerMap = {};
   const dayMap      = {};
   const supplierMap = {};
+  const allHiredDeals = []; // общекорпоративный список сделок найма (2026-08-10, "Общие сделки")
   const driverMap   = {};
   const problemOrders = [];
   const mgrDetailMap = {}; // персональная разбивка по менеджеру (для личной страницы)
@@ -6760,7 +6767,10 @@ function aggregateOrdersRows(rows) {
     if (isHired) {
       const supplier = str(row, 'hired');
       const isInternalOrder = isInt || ordInList(str(row, 'customer'), INTERNAL_CLIENTS);
-      if (!supplierMap[supplier]) supplierMap[supplier] = { name:supplier, orders:0, revenue:0, cost:0, extra_costs:0, profit:0, no_waybill:0 };
+      if (!supplierMap[supplier]) {
+        supplierMap[supplier] = { name:supplier, orders:0, revenue:0, cost:0, extra_costs:0, profit:0,
+          no_waybill:0, not_posted:0, no_realiz:0, complete:0 };
+      }
       supplierMap[supplier].orders++;
       supplierMap[supplier].revenue += amount;
       supplierMap[supplier].cost    += hiredCost; // "Стоимость найма" - что заплатили перевозчику
@@ -6774,6 +6784,14 @@ function aggregateOrdersRows(rows) {
       // равен "Прибыль" - именно эта сумма и есть маржа с учётом всех затрат.
       supplierMap[supplier].extra_costs += (amount - hiredCost - profit);
       if (!hw && !isInternalOrder) supplierMap[supplier].no_waybill++;
+
+      // Общекорпоративный список сделок найма (2026-08-10, "Общие сделки" на личной странице
+      // логиста - Влад: "он видит абсолютно всю ситуацию по направлению") - КАЖДАЯ наёмная
+      // строка, не только у распознанных логистов из TRAL_LOGISTS.
+      allHiredDeals.push({
+        id: str(row,'id'), date: dateStr, customer: str(row,'customer'), supplier: supplier,
+        amount: amount, cost: hiredCost, margin: profit, logist: mgrLog || '',
+      });
 
       // Та же разбивка по поставщику, но только для СВОЕГО логиста (личная страница,
       // 2026-08-10) - не смешивается с чужими сделками, как mgrDetail выше для менеджеров.
@@ -6789,6 +6807,11 @@ function aggregateOrdersRows(rows) {
         lds.cost    += hiredCost;
         lds.profit  += profit;
         lds.extra_costs += (amount - hiredCost - profit);
+        // Тем же условием, что и глобальный supplierMap.no_waybill чуть выше (!isInternalOrder
+        // тоже учитывается) - раньше эта цифра считалась отдельно в блоке "Статус документов"
+        // по более узкому условию (!isInt, без !isInternalOrder), что расходилось с "Общими
+        // сделками" по тому же поставщику. Один источник на обе вкладки (2026-08-10).
+        if (!hw && !isInternalOrder) lds.no_waybill++;
         ld.deals.push({
           id: str(row,'id'), date: dateStr, customer: str(row,'customer'), supplier: supplier,
           amount: amount, cost: hiredCost, margin: profit,
@@ -6827,14 +6850,30 @@ function aggregateOrdersRows(rows) {
         else           { md2.complete++; mgrDetail(mgrSales).rows_complete++; }
       }
 
+      // Воронка документов ПО ПОСТАВЩИКУ - общекорпоративная (2026-08-10, "Общие сделки" на
+      // личной странице логиста) - та же классификация, на ГЛОБАЛЬНУЮ запись supplierMap
+      // (уже создана в блоке "По поставщикам найма" для каждой наёмной строки). no_waybill
+      // НЕ трогаем здесь - он уже посчитан выше (учитывает isInternalOrder, более широкое
+      // условие, чем !isInt тут) - повторный счёт задвоил бы цифру.
+      if (isHired) {
+        var sg = supplierMap[str(row, 'hired')];
+        if (sg) {
+          if (skipToComplete) { sg.complete++; }
+          else if (!hw)       { /* учтено в no_waybill выше */ }
+          else if (!pst)      { sg.not_posted++; }
+          else if (!hr)       { sg.no_realiz++; }
+          else                { sg.complete++; }
+        }
+      }
+
       // Воронка документов ПО ПОСТАВЩИКУ, только для найма своего логиста (личная страница,
-      // 2026-08-10) - та же классификация (skipToComplete/hw/pst/hr), что и общая воронка выше,
-      // просто на запись supplierMap этого логиста (уже создана в блоке "По поставщикам найма").
+      // 2026-08-10) - та же классификация, что и общая воронка выше. no_waybill НЕ трогаем
+      // здесь - уже посчитан в блоке "По поставщикам найма" (тем же условием, что глобальный).
       if (isHired && mgrLog && ordInList(mgrLog, TRAL_LOGISTS)) {
         var lds2 = logistDetail(mgrLog).suppliers[str(row, 'hired')];
         if (lds2) {
           if (skipToComplete) { lds2.complete++; }
-          else if (!hw)       { lds2.no_waybill++; }
+          else if (!hw)       { /* учтено в no_waybill выше */ }
           else if (!pst)      { lds2.not_posted++; }
           else if (!hr)       { lds2.no_realiz++; }
           else                { lds2.complete++; }
@@ -6923,6 +6962,9 @@ function aggregateOrdersRows(rows) {
       name: s.name, orders: s.orders, revenue: s.revenue, cost: s.cost, extra_costs: s.extra_costs,
       margin: margin, margin_pct: s.revenue > 0 ? Math.round(margin / s.revenue * 100) : 0,
       no_waybill: s.no_waybill,
+      // Полная воронка (2026-08-10, "Общие сделки" на личной странице логиста) - раньше был
+      // только no_waybill, теперь та же разбивка, что и в logist_detail.by_supplier.
+      not_posted: s.not_posted, no_realiz: s.no_realiz, complete: s.complete,
     };
   }).sort(function(a,b){ return b.revenue-a.revenue; });
 
@@ -6966,6 +7008,13 @@ function aggregateOrdersRows(rows) {
       deals: ld.deals.sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); }).slice(0, 300),
     };
   });
+
+  // Общекорпоративные сделки найма (2026-08-10, "Общие сделки" на личной странице логиста) -
+  // те же поля, что и у личных deals выше, плюс logist (кто вёл сделку). Обрезка до 500 -
+  // компания целиком, объём больше, чем у одного логиста.
+  const allHiredDealsOut = allHiredDeals
+    .sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); })
+    .slice(0, 500);
 
   // Топ грузов: сортируем по числу рейсов, "Прочие грузы" всегда в конец
   function sortCargo(map) {
@@ -7055,6 +7104,7 @@ function aggregateOrdersRows(rows) {
       .sort(function(a,b){ return b.no_waybill-a.no_waybill; }),
     by_manager_detail: managerDetail,
     logist_detail:     logistDetailOut,
+    all_hired_deals:   allHiredDealsOut,
     internal: {
       total_trips:  internalOrders,
       total_amount: internalAmount,

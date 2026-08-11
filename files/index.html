@@ -1217,6 +1217,25 @@ async function loadData() {
   stopLoadingPhrases();
 }
 
+// Должность для шапки личной страницы (Влад, 2026-08-10: "вверху надпись - фамилия, имя,
+// отчество, должность того, кто заходит"). Отчества в данных нет нигде (1С отдаёт только
+// Фамилия+Имя) - показываем что реально есть, не выдумываем. По умолчанию по типу роли,
+// с точечными исключениями для руководителей отделов.
+function positionLabel(name, type) {
+  var sur = (name||'').trim().split(' ')[0].toLowerCase();
+  if (type === 'logist') {
+    return sur === 'рыщанов' ? 'Руководитель отдела логистики' : 'Логист';
+  }
+  return (sur === 'ахтамова' || sur === 'гусейнова') ? 'Руководитель отдела продаж' : 'Менеджер по продажам';
+}
+
+// Переключатель "Свои продажи" / "Общие сделки" на личной странице логиста (Влад, 2026-08-10:
+// "Прусу Роману нужно добавить две кнопки... он видит абсолютно всю ситуацию по направлению").
+// Персистентный между рендерами (не сбрасывается при смене сотрудника в дропдауне) - "Общие
+// сделки" не зависит от выбранного человека, это общекорпоративный срез по найму.
+let myPageLogistScope = 'own'; // 'own' | 'company'
+function setMyPageLogistScope(scope) { myPageLogistScope = scope; renderMyPage(); }
+
 // Диспетчер личной страницы (2026-08-10): раньше страница была только для менеджеров
 // (by_manager_detail), теперь объединяет менеджеров и логистов (logist_detail) в один
 // выпадающий список для admin-предпросмотра, с автовыбором своей записи для ролей
@@ -1244,11 +1263,19 @@ function renderMyPage() {
     current = entries.filter(function(en){ return (en.name+'::'+en.type) === selVal; })[0] || entries[0];
   }
 
+  // Шапка "личной страницы" - ФИО (что реально есть в данных, без выдумывания отчества) +
+  // должность, вместо сырого имени (Влад, 2026-08-10).
+  var headerHtml = '<div style="margin-bottom:'+(isManagerRole||isLogistRole?'16':'8')+'px">'+
+    '<div style="font-size:19px;font-weight:700;color:var(--text)">'+current.name+'</div>'+
+    '<div style="font-size:13px;color:var(--muted);margin-top:2px">'+positionLabel(current.name, current.type)+'</div>'+
+  '</div>';
+
   var selectorHtml;
   if (isManagerRole || isLogistRole) {
-    selectorHtml = '<div style="margin-bottom:16px;font-size:15px;font-weight:600">'+current.name+'</div>';
+    selectorHtml = headerHtml;
   } else {
-    selectorHtml = '<div style="margin-bottom:16px;display:flex;align-items:center;gap:10px">'+
+    selectorHtml = headerHtml +
+      '<div style="margin-bottom:16px;display:flex;align-items:center;gap:10px">'+
       '<label style="font-size:13px;color:var(--muted)">Сотрудник (выбор для проверки - после входа по логину каждый увидит только себя):</label>'+
       '<select id="my-page-mgr-select" onchange="renderMyPage()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 10px;font-size:13px">';
     entries.forEach(function(en){
@@ -1540,11 +1567,13 @@ function renderMyPageManager(el, current, selectorHtml, d) {
 }
 
 // Личная страница логиста (2026-08-10, Прус-Роскошный и остальные - см.
-// plans/2026-08-10-logist-personal-page.md). d - запись из D.orders.logist_detail[имя]
-// ({ by_supplier, deals }), собирается на бэкенде в aggregateOrdersRows.
+// plans/2026-08-10-logist-personal-page.md, plans/2026-08-10-logist-page-toggle-and-header.md).
+// d - запись из D.orders.logist_detail[имя] ({ by_supplier, deals }), собирается на бэкенде в
+// aggregateOrdersRows. Нет данных за месяц (d==null) - НЕ обрываем рендер целиком: переключатель
+// "Общие сделки" и блок зарплаты не зависят от d, должны работать и без личных сделок в этом
+// месяце (например у нового человека).
 function renderMyPageLogist(el, current, selectorHtml, d) {
-  if (!d) { el.innerHTML = selectorHtml + '<p style="color:var(--muted);padding:16px">Нет данных за этот месяц.</p>'; return; }
-
+  d = d || {};
   var COL = { red:'#E24B4A', amber:'#EF9F27', green:'#1D9E75', blue:'#378ADD' };
   function mln(n) { var x=Math.abs(n||0); var sg=(n||0)<0?'-':''; return x>=1000000 ? sg+(x/1000000).toFixed(1)+' млн ₽' : sg+Math.round(x).toLocaleString('ru-RU')+' ₽'; }
   function fr(n) { return n ? Math.round(n).toLocaleString('ru-RU')+' ₽' : '—'; }
@@ -1577,8 +1606,14 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
     ? (vasinProfitLong != null ? calcVasin(vasinProfitLong) : null)
     : calcLogist(sur, getL, useNewRules);
 
-  var suppliers = (d.by_supplier || []).slice();
-  var deals = (d.deals || []).slice();
+  // Переключатель "Свои продажи" / "Общие сделки" (Влад, 2026-08-10) - "Общие сделки" читает
+  // общекорпоративные поля (by_hired_supplier/all_hired_deals), которые уже приходят и в
+  // полном admin-ответе, и в урезанной роли logist (getLogistView_ отдаёт их явно - "видит
+  // абсолютно всю ситуацию по направлению", но не остальную компанию).
+  var isCompany = myPageLogistScope === 'company';
+  var suppliers = (isCompany ? ((D.orders && D.orders.by_hired_supplier) || []) : (d.by_supplier || [])).slice();
+  var deals = (isCompany ? ((D.orders && D.orders.all_hired_deals) || []) : (d.deals || [])).slice();
+  var scopeSuffix = isCompany ? ' · вся компания' : ' · мои сделки';
 
   var totalRevenue = suppliers.reduce(function(s,x){ return s+(x.revenue||0); }, 0);
   var totalCost    = suppliers.reduce(function(s,x){ return s+(x.cost||0); }, 0);
@@ -1598,6 +1633,12 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
 
   var html = selectorHtml;
 
+  // Переключатель "Свои продажи" / "Общие сделки"
+  html += '<div class="tab-bar">'+
+    '<button class="tab-btn'+(isCompany?'':' active')+'" onclick="setMyPageLogistScope(\'own\')">Свои продажи</button>'+
+    '<button class="tab-btn'+(isCompany?' active':'')+'" onclick="setMyPageLogistScope(\'company\')">Общие сделки</button>'+
+  '</div>';
+
   // KPI-шапка: найм (заказы/выручка), маржа найма, документы + 4-й блок "Общая
   // маржинальность по направлению" - Влад, 2026-08-10: "точно так же, как у нас сделано
   // на главной панели маржа найма" - воспроизводит один в один разметку и пороги карточки
@@ -1605,16 +1646,16 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
   // k-margin-bar/k-margin-abs, см. renderKPI выше), только числитель/знаменатель - его
   // собственные (totalMargin/totalRevenue), а не по компании целиком.
   html += '<div class="kpi-grid" style="margin-bottom:18px">';
-  html += kpiCard('🚚', 'Заказов по найму', String(totalOrders), mln(totalRevenue)+' выручка'+(lRow ? ' · всего заказов '+(lRow.orders||0) : ''), COL.blue);
-  html += kpiCard('💹', 'Маржа найма', mln(totalMargin), totalMarginPct+'% от выручки найма', COL.green);
-  html += kpiCard('📋', 'Документы', fun.complete+' из '+funTotal, funTotal>0 ? Math.round(fun.complete/funTotal*100)+'% готово' : 'Нет заказов в воронке', COL.blue);
+  html += kpiCard('🚚', 'Заказов по найму'+scopeSuffix, String(totalOrders), mln(totalRevenue)+' выручка'+(!isCompany && lRow ? ' · всего заказов '+(lRow.orders||0) : ''), COL.blue);
+  html += kpiCard('💹', 'Маржа найма'+scopeSuffix, mln(totalMargin), totalMarginPct+'% от выручки найма', COL.green);
+  html += kpiCard('📋', 'Документы'+scopeSuffix, fun.complete+' из '+funTotal, funTotal>0 ? Math.round(fun.complete/funTotal*100)+'% готово' : 'Нет заказов в воронке', COL.blue);
   (function() {
     var mp = totalMarginPct;
     var mColorVar = mp >= 30 ? 'var(--green)' : mp >= 15 ? 'var(--amber)' : 'var(--red)';
     var mColorCls = mp >= 30 ? 'green' : mp >= 15 ? 'amber' : 'red';
     var mDetail = mp >= 30 ? 'Хорошая маржа найма' : mp >= 15 ? 'Средняя маржа найма' : 'Низкая маржа найма';
     html += '<div class="kpi">'+
-      '<div class="kpi-label">Общая маржинальность по направлению</div>'+
+      '<div class="kpi-label">Общая маржинальность по направлению'+scopeSuffix+'</div>'+
       '<div class="kpi-value '+mColorCls+'">'+mp+'%</div>'+
       '<div class="kpi-sub2">'+mDetail+'</div>'+
       '<div class="kpi-prog-wrap">'+
@@ -1657,7 +1698,7 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
       '<td class="num" style="font-weight:600">'+totalMarginPct+'%</td>'+
       '<td class="num" style="font-weight:600">'+totalOrders+'</td><td></td>'
     : '';
-  html += block('🏭 Маржа по поставщикам (его сделки)',
+  html += block('🏭 Маржа по поставщикам'+scopeSuffix,
     '<div style="overflow-x:auto"><table class="tbl">'+
       '<thead><tr><th>Поставщик</th><th class="num">Выручка</th><th class="num" title="Что заплатили перевозчику">Стоимость найма</th><th class="num" title="Вознаграждения, спецразрешение и т.п. из 1С">Затраты</th><th class="num">Маржа</th><th class="num">%</th><th class="num">Зак.</th><th style="min-width:130px">Шкала маржи</th></tr></thead>'+
       '<tbody>'+supRows+'</tbody>'+
@@ -1680,29 +1721,33 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
           '<td class="num muted">'+t+' ('+pct+'%)</td>'+
         '</tr>';
       }).join('');
-  html += block('📋 Воронка документов по поставщикам',
+  html += block('📋 Воронка документов по поставщикам'+scopeSuffix,
     '<div style="overflow-x:auto"><table class="tbl">'+
       '<thead><tr><th>Поставщик</th><th class="num">Нет путёвки</th><th class="num">Не проведён</th><th class="num">Нет реализации</th><th class="num">Готово</th><th class="num">Всего</th></tr></thead>'+
       '<tbody>'+funRows+'</tbody>'+
     '</table></div>');
 
-  // 3. Мои сделки - последние 40 из архива (полный список приходит с бэкенда до 300 записей)
+  // 3. Мои сделки / Общие сделки - последние 40 (компания - до 500 приходит с бэкенда,
+  // личные - до 300). В общем режиме добавляем колонку "Логист" - записей много разных людей,
+  // без неё непонятно, чья сделка.
+  var dealsCap = isCompany ? 500 : 300;
   var dealsShown = deals.slice(0, 40);
   var dealRows = !dealsShown.length
-    ? '<tr><td colspan="6" class="muted" style="padding:14px">Сделок в этом месяце нет</td></tr>'
+    ? '<tr><td colspan="'+(isCompany?7:6)+'" class="muted" style="padding:14px">Сделок в этом месяце нет</td></tr>'
     : dealsShown.map(function(dl) {
         return '<tr>'+
           '<td class="muted" style="font-size:12px">'+(dl.date||'—')+'</td>'+
           '<td>'+(dl.customer||'—')+'</td>'+
           '<td>'+(dl.supplier||'—')+'</td>'+
+          (isCompany ? '<td class="muted">'+(dl.logist||'—')+'</td>' : '')+
           '<td class="num">'+fmtK2(dl.amount||0)+'</td>'+
           '<td class="num red">'+fmtK2(dl.cost||0)+'</td>'+
           '<td class="num green">'+fmtK2(dl.margin||0)+'</td>'+
         '</tr>';
       }).join('');
-  html += block('🤝 Мои сделки'+(deals.length>dealsShown.length ? ' <span style="font-size:11px;color:var(--muted);font-weight:400">(показаны последние '+dealsShown.length+' из '+deals.length+')</span>' : ''),
+  html += block((isCompany ? '🤝 Общие сделки' : '🤝 Мои сделки')+(deals.length>dealsShown.length ? ' <span style="font-size:11px;color:var(--muted);font-weight:400">(показаны последние '+dealsShown.length+' из '+deals.length+(deals.length>=dealsCap ? '+' : '')+')</span>' : ''),
     '<div style="overflow-x:auto"><table class="tbl">'+
-      '<thead><tr><th>Дата</th><th>Заказчик</th><th>Поставщик</th><th class="num">Сумма</th><th class="num">Стоимость найма</th><th class="num">Маржа</th></tr></thead>'+
+      '<thead><tr><th>Дата</th><th>Заказчик</th><th>Поставщик</th>'+(isCompany?'<th>Логист</th>':'')+'<th class="num">Сумма</th><th class="num">Стоимость найма</th><th class="num">Маржа</th></tr></thead>'+
       '<tbody>'+dealRows+'</tbody>'+
     '</table></div>');
 

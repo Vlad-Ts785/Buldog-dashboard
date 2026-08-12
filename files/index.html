@@ -1466,6 +1466,35 @@ function setMyPageMgrTab(tab) { myPageMgrTab = tab; renderMyPage(); }
 // страницы - тяжёлая операция на бэкенде, читает 3 архивных листа).
 let mgrLostCache = {};     // 'ФИО::период' -> { data:[...] } | { error:'...' }
 let mgrLostLoading = false;
+// 5 задач на день от ИИ (2026-08-12, см. plans/2026-08-12-ai-daily-tasks-manager.md) - кэш на
+// бэкенде уже на календарный день, фронтенд дополнительно кэширует в памяти на время сессии,
+// чтобы переключение вкладок/дропдауна admin-предпросмотра не дёргало повторный HTTP-запрос
+// за тем же самым результатом. Ключ - 'ФИО::YYYY-MM-DD' (локальная дата браузера - границу дня
+// строго держит бэкенд, здесь это просто ключ кэша, не источник истины).
+let aiTasksCache = {};    // 'ФИО::дата' -> { tasks:[...], plan_advice:'...' } | { error:'...' }
+let aiTasksLoadingKey = null;
+function aiTasksTodayKey_(managerName) {
+  var d = new Date();
+  return managerName + '::' + d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function loadAiTasksIfNeeded_(managerName) {
+  var key = aiTasksTodayKey_(managerName);
+  if (aiTasksCache[key] || aiTasksLoadingKey === key) return;
+  aiTasksLoadingKey = key;
+  apiFetchJson({ action: 'generate_ai_tasks', manager: managerName }).then(function(data) {
+    aiTasksLoadingKey = null;
+    aiTasksCache[key] = data && data.error ? { error: data.error } : data;
+    renderMyPage();
+  }).catch(function(e) {
+    aiTasksLoadingKey = null;
+    aiTasksCache[key] = { error: e.message };
+    renderMyPage();
+  });
+}
+function retryAiTasks_(managerName) {
+  delete aiTasksCache[aiTasksTodayKey_(managerName)];
+  renderMyPage();
+}
 // Фильтр вкладки "Дебиторская задолженность" по корзине дней - ТОЧНО тот же механизм, что
 // global ДЗ (Set, множественный выбор - см. debtBucketFilters/setDebtBucketFilter выше по
 // файлу), только дефолт другой (2026-08-12, Влад: "изначально на начальном экране показывает
@@ -1642,6 +1671,34 @@ function renderMyPageManager(el, current, selectorHtml, d) {
   }
 
   var html = selectorHtml;
+
+  // 5 задач на день от ИИ (2026-08-12, см. plans/2026-08-12-ai-daily-tasks-manager.md) - самое
+  // первое, что менеджер видит, открыв страницу утром. Только для текущего месяца - "задачи на
+  // сегодня" не имеют смысла для закрытого прошлого периода.
+  if (!myPagePeriod) {
+    var aiKey = aiTasksTodayKey_(current);
+    var aiEntry = aiTasksCache[aiKey];
+    if (!aiEntry && aiTasksLoadingKey !== aiKey) loadAiTasksIfNeeded_(current);
+    var aiBody;
+    if (!aiEntry) {
+      aiBody = '<div style="font-size:13px;color:var(--muted);padding:8px 0">Генерируется… обычно 5-15 сек.</div>';
+    } else if (aiEntry.error) {
+      aiBody = '<div style="font-size:13px;color:'+COL.red+';padding:8px 0">Не удалось сгенерировать: '+aiEntry.error+'</div>'+
+        '<button onclick="retryAiTasks_(\''+current.replace(/'/g,"\\'")+'\')" style="margin-top:6px;cursor:pointer;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:12px;color:var(--text)">Повторить</button>';
+    } else {
+      var aiTasksHtml = (aiEntry.tasks||[]).map(function(t, i){
+        return '<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
+          '<div style="font-size:13px;font-weight:700;color:'+COL.blue+';flex:none">'+(i+1)+'</div>'+
+          '<div><div style="font-size:13px;font-weight:600;color:var(--text)">'+t.title+'</div>'+
+          (t.why ? '<div style="font-size:12px;color:var(--muted);margin-top:2px">'+t.why+'</div>' : '')+
+          '</div></div>';
+      }).join('');
+      aiBody = aiTasksHtml +
+        (aiEntry.plan_advice ? '<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07);font-size:12.5px;color:var(--text)"><b>Совет по плану:</b> '+aiEntry.plan_advice+'</div>' : '');
+    }
+    html += '<div class="card" style="margin-bottom:18px;padding:16px 18px">'+
+      '<div style="font-size:14px;font-weight:600;margin-bottom:6px">🤖 Задачи на сегодня (ИИ)</div>'+aiBody+'</div>';
+  }
 
   // Широкая шкала: факт + прогноз выполнения плана + таргет по рабочим/выходным дням
   html += planProgressBar('Выполнение плана продаж', planPct, planForecastPct, fakt, planForecast, plan, dayRateHtml);

@@ -3379,6 +3379,29 @@ function doGet(e) {
       return ContentService.createTextOutput(JSON.stringify({ customers: mlcCustomers })).setMimeType(ContentService.MimeType.JSON);
     }
 
+    // 5 задач на день от ИИ (2026-08-12, см. plans/2026-08-12-ai-daily-tasks-manager.md) -
+    // кэш на календарный день (Europe/Moscow), см. generateManagerAiTasksCached_. Только для
+    // ТЕКУЩЕГО месяца - "задачи на сегодня" не имеют смысла для закрытого периода, фронтенд
+    // этот action для прошлого периода вообще не вызывает, но проверяем и тут на всякий
+    // случай. Роль logist - вне охвата v1 (Влад просил именно для менеджера).
+    if (action === 'generate_ai_tasks') {
+      if (access.role !== 'admin' && access.role !== 'manager') {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var gatManager = access.role === 'manager' ? access.name : (e.parameter.manager || '');
+      if (!gatManager) {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Не указан менеджер' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      try {
+        var gatOrders = getOrdersData(ss);
+        if (gatOrders.error) throw new Error(gatOrders.error);
+        var gatResult = generateManagerAiTasksCached_(ss, gatOrders, gatManager, null);
+        return ContentService.createTextOutput(JSON.stringify(gatResult)).setMimeType(ContentService.MimeType.JSON);
+      } catch (gatErr) {
+        return ContentService.createTextOutput(JSON.stringify({ error: gatErr.message })).setMimeType(ContentService.MimeType.JSON);
+      }
+    }
+
     // Менеджер - только его собственные данные, без доступа к остальному
     if (access.role === 'manager') {
       return ContentService
@@ -6641,6 +6664,205 @@ function computeLostCustomersForManager_(ss, monthKey, managerName, isLiveMonth)
     })
     .filter(function(c) { return c.days_since !== null && c.days_since >= 15; })
     .sort(function(a, b) { return b.amount_total - a.amount_total; });
+}
+
+// ── 5 ЗАДАЧ НА ДЕНЬ ОТ ИИ (2026-08-12, личная страница менеджера) ──────────────────────────
+// Влад: у Васина уже есть 5 задач на день по жёсткому алгоритму (см.
+// plans/2026-08-11-vasin-per-vehicle-forecast-tasks.md) - для менеджера хочет то же самое, но
+// СГЕНЕРИРОВАННОЕ ИИ (GPT-5 через kie.ai, см. plans/2026-08-12-ai-daily-tasks-manager.md) по
+// его личной ситуации: план/факт/прогноз, топ заказчиков, пропавшие клиенты, дебиторка.
+//
+// Кэш на день - reasoning-модель не мгновенная (~5-15 сек) и не бесплатная, звать её при
+// каждом открытии страницы не нужно ("раз в день" - дословно просьба Влада). Один лист
+// ИИ_Задачи_Менеджеров, одна строка на менеджера на календарный день (Europe/Moscow).
+const AI_TASKS_SHEET = 'ИИ_Задачи_Менеджеров';
+const KIE_GPT5_URL = 'https://api.kie.ai/codex/v1/responses';
+
+function ensureAiTasksSheet_(ss) {
+  let sheet = ss.getSheetByName(AI_TASKS_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(AI_TASKS_SHEET);
+    sheet.getRange(1, 1, 1, 6).setValues([['Дата', 'Менеджер', 'Задачи_JSON', 'Совет_по_плану', 'Модель', 'Сгенерировано_в']]).setFontWeight('bold');
+  }
+  return sheet;
+}
+
+// Линейный поиск строки на сегодня для этого менеджера - тот же приём, что
+// findOrCreateDebtStatusRow_ (таблица маленькая, ~1 строка/менеджер/день, скан копеечный).
+function findAiTasksCacheRow_(ss, dateKey, managerName) {
+  const sheet = ss.getSheetByName(AI_TASKS_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) return null;
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 6).getValues();
+  for (let i = 0; i < data.length; i++) {
+    const r = data[i];
+    const rDate = r[0] instanceof Date ? Utilities.formatDate(r[0], 'Europe/Moscow', 'yyyy-MM-dd') : String(r[0] || '').trim();
+    if (rDate === dateKey && String(r[1] || '').trim() === managerName) {
+      let tasks = [];
+      try { tasks = JSON.parse(r[2] || '[]'); } catch (parseErr) { tasks = []; }
+      return { tasks: tasks, plan_advice: String(r[3] || ''), model: String(r[4] || ''), generated_at: String(r[5] || '') };
+    }
+  }
+  return null;
+}
+
+function saveAiTasksCache_(ss, dateKey, managerName, tasks, planAdvice, model) {
+  const sheet = ensureAiTasksSheet_(ss);
+  const now = new Date().toISOString();
+  sheet.appendRow([dateKey, managerName, JSON.stringify(tasks), planAdvice, model, now]);
+  return now;
+}
+
+// Честный порт calcPaceRatio_ из фронтенда (files/index.html) - единственный расчёт, который
+// реально нужно дублировать для прогноза к концу месяца (остальной контекст берём из уже
+// существующих бэкенд-функций, см. план). "Живой" месяц - текущий календарный (Apps Script
+// всегда считает по актуальной дате, в отличие от фронтенда, которому нужен D.updated для
+// защиты от локальных часов пользователя).
+function calcPaceRatioServer_(period) {
+  const now = new Date();
+  const liveMonthKey = Utilities.formatDate(now, 'Europe/Moscow', 'yyyy-MM');
+  let dim, dayOfMonth;
+  if (period && period !== liveMonthKey) {
+    const p = String(period).split('-').map(Number);
+    dim = (p[0] && p[1]) ? new Date(p[0], p[1], 0).getDate() : 30;
+    dayOfMonth = dim;
+  } else {
+    dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    dayOfMonth = now.getDate();
+  }
+  return dayOfMonth > 0 ? (dim / dayOfMonth) : 1;
+}
+
+// Компактный набор фактов о менеджере для промпта ИИ - ТОЛЬКО из уже существующих бэкенд-
+// функций (не дублируем computeDebtAggregates_/фронтенд-агрегаты, достаточно топ-должников и
+// итоговых сумм для содержательного совета).
+function buildManagerAiContext_(ss, orders, managerName, period) {
+  const mgrRow = (orders.by_manager || []).filter(function(m) { return m.name === managerName; })[0] || {};
+  const plan = mgrRow.plan || 0, fakt = mgrRow.amount || 0;
+  const paceRatio = calcPaceRatioServer_(period);
+  const faktForPace = mgrRow.amount_thru_yesterday != null ? mgrRow.amount_thru_yesterday : fakt;
+  const forecast = faktForPace * paceRatio;
+
+  const myDetail = (orders.by_manager_detail || {})[managerName] || null;
+  const topCustomers = ((myDetail && myDetail.top_customers) || []).slice(0, 8)
+    .map(function(c) { return { name: c.name, amount: Math.round(c.amount || 0), orders: c.orders || 0 }; });
+  const doc = (myDetail && myDetail.doc) || {};
+
+  const monthKey = period || Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+  const isLive = !period;
+  let lostCustomers = [];
+  try {
+    lostCustomers = computeLostCustomersForManager_(ss, monthKey, managerName, isLive).slice(0, 8)
+      .map(function(c) { return { name: c.name, days_since: c.days_since, amount_total: Math.round(c.amount_total || 0) }; });
+  } catch (lostErr) { lostCustomers = []; } // не критично для остального контекста
+
+  let debtSummary = { total_balance: 0, debtor_count: 0, top_debtors: [] };
+  try {
+    const dd = getDebtData(ss);
+    if (dd && dd.by_customer) {
+      const surLower = managerName.trim().split(' ')[0].toLowerCase();
+      const mine = dd.by_customer.filter(function(c) { return String(c.manager || '').trim().split(' ')[0].toLowerCase() === surLower; });
+      debtSummary.debtor_count = mine.length;
+      debtSummary.total_balance = Math.round(mine.reduce(function(s, c) { return s + (c.balance || 0); }, 0));
+      debtSummary.top_debtors = mine.slice(0, 6)
+        .map(function(c) { return { name: c.contragent, balance: Math.round(c.balance || 0), days_overdue: c.daysOverdue }; });
+    }
+  } catch (debtErr) { /* ДЗ не критична для остального контекста */ }
+
+  return {
+    manager: managerName,
+    period: monthKey,
+    plan: { plan: Math.round(plan), fact: Math.round(fakt), pct: plan > 0 ? Math.round(fakt / plan * 100) : 0,
+      forecast: Math.round(forecast), forecast_pct: plan > 0 ? Math.round(forecast / plan * 100) : 0 },
+    top_customers: topCustomers,
+    lost_customers: lostCustomers,
+    debt: debtSummary,
+    documents: { no_waybill: (doc.no_waybill_own || 0) + (doc.no_waybill_hired || 0),
+      not_posted: doc.waybill_not_posted || 0, no_realiz: doc.posted_no_realiz || 0, complete: doc.complete || 0 },
+  };
+}
+
+function buildAiTasksPrompt_(managerName, context) {
+  return 'Ты - ассистент коммерческого директора транспортно-логистической компании ' +
+    '(перевозки тралами и длинномерами). Ниже - реальные данные по одному менеджеру за ' +
+    'текущий месяц в формате JSON. На их основе сформулируй РОВНО 5 конкретных задач на ' +
+    'сегодня для этого менеджера и короткий совет, как выполнить план продаж.\n\n' +
+    'Данные:\n' + JSON.stringify(context, null, 0) + '\n\n' +
+    'Требования к ответу:\n' +
+    '- Ответь СТРОГО валидным JSON без markdown-обёртки (без ```), без текста до/после.\n' +
+    '- Формат: {"tasks":[{"title":"...","why":"..."},... ровно 5 штук],"plan_advice":"..."}\n' +
+    '- "title" - короткая формулировка задачи (до 80 символов), "why" - 1 фраза, почему это ' +
+    'важно, со ссылкой на конкретную цифру из данных (сумма, дни, имя клиента).\n' +
+    '- "plan_advice" - 2-4 предложения, как реалистично выполнить план, с опорой на ' +
+    'переданные цифры (план/факт/прогноз, сколько осталось).\n' +
+    '- Задачи должны быть РАЗНЫЕ по теме (не 5 вариаций одного и того же) и опираться ТОЛЬКО ' +
+    'на переданные данные, не выдумывай факты, которых нет в JSON.\n' +
+    '- Пиши по-русски, обращение на "ты", по-деловому, без длинного тире (используй обычный ' +
+    'дефис), без канцелярита и воды.';
+}
+
+// POST https://api.kie.ai/codex/v1/responses - reasoning-модель (см. reference-память
+// kie.ai - "у каждой модели свой URL/формат", этот путь для GPT-5). Ключ - только из Script
+// Properties, никогда не в коде (правило репозитория).
+function callKieGpt5_(promptText) {
+  const key = PropertiesService.getScriptProperties().getProperty('KIE_API_KEY');
+  if (!key) throw new Error('KIE_API_KEY не настроен в Script Properties - добавь вручную в редакторе Apps Script (Настройки проекта -> Свойства скрипта)');
+  const payload = {
+    model: 'gpt-5-4',
+    stream: false,
+    input: [{ role: 'user', content: [{ type: 'input_text', text: promptText }] }],
+    reasoning: { effort: 'medium' },
+  };
+  const resp = UrlFetchApp.fetch(KIE_GPT5_URL, {
+    method: 'post',
+    contentType: 'application/json',
+    headers: { Authorization: 'Bearer ' + key },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true,
+  });
+  const code = resp.getResponseCode();
+  const body = resp.getContentText();
+  if (code !== 200) throw new Error('kie.ai HTTP ' + code + ': ' + body.slice(0, 400));
+  let data;
+  try { data = JSON.parse(body); } catch (parseErr) { throw new Error('kie.ai вернул не-JSON: ' + body.slice(0, 400)); }
+  let text = '';
+  (data.output || []).forEach(function(o) {
+    (o.content || []).forEach(function(c) { if (c.text) text += c.text; });
+  });
+  if (!text) throw new Error('kie.ai вернул пустой ответ - формат мог измениться, см. raw: ' + body.slice(0, 400));
+  return text;
+}
+
+// Защитный парсинг - модель иногда всё равно оборачивает ответ в ```json fences вопреки
+// инструкции, снимаем их перед JSON.parse. Обрезаем/не роняем весь ответ, если задач не ровно 5
+// (лучше показать 3-4 реальные задачи, чем упасть с ошибкой).
+function parseAiTasksResponse_(rawText) {
+  let cleaned = String(rawText || '').trim();
+  if (cleaned.indexOf('```') === 0) {
+    cleaned = cleaned.replace(/^```[a-zA-Z]*\n?/, '').replace(/```\s*$/, '').trim();
+  }
+  let data;
+  try { data = JSON.parse(cleaned); } catch (parseErr) { throw new Error('Не удалось разобрать ответ ИИ как JSON: ' + cleaned.slice(0, 300)); }
+  if (!data || !Array.isArray(data.tasks) || !data.tasks.length) throw new Error('Ответ ИИ не содержит списка задач');
+  const tasks = data.tasks.slice(0, 5).map(function(t) {
+    return { title: String((t && t.title) || '').trim(), why: String((t && t.why) || '').trim() };
+  }).filter(function(t) { return t.title; });
+  if (!tasks.length) throw new Error('Ответ ИИ не содержит валидных задач');
+  return { tasks: tasks, plan_advice: String(data.plan_advice || '').trim() };
+}
+
+// Оркестратор - кэш на день, иначе генерация + сохранение. Ошибки НЕ кэшируются (можно
+// повторить в тот же день - см. план, риск "формат ответа kie.ai не проверен вживую").
+function generateManagerAiTasksCached_(ss, orders, managerName, period) {
+  const dateKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM-dd');
+  const cached = findAiTasksCacheRow_(ss, dateKey, managerName);
+  if (cached) return { tasks: cached.tasks, plan_advice: cached.plan_advice, generated_at: cached.generated_at, cached: true };
+
+  const context = buildManagerAiContext_(ss, orders, managerName, period);
+  const prompt = buildAiTasksPrompt_(managerName, context);
+  const rawText = callKieGpt5_(prompt);
+  const parsed = parseAiTasksResponse_(rawText);
+  const generatedAt = saveAiTasksCache_(ss, dateKey, managerName, parsed.tasks, parsed.plan_advice, 'gpt-5-4');
+  return { tasks: parsed.tasks, plan_advice: parsed.plan_advice, generated_at: generatedAt, cached: false };
 }
 
 // ── ПЛАНЫ МЕНЕДЖЕРОВ (лист "Планы_менеджеров", Влад вводит вручную каждый месяц) ──

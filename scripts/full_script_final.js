@@ -2856,8 +2856,9 @@ function getAccessRole_(ss, email) {
 // данным других людей и компании в целом. orders - уже загруженный результат getOrdersData
 // (текущий месяц) ИЛИ getOrdersDataForPeriod (2026-08-11, выбор периода на личной странице -
 // "текущий/прошлый месяц" - вынесено в отдельную функцию, чтобы не дублировать фильтрацию
-// между getManagerView_ (текущий месяц) и getManagerViewForPeriod_ (архив) ниже).
-function buildManagerView_(orders, managerName) {
+// между getManagerView_ (текущий месяц) и getManagerViewForPeriod_ (архив) ниже). ss/period
+// (2026-08-12) - опциональны, нужны только чтобы приложить ДЗ этого менеджера (см. ниже).
+function buildManagerView_(orders, managerName, ss, period) {
   if (orders.error) return { error: orders.error };
 
   const myDetail = (orders.by_manager_detail || {})[managerName] || null;
@@ -2869,7 +2870,7 @@ function buildManagerView_(orders, managerName) {
   const detailWrapped = {};
   if (myDetail) detailWrapped[managerName] = myDetail;
 
-  return {
+  const result = {
     updated: new Date().toISOString(),
     role: 'manager',
     managerName: managerName,
@@ -2881,9 +2882,27 @@ function buildManagerView_(orders, managerName) {
       by_manager_detail: detailWrapped,
     },
   };
+
+  // ДЗ, отфильтрованная на этого менеджера (2026-08-12, личная страница - вкладка
+  // "Дебиторская задолженность", то же ядро computeDebtAggregates_/debtDeadAndStatus_, что
+  // общая ДЗ на фронтенде). Приватность - другие менеджеры не видны, только свои должники.
+  // ДЗ всегда "живая" (последний снимок 1С), не зависит от выбранного периода продаж.
+  if (ss) {
+    const dd = getDebtData(ss);
+    if (dd && dd.by_customer) {
+      const surLower = String(managerName || '').trim().split(' ')[0].toLowerCase();
+      result.debt = {
+        by_customer: dd.by_customer.filter(function(c) {
+          return String(c.manager || '').trim().split(' ')[0].toLowerCase() === surLower;
+        }),
+      };
+    }
+  }
+
+  return result;
 }
-function getManagerView_(ss, managerName) { return buildManagerView_(getOrdersData(ss), managerName); }
-function getManagerViewForPeriod_(ss, managerName, period) { return buildManagerView_(getOrdersDataForPeriod(ss, period), managerName); }
+function getManagerView_(ss, managerName) { return buildManagerView_(getOrdersData(ss), managerName, ss, null); }
+function getManagerViewForPeriod_(ss, managerName, period) { return buildManagerView_(getOrdersDataForPeriod(ss, period), managerName, ss, period); }
 
 function isVasinName_(name) {
   return (name||'').trim().split(' ')[0].toLowerCase() === 'васин';
@@ -3331,6 +3350,27 @@ function doGet(e) {
         return ContentService.createTextOutput(JSON.stringify({ error: 'Некорректный период' })).setMimeType(ContentService.MimeType.JSON);
       }
       return ContentService.createTextOutput(JSON.stringify(getLongHaulDetail_(ss, lhdPeriod))).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // Пропавшие клиенты менеджера за 3 месяца (2026-08-12, вкладка "Пропавшие клиенты" на
+    // личной странице) - лениво, по клику на вкладку (не на каждой загрузке страницы, тяжёлая
+    // операция - читает 3 архивных листа). admin может запросить любого менеджера параметром,
+    // роль manager - только себя (access.name, параметр manager игнорируется).
+    if (action === 'manager_lost_customers') {
+      if (access.role !== 'admin' && access.role !== 'manager') {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var mlcManager = access.role === 'manager' ? access.name : (e.parameter.manager || '');
+      if (!mlcManager) {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Не указан менеджер' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var mlcPeriod = e.parameter.period || '';
+      if (mlcPeriod && !/^\d{4}-\d{2}$/.test(mlcPeriod)) {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Некорректный период' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var mlcMonthKey = mlcPeriod || Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+      var mlcCustomers = computeLostCustomersForManager_(ss, mlcMonthKey, mlcManager, !mlcPeriod);
+      return ContentService.createTextOutput(JSON.stringify({ customers: mlcCustomers })).setMimeType(ContentService.MimeType.JSON);
     }
 
     // Менеджер - только его собственные данные, без доступа к остальному
@@ -6530,6 +6570,71 @@ function computeLostCustomers_(ss, currentRows, monthKey) {
     .filter(function(c) { return c.days_since !== null && c.days_since >= 15; })
     .sort(function(a, b) { return b.days_since - a.days_since; })
     .slice(0, 40);
+}
+
+// Строки заказов за месяц в формате, который ожидает aggregateOrdersRows/computeLostCustomers_
+// (C-карта: customer:9, date_s:2, internal:13, mgr_s:15, amount:30) - живой месяц (Заказы_данные)
+// уже в этом формате, архивные листы ("Заказы_YYYY-MM") нужно нормализовать через
+// parseOrdersRawRows (тот же приём, что getOrdersData/getOrdersDataForPeriod).
+function readOrdersRowsForMonth_(ss, monthKey, isLiveMonth) {
+  if (isLiveMonth) {
+    var norm = ss.getSheetByName(ORDERS_NORM_SHEET);
+    if (!norm || norm.getLastRow() < 2) return [];
+    return norm.getRange(2, 1, norm.getLastRow() - 1, 44).getValues();
+  }
+  var sheet = ss.getSheetByName(ORDERS_ARCHIVE_PFX + monthKey);
+  if (!sheet || sheet.getLastRow() < 5) return [];
+  return parseOrdersRawRows(sheet.getDataRange().getValues()).rows;
+}
+
+// Пропавшие клиенты - ЛИЧНАЯ версия для страницы менеджера (2026-08-12, Влад: "все кто
+// заказывал у нас последние три месяца и не заказывал больше двух недель, приоритет по
+// объёму выручки от большего к меньшему"). В отличие от company-wide computeLostCustomers_
+// выше (2 месяца, сортировка по дням, топ-40, БЕЗ фильтра по менеджеру) - тут 3 месяца
+// (monthKey + 2 предыдущих), отфильтровано на ОДНОГО менеджера (по фамилии - первое слово
+// mgr_s), сортировка по выручке. monthKey - месяц-якорь ('YYYY-MM'), isLiveMonth - true, если
+// monthKey это текущий календарный месяц (тогда читаем живой лист, не архив).
+function computeLostCustomersForManager_(ss, monthKey, managerName, isLiveMonth) {
+  const custMap = {};
+  const surLower = String(managerName || '').trim().split(' ')[0].toLowerCase();
+
+  function ingest(rows) {
+    rows.forEach(function(row) {
+      if (String(row[13] || '').trim() === 'Да') return; // внутренние перевозки не считаем
+      const mgrSur = String(row[15] || '').trim().split(' ')[0].toLowerCase();
+      if (mgrSur !== surLower) return; // только заказы ЭТОГО менеджера
+      const cust = String(row[9] || '').trim();
+      if (!cust) return;
+      const rawDate = row[2];
+      const dateStr = rawDate instanceof Date
+        ? Utilities.formatDate(rawDate, 'Europe/Moscow', 'yyyy-MM-dd')
+        : String(rawDate || '').trim();
+      if (!custMap[cust]) custMap[cust] = { name: cust, last_date: '', orders_total: 0, amount_total: 0 };
+      const c = custMap[cust];
+      c.orders_total++;
+      c.amount_total += ordParseNum(row[30]);
+      if (dateStr && dateStr > c.last_date) c.last_date = dateStr;
+    });
+  }
+
+  ingest(readOrdersRowsForMonth_(ss, monthKey, isLiveMonth));
+  const parts = String(monthKey || '').split('-');
+  let py = parseInt(parts[0], 10), pm = parseInt(parts[1], 10);
+  for (let i = 0; i < 2; i++) { // ещё 2 предыдущих месяца (+ monthKey = 3 всего)
+    pm -= 1;
+    if (pm < 1) { pm = 12; py -= 1; }
+    const pk = py + '-' + String(pm).padStart(2, '0');
+    ingest(readOrdersRowsForMonth_(ss, pk, false));
+  }
+
+  const today = new Date();
+  return Object.values(custMap)
+    .map(function(c) {
+      const days = c.last_date ? Math.floor((today - new Date(c.last_date)) / 86400000) : null;
+      return { name: c.name, last_date: c.last_date, days_since: days, orders_total: c.orders_total, amount_total: c.amount_total };
+    })
+    .filter(function(c) { return c.days_since !== null && c.days_since >= 15; })
+    .sort(function(a, b) { return b.amount_total - a.amount_total; });
 }
 
 // ── ПЛАНЫ МЕНЕДЖЕРОВ (лист "Планы_менеджеров", Влад вводит вручную каждый месяц) ──

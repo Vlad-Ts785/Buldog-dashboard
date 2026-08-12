@@ -1433,6 +1433,47 @@ function renderMyPage() {
   }
 }
 
+// Соотношение выходной/будний день по выручке - эмпирика из company-wide D.orders.by_day
+// (2026-08-12, для расчёта "сколько нужно делать в рабочий/выходной день, чтобы догнать
+// план" на личной странице менеджера - "в выходной объём падает", не поровну). Дефолт 0.5,
+// если данных мало (начало месяца) - на реальных данных пересчитывается каждый рендер.
+function weekendRatio_() {
+  var byDay = (D.orders && D.orders.by_day) || [];
+  var wdSum=0, wdCnt=0, weSum=0, weCnt=0;
+  byDay.forEach(function(dd){
+    var dt = new Date(dd.date);
+    if (isNaN(dt.getTime())) return;
+    if (dt.getDay()===0 || dt.getDay()===6) { weSum += dd.amount||0; weCnt++; }
+    else { wdSum += dd.amount||0; wdCnt++; }
+  });
+  if (wdCnt===0 || wdSum<=0) return 0.5;
+  var wdAvg = wdSum/wdCnt, weAvg = weCnt>0 ? weSum/weCnt : wdAvg*0.5;
+  return Math.max(0.1, Math.min(1, weAvg/wdAvg));
+}
+// Тот же признак "текущий календарный месяц", что уже использует calcPaceRatio_() -
+// расчёт таргета по дням имеет смысл только для месяца, который ещё идёт.
+function isLiveMonthKey_(period) {
+  var dt = D && D.updated ? new Date(D.updated) : new Date();
+  dt.setDate(dt.getDate()-1);
+  var liveKey = dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0');
+  return !period || period === liveKey;
+}
+
+// Вкладки нового блока личной страницы менеджера (2026-08-12, по образцу "Обзор заказов").
+let myPageMgrTab = 'top'; // 'top' | 'lost' | 'debt' | 'docs'
+function setMyPageMgrTab(tab) { myPageMgrTab = tab; renderMyPage(); }
+// "Пропавшие клиенты" за 3 месяца - лениво, по клику на вкладку (не на каждой загрузке
+// страницы - тяжёлая операция на бэкенде, читает 3 архивных листа).
+let mgrLostCache = {};     // 'ФИО::период' -> { data:[...] } | { error:'...' }
+let mgrLostLoading = false;
+// Фильтры вкладки "Дебиторская задолженность" - по корзине дней (общее ядро с global ДЗ,
+// см. debtInBucket_) и по минимальной сумме долга (2026-08-12, новое - в global ДЗ такого
+// явного фильтра нет).
+let mgrDebtBucket = '';
+let mgrDebtMinAmount = 0;
+function setMgrDebtBucket(b) { mgrDebtBucket = (mgrDebtBucket===b?'':b); renderMyPage(); }
+function setMgrDebtMinAmount(v) { mgrDebtMinAmount = parseFloat(v)||0; renderMyPage(); }
+
 function renderMyPageManager(el, current, selectorHtml, d) {
   if (!d) { el.innerHTML = selectorHtml + '<p style="color:var(--muted);padding:16px">Нет данных за этот месяц.</p>'; return; }
 
@@ -1453,24 +1494,7 @@ function renderMyPageManager(el, current, selectorHtml, d) {
     return '<div class="card" style="margin-bottom:14px;padding:16px 18px">'+
       '<div style="font-size:14px;font-weight:600;margin-bottom:8px">'+title+'</div>'+bodyHtml+'</div>';
   }
-  function kpiCard(icon, label, value, sub, pctVal, color, extraHtml) {
-    var h = '<div class="card" style="padding:16px 18px;border-left:3px solid '+color+'">';
-    h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">';
-    h += '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">'+icon+' '+label+'</div>';
-    if (pctVal !== null) h += '<div style="font-size:13px;font-weight:700;color:'+color+'">'+Math.round(pctVal)+'%</div>';
-    h += '</div>';
-    h += '<div style="font-size:24px;font-weight:700;color:var(--text);line-height:1.1">'+value+'</div>';
-    h += '<div style="font-size:11px;color:var(--muted);margin-top:4px">'+sub+'</div>';
-    if (pctVal !== null) {
-      var barW = Math.min(Math.max(pctVal,0),100);
-      h += '<div style="height:6px;border-radius:3px;background:rgba(255,255,255,.08);margin-top:10px;overflow:hidden">'+
-           '<div style="width:'+barW+'%;height:100%;background:'+color+';border-radius:3px;transition:width .4s"></div></div>';
-    }
-    if (extraHtml) h += extraHtml;
-    return h + '</div>';
-  }
-
-  function planProgressBar(label, factPct, forecastPct, factVal, forecastVal, planVal) {
+  function planProgressBar(label, factPct, forecastPct, factVal, forecastVal, planVal, extraHtml) {
     var color = factPct>=80?COL.green:factPct>=50?COL.amber:COL.red;
     var statusText, statusColor;
     if (forecastPct >= 105) { statusText = 'Идём с опережением плана'; statusColor = COL.green; }
@@ -1492,7 +1516,9 @@ function renderMyPageManager(el, current, selectorHtml, d) {
     h += '<span>Факт: <b style="color:var(--text)">'+mln(factVal)+'</b> ('+Math.round(factPct)+'%)</span>';
     h += '<span>Прогноз к концу месяца: <b style="color:var(--text)">'+mln(forecastVal)+'</b> ('+Math.round(forecastPct)+'%)</span>';
     h += '<span>План: <b style="color:var(--text)">'+mln(planVal)+'</b></span>';
-    h += '</div></div>';
+    h += '</div>';
+    if (extraHtml) h += extraHtml;
+    h += '</div>';
     return h;
   }
 
@@ -1510,11 +1536,40 @@ function renderMyPageManager(el, current, selectorHtml, d) {
   var planForecast = faktForPace * paceRatio;
   var planForecastPct = plan > 0 ? planForecast/plan*100 : 0;
 
-  var doc = d.doc || {};
-  var docStuck = (doc.no_waybill_own||0)+(doc.no_waybill_hired||0)+(doc.waybill_not_posted||0)+(doc.posted_no_realiz||0);
-  var docTotal = docStuck + (doc.complete||0);
+  // "Сколько нужно делать в рабочий/выходной день, чтобы догнать план" (Влад, 2026-08-12) -
+  // остаток (план-факт) делится на оставшиеся дни месяца с весом на выходные (в выходной
+  // объём падает, не поровну - эмпирика из company-wide weekendRatio_()). Только для ТЕКУЩЕГО
+  // месяца - для закрытого прошлого периода "оставшихся дней" не существует.
+  var dayRateHtml = '';
+  if (isLiveMonthKey_(D.orders.period)) {
+    var remaining = plan - fakt;
+    if (remaining > 0) {
+      var nowD = new Date();
+      var daysInMonth = new Date(nowD.getFullYear(), nowD.getMonth()+1, 0).getDate();
+      var remWorkdays=0, remWeekends=0;
+      for (var dnum=nowD.getDate()+1; dnum<=daysInMonth; dnum++) {
+        var dow = new Date(nowD.getFullYear(), nowD.getMonth(), dnum).getDay();
+        if (dow===0||dow===6) remWeekends++; else remWorkdays++;
+      }
+      var wRatio = weekendRatio_();
+      var denom = remWorkdays + remWeekends*wRatio;
+      if (denom > 0) {
+        var perWorkday = remaining/denom;
+        var perWeekend = perWorkday*wRatio;
+        dayRateHtml = '<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07);font-size:12px;color:var(--muted)">'+
+          'Чтобы догнать план, нужно делать в среднем: <b style="color:var(--text)">'+mln(perWorkday)+'</b> в рабочий день'+
+          (remWeekends>0 ? ' и <b style="color:var(--text)">'+mln(perWeekend)+'</b> в выходной (объём в выходной ниже)' : '')+
+          ' <span style="opacity:.7">(осталось '+remWorkdays+' раб. + '+remWeekends+' вых. дней)</span>'+
+        '</div>';
+      }
+    } else {
+      dayRateHtml = '<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07);font-size:12px;color:'+COL.green+'">План уже выполнен ✅</div>';
+    }
+  }
 
-  // Заработал - та же формула, что на вкладке "Зарплата"
+  var doc = d.doc || {};
+
+  // Зарплата - та же формула, что на вкладке "Зарплата" (calcMgr)
   var allMgrs = D.orders.by_manager || [], allLogs = D.orders.by_logist || [];
   var mgrIdx = {}; allMgrs.forEach(function(m){ mgrIdx[(m.name||'').trim().split(' ')[0].toLowerCase()] = m; });
   var logIdx = {}; allLogs.forEach(function(l){ logIdx[(l.name||'').trim().split(' ')[0].toLowerCase()] = l; });
@@ -1523,185 +1578,170 @@ function renderMyPageManager(el, current, selectorHtml, d) {
   var sur = current.trim().split(' ')[0];
   var useNewRules = isNewRulesPeriod(D.orders.period);
   var sal = calcMgr(sur, true, getM, getL, useNewRules);
-  var earned = sal ? sal.total_sal : 0;
-  var earnedSub = sal ? ('оклад '+mln(sal.oklad)+' + комиссия '+mln(sal.ownComm + sal.hiredBonus + sal.bonus15m)) : 'нет данных по выручке';
 
-  // Прогноз зарплаты - тот же calcMgr, но на масштабированных по темпу цифрах (без дублирования формулы)
-  var mReal = getM(sur);
-  function getMForecast() {
-    if (!mReal) return null;
-    var f = {};
-    for (var k in mReal) f[k] = mReal[k];
-    ['amount','own_amount','hired_margin_qualified','hired_margin_unqualified','profit','hired_cost','internal_amount']
-      .forEach(function(k){ f[k] = (mReal[k]||0) * paceRatio; });
-    return f;
+  function fr(n) { return n ? Math.round(n).toLocaleString('ru-RU')+' ₽' : '—'; }
+  function salRow(label, val) {
+    return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
+      '<span style="font-size:13px;color:var(--muted)">'+label+'</span>'+
+      '<span style="font-size:13px;font-weight:600">'+fr(val)+'</span></div>';
   }
-  var salForecast = mReal ? calcMgr(sur, true, getMForecast, getL, useNewRules) : null;
-  var earnedForecast = salForecast ? salForecast.total_sal : earned;
-  var earnedDiff = earnedForecast - earned;
-
-  // Ступени оклада - для прогресса "до следующей ступени"
-  var OKLAD_TIERS = [
-    {rev:0, oklad:0}, {rev:2000000, oklad:30000}, {rev:5000000, oklad:50000},
-    {rev:8000000, oklad:100000}, {rev:10000000, oklad:150000}
-  ];
-  function tierInfo(rev) {
-    var cur = OKLAD_TIERS[0], next = null;
-    for (var i=0;i<OKLAD_TIERS.length;i++){
-      if (rev >= OKLAD_TIERS[i].rev) cur = OKLAD_TIERS[i];
-      else { next = OKLAD_TIERS[i]; break; }
+  function salTotalRow(val) {
+    return '<div style="display:flex;justify-content:space-between;padding-top:10px;margin-top:4px;border-top:1px solid var(--border)">'+
+      '<span style="font-size:14px;font-weight:700">Итого</span>'+
+      '<span style="font-size:16px;font-weight:700;color:'+COL.green+'">'+fr(val)+'</span></div>';
+  }
+  // Расчёт зарплаты - "такой же длинный", прямо с вкладки "Зарплата" (Влад, 2026-08-12) - те
+  // же компоненты calcMgr, в стиле строка-значение (как у остальных личных страниц), а не
+  // многоколоночной таблицей отдела - тут один человек, таблица на весь отдел избыточна.
+  var salaryBody;
+  if (!sal) {
+    salaryBody = '<div style="font-size:13px;color:var(--muted)">Нет данных для расчёта за этот период.</div>';
+  } else if (sal.newRules) {
+    var srows = salRow('Оклад (по ступени оборота '+mln(sal.total)+')', sal.oklad);
+    var ownCost = sal.ownRev - sal.ownProfitBase;
+    srows += salRow('Комиссия своего парка ('+(sal.rate*100).toString().replace('.',',')+'% × '+fr(sal.ownProfitBase)+
+      (ownCost>1 ? ', база = выручка '+fr(sal.ownRev)+' минус затраты '+fr(ownCost) : '')+')', sal.ownComm);
+    if (sal.hiredMargin || sal.hiredMarginUnqual) {
+      var hParts = [];
+      if (sal.hiredMargin) hParts.push(fr(sal.hiredMargin)+' маржа ≥23% (8%)');
+      if (sal.hiredMarginUnqual) hParts.push(fr(sal.hiredMarginUnqual)+' маржа &lt;23% (0%)');
+      srows += salRow('Бонус с маржи найма ('+hParts.join(' + ')+')', sal.hiredBonus);
     }
-    return {cur:cur, next:next};
-  }
-  var salRevenue = sal ? sal.total : 0;
-  var tier = tierInfo(salRevenue);
-  var tierGapHtml;
-  if (tier.next) {
-    var tierGap = tier.next.rev - salRevenue;
-    var tierSpan = tier.next.rev - tier.cur.rev;
-    var tierProg = tierSpan>0 ? Math.max(0,Math.min(100,(salRevenue-tier.cur.rev)/tierSpan*100)) : 100;
-    tierGapHtml = '<div style="margin-top:10px">'+
-      '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:4px">'+
-      '<span>До следующей ступени оклада</span><span style="color:var(--text);font-weight:600">'+mln(tierGap)+'</span></div>'+
-      '<div style="height:5px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden">'+
-      '<div style="height:100%;border-radius:3px;background:'+COL.blue+';width:'+tierProg+'%"></div></div></div>';
+    if (sal.bonus15m) srows += salRow('Премия за оборот &gt;15М', sal.bonus15m);
+    salaryBody = srows + salTotalRow(sal.total_sal);
   } else {
-    tierGapHtml = '<div style="margin-top:10px;font-size:10px;color:var(--muted)">Достигнута верхняя ступень оклада ('+mln(tier.cur.oklad)+')</div>';
+    var srows2 = salRow('Оклад', sal.oklad);
+    srows2 += salRow('Комиссия своего парка ('+(sal.rate*100).toString().replace('.',',')+'% × '+fr(sal.ownRev)+')', sal.ownComm);
+    if (sal.isPrus) {
+      srows2 += salRow('Найм ('+Math.round((sal.prusHiredPct||0)*100)+'% от '+fr(sal.hiredMargin)+')', sal.hiredBonus);
+    } else if (sal.logPart || sal.nonLogPart) {
+      var lParts = [];
+      if (sal.logPart) lParts.push(fr(sal.logPart)+' как логист (10%)');
+      if (sal.nonLogPart) lParts.push(fr(sal.nonLogPart)+' логист другой (5%)');
+      srows2 += salRow('Бонус с маржи найма ('+lParts.join(' + ')+')', sal.hiredBonus);
+    }
+    if (sal.bonus15m) srows2 += salRow('Премия за оборот &gt;15М', sal.bonus15m);
+    salaryBody = srows2 + salTotalRow(sal.total_sal);
   }
-  var earnedDiffSign = earnedDiff >= 0 ? '+' : '';
-  var forecastHtml = '<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07);display:flex;justify-content:space-between;align-items:baseline">'+
-    '<span style="font-size:10px;color:var(--muted)">Прогноз к концу месяца</span>'+
-    '<span style="font-size:13px;font-weight:700;color:'+(earnedDiff>=0?COL.green:COL.red)+'">'+mln(earnedForecast)+' '+(earnedDiff>=0?'↑':'↓')+' '+earnedDiffSign+mln(earnedDiff)+'</span></div>';
-
-  // Карточка "Документы" - сегментированная полоса + точные цифры по каждой стадии
-  function miniBarRow(color, label, count) {
-    return '<div style="display:flex;justify-content:space-between;font-size:10.5px">'+
-      '<span style="display:flex;align-items:center;gap:5px;color:var(--muted)"><span style="width:7px;height:7px;border-radius:2px;background:'+color+';display:inline-block"></span>'+label+'</span>'+
-      '<span style="font-weight:600;color:var(--text)">'+count+'</span></div>';
-  }
-  var noWaybillCnt = (doc.no_waybill_own||0)+(doc.no_waybill_hired||0);
-  var notPostedCnt = doc.waybill_not_posted||0;
-  var notClosedCnt = doc.posted_no_realiz||0;
-  var completeCnt  = doc.complete||0;
-  var docAmber2 = '#BA7517';
-  function segPct(n) { return docTotal>0 ? Math.max(0, n/docTotal*100) : 0; }
-
-  var docsCardHtml = '<div class="card" style="padding:14px 16px;border-left:3px solid '+COL.blue+'">';
-  docsCardHtml += '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">📋 Документы</div>';
-  docsCardHtml += '<div style="font-size:21px;font-weight:700;color:var(--text)">'+completeCnt+' из '+docTotal+'</div>';
-  docsCardHtml += '<div style="height:6px;border-radius:3px;background:rgba(255,255,255,.08);margin-top:8px;overflow:hidden;display:flex">';
-  docsCardHtml += '<div style="width:'+segPct(noWaybillCnt)+'%;height:100%;background:'+COL.red+'"></div>';
-  docsCardHtml += '<div style="width:'+segPct(notPostedCnt)+'%;height:100%;background:'+COL.amber+'"></div>';
-  docsCardHtml += '<div style="width:'+segPct(notClosedCnt)+'%;height:100%;background:'+docAmber2+'"></div>';
-  docsCardHtml += '<div style="width:'+segPct(completeCnt)+'%;height:100%;background:'+COL.green+'"></div>';
-  docsCardHtml += '</div>';
-  docsCardHtml += '<div style="margin-top:9px;display:flex;flex-direction:column;gap:3px">';
-  docsCardHtml += miniBarRow(COL.red, 'Нет путёвки', noWaybillCnt);
-  docsCardHtml += miniBarRow(COL.amber, 'Не проведено', notPostedCnt);
-  docsCardHtml += miniBarRow(docAmber2, 'Не закрыта', notClosedCnt);
-  docsCardHtml += '</div></div>';
-
-  // Карточка "Дебиторка" - сумма + доля от выставленного + крупнейший должник
-  var debtors = d.debtors || [];
-  var debtTotal = debtors.reduce(function(s,c){ return s+(c.unpaid||0); }, 0);
-  var debtPct = fakt > 0 ? Math.min(100, debtTotal/fakt*100) : 0;
-  var debtTop = debtors[0];
-  var debtSub = debtors.length
-    ? (debtors.length+' '+(debtors.length===1?'клиент':'клиента')+(debtTop ? ' · крупнейший '+mln(debtTop.unpaid) : ''))
-    : 'Долгов нет';
-
-  var debtCardHtml = '<div class="card" style="padding:14px 16px;border-left:3px solid '+COL.red+'">';
-  debtCardHtml += '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">💸 Дебиторка</div>';
-  debtCardHtml += '<div style="font-size:21px;font-weight:700;color:var(--text)">'+mln(debtTotal)+'</div>';
-  if (debtTotal > 0) {
-    debtCardHtml += '<div style="height:6px;border-radius:3px;background:rgba(255,255,255,.08);margin-top:8px;overflow:hidden">'+
-      '<div style="width:'+debtPct+'%;height:100%;background:'+COL.red+'"></div></div>';
-  }
-  debtCardHtml += '<div style="font-size:10px;color:var(--muted);margin-top:6px">'+debtSub+'</div></div>';
-
-  // Карточка "Заказы по технике" - две шкалы: тралы и длинномеры
-  var tralCnt = d.tral_orders || 0;
-  var longCnt = d.long_orders || 0;
-  var maxEquip = Math.max(tralCnt, longCnt, 1);
-  function equipBarRow(label, count, color) {
-    var w = Math.round(count/maxEquip*100);
-    return '<div style="margin-bottom:7px">'+
-      '<div style="display:flex;justify-content:space-between;font-size:10.5px;margin-bottom:3px">'+
-      '<span style="color:var(--muted)">'+label+'</span><span style="font-weight:600;color:var(--text)">'+count+'</span></div>'+
-      '<div style="height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden">'+
-      '<div style="width:'+w+'%;height:100%;background:'+color+'"></div></div></div>';
-  }
-  var equipCardHtml = '<div class="card" style="padding:14px 16px;border-left:3px solid '+COL.blue+'">';
-  equipCardHtml += '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">🚛 Заказы по технике</div>';
-  equipCardHtml += equipBarRow('Тралы', tralCnt, COL.blue);
-  equipCardHtml += equipBarRow('Длинномеры', longCnt, '#8B5CF6');
-  equipCardHtml += '</div>';
-
-  // Большой блок "Дебиторская задолженность" - по контрагенту, со сроком от первого
-  // неоплаченного заказа
-  function daysWord(n) {
-    var n10 = n % 10, n100 = n % 100;
-    if (n100 >= 11 && n100 <= 14) return 'дней';
-    if (n10 === 1) return 'день';
-    if (n10 >= 2 && n10 <= 4) return 'дня';
-    return 'дней';
-  }
-  var todayDate = new Date();
-  function daysSince(dateStr) {
-    if (!dateStr) return null;
-    return Math.max(0, Math.floor((todayDate - new Date(dateStr)) / 86400000));
-  }
-  function debtRow(c) {
-    var days = daysSince(c.first_unpaid_date);
-    var ageColor = days===null ? 'var(--muted)' : days>=30?COL.red:days>=14?COL.amber:COL.green;
-    var ageLabel = days===null ? 'дата неизвестна' : (days===0 ? 'сегодня' : days+' '+daysWord(days));
-    return '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
-      '<div style="flex:1;min-width:0">'+
-        '<div style="font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+c.name+'</div>'+
-        '<div style="font-size:11px;color:'+ageColor+';margin-top:2px">просрочка '+ageLabel+(c.first_unpaid_date?' · с '+c.first_unpaid_date:'')+'</div>'+
-      '</div>'+
-      '<div style="font-size:14px;font-weight:700;color:'+COL.red+';white-space:nowrap">'+mln(c.unpaid)+'</div>'+
-    '</div>';
-  }
-  var debtBlockHtml = '<div class="card" style="margin-bottom:14px;padding:16px 18px">';
-  debtBlockHtml += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">';
-  debtBlockHtml += '<span style="font-size:14px;font-weight:600">💸 Дебиторская задолженность</span>';
-  debtBlockHtml += '<span style="font-size:15px;font-weight:700;color:'+COL.red+'">'+mln(debtTotal)+'</span></div>';
-  debtBlockHtml += '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Срок считается от даты первого неоплаченного заказа по контрагенту</div>';
-  debtBlockHtml += debtors.length ? debtors.map(debtRow).join('') : '<div style="font-size:13px;color:var(--muted);padding:8px 0">Долгов нет</div>';
-  debtBlockHtml += '</div>';
 
   var html = selectorHtml;
 
-  // Широкая шкала: факт + прогноз выполнения плана
-  html += planProgressBar('Выполнение плана продаж', planPct, planForecastPct, fakt, planForecast, plan);
+  // Широкая шкала: факт + прогноз выполнения плана + таргет по рабочим/выходным дням
+  html += planProgressBar('Выполнение плана продаж', planPct, planForecastPct, fakt, planForecast, plan, dayRateHtml);
 
-  // 4 одинаковых блока в ряд: Заработал / Документы / Дебиторка (кратко) / Заказы по технике
-  html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px">';
-  html += kpiCard('💰', 'Заработал сейчас', mln(earned), earnedSub, null, COL.green, tierGapHtml + forecastHtml);
-  html += docsCardHtml;
-  html += debtCardHtml;
-  html += equipCardHtml;
-  html += '</div>';
+  // Расчёт зарплаты - сразу после плана (Влад, 2026-08-12: "сразу после 4 блоков с
+  // информацией" - тут блоков-KPI больше нет вовсе, зарплата идёт вторым блоком).
+  html += block('💰 Расчёт зарплаты', salaryBody);
 
-  // Дебиторская задолженность - детально по контрагентам, со сроком просрочки
-  html += debtBlockHtml;
+  // Большой блок с вкладками (как "Обзор заказов") - Топ заказчиков / Пропавшие клиенты /
+  // Дебиторская задолженность / Воронка документов. 4 старых KPI-блока не нужны (Влад,
+  // 2026-08-12) - зарплата и документы уже покрыты блоком зарплаты выше и вкладкой "Воронка
+  // документов" ниже.
+  html += '<div class="card" style="margin-bottom:16px">';
+  html += '<div class="tab-bar">'+
+    '<button class="tab-btn'+(myPageMgrTab==='top'?' active':'')+'" onclick="setMyPageMgrTab(\'top\')">Топ заказчиков</button>'+
+    '<button class="tab-btn'+(myPageMgrTab==='lost'?' active':'')+'" onclick="setMyPageMgrTab(\'lost\')">Пропавшие клиенты</button>'+
+    '<button class="tab-btn'+(myPageMgrTab==='debt'?' active':'')+'" onclick="setMyPageMgrTab(\'debt\')">Дебиторская задолженность</button>'+
+    '<button class="tab-btn'+(myPageMgrTab==='docs'?' active':'')+'" onclick="setMyPageMgrTab(\'docs\')">Воронка документов</button>'+
+  '</div>';
 
-  // 2. Топ заказчиков
-  html += block('Топ заказчиков (формируют план в этом месяце)',
-    rowsList((d.top_customers||[]).slice(0,8).map(function(c){
+  if (myPageMgrTab === 'top') {
+    html += rowsList((d.top_customers||[]).slice(0,15).map(function(c){
       return { left:c.name, sub:c.orders+' зак.', right:mln(c.amount), color:'var(--text)' };
-    }), 'Нет заказов в этом месяце'));
+    }), 'Нет заказов в этом месяце');
 
-  // 3. Топ прошлого месяца - заглушка, требует чтения архива
-  html += block('Топ заказчиков прошлого месяца',
-    '<div style="font-size:13px;color:var(--muted)">В разработке - появится после доработки чтения архивных данных.</div>');
+  } else if (myPageMgrTab === 'lost') {
+    // Пропавшие клиенты за 3 месяца (Влад: "все кто заказывал у нас последние три месяца и
+    // не заказывал больше двух недель, приоритет по объёму выручки от большего к меньшему") -
+    // лениво по клику (тяжёлая операция на бэкенде - читает 3 архивных листа).
+    var lostKey = current + '::' + (myPagePeriod || 'current');
+    var lostEntry = mgrLostCache[lostKey];
+    if (!lostEntry) {
+      html += '<div style="font-size:13px;color:var(--muted);padding:8px 0">Загрузка…</div>';
+      if (!mgrLostLoading) {
+        mgrLostLoading = true;
+        apiFetchJson({ action: 'manager_lost_customers', manager: current, period: myPagePeriod || '' }).then(function(data) {
+          mgrLostLoading = false;
+          mgrLostCache[lostKey] = data && data.error ? { error: data.error } : { data: (data && data.customers) || [] };
+          renderMyPage();
+        }).catch(function(e) {
+          mgrLostLoading = false;
+          mgrLostCache[lostKey] = { error: e.message };
+          renderMyPage();
+        });
+      }
+    } else if (lostEntry.error) {
+      html += '<div style="font-size:13px;color:'+COL.red+';padding:8px 0">Ошибка: '+lostEntry.error+'</div>';
+    } else {
+      html += rowsList(lostEntry.data.slice(0,30).map(function(c){
+        return { left:c.name, sub:c.days_since+' дн. тишины · '+c.orders_total+' зак. за 3 мес.', right:mln(c.amount_total), color:COL.amber };
+      }), 'Пропавших клиентов нет - все, кто заказывал за 3 месяца, на связи');
+    }
 
-  // 4. Кому позвонить
-  html += block('☎️ Кому позвонить (пропали во 2-й половине месяца)',
-    rowsList((d.lost_customers||[]).slice(0,8).map(function(c){
-      return { left:c.name, sub:c.first_half+' зак. в 1-й половине', right:mln(c.amount), color:COL.amber };
-    }), 'Никто не пропал - все клиенты на связи'));
+  } else if (myPageMgrTab === 'debt') {
+    // Дебиторская задолженность этого менеджера - общее ядро с global ДЗ
+    // (computeDebtAggregates_/debtDeadAndStatus_/debtInBucket_, те же чистые функции), только
+    // на отфильтрованном списке + свои фильтры (по корзине дней, по мин. сумме).
+    var allDebt = ((D.debt && D.debt.by_customer) || []).filter(function(c){
+      return String(c.manager||'').trim().split(' ')[0].toLowerCase() === sur.toLowerCase();
+    });
+    var dAgg = computeDebtAggregates_(allDebt);
+    var dDead = debtDeadAndStatus_(allDebt);
+    var buckets = [
+      {key:'0-30', label:'0-30 дн.', value: dAgg.summary.current_0_30},
+      {key:'30-60', label:'30-60 дн.', value: dAgg.summary.overdue_30_60},
+      {key:'60-90', label:'60-90 дн.', value: dAgg.summary.overdue_60_90},
+      {key:'90+', label:'90+ дн.', value: dAgg.summary.overdue_90_plus},
+      {key:'dead', label:'Мёртвая (600+)', value: dDead.overdue_dead},
+    ];
+    html += '<div style="margin-bottom:12px;font-size:13px;color:var(--muted)">Итого долг: <b style="color:'+COL.red+'">'+mln(dAgg.summary.total_balance)+'</b> · должников: '+dAgg.summary.debtor_count+'</div>';
+    html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">'+
+      buckets.map(function(b){
+        var active = mgrDebtBucket === b.key;
+        return '<button onclick="setMgrDebtBucket(\''+b.key+'\')" style="cursor:pointer;background:'+(active?'rgba(255,255,255,.12)':'var(--bg3)')+';border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:11px;color:var(--text)">'+b.label+' <b>'+mln(b.value)+'</b></button>';
+      }).join('')+
+    '</div>';
+    html += '<div style="margin-bottom:12px;display:flex;align-items:center;gap:8px">'+
+      '<label style="font-size:12px;color:var(--muted)">Мин. сумма долга:</label>'+
+      '<input type="number" value="'+(mgrDebtMinAmount||'')+'" oninput="setMgrDebtMinAmount(this.value)" style="width:130px;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:5px 8px;font-size:12px">'+
+    '</div>';
+    var dFiltered = allDebt.filter(function(c){
+      if (mgrDebtBucket && !debtInBucket_(c.daysOverdue, mgrDebtBucket)) return false;
+      if (mgrDebtMinAmount && (c.balance||0) < mgrDebtMinAmount) return false;
+      return true;
+    }).sort(function(a,b){ return b.balance-a.balance; });
+    var dRows = !dFiltered.length
+      ? '<tr><td colspan="4" class="muted" style="padding:14px">'+(allDebt.length?'Нет должников по этому фильтру':'Долгов нет')+'</td></tr>'
+      : dFiltered.map(function(c){
+          return '<tr><td>'+c.contragent+'</td><td class="num red">'+mln(c.balance)+'</td><td class="num">'+c.daysOverdue+' дн.</td><td class="muted">'+(c.status||'—')+'</td></tr>';
+        }).join('');
+    html += '<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Контрагент</th><th class="num">Баланс</th><th class="num">Дней просрочки</th><th>Статус</th></tr></thead><tbody>'+dRows+'</tbody></table></div>';
+
+  } else if (myPageMgrTab === 'docs') {
+    var noWb = (doc.no_waybill_own||0)+(doc.no_waybill_hired||0);
+    var notPosted = doc.waybill_not_posted||0;
+    var notClosed = doc.posted_no_realiz||0;
+    var complete = doc.complete||0;
+    var docTotal = noWb+notPosted+notClosed+complete;
+    var docAmber2 = '#BA7517';
+    function docPct(n){ return docTotal>0 ? Math.max(0,n/docTotal*100) : 0; }
+    function docRow(color, label, count) {
+      return '<div style="display:flex;justify-content:space-between;padding:5px 0"><span style="display:flex;align-items:center;gap:6px;color:var(--muted);font-size:13px"><span style="width:8px;height:8px;border-radius:2px;background:'+color+';display:inline-block"></span>'+label+'</span><span style="font-weight:600;color:var(--text);font-size:13px">'+count+'</span></div>';
+    }
+    html += '<div style="font-size:21px;font-weight:700;color:var(--text);margin-bottom:8px">'+complete+' из '+docTotal+' готово</div>';
+    html += '<div style="height:8px;border-radius:4px;background:rgba(255,255,255,.08);overflow:hidden;display:flex;margin-bottom:12px">'+
+      '<div style="width:'+docPct(noWb)+'%;height:100%;background:'+COL.red+'"></div>'+
+      '<div style="width:'+docPct(notPosted)+'%;height:100%;background:'+COL.amber+'"></div>'+
+      '<div style="width:'+docPct(notClosed)+'%;height:100%;background:'+docAmber2+'"></div>'+
+      '<div style="width:'+docPct(complete)+'%;height:100%;background:'+COL.green+'"></div>'+
+    '</div>';
+    html += docRow(COL.red, 'Нет путёвки (свой парк '+(doc.no_waybill_own||0)+' + наём '+(doc.no_waybill_hired||0)+')', noWb);
+    html += docRow(COL.amber, 'Не проведено', notPosted);
+    html += docRow(docAmber2, 'Нет реализации', notClosed);
+    html += docRow(COL.green, 'Готово', complete);
+  }
+
+  html += '</div>';
 
   el.innerHTML = html;
 }
@@ -1799,6 +1839,31 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
   })();
   html += '</div>';
 
+  // Расчёт зарплаты - та же формула, что на вкладке "Зарплата" (calcLogist), сразу после
+  // KPI-блоков (Влад, 2026-08-12: "расчёт зарплаты сразу после 4 блоков с информацией").
+  var salaryBody;
+  if (!salary) {
+    salaryBody = '<div style="font-size:13px;color:var(--muted)">Нет данных для расчёта за этот период.</div>';
+  } else {
+    salaryBody = ''+
+      '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
+      '<span style="font-size:13px;color:var(--muted)">Оклад</span>'+
+      '<span style="font-size:13px;font-weight:600">'+fr(salary.oklad)+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
+      '<span style="font-size:13px;color:var(--muted)">Бонус за свои заказы (500₽ × '+salary.ownOrders+')</span>'+
+      '<span style="font-size:13px;font-weight:600">'+fr(salary.flatBonus)+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
+      '<span style="font-size:13px;color:var(--muted)">Бонус с маржи найма (8% × '+fr(salary.qualMargin)+(salary.unqualMargin ? ', ещё '+fr(salary.unqualMargin)+' маржи &lt;23% — не квалифицируется' : '')+')</span>'+
+      '<span style="font-size:13px;font-weight:600">'+fr(salary.marginBonus)+'</span></div>'+
+      (salary.bonus1m ? '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
+        '<span style="font-size:13px;color:var(--muted)">Премия за маржу найма &gt;1М</span>'+
+        '<span style="font-size:13px;font-weight:600">'+fr(salary.bonus1m)+'</span></div>' : '')+
+      '<div style="display:flex;justify-content:space-between;padding-top:10px;margin-top:4px;border-top:1px solid var(--border)">'+
+      '<span style="font-size:14px;font-weight:700">Итого</span>'+
+      '<span style="font-size:16px;font-weight:700;color:'+COL.green+'">'+fr(salary.total)+'</span></div>';
+  }
+  html += block('💰 Расчёт зарплаты', salaryBody);
+
   // 1. Маржа по поставщикам - те же колонки и шкала, что на "Заказы → Наёмная техника",
   // отфильтровано только на сделки этого логиста.
   var supRows = !suppliers.length
@@ -1883,30 +1948,6 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
       '<thead><tr><th>Дата</th><th>Заказчик</th><th>Поставщик</th>'+(isCompany?'<th>Логист</th>':'')+'<th class="num">Сумма</th><th class="num">Стоимость найма</th><th class="num">Маржа</th></tr></thead>'+
       '<tbody>'+dealRows+'</tbody>'+
     '</table></div>');
-
-  // 4. Расчёт зарплаты - та же формула, что на вкладке "Зарплата" (calcLogist)
-  var salaryBody;
-  if (!salary) {
-    salaryBody = '<div style="font-size:13px;color:var(--muted)">Нет данных для расчёта за этот период.</div>';
-  } else {
-    salaryBody = ''+
-      '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
-      '<span style="font-size:13px;color:var(--muted)">Оклад</span>'+
-      '<span style="font-size:13px;font-weight:600">'+fr(salary.oklad)+'</span></div>'+
-      '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
-      '<span style="font-size:13px;color:var(--muted)">Бонус за свои заказы (500₽ × '+salary.ownOrders+')</span>'+
-      '<span style="font-size:13px;font-weight:600">'+fr(salary.flatBonus)+'</span></div>'+
-      '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
-      '<span style="font-size:13px;color:var(--muted)">Бонус с маржи найма (8% × '+fr(salary.qualMargin)+(salary.unqualMargin ? ', ещё '+fr(salary.unqualMargin)+' маржи &lt;23% — не квалифицируется' : '')+')</span>'+
-      '<span style="font-size:13px;font-weight:600">'+fr(salary.marginBonus)+'</span></div>'+
-      (salary.bonus1m ? '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
-        '<span style="font-size:13px;color:var(--muted)">Премия за маржу найма &gt;1М</span>'+
-        '<span style="font-size:13px;font-weight:600">'+fr(salary.bonus1m)+'</span></div>' : '')+
-      '<div style="display:flex;justify-content:space-between;padding-top:10px;margin-top:4px;border-top:1px solid var(--border)">'+
-      '<span style="font-size:14px;font-weight:700">Итого</span>'+
-      '<span style="font-size:16px;font-weight:700;color:'+COL.green+'">'+fr(salary.total)+'</span></div>';
-  }
-  html += block('💰 Расчёт зарплаты', salaryBody);
 
   el.innerHTML = html;
 }
@@ -2061,6 +2102,22 @@ function renderMyPageVasin(el, current, selectorHtml) {
   html += kpiCard('📋', 'Документы', funnel.complete+' из '+funTotal, funTotal>0 ? Math.round(funnel.complete/funTotal*100)+'% готово' : 'Нет заказов в воронке', COL.blue);
   html += '</div>';
 
+  // Расчёт зарплаты - calcVasin (2.5% от ВП длинномеров компании), сразу после KPI-блоков
+  // (Влад, 2026-08-12: "расчёт зарплаты сразу после 4 блоков с информацией" - общий принцип
+  // для всех личных страниц, не в самом низу, как было раньше).
+  var salaryBody;
+  if (!salary) {
+    salaryBody = '<div style="font-size:13px;color:var(--muted)">Нет данных для расчёта за этот период.</div>';
+  } else {
+    salaryBody = '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
+      '<span style="font-size:13px;color:var(--muted)">2.5% от ВП длинномеров компании ('+mln(salary.profitLong)+')</span>'+
+      '<span style="font-size:13px;font-weight:600">'+fr(salary.bonus)+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;padding-top:10px;margin-top:4px;border-top:1px solid var(--border)">'+
+      '<span style="font-size:14px;font-weight:700">Итого</span>'+
+      '<span style="font-size:16px;font-weight:700;color:'+COL.green+'">'+fr(salary.total)+'</span></div>';
+  }
+  html += block('💰 Расчёт зарплаты', salaryBody);
+
   // Задачи на сегодня - между 4 KPI-блоками и таблицей машин (Влад, 2026-08-11)
   if (tasks.length) {
     html += block('✅ Задачи на сегодня',
@@ -2155,20 +2212,6 @@ function renderMyPageVasin(el, current, selectorHtml) {
       '<thead><tr><th>Дата</th><th>Заказчик</th><th>Менеджер</th><th class="num">Сумма</th><th class="num">Прибыль</th></tr></thead>'+
       '<tbody>'+dealRows+'</tbody>'+
     '</table></div>');
-
-  // 5. Расчёт зарплаты - calcVasin (2.5% от ВП длинномеров компании)
-  var salaryBody;
-  if (!salary) {
-    salaryBody = '<div style="font-size:13px;color:var(--muted)">Нет данных для расчёта за этот период.</div>';
-  } else {
-    salaryBody = '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
-      '<span style="font-size:13px;color:var(--muted)">2.5% от ВП длинномеров компании ('+mln(salary.profitLong)+')</span>'+
-      '<span style="font-size:13px;font-weight:600">'+fr(salary.bonus)+'</span></div>'+
-      '<div style="display:flex;justify-content:space-between;padding-top:10px;margin-top:4px;border-top:1px solid var(--border)">'+
-      '<span style="font-size:14px;font-weight:700">Итого</span>'+
-      '<span style="font-size:16px;font-weight:700;color:'+COL.green+'">'+fr(salary.total)+'</span></div>';
-  }
-  html += block('💰 Расчёт зарплаты', salaryBody);
 
   el.innerHTML = html;
 }

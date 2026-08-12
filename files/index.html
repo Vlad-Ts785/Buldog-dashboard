@@ -1724,11 +1724,32 @@ function renderMyPageManager(el, current, selectorHtml, d) {
     function getLForecast_(s) { return s.toLowerCase()===sur.toLowerCase() ? lForecastRow : getL(s); }
     salForecast = calcMgr(sur, true, getMForecast_, getLForecast_, useNewRules);
   }
-  var salForecastHtml = (salForecast && Math.abs(salForecast.total_sal - sal.total_sal) > 100)
-    ? '<div style="display:flex;justify-content:space-between;padding-top:6px">'+
-        '<span style="font-size:12px;color:var(--muted)">Итого по прогнозу (текущий темп)</span>'+
-        '<span style="font-size:14px;font-weight:700;color:'+COL.blue+'">'+fr(salForecast.total_sal)+'</span></div>'
-    : '';
+  // Разбивка по тем же трём компонентам, что и факт (2026-08-12, Влад: "2% от 9.4 млн это
+  // 188000, оклад 100000, итого 288000, ну никак не 361000" - без разбивки цифра выглядела
+  // непроверяемой, "откуда-то взялась". Комиссия считается НЕ от общего прогнозного оборота
+  // (тот идёт только в ступень оклада), а от ownProfitBase (выручка своего парка минус
+  // затраты) - плюс отдельный бонус с маржи найма, который в ручном счёте легко упустить).
+  function fRow_(label, val) {
+    return '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);padding:2px 0;gap:10px"><span>'+label+'</span><span style="white-space:nowrap">'+fr(val)+'</span></div>';
+  }
+  var salForecastHtml = '';
+  if (salForecast && Math.abs(salForecast.total_sal - sal.total_sal) > 100) {
+    var fBreakdown = fRow_('Оклад (по ступени оборота '+mln(salForecast.total)+')', salForecast.oklad);
+    if (salForecast.newRules) {
+      fBreakdown += fRow_('Комиссия своего парка ('+(salForecast.rate*100).toString().replace('.',',')+'% × '+fr(salForecast.ownProfitBase)+')', salForecast.ownComm);
+      if (salForecast.hiredMargin || salForecast.hiredMarginUnqual) fBreakdown += fRow_('Бонус с маржи найма (8% × '+fr(salForecast.hiredMargin)+')', salForecast.hiredBonus);
+    } else {
+      fBreakdown += fRow_('Комиссия своего парка ('+(salForecast.rate*100).toString().replace('.',',')+'% × '+fr(salForecast.ownRev)+')', salForecast.ownComm);
+      if (salForecast.hiredBonus) fBreakdown += fRow_('Бонус с маржи найма', salForecast.hiredBonus);
+    }
+    if (salForecast.bonus15m) fBreakdown += fRow_('Премия за оборот &gt;15М', salForecast.bonus15m);
+    salForecastHtml = '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed rgba(255,255,255,.1)">'+
+      fBreakdown+
+      '<div style="display:flex;justify-content:space-between;padding-top:4px">'+
+      '<span style="font-size:12px;font-weight:600;color:var(--muted)">Итого по прогнозу (текущий темп)</span>'+
+      '<span style="font-size:14px;font-weight:700;color:'+COL.blue+'">'+fr(salForecast.total_sal)+'</span></div>'+
+    '</div>';
+  }
   // Расчёт зарплаты - "такой же длинный", прямо с вкладки "Зарплата" (Влад, 2026-08-12) - те
   // же компоненты calcMgr, в стиле строка-значение (как у остальных личных страниц), а не
   // многоколоночной таблицей отдела - тут один человек, таблица на весь отдел избыточна.

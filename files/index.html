@@ -324,6 +324,19 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   .fleet-grid{grid-template-columns:1fr;}
   main{padding:16px;}
 }
+
+/* Двойной слайдер диапазона (2026-08-12, ДЗ на личной странице менеджера - "возможность
+   зажимать диапазоны сделать" вместо ввода суммы руками). Два input[type=range] поверх друг
+   друга, трек прозрачный (кликабелен только ползунок - pointer-events:none на инпуте,
+   auto на самом ползунке), заполненная полоса между ними - отдельный div, ширина считается в JS. */
+.range-slider{position:relative;height:26px;margin:4px 0 2px;}
+.range-slider input[type=range]{position:absolute;left:0;right:0;top:9px;width:100%;height:6px;margin:0;background:transparent;pointer-events:none;-webkit-appearance:none;appearance:none;}
+.range-slider input[type=range]::-webkit-slider-runnable-track{height:6px;background:transparent;}
+.range-slider input[type=range]::-moz-range-track{height:6px;background:transparent;}
+.range-slider input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;pointer-events:auto;width:15px;height:15px;border-radius:50%;background:var(--text);border:2px solid var(--bg);cursor:pointer;margin-top:-4.5px;}
+.range-slider input[type=range]::-moz-range-thumb{pointer-events:auto;width:15px;height:15px;border-radius:50%;background:var(--text);border:2px solid var(--bg);cursor:pointer;}
+.range-slider-track{position:absolute;left:0;right:0;top:9px;height:6px;border-radius:3px;background:rgba(255,255,255,.08);}
+.range-slider-fill{position:absolute;top:9px;height:6px;border-radius:3px;background:var(--blue,#378ADD);}
 </style>
 </head>
 <body>
@@ -1467,12 +1480,25 @@ function setMyPageMgrTab(tab) { myPageMgrTab = tab; renderMyPage(); }
 let mgrLostCache = {};     // 'ФИО::период' -> { data:[...] } | { error:'...' }
 let mgrLostLoading = false;
 // Фильтры вкладки "Дебиторская задолженность" - по корзине дней (общее ядро с global ДЗ,
-// см. debtInBucket_) и по минимальной сумме долга (2026-08-12, новое - в global ДЗ такого
-// явного фильтра нет).
+// см. debtInBucket_) и по диапазону суммы долга (2026-08-12, Влад: "минимальная сумма долга
+// окно где руками вводить убери, возможность зажимать диапазоны сделать" - двойной слайдер
+// вместо текстового поля, границы пересчитываются от реальных долгов при каждом рендере).
 let mgrDebtBucket = '';
-let mgrDebtMinAmount = 0;
+let mgrDebtRangeMin = 0;
+let mgrDebtRangeMax = null; // null = верхняя граница не задана - пересчитается от данных
 function setMgrDebtBucket(b) { mgrDebtBucket = (mgrDebtBucket===b?'':b); renderMyPage(); }
-function setMgrDebtMinAmount(v) { mgrDebtMinAmount = parseFloat(v)||0; renderMyPage(); }
+function setMgrDebtRangeMin(v) { mgrDebtRangeMin = parseFloat(v)||0; if (mgrDebtRangeMin > mgrDebtRangeMax) mgrDebtRangeMax = mgrDebtRangeMin; renderMyPage(); }
+function setMgrDebtRangeMax(v) { mgrDebtRangeMax = parseFloat(v)||0; if (mgrDebtRangeMax < mgrDebtRangeMin) mgrDebtRangeMin = mgrDebtRangeMax; renderMyPage(); }
+// Разворачивание строки должника - показывает документы (общее ядро buildDebtDocsHtml_, то
+// же самое, что открывает строка в global ДЗ), без возможности менять статус/комментарий -
+// Влад, 2026-08-12: "то же самое, только без возможности менять, только видеть". Ключ - имя
+// контрагента (не индекс) - устойчиво к смене фильтра/сортировки, пока строка развёрнута.
+let mgrDebtOpenRow = null;
+function toggleMgrDebtDetail(name) { mgrDebtOpenRow = (mgrDebtOpenRow===name ? null : name); renderMyPage(); }
+// Фильтр статуса на вкладке "Воронка документов" (2026-08-12) - тот же формат, что
+// "Обзор заказов → Проблемные заказы" (problemOrderRowHtml_, один источник строки).
+let myPageMgrProblemsFilter = '';
+function setMyPageMgrProblemsFilter(f) { myPageMgrProblemsFilter = f; renderMyPage(); }
 
 function renderMyPageManager(el, current, selectorHtml, d) {
   if (!d) { el.innerHTML = selectorHtml + '<p style="color:var(--muted);padding:16px">Нет данных за этот месяц.</p>'; return; }
@@ -1679,9 +1705,12 @@ function renderMyPageManager(el, current, selectorHtml, d) {
     }
 
   } else if (myPageMgrTab === 'debt') {
-    // Дебиторская задолженность этого менеджера - общее ядро с global ДЗ
-    // (computeDebtAggregates_/debtDeadAndStatus_/debtInBucket_, те же чистые функции), только
-    // на отфильтрованном списке + свои фильтры (по корзине дней, по мин. сумме).
+    // Дебиторская задолженность этого менеджера - ТОТ ЖЕ формат, что global ДЗ (Влад,
+    // 2026-08-12: "по сути то же самое, что есть, только на странице менеджера, без
+    // возможности менять - только статус видеть"): общее ядро computeDebtAggregates_/
+    // debtDeadAndStatus_/debtInBucket_, цветовая кодировка просрочки (ageCls, как в global
+    // ДЗ), разворачивание строки контрагента с документами (buildDebtDocsHtml_ - то же самое
+    // ядро, что открывает строка в global ДЗ), разбивка по юрлицам ("от какого работаем").
     var allDebt = ((D.debt && D.debt.by_customer) || []).filter(function(c){
       return String(c.manager||'').trim().split(' ')[0].toLowerCase() === sur.toLowerCase();
     });
@@ -1695,25 +1724,63 @@ function renderMyPageManager(el, current, selectorHtml, d) {
       {key:'dead', label:'Мёртвая (600+)', value: dDead.overdue_dead},
     ];
     html += '<div style="margin-bottom:12px;font-size:13px;color:var(--muted)">Итого долг: <b style="color:'+COL.red+'">'+mln(dAgg.summary.total_balance)+'</b> · должников: '+dAgg.summary.debtor_count+'</div>';
-    html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">'+
+    html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'+
       buckets.map(function(b){
         var active = mgrDebtBucket === b.key;
         return '<button onclick="setMgrDebtBucket(\''+b.key+'\')" style="cursor:pointer;background:'+(active?'rgba(255,255,255,.12)':'var(--bg3)')+';border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:11px;color:var(--text)">'+b.label+' <b>'+mln(b.value)+'</b></button>';
       }).join('')+
     '</div>';
-    html += '<div style="margin-bottom:12px;display:flex;align-items:center;gap:8px">'+
-      '<label style="font-size:12px;color:var(--muted)">Мин. сумма долга:</label>'+
-      '<input type="number" value="'+(mgrDebtMinAmount||'')+'" oninput="setMgrDebtMinAmount(this.value)" style="width:130px;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:5px 8px;font-size:12px">'+
+
+    // Диапазон суммы долга - двойной слайдер, без текстового ввода (Влад, 2026-08-12:
+    // "минимальная сумма долга окно где руками вводить убери, возможность зажимать
+    // диапазоны сделать"). Верхняя граница - максимальный долг среди клиентов этого
+    // менеджера, пересчитывается каждый рендер, если руками ещё не двигали.
+    var rangeMax = Math.max(1, Math.ceil(allDebt.reduce(function(m,c){ return Math.max(m, c.balance||0); }, 0)));
+    if (mgrDebtRangeMax === null || mgrDebtRangeMax > rangeMax) mgrDebtRangeMax = rangeMax;
+    var rMin = Math.min(mgrDebtRangeMin, rangeMax), rMax = Math.min(mgrDebtRangeMax, rangeMax);
+    var fillL = rangeMax>0 ? rMin/rangeMax*100 : 0, fillR = rangeMax>0 ? rMax/rangeMax*100 : 100;
+    html += '<div style="margin-bottom:16px">'+
+      '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:2px">'+
+        '<span>Сумма долга</span><span style="color:var(--text);font-weight:600">'+mln(rMin)+' — '+mln(rMax)+'</span>'+
+      '</div>'+
+      '<div class="range-slider">'+
+        '<div class="range-slider-track"></div>'+
+        '<div class="range-slider-fill" style="left:'+fillL+'%;width:'+(fillR-fillL)+'%"></div>'+
+        '<input type="range" min="0" max="'+rangeMax+'" step="1" value="'+rMin+'" oninput="setMgrDebtRangeMin(this.value)">'+
+        '<input type="range" min="0" max="'+rangeMax+'" step="1" value="'+rMax+'" oninput="setMgrDebtRangeMax(this.value)">'+
+      '</div>'+
     '</div>';
+
     var dFiltered = allDebt.filter(function(c){
       if (mgrDebtBucket && !debtInBucket_(c.daysOverdue, mgrDebtBucket)) return false;
-      if (mgrDebtMinAmount && (c.balance||0) < mgrDebtMinAmount) return false;
+      if ((c.balance||0) < rMin || (c.balance||0) > rMax) return false;
       return true;
     }).sort(function(a,b){ return b.balance-a.balance; });
+
+    function ageCls(days) { return days > 90 ? 'red' : (days > 30) ? 'amber' : 'green'; }
+    var todayForDocs = new Date();
+    var curMonthStart = todayForDocs.getFullYear()+'-'+String(todayForDocs.getMonth()+1).padStart(2,'0')+'-01';
     var dRows = !dFiltered.length
       ? '<tr><td colspan="4" class="muted" style="padding:14px">'+(allDebt.length?'Нет должников по этому фильтру':'Долгов нет')+'</td></tr>'
       : dFiltered.map(function(c){
-          return '<tr><td>'+c.contragent+'</td><td class="num red">'+mln(c.balance)+'</td><td class="num">'+c.daysOverdue+' дн.</td><td class="muted">'+(c.status||'—')+'</td></tr>';
+          var byOrgLine = (c.byOrg && c.byOrg.length)
+            ? ' <span class="muted" style="font-size:10.5px">— '+c.byOrg.map(function(o){ return o.org+': '+fmt(o.balance); }).join(' · ')+'</span>'
+            : '';
+          var isOpen = mgrDebtOpenRow === c.contragent;
+          var contragentEsc = c.contragent.replace(/'/g,"\\'");
+          var row = '<tr class="debt-row-toggle" onclick="toggleMgrDebtDetail(\''+contragentEsc+'\')" style="cursor:pointer">'+
+            '<td><span class="muted" style="display:inline-block;width:14px">'+(isOpen?'▾':'▸')+'</span><b>'+c.contragent+'</b>'+byOrgLine+'</td>'+
+            '<td class="num red"><b>'+fmt(c.balance)+'</b></td>'+
+            '<td class="num '+ageCls(c.daysOverdue)+'">'+c.daysOverdue+'</td>'+
+            '<td class="muted">'+(c.status||'—')+'</td>'+
+          '</tr>';
+          if (isOpen) {
+            var docs = buildDebtDocsHtml_(c, curMonthStart);
+            row += '<tr><td colspan="4" style="padding:0 0 10px 24px">'+
+              '<table style="width:100%;font-size:11.5px;border-collapse:collapse">'+docs.docsHtml+'</table>'+docs.reconcileLine+
+            '</td></tr>';
+          }
+          return row;
         }).join('');
     html += '<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Контрагент</th><th class="num">Баланс</th><th class="num">Дней просрочки</th><th>Статус</th></tr></thead><tbody>'+dRows+'</tbody></table></div>';
 
@@ -1739,6 +1806,36 @@ function renderMyPageManager(el, current, selectorHtml, d) {
     html += docRow(COL.amber, 'Не проведено', notPosted);
     html += docRow(docAmber2, 'Нет реализации', notClosed);
     html += docRow(COL.green, 'Готово', complete);
+
+    // Детальный список проблемных заказов - тот же формат и та же функция-шаблон строки
+    // (problemOrderRowHtml_), что "Обзор заказов → Проблемные заказы" (Влад, 2026-08-12:
+    // "гораздо информативнее... зачем изобретать, если уже всё есть, и там и тут должно
+    // быть от одного источника"). Бэкенд уже фильтрует problem_orders на этого менеджера
+    // для роли manager - фильтр тут же нужен на случай admin-предпросмотра (там company-wide).
+    var myProblems = ((D.orders && D.orders.problem_orders) || []).filter(function(p){
+      return String(p.mgr||'').trim().split(' ')[0].toLowerCase() === sur.toLowerCase();
+    });
+    var pFiltered = myProblems.filter(function(p){
+      return !myPageMgrProblemsFilter || (p.status||'').indexOf(myPageMgrProblemsFilter) >= 0;
+    }).slice().sort(function(a,b){ return (a.date||'').localeCompare(b.date||''); });
+
+    html += '<div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">';
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">';
+    html += '<div class="tab-bar" style="margin-bottom:0;border-bottom:none;padding-bottom:0;gap:4px">'+
+      '<button class="tab-btn'+(!myPageMgrProblemsFilter?' active':'')+'" onclick="setMyPageMgrProblemsFilter(\'\')">Все</button>'+
+      '<button class="tab-btn'+(myPageMgrProblemsFilter==='нет путёвки'?' active':'')+'" onclick="setMyPageMgrProblemsFilter(\'нет путёвки\')">Нет путёвки</button>'+
+      '<button class="tab-btn'+(myPageMgrProblemsFilter==='не проведён'?' active':'')+'" onclick="setMyPageMgrProblemsFilter(\'не проведён\')">Не проведён</button>'+
+      '<button class="tab-btn'+(myPageMgrProblemsFilter==='нет реализации'?' active':'')+'" onclick="setMyPageMgrProblemsFilter(\'нет реализации\')">Нет реализации</button>'+
+    '</div>';
+    html += '<span class="muted" style="font-size:11px">'+pFiltered.length+' из '+myProblems.length+' заказов</span>';
+    html += '</div>';
+    html += '<div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
+      '<th>Номер</th><th>Дата</th><th>Декада</th><th>Клиент</th><th>Менеджер</th>'+
+      '<th>Водитель/наёмник</th><th class="num">Сумма</th><th class="num">Оплата</th><th>Статус</th>'+
+    '</tr></thead><tbody>'+
+      (pFiltered.length ? pFiltered.slice(0,100).map(problemOrderRowHtml_).join('') : '<tr><td colspan="9" style="color:'+COL.green+';padding:14px">Нет проблемных заказов ✅</td></tr>')+
+    '</tbody></table></div>';
+    html += '</div>';
   }
 
   html += '</div>';
@@ -3809,6 +3906,28 @@ function renderStatusTrend(data) {
 }
 
 // ── ПРОДАЖИ (ЗАКАЗЫ 1С) ────────────────────────────────────
+// Шаблон строки "Проблемные заказы" - один источник для global-страницы (filterProblems ниже)
+// и для вкладки "Воронка документов" на личной странице менеджера (2026-08-12, Влад: "зачем
+// изобретать, если уже всё есть, и там и тут должно быть от одного источника").
+var PROBLEM_DECADE_LABEL = ['', '1-10', '11-20', '21+'];
+function problemOrderRowHtml_(p) {
+  var st = p.status||'';
+  var stCls = st.indexOf('путёвки') >= 0 ? 'red' : 'amber';
+  // Один столбик (Влад, 2026-07-16) - водитель, если свой парк, наёмник, если наёмный.
+  var executorCell = p.executor ? (p.is_hired ? p.executor : cleanName(p.executor)) : '—';
+  return '<tr>' +
+    '<td><b>' + (p.id||'—') + '</b></td>' +
+    '<td class="muted">' + (p.date||'—') + '</td>' +
+    '<td class="muted" style="font-size:11px">' + (PROBLEM_DECADE_LABEL[p.decade||0]||'—') + '</td>' +
+    '<td>' + (p.customer||'').substring(0,24) + '</td>' +
+    '<td class="muted">' + (p.mgr||'').split(' ').slice(0,2).join(' ') + '</td>' +
+    '<td class="muted">' + executorCell + '</td>' +
+    '<td class="num">' + fmtK2(p.amount||0) + '</td>' +
+    '<td class="num">' + ((p.payment||0)>0?fmtK2(p.payment):'—') + '</td>' +
+    '<td><span class="badge ' + stCls + '">' + st + '</span></td>' +
+  '</tr>';
+}
+
 function filterProblems(status, btn) {
   if (btn) {
     document.querySelectorAll('#problems-status-bar .tab-btn').forEach(function(b){ b.classList.remove('active'); });
@@ -3823,30 +3942,11 @@ function filterProblems(status, btn) {
     var okM = !mgr || (p.mgr||'').indexOf(mgr) >= 0;
     return okS && okM;
   });
-  var decadeLabel = ['', '1-10', '11-20', '21+'];
   // Сортировка по дате заказа, от самого раннего к позднему (Влад, 2026-07-16) - раньше
   // порядок был "как пришло из 1С", самые старые/просроченные заказы могли теряться внизу.
   filtered = filtered.slice().sort(function(a, b) { return (a.date||'').localeCompare(b.date||''); });
   document.getElementById('sales-problems-body').innerHTML = filtered.length
-    ? filtered.slice(0,100).map(function(p) {
-        var st = p.status||'';
-        var stCls = st.indexOf('путёвки') >= 0 ? 'red' : 'amber';
-        // Один столбик (Влад, 2026-07-16: "мне нужен будет один столбик... 2 столбика из-за
-        // того что много колонок, есть переходы на следующую строку, некрасиво") - водитель,
-        // если свой парк, наёмник, если наёмный, в одной и той же ячейке.
-        var executorCell = p.executor ? (p.is_hired ? p.executor : cleanName(p.executor)) : '—';
-        return '<tr>' +
-          '<td><b>' + (p.id||'—') + '</b></td>' +
-          '<td class="muted">' + (p.date||'—') + '</td>' +
-          '<td class="muted" style="font-size:11px">' + (decadeLabel[p.decade||0]||'—') + '</td>' +
-          '<td>' + (p.customer||'').substring(0,24) + '</td>' +
-          '<td class="muted">' + (p.mgr||'').split(' ').slice(0,2).join(' ') + '</td>' +
-          '<td class="muted">' + executorCell + '</td>' +
-          '<td class="num">' + fmtK2(p.amount||0) + '</td>' +
-          '<td class="num">' + ((p.payment||0)>0?fmtK2(p.payment):'—') + '</td>' +
-          '<td><span class="badge ' + stCls + '">' + st + '</span></td>' +
-        '</tr>';
-      }).join('')
+    ? filtered.slice(0,100).map(problemOrderRowHtml_).join('')
     : '<tr><td colspan="9" style="color:var(--green);padding:14px">Нет проблемных заказов ✅</td></tr>';
   setText('sales-problems-count', filtered.length + ' из ' + all.length + ' заказов');
 }

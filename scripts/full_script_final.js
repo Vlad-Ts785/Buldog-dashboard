@@ -2880,6 +2880,12 @@ function buildManagerView_(orders, managerName, ss, period) {
       by_manager: myManagerRow,
       by_logist: myLogistRow,
       by_manager_detail: detailWrapped,
+      // Проблемные заказы этого менеджера (2026-08-12, вкладка "Воронка документов" на личной
+      // странице - тот же формат/источник, что "Обзор заказов → Проблемные заказы", просто
+      // отфильтровано на одного человека, приватность - другие менеджеры не видны).
+      problem_orders: (orders.problem_orders || []).filter(function(p) {
+        return String(p.mgr || '').trim().split(' ')[0].toLowerCase() === managerName.trim().split(' ')[0].toLowerCase();
+      }),
     },
   };
 

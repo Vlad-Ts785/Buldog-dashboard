@@ -3395,7 +3395,8 @@ function doGet(e) {
       try {
         var gatOrders = getOrdersData(ss);
         if (gatOrders.error) throw new Error(gatOrders.error);
-        var gatResult = generateManagerAiTasksCached_(ss, gatOrders, gatManager, null);
+        var gatForce = e.parameter.force === '1';
+        var gatResult = generateManagerAiTasksCached_(ss, gatOrders, gatManager, null, gatForce);
         return ContentService.createTextOutput(JSON.stringify(gatResult)).setMimeType(ContentService.MimeType.JSON);
       } catch (gatErr) {
         return ContentService.createTextOutput(JSON.stringify({ error: gatErr.message })).setMimeType(ContentService.MimeType.JSON);
@@ -6705,6 +6706,23 @@ function findAiTasksCacheRow_(ss, dateKey, managerName) {
   return null;
 }
 
+// Удаляет строку кэша на сегодня для этого менеджера, если есть (2026-08-12, Влад: "мы сделали
+// много изменений... по Савитку была генерация раньше, это всё осталось в кэше... нужно
+// обнулить" - кнопка "Сгенерировать заново" на фронтенде дёргает action=generate_ai_tasks с
+// force=1, это и есть та точка, что стирает старую строку перед новой генерацией). Идёт снизу
+// вверх - на случай, если в листе случайно оказалось больше одной строки на менеджера/день.
+function deleteAiTasksCacheRow_(ss, dateKey, managerName) {
+  const sheet = ss.getSheetByName(AI_TASKS_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) return;
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
+  for (let i = data.length - 1; i >= 0; i--) {
+    const rDate = data[i][0] instanceof Date ? Utilities.formatDate(data[i][0], 'Europe/Moscow', 'yyyy-MM-dd') : String(data[i][0] || '').trim();
+    if (rDate === dateKey && String(data[i][1] || '').trim() === managerName) {
+      sheet.deleteRow(i + 2);
+    }
+  }
+}
+
 function saveAiTasksCache_(ss, dateKey, managerName, tasks, planAdvice, model) {
   const sheet = ensureAiTasksSheet_(ss);
   const now = new Date().toISOString();
@@ -7001,10 +7019,18 @@ function parseAiTasksResponse_(rawText) {
 
 // Оркестратор - кэш на день, иначе генерация + сохранение. Ошибки НЕ кэшируются (можно
 // повторить в тот же день - см. план, риск "формат ответа kie.ai не проверен вживую").
-function generateManagerAiTasksCached_(ss, orders, managerName, period) {
+// force=true (2026-08-12, Влад: "мы сделали много изменений... нужно всё обнулить, чтобы
+// посмотреть заново по новым данным") - игнорирует кэш на сегодня и удаляет старую строку
+// перед генерацией новой, вместо ручного похода в Google Таблицу за каждым обновлением
+// промпта. Дёргается кнопкой "Сгенерировать заново" на фронтенде (см. retryAiTasks_).
+function generateManagerAiTasksCached_(ss, orders, managerName, period, force) {
   const dateKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM-dd');
-  const cached = findAiTasksCacheRow_(ss, dateKey, managerName);
-  if (cached) return { tasks: cached.tasks, plan_advice: cached.plan_advice, generated_at: cached.generated_at, cached: true };
+  if (force) {
+    deleteAiTasksCacheRow_(ss, dateKey, managerName);
+  } else {
+    const cached = findAiTasksCacheRow_(ss, dateKey, managerName);
+    if (cached) return { tasks: cached.tasks, plan_advice: cached.plan_advice, generated_at: cached.generated_at, cached: true };
+  }
 
   const context = buildManagerAiContext_(ss, orders, managerName, period);
   const prompt = buildAiTasksPrompt_(managerName, context);

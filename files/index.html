@@ -1497,9 +1497,27 @@ function loadAiTasksIfNeeded_(managerName) {
     renderMyPage();
   });
 }
+// force=1 (2026-08-12, Влад: "мы сделали много изменений... нужно всё обнулить, чтобы
+// посмотреть заново по новым данным") - удаляет старую строку кэша на бэкенде и генерирует
+// заново, а не просто ждёт, пока фронтенд перечитает то же самое. Одна функция и для кнопки
+// "Повторить" при ошибке (тогда кэша обычно и не было - ошибки не кэшируются), и для новой
+// кнопки "Сгенерировать заново" на успешном результате - разницы в поведении нет, всегда
+// безопасно передёрнуть.
 function retryAiTasks_(managerName) {
-  delete aiTasksCache[aiTasksTodayKey_(managerName)];
+  var key = aiTasksTodayKey_(managerName);
+  if (aiTasksLoadingKey === key) return;
+  delete aiTasksCache[key];
+  aiTasksLoadingKey = key;
   renderMyPage();
+  apiFetchJson({ action: 'generate_ai_tasks', manager: managerName, force: '1' }).then(function(data) {
+    aiTasksLoadingKey = null;
+    aiTasksCache[key] = data && data.error ? { error: data.error } : data;
+    renderMyPage();
+  }).catch(function(e) {
+    aiTasksLoadingKey = null;
+    aiTasksCache[key] = { error: e.message };
+    renderMyPage();
+  });
 }
 // Фильтр вкладки "Дебиторская задолженность" по корзине дней - ТОЧНО тот же механизм, что
 // global ДЗ (Set, множественный выбор - см. debtBucketFilters/setDebtBucketFilter выше по
@@ -1776,8 +1794,16 @@ function renderMyPageManager(el, current, selectorHtml, d) {
       aiBody = aiTasksHtml +
         (aiEntry.plan_advice ? '<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07);font-size:12.5px;color:var(--text)"><b>Совет по плану:</b> '+aiEntry.plan_advice+'</div>' : '');
     }
+    // Кнопка "Заново" - только на успешном результате (2026-08-12, Влад: "мы сделали много
+    // изменений... нужно всё обнулить, чтобы посмотреть заново по новым данным") - при ошибке
+    // кнопка "Повторить" уже есть внутри aiBody, дублировать не нужно.
+    var aiRegenBtn = (aiEntry && !aiEntry.error)
+      ? '<button onclick="retryAiTasks_(\''+current.replace(/'/g,"\\'")+'\')" title="Стереть сегодняшний кэш и сгенерировать заново" style="cursor:pointer;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:3px 9px;font-size:11px;color:var(--muted)">🔄 Заново</button>'
+      : '';
     html += '<div class="card" style="margin-bottom:18px;padding:16px 18px">'+
-      '<div style="font-size:14px;font-weight:600;margin-bottom:6px">🤖 Задачи на сегодня (ИИ)</div>'+aiBody+'</div>';
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'+
+      '<div style="font-size:14px;font-weight:600">🤖 Задачи на сегодня (ИИ)</div>'+aiRegenBtn+
+      '</div>'+aiBody+'</div>';
   }
 
   // Широкая шкала: факт + прогноз выполнения плана + таргет по рабочим/выходным дням.

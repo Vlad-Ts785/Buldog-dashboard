@@ -324,19 +324,6 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   .fleet-grid{grid-template-columns:1fr;}
   main{padding:16px;}
 }
-
-/* Двойной слайдер диапазона (2026-08-12, ДЗ на личной странице менеджера - "возможность
-   зажимать диапазоны сделать" вместо ввода суммы руками). Два input[type=range] поверх друг
-   друга, трек прозрачный (кликабелен только ползунок - pointer-events:none на инпуте,
-   auto на самом ползунке), заполненная полоса между ними - отдельный div, ширина считается в JS. */
-.range-slider{position:relative;height:26px;margin:4px 0 2px;}
-.range-slider input[type=range]{position:absolute;left:0;right:0;top:9px;width:100%;height:6px;margin:0;background:transparent;pointer-events:none;-webkit-appearance:none;appearance:none;}
-.range-slider input[type=range]::-webkit-slider-runnable-track{height:6px;background:transparent;}
-.range-slider input[type=range]::-moz-range-track{height:6px;background:transparent;}
-.range-slider input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;pointer-events:auto;width:15px;height:15px;border-radius:50%;background:var(--text);border:2px solid var(--bg);cursor:pointer;margin-top:-4.5px;}
-.range-slider input[type=range]::-moz-range-thumb{pointer-events:auto;width:15px;height:15px;border-radius:50%;background:var(--text);border:2px solid var(--bg);cursor:pointer;}
-.range-slider-track{position:absolute;left:0;right:0;top:9px;height:6px;border-radius:3px;background:rgba(255,255,255,.08);}
-.range-slider-fill{position:absolute;top:9px;height:6px;border-radius:3px;background:var(--blue,#378ADD);}
 </style>
 </head>
 <body>
@@ -1479,16 +1466,20 @@ function setMyPageMgrTab(tab) { myPageMgrTab = tab; renderMyPage(); }
 // страницы - тяжёлая операция на бэкенде, читает 3 архивных листа).
 let mgrLostCache = {};     // 'ФИО::период' -> { data:[...] } | { error:'...' }
 let mgrLostLoading = false;
-// Фильтры вкладки "Дебиторская задолженность" - по корзине дней (общее ядро с global ДЗ,
-// см. debtInBucket_) и по диапазону суммы долга (2026-08-12, Влад: "минимальная сумма долга
-// окно где руками вводить убери, возможность зажимать диапазоны сделать" - двойной слайдер
-// вместо текстового поля, границы пересчитываются от реальных долгов при каждом рендере).
-let mgrDebtBucket = '';
-let mgrDebtRangeMin = 0;
-let mgrDebtRangeMax = null; // null = верхняя граница не задана - пересчитается от данных
-function setMgrDebtBucket(b) { mgrDebtBucket = (mgrDebtBucket===b?'':b); renderMyPage(); }
-function setMgrDebtRangeMin(v) { mgrDebtRangeMin = parseFloat(v)||0; if (mgrDebtRangeMin > mgrDebtRangeMax) mgrDebtRangeMax = mgrDebtRangeMin; renderMyPage(); }
-function setMgrDebtRangeMax(v) { mgrDebtRangeMax = parseFloat(v)||0; if (mgrDebtRangeMax < mgrDebtRangeMin) mgrDebtRangeMin = mgrDebtRangeMax; renderMyPage(); }
+// Фильтр вкладки "Дебиторская задолженность" по корзине дней - ТОЧНО тот же механизм, что
+// global ДЗ (Set, множественный выбор - см. debtBucketFilters/setDebtBucketFilter выше по
+// файлу), только дефолт другой (2026-08-12, Влад: "изначально на начальном экране показывает
+// сразу три зажатые диапазона: 0-30, 30-60, 60-90... при отжимании одного из диапазонов
+// остаётся столько, сколько зажато"). Слайдер суммы долга - убран целиком (Влад: "не
+// работает, не нужна, убери вообще, чтобы её не было" - это и было причиной пропажи
+// ГЕОСПЕЦСТРОЙ у Савитка: mgrDebtRangeMax был module-level переменной, не сбрасывался при
+// смене менеджера в admin-дропдауне и оставался от предыдущего с меньшим макс. долгом).
+let mgrDebtBuckets = new Set(['0-30','30-60','60-90']);
+function setMgrDebtBucket(bucket) {
+  if (mgrDebtBuckets.has(bucket)) mgrDebtBuckets.delete(bucket);
+  else mgrDebtBuckets.add(bucket);
+  renderMyPage();
+}
 // Разворачивание строки должника - показывает документы (общее ядро buildDebtDocsHtml_, то
 // же самое, что открывает строка в global ДЗ), без возможности менять статус/комментарий -
 // Влад, 2026-08-12: "то же самое, только без возможности менять, только видеть". Ключ - имя
@@ -1726,34 +1717,13 @@ function renderMyPageManager(el, current, selectorHtml, d) {
     html += '<div style="margin-bottom:12px;font-size:13px;color:var(--muted)">Итого долг: <b style="color:'+COL.red+'">'+mln(dAgg.summary.total_balance)+'</b> · должников: '+dAgg.summary.debtor_count+'</div>';
     html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'+
       buckets.map(function(b){
-        var active = mgrDebtBucket === b.key;
+        var active = mgrDebtBuckets.has(b.key);
         return '<button onclick="setMgrDebtBucket(\''+b.key+'\')" style="cursor:pointer;background:'+(active?'rgba(255,255,255,.12)':'var(--bg3)')+';border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:11px;color:var(--text)">'+b.label+' <b>'+mln(b.value)+'</b></button>';
       }).join('')+
     '</div>';
 
-    // Диапазон суммы долга - двойной слайдер, без текстового ввода (Влад, 2026-08-12:
-    // "минимальная сумма долга окно где руками вводить убери, возможность зажимать
-    // диапазоны сделать"). Верхняя граница - максимальный долг среди клиентов этого
-    // менеджера, пересчитывается каждый рендер, если руками ещё не двигали.
-    var rangeMax = Math.max(1, Math.ceil(allDebt.reduce(function(m,c){ return Math.max(m, c.balance||0); }, 0)));
-    if (mgrDebtRangeMax === null || mgrDebtRangeMax > rangeMax) mgrDebtRangeMax = rangeMax;
-    var rMin = Math.min(mgrDebtRangeMin, rangeMax), rMax = Math.min(mgrDebtRangeMax, rangeMax);
-    var fillL = rangeMax>0 ? rMin/rangeMax*100 : 0, fillR = rangeMax>0 ? rMax/rangeMax*100 : 100;
-    html += '<div style="margin-bottom:16px">'+
-      '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:2px">'+
-        '<span>Сумма долга</span><span style="color:var(--text);font-weight:600">'+mln(rMin)+' — '+mln(rMax)+'</span>'+
-      '</div>'+
-      '<div class="range-slider">'+
-        '<div class="range-slider-track"></div>'+
-        '<div class="range-slider-fill" style="left:'+fillL+'%;width:'+(fillR-fillL)+'%"></div>'+
-        '<input type="range" min="0" max="'+rangeMax+'" step="1" value="'+rMin+'" oninput="setMgrDebtRangeMin(this.value)">'+
-        '<input type="range" min="0" max="'+rangeMax+'" step="1" value="'+rMax+'" oninput="setMgrDebtRangeMax(this.value)">'+
-      '</div>'+
-    '</div>';
-
     var dFiltered = allDebt.filter(function(c){
-      if (mgrDebtBucket && !debtInBucket_(c.daysOverdue, mgrDebtBucket)) return false;
-      if ((c.balance||0) < rMin || (c.balance||0) > rMax) return false;
+      if (mgrDebtBuckets.size && !Array.from(mgrDebtBuckets).some(function(bk){ return debtInBucket_(c.daysOverdue, bk); })) return false;
       return true;
     }).sort(function(a,b){ return b.balance-a.balance; });
 
@@ -1770,7 +1740,7 @@ function renderMyPageManager(el, current, selectorHtml, d) {
           var contragentEsc = c.contragent.replace(/'/g,"\\'");
           var row = '<tr class="debt-row-toggle" onclick="toggleMgrDebtDetail(\''+contragentEsc+'\')" style="cursor:pointer">'+
             '<td><span class="muted" style="display:inline-block;width:14px">'+(isOpen?'▾':'▸')+'</span><b>'+c.contragent+'</b>'+byOrgLine+'</td>'+
-            '<td class="num red"><b>'+fmt(c.balance)+'</b></td>'+
+            '<td class="num"><b>'+fmt(c.balance)+'</b></td>'+
             '<td class="num '+ageCls(c.daysOverdue)+'">'+c.daysOverdue+'</td>'+
             '<td class="muted">'+(c.status||'—')+'</td>'+
           '</tr>';

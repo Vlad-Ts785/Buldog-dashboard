@@ -1389,33 +1389,23 @@ function renderMyPage() {
     var current = myPageCurrentEntry_();
     if (!current) { el.innerHTML = '<p style="color:var(--muted);padding:16px">Нет данных за этот месяц.</p>'; return; }
 
-    // Компактный виджет плана в шапке, справа от имени (2026-08-12, Влад - по скриншоту:
-    // "полоску плана переместить" в пустое место рядом с именем). Только для менеджеров -
-    // полная шкала с цифрами (planProgressBar) остаётся отдельным блоком ниже, это just
-    // "на взгляд" индикатор. Прогноз, не голый факт - факт середины месяца всегда низкий по
-    // определению, прогноз честнее отвечает на вопрос "успею ли к плану".
-    var planBadgeHtml = '';
-    if (current.type === 'manager') {
-      var pbRow = (D.orders.by_manager || []).filter(function(m){ return m.name === current.name; })[0];
-      if (pbRow && pbRow.plan > 0) {
-        var pbPaceRatio = calcPaceRatio_(D.orders.period);
-        var pbFaktForPace = pbRow.amount_thru_yesterday != null ? pbRow.amount_thru_yesterday : (pbRow.amount||0);
-        var pbForecastPct = Math.round(pbFaktForPace * pbPaceRatio / pbRow.plan * 100);
-        // Та же трёхзонная раскраска, что и полная шкала ниже (Влад: "0-50 красная, 50-80
-        // жёлтая, 80-100 зелёная") - один и тот же порог везде, не изобретаем отдельно.
-        var pbColor = pbForecastPct >= 80 ? '#1D9E75' : pbForecastPct >= 50 ? '#EF9F27' : '#E24B4A';
-        var pbLabel = pbForecastPct >= 80 ? 'план в норме' : pbForecastPct >= 50 ? 'нужно ускориться' : 'сильное отставание';
-        planBadgeHtml = '<div style="text-align:right;flex:none"><div style="font-size:24px;font-weight:800;color:'+pbColor+'">'+pbForecastPct+'%</div>'+
-          '<div style="font-size:11px;color:var(--muted);white-space:nowrap">прогноз плана - '+pbLabel+'</div></div>';
-      }
-    }
+    // Плейсхолдер для полного блока "Выполнение плана продаж" (2026-08-12, Влад, второй заход
+    // по скриншоту: "не просто процент после фамилии - должен быть ПОЛНЫМ блоком с полоской,
+    // рядом с фамилией, в том объёме, который остаётся после фамилии"). renderMyPage() не
+    // знает план/факт/прогноз конкретного менеджера (это считает renderMyPageManager из уже
+    // загруженной детализации) - вместо дублирования расчёта тут, оставляем метку-слот и даём
+    // renderMyPageManager подставить туда СВОЙ уже посчитанный planProgressBar() целиком
+    // (см. ниже по файлу, PLAN_WIDGET_SLOT.replace). Для логиста/Васина слот остаётся пустым
+    // комментарием - у них своя шкала на своём месте, без изменений.
+    var planWidgetSlot = '<!--PLAN_WIDGET_SLOT-->';
 
     // Шапка "личной страницы" - ФИО (что реально есть в данных, без выдумывания отчества) +
-    // должность, вместо сырого имени (Влад, 2026-08-10).
-    var headerHtml = '<div style="margin-bottom:'+(isManagerRole||isLogistRole?'16':'8')+'px;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">'+
-      '<div><div style="font-size:19px;font-weight:700;color:var(--text)">'+current.name+'</div>'+
+    // должность, вместо сырого имени (Влад, 2026-08-10). Плановый блок занимает всё, что
+    // остаётся после имени (flex:1) - на узких экранах естественно перенесётся ниже (flex-wrap).
+    var headerHtml = '<div style="margin-bottom:'+(isManagerRole||isLogistRole?'16':'8')+'px;display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap">'+
+      '<div style="flex:none"><div style="font-size:19px;font-weight:700;color:var(--text)">'+current.name+'</div>'+
       '<div style="font-size:13px;color:var(--muted);margin-top:2px">'+positionLabel(current.name, current.type)+'</div></div>'+
-      planBadgeHtml+
+      '<div style="flex:1 1 380px;min-width:320px">'+planWidgetSlot+'</div>'+
     '</div>';
 
     // Переключатель периода (2026-08-11) - "Текущий месяц" / "Прошлый месяц", доступен всем
@@ -1571,15 +1561,23 @@ function renderMyPageManager(el, current, selectorHtml, d) {
   // компактный виджет плана в шапке (см. renderMyPage) - не изобретаем ещё один вариант.
   function planZoneColor_(pct) { return pct>=80?COL.green:pct>=50?COL.amber:COL.red; }
   function planProgressBar(label, factPct, forecastPct, factVal, forecastVal, planVal, extraHtml) {
-    var color = planZoneColor_(factPct);
-    var statusColor = planZoneColor_(forecastPct);
+    // Цвет заливки - по ПРОГНОЗУ, не по факту (Влад, 2026-08-12: "цвет полосок должен быть в
+    // зависимости от тех параметров, которые я задал... при прогнозе 91% полоска должна быть
+    // зелёного цвета"). Факт середины месяца почти всегда низкий по определению (это вопрос
+    // календаря, не здоровья продаж) - красить по нему вводило в заблуждение: полоса выглядела
+    // тревожно красной, даже когда менеджер идёт по плану. Ширина заливки - по-прежнему факт
+    // (реальный прогресс в ₽), цвет - по прогнозу (статус "успеем ли").
+    var color = planZoneColor_(forecastPct);
+    var statusColor = color;
     var statusText = forecastPct>=105 ? 'Идём с опережением плана'
       : forecastPct>=80 ? 'Идём по плану'
       : forecastPct>=50 ? 'Есть отставание - нужно ускориться'
       : 'Сильное отставание от плана';
     var factBarW = Math.min(Math.max(factPct,0),100);
     var forecastPos = Math.min(Math.max(forecastPct,0),100);
-    var h = '<div class="card" style="margin-bottom:18px;padding:18px 20px">';
+    // margin-bottom:0 - карточка встраивается в шапку рядом с фамилией (см. PLAN_WIDGET_SLOT в
+    // renderMyPage()), отступ до следующего блока уже даёт обёртка шапки.
+    var h = '<div class="card" style="margin-bottom:0;padding:18px 20px">';
     h += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">';
     h += '<span style="font-size:14px;font-weight:600">'+label+'</span>';
     h += '<span style="font-size:13px;font-weight:700;color:'+statusColor+'">'+statusText+'</span>';
@@ -1667,6 +1665,19 @@ function renderMyPageManager(el, current, selectorHtml, d) {
       '<span style="font-size:14px;font-weight:700">Итого</span>'+
       '<span style="font-size:16px;font-weight:700;color:'+COL.green+'">'+fr(val)+'</span></div>';
   }
+  // Рекомендация до следующей ступени оклада (2026-08-12, Влад: "хочу рекомендацию до
+  // следующего уровня - столько-то выручки, и будет оклад такой-то в зависимости от нашего
+  // градиента"). Пороги СТРОГО те же, что в okladByRev() (единственный источник истины для
+  // самого расчёта, module scope выше по файлу) - здесь только "подглядываем" следующую
+  // ступень, ничего не пересчитываем заново.
+  var OKLAD_TIERS_ = [ {threshold:2000000, oklad:30000}, {threshold:5000000, oklad:50000}, {threshold:8000000, oklad:100000}, {threshold:10000000, oklad:150000} ];
+  function okladNextTierNote_(total) {
+    var next = null;
+    for (var i=0; i<OKLAD_TIERS_.length; i++) { if ((total||0) < OKLAD_TIERS_[i].threshold) { next = OKLAD_TIERS_[i]; break; } }
+    if (!next) return '';
+    var needed = next.threshold - (total||0);
+    return '<div style="font-size:11.5px;color:var(--muted);padding:0 0 8px">До следующей ступени не хватает <b style="color:var(--text)">'+mln(needed)+'</b> оборота - оклад вырастет до <b style="color:var(--text)">'+fr(next.oklad)+'</b></div>';
+  }
   // Расчёт зарплаты - "такой же длинный", прямо с вкладки "Зарплата" (Влад, 2026-08-12) - те
   // же компоненты calcMgr, в стиле строка-значение (как у остальных личных страниц), а не
   // многоколоночной таблицей отдела - тут один человек, таблица на весь отдел избыточна.
@@ -1674,7 +1685,7 @@ function renderMyPageManager(el, current, selectorHtml, d) {
   if (!sal) {
     salaryBody = '<div style="font-size:13px;color:var(--muted)">Нет данных для расчёта за этот период.</div>';
   } else if (sal.newRules) {
-    var srows = salRow('Оклад (по ступени оборота '+mln(sal.total)+')', sal.oklad);
+    var srows = salRow('Оклад (по ступени оборота '+mln(sal.total)+')', sal.oklad) + okladNextTierNote_(sal.total);
     var ownCost = sal.ownRev - sal.ownProfitBase;
     srows += salRow('Комиссия своего парка ('+(sal.rate*100).toString().replace('.',',')+'% × '+fr(sal.ownProfitBase)+
       (ownCost>1 ? ', база = выручка '+fr(sal.ownRev)+' минус затраты '+fr(ownCost) : '')+')', sal.ownComm);
@@ -1687,7 +1698,7 @@ function renderMyPageManager(el, current, selectorHtml, d) {
     if (sal.bonus15m) srows += salRow('Премия за оборот &gt;15М', sal.bonus15m);
     salaryBody = srows + salTotalRow(sal.total_sal);
   } else {
-    var srows2 = salRow('Оклад', sal.oklad);
+    var srows2 = salRow('Оклад', sal.oklad) + okladNextTierNote_(sal.total);
     srows2 += salRow('Комиссия своего парка ('+(sal.rate*100).toString().replace('.',',')+'% × '+fr(sal.ownRev)+')', sal.ownComm);
     if (sal.isPrus) {
       srows2 += salRow('Найм ('+Math.round((sal.prusHiredPct||0)*100)+'% от '+fr(sal.hiredMargin)+')', sal.hiredBonus);
@@ -1701,7 +1712,13 @@ function renderMyPageManager(el, current, selectorHtml, d) {
     salaryBody = srows2 + salTotalRow(sal.total_sal);
   }
 
-  var html = selectorHtml;
+  // Полный блок "Выполнение плана продаж" встраивается в шапку рядом с фамилией, в слот
+  // PLAN_WIDGET_SLOT из renderMyPage() (2026-08-12, второй заход по скриншоту Влада: "не
+  // нравится, что там просто процент после фамилии - должен быть полным блоком с полоской, в
+  // том объёме, который остаётся после фамилии"). Раньше карточка шла отдельным блоком ниже -
+  // теперь ТОЛЬКО в шапке, дубля нет.
+  var planCardHtml = planProgressBar('Выполнение плана продаж', planPct, planForecastPct, fakt, planForecast, plan, dayRateHtml);
+  var html = selectorHtml.replace('<!--PLAN_WIDGET_SLOT-->', planCardHtml);
 
   // 5 задач на день от ИИ (2026-08-12, см. plans/2026-08-12-ai-daily-tasks-manager.md) - самое
   // первое, что менеджер видит, открыв страницу утром. Только для текущего месяца - "задачи на
@@ -1734,9 +1751,6 @@ function renderMyPageManager(el, current, selectorHtml, d) {
     html += '<div class="card" style="margin-bottom:18px;padding:16px 18px">'+
       '<div style="font-size:14px;font-weight:600;margin-bottom:6px">🤖 Задачи на сегодня (ИИ)</div>'+aiBody+'</div>';
   }
-
-  // Широкая шкала: факт + прогноз выполнения плана + таргет по рабочим/выходным дням
-  html += planProgressBar('Выполнение плана продаж', planPct, planForecastPct, fakt, planForecast, plan, dayRateHtml);
 
   // Расчёт зарплаты - сразу после плана (Влад, 2026-08-12: "сразу после 4 блоков с
   // информацией" - тут блоков-KPI больше нет вовсе, зарплата идёт вторым блоком).

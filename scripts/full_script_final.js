@@ -1911,6 +1911,52 @@ function parseDebtRawRows_(rawData) {
   return result.sort(function(a, b) { return b.balance - a.balance; });
 }
 
+// ВРЕМЕННАЯ ДИАГНОСТИКА (2026-08-12) - importDebtReport() у Влада вернул "после разбора и
+// фильтрации не осталось ни одного клиента" на реальном сегодняшнем письме 1С, хотя раньше
+// парсился нормально - похоже, 1С поменяла формат выгрузки. Ничего не пишет и не ломает -
+// только логирует структуру файла, чтобы понять, что именно изменилось. Запускать вручную
+// (Выполнить -> debugDumpDebtReport) из редактора Apps Script, смотреть "Журнал выполнения".
+// УДАЛИТЬ после диагностики (см. правило 3 в CLAUDE.md - одноразовый код).
+function debugDumpDebtReport() {
+  const query = 'subject:"Отчет по дебиторской задолженности" has:attachment newer_than:2d';
+  const threads = GmailApp.search(query);
+  Logger.log('Найдено писем (threads): ' + threads.length);
+  if (!threads.length) { Logger.log('Письмо не найдено - дальше смотреть нечего'); return; }
+
+  const msgs = [];
+  for (const t of threads) for (const m of t.getMessages()) msgs.push(m);
+  msgs.sort(function(a, b) { return b.getDate() - a.getDate(); });
+  const latest = msgs[0];
+  Logger.log('Последнее письмо: "' + latest.getSubject() + '" от ' + latest.getDate());
+
+  let att = null;
+  for (const a of latest.getAttachments()) {
+    Logger.log('Вложение: ' + a.getName() + ' (' + a.getContentType() + ', ' + a.getSize() + ' байт)');
+    if (a.getName().endsWith('.xlsx') || a.getName().endsWith('.xls')) { att = a; break; }
+  }
+  if (!att) { Logger.log('Excel-вложение не найдено среди вложений выше'); return; }
+
+  const tmp = Drive.Files.insert(
+    { title: 'tmp_debug_debt_' + Date.now(), mimeType: MimeType.GOOGLE_SHEETS },
+    att.copyBlob()
+  );
+  try {
+    const sheets = SpreadsheetApp.openById(tmp.id).getSheets();
+    Logger.log('Листов в файле: ' + sheets.length + ' (' + sheets.map(function(s){ return s.getName(); }).join(', ') + ')');
+    const data = sheets[0].getDataRange().getValues();
+    Logger.log('Размер первого листа: ' + data.length + ' строк x ' + (data[0] ? data[0].length : 0) + ' колонок');
+    // Парсер ожидает данные с индекса 9 (10-я строка Excel) - печатаем первые 15 строк
+    // целиком, чтобы увидеть, не сдвинулась ли шапка/формат.
+    for (let i = 0; i < Math.min(15, data.length); i++) {
+      Logger.log('Строка ' + (i + 1) + ': ' + JSON.stringify(data[i]));
+    }
+    const parsed = parseDebtRawRows_(data);
+    Logger.log('parseDebtRawRows_ вернул клиентов: ' + parsed.length);
+  } finally {
+    Drive.Files.remove(tmp.id);
+  }
+}
+
 function importDebtReport() {
   const query = 'subject:"Отчет по дебиторской задолженности" has:attachment newer_than:2d';
   const threads = GmailApp.search(query);

@@ -6750,6 +6750,22 @@ function calcPaceRatioServer_(period) {
   return dayOfMonth > 0 ? (dim / dayOfMonth) : 1;
 }
 
+// Русская дата "18 июля" (год - только если НЕ текущий, чтобы не загромождать свежие даты)
+// вместо машинного "2026-07-18" (2026-08-12, Влад: "вместо 07.17.2026 лучше писать 18 июля,
+// так человеку понятнее" - модель, получив голый ISO-формат, один раз перепутала его на
+// американский MM/DD/YYYY). Честный порт fmtDateRu()/RU_MONTHS_GENITIVE из фронтенда - даты
+// форматируются ЗДЕСЬ, на бэкенде, а не оставляются модели на откуп, чтобы не рисковать вторым
+// таким же перепутыванием формата.
+const RU_MONTHS_GENITIVE_ = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+function fmtDateRuServer_(dateStr) {
+  if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(String(dateStr))) return dateStr || '';
+  const parts = String(dateStr).split('-');
+  const y = parseInt(parts[0], 10), m = parseInt(parts[1], 10), d = parseInt(parts[2], 10);
+  if (!m || !d || m < 1 || m > 12) return dateStr;
+  const currentYear = new Date().getFullYear();
+  return d + ' ' + RU_MONTHS_GENITIVE_[m-1] + (y !== currentYear ? ' ' + y : '');
+}
+
 // Компактный набор фактов о менеджере для промпта ИИ - ТОЛЬКО из уже существующих бэкенд-
 // функций (не дублируем computeDebtAggregates_/фронтенд-агрегаты, достаточно топ-должников и
 // итоговых сумм для содержательного совета).
@@ -6803,7 +6819,7 @@ function buildManagerAiContext_(ss, orders, managerName, period) {
     // тем-то тем-то, попробуй связаться, узнать как дела" - без даты последнего заказа модель
     // не может так написать, только сухую статистику).
     lostCustomers = computeLostCustomersForManager_(ss, monthKey, managerName, isLive).slice(0, 8)
-      .map(function(c) { return attachDebtFlag_(c.name, { name: c.name, last_order_date: c.last_date, days_since: c.days_since, amount_total: Math.round(c.amount_total || 0) }); });
+      .map(function(c) { return attachDebtFlag_(c.name, { name: c.name, last_order_date: fmtDateRuServer_(c.last_date), days_since: c.days_since, amount_total: Math.round(c.amount_total || 0) }); });
   } catch (lostErr) { lostCustomers = []; } // не критично для остального контекста
 
   let debtSummary = { total_balance: 0, debtor_count: mine.length, top_debtors: [] };
@@ -6825,11 +6841,15 @@ function buildManagerAiContext_(ss, orders, managerName, period) {
   // чтобы модель не рекомендовала "составить претензию" тому, у кого претензия уже стоит
   // (см. правила эскалации в промпте).
   debtSummary.top_debtors = actionable.slice(0, 6).map(function(c) {
+    // Сортировка - на СЫРОЙ ISO-дате (2026-07-18), русский формат применяется ПОСЛЕДНИМ шагом
+    // - иначе "18 июля"/"5 мая" сравнивались бы как текст (алфавитный порядок месяцев не
+    // совпадает с хронологическим) и топ-3 "самых старых" документа выбирались бы неверно.
     const unpaidDocs = (c.unpaidDocs || [])
       .map(function(d) { return { date: d.date, org: d.org, desc: d.desc, amount_outstanding: Math.round((d.debt || 0) - (d.covered || 0)) }; })
       .filter(function(d) { return d.amount_outstanding > 0; })
       .sort(function(a, b) { return String(a.date).localeCompare(String(b.date)); })
-      .slice(0, 3);
+      .slice(0, 3)
+      .map(function(d) { return { date: fmtDateRuServer_(d.date), org: d.org, desc: d.desc, amount_outstanding: d.amount_outstanding }; });
     return { name: c.contragent, balance: Math.round(c.balance || 0), days_overdue: c.daysOverdue, status: c.status || '', unpaid_docs: unpaidDocs };
   });
 
@@ -6839,11 +6859,17 @@ function buildManagerAiContext_(ss, orders, managerName, period) {
   // функция вызывается из doGet с "сырым" orders, не через buildManagerView_). Сортировка по
   // дате - старые проблемные заказы первыми (та же логика приоритета, что везде на дашборде).
   const surLowerDocs = managerName.trim().split(' ')[0].toLowerCase();
+  // unpaid_balance добавлено (2026-08-12, Влад разобрал живую генерацию по ПРОЕКТ-ДЕВЕЛОПМЕНТ
+  // ЦВВ: "оплата пойдёт медленнее" неуместно, если у клиента вообще нет ДЗ - "оплата либо
+  // произойдёт, либо нет, нужно сопоставить с текущей дебиторкой... если долга нет, тут просто
+  // документальный порядок закрытия сделки") - та же кросс-ссылка с debtByName, что уже стоит
+  // на top_customers/lost_customers, чтобы модель различала два РАЗНЫХ обоснования для одной и
+  // той же задачи "провести документы" в зависимости от того, есть у клиента долг или нет.
   const problemExamples = ((orders.problem_orders || [])
     .filter(function(p) { return String(p.mgr || '').trim().split(' ')[0].toLowerCase() === surLowerDocs; }))
     .sort(function(a, b) { return String(a.date||'').localeCompare(String(b.date||'')); })
     .slice(0, 5)
-    .map(function(p) { return { id: p.id, date: p.date, customer: p.customer, amount: Math.round(p.amount || 0), status: p.status }; });
+    .map(function(p) { return attachDebtFlag_(p.customer, { id: p.id, date: fmtDateRuServer_(p.date), customer: p.customer, amount: Math.round(p.amount || 0), status: p.status }); });
 
   return {
     manager: managerName,
@@ -6879,9 +6905,14 @@ function buildAiTasksPrompt_(managerName, context) {
     'менеджер МОЖЕТ ускорить (напомнить, чтобы провели/оформили быстрее). Формулируй как ' +
     '"ускорить проведение уже готовых документов", а не "собери документы".\n' +
     '- Непроведённые/неоформленные документы НЕ "держат выручку" сами по себе (факт продаж ' +
-    'уже учтён) - они снижают ВЕРОЯТНОСТЬ БЫСТРОЙ ОПЛАТЫ, потому что клиент обычно платит по ' +
-    'закрытому документу (акту/УПД), который ему отправили. Объясняй причину именно так, не ' +
-    'придумывай другую.\n' +
+    'уже учтён). ПРИЧИНА, почему их важно провести, ЗАВИСИТ от того, есть ли у ЭТОГО клиента ' +
+    'долг (documents.examples[i].unpaid_balance) - НЕ пиши одну и ту же формулировку для всех:\n' +
+    '  * Если unpaid_balance ЕСТЬ (клиент уже должен) - можно писать, что закрытие документов ' +
+    'снижает риск задержки оплаты (клиент обычно платит по закрытому акту/УПД).\n' +
+    '  * Если unpaid_balance НЕТ (у клиента сейчас нет долга по ДЗ) - НЕ утверждай, что "оплата ' +
+    'пойдёт медленнее/быстрее" - это не подтверждено данными, звучит как выдумка. Обоснование - ' +
+    'просто правильный документооборот/порядок закрытия сделки (акт должен быть оформлен и ' +
+    'отправлен клиенту, это не про риск неоплаты).\n' +
     '- debt.top_debtors[].unpaid_docs - конкретные неоплаченные документы по каждому ' +
     'должнику (дата, юрлицо, номер/описание, сумма к оплате). Если они есть - ссылайся на ' +
     'САМЫЙ СТАРЫЙ документ по имени/номеру и дате, а не просто на общий баланс.\n' +
@@ -6926,6 +6957,11 @@ function buildAiTasksPrompt_(managerName, context) {
     '- ФОРМАТ ЧИСЕЛ: все суммы в рублях пиши с пробелом как разделителем тысяч, как везде на ' +
     'дашборде (например, "7 618 250", а НЕ "7618250"; "381 750", а НЕ "381750") - слитные числа ' +
     'от 4 цифр тяжело читать.\n' +
+    '- ФОРМАТ ДАТ: все даты (last_order_date, unpaid_docs[].date, documents.examples[].date) ' +
+    'УЖЕ отформатированы по-русски (например "18 июля") - используй их РОВНО КАК ДАНЫ в тексте ' +
+    'задач, ничего не меняй и не переводи в другой формат (не пиши "18.07.2026", не пиши ' +
+    '"07/18/2026", не переставляй числа местами) - в прошлый раз при попытке самому ' +
+    'переформатировать дату получился нечитаемый и неверный результат.\n' +
     '- НЕ указывай в "plan_advice" конкретные суммы или проценты выполнения плана (факт/' +
     'прогноз/план из plan.*) - эти цифры УЖЕ показаны прямо на странице живым виджетом рядом с ' +
     'твоим текстом и обновляются в реальном времени в течение дня (несколько раз в день ' +

@@ -1704,12 +1704,20 @@ function renderMyPageManager(el, current, selectorHtml, d) {
     return '<div style="font-size:11.5px;color:var(--muted);padding:0 0 8px">До следующей ступени не хватает <b style="color:var(--text)">'+mln(needed)+'</b> оборота - оклад вырастет до <b style="color:var(--text)">'+fr(next.oklad)+'</b></div>';
   }
   // "Итого по прогнозу" (2026-08-12, Влад: "нужно ещё какая ЗП будет по прогнозу исходя из
-  // текущей тенденции") - та же идея, что прогноз плана выше (факт × paceRatio), только
-  // применённая к зарплате: масштабируем числовые поля строки менеджера/логиста на paceRatio и
-  // прогоняем через ТУ ЖЕ calcMgr() - формула не дублируется. Это заодно честно подхватывает
-  // переход на следующую ступень оклада/премию >15М, если прогноз их пересекает - без отдельной
-  // логики для каждого случая. Только для текущего месяца - для закрытого периода факт уже
-  // финальный, прогнозировать нечего.
+  // текущей тенденции") - та же идея, что прогноз плана выше, только применённая к зарплате:
+  // масштабируем числовые поля строки менеджера/логиста и прогоняем через ТУ ЖЕ calcMgr() -
+  // формула не дублируется, заодно честно подхватывает переход ступени оклада/премию >15М.
+  //
+  // ФИКС 2026-08-13 (Влад: "прогноз 9.4 млн по полоске, а комиссия своего парка считается от
+  // 9 763 365 - не бьются цифры, хотя должны; оклад по ступени 10.5 млн, хотя прогноз меньше
+  // 10 млн") - раньше здесь масштабировался СЫРОЙ paceRatio × сегодняшний живой m.amount
+  // (растёт в течение дня по мере новых заказов), а полоска плана выше считает прогноз от
+  // m.amount_thru_yesterday (факт ПО ВЧЕРА - деньги, "закрытые" на вчера, тот же принцип, что
+  // и calcPaceRatio_ везде на дашборде: "менеджеры вносят заказы сегодня за вчера, темп считаем
+  // от вчера"). Разные базы у одного и того же "прогноза" - вот и разъехались 9.4 млн и
+  // 10.5 млн. effectiveRatio - тот же коэффициент, что уже привёл факт к ИМЕННО planForecast
+  // (уже показанному на шкале), поэтому scaled.amount будет РОВНО planForecast, а не отдельно
+  // посчитанным числом - и ступень оклада, и комиссия своего парка теперь бьются с шкалой.
   function scaleRowForForecast_(row, ratio) {
     if (!row) return null;
     var scaled = {};
@@ -1718,8 +1726,9 @@ function renderMyPageManager(el, current, selectorHtml, d) {
   }
   var salForecast = null;
   if (!myPagePeriod && sal && paceRatio > 1.001) {
-    var mForecastRow = scaleRowForForecast_(getM(sur), paceRatio);
-    var lForecastRow = scaleRowForForecast_(getL(sur), paceRatio);
+    var effectiveRatio = fakt > 0 ? (planForecast / fakt) : paceRatio;
+    var mForecastRow = scaleRowForForecast_(getM(sur), effectiveRatio);
+    var lForecastRow = scaleRowForForecast_(getL(sur), effectiveRatio);
     function getMForecast_(s) { return s.toLowerCase()===sur.toLowerCase() ? mForecastRow : getM(s); }
     function getLForecast_(s) { return s.toLowerCase()===sur.toLowerCase() ? lForecastRow : getL(s); }
     salForecast = calcMgr(sur, true, getMForecast_, getLForecast_, useNewRules);

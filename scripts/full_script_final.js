@@ -6749,9 +6749,33 @@ function buildManagerAiContext_(ss, orders, managerName, period) {
   const forecast = faktForPace * paceRatio;
 
   const myDetail = (orders.by_manager_detail || {})[managerName] || null;
-  const topCustomers = ((myDetail && myDetail.top_customers) || []).slice(0, 8)
-    .map(function(c) { return { name: c.name, amount: Math.round(c.amount || 0), orders: c.orders || 0 }; });
   const doc = (myDetail && myDetail.doc) || {};
+
+  // ДЗ этого менеджера - собирается ПЕРВОЙ (до топ/пропавших клиентов), потому что нужна для
+  // кросс-ссылки "у этого клиента есть непогашенный долг" ниже (2026-08-12, Влад - разбор
+  // рекомендации по МИК-СЕРВИС+: "очень сомнительно рекомендовать увеличивать объём с клиентом,
+  // который не оплатил предыдущий - только при условии оплаты по уже сделанному объёму").
+  let mine = [];
+  try {
+    const dd = getDebtData(ss);
+    if (dd && dd.by_customer) {
+      const surLower = managerName.trim().split(' ')[0].toLowerCase();
+      mine = dd.by_customer.filter(function(c) { return String(c.manager || '').trim().split(' ')[0].toLowerCase() === surLower; });
+    }
+  } catch (debtErr) { mine = []; } // ДЗ не критична для остального контекста
+  // Долг по имени контрагента (ЛЮБОЙ положительный баланс, включая мёртвый/чужой-отдел - для
+  // предупреждения "не увеличивай объём, пока не оплачено" не важно, взыскиваемый ли долг,
+  // важен сам факт "уже должен").
+  const debtByName = {};
+  mine.forEach(function(c) { if ((c.balance || 0) > 0) debtByName[c.contragent] = { balance: Math.round(c.balance), days_overdue: c.daysOverdue }; });
+  function attachDebtFlag_(name, entry) {
+    const d = debtByName[name];
+    if (d) entry.unpaid_balance = d.balance;
+    return entry;
+  }
+
+  const topCustomers = ((myDetail && myDetail.top_customers) || []).slice(0, 8)
+    .map(function(c) { return attachDebtFlag_(c.name, { name: c.name, amount: Math.round(c.amount || 0), orders: c.orders || 0 }); });
 
   const monthKey = period || Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
   const isLive = !period;
@@ -6761,43 +6785,35 @@ function buildManagerAiContext_(ss, orders, managerName, period) {
     // тем-то тем-то, попробуй связаться, узнать как дела" - без даты последнего заказа модель
     // не может так написать, только сухую статистику).
     lostCustomers = computeLostCustomersForManager_(ss, monthKey, managerName, isLive).slice(0, 8)
-      .map(function(c) { return { name: c.name, last_order_date: c.last_date, days_since: c.days_since, amount_total: Math.round(c.amount_total || 0) }; });
+      .map(function(c) { return attachDebtFlag_(c.name, { name: c.name, last_order_date: c.last_date, days_since: c.days_since, amount_total: Math.round(c.amount_total || 0) }); });
   } catch (lostErr) { lostCustomers = []; } // не критично для остального контекста
 
-  let debtSummary = { total_balance: 0, debtor_count: 0, top_debtors: [] };
-  try {
-    const dd = getDebtData(ss);
-    if (dd && dd.by_customer) {
-      const surLower = managerName.trim().split(' ')[0].toLowerCase();
-      const mine = dd.by_customer.filter(function(c) { return String(c.manager || '').trim().split(' ')[0].toLowerCase() === surLower; });
-      debtSummary.debtor_count = mine.length;
-      debtSummary.total_balance = Math.round(mine.reduce(function(s, c) { return s + (c.balance || 0); }, 0));
-      // Отбор для ИИ-задач (2026-08-12, Влад разобрал реальную генерацию - "Гермесавто, долг
-      // 827 дней - бесполезная рекомендация 'нужен личный дожим'"): долги 600+ дней (мёртвая
-      // корзина, DEBT_AGE_LIMIT_DAYS) в задачи не попадают вообще - там уже не работает
-      // "дожим", это отдельная категория, которую менеджер не может сдвинуть звонком. Долги
-      // "Долг отдела кранов/экскаваторов" - тоже не его (см. DEBT_STATUS_EXCLUDE_FROM_TOTAL,
-      // тот же приём, что фронтенд уже применяет к суммам).
-      const actionable = mine.filter(function(c) {
-        return (c.daysOverdue || 0) < DEBT_AGE_LIMIT_DAYS && DEBT_STATUS_EXCLUDE_FROM_TOTAL.indexOf(c.status) < 0;
-      });
-      // unpaid_docs добавлено (2026-08-12, Влад: "по Геоспецстрою можно написать, что нужно
-      // получить оплату хотя бы 500 тыс по УПД 30 июня 2026 Бульдог Реализация... 00БП-004941"
-      // - без документов модель может ссылаться только на общий баланс, не на конкретный акт).
-      // Топ-3 САМЫХ СТАРЫХ непокрытых документа - приоритет "внимание в первую очередь", тот
-      // же принцип, что и на вкладке ДЗ (см. buildDebtDocsHtml_). status добавлен (2026-08-12) -
-      // чтобы модель не рекомендовала "составить претензию" тому, у кого претензия уже стоит
-      // (см. правила эскалации в промпте).
-      debtSummary.top_debtors = actionable.slice(0, 6).map(function(c) {
-        const unpaidDocs = (c.unpaidDocs || [])
-          .map(function(d) { return { date: d.date, org: d.org, desc: d.desc, amount_outstanding: Math.round((d.debt || 0) - (d.covered || 0)) }; })
-          .filter(function(d) { return d.amount_outstanding > 0; })
-          .sort(function(a, b) { return String(a.date).localeCompare(String(b.date)); })
-          .slice(0, 3);
-        return { name: c.contragent, balance: Math.round(c.balance || 0), days_overdue: c.daysOverdue, status: c.status || '', unpaid_docs: unpaidDocs };
-      });
-    }
-  } catch (debtErr) { /* ДЗ не критична для остального контекста */ }
+  let debtSummary = { total_balance: 0, debtor_count: mine.length, top_debtors: [] };
+  debtSummary.total_balance = Math.round(mine.reduce(function(s, c) { return s + (c.balance || 0); }, 0));
+  // Отбор для ИИ-задач (2026-08-12, Влад разобрал реальную генерацию - "Гермесавто, долг
+  // 827 дней - бесполезная рекомендация 'нужен личный дожим'"): долги 600+ дней (мёртвая
+  // корзина, DEBT_AGE_LIMIT_DAYS) в задачи не попадают вообще - там уже не работает
+  // "дожим", это отдельная категория, которую менеджер не может сдвинуть звонком. Долги
+  // "Долг отдела кранов/экскаваторов" - тоже не его (см. DEBT_STATUS_EXCLUDE_FROM_TOTAL,
+  // тот же приём, что фронтенд уже применяет к суммам).
+  const actionable = mine.filter(function(c) {
+    return (c.daysOverdue || 0) < DEBT_AGE_LIMIT_DAYS && DEBT_STATUS_EXCLUDE_FROM_TOTAL.indexOf(c.status) < 0;
+  });
+  // unpaid_docs добавлено (2026-08-12, Влад: "по Геоспецстрою можно написать, что нужно
+  // получить оплату хотя бы 500 тыс по УПД 30 июня 2026 Бульдог Реализация... 00БП-004941"
+  // - без документов модель может ссылаться только на общий баланс, не на конкретный акт).
+  // Топ-3 САМЫХ СТАРЫХ непокрытых документа - приоритет "внимание в первую очередь", тот
+  // же принцип, что и на вкладке ДЗ (см. buildDebtDocsHtml_). status добавлен (2026-08-12) -
+  // чтобы модель не рекомендовала "составить претензию" тому, у кого претензия уже стоит
+  // (см. правила эскалации в промпте).
+  debtSummary.top_debtors = actionable.slice(0, 6).map(function(c) {
+    const unpaidDocs = (c.unpaidDocs || [])
+      .map(function(d) { return { date: d.date, org: d.org, desc: d.desc, amount_outstanding: Math.round((d.debt || 0) - (d.covered || 0)) }; })
+      .filter(function(d) { return d.amount_outstanding > 0; })
+      .sort(function(a, b) { return String(a.date).localeCompare(String(b.date)); })
+      .slice(0, 3);
+    return { name: c.contragent, balance: Math.round(c.balance || 0), days_overdue: c.daysOverdue, status: c.status || '', unpaid_docs: unpaidDocs };
+  });
 
   // Примеры проблемных заказов ЭТОГО менеджера (2026-08-12, Влад: "тут можно ссылаться на
   // конкретные заказы, как по дебиторке") - тот же источник (orders.problem_orders), что уже
@@ -6869,12 +6885,29 @@ function buildAiTasksPrompt_(managerName, context) {
     'задачи с category="дебиторка" - не выдумывай, просто не бери эту тему сегодня и перенеси ' +
     'слот на "выручка"/"документы".\n' +
     '- lost_customers[].last_order_date - когда именно менеджер последний раз работал с этим ' +
-    'клиентом. Формулируй как напоминание из истории отношений: "ты работал с [клиент] до ' +
-    '[дата], свяжись, узнай как дела и нужны ли перевозки" - а не сухую статистику потерь.\n' +
+    'клиентом. Формулируй как напоминание из истории отношений: "с [клиент] ты в последний раз ' +
+    'работал(а) [дата], свяжись, узнай как дела и нужны ли перевозки" - а не сухую статистику ' +
+    'потерь. Слово "возобнови работу с..." - хорошо, слово "верни клиента" - НЕ используй, ' +
+    'звучит неестественно (клиент не вещь, которую "возвращают").\n' +
     '- Для активных клиентов с хорошей динамикой (top_customers) - формулируй позитивно: ' +
-    '"с [клиент] хорошо идёт работа, стоит предложить увеличить объёмы" - не как претензию.\n' +
+    '"с [клиент] хорошо идёт работа, стоит предложить увеличить объёмы" - не как претензию. НО ' +
+    'если у top_customers[i].unpaid_balance есть значение (клиент нам должен) - НЕ рекомендуй ' +
+    'просто нарастить объём без оговорки: сомнительно наращивать работу с клиентом, который не ' +
+    'оплатил уже сделанное. Формулируй с условием - например, "сначала закрыть оплату ' +
+    '[сумма], потом предлагать доп. объём" или совместить оба действия в одной задаче (собрать ' +
+    'оплату И только затем предложить рост). То же самое для lost_customers[i].unpaid_balance - ' +
+    'если у пропавшего клиента есть долг, в задаче на реактивацию упомяни это.\n' +
     '- documents.examples - конкретные проблемные заказы (номер, дата, клиент, сумма, статус) ' +
     'для задач по документам - ссылайся на них, а не на голые счётчики.\n' +
+    '- ГРАМОТНОСТЬ И РОД: определи пол менеджера по отчеству/имени в поле "manager" - отчество ' +
+    'на "-вна"/"-чна" (Анатольевна, Владимировна) или явно женское имя = ЖЕНСКИЙ род, "-вич"/' +
+    '"-ич" (Анатольевич, Владимирович) = МУЖСКОЙ род. Используй ПРАВИЛЬНЫЙ род во всех глаголах ' +
+    'прошедшего времени и кратких прилагательных, обращённых к менеджеру на "ты" (например, ' +
+    '"ты работала"/"ты работал", "ты сделала"/"ты сделал") - не используй мужской род по ' +
+    'умолчанию для женщины.\n' +
+    '- ФОРМАТ ЧИСЕЛ: все суммы в рублях пиши с пробелом как разделителем тысяч, как везде на ' +
+    'дашборде (например, "7 618 250", а НЕ "7618250"; "381 750", а НЕ "381750") - слитные числа ' +
+    'от 4 цифр тяжело читать.\n' +
     '- НЕ указывай в "plan_advice" конкретные суммы или проценты выполнения плана (факт/' +
     'прогноз/план из plan.*) - эти цифры УЖЕ показаны прямо на странице живым виджетом рядом с ' +
     'твоим текстом и обновляются в реальном времени в течение дня (несколько раз в день ' +

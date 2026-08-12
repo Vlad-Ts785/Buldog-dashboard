@@ -6735,6 +6735,12 @@ function calcPaceRatioServer_(period) {
 // Компактный набор фактов о менеджере для промпта ИИ - ТОЛЬКО из уже существующих бэкенд-
 // функций (не дублируем computeDebtAggregates_/фронтенд-агрегаты, достаточно топ-должников и
 // итоговых сумм для содержательного совета).
+//
+// Уточнения от 2026-08-12 (Влад, разбор первой реальной генерации - см.
+// plans/2026-08-12-ai-daily-tasks-manager.md, "Уточнения"): модель писала общие/неточные
+// формулировки, потому что в контексте не хватало ДЕТАЛЕЙ (конкретный номер и дата документа
+// по должнику, дата последнего заказа у пропавшего клиента, примеры конкретных проблемных
+// заказов) - добавлены ниже, чтобы задачи ссылались на реальные записи, а не на голые суммы.
 function buildManagerAiContext_(ss, orders, managerName, period) {
   const mgrRow = (orders.by_manager || []).filter(function(m) { return m.name === managerName; })[0] || {};
   const plan = mgrRow.plan || 0, fakt = mgrRow.amount || 0;
@@ -6751,8 +6757,11 @@ function buildManagerAiContext_(ss, orders, managerName, period) {
   const isLive = !period;
   let lostCustomers = [];
   try {
+    // last_date добавлено (2026-08-12, Влад: "должно быть - ты тогда-то тогда-то работал с
+    // тем-то тем-то, попробуй связаться, узнать как дела" - без даты последнего заказа модель
+    // не может так написать, только сухую статистику).
     lostCustomers = computeLostCustomersForManager_(ss, monthKey, managerName, isLive).slice(0, 8)
-      .map(function(c) { return { name: c.name, days_since: c.days_since, amount_total: Math.round(c.amount_total || 0) }; });
+      .map(function(c) { return { name: c.name, last_order_date: c.last_date, days_since: c.days_since, amount_total: Math.round(c.amount_total || 0) }; });
   } catch (lostErr) { lostCustomers = []; } // не критично для остального контекста
 
   let debtSummary = { total_balance: 0, debtor_count: 0, top_debtors: [] };
@@ -6763,10 +6772,33 @@ function buildManagerAiContext_(ss, orders, managerName, period) {
       const mine = dd.by_customer.filter(function(c) { return String(c.manager || '').trim().split(' ')[0].toLowerCase() === surLower; });
       debtSummary.debtor_count = mine.length;
       debtSummary.total_balance = Math.round(mine.reduce(function(s, c) { return s + (c.balance || 0); }, 0));
-      debtSummary.top_debtors = mine.slice(0, 6)
-        .map(function(c) { return { name: c.contragent, balance: Math.round(c.balance || 0), days_overdue: c.daysOverdue }; });
+      // unpaid_docs добавлено (2026-08-12, Влад: "по Геоспецстрою можно написать, что нужно
+      // получить оплату хотя бы 500 тыс по УПД 30 июня 2026 Бульдог Реализация... 00БП-004941"
+      // - без документов модель может ссылаться только на общий баланс, не на конкретный акт).
+      // Топ-3 САМЫХ СТАРЫХ непокрытых документа - приоритет "внимание в первую очередь", тот
+      // же принцип, что и на вкладке ДЗ (см. buildDebtDocsHtml_).
+      debtSummary.top_debtors = mine.slice(0, 6).map(function(c) {
+        const unpaidDocs = (c.unpaidDocs || [])
+          .map(function(d) { return { date: d.date, org: d.org, desc: d.desc, amount_outstanding: Math.round((d.debt || 0) - (d.covered || 0)) }; })
+          .filter(function(d) { return d.amount_outstanding > 0; })
+          .sort(function(a, b) { return String(a.date).localeCompare(String(b.date)); })
+          .slice(0, 3);
+        return { name: c.contragent, balance: Math.round(c.balance || 0), days_overdue: c.daysOverdue, unpaid_docs: unpaidDocs };
+      });
     }
   } catch (debtErr) { /* ДЗ не критична для остального контекста */ }
+
+  // Примеры проблемных заказов ЭТОГО менеджера (2026-08-12, Влад: "тут можно ссылаться на
+  // конкретные заказы, как по дебиторке") - тот же источник (orders.problem_orders), что уже
+  // фильтрует buildManagerView_ для вкладки "Воронка документов", отфильтрован тут же (эта
+  // функция вызывается из doGet с "сырым" orders, не через buildManagerView_). Сортировка по
+  // дате - старые проблемные заказы первыми (та же логика приоритета, что везде на дашборде).
+  const surLowerDocs = managerName.trim().split(' ')[0].toLowerCase();
+  const problemExamples = ((orders.problem_orders || [])
+    .filter(function(p) { return String(p.mgr || '').trim().split(' ')[0].toLowerCase() === surLowerDocs; }))
+    .sort(function(a, b) { return String(a.date||'').localeCompare(String(b.date||'')); })
+    .slice(0, 5)
+    .map(function(p) { return { id: p.id, date: p.date, customer: p.customer, amount: Math.round(p.amount || 0), status: p.status }; });
 
   return {
     manager: managerName,
@@ -6776,28 +6808,73 @@ function buildManagerAiContext_(ss, orders, managerName, period) {
     top_customers: topCustomers,
     lost_customers: lostCustomers,
     debt: debtSummary,
-    documents: { no_waybill: (doc.no_waybill_own || 0) + (doc.no_waybill_hired || 0),
-      not_posted: doc.waybill_not_posted || 0, no_realiz: doc.posted_no_realiz || 0, complete: doc.complete || 0 },
+    documents: {
+      no_waybill: (doc.no_waybill_own || 0) + (doc.no_waybill_hired || 0), // сбор путевого листа - НЕ зона менеджера, см. промпт
+      not_posted: doc.waybill_not_posted || 0,   // путевой есть, документ не проведён - менеджер может ускорить
+      no_realiz: doc.posted_no_realiz || 0,      // документ проведён, но нет акта/накладной/УПД - менеджер может ускорить
+      complete: doc.complete || 0,
+      examples: problemExamples,
+    },
   };
 }
 
 function buildAiTasksPrompt_(managerName, context) {
-  return 'Ты - ассистент коммерческого директора транспортно-логистической компании ' +
-    '(перевозки тралами и длинномерами). Ниже - реальные данные по одному менеджеру за ' +
-    'текущий месяц в формате JSON. На их основе сформулируй РОВНО 5 конкретных задач на ' +
-    'сегодня для этого менеджера и короткий совет, как выполнить план продаж.\n\n' +
+  return 'Ты - опытный коммерческий директор транспортно-логистической компании (перевозки ' +
+    'тралами и длинномерами), который каждое утро даёт менеджеру по продажам короткий и ' +
+    'ТОЧНЫЙ разбор дня - как это делает живой руководитель, который помнит историю по каждому ' +
+    'клиенту, а не формальный отчёт по цифрам. Ниже - реальные данные по одному менеджеру за ' +
+    'текущий месяц в формате JSON.\n\n' +
     'Данные:\n' + JSON.stringify(context, null, 0) + '\n\n' +
+    'ВАЖНЫЕ ФАКТЫ О ТОМ, КАК УСТРОЕНА РАБОТА (используй их, чтобы не писать ошибочных советов):\n' +
+    '- documents.no_waybill (нет путевого листа) - это зона ответственности ЛОГИСТОВ, а не ' +
+    'менеджера по продажам. НЕ пиши менеджеру задачу "собери путевые листы" - он на это почти ' +
+    'не влияет.\n' +
+    '- documents.not_posted (путевой лист есть, но документ не проведён в 1С) и ' +
+    'documents.no_realiz (документ проведён, но акт/накладная/УПД ещё не оформлены) - это ' +
+    'менеджер МОЖЕТ ускорить (напомнить, чтобы провели/оформили быстрее). Формулируй как ' +
+    '"ускорить проведение уже готовых документов", а не "собери документы".\n' +
+    '- Непроведённые/неоформленные документы НЕ "держат выручку" сами по себе (факт продаж ' +
+    'уже учтён) - они снижают ВЕРОЯТНОСТЬ БЫСТРОЙ ОПЛАТЫ, потому что клиент обычно платит по ' +
+    'закрытому документу (акту/УПД), который ему отправили. Объясняй причину именно так, не ' +
+    'придумывай другую.\n' +
+    '- debt.top_debtors[].unpaid_docs - конкретные неоплаченные документы по каждому ' +
+    'должнику (дата, юрлицо, номер/описание, сумма к оплате). Если они есть - ссылайся на ' +
+    'САМЫЙ СТАРЫЙ документ по имени/номеру и дате, а не просто на общий баланс.\n' +
+    '- lost_customers[].last_order_date - когда именно менеджер последний раз работал с этим ' +
+    'клиентом. Формулируй как напоминание из истории отношений: "ты работал с [клиент] до ' +
+    '[дата], свяжись, узнай как дела и нужны ли перевозки" - а не сухую статистику потерь.\n' +
+    '- Для активных клиентов с хорошей динамикой (top_customers) - формулируй позитивно: ' +
+    '"с [клиент] хорошо идёт работа, стоит предложить увеличить объёмы" - не как претензию.\n' +
+    '- documents.examples - конкретные проблемные заказы (номер, дата, клиент, сумма, статус) ' +
+    'для задач по документам - ссылайся на них, а не на голые счётчики.\n\n' +
+    'РАЗДЕЛЯЙ ДВЕ РАЗНЫЕ ЦЕЛИ - не путай их: (1) РОСТ ПРОДАЖ - новые/повторные заказы, ' +
+    'допродажи активным клиентам, возврат пропавших клиентов - это то, что двигает план. ' +
+    '(2) ДЕНЬГИ И ПОРЯДОК В ДОКУМЕНТАХ - сбор дебиторки, проведение документов - это ВАЖНО, но ' +
+    'НЕ является "рычагом для роста продаж" (план считается по факту продаж, не по оплатам). ' +
+    'В "plan_advice" пиши ТОЛЬКО про рычаги роста продаж (пункт 1) - не называй сбор долгов ' +
+    'или проведение документов способом ускорить выполнение плана продаж.\n\n' +
+    'Сформулируй РОВНО 5 задач на сегодня для этого менеджера. Постарайся сделать разумный ' +
+    'баланс: минимум 2 задачи про рост продаж (пропавшие клиенты / допродажи активным / новые ' +
+    'заказы), не больше 2 задач про дебиторку и не больше 1 про документы - но если данных по ' +
+    'какой-то теме нет (например, нет пропавших клиентов), не выдумывай, просто перераспредели ' +
+    'на другие темы.\n\n' +
     'Требования к ответу:\n' +
     '- Ответь СТРОГО валидным JSON без markdown-обёртки (без ```), без текста до/после.\n' +
-    '- Формат: {"tasks":[{"title":"...","why":"..."},... ровно 5 штук],"plan_advice":"..."}\n' +
-    '- "title" - короткая формулировка задачи (до 80 символов), "why" - 1 фраза, почему это ' +
-    'важно, со ссылкой на конкретную цифру из данных (сумма, дни, имя клиента).\n' +
-    '- "plan_advice" - 2-4 предложения, как реалистично выполнить план, с опорой на ' +
-    'переданные цифры (план/факт/прогноз, сколько осталось).\n' +
+    '- Формат: {"tasks":[{"title":"...","why":"...","category":"выручка|дебиторка|документы"},' +
+    '... ровно 5 штук],"plan_advice":"..."}\n' +
+    '- "title" - короткая формулировка КОНКРЕТНОГО действия (до 90 символов) - что именно ' +
+    'сделать сегодня (позвонить, напомнить, предложить), а не общая тема.\n' +
+    '- "why" - 1-2 фразы, ПОЧЕМУ это важно именно сегодня, со ссылкой на конкретный факт из ' +
+    'данных (сумма, дата, номер документа, имя клиента) - не общие слова.\n' +
+    '- "category" - одна из трёх: "выручка" (рост продаж), "дебиторка" (сбор долгов), ' +
+    '"документы" (порядок в документах).\n' +
+    '- "plan_advice" - 2-4 предложения, КОНКРЕТНО как реалистично выполнить план ПРОДАЖ, с ' +
+    'опорой на цифры (план/факт/прогноз, сколько осталось) и на конкретных клиентов из ' +
+    'top_customers/lost_customers, которые реально могут дать этот объём - не общие фразы.\n' +
     '- Задачи должны быть РАЗНЫЕ по теме (не 5 вариаций одного и того же) и опираться ТОЛЬКО ' +
     'на переданные данные, не выдумывай факты, которых нет в JSON.\n' +
-    '- Пиши по-русски, обращение на "ты", по-деловому, без длинного тире (используй обычный ' +
-    'дефис), без канцелярита и воды.';
+    '- Пиши по-русски, обращение на "ты", по-деловому, тоном опытного руководителя, который ' +
+    'знает клиентов лично - без длинного тире (используй обычный дефис), без канцелярита и воды.';
 }
 
 // POST https://api.kie.ai/codex/v1/responses - reasoning-модель (см. reference-память
@@ -6843,8 +6920,11 @@ function parseAiTasksResponse_(rawText) {
   let data;
   try { data = JSON.parse(cleaned); } catch (parseErr) { throw new Error('Не удалось разобрать ответ ИИ как JSON: ' + cleaned.slice(0, 300)); }
   if (!data || !Array.isArray(data.tasks) || !data.tasks.length) throw new Error('Ответ ИИ не содержит списка задач');
+  const validCategories = ['выручка', 'дебиторка', 'документы'];
   const tasks = data.tasks.slice(0, 5).map(function(t) {
-    return { title: String((t && t.title) || '').trim(), why: String((t && t.why) || '').trim() };
+    const cat = String((t && t.category) || '').trim().toLowerCase();
+    return { title: String((t && t.title) || '').trim(), why: String((t && t.why) || '').trim(),
+      category: validCategories.indexOf(cat) >= 0 ? cat : '' };
   }).filter(function(t) { return t.title; });
   if (!tasks.length) throw new Error('Ответ ИИ не содержит валидных задач');
   return { tasks: tasks, plan_advice: String(data.plan_advice || '').trim() };

@@ -637,6 +637,8 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           <div class="sec-header" id="receipts-tab-bar" style="gap:6px">
             <button class="tab-btn active" onclick="showReceiptsTab('managers',this)">По менеджерам</button>
             <button class="tab-btn" onclick="showReceiptsTab('customers',this)">По клиентам</button>
+            <button class="tab-btn" onclick="showReceiptsTab('today',this)">Сегодня</button>
+            <button class="tab-btn" onclick="showReceiptsTab('yesterday',this)">Вчера</button>
           </div>
 
           <div id="receipts-tab-managers">
@@ -661,6 +663,29 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
               </table>
             </div>
             <div style="text-align:center;margin-top:10px" id="receipts-customers-more-wrap"></div>
+          </div>
+
+          <!-- "Сегодня"/"Вчера" - построчная разбивка поступлений за конкретный день (Влад,
+               2026-08-13: "сделай ещё третью вкладку Поступления сегодня разбивку хочу
+               видеть... ещё одну вкладку Поступлениям вчера"). -->
+          <div id="receipts-tab-today" style="display:none">
+            <div class="sec-sub" id="receipts-today-sub" style="margin-bottom:8px"></div>
+            <div style="overflow-x:auto">
+              <table class="tbl">
+                <thead><tr><th>Клиент</th><th>Менеджер</th><th>Юрлицо</th><th>Документ</th><th class="num">Сумма</th></tr></thead>
+                <tbody id="receipts-today-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div id="receipts-tab-yesterday" style="display:none">
+            <div class="sec-sub" id="receipts-yesterday-sub" style="margin-bottom:8px"></div>
+            <div style="overflow-x:auto">
+              <table class="tbl">
+                <thead><tr><th>Клиент</th><th>Менеджер</th><th>Юрлицо</th><th>Документ</th><th class="num">Сумма</th></tr></thead>
+                <tbody id="receipts-yesterday-body"></tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
@@ -4133,6 +4158,8 @@ function renderReceipts() {
   renderReceiptsChart();
   renderReceiptsManagers(r);
   renderReceiptsCustomers(r);
+  renderReceiptsDayTransactions_(r.today, 'today');
+  renderReceiptsDayTransactions_(r.yesterday, 'yesterday');
 }
 
 function renderReceiptsKPI(r) {
@@ -4187,12 +4214,29 @@ function renderReceiptsKPI(r) {
 // (Влад, 2026-08-13: "два больших нижних блока лучше объединить в один через вкладки, как у
 // нас в заказах это").
 function showReceiptsTab(tab, btn) {
-  ['managers', 'customers'].forEach(function(t) {
+  ['managers', 'customers', 'today', 'yesterday'].forEach(function(t) {
     var el = document.getElementById('receipts-tab-' + t);
     if (el) el.style.display = (t === tab) ? '' : 'none';
   });
   document.querySelectorAll('#receipts-tab-bar .tab-btn').forEach(function(b) { b.classList.remove('active'); });
   if (btn) btn.classList.add('active');
+}
+
+// "Сегодня"/"Вчера" - построчная разбивка поступлений (Влад, 2026-08-13: "разбивку хочу видеть").
+function renderReceiptsDayTransactions_(day, prefix) {
+  if (!day) return;
+  var subEl = document.getElementById('receipts-' + prefix + '-sub');
+  if (subEl) subEl.textContent = fmtDateRu(day.date) + ' · Итого: ' + fmt(day.total) + ' · Поступлений: ' + day.transactions.length;
+  var bodyEl = document.getElementById('receipts-' + prefix + '-body');
+  if (!bodyEl) return;
+  bodyEl.innerHTML = (day.transactions || []).map(function(t) {
+    var mgrCls = t.manager === 'Не определён' ? ' class="muted"' : '';
+    return '<tr><td>' + t.customer + '</td>' +
+      '<td' + mgrCls + '>' + t.manager + '</td>' +
+      '<td class="muted">' + (t.orgName || '—') + '</td>' +
+      '<td class="muted">' + (t.docNumber || '—') + '</td>' +
+      '<td class="num">' + fmt(t.amount) + '</td></tr>';
+  }).join('') || '<tr><td colspan="5" class="muted">Поступлений не было</td></tr>';
 }
 
 function setReceiptsChartView(view) {
@@ -4256,10 +4300,11 @@ function renderReceiptsChart() {
   }
 
   // Подписи значений прямо над столбиками (свой лёгкий плагин - без внешних библиотек, чтобы
-  // не тянуть chartjs-plugin-datalabels через CDN). Для стека "Поступления" подписывает
-  // ТОЛЬКО верхний сегмент (наличку - showLabelAlways) реальным числом, даже если сам сегмент
-  // почти не виден на глаз - именно это "гиперболизирует" наличку честно, без раздувания
-  // высоты столбика.
+  // не тянуть chartjs-plugin-datalabels через CDN). Влад, 2026-08-13 (второй заход): "где
+  // наличка, там должна быть сумма наличка+безнал ОДНОЙ цифрой, где налички нет - просто
+  // безнал" - подпись на верхнем сегменте стека "Поступления" показывает ИТОГО (безнал+нал),
+  // не только наличку саму по себе (раньше было так - путало, "731" читалось как отдельная
+  // маленькая сумма, а не как часть целого).
   var barLabelsPlugin = {
     id: 'receiptsBarLabels',
     afterDatasetsDraw: function(chart) {
@@ -4272,9 +4317,11 @@ function renderReceiptsChart() {
         var meta = chart.getDatasetMeta(dsIndex);
         if (meta.hidden) return;
         var isTopOfStack = ds.stack !== 'receipts' || ds.showLabelAlways || !hasCash;
-        if (!isTopOfStack) return; // безнал сам по себе не подписываем - подпись только у налички (верх стека) и у Коммерческих
+        if (!isTopOfStack) return; // безнал сам по себе не подписываем - подпись только у верха стека "Поступления" и у Коммерческих
         meta.data.forEach(function(bar, i) {
-          var v = ds.data[i];
+          // На стеке "Поступления" подписываем ИТОГО (безнал+нал) одной цифрой, а не только
+          // наличку - иначе выглядит как отдельная маленькая сумма, а не часть столбика.
+          var v = (ds.stack === 'receipts') ? (bankValues[i] || 0) + (cashValues[i] || 0) : ds.data[i];
           if (v == null || v === 0) return;
           chCtx.fillStyle = ds.stack === 'receipts' ? '#EF9F27' : '#7db9ee';
           chCtx.fillText(fmtK(v), bar.x, bar.y - 6);

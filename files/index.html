@@ -616,7 +616,6 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
         <div class="kpi-grid" id="receipts-kpi">
           <div class="kpi" id="receipts-kpi-month"></div>
           <div class="kpi" id="receipts-kpi-today"></div>
-          <div class="kpi" id="receipts-kpi-avg"></div>
           <div class="kpi" id="receipts-kpi-org"></div>
           <div class="kpi" id="receipts-kpi-ytd"></div>
         </div>
@@ -632,32 +631,40 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           <div class="chart-wrap" style="height:220px"><canvas id="chart-receipts"></canvas></div>
         </div>
 
+        <!-- Менеджеры/Клиенты - один блок с переключением вкладками (как "Заказы"/"Клиенты"),
+             Влад 2026-08-13: "два больших нижних блока лучше объединить в один через вкладки". -->
         <div class="card" style="margin-bottom:16px">
-          <div class="card-title">По менеджерам</div>
-          <div style="overflow-x:auto">
-            <table class="tbl">
-              <thead><tr id="receipts-managers-thead-row">
-                <th>Менеджер</th><th class="num">Сумма</th><th class="num">Доля</th><th class="num">Поступлений</th>
-              </tr></thead>
-              <tbody id="receipts-managers-body"></tbody>
-            </table>
+          <div class="sec-header" id="receipts-tab-bar" style="gap:6px">
+            <button class="tab-btn active" onclick="showReceiptsTab('managers',this)">По менеджерам</button>
+            <button class="tab-btn" onclick="showReceiptsTab('customers',this)">По клиентам</button>
           </div>
-        </div>
 
-        <div class="card" style="margin-bottom:16px">
-          <div class="sec-header">
-            <div class="sec-title">По клиентам</div>
-            <div class="sec-sub" id="receipts-customers-sub"></div>
+          <div id="receipts-tab-managers">
+            <div style="overflow-x:auto">
+              <table class="tbl">
+                <thead><tr id="receipts-managers-thead-row">
+                  <th>Менеджер</th><th class="num">Сумма</th><th class="num">Доля</th><th class="num">Поступлений</th>
+                </tr></thead>
+                <tbody id="receipts-managers-body"></tbody>
+              </table>
+            </div>
           </div>
-          <div style="overflow-x:auto">
-            <table class="tbl">
-              <thead><tr id="receipts-customers-thead-row">
-                <th>Клиент</th><th>Менеджер</th><th class="num">Сумма</th><th class="num">Поступлений</th>
-              </tr></thead>
-              <tbody id="receipts-customers-body"></tbody>
-            </table>
+
+          <div id="receipts-tab-customers" style="display:none">
+            <!-- По юрлицам - куда именно пришли деньги (Влад: "там где таблица поступления по
+                 клиентам пусть будет столбик по нашим КА куда поступили деньги"). -->
+            <div class="chart-wrap" style="height:140px;margin-bottom:14px"><canvas id="chart-receipts-org"></canvas></div>
+            <div style="overflow-x:auto">
+              <div class="sec-sub" id="receipts-customers-sub" style="margin-bottom:8px"></div>
+              <table class="tbl">
+                <thead><tr id="receipts-customers-thead-row">
+                  <th>Клиент</th><th>Менеджер</th><th class="num">Сумма</th><th class="num">Поступлений</th>
+                </tr></thead>
+                <tbody id="receipts-customers-body"></tbody>
+              </table>
+            </div>
+            <div style="text-align:center;margin-top:10px" id="receipts-customers-more-wrap"></div>
           </div>
-          <div style="text-align:center;margin-top:10px" id="receipts-customers-more-wrap"></div>
         </div>
       </div>
     </div>
@@ -3914,6 +3921,7 @@ function renderGlobalStatsTable(t) {
 var receiptsChartView = 'daily'; // 'daily' | 'monthly'
 var receiptsShowAllCustomers = false;
 var receiptsChart = null;
+var receiptsOrgChart = null;
 var RECEIPTS_CUSTOMERS_TOP = 20;
 
 function renderReceipts() {
@@ -3942,13 +3950,12 @@ function renderReceiptsKPI(r) {
     '<div class="kpi-value">' + fmt(s.total_month) + '</div>' +
     '<div class="kpi-sub">безнал ' + fmt(s.total_bank) + ' + нал ' + fmt(s.total_cash) + '</div>';
 
+  // Сегодня + Среднее в день - один блок (Влад, 2026-08-13: "некоторые блоки можно объединить
+  // в один по смыслу, не нужно городить два этажа") - две родственные суточные метрики.
   document.getElementById('receipts-kpi-today').innerHTML =
     '<div class="kpi-label">Сегодня</div>' +
-    '<div class="kpi-value">' + fmt(s.total_today) + '</div>';
-
-  document.getElementById('receipts-kpi-avg').innerHTML =
-    '<div class="kpi-label">Среднее в день</div>' +
-    '<div class="kpi-value">' + fmt(s.avg_per_day) + '</div>';
+    '<div class="kpi-value">' + fmt(s.total_today) + '</div>' +
+    '<div class="kpi-sub2">Среднее в день: ' + fmt(s.avg_per_day) + '</div>';
 
   var orgHtml = (s.by_org || []).map(function(o) {
     return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--muted);padding:2px 0">' +
@@ -3967,12 +3974,34 @@ function renderReceiptsKPI(r) {
     var coverageNote = (y.revenue_months < y.receipts_months)
       ? '<div class="kpi-sub" style="color:var(--amber)">Выручка известна за ' + y.revenue_months + ' из ' + y.receipts_months + ' мес.</div>'
       : '<div class="kpi-sub">' + y.receipts_months + ' мес.</div>';
+    // Сальдо ЗА ТЕКУЩИЙ МЕСЯЦ рядом с годовым (Влад, 2026-08-13: "в блочок сальдо по году
+    // также сальдо по месяцу добавь инф.") - тот же цвет-логика (плюс зелёным, минус красным).
+    var monthBalHtml = '';
+    if (s.month_balance != null) {
+      var mColor = s.month_balance >= 0 ? 'var(--green)' : 'var(--red)';
+      monthBalHtml = '<div class="kpi-sub2" style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border)">' +
+        'Сальдо за ' + formatMonthLabel(r.month).toLowerCase() + ': <b style="color:' + mColor + '">' +
+        (s.month_balance >= 0 ? '+' : '') + fmt(s.month_balance) + '</b></div>';
+    }
     document.getElementById('receipts-kpi-ytd').innerHTML =
       '<div class="kpi-label">Сальдо с начала ' + y.year + '</div>' +
       '<div class="kpi-value ' + balCls + '">' + (y.balance >= 0 ? '+' : '') + fmt(y.balance) + '</div>' +
       '<div class="kpi-sub2">Поступления ' + fmt(y.receipts) + ' · Выручка ' + fmt(y.revenue) + '</div>' +
-      coverageNote;
+      coverageNote + monthBalHtml;
   }
+}
+
+// Переключатель "По менеджерам"/"По клиентам" - тот же приём, что showCustTab/showClientsTab
+// (Влад, 2026-08-13: "два больших нижних блока лучше объединить в один через вкладки, как у
+// нас в заказах это").
+function showReceiptsTab(tab, btn) {
+  ['managers', 'customers'].forEach(function(t) {
+    var el = document.getElementById('receipts-tab-' + t);
+    if (el) el.style.display = (t === tab) ? '' : 'none';
+  });
+  document.querySelectorAll('#receipts-tab-bar .tab-btn').forEach(function(b) { b.classList.remove('active'); });
+  if (btn) btn.classList.add('active');
+  if (tab === 'customers') renderReceiptsOrgChart();
 }
 
 function setReceiptsChartView(view) {
@@ -4021,11 +4050,14 @@ function renderReceiptsChart() {
   var hasRevenue = revValues.some(function(v) { return v != null; });
   var hasCash = cashValues.some(function(v) { return v > 0; });
 
+  // Цвета (Влад, 2026-08-13: "Поступления пусть будут зелёным столбик... наличка внутри
+  // столбика безнал контрастным цветом") - зелёный (безнал) + жёлто-золотой (нал, хорошо
+  // контрастирует с зелёным внутри той же полосы) + синий (Выручка, отдельный столбик).
   var datasets = [
-    { label: hasCash ? 'Поступления (безнал)' : 'Поступления', data: bankValues, backgroundColor: '#EF9F27', borderRadius: hasCash ? 0 : 4, maxBarThickness: 28, stack: 'receipts' },
+    { label: hasCash ? 'Поступления (безнал)' : 'Поступления', data: bankValues, backgroundColor: '#1D9E75', borderRadius: hasCash ? 0 : 4, maxBarThickness: 28, stack: 'receipts' },
   ];
   if (hasCash) {
-    datasets.push({ label: 'Поступления (нал)', data: cashValues, backgroundColor: '#c97d1f', borderRadius: 4, maxBarThickness: 28, stack: 'receipts' });
+    datasets.push({ label: 'Поступления (нал)', data: cashValues, backgroundColor: '#EF9F27', borderRadius: 4, maxBarThickness: 28, stack: 'receipts' });
   }
   if (hasRevenue) {
     datasets.push({ label: 'Выручка', data: revValues, backgroundColor: '#7db9ee', borderRadius: 4, maxBarThickness: 28, stack: 'revenue' });
@@ -4088,6 +4120,38 @@ function renderReceiptsCustomers(r) {
   } else {
     moreWrap.innerHTML = '';
   }
+}
+
+// Столбик "куда именно пришли деньги" по нашим юрлицам (Влад, 2026-08-13: "там где таблица
+// поступления по клиентам пусть будет столбик по нашим КА куда поступили деньги") - на
+// вкладке "По клиентам", горизонтальные бары (короткий список из 4-5 юрлиц, длинные подписи).
+// Рендерится лениво при открытии вкладки (showReceiptsTab) - иначе Chart.js посчитал бы
+// размеры на скрытом (display:none) canvas и график остался бы нулевого размера.
+function renderReceiptsOrgChart() {
+  var r = D && D.receipts;
+  var ctx = document.getElementById('chart-receipts-org');
+  if (!r || !ctx) return;
+  if (receiptsOrgChart) receiptsOrgChart.destroy();
+  var byOrg = (r.summary && r.summary.by_org) || [];
+  receiptsOrgChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: byOrg.map(function(o) { return o.name || o.org; }),
+      datasets: [{ data: byOrg.map(function(o) { return o.amount; }), backgroundColor: '#1D9E75', borderRadius: 4, maxBarThickness: 32 }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: function(c) { return ' ' + fmt(c.raw); } } }
+      },
+      scales: {
+        x: { ticks: { color: '#888780', callback: function(v) { return fmtK(v); } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        y: { ticks: { color: '#888780', font: { size: 11 } }, grid: { display: false } }
+      }
+    }
+  });
 }
 
 // ── ДИНАМИКА ───────────────────────────────────────────────

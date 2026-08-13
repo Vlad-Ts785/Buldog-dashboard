@@ -2883,6 +2883,38 @@ function receiptsMonthRevenueMap_(ss) {
   } catch (revErr) {
     Logger.log('receiptsMonthRevenueMap_: ' + revErr);
   }
+
+  // Донабираем более СТАРЫЕ месяцы (до CLIENT_HISTORY_CUTOFF включительно), которых нет в
+  // "История_месяцев" - Влад, 2026-08-13: "мы вроде делали отдельную таблицу по той большой
+  // выгрузке за предыдущие периоды и года" - это она (CLIENT_HISTORY_SHEET_ID, "Нормализованные
+  // _история_заказов"/"История_клиентов_агрегат"), уже подключена к дашборду для вкладки
+  // "Клиенты", просто раньше не использовалась для сравнения с "Поступлениями". НЕ пишем эти
+  // месяцы в саму "История_месяцев" - там нет остальных полей (ВП/затраты/план), строка
+  // выглядела бы обманчиво на "Глобальной статистике" (нули вместо "нет данных"), только для
+  // сравнения на этой вкладке. ВАЖНО: методика чуть отличается - offline-выгрузка исключает
+  // внутренние перевозки (см. .business/clients/INDEX.md), а живая "Выручка" дашборда - нет
+  // (project_business_rules) - историческая выручка может быть немного НИЖЕ по этой причине,
+  // не ошибка.
+  try {
+    const agg = getClientHistoryAggregate_();
+    if (agg) {
+      const histByMonth = {};
+      Object.keys(agg).forEach(function(name) {
+        const daily = agg[name].daily || {};
+        Object.keys(daily).forEach(function(dateStr) {
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr) || dateStr > CLIENT_HISTORY_CUTOFF) return;
+          const mk = dateStr.slice(0, 7);
+          histByMonth[mk] = (histByMonth[mk] || 0) + (daily[dateStr].r || 0);
+        });
+      });
+      Object.keys(histByMonth).forEach(function(mk) {
+        if (!(mk in map)) map[mk] = { revenue: histByMonth[mk], cash: 0 };
+      });
+    }
+  } catch (histErr) {
+    Logger.log('receiptsMonthRevenueMap_ (историческая часть): ' + histErr);
+  }
+
   return map;
 }
 

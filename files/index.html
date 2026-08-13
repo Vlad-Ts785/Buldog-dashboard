@@ -1345,6 +1345,13 @@ function myPageCurrentEntry_() {
 function isVasinEntry_(entry) {
   return !!entry && entry.type === 'logist' && entry.name.trim().split(' ')[0].toLowerCase() === 'васин';
 }
+// Логисты "своего парка тралов" (2026-08-13, см. isOwnTralLogistName_ на бэкенде - тот же
+// фиксированный список по фамилии, не data-driven, см. план "три роли логистов"). Влад: "Три
+// логиста Сильчев, Кан, Махура - по своей технике тралы, у них упор идёт от своего парка".
+function isOwnTralLogistSur_(sur) {
+  var s = (sur||'').toLowerCase();
+  return s === 'сильчев' || s === 'кан' || s === 'махура';
+}
 
 // Переключатель "Свои продажи" / "Общие сделки" на личной странице логиста (Влад, 2026-08-10:
 // "Прусу Роману нужно добавить две кнопки... он видит абсолютно всю ситуацию по направлению").
@@ -1570,6 +1577,27 @@ function setMyPageMgrTab(tab) { myPageMgrTab = tab; renderMyPage(); }
 // страницы - тяжёлая операция на бэкенде, читает 3 архивных листа).
 let mgrLostCache = {};     // 'ФИО::период' -> { data:[...] } | { error:'...' }
 let mgrLostLoading = false;
+// "ВП тралов к прошлому месяцу" для own-tral логистов (Сильчев/Кан/Махура), 2026-08-13 - при
+// самостоятельном входе приходит "бесплатно" в D.orders.own_profit_tral_prev_month (см.
+// buildLogistView_ на бэкенде), но admin-предпросмотр читает company-wide payload, который эту
+// цифру не считает (дорогой архивный запрос не на каждого логиста нужен всем) - лениво
+// догружаем тем же приёмом, что mgrLostCache выше.
+let ownTralPrevCache = {}; // 'ФИО::период' -> { value:N } | { error:'...' }
+let ownTralPrevLoading = false;
+function loadOwnTralPrevIfNeeded_(logistName, period) {
+  var key = logistName + '::' + (period || 'current');
+  if (ownTralPrevCache[key] || ownTralPrevLoading) return;
+  ownTralPrevLoading = true;
+  apiFetchJson({ action: 'own_tral_prev_month', logist: logistName, period: period || '' }).then(function(data) {
+    ownTralPrevLoading = false;
+    ownTralPrevCache[key] = data && data.error ? { error: data.error } : { value: (data && data.value) || 0 };
+    renderMyPage();
+  }).catch(function(e) {
+    ownTralPrevLoading = false;
+    ownTralPrevCache[key] = { error: e.message };
+    renderMyPage();
+  });
+}
 // 5 задач на день от ИИ (2026-08-12, см. plans/2026-08-12-ai-daily-tasks-manager.md) - кэш на
 // бэкенде уже на календарный день, фронтенд дополнительно кэширует в памяти на время сессии,
 // чтобы переключение вкладок/дропдауна admin-предпросмотра не дёргало повторный HTTP-запрос
@@ -1664,7 +1692,7 @@ function planZoneColor_(pct) { return pct>=80?PAGE_COL.green:pct>=50?PAGE_COL.am
 // Универсальная полоска "факт/прогноз/цель" - изначально "Выполнение плана продаж" у
 // менеджера, теперь используется и логистом (см. 2026-08-13, "Маржа найма к премии >1М") -
 // label/подписи задаются вызывающей стороной, сама полоска/цвета/пороги - общие.
-function planProgressBar(label, factPct, forecastPct, factVal, forecastVal, planVal, extraHtml) {
+function planProgressBar(label, factPct, forecastPct, factVal, forecastVal, planVal, extraHtml, targetLabel) {
   // Цвет заливки - по ПРОГНОЗУ, не по факту (Влад, 2026-08-12: "цвет полосок должен быть в
   // зависимости от тех параметров, которые я задал... при прогнозе 91% полоска должна быть
   // зелёного цвета"). Факт середины месяца почти всегда низкий по определению (это вопрос
@@ -1695,7 +1723,7 @@ function planProgressBar(label, factPct, forecastPct, factVal, forecastVal, plan
   h += '<div style="display:flex;gap:20px;flex-wrap:wrap;font-size:12px;color:var(--muted)">';
   h += '<span>Факт: <b style="color:var(--text)">'+pageMln_(factVal)+'</b> ('+Math.round(factPct)+'%)</span>';
   h += '<span>Прогноз к концу месяца: <b style="color:var(--text)">'+pageMln_(forecastVal)+'</b> ('+Math.round(forecastPct)+'%)</span>';
-  h += '<span>План: <b style="color:var(--text)">'+pageMln_(planVal)+'</b></span>';
+  h += '<span>'+(targetLabel||'План')+': <b style="color:var(--text)">'+pageMln_(planVal)+'</b></span>';
   h += '</div>';
   if (extraHtml) h += extraHtml;
   h += '</div>';
@@ -2165,37 +2193,94 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
   var lRow = getL(sur);
   var salary = calcLogist(sur, getL, useNewRules);
 
-  // "Маржа найма к премии >1М" (2026-08-13, Влад: "структурно каркас должен быть
-  // единообразным" - у логиста нет плана продаж, как у менеджера, уточнено с Владом - на месте
-  // полоски плана показываем прогресс к порогу премии 30 000 ₽ за маржу найма >1М, тот же
-  // порог, что в calcLogist). ВСЕГДА от ЛИЧНОЙ маржи логиста (lRow), не от переключателя
-  // "Общие сделки" ниже - зарплата не зависит от режима просмотра таблиц.
-  var qualMargin = lRow ? (lRow.hired_margin_qualified||0) : 0;
-  var unqualMargin = lRow ? (lRow.hired_margin_unqualified||0) : 0;
-  var marginForBonus = qualMargin + unqualMargin;
-  var MARGIN_BONUS_THRESHOLD = 1000000;
-  var marginPct = marginForBonus / MARGIN_BONUS_THRESHOLD * 100;
+  // Own-tral логисты (Сильчев/Кан/Махура, 2026-08-13, Влад: "по своей технике тралы у них упор
+  // идёт от своего парка") - вместо "Маржа найма к премии >1М" на полоске показываем "ВП
+  // своего парка тралов" к прошлому месяцу (нет фиксированного плана/порога в данных для этой
+  // метрики - Влад выбрал сравнение с прошлым месяцем, см. план). Формула ЗП (calcLogist ниже)
+  // НЕ меняется ни для кого - это ТОЛЬКО про то, какой показатель выводится на полоске.
+  var isOwnTral = isOwnTralLogistSur_(sur);
   var paceRatio = calcPaceRatio_((D.orders||{}).period);
-  var marginForecast = marginForBonus * paceRatio;
-  var marginForecastPct = marginForecast / MARGIN_BONUS_THRESHOLD * 100;
+  var barLabel, barTargetLabel, marginForBonus, MARGIN_BONUS_THRESHOLD, marginPct, marginForecast, marginForecastPct, marginDayRateHtml = '';
 
-  // Рекомендация "сколько добирать в день" - без деления на будни/выходные (в отличие от
-  // менеджера) - для маржи найма нет обоснованной эмпирики такой сезонности, как у продаж.
-  var marginDayRateHtml = '';
-  if (isLiveMonthKey_((D.orders||{}).period)) {
-    var remainingMargin = MARGIN_BONUS_THRESHOLD - marginForBonus;
-    if (remainingMargin > 0) {
-      var nowD = new Date();
-      var daysInMonth = new Date(nowD.getFullYear(), nowD.getMonth()+1, 0).getDate();
-      var remDays = Math.max(0, daysInMonth - nowD.getDate());
-      if (remDays > 0) {
+  if (isOwnTral) {
+    barLabel = 'ВП своего парка тралов';
+    barTargetLabel = 'Прошлый месяц';
+    var ownTralFact = lRow ? (lRow.own_profit_tral||0) : 0;
+    var ownTralForecast = ownTralFact * paceRatio;
+    // Прошлый месяц - "бесплатно" в D.orders.own_profit_tral_prev_month при самостоятельном
+    // входе (buildLogistView_), либо лениво догружается для admin-предпросмотра (см.
+    // loadOwnTralPrevIfNeeded_ выше) - пока не пришло, полоска использует 0 как временную базу
+    // (не вводит в заблуждение - явно помечено "Загрузка..." в рекомендации ниже).
+    var otKey = current + '::' + (myPagePeriod || 'current');
+    var ownTralPrevEntry = (D.orders && D.orders.own_profit_tral_prev_month != null)
+      ? { value: D.orders.own_profit_tral_prev_month }
+      : ownTralPrevCache[otKey];
+    if (!ownTralPrevEntry && (D.orders && D.orders.own_profit_tral_prev_month == null)) {
+      loadOwnTralPrevIfNeeded_(current, myPagePeriod);
+    }
+    // Пока цифра не пришла - явно помечаем подпись "загрузкой", а не просто дублируем текущий
+    // факт под видом готового сравнения (было бы похоже на настоящий "прошлый месяц = факту").
+    if (!ownTralPrevEntry) barTargetLabel = 'Прошлый месяц (загрузка…)';
+    var ownTralPrev = (ownTralPrevEntry && !ownTralPrevEntry.error) ? (ownTralPrevEntry.value||0) : 0;
+    marginForBonus = ownTralFact;
+    MARGIN_BONUS_THRESHOLD = ownTralPrev > 0 ? ownTralPrev : (ownTralFact > 0 ? ownTralFact : 1);
+    marginPct = ownTralPrev > 0 ? (ownTralFact / ownTralPrev * 100) : (ownTralFact > 0 ? 100 : 0);
+    marginForecast = ownTralForecast;
+    marginForecastPct = ownTralPrev > 0 ? (ownTralForecast / ownTralPrev * 100) : (ownTralForecast > 0 ? 100 : 0);
+
+    if (!ownTralPrevEntry) {
+      marginDayRateHtml = '<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07);font-size:12px;color:var(--muted)">Загрузка данных за прошлый месяц…</div>';
+    } else if (ownTralPrevEntry.error) {
+      marginDayRateHtml = '<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07);font-size:12px;color:'+COL.red+'">Не удалось загрузить прошлый месяц: '+ownTralPrevEntry.error+'</div>';
+    } else if (ownTralPrev <= 0) {
+      marginDayRateHtml = '<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07);font-size:12px;color:var(--muted)">Нет данных ВП тралов за прошлый месяц для сравнения.</div>';
+    } else if (ownTralFact >= ownTralPrev) {
+      marginDayRateHtml = '<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07);font-size:12px;color:'+COL.green+'">Прошлый месяц уже превзойдён ✅</div>';
+    } else if (isLiveMonthKey_((D.orders||{}).period)) {
+      var otRemaining = ownTralPrev - ownTralFact;
+      var otNowD = new Date();
+      var otDaysInMonth = new Date(otNowD.getFullYear(), otNowD.getMonth()+1, 0).getDate();
+      var otRemDays = Math.max(0, otDaysInMonth - otNowD.getDate());
+      if (otRemDays > 0) {
         marginDayRateHtml = '<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07);font-size:12px;color:var(--muted)">'+
-          'Чтобы получить премию 30 000 ₽ за маржу &gt;1М, нужно добирать в среднем: <b style="color:var(--text)">'+mln(remainingMargin/remDays)+'</b> маржи в день'+
-          ' <span style="opacity:.7">(осталось '+remDays+' дней)</span>'+
+          'Чтобы сравняться с прошлым месяцем ('+mln(ownTralPrev)+'), нужно в среднем: <b style="color:var(--text)">'+mln(otRemaining/otRemDays)+'</b> ВП тралов в день'+
+          ' <span style="opacity:.7">(осталось '+otRemDays+' дней)</span>'+
         '</div>';
       }
-    } else {
-      marginDayRateHtml = '<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07);font-size:12px;color:'+COL.green+'">Премия за маржу найма &gt;1М уже обеспечена ✅</div>';
+    }
+  } else {
+    barLabel = 'Маржа найма к премии &gt;1М';
+    barTargetLabel = 'План';
+    // "Маржа найма к премии >1М" (2026-08-13, Влад: "структурно каркас должен быть
+    // единообразным" - у логиста нет плана продаж, как у менеджера, уточнено с Владом - на месте
+    // полоски плана показываем прогресс к порогу премии 30 000 ₽ за маржу найма >1М, тот же
+    // порог, что в calcLogist). ВСЕГДА от ЛИЧНОЙ маржи логиста (lRow), не от переключателя
+    // "Общие сделки" ниже - зарплата не зависит от режима просмотра таблиц.
+    var qualMargin = lRow ? (lRow.hired_margin_qualified||0) : 0;
+    var unqualMargin = lRow ? (lRow.hired_margin_unqualified||0) : 0;
+    marginForBonus = qualMargin + unqualMargin;
+    MARGIN_BONUS_THRESHOLD = 1000000;
+    marginPct = marginForBonus / MARGIN_BONUS_THRESHOLD * 100;
+    marginForecast = marginForBonus * paceRatio;
+    marginForecastPct = marginForecast / MARGIN_BONUS_THRESHOLD * 100;
+
+    // Рекомендация "сколько добирать в день" - без деления на будни/выходные (в отличие от
+    // менеджера) - для маржи найма нет обоснованной эмпирики такой сезонности, как у продаж.
+    if (isLiveMonthKey_((D.orders||{}).period)) {
+      var remainingMargin = MARGIN_BONUS_THRESHOLD - marginForBonus;
+      if (remainingMargin > 0) {
+        var nowD = new Date();
+        var daysInMonth = new Date(nowD.getFullYear(), nowD.getMonth()+1, 0).getDate();
+        var remDays = Math.max(0, daysInMonth - nowD.getDate());
+        if (remDays > 0) {
+          marginDayRateHtml = '<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07);font-size:12px;color:var(--muted)">'+
+            'Чтобы получить премию 30 000 ₽ за маржу &gt;1М, нужно добирать в среднем: <b style="color:var(--text)">'+mln(remainingMargin/remDays)+'</b> маржи в день'+
+            ' <span style="opacity:.7">(осталось '+remDays+' дней)</span>'+
+          '</div>';
+        }
+      } else {
+        marginDayRateHtml = '<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07);font-size:12px;color:'+COL.green+'">Премия за маржу найма &gt;1М уже обеспечена ✅</div>';
+      }
     }
   }
 
@@ -2267,7 +2352,7 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
 
   // "Полоска плана" логиста - прогресс к премии >1М маржи найма, тот же стиль/цвета, что
   // "Выполнение плана продаж" у менеджера (planProgressBar - общая функция).
-  html += planProgressBar('Маржа найма к премии &gt;1М', marginPct, marginForecastPct, marginForBonus, marginForecast, MARGIN_BONUS_THRESHOLD, marginDayRateHtml);
+  html += planProgressBar(barLabel, marginPct, marginForecastPct, marginForBonus, marginForecast, MARGIN_BONUS_THRESHOLD, marginDayRateHtml, barTargetLabel);
 
   // Расчёт зарплаты - сразу после полоски (тот же порядок, что у менеджера).
   html += block('💰 Расчёт зарплаты', salaryBody);

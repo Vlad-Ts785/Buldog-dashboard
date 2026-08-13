@@ -3503,6 +3503,40 @@ function isVasinName_(name) {
   return (name||'').trim().split(' ')[0].toLowerCase() === 'васин';
 }
 
+// Логисты "своего парка тралов" (2026-08-13, Влад: "Сильчев/Кан/Махура - упор идёт от своего
+// парка по тралам", в отличие от Пруса/Сурковой - упор от маржи найма). Фиксированный список
+// по фамилии (не data-driven) - Влад явно допустил редкое смешение ролей ("Сильчев может
+// поставить на найм") и попросил НЕ подстраивать классификацию под разовые случаи.
+function isOwnTralLogistName_(name) {
+  var sur = (name||'').trim().split(' ')[0].toLowerCase();
+  return sur === 'сильчев' || sur === 'кан' || sur === 'махура';
+}
+
+// 'YYYY-MM' предыдущего месяца относительно переданного - для сравнения "ВП тралов к прошлому
+// месяцу" у own-tral логистов (см. ниже). day=1 перед вычитанием месяца - та же защита от
+// перепрыгивания через 2 месяца, что и в prevMonthKey_() на фронтенде.
+function prevMonthKeyOf_(monthKey) {
+  var p = String(monthKey).split('-').map(Number);
+  var d = new Date(p[0], p[1] - 1, 1);
+  d.setMonth(d.getMonth() - 1);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+
+// own_profit_tral этого логиста за месяц ПЕРЕД monthKeyOrPeriod (или перед текущим, если
+// falsy) - для полоски "ВП тралов к прошлому месяцу" (2026-08-13). Ошибка архива (нет данных
+// за предыдущий месяц - например, самый первый месяц работы) - тихо 0, не бросает исключение.
+function getOwnTralPrevMonthProfit_(ss, logistName, monthKeyOrPeriod) {
+  try {
+    const curMonthKey = monthKeyOrPeriod || Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+    const prevMonthKey = prevMonthKeyOf_(curMonthKey);
+    const prevOrders = getOrdersDataForPeriod(ss, prevMonthKey);
+    const prevRow = (!prevOrders.error && (prevOrders.by_logist || []).filter(function(l) { return l.name === logistName; })[0]) || null;
+    return prevRow ? (prevRow.own_profit_tral || 0) : 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
 // Личная страница логиста-длинномерщика (2026-08-11, Васин Максим - см.
 // plans/2026-08-11-vasin-long-haul-page.md, plans/2026-08-11-vasin-perf-and-forecast.md).
 // Принципиально другой набор данных, чем у "наёмных" логистов - Васин не брокер найма, у него
@@ -3588,6 +3622,14 @@ function buildLogistView_(orders, logistName, ss, period) {
   };
   if (ss && isVasinName_(logistName)) {
     ordersOut.long_haul = buildLongHaulBundle_(ss, orders, period || null);
+  }
+  // "ВП тралов к прошлому месяцу" (2026-08-13) - лёгкий архивный запрос ТОЛЬКО для own-tral
+  // логистов, при самостоятельном входе достаётся "бесплатно" вместе с остальным ответом (без
+  // лишнего round-trip). Admin-предпросмотр НЕ проходит через buildLogistView_ (у него полный
+  // company-wide payload) - для него та же цифра достаётся лениво через
+  // action=own_tral_prev_month (см. getOwnTralPrevMonthProfit_ + doGet ниже).
+  if (ss && isOwnTralLogistName_(logistName)) {
+    ordersOut.own_profit_tral_prev_month = getOwnTralPrevMonthProfit_(ss, logistName, period);
   }
 
   return {
@@ -3973,6 +4015,28 @@ function doGet(e) {
       var mlcMonthKey = mlcPeriod || Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
       var mlcCustomers = computeLostCustomersForManager_(ss, mlcMonthKey, mlcManager, !mlcPeriod);
       return ContentService.createTextOutput(JSON.stringify({ customers: mlcCustomers })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // "ВП тралов к прошлому месяцу" для admin-предпросмотра own-tral логиста (2026-08-13) -
+    // admin НЕ проходит через buildLogistView_ (свой полный company-wide payload), эта цифра
+    // достаётся лениво тем же приёмом, что manager_lost_customers выше. Роль logist - только
+    // свою (форсит access.name), эта же цифра у самого логиста уже приходит в основном ответе
+    // (buildLogistView_), фронтенд не должен её лишний раз запрашивать для себя - но action
+    // всё равно разрешён и роли logist, на случай ручной проверки/несовпадения кэша.
+    if (action === 'own_tral_prev_month') {
+      if (access.role !== 'admin' && access.role !== 'logist') {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var otpmLogist = access.role === 'logist' ? access.name : (e.parameter.logist || '');
+      if (!otpmLogist) {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Не указан логист' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var otpmPeriod = e.parameter.period || '';
+      if (otpmPeriod && !/^\d{4}-\d{2}$/.test(otpmPeriod)) {
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Некорректный период' })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var otpmValue = getOwnTralPrevMonthProfit_(ss, otpmLogist, otpmPeriod || null);
+      return ContentService.createTextOutput(JSON.stringify({ value: otpmValue })).setMimeType(ContentService.MimeType.JSON);
     }
 
     // 5 задач на день от ИИ (2026-08-12, см. plans/2026-08-12-ai-daily-tasks-manager.md) -
@@ -8281,7 +8345,8 @@ function aggregateOrdersRows(rows) {
     if (mgrLog && ordInList(mgrLog, TRAL_LOGISTS)) {
       if (!logistMap[mgrLog]) {
         logistMap[mgrLog] = { name: mgrLog, orders:0, amount:0, hired_orders:0, hired_cost:0, tral:0, long_:0,
-          own_amount:0, hired_margin_total:0, hired_margin_qualified:0, hired_margin_unqualified:0,
+          own_amount:0, own_profit_tral:0, own_profit_long:0,
+          hired_margin_total:0, hired_margin_qualified:0, hired_margin_unqualified:0,
           hired_extra_costs:0 };
       }
       const l = logistMap[mgrLog];
@@ -8294,6 +8359,12 @@ function aggregateOrdersRows(rows) {
         l.hired_extra_costs += (amount - hiredCost - profit);
       } else {
         l.own_amount += amount;
+        // own_profit_tral/long (2026-08-13, Влад: "три логиста Сильчев/Кан/Махура - свой парк
+        // тралов, упор идёт от своего парка") - та же логика, что own_profit у менеджера
+        // (m.own_profit += profit выше) - "Прибыль" 1С по НЕ наёмным заказам, разбита по типу
+        // техники (own_amount оставлен общим - как было, для контекста).
+        if (equip === 'Трал')      l.own_profit_tral += profit;
+        if (equip === 'Длинномер') l.own_profit_long += profit;
       }
       if (isHired) { l.hired_orders++; l.hired_cost += hiredCost; }
     }

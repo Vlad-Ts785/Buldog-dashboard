@@ -1332,6 +1332,22 @@ function positionLabel(name, type) {
   return (sur === 'ахтамова' || sur === 'гусейнова') ? 'Руководитель отдела продаж' : 'Менеджер по продажам';
 }
 
+// Дедуп ростера дропдауна личной страницы (2026-08-13, Влад - скриншот: "Прус-Роскошный
+// задвоился") - некоторые логисты (Прус и т.п.) попадают ОДНОВРЕМЕННО в by_manager (какая-то
+// их сделка помечена в 1С "Менеджер по продажам" = они же) и в by_logist (их настоящая роль) -
+// без дедупа один и тот же человек показывался в списке дважды. Логист побеждает при дубле -
+// это их РЕАЛЬНАЯ роль (см. .business/ - фиксированный список логистов), попадание в
+// by_manager для них - артефакт данных 1С, не признак того, что у человека есть менеджерская
+// личная страница.
+function dedupeMyPageEntries_(rawEntries) {
+  var byName = {};
+  rawEntries.forEach(function(en) {
+    var existing = byName[en.name];
+    if (!existing || en.type === 'logist') byName[en.name] = en;
+  });
+  return Object.values(byName);
+}
+
 // Кто сейчас выбран на личной странице - вынесено отдельно (2026-08-11), т.к. и
 // renderMyPage(), и setMyPagePeriod() (для роутинга Васина на свой источник данных, см. ниже)
 // независимо должны знать "кого сейчас смотрим", без дублирования логики дропдауна/ролей.
@@ -1341,8 +1357,10 @@ function myPageCurrentEntry_() {
   if (D.role === 'logist')  return { name: D.logistName,  type: 'logist'  };
   // Из ростеров by_manager/by_logist, не из by_manager_detail/logist_detail - см. комментарий
   // в renderMyPage() (баг с Васиным, 2026-08-11).
-  var entries = (D.orders.by_manager || []).map(function(m){ return {name:m.name, type:'manager'}; })
-    .concat((D.orders.by_logist || []).map(function(l){ return {name:l.name, type:'logist'}; }));
+  var entries = dedupeMyPageEntries_(
+    (D.orders.by_manager || []).map(function(m){ return {name:m.name, type:'manager'}; })
+      .concat((D.orders.by_logist || []).map(function(l){ return {name:l.name, type:'logist'}; }))
+  );
   if (!entries.length) return null;
   entries.sort(function(a,b){ return a.name.localeCompare(b.name, 'ru'); });
   var sel = document.getElementById('my-page-mgr-select');
@@ -1478,8 +1496,10 @@ function renderMyPage() {
     // заказом за период), а НЕ из by_manager_detail/logist_detail (2026-08-11, баг с
     // Васиным - он почти никогда не попадает в logist_detail, там только наёмные сделки,
     // а Васин работает своим парком - без этого фикса он вообще не появлялся в дропдауне).
-    var entries = (((D.orders && D.orders.by_manager) || []).map(function(m){ return {name:m.name, type:'manager'}; }))
-      .concat(((D.orders && D.orders.by_logist) || []).map(function(l){ return {name:l.name, type:'logist'}; }));
+    var entries = dedupeMyPageEntries_(
+      (((D.orders && D.orders.by_manager) || []).map(function(m){ return {name:m.name, type:'manager'}; }))
+        .concat(((D.orders && D.orders.by_logist) || []).map(function(l){ return {name:l.name, type:'logist'}; }))
+    );
     entries.sort(function(a,b){ return a.name.localeCompare(b.name, 'ru'); });
     // Пустой entries - ок для manager/logist ролей (свой D.managerName/logistName не зависит
     // от by_manager_detail/logist_detail - у Васина, например, logist_detail почти всегда

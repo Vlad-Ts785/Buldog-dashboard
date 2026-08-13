@@ -651,14 +651,11 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           </div>
 
           <div id="receipts-tab-customers" style="display:none">
-            <!-- По юрлицам - куда именно пришли деньги (Влад: "там где таблица поступления по
-                 клиентам пусть будет столбик по нашим КА куда поступили деньги"). -->
-            <div class="chart-wrap" style="height:140px;margin-bottom:14px"><canvas id="chart-receipts-org"></canvas></div>
             <div style="overflow-x:auto">
               <div class="sec-sub" id="receipts-customers-sub" style="margin-bottom:8px"></div>
               <table class="tbl">
                 <thead><tr id="receipts-customers-thead-row">
-                  <th>Клиент</th><th>Менеджер</th><th class="num">Сумма</th><th class="num">Поступлений</th>
+                  <th>Клиент</th><th>Менеджер</th><th>Юрлицо</th><th class="num">Сумма</th><th class="num">Поступлений</th>
                 </tr></thead>
                 <tbody id="receipts-customers-body"></tbody>
               </table>
@@ -3921,7 +3918,6 @@ function renderGlobalStatsTable(t) {
 var receiptsChartView = 'daily'; // 'daily' | 'monthly'
 var receiptsShowAllCustomers = false;
 var receiptsChart = null;
-var receiptsOrgChart = null;
 var RECEIPTS_CUSTOMERS_TOP = 20;
 
 function renderReceipts() {
@@ -4001,7 +3997,6 @@ function showReceiptsTab(tab, btn) {
   });
   document.querySelectorAll('#receipts-tab-bar .tab-btn').forEach(function(b) { b.classList.remove('active'); });
   if (btn) btn.classList.add('active');
-  if (tab === 'customers') renderReceiptsOrgChart();
 }
 
 function setReceiptsChartView(view) {
@@ -4032,9 +4027,10 @@ function renderReceiptsChart() {
   if (receiptsChart) receiptsChart.destroy();
 
   // Выручка рядом с поступлениями (Влад, 2026-08-13: "не кривая линия, а тоже столбики, чтобы
-  // было чётко видно разницу") - Поступления показаны СВОИМ столбиком (безнал+нал сложены
-  // друг на друга - stack:'receipts"), Выручка - отдельным столбиком рядом (без stack, свой
-  // groupы). null-точки (нет данных за месяц/день) дают пропуск столбика, не ложный ноль.
+  // было чётко видно разницу"). Второй заход (Влад, чуть позже): сложенный столбик "прятал"
+  // наличку - она кратно меньше безнала и превращалась в невидимую полоску сверху. Теперь три
+  // РАЗДЕЛЬНЫХ столбика рядом (безнал/нал/выручка, без stack) - "столбики наличка и выручка
+  // должны быть рядом". null-точки (нет данных) дают пропуск столбика, не ложный ноль.
   var labels, bankValues, cashValues, revValues;
   if (receiptsChartView === 'monthly') {
     labels = (r.monthly || []).map(function(m) { return formatMonthLabel(m.month); });
@@ -4050,17 +4046,26 @@ function renderReceiptsChart() {
   var hasRevenue = revValues.some(function(v) { return v != null; });
   var hasCash = cashValues.some(function(v) { return v > 0; });
 
-  // Цвета (Влад, 2026-08-13: "Поступления пусть будут зелёным столбик... наличка внутри
-  // столбика безнал контрастным цветом") - зелёный (безнал) + жёлто-золотой (нал, хорошо
-  // контрастирует с зелёным внутри той же полосы) + синий (Выручка, отдельный столбик).
+  // Наличка "гиперболизирована" визуально (Влад: "она всегда будет кратно меньше безнала,
+  // нужно помочь ей быть видной") - если реальное значение ненулевое, но меньше 5% от
+  // максимума на графике, рисуем столбик высотой в эти 5% (видимая полоска), а не истинную
+  // (незаметную) высоту. Подсказка/подпись всё равно показывают РЕАЛЬНОЕ число (realData) -
+  // это визуальный акцент, а не искажение данных, которое кто-то может принять за факт.
+  var maxVal = bankValues.concat(revValues.filter(function(v) { return v != null; }))
+    .reduce(function(m, v) { return Math.max(m, v || 0); }, 0);
+  var cashFloor = maxVal * 0.05;
+  var cashDisplay = cashValues.map(function(v) { return (v > 0 && v < cashFloor) ? cashFloor : v; });
+
+  // Цвета (Влад, 2026-08-13: "Поступления пусть будут зелёным столбик") - зелёный (безнал) +
+  // жёлто-золотой (нал) + синий (Выручка).
   var datasets = [
-    { label: hasCash ? 'Поступления (безнал)' : 'Поступления', data: bankValues, backgroundColor: '#1D9E75', borderRadius: hasCash ? 0 : 4, maxBarThickness: 28, stack: 'receipts' },
+    { label: hasCash ? 'Поступления (безнал)' : 'Поступления', data: bankValues, backgroundColor: '#1D9E75', borderRadius: 4, maxBarThickness: 26 },
   ];
   if (hasCash) {
-    datasets.push({ label: 'Поступления (нал)', data: cashValues, backgroundColor: '#EF9F27', borderRadius: 4, maxBarThickness: 28, stack: 'receipts' });
+    datasets.push({ label: 'Поступления (нал)', data: cashDisplay, realData: cashValues, backgroundColor: '#EF9F27', borderRadius: 4, maxBarThickness: 26 });
   }
   if (hasRevenue) {
-    datasets.push({ label: 'Выручка', data: revValues, backgroundColor: '#7db9ee', borderRadius: 4, maxBarThickness: 28, stack: 'revenue' });
+    datasets.push({ label: 'Выручка', data: revValues, backgroundColor: '#7db9ee', borderRadius: 4, maxBarThickness: 26 });
   }
 
   receiptsChart = new Chart(ctx, {
@@ -4071,13 +4076,14 @@ function renderReceiptsChart() {
       interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: { display: hasCash || hasRevenue, position: 'bottom', labels: { color: '#888780', font: { size: 11 }, boxWidth: 10 } },
-        tooltip: { callbacks: { label: function(c) { return ' ' + c.dataset.label + ': ' + (c.raw == null ? '—' : fmt(c.raw)); } } }
+        tooltip: { callbacks: { label: function(c) {
+          var real = c.dataset.realData ? c.dataset.realData[c.dataIndex] : c.raw;
+          return ' ' + c.dataset.label + ': ' + (real == null ? '—' : fmt(real));
+        } } }
       },
       scales: {
-        // stacked:true обязателен, чтобы датасеты с одинаковым stack:'receipts' (безнал+нал)
-        // складывались друг на друга, а группа 'revenue' стояла рядом отдельным столбиком.
-        x: { stacked: true, ticks: { color: '#888780', font: { size: 11 }, maxRotation: 0, autoSkip: true }, grid: { display: false } },
-        y: { stacked: true, ticks: { color: '#888780', callback: function(v) { return fmtK(v); } }, grid: { color: 'rgba(255,255,255,0.04)' } }
+        x: { ticks: { color: '#888780', font: { size: 11 }, maxRotation: 0, autoSkip: true }, grid: { display: false } },
+        y: { ticks: { color: '#888780', callback: function(v) { return fmtK(v); } }, grid: { color: 'rgba(255,255,255,0.04)' } }
       }
     }
   });
@@ -4109,9 +4115,10 @@ function renderReceiptsCustomers(r) {
     var mgrCls = c.manager === 'Не определён' ? ' class="muted"' : '';
     return '<tr><td>' + c.customer + '</td>' +
       '<td' + mgrCls + '>' + c.manager + '</td>' +
+      '<td class="muted">' + (c.orgs || '—') + '</td>' +
       '<td class="num">' + fmt(c.amount) + '</td>' +
       '<td class="num muted">' + c.count + '</td></tr>';
-  }).join('') || '<tr><td colspan="4" class="muted">Нет данных</td></tr>';
+  }).join('') || '<tr><td colspan="5" class="muted">Нет данных</td></tr>';
 
   var moreWrap = document.getElementById('receipts-customers-more-wrap');
   if (all.length > RECEIPTS_CUSTOMERS_TOP) {
@@ -4122,37 +4129,6 @@ function renderReceiptsCustomers(r) {
   }
 }
 
-// Столбик "куда именно пришли деньги" по нашим юрлицам (Влад, 2026-08-13: "там где таблица
-// поступления по клиентам пусть будет столбик по нашим КА куда поступили деньги") - на
-// вкладке "По клиентам", горизонтальные бары (короткий список из 4-5 юрлиц, длинные подписи).
-// Рендерится лениво при открытии вкладки (showReceiptsTab) - иначе Chart.js посчитал бы
-// размеры на скрытом (display:none) canvas и график остался бы нулевого размера.
-function renderReceiptsOrgChart() {
-  var r = D && D.receipts;
-  var ctx = document.getElementById('chart-receipts-org');
-  if (!r || !ctx) return;
-  if (receiptsOrgChart) receiptsOrgChart.destroy();
-  var byOrg = (r.summary && r.summary.by_org) || [];
-  receiptsOrgChart = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: byOrg.map(function(o) { return o.name || o.org; }),
-      datasets: [{ data: byOrg.map(function(o) { return o.amount; }), backgroundColor: '#1D9E75', borderRadius: 4, maxBarThickness: 32 }]
-    },
-    options: {
-      indexAxis: 'y',
-      responsive: true, maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { label: function(c) { return ' ' + fmt(c.raw); } } }
-      },
-      scales: {
-        x: { ticks: { color: '#888780', callback: function(v) { return fmtK(v); } }, grid: { color: 'rgba(255,255,255,0.04)' } },
-        y: { ticks: { color: '#888780', font: { size: 11 } }, grid: { display: false } }
-      }
-    }
-  });
-}
 
 // ── ДИНАМИКА ───────────────────────────────────────────────
 var histData = null;

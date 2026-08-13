@@ -2991,13 +2991,22 @@ function getReceiptsData(ss, ordersData) {
   });
   const byManager = Object.values(mgrMap).sort(function(a, b) { return b.amount - a.amount; });
 
+  // "Юрлицо" в таблице по клиентам (Влад, 2026-08-13: "нужно просто чтобы в таблице была
+  // колонка с нашим КА куда упали деньги") - вместо отдельного графика (не понравился, убран).
+  // Один клиент может платить в НЕСКОЛЬКО наших юрлиц - копим множество, на выходе строка
+  // через запятую (обычно одно, но не гарантировано).
   const custMap = {};
   liveRows.forEach(function(r) {
-    if (!custMap[r.customer]) custMap[r.customer] = { customer: r.customer, manager: r.manager, amount: 0, count: 0 };
+    if (!custMap[r.customer]) custMap[r.customer] = { customer: r.customer, manager: r.manager, amount: 0, count: 0, orgsSet: {} };
     custMap[r.customer].amount += r.amount;
     custMap[r.customer].count++;
+    custMap[r.customer].orgsSet[r.org] = true;
   });
-  const byCustomer = Object.values(custMap).sort(function(a, b) { return b.amount - a.amount; });
+  const byCustomer = Object.values(custMap).map(function(c) {
+    c.orgs = Object.keys(c.orgsSet).map(function(o) { return DEBT_ORG_SHORT_NAMES[o] || o; }).sort().join(', ');
+    delete c.orgsSet;
+    return c;
+  }).sort(function(a, b) { return b.amount - a.amount; });
 
   // По месяцам (архивы + текущий живой месяц) - для графика динамики по месяцам. "bank" -
   // только безналичные поступления (из отчёта 1С), "amount" - вместе с наличкой (как и в

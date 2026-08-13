@@ -1078,6 +1078,12 @@ function runAll() {
   try { saveDebtHistory();         log.push('✅ История ДЗ сохранена'); }
   catch(e) { errors.push('❌ История ДЗ: ' + e.message); }
 
+  // 1С шлёт отчёт "Поступления" 3 раза в день (6:00/12:00/18:00, Влад 2026-08-13) - в
+  // остальные прогоны письма не будет (newer_than:2d покрывает выходные/задержки), ошибка
+  // безопасно уходит в errors, не ломает остальной пайплайн.
+  try { importReceiptsReport();    log.push('✅ Поступления импортированы'); }
+  catch(e) { errors.push('❌ Поступления (импорт): ' + e.message); }
+
   // Алерты и сводка — собираем данные один раз
   let alertsText = '';
   let summaryText = '';
@@ -2556,6 +2562,323 @@ function getDebtData(ss, compareDaysBack) {
 }
 
 // ============================================================
+// ПОСТУПЛЕНИЯ — реальные деньги на расчётный счёт (тралы Ярд)
+// Отдельный отчёт 1С (не путать с "Выручкой" по актам и с "ДЗ" - кто должен). Влад настроил
+// рассылку 3 раза в день (6:00/12:00/18:00), см. plans/2026-08-13-receipts-report-tab.md.
+// Отчёт НАКОПИТЕЛЬНЫЙ с начала месяца ("Стандартный период: 01.08.2026 - 13.08.2026") -
+// каждое письмо содержит ВСЕ поступления с 1-го числа, поэтому импорт полностью
+// ПЕРЕЗАПИСЫВАЕТ текущий месяц (не доливает), а не пытается мержить строки.
+// ============================================================
+const RECEIPTS_SHEET       = 'Поступления_данные';
+const RECEIPTS_ARCHIVE_PFX = 'Поступления_';   // + YYYY-MM, например «Поступления_2026-08»
+const RECEIPTS_GMAIL_QUERY = 'subject:"Рассылка Поступления на расчетный счет тралы" has:attachment newer_than:2d';
+const RECEIPTS_ARTICLE_MARKER_ = 'Поступление за услуги спецтехники';
+
+// "Стандартный период: DD.MM.YYYY - DD.MM.YYYY" -> месяц КОНЦА периода ("2026-08") - это и
+// есть месяц, за который сейчас накапливается отчёт.
+function receiptsExtractPeriodEndMonth_(rawData) {
+  for (let r = 0; r < Math.min(rawData.length, 5); r++) {
+    const rowArr = rawData[r] || [];
+    for (let c = 0; c < rowArr.length; c++) {
+      const s = String(rowArr[c] || '');
+      const m = s.match(/\d{2}\.\d{2}\.\d{4}\s*-\s*(\d{2})\.(\d{2})\.(\d{4})/);
+      if (m) return m[3] + '-' + m[2];
+    }
+  }
+  return null;
+}
+
+// Убирает служебный "хвост" у имени контрагента - ИНН (в скобках или голым числом) и любые
+// бухгалтерские пометки в скобках (напр. "(ГИ)", "(Савиток)"). ВАЖНО: эти пометки НЕ
+// используются как признак менеджера (Влад, 2026-08-13: "не нужно на это ориентироваться,
+// у нас ответственный - тот, кто делал крайнюю сделку") - функция нужна только чтобы
+// сопоставить одного и того же клиента между "Поступлениями" и остальными выгрузками 1С,
+// где таких хвостов обычно нет.
+function normalizeReceiptClientName_(name) {
+  let s = String(name || '');
+  s = s.replace(/\d{5,}/g, ' ');     // ИНН - 5+ цифр подряд, в скобках или без
+  s = s.replace(/\([^)]*\)/g, ' ');  // любые пометки в скобках, не только в конце строки
+  s = s.replace(/!/g, ' ');
+  return s.replace(/\s+/g, ' ').trim().toUpperCase();
+}
+
+// Карта "клиент -> менеджер последней сделки" - переиспользует уже готовую и подтверждённую
+// клиентскую аналитику (см. computeClientAnalyticsFromAggregate_/getClientHistoryAggregate_/
+// getClientLiveRows_ выше), тот же принцип атрибуции, что уже работает на "ДЗ" и "Клиентах".
+// Специально ЛЁГКАЯ версия (без сегментов/win-back/сезонности из finishClientAnalytics_) -
+// вызывается на каждом импорте "Поступлений" (несколько раз в день), тяжёлая аналитика была
+// бы избыточна для того, чтобы просто узнать одно имя менеджера на клиента.
+function getClientManagerMap_(ss) {
+  const map = {};
+  try {
+    const histAgg = getClientHistoryAggregate_();
+    if (histAgg) {
+      Object.keys(histAgg).forEach(function(name) {
+        const key = normalizeReceiptClientName_(name);
+        if (key) map[key] = cleanManagerName_(histAgg[name].manager || '');
+      });
+      const liveRows = getClientLiveRows_(ss);
+      const latestDateByKey = {};
+      liveRows.forEach(function(r) {
+        const key = normalizeReceiptClientName_(r.customer);
+        if (!key || !r.date) return;
+        // "Последняя сделка выигрывает" - живые (текущие) строки перекрывают историю, если
+        // они позже, тот же принцип, что и в computeClientAnalyticsFromAggregate_.
+        if (!latestDateByKey[key] || r.date >= latestDateByKey[key]) {
+          latestDateByKey[key] = r.date;
+          map[key] = cleanManagerName_(r.mgrSales || '');
+        }
+      });
+    } else {
+      // Фолбэк, если предпосчитанный агрегат ещё не построен - тот же принцип "последняя
+      // сделка выигрывает", но по сырым строкам (дороже, см. getClientAnalyticsRows_).
+      const rawRows = getClientAnalyticsRows_(ss);
+      const latestDateByKey2 = {};
+      rawRows.forEach(function(r) {
+        const key = normalizeReceiptClientName_(r.customer);
+        if (!key || !r.date) return;
+        if (!latestDateByKey2[key] || r.date >= latestDateByKey2[key]) {
+          latestDateByKey2[key] = r.date;
+          map[key] = cleanManagerName_(r.mgrSales || '');
+        }
+      });
+    }
+  } catch (mapErr) {
+    Logger.log('getClientManagerMap_: ' + mapErr);
+  }
+  return map;
+}
+
+// Разбирает сырую выгрузку отчёта "Поступления" - плоская таблица (без иерархии, в отличие
+// от ДЗ). Заголовок ищем по тексту "Дата" в колонке A, а не по фиксированному номеру строки -
+// защита от лишней/недостающей пустой строки в начале файла.
+function parseReceiptsRawRows_(rawData) {
+  const reportMonth = receiptsExtractPeriodEndMonth_(rawData);
+
+  let headerRowIdx = -1;
+  for (let r = 0; r < Math.min(rawData.length, 10); r++) {
+    if (String((rawData[r] || [])[0] || '').trim() === 'Дата') { headerRowIdx = r; break; }
+  }
+  if (headerRowIdx < 0) {
+    throw new Error('Поступления: не найдена строка заголовков ("Дата" в колонке A) - формат отчёта мог измениться');
+  }
+
+  const rows = [];
+  let reportedTotal = null;
+
+  for (let r = headerRowIdx + 1; r < rawData.length; r++) {
+    const row = rawData[r];
+    const firstCell = String(row[0] || '').trim();
+    if (!firstCell) continue;
+    if (firstCell === 'Итого') { reportedTotal = ordParseNum(row[9]); break; }
+
+    // Статья движения денежных средств - защита от строк с другой статьёй, если 1С когда-
+    // нибудь добавит их в этот же отчёт (в образце на 2026-08-13 статья всегда одна).
+    const article = String(row[8] || '').trim();
+    if (article && article.indexOf(RECEIPTS_ARTICLE_MARKER_) === -1) continue;
+
+    const customer = String(row[4] || '').trim();
+    const amount = ordParseNum(row[9]);
+    if (!customer || !amount) continue;
+
+    const doc = String(row[7] || '').trim();
+    const docMatch = doc.match(/(\d{2}[А-Я]{2}-\d+)/);
+
+    rows.push({
+      date: ordFormatDate(row[0]),
+      org: String(row[3] || '').trim(),
+      customer: customer,
+      contract: String(row[6] || '').trim(),
+      docNumber: docMatch ? docMatch[1] : doc,
+      amount: amount,
+    });
+  }
+
+  return { rows: rows, reportMonth: reportMonth, reportedTotal: reportedTotal };
+}
+
+function receiptsExistingSheetMonth_(sheet) {
+  if (!sheet || sheet.getLastRow() < 2) return null;
+  const d = ordFormatDate(sheet.getRange(2, 1, 1, 1).getValue());
+  return d ? d.slice(0, 7) : null;
+}
+
+const RECEIPTS_HEADERS_ = ['Дата', 'Юрлицо', 'Контрагент', 'Договор', 'Документ', 'Менеджер', 'Сумма'];
+
+function writeReceiptsSheet_(ss, name, headers, rows) {
+  let sheet = ss.getSheetByName(name);
+  if (sheet) sheet.clear();
+  else sheet = ss.insertSheet(name);
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
+  if (rows.length) {
+    sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
+    sheet.getRange(2, 7, rows.length, 1).setNumberFormat('#,##0');
+  }
+}
+
+function importReceiptsReport() {
+  const threads = GmailApp.search(RECEIPTS_GMAIL_QUERY);
+  if (!threads.length) throw new Error('Письмо "Поступления" не найдено за 2 дня');
+
+  const msgs = [];
+  for (const t of threads) for (const m of t.getMessages()) msgs.push(m);
+  msgs.sort(function(a, b) { return b.getDate() - a.getDate(); });
+  const latest = msgs[0];
+
+  let att = null;
+  for (const a of latest.getAttachments()) {
+    if (a.getName().endsWith('.xlsx') || a.getName().endsWith('.xls')) { att = a; break; }
+  }
+  if (!att) throw new Error('Excel-вложение "Поступления" не найдено');
+
+  const tmp = Drive.Files.insert(
+    { title: 'tmp_receipts_' + Date.now(), mimeType: MimeType.GOOGLE_SHEETS },
+    att.copyBlob()
+  );
+  const rawData = SpreadsheetApp.openById(tmp.id).getSheets()[0].getDataRange().getValues();
+  Drive.Files.remove(tmp.id);
+
+  const parsed = parseReceiptsRawRows_(rawData);
+  if (!parsed.rows.length) throw new Error('Поступления: после разбора не осталось ни одной строки - проверь формат файла');
+  if (!parsed.reportMonth) throw new Error('Поступления: не удалось определить месяц периода отчёта');
+
+  // Сверка со строкой "Итого" - минимальная защита от молчаливого съезда парсинга, если
+  // формат столбцов 1С поменяется.
+  const parsedTotal = parsed.rows.reduce(function(s, r) { return s + r.amount; }, 0);
+  // Допуск 5 ₽ - страховка от накопленной погрешности плавающей точки на сотнях строк с
+  // копеечными долями (в образце встречались суммы вида 20687.5), не признак реальной ошибки.
+  if (parsed.reportedTotal != null && Math.abs(parsedTotal - parsed.reportedTotal) > 5) {
+    throw new Error('Поступления: сумма строк (' + Math.round(parsedTotal) + ') не сошлась с "Итого" (' +
+      Math.round(parsed.reportedTotal) + ') - прерываю импорт, формат мог измениться');
+  }
+
+  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+
+  const managerMap = getClientManagerMap_(ss);
+  parsed.rows.forEach(function(row) {
+    row.manager = managerMap[normalizeReceiptClientName_(row.customer)] || 'Не определён';
+  });
+
+  const sheetRows = parsed.rows.map(function(r) {
+    return [r.date, r.org, r.customer, r.contract, r.docNumber, r.manager, r.amount];
+  });
+
+  const existingSheet = ss.getSheetByName(RECEIPTS_SHEET);
+  const existingMonth = receiptsExistingSheetMonth_(existingSheet);
+
+  if (existingMonth && existingMonth !== parsed.reportMonth) {
+    if (parsed.reportMonth < existingMonth) {
+      // Пришедший отчёт за месяц РАНЬШЕ текущего живого - поздняя коррекция прошлого месяца
+      // (бухгалтерия ещё доделывает). Живой месяц не трогаем, обновляем только его архив.
+      writeReceiptsSheet_(ss, RECEIPTS_ARCHIVE_PFX + parsed.reportMonth, RECEIPTS_HEADERS_, sheetRows);
+      latest.markRead();
+      Logger.log('✅ Поступления: коррекция архива ' + parsed.reportMonth + ' (' + sheetRows.length + ' строк)');
+      return;
+    }
+    // Обычный переход на новый месяц - архивируем прошлый живой месяц перед перезаписью.
+    if (!ss.getSheetByName(RECEIPTS_ARCHIVE_PFX + existingMonth)) {
+      const existingData = existingSheet.getDataRange().getValues();
+      writeReceiptsSheet_(ss, RECEIPTS_ARCHIVE_PFX + existingMonth, existingData[0], existingData.slice(1));
+      Logger.log('✅ Поступления: архив создан ' + existingMonth);
+    }
+  }
+
+  writeReceiptsSheet_(ss, RECEIPTS_SHEET, RECEIPTS_HEADERS_, sheetRows);
+  latest.markRead();
+  Logger.log('✅ Поступления импортированы: ' + sheetRows.length + ' строк, ' + Math.round(parsedTotal) + ' ₽ за ' + parsed.reportMonth);
+}
+
+function receiptsReadSheetRows_(sheet) {
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 7).getValues();
+  return data.map(function(r) {
+    return {
+      date: ordFormatDate(r[0]),
+      org: String(r[1] || '').trim(),
+      customer: String(r[2] || '').trim(),
+      contract: String(r[3] || '').trim(),
+      docNumber: String(r[4] || '').trim(),
+      manager: String(r[5] || '').trim(),
+      amount: ordParseNum(r[6]),
+    };
+  }).filter(function(r) { return r.date && r.amount; });
+}
+
+// Агрегация для дашборда - вкладка "Поступления". Читает уже готовые (посчитанные при
+// импорте) строки, сама ничего заново не сопоставляет с менеджерами - быстро, без похода в
+// клиентскую аналитику на каждый запрос doGet().
+function getReceiptsData(ss) {
+  const liveSheet = ss.getSheetByName(RECEIPTS_SHEET);
+  const liveRows = receiptsReadSheetRows_(liveSheet);
+  if (!liveRows.length) {
+    return { error: 'Нет данных "Поступления" - импорт ещё не выполнялся или письмо 1С не пришло' };
+  }
+
+  const currentMonth = liveRows.reduce(function(m, r) { return r.date > m ? r.date : m; }, liveRows[0].date).slice(0, 7);
+  const maxDate = liveRows.reduce(function(m, r) { return r.date > m ? r.date : m; }, liveRows[0].date);
+  const daysElapsed = parseInt(maxDate.slice(8, 10), 10) || 1;
+  const todayStr = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM-dd');
+
+  const totalMonth = liveRows.reduce(function(s, r) { return s + r.amount; }, 0);
+  const totalToday = liveRows.filter(function(r) { return r.date === todayStr; })
+    .reduce(function(s, r) { return s + r.amount; }, 0);
+
+  const byOrgMap = {};
+  liveRows.forEach(function(r) { byOrgMap[r.org] = (byOrgMap[r.org] || 0) + r.amount; });
+  const byOrg = Object.keys(byOrgMap).map(function(k) {
+    return { org: k, name: DEBT_ORG_SHORT_NAMES[k] || k, amount: byOrgMap[k] };
+  }).sort(function(a, b) { return b.amount - a.amount; });
+
+  const dayMap = {};
+  liveRows.forEach(function(r) { dayMap[r.date] = (dayMap[r.date] || 0) + r.amount; });
+  const daily = Object.keys(dayMap).sort().map(function(d) { return { date: d, amount: dayMap[d] }; });
+
+  const mgrMap = {};
+  liveRows.forEach(function(r) {
+    const key = r.manager || 'Не определён';
+    if (!mgrMap[key]) mgrMap[key] = { manager: key, amount: 0, count: 0 };
+    mgrMap[key].amount += r.amount;
+    mgrMap[key].count++;
+  });
+  const byManager = Object.values(mgrMap).sort(function(a, b) { return b.amount - a.amount; });
+
+  const custMap = {};
+  liveRows.forEach(function(r) {
+    if (!custMap[r.customer]) custMap[r.customer] = { customer: r.customer, manager: r.manager, amount: 0, count: 0 };
+    custMap[r.customer].amount += r.amount;
+    custMap[r.customer].count++;
+  });
+  const byCustomer = Object.values(custMap).sort(function(a, b) { return b.amount - a.amount; });
+
+  // По месяцам (архивы + текущий живой месяц) - для графика динамики по месяцам.
+  const monthly = [];
+  ss.getSheets().forEach(function(sh) {
+    const name = sh.getSheetName();
+    if (name.indexOf(RECEIPTS_ARCHIVE_PFX) !== 0) return;
+    const monthKey = name.slice(RECEIPTS_ARCHIVE_PFX.length);
+    if (!/^\d{4}-\d{2}$/.test(monthKey)) return;
+    const rows = receiptsReadSheetRows_(sh);
+    monthly.push({ month: monthKey, amount: rows.reduce(function(s, r) { return s + r.amount; }, 0), count: rows.length });
+  });
+  monthly.push({ month: currentMonth, amount: totalMonth, count: liveRows.length });
+  monthly.sort(function(a, b) { return a.month < b.month ? -1 : 1; });
+
+  return {
+    month: currentMonth,
+    summary: {
+      total_month: totalMonth,
+      total_today: totalToday,
+      avg_per_day: totalMonth / daysElapsed,
+      by_org: byOrg,
+    },
+    daily: daily,
+    by_manager: byManager,
+    by_customer: byCustomer,
+    monthly: monthly,
+  };
+}
+
+// ============================================================
 // АЛЕРТЫ — собирает текст для Telegram
 // ============================================================
 function buildAlertsText() {
@@ -3494,6 +3817,7 @@ function doGet(e) {
       staffMarkas: staffMarkas,
       orders:     ordersData,
       debt:       getDebtData(ss),
+      receipts:   getReceiptsData(ss),
       // Колонка "Заказов" на "Водителях" в ДЕФОЛТНОМ виде (без выбора периода) раньше падала
       // на orders.by_driver, который обрезан до топ-25 ПО ВСЕЙ КОМПАНИИ (см. по_driver ниже
       // в getOrdersData) - водитель с высокой выручкой, но малым числом дорогих рейсов, в

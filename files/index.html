@@ -360,6 +360,9 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
     <div class="sidebar-nav-item" onclick="showPage('global-stats',this)" data-page="global-stats">
       <span class="sidebar-nav-icon">🌐</span> Глобальная статистика
     </div>
+    <div class="sidebar-nav-item" onclick="showPage('receipts',this)" data-page="receipts">
+      <span class="sidebar-nav-icon">💵</span> Поступления
+    </div>
     <div class="sidebar-nav-section">
       <span class="sidebar-nav-section-label">Парк</span>
       <div class="sidebar-nav-section-line"></div>
@@ -599,6 +602,61 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
               <tfoot><tr id="gs-table-foot" style="border-top:2px solid var(--border);font-weight:600"></tr></tfoot>
             </table>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ ПОСТУПЛЕНИЯ (реальные деньги на р/с, тралы Ярд) ══════ -->
+    <div id="page-receipts" class="page">
+      <div id="receipts-empty" style="display:none;color:var(--muted);padding:16px">
+        Данные "Поступления" ещё не загружены - отчёт 1С импортируется несколько раз в день.
+        Если это первый запуск, нужно один раз вручную выполнить importReceiptsReport() в редакторе Apps Script.
+      </div>
+      <div id="receipts-body">
+        <div class="kpi-grid" id="receipts-kpi">
+          <div class="kpi" id="receipts-kpi-month"></div>
+          <div class="kpi" id="receipts-kpi-today"></div>
+          <div class="kpi" id="receipts-kpi-avg"></div>
+          <div class="kpi" id="receipts-kpi-org"></div>
+        </div>
+
+        <div class="card" style="margin-bottom:16px">
+          <div class="sec-header">
+            <div class="sec-title">Динамика поступлений</div>
+            <div style="display:flex;gap:6px">
+              <button type="button" id="receipts-view-daily-btn" onclick="setReceiptsChartView('daily')" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;cursor:pointer">По дням</button>
+              <button type="button" id="receipts-view-monthly-btn" onclick="setReceiptsChartView('monthly')" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;cursor:pointer">По месяцам</button>
+            </div>
+          </div>
+          <div class="chart-wrap" style="height:220px"><canvas id="chart-receipts"></canvas></div>
+        </div>
+
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-title">По менеджерам</div>
+          <div style="overflow-x:auto">
+            <table class="tbl">
+              <thead><tr id="receipts-managers-thead-row">
+                <th>Менеджер</th><th class="num">Сумма</th><th class="num">Доля</th><th class="num">Поступлений</th>
+              </tr></thead>
+              <tbody id="receipts-managers-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:16px">
+          <div class="sec-header">
+            <div class="sec-title">По клиентам</div>
+            <div class="sec-sub" id="receipts-customers-sub"></div>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="tbl">
+              <thead><tr id="receipts-customers-thead-row">
+                <th>Клиент</th><th>Менеджер</th><th class="num">Сумма</th><th class="num">Поступлений</th>
+              </tr></thead>
+              <tbody id="receipts-customers-body"></tbody>
+            </table>
+          </div>
+          <div style="text-align:center;margin-top:10px" id="receipts-customers-more-wrap"></div>
         </div>
       </div>
     </div>
@@ -2510,6 +2568,7 @@ function render() {
   renderSalesTabsForPeriod();
   renderMyPage();
   renderDebt();
+  renderReceipts();
 }
 
 // Показывает/скрывает пункты сайдбара в зависимости от роли. Менеджер видит только
@@ -3845,6 +3904,149 @@ function renderGlobalStatsTable(t) {
   var sorted = globalStatsMonths.slice().sort(function(a,b){ return b.month.localeCompare(a.month); });
   document.getElementById('gs-table-body').innerHTML = sorted.map(function(m){ return row(m, false); }).join('');
   document.getElementById('gs-table-foot').innerHTML = row(t, true).replace('<tr>', '').replace('</tr>', '');
+}
+
+// ── ПОСТУПЛЕНИЯ (реальные деньги на р/с, тралы Ярд) - отдельный от "Выручки"/"ДЗ" срез:
+// сколько денег физически пришло на счёт и когда. См. plans/2026-08-13-receipts-report-tab.md.
+// Данные приходят вместе с основным payload (D.receipts), отдельного запроса не нужно -
+// та же схема, что и у "ДЗ" (renderDebt), рендерится сразу при загрузке данных.
+var receiptsChartView = 'daily'; // 'daily' | 'monthly'
+var receiptsShowAllCustomers = false;
+var receiptsChart = null;
+var RECEIPTS_CUSTOMERS_TOP = 20;
+
+function renderReceipts() {
+  if (!D) return;
+  var r = D.receipts;
+  var emptyEl = document.getElementById('receipts-empty');
+  var bodyEl = document.getElementById('receipts-body');
+  if (!r || r.error || !r.summary) {
+    if (emptyEl) { emptyEl.style.display = 'block'; if (r && r.error) emptyEl.textContent = r.error; }
+    if (bodyEl) bodyEl.style.display = 'none';
+    return;
+  }
+  if (emptyEl) emptyEl.style.display = 'none';
+  if (bodyEl) bodyEl.style.display = 'block';
+
+  renderReceiptsKPI(r);
+  renderReceiptsChart();
+  renderReceiptsManagers(r);
+  renderReceiptsCustomers(r);
+}
+
+function renderReceiptsKPI(r) {
+  var s = r.summary;
+  document.getElementById('receipts-kpi-month').innerHTML =
+    '<div class="kpi-label">Поступления за ' + formatMonthLabel(r.month).toLowerCase() + '</div>' +
+    '<div class="kpi-value">' + fmt(s.total_month) + '</div>';
+
+  document.getElementById('receipts-kpi-today').innerHTML =
+    '<div class="kpi-label">Сегодня</div>' +
+    '<div class="kpi-value">' + fmt(s.total_today) + '</div>';
+
+  document.getElementById('receipts-kpi-avg').innerHTML =
+    '<div class="kpi-label">Среднее в день</div>' +
+    '<div class="kpi-value">' + fmt(s.avg_per_day) + '</div>';
+
+  var orgHtml = (s.by_org || []).map(function(o) {
+    return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--muted);padding:2px 0">' +
+      '<span style="white-space:nowrap">' + (o.name || o.org) + '</span>' +
+      '<span style="font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--text)">' + fmt(o.amount) + '</span></div>';
+  }).join('');
+  document.getElementById('receipts-kpi-org').innerHTML =
+    '<div class="kpi-label">По юрлицам</div>' + (orgHtml || '<div class="kpi-sub">Нет данных</div>');
+}
+
+function setReceiptsChartView(view) {
+  receiptsChartView = view;
+  renderReceiptsChart();
+}
+
+// Короткая дата для оси графика ("13.08") - fmtDateRu() даёт полную "13 августа 2026",
+// слишком длинно для ~20-30 подписей подряд на графике "по дням".
+function receiptsShortDate_(dateStr) {
+  var m = /^\d{4}-(\d{2})-(\d{2})$/.exec(String(dateStr || ''));
+  return m ? (m[2] + '.' + m[1]) : (dateStr || '—');
+}
+
+function renderReceiptsChart() {
+  var r = D && D.receipts;
+  if (!r) return;
+  ['receipts-view-daily-btn', 'receipts-view-monthly-btn'].forEach(function(id) {
+    var btn = document.getElementById(id);
+    if (!btn) return;
+    var active = (id === 'receipts-view-daily-btn') === (receiptsChartView === 'daily');
+    btn.style.background = active ? 'var(--amber)' : 'var(--bg3)';
+    btn.style.color = active ? '#000' : 'var(--text)';
+  });
+
+  var ctx = document.getElementById('chart-receipts');
+  if (!ctx) return;
+  if (receiptsChart) receiptsChart.destroy();
+
+  var labels, values;
+  if (receiptsChartView === 'monthly') {
+    labels = (r.monthly || []).map(function(m) { return formatMonthLabel(m.month); });
+    values = (r.monthly || []).map(function(m) { return m.amount; });
+  } else {
+    labels = (r.daily || []).map(function(d) { return receiptsShortDate_(d.date); });
+    values = (r.daily || []).map(function(d) { return d.amount; });
+  }
+
+  receiptsChart = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: labels, datasets: [{ label: 'Поступления', data: values, backgroundColor: '#EF9F27', borderRadius: 4, maxBarThickness: 28 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: function(c) { return ' ' + fmt(c.raw); } } }
+      },
+      scales: {
+        x: { ticks: { color: '#888780', font: { size: 11 }, maxRotation: 0, autoSkip: true }, grid: { display: false } },
+        y: { ticks: { color: '#888780', callback: function(v) { return fmtK(v); } }, grid: { color: 'rgba(255,255,255,0.04)' } }
+      }
+    }
+  });
+}
+
+function renderReceiptsManagers(r) {
+  var total = r.summary.total_month || 0;
+  var rows = (r.by_manager || []).slice().sort(function(a, b) { return b.amount - a.amount; });
+  document.getElementById('receipts-managers-body').innerHTML = rows.map(function(m) {
+    var pct = total > 0 ? Math.round(m.amount / total * 100) : 0;
+    var nameCls = m.manager === 'Не определён' ? ' class="muted"' : '';
+    return '<tr><td' + nameCls + '>' + m.manager + '</td>' +
+      '<td class="num">' + fmt(m.amount) + '</td>' +
+      '<td class="num muted">' + pct + '%</td>' +
+      '<td class="num muted">' + m.count + '</td></tr>';
+  }).join('') || '<tr><td colspan="4" class="muted">Нет данных</td></tr>';
+}
+
+function toggleReceiptsCustomers() {
+  receiptsShowAllCustomers = !receiptsShowAllCustomers;
+  renderReceiptsCustomers(D.receipts);
+}
+
+function renderReceiptsCustomers(r) {
+  var all = r.by_customer || [];
+  var shown = receiptsShowAllCustomers ? all : all.slice(0, RECEIPTS_CUSTOMERS_TOP);
+  document.getElementById('receipts-customers-sub').textContent = 'Клиентов: ' + all.length;
+  document.getElementById('receipts-customers-body').innerHTML = shown.map(function(c) {
+    var mgrCls = c.manager === 'Не определён' ? ' class="muted"' : '';
+    return '<tr><td>' + c.customer + '</td>' +
+      '<td' + mgrCls + '>' + c.manager + '</td>' +
+      '<td class="num">' + fmt(c.amount) + '</td>' +
+      '<td class="num muted">' + c.count + '</td></tr>';
+  }).join('') || '<tr><td colspan="4" class="muted">Нет данных</td></tr>';
+
+  var moreWrap = document.getElementById('receipts-customers-more-wrap');
+  if (all.length > RECEIPTS_CUSTOMERS_TOP) {
+    moreWrap.innerHTML = '<button type="button" onclick="toggleReceiptsCustomers()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:6px 14px;font-size:12px;cursor:pointer">' +
+      (receiptsShowAllCustomers ? 'Свернуть' : 'Показать всех (' + all.length + ')') + '</button>';
+  } else {
+    moreWrap.innerHTML = '';
+  }
 }
 
 // ── ДИНАМИКА ───────────────────────────────────────────────

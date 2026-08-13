@@ -2871,13 +2871,17 @@ function receiptsMonthRevenueMap_(ss) {
   try {
     const sheet = ss.getSheetByName(MONTH_SUMMARY_SHEET);
     if (sheet && sheet.getLastRow() > 1) {
-      // Читаем и "Выручку" (колонка 2), и "Наличные" (последняя колонка, добавлена
-      // 2026-08-13) - для старых строк, записанных до этой колонки, cash будет undefined/0.
+      // "revenue" тут = "Выручка коммерческая" (без внутригрупповых, колонка 16, добавлена
+      // 2026-08-13) - НЕ общая "Выручка" (колонка 2, та используется на "Глобальной
+      // статистике" и специально включает внутренние). Влад, 2026-08-13: "внутренних не
+      // должно быть, мы всё равно не получаем по ним поступления". И "Наличные" (колонка 15,
+      // тоже добавлена 2026-08-13) - для старых строк, записанных до появления этих двух
+      // колонок, оба поля будут undefined/0, пока не запущен backfillMonthSummaries() заново.
       const width = Math.max(sheet.getLastColumn(), MONTH_SUMMARY_HEADERS.length);
       const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, width).getValues();
       data.forEach(function(r) {
         if (!r[0]) return;
-        map[monthKeyFrom_(r[0])] = { revenue: r[1] || 0, cash: r[14] || 0 };
+        map[monthKeyFrom_(r[0])] = { revenue: r[15] || 0, cash: r[14] || 0 };
       });
     }
   } catch (revErr) {
@@ -2891,10 +2895,11 @@ function receiptsMonthRevenueMap_(ss) {
   // "Клиенты", просто раньше не использовалась для сравнения с "Поступлениями". НЕ пишем эти
   // месяцы в саму "История_месяцев" - там нет остальных полей (ВП/затраты/план), строка
   // выглядела бы обманчиво на "Глобальной статистике" (нули вместо "нет данных"), только для
-  // сравнения на этой вкладке. ВАЖНО: методика чуть отличается - offline-выгрузка исключает
-  // внутренние перевозки (см. .business/clients/INDEX.md), а живая "Выручка" дашборда - нет
-  // (project_business_rules) - историческая выручка может быть немного НИЖЕ по этой причине,
-  // не ошибка.
+  // сравнения на этой вкладке. Методика теперь СОГЛАСОВАНА с живой частью (2026-08-13,
+  // тот же вечер): offline-выгрузка изначально исключает внутренние перевозки (см.
+  // .business/clients/INDEX.md), а живая часть выше читает именно "Выручка коммерческая"
+  // (тоже без внутренних) - раньше тут было расхождение методик, теперь обе половины карты
+  // одинаково "без внутригрупповых".
   try {
     const agg = getClientHistoryAggregate_();
     if (agg) {
@@ -2922,7 +2927,9 @@ function receiptsMonthRevenueMap_(ss) {
 // импорте) строки, сама ничего заново не сопоставляет с менеджерами - быстро, без похода в
 // клиентскую аналитику на каждый запрос doGet(). ordersData - уже посчитанный getOrdersData(ss)
 // (передаётся вызывающим кодом из doGet(), чтобы не считать заказы дважды за один запрос) -
-// источник "Выручки по дням" для текущего месяца (ordersData.summary.by_day).
+// источник "Выручки по дням" для текущего месяца - ordersData.summary.by_day_commercial
+// (БЕЗ внутригрупповых, см. total_commercial в aggregateOrdersRows - Влад, 2026-08-13:
+// "внутренних не должно быть, мы всё равно не получаем по ним поступления").
 function getReceiptsData(ss, ordersData) {
   const liveSheet = ss.getSheetByName(RECEIPTS_SHEET);
   const liveRows = receiptsReadSheetRows_(liveSheet);
@@ -2940,6 +2947,10 @@ function getReceiptsData(ss, ordersData) {
   // деньги, а не только то, что прошло через расчётный счёт.
   const totalCashMonth = (ordersData && ordersData.summary && ordersData.summary.total_cash) || 0;
   const cashByDayForToday = (ordersData && ordersData.summary && ordersData.summary.by_day_cash) || {};
+  // Живая выручка (коммерческая, без внутригрупповых) текущего месяца - для monthly-записи
+  // текущего месяца, тем же принципом, что и totalCashMonth (не кэш История_месяцев, тот
+  // обновляется раз за прогон runAll() и может отставать внутри дня).
+  const totalRevenueMonthLive = (ordersData && ordersData.summary && ordersData.summary.total_commercial);
 
   const totalBankMonth = liveRows.reduce(function(s, r) { return s + r.amount; }, 0);
   const totalMonth = totalBankMonth + totalCashMonth;
@@ -2959,7 +2970,7 @@ function getReceiptsData(ss, ordersData) {
   // комментарий у getReceiptsData). Наличка (Влад, 2026-08-13: "поступления налички видно из
   // таблицы заказов" - отчёт 1С по р/с наличные вообще не видит) прибавляется к безналичным
   // "Поступлениям", чтобы столбец на графике показывал ВСЕ реально полученные деньги.
-  const revByDay = (ordersData && ordersData.summary && ordersData.summary.by_day) || {};
+  const revByDay = (ordersData && ordersData.summary && ordersData.summary.by_day_commercial) || {};
   const daily = Object.keys(dayMap).sort().map(function(d) {
     const cash = cashByDayForToday[d] || 0;
     return {
@@ -3011,7 +3022,9 @@ function getReceiptsData(ss, ordersData) {
     const rc = monthRevMap[m.month];
     m.cash = (m.month === currentMonth) ? totalCashMonth : ((rc && rc.cash) || 0);
     m.amount = m.bank + m.cash;
-    m.revenue = rc ? rc.revenue : null;
+    m.revenue = (m.month === currentMonth && totalRevenueMonthLive !== undefined)
+      ? totalRevenueMonthLive
+      : (rc ? rc.revenue : null);
   });
 
   // Сальдо с начала года (Влад, 2026-08-13: "нужно видеть общее сальдо по году выручка
@@ -3032,6 +3045,12 @@ function getReceiptsData(ss, ordersData) {
     balance: ytdReceipts - ytdRevenue,
   };
 
+  // Сальдо ТОЛЬКО за текущий месяц (Влад, 2026-08-13: "в блочок сальдо по году также сальдо
+  // по месяцу добавь инф.") - null, если выручка за этот месяц ещё не известна вообще
+  // (не должно случиться для текущего месяца - totalRevenueMonthLive всегда живой - но
+  // на всякий случай, если ordersData вдруг не пришёл).
+  const monthBalance = (totalRevenueMonthLive !== undefined) ? (totalMonth - totalRevenueMonthLive) : null;
+
   return {
     month: currentMonth,
     summary: {
@@ -3042,6 +3061,8 @@ function getReceiptsData(ss, ordersData) {
       avg_per_day: totalMonth / daysElapsed,
       by_org: byOrg,
       ytd: ytd,
+      month_balance: monthBalance,
+      month_revenue: (totalRevenueMonthLive !== undefined) ? totalRevenueMonthLive : null,
     },
     daily: daily,
     by_manager: byManager,
@@ -4801,6 +4822,8 @@ const MONTH_SUMMARY_HEADERS = [
   'Наличные', // добавлено 2026-08-13 (вкладка "Поступления") - СТРОГО в конец, не между
               // существующими колонками, чтобы не сдвинуть индексы у старых строк (тот же
               // приём, что и с "Сумма нашего долга" в ДЗ_данные).
+  'Выручка коммерческая', // добавлено 2026-08-13 (то же самое, тем же вечером) - выручка БЕЗ
+              // внутригрупповых перевозок, только для сравнения с "Поступлениями".
 ];
 
 // Считает сводку за месяц - НЕ пишет в лист, чистая функция. Работает и для текущего
@@ -4837,6 +4860,7 @@ function computeMonthSummary_(ss, monthKey) {
     hiredProfit: hiredProfit,
     hiredRevenue: hiredCost + hiredProfit,
     cash: os.total_cash || 0, // наличные поступления за месяц (см. "Поступления")
+    commercial: os.total_commercial || 0, // выручка без внутригрупповых (см. "Поступления")
   };
 }
 
@@ -4898,7 +4922,7 @@ function saveMonthSummary_(ss, monthKey) {
   var row = [
     "'" + summary.month, summary.revenue, summary.salesPlan, summary.profit, summary.profitTral, summary.profitLong,
     summary.fot, summary.fuel, summary.parts, summary.fines, summary.tolls,
-    summary.hiredProfit, summary.hiredRevenue, new Date(), summary.cash,
+    summary.hiredProfit, summary.hiredRevenue, new Date(), summary.cash, summary.commercial,
   ];
   if (rowIndex > 0) sheet.getRange(rowIndex, 1, 1, row.length).setValues([row]);
   else sheet.appendRow(row);
@@ -7817,6 +7841,14 @@ function aggregateOrdersRows(rows) {
   // что и byDay/totalAmount выше.
   let totalCash = 0;
   let byDayCash = {};
+  // "Коммерческая" выручка - БЕЗ внутригрупповых перевозок (Влад, 2026-08-13: "внутренних и
+  // не должно быть, мы всё равно не получаем по ним поступления... сравнение должно быть
+  // поступления / коммерческие заказы"). totalAmount/byDay выше НЕ трогаем - они используются
+  // в других местах дашборда, где внутренние специально ВКЛЮЧЕНЫ в аналитику (project_business_
+  // rules, "Внутренние перевозки - НЕ исключать"). Эта пара - только для сравнения с
+  // "Поступлениями", где внутренние структурно не могут дать реальных денег на счёт.
+  let totalCommercial = 0;
+  let byDayCommercial = {};
   let totalHiredCost=0, hiredProfit=0, hiredProfitTral=0, hiredProfitLong=0;
   let internalAmount=0, internalAmountThruYesterday=0, internalOrders=0;
   // Счётчики исключённых из воронки документов строк - для сверки с "Заказов (свой парк +
@@ -7922,6 +7954,10 @@ function aggregateOrdersRows(rows) {
     const cashPaid = num(row, 'cash');
     totalCash += cashPaid;
     if (dateStr && cashPaid) byDayCash[dateStr] = (byDayCash[dateStr] || 0) + cashPaid;
+    if (!isInt) {
+      totalCommercial += amount;
+      if (dateStr) byDayCommercial[dateStr] = (byDayCommercial[dateStr] || 0) + amount;
+    }
     if (isThruYesterday) totalAmountThruYesterday += amount;
     totalPayment += payment;
     totalBalance += balance;
@@ -8385,6 +8421,8 @@ function aggregateOrdersRows(rows) {
       by_day:          byDay, // {'YYYY-MM-DD': сумма} - для сравнения с "Поступлениями" по дням
       total_cash:      totalCash, // наличные поступления за период (видны только в заказах, не в отчёте 1С по р/с)
       by_day_cash:     byDayCash,
+      total_commercial: totalCommercial, // выручка БЕЗ внутригрупповых - для сравнения с "Поступлениями"
+      by_day_commercial: byDayCommercial,
       total_amount_thru_yesterday: totalAmountThruYesterday, // числитель прогноза, см. isThruYesterday выше
       total_payment:   totalPayment,
       hired_profit:    hiredProfit,    // прибыль только по найму

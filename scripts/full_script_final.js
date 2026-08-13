@@ -7569,21 +7569,31 @@ function ensureAiTasksSheet_(ss) {
   let sheet = ss.getSheetByName(AI_TASKS_SHEET);
   if (!sheet) {
     sheet = ss.insertSheet(AI_TASKS_SHEET);
-    sheet.getRange(1, 1, 1, 6).setValues([['Дата', 'Менеджер', 'Задачи_JSON', 'Совет_по_плану', 'Модель', 'Сгенерировано_в']]).setFontWeight('bold');
+    sheet.getRange(1, 1, 1, 7).setValues([['Дата', 'Сотрудник', 'Задачи_JSON', 'Совет_по_плану', 'Модель', 'Сгенерировано_в', 'Роль']]).setFontWeight('bold');
+  } else if (sheet.getLastColumn() < 7 || String(sheet.getRange(1, 7).getValue()).trim() !== 'Роль') {
+    // Апгрейд листа "на месте" - НЕ трогаем уже записанные строки (2026-08-13, баг: "Прус-
+    // Роскошный/Суркова задвоены ролями" - кэш был на 'Дата'+'Сотрудник' БЕЗ роли, у людей
+    // с двумя ролями (менеджер И логист - Суркова, исторически Прус) первая за день генерация
+    // "побеждала" на весь день независимо от того, какая роль реально запросила задачи -
+    // Владу пришли задачи про пропавших клиентов (менеджерский промпт) на странице логиста.
+    // Колонка G добавляется В КОНЕЦ, не вставляется - старые строки не сдвигаются, у них
+    // просто останется пустая роль (не совпадёт ни с одним будущим ролевым запросом, тихо
+    // перегенерируется один раз - самоисцеляется, без ручной миграции).
+    sheet.getRange(1, 7).setValue('Роль').setFontWeight('bold');
   }
   return sheet;
 }
 
-// Линейный поиск строки на сегодня для этого менеджера - тот же приём, что
-// findOrCreateDebtStatusRow_ (таблица маленькая, ~1 строка/менеджер/день, скан копеечный).
-function findAiTasksCacheRow_(ss, dateKey, managerName) {
+// Линейный поиск строки на сегодня для ЭТОГО человека И ЭТОЙ роли (см. ensureAiTasksSheet_ -
+// без роли в ключе задачи одной роли подменялись кэшем другой у людей с двойной ролью).
+function findAiTasksCacheRow_(ss, dateKey, personName, role) {
   const sheet = ss.getSheetByName(AI_TASKS_SHEET);
   if (!sheet || sheet.getLastRow() < 2) return null;
-  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 6).getValues();
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 7).getValues();
   for (let i = 0; i < data.length; i++) {
     const r = data[i];
     const rDate = r[0] instanceof Date ? Utilities.formatDate(r[0], 'Europe/Moscow', 'yyyy-MM-dd') : String(r[0] || '').trim();
-    if (rDate === dateKey && String(r[1] || '').trim() === managerName) {
+    if (rDate === dateKey && String(r[1] || '').trim() === personName && String(r[6] || '').trim() === role) {
       let tasks = [];
       try { tasks = JSON.parse(r[2] || '[]'); } catch (parseErr) { tasks = []; }
       return { tasks: tasks, plan_advice: String(r[3] || ''), model: String(r[4] || ''), generated_at: String(r[5] || '') };
@@ -7592,27 +7602,27 @@ function findAiTasksCacheRow_(ss, dateKey, managerName) {
   return null;
 }
 
-// Удаляет строку кэша на сегодня для этого менеджера, если есть (2026-08-12, Влад: "мы сделали
-// много изменений... по Савитку была генерация раньше, это всё осталось в кэше... нужно
-// обнулить" - кнопка "Сгенерировать заново" на фронтенде дёргает action=generate_ai_tasks с
-// force=1, это и есть та точка, что стирает старую строку перед новой генерацией). Идёт снизу
-// вверх - на случай, если в листе случайно оказалось больше одной строки на менеджера/день.
-function deleteAiTasksCacheRow_(ss, dateKey, managerName) {
+// Удаляет строку кэша на сегодня для этого человека И ЭТОЙ роли, если есть (2026-08-12, Влад:
+// "мы сделали много изменений... нужно обнулить" - кнопка "Сгенерировать заново"). Роль в
+// условии удаления (2026-08-13) - force-регенерация одной роли (например логиста) не должна
+// стирать валидный кэш другой роли того же человека за тот же день (например менеджера).
+// Идёт снизу вверх - на случай, если в листе случайно оказалось больше одной строки.
+function deleteAiTasksCacheRow_(ss, dateKey, personName, role) {
   const sheet = ss.getSheetByName(AI_TASKS_SHEET);
   if (!sheet || sheet.getLastRow() < 2) return;
-  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 7).getValues();
   for (let i = data.length - 1; i >= 0; i--) {
     const rDate = data[i][0] instanceof Date ? Utilities.formatDate(data[i][0], 'Europe/Moscow', 'yyyy-MM-dd') : String(data[i][0] || '').trim();
-    if (rDate === dateKey && String(data[i][1] || '').trim() === managerName) {
+    if (rDate === dateKey && String(data[i][1] || '').trim() === personName && String(data[i][6] || '').trim() === role) {
       sheet.deleteRow(i + 2);
     }
   }
 }
 
-function saveAiTasksCache_(ss, dateKey, managerName, tasks, planAdvice, model) {
+function saveAiTasksCache_(ss, dateKey, personName, tasks, planAdvice, model, role) {
   const sheet = ensureAiTasksSheet_(ss);
   const now = new Date().toISOString();
-  sheet.appendRow([dateKey, managerName, JSON.stringify(tasks), planAdvice, model, now]);
+  sheet.appendRow([dateKey, personName, JSON.stringify(tasks), planAdvice, model, now, role]);
   return now;
 }
 
@@ -7906,7 +7916,17 @@ function buildLogistAiContext_(ss, orders, logistName, period) {
   const forecastMargin = totalMargin * paceRatio;
 
   const detail = (orders.logist_detail || {})[logistName] || { by_supplier: [], deals: [] };
-  const suppliers = (detail.by_supplier || []).slice(0, 8).map(function(s) {
+  const allSuppliers = detail.by_supplier || [];
+  // Общая маржинальность (2026-08-13, Влад: "обязательно контроль общей маржинальной прибыли,
+  // если провалимся ниже 23%, никто не получит премии") - от ВСЕХ поставщиков этого логиста
+  // (не только топ-8, которые уходят в suppliers[] ниже) - тот же показатель, что виджет
+  // "Общая маржинальность по направлению" на самой странице (renderMyPageLogist), но раньше
+  // модель его вообще не видела - знала только про margin_bonus (прогресс к порогу 1М в ₽), а
+  // не про % маржинальности, от которого зависит квалификация под 8% ставку.
+  const totalRevenueAll = allSuppliers.reduce(function(s, x) { return s + (x.revenue || 0); }, 0);
+  const totalMarginAll = allSuppliers.reduce(function(s, x) { return s + (x.margin || 0); }, 0);
+  const overallMarginPct = totalRevenueAll > 0 ? Math.round(totalMarginAll / totalRevenueAll * 100) : null;
+  const suppliers = allSuppliers.slice(0, 8).map(function(s) {
     return { name: s.name, revenue: Math.round(s.revenue || 0), margin: Math.round(s.margin || 0),
       margin_pct: s.margin_pct || 0, orders: s.orders || 0,
       no_waybill: s.no_waybill || 0, not_posted: s.not_posted || 0, no_realiz: s.no_realiz || 0, complete: s.complete || 0 };
@@ -7919,6 +7939,7 @@ function buildLogistAiContext_(ss, orders, logistName, period) {
   return {
     logist: logistName,
     period: period || Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM'),
+    overall_margin_pct: overallMarginPct,
     margin_bonus: {
       total_margin: Math.round(totalMargin), threshold: MARGIN_BONUS_THRESHOLD,
       pct: Math.round(totalMargin / MARGIN_BONUS_THRESHOLD * 100),
@@ -7940,9 +7961,15 @@ function buildLogistAiTasksPrompt_(logistName, context) {
     'данные по одному логисту за текущий месяц в формате JSON.\n\n' +
     'Данные:\n' + JSON.stringify(context, null, 0) + '\n\n' +
     'ВАЖНЫЕ ФАКТЫ О ТОМ, КАК УСТРОЕНА РАБОТА (используй их, чтобы не писать ошибочных советов):\n' +
-    '- margin_pct поставщика >= 23% - квалифицирует маржу под бонус 8% (иначе бонус 0% с этой ' +
-    'части) - поставщики с margin_pct < 23% в suppliers[] стоит отметить как кандидатов на ' +
-    'пересмотр ставки или частичную замену другим поставщиком с более высокой маржой.\n' +
+    '- overall_margin_pct - ОБЩАЯ маржинальность этого логиста (маржа/выручка найма за месяц, ' +
+    'по всем поставщикам). 23% - критический порог: маржа НИЖЕ 23% по конкретному поставщику ' +
+    'не квалифицируется под 8% бонус (идёт по ставке 0%) - если overall_margin_pct меньше 23% ' +
+    'или близко к порогу (23-27%), это ПРИОРИТЕТ №1 сегодня: обязательно сделай про это ' +
+    'отдельную задачу (category "поставщики") - укажи КОНКРЕТНОГО поставщика(ов) из suppliers[] ' +
+    'с margin_pct < 23%, из-за которых проседает общая маржинальность, и предложи пересмотреть ' +
+    'ставку с ним или частично перевести объём на поставщика с margin_pct повыше. Если ' +
+    'overall_margin_pct уверенно выше 23% (например 30%+) - отдельной задачи можно не делать, ' +
+    'просто не упускай из виду отдельных слабых поставщиков.\n' +
     '- suppliers[i].no_waybill (нет путевого листа от перевозчика) - ЭТО ЗОНА ОТВЕТСТВЕННОСТИ ' +
     'ЛОГИСТА (в отличие от менеджера по продажам, у которого это была бы чужая зона) - здесь ' +
     'логист сам работает с поставщиком, уместно рекомендовать запросить путевой лист напрямую.\n' +
@@ -7968,11 +7995,13 @@ function buildLogistAiTasksPrompt_(logistName, context) {
     '"7 618 250", а НЕ "7618250") - слитные числа от 4 цифр тяжело читать.\n' +
     '- ФОРМАТ ДАТ: даты (deals_examples[].date) УЖЕ отформатированы по-русски (например ' +
     '"18 июля") - используй РОВНО КАК ДАНЫ, не переформатируй и не переставляй числа местами.\n\n' +
-    'Сформулируй РОВНО 5 задач на сегодня для этого логиста. Постарайся сделать разумный ' +
-    'баланс: минимум 2 задачи про работу с поставщиками (низкая маржа/новые предложения/объём), ' +
-    'не больше 2 задачи про документы (путевые/проведение/реализация), 1 задачу можно посвятить ' +
-    'прогрессу к премии >1М, если это уместно (близко к порогу) - но если данных по какой-то ' +
-    'теме нет, не выдумывай, просто перераспредели на другие темы.\n\n' +
+    'Сформулируй РОВНО 5 задач на сегодня для этого логиста. Если overall_margin_pct ниже 23% ' +
+    'или близко к порогу (23-27%) - задача про восстановление общей маржинальности ОБЯЗАТЕЛЬНА ' +
+    'и идёт первой. Дальше разумный баланс: минимум 1-2 задачи про работу с поставщиками (новые ' +
+    'предложения/объём, помимо маржи), не больше 2 задач про документы (путевые/проведение/ ' +
+    'реализация), 1 задачу можно посвятить прогрессу к премии >1М, если это уместно (близко к ' +
+    'порогу) - но если данных по какой-то теме нет, не выдумывай, просто перераспредели на ' +
+    'другие темы.\n\n' +
     'Требования к ответу:\n' +
     '- Ответь СТРОГО валидным JSON без markdown-обёртки (без ```), без текста до/после.\n' +
     '- Формат: {"tasks":[{"title":"...","why":"...","category":"выручка|поставщики|документы"},' +
@@ -8037,7 +8066,11 @@ function parseAiTasksResponse_(rawText) {
   let data;
   try { data = JSON.parse(cleaned); } catch (parseErr) { throw new Error('Не удалось разобрать ответ ИИ как JSON: ' + cleaned.slice(0, 300)); }
   if (!data || !Array.isArray(data.tasks) || !data.tasks.length) throw new Error('Ответ ИИ не содержит списка задач');
-  const validCategories = ['выручка', 'дебиторка', 'документы'];
+  // "поставщики" - категория логистского промпта (buildLogistAiTasksPrompt_), "дебиторка" -
+  // только менеджерского (buildAiTasksPrompt_) - парсер общий для обеих ролей, список должен
+  // содержать категории ОБЕИХ (2026-08-13, баг: "поставщики" отсутствовал здесь, все задачи
+  // логиста про поставщиков молча теряли category, бейдж на фронтенде не показывался).
+  const validCategories = ['выручка', 'дебиторка', 'документы', 'поставщики'];
   const tasks = data.tasks.slice(0, 5).map(function(t) {
     const cat = String((t && t.category) || '').trim().toLowerCase();
     return { title: String((t && t.title) || '').trim(), why: String((t && t.why) || '').trim(),
@@ -8056,12 +8089,12 @@ function parseAiTasksResponse_(rawText) {
 // кэш на сегодня и удаляет старую строку перед генерацией новой, вместо ручного похода в
 // Google Таблицу за каждым обновлением промпта. Дёргается кнопкой "Сгенерировать заново" на
 // фронтенде (см. retryAiTasks_).
-function generateAiTasksCached_(ss, personName, contextFn, promptFn, force) {
+function generateAiTasksCached_(ss, personName, role, contextFn, promptFn, force) {
   const dateKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM-dd');
   if (force) {
-    deleteAiTasksCacheRow_(ss, dateKey, personName);
+    deleteAiTasksCacheRow_(ss, dateKey, personName, role);
   } else {
-    const cached = findAiTasksCacheRow_(ss, dateKey, personName);
+    const cached = findAiTasksCacheRow_(ss, dateKey, personName, role);
     if (cached) return { tasks: cached.tasks, plan_advice: cached.plan_advice, generated_at: cached.generated_at, cached: true };
   }
 
@@ -8069,18 +8102,18 @@ function generateAiTasksCached_(ss, personName, contextFn, promptFn, force) {
   const prompt = promptFn(personName, context);
   const rawText = callKieGpt5_(prompt);
   const parsed = parseAiTasksResponse_(rawText);
-  const generatedAt = saveAiTasksCache_(ss, dateKey, personName, parsed.tasks, parsed.plan_advice, 'gpt-5-4');
+  const generatedAt = saveAiTasksCache_(ss, dateKey, personName, parsed.tasks, parsed.plan_advice, 'gpt-5-4', role);
   return { tasks: parsed.tasks, plan_advice: parsed.plan_advice, generated_at: generatedAt, cached: false };
 }
 
 function generateManagerAiTasksCached_(ss, orders, managerName, period, force) {
-  return generateAiTasksCached_(ss, managerName,
+  return generateAiTasksCached_(ss, managerName, 'manager',
     function() { return buildManagerAiContext_(ss, orders, managerName, period); },
     buildAiTasksPrompt_, force);
 }
 
 function generateLogistAiTasksCached_(ss, orders, logistName, period, force) {
-  return generateAiTasksCached_(ss, logistName,
+  return generateAiTasksCached_(ss, logistName, 'logist',
     function() { return buildLogistAiContext_(ss, orders, logistName, period); },
     buildLogistAiTasksPrompt_, force);
 }

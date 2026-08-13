@@ -3984,23 +3984,35 @@ function renderReceiptsChart() {
   if (!ctx) return;
   if (receiptsChart) receiptsChart.destroy();
 
-  var labels, values;
+  // Выручка рядом с поступлениями (Влад, 2026-08-13: "сравнивал поступления с выручкой по
+  // дням и месяцам") - линия поверх столбцов, null-точки (нет данных за месяц/день) дают
+  // разрыв в линии, а не ложный ноль - Chart.js сам это умеет через spanGaps:false (дефолт).
+  var labels, values, revValues;
   if (receiptsChartView === 'monthly') {
     labels = (r.monthly || []).map(function(m) { return formatMonthLabel(m.month); });
     values = (r.monthly || []).map(function(m) { return m.amount; });
+    revValues = (r.monthly || []).map(function(m) { return (m.revenue == null) ? null : m.revenue; });
   } else {
     labels = (r.daily || []).map(function(d) { return receiptsShortDate_(d.date); });
     values = (r.daily || []).map(function(d) { return d.amount; });
+    revValues = (r.daily || []).map(function(d) { return (d.revenue == null) ? null : d.revenue; });
+  }
+  var hasRevenue = revValues.some(function(v) { return v != null; });
+
+  var datasets = [{ type: 'bar', label: 'Поступления', data: values, backgroundColor: '#EF9F27', borderRadius: 4, maxBarThickness: 28, order: 2 }];
+  if (hasRevenue) {
+    datasets.push({ type: 'line', label: 'Выручка', data: revValues, borderColor: '#7db9ee', backgroundColor: 'rgba(125,185,238,0.1)', tension: 0.3, fill: false, pointRadius: 2, borderWidth: 2, order: 1 });
   }
 
   receiptsChart = new Chart(ctx, {
     type: 'bar',
-    data: { labels: labels, datasets: [{ label: 'Поступления', data: values, backgroundColor: '#EF9F27', borderRadius: 4, maxBarThickness: 28 }] },
+    data: { labels: labels, datasets: datasets },
     options: {
       responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { label: function(c) { return ' ' + fmt(c.raw); } } }
+        legend: { display: hasRevenue, position: 'bottom', labels: { color: '#888780', font: { size: 11 }, boxWidth: 10 } },
+        tooltip: { callbacks: { label: function(c) { return ' ' + c.dataset.label + ': ' + (c.raw == null ? '—' : fmt(c.raw)); } } }
       },
       scales: {
         x: { ticks: { color: '#888780', font: { size: 11 }, maxRotation: 0, autoSkip: true }, grid: { display: false } },

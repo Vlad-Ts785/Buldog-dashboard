@@ -2770,7 +2770,6 @@ function importReceiptsReport() {
 
   const parsed = parseReceiptsRawRows_(rawData);
   if (!parsed.rows.length) throw new Error('Поступления: после разбора не осталось ни одной строки - проверь формат файла');
-  if (!parsed.reportMonth) throw new Error('Поступления: не удалось определить месяц периода отчёта');
 
   // Сверка со строкой "Итого" - минимальная защита от молчаливого съезда парсинга, если
   // формат столбцов 1С поменяется.
@@ -2789,33 +2788,56 @@ function importReceiptsReport() {
     row.manager = managerMap[normalizeReceiptClientName_(row.customer)] || 'Не определён';
   });
 
-  const sheetRows = parsed.rows.map(function(r) {
-    return [r.date, r.org, r.customer, r.contract, r.docNumber, r.manager, r.amount];
+  // Маршрутизация по МЕСЯЦУ КАЖДОЙ СТРОКИ (не по заявленному периоду отчёта целиком) - это
+  // одновременно покрывает рутинный ежедневный импорт (один месяц - текущий), позднюю
+  // коррекцию прошлого месяца (один месяц - не текущий) И разовую массовую выгрузку сразу за
+  // несколько месяцев (Влад, 2026-08-13: "один раз выгружу за пол года") - без этого разовая
+  // выгрузка тихо схлопнула бы полгода данных в один "текущий месяц" и испортила бы KPI/график.
+  const groups = {}; // 'YYYY-MM' -> строки
+  parsed.rows.forEach(function(r) {
+    const mk = r.date.slice(0, 7);
+    if (!groups[mk]) groups[mk] = [];
+    groups[mk].push(r);
   });
+  const nowMonthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+  function toSheetRows(list) {
+    return list.map(function(r) { return [r.date, r.org, r.customer, r.contract, r.docNumber, r.manager, r.amount]; });
+  }
 
+  // Если живой лист сейчас держит месяц, ОТЛИЧНЫЙ от текущего, И новый файл этот месяц с
+  // собой не принёс (то есть это обычный ежедневный импорт, а не коррекция/массовая выгрузка,
+  // которые сами перезапишут этот месяц ниже) - последний известный живой снимок нужно
+  // сохранить в архив ПЕРЕД перезаписью, иначе он пропадёт при переходе на новый месяц.
   const existingSheet = ss.getSheetByName(RECEIPTS_SHEET);
   const existingMonth = receiptsExistingSheetMonth_(existingSheet);
-
-  if (existingMonth && existingMonth !== parsed.reportMonth) {
-    if (parsed.reportMonth < existingMonth) {
-      // Пришедший отчёт за месяц РАНЬШЕ текущего живого - поздняя коррекция прошлого месяца
-      // (бухгалтерия ещё доделывает). Живой месяц не трогаем, обновляем только его архив.
-      writeReceiptsSheet_(ss, RECEIPTS_ARCHIVE_PFX + parsed.reportMonth, RECEIPTS_HEADERS_, sheetRows);
-      latest.markRead();
-      Logger.log('✅ Поступления: коррекция архива ' + parsed.reportMonth + ' (' + sheetRows.length + ' строк)');
-      return;
-    }
-    // Обычный переход на новый месяц - архивируем прошлый живой месяц перед перезаписью.
+  if (existingMonth && existingMonth !== nowMonthKey && !groups[existingMonth]) {
     if (!ss.getSheetByName(RECEIPTS_ARCHIVE_PFX + existingMonth)) {
       const existingData = existingSheet.getDataRange().getValues();
       writeReceiptsSheet_(ss, RECEIPTS_ARCHIVE_PFX + existingMonth, existingData[0], existingData.slice(1));
-      Logger.log('✅ Поступления: архив создан ' + existingMonth);
+      Logger.log('✅ Поступления: архив создан ' + existingMonth + ' (переход на новый месяц)');
     }
   }
 
-  writeReceiptsSheet_(ss, RECEIPTS_SHEET, RECEIPTS_HEADERS_, sheetRows);
+  // Каждый месяц, кроме текущего, - полностью в свой архив (или коррекция уже существующего
+  // архива, или новый архив из массовой выгрузки - разницы нет, всегда полная замена данными
+  // из этого файла, отчёт сам по себе накопительный и авторитетный на момент отправки).
+  let archivedMonths = 0;
+  Object.keys(groups).sort().forEach(function(mk) {
+    if (mk === nowMonthKey) return;
+    writeReceiptsSheet_(ss, RECEIPTS_ARCHIVE_PFX + mk, RECEIPTS_HEADERS_, toSheetRows(groups[mk]));
+    archivedMonths++;
+  });
+
+  // Текущий месяц - в живой лист, но только если файл его реально содержит (историческая
+  // выгрузка может обрываться до сегодняшнего дня - тогда живой лист не трогаем вообще).
+  if (groups[nowMonthKey]) {
+    writeReceiptsSheet_(ss, RECEIPTS_SHEET, RECEIPTS_HEADERS_, toSheetRows(groups[nowMonthKey]));
+  }
+
   latest.markRead();
-  Logger.log('✅ Поступления импортированы: ' + sheetRows.length + ' строк, ' + Math.round(parsedTotal) + ' ₽ за ' + parsed.reportMonth);
+  Logger.log('✅ Поступления импортированы: ' + parsed.rows.length + ' строк, ' + Math.round(parsedTotal) +
+    ' ₽, месяцев в файле: ' + Object.keys(groups).length + ' (архивировано: ' + archivedMonths +
+    (groups[nowMonthKey] ? ', + текущий месяц в живой лист' : ', текущего месяца в файле не было') + ')');
 }
 
 function receiptsReadSheetRows_(sheet) {
@@ -2834,10 +2856,34 @@ function receiptsReadSheetRows_(sheet) {
   }).filter(function(r) { return r.date && r.amount; });
 }
 
+// Выручка по месяцам - для сравнения с "Поступлениями" (2026-08-13, Влад: "сравнивал
+// поступления с выручкой по дням и месяцам"). Читает уже готовый кэш История_месяцев (тот же,
+// что "Глобальная статистика") - НЕ пересчитывает архивы заказов на лету на каждый запрос
+// doGet(). Может не покрывать совсем ранние месяцы, если Поступления загружены глубже, чем
+// копится История_месяцев - тогда revenue у месяца просто null, это честно, не выдумываем.
+function receiptsMonthRevenueMap_(ss) {
+  const map = {};
+  try {
+    const sheet = ss.getSheetByName(MONTH_SUMMARY_SHEET);
+    if (sheet && sheet.getLastRow() > 1) {
+      const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
+      data.forEach(function(r) {
+        if (!r[0]) return;
+        map[monthKeyFrom_(r[0])] = r[1] || 0;
+      });
+    }
+  } catch (revErr) {
+    Logger.log('receiptsMonthRevenueMap_: ' + revErr);
+  }
+  return map;
+}
+
 // Агрегация для дашборда - вкладка "Поступления". Читает уже готовые (посчитанные при
 // импорте) строки, сама ничего заново не сопоставляет с менеджерами - быстро, без похода в
-// клиентскую аналитику на каждый запрос doGet().
-function getReceiptsData(ss) {
+// клиентскую аналитику на каждый запрос doGet(). ordersData - уже посчитанный getOrdersData(ss)
+// (передаётся вызывающим кодом из doGet(), чтобы не считать заказы дважды за один запрос) -
+// источник "Выручки по дням" для текущего месяца (ordersData.summary.by_day).
+function getReceiptsData(ss, ordersData) {
   const liveSheet = ss.getSheetByName(RECEIPTS_SHEET);
   const liveRows = receiptsReadSheetRows_(liveSheet);
   if (!liveRows.length) {
@@ -2861,7 +2907,12 @@ function getReceiptsData(ss) {
 
   const dayMap = {};
   liveRows.forEach(function(r) { dayMap[r.date] = (dayMap[r.date] || 0) + r.amount; });
-  const daily = Object.keys(dayMap).sort().map(function(d) { return { date: d, amount: dayMap[d] }; });
+  // Выручка по дням - только для ТЕКУЩЕГО месяца (ordersData уже посчитан вызывающим кодом,
+  // архивные месяцы намеренно не тянем на каждый запрос - см. комментарий у getReceiptsData).
+  const revByDay = (ordersData && ordersData.summary && ordersData.summary.by_day) || {};
+  const daily = Object.keys(dayMap).sort().map(function(d) {
+    return { date: d, amount: dayMap[d], revenue: (d in revByDay) ? revByDay[d] : null };
+  });
 
   const mgrMap = {};
   liveRows.forEach(function(r) {
@@ -2892,6 +2943,9 @@ function getReceiptsData(ss) {
   });
   monthly.push({ month: currentMonth, amount: totalMonth, count: liveRows.length });
   monthly.sort(function(a, b) { return a.month < b.month ? -1 : 1; });
+
+  const monthRevMap = receiptsMonthRevenueMap_(ss);
+  monthly.forEach(function(m) { m.revenue = (m.month in monthRevMap) ? monthRevMap[m.month] : null; });
 
   return {
     month: currentMonth,
@@ -3847,7 +3901,7 @@ function doGet(e) {
       staffMarkas: staffMarkas,
       orders:     ordersData,
       debt:       getDebtData(ss),
-      receipts:   getReceiptsData(ss),
+      receipts:   getReceiptsData(ss, ordersData),
       // Колонка "Заказов" на "Водителях" в ДЕФОЛТНОМ виде (без выбора периода) раньше падала
       // на orders.by_driver, который обрезан до топ-25 ПО ВСЕЙ КОМПАНИИ (см. по_driver ниже
       // в getOrdersData) - водитель с высокой выручкой, но малым числом дорогих рейсов, в
@@ -7628,6 +7682,11 @@ function aggregateOrdersRows(rows) {
   const todayStr = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM-dd');
 
   let totalOrders=0, totalAmount=0, totalAmountThruYesterday=0, totalPayment=0, totalBalance=0;
+  // Выручка по дням (2026-08-13, вкладка "Поступления" - сравнение с реальными деньгами на
+  // р/с по дням/месяцам). Копится ровно на том же событии, что и totalAmount ниже - гарантия,
+  // что сумма по дням всегда сходится с "Общей выручкой" за период (тот же принцип "цифры
+  // бьются везде", что и везде на дашборде).
+  let byDay = {};
   let totalHiredCost=0, hiredProfit=0, hiredProfitTral=0, hiredProfitLong=0;
   let internalAmount=0, internalAmountThruYesterday=0, internalOrders=0;
   // Счётчики исключённых из воронки документов строк - для сверки с "Заказов (свой парк +
@@ -7729,6 +7788,7 @@ function aggregateOrdersRows(rows) {
     const isThruYesterday = dateStr !== '' && dateStr <= yesterdayStr;
 
     totalAmount  += amount;
+    if (dateStr) byDay[dateStr] = (byDay[dateStr] || 0) + amount;
     if (isThruYesterday) totalAmountThruYesterday += amount;
     totalPayment += payment;
     totalBalance += balance;
@@ -8189,6 +8249,7 @@ function aggregateOrdersRows(rows) {
     summary: {
       total_orders:    totalOrders,
       total_amount:    totalAmount,
+      by_day:          byDay, // {'YYYY-MM-DD': сумма} - для сравнения с "Поступлениями" по дням
       total_amount_thru_yesterday: totalAmountThruYesterday, // числитель прогноза, см. isThruYesterday выше
       total_payment:   totalPayment,
       hired_profit:    hiredProfit,    // прибыль только по найму

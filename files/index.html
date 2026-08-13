@@ -548,6 +548,17 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           <div id="mgr-list"></div>
         </div>
       </div>
+
+      <!-- Активность сотрудников (2026-08-13, Влад: "раздаю доступы, хочу видеть кто сколько
+           раз заходил") - только admin (data.access_log приходит только этой роли), скрыто
+           по умолчанию, заполняется в render(). -->
+      <div class="card" id="access-log-card" style="display:none;margin-top:16px">
+        <div class="card-title">👀 Активность сотрудников</div>
+        <div style="overflow-x:auto"><table class="tbl">
+          <thead><tr><th>Сотрудник</th><th>Роль</th><th class="num">Заходов</th><th>Первый вход</th><th>Последний вход</th></tr></thead>
+          <tbody id="access-log-body"></tbody>
+        </table></div>
+      </div>
     </div>
 
     <!-- ═══ ГЛОБАЛЬНАЯ СТАТИСТИКА (Влад, 2026-08-04) ═══════════ -->
@@ -2911,8 +2922,33 @@ function renderMain() {
   renderMgrList();
   renderMainRepairTable();
   renderOldOrdersCard();
+  renderAccessLog();
   // renderAlerts() временно убрана со страницы (Влад, 2026-07-04) - функция осталась в коде,
   // на случай если понадобится вернуть.
+}
+
+// Активность сотрудников (2026-08-13, Влад: "раздаю доступы, хочу видеть кто сколько раз
+// заходил") - D.access_log приходит только роли admin (см. doGet, поле присутствует только в
+// ответе для admin), карточка скрыта для остальных ролей и когда логов ещё нет (только что
+// раздали доступы - никто не заходил).
+function renderAccessLog() {
+  var card = document.getElementById('access-log-card');
+  if (!card) return;
+  var log = D.access_log || [];
+  if (D.role !== 'admin' || !log.length) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  function fmtVisit(iso) {
+    if (!iso) return '—';
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  }
+  document.getElementById('access-log-body').innerHTML = log.map(function(r) {
+    return '<tr><td>'+(r.name||r.email||'—')+'</td><td class="muted">'+(r.role||'—')+'</td>'+
+      '<td class="num"><b>'+(r.count||0)+'</b></td>'+
+      '<td class="muted">'+fmtVisit(r.first_visit)+'</td>'+
+      '<td class="muted">'+fmtVisit(r.last_visit)+'</td></tr>';
+  }).join('');
 }
 
 // "Незакрытые заказы" - карточка на Панели (Влад, 2026-07-11): сколько заказов ("Таблица

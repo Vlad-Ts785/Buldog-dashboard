@@ -2852,6 +2852,58 @@ function getAccessRole_(ss, email) {
   return null;
 }
 
+// ── СЧЁТЧИК ВХОДОВ (2026-08-13, Влад: "раздаю доступы сотрудникам, хочу видеть кто сколько раз
+// заходил") ──────────────────────────────────────────────────────────────────────────────────
+// Одна строка на email - не полный лог каждого визита (рос бы бесконечно), а счётчик +
+// первый/последний вход, этого достаточно, чтобы видеть, кто реально пользуется.
+const ACCESS_LOG_SHEET = 'Логи_входов';
+
+function ensureAccessLogSheet_(ss) {
+  let sheet = ss.getSheetByName(ACCESS_LOG_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(ACCESS_LOG_SHEET);
+    sheet.getRange(1, 1, 1, 6).setValues([['Email', 'Имя', 'Роль', 'Первый вход', 'Последний вход', 'Заходов']]).setFontWeight('bold');
+  }
+  return sheet;
+}
+
+// Засчитывает один "визит" (открытие/обновление страницы, не каждый мелкий доп-запрос -
+// вызывается только когда action пуст, см. doGet). Не критично для остального ответа - любая
+// ошибка тут молча проглатывается в doGet, чтобы сбой записи лога не ронял саму страницу.
+function logAccessVisit_(ss, email, name, role) {
+  const sheet = ensureAccessLogSheet_(ss);
+  const now = new Date().toISOString();
+  const lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    const emails = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    for (let i = 0; i < emails.length; i++) {
+      if (String(emails[i][0] || '').trim().toLowerCase() === email) {
+        const row = i + 2;
+        const count = sheet.getRange(row, 6).getValue() || 0;
+        sheet.getRange(row, 2, 1, 5).setValues([[name, role, sheet.getRange(row, 4).getValue(), now, count + 1]]);
+        return;
+      }
+    }
+  }
+  sheet.appendRow([email, name, role, now, now, 1]);
+}
+
+// Сводка для карточки "Активность сотрудников" на Панели (только admin, см. data.access_log в
+// doGet) - отсортировано по последнему входу, самые недавние первыми.
+function getAccessLogSummary_(ss) {
+  const sheet = ss.getSheetByName(ACCESS_LOG_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 6).getValues();
+  return data.map(function(r) {
+    return {
+      email: String(r[0] || ''), name: String(r[1] || ''), role: String(r[2] || ''),
+      first_visit: r[3] instanceof Date ? r[3].toISOString() : String(r[3] || ''),
+      last_visit: r[4] instanceof Date ? r[4].toISOString() : String(r[4] || ''),
+      count: Number(r[5]) || 0,
+    };
+  }).sort(function(a, b) { return String(b.last_visit).localeCompare(String(a.last_visit)); });
+}
+
 // Урезанный набор данных для роли "manager" - только его собственные цифры, без доступа к
 // данным других людей и компании в целом. orders - уже загруженный результат getOrdersData
 // (текущий месяц) ИЛИ getOrdersDataForPeriod (2026-08-11, выбор периода на личной странице -
@@ -3040,6 +3092,12 @@ function doGet(e) {
   try {
     // Отдельный endpoint для истории по машинам (тяжёлые данные, грузим лениво) - только admin
     var action = e && e.parameter ? (e.parameter.action || '') : '';
+    // Счётчик входов (2026-08-13) - засчитываем только "главную" загрузку страницы (без action -
+    // тот же признак, что отличает основной запрос от мелких доп-запросов вроде generate_ai_tasks/
+    // manager_lost_customers ниже), иначе один визит на дашборд считался бы много раз подряд.
+    if (!action) {
+      try { logAccessVisit_(ss, email, access.name, access.role); } catch (logErr) { /* не критично для остального ответа */ }
+    }
     if (action === 'vehicle_history') {
       if (access.role !== 'admin') {
         return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
@@ -3450,6 +3508,9 @@ function doGet(e) {
       // Google). getAvailablePeriods(ss) сам по себе дешёвый (просто список листов, без чтения
       // ячеек) - отдаём его сразу с основным ответом, второй round-trip больше не нужен.
       periods: getAvailablePeriods(ss),
+      // Активность сотрудников (2026-08-13) - только admin, для карточки "👀 Активность
+      // сотрудников" на Панели. Дешёвый листовой запрос (десяток строк), не отдельный action.
+      access_log: getAccessLogSummary_(ss),
     };
     return ContentService
       .createTextOutput(JSON.stringify(data))

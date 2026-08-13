@@ -24,6 +24,11 @@
 //   setupAccessSheet()           - создать/обновить лист "Доступ" (список email -> роль)
 //   setupShtatkaAutoMigration()  - настроить автопереход "Штатки" в историю по месяцам
 //
+// ПО ЗАПРОСУ (запускать вручную, когда нужно досчитать/поправить задним числом):
+//   backfillMonthSummaries()     - пересчитать "История_месяцев" по всем месяцам с архивом
+//                                  заказов (Заказы_YYYY-MM) - нужно после добавления новой
+//                                  колонки в сводку ИЛИ если появился архив за старый месяц
+//
 // Если нужной функции нет в списке выше - она почти наверняка есть в файле, просто это
 // разовый скрипт под старую задачу: Ctrl+F по имени найдёт её в любом случае.
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2866,10 +2871,13 @@ function receiptsMonthRevenueMap_(ss) {
   try {
     const sheet = ss.getSheetByName(MONTH_SUMMARY_SHEET);
     if (sheet && sheet.getLastRow() > 1) {
-      const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
+      // Читаем и "Выручку" (колонка 2), и "Наличные" (последняя колонка, добавлена
+      // 2026-08-13) - для старых строк, записанных до этой колонки, cash будет undefined/0.
+      const width = Math.max(sheet.getLastColumn(), MONTH_SUMMARY_HEADERS.length);
+      const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, width).getValues();
       data.forEach(function(r) {
         if (!r[0]) return;
-        map[monthKeyFrom_(r[0])] = r[1] || 0;
+        map[monthKeyFrom_(r[0])] = { revenue: r[1] || 0, cash: r[14] || 0 };
       });
     }
   } catch (revErr) {
@@ -2895,9 +2903,16 @@ function getReceiptsData(ss, ordersData) {
   const daysElapsed = parseInt(maxDate.slice(8, 10), 10) || 1;
   const todayStr = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM-dd');
 
-  const totalMonth = liveRows.reduce(function(s, r) { return s + r.amount; }, 0);
+  // Наличные поступления текущего месяца (из заказов - см. комментарий у "daily" ниже) -
+  // прибавляются к безналу отчёта 1С, чтобы "Поступления" отражали ВСЕ реально полученные
+  // деньги, а не только то, что прошло через расчётный счёт.
+  const totalCashMonth = (ordersData && ordersData.summary && ordersData.summary.total_cash) || 0;
+  const cashByDayForToday = (ordersData && ordersData.summary && ordersData.summary.by_day_cash) || {};
+
+  const totalBankMonth = liveRows.reduce(function(s, r) { return s + r.amount; }, 0);
+  const totalMonth = totalBankMonth + totalCashMonth;
   const totalToday = liveRows.filter(function(r) { return r.date === todayStr; })
-    .reduce(function(s, r) { return s + r.amount; }, 0);
+    .reduce(function(s, r) { return s + r.amount; }, 0) + (cashByDayForToday[todayStr] || 0);
 
   const byOrgMap = {};
   liveRows.forEach(function(r) { byOrgMap[r.org] = (byOrgMap[r.org] || 0) + r.amount; });
@@ -2907,11 +2922,21 @@ function getReceiptsData(ss, ordersData) {
 
   const dayMap = {};
   liveRows.forEach(function(r) { dayMap[r.date] = (dayMap[r.date] || 0) + r.amount; });
-  // Выручка по дням - только для ТЕКУЩЕГО месяца (ordersData уже посчитан вызывающим кодом,
-  // архивные месяцы намеренно не тянем на каждый запрос - см. комментарий у getReceiptsData).
+  // Выручка и наличные поступления по дням - только для ТЕКУЩЕГО месяца (ordersData уже
+  // посчитан вызывающим кодом, архивные месяцы намеренно не тянем на каждый запрос - см.
+  // комментарий у getReceiptsData). Наличка (Влад, 2026-08-13: "поступления налички видно из
+  // таблицы заказов" - отчёт 1С по р/с наличные вообще не видит) прибавляется к безналичным
+  // "Поступлениям", чтобы столбец на графике показывал ВСЕ реально полученные деньги.
   const revByDay = (ordersData && ordersData.summary && ordersData.summary.by_day) || {};
   const daily = Object.keys(dayMap).sort().map(function(d) {
-    return { date: d, amount: dayMap[d], revenue: (d in revByDay) ? revByDay[d] : null };
+    const cash = cashByDayForToday[d] || 0;
+    return {
+      date: d,
+      bank: dayMap[d],
+      cash: cash,
+      amount: dayMap[d] + cash, // "Поступления" на графике - безнал + нал вместе
+      revenue: (d in revByDay) ? revByDay[d] : null,
+    };
   });
 
   const mgrMap = {};
@@ -2931,7 +2956,9 @@ function getReceiptsData(ss, ordersData) {
   });
   const byCustomer = Object.values(custMap).sort(function(a, b) { return b.amount - a.amount; });
 
-  // По месяцам (архивы + текущий живой месяц) - для графика динамики по месяцам.
+  // По месяцам (архивы + текущий живой месяц) - для графика динамики по месяцам. "bank" -
+  // только безналичные поступления (из отчёта 1С), "amount" - вместе с наличкой (как и в
+  // daily выше), чтобы обе разбивки (по дням и по месяцам) значили одно и то же.
   const monthly = [];
   ss.getSheets().forEach(function(sh) {
     const name = sh.getSheetName();
@@ -2939,21 +2966,50 @@ function getReceiptsData(ss, ordersData) {
     const monthKey = name.slice(RECEIPTS_ARCHIVE_PFX.length);
     if (!/^\d{4}-\d{2}$/.test(monthKey)) return;
     const rows = receiptsReadSheetRows_(sh);
-    monthly.push({ month: monthKey, amount: rows.reduce(function(s, r) { return s + r.amount; }, 0), count: rows.length });
+    monthly.push({ month: monthKey, bank: rows.reduce(function(s, r) { return s + r.amount; }, 0), count: rows.length });
   });
-  monthly.push({ month: currentMonth, amount: totalMonth, count: liveRows.length });
+  monthly.push({ month: currentMonth, bank: totalBankMonth, count: liveRows.length });
   monthly.sort(function(a, b) { return a.month < b.month ? -1 : 1; });
 
+  // Наличка/выручка по месяцам - из кэша История_месяцев (см. receiptsMonthRevenueMap_),
+  // КРОМЕ текущего месяца, где уже есть точное живое значение (кэш обновляется раз за
+  // прогон runAll() и может немного отставать внутри дня).
   const monthRevMap = receiptsMonthRevenueMap_(ss);
-  monthly.forEach(function(m) { m.revenue = (m.month in monthRevMap) ? monthRevMap[m.month] : null; });
+  monthly.forEach(function(m) {
+    const rc = monthRevMap[m.month];
+    m.cash = (m.month === currentMonth) ? totalCashMonth : ((rc && rc.cash) || 0);
+    m.amount = m.bank + m.cash;
+    m.revenue = rc ? rc.revenue : null;
+  });
+
+  // Сальдо с начала года (Влад, 2026-08-13: "нужно видеть общее сальдо по году выручка
+  // поступления") - Поступления считаем по ВСЕМ месяцам года, что есть в "Поступлениях",
+  // Выручку - только по тем месяцам года, где она известна (может быть короче) - сальдо
+  // честное, но не всегда "месяц в месяц", если периоды не совпадают целиком.
+  const currentYear = currentMonth.slice(0, 4);
+  const ytdMonths = monthly.filter(function(m) { return m.month.slice(0, 4) === currentYear; });
+  const ytdRevenueMonths = ytdMonths.filter(function(m) { return m.revenue != null; });
+  const ytdReceipts = ytdMonths.reduce(function(s, m) { return s + m.amount; }, 0);
+  const ytdRevenue = ytdRevenueMonths.reduce(function(s, m) { return s + m.revenue; }, 0);
+  const ytd = {
+    year: currentYear,
+    receipts: ytdReceipts,
+    receipts_months: ytdMonths.length,
+    revenue: ytdRevenue,
+    revenue_months: ytdRevenueMonths.length,
+    balance: ytdReceipts - ytdRevenue,
+  };
 
   return {
     month: currentMonth,
     summary: {
       total_month: totalMonth,
+      total_bank: totalBankMonth,
+      total_cash: totalCashMonth,
       total_today: totalToday,
       avg_per_day: totalMonth / daysElapsed,
       by_org: byOrg,
+      ytd: ytd,
     },
     daily: daily,
     by_manager: byManager,
@@ -3603,6 +3659,7 @@ function doGet(e) {
             profit: r[3] || 0, profitTral: r[4] || 0, profitLong: r[5] || 0,
             fot: r[6] || 0, fuel: r[7] || 0, parts: r[8] || 0, fines: r[9] || 0, tolls: r[10] || 0,
             hiredProfit: r[11] || 0, hiredRevenue: r[12] || 0,
+            cash: r[14] || 0, // может отсутствовать в старых строках (колонка добавлена 2026-08-13) - тогда 0
           };
         });
       }
@@ -4709,6 +4766,9 @@ const MONTH_SUMMARY_HEADERS = [
   'Месяц', 'Выручка', 'План продаж', 'ВП', 'ВП тралы', 'ВП длинномеры',
   'ФОТ', 'Топливо', 'Запчасти', 'Штрафы', 'Проходные',
   'Прибыль найма', 'Выручка найма', 'Обновлено',
+  'Наличные', // добавлено 2026-08-13 (вкладка "Поступления") - СТРОГО в конец, не между
+              // существующими колонками, чтобы не сдвинуть индексы у старых строк (тот же
+              // приём, что и с "Сумма нашего долга" в ДЗ_данные).
 ];
 
 // Считает сводку за месяц - НЕ пишет в лист, чистая функция. Работает и для текущего
@@ -4744,6 +4804,7 @@ function computeMonthSummary_(ss, monthKey) {
     tolls: gp.tolls || 0,
     hiredProfit: hiredProfit,
     hiredRevenue: hiredCost + hiredProfit,
+    cash: os.total_cash || 0, // наличные поступления за месяц (см. "Поступления")
   };
 }
 
@@ -4770,6 +4831,10 @@ function ensureMonthSummarySheet_(ss) {
   if (!sheet) {
     sheet = ss.insertSheet(MONTH_SUMMARY_SHEET);
     sheet.getRange(1, 1, 1, MONTH_SUMMARY_HEADERS.length).setValues([MONTH_SUMMARY_HEADERS]).setFontWeight('bold');
+  } else if (sheet.getLastColumn() < MONTH_SUMMARY_HEADERS.length) {
+    // Догоняем заголовок колонки "Наличные" (2026-08-13) для листа, созданного ДО этого
+    // изменения - тот же приём, что и с колонкой "Водитель" в saveFinancialHistory().
+    sheet.getRange(1, MONTH_SUMMARY_HEADERS.length).setValue(MONTH_SUMMARY_HEADERS[MONTH_SUMMARY_HEADERS.length - 1]).setFontWeight('bold');
   }
   // Колонка "Месяц" - текстовый формат, чтобы Таблицы не конвертировали "2026-07" в дату
   // молча при следующей записи (сама конвертация УЖЕ произошла для старых строк - это не
@@ -4801,11 +4866,37 @@ function saveMonthSummary_(ss, monthKey) {
   var row = [
     "'" + summary.month, summary.revenue, summary.salesPlan, summary.profit, summary.profitTral, summary.profitLong,
     summary.fot, summary.fuel, summary.parts, summary.fines, summary.tolls,
-    summary.hiredProfit, summary.hiredRevenue, new Date(),
+    summary.hiredProfit, summary.hiredRevenue, new Date(), summary.cash,
   ];
   if (rowIndex > 0) sheet.getRange(rowIndex, 1, 1, row.length).setValues([row]);
   else sheet.appendRow(row);
   return true;
+}
+
+// Досчитывает "История_месяцев" по ВСЕМ месяцам, у которых есть архив "Заказы_YYYY-MM"
+// (getAvailablePeriods), плюс текущий месяц. ВОССОЗДАНА 2026-08-13 (была удалена как
+// одноразовая после первого запуска 2026-08-04, см. правило "удалять одноразовый код" в
+// CLAUDE.md) - понадобилась снова: 1) досчитать новую колонку "Наличные" в уже существующих
+// строках (полная перезапись строки, не только добавление колонки - saveMonthSummary_ и так
+// перезаписывает всю строку целиком, если месяц уже есть); 2) подхватить более старые месяцы,
+// если Влад добавит архив ЗА ПРОШЛЫЕ (например "Заказы_2026-05"), которого раньше не было.
+// Месяцы без архива/без данных просто пропускаются (лог ниже), не падение.
+function backfillMonthSummaries() {
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var periods = getAvailablePeriods(ss);
+  var currentMonthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+  var all = periods.slice();
+  if (all.indexOf(currentMonthKey) < 0) all.push(currentMonthKey);
+  var done = [], skipped = [];
+  all.sort().forEach(function(mk) {
+    try {
+      if (saveMonthSummary_(ss, mk)) done.push(mk); else skipped.push(mk);
+    } catch (bErr) {
+      skipped.push(mk + ' (' + bErr.message + ')');
+    }
+  });
+  Logger.log('✅ Сводки по месяцам обновлены: ' + (done.join(', ') || '(ничего)'));
+  if (skipped.length) Logger.log('⚠️ Пропущены (нет данных/архива): ' + skipped.join(', '));
 }
 
 
@@ -7687,6 +7778,13 @@ function aggregateOrdersRows(rows) {
   // что сумма по дням всегда сходится с "Общей выручкой" за период (тот же принцип "цифры
   // бьются везде", что и везде на дашборде).
   let byDay = {};
+  // Наличные поступления по дням (Влад, 2026-08-13: "поступления налички это видно из
+  // таблицы заказов" - отчёт 1С "Поступления на расчётный счёт" видит ТОЛЬКО безналичные
+  // переводы, наличная оплата в банк не попадает и там не видна вообще). Колонка "Оплата
+  // нал" (cash) - накопительная сумма наличными по заказу, тот же принцип дневной разбивки,
+  // что и byDay/totalAmount выше.
+  let totalCash = 0;
+  let byDayCash = {};
   let totalHiredCost=0, hiredProfit=0, hiredProfitTral=0, hiredProfitLong=0;
   let internalAmount=0, internalAmountThruYesterday=0, internalOrders=0;
   // Счётчики исключённых из воронки документов строк - для сверки с "Заказов (свой парк +
@@ -7789,6 +7887,9 @@ function aggregateOrdersRows(rows) {
 
     totalAmount  += amount;
     if (dateStr) byDay[dateStr] = (byDay[dateStr] || 0) + amount;
+    const cashPaid = num(row, 'cash');
+    totalCash += cashPaid;
+    if (dateStr && cashPaid) byDayCash[dateStr] = (byDayCash[dateStr] || 0) + cashPaid;
     if (isThruYesterday) totalAmountThruYesterday += amount;
     totalPayment += payment;
     totalBalance += balance;
@@ -8250,6 +8351,8 @@ function aggregateOrdersRows(rows) {
       total_orders:    totalOrders,
       total_amount:    totalAmount,
       by_day:          byDay, // {'YYYY-MM-DD': сумма} - для сравнения с "Поступлениями" по дням
+      total_cash:      totalCash, // наличные поступления за период (видны только в заказах, не в отчёте 1С по р/с)
+      by_day_cash:     byDayCash,
       total_amount_thru_yesterday: totalAmountThruYesterday, // числитель прогноза, см. isThruYesterday выше
       total_payment:   totalPayment,
       hired_profit:    hiredProfit,    // прибыль только по найму

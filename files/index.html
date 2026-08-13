@@ -618,6 +618,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           <div class="kpi" id="receipts-kpi-today"></div>
           <div class="kpi" id="receipts-kpi-avg"></div>
           <div class="kpi" id="receipts-kpi-org"></div>
+          <div class="kpi" id="receipts-kpi-ytd"></div>
         </div>
 
         <div class="card" style="margin-bottom:16px">
@@ -3938,7 +3939,8 @@ function renderReceiptsKPI(r) {
   var s = r.summary;
   document.getElementById('receipts-kpi-month').innerHTML =
     '<div class="kpi-label">Поступления за ' + formatMonthLabel(r.month).toLowerCase() + '</div>' +
-    '<div class="kpi-value">' + fmt(s.total_month) + '</div>';
+    '<div class="kpi-value">' + fmt(s.total_month) + '</div>' +
+    '<div class="kpi-sub">безнал ' + fmt(s.total_bank) + ' + нал ' + fmt(s.total_cash) + '</div>';
 
   document.getElementById('receipts-kpi-today').innerHTML =
     '<div class="kpi-label">Сегодня</div>' +
@@ -3955,6 +3957,22 @@ function renderReceiptsKPI(r) {
   }).join('');
   document.getElementById('receipts-kpi-org').innerHTML =
     '<div class="kpi-label">По юрлицам</div>' + (orgHtml || '<div class="kpi-sub">Нет данных</div>');
+
+  // Сальдо с начала года (Влад, 2026-08-13: "нужно видеть общее сальдо по году выручка
+  // поступления") - Поступления считаются по всем месяцам года, что есть в данных,
+  // Выручка - только там, где она известна (может быть короче период) - см. бэкенд.
+  var y = s.ytd;
+  if (y) {
+    var balCls = y.balance >= 0 ? 'green' : 'red';
+    var coverageNote = (y.revenue_months < y.receipts_months)
+      ? '<div class="kpi-sub" style="color:var(--amber)">Выручка известна за ' + y.revenue_months + ' из ' + y.receipts_months + ' мес.</div>'
+      : '<div class="kpi-sub">' + y.receipts_months + ' мес.</div>';
+    document.getElementById('receipts-kpi-ytd').innerHTML =
+      '<div class="kpi-label">Сальдо с начала ' + y.year + '</div>' +
+      '<div class="kpi-value ' + balCls + '">' + (y.balance >= 0 ? '+' : '') + fmt(y.balance) + '</div>' +
+      '<div class="kpi-sub2">Поступления ' + fmt(y.receipts) + ' · Выручка ' + fmt(y.revenue) + '</div>' +
+      coverageNote;
+  }
 }
 
 function setReceiptsChartView(view) {
@@ -3984,24 +4002,33 @@ function renderReceiptsChart() {
   if (!ctx) return;
   if (receiptsChart) receiptsChart.destroy();
 
-  // Выручка рядом с поступлениями (Влад, 2026-08-13: "сравнивал поступления с выручкой по
-  // дням и месяцам") - линия поверх столбцов, null-точки (нет данных за месяц/день) дают
-  // разрыв в линии, а не ложный ноль - Chart.js сам это умеет через spanGaps:false (дефолт).
-  var labels, values, revValues;
+  // Выручка рядом с поступлениями (Влад, 2026-08-13: "не кривая линия, а тоже столбики, чтобы
+  // было чётко видно разницу") - Поступления показаны СВОИМ столбиком (безнал+нал сложены
+  // друг на друга - stack:'receipts"), Выручка - отдельным столбиком рядом (без stack, свой
+  // groupы). null-точки (нет данных за месяц/день) дают пропуск столбика, не ложный ноль.
+  var labels, bankValues, cashValues, revValues;
   if (receiptsChartView === 'monthly') {
     labels = (r.monthly || []).map(function(m) { return formatMonthLabel(m.month); });
-    values = (r.monthly || []).map(function(m) { return m.amount; });
+    bankValues = (r.monthly || []).map(function(m) { return m.bank; });
+    cashValues = (r.monthly || []).map(function(m) { return m.cash; });
     revValues = (r.monthly || []).map(function(m) { return (m.revenue == null) ? null : m.revenue; });
   } else {
     labels = (r.daily || []).map(function(d) { return receiptsShortDate_(d.date); });
-    values = (r.daily || []).map(function(d) { return d.amount; });
+    bankValues = (r.daily || []).map(function(d) { return d.bank; });
+    cashValues = (r.daily || []).map(function(d) { return d.cash; });
     revValues = (r.daily || []).map(function(d) { return (d.revenue == null) ? null : d.revenue; });
   }
   var hasRevenue = revValues.some(function(v) { return v != null; });
+  var hasCash = cashValues.some(function(v) { return v > 0; });
 
-  var datasets = [{ type: 'bar', label: 'Поступления', data: values, backgroundColor: '#EF9F27', borderRadius: 4, maxBarThickness: 28, order: 2 }];
+  var datasets = [
+    { label: hasCash ? 'Поступления (безнал)' : 'Поступления', data: bankValues, backgroundColor: '#EF9F27', borderRadius: hasCash ? 0 : 4, maxBarThickness: 28, stack: 'receipts' },
+  ];
+  if (hasCash) {
+    datasets.push({ label: 'Поступления (нал)', data: cashValues, backgroundColor: '#c97d1f', borderRadius: 4, maxBarThickness: 28, stack: 'receipts' });
+  }
   if (hasRevenue) {
-    datasets.push({ type: 'line', label: 'Выручка', data: revValues, borderColor: '#7db9ee', backgroundColor: 'rgba(125,185,238,0.1)', tension: 0.3, fill: false, pointRadius: 2, borderWidth: 2, order: 1 });
+    datasets.push({ label: 'Выручка', data: revValues, backgroundColor: '#7db9ee', borderRadius: 4, maxBarThickness: 28, stack: 'revenue' });
   }
 
   receiptsChart = new Chart(ctx, {
@@ -4011,12 +4038,14 @@ function renderReceiptsChart() {
       responsive: true, maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { display: hasRevenue, position: 'bottom', labels: { color: '#888780', font: { size: 11 }, boxWidth: 10 } },
+        legend: { display: hasCash || hasRevenue, position: 'bottom', labels: { color: '#888780', font: { size: 11 }, boxWidth: 10 } },
         tooltip: { callbacks: { label: function(c) { return ' ' + c.dataset.label + ': ' + (c.raw == null ? '—' : fmt(c.raw)); } } }
       },
       scales: {
-        x: { ticks: { color: '#888780', font: { size: 11 }, maxRotation: 0, autoSkip: true }, grid: { display: false } },
-        y: { ticks: { color: '#888780', callback: function(v) { return fmtK(v); } }, grid: { color: 'rgba(255,255,255,0.04)' } }
+        // stacked:true обязателен, чтобы датасеты с одинаковым stack:'receipts' (безнал+нал)
+        // складывались друг на друга, а группа 'revenue' стояла рядом отдельным столбиком.
+        x: { stacked: true, ticks: { color: '#888780', font: { size: 11 }, maxRotation: 0, autoSkip: true }, grid: { display: false } },
+        y: { stacked: true, ticks: { color: '#888780', callback: function(v) { return fmtK(v); } }, grid: { color: 'rgba(255,255,255,0.04)' } }
       }
     }
   });

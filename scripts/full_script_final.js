@@ -28,6 +28,9 @@
 //   backfillMonthSummaries()     - пересчитать "История_месяцев" по всем месяцам с архивом
 //                                  заказов (Заказы_YYYY-MM) - нужно после добавления новой
 //                                  колонки в сводку ИЛИ если появился архив за старый месяц
+//   migrateReceiptsArchiveToSingleSheet() - разовый перенос старых листов "Поступления_
+//                                  YYYY-MM" (по одному на месяц) в единый "Поступления_архив"
+//                                  - запустить ОДИН РАЗ, удаляет старые листы после переноса
 //
 // Если нужной функции нет в списке выше - она почти наверняка есть в файле, просто это
 // разовый скрипт под старую задачу: Ctrl+F по имени найдёт её в любом случае.
@@ -2611,7 +2614,12 @@ function getDebtData(ss, compareDaysBack) {
 // ПЕРЕЗАПИСЫВАЕТ текущий месяц (не доливает), а не пытается мержить строки.
 // ============================================================
 const RECEIPTS_SHEET       = 'Поступления_данные';
-const RECEIPTS_ARCHIVE_PFX = 'Поступления_';   // + YYYY-MM, например «Поступления_2026-08»
+// ОДИН лист на все архивные месяцы (2026-08-13, Влад: "если создавал листов по каждому
+// месяцу, сделай компактно на одном") - раньше был отдельный лист на каждый месяц
+// (RECEIPTS_ARCHIVE_PFX + 'YYYY-MM'), захламляло вкладки таблицы. RECEIPTS_ARCHIVE_PFX
+// оставлен только для одноразовой миграции старых листов, см. migrateReceiptsArchiveToSingleSheet().
+const RECEIPTS_ARCHIVE_SHEET = 'Поступления_архив';
+const RECEIPTS_ARCHIVE_PFX = 'Поступления_';   // + YYYY-MM, старый формат до 2026-08-13
 const RECEIPTS_GMAIL_QUERY = 'subject:"Рассылка Поступления на расчетный счет тралы" has:attachment newer_than:2d';
 const RECEIPTS_ARTICLE_MARKER_ = 'Поступление за услуги спецтехники';
 
@@ -2757,6 +2765,32 @@ function writeReceiptsSheet_(ss, name, headers, rows) {
   }
 }
 
+// Заменяет данные ОДНОГО месяца внутри единого архивного листа RECEIPTS_ARCHIVE_SHEET -
+// вычищает старые строки этого месяца (если были - коррекция/повторный импорт), дописывает
+// новые. Используется и для обычного архивирования месяца при переходе на новый, и для
+// поздней коррекции прошлого месяца, и для разовой массовой исторической выгрузки - везде
+// один и тот же приём "полная замена данных этого месяца", просто теперь в общем листе,
+// а не в отдельном на каждый месяц.
+function writeReceiptsArchiveMonth_(ss, monthKey, rows) {
+  let sheet = ss.getSheetByName(RECEIPTS_ARCHIVE_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(RECEIPTS_ARCHIVE_SHEET);
+    sheet.getRange(1, 1, 1, RECEIPTS_HEADERS_.length).setValues([RECEIPTS_HEADERS_]).setFontWeight('bold');
+  }
+  const lastRow = sheet.getLastRow();
+  let keep = [];
+  if (lastRow > 1) {
+    const existing = sheet.getRange(2, 1, lastRow - 1, RECEIPTS_HEADERS_.length).getValues();
+    keep = existing.filter(function(r) { return ordFormatDate(r[0]).slice(0, 7) !== monthKey; });
+    sheet.getRange(2, 1, lastRow - 1, RECEIPTS_HEADERS_.length).clearContent();
+  }
+  const combined = keep.concat(rows);
+  if (combined.length) {
+    sheet.getRange(2, 1, combined.length, RECEIPTS_HEADERS_.length).setValues(combined);
+    sheet.getRange(2, 7, combined.length, 1).setNumberFormat('#,##0');
+  }
+}
+
 function importReceiptsReport() {
   const threads = GmailApp.search(RECEIPTS_GMAIL_QUERY);
   if (!threads.length) throw new Error('Письмо "Поступления" не найдено за 2 дня');
@@ -2822,20 +2856,22 @@ function importReceiptsReport() {
   const existingSheet = ss.getSheetByName(RECEIPTS_SHEET);
   const existingMonth = receiptsExistingSheetMonth_(existingSheet);
   if (existingMonth && existingMonth !== nowMonthKey && !groups[existingMonth]) {
-    if (!ss.getSheetByName(RECEIPTS_ARCHIVE_PFX + existingMonth)) {
-      const existingData = existingSheet.getDataRange().getValues();
-      writeReceiptsSheet_(ss, RECEIPTS_ARCHIVE_PFX + existingMonth, existingData[0], existingData.slice(1));
-      Logger.log('✅ Поступления: архив создан ' + existingMonth + ' (переход на новый месяц)');
+    const existingLastRow = existingSheet.getLastRow();
+    if (existingLastRow > 1) {
+      const existingRows = existingSheet.getRange(2, 1, existingLastRow - 1, RECEIPTS_HEADERS_.length).getValues();
+      writeReceiptsArchiveMonth_(ss, existingMonth, existingRows);
+      Logger.log('✅ Поступления: архив обновлён ' + existingMonth + ' (переход на новый месяц)');
     }
   }
 
-  // Каждый месяц, кроме текущего, - полностью в свой архив (или коррекция уже существующего
-  // архива, или новый архив из массовой выгрузки - разницы нет, всегда полная замена данными
-  // из этого файла, отчёт сам по себе накопительный и авторитетный на момент отправки).
+  // Каждый месяц, кроме текущего, - полностью заменяет свой кусок в общем архивном листе
+  // (или коррекция уже записанного месяца, или новый месяц из массовой выгрузки - разницы
+  // нет, всегда полная замена данными из этого файла, отчёт сам по себе накопительный и
+  // авторитетный на момент отправки).
   let archivedMonths = 0;
   Object.keys(groups).sort().forEach(function(mk) {
     if (mk === nowMonthKey) return;
-    writeReceiptsSheet_(ss, RECEIPTS_ARCHIVE_PFX + mk, RECEIPTS_HEADERS_, toSheetRows(groups[mk]));
+    writeReceiptsArchiveMonth_(ss, mk, toSheetRows(groups[mk]));
     archivedMonths++;
   });
 
@@ -2849,6 +2885,32 @@ function importReceiptsReport() {
   Logger.log('✅ Поступления импортированы: ' + parsed.rows.length + ' строк, ' + Math.round(parsedTotal) +
     ' ₽, месяцев в файле: ' + Object.keys(groups).length + ' (архивировано: ' + archivedMonths +
     (groups[nowMonthKey] ? ', + текущий месяц в живой лист' : ', текущего месяца в файле не было') + ')');
+}
+
+// Разовая миграция старых листов "Поступления_YYYY-MM" (по одному на месяц) в единый
+// RECEIPTS_ARCHIVE_SHEET (2026-08-13, Влад: "если создавал листов по каждому месяцу, сделай
+// компактно на одном"). Переносит данные, затем УДАЛЯЕТ старый лист - необратимо, поэтому
+// запускать вручную и один раз. Дальнейшие импорты (importReceiptsReport) уже сами пишут
+// сразу в единый лист, повторный запуск после первого просто ничего не найдёт и выйдет тихо.
+function migrateReceiptsArchiveToSingleSheet() {
+  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  const re = new RegExp('^' + RECEIPTS_ARCHIVE_PFX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(\\d{4}-\\d{2})$');
+  const oldSheets = ss.getSheets().filter(function(sh) { return re.test(sh.getSheetName()); });
+  if (!oldSheets.length) { Logger.log('Старых листов "Поступления_YYYY-MM" не найдено - миграция не нужна (уже сделана или их не было).'); return; }
+
+  let totalMoved = 0;
+  oldSheets.forEach(function(sh) {
+    const monthKey = sh.getSheetName().match(re)[1];
+    const lastRow = sh.getLastRow();
+    if (lastRow > 1) {
+      const rows = sh.getRange(2, 1, lastRow - 1, RECEIPTS_HEADERS_.length).getValues();
+      writeReceiptsArchiveMonth_(ss, monthKey, rows);
+      totalMoved += rows.length;
+      Logger.log('Перенесено ' + rows.length + ' строк из "' + sh.getSheetName() + '"');
+    }
+    ss.deleteSheet(sh);
+  });
+  Logger.log('✅ Миграция завершена: ' + oldSheets.length + ' листов объединены в "' + RECEIPTS_ARCHIVE_SHEET + '" (всего строк: ' + totalMoved + ').');
 }
 
 function receiptsReadSheetRows_(sheet) {
@@ -3020,17 +3082,22 @@ function getReceiptsData(ss, ordersData) {
     return c;
   }).sort(function(a, b) { return b.amount - a.amount; });
 
-  // По месяцам (архивы + текущий живой месяц) - для графика динамики по месяцам. "bank" -
-  // только безналичные поступления (из отчёта 1С), "amount" - вместе с наличкой (как и в
-  // daily выше), чтобы обе разбивки (по дням и по месяцам) значили одно и то же.
-  const monthly = [];
-  ss.getSheets().forEach(function(sh) {
-    const name = sh.getSheetName();
-    if (name.indexOf(RECEIPTS_ARCHIVE_PFX) !== 0) return;
-    const monthKey = name.slice(RECEIPTS_ARCHIVE_PFX.length);
-    if (!/^\d{4}-\d{2}$/.test(monthKey)) return;
-    const rows = receiptsReadSheetRows_(sh);
-    monthly.push({ month: monthKey, bank: rows.reduce(function(s, r) { return s + r.amount; }, 0), count: rows.length });
+  // По месяцам (единый архивный лист + текущий живой месяц) - для графика динамики по
+  // месяцам. "bank" - только безналичные поступления (из отчёта 1С), "amount" - вместе с
+  // наличкой (как и в daily выше), чтобы обе разбивки (по дням и по месяцам) значили одно
+  // и то же. Архив теперь ОДИН лист на все месяцы (2026-08-13, было по листу на месяц -
+  // Влад попросил компактнее), группируем по месяцу прямо тут.
+  const archiveSheet = ss.getSheetByName(RECEIPTS_ARCHIVE_SHEET);
+  const archiveRows = receiptsReadSheetRows_(archiveSheet);
+  const archiveByMonth = {};
+  archiveRows.forEach(function(r) {
+    const mk = r.date.slice(0, 7);
+    if (!archiveByMonth[mk]) archiveByMonth[mk] = { bank: 0, count: 0 };
+    archiveByMonth[mk].bank += r.amount;
+    archiveByMonth[mk].count++;
+  });
+  const monthly = Object.keys(archiveByMonth).map(function(mk) {
+    return { month: mk, bank: archiveByMonth[mk].bank, count: archiveByMonth[mk].count };
   });
   monthly.push({ month: currentMonth, bank: totalBankMonth, count: liveRows.length });
   monthly.sort(function(a, b) { return a.month < b.month ? -1 : 1; });
@@ -3072,6 +3139,25 @@ function getReceiptsData(ss, ordersData) {
   // на всякий случай, если ordersData вдруг не пришёл).
   const monthBalance = (totalRevenueMonthLive !== undefined) ? (totalMonth - totalRevenueMonthLive) : null;
 
+  // "Сегодня"/"Вчера" - построчная разбивка поступлений за конкретный день (Влад, 2026-08-13:
+  // "сделай ещё третью вкладку Поступления сегодня разбивку хочу видеть... ещё одну вкладку
+  // Поступлениям вчера"). Берём из liveRows (текущий месяц) ИЛИ archiveRows (если вчера
+  // пришлось на предыдущий месяц - переход через границу месяца) - оба набора уже прочитаны
+  // выше, лишнего похода в Таблицы не требуется.
+  const yesterdayDate = new Date();
+  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+  const yesterdayStr = Utilities.formatDate(yesterdayDate, 'Europe/Moscow', 'yyyy-MM-dd');
+  const allRowsForDayLookup = liveRows.concat(archiveRows);
+  function receiptsRowsForDay_(dateStr) {
+    return allRowsForDayLookup.filter(function(r) { return r.date === dateStr; })
+      .map(function(r) {
+        return { customer: r.customer, manager: r.manager, org: r.org, orgName: DEBT_ORG_SHORT_NAMES[r.org] || r.org, docNumber: r.docNumber, amount: r.amount };
+      })
+      .sort(function(a, b) { return b.amount - a.amount; });
+  }
+  const todayTransactions = receiptsRowsForDay_(todayStr);
+  const yesterdayTransactions = receiptsRowsForDay_(yesterdayStr);
+
   return {
     month: currentMonth,
     summary: {
@@ -3089,6 +3175,8 @@ function getReceiptsData(ss, ordersData) {
     by_manager: byManager,
     by_customer: byCustomer,
     monthly: monthly,
+    today: { date: todayStr, transactions: todayTransactions, total: todayTransactions.reduce(function(s, r) { return s + r.amount; }, 0) },
+    yesterday: { date: yesterdayStr, transactions: yesterdayTransactions, total: yesterdayTransactions.reduce(function(s, r) { return s + r.amount; }, 0) },
   };
 }
 
@@ -3503,40 +3591,6 @@ function isVasinName_(name) {
   return (name||'').trim().split(' ')[0].toLowerCase() === 'васин';
 }
 
-// Логисты "своего парка тралов" (2026-08-13, Влад: "Сильчев/Кан/Махура - упор идёт от своего
-// парка по тралам", в отличие от Пруса/Сурковой - упор от маржи найма). Фиксированный список
-// по фамилии (не data-driven) - Влад явно допустил редкое смешение ролей ("Сильчев может
-// поставить на найм") и попросил НЕ подстраивать классификацию под разовые случаи.
-function isOwnTralLogistName_(name) {
-  var sur = (name||'').trim().split(' ')[0].toLowerCase();
-  return sur === 'сильчев' || sur === 'кан' || sur === 'махура';
-}
-
-// 'YYYY-MM' предыдущего месяца относительно переданного - для сравнения "ВП тралов к прошлому
-// месяцу" у own-tral логистов (см. ниже). day=1 перед вычитанием месяца - та же защита от
-// перепрыгивания через 2 месяца, что и в prevMonthKey_() на фронтенде.
-function prevMonthKeyOf_(monthKey) {
-  var p = String(monthKey).split('-').map(Number);
-  var d = new Date(p[0], p[1] - 1, 1);
-  d.setMonth(d.getMonth() - 1);
-  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
-}
-
-// own_profit_tral этого логиста за месяц ПЕРЕД monthKeyOrPeriod (или перед текущим, если
-// falsy) - для полоски "ВП тралов к прошлому месяцу" (2026-08-13). Ошибка архива (нет данных
-// за предыдущий месяц - например, самый первый месяц работы) - тихо 0, не бросает исключение.
-function getOwnTralPrevMonthProfit_(ss, logistName, monthKeyOrPeriod) {
-  try {
-    const curMonthKey = monthKeyOrPeriod || Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
-    const prevMonthKey = prevMonthKeyOf_(curMonthKey);
-    const prevOrders = getOrdersDataForPeriod(ss, prevMonthKey);
-    const prevRow = (!prevOrders.error && (prevOrders.by_logist || []).filter(function(l) { return l.name === logistName; })[0]) || null;
-    return prevRow ? (prevRow.own_profit_tral || 0) : 0;
-  } catch (e) {
-    return 0;
-  }
-}
-
 // Личная страница логиста-длинномерщика (2026-08-11, Васин Максим - см.
 // plans/2026-08-11-vasin-long-haul-page.md, plans/2026-08-11-vasin-perf-and-forecast.md).
 // Принципиально другой набор данных, чем у "наёмных" логистов - Васин не брокер найма, у него
@@ -3622,14 +3676,6 @@ function buildLogistView_(orders, logistName, ss, period) {
   };
   if (ss && isVasinName_(logistName)) {
     ordersOut.long_haul = buildLongHaulBundle_(ss, orders, period || null);
-  }
-  // "ВП тралов к прошлому месяцу" (2026-08-13) - лёгкий архивный запрос ТОЛЬКО для own-tral
-  // логистов, при самостоятельном входе достаётся "бесплатно" вместе с остальным ответом (без
-  // лишнего round-trip). Admin-предпросмотр НЕ проходит через buildLogistView_ (у него полный
-  // company-wide payload) - для него та же цифра достаётся лениво через
-  // action=own_tral_prev_month (см. getOwnTralPrevMonthProfit_ + doGet ниже).
-  if (ss && isOwnTralLogistName_(logistName)) {
-    ordersOut.own_profit_tral_prev_month = getOwnTralPrevMonthProfit_(ss, logistName, period);
   }
 
   return {
@@ -4015,28 +4061,6 @@ function doGet(e) {
       var mlcMonthKey = mlcPeriod || Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
       var mlcCustomers = computeLostCustomersForManager_(ss, mlcMonthKey, mlcManager, !mlcPeriod);
       return ContentService.createTextOutput(JSON.stringify({ customers: mlcCustomers })).setMimeType(ContentService.MimeType.JSON);
-    }
-
-    // "ВП тралов к прошлому месяцу" для admin-предпросмотра own-tral логиста (2026-08-13) -
-    // admin НЕ проходит через buildLogistView_ (свой полный company-wide payload), эта цифра
-    // достаётся лениво тем же приёмом, что manager_lost_customers выше. Роль logist - только
-    // свою (форсит access.name), эта же цифра у самого логиста уже приходит в основном ответе
-    // (buildLogistView_), фронтенд не должен её лишний раз запрашивать для себя - но action
-    // всё равно разрешён и роли logist, на случай ручной проверки/несовпадения кэша.
-    if (action === 'own_tral_prev_month') {
-      if (access.role !== 'admin' && access.role !== 'logist') {
-        return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
-      }
-      var otpmLogist = access.role === 'logist' ? access.name : (e.parameter.logist || '');
-      if (!otpmLogist) {
-        return ContentService.createTextOutput(JSON.stringify({ error: 'Не указан логист' })).setMimeType(ContentService.MimeType.JSON);
-      }
-      var otpmPeriod = e.parameter.period || '';
-      if (otpmPeriod && !/^\d{4}-\d{2}$/.test(otpmPeriod)) {
-        return ContentService.createTextOutput(JSON.stringify({ error: 'Некорректный период' })).setMimeType(ContentService.MimeType.JSON);
-      }
-      var otpmValue = getOwnTralPrevMonthProfit_(ss, otpmLogist, otpmPeriod || null);
-      return ContentService.createTextOutput(JSON.stringify({ value: otpmValue })).setMimeType(ContentService.MimeType.JSON);
     }
 
     // 5 задач на день от ИИ (2026-08-12, см. plans/2026-08-12-ai-daily-tasks-manager.md) -
@@ -8345,8 +8369,7 @@ function aggregateOrdersRows(rows) {
     if (mgrLog && ordInList(mgrLog, TRAL_LOGISTS)) {
       if (!logistMap[mgrLog]) {
         logistMap[mgrLog] = { name: mgrLog, orders:0, amount:0, hired_orders:0, hired_cost:0, tral:0, long_:0,
-          own_amount:0, own_profit_tral:0, own_profit_long:0,
-          hired_margin_total:0, hired_margin_qualified:0, hired_margin_unqualified:0,
+          own_amount:0, hired_margin_total:0, hired_margin_qualified:0, hired_margin_unqualified:0,
           hired_extra_costs:0 };
       }
       const l = logistMap[mgrLog];
@@ -8359,12 +8382,6 @@ function aggregateOrdersRows(rows) {
         l.hired_extra_costs += (amount - hiredCost - profit);
       } else {
         l.own_amount += amount;
-        // own_profit_tral/long (2026-08-13, Влад: "три логиста Сильчев/Кан/Махура - свой парк
-        // тралов, упор идёт от своего парка") - та же логика, что own_profit у менеджера
-        // (m.own_profit += profit выше) - "Прибыль" 1С по НЕ наёмным заказам, разбита по типу
-        // техники (own_amount оставлен общим - как было, для контекста).
-        if (equip === 'Трал')      l.own_profit_tral += profit;
-        if (equip === 'Длинномер') l.own_profit_long += profit;
       }
       if (isHired) { l.hired_orders++; l.hired_cost += hiredCost; }
     }

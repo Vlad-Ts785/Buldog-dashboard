@@ -1119,6 +1119,12 @@ function runAll() {
   try { importReceiptsReport();    log.push('✅ Поступления импортированы'); }
   catch(e) { errors.push('❌ Поступления (импорт): ' + e.message); }
 
+  // Precompute главного payload дашборда (2026-08-13) - в самом конце, после того как все
+  // источники выше уже свежие за этот прогон. doGet() читает готовое вместо пересчёта на
+  // каждый визит.
+  try { saveMainPayloadCache_(SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID)); log.push('✅ Кэш главной страницы обновлён'); }
+  catch(e) { errors.push('❌ Кэш главной страницы: ' + e.message); }
+
   // Алерты и сводка — собираем данные один раз
   let alertsText = '';
   let summaryText = '';
@@ -4013,44 +4019,27 @@ function doGet(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
 
-    const staffData = getStaffData(ss); // читаем Штатку один раз
+    const staffData = getStaffData(ss); // читаем Штатку один раз - ЖИВОЙ документ, всегда live
     // Карта госномер → марка из Штатки (для всех 55 машин, не только с выручкой)
     var staffMarkas = {};
     Object.values(staffData).forEach(function(v) { staffMarkas[v.gosOriginal] = v.marka; });
-    var defaultRange = getCurrentMonthRange_();
-    var vehiclesData = aggregateFinHistoryForRange(ss, staffData, defaultRange.from, defaultRange.to);
-    var ordersData = getOrdersData(ss);
-    const data = {
-      updated:    new Date().toISOString(),
-      role:       'admin',
-      summary:    getSummaryData(ss, ordersData),
-      vehicles:   vehiclesData,
-      drivers:    deriveDriversFromVehicles(vehiclesData),
-      fleet:      getFleetStatus(staffData),
-      history:    getHistoryData(ss),
-      repairs:    getRepairsData(staffData),
-      staffMarkas: staffMarkas,
-      orders:     ordersData,
-      debt:       getDebtData(ss),
-      receipts:   getReceiptsData(ss, ordersData),
-      // Колонка "Заказов" на "Водителях" в ДЕФОЛТНОМ виде (без выбора периода) раньше падала
-      // на orders.by_driver, который обрезан до топ-25 ПО ВСЕЙ КОМПАНИИ (см. по_driver ниже
-      // в getOrdersData) - водитель с высокой выручкой, но малым числом дорогих рейсов, в
-      // топ-25 по КОЛИЧЕСТВУ не попадал и показывал "—", хотя факт был ненулевой (Влад,
-      // 2026-07-16: "по некоторым машинам по количеству заказов показывает —"). Тут - тот же
-      // ПОЛНЫЙ (без обрезки) счётчик, что уже считается для action=vehicles_period.
-      driverOrderCounts: getDriverOrderCounts_(ss, defaultRange.from, defaultRange.to),
-      // Влад, 2026-08-10: "выпадающий список периода сначала пустой, месяцы появляются с
-      // задержкой" - раньше фронт после загрузки страницы делал ВТОРОЙ отдельный запрос
-      // (action=available_periods) только при первом заходе на вкладку с выбором периода, а
-      // каждый запрос к doGet() платит свою цену (открытие таблицы + проверка токена через
-      // Google). getAvailablePeriods(ss) сам по себе дешёвый (просто список листов, без чтения
-      // ячеек) - отдаём его сразу с основным ответом, второй round-trip больше не нужен.
-      periods: getAvailablePeriods(ss),
-      // Активность сотрудников (2026-08-13) - только admin, для карточки "👀 Активность
-      // сотрудников" на Панели. Дешёвый листовой запрос (десяток строк), не отдельный action.
-      access_log: getAccessLogSummary_(ss),
-    };
+
+    const data = Object.assign(
+      {
+        updated: new Date().toISOString(),
+        role:    'admin',
+        // Живые поля - НЕ кэшируются в runAll() (см. buildHeavyMainPayload_). Штатка -
+        // "живой документ" (CLAUDE.md), её правят руками вне расписания runAll() - если
+        // закэшировать статус машины/ремонты на 3 часа, правки будут "зависать", это
+        // регресс, а не ускорение. Штатка маленькая (~55 строк), расчёт и так мгновенный.
+        fleet:       getFleetStatus(staffData),
+        repairs:     getRepairsData(staffData),
+        staffMarkas: staffMarkas,
+        // Активность сотрудников (2026-08-13) - дешёвый листовой запрос (десяток строк).
+        access_log:  getAccessLogSummary_(ss),
+      },
+      getMainPayloadCacheOrLive_(ss, staffData)
+    );
     return ContentService
       .createTextOutput(JSON.stringify(data))
       .setMimeType(ContentService.MimeType.JSON);
@@ -4059,6 +4048,110 @@ function doGet(e) {
       .createTextOutput(JSON.stringify({ error: e.message }))
       .setMimeType(ContentService.MimeType.JSON);
   }
+}
+
+// ============================================================
+// ГЛАВНЫЙ PAYLOAD ДАШБОРДА (doGet без action, admin) - precompute (2026-08-13)
+// Раньше эти поля пересчитывались заново на КАЖДЫЙ визит (парсинг Заказы_данные + архив
+// прошлого месяца + История_финансов + ДЗ + Поступления и т.д.) - именно это делало загрузку
+// долгой. runAll() и так обновляет эти источники по расписанию (6 раз в день) - пересчитывать
+// чаще смысла нет. buildHeavyMainPayload_ - чистая функция (та же, что считалась раньше
+// внутри doGet()), кэш вокруг неё - отдельно. ВОССТАНОВЛЕНО 2026-08-13 (обнаружено расхождение
+// с живым редактором при координации перед clasp push - см. правило синхронизации в CLAUDE.md;
+// перенесено сюда с полным набором полей текущей ветки, включая "Юрлицо" в byCustomer и
+// историческую наличку в receiptsMonthRevenueMap_, которых не было в живой версии на момент
+// обнаружения).
+// ============================================================
+var MAIN_PAYLOAD_CACHE_SHEET = 'Кэш_главной_страницы';
+var MAIN_PAYLOAD_CACHE_VERSION = 'v1'; // поднимать при изменении состава полей ниже
+var MAIN_PAYLOAD_CACHE_CHUNK_SIZE = 45000; // с запасом от лимита ячейки Sheets (~50000)
+
+// "Дорогие" поля главной страницы - НЕ включает Штатку-производные (fleet/repairs/
+// staffMarkas/access_log) - те живые, считаются в doGet() напрямую, см. комментарий там.
+function buildHeavyMainPayload_(ss, staffData) {
+  var defaultRange = getCurrentMonthRange_();
+  var vehiclesData = aggregateFinHistoryForRange(ss, staffData, defaultRange.from, defaultRange.to);
+  var ordersData = getOrdersData(ss);
+  return {
+    summary:  getSummaryData(ss, ordersData),
+    vehicles: vehiclesData,
+    drivers:  deriveDriversFromVehicles(vehiclesData),
+    history:  getHistoryData(ss),
+    orders:   ordersData,
+    debt:     getDebtData(ss),
+    receipts: getReceiptsData(ss, ordersData),
+    // Колонка "Заказов" на "Водителях" в ДЕФОЛТНОМ виде (без выбора периода) раньше падала
+    // на orders.by_driver, который обрезан до топ-25 ПО ВСЕЙ КОМПАНИИ (см. по_driver ниже
+    // в getOrdersData) - водитель с высокой выручкой, но малым числом дорогих рейсов, в
+    // топ-25 по КОЛИЧЕСТВУ не попадал и показывал "—", хотя факт был ненулевой (Влад,
+    // 2026-07-16: "по некоторым машинам по количеству заказов показывает —"). Тут - тот же
+    // ПОЛНЫЙ (без обрезки) счётчик, что уже считается для action=vehicles_period.
+    driverOrderCounts: getDriverOrderCounts_(ss, defaultRange.from, defaultRange.to),
+    // Влад, 2026-08-10: "выпадающий список периода сначала пустой, месяцы появляются с
+    // задержкой" - раньше фронт после загрузки страницы делал ВТОРОЙ отдельный запрос
+    // (action=available_periods) только при первом заходе на вкладку с выбором периода, а
+    // каждый запрос к doGet() платит свою цену (открытие таблицы + проверка токена через
+    // Google). getAvailablePeriods(ss) сам по себе дешёвый (просто список листов, без чтения
+    // ячеек) - отдаём его сразу с основным ответом, второй round-trip больше не нужен.
+    periods: getAvailablePeriods(ss),
+  };
+}
+
+function ensureMainPayloadCacheSheet_(ss) {
+  var sheet = ss.getSheetByName(MAIN_PAYLOAD_CACHE_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(MAIN_PAYLOAD_CACHE_SHEET);
+    sheet.hideSheet();
+  }
+  return sheet;
+}
+
+// Считает buildHeavyMainPayload_ и кладёт результат одной строкой (версия | updated |
+// JSON-чанки...) - перезаписывается целиком за один setValues(), чтобы doGet() не мог
+// прочитать кэш "наполовину записанным" при совпадении по времени с runAll().
+function saveMainPayloadCache_(ss) {
+  var staffData = getStaffData(ss);
+  var payload = buildHeavyMainPayload_(ss, staffData);
+  var json = JSON.stringify(payload);
+  var chunks = [];
+  for (var i = 0; i < json.length; i += MAIN_PAYLOAD_CACHE_CHUNK_SIZE) {
+    chunks.push(json.slice(i, i + MAIN_PAYLOAD_CACHE_CHUNK_SIZE));
+  }
+  var sheet = ensureMainPayloadCacheSheet_(ss);
+  var row = [MAIN_PAYLOAD_CACHE_VERSION, new Date().toISOString()].concat(chunks);
+  // getMaxColumns может быть меньше нужного при первом запуске/после уменьшения payload -
+  // расширяем лист перед записью, иначе setValues на диапазон шире листа упадёт с ошибкой.
+  if (sheet.getMaxColumns() < row.length) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), row.length - sheet.getMaxColumns());
+  }
+  // Чистим старую строку целиком - если новый payload короче старого (меньше чанков),
+  // хвостовые ячейки от прошлой версии не должны остаться и склеиться в JSON при чтении.
+  sheet.getRange(1, 1, 1, sheet.getMaxColumns()).clearContent();
+  sheet.getRange(1, 1, 1, row.length).setValues([row]);
+}
+
+// Читает кэш; null если кэша нет, версия не совпадает, или JSON.parse не удался (битые
+// данные не должны ронять всю страницу - doGet() в этом случае посчитает вживую).
+function readMainPayloadCache_(ss) {
+  var sheet = ss.getSheetByName(MAIN_PAYLOAD_CACHE_SHEET);
+  if (!sheet || sheet.getLastRow() < 1) return null;
+  var row = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  if (row[0] !== MAIN_PAYLOAD_CACHE_VERSION) return null;
+  var json = row.slice(2).join('');
+  if (!json) return null;
+  try {
+    return JSON.parse(json);
+  } catch (parseErr) {
+    return null;
+  }
+}
+
+// doGet() зовёт это, а не buildHeavyMainPayload_ напрямую - кэш в приоритете, живой расчёт
+// только как страховка (первый запуск после деплоя, до первого runAll(); или кэш битый).
+function getMainPayloadCacheOrLive_(ss, staffData) {
+  var cached = readMainPayloadCache_(ss);
+  if (cached) return cached;
+  return buildHeavyMainPayload_(ss, staffData);
 }
 
 // Нормализация госномера: убираем пробелы + кириллица→латиница (А=A, В=B и т.д.)

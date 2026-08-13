@@ -89,7 +89,11 @@ function formatDate_(val) {
   return s;
 }
 
-const READ_BATCH_SIZE = 10000;
+// Уменьшено с 10000 (2026-08-13, Влад: "Out of memory error" на прогоне после добавления
+// колонки "Наличные") - сырой лист "Лист_1" широкий (~46 колонок), 10000 строк × 46 колонок
+// разом в памяти V8-песочницы Apps Script оказалось слишком много. Меньше строк за раз -
+// больше итераций до готовности, но каждая легче и надёжнее.
+const READ_BATCH_SIZE = 3000;
 // Оставляем запас до жёсткого 6-минутного лимита Apps Script - на финальную сводку и
 // форматирование тоже нужно время, поэтому не расходуем весь бюджет на чтение/запись.
 const TIME_BUDGET_MS = 4.5 * 60 * 1000;
@@ -269,6 +273,46 @@ function resetClientHistoryProgress() {
   props.deleteProperty(PROP_NEXT_ROW);
   props.deleteProperty(PROP_COUNTERS);
   Logger.log('Прогресс сброшен - следующий запуск normalizeClientHistory() начнёт с начала.');
+}
+
+// Защита от "Out of memory error" в середине normalizeClientHistory() (2026-08-13, реальный
+// случай у Влада) - каждый пакет сначала ЗАПИСЫВАЕТСЯ в лист, и только ПОСЛЕ этого прогресс
+// сохраняется в PropertiesService. Если сбой произошёл ровно между этими двумя шагами, при
+// повторном запуске тот же пакет обработается и запишется ЕЩЁ РАЗ - в листе появятся
+// дублирующиеся строки (полностью идентичные по всем 9 колонкам). Запусти ОДИН РАЗ после
+// того, как normalizeClientHistory() отчитается "ГОТОВО" (не раньше - до этого лист ещё не
+// полный, дедуп по частичным данным ничего не даст).
+function dedupeClientHistoryRows() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const clean = ss.getSheetByName(CLEAN_SHEET_NAME);
+  if (!clean || clean.getLastRow() < 2) { Logger.log('Лист "' + CLEAN_SHEET_NAME + '" пуст или не найден.'); return; }
+
+  const lastRow = clean.getLastRow();
+  const data = clean.getRange(2, 1, lastRow - 1, 9).getValues();
+  const seen = {};
+  const kept = [];
+  let dupCount = 0;
+
+  data.forEach(function(row) {
+    // Составной ключ по ВСЕМ 9 колонкам - легитимная многострочная разбивка одного заказа
+    // (тот же "Номер" несколько раз) обычно отличается хотя бы Суммой/Типом техники, поэтому
+    // точное совпадение по всем полям - надёжный признак именно случайного задвоения пакета,
+    // а не двух разных настоящих строк одного заказа.
+    const key = row.join('|');
+    if (seen[key]) { dupCount++; return; }
+    seen[key] = true;
+    kept.push(row);
+  });
+
+  if (dupCount === 0) {
+    Logger.log('Дублей не найдено (' + (lastRow - 1) + ' строк проверено) - ничего не изменено.');
+    return;
+  }
+
+  clean.getRange(2, 1, lastRow - 1, 9).clearContent();
+  if (kept.length) clean.getRange(2, 1, kept.length, 9).setValues(kept);
+  Logger.log('Удалено дублей: ' + dupCount + '. Было ' + (lastRow - 1) + ' строк, стало ' + kept.length + '.');
+  Logger.log('ВАЖНО: после этого нужно заново запустить buildClientHistoryAggregate() - агрегат ещё построен по старым (с дублями) данным.');
 }
 
 // ── АГРЕГАТ ПО КЛИЕНТАМ (Влад, 2026-07-06: "хочу, чтобы загрузка была мгновенной") ──

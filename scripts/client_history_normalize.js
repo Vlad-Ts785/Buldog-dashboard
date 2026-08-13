@@ -119,14 +119,19 @@ function normalizeClientHistory() {
   if (missing.length) throw new Error('В сыром листе нет колонок: ' + missing.join(', '));
 
   // Наличные (2026-08-13, Влад: "осталось наличку с января по май найти и подгрузить, можем
-  // подтянуть из мега-базы?") - НЕ в required выше: не гарантировано, что в этой исторической
-  // выгрузке вообще есть такая колонка (в живом отчёте 1С она называется "Оплата нал" - см.
-  // full_script_final.js, aggregateOrdersRows). Если колонки нет - просто пишем 0 везде и
-  // явно логируем это, чтобы не потерять час на молчаливое "наличка почему-то всегда ноль".
-  const hasCashCol = col['Оплата нал'] !== undefined;
+  // подтянуть из мега-базы?") - НЕ в required выше: название колонки НЕ гарантировано - в
+  // живом отчёте 1С (Заказы_данные, aggregateOrdersRows) она называется "Оплата нал", но
+  // Влад проверил вручную (2026-08-13): в этой исторической выгрузке за прошлые периоды (по
+  // май включительно) 1С отдаёт её под другим именем - "Наличные" (столбец AM в сыром
+  // "Лист_1"). Проверяем оба варианта названия, первый найденный - в приоритете. Если НИ
+  // ОДНОГО из них нет - пишем 0 везде и явно логируем, чтобы не потерять время на молчаливое
+  // "наличка почему-то всегда ноль".
+  const CASH_COLUMN_ALIASES_ = ['Оплата нал', 'Наличные'];
+  const cashColName_ = CASH_COLUMN_ALIASES_.filter(function(k) { return col[k] !== undefined; })[0] || null;
+  const hasCashCol = !!cashColName_;
   Logger.log(hasCashCol
-    ? 'Колонка "Оплата нал" найдена - наличка будет подтянута.'
-    : 'ВНИМАНИЕ: колонки "Оплата нал" в сыром листе НЕТ - наличка за этот период недоступна в исходнике, будет 0 у всех строк.');
+    ? 'Колонка "' + cashColName_ + '" найдена - наличка будет подтянута.'
+    : 'ВНИМАНИЕ: ни одной из колонок (' + CASH_COLUMN_ALIASES_.join(', ') + ') в сыром листе нет - наличка за этот период недоступна в исходнике, будет 0 у всех строк.');
 
   // 'БЕЗ ВОДИТЕЛЯ' - Влад, 2026-07-05: служебный статус в 1С, не реальный клиент (882 строки
   // в полной истории) - похоже на старый техпроцесс, сейчас таких клиентов нет.
@@ -172,7 +177,7 @@ function normalizeClientHistory() {
       const mgrSupply = String(row[col['Менеджер по снабжению']] || '').trim();
       const equipType = String(row[col['Тип техники']] || '').trim();
       const orderId = String(row[col['Номер']] || '').trim();
-      const cash = hasCashCol ? parseNum_(row[col['Оплата нал']]) : 0;
+      const cash = hasCashCol ? parseNum_(row[col[cashColName_]]) : 0;
 
       if (!customer || ADMIN_VALUES[customer] || !dateStr) { counters.adminOrEmptyRows++; continue; }
 
@@ -248,7 +253,7 @@ function normalizeClientHistory() {
   Logger.log('Исключено (служебные/пустые/без даты): ' + counters.adminOrEmptyRows);
   Logger.log('ИТОГО чистых строк: ' + writtenRows + ' | клиентов: ' + Object.keys(uniqueClients).length + ' | выручка: ' + Math.round(totalRevenue));
   Logger.log('НАЛИЧНЫЕ (за весь период до ' + HISTORY_CUTOFF + '): ' + Math.round(totalCash) +
-    (hasCashCol ? '' : ' - колонки "Оплата нал" в исходнике не было, это ожидаемый ноль'));
+    (hasCashCol ? ' (колонка "' + cashColName_ + '")' : ' - ни одной колонки налички в исходнике не было, это ожидаемый ноль'));
   Logger.log('Последняя дата в чистых данных (должна быть <= ' + HISTORY_CUTOFF + '): ' + counters.maxDate);
   Logger.log('---');
   Logger.log('ДИАГНОСТИКА: строк с тегом "(НАШ)" НЕ в INTERNAL_CLIENTS, НЕ отфильтрованы: ' + counters.tagLeakRows + ', выручка ' + Math.round(counters.tagLeakRevenue));

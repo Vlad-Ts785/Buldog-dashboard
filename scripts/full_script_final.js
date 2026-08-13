@@ -3975,18 +3975,24 @@ function doGet(e) {
     // этот action для прошлого периода вообще не вызывает, но проверяем и тут на всякий
     // случай. Роль logist - вне охвата v1 (Влад просил именно для менеджера).
     if (action === 'generate_ai_tasks') {
-      if (access.role !== 'admin' && access.role !== 'manager') {
+      if (access.role !== 'admin' && access.role !== 'manager' && access.role !== 'logist') {
         return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
       }
-      var gatManager = access.role === 'manager' ? access.name : (e.parameter.manager || '');
+      // Роль 'manager'/'logist' форсит СВОЁ имя И СВОЮ роль (игнорирует параметры от клиента,
+      // тот же паттерн, что my_page_period) - admin-предпросмотр указывает и то, и другое
+      // явно (2026-08-13, логист - см. plans/2026-08-13-logist-page-unify-with-manager.md).
+      var gatRole = (access.role === 'manager' || access.role === 'logist') ? access.role : (e.parameter.role || 'manager');
+      var gatManager = (access.role === 'manager' || access.role === 'logist') ? access.name : (e.parameter.manager || '');
       if (!gatManager) {
-        return ContentService.createTextOutput(JSON.stringify({ error: 'Не указан менеджер' })).setMimeType(ContentService.MimeType.JSON);
+        return ContentService.createTextOutput(JSON.stringify({ error: 'Не указан сотрудник' })).setMimeType(ContentService.MimeType.JSON);
       }
       try {
         var gatOrders = getOrdersData(ss);
         if (gatOrders.error) throw new Error(gatOrders.error);
         var gatForce = e.parameter.force === '1';
-        var gatResult = generateManagerAiTasksCached_(ss, gatOrders, gatManager, null, gatForce);
+        var gatResult = gatRole === 'logist'
+          ? generateLogistAiTasksCached_(ss, gatOrders, gatManager, null, gatForce)
+          : generateManagerAiTasksCached_(ss, gatOrders, gatManager, null, gatForce);
         return ContentService.createTextOutput(JSON.stringify(gatResult)).setMimeType(ContentService.MimeType.JSON);
       } catch (gatErr) {
         return ContentService.createTextOutput(JSON.stringify({ error: gatErr.message })).setMimeType(ContentService.MimeType.JSON);
@@ -7631,6 +7637,114 @@ function buildAiTasksPrompt_(managerName, context) {
     'знает клиентов лично - без длинного тире (используй обычный дефис), без канцелярита и воды.';
 }
 
+// ── ИИ-ЗАДАЧИ ДЛЯ ЛОГИСТА (2026-08-13) ─────────────────────────────────────────────────────
+// Влад: "логисту тоже нужно структурировать страницу как менеджеру... задачи ИИ блок" -
+// доменная область другая (найм техники у поставщиков, не прямые продажи клиентам), поэтому
+// контекст и промпт - отдельные функции, а не параметризация одной большой (риск запутать оба
+// промпта правкой одного). Оркестратор/кэш/API-вызов/парсинг - ОБЩИЕ (generateAiTasksCached_,
+// см. выше) - не копируются.
+//
+// В отличие от менеджера - НЕТ кросс-ссылки с ДЗ клиентов: долг контрагента в 1С привязан к
+// его менеджеру по продажам, не к логисту, который брокерил конкретный рейс - ложная связь
+// была бы хуже отсутствия (логист не может "давить на оплату", это не его клиент).
+function buildLogistAiContext_(ss, orders, logistName, period) {
+  const lRow = ((orders.by_logist || []).filter(function(l) { return l.name === logistName; })[0]) || {};
+  const qualMargin = lRow.hired_margin_qualified || 0;
+  const unqualMargin = lRow.hired_margin_unqualified || 0;
+  const totalMargin = qualMargin + unqualMargin;
+  const MARGIN_BONUS_THRESHOLD = 1000000; // тот же порог, что в calcLogist (премия 30т)
+  const paceRatio = calcPaceRatioServer_(period);
+  const forecastMargin = totalMargin * paceRatio;
+
+  const detail = (orders.logist_detail || {})[logistName] || { by_supplier: [], deals: [] };
+  const suppliers = (detail.by_supplier || []).slice(0, 8).map(function(s) {
+    return { name: s.name, revenue: Math.round(s.revenue || 0), margin: Math.round(s.margin || 0),
+      margin_pct: s.margin_pct || 0, orders: s.orders || 0,
+      no_waybill: s.no_waybill || 0, not_posted: s.not_posted || 0, no_realiz: s.no_realiz || 0, complete: s.complete || 0 };
+  });
+  const deals = (detail.deals || []).slice(0, 8).map(function(d) {
+    return { date: fmtDateRuServer_(d.date), customer: d.customer, supplier: d.supplier,
+      amount: Math.round(d.amount || 0), margin: Math.round(d.margin || 0) };
+  });
+
+  return {
+    logist: logistName,
+    period: period || Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM'),
+    margin_bonus: {
+      total_margin: Math.round(totalMargin), threshold: MARGIN_BONUS_THRESHOLD,
+      pct: Math.round(totalMargin / MARGIN_BONUS_THRESHOLD * 100),
+      forecast_margin: Math.round(forecastMargin),
+      forecast_pct: Math.round(forecastMargin / MARGIN_BONUS_THRESHOLD * 100),
+    },
+    own_orders: Math.max(0, (lRow.orders || 0) - (lRow.hired_orders || 0)),
+    suppliers: suppliers,
+    deals_examples: deals,
+  };
+}
+
+function buildLogistAiTasksPrompt_(logistName, context) {
+  return 'Ты - опытный руководитель отдела логистики транспортной компании (перевозки тралами ' +
+    'и длинномерами), который каждое утро даёт логисту-брокеру короткий и ТОЧНЫЙ разбор дня - ' +
+    'как это делает живой руководитель, который помнит историю по каждому поставщику ' +
+    '(перевозчику), а не формальный отчёт по цифрам. Логист находит поставщиков (наёмные ' +
+    'машины/перевозчиков) под заказы клиентов и получает % от маржи найма. Ниже - реальные ' +
+    'данные по одному логисту за текущий месяц в формате JSON.\n\n' +
+    'Данные:\n' + JSON.stringify(context, null, 0) + '\n\n' +
+    'ВАЖНЫЕ ФАКТЫ О ТОМ, КАК УСТРОЕНА РАБОТА (используй их, чтобы не писать ошибочных советов):\n' +
+    '- margin_pct поставщика >= 23% - квалифицирует маржу под бонус 8% (иначе бонус 0% с этой ' +
+    'части) - поставщики с margin_pct < 23% в suppliers[] стоит отметить как кандидатов на ' +
+    'пересмотр ставки или частичную замену другим поставщиком с более высокой маржой.\n' +
+    '- suppliers[i].no_waybill (нет путевого листа от перевозчика) - ЭТО ЗОНА ОТВЕТСТВЕННОСТИ ' +
+    'ЛОГИСТА (в отличие от менеджера по продажам, у которого это была бы чужая зона) - здесь ' +
+    'логист сам работает с поставщиком, уместно рекомендовать запросить путевой лист напрямую.\n' +
+    '- suppliers[i].not_posted (путевой есть, но документ не проведён) и suppliers[i].no_realiz ' +
+    '(документ проведён, но акт/накладная не оформлены) - тоже в зоне влияния логиста, можно ' +
+    'ускорить, напомнив поставщику или бухгалтерии.\n' +
+    '- margin_bonus.threshold (1 000 000 ₽) - порог квалифицирующей маржи найма за месяц, при ' +
+    'котором начисляется премия 30 000 ₽ (см. margin_bonus.total_margin - факт, ' +
+    'margin_bonus.forecast_margin - прогноз к концу месяца при текущем темпе). Если факт или ' +
+    'прогноз близко к порогу (пример: 70-99%) - уместна задача "добрать маржу, чтобы получить ' +
+    'премию 30 000 ₽" со ссылкой на конкретную нехватку в рублях (threshold - total_margin).\n' +
+    '- НЕ указывай в "plan_advice" конкретные суммы/проценты маржи-к-порогу (margin_bonus.*) - ' +
+    'эти цифры УЖЕ показаны прямо на странице живым виджетом и обновляются в реальном времени ' +
+    'в течение дня, а твой текст кэшируется на весь день - если повторить цифры словами, они ' +
+    'разойдутся с тем, что логист видит на экране. Пиши про КОНКРЕТНЫЕ ДЕЙСТВИЯ и КОНКРЕТНЫХ ' +
+    'ПОСТАВЩИКОВ/КЛИЕНТОВ - без своей копии процента до премии.\n' +
+    '- ГРАМОТНОСТЬ И РОД: определи пол логиста по отчеству/имени в поле "logist" - отчество на ' +
+    '"-вна"/"-чна" или явно женское имя = ЖЕНСКИЙ род, "-вич"/"-ич" = МУЖСКОЙ род. Используй ' +
+    'ПРАВИЛЬНЫЙ род во всех глаголах прошедшего времени и кратких прилагательных, обращённых ' +
+    'на "ты" (например, "ты сделал(а)", "ты договорился/договорилась") - не мужской род по ' +
+    'умолчанию для женщины.\n' +
+    '- ФОРМАТ ЧИСЕЛ: все суммы в рублях пиши с пробелом как разделителем тысяч (например, ' +
+    '"7 618 250", а НЕ "7618250") - слитные числа от 4 цифр тяжело читать.\n' +
+    '- ФОРМАТ ДАТ: даты (deals_examples[].date) УЖЕ отформатированы по-русски (например ' +
+    '"18 июля") - используй РОВНО КАК ДАНЫ, не переформатируй и не переставляй числа местами.\n\n' +
+    'Сформулируй РОВНО 5 задач на сегодня для этого логиста. Постарайся сделать разумный ' +
+    'баланс: минимум 2 задачи про работу с поставщиками (низкая маржа/новые предложения/объём), ' +
+    'не больше 2 задачи про документы (путевые/проведение/реализация), 1 задачу можно посвятить ' +
+    'прогрессу к премии >1М, если это уместно (близко к порогу) - но если данных по какой-то ' +
+    'теме нет, не выдумывай, просто перераспредели на другие темы.\n\n' +
+    'Требования к ответу:\n' +
+    '- Ответь СТРОГО валидным JSON без markdown-обёртки (без ```), без текста до/после.\n' +
+    '- Формат: {"tasks":[{"title":"...","why":"...","category":"выручка|поставщики|документы"},' +
+    '... ровно 5 штук],"plan_advice":"..."}\n' +
+    '- "title" - короткая формулировка КОНКРЕТНОГО действия (до 90 символов) - что именно ' +
+    'сделать сегодня (позвонить поставщику, запросить документ, предложить объём), а не общая ' +
+    'тема.\n' +
+    '- "why" - 1-2 фразы, ПОЧЕМУ это важно именно сегодня, со ссылкой на конкретный факт из ' +
+    'данных (сумма, поставщик, % маржи, номер заказа) - не общие слова.\n' +
+    '- "category" - одна из трёх: "выручка" (объём/новые сделки/прогресс к премии), ' +
+    '"поставщики" (маржа/ставки/переговоры), "документы" (путевые/проведение/реализация).\n' +
+    '- "plan_advice" - 2-4 предложения, КОНКРЕТНО как реалистично добрать маржу до премии ' +
+    'или нарастить объём, с опорой на конкретных поставщиков/клиентов из suppliers/' +
+    'deals_examples - БЕЗ повторения процента/суммы до порога (см. выше).\n' +
+    '- Задачи должны быть РАЗНЫЕ по теме (не 5 вариаций одного и того же) и опираться ТОЛЬКО ' +
+    'на переданные данные, не выдумывай факты, которых нет в JSON.\n' +
+    '- Пиши по-русски, обращение на "ты", по-деловому, тоном опытного руководителя, который ' +
+    'знает поставщиков лично - без длинного тире (используй обычный дефис), без канцелярита ' +
+    'и воды.';
+}
+
 // POST https://api.kie.ai/codex/v1/responses - reasoning-модель (см. reference-память
 // kie.ai - "у каждой модели свой URL/формат", этот путь для GPT-5). Ключ - только из Script
 // Properties, никогда не в коде (правило репозитория).
@@ -7684,27 +7798,42 @@ function parseAiTasksResponse_(rawText) {
   return { tasks: tasks, plan_advice: String(data.plan_advice || '').trim() };
 }
 
-// Оркестратор - кэш на день, иначе генерация + сохранение. Ошибки НЕ кэшируются (можно
-// повторить в тот же день - см. план, риск "формат ответа kie.ai не проверен вживую").
-// force=true (2026-08-12, Влад: "мы сделали много изменений... нужно всё обнулить, чтобы
-// посмотреть заново по новым данным") - игнорирует кэш на сегодня и удаляет старую строку
-// перед генерацией новой, вместо ручного похода в Google Таблицу за каждым обновлением
-// промпта. Дёргается кнопкой "Сгенерировать заново" на фронтенде (см. retryAiTasks_).
-function generateManagerAiTasksCached_(ss, orders, managerName, period, force) {
+// Оркестратор ОБЩИЙ для менеджера и логиста (2026-08-13, было отдельно под менеджера,
+// обобщено, когда Влад попросил "тот же каркас" для логиста - не копируем кэш/API-вызов/
+// парсинг под каждую роль, только contextFn/promptFn разные). Кэш на день, иначе генерация +
+// сохранение. Ошибки НЕ кэшируются (можно повторить в тот же день - см. план, риск "формат
+// ответа kie.ai не проверен вживую"). force=true (2026-08-12, Влад: "мы сделали много
+// изменений... нужно всё обнулить, чтобы посмотреть заново по новым данным") - игнорирует
+// кэш на сегодня и удаляет старую строку перед генерацией новой, вместо ручного похода в
+// Google Таблицу за каждым обновлением промпта. Дёргается кнопкой "Сгенерировать заново" на
+// фронтенде (см. retryAiTasks_).
+function generateAiTasksCached_(ss, personName, contextFn, promptFn, force) {
   const dateKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM-dd');
   if (force) {
-    deleteAiTasksCacheRow_(ss, dateKey, managerName);
+    deleteAiTasksCacheRow_(ss, dateKey, personName);
   } else {
-    const cached = findAiTasksCacheRow_(ss, dateKey, managerName);
+    const cached = findAiTasksCacheRow_(ss, dateKey, personName);
     if (cached) return { tasks: cached.tasks, plan_advice: cached.plan_advice, generated_at: cached.generated_at, cached: true };
   }
 
-  const context = buildManagerAiContext_(ss, orders, managerName, period);
-  const prompt = buildAiTasksPrompt_(managerName, context);
+  const context = contextFn();
+  const prompt = promptFn(personName, context);
   const rawText = callKieGpt5_(prompt);
   const parsed = parseAiTasksResponse_(rawText);
-  const generatedAt = saveAiTasksCache_(ss, dateKey, managerName, parsed.tasks, parsed.plan_advice, 'gpt-5-4');
+  const generatedAt = saveAiTasksCache_(ss, dateKey, personName, parsed.tasks, parsed.plan_advice, 'gpt-5-4');
   return { tasks: parsed.tasks, plan_advice: parsed.plan_advice, generated_at: generatedAt, cached: false };
+}
+
+function generateManagerAiTasksCached_(ss, orders, managerName, period, force) {
+  return generateAiTasksCached_(ss, managerName,
+    function() { return buildManagerAiContext_(ss, orders, managerName, period); },
+    buildAiTasksPrompt_, force);
+}
+
+function generateLogistAiTasksCached_(ss, orders, logistName, period, force) {
+  return generateAiTasksCached_(ss, logistName,
+    function() { return buildLogistAiContext_(ss, orders, logistName, period); },
+    buildLogistAiTasksPrompt_, force);
 }
 
 // ── ПЛАНЫ МЕНЕДЖЕРОВ (лист "Планы_менеджеров", Влад вводит вручную каждый месяц) ──

@@ -1334,6 +1334,10 @@ function isVasinEntry_(entry) {
 // сделки" не зависит от выбранного человека, это общекорпоративный срез по найму.
 let myPageLogistScope = 'own'; // 'own' | 'company'
 function setMyPageLogistScope(scope) { myPageLogistScope = scope; renderMyPage(); }
+// Вкладки объединённого инфо-блока страницы логиста (2026-08-13, по образцу вкладок
+// менеджера) - Маржа по поставщикам / Воронка документов / Сделки, было 3 отдельных блока.
+let myPageLogTab = 'suppliers'; // 'suppliers' | 'docs' | 'deals'
+function setMyPageLogTab(tab) { myPageLogTab = tab; renderMyPage(); }
 
 // Выбор периода на личной странице (2026-08-11, Влад: "нужно сделать ещё выбор периода:
 // текущий месяц и прошлый месяц"). Admin получает данные через уже существующий
@@ -1553,15 +1557,19 @@ let mgrLostLoading = false;
 // строго держит бэкенд, здесь это просто ключ кэша, не источник истины).
 let aiTasksCache = {};    // 'ФИО::дата' -> { tasks:[...], plan_advice:'...' } | { error:'...' }
 let aiTasksLoadingKey = null;
+// Ключ кэша по имени (без роли) - манагеры и логисты в этой компании не пересекаются по
+// фамилиям (см. .business/ - разные, непересекающиеся списки), коллизия практически невозможна,
+// лист-кэш на бэкенде тоже ключуется только по имени. Роль нужна ОТДЕЛЬНО - только чтобы
+// backend знал, каким промптом (менеджерским/логистским) генерировать (2026-08-13).
 function aiTasksTodayKey_(managerName) {
   var d = new Date();
   return managerName + '::' + d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 }
-function loadAiTasksIfNeeded_(managerName) {
+function loadAiTasksIfNeeded_(managerName, role) {
   var key = aiTasksTodayKey_(managerName);
   if (aiTasksCache[key] || aiTasksLoadingKey === key) return;
   aiTasksLoadingKey = key;
-  apiFetchJson({ action: 'generate_ai_tasks', manager: managerName }).then(function(data) {
+  apiFetchJson({ action: 'generate_ai_tasks', manager: managerName, role: role || 'manager' }).then(function(data) {
     aiTasksLoadingKey = null;
     aiTasksCache[key] = data && data.error ? { error: data.error } : data;
     renderMyPage();
@@ -1577,13 +1585,13 @@ function loadAiTasksIfNeeded_(managerName) {
 // "Повторить" при ошибке (тогда кэша обычно и не было - ошибки не кэшируются), и для новой
 // кнопки "Сгенерировать заново" на успешном результате - разницы в поведении нет, всегда
 // безопасно передёрнуть.
-function retryAiTasks_(managerName) {
+function retryAiTasks_(managerName, role) {
   var key = aiTasksTodayKey_(managerName);
   if (aiTasksLoadingKey === key) return;
   delete aiTasksCache[key];
   aiTasksLoadingKey = key;
   renderMyPage();
-  apiFetchJson({ action: 'generate_ai_tasks', manager: managerName, force: '1' }).then(function(data) {
+  apiFetchJson({ action: 'generate_ai_tasks', manager: managerName, role: role || 'manager', force: '1' }).then(function(data) {
     aiTasksLoadingKey = null;
     aiTasksCache[key] = data && data.error ? { error: data.error } : data;
     renderMyPage();
@@ -1618,11 +1626,157 @@ function toggleMgrDebtDetail(name) { mgrDebtOpenRow = (mgrDebtOpenRow===name ? n
 let myPageMgrProblemsFilter = '';
 function setMyPageMgrProblemsFilter(f) { myPageMgrProblemsFilter = f; renderMyPage(); }
 
+// ── Общий каркас личных страниц (2026-08-13) - вынесено из renderMyPageManager, чтобы
+// renderMyPageLogist переиспользовал те же функции, не копируя (Влад: "структурно каркас
+// должен быть единообразным"). PAGE_COL/mln/fr/planProgressBar/salRow и т.д. - один источник
+// стиля для обеих страниц. ──────────────────────────────────────────────────────────────────
+var PAGE_COL = { red:'#E24B4A', amber:'#EF9F27', green:'#1D9E75', blue:'#378ADD' };
+function pageMln_(n) { var x=Math.abs(n||0); var sg=(n||0)<0?'-':''; return x>=1000000 ? sg+(x/1000000).toFixed(1)+' млн ₽' : sg+Math.round(x).toLocaleString('ru-RU')+' ₽'; }
+function pageFr_(n) { return n ? Math.round(n).toLocaleString('ru-RU')+' ₽' : '—'; }
+function pageBlock_(title, bodyHtml) {
+  return '<div class="card" style="margin-bottom:14px;padding:16px 18px">'+
+    '<div style="font-size:14px;font-weight:600;margin-bottom:8px">'+title+'</div>'+bodyHtml+'</div>';
+}
+// Единая трёхзонная раскраска "дружелюбнее" (Влад, 2026-08-12: "от 0 до 50 пусть будет
+// красная, от 50 до 80% пусть жёлтая, и 80-100 [зелёная]") - ОДИН порог для цвета факт-бара
+// И для статус-текста, переиспользуется любой полоской-прогрессом на любой личной странице.
+function planZoneColor_(pct) { return pct>=80?PAGE_COL.green:pct>=50?PAGE_COL.amber:PAGE_COL.red; }
+// Универсальная полоска "факт/прогноз/цель" - изначально "Выполнение плана продаж" у
+// менеджера, теперь используется и логистом (см. 2026-08-13, "Маржа найма к премии >1М") -
+// label/подписи задаются вызывающей стороной, сама полоска/цвета/пороги - общие.
+function planProgressBar(label, factPct, forecastPct, factVal, forecastVal, planVal, extraHtml) {
+  // Цвет заливки - по ПРОГНОЗУ, не по факту (Влад, 2026-08-12: "цвет полосок должен быть в
+  // зависимости от тех параметров, которые я задал... при прогнозе 91% полоска должна быть
+  // зелёного цвета"). Факт середины месяца почти всегда низкий по определению (это вопрос
+  // календаря, не здоровья продаж) - красить по нему вводило в заблуждение: полоса выглядела
+  // тревожно красной, даже когда менеджер идёт по плану. Ширина заливки - по-прежнему факт
+  // (реальный прогресс в ₽), цвет - по прогнозу (статус "успеем ли").
+  var color = planZoneColor_(forecastPct);
+  var statusColor = color;
+  var statusText = forecastPct>=105 ? 'Идём с опережением плана'
+    : forecastPct>=80 ? 'Идём по плану'
+    : forecastPct>=50 ? 'Есть отставание - нужно ускориться'
+    : 'Сильное отставание от плана';
+  var factBarW = Math.min(Math.max(factPct,0),100);
+  var forecastPos = Math.min(Math.max(forecastPct,0),100);
+  var h = '<div class="card" style="margin-bottom:18px;padding:18px 20px">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">';
+  h += '<span style="font-size:14px;font-weight:600">'+label+'</span>';
+  h += '<span style="font-size:13px;font-weight:700;color:'+statusColor+'">'+statusText+'</span>';
+  h += '</div>';
+  // Тоньше (2026-08-12, Влад: "полоску можно тоньше сделать, будет чуть элегантнее и
+  // сочетаться с общим стилем") - 8px/radius:4px, тот же формат, что воронки документов на
+  // дашборде (docsCardHtml и т.п.), а не отдельная толстая 16px полоса.
+  h += '<div style="position:relative;height:8px;border-radius:4px;background:rgba(255,255,255,.07);margin:16px 0 10px;overflow:visible">';
+  h += '<div style="position:absolute;left:0;top:0;height:100%;border-radius:4px;background:'+color+';width:'+factBarW+'%;transition:width .4s"></div>';
+  h += '<div style="position:absolute;top:-4px;width:2px;height:16px;background:'+statusColor+';left:'+forecastPos+'%"></div>';
+  h += '<div style="position:absolute;top:-20px;transform:translateX(-50%);font-size:11px;font-weight:600;color:'+statusColor+';white-space:nowrap;left:'+forecastPos+'%">'+Math.round(forecastPct)+'%</div>';
+  h += '</div>';
+  h += '<div style="display:flex;gap:20px;flex-wrap:wrap;font-size:12px;color:var(--muted)">';
+  h += '<span>Факт: <b style="color:var(--text)">'+pageMln_(factVal)+'</b> ('+Math.round(factPct)+'%)</span>';
+  h += '<span>Прогноз к концу месяца: <b style="color:var(--text)">'+pageMln_(forecastVal)+'</b> ('+Math.round(forecastPct)+'%)</span>';
+  h += '<span>План: <b style="color:var(--text)">'+pageMln_(planVal)+'</b></span>';
+  h += '</div>';
+  if (extraHtml) h += extraHtml;
+  h += '</div>';
+  return h;
+}
+function pageHex2rgba_(hex, a) { var r=parseInt(hex.slice(1,3),16), g=parseInt(hex.slice(3,5),16), b=parseInt(hex.slice(5,7),16); return 'rgba('+r+','+g+','+b+','+a+')'; }
+function pctBadge_(text, colorHex) {
+  return '<span style="background:'+pageHex2rgba_(colorHex,0.15)+';color:'+colorHex+';padding:1px 6px;border-radius:3px;font-size:10.5px;font-weight:600;white-space:nowrap">'+text+'</span>';
+}
+function mutedBadge_(text) {
+  return '<span style="background:rgba(255,255,255,.08);color:var(--muted);padding:1px 6px;border-radius:3px;font-size:10.5px;font-weight:600;white-space:nowrap">'+text+'</span>';
+}
+// Строка расчёта в два уровня - значение сверху, формула мельче под ней (2026-08-12, Влад:
+// "сделай как-то поаккуратнее визуально, мне нравится как у нас в блоке зарплата где всё").
+function salRow(label, val, detail) {
+  return '<div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
+    '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px">'+
+    '<span style="font-size:13px;color:var(--text)">'+label+'</span>'+
+    '<span style="font-size:13px;font-weight:600;white-space:nowrap">'+pageFr_(val)+'</span></div>'+
+    (detail ? '<div style="font-size:11px;color:var(--muted);margin-top:3px">'+detail+'</div>' : '')+
+  '</div>';
+}
+function salTotalRow(val) {
+  // "Итого на сегодня" - не просто "Итого" (2026-08-13, Влад) - рядом всегда идёт "Итого по
+  // прогнозу", без уточнения непонятно, какая из двух сумм за какой момент.
+  return '<div style="display:flex;justify-content:space-between;padding-top:10px;margin-top:4px;border-top:1px solid var(--border)">'+
+    '<span style="font-size:14px;font-weight:700">Итого на сегодня</span>'+
+    '<span style="font-size:16px;font-weight:700;color:'+PAGE_COL.green+'">'+pageFr_(val)+'</span></div>';
+}
+// "Итого по прогнозу" - масштабирует ЧИСЛОВЫЕ поля строки менеджера/логиста на ratio и отдаёт
+// обратно тот же объект, готовый к пропуску через calcMgr()/calcLogist() - формула зарплаты не
+// дублируется, только входные данные "домасштабированы" под конец месяца (2026-08-12).
+function scaleRowForForecast_(row, ratio) {
+  if (!row) return null;
+  var scaled = {};
+  Object.keys(row).forEach(function(k) { scaled[k] = (typeof row[k] === 'number') ? row[k]*ratio : row[k]; });
+  return scaled;
+}
+// Мелкая приглушённая строка разбивки прогноза зарплаты (2026-08-12, у факта разбивка через
+// salRow крупнее, у прогноза - компактнее, чтобы визуально не спорить с фактом) + обёртка
+// пунктирной чертой с итогом синим цветом. Общие для менеджера и логиста (2026-08-13).
+function pageForecastRow_(label, val) {
+  return '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);padding:2px 0;gap:10px"><span>'+label+'</span><span style="white-space:nowrap">'+pageFr_(val)+'</span></div>';
+}
+function pageForecastWrap_(breakdownHtml, totalVal) {
+  return '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed rgba(255,255,255,.1)">'+
+    breakdownHtml+
+    '<div style="display:flex;justify-content:space-between;padding-top:4px">'+
+    '<span style="font-size:12px;font-weight:600;color:var(--muted)">Итого по прогнозу (текущий темп)</span>'+
+    '<span style="font-size:14px;font-weight:700;color:'+PAGE_COL.blue+'">'+pageFr_(totalVal)+'</span></div>'+
+  '</div>';
+}
+// Блок "🤖 Задачи на сегодня (ИИ)" - общий для менеджера и логиста (2026-08-13), кэш/лоадинг/
+// ошибка/кнопка "Заново" - один и тот же паттерн, только personName разный. Возвращает пустую
+// строку для прошлого периода (задачи "на сегодня" не имеют смысла для закрытого месяца).
+function renderAiTasksBlockHtml_(personName, role) {
+  if (myPagePeriod) return '';
+  role = role || 'manager';
+  var roleEsc = role.replace(/'/g,"\\'");
+  var aiKey = aiTasksTodayKey_(personName);
+  var aiEntry = aiTasksCache[aiKey];
+  if (!aiEntry && aiTasksLoadingKey !== aiKey) loadAiTasksIfNeeded_(personName, role);
+  var aiBody;
+  if (!aiEntry) {
+    aiBody = '<div style="font-size:13px;color:var(--muted);padding:8px 0">Генерируется… обычно 5-15 сек.</div>';
+  } else if (aiEntry.error) {
+    aiBody = '<div style="font-size:13px;color:'+PAGE_COL.red+';padding:8px 0">Не удалось сгенерировать: '+aiEntry.error+'</div>'+
+      '<button onclick="retryAiTasks_(\''+personName.replace(/'/g,"\\'")+'\',\''+roleEsc+'\')" style="margin-top:6px;cursor:pointer;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:12px;color:var(--text)">Повторить</button>';
+  } else {
+    // Бейдж категории (2026-08-12) - помогает быстро понять баланс задач на день, не только
+    // читать текст каждой. Цвета по трём категориям менеджера (выручка/дебиторка/документы) -
+    // категории логиста (выручка/поставщики/документы) используют тот же цветовой ряд по
+    // порядку, "поставщики" красятся как "дебиторка" (амбер) - обе про партнёров/контрагентов.
+    var catColor = { 'выручка': PAGE_COL.green, 'дебиторка': PAGE_COL.amber, 'поставщики': PAGE_COL.amber, 'документы': PAGE_COL.blue };
+    var aiTasksHtml = (aiEntry.tasks||[]).map(function(t, i){
+      var catBadge = t.category ? ' <span style="font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:'+(catColor[t.category]||PAGE_COL.blue)+';border:1px solid '+(catColor[t.category]||PAGE_COL.blue)+';border-radius:4px;padding:1px 5px;vertical-align:middle">'+t.category+'</span>' : '';
+      return '<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
+        '<div style="font-size:13px;font-weight:700;color:'+PAGE_COL.blue+';flex:none">'+(i+1)+'</div>'+
+        '<div><div style="font-size:13px;font-weight:600;color:var(--text)">'+t.title+catBadge+'</div>'+
+        (t.why ? '<div style="font-size:12px;color:var(--muted);margin-top:2px">'+t.why+'</div>' : '')+
+        '</div></div>';
+    }).join('');
+    aiBody = aiTasksHtml +
+      (aiEntry.plan_advice ? '<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07);font-size:12.5px;color:var(--text)"><b>Совет по плану:</b> '+aiEntry.plan_advice+'</div>' : '');
+  }
+  // Кнопка "Заново" - только на успешном результате (2026-08-12, Влад: "мы сделали много
+  // изменений... нужно всё обнулить, чтобы посмотреть заново по новым данным") - при ошибке
+  // кнопка "Повторить" уже есть внутри aiBody, дублировать не нужно.
+  var aiRegenBtn = (aiEntry && !aiEntry.error)
+    ? '<button onclick="retryAiTasks_(\''+personName.replace(/'/g,"\\'")+'\',\''+roleEsc+'\')" title="Стереть сегодняшний кэш и сгенерировать заново" style="cursor:pointer;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:3px 9px;font-size:11px;color:var(--muted)">🔄 Заново</button>'
+    : '';
+  return '<div class="card" style="margin-bottom:18px;padding:16px 18px">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'+
+    '<div style="font-size:14px;font-weight:600">🤖 Задачи на сегодня (ИИ)</div>'+aiRegenBtn+
+    '</div>'+aiBody+'</div>';
+}
+
 function renderMyPageManager(el, current, selectorHtml, d) {
   if (!d) { el.innerHTML = selectorHtml + '<p style="color:var(--muted);padding:16px">Нет данных за этот месяц.</p>'; return; }
 
-  var COL = { red:'#E24B4A', amber:'#EF9F27', green:'#1D9E75', blue:'#378ADD' };
-  function mln(n) { var x=Math.abs(n||0); var sg=(n||0)<0?'-':''; return x>=1000000 ? sg+(x/1000000).toFixed(1)+' млн ₽' : sg+Math.round(x).toLocaleString('ru-RU')+' ₽'; }
+  var COL = PAGE_COL, mln = pageMln_, block = pageBlock_;
   function rowsList(rows, emptyText) {
     if (!rows.length) return '<div style="font-size:13px;color:var(--muted);padding:8px 0">'+(emptyText||'Пусто')+'</div>';
     var h = '<div style="margin-top:6px">';
@@ -1633,53 +1787,6 @@ function renderMyPageManager(el, current, selectorHtml, d) {
         '<div style="font-size:13px;font-weight:600;white-space:nowrap;color:'+(r.color||'var(--text)')+'">'+r.right+'</div></div>';
     });
     return h + '</div>';
-  }
-  function block(title, bodyHtml) {
-    return '<div class="card" style="margin-bottom:14px;padding:16px 18px">'+
-      '<div style="font-size:14px;font-weight:600;margin-bottom:8px">'+title+'</div>'+bodyHtml+'</div>';
-  }
-  // Единая трёхзонная раскраска "дружелюбнее" (Влад, 2026-08-12: "от 0 до 50 пусть будет
-  // красная, от 50 до 80% пусть жёлтая, и 80-100 [зелёная]") - ОДИН порог для цвета факт-бара
-  // И для статус-текста (раньше статус красился отдельным порогом 95/105 - с "мёртвой зоной"
-  // 95-100%, где не было ни зелёного, ни явного предупреждения). Тот же порог использует
-  // компактный виджет плана в шапке (см. renderMyPage) - не изобретаем ещё один вариант.
-  function planZoneColor_(pct) { return pct>=80?COL.green:pct>=50?COL.amber:COL.red; }
-  function planProgressBar(label, factPct, forecastPct, factVal, forecastVal, planVal, extraHtml) {
-    // Цвет заливки - по ПРОГНОЗУ, не по факту (Влад, 2026-08-12: "цвет полосок должен быть в
-    // зависимости от тех параметров, которые я задал... при прогнозе 91% полоска должна быть
-    // зелёного цвета"). Факт середины месяца почти всегда низкий по определению (это вопрос
-    // календаря, не здоровья продаж) - красить по нему вводило в заблуждение: полоса выглядела
-    // тревожно красной, даже когда менеджер идёт по плану. Ширина заливки - по-прежнему факт
-    // (реальный прогресс в ₽), цвет - по прогнозу (статус "успеем ли").
-    var color = planZoneColor_(forecastPct);
-    var statusColor = color;
-    var statusText = forecastPct>=105 ? 'Идём с опережением плана'
-      : forecastPct>=80 ? 'Идём по плану'
-      : forecastPct>=50 ? 'Есть отставание - нужно ускориться'
-      : 'Сильное отставание от плана';
-    var factBarW = Math.min(Math.max(factPct,0),100);
-    var forecastPos = Math.min(Math.max(forecastPct,0),100);
-    var h = '<div class="card" style="margin-bottom:18px;padding:18px 20px">';
-    h += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">';
-    h += '<span style="font-size:14px;font-weight:600">'+label+'</span>';
-    h += '<span style="font-size:13px;font-weight:700;color:'+statusColor+'">'+statusText+'</span>';
-    h += '</div>';
-    // Тоньше (2026-08-12, Влад: "полоску можно тоньше сделать, будет чуть элегантнее и
-    // сочетаться с общим стилем") - 8px/radius:4px, тот же формат, что воронки документов на
-    // дашборде (docsCardHtml и т.п.), а не отдельная толстая 16px полоса.
-    h += '<div style="position:relative;height:8px;border-radius:4px;background:rgba(255,255,255,.07);margin:16px 0 10px;overflow:visible">';
-    h += '<div style="position:absolute;left:0;top:0;height:100%;border-radius:4px;background:'+color+';width:'+factBarW+'%;transition:width .4s"></div>';
-    h += '<div style="position:absolute;top:-4px;width:2px;height:16px;background:'+statusColor+';left:'+forecastPos+'%"></div>';
-    h += '<div style="position:absolute;top:-20px;transform:translateX(-50%);font-size:11px;font-weight:600;color:'+statusColor+';white-space:nowrap;left:'+forecastPos+'%">'+Math.round(forecastPct)+'%</div>';
-    h += '</div>';
-    h += '<div style="display:flex;gap:20px;flex-wrap:wrap;font-size:12px;color:var(--muted)">';
-    h += '<span>Факт: <b style="color:var(--text)">'+mln(factVal)+'</b> ('+Math.round(factPct)+'%)</span>';
-    h += '<span>Прогноз к концу месяца: <b style="color:var(--text)">'+mln(forecastVal)+'</b> ('+Math.round(forecastPct)+'%)</span>';
-    h += '<span>План: <b style="color:var(--text)">'+mln(planVal)+'</b></span>';
-    h += '</div>';
-    if (extraHtml) h += extraHtml;
-    h += '</div>';
-    return h;
   }
 
   var mgrRow = (D.orders.by_manager||[]).filter(function(m){ return m.name && m.name.indexOf(current) >= 0; })[0] || {};
@@ -1739,33 +1846,7 @@ function renderMyPageManager(el, current, selectorHtml, d) {
   var useNewRules = isNewRulesPeriod(D.orders.period);
   var sal = calcMgr(sur, true, getM, getL, useNewRules);
 
-  function fr(n) { return n ? Math.round(n).toLocaleString('ru-RU')+' ₽' : '—'; }
-  // Строка расчёта в два уровня - значение сверху, формула мельче под ней (2026-08-12, Влад:
-  // "сделай как-то поаккуратнее визуально, мне нравится как у нас в блоке зарплата где всё") -
-  // раньше вся формула шла одной длинной строкой в скобках рядом с названием. Проценты - тем
-  // же приёмом badge/пилюля, что уже красит 8%/10%/5% на вкладке "Зарплата" (hiredBreakdownRow).
-  function hex2rgba_(hex, a) { var r=parseInt(hex.slice(1,3),16), g=parseInt(hex.slice(3,5),16), b=parseInt(hex.slice(5,7),16); return 'rgba('+r+','+g+','+b+','+a+')'; }
-  function pctBadge_(text, colorHex) {
-    return '<span style="background:'+hex2rgba_(colorHex,0.15)+';color:'+colorHex+';padding:1px 6px;border-radius:3px;font-size:10.5px;font-weight:600;white-space:nowrap">'+text+'</span>';
-  }
-  function mutedBadge_(text) {
-    return '<span style="background:rgba(255,255,255,.08);color:var(--muted);padding:1px 6px;border-radius:3px;font-size:10.5px;font-weight:600;white-space:nowrap">'+text+'</span>';
-  }
-  function salRow(label, val, detail) {
-    return '<div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
-      '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px">'+
-      '<span style="font-size:13px;color:var(--text)">'+label+'</span>'+
-      '<span style="font-size:13px;font-weight:600;white-space:nowrap">'+fr(val)+'</span></div>'+
-      (detail ? '<div style="font-size:11px;color:var(--muted);margin-top:3px">'+detail+'</div>' : '')+
-    '</div>';
-  }
-  function salTotalRow(val) {
-    // "Итого на сегодня" - не просто "Итого" (2026-08-13, Влад) - рядом всегда идёт "Итого по
-    // прогнозу", без уточнения непонятно, какая из двух сумм за какой момент.
-    return '<div style="display:flex;justify-content:space-between;padding-top:10px;margin-top:4px;border-top:1px solid var(--border)">'+
-      '<span style="font-size:14px;font-weight:700">Итого на сегодня</span>'+
-      '<span style="font-size:16px;font-weight:700;color:'+COL.green+'">'+fr(val)+'</span></div>';
-  }
+  var fr = pageFr_; // локальный алиас - остальной код функции уже вызывает fr(...) по имени
   // Рекомендация до следующей ступени оклада (2026-08-12, Влад: "хочу рекомендацию до
   // следующего уровня - столько-то выручки, и будет оклад такой-то в зависимости от нашего
   // градиента"). Пороги СТРОГО те же, что в okladByRev() (единственный источник истины для
@@ -1794,12 +1875,7 @@ function renderMyPageManager(el, current, selectorHtml, d) {
   // 10.5 млн. effectiveRatio - тот же коэффициент, что уже привёл факт к ИМЕННО planForecast
   // (уже показанному на шкале), поэтому scaled.amount будет РОВНО planForecast, а не отдельно
   // посчитанным числом - и ступень оклада, и комиссия своего парка теперь бьются с шкалой.
-  function scaleRowForForecast_(row, ratio) {
-    if (!row) return null;
-    var scaled = {};
-    Object.keys(row).forEach(function(k) { scaled[k] = (typeof row[k] === 'number') ? row[k]*ratio : row[k]; });
-    return scaled;
-  }
+  // (scaleRowForForecast_ - вынесена на module scope, см. выше по файлу.)
   var salForecast = null;
   if (!myPagePeriod && sal && paceRatio > 1.001) {
     var effectiveRatio = fakt > 0 ? (planForecast / fakt) : paceRatio;
@@ -1814,26 +1890,18 @@ function renderMyPageManager(el, current, selectorHtml, d) {
   // непроверяемой, "откуда-то взялась". Комиссия считается НЕ от общего прогнозного оборота
   // (тот идёт только в ступень оклада), а от ownProfitBase (выручка своего парка минус
   // затраты) - плюс отдельный бонус с маржи найма, который в ручном счёте легко упустить).
-  function fRow_(label, val) {
-    return '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);padding:2px 0;gap:10px"><span>'+label+'</span><span style="white-space:nowrap">'+fr(val)+'</span></div>';
-  }
   var salForecastHtml = '';
   if (salForecast && Math.abs(salForecast.total_sal - sal.total_sal) > 100) {
-    var fBreakdown = fRow_('Оклад (по ступени оборота '+mln(salForecast.total)+')', salForecast.oklad);
+    var fBreakdown = pageForecastRow_('Оклад (по ступени оборота '+mln(salForecast.total)+')', salForecast.oklad);
     if (salForecast.newRules) {
-      fBreakdown += fRow_('Комиссия своего парка ('+(salForecast.rate*100).toString().replace('.',',')+'% × '+fr(salForecast.ownProfitBase)+')', salForecast.ownComm);
-      if (salForecast.hiredMargin || salForecast.hiredMarginUnqual) fBreakdown += fRow_('Бонус с маржи найма (8% × '+fr(salForecast.hiredMargin)+')', salForecast.hiredBonus);
+      fBreakdown += pageForecastRow_('Комиссия своего парка ('+(salForecast.rate*100).toString().replace('.',',')+'% × '+fr(salForecast.ownProfitBase)+')', salForecast.ownComm);
+      if (salForecast.hiredMargin || salForecast.hiredMarginUnqual) fBreakdown += pageForecastRow_('Бонус с маржи найма (8% × '+fr(salForecast.hiredMargin)+')', salForecast.hiredBonus);
     } else {
-      fBreakdown += fRow_('Комиссия своего парка ('+(salForecast.rate*100).toString().replace('.',',')+'% × '+fr(salForecast.ownRev)+')', salForecast.ownComm);
-      if (salForecast.hiredBonus) fBreakdown += fRow_('Бонус с маржи найма', salForecast.hiredBonus);
+      fBreakdown += pageForecastRow_('Комиссия своего парка ('+(salForecast.rate*100).toString().replace('.',',')+'% × '+fr(salForecast.ownRev)+')', salForecast.ownComm);
+      if (salForecast.hiredBonus) fBreakdown += pageForecastRow_('Бонус с маржи найма', salForecast.hiredBonus);
     }
-    if (salForecast.bonus15m) fBreakdown += fRow_('Премия за оборот &gt;15М', salForecast.bonus15m);
-    salForecastHtml = '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed rgba(255,255,255,.1)">'+
-      fBreakdown+
-      '<div style="display:flex;justify-content:space-between;padding-top:4px">'+
-      '<span style="font-size:12px;font-weight:600;color:var(--muted)">Итого по прогнозу (текущий темп)</span>'+
-      '<span style="font-size:14px;font-weight:700;color:'+COL.blue+'">'+fr(salForecast.total_sal)+'</span></div>'+
-    '</div>';
+    if (salForecast.bonus15m) fBreakdown += pageForecastRow_('Премия за оборот &gt;15М', salForecast.bonus15m);
+    salForecastHtml = pageForecastWrap_(fBreakdown, salForecast.total_sal);
   }
   // Расчёт зарплаты - "такой же длинный", прямо с вкладки "Зарплата" (Влад, 2026-08-12) - те
   // же компоненты calcMgr, в стиле строка-значение (как у остальных личных страниц), а не
@@ -1873,44 +1941,10 @@ function renderMyPageManager(el, current, selectorHtml, d) {
   var html = selectorHtml;
 
   // 5 задач на день от ИИ (2026-08-12, см. plans/2026-08-12-ai-daily-tasks-manager.md) - самое
-  // первое, что менеджер видит, открыв страницу утром. Только для текущего месяца - "задачи на
-  // сегодня" не имеют смысла для закрытого прошлого периода.
-  if (!myPagePeriod) {
-    var aiKey = aiTasksTodayKey_(current);
-    var aiEntry = aiTasksCache[aiKey];
-    if (!aiEntry && aiTasksLoadingKey !== aiKey) loadAiTasksIfNeeded_(current);
-    var aiBody;
-    if (!aiEntry) {
-      aiBody = '<div style="font-size:13px;color:var(--muted);padding:8px 0">Генерируется… обычно 5-15 сек.</div>';
-    } else if (aiEntry.error) {
-      aiBody = '<div style="font-size:13px;color:'+COL.red+';padding:8px 0">Не удалось сгенерировать: '+aiEntry.error+'</div>'+
-        '<button onclick="retryAiTasks_(\''+current.replace(/'/g,"\\'")+'\')" style="margin-top:6px;cursor:pointer;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:12px;color:var(--text)">Повторить</button>';
-    } else {
-      // Бейдж категории (2026-08-12) - "выручка"/"дебиторка"/"документы", помогает быстро
-      // понять баланс задач на день, не только читать текст каждой.
-      var catColor = { 'выручка': COL.green, 'дебиторка': COL.amber, 'документы': COL.blue };
-      var aiTasksHtml = (aiEntry.tasks||[]).map(function(t, i){
-        var catBadge = t.category ? ' <span style="font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:'+(catColor[t.category]||COL.blue)+';border:1px solid '+(catColor[t.category]||COL.blue)+';border-radius:4px;padding:1px 5px;vertical-align:middle">'+t.category+'</span>' : '';
-        return '<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
-          '<div style="font-size:13px;font-weight:700;color:'+COL.blue+';flex:none">'+(i+1)+'</div>'+
-          '<div><div style="font-size:13px;font-weight:600;color:var(--text)">'+t.title+catBadge+'</div>'+
-          (t.why ? '<div style="font-size:12px;color:var(--muted);margin-top:2px">'+t.why+'</div>' : '')+
-          '</div></div>';
-      }).join('');
-      aiBody = aiTasksHtml +
-        (aiEntry.plan_advice ? '<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07);font-size:12.5px;color:var(--text)"><b>Совет по плану:</b> '+aiEntry.plan_advice+'</div>' : '');
-    }
-    // Кнопка "Заново" - только на успешном результате (2026-08-12, Влад: "мы сделали много
-    // изменений... нужно всё обнулить, чтобы посмотреть заново по новым данным") - при ошибке
-    // кнопка "Повторить" уже есть внутри aiBody, дублировать не нужно.
-    var aiRegenBtn = (aiEntry && !aiEntry.error)
-      ? '<button onclick="retryAiTasks_(\''+current.replace(/'/g,"\\'")+'\')" title="Стереть сегодняшний кэш и сгенерировать заново" style="cursor:pointer;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:3px 9px;font-size:11px;color:var(--muted)">🔄 Заново</button>'
-      : '';
-    html += '<div class="card" style="margin-bottom:18px;padding:16px 18px">'+
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'+
-      '<div style="font-size:14px;font-weight:600">🤖 Задачи на сегодня (ИИ)</div>'+aiRegenBtn+
-      '</div>'+aiBody+'</div>';
-  }
+  // первое, что менеджер видит, открыв страницу утром. Общая функция для менеджера и логиста
+  // (2026-08-13, см. renderAiTasksBlockHtml_ выше по файлу) - сама возвращает '' для прошлого
+  // периода.
+  html += renderAiTasksBlockHtml_(current, 'manager');
 
   // Широкая шкала: факт + прогноз выполнения плана + таргет по рабочим/выходным дням.
   // Отдельный полноширинный блок (2026-08-12, третий заход - Влад отклонил встраивание в
@@ -2092,13 +2126,7 @@ function renderMyPageManager(el, current, selectorHtml, d) {
 // месяце (например у нового человека).
 function renderMyPageLogist(el, current, selectorHtml, d) {
   d = d || {};
-  var COL = { red:'#E24B4A', amber:'#EF9F27', green:'#1D9E75', blue:'#378ADD' };
-  function mln(n) { var x=Math.abs(n||0); var sg=(n||0)<0?'-':''; return x>=1000000 ? sg+(x/1000000).toFixed(1)+' млн ₽' : sg+Math.round(x).toLocaleString('ru-RU')+' ₽'; }
-  function fr(n) { return n ? Math.round(n).toLocaleString('ru-RU')+' ₽' : '—'; }
-  function block(title, bodyHtml) {
-    return '<div class="card" style="margin-bottom:14px;padding:16px 18px">'+
-      '<div style="font-size:14px;font-weight:600;margin-bottom:8px">'+title+'</div>'+bodyHtml+'</div>';
-  }
+  var COL = PAGE_COL, mln = pageMln_, fr = pageFr_, block = pageBlock_;
   function kpiCard(icon, label, value, sub, color) {
     return '<div class="card" style="padding:16px 18px;border-left:3px solid '+color+'">'+
       '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">'+icon+' '+label+'</div>'+
@@ -2116,6 +2144,40 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
   var useNewRules = isNewRulesPeriod((D.orders||{}).period);
   var lRow = getL(sur);
   var salary = calcLogist(sur, getL, useNewRules);
+
+  // "Маржа найма к премии >1М" (2026-08-13, Влад: "структурно каркас должен быть
+  // единообразным" - у логиста нет плана продаж, как у менеджера, уточнено с Владом - на месте
+  // полоски плана показываем прогресс к порогу премии 30 000 ₽ за маржу найма >1М, тот же
+  // порог, что в calcLogist). ВСЕГДА от ЛИЧНОЙ маржи логиста (lRow), не от переключателя
+  // "Общие сделки" ниже - зарплата не зависит от режима просмотра таблиц.
+  var qualMargin = lRow ? (lRow.hired_margin_qualified||0) : 0;
+  var unqualMargin = lRow ? (lRow.hired_margin_unqualified||0) : 0;
+  var marginForBonus = qualMargin + unqualMargin;
+  var MARGIN_BONUS_THRESHOLD = 1000000;
+  var marginPct = marginForBonus / MARGIN_BONUS_THRESHOLD * 100;
+  var paceRatio = calcPaceRatio_((D.orders||{}).period);
+  var marginForecast = marginForBonus * paceRatio;
+  var marginForecastPct = marginForecast / MARGIN_BONUS_THRESHOLD * 100;
+
+  // Рекомендация "сколько добирать в день" - без деления на будни/выходные (в отличие от
+  // менеджера) - для маржи найма нет обоснованной эмпирики такой сезонности, как у продаж.
+  var marginDayRateHtml = '';
+  if (isLiveMonthKey_((D.orders||{}).period)) {
+    var remainingMargin = MARGIN_BONUS_THRESHOLD - marginForBonus;
+    if (remainingMargin > 0) {
+      var nowD = new Date();
+      var daysInMonth = new Date(nowD.getFullYear(), nowD.getMonth()+1, 0).getDate();
+      var remDays = Math.max(0, daysInMonth - nowD.getDate());
+      if (remDays > 0) {
+        marginDayRateHtml = '<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07);font-size:12px;color:var(--muted)">'+
+          'Чтобы получить премию 30 000 ₽ за маржу &gt;1М, нужно добирать в среднем: <b style="color:var(--text)">'+mln(remainingMargin/remDays)+'</b> маржи в день'+
+          ' <span style="opacity:.7">(осталось '+remDays+' дней)</span>'+
+        '</div>';
+      }
+    } else {
+      marginDayRateHtml = '<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07);font-size:12px;color:'+COL.green+'">Премия за маржу найма &gt;1М уже обеспечена ✅</div>';
+    }
+  }
 
   // Переключатель "Свои продажи" / "Общие сделки" (Влад, 2026-08-10) - "Общие сделки" читает
   // общекорпоративные поля (by_hired_supplier/all_hired_deals), которые уже приходят и в
@@ -2142,7 +2204,53 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
   }, { no_waybill:0, not_posted:0, no_realiz:0, complete:0 });
   var funTotal = fun.no_waybill + fun.not_posted + fun.no_realiz + fun.complete;
 
+  // Расчёт зарплаты - та же формула, что на вкладке "Зарплата" (calcLogist). Стиль (два уровня
+  // + badge-проценты) - тот же, что у менеджера (2026-08-13, "структурно каркас должен быть
+  // единообразным"), "Итого на сегодня" + "Итого по прогнозу".
+  var salaryBody;
+  if (!salary) {
+    salaryBody = '<div style="font-size:13px;color:var(--muted)">Нет данных для расчёта за этот период.</div>';
+  } else {
+    var lsrows = salRow('Оклад', salary.oklad);
+    lsrows += salRow('Бонус за свои заказы', salary.flatBonus, pctBadge_('500 ₽/зак.', COL.blue)+' × '+salary.ownOrders);
+    var lhParts = [];
+    if (salary.qualMargin) lhParts.push(fr(salary.qualMargin)+' маржа ≥23% '+pctBadge_('8%', COL.green));
+    if (salary.unqualMargin) lhParts.push(fr(salary.unqualMargin)+' маржа &lt;23% '+mutedBadge_('0%'));
+    lsrows += salRow('Бонус с маржи найма', salary.marginBonus, lhParts.join('&nbsp;&nbsp;/&nbsp;&nbsp;'));
+    if (salary.bonus1m) lsrows += salRow('Премия за маржу найма &gt;1М', salary.bonus1m);
+
+    // "Итого по прогнозу" - масштабируем строку логиста тем же paceRatio (нет отдельной
+    // "живой vs по вчера" развилки, как у менеджера - у логиста нет amount_thru_yesterday).
+    var logForecastHtml = '';
+    if (!myPagePeriod && paceRatio > 1.001) {
+      var lForecastRow = scaleRowForForecast_(getL(sur), paceRatio);
+      function getLForecast_(s) { return s.toLowerCase()===sur.toLowerCase() ? lForecastRow : getL(s); }
+      var salaryForecast = calcLogist(sur, getLForecast_, useNewRules);
+      if (salaryForecast && Math.abs(salaryForecast.total - salary.total) > 100) {
+        // Оклад - ПЕРВАЯ строка (была пропущена изначально - разбивка не сходилась с итогом на
+        // 20 000 ₽, ровно на сумму оклада: он не входит в scaleRowForForecast_, так как это
+        // фиксированная константа внутри calcLogist, а не поле строки логиста).
+        var lfBreakdown = pageForecastRow_('Оклад', salaryForecast.oklad);
+        lfBreakdown += pageForecastRow_('Бонус за свои заказы (500 ₽ × '+Math.round(salaryForecast.ownOrders)+')', salaryForecast.flatBonus);
+        lfBreakdown += pageForecastRow_('Бонус с маржи найма (8% × '+fr(salaryForecast.qualMargin)+')', salaryForecast.marginBonus);
+        if (salaryForecast.bonus1m) lfBreakdown += pageForecastRow_('Премия за маржу найма &gt;1М', salaryForecast.bonus1m);
+        logForecastHtml = pageForecastWrap_(lfBreakdown, salaryForecast.total);
+      }
+    }
+    salaryBody = lsrows + salTotalRow(salary.total) + logForecastHtml;
+  }
+
   var html = selectorHtml;
+
+  // 🤖 Задачи на сегодня (ИИ) - первым (2026-08-13, тот же каркас, что у менеджера).
+  html += renderAiTasksBlockHtml_(current, 'logist');
+
+  // "Полоска плана" логиста - прогресс к премии >1М маржи найма, тот же стиль/цвета, что
+  // "Выполнение плана продаж" у менеджера (planProgressBar - общая функция).
+  html += planProgressBar('Маржа найма к премии &gt;1М', marginPct, marginForecastPct, marginForBonus, marginForecast, MARGIN_BONUS_THRESHOLD, marginDayRateHtml);
+
+  // Расчёт зарплаты - сразу после полоски (тот же порядок, что у менеджера).
+  html += block('💰 Расчёт зарплаты', salaryBody);
 
   // Переключатель "Свои продажи" / "Общие сделки"
   html += '<div class="tab-bar">'+
@@ -2177,33 +2285,9 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
   })();
   html += '</div>';
 
-  // Расчёт зарплаты - та же формула, что на вкладке "Зарплата" (calcLogist), сразу после
-  // KPI-блоков (Влад, 2026-08-12: "расчёт зарплаты сразу после 4 блоков с информацией").
-  var salaryBody;
-  if (!salary) {
-    salaryBody = '<div style="font-size:13px;color:var(--muted)">Нет данных для расчёта за этот период.</div>';
-  } else {
-    salaryBody = ''+
-      '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
-      '<span style="font-size:13px;color:var(--muted)">Оклад</span>'+
-      '<span style="font-size:13px;font-weight:600">'+fr(salary.oklad)+'</span></div>'+
-      '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
-      '<span style="font-size:13px;color:var(--muted)">Бонус за свои заказы (500₽ × '+salary.ownOrders+')</span>'+
-      '<span style="font-size:13px;font-weight:600">'+fr(salary.flatBonus)+'</span></div>'+
-      '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
-      '<span style="font-size:13px;color:var(--muted)">Бонус с маржи найма (8% × '+fr(salary.qualMargin)+(salary.unqualMargin ? ', ещё '+fr(salary.unqualMargin)+' маржи &lt;23% — не квалифицируется' : '')+')</span>'+
-      '<span style="font-size:13px;font-weight:600">'+fr(salary.marginBonus)+'</span></div>'+
-      (salary.bonus1m ? '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
-        '<span style="font-size:13px;color:var(--muted)">Премия за маржу найма &gt;1М</span>'+
-        '<span style="font-size:13px;font-weight:600">'+fr(salary.bonus1m)+'</span></div>' : '')+
-      '<div style="display:flex;justify-content:space-between;padding-top:10px;margin-top:4px;border-top:1px solid var(--border)">'+
-      '<span style="font-size:14px;font-weight:700">Итого</span>'+
-      '<span style="font-size:16px;font-weight:700;color:'+COL.green+'">'+fr(salary.total)+'</span></div>';
-  }
-  html += block('💰 Расчёт зарплаты', salaryBody);
-
-  // 1. Маржа по поставщикам - те же колонки и шкала, что на "Заказы → Наёмная техника",
-  // отфильтровано только на сделки этого логиста.
+  // Единый блок с вкладками (2026-08-13, Влад: "все информационные блоки-таблицы объединить в
+  // одну с вкладками") - было 3 отдельных блока (Маржа по поставщикам / Воронка документов /
+  // Сделки), теперь одна карточка с tab-bar, тот же формат, что у менеджера.
   var supRows = !suppliers.length
     ? '<tr><td colspan="8" class="muted" style="padding:14px">Нет сделок по найму в этом месяце</td></tr>'
     : suppliers.map(function(s) {
@@ -2234,15 +2318,7 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
       '<td class="num" style="font-weight:600">'+totalMarginPct+'%</td>'+
       '<td class="num" style="font-weight:600">'+totalOrders+'</td><td></td>'
     : '';
-  html += block('🏭 Маржа по поставщикам'+scopeSuffix,
-    '<div style="overflow-x:auto"><table class="tbl">'+
-      '<thead><tr><th>Поставщик</th><th class="num">Выручка</th><th class="num" title="Что заплатили перевозчику">Стоимость найма</th><th class="num" title="Вознаграждения, спецразрешение и т.п. из 1С">Затраты</th><th class="num">Маржа</th><th class="num">%</th><th class="num">Зак.</th><th style="min-width:130px">Шкала маржи</th></tr></thead>'+
-      '<tbody>'+supRows+'</tbody>'+
-      (supFoot ? '<tfoot><tr>'+supFoot+'</tr></tfoot>' : '')+
-    '</table></div>');
 
-  // 2. Воронка документов по поставщику - та же классификация, что и общая воронка компании
-  // (нет путёвки / не проведён / нет реализации / готово), только по его найму.
   var funRows = !suppliers.length
     ? '<tr><td colspan="6" class="muted" style="padding:14px">Нет данных</td></tr>'
     : suppliers.map(function(s) {
@@ -2257,15 +2333,7 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
           '<td class="num muted">'+t+' ('+pct+'%)</td>'+
         '</tr>';
       }).join('');
-  html += block('📋 Воронка документов по поставщикам'+scopeSuffix,
-    '<div style="overflow-x:auto"><table class="tbl">'+
-      '<thead><tr><th>Поставщик</th><th class="num">Нет путёвки</th><th class="num">Не проведён</th><th class="num">Нет реализации</th><th class="num">Готово</th><th class="num">Всего</th></tr></thead>'+
-      '<tbody>'+funRows+'</tbody>'+
-    '</table></div>');
 
-  // 3. Мои сделки / Общие сделки - последние 40 (компания - до 500 приходит с бэкенда,
-  // личные - до 300). В общем режиме добавляем колонку "Логист" - записей много разных людей,
-  // без неё непонятно, чья сделка.
   var dealsCap = isCompany ? 500 : 300;
   var dealsShown = deals.slice(0, 40);
   var dealRows = !dealsShown.length
@@ -2281,11 +2349,34 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
           '<td class="num green">'+fmtK2(dl.margin||0)+'</td>'+
         '</tr>';
       }).join('');
-  html += block((isCompany ? '🤝 Общие сделки' : '🤝 Мои сделки')+(deals.length>dealsShown.length ? ' <span style="font-size:11px;color:var(--muted);font-weight:400">(показаны последние '+dealsShown.length+' из '+deals.length+(deals.length>=dealsCap ? '+' : '')+')</span>' : ''),
-    '<div style="overflow-x:auto"><table class="tbl">'+
+  var dealsTitle = (isCompany ? 'Общие сделки' : 'Сделки')+(deals.length>dealsShown.length ? ' <span style="font-size:11px;color:var(--muted);font-weight:400">(показаны последние '+dealsShown.length+' из '+deals.length+(deals.length>=dealsCap ? '+' : '')+')</span>' : '');
+
+  html += '<div class="card" style="margin-bottom:16px">';
+  html += '<div class="tab-bar">'+
+    '<button class="tab-btn'+(myPageLogTab==='suppliers'?' active':'')+'" onclick="setMyPageLogTab(\'suppliers\')">🏭 Маржа по поставщикам</button>'+
+    '<button class="tab-btn'+(myPageLogTab==='docs'?' active':'')+'" onclick="setMyPageLogTab(\'docs\')">📋 Воронка документов</button>'+
+    '<button class="tab-btn'+(myPageLogTab==='deals'?' active':'')+'" onclick="setMyPageLogTab(\'deals\')">🤝 '+(isCompany?'Общие сделки':'Сделки')+'</button>'+
+  '</div>';
+
+  if (myPageLogTab === 'suppliers') {
+    html += '<div style="overflow-x:auto"><table class="tbl">'+
+      '<thead><tr><th>Поставщик</th><th class="num">Выручка</th><th class="num" title="Что заплатили перевозчику">Стоимость найма</th><th class="num" title="Вознаграждения, спецразрешение и т.п. из 1С">Затраты</th><th class="num">Маржа</th><th class="num">%</th><th class="num">Зак.</th><th style="min-width:130px">Шкала маржи</th></tr></thead>'+
+      '<tbody>'+supRows+'</tbody>'+
+      (supFoot ? '<tfoot><tr>'+supFoot+'</tr></tfoot>' : '')+
+    '</table></div>';
+  } else if (myPageLogTab === 'docs') {
+    html += '<div style="overflow-x:auto"><table class="tbl">'+
+      '<thead><tr><th>Поставщик</th><th class="num">Нет путёвки</th><th class="num">Не проведён</th><th class="num">Нет реализации</th><th class="num">Готово</th><th class="num">Всего</th></tr></thead>'+
+      '<tbody>'+funRows+'</tbody>'+
+    '</table></div>';
+  } else {
+    html += '<div style="font-size:11px;color:var(--muted);margin-bottom:8px">'+dealsTitle+'</div>'+
+      '<div style="overflow-x:auto"><table class="tbl">'+
       '<thead><tr><th>Дата</th><th>Заказчик</th><th>Поставщик</th>'+(isCompany?'<th>Логист</th>':'')+'<th class="num">Сумма</th><th class="num">Стоимость найма</th><th class="num">Маржа</th></tr></thead>'+
       '<tbody>'+dealRows+'</tbody>'+
-    '</table></div>');
+    '</table></div>';
+  }
+  html += '</div>';
 
   el.innerHTML = html;
 }

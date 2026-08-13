@@ -2903,17 +2903,23 @@ function receiptsMonthRevenueMap_(ss) {
   try {
     const agg = getClientHistoryAggregate_();
     if (agg) {
+      // "c" (наличка) в дневном JSON появилась 2026-08-13 (Влад: "осталось наличку с января
+      // по май найти и подгрузить, можем подтянуть из мега-базы?") - если агрегат ещё не
+      // пересчитан (buildClientHistoryAggregate() не запускался заново), daily[dateStr].c
+      // просто undefined -> 0, без ошибок, старое поведение сохраняется до пересчёта.
       const histByMonth = {};
+      const histCashByMonth = {};
       Object.keys(agg).forEach(function(name) {
         const daily = agg[name].daily || {};
         Object.keys(daily).forEach(function(dateStr) {
           if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr) || dateStr > CLIENT_HISTORY_CUTOFF) return;
           const mk = dateStr.slice(0, 7);
           histByMonth[mk] = (histByMonth[mk] || 0) + (daily[dateStr].r || 0);
+          histCashByMonth[mk] = (histCashByMonth[mk] || 0) + (daily[dateStr].c || 0);
         });
       });
       Object.keys(histByMonth).forEach(function(mk) {
-        if (!(mk in map)) map[mk] = { revenue: histByMonth[mk], cash: 0 };
+        if (!(mk in map)) map[mk] = { revenue: histByMonth[mk], cash: histCashByMonth[mk] || 0 };
       });
     }
   } catch (histErr) {

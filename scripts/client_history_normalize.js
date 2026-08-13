@@ -118,6 +118,16 @@ function normalizeClientHistory() {
   const missing = required.filter(function(k) { return col[k] === undefined; });
   if (missing.length) throw new Error('В сыром листе нет колонок: ' + missing.join(', '));
 
+  // Наличные (2026-08-13, Влад: "осталось наличку с января по май найти и подгрузить, можем
+  // подтянуть из мега-базы?") - НЕ в required выше: не гарантировано, что в этой исторической
+  // выгрузке вообще есть такая колонка (в живом отчёте 1С она называется "Оплата нал" - см.
+  // full_script_final.js, aggregateOrdersRows). Если колонки нет - просто пишем 0 везде и
+  // явно логируем это, чтобы не потерять час на молчаливое "наличка почему-то всегда ноль".
+  const hasCashCol = col['Оплата нал'] !== undefined;
+  Logger.log(hasCashCol
+    ? 'Колонка "Оплата нал" найдена - наличка будет подтянута.'
+    : 'ВНИМАНИЕ: колонки "Оплата нал" в сыром листе НЕТ - наличка за этот период недоступна в исходнике, будет 0 у всех строк.');
+
   // 'БЕЗ ВОДИТЕЛЯ' - Влад, 2026-07-05: служебный статус в 1С, не реальный клиент (882 строки
   // в полной истории) - похоже на старый техпроцесс, сейчас таких клиентов нет.
   const ADMIN_VALUES = { 'РЕМОНТ': true, 'БЕЗ ВОДИТЕЛЯ': true, '': true };
@@ -131,7 +141,7 @@ function normalizeClientHistory() {
     // Свежий старт (первый запуск или сброс) - создаём/чистим лист, обнуляем прогресс
     if (clean) clean.clear();
     else clean = ss.insertSheet(CLEAN_SHEET_NAME);
-    const outHeaders = ['Номер', 'Заказчик', 'Менеджер по продажам', 'Менеджер по снабжению', 'Тип техники', 'Сумма', 'Прибыль', 'Начало'];
+    const outHeaders = ['Номер', 'Заказчик', 'Менеджер по продажам', 'Менеджер по снабжению', 'Тип техники', 'Сумма', 'Прибыль', 'Начало', 'Наличные'];
     clean.getRange(1, 1, 1, outHeaders.length).setValues([outHeaders]).setFontWeight('bold');
     clean.setFrozenRows(1);
     nextRow = 2;
@@ -162,6 +172,7 @@ function normalizeClientHistory() {
       const mgrSupply = String(row[col['Менеджер по снабжению']] || '').trim();
       const equipType = String(row[col['Тип техники']] || '').trim();
       const orderId = String(row[col['Номер']] || '').trim();
+      const cash = hasCashCol ? parseNum_(row[col['Оплата нал']]) : 0;
 
       if (!customer || ADMIN_VALUES[customer] || !dateStr) { counters.adminOrEmptyRows++; continue; }
 
@@ -182,12 +193,12 @@ function normalizeClientHistory() {
       if (!isTralDept) { counters.otherDeptRows++; continue; }
 
       if (dateStr > counters.maxDate) counters.maxDate = dateStr;
-      out.push([orderId, customer, mgrSales, mgrSupply, equipType, revenue, profit, dateStr]);
+      out.push([orderId, customer, mgrSales, mgrSupply, equipType, revenue, profit, dateStr, cash]);
     }
 
     if (out.length) {
       const writeRow = clean.getLastRow() + 1;
-      clean.getRange(writeRow, 1, out.length, 8).setValues(out);
+      clean.getRange(writeRow, 1, out.length, 9).setValues(out);
     }
 
     nextRow += numRows;
@@ -217,12 +228,15 @@ function normalizeClientHistory() {
 
   let uniqueClients = {};
   let totalRevenue = 0;
+  let totalCash = 0;
   if (writtenRows > 0) {
     const customers = clean.getRange(2, 2, writtenRows, 1).getValues();
     const revenues = clean.getRange(2, 6, writtenRows, 1).getValues();
+    const cashCol = clean.getRange(2, 9, writtenRows, 1).getValues();
     for (let i = 0; i < writtenRows; i++) {
       uniqueClients[customers[i][0]] = true;
       totalRevenue += revenues[i][0];
+      totalCash += cashCol[i][0] || 0;
     }
   }
 
@@ -233,6 +247,8 @@ function normalizeClientHistory() {
   Logger.log('Исключено (не отдел тралов/грузоперевозок): ' + counters.otherDeptRows);
   Logger.log('Исключено (служебные/пустые/без даты): ' + counters.adminOrEmptyRows);
   Logger.log('ИТОГО чистых строк: ' + writtenRows + ' | клиентов: ' + Object.keys(uniqueClients).length + ' | выручка: ' + Math.round(totalRevenue));
+  Logger.log('НАЛИЧНЫЕ (за весь период до ' + HISTORY_CUTOFF + '): ' + Math.round(totalCash) +
+    (hasCashCol ? '' : ' - колонки "Оплата нал" в исходнике не было, это ожидаемый ноль'));
   Logger.log('Последняя дата в чистых данных (должна быть <= ' + HISTORY_CUTOFF + '): ' + counters.maxDate);
   Logger.log('---');
   Logger.log('ДИАГНОСТИКА: строк с тегом "(НАШ)" НЕ в INTERNAL_CLIENTS, НЕ отфильтрованы: ' + counters.tagLeakRows + ', выручка ' + Math.round(counters.tagLeakRevenue));
@@ -277,8 +293,9 @@ function buildClientHistoryAggregate() {
   for (let batchStart = 2; batchStart <= lastRow; batchStart += AGG_READ_BATCH_SIZE) {
     const numRows = Math.min(AGG_READ_BATCH_SIZE, lastRow - batchStart + 1);
     // Колонки очищенного листа: Номер(1), Заказчик(2), Менеджер по продажам(3),
-    // Менеджер по снабжению(4), Тип техники(5), Сумма(6), Прибыль(7), Начало(8)
-    const batch = clean.getRange(batchStart, 2, numRows, 7).getValues(); // Заказчик..Начало
+    // Менеджер по снабжению(4), Тип техники(5), Сумма(6), Прибыль(7), Начало(8), Наличные(9)
+    // - последняя добавлена 2026-08-13, см. normalizeClientHistory().
+    const batch = clean.getRange(batchStart, 2, numRows, 8).getValues(); // Заказчик..Наличные
 
     for (let i = 0; i < batch.length; i++) {
       const row = batch[i];
@@ -288,21 +305,24 @@ function buildClientHistoryAggregate() {
       const revenue = parseNum_(row[4]);
       const profit  = parseNum_(row[5]);
       const dateStr = formatDate_(row[6]);
+      const cash    = parseNum_(row[7]);
       if (!dateStr) continue;
 
       if (!byCustomer[name]) {
-        byCustomer[name] = { orders: 0, revenue: 0, profit: 0, first: dateStr, last: dateStr, lastManager: mgrSales, daily: {} };
+        byCustomer[name] = { orders: 0, revenue: 0, profit: 0, cash: 0, first: dateStr, last: dateStr, lastManager: mgrSales, daily: {} };
       }
       const c = byCustomer[name];
       c.orders++;
       c.revenue += revenue;
       c.profit  += profit;
+      c.cash    += cash;
       if (dateStr < c.first) c.first = dateStr;
       if (dateStr >= c.last) { c.last = dateStr; c.lastManager = mgrSales; }
-      if (!c.daily[dateStr]) c.daily[dateStr] = { o: 0, r: 0, p: 0 };
+      if (!c.daily[dateStr]) c.daily[dateStr] = { o: 0, r: 0, p: 0, c: 0 };
       c.daily[dateStr].o++;
       c.daily[dateStr].r += revenue;
       c.daily[dateStr].p += profit;
+      c.daily[dateStr].c += cash;
     }
     Logger.log('Обработано строк: ' + Math.min(batchStart - 2 + numRows, lastRow - 1) + ' из ' + (lastRow - 1) + ' (' + Math.round((Date.now() - startTime) / 1000) + ' сек)');
   }
@@ -314,7 +334,9 @@ function buildClientHistoryAggregate() {
   if (agg) agg.clear();
   else agg = ss.insertSheet(AGGREGATE_SHEET_NAME);
 
-  const outHeaders = ['Заказчик', 'Заказов', 'Выручка', 'Прибыль', 'Первый_заказ', 'Последний_заказ', 'Менеджер', 'ПоДням'];
+  // "Наличные" - строго В КОНЕЦ (после "ПоДням"), не сдвигает индексы остальных полей,
+  // которые уже читает getClientHistoryAggregate_() в full_script_final.js.
+  const outHeaders = ['Заказчик', 'Заказов', 'Выручка', 'Прибыль', 'Первый_заказ', 'Последний_заказ', 'Менеджер', 'ПоДням', 'Наличные'];
   agg.getRange(1, 1, 1, outHeaders.length).setValues([outHeaders]).setFontWeight('bold');
   agg.setFrozenRows(1);
 
@@ -347,7 +369,7 @@ function buildClientHistoryAggregate() {
     const roundedDaily = {};
     Object.keys(c.daily).forEach(function(date) {
       const d = c.daily[date];
-      roundedDaily[date] = { o: d.o, r: Math.round(d.r), p: Math.round(d.p) };
+      roundedDaily[date] = { o: d.o, r: Math.round(d.r), p: Math.round(d.p), c: Math.round(d.c || 0) };
     });
     let json = JSON.stringify(roundedDaily);
     if (json.length > CELL_LIMIT_SAFE) {
@@ -355,12 +377,13 @@ function buildClientHistoryAggregate() {
       Object.keys(c.daily).forEach(function(date) {
         const wk = weekStartKey_(date);
         const d = c.daily[date];
-        if (!weekly[wk]) weekly[wk] = { o: 0, r: 0, p: 0 };
-        weekly[wk].o += d.o; weekly[wk].r += d.r; weekly[wk].p += d.p;
+        if (!weekly[wk]) weekly[wk] = { o: 0, r: 0, p: 0, c: 0 };
+        weekly[wk].o += d.o; weekly[wk].r += d.r; weekly[wk].p += d.p; weekly[wk].c += (d.c || 0);
       });
       Object.keys(weekly).forEach(function(wk) {
         weekly[wk].r = Math.round(weekly[wk].r);
         weekly[wk].p = Math.round(weekly[wk].p);
+        weekly[wk].c = Math.round(weekly[wk].c);
       });
       const weeklyJson = JSON.stringify(weekly);
       Logger.log('ВНИМАНИЕ: "' + name + '" - дневная разбивка (' + Object.keys(roundedDaily).length +
@@ -369,7 +392,7 @@ function buildClientHistoryAggregate() {
       json = weeklyJson;
       degradedCount++;
     }
-    return [name, c.orders, Math.round(c.revenue), Math.round(c.profit), c.first, c.last, c.lastManager, json];
+    return [name, c.orders, Math.round(c.revenue), Math.round(c.profit), c.first, c.last, c.lastManager, json, Math.round(c.cash || 0)];
   });
   Logger.log('Клиентов со свёрнутой (недельной вместо дневной) разбивкой: ' + degradedCount);
 

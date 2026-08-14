@@ -62,6 +62,19 @@ function parseNum_(val) {
   return isNaN(n) ? 0 : n;
 }
 
+// 0-based индекс колонки -> буква A1 (0->A, 25->Z, 26->AA...) - для логов, чтобы можно было
+// глазами свериться с реальным столбцом в Google Таблице (2026-08-13, из-за бага с
+// задвоенным заголовком "Наличные" - см. normalizeClientHistory()).
+function colLetter_(index) {
+  let n = index + 1, s = '';
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    s = String.fromCharCode(65 + rem) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
+}
+
 // Тот же формат, что ordFormatDate() в full_script_final.js - для согласованности между
 // историческим и живым листами дашборда.
 //
@@ -113,10 +126,21 @@ function normalizeClientHistory() {
 
   const headerRow = raw.getRange(1, 1, 1, lastCol).getValues()[0];
   const col = {};
+  const dupeHeaders_ = []; // для лога - если что-то задвоено, лучше сразу увидеть
   headerRow.forEach(function(h, i) {
     const key = String(h || '').trim();
-    if (key) col[key] = i;
+    if (!key) return;
+    // ПЕРВОЕ вхождение выигрывает, а не последнее (2026-08-13, реальный баг у Влада:
+    // в сыром листе оказалось ДВА столбца с названием "Наличные" - один настоящий
+    // (реалистичные суммы вроде 115 000), второй - какое-то другое поле, совпавшее по
+    // имени (значения ~= Сумма/1000, явно не деньги). Раньше col[key]=i без проверки
+    // молча брал ПОСЛЕДНИЙ дубль - в данном случае неправильный).
+    if (col[key] !== undefined) { dupeHeaders_.push(key + ' (столбец ' + colLetter_(i) + ', уже был в ' + colLetter_(col[key]) + ')'); return; }
+    col[key] = i;
   });
+  if (dupeHeaders_.length) {
+    Logger.log('ВНИМАНИЕ: повторяющиеся заголовки в сыром листе (взят ПЕРВЫЙ по счёту, не последний): ' + dupeHeaders_.join('; '));
+  }
 
   const required = ['Заказчик', 'Менеджер по продажам', 'Менеджер по снабжению', 'Тип техники', 'Сумма', 'Прибыль', 'Начало', 'Номер'];
   const missing = required.filter(function(k) { return col[k] === undefined; });
@@ -134,7 +158,7 @@ function normalizeClientHistory() {
   const cashColName_ = CASH_COLUMN_ALIASES_.filter(function(k) { return col[k] !== undefined; })[0] || null;
   const hasCashCol = !!cashColName_;
   Logger.log(hasCashCol
-    ? 'Колонка "' + cashColName_ + '" найдена - наличка будет подтянута.'
+    ? 'Колонка "' + cashColName_ + '" найдена в столбце ' + colLetter_(col[cashColName_]) + ' - наличка будет подтянута.'
     : 'ВНИМАНИЕ: ни одной из колонок (' + CASH_COLUMN_ALIASES_.join(', ') + ') в сыром листе нет - наличка за этот период недоступна в исходнике, будет 0 у всех строк.');
 
   // 'БЕЗ ВОДИТЕЛЯ' - Влад, 2026-07-05: служебный статус в 1С, не реальный клиент (882 строки

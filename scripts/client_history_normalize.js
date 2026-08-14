@@ -419,6 +419,79 @@ function diagnoseCashExclusions2026() {
   });
 }
 
+// Диагностика (2026-08-14, Влад сверил с БДР финансистов - "Операционный бюджет тралного
+// отдела": январь ДОХОДЫ 19 373 780, февраль 26 277 686, март 39 287 408, апрель 49 278 163,
+// май 45 503 067 - наша "Коммерческая выручка" на дашборде за эти месяцы систематически
+// НИЖЕ БДР на 3-9 млн ₽/месяц, растущий разрыв, а фикс 5 сотрудников дал всего +468К на все
+// 5 месяцев - явно не вся причина). Показывает ПО КАЖДОМУ МЕСЯЦУ отдельно (не общей суммой,
+// как diagnoseCashExclusions2026): включённая выручка (для прямой сверки со строками БДР) +
+// список КОНКРЕТНЫХ клиентов в "внутренние" (подозрение - INTERNAL_CLIENTS слишком широкий,
+// например 'БАЗА' - короткое слово, может случайно резать реального клиента по подстроке).
+function diagnoseRevenueVsBDR2026() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const raw = ss.getSheetByName(RAW_SHEET_NAME);
+  if (!raw) throw new Error('Лист "' + RAW_SHEET_NAME + '" не найден');
+
+  const lastRow = raw.getLastRow();
+  const lastCol = raw.getLastColumn();
+  const headerRow = raw.getRange(1, 1, 1, lastCol).getValues()[0];
+  const col = {};
+  headerRow.forEach(function(h, i) {
+    const key = String(h || '').trim();
+    if (key && col[key] === undefined) col[key] = i;
+  });
+  const ADMIN_VALUES = { 'РЕМОНТ': true, 'БЕЗ ВОДИТЕЛЯ': true, '': true };
+  const startRow = findRawStartRowForYear_(raw, col, HISTORY_SCAN_MIN_DATE);
+  const numRows = lastRow - startRow + 1;
+  const batch = raw.getRange(startRow, 1, numRows, lastCol).getValues();
+
+  // Помесячно (2026-01..2026-05) - выручка included + разбивка исключений.
+  const months = ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05'];
+  const byMonth = {};
+  months.forEach(function(m) { byMonth[m] = { included: 0, internal: 0, otherDept: 0, adminEmpty: 0 }; });
+  // Кто именно попал во "внутренние" - суммарно по клиенту за весь период (не по месяцу,
+  // чтобы список был компактным и его было легко глазами оценить целиком).
+  const internalByCustomer = {};
+
+  for (let i = 0; i < batch.length; i++) {
+    const row = batch[i];
+    const customer = String(row[col['Заказчик']] || '').trim();
+    const dateStr = formatDate_(row[col['Начало']]);
+    const revenue = parseNum_(row[col['Сумма']]);
+    const mgrSales = String(row[col['Менеджер по продажам']] || '').trim();
+    const mgrSupply = String(row[col['Менеджер по снабжению']] || '').trim();
+    const mk = dateStr ? dateStr.slice(0, 7) : '';
+
+    if (!customer || ADMIN_VALUES[customer] || !dateStr) { if (byMonth[mk]) byMonth[mk].adminEmpty += revenue; continue; }
+    if (dateStr > HISTORY_CUTOFF) continue; // после мая - не в нашем разборе (2026-06+)
+    if (!byMonth[mk]) continue; // защита - если вдруг дата за пределами янв-май
+    if (inList_(customer, INTERNAL_CLIENTS)) {
+      byMonth[mk].internal += revenue;
+      if (!internalByCustomer[customer]) internalByCustomer[customer] = { count: 0, revenue: 0 };
+      internalByCustomer[customer].count++;
+      internalByCustomer[customer].revenue += revenue;
+      continue;
+    }
+    if (!(inList_(mgrSales, TRAL_MANAGERS) || inList_(mgrSupply, TRAL_LOGISTS))) { byMonth[mk].otherDept += revenue; continue; }
+    byMonth[mk].included += revenue;
+  }
+
+  Logger.log('=== ВЫРУЧКА ПО МЕСЯЦАМ (сверка с БДР - "ДОХОДЫ" построчно) ===');
+  months.forEach(function(m) {
+    const b = byMonth[m];
+    Logger.log(m + ': включено=' + Math.round(b.included) + ' | внутренние=' + Math.round(b.internal) +
+      ' | не-тралы=' + Math.round(b.otherDept) + ' | пусто/служебное=' + Math.round(b.adminEmpty));
+  });
+
+  Logger.log('=== КТО ПОПАЛ ВО "ВНУТРЕННИЕ" (весь период янв-май, отсортировано по сумме) ===');
+  const internalList = Object.keys(internalByCustomer).map(function(name) {
+    return { name: name, count: internalByCustomer[name].count, revenue: internalByCustomer[name].revenue };
+  }).sort(function(a, b) { return b.revenue - a.revenue; });
+  internalList.forEach(function(c) {
+    Logger.log('"' + c.name + '" - ' + c.count + ' строк, выручка ' + Math.round(c.revenue));
+  });
+}
+
 // Защита от "Out of memory error" в середине normalizeClientHistory() (2026-08-13, реальный
 // случай у Влада) - каждый пакет сначала ЗАПИСЫВАЕТСЯ в лист, и только ПОСЛЕ этого прогресс
 // сохраняется в PropertiesService. Если сбой произошёл ровно между этими двумя шагами, при

@@ -4308,11 +4308,31 @@ function renderReceiptsChart() {
   var barLabelsPlugin = {
     id: 'receiptsBarLabels',
     afterDatasetsDraw: function(chart) {
-      if (!showLabels) return;
       var chCtx = chart.ctx;
       chCtx.save();
+      // 💰 прямо ВНУТРИ столбика "Поступления" (Влад, 2026-08-14: "хочу видеть смайлик, чтобы
+      // было понятно, что это поступления, прям внутри полоски столбика") - рисуется на
+      // безналичном (нижнем/основном) сегменте стека, по вертикальному центру САМОГО СЕГМЕНТА,
+      // не всего столбика - если сегмент слишком тонкий (короткий месяц/день), эмодзи не
+      // влезет и просто не рисуется, лучше пусто, чем вылезающий за пределы символ.
+      chart.data.datasets.forEach(function(ds, dsIndex) {
+        if (ds.stack !== 'receipts' || ds.showLabelAlways) return; // только безнал (нижний сегмент)
+        var meta = chart.getDatasetMeta(dsIndex);
+        if (meta.hidden) return;
+        meta.data.forEach(function(bar) {
+          var segHeight = Math.abs((bar.base != null ? bar.base : bar.y) - bar.y);
+          if (segHeight < 18) return; // слишком тонкий сегмент - эмодзи бы вылезал
+          chCtx.font = '11px sans-serif';
+          chCtx.textAlign = 'center';
+          chCtx.textBaseline = 'middle';
+          chCtx.fillText('💰', bar.x, (bar.y + (bar.base != null ? bar.base : bar.y)) / 2);
+        });
+      });
+
+      if (!showLabels) { chCtx.restore(); return; }
       chCtx.font = '600 10px -apple-system,BlinkMacSystemFont,sans-serif';
       chCtx.textAlign = 'center';
+      chCtx.textBaseline = 'alphabetic';
       chart.data.datasets.forEach(function(ds, dsIndex) {
         var meta = chart.getDatasetMeta(dsIndex);
         if (meta.hidden) return;

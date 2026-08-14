@@ -42,7 +42,10 @@ const HISTORY_SCAN_MIN_DATE = '2026-01-01';
 
 const INTERNAL_CLIENTS = [
   'ТЕХНО ПАРК', 'ОТДЕЛ БУРОВЫХ РАБОТ', 'КРАНМАСТЕР',
-  'МЕГАКРАН', 'БАЗА ДМД', 'БУЛЬДОГ ООО', 'БАЗА',
+  'МЕГАКРАН', 'БАЗА ДМД', 'БУЛЬДОГ ООО',
+  // 'БАЗА' убрано 2026-08-14 (Влад: "Автобаза 2020 это клиент, остальные внутренние") -
+  // короткое слово случайно резало реального клиента "АВТОБАЗА 2020 ООО" по совпадению
+  // подстроки. "БАЗА ДМД" (выше) - точное совпадение, настоящий внутренний КА, остаётся.
   'УМИАТ ЯРД', // Влад, 2026-07-05: решено исключить - см. ту же правку в full_script_final.js
   'ОТДЕЛ ЭКСКАВАТОРОВ ДМД', 'ОТДЕЛ КРАНОВ ДМД', 'ТД ЯРД' // Влад, 2026-07-06: старые внутренние КА, сейчас это ТЕХНО ПАРК (НАШ)
 ];
@@ -490,6 +493,101 @@ function diagnoseRevenueVsBDR2026() {
   internalList.forEach(function(c) {
     Logger.log('"' + c.name + '" - ' + c.count + ' строк, выручка ' + Math.round(c.revenue));
   });
+}
+
+const PROP_VERIFY_NEXT_ROW = 'verifyDates_nextRow';
+const PROP_VERIFY_STATE = 'verifyDates_state';
+const VERIFY_BATCH_SIZE = 20000; // лёгкий скан (2 колонки, не 46) - можно крупнее пакет
+
+// Влад, 2026-08-14: даже сложив ВСЕ 4 категории (включено+внутренние+не-тралы+пусто) за
+// январь получилось 17.16М, а в БДР январь = 19.37М - 2.2М пропадает ЕЩЁ ДО фильтрации по
+// менеджерам/внутренним. Гипотеза: findRawStartRowForYear_() бинарным поиском предполагает
+// СТРОГУЮ сортировку по дате - если где-то в файле порядок сбивается (например, поздние
+// корректировки дописаны в конец не по хронологии), часть январских строк может физически
+// лежать РАНЬШЕ строки 108857 и биноар-поиск их просто не увидит. Эта функция - ПОЛНЫЙ
+// проход по ВСЕМ 112 тыс. строк (не только предполагаемому диапазону 2026 года), читает
+// ТОЛЬКО 2 узкие колонки (Начало, Сумма) - легче полного 46-колоночного чтения, поэтому
+// пакет крупнее. Резюмируемая (та же защита от таймаута/OOM, что и normalizeClientHistory) -
+// если лог скажет "запусти ещё раз", просто нажми ▶ снова.
+function verifyDateSortingAndFullRevenue() {
+  const startTime = Date.now();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const raw = ss.getSheetByName(RAW_SHEET_NAME);
+  if (!raw) throw new Error('Лист "' + RAW_SHEET_NAME + '" не найден');
+  const lastRow = raw.getLastRow();
+  const lastCol = raw.getLastColumn();
+  const headerRow = raw.getRange(1, 1, 1, lastCol).getValues()[0];
+  const col = {};
+  headerRow.forEach(function(h, i) { const key = String(h || '').trim(); if (key && col[key] === undefined) col[key] = i; });
+  const dateColIdx = col['Начало'], sumColIdx = col['Сумма'];
+  if (dateColIdx === undefined || sumColIdx === undefined) throw new Error('Не найдена колонка "Начало" или "Сумма"');
+
+  const props = PropertiesService.getScriptProperties();
+  let nextRow = parseInt(props.getProperty(PROP_VERIFY_NEXT_ROW), 10);
+  let state;
+  if (!nextRow || nextRow < 2) {
+    nextRow = 2;
+    state = { byMonth: { '2026-01': 0, '2026-02': 0, '2026-03': 0, '2026-04': 0, '2026-05': 0 },
+      countByMonth: { '2026-01': 0, '2026-02': 0, '2026-03': 0, '2026-04': 0, '2026-05': 0 },
+      minRow: {}, maxRow: {}, outsideExpectedRange: 0, outsideExpectedRevenue: 0 };
+    Logger.log('Начинаем полный проход с начала (' + (lastRow - 1) + ' строк).');
+  } else {
+    state = JSON.parse(props.getProperty(PROP_VERIFY_STATE));
+    Logger.log('Продолжаем с прошлого запуска, строка ' + nextRow + ' из ' + lastRow);
+  }
+
+  const EXPECTED_MIN_ROW = 108857, EXPECTED_MAX_ROW = 112754; // диапазон, который сейчас использует normalizeClientHistory()
+
+  while (nextRow <= lastRow && (Date.now() - startTime) < TIME_BUDGET_MS) {
+    const numRows = Math.min(VERIFY_BATCH_SIZE, lastRow - nextRow + 1);
+    const batch = raw.getRange(nextRow, 1, numRows, lastCol).getValues();
+    for (let i = 0; i < batch.length; i++) {
+      const rowNum = nextRow + i;
+      const d = formatDate_(batch[i][dateColIdx]);
+      if (!d) continue;
+      const mk = d.slice(0, 7);
+      if (state.byMonth[mk] === undefined) continue; // не январь-май 2026 - не наш интерес здесь
+      const sum = parseNum_(batch[i][sumColIdx]);
+      state.byMonth[mk] += sum;
+      state.countByMonth[mk]++;
+      if (state.minRow[mk] === undefined || rowNum < state.minRow[mk]) state.minRow[mk] = rowNum;
+      if (state.maxRow[mk] === undefined || rowNum > state.maxRow[mk]) state.maxRow[mk] = rowNum;
+      if (rowNum < EXPECTED_MIN_ROW || rowNum > EXPECTED_MAX_ROW) {
+        state.outsideExpectedRange++;
+        state.outsideExpectedRevenue += sum;
+      }
+    }
+    nextRow += numRows;
+    props.setProperty(PROP_VERIFY_NEXT_ROW, String(nextRow));
+    props.setProperty(PROP_VERIFY_STATE, JSON.stringify(state));
+    Logger.log('Обработано до строки ' + (nextRow - 1) + ' из ' + lastRow + ' (' + Math.round((Date.now() - startTime) / 1000) + ' сек)');
+  }
+
+  if (nextRow <= lastRow) {
+    Logger.log('Время вышло, прогресс сохранён - ЗАПУСТИ verifyDateSortingAndFullRevenue() ЕЩЁ РАЗ.');
+    return;
+  }
+
+  Logger.log('=== ГОТОВО - полная (без binary search) сверка по всем ' + (lastRow - 1) + ' строкам ===');
+  Object.keys(state.byMonth).forEach(function(m) {
+    Logger.log(m + ': выручка=' + Math.round(state.byMonth[m]) + ' (' + state.countByMonth[m] + ' строк), ' +
+      'строки ' + (state.minRow[m] || '-') + '..' + (state.maxRow[m] || '-'));
+  });
+  Logger.log('Строк с датой янв-май 2026, но ВНЕ ожидаемого диапазона ' + EXPECTED_MIN_ROW + '-' + EXPECTED_MAX_ROW + ': ' +
+    state.outsideExpectedRange + ' строк, выручка ' + Math.round(state.outsideExpectedRevenue) +
+    (state.outsideExpectedRange > 0 ? ' - ВОТ ГДЕ ПРОПАВШИЕ ДЕНЬГИ, сортировка по дате не строгая!' : ' - сортировка подтверждена, дело не в этом.'));
+
+  props.deleteProperty(PROP_VERIFY_NEXT_ROW);
+  props.deleteProperty(PROP_VERIFY_STATE);
+}
+
+// Если нужно начать verifyDateSortingAndFullRevenue() заново (например, посреди прогона
+// поменялся файл) - запусти один раз перед повторным запуском.
+function resetVerifyDateSortingProgress() {
+  const props = PropertiesService.getScriptProperties();
+  props.deleteProperty(PROP_VERIFY_NEXT_ROW);
+  props.deleteProperty(PROP_VERIFY_STATE);
+  Logger.log('Прогресс сброшен.');
 }
 
 // Защита от "Out of memory error" в середине normalizeClientHistory() (2026-08-13, реальный

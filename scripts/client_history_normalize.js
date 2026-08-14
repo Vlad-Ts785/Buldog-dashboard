@@ -32,6 +32,14 @@ const CLEAN_SHEET_NAME = 'Нормализованные_история_зака
 // исключительно из своих живых листов ("Заказы_данные"/"Заказы_YYYY-MM"), не отсюда.
 const HISTORY_CUTOFF = '2026-05-31';
 
+// Влад, 2026-08-14: "мне ведь пока нужны только данные за 26 год" - незачем читать и
+// обрабатывать 2020-2025 (основная масса из 112 тыс. строк), если конечная цель - только
+// наличка за январь-май 2026 для сравнения с "Поступлениями". Сырой лист отсортирован по
+// дате по возрастанию (проверено визуально) - findRawStartRowForYear_() ниже находит первую
+// строку с этой датой ОДНИМ лёгким чтением единственной колонки "Начало" (не всех 46) и
+// свежий старт normalizeClientHistory() начинается сразу оттуда, а не с строки 2.
+const HISTORY_SCAN_MIN_DATE = '2026-01-01';
+
 const INTERNAL_CLIENTS = [
   'ТЕХНО ПАРК', 'ОТДЕЛ БУРОВЫХ РАБОТ', 'КРАНМАСТЕР',
   'МЕГАКРАН', 'БАЗА ДМД', 'БУЛЬДОГ ООО', 'БАЗА',
@@ -114,6 +122,27 @@ const TIME_BUDGET_MS = 4.5 * 60 * 1000;
 const PROP_NEXT_ROW = 'histNorm_nextRow';
 const PROP_COUNTERS = 'histNorm_counters';
 
+// Лёгкое сканирование ОДНОЙ колонки ("Начало") целиком - на порядок дешевле полного скана
+// (46 колонок), укладывается в одно выполнение без риска OOM даже на 112 тыс. строк. Ищет
+// первую строку, где дата >= minDate (сырой лист отсортирован по возрастанию даты - если
+// когда-нибудь окажется не так, просто вернёт более раннюю строку, чем нужно - не потеря
+// данных, просто чуть больше лишнего прочитается).
+function findRawStartRowForYear_(raw, col, minDate) {
+  const lastRow = raw.getLastRow();
+  const dateColIdx = col['Начало'];
+  if (dateColIdx === undefined) return 2;
+  const dateValues = raw.getRange(2, dateColIdx + 1, lastRow - 1, 1).getValues();
+  for (let i = 0; i < dateValues.length; i++) {
+    const d = formatDate_(dateValues[i][0]);
+    if (d && d >= minDate) {
+      Logger.log('Первая строка с датой >= ' + minDate + ': строка ' + (i + 2) + ' (дата "' + d + '") - пропускаем ' + i + ' более ранних строк.');
+      return i + 2;
+    }
+  }
+  Logger.log('ВНИМАНИЕ: не найдено ни одной строки с датой >= ' + minDate + ' - обрабатываем весь лист с начала.');
+  return 2;
+}
+
 function normalizeClientHistory() {
   const startTime = Date.now();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -177,12 +206,15 @@ function normalizeClientHistory() {
     const outHeaders = ['Номер', 'Заказчик', 'Менеджер по продажам', 'Менеджер по снабжению', 'Тип техники', 'Сумма', 'Прибыль', 'Начало', 'Наличные'];
     clean.getRange(1, 1, 1, outHeaders.length).setValues([outHeaders]).setFontWeight('bold');
     clean.setFrozenRows(1);
-    nextRow = 2;
+    // Влад, 2026-08-14: "мне ведь пока нужны только данные за 26 год" - пропускаем 2020-2025
+    // одним лёгким сканированием, не читая все 46 колонок ради строк, которые всё равно
+    // выбросим по HISTORY_SCAN_MIN_DATE.
+    nextRow = findRawStartRowForYear_(raw, col, HISTORY_SCAN_MIN_DATE);
     counters = {
       totalRows: 0, cutoffExcludedRows: 0, internalRows: 0, internalRevenue: 0,
       otherDeptRows: 0, adminOrEmptyRows: 0, tagLeakRows: 0, tagLeakRevenue: 0, maxDate: ''
     };
-    Logger.log('Начинаем с первой строки (' + (lastRow - 1) + ' строк данных всего)');
+    Logger.log('Начинаем со строки ' + nextRow + ' (' + (lastRow - nextRow + 1) + ' строк подлежит обработке из ' + (lastRow - 1) + ' всего в сыром листе)');
   } else {
     counters = JSON.parse(props.getProperty(PROP_COUNTERS));
     Logger.log('Продолжаем с прошлого запуска: уже обработано ' + counters.totalRows + ' из ' + (lastRow - 1) + ' строк');
@@ -274,7 +306,7 @@ function normalizeClientHistory() {
   }
 
   Logger.log('ГОТОВО.');
-  Logger.log('Всего строк в сыром листе: ' + counters.totalRows);
+  Logger.log('Обработано строк (начиная с ' + HISTORY_SCAN_MIN_DATE + '): ' + counters.totalRows);
   Logger.log('Исключено (позже ' + HISTORY_CUTOFF + ' - приоритет живых данных дашборда за июнь+): ' + counters.cutoffExcludedRows);
   Logger.log('Исключено (внутренние компании из INTERNAL_CLIENTS): ' + counters.internalRows + ', выручка ' + Math.round(counters.internalRevenue));
   Logger.log('Исключено (не отдел тралов/грузоперевозок): ' + counters.otherDeptRows);

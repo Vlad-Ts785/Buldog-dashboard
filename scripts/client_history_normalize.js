@@ -122,25 +122,27 @@ const TIME_BUDGET_MS = 4.5 * 60 * 1000;
 const PROP_NEXT_ROW = 'histNorm_nextRow';
 const PROP_COUNTERS = 'histNorm_counters';
 
-// Лёгкое сканирование ОДНОЙ колонки ("Начало") целиком - на порядок дешевле полного скана
-// (46 колонок), укладывается в одно выполнение без риска OOM даже на 112 тыс. строк. Ищет
-// первую строку, где дата >= minDate (сырой лист отсортирован по возрастанию даты - если
-// когда-нибудь окажется не так, просто вернёт более раннюю строку, чем нужно - не потеря
-// данных, просто чуть больше лишнего прочитается).
+// Бинарный поиск по колонке "Начало" - сырой лист отсортирован по дате по возрастанию.
+// ПЕРЕДЕЛАНО 2026-08-14: первая версия читала ВСЮ колонку одним getRange().getValues() на
+// 112 тыс. строк - у Влада упало по "Exceeded maximum execution time" (~6 минут) ДО начала
+// основного цикла, где нет защиты по времени вообще. Бинарный поиск читает ПО ОДНОЙ ячейке
+// за раз (~17 обращений вместо 112 тыс.) - на порядок быстрее и не рискует таймаутом.
 function findRawStartRowForYear_(raw, col, minDate) {
-  const lastRow = raw.getLastRow();
   const dateColIdx = col['Начало'];
   if (dateColIdx === undefined) return 2;
-  const dateValues = raw.getRange(2, dateColIdx + 1, lastRow - 1, 1).getValues();
-  for (let i = 0; i < dateValues.length; i++) {
-    const d = formatDate_(dateValues[i][0]);
-    if (d && d >= minDate) {
-      Logger.log('Первая строка с датой >= ' + minDate + ': строка ' + (i + 2) + ' (дата "' + d + '") - пропускаем ' + i + ' более ранних строк.');
-      return i + 2;
-    }
+  const lastRow = raw.getLastRow();
+  let lo = 2, hi = lastRow;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    const val = raw.getRange(mid, dateColIdx + 1, 1, 1).getValue();
+    const d = formatDate_(val);
+    // Пустая/нераспознанная дата в середине диапазона (редкие служебные строки) - считаем
+    // "раньше" искомой даты, чтобы поиск сдвигался вправо и не залипал - в худшем случае
+    // вернёт строку на несколько позиций раньше нужной, не потеря данных.
+    if (d && d >= minDate) hi = mid; else lo = mid + 1;
   }
-  Logger.log('ВНИМАНИЕ: не найдено ни одной строки с датой >= ' + minDate + ' - обрабатываем весь лист с начала.');
-  return 2;
+  Logger.log('Первая строка с датой >= ' + minDate + ': строка ' + lo + ' (бинарный поиск - сырой лист отсортирован по дате по возрастанию).');
+  return lo;
 }
 
 function normalizeClientHistory() {

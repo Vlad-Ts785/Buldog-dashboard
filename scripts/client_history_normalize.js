@@ -333,6 +333,83 @@ function resetClientHistoryProgress() {
   Logger.log('Прогресс сброшен - следующий запуск normalizeClientHistory() начнёт с начала.');
 }
 
+// Диагностика (2026-08-14, Влад отфильтровал в самой Таблице ненулевые "Наличные" - 3828
+// строк по всему листу, включая заметные суммы в диапазоне 2026 года, а normalizeClientHistory()
+// в тот же диапазон дал всего 2683 ₽ суммарно - разница слишком большая, чтобы поверить на
+// слово, нужно увидеть ПОЧЕМУ строки отсеиваются). Читает ТОЛЬКО диапазон 2026 года (тот же
+// findRawStartRowForYear_, что и normalizeClientHistory()), НИЧЕГО не пишет - только логирует
+// разбивку: сколько строк/наличности ушло в каждую причину исключения + примеры первых строк
+// каждой категории, чтобы можно было сверить с тем, что видно глазами в самой Таблице.
+function diagnoseCashExclusions2026() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const raw = ss.getSheetByName(RAW_SHEET_NAME);
+  if (!raw) throw new Error('Лист "' + RAW_SHEET_NAME + '" не найден');
+
+  const lastRow = raw.getLastRow();
+  const lastCol = raw.getLastColumn();
+  const headerRow = raw.getRange(1, 1, 1, lastCol).getValues()[0];
+  const col = {};
+  headerRow.forEach(function(h, i) {
+    const key = String(h || '').trim();
+    if (key && col[key] === undefined) col[key] = i;
+  });
+  const cashColName_ = ['Оплата нал', 'Наличные'].filter(function(k) { return col[k] !== undefined; })[0];
+  if (!cashColName_) { Logger.log('Колонка налички не найдена вообще - нечего диагностировать.'); return; }
+  Logger.log('Колонка налички: "' + cashColName_ + '" в столбце ' + colLetter_(col[cashColName_]));
+
+  const ADMIN_VALUES = { 'РЕМОНТ': true, 'БЕЗ ВОДИТЕЛЯ': true, '': true };
+  const startRow = findRawStartRowForYear_(raw, col, HISTORY_SCAN_MIN_DATE);
+  const numRows = lastRow - startRow + 1;
+  Logger.log('Диапазон для диагностики: строки ' + startRow + '-' + lastRow + ' (' + numRows + ' строк).');
+
+  const batch = raw.getRange(startRow, 1, numRows, lastCol).getValues();
+  const buckets = {
+    included:   { count: 0, cash: 0, examples: [] },
+    adminEmpty: { count: 0, cash: 0, examples: [] },
+    afterCutoff:{ count: 0, cash: 0, examples: [] },
+    internal:   { count: 0, cash: 0, examples: [] },
+    otherDept:  { count: 0, cash: 0, examples: [] },
+  };
+  function pushExample_(bucket, rowNum, row, dateStr, cash) {
+    if (bucket.examples.length < 5) {
+      bucket.examples.push('стр.' + rowNum + ': дата=' + dateStr + ' менеджер_прод="' + String(row[col['Менеджер по продажам']] || '') +
+        '" менеджер_снаб="' + String(row[col['Менеджер по снабжению']] || '') + '" наличка=' + cash);
+    }
+  }
+
+  for (let i = 0; i < batch.length; i++) {
+    const row = batch[i];
+    const rowNum = startRow + i;
+    const customer = String(row[col['Заказчик']] || '').trim();
+    const dateStr = formatDate_(row[col['Начало']]);
+    const cash = parseNum_(row[col[cashColName_]]);
+    const mgrSales = String(row[col['Менеджер по продажам']] || '').trim();
+    const mgrSupply = String(row[col['Менеджер по снабжению']] || '').trim();
+
+    let bucket;
+    if (!customer || ADMIN_VALUES[customer] || !dateStr) bucket = buckets.adminEmpty;
+    else if (dateStr > HISTORY_CUTOFF) bucket = buckets.afterCutoff;
+    else if (inList_(customer, INTERNAL_CLIENTS)) bucket = buckets.internal;
+    else if (!(inList_(mgrSales, TRAL_MANAGERS) || inList_(mgrSupply, TRAL_LOGISTS))) bucket = buckets.otherDept;
+    else bucket = buckets.included;
+
+    bucket.count++;
+    bucket.cash += cash;
+    if (cash > 0) pushExample_(bucket, rowNum, row, dateStr, cash);
+  }
+
+  Logger.log('=== ИТОГО ПО ПРИЧИНАМ (строк / сумма налички) ===');
+  Logger.log('Включено в чистые данные: ' + buckets.included.count + ' строк, наличка ' + Math.round(buckets.included.cash));
+  Logger.log('Исключено (пусто/служебное): ' + buckets.adminEmpty.count + ' строк, наличка ' + Math.round(buckets.adminEmpty.cash));
+  Logger.log('Исключено (позже ' + HISTORY_CUTOFF + '): ' + buckets.afterCutoff.count + ' строк, наличка ' + Math.round(buckets.afterCutoff.cash));
+  Logger.log('Исключено (внутренние компании): ' + buckets.internal.count + ' строк, наличка ' + Math.round(buckets.internal.cash));
+  Logger.log('Исключено (не отдел тралов - менеджер не в списках): ' + buckets.otherDept.count + ' строк, наличка ' + Math.round(buckets.otherDept.cash));
+  Logger.log('=== ПРИМЕРЫ (первые 5 строк с ненулевой наличкой в каждой категории) ===');
+  Object.keys(buckets).forEach(function(name) {
+    if (buckets[name].examples.length) Logger.log(name + ':\n  ' + buckets[name].examples.join('\n  '));
+  });
+}
+
 // Защита от "Out of memory error" в середине normalizeClientHistory() (2026-08-13, реальный
 // случай у Влада) - каждый пакет сначала ЗАПИСЫВАЕТСЯ в лист, и только ПОСЛЕ этого прогресс
 // сохраняется в PropertiesService. Если сбой произошёл ровно между этими двумя шагами, при

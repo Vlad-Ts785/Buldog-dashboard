@@ -5258,10 +5258,19 @@ function importMayManualFix_2026_08_15() {
   var srcSS = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
   var srcSheet = srcSS.getSheetByName('МАЙ_ТЕСТ');
   if (!srcSheet) throw new Error('Лист "МАЙ_ТЕСТ" не найден в таблице "Копия ДАШБОРД 2.0"');
-  var data = srcSheet.getDataRange().getValues();
-  if (data.length < 2) throw new Error('Лист "МАЙ_ТЕСТ" пуст');
+  var rawData = srcSheet.getDataRange().getValues();
+  if (rawData.length < 2) throw new Error('Лист "МАЙ_ТЕСТ" пуст');
 
-  var headerRowIdx = findOrdersHeaderRowIndex_(data);
+  // Вставка в Google Таблицы иногда растягивает getDataRange() до лишних пустых колонок
+  // (форматирование/границы задели соседние ячейки) - "The data has 105 but the range has 46"
+  // при попытке слить с архивом (у него честные 46 колонок). Обрезаем по РЕАЛЬНОЙ ширине
+  // заголовков (последняя непустая ячейка строки заголовков), а не по сырой ширине листа.
+  var headerRowIdx = findOrdersHeaderRowIndex_(rawData);
+  var headerRowRaw = rawData[headerRowIdx];
+  var realWidth = headerRowRaw.length;
+  while (realWidth > 0 && String(headerRowRaw[realWidth - 1] || '').trim() === '') realWidth--;
+  var data = rawData.map(function(row) { return row.slice(0, realWidth); });
+
   var headerRows = data.slice(0, headerRowIdx + 1);
   var monthData = headerRows.concat(data.slice(headerRowIdx + 1));
 

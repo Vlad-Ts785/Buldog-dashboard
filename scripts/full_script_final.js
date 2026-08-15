@@ -5241,6 +5241,33 @@ function backfillMonthSummaries() {
   if (skipped.length) Logger.log('⚠️ Пропущены (нет данных/архива): ' + skipped.join(', '));
 }
 
+// РАЗОВАЯ ДИАГНОСТИКА (2026-08-15, удалить после использования). Влад: "Васин - это логист,
+// такой же как Сильчев/Кан/Махура, у которого есть внутренние перевозки. Его обороты - это
+// внутренние перевозки" - отверг мой более ранний вывод, что 100 800 ₽ Васина за август
+// коммерческие (не внутренние). Проверяем ФАКТИЧЕСКИЕ данные его строк за август - customer,
+// internal-флаг, оба менеджера - вместо предположений.
+function diagnoseVasinAugustRows_2026_08_15() {
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var norm = ss.getSheetByName(ORDERS_NORM_SHEET);
+  if (!norm || norm.getLastRow() < 2) { Logger.log('Нет данных в ' + ORDERS_NORM_SHEET); return; }
+  var rows = norm.getRange(2, 1, norm.getLastRow() - 1, 44).getValues();
+  var found = [];
+  rows.forEach(function(row) {
+    var mgrS = String(row[15] || '').trim();
+    var mgrL = String(row[16] || '').trim();
+    if (mgrS.indexOf('Васин') >= 0 || mgrL.indexOf('Васин') >= 0) {
+      found.push({
+        id: row[0], date_s: row[2], customer: row[9], internal: row[13],
+        mgr_s: mgrS, mgr_l: mgrL, equip: row[20], amount: row[30]
+      });
+    }
+  });
+  Logger.log('Строк с Васиным (продажи или снабжение) в живом ' + ORDERS_NORM_SHEET + ': ' + found.length);
+  found.forEach(function(f) {
+    Logger.log(JSON.stringify(f));
+  });
+}
+
 
 // ============================================================
 // МОДУЛЬ ЗАКАЗОВ (встроен из orders_module.js)

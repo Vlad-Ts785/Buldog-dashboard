@@ -5680,7 +5680,10 @@ function importHistoricalOrdersFromMegaBase() {
   const monthBuckets = splitOrdersRawByMonth(data);
   const monthsPresent = Object.keys(monthBuckets).sort();
   if (!monthsPresent.length) {
-    throw new Error('Не удалось распознать ни одного месяца в листе "ЯНВАРЬ_МАЙ_НОВЫЙ" - формат не совпадает с ожидаемым (нет колонок "Начало работ"/"Дата создания"?).');
+    // Печатаем РЕАЛЬНЫЕ заголовки листа в ошибку - у разных выгрузок 1С колонка с датой
+    // называется по-разному ("Начало"/"Начало работ"), нет смысла гадать вслепую.
+    var realHeaderRow = data[findOrdersHeaderRowIndex_(data)] || [];
+    throw new Error('Не удалось распознать ни одного месяца в листе "ЯНВАРЬ_МАЙ_НОВЫЙ" - нет колонок "Начало работ"/"Дата создания". Реальные заголовки листа: ' + JSON.stringify(realHeaderRow));
   }
 
   const headerRowIdx = findOrdersHeaderRowIndex_(data);

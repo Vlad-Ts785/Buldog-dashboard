@@ -5241,6 +5241,58 @@ function backfillMonthSummaries() {
   if (skipped.length) Logger.log('⚠️ Пропущены (нет данных/архива): ' + skipped.join(', '));
 }
 
+// РАЗОВАЯ ДИАГНОСТИКА №3 (2026-08-15, удалить после использования). Январь после фикса v187
+// сблизился с 1С почти вплотную (368к из 19.48М, 1.9%), но май осталось большое расхождение
+// (Влад: "Тралы" в 1С 45 562 520,7, у нас 41 250 116 - 4.3М, 9.5%), хотя diagnoseOrphanCommercial
+// Rows_2026_08_15 не находил orphan-строк для мая (там сумма была 0). Гипотеза - проблема не в
+// фильтрации по менеджеру, а в РАЗБИВКЕ ПО МЕСЯЦАМ (splitOrdersRawByMonth): строки без "Начало
+// работ" распределяются по "Дата создания" (фолбэк), строки вообще без обеих дат выпадают
+// целиком (data.length<5 return {} / "if (!month) continue"). Эта функция читает лист
+// "Январь_Май" мега-базы НАПРЯМУЮ (тот же файл, что уже импортирован) и печатает суммы по
+// каждой бакете месяца (включая июнь+, куда могли утечь майские строки с поздней датой) и
+// сумму строк, выпавших совсем без даты - чтобы понять, где именно теряется разница.
+function diagnoseMayGap_2026_08_15() {
+  var megaSS = SpreadsheetApp.openById(CLIENT_HISTORY_SHEET_ID);
+  var sheet = megaSS.getSheetByName('Январь_Май');
+  if (!sheet) { Logger.log('Лист "Январь_Май" не найден'); return; }
+  var data = sheet.getDataRange().getValues();
+
+  var headerRowIdx = findOrdersHeaderRowIndex_(data);
+  var headerRow = data[headerRowIdx];
+  var col = {};
+  headerRow.forEach(function(h, i) { var key = String(h || '').trim(); if (key) col[key] = i; });
+  var dateColIdx = col['Начало работ'];
+  var createdColIdx = col['Дата создания'];
+  var amountColIdx = col['Сумма'];
+  var noDateColIdx = col['Номер']; // для проверки, что строка вообще "настоящая" (не пустая/служебная)
+
+  var bucketSum = {}, bucketCount = {};
+  var noDateSum = 0, noDateCount = 0;
+  var usedFallbackSum = 0, usedFallbackCount = 0; // сколько взято по "Дата создания", не по "Начало работ"
+
+  for (var i = headerRowIdx + 1; i < data.length; i++) {
+    var row = data[i];
+    var orderNo = noDateColIdx !== undefined ? String(row[noDateColIdx] || '').trim() : '';
+    if (!orderNo) continue; // не строка заказа вообще (пустая/итоговая)
+
+    var amount = ordParseNum(row[amountColIdx]);
+    var monthFromStart = dateColIdx !== undefined ? ordMonthKey(row[dateColIdx]) : '';
+    var month = monthFromStart;
+    var usedFallback = false;
+    if (!month && createdColIdx !== undefined) { month = ordMonthKey(row[createdColIdx]); usedFallback = true; }
+
+    if (!month) { noDateSum += amount; noDateCount++; continue; }
+    if (usedFallback) { usedFallbackSum += amount; usedFallbackCount++; }
+    bucketSum[month] = (bucketSum[month] || 0) + amount;
+    bucketCount[month] = (bucketCount[month] || 0) + 1;
+  }
+
+  Logger.log('Суммы по бакетам месяца (вся выгрузка "Январь_Май"): ' + JSON.stringify(bucketSum));
+  Logger.log('Кол-во строк по бакетам: ' + JSON.stringify(bucketCount));
+  Logger.log('Строк без ЛЮБОЙ даты (выпали целиком, не попали никуда) = ' + noDateCount + ', сумма = ' + noDateSum);
+  Logger.log('Строк, взятых по фолбэку "Дата создания" (нет "Начало работ") = ' + usedFallbackCount + ', сумма = ' + usedFallbackSum);
+}
+
 // ============================================================
 // МОДУЛЬ ЗАКАЗОВ (встроен из orders_module.js)
 // ============================================================

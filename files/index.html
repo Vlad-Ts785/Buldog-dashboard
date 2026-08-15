@@ -637,8 +637,9 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           <div class="sec-header" id="receipts-tab-bar" style="gap:6px">
             <button class="tab-btn active" onclick="showReceiptsTab('managers',this)">По менеджерам</button>
             <button class="tab-btn" onclick="showReceiptsTab('customers',this)">По клиентам</button>
-            <button class="tab-btn" onclick="showReceiptsTab('today',this)">Сегодня</button>
             <button class="tab-btn" onclick="showReceiptsTab('yesterday',this)">Вчера</button>
+            <button class="tab-btn" onclick="showReceiptsTab('today',this)">Сегодня</button>
+            <button class="tab-btn" onclick="showReceiptsTab('week',this)">Эта неделя</button>
           </div>
 
           <div id="receipts-tab-managers">
@@ -684,6 +685,18 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
               <table class="tbl">
                 <thead><tr><th>Клиент</th><th>Менеджер</th><th>Юрлицо</th><th>Документ</th><th class="num">Сумма</th></tr></thead>
                 <tbody id="receipts-yesterday-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- "Эта неделя" (Влад, 2026-08-15: "хочу выборку вчера/сегодня/неделей/месяцем") -
+               с понедельника текущей недели по сегодня, та же построчная разбивка + дата. -->
+          <div id="receipts-tab-week" style="display:none">
+            <div class="sec-sub" id="receipts-week-sub" style="margin-bottom:8px"></div>
+            <div style="overflow-x:auto">
+              <table class="tbl">
+                <thead><tr><th>Дата</th><th>Клиент</th><th>Менеджер</th><th>Юрлицо</th><th>Документ</th><th class="num">Сумма</th></tr></thead>
+                <tbody id="receipts-week-body"></tbody>
               </table>
             </div>
           </div>
@@ -4160,6 +4173,7 @@ function renderReceipts() {
   renderReceiptsCustomers(r);
   renderReceiptsDayTransactions_(r.today, 'today');
   renderReceiptsDayTransactions_(r.yesterday, 'yesterday');
+  renderReceiptsWeekTransactions_(r.week);
 }
 
 function renderReceiptsKPI(r) {
@@ -4214,7 +4228,7 @@ function renderReceiptsKPI(r) {
 // (Влад, 2026-08-13: "два больших нижних блока лучше объединить в один через вкладки, как у
 // нас в заказах это").
 function showReceiptsTab(tab, btn) {
-  ['managers', 'customers', 'today', 'yesterday'].forEach(function(t) {
+  ['managers', 'customers', 'today', 'yesterday', 'week'].forEach(function(t) {
     var el = document.getElementById('receipts-tab-' + t);
     if (el) el.style.display = (t === tab) ? '' : 'none';
   });
@@ -4237,6 +4251,31 @@ function renderReceiptsDayTransactions_(day, prefix) {
       '<td class="muted">' + (t.docNumber || '—') + '</td>' +
       '<td class="num">' + fmt(t.amount) + '</td></tr>';
   }).join('') || '<tr><td colspan="5" class="muted">Поступлений не было</td></tr>';
+}
+
+// "Эта неделя" (Влад, 2026-08-15) - та же построчная разбивка, что "Сегодня"/"Вчера", плюс
+// колонка "Дата" (диапазон дней, не один день) и сортировка сначала по дате (новые сверху).
+function renderReceiptsWeekTransactions_(week) {
+  if (!week) return;
+  var subEl = document.getElementById('receipts-week-sub');
+  if (subEl) {
+    subEl.textContent = fmtDateRu(week.date_from) + ' — ' + fmtDateRu(week.date_to) +
+      ' · Итого: ' + fmt(week.total) + ' · Поступлений: ' + week.transactions.length;
+  }
+  var bodyEl = document.getElementById('receipts-week-body');
+  if (!bodyEl) return;
+  var rows = (week.transactions || []).slice().sort(function(a, b) {
+    return b.date === a.date ? (b.amount - a.amount) : (b.date < a.date ? -1 : 1);
+  });
+  bodyEl.innerHTML = rows.map(function(t) {
+    var mgrCls = t.manager === 'Не определён' ? ' class="muted"' : '';
+    return '<tr><td class="muted">' + receiptsShortDate_(t.date) + '</td>' +
+      '<td>' + t.customer + '</td>' +
+      '<td' + mgrCls + '>' + t.manager + '</td>' +
+      '<td class="muted">' + (t.orgName || '—') + '</td>' +
+      '<td class="muted">' + (t.docNumber || '—') + '</td>' +
+      '<td class="num">' + fmt(t.amount) + '</td></tr>';
+  }).join('') || '<tr><td colspan="6" class="muted">Поступлений не было</td></tr>';
 }
 
 function setReceiptsChartView(view) {

@@ -3161,6 +3161,21 @@ function getReceiptsData(ss, ordersData) {
   const todayTransactions = receiptsRowsForDay_(todayStr);
   const yesterdayTransactions = receiptsRowsForDay_(yesterdayStr);
 
+  // "Эта неделя" (Влад, 2026-08-15: "хочу выборку вчера/сегодня/неделей/месяцем") - с
+  // понедельника текущей недели по сегодня включительно (обычный рабочий календарь, не
+  // "последние 7 дней" - предсказуемее для директора: понедельник всегда старт).
+  const weekStartDate = new Date();
+  const dow = weekStartDate.getDay(); // 0=вс,1=пн,...,6=сб
+  const daysSinceMonday = (dow === 0) ? 6 : dow - 1;
+  weekStartDate.setDate(weekStartDate.getDate() - daysSinceMonday);
+  const weekStartStr = Utilities.formatDate(weekStartDate, 'Europe/Moscow', 'yyyy-MM-dd');
+  const weekTransactions = allRowsForDayLookup
+    .filter(function(r) { return r.date >= weekStartStr && r.date <= todayStr; })
+    .map(function(r) {
+      return { customer: r.customer, manager: r.manager, org: r.org, orgName: DEBT_ORG_SHORT_NAMES[r.org] || r.org, docNumber: r.docNumber, amount: r.amount, date: r.date };
+    })
+    .sort(function(a, b) { return b.amount - a.amount; });
+
   return {
     month: currentMonth,
     summary: {
@@ -3180,6 +3195,7 @@ function getReceiptsData(ss, ordersData) {
     monthly: monthly,
     today: { date: todayStr, transactions: todayTransactions, total: todayTransactions.reduce(function(s, r) { return s + r.amount; }, 0) },
     yesterday: { date: yesterdayStr, transactions: yesterdayTransactions, total: yesterdayTransactions.reduce(function(s, r) { return s + r.amount; }, 0) },
+    week: { date_from: weekStartStr, date_to: todayStr, transactions: weekTransactions, total: weekTransactions.reduce(function(s, r) { return s + r.amount; }, 0) },
   };
 }
 

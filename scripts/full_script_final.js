@@ -5259,7 +5259,15 @@ function dumpMayArchiveOrderNumbers_2026_08_15() {
     return r[0] + ':' + r[30];
   });
   Logger.log('Кол-во строк (после isTralDept) = ' + lines.length + ', сумма = ' + total);
-  Logger.log(lines.join(','));
+  // Один гигантский Logger.log() ранее обрезался ("Logging output too large") - режем на
+  // мелкие куски по 60 записей, каждый в СВОЁМ вызове Logger.log с номером части, чтобы
+  // ничего не потерялось молча.
+  var CHUNK = 60;
+  var totalChunks = Math.ceil(lines.length / CHUNK);
+  for (var c = 0; c < totalChunks; c++) {
+    var part = lines.slice(c * CHUNK, (c + 1) * CHUNK);
+    Logger.log('ЧАСТЬ ' + (c + 1) + '/' + totalChunks + ': ' + part.join(','));
+  }
 }
 
 // ============================================================

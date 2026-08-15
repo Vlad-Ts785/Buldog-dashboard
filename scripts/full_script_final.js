@@ -5241,33 +5241,46 @@ function backfillMonthSummaries() {
   if (skipped.length) Logger.log('⚠️ Пропущены (нет данных/архива): ' + skipped.join(', '));
 }
 
-// РАЗОВАЯ ДИАГНОСТИКА №4 (2026-08-15, удалить после использования). Влад выгрузил май из 1С
-// вручную отдельным файлом (уже пофильтрован по отделу тралов на его стороне, 951 заказ,
-// 45 514 157,70 ₽) и просит сверить ПОНОМЕРНО - какие номера заказов из его файла отсутствуют
-// в архиве "Заказы_2026-05" дашборда, чтобы разобраться руками. Эта функция печатает ВСЕ
-// номера заказов + суммы, которые сейчас реально учтены в архиве (после parseOrdersRawRows/
-// isTralDept - то же самое, что попадает в total_amount) - список сравнивается локально с
-// файлом Влада.
-function dumpMayArchiveOrderNumbers_2026_08_15() {
+// РАЗОВЫЙ ИМПОРТ (2026-08-15, удалить после использования). Пономерная сверка (см. историю
+// коммитов - dumpMayArchiveOrderNumbers_2026_08_15) нашла 133 заказа (4 264 041,67 ₽) из
+// ручной выгрузки Влада, которых НЕТ в архиве "Заказы_2026-05" - все на уже известных
+// сотрудников отдела (Котельников/Цегельников/Филипчук/Ахтамова/Гуляева/Коньшина/
+// Прус-Роскошный/Сильчев/Махура/Кан/Савиток/Васин), не проблема фильтрации - просто их не
+// было в старой выгрузке "Январь_Май" мега-базы (снята 2026-08-14, 1С с тех пор дополнила май
+// новыми документами задним числом). Влад загрузил свежий файл (951 заказ, 45 514 157,70 ₽,
+// сходится с живым 1С почти идеально) в отдельную таблицу "Копия ДАШБОРД 2.0"
+// (1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM), лист "МАЙ_ТЕСТ" - та же структура сырого
+// отчёта 1С, что и везде (заголовки в строке 1, без строк "Параметры:"/"Отбор:"). writeArchiveSheet
+// сам сольёт по номеру заказа с уже существующими 818 строками архива - новые 133 добавятся,
+// существующие не задвоятся.
+function importMayManualFix_2026_08_15() {
   var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-  var archive = ss.getSheetByName('Заказы_2026-05');
-  if (!archive) { Logger.log('Нет архива Заказы_2026-05'); return; }
-  var parsed = parseOrdersRawRows(archive.getDataRange().getValues());
-  var total = 0;
-  var lines = parsed.rows.map(function(r) {
-    total += (r[30] || 0);
-    return r[0] + ':' + r[30];
-  });
-  Logger.log('Кол-во строк (после isTralDept) = ' + lines.length + ', сумма = ' + total);
-  // Один гигантский Logger.log() ранее обрезался ("Logging output too large") - режем на
-  // мелкие куски по 60 записей, каждый в СВОЁМ вызове Logger.log с номером части, чтобы
-  // ничего не потерялось молча.
-  var CHUNK = 60;
-  var totalChunks = Math.ceil(lines.length / CHUNK);
-  for (var c = 0; c < totalChunks; c++) {
-    var part = lines.slice(c * CHUNK, (c + 1) * CHUNK);
-    Logger.log('ЧАСТЬ ' + (c + 1) + '/' + totalChunks + ': ' + part.join(','));
-  }
+  var srcSS = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
+  var srcSheet = srcSS.getSheetByName('МАЙ_ТЕСТ');
+  if (!srcSheet) throw new Error('Лист "МАЙ_ТЕСТ" не найден в таблице "Копия ДАШБОРД 2.0"');
+  var data = srcSheet.getDataRange().getValues();
+  if (data.length < 2) throw new Error('Лист "МАЙ_ТЕСТ" пуст');
+
+  var headerRowIdx = findOrdersHeaderRowIndex_(data);
+  var headerRows = data.slice(0, headerRowIdx + 1);
+  var monthData = headerRows.concat(data.slice(headerRowIdx + 1));
+
+  var parsedCheck = parseOrdersRawRows(data);
+  if (!parsedCheck.rows.length) throw new Error('0 строк распознано после фильтра отдела - проверь формат листа');
+
+  var beforeArchive = ss.getSheetByName('Заказы_2026-05');
+  var beforeCount = beforeArchive ? parseOrdersRawRows(beforeArchive.getDataRange().getValues()).rows.length : 0;
+
+  writeArchiveSheet(ss, 'Заказы_2026-05', monthData);
+
+  var afterArchive = ss.getSheetByName('Заказы_2026-05');
+  var afterParsed = parseOrdersRawRows(afterArchive.getDataRange().getValues());
+  var afterTotal = 0;
+  afterParsed.rows.forEach(function(r) { afterTotal += (r[30] || 0); });
+
+  Logger.log('✅ Слито с "Заказы_2026-05". Строк после фильтра отдела: было ' + beforeCount + ', стало ' + afterParsed.rows.length +
+    ' (+' + (afterParsed.rows.length - beforeCount) + '), сумма = ' + afterTotal);
+  Logger.log('Дальше запусти backfillMonthSummaries() - пересчитает "История_месяцев" с новой суммой мая.');
 }
 
 // ============================================================

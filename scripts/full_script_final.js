@@ -5228,6 +5228,61 @@ function backfillMonthSummaries() {
   if (skipped.length) Logger.log('⚠️ Пропущены (нет данных/архива): ' + skipped.join(', '));
 }
 
+// РАЗОВАЯ ДИАГНОСТИКА (2026-08-15, удалить после использования - см. правило CLAUDE.md
+// "удалять одноразовый код"). Влад сверил "Глобальную статистику" со скриншотами живого
+// отчёта 1С "План-фактный анализ продаж" (раздел "Тралы") - за январь дашборд показывает
+// 17 702 180, 1С - 19 475 363,33, разница слишком большая ("это слишком большая разница...
+// 17-е это без внутригрупповых или нет?"). "revenue" на "Глобальной статистике" берётся из
+// computeSalesFaktPlan_().salesFakt - он строит сумму НЕ из summary.total_amount (честный
+// итог по ВСЕМ строкам месяца), а восстанавливает её из by_manager (только TRAL_MANAGERS) +
+// довесок по internal_amount. Гипотеза - где-то в этой реконструкции теряется часть суммы для
+// более старых (январь-май, свежеимпортированных) месяцев, хотя для июня совпадает ТОЧНО.
+// Функция печатает по каждому месяцу все промежуточные числа, чтобы найти точную причину
+// цифрами, а не гадать.
+function diagnoseSalesFaktGap_2026_08_15() {
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var periods = getAvailablePeriods(ss);
+  var currentMonthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+  var all = periods.slice();
+  if (all.indexOf(currentMonthKey) < 0) all.push(currentMonthKey);
+  all.sort();
+
+  all.forEach(function(mk) {
+    try {
+      var ordersData = (mk === currentMonthKey) ? getOrdersData(ss) : getOrdersDataForPeriod(ss, mk);
+      if (!ordersData || ordersData.error) { Logger.log(mk + ': нет данных (' + (ordersData && ordersData.error) + ')'); return; }
+      var os = ordersData.summary || {};
+      var sfp = computeSalesFaktPlan_(ordersData);
+
+      var byManager = ordersData.by_manager || [];
+      var mgrInternal = 0, mgrTotal = 0;
+      byManager.forEach(function(m) { mgrInternal += m.internal_amount || 0; mgrTotal += m.amount || 0; });
+
+      var byLogist = ordersData.by_logist || [];
+      var pureLogists = TRAL_LOGISTS.filter(function(l) { return TRAL_MANAGERS.indexOf(l) < 0; });
+      var logistAmountByName = {};
+      byLogist.forEach(function(l) {
+        if (pureLogists.indexOf(l.name) >= 0) logistAmountByName[l.name] = l.amount || 0;
+      });
+
+      Logger.log(
+        mk + ':' +
+        ' total_amount=' + (os.total_amount || 0) +
+        ' | total_commercial=' + (os.total_commercial || 0) +
+        ' | internal_amount(общий)=' + (os.internal_amount || 0) +
+        ' | mgrInternal(внутри TRAL_MANAGERS)=' + mgrInternal +
+        ' | mgrTotal(сумма by_manager)=' + mgrTotal +
+        ' | recovery(internal_amount-mgrInternal, floor 0)=' + Math.max(0, (os.internal_amount || 0) - mgrInternal) +
+        ' | salesFakt(текущая "Глоб.статистика")=' + (sfp.salesFakt || 0) +
+        ' | ГЭП(total_amount - salesFakt)=' + ((os.total_amount || 0) - (sfp.salesFakt || 0)) +
+        ' | суммы чистых логистов (Кан/Махура/Сильчев/Васин, вне TRAL_MANAGERS): ' + JSON.stringify(logistAmountByName)
+      );
+    } catch (e) {
+      Logger.log(mk + ': ошибка - ' + e.message);
+    }
+  });
+}
+
 
 // ============================================================
 // МОДУЛЬ ЗАКАЗОВ (встроен из orders_module.js)

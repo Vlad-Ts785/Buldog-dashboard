@@ -5537,7 +5537,10 @@ function splitOrdersRawByMonth(data) {
   const headerRow = data[headerRowIdx];
   const col = {};
   headerRow.forEach(function(h, i) { const key = String(h || '').trim(); if (key) col[key] = i; });
-  const dateColIdx = col['Начало работ'];
+  // "Начало работ" - обычное имя колонки в ежедневной выгрузке 1С, но у ручных/разовых
+  // выгрузок (Влад, 2026-08-15: "ЯНВАРЬ_МАЙ_НОВЫЙ") встречается короткий вариант "Начало"
+  // (без "работ") - тот же столбец, другое имя в зависимости от настроек экспорта 1С.
+  const dateColIdx = col['Начало работ'] !== undefined ? col['Начало работ'] : col['Начало'];
   const createdColIdx = col['Дата создания'];
   if (dateColIdx === undefined && createdColIdx === undefined) return {};
 
@@ -7178,6 +7181,12 @@ function parseOrdersRawRows(allData) {
     const key = String(h || '').trim();
     if (key) col[key] = i;
   });
+  // "Начало работ"/"Окончание работ" - обычные имена колонок в ежедневной выгрузке 1С, но у
+  // ручных/разовых выгрузок (Влад, 2026-08-15: "ЯНВАРЬ_МАЙ_НОВЫЙ") встречается короткий
+  // вариант "Начало"/"Окончание" (без "работ") - тот же столбец, другое имя в зависимости от
+  // настроек экспорта 1С. Алиасим на уровне карты колонок - все geттеры ниже работают как есть.
+  if (col['Начало работ'] === undefined && col['Начало'] !== undefined) col['Начало работ'] = col['Начало'];
+  if (col['Окончание работ'] === undefined && col['Окончание'] !== undefined) col['Окончание работ'] = col['Окончание'];
 
   // Геттеры по имени колонки
   const g   = function(row, name) { const i = col[name]; return i !== undefined ? row[i] : null; };

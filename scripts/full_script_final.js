@@ -5291,6 +5291,41 @@ function diagnoseMayGap_2026_08_15() {
   Logger.log('Кол-во строк по бакетам: ' + JSON.stringify(bucketCount));
   Logger.log('Строк без ЛЮБОЙ даты (выпали целиком, не попали никуда) = ' + noDateCount + ', сумма = ' + noDateSum);
   Logger.log('Строк, взятых по фолбэку "Дата создания" (нет "Начало работ") = ' + usedFallbackCount + ', сумма = ' + usedFallbackSum);
+
+  // ЧАСТЬ 2: сырая сумма мая (44.6М) оказалась БЛИЗКА к 1С (45.56М), но архив "Заказы_2026-05"
+  // (после parseOrdersRawRows/isTralDept) даёт только 41.25М - разница ~3.37М теряется ИМЕННО
+  // на фильтре isTralDept при парсинге, а не на разбивке по месяцам. orphan-диагностика (v185)
+  // не могла это увидеть - она читает УЖЕ ОТФИЛЬТРОВАННЫЙ архив (parseOrdersRawRows САМ
+  // применяет isTralDept при чтении), поэтому видит только строки, которые ЭТОТ фильтр уже
+  // пропустил - строки, отсеянные isTralDept ЦЕЛИКОМ (ни один менеджер не совпал), ей в принципе
+  // не видны. Эта часть проверяет isTralDept НАПРЯМУЮ на сырых майских строках - находит, кто
+  // именно отсеивается совсем.
+  var mgrSColIdx = col['Менеджер по продажам'];
+  var mgrLColIdx = col['Менеджер по снабжению'];
+  var droppedByName = {}, droppedTotal = 0, droppedCount = 0;
+  for (var j = headerRowIdx + 1; j < data.length; j++) {
+    var r = data[j];
+    var orderNo2 = noDateColIdx !== undefined ? String(r[noDateColIdx] || '').trim() : '';
+    if (!orderNo2) continue;
+    var m = dateColIdx !== undefined ? ordMonthKey(r[dateColIdx]) : '';
+    if (!m && createdColIdx !== undefined) m = ordMonthKey(r[createdColIdx]);
+    if (m !== '2026-05') continue; // только майский бакет
+
+    var mgrS2 = mgrSColIdx !== undefined ? String(r[mgrSColIdx] || '').trim() : '';
+    var mgrL2 = mgrLColIdx !== undefined ? String(r[mgrLColIdx] || '').trim() : '';
+    var passes = ordInList(mgrS2, TRAL_MANAGERS) || ordInList(mgrL2, TRAL_LOGISTS);
+    if (!passes) {
+      var amt2 = ordParseNum(r[amountColIdx]);
+      droppedTotal += amt2;
+      droppedCount++;
+      var key2 = 'продажи="' + (mgrS2 || '(пусто)') + '" снабжение="' + (mgrL2 || '(пусто)') + '"';
+      if (!droppedByName[key2]) droppedByName[key2] = { count: 0, amount: 0 };
+      droppedByName[key2].count++;
+      droppedByName[key2].amount += amt2;
+    }
+  }
+  Logger.log('МАЙ: строк, отсеянных isTralDept ЦЕЛИКОМ (не попали в архив вообще) = ' + droppedCount + ', сумма = ' + droppedTotal);
+  Logger.log('МАЙ: разбивка отсеянных по именам = ' + JSON.stringify(droppedByName));
 }
 
 // ============================================================

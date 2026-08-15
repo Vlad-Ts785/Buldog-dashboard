@@ -5292,6 +5292,58 @@ function importMayManualFix_2026_08_15() {
   Logger.log('Дальше запусти backfillMonthSummaries() - пересчитает "История_месяцев" с новой суммой мая.');
 }
 
+// РАЗОВАЯ ДИАГНОСТИКА №5 (2026-08-15, удалить после использования). Влад отверг гипотезу
+// "1С дополняет закрытую базу задним числом" ("база уже закрыта, бухгалтера не меняют без
+// служебки") и потребовал ПОСТРОЧНУЮ проверку без предположений: для каждого из 133 номеров
+// заказа (были в ручной выгрузке Влада, отсутствовали в архиве Заказы_2026-05 ДО импорта
+// МАЙ_ТЕСТ) - проверить, есть ли этот номер ВООБЩЕ в исходном листе "Январь_Май" мега-базы
+// (в любом месяце, не только майском бакете), и если есть - показать все его поля (дата,
+// оба менеджера), чтобы понять факт, а не гадать. Список из 133 номеров захардкожен - это
+// результат прямого сравнения (Python, вне Apps Script) файла Влада с логом
+// dumpMayArchiveOrderNumbers_2026_08_15.
+function diagnoseMissing133Rows_2026_08_15() {
+  var missingNumbers = ['464631','464632','464705','464706','464850','464851','464929','465162','465163','465275','465276','465328','465329','465334','465336','465409','465410','465581','465582','465830','465831','465835','465841','465842','465844','465845','465846','465907','465910','465911','465912','466119','466303','466462','466464','466465','466467','466468','466469','466470','466471','466472','466474','466475','466477','466479','466481','466482','466483','466486','466487','466488','466489','466491','466492','466496','466499','466500','466509','466510','466512','466513','466515','466519','466523','466525','466527','466537','466538','466540','466541','466542','466543','466544','466545','466547','466548','466549','466551','466552','466553','466554','466557','466558','466620','466622','466623','466624','466625','466626','466627','466628','466629','466630','466631','466632','466633','466634','466635','466636','466637','466638','466639','466640','466641','466642','466644','466645','466675','466683','466700','466703','466704','466705','466706','466707','466721','466768','466769','466784','466785','466786','466787','466788','466789','466790','466791','466792','466840','466892','466958','466959','467688'];
+  var missingSet = {};
+  missingNumbers.forEach(function(n) { missingSet[n] = true; });
+
+  var megaSS = SpreadsheetApp.openById(CLIENT_HISTORY_SHEET_ID);
+  var sheet = megaSS.getSheetByName('Январь_Май');
+  if (!sheet) { Logger.log('Лист "Январь_Май" не найден'); return; }
+  var data = sheet.getDataRange().getValues();
+  var headerRowIdx = findOrdersHeaderRowIndex_(data);
+  var headerRow = data[headerRowIdx];
+  var col = {};
+  headerRow.forEach(function(h, i) { var key = String(h || '').trim(); if (key) col[key] = i; });
+  var numIdx = col['Номер'], dateIdx = col['Начало работ'], createdIdx = col['Дата создания'];
+  var mgrSIdx = col['Менеджер по продажам'], mgrLIdx = col['Менеджер по снабжению'];
+  var amountIdx = col['Сумма'];
+
+  var found = [], notFound = [];
+  for (var i = headerRowIdx + 1; i < data.length; i++) {
+    var row = data[i];
+    var num = numIdx !== undefined ? String(row[numIdx] || '').trim() : '';
+    if (!num || !missingSet[num]) continue;
+    var month = dateIdx !== undefined ? ordMonthKey(row[dateIdx]) : '';
+    var usedFallback = false;
+    if (!month && createdIdx !== undefined) { month = ordMonthKey(row[createdIdx]); usedFallback = true; }
+    var mgrS = mgrSIdx !== undefined ? String(row[mgrSIdx] || '').trim() : '';
+    var mgrL = mgrLIdx !== undefined ? String(row[mgrLIdx] || '').trim() : '';
+    var passesTralDept = ordInList(mgrS, TRAL_MANAGERS) || ordInList(mgrL, TRAL_LOGISTS);
+    found.push(num + ': месяц=' + month + (usedFallback ? '(по Дате создания)' : '(по Начало работ)') +
+      ', продажи="' + mgrS + '", снабжение="' + mgrL + '", isTralDept=' + passesTralDept +
+      ', сумма=' + ordParseNum(row[amountIdx]));
+    delete missingSet[num];
+  }
+  Object.keys(missingSet).forEach(function(n) { notFound.push(n); });
+
+  Logger.log('НАЙДЕНЫ в листе "Январь_Май" (' + found.length + ' из ' + missingNumbers.length + '):');
+  var CHUNK = 15;
+  for (var c = 0; c < Math.ceil(found.length / CHUNK); c++) {
+    Logger.log('  ' + found.slice(c * CHUNK, (c + 1) * CHUNK).join(' | '));
+  }
+  Logger.log('НЕ НАЙДЕНЫ в листе "Январь_Май" ВООБЩЕ (физически отсутствуют в этом файле) - ' + notFound.length + ' шт: ' + notFound.join(','));
+}
+
 // ============================================================
 // МОДУЛЬ ЗАКАЗОВ (встроен из orders_module.js)
 // ============================================================

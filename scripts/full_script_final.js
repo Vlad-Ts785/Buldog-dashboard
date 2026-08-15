@@ -5120,7 +5120,20 @@ function computeMonthSummary_(ss, monthKey) {
 
   return {
     month: monthKey,
-    revenue: sfp.salesFakt,
+    // revenue = os.total_amount (честная сумма ВСЕХ строк месяца), НЕ sfp.salesFakt (Влад,
+    // 2026-08-15: сверил "Глобальную статистику" с живым отчётом 1С "План-фактный анализ
+    // продаж" - за январь 17.7М у нас против 19.48М в 1С, "это слишком большая разница").
+    // Найдено диагностикой (diagnoseOrphanCommercialRows_2026_08_15, см. историю коммитов):
+    // sfp.salesFakt реконструирует сумму из TRAL_MANAGERS + довеска по внутренним - НЕ
+    // внутренние (коммерческие) заказы, у которых "Менеджер по продажам" - логист или бывший
+    // сотрудник вне TRAL_MANAGERS (Каспарова/Фидан/Васёв/Горбачев/Васин и т.п.), нигде не
+    // подхватываются и молча выпадают. os.total_amount такой фильтрации не делает вообще
+    // (aggregateOrdersRows суммирует ВСЕ строки месяца безусловно) - там, где расхождения не
+    // было (март/май/июнь), total_amount и salesFakt совпадали ТОЧНО, что и подтвердило выбор
+    // источника. sfp.salesFakt НЕ трогаем - он специально уже ограничен теми же именами, что
+    // и salesPlan (activePlanKeys), это нужно для корректного %"Выполнения плана продаж" на
+    // "Панели"/"По менеджерам" (другая семантика, другое место, см. computeSalesFaktPlan_).
+    revenue: os.total_amount || 0,
     salesPlan: sfp.salesPlan,
     profit: gp.profit || 0,
     profitTral: gp.profit_tral || 0,
@@ -5227,116 +5240,6 @@ function backfillMonthSummaries() {
   Logger.log('✅ Сводки по месяцам обновлены: ' + (done.join(', ') || '(ничего)'));
   if (skipped.length) Logger.log('⚠️ Пропущены (нет данных/архива): ' + skipped.join(', '));
 }
-
-// РАЗОВАЯ ДИАГНОСТИКА (2026-08-15, удалить после использования - см. правило CLAUDE.md
-// "удалять одноразовый код"). Влад сверил "Глобальную статистику" со скриншотами живого
-// отчёта 1С "План-фактный анализ продаж" (раздел "Тралы") - за январь дашборд показывает
-// 17 702 180, 1С - 19 475 363,33, разница слишком большая ("это слишком большая разница...
-// 17-е это без внутригрупповых или нет?"). "revenue" на "Глобальной статистике" берётся из
-// computeSalesFaktPlan_().salesFakt - он строит сумму НЕ из summary.total_amount (честный
-// итог по ВСЕМ строкам месяца), а восстанавливает её из by_manager (только TRAL_MANAGERS) +
-// довесок по internal_amount. Гипотеза - где-то в этой реконструкции теряется часть суммы для
-// более старых (январь-май, свежеимпортированных) месяцев, хотя для июня совпадает ТОЧНО.
-// Функция печатает по каждому месяцу все промежуточные числа, чтобы найти точную причину
-// цифрами, а не гадать.
-function diagnoseSalesFaktGap_2026_08_15() {
-  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-  var periods = getAvailablePeriods(ss);
-  var currentMonthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
-  var all = periods.slice();
-  if (all.indexOf(currentMonthKey) < 0) all.push(currentMonthKey);
-  all.sort();
-
-  all.forEach(function(mk) {
-    try {
-      var ordersData = (mk === currentMonthKey) ? getOrdersData(ss) : getOrdersDataForPeriod(ss, mk);
-      if (!ordersData || ordersData.error) { Logger.log(mk + ': нет данных (' + (ordersData && ordersData.error) + ')'); return; }
-      var os = ordersData.summary || {};
-      var sfp = computeSalesFaktPlan_(ordersData);
-
-      var byManager = ordersData.by_manager || [];
-      var mgrInternal = 0, mgrTotal = 0;
-      byManager.forEach(function(m) { mgrInternal += m.internal_amount || 0; mgrTotal += m.amount || 0; });
-
-      var byLogist = ordersData.by_logist || [];
-      var pureLogists = TRAL_LOGISTS.filter(function(l) { return TRAL_MANAGERS.indexOf(l) < 0; });
-      var logistAmountByName = {};
-      byLogist.forEach(function(l) {
-        if (pureLogists.indexOf(l.name) >= 0) logistAmountByName[l.name] = l.amount || 0;
-      });
-
-      Logger.log(
-        mk + ':' +
-        ' total_amount=' + (os.total_amount || 0) +
-        ' | total_commercial=' + (os.total_commercial || 0) +
-        ' | internal_amount(общий)=' + (os.internal_amount || 0) +
-        ' | mgrInternal(внутри TRAL_MANAGERS)=' + mgrInternal +
-        ' | mgrTotal(сумма by_manager)=' + mgrTotal +
-        ' | recovery(internal_amount-mgrInternal, floor 0)=' + Math.max(0, (os.internal_amount || 0) - mgrInternal) +
-        ' | salesFakt(текущая "Глоб.статистика")=' + (sfp.salesFakt || 0) +
-        ' | ГЭП(total_amount - salesFakt)=' + ((os.total_amount || 0) - (sfp.salesFakt || 0)) +
-        ' | суммы чистых логистов (Кан/Махура/Сильчев/Васин, вне TRAL_MANAGERS): ' + JSON.stringify(logistAmountByName)
-      );
-    } catch (e) {
-      Logger.log(mk + ': ошибка - ' + e.message);
-    }
-  });
-}
-
-// РАЗОВАЯ ДИАГНОСТИКА №2 (2026-08-15, удалить после использования). Первый прогон
-// diagnoseSalesFaktGap_2026_08_15() показал, что "суммы чистых логистов" (по колонке mgr_l,
-// "Менеджер по снабжению") везде пустые {} - значит гипотеза про logistMap была неверной.
-// Настоящая проверка - по колонке mgr_s ("Менеджер по продажам", та же, что строит
-// managerMap/by_manager): ищем строки, которые НЕ внутренние (isInt=false) И их mgr_s НЕ
-// входит в TRAL_MANAGERS - такие строки не попадают ни в Ac (managerMap), ни в internalAmount
-// (не внутренние) - молча выпадают из salesFakt, хотя честно сидят в total_amount/
-// total_commercial. Печатает сумму и разбивку по именам "осиротевших" строк по месяцу.
-function diagnoseOrphanCommercialRows_2026_08_15() {
-  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-  var periods = getAvailablePeriods(ss);
-  var currentMonthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
-  var all = periods.slice();
-  if (all.indexOf(currentMonthKey) < 0) all.push(currentMonthKey);
-  all.sort();
-
-  var C_mgr_s = 15, C_internal = 13, C_amount = 30;
-
-  all.forEach(function(mk) {
-    try {
-      var rows;
-      if (mk === currentMonthKey) {
-        var norm = ss.getSheetByName(ORDERS_NORM_SHEET);
-        if (!norm || norm.getLastRow() < 2) { Logger.log(mk + ': нет данных'); return; }
-        rows = norm.getRange(2, 1, norm.getLastRow() - 1, 44).getValues();
-      } else {
-        var archive = ss.getSheetByName(ORDERS_ARCHIVE_PFX + mk);
-        if (!archive || archive.getLastRow() < 5) { Logger.log(mk + ': нет архива'); return; }
-        rows = parseOrdersRawRows(archive.getDataRange().getValues()).rows;
-      }
-
-      var orphanTotal = 0, orphanCount = 0;
-      var byName = {};
-      rows.forEach(function(row) {
-        var mgrS = String(row[C_mgr_s] || '').trim();
-        var isInt = String(row[C_internal] || '').trim() === 'Да';
-        var amount = ordParseNum(row[C_amount]);
-        var inManagers = mgrS && ordInList(mgrS, TRAL_MANAGERS);
-        if (!isInt && !inManagers) {
-          orphanTotal += amount;
-          orphanCount++;
-          var key = mgrS || '(пусто)';
-          if (!byName[key]) byName[key] = { count: 0, amount: 0 };
-          byName[key].count++;
-          byName[key].amount += amount;
-        }
-      });
-      Logger.log(mk + ': orphan-коммерческих строк=' + orphanCount + ', сумма=' + orphanTotal + ', по именам=' + JSON.stringify(byName));
-    } catch (e) {
-      Logger.log(mk + ': ошибка - ' + e.message);
-    }
-  });
-}
-
 
 // ============================================================
 // МОДУЛЬ ЗАКАЗОВ (встроен из orders_module.js)

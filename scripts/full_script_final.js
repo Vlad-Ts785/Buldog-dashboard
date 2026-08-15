@@ -5241,91 +5241,25 @@ function backfillMonthSummaries() {
   if (skipped.length) Logger.log('⚠️ Пропущены (нет данных/архива): ' + skipped.join(', '));
 }
 
-// РАЗОВАЯ ДИАГНОСТИКА №3 (2026-08-15, удалить после использования). Январь после фикса v187
-// сблизился с 1С почти вплотную (368к из 19.48М, 1.9%), но май осталось большое расхождение
-// (Влад: "Тралы" в 1С 45 562 520,7, у нас 41 250 116 - 4.3М, 9.5%), хотя diagnoseOrphanCommercial
-// Rows_2026_08_15 не находил orphan-строк для мая (там сумма была 0). Гипотеза - проблема не в
-// фильтрации по менеджеру, а в РАЗБИВКЕ ПО МЕСЯЦАМ (splitOrdersRawByMonth): строки без "Начало
-// работ" распределяются по "Дата создания" (фолбэк), строки вообще без обеих дат выпадают
-// целиком (data.length<5 return {} / "if (!month) continue"). Эта функция читает лист
-// "Январь_Май" мега-базы НАПРЯМУЮ (тот же файл, что уже импортирован) и печатает суммы по
-// каждой бакете месяца (включая июнь+, куда могли утечь майские строки с поздней датой) и
-// сумму строк, выпавших совсем без даты - чтобы понять, где именно теряется разница.
-function diagnoseMayGap_2026_08_15() {
-  var megaSS = SpreadsheetApp.openById(CLIENT_HISTORY_SHEET_ID);
-  var sheet = megaSS.getSheetByName('Январь_Май');
-  if (!sheet) { Logger.log('Лист "Январь_Май" не найден'); return; }
-  var data = sheet.getDataRange().getValues();
-
-  var headerRowIdx = findOrdersHeaderRowIndex_(data);
-  var headerRow = data[headerRowIdx];
-  var col = {};
-  headerRow.forEach(function(h, i) { var key = String(h || '').trim(); if (key) col[key] = i; });
-  var dateColIdx = col['Начало работ'];
-  var createdColIdx = col['Дата создания'];
-  var amountColIdx = col['Сумма'];
-  var noDateColIdx = col['Номер']; // для проверки, что строка вообще "настоящая" (не пустая/служебная)
-
-  var bucketSum = {}, bucketCount = {};
-  var noDateSum = 0, noDateCount = 0;
-  var usedFallbackSum = 0, usedFallbackCount = 0; // сколько взято по "Дата создания", не по "Начало работ"
-
-  for (var i = headerRowIdx + 1; i < data.length; i++) {
-    var row = data[i];
-    var orderNo = noDateColIdx !== undefined ? String(row[noDateColIdx] || '').trim() : '';
-    if (!orderNo) continue; // не строка заказа вообще (пустая/итоговая)
-
-    var amount = ordParseNum(row[amountColIdx]);
-    var monthFromStart = dateColIdx !== undefined ? ordMonthKey(row[dateColIdx]) : '';
-    var month = monthFromStart;
-    var usedFallback = false;
-    if (!month && createdColIdx !== undefined) { month = ordMonthKey(row[createdColIdx]); usedFallback = true; }
-
-    if (!month) { noDateSum += amount; noDateCount++; continue; }
-    if (usedFallback) { usedFallbackSum += amount; usedFallbackCount++; }
-    bucketSum[month] = (bucketSum[month] || 0) + amount;
-    bucketCount[month] = (bucketCount[month] || 0) + 1;
-  }
-
-  Logger.log('Суммы по бакетам месяца (вся выгрузка "Январь_Май"): ' + JSON.stringify(bucketSum));
-  Logger.log('Кол-во строк по бакетам: ' + JSON.stringify(bucketCount));
-  Logger.log('Строк без ЛЮБОЙ даты (выпали целиком, не попали никуда) = ' + noDateCount + ', сумма = ' + noDateSum);
-  Logger.log('Строк, взятых по фолбэку "Дата создания" (нет "Начало работ") = ' + usedFallbackCount + ', сумма = ' + usedFallbackSum);
-
-  // ЧАСТЬ 2: сырая сумма мая (44.6М) оказалась БЛИЗКА к 1С (45.56М), но архив "Заказы_2026-05"
-  // (после parseOrdersRawRows/isTralDept) даёт только 41.25М - разница ~3.37М теряется ИМЕННО
-  // на фильтре isTralDept при парсинге, а не на разбивке по месяцам. orphan-диагностика (v185)
-  // не могла это увидеть - она читает УЖЕ ОТФИЛЬТРОВАННЫЙ архив (parseOrdersRawRows САМ
-  // применяет isTralDept при чтении), поэтому видит только строки, которые ЭТОТ фильтр уже
-  // пропустил - строки, отсеянные isTralDept ЦЕЛИКОМ (ни один менеджер не совпал), ей в принципе
-  // не видны. Эта часть проверяет isTralDept НАПРЯМУЮ на сырых майских строках - находит, кто
-  // именно отсеивается совсем.
-  var mgrSColIdx = col['Менеджер по продажам'];
-  var mgrLColIdx = col['Менеджер по снабжению'];
-  var droppedByName = {}, droppedTotal = 0, droppedCount = 0;
-  for (var j = headerRowIdx + 1; j < data.length; j++) {
-    var r = data[j];
-    var orderNo2 = noDateColIdx !== undefined ? String(r[noDateColIdx] || '').trim() : '';
-    if (!orderNo2) continue;
-    var m = dateColIdx !== undefined ? ordMonthKey(r[dateColIdx]) : '';
-    if (!m && createdColIdx !== undefined) m = ordMonthKey(r[createdColIdx]);
-    if (m !== '2026-05') continue; // только майский бакет
-
-    var mgrS2 = mgrSColIdx !== undefined ? String(r[mgrSColIdx] || '').trim() : '';
-    var mgrL2 = mgrLColIdx !== undefined ? String(r[mgrLColIdx] || '').trim() : '';
-    var passes = ordInList(mgrS2, TRAL_MANAGERS) || ordInList(mgrL2, TRAL_LOGISTS);
-    if (!passes) {
-      var amt2 = ordParseNum(r[amountColIdx]);
-      droppedTotal += amt2;
-      droppedCount++;
-      var key2 = 'продажи="' + (mgrS2 || '(пусто)') + '" снабжение="' + (mgrL2 || '(пусто)') + '"';
-      if (!droppedByName[key2]) droppedByName[key2] = { count: 0, amount: 0 };
-      droppedByName[key2].count++;
-      droppedByName[key2].amount += amt2;
-    }
-  }
-  Logger.log('МАЙ: строк, отсеянных isTralDept ЦЕЛИКОМ (не попали в архив вообще) = ' + droppedCount + ', сумма = ' + droppedTotal);
-  Logger.log('МАЙ: разбивка отсеянных по именам = ' + JSON.stringify(droppedByName));
+// РАЗОВАЯ ДИАГНОСТИКА №4 (2026-08-15, удалить после использования). Влад выгрузил май из 1С
+// вручную отдельным файлом (уже пофильтрован по отделу тралов на его стороне, 951 заказ,
+// 45 514 157,70 ₽) и просит сверить ПОНОМЕРНО - какие номера заказов из его файла отсутствуют
+// в архиве "Заказы_2026-05" дашборда, чтобы разобраться руками. Эта функция печатает ВСЕ
+// номера заказов + суммы, которые сейчас реально учтены в архиве (после parseOrdersRawRows/
+// isTralDept - то же самое, что попадает в total_amount) - список сравнивается локально с
+// файлом Влада.
+function dumpMayArchiveOrderNumbers_2026_08_15() {
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var archive = ss.getSheetByName('Заказы_2026-05');
+  if (!archive) { Logger.log('Нет архива Заказы_2026-05'); return; }
+  var parsed = parseOrdersRawRows(archive.getDataRange().getValues());
+  var total = 0;
+  var lines = parsed.rows.map(function(r) {
+    total += (r[30] || 0);
+    return r[0] + ':' + r[30];
+  });
+  Logger.log('Кол-во строк (после isTralDept) = ' + lines.length + ', сумма = ' + total);
+  Logger.log(lines.join(','));
 }
 
 // ============================================================

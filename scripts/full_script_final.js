@@ -5283,6 +5283,60 @@ function diagnoseSalesFaktGap_2026_08_15() {
   });
 }
 
+// РАЗОВАЯ ДИАГНОСТИКА №2 (2026-08-15, удалить после использования). Первый прогон
+// diagnoseSalesFaktGap_2026_08_15() показал, что "суммы чистых логистов" (по колонке mgr_l,
+// "Менеджер по снабжению") везде пустые {} - значит гипотеза про logistMap была неверной.
+// Настоящая проверка - по колонке mgr_s ("Менеджер по продажам", та же, что строит
+// managerMap/by_manager): ищем строки, которые НЕ внутренние (isInt=false) И их mgr_s НЕ
+// входит в TRAL_MANAGERS - такие строки не попадают ни в Ac (managerMap), ни в internalAmount
+// (не внутренние) - молча выпадают из salesFakt, хотя честно сидят в total_amount/
+// total_commercial. Печатает сумму и разбивку по именам "осиротевших" строк по месяцу.
+function diagnoseOrphanCommercialRows_2026_08_15() {
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var periods = getAvailablePeriods(ss);
+  var currentMonthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+  var all = periods.slice();
+  if (all.indexOf(currentMonthKey) < 0) all.push(currentMonthKey);
+  all.sort();
+
+  var C_mgr_s = 15, C_internal = 13, C_amount = 30;
+
+  all.forEach(function(mk) {
+    try {
+      var rows;
+      if (mk === currentMonthKey) {
+        var norm = ss.getSheetByName(ORDERS_NORM_SHEET);
+        if (!norm || norm.getLastRow() < 2) { Logger.log(mk + ': нет данных'); return; }
+        rows = norm.getRange(2, 1, norm.getLastRow() - 1, 44).getValues();
+      } else {
+        var archive = ss.getSheetByName(ORDERS_ARCHIVE_PFX + mk);
+        if (!archive || archive.getLastRow() < 5) { Logger.log(mk + ': нет архива'); return; }
+        rows = parseOrdersRawRows(archive.getDataRange().getValues()).rows;
+      }
+
+      var orphanTotal = 0, orphanCount = 0;
+      var byName = {};
+      rows.forEach(function(row) {
+        var mgrS = String(row[C_mgr_s] || '').trim();
+        var isInt = String(row[C_internal] || '').trim() === 'Да';
+        var amount = ordParseNum(row[C_amount]);
+        var inManagers = mgrS && ordInList(mgrS, TRAL_MANAGERS);
+        if (!isInt && !inManagers) {
+          orphanTotal += amount;
+          orphanCount++;
+          var key = mgrS || '(пусто)';
+          if (!byName[key]) byName[key] = { count: 0, amount: 0 };
+          byName[key].count++;
+          byName[key].amount += amount;
+        }
+      });
+      Logger.log(mk + ': orphan-коммерческих строк=' + orphanCount + ', сумма=' + orphanTotal + ', по именам=' + JSON.stringify(byName));
+    } catch (e) {
+      Logger.log(mk + ': ошибка - ' + e.message);
+    }
+  });
+}
+
 
 // ============================================================
 // МОДУЛЬ ЗАКАЗОВ (встроен из orders_module.js)

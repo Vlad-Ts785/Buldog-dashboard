@@ -31,6 +31,9 @@
 //   migrateReceiptsArchiveToSingleSheet() - разовый перенос старых листов "Поступления_
 //                                  YYYY-MM" (по одному на месяц) в единый "Поступления_архив"
 //                                  - запустить ОДИН РАЗ, удаляет старые листы после переноса
+//   importHistoricalOrdersFromMegaBase() - разовый импорт листа "Январь_Май" из таблицы
+//                                  "мега база" в архивы Заказы_2026-01..05 (2026-08-14) -
+//                                  запустить один раз, потом backfillMonthSummaries()
 //
 // Если нужной функции нет в списке выше - она почти наверняка есть в файле, просто это
 // разовый скрипт под старую задачу: Ctrl+F по имени найдёт её в любом случае.
@@ -5615,6 +5618,57 @@ function importOrdersReport() {
 
   latest.markRead();
   Logger.log('✅ Заказы импортированы: ' + data.length + ' строк, письмо от ' + latest.getDate());
+}
+
+// РАЗОВЫЙ импорт (2026-08-14, Влад): "загрузил в гугл таблицу лист новый там база январь май
+// причём в формате который мы обрабатываем в июне июле и августе" - лист "Январь_Май" в
+// таблице "мега база" (CLIENT_HISTORY_SHEET_ID), в РОВНО ТОМ ЖЕ формате, что обычный
+// ежедневный импорт заказов (тот же parseOrdersRawRows/splitOrdersRawByMonth). Вместо всей
+// возни с client_history_normalize.js (отдельный хрупкий пайплайн - за одну ночь нашли и
+// починили задвоенные заголовки "Наличные", слишком широкий фильтр "БАЗА", а сама выгрузка
+// всё равно оказалась устаревшей на ~9% против свежих данных 1С) - просто раскладывает эти
+// строки как ОБЫЧНЫЕ архивы "Заказы_2026-01".."Заказы_2026-05" в ОСНОВНОЙ таблице дашборда,
+// ТЕМ ЖЕ кодом (parseOrdersRawRows/getOrdersDataForPeriod/computeSalesFaktPlan_), что уже
+// проверенно работает для июня-июля - включая уже исправленные сегодня TRAL_MANAGERS/
+// INTERNAL_CLIENTS (5 бывших сотрудников, убранное "БАЗА"). После этого - backfillMonthSummaries()
+// (см. оглавление в начале файла) пересчитает "История_месяцев"/"Выручка коммерческая" для
+// этих месяцев так же, как для любого другого - "Поступления" и "Глобальная статистика"
+// подхватят их автоматически, без отдельного кода. ВП/затраты (Данные_1С_история) для этих
+// месяцев всё равно недоступны (это отдельный отчёт "Парк", не заказы) - останутся нулями,
+// не проблема этой задачи (сегодня была про выручку/наличку, не про ВП).
+function importHistoricalOrdersFromMegaBase() {
+  const megaSS = SpreadsheetApp.openById(CLIENT_HISTORY_SHEET_ID);
+  const sheet = megaSS.getSheetByName('Январь_Май');
+  if (!sheet) throw new Error('Лист "Январь_Май" не найден в таблице "мега база" - проверь точное название.');
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 5) throw new Error('Лист "Январь_Май" пуст или почти пуст.');
+
+  const monthBuckets = splitOrdersRawByMonth(data);
+  const monthsPresent = Object.keys(monthBuckets).sort();
+  if (!monthsPresent.length) {
+    throw new Error('Не удалось распознать ни одного месяца в листе "Январь_Май" - формат не совпадает с ожидаемым (нет колонок "Начало работ"/"Дата создания"?).');
+  }
+
+  const headerRowIdx = findOrdersHeaderRowIndex_(data);
+  const headerRows = data.slice(0, headerRowIdx + 1);
+  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  const currentMonthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+
+  const written = [], skippedCurrent = [];
+  monthsPresent.forEach(function(month) {
+    if (month >= currentMonthKey) {
+      // Защита - эта функция только для ПРОШЛЫХ месяцев, живой текущий месяц не трогаем.
+      skippedCurrent.push(month);
+      return;
+    }
+    const monthData = headerRows.concat(monthBuckets[month]);
+    writeArchiveSheet(ss, ORDERS_ARCHIVE_PFX + month, monthData);
+    written.push(month + ' (' + monthBuckets[month].length + ' строк)');
+  });
+
+  Logger.log('✅ ГОТОВО. Записаны архивы: ' + (written.join(', ') || '(ничего)'));
+  if (skippedCurrent.length) Logger.log('⚠️ Пропущены (текущий/будущий месяц, не трогаем живые данные): ' + skippedCurrent.join(', '));
+  Logger.log('Дальше запусти backfillMonthSummaries() - пересчитает "История_месяцев" для этих месяцев тем же кодом, что для июня-июля.');
 }
 
 // ── СЛИЯНИЕ ВМЕСТО ПЕРЕЗАПИСИ (2026-08-06) ────────────────────

@@ -5241,6 +5241,84 @@ function backfillMonthSummaries() {
   if (skipped.length) Logger.log('⚠️ Пропущены (нет данных/архива): ' + skipped.join(', '));
 }
 
+// АВАРИЙНОЕ ВОССТАНОВЛЕНИЕ (2026-08-15, удалить после использования). importPrikrytieAndAugustFix_
+// 2026_08_15 (см. ниже) дважды подряд стёр архивы "Заказы_2026-06" и "Заказы_2026-07" (сначала
+// несовпадение ширины строк при слиянии разных форматов 1С, потом - после фикса
+// mergeRawOrderRows_ - вторая, пока не до конца понятная причина; см. ретроспективу
+// 2026-08-15). Оба листа сейчас почти пустые - реальные заказы за июнь-июль (~1000-1130
+// строк каждый) физически стёрты с листа, НО ЕСТЬ в истории версий Google Таблиц (Google
+// хранит автосохранения). Эта функция САМА находит последнюю версию файла ДО инцидента
+// (граница - 22:50 по Москве 2026-08-15, с запасом ДО первого неудачного запуска в 22:57),
+// скачивает её как временный файл, копирует оттуда данные "Заказы_2026-06"/"Заказы_2026-07"
+// обратно в живую таблицу. Защита от лишнего вреда: если в найденной версии в листе МЕНЬШЕ
+// 500 строк (подозрительно мало, могло само попасть в интервал восстановления по ошибке) -
+// НЕ трогает лист, только пишет предупреждение в лог. Временный файл переносится в корзину
+// (не удаляется безвозвратно) - на случай, если восстановление всё же понадобится ещё раз
+// вручную из другой версии.
+function recoverJuneJulyArchives_2026_08_15() {
+  var fileId = CONFIG.SPREADSHEET_ID;
+  var CUTOFF_UTC = new Date('2026-08-15T19:50:00Z'); // 22:50 МСК 15.08.2026 - с запасом до первого сбоя (22:57 МСК)
+  var MIN_SANE_ROWS = 500;
+
+  var revisions = [];
+  var pageToken = null;
+  do {
+    var resp = Drive.Revisions.list(fileId, pageToken ? { pageToken: pageToken } : {});
+    revisions = revisions.concat(resp.items || []);
+    pageToken = resp.nextPageToken;
+  } while (pageToken);
+
+  if (!revisions.length) throw new Error('Не найдено ни одной ревизии файла - история версий недоступна?');
+
+  var candidates = revisions.filter(function(r) { return new Date(r.modifiedDate) < CUTOFF_UTC; });
+  if (!candidates.length) throw new Error('Нет ревизий раньше ' + CUTOFF_UTC.toISOString() + ' - самая старая доступная: ' +
+    revisions.map(function(r){return r.modifiedDate;}).sort()[0]);
+  candidates.sort(function(a, b) { return new Date(b.modifiedDate) - new Date(a.modifiedDate); });
+  var rev = candidates[0];
+  Logger.log('Использую ревизию от ' + rev.modifiedDate + ' (id=' + rev.id + ', всего найдено ревизий: ' + revisions.length + ')');
+
+  var exportMime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  var exportUrl = rev.exportLinks && rev.exportLinks[exportMime];
+  if (!exportUrl) throw new Error('У ревизии ' + rev.modifiedDate + ' нет exportLinks для xlsx - ' +
+    'доступные форматы: ' + JSON.stringify(rev.exportLinks || {}));
+
+  var fetchResp = UrlFetchApp.fetch(exportUrl, { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() } });
+  var blob = fetchResp.getBlob().setName('TEMP_ВОССТАНОВЛЕНИЕ_' + Date.now() + '.xlsx');
+
+  var tempFile = Drive.Files.insert(
+    { title: 'TEMP_ВОССТАНОВЛЕНИЕ_' + Date.now(), mimeType: MimeType.GOOGLE_SHEETS },
+    blob, { convert: true }
+  );
+  var tempSS;
+  var report = [];
+  try {
+    tempSS = SpreadsheetApp.openById(tempFile.id);
+    var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+
+    ['Заказы_2026-06', 'Заказы_2026-07'].forEach(function(sheetName) {
+      var tempSheet = tempSS.getSheetByName(sheetName);
+      if (!tempSheet) { report.push(sheetName + ': НЕ НАЙДЕН в старой ревизии - ничего не восстановлено'); return; }
+      var data = tempSheet.getDataRange().getValues();
+      if (data.length < MIN_SANE_ROWS) {
+        report.push(sheetName + ': в найденной ревизии только ' + data.length + ' строк (меньше ' + MIN_SANE_ROWS +
+          ') - подозрительно мало, НЕ трогаю живой лист, разбираться вручную');
+        return;
+      }
+      var liveSheet = ss.getSheetByName(sheetName);
+      if (!liveSheet) liveSheet = ss.insertSheet(sheetName);
+      liveSheet.clear();
+      liveSheet.getRange(1, 1, data.length, data[0].length).setValues(data);
+      report.push(sheetName + ': восстановлено ' + data.length + ' строк из ревизии ' + rev.modifiedDate);
+    });
+  } finally {
+    if (tempFile && tempFile.id) Drive.Files.trash(tempFile.id); // в корзину, не насовсем - на всякий случай
+  }
+
+  Logger.log('✅ ' + report.join(' | '));
+  Logger.log('Дальше (только если оба листа успешно восстановлены выше) - можно ЕЩЁ РАЗ (и только после этого) ' +
+    'аккуратно запустить importPrikrytieAndAugustFix_2026_08_15() для доливки "Машины прикрытия".');
+}
+
 // РАЗОВЫЙ ИМПОРТ (2026-08-15, удалить после использования). "Машина прикрытия" (эскорт-
 // сопровождение негабарита) - реальная платная услуга, но отчёт 1С "Отчёт Таблица заказов"
 // (тот самый, который дашборд получает по почте каждый день) почему-то НЕ включает заказы
@@ -5258,7 +5336,14 @@ function backfillMonthSummaries() {
 function importPrikrytieAndAugustFix_2026_08_15() {
   var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
 
-  var HEADERS = ['Менеджер по продажам','Организация','Тип техники','Оборудование','Менеджер по снабжению','Исполнитель','Данные по машине','Водитель','Заказчик','Объект','Договор','Начало','Окончание','Кол - во','Путевка','Баланс заказчика по организации','Ед. Изм','Номер путевого','Доплата за путевку','Номер счета','Груз','Стоимость','Кол-во км за МКАД','Ст-ть 1км за МКАД','Заблокирован заказ','Сумма','Факт оплаты от заказчика','Вариант расчета','Часы привлеченной','Стоимость часа привлеченной','Кол-во км за МКАД привлеченной','Стоимость 1км привлеченной','Стоимость привлеченной техники','ФИО Вознаграждения 1','Сумма вознаграждения 1','ФИО Вознаграждения 2','Сумма вознаграждения 2','Спецразрешение','Сумма спецразрешение','Наличные','Номер УПД','Автор','Без топлива','Работа на стационаре','Номер','Прибыль'];
+  // "Начало работ"/"Окончание работ" - тут ИМЕНА КОЛОНОК уже переименованы из "Начало"/
+  // "Окончание" (как в исходных файлах Влада) под то, как эти же поля называются в живом
+  // ежедневном отчёте 1С - иначе при слиянии с уже существующим архивом (см. mergeRawOrderRows_)
+  // получились бы ДВЕ РАЗНЫЕ колонки с датой (старая "Начало работ" пустая у новых строк,
+  // новая "Начало" пустая у старых) - алиас на уровне карты колонок (parseOrdersRawRows/
+  // splitOrdersRawByMonth) такое не разруливает, он про ОДНОРОДНЫЙ набор строк, не про слияние
+  // двух разных источников с разными названиями одного и того же поля.
+  var HEADERS = ['Менеджер по продажам','Организация','Тип техники','Оборудование','Менеджер по снабжению','Исполнитель','Данные по машине','Водитель','Заказчик','Объект','Договор','Начало работ','Окончание работ','Кол - во','Путевка','Баланс заказчика по организации','Ед. Изм','Номер путевого','Доплата за путевку','Номер счета','Груз','Стоимость','Кол-во км за МКАД','Ст-ть 1км за МКАД','Заблокирован заказ','Сумма','Факт оплаты от заказчика','Вариант расчета','Часы привлеченной','Стоимость часа привлеченной','Кол-во км за МКАД привлеченной','Стоимость 1км привлеченной','Стоимость привлеченной техники','ФИО Вознаграждения 1','Сумма вознаграждения 1','ФИО Вознаграждения 2','Сумма вознаграждения 2','Спецразрешение','Сумма спецразрешение','Наличные','Номер УПД','Автор','Без топлива','Работа на стационаре','Номер','Прибыль'];
 
   // "прикрывашки.xlsx" - июнь (3 строки) + июль (2 строки), Влад выгрузил вручную из 1С
   var PRIKR_ROWS = [
@@ -5285,9 +5370,16 @@ function importPrikrytieAndAugustFix_2026_08_15() {
   var prikrData = [HEADERS].concat(PRIKR_ROWS);
   var buckets = splitOrdersRawByMonth(prikrData);
   Object.keys(buckets).sort().forEach(function(month) {
-    var monthData = [HEADERS].concat(buckets[month]);
-    writeArchiveSheet(ss, ORDERS_ARCHIVE_PFX + month, monthData);
-    report.push(month + ': +' + buckets[month].length + ' (прикрывашки)');
+    try {
+      var monthData = [HEADERS].concat(buckets[month]);
+      writeArchiveSheet(ss, ORDERS_ARCHIVE_PFX + month, monthData);
+      report.push(month + ': +' + buckets[month].length + ' (прикрывашки)');
+    } catch (writeErr) {
+      // Свой try/catch на каждый месяц (2026-08-15, реальный случай - падение на июне
+      // раньше обрывало весь forEach, июль вообще не пытался записаться) - один сбойный
+      // месяц больше не мешает остальным.
+      report.push(month + ': ОШИБКА - ' + writeErr.message);
+    }
   });
 
   // 2. Август - 5 заказов в ЖИВОЙ "Заказы_данные" (текущий месяц, не архив)
@@ -5876,20 +5968,49 @@ function mergeRawOrderRows_(existingData, newData) {
   existingHeaderRow.forEach(function(h, i) { if (String(h || '').trim() === 'Номер') existingIdCol = i; });
   if (existingIdCol < 0) return newData; // не нашли колонку в старых данных - не рискуем, просто заменяем
 
-  const headerRows = newData.slice(0, newHeaderIdx + 1);
+  // Разные выгрузки 1С (живой ежедневный отчёт по почте vs ручные разовые выгрузки) могут иметь
+  // РАЗНУЮ ширину/состав колонок - живой отчёт даёт ~105 колонок (десятки служебных полей типа
+  // "Бонус продавца"/"Дней до закрытия"), ручная выгрузка через "Таблица заказов: Список" -
+  // компактные ~46. Раньше эта функция брала шапку/ширину newData "как есть" и молча
+  // склеивала со старыми строками другой ширины - работало, только пока оба набора были из
+  // ОДНОГО источника. setValues() ломается, если у строк разная длина ("The data has 105 but
+  // the range has 46" - реальный случай 2026-08-15, слияние ручной выгрузки "прикрывашек" в
+  // архив, уже заполненный из живого импорта). Строим ОБЪЕДИНЁННЫЙ заголовок (сначала колонки
+  // existing в своём порядке, затем любые новые из newData, которых раньше не было) и
+  // переносим ВСЕ строки (и старые, и новые) в эту единую раскладку ПО ИМЕНИ колонки - ширина
+  // гарантированно одинакова независимо от того, из какого отчёта 1С пришли данные.
+  const unifiedHeader = existingHeaderRow.slice();
+  const unifiedNameToCol = {};
+  unifiedHeader.forEach(function(h, i) { const k = String(h || '').trim(); if (k) unifiedNameToCol[k] = i; });
+  newHeaderRow.forEach(function(h) {
+    const k = String(h || '').trim();
+    if (k && !(k in unifiedNameToCol)) { unifiedNameToCol[k] = unifiedHeader.length; unifiedHeader.push(h); }
+  });
+
+  function remap(row, headerRow) {
+    const out = new Array(unifiedHeader.length).fill('');
+    headerRow.forEach(function(h, i) {
+      const k = String(h || '').trim();
+      if (!k) return;
+      const target = unifiedNameToCol[k];
+      if (target !== undefined) out[target] = row[i];
+    });
+    return out;
+  }
+
   const map = {};
   const order = [];
-  function addRows(rows, col) {
+  function addRows(rows, headerRow, col) {
     rows.forEach(function(row) {
       const id = normalizeOrderId_(row[col]); // см. normalizeOrderId_ - без этого "469109" (число, уже записанное нами) и "000469109" (текст из свежего отчёта 1С) считались бы разными заказами - настоящая причина задвоения 2026-08-07
       if (!id) return;
       if (!(id in map)) order.push(id);
-      map[id] = row;
+      map[id] = remap(row, headerRow);
     });
   }
-  addRows(existingData.slice(existingHeaderIdx + 1), existingIdCol);
-  addRows(newData.slice(newHeaderIdx + 1), idCol);
-  return headerRows.concat(order.map(function(id) { return map[id]; }));
+  addRows(existingData.slice(existingHeaderIdx + 1), existingHeaderRow, existingIdCol);
+  addRows(newData.slice(newHeaderIdx + 1), newHeaderRow, idCol);
+  return [unifiedHeader].concat(order.map(function(id) { return map[id]; }));
 }
 
 
@@ -7187,10 +7308,27 @@ function writeArchiveSheet(ss, archiveName, data) {
   if (archive && archive.getLastRow() >= 5) {
     toWrite = mergeRawOrderRows_(archive.getDataRange().getValues(), data);
   }
-  if (archive) archive.clear();
-  else archive = ss.insertSheet(archiveName);
+  if (!archive) archive = ss.insertSheet(archiveName);
+
+  // ПОРЯДОК ВАЖЕН (2026-08-15, реальный случай - см. retrospectives, "Заказы_2026-06"/"07"
+  // остались пустыми после сбоя слияния). Раньше .clear() шёл ПЕРВЫМ, потом setValues() -
+  // если запись падала (несовпадение размеров, лимит ячейки, любая ошибка API) лист уже был
+  // стёрт, а новые данные не записались - тысяча реальных заказов терялась без возможности
+  // восстановить одним повторным запуском (архив пришлось поднимать из истории версий
+  // Google). Теперь сначала пишем новые данные (если запись упадёт - старые ещё на месте),
+  // и только потом чистим ИЗЛИШЕК старых строк/колонок за пределами нового размера.
   if (toWrite.length > 0) {
+    const prevRows = archive.getLastRow();
+    const prevCols = archive.getLastColumn();
     archive.getRange(1, 1, toWrite.length, toWrite[0].length).setValues(toWrite);
+    if (prevRows > toWrite.length) {
+      archive.getRange(toWrite.length + 1, 1, prevRows - toWrite.length, Math.max(prevCols, 1)).clearContent();
+    }
+    if (prevCols > toWrite[0].length) {
+      archive.getRange(1, toWrite[0].length + 1, Math.max(archive.getLastRow(), 1), prevCols - toWrite[0].length).clearContent();
+    }
+  } else {
+    archive.clear();
   }
 }
 

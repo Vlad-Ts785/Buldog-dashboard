@@ -5241,122 +5241,6 @@ function backfillMonthSummaries() {
   if (skipped.length) Logger.log('⚠️ Пропущены (нет данных/архива): ' + skipped.join(', '));
 }
 
-// РАЗОВЫЙ ИМПОРТ (2026-08-15, удалить после использования). Пономерная сверка (см. историю
-// коммитов - dumpMayArchiveOrderNumbers_2026_08_15) нашла 133 заказа (4 264 041,67 ₽) из
-// ручной выгрузки Влада, которых НЕТ в архиве "Заказы_2026-05" - все на уже известных
-// сотрудников отдела (Котельников/Цегельников/Филипчук/Ахтамова/Гуляева/Коньшина/
-// Прус-Роскошный/Сильчев/Махура/Кан/Савиток/Васин), не проблема фильтрации - просто их не
-// было в старой выгрузке "Январь_Май" мега-базы (снята 2026-08-14, 1С с тех пор дополнила май
-// новыми документами задним числом). Влад загрузил свежий файл (951 заказ, 45 514 157,70 ₽,
-// сходится с живым 1С почти идеально) в отдельную таблицу "Копия ДАШБОРД 2.0"
-// (1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM), лист "МАЙ_ТЕСТ" - та же структура сырого
-// отчёта 1С, что и везде (заголовки в строке 1, без строк "Параметры:"/"Отбор:"). writeArchiveSheet
-// сам сольёт по номеру заказа с уже существующими 818 строками архива - новые 133 добавятся,
-// существующие не задвоятся.
-function importMayManualFix_2026_08_15() {
-  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-  var srcSS = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
-  var srcSheet = srcSS.getSheetByName('МАЙ_ТЕСТ');
-  if (!srcSheet) throw new Error('Лист "МАЙ_ТЕСТ" не найден в таблице "Копия ДАШБОРД 2.0"');
-  var rawData = srcSheet.getDataRange().getValues();
-  if (rawData.length < 2) throw new Error('Лист "МАЙ_ТЕСТ" пуст');
-
-  // Вставка в Google Таблицы иногда растягивает getDataRange() до лишних пустых колонок
-  // (форматирование/границы задели соседние ячейки) - "The data has 105 but the range has 46"
-  // при попытке слить с архивом (у него честные 46 колонок). Обрезаем по РЕАЛЬНОЙ ширине
-  // заголовков (последняя непустая ячейка строки заголовков), а не по сырой ширине листа.
-  var headerRowIdx = findOrdersHeaderRowIndex_(rawData);
-  var headerRowRaw = rawData[headerRowIdx];
-  var realWidth = headerRowRaw.length;
-  while (realWidth > 0 && String(headerRowRaw[realWidth - 1] || '').trim() === '') realWidth--;
-  var data = rawData.map(function(row) { return row.slice(0, realWidth); });
-
-  var headerRows = data.slice(0, headerRowIdx + 1);
-  var monthData = headerRows.concat(data.slice(headerRowIdx + 1));
-
-  var parsedCheck = parseOrdersRawRows(data);
-  if (!parsedCheck.rows.length) throw new Error('0 строк распознано после фильтра отдела - проверь формат листа');
-
-  var beforeArchive = ss.getSheetByName('Заказы_2026-05');
-  var beforeCount = beforeArchive ? parseOrdersRawRows(beforeArchive.getDataRange().getValues()).rows.length : 0;
-
-  writeArchiveSheet(ss, 'Заказы_2026-05', monthData);
-
-  var afterArchive = ss.getSheetByName('Заказы_2026-05');
-  var afterParsed = parseOrdersRawRows(afterArchive.getDataRange().getValues());
-  var afterTotal = 0;
-  afterParsed.rows.forEach(function(r) { afterTotal += (r[30] || 0); });
-
-  Logger.log('✅ Слито с "Заказы_2026-05". Строк после фильтра отдела: было ' + beforeCount + ', стало ' + afterParsed.rows.length +
-    ' (+' + (afterParsed.rows.length - beforeCount) + '), сумма = ' + afterTotal);
-  Logger.log('Дальше запусти backfillMonthSummaries() - пересчитает "История_месяцев" с новой суммой мая.');
-}
-
-// РАЗОВАЯ ДИАГНОСТИКА №6 (2026-08-15, удалить после использования). diagnoseMissing133Rows_
-// 2026_08_15 подтвердил: 133 майских заказа физически отсутствуют в листе "Январь_Май" -
-// значит эта выгрузка сама по себе НЕПОЛНАЯ (не "1С поменяла данные задним числом", как я
-// сначала ошибочно предположил - Влад справедливо это отверг). Влад вручную нашёл один из
-// этих номеров (465409) в ДРУГОМ, более старом листе мега-базы - "Нормализованные_история_
-// заказов" (построен из "Лист_1" ещё до перехода на "Январь_Май", см. client_history_
-// normalize.js). Открытый вопрос: та же неполнота "Январь_Май" может затрагивать и январь-
-// апрель, которые уже импортированы в дашборд. Эта функция сравнивает архивы Заказы_2026-01
-// .. Заказы_2026-04 с "Нормализованные_история_заказов" (по номеру заказа, тот же принцип,
-// что и майская пономерная сверка) - находит заказы, которые есть в старой истории, но
-// отсутствуют в текущих архивах дашборда.
-function diagnoseJanAprMissingViaOldHistory_2026_08_15() {
-  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-  var megaSS = SpreadsheetApp.openById(CLIENT_HISTORY_SHEET_ID);
-  var histSheet = megaSS.getSheetByName('Нормализованные_история_заказов');
-  if (!histSheet) { Logger.log('Лист "Нормализованные_история_заказов" не найден'); return; }
-  var histData = histSheet.getDataRange().getValues();
-  if (histData.length < 2) { Logger.log('Лист пуст'); return; }
-  var histHeader = histData[0];
-  var hc = {};
-  histHeader.forEach(function(h, i) { var key = String(h || '').trim(); if (key) hc[key] = i; });
-  var numIdx = hc['Номер'], startIdx = hc['Начало'], amtIdx = hc['Сумма'];
-  if (numIdx === undefined || startIdx === undefined || amtIdx === undefined) {
-    Logger.log('Не нашёл нужные колонки (Номер/Начало/Сумма) в заголовке: ' + JSON.stringify(histHeader));
-    return;
-  }
-
-  var histByMonth = {};
-  for (var i = 1; i < histData.length; i++) {
-    var row = histData[i];
-    var num = String(row[numIdx] || '').trim();
-    if (!num) continue;
-    var normNum = num.replace(/^0+/, '') || '0';
-    var mk = ordMonthKey(row[startIdx]);
-    if (!mk) continue;
-    if (!histByMonth[mk]) histByMonth[mk] = {};
-    histByMonth[mk][normNum] = ordParseNum(row[amtIdx]);
-  }
-
-  ['2026-01', '2026-02', '2026-03', '2026-04'].forEach(function(mk) {
-    var archive = ss.getSheetByName('Заказы_' + mk);
-    var archiveSet = {};
-    if (archive) {
-      var parsed = parseOrdersRawRows(archive.getDataRange().getValues());
-      parsed.rows.forEach(function(r) {
-        var n = String(r[0] || '').trim().replace(/^0+/, '') || '0';
-        archiveSet[n] = true;
-      });
-    }
-    var histMonth = histByMonth[mk] || {};
-    var missing = [], missingSum = 0;
-    Object.keys(histMonth).forEach(function(n) {
-      if (!archiveSet[n]) { missing.push(n); missingSum += histMonth[n]; }
-    });
-    Logger.log(mk + ': в архиве дашборда ' + Object.keys(archiveSet).length + ' заказов, в старой истории (Лист_1) ' +
-      Object.keys(histMonth).length + ' заказов. ОТСУТСТВУЮТ в архиве, но ЕСТЬ в старой истории = ' +
-      missing.length + ' шт, сумма = ' + missingSum);
-    if (missing.length) {
-      var CHUNK = 40;
-      for (var c = 0; c < Math.ceil(missing.length / CHUNK); c++) {
-        Logger.log('  ' + mk + ' номера: ' + missing.slice(c * CHUNK, (c + 1) * CHUNK).join(','));
-      }
-    }
-  });
-}
 
 // ============================================================
 // МОДУЛЬ ЗАКАЗОВ (встроен из orders_module.js)
@@ -5763,33 +5647,40 @@ function importOrdersReport() {
   Logger.log('✅ Заказы импортированы: ' + data.length + ' строк, письмо от ' + latest.getDate());
 }
 
-// РАЗОВЫЙ импорт (2026-08-14, Влад): "загрузил в гугл таблицу лист новый там база январь май
-// причём в формате который мы обрабатываем в июне июле и августе" - лист "Январь_Май" в
-// таблице "мега база" (CLIENT_HISTORY_SHEET_ID), в РОВНО ТОМ ЖЕ формате, что обычный
-// ежедневный импорт заказов (тот же parseOrdersRawRows/splitOrdersRawByMonth). Вместо всей
-// возни с client_history_normalize.js (отдельный хрупкий пайплайн - за одну ночь нашли и
-// починили задвоенные заголовки "Наличные", слишком широкий фильтр "БАЗА", а сама выгрузка
-// всё равно оказалась устаревшей на ~9% против свежих данных 1С) - просто раскладывает эти
-// строки как ОБЫЧНЫЕ архивы "Заказы_2026-01".."Заказы_2026-05" в ОСНОВНОЙ таблице дашборда,
-// ТЕМ ЖЕ кодом (parseOrdersRawRows/getOrdersDataForPeriod/computeSalesFaktPlan_), что уже
-// проверенно работает для июня-июля - включая уже исправленные сегодня TRAL_MANAGERS/
-// INTERNAL_CLIENTS (5 бывших сотрудников, убранное "БАЗА"). После этого - backfillMonthSummaries()
-// (см. оглавление в начале файла) пересчитает "История_месяцев"/"Выручка коммерческая" для
-// этих месяцев так же, как для любого другого - "Поступления" и "Глобальная статистика"
-// подхватят их автоматически, без отдельного кода. ВП/затраты (Данные_1С_история) для этих
-// месяцев всё равно недоступны (это отдельный отчёт "Парк", не заказы) - останутся нулями,
-// не проблема этой задачи (сегодня была про выручку/наличку, не про ВП).
+// РАЗОВЫЙ импорт (2026-08-14, Влад, обновлено 2026-08-15). Изначально читал лист "Январь_Май"
+// в таблице "мега база" (CLIENT_HISTORY_SHEET_ID) - тот же формат, что обычный ежедневный
+// импорт заказов (parseOrdersRawRows/splitOrdersRawByMonth). Пономерная сверка 2026-08-15
+// (см. историю коммитов) нашла, что "Январь_Май" САМ ПО СЕБЕ неполный - у мая не хватало 133
+// заказов, физически отсутствовавших в этом листе (не "1С поменяла данные задним числом" -
+// Влад справедливо отверг эту гипотезу, потребовал точную построчную проверку, которая и
+// показала: строк просто не было в файле). Влад сделал новую, более полную выгрузку "прямо
+// сейчас" - лист "ЯНВАРЬ_МАЙ_НОВЫЙ" в той же таблице "мега база" - переключено на него.
+// Раскладывает строки как ОБЫЧНЫЕ архивы "Заказы_2026-01".."Заказы_2026-05" в ОСНОВНОЙ
+// таблице дашборда, ТЕМ ЖЕ кодом (parseOrdersRawRows/getOrdersDataForPeriod/
+// computeSalesFaktPlan_), что уже проверенно работает для июня-июля. writeArchiveSheet сам
+// СЛИВАЕТ по номеру заказа с уже существующими строками архива - безопасно перезапускать,
+// новые заказы добавятся, существующие не задвоятся. После этого - backfillMonthSummaries()
+// пересчитает "История_месяцев" для этих месяцев так же, как для любого другого.
 function importHistoricalOrdersFromMegaBase() {
   const megaSS = SpreadsheetApp.openById(CLIENT_HISTORY_SHEET_ID);
-  const sheet = megaSS.getSheetByName('Январь_Май');
-  if (!sheet) throw new Error('Лист "Январь_Май" не найден в таблице "мега база" - проверь точное название.');
-  const data = sheet.getDataRange().getValues();
-  if (data.length < 5) throw new Error('Лист "Январь_Май" пуст или почти пуст.');
+  const sheet = megaSS.getSheetByName('ЯНВАРЬ_МАЙ_НОВЫЙ');
+  if (!sheet) throw new Error('Лист "ЯНВАРЬ_МАЙ_НОВЫЙ" не найден в таблице "мега база" - проверь точное название.');
+  const rawData = sheet.getDataRange().getValues();
+  if (rawData.length < 2) throw new Error('Лист "ЯНВАРЬ_МАЙ_НОВЫЙ" пуст или почти пуст.');
+
+  // Вставка в Google Таблицы иногда растягивает getDataRange() до лишних пустых колонок
+  // (форматирование/границы) - та же проблема, что уже ловили на "МАЙ_ТЕСТ" ("The data has
+  // 105 but the range has 46"). Обрезаем по реальной ширине строки заголовков.
+  const headerRowIdxRaw = findOrdersHeaderRowIndex_(rawData);
+  const headerRowRaw = rawData[headerRowIdxRaw];
+  let realWidth = headerRowRaw.length;
+  while (realWidth > 0 && String(headerRowRaw[realWidth - 1] || '').trim() === '') realWidth--;
+  const data = rawData.map(function(row) { return row.slice(0, realWidth); });
 
   const monthBuckets = splitOrdersRawByMonth(data);
   const monthsPresent = Object.keys(monthBuckets).sort();
   if (!monthsPresent.length) {
-    throw new Error('Не удалось распознать ни одного месяца в листе "Январь_Май" - формат не совпадает с ожидаемым (нет колонок "Начало работ"/"Дата создания"?).');
+    throw new Error('Не удалось распознать ни одного месяца в листе "ЯНВАРЬ_МАЙ_НОВЫЙ" - формат не совпадает с ожидаемым (нет колонок "Начало работ"/"Дата создания"?).');
   }
 
   const headerRowIdx = findOrdersHeaderRowIndex_(data);

@@ -5654,21 +5654,35 @@ function importHistoricalOrdersFromMegaBase() {
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
   const currentMonthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
 
-  const written = [], skippedCurrent = [];
+  // Каждый месяц - в своём try/catch (2026-08-14, реальный случай у Влада: "Service
+  // Spreadsheets timed out" - транзиентный сбой Google при записи нескольких больших листов
+  // подряд). Без этого один неудачный месяц обрывал бы ВСЕ остальные, хотя они, возможно,
+  // записались бы успешно - теперь падение одного месяца не мешает остальным, а повторный
+  // запуск функции просто доделает то, что не получилось (writeArchiveSheet сам сливает с
+  // уже записанными данными, если архив уже существует - безопасно перезапускать).
+  const written = [], skippedCurrent = [], failed = [];
   monthsPresent.forEach(function(month) {
     if (month >= currentMonthKey) {
       // Защита - эта функция только для ПРОШЛЫХ месяцев, живой текущий месяц не трогаем.
       skippedCurrent.push(month);
       return;
     }
-    const monthData = headerRows.concat(monthBuckets[month]);
-    writeArchiveSheet(ss, ORDERS_ARCHIVE_PFX + month, monthData);
-    written.push(month + ' (' + monthBuckets[month].length + ' строк)');
+    try {
+      const monthData = headerRows.concat(monthBuckets[month]);
+      writeArchiveSheet(ss, ORDERS_ARCHIVE_PFX + month, monthData);
+      written.push(month + ' (' + monthBuckets[month].length + ' строк)');
+    } catch (writeErr) {
+      failed.push(month + ' (' + writeErr.message + ')');
+    }
   });
 
-  Logger.log('✅ ГОТОВО. Записаны архивы: ' + (written.join(', ') || '(ничего)'));
+  Logger.log('✅ Записаны архивы: ' + (written.join(', ') || '(ничего)'));
   if (skippedCurrent.length) Logger.log('⚠️ Пропущены (текущий/будущий месяц, не трогаем живые данные): ' + skippedCurrent.join(', '));
-  Logger.log('Дальше запусти backfillMonthSummaries() - пересчитает "История_месяцев" для этих месяцев тем же кодом, что для июня-июля.');
+  if (failed.length) {
+    Logger.log('❌ НЕ записаны (ошибка при записи, обычно временный сбой Google) - ЗАПУСТИ ФУНКЦИЮ ЕЩЁ РАЗ: ' + failed.join('; '));
+  } else {
+    Logger.log('✅ ГОТОВО. Дальше запусти backfillMonthSummaries() - пересчитает "История_месяцев" для этих месяцев тем же кодом, что для июня-июля.');
+  }
 }
 
 // ── СЛИЯНИЕ ВМЕСТО ПЕРЕЗАПИСИ (2026-08-06) ────────────────────

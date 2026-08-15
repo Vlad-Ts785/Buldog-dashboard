@@ -5652,7 +5652,14 @@ function importHistoricalOrdersFromMegaBase() {
   const headerRowIdx = findOrdersHeaderRowIndex_(data);
   const headerRows = data.slice(0, headerRowIdx + 1);
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-  const currentMonthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+  // ГРАНИЦЫ ЖЁСТКО "2026-01".."2026-05" (2026-08-14, реальный случай) - Влад назвал лист
+  // "Январь_Май", но сама выгрузка 1С (стандартный период "с начала до сегодня") принесла
+  // заодно и июнь-июль. writeArchiveSheet СЛИВАЕТ данные с уже существующим архивом - если
+  // дать ей тронуть "Заказы_2026-06"/"Заказы_2026-07", она перезаписала бы их снимком на
+  // момент отправки этой выгрузки, который может быть СТАРЕЕ, чем то, что уже накопил живой
+  // ежедневный импорт (постоянные корректировки 1С). Эта функция - ТОЛЬКО для месяцев, для
+  // которых архива ещё нет вообще, никогда не трогает то, что дашборд уже импортирует сам.
+  const IMPORT_MIN_MONTH_ = '2026-01', IMPORT_MAX_MONTH_ = '2026-05';
 
   // Каждый месяц - в своём try/catch (2026-08-14, реальный случай у Влада: "Service
   // Spreadsheets timed out" - транзиентный сбой Google при записи нескольких больших листов
@@ -5662,8 +5669,8 @@ function importHistoricalOrdersFromMegaBase() {
   // уже записанными данными, если архив уже существует - безопасно перезапускать).
   const written = [], skippedCurrent = [], failed = [];
   monthsPresent.forEach(function(month) {
-    if (month >= currentMonthKey) {
-      // Защита - эта функция только для ПРОШЛЫХ месяцев, живой текущий месяц не трогаем.
+    if (month < IMPORT_MIN_MONTH_ || month > IMPORT_MAX_MONTH_) {
+      // Защита - строго январь-май, никогда не трогаем июнь+ (живые данные дашборда).
       skippedCurrent.push(month);
       return;
     }
@@ -5677,7 +5684,7 @@ function importHistoricalOrdersFromMegaBase() {
   });
 
   Logger.log('✅ Записаны архивы: ' + (written.join(', ') || '(ничего)'));
-  if (skippedCurrent.length) Logger.log('⚠️ Пропущены (текущий/будущий месяц, не трогаем живые данные): ' + skippedCurrent.join(', '));
+  if (skippedCurrent.length) Logger.log('⚠️ Пропущены (вне диапазона ' + IMPORT_MIN_MONTH_ + '..' + IMPORT_MAX_MONTH_ + ', не трогаем живые данные): ' + skippedCurrent.join(', '));
   if (failed.length) {
     Logger.log('❌ НЕ записаны (ошибка при записи, обычно временный сбой Google) - ЗАПУСТИ ФУНКЦИЮ ЕЩЁ РАЗ: ' + failed.join('; '));
   } else {

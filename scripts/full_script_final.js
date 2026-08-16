@@ -3194,6 +3194,15 @@ function getReceiptsData(ss, ordersData) {
     .filter(function(r) { return r.date >= prevWeekStartStr && r.date <= prevWeekEndStr; })
     .reduce(function(s, r) { return s + r.amount; }, 0);
 
+  // Построчная разбивка ЗА ТЕКУЩИЙ МЕСЯЦ целиком (Влад, 2026-08-16: личная страница
+  // менеджера - "вкладка Поступление, выбор сегодня/вчера/неделя/месяц, поступления должны
+  // относиться к конкретному менеджеру") - liveRows УЖЕ и есть накопительный список с начала
+  // месяца (см. importReceiptsReport), фронтенд фильтрует по менеджеру сам, тем же полем
+  // "manager", что и в today/yesterday/week.
+  const monthTransactions = liveRows.map(function(r) {
+    return { customer: r.customer, manager: r.manager, org: r.org, orgName: DEBT_ORG_SHORT_NAMES[r.org] || r.org, docNumber: r.docNumber, amount: r.amount, date: r.date };
+  }).sort(function(a, b) { return b.amount - a.amount; });
+
   return {
     month: currentMonth,
     summary: {
@@ -3213,6 +3222,7 @@ function getReceiptsData(ss, ordersData) {
     monthly: monthly,
     today: { date: todayStr, transactions: todayTransactions, total: todayTransactions.reduce(function(s, r) { return s + r.amount; }, 0) },
     yesterday: { date: yesterdayStr, transactions: yesterdayTransactions, total: yesterdayTransactions.reduce(function(s, r) { return s + r.amount; }, 0) },
+    this_month: { date_from: currentMonth + '-01', date_to: todayStr, transactions: monthTransactions, total: totalBankMonth },
     week: {
       date_from: weekStartStr, date_to: todayStr, transactions: weekTransactions,
       total: weekTransactions.reduce(function(s, r) { return s + r.amount; }, 0),
@@ -3621,6 +3631,30 @@ function buildManagerView_(orders, managerName, ss, period) {
         }),
       };
     }
+
+    // Поступления, отфильтрованные на этого менеджера (Влад, 2026-08-16: "вкладка Поступление,
+    // выбор сегодня/вчера/неделя/месяц, все поступления должны относиться к конкретному
+    // менеджеру") - ЖИВЫЕ (не по выбранному периоду - "Поступления" всегда о деньгах прямо
+    // сейчас/на этой неделе/в этом месяце, тот же принцип, что и ДЗ выше). Фильтруем СЕРВЕРНО,
+    // не только на фронтенде - у логина реального менеджера (не админ-предпросмотр) чужие
+    // строки не должны даже прийти по сети, приватность как у ДЗ/problem_orders выше.
+    try {
+      const rd = getReceiptsData(ss, orders);
+      if (rd && !rd.error) {
+        const surLower2 = String(managerName || '').trim().split(' ')[0].toLowerCase();
+        function onlyMine_(list) {
+          return (list || []).filter(function(t) {
+            return String(t.manager || '').trim().split(' ')[0].toLowerCase() === surLower2;
+          });
+        }
+        result.receipts = {
+          today: { date: rd.today.date, transactions: onlyMine_(rd.today.transactions) },
+          yesterday: { date: rd.yesterday.date, transactions: onlyMine_(rd.yesterday.transactions) },
+          week: { date_from: rd.week.date_from, date_to: rd.week.date_to, transactions: onlyMine_(rd.week.transactions) },
+          this_month: { date_from: rd.this_month.date_from, date_to: rd.this_month.date_to, transactions: onlyMine_(rd.this_month.transactions) },
+        };
+      }
+    } catch (recErr) { /* "Поступления" не критичны для остальной личной страницы - просто не показываем вкладку */ }
   }
 
   return result;

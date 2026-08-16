@@ -1617,8 +1617,14 @@ function isLiveMonthKey_(period) {
 }
 
 // Вкладки нового блока личной страницы менеджера (2026-08-12, по образцу "Обзор заказов").
-let myPageMgrTab = 'top'; // 'top' | 'lost' | 'debt' | 'docs'
+let myPageMgrTab = 'top'; // 'top' | 'lost' | 'debt' | 'docs' | 'receipts'
 function setMyPageMgrTab(tab) { myPageMgrTab = tab; renderMyPage(); }
+// "Поступления" на личной странице менеджера (Влад, 2026-08-16: "внутри вкладки должен быть
+// выбор сегодня/вчера/неделя/месяц... все поступления должны относиться к конкретному
+// менеджеру") - те же готовые списки, что и на общей странице "Поступления" (D.receipts),
+// просто отфильтрованные по фамилии этого менеджера - без отдельного запроса к серверу.
+let myPageReceiptsPeriod = 'today'; // 'today' | 'yesterday' | 'week' | 'this_month'
+function setMyPageReceiptsPeriod(p) { myPageReceiptsPeriod = p; renderMyPage(); }
 // "Пропавшие клиенты" за 3 месяца - лениво, по клику на вкладку (не на каждой загрузке
 // страницы - тяжёлая операция на бэкенде, читает 3 архивных листа).
 let mgrLostCache = {};     // 'ФИО::период' -> { data:[...] } | { error:'...' }
@@ -2059,6 +2065,7 @@ function renderMyPageManager(el, current, selectorHtml, d) {
     '<button class="tab-btn'+(myPageMgrTab==='lost'?' active':'')+'" onclick="setMyPageMgrTab(\'lost\')">Пропавшие клиенты</button>'+
     '<button class="tab-btn'+(myPageMgrTab==='debt'?' active':'')+'" onclick="setMyPageMgrTab(\'debt\')">Дебиторская задолженность</button>'+
     '<button class="tab-btn'+(myPageMgrTab==='docs'?' active':'')+'" onclick="setMyPageMgrTab(\'docs\')">Воронка документов</button>'+
+    '<button class="tab-btn'+(myPageMgrTab==='receipts'?' active':'')+'" onclick="setMyPageMgrTab(\'receipts\')">Поступления</button>'+
   '</div>';
 
   if (myPageMgrTab === 'top') {
@@ -2205,6 +2212,54 @@ function renderMyPageManager(el, current, selectorHtml, d) {
       (pFiltered.length ? pFiltered.slice(0,100).map(problemOrderRowHtml_).join('') : '<tr><td colspan="9" style="color:'+COL.green+';padding:14px">Нет проблемных заказов ✅</td></tr>')+
     '</tbody></table></div>';
     html += '</div>';
+
+  } else if (myPageMgrTab === 'receipts') {
+    // "Поступления" на личной странице менеджера (Влад, 2026-08-16: "внутри вкладки должен
+    // быть выбор сегодня/вчера/неделя/месяц... все поступления должны относиться к
+    // конкретному менеджеру") - фильтруем уже загруженные глобальные списки D.receipts по
+    // фамилии этого менеджера (тот же приём, что и в других вкладках выше - problem_orders,
+    // debt), без отдельного запроса к серверу.
+    var recPeriodMap = {
+      yesterday: (D.receipts && D.receipts.yesterday) || null,
+      today: (D.receipts && D.receipts.today) || null,
+      week: (D.receipts && D.receipts.week) || null,
+      this_month: (D.receipts && D.receipts.this_month) || null,
+    };
+    html += '<div class="tab-bar" style="margin-bottom:14px;border-bottom:none;padding-bottom:0;gap:4px">'+
+      '<button class="tab-btn'+(myPageReceiptsPeriod==='yesterday'?' active':'')+'" onclick="setMyPageReceiptsPeriod(\'yesterday\')">Вчера</button>'+
+      '<button class="tab-btn'+(myPageReceiptsPeriod==='today'?' active':'')+'" onclick="setMyPageReceiptsPeriod(\'today\')">Сегодня</button>'+
+      '<button class="tab-btn'+(myPageReceiptsPeriod==='week'?' active':'')+'" onclick="setMyPageReceiptsPeriod(\'week\')">Неделя</button>'+
+      '<button class="tab-btn'+(myPageReceiptsPeriod==='this_month'?' active':'')+'" onclick="setMyPageReceiptsPeriod(\'this_month\')">Месяц</button>'+
+    '</div>';
+    var recPeriod = recPeriodMap[myPageReceiptsPeriod];
+    var showDate = myPageReceiptsPeriod === 'week' || myPageReceiptsPeriod === 'this_month';
+    if (!recPeriod) {
+      html += '<div class="muted" style="padding:14px 0">Нет данных "Поступления"</div>';
+    } else {
+      var myReceipts = (recPeriod.transactions || []).filter(function(t) {
+        return String(t.manager || '').trim().split(' ')[0].toLowerCase() === sur.toLowerCase();
+      });
+      var myReceiptsTotal = myReceipts.reduce(function(s, t) { return s + t.amount; }, 0);
+      var periodLabel = {yesterday:'вчера', today:'сегодня', week:'на этой неделе', this_month:'в этом месяце'}[myPageReceiptsPeriod];
+      html += '<div style="font-size:13px;color:var(--muted);margin-bottom:10px">Поступлений '+periodLabel+': '+
+        '<b style="color:var(--text)">'+fmt(myReceiptsTotal)+'</b> · '+myReceipts.length+' плат.</div>';
+      html += '<div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
+        (showDate ? '<th>Дата</th>' : '')+
+        '<th>Клиент</th><th>Юрлицо</th><th>Документ</th><th class="num">Сумма</th>'+
+      '</tr></thead><tbody>'+
+        (myReceipts.length
+          ? myReceipts.map(function(t) {
+              return '<tr>'+
+                (showDate ? '<td class="muted">'+receiptsShortDate_(t.date)+'</td>' : '')+
+                '<td>'+t.customer+'</td>'+
+                '<td class="muted">'+(t.orgName || '—')+'</td>'+
+                '<td class="muted">'+(t.docNumber || '—')+'</td>'+
+                '<td class="num">'+fmt(t.amount)+'</td>'+
+              '</tr>';
+            }).join('')
+          : '<tr><td colspan="'+(showDate?5:4)+'" class="muted" style="padding:14px">Поступлений не было</td></tr>')+
+      '</tbody></table></div>';
+    }
   }
 
   html += '</div>';

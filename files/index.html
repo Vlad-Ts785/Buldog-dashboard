@@ -1635,6 +1635,11 @@ function setMyPageMgrTab(tab) { myPageMgrTab = tab; renderMyPage(); }
 // просто отфильтрованные по фамилии этого менеджера - без отдельного запроса к серверу.
 let myPageReceiptsPeriod = 'today'; // 'today' | 'yesterday' | 'week' | 'this_month'
 function setMyPageReceiptsPeriod(p) { myPageReceiptsPeriod = p; renderMyPage(); }
+// "По заказчикам" (Влад, 2026-08-16: "после кнопки месяца пусть будет кнопка по заказчикам") -
+// НЕ период, а режим отображения ВЫБРАННОГО периода: список строк (по умолчанию) или сгруппировано
+// по клиенту (сумма+кол-во). Переключается независимо от периода, поэтому отдельный стейт.
+let myPageReceiptsByCustomer = false;
+function toggleMyPageReceiptsByCustomer() { myPageReceiptsByCustomer = !myPageReceiptsByCustomer; renderMyPage(); }
 // "Пропавшие клиенты" за 3 месяца - лениво, по клику на вкладку (не на каждой загрузке
 // страницы - тяжёлая операция на бэкенде, читает 3 архивных листа).
 let mgrLostCache = {};     // 'ФИО::период' -> { data:[...] } | { error:'...' }
@@ -2240,6 +2245,7 @@ function renderMyPageManager(el, current, selectorHtml, d) {
       '<button class="tab-btn'+(myPageReceiptsPeriod==='today'?' active':'')+'" onclick="setMyPageReceiptsPeriod(\'today\')">Сегодня</button>'+
       '<button class="tab-btn'+(myPageReceiptsPeriod==='week'?' active':'')+'" onclick="setMyPageReceiptsPeriod(\'week\')">Неделя</button>'+
       '<button class="tab-btn'+(myPageReceiptsPeriod==='this_month'?' active':'')+'" onclick="setMyPageReceiptsPeriod(\'this_month\')">Месяц</button>'+
+      '<button class="tab-btn'+(myPageReceiptsByCustomer?' active':'')+'" onclick="toggleMyPageReceiptsByCustomer()">По заказчикам</button>'+
     '</div>';
     var recPeriod = recPeriodMap[myPageReceiptsPeriod];
     var showDate = myPageReceiptsPeriod === 'week' || myPageReceiptsPeriod === 'this_month';
@@ -2253,22 +2259,52 @@ function renderMyPageManager(el, current, selectorHtml, d) {
       var periodLabel = {yesterday:'вчера', today:'сегодня', week:'на этой неделе', this_month:'в этом месяце'}[myPageReceiptsPeriod];
       html += '<div style="font-size:13px;color:var(--muted);margin-bottom:10px">Поступлений '+periodLabel+': '+
         '<b style="color:var(--text)">'+fmt(myReceiptsTotal)+'</b> · '+myReceipts.length+' плат.</div>';
-      html += '<div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
-        (showDate ? '<th>Дата</th>' : '')+
-        '<th>Клиент</th><th>Юрлицо</th><th>Документ</th><th class="num">Сумма</th>'+
-      '</tr></thead><tbody>'+
-        (myReceipts.length
-          ? myReceipts.map(function(t) {
-              return '<tr>'+
-                (showDate ? '<td class="muted">'+receiptsShortDate_(t.date)+'</td>' : '')+
-                '<td>'+t.customer+'</td>'+
-                '<td class="muted">'+(t.orgName || '—')+'</td>'+
-                '<td class="muted">'+(t.docNumber || '—')+'</td>'+
-                '<td class="num">'+fmt(t.amount)+'</td>'+
-              '</tr>';
-            }).join('')
-          : '<tr><td colspan="'+(showDate?5:4)+'" class="muted" style="padding:14px">Поступлений не было</td></tr>')+
-      '</tbody></table></div>';
+
+      if (myPageReceiptsByCustomer) {
+        // Группировка по заказчику (Влад, 2026-08-16) - сумма+кол-во за выбранный период,
+        // юрлицо через запятую если платил в несколько наших КА (тот же приём, что byCustomer
+        // на общей странице "Поступления").
+        var custMap = {};
+        myReceipts.forEach(function(t) {
+          if (!custMap[t.customer]) custMap[t.customer] = { customer: t.customer, amount: 0, count: 0, orgsSet: {} };
+          custMap[t.customer].amount += t.amount;
+          custMap[t.customer].count++;
+          if (t.orgName) custMap[t.customer].orgsSet[t.orgName] = true;
+        });
+        var byCust = Object.values(custMap).map(function(c) {
+          c.orgs = Object.keys(c.orgsSet).sort().join(', ');
+          return c;
+        }).sort(function(a, b) { return b.amount - a.amount; });
+        html += '<div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
+          '<th>Клиент</th><th>Юрлицо</th><th class="num">Сумма</th><th class="num">Поступлений</th>'+
+        '</tr></thead><tbody>'+
+          (byCust.length
+            ? byCust.map(function(c) {
+                return '<tr><td>'+c.customer+'</td>'+
+                  '<td class="muted">'+(c.orgs || '—')+'</td>'+
+                  '<td class="num">'+fmt(c.amount)+'</td>'+
+                  '<td class="num muted">'+c.count+'</td></tr>';
+              }).join('')
+            : '<tr><td colspan="4" class="muted" style="padding:14px">Поступлений не было</td></tr>')+
+        '</tbody></table></div>';
+      } else {
+        html += '<div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
+          (showDate ? '<th>Дата</th>' : '')+
+          '<th>Клиент</th><th>Юрлицо</th><th>Документ</th><th class="num">Сумма</th>'+
+        '</tr></thead><tbody>'+
+          (myReceipts.length
+            ? myReceipts.map(function(t) {
+                return '<tr>'+
+                  (showDate ? '<td class="muted">'+receiptsShortDate_(t.date)+'</td>' : '')+
+                  '<td>'+t.customer+'</td>'+
+                  '<td class="muted">'+(t.orgName || '—')+'</td>'+
+                  '<td class="muted">'+(t.docNumber || '—')+'</td>'+
+                  '<td class="num">'+fmt(t.amount)+'</td>'+
+                '</tr>';
+              }).join('')
+            : '<tr><td colspan="'+(showDate?5:4)+'" class="muted" style="padding:14px">Поступлений не было</td></tr>')+
+        '</tbody></table></div>';
+      }
     }
   }
 

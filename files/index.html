@@ -4735,8 +4735,11 @@ function renderReceiptsCustomers(r) {
 
 // ── ПЛАН ЗАДАНИЯ (только чтение из таблицы планировки, вариант А) ──
 // Данные приходят через ?action=order_plan (getOrderPlanView_ в Apps Script) -
-// дашборд ничего не пишет в таблицу планировки, только читает.
+// дашборд ничего не пишет в таблицу планировки, только читает. Один запрос отдаёт
+// заказы за весь месяц сразу - переключение дня ниже работает без похода на сервер.
 var orderPlanData = null;
+var orderPlanActiveDay = null; // null = ещё не выбран - при первом рендере встанет на сегодня
+var ORDER_PLAN_WEEKDAY_SHORT_ = ['вс','пн','вт','ср','чт','пт','сб']; // Date.getUTCDay(): 0=вс..6=сб
 
 function loadOrderPlanData() {
   if (orderPlanData !== null) { renderOrderPlan(); return; }
@@ -4754,6 +4757,38 @@ function orderPlanStatusColor_(status) {
   return 'var(--muted)';
 }
 
+// Стоимость иногда приходит числом, а иногда уже готовым текстом из ячейки
+// ("130 000р за рейс", "31 000 ₽") - раньше слепой Math.round() на такой строке
+// давал "NaN"/"не число ₽". Число форматируем сами, текст показываем как есть.
+function orderPlanFormatCost_(cost) {
+  if (cost === '' || cost === null || cost === undefined) return '';
+  if (typeof cost === 'number') return Math.round(cost).toLocaleString('ru-RU') + ' ₽';
+  var s = String(cost).trim();
+  var cleaned = s.replace(/\s+/g, '').replace(',', '.');
+  if (/^\d+(\.\d+)?$/.test(cleaned)) return Math.round(parseFloat(cleaned)).toLocaleString('ru-RU') + ' ₽';
+  return s;
+}
+
+// "Сегодня" по московскому времени, независимо от часового пояса браузера - берём
+// момент ответа сервера (orderPlanData.updated) и сдвигаем на UTC+3 (Москва круглый
+// год без перевода часов). daysInMonth - для отрисовки ВСЕХ вкладок 1..30/31, а не
+// только тех дней, где есть заказы.
+function orderPlanTodayMsk_() {
+  var base = orderPlanData && orderPlanData.updated ? new Date(orderPlanData.updated) : new Date();
+  var msk = new Date(base.getTime() + 3 * 3600 * 1000);
+  var y = msk.getUTCFullYear(), m = msk.getUTCMonth();
+  return {
+    day: msk.getUTCDate(),
+    daysInMonth: new Date(Date.UTC(y, m + 1, 0)).getUTCDate(),
+    weekdayOf: function(d) { return new Date(Date.UTC(y, m, d)).getUTCDay(); },
+  };
+}
+
+function setOrderPlanDay(day) {
+  orderPlanActiveDay = day;
+  renderOrderPlan();
+}
+
 function renderOrderPlan() {
   var el = document.getElementById('order-plan-content');
   if (!el || !orderPlanData) return;
@@ -4764,31 +4799,47 @@ function renderOrderPlan() {
   }
 
   var orders = orderPlanData.orders || [];
-  if (!orders.length) {
-    el.innerHTML = '<p style="color:var(--muted);padding:16px">Заказов на вас в таблице планировки не найдено.</p>';
-    return;
-  }
-
   var byDay = {};
   orders.forEach(function(o) {
     if (!byDay[o.day]) byDay[o.day] = [];
     byDay[o.day].push(o);
   });
-  var days = Object.keys(byDay).map(Number).sort(function(a,b){ return a-b; });
 
-  var h = '';
-  if (orderPlanData.planSpreadsheetUrl) {
-    h += '<div style="padding:0 0 12px"><a href="'+orderPlanData.planSpreadsheetUrl+'" target="_blank" style="font-size:12px;color:var(--muted)">Открыть таблицу планировки ↗</a></div>';
+  var today = orderPlanTodayMsk_();
+  if (orderPlanActiveDay === null) orderPlanActiveDay = today.day;
+
+  var h = '<div class="card" style="padding:16px 18px">';
+
+  // Вкладки дней месяца - ОДИН блок, без длинной портянки карточек. Подсвечены
+  // выходные, отдельно отмечен день с заказами и текущий выбранный день.
+  h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">';
+  for (var d = 1; d <= today.daysInMonth; d++) {
+    var dow = today.weekdayOf(d);
+    var isWeekend = dow === 0 || dow === 6;
+    var isActive = d === orderPlanActiveDay;
+    var hasOrders = !!(byDay[d] && byDay[d].length);
+    var numColor = isActive ? 'var(--text)' : (isWeekend ? '#E24B4A' : 'var(--muted)');
+    h += '<button type="button" onclick="setOrderPlanDay('+d+')" style="position:relative;min-width:38px;padding:6px 4px 5px;border-radius:var(--radius-sm);border:1px solid '+(isActive?'var(--accent,#378ADD)':'transparent')+';background:'+(isActive?'var(--bg3)':'transparent')+';cursor:pointer;text-align:center;line-height:1.15">'+
+      '<div style="font-size:13px;font-weight:600;color:'+numColor+'">'+d+'</div>'+
+      '<div style="font-size:9px;color:var(--muted);text-transform:uppercase">'+ORDER_PLAN_WEEKDAY_SHORT_[dow]+'</div>'+
+      (hasOrders ? '<div style="position:absolute;top:3px;right:3px;width:5px;height:5px;border-radius:50%;background:#378ADD"></div>' : '')+
+      '</button>';
   }
+  h += '</div>';
 
-  days.forEach(function(day) {
-    var dayOrders = byDay[day];
-    h += '<div class="card" style="margin-bottom:14px;padding:16px 18px">';
-    h += '<div style="font-size:14px;font-weight:600;margin-bottom:10px">'+(dayOrders[0].date || ('День '+day))+'</div>';
+  // Содержимое выбранного дня
+  var dayOrders = byDay[orderPlanActiveDay] || [];
+  var dateLabel = (dayOrders[0] && dayOrders[0].date) || '';
+  h += '<div style="font-size:13px;color:var(--muted);margin-bottom:8px">'+(dateLabel || (today.daysInMonth+' дней в месяце'))+'</div>';
+
+  if (!dayOrders.length) {
+    h += '<div style="color:var(--muted);font-size:13px;padding:12px 0">Заказов на этот день нет.</div>';
+  } else {
     dayOrders.forEach(function(o) {
       var color = orderPlanStatusColor_(o.status);
       var carText = o.carAssigned ? ('🚚 '+o.carAssigned) : 'машина не назначена';
       var roleText = o.role === 'logist' ? 'как логист' : 'как менеджер';
+      var costText = orderPlanFormatCost_(o.cost);
       h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04)">';
       h += '<div style="min-width:0">';
       h += '<div style="font-size:13px;color:var(--text)">№ '+(o.orderNumber||'—')+' · '+(o.equipType||'—')+'</div>';
@@ -4796,12 +4847,16 @@ function renderOrderPlan() {
       h += '</div>';
       h += '<div style="text-align:right;white-space:nowrap">';
       h += '<div style="font-size:12px;font-weight:600;color:'+color+'">'+(o.status || 'без статуса')+'</div>';
-      if (o.cost) h += '<div style="font-size:12px;color:var(--text);margin-top:2px">'+Math.round(o.cost).toLocaleString('ru-RU')+' ₽</div>';
+      if (costText) h += '<div style="font-size:12px;color:var(--text);margin-top:2px">'+costText+'</div>';
       h += '</div></div>';
     });
-    h += '</div>';
-  });
+  }
 
+  if (orderPlanData.planSpreadsheetUrl) {
+    h += '<div style="padding-top:14px"><a href="'+orderPlanData.planSpreadsheetUrl+'" target="_blank" style="font-size:12px;color:var(--muted)">Открыть таблицу планировки ↗</a></div>';
+  }
+
+  h += '</div>';
   el.innerHTML = h;
 }
 

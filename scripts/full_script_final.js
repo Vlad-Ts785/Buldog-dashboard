@@ -3831,6 +3831,46 @@ function orderPlanNameMatch_(accessName, cellName) {
   return aSurname === cSurname && a[1].toLowerCase() === c[1].toLowerCase();
 }
 
+// Читает и разбирает ОДНУ дневную вкладку таблицы планировки (без фильтра по
+// человеку - сырые имена менеджера/логиста оставлены как есть, фильтрация в
+// getOrderPlanView_). Кэшируется по дням на 5 минут (CacheService) - живой
+// тест 2026-08-16 показал, что последовательное чтение ~31 вкладки занимает
+// ОКОЛО 2.5 МИНУТ (Sheets API относительно медленный на много мелких вызовов
+// подряд) - неприемлемо для живой вкладки дашборда. Кэш по дням даёт то, что
+// дорогим остаётся только самый первый запрос после истечения кэша - для
+// ЛЮБОГО следующего человека (не только того же самого) в течение 5 минут
+// день уже не перечитывается заново.
+function readOrderPlanDayTab_(planId, sheet, day) {
+  var cache = CacheService.getScriptCache();
+  var cacheKey = 'order_plan_day_' + planId + '_' + day;
+  var cached = null;
+  try { cached = cache.get(cacheKey); } catch (e) { /* кэш недоступен - не критично */ }
+  if (cached) {
+    try { return JSON.parse(cached); } catch (e) { /* повреждённый кэш - читаем заново ниже */ }
+  }
+
+  var result = [];
+  var data = sheet.getDataRange().getValues();
+  for (var i = 3; i < data.length; i += 2) {
+    var orderNumber = data[i - 1][0];
+    if (orderNumber === '' || orderNumber === null) continue; // пустая пара — не заказ
+    result.push({
+      orderNumber: String(orderNumber).trim(),
+      date: String(data[i - 1][4] || '').trim(),
+      equipType: String(data[i - 1][2] || '').trim(),
+      status: String(data[i][0] || '').trim(),
+      cost: data[i - 1][10] || '',
+      hiredCompany: String(data[i - 1][12] || '').trim(),
+      carAssigned: String(data[i][14] || data[i - 1][14] || '').trim(),
+      rowManager: String(data[i - 1][1] || '').trim(),
+      rowLogist: String(data[i][1] || '').trim(),
+    });
+  }
+
+  try { cache.put(cacheKey, JSON.stringify(result), 300); } catch (e) { /* день слишком большой для кэша (>100KB) - не критично, просто без кэша */ }
+  return result;
+}
+
 // Читает заказы конкретного человека (как менеджера-продавца, так и
 // логиста-диспетчера) из ТЕКУЩЕЙ таблицы планировки. Актуальная таблица
 // определяется через CONFIG.ORDER_PLAN_INDEX_ID — эту строку раз в месяц
@@ -3867,30 +3907,25 @@ function getOrderPlanView_(personName) {
 
   dayTabs.forEach(function (sheet) {
     var day = parseInt(sheet.getName(), 10);
-    var data = sheet.getDataRange().getValues();
+    var dayOrders = readOrderPlanDayTab_(planId, sheet, day);
 
-    for (var i = 3; i < data.length; i += 2) {
-      var orderNumber = data[i - 1][0];
-      if (orderNumber === '' || orderNumber === null) continue; // пустая пара — не заказ
-
-      var rowManager = data[i - 1][1];
-      var rowLogist  = data[i][1];
-      var asManager = orderPlanNameMatch_(personName, rowManager);
-      var asLogist  = orderPlanNameMatch_(personName, rowLogist);
-      if (!asManager && !asLogist) continue;
+    dayOrders.forEach(function (o) {
+      var asManager = orderPlanNameMatch_(personName, o.rowManager);
+      var asLogist  = orderPlanNameMatch_(personName, o.rowLogist);
+      if (!asManager && !asLogist) return;
 
       orders.push({
         day: day,
-        orderNumber: String(orderNumber).trim(),
-        date: String(data[i - 1][4] || '').trim(),
-        equipType: String(data[i - 1][2] || '').trim(),
-        status: String(data[i][0] || '').trim(),
-        cost: data[i - 1][10] || '',
-        hiredCompany: String(data[i - 1][12] || '').trim(),
-        carAssigned: String(data[i][14] || data[i - 1][14] || '').trim(),
+        orderNumber: o.orderNumber,
+        date: o.date,
+        equipType: o.equipType,
+        status: o.status,
+        cost: o.cost,
+        hiredCompany: o.hiredCompany,
+        carAssigned: o.carAssigned,
         role: asManager ? 'manager' : 'logist',
       });
-    }
+    });
   });
 
   orders.sort(function (x, y) { return x.day - y.day; });

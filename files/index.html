@@ -9,6 +9,9 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="theme-color" content="#1D9E75">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<!-- Tabler Icons - единый стиль иконок для новых блоков (Влад, 2026-08-16), см. заметку
+     в памяти о стандарте оформления дашборда -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.46.0/dist/tabler-icons.min.css">
 <style>
 :root {
   --bg:#0f0f13;--bg2:#17171d;--bg3:#1e1e26;--bg4:#252530;
@@ -190,8 +193,8 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .cost-card{background:var(--bg3);border-radius:var(--radius-sm);padding:12px 14px;}
 .cost-card.total{border:1px solid var(--blue);}
 .cost-card-label{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);margin-bottom:6px;}
+.cost-card-label .ti{font-size:16px;}
 .cost-card.total .cost-card-label{color:var(--blue);}
-.cost-card-dot{width:8px;height:8px;border-radius:2px;flex-shrink:0;}
 .cost-card-val{font-size:17px;font-weight:600;color:var(--text);margin-bottom:3px;}
 .cost-card-sub{font-size:11px;color:var(--muted);}
 @media (max-width:640px){.cost-cards{grid-template-columns:repeat(2,1fr);}}
@@ -496,14 +499,17 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
         </div>
       </div>
 
-      <!-- Поступления - короткая сводка цифрами, один широкий блок под 4 KPI-карточками
-           (Влад, 2026-08-16: "так же, как на странице поступления... один длинный блок под
-           четырьмя блоками"). Кликабельно - переход на полную страницу "Поступления". -->
-      <div class="card" id="main-receipts-card" onclick="showPage('receipts')" style="margin-bottom:16px;cursor:pointer">
-        <div class="sec-header">
-          <div class="sec-title">💰 Поступления</div>
+      <!-- Поступления - короткая сводка цифрами, в половину ширины, как "Структура затрат"
+           (Влад, 2026-08-16: "размером сделай его так же, как структура затрат... рядом с
+           ним мы ещё потом какой-нибудь блок поставим" - карточка одна в grid-2, второй
+           слот свободен под будущий блок). Заголовок без иконки/emoji - единый стиль с
+           .card-title остальных блоков (см. память project_dashboard_icon_style).
+           Кликабельно - переход на полную страницу "Поступления". -->
+      <div class="grid-2">
+        <div class="card" id="main-receipts-card" onclick="showPage('receipts')" style="cursor:pointer">
+          <div class="card-title">Поступления</div>
+          <div id="main-receipts-summary"></div>
         </div>
-        <div id="main-receipts-summary"></div>
       </div>
 
       <!-- Строка 2: Структура затрат и Статус парка - равная ширина (Влад, 2026-07-04) -->
@@ -3255,6 +3261,11 @@ function renderKPI() {
 // строку, без графика (Влад выбрал "короткая сводка цифрами" из предложенных вариантов).
 // Источник - тот же D.receipts, что уже грузится для страницы "Поступления" (renderReceipts) -
 // без отдельного запроса.
+// Вариант 1 из превью в чате (Влад, 2026-08-16): крупное число за месяц сверху + сетка
+// 2х2 из остальных трёх метрик снизу. Сальдо - за ТЕКУЩИЙ МЕСЯЦ (s.month_balance), не с
+// начала года - "года показывать не нужно" (Влад, 2026-08-16). Тот же s.month_balance
+// уже считается бэкендом и используется на полной странице "Поступления" (см.
+// renderReceiptsKPIs), тут просто другой ракурс на то же число.
 function renderMainReceiptsSummary() {
   var el = document.getElementById('main-receipts-summary');
   if (!el) return;
@@ -3265,30 +3276,34 @@ function renderMainReceiptsSummary() {
   }
   var s = r.summary;
   var w = r.week || {};
-  var y = s.ytd || {};
-
-  function stat(label, valueHtml, sub) {
-    return '<div>' +
-      '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">' + label + '</div>' +
-      '<div style="font-size:20px;font-weight:700;color:var(--text)">' + valueHtml + '</div>' +
-      (sub ? '<div style="font-size:11px;color:var(--muted);margin-top:2px">' + sub + '</div>' : '') +
-    '</div>';
-  }
 
   var weekPct = null;
   if (w.prev_total > 0) weekPct = Math.round(((w.total || 0) - w.prev_total) / w.prev_total * 100);
   var weekUp = weekPct !== null && weekPct >= 0;
   var weekSub = weekPct === null ? '' :
-    '<span style="color:' + (weekUp ? 'var(--green)' : 'var(--red)') + '">' + (weekUp ? '▲' : '▼') + ' ' + (weekUp ? '+' : '') + weekPct + '% к прошлой</span>';
+    '<div style="font-size:11px;color:' + (weekUp ? 'var(--green)' : 'var(--red)') + ';margin-top:2px">' +
+      (weekUp ? '▲' : '▼') + ' ' + (weekUp ? '+' : '') + weekPct + '%</div>';
 
-  var balCls = y.balance >= 0 ? 'var(--green)' : 'var(--red)';
+  function miniStat(label, valueHtml, sub, fullRow) {
+    return '<div' + (fullRow ? ' style="grid-column:1/-1"' : '') + '>' +
+      '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">' + label + '</div>' +
+      '<div style="font-size:15px;font-weight:600;color:var(--text)">' + valueHtml + '</div>' +
+      (sub || '') +
+    '</div>';
+  }
 
-  el.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:24px">' +
-    stat('За ' + formatMonthLabel(r.month).toLowerCase(), fmt(s.total_month)) +
-    stat('Сегодня', fmt(s.total_today)) +
-    stat('На этой неделе', fmt(w.total || 0), weekSub) +
-    stat('Сальдо с начала ' + (y.year || ''), '<span style="color:' + balCls + '">' + (y.balance >= 0 ? '+' : '') + fmt(y.balance) + '</span>') +
-  '</div>';
+  var monthBalance = s.month_balance;
+  var balHtml = monthBalance == null ? '—' :
+    '<span style="color:' + (monthBalance >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (monthBalance >= 0 ? '+' : '') + fmt(monthBalance) + '</span>';
+
+  el.innerHTML =
+    '<div style="font-size:22px;font-weight:600;color:var(--text);line-height:1.2">' + fmt(s.total_month) + '</div>' +
+    '<div style="font-size:11px;color:var(--muted);margin-top:4px">за ' + formatMonthLabel(r.month).toLowerCase() + '</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 16px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">' +
+      miniStat('Сегодня', fmt(s.total_today)) +
+      miniStat('На неделе', fmt(w.total || 0), weekSub) +
+      miniStat('Сальдо за ' + formatMonthLabel(r.month).toLowerCase(), balHtml, null, true) +
+    '</div>';
 }
 
 function setBar(id, v, color) {
@@ -3526,11 +3541,11 @@ function goToVehiclesWithType(typeVal) {
 function renderCostChart() {
   const s = D.summary || {};
   const costs = [
-    {name:'ФОТ',       val:Math.abs(s.fot||0),   color:'var(--blue)'},
-    {name:'Топливо',   val:Math.abs(s.fuel||0),  color:'var(--green)'},
-    {name:'Запчасти',  val:Math.abs(s.parts||0), color:'var(--amber)'},
-    {name:'Штрафы',    val:Math.abs(s.fines||0), color:'var(--red)'},
-    {name:'Проходные', val:Math.abs(s.tolls||0), color:'var(--purple)'},
+    {name:'ФОТ',       val:Math.abs(s.fot||0),   icon:'ti-users'},
+    {name:'Топливо',   val:Math.abs(s.fuel||0),  icon:'ti-gas-station'},
+    {name:'Запчасти',  val:Math.abs(s.parts||0), icon:'ti-tool'},
+    {name:'Штрафы',    val:Math.abs(s.fines||0), icon:'ti-alert-triangle'},
+    {name:'Проходные', val:Math.abs(s.tolls||0), icon:'ti-route'},
   ];
   const total = costs.reduce((a,c) => a + c.val, 0);
   const parkRevenue = s.revenue || 0;
@@ -3540,14 +3555,14 @@ function renderCostChart() {
     const p = total > 0 ? (c.val/total*100).toFixed(1) : '0';
     const revPct = parkRevenue > 0 ? (c.val/parkRevenue*100).toFixed(1) : null;
     return `<div class="cost-card">
-      <div class="cost-card-label"><span class="cost-card-dot" style="background:${c.color}"></span>${c.name}</div>
+      <div class="cost-card-label"><i class="ti ${c.icon}" aria-hidden="true"></i>${c.name}</div>
       <div class="cost-card-val">${fmtK2(c.val)} ₽</div>
       <div class="cost-card-sub">${p}% затрат${revPct !== null ? ' · ' + revPct + '% выр.' : ''}</div>
     </div>`;
   }).join('');
 
   const totalCard = `<div class="cost-card total">
-    <div class="cost-card-label">Итого</div>
+    <div class="cost-card-label"><i class="ti ti-sum" aria-hidden="true"></i>Итого</div>
     <div class="cost-card-val">${fmtK2(total)} ₽</div>
     <div class="cost-card-sub">${totalRevPct !== null ? totalRevPct + '% от выручки' : '&nbsp;'}</div>
   </div>`;

@@ -397,6 +397,9 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
     <div class="sidebar-nav-item" onclick="showPage('my-page',this)" data-page="my-page">
       <span class="sidebar-nav-icon">🙋</span> Личная страница
     </div>
+    <div class="sidebar-nav-item" onclick="showPage('order-plan',this)" data-page="order-plan">
+      <span class="sidebar-nav-icon">📋</span> План задания
+    </div>
     <div class="sidebar-nav-item" onclick="showPage('clients',this)" data-page="clients">
       <span class="sidebar-nav-icon">🏢</span> Клиенты
     </div>
@@ -1097,6 +1100,11 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
       <div id="my-page-content"><p style="color:var(--muted);padding:16px">Данные загружаются...</p></div>
     </div>
 
+    <!-- ═══ ПЛАН ЗАДАНИЯ (только чтение из таблицы планировки) ═══ -->
+    <div id="page-order-plan" class="page">
+      <div id="order-plan-content"><p style="color:var(--muted);padding:16px">Данные загружаются...</p></div>
+    </div>
+
     <!-- ═══ КЛИЕНТЫ ══════════════════════════════════════════════ -->
     <div id="page-clients" class="page">
       <div id="clients-loading" style="color:var(--muted);padding:16px">Загрузка клиентской аналитики...</div>
@@ -1172,6 +1180,7 @@ const PAGE_TITLES = {
   // 'my-page' - без заголовка (Влад, 2026-08-12: "слово личная страница убрать") - шапка
   // самой страницы (ФИО+должность) уже несёт этот смысл, дублирующий заголовок не нужен.
   'my-page': '',
+  'order-plan': 'План задания',
   debt: 'Дебиторская задолженность',
 };
 
@@ -2929,7 +2938,7 @@ function applyRoleUI() {
     if (sidebarLabel) sidebarLabel.textContent = D.managerName || D.logistName || (D.role === 'logist' ? 'Логист' : 'Менеджер');
     document.querySelectorAll('.sidebar-nav-item').forEach(function(item) {
       const page = item.getAttribute('data-page');
-      item.style.display = (page === 'my-page') ? '' : 'none';
+      item.style.display = (page === 'my-page' || page === 'order-plan') ? '' : 'none';
     });
     document.querySelectorAll('.sidebar-nav-section').forEach(function(s){ s.style.display = 'none'; });
     showPage('my-page');
@@ -4708,6 +4717,78 @@ function renderReceiptsCustomers(r) {
   }
 }
 
+
+// ── ПЛАН ЗАДАНИЯ (только чтение из таблицы планировки, вариант А) ──
+// Данные приходят через ?action=order_plan (getOrderPlanView_ в Apps Script) -
+// дашборд ничего не пишет в таблицу планировки, только читает.
+var orderPlanData = null;
+
+function loadOrderPlanData() {
+  if (orderPlanData !== null) { renderOrderPlan(); return; }
+  var el = document.getElementById('order-plan-content');
+  if (el) el.innerHTML = '<p style="color:var(--muted);padding:16px">Загрузка...</p>';
+  apiFetchJson({ action: 'order_plan' })
+    .then(function(d) { orderPlanData = d; renderOrderPlan(); })
+    .catch(function() { orderPlanData = { error: 'Ошибка загрузки', orders: [] }; renderOrderPlan(); });
+}
+
+function orderPlanStatusColor_(status) {
+  if (status === 'Подтверждено') return '#1D9E75';
+  if (status === 'Отбой') return '#E24B4A';
+  if (status === 'Не закрыто') return '#EF9F27';
+  return 'var(--muted)';
+}
+
+function renderOrderPlan() {
+  var el = document.getElementById('order-plan-content');
+  if (!el || !orderPlanData) return;
+
+  if (orderPlanData.error && !(orderPlanData.orders && orderPlanData.orders.length)) {
+    el.innerHTML = '<p style="color:var(--muted);padding:16px">'+orderPlanData.error+'</p>';
+    return;
+  }
+
+  var orders = orderPlanData.orders || [];
+  if (!orders.length) {
+    el.innerHTML = '<p style="color:var(--muted);padding:16px">Заказов на вас в таблице планировки не найдено.</p>';
+    return;
+  }
+
+  var byDay = {};
+  orders.forEach(function(o) {
+    if (!byDay[o.day]) byDay[o.day] = [];
+    byDay[o.day].push(o);
+  });
+  var days = Object.keys(byDay).map(Number).sort(function(a,b){ return a-b; });
+
+  var h = '';
+  if (orderPlanData.planSpreadsheetUrl) {
+    h += '<div style="padding:0 0 12px"><a href="'+orderPlanData.planSpreadsheetUrl+'" target="_blank" style="font-size:12px;color:var(--muted)">Открыть таблицу планировки ↗</a></div>';
+  }
+
+  days.forEach(function(day) {
+    var dayOrders = byDay[day];
+    h += '<div class="card" style="margin-bottom:14px;padding:16px 18px">';
+    h += '<div style="font-size:14px;font-weight:600;margin-bottom:10px">'+(dayOrders[0].date || ('День '+day))+'</div>';
+    dayOrders.forEach(function(o) {
+      var color = orderPlanStatusColor_(o.status);
+      var carText = o.carAssigned ? ('🚚 '+o.carAssigned) : 'машина не назначена';
+      var roleText = o.role === 'logist' ? 'как логист' : 'как менеджер';
+      h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04)">';
+      h += '<div style="min-width:0">';
+      h += '<div style="font-size:13px;color:var(--text)">№ '+(o.orderNumber||'—')+' · '+(o.equipType||'—')+'</div>';
+      h += '<div style="font-size:11px;color:var(--muted);margin-top:2px">'+carText+(o.hiredCompany ? ' · найм: '+o.hiredCompany : '')+' · '+roleText+'</div>';
+      h += '</div>';
+      h += '<div style="text-align:right;white-space:nowrap">';
+      h += '<div style="font-size:12px;font-weight:600;color:'+color+'">'+(o.status || 'без статуса')+'</div>';
+      if (o.cost) h += '<div style="font-size:12px;color:var(--text);margin-top:2px">'+Math.round(o.cost).toLocaleString('ru-RU')+' ₽</div>';
+      h += '</div></div>';
+    });
+    h += '</div>';
+  });
+
+  el.innerHTML = h;
+}
 
 // ── ДИНАМИКА ───────────────────────────────────────────────
 var histData = null;
@@ -7448,6 +7529,7 @@ function showPage(id, el) {
   if (id === 'dynamics') loadHistoryData();
   if (id === 'clients') loadClientsData();
   if (id === 'global-stats') loadGlobalStatsData();
+  if (id === 'order-plan') loadOrderPlanData();
 
   var wrap = document.getElementById('period-selector-wrap');
   if (wrap) {

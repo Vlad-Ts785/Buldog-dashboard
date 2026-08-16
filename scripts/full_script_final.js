@@ -178,6 +178,11 @@ const CONFIG = {
   TELEGRAM_LOGISTS_CHAT_ID: '-5072928374',  // группа "Кадры/Ремонт/База"
   ALERT_FINE_THRESHOLD: 50000,   // штраф выше этой суммы → алерт
   ALERT_LOSS_THRESHOLD: 0,       // прибыль ниже этого → алерт
+  // Таблица-указатель "План задания - Индекс" (не сама таблица планировки -
+  // та меняется каждый месяц, это одна строка month/year/id/url, которую
+  // duplicateForNextMonth() перезаписывает при создании копии на новый месяц).
+  // Создана 2026-08-16, см. plans/ "План задания" и project_order_planning_sheet.
+  ORDER_PLAN_INDEX_ID: '1-afr5nC1Mg0UXgz7vwxvH4GX7MuAS14i-2-QA6yGxQQ',
 };
 
 // Google OAuth Client ID - не секрет (Google сам рекомендует класть его в открытый код сайта,
@@ -3806,6 +3811,98 @@ function getLogistView_(ss, logistName) { return buildLogistView_(getOrdersData(
 function getLogistViewForPeriod_(ss, logistName, period) { return buildLogistView_(getOrdersDataForPeriod(ss, period), logistName, ss, period); }
 
 // ============================================================
+// "ПЛАН ЗАДАНИЯ" — только чтение из отдельной таблицы планировки
+// (Планировка_заказов, живёт вне репозитория дашборда). Дашборд её не
+// изменяет, только читает — сама таблица остаётся основным рабочим
+// инструментом логистов/менеджеров (см. plans/ "План задания на дашборде").
+// ============================================================
+
+// Сверяет "Фамилия Имя Отчество" (лист «Доступ» дашборда) с "Фамилия Имя"
+// (колонка B таблицы планировки) — форматы разные, отчества в планировке
+// нет, а фамилия может быть короче через дефис (Прус-Роскошный → Прус).
+// Сверено на реальных данных 2026-08-16: без этой нормализации 0 совпадений
+// из 17 имён, с ней — все 5 реальных пар совпали. См. plans/ "План задания".
+function orderPlanNameMatch_(accessName, cellName) {
+  var a = String(accessName || '').trim().split(/\s+/);
+  var c = String(cellName || '').trim().split(/\s+/);
+  if (a.length < 2 || c.length < 2) return false;
+  var aSurname = a[0].split('-')[0].toLowerCase();
+  var cSurname = c[0].split('-')[0].toLowerCase();
+  return aSurname === cSurname && a[1].toLowerCase() === c[1].toLowerCase();
+}
+
+// Читает заказы конкретного человека (как менеджера-продавца, так и
+// логиста-диспетчера) из ТЕКУЩЕЙ таблицы планировки. Актуальная таблица
+// определяется через CONFIG.ORDER_PLAN_INDEX_ID — эту строку раз в месяц
+// перезаписывает duplicateForNextMonth() в проекте планировки при создании
+// копии на новый месяц. Раскладка строк/колонок — по факту кода планировки
+// (см. Планировка_заказов*/planirovka_zakazov_script.js, CONFIG вверху):
+// пара строк на заказ, нечётная (верхняя) — номер/менеджер/техника/дата/
+// стоимость/наёмная компания, чётная (нижняя) — статус/логист/машина.
+function getOrderPlanView_(personName) {
+  var indexSs, indexSheet;
+  try {
+    indexSs = SpreadsheetApp.openById(CONFIG.ORDER_PLAN_INDEX_ID);
+    indexSheet = indexSs.getSheetByName('Индекс');
+  } catch (e) {
+    return { error: 'Не удалось открыть индексную таблицу: ' + e.message, orders: [] };
+  }
+  if (!indexSheet || indexSheet.getLastRow() < 2) {
+    return { error: 'Индексная таблица пуста', orders: [] };
+  }
+  var planId = indexSheet.getRange(2, 3).getValue();
+  if (!planId) return { error: 'В индексе не указан ID таблицы планировки', orders: [] };
+
+  var planSs;
+  try {
+    planSs = SpreadsheetApp.openById(planId);
+  } catch (e) {
+    return { error: 'Не удалось открыть таблицу планировки: ' + e.message, orders: [] };
+  }
+
+  var orders = [];
+  var dayTabs = planSs.getSheets().filter(function (s) {
+    return !isNaN(parseInt(s.getName(), 10));
+  });
+
+  dayTabs.forEach(function (sheet) {
+    var day = parseInt(sheet.getName(), 10);
+    var data = sheet.getDataRange().getValues();
+
+    for (var i = 3; i < data.length; i += 2) {
+      var orderNumber = data[i - 1][0];
+      if (orderNumber === '' || orderNumber === null) continue; // пустая пара — не заказ
+
+      var rowManager = data[i - 1][1];
+      var rowLogist  = data[i][1];
+      var asManager = orderPlanNameMatch_(personName, rowManager);
+      var asLogist  = orderPlanNameMatch_(personName, rowLogist);
+      if (!asManager && !asLogist) continue;
+
+      orders.push({
+        day: day,
+        orderNumber: String(orderNumber).trim(),
+        date: String(data[i - 1][4] || '').trim(),
+        equipType: String(data[i - 1][2] || '').trim(),
+        status: String(data[i][0] || '').trim(),
+        cost: data[i - 1][10] || '',
+        hiredCompany: String(data[i - 1][12] || '').trim(),
+        carAssigned: String(data[i][14] || data[i - 1][14] || '').trim(),
+        role: asManager ? 'manager' : 'logist',
+      });
+    }
+  });
+
+  orders.sort(function (x, y) { return x.day - y.day; });
+
+  return {
+    updated: new Date().toISOString(),
+    planSpreadsheetUrl: planSs.getUrl(),
+    orders: orders,
+  };
+}
+
+// ============================================================
 // API ДЛЯ ДАШБОРДА — читает Штатку для статусов и типов
 // ============================================================
 // ============================================================
@@ -3840,6 +3937,16 @@ function doGet(e) {
     if (!action) {
       try { logAccessVisit_(ss, email, access.name, access.role); } catch (logErr) { /* не критично для остального ответа */ }
     }
+
+    // Вкладка "План задания" - урезанный только-чтение список заказов текущего
+    // пользователя из ОТДЕЛЬНОЙ таблицы планировки (см. getOrderPlanView_ выше).
+    // Доступна manager и logist (свои заказы), и admin (по имени из своей строки в "Доступ").
+    if (action === 'order_plan') {
+      return ContentService
+        .createTextOutput(JSON.stringify(getOrderPlanView_(access.name)))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
     if (action === 'vehicle_history') {
       if (access.role !== 'admin') {
         return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);

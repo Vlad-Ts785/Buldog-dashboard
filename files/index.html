@@ -4789,6 +4789,28 @@ function setOrderPlanDay(day) {
   renderOrderPlan();
 }
 
+// Строка "Машина/водитель" в исходной таблице - это большой текст из шаблона
+// уведомления ("*ФИО и тел. водителя:*\nИванов...\n\n*Тягач:*..."). В таблице
+// показываем только имя водителя, полный текст - во всплывающей подсказке (title).
+function orderPlanCarSummary_(carAssigned) {
+  if (!carAssigned) return { short: '', full: '' };
+  var s = String(carAssigned).replace(/^"+|"+$/g, '').trim();
+  var m = s.match(/ФИО и тел\.\s*водителя:\*?\s*\n?\s*([^\n]+)/i);
+  var short = m ? m[1].trim() : s.split(/\n/)[0].trim();
+  if (short.length > 34) short = short.slice(0, 34) + '…';
+  return { short: short, full: s };
+}
+
+// Фон строки таблицы, приближенный к покраске статуса в самой таблице планировки
+// (getStatusColor в Планировка_заказов*/planirovka_zakazov_script.js: розовый/зелёный/
+// жёлтый на всю пару строк заказа) - здесь та же идея, но приглушённая под тёмную тему.
+function orderPlanRowBg_(status) {
+  if (status === 'Подтверждено') return 'rgba(29,158,117,.12)';
+  if (status === 'Отбой') return 'rgba(226,75,74,.12)';
+  if (status === 'Не закрыто') return 'rgba(239,159,39,.12)';
+  return 'transparent';
+}
+
 function renderOrderPlan() {
   var el = document.getElementById('order-plan-content');
   if (!el || !orderPlanData) return;
@@ -4810,24 +4832,28 @@ function renderOrderPlan() {
 
   var h = '<div class="card" style="padding:16px 18px">';
 
-  // Вкладки дней месяца - ОДИН блок, без длинной портянки карточек. Подсвечены
-  // выходные, отдельно отмечен день с заказами и текущий выбранный день.
-  h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">';
+  // Вкладки дней месяца - ОДИН блок, ОДИН ряд (Влад: "не должно быть перескока на
+  // второй ряд") - если не помещается на узком экране, скроллится по горизонтали,
+  // а не переносится. Подсвечены выходные, точкой отмечен день с заказами.
+  h += '<div id="order-plan-day-tabs" style="display:flex;flex-wrap:nowrap;overflow-x:auto;gap:4px;margin-bottom:14px;padding-bottom:2px">';
   for (var d = 1; d <= today.daysInMonth; d++) {
     var dow = today.weekdayOf(d);
     var isWeekend = dow === 0 || dow === 6;
     var isActive = d === orderPlanActiveDay;
     var hasOrders = !!(byDay[d] && byDay[d].length);
     var numColor = isActive ? 'var(--text)' : (isWeekend ? '#E24B4A' : 'var(--muted)');
-    h += '<button type="button" onclick="setOrderPlanDay('+d+')" style="position:relative;min-width:38px;padding:6px 4px 5px;border-radius:var(--radius-sm);border:1px solid '+(isActive?'var(--accent,#378ADD)':'transparent')+';background:'+(isActive?'var(--bg3)':'transparent')+';cursor:pointer;text-align:center;line-height:1.15">'+
-      '<div style="font-size:13px;font-weight:600;color:'+numColor+'">'+d+'</div>'+
-      '<div style="font-size:9px;color:var(--muted);text-transform:uppercase">'+ORDER_PLAN_WEEKDAY_SHORT_[dow]+'</div>'+
-      (hasOrders ? '<div style="position:absolute;top:3px;right:3px;width:5px;height:5px;border-radius:50%;background:#378ADD"></div>' : '')+
+    h += '<button type="button" data-day="'+d+'" onclick="setOrderPlanDay('+d+')" style="flex:0 0 auto;position:relative;min-width:32px;padding:5px 3px 4px;border-radius:var(--radius-sm);border:1px solid '+(isActive?'var(--accent,#378ADD)':'transparent')+';background:'+(isActive?'var(--bg3)':'transparent')+';cursor:pointer;text-align:center;line-height:1.15">'+
+      '<div style="font-size:12px;font-weight:600;color:'+numColor+'">'+d+'</div>'+
+      '<div style="font-size:8px;color:var(--muted);text-transform:uppercase">'+ORDER_PLAN_WEEKDAY_SHORT_[dow]+'</div>'+
+      (hasOrders ? '<div style="position:absolute;top:2px;right:2px;width:4px;height:4px;border-radius:50%;background:#378ADD"></div>' : '')+
       '</button>';
   }
   h += '</div>';
 
-  // Содержимое выбранного дня
+  // Содержимое выбранного дня - таблица, приближенная по виду к самой таблице
+  // планировки (Влад: "заявки должны быть максимально визуально приближены к тому,
+  // что у нас в таблице заказов") - строки подсвечены тем же цветом, что и статус
+  // заказа в исходном Google Sheet.
   var dayOrders = byDay[orderPlanActiveDay] || [];
   var dateLabel = (dayOrders[0] && dayOrders[0].date) || '';
   h += '<div style="font-size:13px;color:var(--muted);margin-bottom:8px">'+(dateLabel || (today.daysInMonth+' дней в месяце'))+'</div>';
@@ -4835,21 +4861,25 @@ function renderOrderPlan() {
   if (!dayOrders.length) {
     h += '<div style="color:var(--muted);font-size:13px;padding:12px 0">Заказов на этот день нет.</div>';
   } else {
+    h += '<div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
+      '<th>№</th><th>Техника</th><th>Статус</th><th class="num">Стоимость</th><th>Наём</th><th>Машина / водитель</th><th>Роль</th>'+
+      '</tr></thead><tbody>';
     dayOrders.forEach(function(o) {
       var color = orderPlanStatusColor_(o.status);
-      var carText = o.carAssigned ? ('🚚 '+o.carAssigned) : 'машина не назначена';
-      var roleText = o.role === 'logist' ? 'как логист' : 'как менеджер';
+      var car = orderPlanCarSummary_(o.carAssigned);
+      var roleText = o.role === 'logist' ? 'логист' : 'менеджер';
       var costText = orderPlanFormatCost_(o.cost);
-      h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04)">';
-      h += '<div style="min-width:0">';
-      h += '<div style="font-size:13px;color:var(--text)">№ '+(o.orderNumber||'—')+' · '+(o.equipType||'—')+'</div>';
-      h += '<div style="font-size:11px;color:var(--muted);margin-top:2px">'+carText+(o.hiredCompany ? ' · найм: '+o.hiredCompany : '')+' · '+roleText+'</div>';
-      h += '</div>';
-      h += '<div style="text-align:right;white-space:nowrap">';
-      h += '<div style="font-size:12px;font-weight:600;color:'+color+'">'+(o.status || 'без статуса')+'</div>';
-      if (costText) h += '<div style="font-size:12px;color:var(--text);margin-top:2px">'+costText+'</div>';
-      h += '</div></div>';
+      h += '<tr style="background:'+orderPlanRowBg_(o.status)+'">';
+      h += '<td>'+(o.orderNumber||'—')+'</td>';
+      h += '<td>'+(o.equipType||'—')+'</td>';
+      h += '<td style="color:'+color+';font-weight:600">'+(o.status || 'без статуса')+'</td>';
+      h += '<td class="num">'+(costText || '—')+'</td>';
+      h += '<td>'+(o.hiredCompany || '—')+'</td>';
+      h += '<td'+(car.full ? ' title="'+car.full.replace(/"/g,'&quot;')+'"' : '')+'>'+(car.short || '—')+'</td>';
+      h += '<td style="color:var(--muted)">'+roleText+'</td>';
+      h += '</tr>';
     });
+    h += '</tbody></table></div>';
   }
 
   if (orderPlanData.planSpreadsheetUrl) {
@@ -4858,6 +4888,11 @@ function renderOrderPlan() {
 
   h += '</div>';
   el.innerHTML = h;
+
+  // Активный день может быть вне видимой части ряда (ряд не переносится на второй
+  // ряд, а скроллится) - прокручиваем его в центр, чтобы не искать глазами вручную.
+  var activeTabEl = document.querySelector('#order-plan-day-tabs [data-day="'+orderPlanActiveDay+'"]');
+  if (activeTabEl) activeTabEl.scrollIntoView({ block: 'nearest', inline: 'center' });
 }
 
 // ── ДИНАМИКА ───────────────────────────────────────────────

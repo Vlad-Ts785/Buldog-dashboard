@@ -3074,10 +3074,15 @@ function getReceiptsData(ss, ordersData) {
   // через запятую (обычно одно, но не гарантировано).
   const custMap = {};
   liveRows.forEach(function(r) {
-    if (!custMap[r.customer]) custMap[r.customer] = { customer: r.customer, manager: r.manager, amount: 0, count: 0, orgsSet: {} };
+    if (!custMap[r.customer]) custMap[r.customer] = { customer: r.customer, manager: r.manager, amount: 0, count: 0, orgsSet: {}, orgAmounts: {} };
     custMap[r.customer].amount += r.amount;
     custMap[r.customer].count++;
     custMap[r.customer].orgsSet[r.org] = true;
+    // Сумма ИМЕННО по этому юрлицу (Влад, 2026-08-16: клик по юрлицу должен сортировать
+    // клиентов по их сумме В ЭТОМ юрлице, не по общей сумме - у клиента, платящего в
+    // несколько наших КА, это разные числа).
+    const shortOrg = DEBT_ORG_SHORT_NAMES[r.org] || r.org;
+    custMap[r.customer].orgAmounts[shortOrg] = (custMap[r.customer].orgAmounts[shortOrg] || 0) + r.amount;
   });
   const byCustomer = Object.values(custMap).map(function(c) {
     c.orgs = Object.keys(c.orgsSet).map(function(o) { return DEBT_ORG_SHORT_NAMES[o] || o; }).sort().join(', ');
@@ -3176,6 +3181,19 @@ function getReceiptsData(ss, ordersData) {
     })
     .sort(function(a, b) { return b.amount - a.amount; });
 
+  // Прошлая неделя - ТОТ ЖЕ диапазон дней недели, сдвинутый на 7 дней назад (не полная
+  // неделя пн-вс, а "по сегодняшний день недели" - честное сравнение "сколько было на эту
+  // же точку прошлой недели", Влад, 2026-08-16: "сравнение с прошлой неделей в процентах").
+  const prevWeekStartDate = new Date(weekStartDate);
+  prevWeekStartDate.setDate(prevWeekStartDate.getDate() - 7);
+  const prevWeekStartStr = Utilities.formatDate(prevWeekStartDate, 'Europe/Moscow', 'yyyy-MM-dd');
+  const prevWeekEndDate = new Date();
+  prevWeekEndDate.setDate(prevWeekEndDate.getDate() - 7);
+  const prevWeekEndStr = Utilities.formatDate(prevWeekEndDate, 'Europe/Moscow', 'yyyy-MM-dd');
+  const prevWeekTotal = allRowsForDayLookup
+    .filter(function(r) { return r.date >= prevWeekStartStr && r.date <= prevWeekEndStr; })
+    .reduce(function(s, r) { return s + r.amount; }, 0);
+
   return {
     month: currentMonth,
     summary: {
@@ -3195,7 +3213,11 @@ function getReceiptsData(ss, ordersData) {
     monthly: monthly,
     today: { date: todayStr, transactions: todayTransactions, total: todayTransactions.reduce(function(s, r) { return s + r.amount; }, 0) },
     yesterday: { date: yesterdayStr, transactions: yesterdayTransactions, total: yesterdayTransactions.reduce(function(s, r) { return s + r.amount; }, 0) },
-    week: { date_from: weekStartStr, date_to: todayStr, transactions: weekTransactions, total: weekTransactions.reduce(function(s, r) { return s + r.amount; }, 0) },
+    week: {
+      date_from: weekStartStr, date_to: todayStr, transactions: weekTransactions,
+      total: weekTransactions.reduce(function(s, r) { return s + r.amount; }, 0),
+      prev_total: prevWeekTotal, prev_date_from: prevWeekStartStr, prev_date_to: prevWeekEndStr,
+    },
   };
 }
 
@@ -3886,6 +3908,25 @@ function doGet(e) {
           };
         });
       }
+      // "Поступления денежных средств" - реальные деньги на р/с (Влад, 2026-08-16: "кривая
+      // поступления денежных средств... заранее по умолчанию отключена, при необходимости
+      // по клику включается"). Безнал - прямое чтение архива+живого листа "Поступления"
+      // (дёшево, просто сумма по месяцу, БЕЗ пересчёта заказов), наличка - уже готовое
+      // История_месяцев.cash (посчитано один раз за прогон runAll(), не на лету) - тот же
+      // принцип "не пересчитываем на каждый запрос", что и у остального global_stats.
+      var receiptsByMonth = {};
+      receiptsReadSheetRows_(ss.getSheetByName(RECEIPTS_ARCHIVE_SHEET)).forEach(function(row) {
+        var mk = row.date.slice(0, 7);
+        receiptsByMonth[mk] = (receiptsByMonth[mk] || 0) + row.amount;
+      });
+      receiptsReadSheetRows_(ss.getSheetByName(RECEIPTS_SHEET)).forEach(function(row) {
+        var mk = row.date.slice(0, 7);
+        receiptsByMonth[mk] = (receiptsByMonth[mk] || 0) + row.amount;
+      });
+      msMonths.forEach(function(m) {
+        m.receipts = (receiptsByMonth[m.month] || 0) + (m.cash || 0);
+      });
+
       msMonths.sort(function(a, b) { return a.month.localeCompare(b.month); });
       return ContentService.createTextOutput(JSON.stringify({ months: msMonths })).setMimeType(ContentService.MimeType.JSON);
     }

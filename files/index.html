@@ -620,6 +620,11 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           <div class="kpi" id="receipts-kpi-ytd"></div>
         </div>
 
+        <!-- Поступления этой недели vs прошлой (Влад, 2026-08-16: "ниже должно быть поступление
+             этой недели и сравнение с прошлой неделей в процентах") - отдельный блок под KPI,
+             не в сетке из 4 карточек (5-я карточка в grid repeat(4,1fr) смотрелась бы криво). -->
+        <div class="card" id="receipts-week-summary" style="margin-bottom:16px"></div>
+
         <div class="card" style="margin-bottom:16px">
           <div class="sec-header">
             <div class="sec-title">Поступления vs. Коммерческие заказы</div>
@@ -649,6 +654,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
                   <th>Менеджер</th><th class="num">Сумма</th><th class="num">Доля</th><th class="num">Поступлений</th>
                 </tr></thead>
                 <tbody id="receipts-managers-body"></tbody>
+                <tfoot><tr id="receipts-managers-foot" style="border-top:2px solid var(--border);font-weight:600"></tr></tfoot>
               </table>
             </div>
           </div>
@@ -661,6 +667,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
                   <th>Клиент</th><th>Менеджер</th><th>Юрлицо</th><th class="num">Сумма</th><th class="num">Поступлений</th>
                 </tr></thead>
                 <tbody id="receipts-customers-body"></tbody>
+                <tfoot><tr id="receipts-customers-foot" style="border-top:2px solid var(--border);font-weight:600"></tr></tfoot>
               </table>
             </div>
             <div style="text-align:center;margin-top:10px" id="receipts-customers-more-wrap"></div>
@@ -1142,6 +1149,7 @@ const NET_PROFIT_COEFFICIENT = 0.30;
 const PAGE_TITLES = {
   main: 'Панель управления',
   'global-stats': 'Глобальная статистика',
+  receipts: 'Поступления',
   vehicles: 'Парк техники',
   managers: 'Менеджеры',
   drivers: 'Водители',
@@ -4089,6 +4097,10 @@ function renderGlobalStatsChart() {
         { label: 'Выручка', data: globalStatsMonths.map(function(m){ return m.revenue; }), borderColor: '#EF9F27', backgroundColor: 'rgba(239,159,39,0.1)', tension: 0.3, fill: true, pointRadius: 3, borderWidth: 2 },
         { label: 'План продаж', data: globalStatsMonths.map(function(m){ return m.salesPlan || null; }), borderColor: '#888780', borderDash: [5,4], tension: 0.3, fill: false, pointRadius: 2, borderWidth: 1.5 },
         { label: 'Валовая прибыль', data: globalStatsMonths.map(function(m){ return m.profit; }), borderColor: '#1D9E75', backgroundColor: 'rgba(29,158,117,0.1)', tension: 0.3, fill: true, pointRadius: 3, borderWidth: 2 },
+        // "Поступления денежных средств" (Влад, 2026-08-16: "заранее по умолчанию отключена,
+        // при необходимости по клику включается") - hidden:true + встроенный клик по легенде
+        // Chart.js (без него, показывает/прячет серию сам) - ничего кастомного не нужно.
+        { label: 'Поступления ДС', data: globalStatsMonths.map(function(m){ return m.receipts != null ? m.receipts : null; }), borderColor: '#4FA8E8', backgroundColor: 'rgba(79,168,232,0.1)', tension: 0.3, fill: false, pointRadius: 3, borderWidth: 2, hidden: true },
       ]
     },
     options: {
@@ -4153,6 +4165,20 @@ var receiptsChartView = 'monthly'; // 'daily' | 'monthly'
 var receiptsShowAllCustomers = false;
 var receiptsChart = null;
 var RECEIPTS_CUSTOMERS_TOP = 20;
+var receiptsOrgFilter = null; // выбранное юрлицо (Влад, 2026-08-16) - фильтрует "По клиентам"
+
+// Клик по юрлицу в блоке "По юрлицам" (Влад, 2026-08-16: "нажимая на любое юрлицо, должно
+// автоматически сортироваться по поступлению выбранного юрлица") - фильтрует "По клиентам"
+// на клиентов этого юрлица (уже отсортировано по сумме по умолчанию) и переключает вкладку.
+function setReceiptsOrgFilter(orgName) {
+  receiptsOrgFilter = (receiptsOrgFilter === orgName) ? null : orgName; // повторный клик - сброс
+  renderReceiptsKPI(D.receipts);
+  renderReceiptsCustomers(D.receipts);
+  if (receiptsOrgFilter) {
+    var btn = document.querySelector('#receipts-tab-bar .tab-btn[onclick*="customers"]');
+    showReceiptsTab('customers', btn);
+  }
+}
 
 function renderReceipts() {
   if (!D) return;
@@ -4171,6 +4197,7 @@ function renderReceipts() {
   renderReceiptsChart();
   renderReceiptsManagers(r);
   renderReceiptsCustomers(r);
+  renderReceiptsWeekSummary_(r.week);
   renderReceiptsDayTransactions_(r.today, 'today');
   renderReceiptsDayTransactions_(r.yesterday, 'yesterday');
   renderReceiptsWeekTransactions_(r.week);
@@ -4190,13 +4217,24 @@ function renderReceiptsKPI(r) {
     '<div class="kpi-value">' + fmt(s.total_today) + '</div>' +
     '<div class="kpi-sub2">Среднее в день: ' + fmt(s.avg_per_day) + '</div>';
 
+  // Кликабельно (Влад, 2026-08-16: "нажимая на любое юрлицо, должно автоматически
+  // сортироваться по поступлению выбранного юрлица") - клик фильтрует таблицу "По клиентам"
+  // на клиентов этого юрлица и переключает на неё, см. setReceiptsOrgFilter.
   var orgHtml = (s.by_org || []).map(function(o) {
-    return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--muted);padding:2px 0">' +
-      '<span style="white-space:nowrap">' + (o.name || o.org) + '</span>' +
+    var name = o.name || o.org;
+    var active = name === receiptsOrgFilter;
+    return '<div class="clickable" onclick="setReceiptsOrgFilter(\'' + name.replace(/'/g,"\\'") + '\')" ' +
+      'style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--muted);padding:3px 4px;margin:0 -4px;border-radius:4px;' +
+      (active ? 'background:rgba(255,193,7,0.12)' : '') + '">' +
+      '<span style="white-space:nowrap;' + (active ? 'color:var(--amber);font-weight:600' : '') + '">' + name + '</span>' +
       '<span style="font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--text)">' + fmt(o.amount) + '</span></div>';
   }).join('');
+  var clearBtn = receiptsOrgFilter
+    ? '<span onclick="event.stopPropagation();setReceiptsOrgFilter(null)" class="muted" style="cursor:pointer;text-decoration:underline dotted;font-size:11px">сбросить ✕</span>'
+    : '';
   document.getElementById('receipts-kpi-org').innerHTML =
-    '<div class="kpi-label">По юрлицам</div>' + (orgHtml || '<div class="kpi-sub">Нет данных</div>');
+    '<div class="kpi-label" style="display:flex;justify-content:space-between;align-items:center">По юрлицам' + clearBtn + '</div>' +
+    (orgHtml || '<div class="kpi-sub">Нет данных</div>');
 
   // Сальдо с начала года (Влад, 2026-08-13: "нужно видеть общее сальдо по году выручка
   // поступления") - Поступления считаются по всем месяцам года, что есть в данных,
@@ -4251,6 +4289,33 @@ function renderReceiptsDayTransactions_(day, prefix) {
       '<td class="muted">' + (t.docNumber || '—') + '</td>' +
       '<td class="num">' + fmt(t.amount) + '</td></tr>';
   }).join('') || '<tr><td colspan="5" class="muted">Поступлений не было</td></tr>';
+}
+
+// Сводный блок "Поступления на этой неделе" vs прошлая (Влад, 2026-08-16) - отдельная
+// карточка над таблицей вкладок, не путать с построчной разбивкой во вкладке "Эта неделя"
+// ниже (renderReceiptsWeekTransactions_) - тут только итоговое сравнение в процентах.
+function renderReceiptsWeekSummary_(week) {
+  var el = document.getElementById('receipts-week-summary');
+  if (!el || !week) return;
+  var pct = null;
+  if (week.prev_total > 0) pct = Math.round((week.total - week.prev_total) / week.prev_total * 100);
+  var up = pct !== null && pct >= 0;
+  var arrowColor = pct === null ? 'var(--muted)' : (up ? 'var(--green)' : 'var(--red)');
+  var pctHtml = pct === null
+    ? '<span class="muted">нет данных за прошлую неделю</span>'
+    : '<span style="color:' + arrowColor + '">' + (up ? '▲' : '▼') + ' ' + (up ? '+' : '') + pct + '% к прошлой неделе</span>';
+  el.innerHTML =
+    '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">' +
+      '<div>' +
+        '<div class="kpi-label">Поступления на этой неделе</div>' +
+        '<div class="kpi-value">' + fmt(week.total) + '</div>' +
+        '<div class="kpi-sub">' + fmtDateRu(week.date_from) + ' — ' + fmtDateRu(week.date_to) + '</div>' +
+      '</div>' +
+      '<div style="text-align:right">' +
+        '<div style="font-size:14px;font-weight:600">' + pctHtml + '</div>' +
+        '<div class="kpi-sub">Прошлая неделя (' + fmtDateRu(week.prev_date_from) + ' — ' + fmtDateRu(week.prev_date_to) + '): ' + fmt(week.prev_total) + '</div>' +
+      '</div>' +
+    '</div>';
 }
 
 // "Эта неделя" (Влад, 2026-08-15) - та же построчная разбивка, что "Сегодня"/"Вчера", плюс
@@ -4433,6 +4498,12 @@ function renderReceiptsManagers(r) {
       '<td class="num muted">' + pct + '%</td>' +
       '<td class="num muted">' + m.count + '</td></tr>';
   }).join('') || '<tr><td colspan="4" class="muted">Нет данных</td></tr>';
+
+  // Итоговая строка (Влад, 2026-08-16: "блок с таблицами должен иметь суммы поступлений внизу").
+  var footAmount = rows.reduce(function(s, m) { return s + m.amount; }, 0);
+  var footCount = rows.reduce(function(s, m) { return s + m.count; }, 0);
+  document.getElementById('receipts-managers-foot').innerHTML =
+    '<td>Итого</td><td class="num">' + fmt(footAmount) + '</td><td></td><td class="num">' + footCount + '</td>';
 }
 
 function toggleReceiptsCustomers() {
@@ -4441,17 +4512,43 @@ function toggleReceiptsCustomers() {
 }
 
 function renderReceiptsCustomers(r) {
-  var all = r.by_customer || [];
+  var byOrgAll = r.by_customer || [];
+  // Фильтр по юрлицу (Влад, 2026-08-16: "нажимая на любое юрлицо, должно автоматически
+  // сортироваться по поступлению выбранного юрлица") - c.orgs хранится через запятую
+  // ("Бульдог, Ярд Империал"), сравниваем по токену, не подстрокой (иначе "Ярд" совпал бы
+  // и с "Ярд Империал"). При активном фильтре показываем/сортируем по СУММЕ ИМЕННО В ЭТОМ
+  // юрлице (c.orgAmounts[org]), не по общей сумме клиента - у клиента с несколькими нашими
+  // КА это разные числа, сортировка "по поступлению выбранного юрлица" должна быть честной.
+  var filter = receiptsOrgFilter;
+  var all = filter
+    ? byOrgAll
+        .filter(function(c) { return (c.orgs || '').split(',').map(function(s){return s.trim();}).indexOf(filter) >= 0; })
+        .slice()
+        .sort(function(a, b) { return ((b.orgAmounts && b.orgAmounts[filter]) || 0) - ((a.orgAmounts && a.orgAmounts[filter]) || 0); })
+    : byOrgAll;
   var shown = receiptsShowAllCustomers ? all : all.slice(0, RECEIPTS_CUSTOMERS_TOP);
-  document.getElementById('receipts-customers-sub').textContent = 'Клиентов: ' + all.length;
+  var subText = 'Клиентов: ' + all.length + (filter ? ' · фильтр: ' + filter : '');
+  document.getElementById('receipts-customers-sub').textContent = subText;
   document.getElementById('receipts-customers-body').innerHTML = shown.map(function(c) {
     var mgrCls = c.manager === 'Не определён' ? ' class="muted"' : '';
+    var displayAmount = filter ? ((c.orgAmounts && c.orgAmounts[filter]) || 0) : c.amount;
     return '<tr><td>' + c.customer + '</td>' +
       '<td' + mgrCls + '>' + c.manager + '</td>' +
       '<td class="muted">' + (c.orgs || '—') + '</td>' +
-      '<td class="num">' + fmt(c.amount) + '</td>' +
+      '<td class="num">' + fmt(displayAmount) + '</td>' +
       '<td class="num muted">' + c.count + '</td></tr>';
   }).join('') || '<tr><td colspan="5" class="muted">Нет данных</td></tr>';
+
+  // Итоговая строка (Влад, 2026-08-16) - по ВСЕМ клиентам, не только по показанным (топ-20
+  // до "Показать всех") - иначе сумма выглядела бы обманчиво заниженной. При фильтре -
+  // сумма ТОЛЬКО по выбранному юрлицу (та же логика, что и в строках выше).
+  var footAmount = filter
+    ? all.reduce(function(s, c) { return s + ((c.orgAmounts && c.orgAmounts[filter]) || 0); }, 0)
+    : all.reduce(function(s, c) { return s + c.amount; }, 0);
+  var footCount = all.reduce(function(s, c) { return s + c.count; }, 0);
+  document.getElementById('receipts-customers-foot').innerHTML =
+    '<td>Итого' + (all.length > shown.length ? ' (все ' + all.length + ')' : '') + '</td><td></td><td></td>' +
+    '<td class="num">' + fmt(footAmount) + '</td><td class="num">' + footCount + '</td>';
 
   var moreWrap = document.getElementById('receipts-customers-more-wrap');
   if (all.length > RECEIPTS_CUSTOMERS_TOP) {

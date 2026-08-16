@@ -1136,6 +1136,11 @@ function runAll() {
   try { saveMainPayloadCache_(SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID)); log.push('✅ Кэш главной страницы обновлён'); }
   catch(e) { errors.push('❌ Кэш главной страницы: ' + e.message); }
 
+  // "План задания" (2026-08-16) - прогрев кэша, чтобы дорогое чтение таблицы планировки
+  // (~2.5 минуты на ~31 вкладку) не доставалось живому пользователю дашборда.
+  try { warmOrderPlanCache();      log.push('✅ Кэш "План задания" прогрет'); }
+  catch(e) { errors.push('❌ Кэш "План задания": ' + e.message); }
+
   // Алерты и сводка — собираем данные один раз
   let alertsText = '';
   let summaryText = '';
@@ -3831,15 +3836,42 @@ function orderPlanNameMatch_(accessName, cellName) {
   return aSurname === cSurname && a[1].toLowerCase() === c[1].toLowerCase();
 }
 
-// Читает и разбирает ОДНУ дневную вкладку таблицы планировки (без фильтра по
-// человеку - сырые имена менеджера/логиста оставлены как есть, фильтрация в
-// getOrderPlanView_). Кэшируется по дням на 5 минут (CacheService) - живой
-// тест 2026-08-16 показал, что последовательное чтение ~31 вкладки занимает
-// ОКОЛО 2.5 МИНУТ (Sheets API относительно медленный на много мелких вызовов
-// подряд) - неприемлемо для живой вкладки дашборда. Кэш по дням даёт то, что
-// дорогим остаётся только самый первый запрос после истечения кэша - для
-// ЛЮБОГО следующего человека (не только того же самого) в течение 5 минут
-// день уже не перечитывается заново.
+// Открывает ТЕКУЩУЮ таблицу планировки через индекс (CONFIG.ORDER_PLAN_INDEX_ID).
+// Общий кусок для getOrderPlanView_ и warmOrderPlanCache - раньше был продублирован.
+function resolveOrderPlanSpreadsheet_() {
+  var indexSs, indexSheet;
+  try {
+    indexSs = SpreadsheetApp.openById(CONFIG.ORDER_PLAN_INDEX_ID);
+    indexSheet = indexSs.getSheetByName('Индекс');
+  } catch (e) {
+    return { error: 'Не удалось открыть индексную таблицу: ' + e.message };
+  }
+  if (!indexSheet || indexSheet.getLastRow() < 2) {
+    return { error: 'Индексная таблица пуста' };
+  }
+  var planId = indexSheet.getRange(2, 3).getValue();
+  if (!planId) return { error: 'В индексе не указан ID таблицы планировки' };
+
+  try {
+    return { planId: planId, planSs: SpreadsheetApp.openById(planId) };
+  } catch (e) {
+    return { error: 'Не удалось открыть таблицу планировки: ' + e.message };
+  }
+}
+
+// Живой тест 2026-08-16 показал: последовательное чтение ~31 дневной вкладки таблицы
+// планировки занимает ОКОЛО 2.5 МИНУТ (Sheets API медленный на много мелких вызовов
+// подряд) - неприемлемо, если это платит своим ожиданием живой пользователь дашборда.
+// Решение в два слоя:
+// 1) readOrderPlanDayTab_ кэширует РАЗОБРАННЫЕ строки каждой дневной вкладки в
+//    CacheService на ORDER_PLAN_CACHE_TTL_SEC (сейчас 4 часа - с запасом перекрывает
+//    интервал между прогонами runAll(), см. ниже).
+// 2) warmOrderPlanCache() проактивно прогревает кэш КАЖДЫЙ раз, когда всё равно
+//    выполняется runAll() (6 раз в день, каждые 3 часа) - обычный пользователь почти
+//    никогда не попадает на холодный кэш, ждать 2.5 минуты приходится только внутри
+//    самого runAll(), а не в момент, когда менеджер открыл вкладку.
+var ORDER_PLAN_CACHE_TTL_SEC = 14400; // 4 часа, запас над 3-часовым интервалом runAll()
+
 function readOrderPlanDayTab_(planId, sheet, day) {
   var cache = CacheService.getScriptCache();
   var cacheKey = 'order_plan_day_' + planId + '_' + day;
@@ -3867,7 +3899,7 @@ function readOrderPlanDayTab_(planId, sheet, day) {
     });
   }
 
-  try { cache.put(cacheKey, JSON.stringify(result), 300); } catch (e) { /* день слишком большой для кэша (>100KB) - не критично, просто без кэша */ }
+  try { cache.put(cacheKey, JSON.stringify(result), ORDER_PLAN_CACHE_TTL_SEC); } catch (e) { /* день слишком большой для кэша (>100KB) - не критично, просто без кэша */ }
   return result;
 }
 
@@ -3880,25 +3912,9 @@ function readOrderPlanDayTab_(planId, sheet, day) {
 // пара строк на заказ, нечётная (верхняя) — номер/менеджер/техника/дата/
 // стоимость/наёмная компания, чётная (нижняя) — статус/логист/машина.
 function getOrderPlanView_(personName) {
-  var indexSs, indexSheet;
-  try {
-    indexSs = SpreadsheetApp.openById(CONFIG.ORDER_PLAN_INDEX_ID);
-    indexSheet = indexSs.getSheetByName('Индекс');
-  } catch (e) {
-    return { error: 'Не удалось открыть индексную таблицу: ' + e.message, orders: [] };
-  }
-  if (!indexSheet || indexSheet.getLastRow() < 2) {
-    return { error: 'Индексная таблица пуста', orders: [] };
-  }
-  var planId = indexSheet.getRange(2, 3).getValue();
-  if (!planId) return { error: 'В индексе не указан ID таблицы планировки', orders: [] };
-
-  var planSs;
-  try {
-    planSs = SpreadsheetApp.openById(planId);
-  } catch (e) {
-    return { error: 'Не удалось открыть таблицу планировки: ' + e.message, orders: [] };
-  }
+  var resolved = resolveOrderPlanSpreadsheet_();
+  if (resolved.error) return { error: resolved.error, orders: [] };
+  var planId = resolved.planId, planSs = resolved.planSs;
 
   var orders = [];
   var dayTabs = planSs.getSheets().filter(function (s) {
@@ -3935,6 +3951,25 @@ function getOrderPlanView_(personName) {
     planSpreadsheetUrl: planSs.getUrl(),
     orders: orders,
   };
+}
+
+// Проактивно прогревает кэш "План задания" на все дневные вкладки текущей таблицы
+// планировки - вызывается из runAll() (6 раз в день), чтобы дорогое чтение ~31 вкладки
+// (~2.5 минуты) оплачивал плановый прогон, а не менеджер, открывший вкладку на дашборде.
+// Можно запускать и вручную (например, сразу после релиза, не дожидаясь runAll()).
+function warmOrderPlanCache() {
+  var resolved = resolveOrderPlanSpreadsheet_();
+  if (resolved.error) {
+    Logger.log('warmOrderPlanCache: ' + resolved.error);
+    return;
+  }
+  var dayTabs = resolved.planSs.getSheets().filter(function (s) {
+    return !isNaN(parseInt(s.getName(), 10));
+  });
+  dayTabs.forEach(function (sheet) {
+    readOrderPlanDayTab_(resolved.planId, sheet, parseInt(sheet.getName(), 10));
+  });
+  Logger.log('warmOrderPlanCache: прогрето вкладок - ' + dayTabs.length);
 }
 
 // ============================================================

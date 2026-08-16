@@ -492,6 +492,16 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
         </div>
       </div>
 
+      <!-- Поступления - короткая сводка цифрами, один широкий блок под 4 KPI-карточками
+           (Влад, 2026-08-16: "так же, как на странице поступления... один длинный блок под
+           четырьмя блоками"). Кликабельно - переход на полную страницу "Поступления". -->
+      <div class="card" id="main-receipts-card" onclick="showPage('receipts')" style="margin-bottom:16px;cursor:pointer">
+        <div class="sec-header">
+          <div class="sec-title">💰 Поступления</div>
+        </div>
+        <div id="main-receipts-summary"></div>
+      </div>
+
       <!-- Строка 2: Структура затрат и Статус парка - равная ширина (Влад, 2026-07-04) -->
       <div class="grid-2">
         <div class="card">
@@ -2863,6 +2873,7 @@ function render() {
   }
 
   renderKPI();
+  renderMainReceiptsSummary();
   renderMain();
   renderVehiclesTable();
   renderDrivers();
@@ -3192,6 +3203,47 @@ function renderKPI() {
   setText('k-margin-badge', pct(marginPct));
   setText('k-margin-abs', 'Прибыль найма ' + fmt(hiredProfit) + ' из выручки найма ' + fmt(hiredRevenue));
   setBar('k-margin-bar', Math.min(marginPct, 100), marginColor);
+}
+
+// Короткая сводка "Поступления" на Панели (Влад, 2026-08-16: "так же, как на странице
+// поступления... один длинный блок под четырьмя блоками") - только ключевые цифры в одну
+// строку, без графика (Влад выбрал "короткая сводка цифрами" из предложенных вариантов).
+// Источник - тот же D.receipts, что уже грузится для страницы "Поступления" (renderReceipts) -
+// без отдельного запроса.
+function renderMainReceiptsSummary() {
+  var el = document.getElementById('main-receipts-summary');
+  if (!el) return;
+  var r = D && D.receipts;
+  if (!r || r.error || !r.summary) {
+    el.innerHTML = '<div class="muted" style="font-size:13px;padding:4px 0">Нет данных "Поступления"</div>';
+    return;
+  }
+  var s = r.summary;
+  var w = r.week || {};
+  var y = s.ytd || {};
+
+  function stat(label, valueHtml, sub) {
+    return '<div>' +
+      '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">' + label + '</div>' +
+      '<div style="font-size:20px;font-weight:700;color:var(--text)">' + valueHtml + '</div>' +
+      (sub ? '<div style="font-size:11px;color:var(--muted);margin-top:2px">' + sub + '</div>' : '') +
+    '</div>';
+  }
+
+  var weekPct = null;
+  if (w.prev_total > 0) weekPct = Math.round(((w.total || 0) - w.prev_total) / w.prev_total * 100);
+  var weekUp = weekPct !== null && weekPct >= 0;
+  var weekSub = weekPct === null ? '' :
+    '<span style="color:' + (weekUp ? 'var(--green)' : 'var(--red)') + '">' + (weekUp ? '▲' : '▼') + ' ' + (weekUp ? '+' : '') + weekPct + '% к прошлой</span>';
+
+  var balCls = y.balance >= 0 ? 'var(--green)' : 'var(--red)';
+
+  el.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:24px">' +
+    stat('За ' + formatMonthLabel(r.month).toLowerCase(), fmt(s.total_month)) +
+    stat('Сегодня', fmt(s.total_today)) +
+    stat('На этой неделе', fmt(w.total || 0), weekSub) +
+    stat('Сальдо с начала ' + (y.year || ''), '<span style="color:' + balCls + '">' + (y.balance >= 0 ? '+' : '') + fmt(y.balance) + '</span>') +
+  '</div>';
 }
 
 function setBar(id, v, color) {

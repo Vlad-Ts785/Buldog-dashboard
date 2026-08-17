@@ -1779,36 +1779,58 @@ function stopLoadingPhrases() { clearInterval(loadingPhraseTimer); loadingPhrase
 // ── ВХОД ЧЕРЕЗ GOOGLE ────────────────────────────────────────
 const GOOGLE_CLIENT_ID = '872723319158-cmr4v5v31fk3uv8ass3vvdch7at66n8e.apps.googleusercontent.com';
 let ID_TOKEN = localStorage.getItem('id_token') || '';
+// Свой токен сессии (2026-08-17, Влад: "постоянно раз в час требует перезахода... один раз
+// залогинились - день-два никто не трогает") - живёт до 48ч на backend, продлевается сам при
+// каждой загрузке страницы (см. SESSION_TOKEN_TTL_MS в full_script_final.js). Google id_token
+// живёт только ~1 час - без своего токена сессии пришлось бы логиниться через Google каждый час.
+let SESSION_TOKEN = localStorage.getItem('session_token') || '';
 
 // Собирает URL запроса к API с токеном входа - используется везде вместо ручной склейки.
 // Раньше требовался ещё и статический "ключ доступа" - убран (Влад, 2026-07-04: "у нас уже
 // авторизация идёт по почте, зачем это надо") - единственный гейт теперь Google-логин + лист
-// "Доступ".
+// "Доступ". Шлём оба токена, если есть - backend сам разбирается, какой использовать
+// (session_token в приоритете, id_token - фолбэк для самого первого входа).
 function apiUrl(params) {
   // "_" - метка времени, чтобы URL всегда был уникальным и браузер не отдавал закэшированный
   // ответ вместо свежего запроса к серверу (без этого повторный fetch() на тот же набор
   // параметров иногда мог тихо вернуть старые данные - Влад, 2026-07-03).
-  const p = Object.assign({ id_token: ID_TOKEN, _: Date.now() }, params || {});
+  const p = Object.assign({ id_token: ID_TOKEN, session_token: SESSION_TOKEN, _: Date.now() }, params || {});
   const qs = Object.keys(p).map(function(k){ return k + '=' + encodeURIComponent(p[k] || ''); }).join('&');
   const sep = API_URL.includes('?') ? '&' : '?';
   return API_URL + sep + qs;
 }
 
+// Сохраняет свежий токен сессии из ответа сервера (приходит только у "полных" загрузок
+// страницы - см. freshSessionToken в doGet()), чтобы следующие запросы шли уже по нему.
+function saveSessionTokenFromResponse_(data) {
+  if (data && data.session_token) {
+    SESSION_TOKEN = data.session_token;
+    localStorage.setItem('session_token', data.session_token);
+  }
+}
+
+function clearAuthTokens_() {
+  ID_TOKEN = '';
+  SESSION_TOKEN = '';
+  localStorage.removeItem('id_token');
+  localStorage.removeItem('session_token');
+}
+
 // Общий wrapper над fetch(apiUrl(...)) для всех запросов КРОМЕ самого первого (loadData()
-// сама разбирает needLogin). ID_TOKEN живёт ~1 час (обычный срок жизни Google id_token) - если
-// дашборд открыт дольше и потом нажать, например, "Прошлый месяц" на Технике, второй запрос
-// уходит с уже протухшим токеном и раньше падал с сырым "Ошибка: Не авторизован", без
+// сама разбирает needLogin). Токен сессии живёт до 48ч (см. SESSION_TOKEN_TTL_MS на backend) -
+// если дашборд открыт дольше и потом нажать, например, "Прошлый месяц" на Технике, второй
+// запрос уходит с уже протухшим токеном и раньше падал с сырым "Ошибка: Не авторизован", без
 // подсказки, что делать (Влад, 2026-07-04). Теперь при needLogin сразу разлогиниваем и
 // показываем экран входа - как и при самой первой загрузке.
 async function apiFetchJson(params) {
   const res = await fetch(apiUrl(params));
   const data = await res.json();
   if (data.needLogin) {
-    ID_TOKEN = '';
-    localStorage.removeItem('id_token');
+    clearAuthTokens_();
     showLoginScreen(data.error);
     throw new Error(data.error || 'Не авторизован - обновите страницу и войдите заново');
   }
+  saveSessionTokenFromResponse_(data);
   return data;
 }
 
@@ -1862,8 +1884,7 @@ function handleCredentialResponse(response) {
 }
 
 function logoutUser() {
-  ID_TOKEN = '';
-  localStorage.removeItem('id_token');
+  clearAuthTokens_();
   D = null;
   if (window.google && google.accounts && google.accounts.id) google.accounts.id.disableAutoSelect();
   showLoginScreen();
@@ -1871,10 +1892,12 @@ function logoutUser() {
 
 // Вызывается самой библиотекой Google (через ?onload= в URL скрипта) - надёжнее, чем
 // полагаться на window.load, который может сработать раньше, чем загрузится сама библиотека.
+// ЛИБО id_token (только что вошли), ЛИБО session_token (уже был вход в последние 48ч) -
+// в обоих случаях грузим данные сразу, экран входа не показываем.
 function initGoogleSignIn() {
   startLoadingPhrases();
   google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, callback: handleCredentialResponse });
-  if (ID_TOKEN) loadData();
+  if (ID_TOKEN || SESSION_TOKEN) loadData();
   else showLoginScreen();
 }
 
@@ -1884,8 +1907,9 @@ async function loadData() {
   try {
     const mainRes = await fetch(apiUrl({}));
     D = await mainRes.json();
-    if (D.needLogin) { ID_TOKEN = ''; localStorage.removeItem('id_token'); showLoginScreen(D.error); return; }
+    if (D.needLogin) { clearAuthTokens_(); showLoginScreen(D.error); return; }
     if (D.error) throw new Error(D.error);
+    saveSessionTokenFromResponse_(D);
     hideLoginScreen();
     document.getElementById('error-block').style.display = 'none';
     render();
@@ -8437,6 +8461,20 @@ function fmtDateRu(dateStr) {
   return d + ' ' + RU_MONTHS_GENITIVE[m-1] + ' ' + y;
 }
 
+// Вкладка "Клиенты" (2026-08-17) - первая часть дашборда, переведённая на свой сервер
+// вместо Apps Script/Google Таблиц (см. plans/ и retrospectives/ про переезд на Beget).
+// Ключ - не полноценная сессия, как у apiFetchJson, а общий секрет только для этого
+// эндпоинта - осознанное временное упрощение, см. комментарий в server.js на сервере.
+const CLIENTS_API_URL = 'https://api.yardhub.ru/api/client_analytics';
+const CLIENTS_API_KEY = '3f41d8e2d1cb53fe45cd1627f0067cd65df37b1d5081b275';
+function fetchClientAnalyticsFromServer_(params) {
+  var qs = Object.keys(params || {}).map(function(k) {
+    return params[k] ? (k + '=' + encodeURIComponent(params[k])) : null;
+  }).filter(Boolean).join('&');
+  return fetch(CLIENTS_API_URL + (qs ? '?' + qs : ''), { headers: { 'X-Api-Key': CLIENTS_API_KEY } })
+    .then(function(res) { return res.json(); });
+}
+
 function loadClientsData() {
   if (clientsData !== null) { renderClientsBody(); return; }
   fetchClientsData();
@@ -8449,11 +8487,11 @@ function fetchClientsData() {
   document.getElementById('clients-loading').style.display = 'block';
   document.getElementById('clients-loading').textContent = 'Загрузка клиентской аналитики...';
   document.getElementById('clients-body').style.display = 'none';
-  var params = { action: 'client_analytics' };
+  var params = {};
   if (clientsRangeFrom) params.from = clientsRangeFrom;
   if (clientsRangeTo) params.to = clientsRangeTo;
   if (clientsSegmentFilter) params.segment = clientsSegmentFilter;
-  apiFetchJson(params)
+  fetchClientAnalyticsFromServer_(params)
     .then(function(d) {
       if (d.error) throw new Error(d.error);
       clientsData = d;
@@ -8632,10 +8670,10 @@ function renderClientsSegmentFilter_() {
 function fetchClientsTopFiltered_() {
   var el = document.getElementById('clients-tab-content');
   el.innerHTML = '<p style="color:var(--muted);padding:16px">Загрузка...</p>';
-  var params = { action: 'client_analytics', segment: clientsSegmentFilter, manager: clientsManagerFilter };
+  var params = { segment: clientsSegmentFilter, manager: clientsManagerFilter };
   if (clientsRangeFrom) params.from = clientsRangeFrom;
   if (clientsRangeTo) params.to = clientsRangeTo;
-  apiFetchJson(params)
+  fetchClientAnalyticsFromServer_(params)
     .then(function(d) {
       if (d.error) throw new Error(d.error);
       clientsData.top_clients = d.top_clients;

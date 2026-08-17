@@ -6913,6 +6913,20 @@ function fmtDateRu(dateStr) {
   return d + ' ' + RU_MONTHS_GENITIVE[m-1] + ' ' + y;
 }
 
+// Вкладка "Клиенты" (2026-08-17) - первая часть дашборда, переведённая на свой сервер
+// вместо Apps Script/Google Таблиц (см. plans/ и retrospectives/ про переезд на Beget).
+// Ключ - не полноценная сессия, как у apiFetchJson, а общий секрет только для этого
+// эндпоинта - осознанное временное упрощение, см. комментарий в server.js на сервере.
+const CLIENTS_API_URL = 'https://api.yardhub.ru/api/client_analytics';
+const CLIENTS_API_KEY = '3f41d8e2d1cb53fe45cd1627f0067cd65df37b1d5081b275';
+function fetchClientAnalyticsFromServer_(params) {
+  var qs = Object.keys(params || {}).map(function(k) {
+    return params[k] ? (k + '=' + encodeURIComponent(params[k])) : null;
+  }).filter(Boolean).join('&');
+  return fetch(CLIENTS_API_URL + (qs ? '?' + qs : ''), { headers: { 'X-Api-Key': CLIENTS_API_KEY } })
+    .then(function(res) { return res.json(); });
+}
+
 function loadClientsData() {
   if (clientsData !== null) { renderClientsBody(); return; }
   fetchClientsData();
@@ -6925,11 +6939,11 @@ function fetchClientsData() {
   document.getElementById('clients-loading').style.display = 'block';
   document.getElementById('clients-loading').textContent = 'Загрузка клиентской аналитики...';
   document.getElementById('clients-body').style.display = 'none';
-  var params = { action: 'client_analytics' };
+  var params = {};
   if (clientsRangeFrom) params.from = clientsRangeFrom;
   if (clientsRangeTo) params.to = clientsRangeTo;
   if (clientsSegmentFilter) params.segment = clientsSegmentFilter;
-  apiFetchJson(params)
+  fetchClientAnalyticsFromServer_(params)
     .then(function(d) {
       if (d.error) throw new Error(d.error);
       clientsData = d;
@@ -7108,10 +7122,10 @@ function renderClientsSegmentFilter_() {
 function fetchClientsTopFiltered_() {
   var el = document.getElementById('clients-tab-content');
   el.innerHTML = '<p style="color:var(--muted);padding:16px">Загрузка...</p>';
-  var params = { action: 'client_analytics', segment: clientsSegmentFilter, manager: clientsManagerFilter };
+  var params = { segment: clientsSegmentFilter, manager: clientsManagerFilter };
   if (clientsRangeFrom) params.from = clientsRangeFrom;
   if (clientsRangeTo) params.to = clientsRangeTo;
-  apiFetchJson(params)
+  fetchClientAnalyticsFromServer_(params)
     .then(function(d) {
       if (d.error) throw new Error(d.error);
       clientsData.top_clients = d.top_clients;

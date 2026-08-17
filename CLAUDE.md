@@ -45,6 +45,7 @@
 | Текущая фича / план | `plans/<актуальный>.md` |
 | История сессий | `retrospectives/` |
 | Дебиторская задолженность (ДЗ) | `plans/2026-07-08-debt-receivables-tab.md` |
+| Методика расчёта стоимости перевозки (вкладка «Калькулятор») | `.business/products/pricing.md`, план встраивания - `plans/2026-08-17-calculator-dashboard-integration.md` |
 | Как задеплоить Apps Script быстро | `clasp` подключен, см. секцию "Деплой" ниже |
 
 ## Стек

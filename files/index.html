@@ -12,6 +12,9 @@
 <!-- Tabler Icons - единый стиль иконок для новых блоков (Влад, 2026-08-16), см. заметку
      в памяти о стандарте оформления дашборда -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.46.0/dist/tabler-icons.min.css">
+<!-- Leaflet - карта и маршрут для страницы "Калькулятор" (plans/2026-08-17-calculator-dashboard-integration.md) -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
 :root {
   --bg:#0f0f13;--bg2:#17171d;--bg3:#1e1e26;--bg4:#252530;
@@ -338,7 +341,59 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   .grid-2,.grid-3,.grid-65{grid-template-columns:1fr;}
   .fleet-grid{grid-template-columns:1fr;}
   main{padding:16px;}
+  .clc-map{height:220px;}
+  .clc-price-value{font-size:28px;}
 }
+
+/* ── КАЛЬКУЛЯТОР ПЕРЕВОЗКИ (plans/2026-08-17-calculator-dashboard-integration.md) ──
+   Портирован из ЯРД_Калькулятор_v1.3 (yard-calc-v1.7.html), логика расчёта не менялась -
+   только визуальное оформление под токены дашборда и id/классы с префиксом clc-. */
+.clc-map{height:280px;border-radius:var(--radius-sm);border:1px solid var(--border);margin-bottom:14px;position:relative;z-index:1;}
+.clc-fg{margin-bottom:14px;}
+.clc-fg label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px;font-weight:500;}
+.clc-input,.clc-select{width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);padding:9px 12px;color:var(--text);font-size:13px;outline:none;font-family:inherit;}
+.clc-input:focus,.clc-select:focus{border-color:var(--green);}
+.clc-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.clc-row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}
+@media(max-width:600px){.clc-row,.clc-row3{grid-template-columns:1fr;}}
+.clc-ig{display:flex;gap:8px;}
+.clc-ac-wrap{position:relative;flex:1;}
+.clc-ac-list{position:absolute;top:100%;left:0;right:0;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-sm);max-height:200px;overflow-y:auto;z-index:99;display:none;box-shadow:0 4px 16px rgba(0,0,0,.35);}
+.clc-ac-list.show{display:block;}
+.clc-ac-item{padding:9px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--border);color:var(--text);}
+.clc-ac-item:last-child{border-bottom:none;}
+.clc-ac-item:hover{background:var(--bg3);}
+.clc-ac-sub{font-size:11px;color:var(--muted);}
+.clc-route-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;}
+.clc-route-stat{background:var(--bg3);border-radius:var(--radius-sm);padding:10px;text-align:center;}
+.clc-route-stat .val{font-size:15px;font-weight:600;color:var(--text);}
+.clc-route-stat .lbl{font-size:9px;color:var(--muted);margin-top:2px;text-transform:uppercase;letter-spacing:.04em;}
+.clc-base-badge{display:inline-block;padding:3px 10px;background:rgba(55,138,221,.12);border:1px solid rgba(55,138,221,.25);border-radius:6px;font-size:11px;color:var(--blue);margin-bottom:10px;}
+.clc-btn{padding:9px 16px;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;font-weight:500;border:1px solid transparent;font-family:inherit;transition:all .15s;display:inline-flex;align-items:center;justify-content:center;gap:6px;}
+.clc-btn-primary{background:var(--green);color:#fff;}
+.clc-btn-primary:hover{opacity:.9;}
+.clc-btn-ghost{background:transparent;border-color:var(--border);color:var(--muted);}
+.clc-btn-ghost:hover{border-color:var(--green);color:var(--green);}
+.clc-btn-sm{padding:5px 10px;font-size:11px;}
+.clc-price-hero{background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:24px 20px;text-align:center;margin-bottom:16px;}
+.clc-price-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;font-weight:600;}
+.clc-price-value{font-size:38px;font-weight:700;color:var(--green);margin:8px 0;line-height:1.1;}
+.clc-price-sub{font-size:12px;color:var(--muted);}
+.clc-bd{background:var(--bg3);border-radius:var(--radius-sm);padding:16px 18px;margin-bottom:16px;}
+.clc-bd table{width:100%;border-collapse:collapse;font-size:13px;}
+.clc-bd td{padding:7px 0;border-bottom:1px solid var(--border);color:var(--text);}
+.clc-bd tr:last-child td{border-bottom:none;}
+.clc-bd td:last-child{text-align:right;font-weight:500;}
+.clc-bd tr.clc-tot td{font-size:15px;font-weight:700;color:var(--green);padding-top:12px;border-top:2px solid var(--border);border-bottom:none;}
+.clc-list-item{background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 13px;margin-bottom:6px;cursor:pointer;transition:all .15s;}
+.clc-list-item:hover{border-color:var(--green);background:var(--bg4);}
+.clc-tech-name{font-weight:500;font-size:13px;color:var(--text);}
+.clc-tech-spec{font-size:11px;color:var(--muted);margin-top:4px;display:flex;gap:8px;flex-wrap:wrap;}
+.clc-tech-spec span{background:var(--bg4);padding:2px 7px;border-radius:4px;}
+.clc-list-scroll{max-height:360px;overflow-y:auto;}
+.clc-toast{position:fixed;bottom:24px;right:24px;background:#166534;color:#fff;padding:12px 20px;border-radius:var(--radius-sm);font-size:13px;font-weight:500;z-index:999;transform:translateY(120px);opacity:0;transition:all .35s;}
+.clc-toast.show{transform:translateY(0);opacity:1;}
+.clc-toast-err{background:#7f1d1d;}
 </style>
 </head>
 <body>
@@ -413,6 +468,9 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
     </div>
     <div class="sidebar-nav-item" onclick="showPage('order-plan',this)" data-page="order-plan">
       <span class="sidebar-nav-icon">📋</span> План задание
+    </div>
+    <div class="sidebar-nav-item" onclick="showPage('calculator',this)" data-page="calculator">
+      <span class="sidebar-nav-icon">🧮</span> Калькулятор
     </div>
     <div class="sidebar-nav-item" onclick="showPage('clients',this)" data-page="clients">
       <span class="sidebar-nav-icon">🏢</span> Клиенты
@@ -1129,6 +1187,169 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
       <div id="order-plan-content"><p style="color:var(--muted);padding:16px">Данные загружаются...</p></div>
     </div>
 
+    <!-- ═══ КАЛЬКУЛЯТОР СТОИМОСТИ ПЕРЕВОЗКИ ═══════════════════════
+         Портирован из ЯРД_Калькулятор_v1.3 (yard-calc-v1.7.html) - методика расчёта не
+         менялась, см. .business/products/pricing.md и
+         plans/2026-08-17-calculator-dashboard-integration.md. Работает офлайн от Google
+         Sheets/Apps Script - только карта (OSM/OSRM/Nominatim, публичные, без ключей). -->
+    <div id="page-calculator" class="page clc-page">
+      <div class="clc-toast" id="clc-toast"></div>
+      <div class="grid-65">
+        <div>
+          <div class="card">
+            <div class="card-title">Маршрут</div>
+            <div class="clc-fg">
+              <label>Откуда (погрузка)</label>
+              <div class="clc-ig">
+                <div class="clc-ac-wrap">
+                  <input type="text" id="clc-loadAddr" class="clc-input" placeholder="Например: Кострома..." oninput="Clc.geoc('load')">
+                  <div class="clc-ac-list" id="clc-loadAc"></div>
+                </div>
+                <button class="clc-btn clc-btn-ghost" onclick="Clc.getLoc('load')" title="Моё местоположение"><i class="ti ti-current-location"></i></button>
+              </div>
+            </div>
+            <div class="clc-fg">
+              <label>Куда (выгрузка)</label>
+              <div class="clc-ig">
+                <div class="clc-ac-wrap">
+                  <input type="text" id="clc-unloadAddr" class="clc-input" placeholder="Например: Санкт-Петербург..." oninput="Clc.geoc('unload')">
+                  <div class="clc-ac-list" id="clc-unloadAc"></div>
+                </div>
+                <button class="clc-btn clc-btn-ghost" onclick="Clc.swapAdr()" title="Поменять местами"><i class="ti ti-arrows-left-right"></i></button>
+              </div>
+            </div>
+            <div id="clc-map" class="clc-map"></div>
+            <span class="clc-base-badge">🏠 База: Домодедово (МО)</span>
+            <div class="clc-route-stats">
+              <div class="clc-route-stat"><div class="val" id="clc-stD1" style="color:#60a5fa">—</div><div class="lbl">База→загрузка</div></div>
+              <div class="clc-route-stat"><div class="val" id="clc-stD2" style="color:var(--green)">—</div><div class="lbl">С грузом</div></div>
+              <div class="clc-route-stat"><div class="val" id="clc-stD3" style="color:var(--muted)">—</div><div class="lbl">Выгрузка→база</div></div>
+            </div>
+            <div class="clc-fg" style="margin-bottom:0">
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px">
+                <input type="checkbox" id="clc-manualKm" onchange="Clc.toggleManual()" style="width:auto"> Ввести км вручную (если маршрут не строится)
+              </label>
+              <div id="clc-manualKmBox" class="clc-row3" style="display:none;margin-top:8px">
+                <div class="clc-fg" style="margin-bottom:0"><label style="font-size:10px">База→погр.</label><input type="number" id="clc-mkm1" class="clc-input" value="0" min="0" oninput="Clc.calc()"></div>
+                <div class="clc-fg" style="margin-bottom:0"><label style="font-size:10px">С грузом</label><input type="number" id="clc-mkm2" class="clc-input" value="0" min="0" oninput="Clc.calc()"></div>
+                <div class="clc-fg" style="margin-bottom:0"><label style="font-size:10px">Выгр.→база</label><input type="number" id="clc-mkm3" class="clc-input" value="0" min="0" oninput="Clc.calc()"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Груз и техника</div>
+            <div class="clc-row3">
+              <div class="clc-fg"><label>Масса, т</label><input type="number" id="clc-weight" class="clc-input" value="33" min="0.1" step="0.5" oninput="Clc.onWChange()"></div>
+              <div class="clc-fg"><label>Длина, м</label><input type="number" id="clc-len" class="clc-input" value="6" min="0.5" step="0.5" oninput="Clc.calc()"></div>
+              <div class="clc-fg"><label>Ширина, м</label><input type="number" id="clc-wid" class="clc-input" value="2.5" min="0.5" step="0.1" oninput="Clc.calc()"></div>
+            </div>
+            <div class="clc-row">
+              <div class="clc-fg"><label>Высота, м</label><input type="number" id="clc-hei" class="clc-input" value="3" min="0.5" step="0.1" oninput="Clc.calc()"></div>
+              <div class="clc-fg"><label>Тип груза</label>
+                <select id="clc-cargoType" class="clc-select" onchange="Clc.calc()">
+                  <option value="gabarit">Габарит</option>
+                  <option value="negabarit" selected>Негабарит</option>
+                </select>
+              </div>
+            </div>
+            <div class="clc-row3">
+              <div class="clc-fg"><label>Тип техники</label>
+                <select id="clc-vehType" class="clc-select" onchange="Clc.vhCh()">
+                  <option value="tral">Трал</option>
+                  <option value="board">Длинномер</option>
+                  <option value="panel">Панелевоз</option>
+                  <option value="tral_crane">Трал под кран</option>
+                  <option value="korito">Трал-корыто</option>
+                  <option value="faymon">Faymonville</option>
+                </select>
+              </div>
+              <div class="clc-fg" id="clc-faymonGrp" style="display:none">
+                <label>Категория Faymonville</label>
+                <select id="clc-faymonCat" class="clc-select" onchange="Clc.calc()">
+                  <option value="60-75">60-75 т</option>
+                  <option value="75-100">75-100 т</option>
+                  <option value="100-120">100-120 т</option>
+                </select>
+              </div>
+              <div class="clc-fg"><label>Рейсов</label><input type="number" id="clc-trips" class="clc-input" value="1" min="1" step="1" oninput="Clc.calc()"></div>
+            </div>
+            <div class="clc-row">
+              <div class="clc-fg" id="clc-koritoGrp" style="display:none">
+                <label>Корыто (фронтальный заезд)</label>
+                <select id="clc-koritoType" class="clc-select" onchange="Clc.calc()">
+                  <option value="base">Обычный (от 30 000 ₽)</option>
+                  <option value="razd">Раздвижной (от 40 000 ₽)</option>
+                </select>
+              </div>
+              <div class="clc-fg" id="clc-koritoExtGrp" style="display:none">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px"><input type="checkbox" id="clc-koritoExt" onchange="Clc.calc()" style="width:auto"> Раздвижение ×1,5</label>
+              </div>
+            </div>
+            <div class="clc-fg" id="clc-escZoneGrp" style="display:none;margin-bottom:0">
+              <label>Сопровождение негабарита — зона</label>
+              <select id="clc-escZone" class="clc-select" onchange="Clc.calc()">
+                <option value="mkad">Москва: внутри МКАД (10 000 ₽)</option>
+                <option value="sadovoe">Москва: Садовое (12 000 ₽)</option>
+                <option value="ckad">МО до ЦКАД (20 000 ₽)</option>
+                <option value="far">Дальний рейс</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom:0">
+            <div class="card-title">База техники заказчика</div>
+            <div style="font-size:11px;color:var(--muted);margin:-6px 0 12px;line-height:1.5">Габариты типовые (рассчитаны по массе). Для критичных грузов сверяйте с ТТН.</div>
+            <input type="text" id="clc-techSearch" class="clc-input" placeholder="Поиск техники..." oninput="Clc.fltr()" style="margin-bottom:12px">
+            <div class="tab-bar">
+              <button class="tab-btn active" onclick="Clc.fltr('all')">Всё</button>
+              <button class="tab-btn" onclick="Clc.fltr('excavator')">Экскаваторы</button>
+              <button class="tab-btn" onclick="Clc.fltr('drill')">Буровые</button>
+              <button class="tab-btn" onclick="Clc.fltr('roller')">Катки</button>
+              <button class="tab-btn" onclick="Clc.fltr('loader')">Погрузчики</button>
+              <button class="tab-btn" onclick="Clc.fltr('bulldozer')">Бульдозеры</button>
+              <button class="tab-btn" onclick="Clc.fltr('crane')">Краны</button>
+              <button class="tab-btn" onclick="Clc.fltr('grader')">Грейдеры</button>
+              <button class="tab-btn" onclick="Clc.fltr('paver')">Асфальтоукл.</button>
+              <button class="tab-btn" onclick="Clc.fltr('telehandler')">Телескопы</button>
+            </div>
+            <div class="clc-list-scroll" id="clc-techList"></div>
+          </div>
+        </div>
+
+        <div>
+          <div class="clc-price-hero">
+            <div class="clc-price-label">Стоимость перевозки (с НДС)</div>
+            <div class="clc-price-value" id="clc-totalPrice">0 ₽</div>
+            <div class="clc-price-sub" id="clc-priceSub">Укажите маршрут и груз</div>
+            <div style="display:flex;gap:8px;margin-top:16px">
+              <button class="clc-btn clc-btn-primary" onclick="Clc.saveCalc()" style="flex:1">💾 Сохранить</button>
+              <button class="clc-btn clc-btn-ghost" onclick="Clc.genKP()" style="flex:1">📄 КП</button>
+            </div>
+            <div id="clc-kpInfo" style="font-size:11px;color:var(--muted);margin-top:12px"></div>
+          </div>
+
+          <div class="clc-bd">
+            <table>
+              <tr><td>Техника</td><td id="clc-bdType">—</td></tr>
+              <tr><td>Смена</td><td id="clc-bdShift">0 ₽</td></tr>
+              <tr><td>База→загрузка</td><td id="clc-bdEmptyTo">0 ₽</td></tr>
+              <tr><td>С грузом</td><td id="clc-bdLoaded">0 ₽</td></tr>
+              <tr><td>Выгрузка→база</td><td id="clc-bdEmptyFrom">0 ₽</td></tr>
+              <tr><td>Коэффициенты</td><td id="clc-bdCoef">×1.0</td></tr>
+              <tr><td>Сопровождение</td><td id="clc-bdNeg">0 ₽</td></tr>
+              <tr class="clc-tot"><td>ИТОГО</td><td id="clc-bdTotal">0 ₽</td></tr>
+            </table>
+          </div>
+
+          <div class="card" style="margin-top:0">
+            <div class="card-title">История расчётов</div>
+            <div class="clc-list-scroll" id="clc-histList" style="max-height:300px"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ═══ КЛИЕНТЫ ══════════════════════════════════════════════ -->
     <div id="page-clients" class="page">
       <div id="clients-loading" style="color:var(--muted);padding:16px">Загрузка клиентской аналитики...</div>
@@ -1164,6 +1385,308 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 
   </main>
 </div>
+
+<!-- Калькулятор стоимости перевозки - логика (plans/2026-08-17-calculator-dashboard-integration.md) -->
+<script>
+(function(){
+
+var APP_VER = 'v1.7';
+var BASE = { lat: 55.4100, lng: 37.7700, name: 'Домодедово (МО)' };
+var P = {
+    board:{n:'Длинномер',s:28000,km:120,emptyKm:120,maxW:20},
+    panel:{n:'Панелевоз',s:28000,km:120,emptyKm:120,maxW:20},
+    tral:{n:'Трал до 20т',s:25000,km:120,emptyKm:120},
+    tral_c:{n:'Трал под кран',s:28000,km:120,emptyKm:120},
+    t20:{n:'Трал 20-25т',s:30000,km:130,emptyKm:120},
+    t25:{n:'Трал 25-34т',s:43000,km:190,emptyKm:120},
+    t35:{n:'Трал 35-44т',s:46000,km:250,emptyKm:120},
+    t45:{n:'Трал 45-49т',s:50000,km:280,emptyKm:120},
+    t50:{n:'Трал 50-59т',s:60000,km:350,emptyKm:120}
+};
+var FAR_LIMIT=200,FAR_SHIFT=30000,K_COEF=1.5,OV_COEF=2,EMPTY_RATE=120;
+// Доплата за негабарит (сопровождение) — прайс ООО БУЛЬДОГ от 12.06.2026
+var ESC_ZONE={sadovoe:12000,mkad:10000,ckad:20000};
+var ESC_FAR_BASE=20000,ESC_FAR_MIN=200;
+var ESC_CAT={1:[55,50,45],2:[100,90,80]}; // ₽/км по полосам [200-500, 501-1000, 1001-2000]; 3 кат. — индивидуально
+function escortBand(d){return d<=500?0:d<=1000?1:2;}
+function tralByMass(w){if(w<=20)return P.tral;if(w<=25)return P.t20;if(w<=34)return P.t25;if(w<=44)return P.t35;if(w<=49)return P.t45;if(w<=59)return P.t50;return null;}
+function rn(v){if(!v||v===0)return 0;var s=v<0?-1:1,n=Math.abs(v);if(n<1000)return s*Math.round(n/100)*100;if(n<10000)return s*Math.round(n/500)*500;if(n<100000)return s*Math.round(n/1000)*1000;if(n<1000000)return s*Math.round(n/5000)*5000;return s*Math.round(n/10000)*10000;}
+var MSK_LAT=55.7557,MSK_LON=37.6176,SAD_R=2.8,FAR_R=200;
+function ptDist(la1,lo1,la2,lo2){var R=6371,dp=(la2-la1)*Math.PI/180,dl=(lo2-lo1)*Math.PI/180,a=Math.sin(dp/2)*Math.sin(dp/2)+Math.cos(la1*Math.PI/180)*Math.cos(la2*Math.PI/180)*Math.sin(dl/2)*Math.sin(dl/2);return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));}
+var MKAD_POLY=[[55.891,37.373],[55.882,37.540],[55.888,37.707],[55.871,37.843],[55.815,37.945],[55.733,37.978],[55.653,37.933],[55.611,37.810],[55.572,37.661],[55.573,37.507],[55.604,37.333],[55.664,37.218],[55.735,37.191],[55.810,37.250],[55.862,37.312]];
+function inMkad(lat,lon){var p=MKAD_POLY,n=p.length,ins=false,j=n-1;for(var i=0;i<n;j=i++){if(((p[i][0]>lat)!=(p[j][0]>lat))&&(lon<(p[j][1]-p[i][1])*(lat-p[i][0])/(p[j][0]-p[i][0])+p[i][1]))ins=!ins;}return ins;}
+function mskZone(lat,lon){if(!inMkad(lat,lon))return null;return ptDist(lat,lon,MSK_LAT,MSK_LON)<=SAD_R?'sadovoe':'mkad';}
+
+var TECH=[
+{n:"Caterpillar 301.7",g:'excavator',w:1.7,l:4.69,d:2.0,h:2.58,m:"1.7 т"},{n:"Caterpillar 303",g:'excavator',w:3.3,l:4.96,d:2.1,h:2.67,m:"3.3 т"},{n:"Caterpillar 305",g:'excavator',w:5.3,l:5.3,d:2.22,h:2.77,m:"5.3 т"},{n:"Caterpillar 308",g:'excavator',w:8.2,l:5.79,d:2.39,h:2.91,m:"8.2 т"},{n:"Caterpillar 313",g:'excavator',w:13.5,l:9.38,d:2.98,h:3.12,m:"13.5 т"},{n:"Caterpillar 315",g:'excavator',w:15.7,l:9.51,d:3.01,h:3.15,m:"15.7 т"},{n:"Caterpillar 316",g:'excavator',w:16.5,l:9.56,d:3.02,h:3.16,m:"16.5 т"},{n:"Caterpillar 318",g:'excavator',w:18.5,l:9.67,d:3.04,h:3.18,m:"18.5 т"},{n:"Caterpillar 320",g:'excavator',w:22.5,l:9.9,d:3.09,h:3.23,m:"22.5 т"},{n:"Caterpillar 323",g:'excavator',w:25.0,l:10.05,d:3.12,h:3.26,m:"25.0 т"},{n:"Caterpillar 326",g:'excavator',w:27.0,l:10.17,d:3.14,h:3.29,m:"27.0 т"},{n:"Caterpillar 330",g:'excavator',w:30.5,l:10.37,d:3.19,h:3.33,m:"30.5 т"},{n:"Caterpillar 336",g:'excavator',w:37.0,l:10.75,d:3.26,h:3.41,m:"37.0 т"},{n:"Caterpillar 340",g:'excavator',w:40.0,l:10.92,d:3.3,h:3.45,m:"40.0 т"},{n:"Caterpillar 349",g:'excavator',w:47.0,l:11.33,d:3.38,h:3.54,m:"47.0 т"},{n:"Caterpillar 352",g:'excavator',w:52.0,l:11.62,d:3.44,h:3.6,m:"52.0 т"},{n:"Caterpillar 374",g:'excavator',w:73.0,l:12.83,d:3.7,h:3.86,m:"73.0 т"},{n:"Caterpillar 390",g:'excavator',w:90.0,l:13.82,d:3.9,h:4.08,m:"90.0 т"},{n:"Caterpillar 395",g:'excavator',w:95.0,l:14.11,d:3.96,h:4.14,m:"95.0 т"},{n:"Komatsu PC18",g:'excavator',w:1.8,l:4.71,d:2.01,h:2.59,m:"1.8 т"},{n:"Komatsu PC30",g:'excavator',w:3.2,l:4.94,d:2.09,h:2.66,m:"3.2 т"},{n:"Komatsu PC55",g:'excavator',w:5.5,l:5.34,d:2.23,h:2.77,m:"5.5 т"},{n:"Komatsu PC78",g:'excavator',w:8.0,l:5.76,d:2.38,h:2.9,m:"8.0 т"},{n:"Komatsu PC130",g:'excavator',w:13.3,l:9.37,d:2.98,h:3.12,m:"13.3 т"},{n:"Komatsu PC160",g:'excavator',w:16.5,l:9.56,d:3.02,h:3.16,m:"16.5 т"},{n:"Komatsu PC170",g:'excavator',w:17.5,l:9.62,d:3.03,h:3.17,m:"17.5 т"},{n:"Komatsu PC200",g:'excavator',w:20.0,l:9.76,d:3.06,h:3.2,m:"20.0 т"},{n:"Komatsu PC210",g:'excavator',w:21.0,l:9.82,d:3.07,h:3.21,m:"21.0 т"},{n:"Komatsu PC240",g:'excavator',w:24.5,l:10.02,d:3.11,h:3.26,m:"24.5 т"},{n:"Komatsu PC290",g:'excavator',w:29.0,l:10.28,d:3.17,h:3.31,m:"29.0 т"},{n:"Komatsu PC300",g:'excavator',w:31.5,l:10.43,d:3.2,h:3.34,m:"31.5 т"},{n:"Komatsu PC350",g:'excavator',w:34.5,l:10.6,d:3.23,h:3.38,m:"34.5 т"},{n:"Komatsu PC360",g:'excavator',w:36.0,l:10.69,d:3.25,h:3.4,m:"36.0 т"},{n:"Komatsu PC400",g:'excavator',w:42.5,l:11.06,d:3.33,h:3.48,m:"42.5 т"},{n:"Komatsu PC450",g:'excavator',w:45.5,l:11.24,d:3.37,h:3.52,m:"45.5 т"},{n:"Komatsu PC490",g:'excavator',w:49.0,l:11.44,d:3.41,h:3.56,m:"49.0 т"},{n:"Komatsu PC550",g:'excavator',w:54.0,l:11.73,d:3.47,h:3.62,m:"54.0 т"},{n:"Komatsu PC650",g:'excavator',w:65.0,l:12.37,d:3.6,h:3.76,m:"65.0 т"},{n:"Komatsu PC700",g:'excavator',w:70.0,l:12.66,d:3.66,h:3.83,m:"70.0 т"},{n:"Komatsu PC800",g:'excavator',w:80.0,l:13.24,d:3.78,h:3.95,m:"80.0 т"},{n:"Komatsu PC1250",g:'excavator',w:120.0,l:15.56,d:4.26,h:4.45,m:"120.0 т"},{n:"Hitachi ZX17",g:'excavator',w:1.7,l:4.69,d:2.0,h:2.58,m:"1.7 т"},{n:"Hitachi ZX33",g:'excavator',w:3.3,l:4.96,d:2.1,h:2.67,m:"3.3 т"},{n:"Hitachi ZX55",g:'excavator',w:5.5,l:5.34,d:2.23,h:2.77,m:"5.5 т"},{n:"Hitachi ZX85",g:'excavator',w:8.5,l:5.85,d:2.41,h:2.92,m:"8.5 т"},{n:"Hitachi ZX130",g:'excavator',w:13.0,l:9.35,d:2.98,h:3.11,m:"13.0 т"},{n:"Hitachi ZX160",g:'excavator',w:16.0,l:9.53,d:3.01,h:3.15,m:"16.0 т"},{n:"Hitachi ZX200",g:'excavator',w:20.0,l:9.76,d:3.06,h:3.2,m:"20.0 т"},{n:"Hitachi ZX210",g:'excavator',w:21.0,l:9.82,d:3.07,h:3.21,m:"21.0 т"},{n:"Hitachi ZX240",g:'excavator',w:24.0,l:9.99,d:3.11,h:3.25,m:"24.0 т"},{n:"Hitachi ZX300",g:'excavator',w:30.0,l:10.34,d:3.18,h:3.33,m:"30.0 т"},{n:"Hitachi ZX330",g:'excavator',w:33.5,l:10.54,d:3.22,h:3.37,m:"33.5 т"},{n:"Hitachi ZX350",g:'excavator',w:35.5,l:10.66,d:3.25,h:3.39,m:"35.5 т"},{n:"Hitachi ZX470",g:'excavator',w:47.5,l:11.36,d:3.39,h:3.54,m:"47.5 т"},{n:"Hitachi ZX490",g:'excavator',w:49.5,l:11.47,d:3.41,h:3.57,m:"49.5 т"},{n:"Hitachi ZX530",g:'excavator',w:53.0,l:11.67,d:3.46,h:3.61,m:"53.0 т"},{n:"Hitachi ZX670",g:'excavator',w:67.0,l:12.49,d:3.62,h:3.79,m:"67.0 т"},{n:"Hitachi ZX690",g:'excavator',w:68.8,l:12.59,d:3.65,h:3.81,m:"68.8 т"},{n:"Hitachi ZX870",g:'excavator',w:86.0,l:13.59,d:3.85,h:4.03,m:"86.0 т"},{n:"Volvo EC18",g:'excavator',w:1.8,l:4.71,d:2.01,h:2.59,m:"1.8 т"},{n:"Volvo EC55",g:'excavator',w:5.5,l:5.34,d:2.23,h:2.77,m:"5.5 т"},{n:"Volvo EC140",g:'excavator',w:14.0,l:9.41,d:2.99,h:3.12,m:"14.0 т"},{n:"Volvo EC160",g:'excavator',w:16.5,l:9.56,d:3.02,h:3.16,m:"16.5 т"},{n:"Volvo EC200",g:'excavator',w:20.0,l:9.76,d:3.06,h:3.2,m:"20.0 т"},{n:"Volvo EC220",g:'excavator',w:22.0,l:9.88,d:3.08,h:3.23,m:"22.0 т"},{n:"Volvo EC250",g:'excavator',w:25.0,l:10.05,d:3.12,h:3.26,m:"25.0 т"},{n:"Volvo EC300",g:'excavator',w:30.0,l:10.34,d:3.18,h:3.33,m:"30.0 т"},{n:"Volvo EC350",g:'excavator',w:35.0,l:10.63,d:3.24,h:3.39,m:"35.0 т"},{n:"Volvo EC380",g:'excavator',w:38.0,l:10.8,d:3.28,h:3.43,m:"38.0 т"},{n:"Volvo EC480",g:'excavator',w:48.5,l:11.41,d:3.4,h:3.56,m:"48.5 т"},{n:"Volvo EC750",g:'excavator',w:75.0,l:12.95,d:3.72,h:3.89,m:"75.0 т"},{n:"Hyundai R17",g:'excavator',w:1.7,l:4.69,d:2.0,h:2.58,m:"1.7 т"},{n:"Hyundai R55",g:'excavator',w:5.5,l:5.34,d:2.23,h:2.77,m:"5.5 т"},{n:"Hyundai R140",g:'excavator',w:14.0,l:9.41,d:2.99,h:3.12,m:"14.0 т"},{n:"Hyundai R160",g:'excavator',w:16.5,l:9.56,d:3.02,h:3.16,m:"16.5 т"},{n:"Hyundai R180",g:'excavator',w:18.0,l:9.64,d:3.04,h:3.18,m:"18.0 т"},{n:"Hyundai R220",g:'excavator',w:22.0,l:9.88,d:3.08,h:3.23,m:"22.0 т"},{n:"Hyundai R260",g:'excavator',w:26.0,l:10.11,d:3.13,h:3.28,m:"26.0 т"},{n:"Hyundai R300",g:'excavator',w:30.0,l:10.34,d:3.18,h:3.33,m:"30.0 т"},{n:"Hyundai R330",g:'excavator',w:33.0,l:10.51,d:3.22,h:3.36,m:"33.0 т"},{n:"Hyundai R380",g:'excavator',w:38.0,l:10.8,d:3.28,h:3.43,m:"38.0 т"},{n:"Hyundai R480",g:'excavator',w:48.0,l:11.38,d:3.4,h:3.55,m:"48.0 т"},{n:"Hyundai R520",g:'excavator',w:52.0,l:11.62,d:3.44,h:3.6,m:"52.0 т"},{n:"Doosan DX55",g:'excavator',w:5.5,l:5.34,d:2.23,h:2.77,m:"5.5 т"},{n:"Doosan DX140",g:'excavator',w:14.0,l:9.41,d:2.99,h:3.12,m:"14.0 т"},{n:"Doosan DX180",g:'excavator',w:18.0,l:9.64,d:3.04,h:3.18,m:"18.0 т"},{n:"Doosan DX225",g:'excavator',w:22.5,l:9.9,d:3.09,h:3.23,m:"22.5 т"},{n:"Doosan DX255",g:'excavator',w:25.5,l:10.08,d:3.13,h:3.27,m:"25.5 т"},{n:"Doosan DX300",g:'excavator',w:30.0,l:10.34,d:3.18,h:3.33,m:"30.0 т"},{n:"Doosan DX340",g:'excavator',w:34.0,l:10.57,d:3.23,h:3.38,m:"34.0 т"},{n:"Doosan DX380",g:'excavator',w:38.0,l:10.8,d:3.28,h:3.43,m:"38.0 т"},{n:"Doosan DX420",g:'excavator',w:42.0,l:11.04,d:3.32,h:3.48,m:"42.0 т"},{n:"Doosan DX490",g:'excavator',w:49.0,l:11.44,d:3.41,h:3.56,m:"49.0 т"},{n:"Doosan DX530",g:'excavator',w:53.0,l:11.67,d:3.46,h:3.61,m:"53.0 т"},{n:"JCB 8018",g:'excavator',w:1.8,l:4.71,d:2.01,h:2.59,m:"1.8 т"},{n:"JCB 8055",g:'excavator',w:5.5,l:5.34,d:2.23,h:2.77,m:"5.5 т"},{n:"JCB JS130",g:'excavator',w:13.0,l:9.35,d:2.98,h:3.11,m:"13.0 т"},{n:"JCB JS160",g:'excavator',w:16.0,l:9.53,d:3.01,h:3.15,m:"16.0 т"},{n:"JCB JS200",g:'excavator',w:20.0,l:9.76,d:3.06,h:3.2,m:"20.0 т"},{n:"JCB JS220",g:'excavator',w:22.0,l:9.88,d:3.08,h:3.23,m:"22.0 т"},{n:"JCB JS300",g:'excavator',w:30.0,l:10.34,d:3.18,h:3.33,m:"30.0 т"},{n:"JCB JS370",g:'excavator',w:37.0,l:10.75,d:3.26,h:3.41,m:"37.0 т"},{n:"JCB 3CX",g:'excavator',w:8.5,l:5.85,d:2.41,h:2.92,m:"8.5 т"},{n:"JCB 4CX",g:'excavator',w:9.5,l:6.02,d:2.47,h:2.98,m:"9.5 т"},{n:"Liebherr R914",g:'excavator',w:20.0,l:9.76,d:3.06,h:3.2,m:"20.0 т"},{n:"Liebherr R920",g:'excavator',w:22.0,l:9.88,d:3.08,h:3.23,m:"22.0 т"},{n:"Liebherr R924",g:'excavator',w:24.0,l:9.99,d:3.11,h:3.25,m:"24.0 т"},{n:"Liebherr R926",g:'excavator',w:26.0,l:10.11,d:3.13,h:3.28,m:"26.0 т"},{n:"Liebherr R934",g:'excavator',w:32.0,l:10.46,d:3.2,h:3.35,m:"32.0 т"},{n:"Liebherr R938",g:'excavator',w:38.0,l:10.8,d:3.28,h:3.43,m:"38.0 т"},{n:"Liebherr R944",g:'excavator',w:44.0,l:11.15,d:3.35,h:3.5,m:"44.0 т"},{n:"Liebherr R950",g:'excavator',w:50.0,l:11.5,d:3.42,h:3.58,m:"50.0 т"},{n:"Liebherr R954",g:'excavator',w:55.0,l:11.79,d:3.48,h:3.64,m:"55.0 т"},{n:"Liebherr R960",g:'excavator',w:60.0,l:12.08,d:3.54,h:3.7,m:"60.0 т"},{n:"Liebherr R970",g:'excavator',w:70.0,l:12.66,d:3.66,h:3.83,m:"70.0 т"},{n:"Liebherr R976",g:'excavator',w:76.0,l:13.01,d:3.73,h:3.9,m:"76.0 т"},{n:"Sany SY16",g:'excavator',w:1.7,l:4.69,d:2.0,h:2.58,m:"1.7 т"},{n:"Sany SY55",g:'excavator',w:5.4,l:5.32,d:2.22,h:2.77,m:"5.4 т"},{n:"Sany SY135",g:'excavator',w:13.5,l:9.38,d:2.98,h:3.12,m:"13.5 т"},{n:"Sany SY215",g:'excavator',w:21.5,l:9.85,d:3.08,h:3.22,m:"21.5 т"},{n:"Sany SY265",g:'excavator',w:26.5,l:10.14,d:3.14,h:3.28,m:"26.5 т"},{n:"Sany SY305",g:'excavator',w:30.5,l:10.37,d:3.19,h:3.33,m:"30.5 т"},{n:"Sany SY365",g:'excavator',w:36.5,l:10.72,d:3.26,h:3.41,m:"36.5 т"},{n:"Sany SY485",g:'excavator',w:48.5,l:11.41,d:3.4,h:3.56,m:"48.5 т"},{n:"Sany SY500",g:'excavator',w:50.0,l:11.5,d:3.42,h:3.58,m:"50.0 т"},{n:"XCMG XE15",g:'excavator',w:1.6,l:4.67,d:2.0,h:2.58,m:"1.6 т"},{n:"XCMG XE60",g:'excavator',w:6.0,l:5.42,d:2.26,h:2.8,m:"6.0 т"},{n:"XCMG XE135",g:'excavator',w:13.5,l:9.38,d:2.98,h:3.12,m:"13.5 т"},{n:"XCMG XE210",g:'excavator',w:21.0,l:9.82,d:3.07,h:3.21,m:"21.0 т"},{n:"XCMG XE265",g:'excavator',w:26.5,l:10.14,d:3.14,h:3.28,m:"26.5 т"},{n:"XCMG XE335",g:'excavator',w:33.5,l:10.54,d:3.22,h:3.37,m:"33.5 т"},{n:"XCMG XE370",g:'excavator',w:37.0,l:10.75,d:3.26,h:3.41,m:"37.0 т"},{n:"XCMG XE490",g:'excavator',w:49.0,l:11.44,d:3.41,h:3.56,m:"49.0 т"},{n:"XCMG XE700",g:'excavator',w:70.0,l:12.66,d:3.66,h:3.83,m:"70.0 т"},{n:"Kobelco SK17",g:'excavator',w:1.7,l:4.69,d:2.0,h:2.58,m:"1.7 т"},{n:"Kobelco SK75",g:'excavator',w:7.5,l:5.68,d:2.35,h:2.88,m:"7.5 т"},{n:"Kobelco SK140",g:'excavator',w:14.0,l:9.41,d:2.99,h:3.12,m:"14.0 т"},{n:"Kobelco SK210",g:'excavator',w:21.0,l:9.82,d:3.07,h:3.21,m:"21.0 т"},{n:"Kobelco SK260",g:'excavator',w:26.0,l:10.11,d:3.13,h:3.28,m:"26.0 т"},{n:"Kobelco SK350",g:'excavator',w:35.0,l:10.63,d:3.24,h:3.39,m:"35.0 т"},{n:"Kobelco SK500",g:'excavator',w:50.0,l:11.5,d:3.42,h:3.58,m:"50.0 т"},{n:"Case CX130",g:'excavator',w:13.5,l:9.38,d:2.98,h:3.12,m:"13.5 т"},{n:"Case CX210",g:'excavator',w:21.0,l:9.82,d:3.07,h:3.21,m:"21.0 т"},{n:"Case CX250",g:'excavator',w:25.0,l:10.05,d:3.12,h:3.26,m:"25.0 т"},{n:"Case CX300",g:'excavator',w:30.0,l:10.34,d:3.18,h:3.33,m:"30.0 т"},{n:"Case CX370",g:'excavator',w:37.0,l:10.75,d:3.26,h:3.41,m:"37.0 т"},{n:"LiuGong 922",g:'excavator',w:22.0,l:9.88,d:3.08,h:3.23,m:"22.0 т"},{n:"LiuGong 933",g:'excavator',w:33.0,l:10.51,d:3.22,h:3.36,m:"33.0 т"},{n:"LiuGong 950",g:'excavator',w:50.0,l:11.5,d:3.42,h:3.58,m:"50.0 т"},{n:"SDLG E6210",g:'excavator',w:21.0,l:9.82,d:3.07,h:3.21,m:"21.0 т"},{n:"SDLG E6360",g:'excavator',w:36.0,l:10.69,d:3.25,h:3.4,m:"36.0 т"},
+{n:"Liebherr LB 16",g:'drill',w:38.0,l:12.9,d:3.22,h:3.72,m:"Бур 38.0 т"},{n:"Liebherr LB 20",g:'drill',w:42.0,l:13.1,d:3.26,h:3.76,m:"Бур 42.0 т"},{n:"Liebherr LB 24",g:'drill',w:48.0,l:13.4,d:3.33,h:3.83,m:"Бур 48.0 т"},{n:"Liebherr LB 28",g:'drill',w:55.0,l:13.75,d:3.4,h:3.9,m:"Бур 55.0 т"},{n:"Liebherr LB 32",g:'drill',w:65.0,l:14.25,d:3.51,h:4.01,m:"Бур 65.0 т"},{n:"Liebherr LB 35",g:'drill',w:72.0,l:14.6,d:3.59,h:4.09,m:"Бур 72.0 т"},{n:"Liebherr LB 44",g:'drill',w:85.0,l:15.25,d:3.73,h:4.23,m:"Бур 85.0 т"},{n:"Casagrande C6",g:'drill',w:35.0,l:12.75,d:3.18,h:3.68,m:"Бур 35.0 т"},{n:"Casagrande C8",g:'drill',w:40.0,l:13.0,d:3.24,h:3.74,m:"Бур 40.0 т"},{n:"Casagrande C10",g:'drill',w:45.0,l:13.25,d:3.29,h:3.79,m:"Бур 45.0 т"},{n:"Casagrande C12",g:'drill',w:52.0,l:13.6,d:3.37,h:3.87,m:"Бур 52.0 т"},{n:"Casagrande C16",g:'drill',w:60.0,l:14.0,d:3.46,h:3.96,m:"Бур 60.0 т"},{n:"Casagrande C20",g:'drill',w:70.0,l:14.5,d:3.57,h:4.07,m:"Бур 70.0 т"},{n:"Casagrande C25",g:'drill',w:88.0,l:15.4,d:3.77,h:4.27,m:"Бур 88.0 т"},{n:"Junttan PM20",g:'drill',w:32.0,l:12.6,d:3.15,h:3.65,m:"Бур 32.0 т"},{n:"Junttan PM25",g:'drill',w:42.0,l:13.1,d:3.26,h:3.76,m:"Бур 42.0 т"},{n:"Junttan PM28",g:'drill',w:48.0,l:13.4,d:3.33,h:3.83,m:"Бур 48.0 т"},{n:"Junttan PM30",g:'drill',w:55.0,l:13.75,d:3.4,h:3.9,m:"Бур 55.0 т"},{n:"Junttan PM35",g:'drill',w:62.0,l:14.1,d:3.48,h:3.98,m:"Бур 62.0 т"},{n:"Junttan PM40",g:'drill',w:72.0,l:14.6,d:3.59,h:4.09,m:"Бур 72.0 т"},{n:"Junttan PM45",g:'drill',w:80.0,l:15.0,d:3.68,h:4.18,m:"Бур 80.0 т"},{n:"Bauer BG 15",g:'drill',w:35.0,l:12.75,d:3.18,h:3.68,m:"Бур 35.0 т"},{n:"Bauer BG 20",g:'drill',w:42.0,l:13.1,d:3.26,h:3.76,m:"Бур 42.0 т"},{n:"Bauer BG 24",g:'drill',w:50.0,l:13.5,d:3.35,h:3.85,m:"Бур 50.0 т"},{n:"Bauer BG 28",g:'drill',w:60.0,l:14.0,d:3.46,h:3.96,m:"Бур 60.0 т"},{n:"Bauer BG 36",g:'drill',w:75.0,l:14.75,d:3.62,h:4.12,m:"Бур 75.0 т"},{n:"Bauer BG 40",g:'drill',w:85.0,l:15.25,d:3.73,h:4.23,m:"Бур 85.0 т"},{n:"Bauer BG 45",g:'drill',w:95.0,l:15.75,d:3.84,h:4.34,m:"Бур 95.0 т"},{n:"Bauer BG 50",g:'drill',w:110.0,l:16.5,d:4.01,h:4.51,m:"Бур 110.0 т"},{n:"Soilmec SR40",g:'drill',w:40.0,l:13.0,d:3.24,h:3.74,m:"Бур 40.0 т"},{n:"Soilmec SR60",g:'drill',w:55.0,l:13.75,d:3.4,h:3.9,m:"Бур 55.0 т"},{n:"Soilmec SR80",g:'drill',w:72.0,l:14.6,d:3.59,h:4.09,m:"Бур 72.0 т"},{n:"Soilmec SR95",g:'drill',w:90.0,l:15.5,d:3.79,h:4.29,m:"Бур 90.0 т"},{n:"XCMG XR160",g:'drill',w:32.0,l:12.6,d:3.15,h:3.65,m:"Бур 32.0 т"},{n:"XCMG XR220",g:'drill',w:45.0,l:13.25,d:3.29,h:3.79,m:"Бур 45.0 т"},{n:"XCMG XR280",g:'drill',w:55.0,l:13.75,d:3.4,h:3.9,m:"Бур 55.0 т"},{n:"XCMG XR320",g:'drill',w:62.0,l:14.1,d:3.48,h:3.98,m:"Бур 62.0 т"},{n:"XCMG XR360",g:'drill',w:70.0,l:14.5,d:3.57,h:4.07,m:"Бур 70.0 т"},{n:"XCMG XR400",g:'drill',w:80.0,l:15.0,d:3.68,h:4.18,m:"Бур 80.0 т"},{n:"XCMG XR550",g:'drill',w:105.0,l:16.25,d:3.96,h:4.46,m:"Бур 105.0 т"},{n:"Sany SR155",g:'drill',w:42.0,l:13.1,d:3.26,h:3.76,m:"Бур 42.0 т"},{n:"Sany SR205",g:'drill',w:52.0,l:13.6,d:3.37,h:3.87,m:"Бур 52.0 т"},{n:"Sany SR285",g:'drill',w:66.0,l:14.3,d:3.53,h:4.03,m:"Бур 66.0 т"},{n:"Sany SR365",g:'drill',w:82.0,l:15.1,d:3.7,h:4.2,m:"Бур 82.0 т"},{n:"Sany SR445",g:'drill',w:95.0,l:15.75,d:3.84,h:4.34,m:"Бур 95.0 т"},{n:"IMT AF180",g:'drill',w:40.0,l:13.0,d:3.24,h:3.74,m:"Бур 40.0 т"},{n:"IMT AF240",g:'drill',w:55.0,l:13.75,d:3.4,h:3.9,m:"Бур 55.0 т"},{n:"Mait HR130",g:'drill',w:48.0,l:13.4,d:3.33,h:3.83,m:"Бур 48.0 т"},{n:"Mait HR180",g:'drill',w:66.0,l:14.3,d:3.53,h:4.03,m:"Бур 66.0 т"},{n:"Delmag RH20",g:'drill',w:35.0,l:12.75,d:3.18,h:3.68,m:"Бур 35.0 т"},{n:"ABI TM18",g:'drill',w:42.0,l:13.1,d:3.26,h:3.76,m:"Бур 42.0 т"},
+{n:"HAMM HD10",g:'roller',w:10.0,l:5.5,d:2.3,h:3.1,m:"Каток 10.0 т"},{n:"HAMM HD12",g:'roller',w:12.0,l:5.64,d:2.36,h:3.16,m:"Каток 12.0 т"},{n:"HAMM HD14",g:'roller',w:14.0,l:5.78,d:2.42,h:3.22,m:"Каток 14.0 т"},{n:"HAMM HD+ 110",g:'roller',w:11.5,l:5.6,d:2.34,h:3.14,m:"Каток 11.5 т"},{n:"HAMM HD+ 120",g:'roller',w:13.0,l:5.71,d:2.39,h:3.19,m:"Каток 13.0 т"},{n:"HAMM 3410",g:'roller',w:14.5,l:5.81,d:2.44,h:3.23,m:"Каток 14.5 т"},{n:"HAMM 3412",g:'roller',w:16.0,l:5.92,d:2.48,h:3.28,m:"Каток 16.0 т"},{n:"HAMM 3414",g:'roller',w:17.0,l:5.99,d:2.51,h:3.31,m:"Каток 17.0 т"},{n:"HAMM 3516",g:'roller',w:18.5,l:6.09,d:2.55,h:3.35,m:"Каток 18.5 т"},{n:"HAMM 3520",g:'roller',w:20.5,l:6.23,d:2.62,h:3.42,m:"Каток 20.5 т"},{n:"BOMAG BW 145",g:'roller',w:9.5,l:5.46,d:2.29,h:3.08,m:"Каток 9.5 т"},{n:"BOMAG BW 177",g:'roller',w:10.5,l:5.54,d:2.31,h:3.11,m:"Каток 10.5 т"},{n:"BOMAG BW 203",g:'roller',w:14.0,l:5.78,d:2.42,h:3.22,m:"Каток 14.0 т"},{n:"BOMAG BW 213",g:'roller',w:12.5,l:5.67,d:2.38,h:3.17,m:"Каток 12.5 т"},{n:"BOMAG BW 219",g:'roller',w:19.0,l:6.13,d:2.57,h:3.37,m:"Каток 19.0 т"},{n:"BOMAG BW 226",g:'roller',w:18.0,l:6.06,d:2.54,h:3.34,m:"Каток 18.0 т"},{n:"BOMAG BW 332",g:'roller',w:25.0,l:6.55,d:2.75,h:3.55,m:"Каток 25.0 т"},{n:"Dynapac CA 1500",g:'roller',w:8.5,l:5.39,d:2.25,h:3.05,m:"Каток 8.5 т"},{n:"Dynapac CA 2500",g:'roller',w:12.0,l:5.64,d:2.36,h:3.16,m:"Каток 12.0 т"},{n:"Dynapac CA 3500",g:'roller',w:15.0,l:5.85,d:2.45,h:3.25,m:"Каток 15.0 т"},{n:"Dynapac CA 4500",g:'roller',w:18.0,l:6.06,d:2.54,h:3.34,m:"Каток 18.0 т"},{n:"Dynapac CA 6500",g:'roller',w:21.0,l:6.27,d:2.63,h:3.43,m:"Каток 21.0 т"},{n:"Caterpillar CS44",g:'roller',w:9.5,l:5.46,d:2.29,h:3.08,m:"Каток 9.5 т"},{n:"Caterpillar CS54",g:'roller',w:11.5,l:5.6,d:2.34,h:3.14,m:"Каток 11.5 т"},{n:"Caterpillar CS64",g:'roller',w:14.0,l:5.78,d:2.42,h:3.22,m:"Каток 14.0 т"},{n:"Caterpillar CS68",g:'roller',w:16.0,l:5.92,d:2.48,h:3.28,m:"Каток 16.0 т"},{n:"Caterpillar CS74",g:'roller',w:17.5,l:6.03,d:2.52,h:3.32,m:"Каток 17.5 т"},{n:"Caterpillar CS76",g:'roller',w:18.5,l:6.09,d:2.55,h:3.35,m:"Каток 18.5 т"},{n:"Caterpillar CS78",g:'roller',w:19.5,l:6.17,d:2.58,h:3.38,m:"Каток 19.5 т"},{n:"Volvo SD75",g:'roller',w:8.0,l:5.36,d:2.24,h:3.04,m:"Каток 8.0 т"},{n:"Volvo SD115",g:'roller',w:11.5,l:5.6,d:2.34,h:3.14,m:"Каток 11.5 т"},{n:"Volvo SD135",g:'roller',w:13.5,l:5.75,d:2.4,h:3.2,m:"Каток 13.5 т"},{n:"Volvo SD160",g:'roller',w:16.0,l:5.92,d:2.48,h:3.28,m:"Каток 16.0 т"},{n:"Volvo SD200",g:'roller',w:20.0,l:6.2,d:2.6,h:3.4,m:"Каток 20.0 т"},{n:"Ammann ASC110",g:'roller',w:11.0,l:5.57,d:2.33,h:3.13,m:"Каток 11.0 т"},{n:"Ammann ASC150",g:'roller',w:15.0,l:5.85,d:2.45,h:3.25,m:"Каток 15.0 т"},{n:"Ammann ASC200",g:'roller',w:20.0,l:6.2,d:2.6,h:3.4,m:"Каток 20.0 т"},{n:"Ammann ASC250",g:'roller',w:25.0,l:6.55,d:2.75,h:3.55,m:"Каток 25.0 т"},{n:"Sakai SV520",g:'roller',w:11.0,l:5.57,d:2.33,h:3.13,m:"Каток 11.0 т"},{n:"Sakai SV540",g:'roller',w:13.0,l:5.71,d:2.39,h:3.19,m:"Каток 13.0 т"},{n:"Sakai SV640",g:'roller',w:16.0,l:5.92,d:2.48,h:3.28,m:"Каток 16.0 т"},{n:"XCMG XS123",g:'roller',w:12.0,l:5.64,d:2.36,h:3.16,m:"Каток 12.0 т"},{n:"XCMG XS143",g:'roller',w:14.0,l:5.78,d:2.42,h:3.22,m:"Каток 14.0 т"},{n:"XCMG XS163",g:'roller',w:16.0,l:5.92,d:2.48,h:3.28,m:"Каток 16.0 т"},{n:"XCMG XS183",g:'roller',w:18.0,l:6.06,d:2.54,h:3.34,m:"Каток 18.0 т"},{n:"XCMG XS203",g:'roller',w:20.0,l:6.2,d:2.6,h:3.4,m:"Каток 20.0 т"},{n:"XCMG XS223",g:'roller',w:22.0,l:6.34,d:2.66,h:3.46,m:"Каток 22.0 т"},{n:"XCMG XS263",g:'roller',w:26.0,l:6.62,d:2.78,h:3.58,m:"Каток 26.0 т"},{n:"XCMG XS305",g:'roller',w:30.0,l:6.9,d:2.9,h:3.7,m:"Каток 30.0 т"},{n:"JCB VM115",g:'roller',w:11.5,l:5.6,d:2.34,h:3.14,m:"Каток 11.5 т"},{n:"JCB VM132",g:'roller',w:13.2,l:5.72,d:2.4,h:3.2,m:"Каток 13.2 т"},{n:"LiuGong 6122",g:'roller',w:12.0,l:5.64,d:2.36,h:3.16,m:"Каток 12.0 т"},{n:"Lonking LG520",g:'roller',w:20.0,l:6.2,d:2.6,h:3.4,m:"Каток 20.0 т"},
+{n:"Caterpillar 938",g:'loader',w:16.5,l:8.24,d:2.9,h:3.41,m:"Погр. 16.5 т"},{n:"Caterpillar 950",g:'loader',w:18.5,l:8.39,d:2.93,h:3.44,m:"Погр. 18.5 т"},{n:"Caterpillar 962",g:'loader',w:20.0,l:8.5,d:2.96,h:3.46,m:"Погр. 20.0 т"},{n:"Caterpillar 966",g:'loader',w:24.0,l:8.8,d:3.03,h:3.51,m:"Погр. 24.0 т"},{n:"Caterpillar 972",g:'loader',w:25.0,l:8.88,d:3.05,h:3.53,m:"Погр. 25.0 т"},{n:"Caterpillar 980",g:'loader',w:30.0,l:9.25,d:3.14,h:3.59,m:"Погр. 30.0 т"},{n:"Caterpillar 982",g:'loader',w:31.0,l:9.32,d:3.16,h:3.6,m:"Погр. 31.0 т"},{n:"Caterpillar 988",g:'loader',w:50.0,l:10.75,d:3.5,h:3.85,m:"Погр. 50.0 т"},{n:"Caterpillar 990",g:'loader',w:78.0,l:12.85,d:4.0,h:4.21,m:"Погр. 78.0 т"},{n:"Volvo L60",g:'loader',w:12.5,l:7.94,d:2.83,h:3.36,m:"Погр. 12.5 т"},{n:"Volvo L90",g:'loader',w:15.0,l:8.12,d:2.87,h:3.4,m:"Погр. 15.0 т"},{n:"Volvo L110",g:'loader',w:18.0,l:8.35,d:2.92,h:3.43,m:"Погр. 18.0 т"},{n:"Volvo L120",g:'loader',w:21.0,l:8.57,d:2.98,h:3.47,m:"Погр. 21.0 т"},{n:"Volvo L150",g:'loader',w:24.0,l:8.8,d:3.03,h:3.51,m:"Погр. 24.0 т"},{n:"Volvo L180",g:'loader',w:30.0,l:9.25,d:3.14,h:3.59,m:"Погр. 30.0 т"},{n:"Volvo L220",g:'loader',w:33.0,l:9.47,d:3.19,h:3.63,m:"Погр. 33.0 т"},{n:"Volvo L260",g:'loader',w:38.0,l:9.85,d:3.28,h:3.69,m:"Погр. 38.0 т"},{n:"Volvo L350",g:'loader',w:53.0,l:10.97,d:3.55,h:3.89,m:"Погр. 53.0 т"},{n:"Komatsu WA200",g:'loader',w:11.5,l:7.86,d:2.81,h:3.35,m:"Погр. 11.5 т"},{n:"Komatsu WA320",g:'loader',w:15.0,l:8.12,d:2.87,h:3.4,m:"Погр. 15.0 т"},{n:"Komatsu WA380",g:'loader',w:18.0,l:8.35,d:2.92,h:3.43,m:"Погр. 18.0 т"},{n:"Komatsu WA470",g:'loader',w:24.0,l:8.8,d:3.03,h:3.51,m:"Погр. 24.0 т"},{n:"Komatsu WA500",g:'loader',w:34.0,l:9.55,d:3.21,h:3.64,m:"Погр. 34.0 т"},{n:"Komatsu WA600",g:'loader',w:53.0,l:10.97,d:3.55,h:3.89,m:"Погр. 53.0 т"},{n:"XCMG LW300",g:'loader',w:10.5,l:7.79,d:2.79,h:3.34,m:"Погр. 10.5 т"},{n:"XCMG LW400",g:'loader',w:13.5,l:8.01,d:2.84,h:3.38,m:"Погр. 13.5 т"},{n:"XCMG LW500",g:'loader',w:17.5,l:8.31,d:2.92,h:3.43,m:"Погр. 17.5 т"},{n:"XCMG LW600",g:'loader',w:20.0,l:8.5,d:2.96,h:3.46,m:"Погр. 20.0 т"},{n:"XCMG LW900",g:'loader',w:31.0,l:9.32,d:3.16,h:3.6,m:"Погр. 31.0 т"},{n:"SDLG LG936",g:'loader',w:10.8,l:7.81,d:2.79,h:3.34,m:"Погр. 10.8 т"},{n:"SDLG LG953",g:'loader',w:16.5,l:8.24,d:2.9,h:3.41,m:"Погр. 16.5 т"},{n:"SDLG LG958",g:'loader',w:17.5,l:8.31,d:2.92,h:3.43,m:"Погр. 17.5 т"},{n:"SDLG LG968",g:'loader',w:20.5,l:8.54,d:2.97,h:3.47,m:"Погр. 20.5 т"},{n:"LiuGong 835",g:'loader',w:10.5,l:7.79,d:2.79,h:3.34,m:"Погр. 10.5 т"},{n:"LiuGong 856",g:'loader',w:17.0,l:8.28,d:2.91,h:3.42,m:"Погр. 17.0 т"},{n:"LiuGong 877",g:'loader',w:24.0,l:8.8,d:3.03,h:3.51,m:"Погр. 24.0 т"},{n:"Lonking CDM856",g:'loader',w:17.0,l:8.28,d:2.91,h:3.42,m:"Погр. 17.0 т"},{n:"Lonking CDM860",g:'loader',w:20.0,l:8.5,d:2.96,h:3.46,m:"Погр. 20.0 т"},{n:"Doosan DL300",g:'loader',w:18.5,l:8.39,d:2.93,h:3.44,m:"Погр. 18.5 т"},{n:"Doosan DL420",g:'loader',w:24.0,l:8.8,d:3.03,h:3.51,m:"Погр. 24.0 т"},{n:"Doosan DL550",g:'loader',w:33.0,l:9.47,d:3.19,h:3.63,m:"Погр. 33.0 т"},{n:"Hyundai HL940",g:'loader',w:14.0,l:8.05,d:2.85,h:3.38,m:"Погр. 14.0 т"},{n:"Hyundai HL960",g:'loader',w:18.0,l:8.35,d:2.92,h:3.43,m:"Погр. 18.0 т"},{n:"Hyundai HL980",g:'loader',w:30.0,l:9.25,d:3.14,h:3.59,m:"Погр. 30.0 т"},{n:"JCB 426",g:'loader',w:12.0,l:7.9,d:2.82,h:3.36,m:"Погр. 12.0 т"},{n:"JCB 437",g:'loader',w:15.0,l:8.12,d:2.87,h:3.4,m:"Погр. 15.0 т"},{n:"JCB 457",g:'loader',w:19.0,l:8.43,d:2.94,h:3.45,m:"Погр. 19.0 т"},{n:"Case 821",g:'loader',w:16.0,l:8.2,d:2.89,h:3.41,m:"Погр. 16.0 т"},{n:"Case 921",g:'loader',w:20.0,l:8.5,d:2.96,h:3.46,m:"Погр. 20.0 т"},
+{n:"Caterpillar D5",g:'bulldozer',w:13.5,l:5.41,d:3.18,h:3.18,m:"Бульд. 13.5 т"},{n:"Caterpillar D6",g:'bulldozer',w:20.0,l:5.7,d:3.26,h:3.26,m:"Бульд. 20.0 т"},{n:"Caterpillar D6T",g:'bulldozer',w:20.5,l:5.72,d:3.27,h:3.27,m:"Бульд. 20.5 т"},{n:"Caterpillar D7",g:'bulldozer',w:26.0,l:5.97,d:3.34,h:3.34,m:"Бульд. 26.0 т"},{n:"Caterpillar D8",g:'bulldozer',w:38.0,l:6.51,d:3.49,h:3.49,m:"Бульд. 38.0 т"},{n:"Caterpillar D9",g:'bulldozer',w:48.0,l:6.96,d:3.62,h:3.62,m:"Бульд. 48.0 т"},{n:"Caterpillar D10",g:'bulldozer',w:66.0,l:7.77,d:3.86,h:3.86,m:"Бульд. 66.0 т"},{n:"Caterpillar D11",g:'bulldozer',w:104.0,l:9.48,d:4.35,h:4.35,m:"Бульд. 104.0 т"},{n:"Komatsu D51",g:'bulldozer',w:15.5,l:5.5,d:3.2,h:3.2,m:"Бульд. 15.5 т"},{n:"Komatsu D61",g:'bulldozer',w:18.5,l:5.63,d:3.24,h:3.24,m:"Бульд. 18.5 т"},{n:"Komatsu D65",g:'bulldozer',w:24.0,l:5.88,d:3.31,h:3.31,m:"Бульд. 24.0 т"},{n:"Komatsu D85",g:'bulldozer',w:27.0,l:6.01,d:3.35,h:3.35,m:"Бульд. 27.0 т"},{n:"Komatsu D155",g:'bulldozer',w:40.0,l:6.6,d:3.52,h:3.52,m:"Бульд. 40.0 т"},{n:"Komatsu D275",g:'bulldozer',w:49.0,l:7.0,d:3.64,h:3.64,m:"Бульд. 49.0 т"},{n:"Komatsu D375",g:'bulldozer',w:68.0,l:7.86,d:3.88,h:3.88,m:"Бульд. 68.0 т"},{n:"Komatsu D475",g:'bulldozer',w:108.0,l:9.66,d:4.4,h:4.4,m:"Бульд. 108.0 т"},{n:"Shantui SD16",g:'bulldozer',w:17.0,l:5.56,d:3.22,h:3.22,m:"Бульд. 17.0 т"},{n:"Shantui SD22",g:'bulldozer',w:23.5,l:5.86,d:3.31,h:3.31,m:"Бульд. 23.5 т"},{n:"Shantui SD32",g:'bulldozer',w:37.0,l:6.46,d:3.48,h:3.48,m:"Бульд. 37.0 т"},{n:"Shantui SD42",g:'bulldozer',w:46.0,l:6.87,d:3.6,h:3.6,m:"Бульд. 46.0 т"},{n:"Shantui DH17",g:'bulldozer',w:18.0,l:5.61,d:3.23,h:3.23,m:"Бульд. 18.0 т"},{n:"Shantui DH24",g:'bulldozer',w:24.0,l:5.88,d:3.31,h:3.31,m:"Бульд. 24.0 т"},{n:"SEM 816",g:'bulldozer',w:16.5,l:5.54,d:3.21,h:3.21,m:"Бульд. 16.5 т"},{n:"SEM 822",g:'bulldozer',w:23.0,l:5.83,d:3.3,h:3.3,m:"Бульд. 23.0 т"},{n:"XCMG TY160",g:'bulldozer',w:17.5,l:5.59,d:3.23,h:3.23,m:"Бульд. 17.5 т"},{n:"XCMG TY220",g:'bulldozer',w:24.0,l:5.88,d:3.31,h:3.31,m:"Бульд. 24.0 т"},{n:"XCMG TY320",g:'bulldozer',w:37.0,l:6.46,d:3.48,h:3.48,m:"Бульд. 37.0 т"},{n:"Liebherr PR736",g:'bulldozer',w:24.0,l:5.88,d:3.31,h:3.31,m:"Бульд. 24.0 т"},{n:"Liebherr PR746",g:'bulldozer',w:36.0,l:6.42,d:3.47,h:3.47,m:"Бульд. 36.0 т"},{n:"Liebherr PR766",g:'bulldozer',w:52.0,l:7.14,d:3.68,h:3.68,m:"Бульд. 52.0 т"},{n:"Liebherr PR776",g:'bulldozer',w:73.0,l:8.08,d:3.95,h:3.95,m:"Бульд. 73.0 т"},{n:"John Deere 750",g:'bulldozer',w:18.0,l:5.61,d:3.23,h:3.23,m:"Бульд. 18.0 т"},{n:"John Deere 850",g:'bulldozer',w:20.5,l:5.72,d:3.27,h:3.27,m:"Бульд. 20.5 т"},{n:"John Deere 950",g:'bulldozer',w:28.0,l:6.06,d:3.36,h:3.36,m:"Бульд. 28.0 т"},{n:"Case 1650",g:'bulldozer',w:17.0,l:5.56,d:3.22,h:3.22,m:"Бульд. 17.0 т"},{n:"Case 2050",g:'bulldozer',w:20.5,l:5.72,d:3.27,h:3.27,m:"Бульд. 20.5 т"},{n:"ЧЕТРА Т-11",g:'bulldozer',w:20.0,l:5.7,d:3.26,h:3.26,m:"Бульд. 20.0 т"},{n:"ЧЕТРА Т-15",g:'bulldozer',w:25.0,l:5.92,d:3.33,h:3.33,m:"Бульд. 25.0 т"},{n:"ЧЕТРА Т-20",g:'bulldozer',w:32.0,l:6.24,d:3.42,h:3.42,m:"Бульд. 32.0 т"},{n:"ЧЕТРА Т-25",g:'bulldozer',w:38.0,l:6.51,d:3.49,h:3.49,m:"Бульд. 38.0 т"},{n:"ЧЕТРА Т-35",g:'bulldozer',w:46.0,l:6.87,d:3.6,h:3.6,m:"Бульд. 46.0 т"},{n:"ДСТ-УРАЛ ТМ10",g:'bulldozer',w:16.0,l:5.52,d:3.21,h:3.21,m:"Бульд. 16.0 т"},{n:"ДСТ-УРАЛ Б11",g:'bulldozer',w:18.5,l:5.63,d:3.24,h:3.24,m:"Бульд. 18.5 т"},{n:"Б10М (ЧТЗ)",g:'bulldozer',w:21.0,l:5.75,d:3.27,h:3.27,m:"Бульд. 21.0 т"},
+{n:"Liebherr LTM 1030",g:'crane',w:24.0,l:12.32,d:2.81,h:3.7,m:"Кран 24.0 т"},{n:"Liebherr LTM 1050",g:'crane',w:36.0,l:12.98,d:2.95,h:3.74,m:"Кран 36.0 т"},{n:"Liebherr LTM 1070",g:'crane',w:42.0,l:13.31,d:3.01,h:3.77,m:"Кран 42.0 т"},{n:"Liebherr LTM 1090",g:'crane',w:48.0,l:13.64,d:3.08,h:3.79,m:"Кран 48.0 т"},{n:"Liebherr LTM 1100",g:'crane',w:52.0,l:13.86,d:3.12,h:3.81,m:"Кран 52.0 т"},{n:"Liebherr LTM 1130",g:'crane',w:60.0,l:14.3,d:3.21,h:3.84,m:"Кран 60.0 т"},{n:"Liebherr LTM 1160",g:'crane',w:72.0,l:14.96,d:3.34,h:3.89,m:"Кран 72.0 т"},{n:"Liebherr LTM 1200",g:'crane',w:96.0,l:16.28,d:3.61,h:3.98,m:"Кран 96.0 т"},{n:"Liebherr LR 1100",g:'crane',w:110.0,l:17.05,d:3.76,h:4.04,m:"Кран 110.0 т"},{n:"Tadano GR-300",g:'crane',w:30.0,l:12.65,d:2.88,h:3.72,m:"Кран 30.0 т"},{n:"Tadano GR-500",g:'crane',w:40.0,l:13.2,d:2.99,h:3.76,m:"Кран 40.0 т"},{n:"Tadano GR-800",g:'crane',w:51.5,l:13.83,d:3.12,h:3.81,m:"Кран 51.5 т"},{n:"Tadano GR-1000",g:'crane',w:65.0,l:14.57,d:3.26,h:3.86,m:"Кран 65.0 т"},{n:"Tadano ATF-90",g:'crane',w:60.0,l:14.3,d:3.21,h:3.84,m:"Кран 60.0 т"},{n:"Tadano ATF-130",g:'crane',w:96.0,l:16.28,d:3.61,h:3.98,m:"Кран 96.0 т"},{n:"Grove GMK3050",g:'crane',w:36.0,l:12.98,d:2.95,h:3.74,m:"Кран 36.0 т"},{n:"Grove GMK4100",g:'crane',w:48.0,l:13.64,d:3.08,h:3.79,m:"Кран 48.0 т"},{n:"Grove GMK5130",g:'crane',w:60.0,l:14.3,d:3.21,h:3.84,m:"Кран 60.0 т"},{n:"Grove GMK5250",g:'crane',w:72.0,l:14.96,d:3.34,h:3.89,m:"Кран 72.0 т"},{n:"XCMG QY25",g:'crane',w:30.0,l:12.65,d:2.88,h:3.72,m:"Кран 30.0 т"},{n:"XCMG QY50",g:'crane',w:42.0,l:13.31,d:3.01,h:3.77,m:"Кран 42.0 т"},{n:"XCMG QY70",g:'crane',w:48.0,l:13.64,d:3.08,h:3.79,m:"Кран 48.0 т"},{n:"XCMG XCA60",g:'crane',w:45.0,l:13.47,d:3.04,h:3.78,m:"Кран 45.0 т"},{n:"XCMG XCA100",g:'crane',w:60.0,l:14.3,d:3.21,h:3.84,m:"Кран 60.0 т"},{n:"XCMG XCT80",g:'crane',w:52.0,l:13.86,d:3.12,h:3.81,m:"Кран 52.0 т"},{n:"Zoomlion QY55",g:'crane',w:43.0,l:13.37,d:3.02,h:3.77,m:"Кран 43.0 т"},{n:"Zoomlion QY70",g:'crane',w:49.0,l:13.7,d:3.09,h:3.8,m:"Кран 49.0 т"},{n:"Zoomlion ZTC800",g:'crane',w:52.0,l:13.86,d:3.12,h:3.81,m:"Кран 52.0 т"},{n:"Sany STC250",g:'crane',w:28.0,l:12.54,d:2.86,h:3.71,m:"Кран 28.0 т"},{n:"Sany STC500",g:'crane',w:40.0,l:13.2,d:2.99,h:3.76,m:"Кран 40.0 т"},{n:"Sany STC750",g:'crane',w:50.0,l:13.75,d:3.1,h:3.8,m:"Кран 50.0 т"},{n:"Sany SAC1000",g:'crane',w:60.0,l:14.3,d:3.21,h:3.84,m:"Кран 60.0 т"},{n:"Галичанин КС-55713",g:'crane',w:23.0,l:12.27,d:2.8,h:3.69,m:"Кран 23.0 т"},{n:"Галичанин КС-65740",g:'crane',w:34.0,l:12.87,d:2.92,h:3.74,m:"Кран 34.0 т"},{n:"Ивановец КС-45717",g:'crane',w:22.0,l:12.21,d:2.79,h:3.69,m:"Кран 22.0 т"},{n:"Ивановец КС-55729",g:'crane',w:31.0,l:12.71,d:2.89,h:3.72,m:"Кран 31.0 т"},{n:"Клинцы КС-55713",g:'crane',w:24.0,l:12.32,d:2.81,h:3.7,m:"Кран 24.0 т"},{n:"Клинцы КС-65719",g:'crane',w:32.0,l:12.76,d:2.9,h:3.73,m:"Кран 32.0 т"},{n:"Челябинец КС-55732",g:'crane',w:25.0,l:12.38,d:2.82,h:3.7,m:"Кран 25.0 т"},{n:"Уралмаш КС-65740",g:'crane',w:35.0,l:12.93,d:2.93,h:3.74,m:"Кран 35.0 т"},
+{n:"Caterpillar 120",g:'grader',w:13.5,l:8.68,d:2.52,h:3.41,m:"Грейдер 13.5 т"},{n:"Caterpillar 140",g:'grader',w:16.5,l:8.82,d:2.53,h:3.45,m:"Грейдер 16.5 т"},{n:"Caterpillar 160",g:'grader',w:18.5,l:8.93,d:2.54,h:3.47,m:"Грейдер 18.5 т"},{n:"Caterpillar 14M",g:'grader',w:23.0,l:9.15,d:2.57,h:3.53,m:"Грейдер 23.0 т"},{n:"Caterpillar 16M",g:'grader',w:27.0,l:9.35,d:2.58,h:3.57,m:"Грейдер 27.0 т"},{n:"Komatsu GD555",g:'grader',w:15.5,l:8.78,d:2.53,h:3.44,m:"Грейдер 15.5 т"},{n:"Komatsu GD655",g:'grader',w:16.5,l:8.82,d:2.53,h:3.45,m:"Грейдер 16.5 т"},{n:"Komatsu GD675",g:'grader',w:18.0,l:8.9,d:2.54,h:3.47,m:"Грейдер 18.0 т"},{n:"Volvo G930",g:'grader',w:16.0,l:8.8,d:2.53,h:3.44,m:"Грейдер 16.0 т"},{n:"Volvo G940",g:'grader',w:17.0,l:8.85,d:2.54,h:3.45,m:"Грейдер 17.0 т"},{n:"Volvo G960",g:'grader',w:18.5,l:8.93,d:2.54,h:3.47,m:"Грейдер 18.5 т"},{n:"John Deere 670",g:'grader',w:15.0,l:8.75,d:2.53,h:3.43,m:"Грейдер 15.0 т"},{n:"John Deere 770",g:'grader',w:17.0,l:8.85,d:2.54,h:3.45,m:"Грейдер 17.0 т"},{n:"XCMG GR165",g:'grader',w:15.0,l:8.75,d:2.53,h:3.43,m:"Грейдер 15.0 т"},{n:"XCMG GR180",g:'grader',w:16.5,l:8.82,d:2.53,h:3.45,m:"Грейдер 16.5 т"},{n:"XCMG GR215",g:'grader',w:18.5,l:8.93,d:2.54,h:3.47,m:"Грейдер 18.5 т"},{n:"XCMG GR300",g:'grader',w:22.0,l:9.1,d:2.56,h:3.51,m:"Грейдер 22.0 т"},{n:"SDLG G9165",g:'grader',w:15.0,l:8.75,d:2.53,h:3.43,m:"Грейдер 15.0 т"},{n:"SDLG G9190",g:'grader',w:16.8,l:8.84,d:2.53,h:3.45,m:"Грейдер 16.8 т"},{n:"LiuGong 4180",g:'grader',w:16.0,l:8.8,d:2.53,h:3.44,m:"Грейдер 16.0 т"},{n:"ДЗ-98 (ЧСДМ)",g:'grader',w:19.0,l:8.95,d:2.55,h:3.48,m:"Грейдер 19.0 т"},{n:"ГС-14.02 (Брянск)",g:'grader',w:14.5,l:8.72,d:2.52,h:3.42,m:"Грейдер 14.5 т"},{n:"ГС-18.07",g:'grader',w:18.0,l:8.9,d:2.54,h:3.47,m:"Грейдер 18.0 т"},{n:"ДЗ-122",g:'grader',w:13.5,l:8.68,d:2.52,h:3.41,m:"Грейдер 13.5 т"},{n:"ДЗ-180",g:'grader',w:14.5,l:8.72,d:2.52,h:3.42,m:"Грейдер 14.5 т"},
+{n:"Vogele Super 1300",g:'paver',w:9.0,l:5.54,d:2.54,h:2.97,m:"Асфальт. 9.0 т"},{n:"Vogele Super 1600",g:'paver',w:13.0,l:5.78,d:2.55,h:3.0,m:"Асфальт. 13.0 т"},{n:"Vogele Super 1800",g:'paver',w:19.0,l:6.14,d:2.58,h:3.05,m:"Асфальт. 19.0 т"},{n:"Vogele Super 2100",g:'paver',w:21.0,l:6.26,d:2.58,h:3.07,m:"Асфальт. 21.0 т"},{n:"Dynapac SD1800",g:'paver',w:17.0,l:6.02,d:2.57,h:3.04,m:"Асфальт. 17.0 т"},{n:"Dynapac SD2500",g:'paver',w:21.0,l:6.26,d:2.58,h:3.07,m:"Асфальт. 21.0 т"},{n:"Caterpillar AP500",g:'paver',w:15.0,l:5.9,d:2.56,h:3.02,m:"Асфальт. 15.0 т"},{n:"Caterpillar AP555",g:'paver',w:16.0,l:5.96,d:2.56,h:3.03,m:"Асфальт. 16.0 т"},{n:"Caterpillar AP655",g:'paver',w:19.0,l:6.14,d:2.58,h:3.05,m:"Асфальт. 19.0 т"},{n:"Caterpillar AP1055",g:'paver',w:23.0,l:6.38,d:2.59,h:3.08,m:"Асфальт. 23.0 т"},{n:"BOMAG BF300",g:'paver',w:9.0,l:5.54,d:2.54,h:2.97,m:"Асфальт. 9.0 т"},{n:"BOMAG BF600",g:'paver',w:16.0,l:5.96,d:2.56,h:3.03,m:"Асфальт. 16.0 т"},{n:"BOMAG BF800",g:'paver',w:19.0,l:6.14,d:2.58,h:3.05,m:"Асфальт. 19.0 т"},{n:"Volvo P6820",g:'paver',w:19.0,l:6.14,d:2.58,h:3.05,m:"Асфальт. 19.0 т"},{n:"Volvo P7820",g:'paver',w:21.0,l:6.26,d:2.58,h:3.07,m:"Асфальт. 21.0 т"},{n:"XCMG RP403",g:'paver',w:9.0,l:5.54,d:2.54,h:2.97,m:"Асфальт. 9.0 т"},{n:"XCMG RP603",g:'paver',w:16.0,l:5.96,d:2.56,h:3.03,m:"Асфальт. 16.0 т"},{n:"XCMG RP903",g:'paver',w:19.0,l:6.14,d:2.58,h:3.05,m:"Асфальт. 19.0 т"},{n:"XCMG RP1203",g:'paver',w:23.0,l:6.38,d:2.59,h:3.08,m:"Асфальт. 23.0 т"},{n:"Sany SAP90",g:'paver',w:9.0,l:5.54,d:2.54,h:2.97,m:"Асфальт. 9.0 т"},{n:"Sany SAP130",g:'paver',w:16.0,l:5.96,d:2.56,h:3.03,m:"Асфальт. 16.0 т"},{n:"Титан-7820",g:'paver',w:19.0,l:6.14,d:2.58,h:3.05,m:"Асфальт. 19.0 т"},{n:"ДС-191",g:'paver',w:16.0,l:5.96,d:2.56,h:3.03,m:"Асфальт. 16.0 т"},{n:"ДС-195",g:'paver',w:13.0,l:5.78,d:2.55,h:3.0,m:"Асфальт. 13.0 т"},
+{n:"JCB 525",g:'telehandler',w:6.5,l:5.69,d:2.34,h:2.69,m:"Телеск. 6.5 т"},{n:"JCB 531",g:'telehandler',w:7.0,l:5.72,d:2.34,h:2.71,m:"Телеск. 7.0 т"},{n:"JCB 535",g:'telehandler',w:7.8,l:5.77,d:2.35,h:2.75,m:"Телеск. 7.8 т"},{n:"JCB 540",g:'telehandler',w:8.5,l:5.81,d:2.35,h:2.78,m:"Телеск. 8.5 т"},{n:"JCB 550",g:'telehandler',w:10.0,l:5.9,d:2.36,h:2.85,m:"Телеск. 10.0 т"},{n:"JCB 560",g:'telehandler',w:11.0,l:5.96,d:2.37,h:2.9,m:"Телеск. 11.0 т"},{n:"Manitou MT625",g:'telehandler',w:5.5,l:5.63,d:2.33,h:2.65,m:"Телеск. 5.5 т"},{n:"Manitou MT732",g:'telehandler',w:7.0,l:5.72,d:2.34,h:2.71,m:"Телеск. 7.0 т"},{n:"Manitou MT1135",g:'telehandler',w:9.5,l:5.87,d:2.36,h:2.83,m:"Телеск. 9.5 т"},{n:"Manitou MT1440",g:'telehandler',w:11.0,l:5.96,d:2.37,h:2.9,m:"Телеск. 11.0 т"},{n:"Manitou MT1840",g:'telehandler',w:13.0,l:6.08,d:2.38,h:2.98,m:"Телеск. 13.0 т"},{n:"Manitou MHT10130",g:'telehandler',w:24.0,l:6.74,d:2.44,h:3.48,m:"Телеск. 24.0 т"},{n:"Merlo P40.17",g:'telehandler',w:9.0,l:5.84,d:2.35,h:2.8,m:"Телеск. 9.0 т"},{n:"Merlo P50.18",g:'telehandler',w:10.5,l:5.93,d:2.36,h:2.87,m:"Телеск. 10.5 т"},{n:"Merlo P72.10",g:'telehandler',w:13.0,l:6.08,d:2.38,h:2.98,m:"Телеск. 13.0 т"},{n:"Caterpillar TH337",g:'telehandler',w:7.5,l:5.75,d:2.34,h:2.74,m:"Телеск. 7.5 т"},{n:"Caterpillar TH408",g:'telehandler',w:9.0,l:5.84,d:2.35,h:2.8,m:"Телеск. 9.0 т"},{n:"Caterpillar TH514",g:'telehandler',w:10.5,l:5.93,d:2.36,h:2.87,m:"Телеск. 10.5 т"},{n:"Bobcat T35",g:'telehandler',w:7.5,l:5.75,d:2.34,h:2.74,m:"Телеск. 7.5 т"},{n:"Bobcat T40",g:'telehandler',w:8.5,l:5.81,d:2.35,h:2.78,m:"Телеск. 8.5 т"},{n:"Dieci 38.16",g:'telehandler',w:9.5,l:5.87,d:2.36,h:2.83,m:"Телеск. 9.5 т"},{n:"Dieci 40.17",g:'telehandler',w:10.5,l:5.93,d:2.36,h:2.87,m:"Телеск. 10.5 т"},{n:"Genie GTH4018",g:'telehandler',w:11.0,l:5.96,d:2.37,h:2.9,m:"Телеск. 11.0 т"},{n:"Haulotte HTL4017",g:'telehandler',w:11.5,l:5.99,d:2.37,h:2.92,m:"Телеск. 11.5 т"},{n:"Magni TH5.18",g:'telehandler',w:10.0,l:5.9,d:2.36,h:2.85,m:"Телеск. 10.0 т"},{n:"XCMG XC6-3514",g:'telehandler',w:7.5,l:5.75,d:2.34,h:2.74,m:"Телеск. 7.5 т"},{n:"Sany STH1440",g:'telehandler',w:11.0,l:5.96,d:2.37,h:2.9,m:"Телеск. 11.0 т"},{n:"Liebherr T35",g:'telehandler',w:7.5,l:5.75,d:2.34,h:2.74,m:"Телеск. 7.5 т"},{n:"Faresin 6.26",g:'telehandler',w:7.0,l:5.72,d:2.34,h:2.71,m:"Телеск. 7.0 т"},{n:"Bobcat TL38",g:'telehandler',w:12.5,l:6.05,d:2.38,h:2.96,m:"Телеск. 12.5 т"}
+];
+
+TECH=TECH.filter(function(t){return t.w>=10;});
+var map,mL,mU,mBase,layerBase=null,layerLoad=null,layerUnload=null,lc=null,uc=null;
+var d1=0,d2=0,d3=0,running=0,loadedOk=false,hist=JSON.parse(localStorage.getItem('yrd_calc_history')||'[]'),gT=null;
+var kpLog=JSON.parse(localStorage.getItem('yrd_calc_kp_log')||'[]'),LK={a1:0,a2:0,a3:0};
+
+function initMap(){
+    map=L.map('clc-map',{zoomControl:false}).setView([55.76,37.62],11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18}).addTo(map);
+    L.control.zoom({position:'bottomright'}).addTo(map);
+    mBase=L.marker([BASE.lat,BASE.lng],{icon:ic('#3b82f6')}).addTo(map).bindPopup('🏠 База: '+BASE.name);
+    map.on('click',function(e){
+        if(!lc){setP('load',e.latlng);revG(e.latlng,'load');}
+        else if(!uc){setP('unload',e.latlng);revG(e.latlng,'unload');}
+        else{clrP();setP('load',e.latlng);revG(e.latlng,'load');}
+    });
+}
+function ic(c){return L.divIcon({html:'<div style="width:18px;height:18px;background:'+c+';border:3px solid #fff;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,.6);"></div>',iconSize:[18,18],iconAnchor:[9,9],className:''});}
+function setP(t,p){
+    if(t==='load'){lc=p;if(mL)map.removeLayer(mL);mL=L.marker(p,{icon:ic('#d4a843')}).addTo(map).bindPopup('Погрузка').openPopup();}
+    else{uc=p;if(mU)map.removeLayer(mU);mU=L.marker(p,{icon:ic('#ef4444')}).addTo(map).bindPopup('Выгрузка').openPopup();}
+    routeAll();
+}
+function clrP(){
+    if(mL){map.removeLayer(mL);mL=null;}if(mU){map.removeLayer(mU);mU=null;}
+    if(layerBase){map.removeLayer(layerBase);layerBase=null;}if(layerLoad){map.removeLayer(layerLoad);layerLoad=null;}if(layerUnload){map.removeLayer(layerUnload);layerUnload=null;}
+    lc=null;uc=null;d1=0;d2=0;d3=0;loadedOk=false;
+    document.getElementById('clc-stD1').textContent='—';document.getElementById('clc-stD2').textContent='—';document.getElementById('clc-stD3').textContent='—';
+    calc();
+}
+function swapAdr(){
+    var a=document.getElementById('clc-loadAddr'),b=document.getElementById('clc-unloadAddr'),t=a.value;a.value=b.value;b.value=t;
+    var tp=lc;lc=uc;uc=tp;
+    if(mL){map.removeLayer(mL);mL=null;}if(mU){map.removeLayer(mU);mU=null;}
+    if(lc)mL=L.marker(lc,{icon:ic('#d4a843')}).addTo(map).bindPopup('Погрузка');
+    if(uc)mU=L.marker(uc,{icon:ic('#ef4444')}).addTo(map).bindPopup('Выгрузка');
+    routeAll();
+}
+
+// ===== OSRM ДЛЯ ТРЁХ СЕГМЕНТОВ =====
+async function osrmRoute(c1, c2, callback) {
+    var url = 'https://router.project-osrm.org/route/v1/driving/'+c1.lng+','+c1.lat+';'+c2.lng+','+c2.lat+'?overview=full&geometries=geojson';
+    try {
+        var r = await fetch(url), d = await r.json();
+        if (d.code !== 'Ok' || !d.routes || !d.routes[0]) {
+            callback(null, 0);
+            return;
+        }
+        var rt = d.routes[0];
+        var dist = Math.round(rt.distance / 1000);
+        var geojson = rt.geometry;
+        callback(geojson, dist);
+    } catch(e) {
+        callback(null, 0);
+    }
+}
+
+var seg1Done = false, seg2Done = false, seg3Done = false;
+
+function routeAll() {
+    if (!lc || !uc) return;
+    running = 3;
+    seg1Done = false; seg2Done = false; seg3Done = false;
+    if (layerBase) { map.removeLayer(layerBase); layerBase = null; }
+    if (layerLoad) { map.removeLayer(layerLoad); layerLoad = null; }
+    if (layerUnload) { map.removeLayer(layerUnload); layerUnload = null; }
+    document.getElementById('clc-stD1').textContent = '⏳';
+    document.getElementById('clc-stD2').textContent = '⏳';
+    document.getElementById('clc-stD3').textContent = '⏳';
+    
+    // Сегмент 1: База → Погрузка (порожний)
+    osrmRoute(BASE, lc, function(geo, km) {
+        d1 = km;
+        document.getElementById('clc-stD1').textContent = km || '—';
+        if (geo) {
+            layerBase = L.geoJSON(geo, { style: { color: '#60a5fa', weight: 2.5, dashArray: '6,6', opacity: 0.8 } }).addTo(map);
+        }
+        seg1Done = true;
+        checkAllDone();
+    });
+    
+    // Сегмент 2: Погрузка → Выгрузка (с грузом)
+    osrmRoute(lc, uc, function(geo, km) {
+        d2 = km; loadedOk = !!geo;
+        document.getElementById('clc-stD2').textContent = km || '—';
+        if (geo) {
+            layerLoad = L.geoJSON(geo, { style: { color: '#d4a843', weight: 4, opacity: 0.9 } }).addTo(map);
+        }
+        seg2Done = true;
+        checkAllDone();
+    });
+    
+    // Сегмент 3: Выгрузка → База (порожний обратно)
+    osrmRoute(uc, BASE, function(geo, km) {
+        d3 = km;
+        document.getElementById('clc-stD3').textContent = km || '—';
+        if (geo) {
+            layerUnload = L.geoJSON(geo, { style: { color: '#94a3b8', weight: 2.5, dashArray: '6,6', opacity: 0.8 } }).addTo(map);
+        }
+        seg3Done = true;
+        checkAllDone();
+    });
+}
+
+function checkAllDone() {
+    if (seg1Done && seg2Done && seg3Done) {
+        // Fit bounds по всем трём маршрутам
+        var allBounds = [];
+        if (layerBase) allBounds.push(layerBase.getBounds());
+        if (layerLoad) allBounds.push(layerLoad.getBounds());
+        if (layerUnload) allBounds.push(layerUnload.getBounds());
+        if (allBounds.length > 0) {
+            var full = allBounds[0];
+            for (var i = 1; i < allBounds.length; i++) {
+                full = full.extend(allBounds[i]);
+            }
+            map.fitBounds(full.pad(0.08));
+        }
+        if(!loadedOk)toast('⚠️ Маршрут не построен — включите «Ввести км вручную»',1);
+        calc();
+    }
+}
+
+// ===== ГЕО =====
+function geoc(t){
+    clearTimeout(gT);var inp=document.getElementById(t==='load'?'clc-loadAddr':'clc-unloadAddr'),lst=document.getElementById(t==='load'?'clc-loadAc':'clc-unloadAc');
+    if(inp.value.length<3){lst.classList.remove('show');return;}
+    gT=setTimeout(async function(){try{var r=await fetch('https://nominatim.openstreetmap.org/search?format=json&q='+encodeURIComponent(inp.value)+'&limit=5&countrycodes=ru');var d=await r.json();lst.innerHTML='';if(!d.length){lst.classList.remove('show');return;}d.forEach(function(p){var el=document.createElement('div');el.className='clc-ac-item';var ps=p.display_name.split(',');el.innerHTML=ps[0]+' <span class="clc-ac-sub">'+ps.slice(1,3).join(',')+'</span>';el.onclick=function(){inp.value=ps[0];lst.classList.remove('show');setP(t,L.latLng(p.lat,p.lon));};lst.appendChild(el);});lst.classList.add('show');}catch(e){}},500);
+}
+async function revG(p,t){try{var r=await fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat='+p.lat+'&lon='+p.lng+'&accept-language=ru');var d=await r.json();if(d&&d.display_name){var a=d.display_name.split(',').slice(0,3).join(',');document.getElementById(t==='load'?'clc-loadAddr':'clc-unloadAddr').value=a;}}catch(e){}}
+function getLoc(t){if(!navigator.geolocation){toast('Геолокация недоступна',1);return;}navigator.geolocation.getCurrentPosition(function(p){setP(t,L.latLng(p.coords.latitude,p.coords.longitude));},function(){toast('Не удалось',1);});}
+function fltr(g){if(g){document.querySelectorAll('.clc-page .tab-btn').forEach(function(el){el.classList.remove('active');});if(typeof event!=='undefined'&&event&&event.target&&event.target.classList)event.target.classList.add('active');}var s=document.getElementById('clc-techSearch').value.toLowerCase(),ag=g||'all',f=TECH;if(ag!=='all')f=f.filter(function(t){return t.g===ag;});if(s)f=f.filter(function(t){return t.n.toLowerCase().indexOf(s)>=0;});var c=document.getElementById('clc-techList');if(!f.length){c.innerHTML='<p style="color:var(--muted);text-align:center;padding:20px;font-size:13px;">Ничего не найдено</p>';return;}c.innerHTML=f.map(function(t){var idx=TECH.indexOf(t);return '<div class="clc-list-item" onclick="Clc.selTech('+idx+')"><div class="clc-tech-name">'+t.n+'</div><div class="clc-tech-spec"><span>'+t.w+' т</span><span>'+t.l+'×'+t.d+'×'+t.h+' м</span><span>'+t.m+'</span></div></div>';}).join('');}
+function selTech(i){if(i<0||i>=TECH.length)return;var t=TECH[i];document.getElementById('clc-weight').value=t.w;document.getElementById('clc-len').value=t.l;document.getElementById('clc-wid').value=t.d;document.getElementById('clc-hei').value=t.h;document.getElementById('clc-vehType').value=t.w>59?'faymon':'tral';document.getElementById('clc-cargoType').value=(t.w>20||t.l>13.6||t.d>2.55||t.h>4)?'negabarit':'gabarit';vhCh();calc();toast('Загружено: '+t.n);}
+function onWChange(){var w=+document.getElementById('clc-weight').value||0;if(w>20&&document.getElementById('clc-vehType').value==='board'){document.getElementById('clc-vehType').value='tral';toast('⚠️ Длинномер только до 20 т');}if(w>20&&document.getElementById('clc-vehType').value==='panel'){document.getElementById('clc-vehType').value='tral';toast('⚠️ Панелевоз только до 20 т');}calc();}
+function vhCh(){var vt=document.getElementById('clc-vehType').value;document.getElementById('clc-faymonGrp').style.display=vt==='faymon'?'block':'none';var kg=vt==='korito';document.getElementById('clc-koritoGrp').style.display=kg?'block':'none';document.getElementById('clc-koritoExtGrp').style.display=kg?'block':'none';onWChange();}
+function toggleManual(){document.getElementById('clc-manualKmBox').style.display=document.getElementById('clc-manualKm').checked?'grid':'none';calc();}
+function calc(){
+    var w=+document.getElementById('clc-weight').value||0,ln=+document.getElementById('clc-len').value||0,wh=+document.getElementById('clc-wid').value||0,h=+document.getElementById('clc-hei').value||0;
+    var neg=document.getElementById('clc-cargoType').value==='negabarit'||w>20,vt=document.getElementById('clc-vehType').value,trips=+document.getElementById('clc-trips').value||1,over=(ln>17||wh>4||h>4.5);
+    var manual=document.getElementById('clc-manualKm').checked;
+    document.getElementById('clc-escZoneGrp').style.display=(neg&&manual)?'block':'none';
+    var a1=manual?(+document.getElementById('clc-mkm1').value||0):d1;
+    var a2=manual?(+document.getElementById('clc-mkm2').value||0):d2;
+    var a3=manual?(+document.getElementById('clc-mkm3').value||0):d3;
+    LK.a1=a1;LK.a2=a2;LK.a3=a3;
+    if(!(manual||loadedOk)){
+        document.getElementById('clc-totalPrice').textContent='—';
+        document.getElementById('clc-priceSub').textContent='Укажите маршрут (или введите км вручную)';
+        ['clc-bdType','clc-bdShift','clc-bdEmptyTo','clc-bdLoaded','clc-bdEmptyFrom','clc-bdNeg'].forEach(function(id){document.getElementById(id).textContent='—';});
+        document.getElementById('clc-bdCoef').textContent='×1.0';document.getElementById('clc-bdTotal').textContent='—';
+        return;
+    }
+    var autoZone=null,isMsk=false;
+    if(lc&&uc){
+        var zl=mskZone(lc.lat,lc.lng),zu=mskZone(uc.lat,uc.lng);
+        isMsk=!!(zl&&zu);
+        if(isMsk)autoZone=(zl==='sadovoe'||zu==='sadovoe')?'sadovoe':'mkad';
+    }
+    var distMsk=uc?ptDist(uc.lat,uc.lng,MSK_LAT,MSK_LON):a2;
+    var rate=null;
+    if(vt==='board')rate=P.board;
+    else if(vt==='panel')rate=P.panel;
+    else if(vt==='tral_crane')rate=P.tral_c;
+    else if(vt==='tral'){var tb=tralByMass(w);if(!tb){toast('Для >59 т нужен Faymonville',1);return;}rate={n:'Трал '+w+' т',s:tb.s,km:tb.km,emptyKm:tb.emptyKm};}
+    else if(vt==='korito'){var kb=tralByMass(w);if(!kb){toast('Корыто >59 т — нужен Faymonville',1);return;}var razd=document.getElementById('clc-koritoType').value==='razd';rate={n:'Корыто'+(razd?' раздвижное':''),s:Math.max(kb.s,razd?40000:30000),km:kb.km,emptyKm:kb.emptyKm,korito:true};}
+    else if(vt==='faymon'){var cat=document.getElementById('clc-faymonCat').value,pr=cat==='60-75'?1500:cat==='75-100'?1700:2000;rate={n:'Faymonville '+cat+' т',s:rn(w*pr),km:cat==='60-75'?500:cat==='75-100'?700:1000,emptyKm:200,isF:true};}
+    if(!rate)return;
+    var shift=rate.s,kmRate=rate.km,emptyRate=rate.emptyKm||EMPTY_RATE,mskOnly=isMsk,isFar=distMsk>FAR_R;
+    if(!mskOnly&&isFar&&!rate.isF)shift=FAR_SHIFT;shift=rn(shift);
+    var e1=0,ld=0,e2=0;
+    if(!mskOnly){e1=rn(a1*emptyRate);ld=rn(a2*kmRate);e2=rn(a3*emptyRate);}
+    var coef=1,coefs=[];
+    if(vt==='korito'&&document.getElementById('clc-koritoExt').checked){coef*=K_COEF;coefs.push('×1.5 раздвижение');}
+    if(over){coef*=OV_COEF;coefs.push('×2 негабарит >17/4/4.5');}
+    var esc=0,escNote='';
+    if(neg){
+        var zone=manual?document.getElementById('clc-escZone').value:(autoZone||(isFar?'far':'ckad')),ecat=over?3:(w<=45?1:w<=80?2:3);
+        if(zone==='sadovoe'){esc=ESC_ZONE.sadovoe;escNote='Садовое 🔍';}
+        else if(zone==='mkad'){esc=ESC_ZONE.mkad;escNote='МКАД 🔍';}
+        else if(zone==='ckad'){esc=ESC_ZONE.ckad;escNote='МО до ЦКАД';}
+        else if(ecat===3){esc=0;escNote='Кат. 3 — индивидуально с руководителем';}
+        else{var er=ESC_CAT[ecat][escortBand(a2)];esc=ESC_FAR_BASE+rn(a2*er);escNote='Кат.'+ecat+' · 20 000 + '+a2+' км × '+er+' ₽';}
+    }
+    var sub=rn(shift*coef)+e1+ld+e2+esc,total=rn(sub*trips);
+    document.getElementById('clc-totalPrice').textContent=total?total.toLocaleString()+' ₽':'0 ₽';
+    var zoneLbl=autoZone==='sadovoe'?'Садовое':autoZone==='mkad'?'МКАД':'МО';
+    document.getElementById('clc-priceSub').innerHTML=(mskOnly?'🏙️ Москва/'+zoneLbl:(isFar?'🚛 Дальний':'📍 Регион'))+(manual?' · ✍️ ручной км':'')+(mskOnly?'':' · '+a2+' км с грузом');
+    document.getElementById('clc-bdType').textContent=rate.n||'Трал';
+    document.getElementById('clc-bdShift').textContent=(mskOnly?rn(shift*coef):shift).toLocaleString()+' ₽'+(isFar?' (дальний)':'')+(mskOnly?' (вся Москва)':'');
+    document.getElementById('clc-bdEmptyTo').textContent=mskOnly?'—':e1.toLocaleString()+' ₽ (расчёт: '+a1+' км × '+emptyRate+' ₽)';
+    document.getElementById('clc-bdLoaded').textContent=mskOnly?'—':ld.toLocaleString()+' ₽ (расчёт: '+a2+' км × '+kmRate+' ₽)';
+    document.getElementById('clc-bdEmptyFrom').textContent=mskOnly?'—':e2.toLocaleString()+' ₽ (расчёт: '+a3+' км × '+emptyRate+' ₽)';
+    document.getElementById('clc-bdCoef').textContent=coef===1?'×1.0':'×'+coef+' ('+coefs.join(', ')+')';
+    document.getElementById('clc-bdNeg').textContent=neg?(esc?esc.toLocaleString()+' ₽'+(escNote?' ('+escNote+')':''):(escNote||'0 ₽')):'0 ₽';
+    document.getElementById('clc-bdTotal').textContent=total.toLocaleString()+' ₽';
+}
+function saveCalc(){var e={id:Date.now(),dt:new Date().toLocaleString('ru-RU'),load:document.getElementById('clc-loadAddr').value||'—',unload:document.getElementById('clc-unloadAddr').value||'—',dist:d2,w:document.getElementById('clc-weight').value,total:document.getElementById('clc-totalPrice').textContent};hist.unshift(e);if(hist.length>30)hist.pop();localStorage.setItem('yrd_calc_history',JSON.stringify(hist));rendH();toast('✅ Сохранён');}
+function delCalc(id){if(!confirm('Удалить?'))return;hist=hist.filter(function(e){return e.id!==id;});localStorage.setItem('yrd_calc_history',JSON.stringify(hist));rendH();toast('🗑️ Удалён');}
+function rendH(){var c=document.getElementById('clc-histList');if(!hist.length){c.innerHTML='<p style="color:var(--muted);text-align:center;padding:30px 0;">Нет сохранённых расчётов</p>';return;}c.innerHTML=hist.map(function(h){return '<div class="clc-list-item" onclick="Clc.loadH('+h.id+')" style="position:relative;"><div style="display:flex;justify-content:space-between;align-items:center;"><strong style="color:var(--green);font-size:13px;">'+h.total+'</strong><button class="clc-btn clc-btn-ghost clc-btn-sm" onclick="event.stopPropagation();Clc.delCalc('+h.id+')" style="padding:2px 6px;font-size:10px;">✕</button></div><div style="font-size:12px;color:var(--muted);">'+h.dist+' км · '+h.w+' т · '+(h.load||'').substring(0,20)+'...</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">'+h.dt+'</div></div>';}).join('');}
+function loadH(id){var h=hist.find(function(e){return e.id===id;});if(!h)return;document.getElementById('clc-loadAddr').value=h.load||'';document.getElementById('clc-unloadAddr').value=h.unload||'';toast('📂 Загружен');}
+function toast(m,e){var t=document.getElementById('clc-toast');t.textContent=m;t.className='clc-toast'+(e?' clc-toast-err':'');t.classList.add('show');setTimeout(function(){t.classList.remove('show');},3000);}
+function updKpInfo(){var n=+(localStorage.getItem('yrd_calc_kp_num')||0);var el=document.getElementById('clc-kpInfo');if(el)el.textContent='📄 Выдано КП: '+n+' · следующий № КП-'+String(n+1).padStart(4,'0');}
+function genKP(){
+    var w=document.getElementById('clc-weight').value||'—',ln=document.getElementById('clc-len').value||'—',wh=document.getElementById('clc-wid').value||'—',h=document.getElementById('clc-hei').value||'—';
+    var la=document.getElementById('clc-loadAddr').value||'—',ua=document.getElementById('clc-unloadAddr').value||'—',total=document.getElementById('clc-totalPrice').textContent||'—';
+    if(total==='—'||total==='0 ₽'){toast('Сначала рассчитайте стоимость',1);return;}
+    var vm={tral:'Трал',board:'Длинномер',panel:'Панелевоз',tral_crane:'Трал под кран',korito:'Трал-корыто',faymon:'Faymonville'};
+    var vt=vm[document.getElementById('clc-vehType').value]||'Трал',neg=document.getElementById('clc-cargoType').value==='negabarit',esc=document.getElementById('clc-bdNeg').textContent;
+    var dt=new Date().toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'});
+    var kpNum=(+(localStorage.getItem('yrd_calc_kp_num')||0))+1;localStorage.setItem('yrd_calc_kp_num',kpNum);var numStr='КП-'+String(kpNum).padStart(4,'0');
+    var rt='База '+BASE.name+' → '+la+' → '+ua+' · порожний '+LK.a1+' + груз '+LK.a2+' + порожний '+LK.a3+' км';
+    var htm='<!DOCTYPE html><html><head><meta charset="UTF-8"><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><style>';
+    htm+='@page{margin:1.4cm 1.6cm}body{font-family:Arial,sans-serif;font-size:10.5pt;color:#1a1a1a;margin:0}';
+    htm+='.h{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #d4a843;padding-bottom:12px;margin-bottom:14px}';
+    htm+='.cn{font-size:20pt;font-weight:900;color:#0a1628;letter-spacing:1px}.cn span{color:#d4a843}';
+    htm+='.cd{font-size:7.5pt;color:#777;line-height:1.35;margin-top:4px}';
+    htm+='.hr{text-align:right;font-size:8.5pt;color:#555;white-space:nowrap}.hr b{font-size:11pt;color:#0a1628}';
+    htm+='h1{font-size:14pt;font-weight:700;color:#0a1628;margin:0 0 8px}';
+    htm+='.off{display:flex;justify-content:space-between;align-items:center;padding:10px 18px;border:2px solid #d4a843;border-radius:10px;margin:8px 0 12px;background:#fffdf7}';
+    htm+='.off .lb{font-size:8.5pt;text-transform:uppercase;letter-spacing:1.5px;color:#777}.off .pr{font-size:24pt;font-weight:900;color:#d4a843}';
+    htm+='table{width:100%;border-collapse:collapse;margin:4px 0 10px}th{text-align:left;padding:7px 10px;border-bottom:1.5px solid #d4a843;font-size:8pt;text-transform:uppercase;color:#777}td{padding:7px 10px;border-bottom:1px solid #eee;font-size:10pt;vertical-align:top}';
+    htm+='.tot td{font-size:12pt;font-weight:800;color:#d4a843;border-top:2px solid #d4a843;border-bottom:none}';
+    htm+='.bn{display:inline-block;padding:1px 8px;background:#fff3e0;color:#e65100;border-radius:4px;font-size:8pt;font-weight:700}';
+    htm+='.meta{font-size:9.5pt;color:#444;line-height:1.65;margin:8px 0}.meta b{color:#0a1628}';
+    htm+='.why{font-size:9pt;color:#2563eb;background:#f0f4ff;border-radius:8px;padding:8px 14px;margin:10px 0;border-left:4px solid #3b82f6}';
+    htm+='.ft{margin-top:14px;padding-top:10px;border-top:1px solid #ddd;font-size:8pt;color:#888;display:flex;justify-content:space-between}';
+    htm+='</style></head><body>';
+    htm+='<div class="h"><div><div class="cn"><span>ЯРД</span></div><div class="cd">ООО «БУЛЬДОГ» · ОГРН 1177746503220 · ИНН 7702417768 / КПП 773301001<br>125466, г. Москва, ул. Юровская, 92, подвал пом. I, ком. 40, РМ 1г · +7 (495) 222-62-60</div></div>';
+    htm+='<div class="hr"><b>'+numStr+'</b><br>от '+dt+'<br>На №____ от ____</div></div>';
+    htm+='<h1>Коммерческое предложение на перевозку</h1>';
+    htm+='<div class="off"><div class="lb">Стоимость перевозки, с НДС</div><div class="pr">'+total+'</div></div>';
+    htm+='<table><tr><th style="width:6%">№</th><th>Наименование услуги</th><th style="width:14%">Кол-во</th><th style="width:22%">Сумма</th></tr>';
+    htm+='<tr><td>1</td><td><b>Транспортные услуги</b><br><span style="font-size:8.5pt;color:#666">'+vt+' · '+la+' → '+ua+'</span>'+(neg?' <span class="bn">НЕГАБАРИТ</span>':'')+'</td><td>1 ед.</td><td><b>'+total+'</b></td></tr>';
+    htm+=(neg&&esc&&esc!=='0 ₽'&&esc.indexOf('—')<0?'<tr><td></td><td style="color:#666;font-size:9pt">в т.ч. сопровождение негабарита</td><td></td><td style="font-size:9pt">'+esc+'</td></tr>':'');
+    htm+='<tr class="tot"><td colspan="3" style="text-align:right">ИТОГО к оплате:</td><td>'+total+'</td></tr></table>';
+    htm+='<div class="meta"><b>Груз:</b> '+w+' т · '+ln+'×'+wh+'×'+h+' м'+(neg?' · негабарит':'')+' &nbsp;|&nbsp; <b>Техника:</b> '+vt+'<br><b>Маршрут:</b> '+rt+'<br><b>Условия оплаты:</b> предоплата / отсрочка по договору &nbsp;|&nbsp; <b>Срок подачи:</b> 1–3 дня</div>';
+    htm+='<div class="why">✅ Парк 50+ единиц · 10 000+ перевозок · страхование груза · полный пакет документов</div>';
+    htm+='<p style="font-size:9.5pt;color:#444;margin:6px 0">С уважением, команда ООО «БУЛЬДОГ» · +7 (495) 222-62-60</p>';
+    htm+='<div class="ft"><div><b>ООО «БУЛЬДОГ»</b> · ОГРН 1177746503220 · ИНН 7702417768</div><div>'+numStr+' от '+dt+'</div></div>';
+    htm+='</body></html>';
+    var blob=new Blob(['\uFEFF'+htm],{type:'application/msword;charset=utf-8'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download=numStr+'_Бульдог_'+new Date().toISOString().slice(0,10)+'.doc';document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);kpLog.unshift({num:numStr,dt:new Date().toLocaleString('ru-RU'),route:la+' → '+ua,total:total,veh:vt});if(kpLog.length>200)kpLog.pop();localStorage.setItem('yrd_calc_kp_log',JSON.stringify(kpLog));updKpInfo();toast('✅ '+numStr+' готов');
+}
+rendH();fltr('all');calc();updKpInfo();
+
+var clcMapInited=false;
+function initPage(){
+  if(!clcMapInited){ initMap(); clcMapInited=true; }
+  else if(map){ setTimeout(function(){ map.invalidateSize(); }, 50); }
+}
+
+window.Clc = {
+  geoc:geoc, getLoc:getLoc, swapAdr:swapAdr, toggleManual:toggleManual, onWChange:onWChange,
+  vhCh:vhCh, fltr:fltr, selTech:selTech, saveCalc:saveCalc, delCalc:delCalc, loadH:loadH,
+  genKP:genKP, calc:calc, initPage:initPage
+};
+
+})();
+
+</script>
 
 <!-- ═══ КАРТОЧКА МАШИНЫ ════════════════════════════════════ -->
 <div class="vcard-overlay" id="vcard-overlay" onclick="closeVehicleCard()"></div>
@@ -1205,6 +1728,7 @@ const PAGE_TITLES = {
   // самой страницы (ФИО+должность) уже несёт этот смысл, дублирующий заголовок не нужен.
   'my-page': '',
   'order-plan': 'План задание',
+  calculator: 'Калькулятор стоимости перевозки',
   debt: 'Дебиторская задолженность',
 };
 
@@ -2962,7 +3486,9 @@ function applyRoleUI() {
     if (sidebarLabel) sidebarLabel.textContent = D.managerName || D.logistName || (D.role === 'logist' ? 'Логист' : 'Менеджер');
     document.querySelectorAll('.sidebar-nav-item').forEach(function(item) {
       const page = item.getAttribute('data-page');
-      item.style.display = (page === 'my-page' || page === 'order-plan') ? '' : 'none';
+      // Калькулятор не зависит от серверных данных (D.role) - считает офлайн в браузере,
+      // поэтому доступен и менеджерам/логистам, а не только админ-панели.
+      item.style.display = (page === 'my-page' || page === 'order-plan' || page === 'calculator') ? '' : 'none';
     });
     document.querySelectorAll('.sidebar-nav-section').forEach(function(s){ s.style.display = 'none'; });
     showPage('my-page');
@@ -7847,6 +8373,10 @@ function showPage(id, el) {
   if (id === 'clients') loadClientsData();
   if (id === 'global-stats') loadGlobalStatsData();
   if (id === 'order-plan') loadOrderPlanData();
+  // Карта Leaflet не может инициализироваться, пока страница скрыта (display:none даёт
+  // контейнеру нулевой размер - плитки карты не подтягиваются) - инициализируем/пересчитываем
+  // размер только при реальном открытии вкладки.
+  if (id === 'calculator' && window.Clc) Clc.initPage();
 
   var wrap = document.getElementById('period-selector-wrap');
   if (wrap) {

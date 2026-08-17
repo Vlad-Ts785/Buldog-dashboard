@@ -4082,6 +4082,38 @@ function warmOrderPlanCache() {
 function doGet(e) {
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
 
+  // ── ВРЕМЕННЫЙ СНИМОК ДЛЯ ПЕРЕНОСА ЗАКРЫТОГО МЕСЯЦА НА СЕРВЕР (2026-08-17) ─────────────────
+  // Разово отдаёт УЖЕ ГОТОВЫЙ (тот же расчёт, что action=orders_period) результат по закрытому
+  // месяцу - не пересчитываем бизнес-логику заново на сервере (риск разойтись), а берём снимок
+  // проверенного ответа и просто раздаём его быстрее. Секрет вместо Google-логина (запрос
+  // с сервера, не из браузера). УДАЛИТЬ этот блок после переноса - см. README.md на VPS.
+  if (e && e.parameter && e.parameter.action === 'export_period_snapshot') {
+    if (e.parameter.key !== 'bcd3b5c5fbec342ccb85bd06838950ae') {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var epsPeriod = e.parameter.period || '';
+    if (!/^\d{4}-\d{2}$/.test(epsPeriod)) {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'Некорректный период' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var epsGp = getGrossProfitForPeriod(ss, epsPeriod);
+    var epsOrders = getOrdersDataForPeriod(ss, epsPeriod);
+    var epsSfp = (epsOrders && !epsOrders.error) ? computeSalesFaktPlan_(epsOrders) : null;
+    return ContentService
+      .createTextOutput(JSON.stringify({
+        orders: epsOrders,
+        summary: {
+          profit: epsGp ? epsGp.profit : null,
+          profit_tral: epsGp ? epsGp.profit_tral : null,
+          profit_long: epsGp ? epsGp.profit_long : null,
+          special_trals_profit: epsGp ? epsGp.special_trals_profit : null,
+          salesFakt: epsSfp ? epsSfp.salesFakt : null,
+          salesPlan: epsSfp ? epsSfp.salesPlan : null,
+          salesFaktThruYesterday: epsSfp ? epsSfp.salesFaktThruYesterday : null,
+        },
+      }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
   // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём.
   // Сначала пробуем свой токен сессии (живёт до 48ч, см. issueSessionToken_) - только если
   // его нет или он истёк, идём проверять Google id_token (тот живёт ~1 час, это уже требует

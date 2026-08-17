@@ -3521,6 +3521,63 @@ function verifyGoogleToken_(idToken) {
   }
 }
 
+// ── СЕССИЯ НА 1-2 СУТОК ПОВЕРХ GOOGLE-ЛОГИНА (2026-08-17, Влад: "постоянно раз в час требует
+// перезахода... один раз залогинились - день-два никто не трогает") ────────────────────────
+// Google id_token живёт ~1 час - это срок жизни ОТ GOOGLE, мы его не контролируем. Вместо того
+// чтобы гонять пользователя обратно в Google каждый час, после первой успешной проверки
+// id_token выдаём СВОЙ подписанный токен на SESSION_TOKEN_TTL_MS - фронтенд дальше ходит по
+// нему, Google трогаем заново только когда истёк. Роль/доступ (лист "Доступ") по-прежнему
+// проверяется на КАЖДЫЙ запрос через getAccessRole_ - длинная сессия влияет только на то, что
+// не нужно повторно подтверждать личность через Google, а не на то, есть ли у email доступ
+// прямо сейчас (отозвать доступ - как и раньше, просто удалить строку из "Доступ", сработает
+// мгновенно и для уже выданных токенов сессии).
+var SESSION_TOKEN_TTL_MS = 48 * 60 * 60 * 1000; // "день-два"
+
+function getSessionSecret_() {
+  var props = PropertiesService.getScriptProperties();
+  var secret = props.getProperty('SESSION_SECRET');
+  if (!secret) {
+    // Генерируем сами при первом обращении - не нужно заводить руками, как TELEGRAM_TOKEN.
+    secret = Utilities.getUuid() + Utilities.getUuid();
+    props.setProperty('SESSION_SECRET', secret);
+  }
+  return secret;
+}
+
+function issueSessionToken_(email) {
+  var payload = JSON.stringify({ email: email, exp: Date.now() + SESSION_TOKEN_TTL_MS });
+  var payloadB64 = Utilities.base64EncodeWebSafe(payload);
+  var sig = Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(payloadB64, getSessionSecret_()));
+  return payloadB64 + '.' + sig;
+}
+
+// Сравнение строк без раннего выхода на первом несовпадении - иначе время сравнения выдаёт,
+// сколько первых байт подписи угаданы верно (классический timing-канал для HMAC-проверки).
+function constantTimeEquals_(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  var diff = 0;
+  for (var i = 0; i < a.length; i++) diff |= (a.charCodeAt(i) ^ b.charCodeAt(i));
+  return diff === 0;
+}
+
+// Возвращает email из валидного токена сессии, иначе null (нет токена, битая подпись, истёк).
+// Никогда не бросает исключение - вызывающий код просто откатывается на проверку id_token.
+function verifySessionToken_(token) {
+  if (!token || token.indexOf('.') === -1) return null;
+  var parts = token.split('.');
+  var payloadB64 = parts[0], sig = parts[1];
+  if (!payloadB64 || !sig) return null;
+  var expectedSig = Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(payloadB64, getSessionSecret_()));
+  if (!constantTimeEquals_(sig, expectedSig)) return null;
+  try {
+    var payload = JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(payloadB64)).getDataAsString());
+    if (!payload.email || !payload.exp || payload.exp < Date.now()) return null;
+    return String(payload.email).trim().toLowerCase();
+  } catch (parseErr) {
+    return null;
+  }
+}
+
 // Ищет email в листе "Доступ", возвращает {name, role} или null.
 function getAccessRole_(ss, email) {
   const sheet = ss.getSheetByName('Доступ');
@@ -4025,9 +4082,14 @@ function warmOrderPlanCache() {
 function doGet(e) {
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
 
-  // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём
+  // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём.
+  // Сначала пробуем свой токен сессии (живёт до 48ч, см. issueSessionToken_) - только если
+  // его нет или он истёк, идём проверять Google id_token (тот живёт ~1 час, это уже требует
+  // повторного клика "Войти через Google" на фронтенде).
+  var sessionToken = e && e.parameter ? (e.parameter.session_token || '') : '';
   var idToken = e && e.parameter ? (e.parameter.id_token || '') : '';
-  var email = verifyGoogleToken_(idToken);
+  var email = sessionToken ? verifySessionToken_(sessionToken) : null;
+  if (!email) email = verifyGoogleToken_(idToken);
   if (!email) {
     return ContentService
       .createTextOutput(JSON.stringify({ error: 'Не авторизован', needLogin: true }))
@@ -4039,6 +4101,11 @@ function doGet(e) {
       .createTextOutput(JSON.stringify({ error: 'У этого аккаунта нет доступа к дашборду', needLogin: true }))
       .setMimeType(ContentService.MimeType.JSON);
   }
+  // Скользящее окно - каждый успешный заход продлевает сессию ещё на 48ч от текущего момента.
+  // Кладём в ответ только у трёх "полных" загрузок страницы ниже (admin/manager/logist) -
+  // этого достаточно, фронтенд читает токен один раз при загрузке и использует дальше для
+  // всех запросов, включая мелкие action=... (которым сам токен в ответе не нужен).
+  var freshSessionToken = issueSessionToken_(email);
 
   try {
     // Отдельный endpoint для истории по машинам (тяжёлые данные, грузим лениво) - только admin
@@ -4480,14 +4547,14 @@ function doGet(e) {
     // Менеджер - только его собственные данные, без доступа к остальному
     if (access.role === 'manager') {
       return ContentService
-        .createTextOutput(JSON.stringify(getManagerView_(ss, access.name)))
+        .createTextOutput(JSON.stringify(Object.assign(getManagerView_(ss, access.name), { session_token: freshSessionToken })))
         .setMimeType(ContentService.MimeType.JSON);
     }
 
     // Логист (2026-08-10) - та же логика, что и manager выше, но своя урезанная выдача
     if (access.role === 'logist') {
       return ContentService
-        .createTextOutput(JSON.stringify(getLogistView_(ss, access.name)))
+        .createTextOutput(JSON.stringify(Object.assign(getLogistView_(ss, access.name), { session_token: freshSessionToken })))
         .setMimeType(ContentService.MimeType.JSON);
     }
 
@@ -4497,6 +4564,7 @@ function doGet(e) {
       {
         updated: new Date().toISOString(),
         role:    'admin',
+        session_token: freshSessionToken,
         // Живые поля - НЕ кэшируются в runAll() (см. buildHeavyMainPayload_). Штатка -
         // "живой документ" (CLAUDE.md), её правят руками вне расписания runAll() - если
         // закэшировать статус машины/ремонты на 3 часа, правки будут "зависать", это
@@ -9955,3 +10023,4 @@ function runOrdersOnly() {
   catch(e) { errors.push('❌ Нормализация: ' + e.message); }
   Logger.log(log.concat(errors).join('\n'));
 }
+

@@ -2031,7 +2031,8 @@ async function setMyPagePeriod(period) {
       // существующий action=vehicles_period (тот же, что "Техника") - только для него, чтобы
       // не тратить лишний запрос на остальных сотрудников, у которых машин на странице нет.
       var wantVehicles = isVasinEntry_(myPageCurrentEntry_());
-      var reqs = [ apiFetchJson({ action: 'orders_period', period: period }) ];
+      var fromServer = await fetchOrdersPeriodFromServer_(period);
+      var reqs = [ fromServer ? Promise.resolve(fromServer) : apiFetchJson({ action: 'orders_period', period: period }) ];
       if (wantVehicles) {
         var r = monthKeyToRangeStr_(period);
         reqs.push(apiFetchJson({ action: 'vehicles_period', from: r.from, to: r.to }));
@@ -3576,7 +3577,8 @@ async function changePeriod(period) {
   }
   if (status) status.textContent = 'Загрузка...';
   try {
-    const data = await apiFetchJson({ action: 'orders_period', period: selectedPeriod });
+    const fromServer = await fetchOrdersPeriodFromServer_(selectedPeriod);
+    const data = fromServer || await apiFetchJson({ action: 'orders_period', period: selectedPeriod });
     if (data.orders && data.orders.error) throw new Error(data.orders.error);
     periodOrdersData = data.orders;
     periodGrossProfit = (data.summary && typeof data.summary.profit === 'number') ? data.summary.profit : null;
@@ -8465,14 +8467,25 @@ function fmtDateRu(dateStr) {
 // вместо Apps Script/Google Таблиц (см. plans/ и retrospectives/ про переезд на Beget).
 // Ключ - не полноценная сессия, как у apiFetchJson, а общий секрет только для этого
 // эндпоинта - осознанное временное упрощение, см. комментарий в server.js на сервере.
-const CLIENTS_API_URL = 'https://api.yardhub.ru/api/client_analytics';
-const CLIENTS_API_KEY = '3f41d8e2d1cb53fe45cd1627f0067cd65df37b1d5081b275';
-function fetchClientAnalyticsFromServer_(params) {
+const YARD_API_BASE = 'https://api.yardhub.ru/api';
+const YARD_API_KEY = '3f41d8e2d1cb53fe45cd1627f0067cd65df37b1d5081b275';
+function fetchFromYardApi_(path, params) {
   var qs = Object.keys(params || {}).map(function(k) {
     return params[k] ? (k + '=' + encodeURIComponent(params[k])) : null;
   }).filter(Boolean).join('&');
-  return fetch(CLIENTS_API_URL + (qs ? '?' + qs : ''), { headers: { 'X-Api-Key': CLIENTS_API_KEY } })
-    .then(function(res) { return res.json(); });
+  return fetch(YARD_API_BASE + path + (qs ? '?' + qs : ''), { headers: { 'X-Api-Key': YARD_API_KEY } })
+    .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); });
+}
+function fetchClientAnalyticsFromServer_(params) {
+  return fetchFromYardApi_('/client_analytics', params).then(function(r) { return r.data; });
+}
+// Снимок закрытого месяца с сервера, если он уже перенесён (см. period_snapshots на VPS) -
+// null, если ещё нет (404) - вызывающий код в этом случае откатывается на apiFetchJson
+// (обычный путь через Apps Script), ничего не ломается для ещё не перенесённых месяцев.
+function fetchOrdersPeriodFromServer_(period) {
+  return fetchFromYardApi_('/orders_period', { period: period }).then(function(r) {
+    return r.ok ? r.data : null;
+  }).catch(function() { return null; });
 }
 
 function loadClientsData() {

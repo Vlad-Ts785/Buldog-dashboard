@@ -4082,41 +4082,6 @@ function warmOrderPlanCache() {
 function doGet(e) {
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
 
-  // ── ВРЕМЕННЫЙ ЭКСПОРТ АРХИВА ПОСТУПЛЕНИЙ ДЛЯ ПЕРЕНОСА НА СЕРВЕР (2026-08-18) ──────────────
-  // Постранично отдаёт лист "Поступления_архив" (7 колонок, тот же формат, что
-  // receiptsReadSheetRows_). Секрет вместо Google-логина (запрос с сервера). УДАЛИТЬ после
-  // переноса - см. README.md на VPS.
-  if (e && e.parameter && e.parameter.action === 'export_receipts_archive') {
-    if (e.parameter.key !== 'a03e62b26923d3f01766944e2b3896f8') {
-      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
-    }
-    var eraSheet = ss.getSheetByName('Поступления_архив');
-    if (!eraSheet) {
-      return ContentService.createTextOutput(JSON.stringify({ error: 'Лист "Поступления_архив" не найден' })).setMimeType(ContentService.MimeType.JSON);
-    }
-    var eraLastRow = eraSheet.getLastRow();
-    var eraOffset = Math.max(2, parseInt((e.parameter.offset || '2'), 10));
-    var eraLimit = Math.min(20000, parseInt((e.parameter.limit || '20000'), 10));
-    var eraNumRows = Math.min(eraLimit, eraLastRow - eraOffset + 1);
-    if (eraNumRows <= 0) {
-      return ContentService.createTextOutput(JSON.stringify({ rows: [], nextOffset: null, lastRow: eraLastRow, done: true })).setMimeType(ContentService.MimeType.JSON);
-    }
-    var eraData = eraSheet.getRange(eraOffset, 1, eraNumRows, 7).getValues();
-    var eraRows = eraData.map(function(r) {
-      return r.map(function(v) {
-        var looksLikeDate = v && typeof v === 'object' && typeof v.getFullYear === 'function';
-        return looksLikeDate ? Utilities.formatDate(v, 'Europe/Moscow', 'yyyy-MM-dd') : v;
-      });
-    });
-    var eraNextOffset = eraOffset + eraNumRows;
-    return ContentService.createTextOutput(JSON.stringify({
-      rows: eraRows,
-      nextOffset: eraNextOffset <= eraLastRow ? eraNextOffset : null,
-      lastRow: eraLastRow,
-      done: eraNextOffset > eraLastRow,
-    })).setMimeType(ContentService.MimeType.JSON);
-  }
-
   // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём.
   // Сначала пробуем свой токен сессии (живёт до 48ч, см. issueSessionToken_) - только если
   // его нет или он истёк, идём проверять Google id_token (тот живёт ~1 час, это уже требует

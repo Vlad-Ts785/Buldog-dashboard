@@ -320,9 +320,20 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .sort-th.sorted .sort-arrow{opacity:1;color:var(--green);}
 
 /* ── RESPONSIVE ─────────────────────────────────────────── */
+/* Кнопка-гамбургер и затемнение живут в разметке всегда, но видны/активны
+   только на мобильном (см. media-блок ниже) - иначе на десктопе будет либо
+   лишняя кнопка, либо (что хуже) невидимый, но кликабельный на весь экран
+   div поверх контента. */
+.mobile-menu-btn{display:none;position:fixed;top:14px;left:14px;z-index:101;background:var(--bg3);border:1px solid var(--border);color:var(--text);width:38px;height:38px;border-radius:var(--radius-sm);align-items:center;justify-content:center;cursor:pointer;font-size:18px;box-shadow:0 2px 8px rgba(0,0,0,.3);}
+.mobile-menu-btn:hover{border-color:var(--green);color:var(--green);}
+.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99;}
+.sidebar-overlay.open{display:block;}
+
 @media(max-width:900px){
-  .sidebar{transform:translateX(-100%);}
+  .sidebar{transform:translateX(-100%);transition:transform .25s cubic-bezier(.4,0,.2,1);}
+  .sidebar.open{transform:translateX(0);}
   .main-wrap{margin-left:0;}
+  .mobile-menu-btn{display:flex;}
   .kpi-grid{grid-template-columns:1fr 1fr;}
   .grid-2,.grid-3,.grid-65{grid-template-columns:1fr;}
   .fleet-grid{grid-template-columns:1fr;}
@@ -417,6 +428,13 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
     <button class="sidebar-refresh" onclick="logoutUser()" style="margin-top:6px">Выйти</button>
   </div>
 </aside>
+
+<!-- Затемнение позади меню на мобильном - тап вне меню закрывает его -->
+<div class="sidebar-overlay" id="sidebar-overlay" onclick="closeMobileSidebar()"></div>
+
+<!-- Кнопка-гамбургер - фиксированная, вне .page-header (у "Личной страницы" он
+     полностью скрыт - см. showPage(), иначе кнопка пропадала бы вместе с ним). -->
+<button class="mobile-menu-btn" id="mobile-menu-btn" onclick="toggleMobileSidebar()" aria-label="Меню"><i class="ti ti-menu-2"></i></button>
 
 <!-- ═══ MAIN WRAP ════════════════════════════════════════════ -->
 <div class="main-wrap">
@@ -4778,16 +4796,21 @@ function orderPlanStatusColor_(status) {
   return 'var(--muted)';
 }
 
-// Стоимость иногда приходит числом, а иногда уже готовым текстом из ячейки
-// ("130 000р за рейс", "31 000 ₽") - раньше слепой Math.round() на такой строке
-// давал "NaN"/"не число ₽". Число форматируем сами, текст показываем как есть.
+// Стоимость иногда приходит чистым числом, а иногда уже готовым текстом из
+// ячейки ("130 000р за рейс") - такое НЕ считаем как число (см. итог по дню
+// ниже), просто показываем как есть, не додумывая за пользователя.
+function orderPlanCostNumber_(cost) {
+  if (typeof cost === 'number') return cost;
+  if (!cost) return null;
+  var cleaned = String(cost).trim().replace(/\s+/g, '').replace(',', '.');
+  return /^\d+(\.\d+)?$/.test(cleaned) ? parseFloat(cleaned) : null;
+}
+
+// Раньше слепой Math.round() на нечисловой строке давал "NaN"/"не число ₽".
 function orderPlanFormatCost_(cost) {
   if (cost === '' || cost === null || cost === undefined) return '';
-  if (typeof cost === 'number') return Math.round(cost).toLocaleString('ru-RU') + ' ₽';
-  var s = String(cost).trim();
-  var cleaned = s.replace(/\s+/g, '').replace(',', '.');
-  if (/^\d+(\.\d+)?$/.test(cleaned)) return Math.round(parseFloat(cleaned)).toLocaleString('ru-RU') + ' ₽';
-  return s;
+  var n = orderPlanCostNumber_(cost);
+  return n !== null ? Math.round(n).toLocaleString('ru-RU') + ' ₽' : String(cost).trim();
 }
 
 // "Сегодня" по московскому времени, независимо от часового пояса браузера - берём
@@ -4813,15 +4836,57 @@ function setOrderPlanDay(day) {
 var orderPlanCurrentDayOrders = []; // заказы активного дня в порядке отрисовки таблицы - для клика по строке
 
 // Строка "Машина/водитель" в исходной таблице - это большой текст из шаблона
-// уведомления ("*ФИО и тел. водителя:*\nИванов...\n\n*Тягач:*..."). В таблице
-// показываем только имя водителя, полный текст - во всплывающей подсказке (title).
+// уведомления ("*ФИО и тел. водителя:*\nИванов Иван Иванович\n891234567\n\n*Тягач:*...").
+// Влад, 2026-08-17: "достаточно фамилия и имя, остальное пусть отсекается" -
+// в таблице только первые два слова (без отчества и телефона), полный текст -
+// в подсказке (title) и по кнопке-копированию рядом.
 function orderPlanCarSummary_(carAssigned) {
   if (!carAssigned) return { short: '', full: '' };
   var s = String(carAssigned).replace(/^"+|"+$/g, '').trim();
   var m = s.match(/ФИО и тел\.\s*водителя:\*?\s*\n?\s*([^\n]+)/i);
-  var short = m ? m[1].trim() : s.split(/\n/)[0].trim();
-  if (short.length > 34) short = short.slice(0, 34) + '…';
+  var nameLine = m ? m[1].trim() : s.split(/\n/)[0].trim();
+  var short = nameLine.split(/\s+/).filter(Boolean).slice(0, 2).join(' ');
   return { short: short, full: s };
+}
+
+// Иконка-копирование рядом с обрезанным текстом - Влад: "чтобы можно было
+// скопировать полные данные" (телефон и т.п., которые отсекли в short).
+// Текст кладём в data-атрибут (не в onclick напрямую) - в тексте бывают
+// переносы строк и кавычки (сам формат ячейки "ВОДИТЕЛЬ НАЗНАЧЕН").
+function orderPlanCopyBtnHtml_(text) {
+  if (!text) return '';
+  var esc = String(text).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  return '<button type="button" onclick="event.stopPropagation();orderPlanCopy_(this)" data-copy="'+esc+'" title="Скопировать" '+
+    'style="background:none;border:none;color:var(--muted);cursor:pointer;padding:2px;display:inline-flex;vertical-align:middle;margin-left:4px">'+
+    '<i class="ti ti-copy" style="font-size:14px"></i></button>';
+}
+
+// Показывает, что скопировалось (Влад: "чтобы было понятно, что данные
+// скопированы") - на 1.4 сек меняет иконку на галочку и красит в зелёный.
+function orderPlanCopy_(btn) {
+  var text = btn.getAttribute('data-copy') || '';
+  function ok() {
+    var icon = btn.querySelector('i');
+    if (icon) icon.className = 'ti ti-check';
+    btn.style.color = '#1D9E75';
+    setTimeout(function() {
+      if (icon) icon.className = 'ti ti-copy';
+      btn.style.color = '';
+    }, 1400);
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(ok).catch(function() { orderPlanCopyFallback_(text); ok(); });
+  } else {
+    orderPlanCopyFallback_(text);
+    ok();
+  }
+}
+function orderPlanCopyFallback_(text) {
+  var ta = document.createElement('textarea');
+  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.focus(); ta.select();
+  try { document.execCommand('copy'); } catch (e) { /* браузер без поддержки - ничего не поделать */ }
+  document.body.removeChild(ta);
 }
 
 // Фон строки таблицы, приближенный к покраске статуса в самой таблице планировки
@@ -4893,18 +4958,24 @@ function buildOrderCard_(o) {
   h += '<div class="vcard-sec"><div class="vcard-sec-title">Стоимость</div>'+
     orderCardRow_('Стоимость', orderPlanFormatCost_(o.cost))+orderCardRow_('Статус оплаты', o.paymentStatus)+'</div>';
 
+  // "Назначенная машина" - с кнопкой копирования рядом (Влад: "такую же кнопку
+  // нужно добавить внутри заявки, рядом с данными по водителю").
+  var carFull = orderPlanCarSummary_(o.carAssigned).full;
+  var carRowHtml = carFull
+    ? '<span style="white-space:pre-line">'+String(carFull).replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</span>'+orderPlanCopyBtnHtml_(carFull)
+    : '';
   h += '<div class="vcard-sec"><div class="vcard-sec-title">Транспорт</div>'+
     orderCardRow_('Водитель (наш)', o.ownDriver)+orderCardRow_('Машина (наша)', o.ownVehicle)+
     orderCardRow_('Наёмная компания', o.hiredCompany)+orderCardRow_('Наёмная машина', o.hiredVehicle)+
-    orderCardRow_('Назначенная машина', o.carAssigned)+'</div>';
+    (carRowHtml ? orderCardRowHtml_('Назначенная машина', carRowHtml) : '')+'</div>';
 
+  // Отметки "Счёт выставлен"/"Деньги получены"/"Заявка внесена в 1С"/"Логист
+  // проставил отработку" пока не используются командой (везде "Нет") - Влад,
+  // 2026-08-17: "там, где везде нет, можно пока убрать" - оставлены только две
+  // реально живые отметки (видны такими же в колонке "Водитель" в таблице).
   h += '<div class="vcard-sec"><div class="vcard-sec-title">Отметки</div>'+
     orderCardRowHtml_('Заявка отправлена водителю', orderPlanBoolBadge_(o.requestSentToDriver,'Отправлена','Не отправлена'))+
-    orderCardRowHtml_('Подтверждение водителя', orderPlanBoolBadge_(o.driverConfirmed,'Подтверждено','Не подтверждено'))+
-    orderCardRowHtml_('Счёт выставлен', orderPlanBoolBadge_(o.invoiceIssued,'Да','Нет'))+
-    orderCardRowHtml_('Деньги получены', orderPlanBoolBadge_(o.moneyReceived,'Да','Нет'))+
-    orderCardRowHtml_('Заявка внесена в 1С', orderPlanBoolBadge_(o.orderEnteredIn1C,'Да','Нет'))+
-    orderCardRowHtml_('Логист проставил отработку', orderPlanBoolBadge_(o.logistClosed,'Да','Нет'))+'</div>';
+    orderCardRowHtml_('Подтверждение водителя', orderPlanBoolBadge_(o.driverConfirmed,'Подтверждено','Не подтверждено'))+'</div>';
 
   h += '<div class="vcard-sec"><div class="vcard-sec-title">Ответственные</div>'+
     orderCardRow_('Менеджер', o.managerName)+orderCardRow_('Логист', o.logistName)+'</div>';
@@ -4979,22 +5050,34 @@ function renderOrderPlan() {
     h += '<div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
       '<th>№</th><th>Техника</th><th>Заказчик</th><th class="num">Стоимость</th><th>Наём</th><th>Машина / водитель</th><th>Статус</th><th>Водитель</th>'+
       '</tr></thead><tbody>';
+    var daySum = 0, daySumCount = 0;
     dayOrders.forEach(function(o, idx) {
       var color = orderPlanStatusColor_(o.status);
       var car = orderPlanCarSummary_(o.carAssigned);
       var costText = orderPlanFormatCost_(o.cost);
+      var costN = orderPlanCostNumber_(o.cost);
+      if (costN !== null) { daySum += costN; daySumCount++; }
       h += '<tr class="clickable" onclick="openOrderCard('+idx+')" style="background:'+orderPlanRowBg_(o.status)+'">';
       h += '<td>'+(o.orderNumber||'—')+'</td>';
       h += '<td>'+(o.equipType||'—')+'</td>';
       h += '<td>'+(o.customer || '—')+'</td>';
       h += '<td class="num">'+(costText || '—')+'</td>';
       h += '<td>'+(o.hiredCompany || '—')+'</td>';
-      h += '<td'+(car.full ? ' title="'+car.full.replace(/"/g,'&quot;')+'"' : '')+'>'+(car.short || '—')+'</td>';
+      h += '<td'+(car.full ? ' title="'+car.full.replace(/"/g,'&quot;')+'"' : '')+'>'+(car.short || '—')+(car.full ? orderPlanCopyBtnHtml_(car.full) : '')+'</td>';
       h += '<td style="color:'+color+';font-weight:600">'+(o.status || 'без статуса')+'</td>';
       h += '<td>'+orderPlanBoolBadge_(o.driverConfirmed,'Подтверждено','Не подтверждено')+'</td>';
       h += '</tr>';
     });
-    h += '</tbody></table></div>';
+    // Итог по дню (Влад, 2026-08-17: "где стоимость по всем заказам в день, должна
+    // быть внизу итоговая сумма") - складываем только заказы с чистым числом в
+    // стоимости (см. orderPlanCostNumber_), заказы с текстом вместо числа не
+    // додумываем - явно помечаем, сколько из них не вошло в сумму.
+    var skipped = dayOrders.length - daySumCount;
+    h += '</tbody><tfoot><tr style="font-weight:600">'+
+      '<td colspan="3">Итого за день'+(skipped ? ' <span style="font-weight:400;color:var(--muted);font-size:11px">('+skipped+' без суммы - см. текстом)</span>' : '')+'</td>'+
+      '<td class="num">'+Math.round(daySum).toLocaleString('ru-RU')+' ₽</td>'+
+      '<td colspan="4"></td></tr></tfoot>';
+    h += '</table></div>';
   }
 
   if (orderPlanData.planSpreadsheetUrl) {
@@ -7733,7 +7816,21 @@ function toggleDebtDetail(i) {
 const PERIOD_PAGES = ['sales', 'sales-mgr', 'sales-log', 'sales-salary'];
 const RANGE_PAGES = ['vehicles', 'drivers'];
 
+// Мобильное меню (Влад, 2026-08-17: "открываю с телефона, вижу страничку, но не
+// могу переключаться по меню" - sidebar на узком экране скрыт translateX(-100%)
+// без единой кнопки, чтобы вернуть его). Кнопка/overlay - фиксированные элементы
+// вне .sidebar/.page-header, видны только на мобильном (см. @media в <style>).
+function toggleMobileSidebar() {
+  document.querySelector('.sidebar').classList.toggle('open');
+  document.getElementById('sidebar-overlay').classList.toggle('open');
+}
+function closeMobileSidebar() {
+  document.querySelector('.sidebar').classList.remove('open');
+  document.getElementById('sidebar-overlay').classList.remove('open');
+}
+
 function showPage(id, el) {
+  closeMobileSidebar(); // выбрали страницу - меню на телефоне больше не нужно открытым
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.sidebar-nav-item').forEach(b => b.classList.remove('active'));
   document.getElementById('page-' + id).classList.add('active');

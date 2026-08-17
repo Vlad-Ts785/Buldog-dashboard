@@ -4082,6 +4082,28 @@ function warmOrderPlanCache() {
 function doGet(e) {
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
 
+  // ── ВРЕМЕННЫЙ ЭКСПОРТ "ИСТОРИЯ_МЕСЯЦЕВ" ДЛЯ ПЕРЕНОСА НА СЕРВЕР (2026-08-18) ───────────────
+  // Отдаёт лист "История_месяцев" целиком (маленький - строка на месяц) - уже посчитанные и
+  // выверенные (см. history регрессий v181-198 в DEPLOY_LOG) наличка/выручка коммерческая по
+  // месяцам. Секрет вместо Google-логина. УДАЛИТЬ после переноса - см. README.md на VPS.
+  if (e && e.parameter && e.parameter.action === 'export_month_summary') {
+    if (e.parameter.key !== '9b3ef5ea2c37a7860b010d62e4e266af') {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var emsSheet = ss.getSheetByName('История_месяцев');
+    if (!emsSheet || emsSheet.getLastRow() < 2) {
+      return ContentService.createTextOutput(JSON.stringify({ rows: [] })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var emsData = emsSheet.getRange(2, 1, emsSheet.getLastRow() - 1, 15).getValues();
+    var emsRows = emsData.map(function(r) {
+      return r.map(function(v) {
+        var looksLikeDate = v && typeof v === 'object' && typeof v.getFullYear === 'function';
+        return looksLikeDate ? Utilities.formatDate(v, 'Europe/Moscow', 'yyyy-MM-dd') : v;
+      });
+    });
+    return ContentService.createTextOutput(JSON.stringify({ rows: emsRows })).setMimeType(ContentService.MimeType.JSON);
+  }
+
   // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём.
   // Сначала пробуем свой токен сессии (живёт до 48ч, см. issueSessionToken_) - только если
   // его нет или он истёк, идём проверять Google id_token (тот живёт ~1 час, это уже требует

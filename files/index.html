@@ -401,7 +401,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
       <span class="sidebar-nav-icon">🙋</span> Личная страница
     </div>
     <div class="sidebar-nav-item" onclick="showPage('order-plan',this)" data-page="order-plan">
-      <span class="sidebar-nav-icon">📋</span> План задания
+      <span class="sidebar-nav-icon">📋</span> План задание
     </div>
     <div class="sidebar-nav-item" onclick="showPage('clients',this)" data-page="clients">
       <span class="sidebar-nav-icon">🏢</span> Клиенты
@@ -1186,7 +1186,7 @@ const PAGE_TITLES = {
   // 'my-page' - без заголовка (Влад, 2026-08-12: "слово личная страница убрать") - шапка
   // самой страницы (ФИО+должность) уже несёт этот смысл, дублирующий заголовок не нужен.
   'my-page': '',
-  'order-plan': 'План задания',
+  'order-plan': 'План задание',
   debt: 'Дебиторская задолженность',
 };
 
@@ -4829,9 +4829,22 @@ function openOrderCard(idx) {
 function orderCardRow_(label, value) {
   if (!value) return '';
   var esc = String(value).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  return orderCardRowHtml_(label, '<span style="white-space:pre-line">'+esc+'</span>');
+}
+
+// Вариант orderCardRow_ для готового HTML (бейджи да/нет) - не экранирует и не
+// прячет строку при "пустом" значении (false - это тоже осмысленный ответ).
+function orderCardRowHtml_(label, html) {
   return '<div style="display:flex;gap:10px;padding:5px 0;font-size:13px;border-bottom:1px solid rgba(255,255,255,.04)">'+
     '<div style="width:150px;flex-shrink:0;color:var(--muted)">'+label+'</div>'+
-    '<div style="color:var(--text);white-space:pre-line;min-width:0">'+esc+'</div></div>';
+    '<div style="color:var(--text);min-width:0">'+html+'</div></div>';
+}
+
+// Влад: "движение водителя должно быть не true или false, а подтверждено или не
+// подтверждено... зелёным, если подтверждено, красным, если нет" - те же правила
+// для всех чекбоксов заказа (счёт выставлен, деньги получены и т.п.).
+function orderPlanBoolBadge_(val, trueText, falseText) {
+  return '<span style="color:'+(val?'#1D9E75':'#E24B4A')+';font-weight:600">'+(val?trueText:falseText)+'</span>';
 }
 
 function buildOrderCard_(o) {
@@ -4842,7 +4855,7 @@ function buildOrderCard_(o) {
   h += '</div><div class="vcard-body">';
 
   h += '<div class="vcard-sec"><div class="vcard-sec-title">Заказчик</div>'+
-    orderCardRow_('Заказчик', o.customer)+orderCardRow_('Документы', o.documents)+'</div>';
+    orderCardRow_('Заказчик', o.customer)+orderCardRow_('Конт. лицо', o.customerContact)+orderCardRow_('Документы', o.documents)+'</div>';
 
   h += '<div class="vcard-sec"><div class="vcard-sec-title">Груз</div>'+
     orderCardRow_('Груз', o.cargo)+orderCardRow_('Габарит', o.gabarit)+'</div>';
@@ -4857,17 +4870,23 @@ function buildOrderCard_(o) {
   }
 
   h += '<div class="vcard-sec"><div class="vcard-sec-title">Стоимость</div>'+
-    orderCardRow_('Стоимость', orderPlanFormatCost_(o.cost))+orderCardRow_('Статус оплаты', o.paymentStatus)+
-    orderCardRow_('Деньги получены', o.moneyReceived)+'</div>';
+    orderCardRow_('Стоимость', orderPlanFormatCost_(o.cost))+orderCardRow_('Статус оплаты', o.paymentStatus)+'</div>';
 
   h += '<div class="vcard-sec"><div class="vcard-sec-title">Транспорт</div>'+
     orderCardRow_('Водитель (наш)', o.ownDriver)+orderCardRow_('Машина (наша)', o.ownVehicle)+
     orderCardRow_('Наёмная компания', o.hiredCompany)+orderCardRow_('Наёмная машина', o.hiredVehicle)+
-    orderCardRow_('Назначенная машина', o.carAssigned)+orderCardRow_('Подтверждение водителя', o.driverConfirmed)+'</div>';
+    orderCardRow_('Назначенная машина', o.carAssigned)+'</div>';
+
+  h += '<div class="vcard-sec"><div class="vcard-sec-title">Отметки</div>'+
+    orderCardRowHtml_('Заявка отправлена водителю', orderPlanBoolBadge_(o.requestSentToDriver,'Отправлена','Не отправлена'))+
+    orderCardRowHtml_('Подтверждение водителя', orderPlanBoolBadge_(o.driverConfirmed,'Подтверждено','Не подтверждено'))+
+    orderCardRowHtml_('Счёт выставлен', orderPlanBoolBadge_(o.invoiceIssued,'Да','Нет'))+
+    orderCardRowHtml_('Деньги получены', orderPlanBoolBadge_(o.moneyReceived,'Да','Нет'))+
+    orderCardRowHtml_('Заявка внесена в 1С', orderPlanBoolBadge_(o.orderEnteredIn1C,'Да','Нет'))+
+    orderCardRowHtml_('Логист проставил отработку', orderPlanBoolBadge_(o.logistClosed,'Да','Нет'))+'</div>';
 
   h += '<div class="vcard-sec"><div class="vcard-sec-title">Ответственные</div>'+
-    orderCardRow_('Менеджер', o.managerName)+orderCardRow_('Логист', o.logistName)+
-    orderCardRow_('Логист отработал', o.logistClosed)+'</div>';
+    orderCardRow_('Менеджер', o.managerName)+orderCardRow_('Логист', o.logistName)+'</div>';
 
   h += '</div>';
   return h;
@@ -4929,7 +4948,7 @@ function renderOrderPlan() {
     h += '<div style="color:var(--muted);font-size:13px;padding:12px 0">Заказов на этот день нет.</div>';
   } else {
     h += '<div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
-      '<th>№</th><th>Техника</th><th>Заказчик</th><th class="num">Стоимость</th><th>Наём</th><th>Машина / водитель</th><th>Статус</th>'+
+      '<th>№</th><th>Техника</th><th>Заказчик</th><th class="num">Стоимость</th><th>Наём</th><th>Машина / водитель</th><th>Статус</th><th>Водитель</th>'+
       '</tr></thead><tbody>';
     dayOrders.forEach(function(o, idx) {
       var color = orderPlanStatusColor_(o.status);
@@ -4943,6 +4962,7 @@ function renderOrderPlan() {
       h += '<td>'+(o.hiredCompany || '—')+'</td>';
       h += '<td'+(car.full ? ' title="'+car.full.replace(/"/g,'&quot;')+'"' : '')+'>'+(car.short || '—')+'</td>';
       h += '<td style="color:'+color+';font-weight:600">'+(o.status || 'без статуса')+'</td>';
+      h += '<td>'+orderPlanBoolBadge_(o.driverConfirmed,'Подтверждено','Не подтверждено')+'</td>';
       h += '</tr>';
     });
     h += '</tbody></table></div>';

@@ -3872,16 +3872,18 @@ function resolveOrderPlanSpreadsheet_() {
 //    самого runAll(), а не в момент, когда менеджер открыл вкладку.
 var ORDER_PLAN_CACHE_TTL_SEC = 14400; // 4 часа, запас над 3-часовым интервалом runAll()
 
-// Карта колонок ниже подтверждена 2026-08-16 напрямую по формуле ячейки N3
-// ("ЗАЯВКА ДЛЯ ВОДИТЕЛЯ", ="*"&A3&"*  *Заказ на:* "&C3&" "&C4&"\n*Дата и время
-// подачи:* "&E3&" "&E4&"\n*Груз:* "&F3&" "&F4&"\n*От кого грузимся:* "&G3&"\n
-// *Какие документы нужно оформить:* "&G4&"\n*Адрес Погрузки:* "&H3&"\n*Конт.
-// лицо на Погрузке:* "&H4&"\n*Адрес Выгрузки:* "&I3&"\n*Конт. лицо на
-// Выгрузке:* "&I4&"\n*Условия переработки:* "&J3&"\n*Примечание:* "&J4&"),
-// не догадка по одному примеру значений - это реальная формула шаблона.
+// Карта колонок ниже подтверждена 2026-08-17 напрямую по строке 1 (человеческий
+// заголовок) + строке 2 (функциональный подзаголовок) живого листа, показанного
+// Владом (17.08.2026): D1="Заказчик"/D2="ФИО,телефон", G1="Исполнитель"/
+// G2="Какие документы оформить" - ПЕРВАЯ версия карты (2026-08-16) ошибочно брала
+// заказчика из G (там "От кого грузимся" по формуле N3, другое поле) - у части
+// заказов (Цегельников) G3 пуст, поэтому заказчик пропадал. Сейчас заказчик - D3.
+// P/Q/R - чекбоксы (реальные booleans в Sheets), а не текст: раньше `s()` с `||''`
+// молча превращал false в пустую строку, а true - в текст "true" (Влад: "не true
+// или false, а подтверждено/не подтверждено") - теперь строгое сравнение `=== true`.
 function readOrderPlanDayTab_(planId, sheet, day) {
   var cache = CacheService.getScriptCache();
-  var cacheKey = 'order_plan_day_v2_' + planId + '_' + day; // v2 - другая форма кэша (больше полей), старые ключи сами истекут
+  var cacheKey = 'order_plan_day_v3_' + planId + '_' + day; // v3 - другая форма кэша (заказчик из D, booleans), старые ключи сами истекут
   var cached = null;
   try { cached = cache.get(cacheKey); } catch (e) { /* кэш недоступен - не критично */ }
   if (cached) {
@@ -3901,11 +3903,12 @@ function readOrderPlanDayTab_(planId, sheet, day) {
       rowManager: s(top, 1),
       rowLogist: s(bottom, 1),
       equipType: (s(top, 2) + ' ' + s(bottom, 2)).trim(),
+      customer: s(top, 3),           // D3 - "Заказчик"
+      customerContact: s(bottom, 3), // D4 - "ФИО, телефон"
       date: s(top, 4),
       time: s(bottom, 4),
       cargo: s(top, 5),
       gabarit: s(bottom, 5),
-      customer: s(top, 6),           // G3 - "От кого грузимся"
       documents: s(bottom, 6),       // G4 - "Какие документы оформить"
       loadAddress: s(top, 7),        // H3
       loadContact: s(bottom, 7),     // H4
@@ -3920,9 +3923,12 @@ function readOrderPlanDayTab_(planId, sheet, day) {
       hiredCompany: s(top, 12),
       hiredVehicle: s(bottom, 12),
       carAssigned: s(bottom, 14) || s(top, 14),
-      moneyReceived: s(bottom, 15) || s(top, 15),
-      driverConfirmed: s(bottom, 16) || s(top, 16),
-      logistClosed: s(bottom, 17) || s(top, 17),
+      invoiceIssued: top[15] === true,        // P3 - "Счёт выставлен"
+      moneyReceived: bottom[15] === true,     // P4 - "Деньги получены"
+      requestSentToDriver: top[16] === true,  // Q3 - "Заявка отправлена водителю"
+      driverConfirmed: bottom[16] === true,   // Q4 - "Получено подтверждение от водителя"
+      orderEnteredIn1C: top[17] === true,     // R3 - "Заявка внесена в 1С"
+      logistClosed: bottom[17] === true,      // R4 - "Логист проставил отработку"
     });
   }
 

@@ -4094,7 +4094,7 @@ function doGet(e) {
     if (!emsSheet || emsSheet.getLastRow() < 2) {
       return ContentService.createTextOutput(JSON.stringify({ rows: [] })).setMimeType(ContentService.MimeType.JSON);
     }
-    var emsData = emsSheet.getRange(2, 1, emsSheet.getLastRow() - 1, 15).getValues();
+    var emsData = emsSheet.getRange(2, 1, emsSheet.getLastRow() - 1, MONTH_SUMMARY_HEADERS.length).getValues();
     var emsRows = emsData.map(function(r) {
       return r.map(function(v) {
         var looksLikeDate = v && typeof v === 'object' && typeof v.getFullYear === 'function';

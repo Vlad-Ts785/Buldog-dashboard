@@ -4738,14 +4738,35 @@ function renderReceiptsCustomers(r) {
 // дашборд ничего не пишет в таблицу планировки, только читает. Один запрос отдаёт
 // заказы за весь месяц сразу - переключение дня ниже работает без похода на сервер.
 var orderPlanData = null;
+var orderPlanLoadedForKey = null; // "роль::имя", под которого запрошены текущие orderPlanData
 var orderPlanActiveDay = null; // null = ещё не выбран - при первом рендере встанет на сегодня
 var ORDER_PLAN_WEEKDAY_SHORT_ = ['вс','пн','вт','ср','чт','пт','сб']; // Date.getUTCDay(): 0=вс..6=сб
 
+// Admin видит "План задание" не своё (он не менеджер/логист в самой таблице
+// планировки), а того, кто выбран в общем селекторе "Личной страницы"
+// (myPageCurrentEntry_ - тот же дропдаун, что уже переключает my-page/receipts,
+// Влад 2026-08-17: "чтобы я мог зайти под любым менеджером"). manager/logist
+// всегда видят только себя - сервер и так игнорирует &manager= для них.
+function orderPlanTargetKey_() {
+  if (!D) return '';
+  if (D.role === 'manager') return 'manager::' + (D.managerName || '');
+  if (D.role === 'logist')  return 'logist::' + (D.logistName || '');
+  var entry = myPageCurrentEntry_();
+  return 'admin::' + (entry ? entry.name : '');
+}
+
 function loadOrderPlanData() {
-  if (orderPlanData !== null) { renderOrderPlan(); return; }
+  var key = orderPlanTargetKey_();
+  if (orderPlanData !== null && orderPlanLoadedForKey === key) { renderOrderPlan(); return; }
+  orderPlanLoadedForKey = key;
   var el = document.getElementById('order-plan-content');
   if (el) el.innerHTML = '<p style="color:var(--muted);padding:16px">Загрузка...</p>';
-  apiFetchJson({ action: 'order_plan' })
+  var params = { action: 'order_plan' };
+  if (D && D.role !== 'manager' && D.role !== 'logist') {
+    var entry = myPageCurrentEntry_();
+    if (entry) params.manager = entry.name;
+  }
+  apiFetchJson(params)
     .then(function(d) { orderPlanData = d; renderOrderPlan(); })
     .catch(function() { orderPlanData = { error: 'Ошибка загрузки', orders: [] }; renderOrderPlan(); });
 }
@@ -4912,6 +4933,14 @@ function renderOrderPlan() {
   if (orderPlanActiveDay === null) orderPlanActiveDay = today.day;
 
   var h = '<div class="card" style="padding:16px 18px">';
+
+  // Admin смотрит не свой план - подпись, чей именно, и подсказка, где переключить
+  // (тот же селектор, что на "Личной странице" - Влад, 2026-08-17: "чтобы я мог
+  // зайти под любым менеджером").
+  if (D && D.role !== 'manager' && D.role !== 'logist') {
+    var opEntry = myPageCurrentEntry_();
+    h += '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">План задание — <b style="color:var(--text)">'+(opEntry?opEntry.name:'?')+'</b> · переключить можно на «Личной странице»</div>';
+  }
 
   // Вкладки дней месяца - ОДИН блок, ОДИН ряд, растянутый на всю ширину блока
   // (Влад: "не должно быть перескока на второй ряд", "дату нужно раздвинуть немножко

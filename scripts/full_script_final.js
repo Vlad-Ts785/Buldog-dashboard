@@ -4050,12 +4050,19 @@ function doGet(e) {
       try { logAccessVisit_(ss, email, access.name, access.role); } catch (logErr) { /* не критично для остального ответа */ }
     }
 
-    // Вкладка "План задания" - урезанный только-чтение список заказов текущего
-    // пользователя из ОТДЕЛЬНОЙ таблицы планировки (см. getOrderPlanView_ выше).
-    // Доступна manager и logist (свои заказы), и admin (по имени из своей строки в "Доступ").
+    // Вкладка "План задание" - урезанный только-чтение список заказов конкретного
+    // человека из ОТДЕЛЬНОЙ таблицы планировки (см. getOrderPlanView_ выше).
+    // manager/logist - всегда только свои заказы (access.name, параметр manager
+    // игнорируется - так же, как и везде в этом файле). admin - имя того, кого
+    // выбрал в селекторе "Личной страницы" (Влад, 2026-08-17: "чтобы я мог зайти
+    // под любым менеджером" - то же самое &manager=, что уже работает для
+    // my-page/receipts, см. mlcManager/gatManager выше).
     if (action === 'order_plan') {
+      var opPerson = (access.role === 'manager' || access.role === 'logist')
+        ? access.name
+        : (e.parameter.manager || access.name);
       return ContentService
-        .createTextOutput(JSON.stringify(getOrderPlanView_(access.name)))
+        .createTextOutput(JSON.stringify(getOrderPlanView_(opPerson)))
         .setMimeType(ContentService.MimeType.JSON);
     }
 

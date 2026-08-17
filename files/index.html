@@ -4613,11 +4613,21 @@ function renderReceiptsChart() {
             label: function(c) { return ' ' + c.dataset.label + ': ' + (c.raw == null ? '—' : fmt(c.raw)); },
             // "Поступления всего" - вычисляемая строка (безнал+нал), которой нет отдельным
             // датасетом - Влад, референс-скриншот: "Поступления всего: 56 100 000 ₽".
+            // "Сальдо" по месяцу/дню (Влад, 2026-08-16: "наводишь на месяц, вылезает это окно,
+            // и сальдо внизу") - поступления минус коммерческие заказы за ТОТ ЖЕ месяц/день,
+            // тот же принцип, что month_balance в KPI-карточке "Поступления" (getReceiptsData),
+            // просто теперь виден для КАЖДОГО месяца в подсказке графика, не только текущего.
             afterBody: function(items) {
-              if (!hasCash) return [];
               var idx = items[0].dataIndex;
+              var lines = [];
               var total = (bankValues[idx] || 0) + (cashValues[idx] || 0);
-              return [' Поступления всего: ' + fmt(total)];
+              if (hasCash) lines.push(' Поступления всего: ' + fmt(total));
+              var rev = revValues[idx];
+              if (rev != null) {
+                var balance = total - rev;
+                lines.push(' Сальдо: ' + (balance >= 0 ? '+' : '') + fmt(balance));
+              }
+              return lines;
             }
           }
         }

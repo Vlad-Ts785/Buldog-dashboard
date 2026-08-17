@@ -3872,9 +3872,16 @@ function resolveOrderPlanSpreadsheet_() {
 //    самого runAll(), а не в момент, когда менеджер открыл вкладку.
 var ORDER_PLAN_CACHE_TTL_SEC = 14400; // 4 часа, запас над 3-часовым интервалом runAll()
 
+// Карта колонок ниже подтверждена 2026-08-16 напрямую по формуле ячейки N3
+// ("ЗАЯВКА ДЛЯ ВОДИТЕЛЯ", ="*"&A3&"*  *Заказ на:* "&C3&" "&C4&"\n*Дата и время
+// подачи:* "&E3&" "&E4&"\n*Груз:* "&F3&" "&F4&"\n*От кого грузимся:* "&G3&"\n
+// *Какие документы нужно оформить:* "&G4&"\n*Адрес Погрузки:* "&H3&"\n*Конт.
+// лицо на Погрузке:* "&H4&"\n*Адрес Выгрузки:* "&I3&"\n*Конт. лицо на
+// Выгрузке:* "&I4&"\n*Условия переработки:* "&J3&"\n*Примечание:* "&J4&"),
+// не догадка по одному примеру значений - это реальная формула шаблона.
 function readOrderPlanDayTab_(planId, sheet, day) {
   var cache = CacheService.getScriptCache();
-  var cacheKey = 'order_plan_day_' + planId + '_' + day;
+  var cacheKey = 'order_plan_day_v2_' + planId + '_' + day; // v2 - другая форма кэша (больше полей), старые ключи сами истекут
   var cached = null;
   try { cached = cache.get(cacheKey); } catch (e) { /* кэш недоступен - не критично */ }
   if (cached) {
@@ -3886,16 +3893,36 @@ function readOrderPlanDayTab_(planId, sheet, day) {
   for (var i = 3; i < data.length; i += 2) {
     var orderNumber = data[i - 1][0];
     if (orderNumber === '' || orderNumber === null) continue; // пустая пара — не заказ
+    var top = data[i - 1], bottom = data[i];
+    var s = function (row, col) { return String(row[col] || '').trim(); };
     result.push({
-      orderNumber: String(orderNumber).trim(),
-      date: String(data[i - 1][4] || '').trim(),
-      equipType: String(data[i - 1][2] || '').trim(),
-      status: String(data[i][0] || '').trim(),
-      cost: data[i - 1][10] || '',
-      hiredCompany: String(data[i - 1][12] || '').trim(),
-      carAssigned: String(data[i][14] || data[i - 1][14] || '').trim(),
-      rowManager: String(data[i - 1][1] || '').trim(),
-      rowLogist: String(data[i][1] || '').trim(),
+      orderNumber: s(top, 0),
+      status: s(bottom, 0),
+      rowManager: s(top, 1),
+      rowLogist: s(bottom, 1),
+      equipType: (s(top, 2) + ' ' + s(bottom, 2)).trim(),
+      date: s(top, 4),
+      time: s(bottom, 4),
+      cargo: s(top, 5),
+      gabarit: s(bottom, 5),
+      customer: s(top, 6),           // G3 - "От кого грузимся"
+      documents: s(bottom, 6),       // G4 - "Какие документы оформить"
+      loadAddress: s(top, 7),        // H3
+      loadContact: s(bottom, 7),     // H4
+      unloadAddress: s(top, 8),      // I3
+      unloadContact: s(bottom, 8),   // I4
+      reworkTerms: s(top, 9),        // J3
+      note: s(bottom, 9),            // J4
+      cost: top[10] || '',
+      paymentStatus: s(bottom, 10),
+      ownDriver: s(top, 11),
+      ownVehicle: s(bottom, 11),
+      hiredCompany: s(top, 12),
+      hiredVehicle: s(bottom, 12),
+      carAssigned: s(bottom, 14) || s(top, 14),
+      moneyReceived: s(bottom, 15) || s(top, 15),
+      driverConfirmed: s(bottom, 16) || s(top, 16),
+      logistClosed: s(bottom, 17) || s(top, 17),
     });
   }
 
@@ -3930,21 +3957,30 @@ function getOrderPlanView_(personName) {
       var asLogist  = orderPlanNameMatch_(personName, o.rowLogist);
       if (!asManager && !asLogist) return;
 
-      orders.push({
+      // Отдаём все поля заказа как есть (readOrderPlanDayTab_ уже собрал их по
+      // проверенной карте колонок) + day/role, не переписываем список руками -
+      // так при появлении нового поля не нужно править это место дважды.
+      // rowManager/rowLogist переименованы в managerName/logistName - используются
+      // в карточке заказа (кто ещё участвует, кроме самого смотрящего).
+      var order = Object.assign({}, o, {
         day: day,
-        orderNumber: o.orderNumber,
-        date: o.date,
-        equipType: o.equipType,
-        status: o.status,
-        cost: o.cost,
-        hiredCompany: o.hiredCompany,
-        carAssigned: o.carAssigned,
         role: asManager ? 'manager' : 'logist',
+        managerName: o.rowManager,
+        logistName: o.rowLogist,
       });
+      delete order.rowManager;
+      delete order.rowLogist;
+      orders.push(order);
     });
   });
 
-  orders.sort(function (x, y) { return x.day - y.day; });
+  // Внутри дня заказы одного заказчика идут подряд (Влад, 2026-08-16), даже если
+  // в самой таблице планировки они не рядом - сортировка стабильная, порядок
+  // внутри одного заказчика и порядок дней между собой не меняется.
+  orders.sort(function (x, y) {
+    if (x.day !== y.day) return x.day - y.day;
+    return (x.customer || '').localeCompare(y.customer || '', 'ru');
+  });
 
   return {
     updated: new Date().toISOString(),

@@ -4789,6 +4789,8 @@ function setOrderPlanDay(day) {
   renderOrderPlan();
 }
 
+var orderPlanCurrentDayOrders = []; // заказы активного дня в порядке отрисовки таблицы - для клика по строке
+
 // Строка "Машина/водитель" в исходной таблице - это большой текст из шаблона
 // уведомления ("*ФИО и тел. водителя:*\nИванов...\n\n*Тягач:*..."). В таблице
 // показываем только имя водителя, полный текст - во всплывающей подсказке (title).
@@ -4809,6 +4811,66 @@ function orderPlanRowBg_(status) {
   if (status === 'Отбой') return 'rgba(226,75,74,.12)';
   if (status === 'Не закрыто') return 'rgba(239,159,39,.12)';
   return 'transparent';
+}
+
+// Карточка заказа - переиспользует ту же выезжающую панель, что и карточка машины/
+// контрагента (#vcard-overlay/#vcard-panel, closeVehicleCard()) вместо нового
+// компонента. Влад: "уже все там должно быть: адреса, телефоны и всё прочее - это
+// будущая форма подачи заявок" - показываем ВСЕ поля заказа, не только то, что в таблице.
+function openOrderCard(idx) {
+  var o = orderPlanCurrentDayOrders[idx];
+  if (!o) return;
+  document.getElementById('vcard-content').innerHTML = buildOrderCard_(o);
+  document.getElementById('vcard-overlay').classList.add('open');
+  document.getElementById('vcard-panel').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function orderCardRow_(label, value) {
+  if (!value) return '';
+  var esc = String(value).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  return '<div style="display:flex;gap:10px;padding:5px 0;font-size:13px;border-bottom:1px solid rgba(255,255,255,.04)">'+
+    '<div style="width:150px;flex-shrink:0;color:var(--muted)">'+label+'</div>'+
+    '<div style="color:var(--text);white-space:pre-line;min-width:0">'+esc+'</div></div>';
+}
+
+function buildOrderCard_(o) {
+  var color = orderPlanStatusColor_(o.status);
+  var h = '<div class="vcard-header">';
+  h += '<div class="vcard-gos">№ '+(o.orderNumber||'—')+' · '+(o.equipType||'—')+'</div>';
+  h += '<div class="vcard-meta">'+(o.date||'')+(o.time?' '+o.time:'')+' · <span style="color:'+color+';font-weight:600">'+(o.status||'без статуса')+'</span></div>';
+  h += '</div><div class="vcard-body">';
+
+  h += '<div class="vcard-sec"><div class="vcard-sec-title">Заказчик</div>'+
+    orderCardRow_('Заказчик', o.customer)+orderCardRow_('Документы', o.documents)+'</div>';
+
+  h += '<div class="vcard-sec"><div class="vcard-sec-title">Груз</div>'+
+    orderCardRow_('Груз', o.cargo)+orderCardRow_('Габарит', o.gabarit)+'</div>';
+
+  h += '<div class="vcard-sec"><div class="vcard-sec-title">Погрузка / выгрузка</div>'+
+    orderCardRow_('Адрес погрузки', o.loadAddress)+orderCardRow_('Конт. лицо погрузки', o.loadContact)+
+    orderCardRow_('Адрес выгрузки', o.unloadAddress)+orderCardRow_('Конт. лицо выгрузки', o.unloadContact)+'</div>';
+
+  if (o.reworkTerms || o.note) {
+    h += '<div class="vcard-sec"><div class="vcard-sec-title">Условия</div>'+
+      orderCardRow_('Условия переработки', o.reworkTerms)+orderCardRow_('Примечание', o.note)+'</div>';
+  }
+
+  h += '<div class="vcard-sec"><div class="vcard-sec-title">Стоимость</div>'+
+    orderCardRow_('Стоимость', orderPlanFormatCost_(o.cost))+orderCardRow_('Статус оплаты', o.paymentStatus)+
+    orderCardRow_('Деньги получены', o.moneyReceived)+'</div>';
+
+  h += '<div class="vcard-sec"><div class="vcard-sec-title">Транспорт</div>'+
+    orderCardRow_('Водитель (наш)', o.ownDriver)+orderCardRow_('Машина (наша)', o.ownVehicle)+
+    orderCardRow_('Наёмная компания', o.hiredCompany)+orderCardRow_('Наёмная машина', o.hiredVehicle)+
+    orderCardRow_('Назначенная машина', o.carAssigned)+orderCardRow_('Подтверждение водителя', o.driverConfirmed)+'</div>';
+
+  h += '<div class="vcard-sec"><div class="vcard-sec-title">Ответственные</div>'+
+    orderCardRow_('Менеджер', o.managerName)+orderCardRow_('Логист', o.logistName)+
+    orderCardRow_('Логист отработал', o.logistClosed)+'</div>';
+
+  h += '</div>';
+  return h;
 }
 
 function renderOrderPlan() {
@@ -4832,17 +4894,19 @@ function renderOrderPlan() {
 
   var h = '<div class="card" style="padding:16px 18px">';
 
-  // Вкладки дней месяца - ОДИН блок, ОДИН ряд (Влад: "не должно быть перескока на
-  // второй ряд") - если не помещается на узком экране, скроллится по горизонтали,
-  // а не переносится. Подсвечены выходные, точкой отмечен день с заказами.
-  h += '<div id="order-plan-day-tabs" style="display:flex;flex-wrap:nowrap;overflow-x:auto;gap:4px;margin-bottom:14px;padding-bottom:2px">';
+  // Вкладки дней месяца - ОДИН блок, ОДИН ряд, растянутый на всю ширину блока
+  // (Влад: "не должно быть перескока на второй ряд", "дату нужно раздвинуть немножко
+  // на всю ширину") - кнопки делят ширину поровну (flex:1), если совсем не помещаются
+  // на узком экране - скроллится по горизонтали, а не переносится. Подсвечены
+  // выходные, точкой отмечен день с заказами.
+  h += '<div id="order-plan-day-tabs" style="display:flex;flex-wrap:nowrap;overflow-x:auto;gap:3px;margin-bottom:14px;padding-bottom:2px">';
   for (var d = 1; d <= today.daysInMonth; d++) {
     var dow = today.weekdayOf(d);
     var isWeekend = dow === 0 || dow === 6;
     var isActive = d === orderPlanActiveDay;
     var hasOrders = !!(byDay[d] && byDay[d].length);
     var numColor = isActive ? 'var(--text)' : (isWeekend ? '#E24B4A' : 'var(--muted)');
-    h += '<button type="button" data-day="'+d+'" onclick="setOrderPlanDay('+d+')" style="flex:0 0 auto;position:relative;min-width:32px;padding:5px 3px 4px;border-radius:var(--radius-sm);border:1px solid '+(isActive?'var(--accent,#378ADD)':'transparent')+';background:'+(isActive?'var(--bg3)':'transparent')+';cursor:pointer;text-align:center;line-height:1.15">'+
+    h += '<button type="button" data-day="'+d+'" onclick="setOrderPlanDay('+d+')" style="flex:1 1 0;min-width:0;position:relative;padding:5px 2px 4px;border-radius:var(--radius-sm);border:1px solid '+(isActive?'var(--accent,#378ADD)':'transparent')+';background:'+(isActive?'var(--bg3)':'transparent')+';cursor:pointer;text-align:center;line-height:1.15">'+
       '<div style="font-size:12px;font-weight:600;color:'+numColor+'">'+d+'</div>'+
       '<div style="font-size:8px;color:var(--muted);text-transform:uppercase">'+ORDER_PLAN_WEEKDAY_SHORT_[dow]+'</div>'+
       (hasOrders ? '<div style="position:absolute;top:2px;right:2px;width:4px;height:4px;border-radius:50%;background:#378ADD"></div>' : '')+
@@ -4853,8 +4917,11 @@ function renderOrderPlan() {
   // Содержимое выбранного дня - таблица, приближенная по виду к самой таблице
   // планировки (Влад: "заявки должны быть максимально визуально приближены к тому,
   // что у нас в таблице заказов") - строки подсвечены тем же цветом, что и статус
-  // заказа в исходном Google Sheet.
+  // заказа в исходном Google Sheet. Заказы одного заказчика уже идут подряд -
+  // сортирует бэкенд (getOrderPlanView_), тут порядок не трогаем. Клик по строке -
+  // полная карточка заказа (адреса, телефоны, всё как в самой таблице).
   var dayOrders = byDay[orderPlanActiveDay] || [];
+  orderPlanCurrentDayOrders = dayOrders;
   var dateLabel = (dayOrders[0] && dayOrders[0].date) || '';
   h += '<div style="font-size:13px;color:var(--muted);margin-bottom:8px">'+(dateLabel || (today.daysInMonth+' дней в месяце'))+'</div>';
 
@@ -4862,21 +4929,20 @@ function renderOrderPlan() {
     h += '<div style="color:var(--muted);font-size:13px;padding:12px 0">Заказов на этот день нет.</div>';
   } else {
     h += '<div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
-      '<th>№</th><th>Техника</th><th>Статус</th><th class="num">Стоимость</th><th>Наём</th><th>Машина / водитель</th><th>Роль</th>'+
+      '<th>№</th><th>Техника</th><th>Заказчик</th><th class="num">Стоимость</th><th>Наём</th><th>Машина / водитель</th><th>Статус</th>'+
       '</tr></thead><tbody>';
-    dayOrders.forEach(function(o) {
+    dayOrders.forEach(function(o, idx) {
       var color = orderPlanStatusColor_(o.status);
       var car = orderPlanCarSummary_(o.carAssigned);
-      var roleText = o.role === 'logist' ? 'логист' : 'менеджер';
       var costText = orderPlanFormatCost_(o.cost);
-      h += '<tr style="background:'+orderPlanRowBg_(o.status)+'">';
+      h += '<tr class="clickable" onclick="openOrderCard('+idx+')" style="background:'+orderPlanRowBg_(o.status)+'">';
       h += '<td>'+(o.orderNumber||'—')+'</td>';
       h += '<td>'+(o.equipType||'—')+'</td>';
-      h += '<td style="color:'+color+';font-weight:600">'+(o.status || 'без статуса')+'</td>';
+      h += '<td>'+(o.customer || '—')+'</td>';
       h += '<td class="num">'+(costText || '—')+'</td>';
       h += '<td>'+(o.hiredCompany || '—')+'</td>';
       h += '<td'+(car.full ? ' title="'+car.full.replace(/"/g,'&quot;')+'"' : '')+'>'+(car.short || '—')+'</td>';
-      h += '<td style="color:var(--muted)">'+roleText+'</td>';
+      h += '<td style="color:'+color+';font-weight:600">'+(o.status || 'без статуса')+'</td>';
       h += '</tr>';
     });
     h += '</tbody></table></div>';

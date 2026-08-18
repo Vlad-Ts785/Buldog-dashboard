@@ -4170,6 +4170,94 @@ function warmOrderPlanCache() {
   Logger.log('warmOrderPlanCache: прогрето вкладок - ' + dayTabs.length);
 }
 
+// Создаёт новую заявку в таблице планировки - вариант Б "Плана задания" (Влад,
+// 2026-08-18: "не только инструмент просмотра, но и инструмент создания заявок").
+// НЕ трогает существующую автоматику планировки (masterEditRouter и т.п.) - только
+// ищет свободную пару строк на нужной дневной вкладке и пишет в неё. Подробности и
+// карта колонок - plans/2026-08-18-order-plan-create-orders.md.
+var ORDER_PLAN_CREATE_MAX_ROW_ = 300; // тот же предел, что и у resetResidualBackgrounds в проекте планировки
+var ORDER_PLAN_WEEKDAYS_RU_ = ['воскресенье','понедельник','вторник','среда','четверг','пятница','суббота'];
+
+function createOrderPlanEntry_(personName, p) {
+  var day = parseInt(p.day, 10);
+  if (!day || day < 1 || day > 31) return { error: 'Некорректная дата' };
+  if (!p.equipType || !p.customer || !p.loadAddress || !p.unloadAddress) {
+    return { error: 'Заполните обязательные поля: тип техники, заказчик, адреса погрузки и выгрузки' };
+  }
+
+  var resolved = resolveOrderPlanSpreadsheet_();
+  if (resolved.error) return { error: resolved.error };
+  var sheet = resolved.planSs.getSheetByName(String(day));
+  if (!sheet) return { error: 'Вкладка на день ' + day + ' не найдена в текущей таблице планировки' };
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { error: 'Сейчас кто-то ещё создаёт заявку, попробуйте через несколько секунд' };
+
+  try {
+    var colA = sheet.getRange(3, 1, ORDER_PLAN_CREATE_MAX_ROW_ - 2, 1).getValues();
+    var maxOrderNum = 0;
+    var targetTopRow = null;
+    for (var i = 0; i < colA.length; i += 2) {
+      var v = colA[i][0];
+      if (v === '' || v === null) {
+        if (targetTopRow === null) targetTopRow = 3 + i;
+      } else {
+        var n = parseInt(v, 10);
+        if (!isNaN(n) && n > maxOrderNum) maxOrderNum = n;
+      }
+    }
+    if (targetTopRow === null) {
+      return { error: 'На этот день не осталось свободных строк в таблице - обратитесь к администратору' };
+    }
+    // Перепроверка прямо перед записью - вдруг кто-то вписал заявку вручную за то
+    // время, что мы искали строку (см. план, раздел "Как находим свободную строку").
+    if (sheet.getRange(targetTopRow, 1).getValue() !== '') {
+      return { error: 'Строка уже занята, попробуйте ещё раз' };
+    }
+
+    var orderNumber = maxOrderNum + 1;
+    var bottomRow = targetTopRow + 1;
+
+    // Дата - читаем из A1 вкладки (уже проставлена duplicateForNextMonth() при создании
+    // копии на месяц), не пересчитываем месяц/год сами - разные Apps Script проекты,
+    // нет доступа к CONFIG.PLAN_MONTH таблицы планировки напрямую.
+    var a1 = sheet.getRange('A1').getValue();
+    var dateText = '';
+    if (a1 instanceof Date) {
+      var dd = ('0' + a1.getDate()).slice(-2);
+      var mm = ('0' + (a1.getMonth() + 1)).slice(-2);
+      dateText = dd + '.' + mm + '.' + a1.getFullYear() + ' (' + ORDER_PLAN_WEEKDAYS_RU_[a1.getDay()] + ')';
+    }
+
+    // Верхняя строка: A..K (11 колонок) - номер/менеджер/тип/заказчик/дата/груз/
+    // (пусто, "исполнитель" - не наше поле)/адреса/условия переработки/стоимость.
+    sheet.getRange(targetTopRow, 1, 1, 11).setValues([[
+      orderNumber, personName, String(p.equipType || ''), String(p.customer || ''),
+      dateText, String(p.cargo || ''), '', String(p.loadAddress || ''), String(p.unloadAddress || ''),
+      String(p.reworkTerms || ''), p.cost || '',
+    ]]);
+    // Нижняя строка - только реально пришедшие из формы поля (контакты, время,
+    // документы, примечание). Статус/логист/оплата/транспорт - пустые, заполнит
+    // логист по ходу работы, как и для заявок, вписанных вручную.
+    sheet.getRange(bottomRow, 4, 1, 7).setValues([[
+      String(p.customerContact || ''), String(p.time || ''), String(p.gabarit || ''),
+      String(p.documents || ''), String(p.loadContact || ''), String(p.unloadContact || ''),
+      String(p.note || ''),
+    ]]);
+
+    // Кэш дня теперь устарел - следующее чтение "Плана задания" должно увидеть
+    // свежесозданную заявку, а не 4-часовой кэш (см. ORDER_PLAN_CACHE_TTL_SEC).
+    try {
+      var cache = CacheService.getScriptCache();
+      cache.remove('order_plan_day_v3_' + resolved.planId + '_' + day);
+    } catch (cacheErr) { /* не критично - в худшем случае увидят через 4 часа */ }
+
+    return { ok: true, day: day, orderNumber: orderNumber };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 // ============================================================
 // API ДЛЯ ДАШБОРДА — читает Штатку для статусов и типов
 // ============================================================
@@ -4248,6 +4336,20 @@ function doGet(e) {
       }
       return ContentService
         .createTextOutput(JSON.stringify(getOrderPlanView_(opPerson, opFilter)))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // "План задание", вариант Б (Влад, 2026-08-18: "не только инструмент просмотра,
+    // но и инструмент создания заявок") - создаёт заявку в таблице планировки.
+    // GET с именованными параметрами, тот же паттерн, что уже calc_save - не
+    // изобретаем doPost ради одной фичи. Автор - access.name (или &manager= для
+    // admin-предпросмотра, тот же приём, что и на чтение).
+    if (action === 'order_plan_create') {
+      var opcPerson = (access.role === 'manager' || access.role === 'logist')
+        ? access.name
+        : (e.parameter.manager || access.name);
+      return ContentService
+        .createTextOutput(JSON.stringify(createOrderPlanEntry_(opcPerson, e.parameter)))
         .setMimeType(ContentService.MimeType.JSON);
     }
 
@@ -10230,3 +10332,29 @@ function runOrdersOnly() {
   Logger.log(log.concat(errors).join('\n'));
 }
 
+
+// ВРЕМЕННЫЙ тест createOrderPlanEntry_ (удалить после проверки, 2026-08-18) -
+// пишет ОДНУ тестовую заявку на завтра (day=19) с явно фейковым заказчиком, чтобы
+// легко найти и удалить вручную. Запустить, затем открыть реальную таблицу
+// планировки и глазами свериться: та ли вкладка, тот ли номер, подставилась ли
+// дата, не съехали ли выпадающие списки/условное форматирование в этой строке.
+function testCreateOrderPlanEntry() {
+  var result = createOrderPlanEntry_('Тестовый Тест', {
+    day: '19',
+    equipType: 'Трал',
+    customer: 'ТЕСТ УДАЛИТЬ ЭТУ СТРОКУ',
+    customerContact: 'Тест Тестович +70000000000',
+    cargo: 'тестовый груз',
+    gabarit: 'Габарит',
+    loadAddress: 'тестовый адрес погрузки',
+    loadContact: 'тест +70000000001',
+    unloadAddress: 'тестовый адрес выгрузки',
+    unloadContact: 'тест +70000000002',
+    documents: 'тест',
+    reworkTerms: 'тест',
+    note: 'ЭТО ТЕСТ, УДАЛИТЬ',
+    cost: '1',
+    time: '10:00',
+  });
+  Logger.log(JSON.stringify(result, null, 2));
+}

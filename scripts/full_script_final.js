@@ -4082,6 +4082,41 @@ function warmOrderPlanCache() {
 function doGet(e) {
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
 
+  // ── ВРЕМЕННЫЙ экспорт снимка периода для переноса на сервер (2026-08-18) ──────────────────
+  // Тот же расчёт, что и живой action=orders_period ниже (getGrossProfitForPeriod +
+  // getOrdersDataForPeriod + computeSalesFaktPlan_) - НЕ переизобретаем логику, просто зовём
+  // её напрямую по секрету вместо admin-сессии, чтобы забрать готовый JSON один раз и
+  // сохранить его как снимок закрытого месяца в period_snapshots на сервере (как июнь).
+  // УБРАТЬ после переноса июля - см. DEPLOY_LOG.md.
+  if (e && e.parameter && e.parameter.action === 'export_period_snapshot') {
+    var epsKey = e.parameter.key || '';
+    if (epsKey !== '7f2a9c1e6b4d8035a1c9ef26b8d40317') {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var epsPeriod = e.parameter.period || '';
+    if (!/^\d{4}-\d{2}$/.test(epsPeriod)) {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'Некорректный период' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var epsGp = getGrossProfitForPeriod(ss, epsPeriod);
+    var epsOrders = getOrdersDataForPeriod(ss, epsPeriod);
+    var epsSfp = (epsOrders && !epsOrders.error) ? computeSalesFaktPlan_(epsOrders) : null;
+    return ContentService
+      .createTextOutput(JSON.stringify({
+        orders:  epsOrders,
+        summary: {
+          profit:      epsGp ? epsGp.profit : null,
+          profit_tral: epsGp ? epsGp.profit_tral : null,
+          profit_long: epsGp ? epsGp.profit_long : null,
+          special_trals_profit: epsGp ? epsGp.special_trals_profit : null,
+          salesFakt:   epsSfp ? epsSfp.salesFakt : null,
+          salesPlan:   epsSfp ? epsSfp.salesPlan : null,
+          salesFaktThruYesterday: epsSfp ? epsSfp.salesFaktThruYesterday : null,
+        },
+      }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  // ── конец временного экспорта ──────────────────────────────────────────────────────────────
+
   // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём.
   // Сначала пробуем свой токен сессии (живёт до 48ч, см. issueSessionToken_) - только если
   // его нет или он истёк, идём проверять Google id_token (тот живёт ~1 час, это уже требует

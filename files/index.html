@@ -5549,6 +5549,7 @@ function renderReceiptsCustomers(r) {
 // заказы за весь месяц сразу - переключение дня ниже работает без похода на сервер.
 var orderPlanData = null;
 var orderPlanLoadedForKey = null; // "роль::имя", под которого запрошены текущие orderPlanData
+var orderPlanFullyLoaded = false; // false, пока фоновый "rest" ещё не долетел
 var orderPlanActiveDay = null; // null = ещё не выбран - при первом рендере встанет на сегодня
 var ORDER_PLAN_WEEKDAY_SHORT_ = ['вс','пн','вт','ср','чт','пт','сб']; // Date.getUTCDay(): 0=вс..6=сб
 
@@ -5565,20 +5566,47 @@ function orderPlanTargetKey_() {
   return 'admin::' + (entry ? entry.name : '');
 }
 
+// Двухфазная загрузка (Влад, 2026-08-18: "не так критичны данные за прошедшие дни,
+// больше интересует вчера сегодня и завтра... эти листы должны прогружаться макс.
+// оперативно"). Таблица планировки - ~31 вкладка, холодное чтение всех разом - минуты
+// (см. warmOrderPlanCache/ORDER_PLAN_CACHE_TTL_SEC). Сначала грузим только "горячие"
+// 3 дня (&scope=hot, секунды) и сразу рисуем их - именно то, что нужно менеджеру прямо
+// сейчас. Остальной месяц (&scope=rest) догружается следом, не блокируя первый показ.
 function loadOrderPlanData() {
   var key = orderPlanTargetKey_();
   if (orderPlanData !== null && orderPlanLoadedForKey === key) { renderOrderPlan(); return; }
   orderPlanLoadedForKey = key;
+  orderPlanFullyLoaded = false;
   var el = document.getElementById('order-plan-content');
   if (el) el.innerHTML = '<p style="color:var(--muted);padding:16px">Загрузка...</p>';
-  var params = { action: 'order_plan' };
+
+  var baseParams = { action: 'order_plan' };
   if (D && D.role !== 'manager' && D.role !== 'logist') {
     var entry = myPageCurrentEntry_();
-    if (entry) params.manager = entry.name;
+    if (entry) baseParams.manager = entry.name;
   }
-  apiFetchJson(params)
-    .then(function(d) { orderPlanData = d; renderOrderPlan(); })
-    .catch(function() { orderPlanData = { error: 'Ошибка загрузки', orders: [] }; renderOrderPlan(); });
+
+  apiFetchJson(Object.assign({}, baseParams, { scope: 'hot' }))
+    .then(function(d) {
+      if (orderPlanLoadedForKey !== key) return; // пользователь уже переключился на другого - не мешаем
+      orderPlanData = d;
+      renderOrderPlan();
+      return apiFetchJson(Object.assign({}, baseParams, { scope: 'rest' }));
+    })
+    .then(function(restData) {
+      if (!restData || orderPlanLoadedForKey !== key) return;
+      if (!restData.error) {
+        orderPlanData.orders = (orderPlanData.orders || []).concat(restData.orders || []);
+      }
+      orderPlanFullyLoaded = true;
+      renderOrderPlan();
+    })
+    .catch(function() {
+      if (orderPlanLoadedForKey !== key) return;
+      if (!orderPlanData) orderPlanData = { error: 'Ошибка загрузки', orders: [] };
+      orderPlanFullyLoaded = true;
+      renderOrderPlan();
+    });
 }
 
 function orderPlanStatusColor_(status) {
@@ -5797,12 +5825,15 @@ function renderOrderPlan() {
 
   var h = '<div class="card" style="padding:16px 18px">';
 
-  // Admin смотрит не свой план - подпись, чей именно, и подсказка, где переключить
-  // (тот же селектор, что на "Личной странице" - Влад, 2026-08-17: "чтобы я мог
-  // зайти под любым менеджером").
+  // Admin смотрит не свой план - подпись, чей именно, и подсказка, где переключить.
+  // 2026-08-18: с появлением кнопки "Смотреть как сотрудник" (подвал сайдбара) это
+  // уже не единственный способ - подсказка обновлена, чтобы не путать старым путём.
   if (D && D.role !== 'manager' && D.role !== 'logist') {
     var opEntry = myPageCurrentEntry_();
-    h += '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">План задание — <b style="color:var(--text)">'+(opEntry?opEntry.name:'?')+'</b> · переключить можно на «Личной странице»</div>';
+    h += '<div style="font-size:12px;color:var(--muted);margin-bottom:6px">План задание — <b style="color:var(--text)">'+(opEntry?opEntry.name:'?')+'</b> · переключить: «Смотреть как сотрудник» внизу меню или дропдаун на «Личной странице»</div>';
+  }
+  if (!orderPlanFullyLoaded) {
+    h += '<div style="font-size:11px;color:var(--muted);margin-bottom:10px">⏳ Догружаем остальные дни месяца…</div>';
   }
 
   // Вкладки дней месяца - ОДИН блок, ОДИН ряд, растянутый на всю ширину блока

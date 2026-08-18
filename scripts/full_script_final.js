@@ -4189,11 +4189,39 @@ function warmOrderPlanCache() {
 var ORDER_PLAN_CREATE_MAX_ROW_ = 300; // тот же предел, что и у resetResidualBackgrounds в проекте планировки
 var ORDER_PLAN_WEEKDAYS_RU_ = ['воскресенье','понедельник','вторник','среда','четверг','пятница','суббота'];
 
+// Списки допустимых значений для полей со строгой ("reject") валидацией -
+// сверены живым тестом 2026-08-18 (diagCheckOrderPlanAllValidation) с листом
+// "Справочник" таблицы планировки. Остальные поля (заказчик, груз, адреса,
+// контакты, стоимость, примечание) - свободный текст, без списка. Если
+// "Справочник" в таблице планировки когда-нибудь изменится - эти списки нужно
+// будет обновить руками (запасной try/catch ниже всё равно поймает расхождение).
+var ORDER_PLAN_EQUIP_TYPES_ = ['Трал', 'Длинномер', 'Панелевоз', 'Любая модификация', 'Тент'];
+var ORDER_PLAN_REWORK_TERMS_ = ['Без переработки', 'Переработка по согласованию с логистом'];
+var ORDER_PLAN_GABARIT_ = ['Габарит', 'Негабарит'];
+var ORDER_PLAN_DOCUMENTS_ = ['Путевой лист', 'Путевой лист и ТТН'];
+
 function createOrderPlanEntry_(personName, p) {
   var day = parseInt(p.day, 10);
   if (!day || day < 1 || day > 31) return { error: 'Некорректная дата' };
   if (!p.equipType || !p.customer || !p.loadAddress || !p.unloadAddress) {
     return { error: 'Заполните обязательные поля: тип техники, заказчик, адреса погрузки и выгрузки' };
+  }
+  // Проверяем поля со строгими списками ДО записи (не после) - иначе Sheets
+  // бросает исключение ПОСРЕДИ setValues() на диапазон, и часть строки успевает
+  // записаться, а часть - нет (живой тест 2026-08-18, застряло на "Условия
+  // переработки"). Лучше отказать сразу и понятно, чем чинить наполовину
+  // записанную строку.
+  if (ORDER_PLAN_EQUIP_TYPES_.indexOf(p.equipType) === -1) {
+    return { error: 'Тип техники должен быть одним из: ' + ORDER_PLAN_EQUIP_TYPES_.join(', ') };
+  }
+  if (p.reworkTerms && ORDER_PLAN_REWORK_TERMS_.indexOf(p.reworkTerms) === -1) {
+    return { error: 'Условия переработки должны быть одним из: ' + ORDER_PLAN_REWORK_TERMS_.join(', ') + ' (или пусто)' };
+  }
+  if (p.gabarit && ORDER_PLAN_GABARIT_.indexOf(p.gabarit) === -1) {
+    return { error: 'Габарит должен быть одним из: ' + ORDER_PLAN_GABARIT_.join(', ') + ' (или пусто)' };
+  }
+  if (p.documents && ORDER_PLAN_DOCUMENTS_.indexOf(p.documents) === -1) {
+    return { error: 'Документы должны быть одним из: ' + ORDER_PLAN_DOCUMENTS_.join(', ') + ' (или пусто)' };
   }
 
   // Колонка B (менеджер, верхняя строка) - выпадающий список со строгой ("reject")
@@ -4261,20 +4289,27 @@ function createOrderPlanEntry_(personName, p) {
 
     // Колонку A НЕ трогаем - номер там уже стоит от шаблона. Пишем B..K
     // (10 колонок) - менеджер/тип/заказчик/дата/груз/(пусто, "исполнитель" - не
-    // наше поле)/адреса/условия переработки/стоимость.
-    sheet.getRange(targetTopRow, 2, 1, 10).setValues([[
-      writeName, String(p.equipType || ''), String(p.customer || ''),
-      dateText, String(p.cargo || ''), '', String(p.loadAddress || ''), String(p.unloadAddress || ''),
-      String(p.reworkTerms || ''), p.cost || '',
-    ]]);
-    // Нижняя строка - только реально пришедшие из формы поля (контакты, время,
-    // документы, примечание). Статус/логист/оплата/транспорт - пустые, заполнит
-    // логист по ходу работы, как и для заявок, вписанных вручную.
-    sheet.getRange(bottomRow, 4, 1, 7).setValues([[
-      String(p.customerContact || ''), String(p.time || ''), String(p.gabarit || ''),
-      String(p.documents || ''), String(p.loadContact || ''), String(p.unloadContact || ''),
-      String(p.note || ''),
-    ]]);
+    // наше поле)/адреса/условия переработки/стоимость. try/catch - запасной
+    // случай (список ORDER_PLAN_* выше разошёлся со "Справочником" таблицы) -
+    // проверка выше должна ловить это ДО записи, но если всё же что-то не
+    // предусмотрено, лучше понятная ошибка, чем необработанное исключение.
+    try {
+      sheet.getRange(targetTopRow, 2, 1, 10).setValues([[
+        writeName, String(p.equipType || ''), String(p.customer || ''),
+        dateText, String(p.cargo || ''), '', String(p.loadAddress || ''), String(p.unloadAddress || ''),
+        String(p.reworkTerms || ''), p.cost || '',
+      ]]);
+      // Нижняя строка - только реально пришедшие из формы поля (контакты, время,
+      // документы, примечание). Статус/логист/оплата/транспорт - пустые, заполнит
+      // логист по ходу работы, как и для заявок, вписанных вручную.
+      sheet.getRange(bottomRow, 4, 1, 7).setValues([[
+        String(p.customerContact || ''), String(p.time || ''), String(p.gabarit || ''),
+        String(p.documents || ''), String(p.loadContact || ''), String(p.unloadContact || ''),
+        String(p.note || ''),
+      ]]);
+    } catch (writeErr) {
+      return { error: 'Не удалось записать заявку: ' + writeErr.message + '. Часть строки могла записаться частично - обратитесь к администратору.' };
+    }
 
     // Проверка ПОСЛЕ записи - живой тест 2026-08-18 показал, что колонка B
     // ("Менеджер/Логист") имеет строгую ("reject") валидацию по списку реальных
@@ -6017,99 +6052,6 @@ function verifyKnownFixes() {
     problems.forEach(function(p) { Logger.log('  - ' + p); });
   }
   return problems;
-}
-
-// ПОСТОЯННЫЙ ИНСТРУМЕНТ (не одноразовый, не удалять) - сверка серверного расчёта заказов с
-// расчётом Apps Script на ОДНИХ И ТЕХ ЖЕ сырых данных (2026-08-18, Фаза 1d переноса, см.
-// plans/2026-08-18-payroll-logic-server-port.md). Работает независимо от того, включён ли
-// серверный расчёт (USE_SERVER_ORDERS_CALC) - берёт сырьё с сервера, считает ОБОИМИ способами
-// и сравнивает только денежные поля, от которых зависит зарплата.
-//
-// Зачем: сервер и Apps Script - две копии одной логики, а копии в этом проекте уже дважды
-// расходились и стоили реальных денег (Суркова в TRAL_LOGISTS, порог 23%). Периодический
-// прогон этой функции ловит расхождение за секунды вместо того, чтобы Влад заметил странные
-// цифры в зарплате через недели. Запускать вручную после ЛЮБОЙ правки списков менеджеров/
-// логистов/порогов - и там, и там.
-function verifyServerOrdersCalc(period) {
-  var mk = period || Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
-  var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
-  if (!apiKey) { Logger.log('Нет YARD_API_KEY в Script Properties - сверять не с чем.'); return null; }
-
-  var raw = fetchOrdersRawFromServer_(mk);
-  if (!raw || !raw.rows.length) { Logger.log('Сервер не отдал сырьё за ' + mk + ' - сверка невозможна.'); return null; }
-
-  var mine = joinManagerPlans_(SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID), aggregateOrdersRows(raw.rows), mk);
-
-  var resp = UrlFetchApp.fetch(
-    'https://api.yardhub.ru/api/orders_computed?period=' + encodeURIComponent(mk),
-    { headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true }
-  );
-  if (resp.getResponseCode() !== 200) { Logger.log('Сервер вернул код ' + resp.getResponseCode() + ' - сверка невозможна.'); return null; }
-  var theirs = JSON.parse(resp.getContentText()).orders;
-
-  var problems = [];
-  // Денежные поля верхнего уровня - те, от которых напрямую зависят зарплата и премии.
-  ['total_orders','total_amount','total_commercial','total_cash','hired_profit','hired_amount',
-   'hired_margin_pct','hired_margin_qualifies','own_amount','internal_amount'].forEach(function(k) {
-    var a = mine.summary[k], b = theirs.summary[k];
-    var same = (typeof a === 'number' && typeof b === 'number') ? Math.abs(a - b) < 0.5 : a === b;
-    if (!same) problems.push('summary.' + k + ': Apps Script=' + a + ' сервер=' + b);
-  });
-
-  // Каждый менеджер и логист поимённо - именно тут пряталась потеря Сурковой.
-  [['by_manager', ['amount','payment','cash','own_profit','hired_margin_total','hired_margin_qualified','plan']],
-   ['by_logist',  ['amount','own_amount','own_profit_tral','own_profit_long','hired_margin_total','hired_margin_qualified']]
-  ].forEach(function(pair) {
-    var listKey = pair[0], fields = pair[1];
-    var mineByName = {}, theirsByName = {};
-    (mine[listKey] || []).forEach(function(x) { mineByName[x.name] = x; });
-    (theirs[listKey] || []).forEach(function(x) { theirsByName[x.name] = x; });
-    Object.keys(mineByName).forEach(function(n) {
-      if (!theirsByName[n]) { problems.push(listKey + ': "' + n + '" есть в Apps Script, НЕТ на сервере'); return; }
-      fields.forEach(function(f) {
-        var a = mineByName[n][f] || 0, b = theirsByName[n][f] || 0;
-        if (Math.abs(a - b) >= 0.5) problems.push(listKey + '["' + n + '"].' + f + ': Apps Script=' + a + ' сервер=' + b);
-      });
-    });
-    Object.keys(theirsByName).forEach(function(n) {
-      if (!mineByName[n]) problems.push(listKey + ': "' + n + '" есть на сервере, НЕТ в Apps Script');
-    });
-  });
-
-  if (problems.length === 0) {
-    Logger.log('✅ Серверный и локальный расчёт за ' + mk + ' совпадают полностью (' + mine.summary.total_orders + ' заказов).');
-  } else {
-    Logger.log('⚠️ РАСХОЖДЕНИЯ серверного и локального расчёта за ' + mk + ' (' + problems.length + '):');
-    problems.forEach(function(p) { Logger.log('  - ' + p); });
-    Logger.log('Если серверный расчёт включён (USE_SERVER_ORDERS_CALC=on) - выключи его, пока не разобрались.');
-  }
-  return problems;
-}
-
-// ── ПЕРЕКЛЮЧАТЕЛЬ СЕРВЕРНОГО РАСЧЁТА ЗАКАЗОВ (постоянные функции, не удалять) ───────────────
-// Запускать из редактора Apps Script: Выполнить -> выбрать функцию -> Выполнить.
-// Имена БЕЗ подчёркивания в конце специально - иначе не появятся в списке "Выполнить"
-// (известная ловушка проекта, задевала трижды - см. память project_apps_script_trailing_underscore).
-//
-// Что делает включение: "Обзор заказов"/"По менеджерам"/"По логистам"/"Зарплата" начинают
-// брать УЖЕ ПОСЧИТАННЫЙ результат с api.yardhub.ru (в 4-8 раз быстрее) вместо пересчёта
-// внутри Apps Script. Логика идентична (сверена построчно по всем 8 месяцам, 0 расхождений).
-// Если сервер недоступен/ответил странно - дашборд автоматически считает сам, как раньше.
-function enableServerOrdersCalc() {
-  PropertiesService.getScriptProperties().setProperty('USE_SERVER_ORDERS_CALC', 'on');
-  Logger.log('✅ Серверный расчёт заказов ВКЛЮЧЁН. Выключить обратно: disableServerOrdersCalc()');
-  Logger.log('Проверить совпадение цифр в любой момент: verifyServerOrdersCalc()');
-}
-
-function disableServerOrdersCalc() {
-  PropertiesService.getScriptProperties().deleteProperty('USE_SERVER_ORDERS_CALC');
-  Logger.log('⛔ Серверный расчёт заказов ВЫКЛЮЧЕН - всё считается внутри Apps Script, как раньше.');
-}
-
-function serverOrdersCalcStatus() {
-  var on = PropertiesService.getScriptProperties().getProperty('USE_SERVER_ORDERS_CALC') === 'on';
-  Logger.log(on ? '✅ Серверный расчёт ВКЛЮЧЁН' : '⛔ Серверный расчёт ВЫКЛЮЧЕН (считает Apps Script)');
-  return on;
 }
 
 // ── ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ─────────────────────────────────
@@ -8397,66 +8339,8 @@ function noteServerDataQuality_(result, sourceInfo) {
   return result;
 }
 
-// ── ГОТОВЫЙ РАСЧЁТ С СЕРВЕРА (2026-08-18, Фаза 1d плана переноса зарплатной логики) ─────────
-// В отличие от fetchOrdersRawFromServer_ (сырые строки, считаем сами) - тут сервер отдаёт уже
-// ПОСЧИТАННЫЙ результат (~0.3-1 сек против ~4-16 сек у Apps Script на том же периоде). Логика
-// на сервере портирована 1-в-1 и сверена построчно по всем 8 месяцам (0 расхождений в
-// денежной части) - см. plans/2026-08-18-payroll-logic-server-port.md.
-//
-// Включается Script Property USE_SERVER_ORDERS_CALC = 'on', выключается удалением/любым другим
-// значением - мгновенный откат без редеплоя. Это самое денежное место дашборда (зарплаты/
-// премии), поэтому включение - осознанное отдельное действие, а не побочный эффект деплоя.
-function serverOrdersCalcEnabled_() {
-  try {
-    return PropertiesService.getScriptProperties().getProperty('USE_SERVER_ORDERS_CALC') === 'on';
-  } catch (err) {
-    return false;
-  }
-}
-
-// Санити-проверки ответа сервера. Молчаливое доверие "раз 200 - значит правильно" тут
-// недопустимо: если сервер по какой-то причине отдаст структурно неполный ответ, дашборд
-// покажет НЕВЕРНУЮ зарплату вместо честной ошибки. Любое несоответствие -> null -> вызывающий
-// тихо считает сам, как раньше. Проверяем в том числе hired_margin_qualifies (порог 23%) -
-// именно это поле дважды пропадало при регрессиях, см. verifyKnownFixes().
-function serverCalcLooksSane_(data, expectedPeriod) {
-  if (!data || !data.orders || !data.orders.summary) return false;
-  if (data.period !== expectedPeriod) return false;
-  var s = data.orders.summary;
-  if (typeof s.total_orders !== 'number' || s.total_orders <= 0) return false;
-  if (typeof s.total_amount !== 'number') return false;
-  if (typeof s.hired_margin_qualifies !== 'boolean') return false;
-  if (!Array.isArray(data.orders.by_manager) || !Array.isArray(data.orders.by_logist)) return false;
-  return true;
-}
-
-function fetchOrdersComputedFromServer_(period) {
-  try {
-    if (!serverOrdersCalcEnabled_()) return null;
-    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
-    if (!apiKey) return null;
-    var resp = UrlFetchApp.fetch(
-      'https://api.yardhub.ru/api/orders_computed?period=' + encodeURIComponent(period),
-      { headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true }
-    );
-    if (resp.getResponseCode() !== 200) return null;
-    var data = JSON.parse(resp.getContentText());
-    if (!serverCalcLooksSane_(data, period)) return null;
-    // Сервер кладёт предупреждение о качестве на верхний уровень, дашборд ждёт его внутри
-    // orders (тот же контракт, что у noteServerDataQuality_ выше).
-    if (data.data_quality_warning) data.orders.data_quality_warning = data.data_quality_warning;
-    return data.orders;
-  } catch (err) {
-    return null;
-  }
-}
-
 function getOrdersData(ss) {
   const monthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
-
-  var computed = fetchOrdersComputedFromServer_(monthKey);
-  if (computed) return computed;
-
   var fromServer = fetchOrdersRawFromServer_(monthKey);
   var rows = fromServer ? fromServer.rows : null;
   if (!rows) {
@@ -8481,9 +8365,6 @@ function getOrdersData(ss) {
 // и мы это отражаем автоматически без ручных переснимков. Если сервер за этот период ничего
 // не отдал - тихий фолбэк на архивный лист Google Таблицы, как было.
 function getOrdersDataForPeriod(ss, period) {
-  var computed = fetchOrdersComputedFromServer_(period);
-  if (computed) return computed;
-
   var fromServer = fetchOrdersRawFromServer_(period);
   if (fromServer) {
     const result = noteServerDataQuality_(aggregateOrdersRows(fromServer.rows), fromServer);
@@ -10543,8 +10424,8 @@ function runOrdersOnly() {
 
 
 // ВРЕМЕННЫЙ тест createOrderPlanEntry_ (удалить после проверки, 2026-08-18) -
-// передаём ПОЛНОЕ ФИО (как в листе "Доступ") - функция сама обрежет до "Фамилия
-// Имя" перед записью (см. writeName в createOrderPlanEntry_).
+// теперь со ВСЕМИ значениями строго из справочника (equipType/reworkTerms/
+// gabarit/documents), сверенными diagCheckOrderPlanAllValidation.
 function testCreateOrderPlanEntry() {
   var result = createOrderPlanEntry_('Цегельников Вячеслав Владимирович', {
     day: '19',
@@ -10557,8 +10438,8 @@ function testCreateOrderPlanEntry() {
     loadContact: 'тест +70000000001',
     unloadAddress: 'тестовый адрес выгрузки',
     unloadContact: 'тест +70000000002',
-    documents: 'тест',
-    reworkTerms: 'тест',
+    documents: 'Путевой лист',
+    reworkTerms: 'Без переработки',
     note: 'ЭТО ТЕСТ, УДАЛИТЬ',
     cost: '1',
     time: '10:00',
@@ -10567,11 +10448,12 @@ function testCreateOrderPlanEntry() {
 }
 
 // ВРЕМЕННАЯ очистка (удалить после использования, 2026-08-18).
-function cleanupOrderPlanBadTestRows4() {
+function cleanupOrderPlanBadTestRows5() {
   var resolved = resolveOrderPlanSpreadsheet_();
   if (resolved.error) { Logger.log(resolved.error); return; }
   var sheet = resolved.planSs.getSheetByName('19');
   if (!sheet) { Logger.log('Вкладка 19 не найдена'); return; }
-  sheet.getRange(93, 2, 2, 9).clearContent(); // B..J, оставляем A (номер шаблона)
-  Logger.log('Строки 93-94 (кроме номера в A) вкладки "19" очищены.');
+  sheet.getRange(93, 2, 2, 9).clearContent(); // заказ 46
+  sheet.getRange(95, 2, 2, 9).clearContent(); // заказ 47, на случай если тест туда попал
+  Logger.log('Строки 93-96 (кроме номеров в A) вкладки "19" очищены.');
 }

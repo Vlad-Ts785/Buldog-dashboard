@@ -4082,6 +4082,30 @@ function warmOrderPlanCache() {
 function doGet(e) {
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
 
+  // ── ВРЕМЕННАЯ сверка Заказы_данные (текущий месяц) перед переносом источника на сервер
+  // (2026-08-18) - только чтение, ничего не пишет. УБРАТЬ после сверки - см. DEPLOY_LOG.md.
+  if (e && e.parameter && e.parameter.action === 'diag_orders_norm_sheet') {
+    var donsKey = e.parameter.key || '';
+    if (donsKey !== '7f2a9c1e6b4d8035a1c9ef26b8d40317') {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var donsSheet = ss.getSheetByName(ORDERS_NORM_SHEET);
+    if (!donsSheet || donsSheet.getLastRow() < 2) {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'Нет данных' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var donsRows = donsSheet.getRange(2, 1, donsSheet.getLastRow() - 1, 44).getValues();
+    var donsTotal = 0, donsInternal = 0;
+    donsRows.forEach(function(r) {
+      donsTotal += ordParseNum(r[30]);
+      if (String(r[13] || '').trim() === 'Да') donsInternal += ordParseNum(r[30]);
+    });
+    return ContentService.createTextOutput(JSON.stringify({
+      count: donsRows.length, totalAmount: donsTotal, internalAmount: donsInternal,
+      sampleRow0: donsRows[0], sampleLastRow: donsRows[donsRows.length - 1],
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+  // ── конец временной сверки ─────────────────────────────────────────────────────────────────
+
   // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём.
   // Сначала пробуем свой токен сессии (живёт до 48ч, см. issueSessionToken_) - только если
   // его нет или он истёк, идём проверять Google id_token (тот живёт ~1 час, это уже требует

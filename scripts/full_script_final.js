@@ -178,6 +178,11 @@ const CONFIG = {
   TELEGRAM_LOGISTS_CHAT_ID: '-5072928374',  // группа "Кадры/Ремонт/База"
   ALERT_FINE_THRESHOLD: 50000,   // штраф выше этой суммы → алерт
   ALERT_LOSS_THRESHOLD: 0,       // прибыль ниже этого → алерт
+  // Таблица-указатель "План задания - Индекс" (не сама таблица планировки -
+  // та меняется каждый месяц, это одна строка month/year/id/url, которую
+  // duplicateForNextMonth() перезаписывает при создании копии на новый месяц).
+  // Создана 2026-08-16, см. plans/ "План задания" и project_order_planning_sheet.
+  ORDER_PLAN_INDEX_ID: '1-afr5nC1Mg0UXgz7vwxvH4GX7MuAS14i-2-QA6yGxQQ',
 };
 
 // Google OAuth Client ID - не секрет (Google сам рекомендует класть его в открытый код сайта,
@@ -1130,6 +1135,11 @@ function runAll() {
   // каждый визит.
   try { saveMainPayloadCache_(SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID)); log.push('✅ Кэш главной страницы обновлён'); }
   catch(e) { errors.push('❌ Кэш главной страницы: ' + e.message); }
+
+  // "План задания" (2026-08-16) - прогрев кэша, чтобы дорогое чтение таблицы планировки
+  // (~2.5 минуты на ~31 вкладку) не доставалось живому пользователю дашборда.
+  try { warmOrderPlanCache();      log.push('✅ Кэш "План задания" прогрет'); }
+  catch(e) { errors.push('❌ Кэш "План задания": ' + e.message); }
 
   // Алерты и сводка — собираем данные один раз
   let alertsText = '';
@@ -3511,6 +3521,63 @@ function verifyGoogleToken_(idToken) {
   }
 }
 
+// ── СЕССИЯ НА 1-2 СУТОК ПОВЕРХ GOOGLE-ЛОГИНА (2026-08-17, Влад: "постоянно раз в час требует
+// перезахода... один раз залогинились - день-два никто не трогает") ────────────────────────
+// Google id_token живёт ~1 час - это срок жизни ОТ GOOGLE, мы его не контролируем. Вместо того
+// чтобы гонять пользователя обратно в Google каждый час, после первой успешной проверки
+// id_token выдаём СВОЙ подписанный токен на SESSION_TOKEN_TTL_MS - фронтенд дальше ходит по
+// нему, Google трогаем заново только когда истёк. Роль/доступ (лист "Доступ") по-прежнему
+// проверяется на КАЖДЫЙ запрос через getAccessRole_ - длинная сессия влияет только на то, что
+// не нужно повторно подтверждать личность через Google, а не на то, есть ли у email доступ
+// прямо сейчас (отозвать доступ - как и раньше, просто удалить строку из "Доступ", сработает
+// мгновенно и для уже выданных токенов сессии).
+var SESSION_TOKEN_TTL_MS = 48 * 60 * 60 * 1000; // "день-два"
+
+function getSessionSecret_() {
+  var props = PropertiesService.getScriptProperties();
+  var secret = props.getProperty('SESSION_SECRET');
+  if (!secret) {
+    // Генерируем сами при первом обращении - не нужно заводить руками, как TELEGRAM_TOKEN.
+    secret = Utilities.getUuid() + Utilities.getUuid();
+    props.setProperty('SESSION_SECRET', secret);
+  }
+  return secret;
+}
+
+function issueSessionToken_(email) {
+  var payload = JSON.stringify({ email: email, exp: Date.now() + SESSION_TOKEN_TTL_MS });
+  var payloadB64 = Utilities.base64EncodeWebSafe(payload);
+  var sig = Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(payloadB64, getSessionSecret_()));
+  return payloadB64 + '.' + sig;
+}
+
+// Сравнение строк без раннего выхода на первом несовпадении - иначе время сравнения выдаёт,
+// сколько первых байт подписи угаданы верно (классический timing-канал для HMAC-проверки).
+function constantTimeEquals_(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  var diff = 0;
+  for (var i = 0; i < a.length; i++) diff |= (a.charCodeAt(i) ^ b.charCodeAt(i));
+  return diff === 0;
+}
+
+// Возвращает email из валидного токена сессии, иначе null (нет токена, битая подпись, истёк).
+// Никогда не бросает исключение - вызывающий код просто откатывается на проверку id_token.
+function verifySessionToken_(token) {
+  if (!token || token.indexOf('.') === -1) return null;
+  var parts = token.split('.');
+  var payloadB64 = parts[0], sig = parts[1];
+  if (!payloadB64 || !sig) return null;
+  var expectedSig = Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(payloadB64, getSessionSecret_()));
+  if (!constantTimeEquals_(sig, expectedSig)) return null;
+  try {
+    var payload = JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(payloadB64)).getDataAsString());
+    if (!payload.email || !payload.exp || payload.exp < Date.now()) return null;
+    return String(payload.email).trim().toLowerCase();
+  } catch (parseErr) {
+    return null;
+  }
+}
+
 // Ищет email в листе "Доступ", возвращает {name, role} или null.
 function getAccessRole_(ss, email) {
   const sheet = ss.getSheetByName('Доступ');
@@ -3806,6 +3873,205 @@ function getLogistView_(ss, logistName) { return buildLogistView_(getOrdersData(
 function getLogistViewForPeriod_(ss, logistName, period) { return buildLogistView_(getOrdersDataForPeriod(ss, period), logistName, ss, period); }
 
 // ============================================================
+// "ПЛАН ЗАДАНИЯ" — только чтение из отдельной таблицы планировки
+// (Планировка_заказов, живёт вне репозитория дашборда). Дашборд её не
+// изменяет, только читает — сама таблица остаётся основным рабочим
+// инструментом логистов/менеджеров (см. plans/ "План задания на дашборде").
+// ============================================================
+
+// Сверяет "Фамилия Имя Отчество" (лист «Доступ» дашборда) с "Фамилия Имя"
+// (колонка B таблицы планировки) — форматы разные, отчества в планировке
+// нет, а фамилия может быть короче через дефис (Прус-Роскошный → Прус).
+// Сверено на реальных данных 2026-08-16: без этой нормализации 0 совпадений
+// из 17 имён, с ней — все 5 реальных пар совпали. См. plans/ "План задания".
+function orderPlanNameMatch_(accessName, cellName) {
+  var a = String(accessName || '').trim().split(/\s+/);
+  var c = String(cellName || '').trim().split(/\s+/);
+  if (a.length < 2 || c.length < 2) return false;
+  var aSurname = a[0].split('-')[0].toLowerCase();
+  var cSurname = c[0].split('-')[0].toLowerCase();
+  return aSurname === cSurname && a[1].toLowerCase() === c[1].toLowerCase();
+}
+
+// Открывает ТЕКУЩУЮ таблицу планировки через индекс (CONFIG.ORDER_PLAN_INDEX_ID).
+// Общий кусок для getOrderPlanView_ и warmOrderPlanCache - раньше был продублирован.
+function resolveOrderPlanSpreadsheet_() {
+  var indexSs, indexSheet;
+  try {
+    indexSs = SpreadsheetApp.openById(CONFIG.ORDER_PLAN_INDEX_ID);
+    indexSheet = indexSs.getSheetByName('Индекс');
+  } catch (e) {
+    return { error: 'Не удалось открыть индексную таблицу: ' + e.message };
+  }
+  if (!indexSheet || indexSheet.getLastRow() < 2) {
+    return { error: 'Индексная таблица пуста' };
+  }
+  var planId = indexSheet.getRange(2, 3).getValue();
+  if (!planId) return { error: 'В индексе не указан ID таблицы планировки' };
+
+  try {
+    return { planId: planId, planSs: SpreadsheetApp.openById(planId) };
+  } catch (e) {
+    return { error: 'Не удалось открыть таблицу планировки: ' + e.message };
+  }
+}
+
+// Живой тест 2026-08-16 показал: последовательное чтение ~31 дневной вкладки таблицы
+// планировки занимает ОКОЛО 2.5 МИНУТ (Sheets API медленный на много мелких вызовов
+// подряд) - неприемлемо, если это платит своим ожиданием живой пользователь дашборда.
+// Решение в два слоя:
+// 1) readOrderPlanDayTab_ кэширует РАЗОБРАННЫЕ строки каждой дневной вкладки в
+//    CacheService на ORDER_PLAN_CACHE_TTL_SEC (сейчас 4 часа - с запасом перекрывает
+//    интервал между прогонами runAll(), см. ниже).
+// 2) warmOrderPlanCache() проактивно прогревает кэш КАЖДЫЙ раз, когда всё равно
+//    выполняется runAll() (6 раз в день, каждые 3 часа) - обычный пользователь почти
+//    никогда не попадает на холодный кэш, ждать 2.5 минуты приходится только внутри
+//    самого runAll(), а не в момент, когда менеджер открыл вкладку.
+var ORDER_PLAN_CACHE_TTL_SEC = 14400; // 4 часа, запас над 3-часовым интервалом runAll()
+
+// Карта колонок ниже подтверждена 2026-08-17 напрямую по строке 1 (человеческий
+// заголовок) + строке 2 (функциональный подзаголовок) живого листа, показанного
+// Владом (17.08.2026): D1="Заказчик"/D2="ФИО,телефон", G1="Исполнитель"/
+// G2="Какие документы оформить" - ПЕРВАЯ версия карты (2026-08-16) ошибочно брала
+// заказчика из G (там "От кого грузимся" по формуле N3, другое поле) - у части
+// заказов (Цегельников) G3 пуст, поэтому заказчик пропадал. Сейчас заказчик - D3.
+// P/Q/R - чекбоксы (реальные booleans в Sheets), а не текст: раньше `s()` с `||''`
+// молча превращал false в пустую строку, а true - в текст "true" (Влад: "не true
+// или false, а подтверждено/не подтверждено") - теперь строгое сравнение `=== true`.
+function readOrderPlanDayTab_(planId, sheet, day) {
+  var cache = CacheService.getScriptCache();
+  var cacheKey = 'order_plan_day_v3_' + planId + '_' + day; // v3 - другая форма кэша (заказчик из D, booleans), старые ключи сами истекут
+  var cached = null;
+  try { cached = cache.get(cacheKey); } catch (e) { /* кэш недоступен - не критично */ }
+  if (cached) {
+    try { return JSON.parse(cached); } catch (e) { /* повреждённый кэш - читаем заново ниже */ }
+  }
+
+  var result = [];
+  var data = sheet.getDataRange().getValues();
+  for (var i = 3; i < data.length; i += 2) {
+    var orderNumber = data[i - 1][0];
+    if (orderNumber === '' || orderNumber === null) continue; // пустая пара — не заказ
+    var top = data[i - 1], bottom = data[i];
+    var s = function (row, col) { return String(row[col] || '').trim(); };
+    result.push({
+      orderNumber: s(top, 0),
+      status: s(bottom, 0),
+      rowManager: s(top, 1),
+      rowLogist: s(bottom, 1),
+      equipType: (s(top, 2) + ' ' + s(bottom, 2)).trim(),
+      customer: s(top, 3),           // D3 - "Заказчик"
+      customerContact: s(bottom, 3), // D4 - "ФИО, телефон"
+      date: s(top, 4),
+      time: s(bottom, 4),
+      cargo: s(top, 5),
+      gabarit: s(bottom, 5),
+      documents: s(bottom, 6),       // G4 - "Какие документы оформить"
+      loadAddress: s(top, 7),        // H3
+      loadContact: s(bottom, 7),     // H4
+      unloadAddress: s(top, 8),      // I3
+      unloadContact: s(bottom, 8),   // I4
+      reworkTerms: s(top, 9),        // J3
+      note: s(bottom, 9),            // J4
+      cost: top[10] || '',
+      paymentStatus: s(bottom, 10),
+      ownDriver: s(top, 11),
+      ownVehicle: s(bottom, 11),
+      hiredCompany: s(top, 12),
+      hiredVehicle: s(bottom, 12),
+      carAssigned: s(bottom, 14) || s(top, 14),
+      invoiceIssued: top[15] === true,        // P3 - "Счёт выставлен"
+      moneyReceived: bottom[15] === true,     // P4 - "Деньги получены"
+      requestSentToDriver: top[16] === true,  // Q3 - "Заявка отправлена водителю"
+      driverConfirmed: bottom[16] === true,   // Q4 - "Получено подтверждение от водителя"
+      orderEnteredIn1C: top[17] === true,     // R3 - "Заявка внесена в 1С"
+      logistClosed: bottom[17] === true,      // R4 - "Логист проставил отработку"
+    });
+  }
+
+  try { cache.put(cacheKey, JSON.stringify(result), ORDER_PLAN_CACHE_TTL_SEC); } catch (e) { /* день слишком большой для кэша (>100KB) - не критично, просто без кэша */ }
+  return result;
+}
+
+// Читает заказы конкретного человека (как менеджера-продавца, так и
+// логиста-диспетчера) из ТЕКУЩЕЙ таблицы планировки. Актуальная таблица
+// определяется через CONFIG.ORDER_PLAN_INDEX_ID — эту строку раз в месяц
+// перезаписывает duplicateForNextMonth() в проекте планировки при создании
+// копии на новый месяц. Раскладка строк/колонок — по факту кода планировки
+// (см. Планировка_заказов*/planirovka_zakazov_script.js, CONFIG вверху):
+// пара строк на заказ, нечётная (верхняя) — номер/менеджер/техника/дата/
+// стоимость/наёмная компания, чётная (нижняя) — статус/логист/машина.
+function getOrderPlanView_(personName) {
+  var resolved = resolveOrderPlanSpreadsheet_();
+  if (resolved.error) return { error: resolved.error, orders: [] };
+  var planId = resolved.planId, planSs = resolved.planSs;
+
+  var orders = [];
+  var dayTabs = planSs.getSheets().filter(function (s) {
+    return !isNaN(parseInt(s.getName(), 10));
+  });
+
+  dayTabs.forEach(function (sheet) {
+    var day = parseInt(sheet.getName(), 10);
+    var dayOrders = readOrderPlanDayTab_(planId, sheet, day);
+
+    dayOrders.forEach(function (o) {
+      var asManager = orderPlanNameMatch_(personName, o.rowManager);
+      var asLogist  = orderPlanNameMatch_(personName, o.rowLogist);
+      if (!asManager && !asLogist) return;
+
+      // Отдаём все поля заказа как есть (readOrderPlanDayTab_ уже собрал их по
+      // проверенной карте колонок) + day/role, не переписываем список руками -
+      // так при появлении нового поля не нужно править это место дважды.
+      // rowManager/rowLogist переименованы в managerName/logistName - используются
+      // в карточке заказа (кто ещё участвует, кроме самого смотрящего).
+      var order = Object.assign({}, o, {
+        day: day,
+        role: asManager ? 'manager' : 'logist',
+        managerName: o.rowManager,
+        logistName: o.rowLogist,
+      });
+      delete order.rowManager;
+      delete order.rowLogist;
+      orders.push(order);
+    });
+  });
+
+  // Внутри дня заказы одного заказчика идут подряд (Влад, 2026-08-16), даже если
+  // в самой таблице планировки они не рядом - сортировка стабильная, порядок
+  // внутри одного заказчика и порядок дней между собой не меняется.
+  orders.sort(function (x, y) {
+    if (x.day !== y.day) return x.day - y.day;
+    return (x.customer || '').localeCompare(y.customer || '', 'ru');
+  });
+
+  return {
+    updated: new Date().toISOString(),
+    planSpreadsheetUrl: planSs.getUrl(),
+    orders: orders,
+  };
+}
+
+// Проактивно прогревает кэш "План задания" на все дневные вкладки текущей таблицы
+// планировки - вызывается из runAll() (6 раз в день), чтобы дорогое чтение ~31 вкладки
+// (~2.5 минуты) оплачивал плановый прогон, а не менеджер, открывший вкладку на дашборде.
+// Можно запускать и вручную (например, сразу после релиза, не дожидаясь runAll()).
+function warmOrderPlanCache() {
+  var resolved = resolveOrderPlanSpreadsheet_();
+  if (resolved.error) {
+    Logger.log('warmOrderPlanCache: ' + resolved.error);
+    return;
+  }
+  var dayTabs = resolved.planSs.getSheets().filter(function (s) {
+    return !isNaN(parseInt(s.getName(), 10));
+  });
+  dayTabs.forEach(function (sheet) {
+    readOrderPlanDayTab_(resolved.planId, sheet, parseInt(sheet.getName(), 10));
+  });
+  Logger.log('warmOrderPlanCache: прогрето вкладок - ' + dayTabs.length);
+}
+
+// ============================================================
 // API ДЛЯ ДАШБОРДА — читает Штатку для статусов и типов
 // ============================================================
 // ============================================================
@@ -3816,9 +4082,14 @@ function getLogistViewForPeriod_(ss, logistName, period) { return buildLogistVie
 function doGet(e) {
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
 
-  // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём
+  // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём.
+  // Сначала пробуем свой токен сессии (живёт до 48ч, см. issueSessionToken_) - только если
+  // его нет или он истёк, идём проверять Google id_token (тот живёт ~1 час, это уже требует
+  // повторного клика "Войти через Google" на фронтенде).
+  var sessionToken = e && e.parameter ? (e.parameter.session_token || '') : '';
   var idToken = e && e.parameter ? (e.parameter.id_token || '') : '';
-  var email = verifyGoogleToken_(idToken);
+  var email = sessionToken ? verifySessionToken_(sessionToken) : null;
+  if (!email) email = verifyGoogleToken_(idToken);
   if (!email) {
     return ContentService
       .createTextOutput(JSON.stringify({ error: 'Не авторизован', needLogin: true }))
@@ -3830,6 +4101,11 @@ function doGet(e) {
       .createTextOutput(JSON.stringify({ error: 'У этого аккаунта нет доступа к дашборду', needLogin: true }))
       .setMimeType(ContentService.MimeType.JSON);
   }
+  // Скользящее окно - каждый успешный заход продлевает сессию ещё на 48ч от текущего момента.
+  // Кладём в ответ только у трёх "полных" загрузок страницы ниже (admin/manager/logist) -
+  // этого достаточно, фронтенд читает токен один раз при загрузке и использует дальше для
+  // всех запросов, включая мелкие action=... (которым сам токен в ответе не нужен).
+  var freshSessionToken = issueSessionToken_(email);
 
   try {
     // Отдельный endpoint для истории по машинам (тяжёлые данные, грузим лениво) - только admin
@@ -3840,6 +4116,23 @@ function doGet(e) {
     if (!action) {
       try { logAccessVisit_(ss, email, access.name, access.role); } catch (logErr) { /* не критично для остального ответа */ }
     }
+
+    // Вкладка "План задание" - урезанный только-чтение список заказов конкретного
+    // человека из ОТДЕЛЬНОЙ таблицы планировки (см. getOrderPlanView_ выше).
+    // manager/logist - всегда только свои заказы (access.name, параметр manager
+    // игнорируется - так же, как и везде в этом файле). admin - имя того, кого
+    // выбрал в селекторе "Личной страницы" (Влад, 2026-08-17: "чтобы я мог зайти
+    // под любым менеджером" - то же самое &manager=, что уже работает для
+    // my-page/receipts, см. mlcManager/gatManager выше).
+    if (action === 'order_plan') {
+      var opPerson = (access.role === 'manager' || access.role === 'logist')
+        ? access.name
+        : (e.parameter.manager || access.name);
+      return ContentService
+        .createTextOutput(JSON.stringify(getOrderPlanView_(opPerson)))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
     if (action === 'vehicle_history') {
       if (access.role !== 'admin') {
         return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
@@ -4254,14 +4547,14 @@ function doGet(e) {
     // Менеджер - только его собственные данные, без доступа к остальному
     if (access.role === 'manager') {
       return ContentService
-        .createTextOutput(JSON.stringify(getManagerView_(ss, access.name)))
+        .createTextOutput(JSON.stringify(Object.assign(getManagerView_(ss, access.name), { session_token: freshSessionToken })))
         .setMimeType(ContentService.MimeType.JSON);
     }
 
     // Логист (2026-08-10) - та же логика, что и manager выше, но своя урезанная выдача
     if (access.role === 'logist') {
       return ContentService
-        .createTextOutput(JSON.stringify(getLogistView_(ss, access.name)))
+        .createTextOutput(JSON.stringify(Object.assign(getLogistView_(ss, access.name), { session_token: freshSessionToken })))
         .setMimeType(ContentService.MimeType.JSON);
     }
 
@@ -4271,6 +4564,7 @@ function doGet(e) {
       {
         updated: new Date().toISOString(),
         role:    'admin',
+        session_token: freshSessionToken,
         // Живые поля - НЕ кэшируются в runAll() (см. buildHeavyMainPayload_). Штатка -
         // "живой документ" (CLAUDE.md), её правят руками вне расписания runAll() - если
         // закэшировать статус машины/ремонты на 3 часа, правки будут "зависать", это
@@ -9729,3 +10023,4 @@ function runOrdersOnly() {
   catch(e) { errors.push('❌ Нормализация: ' + e.message); }
   Logger.log(log.concat(errors).join('\n'));
 }
+

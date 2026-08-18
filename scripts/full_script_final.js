@@ -4269,39 +4269,6 @@ function createOrderPlanEntry_(personName, p) {
 function doGet(e) {
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
 
-  // ── ВРЕМЕННО (2026-08-18, проверка computeLostCustomers на синхронном снимке) - УБРАТЬ.
-  if (e && e.parameter && e.parameter.action === 'diag_full_orders') {
-    var dfoKey = e.parameter.key || '';
-    if (dfoKey !== '7f2a9c1e6b4d8035a1c9ef26b8d40317') {
-      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
-    }
-    var dfoPeriod = e.parameter.period || '';
-    var dfoResult = dfoPeriod ? getOrdersDataForPeriod(ss, dfoPeriod) : getOrdersData(ss);
-    return ContentService.createTextOutput(JSON.stringify(dfoResult)).setMimeType(ContentService.MimeType.JSON);
-  }
-  // Поиск конкретного клиента в сыром листе (архив или текущий) - разбор расхождения
-  // computeLostCustomers по ТРЕЙДСЕРВИС (2026-08-18).
-  if (e && e.parameter && e.parameter.action === 'diag_find_customer') {
-    var dfcKey = e.parameter.key || '';
-    if (dfcKey !== '7f2a9c1e6b4d8035a1c9ef26b8d40317') {
-      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
-    }
-    var dfcPeriod = e.parameter.period || '';
-    var dfcNeedle = e.parameter.q || '';
-    var dfcSheet = dfcPeriod === (Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM'))
-      ? ss.getSheetByName(ORDERS_NORM_SHEET)
-      : ss.getSheetByName(ORDERS_ARCHIVE_PFX + dfcPeriod);
-    if (!dfcSheet) return ContentService.createTextOutput(JSON.stringify({ error: 'sheet_not_found' })).setMimeType(ContentService.MimeType.JSON);
-    var dfcAll = dfcSheet.getDataRange().getValues();
-    var dfcParsed = parseOrdersRawRows(dfcAll).rows;
-    var dfcFound = dfcParsed.filter(function(r) { return String(r[9] || '').indexOf(dfcNeedle) >= 0; });
-    var dfcOut = dfcFound.map(function(r) {
-      return { id: r[0], date_created: r[1], date_start: r[2], customer: r[9], internal: r[13], amount: r[30], month_key: r[42] };
-    });
-    return ContentService.createTextOutput(JSON.stringify({ count: dfcOut.length, rows: dfcOut })).setMimeType(ContentService.MimeType.JSON);
-  }
-  // ── конец временной сверки ─────────────────────────────────────────────────────────────────
-
   // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём.
   // Сначала пробуем свой токен сессии (живёт до 48ч, см. issueSessionToken_) - только если
   // его нет или он истёк, идём проверять Google id_token (тот живёт ~1 час, это уже требует

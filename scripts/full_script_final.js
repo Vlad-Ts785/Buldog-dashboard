@@ -4305,6 +4305,20 @@ function createOrderPlanEntry_(personName, p) {
 function doGet(e) {
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
 
+  // ── ВРЕМЕННО (2026-08-18, Влад не нашёл enableServerOrdersCalc() в редакторе - включаю по
+  // его просьбе этим путём) - УБРАТЬ сразу после включения.
+  if (e && e.parameter && e.parameter.action === 'diag_enable_server_calc') {
+    var descKey = e.parameter.key || '';
+    if (descKey !== '7f2a9c1e6b4d8035a1c9ef26b8d40317') {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    PropertiesService.getScriptProperties().setProperty('USE_SERVER_ORDERS_CALC', 'on');
+    var checkOn = PropertiesService.getScriptProperties().getProperty('USE_SERVER_ORDERS_CALC');
+    var freshCheck = verifyServerOrdersCalc();
+    return ContentService.createTextOutput(JSON.stringify({ ok: true, flagNow: checkOn, verify: freshCheck })).setMimeType(ContentService.MimeType.JSON);
+  }
+  // ── конец временного включения ─────────────────────────────────────────────────────────────
+
   // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём.
   // Сначала пробуем свой токен сессии (живёт до 48ч, см. issueSessionToken_) - только если
   // его нет или он истёк, идём проверять Google id_token (тот живёт ~1 час, это уже требует

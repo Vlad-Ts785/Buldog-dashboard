@@ -482,7 +482,16 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 
   <div class="sidebar-bottom">
     <div class="sidebar-updated" id="nav-updated">Нет данных</div>
-    <button class="sidebar-refresh" onclick="loadData()">↻ Обновить данные</button>
+    <!-- Admin-предпросмотр "глазами сотрудника" (Влад, 2026-08-18: "нажал менеджер - и у меня
+         полностью интерфейс поменялся, как его видит менеджер... лучше сразу сотрудника
+         выбирать") - список из того же ростера, что уже даёт дропдаун на "Личной странице",
+         просто теперь ещё и урезает сайдбар/лейбл через applyRoleUI(), как для реального
+         входа manager/logist. Данные не перезапрашиваются - у admin и так есть всё в D. -->
+    <div style="position:relative">
+      <button type="button" class="sidebar-refresh" id="view-as-btn" onclick="toggleViewAsPanel(event)">👁 Смотреть как сотрудник</button>
+      <div id="view-as-panel" style="display:none;position:absolute;bottom:calc(100% + 4px);left:0;right:0;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px;z-index:50;max-height:280px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.4)"></div>
+    </div>
+    <button class="sidebar-refresh" onclick="loadData()" style="margin-top:6px">↻ Обновить данные</button>
     <button class="sidebar-refresh" onclick="logoutUser()" style="margin-top:6px">Выйти</button>
   </div>
 </aside>
@@ -2083,6 +2092,11 @@ function dedupeMyPageEntries_(rawEntries) {
   return Object.values(byName);
 }
 
+// Admin-предпросмотр "глазами сотрудника" (2026-08-18) - {name, type} выбранного через кнопку
+// "Смотреть как сотрудник" в подвале сайдбара, иначе null. Только для D.role==='admin' - у
+// реальных manager/logist кнопки нет (applyRoleUI прячет весь сайдбар, кроме своих 3 пунктов).
+let viewAsEntry = null;
+
 // Кто сейчас выбран на личной странице - вынесено отдельно (2026-08-11), т.к. и
 // renderMyPage(), и setMyPagePeriod() (для роутинга Васина на свой источник данных, см. ниже)
 // независимо должны знать "кого сейчас смотрим", без дублирования логики дропдауна/ролей.
@@ -2090,6 +2104,7 @@ function myPageCurrentEntry_() {
   if (!D || !D.orders) return null;
   if (D.role === 'manager') return { name: D.managerName, type: 'manager' };
   if (D.role === 'logist')  return { name: D.logistName,  type: 'logist'  };
+  if (D.role === 'admin' && viewAsEntry) return viewAsEntry;
   // Из ростеров by_manager/by_logist, не из by_manager_detail/logist_detail - см. комментарий
   // в renderMyPage() (баг с Васиным, 2026-08-11).
   var entries = dedupeMyPageEntries_(
@@ -2231,8 +2246,10 @@ function renderMyPage() {
   }
 
   try {
-    var isManagerRole = D.role === 'manager';
-    var isLogistRole  = D.role === 'logist';
+    // Admin-предпросмотр (viewAsEntry) считается той же ролью, что и реальный вход - прячет
+    // дропдаун "Сотрудник" ниже (человек, реально вошедший под своим логином, его не видит).
+    var isManagerRole = D.role === 'manager' || (D.role === 'admin' && viewAsEntry && viewAsEntry.type === 'manager');
+    var isLogistRole  = D.role === 'logist'  || (D.role === 'admin' && viewAsEntry && viewAsEntry.type === 'logist');
     var mgrDetailAll = (D.orders && D.orders.by_manager_detail) || {};
     var logDetailAll = (D.orders && D.orders.logist_detail) || {};
     // Список для дропдауна - из ростеров by_manager/by_logist (кто угодно с хоть одним
@@ -3607,8 +3624,10 @@ function render() {
   setText('nav-updated', 'Обновлено: ' + t);
   applyRoleUI();
 
-  if (D.role === 'manager' || D.role === 'logist') {
-    // Менеджеру/логисту урезанные данные с сервера - другие вкладки на них упадут, не рендерим их
+  if (D.role === 'manager' || D.role === 'logist' || (D.role === 'admin' && viewAsEntry)) {
+    // Менеджеру/логисту урезанные данные с сервера - другие вкладки на них упадут, не рендерим
+    // их. Admin-предпросмотр (viewAsEntry) технически видит полный D, но остальные вкладки тоже
+    // не рендерим - они скрыты в сайдбаре (applyRoleUI), рендерить их незачем.
     renderMyPage();
     return;
   }
@@ -3630,8 +3649,9 @@ function render() {
 // но скрыть пункты меню тоже нужно, чтобы интерфейс не предлагал недоступное.
 function applyRoleUI() {
   const sidebarLabel = document.querySelector('.sidebar-logo-label');
-  if (D.role === 'manager' || D.role === 'logist') {
-    if (sidebarLabel) sidebarLabel.textContent = D.managerName || D.logistName || (D.role === 'logist' ? 'Логист' : 'Менеджер');
+  const previewing = D.role === 'admin' && !!viewAsEntry;
+  if (D.role === 'manager' || D.role === 'logist' || previewing) {
+    if (sidebarLabel) sidebarLabel.textContent = previewing ? viewAsEntry.name : (D.managerName || D.logistName || (D.role === 'logist' ? 'Логист' : 'Менеджер'));
     document.querySelectorAll('.sidebar-nav-item').forEach(function(item) {
       const page = item.getAttribute('data-page');
       // Калькулятор не зависит от серверных данных (D.role) - считает офлайн в браузере,
@@ -3645,7 +3665,84 @@ function applyRoleUI() {
     document.querySelectorAll('.sidebar-nav-item').forEach(function(item) { item.style.display = ''; });
     document.querySelectorAll('.sidebar-nav-section').forEach(function(s){ s.style.display = ''; });
   }
+  updateViewAsButton_();
 }
+
+// Кнопка-переключатель "Смотреть как сотрудник" в подвале сайдбара - список из того же
+// ростера, что дропдаун на "Личной странице" (by_manager/by_logist), сгруппирован
+// Менеджеры/Логисты. Первая строка - выход из предпросмотра, только когда он активен.
+function viewAsRoster_() {
+  if (!D || !D.orders) return [];
+  return dedupeMyPageEntries_(
+    ((D.orders.by_manager || []).map(function(m){ return {name:m.name, type:'manager'}; }))
+      .concat((D.orders.by_logist || []).map(function(l){ return {name:l.name, type:'logist'}; }))
+  ).sort(function(a,b){ return a.name.localeCompare(b.name, 'ru'); });
+}
+
+function updateViewAsButton_() {
+  var btn = document.getElementById('view-as-btn');
+  if (!btn) return;
+  if (D.role === 'admin' && viewAsEntry) {
+    btn.textContent = '👁 Вы смотрите как: ' + viewAsEntry.name;
+    btn.style.color = 'var(--amber)';
+    btn.style.borderColor = 'var(--amber)';
+  } else {
+    btn.textContent = '👁 Смотреть как сотрудник';
+    btn.style.color = '';
+    btn.style.borderColor = '';
+  }
+  // Реальным manager/logist сама кнопка не нужна - им и так показывается только своя страница.
+  btn.parentElement.style.display = (D.role === 'admin') ? '' : 'none';
+}
+
+function toggleViewAsPanel(ev) {
+  if (ev) ev.stopPropagation();
+  var panel = document.getElementById('view-as-panel');
+  if (!panel) return;
+  if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
+  renderViewAsPanel_();
+  panel.style.display = 'block';
+}
+
+function renderViewAsPanel_() {
+  var panel = document.getElementById('view-as-panel');
+  if (!panel) return;
+  var roster = viewAsRoster_();
+  function rowHtml(en) {
+    var active = viewAsEntry && viewAsEntry.name === en.name && viewAsEntry.type === en.type;
+    var safe = en.name.replace(/'/g, "\\'");
+    return '<div onclick="setViewAs(\''+safe+'\',\''+en.type+'\')" style="padding:7px 10px;font-size:13px;cursor:pointer;border-radius:4px;color:'+(active?'var(--amber)':'var(--text)')+(active?';font-weight:600':'')+'" '+
+      'onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'\'">'+en.name+'</div>';
+  }
+  var managers = roster.filter(function(e){ return e.type === 'manager'; });
+  var logists  = roster.filter(function(e){ return e.type === 'logist'; });
+  var html = '';
+  if (viewAsEntry) {
+    html += '<div onclick="setViewAs(null,null)" style="padding:7px 10px;font-size:13px;cursor:pointer;border-radius:4px;color:var(--red);border-bottom:1px solid var(--border);margin-bottom:4px" '+
+      'onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'\'">✕ Обычный вид (админ)</div>';
+  }
+  if (managers.length) html += '<div style="padding:6px 10px 2px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Менеджеры</div>' + managers.map(rowHtml).join('');
+  if (logists.length) html += '<div style="padding:6px 10px 2px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Логисты</div>' + logists.map(rowHtml).join('');
+  if (!roster.length) html += '<div style="padding:8px 10px;font-size:12px;color:var(--muted)">Нет данных</div>';
+  panel.innerHTML = html;
+}
+
+function setViewAs(name, type) {
+  viewAsEntry = name ? { name: name, type: type } : null;
+  myPagePeriod = null; // сброс "прошлого месяца" - иначе можно унести чужой кэш периода на нового человека
+  var panel = document.getElementById('view-as-panel');
+  if (panel) panel.style.display = 'none';
+  render();
+  if (!viewAsEntry) {
+    var mainNav = document.querySelector('.sidebar-nav-item[data-page="main"]');
+    showPage('main', mainNav);
+  }
+}
+document.addEventListener('click', function(ev) {
+  var panel = document.getElementById('view-as-panel');
+  if (!panel || panel.style.display === 'none') return;
+  if (!panel.contains(ev.target) && ev.target.id !== 'view-as-btn') panel.style.display = 'none';
+});
 
 // ── ВЫБОР ПЕРИОДА (Заказы / Менеджеры / Логисты / Зарплата) ──
 let selectedPeriod = null;     // null = текущий месяц

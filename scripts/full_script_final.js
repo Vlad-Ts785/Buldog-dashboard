@@ -4064,6 +4064,30 @@ function readOrderPlanDayTab_(planId, sheet, day) {
   return result;
 }
 
+// Вчера/сегодня/завтра по московскому времени, обрезано в границы месяца - Влад,
+// 2026-08-18: "не так критичны данные за прошедшие дни, больше интересует вчера
+// сегодня и завтра" - эти дни должны грузиться быстрее всего (см. scope=hot/rest
+// в doGet ниже и двухфазную загрузку на фронтенде).
+function orderPlanHotDays_(daysInMonth) {
+  var todayNum = parseInt(Utilities.formatDate(new Date(), 'Europe/Moscow', 'd'), 10);
+  var days = [];
+  [todayNum - 1, todayNum, todayNum + 1].forEach(function (d) {
+    if (d >= 1 && d <= daysInMonth && days.indexOf(d) === -1) days.push(d);
+  });
+  return days;
+}
+
+// Список номеров дневных вкладок текущей таблицы планировки - дешёвая операция
+// (только имена листов, без чтения данных), в отличие от полного скана дня.
+function orderPlanDaysInMonth_() {
+  var resolved = resolveOrderPlanSpreadsheet_();
+  if (resolved.error) return 31;
+  var nums = resolved.planSs.getSheets()
+    .map(function (s) { return parseInt(s.getName(), 10); })
+    .filter(function (n) { return !isNaN(n); });
+  return nums.length ? Math.max.apply(null, nums) : 31;
+}
+
 // Читает заказы конкретного человека (как менеджера-продавца, так и
 // логиста-диспетчера) из ТЕКУЩЕЙ таблицы планировки. Актуальная таблица
 // определяется через CONFIG.ORDER_PLAN_INDEX_ID — эту строку раз в месяц
@@ -4072,14 +4096,18 @@ function readOrderPlanDayTab_(planId, sheet, day) {
 // (см. Планировка_заказов*/planirovka_zakazov_script.js, CONFIG вверху):
 // пара строк на заказ, нечётная (верхняя) — номер/менеджер/техника/дата/
 // стоимость/наёмная компания, чётная (нижняя) — статус/логист/машина.
-function getOrderPlanView_(personName) {
+// dayFilter - необязательный массив номеров дней (см. orderPlanHotDays_ выше) -
+// если задан, читаются только эти вкладки, остальной месяц пропускается.
+function getOrderPlanView_(personName, dayFilter) {
   var resolved = resolveOrderPlanSpreadsheet_();
   if (resolved.error) return { error: resolved.error, orders: [] };
   var planId = resolved.planId, planSs = resolved.planSs;
 
   var orders = [];
   var dayTabs = planSs.getSheets().filter(function (s) {
-    return !isNaN(parseInt(s.getName(), 10));
+    var n = parseInt(s.getName(), 10);
+    if (isNaN(n)) return false;
+    return !dayFilter || dayFilter.indexOf(n) >= 0;
   });
 
   dayTabs.forEach(function (sheet) {
@@ -4232,8 +4260,27 @@ function doGet(e) {
       var opPerson = (access.role === 'manager' || access.role === 'logist')
         ? access.name
         : (e.parameter.manager || access.name);
+      // scope=hot/rest - двухфазная загрузка (Влад, 2026-08-18): вчера/сегодня/
+      // завтра отдаём отдельным быстрым запросом, остальной месяц - вторым, в
+      // фоне на фронтенде. Без scope (или scope=all) - как раньше, весь месяц
+      // одним запросом (используется, например, warmOrderPlanCache косвенно
+      // через readOrderPlanDayTab_, не через doGet).
+      var opScope = e.parameter.scope || '';
+      var opFilter = null;
+      if (opScope === 'hot' || opScope === 'rest') {
+        var opDaysInMonth = orderPlanDaysInMonth_();
+        var opHot = orderPlanHotDays_(opDaysInMonth);
+        if (opScope === 'hot') {
+          opFilter = opHot;
+        } else {
+          opFilter = [];
+          for (var opD = 1; opD <= opDaysInMonth; opD++) {
+            if (opHot.indexOf(opD) === -1) opFilter.push(opD);
+          }
+        }
+      }
       return ContentService
-        .createTextOutput(JSON.stringify(getOrderPlanView_(opPerson)))
+        .createTextOutput(JSON.stringify(getOrderPlanView_(opPerson, opFilter)))
         .setMimeType(ContentService.MimeType.JSON);
     }
 

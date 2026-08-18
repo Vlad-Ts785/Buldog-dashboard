@@ -4102,9 +4102,32 @@ function doGet(e) {
     return ContentService.createTextOutput(JSON.stringify({
       count: donsRows.length, totalAmount: donsTotal, internalAmount: donsInternal,
       sampleRow0: donsRows[0], sampleLastRow: donsRows[donsRows.length - 1],
+      orderNumbers: donsRows.map(function(r) { return String(r[0]); }),
     })).setMimeType(ContentService.MimeType.JSON);
   }
   // ── конец временной сверки ─────────────────────────────────────────────────────────────────
+
+  // ── ВРЕМЕННО: сравнение агрегата getOrdersData() до/после включения серверного источника
+  // (2026-08-18, см. plans/2026-08-18-live-orders-current-month-server-source.md). УБРАТЬ
+  // после сверки вместе с diag_orders_norm_sheet выше.
+  if (e && e.parameter && e.parameter.action === 'diag_orders_compare') {
+    var docKey = e.parameter.key || '';
+    if (docKey !== '7f2a9c1e6b4d8035a1c9ef26b8d40317') {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    return ContentService.createTextOutput(JSON.stringify(getOrdersData(ss))).setMimeType(ContentService.MimeType.JSON);
+  }
+  if (e && e.parameter && e.parameter.action === 'diag_set_yard_api_key') {
+    var dsakKey = e.parameter.key || '';
+    if (dsakKey !== '7f2a9c1e6b4d8035a1c9ef26b8d40317') {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var newVal = e.parameter.value || '';
+    if (newVal) PropertiesService.getScriptProperties().setProperty('YARD_API_KEY', newVal);
+    else PropertiesService.getScriptProperties().deleteProperty('YARD_API_KEY');
+    return ContentService.createTextOutput(JSON.stringify({ ok: true, set: !!newVal })).setMimeType(ContentService.MimeType.JSON);
+  }
+  // ── конец временного сравнения ─────────────────────────────────────────────────────────────
 
   // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём.
   // Сначала пробуем свой токен сессии (живёт до 48ч, см. issueSessionToken_) - только если
@@ -8000,13 +8023,37 @@ function dedupeJuneArchive() { return dedupeArchive('2026-06'); }
 // ── API ДЛЯ ДАШБОРДА ─────────────────────────────────────────
 // Вызывается из doGet() основного скрипта: orders: getOrdersData(ss)
 
-function getOrdersData(ss) {
-  const norm = ss.getSheetByName(ORDERS_NORM_SHEET);
-  if (!norm || norm.getLastRow() < 2) return { error: 'Нет данных заказов' };
+// Сырые строки текущего месяца с сервера (api.yardhub.ru/api/orders_raw, обновляется по FTP
+// от 1С раз в час) вместо листа "Заказы_данные" (email-канал, обновляется реже) - 2026-08-18,
+// см. plans/2026-08-18-live-orders-current-month-server-source.md. Возвращает null при ЛЮБОЙ
+// проблеме (нет ключа в Script Properties, сеть, пустой ответ) - вызывающий код тихо
+// переходит на чтение листа, как раньше. Сам расчёт (aggregateOrdersRows и т.д.) НЕ меняется.
+function fetchOrdersRawFromServer_(monthKey) {
+  try {
+    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    if (!apiKey) return null;
+    var resp = UrlFetchApp.fetch(
+      'https://api.yardhub.ru/api/orders_raw?month=' + encodeURIComponent(monthKey),
+      { headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true }
+    );
+    if (resp.getResponseCode() !== 200) return null;
+    var data = JSON.parse(resp.getContentText());
+    if (!data || !data.rows || !data.rows.length) return null;
+    return data.rows;
+  } catch (err) {
+    return null;
+  }
+}
 
-  const rows = norm.getRange(2, 1, norm.getLastRow() - 1, 44).getValues();
-  const result = aggregateOrdersRows(rows);
+function getOrdersData(ss) {
   const monthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+  var rows = fetchOrdersRawFromServer_(monthKey);
+  if (!rows) {
+    const norm = ss.getSheetByName(ORDERS_NORM_SHEET);
+    if (!norm || norm.getLastRow() < 2) return { error: 'Нет данных заказов' };
+    rows = norm.getRange(2, 1, norm.getLastRow() - 1, 44).getValues();
+  }
+  const result = aggregateOrdersRows(rows);
   const smartLost = computeLostCustomers_(ss, rows, monthKey);
   if (smartLost) result.lost_customers = smartLost;
   return joinManagerPlans_(ss, result, monthKey);

@@ -1296,6 +1296,15 @@ async function loadData() {
     hideLoginScreen();
     document.getElementById('error-block').style.display = 'none';
     render();
+    // "Поступления" - на экране уже живые данные из основного payload (D.receipts, посчитаны
+    // Apps Script), это МГНОВЕННЫЙ фолбэк. В фоне, не блокируя загрузку страницы, пробуем
+    // подменить на свежий расчёт с сервера (2026-08-18, см. /api/receipts) - если сервер не
+    // ответил или вернул ошибку, тихо остаёмся на уже отрисованных данных, ничего не ломается.
+    if (D.role === 'admin') {
+      fetchReceiptsFromServer_().then(function(r) {
+        if (r && !r.error && D) { D.receipts = r; renderReceipts(); }
+      }).catch(function() {});
+    }
   } catch(e) {
     document.getElementById('error-block').style.display = 'block';
     document.getElementById('error-block').querySelector('b').textContent = 'Ошибка: ' + e.message;
@@ -6935,6 +6944,13 @@ function fetchClientAnalyticsFromServer_(params) {
 // (обычный путь через Apps Script), ничего не ломается для ещё не перенесённых месяцев.
 function fetchOrdersPeriodFromServer_(period) {
   return fetchFromYardApi_('/orders_period', { period: period }).then(function(r) {
+    return r.ok ? r.data : null;
+  }).catch(function() { return null; });
+}
+// "Поступления" с сервера (2026-08-18, см. /api/receipts) - null при любой проблеме, вызывающий
+// код в этом случае просто остаётся на D.receipts, посчитанном Apps Script при основной загрузке.
+function fetchReceiptsFromServer_() {
+  return fetchFromYardApi_('/receipts', {}).then(function(r) {
     return r.ok ? r.data : null;
   }).catch(function() { return null; });
 }

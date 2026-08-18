@@ -4305,6 +4305,25 @@ function createOrderPlanEntry_(personName, p) {
 function doGet(e) {
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
 
+  // ── ВРЕМЕННО (2026-08-18, повторная проверка после восстановления Фазы 1d) - УБРАТЬ.
+  if (e && e.parameter && e.parameter.action === 'diag_enable_server_calc') {
+    var descKey = e.parameter.key || '';
+    if (descKey !== '7f2a9c1e6b4d8035a1c9ef26b8d40317') {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    PropertiesService.getScriptProperties().setProperty('USE_SERVER_ORDERS_CALC', 'on');
+    var checkOn = PropertiesService.getScriptProperties().getProperty('USE_SERVER_ORDERS_CALC');
+    var freshCheck = verifyServerOrdersCalc();
+    var liveNow = getOrdersData(ss); // тот самый путь, которым реально пойдёт дашборд
+    return ContentService.createTextOutput(JSON.stringify({
+      ok: true, flagNow: checkOn, verify: freshCheck,
+      live_total_orders: liveNow.summary ? liveNow.summary.total_orders : null,
+      live_total_amount: liveNow.summary ? liveNow.summary.total_amount : null,
+      live_qualifies: liveNow.summary ? liveNow.summary.hired_margin_qualifies : null,
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+  // ── конец временной проверки ───────────────────────────────────────────────────────────────
+
   // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём.
   // Сначала пробуем свой токен сессии (живёт до 48ч, см. issueSessionToken_) - только если
   // его нет или он истёк, идём проверять Google id_token (тот живёт ~1 час, это уже требует

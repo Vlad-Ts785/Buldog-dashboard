@@ -4153,6 +4153,39 @@ function warmOrderPlanCache() {
 function doGet(e) {
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
 
+  // ── ВРЕМЕННО (2026-08-18, Фаза 1a/1c переноса зарплатной логики, см.
+  // plans/2026-08-18-payroll-logic-server-port.md) - УБРАТЬ после переноса.
+  if (e && e.parameter && e.parameter.action === 'export_manager_plans') {
+    var empKey = e.parameter.key || '';
+    if (empKey !== '7f2a9c1e6b4d8035a1c9ef26b8d40317') {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var plansSheet = ss.getSheetByName('Планы_менеджеров');
+    if (!plansSheet || plansSheet.getLastRow() < 2) {
+      return ContentService.createTextOutput(JSON.stringify({ rows: [] })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var plansData = plansSheet.getRange(2, 1, plansSheet.getLastRow() - 1, 3).getValues();
+    var plansRows = plansData.map(function(r) {
+      var mk = r[0] instanceof Date ? Utilities.formatDate(r[0], 'Europe/Moscow', 'yyyy-MM') : String(r[0] || '').trim();
+      return [mk, String(r[1] || '').trim(), Number(r[2]) || 0];
+    }).filter(function(r) { return r[0] && r[1]; });
+    return ContentService.createTextOutput(JSON.stringify({ rows: plansRows })).setMimeType(ContentService.MimeType.JSON);
+  }
+
+  // Полная сверка (Фаза 1c) - тот же getOrdersData()/getOrdersDataForPeriod(), что и живой
+  // action=orders_period, но без admin-сессии (секрет вместо неё). period опционален -
+  // если не передан, считает ТЕКУЩИЙ месяц (getOrdersData), иначе - getOrdersDataForPeriod.
+  if (e && e.parameter && e.parameter.action === 'diag_full_orders') {
+    var dfoKey = e.parameter.key || '';
+    if (dfoKey !== '7f2a9c1e6b4d8035a1c9ef26b8d40317') {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var dfoPeriod = e.parameter.period || '';
+    var dfoResult = dfoPeriod ? getOrdersDataForPeriod(ss, dfoPeriod) : getOrdersData(ss);
+    return ContentService.createTextOutput(JSON.stringify(dfoResult)).setMimeType(ContentService.MimeType.JSON);
+  }
+  // ── конец временных экспортов Фазы 1 ───────────────────────────────────────────────────────
+
   // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём.
   // Сначала пробуем свой токен сессии (живёт до 48ч, см. issueSessionToken_) - только если
   // его нет или он истёк, идём проверять Google id_token (тот живёт ~1 час, это уже требует

@@ -4153,37 +4153,6 @@ function warmOrderPlanCache() {
 function doGet(e) {
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
 
-  // ── ВРЕМЕННО: замер, где реально теряется время при смене периода (2026-08-18, Влад:
-  // "поттормаживала переключение по месяцам"). Не трогает боевые данные. УБРАТЬ после замера.
-  if (e && e.parameter && e.parameter.action === 'diag_timing_period') {
-    var dtpKey = e.parameter.key || '';
-    if (dtpKey !== '7f2a9c1e6b4d8035a1c9ef26b8d40317') {
-      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
-    }
-    var dtpPeriod = e.parameter.period || '2026-07';
-    var t = {};
-    var t0 = Date.now();
-    var staffData = getStaffData(ss);
-    t.getStaffData = Date.now() - t0; t0 = Date.now();
-    var parts = dtpPeriod.split('-').map(Number);
-    var monthStart = new Date(parts[0], parts[1] - 1, 1);
-    var monthEnd = new Date(parts[0], parts[1], 0);
-    var vehicles = aggregateFinHistoryForRange(ss, staffData, monthStart, monthEnd);
-    t.aggregateFinHistoryForRange = Date.now() - t0; t0 = Date.now();
-    var gp = getGrossProfitForPeriod(ss, dtpPeriod);
-    t.getGrossProfitForPeriod_total = Date.now() - t0; t0 = Date.now();
-    var periodOrders = getOrdersDataForPeriod(ss, dtpPeriod);
-    t.getOrdersDataForPeriod_total = Date.now() - t0; t0 = Date.now();
-    var fetchOnly = fetchOrdersRawFromServer_(dtpPeriod);
-    t.fetchOrdersRawFromServer_only = Date.now() - t0; t0 = Date.now();
-    var plansOnly = getManagerPlans_(ss, dtpPeriod);
-    t.getManagerPlans_only = Date.now() - t0; t0 = Date.now();
-    var sfp = (periodOrders && !periodOrders.error) ? computeSalesFaktPlan_(periodOrders) : null;
-    t.computeSalesFaktPlan_ = Date.now() - t0;
-    return ContentService.createTextOutput(JSON.stringify({ period: dtpPeriod, timingsMs: t, vehiclesCount: vehicles.length, plansCount: Object.keys(plansOnly).length })).setMimeType(ContentService.MimeType.JSON);
-  }
-  // ── конец временного замера ────────────────────────────────────────────────────────────────
-
   // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём.
   // Сначала пробуем свой токен сессии (живёт до 48ч, см. issueSessionToken_) - только если
   // его нет или он истёк, идём проверять Google id_token (тот живёт ~1 час, это уже требует

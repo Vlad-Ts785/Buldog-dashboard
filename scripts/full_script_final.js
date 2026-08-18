@@ -4082,18 +4082,6 @@ function warmOrderPlanCache() {
 function doGet(e) {
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
 
-  // ── ВРЕМЕННАЯ сверка: живой getReceiptsData() для сравнения с портом на сервере (2026-08-18) ─
-  // Только чтение, ничего не пишет. УБРАТЬ после сверки.
-  if (e && e.parameter && e.parameter.action === 'export_receipts_check') {
-    if ((e.parameter.key || '') !== '4c1e8fa2b6d09357c1e0a94fb2836d15') {
-      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
-    }
-    var ercOrders = getOrdersData(ss);
-    var ercReceipts = getReceiptsData(ss, ercOrders);
-    return ContentService.createTextOutput(JSON.stringify(ercReceipts)).setMimeType(ContentService.MimeType.JSON);
-  }
-  // ── конец временной сверки ────────────────────────────────────────────────────────────────
-
   // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём.
   // Сначала пробуем свой токен сессии (живёт до 48ч, см. issueSessionToken_) - только если
   // его нет или он истёк, идём проверять Google id_token (тот живёт ~1 час, это уже требует

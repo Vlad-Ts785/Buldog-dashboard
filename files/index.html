@@ -1690,6 +1690,16 @@ function fmtServerDate(iso){
     var d=new Date(iso);
     return isNaN(d.getTime())?String(iso||''):d.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'});
 }
+// Расчёты теперь видны ДРУГИМ людям (admin видит все, не только свои) - в отличие от старой
+// чисто-локальной localStorage-версии, где эти же строки могли атаковать только самого себя.
+// Откуда/куда/техника - свободный текст с клавиатуры менеджера, экранируем перед innerHTML,
+// иначе это готовый stored-XSS (сохранил адрес вроде "<img src=x onerror=...>" - выполнится в
+// браузере админа при следующем открытии вкладки).
+function escHtml_(s){
+    return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+        return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+}
 function renderServerHist(rows){
     var c=document.getElementById('clc-histList');
     if(!c)return;
@@ -1698,10 +1708,10 @@ function renderServerHist(rows){
         return '<div class="clc-list-item" style="cursor:default">'
             +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">'
             +'<strong style="color:var(--green);font-size:13px">'+totalTxt+'</strong>'
-            +'<span style="font-size:10px;color:var(--muted);white-space:nowrap">'+(r.manager||'—')+'</span>'
+            +'<span style="font-size:10px;color:var(--muted);white-space:nowrap">'+escHtml_(r.manager||'—')+'</span>'
             +'</div>'
-            +'<div class="clc-tech-spec" style="margin-top:4px">'+(r.load||'')+' → '+(r.unload||'')+'</div>'
-            +'<div style="font-size:10px;color:var(--muted);margin-top:2px">'+fmtServerDate(r.date)+' · '+(r.weight||0)+' т · '+(r.veh||'')+'</div>'
+            +'<div class="clc-tech-spec" style="margin-top:4px">'+escHtml_(r.load)+' → '+escHtml_(r.unload)+'</div>'
+            +'<div style="font-size:10px;color:var(--muted);margin-top:2px">'+fmtServerDate(r.date)+' · '+(Number(r.weight)||0)+' т · '+escHtml_(r.veh)+'</div>'
             +'</div>';
     }).join('');
 }
@@ -1720,7 +1730,7 @@ function updKpInfo(){var n=+(localStorage.getItem('yrd_calc_kp_num')||0);var el=
 // целиком в браузере без сервера сборки.
 function genKP(){
     var w=document.getElementById('clc-weight').value||'—',ln=document.getElementById('clc-len').value||'—',wh=document.getElementById('clc-wid').value||'—',h=document.getElementById('clc-hei').value||'—';
-    var la=document.getElementById('clc-loadAddr').value||'—',ua=document.getElementById('clc-unloadAddr').value||'—',total=document.getElementById('clc-totalPrice').textContent||'—';
+    var la=escHtml_(document.getElementById('clc-loadAddr').value||'—'),ua=escHtml_(document.getElementById('clc-unloadAddr').value||'—'),total=document.getElementById('clc-totalPrice').textContent||'—';
     if(total==='—'||total==='0 ₽'){toast('Сначала рассчитайте стоимость',1);return;}
     var vm={tral:'Трал',board:'Длинномер',panel:'Панелевоз',tral_crane:'Трал под кран',korito:'Трал-корыто',faymon:'Faymonville'};
     var vt0=document.getElementById('clc-vehType').value;

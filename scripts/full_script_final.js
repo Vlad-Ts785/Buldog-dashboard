@@ -4181,6 +4181,41 @@ function warmOrderPlanCache() {
 function doGet(e) {
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
 
+  // ── ВРЕМЕННО (2026-08-18, закрываем дыру июня - см. plans/2026-08-18-payroll-logic-server-
+  // port.md) - постраничный экспорт листа "Заказы_2026-06" (тот же формат, что июль-август,
+  // не урезанный как мегабаза январь-май). УБРАТЬ после переноса.
+  if (e && e.parameter && e.parameter.action === 'export_june_archive') {
+    var ejaKey = e.parameter.key || '';
+    if (ejaKey !== '7f2a9c1e6b4d8035a1c9ef26b8d40317') {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var juneSheet = ss.getSheetByName('Заказы_2026-06');
+    if (!juneSheet) {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'sheet_not_found' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var jLastRow = juneSheet.getLastRow();
+    var jLastCol = juneSheet.getLastColumn();
+    var jOffset = Math.max(1, parseInt((e.parameter.offset || '1'), 10));
+    var jLimit = Math.min(5000, parseInt((e.parameter.limit || '5000'), 10));
+    var jNumRows = Math.min(jLimit, jLastRow - jOffset + 1);
+    if (jNumRows <= 0) {
+      return ContentService.createTextOutput(JSON.stringify({ rows: [], nextOffset: null, lastRow: jLastRow, lastCol: jLastCol, done: true })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var jData = juneSheet.getRange(jOffset, 1, jNumRows, jLastCol).getValues();
+    var jRows = jData.map(function(r) {
+      return r.map(function(v) {
+        var looksLikeDate = v && typeof v === 'object' && typeof v.getFullYear === 'function';
+        return looksLikeDate ? Utilities.formatDate(v, 'Europe/Moscow', 'dd.MM.yyyy HH:mm:ss') : v;
+      });
+    });
+    var jNextOffset = jOffset + jNumRows;
+    return ContentService.createTextOutput(JSON.stringify({
+      rows: jRows, nextOffset: jNextOffset <= jLastRow ? jNextOffset : null,
+      lastRow: jLastRow, lastCol: jLastCol, done: jNextOffset > jLastRow,
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+  // ── конец временного экспорта июня ─────────────────────────────────────────────────────────
+
   // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём.
   // Сначала пробуем свой токен сессии (живёт до 48ч, см. issueSessionToken_) - только если
   // его нет или он истёк, идём проверять Google id_token (тот живёт ~1 час, это уже требует

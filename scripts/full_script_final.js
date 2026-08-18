@@ -4175,6 +4175,17 @@ function warmOrderPlanCache() {
 // НЕ трогает существующую автоматику планировки (masterEditRouter и т.п.) - только
 // ищет свободную пару строк на нужной дневной вкладке и пишет в неё. Подробности и
 // карта колонок - plans/2026-08-18-order-plan-create-orders.md.
+//
+// ВАЖНО (найдено живым тестом 2026-08-18, Влад заметил "выпадающих списков нет
+// вообще"): колонка A ("№ п/п") ПРОНУМЕРОВАНА ЗАРАНЕЕ шаблоном на весь
+// отформатированный диапазон (1..100 и т.п.) - НЕЗАВИСИМО от того, использована
+// строка или нет. Выпадающие списки/условное форматирование обрываются РОВНО там
+// же, где обрывается эта преднумерация (диагностика: строки с A=1..100 все имеют
+// data validation, строка сразу за последним номером - уже нет). Значит "свободная
+// строка" - это НЕ "A пустая", а "A уже пронумерована шаблоном, но B (менеджер)
+// ещё пусто". И номер заказа НЕ придумываем - берём готовый из A, не перезаписываем
+// колонку A вообще (это ещё и защищает N-формулу "ЗАЯВКА ДЛЯ ВОДИТЕЛЯ", которая
+// сама на A3 ссылается).
 var ORDER_PLAN_CREATE_MAX_ROW_ = 300; // тот же предел, что и у resetResidualBackgrounds в проекте планировки
 var ORDER_PLAN_WEEKDAYS_RU_ = ['воскресенье','понедельник','вторник','среда','четверг','пятница','суббота'];
 
@@ -4194,28 +4205,28 @@ function createOrderPlanEntry_(personName, p) {
   if (!lock.tryLock(10000)) return { error: 'Сейчас кто-то ещё создаёт заявку, попробуйте через несколько секунд' };
 
   try {
-    var colA = sheet.getRange(3, 1, ORDER_PLAN_CREATE_MAX_ROW_ - 2, 1).getValues();
-    var maxOrderNum = 0;
+    var ab = sheet.getRange(3, 1, ORDER_PLAN_CREATE_MAX_ROW_ - 2, 2).getValues(); // A и B
     var targetTopRow = null;
-    for (var i = 0; i < colA.length; i += 2) {
-      var v = colA[i][0];
-      if (v === '' || v === null) {
-        if (targetTopRow === null) targetTopRow = 3 + i;
-      } else {
-        var n = parseInt(v, 10);
-        if (!isNaN(n) && n > maxOrderNum) maxOrderNum = n;
+    var orderNumber = null;
+    for (var i = 0; i < ab.length; i += 2) {
+      var aVal = ab[i][0], bVal = ab[i][1];
+      var hasTemplateNumber = aVal !== '' && aVal !== null;
+      var isFree = bVal === '' || bVal === null;
+      if (hasTemplateNumber && isFree) {
+        targetTopRow = 3 + i;
+        orderNumber = aVal;
+        break;
       }
     }
     if (targetTopRow === null) {
-      return { error: 'На этот день не осталось свободных строк в таблице - обратитесь к администратору' };
+      return { error: 'На этот день не осталось свободных пронумерованных строк - обратитесь к администратору' };
     }
     // Перепроверка прямо перед записью - вдруг кто-то вписал заявку вручную за то
     // время, что мы искали строку (см. план, раздел "Как находим свободную строку").
-    if (sheet.getRange(targetTopRow, 1).getValue() !== '') {
+    if (sheet.getRange(targetTopRow, 2).getValue() !== '') {
       return { error: 'Строка уже занята, попробуйте ещё раз' };
     }
 
-    var orderNumber = maxOrderNum + 1;
     var bottomRow = targetTopRow + 1;
 
     // Дата - читаем из A1 вкладки (уже проставлена duplicateForNextMonth() при создании
@@ -4229,10 +4240,11 @@ function createOrderPlanEntry_(personName, p) {
       dateText = dd + '.' + mm + '.' + a1.getFullYear() + ' (' + ORDER_PLAN_WEEKDAYS_RU_[a1.getDay()] + ')';
     }
 
-    // Верхняя строка: A..K (11 колонок) - номер/менеджер/тип/заказчик/дата/груз/
-    // (пусто, "исполнитель" - не наше поле)/адреса/условия переработки/стоимость.
-    sheet.getRange(targetTopRow, 1, 1, 11).setValues([[
-      orderNumber, personName, String(p.equipType || ''), String(p.customer || ''),
+    // Колонку A НЕ трогаем - номер там уже стоит от шаблона. Пишем B..K
+    // (10 колонок) - менеджер/тип/заказчик/дата/груз/(пусто, "исполнитель" - не
+    // наше поле)/адреса/условия переработки/стоимость.
+    sheet.getRange(targetTopRow, 2, 1, 10).setValues([[
+      personName, String(p.equipType || ''), String(p.customer || ''),
       dateText, String(p.cargo || ''), '', String(p.loadAddress || ''), String(p.unloadAddress || ''),
       String(p.reworkTerms || ''), p.cost || '',
     ]]);
@@ -4244,6 +4256,21 @@ function createOrderPlanEntry_(personName, p) {
       String(p.documents || ''), String(p.loadContact || ''), String(p.unloadContact || ''),
       String(p.note || ''),
     ]]);
+
+    // Проверка ПОСЛЕ записи - живой тест 2026-08-18 показал, что колонка B
+    // ("Менеджер/Логист") имеет строгую ("reject") валидацию по списку реальных
+    // людей - запись значения не из списка молча отклоняется, строка остаётся
+    // полностью пустой, хотя setValues() не бросает исключение и функция дошла
+    // бы до "ok:true", соврав пользователю об успехе. Перечитываем B и C, чтобы
+    // поймать это, а не полагаться на то, что запись прошла раз не было ошибки.
+    var checkB = String(sheet.getRange(targetTopRow, 2).getValue()).trim();
+    var checkC = String(sheet.getRange(targetTopRow, 3).getValue()).trim();
+    if (checkB !== String(personName).trim()) {
+      return { error: 'Не удалось сохранить заявку - значение "' + personName + '" не проходит проверку в колонке "Менеджер/Логист". Обратитесь к администратору.' };
+    }
+    if (checkC !== String(p.equipType || '').trim()) {
+      return { error: 'Не удалось сохранить заявку - тип техники "' + p.equipType + '" не входит в список допустимых значений. Выберите вариант из списка.' };
+    }
 
     // Кэш дня теперь устарел - следующее чтение "Плана задания" должно увидеть
     // свежесозданную заявку, а не 4-часовой кэш (см. ORDER_PLAN_CACHE_TTL_SEC).
@@ -10334,12 +10361,11 @@ function runOrdersOnly() {
 
 
 // ВРЕМЕННЫЙ тест createOrderPlanEntry_ (удалить после проверки, 2026-08-18) -
-// пишет ОДНУ тестовую заявку на завтра (day=19) с явно фейковым заказчиком, чтобы
-// легко найти и удалить вручную. Запустить, затем открыть реальную таблицу
-// планировки и глазами свериться: та ли вкладка, тот ли номер, подставилась ли
-// дата, не съехали ли выпадающие списки/условное форматирование в этой строке.
+// пишет ОДНУ тестовую заявку на завтра (day=19) с явно фейковым заказчиком (но
+// РЕАЛЬНЫМ именем менеджера - "Тестовый Тест" не проходил валидацию колонки B,
+// см. комментарий в createOrderPlanEntry_), чтобы легко найти и удалить вручную.
 function testCreateOrderPlanEntry() {
-  var result = createOrderPlanEntry_('Тестовый Тест', {
+  var result = createOrderPlanEntry_('Цегельников Вячеслав Владимирович', {
     day: '19',
     equipType: 'Трал',
     customer: 'ТЕСТ УДАЛИТЬ ЭТУ СТРОКУ',
@@ -10357,4 +10383,15 @@ function testCreateOrderPlanEntry() {
     time: '10:00',
   });
   Logger.log(JSON.stringify(result, null, 2));
+}
+
+// ВРЕМЕННАЯ очистка (удалить после использования, 2026-08-18) - стирает
+// конкретно строки 93-94 вкладки "19" (второй тестовый прогон).
+function cleanupOrderPlanBadTestRows2() {
+  var resolved = resolveOrderPlanSpreadsheet_();
+  if (resolved.error) { Logger.log(resolved.error); return; }
+  var sheet = resolved.planSs.getSheetByName('19');
+  if (!sheet) { Logger.log('Вкладка 19 не найдена'); return; }
+  sheet.getRange(93, 2, 2, 9).clearContent(); // B..J, оставляем A (номер шаблона)
+  Logger.log('Строки 93-94 (кроме номера в A) вкладки "19" очищены.');
 }

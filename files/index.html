@@ -1410,6 +1410,16 @@ var ESC_FAR_BASE=20000,ESC_FAR_MIN=200;
 var ESC_CAT={1:[55,50,45],2:[100,90,80]}; // ₽/км по полосам [200-500, 501-1000, 1001-2000]; 3 кат. — индивидуально
 function escortBand(d){return d<=500?0:d<=1000?1:2;}
 function tralByMass(w){if(w<=20)return P.tral;if(w<=25)return P.t20;if(w<=34)return P.t25;if(w<=44)return P.t35;if(w<=49)return P.t45;if(w<=59)return P.t50;return null;}
+// Влад, 2026-08-17: "выбрали буровую 110т - калькулятор должен сам подобрать категорию
+// Faymonville под вес, а не оставлять что было выбрано раньше". null - вне каталога (>120т),
+// такое согласуется индивидуально, авторасчёта нет.
+function faymonCatByMass(w){if(w<=75)return '60-75';if(w<=100)return '75-100';if(w<=120)return '100-120';return null;}
+function syncFaymonCat(){
+    if(document.getElementById('clc-vehType').value!=='faymon')return;
+    var w=+document.getElementById('clc-weight').value||0,fc=faymonCatByMass(w);
+    if(fc)document.getElementById('clc-faymonCat').value=fc;
+    else toast('Свыше 120 т - категория и цена индивидуальны, согласуйте с руководителем',1);
+}
 function rn(v){if(!v||v===0)return 0;var s=v<0?-1:1,n=Math.abs(v);if(n<1000)return s*Math.round(n/100)*100;if(n<10000)return s*Math.round(n/500)*500;if(n<100000)return s*Math.round(n/1000)*1000;if(n<1000000)return s*Math.round(n/5000)*5000;return s*Math.round(n/10000)*10000;}
 var MSK_LAT=55.7557,MSK_LON=37.6176,SAD_R=2.8,FAR_R=200;
 function ptDist(la1,lo1,la2,lo2){var R=6371,dp=(la2-la1)*Math.PI/180,dl=(lo2-lo1)*Math.PI/180,a=Math.sin(dp/2)*Math.sin(dp/2)+Math.cos(la1*Math.PI/180)*Math.cos(la2*Math.PI/180)*Math.sin(dl/2)*Math.sin(dl/2);return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));}
@@ -1561,7 +1571,7 @@ async function revG(p,t){try{var r=await fetch('https://nominatim.openstreetmap.
 function getLoc(t){if(!navigator.geolocation){toast('Геолокация недоступна',1);return;}navigator.geolocation.getCurrentPosition(function(p){setP(t,L.latLng(p.coords.latitude,p.coords.longitude));},function(){toast('Не удалось',1);});}
 function fltr(g){if(g){document.querySelectorAll('.clc-page .tab-btn').forEach(function(el){el.classList.remove('active');});if(typeof event!=='undefined'&&event&&event.target&&event.target.classList)event.target.classList.add('active');}var s=document.getElementById('clc-techSearch').value.toLowerCase(),ag=g||'all',f=TECH;if(ag!=='all')f=f.filter(function(t){return t.g===ag;});if(s)f=f.filter(function(t){return t.n.toLowerCase().indexOf(s)>=0;});var c=document.getElementById('clc-techList');if(!f.length){c.innerHTML='<p style="color:var(--muted);text-align:center;padding:20px;font-size:13px;">Ничего не найдено</p>';return;}c.innerHTML=f.map(function(t){var idx=TECH.indexOf(t);return '<div class="clc-list-item" onclick="Clc.selTech('+idx+')"><div class="clc-tech-name">'+t.n+'</div><div class="clc-tech-spec"><span>'+t.w+' т</span><span>'+t.l+'×'+t.d+'×'+t.h+' м</span><span>'+t.m+'</span></div></div>';}).join('');}
 function selTech(i){if(i<0||i>=TECH.length)return;var t=TECH[i];document.getElementById('clc-weight').value=t.w;document.getElementById('clc-len').value=t.l;document.getElementById('clc-wid').value=t.d;document.getElementById('clc-hei').value=t.h;document.getElementById('clc-vehType').value=t.w>59?'faymon':'tral';document.getElementById('clc-cargoType').value=(t.w>20||t.l>13.6||t.d>2.55||t.h>4)?'negabarit':'gabarit';vhCh();calc();toast('Загружено: '+t.n);}
-function onWChange(){var w=+document.getElementById('clc-weight').value||0;if(w>20&&document.getElementById('clc-vehType').value==='board'){document.getElementById('clc-vehType').value='tral';toast('⚠️ Длинномер только до 20 т');}if(w>20&&document.getElementById('clc-vehType').value==='panel'){document.getElementById('clc-vehType').value='tral';toast('⚠️ Панелевоз только до 20 т');}calc();}
+function onWChange(){var w=+document.getElementById('clc-weight').value||0;if(w>20&&document.getElementById('clc-vehType').value==='board'){document.getElementById('clc-vehType').value='tral';toast('⚠️ Длинномер только до 20 т');}if(w>20&&document.getElementById('clc-vehType').value==='panel'){document.getElementById('clc-vehType').value='tral';toast('⚠️ Панелевоз только до 20 т');}syncFaymonCat();calc();}
 function vhCh(){var vt=document.getElementById('clc-vehType').value;document.getElementById('clc-faymonGrp').style.display=vt==='faymon'?'block':'none';var kg=vt==='korito';document.getElementById('clc-koritoGrp').style.display=kg?'block':'none';document.getElementById('clc-koritoExtGrp').style.display=kg?'block':'none';onWChange();}
 function toggleManual(){document.getElementById('clc-manualKmBox').style.display=document.getElementById('clc-manualKm').checked?'grid':'none';calc();}
 function calc(){
@@ -1624,58 +1634,149 @@ function calc(){
     document.getElementById('clc-bdNeg').textContent=neg?(esc?esc.toLocaleString()+' ₽'+(escNote?' ('+escNote+')':''):(escNote||'0 ₽')):'0 ₽';
     document.getElementById('clc-bdTotal').textContent=total.toLocaleString()+' ₽';
 }
-function saveCalc(){var e={id:Date.now(),dt:new Date().toLocaleString('ru-RU'),load:document.getElementById('clc-loadAddr').value||'—',unload:document.getElementById('clc-unloadAddr').value||'—',dist:d2,w:document.getElementById('clc-weight').value,total:document.getElementById('clc-totalPrice').textContent};hist.unshift(e);if(hist.length>30)hist.pop();localStorage.setItem('yrd_calc_history',JSON.stringify(hist));rendH();toast('✅ Сохранён');}
+// Сохраняет локально (мгновенно, как раньше) И отправляет на сервер (Влад, 2026-08-17: "должен
+// сохранять на сервер расчёты сделанные менеджером и расчёты именно менеджера кто сделал
+// расчёт"). Сервер сам определяет автора по id_token (лист "Доступ", тот же механизм, что и
+// везде в дашборде) - имя менеджера не берётся из формы, его нельзя подделать с клиента.
+// Сетевая ошибка не должна ронять локальное сохранение - apiSaveToServer() сама глотает свои
+// ошибки (см. ниже), calc-toast про сервер отдельно не показываем, чтобы не путать менеджера
+// (для него важно, что расчёт сохранён - технические детали "долетело ли до Sheets" неважны).
+function saveCalc(){
+    var e={id:Date.now(),dt:new Date().toLocaleString('ru-RU'),load:document.getElementById('clc-loadAddr').value||'—',unload:document.getElementById('clc-unloadAddr').value||'—',dist:d2,w:document.getElementById('clc-weight').value,total:document.getElementById('clc-totalPrice').textContent};
+    hist.unshift(e);if(hist.length>30)hist.pop();
+    localStorage.setItem('yrd_calc_history',JSON.stringify(hist));
+    rendH();
+    toast('✅ Сохранён');
+    saveCalcToServer_();
+}
+function saveCalcToServer_(){
+    if(typeof apiFetchJson!=='function')return; // основной скрипт дашборда ещё не готов - не должно случаться, но не роняем калькулятор
+    var manual=document.getElementById('clc-manualKm').checked;
+    var a1=manual?(+document.getElementById('clc-mkm1').value||0):d1;
+    var a2=manual?(+document.getElementById('clc-mkm2').value||0):d2;
+    var a3=manual?(+document.getElementById('clc-mkm3').value||0):d3;
+    var vt=document.getElementById('clc-vehType').value;
+    var vm={tral:'Трал',board:'Длинномер',panel:'Панелевоз',tral_crane:'Трал под кран',korito:'Трал-корыто',faymon:'Faymonville'};
+    var vehLabel=(vm[vt]||vt)+(vt==='faymon'?' '+document.getElementById('clc-faymonCat').value+' т':'');
+    var dims=document.getElementById('clc-len').value+'×'+document.getElementById('clc-wid').value+'×'+document.getElementById('clc-hei').value+' м';
+    var totalNum=(document.getElementById('clc-totalPrice').textContent||'').replace(/[^\d]/g,'');
+    apiFetchJson({
+        action:'calc_save',
+        load:document.getElementById('clc-loadAddr').value||'',
+        unload:document.getElementById('clc-unloadAddr').value||'',
+        km1:a1,km2:a2,km3:a3,
+        weight:document.getElementById('clc-weight').value||0,
+        dims:dims,
+        cargo:document.getElementById('clc-cargoType').value,
+        veh:vehLabel,
+        trips:document.getElementById('clc-trips').value||1,
+        total:totalNum
+    }).then(function(){ loadServerHistory(); }).catch(function(){ /* офлайн/ошибка сети - локальная копия уже сохранена, не мешаем работе */ });
+}
+// Список расчётов с сервера - себя (manager/logist) или всех (admin, видит поле "Менеджер" у
+// каждой строки), см. action=calc_history в Apps Script. Подменяет локальный список, только
+// если сервер реально ответил (иначе оставляем то, что уже отрисовал rendH() из localStorage -
+// лучше локальные данные, чем пустой экран при недоступном Apps Script).
+function loadServerHistory(){
+    if(typeof apiFetchJson!=='function')return;
+    apiFetchJson({action:'calc_history'}).then(function(data){
+        if(data&&data.history&&data.history.length)renderServerHist(data.history);
+    }).catch(function(){});
+}
+function fmtServerDate(iso){
+    var d=new Date(iso);
+    return isNaN(d.getTime())?String(iso||''):d.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'});
+}
+function renderServerHist(rows){
+    var c=document.getElementById('clc-histList');
+    if(!c)return;
+    c.innerHTML=rows.map(function(r){
+        var totalTxt=r.total?Number(r.total).toLocaleString()+' ₽':'—';
+        return '<div class="clc-list-item" style="cursor:default">'
+            +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">'
+            +'<strong style="color:var(--green);font-size:13px">'+totalTxt+'</strong>'
+            +'<span style="font-size:10px;color:var(--muted);white-space:nowrap">'+(r.manager||'—')+'</span>'
+            +'</div>'
+            +'<div class="clc-tech-spec" style="margin-top:4px">'+(r.load||'')+' → '+(r.unload||'')+'</div>'
+            +'<div style="font-size:10px;color:var(--muted);margin-top:2px">'+fmtServerDate(r.date)+' · '+(r.weight||0)+' т · '+(r.veh||'')+'</div>'
+            +'</div>';
+    }).join('');
+}
 function delCalc(id){if(!confirm('Удалить?'))return;hist=hist.filter(function(e){return e.id!==id;});localStorage.setItem('yrd_calc_history',JSON.stringify(hist));rendH();toast('🗑️ Удалён');}
 function rendH(){var c=document.getElementById('clc-histList');if(!hist.length){c.innerHTML='<p style="color:var(--muted);text-align:center;padding:30px 0;">Нет сохранённых расчётов</p>';return;}c.innerHTML=hist.map(function(h){return '<div class="clc-list-item" onclick="Clc.loadH('+h.id+')" style="position:relative;"><div style="display:flex;justify-content:space-between;align-items:center;"><strong style="color:var(--green);font-size:13px;">'+h.total+'</strong><button class="clc-btn clc-btn-ghost clc-btn-sm" onclick="event.stopPropagation();Clc.delCalc('+h.id+')" style="padding:2px 6px;font-size:10px;">✕</button></div><div style="font-size:12px;color:var(--muted);">'+h.dist+' км · '+h.w+' т · '+(h.load||'').substring(0,20)+'...</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">'+h.dt+'</div></div>';}).join('');}
 function loadH(id){var h=hist.find(function(e){return e.id===id;});if(!h)return;document.getElementById('clc-loadAddr').value=h.load||'';document.getElementById('clc-unloadAddr').value=h.unload||'';toast('📂 Загружен');}
 function toast(m,e){var t=document.getElementById('clc-toast');t.textContent=m;t.className='clc-toast'+(e?' clc-toast-err':'');t.classList.add('show');setTimeout(function(){t.classList.remove('show');},3000);}
 function updKpInfo(){var n=+(localStorage.getItem('yrd_calc_kp_num')||0);var el=document.getElementById('clc-kpInfo');if(el)el.textContent='📄 Выдано КП: '+n+' · следующий № КП-'+String(n+1).padStart(4,'0');}
+// Бланк КП переделан под фирменный стиль официальных документов компании (Влад, 2026-08-17:
+// "форма отвратительная... на бланке фирмы как в приказах, аккуратное содержательное КП") -
+// та же шапка (наименование/ОГРН/ИНН/КПП/адрес, разделительная черта), что и в приказах
+// ООО «БУЛЬДОГ» (см. .business/products/pricing.md и Приказы/*.md), Times New Roman, без
+// декоративных золотых рамок/бейджей прежней версии. Логика расчёта самого КП не менялась -
+// переделана только вёрстка. Остаётся тем же трюком "HTML под видом .doc" (Word открывает
+// такой файл и применяет разметку) - реальный .docx через python-docx тут не собрать, движок
+// целиком в браузере без сервера сборки.
 function genKP(){
     var w=document.getElementById('clc-weight').value||'—',ln=document.getElementById('clc-len').value||'—',wh=document.getElementById('clc-wid').value||'—',h=document.getElementById('clc-hei').value||'—';
     var la=document.getElementById('clc-loadAddr').value||'—',ua=document.getElementById('clc-unloadAddr').value||'—',total=document.getElementById('clc-totalPrice').textContent||'—';
     if(total==='—'||total==='0 ₽'){toast('Сначала рассчитайте стоимость',1);return;}
     var vm={tral:'Трал',board:'Длинномер',panel:'Панелевоз',tral_crane:'Трал под кран',korito:'Трал-корыто',faymon:'Faymonville'};
-    var vt=vm[document.getElementById('clc-vehType').value]||'Трал',neg=document.getElementById('clc-cargoType').value==='negabarit',esc=document.getElementById('clc-bdNeg').textContent;
+    var vt0=document.getElementById('clc-vehType').value;
+    var vt=(vm[vt0]||'Трал')+(vt0==='faymon'?' '+document.getElementById('clc-faymonCat').value+' т':'');
+    var neg=document.getElementById('clc-cargoType').value==='negabarit',esc=document.getElementById('clc-bdNeg').textContent;
     var dt=new Date().toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'});
     var kpNum=(+(localStorage.getItem('yrd_calc_kp_num')||0))+1;localStorage.setItem('yrd_calc_kp_num',kpNum);var numStr='КП-'+String(kpNum).padStart(4,'0');
-    var rt='База '+BASE.name+' → '+la+' → '+ua+' · порожний '+LK.a1+' + груз '+LK.a2+' + порожний '+LK.a3+' км';
+    var manualNow=document.getElementById('clc-manualKm').checked;
+    var ra1=manualNow?(+document.getElementById('clc-mkm1').value||0):d1;
+    var ra2=manualNow?(+document.getElementById('clc-mkm2').value||0):d2;
+    var ra3=manualNow?(+document.getElementById('clc-mkm3').value||0):d3;
+    var managerName=(typeof D!=='undefined'&&D&&(D.managerName||D.logistName))||'';
     var htm='<!DOCTYPE html><html><head><meta charset="UTF-8"><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><style>';
-    htm+='@page{margin:1.4cm 1.6cm}body{font-family:Arial,sans-serif;font-size:10.5pt;color:#1a1a1a;margin:0}';
-    htm+='.h{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #d4a843;padding-bottom:12px;margin-bottom:14px}';
-    htm+='.cn{font-size:20pt;font-weight:900;color:#0a1628;letter-spacing:1px}.cn span{color:#d4a843}';
-    htm+='.cd{font-size:7.5pt;color:#777;line-height:1.35;margin-top:4px}';
-    htm+='.hr{text-align:right;font-size:8.5pt;color:#555;white-space:nowrap}.hr b{font-size:11pt;color:#0a1628}';
-    htm+='h1{font-size:14pt;font-weight:700;color:#0a1628;margin:0 0 8px}';
-    htm+='.off{display:flex;justify-content:space-between;align-items:center;padding:10px 18px;border:2px solid #d4a843;border-radius:10px;margin:8px 0 12px;background:#fffdf7}';
-    htm+='.off .lb{font-size:8.5pt;text-transform:uppercase;letter-spacing:1.5px;color:#777}.off .pr{font-size:24pt;font-weight:900;color:#d4a843}';
-    htm+='table{width:100%;border-collapse:collapse;margin:4px 0 10px}th{text-align:left;padding:7px 10px;border-bottom:1.5px solid #d4a843;font-size:8pt;text-transform:uppercase;color:#777}td{padding:7px 10px;border-bottom:1px solid #eee;font-size:10pt;vertical-align:top}';
-    htm+='.tot td{font-size:12pt;font-weight:800;color:#d4a843;border-top:2px solid #d4a843;border-bottom:none}';
-    htm+='.bn{display:inline-block;padding:1px 8px;background:#fff3e0;color:#e65100;border-radius:4px;font-size:8pt;font-weight:700}';
-    htm+='.meta{font-size:9.5pt;color:#444;line-height:1.65;margin:8px 0}.meta b{color:#0a1628}';
-    htm+='.why{font-size:9pt;color:#2563eb;background:#f0f4ff;border-radius:8px;padding:8px 14px;margin:10px 0;border-left:4px solid #3b82f6}';
-    htm+='.ft{margin-top:14px;padding-top:10px;border-top:1px solid #ddd;font-size:8pt;color:#888;display:flex;justify-content:space-between}';
+    htm+='@page{margin:2cm 2cm 2cm 2.2cm}body{font-family:"Times New Roman",Times,serif;font-size:12pt;color:#111;line-height:1.35;margin:0}';
+    htm+='.hh{text-align:center;font-weight:700;font-size:13pt;letter-spacing:.2px}';
+    htm+='.hr2{text-align:center;font-size:10pt;color:#333;margin-top:4px;line-height:1.5}';
+    htm+='.rule{border:none;border-top:1.5pt solid #111;margin:10pt 0 16pt}';
+    htm+='.doctitle{text-align:center;font-weight:700;font-size:13pt;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4pt}';
+    htm+='.dateline{display:flex;justify-content:space-between;font-size:11pt;margin:2pt 0 16pt}';
+    htm+='table{width:100%;border-collapse:collapse;margin:8pt 0 14pt}';
+    htm+='td,th{border:1pt solid #333;padding:6pt 9pt;font-size:11pt;vertical-align:top;text-align:left}';
+    htm+='th{background:#f0f0f0;font-weight:700;font-size:9.5pt;text-transform:uppercase;letter-spacing:.3px}';
+    htm+='.totrow td{font-weight:700;font-size:12.5pt}';
+    htm+='.meta p{margin:5pt 0;font-size:11pt}';
+    htm+='.sign{margin-top:28pt;font-size:11pt}';
+    htm+='.sign .line{display:flex;align-items:flex-end;gap:14pt;margin-top:24pt;max-width:420pt}';
+    htm+='.sign .fio{border-bottom:1pt solid #111;min-width:190pt;display:inline-block}';
+    htm+='.foot{margin-top:30pt;padding-top:8pt;border-top:0.75pt solid #999;font-size:8.5pt;color:#555;text-align:center}';
     htm+='</style></head><body>';
-    htm+='<div class="h"><div><div class="cn"><span>ЯРД</span></div><div class="cd">ООО «БУЛЬДОГ» · ОГРН 1177746503220 · ИНН 7702417768 / КПП 773301001<br>125466, г. Москва, ул. Юровская, 92, подвал пом. I, ком. 40, РМ 1г · +7 (495) 222-62-60</div></div>';
-    htm+='<div class="hr"><b>'+numStr+'</b><br>от '+dt+'<br>На №____ от ____</div></div>';
-    htm+='<h1>Коммерческое предложение на перевозку</h1>';
-    htm+='<div class="off"><div class="lb">Стоимость перевозки, с НДС</div><div class="pr">'+total+'</div></div>';
-    htm+='<table><tr><th style="width:6%">№</th><th>Наименование услуги</th><th style="width:14%">Кол-во</th><th style="width:22%">Сумма</th></tr>';
-    htm+='<tr><td>1</td><td><b>Транспортные услуги</b><br><span style="font-size:8.5pt;color:#666">'+vt+' · '+la+' → '+ua+'</span>'+(neg?' <span class="bn">НЕГАБАРИТ</span>':'')+'</td><td>1 ед.</td><td><b>'+total+'</b></td></tr>';
-    htm+=(neg&&esc&&esc!=='0 ₽'&&esc.indexOf('—')<0?'<tr><td></td><td style="color:#666;font-size:9pt">в т.ч. сопровождение негабарита</td><td></td><td style="font-size:9pt">'+esc+'</td></tr>':'');
-    htm+='<tr class="tot"><td colspan="3" style="text-align:right">ИТОГО к оплате:</td><td>'+total+'</td></tr></table>';
-    htm+='<div class="meta"><b>Груз:</b> '+w+' т · '+ln+'×'+wh+'×'+h+' м'+(neg?' · негабарит':'')+' &nbsp;|&nbsp; <b>Техника:</b> '+vt+'<br><b>Маршрут:</b> '+rt+'<br><b>Условия оплаты:</b> предоплата / отсрочка по договору &nbsp;|&nbsp; <b>Срок подачи:</b> 1–3 дня</div>';
-    htm+='<div class="why">✅ Парк 50+ единиц · 10 000+ перевозок · страхование груза · полный пакет документов</div>';
-    htm+='<p style="font-size:9.5pt;color:#444;margin:6px 0">С уважением, команда ООО «БУЛЬДОГ» · +7 (495) 222-62-60</p>';
-    htm+='<div class="ft"><div><b>ООО «БУЛЬДОГ»</b> · ОГРН 1177746503220 · ИНН 7702417768</div><div>'+numStr+' от '+dt+'</div></div>';
+    htm+='<div class="hh">ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ «БУЛЬДОГ»</div>';
+    htm+='<div class="hr2">ОГРН 1177746503220, ИНН 7702417768, КПП 773301001<br>125466, г Москва, вн.тер.г муниципальный округ Куркино, ул Юровская, 92, подвал помещ. I, ком. 40, РМ 1г · +7 (495) 222-62-60</div>';
+    htm+='<hr class="rule">';
+    htm+='<div class="doctitle">Коммерческое предложение № '+numStr+'</div>';
+    htm+='<div class="dateline"><span>г. Москва</span><span>'+dt+'</span></div>';
+    htm+='<table><tr><th style="width:30%">Параметр</th><th>Значение</th></tr>';
+    htm+='<tr><td>Маршрут</td><td>'+la+' &#8594; '+ua+'</td></tr>';
+    htm+='<tr><td>Пробег</td><td>порожний '+ra1+' км + с грузом '+ra2+' км + порожний '+ra3+' км</td></tr>';
+    htm+='<tr><td>Техника</td><td>'+vt+(neg?' (негабаритный груз)':'')+'</td></tr>';
+    htm+='<tr><td>Параметры груза</td><td>'+w+' т, '+ln+'&times;'+wh+'&times;'+h+' м</td></tr>';
+    htm+=(neg&&esc&&esc!=='0 ₽'&&esc.indexOf('—')<0?'<tr><td>в т.ч. сопровождение негабарита</td><td>'+esc+'</td></tr>':'');
+    htm+='<tr class="totrow"><td>Стоимость перевозки, с НДС</td><td>'+total+'</td></tr>';
+    htm+='</table>';
+    htm+='<div class="meta">';
+    htm+='<p><b>Условия оплаты:</b> предоплата или отсрочка платежа - по договору.</p>';
+    htm+='<p><b>Срок подачи техники:</b> 1-3 дня с момента согласования заявки.</p>';
+    htm+='<p><b>В стоимость входит:</b> подача техники к месту погрузки, страхование груза, полный пакет закрывающих документов.</p>';
+    htm+='</div>';
+    htm+='<div class="sign"><div class="line"><span>Менеджер'+(managerName?(' &mdash; '+managerName):'')+'</span><span class="fio">&nbsp;</span></div></div>';
+    htm+='<div class="foot">ООО «БУЛЬДОГ» &middot; '+numStr+' от '+dt+' &middot; +7 (495) 222-62-60 &middot; Предложение действительно 5 рабочих дней</div>';
     htm+='</body></html>';
     var blob=new Blob(['\uFEFF'+htm],{type:'application/msword;charset=utf-8'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download=numStr+'_Бульдог_'+new Date().toISOString().slice(0,10)+'.doc';document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);kpLog.unshift({num:numStr,dt:new Date().toLocaleString('ru-RU'),route:la+' → '+ua,total:total,veh:vt});if(kpLog.length>200)kpLog.pop();localStorage.setItem('yrd_calc_kp_log',JSON.stringify(kpLog));updKpInfo();toast('✅ '+numStr+' готов');
 }
 rendH();fltr('all');calc();updKpInfo();
 
-var clcMapInited=false;
+var clcMapInited=false,clcHistLoadedOnce=false;
 function initPage(){
   if(!clcMapInited){ initMap(); clcMapInited=true; }
   else if(map){ setTimeout(function(){ map.invalidateSize(); }, 50); }
+  if(!clcHistLoadedOnce){ clcHistLoadedOnce=true; loadServerHistory(); }
 }
 
 window.Clc = {

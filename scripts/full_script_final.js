@@ -3521,6 +3521,63 @@ function verifyGoogleToken_(idToken) {
   }
 }
 
+// ── СЕССИЯ НА 1-2 СУТОК ПОВЕРХ GOOGLE-ЛОГИНА (2026-08-17, Влад: "постоянно раз в час требует
+// перезахода... один раз залогинились - день-два никто не трогает") ────────────────────────
+// Google id_token живёт ~1 час - это срок жизни ОТ GOOGLE, мы его не контролируем. Вместо того
+// чтобы гонять пользователя обратно в Google каждый час, после первой успешной проверки
+// id_token выдаём СВОЙ подписанный токен на SESSION_TOKEN_TTL_MS - фронтенд дальше ходит по
+// нему, Google трогаем заново только когда истёк. Роль/доступ (лист "Доступ") по-прежнему
+// проверяется на КАЖДЫЙ запрос через getAccessRole_ - длинная сессия влияет только на то, что
+// не нужно повторно подтверждать личность через Google, а не на то, есть ли у email доступ
+// прямо сейчас (отозвать доступ - как и раньше, просто удалить строку из "Доступ", сработает
+// мгновенно и для уже выданных токенов сессии).
+var SESSION_TOKEN_TTL_MS = 48 * 60 * 60 * 1000; // "день-два"
+
+function getSessionSecret_() {
+  var props = PropertiesService.getScriptProperties();
+  var secret = props.getProperty('SESSION_SECRET');
+  if (!secret) {
+    // Генерируем сами при первом обращении - не нужно заводить руками, как TELEGRAM_TOKEN.
+    secret = Utilities.getUuid() + Utilities.getUuid();
+    props.setProperty('SESSION_SECRET', secret);
+  }
+  return secret;
+}
+
+function issueSessionToken_(email) {
+  var payload = JSON.stringify({ email: email, exp: Date.now() + SESSION_TOKEN_TTL_MS });
+  var payloadB64 = Utilities.base64EncodeWebSafe(payload);
+  var sig = Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(payloadB64, getSessionSecret_()));
+  return payloadB64 + '.' + sig;
+}
+
+// Сравнение строк без раннего выхода на первом несовпадении - иначе время сравнения выдаёт,
+// сколько первых байт подписи угаданы верно (классический timing-канал для HMAC-проверки).
+function constantTimeEquals_(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  var diff = 0;
+  for (var i = 0; i < a.length; i++) diff |= (a.charCodeAt(i) ^ b.charCodeAt(i));
+  return diff === 0;
+}
+
+// Возвращает email из валидного токена сессии, иначе null (нет токена, битая подпись, истёк).
+// Никогда не бросает исключение - вызывающий код просто откатывается на проверку id_token.
+function verifySessionToken_(token) {
+  if (!token || token.indexOf('.') === -1) return null;
+  var parts = token.split('.');
+  var payloadB64 = parts[0], sig = parts[1];
+  if (!payloadB64 || !sig) return null;
+  var expectedSig = Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(payloadB64, getSessionSecret_()));
+  if (!constantTimeEquals_(sig, expectedSig)) return null;
+  try {
+    var payload = JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(payloadB64)).getDataAsString());
+    if (!payload.email || !payload.exp || payload.exp < Date.now()) return null;
+    return String(payload.email).trim().toLowerCase();
+  } catch (parseErr) {
+    return null;
+  }
+}
+
 // Ищет email в листе "Доступ", возвращает {name, role} или null.
 function getAccessRole_(ss, email) {
   const sheet = ss.getSheetByName('Доступ');
@@ -4025,9 +4082,14 @@ function warmOrderPlanCache() {
 function doGet(e) {
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
 
-  // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём
+  // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём.
+  // Сначала пробуем свой токен сессии (живёт до 48ч, см. issueSessionToken_) - только если
+  // его нет или он истёк, идём проверять Google id_token (тот живёт ~1 час, это уже требует
+  // повторного клика "Войти через Google" на фронтенде).
+  var sessionToken = e && e.parameter ? (e.parameter.session_token || '') : '';
   var idToken = e && e.parameter ? (e.parameter.id_token || '') : '';
-  var email = verifyGoogleToken_(idToken);
+  var email = sessionToken ? verifySessionToken_(sessionToken) : null;
+  if (!email) email = verifyGoogleToken_(idToken);
   if (!email) {
     return ContentService
       .createTextOutput(JSON.stringify({ error: 'Не авторизован', needLogin: true }))
@@ -4039,6 +4101,11 @@ function doGet(e) {
       .createTextOutput(JSON.stringify({ error: 'У этого аккаунта нет доступа к дашборду', needLogin: true }))
       .setMimeType(ContentService.MimeType.JSON);
   }
+  // Скользящее окно - каждый успешный заход продлевает сессию ещё на 48ч от текущего момента.
+  // Кладём в ответ только у трёх "полных" загрузок страницы ниже (admin/manager/logist) -
+  // этого достаточно, фронтенд читает токен один раз при загрузке и использует дальше для
+  // всех запросов, включая мелкие action=... (которым сам токен в ответе не нужен).
+  var freshSessionToken = issueSessionToken_(email);
 
   try {
     // Отдельный endpoint для истории по машинам (тяжёлые данные, грузим лениво) - только admin
@@ -4480,14 +4547,14 @@ function doGet(e) {
     // Менеджер - только его собственные данные, без доступа к остальному
     if (access.role === 'manager') {
       return ContentService
-        .createTextOutput(JSON.stringify(getManagerView_(ss, access.name)))
+        .createTextOutput(JSON.stringify(Object.assign(getManagerView_(ss, access.name), { session_token: freshSessionToken })))
         .setMimeType(ContentService.MimeType.JSON);
     }
 
     // Логист (2026-08-10) - та же логика, что и manager выше, но своя урезанная выдача
     if (access.role === 'logist') {
       return ContentService
-        .createTextOutput(JSON.stringify(getLogistView_(ss, access.name)))
+        .createTextOutput(JSON.stringify(Object.assign(getLogistView_(ss, access.name), { session_token: freshSessionToken })))
         .setMimeType(ContentService.MimeType.JSON);
     }
 
@@ -4497,6 +4564,7 @@ function doGet(e) {
       {
         updated: new Date().toISOString(),
         role:    'admin',
+        session_token: freshSessionToken,
         // Живые поля - НЕ кэшируются в runAll() (см. buildHeavyMainPayload_). Штатка -
         // "живой документ" (CLAUDE.md), её правят руками вне расписания runAll() - если
         // закэшировать статус машины/ремонты на 3 часа, правки будут "зависать", это
@@ -7908,20 +7976,75 @@ function dedupeJuneArchive() { return dedupeArchive('2026-06'); }
 // ── API ДЛЯ ДАШБОРДА ─────────────────────────────────────────
 // Вызывается из doGet() основного скрипта: orders: getOrdersData(ss)
 
-function getOrdersData(ss) {
-  const norm = ss.getSheetByName(ORDERS_NORM_SHEET);
-  if (!norm || norm.getLastRow() < 2) return { error: 'Нет данных заказов' };
+// Сырые строки текущего месяца с сервера (api.yardhub.ru/api/orders_raw, обновляется по FTP
+// от 1С раз в час) вместо листа "Заказы_данные" (email-канал, обновляется реже) - 2026-08-18,
+// см. plans/2026-08-18-live-orders-current-month-server-source.md. Возвращает null при ЛЮБОЙ
+// проблеме (нет ключа в Script Properties, сеть, пустой ответ) - вызывающий код тихо
+// переходит на чтение листа, как раньше. Сам расчёт (aggregateOrdersRows и т.д.) НЕ меняется.
+function fetchOrdersRawFromServer_(monthKey) {
+  try {
+    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    if (!apiKey) return null;
+    var resp = UrlFetchApp.fetch(
+      'https://api.yardhub.ru/api/orders_raw?month=' + encodeURIComponent(monthKey),
+      { headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true }
+    );
+    if (resp.getResponseCode() !== 200) return null;
+    var data = JSON.parse(resp.getContentText());
+    if (!data || !data.rows || !data.rows.length) return null;
+    return data; // { month, rows, source: 'normalized'|'archive' }
+  } catch (err) {
+    return null;
+  }
+}
 
-  const rows = norm.getRange(2, 1, norm.getLastRow() - 1, 44).getValues();
-  const result = aggregateOrdersRows(rows);
+// Архив мегабазы (январь-май 2026, orders_archive на сервере) собран из листа с ДРУГИМ
+// набором колонок, чем обычный отчёт 1С - нет "Проведён"/"Реализация" (воронка документов
+// покажет всё как "не готово" - неверно) и "Прибыль" там не финальная (маржа 78-88%, см.
+// DEPLOY_LOG v218-222). Выручка/кол-во заказов - надёжны. Этот флаг долетает до фронтенда,
+// чтобы честно предупредить, а не молча показать красивые, но неверные цифры.
+function noteServerDataQuality_(result, sourceInfo) {
+  if (sourceInfo && sourceInfo.source === 'archive') {
+    result.data_quality_warning = 'Данные за этот период - из архива мегабазы 1С (упрощённый формат). ' +
+      'Выручка и количество заказов верны. Прибыль и статус документооборота (путёвка/реализация/проведение) НЕ финальны - не использовать для зарплат/премий за этот период.';
+  }
+  return result;
+}
+
+function getOrdersData(ss) {
   const monthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+  var fromServer = fetchOrdersRawFromServer_(monthKey);
+  var rows = fromServer ? fromServer.rows : null;
+  if (!rows) {
+    const norm = ss.getSheetByName(ORDERS_NORM_SHEET);
+    if (!norm || norm.getLastRow() < 2) return { error: 'Нет данных заказов' };
+    rows = norm.getRange(2, 1, norm.getLastRow() - 1, 44).getValues();
+  }
+  const result = noteServerDataQuality_(aggregateOrdersRows(rows), fromServer);
   const smartLost = computeLostCustomers_(ss, rows, monthKey);
   if (smartLost) result.lost_customers = smartLost;
   return joinManagerPlans_(ss, result, monthKey);
 }
 
 // Архивные данные за прошлый период (?action=orders_period&period=YYYY-MM)
+//
+// Влад, 2026-08-18: "в начале нового месяца есть изменения по старому - отчёт например в
+// августе летит сразу с июлем" - 1С ещё донасчитывает недавно закрытый месяц какое-то время
+// после его окончания, поэтому "закрытый месяц" НЕ значит "навсегда застывший". Как и текущий
+// месяц (getOrdersData выше), сначала пробуем ЖИВОЙ источник с сервера - если 1С по FTP всё
+// ещё присылает этот период (лежит в orders_normalized ИЛИ уже переехал в orders_archive,
+// сервер сам разбирается, см. /api/orders_raw) - берём его, значит месяц ещё может уточняться,
+// и мы это отражаем автоматически без ручных переснимков. Если сервер за этот период ничего
+// не отдал - тихий фолбэк на архивный лист Google Таблицы, как было.
 function getOrdersDataForPeriod(ss, period) {
+  var fromServer = fetchOrdersRawFromServer_(period);
+  if (fromServer) {
+    const result = noteServerDataQuality_(aggregateOrdersRows(fromServer.rows), fromServer);
+    const smartLost = computeLostCustomers_(ss, fromServer.rows, period);
+    if (smartLost) result.lost_customers = smartLost;
+    return joinManagerPlans_(ss, result, period);
+  }
+
   const sheetName = ORDERS_ARCHIVE_PFX + period;
   const archive = ss.getSheetByName(sheetName);
   if (!archive || archive.getLastRow() < 5) return { error: 'Нет архива за ' + period };
@@ -7993,6 +8116,14 @@ function computeLostCustomers_(ss, currentRows, monthKey) {
 // уже в этом формате, архивные листы ("Заказы_YYYY-MM") нужно нормализовать через
 // parseOrdersRawRows (тот же приём, что getOrdersData/getOrdersDataForPeriod).
 function readOrdersRowsForMonth_(ss, monthKey, isLiveMonth) {
+  // Сервер сначала (2026-08-18) - "Пропавшие клиенты" на личной странице читает ТРИ месяца
+  // подряд при каждом открытии вкладки, раньше все три - это три отдельных медленных запроса
+  // к Google Sheets API (Влад: "долго грузятся"). api.yardhub.ru/api/orders_raw отвечает почти
+  // мгновенно и покрывает и текущий, и архивные месяцы (orders_normalized/orders_archive) -
+  // тихий фолбэк на лист, если сервер за этот месяц ничего не отдал (как везде в переезде).
+  var fromServer = fetchOrdersRawFromServer_(monthKey);
+  if (fromServer) return fromServer.rows;
+
   if (isLiveMonth) {
     var norm = ss.getSheetByName(ORDERS_NORM_SHEET);
     if (!norm || norm.getLastRow() < 2) return [];
@@ -8715,6 +8846,13 @@ function getAvailablePeriods(ss) {
   sheets.forEach(function(s) {
     const m = s.getName().match(re);
     if (m && m[1] !== currentMonthKey) periods.push(m[1]);
+  });
+  // Январь-май 2026 - архив мегабазы (orders_archive на сервере), листов "Заказы_2026-0X" в
+  // ЭТОЙ таблице для них нет (импорт шёл из отдельной таблицы), поэтому добавляем явно - иначе
+  // getOrdersDataForPeriod их бы нашёл через fetchOrdersRawFromServer_, а в выпадающем списке
+  // периодов они бы не появились (2026-08-18, см. plans/2026-08-18-...).
+  ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05'].forEach(function(mk) {
+    if (periods.indexOf(mk) === -1 && mk !== currentMonthKey) periods.push(mk);
   });
   periods.sort().reverse();
   return periods;
@@ -9955,3 +10093,4 @@ function runOrdersOnly() {
   catch(e) { errors.push('❌ Нормализация: ' + e.message); }
   Logger.log(log.concat(errors).join('\n'));
 }
+

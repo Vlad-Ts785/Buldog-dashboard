@@ -777,6 +777,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
               <table class="tbl">
                 <thead><tr><th>Клиент</th><th>Менеджер</th><th>Юрлицо</th><th>Документ</th><th class="num">Сумма</th></tr></thead>
                 <tbody id="receipts-today-body"></tbody>
+                <tfoot><tr id="receipts-today-foot" style="border-top:2px solid var(--border);font-weight:600"></tr></tfoot>
               </table>
             </div>
           </div>
@@ -787,6 +788,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
               <table class="tbl">
                 <thead><tr><th>Клиент</th><th>Менеджер</th><th>Юрлицо</th><th>Документ</th><th class="num">Сумма</th></tr></thead>
                 <tbody id="receipts-yesterday-body"></tbody>
+                <tfoot><tr id="receipts-yesterday-foot" style="border-top:2px solid var(--border);font-weight:600"></tr></tfoot>
               </table>
             </div>
           </div>
@@ -799,6 +801,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
               <table class="tbl">
                 <thead><tr><th>Дата</th><th>Клиент</th><th>Менеджер</th><th>Юрлицо</th><th>Документ</th><th class="num">Сумма</th></tr></thead>
                 <tbody id="receipts-week-body"></tbody>
+                <tfoot><tr id="receipts-week-foot" style="border-top:2px solid var(--border);font-weight:600"></tr></tfoot>
               </table>
             </div>
           </div>
@@ -1880,36 +1883,58 @@ function stopLoadingPhrases() { clearInterval(loadingPhraseTimer); loadingPhrase
 // ── ВХОД ЧЕРЕЗ GOOGLE ────────────────────────────────────────
 const GOOGLE_CLIENT_ID = '872723319158-cmr4v5v31fk3uv8ass3vvdch7at66n8e.apps.googleusercontent.com';
 let ID_TOKEN = localStorage.getItem('id_token') || '';
+// Свой токен сессии (2026-08-17, Влад: "постоянно раз в час требует перезахода... один раз
+// залогинились - день-два никто не трогает") - живёт до 48ч на backend, продлевается сам при
+// каждой загрузке страницы (см. SESSION_TOKEN_TTL_MS в full_script_final.js). Google id_token
+// живёт только ~1 час - без своего токена сессии пришлось бы логиниться через Google каждый час.
+let SESSION_TOKEN = localStorage.getItem('session_token') || '';
 
 // Собирает URL запроса к API с токеном входа - используется везде вместо ручной склейки.
 // Раньше требовался ещё и статический "ключ доступа" - убран (Влад, 2026-07-04: "у нас уже
 // авторизация идёт по почте, зачем это надо") - единственный гейт теперь Google-логин + лист
-// "Доступ".
+// "Доступ". Шлём оба токена, если есть - backend сам разбирается, какой использовать
+// (session_token в приоритете, id_token - фолбэк для самого первого входа).
 function apiUrl(params) {
   // "_" - метка времени, чтобы URL всегда был уникальным и браузер не отдавал закэшированный
   // ответ вместо свежего запроса к серверу (без этого повторный fetch() на тот же набор
   // параметров иногда мог тихо вернуть старые данные - Влад, 2026-07-03).
-  const p = Object.assign({ id_token: ID_TOKEN, _: Date.now() }, params || {});
+  const p = Object.assign({ id_token: ID_TOKEN, session_token: SESSION_TOKEN, _: Date.now() }, params || {});
   const qs = Object.keys(p).map(function(k){ return k + '=' + encodeURIComponent(p[k] || ''); }).join('&');
   const sep = API_URL.includes('?') ? '&' : '?';
   return API_URL + sep + qs;
 }
 
+// Сохраняет свежий токен сессии из ответа сервера (приходит только у "полных" загрузок
+// страницы - см. freshSessionToken в doGet()), чтобы следующие запросы шли уже по нему.
+function saveSessionTokenFromResponse_(data) {
+  if (data && data.session_token) {
+    SESSION_TOKEN = data.session_token;
+    localStorage.setItem('session_token', data.session_token);
+  }
+}
+
+function clearAuthTokens_() {
+  ID_TOKEN = '';
+  SESSION_TOKEN = '';
+  localStorage.removeItem('id_token');
+  localStorage.removeItem('session_token');
+}
+
 // Общий wrapper над fetch(apiUrl(...)) для всех запросов КРОМЕ самого первого (loadData()
-// сама разбирает needLogin). ID_TOKEN живёт ~1 час (обычный срок жизни Google id_token) - если
-// дашборд открыт дольше и потом нажать, например, "Прошлый месяц" на Технике, второй запрос
-// уходит с уже протухшим токеном и раньше падал с сырым "Ошибка: Не авторизован", без
+// сама разбирает needLogin). Токен сессии живёт до 48ч (см. SESSION_TOKEN_TTL_MS на backend) -
+// если дашборд открыт дольше и потом нажать, например, "Прошлый месяц" на Технике, второй
+// запрос уходит с уже протухшим токеном и раньше падал с сырым "Ошибка: Не авторизован", без
 // подсказки, что делать (Влад, 2026-07-04). Теперь при needLogin сразу разлогиниваем и
 // показываем экран входа - как и при самой первой загрузке.
 async function apiFetchJson(params) {
   const res = await fetch(apiUrl(params));
   const data = await res.json();
   if (data.needLogin) {
-    ID_TOKEN = '';
-    localStorage.removeItem('id_token');
+    clearAuthTokens_();
     showLoginScreen(data.error);
     throw new Error(data.error || 'Не авторизован - обновите страницу и войдите заново');
   }
+  saveSessionTokenFromResponse_(data);
   return data;
 }
 
@@ -1963,8 +1988,7 @@ function handleCredentialResponse(response) {
 }
 
 function logoutUser() {
-  ID_TOKEN = '';
-  localStorage.removeItem('id_token');
+  clearAuthTokens_();
   D = null;
   if (window.google && google.accounts && google.accounts.id) google.accounts.id.disableAutoSelect();
   showLoginScreen();
@@ -1972,10 +1996,12 @@ function logoutUser() {
 
 // Вызывается самой библиотекой Google (через ?onload= в URL скрипта) - надёжнее, чем
 // полагаться на window.load, который может сработать раньше, чем загрузится сама библиотека.
+// ЛИБО id_token (только что вошли), ЛИБО session_token (уже был вход в последние 48ч) -
+// в обоих случаях грузим данные сразу, экран входа не показываем.
 function initGoogleSignIn() {
   startLoadingPhrases();
   google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, callback: handleCredentialResponse });
-  if (ID_TOKEN) loadData();
+  if (ID_TOKEN || SESSION_TOKEN) loadData();
   else showLoginScreen();
 }
 
@@ -1985,11 +2011,21 @@ async function loadData() {
   try {
     const mainRes = await fetch(apiUrl({}));
     D = await mainRes.json();
-    if (D.needLogin) { ID_TOKEN = ''; localStorage.removeItem('id_token'); showLoginScreen(D.error); return; }
+    if (D.needLogin) { clearAuthTokens_(); showLoginScreen(D.error); return; }
     if (D.error) throw new Error(D.error);
+    saveSessionTokenFromResponse_(D);
     hideLoginScreen();
     document.getElementById('error-block').style.display = 'none';
     render();
+    // "Поступления" - на экране уже живые данные из основного payload (D.receipts, посчитаны
+    // Apps Script), это МГНОВЕННЫЙ фолбэк. В фоне, не блокируя загрузку страницы, пробуем
+    // подменить на свежий расчёт с сервера (2026-08-18, см. /api/receipts) - если сервер не
+    // ответил или вернул ошибку, тихо остаёмся на уже отрисованных данных, ничего не ломается.
+    if (D.role === 'admin') {
+      fetchReceiptsFromServer_().then(function(r) {
+        if (r && !r.error && D) { D.receipts = r; renderReceipts(); }
+      }).catch(function() {});
+    }
   } catch(e) {
     document.getElementById('error-block').style.display = 'block';
     document.getElementById('error-block').querySelector('b').textContent = 'Ошибка: ' + e.message;
@@ -2108,7 +2144,8 @@ async function setMyPagePeriod(period) {
       // существующий action=vehicles_period (тот же, что "Техника") - только для него, чтобы
       // не тратить лишний запрос на остальных сотрудников, у которых машин на странице нет.
       var wantVehicles = isVasinEntry_(myPageCurrentEntry_());
-      var reqs = [ apiFetchJson({ action: 'orders_period', period: period }) ];
+      var fromServer = await fetchOrdersPeriodFromServer_(period);
+      var reqs = [ fromServer ? Promise.resolve(fromServer) : apiFetchJson({ action: 'orders_period', period: period }) ];
       if (wantVehicles) {
         var r = monthKeyToRangeStr_(period);
         reqs.push(apiFetchJson({ action: 'vehicles_period', from: r.from, to: r.to }));
@@ -3628,8 +3665,10 @@ async function loadAvailablePeriods() {
     }
     const sel = document.getElementById('period-select');
     if (sel) {
+      // Влад, 2026-08-16: "чтобы глазам было понятно" - подписи месяцами словами
+      // (formatMonthLabel: "2026-07" -> "Июль 2026"), value остаётся "YYYY-MM" как было.
       sel.innerHTML = '<option value="">Текущий месяц</option>' +
-        availablePeriods.map(function(p){ return '<option value="'+p+'">'+p+'</option>'; }).join('');
+        availablePeriods.map(function(p){ return '<option value="'+p+'">'+formatMonthLabel(p)+'</option>'; }).join('');
       sel.value = selectedPeriod || '';
     }
   } catch(e) { /* список периодов необязателен - молча пропускаем */ }
@@ -3653,7 +3692,8 @@ async function changePeriod(period) {
   }
   if (status) status.textContent = 'Загрузка...';
   try {
-    const data = await apiFetchJson({ action: 'orders_period', period: selectedPeriod });
+    const fromServer = await fetchOrdersPeriodFromServer_(selectedPeriod);
+    const data = fromServer || await apiFetchJson({ action: 'orders_period', period: selectedPeriod });
     if (data.orders && data.orders.error) throw new Error(data.orders.error);
     periodOrdersData = data.orders;
     periodGrossProfit = (data.summary && typeof data.summary.profit === 'number') ? data.summary.profit : null;
@@ -5107,6 +5147,11 @@ function renderReceiptsDayTransactions_(day, prefix) {
       '<td class="muted">' + (t.docNumber || '—') + '</td>' +
       '<td class="num">' + fmt(t.amount) + '</td></tr>';
   }).join('') || '<tr><td colspan="5" class="muted">Поступлений не было</td></tr>';
+
+  // Итоговая строка (Влад, 2026-08-18: "во всех вкладках в поступлениях должны быть суммы
+  // поступлений") - та же tfoot-строка, что уже есть в По менеджерам/По клиентам.
+  var footEl = document.getElementById('receipts-' + prefix + '-foot');
+  if (footEl) footEl.innerHTML = '<td>Итого</td><td></td><td></td><td></td><td class="num">' + fmt(day.total) + '</td>';
 }
 
 // Сводный блок "Поступления на этой неделе" vs прошлая (Влад, 2026-08-16) - отдельная
@@ -5159,6 +5204,9 @@ function renderReceiptsWeekTransactions_(week) {
       '<td class="muted">' + (t.docNumber || '—') + '</td>' +
       '<td class="num">' + fmt(t.amount) + '</td></tr>';
   }).join('') || '<tr><td colspan="6" class="muted">Поступлений не было</td></tr>';
+
+  var footEl = document.getElementById('receipts-week-foot');
+  if (footEl) footEl.innerHTML = '<td></td><td>Итого</td><td></td><td></td><td></td><td class="num">' + fmt(week.total) + '</td>';
 }
 
 function setReceiptsChartView(view) {
@@ -5288,11 +5336,21 @@ function renderReceiptsChart() {
             label: function(c) { return ' ' + c.dataset.label + ': ' + (c.raw == null ? '—' : fmt(c.raw)); },
             // "Поступления всего" - вычисляемая строка (безнал+нал), которой нет отдельным
             // датасетом - Влад, референс-скриншот: "Поступления всего: 56 100 000 ₽".
+            // "Сальдо" по месяцу/дню (Влад, 2026-08-16: "наводишь на месяц, вылезает это окно,
+            // и сальдо внизу") - поступления минус коммерческие заказы за ТОТ ЖЕ месяц/день,
+            // тот же принцип, что month_balance в KPI-карточке "Поступления" (getReceiptsData),
+            // просто теперь виден для КАЖДОГО месяца в подсказке графика, не только текущего.
             afterBody: function(items) {
-              if (!hasCash) return [];
               var idx = items[0].dataIndex;
+              var lines = [];
               var total = (bankValues[idx] || 0) + (cashValues[idx] || 0);
-              return [' Поступления всего: ' + fmt(total)];
+              if (hasCash) lines.push(' Поступления всего: ' + fmt(total));
+              var rev = revValues[idx];
+              if (rev != null) {
+                var balance = total - rev;
+                lines.push(' Сальдо: ' + (balance >= 0 ? '+' : '') + fmt(balance));
+              }
+              return lines;
             }
           }
         }
@@ -8538,6 +8596,37 @@ function fmtDateRu(dateStr) {
   return d + ' ' + RU_MONTHS_GENITIVE[m-1] + ' ' + y;
 }
 
+// Свой сервер (2026-08-17) - постепенный переезд с Apps Script/Google Таблиц на Beget (см.
+// plans/ и retrospectives/). Ключ - не полноценная сессия, как у apiFetchJson, а общий
+// секрет только для этих эндпоинтов - осознанное временное упрощение, см. server.js.
+const YARD_API_BASE = 'https://api.yardhub.ru/api';
+const YARD_API_KEY = '3f41d8e2d1cb53fe45cd1627f0067cd65df37b1d5081b275';
+function fetchFromYardApi_(path, params) {
+  var qs = Object.keys(params || {}).map(function(k) {
+    return params[k] ? (k + '=' + encodeURIComponent(params[k])) : null;
+  }).filter(Boolean).join('&');
+  return fetch(YARD_API_BASE + path + (qs ? '?' + qs : ''), { headers: { 'X-Api-Key': YARD_API_KEY } })
+    .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); });
+}
+function fetchClientAnalyticsFromServer_(params) {
+  return fetchFromYardApi_('/client_analytics', params).then(function(r) { return r.data; });
+}
+// Снимок закрытого месяца с сервера, если он уже перенесён (см. period_snapshots на VPS) -
+// null, если ещё нет (404) - вызывающий код в этом случае откатывается на apiFetchJson
+// (обычный путь через Apps Script), ничего не ломается для ещё не перенесённых месяцев.
+function fetchOrdersPeriodFromServer_(period) {
+  return fetchFromYardApi_('/orders_period', { period: period }).then(function(r) {
+    return r.ok ? r.data : null;
+  }).catch(function() { return null; });
+}
+// "Поступления" с сервера (2026-08-18, см. /api/receipts) - null при любой проблеме, вызывающий
+// код в этом случае просто остаётся на D.receipts, посчитанном Apps Script при основной загрузке.
+function fetchReceiptsFromServer_() {
+  return fetchFromYardApi_('/receipts', {}).then(function(r) {
+    return r.ok ? r.data : null;
+  }).catch(function() { return null; });
+}
+
 function loadClientsData() {
   if (clientsData !== null) { renderClientsBody(); return; }
   fetchClientsData();
@@ -8550,11 +8639,11 @@ function fetchClientsData() {
   document.getElementById('clients-loading').style.display = 'block';
   document.getElementById('clients-loading').textContent = 'Загрузка клиентской аналитики...';
   document.getElementById('clients-body').style.display = 'none';
-  var params = { action: 'client_analytics' };
+  var params = {};
   if (clientsRangeFrom) params.from = clientsRangeFrom;
   if (clientsRangeTo) params.to = clientsRangeTo;
   if (clientsSegmentFilter) params.segment = clientsSegmentFilter;
-  apiFetchJson(params)
+  fetchClientAnalyticsFromServer_(params)
     .then(function(d) {
       if (d.error) throw new Error(d.error);
       clientsData = d;
@@ -8733,10 +8822,10 @@ function renderClientsSegmentFilter_() {
 function fetchClientsTopFiltered_() {
   var el = document.getElementById('clients-tab-content');
   el.innerHTML = '<p style="color:var(--muted);padding:16px">Загрузка...</p>';
-  var params = { action: 'client_analytics', segment: clientsSegmentFilter, manager: clientsManagerFilter };
+  var params = { segment: clientsSegmentFilter, manager: clientsManagerFilter };
   if (clientsRangeFrom) params.from = clientsRangeFrom;
   if (clientsRangeTo) params.to = clientsRangeTo;
-  apiFetchJson(params)
+  fetchClientAnalyticsFromServer_(params)
     .then(function(d) {
       if (d.error) throw new Error(d.error);
       clientsData.top_clients = d.top_clients;

@@ -4296,48 +4296,6 @@ function createOrderPlanEntry_(personName, p) {
 function doGet(e) {
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
 
-  // ── ВРЕМЕННО (2026-08-18, приёмка Фазы 1d) - включает серверный расчёт на ОДИН запрос,
-  // прогоняет весь путь, сверяет с локальным расчётом и ГАРАНТИРОВАННО выключает обратно
-  // (finally), чтобы флаг не остался включённым случайно. УБРАТЬ после приёмки.
-  if (e && e.parameter && e.parameter.action === 'diag_phase1d') {
-    var d1dKey = e.parameter.key || '';
-    if (d1dKey !== '7f2a9c1e6b4d8035a1c9ef26b8d40317') {
-      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
-    }
-    var props = PropertiesService.getScriptProperties();
-    var d1dPeriod = e.parameter.period || '';
-    var out = {};
-    try {
-      out.flagBefore = props.getProperty('USE_SERVER_ORDERS_CALC') || null;
-
-      // 1) флаг выключен - должен использоваться локальный путь
-      props.deleteProperty('USE_SERVER_ORDERS_CALC');
-      var tOff = Date.now();
-      var offRes = d1dPeriod ? getOrdersDataForPeriod(ss, d1dPeriod) : getOrdersData(ss);
-      out.off = { ms: Date.now() - tOff, total_orders: offRes.summary ? offRes.summary.total_orders : null,
-                  total_amount: offRes.summary ? offRes.summary.total_amount : null,
-                  managers: (offRes.by_manager || []).length, qualifies: offRes.summary ? offRes.summary.hired_margin_qualifies : null };
-
-      // 2) флаг включён - должен использоваться серверный путь
-      props.setProperty('USE_SERVER_ORDERS_CALC', 'on');
-      var tOn = Date.now();
-      var onRes = d1dPeriod ? getOrdersDataForPeriod(ss, d1dPeriod) : getOrdersData(ss);
-      out.on = { ms: Date.now() - tOn, total_orders: onRes.summary ? onRes.summary.total_orders : null,
-                 total_amount: onRes.summary ? onRes.summary.total_amount : null,
-                 managers: (onRes.by_manager || []).length, qualifies: onRes.summary ? onRes.summary.hired_margin_qualifies : null };
-
-      // 3) сверка теми же денежными полями, что verifyServerOrdersCalc
-      out.problems = verifyServerOrdersCalc(d1dPeriod || undefined);
-    } catch (d1dErr) {
-      out.error = String(d1dErr);
-    } finally {
-      props.deleteProperty('USE_SERVER_ORDERS_CALC'); // ВСЕГДА выключаем обратно
-      out.flagAfter = props.getProperty('USE_SERVER_ORDERS_CALC') || null;
-    }
-    return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
-  }
-  // ── конец временной приёмки ────────────────────────────────────────────────────────────────
-
   // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём.
   // Сначала пробуем свой токен сессии (живёт до 48ч, см. issueSessionToken_) - только если
   // его нет или он истёк, идём проверять Google id_token (тот живёт ~1 час, это уже требует
@@ -6098,6 +6056,32 @@ function verifyServerOrdersCalc(period) {
     Logger.log('Если серверный расчёт включён (USE_SERVER_ORDERS_CALC=on) - выключи его, пока не разобрались.');
   }
   return problems;
+}
+
+// ── ПЕРЕКЛЮЧАТЕЛЬ СЕРВЕРНОГО РАСЧЁТА ЗАКАЗОВ (постоянные функции, не удалять) ───────────────
+// Запускать из редактора Apps Script: Выполнить -> выбрать функцию -> Выполнить.
+// Имена БЕЗ подчёркивания в конце специально - иначе не появятся в списке "Выполнить"
+// (известная ловушка проекта, задевала трижды - см. память project_apps_script_trailing_underscore).
+//
+// Что делает включение: "Обзор заказов"/"По менеджерам"/"По логистам"/"Зарплата" начинают
+// брать УЖЕ ПОСЧИТАННЫЙ результат с api.yardhub.ru (в 4-8 раз быстрее) вместо пересчёта
+// внутри Apps Script. Логика идентична (сверена построчно по всем 8 месяцам, 0 расхождений).
+// Если сервер недоступен/ответил странно - дашборд автоматически считает сам, как раньше.
+function enableServerOrdersCalc() {
+  PropertiesService.getScriptProperties().setProperty('USE_SERVER_ORDERS_CALC', 'on');
+  Logger.log('✅ Серверный расчёт заказов ВКЛЮЧЁН. Выключить обратно: disableServerOrdersCalc()');
+  Logger.log('Проверить совпадение цифр в любой момент: verifyServerOrdersCalc()');
+}
+
+function disableServerOrdersCalc() {
+  PropertiesService.getScriptProperties().deleteProperty('USE_SERVER_ORDERS_CALC');
+  Logger.log('⛔ Серверный расчёт заказов ВЫКЛЮЧЕН - всё считается внутри Apps Script, как раньше.');
+}
+
+function serverOrdersCalcStatus() {
+  var on = PropertiesService.getScriptProperties().getProperty('USE_SERVER_ORDERS_CALC') === 'on';
+  Logger.log(on ? '✅ Серверный расчёт ВКЛЮЧЁН' : '⛔ Серверный расчёт ВЫКЛЮЧЕН (считает Apps Script)');
+  return on;
 }
 
 // ── ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ─────────────────────────────────

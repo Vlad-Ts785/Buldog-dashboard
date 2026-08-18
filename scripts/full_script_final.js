@@ -7992,28 +7992,59 @@ function fetchOrdersRawFromServer_(monthKey) {
     if (resp.getResponseCode() !== 200) return null;
     var data = JSON.parse(resp.getContentText());
     if (!data || !data.rows || !data.rows.length) return null;
-    return data.rows;
+    return data; // { month, rows, source: 'normalized'|'archive' }
   } catch (err) {
     return null;
   }
 }
 
+// Архив мегабазы (январь-май 2026, orders_archive на сервере) собран из листа с ДРУГИМ
+// набором колонок, чем обычный отчёт 1С - нет "Проведён"/"Реализация" (воронка документов
+// покажет всё как "не готово" - неверно) и "Прибыль" там не финальная (маржа 78-88%, см.
+// DEPLOY_LOG v218-222). Выручка/кол-во заказов - надёжны. Этот флаг долетает до фронтенда,
+// чтобы честно предупредить, а не молча показать красивые, но неверные цифры.
+function noteServerDataQuality_(result, sourceInfo) {
+  if (sourceInfo && sourceInfo.source === 'archive') {
+    result.data_quality_warning = 'Данные за этот период - из архива мегабазы 1С (упрощённый формат). ' +
+      'Выручка и количество заказов верны. Прибыль и статус документооборота (путёвка/реализация/проведение) НЕ финальны - не использовать для зарплат/премий за этот период.';
+  }
+  return result;
+}
+
 function getOrdersData(ss) {
   const monthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
-  var rows = fetchOrdersRawFromServer_(monthKey);
+  var fromServer = fetchOrdersRawFromServer_(monthKey);
+  var rows = fromServer ? fromServer.rows : null;
   if (!rows) {
     const norm = ss.getSheetByName(ORDERS_NORM_SHEET);
     if (!norm || norm.getLastRow() < 2) return { error: 'Нет данных заказов' };
     rows = norm.getRange(2, 1, norm.getLastRow() - 1, 44).getValues();
   }
-  const result = aggregateOrdersRows(rows);
+  const result = noteServerDataQuality_(aggregateOrdersRows(rows), fromServer);
   const smartLost = computeLostCustomers_(ss, rows, monthKey);
   if (smartLost) result.lost_customers = smartLost;
   return joinManagerPlans_(ss, result, monthKey);
 }
 
 // Архивные данные за прошлый период (?action=orders_period&period=YYYY-MM)
+//
+// Влад, 2026-08-18: "в начале нового месяца есть изменения по старому - отчёт например в
+// августе летит сразу с июлем" - 1С ещё донасчитывает недавно закрытый месяц какое-то время
+// после его окончания, поэтому "закрытый месяц" НЕ значит "навсегда застывший". Как и текущий
+// месяц (getOrdersData выше), сначала пробуем ЖИВОЙ источник с сервера - если 1С по FTP всё
+// ещё присылает этот период (лежит в orders_normalized ИЛИ уже переехал в orders_archive,
+// сервер сам разбирается, см. /api/orders_raw) - берём его, значит месяц ещё может уточняться,
+// и мы это отражаем автоматически без ручных переснимков. Если сервер за этот период ничего
+// не отдал - тихий фолбэк на архивный лист Google Таблицы, как было.
 function getOrdersDataForPeriod(ss, period) {
+  var fromServer = fetchOrdersRawFromServer_(period);
+  if (fromServer) {
+    const result = noteServerDataQuality_(aggregateOrdersRows(fromServer.rows), fromServer);
+    const smartLost = computeLostCustomers_(ss, fromServer.rows, period);
+    if (smartLost) result.lost_customers = smartLost;
+    return joinManagerPlans_(ss, result, period);
+  }
+
   const sheetName = ORDERS_ARCHIVE_PFX + period;
   const archive = ss.getSheetByName(sheetName);
   if (!archive || archive.getLastRow() < 5) return { error: 'Нет архива за ' + period };
@@ -8085,6 +8116,14 @@ function computeLostCustomers_(ss, currentRows, monthKey) {
 // уже в этом формате, архивные листы ("Заказы_YYYY-MM") нужно нормализовать через
 // parseOrdersRawRows (тот же приём, что getOrdersData/getOrdersDataForPeriod).
 function readOrdersRowsForMonth_(ss, monthKey, isLiveMonth) {
+  // Сервер сначала (2026-08-18) - "Пропавшие клиенты" на личной странице читает ТРИ месяца
+  // подряд при каждом открытии вкладки, раньше все три - это три отдельных медленных запроса
+  // к Google Sheets API (Влад: "долго грузятся"). api.yardhub.ru/api/orders_raw отвечает почти
+  // мгновенно и покрывает и текущий, и архивные месяцы (orders_normalized/orders_archive) -
+  // тихий фолбэк на лист, если сервер за этот месяц ничего не отдал (как везде в переезде).
+  var fromServer = fetchOrdersRawFromServer_(monthKey);
+  if (fromServer) return fromServer.rows;
+
   if (isLiveMonth) {
     var norm = ss.getSheetByName(ORDERS_NORM_SHEET);
     if (!norm || norm.getLastRow() < 2) return [];
@@ -8807,6 +8846,13 @@ function getAvailablePeriods(ss) {
   sheets.forEach(function(s) {
     const m = s.getName().match(re);
     if (m && m[1] !== currentMonthKey) periods.push(m[1]);
+  });
+  // Январь-май 2026 - архив мегабазы (orders_archive на сервере), листов "Заказы_2026-0X" в
+  // ЭТОЙ таблице для них нет (импорт шёл из отдельной таблицы), поэтому добавляем явно - иначе
+  // getOrdersDataForPeriod их бы нашёл через fetchOrdersRawFromServer_, а в выпадающем списке
+  // периодов они бы не появились (2026-08-18, см. plans/2026-08-18-...).
+  ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05'].forEach(function(mk) {
+    if (periods.indexOf(mk) === -1 && mk !== currentMonthKey) periods.push(mk);
   });
   periods.sort().reverse();
   return periods;

@@ -2281,6 +2281,21 @@ function findOrCreateDebtStatusRow_(sheet, name) {
 // Дата "с какого числа" обновляется, ТОЛЬКО если статус реально изменился - повторная
 // установка того же статуса (например, повторный клик по тому же значению в выпадающем
 // списке) не сбрасывает счётчик "сколько дней уже стоит статус".
+// Зеркалит запись на сервер (2026-08-19, перенос ДЗ) - НЕ блокирует и НЕ ломает основную
+// запись в лист при любой ошибке (сервер временно недоступен и т.п.) - try/catch съедает всё
+// молча. Лист остаётся источником правды, пока фронтенд не переключат на прямые вызовы
+// сервера - тогда эта функция и станет единственной записью, а лист - только историческим.
+function mirrorDebtStatusToServer_(action, params) {
+  try {
+    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    if (!apiKey) return;
+    var qs = Object.keys(params).map(function(k) { return k + '=' + encodeURIComponent(params[k]); }).join('&');
+    UrlFetchApp.fetch('https://api.yardhub.ru/api/debt/' + action + '?' + qs, {
+      headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true,
+    });
+  } catch (err) { /* сервер не критичен для этой операции - тихо игнорируем */ }
+}
+
 function setDebtStatus_(ss, contragent, status) {
   const name = String(contragent || '').trim();
   if (!name) throw new Error('Не указан контрагент');
@@ -2293,6 +2308,7 @@ function setDebtStatus_(ss, contragent, status) {
   if (String(current || '') !== status) {
     sheet.getRange(row, 2, 1, 2).setValues([[status, today]]);
   }
+  mirrorDebtStatusToServer_('set_status', { contragent: name, status: status });
 }
 
 // Комментарий НЕ трогает статус/дату - отдельное поле, может обновляться независимо
@@ -2303,6 +2319,7 @@ function setDebtComment_(ss, contragent, comment) {
   const sheet = ensureDebtStatusSheet_(ss);
   const row = findOrCreateDebtStatusRow_(sheet, name);
   sheet.getRange(row, 4).setValue(String(comment || ''));
+  mirrorDebtStatusToServer_('set_comment', { contragent: name, comment: comment || '' });
 }
 
 // Агрегация ДЗ для дашборда - читает уже посчитанный ДЗ_данные (см. importDebtReport).
@@ -2311,8 +2328,53 @@ function setDebtComment_(ss, contragent, comment) {
 // широких диапазонах - пусть это будет неделя для начала") - по умолчанию 1 (вчера, как
 // раньше). Для >1 берём БЛИЖАЙШУЮ доступную дату к цели (сбор истории мог прерваться на
 // день-два), а не требуем точного совпадения - иначе "неделя" часто осталась бы пустой.
+// ── ГОТОВЫЙ РАСЧЁТ ДЗ С СЕРВЕРА (2026-08-19) ────────────────────────────────────────────────
+// Тот же приём, что и для заказов (см. fetchOrdersComputedFromServer_) - Script Property
+// USE_SERVER_DEBT_CALC='on' включает, любое другое значение/отсутствие - выключено, мгновенный
+// откат без редеплоя. Сверено с живым расчётом (0 расхождений на неизменных клиентах, вся
+// история 42/42 дня точно совпала) - см. plans/2026-07-08-debt-receivables-tab.md, "Итог"
+// от 2026-08-19, и README.md на сервере.
+function serverDebtCalcEnabled_() {
+  try {
+    return PropertiesService.getScriptProperties().getProperty('USE_SERVER_DEBT_CALC') === 'on';
+  } catch (err) {
+    return false;
+  }
+}
+
+function debtCalcLooksSane_(data) {
+  if (!data || !data.debt || !data.debt.summary) return false;
+  var s = data.debt.summary;
+  if (typeof s.total_balance !== 'number') return false;
+  if (typeof s.debtor_count !== 'number' || s.debtor_count <= 0) return false;
+  if (!Array.isArray(data.debt.by_customer) || !Array.isArray(data.debt.by_manager)) return false;
+  return true;
+}
+
+function fetchDebtComputedFromServer_(compareDaysBack) {
+  try {
+    if (!serverDebtCalcEnabled_()) return null;
+    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    if (!apiKey) return null;
+    var resp = UrlFetchApp.fetch(
+      'https://api.yardhub.ru/api/debt_computed?compare_days_back=' + encodeURIComponent(compareDaysBack || 1),
+      { headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true }
+    );
+    if (resp.getResponseCode() !== 200) return null;
+    var data = JSON.parse(resp.getContentText());
+    if (!debtCalcLooksSane_(data)) return null;
+    return data.debt;
+  } catch (err) {
+    return null;
+  }
+}
+
 function getDebtData(ss, compareDaysBack) {
   compareDaysBack = compareDaysBack || 1;
+
+  var computed = fetchDebtComputedFromServer_(compareDaysBack);
+  if (computed) return computed;
+
   const sheet = ss.getSheetByName(DEBT_RAW_SHEET);
   if (!sheet || sheet.getLastRow() < 2) return null;
 
@@ -4523,16 +4585,6 @@ function updateOrderPlanStatus_(personName, p) {
 function doGet(e) {
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
 
-  // ── ВРЕМЕННО (2026-08-19, вторая сверка getDebtData - теперь с историей) - ТОЛЬКО ЧТЕНИЕ. УБРАТЬ.
-  if (e && e.parameter && e.parameter.action === 'diag_debt_data2') {
-    var ddd2Key = e.parameter.key || '';
-    if (ddd2Key !== '7f2a9c1e6b4d8035a1c9ef26b8d40317') {
-      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
-    }
-    return ContentService.createTextOutput(JSON.stringify(getDebtData(ss))).setMimeType(ContentService.MimeType.JSON);
-  }
-  // ── конец временной сверки ─────────────────────────────────────────────────────────────────
-
   // ── ВРЕМЕННО (2026-08-19, перенос ДЗ на сервер) - экспорт листа "ДЗ_Статусы" (ручные
   // статусы/комментарии, НЕ из 1С - разовый + периодический перенос, см.
   // plans/2026-07-08-debt-receivables-tab.md). УБРАТЬ после того, как запись статусов тоже
@@ -6385,6 +6437,83 @@ function serverOrdersCalcStatus() {
   var on = PropertiesService.getScriptProperties().getProperty('USE_SERVER_ORDERS_CALC') === 'on';
   Logger.log(on ? '✅ Серверный расчёт ВКЛЮЧЁН' : '⛔ Серверный расчёт ВЫКЛЮЧЕН (считает Apps Script)');
   return on;
+}
+
+// ── ПЕРЕКЛЮЧАТЕЛЬ СЕРВЕРНОГО РАСЧЁТА ДЗ (постоянные функции, не удалять) ────────────────────
+// Тот же принцип, что и у заказов выше. Запускать из редактора: Выполнить -> функция.
+function enableServerDebtCalc() {
+  PropertiesService.getScriptProperties().setProperty('USE_SERVER_DEBT_CALC', 'on');
+  Logger.log('✅ Серверный расчёт ДЗ ВКЛЮЧЁН. Выключить: disableServerDebtCalc()');
+  Logger.log('Проверить совпадение: verifyServerDebtCalc()');
+}
+
+function disableServerDebtCalc() {
+  PropertiesService.getScriptProperties().deleteProperty('USE_SERVER_DEBT_CALC');
+  Logger.log('⛔ Серверный расчёт ДЗ ВЫКЛЮЧЕН - всё считается внутри Apps Script, как раньше.');
+}
+
+function serverDebtCalcStatus() {
+  var on = PropertiesService.getScriptProperties().getProperty('USE_SERVER_DEBT_CALC') === 'on';
+  Logger.log(on ? '✅ Серверный расчёт ДЗ ВКЛЮЧЁН' : '⛔ Серверный расчёт ДЗ ВЫКЛЮЧЕН (считает Apps Script)');
+  return on;
+}
+
+// ПОСТОЯННЫЙ ИНСТРУМЕНТ - сверяет серверный расчёт ДЗ с расчётом Apps Script на ОДНИХ И ТЕХ
+// ЖЕ данных (лист "ДЗ_данные" на момент запуска). Запускать после любой правки формулы ДЗ -
+// и на сервере (api/lib/debt-calc.js), и здесь.
+function verifyServerDebtCalc() {
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+  if (!apiKey) { Logger.log('Нет YARD_API_KEY в Script Properties - сверять не с чем.'); return null; }
+
+  var sheet = ss.getSheetByName(DEBT_RAW_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) { Logger.log('Нет данных ДЗ_данные - сверка невозможна.'); return null; }
+
+  var mineFlag = serverDebtCalcEnabled_(); // временно выключаем, чтобы посчитать локально
+  PropertiesService.getScriptProperties().deleteProperty('USE_SERVER_DEBT_CALC');
+  var mine;
+  try { mine = getDebtData(ss); } finally {
+    if (mineFlag) PropertiesService.getScriptProperties().setProperty('USE_SERVER_DEBT_CALC', 'on');
+  }
+
+  var resp = UrlFetchApp.fetch('https://api.yardhub.ru/api/debt_computed', {
+    headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true,
+  });
+  if (resp.getResponseCode() !== 200) { Logger.log('Сервер вернул код ' + resp.getResponseCode() + ' - сверка невозможна.'); return null; }
+  var theirs = JSON.parse(resp.getContentText()).debt;
+
+  var problems = [];
+  ['total_balance', 'debtor_count', 'overdue_dead', 'guarantees_total'].forEach(function(k) {
+    var a = mine.summary[k], b = theirs.summary[k];
+    var same = (typeof a === 'number' && typeof b === 'number') ? Math.abs(a - b) < 1 : a === b;
+    if (!same) problems.push('summary.' + k + ': Apps Script=' + a + ' сервер=' + b);
+  });
+
+  var mineByName = {}, theirsByName = {};
+  (mine.by_customer || []).forEach(function(c) { mineByName[c.contragent] = c; });
+  (theirs.by_customer || []).forEach(function(c) { theirsByName[c.contragent] = c; });
+  var sameBalanceCount = 0, fieldMismatches = 0;
+  Object.keys(mineByName).forEach(function(n) {
+    var b = theirsByName[n];
+    if (!b) return;
+    if (Math.abs(mineByName[n].balance - b.balance) >= 1) return; // разное время снимка - пропускаем
+    sameBalanceCount++;
+    ['manager', 'status', 'daysOverdue'].forEach(function(f) {
+      if (String(mineByName[n][f]) !== String(b[f])) {
+        fieldMismatches++;
+        problems.push('by_customer["' + n + '"].' + f + ': Apps Script=' + mineByName[n][f] + ' сервер=' + b[f]);
+      }
+    });
+  });
+
+  if (problems.length === 0) {
+    Logger.log('✅ Серверный и локальный расчёт ДЗ совпадают (' + sameBalanceCount + ' клиентов с неизменным балансом, 0 расхождений в остальных полях).');
+  } else {
+    Logger.log('⚠️ РАСХОЖДЕНИЯ серверного и локального расчёта ДЗ (' + problems.length + '):');
+    problems.forEach(function(p) { Logger.log('  - ' + p); });
+    Logger.log('Если серверный расчёт включён (USE_SERVER_DEBT_CALC=on) - выключи disableServerDebtCalc(), пока не разобрались.');
+  }
+  return problems;
 }
 
 // ── ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ─────────────────────────────────

@@ -5688,9 +5688,47 @@ function orderPlanSelectHtml_(id, options, selected, required) {
   h += '</select>';
   return h;
 }
-function orderPlanInputHtml_(id, value, placeholder, type) {
+function orderPlanInputHtml_(id, value, placeholder, type, extraAttrs) {
   var esc = String(value == null ? '' : value).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
-  return '<input id="'+id+'" type="'+(type || 'text')+'" value="'+esc+'" placeholder="'+(placeholder || '')+'" style="'+ORDER_PLAN_FORM_INPUT_STYLE_+'">';
+  return '<input id="'+id+'" type="'+(type || 'text')+'" value="'+esc+'" placeholder="'+(placeholder || '')+'" style="'+ORDER_PLAN_FORM_INPUT_STYLE_+'"'+(extraAttrs || '')+'>';
+}
+
+// Заказчики "выпадают по первым напечатанным буквам" (Влад) - datalist поверх уже
+// загруженных orderPlanData.orders (без похода на сервер), при этом свободный ввод
+// нового заказчика остаётся возможным (datalist, не select - "если новый, то новый
+// как запишет"). Контакты запоминаются ПО заказчику (лёгкая версия "карточки фирмы" -
+// полноценный СРМ с телефонами по каждому контакту сам по себе отдельная задача,
+// тут только то, что уже видно в загруженных заказах).
+function orderPlanCustomerOptionsHtml_() {
+  var names = {};
+  (orderPlanData && orderPlanData.orders || []).forEach(function(o) { if (o.customer) names[o.customer] = true; });
+  return Object.keys(names).sort(function(a,b){ return a.localeCompare(b,'ru'); })
+    .map(function(n){ return '<option value="'+n.replace(/"/g,'&quot;')+'">'; }).join('');
+}
+function orderPlanContactsForCustomer_(customer) {
+  var set = {};
+  (orderPlanData && orderPlanData.orders || []).forEach(function(o) {
+    if (o.customer === customer && o.customerContact) set[o.customerContact] = true;
+  });
+  return Object.keys(set);
+}
+function orderPlanRefreshContactList_() {
+  var list = document.getElementById('oc-customerContact-list');
+  if (!list) return;
+  var customer = document.getElementById('oc-customer').value;
+  list.innerHTML = orderPlanContactsForCustomer_(customer).map(function(c){ return '<option value="'+c.replace(/"/g,'&quot;')+'">'; }).join('');
+}
+
+var ORDER_PLAN_WEEKDAYS_FULL_RU_ = ['воскресенье','понедельник','вторник','среда','четверг','пятница','суббота'];
+// Дата для только что созданного заказа (оптимистичное отображение в интерфейсе,
+// пока не пришло следующее реальное обновление) - тот же формат, что и в самой
+// таблице планировки ("ДД.ММ.ГГГГ (день недели)").
+function orderPlanFormatDateForDay_(day) {
+  var base = orderPlanData && orderPlanData.updated ? new Date(orderPlanData.updated) : new Date();
+  var msk = new Date(base.getTime() + 3 * 3600 * 1000);
+  var y = msk.getUTCFullYear(), m = msk.getUTCMonth();
+  var dt = new Date(Date.UTC(y, m, day));
+  return ('0'+day).slice(-2)+'.'+('0'+(m+1)).slice(-2)+'.'+y+' ('+ORDER_PLAN_WEEKDAYS_FULL_RU_[dt.getUTCDay()]+')';
 }
 
 function openOrderCreateForm(prefill) {
@@ -5728,10 +5766,12 @@ function buildOrderCreateForm_(prefill) {
     dayOptions += '<option value="'+d+'"'+(d === day ? ' selected' : '')+'>'+d+'</option>';
   }
   h += formRow_('День подачи *', '<select id="oc-day" style="'+ORDER_PLAN_FORM_INPUT_STYLE_+'">'+dayOptions+'</select>');
-  h += formRow_('Время подачи', orderPlanInputHtml_('oc-time', prefill.time, '09:00'));
+  h += formRow_('Время подачи', orderPlanInputHtml_('oc-time', prefill.time, '', 'time')); // Влад: "неудобно вводить знак ':'" - нативный выбор времени
   h += formRow_('Тип техники *', orderPlanSelectHtml_('oc-equipType', ORDER_PLAN_EQUIP_TYPES_FE_, prefill.equipType, true));
-  h += formRow_('Заказчик *', orderPlanInputHtml_('oc-customer', prefill.customer));
-  h += formRow_('Конт. лицо заказчика', orderPlanInputHtml_('oc-customerContact', prefill.customerContact));
+  h += formRow_('Заказчик *', orderPlanInputHtml_('oc-customer', prefill.customer, '', 'text', ' list="oc-customer-list" oninput="orderPlanRefreshContactList_()"')+
+    '<datalist id="oc-customer-list">'+orderPlanCustomerOptionsHtml_()+'</datalist>');
+  h += formRow_('Конт. лицо заказчика', orderPlanInputHtml_('oc-customerContact', prefill.customerContact, '', 'text', ' list="oc-customerContact-list"')+
+    '<datalist id="oc-customerContact-list">'+orderPlanContactsForCustomer_(prefill.customer).map(function(c){ return '<option value="'+c.replace(/"/g,'&quot;')+'">'; }).join('')+'</datalist>');
   h += formRow_('Груз', orderPlanInputHtml_('oc-cargo', prefill.cargo));
   h += formRow_('Габарит', orderPlanSelectHtml_('oc-gabarit', ORDER_PLAN_GABARIT_FE_, prefill.gabarit));
   h += formRow_('Адрес погрузки *', orderPlanInputHtml_('oc-loadAddress', prefill.loadAddress));
@@ -5741,7 +5781,13 @@ function buildOrderCreateForm_(prefill) {
   h += formRow_('Документы', orderPlanSelectHtml_('oc-documents', ORDER_PLAN_DOCUMENTS_FE_, prefill.documents));
   h += formRow_('Условия переработки', orderPlanSelectHtml_('oc-reworkTerms', ORDER_PLAN_REWORK_TERMS_FE_, prefill.reworkTerms));
   h += formRow_('Примечание', orderPlanInputHtml_('oc-note', prefill.note));
-  h += formRow_('Стоимость', orderPlanInputHtml_('oc-cost', prefill.cost, '', 'number'));
+  // Стоимость - только число (Влад: "нужна защита от написания чуши, чтобы не было
+  // текста"): type=number + min=0 не дают набрать буквы в большинстве браузеров,
+  // submitOrderCreateForm() дополнительно перепроверяет перед отправкой.
+  h += formRow_('Стоимость', orderPlanInputHtml_('oc-cost', prefill.cost, '', 'number', ' min="0" step="1"'));
+  // Наличные - отдельная галочка (Влад: "пока в таблицу это пусть идёт в примечание" -
+  // нет отдельной колонки под это в таблице планировки, дублировать не будем).
+  h += formRow_('', '<label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);cursor:pointer"><input type="checkbox" id="oc-cash"> Наличные</label>');
 
   h += '<div style="display:flex;gap:10px;margin-top:6px">';
   h += '<button type="button" onclick="submitOrderCreateForm()" style="flex:1;background:var(--green);color:#fff;border:none;border-radius:8px;padding:10px;font-size:14px;font-weight:600;cursor:pointer">Создать заявку</button>';
@@ -5782,6 +5828,16 @@ function submitOrderCreateForm() {
     errEl.style.display = 'block';
     return;
   }
+  // Стоимость - только число (Влад: "защита от написания чуши, чтобы не было текста").
+  if (params.cost && !/^\d+(\.\d+)?$/.test(params.cost)) {
+    errEl.textContent = 'Стоимость должна быть числом';
+    errEl.style.display = 'block';
+    return;
+  }
+  // Наличные - отдельной колонки под это в таблице планировки нет, Влад: "пока в
+  // таблицу это пусть идёт в примечание".
+  var isCash = document.getElementById('oc-cash').checked;
+  if (isCash) params.note = (params.note ? params.note + '; ' : '') + 'нал';
 
   var btn = document.querySelector('#vcard-content button[onclick="submitOrderCreateForm()"]');
   if (btn) { btn.disabled = true; btn.textContent = 'Создаём…'; }
@@ -5794,11 +5850,32 @@ function submitOrderCreateForm() {
       return;
     }
     closeVehicleCard();
-    // Кэш "Плана задания" устарел - сбрасываем ключ, чтобы следующий заход на
-    // вкладку точно перезапросил свежие данные, а не показал старый список.
-    orderPlanLoadedForKey = null;
+    // Влад: "жуткие тормоза, долго грузит, потом перегружает страницу, ещё грузит -
+    // никто не будет работать с такой системой". Полная перезагрузка вкладки после
+    // каждого создания была лишней - мы и так знаем, что именно записали (форма +
+    // подтверждённый ответ сервера). Добавляем заявку в уже загруженные данные на
+    // месте и перерисовываем мгновенно, без похода на сервер. Реальные (логистом
+    // заполняемые позже) поля подтянутся сами при следующем обычном обновлении
+    // вкладки - серверный кэш на этот день уже сброшен бэкендом при записи.
+    if (orderPlanData && orderPlanData.orders) {
+      orderPlanData.orders.push({
+        day: data.day, orderNumber: String(data.orderNumber),
+        date: orderPlanFormatDateForDay_(data.day), time: params.time,
+        equipType: params.equipType, customer: params.customer, customerContact: params.customerContact,
+        cargo: params.cargo, gabarit: params.gabarit,
+        loadAddress: params.loadAddress, loadContact: params.loadContact,
+        unloadAddress: params.unloadAddress, unloadContact: params.unloadContact,
+        documents: params.documents, reworkTerms: params.reworkTerms, note: params.note,
+        cost: params.cost ? parseFloat(params.cost) : '',
+        status: '', paymentStatus: '', hiredCompany: '', hiredVehicle: '',
+        ownDriver: '', ownVehicle: '', carAssigned: '',
+        invoiceIssued: false, moneyReceived: false, requestSentToDriver: false,
+        driverConfirmed: false, orderEnteredIn1C: false, logistClosed: false,
+        managerName: (myPageCurrentEntry_() || {}).name || '', logistName: '', role: 'manager',
+      });
+    }
     orderPlanActiveDay = data.day;
-    loadOrderPlanData();
+    renderOrderPlan();
   }).catch(function(e) {
     errEl.textContent = 'Ошибка: ' + (e && e.message ? e.message : 'не удалось создать заявку');
     errEl.style.display = 'block';

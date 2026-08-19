@@ -3017,7 +3017,35 @@ function receiptsMonthRevenueMap_(ss) {
 // источник "Выручки по дням" для текущего месяца - ordersData.summary.by_day_commercial
 // (БЕЗ внутригрупповых, см. total_commercial в aggregateOrdersRows - Влад, 2026-08-13:
 // "внутренних не должно быть, мы всё равно не получаем по ним поступления").
+// Готовый расчёт "Поступлений" с сервера (2026-08-19) - та же логика, что ниже в этой функции,
+// уже портирована 1-в-1 в /api/receipts на api.yardhub.ru (сверено с этим самым расчётом
+// 2026-08-18, см. DEPLOY_LOG v221-222 - совпало один в один). Раньше сервером пользовался
+// только фронтенд admin-страницы "Поступления" (files/index.html, fetchReceiptsFromServer_) -
+// личная страница менеджера (buildManagerView_ -> getReceiptsData) ходила мимо, напрямую в
+// Google Sheets, каждый раз читая лист "Поступления" заново - Влад, 2026-08-19: "заходил под
+// Цегельниковым, долго грузилась страница". Форма ответа сервера совпадает 1-в-1 с тем, что
+// возвращает эта функция ниже - используем как есть, без пересборки. Любая проблема -> null ->
+// тихий фолбэк на чтение Таблиц, как было.
+function fetchReceiptsComputedFromServer_() {
+  try {
+    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    if (!apiKey) return null;
+    var resp = UrlFetchApp.fetch('https://api.yardhub.ru/api/receipts', {
+      headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true,
+    });
+    if (resp.getResponseCode() !== 200) return null;
+    var data = JSON.parse(resp.getContentText());
+    if (!data || data.error || !data.summary || !data.today || !data.yesterday || !data.week || !data.this_month) return null;
+    return data;
+  } catch (err) {
+    return null;
+  }
+}
+
 function getReceiptsData(ss, ordersData) {
+  var fromServer = fetchReceiptsComputedFromServer_();
+  if (fromServer) return fromServer;
+
   const liveSheet = ss.getSheetByName(RECEIPTS_SHEET);
   const liveRows = receiptsReadSheetRows_(liveSheet);
   if (!liveRows.length) {
@@ -4348,6 +4376,32 @@ function createOrderPlanEntry_(personName, p) {
 
 function doGet(e) {
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
+
+  // ── ВРЕМЕННО (2026-08-19, Влад: "заходил под Цегельниковым, долго грузилась личная
+  // страница") - замер buildManagerView_ по кускам. ТОЛЬКО ЧТЕНИЕ. УБРАТЬ.
+  if (e && e.parameter && e.parameter.action === 'diag_mgr_view_timing') {
+    var dmvKey = e.parameter.key || '';
+    if (dmvKey !== '7f2a9c1e6b4d8035a1c9ef26b8d40317') {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var dmvName = e.parameter.manager || 'Цегельников Вячеслав Владимирович';
+    var t = {};
+    var t0 = Date.now();
+    var orders = getOrdersData(ss);
+    t.getOrdersData = Date.now() - t0; t0 = Date.now();
+    var dd = getDebtData(ss);
+    t.getDebtData = Date.now() - t0; t0 = Date.now();
+    var rd = getReceiptsData(ss, orders);
+    t.getReceiptsData = Date.now() - t0; t0 = Date.now();
+    var full = getManagerView_(ss, dmvName);
+    t.getManagerView_total = Date.now() - t0;
+    return ContentService.createTextOutput(JSON.stringify({
+      manager: dmvName, timingsMs: t,
+      ordersOk: !orders.error, debtOk: !!(dd && dd.by_customer), receiptsOk: !!(rd && !rd.error),
+      hasDetail: !!(full.orders && full.orders.by_manager_detail && full.orders.by_manager_detail[dmvName]),
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+  // ── конец временного замера ────────────────────────────────────────────────────────────────
 
   // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём.
   // Сначала пробуем свой токен сессии (живёт до 48ч, см. issueSessionToken_) - только если

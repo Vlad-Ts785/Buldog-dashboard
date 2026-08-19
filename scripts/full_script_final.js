@@ -4523,16 +4523,6 @@ function updateOrderPlanStatus_(personName, p) {
 function doGet(e) {
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
 
-  // ── ВРЕМЕННО (2026-08-19, сверка порта getDebtData на сервере) - ТОЛЬКО ЧТЕНИЕ. УБРАТЬ.
-  if (e && e.parameter && e.parameter.action === 'diag_debt_data') {
-    var dddKey = e.parameter.key || '';
-    if (dddKey !== '7f2a9c1e6b4d8035a1c9ef26b8d40317') {
-      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
-    }
-    return ContentService.createTextOutput(JSON.stringify(getDebtData(ss))).setMimeType(ContentService.MimeType.JSON);
-  }
-  // ── конец временной сверки ─────────────────────────────────────────────────────────────────
-
   // ── ВРЕМЕННО (2026-08-19, перенос ДЗ на сервер) - экспорт листа "ДЗ_Статусы" (ручные
   // статусы/комментарии, НЕ из 1С - разовый + периодический перенос, см.
   // plans/2026-07-08-debt-receivables-tab.md). УБРАТЬ после того, как запись статусов тоже

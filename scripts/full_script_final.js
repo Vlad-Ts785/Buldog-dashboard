@@ -3476,6 +3476,85 @@ function sendTelegram(text, chatId) {
 }
 
 // ============================================================
+// СТОРОЖ ЗА СЕРВЕРОМ (Этап 0.4 плана устранения аудита)
+// ============================================================
+// Почему сторож живёт ЗДЕСЬ, а не на сервере рядом с импортами: сторож, который лежит внутри
+// того, за чем следит, умирает вместе с ним. Обработчик ошибок на VPS не сообщит, что cron
+// перестал запускаться (он сам не запустится) и тем более что сервер целиком лёг. Apps Script
+// - независимая площадка с собственным расписанием и уже настроенным ботом, поэтому он видит
+// и то, и другое. Токен бота при этом остаётся в одном месте (Script Properties), а не
+// расползается ещё одной копией на VPS.
+//
+// Повод: 19.08.2026 импорт заказов падал 182 раза подряд восемь часов. Ошибка честно писалась
+// в лог, но лог никто не открывает, а на этих данных считалась зарплата.
+function watchdogCheckDataFreshness() {
+  var props = PropertiesService.getScriptProperties();
+  var apiKey = props.getProperty('YARD_API_KEY');
+  if (!apiKey) { Logger.log('watchdog: YARD_API_KEY не задан, пропускаю'); return; }
+
+  var problems = [];
+  try {
+    var resp = UrlFetchApp.fetch('https://api.yardhub.ru/api/import_status', {
+      headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true,
+    });
+    if (resp.getResponseCode() !== 200) {
+      problems.push('Сервер отвечает кодом ' + resp.getResponseCode());
+    } else {
+      var data = JSON.parse(resp.getContentText());
+      (data.scripts || []).forEach(function(s) {
+        if (s.healthy) return;
+        var line = s.label + ' - ' + s.problem;
+        if (s.minutes_since_run !== null) line += ' (последний запуск ' + s.minutes_since_run + ' мин назад)';
+        if (s.error_message) line += ': ' + String(s.error_message).slice(0, 200);
+        problems.push(line);
+      });
+    }
+  } catch (err) {
+    // Сюда попадаем, если сервер не отвечает вообще - это и есть тот случай, ради которого
+    // сторож вынесен наружу.
+    problems.push('Сервер недоступен: ' + err.message);
+  }
+
+  // Защита от спама - главное, чтобы уведомления не начали игнорировать. Пока проблема ТА ЖЕ,
+  // повторяем не чаще раза в 6 часов; изменился состав проблем - сообщаем сразу.
+  var stateKey = 'WATCHDOG_LAST_STATE';
+  var timeKey = 'WATCHDOG_LAST_SENT';
+  var signature = problems.join('|');
+  var prevSignature = props.getProperty(stateKey) || '';
+  var prevSentMs = parseInt(props.getProperty(timeKey) || '0', 10);
+  var nowMs = Date.now();
+
+  if (!problems.length) {
+    // Восстановление сообщаем один раз - чтобы было видно, что чинить больше нечего.
+    if (prevSignature) {
+      sendTelegram('✅ *Данные снова обновляются*\nВсе импорты в норме.');
+      props.deleteProperty(stateKey);
+      props.deleteProperty(timeKey);
+    }
+    return;
+  }
+
+  var sameProblem = (signature === prevSignature);
+  if (sameProblem && (nowMs - prevSentMs) < 6 * 3600 * 1000) return;
+
+  sendTelegram('⚠️ *Дашборд: обновление данных не проходит*\n\n' + problems.join('\n') +
+    '\n\nЦифры на дашборде могут быть устаревшими.');
+  props.setProperty(stateKey, signature);
+  props.setProperty(timeKey, String(nowMs));
+}
+
+// Ставит сторожа на расписание (раз в час). ВЫПОЛНИТЬ ВРУЧНУЮ один раз в редакторе Apps
+// Script - clasp умеет только заливать код, но не запускать функции (см. CLAUDE.md).
+// Без завершающего "_" в имени - иначе не видна в списке "Выполнить".
+function setupWatchdogTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'watchdogCheckDataFreshness') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('watchdogCheckDataFreshness').timeBased().everyHours(1).create();
+  Logger.log('Сторож поставлен на расписание: раз в час.');
+}
+
+// ============================================================
 // УТИЛИТЫ
 // ============================================================
 function formatNum(n) {

@@ -481,6 +481,14 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   </nav>
 
   <div class="sidebar-bottom">
+    <!-- Плашка "обновление не проходит" (Этап 0.3 плана устранения аудита). 19.08.2026 импорт
+         заказов был мёртв 8 часов, а дашборд всё это время показывал устаревшие цифры без
+         единого признака - и на них считалась зарплата. Молчаливо устаревшие данные хуже
+         явной ошибки: явную видно, эту нет. Заполняется checkDataFreshness(), скрыта пока
+         всё в порядке. -->
+    <div id="nav-stale" style="display:none;margin-bottom:8px;padding:8px 10px;border-radius:6px;
+         background:rgba(239,159,39,.12);border:1px solid rgba(239,159,39,.35);
+         font-size:11px;line-height:1.45;color:#EF9F27"></div>
     <div class="sidebar-updated" id="nav-updated">Нет данных</div>
     <!-- Admin-предпросмотр "глазами сотрудника" (Влад, 2026-08-18: "нажал менеджер - и у меня
          полностью интерфейс поменялся, как его видит менеджер... лучше сразу сотрудника
@@ -3641,6 +3649,7 @@ function renderMyPageVasin(el, current, selectorHtml) {
 function render() {
   const t = D.updated ? new Date(D.updated).toLocaleString('ru',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'}) : '';
   setText('nav-updated', 'Обновлено: ' + t);
+  checkDataFreshness(); // плашка "обновление не проходит", см. Этап 0.3
   applyRoleUI();
 
   if (D.role === 'manager' || D.role === 'logist' || (D.role === 'admin' && viewAsEntry)) {
@@ -9174,6 +9183,35 @@ function fetchReceiptsFromServer_() {
   return fetchFromYardApi_('/receipts', {}).then(function(r) {
     return r.ok ? r.data : null;
   }).catch(function() { return null; });
+}
+
+// Свежесть данных (Этап 0.3 плана устранения аудита) - читает журнал import_runs через
+// /api/import_status. Показывает плашку, только когда есть о чём предупредить: молчащий или
+// падающий импорт. Молчание САМОГО сервера намеренно НЕ показываем - дашборд в этом случае
+// уже работает через тихий фолбэк на Apps Script и данные показывает честные; пугать
+// пользователя тем, что от него не зависит и на цифры не влияет, значит приучить не читать
+// плашку вообще.
+function checkDataFreshness() {
+  var box = document.getElementById('nav-stale');
+  if (!box) return;
+  fetchFromYardApi_('/import_status', {}).then(function(r) {
+    if (!r.ok || !r.data || !r.data.scripts) return;
+    var broken = r.data.scripts.filter(function(s) { return !s.healthy; });
+    if (!broken.length) { box.style.display = 'none'; return; }
+    var lines = broken.map(function(s) {
+      return s.label + ' - ' + s.problem +
+        (s.minutes_since_run !== null ? ' (' + fmtAgo_(s.minutes_since_run) + ')' : '');
+    });
+    box.innerHTML = '<b>Обновление не проходит</b><br>' + lines.join('<br>') +
+      '<br><span style="opacity:.75">Цифры могут быть устаревшими</span>';
+    box.style.display = 'block';
+  }).catch(function() { /* сервер недоступен - молчим, см. комментарий выше */ });
+}
+function fmtAgo_(min) {
+  if (min < 60) return min + ' мин';
+  var h = Math.floor(min / 60);
+  if (h < 24) return h + ' ч';
+  return Math.floor(h / 24) + ' дн';
 }
 
 function loadClientsData() {

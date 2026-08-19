@@ -4585,23 +4585,6 @@ function updateOrderPlanStatus_(personName, p) {
 function doGet(e) {
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
 
-  // ── ВРЕМЕННО (2026-08-19, включение серверного расчёта ДЗ по просьбе Влада) - УБРАТЬ.
-  if (e && e.parameter && e.parameter.action === 'diag_enable_debt_calc') {
-    var dedcKey = e.parameter.key || '';
-    if (dedcKey !== '7f2a9c1e6b4d8035a1c9ef26b8d40317') {
-      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
-    }
-    PropertiesService.getScriptProperties().setProperty('USE_SERVER_DEBT_CALC', 'on');
-    var verify = verifyServerDebtCalc();
-    var liveNow = getDebtData(ss); // тот самый путь, которым реально пойдёт дашборд
-    return ContentService.createTextOutput(JSON.stringify({
-      ok: true, verify_problems: verify,
-      live_total_balance: liveNow ? liveNow.summary.total_balance : null,
-      live_debtor_count: liveNow ? liveNow.summary.debtor_count : null,
-    })).setMimeType(ContentService.MimeType.JSON);
-  }
-  // ── конец временного включения ─────────────────────────────────────────────────────────────
-
   // ── ВРЕМЕННО (2026-08-19, перенос ДЗ на сервер) - экспорт листа "ДЗ_Статусы" (ручные
   // статусы/комментарии, НЕ из 1С - разовый + периодический перенос, см.
   // plans/2026-07-08-debt-receivables-tab.md). УБРАТЬ после того, как запись статусов тоже

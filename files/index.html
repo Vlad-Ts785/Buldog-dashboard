@@ -5633,6 +5633,160 @@ function orderPlanFormatCost_(cost) {
   return n !== null ? Math.round(n).toLocaleString('ru-RU') + ' ₽' : String(cost).trim();
 }
 
+// ── СОЗДАНИЕ ЗАЯВКИ (вариант Б, Влад 2026-08-18: "не только инструмент просмотра,
+// но и инструмент создания заявок") - форма пишет в ту же Google Таблицу
+// планировки через ?action=order_plan_create (createOrderPlanEntry_ в Apps
+// Script). Списки ниже - точная копия строгой валидации листа "Справочник"
+// таблицы планировки (см. ORDER_PLAN_EQUIP_TYPES_ и т.д. в backend, сверено
+// живым тестом 2026-08-18) - если справочник когда-нибудь изменится, backend
+// всё равно отклонит несовпадающее значение понятной ошибкой.
+var ORDER_PLAN_EQUIP_TYPES_FE_ = ['Трал', 'Длинномер', 'Панелевоз', 'Любая модификация', 'Тент'];
+var ORDER_PLAN_REWORK_TERMS_FE_ = ['Без переработки', 'Переработка по согласованию с логистом'];
+var ORDER_PLAN_GABARIT_FE_ = ['Габарит', 'Негабарит'];
+var ORDER_PLAN_DOCUMENTS_FE_ = ['Путевой лист', 'Путевой лист и ТТН'];
+var ORDER_PLAN_FORM_INPUT_STYLE_ = 'width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:7px 10px;font-size:13px';
+
+// Создавать заявки может только менеджер (у B верхней/нижней строки в таблице
+// планировки разные справочники - см. plans/2026-08-18-order-plan-create-orders.md)
+// - для admin смотрим, кого он выбрал через "Смотреть как сотрудник"/дропдаун.
+function orderPlanCanCreate_() {
+  if (!D) return false;
+  if (D.role === 'manager') return true;
+  if (D.role === 'logist') return false;
+  var entry = myPageCurrentEntry_();
+  return !!entry && entry.type === 'manager';
+}
+
+function formRow_(label, inputHtml) {
+  return '<div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">'+label+'</label>'+inputHtml+'</div>';
+}
+function orderPlanSelectHtml_(id, options, selected, required) {
+  var h = '<select id="'+id+'" style="'+ORDER_PLAN_FORM_INPUT_STYLE_+'">';
+  h += '<option value="">'+(required ? '— выберите —' : '(не указано)')+'</option>';
+  options.forEach(function(o) {
+    h += '<option value="'+o+'"'+(o === selected ? ' selected' : '')+'>'+o+'</option>';
+  });
+  h += '</select>';
+  return h;
+}
+function orderPlanInputHtml_(id, value, placeholder, type) {
+  var esc = String(value == null ? '' : value).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  return '<input id="'+id+'" type="'+(type || 'text')+'" value="'+esc+'" placeholder="'+(placeholder || '')+'" style="'+ORDER_PLAN_FORM_INPUT_STYLE_+'">';
+}
+
+function openOrderCreateForm(prefill) {
+  document.getElementById('vcard-content').innerHTML = buildOrderCreateForm_(prefill || {});
+  document.getElementById('vcard-overlay').classList.add('open');
+  document.getElementById('vcard-panel').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+// "Повторить заказ" (Влад: "нажимаем... форма уже автоматически заполняется всеми
+// параметрами, остаётся только внести время и дату") - день и время НЕ копируем
+// намеренно, менеджер вводит их заново.
+function repeatOrderPlanEntry(idx) {
+  var o = orderPlanCurrentDayOrders[idx];
+  if (!o) return;
+  openOrderCreateForm({
+    equipType: ORDER_PLAN_EQUIP_TYPES_FE_.indexOf(o.equipType) >= 0 ? o.equipType : '',
+    customer: o.customer, customerContact: o.customerContact,
+    cargo: o.cargo, gabarit: o.gabarit,
+    loadAddress: o.loadAddress, loadContact: o.loadContact,
+    unloadAddress: o.unloadAddress, unloadContact: o.unloadContact,
+    documents: o.documents, reworkTerms: o.reworkTerms, note: o.note,
+    cost: (typeof o.cost === 'number') ? o.cost : '',
+  });
+}
+
+function buildOrderCreateForm_(prefill) {
+  var today = orderPlanTodayMsk_();
+  var day = orderPlanActiveDay || today.day;
+  var h = '<div class="vcard-header"><div class="vcard-gos">Новая заявка</div></div><div class="vcard-body">';
+  h += '<div id="order-create-error" style="display:none;color:#E24B4A;font-size:13px;margin-bottom:14px;padding:8px 10px;background:rgba(226,75,74,.1);border-radius:8px"></div>';
+
+  var dayOptions = '';
+  for (var d = 1; d <= today.daysInMonth; d++) {
+    dayOptions += '<option value="'+d+'"'+(d === day ? ' selected' : '')+'>'+d+'</option>';
+  }
+  h += formRow_('День подачи *', '<select id="oc-day" style="'+ORDER_PLAN_FORM_INPUT_STYLE_+'">'+dayOptions+'</select>');
+  h += formRow_('Время подачи', orderPlanInputHtml_('oc-time', prefill.time, '09:00'));
+  h += formRow_('Тип техники *', orderPlanSelectHtml_('oc-equipType', ORDER_PLAN_EQUIP_TYPES_FE_, prefill.equipType, true));
+  h += formRow_('Заказчик *', orderPlanInputHtml_('oc-customer', prefill.customer));
+  h += formRow_('Конт. лицо заказчика', orderPlanInputHtml_('oc-customerContact', prefill.customerContact));
+  h += formRow_('Груз', orderPlanInputHtml_('oc-cargo', prefill.cargo));
+  h += formRow_('Габарит', orderPlanSelectHtml_('oc-gabarit', ORDER_PLAN_GABARIT_FE_, prefill.gabarit));
+  h += formRow_('Адрес погрузки *', orderPlanInputHtml_('oc-loadAddress', prefill.loadAddress));
+  h += formRow_('Конт. лицо на погрузке', orderPlanInputHtml_('oc-loadContact', prefill.loadContact));
+  h += formRow_('Адрес выгрузки *', orderPlanInputHtml_('oc-unloadAddress', prefill.unloadAddress));
+  h += formRow_('Конт. лицо на выгрузке', orderPlanInputHtml_('oc-unloadContact', prefill.unloadContact));
+  h += formRow_('Документы', orderPlanSelectHtml_('oc-documents', ORDER_PLAN_DOCUMENTS_FE_, prefill.documents));
+  h += formRow_('Условия переработки', orderPlanSelectHtml_('oc-reworkTerms', ORDER_PLAN_REWORK_TERMS_FE_, prefill.reworkTerms));
+  h += formRow_('Примечание', orderPlanInputHtml_('oc-note', prefill.note));
+  h += formRow_('Стоимость', orderPlanInputHtml_('oc-cost', prefill.cost, '', 'number'));
+
+  h += '<div style="display:flex;gap:10px;margin-top:6px">';
+  h += '<button type="button" onclick="submitOrderCreateForm()" style="flex:1;background:var(--green);color:#fff;border:none;border-radius:8px;padding:10px;font-size:14px;font-weight:600;cursor:pointer">Создать заявку</button>';
+  h += '<button type="button" onclick="closeVehicleCard()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px 16px;font-size:14px;cursor:pointer">Отмена</button>';
+  h += '</div></div>';
+  return h;
+}
+
+function submitOrderCreateForm() {
+  var errEl = document.getElementById('order-create-error');
+  errEl.style.display = 'none';
+
+  var params = {
+    action: 'order_plan_create',
+    day: document.getElementById('oc-day').value,
+    time: document.getElementById('oc-time').value.trim(),
+    equipType: document.getElementById('oc-equipType').value,
+    customer: document.getElementById('oc-customer').value.trim(),
+    customerContact: document.getElementById('oc-customerContact').value.trim(),
+    cargo: document.getElementById('oc-cargo').value.trim(),
+    gabarit: document.getElementById('oc-gabarit').value,
+    loadAddress: document.getElementById('oc-loadAddress').value.trim(),
+    loadContact: document.getElementById('oc-loadContact').value.trim(),
+    unloadAddress: document.getElementById('oc-unloadAddress').value.trim(),
+    unloadContact: document.getElementById('oc-unloadContact').value.trim(),
+    documents: document.getElementById('oc-documents').value,
+    reworkTerms: document.getElementById('oc-reworkTerms').value,
+    note: document.getElementById('oc-note').value.trim(),
+    cost: document.getElementById('oc-cost').value.trim(),
+  };
+  if (D && D.role !== 'manager' && D.role !== 'logist') {
+    var entry = myPageCurrentEntry_();
+    if (entry) params.manager = entry.name;
+  }
+
+  if (!params.equipType || !params.customer || !params.loadAddress || !params.unloadAddress) {
+    errEl.textContent = 'Заполните обязательные поля: тип техники, заказчик, адреса погрузки и выгрузки';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  var btn = document.querySelector('#vcard-content button[onclick="submitOrderCreateForm()"]');
+  if (btn) { btn.disabled = true; btn.textContent = 'Создаём…'; }
+
+  apiFetchJson(params).then(function(data) {
+    if (data.error) {
+      errEl.textContent = data.error;
+      errEl.style.display = 'block';
+      if (btn) { btn.disabled = false; btn.textContent = 'Создать заявку'; }
+      return;
+    }
+    closeVehicleCard();
+    // Кэш "Плана задания" устарел - сбрасываем ключ, чтобы следующий заход на
+    // вкладку точно перезапросил свежие данные, а не показал старый список.
+    orderPlanLoadedForKey = null;
+    orderPlanActiveDay = data.day;
+    loadOrderPlanData();
+  }).catch(function(e) {
+    errEl.textContent = 'Ошибка: ' + (e && e.message ? e.message : 'не удалось создать заявку');
+    errEl.style.display = 'block';
+    if (btn) { btn.disabled = false; btn.textContent = 'Создать заявку'; }
+  });
+}
+
 // "Сегодня" по московскому времени, независимо от часового пояса браузера - берём
 // момент ответа сервера (orderPlanData.updated) и сдвигаем на UTC+3 (Москва круглый
 // год без перевода часов). daysInMonth - для отрисовки ВСЕХ вкладок 1..30/31, а не
@@ -5726,7 +5880,7 @@ function orderPlanRowBg_(status) {
 function openOrderCard(idx) {
   var o = orderPlanCurrentDayOrders[idx];
   if (!o) return;
-  document.getElementById('vcard-content').innerHTML = buildOrderCard_(o);
+  document.getElementById('vcard-content').innerHTML = buildOrderCard_(o, idx);
   document.getElementById('vcard-overlay').classList.add('open');
   document.getElementById('vcard-panel').classList.add('open');
   document.body.style.overflow = 'hidden';
@@ -5753,11 +5907,14 @@ function orderPlanBoolBadge_(val, trueText, falseText) {
   return '<span style="color:'+(val?'#1D9E75':'#E24B4A')+';font-weight:600">'+(val?trueText:falseText)+'</span>';
 }
 
-function buildOrderCard_(o) {
+function buildOrderCard_(o, idx) {
   var color = orderPlanStatusColor_(o.status);
   var h = '<div class="vcard-header">';
   h += '<div class="vcard-gos">№ '+(o.orderNumber||'—')+' · '+(o.equipType||'—')+'</div>';
   h += '<div class="vcard-meta">'+(o.date||'')+(o.time?' '+o.time:'')+' · <span style="color:'+color+';font-weight:600">'+(o.status||'без статуса')+'</span></div>';
+  if (orderPlanCanCreate_() && idx !== undefined) {
+    h += '<button type="button" onclick="repeatOrderPlanEntry('+idx+')" style="margin-top:10px;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer">↻ Повторить заказ</button>';
+  }
   h += '</div><div class="vcard-body">';
 
   h += '<div class="vcard-sec"><div class="vcard-sec-title">Заказчик</div>'+
@@ -5824,6 +5981,13 @@ function renderOrderPlan() {
   if (orderPlanActiveDay === null) orderPlanActiveDay = today.day;
 
   var h = '<div class="card" style="padding:16px 18px">';
+
+  // Кнопка создания заявки (вариант Б, Влад 2026-08-18) - только менеджер (свой
+  // или тот, под кем смотрит admin) - логисты назначают транспорт, не создают заявки.
+  if (orderPlanCanCreate_()) {
+    h += '<div style="display:flex;justify-content:flex-end;margin-bottom:10px">'+
+      '<button type="button" onclick="openOrderCreateForm()" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer">+ Новая заявка</button></div>';
+  }
 
   // Admin смотрит не свой план - подпись, чей именно, и подсказка, где переключить.
   // 2026-08-18: с появлением кнопки "Смотреть как сотрудник" (подвал сайдбара) это

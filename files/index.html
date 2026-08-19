@@ -5677,6 +5677,50 @@ function orderPlanCanCreate_() {
   return !!entry && entry.type === 'manager';
 }
 
+// Статус прямо в таблице (Влад, 2026-08-18: "статус должен меняться прямо из
+// таблицы... в таблице Google также статусы должны меняться в зависимости от
+// статуса в дашборде") - select вместо текста для своих заявок, без открытия
+// формы редактирования. Пишет только одну ячейку (order_plan_set_status).
+function orderPlanStatusSelectHtml_(o, idx) {
+  var color = orderPlanStatusColor_(o.status);
+  if (!(orderPlanCanCreate_() && o.role === 'manager')) {
+    return '<span style="color:'+color+';font-weight:600">'+(o.status || 'без статуса')+'</span>';
+  }
+  var h = '<select onchange="quickSetOrderPlanStatus('+idx+',this.value,this)" style="background:transparent;border:1px solid var(--border);border-radius:6px;padding:3px 4px;font-size:12px;font-weight:600;color:'+color+';cursor:pointer;max-width:120px">';
+  h += '<option value=""'+(!o.status ? ' selected' : '')+'>без статуса</option>';
+  ORDER_PLAN_STATUSES_FE_.forEach(function(s) {
+    h += '<option value="'+s+'"'+(s === o.status ? ' selected' : '')+'>'+s+'</option>';
+  });
+  h += '</select>';
+  return h;
+}
+
+function quickSetOrderPlanStatus(idx, newStatus, selectEl) {
+  var o = orderPlanCurrentDayOrders[idx];
+  if (!o) return;
+  var prevStatus = o.status;
+  selectEl.disabled = true;
+  var params = { action: 'order_plan_set_status', day: o.day, orderNumber: o.orderNumber, status: newStatus };
+  if (D && D.role !== 'manager' && D.role !== 'logist') {
+    var entry = myPageCurrentEntry_();
+    if (entry) params.manager = entry.name;
+  }
+  apiFetchJson(params).then(function(data) {
+    if (data.error) {
+      alert(data.error);
+      selectEl.value = prevStatus || '';
+      selectEl.disabled = false;
+      return;
+    }
+    o.status = newStatus;
+    renderOrderPlan(); // перекрасит фон строки целиком - фон зависит от статуса
+  }).catch(function() {
+    alert('Не удалось сохранить статус, попробуйте ещё раз');
+    selectEl.value = prevStatus || '';
+    selectEl.disabled = false;
+  });
+}
+
 function formRow_(label, inputHtml) {
   return '<div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">'+label+'</label>'+inputHtml+'</div>';
 }
@@ -5702,6 +5746,12 @@ function orderPlanInputHtml_(id, value, placeholder, type, extraAttrs) {
 // тут только то, что уже видно в загруженных заказах).
 function orderPlanCustomerOptionsHtml_() {
   var names = {};
+  // Влад, 2026-08-18: "список компаний должен быть из 1С... правильные названия,
+  // старые корявые уйдут со временем" - приоритет реальным контрагентам из 1С
+  // (D.debt.by_customer уже загружен вместе с основным payload, без похода на
+  // сервер), а не тому, как менеджеры печатают в самой таблице планировки.
+  // Смешиваем с уже использованными в плане именами - плавный переход, не резкий.
+  ((D && D.debt && D.debt.by_customer) || []).forEach(function(c) { if (c.contragent) names[c.contragent] = true; });
   (orderPlanData && orderPlanData.orders || []).forEach(function(o) { if (o.customer) names[o.customer] = true; });
   return Object.keys(names).sort(function(a,b){ return a.localeCompare(b,'ru'); })
     .map(function(n){ return '<option value="'+n.replace(/"/g,'&quot;')+'">'; }).join('');
@@ -5780,7 +5830,11 @@ function editOrderPlanEntry(idx) {
 function buildOrderCreateForm_(prefill) {
   var isEdit = !!prefill.editOrderNumber;
   var today = orderPlanTodayMsk_();
-  var day = isEdit ? prefill.editDay : (orderPlanActiveDay || today.day);
+  // Влад, 2026-08-18: "предлагаемые даты должны быть сегодня и дальше, прошлые не
+  // особо нужны" (создание/повтор заказа на прошедшую дату не имеет смысла) -
+  // редактирование НЕ ограничиваем (заявка уже существует, могла быть создана
+  // задним числом или её всё равно нужно поправить).
+  var day = isEdit ? prefill.editDay : Math.max(orderPlanActiveDay || today.day, today.day);
   var h = '<div class="vcard-header"><div class="vcard-gos">'+(isEdit ? 'Заявка № '+prefill.editOrderNumber : 'Новая заявка')+'</div></div><div class="vcard-body">';
   h += '<div id="order-create-error" style="display:none;color:#E24B4A;font-size:13px;margin-bottom:14px;padding:8px 10px;background:rgba(226,75,74,.1);border-radius:8px"></div>';
 
@@ -5793,7 +5847,7 @@ function buildOrderCreateForm_(prefill) {
     h += formRow_('Статус', orderPlanSelectHtml_('oc-status', ORDER_PLAN_STATUSES_FE_, prefill.status));
   } else {
     var dayOptions = '';
-    for (var d = 1; d <= today.daysInMonth; d++) {
+    for (var d = today.day; d <= today.daysInMonth; d++) {
       dayOptions += '<option value="'+d+'"'+(d === day ? ' selected' : '')+'>'+d+'</option>';
     }
     h += formRow_('День подачи *', '<select id="oc-day" style="'+ORDER_PLAN_FORM_INPUT_STYLE_+'">'+dayOptions+'</select>');
@@ -6191,7 +6245,6 @@ function renderOrderPlan() {
       '</tr></thead><tbody>';
     var daySum = 0, daySumCount = 0;
     dayOrders.forEach(function(o, idx) {
-      var color = orderPlanStatusColor_(o.status);
       var car = orderPlanCarSummary_(o.carAssigned);
       var costText = orderPlanFormatCost_(o.cost);
       var costN = orderPlanCostNumber_(o.cost);
@@ -6203,7 +6256,7 @@ function renderOrderPlan() {
       h += '<td class="num">'+(costText || '—')+'</td>';
       h += '<td>'+(o.hiredCompany || '—')+'</td>';
       h += '<td'+(car.full ? ' title="'+car.full.replace(/"/g,'&quot;')+'"' : '')+'>'+(car.short || '—')+(car.full ? orderPlanCopyBtnHtml_(car.full) : '')+'</td>';
-      h += '<td style="color:'+color+';font-weight:600">'+(o.status || 'без статуса')+'</td>';
+      h += '<td onclick="event.stopPropagation()">'+orderPlanStatusSelectHtml_(o, idx)+'</td>';
       h += '<td>'+orderPlanBoolBadge_(o.driverConfirmed,'Подтверждено','Не подтверждено')+'</td>';
       if (canManage) {
         h += '<td onclick="event.stopPropagation()" style="white-space:nowrap">';

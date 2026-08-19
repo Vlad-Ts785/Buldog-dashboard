@@ -4461,6 +4461,57 @@ function updateOrderPlanEntry_(personName, p) {
   }
 }
 
+// Быстрая смена статуса прямо из таблицы "План задание" (Влад, 2026-08-18:
+// "статус должен меняться прямо из таблицы, как на скриншоте... и в таблице
+// Google также статусы должны меняться в зависимости от статуса в дашборде") -
+// облегчённая версия updateOrderPlanEntry_, трогает ТОЛЬКО одну ячейку (статус,
+// нижняя строка колонки A) - никакого риска затереть остальные поля устаревшими
+// клиентскими данными. Пишем в ту же ячейку, что отслеживает masterEditRouter -
+// покраска/Telegram сработают сами, тот же installable-триггер, что и для ручной
+// правки в самой таблице.
+function updateOrderPlanStatus_(personName, p) {
+  var day = parseInt(p.day, 10);
+  var orderNumber = String(p.orderNumber || '').trim();
+  if (!day || day < 1 || day > 31 || !orderNumber) return { error: 'Некорректный заказ' };
+  var status = String(p.status || '').trim();
+  if (status && ORDER_PLAN_STATUSES_.indexOf(status) === -1) {
+    return { error: 'Статус должен быть одним из: ' + ORDER_PLAN_STATUSES_.join(', ') };
+  }
+
+  var writeName = String(personName || '').trim().split(/\s+/).slice(0, 2).join(' ');
+  var resolved = resolveOrderPlanSpreadsheet_();
+  if (resolved.error) return { error: resolved.error };
+  var sheet = resolved.planSs.getSheetByName(String(day));
+  if (!sheet) return { error: 'Вкладка на день ' + day + ' не найдена' };
+
+  var colA = sheet.getRange(3, 1, ORDER_PLAN_CREATE_MAX_ROW_ - 2, 1).getValues();
+  var targetTopRow = null;
+  for (var i = 0; i < colA.length; i += 2) {
+    if (String(colA[i][0]).trim() === orderNumber) { targetTopRow = 3 + i; break; }
+  }
+  if (targetTopRow === null) return { error: 'Заказ №' + orderNumber + ' не найден на вкладке ' + day };
+  var bottomRow = targetTopRow + 1;
+
+  // Тот же авторский контроль, что и у полного редактирования - менять статус
+  // может только тот, кто создал заявку.
+  var currentManager = String(sheet.getRange(targetTopRow, 2).getValue()).trim();
+  if (currentManager && currentManager !== writeName) {
+    return { error: 'Эта заявка создана другим менеджером (' + currentManager + ') - менять статус может только автор' };
+  }
+
+  try {
+    sheet.getRange(bottomRow, 1, 1, 1).setValue(status);
+  } catch (writeErr) {
+    return { error: 'Не удалось сохранить статус: ' + writeErr.message };
+  }
+
+  try {
+    CacheService.getScriptCache().remove('order_plan_day_v3_' + resolved.planId + '_' + day);
+  } catch (cacheErr) { /* не критично */ }
+
+  return { ok: true, day: day, orderNumber: orderNumber, status: status };
+}
+
 // ============================================================
 // API ДЛЯ ДАШБОРДА — читает Штатку для статусов и типов
 // ============================================================
@@ -4607,6 +4658,22 @@ function doGet(e) {
         : (e.parameter.manager || access.name);
       return ContentService
         .createTextOutput(JSON.stringify(updateOrderPlanEntry_(opuPerson, e.parameter)))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // Быстрая смена статуса прямо из таблицы (без открытия формы редактирования) -
+    // те же права, что и на редактирование.
+    if (action === 'order_plan_set_status') {
+      if (access.role === 'logist') {
+        return ContentService
+          .createTextOutput(JSON.stringify({ error: 'Смена статуса доступна менеджерам' }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+      var opsPerson = access.role === 'manager'
+        ? access.name
+        : (e.parameter.manager || access.name);
+      return ContentService
+        .createTextOutput(JSON.stringify(updateOrderPlanStatus_(opsPerson, e.parameter)))
         .setMimeType(ContentService.MimeType.JSON);
     }
 

@@ -171,9 +171,15 @@ clasp create-version "описание"
 clasp list-deployments   # найти deployment ID = хвост URL в API_URL_DEFAULT (files/index.html) между /s/ и /exec
 clasp redeploy <deploymentId> --versionNumber <N> --description "..."
 ```
-Deployment ID живого `/exec` (на дату 2026-07-10):
-`AKfycbxWi4wJWsSeHdgwrsC-d__EOrncLnkhDr6PgXohoPafY2Y2VtBPq_mGi9qd7mH-vzA00w` - сверяй с
-`API_URL_DEFAULT` в `files/index.html`, он мог измениться.
+Deployment ID живого `/exec` (на дату 2026-08-18/19):
+`AKfycbxN4dAxHUhi2S7bfh7Ts8kh4nai11hzWO4nXA2XLQbMNyMXqriGQDL4LhTql-XbXWzyeA` - сверяй с
+`API_URL_DEFAULT` в `files/index.html`, он мог измениться. **Старый ID
+(`AKfycbxWi4wJWsSeHdgwrsC-...`) МЁРТВ** - стабильно отдаёт HTTP 404 при живом коде/аккаунте
+(причина не установлена - `clasp deploy` в него проходил без ошибок, но URL не отвечал; вторая
+существовавшая деплой-цель того же проекта, `@HEAD`, тоже была нерабочей, но по другой причине -
+"permission denied", похоже не настроена на анонимный доступ). Если снова столкнёшься с 404 на
+`/exec` при исправном коде - не трать время на редеплой того же ID, сразу `clasp deploy` БЕЗ
+`--deploymentId` (создаст новый), проверь curl'ом, обнови `API_URL_DEFAULT`.
 
 **Вручную через браузер (запасной путь)** - Развернуть -> Управление развёртываниями ->
 Новая версия -> Развернуть.

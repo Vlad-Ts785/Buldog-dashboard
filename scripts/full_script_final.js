@@ -3017,7 +3017,35 @@ function receiptsMonthRevenueMap_(ss) {
 // источник "Выручки по дням" для текущего месяца - ordersData.summary.by_day_commercial
 // (БЕЗ внутригрупповых, см. total_commercial в aggregateOrdersRows - Влад, 2026-08-13:
 // "внутренних не должно быть, мы всё равно не получаем по ним поступления").
+// Готовый расчёт "Поступлений" с сервера (2026-08-19) - та же логика, что ниже в этой функции,
+// уже портирована 1-в-1 в /api/receipts на api.yardhub.ru (сверено с этим самым расчётом
+// 2026-08-18, см. DEPLOY_LOG v221-222 - совпало один в один). Раньше сервером пользовался
+// только фронтенд admin-страницы "Поступления" (files/index.html, fetchReceiptsFromServer_) -
+// личная страница менеджера (buildManagerView_ -> getReceiptsData) ходила мимо, напрямую в
+// Google Sheets, каждый раз читая лист "Поступления" заново - Влад, 2026-08-19: "заходил под
+// Цегельниковым, долго грузилась страница". Форма ответа сервера совпадает 1-в-1 с тем, что
+// возвращает эта функция ниже - используем как есть, без пересборки. Любая проблема -> null ->
+// тихий фолбэк на чтение Таблиц, как было.
+function fetchReceiptsComputedFromServer_() {
+  try {
+    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    if (!apiKey) return null;
+    var resp = UrlFetchApp.fetch('https://api.yardhub.ru/api/receipts', {
+      headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true,
+    });
+    if (resp.getResponseCode() !== 200) return null;
+    var data = JSON.parse(resp.getContentText());
+    if (!data || data.error || !data.summary || !data.today || !data.yesterday || !data.week || !data.this_month) return null;
+    return data;
+  } catch (err) {
+    return null;
+  }
+}
+
 function getReceiptsData(ss, ordersData) {
+  var fromServer = fetchReceiptsComputedFromServer_();
+  if (fromServer) return fromServer;
+
   const liveSheet = ss.getSheetByName(RECEIPTS_SHEET);
   const liveRows = receiptsReadSheetRows_(liveSheet);
   if (!liveRows.length) {

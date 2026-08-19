@@ -4349,6 +4349,32 @@ function createOrderPlanEntry_(personName, p) {
 function doGet(e) {
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
 
+  // ── ВРЕМЕННО (2026-08-19, Влад: "заходил под Цегельниковым, долго грузилась личная
+  // страница") - замер buildManagerView_ по кускам. ТОЛЬКО ЧТЕНИЕ. УБРАТЬ.
+  if (e && e.parameter && e.parameter.action === 'diag_mgr_view_timing') {
+    var dmvKey = e.parameter.key || '';
+    if (dmvKey !== '7f2a9c1e6b4d8035a1c9ef26b8d40317') {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var dmvName = e.parameter.manager || 'Цегельников Вячеслав Владимирович';
+    var t = {};
+    var t0 = Date.now();
+    var orders = getOrdersData(ss);
+    t.getOrdersData = Date.now() - t0; t0 = Date.now();
+    var dd = getDebtData(ss);
+    t.getDebtData = Date.now() - t0; t0 = Date.now();
+    var rd = getReceiptsData(ss, orders);
+    t.getReceiptsData = Date.now() - t0; t0 = Date.now();
+    var full = getManagerView_(ss, dmvName);
+    t.getManagerView_total = Date.now() - t0;
+    return ContentService.createTextOutput(JSON.stringify({
+      manager: dmvName, timingsMs: t,
+      ordersOk: !orders.error, debtOk: !!(dd && dd.by_customer), receiptsOk: !!(rd && !rd.error),
+      hasDetail: !!(full.orders && full.orders.by_manager_detail && full.orders.by_manager_detail[dmvName]),
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+  // ── конец временного замера ────────────────────────────────────────────────────────────────
+
   // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём.
   // Сначала пробуем свой токен сессии (живёт до 48ч, см. issueSessionToken_) - только если
   // его нет или он истёк, идём проверять Google id_token (тот живёт ~1 час, это уже требует

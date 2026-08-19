@@ -9885,6 +9885,14 @@ function aggregateOrdersRows(rows) {
     const dateStr   = dateVal(row, 'date_s');
     const mgrSales  = str(row, 'mgr_s');
     const hw        = yes(row, 'waybill'); // есть ли путёвка - нужно в нескольких местах ниже
+    // Поднято к началу цикла (2026-08-19, Влад: "нет путёвки" по водителям/поставщикам
+    // считало и служебные ("Прочее") строки - раньше isServiceRow объявлялась только внутри
+    // блока "Статус документов" ниже, а блоки "По поставщикам"/"По водителям" идут РАНЬШЕ
+    // него в цикле и физически не могли на неё ссылаться). Теперь доступна везде в итерации -
+    // тот же принцип исключения, что уже в основной воронке документов.
+    const paymentVariant = str(row, 'payment_variant');
+    const isServiceRow = (FUNNEL_EXCLUDE_OTHER_PAYMENT_VARIANT && paymentVariant === 'Прочее') ||
+                         (FUNNEL_EXCLUDE_CASH_PAYMENTS && paymentVariant === 'Наличный');
 
     // С июля 2026: 8%/8%/2%/2% от маржи найма платится только если маржа найма >=23% -
     // порог проверяется ПО КОМПАНИИ ЗА МЕСЯЦ ЦЕЛИКОМ (тот же % что и KPI "Маржа найма" на
@@ -10086,7 +10094,11 @@ function aggregateOrdersRows(rows) {
       // "Сумма вознаграждения 2" в 1С день в день). margin (см. supplierList ниже) остаётся
       // равен "Прибыль" - именно эта сумма и есть маржа с учётом всех затрат.
       supplierMap[supplier].extra_costs += (amount - hiredCost - profit);
-      if (!hw && !isInternalOrder) supplierMap[supplier].no_waybill++;
+      // Служебные строки ("Вариант расчёта" = Прочее/Наличный) НЕ считаем как "нет путёвки" -
+      // структурно у них путёвки в принципе не бывает, это не реальная недостача документа
+      // (Влад, 2026-08-19: тот же принцип, что уже в основной воронке документов, здесь
+      // раньше не применялся - "нет путёвки" по поставщикам/водителям завышало цифру).
+      if (!hw && !isInternalOrder && !isServiceRow) supplierMap[supplier].no_waybill++;
 
       // Общекорпоративный список сделок найма (2026-08-10, "Общие сделки" на личной странице
       // логиста - Влад: "он видит абсолютно всю ситуацию по направлению") - КАЖДАЯ наёмная
@@ -10114,7 +10126,8 @@ function aggregateOrdersRows(rows) {
         // тоже учитывается) - раньше эта цифра считалась отдельно в блоке "Статус документов"
         // по более узкому условию (!isInt, без !isInternalOrder), что расходилось с "Общими
         // сделками" по тому же поставщику. Один источник на обе вкладки (2026-08-10).
-        if (!hw && !isInternalOrder) lds.no_waybill++;
+        // !isServiceRow добавлен 2026-08-19 - см. комментарий у supplierMap.no_waybill выше.
+        if (!hw && !isInternalOrder && !isServiceRow) lds.no_waybill++;
         ld.deals.push({
           id: str(row,'id'), date: dateStr, customer: str(row,'customer'), supplier: supplier,
           amount: amount, cost: hiredCost, margin: profit,
@@ -10137,9 +10150,8 @@ function aggregateOrdersRows(rows) {
     }
 
     // ── Статус документов (внешние заказы, разбивка по декадам) ──
-    const paymentVariant = str(row, 'payment_variant');
-    const isServiceRow = (FUNNEL_EXCLUDE_OTHER_PAYMENT_VARIANT && paymentVariant === 'Прочее') ||
-                         (FUNNEL_EXCLUDE_CASH_PAYMENTS && paymentVariant === 'Наличный');
+    // paymentVariant/isServiceRow теперь объявлены в начале цикла (см. комментарий выше) -
+    // используются здесь без изменений.
     if (!isInt && !isServiceRow) {
       const dayNum2 = parseInt((dateStr||'').split('-')[2]) || 0;
       const dec = dayNum2 <= 10 ? 0 : dayNum2 <= 20 ? 1 : 2;
@@ -10245,10 +10257,13 @@ function aggregateOrdersRows(rows) {
       }
       driverMap[driverName].orders++;
       driverMap[driverName].amount += amount;
-      if (!hw && !isInternalOrder) driverMap[driverName].no_waybill++;
+      // !isServiceRow добавлен 2026-08-19 (Влад: "Не сданные путевые листы" считало и
+      // служебные строки "Прочее" - у Войткуна за июль показывало 8, реально 4, см.
+      // комментарий у supplierMap.no_waybill выше - тот же принцип).
+      if (!hw && !isInternalOrder && !isServiceRow) driverMap[driverName].no_waybill++;
       if (equip === 'Длинномер') {
         driverMap[driverName].orders_long++;
-        if (!hw && !isInternalOrder) driverMap[driverName].no_waybill_long++;
+        if (!hw && !isInternalOrder && !isServiceRow) driverMap[driverName].no_waybill_long++;
       }
     }
   }

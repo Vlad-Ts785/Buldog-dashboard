@@ -5652,6 +5652,374 @@ function orderPlanFormatCost_(cost) {
   return n !== null ? Math.round(n).toLocaleString('ru-RU') + ' ₽' : String(cost).trim();
 }
 
+// ── СОЗДАНИЕ ЗАЯВКИ (вариант Б, Влад 2026-08-18: "не только инструмент просмотра,
+// но и инструмент создания заявок") - форма пишет в ту же Google Таблицу
+// планировки через ?action=order_plan_create (createOrderPlanEntry_ в Apps
+// Script). Списки ниже - точная копия строгой валидации листа "Справочник"
+// таблицы планировки (см. ORDER_PLAN_EQUIP_TYPES_ и т.д. в backend, сверено
+// живым тестом 2026-08-18) - если справочник когда-нибудь изменится, backend
+// всё равно отклонит несовпадающее значение понятной ошибкой.
+var ORDER_PLAN_EQUIP_TYPES_FE_ = ['Трал', 'Длинномер', 'Панелевоз', 'Любая модификация', 'Тент'];
+var ORDER_PLAN_REWORK_TERMS_FE_ = ['Без переработки', 'Переработка по согласованию с логистом'];
+var ORDER_PLAN_GABARIT_FE_ = ['Габарит', 'Негабарит'];
+var ORDER_PLAN_DOCUMENTS_FE_ = ['Путевой лист', 'Путевой лист и ТТН'];
+var ORDER_PLAN_STATUSES_FE_ = ['Подтверждено', 'Отбой', 'Не закрыто'];
+var ORDER_PLAN_FORM_INPUT_STYLE_ = 'width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:7px 10px;font-size:13px';
+
+// Создавать заявки может только менеджер (у B верхней/нижней строки в таблице
+// планировки разные справочники - см. plans/2026-08-18-order-plan-create-orders.md)
+// - для admin смотрим, кого он выбрал через "Смотреть как сотрудник"/дропдаун.
+function orderPlanCanCreate_() {
+  if (!D) return false;
+  if (D.role === 'manager') return true;
+  if (D.role === 'logist') return false;
+  var entry = myPageCurrentEntry_();
+  return !!entry && entry.type === 'manager';
+}
+
+// Статус прямо в таблице (Влад, 2026-08-18: "статус должен меняться прямо из
+// таблицы... в таблице Google также статусы должны меняться в зависимости от
+// статуса в дашборде") - select вместо текста для своих заявок, без открытия
+// формы редактирования. Пишет только одну ячейку (order_plan_set_status).
+function orderPlanStatusSelectHtml_(o, idx) {
+  var color = orderPlanStatusColor_(o.status);
+  if (!(orderPlanCanCreate_() && o.role === 'manager')) {
+    return '<span style="color:'+color+';font-weight:600">'+(o.status || 'без статуса')+'</span>';
+  }
+  var h = '<select onchange="quickSetOrderPlanStatus('+idx+',this.value,this)" style="background:transparent;border:1px solid var(--border);border-radius:6px;padding:3px 4px;font-size:12px;font-weight:600;color:'+color+';cursor:pointer;max-width:120px">';
+  h += '<option value=""'+(!o.status ? ' selected' : '')+'>без статуса</option>';
+  ORDER_PLAN_STATUSES_FE_.forEach(function(s) {
+    h += '<option value="'+s+'"'+(s === o.status ? ' selected' : '')+'>'+s+'</option>';
+  });
+  h += '</select>';
+  return h;
+}
+
+function quickSetOrderPlanStatus(idx, newStatus, selectEl) {
+  var o = orderPlanCurrentDayOrders[idx];
+  if (!o) return;
+  var prevStatus = o.status;
+  selectEl.disabled = true;
+  var params = { action: 'order_plan_set_status', day: o.day, orderNumber: o.orderNumber, status: newStatus };
+  if (D && D.role !== 'manager' && D.role !== 'logist') {
+    var entry = myPageCurrentEntry_();
+    if (entry) params.manager = entry.name;
+  }
+  apiFetchJson(params).then(function(data) {
+    if (data.error) {
+      alert(data.error);
+      selectEl.value = prevStatus || '';
+      selectEl.disabled = false;
+      return;
+    }
+    o.status = newStatus;
+    renderOrderPlan(); // перекрасит фон строки целиком - фон зависит от статуса
+  }).catch(function() {
+    alert('Не удалось сохранить статус, попробуйте ещё раз');
+    selectEl.value = prevStatus || '';
+    selectEl.disabled = false;
+  });
+}
+
+function formRow_(label, inputHtml) {
+  return '<div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">'+label+'</label>'+inputHtml+'</div>';
+}
+function orderPlanSelectHtml_(id, options, selected, required) {
+  var h = '<select id="'+id+'" style="'+ORDER_PLAN_FORM_INPUT_STYLE_+'">';
+  h += '<option value="">'+(required ? '— выберите —' : '(не указано)')+'</option>';
+  options.forEach(function(o) {
+    h += '<option value="'+o+'"'+(o === selected ? ' selected' : '')+'>'+o+'</option>';
+  });
+  h += '</select>';
+  return h;
+}
+function orderPlanInputHtml_(id, value, placeholder, type, extraAttrs) {
+  var esc = String(value == null ? '' : value).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  return '<input id="'+id+'" type="'+(type || 'text')+'" value="'+esc+'" placeholder="'+(placeholder || '')+'" style="'+ORDER_PLAN_FORM_INPUT_STYLE_+'"'+(extraAttrs || '')+'>';
+}
+
+// Заказчики "выпадают по первым напечатанным буквам" (Влад) - datalist поверх уже
+// загруженных orderPlanData.orders (без похода на сервер), при этом свободный ввод
+// нового заказчика остаётся возможным (datalist, не select - "если новый, то новый
+// как запишет"). Контакты запоминаются ПО заказчику (лёгкая версия "карточки фирмы" -
+// полноценный СРМ с телефонами по каждому контакту сам по себе отдельная задача,
+// тут только то, что уже видно в загруженных заказах).
+function orderPlanCustomerList_() {
+  var names = {};
+  // Влад, 2026-08-18: "список компаний должен быть из 1С... правильные названия,
+  // старые корявые уйдут со временем" - приоритет реальным контрагентам из 1С
+  // (D.debt.by_customer уже загружен вместе с основным payload, без похода на
+  // сервер), а не тому, как менеджеры печатают в самой таблице планировки.
+  // Смешиваем с уже использованными в плане именами - плавный переход, не резкий.
+  ((D && D.debt && D.debt.by_customer) || []).forEach(function(c) { if (c.contragent) names[c.contragent] = true; });
+  (orderPlanData && orderPlanData.orders || []).forEach(function(o) { if (o.customer) names[o.customer] = true; });
+  return Object.keys(names).sort(function(a,b){ return a.localeCompare(b,'ru'); });
+}
+
+// Свой автокомплит вместо <datalist> - Влад, 2026-08-18: "когда ввёл 'пр' уже все
+// должны быть с названием 'пр' в начале" - нативный datalist в Chrome ищет
+// совпадение ГДЕ УГОДНО в строке, а не строго с начала, поведение не настраивается.
+// Строгое совпадение "начинается с" реализуем сами.
+function orderPlanCustomerInput_() {
+  var val = document.getElementById('oc-customer').value.trim().toLowerCase();
+  var box = document.getElementById('oc-customer-suggest');
+  if (!box) return;
+  orderPlanRefreshContactList_();
+  if (!val) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  var matches = orderPlanCustomerList_().filter(function(n) {
+    return n.toLowerCase().indexOf(val) === 0;
+  }).slice(0, 15);
+  if (!matches.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  box.innerHTML = matches.map(function(n) {
+    var esc = n.replace(/</g,'&lt;');
+    var escAttr = n.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    return '<div onmousedown="orderPlanPickCustomer_(\''+escAttr+'\')" '+
+      'style="padding:7px 10px;cursor:pointer;font-size:13px;color:var(--text)" '+
+      'onmouseover="this.style.background=\'var(--bg4)\'" onmouseout="this.style.background=\'\'">'+esc+'</div>';
+  }).join('');
+  box.style.display = 'block';
+}
+function orderPlanPickCustomer_(name) {
+  document.getElementById('oc-customer').value = name;
+  document.getElementById('oc-customer-suggest').style.display = 'none';
+  orderPlanRefreshContactList_();
+}
+function orderPlanContactsForCustomer_(customer) {
+  var set = {};
+  (orderPlanData && orderPlanData.orders || []).forEach(function(o) {
+    if (o.customer === customer && o.customerContact) set[o.customerContact] = true;
+  });
+  return Object.keys(set);
+}
+function orderPlanRefreshContactList_() {
+  var list = document.getElementById('oc-customerContact-list');
+  if (!list) return;
+  var customer = document.getElementById('oc-customer').value;
+  list.innerHTML = orderPlanContactsForCustomer_(customer).map(function(c){ return '<option value="'+c.replace(/"/g,'&quot;')+'">'; }).join('');
+}
+
+var ORDER_PLAN_WEEKDAYS_FULL_RU_ = ['воскресенье','понедельник','вторник','среда','четверг','пятница','суббота'];
+// Дата для только что созданного заказа (оптимистичное отображение в интерфейсе,
+// пока не пришло следующее реальное обновление) - тот же формат, что и в самой
+// таблице планировки ("ДД.ММ.ГГГГ (день недели)").
+function orderPlanFormatDateForDay_(day) {
+  var base = orderPlanData && orderPlanData.updated ? new Date(orderPlanData.updated) : new Date();
+  var msk = new Date(base.getTime() + 3 * 3600 * 1000);
+  var y = msk.getUTCFullYear(), m = msk.getUTCMonth();
+  var dt = new Date(Date.UTC(y, m, day));
+  return ('0'+day).slice(-2)+'.'+('0'+(m+1)).slice(-2)+'.'+y+' ('+ORDER_PLAN_WEEKDAYS_FULL_RU_[dt.getUTCDay()]+')';
+}
+
+function openOrderCreateForm(prefill) {
+  document.getElementById('vcard-content').innerHTML = buildOrderCreateForm_(prefill || {});
+  document.getElementById('vcard-overlay').classList.add('open');
+  document.getElementById('vcard-panel').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+// "Повторить заказ" (Влад: "нажимаем... форма уже автоматически заполняется всеми
+// параметрами, остаётся только внести время и дату") - день и время НЕ копируем
+// намеренно, менеджер вводит их заново.
+function repeatOrderPlanEntry(idx) {
+  var o = orderPlanCurrentDayOrders[idx];
+  if (!o) return;
+  openOrderCreateForm({
+    equipType: ORDER_PLAN_EQUIP_TYPES_FE_.indexOf(o.equipType) >= 0 ? o.equipType : '',
+    customer: o.customer, customerContact: o.customerContact,
+    cargo: o.cargo, gabarit: o.gabarit,
+    loadAddress: o.loadAddress, loadContact: o.loadContact,
+    unloadAddress: o.unloadAddress, unloadContact: o.unloadContact,
+    documents: o.documents, reworkTerms: o.reworkTerms, note: o.note,
+    cost: (typeof o.cost === 'number') ? o.cost : '',
+  });
+}
+
+// "Редактировать" (карандаш в таблице) - открывает ту же форму в режиме
+// редактирования (Влад, 2026-08-18: "нужна возможность менять статус заказа").
+// В отличие от "Повторить" - день/время НЕ сбрасываются (это ТА ЖЕ заявка, не
+// новая), добавляется поле "Статус".
+function editOrderPlanEntry(idx) {
+  var o = orderPlanCurrentDayOrders[idx];
+  if (!o) return;
+  openOrderCreateForm({
+    editDay: o.day, editOrderNumber: o.orderNumber,
+    equipType: ORDER_PLAN_EQUIP_TYPES_FE_.indexOf(o.equipType) >= 0 ? o.equipType : '',
+    customer: o.customer, customerContact: o.customerContact,
+    cargo: o.cargo, gabarit: ORDER_PLAN_GABARIT_FE_.indexOf(o.gabarit) >= 0 ? o.gabarit : '',
+    loadAddress: o.loadAddress, loadContact: o.loadContact,
+    unloadAddress: o.unloadAddress, unloadContact: o.unloadContact,
+    documents: ORDER_PLAN_DOCUMENTS_FE_.indexOf(o.documents) >= 0 ? o.documents : '',
+    reworkTerms: ORDER_PLAN_REWORK_TERMS_FE_.indexOf(o.reworkTerms) >= 0 ? o.reworkTerms : '',
+    note: o.note, cost: (typeof o.cost === 'number') ? o.cost : '',
+    time: o.time, status: o.status,
+  });
+}
+
+function buildOrderCreateForm_(prefill) {
+  var isEdit = !!prefill.editOrderNumber;
+  var today = orderPlanTodayMsk_();
+  // Влад, 2026-08-18: "предлагаемые даты должны быть сегодня и дальше, прошлые не
+  // особо нужны" (создание/повтор заказа на прошедшую дату не имеет смысла) -
+  // редактирование НЕ ограничиваем (заявка уже существует, могла быть создана
+  // задним числом или её всё равно нужно поправить).
+  var day = isEdit ? prefill.editDay : Math.max(orderPlanActiveDay || today.day, today.day);
+  var h = '<div class="vcard-header"><div class="vcard-gos">'+(isEdit ? 'Заявка № '+prefill.editOrderNumber : 'Новая заявка')+'</div></div><div class="vcard-body">';
+  h += '<div id="order-create-error" style="display:none;color:#E24B4A;font-size:13px;margin-bottom:14px;padding:8px 10px;background:rgba(226,75,74,.1);border-radius:8px"></div>';
+
+  if (isEdit) {
+    // День при редактировании не переносится (это та же заявка, не новая) -
+    // скрытые поля вместо выпадающего списка, но видно, к какому дню относится.
+    h += '<input type="hidden" id="oc-day" value="'+day+'">';
+    h += '<input type="hidden" id="oc-orderNumber" value="'+prefill.editOrderNumber+'">';
+    h += formRow_('Заказ', '<div style="'+ORDER_PLAN_FORM_INPUT_STYLE_+';background:var(--bg2)">№ '+prefill.editOrderNumber+' · день '+day+'</div>');
+    h += formRow_('Статус', orderPlanSelectHtml_('oc-status', ORDER_PLAN_STATUSES_FE_, prefill.status));
+  } else {
+    var dayOptions = '';
+    for (var d = today.day; d <= today.daysInMonth; d++) {
+      dayOptions += '<option value="'+d+'"'+(d === day ? ' selected' : '')+'>'+d+'</option>';
+    }
+    h += formRow_('День подачи *', '<select id="oc-day" style="'+ORDER_PLAN_FORM_INPUT_STYLE_+'">'+dayOptions+'</select>');
+  }
+  h += formRow_('Время подачи', orderPlanInputHtml_('oc-time', prefill.time, '', 'time')); // Влад: "неудобно вводить знак ':'" - нативный выбор времени
+  h += formRow_('Тип техники *', orderPlanSelectHtml_('oc-equipType', ORDER_PLAN_EQUIP_TYPES_FE_, prefill.equipType, true));
+  h += formRow_('Заказчик *', '<div style="position:relative">'+
+    orderPlanInputHtml_('oc-customer', prefill.customer, '', 'text',
+      ' autocomplete="off" oninput="orderPlanCustomerInput_()" onfocus="orderPlanCustomerInput_()" '+
+      'onblur="setTimeout(function(){var b=document.getElementById(\'oc-customer-suggest\');if(b)b.style.display=\'none\';},150)"')+
+    '<div id="oc-customer-suggest" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg3);border:1px solid var(--border);border-radius:8px;margin-top:4px;max-height:220px;overflow-y:auto;z-index:10"></div>'+
+    '</div>');
+  h += formRow_('Конт. лицо заказчика', orderPlanInputHtml_('oc-customerContact', prefill.customerContact, '', 'text', ' list="oc-customerContact-list"')+
+    '<datalist id="oc-customerContact-list">'+orderPlanContactsForCustomer_(prefill.customer).map(function(c){ return '<option value="'+c.replace(/"/g,'&quot;')+'">'; }).join('')+'</datalist>');
+  h += formRow_('Груз', orderPlanInputHtml_('oc-cargo', prefill.cargo));
+  h += formRow_('Габарит', orderPlanSelectHtml_('oc-gabarit', ORDER_PLAN_GABARIT_FE_, prefill.gabarit));
+  h += formRow_('Адрес погрузки *', orderPlanInputHtml_('oc-loadAddress', prefill.loadAddress));
+  h += formRow_('Конт. лицо на погрузке', orderPlanInputHtml_('oc-loadContact', prefill.loadContact));
+  h += formRow_('Адрес выгрузки *', orderPlanInputHtml_('oc-unloadAddress', prefill.unloadAddress));
+  h += formRow_('Конт. лицо на выгрузке', orderPlanInputHtml_('oc-unloadContact', prefill.unloadContact));
+  h += formRow_('Документы', orderPlanSelectHtml_('oc-documents', ORDER_PLAN_DOCUMENTS_FE_, prefill.documents));
+  h += formRow_('Условия переработки', orderPlanSelectHtml_('oc-reworkTerms', ORDER_PLAN_REWORK_TERMS_FE_, prefill.reworkTerms));
+  h += formRow_('Примечание', orderPlanInputHtml_('oc-note', prefill.note));
+  // Стоимость - только число (Влад: "нужна защита от написания чуши, чтобы не было
+  // текста"): type=number + min=0 не дают набрать буквы в большинстве браузеров,
+  // submitOrderCreateForm() дополнительно перепроверяет перед отправкой.
+  h += formRow_('Стоимость', orderPlanInputHtml_('oc-cost', prefill.cost, '', 'number', ' min="0" step="1"'));
+  // Наличные - отдельная галочка (Влад: "пока в таблицу это пусть идёт в примечание" -
+  // нет отдельной колонки под это в таблице планировки, дублировать не будем).
+  h += formRow_('', '<label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);cursor:pointer"><input type="checkbox" id="oc-cash"> Наличные</label>');
+
+  h += '<div style="display:flex;gap:10px;margin-top:6px">';
+  h += '<button type="button" onclick="submitOrderCreateForm()" style="flex:1;background:var(--green);color:#fff;border:none;border-radius:8px;padding:10px;font-size:14px;font-weight:600;cursor:pointer">'+(isEdit ? 'Сохранить изменения' : 'Создать заявку')+'</button>';
+  h += '<button type="button" onclick="closeVehicleCard()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px 16px;font-size:14px;cursor:pointer">Отмена</button>';
+  h += '</div></div>';
+  return h;
+}
+
+function submitOrderCreateForm() {
+  var errEl = document.getElementById('order-create-error');
+  errEl.style.display = 'none';
+
+  var orderNumberEl = document.getElementById('oc-orderNumber');
+  var isEdit = !!orderNumberEl;
+
+  var params = {
+    action: isEdit ? 'order_plan_update' : 'order_plan_create',
+    day: document.getElementById('oc-day').value,
+    time: document.getElementById('oc-time').value.trim(),
+    equipType: document.getElementById('oc-equipType').value,
+    customer: document.getElementById('oc-customer').value.trim(),
+    customerContact: document.getElementById('oc-customerContact').value.trim(),
+    cargo: document.getElementById('oc-cargo').value.trim(),
+    gabarit: document.getElementById('oc-gabarit').value,
+    loadAddress: document.getElementById('oc-loadAddress').value.trim(),
+    loadContact: document.getElementById('oc-loadContact').value.trim(),
+    unloadAddress: document.getElementById('oc-unloadAddress').value.trim(),
+    unloadContact: document.getElementById('oc-unloadContact').value.trim(),
+    documents: document.getElementById('oc-documents').value,
+    reworkTerms: document.getElementById('oc-reworkTerms').value,
+    note: document.getElementById('oc-note').value.trim(),
+    cost: document.getElementById('oc-cost').value.trim(),
+  };
+  if (isEdit) {
+    params.orderNumber = orderNumberEl.value;
+    params.status = document.getElementById('oc-status').value;
+  }
+  if (D && D.role !== 'manager' && D.role !== 'logist') {
+    var entry = myPageCurrentEntry_();
+    if (entry) params.manager = entry.name;
+  }
+
+  if (!params.equipType || !params.customer || !params.loadAddress || !params.unloadAddress) {
+    errEl.textContent = 'Заполните обязательные поля: тип техники, заказчик, адреса погрузки и выгрузки';
+    errEl.style.display = 'block';
+    return;
+  }
+  // Стоимость - только число (Влад: "защита от написания чуши, чтобы не было текста").
+  if (params.cost && !/^\d+(\.\d+)?$/.test(params.cost)) {
+    errEl.textContent = 'Стоимость должна быть числом';
+    errEl.style.display = 'block';
+    return;
+  }
+  // Наличные - отдельной колонки под это в таблице планировки нет, Влад: "пока в
+  // таблицу это пусть идёт в примечание".
+  var isCash = document.getElementById('oc-cash').checked;
+  if (isCash) params.note = (params.note ? params.note + '; ' : '') + 'нал';
+
+  var btn = document.querySelector('#vcard-content button[onclick="submitOrderCreateForm()"]');
+  var busyText = isEdit ? 'Сохраняем…' : 'Создаём…';
+  var idleText = isEdit ? 'Сохранить изменения' : 'Создать заявку';
+  if (btn) { btn.disabled = true; btn.textContent = busyText; }
+
+  apiFetchJson(params).then(function(data) {
+    if (data.error) {
+      errEl.textContent = data.error;
+      errEl.style.display = 'block';
+      if (btn) { btn.disabled = false; btn.textContent = idleText; }
+      return;
+    }
+    closeVehicleCard();
+    // Влад: "жуткие тормоза, долго грузит, потом перегружает страницу, ещё грузит -
+    // никто не будет работать с такой системой". Полная перезагрузка вкладки после
+    // каждой записи была лишней - мы и так знаем, что именно записали (форма +
+    // подтверждённый ответ сервера). Обновляем уже загруженные данные на месте и
+    // перерисовываем мгновенно, без похода на сервер. Реальные (логистом
+    // заполняемые позже) поля подтянутся сами при следующем обычном обновлении
+    // вкладки - серверный кэш на этот день уже сброшен бэкендом при записи.
+    var updatedFields = {
+      day: data.day, orderNumber: String(data.orderNumber),
+      time: params.time, equipType: params.equipType, customer: params.customer,
+      customerContact: params.customerContact, cargo: params.cargo, gabarit: params.gabarit,
+      loadAddress: params.loadAddress, loadContact: params.loadContact,
+      unloadAddress: params.unloadAddress, unloadContact: params.unloadContact,
+      documents: params.documents, reworkTerms: params.reworkTerms, note: params.note,
+      cost: params.cost ? parseFloat(params.cost) : '',
+    };
+    if (isEdit && orderPlanData && orderPlanData.orders) {
+      var existing = orderPlanData.orders.filter(function(o) {
+        return o.day === data.day && String(o.orderNumber) === String(data.orderNumber);
+      })[0];
+      if (existing) {
+        Object.assign(existing, updatedFields);
+        if (params.status) existing.status = params.status; // пусто = "не менять"
+      }
+    } else if (orderPlanData && orderPlanData.orders) {
+      orderPlanData.orders.push(Object.assign({
+        date: orderPlanFormatDateForDay_(data.day),
+        status: '', paymentStatus: '', hiredCompany: '', hiredVehicle: '',
+        ownDriver: '', ownVehicle: '', carAssigned: '',
+        invoiceIssued: false, moneyReceived: false, requestSentToDriver: false,
+        driverConfirmed: false, orderEnteredIn1C: false, logistClosed: false,
+        managerName: (myPageCurrentEntry_() || {}).name || '', logistName: '', role: 'manager',
+      }, updatedFields));
+    }
+    orderPlanActiveDay = data.day;
+    renderOrderPlan();
+  }).catch(function(e) {
+    errEl.textContent = 'Ошибка: ' + (e && e.message ? e.message : 'не удалось сохранить');
+    errEl.style.display = 'block';
+    if (btn) { btn.disabled = false; btn.textContent = idleText; }
+  });
+}
+
 // "Сегодня" по московскому времени, независимо от часового пояса браузера - берём
 // момент ответа сервера (orderPlanData.updated) и сдвигаем на UTC+3 (Москва круглый
 // год без перевода часов). daysInMonth - для отрисовки ВСЕХ вкладок 1..30/31, а не
@@ -5745,7 +6113,7 @@ function orderPlanRowBg_(status) {
 function openOrderCard(idx) {
   var o = orderPlanCurrentDayOrders[idx];
   if (!o) return;
-  document.getElementById('vcard-content').innerHTML = buildOrderCard_(o);
+  document.getElementById('vcard-content').innerHTML = buildOrderCard_(o, idx);
   document.getElementById('vcard-overlay').classList.add('open');
   document.getElementById('vcard-panel').classList.add('open');
   document.body.style.overflow = 'hidden';
@@ -5772,11 +6140,14 @@ function orderPlanBoolBadge_(val, trueText, falseText) {
   return '<span style="color:'+(val?'#1D9E75':'#E24B4A')+';font-weight:600">'+(val?trueText:falseText)+'</span>';
 }
 
-function buildOrderCard_(o) {
+function buildOrderCard_(o, idx) {
   var color = orderPlanStatusColor_(o.status);
   var h = '<div class="vcard-header">';
   h += '<div class="vcard-gos">№ '+(o.orderNumber||'—')+' · '+(o.equipType||'—')+'</div>';
   h += '<div class="vcard-meta">'+(o.date||'')+(o.time?' '+o.time:'')+' · <span style="color:'+color+';font-weight:600">'+(o.status||'без статуса')+'</span></div>';
+  if (orderPlanCanCreate_() && idx !== undefined) {
+    h += '<button type="button" onclick="repeatOrderPlanEntry('+idx+')" style="margin-top:10px;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer">↻ Повторить заказ</button>';
+  }
   h += '</div><div class="vcard-body">';
 
   h += '<div class="vcard-sec"><div class="vcard-sec-title">Заказчик</div>'+
@@ -5844,6 +6215,13 @@ function renderOrderPlan() {
 
   var h = '<div class="card" style="padding:16px 18px">';
 
+  // Кнопка создания заявки (вариант Б, Влад 2026-08-18) - только менеджер (свой
+  // или тот, под кем смотрит admin) - логисты назначают транспорт, не создают заявки.
+  if (orderPlanCanCreate_()) {
+    h += '<div style="display:flex;justify-content:flex-end;margin-bottom:10px">'+
+      '<button type="button" onclick="openOrderCreateForm()" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer">+ Новая заявка</button></div>';
+  }
+
   // Admin смотрит не свой план - подпись, чей именно, и подсказка, где переключить.
   // 2026-08-18: с появлением кнопки "Смотреть как сотрудник" (подвал сайдбара) это
   // уже не единственный способ - подсказка обновлена, чтобы не путать старым путём.
@@ -5889,12 +6267,16 @@ function renderOrderPlan() {
   if (!dayOrders.length) {
     h += '<div style="color:var(--muted);font-size:13px;padding:12px 0">Заказов на этот день нет.</div>';
   } else {
+    // "Действия" (повторить/редактировать) - только тому, кто вообще может создавать
+    // заявки (менеджер/admin-от-его-имени), и только для СВОИХ заявок (role==='manager'
+    // на этом конкретном заказе - не для тех, где смотрящий тут как логист).
+    var canManage = orderPlanCanCreate_();
     h += '<div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
       '<th>№</th><th>Техника</th><th>Заказчик</th><th class="num">Стоимость</th><th>Наём</th><th>Машина / водитель</th><th>Статус</th><th>Водитель</th>'+
+      (canManage ? '<th>Действия</th>' : '')+
       '</tr></thead><tbody>';
     var daySum = 0, daySumCount = 0;
     dayOrders.forEach(function(o, idx) {
-      var color = orderPlanStatusColor_(o.status);
       var car = orderPlanCarSummary_(o.carAssigned);
       var costText = orderPlanFormatCost_(o.cost);
       var costN = orderPlanCostNumber_(o.cost);
@@ -5906,8 +6288,18 @@ function renderOrderPlan() {
       h += '<td class="num">'+(costText || '—')+'</td>';
       h += '<td>'+(o.hiredCompany || '—')+'</td>';
       h += '<td'+(car.full ? ' title="'+car.full.replace(/"/g,'&quot;')+'"' : '')+'>'+(car.short || '—')+(car.full ? orderPlanCopyBtnHtml_(car.full) : '')+'</td>';
-      h += '<td style="color:'+color+';font-weight:600">'+(o.status || 'без статуса')+'</td>';
+      h += '<td onclick="event.stopPropagation()">'+orderPlanStatusSelectHtml_(o, idx)+'</td>';
       h += '<td>'+orderPlanBoolBadge_(o.driverConfirmed,'Подтверждено','Не подтверждено')+'</td>';
+      if (canManage) {
+        h += '<td onclick="event.stopPropagation()" style="white-space:nowrap">';
+        if (o.role === 'manager') {
+          h += '<button type="button" onclick="repeatOrderPlanEntry('+idx+')" title="Повторить заказ" style="background:none;border:none;color:var(--muted);cursor:pointer;padding:4px;margin-right:2px"><i class="ti ti-repeat"></i></button>';
+          h += '<button type="button" onclick="editOrderPlanEntry('+idx+')" title="Редактировать" style="background:none;border:none;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-pencil"></i></button>';
+        } else {
+          h += '—';
+        }
+        h += '</td>';
+      }
       h += '</tr>';
     });
     // Итог по дню (Влад, 2026-08-17: "где стоимость по всем заказам в день, должна
@@ -5918,7 +6310,7 @@ function renderOrderPlan() {
     h += '</tbody><tfoot><tr style="font-weight:600">'+
       '<td colspan="3">Итого за день'+(skipped ? ' <span style="font-weight:400;color:var(--muted);font-size:11px">('+skipped+' без суммы - см. текстом)</span>' : '')+'</td>'+
       '<td class="num">'+Math.round(daySum).toLocaleString('ru-RU')+' ₽</td>'+
-      '<td colspan="4"></td></tr></tfoot>';
+      '<td colspan="'+(canManage ? 5 : 4)+'"></td></tr></tfoot>';
     h += '</table></div>';
   }
 

@@ -4366,6 +4366,152 @@ function createOrderPlanEntry_(personName, p) {
   }
 }
 
+var ORDER_PLAN_STATUSES_ = ['Подтверждено', 'Отбой', 'Не закрыто'];
+
+// Редактирование УЖЕ созданной заявки (Влад, 2026-08-18: "нужна возможность менять
+// статус заказа" + карандаш "редактировать" в таблице) - находит строку по
+// day+orderNumber (не ищет свободную, как createOrderPlanEntry_) и переписывает те
+// же поля. НАМЕРЕННО не трогает колонки L/M/O/P/Q/R (наш/наёмный транспорт,
+// назначенная машина, отметки логиста) - это территория логиста, менеджер через эту
+// форму может затереть только то, что сам когда-то заполнял при создании + статус.
+function updateOrderPlanEntry_(personName, p) {
+  var day = parseInt(p.day, 10);
+  var orderNumber = String(p.orderNumber || '').trim();
+  if (!day || day < 1 || day > 31 || !orderNumber) return { error: 'Некорректный заказ' };
+  if (!p.equipType || !p.customer || !p.loadAddress || !p.unloadAddress) {
+    return { error: 'Заполните обязательные поля: тип техники, заказчик, адреса погрузки и выгрузки' };
+  }
+  if (ORDER_PLAN_EQUIP_TYPES_.indexOf(p.equipType) === -1) {
+    return { error: 'Тип техники должен быть одним из: ' + ORDER_PLAN_EQUIP_TYPES_.join(', ') };
+  }
+  if (p.reworkTerms && ORDER_PLAN_REWORK_TERMS_.indexOf(p.reworkTerms) === -1) {
+    return { error: 'Условия переработки должны быть одним из: ' + ORDER_PLAN_REWORK_TERMS_.join(', ') + ' (или пусто)' };
+  }
+  if (p.gabarit && ORDER_PLAN_GABARIT_.indexOf(p.gabarit) === -1) {
+    return { error: 'Габарит должен быть одним из: ' + ORDER_PLAN_GABARIT_.join(', ') + ' (или пусто)' };
+  }
+  if (p.documents && ORDER_PLAN_DOCUMENTS_.indexOf(p.documents) === -1) {
+    return { error: 'Документы должны быть одним из: ' + ORDER_PLAN_DOCUMENTS_.join(', ') + ' (или пусто)' };
+  }
+  if (p.status && ORDER_PLAN_STATUSES_.indexOf(p.status) === -1) {
+    return { error: 'Статус должен быть одним из: ' + ORDER_PLAN_STATUSES_.join(', ') + ' (или пусто - не менять)' };
+  }
+
+  var writeName = String(personName || '').trim().split(/\s+/).slice(0, 2).join(' ');
+
+  var resolved = resolveOrderPlanSpreadsheet_();
+  if (resolved.error) return { error: resolved.error };
+  var sheet = resolved.planSs.getSheetByName(String(day));
+  if (!sheet) return { error: 'Вкладка на день ' + day + ' не найдена в текущей таблице планировки' };
+
+  var cache = CacheService.getScriptCache();
+  var mutexKey = 'order_plan_create_lock_' + resolved.planId + '_' + day; // тот же мьютекс, что и у создания - одна вкладка, один writer за раз
+  if (cache.get(mutexKey)) {
+    return { error: 'Сейчас кто-то ещё меняет заявки на этот день, попробуйте через несколько секунд' };
+  }
+  cache.put(mutexKey, '1', 20);
+
+  try {
+    var colA = sheet.getRange(3, 1, ORDER_PLAN_CREATE_MAX_ROW_ - 2, 1).getValues();
+    var targetTopRow = null;
+    for (var i = 0; i < colA.length; i += 2) {
+      if (String(colA[i][0]).trim() === orderNumber) { targetTopRow = 3 + i; break; }
+    }
+    if (targetTopRow === null) return { error: 'Заказ №' + orderNumber + ' не найден на вкладке ' + day };
+    var bottomRow = targetTopRow + 1;
+
+    // Заявку может редактировать только тот, кто её создал (или admin от его
+    // имени) - то же имя, что уже стоит в B этой строки. Читаем ДО записи -
+    // случайно отредактировать чужую заявку (например, угадав номер) нельзя.
+    var currentManager = String(sheet.getRange(targetTopRow, 2).getValue()).trim();
+    if (currentManager && currentManager !== writeName) {
+      return { error: 'Эта заявка создана другим менеджером (' + currentManager + ') - редактировать может только автор' };
+    }
+
+    try {
+      sheet.getRange(targetTopRow, 2, 1, 10).setValues([[
+        writeName, String(p.equipType || ''), String(p.customer || ''),
+        String(sheet.getRange(targetTopRow, 5).getValue() || ''), // дату не трогаем - меняется только через пересоздание
+        String(p.cargo || ''), '', String(p.loadAddress || ''), String(p.unloadAddress || ''),
+        String(p.reworkTerms || ''), p.cost || '',
+      ]]);
+      sheet.getRange(bottomRow, 4, 1, 7).setValues([[
+        String(p.customerContact || ''), String(p.time || ''), String(p.gabarit || ''),
+        String(p.documents || ''), String(p.loadContact || ''), String(p.unloadContact || ''),
+        String(p.note || ''),
+      ]]);
+      // Статус - отдельно и только если явно передан (пустое значение = "не
+      // менять", а не "очистить"). Пишем в СВОЮ ячейку - это и есть колонка,
+      // которую отслеживает masterEditRouter (покраска/Telegram сработают сами,
+      // тот же installable-триггер, что и для ручной правки).
+      if (p.status) {
+        sheet.getRange(bottomRow, 1, 1, 1).setValue(p.status);
+      }
+    } catch (writeErr) {
+      return { error: 'Не удалось сохранить изменения: ' + writeErr.message };
+    }
+
+    try {
+      cache.remove('order_plan_day_v3_' + resolved.planId + '_' + day);
+    } catch (cacheErr) { /* не критично */ }
+
+    return { ok: true, day: day, orderNumber: orderNumber };
+  } finally {
+    cache.remove(mutexKey);
+  }
+}
+
+// Быстрая смена статуса прямо из таблицы "План задание" (Влад, 2026-08-18:
+// "статус должен меняться прямо из таблицы, как на скриншоте... и в таблице
+// Google также статусы должны меняться в зависимости от статуса в дашборде") -
+// облегчённая версия updateOrderPlanEntry_, трогает ТОЛЬКО одну ячейку (статус,
+// нижняя строка колонки A) - никакого риска затереть остальные поля устаревшими
+// клиентскими данными. Пишем в ту же ячейку, что отслеживает masterEditRouter -
+// покраска/Telegram сработают сами, тот же installable-триггер, что и для ручной
+// правки в самой таблице.
+function updateOrderPlanStatus_(personName, p) {
+  var day = parseInt(p.day, 10);
+  var orderNumber = String(p.orderNumber || '').trim();
+  if (!day || day < 1 || day > 31 || !orderNumber) return { error: 'Некорректный заказ' };
+  var status = String(p.status || '').trim();
+  if (status && ORDER_PLAN_STATUSES_.indexOf(status) === -1) {
+    return { error: 'Статус должен быть одним из: ' + ORDER_PLAN_STATUSES_.join(', ') };
+  }
+
+  var writeName = String(personName || '').trim().split(/\s+/).slice(0, 2).join(' ');
+  var resolved = resolveOrderPlanSpreadsheet_();
+  if (resolved.error) return { error: resolved.error };
+  var sheet = resolved.planSs.getSheetByName(String(day));
+  if (!sheet) return { error: 'Вкладка на день ' + day + ' не найдена' };
+
+  var colA = sheet.getRange(3, 1, ORDER_PLAN_CREATE_MAX_ROW_ - 2, 1).getValues();
+  var targetTopRow = null;
+  for (var i = 0; i < colA.length; i += 2) {
+    if (String(colA[i][0]).trim() === orderNumber) { targetTopRow = 3 + i; break; }
+  }
+  if (targetTopRow === null) return { error: 'Заказ №' + orderNumber + ' не найден на вкладке ' + day };
+  var bottomRow = targetTopRow + 1;
+
+  // Тот же авторский контроль, что и у полного редактирования - менять статус
+  // может только тот, кто создал заявку.
+  var currentManager = String(sheet.getRange(targetTopRow, 2).getValue()).trim();
+  if (currentManager && currentManager !== writeName) {
+    return { error: 'Эта заявка создана другим менеджером (' + currentManager + ') - менять статус может только автор' };
+  }
+
+  try {
+    sheet.getRange(bottomRow, 1, 1, 1).setValue(status);
+  } catch (writeErr) {
+    return { error: 'Не удалось сохранить статус: ' + writeErr.message };
+  }
+
+  try {
+    CacheService.getScriptCache().remove('order_plan_day_v3_' + resolved.planId + '_' + day);
+  } catch (cacheErr) { /* не критично */ }
+
+  return { ok: true, day: day, orderNumber: orderNumber, status: status };
+}
+
 // ============================================================
 // API ДЛЯ ДАШБОРДА — читает Штатку для статусов и типов
 // ============================================================
@@ -4494,6 +4640,40 @@ function doGet(e) {
         : (e.parameter.manager || access.name);
       return ContentService
         .createTextOutput(JSON.stringify(createOrderPlanEntry_(opcPerson, e.parameter)))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // Редактирование уже созданной заявки (карандаш в таблице "План задание" -
+    // Влад, 2026-08-18: "нужна возможность менять статус заказа") - те же права,
+    // что и на создание (только менеджер/admin-от-его-имени), updateOrderPlanEntry_
+    // дополнительно проверяет, что редактирует именно автор заявки.
+    if (action === 'order_plan_update') {
+      if (access.role === 'logist') {
+        return ContentService
+          .createTextOutput(JSON.stringify({ error: 'Редактирование заявок доступно менеджерам' }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+      var opuPerson = access.role === 'manager'
+        ? access.name
+        : (e.parameter.manager || access.name);
+      return ContentService
+        .createTextOutput(JSON.stringify(updateOrderPlanEntry_(opuPerson, e.parameter)))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // Быстрая смена статуса прямо из таблицы (без открытия формы редактирования) -
+    // те же права, что и на редактирование.
+    if (action === 'order_plan_set_status') {
+      if (access.role === 'logist') {
+        return ContentService
+          .createTextOutput(JSON.stringify({ error: 'Смена статуса доступна менеджерам' }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+      var opsPerson = access.role === 'manager'
+        ? access.name
+        : (e.parameter.manager || access.name);
+      return ContentService
+        .createTextOutput(JSON.stringify(updateOrderPlanStatus_(opsPerson, e.parameter)))
         .setMimeType(ContentService.MimeType.JSON);
     }
 

@@ -5744,7 +5744,7 @@ function orderPlanInputHtml_(id, value, placeholder, type, extraAttrs) {
 // как запишет"). Контакты запоминаются ПО заказчику (лёгкая версия "карточки фирмы" -
 // полноценный СРМ с телефонами по каждому контакту сам по себе отдельная задача,
 // тут только то, что уже видно в загруженных заказах).
-function orderPlanCustomerOptionsHtml_() {
+function orderPlanCustomerList_() {
   var names = {};
   // Влад, 2026-08-18: "список компаний должен быть из 1С... правильные названия,
   // старые корявые уйдут со временем" - приоритет реальным контрагентам из 1С
@@ -5753,8 +5753,36 @@ function orderPlanCustomerOptionsHtml_() {
   // Смешиваем с уже использованными в плане именами - плавный переход, не резкий.
   ((D && D.debt && D.debt.by_customer) || []).forEach(function(c) { if (c.contragent) names[c.contragent] = true; });
   (orderPlanData && orderPlanData.orders || []).forEach(function(o) { if (o.customer) names[o.customer] = true; });
-  return Object.keys(names).sort(function(a,b){ return a.localeCompare(b,'ru'); })
-    .map(function(n){ return '<option value="'+n.replace(/"/g,'&quot;')+'">'; }).join('');
+  return Object.keys(names).sort(function(a,b){ return a.localeCompare(b,'ru'); });
+}
+
+// Свой автокомплит вместо <datalist> - Влад, 2026-08-18: "когда ввёл 'пр' уже все
+// должны быть с названием 'пр' в начале" - нативный datalist в Chrome ищет
+// совпадение ГДЕ УГОДНО в строке, а не строго с начала, поведение не настраивается.
+// Строгое совпадение "начинается с" реализуем сами.
+function orderPlanCustomerInput_() {
+  var val = document.getElementById('oc-customer').value.trim().toLowerCase();
+  var box = document.getElementById('oc-customer-suggest');
+  if (!box) return;
+  orderPlanRefreshContactList_();
+  if (!val) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  var matches = orderPlanCustomerList_().filter(function(n) {
+    return n.toLowerCase().indexOf(val) === 0;
+  }).slice(0, 15);
+  if (!matches.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  box.innerHTML = matches.map(function(n) {
+    var esc = n.replace(/</g,'&lt;');
+    var escAttr = n.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    return '<div onmousedown="orderPlanPickCustomer_(\''+escAttr+'\')" '+
+      'style="padding:7px 10px;cursor:pointer;font-size:13px;color:var(--text)" '+
+      'onmouseover="this.style.background=\'var(--bg4)\'" onmouseout="this.style.background=\'\'">'+esc+'</div>';
+  }).join('');
+  box.style.display = 'block';
+}
+function orderPlanPickCustomer_(name) {
+  document.getElementById('oc-customer').value = name;
+  document.getElementById('oc-customer-suggest').style.display = 'none';
+  orderPlanRefreshContactList_();
 }
 function orderPlanContactsForCustomer_(customer) {
   var set = {};
@@ -5854,8 +5882,12 @@ function buildOrderCreateForm_(prefill) {
   }
   h += formRow_('Время подачи', orderPlanInputHtml_('oc-time', prefill.time, '', 'time')); // Влад: "неудобно вводить знак ':'" - нативный выбор времени
   h += formRow_('Тип техники *', orderPlanSelectHtml_('oc-equipType', ORDER_PLAN_EQUIP_TYPES_FE_, prefill.equipType, true));
-  h += formRow_('Заказчик *', orderPlanInputHtml_('oc-customer', prefill.customer, '', 'text', ' list="oc-customer-list" oninput="orderPlanRefreshContactList_()"')+
-    '<datalist id="oc-customer-list">'+orderPlanCustomerOptionsHtml_()+'</datalist>');
+  h += formRow_('Заказчик *', '<div style="position:relative">'+
+    orderPlanInputHtml_('oc-customer', prefill.customer, '', 'text',
+      ' autocomplete="off" oninput="orderPlanCustomerInput_()" onfocus="orderPlanCustomerInput_()" '+
+      'onblur="setTimeout(function(){var b=document.getElementById(\'oc-customer-suggest\');if(b)b.style.display=\'none\';},150)"')+
+    '<div id="oc-customer-suggest" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg3);border:1px solid var(--border);border-radius:8px;margin-top:4px;max-height:220px;overflow-y:auto;z-index:10"></div>'+
+    '</div>');
   h += formRow_('Конт. лицо заказчика', orderPlanInputHtml_('oc-customerContact', prefill.customerContact, '', 'text', ' list="oc-customerContact-list"')+
     '<datalist id="oc-customerContact-list">'+orderPlanContactsForCustomer_(prefill.customer).map(function(c){ return '<option value="'+c.replace(/"/g,'&quot;')+'">'; }).join('')+'</datalist>');
   h += formRow_('Груз', orderPlanInputHtml_('oc-cargo', prefill.cargo));

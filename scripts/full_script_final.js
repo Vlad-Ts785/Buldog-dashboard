@@ -2287,7 +2287,14 @@ function findOrCreateDebtStatusRow_(sheet, name) {
 // сервера - тогда эта функция и станет единственной записью, а лист - только историческим.
 function mirrorDebtStatusToServer_(action, params) {
   try {
-    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    // ЗАПИСЬ идёт отдельным ключом (Этап 1.0 плана устранения аудита): YARD_API_KEY лежит
+    // открыто в публичном files/index.html, и до сих пор им же можно было менять статусы
+    // должников со стороны. Эти эндпоинты вызываются только отсюда, браузер к ним не
+    // обращается - значит ключ записи может никогда не попадать в страницу.
+    // Откат на YARD_API_KEY - на случай, если свойство ещё не заведено: сервер на время
+    // перехода принимает оба (см. checkWriteKey в api/server.js).
+    var props = PropertiesService.getScriptProperties();
+    var apiKey = props.getProperty('YARD_WRITE_KEY') || props.getProperty('YARD_API_KEY');
     if (!apiKey) return;
     var qs = Object.keys(params).map(function(k) { return k + '=' + encodeURIComponent(params[k]); }).join('&');
     UrlFetchApp.fetch('https://api.yardhub.ru/api/debt/' + action + '?' + qs, {

@@ -1939,6 +1939,27 @@ function clearAuthTokens_() {
   localStorage.removeItem('session_token');
 }
 
+// Google Apps Script иногда временно отдаёт HTML-страницу (или пустой ответ) вместо JSON,
+// даже когда код исправен и задеплоен нормально (2026-08-19 - живой инцидент: несколько
+// запросов подряд к одному и тому же /exec то проходили, то нет - похоже на кратковременную
+// нестабильность на стороне Google, не на нашей стороне). Раньше единственный неудачный ответ
+// сразу показывал пользователю "Unexpected token '<'..." - теперь тихо повторяем ещё пару раз
+// с небольшой паузой, прежде чем сдаться и показать ошибку.
+async function fetchJsonWithRetry_(url, attempts) {
+  attempts = attempts || 3;
+  var lastErr;
+  for (var i = 0; i < attempts; i++) {
+    try {
+      var res = await fetch(url);
+      return await res.json();
+    } catch (e) {
+      lastErr = e;
+      if (i < attempts - 1) await new Promise(function(r) { setTimeout(r, 700 + i * 500); });
+    }
+  }
+  throw lastErr;
+}
+
 // Общий wrapper над fetch(apiUrl(...)) для всех запросов КРОМЕ самого первого (loadData()
 // сама разбирает needLogin). Токен сессии живёт до 48ч (см. SESSION_TOKEN_TTL_MS на backend) -
 // если дашборд открыт дольше и потом нажать, например, "Прошлый месяц" на Технике, второй
@@ -1946,8 +1967,7 @@ function clearAuthTokens_() {
 // подсказки, что делать (Влад, 2026-07-04). Теперь при needLogin сразу разлогиниваем и
 // показываем экран входа - как и при самой первой загрузке.
 async function apiFetchJson(params) {
-  const res = await fetch(apiUrl(params));
-  const data = await res.json();
+  const data = await fetchJsonWithRetry_(apiUrl(params));
   if (data.needLogin) {
     clearAuthTokens_();
     showLoginScreen(data.error);
@@ -2028,8 +2048,7 @@ async function loadData() {
   document.getElementById('loading').style.display = 'flex';
   startLoadingPhrases();
   try {
-    const mainRes = await fetch(apiUrl({}));
-    D = await mainRes.json();
+    D = await fetchJsonWithRetry_(apiUrl({}));
     if (D.needLogin) { clearAuthTokens_(); showLoginScreen(D.error); return; }
     if (D.error) throw new Error(D.error);
     saveSessionTokenFromResponse_(D);

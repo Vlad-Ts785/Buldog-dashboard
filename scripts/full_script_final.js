@@ -4523,6 +4523,42 @@ function updateOrderPlanStatus_(personName, p) {
 function doGet(e) {
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
 
+  // ── ВРЕМЕННО (2026-08-19, разовый перенос Истории ДЗ на сервер) - постраничный экспорт
+  // "История_ДЗ" (общий снимок) и "История_ДЗ_по_контрагентам" (для drill-down). УБРАТЬ.
+  if (e && e.parameter && e.parameter.action === 'export_debt_history') {
+    var edhKey = e.parameter.key || '';
+    if (edhKey !== '7f2a9c1e6b4d8035a1c9ef26b8d40317') {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var edhWhich = e.parameter.which || 'history'; // 'history' | 'customer_history'
+    var edhSheetName = edhWhich === 'customer_history' ? 'История_ДЗ_по_контрагентам' : 'История_ДЗ';
+    var edhSheet = ss.getSheetByName(edhSheetName);
+    if (!edhSheet || edhSheet.getLastRow() < 2) {
+      return ContentService.createTextOutput(JSON.stringify({ rows: [], nextOffset: null, done: true })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var edhLastRow = edhSheet.getLastRow();
+    var edhLastCol = edhSheet.getLastColumn();
+    var edhOffset = Math.max(2, parseInt((e.parameter.offset || '2'), 10));
+    var edhLimit = Math.min(10000, parseInt((e.parameter.limit || '10000'), 10));
+    var edhNumRows = Math.min(edhLimit, edhLastRow - edhOffset + 1);
+    if (edhNumRows <= 0) {
+      return ContentService.createTextOutput(JSON.stringify({ rows: [], nextOffset: null, lastRow: edhLastRow, done: true })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var edhData = edhSheet.getRange(edhOffset, 1, edhNumRows, edhLastCol).getValues();
+    var edhRows = edhData.map(function(r) {
+      return r.map(function(v) {
+        var looksLikeDate = v && typeof v === 'object' && typeof v.getFullYear === 'function';
+        return looksLikeDate ? Utilities.formatDate(v, 'Europe/Moscow', 'yyyy-MM-dd') : v;
+      });
+    });
+    var edhNextOffset = edhOffset + edhNumRows;
+    return ContentService.createTextOutput(JSON.stringify({
+      rows: edhRows, nextOffset: edhNextOffset <= edhLastRow ? edhNextOffset : null,
+      lastRow: edhLastRow, done: edhNextOffset > edhLastRow,
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+  // ── конец временного экспорта истории ──────────────────────────────────────────────────────
+
   // ── ВРЕМЕННО (2026-08-19, перенос ДЗ на сервер) - экспорт листа "ДЗ_Статусы" (ручные
   // статусы/комментарии, НЕ из 1С - разовый + периодический перенос, см.
   // plans/2026-07-08-debt-receivables-tab.md). УБРАТЬ после того, как запись статусов тоже

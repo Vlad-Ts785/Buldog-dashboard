@@ -1271,12 +1271,17 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           </div>
           <div id="clc-map" class="clc-map"></div>
           <span class="clc-base-badge">🏠 База: Домодедово (МО)</span>
-          <div class="clc-route-stats">
+          <!-- Влад, 2026-08-21: "дублирует то, что уже сбоку есть (в разбивке цены), только
+               место занимает" - спрятано (не удалено), #clc-stD1/2/3 по-прежнему обновляются
+               в routeAll(), просто не показываются. -->
+          <div class="clc-route-stats" style="display:none">
             <div class="clc-route-stat"><div class="val" id="clc-stD1" style="color:#60a5fa">—</div><div class="lbl">База→загрузка</div></div>
             <div class="clc-route-stat"><div class="val" id="clc-stD2" style="color:var(--green)">—</div><div class="lbl">С грузом</div></div>
             <div class="clc-route-stat"><div class="val" id="clc-stD3" style="color:var(--muted)">—</div><div class="lbl">Выгрузка→база</div></div>
           </div>
-          <div class="clc-fg" style="margin-bottom:0">
+          <!-- Влад, 2026-08-21: "пока скрыть, функцию не удалять" - ручной ввод км временно
+               недоступен из интерфейса, чекбокс/поля остаются в DOM нетронутыми. -->
+          <div class="clc-fg" style="margin-bottom:0;display:none">
             <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px">
               <input type="checkbox" id="clc-manualKm" onchange="Clc.toggleManual()" style="width:auto"> Ввести км вручную (если маршрут не строится)
             </label>
@@ -1342,7 +1347,9 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
                 <option value="100-120">100-120 т</option>
               </select>
             </div>
-            <div class="clc-fg"><label>Рейсов</label><input type="number" id="clc-trips" class="clc-input" value="1" min="1" step="1" oninput="Clc.calc()"></div>
+            <!-- Влад, 2026-08-21: "лишнее окно, не нужно" - скрыто, не удалено, значение
+                 остаётся 1 рейс по умолчанию (calc() как и раньше читает clc-trips). -->
+            <div class="clc-fg" style="display:none"><label>Рейсов</label><input type="number" id="clc-trips" class="clc-input" value="1" min="1" step="1" oninput="Clc.calc()"></div>
           </div>
           <div class="clc-row">
             <div class="clc-fg" id="clc-koritoGrp" style="display:none">
@@ -1500,10 +1507,10 @@ function initMap(){
     // самого Leaflet (библиотека сама добавляет флаг+ссылку с версии 1.9.4), не наше решение
     // и не связано с картой/тайлами - просто переопределяем префикс на голый текст.
     if(map.attributionControl)map.attributionControl.setPrefix('Leaflet');
-    // Тёмные тайлы CARTO Dark Matter вместо светлых OSM (Влад, 2026-08-21: "бледная карта на
-    // тёмном фоне") - тоже бесплатно и без ключа, роутинг/геокодинг (OSRM/Nominatim) не
-    // трогали - это только картинка, движок Leaflet тот же.
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{maxZoom:18,subdomains:'abcd',attribution:'© OpenStreetMap, © CARTO'}).addTo(map);
+    // Тёмные тайлы CARTO пробовали (2026-08-21) - Влад: "не нравится, тёмное и подписи на
+    // английском" (CARTO dark_all не переключает подписи на русский). Вернули обычные светлые
+    // OSM-тайлы, флаг Украины остался убран отдельной строкой выше (это не про цвет тайлов).
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18}).addTo(map);
     L.control.zoom({position:'bottomright'}).addTo(map);
     mBase=L.marker([BASE.lat,BASE.lng],{icon:ic('#3b82f6')}).addTo(map).bindPopup('🏠 База: '+BASE.name);
     map.on('click',function(e){
@@ -1849,7 +1856,18 @@ function genKP(){
     htm+='</body></html>';
     var blob=new Blob(['\uFEFF'+htm],{type:'application/msword;charset=utf-8'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download=numStr+'_Бульдог_'+new Date().toISOString().slice(0,10)+'.doc';document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);kpLog.unshift({num:numStr,dt:new Date().toLocaleString('ru-RU'),route:la+' → '+ua,total:total,veh:vt});if(kpLog.length>200)kpLog.pop();localStorage.setItem('yrd_calc_kp_log',JSON.stringify(kpLog));updKpInfo();toast('✅ '+numStr+' готов');
 }
-rendH();fltr('all');calc();updKpInfo();
+rendH();fltr();calc();updKpInfo();
+// Влад, 2026-08-21: "если выскочил список, он не закрывается, если нажать на любое место
+// на калькуляторе - обязывает прям что-то выбрать" - клик куда угодно вне поля/списка должен
+// просто закрывать список без выбора. onblur+setTimeout в разметке ловит только уход фокуса
+// с самого поля - клик по СВОБОДНОМУ месту внутри списка (не по конкретному пункту) или по
+// другому виджету не всегда доходит до blur вовремя. Один глобальный слушатель клика надёжнее.
+document.addEventListener('click',function(e){
+    var inp=document.getElementById('clc-techSearch'),list=document.getElementById('clc-techList');
+    if(!inp||!list)return;
+    if(e.target===inp||list.contains(e.target))return;
+    list.classList.remove('show');
+});
 
 var clcMapInited=false,clcHistLoadedOnce=false;
 function initPage(){

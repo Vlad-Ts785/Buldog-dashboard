@@ -2130,6 +2130,33 @@ function dedupeMyPageEntries_(rawEntries) {
   return Object.values(byName);
 }
 
+// Синтетические записи-заглушки для новых сотрудников, у которых в 1С ЕЩЁ НЕТ ни одного
+// заказа (2026-08-21, Влад про Ратникова: "могу зайти под его страницу, как под другими?
+// Почему нет выбора?") - без этого человека физически нельзя выбрать ни на "Личной странице",
+// ни в "Смотреть как сотрудник" (обе построены из by_manager/by_logist, а туда попадают только
+// те, у кого УЖЕ есть заказ, см. TRAL_MANAGERS-гейт на бэкенде). Добавляется в дропдаун ТОЛЬКО
+// когда реальной записи с той же ФАМИЛИЕЙ ещё нет - сравнение по фамилии (не по полному имени),
+// чтобы не рисковать задвоением, если 1С в итоге запишет отчество чуть иначе, чем здесь.
+// Ничего вручную убирать не нужно - как только появятся настоящие заказы, реальная запись
+// перекроет эту заглушку сама (условие ниже просто перестанет срабатывать).
+var ALWAYS_PREVIEW_ROSTER_ = [
+  { name: 'Ратников Максим Михайлович', type: 'manager', sur: 'ратников' },
+];
+// Единая точка сборки ростера дропдауна (2026-08-21) - раньше concat+dedupe дублировался в
+// трёх местах (myPageCurrentEntry_/renderMyPage/viewAsRoster_), из-за чего правка вроде этой
+// рисковала попасть не во все - тот же класс риска, что уже ловили на дедупе Пруса.
+function buildMyPageRoster_(byManager, byLogist) {
+  var entries = dedupeMyPageEntries_(
+    (byManager || []).map(function(m){ return {name:m.name, type:'manager'}; })
+      .concat((byLogist || []).map(function(l){ return {name:l.name, type:'logist'}; }))
+  );
+  ALWAYS_PREVIEW_ROSTER_.forEach(function(ap) {
+    var hasReal = entries.some(function(en){ return en.name.trim().split(' ')[0].toLowerCase() === ap.sur; });
+    if (!hasReal) entries.push({ name: ap.name, type: ap.type });
+  });
+  return entries;
+}
+
 // Admin-предпросмотр "глазами сотрудника" (2026-08-18) - {name, type} выбранного через кнопку
 // "Смотреть как сотрудник" в подвале сайдбара, иначе null. Только для D.role==='admin' - у
 // реальных manager/logist кнопки нет (applyRoleUI прячет весь сайдбар, кроме своих 3 пунктов).
@@ -2145,10 +2172,7 @@ function myPageCurrentEntry_() {
   if (D.role === 'admin' && viewAsEntry) return viewAsEntry;
   // Из ростеров by_manager/by_logist, не из by_manager_detail/logist_detail - см. комментарий
   // в renderMyPage() (баг с Васиным, 2026-08-11).
-  var entries = dedupeMyPageEntries_(
-    (D.orders.by_manager || []).map(function(m){ return {name:m.name, type:'manager'}; })
-      .concat((D.orders.by_logist || []).map(function(l){ return {name:l.name, type:'logist'}; }))
-  );
+  var entries = buildMyPageRoster_(D.orders.by_manager, D.orders.by_logist);
   if (!entries.length) return null;
   entries.sort(function(a,b){ return a.name.localeCompare(b.name, 'ru'); });
   var sel = document.getElementById('my-page-mgr-select');
@@ -2306,10 +2330,8 @@ function renderMyPage() {
     // заказом за период), а НЕ из by_manager_detail/logist_detail (2026-08-11, баг с
     // Васиным - он почти никогда не попадает в logist_detail, там только наёмные сделки,
     // а Васин работает своим парком - без этого фикса он вообще не появлялся в дропдауне).
-    var entries = dedupeMyPageEntries_(
-      (((D.orders && D.orders.by_manager) || []).map(function(m){ return {name:m.name, type:'manager'}; }))
-        .concat(((D.orders && D.orders.by_logist) || []).map(function(l){ return {name:l.name, type:'logist'}; }))
-    );
+    // ALWAYS_PREVIEW_ROSTER_ (2026-08-21) - добавляет заглушки-новичков без единого заказа.
+    var entries = buildMyPageRoster_(D.orders && D.orders.by_manager, D.orders && D.orders.by_logist);
     entries.sort(function(a,b){ return a.name.localeCompare(b.name, 'ru'); });
     // Пустой entries - ок для manager/logist ролей (свой D.managerName/logistName не зависит
     // от by_manager_detail/logist_detail - у Васина, например, logist_detail почти всегда
@@ -3726,10 +3748,8 @@ function applyRoleUI() {
 // Менеджеры/Логисты. Первая строка - выход из предпросмотра, только когда он активен.
 function viewAsRoster_() {
   if (!D || !D.orders) return [];
-  return dedupeMyPageEntries_(
-    ((D.orders.by_manager || []).map(function(m){ return {name:m.name, type:'manager'}; }))
-      .concat((D.orders.by_logist || []).map(function(l){ return {name:l.name, type:'logist'}; }))
-  ).sort(function(a,b){ return a.name.localeCompare(b.name, 'ru'); });
+  return buildMyPageRoster_(D.orders.by_manager, D.orders.by_logist)
+    .sort(function(a,b){ return a.name.localeCompare(b.name, 'ru'); });
 }
 
 function updateViewAsButton_() {

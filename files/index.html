@@ -381,6 +381,12 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .clc-ac-item:last-child{border-bottom:none;}
 .clc-ac-item:hover{background:var(--bg3);}
 .clc-ac-sub{font-size:11px;color:var(--muted);}
+.clc-tech-clear{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--muted);font-size:18px;line-height:1;cursor:pointer;padding:5px 7px;border-radius:6px;}
+.clc-tech-clear:hover{color:var(--text);background:var(--bg4);}
+.clc-loop-wrap{position:relative;margin-bottom:12px;}
+.clc-loop-panel{position:absolute;top:100%;left:0;margin-top:6px;width:270px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-sm);box-shadow:0 8px 24px rgba(0,0,0,.4);padding:14px;z-index:99;opacity:0;transform:translateY(-4px);pointer-events:none;transition:opacity .15s ease-out,transform .15s ease-out;}
+.clc-loop-panel.show{opacity:1;transform:translateY(0);pointer-events:auto;}
+@media(prefers-reduced-motion:reduce){.clc-loop-panel{transition:none;}}
 .clc-route-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;}
 .clc-route-stat{background:var(--bg3);border-radius:var(--radius-sm);padding:10px;text-align:center;}
 .clc-route-stat .val{font-size:15px;font-weight:600;color:var(--text);}
@@ -1297,7 +1303,8 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
             <label>Подбор по базе техники заказчика (необязательно)</label>
             <div class="clc-ig">
               <div class="clc-ac-wrap">
-                <input type="text" id="clc-techSearch" class="clc-input" placeholder="Модель, например: Hitachi ZX330..." oninput="Clc.fltr()" onfocus="Clc.fltr()" onblur="setTimeout(function(){var l=document.getElementById('clc-techList');if(l)l.classList.remove('show');},200)">
+                <input type="text" id="clc-techSearch" class="clc-input" style="padding-right:32px" placeholder="Модель, например: Hitachi ZX330..." oninput="Clc.fltr()" onfocus="Clc.fltrFocus()" onblur="setTimeout(function(){var l=document.getElementById('clc-techList');if(l)l.classList.remove('show');},200)">
+                <button type="button" class="clc-tech-clear" id="clc-techClear" onmousedown="event.preventDefault()" onclick="Clc.clearTechSearch()" style="display:none" title="Очистить">×</button>
                 <div class="clc-ac-list" id="clc-techList"></div>
               </div>
               <select id="clc-techCat" class="clc-select" style="width:150px;flex:none" onchange="Clc.fltr()">
@@ -1386,12 +1393,26 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
             <div id="clc-kpInfo" style="font-size:11px;color:var(--muted);margin-top:12px"></div>
           </div>
 
+          <!-- Влад, 2026-08-21: "круговые рейсы" - едем до погрузки один раз, между двумя
+               точками мотаемся N раз (с грузом туда / порожним обратно за следующей партией),
+               и только с последней точки возвращаемся на базу один раз. N=1 (по умолчанию) -
+               даёт ровно ту же цифру, что и раньше, ничего не меняет. -->
+          <div class="clc-loop-wrap">
+            <button type="button" class="clc-btn clc-btn-ghost clc-btn-sm" onclick="Clc.toggleLoopPanel()">🔄 Круговые рейсы<span id="clc-loopBadge" style="color:var(--green);font-weight:600;margin-left:4px"></span></button>
+            <div class="clc-loop-panel" id="clc-loopPanel">
+              <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px">Количество круговых рейсов между точками</label>
+              <input type="number" id="clc-loopCount" class="clc-input" value="1" min="1" step="1" oninput="Clc.calc();Clc.updLoopBadge()">
+              <div style="font-size:10px;color:var(--muted);margin-top:8px;line-height:1.5">На базу и обратно считается один раз. Между точками погрузки/выгрузки - выбранное число раз (загружено туда, порожняком обратно за следующей партией).</div>
+            </div>
+          </div>
+
           <div class="clc-bd">
             <table>
               <tr><td>Техника</td><td id="clc-bdType">—</td></tr>
               <tr><td>Смена</td><td id="clc-bdShift">0 ₽</td></tr>
               <tr><td>База→загрузка</td><td id="clc-bdEmptyTo">0 ₽</td></tr>
               <tr><td>С грузом</td><td id="clc-bdLoaded">0 ₽</td></tr>
+              <tr id="clc-bdLoopRow" style="display:none"><td>Порожний между точками</td><td id="clc-bdLoopBack">0 ₽</td></tr>
               <tr><td>Выгрузка→база</td><td id="clc-bdEmptyFrom">0 ₽</td></tr>
               <tr><td>Коэффициенты</td><td id="clc-bdCoef">×1.0</td></tr>
               <tr><td>Сопровождение</td><td id="clc-bdNeg">0 ₽</td></tr>
@@ -1637,16 +1658,41 @@ function getLoc(t){if(!navigator.geolocation){toast('Геолокация нед
 // "выбирать груз тоже есть место в одном окне". Теперь это встроенный автокомплит рядом с
 // массой/габаритами (тот же паттерн .clc-ac-list, что у полей адреса) - показывается по
 // фокусу/вводу, прячется по выбору или потере фокуса (onblur в разметке).
-function fltr(){
-    var s=document.getElementById('clc-techSearch').value.toLowerCase(),ag=document.getElementById('clc-techCat').value,f=TECH;
-    if(ag!=='all')f=f.filter(function(t){return t.g===ag;});
-    if(s)f=f.filter(function(t){return t.n.toLowerCase().indexOf(s)>=0;});
+// 2026-08-21: после выбора техники поле хранит её название - повторный клик фильтровал
+// список по этому же тексту и казалось, что список "не открывается" (Влад: "всё замыкается
+// на том, что записано в строке"). Разделили: fltr() - обычная фильтрация по вводу (typing),
+// fltrFocus() - фокус ВСЕГДА показывает список по категории, игнорируя старый текст в поле
+// (плюс выделяет весь текст, чтобы печать сразу его заменила) + крестик очистки на видном месте.
+function renderTechList_(f){
     var c=document.getElementById('clc-techList');
     if(!f.length){c.innerHTML='<div class="clc-ac-item" style="cursor:default;color:var(--muted)">Ничего не найдено</div>';}
     else{c.innerHTML=f.slice(0,80).map(function(t){var idx=TECH.indexOf(t);return '<div class="clc-ac-item" onmousedown="event.preventDefault()" onclick="Clc.selTech('+idx+')"><div class="clc-tech-name">'+t.n+'</div><div class="clc-tech-spec"><span>'+t.w+' т</span><span>'+t.l+'×'+t.d+'×'+t.h+' м</span></div></div>';}).join('');}
     c.classList.add('show');
 }
-function selTech(i){if(i<0||i>=TECH.length)return;var t=TECH[i];document.getElementById('clc-weight').value=t.w;document.getElementById('clc-len').value=t.l;document.getElementById('clc-wid').value=t.d;document.getElementById('clc-hei').value=t.h;document.getElementById('clc-vehType').value=t.w>59?'faymon':'tral';document.getElementById('clc-cargoType').value=(t.w>20||t.l>13.6||t.d>2.55||t.h>4)?'negabarit':'gabarit';document.getElementById('clc-techSearch').value=t.n;document.getElementById('clc-techList').classList.remove('show');vhCh();calc();toast('Загружено: '+t.n);}
+function updateTechClearBtn_(){var btn=document.getElementById('clc-techClear');if(btn)btn.style.display=document.getElementById('clc-techSearch').value?'block':'none';}
+function fltr(){
+    var s=document.getElementById('clc-techSearch').value.toLowerCase(),ag=document.getElementById('clc-techCat').value,f=TECH;
+    if(ag!=='all')f=f.filter(function(t){return t.g===ag;});
+    if(s)f=f.filter(function(t){return t.n.toLowerCase().indexOf(s)>=0;});
+    renderTechList_(f);
+    updateTechClearBtn_();
+}
+function fltrFocus(){
+    var inp=document.getElementById('clc-techSearch');
+    inp.select();
+    var ag=document.getElementById('clc-techCat').value,f=TECH;
+    if(ag!=='all')f=f.filter(function(t){return t.g===ag;});
+    renderTechList_(f);
+    updateTechClearBtn_();
+}
+function clearTechSearch(){
+    var inp=document.getElementById('clc-techSearch');
+    inp.value='';
+    inp.focus();
+    updateTechClearBtn_();
+    fltrFocus();
+}
+function selTech(i){if(i<0||i>=TECH.length)return;var t=TECH[i];document.getElementById('clc-weight').value=t.w;document.getElementById('clc-len').value=t.l;document.getElementById('clc-wid').value=t.d;document.getElementById('clc-hei').value=t.h;document.getElementById('clc-vehType').value=t.w>59?'faymon':'tral';document.getElementById('clc-cargoType').value=(t.w>20||t.l>13.6||t.d>2.55||t.h>4)?'negabarit':'gabarit';document.getElementById('clc-techSearch').value=t.n;updateTechClearBtn_();document.getElementById('clc-techList').classList.remove('show');vhCh();calc();toast('Загружено: '+t.n);}
 function onWChange(){var w=+document.getElementById('clc-weight').value||0;if(w>20&&document.getElementById('clc-vehType').value==='board'){document.getElementById('clc-vehType').value='tral';toast('⚠️ Длинномер только до 20 т');}if(w>20&&document.getElementById('clc-vehType').value==='panel'){document.getElementById('clc-vehType').value='tral';toast('⚠️ Панелевоз только до 20 т');}syncFaymonCat();calc();}
 function vhCh(){var vt=document.getElementById('clc-vehType').value;document.getElementById('clc-faymonGrp').style.display=vt==='faymon'?'block':'none';var kg=vt==='korito';document.getElementById('clc-koritoGrp').style.display=kg?'block':'none';document.getElementById('clc-koritoExtGrp').style.display=kg?'block':'none';onWChange();}
 function toggleManual(){document.getElementById('clc-manualKmBox').style.display=document.getElementById('clc-manualKm').checked?'grid':'none';calc();}
@@ -1663,6 +1709,7 @@ function calc(){
         document.getElementById('clc-totalPrice').textContent='—';
         document.getElementById('clc-priceSub').textContent='Укажите маршрут (или введите км вручную)';
         ['clc-bdType','clc-bdShift','clc-bdEmptyTo','clc-bdLoaded','clc-bdEmptyFrom','clc-bdNeg'].forEach(function(id){document.getElementById(id).textContent='—';});
+        document.getElementById('clc-bdLoopRow').style.display='none';
         document.getElementById('clc-bdCoef').textContent='×1.0';document.getElementById('clc-bdTotal').textContent='—';
         return;
     }
@@ -1683,8 +1730,12 @@ function calc(){
     if(!rate)return;
     var shift=rate.s,kmRate=rate.km,emptyRate=rate.emptyKm||EMPTY_RATE,mskOnly=isMsk,isFar=distMsk>FAR_R;
     if(!mskOnly&&isFar&&!rate.isF)shift=FAR_SHIFT;shift=rn(shift);
-    var e1=0,ld=0,e2=0;
-    if(!mskOnly){e1=rn(a1*emptyRate);ld=rn(a2*kmRate);e2=rn(a3*emptyRate);}
+    var loopCount=Math.max(1,+document.getElementById('clc-loopCount').value||1);
+    var e1=0,ld=0,e2=0,ldBack=0;
+    if(!mskOnly){e1=rn(a1*emptyRate);ld=rn(a2*kmRate);e2=rn(a3*emptyRate);ldBack=rn(a2*emptyRate);}
+    // Круговые рейсы: N раз с грузом между точками, (N-1) раз порожним обратно между ними -
+    // при loopCount=1 loopBackTotal=0 и ldAll=ld, формула не отличается от обычной.
+    var ldAll=ld*loopCount,loopBackTotal=ldBack*(loopCount-1);
     var coef=1,coefs=[];
     if(vt==='korito'&&document.getElementById('clc-koritoExt').checked){coef*=K_COEF;coefs.push('×1.5 раздвижение');}
     if(over){coef*=OV_COEF;coefs.push('×2 негабарит >17/4/4.5');}
@@ -1697,14 +1748,17 @@ function calc(){
         else if(ecat===3){esc=0;escNote='Кат. 3 — индивидуально с руководителем';}
         else{var er=ESC_CAT[ecat][escortBand(a2)];esc=ESC_FAR_BASE+rn(a2*er);escNote='Кат.'+ecat+' · 20 000 + '+a2+' км × '+er+' ₽';}
     }
-    var sub=rn(shift*coef)+e1+ld+e2+esc,total=rn(sub*trips);
+    var sub=rn(shift*coef)+e1+ldAll+loopBackTotal+e2+esc,total=rn(sub*trips);
     document.getElementById('clc-totalPrice').textContent=total?total.toLocaleString()+' ₽':'0 ₽';
     var zoneLbl=autoZone==='sadovoe'?'Садовое':autoZone==='mkad'?'МКАД':'МО';
     document.getElementById('clc-priceSub').innerHTML=(mskOnly?'🏙️ Москва/'+zoneLbl:(isFar?'🚛 Дальний':'📍 Регион'))+(manual?' · ✍️ ручной км':'')+(mskOnly?'':' · '+a2+' км с грузом');
     document.getElementById('clc-bdType').textContent=rate.n||'Трал';
     document.getElementById('clc-bdShift').textContent=(mskOnly?rn(shift*coef):shift).toLocaleString()+' ₽'+(isFar?' (дальний)':'')+(mskOnly?' (вся Москва)':'');
     document.getElementById('clc-bdEmptyTo').textContent=mskOnly?'—':e1.toLocaleString()+' ₽ (расчёт: '+a1+' км × '+emptyRate+' ₽)';
-    document.getElementById('clc-bdLoaded').textContent=mskOnly?'—':ld.toLocaleString()+' ₽ (расчёт: '+a2+' км × '+kmRate+' ₽)';
+    document.getElementById('clc-bdLoaded').textContent=mskOnly?'—':ldAll.toLocaleString()+' ₽ (расчёт: '+a2+' км × '+kmRate+' ₽'+(loopCount>1?' × '+loopCount+' рейсов':'')+')';
+    var loopRow=document.getElementById('clc-bdLoopRow');
+    if(loopCount>1&&!mskOnly){loopRow.style.display='';document.getElementById('clc-bdLoopBack').textContent=loopBackTotal.toLocaleString()+' ₽ (расчёт: '+a2+' км × '+emptyRate+' ₽ × '+(loopCount-1)+')';}
+    else{loopRow.style.display='none';}
     document.getElementById('clc-bdEmptyFrom').textContent=mskOnly?'—':e2.toLocaleString()+' ₽ (расчёт: '+a3+' км × '+emptyRate+' ₽)';
     document.getElementById('clc-bdCoef').textContent=coef===1?'×1.0':'×'+coef+' ('+coefs.join(', ')+')';
     document.getElementById('clc-bdNeg').textContent=neg?(esc?esc.toLocaleString()+' ₽'+(escNote?' ('+escNote+')':''):(escNote||'0 ₽')):'0 ₽';
@@ -1864,10 +1918,13 @@ rendH();fltr();calc();updKpInfo();
 // другому виджету не всегда доходит до blur вовремя. Один глобальный слушатель клика надёжнее.
 document.addEventListener('click',function(e){
     var inp=document.getElementById('clc-techSearch'),list=document.getElementById('clc-techList');
-    if(!inp||!list)return;
-    if(e.target===inp||list.contains(e.target))return;
-    list.classList.remove('show');
+    if(inp&&list&&e.target!==inp&&!list.contains(e.target))list.classList.remove('show');
+    var loopBtn=e.target.closest?e.target.closest('.clc-loop-wrap'):null,loopPanel=document.getElementById('clc-loopPanel');
+    if(loopPanel&&!loopBtn)loopPanel.classList.remove('show');
 });
+
+function toggleLoopPanel(){document.getElementById('clc-loopPanel').classList.toggle('show');}
+function updLoopBadge(){var n=+document.getElementById('clc-loopCount').value||1,b=document.getElementById('clc-loopBadge');b.textContent=n>1?'×'+n:'';}
 
 var clcMapInited=false,clcHistLoadedOnce=false;
 function initPage(){
@@ -1878,8 +1935,9 @@ function initPage(){
 
 window.Clc = {
   geoc:geoc, getLoc:getLoc, swapAdr:swapAdr, toggleManual:toggleManual, onWChange:onWChange,
-  vhCh:vhCh, fltr:fltr, selTech:selTech, saveCalc:saveCalc, delCalc:delCalc, loadH:loadH,
-  genKP:genKP, calc:calc, initPage:initPage
+  vhCh:vhCh, fltr:fltr, fltrFocus:fltrFocus, clearTechSearch:clearTechSearch, selTech:selTech,
+  saveCalc:saveCalc, delCalc:delCalc, loadH:loadH, genKP:genKP, calc:calc, initPage:initPage,
+  toggleLoopPanel:toggleLoopPanel, updLoopBadge:updLoopBadge
 };
 
 })();

@@ -487,8 +487,25 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   </nav>
 
   <div class="sidebar-bottom">
+    <!-- Плашка "обновление не проходит" (Этап 0.3 плана устранения аудита). 19.08.2026 импорт
+         заказов был мёртв 8 часов, а дашборд всё это время показывал устаревшие цифры без
+         единого признака - и на них считалась зарплата. Молчаливо устаревшие данные хуже
+         явной ошибки: явную видно, эту нет. Заполняется checkDataFreshness(), скрыта пока
+         всё в порядке. -->
+    <div id="nav-stale" style="display:none;margin-bottom:8px;padding:8px 10px;border-radius:6px;
+         background:rgba(239,159,39,.12);border:1px solid rgba(239,159,39,.35);
+         font-size:11px;line-height:1.45;color:#EF9F27"></div>
     <div class="sidebar-updated" id="nav-updated">Нет данных</div>
-    <button class="sidebar-refresh" onclick="loadData()">↻ Обновить данные</button>
+    <!-- Admin-предпросмотр "глазами сотрудника" (Влад, 2026-08-18: "нажал менеджер - и у меня
+         полностью интерфейс поменялся, как его видит менеджер... лучше сразу сотрудника
+         выбирать") - список из того же ростера, что уже даёт дропдаун на "Личной странице",
+         просто теперь ещё и урезает сайдбар/лейбл через applyRoleUI(), как для реального
+         входа manager/logist. Данные не перезапрашиваются - у admin и так есть всё в D. -->
+    <div style="position:relative">
+      <button type="button" class="sidebar-refresh" id="view-as-btn" onclick="toggleViewAsPanel(event)">👁 Смотреть как сотрудник</button>
+      <div id="view-as-panel" style="display:none;position:absolute;bottom:calc(100% + 4px);left:0;right:0;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px;z-index:50;max-height:280px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.4)"></div>
+    </div>
+    <button class="sidebar-refresh" onclick="loadData()" style="margin-top:6px">↻ Обновить данные</button>
     <button class="sidebar-refresh" onclick="logoutUser()" style="margin-top:6px">Выйти</button>
   </div>
 </aside>
@@ -1941,6 +1958,27 @@ function clearAuthTokens_() {
   localStorage.removeItem('session_token');
 }
 
+// Google Apps Script иногда временно отдаёт HTML-страницу (или пустой ответ) вместо JSON,
+// даже когда код исправен и задеплоен нормально (2026-08-19 - живой инцидент: несколько
+// запросов подряд к одному и тому же /exec то проходили, то нет - похоже на кратковременную
+// нестабильность на стороне Google, не на нашей стороне). Раньше единственный неудачный ответ
+// сразу показывал пользователю "Unexpected token '<'..." - теперь тихо повторяем ещё пару раз
+// с небольшой паузой, прежде чем сдаться и показать ошибку.
+async function fetchJsonWithRetry_(url, attempts) {
+  attempts = attempts || 3;
+  var lastErr;
+  for (var i = 0; i < attempts; i++) {
+    try {
+      var res = await fetch(url);
+      return await res.json();
+    } catch (e) {
+      lastErr = e;
+      if (i < attempts - 1) await new Promise(function(r) { setTimeout(r, 700 + i * 500); });
+    }
+  }
+  throw lastErr;
+}
+
 // Общий wrapper над fetch(apiUrl(...)) для всех запросов КРОМЕ самого первого (loadData()
 // сама разбирает needLogin). Токен сессии живёт до 48ч (см. SESSION_TOKEN_TTL_MS на backend) -
 // если дашборд открыт дольше и потом нажать, например, "Прошлый месяц" на Технике, второй
@@ -1948,8 +1986,7 @@ function clearAuthTokens_() {
 // подсказки, что делать (Влад, 2026-07-04). Теперь при needLogin сразу разлогиниваем и
 // показываем экран входа - как и при самой первой загрузке.
 async function apiFetchJson(params) {
-  const res = await fetch(apiUrl(params));
-  const data = await res.json();
+  const data = await fetchJsonWithRetry_(apiUrl(params));
   if (data.needLogin) {
     clearAuthTokens_();
     showLoginScreen(data.error);
@@ -2030,8 +2067,7 @@ async function loadData() {
   document.getElementById('loading').style.display = 'flex';
   startLoadingPhrases();
   try {
-    const mainRes = await fetch(apiUrl({}));
-    D = await mainRes.json();
+    D = await fetchJsonWithRetry_(apiUrl({}));
     if (D.needLogin) { clearAuthTokens_(); showLoginScreen(D.error); return; }
     if (D.error) throw new Error(D.error);
     saveSessionTokenFromResponse_(D);
@@ -2094,6 +2130,11 @@ function dedupeMyPageEntries_(rawEntries) {
   return Object.values(byName);
 }
 
+// Admin-предпросмотр "глазами сотрудника" (2026-08-18) - {name, type} выбранного через кнопку
+// "Смотреть как сотрудник" в подвале сайдбара, иначе null. Только для D.role==='admin' - у
+// реальных manager/logist кнопки нет (applyRoleUI прячет весь сайдбар, кроме своих 3 пунктов).
+let viewAsEntry = null;
+
 // Кто сейчас выбран на личной странице - вынесено отдельно (2026-08-11), т.к. и
 // renderMyPage(), и setMyPagePeriod() (для роутинга Васина на свой источник данных, см. ниже)
 // независимо должны знать "кого сейчас смотрим", без дублирования логики дропдауна/ролей.
@@ -2101,6 +2142,7 @@ function myPageCurrentEntry_() {
   if (!D || !D.orders) return null;
   if (D.role === 'manager') return { name: D.managerName, type: 'manager' };
   if (D.role === 'logist')  return { name: D.logistName,  type: 'logist'  };
+  if (D.role === 'admin' && viewAsEntry) return viewAsEntry;
   // Из ростеров by_manager/by_logist, не из by_manager_detail/logist_detail - см. комментарий
   // в renderMyPage() (баг с Васиным, 2026-08-11).
   var entries = dedupeMyPageEntries_(
@@ -2122,6 +2164,18 @@ function isVasinEntry_(entry) {
 function isOwnTralLogistSur_(sur) {
   var s = (sur||'').toLowerCase();
   return s === 'сильчев' || s === 'кан' || s === 'махура';
+}
+
+// Менеджеры, у которых формула зарплаты ЕЩЁ НЕ согласована с Владом (2026-08-13, новый
+// менеджер Ратников Максим - "сам по себе, не к Лиане, не к Айнур... зарплату ему считать
+// пока не нужно, остальное всё как у всех продавцов"). Показывать calcMgr() с дефолтной
+// ставкой было бы враньём сотруднику - число выглядело бы официальным расчётом, но ставка
+// для него не решена. Личная страница (план/ИИ-задачи/клиенты/ДЗ/документы) - без изменений,
+// подменяется только блок "Расчёт зарплаты" (см. renderMyPageManager). Список по фамилии
+// (не data-driven) - убрать отсюда, когда Влад согласует ставку.
+var SALARY_NOT_CONFIGURED_ = ['ратников'];
+function isSalaryNotConfigured_(sur) {
+  return SALARY_NOT_CONFIGURED_.indexOf((sur||'').toLowerCase()) >= 0;
 }
 
 // Переключатель "Свои продажи" / "Общие сделки" на личной странице логиста (Влад, 2026-08-10:
@@ -2242,8 +2296,10 @@ function renderMyPage() {
   }
 
   try {
-    var isManagerRole = D.role === 'manager';
-    var isLogistRole  = D.role === 'logist';
+    // Admin-предпросмотр (viewAsEntry) считается той же ролью, что и реальный вход - прячет
+    // дропдаун "Сотрудник" ниже (человек, реально вошедший под своим логином, его не видит).
+    var isManagerRole = D.role === 'manager' || (D.role === 'admin' && viewAsEntry && viewAsEntry.type === 'manager');
+    var isLogistRole  = D.role === 'logist'  || (D.role === 'admin' && viewAsEntry && viewAsEntry.type === 'logist');
     var mgrDetailAll = (D.orders && D.orders.by_manager_detail) || {};
     var logDetailAll = (D.orders && D.orders.logist_detail) || {};
     // Список для дропдауна - из ростеров by_manager/by_logist (кто угодно с хоть одним
@@ -2738,7 +2794,9 @@ function renderMyPageManager(el, current, selectorHtml, d) {
   // же компоненты calcMgr, в стиле строка-значение (как у остальных личных страниц), а не
   // многоколоночной таблицей отдела - тут один человек, таблица на весь отдел избыточна.
   var salaryBody;
-  if (!sal) {
+  if (isSalaryNotConfigured_(sur)) {
+    salaryBody = '<div style="font-size:13px;color:var(--muted)">Формула зарплаты для этого сотрудника пока не согласована - расчёт временно не показывается.</div>';
+  } else if (!sal) {
     salaryBody = '<div style="font-size:13px;color:var(--muted)">Нет данных для расчёта за этот период.</div>';
   } else if (sal.newRules) {
     var srows = salRow('Оклад', sal.oklad, 'По ступени оборота '+mln(sal.total)) + okladNextTierNote_(sal.total);
@@ -3616,10 +3674,13 @@ function renderMyPageVasin(el, current, selectorHtml) {
 function render() {
   const t = D.updated ? new Date(D.updated).toLocaleString('ru',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'}) : '';
   setText('nav-updated', 'Обновлено: ' + t);
+  checkDataFreshness(); // плашка "обновление не проходит", см. Этап 0.3
   applyRoleUI();
 
-  if (D.role === 'manager' || D.role === 'logist') {
-    // Менеджеру/логисту урезанные данные с сервера - другие вкладки на них упадут, не рендерим их
+  if (D.role === 'manager' || D.role === 'logist' || (D.role === 'admin' && viewAsEntry)) {
+    // Менеджеру/логисту урезанные данные с сервера - другие вкладки на них упадут, не рендерим
+    // их. Admin-предпросмотр (viewAsEntry) технически видит полный D, но остальные вкладки тоже
+    // не рендерим - они скрыты в сайдбаре (applyRoleUI), рендерить их незачем.
     renderMyPage();
     return;
   }
@@ -3641,8 +3702,9 @@ function render() {
 // но скрыть пункты меню тоже нужно, чтобы интерфейс не предлагал недоступное.
 function applyRoleUI() {
   const sidebarLabel = document.querySelector('.sidebar-logo-label');
-  if (D.role === 'manager' || D.role === 'logist') {
-    if (sidebarLabel) sidebarLabel.textContent = D.managerName || D.logistName || (D.role === 'logist' ? 'Логист' : 'Менеджер');
+  const previewing = D.role === 'admin' && !!viewAsEntry;
+  if (D.role === 'manager' || D.role === 'logist' || previewing) {
+    if (sidebarLabel) sidebarLabel.textContent = previewing ? viewAsEntry.name : (D.managerName || D.logistName || (D.role === 'logist' ? 'Логист' : 'Менеджер'));
     document.querySelectorAll('.sidebar-nav-item').forEach(function(item) {
       const page = item.getAttribute('data-page');
       // Калькулятор не зависит от серверных данных (D.role) - считает офлайн в браузере,
@@ -3656,7 +3718,84 @@ function applyRoleUI() {
     document.querySelectorAll('.sidebar-nav-item').forEach(function(item) { item.style.display = ''; });
     document.querySelectorAll('.sidebar-nav-section').forEach(function(s){ s.style.display = ''; });
   }
+  updateViewAsButton_();
 }
+
+// Кнопка-переключатель "Смотреть как сотрудник" в подвале сайдбара - список из того же
+// ростера, что дропдаун на "Личной странице" (by_manager/by_logist), сгруппирован
+// Менеджеры/Логисты. Первая строка - выход из предпросмотра, только когда он активен.
+function viewAsRoster_() {
+  if (!D || !D.orders) return [];
+  return dedupeMyPageEntries_(
+    ((D.orders.by_manager || []).map(function(m){ return {name:m.name, type:'manager'}; }))
+      .concat((D.orders.by_logist || []).map(function(l){ return {name:l.name, type:'logist'}; }))
+  ).sort(function(a,b){ return a.name.localeCompare(b.name, 'ru'); });
+}
+
+function updateViewAsButton_() {
+  var btn = document.getElementById('view-as-btn');
+  if (!btn) return;
+  if (D.role === 'admin' && viewAsEntry) {
+    btn.textContent = '👁 Вы смотрите как: ' + viewAsEntry.name;
+    btn.style.color = 'var(--amber)';
+    btn.style.borderColor = 'var(--amber)';
+  } else {
+    btn.textContent = '👁 Смотреть как сотрудник';
+    btn.style.color = '';
+    btn.style.borderColor = '';
+  }
+  // Реальным manager/logist сама кнопка не нужна - им и так показывается только своя страница.
+  btn.parentElement.style.display = (D.role === 'admin') ? '' : 'none';
+}
+
+function toggleViewAsPanel(ev) {
+  if (ev) ev.stopPropagation();
+  var panel = document.getElementById('view-as-panel');
+  if (!panel) return;
+  if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
+  renderViewAsPanel_();
+  panel.style.display = 'block';
+}
+
+function renderViewAsPanel_() {
+  var panel = document.getElementById('view-as-panel');
+  if (!panel) return;
+  var roster = viewAsRoster_();
+  function rowHtml(en) {
+    var active = viewAsEntry && viewAsEntry.name === en.name && viewAsEntry.type === en.type;
+    var safe = en.name.replace(/'/g, "\\'");
+    return '<div onclick="setViewAs(\''+safe+'\',\''+en.type+'\')" style="padding:7px 10px;font-size:13px;cursor:pointer;border-radius:4px;color:'+(active?'var(--amber)':'var(--text)')+(active?';font-weight:600':'')+'" '+
+      'onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'\'">'+en.name+'</div>';
+  }
+  var managers = roster.filter(function(e){ return e.type === 'manager'; });
+  var logists  = roster.filter(function(e){ return e.type === 'logist'; });
+  var html = '';
+  if (viewAsEntry) {
+    html += '<div onclick="setViewAs(null,null)" style="padding:7px 10px;font-size:13px;cursor:pointer;border-radius:4px;color:var(--red);border-bottom:1px solid var(--border);margin-bottom:4px" '+
+      'onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'\'">✕ Обычный вид (админ)</div>';
+  }
+  if (managers.length) html += '<div style="padding:6px 10px 2px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Менеджеры</div>' + managers.map(rowHtml).join('');
+  if (logists.length) html += '<div style="padding:6px 10px 2px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Логисты</div>' + logists.map(rowHtml).join('');
+  if (!roster.length) html += '<div style="padding:8px 10px;font-size:12px;color:var(--muted)">Нет данных</div>';
+  panel.innerHTML = html;
+}
+
+function setViewAs(name, type) {
+  viewAsEntry = name ? { name: name, type: type } : null;
+  myPagePeriod = null; // сброс "прошлого месяца" - иначе можно унести чужой кэш периода на нового человека
+  var panel = document.getElementById('view-as-panel');
+  if (panel) panel.style.display = 'none';
+  render();
+  if (!viewAsEntry) {
+    var mainNav = document.querySelector('.sidebar-nav-item[data-page="main"]');
+    showPage('main', mainNav);
+  }
+}
+document.addEventListener('click', function(ev) {
+  var panel = document.getElementById('view-as-panel');
+  if (!panel || panel.style.display === 'none') return;
+  if (!panel.contains(ev.target) && ev.target.id !== 'view-as-btn') panel.style.display = 'none';
+});
 
 // ── ВЫБОР ПЕРИОДА (Заказы / Менеджеры / Логисты / Зарплата) ──
 let selectedPeriod = null;     // null = текущий месяц
@@ -5463,6 +5602,7 @@ function renderReceiptsCustomers(r) {
 // заказы за весь месяц сразу - переключение дня ниже работает без похода на сервер.
 var orderPlanData = null;
 var orderPlanLoadedForKey = null; // "роль::имя", под которого запрошены текущие orderPlanData
+var orderPlanFullyLoaded = false; // false, пока фоновый "rest" ещё не долетел
 var orderPlanActiveDay = null; // null = ещё не выбран - при первом рендере встанет на сегодня
 var ORDER_PLAN_WEEKDAY_SHORT_ = ['вс','пн','вт','ср','чт','пт','сб']; // Date.getUTCDay(): 0=вс..6=сб
 
@@ -5479,20 +5619,47 @@ function orderPlanTargetKey_() {
   return 'admin::' + (entry ? entry.name : '');
 }
 
+// Двухфазная загрузка (Влад, 2026-08-18: "не так критичны данные за прошедшие дни,
+// больше интересует вчера сегодня и завтра... эти листы должны прогружаться макс.
+// оперативно"). Таблица планировки - ~31 вкладка, холодное чтение всех разом - минуты
+// (см. warmOrderPlanCache/ORDER_PLAN_CACHE_TTL_SEC). Сначала грузим только "горячие"
+// 3 дня (&scope=hot, секунды) и сразу рисуем их - именно то, что нужно менеджеру прямо
+// сейчас. Остальной месяц (&scope=rest) догружается следом, не блокируя первый показ.
 function loadOrderPlanData() {
   var key = orderPlanTargetKey_();
   if (orderPlanData !== null && orderPlanLoadedForKey === key) { renderOrderPlan(); return; }
   orderPlanLoadedForKey = key;
+  orderPlanFullyLoaded = false;
   var el = document.getElementById('order-plan-content');
   if (el) el.innerHTML = '<p style="color:var(--muted);padding:16px">Загрузка...</p>';
-  var params = { action: 'order_plan' };
+
+  var baseParams = { action: 'order_plan' };
   if (D && D.role !== 'manager' && D.role !== 'logist') {
     var entry = myPageCurrentEntry_();
-    if (entry) params.manager = entry.name;
+    if (entry) baseParams.manager = entry.name;
   }
-  apiFetchJson(params)
-    .then(function(d) { orderPlanData = d; renderOrderPlan(); })
-    .catch(function() { orderPlanData = { error: 'Ошибка загрузки', orders: [] }; renderOrderPlan(); });
+
+  apiFetchJson(Object.assign({}, baseParams, { scope: 'hot' }))
+    .then(function(d) {
+      if (orderPlanLoadedForKey !== key) return; // пользователь уже переключился на другого - не мешаем
+      orderPlanData = d;
+      renderOrderPlan();
+      return apiFetchJson(Object.assign({}, baseParams, { scope: 'rest' }));
+    })
+    .then(function(restData) {
+      if (!restData || orderPlanLoadedForKey !== key) return;
+      if (!restData.error) {
+        orderPlanData.orders = (orderPlanData.orders || []).concat(restData.orders || []);
+      }
+      orderPlanFullyLoaded = true;
+      renderOrderPlan();
+    })
+    .catch(function() {
+      if (orderPlanLoadedForKey !== key) return;
+      if (!orderPlanData) orderPlanData = { error: 'Ошибка загрузки', orders: [] };
+      orderPlanFullyLoaded = true;
+      renderOrderPlan();
+    });
 }
 
 function orderPlanStatusColor_(status) {
@@ -5517,6 +5684,374 @@ function orderPlanFormatCost_(cost) {
   if (cost === '' || cost === null || cost === undefined) return '';
   var n = orderPlanCostNumber_(cost);
   return n !== null ? Math.round(n).toLocaleString('ru-RU') + ' ₽' : String(cost).trim();
+}
+
+// ── СОЗДАНИЕ ЗАЯВКИ (вариант Б, Влад 2026-08-18: "не только инструмент просмотра,
+// но и инструмент создания заявок") - форма пишет в ту же Google Таблицу
+// планировки через ?action=order_plan_create (createOrderPlanEntry_ в Apps
+// Script). Списки ниже - точная копия строгой валидации листа "Справочник"
+// таблицы планировки (см. ORDER_PLAN_EQUIP_TYPES_ и т.д. в backend, сверено
+// живым тестом 2026-08-18) - если справочник когда-нибудь изменится, backend
+// всё равно отклонит несовпадающее значение понятной ошибкой.
+var ORDER_PLAN_EQUIP_TYPES_FE_ = ['Трал', 'Длинномер', 'Панелевоз', 'Любая модификация', 'Тент'];
+var ORDER_PLAN_REWORK_TERMS_FE_ = ['Без переработки', 'Переработка по согласованию с логистом'];
+var ORDER_PLAN_GABARIT_FE_ = ['Габарит', 'Негабарит'];
+var ORDER_PLAN_DOCUMENTS_FE_ = ['Путевой лист', 'Путевой лист и ТТН'];
+var ORDER_PLAN_STATUSES_FE_ = ['Подтверждено', 'Отбой', 'Не закрыто'];
+var ORDER_PLAN_FORM_INPUT_STYLE_ = 'width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:7px 10px;font-size:13px';
+
+// Создавать заявки может только менеджер (у B верхней/нижней строки в таблице
+// планировки разные справочники - см. plans/2026-08-18-order-plan-create-orders.md)
+// - для admin смотрим, кого он выбрал через "Смотреть как сотрудник"/дропдаун.
+function orderPlanCanCreate_() {
+  if (!D) return false;
+  if (D.role === 'manager') return true;
+  if (D.role === 'logist') return false;
+  var entry = myPageCurrentEntry_();
+  return !!entry && entry.type === 'manager';
+}
+
+// Статус прямо в таблице (Влад, 2026-08-18: "статус должен меняться прямо из
+// таблицы... в таблице Google также статусы должны меняться в зависимости от
+// статуса в дашборде") - select вместо текста для своих заявок, без открытия
+// формы редактирования. Пишет только одну ячейку (order_plan_set_status).
+function orderPlanStatusSelectHtml_(o, idx) {
+  var color = orderPlanStatusColor_(o.status);
+  if (!(orderPlanCanCreate_() && o.role === 'manager')) {
+    return '<span style="color:'+color+';font-weight:600">'+(o.status || 'без статуса')+'</span>';
+  }
+  var h = '<select onchange="quickSetOrderPlanStatus('+idx+',this.value,this)" style="background:transparent;border:1px solid var(--border);border-radius:6px;padding:3px 4px;font-size:12px;font-weight:600;color:'+color+';cursor:pointer;max-width:120px">';
+  h += '<option value=""'+(!o.status ? ' selected' : '')+'>без статуса</option>';
+  ORDER_PLAN_STATUSES_FE_.forEach(function(s) {
+    h += '<option value="'+s+'"'+(s === o.status ? ' selected' : '')+'>'+s+'</option>';
+  });
+  h += '</select>';
+  return h;
+}
+
+function quickSetOrderPlanStatus(idx, newStatus, selectEl) {
+  var o = orderPlanCurrentDayOrders[idx];
+  if (!o) return;
+  var prevStatus = o.status;
+  selectEl.disabled = true;
+  var params = { action: 'order_plan_set_status', day: o.day, orderNumber: o.orderNumber, status: newStatus };
+  if (D && D.role !== 'manager' && D.role !== 'logist') {
+    var entry = myPageCurrentEntry_();
+    if (entry) params.manager = entry.name;
+  }
+  apiFetchJson(params).then(function(data) {
+    if (data.error) {
+      alert(data.error);
+      selectEl.value = prevStatus || '';
+      selectEl.disabled = false;
+      return;
+    }
+    o.status = newStatus;
+    renderOrderPlan(); // перекрасит фон строки целиком - фон зависит от статуса
+  }).catch(function() {
+    alert('Не удалось сохранить статус, попробуйте ещё раз');
+    selectEl.value = prevStatus || '';
+    selectEl.disabled = false;
+  });
+}
+
+function formRow_(label, inputHtml) {
+  return '<div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">'+label+'</label>'+inputHtml+'</div>';
+}
+function orderPlanSelectHtml_(id, options, selected, required) {
+  var h = '<select id="'+id+'" style="'+ORDER_PLAN_FORM_INPUT_STYLE_+'">';
+  h += '<option value="">'+(required ? '— выберите —' : '(не указано)')+'</option>';
+  options.forEach(function(o) {
+    h += '<option value="'+o+'"'+(o === selected ? ' selected' : '')+'>'+o+'</option>';
+  });
+  h += '</select>';
+  return h;
+}
+function orderPlanInputHtml_(id, value, placeholder, type, extraAttrs) {
+  var esc = String(value == null ? '' : value).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  return '<input id="'+id+'" type="'+(type || 'text')+'" value="'+esc+'" placeholder="'+(placeholder || '')+'" style="'+ORDER_PLAN_FORM_INPUT_STYLE_+'"'+(extraAttrs || '')+'>';
+}
+
+// Заказчики "выпадают по первым напечатанным буквам" (Влад) - datalist поверх уже
+// загруженных orderPlanData.orders (без похода на сервер), при этом свободный ввод
+// нового заказчика остаётся возможным (datalist, не select - "если новый, то новый
+// как запишет"). Контакты запоминаются ПО заказчику (лёгкая версия "карточки фирмы" -
+// полноценный СРМ с телефонами по каждому контакту сам по себе отдельная задача,
+// тут только то, что уже видно в загруженных заказах).
+function orderPlanCustomerList_() {
+  var names = {};
+  // Влад, 2026-08-18: "список компаний должен быть из 1С... правильные названия,
+  // старые корявые уйдут со временем" - приоритет реальным контрагентам из 1С
+  // (D.debt.by_customer уже загружен вместе с основным payload, без похода на
+  // сервер), а не тому, как менеджеры печатают в самой таблице планировки.
+  // Смешиваем с уже использованными в плане именами - плавный переход, не резкий.
+  ((D && D.debt && D.debt.by_customer) || []).forEach(function(c) { if (c.contragent) names[c.contragent] = true; });
+  (orderPlanData && orderPlanData.orders || []).forEach(function(o) { if (o.customer) names[o.customer] = true; });
+  return Object.keys(names).sort(function(a,b){ return a.localeCompare(b,'ru'); });
+}
+
+// Свой автокомплит вместо <datalist> - Влад, 2026-08-18: "когда ввёл 'пр' уже все
+// должны быть с названием 'пр' в начале" - нативный datalist в Chrome ищет
+// совпадение ГДЕ УГОДНО в строке, а не строго с начала, поведение не настраивается.
+// Строгое совпадение "начинается с" реализуем сами.
+function orderPlanCustomerInput_() {
+  var val = document.getElementById('oc-customer').value.trim().toLowerCase();
+  var box = document.getElementById('oc-customer-suggest');
+  if (!box) return;
+  orderPlanRefreshContactList_();
+  if (!val) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  var matches = orderPlanCustomerList_().filter(function(n) {
+    return n.toLowerCase().indexOf(val) === 0;
+  }).slice(0, 15);
+  if (!matches.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  box.innerHTML = matches.map(function(n) {
+    var esc = n.replace(/</g,'&lt;');
+    var escAttr = n.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    return '<div onmousedown="orderPlanPickCustomer_(\''+escAttr+'\')" '+
+      'style="padding:7px 10px;cursor:pointer;font-size:13px;color:var(--text)" '+
+      'onmouseover="this.style.background=\'var(--bg4)\'" onmouseout="this.style.background=\'\'">'+esc+'</div>';
+  }).join('');
+  box.style.display = 'block';
+}
+function orderPlanPickCustomer_(name) {
+  document.getElementById('oc-customer').value = name;
+  document.getElementById('oc-customer-suggest').style.display = 'none';
+  orderPlanRefreshContactList_();
+}
+function orderPlanContactsForCustomer_(customer) {
+  var set = {};
+  (orderPlanData && orderPlanData.orders || []).forEach(function(o) {
+    if (o.customer === customer && o.customerContact) set[o.customerContact] = true;
+  });
+  return Object.keys(set);
+}
+function orderPlanRefreshContactList_() {
+  var list = document.getElementById('oc-customerContact-list');
+  if (!list) return;
+  var customer = document.getElementById('oc-customer').value;
+  list.innerHTML = orderPlanContactsForCustomer_(customer).map(function(c){ return '<option value="'+c.replace(/"/g,'&quot;')+'">'; }).join('');
+}
+
+var ORDER_PLAN_WEEKDAYS_FULL_RU_ = ['воскресенье','понедельник','вторник','среда','четверг','пятница','суббота'];
+// Дата для только что созданного заказа (оптимистичное отображение в интерфейсе,
+// пока не пришло следующее реальное обновление) - тот же формат, что и в самой
+// таблице планировки ("ДД.ММ.ГГГГ (день недели)").
+function orderPlanFormatDateForDay_(day) {
+  var base = orderPlanData && orderPlanData.updated ? new Date(orderPlanData.updated) : new Date();
+  var msk = new Date(base.getTime() + 3 * 3600 * 1000);
+  var y = msk.getUTCFullYear(), m = msk.getUTCMonth();
+  var dt = new Date(Date.UTC(y, m, day));
+  return ('0'+day).slice(-2)+'.'+('0'+(m+1)).slice(-2)+'.'+y+' ('+ORDER_PLAN_WEEKDAYS_FULL_RU_[dt.getUTCDay()]+')';
+}
+
+function openOrderCreateForm(prefill) {
+  document.getElementById('vcard-content').innerHTML = buildOrderCreateForm_(prefill || {});
+  document.getElementById('vcard-overlay').classList.add('open');
+  document.getElementById('vcard-panel').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+// "Повторить заказ" (Влад: "нажимаем... форма уже автоматически заполняется всеми
+// параметрами, остаётся только внести время и дату") - день и время НЕ копируем
+// намеренно, менеджер вводит их заново.
+function repeatOrderPlanEntry(idx) {
+  var o = orderPlanCurrentDayOrders[idx];
+  if (!o) return;
+  openOrderCreateForm({
+    equipType: ORDER_PLAN_EQUIP_TYPES_FE_.indexOf(o.equipType) >= 0 ? o.equipType : '',
+    customer: o.customer, customerContact: o.customerContact,
+    cargo: o.cargo, gabarit: o.gabarit,
+    loadAddress: o.loadAddress, loadContact: o.loadContact,
+    unloadAddress: o.unloadAddress, unloadContact: o.unloadContact,
+    documents: o.documents, reworkTerms: o.reworkTerms, note: o.note,
+    cost: (typeof o.cost === 'number') ? o.cost : '',
+  });
+}
+
+// "Редактировать" (карандаш в таблице) - открывает ту же форму в режиме
+// редактирования (Влад, 2026-08-18: "нужна возможность менять статус заказа").
+// В отличие от "Повторить" - день/время НЕ сбрасываются (это ТА ЖЕ заявка, не
+// новая), добавляется поле "Статус".
+function editOrderPlanEntry(idx) {
+  var o = orderPlanCurrentDayOrders[idx];
+  if (!o) return;
+  openOrderCreateForm({
+    editDay: o.day, editOrderNumber: o.orderNumber,
+    equipType: ORDER_PLAN_EQUIP_TYPES_FE_.indexOf(o.equipType) >= 0 ? o.equipType : '',
+    customer: o.customer, customerContact: o.customerContact,
+    cargo: o.cargo, gabarit: ORDER_PLAN_GABARIT_FE_.indexOf(o.gabarit) >= 0 ? o.gabarit : '',
+    loadAddress: o.loadAddress, loadContact: o.loadContact,
+    unloadAddress: o.unloadAddress, unloadContact: o.unloadContact,
+    documents: ORDER_PLAN_DOCUMENTS_FE_.indexOf(o.documents) >= 0 ? o.documents : '',
+    reworkTerms: ORDER_PLAN_REWORK_TERMS_FE_.indexOf(o.reworkTerms) >= 0 ? o.reworkTerms : '',
+    note: o.note, cost: (typeof o.cost === 'number') ? o.cost : '',
+    time: o.time, status: o.status,
+  });
+}
+
+function buildOrderCreateForm_(prefill) {
+  var isEdit = !!prefill.editOrderNumber;
+  var today = orderPlanTodayMsk_();
+  // Влад, 2026-08-18: "предлагаемые даты должны быть сегодня и дальше, прошлые не
+  // особо нужны" (создание/повтор заказа на прошедшую дату не имеет смысла) -
+  // редактирование НЕ ограничиваем (заявка уже существует, могла быть создана
+  // задним числом или её всё равно нужно поправить).
+  var day = isEdit ? prefill.editDay : Math.max(orderPlanActiveDay || today.day, today.day);
+  var h = '<div class="vcard-header"><div class="vcard-gos">'+(isEdit ? 'Заявка № '+prefill.editOrderNumber : 'Новая заявка')+'</div></div><div class="vcard-body">';
+  h += '<div id="order-create-error" style="display:none;color:#E24B4A;font-size:13px;margin-bottom:14px;padding:8px 10px;background:rgba(226,75,74,.1);border-radius:8px"></div>';
+
+  if (isEdit) {
+    // День при редактировании не переносится (это та же заявка, не новая) -
+    // скрытые поля вместо выпадающего списка, но видно, к какому дню относится.
+    h += '<input type="hidden" id="oc-day" value="'+day+'">';
+    h += '<input type="hidden" id="oc-orderNumber" value="'+prefill.editOrderNumber+'">';
+    h += formRow_('Заказ', '<div style="'+ORDER_PLAN_FORM_INPUT_STYLE_+';background:var(--bg2)">№ '+prefill.editOrderNumber+' · день '+day+'</div>');
+    h += formRow_('Статус', orderPlanSelectHtml_('oc-status', ORDER_PLAN_STATUSES_FE_, prefill.status));
+  } else {
+    var dayOptions = '';
+    for (var d = today.day; d <= today.daysInMonth; d++) {
+      dayOptions += '<option value="'+d+'"'+(d === day ? ' selected' : '')+'>'+d+'</option>';
+    }
+    h += formRow_('День подачи *', '<select id="oc-day" style="'+ORDER_PLAN_FORM_INPUT_STYLE_+'">'+dayOptions+'</select>');
+  }
+  h += formRow_('Время подачи', orderPlanInputHtml_('oc-time', prefill.time, '', 'time')); // Влад: "неудобно вводить знак ':'" - нативный выбор времени
+  h += formRow_('Тип техники *', orderPlanSelectHtml_('oc-equipType', ORDER_PLAN_EQUIP_TYPES_FE_, prefill.equipType, true));
+  h += formRow_('Заказчик *', '<div style="position:relative">'+
+    orderPlanInputHtml_('oc-customer', prefill.customer, '', 'text',
+      ' autocomplete="off" oninput="orderPlanCustomerInput_()" onfocus="orderPlanCustomerInput_()" '+
+      'onblur="setTimeout(function(){var b=document.getElementById(\'oc-customer-suggest\');if(b)b.style.display=\'none\';},150)"')+
+    '<div id="oc-customer-suggest" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg3);border:1px solid var(--border);border-radius:8px;margin-top:4px;max-height:220px;overflow-y:auto;z-index:10"></div>'+
+    '</div>');
+  h += formRow_('Конт. лицо заказчика', orderPlanInputHtml_('oc-customerContact', prefill.customerContact, '', 'text', ' list="oc-customerContact-list"')+
+    '<datalist id="oc-customerContact-list">'+orderPlanContactsForCustomer_(prefill.customer).map(function(c){ return '<option value="'+c.replace(/"/g,'&quot;')+'">'; }).join('')+'</datalist>');
+  h += formRow_('Груз', orderPlanInputHtml_('oc-cargo', prefill.cargo));
+  h += formRow_('Габарит', orderPlanSelectHtml_('oc-gabarit', ORDER_PLAN_GABARIT_FE_, prefill.gabarit));
+  h += formRow_('Адрес погрузки *', orderPlanInputHtml_('oc-loadAddress', prefill.loadAddress));
+  h += formRow_('Конт. лицо на погрузке', orderPlanInputHtml_('oc-loadContact', prefill.loadContact));
+  h += formRow_('Адрес выгрузки *', orderPlanInputHtml_('oc-unloadAddress', prefill.unloadAddress));
+  h += formRow_('Конт. лицо на выгрузке', orderPlanInputHtml_('oc-unloadContact', prefill.unloadContact));
+  h += formRow_('Документы', orderPlanSelectHtml_('oc-documents', ORDER_PLAN_DOCUMENTS_FE_, prefill.documents));
+  h += formRow_('Условия переработки', orderPlanSelectHtml_('oc-reworkTerms', ORDER_PLAN_REWORK_TERMS_FE_, prefill.reworkTerms));
+  h += formRow_('Примечание', orderPlanInputHtml_('oc-note', prefill.note));
+  // Стоимость - только число (Влад: "нужна защита от написания чуши, чтобы не было
+  // текста"): type=number + min=0 не дают набрать буквы в большинстве браузеров,
+  // submitOrderCreateForm() дополнительно перепроверяет перед отправкой.
+  h += formRow_('Стоимость', orderPlanInputHtml_('oc-cost', prefill.cost, '', 'number', ' min="0" step="1"'));
+  // Наличные - отдельная галочка (Влад: "пока в таблицу это пусть идёт в примечание" -
+  // нет отдельной колонки под это в таблице планировки, дублировать не будем).
+  h += formRow_('', '<label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);cursor:pointer"><input type="checkbox" id="oc-cash"> Наличные</label>');
+
+  h += '<div style="display:flex;gap:10px;margin-top:6px">';
+  h += '<button type="button" onclick="submitOrderCreateForm()" style="flex:1;background:var(--green);color:#fff;border:none;border-radius:8px;padding:10px;font-size:14px;font-weight:600;cursor:pointer">'+(isEdit ? 'Сохранить изменения' : 'Создать заявку')+'</button>';
+  h += '<button type="button" onclick="closeVehicleCard()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px 16px;font-size:14px;cursor:pointer">Отмена</button>';
+  h += '</div></div>';
+  return h;
+}
+
+function submitOrderCreateForm() {
+  var errEl = document.getElementById('order-create-error');
+  errEl.style.display = 'none';
+
+  var orderNumberEl = document.getElementById('oc-orderNumber');
+  var isEdit = !!orderNumberEl;
+
+  var params = {
+    action: isEdit ? 'order_plan_update' : 'order_plan_create',
+    day: document.getElementById('oc-day').value,
+    time: document.getElementById('oc-time').value.trim(),
+    equipType: document.getElementById('oc-equipType').value,
+    customer: document.getElementById('oc-customer').value.trim(),
+    customerContact: document.getElementById('oc-customerContact').value.trim(),
+    cargo: document.getElementById('oc-cargo').value.trim(),
+    gabarit: document.getElementById('oc-gabarit').value,
+    loadAddress: document.getElementById('oc-loadAddress').value.trim(),
+    loadContact: document.getElementById('oc-loadContact').value.trim(),
+    unloadAddress: document.getElementById('oc-unloadAddress').value.trim(),
+    unloadContact: document.getElementById('oc-unloadContact').value.trim(),
+    documents: document.getElementById('oc-documents').value,
+    reworkTerms: document.getElementById('oc-reworkTerms').value,
+    note: document.getElementById('oc-note').value.trim(),
+    cost: document.getElementById('oc-cost').value.trim(),
+  };
+  if (isEdit) {
+    params.orderNumber = orderNumberEl.value;
+    params.status = document.getElementById('oc-status').value;
+  }
+  if (D && D.role !== 'manager' && D.role !== 'logist') {
+    var entry = myPageCurrentEntry_();
+    if (entry) params.manager = entry.name;
+  }
+
+  if (!params.equipType || !params.customer || !params.loadAddress || !params.unloadAddress) {
+    errEl.textContent = 'Заполните обязательные поля: тип техники, заказчик, адреса погрузки и выгрузки';
+    errEl.style.display = 'block';
+    return;
+  }
+  // Стоимость - только число (Влад: "защита от написания чуши, чтобы не было текста").
+  if (params.cost && !/^\d+(\.\d+)?$/.test(params.cost)) {
+    errEl.textContent = 'Стоимость должна быть числом';
+    errEl.style.display = 'block';
+    return;
+  }
+  // Наличные - отдельной колонки под это в таблице планировки нет, Влад: "пока в
+  // таблицу это пусть идёт в примечание".
+  var isCash = document.getElementById('oc-cash').checked;
+  if (isCash) params.note = (params.note ? params.note + '; ' : '') + 'нал';
+
+  var btn = document.querySelector('#vcard-content button[onclick="submitOrderCreateForm()"]');
+  var busyText = isEdit ? 'Сохраняем…' : 'Создаём…';
+  var idleText = isEdit ? 'Сохранить изменения' : 'Создать заявку';
+  if (btn) { btn.disabled = true; btn.textContent = busyText; }
+
+  apiFetchJson(params).then(function(data) {
+    if (data.error) {
+      errEl.textContent = data.error;
+      errEl.style.display = 'block';
+      if (btn) { btn.disabled = false; btn.textContent = idleText; }
+      return;
+    }
+    closeVehicleCard();
+    // Влад: "жуткие тормоза, долго грузит, потом перегружает страницу, ещё грузит -
+    // никто не будет работать с такой системой". Полная перезагрузка вкладки после
+    // каждой записи была лишней - мы и так знаем, что именно записали (форма +
+    // подтверждённый ответ сервера). Обновляем уже загруженные данные на месте и
+    // перерисовываем мгновенно, без похода на сервер. Реальные (логистом
+    // заполняемые позже) поля подтянутся сами при следующем обычном обновлении
+    // вкладки - серверный кэш на этот день уже сброшен бэкендом при записи.
+    var updatedFields = {
+      day: data.day, orderNumber: String(data.orderNumber),
+      time: params.time, equipType: params.equipType, customer: params.customer,
+      customerContact: params.customerContact, cargo: params.cargo, gabarit: params.gabarit,
+      loadAddress: params.loadAddress, loadContact: params.loadContact,
+      unloadAddress: params.unloadAddress, unloadContact: params.unloadContact,
+      documents: params.documents, reworkTerms: params.reworkTerms, note: params.note,
+      cost: params.cost ? parseFloat(params.cost) : '',
+    };
+    if (isEdit && orderPlanData && orderPlanData.orders) {
+      var existing = orderPlanData.orders.filter(function(o) {
+        return o.day === data.day && String(o.orderNumber) === String(data.orderNumber);
+      })[0];
+      if (existing) {
+        Object.assign(existing, updatedFields);
+        if (params.status) existing.status = params.status; // пусто = "не менять"
+      }
+    } else if (orderPlanData && orderPlanData.orders) {
+      orderPlanData.orders.push(Object.assign({
+        date: orderPlanFormatDateForDay_(data.day),
+        status: '', paymentStatus: '', hiredCompany: '', hiredVehicle: '',
+        ownDriver: '', ownVehicle: '', carAssigned: '',
+        invoiceIssued: false, moneyReceived: false, requestSentToDriver: false,
+        driverConfirmed: false, orderEnteredIn1C: false, logistClosed: false,
+        managerName: (myPageCurrentEntry_() || {}).name || '', logistName: '', role: 'manager',
+      }, updatedFields));
+    }
+    orderPlanActiveDay = data.day;
+    renderOrderPlan();
+  }).catch(function(e) {
+    errEl.textContent = 'Ошибка: ' + (e && e.message ? e.message : 'не удалось сохранить');
+    errEl.style.display = 'block';
+    if (btn) { btn.disabled = false; btn.textContent = idleText; }
+  });
 }
 
 // "Сегодня" по московскому времени, независимо от часового пояса браузера - берём
@@ -5612,7 +6147,7 @@ function orderPlanRowBg_(status) {
 function openOrderCard(idx) {
   var o = orderPlanCurrentDayOrders[idx];
   if (!o) return;
-  document.getElementById('vcard-content').innerHTML = buildOrderCard_(o);
+  document.getElementById('vcard-content').innerHTML = buildOrderCard_(o, idx);
   document.getElementById('vcard-overlay').classList.add('open');
   document.getElementById('vcard-panel').classList.add('open');
   document.body.style.overflow = 'hidden';
@@ -5639,11 +6174,14 @@ function orderPlanBoolBadge_(val, trueText, falseText) {
   return '<span style="color:'+(val?'#1D9E75':'#E24B4A')+';font-weight:600">'+(val?trueText:falseText)+'</span>';
 }
 
-function buildOrderCard_(o) {
+function buildOrderCard_(o, idx) {
   var color = orderPlanStatusColor_(o.status);
   var h = '<div class="vcard-header">';
   h += '<div class="vcard-gos">№ '+(o.orderNumber||'—')+' · '+(o.equipType||'—')+'</div>';
   h += '<div class="vcard-meta">'+(o.date||'')+(o.time?' '+o.time:'')+' · <span style="color:'+color+';font-weight:600">'+(o.status||'без статуса')+'</span></div>';
+  if (orderPlanCanCreate_() && idx !== undefined) {
+    h += '<button type="button" onclick="repeatOrderPlanEntry('+idx+')" style="margin-top:10px;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer">↻ Повторить заказ</button>';
+  }
   h += '</div><div class="vcard-body">';
 
   h += '<div class="vcard-sec"><div class="vcard-sec-title">Заказчик</div>'+
@@ -5711,12 +6249,22 @@ function renderOrderPlan() {
 
   var h = '<div class="card" style="padding:16px 18px">';
 
-  // Admin смотрит не свой план - подпись, чей именно, и подсказка, где переключить
-  // (тот же селектор, что на "Личной странице" - Влад, 2026-08-17: "чтобы я мог
-  // зайти под любым менеджером").
+  // Кнопка создания заявки (вариант Б, Влад 2026-08-18) - только менеджер (свой
+  // или тот, под кем смотрит admin) - логисты назначают транспорт, не создают заявки.
+  if (orderPlanCanCreate_()) {
+    h += '<div style="display:flex;justify-content:flex-end;margin-bottom:10px">'+
+      '<button type="button" onclick="openOrderCreateForm()" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer">+ Новая заявка</button></div>';
+  }
+
+  // Admin смотрит не свой план - подпись, чей именно, и подсказка, где переключить.
+  // 2026-08-18: с появлением кнопки "Смотреть как сотрудник" (подвал сайдбара) это
+  // уже не единственный способ - подсказка обновлена, чтобы не путать старым путём.
   if (D && D.role !== 'manager' && D.role !== 'logist') {
     var opEntry = myPageCurrentEntry_();
-    h += '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">План задание — <b style="color:var(--text)">'+(opEntry?opEntry.name:'?')+'</b> · переключить можно на «Личной странице»</div>';
+    h += '<div style="font-size:12px;color:var(--muted);margin-bottom:6px">План задание — <b style="color:var(--text)">'+(opEntry?opEntry.name:'?')+'</b> · переключить: «Смотреть как сотрудник» внизу меню или дропдаун на «Личной странице»</div>';
+  }
+  if (!orderPlanFullyLoaded) {
+    h += '<div style="font-size:11px;color:var(--muted);margin-bottom:10px">⏳ Догружаем остальные дни месяца…</div>';
   }
 
   // Вкладки дней месяца - ОДИН блок, ОДИН ряд, растянутый на всю ширину блока
@@ -5753,12 +6301,16 @@ function renderOrderPlan() {
   if (!dayOrders.length) {
     h += '<div style="color:var(--muted);font-size:13px;padding:12px 0">Заказов на этот день нет.</div>';
   } else {
+    // "Действия" (повторить/редактировать) - только тому, кто вообще может создавать
+    // заявки (менеджер/admin-от-его-имени), и только для СВОИХ заявок (role==='manager'
+    // на этом конкретном заказе - не для тех, где смотрящий тут как логист).
+    var canManage = orderPlanCanCreate_();
     h += '<div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
       '<th>№</th><th>Техника</th><th>Заказчик</th><th class="num">Стоимость</th><th>Наём</th><th>Машина / водитель</th><th>Статус</th><th>Водитель</th>'+
+      (canManage ? '<th>Действия</th>' : '')+
       '</tr></thead><tbody>';
     var daySum = 0, daySumCount = 0;
     dayOrders.forEach(function(o, idx) {
-      var color = orderPlanStatusColor_(o.status);
       var car = orderPlanCarSummary_(o.carAssigned);
       var costText = orderPlanFormatCost_(o.cost);
       var costN = orderPlanCostNumber_(o.cost);
@@ -5770,8 +6322,18 @@ function renderOrderPlan() {
       h += '<td class="num">'+(costText || '—')+'</td>';
       h += '<td>'+(o.hiredCompany || '—')+'</td>';
       h += '<td'+(car.full ? ' title="'+car.full.replace(/"/g,'&quot;')+'"' : '')+'>'+(car.short || '—')+(car.full ? orderPlanCopyBtnHtml_(car.full) : '')+'</td>';
-      h += '<td style="color:'+color+';font-weight:600">'+(o.status || 'без статуса')+'</td>';
+      h += '<td onclick="event.stopPropagation()">'+orderPlanStatusSelectHtml_(o, idx)+'</td>';
       h += '<td>'+orderPlanBoolBadge_(o.driverConfirmed,'Подтверждено','Не подтверждено')+'</td>';
+      if (canManage) {
+        h += '<td onclick="event.stopPropagation()" style="white-space:nowrap">';
+        if (o.role === 'manager') {
+          h += '<button type="button" onclick="repeatOrderPlanEntry('+idx+')" title="Повторить заказ" style="background:none;border:none;color:var(--muted);cursor:pointer;padding:4px;margin-right:2px"><i class="ti ti-repeat"></i></button>';
+          h += '<button type="button" onclick="editOrderPlanEntry('+idx+')" title="Редактировать" style="background:none;border:none;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-pencil"></i></button>';
+        } else {
+          h += '—';
+        }
+        h += '</td>';
+      }
       h += '</tr>';
     });
     // Итог по дню (Влад, 2026-08-17: "где стоимость по всем заказам в день, должна
@@ -5782,7 +6344,7 @@ function renderOrderPlan() {
     h += '</tbody><tfoot><tr style="font-weight:600">'+
       '<td colspan="3">Итого за день'+(skipped ? ' <span style="font-weight:400;color:var(--muted);font-size:11px">('+skipped+' без суммы - см. текстом)</span>' : '')+'</td>'+
       '<td class="num">'+Math.round(daySum).toLocaleString('ru-RU')+' ₽</td>'+
-      '<td colspan="4"></td></tr></tfoot>';
+      '<td colspan="'+(canManage ? 5 : 4)+'"></td></tr></tfoot>';
     h += '</table></div>';
   }
 
@@ -6599,6 +7161,13 @@ function renderSalesMgr() {
     { color:'#1D9E75', name:'Ахтамова Лиана',   head:'Ахтамова',  members:['Ахтамова','Цегельников','Гуштюк','Дербенцева','Шейко'] },
     { color:'#378ADD', name:'Гусейнова Айнур',  head:'Гусейнова', members:['Гусейнова','Савиток','Филипчук','Котельников','Гуляева','Коньшина','Володин'] },
     { color:'#BA7517', name:'Рыщанов Рустем',   head:'Рыщанов',   members:['Рыщанов','Прус-Роскошный','Суркова'] },
+    // Ратников Максим (2026-08-13, Влад: "новый менеджер, не к Лиане, не к Айнур, сам по
+    // себе... всё как у обычного менеджера, только он без старшего") - одиночная "плашка" без
+    // группы/руководителя. solo:true - summaryCard/deptBlock подавляют подпись "руководитель
+    // группы" и список участников (он один, дублировать имя незачем). Зарплата ему намеренно
+    // НЕ считается (см. isSalaryNotConfigured_ в renderMyPageManager) - к DEPTS на вкладке
+    // "Зарплата" (ниже по файлу) НЕ добавлен, только сюда и в TRAL_MANAGERS на бэкенде.
+    { color:'#06B6D4', name:'Ратников Максим',  head:null,        members:['Ратников'], solo:true },
   ];
   var HEAD_FULL = { 'Цуцурин':'Цуцурин Владислав Дмитриевич','Ахтамова':'Ахтамова Лиана Анатольевна','Гусейнова':'Гусейнова Айнур','Рыщанов':'Рыщанов Рустем' };
 
@@ -6672,7 +7241,8 @@ function renderSalesMgr() {
     var badgeC = planPct >= 100 ? '#1D9E75' : planPct >= 70 ? '#EF9F27' : '#E24B4A';
     // Показываем только тех, у кого есть заказы в этом периоде - иначе ушедшие сотрудники
     // (или те, у кого пока просто нет заказов) висят в подписи навсегда (Влад, 2026-07-03).
-    var memberSub = (cfg.members || []).filter(function(s){ return s!==cfg.head && get(s); }).join(' · ');
+    // solo (Ратников, без группы) - подпись из одного повторяющего заголовок имени избыточна.
+    var memberSub = cfg.solo ? '' : (cfg.members || []).filter(function(s){ return s!==cfg.head && get(s); }).join(' · ');
     var h = '<div class="card" style="padding:14px">';
     h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">';
     h +=   '<div>';
@@ -6847,16 +7417,18 @@ function renderSalesMgr() {
 
   function deptBlock(cfg, st) {
     var color = cfg.color;
-    var memberList = cfg.members.filter(function(s){ return s!==cfg.head && get(s); }).join(' · ');
+    // solo (Ратников, без группы/руководителя, 2026-08-13) - без подписи "руководитель
+    // группы" и без списка участников (он один, дублировать своё же имя незачем).
+    var memberList = cfg.solo ? '' : cfg.members.filter(function(s){ return s!==cfg.head && get(s); }).join(' · ');
     var h = '<div class="card" style="margin-bottom:16px;padding:0;overflow:hidden">';
     h += '<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border);background:rgba(255,255,255,0.03);border-left:3px solid '+color+'">';
     h += '<div style="flex:1">';
-    h += '<div style="font-size:13px;font-weight:600;color:'+color+'">'+cfg.name+' <span style="font-weight:400;color:var(--muted);font-size:12px">— руководитель группы</span></div>';
+    h += '<div style="font-size:13px;font-weight:600;color:'+color+'">'+cfg.name+(cfg.solo ? '' : ' <span style="font-weight:400;color:var(--muted);font-size:12px">— руководитель группы</span>')+'</div>';
     if (memberList) h += '<div style="font-size:11px;color:var(--muted);margin-top:2px">'+memberList+'</div>';
     h += '</div>';
     if (st.amount > 0) {
       h += '<div style="text-align:right;white-space:nowrap">';
-      h += '<div style="font-size:11px;color:var(--muted)">итого группы</div>';
+      h += '<div style="font-size:11px;color:var(--muted)">'+(cfg.solo?'выручка':'итого группы')+'</div>';
       h += '<div style="font-size:13px;font-weight:600">'+fmtN(st.amount)+'</div>';
       h += '<div style="font-size:11px;color:#1D9E75">прибыль найм: '+fmtN(st.profit)+'</div>';
       h += '</div>';
@@ -8646,6 +9218,35 @@ function fetchReceiptsFromServer_() {
   return fetchFromYardApi_('/receipts', {}).then(function(r) {
     return r.ok ? r.data : null;
   }).catch(function() { return null; });
+}
+
+// Свежесть данных (Этап 0.3 плана устранения аудита) - читает журнал import_runs через
+// /api/import_status. Показывает плашку, только когда есть о чём предупредить: молчащий или
+// падающий импорт. Молчание САМОГО сервера намеренно НЕ показываем - дашборд в этом случае
+// уже работает через тихий фолбэк на Apps Script и данные показывает честные; пугать
+// пользователя тем, что от него не зависит и на цифры не влияет, значит приучить не читать
+// плашку вообще.
+function checkDataFreshness() {
+  var box = document.getElementById('nav-stale');
+  if (!box) return;
+  fetchFromYardApi_('/import_status', {}).then(function(r) {
+    if (!r.ok || !r.data || !r.data.scripts) return;
+    var broken = r.data.scripts.filter(function(s) { return !s.healthy; });
+    if (!broken.length) { box.style.display = 'none'; return; }
+    var lines = broken.map(function(s) {
+      return s.label + ' - ' + s.problem +
+        (s.minutes_since_run !== null ? ' (' + fmtAgo_(s.minutes_since_run) + ')' : '');
+    });
+    box.innerHTML = '<b>Обновление не проходит</b><br>' + lines.join('<br>') +
+      '<br><span style="opacity:.75">Цифры могут быть устаревшими</span>';
+    box.style.display = 'block';
+  }).catch(function() { /* сервер недоступен - молчим, см. комментарий выше */ });
+}
+function fmtAgo_(min) {
+  if (min < 60) return min + ' мин';
+  var h = Math.floor(min / 60);
+  if (h < 24) return h + ' ч';
+  return Math.floor(h / 24) + ' дн';
 }
 
 function loadClientsData() {

@@ -346,30 +346,47 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 
 /* ── КАЛЬКУЛЯТОР ПЕРЕВОЗКИ (plans/2026-08-17-calculator-dashboard-integration.md) ──
    Портирован из ЯРД_Калькулятор_v1.3 (yard-calc-v1.7.html), логика расчёта не менялась -
-   только визуальное оформление под токены дашборда и id/классы с префиксом clc-. */
-/* Влад, 2026-08-20: "карта пусть будет уже и вниз больше квадратнее" - колонка теперь уже
-   (grid-3 вместо grid-65), поэтому та же карта делается выше, чтобы не быть плоской полоской. */
-.clc-map{height:400px;border-radius:var(--radius-sm);border:1px solid var(--border);margin-bottom:14px;position:relative;z-index:1;}
+   только визуальное оформление под токены дашборда и id/классы с префиксом clc-.
+   2026-08-21: пересборка на эргономику (Влад: "выглядит так себе... можешь вообще всё
+   пересобрать") - один рабочий поток слева (маршрут -> груз, без отдельных одинаковых
+   карточек), закреплённая цена справа (видна, пока листаешь форму), подбор техники -
+   встроенный автокомплит вместо отдельного блока со вкладками ниже. */
+.clc-workspace{display:grid;grid-template-columns:1fr 380px;gap:20px;align-items:start;}
+@media(max-width:960px){.clc-workspace{grid-template-columns:1fr;}}
+.clc-sticky{position:sticky;top:88px;}
+@media(max-width:960px){.clc-sticky{position:static;}}
+/* "карта пусть будет уже и вниз больше квадратнее" (Влад, 2026-08-20) - высокая, не полоска. */
+.clc-map{height:360px;border-radius:var(--radius-sm);border:1px solid var(--border);margin-bottom:14px;position:relative;z-index:1;}
 /* Мобильный оверрайт ДОЛЖЕН идти после базового правила той же специфичности - иначе, при
    равном весе селектора, каскад решает по порядку в файле и media-запрос молча проигрывает
-   (это уже было багом в прежнем порядке: 220px для мобильного объявлялся РАНЬШЕ, чем 400px
-   без условия, поэтому мобильный экран всё равно получал большую карту). */
-@media(max-width:900px){.clc-map{height:220px;}}
+   (уже был баг: 220px для мобильного объявлялся РАНЬШЕ безусловного правила и проигрывал). */
+@media(max-width:900px){.clc-map{height:240px;}}
 .clc-fg{margin-bottom:14px;}
 .clc-fg label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px;font-weight:500;}
 .clc-input,.clc-select{width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);padding:9px 12px;color:var(--text);font-size:13px;outline:none;font-family:inherit;}
 .clc-input:focus,.clc-select:focus{border-color:var(--green);}
 .clc-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
 .clc-row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}
-@media(max-width:600px){.clc-row,.clc-row3{grid-template-columns:1fr;}}
+.clc-row4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;}
+@media(max-width:700px){.clc-row4{grid-template-columns:1fr 1fr;}}
+@media(max-width:600px){.clc-row,.clc-row3,.clc-row4{grid-template-columns:1fr;}}
 .clc-ig{display:flex;gap:8px;}
 .clc-ac-wrap{position:relative;flex:1;}
-.clc-ac-list{position:absolute;top:100%;left:0;right:0;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-sm);max-height:200px;overflow-y:auto;z-index:99;display:none;box-shadow:0 4px 16px rgba(0,0,0,.35);}
-.clc-ac-list.show{display:block;}
+/* opacity+transform вместо display:none/block - позволяет плавно проявлять список вместо
+   резкого щелчка (общий паттерн для адресов и подбора техники ниже). */
+.clc-ac-list{position:absolute;top:100%;left:0;right:0;margin-top:4px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-sm);max-height:280px;overflow-y:auto;z-index:99;box-shadow:0 8px 24px rgba(0,0,0,.4);opacity:0;transform:translateY(-4px);pointer-events:none;transition:opacity .15s ease-out,transform .15s ease-out;}
+.clc-ac-list.show{opacity:1;transform:translateY(0);pointer-events:auto;}
+@media(prefers-reduced-motion:reduce){.clc-ac-list{transition:none;}}
 .clc-ac-item{padding:9px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--border);color:var(--text);}
 .clc-ac-item:last-child{border-bottom:none;}
 .clc-ac-item:hover{background:var(--bg3);}
 .clc-ac-sub{font-size:11px;color:var(--muted);}
+.clc-tech-clear{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--muted);font-size:18px;line-height:1;cursor:pointer;padding:5px 7px;border-radius:6px;}
+.clc-tech-clear:hover{color:var(--text);background:var(--bg4);}
+.clc-loop-wrap{position:relative;margin-bottom:12px;}
+.clc-loop-panel{position:absolute;top:100%;left:0;margin-top:6px;width:270px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-sm);box-shadow:0 8px 24px rgba(0,0,0,.4);padding:14px;z-index:99;opacity:0;transform:translateY(-4px);pointer-events:none;transition:opacity .15s ease-out,transform .15s ease-out;}
+.clc-loop-panel.show{opacity:1;transform:translateY(0);pointer-events:auto;}
+@media(prefers-reduced-motion:reduce){.clc-loop-panel{transition:none;}}
 .clc-route-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;}
 .clc-route-stat{background:var(--bg3);border-radius:var(--radius-sm);padding:10px;text-align:center;}
 .clc-route-stat .val{font-size:15px;font-weight:600;color:var(--text);}
@@ -400,6 +417,17 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .clc-toast{position:fixed;bottom:24px;right:24px;background:#166534;color:#fff;padding:12px 20px;border-radius:var(--radius-sm);font-size:13px;font-weight:500;z-index:999;transform:translateY(120px);opacity:0;transition:all .35s;}
 .clc-toast.show{transform:translateY(0);opacity:1;}
 .clc-toast-err{background:#7f1d1d;}
+/* Секции внутри ОДНОЙ карточки формы (не отдельные карточки на каждую - "вложенные карточки
+   всегда неверны") - переиспользует существующий .sec-block-title дашборда (лейбл + линия). */
+.clc-form-card .sec-block-title{margin-top:24px;}
+.clc-form-card .sec-block-title:first-child{margin-top:0;}
+/* История расчётов - нативный <details>, без модалки и самодельных виджетов сворачивания. */
+.clc-hist-details summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:.05em;padding:4px 0;}
+.clc-hist-details summary::-webkit-details-marker{display:none;}
+.clc-hist-details summary::before{content:'';width:0;height:0;border-left:4px solid var(--muted);border-top:3px solid transparent;border-bottom:3px solid transparent;transition:transform .15s ease-out;flex-shrink:0;}
+.clc-hist-details[open] summary::before{transform:rotate(90deg);}
+.clc-hist-details[open] summary{margin-bottom:12px;}
+@media(prefers-reduced-motion:reduce){.clc-hist-details summary::before{transition:none;}}
 </style>
 </head>
 <body>
@@ -1220,12 +1248,13 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
          Sheets/Apps Script - только карта (OSM/OSRM/Nominatim, публичные, без ключей). -->
     <div id="page-calculator" class="page clc-page">
       <div class="clc-toast" id="clc-toast"></div>
-      <!-- Влад, 2026-08-20: карта крупнее и квадратнее, "Груз и техника" рядом со
-           "Стоимостью" (не под картой) - максимально компактно, без скролла до цены.
-           Прокрутка оставлена только там, где это ОК - база техники/история ниже. -->
-      <div class="grid-3" style="align-items:start">
-        <div class="card">
-          <div class="card-title">Маршрут</div>
+      <!-- 2026-08-21: один рабочий поток слева (не 3 одинаковых карточки), цена закреплена
+           справа и видна всё время, пока листаешь форму - Влад: "сделай очень эргономично",
+           подбор техники встроен автокомплитом рядом с массой/габаритами (не отдельный
+           блок ниже, чтобы "всё было в одном окне"). -->
+      <div class="clc-workspace">
+        <div class="card clc-form-card">
+          <div class="sec-block-title">Маршрут</div>
           <div class="clc-fg">
             <label>Откуда (погрузка)</label>
             <div class="clc-ig">
@@ -1248,12 +1277,17 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           </div>
           <div id="clc-map" class="clc-map"></div>
           <span class="clc-base-badge">🏠 База: Домодедово (МО)</span>
-          <div class="clc-route-stats">
+          <!-- Влад, 2026-08-21: "дублирует то, что уже сбоку есть (в разбивке цены), только
+               место занимает" - спрятано (не удалено), #clc-stD1/2/3 по-прежнему обновляются
+               в routeAll(), просто не показываются. -->
+          <div class="clc-route-stats" style="display:none">
             <div class="clc-route-stat"><div class="val" id="clc-stD1" style="color:#60a5fa">—</div><div class="lbl">База→загрузка</div></div>
             <div class="clc-route-stat"><div class="val" id="clc-stD2" style="color:var(--green)">—</div><div class="lbl">С грузом</div></div>
             <div class="clc-route-stat"><div class="val" id="clc-stD3" style="color:var(--muted)">—</div><div class="lbl">Выгрузка→база</div></div>
           </div>
-          <div class="clc-fg" style="margin-bottom:0">
+          <!-- Влад, 2026-08-21: "пока скрыть, функцию не удалять" - ручной ввод км временно
+               недоступен из интерфейса, чекбокс/поля остаются в DOM нетронутыми. -->
+          <div class="clc-fg" style="margin-bottom:0;display:none">
             <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px">
               <input type="checkbox" id="clc-manualKm" onchange="Clc.toggleManual()" style="width:auto"> Ввести км вручную (если маршрут не строится)
             </label>
@@ -1263,33 +1297,53 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
               <div class="clc-fg" style="margin-bottom:0"><label style="font-size:10px">Выгр.→база</label><input type="number" id="clc-mkm3" class="clc-input" value="0" min="0" oninput="Clc.calc()"></div>
             </div>
           </div>
-        </div>
 
-        <div class="card">
-          <div class="card-title">Груз и техника</div>
-          <div class="clc-row">
+          <div class="sec-block-title">Груз и техника</div>
+          <div class="clc-fg">
+            <label>Подбор по базе техники заказчика (необязательно)</label>
+            <div class="clc-ig">
+              <div class="clc-ac-wrap">
+                <input type="text" id="clc-techSearch" class="clc-input" style="padding-right:32px" placeholder="Модель, например: Hitachi ZX330..." oninput="Clc.fltr()" onfocus="Clc.fltrFocus()" onblur="setTimeout(function(){var l=document.getElementById('clc-techList');if(l)l.classList.remove('show');},200)">
+                <button type="button" class="clc-tech-clear" id="clc-techClear" onmousedown="event.preventDefault()" onclick="Clc.clearTechSearch()" style="display:none" title="Очистить">×</button>
+                <div class="clc-ac-list" id="clc-techList"></div>
+              </div>
+              <select id="clc-techCat" class="clc-select" style="width:150px;flex:none" onchange="Clc.fltr()">
+                <option value="all">Все категории</option>
+                <option value="excavator">Экскаваторы</option>
+                <option value="drill">Буровые</option>
+                <option value="roller">Катки</option>
+                <option value="loader">Погрузчики</option>
+                <option value="bulldozer">Бульдозеры</option>
+                <option value="crane">Краны</option>
+                <option value="grader">Грейдеры</option>
+                <option value="paver">Асфальтоукл.</option>
+                <option value="telehandler">Телескопы</option>
+              </select>
+            </div>
+          </div>
+          <div class="clc-row4">
             <div class="clc-fg"><label>Масса, т</label><input type="number" id="clc-weight" class="clc-input" value="33" min="0.1" step="0.5" oninput="Clc.onWChange()"></div>
             <div class="clc-fg"><label>Длина, м</label><input type="number" id="clc-len" class="clc-input" value="6" min="0.5" step="0.5" oninput="Clc.calc()"></div>
-          </div>
-          <div class="clc-row">
             <div class="clc-fg"><label>Ширина, м</label><input type="number" id="clc-wid" class="clc-input" value="2.5" min="0.5" step="0.1" oninput="Clc.calc()"></div>
             <div class="clc-fg"><label>Высота, м</label><input type="number" id="clc-hei" class="clc-input" value="3" min="0.5" step="0.1" oninput="Clc.calc()"></div>
           </div>
-          <div class="clc-fg"><label>Тип груза</label>
-            <select id="clc-cargoType" class="clc-select" onchange="Clc.calc()">
-              <option value="gabarit">Габарит</option>
-              <option value="negabarit" selected>Негабарит</option>
-            </select>
-          </div>
-          <div class="clc-fg"><label>Тип техники</label>
-            <select id="clc-vehType" class="clc-select" onchange="Clc.vhCh()">
-              <option value="tral">Трал</option>
-              <option value="board">Длинномер</option>
-              <option value="panel">Панелевоз</option>
-              <option value="tral_crane">Трал под кран</option>
-              <option value="korito">Трал-корыто</option>
-              <option value="faymon">Faymonville</option>
-            </select>
+          <div class="clc-row">
+            <div class="clc-fg"><label>Тип груза</label>
+              <select id="clc-cargoType" class="clc-select" onchange="Clc.calc()">
+                <option value="gabarit">Габарит</option>
+                <option value="negabarit" selected>Негабарит</option>
+              </select>
+            </div>
+            <div class="clc-fg"><label>Тип техники</label>
+              <select id="clc-vehType" class="clc-select" onchange="Clc.vhCh()">
+                <option value="tral">Трал</option>
+                <option value="board">Длинномер</option>
+                <option value="panel">Панелевоз</option>
+                <option value="tral_crane">Трал под кран</option>
+                <option value="korito">Трал-корыто</option>
+                <option value="faymon">Faymonville</option>
+              </select>
+            </div>
           </div>
           <div class="clc-row">
             <div class="clc-fg" id="clc-faymonGrp" style="display:none">
@@ -1300,7 +1354,9 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
                 <option value="100-120">100-120 т</option>
               </select>
             </div>
-            <div class="clc-fg"><label>Рейсов</label><input type="number" id="clc-trips" class="clc-input" value="1" min="1" step="1" oninput="Clc.calc()"></div>
+            <!-- Влад, 2026-08-21: "лишнее окно, не нужно" - скрыто, не удалено, значение
+                 остаётся 1 рейс по умолчанию (calc() как и раньше читает clc-trips). -->
+            <div class="clc-fg" style="display:none"><label>Рейсов</label><input type="number" id="clc-trips" class="clc-input" value="1" min="1" step="1" oninput="Clc.calc()"></div>
           </div>
           <div class="clc-row">
             <div class="clc-fg" id="clc-koritoGrp" style="display:none">
@@ -1325,7 +1381,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           </div>
         </div>
 
-        <div>
+        <div class="clc-sticky">
           <div class="clc-price-hero">
             <div class="clc-price-label">Стоимость перевозки (с НДС)</div>
             <div class="clc-price-value" id="clc-totalPrice">0 ₽</div>
@@ -1337,46 +1393,37 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
             <div id="clc-kpInfo" style="font-size:11px;color:var(--muted);margin-top:12px"></div>
           </div>
 
-          <div class="clc-bd" style="margin-bottom:0">
+          <!-- Влад, 2026-08-21: "круговые рейсы" - едем до погрузки один раз, между двумя
+               точками мотаемся N раз (с грузом туда / порожним обратно за следующей партией),
+               и только с последней точки возвращаемся на базу один раз. N=1 (по умолчанию) -
+               даёт ровно ту же цифру, что и раньше, ничего не меняет. -->
+          <div class="clc-loop-wrap">
+            <button type="button" class="clc-btn clc-btn-ghost clc-btn-sm" onclick="Clc.toggleLoopPanel()">🔄 Круговые рейсы<span id="clc-loopBadge" style="color:var(--green);font-weight:600;margin-left:4px"></span></button>
+            <div class="clc-loop-panel" id="clc-loopPanel">
+              <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px">Количество круговых рейсов между точками</label>
+              <input type="number" id="clc-loopCount" class="clc-input" value="1" min="1" step="1" oninput="Clc.calc();Clc.updLoopBadge()">
+              <div style="font-size:10px;color:var(--muted);margin-top:8px;line-height:1.5">На базу и обратно считается один раз. Между точками погрузки/выгрузки - выбранное число раз (загружено туда, порожняком обратно за следующей партией).</div>
+            </div>
+          </div>
+
+          <div class="clc-bd">
             <table>
               <tr><td>Техника</td><td id="clc-bdType">—</td></tr>
               <tr><td>Смена</td><td id="clc-bdShift">0 ₽</td></tr>
               <tr><td>База→загрузка</td><td id="clc-bdEmptyTo">0 ₽</td></tr>
               <tr><td>С грузом</td><td id="clc-bdLoaded">0 ₽</td></tr>
+              <tr id="clc-bdLoopRow" style="display:none"><td>Порожний между точками</td><td id="clc-bdLoopBack">0 ₽</td></tr>
               <tr><td>Выгрузка→база</td><td id="clc-bdEmptyFrom">0 ₽</td></tr>
               <tr><td>Коэффициенты</td><td id="clc-bdCoef">×1.0</td></tr>
               <tr><td>Сопровождение</td><td id="clc-bdNeg">0 ₽</td></tr>
               <tr class="clc-tot"><td>ИТОГО</td><td id="clc-bdTotal">0 ₽</td></tr>
             </table>
           </div>
-        </div>
-      </div>
 
-      <!-- Справочные списки - тут прокрутка нормальна (Влад: "на прослистывание можно
-           оставить выбор груза из списка"), не мешают основному потоку выше. -->
-      <div class="grid-2">
-        <div class="card" style="margin-bottom:0">
-          <div class="card-title">База техники заказчика</div>
-          <div style="font-size:11px;color:var(--muted);margin:-6px 0 12px;line-height:1.5">Габариты типовые (рассчитаны по массе). Для критичных грузов сверяйте с ТТН.</div>
-          <input type="text" id="clc-techSearch" class="clc-input" placeholder="Поиск техники..." oninput="Clc.fltr()" style="margin-bottom:12px">
-          <div class="tab-bar">
-            <button class="tab-btn active" onclick="Clc.fltr('all')">Всё</button>
-            <button class="tab-btn" onclick="Clc.fltr('excavator')">Экскаваторы</button>
-            <button class="tab-btn" onclick="Clc.fltr('drill')">Буровые</button>
-            <button class="tab-btn" onclick="Clc.fltr('roller')">Катки</button>
-            <button class="tab-btn" onclick="Clc.fltr('loader')">Погрузчики</button>
-            <button class="tab-btn" onclick="Clc.fltr('bulldozer')">Бульдозеры</button>
-            <button class="tab-btn" onclick="Clc.fltr('crane')">Краны</button>
-            <button class="tab-btn" onclick="Clc.fltr('grader')">Грейдеры</button>
-            <button class="tab-btn" onclick="Clc.fltr('paver')">Асфальтоукл.</button>
-            <button class="tab-btn" onclick="Clc.fltr('telehandler')">Телескопы</button>
-          </div>
-          <div class="clc-list-scroll" id="clc-techList"></div>
-        </div>
-
-        <div class="card" style="margin-bottom:0">
-          <div class="card-title">История расчётов</div>
-          <div class="clc-list-scroll" id="clc-histList" style="max-height:420px"></div>
+          <details class="clc-hist-details">
+            <summary>История расчётов</summary>
+            <div class="clc-list-scroll" id="clc-histList" style="max-height:320px"></div>
+          </details>
         </div>
       </div>
     </div>
@@ -1473,10 +1520,17 @@ var TECH=[
 TECH=TECH.filter(function(t){return t.w>=10;});
 var map,mL,mU,mBase,layerBase=null,layerLoad=null,layerUnload=null,lc=null,uc=null;
 var d1=0,d2=0,d3=0,running=0,loadedOk=false,hist=JSON.parse(localStorage.getItem('yrd_calc_history')||'[]'),gT=null;
-var kpLog=JSON.parse(localStorage.getItem('yrd_calc_kp_log')||'[]'),LK={a1:0,a2:0,a3:0};
+var LK={a1:0,a2:0,a3:0};
 
 function initMap(){
     map=L.map('clc-map',{zoomControl:false}).setView([55.76,37.62],11);
+    // Влад, 2026-08-21: убрать флаг Украины из подписи - это собственная attribution-плашка
+    // самого Leaflet (библиотека сама добавляет флаг+ссылку с версии 1.9.4), не наше решение
+    // и не связано с картой/тайлами - просто переопределяем префикс на голый текст.
+    if(map.attributionControl)map.attributionControl.setPrefix('Leaflet');
+    // Тёмные тайлы CARTO пробовали (2026-08-21) - Влад: "не нравится, тёмное и подписи на
+    // английском" (CARTO dark_all не переключает подписи на русский). Вернули обычные светлые
+    // OSM-тайлы, флаг Украины остался убран отдельной строкой выше (это не про цвет тайлов).
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18}).addTo(map);
     L.control.zoom({position:'bottomright'}).addTo(map);
     mBase=L.marker([BASE.lat,BASE.lng],{icon:ic('#3b82f6')}).addTo(map).bindPopup('🏠 База: '+BASE.name);
@@ -1600,8 +1654,45 @@ function geoc(t){
 }
 async function revG(p,t){try{var r=await fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat='+p.lat+'&lon='+p.lng+'&accept-language=ru');var d=await r.json();if(d&&d.display_name){var a=d.display_name.split(',').slice(0,3).join(',');document.getElementById(t==='load'?'clc-loadAddr':'clc-unloadAddr').value=a;}}catch(e){}}
 function getLoc(t){if(!navigator.geolocation){toast('Геолокация недоступна',1);return;}navigator.geolocation.getCurrentPosition(function(p){setP(t,L.latLng(p.coords.latitude,p.coords.longitude));},function(){toast('Не удалось',1);});}
-function fltr(g){if(g){document.querySelectorAll('.clc-page .tab-btn').forEach(function(el){el.classList.remove('active');});if(typeof event!=='undefined'&&event&&event.target&&event.target.classList)event.target.classList.add('active');}var s=document.getElementById('clc-techSearch').value.toLowerCase(),ag=g||'all',f=TECH;if(ag!=='all')f=f.filter(function(t){return t.g===ag;});if(s)f=f.filter(function(t){return t.n.toLowerCase().indexOf(s)>=0;});var c=document.getElementById('clc-techList');if(!f.length){c.innerHTML='<p style="color:var(--muted);text-align:center;padding:20px;font-size:13px;">Ничего не найдено</p>';return;}c.innerHTML=f.map(function(t){var idx=TECH.indexOf(t);return '<div class="clc-list-item" onclick="Clc.selTech('+idx+')"><div class="clc-tech-name">'+t.n+'</div><div class="clc-tech-spec"><span>'+t.w+' т</span><span>'+t.l+'×'+t.d+'×'+t.h+' м</span><span>'+t.m+'</span></div></div>';}).join('');}
-function selTech(i){if(i<0||i>=TECH.length)return;var t=TECH[i];document.getElementById('clc-weight').value=t.w;document.getElementById('clc-len').value=t.l;document.getElementById('clc-wid').value=t.d;document.getElementById('clc-hei').value=t.h;document.getElementById('clc-vehType').value=t.w>59?'faymon':'tral';document.getElementById('clc-cargoType').value=(t.w>20||t.l>13.6||t.d>2.55||t.h>4)?'negabarit':'gabarit';vhCh();calc();toast('Загружено: '+t.n);}
+// 2026-08-21: был отдельный блок со вкладками+постоянным списком ниже страницы - Влад:
+// "выбирать груз тоже есть место в одном окне". Теперь это встроенный автокомплит рядом с
+// массой/габаритами (тот же паттерн .clc-ac-list, что у полей адреса) - показывается по
+// фокусу/вводу, прячется по выбору или потере фокуса (onblur в разметке).
+// 2026-08-21: после выбора техники поле хранит её название - повторный клик фильтровал
+// список по этому же тексту и казалось, что список "не открывается" (Влад: "всё замыкается
+// на том, что записано в строке"). Разделили: fltr() - обычная фильтрация по вводу (typing),
+// fltrFocus() - фокус ВСЕГДА показывает список по категории, игнорируя старый текст в поле
+// (плюс выделяет весь текст, чтобы печать сразу его заменила) + крестик очистки на видном месте.
+function renderTechList_(f){
+    var c=document.getElementById('clc-techList');
+    if(!f.length){c.innerHTML='<div class="clc-ac-item" style="cursor:default;color:var(--muted)">Ничего не найдено</div>';}
+    else{c.innerHTML=f.slice(0,80).map(function(t){var idx=TECH.indexOf(t);return '<div class="clc-ac-item" onmousedown="event.preventDefault()" onclick="Clc.selTech('+idx+')"><div class="clc-tech-name">'+t.n+'</div><div class="clc-tech-spec"><span>'+t.w+' т</span><span>'+t.l+'×'+t.d+'×'+t.h+' м</span></div></div>';}).join('');}
+    c.classList.add('show');
+}
+function updateTechClearBtn_(){var btn=document.getElementById('clc-techClear');if(btn)btn.style.display=document.getElementById('clc-techSearch').value?'block':'none';}
+function fltr(){
+    var s=document.getElementById('clc-techSearch').value.toLowerCase(),ag=document.getElementById('clc-techCat').value,f=TECH;
+    if(ag!=='all')f=f.filter(function(t){return t.g===ag;});
+    if(s)f=f.filter(function(t){return t.n.toLowerCase().indexOf(s)>=0;});
+    renderTechList_(f);
+    updateTechClearBtn_();
+}
+function fltrFocus(){
+    var inp=document.getElementById('clc-techSearch');
+    inp.select();
+    var ag=document.getElementById('clc-techCat').value,f=TECH;
+    if(ag!=='all')f=f.filter(function(t){return t.g===ag;});
+    renderTechList_(f);
+    updateTechClearBtn_();
+}
+function clearTechSearch(){
+    var inp=document.getElementById('clc-techSearch');
+    inp.value='';
+    inp.focus();
+    updateTechClearBtn_();
+    fltrFocus();
+}
+function selTech(i){if(i<0||i>=TECH.length)return;var t=TECH[i];document.getElementById('clc-weight').value=t.w;document.getElementById('clc-len').value=t.l;document.getElementById('clc-wid').value=t.d;document.getElementById('clc-hei').value=t.h;document.getElementById('clc-vehType').value=t.w>59?'faymon':'tral';document.getElementById('clc-cargoType').value=(t.w>20||t.l>13.6||t.d>2.55||t.h>4)?'negabarit':'gabarit';document.getElementById('clc-techSearch').value=t.n;updateTechClearBtn_();document.getElementById('clc-techList').classList.remove('show');vhCh();calc();toast('Загружено: '+t.n);}
 function onWChange(){var w=+document.getElementById('clc-weight').value||0;if(w>20&&document.getElementById('clc-vehType').value==='board'){document.getElementById('clc-vehType').value='tral';toast('⚠️ Длинномер только до 20 т');}if(w>20&&document.getElementById('clc-vehType').value==='panel'){document.getElementById('clc-vehType').value='tral';toast('⚠️ Панелевоз только до 20 т');}syncFaymonCat();calc();}
 function vhCh(){var vt=document.getElementById('clc-vehType').value;document.getElementById('clc-faymonGrp').style.display=vt==='faymon'?'block':'none';var kg=vt==='korito';document.getElementById('clc-koritoGrp').style.display=kg?'block':'none';document.getElementById('clc-koritoExtGrp').style.display=kg?'block':'none';onWChange();}
 function toggleManual(){document.getElementById('clc-manualKmBox').style.display=document.getElementById('clc-manualKm').checked?'grid':'none';calc();}
@@ -1618,6 +1709,7 @@ function calc(){
         document.getElementById('clc-totalPrice').textContent='—';
         document.getElementById('clc-priceSub').textContent='Укажите маршрут (или введите км вручную)';
         ['clc-bdType','clc-bdShift','clc-bdEmptyTo','clc-bdLoaded','clc-bdEmptyFrom','clc-bdNeg'].forEach(function(id){document.getElementById(id).textContent='—';});
+        document.getElementById('clc-bdLoopRow').style.display='none';
         document.getElementById('clc-bdCoef').textContent='×1.0';document.getElementById('clc-bdTotal').textContent='—';
         return;
     }
@@ -1638,8 +1730,12 @@ function calc(){
     if(!rate)return;
     var shift=rate.s,kmRate=rate.km,emptyRate=rate.emptyKm||EMPTY_RATE,mskOnly=isMsk,isFar=distMsk>FAR_R;
     if(!mskOnly&&isFar&&!rate.isF)shift=FAR_SHIFT;shift=rn(shift);
-    var e1=0,ld=0,e2=0;
-    if(!mskOnly){e1=rn(a1*emptyRate);ld=rn(a2*kmRate);e2=rn(a3*emptyRate);}
+    var loopCount=Math.max(1,+document.getElementById('clc-loopCount').value||1);
+    var e1=0,ld=0,e2=0,ldBack=0;
+    if(!mskOnly){e1=rn(a1*emptyRate);ld=rn(a2*kmRate);e2=rn(a3*emptyRate);ldBack=rn(a2*emptyRate);}
+    // Круговые рейсы: N раз с грузом между точками, (N-1) раз порожним обратно между ними -
+    // при loopCount=1 loopBackTotal=0 и ldAll=ld, формула не отличается от обычной.
+    var ldAll=ld*loopCount,loopBackTotal=ldBack*(loopCount-1);
     var coef=1,coefs=[];
     if(vt==='korito'&&document.getElementById('clc-koritoExt').checked){coef*=K_COEF;coefs.push('×1.5 раздвижение');}
     if(over){coef*=OV_COEF;coefs.push('×2 негабарит >17/4/4.5');}
@@ -1652,14 +1748,17 @@ function calc(){
         else if(ecat===3){esc=0;escNote='Кат. 3 — индивидуально с руководителем';}
         else{var er=ESC_CAT[ecat][escortBand(a2)];esc=ESC_FAR_BASE+rn(a2*er);escNote='Кат.'+ecat+' · 20 000 + '+a2+' км × '+er+' ₽';}
     }
-    var sub=rn(shift*coef)+e1+ld+e2+esc,total=rn(sub*trips);
+    var sub=rn(shift*coef)+e1+ldAll+loopBackTotal+e2+esc,total=rn(sub*trips);
     document.getElementById('clc-totalPrice').textContent=total?total.toLocaleString()+' ₽':'0 ₽';
     var zoneLbl=autoZone==='sadovoe'?'Садовое':autoZone==='mkad'?'МКАД':'МО';
     document.getElementById('clc-priceSub').innerHTML=(mskOnly?'🏙️ Москва/'+zoneLbl:(isFar?'🚛 Дальний':'📍 Регион'))+(manual?' · ✍️ ручной км':'')+(mskOnly?'':' · '+a2+' км с грузом');
     document.getElementById('clc-bdType').textContent=rate.n||'Трал';
     document.getElementById('clc-bdShift').textContent=(mskOnly?rn(shift*coef):shift).toLocaleString()+' ₽'+(isFar?' (дальний)':'')+(mskOnly?' (вся Москва)':'');
     document.getElementById('clc-bdEmptyTo').textContent=mskOnly?'—':e1.toLocaleString()+' ₽ (расчёт: '+a1+' км × '+emptyRate+' ₽)';
-    document.getElementById('clc-bdLoaded').textContent=mskOnly?'—':ld.toLocaleString()+' ₽ (расчёт: '+a2+' км × '+kmRate+' ₽)';
+    document.getElementById('clc-bdLoaded').textContent=mskOnly?'—':ldAll.toLocaleString()+' ₽ (расчёт: '+a2+' км × '+kmRate+' ₽'+(loopCount>1?' × '+loopCount+' рейсов':'')+')';
+    var loopRow=document.getElementById('clc-bdLoopRow');
+    if(loopCount>1&&!mskOnly){loopRow.style.display='';document.getElementById('clc-bdLoopBack').textContent=loopBackTotal.toLocaleString()+' ₽ (расчёт: '+a2+' км × '+emptyRate+' ₽ × '+(loopCount-1)+')';}
+    else{loopRow.style.display='none';}
     document.getElementById('clc-bdEmptyFrom').textContent=mskOnly?'—':e2.toLocaleString()+' ₽ (расчёт: '+a3+' км × '+emptyRate+' ₽)';
     document.getElementById('clc-bdCoef').textContent=coef===1?'×1.0':'×'+coef+' ('+coefs.join(', ')+')';
     document.getElementById('clc-bdNeg').textContent=neg?(esc?esc.toLocaleString()+' ₽'+(escNote?' ('+escNote+')':''):(escNote||'0 ₽')):'0 ₽';
@@ -1747,37 +1846,52 @@ function delCalc(id){if(!confirm('Удалить?'))return;hist=hist.filter(func
 function rendH(){var c=document.getElementById('clc-histList');if(!hist.length){c.innerHTML='<p style="color:var(--muted);text-align:center;padding:30px 0;">Нет сохранённых расчётов</p>';return;}c.innerHTML=hist.map(function(h){return '<div class="clc-list-item" onclick="Clc.loadH('+h.id+')" style="position:relative;"><div style="display:flex;justify-content:space-between;align-items:center;"><strong style="color:var(--green);font-size:13px;">'+h.total+'</strong><button class="clc-btn clc-btn-ghost clc-btn-sm" onclick="event.stopPropagation();Clc.delCalc('+h.id+')" style="padding:2px 6px;font-size:10px;">✕</button></div><div style="font-size:12px;color:var(--muted);">'+h.dist+' км · '+h.w+' т · '+(h.load||'').substring(0,20)+'...</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">'+h.dt+'</div></div>';}).join('');}
 function loadH(id){var h=hist.find(function(e){return e.id===id;});if(!h)return;document.getElementById('clc-loadAddr').value=h.load||'';document.getElementById('clc-unloadAddr').value=h.unload||'';toast('📂 Загружен');}
 function toast(m,e){var t=document.getElementById('clc-toast');t.textContent=m;t.className='clc-toast'+(e?' clc-toast-err':'');t.classList.add('show');setTimeout(function(){t.classList.remove('show');},3000);}
-function updKpInfo(){var n=+(localStorage.getItem('yrd_calc_kp_num')||0);var el=document.getElementById('clc-kpInfo');if(el)el.textContent='📄 Выдано КП: '+n+' · следующий № КП-'+String(n+1).padStart(4,'0');}
-// Бланк КП переделан под фирменный стиль официальных документов компании (Влад, 2026-08-17:
-// "форма отвратительная... на бланке фирмы как в приказах, аккуратное содержательное КП") -
-// та же шапка (наименование/ОГРН/ИНН/КПП/адрес, разделительная черта), что и в приказах
-// ООО «БУЛЬДОГ» (см. .business/products/pricing.md и Приказы/*.md), Times New Roman, без
-// декоративных золотых рамок/бейджей прежней версии. Логика расчёта самого КП не менялась -
-// переделана только вёрстка. Остаётся тем же трюком "HTML под видом .doc" (Word открывает
-// такой файл и применяет разметку) - реальный .docx через python-docx тут не собрать, движок
-// целиком в браузере без сервера сборки.
-function genKP(){
-    var w=document.getElementById('clc-weight').value||'—',ln=document.getElementById('clc-len').value||'—',wh=document.getElementById('clc-wid').value||'—',h=document.getElementById('clc-hei').value||'—';
+// Нумерация теперь сквозная и живёт на сервере (kp_log на VPS, не в localStorage браузера) -
+// предсказать "следующий номер" заранее без похода на сервер нельзя (его могли выдать другому
+// менеджеру только что), поэтому просто показываем последний РЕАЛЬНО выданный в этой вкладке.
+function updKpInfo(numStr){var el=document.getElementById('clc-kpInfo');if(el&&numStr)el.textContent='📄 Последний выданный: '+numStr;}
+// 2026-08-21, Влад:
+// - номер КП теперь сквозной с сервера (не localStorage) - genKP() стала async, ждёт
+//   action=kp_issue, при отказе сети - явная ошибка, а не выдумывает номер сам
+// - "в коммерческом оставить только маршрут" - убраны строки Пробег/Техника/Параметры груза
+// - "стоимость перевозки НДС 22%, выделить НДС от перевозки" - строка стоимости разбита на
+//   без НДС / НДС 22% / итого с НДС (сумма с НДС не меняется, это то же число, что и раньше)
+// - "слово оплаты - 100% предоплата" (было "предоплата или отсрочка - по договору")
+// - "убрать страховку из того что входит в стоимость"
+// - "подписывается менеджер, с которого аккаунта делаем КП" - имя теперь берётся из ответа
+//   сервера (kp_issue вернул access.name, проверенный по id_token), а не D.managerName -
+//   раньше для admin/директора строка была бы пустой, теперь работает для любой роли
+// - "номер строкой убрать из-под КП, должно быть выше, сбоку красиво с пробелами" - номер и
+//   дата перенесены в правый верхний угол НАД заголовком (как обычно оформляют исходящий
+//   номер письма), сам заголовок больше не содержит номер и не дублируется отдельной строкой
+//   города/даты снизу
+async function genKP(){
     var la=escHtml_(document.getElementById('clc-loadAddr').value||'—'),ua=escHtml_(document.getElementById('clc-unloadAddr').value||'—'),total=document.getElementById('clc-totalPrice').textContent||'—';
     if(total==='—'||total==='0 ₽'){toast('Сначала рассчитайте стоимость',1);return;}
-    var vm={tral:'Трал',board:'Длинномер',panel:'Панелевоз',tral_crane:'Трал под кран',korito:'Трал-корыто',faymon:'Faymonville'};
-    var vt0=document.getElementById('clc-vehType').value;
-    var vt=(vm[vt0]||'Трал')+(vt0==='faymon'?' '+document.getElementById('clc-faymonCat').value+' т':'');
-    var neg=document.getElementById('clc-cargoType').value==='negabarit',esc=document.getElementById('clc-bdNeg').textContent;
+    if(typeof apiFetchJson!=='function'){toast('Основной скрипт дашборда ещё не готов, подождите секунду',1);return;}
+    var totalNum=+(total.replace(/[^\d]/g,''))||0;
+    var VAT_RATE=0.22;
+    var priceNoVat=Math.round(totalNum/(1+VAT_RATE));
+    var vatAmount=totalNum-priceNoVat;
     var dt=new Date().toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'});
-    var kpNum=(+(localStorage.getItem('yrd_calc_kp_num')||0))+1;localStorage.setItem('yrd_calc_kp_num',kpNum);var numStr='КП-'+String(kpNum).padStart(4,'0');
-    var manualNow=document.getElementById('clc-manualKm').checked;
-    var ra1=manualNow?(+document.getElementById('clc-mkm1').value||0):d1;
-    var ra2=manualNow?(+document.getElementById('clc-mkm2').value||0):d2;
-    var ra3=manualNow?(+document.getElementById('clc-mkm3').value||0):d3;
-    var managerName=(typeof D!=='undefined'&&D&&(D.managerName||D.logistName))||'';
+    toast('Оформляем КП…');
+    var kpResp;
+    try{
+        kpResp=await apiFetchJson({action:'kp_issue',load:document.getElementById('clc-loadAddr').value||'',unload:document.getElementById('clc-unloadAddr').value||'',total:totalNum});
+        if(!kpResp||kpResp.error||!kpResp.number)throw new Error((kpResp&&kpResp.error)||'сервер не выдал номер');
+    }catch(err){
+        toast('Не удалось получить номер КП с сервера - проверьте связь и попробуйте ещё раз',1);
+        return;
+    }
+    var numStr='КП-'+String(kpResp.number).padStart(4,'0');
+    var managerName=escHtml_(kpResp.manager||'');
     var htm='<!DOCTYPE html><html><head><meta charset="UTF-8"><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><style>';
     htm+='@page{margin:2cm 2cm 2cm 2.2cm}body{font-family:"Times New Roman",Times,serif;font-size:12pt;color:#111;line-height:1.35;margin:0}';
     htm+='.hh{text-align:center;font-weight:700;font-size:13pt;letter-spacing:.2px}';
     htm+='.hr2{text-align:center;font-size:10pt;color:#333;margin-top:4px;line-height:1.5}';
-    htm+='.rule{border:none;border-top:1.5pt solid #111;margin:10pt 0 16pt}';
-    htm+='.doctitle{text-align:center;font-weight:700;font-size:13pt;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4pt}';
-    htm+='.dateline{display:flex;justify-content:space-between;font-size:11pt;margin:2pt 0 16pt}';
+    htm+='.rule{border:none;border-top:1.5pt solid #111;margin:10pt 0 8pt}';
+    htm+='.refbox{text-align:right;font-size:10.5pt;color:#333;line-height:1.7;margin-bottom:14pt}';
+    htm+='.doctitle{text-align:center;font-weight:700;font-size:14pt;text-transform:uppercase;letter-spacing:.4px;margin-bottom:16pt}';
     htm+='table{width:100%;border-collapse:collapse;margin:8pt 0 14pt}';
     htm+='td,th{border:1pt solid #333;padding:6pt 9pt;font-size:11pt;vertical-align:top;text-align:left}';
     htm+='th{background:#f0f0f0;font-weight:700;font-size:9.5pt;text-transform:uppercase;letter-spacing:.3px}';
@@ -1791,27 +1905,39 @@ function genKP(){
     htm+='<div class="hh">ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ «БУЛЬДОГ»</div>';
     htm+='<div class="hr2">ОГРН 1177746503220, ИНН 7702417768, КПП 773301001<br>125466, г Москва, вн.тер.г муниципальный округ Куркино, ул Юровская, 92, подвал помещ. I, ком. 40, РМ 1г · +7 (495) 222-62-60</div>';
     htm+='<hr class="rule">';
-    htm+='<div class="doctitle">Коммерческое предложение № '+numStr+'</div>';
-    htm+='<div class="dateline"><span>г. Москва</span><span>'+dt+'</span></div>';
+    htm+='<div class="refbox">г. Москва, '+dt+'<br>№ '+numStr+'</div>';
+    htm+='<div class="doctitle">Коммерческое предложение</div>';
     htm+='<table><tr><th style="width:30%">Параметр</th><th>Значение</th></tr>';
     htm+='<tr><td>Маршрут</td><td>'+la+' &#8594; '+ua+'</td></tr>';
-    htm+='<tr><td>Пробег</td><td>порожний '+ra1+' км + с грузом '+ra2+' км + порожний '+ra3+' км</td></tr>';
-    htm+='<tr><td>Техника</td><td>'+vt+(neg?' (негабаритный груз)':'')+'</td></tr>';
-    htm+='<tr><td>Параметры груза</td><td>'+w+' т, '+ln+'&times;'+wh+'&times;'+h+' м</td></tr>';
-    htm+=(neg&&esc&&esc!=='0 ₽'&&esc.indexOf('—')<0?'<tr><td>в т.ч. сопровождение негабарита</td><td>'+esc+'</td></tr>':'');
-    htm+='<tr class="totrow"><td>Стоимость перевозки, с НДС</td><td>'+total+'</td></tr>';
+    htm+='<tr><td>Стоимость перевозки без НДС</td><td>'+priceNoVat.toLocaleString('ru-RU')+' ₽</td></tr>';
+    htm+='<tr><td>НДС 22%</td><td>'+vatAmount.toLocaleString('ru-RU')+' ₽</td></tr>';
+    htm+='<tr class="totrow"><td>Итого к оплате, с НДС</td><td>'+total+'</td></tr>';
     htm+='</table>';
     htm+='<div class="meta">';
-    htm+='<p><b>Условия оплаты:</b> предоплата или отсрочка платежа - по договору.</p>';
+    htm+='<p><b>Условия оплаты:</b> 100% предоплата.</p>';
     htm+='<p><b>Срок подачи техники:</b> 1-3 дня с момента согласования заявки.</p>';
-    htm+='<p><b>В стоимость входит:</b> подача техники к месту погрузки, страхование груза, полный пакет закрывающих документов.</p>';
+    htm+='<p><b>В стоимость входит:</b> подача техники к месту погрузки, полный пакет закрывающих документов.</p>';
     htm+='</div>';
     htm+='<div class="sign"><div class="line"><span>Менеджер'+(managerName?(' &mdash; '+managerName):'')+'</span><span class="fio">&nbsp;</span></div></div>';
     htm+='<div class="foot">ООО «БУЛЬДОГ» &middot; '+numStr+' от '+dt+' &middot; +7 (495) 222-62-60 &middot; Предложение действительно 5 рабочих дней</div>';
     htm+='</body></html>';
-    var blob=new Blob(['\uFEFF'+htm],{type:'application/msword;charset=utf-8'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download=numStr+'_Бульдог_'+new Date().toISOString().slice(0,10)+'.doc';document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);kpLog.unshift({num:numStr,dt:new Date().toLocaleString('ru-RU'),route:la+' → '+ua,total:total,veh:vt});if(kpLog.length>200)kpLog.pop();localStorage.setItem('yrd_calc_kp_log',JSON.stringify(kpLog));updKpInfo();toast('✅ '+numStr+' готов');
+    var blob=new Blob(['\uFEFF'+htm],{type:'application/msword;charset=utf-8'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download=numStr+'_Бульдог_'+new Date().toISOString().slice(0,10)+'.doc';document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);updKpInfo(numStr);toast('✅ '+numStr+' готов');
 }
-rendH();fltr('all');calc();updKpInfo();
+rendH();fltr();calc();updKpInfo();
+// Влад, 2026-08-21: "если выскочил список, он не закрывается, если нажать на любое место
+// на калькуляторе - обязывает прям что-то выбрать" - клик куда угодно вне поля/списка должен
+// просто закрывать список без выбора. onblur+setTimeout в разметке ловит только уход фокуса
+// с самого поля - клик по СВОБОДНОМУ месту внутри списка (не по конкретному пункту) или по
+// другому виджету не всегда доходит до blur вовремя. Один глобальный слушатель клика надёжнее.
+document.addEventListener('click',function(e){
+    var inp=document.getElementById('clc-techSearch'),list=document.getElementById('clc-techList');
+    if(inp&&list&&e.target!==inp&&!list.contains(e.target))list.classList.remove('show');
+    var loopBtn=e.target.closest?e.target.closest('.clc-loop-wrap'):null,loopPanel=document.getElementById('clc-loopPanel');
+    if(loopPanel&&!loopBtn)loopPanel.classList.remove('show');
+});
+
+function toggleLoopPanel(){document.getElementById('clc-loopPanel').classList.toggle('show');}
+function updLoopBadge(){var n=+document.getElementById('clc-loopCount').value||1,b=document.getElementById('clc-loopBadge');b.textContent=n>1?'×'+n:'';}
 
 var clcMapInited=false,clcHistLoadedOnce=false;
 function initPage(){
@@ -1822,8 +1948,9 @@ function initPage(){
 
 window.Clc = {
   geoc:geoc, getLoc:getLoc, swapAdr:swapAdr, toggleManual:toggleManual, onWChange:onWChange,
-  vhCh:vhCh, fltr:fltr, selTech:selTech, saveCalc:saveCalc, delCalc:delCalc, loadH:loadH,
-  genKP:genKP, calc:calc, initPage:initPage
+  vhCh:vhCh, fltr:fltr, fltrFocus:fltrFocus, clearTechSearch:clearTechSearch, selTech:selTech,
+  saveCalc:saveCalc, delCalc:delCalc, loadH:loadH, genKP:genKP, calc:calc, initPage:initPage,
+  toggleLoopPanel:toggleLoopPanel, updLoopBadge:updLoopBadge
 };
 
 })();

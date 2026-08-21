@@ -1378,6 +1378,18 @@ function isOwnTralLogistSur_(sur) {
   return s === 'сильчев' || s === 'кан' || s === 'махура';
 }
 
+// Менеджеры, у которых формула зарплаты ЕЩЁ НЕ согласована с Владом (2026-08-13, новый
+// менеджер Ратников Максим - "сам по себе, не к Лиане, не к Айнур... зарплату ему считать
+// пока не нужно, остальное всё как у всех продавцов"). Показывать calcMgr() с дефолтной
+// ставкой было бы враньём сотруднику - число выглядело бы официальным расчётом, но ставка
+// для него не решена. Личная страница (план/ИИ-задачи/клиенты/ДЗ/документы) - без изменений,
+// подменяется только блок "Расчёт зарплаты" (см. renderMyPageManager). Список по фамилии
+// (не data-driven) - убрать отсюда, когда Влад согласует ставку.
+var SALARY_NOT_CONFIGURED_ = ['ратников'];
+function isSalaryNotConfigured_(sur) {
+  return SALARY_NOT_CONFIGURED_.indexOf((sur||'').toLowerCase()) >= 0;
+}
+
 // Переключатель "Свои продажи" / "Общие сделки" на личной странице логиста (Влад, 2026-08-10:
 // "Прусу Роману нужно добавить две кнопки... он видит абсолютно всю ситуацию по направлению").
 // Персистентный между рендерами (не сбрасывается при смене сотрудника в дропдауне) - "Общие
@@ -1980,7 +1992,9 @@ function renderMyPageManager(el, current, selectorHtml, d) {
   // же компоненты calcMgr, в стиле строка-значение (как у остальных личных страниц), а не
   // многоколоночной таблицей отдела - тут один человек, таблица на весь отдел избыточна.
   var salaryBody;
-  if (!sal) {
+  if (isSalaryNotConfigured_(sur)) {
+    salaryBody = '<div style="font-size:13px;color:var(--muted)">Формула зарплаты для этого сотрудника пока не согласована - расчёт временно не показывается.</div>';
+  } else if (!sal) {
     salaryBody = '<div style="font-size:13px;color:var(--muted)">Нет данных для расчёта за этот период.</div>';
   } else if (sal.newRules) {
     var srows = salRow('Оклад', sal.oklad, 'По ступени оборота '+mln(sal.total)) + okladNextTierNote_(sal.total);
@@ -5204,6 +5218,13 @@ function renderSalesMgr() {
     { color:'#1D9E75', name:'Ахтамова Лиана',   head:'Ахтамова',  members:['Ахтамова','Цегельников','Гуштюк','Дербенцева','Шейко'] },
     { color:'#378ADD', name:'Гусейнова Айнур',  head:'Гусейнова', members:['Гусейнова','Савиток','Филипчук','Котельников','Гуляева','Коньшина','Володин'] },
     { color:'#BA7517', name:'Рыщанов Рустем',   head:'Рыщанов',   members:['Рыщанов','Прус-Роскошный','Суркова'] },
+    // Ратников Максим (2026-08-13, Влад: "новый менеджер, не к Лиане, не к Айнур, сам по
+    // себе... всё как у обычного менеджера, только он без старшего") - одиночная "плашка" без
+    // группы/руководителя. solo:true - summaryCard/deptBlock подавляют подпись "руководитель
+    // группы" и список участников (он один, дублировать имя незачем). Зарплата ему намеренно
+    // НЕ считается (см. isSalaryNotConfigured_ в renderMyPageManager) - к DEPTS на вкладке
+    // "Зарплата" (ниже по файлу) НЕ добавлен, только сюда и в TRAL_MANAGERS на бэкенде.
+    { color:'#06B6D4', name:'Ратников Максим',  head:null,        members:['Ратников'], solo:true },
   ];
   var HEAD_FULL = { 'Цуцурин':'Цуцурин Владислав Дмитриевич','Ахтамова':'Ахтамова Лиана Анатольевна','Гусейнова':'Гусейнова Айнур','Рыщанов':'Рыщанов Рустем' };
 
@@ -5277,7 +5298,8 @@ function renderSalesMgr() {
     var badgeC = planPct >= 100 ? '#1D9E75' : planPct >= 70 ? '#EF9F27' : '#E24B4A';
     // Показываем только тех, у кого есть заказы в этом периоде - иначе ушедшие сотрудники
     // (или те, у кого пока просто нет заказов) висят в подписи навсегда (Влад, 2026-07-03).
-    var memberSub = (cfg.members || []).filter(function(s){ return s!==cfg.head && get(s); }).join(' · ');
+    // solo (Ратников, без группы) - подпись из одного повторяющего заголовок имени избыточна.
+    var memberSub = cfg.solo ? '' : (cfg.members || []).filter(function(s){ return s!==cfg.head && get(s); }).join(' · ');
     var h = '<div class="card" style="padding:14px">';
     h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">';
     h +=   '<div>';
@@ -5452,16 +5474,18 @@ function renderSalesMgr() {
 
   function deptBlock(cfg, st) {
     var color = cfg.color;
-    var memberList = cfg.members.filter(function(s){ return s!==cfg.head && get(s); }).join(' · ');
+    // solo (Ратников, без группы/руководителя, 2026-08-13) - без подписи "руководитель
+    // группы" и без списка участников (он один, дублировать своё же имя незачем).
+    var memberList = cfg.solo ? '' : cfg.members.filter(function(s){ return s!==cfg.head && get(s); }).join(' · ');
     var h = '<div class="card" style="margin-bottom:16px;padding:0;overflow:hidden">';
     h += '<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border);background:rgba(255,255,255,0.03);border-left:3px solid '+color+'">';
     h += '<div style="flex:1">';
-    h += '<div style="font-size:13px;font-weight:600;color:'+color+'">'+cfg.name+' <span style="font-weight:400;color:var(--muted);font-size:12px">— руководитель группы</span></div>';
+    h += '<div style="font-size:13px;font-weight:600;color:'+color+'">'+cfg.name+(cfg.solo ? '' : ' <span style="font-weight:400;color:var(--muted);font-size:12px">— руководитель группы</span>')+'</div>';
     if (memberList) h += '<div style="font-size:11px;color:var(--muted);margin-top:2px">'+memberList+'</div>';
     h += '</div>';
     if (st.amount > 0) {
       h += '<div style="text-align:right;white-space:nowrap">';
-      h += '<div style="font-size:11px;color:var(--muted)">итого группы</div>';
+      h += '<div style="font-size:11px;color:var(--muted)">'+(cfg.solo?'выручка':'итого группы')+'</div>';
       h += '<div style="font-size:13px;font-weight:600">'+fmtN(st.amount)+'</div>';
       h += '<div style="font-size:11px;color:#1D9E75">прибыль найм: '+fmtN(st.profit)+'</div>';
       h += '</div>';

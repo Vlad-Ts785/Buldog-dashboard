@@ -3865,75 +3865,63 @@ function getAccessLogSummary_(ss) {
   }).sort(function(a, b) { return String(b.last_visit).localeCompare(String(a.last_visit)); });
 }
 
-// ── КАЛЬКУЛЯТОР СТОИМОСТИ ПЕРЕВОЗКИ - ИСТОРИЯ РАСЧЁТОВ (2026-08-17, Влад: "должен сохранять
-// на сервер расчёты сделанные менеджером и расчёты именно менеджера кто сделал расчёт") ──────
-// Автор строки берётся ТОЛЬКО из access.name (лист "Доступ", разрешён по проверенному
-// id_token) - клиент передаёт параметры расчёта, но не может подделать, от чьего имени он
-// сохранён. Одна строка = один расчёт (не апдейт, в отличие от Логи_входов) - это журнал, не
-// счётчик.
-const CALC_HISTORY_SHEET = 'Калькулятор_История';
-const CALC_HISTORY_HEADERS = ['Дата', 'Менеджер', 'Роль', 'Откуда', 'Куда', 'Км база→погрузка', 'Км с грузом', 'Км выгрузка→база', 'Масса, т', 'Габариты', 'Тип груза', 'Техника', 'Рейсов', 'Итого, руб'];
-
-function ensureCalcHistorySheet_(ss) {
-  let sheet = ss.getSheetByName(CALC_HISTORY_SHEET);
-  if (!sheet) {
-    sheet = ss.insertSheet(CALC_HISTORY_SHEET);
-    sheet.getRange(1, 1, 1, CALC_HISTORY_HEADERS.length).setValues([CALC_HISTORY_HEADERS]).setFontWeight('bold');
-    sheet.setFrozenRows(1);
-  }
-  return sheet;
+// ── КАЛЬКУЛЯТОР СТОИМОСТИ ПЕРЕВОЗКИ - ИСТОРИЯ РАСЧЁТОВ + НУМЕРАЦИЯ КП (2026-08-21, Влад:
+// "работаем сервером, не Google Таблицами"; "сквозная нумерация КП - одна на всех
+// менеджеров") ─────────────────────────────────────────────────────────────────────────────
+// Было на листе "Калькулятор_История" (2026-08-17) - перенесено на VPS (api.yardhub.ru,
+// MySQL: calc_history/kp_log, см. /root/yard-dashboard/README.md на сервере). Тот же приём,
+// что уже отработан для ДЗ (mirrorDebtStatusToServer_): пишем ТОЛЬКО через отдельный
+// YARD_WRITE_KEY (никогда не в files/index.html), автор - access.name из проверенного
+// id_token, клиент не может подделать, от чьего имени сохранено. Номер КП = id в kp_log
+// (AUTO_INCREMENT в MySQL атомарен сам по себе на конкурентных вставках - отдельная
+// блокировка счётчика, как потребовалась бы в Sheets, не нужна).
+function calcServerHeaders_() {
+  var props = PropertiesService.getScriptProperties();
+  var apiKey = props.getProperty('YARD_WRITE_KEY') || props.getProperty('YARD_API_KEY');
+  return apiKey ? { 'X-Api-Key': apiKey } : null;
 }
 
-function saveCalcHistoryEntry_(ss, access, p) {
-  const sheet = ensureCalcHistorySheet_(ss);
-  sheet.appendRow([
-    new Date(),
-    access.name,
-    access.role,
-    String(p.load || '').slice(0, 300),
-    String(p.unload || '').slice(0, 300),
-    Number(p.km1) || 0,
-    Number(p.km2) || 0,
-    Number(p.km3) || 0,
-    Number(p.weight) || 0,
-    String(p.dims || '').slice(0, 100),
-    String(p.cargo || '').slice(0, 30),
-    String(p.veh || '').slice(0, 60),
-    Number(p.trips) || 1,
-    Number(p.total) || 0,
-  ]);
+function saveCalcHistoryEntry_(access, p) {
+  var headers = calcServerHeaders_();
+  if (!headers) throw new Error('YARD_WRITE_KEY не задан в Script Properties');
+  var params = {
+    manager: access.name, role: access.role,
+    load: String(p.load || '').slice(0, 300), unload: String(p.unload || '').slice(0, 300),
+    km1: Number(p.km1) || 0, km2: Number(p.km2) || 0, km3: Number(p.km3) || 0,
+    weight: Number(p.weight) || 0, dims: String(p.dims || '').slice(0, 100),
+    cargo: String(p.cargo || '').slice(0, 30), veh: String(p.veh || '').slice(0, 80),
+    trips: Number(p.trips) || 1, total: Number(p.total) || 0,
+  };
+  var qs = Object.keys(params).map(function(k) { return k + '=' + encodeURIComponent(params[k]); }).join('&');
+  var resp = UrlFetchApp.fetch('https://api.yardhub.ru/api/calc/save?' + qs, { headers: headers, muteHttpExceptions: true });
+  var data = JSON.parse(resp.getContentText() || '{}');
+  if (!data.ok) throw new Error(data.error || 'Сервер не подтвердил сохранение');
 }
 
 // manager/logist - только свои расчёты (та же приватность, что у ДЗ/problem_orders), admin -
-// все, последние 300 (это журнал для контроля, не для листания истории годами).
-function getCalcHistory_(ss, access) {
-  const sheet = ss.getSheetByName(CALC_HISTORY_SHEET);
-  if (!sheet || sheet.getLastRow() < 2) return [];
-  const n = sheet.getLastRow() - 1;
-  const data = sheet.getRange(2, 1, n, CALC_HISTORY_HEADERS.length).getValues();
-  let rows = data.map(function(r) {
-    return {
-      date: r[0] instanceof Date ? r[0].toISOString() : String(r[0] || ''),
-      manager: String(r[1] || ''),
-      role: String(r[2] || ''),
-      load: String(r[3] || ''),
-      unload: String(r[4] || ''),
-      km1: Number(r[5]) || 0,
-      km2: Number(r[6]) || 0,
-      km3: Number(r[7]) || 0,
-      weight: Number(r[8]) || 0,
-      dims: String(r[9] || ''),
-      cargo: String(r[10] || ''),
-      veh: String(r[11] || ''),
-      trips: Number(r[12]) || 1,
-      total: Number(r[13]) || 0,
-    };
-  });
-  if (access.role !== 'admin') {
-    rows = rows.filter(function(r) { return r.manager === access.name; });
-  }
-  rows.sort(function(a, b) { return String(b.date).localeCompare(String(a.date)); });
-  return rows.slice(0, 300);
+// все, последние 300 (сервер сам режет - см. api/server.js).
+function getCalcHistory_(access) {
+  var headers = calcServerHeaders_();
+  if (!headers) return [];
+  var qs = 'role=' + encodeURIComponent(access.role) + '&manager=' + encodeURIComponent(access.name);
+  var resp = UrlFetchApp.fetch('https://api.yardhub.ru/api/calc/history?' + qs, { headers: headers, muteHttpExceptions: true });
+  var data = JSON.parse(resp.getContentText() || '{}');
+  return data.history || [];
+}
+
+function issueKpNumber_(access, p) {
+  var headers = calcServerHeaders_();
+  if (!headers) throw new Error('YARD_WRITE_KEY не задан в Script Properties');
+  var params = {
+    manager: access.name, role: access.role,
+    load: String(p.load || '').slice(0, 300), unload: String(p.unload || '').slice(0, 300),
+    total: Number(p.total) || 0,
+  };
+  var qs = Object.keys(params).map(function(k) { return k + '=' + encodeURIComponent(params[k]); }).join('&');
+  var resp = UrlFetchApp.fetch('https://api.yardhub.ru/api/calc/kp_issue?' + qs, { headers: headers, muteHttpExceptions: true });
+  var data = JSON.parse(resp.getContentText() || '{}');
+  if (!data.number) throw new Error(data.error || 'Сервер не выдал номер КП');
+  return data;
 }
 
 // Урезанный набор данных для роли "manager" - только его собственные цифры, без доступа к
@@ -4868,7 +4856,7 @@ function doGet(e) {
     // applyRoleUI() на фронтенде. Автор строки - access.name, не то, что прислал клиент.
     if (action === 'calc_save') {
       try {
-        saveCalcHistoryEntry_(ss, access, e.parameter);
+        saveCalcHistoryEntry_(access, e.parameter);
         return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(ContentService.MimeType.JSON);
       } catch (calcErr) {
         return ContentService.createTextOutput(JSON.stringify({ error: String(calcErr) })).setMimeType(ContentService.MimeType.JSON);
@@ -4877,8 +4865,19 @@ function doGet(e) {
 
     if (action === 'calc_history') {
       return ContentService
-        .createTextOutput(JSON.stringify({ history: getCalcHistory_(ss, access) }))
+        .createTextOutput(JSON.stringify({ history: getCalcHistory_(access) }))
         .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // Сквозная нумерация КП (Влад, 2026-08-21) - номер = id в kp_log на VPS, один счётчик на
+    // всех менеджеров сразу (не по одному на браузер, как было в localStorage).
+    if (action === 'kp_issue') {
+      try {
+        var kpResult = issueKpNumber_(access, e.parameter);
+        return ContentService.createTextOutput(JSON.stringify(kpResult)).setMimeType(ContentService.MimeType.JSON);
+      } catch (kpErr) {
+        return ContentService.createTextOutput(JSON.stringify({ error: String(kpErr) })).setMimeType(ContentService.MimeType.JSON);
+      }
     }
 
     if (action === 'vehicle_history') {

@@ -1520,7 +1520,7 @@ var TECH=[
 TECH=TECH.filter(function(t){return t.w>=10;});
 var map,mL,mU,mBase,layerBase=null,layerLoad=null,layerUnload=null,lc=null,uc=null;
 var d1=0,d2=0,d3=0,running=0,loadedOk=false,hist=JSON.parse(localStorage.getItem('yrd_calc_history')||'[]'),gT=null;
-var kpLog=JSON.parse(localStorage.getItem('yrd_calc_kp_log')||'[]'),LK={a1:0,a2:0,a3:0};
+var LK={a1:0,a2:0,a3:0};
 
 function initMap(){
     map=L.map('clc-map',{zoomControl:false}).setView([55.76,37.62],11);
@@ -1846,37 +1846,52 @@ function delCalc(id){if(!confirm('Удалить?'))return;hist=hist.filter(func
 function rendH(){var c=document.getElementById('clc-histList');if(!hist.length){c.innerHTML='<p style="color:var(--muted);text-align:center;padding:30px 0;">Нет сохранённых расчётов</p>';return;}c.innerHTML=hist.map(function(h){return '<div class="clc-list-item" onclick="Clc.loadH('+h.id+')" style="position:relative;"><div style="display:flex;justify-content:space-between;align-items:center;"><strong style="color:var(--green);font-size:13px;">'+h.total+'</strong><button class="clc-btn clc-btn-ghost clc-btn-sm" onclick="event.stopPropagation();Clc.delCalc('+h.id+')" style="padding:2px 6px;font-size:10px;">✕</button></div><div style="font-size:12px;color:var(--muted);">'+h.dist+' км · '+h.w+' т · '+(h.load||'').substring(0,20)+'...</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">'+h.dt+'</div></div>';}).join('');}
 function loadH(id){var h=hist.find(function(e){return e.id===id;});if(!h)return;document.getElementById('clc-loadAddr').value=h.load||'';document.getElementById('clc-unloadAddr').value=h.unload||'';toast('📂 Загружен');}
 function toast(m,e){var t=document.getElementById('clc-toast');t.textContent=m;t.className='clc-toast'+(e?' clc-toast-err':'');t.classList.add('show');setTimeout(function(){t.classList.remove('show');},3000);}
-function updKpInfo(){var n=+(localStorage.getItem('yrd_calc_kp_num')||0);var el=document.getElementById('clc-kpInfo');if(el)el.textContent='📄 Выдано КП: '+n+' · следующий № КП-'+String(n+1).padStart(4,'0');}
-// Бланк КП переделан под фирменный стиль официальных документов компании (Влад, 2026-08-17:
-// "форма отвратительная... на бланке фирмы как в приказах, аккуратное содержательное КП") -
-// та же шапка (наименование/ОГРН/ИНН/КПП/адрес, разделительная черта), что и в приказах
-// ООО «БУЛЬДОГ» (см. .business/products/pricing.md и Приказы/*.md), Times New Roman, без
-// декоративных золотых рамок/бейджей прежней версии. Логика расчёта самого КП не менялась -
-// переделана только вёрстка. Остаётся тем же трюком "HTML под видом .doc" (Word открывает
-// такой файл и применяет разметку) - реальный .docx через python-docx тут не собрать, движок
-// целиком в браузере без сервера сборки.
-function genKP(){
-    var w=document.getElementById('clc-weight').value||'—',ln=document.getElementById('clc-len').value||'—',wh=document.getElementById('clc-wid').value||'—',h=document.getElementById('clc-hei').value||'—';
+// Нумерация теперь сквозная и живёт на сервере (kp_log на VPS, не в localStorage браузера) -
+// предсказать "следующий номер" заранее без похода на сервер нельзя (его могли выдать другому
+// менеджеру только что), поэтому просто показываем последний РЕАЛЬНО выданный в этой вкладке.
+function updKpInfo(numStr){var el=document.getElementById('clc-kpInfo');if(el&&numStr)el.textContent='📄 Последний выданный: '+numStr;}
+// 2026-08-21, Влад:
+// - номер КП теперь сквозной с сервера (не localStorage) - genKP() стала async, ждёт
+//   action=kp_issue, при отказе сети - явная ошибка, а не выдумывает номер сам
+// - "в коммерческом оставить только маршрут" - убраны строки Пробег/Техника/Параметры груза
+// - "стоимость перевозки НДС 22%, выделить НДС от перевозки" - строка стоимости разбита на
+//   без НДС / НДС 22% / итого с НДС (сумма с НДС не меняется, это то же число, что и раньше)
+// - "слово оплаты - 100% предоплата" (было "предоплата или отсрочка - по договору")
+// - "убрать страховку из того что входит в стоимость"
+// - "подписывается менеджер, с которого аккаунта делаем КП" - имя теперь берётся из ответа
+//   сервера (kp_issue вернул access.name, проверенный по id_token), а не D.managerName -
+//   раньше для admin/директора строка была бы пустой, теперь работает для любой роли
+// - "номер строкой убрать из-под КП, должно быть выше, сбоку красиво с пробелами" - номер и
+//   дата перенесены в правый верхний угол НАД заголовком (как обычно оформляют исходящий
+//   номер письма), сам заголовок больше не содержит номер и не дублируется отдельной строкой
+//   города/даты снизу
+async function genKP(){
     var la=escHtml_(document.getElementById('clc-loadAddr').value||'—'),ua=escHtml_(document.getElementById('clc-unloadAddr').value||'—'),total=document.getElementById('clc-totalPrice').textContent||'—';
     if(total==='—'||total==='0 ₽'){toast('Сначала рассчитайте стоимость',1);return;}
-    var vm={tral:'Трал',board:'Длинномер',panel:'Панелевоз',tral_crane:'Трал под кран',korito:'Трал-корыто',faymon:'Faymonville'};
-    var vt0=document.getElementById('clc-vehType').value;
-    var vt=(vm[vt0]||'Трал')+(vt0==='faymon'?' '+document.getElementById('clc-faymonCat').value+' т':'');
-    var neg=document.getElementById('clc-cargoType').value==='negabarit',esc=document.getElementById('clc-bdNeg').textContent;
+    if(typeof apiFetchJson!=='function'){toast('Основной скрипт дашборда ещё не готов, подождите секунду',1);return;}
+    var totalNum=+(total.replace(/[^\d]/g,''))||0;
+    var VAT_RATE=0.22;
+    var priceNoVat=Math.round(totalNum/(1+VAT_RATE));
+    var vatAmount=totalNum-priceNoVat;
     var dt=new Date().toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'});
-    var kpNum=(+(localStorage.getItem('yrd_calc_kp_num')||0))+1;localStorage.setItem('yrd_calc_kp_num',kpNum);var numStr='КП-'+String(kpNum).padStart(4,'0');
-    var manualNow=document.getElementById('clc-manualKm').checked;
-    var ra1=manualNow?(+document.getElementById('clc-mkm1').value||0):d1;
-    var ra2=manualNow?(+document.getElementById('clc-mkm2').value||0):d2;
-    var ra3=manualNow?(+document.getElementById('clc-mkm3').value||0):d3;
-    var managerName=(typeof D!=='undefined'&&D&&(D.managerName||D.logistName))||'';
+    toast('Оформляем КП…');
+    var kpResp;
+    try{
+        kpResp=await apiFetchJson({action:'kp_issue',load:document.getElementById('clc-loadAddr').value||'',unload:document.getElementById('clc-unloadAddr').value||'',total:totalNum});
+        if(!kpResp||kpResp.error||!kpResp.number)throw new Error((kpResp&&kpResp.error)||'сервер не выдал номер');
+    }catch(err){
+        toast('Не удалось получить номер КП с сервера - проверьте связь и попробуйте ещё раз',1);
+        return;
+    }
+    var numStr='КП-'+String(kpResp.number).padStart(4,'0');
+    var managerName=escHtml_(kpResp.manager||'');
     var htm='<!DOCTYPE html><html><head><meta charset="UTF-8"><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><style>';
     htm+='@page{margin:2cm 2cm 2cm 2.2cm}body{font-family:"Times New Roman",Times,serif;font-size:12pt;color:#111;line-height:1.35;margin:0}';
     htm+='.hh{text-align:center;font-weight:700;font-size:13pt;letter-spacing:.2px}';
     htm+='.hr2{text-align:center;font-size:10pt;color:#333;margin-top:4px;line-height:1.5}';
-    htm+='.rule{border:none;border-top:1.5pt solid #111;margin:10pt 0 16pt}';
-    htm+='.doctitle{text-align:center;font-weight:700;font-size:13pt;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4pt}';
-    htm+='.dateline{display:flex;justify-content:space-between;font-size:11pt;margin:2pt 0 16pt}';
+    htm+='.rule{border:none;border-top:1.5pt solid #111;margin:10pt 0 8pt}';
+    htm+='.refbox{text-align:right;font-size:10.5pt;color:#333;line-height:1.7;margin-bottom:14pt}';
+    htm+='.doctitle{text-align:center;font-weight:700;font-size:14pt;text-transform:uppercase;letter-spacing:.4px;margin-bottom:16pt}';
     htm+='table{width:100%;border-collapse:collapse;margin:8pt 0 14pt}';
     htm+='td,th{border:1pt solid #333;padding:6pt 9pt;font-size:11pt;vertical-align:top;text-align:left}';
     htm+='th{background:#f0f0f0;font-weight:700;font-size:9.5pt;text-transform:uppercase;letter-spacing:.3px}';
@@ -1890,25 +1905,23 @@ function genKP(){
     htm+='<div class="hh">ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ «БУЛЬДОГ»</div>';
     htm+='<div class="hr2">ОГРН 1177746503220, ИНН 7702417768, КПП 773301001<br>125466, г Москва, вн.тер.г муниципальный округ Куркино, ул Юровская, 92, подвал помещ. I, ком. 40, РМ 1г · +7 (495) 222-62-60</div>';
     htm+='<hr class="rule">';
-    htm+='<div class="doctitle">Коммерческое предложение № '+numStr+'</div>';
-    htm+='<div class="dateline"><span>г. Москва</span><span>'+dt+'</span></div>';
+    htm+='<div class="refbox">г. Москва, '+dt+'<br>№ '+numStr+'</div>';
+    htm+='<div class="doctitle">Коммерческое предложение</div>';
     htm+='<table><tr><th style="width:30%">Параметр</th><th>Значение</th></tr>';
     htm+='<tr><td>Маршрут</td><td>'+la+' &#8594; '+ua+'</td></tr>';
-    htm+='<tr><td>Пробег</td><td>порожний '+ra1+' км + с грузом '+ra2+' км + порожний '+ra3+' км</td></tr>';
-    htm+='<tr><td>Техника</td><td>'+vt+(neg?' (негабаритный груз)':'')+'</td></tr>';
-    htm+='<tr><td>Параметры груза</td><td>'+w+' т, '+ln+'&times;'+wh+'&times;'+h+' м</td></tr>';
-    htm+=(neg&&esc&&esc!=='0 ₽'&&esc.indexOf('—')<0?'<tr><td>в т.ч. сопровождение негабарита</td><td>'+esc+'</td></tr>':'');
-    htm+='<tr class="totrow"><td>Стоимость перевозки, с НДС</td><td>'+total+'</td></tr>';
+    htm+='<tr><td>Стоимость перевозки без НДС</td><td>'+priceNoVat.toLocaleString('ru-RU')+' ₽</td></tr>';
+    htm+='<tr><td>НДС 22%</td><td>'+vatAmount.toLocaleString('ru-RU')+' ₽</td></tr>';
+    htm+='<tr class="totrow"><td>Итого к оплате, с НДС</td><td>'+total+'</td></tr>';
     htm+='</table>';
     htm+='<div class="meta">';
-    htm+='<p><b>Условия оплаты:</b> предоплата или отсрочка платежа - по договору.</p>';
+    htm+='<p><b>Условия оплаты:</b> 100% предоплата.</p>';
     htm+='<p><b>Срок подачи техники:</b> 1-3 дня с момента согласования заявки.</p>';
-    htm+='<p><b>В стоимость входит:</b> подача техники к месту погрузки, страхование груза, полный пакет закрывающих документов.</p>';
+    htm+='<p><b>В стоимость входит:</b> подача техники к месту погрузки, полный пакет закрывающих документов.</p>';
     htm+='</div>';
     htm+='<div class="sign"><div class="line"><span>Менеджер'+(managerName?(' &mdash; '+managerName):'')+'</span><span class="fio">&nbsp;</span></div></div>';
     htm+='<div class="foot">ООО «БУЛЬДОГ» &middot; '+numStr+' от '+dt+' &middot; +7 (495) 222-62-60 &middot; Предложение действительно 5 рабочих дней</div>';
     htm+='</body></html>';
-    var blob=new Blob(['\uFEFF'+htm],{type:'application/msword;charset=utf-8'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download=numStr+'_Бульдог_'+new Date().toISOString().slice(0,10)+'.doc';document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);kpLog.unshift({num:numStr,dt:new Date().toLocaleString('ru-RU'),route:la+' → '+ua,total:total,veh:vt});if(kpLog.length>200)kpLog.pop();localStorage.setItem('yrd_calc_kp_log',JSON.stringify(kpLog));updKpInfo();toast('✅ '+numStr+' готов');
+    var blob=new Blob(['\uFEFF'+htm],{type:'application/msword;charset=utf-8'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download=numStr+'_Бульдог_'+new Date().toISOString().slice(0,10)+'.doc';document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);updKpInfo(numStr);toast('✅ '+numStr+' готов');
 }
 rendH();fltr();calc();updKpInfo();
 // Влад, 2026-08-21: "если выскочил список, он не закрывается, если нажать на любое место

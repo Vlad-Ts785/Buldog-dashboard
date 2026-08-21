@@ -341,14 +341,20 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   .grid-2,.grid-3,.grid-65{grid-template-columns:1fr;}
   .fleet-grid{grid-template-columns:1fr;}
   main{padding:16px;}
-  .clc-map{height:220px;}
   .clc-price-value{font-size:28px;}
 }
 
 /* ── КАЛЬКУЛЯТОР ПЕРЕВОЗКИ (plans/2026-08-17-calculator-dashboard-integration.md) ──
    Портирован из ЯРД_Калькулятор_v1.3 (yard-calc-v1.7.html), логика расчёта не менялась -
    только визуальное оформление под токены дашборда и id/классы с префиксом clc-. */
-.clc-map{height:280px;border-radius:var(--radius-sm);border:1px solid var(--border);margin-bottom:14px;position:relative;z-index:1;}
+/* Влад, 2026-08-20: "карта пусть будет уже и вниз больше квадратнее" - колонка теперь уже
+   (grid-3 вместо grid-65), поэтому та же карта делается выше, чтобы не быть плоской полоской. */
+.clc-map{height:400px;border-radius:var(--radius-sm);border:1px solid var(--border);margin-bottom:14px;position:relative;z-index:1;}
+/* Мобильный оверрайт ДОЛЖЕН идти после базового правила той же специфичности - иначе, при
+   равном весе селектора, каскад решает по порядку в файле и media-запрос молча проигрывает
+   (это уже было багом в прежнем порядке: 220px для мобильного объявлялся РАНЬШЕ, чем 400px
+   без условия, поэтому мобильный экран всё равно получал большую карту). */
+@media(max-width:900px){.clc-map{height:220px;}}
 .clc-fg{margin-bottom:14px;}
 .clc-fg label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px;font-weight:500;}
 .clc-input,.clc-select{width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);padding:9px 12px;color:var(--text);font-size:13px;outline:none;font-family:inherit;}
@@ -1214,126 +1220,108 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
          Sheets/Apps Script - только карта (OSM/OSRM/Nominatim, публичные, без ключей). -->
     <div id="page-calculator" class="page clc-page">
       <div class="clc-toast" id="clc-toast"></div>
-      <div class="grid-65">
-        <div>
-          <div class="card">
-            <div class="card-title">Маршрут</div>
-            <div class="clc-fg">
-              <label>Откуда (погрузка)</label>
-              <div class="clc-ig">
-                <div class="clc-ac-wrap">
-                  <input type="text" id="clc-loadAddr" class="clc-input" placeholder="Например: Кострома..." oninput="Clc.geoc('load')">
-                  <div class="clc-ac-list" id="clc-loadAc"></div>
-                </div>
-                <button class="clc-btn clc-btn-ghost" onclick="Clc.getLoc('load')" title="Моё местоположение"><i class="ti ti-current-location"></i></button>
+      <!-- Влад, 2026-08-20: карта крупнее и квадратнее, "Груз и техника" рядом со
+           "Стоимостью" (не под картой) - максимально компактно, без скролла до цены.
+           Прокрутка оставлена только там, где это ОК - база техники/история ниже. -->
+      <div class="grid-3" style="align-items:start">
+        <div class="card">
+          <div class="card-title">Маршрут</div>
+          <div class="clc-fg">
+            <label>Откуда (погрузка)</label>
+            <div class="clc-ig">
+              <div class="clc-ac-wrap">
+                <input type="text" id="clc-loadAddr" class="clc-input" placeholder="Например: Кострома..." oninput="Clc.geoc('load')">
+                <div class="clc-ac-list" id="clc-loadAc"></div>
               </div>
-            </div>
-            <div class="clc-fg">
-              <label>Куда (выгрузка)</label>
-              <div class="clc-ig">
-                <div class="clc-ac-wrap">
-                  <input type="text" id="clc-unloadAddr" class="clc-input" placeholder="Например: Санкт-Петербург..." oninput="Clc.geoc('unload')">
-                  <div class="clc-ac-list" id="clc-unloadAc"></div>
-                </div>
-                <button class="clc-btn clc-btn-ghost" onclick="Clc.swapAdr()" title="Поменять местами"><i class="ti ti-arrows-left-right"></i></button>
-              </div>
-            </div>
-            <div id="clc-map" class="clc-map"></div>
-            <span class="clc-base-badge">🏠 База: Домодедово (МО)</span>
-            <div class="clc-route-stats">
-              <div class="clc-route-stat"><div class="val" id="clc-stD1" style="color:#60a5fa">—</div><div class="lbl">База→загрузка</div></div>
-              <div class="clc-route-stat"><div class="val" id="clc-stD2" style="color:var(--green)">—</div><div class="lbl">С грузом</div></div>
-              <div class="clc-route-stat"><div class="val" id="clc-stD3" style="color:var(--muted)">—</div><div class="lbl">Выгрузка→база</div></div>
-            </div>
-            <div class="clc-fg" style="margin-bottom:0">
-              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px">
-                <input type="checkbox" id="clc-manualKm" onchange="Clc.toggleManual()" style="width:auto"> Ввести км вручную (если маршрут не строится)
-              </label>
-              <div id="clc-manualKmBox" class="clc-row3" style="display:none;margin-top:8px">
-                <div class="clc-fg" style="margin-bottom:0"><label style="font-size:10px">База→погр.</label><input type="number" id="clc-mkm1" class="clc-input" value="0" min="0" oninput="Clc.calc()"></div>
-                <div class="clc-fg" style="margin-bottom:0"><label style="font-size:10px">С грузом</label><input type="number" id="clc-mkm2" class="clc-input" value="0" min="0" oninput="Clc.calc()"></div>
-                <div class="clc-fg" style="margin-bottom:0"><label style="font-size:10px">Выгр.→база</label><input type="number" id="clc-mkm3" class="clc-input" value="0" min="0" oninput="Clc.calc()"></div>
-              </div>
+              <button class="clc-btn clc-btn-ghost" onclick="Clc.getLoc('load')" title="Моё местоположение"><i class="ti ti-current-location"></i></button>
             </div>
           </div>
+          <div class="clc-fg">
+            <label>Куда (выгрузка)</label>
+            <div class="clc-ig">
+              <div class="clc-ac-wrap">
+                <input type="text" id="clc-unloadAddr" class="clc-input" placeholder="Например: Санкт-Петербург..." oninput="Clc.geoc('unload')">
+                <div class="clc-ac-list" id="clc-unloadAc"></div>
+              </div>
+              <button class="clc-btn clc-btn-ghost" onclick="Clc.swapAdr()" title="Поменять местами"><i class="ti ti-arrows-left-right"></i></button>
+            </div>
+          </div>
+          <div id="clc-map" class="clc-map"></div>
+          <span class="clc-base-badge">🏠 База: Домодедово (МО)</span>
+          <div class="clc-route-stats">
+            <div class="clc-route-stat"><div class="val" id="clc-stD1" style="color:#60a5fa">—</div><div class="lbl">База→загрузка</div></div>
+            <div class="clc-route-stat"><div class="val" id="clc-stD2" style="color:var(--green)">—</div><div class="lbl">С грузом</div></div>
+            <div class="clc-route-stat"><div class="val" id="clc-stD3" style="color:var(--muted)">—</div><div class="lbl">Выгрузка→база</div></div>
+          </div>
+          <div class="clc-fg" style="margin-bottom:0">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px">
+              <input type="checkbox" id="clc-manualKm" onchange="Clc.toggleManual()" style="width:auto"> Ввести км вручную (если маршрут не строится)
+            </label>
+            <div id="clc-manualKmBox" class="clc-row3" style="display:none;margin-top:8px">
+              <div class="clc-fg" style="margin-bottom:0"><label style="font-size:10px">База→погр.</label><input type="number" id="clc-mkm1" class="clc-input" value="0" min="0" oninput="Clc.calc()"></div>
+              <div class="clc-fg" style="margin-bottom:0"><label style="font-size:10px">С грузом</label><input type="number" id="clc-mkm2" class="clc-input" value="0" min="0" oninput="Clc.calc()"></div>
+              <div class="clc-fg" style="margin-bottom:0"><label style="font-size:10px">Выгр.→база</label><input type="number" id="clc-mkm3" class="clc-input" value="0" min="0" oninput="Clc.calc()"></div>
+            </div>
+          </div>
+        </div>
 
-          <div class="card">
-            <div class="card-title">Груз и техника</div>
-            <div class="clc-row3">
-              <div class="clc-fg"><label>Масса, т</label><input type="number" id="clc-weight" class="clc-input" value="33" min="0.1" step="0.5" oninput="Clc.onWChange()"></div>
-              <div class="clc-fg"><label>Длина, м</label><input type="number" id="clc-len" class="clc-input" value="6" min="0.5" step="0.5" oninput="Clc.calc()"></div>
-              <div class="clc-fg"><label>Ширина, м</label><input type="number" id="clc-wid" class="clc-input" value="2.5" min="0.5" step="0.1" oninput="Clc.calc()"></div>
-            </div>
-            <div class="clc-row">
-              <div class="clc-fg"><label>Высота, м</label><input type="number" id="clc-hei" class="clc-input" value="3" min="0.5" step="0.1" oninput="Clc.calc()"></div>
-              <div class="clc-fg"><label>Тип груза</label>
-                <select id="clc-cargoType" class="clc-select" onchange="Clc.calc()">
-                  <option value="gabarit">Габарит</option>
-                  <option value="negabarit" selected>Негабарит</option>
-                </select>
-              </div>
-            </div>
-            <div class="clc-row3">
-              <div class="clc-fg"><label>Тип техники</label>
-                <select id="clc-vehType" class="clc-select" onchange="Clc.vhCh()">
-                  <option value="tral">Трал</option>
-                  <option value="board">Длинномер</option>
-                  <option value="panel">Панелевоз</option>
-                  <option value="tral_crane">Трал под кран</option>
-                  <option value="korito">Трал-корыто</option>
-                  <option value="faymon">Faymonville</option>
-                </select>
-              </div>
-              <div class="clc-fg" id="clc-faymonGrp" style="display:none">
-                <label>Категория Faymonville</label>
-                <select id="clc-faymonCat" class="clc-select" onchange="Clc.calc()">
-                  <option value="60-75">60-75 т</option>
-                  <option value="75-100">75-100 т</option>
-                  <option value="100-120">100-120 т</option>
-                </select>
-              </div>
-              <div class="clc-fg"><label>Рейсов</label><input type="number" id="clc-trips" class="clc-input" value="1" min="1" step="1" oninput="Clc.calc()"></div>
-            </div>
-            <div class="clc-row">
-              <div class="clc-fg" id="clc-koritoGrp" style="display:none">
-                <label>Корыто (фронтальный заезд)</label>
-                <select id="clc-koritoType" class="clc-select" onchange="Clc.calc()">
-                  <option value="base">Обычный (от 30 000 ₽)</option>
-                  <option value="razd">Раздвижной (от 40 000 ₽)</option>
-                </select>
-              </div>
-              <div class="clc-fg" id="clc-koritoExtGrp" style="display:none">
-                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px"><input type="checkbox" id="clc-koritoExt" onchange="Clc.calc()" style="width:auto"> Раздвижение ×1,5</label>
-              </div>
-            </div>
-            <div class="clc-fg" id="clc-escZoneGrp" style="display:none;margin-bottom:0">
-              <label>Сопровождение негабарита — зона</label>
-              <select id="clc-escZone" class="clc-select" onchange="Clc.calc()">
-                <option value="mkad">Москва: внутри МКАД (10 000 ₽)</option>
-                <option value="sadovoe">Москва: Садовое (12 000 ₽)</option>
-                <option value="ckad">МО до ЦКАД (20 000 ₽)</option>
-                <option value="far">Дальний рейс</option>
+        <div class="card">
+          <div class="card-title">Груз и техника</div>
+          <div class="clc-row">
+            <div class="clc-fg"><label>Масса, т</label><input type="number" id="clc-weight" class="clc-input" value="33" min="0.1" step="0.5" oninput="Clc.onWChange()"></div>
+            <div class="clc-fg"><label>Длина, м</label><input type="number" id="clc-len" class="clc-input" value="6" min="0.5" step="0.5" oninput="Clc.calc()"></div>
+          </div>
+          <div class="clc-row">
+            <div class="clc-fg"><label>Ширина, м</label><input type="number" id="clc-wid" class="clc-input" value="2.5" min="0.5" step="0.1" oninput="Clc.calc()"></div>
+            <div class="clc-fg"><label>Высота, м</label><input type="number" id="clc-hei" class="clc-input" value="3" min="0.5" step="0.1" oninput="Clc.calc()"></div>
+          </div>
+          <div class="clc-fg"><label>Тип груза</label>
+            <select id="clc-cargoType" class="clc-select" onchange="Clc.calc()">
+              <option value="gabarit">Габарит</option>
+              <option value="negabarit" selected>Негабарит</option>
+            </select>
+          </div>
+          <div class="clc-fg"><label>Тип техники</label>
+            <select id="clc-vehType" class="clc-select" onchange="Clc.vhCh()">
+              <option value="tral">Трал</option>
+              <option value="board">Длинномер</option>
+              <option value="panel">Панелевоз</option>
+              <option value="tral_crane">Трал под кран</option>
+              <option value="korito">Трал-корыто</option>
+              <option value="faymon">Faymonville</option>
+            </select>
+          </div>
+          <div class="clc-row">
+            <div class="clc-fg" id="clc-faymonGrp" style="display:none">
+              <label>Категория Faymonville</label>
+              <select id="clc-faymonCat" class="clc-select" onchange="Clc.calc()">
+                <option value="60-75">60-75 т</option>
+                <option value="75-100">75-100 т</option>
+                <option value="100-120">100-120 т</option>
               </select>
             </div>
+            <div class="clc-fg"><label>Рейсов</label><input type="number" id="clc-trips" class="clc-input" value="1" min="1" step="1" oninput="Clc.calc()"></div>
           </div>
-
-          <div class="card" style="margin-bottom:0">
-            <div class="card-title">База техники заказчика</div>
-            <div style="font-size:11px;color:var(--muted);margin:-6px 0 12px;line-height:1.5">Габариты типовые (рассчитаны по массе). Для критичных грузов сверяйте с ТТН.</div>
-            <input type="text" id="clc-techSearch" class="clc-input" placeholder="Поиск техники..." oninput="Clc.fltr()" style="margin-bottom:12px">
-            <div class="tab-bar">
-              <button class="tab-btn active" onclick="Clc.fltr('all')">Всё</button>
-              <button class="tab-btn" onclick="Clc.fltr('excavator')">Экскаваторы</button>
-              <button class="tab-btn" onclick="Clc.fltr('drill')">Буровые</button>
-              <button class="tab-btn" onclick="Clc.fltr('roller')">Катки</button>
-              <button class="tab-btn" onclick="Clc.fltr('loader')">Погрузчики</button>
-              <button class="tab-btn" onclick="Clc.fltr('bulldozer')">Бульдозеры</button>
-              <button class="tab-btn" onclick="Clc.fltr('crane')">Краны</button>
-              <button class="tab-btn" onclick="Clc.fltr('grader')">Грейдеры</button>
-              <button class="tab-btn" onclick="Clc.fltr('paver')">Асфальтоукл.</button>
-              <button class="tab-btn" onclick="Clc.fltr('telehandler')">Телескопы</button>
+          <div class="clc-row">
+            <div class="clc-fg" id="clc-koritoGrp" style="display:none">
+              <label>Корыто (фронтальный заезд)</label>
+              <select id="clc-koritoType" class="clc-select" onchange="Clc.calc()">
+                <option value="base">Обычный (от 30 000 ₽)</option>
+                <option value="razd">Раздвижной (от 40 000 ₽)</option>
+              </select>
             </div>
-            <div class="clc-list-scroll" id="clc-techList"></div>
+            <div class="clc-fg" id="clc-koritoExtGrp" style="display:none">
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px"><input type="checkbox" id="clc-koritoExt" onchange="Clc.calc()" style="width:auto"> Раздвижение ×1,5</label>
+            </div>
+          </div>
+          <div class="clc-fg" id="clc-escZoneGrp" style="display:none;margin-bottom:0">
+            <label>Сопровождение негабарита — зона</label>
+            <select id="clc-escZone" class="clc-select" onchange="Clc.calc()">
+              <option value="mkad">Москва: внутри МКАД (10 000 ₽)</option>
+              <option value="sadovoe">Москва: Садовое (12 000 ₽)</option>
+              <option value="ckad">МО до ЦКАД (20 000 ₽)</option>
+              <option value="far">Дальний рейс</option>
+            </select>
           </div>
         </div>
 
@@ -1349,7 +1337,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
             <div id="clc-kpInfo" style="font-size:11px;color:var(--muted);margin-top:12px"></div>
           </div>
 
-          <div class="clc-bd">
+          <div class="clc-bd" style="margin-bottom:0">
             <table>
               <tr><td>Техника</td><td id="clc-bdType">—</td></tr>
               <tr><td>Смена</td><td id="clc-bdShift">0 ₽</td></tr>
@@ -1361,11 +1349,34 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
               <tr class="clc-tot"><td>ИТОГО</td><td id="clc-bdTotal">0 ₽</td></tr>
             </table>
           </div>
+        </div>
+      </div>
 
-          <div class="card" style="margin-top:0">
-            <div class="card-title">История расчётов</div>
-            <div class="clc-list-scroll" id="clc-histList" style="max-height:300px"></div>
+      <!-- Справочные списки - тут прокрутка нормальна (Влад: "на прослистывание можно
+           оставить выбор груза из списка"), не мешают основному потоку выше. -->
+      <div class="grid-2">
+        <div class="card" style="margin-bottom:0">
+          <div class="card-title">База техники заказчика</div>
+          <div style="font-size:11px;color:var(--muted);margin:-6px 0 12px;line-height:1.5">Габариты типовые (рассчитаны по массе). Для критичных грузов сверяйте с ТТН.</div>
+          <input type="text" id="clc-techSearch" class="clc-input" placeholder="Поиск техники..." oninput="Clc.fltr()" style="margin-bottom:12px">
+          <div class="tab-bar">
+            <button class="tab-btn active" onclick="Clc.fltr('all')">Всё</button>
+            <button class="tab-btn" onclick="Clc.fltr('excavator')">Экскаваторы</button>
+            <button class="tab-btn" onclick="Clc.fltr('drill')">Буровые</button>
+            <button class="tab-btn" onclick="Clc.fltr('roller')">Катки</button>
+            <button class="tab-btn" onclick="Clc.fltr('loader')">Погрузчики</button>
+            <button class="tab-btn" onclick="Clc.fltr('bulldozer')">Бульдозеры</button>
+            <button class="tab-btn" onclick="Clc.fltr('crane')">Краны</button>
+            <button class="tab-btn" onclick="Clc.fltr('grader')">Грейдеры</button>
+            <button class="tab-btn" onclick="Clc.fltr('paver')">Асфальтоукл.</button>
+            <button class="tab-btn" onclick="Clc.fltr('telehandler')">Телескопы</button>
           </div>
+          <div class="clc-list-scroll" id="clc-techList"></div>
+        </div>
+
+        <div class="card" style="margin-bottom:0">
+          <div class="card-title">История расчётов</div>
+          <div class="clc-list-scroll" id="clc-histList" style="max-height:420px"></div>
         </div>
       </div>
     </div>

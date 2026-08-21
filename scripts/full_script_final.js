@@ -31,6 +31,9 @@
 //   migrateReceiptsArchiveToSingleSheet() - разовый перенос старых листов "Поступления_
 //                                  YYYY-MM" (по одному на месяц) в единый "Поступления_архив"
 //                                  - запустить ОДИН РАЗ, удаляет старые листы после переноса
+//   importHistoricalOrdersFromMegaBase() - разовый импорт листа "Январь_Май" из таблицы
+//                                  "мега база" в архивы Заказы_2026-01..05 (2026-08-14) -
+//                                  запустить один раз, потом backfillMonthSummaries()
 //
 // Если нужной функции нет в списке выше - она почти наверняка есть в файле, просто это
 // разовый скрипт под старую задачу: Ctrl+F по имени найдёт её в любом случае.
@@ -175,6 +178,11 @@ const CONFIG = {
   TELEGRAM_LOGISTS_CHAT_ID: '-5072928374',  // группа "Кадры/Ремонт/База"
   ALERT_FINE_THRESHOLD: 50000,   // штраф выше этой суммы → алерт
   ALERT_LOSS_THRESHOLD: 0,       // прибыль ниже этого → алерт
+  // Таблица-указатель "План задания - Индекс" (не сама таблица планировки -
+  // та меняется каждый месяц, это одна строка month/year/id/url, которую
+  // duplicateForNextMonth() перезаписывает при создании копии на новый месяц).
+  // Создана 2026-08-16, см. plans/ "План задания" и project_order_planning_sheet.
+  ORDER_PLAN_INDEX_ID: '1-afr5nC1Mg0UXgz7vwxvH4GX7MuAS14i-2-QA6yGxQQ',
 };
 
 // Google OAuth Client ID - не секрет (Google сам рекомендует класть его в открытый код сайта,
@@ -1127,6 +1135,11 @@ function runAll() {
   // каждый визит.
   try { saveMainPayloadCache_(SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID)); log.push('✅ Кэш главной страницы обновлён'); }
   catch(e) { errors.push('❌ Кэш главной страницы: ' + e.message); }
+
+  // "План задания" (2026-08-16) - прогрев кэша, чтобы дорогое чтение таблицы планировки
+  // (~2.5 минуты на ~31 вкладку) не доставалось живому пользователю дашборда.
+  try { warmOrderPlanCache();      log.push('✅ Кэш "План задания" прогрет'); }
+  catch(e) { errors.push('❌ Кэш "План задания": ' + e.message); }
 
   // Алерты и сводка — собираем данные один раз
   let alertsText = '';
@@ -2268,6 +2281,28 @@ function findOrCreateDebtStatusRow_(sheet, name) {
 // Дата "с какого числа" обновляется, ТОЛЬКО если статус реально изменился - повторная
 // установка того же статуса (например, повторный клик по тому же значению в выпадающем
 // списке) не сбрасывает счётчик "сколько дней уже стоит статус".
+// Зеркалит запись на сервер (2026-08-19, перенос ДЗ) - НЕ блокирует и НЕ ломает основную
+// запись в лист при любой ошибке (сервер временно недоступен и т.п.) - try/catch съедает всё
+// молча. Лист остаётся источником правды, пока фронтенд не переключат на прямые вызовы
+// сервера - тогда эта функция и станет единственной записью, а лист - только историческим.
+function mirrorDebtStatusToServer_(action, params) {
+  try {
+    // ЗАПИСЬ идёт отдельным ключом (Этап 1.0 плана устранения аудита): YARD_API_KEY лежит
+    // открыто в публичном files/index.html, и до сих пор им же можно было менять статусы
+    // должников со стороны. Эти эндпоинты вызываются только отсюда, браузер к ним не
+    // обращается - значит ключ записи может никогда не попадать в страницу.
+    // Откат на YARD_API_KEY - на случай, если свойство ещё не заведено: сервер на время
+    // перехода принимает оба (см. checkWriteKey в api/server.js).
+    var props = PropertiesService.getScriptProperties();
+    var apiKey = props.getProperty('YARD_WRITE_KEY') || props.getProperty('YARD_API_KEY');
+    if (!apiKey) return;
+    var qs = Object.keys(params).map(function(k) { return k + '=' + encodeURIComponent(params[k]); }).join('&');
+    UrlFetchApp.fetch('https://api.yardhub.ru/api/debt/' + action + '?' + qs, {
+      headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true,
+    });
+  } catch (err) { /* сервер не критичен для этой операции - тихо игнорируем */ }
+}
+
 function setDebtStatus_(ss, contragent, status) {
   const name = String(contragent || '').trim();
   if (!name) throw new Error('Не указан контрагент');
@@ -2280,6 +2315,7 @@ function setDebtStatus_(ss, contragent, status) {
   if (String(current || '') !== status) {
     sheet.getRange(row, 2, 1, 2).setValues([[status, today]]);
   }
+  mirrorDebtStatusToServer_('set_status', { contragent: name, status: status });
 }
 
 // Комментарий НЕ трогает статус/дату - отдельное поле, может обновляться независимо
@@ -2290,6 +2326,7 @@ function setDebtComment_(ss, contragent, comment) {
   const sheet = ensureDebtStatusSheet_(ss);
   const row = findOrCreateDebtStatusRow_(sheet, name);
   sheet.getRange(row, 4).setValue(String(comment || ''));
+  mirrorDebtStatusToServer_('set_comment', { contragent: name, comment: comment || '' });
 }
 
 // Агрегация ДЗ для дашборда - читает уже посчитанный ДЗ_данные (см. importDebtReport).
@@ -2298,8 +2335,53 @@ function setDebtComment_(ss, contragent, comment) {
 // широких диапазонах - пусть это будет неделя для начала") - по умолчанию 1 (вчера, как
 // раньше). Для >1 берём БЛИЖАЙШУЮ доступную дату к цели (сбор истории мог прерваться на
 // день-два), а не требуем точного совпадения - иначе "неделя" часто осталась бы пустой.
+// ── ГОТОВЫЙ РАСЧЁТ ДЗ С СЕРВЕРА (2026-08-19) ────────────────────────────────────────────────
+// Тот же приём, что и для заказов (см. fetchOrdersComputedFromServer_) - Script Property
+// USE_SERVER_DEBT_CALC='on' включает, любое другое значение/отсутствие - выключено, мгновенный
+// откат без редеплоя. Сверено с живым расчётом (0 расхождений на неизменных клиентах, вся
+// история 42/42 дня точно совпала) - см. plans/2026-07-08-debt-receivables-tab.md, "Итог"
+// от 2026-08-19, и README.md на сервере.
+function serverDebtCalcEnabled_() {
+  try {
+    return PropertiesService.getScriptProperties().getProperty('USE_SERVER_DEBT_CALC') === 'on';
+  } catch (err) {
+    return false;
+  }
+}
+
+function debtCalcLooksSane_(data) {
+  if (!data || !data.debt || !data.debt.summary) return false;
+  var s = data.debt.summary;
+  if (typeof s.total_balance !== 'number') return false;
+  if (typeof s.debtor_count !== 'number' || s.debtor_count <= 0) return false;
+  if (!Array.isArray(data.debt.by_customer) || !Array.isArray(data.debt.by_manager)) return false;
+  return true;
+}
+
+function fetchDebtComputedFromServer_(compareDaysBack) {
+  try {
+    if (!serverDebtCalcEnabled_()) return null;
+    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    if (!apiKey) return null;
+    var resp = UrlFetchApp.fetch(
+      'https://api.yardhub.ru/api/debt_computed?compare_days_back=' + encodeURIComponent(compareDaysBack || 1),
+      { headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true }
+    );
+    if (resp.getResponseCode() !== 200) return null;
+    var data = JSON.parse(resp.getContentText());
+    if (!debtCalcLooksSane_(data)) return null;
+    return data.debt;
+  } catch (err) {
+    return null;
+  }
+}
+
 function getDebtData(ss, compareDaysBack) {
   compareDaysBack = compareDaysBack || 1;
+
+  var computed = fetchDebtComputedFromServer_(compareDaysBack);
+  if (computed) return computed;
+
   const sheet = ss.getSheetByName(DEBT_RAW_SHEET);
   if (!sheet || sheet.getLastRow() < 2) return null;
 
@@ -3004,7 +3086,35 @@ function receiptsMonthRevenueMap_(ss) {
 // источник "Выручки по дням" для текущего месяца - ordersData.summary.by_day_commercial
 // (БЕЗ внутригрупповых, см. total_commercial в aggregateOrdersRows - Влад, 2026-08-13:
 // "внутренних не должно быть, мы всё равно не получаем по ним поступления").
+// Готовый расчёт "Поступлений" с сервера (2026-08-19) - та же логика, что ниже в этой функции,
+// уже портирована 1-в-1 в /api/receipts на api.yardhub.ru (сверено с этим самым расчётом
+// 2026-08-18, см. DEPLOY_LOG v221-222 - совпало один в один). Раньше сервером пользовался
+// только фронтенд admin-страницы "Поступления" (files/index.html, fetchReceiptsFromServer_) -
+// личная страница менеджера (buildManagerView_ -> getReceiptsData) ходила мимо, напрямую в
+// Google Sheets, каждый раз читая лист "Поступления" заново - Влад, 2026-08-19: "заходил под
+// Цегельниковым, долго грузилась страница". Форма ответа сервера совпадает 1-в-1 с тем, что
+// возвращает эта функция ниже - используем как есть, без пересборки. Любая проблема -> null ->
+// тихий фолбэк на чтение Таблиц, как было.
+function fetchReceiptsComputedFromServer_() {
+  try {
+    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    if (!apiKey) return null;
+    var resp = UrlFetchApp.fetch('https://api.yardhub.ru/api/receipts', {
+      headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true,
+    });
+    if (resp.getResponseCode() !== 200) return null;
+    var data = JSON.parse(resp.getContentText());
+    if (!data || data.error || !data.summary || !data.today || !data.yesterday || !data.week || !data.this_month) return null;
+    return data;
+  } catch (err) {
+    return null;
+  }
+}
+
 function getReceiptsData(ss, ordersData) {
+  var fromServer = fetchReceiptsComputedFromServer_();
+  if (fromServer) return fromServer;
+
   const liveSheet = ss.getSheetByName(RECEIPTS_SHEET);
   const liveRows = receiptsReadSheetRows_(liveSheet);
   if (!liveRows.length) {
@@ -3071,10 +3181,15 @@ function getReceiptsData(ss, ordersData) {
   // через запятую (обычно одно, но не гарантировано).
   const custMap = {};
   liveRows.forEach(function(r) {
-    if (!custMap[r.customer]) custMap[r.customer] = { customer: r.customer, manager: r.manager, amount: 0, count: 0, orgsSet: {} };
+    if (!custMap[r.customer]) custMap[r.customer] = { customer: r.customer, manager: r.manager, amount: 0, count: 0, orgsSet: {}, orgAmounts: {} };
     custMap[r.customer].amount += r.amount;
     custMap[r.customer].count++;
     custMap[r.customer].orgsSet[r.org] = true;
+    // Сумма ИМЕННО по этому юрлицу (Влад, 2026-08-16: клик по юрлицу должен сортировать
+    // клиентов по их сумме В ЭТОМ юрлице, не по общей сумме - у клиента, платящего в
+    // несколько наших КА, это разные числа).
+    const shortOrg = DEBT_ORG_SHORT_NAMES[r.org] || r.org;
+    custMap[r.customer].orgAmounts[shortOrg] = (custMap[r.customer].orgAmounts[shortOrg] || 0) + r.amount;
   });
   const byCustomer = Object.values(custMap).map(function(c) {
     c.orgs = Object.keys(c.orgsSet).map(function(o) { return DEBT_ORG_SHORT_NAMES[o] || o; }).sort().join(', ');
@@ -3158,6 +3273,43 @@ function getReceiptsData(ss, ordersData) {
   const todayTransactions = receiptsRowsForDay_(todayStr);
   const yesterdayTransactions = receiptsRowsForDay_(yesterdayStr);
 
+  // "Эта неделя" (Влад, 2026-08-15: "хочу выборку вчера/сегодня/неделей/месяцем") - с
+  // понедельника текущей недели по сегодня включительно (обычный рабочий календарь, не
+  // "последние 7 дней" - предсказуемее для директора: понедельник всегда старт).
+  const weekStartDate = new Date();
+  const dow = weekStartDate.getDay(); // 0=вс,1=пн,...,6=сб
+  const daysSinceMonday = (dow === 0) ? 6 : dow - 1;
+  weekStartDate.setDate(weekStartDate.getDate() - daysSinceMonday);
+  const weekStartStr = Utilities.formatDate(weekStartDate, 'Europe/Moscow', 'yyyy-MM-dd');
+  const weekTransactions = allRowsForDayLookup
+    .filter(function(r) { return r.date >= weekStartStr && r.date <= todayStr; })
+    .map(function(r) {
+      return { customer: r.customer, manager: r.manager, org: r.org, orgName: DEBT_ORG_SHORT_NAMES[r.org] || r.org, docNumber: r.docNumber, amount: r.amount, date: r.date };
+    })
+    .sort(function(a, b) { return b.amount - a.amount; });
+
+  // Прошлая неделя - ТОТ ЖЕ диапазон дней недели, сдвинутый на 7 дней назад (не полная
+  // неделя пн-вс, а "по сегодняшний день недели" - честное сравнение "сколько было на эту
+  // же точку прошлой недели", Влад, 2026-08-16: "сравнение с прошлой неделей в процентах").
+  const prevWeekStartDate = new Date(weekStartDate);
+  prevWeekStartDate.setDate(prevWeekStartDate.getDate() - 7);
+  const prevWeekStartStr = Utilities.formatDate(prevWeekStartDate, 'Europe/Moscow', 'yyyy-MM-dd');
+  const prevWeekEndDate = new Date();
+  prevWeekEndDate.setDate(prevWeekEndDate.getDate() - 7);
+  const prevWeekEndStr = Utilities.formatDate(prevWeekEndDate, 'Europe/Moscow', 'yyyy-MM-dd');
+  const prevWeekTotal = allRowsForDayLookup
+    .filter(function(r) { return r.date >= prevWeekStartStr && r.date <= prevWeekEndStr; })
+    .reduce(function(s, r) { return s + r.amount; }, 0);
+
+  // Построчная разбивка ЗА ТЕКУЩИЙ МЕСЯЦ целиком (Влад, 2026-08-16: личная страница
+  // менеджера - "вкладка Поступление, выбор сегодня/вчера/неделя/месяц, поступления должны
+  // относиться к конкретному менеджеру") - liveRows УЖЕ и есть накопительный список с начала
+  // месяца (см. importReceiptsReport), фронтенд фильтрует по менеджеру сам, тем же полем
+  // "manager", что и в today/yesterday/week.
+  const monthTransactions = liveRows.map(function(r) {
+    return { customer: r.customer, manager: r.manager, org: r.org, orgName: DEBT_ORG_SHORT_NAMES[r.org] || r.org, docNumber: r.docNumber, amount: r.amount, date: r.date };
+  }).sort(function(a, b) { return b.amount - a.amount; });
+
   return {
     month: currentMonth,
     summary: {
@@ -3177,6 +3329,12 @@ function getReceiptsData(ss, ordersData) {
     monthly: monthly,
     today: { date: todayStr, transactions: todayTransactions, total: todayTransactions.reduce(function(s, r) { return s + r.amount; }, 0) },
     yesterday: { date: yesterdayStr, transactions: yesterdayTransactions, total: yesterdayTransactions.reduce(function(s, r) { return s + r.amount; }, 0) },
+    this_month: { date_from: currentMonth + '-01', date_to: todayStr, transactions: monthTransactions, total: totalBankMonth },
+    week: {
+      date_from: weekStartStr, date_to: todayStr, transactions: weekTransactions,
+      total: weekTransactions.reduce(function(s, r) { return s + r.amount; }, 0),
+      prev_total: prevWeekTotal, prev_date_from: prevWeekStartStr, prev_date_to: prevWeekEndStr,
+    },
   };
 }
 
@@ -3311,7 +3469,13 @@ function buildManagersText() {
 // ============================================================
 // ОТПРАВКА В TELEGRAM
 // ============================================================
-function sendTelegram(text, chatId) {
+// plainText=true отключает разметку Markdown (2026-08-21). Зачем: Telegram ОТКАЗЫВАЕТ в
+// доставке всего сообщения, если не может разобрать разметку - а любой текст ошибки от
+// сервера содержит подчёркивания (`receipts_raw`, `import_runs`, пути к файлам), и для
+// Markdown подчёркивание это курсив. Непарное - и всё сообщение молча не доходит. Для
+// уведомлений о поломках это ровно тот случай, когда сообщение нужнее всего, поэтому
+// сторож шлёт простым текстом. Остальные отправки работают как раньше.
+function sendTelegram(text, chatId, plainText) {
   const url = `https://api.telegram.org/bot${getTelegramToken_()}/sendMessage`;
   UrlFetchApp.fetch(url, {
     method: 'post',
@@ -3319,9 +3483,124 @@ function sendTelegram(text, chatId) {
     payload: JSON.stringify({
       chat_id: chatId || CONFIG.TELEGRAM_CHAT_ID,
       text: text,
-      parse_mode: 'Markdown'
+      parse_mode: plainText ? undefined : 'Markdown'
     })
   });
+}
+
+// ============================================================
+// СТОРОЖ ЗА СЕРВЕРОМ (Этап 0.4 плана устранения аудита)
+// ============================================================
+// Почему сторож живёт ЗДЕСЬ, а не на сервере рядом с импортами: сторож, который лежит внутри
+// того, за чем следит, умирает вместе с ним. Обработчик ошибок на VPS не сообщит, что cron
+// перестал запускаться (он сам не запустится) и тем более что сервер целиком лёг. Apps Script
+// - независимая площадка с собственным расписанием и уже настроенным ботом, поэтому он видит
+// и то, и другое. Токен бота при этом остаётся в одном месте (Script Properties), а не
+// расползается ещё одной копией на VPS.
+//
+// Повод: 19.08.2026 импорт заказов падал 182 раза подряд восемь часов. Ошибка честно писалась
+// в лог, но лог никто не открывает, а на этих данных считалась зарплата.
+function watchdogCheckDataFreshness() {
+  var props = PropertiesService.getScriptProperties();
+  var apiKey = props.getProperty('YARD_API_KEY');
+  if (!apiKey) { Logger.log('watchdog: YARD_API_KEY не задан, пропускаю'); return; }
+
+  var problems = [];
+  try {
+    var resp = UrlFetchApp.fetch('https://api.yardhub.ru/api/import_status', {
+      headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true,
+    });
+    if (resp.getResponseCode() !== 200) {
+      problems.push('Сервер отвечает кодом ' + resp.getResponseCode());
+    } else {
+      var data = JSON.parse(resp.getContentText());
+      (data.scripts || []).forEach(function(s) {
+        if (s.healthy) return;
+        var line = s.label + ' - ' + s.problem;
+        if (s.minutes_since_run !== null) line += ' (последний запуск ' + s.minutes_since_run + ' мин назад)';
+        if (s.error_message) line += ': ' + String(s.error_message).slice(0, 200);
+        problems.push(line);
+      });
+    }
+  } catch (err) {
+    // Сюда попадаем, если сервер не отвечает вообще - это и есть тот случай, ради которого
+    // сторож вынесен наружу.
+    problems.push('Сервер недоступен: ' + err.message);
+  }
+
+  // Защита от спама - главное, чтобы уведомления не начали игнорировать. Пока проблема ТА ЖЕ,
+  // повторяем не чаще раза в 6 часов; изменился состав проблем - сообщаем сразу.
+  var stateKey = 'WATCHDOG_LAST_STATE';
+  var timeKey = 'WATCHDOG_LAST_SENT';
+  var signature = problems.join('|');
+  var prevSignature = props.getProperty(stateKey) || '';
+  var prevSentMs = parseInt(props.getProperty(timeKey) || '0', 10);
+  var nowMs = Date.now();
+
+  if (!problems.length) {
+    // Восстановление сообщаем один раз - чтобы было видно, что чинить больше нечего.
+    if (prevSignature) {
+      sendTelegram('Дашборд: данные снова обновляются. Все импорты в норме.', null, true);
+      props.deleteProperty(stateKey);
+      props.deleteProperty(timeKey);
+    }
+    return;
+  }
+
+  var sameProblem = (signature === prevSignature);
+  if (sameProblem && (nowMs - prevSentMs) < 6 * 3600 * 1000) return;
+
+  sendTelegram('Дашборд: обновление данных не проходит\n\n' + problems.join('\n') +
+    '\n\nЦифры на дашборде могут быть устаревшими.', null, true);
+  props.setProperty(stateKey, signature);
+  props.setProperty(timeKey, String(nowMs));
+}
+
+// Проверка связи с Telegram. Без завершающего "_" - чтобы была видна в списке "Выполнить".
+// Отвечает на вопрос "токен живой или нет" ОДНИМ запуском, вместо перебора догадок: сначала
+// спрашивает у Telegram, кто мы такие (getMe - проверяет сам токен), потом пробует отправить.
+// muteHttpExceptions - чтобы увидеть ТЕКСТ отказа, а не голое исключение: именно в тексте
+// Telegram пишет настоящую причину ("Unauthorized" = токен мёртв, "can't parse entities" =
+// подавился разметкой, "chat not found" = неверный адресат).
+function checkTelegram() {
+  var token = PropertiesService.getScriptProperties().getProperty('TELEGRAM_TOKEN');
+  if (!token) {
+    Logger.log('НЕТ ТОКЕНА. Настройки проекта -> Свойства скрипта -> добавить TELEGRAM_TOKEN.');
+    return;
+  }
+  Logger.log('Токен найден, длина ' + token.length + ' символов.');
+
+  var me = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/getMe',
+    { muteHttpExceptions: true });
+  Logger.log('Проверка токена (getMe): код ' + me.getResponseCode() + ' | ' +
+    me.getContentText().slice(0, 200));
+  if (me.getResponseCode() !== 200) {
+    Logger.log('ТОКЕН НЕДЕЙСТВИТЕЛЕН. Перевыпустить у @BotFather (/token) и заменить в свойствах скрипта.');
+    return;
+  }
+
+  var send = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    payload: JSON.stringify({
+      chat_id: CONFIG.TELEGRAM_CHAT_ID,
+      text: 'Проверка связи: сторож дашборда на связи. Это тестовое сообщение.',
+    }),
+  });
+  Logger.log('Отправка: код ' + send.getResponseCode() + ' | ' + send.getContentText().slice(0, 300));
+  Logger.log(send.getResponseCode() === 200
+    ? 'ОТПРАВЛЕНО - проверь Telegram.'
+    : 'ОТПРАВКА НЕ ПРОШЛА - причина в ответе выше.');
+}
+
+// Ставит сторожа на расписание (раз в час). ВЫПОЛНИТЬ ВРУЧНУЮ один раз в редакторе Apps
+// Script - clasp умеет только заливать код, но не запускать функции (см. CLAUDE.md).
+// Без завершающего "_" в имени - иначе не видна в списке "Выполнить".
+function setupWatchdogTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'watchdogCheckDataFreshness') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('watchdogCheckDataFreshness').timeBased().everyHours(1).create();
+  Logger.log('Сторож поставлен на расписание: раз в час.');
 }
 
 // ============================================================
@@ -3460,6 +3739,63 @@ function verifyGoogleToken_(idToken) {
   }
 }
 
+// ── СЕССИЯ НА 1-2 СУТОК ПОВЕРХ GOOGLE-ЛОГИНА (2026-08-17, Влад: "постоянно раз в час требует
+// перезахода... один раз залогинились - день-два никто не трогает") ────────────────────────
+// Google id_token живёт ~1 час - это срок жизни ОТ GOOGLE, мы его не контролируем. Вместо того
+// чтобы гонять пользователя обратно в Google каждый час, после первой успешной проверки
+// id_token выдаём СВОЙ подписанный токен на SESSION_TOKEN_TTL_MS - фронтенд дальше ходит по
+// нему, Google трогаем заново только когда истёк. Роль/доступ (лист "Доступ") по-прежнему
+// проверяется на КАЖДЫЙ запрос через getAccessRole_ - длинная сессия влияет только на то, что
+// не нужно повторно подтверждать личность через Google, а не на то, есть ли у email доступ
+// прямо сейчас (отозвать доступ - как и раньше, просто удалить строку из "Доступ", сработает
+// мгновенно и для уже выданных токенов сессии).
+var SESSION_TOKEN_TTL_MS = 48 * 60 * 60 * 1000; // "день-два"
+
+function getSessionSecret_() {
+  var props = PropertiesService.getScriptProperties();
+  var secret = props.getProperty('SESSION_SECRET');
+  if (!secret) {
+    // Генерируем сами при первом обращении - не нужно заводить руками, как TELEGRAM_TOKEN.
+    secret = Utilities.getUuid() + Utilities.getUuid();
+    props.setProperty('SESSION_SECRET', secret);
+  }
+  return secret;
+}
+
+function issueSessionToken_(email) {
+  var payload = JSON.stringify({ email: email, exp: Date.now() + SESSION_TOKEN_TTL_MS });
+  var payloadB64 = Utilities.base64EncodeWebSafe(payload);
+  var sig = Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(payloadB64, getSessionSecret_()));
+  return payloadB64 + '.' + sig;
+}
+
+// Сравнение строк без раннего выхода на первом несовпадении - иначе время сравнения выдаёт,
+// сколько первых байт подписи угаданы верно (классический timing-канал для HMAC-проверки).
+function constantTimeEquals_(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  var diff = 0;
+  for (var i = 0; i < a.length; i++) diff |= (a.charCodeAt(i) ^ b.charCodeAt(i));
+  return diff === 0;
+}
+
+// Возвращает email из валидного токена сессии, иначе null (нет токена, битая подпись, истёк).
+// Никогда не бросает исключение - вызывающий код просто откатывается на проверку id_token.
+function verifySessionToken_(token) {
+  if (!token || token.indexOf('.') === -1) return null;
+  var parts = token.split('.');
+  var payloadB64 = parts[0], sig = parts[1];
+  if (!payloadB64 || !sig) return null;
+  var expectedSig = Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(payloadB64, getSessionSecret_()));
+  if (!constantTimeEquals_(sig, expectedSig)) return null;
+  try {
+    var payload = JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(payloadB64)).getDataAsString());
+    if (!payload.email || !payload.exp || payload.exp < Date.now()) return null;
+    return String(payload.email).trim().toLowerCase();
+  } catch (parseErr) {
+    return null;
+  }
+}
+
 // Ищет email в листе "Доступ", возвращает {name, role} или null.
 function getAccessRole_(ss, email) {
   const sheet = ss.getSheetByName('Доступ');
@@ -3529,6 +3865,77 @@ function getAccessLogSummary_(ss) {
   }).sort(function(a, b) { return String(b.last_visit).localeCompare(String(a.last_visit)); });
 }
 
+// ── КАЛЬКУЛЯТОР СТОИМОСТИ ПЕРЕВОЗКИ - ИСТОРИЯ РАСЧЁТОВ (2026-08-17, Влад: "должен сохранять
+// на сервер расчёты сделанные менеджером и расчёты именно менеджера кто сделал расчёт") ──────
+// Автор строки берётся ТОЛЬКО из access.name (лист "Доступ", разрешён по проверенному
+// id_token) - клиент передаёт параметры расчёта, но не может подделать, от чьего имени он
+// сохранён. Одна строка = один расчёт (не апдейт, в отличие от Логи_входов) - это журнал, не
+// счётчик.
+const CALC_HISTORY_SHEET = 'Калькулятор_История';
+const CALC_HISTORY_HEADERS = ['Дата', 'Менеджер', 'Роль', 'Откуда', 'Куда', 'Км база→погрузка', 'Км с грузом', 'Км выгрузка→база', 'Масса, т', 'Габариты', 'Тип груза', 'Техника', 'Рейсов', 'Итого, руб'];
+
+function ensureCalcHistorySheet_(ss) {
+  let sheet = ss.getSheetByName(CALC_HISTORY_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(CALC_HISTORY_SHEET);
+    sheet.getRange(1, 1, 1, CALC_HISTORY_HEADERS.length).setValues([CALC_HISTORY_HEADERS]).setFontWeight('bold');
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function saveCalcHistoryEntry_(ss, access, p) {
+  const sheet = ensureCalcHistorySheet_(ss);
+  sheet.appendRow([
+    new Date(),
+    access.name,
+    access.role,
+    String(p.load || '').slice(0, 300),
+    String(p.unload || '').slice(0, 300),
+    Number(p.km1) || 0,
+    Number(p.km2) || 0,
+    Number(p.km3) || 0,
+    Number(p.weight) || 0,
+    String(p.dims || '').slice(0, 100),
+    String(p.cargo || '').slice(0, 30),
+    String(p.veh || '').slice(0, 60),
+    Number(p.trips) || 1,
+    Number(p.total) || 0,
+  ]);
+}
+
+// manager/logist - только свои расчёты (та же приватность, что у ДЗ/problem_orders), admin -
+// все, последние 300 (это журнал для контроля, не для листания истории годами).
+function getCalcHistory_(ss, access) {
+  const sheet = ss.getSheetByName(CALC_HISTORY_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  const n = sheet.getLastRow() - 1;
+  const data = sheet.getRange(2, 1, n, CALC_HISTORY_HEADERS.length).getValues();
+  let rows = data.map(function(r) {
+    return {
+      date: r[0] instanceof Date ? r[0].toISOString() : String(r[0] || ''),
+      manager: String(r[1] || ''),
+      role: String(r[2] || ''),
+      load: String(r[3] || ''),
+      unload: String(r[4] || ''),
+      km1: Number(r[5]) || 0,
+      km2: Number(r[6]) || 0,
+      km3: Number(r[7]) || 0,
+      weight: Number(r[8]) || 0,
+      dims: String(r[9] || ''),
+      cargo: String(r[10] || ''),
+      veh: String(r[11] || ''),
+      trips: Number(r[12]) || 1,
+      total: Number(r[13]) || 0,
+    };
+  });
+  if (access.role !== 'admin') {
+    rows = rows.filter(function(r) { return r.manager === access.name; });
+  }
+  rows.sort(function(a, b) { return String(b.date).localeCompare(String(a.date)); });
+  return rows.slice(0, 300);
+}
+
 // Урезанный набор данных для роли "manager" - только его собственные цифры, без доступа к
 // данным других людей и компании в целом. orders - уже загруженный результат getOrdersData
 // (текущий месяц) ИЛИ getOrdersDataForPeriod (2026-08-11, выбор периода на личной странице -
@@ -3580,6 +3987,30 @@ function buildManagerView_(orders, managerName, ss, period) {
         }),
       };
     }
+
+    // Поступления, отфильтрованные на этого менеджера (Влад, 2026-08-16: "вкладка Поступление,
+    // выбор сегодня/вчера/неделя/месяц, все поступления должны относиться к конкретному
+    // менеджеру") - ЖИВЫЕ (не по выбранному периоду - "Поступления" всегда о деньгах прямо
+    // сейчас/на этой неделе/в этом месяце, тот же принцип, что и ДЗ выше). Фильтруем СЕРВЕРНО,
+    // не только на фронтенде - у логина реального менеджера (не админ-предпросмотр) чужие
+    // строки не должны даже прийти по сети, приватность как у ДЗ/problem_orders выше.
+    try {
+      const rd = getReceiptsData(ss, orders);
+      if (rd && !rd.error) {
+        const surLower2 = String(managerName || '').trim().split(' ')[0].toLowerCase();
+        function onlyMine_(list) {
+          return (list || []).filter(function(t) {
+            return String(t.manager || '').trim().split(' ')[0].toLowerCase() === surLower2;
+          });
+        }
+        result.receipts = {
+          today: { date: rd.today.date, transactions: onlyMine_(rd.today.transactions) },
+          yesterday: { date: rd.yesterday.date, transactions: onlyMine_(rd.yesterday.transactions) },
+          week: { date_from: rd.week.date_from, date_to: rd.week.date_to, transactions: onlyMine_(rd.week.transactions) },
+          this_month: { date_from: rd.this_month.date_from, date_to: rd.this_month.date_to, transactions: onlyMine_(rd.this_month.transactions) },
+        };
+      }
+    } catch (recErr) { /* "Поступления" не критичны для остальной личной страницы - просто не показываем вкладку */ }
   }
 
   return result;
@@ -3731,6 +4162,547 @@ function getLogistView_(ss, logistName) { return buildLogistView_(getOrdersData(
 function getLogistViewForPeriod_(ss, logistName, period) { return buildLogistView_(getOrdersDataForPeriod(ss, period), logistName, ss, period); }
 
 // ============================================================
+// "ПЛАН ЗАДАНИЯ" — только чтение из отдельной таблицы планировки
+// (Планировка_заказов, живёт вне репозитория дашборда). Дашборд её не
+// изменяет, только читает — сама таблица остаётся основным рабочим
+// инструментом логистов/менеджеров (см. plans/ "План задания на дашборде").
+// ============================================================
+
+// Сверяет "Фамилия Имя Отчество" (лист «Доступ» дашборда) с "Фамилия Имя"
+// (колонка B таблицы планировки) — форматы разные, отчества в планировке
+// нет, а фамилия может быть короче через дефис (Прус-Роскошный → Прус).
+// Сверено на реальных данных 2026-08-16: без этой нормализации 0 совпадений
+// из 17 имён, с ней — все 5 реальных пар совпали. См. plans/ "План задания".
+function orderPlanNameMatch_(accessName, cellName) {
+  var a = String(accessName || '').trim().split(/\s+/);
+  var c = String(cellName || '').trim().split(/\s+/);
+  if (a.length < 2 || c.length < 2) return false;
+  var aSurname = a[0].split('-')[0].toLowerCase();
+  var cSurname = c[0].split('-')[0].toLowerCase();
+  return aSurname === cSurname && a[1].toLowerCase() === c[1].toLowerCase();
+}
+
+// Открывает ТЕКУЩУЮ таблицу планировки через индекс (CONFIG.ORDER_PLAN_INDEX_ID).
+// Общий кусок для getOrderPlanView_ и warmOrderPlanCache - раньше был продублирован.
+function resolveOrderPlanSpreadsheet_() {
+  var indexSs, indexSheet;
+  try {
+    indexSs = SpreadsheetApp.openById(CONFIG.ORDER_PLAN_INDEX_ID);
+    indexSheet = indexSs.getSheetByName('Индекс');
+  } catch (e) {
+    return { error: 'Не удалось открыть индексную таблицу: ' + e.message };
+  }
+  if (!indexSheet || indexSheet.getLastRow() < 2) {
+    return { error: 'Индексная таблица пуста' };
+  }
+  var planId = indexSheet.getRange(2, 3).getValue();
+  if (!planId) return { error: 'В индексе не указан ID таблицы планировки' };
+
+  try {
+    return { planId: planId, planSs: SpreadsheetApp.openById(planId) };
+  } catch (e) {
+    return { error: 'Не удалось открыть таблицу планировки: ' + e.message };
+  }
+}
+
+// Живой тест 2026-08-16 показал: последовательное чтение ~31 дневной вкладки таблицы
+// планировки занимает ОКОЛО 2.5 МИНУТ (Sheets API медленный на много мелких вызовов
+// подряд) - неприемлемо, если это платит своим ожиданием живой пользователь дашборда.
+// Решение в два слоя:
+// 1) readOrderPlanDayTab_ кэширует РАЗОБРАННЫЕ строки каждой дневной вкладки в
+//    CacheService на ORDER_PLAN_CACHE_TTL_SEC (сейчас 4 часа - с запасом перекрывает
+//    интервал между прогонами runAll(), см. ниже).
+// 2) warmOrderPlanCache() проактивно прогревает кэш КАЖДЫЙ раз, когда всё равно
+//    выполняется runAll() (6 раз в день, каждые 3 часа) - обычный пользователь почти
+//    никогда не попадает на холодный кэш, ждать 2.5 минуты приходится только внутри
+//    самого runAll(), а не в момент, когда менеджер открыл вкладку.
+var ORDER_PLAN_CACHE_TTL_SEC = 14400; // 4 часа, запас над 3-часовым интервалом runAll()
+
+// Карта колонок ниже подтверждена 2026-08-17 напрямую по строке 1 (человеческий
+// заголовок) + строке 2 (функциональный подзаголовок) живого листа, показанного
+// Владом (17.08.2026): D1="Заказчик"/D2="ФИО,телефон", G1="Исполнитель"/
+// G2="Какие документы оформить" - ПЕРВАЯ версия карты (2026-08-16) ошибочно брала
+// заказчика из G (там "От кого грузимся" по формуле N3, другое поле) - у части
+// заказов (Цегельников) G3 пуст, поэтому заказчик пропадал. Сейчас заказчик - D3.
+// P/Q/R - чекбоксы (реальные booleans в Sheets), а не текст: раньше `s()` с `||''`
+// молча превращал false в пустую строку, а true - в текст "true" (Влад: "не true
+// или false, а подтверждено/не подтверждено") - теперь строгое сравнение `=== true`.
+function readOrderPlanDayTab_(planId, sheet, day) {
+  var cache = CacheService.getScriptCache();
+  var cacheKey = 'order_plan_day_v3_' + planId + '_' + day; // v3 - другая форма кэша (заказчик из D, booleans), старые ключи сами истекут
+  var cached = null;
+  try { cached = cache.get(cacheKey); } catch (e) { /* кэш недоступен - не критично */ }
+  if (cached) {
+    try { return JSON.parse(cached); } catch (e) { /* повреждённый кэш - читаем заново ниже */ }
+  }
+
+  var result = [];
+  var data = sheet.getDataRange().getValues();
+  for (var i = 3; i < data.length; i += 2) {
+    var orderNumber = data[i - 1][0];
+    if (orderNumber === '' || orderNumber === null) continue; // пустая пара — не заказ
+    var top = data[i - 1], bottom = data[i];
+    var s = function (row, col) { return String(row[col] || '').trim(); };
+    result.push({
+      orderNumber: s(top, 0),
+      status: s(bottom, 0),
+      rowManager: s(top, 1),
+      rowLogist: s(bottom, 1),
+      equipType: (s(top, 2) + ' ' + s(bottom, 2)).trim(),
+      customer: s(top, 3),           // D3 - "Заказчик"
+      customerContact: s(bottom, 3), // D4 - "ФИО, телефон"
+      date: s(top, 4),
+      time: s(bottom, 4),
+      cargo: s(top, 5),
+      gabarit: s(bottom, 5),
+      documents: s(bottom, 6),       // G4 - "Какие документы оформить"
+      loadAddress: s(top, 7),        // H3
+      loadContact: s(bottom, 7),     // H4
+      unloadAddress: s(top, 8),      // I3
+      unloadContact: s(bottom, 8),   // I4
+      reworkTerms: s(top, 9),        // J3
+      note: s(bottom, 9),            // J4
+      cost: top[10] || '',
+      paymentStatus: s(bottom, 10),
+      ownDriver: s(top, 11),
+      ownVehicle: s(bottom, 11),
+      hiredCompany: s(top, 12),
+      hiredVehicle: s(bottom, 12),
+      carAssigned: s(bottom, 14) || s(top, 14),
+      invoiceIssued: top[15] === true,        // P3 - "Счёт выставлен"
+      moneyReceived: bottom[15] === true,     // P4 - "Деньги получены"
+      requestSentToDriver: top[16] === true,  // Q3 - "Заявка отправлена водителю"
+      driverConfirmed: bottom[16] === true,   // Q4 - "Получено подтверждение от водителя"
+      orderEnteredIn1C: top[17] === true,     // R3 - "Заявка внесена в 1С"
+      logistClosed: bottom[17] === true,      // R4 - "Логист проставил отработку"
+    });
+  }
+
+  try { cache.put(cacheKey, JSON.stringify(result), ORDER_PLAN_CACHE_TTL_SEC); } catch (e) { /* день слишком большой для кэша (>100KB) - не критично, просто без кэша */ }
+  return result;
+}
+
+// Вчера/сегодня/завтра по московскому времени, обрезано в границы месяца - Влад,
+// 2026-08-18: "не так критичны данные за прошедшие дни, больше интересует вчера
+// сегодня и завтра" - эти дни должны грузиться быстрее всего (см. scope=hot/rest
+// в doGet ниже и двухфазную загрузку на фронтенде).
+function orderPlanHotDays_(daysInMonth) {
+  var todayNum = parseInt(Utilities.formatDate(new Date(), 'Europe/Moscow', 'd'), 10);
+  var days = [];
+  [todayNum - 1, todayNum, todayNum + 1].forEach(function (d) {
+    if (d >= 1 && d <= daysInMonth && days.indexOf(d) === -1) days.push(d);
+  });
+  return days;
+}
+
+// Список номеров дневных вкладок текущей таблицы планировки - дешёвая операция
+// (только имена листов, без чтения данных), в отличие от полного скана дня.
+function orderPlanDaysInMonth_() {
+  var resolved = resolveOrderPlanSpreadsheet_();
+  if (resolved.error) return 31;
+  var nums = resolved.planSs.getSheets()
+    .map(function (s) { return parseInt(s.getName(), 10); })
+    .filter(function (n) { return !isNaN(n); });
+  return nums.length ? Math.max.apply(null, nums) : 31;
+}
+
+// Читает заказы конкретного человека (как менеджера-продавца, так и
+// логиста-диспетчера) из ТЕКУЩЕЙ таблицы планировки. Актуальная таблица
+// определяется через CONFIG.ORDER_PLAN_INDEX_ID — эту строку раз в месяц
+// перезаписывает duplicateForNextMonth() в проекте планировки при создании
+// копии на новый месяц. Раскладка строк/колонок — по факту кода планировки
+// (см. Планировка_заказов*/planirovka_zakazov_script.js, CONFIG вверху):
+// пара строк на заказ, нечётная (верхняя) — номер/менеджер/техника/дата/
+// стоимость/наёмная компания, чётная (нижняя) — статус/логист/машина.
+// dayFilter - необязательный массив номеров дней (см. orderPlanHotDays_ выше) -
+// если задан, читаются только эти вкладки, остальной месяц пропускается.
+function getOrderPlanView_(personName, dayFilter) {
+  var resolved = resolveOrderPlanSpreadsheet_();
+  if (resolved.error) return { error: resolved.error, orders: [] };
+  var planId = resolved.planId, planSs = resolved.planSs;
+
+  var orders = [];
+  var dayTabs = planSs.getSheets().filter(function (s) {
+    var n = parseInt(s.getName(), 10);
+    if (isNaN(n)) return false;
+    return !dayFilter || dayFilter.indexOf(n) >= 0;
+  });
+
+  dayTabs.forEach(function (sheet) {
+    var day = parseInt(sheet.getName(), 10);
+    var dayOrders = readOrderPlanDayTab_(planId, sheet, day);
+
+    dayOrders.forEach(function (o) {
+      var asManager = orderPlanNameMatch_(personName, o.rowManager);
+      var asLogist  = orderPlanNameMatch_(personName, o.rowLogist);
+      if (!asManager && !asLogist) return;
+
+      // Отдаём все поля заказа как есть (readOrderPlanDayTab_ уже собрал их по
+      // проверенной карте колонок) + day/role, не переписываем список руками -
+      // так при появлении нового поля не нужно править это место дважды.
+      // rowManager/rowLogist переименованы в managerName/logistName - используются
+      // в карточке заказа (кто ещё участвует, кроме самого смотрящего).
+      var order = Object.assign({}, o, {
+        day: day,
+        role: asManager ? 'manager' : 'logist',
+        managerName: o.rowManager,
+        logistName: o.rowLogist,
+      });
+      delete order.rowManager;
+      delete order.rowLogist;
+      orders.push(order);
+    });
+  });
+
+  // Внутри дня заказы одного заказчика идут подряд (Влад, 2026-08-16), даже если
+  // в самой таблице планировки они не рядом - сортировка стабильная, порядок
+  // внутри одного заказчика и порядок дней между собой не меняется.
+  orders.sort(function (x, y) {
+    if (x.day !== y.day) return x.day - y.day;
+    return (x.customer || '').localeCompare(y.customer || '', 'ru');
+  });
+
+  return {
+    updated: new Date().toISOString(),
+    planSpreadsheetUrl: planSs.getUrl(),
+    orders: orders,
+  };
+}
+
+// Проактивно прогревает кэш "План задания" на все дневные вкладки текущей таблицы
+// планировки - вызывается из runAll() (6 раз в день), чтобы дорогое чтение ~31 вкладки
+// (~2.5 минуты) оплачивал плановый прогон, а не менеджер, открывший вкладку на дашборде.
+// Можно запускать и вручную (например, сразу после релиза, не дожидаясь runAll()).
+function warmOrderPlanCache() {
+  var resolved = resolveOrderPlanSpreadsheet_();
+  if (resolved.error) {
+    Logger.log('warmOrderPlanCache: ' + resolved.error);
+    return;
+  }
+  var dayTabs = resolved.planSs.getSheets().filter(function (s) {
+    return !isNaN(parseInt(s.getName(), 10));
+  });
+  dayTabs.forEach(function (sheet) {
+    readOrderPlanDayTab_(resolved.planId, sheet, parseInt(sheet.getName(), 10));
+  });
+  Logger.log('warmOrderPlanCache: прогрето вкладок - ' + dayTabs.length);
+}
+
+// Создаёт новую заявку в таблице планировки - вариант Б "Плана задания" (Влад,
+// 2026-08-18: "не только инструмент просмотра, но и инструмент создания заявок").
+// НЕ трогает существующую автоматику планировки (masterEditRouter и т.п.) - только
+// ищет свободную пару строк на нужной дневной вкладке и пишет в неё. Подробности и
+// карта колонок - plans/2026-08-18-order-plan-create-orders.md.
+//
+// ВАЖНО (найдено живым тестом 2026-08-18, Влад заметил "выпадающих списков нет
+// вообще"): колонка A ("№ п/п") ПРОНУМЕРОВАНА ЗАРАНЕЕ шаблоном на весь
+// отформатированный диапазон (1..100 и т.п.) - НЕЗАВИСИМО от того, использована
+// строка или нет. Выпадающие списки/условное форматирование обрываются РОВНО там
+// же, где обрывается эта преднумерация (диагностика: строки с A=1..100 все имеют
+// data validation, строка сразу за последним номером - уже нет). Значит "свободная
+// строка" - это НЕ "A пустая", а "A уже пронумерована шаблоном, но B (менеджер)
+// ещё пусто". И номер заказа НЕ придумываем - берём готовый из A, не перезаписываем
+// колонку A вообще (это ещё и защищает N-формулу "ЗАЯВКА ДЛЯ ВОДИТЕЛЯ", которая
+// сама на A3 ссылается).
+var ORDER_PLAN_CREATE_MAX_ROW_ = 300; // тот же предел, что и у resetResidualBackgrounds в проекте планировки
+var ORDER_PLAN_WEEKDAYS_RU_ = ['воскресенье','понедельник','вторник','среда','четверг','пятница','суббота'];
+
+// Списки допустимых значений для полей со строгой ("reject") валидацией -
+// сверены живым тестом 2026-08-18 (diagCheckOrderPlanAllValidation) с листом
+// "Справочник" таблицы планировки. Остальные поля (заказчик, груз, адреса,
+// контакты, стоимость, примечание) - свободный текст, без списка. Если
+// "Справочник" в таблице планировки когда-нибудь изменится - эти списки нужно
+// будет обновить руками (запасной try/catch ниже всё равно поймает расхождение).
+var ORDER_PLAN_EQUIP_TYPES_ = ['Трал', 'Длинномер', 'Панелевоз', 'Любая модификация', 'Тент'];
+var ORDER_PLAN_REWORK_TERMS_ = ['Без переработки', 'Переработка по согласованию с логистом'];
+var ORDER_PLAN_GABARIT_ = ['Габарит', 'Негабарит'];
+var ORDER_PLAN_DOCUMENTS_ = ['Путевой лист', 'Путевой лист и ТТН'];
+
+function createOrderPlanEntry_(personName, p) {
+  var day = parseInt(p.day, 10);
+  if (!day || day < 1 || day > 31) return { error: 'Некорректная дата' };
+  if (!p.equipType || !p.customer || !p.loadAddress || !p.unloadAddress) {
+    return { error: 'Заполните обязательные поля: тип техники, заказчик, адреса погрузки и выгрузки' };
+  }
+  // Проверяем поля со строгими списками ДО записи (не после) - иначе Sheets
+  // бросает исключение ПОСРЕДИ setValues() на диапазон, и часть строки успевает
+  // записаться, а часть - нет (живой тест 2026-08-18, застряло на "Условия
+  // переработки"). Лучше отказать сразу и понятно, чем чинить наполовину
+  // записанную строку.
+  if (ORDER_PLAN_EQUIP_TYPES_.indexOf(p.equipType) === -1) {
+    return { error: 'Тип техники должен быть одним из: ' + ORDER_PLAN_EQUIP_TYPES_.join(', ') };
+  }
+  if (p.reworkTerms && ORDER_PLAN_REWORK_TERMS_.indexOf(p.reworkTerms) === -1) {
+    return { error: 'Условия переработки должны быть одним из: ' + ORDER_PLAN_REWORK_TERMS_.join(', ') + ' (или пусто)' };
+  }
+  if (p.gabarit && ORDER_PLAN_GABARIT_.indexOf(p.gabarit) === -1) {
+    return { error: 'Габарит должен быть одним из: ' + ORDER_PLAN_GABARIT_.join(', ') + ' (или пусто)' };
+  }
+  if (p.documents && ORDER_PLAN_DOCUMENTS_.indexOf(p.documents) === -1) {
+    return { error: 'Документы должны быть одним из: ' + ORDER_PLAN_DOCUMENTS_.join(', ') + ' (или пусто)' };
+  }
+
+  // Колонка B (менеджер, верхняя строка) - выпадающий список со строгой ("reject")
+  // валидацией по диапазону "Справочник!A2:A100", формат имени там короче, чем в
+  // листе "Доступ" дашборда - "Фамилия Имя" БЕЗ отчества (напр. "Цегельников
+  // Вячеслав", не "Цегельников Вячеслав Владимирович"). Найдено живым тестом
+  // 2026-08-18 - без этого запись падала с "Данные... не соответствуют правилам
+  // проверки" даже для настоящего менеджера. Та же нормализация, что уже
+  // используется на чтение (см. orderPlanNameMatch_) - первые два слова.
+  var writeName = String(personName || '').trim().split(/\s+/).slice(0, 2).join(' ');
+
+  var resolved = resolveOrderPlanSpreadsheet_();
+  if (resolved.error) return { error: resolved.error };
+  var sheet = resolved.planSs.getSheetByName(String(day));
+  if (!sheet) return { error: 'Вкладка на день ' + day + ' не найдена в текущей таблице планировки' };
+
+  // НЕ LockService.getScriptLock() - его же держит runAll() на всё время своего
+  // прогона (6 раз в день, может идти несколько минут: импорт Gmail, пересчёт
+  // всего, прогрев кэшей) - живой тест 2026-08-18 показал, что создание заявки
+  // попадает в окно расписания runAll (21:05) и получает ложное "занято" на
+  // ровном месте, хотя реально никто заявку не создаёт. Свой мьютекс на
+  // CacheService, отдельный ключ на конкретный день - не пересекается с runAll.
+  var cache = CacheService.getScriptCache();
+  var mutexKey = 'order_plan_create_lock_' + resolved.planId + '_' + day;
+  if (cache.get(mutexKey)) {
+    return { error: 'Сейчас кто-то ещё создаёт заявку на этот день, попробуйте через несколько секунд' };
+  }
+  cache.put(mutexKey, '1', 20); // 20 сек - с запасом на всю операцию ниже
+
+  try {
+    var ab = sheet.getRange(3, 1, ORDER_PLAN_CREATE_MAX_ROW_ - 2, 2).getValues(); // A и B
+    var targetTopRow = null;
+    var orderNumber = null;
+    for (var i = 0; i < ab.length; i += 2) {
+      var aVal = ab[i][0], bVal = ab[i][1];
+      var hasTemplateNumber = aVal !== '' && aVal !== null;
+      var isFree = bVal === '' || bVal === null;
+      if (hasTemplateNumber && isFree) {
+        targetTopRow = 3 + i;
+        orderNumber = aVal;
+        break;
+      }
+    }
+    if (targetTopRow === null) {
+      return { error: 'На этот день не осталось свободных пронумерованных строк - обратитесь к администратору' };
+    }
+    // Перепроверка прямо перед записью - вдруг кто-то вписал заявку вручную за то
+    // время, что мы искали строку (см. план, раздел "Как находим свободную строку").
+    if (sheet.getRange(targetTopRow, 2).getValue() !== '') {
+      return { error: 'Строка уже занята, попробуйте ещё раз' };
+    }
+
+    var bottomRow = targetTopRow + 1;
+
+    // Дата - читаем из A1 вкладки (уже проставлена duplicateForNextMonth() при создании
+    // копии на месяц), не пересчитываем месяц/год сами - разные Apps Script проекты,
+    // нет доступа к CONFIG.PLAN_MONTH таблицы планировки напрямую.
+    var a1 = sheet.getRange('A1').getValue();
+    var dateText = '';
+    if (a1 instanceof Date) {
+      var dd = ('0' + a1.getDate()).slice(-2);
+      var mm = ('0' + (a1.getMonth() + 1)).slice(-2);
+      dateText = dd + '.' + mm + '.' + a1.getFullYear() + ' (' + ORDER_PLAN_WEEKDAYS_RU_[a1.getDay()] + ')';
+    }
+
+    // Колонку A НЕ трогаем - номер там уже стоит от шаблона. Пишем B..K
+    // (10 колонок) - менеджер/тип/заказчик/дата/груз/(пусто, "исполнитель" - не
+    // наше поле)/адреса/условия переработки/стоимость. try/catch - запасной
+    // случай (список ORDER_PLAN_* выше разошёлся со "Справочником" таблицы) -
+    // проверка выше должна ловить это ДО записи, но если всё же что-то не
+    // предусмотрено, лучше понятная ошибка, чем необработанное исключение.
+    try {
+      sheet.getRange(targetTopRow, 2, 1, 10).setValues([[
+        writeName, String(p.equipType || ''), String(p.customer || ''),
+        dateText, String(p.cargo || ''), '', String(p.loadAddress || ''), String(p.unloadAddress || ''),
+        String(p.reworkTerms || ''), p.cost || '',
+      ]]);
+      // Нижняя строка - только реально пришедшие из формы поля (контакты, время,
+      // документы, примечание). Статус/логист/оплата/транспорт - пустые, заполнит
+      // логист по ходу работы, как и для заявок, вписанных вручную.
+      sheet.getRange(bottomRow, 4, 1, 7).setValues([[
+        String(p.customerContact || ''), String(p.time || ''), String(p.gabarit || ''),
+        String(p.documents || ''), String(p.loadContact || ''), String(p.unloadContact || ''),
+        String(p.note || ''),
+      ]]);
+    } catch (writeErr) {
+      return { error: 'Не удалось записать заявку: ' + writeErr.message + '. Часть строки могла записаться частично - обратитесь к администратору.' };
+    }
+
+    // Проверка ПОСЛЕ записи - живой тест 2026-08-18 показал, что колонка B
+    // ("Менеджер/Логист") имеет строгую ("reject") валидацию по списку реальных
+    // людей - запись значения не из списка молча отклоняется, строка остаётся
+    // полностью пустой, хотя setValues() не бросает исключение и функция дошла
+    // бы до "ok:true", соврав пользователю об успехе. Перечитываем B и C, чтобы
+    // поймать это, а не полагаться на то, что запись прошла раз не было ошибки.
+    var checkB = String(sheet.getRange(targetTopRow, 2).getValue()).trim();
+    var checkC = String(sheet.getRange(targetTopRow, 3).getValue()).trim();
+    if (checkB !== writeName) {
+      return { error: 'Не удалось сохранить заявку - значение "' + writeName + '" не проходит проверку в колонке "Менеджер". Обратитесь к администратору - возможно, вас ещё нет в справочнике менеджеров таблицы планировки.' };
+    }
+    if (checkC !== String(p.equipType || '').trim()) {
+      return { error: 'Не удалось сохранить заявку - тип техники "' + p.equipType + '" не входит в список допустимых значений. Выберите вариант из списка.' };
+    }
+
+    // Кэш дня теперь устарел - следующее чтение "Плана задания" должно увидеть
+    // свежесозданную заявку, а не 4-часовой кэш (см. ORDER_PLAN_CACHE_TTL_SEC).
+    try {
+      cache.remove('order_plan_day_v3_' + resolved.planId + '_' + day);
+    } catch (cacheErr) { /* не критично - в худшем случае увидят через 4 часа */ }
+
+    return { ok: true, day: day, orderNumber: orderNumber };
+  } finally {
+    cache.remove(mutexKey);
+  }
+}
+
+var ORDER_PLAN_STATUSES_ = ['Подтверждено', 'Отбой', 'Не закрыто'];
+
+// Редактирование УЖЕ созданной заявки (Влад, 2026-08-18: "нужна возможность менять
+// статус заказа" + карандаш "редактировать" в таблице) - находит строку по
+// day+orderNumber (не ищет свободную, как createOrderPlanEntry_) и переписывает те
+// же поля. НАМЕРЕННО не трогает колонки L/M/O/P/Q/R (наш/наёмный транспорт,
+// назначенная машина, отметки логиста) - это территория логиста, менеджер через эту
+// форму может затереть только то, что сам когда-то заполнял при создании + статус.
+function updateOrderPlanEntry_(personName, p) {
+  var day = parseInt(p.day, 10);
+  var orderNumber = String(p.orderNumber || '').trim();
+  if (!day || day < 1 || day > 31 || !orderNumber) return { error: 'Некорректный заказ' };
+  if (!p.equipType || !p.customer || !p.loadAddress || !p.unloadAddress) {
+    return { error: 'Заполните обязательные поля: тип техники, заказчик, адреса погрузки и выгрузки' };
+  }
+  if (ORDER_PLAN_EQUIP_TYPES_.indexOf(p.equipType) === -1) {
+    return { error: 'Тип техники должен быть одним из: ' + ORDER_PLAN_EQUIP_TYPES_.join(', ') };
+  }
+  if (p.reworkTerms && ORDER_PLAN_REWORK_TERMS_.indexOf(p.reworkTerms) === -1) {
+    return { error: 'Условия переработки должны быть одним из: ' + ORDER_PLAN_REWORK_TERMS_.join(', ') + ' (или пусто)' };
+  }
+  if (p.gabarit && ORDER_PLAN_GABARIT_.indexOf(p.gabarit) === -1) {
+    return { error: 'Габарит должен быть одним из: ' + ORDER_PLAN_GABARIT_.join(', ') + ' (или пусто)' };
+  }
+  if (p.documents && ORDER_PLAN_DOCUMENTS_.indexOf(p.documents) === -1) {
+    return { error: 'Документы должны быть одним из: ' + ORDER_PLAN_DOCUMENTS_.join(', ') + ' (или пусто)' };
+  }
+  if (p.status && ORDER_PLAN_STATUSES_.indexOf(p.status) === -1) {
+    return { error: 'Статус должен быть одним из: ' + ORDER_PLAN_STATUSES_.join(', ') + ' (или пусто - не менять)' };
+  }
+
+  var writeName = String(personName || '').trim().split(/\s+/).slice(0, 2).join(' ');
+
+  var resolved = resolveOrderPlanSpreadsheet_();
+  if (resolved.error) return { error: resolved.error };
+  var sheet = resolved.planSs.getSheetByName(String(day));
+  if (!sheet) return { error: 'Вкладка на день ' + day + ' не найдена в текущей таблице планировки' };
+
+  var cache = CacheService.getScriptCache();
+  var mutexKey = 'order_plan_create_lock_' + resolved.planId + '_' + day; // тот же мьютекс, что и у создания - одна вкладка, один writer за раз
+  if (cache.get(mutexKey)) {
+    return { error: 'Сейчас кто-то ещё меняет заявки на этот день, попробуйте через несколько секунд' };
+  }
+  cache.put(mutexKey, '1', 20);
+
+  try {
+    var colA = sheet.getRange(3, 1, ORDER_PLAN_CREATE_MAX_ROW_ - 2, 1).getValues();
+    var targetTopRow = null;
+    for (var i = 0; i < colA.length; i += 2) {
+      if (String(colA[i][0]).trim() === orderNumber) { targetTopRow = 3 + i; break; }
+    }
+    if (targetTopRow === null) return { error: 'Заказ №' + orderNumber + ' не найден на вкладке ' + day };
+    var bottomRow = targetTopRow + 1;
+
+    // Заявку может редактировать только тот, кто её создал (или admin от его
+    // имени) - то же имя, что уже стоит в B этой строки. Читаем ДО записи -
+    // случайно отредактировать чужую заявку (например, угадав номер) нельзя.
+    var currentManager = String(sheet.getRange(targetTopRow, 2).getValue()).trim();
+    if (currentManager && currentManager !== writeName) {
+      return { error: 'Эта заявка создана другим менеджером (' + currentManager + ') - редактировать может только автор' };
+    }
+
+    try {
+      sheet.getRange(targetTopRow, 2, 1, 10).setValues([[
+        writeName, String(p.equipType || ''), String(p.customer || ''),
+        String(sheet.getRange(targetTopRow, 5).getValue() || ''), // дату не трогаем - меняется только через пересоздание
+        String(p.cargo || ''), '', String(p.loadAddress || ''), String(p.unloadAddress || ''),
+        String(p.reworkTerms || ''), p.cost || '',
+      ]]);
+      sheet.getRange(bottomRow, 4, 1, 7).setValues([[
+        String(p.customerContact || ''), String(p.time || ''), String(p.gabarit || ''),
+        String(p.documents || ''), String(p.loadContact || ''), String(p.unloadContact || ''),
+        String(p.note || ''),
+      ]]);
+      // Статус - отдельно и только если явно передан (пустое значение = "не
+      // менять", а не "очистить"). Пишем в СВОЮ ячейку - это и есть колонка,
+      // которую отслеживает masterEditRouter (покраска/Telegram сработают сами,
+      // тот же installable-триггер, что и для ручной правки).
+      if (p.status) {
+        sheet.getRange(bottomRow, 1, 1, 1).setValue(p.status);
+      }
+    } catch (writeErr) {
+      return { error: 'Не удалось сохранить изменения: ' + writeErr.message };
+    }
+
+    try {
+      cache.remove('order_plan_day_v3_' + resolved.planId + '_' + day);
+    } catch (cacheErr) { /* не критично */ }
+
+    return { ok: true, day: day, orderNumber: orderNumber };
+  } finally {
+    cache.remove(mutexKey);
+  }
+}
+
+// Быстрая смена статуса прямо из таблицы "План задание" (Влад, 2026-08-18:
+// "статус должен меняться прямо из таблицы, как на скриншоте... и в таблице
+// Google также статусы должны меняться в зависимости от статуса в дашборде") -
+// облегчённая версия updateOrderPlanEntry_, трогает ТОЛЬКО одну ячейку (статус,
+// нижняя строка колонки A) - никакого риска затереть остальные поля устаревшими
+// клиентскими данными. Пишем в ту же ячейку, что отслеживает masterEditRouter -
+// покраска/Telegram сработают сами, тот же installable-триггер, что и для ручной
+// правки в самой таблице.
+function updateOrderPlanStatus_(personName, p) {
+  var day = parseInt(p.day, 10);
+  var orderNumber = String(p.orderNumber || '').trim();
+  if (!day || day < 1 || day > 31 || !orderNumber) return { error: 'Некорректный заказ' };
+  var status = String(p.status || '').trim();
+  if (status && ORDER_PLAN_STATUSES_.indexOf(status) === -1) {
+    return { error: 'Статус должен быть одним из: ' + ORDER_PLAN_STATUSES_.join(', ') };
+  }
+
+  var writeName = String(personName || '').trim().split(/\s+/).slice(0, 2).join(' ');
+  var resolved = resolveOrderPlanSpreadsheet_();
+  if (resolved.error) return { error: resolved.error };
+  var sheet = resolved.planSs.getSheetByName(String(day));
+  if (!sheet) return { error: 'Вкладка на день ' + day + ' не найдена' };
+
+  var colA = sheet.getRange(3, 1, ORDER_PLAN_CREATE_MAX_ROW_ - 2, 1).getValues();
+  var targetTopRow = null;
+  for (var i = 0; i < colA.length; i += 2) {
+    if (String(colA[i][0]).trim() === orderNumber) { targetTopRow = 3 + i; break; }
+  }
+  if (targetTopRow === null) return { error: 'Заказ №' + orderNumber + ' не найден на вкладке ' + day };
+  var bottomRow = targetTopRow + 1;
+
+  // Тот же авторский контроль, что и у полного редактирования - менять статус
+  // может только тот, кто создал заявку.
+  var currentManager = String(sheet.getRange(targetTopRow, 2).getValue()).trim();
+  if (currentManager && currentManager !== writeName) {
+    return { error: 'Эта заявка создана другим менеджером (' + currentManager + ') - менять статус может только автор' };
+  }
+
+  try {
+    sheet.getRange(bottomRow, 1, 1, 1).setValue(status);
+  } catch (writeErr) {
+    return { error: 'Не удалось сохранить статус: ' + writeErr.message };
+  }
+
+  try {
+    CacheService.getScriptCache().remove('order_plan_day_v3_' + resolved.planId + '_' + day);
+  } catch (cacheErr) { /* не критично */ }
+
+  return { ok: true, day: day, orderNumber: orderNumber, status: status };
+}
+
+// ============================================================
 // API ДЛЯ ДАШБОРДА — читает Штатку для статусов и типов
 // ============================================================
 // ============================================================
@@ -3741,9 +4713,36 @@ function getLogistViewForPeriod_(ss, logistName, period) { return buildLogistVie
 function doGet(e) {
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
 
-  // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём
+  // ── ВРЕМЕННО (2026-08-19, перенос ДЗ на сервер) - экспорт листа "ДЗ_Статусы" (ручные
+  // статусы/комментарии, НЕ из 1С - разовый + периодический перенос, см.
+  // plans/2026-07-08-debt-receivables-tab.md). УБРАТЬ после того, как запись статусов тоже
+  // переедет на сервер (пока фронтенд продолжает писать статусы сюда же, в лист).
+  if (e && e.parameter && e.parameter.action === 'export_debt_status') {
+    var edsKey = e.parameter.key || '';
+    if (edsKey !== '7f2a9c1e6b4d8035a1c9ef26b8d40317') {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var statusSheet = ss.getSheetByName('ДЗ_Статусы');
+    if (!statusSheet || statusSheet.getLastRow() < 2) {
+      return ContentService.createTextOutput(JSON.stringify({ rows: [] })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var statusData = statusSheet.getRange(2, 1, statusSheet.getLastRow() - 1, 4).getValues();
+    var statusRows = statusData.map(function(r) {
+      var since = r[2] instanceof Date ? Utilities.formatDate(r[2], 'Europe/Moscow', 'yyyy-MM-dd') : String(r[2] || '');
+      return [String(r[0] || '').trim(), String(r[1] || ''), since, String(r[3] || '')];
+    }).filter(function(r) { return r[0]; });
+    return ContentService.createTextOutput(JSON.stringify({ rows: statusRows })).setMimeType(ContentService.MimeType.JSON);
+  }
+  // ── конец временного экспорта ──────────────────────────────────────────────────────────────
+
+  // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём.
+  // Сначала пробуем свой токен сессии (живёт до 48ч, см. issueSessionToken_) - только если
+  // его нет или он истёк, идём проверять Google id_token (тот живёт ~1 час, это уже требует
+  // повторного клика "Войти через Google" на фронтенде).
+  var sessionToken = e && e.parameter ? (e.parameter.session_token || '') : '';
   var idToken = e && e.parameter ? (e.parameter.id_token || '') : '';
-  var email = verifyGoogleToken_(idToken);
+  var email = sessionToken ? verifySessionToken_(sessionToken) : null;
+  if (!email) email = verifyGoogleToken_(idToken);
   if (!email) {
     return ContentService
       .createTextOutput(JSON.stringify({ error: 'Не авторизован', needLogin: true }))
@@ -3755,6 +4754,11 @@ function doGet(e) {
       .createTextOutput(JSON.stringify({ error: 'У этого аккаунта нет доступа к дашборду', needLogin: true }))
       .setMimeType(ContentService.MimeType.JSON);
   }
+  // Скользящее окно - каждый успешный заход продлевает сессию ещё на 48ч от текущего момента.
+  // Кладём в ответ только у трёх "полных" загрузок страницы ниже (admin/manager/logist) -
+  // этого достаточно, фронтенд читает токен один раз при загрузке и использует дальше для
+  // всех запросов, включая мелкие action=... (которым сам токен в ответе не нужен).
+  var freshSessionToken = issueSessionToken_(email);
 
   try {
     // Отдельный endpoint для истории по машинам (тяжёлые данные, грузим лениво) - только admin
@@ -3765,6 +4769,118 @@ function doGet(e) {
     if (!action) {
       try { logAccessVisit_(ss, email, access.name, access.role); } catch (logErr) { /* не критично для остального ответа */ }
     }
+
+    // Вкладка "План задание" - урезанный только-чтение список заказов конкретного
+    // человека из ОТДЕЛЬНОЙ таблицы планировки (см. getOrderPlanView_ выше).
+    // manager/logist - всегда только свои заказы (access.name, параметр manager
+    // игнорируется - так же, как и везде в этом файле). admin - имя того, кого
+    // выбрал в селекторе "Личной страницы" (Влад, 2026-08-17: "чтобы я мог зайти
+    // под любым менеджером" - то же самое &manager=, что уже работает для
+    // my-page/receipts, см. mlcManager/gatManager выше).
+    if (action === 'order_plan') {
+      var opPerson = (access.role === 'manager' || access.role === 'logist')
+        ? access.name
+        : (e.parameter.manager || access.name);
+      // scope=hot/rest - двухфазная загрузка (Влад, 2026-08-18): вчера/сегодня/
+      // завтра отдаём отдельным быстрым запросом, остальной месяц - вторым, в
+      // фоне на фронтенде. Без scope (или scope=all) - как раньше, весь месяц
+      // одним запросом (используется, например, warmOrderPlanCache косвенно
+      // через readOrderPlanDayTab_, не через doGet).
+      var opScope = e.parameter.scope || '';
+      var opFilter = null;
+      if (opScope === 'hot' || opScope === 'rest') {
+        var opDaysInMonth = orderPlanDaysInMonth_();
+        var opHot = orderPlanHotDays_(opDaysInMonth);
+        if (opScope === 'hot') {
+          opFilter = opHot;
+        } else {
+          opFilter = [];
+          for (var opD = 1; opD <= opDaysInMonth; opD++) {
+            if (opHot.indexOf(opD) === -1) opFilter.push(opD);
+          }
+        }
+      }
+      return ContentService
+        .createTextOutput(JSON.stringify(getOrderPlanView_(opPerson, opFilter)))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // "План задание", вариант Б (Влад, 2026-08-18: "не только инструмент просмотра,
+    // но и инструмент создания заявок") - создаёт заявку в таблице планировки.
+    // GET с именованными параметрами, тот же паттерн, что уже calc_save - не
+    // изобретаем doPost ради одной фичи. Автор - access.name (или &manager= для
+    // admin-предпросмотра, тот же приём, что и на чтение). Только менеджеры -
+    // диагностика 2026-08-18 показала, что колонка B (верхняя строка, "менеджер")
+    // и колонка B нижней строки ("логист") валидируются по РАЗНЫМ спискам
+    // (Справочник!A2:A100 vs B2:B63) - создание заявки пишет только в верхнюю
+    // строку, логисту там писать нечего (их роль - назначать транспорт на уже
+    // созданную заявку, не создавать её).
+    if (action === 'order_plan_create') {
+      if (access.role === 'logist') {
+        return ContentService
+          .createTextOutput(JSON.stringify({ error: 'Создание заявок доступно менеджерам, логисты назначают транспорт на уже созданные заявки' }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+      var opcPerson = access.role === 'manager'
+        ? access.name
+        : (e.parameter.manager || access.name);
+      return ContentService
+        .createTextOutput(JSON.stringify(createOrderPlanEntry_(opcPerson, e.parameter)))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // Редактирование уже созданной заявки (карандаш в таблице "План задание" -
+    // Влад, 2026-08-18: "нужна возможность менять статус заказа") - те же права,
+    // что и на создание (только менеджер/admin-от-его-имени), updateOrderPlanEntry_
+    // дополнительно проверяет, что редактирует именно автор заявки.
+    if (action === 'order_plan_update') {
+      if (access.role === 'logist') {
+        return ContentService
+          .createTextOutput(JSON.stringify({ error: 'Редактирование заявок доступно менеджерам' }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+      var opuPerson = access.role === 'manager'
+        ? access.name
+        : (e.parameter.manager || access.name);
+      return ContentService
+        .createTextOutput(JSON.stringify(updateOrderPlanEntry_(opuPerson, e.parameter)))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // Быстрая смена статуса прямо из таблицы (без открытия формы редактирования) -
+    // те же права, что и на редактирование.
+    if (action === 'order_plan_set_status') {
+      if (access.role === 'logist') {
+        return ContentService
+          .createTextOutput(JSON.stringify({ error: 'Смена статуса доступна менеджерам' }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+      var opsPerson = access.role === 'manager'
+        ? access.name
+        : (e.parameter.manager || access.name);
+      return ContentService
+        .createTextOutput(JSON.stringify(updateOrderPlanStatus_(opsPerson, e.parameter)))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // Калькулятор стоимости перевозки (вкладка "Калькулятор") - сохранение расчёта и своя
+    // история. Доступно всем ролям (manager/logist/admin), как и сама вкладка - см.
+    // applyRoleUI() на фронтенде. Автор строки - access.name, не то, что прислал клиент.
+    if (action === 'calc_save') {
+      try {
+        saveCalcHistoryEntry_(ss, access, e.parameter);
+        return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(ContentService.MimeType.JSON);
+      } catch (calcErr) {
+        return ContentService.createTextOutput(JSON.stringify({ error: String(calcErr) })).setMimeType(ContentService.MimeType.JSON);
+      }
+    }
+
+    if (action === 'calc_history') {
+      return ContentService
+        .createTextOutput(JSON.stringify({ history: getCalcHistory_(ss, access) }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
     if (action === 'vehicle_history') {
       if (access.role !== 'admin') {
         return ContentService.createTextOutput(JSON.stringify({ error: 'Доступ запрещён' })).setMimeType(ContentService.MimeType.JSON);
@@ -3867,6 +4983,25 @@ function doGet(e) {
           };
         });
       }
+      // "Поступления денежных средств" - реальные деньги на р/с (Влад, 2026-08-16: "кривая
+      // поступления денежных средств... заранее по умолчанию отключена, при необходимости
+      // по клику включается"). Безнал - прямое чтение архива+живого листа "Поступления"
+      // (дёшево, просто сумма по месяцу, БЕЗ пересчёта заказов), наличка - уже готовое
+      // История_месяцев.cash (посчитано один раз за прогон runAll(), не на лету) - тот же
+      // принцип "не пересчитываем на каждый запрос", что и у остального global_stats.
+      var receiptsByMonth = {};
+      receiptsReadSheetRows_(ss.getSheetByName(RECEIPTS_ARCHIVE_SHEET)).forEach(function(row) {
+        var mk = row.date.slice(0, 7);
+        receiptsByMonth[mk] = (receiptsByMonth[mk] || 0) + row.amount;
+      });
+      receiptsReadSheetRows_(ss.getSheetByName(RECEIPTS_SHEET)).forEach(function(row) {
+        var mk = row.date.slice(0, 7);
+        receiptsByMonth[mk] = (receiptsByMonth[mk] || 0) + row.amount;
+      });
+      msMonths.forEach(function(m) {
+        m.receipts = (receiptsByMonth[m.month] || 0) + (m.cash || 0);
+      });
+
       msMonths.sort(function(a, b) { return a.month.localeCompare(b.month); });
       return ContentService.createTextOutput(JSON.stringify({ months: msMonths })).setMimeType(ContentService.MimeType.JSON);
     }
@@ -4160,14 +5295,14 @@ function doGet(e) {
     // Менеджер - только его собственные данные, без доступа к остальному
     if (access.role === 'manager') {
       return ContentService
-        .createTextOutput(JSON.stringify(getManagerView_(ss, access.name)))
+        .createTextOutput(JSON.stringify(Object.assign(getManagerView_(ss, access.name), { session_token: freshSessionToken })))
         .setMimeType(ContentService.MimeType.JSON);
     }
 
     // Логист (2026-08-10) - та же логика, что и manager выше, но своя урезанная выдача
     if (access.role === 'logist') {
       return ContentService
-        .createTextOutput(JSON.stringify(getLogistView_(ss, access.name)))
+        .createTextOutput(JSON.stringify(Object.assign(getLogistView_(ss, access.name), { session_token: freshSessionToken })))
         .setMimeType(ContentService.MimeType.JSON);
     }
 
@@ -4177,6 +5312,7 @@ function doGet(e) {
       {
         updated: new Date().toISOString(),
         role:    'admin',
+        session_token: freshSessionToken,
         // Живые поля - НЕ кэшируются в runAll() (см. buildHeavyMainPayload_). Штатка -
         // "живой документ" (CLAUDE.md), её правят руками вне расписания runAll() - если
         // закэшировать статус машины/ремонты на 3 часа, правки будут "зависать", это
@@ -5117,7 +6253,20 @@ function computeMonthSummary_(ss, monthKey) {
 
   return {
     month: monthKey,
-    revenue: sfp.salesFakt,
+    // revenue = os.total_amount (честная сумма ВСЕХ строк месяца), НЕ sfp.salesFakt (Влад,
+    // 2026-08-15: сверил "Глобальную статистику" с живым отчётом 1С "План-фактный анализ
+    // продаж" - за январь 17.7М у нас против 19.48М в 1С, "это слишком большая разница").
+    // Найдено диагностикой (diagnoseOrphanCommercialRows_2026_08_15, см. историю коммитов):
+    // sfp.salesFakt реконструирует сумму из TRAL_MANAGERS + довеска по внутренним - НЕ
+    // внутренние (коммерческие) заказы, у которых "Менеджер по продажам" - логист или бывший
+    // сотрудник вне TRAL_MANAGERS (Каспарова/Фидан/Васёв/Горбачев/Васин и т.п.), нигде не
+    // подхватываются и молча выпадают. os.total_amount такой фильтрации не делает вообще
+    // (aggregateOrdersRows суммирует ВСЕ строки месяца безусловно) - там, где расхождения не
+    // было (март/май/июнь), total_amount и salesFakt совпадали ТОЧНО, что и подтвердило выбор
+    // источника. sfp.salesFakt НЕ трогаем - он специально уже ограничен теми же именами, что
+    // и salesPlan (activePlanKeys), это нужно для корректного %"Выполнения плана продаж" на
+    // "Панели"/"По менеджерам" (другая семантика, другое место, см. computeSalesFaktPlan_).
+    revenue: os.total_amount || 0,
     salesPlan: sfp.salesPlan,
     profit: gp.profit || 0,
     profitTral: gp.profit_tral || 0,
@@ -5225,7 +6374,6 @@ function backfillMonthSummaries() {
   if (skipped.length) Logger.log('⚠️ Пропущены (нет данных/архива): ' + skipped.join(', '));
 }
 
-
 // ============================================================
 // МОДУЛЬ ЗАКАЗОВ (встроен из orders_module.js)
 // ============================================================
@@ -5248,9 +6396,18 @@ const ORDERS_ARCHIVE_PFX  = 'Заказы_';   // + YYYY-MM, например «
 // Внутренние заказчики — выручка есть, поступлений нет; считаем отдельно
 const INTERNAL_CLIENTS = [
   'ТЕХНО ПАРК', 'ОТДЕЛ БУРОВЫХ РАБОТ', 'КРАНМАСТЕР',
-  'МЕГАКРАН', 'БАЗА ДМД', 'БУЛЬДОГ ООО', 'БАЗА',
+  'МЕГАКРАН', 'БАЗА ДМД', 'БУЛЬДОГ ООО',
+  // 'БАЗА' убрано 2026-08-14 (Влад: "Автобаза 2020 это клиент, остальные внутренние",
+  // найдено при сверке мега-базы с БДР) - короткое слово случайно резало реального клиента
+  // "АВТОБАЗА 2020 ООО" по совпадению подстроки (indexOf-фильтр в inList_/ordInList).
+  // "БАЗА ДМД" (выше) - точное совпадение, настоящий внутренний КА, остаётся.
   'УМИАТ ЯРД', // Влад, 2026-07-05: тег "(НАШ)" в 1С, найдено при анализе клиентской базы
-  'ОТДЕЛ ЭКСКАВАТОРОВ ДМД', 'ОТДЕЛ КРАНОВ ДМД', 'ТД ЯРД' // Влад, 2026-07-06: старые внутренние КА, сейчас это ТЕХНО ПАРК (НАШ)
+  'ОТДЕЛ ЭКСКАВАТОРОВ ДМД', 'ОТДЕЛ КРАНОВ ДМД', 'ТД ЯРД', // Влад, 2026-07-06: старые внутренние КА, сейчас это ТЕХНО ПАРК (НАШ)
+  'Панасюк Роман Викторович' // Влад, 2026-08-15: разбирал 2 строки Васина за август (100 800 ₽,
+  // выглядели "коммерческими" - не совпадали ни с одним известным внутренним КА) - нашёл их
+  // сам в 1С (та же красная подсветка, что и у МЕГАКРАН/ОТДЕЛ БУРОВЫХ), подтвердил "тоже
+  // считать как внутренние перевозки". После добавления salesFakt (Панель) сам подхватит эту
+  // сумму через довесок по internal_amount - без этого расходился с total_amount (Глоб.статистика).
 ];
 
 // Менеджеры отдела — для фильтрации чужих строк
@@ -5265,7 +6422,20 @@ const TRAL_MANAGERS = [
   'Котельников', 'Цегельников', 'Гуляева', 'Гуштюк',
   'Дербенцева', 'Савиток', 'Филипчук', 'Шейко',
   'Коньшина', 'Володин', 'Прус-Роскошный',
-  'Рыщанов', 'Суркова', 'Ратников'
+  'Рыщанов', 'Суркова', 'Ратников',
+  // 5 бывших сотрудников отдела (январь-май 2026) - роли подтверждены Владом явно, 2026-08-14
+  // ("Васёв/Каспарова/Фидан - мои бывшие сотрудники, по ним должна учитываться и наличка и
+  // ВЫРУЧКА"). Эта же правка уже стояла в client_history_normalize.js (мега-база), но не была
+  // перенесена сюда - тогдашний комментарий там объяснял это тем, что "мега-база отдельный
+  // исторический источник, тут (в этом файле) работает ТЕКУЩИЙ состав". Это устарело 2026-08-14
+  // (v181, DEPLOY_LOG): импорт января-мая теперь идёт через importHistoricalOrdersFromMegaBase()
+  // - тем же кодом parseOrdersRawRows()/isTralDept, что и live-импорт, а он читает ИМЕННО
+  // TRAL_MANAGERS/TRAL_LOGISTS ИЗ ЭТОГО ФАЙЛА. Без этих имён здесь их строки за январь-май
+  // отсеивались ЦЕЛИКОМ фильтром "не отдел тралов" (не просто теряли выручку, а не попадали в
+  // архив вообще) - найдено diagnoseOrphanCommercialRows_2026_08_15 (836к/1.33М/864к за
+  // январь/февраль/апрель). Текущим (июнь+) месяцам не вредит - это бывшие сотрудники, в живых
+  // данных их имена не встречаются.
+  'Васёв', 'Каспарова', 'Фидан'
 ];
 
 // Логисты отдела (Прус-Роскошный — двойная роль). РЕГРЕССИЯ (2026-08-07): Суркова снова
@@ -5276,7 +6446,8 @@ const TRAL_MANAGERS = [
 // между сессиями в CLAUDE.md. Возвращена.
 const TRAL_LOGISTS = [
   'Васин', 'Кан', 'Махура', 'Сильчев', 'Суркова',
-  'Прус-Роскошный', 'Рыщанов', 'Ахтамова', 'Гусейнова'
+  'Прус-Роскошный', 'Рыщанов', 'Ахтамова', 'Гусейнова',
+  'Горбачев', 'Свешников' // те же 2 бывших сотрудника (январь-май 2026), см. комментарий в TRAL_MANAGERS выше
 ];
 
 // ПОСТОЯННЫЙ ИНСТРУМЕНТ (не одноразовый, не удалять) - регрессионный смоук-тест. Проверяет
@@ -5305,6 +6476,176 @@ function verifyKnownFixes() {
   } else {
     Logger.log('⚠️ НАЙДЕНЫ РЕГРЕССИИ (' + problems.length + '):');
     problems.forEach(function(p) { Logger.log('  - ' + p); });
+  }
+  return problems;
+}
+
+// ПОСТОЯННЫЙ ИНСТРУМЕНТ (не одноразовый, не удалять) - сверка серверного расчёта заказов с
+// расчётом Apps Script на ОДНИХ И ТЕХ ЖЕ сырых данных (2026-08-18, Фаза 1d переноса, см.
+// plans/2026-08-18-payroll-logic-server-port.md). Работает независимо от того, включён ли
+// серверный расчёт (USE_SERVER_ORDERS_CALC) - берёт сырьё с сервера, считает ОБОИМИ способами
+// и сравнивает только денежные поля, от которых зависит зарплата.
+//
+// Зачем: сервер и Apps Script - две копии одной логики, а копии в этом проекте уже дважды
+// расходились и стоили реальных денег (Суркова в TRAL_LOGISTS, порог 23%). Периодический
+// прогон этой функции ловит расхождение за секунды вместо того, чтобы Влад заметил странные
+// цифры в зарплате через недели. Запускать вручную после ЛЮБОЙ правки списков менеджеров/
+// логистов/порогов - и там, и там.
+function verifyServerOrdersCalc(period) {
+  var mk = period || Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+  var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+  if (!apiKey) { Logger.log('Нет YARD_API_KEY в Script Properties - сверять не с чем.'); return null; }
+
+  var raw = fetchOrdersRawFromServer_(mk);
+  if (!raw || !raw.rows.length) { Logger.log('Сервер не отдал сырьё за ' + mk + ' - сверка невозможна.'); return null; }
+
+  var mine = joinManagerPlans_(SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID), aggregateOrdersRows(raw.rows), mk);
+
+  var resp = UrlFetchApp.fetch(
+    'https://api.yardhub.ru/api/orders_computed?period=' + encodeURIComponent(mk),
+    { headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true }
+  );
+  if (resp.getResponseCode() !== 200) { Logger.log('Сервер вернул код ' + resp.getResponseCode() + ' - сверка невозможна.'); return null; }
+  var theirs = JSON.parse(resp.getContentText()).orders;
+
+  var problems = [];
+  // Денежные поля верхнего уровня - те, от которых напрямую зависят зарплата и премии.
+  ['total_orders','total_amount','total_commercial','total_cash','hired_profit','hired_amount',
+   'hired_margin_pct','hired_margin_qualifies','own_amount','internal_amount'].forEach(function(k) {
+    var a = mine.summary[k], b = theirs.summary[k];
+    var same = (typeof a === 'number' && typeof b === 'number') ? Math.abs(a - b) < 0.5 : a === b;
+    if (!same) problems.push('summary.' + k + ': Apps Script=' + a + ' сервер=' + b);
+  });
+
+  // Каждый менеджер и логист поимённо - именно тут пряталась потеря Сурковой.
+  [['by_manager', ['amount','payment','cash','own_profit','hired_margin_total','hired_margin_qualified','plan']],
+   ['by_logist',  ['amount','own_amount','own_profit_tral','own_profit_long','hired_margin_total','hired_margin_qualified']]
+  ].forEach(function(pair) {
+    var listKey = pair[0], fields = pair[1];
+    var mineByName = {}, theirsByName = {};
+    (mine[listKey] || []).forEach(function(x) { mineByName[x.name] = x; });
+    (theirs[listKey] || []).forEach(function(x) { theirsByName[x.name] = x; });
+    Object.keys(mineByName).forEach(function(n) {
+      if (!theirsByName[n]) { problems.push(listKey + ': "' + n + '" есть в Apps Script, НЕТ на сервере'); return; }
+      fields.forEach(function(f) {
+        var a = mineByName[n][f] || 0, b = theirsByName[n][f] || 0;
+        if (Math.abs(a - b) >= 0.5) problems.push(listKey + '["' + n + '"].' + f + ': Apps Script=' + a + ' сервер=' + b);
+      });
+    });
+    Object.keys(theirsByName).forEach(function(n) {
+      if (!mineByName[n]) problems.push(listKey + ': "' + n + '" есть на сервере, НЕТ в Apps Script');
+    });
+  });
+
+  if (problems.length === 0) {
+    Logger.log('✅ Серверный и локальный расчёт за ' + mk + ' совпадают полностью (' + mine.summary.total_orders + ' заказов).');
+  } else {
+    Logger.log('⚠️ РАСХОЖДЕНИЯ серверного и локального расчёта за ' + mk + ' (' + problems.length + '):');
+    problems.forEach(function(p) { Logger.log('  - ' + p); });
+    Logger.log('Если серверный расчёт включён (USE_SERVER_ORDERS_CALC=on) - выключи его, пока не разобрались.');
+  }
+  return problems;
+}
+
+// ── ПЕРЕКЛЮЧАТЕЛЬ СЕРВЕРНОГО РАСЧЁТА ЗАКАЗОВ (постоянные функции, не удалять) ───────────────
+// Запускать из редактора Apps Script: Выполнить -> выбрать функцию -> Выполнить.
+// Имена БЕЗ подчёркивания в конце специально - иначе не появятся в списке "Выполнить"
+// (известная ловушка проекта, задевала трижды - см. память project_apps_script_trailing_underscore).
+//
+// Что делает включение: "Обзор заказов"/"По менеджерам"/"По логистам"/"Зарплата" начинают
+// брать УЖЕ ПОСЧИТАННЫЙ результат с api.yardhub.ru (в 4-8 раз быстрее) вместо пересчёта
+// внутри Apps Script. Логика идентична (сверена построчно по всем 8 месяцам, 0 расхождений).
+// Если сервер недоступен/ответил странно - дашборд автоматически считает сам, как раньше.
+function enableServerOrdersCalc() {
+  PropertiesService.getScriptProperties().setProperty('USE_SERVER_ORDERS_CALC', 'on');
+  Logger.log('✅ Серверный расчёт заказов ВКЛЮЧЁН. Выключить обратно: disableServerOrdersCalc()');
+  Logger.log('Проверить совпадение цифр в любой момент: verifyServerOrdersCalc()');
+}
+
+function disableServerOrdersCalc() {
+  PropertiesService.getScriptProperties().deleteProperty('USE_SERVER_ORDERS_CALC');
+  Logger.log('⛔ Серверный расчёт заказов ВЫКЛЮЧЕН - всё считается внутри Apps Script, как раньше.');
+}
+
+function serverOrdersCalcStatus() {
+  var on = PropertiesService.getScriptProperties().getProperty('USE_SERVER_ORDERS_CALC') === 'on';
+  Logger.log(on ? '✅ Серверный расчёт ВКЛЮЧЁН' : '⛔ Серверный расчёт ВЫКЛЮЧЕН (считает Apps Script)');
+  return on;
+}
+
+// ── ПЕРЕКЛЮЧАТЕЛЬ СЕРВЕРНОГО РАСЧЁТА ДЗ (постоянные функции, не удалять) ────────────────────
+// Тот же принцип, что и у заказов выше. Запускать из редактора: Выполнить -> функция.
+function enableServerDebtCalc() {
+  PropertiesService.getScriptProperties().setProperty('USE_SERVER_DEBT_CALC', 'on');
+  Logger.log('✅ Серверный расчёт ДЗ ВКЛЮЧЁН. Выключить: disableServerDebtCalc()');
+  Logger.log('Проверить совпадение: verifyServerDebtCalc()');
+}
+
+function disableServerDebtCalc() {
+  PropertiesService.getScriptProperties().deleteProperty('USE_SERVER_DEBT_CALC');
+  Logger.log('⛔ Серверный расчёт ДЗ ВЫКЛЮЧЕН - всё считается внутри Apps Script, как раньше.');
+}
+
+function serverDebtCalcStatus() {
+  var on = PropertiesService.getScriptProperties().getProperty('USE_SERVER_DEBT_CALC') === 'on';
+  Logger.log(on ? '✅ Серверный расчёт ДЗ ВКЛЮЧЁН' : '⛔ Серверный расчёт ДЗ ВЫКЛЮЧЕН (считает Apps Script)');
+  return on;
+}
+
+// ПОСТОЯННЫЙ ИНСТРУМЕНТ - сверяет серверный расчёт ДЗ с расчётом Apps Script на ОДНИХ И ТЕХ
+// ЖЕ данных (лист "ДЗ_данные" на момент запуска). Запускать после любой правки формулы ДЗ -
+// и на сервере (api/lib/debt-calc.js), и здесь.
+function verifyServerDebtCalc() {
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+  if (!apiKey) { Logger.log('Нет YARD_API_KEY в Script Properties - сверять не с чем.'); return null; }
+
+  var sheet = ss.getSheetByName(DEBT_RAW_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) { Logger.log('Нет данных ДЗ_данные - сверка невозможна.'); return null; }
+
+  var mineFlag = serverDebtCalcEnabled_(); // временно выключаем, чтобы посчитать локально
+  PropertiesService.getScriptProperties().deleteProperty('USE_SERVER_DEBT_CALC');
+  var mine;
+  try { mine = getDebtData(ss); } finally {
+    if (mineFlag) PropertiesService.getScriptProperties().setProperty('USE_SERVER_DEBT_CALC', 'on');
+  }
+
+  var resp = UrlFetchApp.fetch('https://api.yardhub.ru/api/debt_computed', {
+    headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true,
+  });
+  if (resp.getResponseCode() !== 200) { Logger.log('Сервер вернул код ' + resp.getResponseCode() + ' - сверка невозможна.'); return null; }
+  var theirs = JSON.parse(resp.getContentText()).debt;
+
+  var problems = [];
+  ['total_balance', 'debtor_count', 'overdue_dead', 'guarantees_total'].forEach(function(k) {
+    var a = mine.summary[k], b = theirs.summary[k];
+    var same = (typeof a === 'number' && typeof b === 'number') ? Math.abs(a - b) < 1 : a === b;
+    if (!same) problems.push('summary.' + k + ': Apps Script=' + a + ' сервер=' + b);
+  });
+
+  var mineByName = {}, theirsByName = {};
+  (mine.by_customer || []).forEach(function(c) { mineByName[c.contragent] = c; });
+  (theirs.by_customer || []).forEach(function(c) { theirsByName[c.contragent] = c; });
+  var sameBalanceCount = 0, fieldMismatches = 0;
+  Object.keys(mineByName).forEach(function(n) {
+    var b = theirsByName[n];
+    if (!b) return;
+    if (Math.abs(mineByName[n].balance - b.balance) >= 1) return; // разное время снимка - пропускаем
+    sameBalanceCount++;
+    ['manager', 'status', 'daysOverdue'].forEach(function(f) {
+      if (String(mineByName[n][f]) !== String(b[f])) {
+        fieldMismatches++;
+        problems.push('by_customer["' + n + '"].' + f + ': Apps Script=' + mineByName[n][f] + ' сервер=' + b[f]);
+      }
+    });
+  });
+
+  if (problems.length === 0) {
+    Logger.log('✅ Серверный и локальный расчёт ДЗ совпадают (' + sameBalanceCount + ' клиентов с неизменным балансом, 0 расхождений в остальных полях).');
+  } else {
+    Logger.log('⚠️ РАСХОЖДЕНИЯ серверного и локального расчёта ДЗ (' + problems.length + '):');
+    problems.forEach(function(p) { Logger.log('  - ' + p); });
+    Logger.log('Если серверный расчёт включён (USE_SERVER_DEBT_CALC=on) - выключи disableServerDebtCalc(), пока не разобрались.');
   }
   return problems;
 }
@@ -5509,7 +6850,10 @@ function splitOrdersRawByMonth(data) {
   const headerRow = data[headerRowIdx];
   const col = {};
   headerRow.forEach(function(h, i) { const key = String(h || '').trim(); if (key) col[key] = i; });
-  const dateColIdx = col['Начало работ'];
+  // "Начало работ" - обычное имя колонки в ежедневной выгрузке 1С, но у ручных/разовых
+  // выгрузок (Влад, 2026-08-15: "ЯНВАРЬ_МАЙ_НОВЫЙ") встречается короткий вариант "Начало"
+  // (без "работ") - тот же столбец, другое имя в зависимости от настроек экспорта 1С.
+  const dateColIdx = col['Начало работ'] !== undefined ? col['Начало работ'] : col['Начало'];
   const createdColIdx = col['Дата создания'];
   if (dateColIdx === undefined && createdColIdx === undefined) return {};
 
@@ -5619,6 +6963,88 @@ function importOrdersReport() {
   Logger.log('✅ Заказы импортированы: ' + data.length + ' строк, письмо от ' + latest.getDate());
 }
 
+// РАЗОВЫЙ импорт (2026-08-14, Влад, обновлено 2026-08-15). Изначально читал лист "Январь_Май"
+// в таблице "мега база" (CLIENT_HISTORY_SHEET_ID) - тот же формат, что обычный ежедневный
+// импорт заказов (parseOrdersRawRows/splitOrdersRawByMonth). Пономерная сверка 2026-08-15
+// (см. историю коммитов) нашла, что "Январь_Май" САМ ПО СЕБЕ неполный - у мая не хватало 133
+// заказов, физически отсутствовавших в этом листе (не "1С поменяла данные задним числом" -
+// Влад справедливо отверг эту гипотезу, потребовал точную построчную проверку, которая и
+// показала: строк просто не было в файле). Влад сделал новую, более полную выгрузку "прямо
+// сейчас" - лист "ЯНВАРЬ_МАЙ_НОВЫЙ" в той же таблице "мега база" - переключено на него.
+// Раскладывает строки как ОБЫЧНЫЕ архивы "Заказы_2026-01".."Заказы_2026-05" в ОСНОВНОЙ
+// таблице дашборда, ТЕМ ЖЕ кодом (parseOrdersRawRows/getOrdersDataForPeriod/
+// computeSalesFaktPlan_), что уже проверенно работает для июня-июля. writeArchiveSheet сам
+// СЛИВАЕТ по номеру заказа с уже существующими строками архива - безопасно перезапускать,
+// новые заказы добавятся, существующие не задвоятся. После этого - backfillMonthSummaries()
+// пересчитает "История_месяцев" для этих месяцев так же, как для любого другого.
+function importHistoricalOrdersFromMegaBase() {
+  const megaSS = SpreadsheetApp.openById(CLIENT_HISTORY_SHEET_ID);
+  const sheet = megaSS.getSheetByName('ЯНВАРЬ_МАЙ_НОВЫЙ');
+  if (!sheet) throw new Error('Лист "ЯНВАРЬ_МАЙ_НОВЫЙ" не найден в таблице "мега база" - проверь точное название.');
+  const rawData = sheet.getDataRange().getValues();
+  if (rawData.length < 2) throw new Error('Лист "ЯНВАРЬ_МАЙ_НОВЫЙ" пуст или почти пуст.');
+
+  // Вставка в Google Таблицы иногда растягивает getDataRange() до лишних пустых колонок
+  // (форматирование/границы) - та же проблема, что уже ловили на "МАЙ_ТЕСТ" ("The data has
+  // 105 but the range has 46"). Обрезаем по реальной ширине строки заголовков.
+  const headerRowIdxRaw = findOrdersHeaderRowIndex_(rawData);
+  const headerRowRaw = rawData[headerRowIdxRaw];
+  let realWidth = headerRowRaw.length;
+  while (realWidth > 0 && String(headerRowRaw[realWidth - 1] || '').trim() === '') realWidth--;
+  const data = rawData.map(function(row) { return row.slice(0, realWidth); });
+
+  const monthBuckets = splitOrdersRawByMonth(data);
+  const monthsPresent = Object.keys(monthBuckets).sort();
+  if (!monthsPresent.length) {
+    // Печатаем РЕАЛЬНЫЕ заголовки листа в ошибку - у разных выгрузок 1С колонка с датой
+    // называется по-разному ("Начало"/"Начало работ"), нет смысла гадать вслепую.
+    var realHeaderRow = data[findOrdersHeaderRowIndex_(data)] || [];
+    throw new Error('Не удалось распознать ни одного месяца в листе "ЯНВАРЬ_МАЙ_НОВЫЙ" - нет колонок "Начало работ"/"Дата создания". Реальные заголовки листа: ' + JSON.stringify(realHeaderRow));
+  }
+
+  const headerRowIdx = findOrdersHeaderRowIndex_(data);
+  const headerRows = data.slice(0, headerRowIdx + 1);
+  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  // ГРАНИЦЫ ЖЁСТКО "2026-01".."2026-05" (2026-08-14, реальный случай) - Влад назвал лист
+  // "Январь_Май", но сама выгрузка 1С (стандартный период "с начала до сегодня") принесла
+  // заодно и июнь-июль. writeArchiveSheet СЛИВАЕТ данные с уже существующим архивом - если
+  // дать ей тронуть "Заказы_2026-06"/"Заказы_2026-07", она перезаписала бы их снимком на
+  // момент отправки этой выгрузки, который может быть СТАРЕЕ, чем то, что уже накопил живой
+  // ежедневный импорт (постоянные корректировки 1С). Эта функция - ТОЛЬКО для месяцев, для
+  // которых архива ещё нет вообще, никогда не трогает то, что дашборд уже импортирует сам.
+  const IMPORT_MIN_MONTH_ = '2026-01', IMPORT_MAX_MONTH_ = '2026-05';
+
+  // Каждый месяц - в своём try/catch (2026-08-14, реальный случай у Влада: "Service
+  // Spreadsheets timed out" - транзиентный сбой Google при записи нескольких больших листов
+  // подряд). Без этого один неудачный месяц обрывал бы ВСЕ остальные, хотя они, возможно,
+  // записались бы успешно - теперь падение одного месяца не мешает остальным, а повторный
+  // запуск функции просто доделает то, что не получилось (writeArchiveSheet сам сливает с
+  // уже записанными данными, если архив уже существует - безопасно перезапускать).
+  const written = [], skippedCurrent = [], failed = [];
+  monthsPresent.forEach(function(month) {
+    if (month < IMPORT_MIN_MONTH_ || month > IMPORT_MAX_MONTH_) {
+      // Защита - строго январь-май, никогда не трогаем июнь+ (живые данные дашборда).
+      skippedCurrent.push(month);
+      return;
+    }
+    try {
+      const monthData = headerRows.concat(monthBuckets[month]);
+      writeArchiveSheet(ss, ORDERS_ARCHIVE_PFX + month, monthData);
+      written.push(month + ' (' + monthBuckets[month].length + ' строк)');
+    } catch (writeErr) {
+      failed.push(month + ' (' + writeErr.message + ')');
+    }
+  });
+
+  Logger.log('✅ Записаны архивы: ' + (written.join(', ') || '(ничего)'));
+  if (skippedCurrent.length) Logger.log('⚠️ Пропущены (вне диапазона ' + IMPORT_MIN_MONTH_ + '..' + IMPORT_MAX_MONTH_ + ', не трогаем живые данные): ' + skippedCurrent.join(', '));
+  if (failed.length) {
+    Logger.log('❌ НЕ записаны (ошибка при записи, обычно временный сбой Google) - ЗАПУСТИ ФУНКЦИЮ ЕЩЁ РАЗ: ' + failed.join('; '));
+  } else {
+    Logger.log('✅ ГОТОВО. Дальше запусти backfillMonthSummaries() - пересчитает "История_месяцев" для этих месяцев тем же кодом, что для июня-июля.');
+  }
+}
+
 // ── СЛИЯНИЕ ВМЕСТО ПЕРЕЗАПИСИ (2026-08-06) ────────────────────
 // Найдено при разборе расхождения 40 000₽ у Савиток за июль (заказ №468973, создан 30.06 в
 // 10:24, "Начало работ" 01.07) - весь импорт заказов раньше был "взял сегодняшний файл 1С,
@@ -5688,20 +7114,49 @@ function mergeRawOrderRows_(existingData, newData) {
   existingHeaderRow.forEach(function(h, i) { if (String(h || '').trim() === 'Номер') existingIdCol = i; });
   if (existingIdCol < 0) return newData; // не нашли колонку в старых данных - не рискуем, просто заменяем
 
-  const headerRows = newData.slice(0, newHeaderIdx + 1);
+  // Разные выгрузки 1С (живой ежедневный отчёт по почте vs ручные разовые выгрузки) могут иметь
+  // РАЗНУЮ ширину/состав колонок - живой отчёт даёт ~105 колонок (десятки служебных полей типа
+  // "Бонус продавца"/"Дней до закрытия"), ручная выгрузка через "Таблица заказов: Список" -
+  // компактные ~46. Раньше эта функция брала шапку/ширину newData "как есть" и молча
+  // склеивала со старыми строками другой ширины - работало, только пока оба набора были из
+  // ОДНОГО источника. setValues() ломается, если у строк разная длина ("The data has 105 but
+  // the range has 46" - реальный случай 2026-08-15, слияние ручной выгрузки "прикрывашек" в
+  // архив, уже заполненный из живого импорта). Строим ОБЪЕДИНЁННЫЙ заголовок (сначала колонки
+  // existing в своём порядке, затем любые новые из newData, которых раньше не было) и
+  // переносим ВСЕ строки (и старые, и новые) в эту единую раскладку ПО ИМЕНИ колонки - ширина
+  // гарантированно одинакова независимо от того, из какого отчёта 1С пришли данные.
+  const unifiedHeader = existingHeaderRow.slice();
+  const unifiedNameToCol = {};
+  unifiedHeader.forEach(function(h, i) { const k = String(h || '').trim(); if (k) unifiedNameToCol[k] = i; });
+  newHeaderRow.forEach(function(h) {
+    const k = String(h || '').trim();
+    if (k && !(k in unifiedNameToCol)) { unifiedNameToCol[k] = unifiedHeader.length; unifiedHeader.push(h); }
+  });
+
+  function remap(row, headerRow) {
+    const out = new Array(unifiedHeader.length).fill('');
+    headerRow.forEach(function(h, i) {
+      const k = String(h || '').trim();
+      if (!k) return;
+      const target = unifiedNameToCol[k];
+      if (target !== undefined) out[target] = row[i];
+    });
+    return out;
+  }
+
   const map = {};
   const order = [];
-  function addRows(rows, col) {
+  function addRows(rows, headerRow, col) {
     rows.forEach(function(row) {
       const id = normalizeOrderId_(row[col]); // см. normalizeOrderId_ - без этого "469109" (число, уже записанное нами) и "000469109" (текст из свежего отчёта 1С) считались бы разными заказами - настоящая причина задвоения 2026-08-07
       if (!id) return;
       if (!(id in map)) order.push(id);
-      map[id] = row;
+      map[id] = remap(row, headerRow);
     });
   }
-  addRows(existingData.slice(existingHeaderIdx + 1), existingIdCol);
-  addRows(newData.slice(newHeaderIdx + 1), idCol);
-  return headerRows.concat(order.map(function(id) { return map[id]; }));
+  addRows(existingData.slice(existingHeaderIdx + 1), existingHeaderRow, existingIdCol);
+  addRows(newData.slice(newHeaderIdx + 1), newHeaderRow, idCol);
+  return [unifiedHeader].concat(order.map(function(id) { return map[id]; }));
 }
 
 
@@ -6999,10 +8454,27 @@ function writeArchiveSheet(ss, archiveName, data) {
   if (archive && archive.getLastRow() >= 5) {
     toWrite = mergeRawOrderRows_(archive.getDataRange().getValues(), data);
   }
-  if (archive) archive.clear();
-  else archive = ss.insertSheet(archiveName);
+  if (!archive) archive = ss.insertSheet(archiveName);
+
+  // ПОРЯДОК ВАЖЕН (2026-08-15, реальный случай - см. retrospectives, "Заказы_2026-06"/"07"
+  // остались пустыми после сбоя слияния). Раньше .clear() шёл ПЕРВЫМ, потом setValues() -
+  // если запись падала (несовпадение размеров, лимит ячейки, любая ошибка API) лист уже был
+  // стёрт, а новые данные не записались - тысяча реальных заказов терялась без возможности
+  // восстановить одним повторным запуском (архив пришлось поднимать из истории версий
+  // Google). Теперь сначала пишем новые данные (если запись упадёт - старые ещё на месте),
+  // и только потом чистим ИЗЛИШЕК старых строк/колонок за пределами нового размера.
   if (toWrite.length > 0) {
+    const prevRows = archive.getLastRow();
+    const prevCols = archive.getLastColumn();
     archive.getRange(1, 1, toWrite.length, toWrite[0].length).setValues(toWrite);
+    if (prevRows > toWrite.length) {
+      archive.getRange(toWrite.length + 1, 1, prevRows - toWrite.length, Math.max(prevCols, 1)).clearContent();
+    }
+    if (prevCols > toWrite[0].length) {
+      archive.getRange(1, toWrite[0].length + 1, Math.max(archive.getLastRow(), 1), prevCols - toWrite[0].length).clearContent();
+    }
+  } else {
+    archive.clear();
   }
 }
 
@@ -7068,6 +8540,20 @@ function parseOrdersRawRows(allData) {
     const key = String(h || '').trim();
     if (key) col[key] = i;
   });
+  // "Начало работ"/"Окончание работ" - обычные имена колонок в ежедневной выгрузке 1С, но у
+  // ручных/разовых выгрузок (Влад, 2026-08-15: "ЯНВАРЬ_МАЙ_НОВЫЙ") встречается короткий
+  // вариант "Начало"/"Окончание" (без "работ") - тот же столбец, другое имя в зависимости от
+  // настроек экспорта 1С. Алиасим на уровне карты колонок - все geттеры ниже работают как есть.
+  if (col['Начало работ'] === undefined && col['Начало'] !== undefined) col['Начало работ'] = col['Начало'];
+  if (col['Окончание работ'] === undefined && col['Окончание'] !== undefined) col['Окончание работ'] = col['Окончание'];
+  // "Сумма оплаты нал" - обычное имя колонки в ежедневной выгрузке 1С (наличная оплата по
+  // заказу), но в ручных/разовых выгрузках эта же колонка называется просто "Наличные"
+  // (Влад, 2026-08-15: "в столбиках налички с января по май нет" - вся история, импортированная
+  // из ЯНВАРЬ_МАЙ_НОВЫЙ/МАЙ_ТЕСТ/прикрывашек, читала наличку как 0 из-за несовпадения имени
+  // колонки - тот же класс бага, что и "Начало"/"Начало работ" выше). НЕ коллизия с живым
+  // отчётом - там ЕСТЬ отдельная колонка "Сумма оплаты нал" напрямую, алиас сработает только
+  // если её нет вообще.
+  if (col['Сумма оплаты нал'] === undefined && col['Наличные'] !== undefined) col['Сумма оплаты нал'] = col['Наличные'];
 
   // Геттеры по имени колонки
   const g   = function(row, name) { const i = col[name]; return i !== undefined ? row[i] : null; };
@@ -7414,20 +8900,136 @@ function dedupeJuneArchive() { return dedupeArchive('2026-06'); }
 // ── API ДЛЯ ДАШБОРДА ─────────────────────────────────────────
 // Вызывается из doGet() основного скрипта: orders: getOrdersData(ss)
 
-function getOrdersData(ss) {
-  const norm = ss.getSheetByName(ORDERS_NORM_SHEET);
-  if (!norm || norm.getLastRow() < 2) return { error: 'Нет данных заказов' };
+// Сырые строки текущего месяца с сервера (api.yardhub.ru/api/orders_raw, обновляется по FTP
+// от 1С раз в час) вместо листа "Заказы_данные" (email-канал, обновляется реже) - 2026-08-18,
+// см. plans/2026-08-18-live-orders-current-month-server-source.md. Возвращает null при ЛЮБОЙ
+// проблеме (нет ключа в Script Properties, сеть, пустой ответ) - вызывающий код тихо
+// переходит на чтение листа, как раньше. Сам расчёт (aggregateOrdersRows и т.д.) НЕ меняется.
+function fetchOrdersRawFromServer_(monthKey) {
+  try {
+    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    if (!apiKey) return null;
+    var resp = UrlFetchApp.fetch(
+      'https://api.yardhub.ru/api/orders_raw?month=' + encodeURIComponent(monthKey),
+      { headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true }
+    );
+    if (resp.getResponseCode() !== 200) return null;
+    var data = JSON.parse(resp.getContentText());
+    if (!data || !data.rows || !data.rows.length) return null;
+    return data; // { month, rows, source: 'normalized'|'archive' }
+  } catch (err) {
+    return null;
+  }
+}
 
-  const rows = norm.getRange(2, 1, norm.getLastRow() - 1, 44).getValues();
-  const result = aggregateOrdersRows(rows);
+// Архив мегабазы (январь-май 2026, orders_archive на сервере) собран из листа с ДРУГИМ
+// набором колонок, чем обычный отчёт 1С - нет "Проведён"/"Реализация" (воронка документов
+// покажет всё как "не готово" - неверно) и "Прибыль" там не финальная (маржа 78-88%, см.
+// DEPLOY_LOG v218-222). Выручка/кол-во заказов - надёжны. Этот флаг долетает до фронтенда,
+// чтобы честно предупредить, а не молча показать красивые, но неверные цифры.
+function noteServerDataQuality_(result, sourceInfo) {
+  if (sourceInfo && sourceInfo.source === 'archive') {
+    result.data_quality_warning = 'Данные за этот период - из архива мегабазы 1С (упрощённый формат). ' +
+      'Выручка и количество заказов верны. Прибыль и статус документооборота (путёвка/реализация/проведение) НЕ финальны - не использовать для зарплат/премий за этот период.';
+  }
+  return result;
+}
+
+// ── ГОТОВЫЙ РАСЧЁТ С СЕРВЕРА (2026-08-18, Фаза 1d плана переноса зарплатной логики) ─────────
+// В отличие от fetchOrdersRawFromServer_ (сырые строки, считаем сами) - тут сервер отдаёт уже
+// ПОСЧИТАННЫЙ результат (~0.3-1 сек против ~4-16 сек у Apps Script на том же периоде). Логика
+// на сервере портирована 1-в-1 и сверена построчно по всем 8 месяцам (0 расхождений в
+// денежной части) - см. plans/2026-08-18-payroll-logic-server-port.md.
+//
+// Включается Script Property USE_SERVER_ORDERS_CALC = 'on', выключается удалением/любым другим
+// значением - мгновенный откат без редеплоя. Это самое денежное место дашборда (зарплаты/
+// премии), поэтому включение - осознанное отдельное действие, а не побочный эффект деплоя.
+function serverOrdersCalcEnabled_() {
+  try {
+    return PropertiesService.getScriptProperties().getProperty('USE_SERVER_ORDERS_CALC') === 'on';
+  } catch (err) {
+    return false;
+  }
+}
+
+// Санити-проверки ответа сервера. Молчаливое доверие "раз 200 - значит правильно" тут
+// недопустимо: если сервер по какой-то причине отдаст структурно неполный ответ, дашборд
+// покажет НЕВЕРНУЮ зарплату вместо честной ошибки. Любое несоответствие -> null -> вызывающий
+// тихо считает сам, как раньше. Проверяем в том числе hired_margin_qualifies (порог 23%) -
+// именно это поле дважды пропадало при регрессиях, см. verifyKnownFixes().
+function serverCalcLooksSane_(data, expectedPeriod) {
+  if (!data || !data.orders || !data.orders.summary) return false;
+  if (data.period !== expectedPeriod) return false;
+  var s = data.orders.summary;
+  if (typeof s.total_orders !== 'number' || s.total_orders <= 0) return false;
+  if (typeof s.total_amount !== 'number') return false;
+  if (typeof s.hired_margin_qualifies !== 'boolean') return false;
+  if (!Array.isArray(data.orders.by_manager) || !Array.isArray(data.orders.by_logist)) return false;
+  return true;
+}
+
+function fetchOrdersComputedFromServer_(period) {
+  try {
+    if (!serverOrdersCalcEnabled_()) return null;
+    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    if (!apiKey) return null;
+    var resp = UrlFetchApp.fetch(
+      'https://api.yardhub.ru/api/orders_computed?period=' + encodeURIComponent(period),
+      { headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true }
+    );
+    if (resp.getResponseCode() !== 200) return null;
+    var data = JSON.parse(resp.getContentText());
+    if (!serverCalcLooksSane_(data, period)) return null;
+    // Сервер кладёт предупреждение о качестве на верхний уровень, дашборд ждёт его внутри
+    // orders (тот же контракт, что у noteServerDataQuality_ выше).
+    if (data.data_quality_warning) data.orders.data_quality_warning = data.data_quality_warning;
+    return data.orders;
+  } catch (err) {
+    return null;
+  }
+}
+
+function getOrdersData(ss) {
   const monthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+
+  var computed = fetchOrdersComputedFromServer_(monthKey);
+  if (computed) return computed;
+
+  var fromServer = fetchOrdersRawFromServer_(monthKey);
+  var rows = fromServer ? fromServer.rows : null;
+  if (!rows) {
+    const norm = ss.getSheetByName(ORDERS_NORM_SHEET);
+    if (!norm || norm.getLastRow() < 2) return { error: 'Нет данных заказов' };
+    rows = norm.getRange(2, 1, norm.getLastRow() - 1, 44).getValues();
+  }
+  const result = noteServerDataQuality_(aggregateOrdersRows(rows), fromServer);
   const smartLost = computeLostCustomers_(ss, rows, monthKey);
   if (smartLost) result.lost_customers = smartLost;
   return joinManagerPlans_(ss, result, monthKey);
 }
 
 // Архивные данные за прошлый период (?action=orders_period&period=YYYY-MM)
+//
+// Влад, 2026-08-18: "в начале нового месяца есть изменения по старому - отчёт например в
+// августе летит сразу с июлем" - 1С ещё донасчитывает недавно закрытый месяц какое-то время
+// после его окончания, поэтому "закрытый месяц" НЕ значит "навсегда застывший". Как и текущий
+// месяц (getOrdersData выше), сначала пробуем ЖИВОЙ источник с сервера - если 1С по FTP всё
+// ещё присылает этот период (лежит в orders_normalized ИЛИ уже переехал в orders_archive,
+// сервер сам разбирается, см. /api/orders_raw) - берём его, значит месяц ещё может уточняться,
+// и мы это отражаем автоматически без ручных переснимков. Если сервер за этот период ничего
+// не отдал - тихий фолбэк на архивный лист Google Таблицы, как было.
 function getOrdersDataForPeriod(ss, period) {
+  var computed = fetchOrdersComputedFromServer_(period);
+  if (computed) return computed;
+
+  var fromServer = fetchOrdersRawFromServer_(period);
+  if (fromServer) {
+    const result = noteServerDataQuality_(aggregateOrdersRows(fromServer.rows), fromServer);
+    const smartLost = computeLostCustomers_(ss, fromServer.rows, period);
+    if (smartLost) result.lost_customers = smartLost;
+    return joinManagerPlans_(ss, result, period);
+  }
+
   const sheetName = ORDERS_ARCHIVE_PFX + period;
   const archive = ss.getSheetByName(sheetName);
   if (!archive || archive.getLastRow() < 5) return { error: 'Нет архива за ' + period };
@@ -7499,6 +9101,14 @@ function computeLostCustomers_(ss, currentRows, monthKey) {
 // уже в этом формате, архивные листы ("Заказы_YYYY-MM") нужно нормализовать через
 // parseOrdersRawRows (тот же приём, что getOrdersData/getOrdersDataForPeriod).
 function readOrdersRowsForMonth_(ss, monthKey, isLiveMonth) {
+  // Сервер сначала (2026-08-18) - "Пропавшие клиенты" на личной странице читает ТРИ месяца
+  // подряд при каждом открытии вкладки, раньше все три - это три отдельных медленных запроса
+  // к Google Sheets API (Влад: "долго грузятся"). api.yardhub.ru/api/orders_raw отвечает почти
+  // мгновенно и покрывает и текущий, и архивные месяцы (orders_normalized/orders_archive) -
+  // тихий фолбэк на лист, если сервер за этот месяц ничего не отдал (как везде в переезде).
+  var fromServer = fetchOrdersRawFromServer_(monthKey);
+  if (fromServer) return fromServer.rows;
+
   if (isLiveMonth) {
     var norm = ss.getSheetByName(ORDERS_NORM_SHEET);
     if (!norm || norm.getLastRow() < 2) return [];
@@ -8222,6 +9832,13 @@ function getAvailablePeriods(ss) {
     const m = s.getName().match(re);
     if (m && m[1] !== currentMonthKey) periods.push(m[1]);
   });
+  // Январь-май 2026 - архив мегабазы (orders_archive на сервере), листов "Заказы_2026-0X" в
+  // ЭТОЙ таблице для них нет (импорт шёл из отдельной таблицы), поэтому добавляем явно - иначе
+  // getOrdersDataForPeriod их бы нашёл через fetchOrdersRawFromServer_, а в выпадающем списке
+  // периодов они бы не появились (2026-08-18, см. plans/2026-08-18-...).
+  ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05'].forEach(function(mk) {
+    if (periods.indexOf(mk) === -1 && mk !== currentMonthKey) periods.push(mk);
+  });
   periods.sort().reverse();
   return periods;
 }
@@ -8402,6 +10019,14 @@ function aggregateOrdersRows(rows) {
     const dateStr   = dateVal(row, 'date_s');
     const mgrSales  = str(row, 'mgr_s');
     const hw        = yes(row, 'waybill'); // есть ли путёвка - нужно в нескольких местах ниже
+    // Поднято к началу цикла (2026-08-19, Влад: "нет путёвки" по водителям/поставщикам
+    // считало и служебные ("Прочее") строки - раньше isServiceRow объявлялась только внутри
+    // блока "Статус документов" ниже, а блоки "По поставщикам"/"По водителям" идут РАНЬШЕ
+    // него в цикле и физически не могли на неё ссылаться). Теперь доступна везде в итерации -
+    // тот же принцип исключения, что уже в основной воронке документов.
+    const paymentVariant = str(row, 'payment_variant');
+    const isServiceRow = (FUNNEL_EXCLUDE_OTHER_PAYMENT_VARIANT && paymentVariant === 'Прочее') ||
+                         (FUNNEL_EXCLUDE_CASH_PAYMENTS && paymentVariant === 'Наличный');
 
     // С июля 2026: 8%/8%/2%/2% от маржи найма платится только если маржа найма >=23% -
     // порог проверяется ПО КОМПАНИИ ЗА МЕСЯЦ ЦЕЛИКОМ (тот же % что и KPI "Маржа найма" на
@@ -8603,7 +10228,11 @@ function aggregateOrdersRows(rows) {
       // "Сумма вознаграждения 2" в 1С день в день). margin (см. supplierList ниже) остаётся
       // равен "Прибыль" - именно эта сумма и есть маржа с учётом всех затрат.
       supplierMap[supplier].extra_costs += (amount - hiredCost - profit);
-      if (!hw && !isInternalOrder) supplierMap[supplier].no_waybill++;
+      // Служебные строки ("Вариант расчёта" = Прочее/Наличный) НЕ считаем как "нет путёвки" -
+      // структурно у них путёвки в принципе не бывает, это не реальная недостача документа
+      // (Влад, 2026-08-19: тот же принцип, что уже в основной воронке документов, здесь
+      // раньше не применялся - "нет путёвки" по поставщикам/водителям завышало цифру).
+      if (!hw && !isInternalOrder && !isServiceRow) supplierMap[supplier].no_waybill++;
 
       // Общекорпоративный список сделок найма (2026-08-10, "Общие сделки" на личной странице
       // логиста - Влад: "он видит абсолютно всю ситуацию по направлению") - КАЖДАЯ наёмная
@@ -8631,7 +10260,8 @@ function aggregateOrdersRows(rows) {
         // тоже учитывается) - раньше эта цифра считалась отдельно в блоке "Статус документов"
         // по более узкому условию (!isInt, без !isInternalOrder), что расходилось с "Общими
         // сделками" по тому же поставщику. Один источник на обе вкладки (2026-08-10).
-        if (!hw && !isInternalOrder) lds.no_waybill++;
+        // !isServiceRow добавлен 2026-08-19 - см. комментарий у supplierMap.no_waybill выше.
+        if (!hw && !isInternalOrder && !isServiceRow) lds.no_waybill++;
         ld.deals.push({
           id: str(row,'id'), date: dateStr, customer: str(row,'customer'), supplier: supplier,
           amount: amount, cost: hiredCost, margin: profit,
@@ -8654,9 +10284,8 @@ function aggregateOrdersRows(rows) {
     }
 
     // ── Статус документов (внешние заказы, разбивка по декадам) ──
-    const paymentVariant = str(row, 'payment_variant');
-    const isServiceRow = (FUNNEL_EXCLUDE_OTHER_PAYMENT_VARIANT && paymentVariant === 'Прочее') ||
-                         (FUNNEL_EXCLUDE_CASH_PAYMENTS && paymentVariant === 'Наличный');
+    // paymentVariant/isServiceRow теперь объявлены в начале цикла (см. комментарий выше) -
+    // используются здесь без изменений.
     if (!isInt && !isServiceRow) {
       const dayNum2 = parseInt((dateStr||'').split('-')[2]) || 0;
       const dec = dayNum2 <= 10 ? 0 : dayNum2 <= 20 ? 1 : 2;
@@ -8762,10 +10391,13 @@ function aggregateOrdersRows(rows) {
       }
       driverMap[driverName].orders++;
       driverMap[driverName].amount += amount;
-      if (!hw && !isInternalOrder) driverMap[driverName].no_waybill++;
+      // !isServiceRow добавлен 2026-08-19 (Влад: "Не сданные путевые листы" считало и
+      // служебные строки "Прочее" - у Войткуна за июль показывало 8, реально 4, см.
+      // комментарий у supplierMap.no_waybill выше - тот же принцип).
+      if (!hw && !isInternalOrder && !isServiceRow) driverMap[driverName].no_waybill++;
       if (equip === 'Длинномер') {
         driverMap[driverName].orders_long++;
-        if (!hw && !isInternalOrder) driverMap[driverName].no_waybill_long++;
+        if (!hw && !isInternalOrder && !isServiceRow) driverMap[driverName].no_waybill_long++;
       }
     }
   }
@@ -9460,4 +11092,40 @@ function runOrdersOnly() {
   try { normalizeOrders();    log.push('✅ Нормализация заказов'); }
   catch(e) { errors.push('❌ Нормализация: ' + e.message); }
   Logger.log(log.concat(errors).join('\n'));
+}
+
+
+// ВРЕМЕННЫЙ тест createOrderPlanEntry_ (удалить после проверки, 2026-08-18) -
+// теперь со ВСЕМИ значениями строго из справочника (equipType/reworkTerms/
+// gabarit/documents), сверенными diagCheckOrderPlanAllValidation.
+function testCreateOrderPlanEntry() {
+  var result = createOrderPlanEntry_('Цегельников Вячеслав Владимирович', {
+    day: '19',
+    equipType: 'Трал',
+    customer: 'ТЕСТ УДАЛИТЬ ЭТУ СТРОКУ',
+    customerContact: 'Тест Тестович +70000000000',
+    cargo: 'тестовый груз',
+    gabarit: 'Габарит',
+    loadAddress: 'тестовый адрес погрузки',
+    loadContact: 'тест +70000000001',
+    unloadAddress: 'тестовый адрес выгрузки',
+    unloadContact: 'тест +70000000002',
+    documents: 'Путевой лист',
+    reworkTerms: 'Без переработки',
+    note: 'ЭТО ТЕСТ, УДАЛИТЬ',
+    cost: '1',
+    time: '10:00',
+  });
+  Logger.log(JSON.stringify(result, null, 2));
+}
+
+// ВРЕМЕННАЯ очистка (удалить после использования, 2026-08-18).
+function cleanupOrderPlanBadTestRows5() {
+  var resolved = resolveOrderPlanSpreadsheet_();
+  if (resolved.error) { Logger.log(resolved.error); return; }
+  var sheet = resolved.planSs.getSheetByName('19');
+  if (!sheet) { Logger.log('Вкладка 19 не найдена'); return; }
+  sheet.getRange(93, 2, 2, 9).clearContent(); // заказ 46
+  sheet.getRange(95, 2, 2, 9).clearContent(); // заказ 47, на случай если тест туда попал
+  Logger.log('Строки 93-96 (кроме номеров в A) вкладки "19" очищены.');
 }

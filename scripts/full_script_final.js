@@ -3469,7 +3469,13 @@ function buildManagersText() {
 // ============================================================
 // ОТПРАВКА В TELEGRAM
 // ============================================================
-function sendTelegram(text, chatId) {
+// plainText=true отключает разметку Markdown (2026-08-21). Зачем: Telegram ОТКАЗЫВАЕТ в
+// доставке всего сообщения, если не может разобрать разметку - а любой текст ошибки от
+// сервера содержит подчёркивания (`receipts_raw`, `import_runs`, пути к файлам), и для
+// Markdown подчёркивание это курсив. Непарное - и всё сообщение молча не доходит. Для
+// уведомлений о поломках это ровно тот случай, когда сообщение нужнее всего, поэтому
+// сторож шлёт простым текстом. Остальные отправки работают как раньше.
+function sendTelegram(text, chatId, plainText) {
   const url = `https://api.telegram.org/bot${getTelegramToken_()}/sendMessage`;
   UrlFetchApp.fetch(url, {
     method: 'post',
@@ -3477,7 +3483,7 @@ function sendTelegram(text, chatId) {
     payload: JSON.stringify({
       chat_id: chatId || CONFIG.TELEGRAM_CHAT_ID,
       text: text,
-      parse_mode: 'Markdown'
+      parse_mode: plainText ? undefined : 'Markdown'
     })
   });
 }
@@ -3534,7 +3540,7 @@ function watchdogCheckDataFreshness() {
   if (!problems.length) {
     // Восстановление сообщаем один раз - чтобы было видно, что чинить больше нечего.
     if (prevSignature) {
-      sendTelegram('✅ *Данные снова обновляются*\nВсе импорты в норме.');
+      sendTelegram('Дашборд: данные снова обновляются. Все импорты в норме.', null, true);
       props.deleteProperty(stateKey);
       props.deleteProperty(timeKey);
     }
@@ -3544,10 +3550,46 @@ function watchdogCheckDataFreshness() {
   var sameProblem = (signature === prevSignature);
   if (sameProblem && (nowMs - prevSentMs) < 6 * 3600 * 1000) return;
 
-  sendTelegram('⚠️ *Дашборд: обновление данных не проходит*\n\n' + problems.join('\n') +
-    '\n\nЦифры на дашборде могут быть устаревшими.');
+  sendTelegram('Дашборд: обновление данных не проходит\n\n' + problems.join('\n') +
+    '\n\nЦифры на дашборде могут быть устаревшими.', null, true);
   props.setProperty(stateKey, signature);
   props.setProperty(timeKey, String(nowMs));
+}
+
+// Проверка связи с Telegram. Без завершающего "_" - чтобы была видна в списке "Выполнить".
+// Отвечает на вопрос "токен живой или нет" ОДНИМ запуском, вместо перебора догадок: сначала
+// спрашивает у Telegram, кто мы такие (getMe - проверяет сам токен), потом пробует отправить.
+// muteHttpExceptions - чтобы увидеть ТЕКСТ отказа, а не голое исключение: именно в тексте
+// Telegram пишет настоящую причину ("Unauthorized" = токен мёртв, "can't parse entities" =
+// подавился разметкой, "chat not found" = неверный адресат).
+function checkTelegram() {
+  var token = PropertiesService.getScriptProperties().getProperty('TELEGRAM_TOKEN');
+  if (!token) {
+    Logger.log('НЕТ ТОКЕНА. Настройки проекта -> Свойства скрипта -> добавить TELEGRAM_TOKEN.');
+    return;
+  }
+  Logger.log('Токен найден, длина ' + token.length + ' символов.');
+
+  var me = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/getMe',
+    { muteHttpExceptions: true });
+  Logger.log('Проверка токена (getMe): код ' + me.getResponseCode() + ' | ' +
+    me.getContentText().slice(0, 200));
+  if (me.getResponseCode() !== 200) {
+    Logger.log('ТОКЕН НЕДЕЙСТВИТЕЛЕН. Перевыпустить у @BotFather (/token) и заменить в свойствах скрипта.');
+    return;
+  }
+
+  var send = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    payload: JSON.stringify({
+      chat_id: CONFIG.TELEGRAM_CHAT_ID,
+      text: 'Проверка связи: сторож дашборда на связи. Это тестовое сообщение.',
+    }),
+  });
+  Logger.log('Отправка: код ' + send.getResponseCode() + ' | ' + send.getContentText().slice(0, 300));
+  Logger.log(send.getResponseCode() === 200
+    ? 'ОТПРАВЛЕНО - проверь Telegram.'
+    : 'ОТПРАВКА НЕ ПРОШЛА - причина в ответе выше.');
 }
 
 // Ставит сторожа на расписание (раз в час). ВЫПОЛНИТЬ ВРУЧНУЮ один раз в редакторе Apps

@@ -9317,15 +9317,20 @@ function fmtDateRu(dateStr) {
 }
 
 // Свой сервер (2026-08-17) - постепенный переезд с Apps Script/Google Таблиц на Beget (см.
-// plans/ и retrospectives/). Ключ - не полноценная сессия, как у apiFetchJson, а общий
-// секрет только для этих эндпоинтов - осознанное временное упрощение, см. server.js.
+// plans/ и retrospectives/). До 2026-08-21 здесь был общий секретный ключ прямо в этом
+// файле - т.е. в открытом виде на публичной странице (техаудит, plans/2026-08-19-audit-
+// remediation.md, пункт 01: "любой, кто откроет исходник страницы, скачивает всю базу").
+// Теперь используется ТОТ ЖЕ session_token, что уже есть у apiFetchJson (см. SESSION_TOKEN
+// выше) - сервер проверяет его сам той же HMAC-подписью, что выдал и умеет проверять Apps
+// Script (see verifySessionToken() в api/server.js). Никакого отдельного секрета в браузере
+// больше нет вообще.
 const YARD_API_BASE = 'https://api.yardhub.ru/api';
-const YARD_API_KEY = '3f41d8e2d1cb53fe45cd1627f0067cd65df37b1d5081b275';
 function fetchFromYardApi_(path, params) {
-  var qs = Object.keys(params || {}).map(function(k) {
-    return params[k] ? (k + '=' + encodeURIComponent(params[k])) : null;
+  var merged = Object.assign({ session_token: SESSION_TOKEN }, params || {});
+  var qs = Object.keys(merged).map(function(k) {
+    return merged[k] ? (k + '=' + encodeURIComponent(merged[k])) : null;
   }).filter(Boolean).join('&');
-  return fetch(YARD_API_BASE + path + (qs ? '?' + qs : ''), { headers: { 'X-Api-Key': YARD_API_KEY } })
+  return fetch(YARD_API_BASE + path + (qs ? '?' + qs : ''))
     .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); });
 }
 function fetchClientAnalyticsFromServer_(params) {

@@ -1152,16 +1152,25 @@ function runAll() {
     errors.push('❌ Сборка отчёта: ' + e.message);
   }
 
-  // Отправляем в Telegram
-  try {
-    if (alertsText) sendTelegram('🚨 *АЛЕРТЫ*\n\n' + alertsText);
-    sendTelegram(summaryText);
-    // Отдельное сообщение по менеджерам и логистам
-    sendTelegram(buildManagersText());
-    if (errors.length > 0) sendTelegram('⚠️ *Ошибки при обновлении*\n\n' + errors.join('\n'));
-    log.push('✅ Telegram уведомления отправлены');
-  } catch(e) {
-    log.push('❌ Telegram: ' + e.message);
+  // Отправляем в Telegram - обычную бизнес-сводку (2026-08-24, Влад: "СМС мне приходят в
+  // Telegram, они не нужны, пусть только приходят СМС касаемо работы сервера") ВЫКЛЮЧЕНО по
+  // умолчанию. Переключатель через Script Properties (BUSINESS_DIGEST_TELEGRAM), а не жёсткое
+  // удаление кода - см. enableBusinessDigestTelegram()/disableBusinessDigestTelegram() ниже,
+  // если понадобится вернуть без нового деплоя. Сторож (watchdogCheckDataFreshness) шлёт
+  // отдельно и НЕ затронут этим переключателем - это и есть "СМС касаемо работы сервера".
+  if (businessDigestTelegramEnabled_()) {
+    try {
+      if (alertsText) sendTelegram('🚨 *АЛЕРТЫ*\n\n' + alertsText);
+      sendTelegram(summaryText);
+      // Отдельное сообщение по менеджерам и логистам
+      sendTelegram(buildManagersText());
+      if (errors.length > 0) sendTelegram('⚠️ *Ошибки при обновлении*\n\n' + errors.join('\n'));
+      log.push('✅ Telegram уведомления отправлены');
+    } catch(e) {
+      log.push('❌ Telegram: ' + e.message);
+    }
+  } else {
+    log.push('⏭ Бизнес-сводка в Telegram выключена (businessDigestTelegramEnabled_)');
   }
 
   console.log(log.join('\n'));
@@ -3603,6 +3612,27 @@ function setupWatchdogTrigger() {
   Logger.log('Сторож поставлен на расписание: раз в час.');
 }
 
+// ── Переключатель бизнес-сводки в Telegram (2026-08-24) ────────────────────────────────────
+// Влад: "СМС мне приходят в Telegram, они не нужны, пусть только приходят СМС касаемо работы
+// сервера" - обычная сводка (алерты/финансы/менеджеры/логисты, отправляется каждый час внутри
+// runAll()) выключена по умолчанию. Сторож (watchdogCheckDataFreshness, "обновление не
+// проходит"/"данные снова обновляются") - ЭТО и есть "СМС про работу сервера", он отдельный
+// переключатель и этим флагом не затрагивается.
+function businessDigestTelegramEnabled_() {
+  return PropertiesService.getScriptProperties().getProperty('BUSINESS_DIGEST_TELEGRAM') === 'on';
+}
+function enableBusinessDigestTelegram() {
+  PropertiesService.getScriptProperties().setProperty('BUSINESS_DIGEST_TELEGRAM', 'on');
+  Logger.log('Бизнес-сводка в Telegram включена - вернётся со следующим runAll().');
+}
+function disableBusinessDigestTelegram() {
+  PropertiesService.getScriptProperties().deleteProperty('BUSINESS_DIGEST_TELEGRAM');
+  Logger.log('Бизнес-сводка в Telegram выключена (это и есть состояние по умолчанию).');
+}
+function businessDigestTelegramStatus() {
+  Logger.log('Бизнес-сводка в Telegram: ' + (businessDigestTelegramEnabled_() ? 'ВКЛЮЧЕНА' : 'выключена (по умолчанию)'));
+}
+
 // ============================================================
 // УТИЛИТЫ
 // ============================================================
@@ -5437,12 +5467,43 @@ function readMainPayloadCache_(ss) {
   }
 }
 
-// doGet() зовёт это, а не buildHeavyMainPayload_ напрямую - кэш в приоритете, живой расчёт
-// только как страховка (первый запуск после деплоя, до первого runAll(); или кэш битый).
+// doGet() зовёт это, а не buildHeavyMainPayload_ напрямую. С 2026-08-24 выручка/ДЗ/
+// поступления/сводка больше НЕ читаются из часового кэша - они уже посчитаны на сервере
+// (миллисекунды, не секунды - fetchOrdersComputedFromServer_/fetchDebtComputedFromServer_/
+// fetchReceiptsComputedFromServer_ внутри getOrdersData/getDebtData/getReceiptsData уже
+// пробуют сервер первым, см. архитектуру в CLAUDE.md). Значит держать их в часовом снимке -
+// собственный тормоз, а не экономия. Повод: 24.08.2026, после простоя VPS (оплата хостинга)
+// сервер уже отдавал свежие цифры, а дашборд ещё час показывал застывшую выручку из кэша, до
+// следующего runAll() - Влад: "мы уже перешли на сервер по выручке ДЗ поступлениям, вся
+// логика должна быть серверная, а не гугловская".
+//
+// В кэше по-прежнему остаются vehicles/drivers/history/periods/driverOrderCounts - они читают
+// Штатку/Историю_финансов НАПРЯМУЮ из Google Таблицы (не с сервера), там расчёт всё ещё
+// медленный (см. CLAUDE.md - "Штатка/История_финансов - НЕ начато", в очереди на перенос) -
+// кэшировать их по-прежнему нужно, иначе КАЖДЫЙ заход на дашборд будет ждать эти секунды.
 function getMainPayloadCacheOrLive_(ss, staffData) {
+  var ordersData = getOrdersData(ss);
+  var freshFinancials = {
+    summary:  getSummaryData(ss, ordersData),
+    orders:   ordersData,
+    debt:     getDebtData(ss),
+    receipts: getReceiptsData(ss, ordersData),
+  };
   var cached = readMainPayloadCache_(ss);
-  if (cached) return cached;
-  return buildHeavyMainPayload_(ss, staffData);
+  if (cached) return Object.assign({}, cached, freshFinancials);
+
+  // Кэша нет вообще (первый запуск после деплоя, до первого runAll()) - остальное (медленные
+  // Штатка-поля) считаем живьём. ordersData уже посчитан выше - buildHeavyMainPayload_ здесь
+  // намеренно НЕ вызывается целиком, чтобы не считать заказы дважды.
+  var defaultRange = getCurrentMonthRange_();
+  var vehiclesData = aggregateFinHistoryForRange(ss, staffData, defaultRange.from, defaultRange.to);
+  return Object.assign({
+    vehicles: vehiclesData,
+    drivers:  deriveDriversFromVehicles(vehiclesData),
+    history:  getHistoryData(ss),
+    driverOrderCounts: getDriverOrderCounts_(ss, defaultRange.from, defaultRange.to),
+    periods: getAvailablePeriods(ss),
+  }, freshFinancials);
 }
 
 // Нормализация госномера: убираем пробелы + кириллица→латиница (А=A, В=B и т.д.)

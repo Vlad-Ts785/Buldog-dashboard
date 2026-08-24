@@ -19,6 +19,9 @@
      "генератор коммерческих предложений... текст является настоящим текстом". Работает
      целиком в браузере, без сервера - тот же принцип, что у Leaflet/Chart.js выше. -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<!-- SheetJS - экспорт вкладки "Зарплата" в Excel с живыми формулами
+     (plans/2026-08-24-salary-excel-export.md) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root {
   --bg:#0f0f13;--bg2:#17171d;--bg3:#1e1e26;--bg4:#252530;
@@ -2400,6 +2403,33 @@ function dedupeMyPageEntries_(rawEntries) {
   return Object.values(byName);
 }
 
+// Синтетические записи-заглушки для новых сотрудников, у которых в 1С ЕЩЁ НЕТ ни одного
+// заказа (2026-08-21, Влад про Ратникова: "могу зайти под его страницу, как под другими?
+// Почему нет выбора?") - без этого человека физически нельзя выбрать ни на "Личной странице",
+// ни в "Смотреть как сотрудник" (обе построены из by_manager/by_logist, а туда попадают только
+// те, у кого УЖЕ есть заказ, см. TRAL_MANAGERS-гейт на бэкенде). Добавляется в дропдаун ТОЛЬКО
+// когда реальной записи с той же ФАМИЛИЕЙ ещё нет - сравнение по фамилии (не по полному имени),
+// чтобы не рисковать задвоением, если 1С в итоге запишет отчество чуть иначе, чем здесь.
+// Ничего вручную убирать не нужно - как только появятся настоящие заказы, реальная запись
+// перекроет эту заглушку сама (условие ниже просто перестанет срабатывать).
+var ALWAYS_PREVIEW_ROSTER_ = [
+  { name: 'Ратников Максим Михайлович', type: 'manager', sur: 'ратников' },
+];
+// Единая точка сборки ростера дропдауна (2026-08-21) - раньше concat+dedupe дублировался в
+// трёх местах (myPageCurrentEntry_/renderMyPage/viewAsRoster_), из-за чего правка вроде этой
+// рисковала попасть не во все - тот же класс риска, что уже ловили на дедупе Пруса.
+function buildMyPageRoster_(byManager, byLogist) {
+  var entries = dedupeMyPageEntries_(
+    (byManager || []).map(function(m){ return {name:m.name, type:'manager'}; })
+      .concat((byLogist || []).map(function(l){ return {name:l.name, type:'logist'}; }))
+  );
+  ALWAYS_PREVIEW_ROSTER_.forEach(function(ap) {
+    var hasReal = entries.some(function(en){ return en.name.trim().split(' ')[0].toLowerCase() === ap.sur; });
+    if (!hasReal) entries.push({ name: ap.name, type: ap.type });
+  });
+  return entries;
+}
+
 // Admin-предпросмотр "глазами сотрудника" (2026-08-18) - {name, type} выбранного через кнопку
 // "Смотреть как сотрудник" в подвале сайдбара, иначе null. Только для D.role==='admin' - у
 // реальных manager/logist кнопки нет (applyRoleUI прячет весь сайдбар, кроме своих 3 пунктов).
@@ -2415,10 +2445,7 @@ function myPageCurrentEntry_() {
   if (D.role === 'admin' && viewAsEntry) return viewAsEntry;
   // Из ростеров by_manager/by_logist, не из by_manager_detail/logist_detail - см. комментарий
   // в renderMyPage() (баг с Васиным, 2026-08-11).
-  var entries = dedupeMyPageEntries_(
-    (D.orders.by_manager || []).map(function(m){ return {name:m.name, type:'manager'}; })
-      .concat((D.orders.by_logist || []).map(function(l){ return {name:l.name, type:'logist'}; }))
-  );
+  var entries = buildMyPageRoster_(D.orders.by_manager, D.orders.by_logist);
   if (!entries.length) return null;
   entries.sort(function(a,b){ return a.name.localeCompare(b.name, 'ru'); });
   var sel = document.getElementById('my-page-mgr-select');
@@ -2576,10 +2603,8 @@ function renderMyPage() {
     // заказом за период), а НЕ из by_manager_detail/logist_detail (2026-08-11, баг с
     // Васиным - он почти никогда не попадает в logist_detail, там только наёмные сделки,
     // а Васин работает своим парком - без этого фикса он вообще не появлялся в дропдауне).
-    var entries = dedupeMyPageEntries_(
-      (((D.orders && D.orders.by_manager) || []).map(function(m){ return {name:m.name, type:'manager'}; }))
-        .concat(((D.orders && D.orders.by_logist) || []).map(function(l){ return {name:l.name, type:'logist'}; }))
-    );
+    // ALWAYS_PREVIEW_ROSTER_ (2026-08-21) - добавляет заглушки-новичков без единого заказа.
+    var entries = buildMyPageRoster_(D.orders && D.orders.by_manager, D.orders && D.orders.by_logist);
     entries.sort(function(a,b){ return a.name.localeCompare(b.name, 'ru'); });
     // Пустой entries - ок для manager/logist ролей (свой D.managerName/logistName не зависит
     // от by_manager_detail/logist_detail - у Васина, например, logist_detail почти всегда
@@ -3996,10 +4021,8 @@ function applyRoleUI() {
 // Менеджеры/Логисты. Первая строка - выход из предпросмотра, только когда он активен.
 function viewAsRoster_() {
   if (!D || !D.orders) return [];
-  return dedupeMyPageEntries_(
-    ((D.orders.by_manager || []).map(function(m){ return {name:m.name, type:'manager'}; }))
-      .concat((D.orders.by_logist || []).map(function(l){ return {name:l.name, type:'logist'}; }))
-  ).sort(function(a,b){ return a.name.localeCompare(b.name, 'ru'); });
+  return buildMyPageRoster_(D.orders.by_manager, D.orders.by_logist)
+    .sort(function(a,b){ return a.name.localeCompare(b.name, 'ru'); });
 }
 
 function updateViewAsButton_() {
@@ -7893,6 +7916,95 @@ function calcVasin(profitLong) {
   return { sur:'васин', profitLong:(profitLong||0), bonus:bonus, total: bonus };
 }
 
+// Состав "обычных" (не спецформула) отделов - ОБЩИЙ источник для renderSalesSalary() и
+// buildSalaryWorkbook_() (plans/2026-08-24-salary-excel-export.md), чтобы список членов
+// команды не разъезжался между экраном и Excel-экспортом (тот же класс риска, что уже дважды
+// ловили на TRAL_MANAGERS). Отдел Рыщанова сюда НЕ входит - его members зависит от
+// ALL_LOGISTS, которая считается только внутри renderSalesSalary() (нужен useNewRules), и в
+// экспорт (только коммерческий отдел) он не входит вообще.
+var COMMERCIAL_DEPTS = [
+  { color:'#1D9E75', bgA:'29,158,117', label:'Отдел Ахтамовой',  head:'ахтамова',  headName:'Ахтамова Лиана',  ownSales:true,  specialHead:false,
+    members:['ахтамова','цегельников','гуштюк','дербенцева','шейко'] },
+  { color:'#378ADD', bgA:'55,138,221', label:'Отдел Гусейновой', head:'гусейнова', headName:'Гусейнова Айнур', ownSales:true, specialHead:false,
+    members:['гусейнова','савиток','филипчук','котельников','гуляева','коньшина','володин'] },
+];
+
+// Влад, 2026-08-06: "сделай, чтобы у всех людей была фамилия и имя" - раньше показывали
+// только фамилию. Имена собраны из выгрузок 1С за это время - у кого не нашли (Дербенцева,
+// Коньшина - уже уволены, скрыты по нулевой выручке) остаётся фолбэк на одну фамилию.
+// Top-level (не внутри renderSalesSalary) - нужна и экспорту в Excel.
+var FULL_NAME = {
+  'ахтамова':'Ахтамова Лиана', 'гусейнова':'Гусейнова Айнур', 'рыщанов':'Рыщанов Рустем',
+  'цегельников':'Цегельников Вячеслав', 'гуштюк':'Гуштюк Ирина', 'котельников':'Котельников Данила',
+  'гуляева':'Гуляева Лилия', 'филипчук':'Филипчук Екатерина', 'шейко':'Шейко Елена',
+  'кан':'Кан Михаил', 'махура':'Махура Николай', 'сильчев':'Сильчев Максим',
+  'васин':'Васин Максим', 'прус-роскошный':'Прус-Роскошный Роман', 'суркова':'Суркова Анастасия',
+  'володин':'Володин Илья', 'савиток':'Савиток Олеся'
+};
+function capName(s) {
+  var key = s.toLowerCase();
+  if (FULL_NAME[key]) return FULL_NAME[key];
+  if (s === 'прус-роскошный') return 'Прус-Роскошный';
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// Агрегат "команда руководителя" - top-level версия calcHead (нужна и renderSalesSalary(),
+// и экспорту в Excel). getM передаётся явным параметром, а не через замыкание - иначе функция
+// была бы не видна вне renderSalesSalary(), как уже однажды оказалось при первой версии
+// экспорта (plans/2026-08-24-salary-excel-export.md).
+function calcHead_(members, headSur, useNewRules, getM) {
+  var deptRev = 0, deptHired = 0, deptQualMargin = 0, deptExtraCosts = 0, above2m = 0, activeCount = 0;
+  // Влад, 2026-08-08: "0.8% для руководителя - не со всей выручки команды (найм тоже), а
+  // только со своего парка команды минус их затраты" - та же логика, что ownProfitBase в
+  // calcMgr для личных продаж (own_amount/own_profit уже разделены и очищены от 1С-затрат
+  // на бэкенде, см. aggregateOrdersRows).
+  var deptOwnRev = 0, deptOwnProfitBase = 0;
+  members.forEach(function(sur) {
+    if (sur.toLowerCase() === headSur.toLowerCase()) return;
+    var m = getM(sur);
+    if (!m || !(m.amount||0)) return; // не активен (нет выручки за период - скорее всего уволен) - не считаем ни в выручку отдела, ни в численность команды
+    activeCount++;
+    if (useNewRules) {
+      deptRev += (m.amount||0);
+      deptQualMargin += (m.hired_margin_qualified||0);
+      deptExtraCosts += (m.hired_extra_costs||0);
+      deptOwnRev += (m.own_amount||0);
+      deptOwnProfitBase += (m.own_profit||0);
+      if ((m.amount||0) >= 2000000) above2m++;
+    } else {
+      var isPrus = sur.toLowerCase() === 'прус-роскошный';
+      var sp = splitRev(m, isPrus);
+      deptRev   += sp.total;
+      deptHired += sp.hiredMargin;
+      if (sp.total >= 2000000) above2m++;
+    }
+  });
+  // До июля 2026 own_profit как база % не выделялся отдельным правилом (см. ownProfitBase в
+  // calcMgr) - для прошлых периодов оставляем старую формулу (вся выручка команды), для
+  // новых правил - только свой парк минус затраты.
+  var pct08   = useNewRules ? Math.round(deptOwnProfitBase * 0.008) : Math.round(deptRev * 0.008);
+  var margin2 = useNewRules ? Math.round(deptQualMargin * 0.02) : (deptHired > 0 ? Math.round(deptHired * 0.02) : 0);
+  // Премия за укомплектованность (Влад, 2026-08-06): "если в команде 4 менеджера [не считая
+  // руководителя] - за всех, кто делает больше 2 млн, по 20 тыс; если условие 4 человека не
+  // выдержано - ноль". Считаем только АКТИВНЫХ (есть выручка за месяц) - уволенный без
+  // выручки не должен ни спасать, ни портить численность команды.
+  var mgrBonus = activeCount >= 4 ? above2m * 20000 : 0;
+  var total = 20000 + pct08 + margin2 + mgrBonus;
+  return { deptRev:deptRev, deptHired:deptHired, deptQualMargin:deptQualMargin, deptExtraCosts:deptExtraCosts,
+           deptOwnRev:deptOwnRev, deptOwnProfitBase:deptOwnProfitBase, pct08:pct08, margin2:margin2,
+           mgrBonus:mgrBonus, above2m:above2m, memberCount:activeCount, total:total };
+}
+
+// Премия за объём >30М (Влад, 2026-08-06, только для Ахтамовой/Гусейновой - НЕ для
+// Рыщанова): "после 30 млн выручки платим по 10 тыс за каждые 10 млн, то есть 32 456 737 -
+// премия 30 тыс, 20 999 999 - премия ноль, 40 787 768 - премия 40 тыс". Не "превышение над
+// 30М", а floor(выручка/10М)×10т, но ТОЛЬКО если выручка вообще перешла порог 30М - иначе 0.
+// Проверено на всех трёх примерах Влада. Top-level - нужна и renderSalesSalary(), и экспорту.
+function calcVolumeBonus(deptRevTotal) {
+  if ((deptRevTotal||0) < 30000000) return 0;
+  return Math.floor(deptRevTotal / 10000000) * 10000;
+}
+
 function renderSalesSalary() {
   if (!D || !D.orders) return;
   var el = document.getElementById('salary-content');
@@ -7941,56 +8053,7 @@ function renderSalesSalary() {
   }
 
   function calcHead(members, headSur, useNewRules) {
-    var deptRev = 0, deptHired = 0, deptQualMargin = 0, deptExtraCosts = 0, above2m = 0, activeCount = 0;
-    // Влад, 2026-08-08: "0.8% для руководителя - не со всей выручки команды (найм тоже), а
-    // только со своего парка команды минус их затраты" - та же логика, что ownProfitBase в
-    // calcMgr для личных продаж (own_amount/own_profit уже разделены и очищены от 1С-затрат
-    // на бэкенде, см. aggregateOrdersRows).
-    var deptOwnRev = 0, deptOwnProfitBase = 0;
-    members.forEach(function(sur) {
-      if (sur.toLowerCase() === headSur.toLowerCase()) return;
-      var m = getM(sur);
-      if (!m || !(m.amount||0)) return; // не активен (нет выручки за период - скорее всего уволен) - не считаем ни в выручку отдела, ни в численность команды
-      activeCount++;
-      if (useNewRules) {
-        deptRev += (m.amount||0);
-        deptQualMargin += (m.hired_margin_qualified||0);
-        deptExtraCosts += (m.hired_extra_costs||0);
-        deptOwnRev += (m.own_amount||0);
-        deptOwnProfitBase += (m.own_profit||0);
-        if ((m.amount||0) >= 2000000) above2m++;
-      } else {
-        var isPrus = sur.toLowerCase() === 'прус-роскошный';
-        var sp = splitRev(m, isPrus);
-        deptRev   += sp.total;
-        deptHired += sp.hiredMargin;
-        if (sp.total >= 2000000) above2m++;
-      }
-    });
-    // До июля 2026 own_profit как база % не выделялся отдельным правилом (см. ownProfitBase в
-    // calcMgr) - для прошлых периодов оставляем старую формулу (вся выручка команды), для
-    // новых правил - только свой парк минус затраты.
-    var pct08   = useNewRules ? Math.round(deptOwnProfitBase * 0.008) : Math.round(deptRev * 0.008);
-    var margin2 = useNewRules ? Math.round(deptQualMargin * 0.02) : (deptHired > 0 ? Math.round(deptHired * 0.02) : 0);
-    // Премия за укомплектованность (Влад, 2026-08-06): "если в команде 4 менеджера [не считая
-    // руководителя] - за всех, кто делает больше 2 млн, по 20 тыс; если условие 4 человека не
-    // выдержано - ноль". Считаем только АКТИВНЫХ (есть выручка за месяц) - уволенный без
-    // выручки не должен ни спасать, ни портить численность команды.
-    var mgrBonus = activeCount >= 4 ? above2m * 20000 : 0;
-    var total = 20000 + pct08 + margin2 + mgrBonus;
-    return { deptRev:deptRev, deptHired:deptHired, deptQualMargin:deptQualMargin, deptExtraCosts:deptExtraCosts,
-             deptOwnRev:deptOwnRev, deptOwnProfitBase:deptOwnProfitBase, pct08:pct08, margin2:margin2,
-             mgrBonus:mgrBonus, above2m:above2m, memberCount:activeCount, total:total };
-  }
-
-  // Премия за объём >30М (Влад, 2026-08-06, только для Ахтамовой/Гусейновой - НЕ для
-  // Рыщанова): "после 30 млн выручки платим по 10 тыс за каждые 10 млн, то есть 32 456 737 -
-  // премия 30 тыс, 20 999 999 - премия ноль, 40 787 768 - премия 40 тыс". Не "превышение над
-  // 30М", а floor(выручка/10М)×10т, но ТОЛЬКО если выручка вообще перешла порог 30М - иначе 0.
-  // Проверено на всех трёх примерах Влада.
-  function calcVolumeBonus(deptRevTotal) {
-    if ((deptRevTotal||0) < 30000000) return 0;
-    return Math.floor(deptRevTotal / 10000000) * 10000;
+    return calcHead_(members, headSur, useNewRules, getM);
   }
 
   // Рыщанов: 100к оклад + 50к если ВП своего парка >20М + 50к за каждые след. 5М
@@ -8028,42 +8091,20 @@ function renderSalesSalary() {
     return sum + (l ? (l.hired_margin_qualified||0) : 0);
   }, 0) : 0;
 
-  var DEPTS = [
-    { color:'#1D9E75', bgA:'29,158,117', label:'Отдел Ахтамовой',  head:'ахтамова',  headName:'Ахтамова Лиана',  ownSales:true,  specialHead:false,
-      members:['ахтамова','цегельников','гуштюк','дербенцева','шейко'] },
-    // ownSales:true - по аналогии с Ахтамовой (Влад, 2026-07-04: "если у неё были собственные
-    // продажи"). Безопасно и когда личных продаж нет: calcMgr('гусейнова',...) вернёт null,
-    // если её нет в by_manager (нет заказов) - строка "Личные продажи" просто не появится,
-    // как и было раньше.
-    { color:'#378ADD', bgA:'55,138,221', label:'Отдел Гусейновой', head:'гусейнова', headName:'Гусейнова Айнур', ownSales:true, specialHead:false,
-      members:['гусейнова','савиток','филипчук','котельников','гуляева','коньшина','володин'] },
+  // ownSales:true у обоих коммерческих отделов - по аналогии с Ахтамовой (Влад, 2026-07-04:
+  // "если у неё были собственные продажи"). Безопасно и когда личных продаж нет:
+  // calcMgr('гусейнова',...) вернёт null, если её нет в by_manager (нет заказов) - строка
+  // "Личные продажи" просто не появится.
+  var DEPTS = COMMERCIAL_DEPTS.concat([
     { color:'#BA7517', bgA:'186,117,23', label:'Отдел Рыщанова',   head:'рыщанов',   headName:'Рыщанов Рустем',  ownSales:false, specialHead:true,
       // С июля - весь отдел логистики одним блоком: Рыщанов (рук.) + все логисты
       // (Влад, 2026-08-06: "это и есть отдел логистики"). members тут - только для шапки
       // карточки (subNames) и списка "кто в отделе"; сами строки таблицы логисты/Васин
       // рендерятся отдельным кодом ниже (calcLogist/calcVasin - другая формула, не calcMgr).
       members: useNewRules ? ['рыщанов'].concat(ALL_LOGISTS) : ['рыщанов','прус-роскошный','суркова'] },
-  ];
+  ]);
 
   var totalPayroll = 0;
-
-  // Влад, 2026-08-06: "сделай, чтобы у всех людей была фамилия и имя" - раньше показывали
-  // только фамилию. Имена собраны из выгрузок 1С за это время - у кого не нашли (Дербенцева,
-  // Коньшина - уже уволены, скрыты по нулевой выручке) остаётся фолбэк на одну фамилию.
-  var FULL_NAME = {
-    'ахтамова':'Ахтамова Лиана', 'гусейнова':'Гусейнова Айнур', 'рыщанов':'Рыщанов Рустем',
-    'цегельников':'Цегельников Вячеслав', 'гуштюк':'Гуштюк Ирина', 'котельников':'Котельников Данила',
-    'гуляева':'Гуляева Лилия', 'филипчук':'Филипчук Екатерина', 'шейко':'Шейко Елена',
-    'кан':'Кан Михаил', 'махура':'Махура Николай', 'сильчев':'Сильчев Максим',
-    'васин':'Васин Максим', 'прус-роскошный':'Прус-Роскошный Роман', 'суркова':'Суркова Анастасия',
-    'володин':'Володин Илья', 'савиток':'Савиток Олеся'
-  };
-  function capName(s) {
-    var key = s.toLowerCase();
-    if (FULL_NAME[key]) return FULL_NAME[key];
-    if (s === 'прус-роскошный') return 'Прус-Роскошный';
-    return s.charAt(0).toUpperCase() + s.slice(1);
-  }
 
   // Влад, 2026-08-06: разделить визуально "базу, от которой считается зарплата" (выручка,
   // маржа найма, затраты - входные данные) от "уже посчитанной зарплаты" (оклад/проценты/
@@ -8511,12 +8552,189 @@ function renderSalesSalary() {
       '</div>';
   }
   var summaryHtml = '<div class="card" style="margin-bottom:16px;padding:16px">';
-  summaryHtml += '<div style="display:flex;justify-content:space-between;align-items:center">';
+  summaryHtml += '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">';
   summaryHtml += '<div style="font-size:14px;font-weight:600">Фонд оплаты труда - коммерческий отдел</div>';
+  summaryHtml += '<div style="display:flex;align-items:center;gap:16px">';
+  // Экспорт в Excel (plans/2026-08-24-salary-excel-export.md) - только коммерческий отдел
+  // (Ахтамова/Гусейнова), только для действующих (useNewRules) периодов - см. проверку внутри
+  // exportSalaryToExcel_.
+  summaryHtml += '<button onclick="exportSalaryToExcel_()" style="background:rgba(29,158,117,.12);border:1px solid rgba(29,158,117,.35);' +
+    'color:#1D9E75;padding:7px 14px;border-radius:7px;font-size:12px;cursor:pointer;white-space:nowrap">📤 Экспорт в Excel</button>';
   summaryHtml += '<div style="font-size:22px;font-weight:700;color:#1D9E75">'+fr(totalPayroll)+'</div>';
-  summaryHtml += '</div>'+marginBannerHtml+warningHtml+'</div>';
+  summaryHtml += '</div></div>';
+  summaryHtml += marginBannerHtml+warningHtml+'</div>';
 
   el.innerHTML = summaryHtml + html;
+}
+
+// ── ЭКСПОРТ ЗАРПЛАТЫ В EXCEL (plans/2026-08-24-salary-excel-export.md) ──────────────────────
+// Влад, 2026-08-24: "нужна возможность выгружать в эксель данные со страницы зарплата, в
+// екселе должна сохраняться логика и должны быть прописаны формулы". Согласовано: снимок
+// ТЕКУЩЕГО периода (базовые цифры - числа, каждый шаг расчёта - настоящая Excel-формула,
+// ссылающаяся на них), только коммерческий отдел (Ахтамова/Гусейнова, без логистов/Рыщанова/
+// скрытой строки Цуцурина).
+//
+// ПРИНЦИП: эта функция НЕ пересчитывает бизнес-логику самостоятельно - она берёт ГОТОВЫЕ,
+// уже отрендеренные на экране объекты (calcHead/calcMgr, ТЕ ЖЕ вызовы, что использует
+// renderSalesSalary()) и раскладывает их числа по ячейкам + формулы, которые обязаны при
+// пересчёте Excel'ем дать то же число, что уже на экране. Если когда-нибудь бизнес-логика
+// (calcMgr/calcHead/okladByRev/mgrRate) изменится - экспорт автоматически подхватит новые
+// цифры (он вызывает те же функции), но конкретные ФОРМУЛЫ ниже (тарифная сетка оклада,
+// проценты, пороги) захардкожены под правила, действующие на 2026-08-24 - при следующем
+// изменении порогов/ставок нужно синхронно поправить и здесь.
+
+function xlCell_(v) {
+  if (typeof v === 'number') return { t: 'n', v: v };
+  return { t: 's', v: String(v == null ? '' : v) };
+}
+// Формула + закэшированное значение. SheetJS МОЛЧА ВЫБРАСЫВАЕТ ячейку-формулу без 'v' при
+// записи файла (проверено на реальной библиотеке 2026-08-24, до фикса файл открывался бы с
+// пустыми ячейками вместо формул) - ровно так работает и настоящий Excel, где у формулы
+// всегда есть последнее вычисленное значение рядом с самой формулой. 'val' - ГОТОВОЕ число
+// из calcMgr/calcHead_ (та же переменная, что уже показана на экране), а не пересчитанное
+// заново - гарантирует, что открытый файл и экран совпадают буква в букву без пересчёта Excel.
+function xlFormula_(f, val) {
+  return { t: 'n', f: f, v: val };
+}
+
+// Строит один лист (один отдел) как массив строк ячеек + возвращает объект листа SheetJS.
+// dept - запись из COMMERCIAL_DEPTS. getM/getL/useNewRules - как в renderSalesSalary().
+function buildDeptSheet_(dept, getM, getL, useNewRules) {
+  var rows = [];
+  var HEADERS = ['Сотрудник', 'Оборот (свой+найм)', 'Своя выручка', 'База % своего парка (выручка минус затраты 1С)',
+    'Маржа найма квалиф. (≥23%)', 'Оклад', '% своего парка', '% найма (8%)', 'Премия ≥15М обор.', 'ИТОГО'];
+  rows.push(HEADERS.map(xlCell_));
+
+  // ── Строки команды (без руководителя) ──────────────────────────────────────────────────
+  var memberRowStart = rows.length; // 0-based индекс строки (после заголовка)
+  var memberSurs = dept.members.filter(function(s){ return s !== dept.head; });
+  var memberFundSum = 0; // сумма total_sal команды - копится тут же, чтобы не вызывать calcMgr дважды
+  memberSurs.forEach(function(sur) {
+    var c = calcMgr(sur, true, getM, getL, useNewRules);
+    if (!c || !c.total) return; // нет данных/уволен - как на экране, строку не рисуем
+    memberFundSum += c.total_sal;
+    var r = rows.length; // текущая строка (0-based)
+    var rowNum = r + 1;  // Excel 1-based
+    var rate = mgrRate(sur);
+    rows.push([
+      xlCell_(capName(sur)),
+      xlCell_(c.total),
+      xlCell_(c.ownRev),
+      xlCell_(c.ownProfitBase),
+      xlCell_(c.hiredMargin),
+      xlFormula_('IF(B'+rowNum+'>=10000000,150000,IF(B'+rowNum+'>=8000000,100000,IF(B'+rowNum+'>=5000000,50000,IF(B'+rowNum+'>=2000000,30000,0))))', c.oklad),
+      xlFormula_('ROUND(D'+rowNum+'*'+rate+',0)', c.ownComm),
+      xlFormula_('ROUND(E'+rowNum+'*0.08,0)', c.hiredBonus),
+      xlFormula_('IF(B'+rowNum+'>=15000000,100000,0)', c.bonus15m),
+      xlFormula_('F'+rowNum+'+G'+rowNum+'+H'+rowNum+'+I'+rowNum, c.total_sal),
+    ]);
+  });
+  var memberRowEnd = rows.length - 1; // последняя строка команды (0-based), может быть < memberRowStart если команда пуста
+
+  // ── Личные продажи руководителя (includeOklad:false - как на экране) ──────────────────
+  var headHM = dept.ownSales ? calcMgr(dept.head, false, getM, getL, useNewRules) : null;
+  var headHMRow = null;
+  if (headHM) {
+    var r2 = rows.length, rowNum2 = r2 + 1;
+    var rate2 = mgrRate(dept.head);
+    headHMRow = rowNum2;
+    rows.push([
+      xlCell_(capName(dept.head) + ' - личные продажи'),
+      xlCell_(headHM.total),
+      xlCell_(headHM.ownRev),
+      xlCell_(headHM.ownProfitBase),
+      xlCell_(headHM.hiredMargin),
+      xlCell_(0), // оклад по личным продажам не начисляется (includeOklad:false) - см. calcMgr
+      xlFormula_('ROUND(D'+rowNum2+'*'+rate2+',0)', headHM.ownComm),
+      xlFormula_('ROUND(E'+rowNum2+'*0.08,0)', headHM.hiredBonus),
+      xlFormula_('IF(B'+rowNum2+'>=15000000,100000,0)', headHM.bonus15m),
+      xlFormula_('F'+rowNum2+'+G'+rowNum2+'+H'+rowNum2+'+I'+rowNum2, headHM.total_sal),
+    ]);
+  }
+
+  // ── Команда руководителя (агрегат calcHead - формулы SUM/COUNTIF по диапазону команды) ──
+  var headHC = calcHead_(dept.members, dept.head, useNewRules, getM);
+  var teamRowNum = rows.length + 1;
+  var hasTeam = memberRowEnd >= memberRowStart;
+  var memberRange = hasTeam ? ('B'+(memberRowStart+1)+':B'+(memberRowEnd+1)) : null;
+  var memberRangeD = hasTeam ? ('D'+(memberRowStart+1)+':D'+(memberRowEnd+1)) : null;
+  var memberRangeE = hasTeam ? ('E'+(memberRowStart+1)+':E'+(memberRowEnd+1)) : null;
+  rows.push([
+    xlCell_(capName(dept.head) + ' - команда (0.8% выручки + 2% маржи найма + премия за укомплект.)'),
+    xlCell_(headHC.deptRev),
+    xlCell_(headHC.deptOwnRev),
+    xlCell_(headHC.deptOwnProfitBase),
+    xlCell_(headHC.deptQualMargin),
+    xlCell_(20000), // оклад руководителя - фикс, не зависит от порогов
+    xlFormula_(hasTeam ? 'ROUND(SUM('+memberRangeD+')*0.008,0)' : '0', headHC.pct08),
+    xlFormula_(hasTeam ? 'ROUND(SUM('+memberRangeE+')*0.02,0)' : '0', headHC.margin2),
+    xlFormula_(hasTeam ? 'IF(COUNTIF('+memberRange+',">0")>=4,COUNTIF('+memberRange+',">=2000000")*20000,0)' : '0', headHC.mgrBonus),
+    xlFormula_('F'+teamRowNum+'+G'+teamRowNum+'+H'+teamRowNum+'+I'+teamRowNum, headHC.total),
+  ]);
+
+  // ── Премия за объём отдела (порог 30М, 10т за каждые 10М) ──────────────────────────────
+  var volRowNum = rows.length + 1;
+  var deptRevTotalFormula = 'B'+teamRowNum + (headHMRow ? '+B'+headHMRow : '');
+  var deptRevTotal = headHC.deptRev + (headHM ? headHM.total : 0);
+  var volumeBonus = calcVolumeBonus(deptRevTotal); // та же функция, что и на экране
+  rows.push([
+    xlCell_('Премия за объём отдела (выручка ≥30М, 10т за каждые полных 10М)'),
+    xlFormula_(deptRevTotalFormula, deptRevTotal), // "Оборот" колонка тут = выручка отдела целиком, для наглядности
+    xlCell_(''), xlCell_(''), xlCell_(''),
+    xlCell_(''), xlCell_(''), xlCell_(''), xlCell_(''),
+    xlFormula_('IF(B'+volRowNum+'<30000000,0,INT(B'+volRowNum+'/10000000)*10000)', volumeBonus),
+  ]);
+
+  // ── ИТОГО по отделу ──────────────────────────────────────────────────────────────────
+  var totalRowNum = rows.length + 1;
+  var sumParts = ['J'+teamRowNum, (headHMRow ? 'J'+headHMRow : '0'), 'J'+volRowNum];
+  var deptFund = headHC.total + (headHM ? headHM.total_sal : 0) + volumeBonus + memberFundSum;
+  if (hasTeam) sumParts.push('SUM(J'+(memberRowStart+1)+':J'+(memberRowEnd+1)+')');
+  rows.push([
+    xlCell_('ИТОГО ПО ОТДЕЛУ'), xlCell_(''), xlCell_(''), xlCell_(''), xlCell_(''),
+    xlCell_(''), xlCell_(''), xlCell_(''), xlCell_(''),
+    xlFormula_(sumParts.join('+'), deptFund),
+  ]);
+
+  // Собираем worksheet вручную (не aoa_to_sheet - тому формулы не передать напрямую)
+  var ws = {};
+  var maxCol = 0;
+  rows.forEach(function(rowCells, r) {
+    maxCol = Math.max(maxCol, rowCells.length - 1);
+    rowCells.forEach(function(cellObj, c) {
+      ws[XLSX.utils.encode_cell({ r: r, c: c })] = cellObj;
+    });
+  });
+  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rows.length - 1, c: maxCol } });
+  ws['!cols'] = [{ wch: 42 }, { wch: 16 }, { wch: 14 }, { wch: 20 }, { wch: 18 }, { wch: 11 }, { wch: 12 }, { wch: 12 }, { wch: 13 }, { wch: 13 }];
+  return ws;
+}
+
+function exportSalaryToExcel_() {
+  if (!D || !D.orders) { alert('Нет данных для экспорта.'); return; }
+  var useNewRules = isNewRulesPeriod(D.orders.period);
+  if (!useNewRules) {
+    alert('Экспорт доступен только для периодов с июля 2026 (действующие правила расчёта). ' +
+      'Формулы в файле написаны под текущие правила - для более старых периодов действовала другая формула.');
+    return;
+  }
+  var allMgrs = D.orders.by_manager || [];
+  var allLogs = D.orders.by_logist || [];
+  var mgrIdx = {}, logIdx = {};
+  allMgrs.forEach(function(m) { mgrIdx[(m.name||'').trim().split(' ')[0].toLowerCase()] = m; });
+  allLogs.forEach(function(l) { logIdx[(l.name||'').trim().split(' ')[0].toLowerCase()] = l; });
+  function getM(sur) { return mgrIdx[sur.toLowerCase()] || null; }
+  function getL(sur) { return logIdx[sur.toLowerCase()] || null; }
+
+  var wb = XLSX.utils.book_new();
+  COMMERCIAL_DEPTS.forEach(function(dept) {
+    var ws = buildDeptSheet_(dept, getM, getL, useNewRules);
+    XLSX.utils.book_append_sheet(wb, ws, dept.headName.split(' ')[0]);
+  });
+
+  var period = D.orders.period || '';
+  var fname = 'Зарплата_' + (period || 'период') + '.xlsx';
+  XLSX.writeFile(wb, fname);
 }
 
 function renderSalesLog() {
@@ -9460,15 +9678,20 @@ function fmtDateRu(dateStr) {
 }
 
 // Свой сервер (2026-08-17) - постепенный переезд с Apps Script/Google Таблиц на Beget (см.
-// plans/ и retrospectives/). Ключ - не полноценная сессия, как у apiFetchJson, а общий
-// секрет только для этих эндпоинтов - осознанное временное упрощение, см. server.js.
+// plans/ и retrospectives/). До 2026-08-21 здесь был общий секретный ключ прямо в этом
+// файле - т.е. в открытом виде на публичной странице (техаудит, plans/2026-08-19-audit-
+// remediation.md, пункт 01: "любой, кто откроет исходник страницы, скачивает всю базу").
+// Теперь используется ТОТ ЖЕ session_token, что уже есть у apiFetchJson (см. SESSION_TOKEN
+// выше) - сервер проверяет его сам той же HMAC-подписью, что выдал и умеет проверять Apps
+// Script (see verifySessionToken() в api/server.js). Никакого отдельного секрета в браузере
+// больше нет вообще.
 const YARD_API_BASE = 'https://api.yardhub.ru/api';
-const YARD_API_KEY = '3f41d8e2d1cb53fe45cd1627f0067cd65df37b1d5081b275';
 function fetchFromYardApi_(path, params) {
-  var qs = Object.keys(params || {}).map(function(k) {
-    return params[k] ? (k + '=' + encodeURIComponent(params[k])) : null;
+  var merged = Object.assign({ session_token: SESSION_TOKEN }, params || {});
+  var qs = Object.keys(merged).map(function(k) {
+    return merged[k] ? (k + '=' + encodeURIComponent(merged[k])) : null;
   }).filter(Boolean).join('&');
-  return fetch(YARD_API_BASE + path + (qs ? '?' + qs : ''), { headers: { 'X-Api-Key': YARD_API_KEY } })
+  return fetch(YARD_API_BASE + path + (qs ? '?' + qs : ''))
     .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); });
 }
 function fetchClientAnalyticsFromServer_(params) {

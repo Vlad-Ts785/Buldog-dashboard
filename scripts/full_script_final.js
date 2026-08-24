@@ -5437,12 +5437,43 @@ function readMainPayloadCache_(ss) {
   }
 }
 
-// doGet() зовёт это, а не buildHeavyMainPayload_ напрямую - кэш в приоритете, живой расчёт
-// только как страховка (первый запуск после деплоя, до первого runAll(); или кэш битый).
+// doGet() зовёт это, а не buildHeavyMainPayload_ напрямую. С 2026-08-24 выручка/ДЗ/
+// поступления/сводка больше НЕ читаются из часового кэша - они уже посчитаны на сервере
+// (миллисекунды, не секунды - fetchOrdersComputedFromServer_/fetchDebtComputedFromServer_/
+// fetchReceiptsComputedFromServer_ внутри getOrdersData/getDebtData/getReceiptsData уже
+// пробуют сервер первым, см. архитектуру в CLAUDE.md). Значит держать их в часовом снимке -
+// собственный тормоз, а не экономия. Повод: 24.08.2026, после простоя VPS (оплата хостинга)
+// сервер уже отдавал свежие цифры, а дашборд ещё час показывал застывшую выручку из кэша, до
+// следующего runAll() - Влад: "мы уже перешли на сервер по выручке ДЗ поступлениям, вся
+// логика должна быть серверная, а не гугловская".
+//
+// В кэше по-прежнему остаются vehicles/drivers/history/periods/driverOrderCounts - они читают
+// Штатку/Историю_финансов НАПРЯМУЮ из Google Таблицы (не с сервера), там расчёт всё ещё
+// медленный (см. CLAUDE.md - "Штатка/История_финансов - НЕ начато", в очереди на перенос) -
+// кэшировать их по-прежнему нужно, иначе КАЖДЫЙ заход на дашборд будет ждать эти секунды.
 function getMainPayloadCacheOrLive_(ss, staffData) {
+  var ordersData = getOrdersData(ss);
+  var freshFinancials = {
+    summary:  getSummaryData(ss, ordersData),
+    orders:   ordersData,
+    debt:     getDebtData(ss),
+    receipts: getReceiptsData(ss, ordersData),
+  };
   var cached = readMainPayloadCache_(ss);
-  if (cached) return cached;
-  return buildHeavyMainPayload_(ss, staffData);
+  if (cached) return Object.assign({}, cached, freshFinancials);
+
+  // Кэша нет вообще (первый запуск после деплоя, до первого runAll()) - остальное (медленные
+  // Штатка-поля) считаем живьём. ordersData уже посчитан выше - buildHeavyMainPayload_ здесь
+  // намеренно НЕ вызывается целиком, чтобы не считать заказы дважды.
+  var defaultRange = getCurrentMonthRange_();
+  var vehiclesData = aggregateFinHistoryForRange(ss, staffData, defaultRange.from, defaultRange.to);
+  return Object.assign({
+    vehicles: vehiclesData,
+    drivers:  deriveDriversFromVehicles(vehiclesData),
+    history:  getHistoryData(ss),
+    driverOrderCounts: getDriverOrderCounts_(ss, defaultRange.from, defaultRange.to),
+    periods: getAvailablePeriods(ss),
+  }, freshFinancials);
 }
 
 // Нормализация госномера: убираем пробелы + кириллица→латиница (А=A, В=B и т.д.)

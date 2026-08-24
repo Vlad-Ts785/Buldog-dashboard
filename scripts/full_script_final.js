@@ -1152,16 +1152,25 @@ function runAll() {
     errors.push('❌ Сборка отчёта: ' + e.message);
   }
 
-  // Отправляем в Telegram
-  try {
-    if (alertsText) sendTelegram('🚨 *АЛЕРТЫ*\n\n' + alertsText);
-    sendTelegram(summaryText);
-    // Отдельное сообщение по менеджерам и логистам
-    sendTelegram(buildManagersText());
-    if (errors.length > 0) sendTelegram('⚠️ *Ошибки при обновлении*\n\n' + errors.join('\n'));
-    log.push('✅ Telegram уведомления отправлены');
-  } catch(e) {
-    log.push('❌ Telegram: ' + e.message);
+  // Отправляем в Telegram - обычную бизнес-сводку (2026-08-24, Влад: "СМС мне приходят в
+  // Telegram, они не нужны, пусть только приходят СМС касаемо работы сервера") ВЫКЛЮЧЕНО по
+  // умолчанию. Переключатель через Script Properties (BUSINESS_DIGEST_TELEGRAM), а не жёсткое
+  // удаление кода - см. enableBusinessDigestTelegram()/disableBusinessDigestTelegram() ниже,
+  // если понадобится вернуть без нового деплоя. Сторож (watchdogCheckDataFreshness) шлёт
+  // отдельно и НЕ затронут этим переключателем - это и есть "СМС касаемо работы сервера".
+  if (businessDigestTelegramEnabled_()) {
+    try {
+      if (alertsText) sendTelegram('🚨 *АЛЕРТЫ*\n\n' + alertsText);
+      sendTelegram(summaryText);
+      // Отдельное сообщение по менеджерам и логистам
+      sendTelegram(buildManagersText());
+      if (errors.length > 0) sendTelegram('⚠️ *Ошибки при обновлении*\n\n' + errors.join('\n'));
+      log.push('✅ Telegram уведомления отправлены');
+    } catch(e) {
+      log.push('❌ Telegram: ' + e.message);
+    }
+  } else {
+    log.push('⏭ Бизнес-сводка в Telegram выключена (businessDigestTelegramEnabled_)');
   }
 
   console.log(log.join('\n'));
@@ -3601,6 +3610,27 @@ function setupWatchdogTrigger() {
   });
   ScriptApp.newTrigger('watchdogCheckDataFreshness').timeBased().everyHours(1).create();
   Logger.log('Сторож поставлен на расписание: раз в час.');
+}
+
+// ── Переключатель бизнес-сводки в Telegram (2026-08-24) ────────────────────────────────────
+// Влад: "СМС мне приходят в Telegram, они не нужны, пусть только приходят СМС касаемо работы
+// сервера" - обычная сводка (алерты/финансы/менеджеры/логисты, отправляется каждый час внутри
+// runAll()) выключена по умолчанию. Сторож (watchdogCheckDataFreshness, "обновление не
+// проходит"/"данные снова обновляются") - ЭТО и есть "СМС про работу сервера", он отдельный
+// переключатель и этим флагом не затрагивается.
+function businessDigestTelegramEnabled_() {
+  return PropertiesService.getScriptProperties().getProperty('BUSINESS_DIGEST_TELEGRAM') === 'on';
+}
+function enableBusinessDigestTelegram() {
+  PropertiesService.getScriptProperties().setProperty('BUSINESS_DIGEST_TELEGRAM', 'on');
+  Logger.log('Бизнес-сводка в Telegram включена - вернётся со следующим runAll().');
+}
+function disableBusinessDigestTelegram() {
+  PropertiesService.getScriptProperties().deleteProperty('BUSINESS_DIGEST_TELEGRAM');
+  Logger.log('Бизнес-сводка в Telegram выключена (это и есть состояние по умолчанию).');
+}
+function businessDigestTelegramStatus() {
+  Logger.log('Бизнес-сводка в Telegram: ' + (businessDigestTelegramEnabled_() ? 'ВКЛЮЧЕНА' : 'выключена (по умолчанию)'));
 }
 
 // ============================================================

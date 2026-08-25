@@ -4049,6 +4049,13 @@ function isOwnTralLogistName_(name) {
   return sur === 'сильчев' || sur === 'кан' || sur === 'махура';
 }
 
+// Рыщанов - руководитель ВСЕГО отдела логистики (2026-08-25, Влад: "нужно сделать личную
+// страницу Рыщанову... похожа на страницу Пруса"), не брокер найма лично - фиксированная
+// фамилия, тот же принцип, что isVasinName_/isOwnTralLogistName_ выше.
+function isRyschanowLogistName_(name) {
+  return (name||'').trim().split(' ')[0].toLowerCase() === 'рыщанов';
+}
+
 // 'YYYY-MM' предыдущего месяца относительно переданного - для сравнения "ВП тралов к прошлому
 // месяцу" у own-tral логистов (см. ниже). day=1 перед вычитанием месяца - та же защита от
 // перепрыгивания через 2 месяца, что и в prevMonthKey_() на фронтенде.
@@ -4133,6 +4140,55 @@ function getLongHaulDetail_(ss, period) {
   return bundle;
 }
 
+// Компанейский бандл для личной страницы Рыщанова (2026-08-25, руководитель отдела логистики,
+// см. plans/2026-08-25-ryschanow-personal-page.md) - тот же приём, что buildLongHaulBundle_
+// для Васина: переиспользует УЖЕ загруженный orders (без повторного getOrdersData) + отдельно
+// читает ВП своего парка (та же формула, что кормит calcRyschanow на фронтенде - grossProfit =
+// "Нормализованные_данные" за текущий месяц, getGrossProfitForPeriod за прошлый).
+// qual_margin_all_logists - сумма hired_margin_qualified по ВСЕМ логистам (не только по
+// Рыщанову лично) - то же слагаемое, что 2%-бонус в calcRyschanow.
+const RYSCHANOW_ALL_LOGISTS_SUR_ = ['васин', 'кан', 'махура', 'сильчев', 'прус-роскошный', 'суркова'];
+function buildRyschanowSummaryBundle_(ss, orders, period) {
+  var byLogistAll = orders.by_logist || [];
+  var qualMarginAllLogists = byLogistAll.reduce(function(sum, l) {
+    var sur = (l.name || '').trim().split(' ')[0].toLowerCase();
+    if (RYSCHANOW_ALL_LOGISTS_SUR_.indexOf(sur) < 0) return sum;
+    return sum + (l.hired_margin_qualified || 0);
+  }, 0);
+
+  var grossProfit = null, specialTralsProfit = 0;
+  if (!period) {
+    var sd = getSummaryData(ss, orders);
+    grossProfit = (sd && typeof sd.profit === 'number') ? sd.profit : null;
+    specialTralsProfit = (sd && sd.special_trals_profit) || 0;
+  } else {
+    var gp = getGrossProfitForPeriod(ss, period);
+    grossProfit = (gp && typeof gp.profit === 'number') ? gp.profit : null;
+    specialTralsProfit = (gp && gp.special_trals_profit) || 0;
+  }
+
+  // Техника/Водители (2026-08-25, Влад: "табличка техника со всеми еденицами и расходами...
+  // табличка водители") - при самостоятельном входе Рыщанова доступа к D.vehicles/D.drivers
+  // ВООБЩЕ НЕТ (buildLogistView_ отдаёт только orders, без верхнеуровневых полей парка,
+  // в отличие от admin-ответа) - тот же источник, что уже кормит "Техника"/vehicles_period/
+  // Васина (aggregateFinHistoryForRange), просто НЕ фильтруем по типу техники (Васину нужны
+  // только длинномеры, Рыщанову - весь парк).
+  var range = period ? monthKeyToRange_(period) : getCurrentMonthRange_();
+  var staffData = getStaffData(ss);
+  var vehicles = aggregateFinHistoryForRange(ss, staffData, range.from, range.to);
+
+  return {
+    by_logist: byLogistAll,
+    by_driver_no_waybill: orders.by_driver_no_waybill || [],
+    by_supplier_no_waybill: orders.by_supplier_no_waybill || [],
+    gross_profit: grossProfit,
+    special_trals_profit: specialTralsProfit,
+    qual_margin_all_logists: qualMarginAllLogists,
+    vehicles: vehicles,
+    drivers: deriveDriversFromVehicles(vehicles),
+  };
+}
+
 // Урезанный набор данных для роли "logist" (2026-08-10, по аналогии с buildManagerView_ выше) -
 // только собственные заказы/маржа/сделки, без доступа к данным других людей и компании в целом.
 // ss/period (2026-08-11) - опциональны, нужны только чтобы приложить long_haul для Васина
@@ -4167,6 +4223,13 @@ function buildLogistView_(orders, logistName, ss, period) {
   // action=own_tral_prev_month (см. getOwnTralPrevMonthProfit_ + doGet ниже).
   if (ss && isOwnTralLogistName_(logistName)) {
     ordersOut.own_profit_tral_prev_month = getOwnTralPrevMonthProfit_(ss, logistName, period);
+  }
+  // Компанейский срез для Рыщанова (2026-08-25) - руководитель отдела логистики, не просто
+  // логист-брокер, ему нужна ВП компании/маржа всех логистов/путевые компании целиком, а не
+  // только своя книга (в отличие от остальных логистов, у которых by_hired_supplier/
+  // all_hired_deals выше - максимум расширенного доступа).
+  if (ss && isRyschanowLogistName_(logistName)) {
+    ordersOut.ryschanow_summary = buildRyschanowSummaryBundle_(ss, orders, period || null);
   }
 
   return {
@@ -5308,11 +5371,18 @@ function doGet(e) {
       if (!gatManager) {
         return ContentService.createTextOutput(JSON.stringify({ error: 'Не указан сотрудник' })).setMimeType(ContentService.MimeType.JSON);
       }
+      // Рыщанов (2026-08-25) - в листе "Доступ" у него роль logist (как и у остальных
+      // логистов), но по факту он руководитель отдела - переопределяем gatRole ПО ФАМИЛИИ,
+      // и для self-login, и для admin-предпросмотра, чтобы всегда попадал на свой собственный
+      // ИИ-промпт, а не на общий логистский.
+      if (isRyschanowLogistName_(gatManager)) gatRole = 'ryschanow';
       try {
         var gatOrders = getOrdersData(ss);
         if (gatOrders.error) throw new Error(gatOrders.error);
         var gatForce = e.parameter.force === '1';
-        var gatResult = gatRole === 'logist'
+        var gatResult = gatRole === 'ryschanow'
+          ? generateRyschanowAiTasksCached_(ss, gatOrders, gatManager, null, gatForce)
+          : gatRole === 'logist'
           ? generateLogistAiTasksCached_(ss, gatOrders, gatManager, null, gatForce)
           : generateManagerAiTasksCached_(ss, gatOrders, gatManager, null, gatForce);
         return ContentService.createTextOutput(JSON.stringify(gatResult)).setMimeType(ContentService.MimeType.JSON);
@@ -9732,6 +9802,95 @@ function buildLogistAiTasksPrompt_(logistName, context) {
     'и воды.';
 }
 
+// ── ИИ-ЗАДАЧИ ДЛЯ РЫЩАНОВА (2026-08-25) ────────────────────────────────────────────────────
+// Влад: "ИИ задачи по сотрудникам логистам, это путевые в основном по своему и наемному
+// парку" - руководитель отдела, а не брокер найма - контекст компанейский (все логисты сразу,
+// путевые и по своим водителям, и по наёмным поставщикам), а не по одному поставщику, как у
+// обычного логиста. См. plans/2026-08-25-ryschanow-personal-page.md.
+function buildRyschanowAiContext_(ss, orders, period) {
+  var bundle = buildRyschanowSummaryBundle_(ss, orders, period || null);
+
+  var noWaybillDrivers = (bundle.by_driver_no_waybill || []).slice(0, 8).map(function(d) {
+    return { name: d.name, no_waybill: d.no_waybill || 0, orders: d.orders || 0 };
+  });
+  var noWaybillSuppliers = (bundle.by_supplier_no_waybill || []).slice(0, 8).map(function(s) {
+    return { name: s.name, no_waybill: s.no_waybill || 0, orders: s.orders || 0 };
+  });
+  var logistsSummary = (bundle.by_logist || [])
+    .filter(function(l) { return RYSCHANOW_ALL_LOGISTS_SUR_.indexOf((l.name||'').trim().split(' ')[0].toLowerCase()) >= 0; })
+    .map(function(l) {
+      return {
+        name: l.name, orders: l.orders || 0, hired_orders: l.hired_orders || 0,
+        margin_qualified: Math.round(l.hired_margin_qualified || 0),
+        margin_unqualified: Math.round(l.hired_margin_unqualified || 0),
+      };
+    });
+
+  return {
+    ryschanow: true,
+    period: period || Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM'),
+    no_waybill_drivers: noWaybillDrivers,
+    no_waybill_suppliers: noWaybillSuppliers,
+    logists: logistsSummary,
+    qual_margin_all_logists: Math.round(bundle.qual_margin_all_logists || 0),
+  };
+}
+
+function buildRyschanowAiTasksPrompt_(name, context) {
+  return 'Ты - директор по логистике транспортной компании (перевозки тралами и ' +
+    'длинномерами), который каждое утро даёт руководителю отдела логистики короткий и ' +
+    'ТОЧНЫЙ разбор дня по ВСЕМУ отделу - как живой директор, который помнит, кто из ' +
+    'логистов и где отстаёт, а не формальный отчёт по цифрам. Этот человек руководит всеми ' +
+    'логистами компании (не брокерит найм лично) - отвечает за путевые листы ПО ВСЕЙ ' +
+    'компании, и по своему парку (водители), и по наёмному (поставщики). Ниже - реальные ' +
+    'компанейские данные за текущий месяц в формате JSON.\n\n' +
+    'Данные:\n' + JSON.stringify(context, null, 0) + '\n\n' +
+    'ВАЖНЫЕ ФАКТЫ О ТОМ, КАК УСТРОЕНА РАБОТА (используй их, чтобы не писать ошибочных ' +
+    'советов):\n' +
+    '- no_waybill_drivers - СВОИ водители (собственный парк) без сданных путевых листов, ' +
+    'отсортированы по количеству. no_waybill_suppliers - НАЁМНЫЕ поставщики (перевозчики) ' +
+    'без сданных путевых. Это ДВЕ РАЗНЫЕ зоны ответственности: за своих водителей отвечает ' +
+    'диспетчер/сам водитель, за наёмных поставщиков - конкретный логист, который с ними ' +
+    'работал. Если оба списка не пусты - задача про своих водителей и задача про наёмных ' +
+    'поставщиков должны быть РАЗНЫМИ задачами, не смешивай их в одну.\n' +
+    '- logists[] - сводка по каждому логисту компании (заказы/маржа найма квалифицирующая ' +
+    '>=23%/неквалифицирующая <23%). Если у кого-то margin_unqualified заметно больше ' +
+    'margin_qualified (или margin_qualified около нуля при заметном числе заказов) - это ' +
+    'сигнал, что у этого логиста проблема со ставками поставщиков, стоит сделать отдельную ' +
+    'задачу "обсудить с [имя логиста] пересмотр ставок" с указанием конкретных цифр из ' +
+    'его строки.\n' +
+    '- НЕ указывай в "plan_advice" сам % выполнения плана по валовой прибыли - эта цифра ' +
+    'уже показана прямо на странице живым виджетом и обновляется в реальном времени в ' +
+    'течение дня, а твой текст кэшируется на весь день - если повторить её словами, она ' +
+    'разойдётся с тем, что видно на экране. Пиши про КОНКРЕТНЫЕ ДЕЙСТВИЯ и КОНКРЕТНЫХ ЛЮДЕЙ ' +
+    '(водителей/поставщиков/логистов) - без своей копии процента плана.\n' +
+    '- ФОРМАТ ЧИСЕЛ: все суммы в рублях пиши с пробелом как разделителем тысяч (например, ' +
+    '"7 618 250", а НЕ "7618250").\n\n' +
+    'Сформулируй РОВНО 5 задач на сегодня. Разумный баланс: минимум 1 задача про своих ' +
+    'водителей без путевых (если no_waybill_drivers не пуст), минимум 1 задача про наёмных ' +
+    'поставщиков без путевых (если no_waybill_suppliers не пуст), 1-2 задачи про конкретных ' +
+    'логистов из logists[] с проблемной маржой - но если по какой-то теме данных нет (список ' +
+    'пуст), не выдумывай, просто перераспредели на другие темы.\n\n' +
+    'Требования к ответу:\n' +
+    '- Ответь СТРОГО валидным JSON без markdown-обёртки (без ```), без текста до/после.\n' +
+    '- Формат: {"tasks":[{"title":"...","why":"...","category":"поставщики|документы"},' +
+    '... ровно 5 штук],"plan_advice":"..."}\n' +
+    '- "title" - короткая формулировка КОНКРЕТНОГО действия (до 90 символов) - что именно ' +
+    'сделать сегодня (позвонить водителю, потребовать путевой у поставщика, обсудить ставки ' +
+    'с логистом), а не общая тема.\n' +
+    '- "why" - 1-2 фразы, ПОЧЕМУ это важно именно сегодня, со ссылкой на конкретный факт из ' +
+    'данных (имя, количество, сумма) - не общие слова.\n' +
+    '- "category" - одна из двух: "документы" (путевые - свои или наёмные), "поставщики" ' +
+    '(маржа/ставки логистов и поставщиков).\n' +
+    '- "plan_advice" - 2-4 предложения, КОНКРЕТНО что подтянуть в отделе сегодня, с опорой ' +
+    'на конкретных людей из no_waybill_drivers/no_waybill_suppliers/logists - БЕЗ повторения ' +
+    'процента плана по ВП (см. выше).\n' +
+    '- Задачи должны быть РАЗНЫЕ по теме (не 5 вариаций одного и того же) и опираться ТОЛЬКО ' +
+    'на переданные данные, не выдумывай факты, которых нет в JSON.\n' +
+    '- Пиши по-русски, обращение на "ты", по-деловому, тоном директора, который знает свой ' +
+    'отдел лично - без длинного тире (используй обычный дефис), без канцелярита и воды.';
+}
+
 // POST https://api.kie.ai/codex/v1/responses - reasoning-модель (см. reference-память
 // kie.ai - "у каждой модели свой URL/формат", этот путь для GPT-5). Ключ - только из Script
 // Properties, никогда не в коде (правило репозитория).
@@ -9825,6 +9984,12 @@ function generateLogistAiTasksCached_(ss, orders, logistName, period, force) {
   return generateAiTasksCached_(ss, logistName, 'logist',
     function() { return buildLogistAiContext_(ss, orders, logistName, period); },
     buildLogistAiTasksPrompt_, force);
+}
+
+function generateRyschanowAiTasksCached_(ss, orders, name, period, force) {
+  return generateAiTasksCached_(ss, name, 'ryschanow',
+    function() { return buildRyschanowAiContext_(ss, orders, period); },
+    buildRyschanowAiTasksPrompt_, force);
 }
 
 // ── ПЛАНЫ МЕНЕДЖЕРОВ (лист "Планы_менеджеров", Влад вводит вручную каждый месяц) ──

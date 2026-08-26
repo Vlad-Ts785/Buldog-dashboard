@@ -10560,12 +10560,17 @@ function aggregateOrdersRows(rows) {
       // структурно у них путёвки в принципе не бывает, это не реальная недостача документа
       // (Влад, 2026-08-19: тот же принцип, что уже в основной воронке документов, здесь
       // раньше не применялся - "нет путёвки" по поставщикам/водителям завышало цифру).
-      if (!hw && !isInternalOrder && !isServiceRow) {
-        supplierMap[supplier].no_waybill++;
+      // Знаменатель "%" (2026-08-26, Влад: "сравним с поступлением путевых, ведём %") - ТА ЖЕ
+      // популяция заказов, что и числитель (!isInternalOrder && !isServiceRow), просто без
+      // условия !hw - считаем ВСЕ заказы, у которых путёвка в принципе требуется, не только
+      // те, где она отсутствует.
+      if (!isInternalOrder && !isServiceRow) {
         if (mgrLog) {
-          if (!logistNoWaybillMap[mgrLog]) logistNoWaybillMap[mgrLog] = { name: mgrLog, no_waybill_own: 0, no_waybill_hired: 0 };
-          logistNoWaybillMap[mgrLog].no_waybill_hired++;
+          if (!logistNoWaybillMap[mgrLog]) logistNoWaybillMap[mgrLog] = { name: mgrLog, no_waybill_own: 0, no_waybill_hired: 0, orders_own: 0, orders_hired: 0 };
+          logistNoWaybillMap[mgrLog].orders_hired++;
+          if (!hw) logistNoWaybillMap[mgrLog].no_waybill_hired++;
         }
+        if (!hw) supplierMap[supplier].no_waybill++;
       }
 
       // Общекорпоративный список сделок найма (2026-08-10, "Общие сделки" на личной странице
@@ -10728,12 +10733,15 @@ function aggregateOrdersRows(rows) {
       // !isServiceRow добавлен 2026-08-19 (Влад: "Не сданные путевые листы" считало и
       // служебные строки "Прочее" - у Войткуна за июль показывало 8, реально 4, см.
       // комментарий у supplierMap.no_waybill выше - тот же принцип).
-      if (!hw && !isInternalOrder && !isServiceRow) {
-        driverMap[driverName].no_waybill++;
+      // Знаменатель "%" (2026-08-26) - см. тот же комментарий у supplierMap выше, зеркальная
+      // логика для своего парка.
+      if (!isInternalOrder && !isServiceRow) {
         if (mgrLog) {
-          if (!logistNoWaybillMap[mgrLog]) logistNoWaybillMap[mgrLog] = { name: mgrLog, no_waybill_own: 0, no_waybill_hired: 0 };
-          logistNoWaybillMap[mgrLog].no_waybill_own++;
+          if (!logistNoWaybillMap[mgrLog]) logistNoWaybillMap[mgrLog] = { name: mgrLog, no_waybill_own: 0, no_waybill_hired: 0, orders_own: 0, orders_hired: 0 };
+          logistNoWaybillMap[mgrLog].orders_own++;
+          if (!hw) logistNoWaybillMap[mgrLog].no_waybill_own++;
         }
+        if (!hw) driverMap[driverName].no_waybill++;
       }
       if (equip === 'Длинномер') {
         driverMap[driverName].orders_long++;
@@ -10933,11 +10941,25 @@ function aggregateOrdersRows(rows) {
       .filter(function(s){ return s.no_waybill > 0; })
       .sort(function(a,b){ return b.no_waybill-a.no_waybill; }),
     // "Топ логистов с несданными путевыми" (2026-08-26, страница Рыщанова) - логист отвечает
-    // и за свой парк, и за наём одновременно, total = сумма обоих счётчиков.
+    // и за свой парк, и за наём одновременно, total = сумма обоих счётчиков. % (2026-08-26,
+    // Влад: "выведем количество заказов, сравним с поступлением путевых, ведём % и расставим
+    // топ согласно %") - orders_own/orders_hired считаются той же ТОЧНО популяцией заказов
+    // (!isInternalOrder && !isServiceRow), что и числитель, просто без условия !hw - топ
+    // сортируется по проценту, не по абсолютному счётчику (у логиста с 5 заказами без путёвки
+    // из 5 проблема серьёзнее, чем у того, у кого 20 из 200).
     by_logist_no_waybill: Object.values(logistNoWaybillMap)
-      .map(function(l){ return { name: l.name, no_waybill_own: l.no_waybill_own, no_waybill_hired: l.no_waybill_hired, no_waybill_total: l.no_waybill_own + l.no_waybill_hired }; })
+      .map(function(l){
+        var ordersTotal = l.orders_own + l.orders_hired;
+        var noWaybillTotal = l.no_waybill_own + l.no_waybill_hired;
+        return {
+          name: l.name,
+          orders_own: l.orders_own, orders_hired: l.orders_hired, orders_total: ordersTotal,
+          no_waybill_own: l.no_waybill_own, no_waybill_hired: l.no_waybill_hired, no_waybill_total: noWaybillTotal,
+          no_waybill_pct: ordersTotal > 0 ? Math.round(noWaybillTotal/ordersTotal*100) : 0,
+        };
+      })
       .filter(function(l){ return l.no_waybill_total > 0; })
-      .sort(function(a,b){ return b.no_waybill_total - a.no_waybill_total; }),
+      .sort(function(a,b){ return b.no_waybill_pct - a.no_waybill_pct || b.no_waybill_total - a.no_waybill_total; }),
     // Длинномеры целиком (2026-08-11, личная страница Васина) - см. getLongHaulDetail_.
     by_driver_no_waybill_long: Object.values(driverMap)
       .filter(function(d){ return d.no_waybill_long > 0; })

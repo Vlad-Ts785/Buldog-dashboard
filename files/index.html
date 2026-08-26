@@ -4009,14 +4009,19 @@ function renderMyPageRyschanow(el, current, selectorHtml, d) {
       '</tbody></table></div>';
   } else {
     // "Топ логистов с несданными путевыми" (2026-08-26, Влад: "за каждый из несданных путевых
-    // листов есть ответственный логист, ему нужен топ") - своя и наёмная недостача сразу,
-    // отсортировано по итогу (by_logist_no_waybill, backend).
+    // листов есть ответственный логист, ему нужен топ" - доводка того же дня: "выведем
+    // количество заказов, сравним с поступлением путевых, ведём % и расставим топ согласно %")
+    // - Заказов = вся популяция, где путёвка в принципе требуется (не только своя/наём с
+    // недостачей); % и порядок строк уже посчитаны на бэкенде (by_logist_no_waybill,
+    // сортировка по no_waybill_pct), фронтенд просто рендерит как пришло.
     html += '<div style="overflow-x:auto"><table class="tbl">'+
-      '<thead><tr><th>Логист</th><th class="num">Свой парк</th><th class="num">Наём</th><th class="num">Итого</th></tr></thead>'+
+      '<thead><tr><th>Логист</th><th class="num">Заказов</th><th class="num">Свой парк</th><th class="num">Наём</th><th class="num">Итого без путевых</th><th class="num">%</th></tr></thead>'+
       '<tbody>'+(!noWaybillLogists.length
-        ? '<tr><td colspan="4" style="color:var(--green);padding:14px">Все путевые листы сданы ✅</td></tr>'
+        ? '<tr><td colspan="6" style="color:var(--green);padding:14px">Все путевые листы сданы ✅</td></tr>'
         : noWaybillLogists.map(function(lg) {
-            return '<tr><td><b>'+lg.name+'</b></td><td class="num muted">'+lg.no_waybill_own+'</td><td class="num muted">'+lg.no_waybill_hired+'</td><td class="num red"><b>'+lg.no_waybill_total+'</b></td></tr>';
+            var pct = lg.no_waybill_pct || 0;
+            var pCls = pct >= 50 ? 'red' : pct >= 25 ? 'amber' : '';
+            return '<tr><td><b>'+lg.name+'</b></td><td class="num muted">'+(lg.orders_total||0)+'</td><td class="num muted">'+lg.no_waybill_own+'</td><td class="num muted">'+lg.no_waybill_hired+'</td><td class="num red"><b>'+lg.no_waybill_total+'</b></td><td class="num '+pCls+'"><b>'+pct+'%</b></td></tr>';
           }).join(''))+
       '</tbody></table></div>';
   }

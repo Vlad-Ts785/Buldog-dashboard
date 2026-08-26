@@ -3744,7 +3744,7 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
 // переименована в "Загрузка парка" и стала статичной (без сортировки/фильтров) - см.
 // myPageRyschTab==='fleet_load' ниже. Сортировка/фильтры "Техника"/"Водители" (были нужны
 // только этим двум удалённым вкладкам) убраны вместе с ними.
-let myPageRyschTab = 'fleet_load'; // 'fleet_load' | 'hired' | 'no_waybill_drivers' | 'no_waybill_suppliers' | 'no_waybill_logists'
+let myPageRyschTab = 'fleet_load'; // 'fleet_load' | 'hired' | 'no_waybill_drivers' | 'no_waybill_suppliers' | 'no_waybill_logists' | 'salary'
 function setMyPageRyschTab(tab) { myPageRyschTab = tab; renderMyPage(); }
 // Логисты, чья маржа найма суммируется в 2%-бонус Рыщанова (зеркало RYSCHANOW_ALL_LOGISTS_SUR_
 // на бэкенде - см. calcRyschanow во вкладке "Зарплата", то же слагаемое qualMarginAllLogists).
@@ -3865,6 +3865,7 @@ function renderMyPageRyschanow(el, current, selectorHtml, d) {
     '<button class="tab-btn'+(myPageRyschTab==='no_waybill_drivers'?' active':'')+'" onclick="setMyPageRyschTab(\'no_waybill_drivers\')">📋 Не сданные путевые (свои)</button>'+
     '<button class="tab-btn'+(myPageRyschTab==='no_waybill_suppliers'?' active':'')+'" onclick="setMyPageRyschTab(\'no_waybill_suppliers\')">📋 Топ поставщиков без путевых</button>'+
     '<button class="tab-btn'+(myPageRyschTab==='no_waybill_logists'?' active':'')+'" onclick="setMyPageRyschTab(\'no_waybill_logists\')">📋 Топ логистов с несданными путевыми</button>'+
+    '<button class="tab-btn'+(myPageRyschTab==='salary'?' active':'')+'" onclick="setMyPageRyschTab(\'salary\')">💰 Зарплата</button>'+
   '</div>';
 
   if (myPageRyschTab === 'fleet_load') {
@@ -3873,14 +3874,18 @@ function renderMyPageRyschanow(el, current, selectorHtml, d) {
     // тот же приём, что уже на личной странице Васина (vehiclesF выше в файле) и на странице
     // "Водители" (driverForecastStatus_): forecast = profit * paceRatio текущего месяца.
     // Машины "Идёт по плану" (>=100%) и "Нет плана" (план не задан) не показываем - страница
-    // только про то, что требует действия. Порядок групп - НЕ по тяжести статуса, а по
-    // приоритету действия (Влад, 2026-08-26): сначала "Загрузить срочно" (обычно пустой
+    // только про то, что требует действия. ОДИН общий список (2026-08-26, Влад: "убери эти
+    // нелепые кружки и сделай всё одним списком" - раньше было 3 отдельные таблицы с
+    // заголовками-кружками), статус - колонкой "Оценка" в каждой строке, тем же бейджем
+    // (class="badge"), что уже на странице "Водители". Порядок строк - НЕ по тяжести статуса,
+    // а по приоритету действия (Влад, 2026-08-26): сначала "Загрузить срочно" (обычно пустой
     // порожняк, самое срочное), потом "Добавить заказов" (можно распланировать заранее), и
     // только в самом низу "Простой — разобраться" (расследование причины, не разовое
-    // действие). Внутри группы - худшие (ближе к 0%) первыми.
+    // действие); внутри своей группы - худшие (ближе к 0%) первыми.
     var flIsLive = isLiveMonthKey_((D.orders||{}).period);
     var flPaceRatio = flIsLive ? paceRatio : 1;
-    var flGroups = { orange: [], amber: [], red: [] };
+    var flOrderIdx = { orange: 0, amber: 1, red: 2 };
+    var flRows = [];
     vehicles.forEach(function(v) {
       if (!(v.plan > 0)) return; // "Нет плана" - не показываем, действия не требует
       var forecast = (v.profit||0) * flPaceRatio;
@@ -3893,41 +3898,31 @@ function renderMyPageRyschanow(el, current, selectorHtml, d) {
       // задача (найм/ремонт), не для этого списка. Показываем только тех в "Простое", кто
       // УЖЕ что-то зарабатывает (>5%) - там ещё есть, что разгонять заказами.
       if (status.cls === 'red' && forecastPct <= 5) return;
-      flGroups[status.cls].push({ v: v, forecast: forecast, forecastPct: forecastPct, status: status });
+      flRows.push({ v: v, forecast: forecast, forecastPct: forecastPct, status: status });
     });
-    ['orange', 'amber', 'red'].forEach(function(cls) {
-      flGroups[cls].sort(function(a, b) { return a.forecastPct - b.forecastPct; });
+    flRows.sort(function(a, b) {
+      var g = flOrderIdx[a.status.cls] - flOrderIdx[b.status.cls];
+      return g !== 0 ? g : a.forecastPct - b.forecastPct;
     });
-    var flOrder = [
-      { cls: 'orange', icon: '🟠' }, { cls: 'amber', icon: '🟡' }, { cls: 'red', icon: '🔴' },
-    ];
-    var flTotal = flGroups.orange.length + flGroups.amber.length + flGroups.red.length;
-    if (!flTotal) {
+    if (!flRows.length) {
       html += '<div style="color:var(--green);padding:14px;font-size:13px">Все машины идут по плану ✅</div>';
     } else {
-      html += flOrder.map(function(g) {
-        var rows = flGroups[g.cls];
-        if (!rows.length) return '';
-        var label = rows[0].status.label;
-        var bodyRows = rows.map(function(x) {
-          var v = x.v;
-          return '<tr>'+
-            '<td class="muted" style="font-size:12px">'+(v.gos||'—')+'</td>'+
-            '<td>'+(v.marka||'—')+'</td>'+
-            '<td class="muted">'+(v.driver||'—')+'</td>'+
-            '<td class="num">'+fmtK2(v.plan||0)+'</td>'+
-            '<td class="num">'+fmtK2(v.profit||0)+'</td>'+
-            '<td class="num '+g.cls+'"><b>'+fmtK2(x.forecast)+'</b> <span class="muted">('+x.forecastPct.toFixed(0)+'%)</span></td>'+
-          '</tr>';
-        }).join('');
-        return '<div style="margin-bottom:16px">'+
-          '<div style="font-size:13px;font-weight:600;margin-bottom:6px">'+g.icon+' '+label+' <span class="muted" style="font-weight:400">('+rows.length+')</span></div>'+
-          '<div style="overflow-x:auto"><table class="tbl">'+
-            '<thead><tr><th>Госномер</th><th>Марка</th><th>Водитель</th><th class="num">План</th><th class="num">Факт</th><th class="num">Прогноз</th></tr></thead>'+
-            '<tbody>'+bodyRows+'</tbody>'+
-          '</table></div>'+
-        '</div>';
+      var flBodyRows = flRows.map(function(x) {
+        var v = x.v;
+        return '<tr>'+
+          '<td class="muted" style="font-size:12px">'+(v.gos||'—')+'</td>'+
+          '<td>'+(v.marka||'—')+'</td>'+
+          '<td class="muted">'+(v.driver||'—')+'</td>'+
+          '<td class="num">'+fmtK2(v.plan||0)+'</td>'+
+          '<td class="num">'+fmtK2(v.profit||0)+'</td>'+
+          '<td class="num '+x.status.cls+'"><b>'+fmtK2(x.forecast)+'</b> <span class="muted">('+x.forecastPct.toFixed(0)+'%)</span></td>'+
+          '<td><span class="badge '+x.status.cls+'">'+x.status.label+'</span></td>'+
+        '</tr>';
       }).join('');
+      html += '<div style="overflow-x:auto"><table class="tbl">'+
+        '<thead><tr><th>Госномер</th><th>Марка</th><th>Водитель</th><th class="num">План</th><th class="num">Факт</th><th class="num">Прогноз</th><th>Оценка</th></tr></thead>'+
+        '<tbody>'+flBodyRows+'</tbody>'+
+      '</table></div>';
     }
   } else if (myPageRyschTab === 'hired') {
     // "Наёмная техника" - точно как на "Обзоре заказов" (Влад, 2026-08-25) - с колонкой
@@ -3995,7 +3990,7 @@ function renderMyPageRyschanow(el, current, selectorHtml, d) {
             return '<tr><td><b>'+sp.name+'</b></td><td class="num red"><b>'+sp.no_waybill+'</b></td><td class="num muted">'+sp.orders+'</td><td class="num '+pCls+'">'+pct+'%</td></tr>';
           }).join(''))+
       '</tbody></table></div>';
-  } else {
+  } else if (myPageRyschTab === 'no_waybill_logists') {
     // "Топ логистов с несданными путевыми" (2026-08-26, Влад: "за каждый из несданных путевых
     // листов есть ответственный логист, ему нужен топ") - своя и наёмная недостача сразу,
     // отсортировано по итогу (by_logist_no_waybill, backend).
@@ -4007,6 +4002,27 @@ function renderMyPageRyschanow(el, current, selectorHtml, d) {
             return '<tr><td><b>'+lg.name+'</b></td><td class="num muted">'+lg.no_waybill_own+'</td><td class="num muted">'+lg.no_waybill_hired+'</td><td class="num red"><b>'+lg.no_waybill_total+'</b></td></tr>';
           }).join(''))+
       '</tbody></table></div>';
+  } else {
+    // "💰 Зарплата" (2026-08-26, Влад в третий раз: "перенеси его туда, где у меня есть
+    // отдельная вкладка «Зарплаты». И туда ту же самую структуру, табличку, как и у меня в
+    // зарплатах, только по его отделу, включая его самого") - та же карточка "Отдел Рыщанова",
+    // что и на company-wide вкладке "Зарплата" (renderRyschanowDeptCardHtml_, module scope).
+    // getL - свой источник у каждого сценария входа: rySummary.by_logist при самостоятельном
+    // входе (тот же company-wide список, что buildRyschanowSummaryBundle_ уже отдаёт), иначе
+    // D.orders.by_logist у admin-предпросмотра (полный payload, видит всех).
+    var salByLogist = rySummary ? (rySummary.by_logist||[]) : ((D.orders && D.orders.by_logist) || []);
+    var salLogIdx = {};
+    salByLogist.forEach(function(l) { salLogIdx[(l.name||'').trim().split(' ')[0].toLowerCase()] = l; });
+    var salGetL = function(sur) { return salLogIdx[sur.toLowerCase()] || null; };
+    var salUseNewRules = isNewRulesPeriod((D.orders||{}).period);
+    var salProfitLong = rySummary ? (rySummary.profit_long||0) : ((D.summary && D.summary.profit_long) || 0);
+    var salQualMargin = rySummary ? (rySummary.qual_margin_all_logists||0) : RYSCHANOW_ALL_LOGISTS_SUR_FRONT_.reduce(function(sum, sur) {
+      var l = salGetL(sur);
+      return sum + (l ? (l.hired_margin_qualified||0) : 0);
+    }, 0);
+    var salSpecialTrals = rySummary ? (rySummary.special_trals_profit||0) : ((D.summary && D.summary.special_trals_profit) || 0);
+    var salCard = renderRyschanowDeptCardHtml_(salGetL, salProfitLong, grossProfit, salQualMargin, salUseNewRules, salSpecialTrals);
+    html += salCard.html;
   }
   html += '</div>';
 
@@ -8248,6 +8264,164 @@ function calcVasin(profitLong) {
   return { sur:'васин', profitLong:(profitLong||0), bonus:bonus, total: bonus };
 }
 
+// Карточка "Отдел Рыщанова" - вынесена в module scope (2026-08-26, нужна и вкладке "Зарплата"
+// (renderSalesSalary), и личной странице Рыщанова: "что касается расчета зарплаты... перенеси
+// его туда, где у меня есть отдельная вкладка «Зарплаты». И туда ту же самую структуру,
+// табличку, как и у меня в зарплатах, только по его отделу, включая его самого"). Раньше жила
+// только внутри DEPTS.forEach в renderSalesSalary - тот же класс дублирования, что уже был у
+// calcRyschanow до выноса 2026-08-25. Возвращает HTML карточки целиком (шапка + таблица +
+// итоговая строка фонда) - идентично тому, что видно во вкладке "Зарплата".
+// getL(sur) - поиск логиста по фамилии в by_logist (свой источник у каждого вызывающего -
+// company-wide у renderSalesSalary, тот же список у личной страницы Рыщанова через
+// rySummary.by_logist/D.orders.by_logist). profitLong - ВП длинномеров компании (строка Васина).
+function renderRyschanowDeptCardHtml_(getL, profitLong, grossProfit, qualMarginAllLogists, useNewRules, specialTralsProfit) {
+  var fr = pageFr_;
+  var color = '#BA7517', bgA = '186,117,23', headName = 'Рыщанов Рустем';
+
+  // Логисты консолидированы внутрь карточки только для новых правил (с июля 2026, см.
+  // renderSalesSalary) - при useNewRules=false (просмотр архивных периодов до июля) карточка
+  // остаётся, но без строк логистов (calcRyschanow.hiredCut тоже 0 в этом случае).
+  var logistCalcs = [];
+  if (useNewRules) {
+    RYSCHANOW_ALL_LOGISTS_SUR_FRONT_.forEach(function(sur) {
+      if (sur === 'васин') {
+        logistCalcs.push({ sur:sur, isVasin:true, calc: calcVasin(profitLong) });
+      } else {
+        var lc = calcLogist(sur, getL, true);
+        if (lc) logistCalcs.push({ sur:sur, isVasin:false, calc:lc });
+      }
+    });
+  }
+  var logistTotal = logistCalcs.reduce(function(s,lc){ return s + (lc.calc ? lc.calc.total : 0); }, 0);
+
+  var headRC = calcRyschanow(grossProfit, qualMarginAllLogists, useNewRules, specialTralsProfit);
+  var deptFund = headRC.total + logistTotal;
+
+  function tblHead() {
+    return '<thead>' +
+      '<tr>' +
+        '<th></th>' +
+        '<th colspan="4" class="num" style="font-size:10px;font-weight:600;color:var(--muted);letter-spacing:.04em">БАЗА РАСЧЁТА</th>' +
+        '<th colspan="5" class="num" style="font-size:10px;font-weight:600;color:var(--muted);letter-spacing:.04em;border-left:2px solid var(--border)">РАСЧЁТ ЗАРПЛАТЫ</th>' +
+      '</tr>' +
+      '<tr>' +
+      '<th>Сотрудник</th>' +
+      '<th class="num">Выр. всего</th>' +
+      '<th class="num">Собст.</th>' +
+      '<th class="num">Найм марж.</th>' +
+      '<th class="num">Затраты</th>' +
+      '<th class="num" style="border-left:2px solid var(--border)">Оклад</th>' +
+      '<th class="num">% парк</th>' +
+      '<th class="num">% найм</th>' +
+      '<th class="num">Премия</th>' +
+      '<th class="num">ИТОГО</th>' +
+      '</tr></thead>';
+  }
+
+  var subNames = RYSCHANOW_ALL_LOGISTS_SUR_FRONT_.filter(function(sur) {
+    if (sur === 'васин') return true;
+    var l = getL(sur);
+    return !!(l && (l.orders||0) > 0);
+  }).map(capName).join(' · ');
+
+  var html = '<div class="card" style="margin-bottom:16px;padding:0;overflow:hidden">';
+  html += '<div style="border-left:3px solid '+color+';padding:12px 16px;background:rgba(255,255,255,.03);display:flex;align-items:center;justify-content:space-between">';
+  html += '<div><div style="font-size:13px;font-weight:600;color:'+color+'">Отдел Рыщанова</div>';
+  html += '<div style="font-size:11px;color:var(--muted);margin-top:2px">'+subNames+'</div></div>';
+  html += '<div style="text-align:right"><div style="font-size:11px;color:var(--muted)">Фонд отдела</div>';
+  html += '<div style="font-size:15px;font-weight:700;color:'+color+'">'+fr(deptFund)+'</div></div></div>';
+
+  html += '<div style="overflow-x:auto"><table class="tbl" style="min-width:960px">'+tblHead()+'<tbody>';
+
+  var rNote = 'Оклад 100т';
+  if (headRC.bonus > 0) {
+    var rSteps = Math.floor((grossProfit - 20000000) / 5000000);
+    rNote += ' + 50т (ВП свой парк >20М)';
+    if (rSteps > 0) rNote += ' + ' + rSteps + 'x50т (каждые 5М)';
+  } else {
+    rNote += ' + бонус при ВП своего парка >20М';
+  }
+  if (useNewRules) rNote += ' + 2% маржи найма логистов (маржа ≥23%)';
+  if (headRC.specialTralsBonus) rNote += ' + 1% ВП 3 спецтралов (приказ №01/07/26)';
+  html += '<tr style="background:rgba('+bgA+',.07)">';
+  html += '<td><b>'+headName+'</b> <span style="font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(255,255,255,.1);color:var(--muted)">рук.</span>';
+  html += '<div style="font-size:10px;color:var(--muted);margin-top:2px">'+rNote+'</div></td>';
+  html += '<td class="num muted" style="font-size:11px" colspan="4">ВП свой парк: '+fr(grossProfit)+'</td>';
+  html += '<td class="num" style="border-left:2px solid var(--border)">'+fr(headRC.oklad)+'</td>';
+  html += '<td class="num muted">—</td>';
+  html += '<td class="num">'+(headRC.hiredCut ? fr(headRC.hiredCut) : '—')+'</td>';
+  html += '<td class="num">'+(headRC.bonus ? fr(headRC.bonus) : '—')+'</td>';
+  html += '<td class="num" style="font-weight:700;color:'+color+'">'+fr(headRC.total)+'</td>';
+  html += '</tr>';
+  if (headRC.bonus) {
+    var rStepsDetail = Math.floor((grossProfit - 20000000) / 5000000);
+    html += '<tr style="background:rgba(255,255,255,.02)">';
+    html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">Премия за ВП своего парка: '+fr(grossProfit)+' (нужно &gt;20М) - 50т за порог'+(rStepsDetail>0?' + '+rStepsDetail+'×50т за каждые следующие 5М':'')+'</td>';
+    html += '<td colspan="9" class="num muted" style="font-size:11px">50т'+(rStepsDetail>0?' + '+rStepsDetail+'×50т':'')+' = '+fr(headRC.bonus)+'</td>';
+    html += '</tr>';
+  }
+  if (headRC.hiredCut) {
+    html += '<tr style="background:rgba(255,255,255,.02)">';
+    html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">Премия за маржу найма логистов (маржа ≥23%): '+fr(headRC.qualMarginAllLogists)+'</td>';
+    html += '<td colspan="9" class="num muted" style="font-size:11px">2% × '+fr(headRC.qualMarginAllLogists)+' = '+fr(headRC.hiredCut)+'</td>';
+    html += '</tr>';
+  }
+  if (headRC.specialTralsBonus) {
+    html += '<tr style="background:rgba(255,255,255,.02)">';
+    html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">Приказ №01/07/26 - 1% от ВП 3 тралов (В776ЕТ797, М800АЕ797, О894ХМ797), до 01.11.2026</td>';
+    html += '<td colspan="9" class="num muted" style="font-size:11px">ВП спецтралов '+fr(headRC.specialTralsProfit)+' × 1% = '+fr(headRC.specialTralsBonus)+'</td>';
+    html += '</tr>';
+  }
+  logistCalcs.forEach(function(lc) {
+    var sur = lc.sur, c = lc.calc;
+    html += '<tr>';
+    html += '<td style="padding-left:16px"><b>'+capName(sur)+'</b>';
+    html += '<div style="font-size:10px;color:var(--muted);margin-top:2px">'+(lc.isVasin
+      ? '2.5% от ВП длинномеров (компания)'
+      : 'Оклад 20т + 500 руб./заявка своя техника + 8% маржи найма (≥23%) + 30т если маржа найма >1М')+'</div></td>';
+    if (lc.isVasin) {
+      html += '<td class="num muted" colspan="8" style="font-size:11px">ВП длинномеров (компания): '+fr(c.profitLong)+' × 2.5%</td>';
+      html += '<td class="num" style="font-weight:600;color:'+color+'">'+fr(c.total)+'</td>';
+    } else {
+      var l = getL(sur);
+      html += '<td class="num">'+(l && l.amount?fr(l.amount):'—')+'</td>';
+      html += '<td class="num">'+c.ownOrders+' <span style="font-size:10px;color:var(--muted)">заявок</span></td>';
+      html += '<td class="num" style="color:#1D9E75">'+fr(c.qualMargin)+'</td>';
+      html += '<td class="num amber">'+(c.hiredExtraCosts?fr(c.hiredExtraCosts):'—')+'</td>';
+      html += '<td class="num" style="border-left:2px solid var(--border)">'+fr(c.oklad)+'</td>';
+      html += '<td class="num">'+(c.flatBonus?fr(c.flatBonus):'—')+'</td>';
+      html += '<td class="num">'+(c.marginBonus?fr(c.marginBonus):'—')+'</td>';
+      html += '<td class="num">'+(c.bonus1m?fr(c.bonus1m):'—')+'</td>';
+      html += '<td class="num" style="font-weight:600;color:'+color+'">'+fr(c.total)+'</td>';
+    }
+    html += '</tr>';
+    if (!lc.isVasin && c.bonus1m) {
+      html += '<tr style="background:rgba(255,255,255,.02)">';
+      html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">Премия за маржу найма >1М: '+fr(c.totalMargin)+' (квалиф. + неквалиф.)</td>';
+      html += '<td colspan="9" class="num muted" style="font-size:11px">'+fr(c.bonus1m)+'</td>';
+      html += '</tr>';
+    }
+    if (!lc.isVasin && (c.qualMargin || c.unqualMargin)) {
+      html += '<tr style="background:rgba(255,255,255,.02)">';
+      html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">';
+      if (c.qualMargin) html += '<span style="color:#1D9E75;font-weight:500">'+fr(c.qualMargin)+'</span> маржа ≥23% <span style="background:rgba(29,158,117,.15);color:#1D9E75;padding:1px 4px;border-radius:3px;font-size:10px">8%</span>';
+      if (c.qualMargin && c.unqualMargin) html += ' &nbsp;/&nbsp; ';
+      if (c.unqualMargin) html += '<span style="color:var(--muted)">'+fr(c.unqualMargin)+'</span> маржа &lt;23% <span style="background:rgba(255,255,255,.08);color:var(--muted);padding:1px 4px;border-radius:3px;font-size:10px">0%</span>';
+      html += '</td>';
+      html += '<td colspan="9" class="num muted" style="font-size:11px">500₽×'+c.ownOrders+' = '+fr(c.flatBonus)+' + 8% = '+fr(c.marginBonus)+'</td>';
+      html += '</tr>';
+    }
+  });
+
+  html += '<tr style="background:rgba(255,255,255,.03);border-top:1px solid var(--border)">';
+  html += '<td colspan="9" style="font-size:12px;color:var(--muted);padding:8px 12px">Фонд оплаты отдела</td>';
+  html += '<td class="num" style="font-weight:700;color:'+color+';padding:8px 12px">'+fr(deptFund)+'</td>';
+  html += '</tr>';
+  html += '</tbody></table></div></div>';
+
+  return { html: html, deptFund: deptFund };
+}
+
 // Состав "обычных" (не спецформула) отделов - ОБЩИЙ источник для renderSalesSalary() и
 // buildSalaryWorkbook_() (plans/2026-08-24-salary-excel-export.md), чтобы список членов
 // команды не разъезжался между экраном и Excel-экспортом (тот же класс риска, что уже дважды
@@ -8449,56 +8623,36 @@ function renderSalesSalary() {
   var html = '';
 
   DEPTS.forEach(function(dept) {
-    var headTotal, headHC, headHM, headRC;
-
-    // Логисты внутри «Отдел Рыщанова» (с июля) - отдельная формула, не calcMgr. Считаем ДО
-    // deptFund, чтобы фонд отдела включал их бонусы. Васин - особая формула (calcVasin), все
-    // остальные - обычный calcLogist (500₽/заявка + 8% квалиф. маржи найма).
-    var logistCalcs = [];
-    if (dept.specialHead && useNewRules) {
-      ALL_LOGISTS.forEach(function(sur) {
-        if (sur === 'васин') {
-          var profitLong = (D.summary||{}).profit_long || 0;
-          logistCalcs.push({ sur:sur, isVasin:true, calc: calcVasin(profitLong) });
-        } else {
-          var lc = calcLogist(sur, getL, true);
-          if (lc) logistCalcs.push({ sur:sur, isVasin:false, calc:lc });
-        }
-      });
-    }
-    var logistTotal = logistCalcs.reduce(function(s,lc){ return s + (lc.calc ? lc.calc.total : 0); }, 0);
-
+    // "Отдел Рыщанова" - вынесен в общую функцию renderRyschanowDeptCardHtml_ (2026-08-26,
+    // нужна и личной странице Рыщанова, см. её module-scope определение рядом с calcRyschanow
+    // выше) - карточка целиком строится там, здесь только приложить результат.
     if (dept.specialHead) {
       var specialTralsProfit = (D.summary||{}).special_trals_profit || 0;
-      headRC = calcRyschanow(grossProfit, qualMarginAllLogists, useNewRules, specialTralsProfit);
-      headTotal = headRC.total;
-      headHC = null; headHM = null;
-    } else {
-      headHC = calcHead(dept.members, dept.head, useNewRules);
-      headHM = dept.ownSales ? calcMgr(dept.head, false, getM, getL, useNewRules) : null;
-      // Премия за объём >30М (Влад, 2026-08-06) - только Ахтамова/Гусейнова, не Рыщанов
-      // (тот в этой ветке не оказывается - specialHead:false отсекает). Выручка отдела ЦЕЛИКОМ
-      // (менеджеры + личные продажи руководителя), не только "итого мен.".
-      var volumeBonus = useNewRules ? calcVolumeBonus(headHC.deptRev + (headHM ? (headHM.total||0) : 0)) : 0;
-      headTotal = headHC.total + (headHM ? headHM.total_sal : 0) + volumeBonus;
-      headRC = null;
+      var profitLong = (D.summary||{}).profit_long || 0;
+      var ryCard = renderRyschanowDeptCardHtml_(getL, profitLong, grossProfit, qualMarginAllLogists, useNewRules, specialTralsProfit);
+      html += ryCard.html;
+      totalPayroll += ryCard.deptFund;
+      return;
     }
+
+    var headHC = calcHead(dept.members, dept.head, useNewRules);
+    var headHM = dept.ownSales ? calcMgr(dept.head, false, getM, getL, useNewRules) : null;
+    // Премия за объём >30М (Влад, 2026-08-06) - только Ахтамова/Гусейнова.
+    var volumeBonus = useNewRules ? calcVolumeBonus(headHC.deptRev + (headHM ? (headHM.total||0) : 0)) : 0;
+    var headTotal = headHC.total + (headHM ? headHM.total_sal : 0) + volumeBonus;
 
     var memberCalcs = dept.members.filter(function(s){ return s !== dept.head; }).map(function(sur){
       return { sur:sur, calc:calcMgr(sur, true, getM, getL, useNewRules) };
     });
-    var deptFund = headTotal + memberCalcs.reduce(function(s,mc){ return s + (mc.calc ? mc.calc.total_sal : 0); }, 0) + logistTotal;
+    var deptFund = headTotal + memberCalcs.reduce(function(s,mc){ return s + (mc.calc ? mc.calc.total_sal : 0); }, 0);
     totalPayroll += deptFund;
 
     html += '<div class="card" style="margin-bottom:16px;padding:0;overflow:hidden">';
     html += '<div style="border-left:3px solid '+dept.color+';padding:12px 16px;background:rgba(255,255,255,.03);display:flex;align-items:center;justify-content:space-between">';
     html += '<div><div style="font-size:13px;font-weight:600;color:'+dept.color+'">'+dept.label+'</div>';
-    // Уволенные (нет данных за период) не попадают в шапку - Влад, 2026-08-06. Васин -
-    // исключение: его формула не зависит от личных заявок, скрывать его по "нет заказов"
-    // нельзя (см. calcVasin).
+    // Уволенные (нет данных за период) не попадают в шапку - Влад, 2026-08-06.
     var subNames = dept.members.filter(function(s){
       if (s === dept.head) return false;
-      if (s === 'васин') return true;
       var mChk = getM(s), lChk = getL(s);
       return !!((mChk && (mChk.amount||0) > 0) || (lChk && (lChk.orders||0) > 0));
     }).map(capName).join(' · ');
@@ -8508,89 +8662,7 @@ function renderSalesSalary() {
 
     html += '<div style="overflow-x:auto"><table class="tbl" style="min-width:960px">'+tblHead()+'<tbody>';
 
-    if (dept.specialHead) {
-      // Рыщанов: особая формула
-      var rNote = 'Оклад 100т';
-      if (headRC.bonus > 0) {
-        var rSteps = Math.floor((grossProfit - 20000000) / 5000000);
-        rNote += ' + 50т (ВП свой парк >20М)';
-        if (rSteps > 0) rNote += ' + ' + rSteps + 'x50т (каждые 5М)';
-      } else {
-        rNote += ' + бонус при ВП своего парка >20М';
-      }
-      if (useNewRules) rNote += ' + 2% маржи найма логистов (маржа ≥23%)';
-      if (headRC.specialTralsBonus) rNote += ' + 1% ВП 3 спецтралов (приказ №01/07/26)';
-      html += '<tr style="background:rgba('+dept.bgA+',.07)">';
-      html += '<td><b>'+dept.headName+'</b> <span style="font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(255,255,255,.1);color:var(--muted)">рук.</span>';
-      html += '<div style="font-size:10px;color:var(--muted);margin-top:2px">'+rNote+'</div></td>';
-      html += '<td class="num muted" style="font-size:11px" colspan="4">ВП свой парк: '+fr(grossProfit)+'</td>';
-      html += '<td class="num" style="border-left:2px solid var(--border)">'+fr(headRC.oklad)+'</td>';
-      html += '<td class="num muted">—</td>';
-      html += '<td class="num">'+(headRC.hiredCut ? fr(headRC.hiredCut) : '—')+'</td>';
-      html += '<td class="num">'+(headRC.bonus ? fr(headRC.bonus) : '—')+'</td>';
-      html += '<td class="num" style="font-weight:700;color:'+dept.color+'">'+fr(headRC.total)+'</td>';
-      html += '</tr>';
-      if (headRC.bonus) {
-        var rStepsDetail = Math.floor((grossProfit - 20000000) / 5000000);
-        html += '<tr style="background:rgba(255,255,255,.02)">';
-        html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">Премия за ВП своего парка: '+fr(grossProfit)+' (нужно &gt;20М) - 50т за порог'+(rStepsDetail>0?' + '+rStepsDetail+'×50т за каждые следующие 5М':'')+'</td>';
-        html += '<td colspan="9" class="num muted" style="font-size:11px">50т'+(rStepsDetail>0?' + '+rStepsDetail+'×50т':'')+' = '+fr(headRC.bonus)+'</td>';
-        html += '</tr>';
-      }
-      if (headRC.hiredCut) {
-        html += '<tr style="background:rgba(255,255,255,.02)">';
-        html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">Премия за маржу найма логистов (маржа ≥23%): '+fr(headRC.qualMarginAllLogists)+'</td>';
-        html += '<td colspan="9" class="num muted" style="font-size:11px">2% × '+fr(headRC.qualMarginAllLogists)+' = '+fr(headRC.hiredCut)+'</td>';
-        html += '</tr>';
-      }
-      if (headRC.specialTralsBonus) {
-        html += '<tr style="background:rgba(255,255,255,.02)">';
-        html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">Приказ №01/07/26 - 1% от ВП 3 тралов (В776ЕТ797, М800АЕ797, О894ХМ797), до 01.11.2026</td>';
-        html += '<td colspan="9" class="num muted" style="font-size:11px">ВП спецтралов '+fr(headRC.specialTralsProfit)+' × 1% = '+fr(headRC.specialTralsBonus)+'</td>';
-        html += '</tr>';
-      }
-      // Логисты отдела - строки внутри той же таблицы (см. logistCalcs выше)
-      logistCalcs.forEach(function(lc) {
-        var sur = lc.sur, c = lc.calc;
-        html += '<tr>';
-        html += '<td style="padding-left:16px"><b>'+capName(sur)+'</b>';
-        html += '<div style="font-size:10px;color:var(--muted);margin-top:2px">'+(lc.isVasin
-          ? '2.5% от ВП длинномеров (компания)'
-          : 'Оклад 20т + 500 руб./заявка своя техника + 8% маржи найма (≥23%) + 30т если маржа найма >1М')+'</div></td>';
-        if (lc.isVasin) {
-          html += '<td class="num muted" colspan="8" style="font-size:11px">ВП длинномеров (компания): '+fr(c.profitLong)+' × 2.5%</td>';
-          html += '<td class="num" style="font-weight:600;color:'+dept.color+'">'+fr(c.total)+'</td>';
-        } else {
-          var l = getL(sur);
-          html += '<td class="num">'+(l.amount?fr(l.amount):'—')+'</td>';
-          html += '<td class="num">'+c.ownOrders+' <span style="font-size:10px;color:var(--muted)">заявок</span></td>';
-          html += '<td class="num" style="color:#1D9E75">'+fr(c.qualMargin)+'</td>';
-          html += '<td class="num amber">'+(c.hiredExtraCosts?fr(c.hiredExtraCosts):'—')+'</td>';
-          html += '<td class="num" style="border-left:2px solid var(--border)">'+fr(c.oklad)+'</td>';
-          html += '<td class="num">'+(c.flatBonus?fr(c.flatBonus):'—')+'</td>';
-          html += '<td class="num">'+(c.marginBonus?fr(c.marginBonus):'—')+'</td>';
-          html += '<td class="num">'+(c.bonus1m?fr(c.bonus1m):'—')+'</td>';
-          html += '<td class="num" style="font-weight:600;color:'+dept.color+'">'+fr(c.total)+'</td>';
-        }
-        html += '</tr>';
-        if (!lc.isVasin && c.bonus1m) {
-          html += '<tr style="background:rgba(255,255,255,.02)">';
-          html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">Премия за маржу найма >1М: '+fr(c.totalMargin)+' (квалиф. + неквалиф.)</td>';
-          html += '<td colspan="9" class="num muted" style="font-size:11px">'+fr(c.bonus1m)+'</td>';
-          html += '</tr>';
-        }
-        if (!lc.isVasin && (c.qualMargin || c.unqualMargin)) {
-          html += '<tr style="background:rgba(255,255,255,.02)">';
-          html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">';
-          if (c.qualMargin) html += '<span style="color:#1D9E75;font-weight:500">'+fr(c.qualMargin)+'</span> маржа ≥23% <span style="background:rgba(29,158,117,.15);color:#1D9E75;padding:1px 4px;border-radius:3px;font-size:10px">8%</span>';
-          if (c.qualMargin && c.unqualMargin) html += ' &nbsp;/&nbsp; ';
-          if (c.unqualMargin) html += '<span style="color:var(--muted)">'+fr(c.unqualMargin)+'</span> маржа &lt;23% <span style="background:rgba(255,255,255,.08);color:var(--muted);padding:1px 4px;border-radius:3px;font-size:10px">0%</span>';
-          html += '</td>';
-          html += '<td colspan="9" class="num muted" style="font-size:11px">500₽×'+c.ownOrders+' = '+fr(c.flatBonus)+' + 8% = '+fr(c.marginBonus)+'</td>';
-          html += '</tr>';
-        }
-      });
-    } else {
+    {
       // Обычный руководитель (Ахтамова, Гусейнова). "Премия" в шапке строки - сумма ВСЕХ
       // премиальных компонентов (укомплектованность + объём), раскладка построчно ниже -
       // Влад, 2026-08-06: "хочу видеть части премии - за что 30 тысяч, за что 80 тысяч".
@@ -8739,7 +8811,7 @@ function renderSalesSalary() {
 
   // Логисты (только для просмотра ПРОШЛЫХ периодов, до июля 2026 - "чистые" + Прус (2-я роль)
   // + Суркова (2-я роль)). С июля логисты консолидированы внутрь карточки "Отдел Рыщанова"
-  // (см. logistCalcs в DEPTS.forEach выше, Влад 2026-08-06: "это и есть отдел логистики") -
+  // (см. renderRyschanowDeptCardHtml_, Влад 2026-08-06: "это и есть отдел логистики") -
   // этот блок для useNewRules больше ничего не рендерит, отдельной карточки "Логисты" в
   // новых периодах нет.
   var logHtml = '';

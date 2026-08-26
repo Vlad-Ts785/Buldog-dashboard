@@ -4233,15 +4233,17 @@ function buildRyschanowSummaryBundle_(ss, orders, period) {
     return sum + (l.hired_margin_qualified || 0);
   }, 0);
 
-  var grossProfit = null, specialTralsProfit = 0;
+  var grossProfit = null, specialTralsProfit = 0, profitLong = 0;
   if (!period) {
     var sd = getSummaryData(ss, orders);
     grossProfit = (sd && typeof sd.profit === 'number') ? sd.profit : null;
     specialTralsProfit = (sd && sd.special_trals_profit) || 0;
+    profitLong = (sd && sd.profit_long) || 0; // нужен для строки Васина в карточке зарплаты
   } else {
     var gp = getGrossProfitForPeriod(ss, period);
     grossProfit = (gp && typeof gp.profit === 'number') ? gp.profit : null;
     specialTralsProfit = (gp && gp.special_trals_profit) || 0;
+    profitLong = (gp && gp.profit_long) || 0;
   }
 
   // Техника/Водители (2026-08-25, Влад: "табличка техника со всеми еденицами и расходами...
@@ -4264,6 +4266,7 @@ function buildRyschanowSummaryBundle_(ss, orders, period) {
     doc_by_decade: orders.doc_by_decade || [], // "Воронка документов" (2026-08-25, Влад: "под зарплатой добавь")
     gross_profit: grossProfit,
     special_trals_profit: specialTralsProfit,
+    profit_long: profitLong, // ВП длинномеров компании - строка Васина в карточке "Отдел Рыщанова"
     qual_margin_all_logists: qualMarginAllLogists,
     vehicles: vehicles,
     // План ВП своего парка (2026-08-26, баг): buildLogistView_ НЕ прокидывал managerPlans в

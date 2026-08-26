@@ -4258,11 +4258,16 @@ function buildRyschanowSummaryBundle_(ss, orders, period) {
     by_logist: byLogistAll,
     by_driver_no_waybill: orders.by_driver_no_waybill || [],
     by_supplier_no_waybill: orders.by_supplier_no_waybill || [],
+    doc_by_decade: orders.doc_by_decade || [], // "Воронка документов" (2026-08-25, Влад: "под зарплатой добавь")
     gross_profit: grossProfit,
     special_trals_profit: specialTralsProfit,
     qual_margin_all_logists: qualMarginAllLogists,
     vehicles: vehicles,
     drivers: deriveDriversFromVehicles(vehicles),
+    // Заказов на водителя (2026-08-25, "Водители" на его странице должны выглядеть как
+    // одноимённая страница "Парк") - тот же источник, что vehicles_period/getStaffData
+    // основного payload'а, тем же диапазоном range, что и vehicles/drivers выше.
+    driver_order_counts: getDriverOrderCounts_(ss, range.from, range.to),
   };
 }
 

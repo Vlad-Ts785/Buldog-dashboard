@@ -519,6 +519,16 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
     <div class="sidebar-nav-item" onclick="showPage('ryschanow-salary',this)" data-page="ryschanow-salary" style="display:none">
       <span class="sidebar-nav-icon">💰</span> Зарплата
     </div>
+    <!-- Отдельные пункты меню для руководителей коммерческих групп - Ахтамова/Гусейнова
+         (2026-08-26, тот же принцип, что у Рыщанова выше: "Отдельная и единственная",
+         "делаю ДЗ и зарплату сбоку в менюшке"). Скрыты по умолчанию, applyRoleUI()
+         показывает только самим руководителям или admin-предпросмотру "как они". -->
+    <div class="sidebar-nav-item" onclick="showPage('commercial-head-salary',this)" data-page="commercial-head-salary" style="display:none">
+      <span class="sidebar-nav-icon">💰</span> Зарплата
+    </div>
+    <div class="sidebar-nav-item" onclick="showPage('commercial-head-debt',this)" data-page="commercial-head-debt" style="display:none">
+      <span class="sidebar-nav-icon">💸</span> Дебиторская задолженность
+    </div>
     <div class="sidebar-nav-item" onclick="showPage('clients',this)" data-page="clients">
       <span class="sidebar-nav-icon">🏢</span> Клиенты
     </div>
@@ -1254,6 +1264,15 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
          ryschanowSalaryCardHtml_/renderRyschanowSalaryPage_. -->
     <div id="page-ryschanow-salary" class="page">
       <div id="ryschanow-salary-content"><p style="color:var(--muted);padding:16px">Данные загружаются...</p></div>
+    </div>
+
+    <!-- ═══ ЗАРПЛАТА/ДЗ РУКОВОДИТЕЛЯ ГРУППЫ (Ахтамова/Гусейнова, отдельные пункты меню,
+         2026-08-26) ═══ - см. renderCommercialHeadSalaryPage_/renderCommercialHeadDebtPage_. -->
+    <div id="page-commercial-head-salary" class="page">
+      <div id="commercial-head-salary-content"><p style="color:var(--muted);padding:16px">Данные загружаются...</p></div>
+    </div>
+    <div id="page-commercial-head-debt" class="page">
+      <div id="commercial-head-debt-content"><p style="color:var(--muted);padding:16px">Данные загружаются...</p></div>
     </div>
 
     <!-- ═══ ПЛАН ЗАДАНИЯ (только чтение из таблицы планировки) ═══ -->
@@ -2156,6 +2175,8 @@ const PAGE_TITLES = {
   // самой страницы (ФИО+должность) уже несёт этот смысл, дублирующий заголовок не нужен.
   'my-page': '',
   'ryschanow-salary': 'Зарплата',
+  'commercial-head-salary': 'Зарплата',
+  'commercial-head-debt': 'Дебиторская задолженность',
   'order-plan': 'План задание',
   calculator: 'Калькулятор стоимости перевозки',
   debt: 'Дебиторская задолженность',
@@ -2484,6 +2505,14 @@ function isVasinEntry_(entry) {
 function isRyschanowEntry_(entry) {
   return !!entry && entry.type === 'logist' && entry.name.trim().split(' ')[0].toLowerCase() === 'рыщанов';
 }
+// Ахтамова/Гусейнова - руководители коммерческих групп (2026-08-26, см.
+// plans/2026-08-26-ahtamova-guseinova-personal-pages.md) - своя отдельная страница
+// (renderMyPageCommercialHead_), тот же принцип, что у Рыщанова/Васина выше (не флейвор
+// renderMyPageManager). Зеркало commercialHeadTeam_ на бэкенде.
+var COMMERCIAL_HEAD_SUR_FRONT_ = ['ахтамова', 'гусейнова'];
+function isCommercialHeadEntry_(entry) {
+  return !!entry && entry.type === 'manager' && COMMERCIAL_HEAD_SUR_FRONT_.indexOf(entry.name.trim().split(' ')[0].toLowerCase()) >= 0;
+}
 // Логисты "своего парка тралов" (2026-08-13, см. isOwnTralLogistName_ на бэкенде - тот же
 // фиксированный список по фамилии, не data-driven, см. план "три роли логистов"). Влад: "Три
 // логиста Сильчев, Кан, Махура - по своей технике тралы, у них упор идёт от своего парка".
@@ -2701,6 +2730,9 @@ function renderMyPage() {
     } else if (isRyschanowEntry_(current)) {
       // Рыщанов - руководитель отдела логистики, не брокер найма - см. renderMyPageRyschanow.
       renderMyPageRyschanow(el, current.name, selectorHtml, logDetailAll[current.name] || null);
+    } else if (isCommercialHeadEntry_(current)) {
+      // Ахтамова/Гусейнова - руководители коммерческих групп, см. renderMyPageCommercialHead_.
+      renderMyPageCommercialHead_(el, current.name, selectorHtml, mgrDetailAll[current.name] || null);
     } else if (current.type === 'logist') {
       renderMyPageLogist(el, current.name, selectorHtml, logDetailAll[current.name] || null);
     } else {
@@ -3431,6 +3463,138 @@ function renderMyPageManager(el, current, selectorHtml, d) {
   html += '</div>';
 
   el.innerHTML = html;
+}
+
+// Личная страница руководителя коммерческой группы - Ахтамова/Гусейнова (2026-08-26, см.
+// plans/2026-08-26-ahtamova-guseinova-personal-pages.md). Влад: "они должны отражать и
+// задачи, план выполнения отдела, точно такая же табличка [группы менеджеров], блок с
+// вкладками поступления (по менеджерам/вчера/сегодня/эта неделя)". ДЗ/Зарплата - НЕ здесь
+// (уточнение того же дня: "Отдельная и единственная" - отдельные пункты меню, см.
+// applyRoleUI()/renderCommercialHeadSalaryPage_/renderCommercialHeadDebtPage_ ниже).
+function renderMyPageCommercialHead_(el, current, selectorHtml, d) {
+  d = d || {};
+  var COL = PAGE_COL, mln = pageMln_, fr = pageFr_, block = pageBlock_;
+  var headSur = current.trim().split(' ')[0].toLowerCase();
+  var cfg = DEPT_CFG.filter(function(c){ return c.head && c.head.toLowerCase() === headSur; })[0];
+  if (!cfg) { el.innerHTML = '<div class="muted" style="padding:16px">Отдел не найден</div>'; return; }
+
+  // team_by_manager - только при самостоятельном входе (buildManagerView_ уже отфильтровал
+  // на сервере, см. commercialHeadTeam_). Admin-предпросмотр видит company-wide
+  // D.orders.by_manager напрямую - renderDeptGroupTableHtml_ сама выберет из него только
+  // cfg.members (get() внутри неё ищет ПО ФАМИЛИИ, лишние строки просто игнорируются), так
+  // что передавать можно любой из двух источников без разницы в итоговой табличке.
+  var byManagerAll = (D.orders && D.orders.team_by_manager) || (D.orders && D.orders.by_manager) || [];
+  var managerPlans = (D.orders && D.orders.managerPlans) || {};
+  var paceRatio = calcPaceRatio_((D.orders||{}).period);
+
+  var html = selectorHtml;
+  html += renderAiTasksBlockHtml_(current, 'commercial_head');
+
+  // План отдела (сумма планов команды) vs факт (сумма выручки команды) - тот же приём, что
+  // "Валовая прибыль своего парка" у Рыщанова, просто по выручке продаж, не по ВП.
+  var mgrIdx = {};
+  byManagerAll.forEach(function(m) { mgrIdx[String(m.name||'').trim().split(' ')[0].toLowerCase()] = m; });
+  var deptPlan = 0, deptFakt = 0, deptFaktThru = 0;
+  cfg.members.forEach(function(sur) {
+    var surLower = sur.toLowerCase();
+    var m = mgrIdx[surLower];
+    var isPrus = surLower === 'прус-роскошный';
+    deptPlan += managerPlans[surLower] || 0;
+    if (m) {
+      deptFakt += (m.amount||0) - (isPrus ? (m.internal_amount||0) : 0);
+      var mThru = m.amount_thru_yesterday != null ? m.amount_thru_yesterday : (m.amount||0);
+      var mIntThru = isPrus ? (m.internal_amount_thru_yesterday != null ? m.internal_amount_thru_yesterday : (m.internal_amount||0)) : 0;
+      deptFaktThru += mThru - mIntThru;
+    }
+  });
+  if (deptPlan > 0) {
+    var deptPct = deptFakt / deptPlan * 100;
+    var deptForecast = deptFaktThru * paceRatio;
+    var deptForecastPct = deptForecast / deptPlan * 100;
+    html += planProgressBar('Выполнение плана продаж отдела', deptPct, deptForecastPct, deptFakt, deptForecast, deptPlan);
+  }
+
+  // Табличка группы отдела - переиспользует ТУ ЖЕ логику, что страница "По менеджерам"
+  // (Влад: "точно такая же табличка... её прям структуру оттуда берём"), включая дельту
+  // "▲+N к сегодня" и click-to-expand (renderDeptGroupTableHtml_, module scope).
+  html += renderDeptGroupTableHtml_(cfg, byManagerAll, managerPlans, paceRatio, 'renderMyPage');
+
+  // Вкладки "Поступления" (по менеджерам/вчера/сегодня/эта неделя) - см.
+  // renderCommercialHeadReceiptsBlock_ ниже.
+  html += renderCommercialHeadReceiptsBlock_(cfg);
+
+  el.innerHTML = html;
+}
+
+// Блок "Поступления" для личной страницы руководителя группы (2026-08-26, Влад: "точно по
+// такому же принципу, как у нас уже это построено" - переиспользует myPageReceiptsPeriod/
+// setMyPageReceiptsPeriod, тот же state/setter, что у обычного менеджера, просто team-scoped
+// фильтрация вместо одной фамилии, и добавлена вкладка "По менеджерам" (rd.by_manager, тот
+// же формат, что renderReceiptsManagers на company-wide странице "Поступления").
+function renderCommercialHeadReceiptsBlock_(cfg) {
+  var teamSurLower = cfg.members.map(function(s){ return s.toLowerCase(); });
+  function inTeam(name) { return teamSurLower.indexOf(String(name||'').trim().split(' ')[0].toLowerCase()) >= 0; }
+  var fmt = pageFr_;
+
+  var html = '<div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">';
+  html += '<div class="tab-bar" style="margin-bottom:14px;border-bottom:none;padding-bottom:0;gap:4px">'+
+    '<button class="tab-btn'+(myPageReceiptsPeriod==='by_manager'?' active':'')+'" onclick="setMyPageReceiptsPeriod(\'by_manager\')">По менеджерам</button>'+
+    '<button class="tab-btn'+(myPageReceiptsPeriod==='yesterday'?' active':'')+'" onclick="setMyPageReceiptsPeriod(\'yesterday\')">Вчера</button>'+
+    '<button class="tab-btn'+(myPageReceiptsPeriod==='today'?' active':'')+'" onclick="setMyPageReceiptsPeriod(\'today\')">Сегодня</button>'+
+    '<button class="tab-btn'+(myPageReceiptsPeriod==='week'?' active':'')+'" onclick="setMyPageReceiptsPeriod(\'week\')">Эта неделя</button>'+
+  '</div>';
+
+  if (myPageReceiptsPeriod === 'by_manager') {
+    var rawByMgr = (D.receipts && D.receipts.by_manager) || [];
+    var byMgr = rawByMgr.filter(function(m){ return inTeam(m.manager); });
+    var teamTotal = byMgr.reduce(function(s,m){ return s+(m.amount||0); }, 0);
+    html += '<div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
+      '<th>Менеджер</th><th class="num">Сумма</th><th class="num">Доля</th><th class="num">Поступлений</th>'+
+    '</tr></thead><tbody>'+
+      (byMgr.length
+        ? byMgr.slice().sort(function(a,b){ return b.amount-a.amount; }).map(function(m) {
+            var pct = teamTotal > 0 ? Math.round(m.amount/teamTotal*100) : 0;
+            return '<tr><td>'+m.manager+'</td><td class="num">'+fmt(m.amount)+'</td><td class="num muted">'+pct+'%</td><td class="num muted">'+m.count+'</td></tr>';
+          }).join('')
+        : '<tr><td colspan="4" class="muted" style="padding:14px">Нет данных</td></tr>')+
+    '</tbody></table></div>';
+  } else {
+    var recPeriodMap = {
+      yesterday: (D.receipts && D.receipts.yesterday) || null,
+      today: (D.receipts && D.receipts.today) || null,
+      week: (D.receipts && D.receipts.week) || null,
+    };
+    var recPeriod = recPeriodMap[myPageReceiptsPeriod] || recPeriodMap.today;
+    var showDate = myPageReceiptsPeriod === 'week';
+    if (!recPeriod) {
+      html += '<div class="muted" style="padding:14px 0">Нет данных "Поступления"</div>';
+    } else {
+      var teamReceipts = (recPeriod.transactions || []).filter(function(t) { return inTeam(t.manager); });
+      var teamReceiptsTotal = teamReceipts.reduce(function(s, t) { return s + t.amount; }, 0);
+      var periodLabel = {yesterday:'вчера', today:'сегодня', week:'на этой неделе'}[myPageReceiptsPeriod];
+      html += '<div style="font-size:13px;color:var(--muted);margin-bottom:10px">Поступлений '+periodLabel+': '+
+        '<b style="color:var(--text)">'+fmt(teamReceiptsTotal)+'</b> · '+teamReceipts.length+' плат.</div>';
+      html += '<div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
+        (showDate ? '<th>Дата</th>' : '')+
+        '<th>Менеджер</th><th>Клиент</th><th>Юрлицо</th><th>Документ</th><th class="num">Сумма</th>'+
+      '</tr></thead><tbody>'+
+        (teamReceipts.length
+          ? teamReceipts.map(function(t) {
+              return '<tr>'+
+                (showDate ? '<td class="muted">'+receiptsShortDate_(t.date)+'</td>' : '')+
+                '<td class="muted">'+(t.manager||'—')+'</td>'+
+                '<td>'+t.customer+'</td>'+
+                '<td class="muted">'+(t.orgName || '—')+'</td>'+
+                '<td class="muted">'+(t.docNumber || '—')+'</td>'+
+                '<td class="num">'+fmt(t.amount)+'</td>'+
+              '</tr>';
+            }).join('')
+          : '<tr><td colspan="'+(showDate?6:5)+'" class="muted" style="padding:14px">Поступлений не было</td></tr>')+
+      '</tbody></table></div>';
+    }
+  }
+  html += '</div>';
+  return html;
 }
 
 // Личная страница логиста (2026-08-10, Прус-Роскошный и остальные - см.
@@ -4333,12 +4497,19 @@ function applyRoleUI() {
     // просматриваемого сотрудника, та же проверка по фамилии, что isRyschanowEntry_/
     // isRyschanowLogistName_ (бэкенд).
     var curPersonName = previewing ? viewAsEntry.name : (D.managerName || D.logistName || '');
-    var isRyschanowViewer = curPersonName.trim().split(' ')[0].toLowerCase() === 'рыщанов';
+    var curPersonSur = curPersonName.trim().split(' ')[0].toLowerCase();
+    var isRyschanowViewer = curPersonSur === 'рыщанов';
+    // Ахтамова/Гусейнова (2026-08-26) - те же два пункта, что у Рыщанова, но для руководителей
+    // коммерческих групп - см. COMMERCIAL_HEAD_SUR_FRONT_.
+    var isCommercialHeadViewer = COMMERCIAL_HEAD_SUR_FRONT_.indexOf(curPersonSur) >= 0;
     document.querySelectorAll('.sidebar-nav-item').forEach(function(item) {
       const page = item.getAttribute('data-page');
       // Калькулятор не зависит от серверных данных (D.role) - считает офлайн в браузере,
       // поэтому доступен и менеджерам/логистам, а не только админ-панели.
-      item.style.display = (page === 'my-page' || page === 'order-plan' || page === 'calculator' || (page === 'ryschanow-salary' && isRyschanowViewer)) ? '' : 'none';
+      item.style.display = (page === 'my-page' || page === 'order-plan' || page === 'calculator' ||
+        (page === 'ryschanow-salary' && isRyschanowViewer) ||
+        (page === 'commercial-head-salary' && isCommercialHeadViewer) ||
+        (page === 'commercial-head-debt' && isCommercialHeadViewer)) ? '' : 'none';
     });
     document.querySelectorAll('.sidebar-nav-section').forEach(function(s){ s.style.display = 'none'; });
     showPage('my-page');
@@ -7758,6 +7929,202 @@ function toggleMgrToday(name) {
   }
 }
 
+// Конфиг отделов (2026-08-26, вынесен в module scope из renderSalesMgr - нужен и личным
+// страницам руководителей групп Ахтамовой/Гусейновой, см. renderDeptGroupTableHtml_ ниже,
+// plans/2026-08-26-ahtamova-guseinova-personal-pages.md). ПОВЕДЕНИЕ НЕ МЕНЯЛОСЬ - тот же
+// массив, просто перемещён, чтобы не жить внутри одной конкретной функции.
+var DEPT_CFG = [
+  { color:'#1D9E75', name:'Ахтамова Лиана',   head:'Ахтамова',  members:['Ахтамова','Цегельников','Гуштюк','Дербенцева','Шейко'] },
+  { color:'#378ADD', name:'Гусейнова Айнур',  head:'Гусейнова', members:['Гусейнова','Савиток','Филипчук','Котельников','Гуляева','Коньшина','Володин'] },
+  { color:'#BA7517', name:'Рыщанов Рустем',   head:'Рыщанов',   members:['Рыщанов','Прус-Роскошный','Суркова'] },
+  // Ратников Максим (2026-08-13, Влад: "новый менеджер, не к Лиане, не к Айнур, сам по
+  // себе... всё как у обычного менеджера, только он без старшего") - одиночная "плашка" без
+  // группы/руководителя. solo:true - summaryCard/deptBlock подавляют подпись "руководитель
+  // группы" и список участников (он один, дублировать имя незачем). Зарплата ему намеренно
+  // НЕ считается (см. isSalaryNotConfigured_ в renderMyPageManager) - к DEPTS на вкладке
+  // "Зарплата" (ниже по файлу) НЕ добавлен, только сюда и в TRAL_MANAGERS на бэкенде.
+  { color:'#06B6D4', name:'Ратников Максим',  head:null,        members:['Ратников'], solo:true },
+];
+var HEAD_FULL = { 'Цуцурин':'Цуцурин Владислав Дмитриевич','Ахтамова':'Ахтамова Лиана Анатольевна','Гусейнова':'Гусейнова Айнур','Рыщанов':'Рыщанов Рустем' };
+
+// Параллельное состояние тоггла "что добавилось сегодня" для табличек группы отдела на
+// личных страницах руководителей (2026-08-26) - НЕ переиспользует mgrTodayVisible/
+// mgrTodayKey/toggleMgrToday страницы "По менеджерам" (те жёстко вызывают renderSalesMgr())
+// - свой параллельный toggle с именем функции повторного рендера параметром (тот же приём,
+// что уже использовался для параллельных вкладок Рыщанова - не трогать чужой рабочий код).
+var deptGroupTodayVisible = false, deptGroupTodayKey = '';
+function toggleDeptGroupToday(name, rerenderFnName) {
+  if (deptGroupTodayVisible && deptGroupTodayKey === name) { deptGroupTodayVisible = false; deptGroupTodayKey = ''; }
+  else { deptGroupTodayVisible = true; deptGroupTodayKey = name; }
+  if (typeof window[rerenderFnName] === 'function') window[rerenderFnName]();
+  if (deptGroupTodayVisible) {
+    var row = document.getElementById('dept-group-today-row');
+    if (row) row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+
+// Табличка группы отдела - переиспользуемая версия deptBlock()/mgrRow()/planBar() со
+// страницы "По менеджерам" (см. renderSalesMgr ниже) для личных страниц руководителей
+// команд (2026-08-26, Ахтамова/Гусейнова: "точно такая же табличка... её прям структуру
+// оттуда берём"). ТА ЖЕ логика/цифры (дельта "сегодня" на today_new_orders/
+// today_new_amount/today_new_list, click-to-expand, план-бар), но НЕ трогает
+// renderSalesMgr()/её DOM id (те заняты статикой страницы "По менеджерам") - параллельная
+// реализация, тот же приём, что уже использовался для "Загрузки парка"/техники/водителей
+// на странице Рыщанова.
+// cfg - запись из DEPT_CFG. byManagerAll - D.orders.by_manager (company-wide, полный
+// список - и у admin-предпросмотра, и у self-login руководителя группы через
+// buildManagerView_). rerenderFnName - имя глобальной функции для повторного рендера при
+// клике на дельту (у каждого вызывающего контекста своя, передаётся строкой).
+function renderDeptGroupTableHtml_(cfg, byManagerAll, managerPlans, paceRatio, rerenderFnName) {
+  function fmtN(n) { return n ? Math.round(n).toLocaleString('ru-RU') : '—'; }
+  var mgrIdx = {};
+  (byManagerAll||[]).forEach(function(m) { mgrIdx[String(m.name||'').trim().split(' ')[0].toLowerCase()] = m; });
+  function get(sur) { return mgrIdx[sur.toLowerCase()] || null; }
+  var plans = managerPlans || {};
+  function planOf(sur) { return plans[sur.toLowerCase()] || 0; }
+
+  function planBar(amount, plan, amountForPace) {
+    if (!plan) return '';
+    var pct = Math.round(amount / plan * 100);
+    var barW = Math.min(pct, 100);
+    var barC = pct >= 80 ? '#1D9E75' : pct >= 60 ? '#EF9F27' : '#E24B4A';
+    var pctC = pct >= 80 ? 'color:#1D9E75' : pct >= 60 ? 'color:#EF9F27' : 'color:#E24B4A';
+    var forecast = (amountForPace != null ? amountForPace : amount) * paceRatio;
+    var forecastPct = Math.round(forecast / plan * 100);
+    var fCol = forecastPct >= 100 ? '#1D9E75' : forecastPct >= 70 ? '#EF9F27' : '#E24B4A';
+    return '<div style="display:flex;align-items:center;gap:5px;margin-top:3px">' +
+      '<div style="flex:1;min-width:40px;height:3px;border-radius:2px;background:rgba(255,255,255,0.1)">' +
+        '<div style="width:'+barW+'%;height:100%;border-radius:2px;background:'+barC+'"></div>' +
+      '</div>' +
+      '<span style="font-size:10px;font-weight:500;'+pctC+'">'+pct+'%</span>' +
+      '<span style="font-size:10px;color:var(--muted)">из '+fmtN(plan)+'</span>' +
+    '</div>' +
+    '<div style="font-size:10px;color:var(--muted);margin-top:2px">Прогноз: <span style="color:'+fCol+';font-weight:500">'+fmtN(forecast)+' ('+forecastPct+'%)</span></div>';
+  }
+
+  function mgrRow(m, isHead, isPrus, plan) {
+    if (!m) {
+      var fn = HEAD_FULL[isHead] || isHead || '';
+      return '<tr style="opacity:0.5"><td><b>'+fn+'</b> <span style="font-size:10px;color:var(--muted)">рук.</span></td>' +
+        '<td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td></tr>';
+    }
+    var orders  = (m.orders||0)  - (isPrus?(m.internal_orders||0):0);
+    var amount  = (m.amount||0)  - (isPrus?(m.internal_amount||0):0);
+    var payment = (m.payment||0) - (isPrus?(m.internal_payment||0):0);
+    var profit  = m.profit||0;
+    var name    = cleanName(m.name);
+    var mAmountThru = m.amount_thru_yesterday != null ? m.amount_thru_yesterday : (m.amount||0);
+    var mIntThru = isPrus ? (m.internal_amount_thru_yesterday != null ? m.internal_amount_thru_yesterday : (m.internal_amount||0)) : 0;
+    var amountForPace = mAmountThru - mIntThru;
+    var hTag = isHead ? ' <span style="font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(29,158,117,.15);color:#1D9E75">рук.</span>' : '';
+    var escName = String(m.name||'').replace(/'/g,"\\'");
+    var todayOrders = m.today_new_orders || 0, todayAmount = m.today_new_amount || 0;
+    var ordersBadge = todayOrders > 0
+      ? ' <span onclick="event.stopPropagation();toggleDeptGroupToday(\''+escName+'\',\''+rerenderFnName+'\')" style="font-size:10px;color:var(--green);cursor:pointer;text-decoration:underline dotted;white-space:nowrap">▲+'+todayOrders+'</span>'
+      : '';
+    var amountBadge = todayAmount > 0
+      ? ' <span onclick="event.stopPropagation();toggleDeptGroupToday(\''+escName+'\',\''+rerenderFnName+'\')" style="font-size:10px;color:var(--green);cursor:pointer;text-decoration:underline dotted;white-space:nowrap">▲+'+fmtN(todayAmount)+'</span>'
+      : '';
+    var mainRow = '<tr>' +
+      '<td><b>'+name+'</b>'+hTag+ planBar(amount, plan, amountForPace) +'</td>' +
+      '<td class="num">'+orders+ordersBadge+'</td>' +
+      '<td class="num">'+fmtN(amount)+amountBadge+'</td>' +
+      '<td class="num green">'+fmtN(payment)+'</td>' +
+      '<td class="num '+(profit>0?'green':profit<0?'red':'muted')+'">'+fmtN(profit)+'</td>' +
+      '<td class="num muted">'+((m.hired_orders||0)||'—')+'</td>' +
+    '</tr>';
+    // Разворачивается ПРЯМО ПОД строкой этого менеджера, тот же приём, что mgr-today-row
+    // на "По менеджерам" - свой id (dept-group-today-row), не коллизирует.
+    var todayRow = '';
+    if (deptGroupTodayVisible && deptGroupTodayKey === m.name) {
+      var todayList = m.today_new_list || [];
+      todayRow = '<tr id="dept-group-today-row"><td colspan="6" style="background:rgba(255,255,255,0.03);padding:10px 14px;border-top:1px dashed var(--border)">' +
+        '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">' +
+          '<div style="font-size:12px;font-weight:600">Что добавилось сегодня</div>' +
+          '<div class="muted" style="font-size:11px">'+todayList.length+' '+(todayList.length===1?'заказ':'заказов')+' · '+fmtN(todayAmount)+'</div>' +
+        '</div>' +
+        (todayList.length
+          ? '<table style="width:100%;font-size:12px;border-collapse:collapse">' +
+              todayList.map(function(o) {
+                return '<tr><td style="padding:2px 10px 2px 0;color:var(--muted)">'+(o.id||'—')+'</td>' +
+                  '<td style="padding:2px 10px 2px 0">'+(o.customer||'').substring(0,50)+'</td>' +
+                  '<td class="num" style="padding:2px 0">'+fmtN(o.amount||0)+'</td></tr>';
+              }).join('') +
+            '</table>'
+          : '<div class="muted" style="font-size:12px">Нет данных</div>') +
+      '</td></tr>';
+    }
+    return mainRow + todayRow;
+  }
+
+  function calcDept(members) {
+    var s = {orders:0,amount:0,amount_thru_yesterday:0,payment:0,profit:0,plan:0};
+    members.forEach(function(sur) {
+      var m = get(sur);
+      var ip = sur.toLowerCase() === 'прус-роскошный';
+      s.orders  += m ? (m.orders||0)  - (ip?(m.internal_orders||0):0)  : 0;
+      s.amount  += m ? (m.amount||0)  - (ip?(m.internal_amount||0):0)  : 0;
+      var mThru = m ? (m.amount_thru_yesterday != null ? m.amount_thru_yesterday : m.amount||0) : 0;
+      var mIntThru = ip && m ? (m.internal_amount_thru_yesterday != null ? m.internal_amount_thru_yesterday : (m.internal_amount||0)) : 0;
+      s.amount_thru_yesterday += mThru - mIntThru;
+      s.payment += m ? (m.payment||0) - (ip?(m.internal_payment||0):0) : 0;
+      s.profit  += m ? (m.profit||0) : 0;
+      s.plan    += planOf(sur);
+    });
+    return s;
+  }
+
+  var st = calcDept(cfg.members);
+  var color = cfg.color;
+  var memberList = cfg.solo ? '' : cfg.members.filter(function(s){ return s!==cfg.head && get(s); }).join(' · ');
+  var h = '<div class="card" style="margin-bottom:16px;padding:0;overflow:hidden">';
+  h += '<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border);background:rgba(255,255,255,0.03);border-left:3px solid '+color+'">';
+  h += '<div style="flex:1">';
+  h += '<div style="font-size:13px;font-weight:600;color:'+color+'">'+cfg.name+(cfg.solo ? '' : ' <span style="font-weight:400;color:var(--muted);font-size:12px">— руководитель группы</span>')+'</div>';
+  if (memberList) h += '<div style="font-size:11px;color:var(--muted);margin-top:2px">'+memberList+'</div>';
+  h += '</div>';
+  if (st.amount > 0) {
+    h += '<div style="text-align:right;white-space:nowrap">';
+    h += '<div style="font-size:11px;color:var(--muted)">'+(cfg.solo?'выручка':'итого группы')+'</div>';
+    h += '<div style="font-size:13px;font-weight:600">'+fmtN(st.amount)+'</div>';
+    h += '<div style="font-size:11px;color:#1D9E75">прибыль найм: '+fmtN(st.profit)+'</div>';
+    h += '</div>';
+  }
+  h += '</div>';
+  h += '<div style="overflow-x:auto"><table class="tbl" style="min-width:600px"><thead><tr>' +
+    '<th>Менеджер</th><th class="num">Заказов</th><th class="num">Сумма</th>' +
+    '<th class="num">Оплата</th><th class="num">Прибыль найм</th><th class="num">Найм</th>' +
+  '</tr></thead><tbody>';
+  cfg.members.forEach(function(sur) {
+    var m = get(sur);
+    var isHead = (sur === cfg.head);
+    var isPrus = sur.toLowerCase() === 'прус-роскошный';
+    var plan = planOf(sur);
+    if (!m && isHead) { h += mgrRow(null, cfg.head, false, plan); }
+    else if (m) { h += mgrRow(m, isHead ? cleanName(m.name) : null, isPrus, plan); }
+  });
+  if (st.plan > 0) {
+    var dPct = Math.round(st.amount / st.plan * 100);
+    var dBarW = Math.min(dPct, 100);
+    var dBarC = dPct >= 80 ? '#1D9E75' : dPct >= 60 ? '#EF9F27' : '#E24B4A';
+    h += '<tr style="background:rgba(255,255,255,0.03);border-top:1px solid var(--border)">' +
+      '<td colspan="2" style="font-size:12px;color:var(--muted);padding:8px 12px">Итого отдела</td>' +
+      '<td class="num" style="padding:8px 12px">' +
+        '<div style="display:flex;align-items:center;justify-content:flex-end;gap:6px">' +
+          '<span style="font-size:12px;font-weight:500">'+fmtN(st.amount)+'</span>' +
+          '<div style="width:50px;height:4px;border-radius:2px;background:rgba(255,255,255,0.1)">' +
+            '<div style="width:'+dBarW+'%;height:100%;border-radius:2px;background:'+dBarC+'"></div>' +
+          '</div>' +
+          '<span style="font-size:11px;font-weight:600;color:'+dBarC+'">'+dPct+'%</span>' +
+        '</div>' +
+      '</td>' +
+      '<td colspan="3" style="font-size:11px;color:var(--muted);padding:8px 12px">из '+fmtN(st.plan)+'</td>' +
+    '</tr>';
+  }
+  h += '</tbody></table></div></div>';
+  return h;
+}
+
 function renderSalesMgr() {
   if (!D || !D.orders) return;
   var allMgrs = D.orders.by_manager || [];
@@ -7782,21 +8149,6 @@ function renderSalesMgr() {
   // Прогноз к концу месяца - единая функция calcPaceRatio_() для всего дашборда. Используется
   // на всех трёх уровнях этой страницы: общая шкала сверху, карточки отделов, строки менеджеров.
   var pacePaceRatio = calcPaceRatio_(D.orders.period);
-
-  // Конфиг отделов (для карточек и таблиц)
-  var DEPT_CFG = [
-    { color:'#1D9E75', name:'Ахтамова Лиана',   head:'Ахтамова',  members:['Ахтамова','Цегельников','Гуштюк','Дербенцева','Шейко'] },
-    { color:'#378ADD', name:'Гусейнова Айнур',  head:'Гусейнова', members:['Гусейнова','Савиток','Филипчук','Котельников','Гуляева','Коньшина','Володин'] },
-    { color:'#BA7517', name:'Рыщанов Рустем',   head:'Рыщанов',   members:['Рыщанов','Прус-Роскошный','Суркова'] },
-    // Ратников Максим (2026-08-13, Влад: "новый менеджер, не к Лиане, не к Айнур, сам по
-    // себе... всё как у обычного менеджера, только он без старшего") - одиночная "плашка" без
-    // группы/руководителя. solo:true - summaryCard/deptBlock подавляют подпись "руководитель
-    // группы" и список участников (он один, дублировать имя незачем). Зарплата ему намеренно
-    // НЕ считается (см. isSalaryNotConfigured_ в renderMyPageManager) - к DEPTS на вкладке
-    // "Зарплата" (ниже по файлу) НЕ добавлен, только сюда и в TRAL_MANAGERS на бэкенде.
-    { color:'#06B6D4', name:'Ратников Максим',  head:null,        members:['Ратников'], solo:true },
-  ];
-  var HEAD_FULL = { 'Цуцурин':'Цуцурин Владислав Дмитриевич','Ахтамова':'Ахтамова Лиана Анатольевна','Гусейнова':'Гусейнова Айнур','Рыщанов':'Рыщанов Рустем' };
 
   // Статистика отдела (коммерческие)
   // Сырая карта планов (фамилия -> план) - план менеджера существует независимо от того,
@@ -8429,6 +8781,225 @@ function renderRyschanowDeptCardHtml_(getL, profitLong, grossProfit, qualMarginA
   return { html: html, deptFund: deptFund };
 }
 
+// Карточка "Отдел Ахтамовой"/"Отдел Гусейновой" - вынесена в module scope (2026-08-26, тот
+// же приём, что renderRyschanowDeptCardHtml_ выше) - нужна и company-wide вкладке "Зарплата"
+// (renderSalesSalary), и отдельному пункту меню "Зарплата" на личной странице руководителя
+// группы (plans/2026-08-26-ahtamova-guseinova-personal-pages.md). Идентична исходному коду
+// внутри DEPTS.forEach (не-specialHead ветка) - просто перенесена без изменений логики.
+// dept - запись из COMMERCIAL_DEPTS. hiredBreakdownRow - функция разбивки найма (локальная
+// в renderSalesSalary, зависит от newRules-версии calcMgr/calcHead_ - передаётся параметром,
+// чтобы не дублировать её собственную логику здесь).
+// Суб-строка разбивки найма (2026-08-26, вынесена в module scope из renderSalesSalary -
+// нужна и renderCommercialDeptCardHtml_ ниже, и вкладке "Зарплата" для менеджеров, и
+// company-wide вкладке "Зарплата"). Без изменения логики - тот же код, что жил внутри
+// renderSalesSalary().
+function hiredBreakdownRow(c, indent) {
+  var fr = pageFr_;
+  if (!c) return '';
+  if (c.newRules) {
+    if (!c.hiredMargin && !c.hiredMarginUnqual) return '';
+    var parts = [];
+    if (c.hiredMargin) parts.push('<span style="color:#1D9E75;font-weight:500">'+fr(c.hiredMargin)+'</span> маржа ≥23% <span style="background:rgba(29,158,117,.15);color:#1D9E75;padding:1px 4px;border-radius:3px;font-size:10px">8%</span>');
+    if (c.hiredMarginUnqual) parts.push('<span style="color:var(--muted)">'+fr(c.hiredMarginUnqual)+'</span> маржа &lt;23% <span style="background:rgba(255,255,255,.08);color:var(--muted);padding:1px 4px;border-radius:3px;font-size:10px">0%</span>');
+    var h = '<tr style="background:rgba(255,255,255,.02)">';
+    h += '<td style="padding-left:'+indent+'px;font-size:11px;color:var(--muted)">'+parts.join(' &nbsp;/&nbsp; ')+'</td>';
+    h += '<td colspan="9" class="num muted" style="font-size:11px">8% × '+fr(c.hiredMargin)+' = '+fr(c.hiredBonus)+'</td>';
+    h += '</tr>';
+    return h;
+  }
+  if (c.logPart > 0) {
+    var h2 = '<tr style="background:rgba(255,255,255,.02)">';
+    h2 += '<td style="padding-left:'+indent+'px;font-size:11px;color:var(--muted)">';
+    h2 += '<span style="color:#1D9E75;font-weight:500">'+fr(c.logPart)+'</span> — как логист <span style="background:rgba(29,158,117,.15);color:#1D9E75;padding:1px 4px;border-radius:3px;font-size:10px">10%</span>';
+    h2 += ' &nbsp;/&nbsp; ';
+    h2 += '<span style="color:var(--text)">'+fr(c.nonLogPart)+'</span> — логист другой <span style="background:rgba(255,255,255,.08);color:var(--muted);padding:1px 4px;border-radius:3px;font-size:10px">5%</span>';
+    h2 += '</td>';
+    h2 += '<td colspan="9" class="num muted" style="font-size:11px">'+fr(Math.round(c.logPart*0.1))+' + '+fr(Math.round(c.nonLogPart*0.05))+' = '+fr(c.hiredBonus)+'</td>';
+    h2 += '</tr>';
+    return h2;
+  }
+  return '';
+}
+
+function renderCommercialDeptCardHtml_(dept, getM, getL, useNewRules) {
+  var fr = pageFr_;
+  var DUAL_LOGISTS = ['прус-роскошный','суркова'];
+
+  function tblHead() {
+    return '<thead>' +
+      '<tr>' +
+        '<th></th>' +
+        '<th colspan="4" class="num" style="font-size:10px;font-weight:600;color:var(--muted);letter-spacing:.04em">БАЗА РАСЧЁТА</th>' +
+        '<th colspan="5" class="num" style="font-size:10px;font-weight:600;color:var(--muted);letter-spacing:.04em;border-left:2px solid var(--border)">РАСЧЁТ ЗАРПЛАТЫ</th>' +
+      '</tr>' +
+      '<tr>' +
+      '<th>Сотрудник</th>' +
+      '<th class="num">Выр. всего</th>' +
+      '<th class="num">Собст.</th>' +
+      '<th class="num">Найм марж.</th>' +
+      '<th class="num">Затраты</th>' +
+      '<th class="num" style="border-left:2px solid var(--border)">Оклад</th>' +
+      '<th class="num">% парк</th>' +
+      '<th class="num">% найм</th>' +
+      '<th class="num">Премия</th>' +
+      '<th class="num">ИТОГО</th>' +
+      '</tr></thead>';
+  }
+
+  var headHC = calcHead_(dept.members, dept.head, useNewRules, getM);
+  var headHM = dept.ownSales ? calcMgr(dept.head, false, getM, getL, useNewRules) : null;
+  var volumeBonus = useNewRules ? calcVolumeBonus(headHC.deptRev + (headHM ? (headHM.total||0) : 0)) : 0;
+  var headTotal = headHC.total + (headHM ? headHM.total_sal : 0) + volumeBonus;
+
+  var memberCalcs = dept.members.filter(function(s){ return s !== dept.head; }).map(function(sur){
+    return { sur:sur, calc:calcMgr(sur, true, getM, getL, useNewRules) };
+  });
+  var deptFund = headTotal + memberCalcs.reduce(function(s,mc){ return s + (mc.calc ? mc.calc.total_sal : 0); }, 0);
+
+  var html = '<div class="card" style="margin-bottom:16px;padding:0;overflow:hidden">';
+  html += '<div style="border-left:3px solid '+dept.color+';padding:12px 16px;background:rgba(255,255,255,.03);display:flex;align-items:center;justify-content:space-between">';
+  html += '<div><div style="font-size:13px;font-weight:600;color:'+dept.color+'">'+dept.label+'</div>';
+  var subNames = dept.members.filter(function(s){
+    if (s === dept.head) return false;
+    var mChk = getM(s), lChk = getL(s);
+    return !!((mChk && (mChk.amount||0) > 0) || (lChk && (lChk.orders||0) > 0));
+  }).map(capName).join(' · ');
+  html += '<div style="font-size:11px;color:var(--muted);margin-top:2px">'+subNames+'</div></div>';
+  html += '<div style="text-align:right"><div style="font-size:11px;color:var(--muted)">Фонд отдела</div>';
+  html += '<div style="font-size:15px;font-weight:700;color:'+dept.color+'">'+fr(deptFund)+'</div></div></div>';
+
+  html += '<div style="overflow-x:auto"><table class="tbl" style="min-width:960px">'+tblHead()+'<tbody>';
+
+  var headPremiaTotal = headHC.mgrBonus + volumeBonus;
+  var headRowTotal = headHC.total + volumeBonus;
+  var headNote = useNewRules
+    ? 'Оклад 20т + 0.8% вырч.мен. + 2% найм мен. (маржа ≥23%)'
+    : 'Оклад 20т + 0.8% вырч.мен. + 2% найм мен.';
+  html += '<tr style="background:rgba('+dept.bgA+',.07)">';
+  html += '<td><b>'+dept.headName+'</b> <span style="font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(255,255,255,.1);color:var(--muted)">рук.</span>';
+  html += '<div style="font-size:10px;color:var(--muted);margin-top:2px">'+headNote+'</div></td>';
+  html += '<td class="num muted" style="font-size:11px">'+fr(headHC.deptRev)+'<div style="font-size:10px;color:var(--muted)">итого мен.</div></td>';
+  html += '<td class="num muted" style="font-size:11px">—</td>';
+  html += '<td class="num muted" style="font-size:11px">'+fr(useNewRules ? headHC.deptQualMargin : headHC.deptHired)+'<div style="font-size:10px;color:var(--muted)">найм мен.</div></td>';
+  var headOwnCost = (useNewRules && headHC.deptOwnProfitBase !== undefined) ? (headHC.deptOwnRev - headHC.deptOwnProfitBase) : 0;
+  html += '<td class="num amber" style="font-size:11px">'+(headOwnCost?fr(headOwnCost):'—')+'</td>';
+  html += '<td class="num" style="border-left:2px solid var(--border)">'+fr(20000)+'</td>';
+  html += '<td class="num">'+fr(headHC.pct08)+'</td>';
+  html += '<td class="num">'+fr(headHC.margin2)+'</td>';
+  html += '<td class="num">'+(headPremiaTotal ? fr(headPremiaTotal) : '—')+'</td>';
+  html += '<td class="num" style="font-weight:700;color:'+dept.color+'">'+fr(headRowTotal)+'</td>';
+  html += '</tr>';
+  if (headHC.pct08) {
+    html += '<tr style="background:rgba(255,255,255,.02)">';
+    if (useNewRules) {
+      var headTeamCosts = headHC.deptOwnRev - headHC.deptOwnProfitBase;
+      html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">База % с команды: '+fr(headHC.deptOwnRev)+' выручка своего парка команды минус '+fr(headTeamCosts)+' затраты = <b>'+fr(headHC.deptOwnProfitBase)+'</b></td>';
+      html += '<td colspan="9" class="num muted" style="font-size:11px">0.8% × '+fr(headHC.deptOwnProfitBase)+' = '+fr(headHC.pct08)+'</td>';
+    } else {
+      html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">% с команды: 0.8% от выручки менеджеров (без личных продаж рук.)</td>';
+      html += '<td colspan="9" class="num muted" style="font-size:11px">0.8% × '+fr(headHC.deptRev)+' = '+fr(headHC.pct08)+'</td>';
+    }
+    html += '</tr>';
+  }
+  if (headHC.margin2) {
+    var headMargin2Base = useNewRules ? headHC.deptQualMargin : headHC.deptHired;
+    var headMargin2Label = useNewRules
+      ? '% с найма команды: 2% от квалифицирующей маржи найма менеджеров (маржа по заказу ≥23%)'
+      : '% с найма команды: 2% от маржи найма менеджеров';
+    html += '<tr style="background:rgba(255,255,255,.02)">';
+    html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">'+headMargin2Label+'</td>';
+    html += '<td colspan="9" class="num muted" style="font-size:11px">2% × '+fr(headMargin2Base)+' = '+fr(headHC.margin2)+'</td>';
+    html += '</tr>';
+  }
+  if (headHC.mgrBonus) {
+    html += '<tr style="background:rgba(255,255,255,.02)">';
+    html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">Премия за укомплектованность отдела: '+headHC.memberCount+' активных менеджеров (нужно ≥4), из них '+headHC.above2m+' сделали &gt;2М</td>';
+    html += '<td colspan="9" class="num muted" style="font-size:11px">20т × '+headHC.above2m+' = '+fr(headHC.mgrBonus)+'</td>';
+    html += '</tr>';
+  }
+  if (volumeBonus) {
+    var deptRevTotal = headHC.deptRev + (headHM ? (headHM.total||0) : 0);
+    html += '<tr style="background:rgba(255,255,255,.02)">';
+    html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">Премия за объём: выручка отдела '+fr(deptRevTotal)+' (нужно ≥30М)</td>';
+    html += '<td colspan="9" class="num muted" style="font-size:11px">10т × '+Math.floor(deptRevTotal/10000000)+' (по 10М) = '+fr(volumeBonus)+'</td>';
+    html += '</tr>';
+  }
+
+  if (headHM) {
+    var headRateBadge = (headHM.rate*100).toString().replace('.', ',') + '%';
+    html += '<tr style="background:rgba('+dept.bgA+',.03)">';
+    html += '<td style="padding-left:24px"><span style="font-size:12px;color:var(--muted)">↳ Личные продажи</span> ';
+    html += '<span style="font-size:10px;padding:1px 4px;border-radius:3px;background:rgba(29,158,117,.15);color:#1D9E75">'+headRateBadge+'</span></td>';
+    html += '<td class="num">'+fr(headHM.total)+'</td>';
+    html += '<td class="num">'+fr(headHM.ownRev)+'</td>';
+    html += '<td class="num">'+fr(headHM.hiredMargin)+'</td>';
+    var headHMOwnCost = (headHM.newRules && headHM.ownProfitBase !== undefined) ? (headHM.ownRev - headHM.ownProfitBase) : 0;
+    html += '<td class="num amber">'+(headHMOwnCost?fr(headHMOwnCost):'—')+'</td>';
+    html += '<td class="num muted" style="border-left:2px solid var(--border)">—</td>';
+    html += '<td class="num">'+fr(headHM.ownComm)+'</td>';
+    html += '<td class="num">'+(headHM.hiredBonus ? fr(headHM.hiredBonus) : '—')+'</td>';
+    html += '<td class="num">'+(headHM.bonus15m ? fr(headHM.bonus15m) : '—')+'</td>';
+    html += '<td class="num" style="font-weight:700;color:'+dept.color+'">'+fr(headHM.total_sal)+'</td>';
+    html += '</tr>';
+    if (headHM.newRules && headHM.ownProfitBase !== undefined && Math.abs(headHM.ownProfitBase - headHM.ownRev) > 1) {
+      html += '<tr style="background:rgba(255,255,255,.02)">';
+      html += '<td style="padding-left:44px;font-size:11px;color:var(--muted)">База % своего парка: '+fr(headHM.ownRev)+' выручка минус '+fr(headHM.ownRev - headHM.ownProfitBase)+' затраты = <b>'+fr(headHM.ownProfitBase)+'</b></td>';
+      html += '<td colspan="9" class="num muted" style="font-size:11px">'+(headHM.rate*100).toString().replace('.', ',')+'% × '+fr(headHM.ownProfitBase)+' = '+fr(headHM.ownComm)+'</td>';
+      html += '</tr>';
+    }
+    html += hiredBreakdownRow(headHM, 44);
+    html += '<tr style="border-top:1px solid rgba(255,255,255,.06)">';
+    html += '<td colspan="9" style="font-size:12px;color:var(--muted);text-align:right;padding-right:12px">Итого '+dept.headName.split(' ')[0]+'</td>';
+    html += '<td class="num" style="font-weight:700;color:'+dept.color+'">'+fr(headTotal)+'</td>';
+    html += '</tr>';
+  }
+
+  memberCalcs.forEach(function(mc) {
+    var sur = mc.sur;
+    var c = mc.calc;
+    if (!c || !c.total) return;
+    var rate = mgrRate(sur);
+    var isDual = DUAL_LOGISTS.indexOf(sur.toLowerCase()) >= 0;
+    html += '<tr>';
+    html += '<td><b>'+capName(sur)+'</b>';
+    if (rate === 0.02) html += ' <span style="font-size:10px;padding:1px 4px;border-radius:3px;background:rgba(55,138,221,.18);color:#378ADD">2%</span>';
+    if (isDual) html += ' <span style="font-size:10px;padding:1px 4px;border-radius:3px;background:rgba(239,159,39,.15);color:#EF9F27">лог.</span>';
+    if (c.isPrus) {
+      var prusNote = c.hiredMargin > 1000000 ? 'найм >1М: 10% маржи' : 'найм до 1М: 7% маржи';
+      html += '<div style="font-size:10px;color:var(--muted);margin-top:2px">'+prusNote+'</div>';
+    }
+    html += '</td>';
+    html += '<td class="num">'+fr(c.total)+'</td>';
+    html += '<td class="num">'+fr(c.ownRev)+'</td>';
+    html += '<td class="num">'+fr(c.hiredMargin)+'</td>';
+    var cOwnCost = (c.newRules && c.ownProfitBase !== undefined) ? (c.ownRev - c.ownProfitBase) : 0;
+    html += '<td class="num amber">'+(cOwnCost?fr(cOwnCost):'—')+'</td>';
+    html += '<td class="num" style="border-left:2px solid var(--border)">'+fr(c.oklad)+'</td>';
+    html += '<td class="num">'+fr(c.ownComm)+'</td>';
+    html += '<td class="num">'+(c.hiredBonus ? fr(c.hiredBonus) : '—')+'</td>';
+    html += '<td class="num">'+(c.bonus15m ? fr(c.bonus15m) : '—')+'</td>';
+    html += '<td class="num" style="font-weight:600;color:'+dept.color+'">'+fr(c.total_sal)+'</td>';
+    html += '</tr>';
+    if (c.newRules && c.ownProfitBase !== undefined && Math.abs(c.ownProfitBase - c.ownRev) > 1) {
+      html += '<tr style="background:rgba(255,255,255,.02)">';
+      html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">База % своего парка: '+fr(c.ownRev)+' выручка минус '+fr(c.ownRev - c.ownProfitBase)+' затраты = <b>'+fr(c.ownProfitBase)+'</b></td>';
+      html += '<td colspan="9" class="num muted" style="font-size:11px">'+(c.rate*100).toString().replace('.', ',')+'% × '+fr(c.ownProfitBase)+' = '+fr(c.ownComm)+'</td>';
+      html += '</tr>';
+    }
+    if (!c.isPrus) {
+      html += hiredBreakdownRow(c, 24);
+    }
+  });
+
+  html += '<tr style="background:rgba(255,255,255,.03);border-top:1px solid var(--border)">';
+  html += '<td colspan="9" style="font-size:12px;color:var(--muted);padding:8px 12px">Фонд оплаты отдела</td>';
+  html += '<td class="num" style="font-weight:700;color:'+dept.color+';padding:8px 12px">'+fr(deptFund)+'</td>';
+  html += '</tr>';
+  html += '</tbody></table></div></div>';
+
+  return { html: html, deptFund: deptFund };
+}
+
 // Собирает вход для renderRyschanowDeptCardHtml_ прямо из D (2026-08-26, отдельный пункт
 // меню "Зарплата" для Рыщанова - см. showPage('ryschanow-salary')/applyRoleUI ниже). Общий
 // источник для company-wide вкладки "Зарплата" (там свои локальные getL/grossProfit уже
@@ -8456,6 +9027,123 @@ function renderRyschanowSalaryPage_() {
   var el = document.getElementById('ryschanow-salary-content');
   if (!el || !D || !D.orders) return;
   el.innerHTML = ryschanowSalaryCardHtml_();
+}
+
+// Текущий просматриваемый руководитель коммерческой группы - self-login (D.managerName) или
+// admin-предпросмотр (viewAsEntry). Возвращает запись DEPT_CFG (color/name/head/members) -
+// используется личной страницей (renderMyPageCommercialHead_/renderDeptGroupTableHtml_).
+function currentCommercialHeadCfg_() {
+  var previewing = D && D.role === 'admin' && typeof viewAsEntry !== 'undefined' && viewAsEntry;
+  var name = previewing ? viewAsEntry.name : ((D && D.managerName) || '');
+  var headSur = name.trim().split(' ')[0].toLowerCase();
+  return DEPT_CFG.filter(function(c){ return c.head && c.head.toLowerCase() === headSur; })[0] || null;
+}
+
+// Карточка "Отдел X" для отдельного пункта меню "Зарплата" руководителя группы (2026-08-26,
+// см. plans/2026-08-26-ahtamova-guseinova-personal-pages.md) - переиспользует
+// renderCommercialDeptCardHtml_ (та же функция, что и company-wide вкладка "Зарплата") -
+// та ждёт ДРУГУЮ форму записи (color/bgA/label/head/headName/ownSales/members), чем DEPT_CFG
+// (color/name/head/members) - ищем в COMMERCIAL_DEPTS напрямую, не через
+// currentCommercialHeadCfg_ (та возвращает форму DEPT_CFG, не подходит сюда).
+function commercialHeadSalaryCardHtml_() {
+  var previewing = D && D.role === 'admin' && typeof viewAsEntry !== 'undefined' && viewAsEntry;
+  var name = previewing ? viewAsEntry.name : ((D && D.managerName) || '');
+  var headSur = name.trim().split(' ')[0].toLowerCase();
+  var cfg = COMMERCIAL_DEPTS.filter(function(c){ return c.head && c.head.toLowerCase() === headSur; })[0];
+  if (!cfg) return '<div class="muted" style="padding:16px">Отдел не найден</div>';
+  var byManagerAll = (D.orders && D.orders.team_by_manager) || (D.orders && D.orders.by_manager) || [];
+  var mgrIdx = {};
+  byManagerAll.forEach(function(m) { mgrIdx[String(m.name||'').trim().split(' ')[0].toLowerCase()] = m; });
+  function getM(sur) { return mgrIdx[sur.toLowerCase()] || null; }
+  function getL() { return null; } // коммерческие команды - чистые менеджеры, не логисты (см. renderCommercialDeptCardHtml_)
+  var useNewRules = isNewRulesPeriod((D.orders||{}).period);
+  return renderCommercialDeptCardHtml_(cfg, getM, getL, useNewRules).html;
+}
+
+function renderCommercialHeadSalaryPage_() {
+  var el = document.getElementById('commercial-head-salary-content');
+  if (!el || !D || !D.orders) return;
+  el.innerHTML = commercialHeadSalaryCardHtml_();
+}
+
+// Дебиторская задолженность отдела для отдельного пункта меню "ДЗ" руководителя группы
+// (2026-08-26, Влад: "делаю ДЗ... отдельно сбоку, как это у меня сделано на дашборде") -
+// ТОТ ЖЕ формат, что вкладка "ДЗ" на личной странице обычного менеджера (Контрагент/Баланс/
+// Дней просрочки/Статус, click-to-expand документов через buildDebtDocsHtml_), team-scoped
+// вместо одной фамилии. Своё параллельное состояние (chDebt*) - НЕ переиспользует mgrDebt*
+// (те жёстко вызывают renderMyPage()) - тот же приём, что уже использовался для параллельных
+// вкладок Рыщанова/группы отдела выше.
+let chDebtBuckets = new Set(['0-30','30-60','60-90']);
+function setChDebtBucket(bucket) {
+  if (chDebtBuckets.has(bucket)) chDebtBuckets.delete(bucket);
+  else chDebtBuckets.add(bucket);
+  renderCommercialHeadDebtPage_();
+}
+let chDebtOpenRow = null;
+function toggleChDebtDetail(name) { chDebtOpenRow = (chDebtOpenRow===name ? null : name); renderCommercialHeadDebtPage_(); }
+
+function renderCommercialHeadDebtPage_() {
+  var el = document.getElementById('commercial-head-debt-content');
+  if (!el || !D) return;
+  var cfg = currentCommercialHeadCfg_();
+  if (!cfg) { el.innerHTML = '<div class="muted" style="padding:16px">Отдел не найден</div>'; return; }
+  var fmt = pageFr_;
+  var teamSurLower = cfg.members.map(function(s){ return s.toLowerCase(); });
+
+  var allDebt = ((D.debt && D.debt.by_customer) || []).filter(function(c){
+    return teamSurLower.indexOf(String(c.manager||'').trim().split(' ')[0].toLowerCase()) >= 0;
+  });
+  var dAgg = computeDebtAggregates_(allDebt);
+  var dDead = debtDeadAndStatus_(allDebt);
+  var buckets = [
+    {key:'0-30', label:'0-30 дн.', value: dAgg.summary.current_0_30},
+    {key:'30-60', label:'30-60 дн.', value: dAgg.summary.overdue_30_60},
+    {key:'60-90', label:'60-90 дн.', value: dAgg.summary.overdue_60_90},
+    {key:'90+', label:'90+ дн.', value: dAgg.summary.overdue_90_plus},
+    {key:'dead', label:'Мёртвая (600+)', value: dDead.overdue_dead},
+  ];
+  var html = '<div style="margin-bottom:12px;font-size:13px;color:var(--muted)">Итого долг: <b style="color:'+PAGE_COL.red+'">'+pageMln_(dAgg.summary.total_balance)+'</b> · должников: '+dAgg.summary.debtor_count+'</div>';
+  html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'+
+    buckets.map(function(b){
+      var active = chDebtBuckets.has(b.key);
+      return '<button onclick="setChDebtBucket(\''+b.key+'\')" style="cursor:pointer;background:'+(active?'rgba(255,255,255,.12)':'var(--bg3)')+';border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:11px;color:var(--text)">'+b.label+' <b>'+pageMln_(b.value)+'</b></button>';
+    }).join('')+
+  '</div>';
+
+  var dFiltered = allDebt.filter(function(c){
+    if (chDebtBuckets.size && !Array.from(chDebtBuckets).some(function(bk){ return debtInBucket_(c.daysOverdue, bk); })) return false;
+    return true;
+  }).sort(function(a,b){ return b.balance-a.balance; });
+
+  function ageCls(days) { return days > 90 ? 'red' : (days > 30) ? 'amber' : 'green'; }
+  var todayForDocs = new Date();
+  var curMonthStart = todayForDocs.getFullYear()+'-'+String(todayForDocs.getMonth()+1).padStart(2,'0')+'-01';
+  var dRows = !dFiltered.length
+    ? '<tr><td colspan="5" class="muted" style="padding:14px">'+(allDebt.length?'Нет должников по этому фильтру':'Долгов нет')+'</td></tr>'
+    : dFiltered.map(function(c){
+        var byOrgLine = (c.byOrg && c.byOrg.length)
+          ? ' <span class="muted" style="font-size:10.5px">— '+c.byOrg.map(function(o){ return o.org+': '+fmt(o.balance); }).join(' · ')+'</span>'
+          : '';
+        var isOpen = chDebtOpenRow === c.contragent;
+        var contragentEsc = c.contragent.replace(/'/g,"\\'");
+        var row = '<tr class="debt-row-toggle" onclick="toggleChDebtDetail(\''+contragentEsc+'\')" style="cursor:pointer">'+
+          '<td><span class="muted" style="display:inline-block;width:14px">'+(isOpen?'▾':'▸')+'</span><b>'+c.contragent+'</b>'+byOrgLine+'</td>'+
+          '<td class="muted">'+(c.manager||'—')+'</td>'+
+          '<td class="num"><b>'+fmt(c.balance)+'</b></td>'+
+          '<td class="num '+ageCls(c.daysOverdue)+'">'+c.daysOverdue+'</td>'+
+          '<td class="muted">'+(c.status||'—')+'</td>'+
+        '</tr>';
+        if (isOpen) {
+          var docs = buildDebtDocsHtml_(c, curMonthStart);
+          row += '<tr><td colspan="5" style="padding:0 0 10px 24px">'+
+            '<table style="width:100%;font-size:11.5px;border-collapse:collapse">'+docs.docsHtml+'</table>'+docs.reconcileLine+
+          '</td></tr>';
+        }
+        return row;
+      }).join('');
+  html += '<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Контрагент</th><th>Менеджер</th><th class="num">Баланс</th><th class="num">Дней просрочки</th><th>Статус</th></tr></thead><tbody>'+dRows+'</tbody></table></div>';
+
+  el.innerHTML = html;
 }
 
 // Состав "обычных" (не спецформула) отделов - ОБЩИЙ источник для renderSalesSalary() и
@@ -8567,33 +9255,6 @@ function renderSalesSalary() {
   function fr(n) { return n ? Math.round(n).toLocaleString('ru-RU') + ' ₽' : '—'; }
 
   // Суб-строка разбивки найма под менеджером - старые правила (логист/не логист) или новые (квалиф./не квалиф. маржа)
-  function hiredBreakdownRow(c, indent) {
-    if (!c) return '';
-    if (c.newRules) {
-      if (!c.hiredMargin && !c.hiredMarginUnqual) return '';
-      var parts = [];
-      if (c.hiredMargin) parts.push('<span style="color:#1D9E75;font-weight:500">'+fr(c.hiredMargin)+'</span> маржа ≥23% <span style="background:rgba(29,158,117,.15);color:#1D9E75;padding:1px 4px;border-radius:3px;font-size:10px">8%</span>');
-      if (c.hiredMarginUnqual) parts.push('<span style="color:var(--muted)">'+fr(c.hiredMarginUnqual)+'</span> маржа &lt;23% <span style="background:rgba(255,255,255,.08);color:var(--muted);padding:1px 4px;border-radius:3px;font-size:10px">0%</span>');
-      var h = '<tr style="background:rgba(255,255,255,.02)">';
-      h += '<td style="padding-left:'+indent+'px;font-size:11px;color:var(--muted)">'+parts.join(' &nbsp;/&nbsp; ')+'</td>';
-      h += '<td colspan="9" class="num muted" style="font-size:11px">8% × '+fr(c.hiredMargin)+' = '+fr(c.hiredBonus)+'</td>';
-      h += '</tr>';
-      return h;
-    }
-    if (c.logPart > 0) {
-      var h2 = '<tr style="background:rgba(255,255,255,.02)">';
-      h2 += '<td style="padding-left:'+indent+'px;font-size:11px;color:var(--muted)">';
-      h2 += '<span style="color:#1D9E75;font-weight:500">'+fr(c.logPart)+'</span> — как логист <span style="background:rgba(29,158,117,.15);color:#1D9E75;padding:1px 4px;border-radius:3px;font-size:10px">10%</span>';
-      h2 += ' &nbsp;/&nbsp; ';
-      h2 += '<span style="color:var(--text)">'+fr(c.nonLogPart)+'</span> — логист другой <span style="background:rgba(255,255,255,.08);color:var(--muted);padding:1px 4px;border-radius:3px;font-size:10px">5%</span>';
-      h2 += '</td>';
-      h2 += '<td colspan="9" class="num muted" style="font-size:11px">'+fr(Math.round(c.logPart*0.1))+' + '+fr(Math.round(c.nonLogPart*0.05))+' = '+fr(c.hiredBonus)+'</td>';
-      h2 += '</tr>';
-      return h2;
-    }
-    return '';
-  }
-
   function calcHead(members, headSur, useNewRules) {
     return calcHead_(members, headSur, useNewRules, getM);
   }
@@ -8631,30 +9292,10 @@ function renderSalesSalary() {
 
   var totalPayroll = 0;
 
-  // Влад, 2026-08-06: разделить визуально "базу, от которой считается зарплата" (выручка,
-  // маржа найма, затраты - входные данные) от "уже посчитанной зарплаты" (оклад/проценты/
-  // итого - результат). Групповая шапка + вертикальная граница перед "Оклад" - без разбивки
-  // на два физически разных стола, чтобы не плодить лишние таблицы на каждую строку.
-  function tblHead() {
-    return '<thead>' +
-      '<tr>' +
-        '<th></th>' +
-        '<th colspan="4" class="num" style="font-size:10px;font-weight:600;color:var(--muted);letter-spacing:.04em">БАЗА РАСЧЁТА</th>' +
-        '<th colspan="5" class="num" style="font-size:10px;font-weight:600;color:var(--muted);letter-spacing:.04em;border-left:2px solid var(--border)">РАСЧЁТ ЗАРПЛАТЫ</th>' +
-      '</tr>' +
-      '<tr>' +
-      '<th>Сотрудник</th>' +
-      '<th class="num">Выр. всего</th>' +
-      '<th class="num">Собст.</th>' +
-      '<th class="num">Найм марж.</th>' +
-      '<th class="num">Затраты</th>' +
-      '<th class="num" style="border-left:2px solid var(--border)">Оклад</th>' +
-      '<th class="num">% парк</th>' +
-      '<th class="num">% найм</th>' +
-      '<th class="num">Премия</th>' +
-      '<th class="num">ИТОГО</th>' +
-      '</tr></thead>';
-  }
+  // tblHead() (шапка "БАЗА РАСЧЁТА"/"РАСЧЁТ ЗАРПЛАТЫ") теперь живёт внутри
+  // renderRyschanowDeptCardHtml_/renderCommercialDeptCardHtml_ (2026-08-26, обе карточки
+  // вынесены в module scope) - здесь больше не нужна, DEPTS.forEach только вызывает эти
+  // функции и суммирует totalPayroll.
 
   var html = '';
 
@@ -8671,178 +9312,13 @@ function renderSalesSalary() {
       return;
     }
 
-    var headHC = calcHead(dept.members, dept.head, useNewRules);
-    var headHM = dept.ownSales ? calcMgr(dept.head, false, getM, getL, useNewRules) : null;
-    // Премия за объём >30М (Влад, 2026-08-06) - только Ахтамова/Гусейнова.
-    var volumeBonus = useNewRules ? calcVolumeBonus(headHC.deptRev + (headHM ? (headHM.total||0) : 0)) : 0;
-    var headTotal = headHC.total + (headHM ? headHM.total_sal : 0) + volumeBonus;
-
-    var memberCalcs = dept.members.filter(function(s){ return s !== dept.head; }).map(function(sur){
-      return { sur:sur, calc:calcMgr(sur, true, getM, getL, useNewRules) };
-    });
-    var deptFund = headTotal + memberCalcs.reduce(function(s,mc){ return s + (mc.calc ? mc.calc.total_sal : 0); }, 0);
-    totalPayroll += deptFund;
-
-    html += '<div class="card" style="margin-bottom:16px;padding:0;overflow:hidden">';
-    html += '<div style="border-left:3px solid '+dept.color+';padding:12px 16px;background:rgba(255,255,255,.03);display:flex;align-items:center;justify-content:space-between">';
-    html += '<div><div style="font-size:13px;font-weight:600;color:'+dept.color+'">'+dept.label+'</div>';
-    // Уволенные (нет данных за период) не попадают в шапку - Влад, 2026-08-06.
-    var subNames = dept.members.filter(function(s){
-      if (s === dept.head) return false;
-      var mChk = getM(s), lChk = getL(s);
-      return !!((mChk && (mChk.amount||0) > 0) || (lChk && (lChk.orders||0) > 0));
-    }).map(capName).join(' · ');
-    html += '<div style="font-size:11px;color:var(--muted);margin-top:2px">'+subNames+'</div></div>';
-    html += '<div style="text-align:right"><div style="font-size:11px;color:var(--muted)">Фонд отдела</div>';
-    html += '<div style="font-size:15px;font-weight:700;color:'+dept.color+'">'+fr(deptFund)+'</div></div></div>';
-
-    html += '<div style="overflow-x:auto"><table class="tbl" style="min-width:960px">'+tblHead()+'<tbody>';
-
-    {
-      // Обычный руководитель (Ахтамова, Гусейнова). "Премия" в шапке строки - сумма ВСЕХ
-      // премиальных компонентов (укомплектованность + объём), раскладка построчно ниже -
-      // Влад, 2026-08-06: "хочу видеть части премии - за что 30 тысяч, за что 80 тысяч".
-      var headPremiaTotal = headHC.mgrBonus + volumeBonus;
-      var headRowTotal = headHC.total + volumeBonus; // строка руководителя целиком, включая объём (который считается вне calcHead - там нет личных продаж)
-      var headNote = useNewRules
-        ? 'Оклад 20т + 0.8% вырч.мен. + 2% найм мен. (маржа ≥23%)'
-        : 'Оклад 20т + 0.8% вырч.мен. + 2% найм мен.';
-      html += '<tr style="background:rgba('+dept.bgA+',.07)">';
-      html += '<td><b>'+dept.headName+'</b> <span style="font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(255,255,255,.1);color:var(--muted)">рук.</span>';
-      html += '<div style="font-size:10px;color:var(--muted);margin-top:2px">'+headNote+'</div></td>';
-      html += '<td class="num muted" style="font-size:11px">'+fr(headHC.deptRev)+'<div style="font-size:10px;color:var(--muted)">итого мен.</div></td>';
-      html += '<td class="num muted" style="font-size:11px">—</td>';
-      html += '<td class="num muted" style="font-size:11px">'+fr(useNewRules ? headHC.deptQualMargin : headHC.deptHired)+'<div style="font-size:10px;color:var(--muted)">найм мен.</div></td>';
-      // Влад, 2026-08-10: "в колонке Затраты хочу видеть именно те цифры, что в примечании
-      // 'База % своего парка... минус затраты'" - раньше тут была найм-затраты (hiredExtraCosts,
-      // справочная, мелкая и путала), теперь - реальное вычитаемое из базы % своего парка.
-      var headOwnCost = (useNewRules && headHC.deptOwnProfitBase !== undefined) ? (headHC.deptOwnRev - headHC.deptOwnProfitBase) : 0;
-      html += '<td class="num amber" style="font-size:11px">'+(headOwnCost?fr(headOwnCost):'—')+'</td>';
-      html += '<td class="num" style="border-left:2px solid var(--border)">'+fr(20000)+'</td>';
-      html += '<td class="num">'+fr(headHC.pct08)+'</td>';
-      html += '<td class="num">'+fr(headHC.margin2)+'</td>';
-      html += '<td class="num">'+(headPremiaTotal ? fr(headPremiaTotal) : '—')+'</td>';
-      html += '<td class="num" style="font-weight:700;color:'+dept.color+'">'+fr(headRowTotal)+'</td>';
-      html += '</tr>';
-      // Влад, 2026-08-08: "в части шеф-менеджеров хорошо расписаны личные продажи - сделать так
-      // же для части зарплаты от сотрудников их команды" - раскладываем 0.8%/2% override так же,
-      // как ownProfitBase/hiredBreakdownRow ниже для личных продаж.
-      if (headHC.pct08) {
-        html += '<tr style="background:rgba(255,255,255,.02)">';
-        if (useNewRules) {
-          var headTeamCosts = headHC.deptOwnRev - headHC.deptOwnProfitBase;
-          html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">База % с команды: '+fr(headHC.deptOwnRev)+' выручка своего парка команды минус '+fr(headTeamCosts)+' затраты = <b>'+fr(headHC.deptOwnProfitBase)+'</b></td>';
-          html += '<td colspan="9" class="num muted" style="font-size:11px">0.8% × '+fr(headHC.deptOwnProfitBase)+' = '+fr(headHC.pct08)+'</td>';
-        } else {
-          html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">% с команды: 0.8% от выручки менеджеров (без личных продаж рук.)</td>';
-          html += '<td colspan="9" class="num muted" style="font-size:11px">0.8% × '+fr(headHC.deptRev)+' = '+fr(headHC.pct08)+'</td>';
-        }
-        html += '</tr>';
-      }
-      if (headHC.margin2) {
-        var headMargin2Base = useNewRules ? headHC.deptQualMargin : headHC.deptHired;
-        var headMargin2Label = useNewRules
-          ? '% с найма команды: 2% от квалифицирующей маржи найма менеджеров (маржа по заказу ≥23%)'
-          : '% с найма команды: 2% от маржи найма менеджеров';
-        html += '<tr style="background:rgba(255,255,255,.02)">';
-        html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">'+headMargin2Label+'</td>';
-        html += '<td colspan="9" class="num muted" style="font-size:11px">2% × '+fr(headMargin2Base)+' = '+fr(headHC.margin2)+'</td>';
-        html += '</tr>';
-      }
-      if (headHC.mgrBonus) {
-        html += '<tr style="background:rgba(255,255,255,.02)">';
-        html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">Премия за укомплектованность отдела: '+headHC.memberCount+' активных менеджеров (нужно ≥4), из них '+headHC.above2m+' сделали &gt;2М</td>';
-        html += '<td colspan="9" class="num muted" style="font-size:11px">20т × '+headHC.above2m+' = '+fr(headHC.mgrBonus)+'</td>';
-        html += '</tr>';
-      }
-      if (volumeBonus) {
-        var deptRevTotal = headHC.deptRev + (headHM ? (headHM.total||0) : 0);
-        html += '<tr style="background:rgba(255,255,255,.02)">';
-        html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">Премия за объём: выручка отдела '+fr(deptRevTotal)+' (нужно ≥30М)</td>';
-        html += '<td colspan="9" class="num muted" style="font-size:11px">10т × '+Math.floor(deptRevTotal/10000000)+' (по 10М) = '+fr(volumeBonus)+'</td>';
-        html += '</tr>';
-      }
-
-      if (headHM) {
-        var headRateBadge = (headHM.rate*100).toString().replace('.', ',') + '%';
-        html += '<tr style="background:rgba('+dept.bgA+',.03)">';
-        html += '<td style="padding-left:24px"><span style="font-size:12px;color:var(--muted)">↳ Личные продажи</span> ';
-        html += '<span style="font-size:10px;padding:1px 4px;border-radius:3px;background:rgba(29,158,117,.15);color:#1D9E75">'+headRateBadge+'</span></td>';
-        html += '<td class="num">'+fr(headHM.total)+'</td>';
-        html += '<td class="num">'+fr(headHM.ownRev)+'</td>';
-        html += '<td class="num">'+fr(headHM.hiredMargin)+'</td>';
-        var headHMOwnCost = (headHM.newRules && headHM.ownProfitBase !== undefined) ? (headHM.ownRev - headHM.ownProfitBase) : 0;
-        html += '<td class="num amber">'+(headHMOwnCost?fr(headHMOwnCost):'—')+'</td>';
-        html += '<td class="num muted" style="border-left:2px solid var(--border)">—</td>';
-        html += '<td class="num">'+fr(headHM.ownComm)+'</td>';
-        html += '<td class="num">'+(headHM.hiredBonus ? fr(headHM.hiredBonus) : '—')+'</td>';
-        html += '<td class="num">'+(headHM.bonus15m ? fr(headHM.bonus15m) : '—')+'</td>';
-        html += '<td class="num" style="font-weight:700;color:'+dept.color+'">'+fr(headHM.total_sal)+'</td>';
-        html += '</tr>';
-        if (headHM.newRules && headHM.ownProfitBase !== undefined && Math.abs(headHM.ownProfitBase - headHM.ownRev) > 1) {
-          html += '<tr style="background:rgba(255,255,255,.02)">';
-          html += '<td style="padding-left:44px;font-size:11px;color:var(--muted)">База % своего парка: '+fr(headHM.ownRev)+' выручка минус '+fr(headHM.ownRev - headHM.ownProfitBase)+' затраты = <b>'+fr(headHM.ownProfitBase)+'</b></td>';
-          html += '<td colspan="9" class="num muted" style="font-size:11px">'+(headHM.rate*100).toString().replace('.', ',')+'% × '+fr(headHM.ownProfitBase)+' = '+fr(headHM.ownComm)+'</td>';
-          html += '</tr>';
-        }
-        html += hiredBreakdownRow(headHM, 44);
-        html += '<tr style="border-top:1px solid rgba(255,255,255,.06)">';
-        html += '<td colspan="9" style="font-size:12px;color:var(--muted);text-align:right;padding-right:12px">Итого '+dept.headName.split(' ')[0]+'</td>';
-        html += '<td class="num" style="font-weight:700;color:'+dept.color+'">'+fr(headTotal)+'</td>';
-        html += '</tr>';
-      }
-    }
-
-    // Менеджеры отдела. Без данных ИЛИ с нулевой выручкой за период - строку не рисуем вовсе,
-    // не "нет данных" - скорее всего человек уволен (Влад, 2026-08-06: пример - Дербенцева,
-    // Коньшина, Володин). !c.total ловит случай, когда запись в by_manager технически ЕСТЬ
-    // (m не null), но amount=0 - без этой проверки такие строки всё равно рендерились пустыми.
-    memberCalcs.forEach(function(mc) {
-      var sur = mc.sur;
-      var c = mc.calc;
-      if (!c || !c.total) return;
-      var rate = mgrRate(sur);
-      var isDual = DUAL_LOGISTS.indexOf(sur.toLowerCase()) >= 0;
-      html += '<tr>';
-      html += '<td><b>'+capName(sur)+'</b>';
-      if (rate === 0.02) html += ' <span style="font-size:10px;padding:1px 4px;border-radius:3px;background:rgba(55,138,221,.18);color:#378ADD">2%</span>';
-      if (isDual) html += ' <span style="font-size:10px;padding:1px 4px;border-radius:3px;background:rgba(239,159,39,.15);color:#EF9F27">лог.</span>';
-      if (c.isPrus) {
-        var prusNote = c.hiredMargin > 1000000 ? 'найм >1М: 10% маржи' : 'найм до 1М: 7% маржи';
-        html += '<div style="font-size:10px;color:var(--muted);margin-top:2px">'+prusNote+'</div>';
-      }
-      html += '</td>';
-      html += '<td class="num">'+fr(c.total)+'</td>';
-      html += '<td class="num">'+fr(c.ownRev)+'</td>';
-      html += '<td class="num">'+fr(c.hiredMargin)+'</td>';
-      var cOwnCost = (c.newRules && c.ownProfitBase !== undefined) ? (c.ownRev - c.ownProfitBase) : 0;
-      html += '<td class="num amber">'+(cOwnCost?fr(cOwnCost):'—')+'</td>';
-      html += '<td class="num" style="border-left:2px solid var(--border)">'+fr(c.oklad)+'</td>';
-      html += '<td class="num">'+fr(c.ownComm)+'</td>';
-      html += '<td class="num">'+(c.hiredBonus ? fr(c.hiredBonus) : '—')+'</td>';
-      html += '<td class="num">'+(c.bonus15m ? fr(c.bonus15m) : '—')+'</td>';
-      html += '<td class="num" style="font-weight:600;color:'+dept.color+'">'+fr(c.total_sal)+'</td>';
-      html += '</tr>';
-      // Комиссия своего парка считается не с валовой выручки, а с выручки минус вознаграждения/
-      // спецразрешение (см. ownProfitBase в calcMgr) - показываем базу, если она отличается от
-      // валовой выручки, чтобы не выглядело как расхождение в цифрах.
-      if (c.newRules && c.ownProfitBase !== undefined && Math.abs(c.ownProfitBase - c.ownRev) > 1) {
-        html += '<tr style="background:rgba(255,255,255,.02)">';
-        html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">База % своего парка: '+fr(c.ownRev)+' выручка минус '+fr(c.ownRev - c.ownProfitBase)+' затраты = <b>'+fr(c.ownProfitBase)+'</b></td>';
-        html += '<td colspan="9" class="num muted" style="font-size:11px">'+(c.rate*100).toString().replace('.', ',')+'% × '+fr(c.ownProfitBase)+' = '+fr(c.ownComm)+'</td>';
-        html += '</tr>';
-      }
-      // Суб-строка разбивки найма только для НЕ-Пруса (у Пруса единая ставка, и только до июля)
-      if (!c.isPrus) {
-        html += hiredBreakdownRow(c, 24);
-      }
-    });
-
-    html += '<tr style="background:rgba(255,255,255,.03);border-top:1px solid var(--border)">';
-    html += '<td colspan="9" style="font-size:12px;color:var(--muted);padding:8px 12px">Фонд оплаты отдела</td>';
-    html += '<td class="num" style="font-weight:700;color:'+dept.color+';padding:8px 12px">'+fr(deptFund)+'</td>';
-    html += '</tr>';
-    html += '</tbody></table></div></div>';
+    // Ахтамова/Гусейнова - вынесены в общую функцию renderCommercialDeptCardHtml_
+    // (2026-08-26, тот же приём, что renderRyschanowDeptCardHtml_ выше) - нужна и отдельному
+    // пункту меню "Зарплата" на личной странице руководителя группы, см.
+    // plans/2026-08-26-ahtamova-guseinova-personal-pages.md.
+    var deptCard = renderCommercialDeptCardHtml_(dept, getM, getL, useNewRules);
+    html += deptCard.html;
+    totalPayroll += deptCard.deptFund;
   });
 
   // Логисты (только для просмотра ПРОШЛЫХ периодов, до июля 2026 - "чистые" + Прус (2-я роль)
@@ -10058,6 +10534,8 @@ function showPage(id, el) {
   // размер только при реальном открытии вкладки.
   if (id === 'calculator' && window.Clc) Clc.initPage();
   if (id === 'ryschanow-salary') renderRyschanowSalaryPage_();
+  if (id === 'commercial-head-salary') renderCommercialHeadSalaryPage_();
+  if (id === 'commercial-head-debt') renderCommercialHeadDebtPage_();
 
   var wrap = document.getElementById('period-selector-wrap');
   if (wrap) {

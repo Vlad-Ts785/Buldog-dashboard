@@ -9908,11 +9908,17 @@ function buildLogistAiTasksPrompt_(logistName, context) {
 function buildRyschanowAiContext_(ss, orders, period) {
   var bundle = buildRyschanowSummaryBundle_(ss, orders, period || null);
 
+  // primary_logist (2026-08-26, Влад: "поставить кому-то из логистов задачу собрать путевые
+  // с водителей, допустим что на рейсах Крысало больше всего был Сильчев" / "Рустем ставит
+  // задачу логисту по наёмной технике") - логист с наибольшим числом заказов этого водителя/
+  // поставщика (argmaxLogist_ уже посчитан на бэкенде в aggregateOrdersRows), чтобы промпт
+  // мог рекомендовать ДЕЛЕГИРОВАНИЕ конкретному человеку, а не звонок/требование от Рыщанова
+  // лично.
   var noWaybillDrivers = (bundle.by_driver_no_waybill || []).slice(0, 8).map(function(d) {
-    return { name: d.name, no_waybill: d.no_waybill || 0, orders: d.orders || 0 };
+    return { name: d.name, no_waybill: d.no_waybill || 0, orders: d.orders || 0, primary_logist: d.primary_logist || '' };
   });
   var noWaybillSuppliers = (bundle.by_supplier_no_waybill || []).slice(0, 8).map(function(s) {
-    return { name: s.name, no_waybill: s.no_waybill || 0, orders: s.orders || 0 };
+    return { name: s.name, no_waybill: s.no_waybill || 0, orders: s.orders || 0, primary_logist: s.primary_logist || '' };
   });
   var logistsSummary = (bundle.by_logist || [])
     .filter(function(l) { return RYSCHANOW_ALL_LOGISTS_SUR_.indexOf((l.name||'').trim().split(' ')[0].toLowerCase()) >= 0; })
@@ -9921,6 +9927,11 @@ function buildRyschanowAiContext_(ss, orders, period) {
         name: l.name, orders: l.orders || 0, hired_orders: l.hired_orders || 0,
         margin_qualified: Math.round(l.hired_margin_qualified || 0),
         margin_unqualified: Math.round(l.hired_margin_unqualified || 0),
+        // own_fleet_focus (2026-08-26, Влад: "тут вообще не надо рекомендовать Рустему
+        // работать с логистами, которые ведут наш парк, по поводу найма") - Сильчев/Кан/
+        // Махура заточены под собственный парк тралов (isOwnTralLogistName_), обсуждение
+        // ставок НАЙМА через них - роль-мисматч, даже если у них случайно есть hired_orders.
+        own_fleet_focus: isOwnTralLogistName_(l.name),
       };
     });
 
@@ -9938,25 +9949,44 @@ function buildRyschanowAiTasksPrompt_(name, context) {
   return 'Ты - директор по логистике транспортной компании (перевозки тралами и ' +
     'длинномерами), который каждое утро даёт руководителю отдела логистики короткий и ' +
     'ТОЧНЫЙ разбор дня по ВСЕМУ отделу - как живой директор, который помнит, кто из ' +
-    'логистов и где отстаёт, а не формальный отчёт по цифрам. Этот человек руководит всеми ' +
-    'логистами компании (не брокерит найм лично) - отвечает за путевые листы ПО ВСЕЙ ' +
-    'компании, и по своему парку (водители), и по наёмному (поставщики). Ниже - реальные ' +
-    'компанейские данные за текущий месяц в формате JSON.\n\n' +
+    'логистов и где отстаёт, а не формальный отчёт по цифрам. Этот человек - РУКОВОДИТЕЛЬ ' +
+    'ВСЕГО отдела логистики (не брокерит найм лично и не звонит водителям/поставщикам сам) - ' +
+    'у него в подчинении логисты, которые ведут своих водителей и наёмных поставщиков. Его ' +
+    'работа - ставить задачи подчинённым логистам и спрашивать с них результат, а НЕ ' +
+    'выполнять их работу за них. Ниже - реальные компанейские данные за текущий месяц в ' +
+    'формате JSON.\n\n' +
     'Данные:\n' + JSON.stringify(context, null, 0) + '\n\n' +
     'ВАЖНЫЕ ФАКТЫ О ТОМ, КАК УСТРОЕНА РАБОТА (используй их, чтобы не писать ошибочных ' +
     'советов):\n' +
+    '- ГЛАВНОЕ ПРАВИЛО ФОРМУЛИРОВОК (2026-08-26, прямое указание): рекомендации должны быть ' +
+    'С ПОЗИЦИИ РУКОВОДИТЕЛЯ, а не исполнителя. НИКОГДА не пиши "позвони [водителю]", ' +
+    '"потребуй у [поставщика]", "обзвони", "свяжись лично" - это работа логиста, не ' +
+    'директора по логистике. Вместо этого - "поставь задачу [конкретному логисту] собрать ' +
+    'путевые у [водителя]" или "спроси с [логиста] по путевым [поставщика]". Пример из ' +
+    'реальной правки: НЕПРАВИЛЬНО "Позвони Крысало Алексею и добей сдачу путевых" - ' +
+    'ПРАВИЛЬНО "Поставь Сильчеву задачу собрать путевые с Крысало Алексея" (Сильчев - его ' +
+    'primary_logist, см. ниже).\n' +
     '- no_waybill_drivers - СВОИ водители (собственный парк) без сданных путевых листов, ' +
     'отсортированы по количеству. no_waybill_suppliers - НАЁМНЫЕ поставщики (перевозчики) ' +
     'без сданных путевых. Это ДВЕ РАЗНЫЕ зоны ответственности: за своих водителей отвечает ' +
     'диспетчер/сам водитель, за наёмных поставщиков - конкретный логист, который с ними ' +
     'работал. Если оба списка не пусты - задача про своих водителей и задача про наёмных ' +
     'поставщиков должны быть РАЗНЫМИ задачами, не смешивай их в одну.\n' +
+    '- primary_logist (в no_waybill_drivers/no_waybill_suppliers) - логист, который реально ' +
+    'ведёт этого водителя/поставщика (больше всего заказов через него) - ИСПОЛЬЗУЙ ЭТО ИМЯ в ' +
+    'формулировке задачи как того, кому Рыщанов ставит задачу собрать путевые. Если ' +
+    'primary_logist пустая строка - не выдумывай имя, сформулируй задачу без указания ' +
+    'конкретного логиста ("поставь задачу ответственному логисту...").\n' +
     '- logists[] - сводка по каждому логисту компании (заказы/маржа найма квалифицирующая ' +
-    '>=23%/неквалифицирующая <23%). Если у кого-то margin_unqualified заметно больше ' +
-    'margin_qualified (или margin_qualified около нуля при заметном числе заказов) - это ' +
-    'сигнал, что у этого логиста проблема со ставками поставщиков, стоит сделать отдельную ' +
-    'задачу "обсудить с [имя логиста] пересмотр ставок" с указанием конкретных цифр из ' +
-    'его строки.\n' +
+    '>=23%/неквалифицирующая <23%, own_fleet_focus). Если у кого-то margin_unqualified ' +
+    'заметно больше margin_qualified (или margin_qualified около нуля при заметном числе ' +
+    'заказов) - это сигнал проблемы со ставками поставщиков, стоит сделать задачу "спроси с ' +
+    '[имя логиста] пересмотр ставок с поставщиками" с указанием конкретных цифр из его ' +
+    'строки. ИСКЛЮЧЕНИЕ: если own_fleet_focus у логиста true - это логист, который ведёт ' +
+    'НАШ СОБСТВЕННЫЙ парк (не найм), НЕ строй для него задачу про ставки поставщиков/найма, ' +
+    'даже если у него есть margin_unqualified - это не его основная зона ответственности, ' +
+    'выбери для темы "ставки поставщиков" другого логиста из logists[] (own_fleet_focus: ' +
+    'false), а если таких с проблемной маржой нет - пропусти эту тему совсем.\n' +
     '- НЕ указывай в "plan_advice" сам % выполнения плана по валовой прибыли - эта цифра ' +
     'уже показана прямо на странице живым виджетом и обновляется в реальном времени в ' +
     'течение дня, а твой текст кэшируется на весь день - если повторить её словами, она ' +
@@ -9967,15 +9997,16 @@ function buildRyschanowAiTasksPrompt_(name, context) {
     'Сформулируй РОВНО 5 задач на сегодня. Разумный баланс: минимум 1 задача про своих ' +
     'водителей без путевых (если no_waybill_drivers не пуст), минимум 1 задача про наёмных ' +
     'поставщиков без путевых (если no_waybill_suppliers не пуст), 1-2 задачи про конкретных ' +
-    'логистов из logists[] с проблемной маржой - но если по какой-то теме данных нет (список ' +
-    'пуст), не выдумывай, просто перераспредели на другие темы.\n\n' +
+    'логистов из logists[] с проблемной маржой (не own_fleet_focus) - но если по какой-то ' +
+    'теме данных нет (список пуст или все подходящие own_fleet_focus:true), не выдумывай, ' +
+    'просто перераспредели на другие темы.\n\n' +
     'Требования к ответу:\n' +
     '- Ответь СТРОГО валидным JSON без markdown-обёртки (без ```), без текста до/после.\n' +
     '- Формат: {"tasks":[{"title":"...","why":"...","category":"поставщики|документы"},' +
     '... ровно 5 штук],"plan_advice":"..."}\n' +
-    '- "title" - короткая формулировка КОНКРЕТНОГО действия (до 90 символов) - что именно ' +
-    'сделать сегодня (позвонить водителю, потребовать путевой у поставщика, обсудить ставки ' +
-    'с логистом), а не общая тема.\n' +
+    '- "title" - короткая формулировка КОНКРЕТНОГО действия (до 90 символов) с позиции ' +
+    'руководителя - что поставить/проверить/спросить с логиста сегодня (см. ГЛАВНОЕ ПРАВИЛО ' +
+    'выше), а не общая тема и не действие, которое Рыщанов делает лично.\n' +
     '- "why" - 1-2 фразы, ПОЧЕМУ это важно именно сегодня, со ссылкой на конкретный факт из ' +
     'данных (имя, количество, сумма) - не общие слова.\n' +
     '- "category" - одна из двух: "документы" (путевые - свои или наёмные), "поставщики" ' +
@@ -10187,6 +10218,18 @@ const FUNNEL_EXCLUDE_OTHER_PAYMENT_VARIANT = true;
 // бессмысленно. Отдельный переключатель от "Прочее" - разные причины, легче откатить
 // независимо друг от друга.
 const FUNNEL_EXCLUDE_CASH_PAYMENTS = true;
+
+// Логист с наибольшим числом заказов из {логист: счётчик} - "ответственный логист" по
+// конкретному водителю/поставщику (2026-08-26, страница Рыщанова: "поставить кому-то из
+// логистов задачу", не звонить/требовать самому - см. buildRyschanowAiContext_/
+// buildRyschanowAiTasksPrompt_). '' если счётчиков нет (мог случиться заказ без mgr_l).
+function argmaxLogist_(logCounts) {
+  var best = '', bestN = 0;
+  Object.keys(logCounts || {}).forEach(function(name) {
+    if (logCounts[name] > bestN) { bestN = logCounts[name]; best = name; }
+  });
+  return best;
+}
 
 // Чистая функция: нормализованные строки заказов -> агрегированный JSON для дашборда.
 // Используется и для текущего месяца (Заказы_данные), и для архивов прошлых периодов.
@@ -10542,9 +10585,14 @@ function aggregateOrdersRows(rows) {
       const isInternalOrder = isInt || ordInList(str(row, 'customer'), INTERNAL_CLIENTS);
       if (!supplierMap[supplier]) {
         supplierMap[supplier] = { name:supplier, orders:0, revenue:0, cost:0, extra_costs:0, profit:0,
-          no_waybill:0, not_posted:0, no_realiz:0, complete:0 };
+          no_waybill:0, not_posted:0, no_realiz:0, complete:0, logCounts:{} };
       }
       supplierMap[supplier].orders++;
+      // "Ответственный логист" по этому поставщику (2026-08-26, Влад: "Рустем ставит задачу
+      // логисту по наёмной технике", не требует путевые у поставщика лично) - логист с
+      // наибольшим числом заказов через этого поставщика, см. primary_logist в
+      // buildRyschanowAiContext_ ниже.
+      if (mgrLog) supplierMap[supplier].logCounts[mgrLog] = (supplierMap[supplier].logCounts[mgrLog] || 0) + 1;
       supplierMap[supplier].revenue += amount;
       supplierMap[supplier].cost    += hiredCost; // "Стоимость найма" - что заплатили перевозчику
       supplierMap[supplier].profit  += profit;
@@ -10726,10 +10774,14 @@ function aggregateOrdersRows(rows) {
       const isInternalOrder = isInt || ordInList(str(row, 'customer'), INTERNAL_CLIENTS);
       if (!driverMap[driverName]) {
         driverMap[driverName] = { name: driverName, orders: 0, amount: 0, no_waybill: 0,
-          orders_long: 0, no_waybill_long: 0 }; // сегмент "Длинномер" (2026-08-11, страница Васина)
+          orders_long: 0, no_waybill_long: 0, logCounts: {} }; // сегмент "Длинномер" (2026-08-11, страница Васина)
       }
       driverMap[driverName].orders++;
       driverMap[driverName].amount += amount;
+      // "Ответственный логист" по этому водителю (2026-08-26, Влад: "поставить кому-то из
+      // логистов задачу собрать путевые с водителей, допустим что на рейсах Крысало больше
+      // всего был Сильчев") - логист с наибольшим числом заказов этого водителя.
+      if (mgrLog) driverMap[driverName].logCounts[mgrLog] = (driverMap[driverName].logCounts[mgrLog] || 0) + 1;
       // !isServiceRow добавлен 2026-08-19 (Влад: "Не сданные путевые листы" считало и
       // служебные строки "Прочее" - у Войткуна за июль показывало 8, реально 4, см.
       // комментарий у supplierMap.no_waybill выше - тот же принцип).
@@ -10797,6 +10849,7 @@ function aggregateOrdersRows(rows) {
       // Полная воронка (2026-08-10, "Общие сделки" на личной странице логиста) - раньше был
       // только no_waybill, теперь та же разбивка, что и в logist_detail.by_supplier.
       not_posted: s.not_posted, no_realiz: s.no_realiz, complete: s.complete,
+      primary_logist: argmaxLogist_(s.logCounts), // 2026-08-26, см. argmaxLogist_ выше
     };
   }).sort(function(a,b){ return b.revenue-a.revenue; });
 
@@ -10936,7 +10989,8 @@ function aggregateOrdersRows(rows) {
     by_driver_no_waybill: Object.values(driverMap)
       .filter(function(d){ return d.no_waybill > 0; })
       .sort(function(a,b){ return b.no_waybill-a.no_waybill; })
-      .slice(0, 25),
+      .slice(0, 25)
+      .map(function(d){ return { name: d.name, orders: d.orders, amount: d.amount, no_waybill: d.no_waybill, primary_logist: argmaxLogist_(d.logCounts) }; }), // primary_logist 2026-08-26
     by_supplier_no_waybill: supplierList
       .filter(function(s){ return s.no_waybill > 0; })
       .sort(function(a,b){ return b.no_waybill-a.no_waybill; }),

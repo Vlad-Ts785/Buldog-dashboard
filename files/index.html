@@ -513,6 +513,12 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
     <div class="sidebar-nav-item" onclick="showPage('calculator',this)" data-page="calculator">
       <span class="sidebar-nav-icon">🧮</span> Калькулятор
     </div>
+    <!-- Отдельный пункт меню для Рыщанова (2026-08-26, Влад: "Отдельная и единственная") -
+         скрыт по умолчанию (display:none), показывается только applyRoleUI() для него самого
+         или admin-предпросмотра "как Рыщанов" - см. applyRoleUI/updateViewAsButton_. -->
+    <div class="sidebar-nav-item" onclick="showPage('ryschanow-salary',this)" data-page="ryschanow-salary" style="display:none">
+      <span class="sidebar-nav-icon">💰</span> Зарплата
+    </div>
     <div class="sidebar-nav-item" onclick="showPage('clients',this)" data-page="clients">
       <span class="sidebar-nav-icon">🏢</span> Клиенты
     </div>
@@ -1241,6 +1247,13 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
     <!-- ═══ ЛИЧНАЯ СТРАНИЦА МЕНЕДЖЕРА ══════════════════════════ -->
     <div id="page-my-page" class="page">
       <div id="my-page-content"><p style="color:var(--muted);padding:16px">Данные загружаются...</p></div>
+    </div>
+
+    <!-- ═══ ЗАРПЛАТА РЫЩАНОВА (отдельный пункт меню, 2026-08-26) ═══
+         Карточка "Отдел Рыщанова" вне вкладок "Личной страницы" - см.
+         ryschanowSalaryCardHtml_/renderRyschanowSalaryPage_. -->
+    <div id="page-ryschanow-salary" class="page">
+      <div id="ryschanow-salary-content"><p style="color:var(--muted);padding:16px">Данные загружаются...</p></div>
     </div>
 
     <!-- ═══ ПЛАН ЗАДАНИЯ (только чтение из таблицы планировки) ═══ -->
@@ -2142,6 +2155,7 @@ const PAGE_TITLES = {
   // 'my-page' - без заголовка (Влад, 2026-08-12: "слово личная страница убрать") - шапка
   // самой страницы (ФИО+должность) уже несёт этот смысл, дублирующий заголовок не нужен.
   'my-page': '',
+  'ryschanow-salary': 'Зарплата',
   'order-plan': 'План задание',
   calculator: 'Калькулятор стоимости перевозки',
   debt: 'Дебиторская задолженность',
@@ -3744,7 +3758,11 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
 // переименована в "Загрузка парка" и стала статичной (без сортировки/фильтров) - см.
 // myPageRyschTab==='fleet_load' ниже. Сортировка/фильтры "Техника"/"Водители" (были нужны
 // только этим двум удалённым вкладкам) убраны вместе с ними.
-let myPageRyschTab = 'fleet_load'; // 'fleet_load' | 'hired' | 'no_waybill_drivers' | 'no_waybill_suppliers' | 'no_waybill_logists' | 'salary'
+let myPageRyschTab = 'fleet_load'; // 'fleet_load' | 'hired' | 'no_waybill_drivers' | 'no_waybill_suppliers' | 'no_waybill_logists'
+// Зарплата (2026-08-26, Влад: "Отдельная и единственная, вот это все ты должен был понять с
+// первого раза") - НЕ вкладка здесь, а отдельный пункт в левом меню (см. showPage('ryschanow-
+// salary')/ryschanowSalaryCardHtml_ ниже), чтобы не заходить на личную страницу и не
+// переключать вкладку.
 function setMyPageRyschTab(tab) { myPageRyschTab = tab; renderMyPage(); }
 // Логисты, чья маржа найма суммируется в 2%-бонус Рыщанова (зеркало RYSCHANOW_ALL_LOGISTS_SUR_
 // на бэкенде - см. calcRyschanow во вкладке "Зарплата", то же слагаемое qualMarginAllLogists).
@@ -3865,7 +3883,6 @@ function renderMyPageRyschanow(el, current, selectorHtml, d) {
     '<button class="tab-btn'+(myPageRyschTab==='no_waybill_drivers'?' active':'')+'" onclick="setMyPageRyschTab(\'no_waybill_drivers\')">📋 Не сданные путевые (свои)</button>'+
     '<button class="tab-btn'+(myPageRyschTab==='no_waybill_suppliers'?' active':'')+'" onclick="setMyPageRyschTab(\'no_waybill_suppliers\')">📋 Топ поставщиков без путевых</button>'+
     '<button class="tab-btn'+(myPageRyschTab==='no_waybill_logists'?' active':'')+'" onclick="setMyPageRyschTab(\'no_waybill_logists\')">📋 Топ логистов с несданными путевыми</button>'+
-    '<button class="tab-btn'+(myPageRyschTab==='salary'?' active':'')+'" onclick="setMyPageRyschTab(\'salary\')">💰 Зарплата</button>'+
   '</div>';
 
   if (myPageRyschTab === 'fleet_load') {
@@ -3990,7 +4007,7 @@ function renderMyPageRyschanow(el, current, selectorHtml, d) {
             return '<tr><td><b>'+sp.name+'</b></td><td class="num red"><b>'+sp.no_waybill+'</b></td><td class="num muted">'+sp.orders+'</td><td class="num '+pCls+'">'+pct+'%</td></tr>';
           }).join(''))+
       '</tbody></table></div>';
-  } else if (myPageRyschTab === 'no_waybill_logists') {
+  } else {
     // "Топ логистов с несданными путевыми" (2026-08-26, Влад: "за каждый из несданных путевых
     // листов есть ответственный логист, ему нужен топ") - своя и наёмная недостача сразу,
     // отсортировано по итогу (by_logist_no_waybill, backend).
@@ -4002,27 +4019,6 @@ function renderMyPageRyschanow(el, current, selectorHtml, d) {
             return '<tr><td><b>'+lg.name+'</b></td><td class="num muted">'+lg.no_waybill_own+'</td><td class="num muted">'+lg.no_waybill_hired+'</td><td class="num red"><b>'+lg.no_waybill_total+'</b></td></tr>';
           }).join(''))+
       '</tbody></table></div>';
-  } else {
-    // "💰 Зарплата" (2026-08-26, Влад в третий раз: "перенеси его туда, где у меня есть
-    // отдельная вкладка «Зарплаты». И туда ту же самую структуру, табличку, как и у меня в
-    // зарплатах, только по его отделу, включая его самого") - та же карточка "Отдел Рыщанова",
-    // что и на company-wide вкладке "Зарплата" (renderRyschanowDeptCardHtml_, module scope).
-    // getL - свой источник у каждого сценария входа: rySummary.by_logist при самостоятельном
-    // входе (тот же company-wide список, что buildRyschanowSummaryBundle_ уже отдаёт), иначе
-    // D.orders.by_logist у admin-предпросмотра (полный payload, видит всех).
-    var salByLogist = rySummary ? (rySummary.by_logist||[]) : ((D.orders && D.orders.by_logist) || []);
-    var salLogIdx = {};
-    salByLogist.forEach(function(l) { salLogIdx[(l.name||'').trim().split(' ')[0].toLowerCase()] = l; });
-    var salGetL = function(sur) { return salLogIdx[sur.toLowerCase()] || null; };
-    var salUseNewRules = isNewRulesPeriod((D.orders||{}).period);
-    var salProfitLong = rySummary ? (rySummary.profit_long||0) : ((D.summary && D.summary.profit_long) || 0);
-    var salQualMargin = rySummary ? (rySummary.qual_margin_all_logists||0) : RYSCHANOW_ALL_LOGISTS_SUR_FRONT_.reduce(function(sum, sur) {
-      var l = salGetL(sur);
-      return sum + (l ? (l.hired_margin_qualified||0) : 0);
-    }, 0);
-    var salSpecialTrals = rySummary ? (rySummary.special_trals_profit||0) : ((D.summary && D.summary.special_trals_profit) || 0);
-    var salCard = renderRyschanowDeptCardHtml_(salGetL, salProfitLong, grossProfit, salQualMargin, salUseNewRules, salSpecialTrals);
-    html += salCard.html;
   }
   html += '</div>';
 
@@ -4327,11 +4323,17 @@ function applyRoleUI() {
   const previewing = D.role === 'admin' && !!viewAsEntry;
   if (D.role === 'manager' || D.role === 'logist' || previewing) {
     if (sidebarLabel) sidebarLabel.textContent = previewing ? viewAsEntry.name : (D.managerName || D.logistName || (D.role === 'logist' ? 'Логист' : 'Менеджер'));
+    // "Зарплата" - отдельный пункт меню (2026-08-26, Влад: "Отдельная и единственная"), виден
+    // только Рыщанову (свой вход) или admin-предпросмотру "как Рыщанов" - фамилия текущего
+    // просматриваемого сотрудника, та же проверка по фамилии, что isRyschanowEntry_/
+    // isRyschanowLogistName_ (бэкенд).
+    var curPersonName = previewing ? viewAsEntry.name : (D.managerName || D.logistName || '');
+    var isRyschanowViewer = curPersonName.trim().split(' ')[0].toLowerCase() === 'рыщанов';
     document.querySelectorAll('.sidebar-nav-item').forEach(function(item) {
       const page = item.getAttribute('data-page');
       // Калькулятор не зависит от серверных данных (D.role) - считает офлайн в браузере,
       // поэтому доступен и менеджерам/логистам, а не только админ-панели.
-      item.style.display = (page === 'my-page' || page === 'order-plan' || page === 'calculator') ? '' : 'none';
+      item.style.display = (page === 'my-page' || page === 'order-plan' || page === 'calculator' || (page === 'ryschanow-salary' && isRyschanowViewer)) ? '' : 'none';
     });
     document.querySelectorAll('.sidebar-nav-section').forEach(function(s){ s.style.display = 'none'; });
     showPage('my-page');
@@ -8422,6 +8424,35 @@ function renderRyschanowDeptCardHtml_(getL, profitLong, grossProfit, qualMarginA
   return { html: html, deptFund: deptFund };
 }
 
+// Собирает вход для renderRyschanowDeptCardHtml_ прямо из D (2026-08-26, отдельный пункт
+// меню "Зарплата" для Рыщанова - см. showPage('ryschanow-salary')/applyRoleUI ниже). Общий
+// источник для company-wide вкладки "Зарплата" (там свои локальные getL/grossProfit уже
+// посчитаны отдельно, см. renderSalesSalary) и ЭТОЙ отдельной страницы - оба сценария входа:
+// D.orders.ryschanow_summary при самостоятельном входе Рыщанова, иначе D.orders/D.summary
+// напрямую (admin-предпросмотр "как Рыщанов", видит company-wide payload).
+function ryschanowSalaryCardHtml_() {
+  var rySummary = (D.orders && D.orders.ryschanow_summary) || null;
+  var grossProfit = rySummary ? (rySummary.gross_profit||0) : ((D.summary && D.summary.profit) || 0);
+  var byLogist = rySummary ? (rySummary.by_logist||[]) : ((D.orders && D.orders.by_logist) || []);
+  var logIdx = {};
+  byLogist.forEach(function(l) { logIdx[(l.name||'').trim().split(' ')[0].toLowerCase()] = l; });
+  var getL = function(sur) { return logIdx[sur.toLowerCase()] || null; };
+  var useNewRules = isNewRulesPeriod((D.orders||{}).period);
+  var profitLong = rySummary ? (rySummary.profit_long||0) : ((D.summary && D.summary.profit_long) || 0);
+  var qualMargin = rySummary ? (rySummary.qual_margin_all_logists||0) : RYSCHANOW_ALL_LOGISTS_SUR_FRONT_.reduce(function(sum, sur) {
+    var l = getL(sur);
+    return sum + (l ? (l.hired_margin_qualified||0) : 0);
+  }, 0);
+  var specialTrals = rySummary ? (rySummary.special_trals_profit||0) : ((D.summary && D.summary.special_trals_profit) || 0);
+  return renderRyschanowDeptCardHtml_(getL, profitLong, grossProfit, qualMargin, useNewRules, specialTrals).html;
+}
+
+function renderRyschanowSalaryPage_() {
+  var el = document.getElementById('ryschanow-salary-content');
+  if (!el || !D || !D.orders) return;
+  el.innerHTML = ryschanowSalaryCardHtml_();
+}
+
 // Состав "обычных" (не спецформула) отделов - ОБЩИЙ источник для renderSalesSalary() и
 // buildSalaryWorkbook_() (plans/2026-08-24-salary-excel-export.md), чтобы список членов
 // команды не разъезжался между экраном и Excel-экспортом (тот же класс риска, что уже дважды
@@ -10021,6 +10052,7 @@ function showPage(id, el) {
   // контейнеру нулевой размер - плитки карты не подтягиваются) - инициализируем/пересчитываем
   // размер только при реальном открытии вкладки.
   if (id === 'calculator' && window.Clc) Clc.initPage();
+  if (id === 'ryschanow-salary') renderRyschanowSalaryPage_();
 
   var wrap = document.getElementById('period-selector-wrap');
   if (wrap) {

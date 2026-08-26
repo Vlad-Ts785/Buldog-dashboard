@@ -435,6 +435,23 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .clc-hist-details[open] summary::before{transform:rotate(90deg);}
 .clc-hist-details[open] summary{margin-bottom:12px;}
 @media(prefers-reduced-motion:reduce){.clc-hist-details summary::before{transition:none;}}
+
+/* ── CRM (канбан сделок, plans/2026-08-26-own-crm-replace-bitrix.md) - воронка
+   скопирована из проверенной настройки Битрикса, визуально похожий канбан. ── */
+.crm-board{display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;align-items:flex-start;}
+.crm-col{background:var(--bg2);border-radius:var(--radius);min-width:230px;max-width:230px;flex-shrink:0;display:flex;flex-direction:column;border:1px solid var(--border);}
+.crm-col-header{padding:10px 12px;border-bottom:2px solid var(--border);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;display:flex;justify-content:space-between;align-items:center;color:var(--text);}
+.crm-col-body{padding:8px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:8px;min-height:60px;max-height:calc(100vh - 260px);transition:background .12s;}
+.crm-col-body.crm-drag-over{background:var(--bg3);}
+.crm-col-total{padding:6px 12px;font-size:11px;color:var(--muted);border-top:1px solid var(--border);}
+.crm-card{background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;cursor:grab;font-size:13px;}
+.crm-card:active{cursor:grabbing;}
+.crm-card.crm-dragging{opacity:.4;}
+.crm-card-phone{font-weight:600;color:var(--text);}
+.crm-card-amount{color:var(--green);font-weight:600;font-size:12px;margin-top:2px;}
+.crm-card-meta{color:var(--muted);font-size:11px;margin-top:6px;display:flex;justify-content:space-between;align-items:center;gap:6px;}
+.crm-avatar{width:20px;height:20px;border-radius:50%;background:var(--purple);color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center;font-weight:600;flex-shrink:0;}
+.crm-card-loss{margin-top:6px;font-size:11px;color:var(--red);}
 </style>
 </head>
 <body>
@@ -491,6 +508,9 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
     <div class="sidebar-nav-section">
       <span class="sidebar-nav-section-label">Продажи</span>
       <div class="sidebar-nav-section-line"></div>
+    </div>
+    <div class="sidebar-nav-item" onclick="showPage('crm',this)" data-page="crm">
+      <span class="sidebar-nav-icon">🗂️</span> CRM
     </div>
     <div class="sidebar-nav-item" onclick="showPage('sales',this)" data-page="sales">
       <span class="sidebar-nav-icon">📦</span> Обзор заказов
@@ -1241,6 +1261,14 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
             </table>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- ═══ CRM (канбан сделок, plans/2026-08-26-own-crm-replace-bitrix.md) ════ -->
+    <div id="page-crm" class="page">
+      <div id="crm-loading" style="color:var(--muted);padding:16px">Загрузка CRM...</div>
+      <div id="crm-body" style="display:none">
+        <div class="crm-board" id="crm-board"></div>
       </div>
     </div>
 
@@ -2148,6 +2176,7 @@ const PAGE_TITLES = {
   drivers: 'Водители',
   dynamics: 'Динамика',
   clients: 'База клиентов',
+  crm: 'CRM',
   sales: 'Продажи - обзор',
   'sales-mgr': 'Менеджеры - заказы 1С',
   'sales-log': 'Логисты - найм техники',
@@ -10051,6 +10080,7 @@ function showPage(id, el) {
   if (pageHeaderEl) pageHeaderEl.style.display = titleText ? '' : 'none';
   if (id === 'dynamics') loadHistoryData();
   if (id === 'clients') loadClientsData();
+  if (id === 'crm') loadCrmData();
   if (id === 'global-stats') loadGlobalStatsData();
   if (id === 'order-plan') loadOrderPlanData();
   // Карта Leaflet не может инициализироваться, пока страница скрыта (display:none даёт
@@ -10137,6 +10167,135 @@ function fetchFromYardApi_(path, params) {
 }
 function fetchClientAnalyticsFromServer_(params) {
   return fetchFromYardApi_('/client_analytics', params).then(function(r) { return r.data; });
+}
+// POST-вариант fetchFromYardApi_ (запись стадии сделки) - те же параметры, что и
+// checkSession-эндпоинты сервера читают из query, метод - POST.
+function postToYardApi_(path, params) {
+  var merged = Object.assign({ session_token: SESSION_TOKEN }, params || {});
+  var qs = Object.keys(merged).map(function(k) {
+    return (merged[k] !== undefined && merged[k] !== null && merged[k] !== '') ? (k + '=' + encodeURIComponent(merged[k])) : null;
+  }).filter(Boolean).join('&');
+  return fetch(YARD_API_BASE + path + (qs ? '?' + qs : ''), { method: 'POST' })
+    .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); });
+}
+
+// ── CRM (канбан сделок, plans/2026-08-26-own-crm-replace-bitrix.md) ────────────────────────
+// Ходит НАПРЯМУЮ на api.yardhub.ru (checkSession), БЕЗ Apps Script посередине - у CRM нет
+// наследия в Google Таблицах, поэтому не повторяем переходный паттерн остальных вкладок
+// (Влад, 26.08: "у нас есть сервер, хочу уйти от Google-скриптов для этого").
+// Стадии воронки скопированы 1-в-1 из проверенной настройки Битрикса, не изобретаем новые
+// (Влад: "мы не создаём уникальную суперсистему, движемся уже проверенными путями").
+var CRM_STAGE_DEFS = [
+  { key: 'new',         label: 'Новые заявки',            color: 'var(--muted)' },
+  { key: 'in_progress', label: 'В работе',                 color: 'var(--blue)' },
+  { key: 'quote',       label: 'Сделан расчёт / КП',       color: 'var(--purple)' },
+  { key: 'negotiation', label: 'Переговоры / Отложено',    color: 'var(--amber)' },
+  { key: 'execution',   label: 'В процессе исполнения',    color: 'var(--blue)' },
+  { key: 'won',         label: 'Сделка успешна',           color: 'var(--green)' },
+  { key: 'lost',        label: 'Отказ',                    color: 'var(--red)' },
+];
+var crmDeals = [];
+var crmDraggedId = null;
+
+function loadCrmData() {
+  var loading = document.getElementById('crm-loading');
+  var body = document.getElementById('crm-body');
+  loading.style.display = '';
+  loading.textContent = 'Загрузка CRM...';
+  body.style.display = 'none';
+  fetchFromYardApi_('/crm/deals', {}).then(function(r) {
+    if (!r.ok) {
+      loading.textContent = 'Не удалось загрузить CRM: ' + (r.data && r.data.error || 'ошибка сервера');
+      return;
+    }
+    crmDeals = r.data.deals || [];
+    renderCrmBoard();
+    loading.style.display = 'none';
+    body.style.display = '';
+  }).catch(function() {
+    loading.textContent = 'Нет соединения с сервером api.yardhub.ru';
+  });
+}
+
+function crmFmtMoney(n) { return Math.round(Number(n) || 0).toLocaleString('ru-RU'); }
+function crmFmtPhone(phone) {
+  var s = String(phone || '');
+  if (/^7\d{10}$/.test(s)) return '+7 (' + s.slice(1, 4) + ') ' + s.slice(4, 7) + '-' + s.slice(7, 9) + '-' + s.slice(9, 11);
+  return s;
+}
+function crmInitials(name) {
+  var parts = String(name || '?').trim().split(/\s+/);
+  return parts.map(function(w) { return w[0] || ''; }).join('').slice(0, 2).toUpperCase() || '?';
+}
+
+function renderCrmBoard() {
+  var board = document.getElementById('crm-board');
+  var html = '';
+  CRM_STAGE_DEFS.forEach(function(st) {
+    var deals = crmDeals.filter(function(d) { return d.stage === st.key; });
+    var total = deals.reduce(function(s, d) { return s + Number(d.amount || 0); }, 0);
+    html += '<div class="crm-col">'
+      + '<div class="crm-col-header" style="border-bottom-color:' + st.color + '">'
+      +   '<span>' + st.label + '</span><span style="color:var(--muted);font-weight:400">' + deals.length + '</span>'
+      + '</div>'
+      + '<div class="crm-col-body" data-stage="' + st.key + '" ondragover="crmDragOver(event)" ondragleave="crmDragLeave(event)" ondrop="crmDrop(event)">'
+      + deals.map(crmCardHtml).join('')
+      + '</div>'
+      + (total ? '<div class="crm-col-total">' + crmFmtMoney(total) + ' ₽</div>' : '')
+      + '</div>';
+  });
+  board.innerHTML = html;
+}
+
+function crmCardHtml(d) {
+  var phone = crmFmtPhone(d.client_phone);
+  var title = d.client_name || phone;
+  return '<div class="crm-card" draggable="true" ondragstart="crmDragStart(event,' + d.id + ')" ondragend="crmDragEnd(event)" data-deal-id="' + d.id + '">'
+    + '<div class="crm-card-phone">' + title + '</div>'
+    + (Number(d.amount) > 0 ? '<div class="crm-card-amount">' + crmFmtMoney(d.amount) + ' ₽</div>' : '')
+    + '<div class="crm-card-meta">'
+    +   '<span>' + (d.client_name ? phone : (d.calls_count ? d.calls_count + ' зв.' : '')) + '</span>'
+    +   '<span class="crm-avatar" title="' + (d.responsible_name || 'Без ответственного') + '">' + crmInitials(d.responsible_name) + '</span>'
+    + '</div>'
+    + (d.loss_reason ? '<div class="crm-card-loss">' + d.loss_reason + '</div>' : '')
+    + '</div>';
+}
+
+function crmDragStart(e, id) {
+  crmDraggedId = id;
+  e.dataTransfer.effectAllowed = 'move';
+  e.currentTarget.classList.add('crm-dragging');
+}
+function crmDragEnd(e) { e.currentTarget.classList.remove('crm-dragging'); }
+function crmDragOver(e) { e.preventDefault(); e.currentTarget.classList.add('crm-drag-over'); }
+function crmDragLeave(e) { e.currentTarget.classList.remove('crm-drag-over'); }
+function crmDrop(e) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('crm-drag-over');
+  var stage = e.currentTarget.getAttribute('data-stage');
+  var id = crmDraggedId;
+  crmDraggedId = null;
+  if (!id) return;
+  crmChangeStage(id, stage);
+}
+
+// Причина отказа ОБЯЗАТЕЛЬНА на стадии "Отказ" - главная победа всей битриксовской истории
+// (причины отказа впервые стали анализируемы 21.07.2026), не теряем это при переезде.
+function crmChangeStage(id, stage) {
+  var params = { id: id, stage: stage };
+  if (stage === 'lost') {
+    var reason = prompt('Причина отказа (обязательно):');
+    if (!reason) { renderCrmBoard(); return; } // отменили - карточка визуально остаётся на месте
+    params.loss_reason = reason;
+  }
+  postToYardApi_('/crm/deals/stage', params).then(function(r) {
+    if (!r.ok) {
+      alert('Не удалось изменить стадию: ' + (r.data && r.data.error || 'ошибка сервера'));
+      renderCrmBoard();
+      return;
+    }
+    loadCrmData();
+  });
 }
 // Снимок закрытого месяца с сервера, если он уже перенесён (см. period_snapshots на VPS) -
 // null, если ещё нет (404) - вызывающий код в этом случае откатывается на apiFetchJson

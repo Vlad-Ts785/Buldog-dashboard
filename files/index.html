@@ -9446,7 +9446,7 @@ function debtDeadAndStatus_(customers) {
 // в одном месте, вынесено в функцию, чтобы не дублировать сложную логику.
 function buildDebtDocsHtml_(c, currentMonthStart) {
   var showDocOrg = true;
-  var sumDocDebt = 0, sumDocCovered = 0;
+  var sumDocDebt = 0, sumDocCovered = 0, sumNonTral = 0;
   var docsHtml = (c.unpaidDocs && c.unpaidDocs.length)
     ? c.unpaidDocs.map(function(d) {
         // Не закрытый документом заказ ("Таблица заказов" - ещё не оформлен как
@@ -9455,6 +9455,20 @@ function buildDebtDocsHtml_(c, currentMonthStart) {
         // обратить внимание в первую очередь - закрыть, а уже потом получить деньги".
         var isOldUnclosed = d.desc && d.desc.indexOf('Таблица заказов') === 0 && d.date < currentMonthStart;
         var covered = d.covered || 0;
+        // Документ менеджера с несколькими отделами (Ратников), не нашедшийся в таблице
+        // заказов - уже НЕ входит в balance/byOrgBalance на бэкенде (см. parseDebtRawRows_,
+        // 2026-08-25), поэтому не участвует и в сверке "Итого по документам" ниже - иначе
+        // "Открыто по факту" не билось бы с "Баланс" контрагента. Показываем документ (для
+        // прозрачности - Влад: "может работать несколько отделов на одном контрагенте"), но
+        // отдельной строкой в итоге, не в общей сумме.
+        if (d.nonTralCrossDept) {
+          sumNonTral += d.debt;
+          return '<tr><td style="opacity:0.55;padding:3px 10px 3px 0;white-space:nowrap">' + fmtDateRu(d.date) + '</td>' +
+            (showDocOrg ? '<td style="opacity:0.55;padding:3px 10px 3px 0" class="muted">' + (d.org||'—') + '</td>' : '') +
+            '<td style="opacity:0.55;padding:3px 10px 3px 0" class="muted">' + d.desc +
+              ' <span class="badge muted" style="font-size:9.5px">не наш отдел - не в балансе</span></td>' +
+            '<td style="opacity:0.55;padding:3px 0" class="num">' + fmt(d.debt) + '</td></tr>';
+        }
         sumDocDebt += d.debt; sumDocCovered += covered;
         // Погашение авансом "по хронологии 1С" (Влад, 2026-07-11/12) - 1С сам ведёт учёт
         // как бегущий остаток по датам (не привязывает поступление к конкретному
@@ -9496,9 +9510,12 @@ function buildDebtDocsHtml_(c, currentMonthStart) {
   var coverageLabel = coverageParts.length
     ? coverageParts.map(function(p) { return p[0] + ' −' + fmt(p[1]); }).join(' · ')
     : 'Аванс/поступления (по хронологии 1С): −' + fmt(sumDocCovered);
+  // "Не наш отдел" - сумма документов, исключённых из баланса как чужого отдела (2026-08-25,
+  // см. пометку на строках выше) - отдельной строкой, не смешиваем с покрытием авансом.
+  var nonTralLine = sumNonTral > 0 ? ' · Не наш отдел (краны/экскаваторы) −' + fmt(sumNonTral) : '';
   var reconcileLine = (c.unpaidDocs && c.unpaidDocs.length)
     ? '<div class="muted" style="font-size:10.5px;margin-top:6px;padding-top:6px;border-top:1px solid var(--border)">' +
-        'Итого по документам: ' + fmt(sumDocDebt) + ' · ' + coverageLabel +
+        'Итого по документам: ' + fmt(sumDocDebt) + ' · ' + coverageLabel + nonTralLine +
         ' · Открыто по факту: <b>' + fmt(sumDocDebt - sumDocCovered) + '</b></div>'
     : '';
   return { docsHtml: docsHtml, reconcileLine: reconcileLine };

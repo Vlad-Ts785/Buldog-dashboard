@@ -4258,6 +4258,9 @@ function buildRyschanowSummaryBundle_(ss, orders, period) {
     by_logist: byLogistAll,
     by_driver_no_waybill: orders.by_driver_no_waybill || [],
     by_supplier_no_waybill: orders.by_supplier_no_waybill || [],
+    // "Топ логистов с несданными путевыми" (2026-08-26, Влад: "за каждый из несданных путевых
+    // листов есть ответственный логист") - company-wide, уже посчитан в aggregateOrdersRows.
+    by_logist_no_waybill: orders.by_logist_no_waybill || [],
     doc_by_decade: orders.doc_by_decade || [], // "Воронка документов" (2026-08-25, Влад: "под зарплатой добавь")
     gross_profit: grossProfit,
     special_trals_profit: specialTralsProfit,
@@ -9205,8 +9208,17 @@ function fetchOrdersComputedFromServer_(period) {
 function getOrdersData(ss) {
   const monthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
 
+  // "Планы_менеджеров" (2026-08-26, баг) - ВСЕГДА берём план свежим из листа поверх серверного
+  // ответа, а не полагаемся на собственную копию сервера (MySQL manager_plans). Тот
+  // HTTP-мостик (action=export_manager_plans -> import-manager-plans.js на VPS) был убран из
+  // doGet как "временный" (см. комментарий в самом import-скрипте: "убрать после переноса"),
+  // но VPS-скрипт остался и молча ловил "Не авторизован" при каждом запуске - план не
+  // синхронизировался НИ РАЗУ с тех пор, задело не только Рыщанова ("рыщанов_вп" 0 вместо
+  // 35М), а вообще всех менеджеров при любой правке плана в течение месяца. Лист - и так
+  // единственный источник (Влад вводит вручную), сервер не должен иметь свою копию вообще -
+  // проще и надёжнее просто наложить joinManagerPlans_ поверх ЛЮБОГО источника заказов.
   var computed = fetchOrdersComputedFromServer_(monthKey);
-  if (computed) return computed;
+  if (computed) return joinManagerPlans_(ss, computed, monthKey);
 
   var fromServer = fetchOrdersRawFromServer_(monthKey);
   var rows = fromServer ? fromServer.rows : null;
@@ -9233,7 +9245,7 @@ function getOrdersData(ss) {
 // не отдал - тихий фолбэк на архивный лист Google Таблицы, как было.
 function getOrdersDataForPeriod(ss, period) {
   var computed = fetchOrdersComputedFromServer_(period);
-  if (computed) return computed;
+  if (computed) return joinManagerPlans_(ss, computed, period); // см. getOrdersData выше
 
   var fromServer = fetchOrdersRawFromServer_(period);
   if (fromServer) {
@@ -10266,6 +10278,11 @@ function aggregateOrdersRows(rows) {
   const supplierMap = {};
   const allHiredDeals = []; // общекорпоративный список сделок найма (2026-08-10, "Общие сделки")
   const driverMap   = {};
+  // "Топ логистов с несданными путевыми" (2026-08-26, страница Рыщанова) - за каждую
+  // недостающую путёвку (свой водитель ИЛИ наёмный поставщик) отвечает логист заказа
+  // (mgrLog) - считаем ОБА источника в одну сумму на логиста, тот же принцип фильтрации
+  // (!isInternalOrder && !isServiceRow), что уже у driverMap/supplierMap.no_waybill выше.
+  const logistNoWaybillMap = {};
   const problemOrders = [];
   const mgrDetailMap = {}; // персональная разбивка по менеджеру (для личной страницы)
   const logistDetailMap = {}; // персональная разбивка по логисту (для личной страницы, 2026-08-10)
@@ -10540,7 +10557,13 @@ function aggregateOrdersRows(rows) {
       // структурно у них путёвки в принципе не бывает, это не реальная недостача документа
       // (Влад, 2026-08-19: тот же принцип, что уже в основной воронке документов, здесь
       // раньше не применялся - "нет путёвки" по поставщикам/водителям завышало цифру).
-      if (!hw && !isInternalOrder && !isServiceRow) supplierMap[supplier].no_waybill++;
+      if (!hw && !isInternalOrder && !isServiceRow) {
+        supplierMap[supplier].no_waybill++;
+        if (mgrLog) {
+          if (!logistNoWaybillMap[mgrLog]) logistNoWaybillMap[mgrLog] = { name: mgrLog, no_waybill_own: 0, no_waybill_hired: 0 };
+          logistNoWaybillMap[mgrLog].no_waybill_hired++;
+        }
+      }
 
       // Общекорпоративный список сделок найма (2026-08-10, "Общие сделки" на личной странице
       // логиста - Влад: "он видит абсолютно всю ситуацию по направлению") - КАЖДАЯ наёмная
@@ -10702,7 +10725,13 @@ function aggregateOrdersRows(rows) {
       // !isServiceRow добавлен 2026-08-19 (Влад: "Не сданные путевые листы" считало и
       // служебные строки "Прочее" - у Войткуна за июль показывало 8, реально 4, см.
       // комментарий у supplierMap.no_waybill выше - тот же принцип).
-      if (!hw && !isInternalOrder && !isServiceRow) driverMap[driverName].no_waybill++;
+      if (!hw && !isInternalOrder && !isServiceRow) {
+        driverMap[driverName].no_waybill++;
+        if (mgrLog) {
+          if (!logistNoWaybillMap[mgrLog]) logistNoWaybillMap[mgrLog] = { name: mgrLog, no_waybill_own: 0, no_waybill_hired: 0 };
+          logistNoWaybillMap[mgrLog].no_waybill_own++;
+        }
+      }
       if (equip === 'Длинномер') {
         driverMap[driverName].orders_long++;
         if (!hw && !isInternalOrder && !isServiceRow) driverMap[driverName].no_waybill_long++;
@@ -10900,6 +10929,12 @@ function aggregateOrdersRows(rows) {
     by_supplier_no_waybill: supplierList
       .filter(function(s){ return s.no_waybill > 0; })
       .sort(function(a,b){ return b.no_waybill-a.no_waybill; }),
+    // "Топ логистов с несданными путевыми" (2026-08-26, страница Рыщанова) - логист отвечает
+    // и за свой парк, и за наём одновременно, total = сумма обоих счётчиков.
+    by_logist_no_waybill: Object.values(logistNoWaybillMap)
+      .map(function(l){ return { name: l.name, no_waybill_own: l.no_waybill_own, no_waybill_hired: l.no_waybill_hired, no_waybill_total: l.no_waybill_own + l.no_waybill_hired }; })
+      .filter(function(l){ return l.no_waybill_total > 0; })
+      .sort(function(a,b){ return b.no_waybill_total - a.no_waybill_total; }),
     // Длинномеры целиком (2026-08-11, личная страница Васина) - см. getLongHaulDetail_.
     by_driver_no_waybill_long: Object.values(driverMap)
       .filter(function(d){ return d.no_waybill_long > 0; })

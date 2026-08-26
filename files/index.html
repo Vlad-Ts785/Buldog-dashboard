@@ -3744,7 +3744,7 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
 // переименована в "Загрузка парка" и стала статичной (без сортировки/фильтров) - см.
 // myPageRyschTab==='fleet_load' ниже. Сортировка/фильтры "Техника"/"Водители" (были нужны
 // только этим двум удалённым вкладкам) убраны вместе с ними.
-let myPageRyschTab = 'fleet_load'; // 'fleet_load' | 'hired' | 'no_waybill_drivers' | 'no_waybill_suppliers'
+let myPageRyschTab = 'fleet_load'; // 'fleet_load' | 'hired' | 'no_waybill_drivers' | 'no_waybill_suppliers' | 'no_waybill_logists'
 function setMyPageRyschTab(tab) { myPageRyschTab = tab; renderMyPage(); }
 // Логисты, чья маржа найма суммируется в 2%-бонус Рыщанова (зеркало RYSCHANOW_ALL_LOGISTS_SUR_
 // на бэкенде - см. calcRyschanow во вкладке "Зарплата", то же слагаемое qualMarginAllLogists).
@@ -3760,16 +3760,11 @@ var RYSCHANOW_ALL_LOGISTS_SUR_FRONT_ = ['васин','кан','махура','с
 function renderMyPageRyschanow(el, current, selectorHtml, d) {
   d = d || {};
   var COL = PAGE_COL, mln = pageMln_, fr = pageFr_, block = pageBlock_;
-  function kpiCard(icon, label, value, sub, color) {
-    return '<div class="card" style="padding:16px 18px;border-left:3px solid '+color+'">'+
-      '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">'+icon+' '+label+'</div>'+
-      '<div style="font-size:24px;font-weight:700;color:var(--text);line-height:1.1">'+value+'</div>'+
-      '<div style="font-size:11px;color:var(--muted);margin-top:4px">'+sub+'</div></div>';
-  }
 
   var rySummary = (D.orders && D.orders.ryschanow_summary) || null;
   var noWaybillDrivers = rySummary ? (rySummary.by_driver_no_waybill||[]) : ((D.orders && D.orders.by_driver_no_waybill) || []);
   var noWaybillSuppliers = rySummary ? (rySummary.by_supplier_no_waybill||[]) : ((D.orders && D.orders.by_supplier_no_waybill) || []);
+  var noWaybillLogists = rySummary ? (rySummary.by_logist_no_waybill||[]) : ((D.orders && D.orders.by_logist_no_waybill) || []);
   // by_hired_supplier - уже приходит и admin, и логисту (buildLogistView_ отдаёт его каждому
   // логисту явно, "видит абсолютно всю ситуацию по направлению") - без ryschanow_summary.
   var hiredSuppliers = (D.orders && D.orders.by_hired_supplier) || [];
@@ -3848,15 +3843,6 @@ function renderMyPageRyschanow(el, current, selectorHtml, d) {
     docFunnelBody = '<div style="overflow-x:auto">'+decHtml+'</div>';
   }
 
-  // KPI-грид - компанейский масштаб (Рыщанов видит всё направление сразу, без переключателя
-  // "Свои/Общие", в отличие от обычного логиста) - тот же формат карточек, что у Пруса.
-  var totalHiredOrders = hiredSuppliers.reduce(function(s,x){ return s+(x.orders||0); }, 0);
-  var totalHiredRevenue = hiredSuppliers.reduce(function(s,x){ return s+(x.revenue||0); }, 0);
-  var totalHiredMargin = hiredSuppliers.reduce(function(s,x){ return s+(x.margin||0); }, 0);
-  var totalHiredMarginPct = totalHiredRevenue > 0 ? Math.round(totalHiredMargin/totalHiredRevenue*100) : 0;
-  var docComplete = hiredSuppliers.reduce(function(s,x){ return s+(x.complete||0); }, 0);
-  var docTotal = hiredSuppliers.reduce(function(s,x){ return s+(x.no_waybill||0)+(x.not_posted||0)+(x.no_realiz||0)+(x.complete||0); }, 0);
-
   var html = selectorHtml;
   html += renderAiTasksBlockHtml_(current, 'ryschanow');
   html += planProgressBar('Валовая прибыль своего парка', gpPct, gpForecastPct, grossProfit, gpForecast, gpPlan, gpDayRateHtml);
@@ -3865,27 +3851,10 @@ function renderMyPageRyschanow(el, current, selectorHtml, d) {
   // детальная таблица "Отдел Рыщанова" (calcRyschanow), включая его самого и весь отдел -
   // дублировать здесь не нужно, дальше только оперативные данные отдела.
   html += block('📋 Воронка документов', docFunnelBody);
-
-  html += '<div class="kpi-grid" style="margin-bottom:18px">';
-  html += kpiCard('🚚', 'Заказов по найму · вся компания', String(totalHiredOrders), mln(totalHiredRevenue)+' выручка найма', COL.blue);
-  html += kpiCard('💹', 'Маржа найма · вся компания', mln(totalHiredMargin), totalHiredMarginPct+'% от выручки найма', COL.green);
-  html += kpiCard('📋', 'Документы · вся компания', docComplete+' из '+docTotal, docTotal>0 ? Math.round(docComplete/docTotal*100)+'% готово' : 'Нет заказов в воронке', COL.blue);
-  (function() {
-    var mp = totalHiredMarginPct;
-    var mColorVar = mp >= 30 ? 'var(--green)' : mp >= 15 ? 'var(--amber)' : 'var(--red)';
-    var mColorCls = mp >= 30 ? 'green' : mp >= 15 ? 'amber' : 'red';
-    var mDetail = mp >= 30 ? 'Хорошая маржа найма' : mp >= 15 ? 'Средняя маржа найма' : 'Низкая маржа найма';
-    html += '<div class="kpi">'+
-      '<div class="kpi-label">Общая маржинальность найма · вся компания</div>'+
-      '<div class="kpi-value '+mColorCls+'">'+mp+'%</div>'+
-      '<div class="kpi-sub2">'+mDetail+'</div>'+
-      '<div class="kpi-prog-wrap">'+
-        '<div class="kpi-prog-header"><span>Прибыль от выручки</span><span>'+mp+'%</span></div>'+
-        '<div class="kpi-prog-bg"><div class="kpi-prog-fill" style="width:'+Math.min(mp,100)+'%;background:'+mColorVar+'"></div></div>'+
-        '<div class="kpi-sub" style="margin-top:4px">Маржа найма '+mln(totalHiredMargin)+' из выручки найма '+mln(totalHiredRevenue)+'</div>'+
-      '</div></div>';
-  })();
-  html += '</div>';
+  // 4 маленьких KPI-карточки (Заказов по найму/Маржа найма/Документы/Общая маржинальность,
+  // все "вся компания") убраны целиком (2026-08-26, Влад: "четыре блока маленьких на
+  // скриншоте убери вообще с этой страницы") - дублировали то, что уже видно во вкладке
+  // "Наёмная техника" ниже (итоговая строка таблицы).
 
   // Единый блок с вкладками (2026-08-26, откат по просьбе Влада: вкладка "Техника" убрана,
   // "Водители" стала статичной "Загрузка парка" без сортировки/фильтров).
@@ -3895,6 +3864,7 @@ function renderMyPageRyschanow(el, current, selectorHtml, d) {
     '<button class="tab-btn'+(myPageRyschTab==='hired'?' active':'')+'" onclick="setMyPageRyschTab(\'hired\')">🏭 Наёмная техника</button>'+
     '<button class="tab-btn'+(myPageRyschTab==='no_waybill_drivers'?' active':'')+'" onclick="setMyPageRyschTab(\'no_waybill_drivers\')">📋 Не сданные путевые (свои)</button>'+
     '<button class="tab-btn'+(myPageRyschTab==='no_waybill_suppliers'?' active':'')+'" onclick="setMyPageRyschTab(\'no_waybill_suppliers\')">📋 Топ поставщиков без путевых</button>'+
+    '<button class="tab-btn'+(myPageRyschTab==='no_waybill_logists'?' active':'')+'" onclick="setMyPageRyschTab(\'no_waybill_logists\')">📋 Топ логистов с несданными путевыми</button>'+
   '</div>';
 
   if (myPageRyschTab === 'fleet_load') {
@@ -3917,6 +3887,12 @@ function renderMyPageRyschanow(el, current, selectorHtml, d) {
       var forecastPct = forecast / v.plan * 100;
       var status = driverForecastStatus_(forecastPct);
       if (status.cls !== 'orange' && status.cls !== 'amber' && status.cls !== 'red') return; // "Идёт по плану" - пропускаем
+      // "Простой — разобраться" (2026-08-26, Влад: "больше 5% - это правило должно быть") -
+      // машина на нуле/в минусе (прогноз <=5% от плана) значит она либо в глубоком ремонте,
+      // либо вообще без водителя - это НЕ то, что решается заказами/логистикой, отдельная
+      // задача (найм/ремонт), не для этого списка. Показываем только тех в "Простое", кто
+      // УЖЕ что-то зарабатывает (>5%) - там ещё есть, что разгонять заказами.
+      if (status.cls === 'red' && forecastPct <= 5) return;
       flGroups[status.cls].push({ v: v, forecast: forecast, forecastPct: forecastPct, status: status });
     });
     ['orange', 'amber', 'red'].forEach(function(cls) {
@@ -4008,7 +3984,7 @@ function renderMyPageRyschanow(el, current, selectorHtml, d) {
             return '<tr><td><b>'+dv.name+'</b></td><td class="num red"><b>'+dv.no_waybill+'</b></td><td class="num muted">'+dv.orders+'</td><td class="num '+pCls+'">'+pct+'%</td></tr>';
           }).join(''))+
       '</tbody></table></div>';
-  } else {
+  } else if (myPageRyschTab === 'no_waybill_suppliers') {
     html += '<div style="overflow-x:auto"><table class="tbl">'+
       '<thead><tr><th>Поставщик</th><th class="num">Нет путёвки</th><th class="num">Заказов</th><th class="num">%</th></tr></thead>'+
       '<tbody>'+(!noWaybillSuppliers.length
@@ -4017,6 +3993,18 @@ function renderMyPageRyschanow(el, current, selectorHtml, d) {
             var pct = sp.orders > 0 ? Math.round(sp.no_waybill/sp.orders*100) : 0;
             var pCls = pct >= 50 ? 'red' : pct >= 25 ? 'amber' : '';
             return '<tr><td><b>'+sp.name+'</b></td><td class="num red"><b>'+sp.no_waybill+'</b></td><td class="num muted">'+sp.orders+'</td><td class="num '+pCls+'">'+pct+'%</td></tr>';
+          }).join(''))+
+      '</tbody></table></div>';
+  } else {
+    // "Топ логистов с несданными путевыми" (2026-08-26, Влад: "за каждый из несданных путевых
+    // листов есть ответственный логист, ему нужен топ") - своя и наёмная недостача сразу,
+    // отсортировано по итогу (by_logist_no_waybill, backend).
+    html += '<div style="overflow-x:auto"><table class="tbl">'+
+      '<thead><tr><th>Логист</th><th class="num">Свой парк</th><th class="num">Наём</th><th class="num">Итого</th></tr></thead>'+
+      '<tbody>'+(!noWaybillLogists.length
+        ? '<tr><td colspan="4" style="color:var(--green);padding:14px">Все путевые листы сданы ✅</td></tr>'
+        : noWaybillLogists.map(function(lg) {
+            return '<tr><td><b>'+lg.name+'</b></td><td class="num muted">'+lg.no_waybill_own+'</td><td class="num muted">'+lg.no_waybill_hired+'</td><td class="num red"><b>'+lg.no_waybill_total+'</b></td></tr>';
           }).join(''))+
       '</tbody></table></div>';
   }

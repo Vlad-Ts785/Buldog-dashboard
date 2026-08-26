@@ -1789,13 +1789,40 @@ const DEBT_ORG_SHORT_NAMES = {
 };
 const DEBT_ORG_KEYS = Object.keys(DEBT_ORG_SHORT_NAMES);
 
+// Менеджеры, которые ведут НЕСКОЛЬКО отделов одновременно (2026-08-25, Ратников - тралы +
+// краны + экскаваторы под одним и тем же именем в 1С). ДЗ-отчёт не даёт разбивку по отделу
+// на уровне документа (колонка "Отдел" там - общий "Коммерческий блок", не помогает), а
+// баланс контрагента в 1С - это ОДНО число на пару (контрагент, юрлицо), не сумма документов -
+// разделить их 1С не умеет. Единственный доступный сигнал - сверка номера "Таблица заказов
+// NNNNNN" с таблицей заказов (там иногда встречается настоящий "Отдел", например
+// "2. Экскаваторный отдел" - см. plans, находка 2026-08-25 на "СУ 910 ООО АВТОБАН"). Правило
+// (Влад, 2026-08-25): для этих менеджеров документ считаем СВОИМ (тральным) только если его
+// номер заказа реально нашёлся в таблице заказов - иначе исключаем его сумму из баланса
+// (contragent при этом НЕ прячем целиком - именно потому что у одного контрагента может быть
+// одновременно и трал, и кран/экскаватор долг, см. пример "Мостоотряд").
+const DEBT_CROSS_DEPT_MANAGERS = ['Ратников'];
+
+// true, если документ - "Таблица заказов NNNNNN" от менеджера из DEBT_CROSS_DEPT_MANAGERS,
+// и его номер НЕ нашёлся в knownOrderNumbers (переданном набор номеров реальных тральных
+// заказов, см. importDebtReport()). knownOrderNumbers отсутствует (например, старый вызов
+// без него) - функция ничего не исключает, безопасный no-op.
+function isNonTralCrossDeptDoc_(doc, knownOrderNumbers) {
+  if (!knownOrderNumbers) return false;
+  if (!ordInList(doc.manager, DEBT_CROSS_DEPT_MANAGERS)) return false;
+  const m = String(doc.desc || '').match(/^Таблица заказов\s+0*(\d+)/);
+  if (!m) return false; // не заказ (акт/поступление и т.п.) - не наш случай, не трогаем
+  return !knownOrderNumbers[m[1]];
+}
+
 // Разбирает сырую 2D-выгрузку отчёта "Взаиморасчёты" в плоский список по клиентам.
 // Документ-строки (Отдел+Менеджер заполнены) дают долг(G)/дату/менеджера. Контрагент-строки
 // (только колонка A) дают аванс(H)/гарантийный платёж(I)/депозит(J) - эти три колонки НЕ
 // встречаются на уровне документа, только на уровне контрагента (проверено на образце).
 // Один контрагент может повторяться под разными юрлицами (165 из ~3800 в образце) -
 // суммируем по имени для общих итогов, но и сохраняем разбивку по юрлицу отдельно (см. план).
-function parseDebtRawRows_(rawData) {
+// knownOrderNumbers - опциональный набор {orderNumber: true} реальных заказов из таблицы
+// заказов (см. DEBT_CROSS_DEPT_MANAGERS выше) - без него функция работает как раньше.
+function parseDebtRawRows_(rawData, knownOrderNumbers) {
   const customers = {};
   let currentOrg = null;
   let currentContragent = null;
@@ -1918,6 +1945,22 @@ function parseDebtRawRows_(rawData) {
         ? (o.debt - Math.max(0, o.advance) - Math.max(0, o.guaranteePayment) - Math.max(0, o.guaranteeDeposit) - Math.max(0, o.ourDebt))
         : 0;
     });
+    // Вычитаем документы "чужого" отдела у кросс-отдельных менеджеров (Влад, 2026-08-25, см.
+    // DEBT_CROSS_DEPT_MANAGERS выше) - ДО суммирования в balance, чтобы контрагент с ТОЛЬКО
+    // такими документами (пример "СУ 910 ООО АВТОБАН" - весь долг под экскаваторами) просто
+    // не набрал положительный баланс и не попал в список должников тралов вообще, а контрагент
+    // со СМЕШАННЫМ долгом (тралы + краны у одного и того же юрлица, пример "Мостоотряд") не
+    // терял свою тральную часть - вычитаем только конкретные "чужие" суммы, не весь баланс
+    // контрагента и не по статусу (статус - на уровне контрагента целиком, тут нужна точность
+    // до документа).
+    const nonTralByOrg = {};
+    unpaidDocs.forEach(function(x) {
+      x.nonTralCrossDept = isNonTralCrossDeptDoc_(x, knownOrderNumbers);
+      if (x.nonTralCrossDept) nonTralByOrg[x.org] = (nonTralByOrg[x.org] || 0) + x.debt;
+    });
+    DEBT_ORG_KEYS.forEach(function(orgKey) {
+      if (nonTralByOrg[orgKey]) byOrgBalance[orgKey] = Math.max(0, byOrgBalance[orgKey] - nonTralByOrg[orgKey]);
+    });
     // Итоговый баланс = сумма ТОЛЬКО положительных остатков по юрлицам (Влад, 2026-07-09:
     // "плюс с минусом мы не сводим, показываем только долг"). Раньше баланс считался как
     // общий долг минус общий аванс ПО ВСЕМ юрлицам сразу - из-за этого аванс, накопленный
@@ -1940,8 +1983,12 @@ function parseDebtRawRows_(rawData) {
     // (взаимозачёт, Влад, 2026-07-16) - все четыре одинаково закрывают документы, просто
     // разными деньгами (клиента, гарантией/зарплатой менеджера, или встречной услугой типа
     // аренды экскаватора) - см. комментарий у byOrgBalance выше.
+    // Документы "чужого" отдела (nonTralCrossDept) не участвуют в покрытии/FIFO - их сумма
+    // уже не входит в byOrgBalance/balance выше, включать их в остаток пула означало бы
+    // растянуть покрытие на сумму, которая не в нашем балансе.
     const docsByOrg = {};
-    unpaidDocs.forEach(function(x) { (docsByOrg[x.org] = docsByOrg[x.org] || []).push(x); });
+    unpaidDocs.filter(function(x) { return !x.nonTralCrossDept; })
+      .forEach(function(x) { (docsByOrg[x.org] = docsByOrg[x.org] || []).push(x); });
     Object.keys(docsByOrg).forEach(function(orgKey) {
       // Та же защита от отрицательных значений, что и в byOrgBalance выше - отрицательный
       // аванс/гарантия не должен УМЕНЬШАТЬ пул покрытия (тем самым как бы "требуя" покрыть
@@ -1966,7 +2013,7 @@ function parseDebtRawRows_(rawData) {
     // разворот "Дебиторская задолженность" по датам показывает именно бегущий остаток в
     // хронологическом порядке - см. обсуждение с Владом). Теперь - дата самого старого
     // документа, который FIFO-оценка НЕ считает полностью покрытым.
-    const stillOpenDocs = unpaidDocs.filter(function(x) { return (x.covered || 0) < x.debt; });
+    const stillOpenDocs = unpaidDocs.filter(function(x) { return !x.nonTralCrossDept && (x.covered || 0) < x.debt; });
     if (stillOpenDocs.length) {
       oldestDate = stillOpenDocs[0].date;
       stillOpenDocs.forEach(function(x) { if (x.date < oldestDate) oldestDate = x.date; });
@@ -1993,12 +2040,34 @@ function parseDebtRawRows_(rawData) {
       // FIFO-оценка того, сколько из этого документа уже покрыто авансом (см. выше) -
       // ОЦЕНКА, не факт.
       unpaidDocs: unpaidDocs
-        .map(function(x) { return { date: x.date, desc: x.desc, debt: x.debt, covered: x.covered || 0, org: DEBT_ORG_SHORT_NAMES[x.org] || x.org }; })
+        .map(function(x) { return { date: x.date, desc: x.desc, debt: x.debt, covered: x.covered || 0, org: DEBT_ORG_SHORT_NAMES[x.org] || x.org, nonTralCrossDept: !!x.nonTralCrossDept }; })
         .sort(function(a, b) { return a.date.localeCompare(b.date); }),
     });
   });
 
   return result.sort(function(a, b) { return b.balance - a.balance; });
+}
+
+// Набор номеров заказов из "Заказы_данные" (та же таблица, что видит "Обзор заказов") - для
+// сверки документов кросс-отдельных менеджеров при разборе ДЗ (см. DEBT_CROSS_DEPT_MANAGERS/
+// isNonTralCrossDeptDoc_ выше). Возвращает {} при любой ошибке чтения листа - тогда
+// parseDebtRawRows_ просто не исключает ничего (безопасный откат к старому поведению), не
+// роняет весь импорт ДЗ из-за постороннего листа.
+function getKnownOrderNumbers_() {
+  try {
+    const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(ORDERS_NORM_SHEET);
+    if (!sheet || sheet.getLastRow() < 2) return {};
+    const nums = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
+    const result = {};
+    nums.forEach(function(r) {
+      const n = String(r[0] || '').trim().replace(/^0+/, '');
+      if (n) result[n] = true;
+    });
+    return result;
+  } catch (e) {
+    return {};
+  }
 }
 
 function importDebtReport() {
@@ -2024,7 +2093,7 @@ function importDebtReport() {
   const data = SpreadsheetApp.openById(tmp.id).getSheets()[0].getDataRange().getValues();
   Drive.Files.remove(tmp.id);
 
-  const parsed = parseDebtRawRows_(data);
+  const parsed = parseDebtRawRows_(data, getKnownOrderNumbers_());
   if (!parsed.length) throw new Error('ДЗ: после разбора и фильтрации не осталось ни одного клиента - проверь формат файла');
 
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);

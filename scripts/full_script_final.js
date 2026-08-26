@@ -4263,11 +4263,12 @@ function buildRyschanowSummaryBundle_(ss, orders, period) {
     special_trals_profit: specialTralsProfit,
     qual_margin_all_logists: qualMarginAllLogists,
     vehicles: vehicles,
-    drivers: deriveDriversFromVehicles(vehicles),
-    // Заказов на водителя (2026-08-25, "Водители" на его странице должны выглядеть как
-    // одноимённая страница "Парк") - тот же источник, что vehicles_period/getStaffData
-    // основного payload'а, тем же диапазоном range, что и vehicles/drivers выше.
-    driver_order_counts: getDriverOrderCounts_(ss, range.from, range.to),
+    // План ВП своего парка (2026-08-26, баг): buildLogistView_ НЕ прокидывал managerPlans в
+    // ordersOut при самостоятельном входе (в отличие от admin-предпросмотра, который видит
+    // D.orders.managerPlans напрямую) - план "рыщанов_вп" был в таблице, но не доходил до
+    // страницы. `orders` здесь - ПОЛНЫЙ объект (getOrdersData/getOrdersDataForPeriod до
+    // урезания в buildLogistView_), .managerPlans на нём уже посчитан joinManagerPlans_.
+    gp_plan: (orders.managerPlans && orders.managerPlans['рыщанов_вп']) || 0,
   };
 }
 

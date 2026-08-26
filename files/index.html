@@ -3740,29 +3740,12 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
 }
 
 // Вкладки нового блока личной страницы Рыщанова (2026-08-25, по образцу myPageLogTab).
-let myPageRyschTab = 'vehicles'; // 'vehicles' | 'drivers' | 'hired' | 'no_waybill_drivers' | 'no_waybill_suppliers'
+// 2026-08-26 (откат по просьбе Влада): вкладка "Техника" убрана целиком, "Водители"
+// переименована в "Загрузка парка" и стала статичной (без сортировки/фильтров) - см.
+// myPageRyschTab==='fleet_load' ниже. Сортировка/фильтры "Техника"/"Водители" (были нужны
+// только этим двум удалённым вкладкам) убраны вместе с ними.
+let myPageRyschTab = 'fleet_load'; // 'fleet_load' | 'hired' | 'no_waybill_drivers' | 'no_waybill_suppliers'
 function setMyPageRyschTab(tab) { myPageRyschTab = tab; renderMyPage(); }
-// Сортировка/фильтры "Техника"/"Водители" на странице Рыщанова (2026-08-25, Влад: "точно
-// так же, как у меня [на странице Техника/Водители], где фильтры и возможность
-// сортировки") - своё состояние и свои id, НЕ переиспользуют filter-type/filter-status со
-// страницы "Техника" (те же id уже заняты static-разметкой той страницы, коллизия).
-let myPageRyschVehSort = { col: 'profit', dir: -1 };
-let myPageRyschVehFilterType = '';
-let myPageRyschVehFilterStatus = '';
-let myPageRyschDrvFilterType = '';
-let myPageRyschDrvFilterStatus = '';
-function setMyPageRyschVehSort(col) {
-  if (myPageRyschVehSort.col === col) { myPageRyschVehSort = { col: col, dir: myPageRyschVehSort.dir * -1 }; }
-  else {
-    var textCol = (col === 'gos' || col === 'marka' || col === 'type' || col === 'status' || col === 'driver');
-    myPageRyschVehSort = { col: col, dir: textCol ? 1 : -1 };
-  }
-  renderMyPage();
-}
-function setMyPageRyschVehFilterType(v) { myPageRyschVehFilterType = v; renderMyPage(); }
-function setMyPageRyschVehFilterStatus(v) { myPageRyschVehFilterStatus = v; renderMyPage(); }
-function setMyPageRyschDrvFilterType(v) { myPageRyschDrvFilterType = v; renderMyPage(); }
-function setMyPageRyschDrvFilterStatus(v) { myPageRyschDrvFilterStatus = v; renderMyPage(); }
 // Логисты, чья маржа найма суммируется в 2%-бонус Рыщанова (зеркало RYSCHANOW_ALL_LOGISTS_SUR_
 // на бэкенде - см. calcRyschanow во вкладке "Зарплата", то же слагаемое qualMarginAllLogists).
 var RYSCHANOW_ALL_LOGISTS_SUR_FRONT_ = ['васин','кан','махура','сильчев','прус-роскошный','суркова'];
@@ -3791,8 +3774,6 @@ function renderMyPageRyschanow(el, current, selectorHtml, d) {
   // логисту явно, "видит абсолютно всю ситуацию по направлению") - без ryschanow_summary.
   var hiredSuppliers = (D.orders && D.orders.by_hired_supplier) || [];
   var vehicles = rySummary ? (rySummary.vehicles||[]) : (D.vehicles || []);
-  var drivers = rySummary ? (rySummary.drivers||[]) : (D.drivers || []);
-  var driverOrderCounts = rySummary ? (rySummary.driver_order_counts||{}) : (D.driverOrderCounts || {});
   var docByDecade = rySummary ? (rySummary.doc_by_decade||[]) : ((D.orders && D.orders.doc_by_decade) || []);
   var grossProfit = rySummary ? (rySummary.gross_profit||0) : ((D.summary && D.summary.profit) || 0);
   var paceRatio = calcPaceRatio_((D.orders||{}).period);
@@ -3800,9 +3781,12 @@ function renderMyPageRyschanow(el, current, selectorHtml, d) {
   // "Валовая прибыль (план)" - план вводится вручную Владом каждый месяц в лист
   // "Планы_менеджеров" под ключом "рыщанов_вп" (НЕ "рыщанов" - та фамилия уже может быть
   // ключом РЕВЕНЮ-плана в "Обзоре"/"Менеджерах", смешивать метрики нельзя). 2026-08-25:
-  // "план ему ставим 35 млн на август".
+  // "план ему ставим 35 млн на август". Admin-предпросмотр видит D.orders.managerPlans
+  // напрямую (полный company-wide payload); самостоятельный вход - через rySummary.gp_plan
+  // (2026-08-26, баг: buildLogistView_ не прокидывал managerPlans в ordersOut вообще, план
+  // был в таблице, но не доходил до страницы Рыщанова при входе под его логином).
   var plans = (D.orders && D.orders.managerPlans) || {};
-  var gpPlan = plans['рыщанов_вп'] || 0;
+  var gpPlan = rySummary ? (rySummary.gp_plan || 0) : (plans['рыщанов_вп'] || 0);
   var gpPct = gpPlan > 0 ? (grossProfit / gpPlan * 100) : 0;
   var gpForecast = grossProfit * paceRatio;
   var gpForecastPct = gpPlan > 0 ? (gpForecast / gpPlan * 100) : 0;
@@ -3903,148 +3887,72 @@ function renderMyPageRyschanow(el, current, selectorHtml, d) {
   })();
   html += '</div>';
 
-  // Единый блок с вкладками - 5 таблиц, все уже посчитаны на бэкенде (Влад: "все эти таблицы
-  // есть, нужно просто их [использовать]").
+  // Единый блок с вкладками (2026-08-26, откат по просьбе Влада: вкладка "Техника" убрана,
+  // "Водители" стала статичной "Загрузка парка" без сортировки/фильтров).
   html += '<div class="card" style="margin-bottom:16px">';
   html += '<div class="tab-bar">'+
-    '<button class="tab-btn'+(myPageRyschTab==='vehicles'?' active':'')+'" onclick="setMyPageRyschTab(\'vehicles\')">🚛 Техника</button>'+
-    '<button class="tab-btn'+(myPageRyschTab==='drivers'?' active':'')+'" onclick="setMyPageRyschTab(\'drivers\')">🏆 Водители</button>'+
+    '<button class="tab-btn'+(myPageRyschTab==='fleet_load'?' active':'')+'" onclick="setMyPageRyschTab(\'fleet_load\')">🚦 Загрузка парка</button>'+
     '<button class="tab-btn'+(myPageRyschTab==='hired'?' active':'')+'" onclick="setMyPageRyschTab(\'hired\')">🏭 Наёмная техника</button>'+
     '<button class="tab-btn'+(myPageRyschTab==='no_waybill_drivers'?' active':'')+'" onclick="setMyPageRyschTab(\'no_waybill_drivers\')">📋 Не сданные путевые (свои)</button>'+
     '<button class="tab-btn'+(myPageRyschTab==='no_waybill_suppliers'?' active':'')+'" onclick="setMyPageRyschTab(\'no_waybill_suppliers\')">📋 Топ поставщиков без путевых</button>'+
   '</div>';
 
-  if (myPageRyschTab === 'vehicles') {
-    // "Техника" - точно как одноимённая страница "Парк" (Влад, 2026-08-25: "где фильтры и
-    // возможность сортировки") - те же 12 колонок (VEH_COLS), свои id/состояние сортировки
-    // (myPageRyschVehSort/myPageRyschVehFilter*), НЕ переиспользуют filter-type/filter-status
-    // страницы "Техника" (те id уже заняты её статичной разметкой).
-    var RYSCH_VEH_COLS_ = [
-      {key:'gos', label:'Госномер', num:false}, {key:'marka', label:'Марка', num:false},
-      {key:'type', label:'Тип', num:false}, {key:'status', label:'Статус', num:false},
-      {key:'driver', label:'Водитель', num:false}, {key:'revenue', label:'Выручка', num:true},
-      {key:'fot', label:'ФОТ', num:true}, {key:'fuel', label:'Топливо', num:true},
-      {key:'parts', label:'Запчасти', num:true}, {key:'fines', label:'Штрафы', num:true},
-      {key:'profit', label:'Прибыль', num:true}, {key:'plan_pct', label:'% плана', num:true},
+  if (myPageRyschTab === 'fleet_load') {
+    // "Загрузка парка" (2026-08-26, заменила "Водители" по просьбе Влада) - статично, без
+    // фильтров/сортировки, только машины, требующие внимания. Прогноз по каждой машине -
+    // тот же приём, что уже на личной странице Васина (vehiclesF выше в файле) и на странице
+    // "Водители" (driverForecastStatus_): forecast = profit * paceRatio текущего месяца.
+    // Машины "Идёт по плану" (>=100%) и "Нет плана" (план не задан) не показываем - страница
+    // только про то, что требует действия. Порядок групп - НЕ по тяжести статуса, а по
+    // приоритету действия (Влад, 2026-08-26): сначала "Загрузить срочно" (обычно пустой
+    // порожняк, самое срочное), потом "Добавить заказов" (можно распланировать заранее), и
+    // только в самом низу "Простой — разобраться" (расследование причины, не разовое
+    // действие). Внутри группы - худшие (ближе к 0%) первыми.
+    var flIsLive = isLiveMonthKey_((D.orders||{}).period);
+    var flPaceRatio = flIsLive ? paceRatio : 1;
+    var flGroups = { orange: [], amber: [], red: [] };
+    vehicles.forEach(function(v) {
+      if (!(v.plan > 0)) return; // "Нет плана" - не показываем, действия не требует
+      var forecast = (v.profit||0) * flPaceRatio;
+      var forecastPct = forecast / v.plan * 100;
+      var status = driverForecastStatus_(forecastPct);
+      if (status.cls !== 'orange' && status.cls !== 'amber' && status.cls !== 'red') return; // "Идёт по плану" - пропускаем
+      flGroups[status.cls].push({ v: v, forecast: forecast, forecastPct: forecastPct, status: status });
+    });
+    ['orange', 'amber', 'red'].forEach(function(cls) {
+      flGroups[cls].sort(function(a, b) { return a.forecastPct - b.forecastPct; });
+    });
+    var flOrder = [
+      { cls: 'orange', icon: '🟠' }, { cls: 'amber', icon: '🟡' }, { cls: 'red', icon: '🔴' },
     ];
-    var vehTypes = [];
-    vehicles.forEach(function(v){ if (v.type && vehTypes.indexOf(v.type)===-1) vehTypes.push(v.type); });
-    vehTypes.sort();
-    var vehFiltered = vehicles.filter(function(v) {
-      if (myPageRyschVehFilterType && !vehicleTypeMatches_(v.type, myPageRyschVehFilterType)) return false;
-      if (myPageRyschVehFilterStatus && (v.status||'').indexOf(myPageRyschVehFilterStatus) === -1) return false;
-      return true;
-    });
-    var vSortCol = myPageRyschVehSort.col, vSortDir = myPageRyschVehSort.dir;
-    vehFiltered.sort(function(a, b) {
-      var av, bv;
-      if (vSortCol === 'plan_pct') { av = a.plan > 0 ? (a.profit||0)/a.plan*100 : -9999; bv = b.plan > 0 ? (b.profit||0)/b.plan*100 : -9999; }
-      else if (vSortCol === 'fines') { av = Math.abs(a.fines||0); bv = Math.abs(b.fines||0); }
-      else { av = a[vSortCol]; bv = b[vSortCol]; }
-      if (typeof av === 'number') return (bv-av) * vSortDir;
-      return String(av||'').localeCompare(String(bv||''), 'ru') * vSortDir;
-    });
-    var vehFilterHtml = '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'+
-      '<select onchange="setMyPageRyschVehFilterType(this.value)" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px">'+
-        '<option value="">Все типы</option>'+
-        vehTypes.map(function(t){ return '<option value="'+t+'"'+(t===myPageRyschVehFilterType?' selected':'')+'>'+t+'</option>'; }).join('')+
-      '</select>'+
-      '<select onchange="setMyPageRyschVehFilterStatus(this.value)" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px">'+
-        '<option value="">Все статусы</option>'+
-        '<option value="В работе"'+(myPageRyschVehFilterStatus==='В работе'?' selected':'')+'>В работе</option>'+
-        '<option value="Ремонт"'+(myPageRyschVehFilterStatus==='Ремонт'?' selected':'')+'>Ремонт</option>'+
-        '<option value="Без водителя"'+(myPageRyschVehFilterStatus==='Без водителя'?' selected':'')+'>Без водителя</option>'+
-      '</select>'+
-    '</div>';
-    var vehHeadHtml = RYSCH_VEH_COLS_.map(function(c) {
-      var active = vSortCol === c.key;
-      var arrow = active ? (vSortDir === -1 ? ' ▼' : ' ▲') : ' ↕';
-      return '<th class="sortable'+(c.num?' num':'')+'" onclick="setMyPageRyschVehSort(\''+c.key+'\')">'+c.label+'<span style="font-size:10px;opacity:'+(active?'1':'0.3')+'">'+arrow+'</span></th>';
-    }).join('');
-    var vehRows = !vehFiltered.length
-      ? '<tr><td colspan="12" class="muted" style="padding:14px">Нет данных за этот месяц</td></tr>'
-      : vehFiltered.map(function(v) {
-          var planPct = v.plan > 0 ? (v.profit||0)/v.plan*100 : null;
-          var cls = v.profit < 0 ? 'red' : planPct !== null ? (planPct >= 100 ? 'green' : planPct >= 80 ? 'amber' : 'red') : ((v.revenue||0) > 0 && (v.profit||0)/v.revenue*100 >= 50 ? 'green' : 'amber');
-          var planPctStr = planPct !== null ? planPct.toFixed(0)+'%' : '—';
-          var stCls = v.status && v.status.indexOf('Ремонт') !== -1 ? 'red' : v.status && v.status.indexOf('работе') !== -1 ? 'green' : 'amber';
-          var finesCls = Math.abs(v.fines||0) > 50000 ? 'red' : '';
+    var flTotal = flGroups.orange.length + flGroups.amber.length + flGroups.red.length;
+    if (!flTotal) {
+      html += '<div style="color:var(--green);padding:14px;font-size:13px">Все машины идут по плану ✅</div>';
+    } else {
+      html += flOrder.map(function(g) {
+        var rows = flGroups[g.cls];
+        if (!rows.length) return '';
+        var label = rows[0].status.label;
+        var bodyRows = rows.map(function(x) {
+          var v = x.v;
           return '<tr>'+
             '<td class="muted" style="font-size:12px">'+(v.gos||'—')+'</td>'+
             '<td>'+(v.marka||'—')+'</td>'+
-            '<td class="muted">'+(v.type||'—')+'</td>'+
-            '<td><span class="badge '+stCls+'">'+(v.status||'—')+'</span></td>'+
             '<td class="muted">'+(v.driver||'—')+'</td>'+
-            '<td class="num">'+fmtK2(v.revenue||0)+'</td>'+
-            '<td class="num">'+fmtK2(v.fot||0)+'</td>'+
-            '<td class="num">'+fmtK2(v.fuel||0)+'</td>'+
-            '<td class="num">'+fmtK2(v.parts||0)+'</td>'+
-            '<td class="num '+finesCls+'">'+fmtK2(v.fines||0)+'</td>'+
-            '<td class="num '+cls+'"><b>'+fmtK2(v.profit||0)+'</b></td>'+
-            '<td class="num '+cls+'">'+planPctStr+'</td>'+
+            '<td class="num">'+fmtK2(v.plan||0)+'</td>'+
+            '<td class="num">'+fmtK2(v.profit||0)+'</td>'+
+            '<td class="num '+g.cls+'"><b>'+fmtK2(x.forecast)+'</b> <span class="muted">('+x.forecastPct.toFixed(0)+'%)</span></td>'+
           '</tr>';
         }).join('');
-    html += vehFilterHtml+'<div style="overflow-x:auto"><table class="tbl">'+
-      '<thead><tr>'+vehHeadHtml+'</tr></thead>'+
-      '<tbody>'+vehRows+'</tbody>'+
-    '</table></div>';
-  } else if (myPageRyschTab === 'drivers') {
-    // "Водители" - точно как одноимённая страница (Влад, 2026-08-25) - Машина/Тип/Статус/
-    // Заказов/План/Факт/%/Прогноз/Оценка, тот же driverForecastStatus_, что уже используют
-    // страница "Водители" и личная страница Васина.
-    var drvStatusByGos = {};
-    vehicles.forEach(function(v) { if (v.gos) drvStatusByGos[v.gos] = v.status || ''; });
-    var drvTypes = [];
-    drivers.forEach(function(dv){ if (dv.type && drvTypes.indexOf(dv.type)===-1) drvTypes.push(dv.type); });
-    drvTypes.sort();
-    var drvFiltered = drivers.filter(function(dv) {
-      if (myPageRyschDrvFilterType && !vehicleTypeMatches_(dv.type, myPageRyschDrvFilterType)) return false;
-      if (myPageRyschDrvFilterStatus && (drvStatusByGos[dv.gos]||'').indexOf(myPageRyschDrvFilterStatus) === -1) return false;
-      return true;
-    });
-    var drvIsLive = isLiveMonthKey_((D.orders||{}).period);
-    var drvPaceRatio = drvIsLive ? paceRatio : 1;
-    var drvFilterHtml = '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'+
-      '<select onchange="setMyPageRyschDrvFilterType(this.value)" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px">'+
-        '<option value="">Все типы</option>'+
-        drvTypes.map(function(t){ return '<option value="'+t+'"'+(t===myPageRyschDrvFilterType?' selected':'')+'>'+t+'</option>'; }).join('')+
-      '</select>'+
-      '<select onchange="setMyPageRyschDrvFilterStatus(this.value)" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px">'+
-        '<option value="">Все статусы</option>'+
-        '<option value="В работе"'+(myPageRyschDrvFilterStatus==='В работе'?' selected':'')+'>В работе</option>'+
-        '<option value="Ремонт"'+(myPageRyschDrvFilterStatus==='Ремонт'?' selected':'')+'>Ремонт</option>'+
-        '<option value="Без водителя"'+(myPageRyschDrvFilterStatus==='Без водителя'?' selected':'')+'>Без водителя</option>'+
-      '</select>'+
-    '</div>';
-    var drvRows = !drvFiltered.length
-      ? '<tr><td colspan="9" class="muted" style="padding:14px">Нет данных за этот месяц</td></tr>'
-      : drvFiltered.map(function(dr) {
-          var pv = (dr.pct||0)*100;
-          var cls = pv >= 90 ? 'green' : pv >= 60 ? 'amber' : 'red';
-          var vStatus = drvStatusByGos[dr.gos] || '';
-          var stCls = vStatus.indexOf('Ремонт') !== -1 ? 'red' : vStatus.indexOf('работе') !== -1 ? 'green' : 'amber';
-          var nameKey = (dr.driver||'').trim().split(' ').slice(0,2).join(' ').toLowerCase();
-          var ordCnt = driverOrderCounts[nameKey] != null ? driverOrderCounts[nameKey] : '—';
-          var forecast = (dr.fakt||0) * drvPaceRatio;
-          var forecastPct = dr.plan > 0 ? forecast/dr.plan*100 : 0;
-          var status = driverForecastStatus_(forecastPct);
-          return '<tr>'+
-            '<td><b>'+(dr.driver||'—')+'</b></td>'+
-            '<td class="muted">'+(dr.gos||'—')+'</td>'+
-            '<td class="muted">'+(dr.type||'—')+'</td>'+
-            '<td><span class="badge '+stCls+'">'+(vStatus||'—')+'</span></td>'+
-            '<td class="num">'+ordCnt+'</td>'+
-            '<td class="num">'+fmtK2(dr.plan||0)+'</td>'+
-            '<td class="num">'+fmtK2(dr.fakt||0)+'</td>'+
-            '<td class="num '+cls+'"><b>'+pv.toFixed(1)+'%</b></td>'+
-            '<td class="num '+status.cls+'">'+fmtK2(forecast)+' <span class="muted">('+forecastPct.toFixed(0)+'%)</span></td>'+
-            '<td><span class="badge '+status.cls+'">'+status.label+'</span></td>'+
-          '</tr>';
-        }).join('');
-    html += drvFilterHtml+'<div style="overflow-x:auto"><table class="tbl">'+
-      '<thead><tr><th>Водитель</th><th>Машина</th><th>Тип</th><th>Статус</th><th class="num">Заказов</th><th class="num">План</th><th class="num">Факт</th><th class="num">%</th><th class="num">Прогноз</th><th>Оценка</th></tr></thead>'+
-      '<tbody>'+drvRows+'</tbody>'+
-    '</table></div>';
+        return '<div style="margin-bottom:16px">'+
+          '<div style="font-size:13px;font-weight:600;margin-bottom:6px">'+g.icon+' '+label+' <span class="muted" style="font-weight:400">('+rows.length+')</span></div>'+
+          '<div style="overflow-x:auto"><table class="tbl">'+
+            '<thead><tr><th>Госномер</th><th>Марка</th><th>Водитель</th><th class="num">План</th><th class="num">Факт</th><th class="num">Прогноз</th></tr></thead>'+
+            '<tbody>'+bodyRows+'</tbody>'+
+          '</table></div>'+
+        '</div>';
+      }).join('');
+    }
   } else if (myPageRyschTab === 'hired') {
     // "Наёмная техника" - точно как на "Обзоре заказов" (Влад, 2026-08-25) - с колонкой
     // "Затраты" и визуальной шкалой маржи, та же вёрстка, что уже использует Прус.

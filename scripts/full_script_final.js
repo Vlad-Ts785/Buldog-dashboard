@@ -1764,9 +1764,17 @@ const DEBT_AGE_LIMIT_DAYS = 600;
 // Убирает телефон из имени менеджера ("Савиток Олеся Анатольевна 8-985-150-11-85" ->
 // "Савиток Олеся Анатольевна") - та же логика, что фронтендный cleanName() (files/index.html).
 // Влад, 2026-07-08: "это вообще нужно везде исключать... у менеджера есть фамилия имя
-// отчество, и всё, больше ничего не надо".
+// отчество, и всё, больше ничего не надо" - но 2026-08-27 нашлось исключение: у Гусейновой
+// Айнур Рафик КЗЫ (среднеазиатское отчество из 2 слов, "кзы"/"кызы" = "дочь") реальное ФИО
+// из 4 слов - жёсткий обрез до 3 резал последнее слово, и в разных местах дашборда её имя
+// показывалось то полностью, то без "кзы" (Влад: "ну хрен знает где с кзы где без кзы").
+// 4-е слово оставляем, только если оно из БУКВ (не цифр/мусора 1С, который не попал под
+// регэксп телефона выше) - легитимные многословные отчества проходят, случайный мусор - нет.
 function cleanManagerName_(name) {
-  return String(name || '').replace(/[\d\+\-\(\)\s]{6,}/g, '').trim().split(' ').slice(0, 3).join(' ');
+  var parts = String(name || '').replace(/[\d\+\-\(\)\s]{6,}/g, '').trim().split(' ').filter(Boolean);
+  var words = parts.slice(0, 3);
+  if (parts.length > 3 && /^[а-яА-ЯёЁ]+$/.test(parts[3])) words.push(parts[3]);
+  return words.join(' ');
 }
 
 // Короткие имена юрлиц группы - для колонок в ДЗ_данные и разбивки на дашборде
@@ -4037,6 +4045,21 @@ function issueKpNumber_(access, p) {
 // "текущий/прошлый месяц" - вынесено в отдельную функцию, чтобы не дублировать фильтрацию
 // между getManagerView_ (текущий месяц) и getManagerViewForPeriod_ (архив) ниже). ss/period
 // (2026-08-12) - опциональны, нужны только чтобы приложить ДЗ этого менеджера (см. ниже).
+// Ахтамова/Гусейнова - руководители коммерческих групп (2026-08-26, план см.
+// plans/2026-08-26-ahtamova-guseinova-personal-pages.md). Тот же состав команд, что
+// DEPT_CFG на фронтенде (files/index.html) - держать синхронно при правке одного из двух.
+// Фиксированный список по фамилии, тот же принцип, что isVasinName_/isOwnTralLogistName_/
+// isRyschanowLogistName_ выше. Возвращает массив фамилий команды (сама + подчинённые) или
+// null, если name - не руководитель группы (обычный менеджер/чужая роль).
+var COMMERCIAL_HEAD_TEAMS_ = {
+  'ахтамова': ['ахтамова','цегельников','гуштюк','дербенцева','шейко'],
+  'гусейнова': ['гусейнова','савиток','филипчук','котельников','гуляева','коньшина','володин'],
+};
+function commercialHeadTeam_(name) {
+  var sur = (name||'').trim().split(' ')[0].toLowerCase();
+  return COMMERCIAL_HEAD_TEAMS_[sur] || null;
+}
+
 function buildManagerView_(orders, managerName, ss, period) {
   if (orders.error) return { error: orders.error };
 
@@ -4048,6 +4071,17 @@ function buildManagerView_(orders, managerName, ss, period) {
 
   const detailWrapped = {};
   if (myDetail) detailWrapped[managerName] = myDetail;
+
+  // Руководитель группы (Ахтамова/Гусейнова, 2026-08-26) - расширенный доступ ТОЛЬКО по
+  // своей команде целиком (тот же принцип, что уже даёт Рыщанову/Васину доступ к их
+  // направлению - см. ryschanow_summary/long_haul), не вся компания. teamSurs - null для
+  // обычного менеджера, ничего не меняется в этом случае.
+  const teamSurs = commercialHeadTeam_(managerName);
+  const teamByManager = teamSurs
+    ? (orders.by_manager || []).filter(function(m) {
+        return teamSurs.indexOf(String(m.name||'').trim().split(' ')[0].toLowerCase()) >= 0;
+      })
+    : null;
 
   const result = {
     updated: new Date().toISOString(),
@@ -4068,34 +4102,46 @@ function buildManagerView_(orders, managerName, ss, period) {
     },
   };
 
-  // ДЗ, отфильтрованная на этого менеджера (2026-08-12, личная страница - вкладка
-  // "Дебиторская задолженность", то же ядро computeDebtAggregates_/debtDeadAndStatus_, что
-  // общая ДЗ на фронтенде). Приватность - другие менеджеры не видны, только свои должники.
-  // ДЗ всегда "живая" (последний снимок 1С), не зависит от выбранного периода продаж.
+  // Компанейский срез своей команды (2026-08-26) - для табличкой группы отдела на личной
+  // странице руководителя (renderDeptGroupTableHtml_ на фронтенде, тот же рендер, что
+  // страница "По менеджерам") и для ИИ-контекста. Только у Ахтамовой/Гусейновой -
+  // обычные менеджеры этого поля не получают.
+  if (teamByManager) {
+    result.orders.team_by_manager = teamByManager;
+    result.orders.managerPlans = orders.managerPlans || {}; // нужен planOf() на фронтенде
+  }
+
+  // ДЗ, отфильтрованная на этого менеджера ИЛИ на всю его команду (руководитель группы,
+  // 2026-08-12/2026-08-26) - то же ядро computeDebtAggregates_/debtDeadAndStatus_, что общая
+  // ДЗ на фронтенде. Приватность - чужие менеджеры не видны, только свои/команда. ДЗ всегда
+  // "живая" (последний снимок 1С), не зависит от выбранного периода продаж.
   if (ss) {
     const dd = getDebtData(ss);
     if (dd && dd.by_customer) {
       const surLower = String(managerName || '').trim().split(' ')[0].toLowerCase();
       result.debt = {
         by_customer: dd.by_customer.filter(function(c) {
-          return String(c.manager || '').trim().split(' ')[0].toLowerCase() === surLower;
+          const cSur = String(c.manager || '').trim().split(' ')[0].toLowerCase();
+          return teamSurs ? teamSurs.indexOf(cSur) >= 0 : cSur === surLower;
         }),
       };
     }
 
-    // Поступления, отфильтрованные на этого менеджера (Влад, 2026-08-16: "вкладка Поступление,
-    // выбор сегодня/вчера/неделя/месяц, все поступления должны относиться к конкретному
-    // менеджеру") - ЖИВЫЕ (не по выбранному периоду - "Поступления" всегда о деньгах прямо
-    // сейчас/на этой неделе/в этом месяце, тот же принцип, что и ДЗ выше). Фильтруем СЕРВЕРНО,
-    // не только на фронтенде - у логина реального менеджера (не админ-предпросмотр) чужие
-    // строки не должны даже прийти по сети, приватность как у ДЗ/problem_orders выше.
+    // Поступления, отфильтрованные на этого менеджера ИЛИ на всю его команду (Влад,
+    // 2026-08-16/2026-08-26: "вкладка Поступление, выбор сегодня/вчера/неделя/месяц, все
+    // поступления должны относиться к конкретному менеджеру [или его отделу]") - ЖИВЫЕ (не
+    // по выбранному периоду - "Поступления" всегда о деньгах прямо сейчас/на этой неделе/в
+    // этом месяце, тот же принцип, что и ДЗ выше). Фильтруем СЕРВЕРНО, не только на
+    // фронтенде - у логина реального менеджера (не админ-предпросмотр) чужие строки не
+    // должны даже прийти по сети, приватность как у ДЗ/problem_orders выше.
     try {
       const rd = getReceiptsData(ss, orders);
       if (rd && !rd.error) {
         const surLower2 = String(managerName || '').trim().split(' ')[0].toLowerCase();
         function onlyMine_(list) {
           return (list || []).filter(function(t) {
-            return String(t.manager || '').trim().split(' ')[0].toLowerCase() === surLower2;
+            const tSur = String(t.manager || '').trim().split(' ')[0].toLowerCase();
+            return teamSurs ? teamSurs.indexOf(tSur) >= 0 : tSur === surLower2;
           });
         }
         result.receipts = {
@@ -4104,6 +4150,18 @@ function buildManagerView_(orders, managerName, ss, period) {
           week: { date_from: rd.week.date_from, date_to: rd.week.date_to, transactions: onlyMine_(rd.week.transactions) },
           this_month: { date_from: rd.this_month.date_from, date_to: rd.this_month.date_to, transactions: onlyMine_(rd.this_month.transactions) },
         };
+        // "По менеджерам" (2026-08-26, руководитель группы - вкладка "Поступления"
+        // повторяет структуру company-wide страницы "Поступления", см.
+        // renderReceiptsManagers на фронтенде) - team-scoped вариант rd.by_manager, % считаем
+        // от суммы КОМАНДЫ, не всей компании (иначе цифра % была бы обманчиво маленькой).
+        if (teamSurs && rd.by_manager) {
+          const teamByMgrReceipts = rd.by_manager.filter(function(m) {
+            return teamSurs.indexOf(String(m.manager||'').trim().split(' ')[0].toLowerCase()) >= 0;
+          });
+          const teamTotalMonth = teamByMgrReceipts.reduce(function(s,m){ return s+(m.amount||0); }, 0);
+          result.receipts.by_manager = teamByMgrReceipts;
+          result.receipts.summary = { total_month: teamTotalMonth };
+        }
       }
     } catch (recErr) { /* "Поступления" не критичны для остальной личной страницы - просто не показываем вкладку */ }
   }
@@ -5465,12 +5523,18 @@ function doGet(e) {
       // и для self-login, и для admin-предпросмотра, чтобы всегда попадал на свой собственный
       // ИИ-промпт, а не на общий логистский.
       if (isRyschanowLogistName_(gatManager)) gatRole = 'ryschanow';
+      // Ахтамова/Гусейнова (2026-08-26) - в листе "Доступ" роль manager (как у остальных
+      // менеджеров), но по факту руководители групп - тот же приём, что у Рыщанова выше,
+      // переопределяем ПО ФАМИЛИИ (commercialHeadTeam_ возвращает не-null только для них).
+      else if (commercialHeadTeam_(gatManager)) gatRole = 'commercial_head';
       try {
         var gatOrders = getOrdersData(ss);
         if (gatOrders.error) throw new Error(gatOrders.error);
         var gatForce = e.parameter.force === '1';
         var gatResult = gatRole === 'ryschanow'
           ? generateRyschanowAiTasksCached_(ss, gatOrders, gatManager, null, gatForce)
+          : gatRole === 'commercial_head'
+          ? generateCommercialHeadAiTasksCached_(ss, gatOrders, gatManager, null, gatForce)
           : gatRole === 'logist'
           ? generateLogistAiTasksCached_(ss, gatOrders, gatManager, null, gatForce)
           : generateManagerAiTasksCached_(ss, gatOrders, gatManager, null, gatForce);
@@ -9506,6 +9570,106 @@ function fmtDateRuServer_(dateStr) {
   return d + ' ' + RU_MONTHS_GENITIVE_[m-1] + (y !== currentYear ? ' ' + y : '');
 }
 
+// ИИ-контекст для руководителя коммерческой группы (Ахтамова/Гусейнова, 2026-08-26, см.
+// plans/2026-08-26-ahtamova-guseinova-personal-pages.md) - командный срез, не про личные
+// продажи (у них они тоже есть, но фокус промпта - управление командой): план/факт/прогноз
+// каждого менеджера + дебиторка по каждому менеджеру. Тот же принцип "с позиции
+// руководителя", что уже закреплён для Рыщанова (2026-08-26, "убери его с этой страницы...
+// рекомендации руководителю должны быть с позиции руководить, а не делать самому").
+function buildCommercialHeadAiContext_(ss, orders, headName, period) {
+  var team = commercialHeadTeam_(headName) || [];
+  var byManager = (orders.by_manager || []).filter(function(m) {
+    return team.indexOf(String(m.name||'').trim().split(' ')[0].toLowerCase()) >= 0;
+  });
+  var plans = orders.managerPlans || {};
+  var paceRatio = calcPaceRatioServer_(period);
+
+  var teamSummary = byManager.map(function(m) {
+    var sur = String(m.name||'').trim().split(' ')[0].toLowerCase();
+    var plan = plans[sur] || 0;
+    var fakt = m.amount || 0;
+    var faktForPace = m.amount_thru_yesterday != null ? m.amount_thru_yesterday : fakt;
+    var forecast = faktForPace * paceRatio;
+    return {
+      name: m.name, orders: m.orders || 0, amount: Math.round(fakt), plan: Math.round(plan),
+      pct: plan > 0 ? Math.round(fakt/plan*100) : null,
+      forecast_pct: plan > 0 ? Math.round(forecast/plan*100) : null,
+    };
+  });
+
+  // ДЗ по каждому менеджеру команды (переиспользует getDebtData, тот же приём, что
+  // buildManagerAiContext_ ниже) - только положительный баланс, не мёртвая/чужая-отдел
+  // корзина (тот же фильтр DEBT_AGE_LIMIT_DAYS/DEBT_STATUS_EXCLUDE_FROM_TOTAL, что у
+  // обычного менеджера).
+  var debtByManager = {};
+  try {
+    var dd = getDebtData(ss);
+    if (dd && dd.by_customer) {
+      dd.by_customer.forEach(function(c) {
+        var cSur = String(c.manager||'').trim().split(' ')[0].toLowerCase();
+        if (team.indexOf(cSur) < 0) return;
+        if (!((c.balance||0) > 0)) return;
+        if ((c.daysOverdue||0) >= DEBT_AGE_LIMIT_DAYS) return;
+        if (DEBT_STATUS_EXCLUDE_FROM_TOTAL.indexOf(c.status) >= 0) return;
+        if (!debtByManager[cSur]) debtByManager[cSur] = { count:0, total_balance:0, max_days:0 };
+        debtByManager[cSur].count++;
+        debtByManager[cSur].total_balance += c.balance;
+        debtByManager[cSur].max_days = Math.max(debtByManager[cSur].max_days, c.daysOverdue||0);
+      });
+    }
+  } catch (debtErr) { /* ДЗ не критична для остального контекста */ }
+  var debtSummary = Object.keys(debtByManager).map(function(sur) {
+    var d = debtByManager[sur];
+    return { manager: sur, debtor_count: d.count, total_balance: Math.round(d.total_balance), max_days_overdue: d.max_days };
+  }).sort(function(a,b){ return b.total_balance - a.total_balance; });
+
+  return {
+    commercial_head: true,
+    period: period || Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM'),
+    team: teamSummary,
+    debt_by_manager: debtSummary,
+  };
+}
+
+function buildCommercialHeadAiTasksPrompt_(name, context) {
+  return 'Ты - коммерческий директор транспортной компании (перевозки тралами и ' +
+    'длинномерами), который каждое утро даёт руководителю группы продаж короткий и ТОЧНЫЙ ' +
+    'разбор дня по ЕЁ команде - как живой директор, который помнит, кто из менеджеров и где ' +
+    'отстаёт. Этот человек РУКОВОДИТ своей группой менеджеров (2-6 человек) - ставит им ' +
+    'задачи и спрашивает результат, а не продаёт лично за них. Ниже - реальные данные её ' +
+    'команды за текущий месяц в формате JSON.\n\n' +
+    'Данные:\n' + JSON.stringify(context, null, 0) + '\n\n' +
+    'ВАЖНЫЕ ФАКТЫ:\n' +
+    '- team[] - каждый менеджер команды: план продаж, факт, % выполнения, прогноз к концу ' +
+    'месяца по темпу. pct/forecast_pct - null, если план не задан за этот месяц (не пиши ' +
+    'задачу про план для такого менеджера).\n' +
+    '- debt_by_manager[] - дебиторская задолженность ПО КАЖДОМУ менеджеру команды (число ' +
+    'должников, общая сумма долга, максимальная просрочка в днях) - если у кого-то заметная ' +
+    'сумма/много дней просрочки, это тема для задачи "спроси с [менеджера] по дебиторке".\n' +
+    '- ГЛАВНОЕ ПРАВИЛО ФОРМУЛИРОВОК: рекомендации - с позиции РУКОВОДИТЕЛЯ группы, не ' +
+    'продавца. НЕ пиши "позвони клиенту"/"продай" - пиши "спроси с [менеджера] почему ' +
+    'отстаёт от плана"/"проконтролируй закрытие ДЗ у [менеджера]"/"разберись с [менеджером], ' +
+    'почему прогноз ниже плана".\n' +
+    '- ФОРМАТ ЧИСЕЛ: суммы в рублях с пробелом-разделителем тысяч ("7 618 250", НЕ ' +
+    '"7618250").\n\n' +
+    'Сформулируй РОВНО 5 задач на сегодня, опираясь ТОЛЬКО на переданные данные (не выдумывай ' +
+    'фактов) - приоритет тем, кто сильнее всего отстаёт от плана/прогноза, и тем, у кого ' +
+    'заметная дебиторка.\n\n' +
+    'Требования к ответу:\n' +
+    '- Ответь СТРОГО валидным JSON без markdown-обёртки (без ```), без текста до/после.\n' +
+    '- Формат: {"tasks":[{"title":"...","why":"...","category":"выручка|дебиторка"},' +
+    '... ровно 5 штук],"plan_advice":"..."}\n' +
+    '- "title" - короткая формулировка КОНКРЕТНОГО действия (до 90 символов) с позиции ' +
+    'руководителя.\n' +
+    '- "why" - 1-2 фразы, ПОЧЕМУ важно сегодня, со ссылкой на конкретный факт (имя, %, ' +
+    'сумма) - не общие слова.\n' +
+    '- "category" - "выручка" (план/темп продаж) или "дебиторка" (долги клиентов).\n' +
+    '- "plan_advice" - 2-4 предложения, что подтянуть в команде сегодня, опираясь на team[]/' +
+    'debt_by_manager[].\n' +
+    '- Пиши по-русски, обращение на "ты", по-деловому, тоном директора, который знает свою ' +
+    'команду лично - без длинного тире (используй обычный дефис), без канцелярита и воды.';
+}
+
 // Компактный набор фактов о менеджере для промпта ИИ - ТОЛЬКО из уже существующих бэкенд-
 // функций (не дублируем computeDebtAggregates_/фронтенд-агрегаты, достаточно топ-должников и
 // итоговых сумм для содержательного совета).
@@ -10107,6 +10271,12 @@ function generateManagerAiTasksCached_(ss, orders, managerName, period, force) {
   return generateAiTasksCached_(ss, managerName, 'manager',
     function() { return buildManagerAiContext_(ss, orders, managerName, period); },
     buildAiTasksPrompt_, force);
+}
+
+function generateCommercialHeadAiTasksCached_(ss, orders, headName, period, force) {
+  return generateAiTasksCached_(ss, headName, 'commercial_head',
+    function() { return buildCommercialHeadAiContext_(ss, orders, headName, period); },
+    buildCommercialHeadAiTasksPrompt_, force);
 }
 
 function generateLogistAiTasksCached_(ss, orders, logistName, period, force) {

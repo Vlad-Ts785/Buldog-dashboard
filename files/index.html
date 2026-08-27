@@ -438,8 +438,15 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 
 /* ── CRM (канбан сделок, plans/2026-08-26-own-crm-replace-bitrix.md) - воронка
    скопирована из проверенной настройки Битрикса, визуально похожий канбан. ── */
-.crm-board{display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;align-items:flex-start;}
-.crm-col{background:var(--bg2);border-radius:var(--radius);min-width:230px;max-width:230px;flex-shrink:0;display:flex;flex-direction:column;border:1px solid var(--border);}
+/* Колонки делят доступную ширину поровну (Влад, 27.08: "место есть, прокрутка бесит") -
+   не фиксированная ширина с горизонтальным скроллом, а гибкая раскладка. overflow-x
+   остаётся ТОЛЬКО как аварийный запасной вариант для очень узких экранов (мобильный) -
+   на обычном десктопе все 7 колонок помещаются без скролла. */
+.crm-board{display:flex;gap:10px;overflow-x:auto;padding-bottom:8px;align-items:flex-start;}
+.crm-col{background:var(--bg2);border-radius:var(--radius);flex:1 1 0;min-width:150px;display:flex;flex-direction:column;border:1px solid var(--border);}
+/* flex-элементы по умолчанию не сжимаются меньше содержимого - без min-width:0 у ВНУТРЕННИХ
+   элементов длинный заголовок стадии распирал бы саму колонку шире её 150px-предела. */
+.crm-col-header,.crm-col-body{min-width:0;}
 .crm-col-header{padding:10px 12px;border-bottom:2px solid var(--border);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;display:flex;justify-content:space-between;align-items:center;color:var(--text);}
 .crm-col-body{padding:8px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:8px;min-height:60px;max-height:calc(100vh - 260px);transition:background .12s;}
 .crm-col-body.crm-drag-over{background:var(--bg3);}
@@ -10828,7 +10835,7 @@ function renderCrmBoard() {
     var total = deals.reduce(function(s, d) { return s + Number(d.amount || 0); }, 0);
     html += '<div class="crm-col">'
       + '<div class="crm-col-header" style="border-bottom-color:' + st.color + '">'
-      +   '<span>' + st.label + '</span><span style="color:var(--muted);font-weight:400">' + deals.length + '</span>'
+      +   '<span style="white-space:normal">' + st.label + '</span><span style="color:var(--muted);font-weight:400;flex-shrink:0;margin-left:6px">' + deals.length + '</span>'
       + '</div>'
       + '<div class="crm-col-body" data-stage="' + st.key + '" ondragover="crmDragOver(event)" ondragleave="crmDragLeave(event)" ondrop="crmDrop(event)">'
       + deals.map(crmCardHtml).join('')

@@ -1302,6 +1302,9 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
     <div id="page-crm" class="page">
       <div id="crm-loading" style="color:var(--muted);padding:16px">Загрузка CRM...</div>
       <div id="crm-body" style="display:none">
+        <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+          <button id="crm-push-btn" class="tab-btn" onclick="crmEnablePush()">🔔 Включить уведомления</button>
+        </div>
         <div class="crm-board" id="crm-board"></div>
       </div>
       <div id="crm-modal-overlay" class="crm-modal-overlay" style="display:none" onmousedown="if(event.target===this)closeCrmModal()">
@@ -10730,6 +10733,70 @@ function loadCrmData() {
     body.style.display = '';
   }).catch(function() {
     loading.textContent = 'Нет соединения с сервером api.yardhub.ru';
+  });
+  crmUpdatePushButton_();
+}
+
+// ── Push-уведомления (Web Push, VAPID) - Фаза 4г плана, "по полной программе" (Влад,
+// 27.08): доходит через Service Worker, даже если вкладка дашборда закрыта, пока сам
+// браузер запущен. Явный opt-in кнопкой - браузеры блокируют автоматический запрос
+// разрешения без клика пользователя, и это правильно с точки зрения UX (не спамить
+// разрешениями сразу при заходе).
+function postToYardApiWithBody_(path, bodyObj) {
+  var qs = 'session_token=' + encodeURIComponent(SESSION_TOKEN);
+  return fetch(YARD_API_BASE + path + '?' + qs, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(bodyObj),
+  }).then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); });
+}
+function urlBase64ToUint8Array_(base64String) {
+  var padding = '='.repeat((4 - base64String.length % 4) % 4);
+  var base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  var rawData = window.atob(base64);
+  var out = new Uint8Array(rawData.length);
+  for (var i = 0; i < rawData.length; i++) out[i] = rawData.charCodeAt(i);
+  return out;
+}
+function crmPushSupported_() {
+  return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+}
+function crmUpdatePushButton_() {
+  var btn = document.getElementById('crm-push-btn');
+  if (!btn) return;
+  if (!crmPushSupported_()) { btn.style.display = 'none'; return; }
+  navigator.serviceWorker.getRegistration('/files/sw.js').then(function(reg) {
+    if (!reg) { btn.textContent = '🔔 Включить уведомления'; btn.disabled = false; return; }
+    reg.pushManager.getSubscription().then(function(sub) {
+      btn.textContent = sub ? '🔔 Уведомления включены' : '🔔 Включить уведомления';
+      btn.disabled = !!sub;
+    });
+  }).catch(function() {}); // нет активной регистрации ещё - обычное состояние до первого клика
+}
+function crmEnablePush() {
+  if (!crmPushSupported_()) { alert('Этот браузер не поддерживает push-уведомления.'); return; }
+  var btn = document.getElementById('crm-push-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Включаем...'; }
+  Notification.requestPermission().then(function(perm) {
+    if (perm !== 'granted') {
+      if (btn) { btn.disabled = false; btn.textContent = '🔔 Включить уведомления'; }
+      alert('Уведомления не разрешены в браузере - без этого разрешения push работать не будет. Проверьте настройки сайта в браузере.');
+      return;
+    }
+    navigator.serviceWorker.register('/files/sw.js').then(function(reg) {
+      return fetchFromYardApi_('/crm/push/vapid_public_key', {}).then(function(r) {
+        if (!r.ok || !r.data.key) throw new Error('сервер не вернул ключ подписки');
+        return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array_(r.data.key) });
+      });
+    }).then(function(sub) {
+      return postToYardApiWithBody_('/crm/push/subscribe', { subscription: sub.toJSON() });
+    }).then(function(r) {
+      if (!r.ok) throw new Error((r.data && r.data.error) || 'ошибка сервера');
+      crmUpdatePushButton_();
+    }).catch(function(err) {
+      if (btn) { btn.disabled = false; btn.textContent = '🔔 Включить уведомления'; }
+      alert('Не удалось включить уведомления: ' + err.message);
+    });
   });
 }
 

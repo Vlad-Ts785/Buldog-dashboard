@@ -452,6 +452,30 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .crm-card-meta{color:var(--muted);font-size:11px;margin-top:6px;display:flex;justify-content:space-between;align-items:center;gap:6px;}
 .crm-avatar{width:20px;height:20px;border-radius:50%;background:var(--purple);color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center;font-weight:600;flex-shrink:0;}
 .crm-card-loss{margin-top:6px;font-size:11px;color:var(--red);}
+/* Модалка деталей сделки (Влад, 27.08: "как в Битриксе, но только нужное") */
+.crm-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto;}
+.crm-modal{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);width:100%;max-width:560px;padding:20px;}
+.crm-modal-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;}
+.crm-modal-title{font-size:16px;font-weight:600;color:var(--text);}
+.crm-modal-sub{font-size:12px;color:var(--muted);margin-top:2px;}
+.crm-modal-close{background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;line-height:1;padding:2px 6px;}
+.crm-modal-close:hover{color:var(--text);}
+.crm-modal-section{margin-bottom:16px;}
+.crm-modal-section-title{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:8px;font-weight:600;}
+.crm-modal-row{display:flex;gap:10px;margin-bottom:8px;}
+.crm-modal-field{flex:1;}
+.crm-modal-field label{display:block;font-size:11px;color:var(--muted);margin-bottom:3px;}
+.crm-modal-field input{width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:7px 10px;font-size:13px;}
+.crm-modal-field input:disabled{color:var(--muted);}
+.crm-modal-static{font-size:13px;color:var(--text);}
+.crm-modal-static.muted{color:var(--muted);}
+.crm-calls-list{display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;}
+.crm-call-row{display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:8px 10px;background:var(--bg3);border-radius:6px;}
+.crm-call-row .muted{color:var(--muted);}
+.crm-call-badge{font-size:10px;padding:2px 6px;border-radius:4px;font-weight:600;}
+.crm-call-badge.ok{background:rgba(29,158,117,.15);color:var(--green);}
+.crm-call-badge.miss{background:rgba(226,75,74,.15);color:var(--red);}
+.crm-modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
 </style>
 </head>
 <body>
@@ -1279,6 +1303,9 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
       <div id="crm-loading" style="color:var(--muted);padding:16px">Загрузка CRM...</div>
       <div id="crm-body" style="display:none">
         <div class="crm-board" id="crm-board"></div>
+      </div>
+      <div id="crm-modal-overlay" class="crm-modal-overlay" style="display:none" onmousedown="if(event.target===this)closeCrmModal()">
+        <div class="crm-modal" id="crm-modal-content"></div>
       </div>
     </div>
 
@@ -10748,9 +10775,11 @@ function renderCrmBoard() {
 function crmCardHtml(d) {
   var phone = crmFmtPhone(d.client_phone); // уже нормализован regex'ом на сервере - безопасен как есть
   var title = crmEsc(d.client_name) || phone;
-  return '<div class="crm-card" draggable="true" ondragstart="crmDragStart(event,' + d.id + ')" ondragend="crmDragEnd(event)" data-deal-id="' + d.id + '">'
+  // Сумма показывается ВСЕГДА, даже 0 ₽ (Влад, 27.08: "как в Битриксе") - на виду
+  // напоминает менеджеру, что её ещё не заполнили, а не прячется молча.
+  return '<div class="crm-card" draggable="true" ondragstart="crmDragStart(event,' + d.id + ')" ondragend="crmDragEnd(event)" onclick="crmOpenDeal(' + d.id + ')" data-deal-id="' + d.id + '">'
     + '<div class="crm-card-phone">' + title + '</div>'
-    + (Number(d.amount) > 0 ? '<div class="crm-card-amount">' + crmFmtMoney(d.amount) + ' ₽</div>' : '')
+    + '<div class="crm-card-amount">' + crmFmtMoney(d.amount) + ' ₽</div>'
     + '<div class="crm-card-meta">'
     +   '<span>' + (d.client_name ? phone : (d.calls_count ? d.calls_count + ' зв.' : '')) + '</span>'
     +   '<span class="crm-avatar" title="' + crmEsc(d.responsible_name || 'Без ответственного') + '">' + crmInitials(d.responsible_name) + '</span>'
@@ -10792,6 +10821,118 @@ function crmChangeStage(id, stage) {
       renderCrmBoard();
       return;
     }
+    loadCrmData();
+  });
+}
+
+// ── Детальная карточка сделки (клик по плитке) ──────────────────────────────────────
+// Влад, 27.08: "как в Битриксе, но только нужное" - из всего, что показывает Битрикс на
+// карточке (Товары/Роботы/Счета/Связи/Маркетплейс - в основном коробочный шум для этого
+// бизнеса), оставлены: сумма, номер заказа 1С, контакты клиента, причина отказа,
+// ответственный и история звонков с длительностью разговора.
+var crmModalDealId = null;
+
+function crmFmtDuration(sec) {
+  if (sec == null) return null;
+  var m = Math.floor(sec / 60), s = sec % 60;
+  return m + ':' + (s < 10 ? '0' : '') + s;
+}
+function crmFmtDateTime(iso) {
+  if (!iso) return '—';
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return '—';
+  var dd = String(d.getDate()).padStart(2, '0'), mm = String(d.getMonth() + 1).padStart(2, '0');
+  var hh = String(d.getHours()).padStart(2, '0'), mi = String(d.getMinutes()).padStart(2, '0');
+  return dd + '.' + mm + ' ' + hh + ':' + mi;
+}
+
+function crmOpenDeal(id) {
+  crmModalDealId = id;
+  var overlay = document.getElementById('crm-modal-overlay');
+  var content = document.getElementById('crm-modal-content');
+  content.innerHTML = '<div style="color:var(--muted);padding:16px">Загрузка...</div>';
+  overlay.style.display = 'flex';
+  fetchFromYardApi_('/crm/deal_detail', { id: id }).then(function(r) {
+    if (crmModalDealId !== id) return; // успели закрыть/открыть другую, пока грузилось
+    if (!r.ok) {
+      content.innerHTML = '<div style="color:var(--red);padding:16px">Не удалось загрузить: ' + crmEsc((r.data && r.data.error) || 'ошибка сервера') + '</div>';
+      return;
+    }
+    content.innerHTML = crmModalHtml(r.data.deal, r.data.calls);
+  }).catch(function() {
+    if (crmModalDealId !== id) return;
+    content.innerHTML = '<div style="color:var(--red);padding:16px">Нет соединения с сервером</div>';
+  });
+}
+
+function closeCrmModal() {
+  crmModalDealId = null;
+  document.getElementById('crm-modal-overlay').style.display = 'none';
+}
+
+function crmModalHtml(d, calls) {
+  var phone = crmFmtPhone(d.client_phone);
+  var stageLabel = (CRM_STAGE_DEFS.find(function(s) { return s.key === d.stage; }) || {}).label || d.stage;
+  var callsHtml = calls.length
+    ? calls.map(function(c) {
+        var badge = c.connected
+          ? '<span class="crm-call-badge ok">' + (crmFmtDuration(c.duration_sec) || 'разговор') + '</span>'
+          : '<span class="crm-call-badge miss">недозвон</span>';
+        var who = c.responsible_name ? crmEsc(c.responsible_name) : '<span class="muted">—</span>';
+        return '<div class="crm-call-row">'
+          + '<span class="muted">' + crmFmtDateTime(c.at) + '</span>'
+          + '<span>' + who + '</span>'
+          + badge
+          + '</div>';
+      }).join('')
+    : '<div class="muted" style="font-size:12px;padding:6px 0">Звонков не зафиксировано</div>';
+
+  return ''
+    + '<div class="crm-modal-header">'
+    +   '<div><div class="crm-modal-title">' + (crmEsc(d.client_name) || phone) + '</div>'
+    +   '<div class="crm-modal-sub">' + phone + ' · ' + crmEsc(stageLabel) + '</div></div>'
+    +   '<button class="crm-modal-close" onclick="closeCrmModal()">✕</button>'
+    + '</div>'
+    + '<div class="crm-modal-section">'
+    +   '<div class="crm-modal-section-title">Итог сделки</div>'
+    +   '<div class="crm-modal-row">'
+    +     '<div class="crm-modal-field"><label>Сумма, ₽</label><input type="number" id="crm-f-amount" value="' + Number(d.amount || 0) + '"></div>'
+    +     '<div class="crm-modal-field"><label>Номер заказа 1С</label><input type="text" id="crm-f-order" value="' + crmEsc(d.order_1c_number || '') + '"></div>'
+    +   '</div>'
+    +   (d.loss_reason ? '<div class="crm-modal-static" style="color:var(--red);margin-top:4px">Причина отказа: ' + crmEsc(d.loss_reason) + '</div>' : '')
+    +   '<div class="crm-modal-static muted" style="margin-top:8px">Ответственный: ' + crmEsc(d.responsible_name || '—') + '</div>'
+    + '</div>'
+    + '<div class="crm-modal-section">'
+    +   '<div class="crm-modal-section-title">Контакт</div>'
+    +   '<div class="crm-modal-row">'
+    +     '<div class="crm-modal-field"><label>Имя</label><input type="text" id="crm-f-name" value="' + crmEsc(d.client_name || '') + '" placeholder="' + phone + '"></div>'
+    +     '<div class="crm-modal-field"><label>E-mail</label><input type="email" id="crm-f-email" value="' + crmEsc(d.client_email || '') + '"></div>'
+    +   '</div>'
+    + '</div>'
+    + '<div class="crm-modal-section">'
+    +   '<div class="crm-modal-section-title">История звонков (' + d.calls_count + ')</div>'
+    +   '<div class="crm-calls-list">' + callsHtml + '</div>'
+    + '</div>'
+    + '<div class="crm-modal-actions">'
+    +   '<button class="tab-btn" onclick="closeCrmModal()">Закрыть</button>'
+    +   '<button class="tab-btn active" onclick="crmSaveDeal(' + d.id + ')">Сохранить</button>'
+    + '</div>';
+}
+
+function crmSaveDeal(id) {
+  var params = {
+    id: id,
+    amount: document.getElementById('crm-f-amount').value,
+    order_1c_number: document.getElementById('crm-f-order').value,
+    client_name: document.getElementById('crm-f-name').value,
+    client_email: document.getElementById('crm-f-email').value,
+  };
+  postToYardApi_('/crm/deals/update', params).then(function(r) {
+    if (!r.ok) {
+      alert('Не удалось сохранить: ' + (r.data && r.data.error || 'ошибка сервера'));
+      return;
+    }
+    closeCrmModal();
     loadCrmData();
   });
 }

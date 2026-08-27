@@ -1152,16 +1152,25 @@ function runAll() {
     errors.push('❌ Сборка отчёта: ' + e.message);
   }
 
-  // Отправляем в Telegram
-  try {
-    if (alertsText) sendTelegram('🚨 *АЛЕРТЫ*\n\n' + alertsText);
-    sendTelegram(summaryText);
-    // Отдельное сообщение по менеджерам и логистам
-    sendTelegram(buildManagersText());
-    if (errors.length > 0) sendTelegram('⚠️ *Ошибки при обновлении*\n\n' + errors.join('\n'));
-    log.push('✅ Telegram уведомления отправлены');
-  } catch(e) {
-    log.push('❌ Telegram: ' + e.message);
+  // Отправляем в Telegram - обычную бизнес-сводку (2026-08-24, Влад: "СМС мне приходят в
+  // Telegram, они не нужны, пусть только приходят СМС касаемо работы сервера") ВЫКЛЮЧЕНО по
+  // умолчанию. Переключатель через Script Properties (BUSINESS_DIGEST_TELEGRAM), а не жёсткое
+  // удаление кода - см. enableBusinessDigestTelegram()/disableBusinessDigestTelegram() ниже,
+  // если понадобится вернуть без нового деплоя. Сторож (watchdogCheckDataFreshness) шлёт
+  // отдельно и НЕ затронут этим переключателем - это и есть "СМС касаемо работы сервера".
+  if (businessDigestTelegramEnabled_()) {
+    try {
+      if (alertsText) sendTelegram('🚨 *АЛЕРТЫ*\n\n' + alertsText);
+      sendTelegram(summaryText);
+      // Отдельное сообщение по менеджерам и логистам
+      sendTelegram(buildManagersText());
+      if (errors.length > 0) sendTelegram('⚠️ *Ошибки при обновлении*\n\n' + errors.join('\n'));
+      log.push('✅ Telegram уведомления отправлены');
+    } catch(e) {
+      log.push('❌ Telegram: ' + e.message);
+    }
+  } else {
+    log.push('⏭ Бизнес-сводка в Telegram выключена (businessDigestTelegramEnabled_)');
   }
 
   console.log(log.join('\n'));
@@ -1763,8 +1772,16 @@ function cleanManagerName_(name) {
 // Короткие имена юрлиц группы - для колонок в ДЗ_данные и разбивки на дашборде
 // (Влад, 2026-07-08: "разбита по нашим... контрагентам: сколько на Бульдоге, сколько на
 // Ярде"). Ключ - точное название строки юрлица в отчёте 1С.
+// '02. УМИАТ ЯРД ООО' добавлено 2026-08-25 - Влад завёл 6-е юрлицо группы и менеджера
+// Ратникова (работает и по тралам, и по кранам/экскаваторам) в отчёте 1С. Без этого ключа
+// долг под этим юрлицом программно обнулялся: byOrgBalance считался ТОЛЬКО по ключам из
+// этого списка (см. parseDebtRawRows_ ниже) -> balance=0 -> клиент/менеджер выпадал из
+// customers целиком (фильтр balance>0 в getDebtData), хотя сырые данные из 1С пришли
+// корректно - тот же класс бага, что уже дважды ловили (колонка "Менеджер", период отчёта).
+// Точная строка подтверждена прямым дампом сырого xlsx с сервера (import/uploads_debt).
 const DEBT_ORG_SHORT_NAMES = {
   '01. ЯРД ИМПЕРИАЛ ООО': 'Ярд Империал',
+  '02. УМИАТ ЯРД ООО':    'Умиат Ярд',
   '03. СТРОЙТРАНС ООО':   'Стройтранс',
   '05. ТЕХНО ПАРК ООО':   'Техно Парк',
   '06. МЕГАКРАН ООО':     'Мегакран',
@@ -1772,13 +1789,40 @@ const DEBT_ORG_SHORT_NAMES = {
 };
 const DEBT_ORG_KEYS = Object.keys(DEBT_ORG_SHORT_NAMES);
 
+// Менеджеры, которые ведут НЕСКОЛЬКО отделов одновременно (2026-08-25, Ратников - тралы +
+// краны + экскаваторы под одним и тем же именем в 1С). ДЗ-отчёт не даёт разбивку по отделу
+// на уровне документа (колонка "Отдел" там - общий "Коммерческий блок", не помогает), а
+// баланс контрагента в 1С - это ОДНО число на пару (контрагент, юрлицо), не сумма документов -
+// разделить их 1С не умеет. Единственный доступный сигнал - сверка номера "Таблица заказов
+// NNNNNN" с таблицей заказов (там иногда встречается настоящий "Отдел", например
+// "2. Экскаваторный отдел" - см. plans, находка 2026-08-25 на "СУ 910 ООО АВТОБАН"). Правило
+// (Влад, 2026-08-25): для этих менеджеров документ считаем СВОИМ (тральным) только если его
+// номер заказа реально нашёлся в таблице заказов - иначе исключаем его сумму из баланса
+// (contragent при этом НЕ прячем целиком - именно потому что у одного контрагента может быть
+// одновременно и трал, и кран/экскаватор долг, см. пример "Мостоотряд").
+const DEBT_CROSS_DEPT_MANAGERS = ['Ратников'];
+
+// true, если документ - "Таблица заказов NNNNNN" от менеджера из DEBT_CROSS_DEPT_MANAGERS,
+// и его номер НЕ нашёлся в knownOrderNumbers (переданном набор номеров реальных тральных
+// заказов, см. importDebtReport()). knownOrderNumbers отсутствует (например, старый вызов
+// без него) - функция ничего не исключает, безопасный no-op.
+function isNonTralCrossDeptDoc_(doc, knownOrderNumbers) {
+  if (!knownOrderNumbers) return false;
+  if (!ordInList(doc.manager, DEBT_CROSS_DEPT_MANAGERS)) return false;
+  const m = String(doc.desc || '').match(/^Таблица заказов\s+0*(\d+)/);
+  if (!m) return false; // не заказ (акт/поступление и т.п.) - не наш случай, не трогаем
+  return !knownOrderNumbers[m[1]];
+}
+
 // Разбирает сырую 2D-выгрузку отчёта "Взаиморасчёты" в плоский список по клиентам.
 // Документ-строки (Отдел+Менеджер заполнены) дают долг(G)/дату/менеджера. Контрагент-строки
 // (только колонка A) дают аванс(H)/гарантийный платёж(I)/депозит(J) - эти три колонки НЕ
 // встречаются на уровне документа, только на уровне контрагента (проверено на образце).
 // Один контрагент может повторяться под разными юрлицами (165 из ~3800 в образце) -
 // суммируем по имени для общих итогов, но и сохраняем разбивку по юрлицу отдельно (см. план).
-function parseDebtRawRows_(rawData) {
+// knownOrderNumbers - опциональный набор {orderNumber: true} реальных заказов из таблицы
+// заказов (см. DEBT_CROSS_DEPT_MANAGERS выше) - без него функция работает как раньше.
+function parseDebtRawRows_(rawData, knownOrderNumbers) {
   const customers = {};
   let currentOrg = null;
   let currentContragent = null;
@@ -1901,6 +1945,22 @@ function parseDebtRawRows_(rawData) {
         ? (o.debt - Math.max(0, o.advance) - Math.max(0, o.guaranteePayment) - Math.max(0, o.guaranteeDeposit) - Math.max(0, o.ourDebt))
         : 0;
     });
+    // Вычитаем документы "чужого" отдела у кросс-отдельных менеджеров (Влад, 2026-08-25, см.
+    // DEBT_CROSS_DEPT_MANAGERS выше) - ДО суммирования в balance, чтобы контрагент с ТОЛЬКО
+    // такими документами (пример "СУ 910 ООО АВТОБАН" - весь долг под экскаваторами) просто
+    // не набрал положительный баланс и не попал в список должников тралов вообще, а контрагент
+    // со СМЕШАННЫМ долгом (тралы + краны у одного и того же юрлица, пример "Мостоотряд") не
+    // терял свою тральную часть - вычитаем только конкретные "чужие" суммы, не весь баланс
+    // контрагента и не по статусу (статус - на уровне контрагента целиком, тут нужна точность
+    // до документа).
+    const nonTralByOrg = {};
+    unpaidDocs.forEach(function(x) {
+      x.nonTralCrossDept = isNonTralCrossDeptDoc_(x, knownOrderNumbers);
+      if (x.nonTralCrossDept) nonTralByOrg[x.org] = (nonTralByOrg[x.org] || 0) + x.debt;
+    });
+    DEBT_ORG_KEYS.forEach(function(orgKey) {
+      if (nonTralByOrg[orgKey]) byOrgBalance[orgKey] = Math.max(0, byOrgBalance[orgKey] - nonTralByOrg[orgKey]);
+    });
     // Итоговый баланс = сумма ТОЛЬКО положительных остатков по юрлицам (Влад, 2026-07-09:
     // "плюс с минусом мы не сводим, показываем только долг"). Раньше баланс считался как
     // общий долг минус общий аванс ПО ВСЕМ юрлицам сразу - из-за этого аванс, накопленный
@@ -1923,8 +1983,12 @@ function parseDebtRawRows_(rawData) {
     // (взаимозачёт, Влад, 2026-07-16) - все четыре одинаково закрывают документы, просто
     // разными деньгами (клиента, гарантией/зарплатой менеджера, или встречной услугой типа
     // аренды экскаватора) - см. комментарий у byOrgBalance выше.
+    // Документы "чужого" отдела (nonTralCrossDept) не участвуют в покрытии/FIFO - их сумма
+    // уже не входит в byOrgBalance/balance выше, включать их в остаток пула означало бы
+    // растянуть покрытие на сумму, которая не в нашем балансе.
     const docsByOrg = {};
-    unpaidDocs.forEach(function(x) { (docsByOrg[x.org] = docsByOrg[x.org] || []).push(x); });
+    unpaidDocs.filter(function(x) { return !x.nonTralCrossDept; })
+      .forEach(function(x) { (docsByOrg[x.org] = docsByOrg[x.org] || []).push(x); });
     Object.keys(docsByOrg).forEach(function(orgKey) {
       // Та же защита от отрицательных значений, что и в byOrgBalance выше - отрицательный
       // аванс/гарантия не должен УМЕНЬШАТЬ пул покрытия (тем самым как бы "требуя" покрыть
@@ -1949,7 +2013,7 @@ function parseDebtRawRows_(rawData) {
     // разворот "Дебиторская задолженность" по датам показывает именно бегущий остаток в
     // хронологическом порядке - см. обсуждение с Владом). Теперь - дата самого старого
     // документа, который FIFO-оценка НЕ считает полностью покрытым.
-    const stillOpenDocs = unpaidDocs.filter(function(x) { return (x.covered || 0) < x.debt; });
+    const stillOpenDocs = unpaidDocs.filter(function(x) { return !x.nonTralCrossDept && (x.covered || 0) < x.debt; });
     if (stillOpenDocs.length) {
       oldestDate = stillOpenDocs[0].date;
       stillOpenDocs.forEach(function(x) { if (x.date < oldestDate) oldestDate = x.date; });
@@ -1976,12 +2040,34 @@ function parseDebtRawRows_(rawData) {
       // FIFO-оценка того, сколько из этого документа уже покрыто авансом (см. выше) -
       // ОЦЕНКА, не факт.
       unpaidDocs: unpaidDocs
-        .map(function(x) { return { date: x.date, desc: x.desc, debt: x.debt, covered: x.covered || 0, org: DEBT_ORG_SHORT_NAMES[x.org] || x.org }; })
+        .map(function(x) { return { date: x.date, desc: x.desc, debt: x.debt, covered: x.covered || 0, org: DEBT_ORG_SHORT_NAMES[x.org] || x.org, nonTralCrossDept: !!x.nonTralCrossDept }; })
         .sort(function(a, b) { return a.date.localeCompare(b.date); }),
     });
   });
 
   return result.sort(function(a, b) { return b.balance - a.balance; });
+}
+
+// Набор номеров заказов из "Заказы_данные" (та же таблица, что видит "Обзор заказов") - для
+// сверки документов кросс-отдельных менеджеров при разборе ДЗ (см. DEBT_CROSS_DEPT_MANAGERS/
+// isNonTralCrossDeptDoc_ выше). Возвращает {} при любой ошибке чтения листа - тогда
+// parseDebtRawRows_ просто не исключает ничего (безопасный откат к старому поведению), не
+// роняет весь импорт ДЗ из-за постороннего листа.
+function getKnownOrderNumbers_() {
+  try {
+    const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(ORDERS_NORM_SHEET);
+    if (!sheet || sheet.getLastRow() < 2) return {};
+    const nums = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
+    const result = {};
+    nums.forEach(function(r) {
+      const n = String(r[0] || '').trim().replace(/^0+/, '');
+      if (n) result[n] = true;
+    });
+    return result;
+  } catch (e) {
+    return {};
+  }
 }
 
 function importDebtReport() {
@@ -2007,7 +2093,7 @@ function importDebtReport() {
   const data = SpreadsheetApp.openById(tmp.id).getSheets()[0].getDataRange().getValues();
   Drive.Files.remove(tmp.id);
 
-  const parsed = parseDebtRawRows_(data);
+  const parsed = parseDebtRawRows_(data, getKnownOrderNumbers_());
   if (!parsed.length) throw new Error('ДЗ: после разбора и фильтрации не осталось ни одного клиента - проверь формат файла');
 
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
@@ -2281,6 +2367,28 @@ function findOrCreateDebtStatusRow_(sheet, name) {
 // Дата "с какого числа" обновляется, ТОЛЬКО если статус реально изменился - повторная
 // установка того же статуса (например, повторный клик по тому же значению в выпадающем
 // списке) не сбрасывает счётчик "сколько дней уже стоит статус".
+// Зеркалит запись на сервер (2026-08-19, перенос ДЗ) - НЕ блокирует и НЕ ломает основную
+// запись в лист при любой ошибке (сервер временно недоступен и т.п.) - try/catch съедает всё
+// молча. Лист остаётся источником правды, пока фронтенд не переключат на прямые вызовы
+// сервера - тогда эта функция и станет единственной записью, а лист - только историческим.
+function mirrorDebtStatusToServer_(action, params) {
+  try {
+    // ЗАПИСЬ идёт отдельным ключом (Этап 1.0 плана устранения аудита): YARD_API_KEY лежит
+    // открыто в публичном files/index.html, и до сих пор им же можно было менять статусы
+    // должников со стороны. Эти эндпоинты вызываются только отсюда, браузер к ним не
+    // обращается - значит ключ записи может никогда не попадать в страницу.
+    // Откат на YARD_API_KEY - на случай, если свойство ещё не заведено: сервер на время
+    // перехода принимает оба (см. checkWriteKey в api/server.js).
+    var props = PropertiesService.getScriptProperties();
+    var apiKey = props.getProperty('YARD_WRITE_KEY') || props.getProperty('YARD_API_KEY');
+    if (!apiKey) return;
+    var qs = Object.keys(params).map(function(k) { return k + '=' + encodeURIComponent(params[k]); }).join('&');
+    UrlFetchApp.fetch('https://api.yardhub.ru/api/debt/' + action + '?' + qs, {
+      headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true,
+    });
+  } catch (err) { /* сервер не критичен для этой операции - тихо игнорируем */ }
+}
+
 function setDebtStatus_(ss, contragent, status) {
   const name = String(contragent || '').trim();
   if (!name) throw new Error('Не указан контрагент');
@@ -2293,6 +2401,7 @@ function setDebtStatus_(ss, contragent, status) {
   if (String(current || '') !== status) {
     sheet.getRange(row, 2, 1, 2).setValues([[status, today]]);
   }
+  mirrorDebtStatusToServer_('set_status', { contragent: name, status: status });
 }
 
 // Комментарий НЕ трогает статус/дату - отдельное поле, может обновляться независимо
@@ -2303,6 +2412,7 @@ function setDebtComment_(ss, contragent, comment) {
   const sheet = ensureDebtStatusSheet_(ss);
   const row = findOrCreateDebtStatusRow_(sheet, name);
   sheet.getRange(row, 4).setValue(String(comment || ''));
+  mirrorDebtStatusToServer_('set_comment', { contragent: name, comment: comment || '' });
 }
 
 // Агрегация ДЗ для дашборда - читает уже посчитанный ДЗ_данные (см. importDebtReport).
@@ -2311,8 +2421,53 @@ function setDebtComment_(ss, contragent, comment) {
 // широких диапазонах - пусть это будет неделя для начала") - по умолчанию 1 (вчера, как
 // раньше). Для >1 берём БЛИЖАЙШУЮ доступную дату к цели (сбор истории мог прерваться на
 // день-два), а не требуем точного совпадения - иначе "неделя" часто осталась бы пустой.
+// ── ГОТОВЫЙ РАСЧЁТ ДЗ С СЕРВЕРА (2026-08-19) ────────────────────────────────────────────────
+// Тот же приём, что и для заказов (см. fetchOrdersComputedFromServer_) - Script Property
+// USE_SERVER_DEBT_CALC='on' включает, любое другое значение/отсутствие - выключено, мгновенный
+// откат без редеплоя. Сверено с живым расчётом (0 расхождений на неизменных клиентах, вся
+// история 42/42 дня точно совпала) - см. plans/2026-07-08-debt-receivables-tab.md, "Итог"
+// от 2026-08-19, и README.md на сервере.
+function serverDebtCalcEnabled_() {
+  try {
+    return PropertiesService.getScriptProperties().getProperty('USE_SERVER_DEBT_CALC') === 'on';
+  } catch (err) {
+    return false;
+  }
+}
+
+function debtCalcLooksSane_(data) {
+  if (!data || !data.debt || !data.debt.summary) return false;
+  var s = data.debt.summary;
+  if (typeof s.total_balance !== 'number') return false;
+  if (typeof s.debtor_count !== 'number' || s.debtor_count <= 0) return false;
+  if (!Array.isArray(data.debt.by_customer) || !Array.isArray(data.debt.by_manager)) return false;
+  return true;
+}
+
+function fetchDebtComputedFromServer_(compareDaysBack) {
+  try {
+    if (!serverDebtCalcEnabled_()) return null;
+    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    if (!apiKey) return null;
+    var resp = UrlFetchApp.fetch(
+      'https://api.yardhub.ru/api/debt_computed?compare_days_back=' + encodeURIComponent(compareDaysBack || 1),
+      { headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true }
+    );
+    if (resp.getResponseCode() !== 200) return null;
+    var data = JSON.parse(resp.getContentText());
+    if (!debtCalcLooksSane_(data)) return null;
+    return data.debt;
+  } catch (err) {
+    return null;
+  }
+}
+
 function getDebtData(ss, compareDaysBack) {
   compareDaysBack = compareDaysBack || 1;
+
+  var computed = fetchDebtComputedFromServer_(compareDaysBack);
+  if (computed) return computed;
+
   const sheet = ss.getSheetByName(DEBT_RAW_SHEET);
   if (!sheet || sheet.getLastRow() < 2) return null;
 
@@ -3400,7 +3555,13 @@ function buildManagersText() {
 // ============================================================
 // ОТПРАВКА В TELEGRAM
 // ============================================================
-function sendTelegram(text, chatId) {
+// plainText=true отключает разметку Markdown (2026-08-21). Зачем: Telegram ОТКАЗЫВАЕТ в
+// доставке всего сообщения, если не может разобрать разметку - а любой текст ошибки от
+// сервера содержит подчёркивания (`receipts_raw`, `import_runs`, пути к файлам), и для
+// Markdown подчёркивание это курсив. Непарное - и всё сообщение молча не доходит. Для
+// уведомлений о поломках это ровно тот случай, когда сообщение нужнее всего, поэтому
+// сторож шлёт простым текстом. Остальные отправки работают как раньше.
+function sendTelegram(text, chatId, plainText) {
   const url = `https://api.telegram.org/bot${getTelegramToken_()}/sendMessage`;
   UrlFetchApp.fetch(url, {
     method: 'post',
@@ -3408,9 +3569,145 @@ function sendTelegram(text, chatId) {
     payload: JSON.stringify({
       chat_id: chatId || CONFIG.TELEGRAM_CHAT_ID,
       text: text,
-      parse_mode: 'Markdown'
+      parse_mode: plainText ? undefined : 'Markdown'
     })
   });
+}
+
+// ============================================================
+// СТОРОЖ ЗА СЕРВЕРОМ (Этап 0.4 плана устранения аудита)
+// ============================================================
+// Почему сторож живёт ЗДЕСЬ, а не на сервере рядом с импортами: сторож, который лежит внутри
+// того, за чем следит, умирает вместе с ним. Обработчик ошибок на VPS не сообщит, что cron
+// перестал запускаться (он сам не запустится) и тем более что сервер целиком лёг. Apps Script
+// - независимая площадка с собственным расписанием и уже настроенным ботом, поэтому он видит
+// и то, и другое. Токен бота при этом остаётся в одном месте (Script Properties), а не
+// расползается ещё одной копией на VPS.
+//
+// Повод: 19.08.2026 импорт заказов падал 182 раза подряд восемь часов. Ошибка честно писалась
+// в лог, но лог никто не открывает, а на этих данных считалась зарплата.
+function watchdogCheckDataFreshness() {
+  var props = PropertiesService.getScriptProperties();
+  var apiKey = props.getProperty('YARD_API_KEY');
+  if (!apiKey) { Logger.log('watchdog: YARD_API_KEY не задан, пропускаю'); return; }
+
+  var problems = [];
+  try {
+    var resp = UrlFetchApp.fetch('https://api.yardhub.ru/api/import_status', {
+      headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true,
+    });
+    if (resp.getResponseCode() !== 200) {
+      problems.push('Сервер отвечает кодом ' + resp.getResponseCode());
+    } else {
+      var data = JSON.parse(resp.getContentText());
+      (data.scripts || []).forEach(function(s) {
+        if (s.healthy) return;
+        var line = s.label + ' - ' + s.problem;
+        if (s.minutes_since_run !== null) line += ' (последний запуск ' + s.minutes_since_run + ' мин назад)';
+        if (s.error_message) line += ': ' + String(s.error_message).slice(0, 200);
+        problems.push(line);
+      });
+    }
+  } catch (err) {
+    // Сюда попадаем, если сервер не отвечает вообще - это и есть тот случай, ради которого
+    // сторож вынесен наружу.
+    problems.push('Сервер недоступен: ' + err.message);
+  }
+
+  // Защита от спама - главное, чтобы уведомления не начали игнорировать. Пока проблема ТА ЖЕ,
+  // повторяем не чаще раза в 6 часов; изменился состав проблем - сообщаем сразу.
+  var stateKey = 'WATCHDOG_LAST_STATE';
+  var timeKey = 'WATCHDOG_LAST_SENT';
+  var signature = problems.join('|');
+  var prevSignature = props.getProperty(stateKey) || '';
+  var prevSentMs = parseInt(props.getProperty(timeKey) || '0', 10);
+  var nowMs = Date.now();
+
+  if (!problems.length) {
+    // Восстановление сообщаем один раз - чтобы было видно, что чинить больше нечего.
+    if (prevSignature) {
+      sendTelegram('Дашборд: данные снова обновляются. Все импорты в норме.', null, true);
+      props.deleteProperty(stateKey);
+      props.deleteProperty(timeKey);
+    }
+    return;
+  }
+
+  var sameProblem = (signature === prevSignature);
+  if (sameProblem && (nowMs - prevSentMs) < 6 * 3600 * 1000) return;
+
+  sendTelegram('Дашборд: обновление данных не проходит\n\n' + problems.join('\n') +
+    '\n\nЦифры на дашборде могут быть устаревшими.', null, true);
+  props.setProperty(stateKey, signature);
+  props.setProperty(timeKey, String(nowMs));
+}
+
+// Проверка связи с Telegram. Без завершающего "_" - чтобы была видна в списке "Выполнить".
+// Отвечает на вопрос "токен живой или нет" ОДНИМ запуском, вместо перебора догадок: сначала
+// спрашивает у Telegram, кто мы такие (getMe - проверяет сам токен), потом пробует отправить.
+// muteHttpExceptions - чтобы увидеть ТЕКСТ отказа, а не голое исключение: именно в тексте
+// Telegram пишет настоящую причину ("Unauthorized" = токен мёртв, "can't parse entities" =
+// подавился разметкой, "chat not found" = неверный адресат).
+function checkTelegram() {
+  var token = PropertiesService.getScriptProperties().getProperty('TELEGRAM_TOKEN');
+  if (!token) {
+    Logger.log('НЕТ ТОКЕНА. Настройки проекта -> Свойства скрипта -> добавить TELEGRAM_TOKEN.');
+    return;
+  }
+  Logger.log('Токен найден, длина ' + token.length + ' символов.');
+
+  var me = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/getMe',
+    { muteHttpExceptions: true });
+  Logger.log('Проверка токена (getMe): код ' + me.getResponseCode() + ' | ' +
+    me.getContentText().slice(0, 200));
+  if (me.getResponseCode() !== 200) {
+    Logger.log('ТОКЕН НЕДЕЙСТВИТЕЛЕН. Перевыпустить у @BotFather (/token) и заменить в свойствах скрипта.');
+    return;
+  }
+
+  var send = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    payload: JSON.stringify({
+      chat_id: CONFIG.TELEGRAM_CHAT_ID,
+      text: 'Проверка связи: сторож дашборда на связи. Это тестовое сообщение.',
+    }),
+  });
+  Logger.log('Отправка: код ' + send.getResponseCode() + ' | ' + send.getContentText().slice(0, 300));
+  Logger.log(send.getResponseCode() === 200
+    ? 'ОТПРАВЛЕНО - проверь Telegram.'
+    : 'ОТПРАВКА НЕ ПРОШЛА - причина в ответе выше.');
+}
+
+// Ставит сторожа на расписание (раз в час). ВЫПОЛНИТЬ ВРУЧНУЮ один раз в редакторе Apps
+// Script - clasp умеет только заливать код, но не запускать функции (см. CLAUDE.md).
+// Без завершающего "_" в имени - иначе не видна в списке "Выполнить".
+function setupWatchdogTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'watchdogCheckDataFreshness') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('watchdogCheckDataFreshness').timeBased().everyHours(1).create();
+  Logger.log('Сторож поставлен на расписание: раз в час.');
+}
+
+// ── Переключатель бизнес-сводки в Telegram (2026-08-24) ────────────────────────────────────
+// Влад: "СМС мне приходят в Telegram, они не нужны, пусть только приходят СМС касаемо работы
+// сервера" - обычная сводка (алерты/финансы/менеджеры/логисты, отправляется каждый час внутри
+// runAll()) выключена по умолчанию. Сторож (watchdogCheckDataFreshness, "обновление не
+// проходит"/"данные снова обновляются") - ЭТО и есть "СМС про работу сервера", он отдельный
+// переключатель и этим флагом не затрагивается.
+function businessDigestTelegramEnabled_() {
+  return PropertiesService.getScriptProperties().getProperty('BUSINESS_DIGEST_TELEGRAM') === 'on';
+}
+function enableBusinessDigestTelegram() {
+  PropertiesService.getScriptProperties().setProperty('BUSINESS_DIGEST_TELEGRAM', 'on');
+  Logger.log('Бизнес-сводка в Telegram включена - вернётся со следующим runAll().');
+}
+function disableBusinessDigestTelegram() {
+  PropertiesService.getScriptProperties().deleteProperty('BUSINESS_DIGEST_TELEGRAM');
+  Logger.log('Бизнес-сводка в Telegram выключена (это и есть состояние по умолчанию).');
+}
+function businessDigestTelegramStatus() {
+  Logger.log('Бизнес-сводка в Telegram: ' + (businessDigestTelegramEnabled_() ? 'ВКЛЮЧЕНА' : 'выключена (по умолчанию)'));
 }
 
 // ============================================================
@@ -3675,75 +3972,63 @@ function getAccessLogSummary_(ss) {
   }).sort(function(a, b) { return String(b.last_visit).localeCompare(String(a.last_visit)); });
 }
 
-// ── КАЛЬКУЛЯТОР СТОИМОСТИ ПЕРЕВОЗКИ - ИСТОРИЯ РАСЧЁТОВ (2026-08-17, Влад: "должен сохранять
-// на сервер расчёты сделанные менеджером и расчёты именно менеджера кто сделал расчёт") ──────
-// Автор строки берётся ТОЛЬКО из access.name (лист "Доступ", разрешён по проверенному
-// id_token) - клиент передаёт параметры расчёта, но не может подделать, от чьего имени он
-// сохранён. Одна строка = один расчёт (не апдейт, в отличие от Логи_входов) - это журнал, не
-// счётчик.
-const CALC_HISTORY_SHEET = 'Калькулятор_История';
-const CALC_HISTORY_HEADERS = ['Дата', 'Менеджер', 'Роль', 'Откуда', 'Куда', 'Км база→погрузка', 'Км с грузом', 'Км выгрузка→база', 'Масса, т', 'Габариты', 'Тип груза', 'Техника', 'Рейсов', 'Итого, руб'];
-
-function ensureCalcHistorySheet_(ss) {
-  let sheet = ss.getSheetByName(CALC_HISTORY_SHEET);
-  if (!sheet) {
-    sheet = ss.insertSheet(CALC_HISTORY_SHEET);
-    sheet.getRange(1, 1, 1, CALC_HISTORY_HEADERS.length).setValues([CALC_HISTORY_HEADERS]).setFontWeight('bold');
-    sheet.setFrozenRows(1);
-  }
-  return sheet;
+// ── КАЛЬКУЛЯТОР СТОИМОСТИ ПЕРЕВОЗКИ - ИСТОРИЯ РАСЧЁТОВ + НУМЕРАЦИЯ КП (2026-08-21, Влад:
+// "работаем сервером, не Google Таблицами"; "сквозная нумерация КП - одна на всех
+// менеджеров") ─────────────────────────────────────────────────────────────────────────────
+// Было на листе "Калькулятор_История" (2026-08-17) - перенесено на VPS (api.yardhub.ru,
+// MySQL: calc_history/kp_log, см. /root/yard-dashboard/README.md на сервере). Тот же приём,
+// что уже отработан для ДЗ (mirrorDebtStatusToServer_): пишем ТОЛЬКО через отдельный
+// YARD_WRITE_KEY (никогда не в files/index.html), автор - access.name из проверенного
+// id_token, клиент не может подделать, от чьего имени сохранено. Номер КП = id в kp_log
+// (AUTO_INCREMENT в MySQL атомарен сам по себе на конкурентных вставках - отдельная
+// блокировка счётчика, как потребовалась бы в Sheets, не нужна).
+function calcServerHeaders_() {
+  var props = PropertiesService.getScriptProperties();
+  var apiKey = props.getProperty('YARD_WRITE_KEY') || props.getProperty('YARD_API_KEY');
+  return apiKey ? { 'X-Api-Key': apiKey } : null;
 }
 
-function saveCalcHistoryEntry_(ss, access, p) {
-  const sheet = ensureCalcHistorySheet_(ss);
-  sheet.appendRow([
-    new Date(),
-    access.name,
-    access.role,
-    String(p.load || '').slice(0, 300),
-    String(p.unload || '').slice(0, 300),
-    Number(p.km1) || 0,
-    Number(p.km2) || 0,
-    Number(p.km3) || 0,
-    Number(p.weight) || 0,
-    String(p.dims || '').slice(0, 100),
-    String(p.cargo || '').slice(0, 30),
-    String(p.veh || '').slice(0, 60),
-    Number(p.trips) || 1,
-    Number(p.total) || 0,
-  ]);
+function saveCalcHistoryEntry_(access, p) {
+  var headers = calcServerHeaders_();
+  if (!headers) throw new Error('YARD_WRITE_KEY не задан в Script Properties');
+  var params = {
+    manager: access.name, role: access.role,
+    load: String(p.load || '').slice(0, 300), unload: String(p.unload || '').slice(0, 300),
+    km1: Number(p.km1) || 0, km2: Number(p.km2) || 0, km3: Number(p.km3) || 0,
+    weight: Number(p.weight) || 0, dims: String(p.dims || '').slice(0, 100),
+    cargo: String(p.cargo || '').slice(0, 30), veh: String(p.veh || '').slice(0, 80),
+    trips: Number(p.trips) || 1, total: Number(p.total) || 0,
+  };
+  var qs = Object.keys(params).map(function(k) { return k + '=' + encodeURIComponent(params[k]); }).join('&');
+  var resp = UrlFetchApp.fetch('https://api.yardhub.ru/api/calc/save?' + qs, { headers: headers, muteHttpExceptions: true });
+  var data = JSON.parse(resp.getContentText() || '{}');
+  if (!data.ok) throw new Error(data.error || 'Сервер не подтвердил сохранение');
 }
 
 // manager/logist - только свои расчёты (та же приватность, что у ДЗ/problem_orders), admin -
-// все, последние 300 (это журнал для контроля, не для листания истории годами).
-function getCalcHistory_(ss, access) {
-  const sheet = ss.getSheetByName(CALC_HISTORY_SHEET);
-  if (!sheet || sheet.getLastRow() < 2) return [];
-  const n = sheet.getLastRow() - 1;
-  const data = sheet.getRange(2, 1, n, CALC_HISTORY_HEADERS.length).getValues();
-  let rows = data.map(function(r) {
-    return {
-      date: r[0] instanceof Date ? r[0].toISOString() : String(r[0] || ''),
-      manager: String(r[1] || ''),
-      role: String(r[2] || ''),
-      load: String(r[3] || ''),
-      unload: String(r[4] || ''),
-      km1: Number(r[5]) || 0,
-      km2: Number(r[6]) || 0,
-      km3: Number(r[7]) || 0,
-      weight: Number(r[8]) || 0,
-      dims: String(r[9] || ''),
-      cargo: String(r[10] || ''),
-      veh: String(r[11] || ''),
-      trips: Number(r[12]) || 1,
-      total: Number(r[13]) || 0,
-    };
-  });
-  if (access.role !== 'admin') {
-    rows = rows.filter(function(r) { return r.manager === access.name; });
-  }
-  rows.sort(function(a, b) { return String(b.date).localeCompare(String(a.date)); });
-  return rows.slice(0, 300);
+// все, последние 300 (сервер сам режет - см. api/server.js).
+function getCalcHistory_(access) {
+  var headers = calcServerHeaders_();
+  if (!headers) return [];
+  var qs = 'role=' + encodeURIComponent(access.role) + '&manager=' + encodeURIComponent(access.name);
+  var resp = UrlFetchApp.fetch('https://api.yardhub.ru/api/calc/history?' + qs, { headers: headers, muteHttpExceptions: true });
+  var data = JSON.parse(resp.getContentText() || '{}');
+  return data.history || [];
+}
+
+function issueKpNumber_(access, p) {
+  var headers = calcServerHeaders_();
+  if (!headers) throw new Error('YARD_WRITE_KEY не задан в Script Properties');
+  var params = {
+    manager: access.name, role: access.role,
+    load: String(p.load || '').slice(0, 300), unload: String(p.unload || '').slice(0, 300),
+    total: Number(p.total) || 0,
+  };
+  var qs = Object.keys(params).map(function(k) { return k + '=' + encodeURIComponent(params[k]); }).join('&');
+  var resp = UrlFetchApp.fetch('https://api.yardhub.ru/api/calc/kp_issue?' + qs, { headers: headers, muteHttpExceptions: true });
+  var data = JSON.parse(resp.getContentText() || '{}');
+  if (!data.number) throw new Error(data.error || 'Сервер не выдал номер КП');
+  return data;
 }
 
 // Урезанный набор данных для роли "manager" - только его собственные цифры, без доступа к
@@ -3752,6 +4037,21 @@ function getCalcHistory_(ss, access) {
 // "текущий/прошлый месяц" - вынесено в отдельную функцию, чтобы не дублировать фильтрацию
 // между getManagerView_ (текущий месяц) и getManagerViewForPeriod_ (архив) ниже). ss/period
 // (2026-08-12) - опциональны, нужны только чтобы приложить ДЗ этого менеджера (см. ниже).
+// Ахтамова/Гусейнова - руководители коммерческих групп (2026-08-26, план см.
+// plans/2026-08-26-ahtamova-guseinova-personal-pages.md). Тот же состав команд, что
+// DEPT_CFG на фронтенде (files/index.html) - держать синхронно при правке одного из двух.
+// Фиксированный список по фамилии, тот же принцип, что isVasinName_/isOwnTralLogistName_/
+// isRyschanowLogistName_ выше. Возвращает массив фамилий команды (сама + подчинённые) или
+// null, если name - не руководитель группы (обычный менеджер/чужая роль).
+var COMMERCIAL_HEAD_TEAMS_ = {
+  'ахтамова': ['ахтамова','цегельников','гуштюк','дербенцева','шейко'],
+  'гусейнова': ['гусейнова','савиток','филипчук','котельников','гуляева','коньшина','володин'],
+};
+function commercialHeadTeam_(name) {
+  var sur = (name||'').trim().split(' ')[0].toLowerCase();
+  return COMMERCIAL_HEAD_TEAMS_[sur] || null;
+}
+
 function buildManagerView_(orders, managerName, ss, period) {
   if (orders.error) return { error: orders.error };
 
@@ -3763,6 +4063,17 @@ function buildManagerView_(orders, managerName, ss, period) {
 
   const detailWrapped = {};
   if (myDetail) detailWrapped[managerName] = myDetail;
+
+  // Руководитель группы (Ахтамова/Гусейнова, 2026-08-26) - расширенный доступ ТОЛЬКО по
+  // своей команде целиком (тот же принцип, что уже даёт Рыщанову/Васину доступ к их
+  // направлению - см. ryschanow_summary/long_haul), не вся компания. teamSurs - null для
+  // обычного менеджера, ничего не меняется в этом случае.
+  const teamSurs = commercialHeadTeam_(managerName);
+  const teamByManager = teamSurs
+    ? (orders.by_manager || []).filter(function(m) {
+        return teamSurs.indexOf(String(m.name||'').trim().split(' ')[0].toLowerCase()) >= 0;
+      })
+    : null;
 
   const result = {
     updated: new Date().toISOString(),
@@ -3783,34 +4094,46 @@ function buildManagerView_(orders, managerName, ss, period) {
     },
   };
 
-  // ДЗ, отфильтрованная на этого менеджера (2026-08-12, личная страница - вкладка
-  // "Дебиторская задолженность", то же ядро computeDebtAggregates_/debtDeadAndStatus_, что
-  // общая ДЗ на фронтенде). Приватность - другие менеджеры не видны, только свои должники.
-  // ДЗ всегда "живая" (последний снимок 1С), не зависит от выбранного периода продаж.
+  // Компанейский срез своей команды (2026-08-26) - для табличкой группы отдела на личной
+  // странице руководителя (renderDeptGroupTableHtml_ на фронтенде, тот же рендер, что
+  // страница "По менеджерам") и для ИИ-контекста. Только у Ахтамовой/Гусейновой -
+  // обычные менеджеры этого поля не получают.
+  if (teamByManager) {
+    result.orders.team_by_manager = teamByManager;
+    result.orders.managerPlans = orders.managerPlans || {}; // нужен planOf() на фронтенде
+  }
+
+  // ДЗ, отфильтрованная на этого менеджера ИЛИ на всю его команду (руководитель группы,
+  // 2026-08-12/2026-08-26) - то же ядро computeDebtAggregates_/debtDeadAndStatus_, что общая
+  // ДЗ на фронтенде. Приватность - чужие менеджеры не видны, только свои/команда. ДЗ всегда
+  // "живая" (последний снимок 1С), не зависит от выбранного периода продаж.
   if (ss) {
     const dd = getDebtData(ss);
     if (dd && dd.by_customer) {
       const surLower = String(managerName || '').trim().split(' ')[0].toLowerCase();
       result.debt = {
         by_customer: dd.by_customer.filter(function(c) {
-          return String(c.manager || '').trim().split(' ')[0].toLowerCase() === surLower;
+          const cSur = String(c.manager || '').trim().split(' ')[0].toLowerCase();
+          return teamSurs ? teamSurs.indexOf(cSur) >= 0 : cSur === surLower;
         }),
       };
     }
 
-    // Поступления, отфильтрованные на этого менеджера (Влад, 2026-08-16: "вкладка Поступление,
-    // выбор сегодня/вчера/неделя/месяц, все поступления должны относиться к конкретному
-    // менеджеру") - ЖИВЫЕ (не по выбранному периоду - "Поступления" всегда о деньгах прямо
-    // сейчас/на этой неделе/в этом месяце, тот же принцип, что и ДЗ выше). Фильтруем СЕРВЕРНО,
-    // не только на фронтенде - у логина реального менеджера (не админ-предпросмотр) чужие
-    // строки не должны даже прийти по сети, приватность как у ДЗ/problem_orders выше.
+    // Поступления, отфильтрованные на этого менеджера ИЛИ на всю его команду (Влад,
+    // 2026-08-16/2026-08-26: "вкладка Поступление, выбор сегодня/вчера/неделя/месяц, все
+    // поступления должны относиться к конкретному менеджеру [или его отделу]") - ЖИВЫЕ (не
+    // по выбранному периоду - "Поступления" всегда о деньгах прямо сейчас/на этой неделе/в
+    // этом месяце, тот же принцип, что и ДЗ выше). Фильтруем СЕРВЕРНО, не только на
+    // фронтенде - у логина реального менеджера (не админ-предпросмотр) чужие строки не
+    // должны даже прийти по сети, приватность как у ДЗ/problem_orders выше.
     try {
       const rd = getReceiptsData(ss, orders);
       if (rd && !rd.error) {
         const surLower2 = String(managerName || '').trim().split(' ')[0].toLowerCase();
         function onlyMine_(list) {
           return (list || []).filter(function(t) {
-            return String(t.manager || '').trim().split(' ')[0].toLowerCase() === surLower2;
+            const tSur = String(t.manager || '').trim().split(' ')[0].toLowerCase();
+            return teamSurs ? teamSurs.indexOf(tSur) >= 0 : tSur === surLower2;
           });
         }
         result.receipts = {
@@ -3819,6 +4142,18 @@ function buildManagerView_(orders, managerName, ss, period) {
           week: { date_from: rd.week.date_from, date_to: rd.week.date_to, transactions: onlyMine_(rd.week.transactions) },
           this_month: { date_from: rd.this_month.date_from, date_to: rd.this_month.date_to, transactions: onlyMine_(rd.this_month.transactions) },
         };
+        // "По менеджерам" (2026-08-26, руководитель группы - вкладка "Поступления"
+        // повторяет структуру company-wide страницы "Поступления", см.
+        // renderReceiptsManagers на фронтенде) - team-scoped вариант rd.by_manager, % считаем
+        // от суммы КОМАНДЫ, не всей компании (иначе цифра % была бы обманчиво маленькой).
+        if (teamSurs && rd.by_manager) {
+          const teamByMgrReceipts = rd.by_manager.filter(function(m) {
+            return teamSurs.indexOf(String(m.manager||'').trim().split(' ')[0].toLowerCase()) >= 0;
+          });
+          const teamTotalMonth = teamByMgrReceipts.reduce(function(s,m){ return s+(m.amount||0); }, 0);
+          result.receipts.by_manager = teamByMgrReceipts;
+          result.receipts.summary = { total_month: teamTotalMonth };
+        }
       }
     } catch (recErr) { /* "Поступления" не критичны для остальной личной страницы - просто не показываем вкладку */ }
   }
@@ -3839,6 +4174,13 @@ function isVasinName_(name) {
 function isOwnTralLogistName_(name) {
   var sur = (name||'').trim().split(' ')[0].toLowerCase();
   return sur === 'сильчев' || sur === 'кан' || sur === 'махура';
+}
+
+// Рыщанов - руководитель ВСЕГО отдела логистики (2026-08-25, Влад: "нужно сделать личную
+// страницу Рыщанову... похожа на страницу Пруса"), не брокер найма лично - фиксированная
+// фамилия, тот же принцип, что isVasinName_/isOwnTralLogistName_ выше.
+function isRyschanowLogistName_(name) {
+  return (name||'').trim().split(' ')[0].toLowerCase() === 'рыщанов';
 }
 
 // 'YYYY-MM' предыдущего месяца относительно переданного - для сравнения "ВП тралов к прошлому
@@ -3925,6 +4267,67 @@ function getLongHaulDetail_(ss, period) {
   return bundle;
 }
 
+// Компанейский бандл для личной страницы Рыщанова (2026-08-25, руководитель отдела логистики,
+// см. plans/2026-08-25-ryschanow-personal-page.md) - тот же приём, что buildLongHaulBundle_
+// для Васина: переиспользует УЖЕ загруженный orders (без повторного getOrdersData) + отдельно
+// читает ВП своего парка (та же формула, что кормит calcRyschanow на фронтенде - grossProfit =
+// "Нормализованные_данные" за текущий месяц, getGrossProfitForPeriod за прошлый).
+// qual_margin_all_logists - сумма hired_margin_qualified по ВСЕМ логистам (не только по
+// Рыщанову лично) - то же слагаемое, что 2%-бонус в calcRyschanow.
+const RYSCHANOW_ALL_LOGISTS_SUR_ = ['васин', 'кан', 'махура', 'сильчев', 'прус-роскошный', 'суркова'];
+function buildRyschanowSummaryBundle_(ss, orders, period) {
+  var byLogistAll = orders.by_logist || [];
+  var qualMarginAllLogists = byLogistAll.reduce(function(sum, l) {
+    var sur = (l.name || '').trim().split(' ')[0].toLowerCase();
+    if (RYSCHANOW_ALL_LOGISTS_SUR_.indexOf(sur) < 0) return sum;
+    return sum + (l.hired_margin_qualified || 0);
+  }, 0);
+
+  var grossProfit = null, specialTralsProfit = 0, profitLong = 0;
+  if (!period) {
+    var sd = getSummaryData(ss, orders);
+    grossProfit = (sd && typeof sd.profit === 'number') ? sd.profit : null;
+    specialTralsProfit = (sd && sd.special_trals_profit) || 0;
+    profitLong = (sd && sd.profit_long) || 0; // нужен для строки Васина в карточке зарплаты
+  } else {
+    var gp = getGrossProfitForPeriod(ss, period);
+    grossProfit = (gp && typeof gp.profit === 'number') ? gp.profit : null;
+    specialTralsProfit = (gp && gp.special_trals_profit) || 0;
+    profitLong = (gp && gp.profit_long) || 0;
+  }
+
+  // Техника/Водители (2026-08-25, Влад: "табличка техника со всеми еденицами и расходами...
+  // табличка водители") - при самостоятельном входе Рыщанова доступа к D.vehicles/D.drivers
+  // ВООБЩЕ НЕТ (buildLogistView_ отдаёт только orders, без верхнеуровневых полей парка,
+  // в отличие от admin-ответа) - тот же источник, что уже кормит "Техника"/vehicles_period/
+  // Васина (aggregateFinHistoryForRange), просто НЕ фильтруем по типу техники (Васину нужны
+  // только длинномеры, Рыщанову - весь парк).
+  var range = period ? monthKeyToRange_(period) : getCurrentMonthRange_();
+  var staffData = getStaffData(ss);
+  var vehicles = aggregateFinHistoryForRange(ss, staffData, range.from, range.to);
+
+  return {
+    by_logist: byLogistAll,
+    by_driver_no_waybill: orders.by_driver_no_waybill || [],
+    by_supplier_no_waybill: orders.by_supplier_no_waybill || [],
+    // "Топ логистов с несданными путевыми" (2026-08-26, Влад: "за каждый из несданных путевых
+    // листов есть ответственный логист") - company-wide, уже посчитан в aggregateOrdersRows.
+    by_logist_no_waybill: orders.by_logist_no_waybill || [],
+    doc_by_decade: orders.doc_by_decade || [], // "Воронка документов" (2026-08-25, Влад: "под зарплатой добавь")
+    gross_profit: grossProfit,
+    special_trals_profit: specialTralsProfit,
+    profit_long: profitLong, // ВП длинномеров компании - строка Васина в карточке "Отдел Рыщанова"
+    qual_margin_all_logists: qualMarginAllLogists,
+    vehicles: vehicles,
+    // План ВП своего парка (2026-08-26, баг): buildLogistView_ НЕ прокидывал managerPlans в
+    // ordersOut при самостоятельном входе (в отличие от admin-предпросмотра, который видит
+    // D.orders.managerPlans напрямую) - план "рыщанов_вп" был в таблице, но не доходил до
+    // страницы. `orders` здесь - ПОЛНЫЙ объект (getOrdersData/getOrdersDataForPeriod до
+    // урезания в buildLogistView_), .managerPlans на нём уже посчитан joinManagerPlans_.
+    gp_plan: (orders.managerPlans && orders.managerPlans['рыщанов_вп']) || 0,
+  };
+}
+
 // Урезанный набор данных для роли "logist" (2026-08-10, по аналогии с buildManagerView_ выше) -
 // только собственные заказы/маржа/сделки, без доступа к данным других людей и компании в целом.
 // ss/period (2026-08-11) - опциональны, нужны только чтобы приложить long_haul для Васина
@@ -3959,6 +4362,13 @@ function buildLogistView_(orders, logistName, ss, period) {
   // action=own_tral_prev_month (см. getOwnTralPrevMonthProfit_ + doGet ниже).
   if (ss && isOwnTralLogistName_(logistName)) {
     ordersOut.own_profit_tral_prev_month = getOwnTralPrevMonthProfit_(ss, logistName, period);
+  }
+  // Компанейский срез для Рыщанова (2026-08-25) - руководитель отдела логистики, не просто
+  // логист-брокер, ему нужна ВП компании/маржа всех логистов/путевые компании целиком, а не
+  // только своя книга (в отличие от остальных логистов, у которых by_hired_supplier/
+  // all_hired_deals выше - максимум расширенного доступа).
+  if (ss && isRyschanowLogistName_(logistName)) {
+    ordersOut.ryschanow_summary = buildRyschanowSummaryBundle_(ss, orders, period || null);
   }
 
   return {
@@ -4523,31 +4933,27 @@ function updateOrderPlanStatus_(personName, p) {
 function doGet(e) {
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
 
-  // ── ВРЕМЕННО (2026-08-19, Влад: "заходил под Цегельниковым, долго грузилась личная
-  // страница") - замер buildManagerView_ по кускам. ТОЛЬКО ЧТЕНИЕ. УБРАТЬ.
-  if (e && e.parameter && e.parameter.action === 'diag_mgr_view_timing') {
-    var dmvKey = e.parameter.key || '';
-    if (dmvKey !== '7f2a9c1e6b4d8035a1c9ef26b8d40317') {
+  // ── ВРЕМЕННО (2026-08-19, перенос ДЗ на сервер) - экспорт листа "ДЗ_Статусы" (ручные
+  // статусы/комментарии, НЕ из 1С - разовый + периодический перенос, см.
+  // plans/2026-07-08-debt-receivables-tab.md). УБРАТЬ после того, как запись статусов тоже
+  // переедет на сервер (пока фронтенд продолжает писать статусы сюда же, в лист).
+  if (e && e.parameter && e.parameter.action === 'export_debt_status') {
+    var edsKey = e.parameter.key || '';
+    if (edsKey !== '7f2a9c1e6b4d8035a1c9ef26b8d40317') {
       return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
     }
-    var dmvName = e.parameter.manager || 'Цегельников Вячеслав Владимирович';
-    var t = {};
-    var t0 = Date.now();
-    var orders = getOrdersData(ss);
-    t.getOrdersData = Date.now() - t0; t0 = Date.now();
-    var dd = getDebtData(ss);
-    t.getDebtData = Date.now() - t0; t0 = Date.now();
-    var rd = getReceiptsData(ss, orders);
-    t.getReceiptsData = Date.now() - t0; t0 = Date.now();
-    var full = getManagerView_(ss, dmvName);
-    t.getManagerView_total = Date.now() - t0;
-    return ContentService.createTextOutput(JSON.stringify({
-      manager: dmvName, timingsMs: t,
-      ordersOk: !orders.error, debtOk: !!(dd && dd.by_customer), receiptsOk: !!(rd && !rd.error),
-      hasDetail: !!(full.orders && full.orders.by_manager_detail && full.orders.by_manager_detail[dmvName]),
-    })).setMimeType(ContentService.MimeType.JSON);
+    var statusSheet = ss.getSheetByName('ДЗ_Статусы');
+    if (!statusSheet || statusSheet.getLastRow() < 2) {
+      return ContentService.createTextOutput(JSON.stringify({ rows: [] })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var statusData = statusSheet.getRange(2, 1, statusSheet.getLastRow() - 1, 4).getValues();
+    var statusRows = statusData.map(function(r) {
+      var since = r[2] instanceof Date ? Utilities.formatDate(r[2], 'Europe/Moscow', 'yyyy-MM-dd') : String(r[2] || '');
+      return [String(r[0] || '').trim(), String(r[1] || ''), since, String(r[3] || '')];
+    }).filter(function(r) { return r[0]; });
+    return ContentService.createTextOutput(JSON.stringify({ rows: statusRows })).setMimeType(ContentService.MimeType.JSON);
   }
-  // ── конец временного замера ────────────────────────────────────────────────────────────────
+  // ── конец временного экспорта ──────────────────────────────────────────────────────────────
 
   // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём.
   // Сначала пробуем свой токен сессии (живёт до 48ч, см. issueSessionToken_) - только если
@@ -4682,7 +5088,7 @@ function doGet(e) {
     // applyRoleUI() на фронтенде. Автор строки - access.name, не то, что прислал клиент.
     if (action === 'calc_save') {
       try {
-        saveCalcHistoryEntry_(ss, access, e.parameter);
+        saveCalcHistoryEntry_(access, e.parameter);
         return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(ContentService.MimeType.JSON);
       } catch (calcErr) {
         return ContentService.createTextOutput(JSON.stringify({ error: String(calcErr) })).setMimeType(ContentService.MimeType.JSON);
@@ -4691,8 +5097,19 @@ function doGet(e) {
 
     if (action === 'calc_history') {
       return ContentService
-        .createTextOutput(JSON.stringify({ history: getCalcHistory_(ss, access) }))
+        .createTextOutput(JSON.stringify({ history: getCalcHistory_(access) }))
         .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // Сквозная нумерация КП (Влад, 2026-08-21) - номер = id в kp_log на VPS, один счётчик на
+    // всех менеджеров сразу (не по одному на браузер, как было в localStorage).
+    if (action === 'kp_issue') {
+      try {
+        var kpResult = issueKpNumber_(access, e.parameter);
+        return ContentService.createTextOutput(JSON.stringify(kpResult)).setMimeType(ContentService.MimeType.JSON);
+      } catch (kpErr) {
+        return ContentService.createTextOutput(JSON.stringify({ error: String(kpErr) })).setMimeType(ContentService.MimeType.JSON);
+      }
     }
 
     if (action === 'vehicle_history') {
@@ -5093,11 +5510,24 @@ function doGet(e) {
       if (!gatManager) {
         return ContentService.createTextOutput(JSON.stringify({ error: 'Не указан сотрудник' })).setMimeType(ContentService.MimeType.JSON);
       }
+      // Рыщанов (2026-08-25) - в листе "Доступ" у него роль logist (как и у остальных
+      // логистов), но по факту он руководитель отдела - переопределяем gatRole ПО ФАМИЛИИ,
+      // и для self-login, и для admin-предпросмотра, чтобы всегда попадал на свой собственный
+      // ИИ-промпт, а не на общий логистский.
+      if (isRyschanowLogistName_(gatManager)) gatRole = 'ryschanow';
+      // Ахтамова/Гусейнова (2026-08-26) - в листе "Доступ" роль manager (как у остальных
+      // менеджеров), но по факту руководители групп - тот же приём, что у Рыщанова выше,
+      // переопределяем ПО ФАМИЛИИ (commercialHeadTeam_ возвращает не-null только для них).
+      else if (commercialHeadTeam_(gatManager)) gatRole = 'commercial_head';
       try {
         var gatOrders = getOrdersData(ss);
         if (gatOrders.error) throw new Error(gatOrders.error);
         var gatForce = e.parameter.force === '1';
-        var gatResult = gatRole === 'logist'
+        var gatResult = gatRole === 'ryschanow'
+          ? generateRyschanowAiTasksCached_(ss, gatOrders, gatManager, null, gatForce)
+          : gatRole === 'commercial_head'
+          ? generateCommercialHeadAiTasksCached_(ss, gatOrders, gatManager, null, gatForce)
+          : gatRole === 'logist'
           ? generateLogistAiTasksCached_(ss, gatOrders, gatManager, null, gatForce)
           : generateManagerAiTasksCached_(ss, gatOrders, gatManager, null, gatForce);
         return ContentService.createTextOutput(JSON.stringify(gatResult)).setMimeType(ContentService.MimeType.JSON);
@@ -5252,12 +5682,43 @@ function readMainPayloadCache_(ss) {
   }
 }
 
-// doGet() зовёт это, а не buildHeavyMainPayload_ напрямую - кэш в приоритете, живой расчёт
-// только как страховка (первый запуск после деплоя, до первого runAll(); или кэш битый).
+// doGet() зовёт это, а не buildHeavyMainPayload_ напрямую. С 2026-08-24 выручка/ДЗ/
+// поступления/сводка больше НЕ читаются из часового кэша - они уже посчитаны на сервере
+// (миллисекунды, не секунды - fetchOrdersComputedFromServer_/fetchDebtComputedFromServer_/
+// fetchReceiptsComputedFromServer_ внутри getOrdersData/getDebtData/getReceiptsData уже
+// пробуют сервер первым, см. архитектуру в CLAUDE.md). Значит держать их в часовом снимке -
+// собственный тормоз, а не экономия. Повод: 24.08.2026, после простоя VPS (оплата хостинга)
+// сервер уже отдавал свежие цифры, а дашборд ещё час показывал застывшую выручку из кэша, до
+// следующего runAll() - Влад: "мы уже перешли на сервер по выручке ДЗ поступлениям, вся
+// логика должна быть серверная, а не гугловская".
+//
+// В кэше по-прежнему остаются vehicles/drivers/history/periods/driverOrderCounts - они читают
+// Штатку/Историю_финансов НАПРЯМУЮ из Google Таблицы (не с сервера), там расчёт всё ещё
+// медленный (см. CLAUDE.md - "Штатка/История_финансов - НЕ начато", в очереди на перенос) -
+// кэшировать их по-прежнему нужно, иначе КАЖДЫЙ заход на дашборд будет ждать эти секунды.
 function getMainPayloadCacheOrLive_(ss, staffData) {
+  var ordersData = getOrdersData(ss);
+  var freshFinancials = {
+    summary:  getSummaryData(ss, ordersData),
+    orders:   ordersData,
+    debt:     getDebtData(ss),
+    receipts: getReceiptsData(ss, ordersData),
+  };
   var cached = readMainPayloadCache_(ss);
-  if (cached) return cached;
-  return buildHeavyMainPayload_(ss, staffData);
+  if (cached) return Object.assign({}, cached, freshFinancials);
+
+  // Кэша нет вообще (первый запуск после деплоя, до первого runAll()) - остальное (медленные
+  // Штатка-поля) считаем живьём. ordersData уже посчитан выше - buildHeavyMainPayload_ здесь
+  // намеренно НЕ вызывается целиком, чтобы не считать заказы дважды.
+  var defaultRange = getCurrentMonthRange_();
+  var vehiclesData = aggregateFinHistoryForRange(ss, staffData, defaultRange.from, defaultRange.to);
+  return Object.assign({
+    vehicles: vehiclesData,
+    drivers:  deriveDriversFromVehicles(vehiclesData),
+    history:  getHistoryData(ss),
+    driverOrderCounts: getDriverOrderCounts_(ss, defaultRange.from, defaultRange.to),
+    periods: getAvailablePeriods(ss),
+  }, freshFinancials);
 }
 
 // Нормализация госномера: убираем пробелы + кириллица→латиница (А=A, В=B и т.д.)
@@ -5715,7 +6176,7 @@ function computeSalesFaktPlan_(ordersData) {
   // расходится с "По менеджерам" (75М) - см. Влад 2026-07-04.
   const activePlanKeys = ['ахтамова','цегельников','гуштюк','дербенцева','шейко',
     'гусейнова','савиток','филипчук','котельников','гуляева','коньшина','володин',
-    'цуцурин','внутренние'];
+    'цуцурин','внутренние','ратников'];
   const allPlans = (ordersData && ordersData.managerPlans) || {};
   activePlanKeys.forEach(function(k) { totalPlan += allPlans[k] || 0; });
 
@@ -6225,12 +6686,18 @@ const INTERNAL_CLIENTS = [
 ];
 
 // Менеджеры отдела — для фильтрации чужих строк
+// 'Ратников' (2026-08-13, Влад: "новый менеджер, сам по себе, не к Лиане, не к Айнур") - без
+// него его заказы (mgr='Ратников' из 1С) молча выпадали бы из managerMap - та же регрессия,
+// что уже дважды ловили с Сурковой в TRAL_LOGISTS (см. verifyKnownFixes ниже). Личная
+// страница/карточка на "Менеджеры" - см. files/index.html DEPT_CFG (solo:true, без группы).
+// Зарплата ему НЕ считается (formula не согласована) - см. isSalaryNotConfigured_ во
+// фронтенде; сюда, в общий ростер выручки/статистики, он добавлен как обычный менеджер.
 const TRAL_MANAGERS = [
   'Ахтамова', 'Гусейнова', 'Цуцурин',
   'Котельников', 'Цегельников', 'Гуляева', 'Гуштюк',
   'Дербенцева', 'Савиток', 'Филипчук', 'Шейко',
   'Коньшина', 'Володин', 'Прус-Роскошный',
-  'Рыщанов', 'Суркова',
+  'Рыщанов', 'Суркова', 'Ратников',
   // 5 бывших сотрудников отдела (январь-май 2026) - роли подтверждены Владом явно, 2026-08-14
   // ("Васёв/Каспарова/Фидан - мои бывшие сотрудники, по ним должна учитываться и наличка и
   // ВЫРУЧКА"). Эта же правка уже стояла в client_history_normalize.js (мега-база), но не была
@@ -6379,6 +6846,83 @@ function serverOrdersCalcStatus() {
   var on = PropertiesService.getScriptProperties().getProperty('USE_SERVER_ORDERS_CALC') === 'on';
   Logger.log(on ? '✅ Серверный расчёт ВКЛЮЧЁН' : '⛔ Серверный расчёт ВЫКЛЮЧЕН (считает Apps Script)');
   return on;
+}
+
+// ── ПЕРЕКЛЮЧАТЕЛЬ СЕРВЕРНОГО РАСЧЁТА ДЗ (постоянные функции, не удалять) ────────────────────
+// Тот же принцип, что и у заказов выше. Запускать из редактора: Выполнить -> функция.
+function enableServerDebtCalc() {
+  PropertiesService.getScriptProperties().setProperty('USE_SERVER_DEBT_CALC', 'on');
+  Logger.log('✅ Серверный расчёт ДЗ ВКЛЮЧЁН. Выключить: disableServerDebtCalc()');
+  Logger.log('Проверить совпадение: verifyServerDebtCalc()');
+}
+
+function disableServerDebtCalc() {
+  PropertiesService.getScriptProperties().deleteProperty('USE_SERVER_DEBT_CALC');
+  Logger.log('⛔ Серверный расчёт ДЗ ВЫКЛЮЧЕН - всё считается внутри Apps Script, как раньше.');
+}
+
+function serverDebtCalcStatus() {
+  var on = PropertiesService.getScriptProperties().getProperty('USE_SERVER_DEBT_CALC') === 'on';
+  Logger.log(on ? '✅ Серверный расчёт ДЗ ВКЛЮЧЁН' : '⛔ Серверный расчёт ДЗ ВЫКЛЮЧЕН (считает Apps Script)');
+  return on;
+}
+
+// ПОСТОЯННЫЙ ИНСТРУМЕНТ - сверяет серверный расчёт ДЗ с расчётом Apps Script на ОДНИХ И ТЕХ
+// ЖЕ данных (лист "ДЗ_данные" на момент запуска). Запускать после любой правки формулы ДЗ -
+// и на сервере (api/lib/debt-calc.js), и здесь.
+function verifyServerDebtCalc() {
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+  if (!apiKey) { Logger.log('Нет YARD_API_KEY в Script Properties - сверять не с чем.'); return null; }
+
+  var sheet = ss.getSheetByName(DEBT_RAW_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) { Logger.log('Нет данных ДЗ_данные - сверка невозможна.'); return null; }
+
+  var mineFlag = serverDebtCalcEnabled_(); // временно выключаем, чтобы посчитать локально
+  PropertiesService.getScriptProperties().deleteProperty('USE_SERVER_DEBT_CALC');
+  var mine;
+  try { mine = getDebtData(ss); } finally {
+    if (mineFlag) PropertiesService.getScriptProperties().setProperty('USE_SERVER_DEBT_CALC', 'on');
+  }
+
+  var resp = UrlFetchApp.fetch('https://api.yardhub.ru/api/debt_computed', {
+    headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true,
+  });
+  if (resp.getResponseCode() !== 200) { Logger.log('Сервер вернул код ' + resp.getResponseCode() + ' - сверка невозможна.'); return null; }
+  var theirs = JSON.parse(resp.getContentText()).debt;
+
+  var problems = [];
+  ['total_balance', 'debtor_count', 'overdue_dead', 'guarantees_total'].forEach(function(k) {
+    var a = mine.summary[k], b = theirs.summary[k];
+    var same = (typeof a === 'number' && typeof b === 'number') ? Math.abs(a - b) < 1 : a === b;
+    if (!same) problems.push('summary.' + k + ': Apps Script=' + a + ' сервер=' + b);
+  });
+
+  var mineByName = {}, theirsByName = {};
+  (mine.by_customer || []).forEach(function(c) { mineByName[c.contragent] = c; });
+  (theirs.by_customer || []).forEach(function(c) { theirsByName[c.contragent] = c; });
+  var sameBalanceCount = 0, fieldMismatches = 0;
+  Object.keys(mineByName).forEach(function(n) {
+    var b = theirsByName[n];
+    if (!b) return;
+    if (Math.abs(mineByName[n].balance - b.balance) >= 1) return; // разное время снимка - пропускаем
+    sameBalanceCount++;
+    ['manager', 'status', 'daysOverdue'].forEach(function(f) {
+      if (String(mineByName[n][f]) !== String(b[f])) {
+        fieldMismatches++;
+        problems.push('by_customer["' + n + '"].' + f + ': Apps Script=' + mineByName[n][f] + ' сервер=' + b[f]);
+      }
+    });
+  });
+
+  if (problems.length === 0) {
+    Logger.log('✅ Серверный и локальный расчёт ДЗ совпадают (' + sameBalanceCount + ' клиентов с неизменным балансом, 0 расхождений в остальных полях).');
+  } else {
+    Logger.log('⚠️ РАСХОЖДЕНИЯ серверного и локального расчёта ДЗ (' + problems.length + '):');
+    problems.forEach(function(p) { Logger.log('  - ' + p); });
+    Logger.log('Если серверный расчёт включён (USE_SERVER_DEBT_CALC=on) - выключи disableServerDebtCalc(), пока не разобрались.');
+  }
+  return problems;
 }
 
 // ── ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ─────────────────────────────────
@@ -8723,8 +9267,17 @@ function fetchOrdersComputedFromServer_(period) {
 function getOrdersData(ss) {
   const monthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
 
+  // "Планы_менеджеров" (2026-08-26, баг) - ВСЕГДА берём план свежим из листа поверх серверного
+  // ответа, а не полагаемся на собственную копию сервера (MySQL manager_plans). Тот
+  // HTTP-мостик (action=export_manager_plans -> import-manager-plans.js на VPS) был убран из
+  // doGet как "временный" (см. комментарий в самом import-скрипте: "убрать после переноса"),
+  // но VPS-скрипт остался и молча ловил "Не авторизован" при каждом запуске - план не
+  // синхронизировался НИ РАЗУ с тех пор, задело не только Рыщанова ("рыщанов_вп" 0 вместо
+  // 35М), а вообще всех менеджеров при любой правке плана в течение месяца. Лист - и так
+  // единственный источник (Влад вводит вручную), сервер не должен иметь свою копию вообще -
+  // проще и надёжнее просто наложить joinManagerPlans_ поверх ЛЮБОГО источника заказов.
   var computed = fetchOrdersComputedFromServer_(monthKey);
-  if (computed) return computed;
+  if (computed) return joinManagerPlans_(ss, computed, monthKey);
 
   var fromServer = fetchOrdersRawFromServer_(monthKey);
   var rows = fromServer ? fromServer.rows : null;
@@ -8751,7 +9304,7 @@ function getOrdersData(ss) {
 // не отдал - тихий фолбэк на архивный лист Google Таблицы, как было.
 function getOrdersDataForPeriod(ss, period) {
   var computed = fetchOrdersComputedFromServer_(period);
-  if (computed) return computed;
+  if (computed) return joinManagerPlans_(ss, computed, period); // см. getOrdersData выше
 
   var fromServer = fetchOrdersRawFromServer_(period);
   if (fromServer) {
@@ -9007,6 +9560,106 @@ function fmtDateRuServer_(dateStr) {
   if (!m || !d || m < 1 || m > 12) return dateStr;
   const currentYear = new Date().getFullYear();
   return d + ' ' + RU_MONTHS_GENITIVE_[m-1] + (y !== currentYear ? ' ' + y : '');
+}
+
+// ИИ-контекст для руководителя коммерческой группы (Ахтамова/Гусейнова, 2026-08-26, см.
+// plans/2026-08-26-ahtamova-guseinova-personal-pages.md) - командный срез, не про личные
+// продажи (у них они тоже есть, но фокус промпта - управление командой): план/факт/прогноз
+// каждого менеджера + дебиторка по каждому менеджеру. Тот же принцип "с позиции
+// руководителя", что уже закреплён для Рыщанова (2026-08-26, "убери его с этой страницы...
+// рекомендации руководителю должны быть с позиции руководить, а не делать самому").
+function buildCommercialHeadAiContext_(ss, orders, headName, period) {
+  var team = commercialHeadTeam_(headName) || [];
+  var byManager = (orders.by_manager || []).filter(function(m) {
+    return team.indexOf(String(m.name||'').trim().split(' ')[0].toLowerCase()) >= 0;
+  });
+  var plans = orders.managerPlans || {};
+  var paceRatio = calcPaceRatioServer_(period);
+
+  var teamSummary = byManager.map(function(m) {
+    var sur = String(m.name||'').trim().split(' ')[0].toLowerCase();
+    var plan = plans[sur] || 0;
+    var fakt = m.amount || 0;
+    var faktForPace = m.amount_thru_yesterday != null ? m.amount_thru_yesterday : fakt;
+    var forecast = faktForPace * paceRatio;
+    return {
+      name: m.name, orders: m.orders || 0, amount: Math.round(fakt), plan: Math.round(plan),
+      pct: plan > 0 ? Math.round(fakt/plan*100) : null,
+      forecast_pct: plan > 0 ? Math.round(forecast/plan*100) : null,
+    };
+  });
+
+  // ДЗ по каждому менеджеру команды (переиспользует getDebtData, тот же приём, что
+  // buildManagerAiContext_ ниже) - только положительный баланс, не мёртвая/чужая-отдел
+  // корзина (тот же фильтр DEBT_AGE_LIMIT_DAYS/DEBT_STATUS_EXCLUDE_FROM_TOTAL, что у
+  // обычного менеджера).
+  var debtByManager = {};
+  try {
+    var dd = getDebtData(ss);
+    if (dd && dd.by_customer) {
+      dd.by_customer.forEach(function(c) {
+        var cSur = String(c.manager||'').trim().split(' ')[0].toLowerCase();
+        if (team.indexOf(cSur) < 0) return;
+        if (!((c.balance||0) > 0)) return;
+        if ((c.daysOverdue||0) >= DEBT_AGE_LIMIT_DAYS) return;
+        if (DEBT_STATUS_EXCLUDE_FROM_TOTAL.indexOf(c.status) >= 0) return;
+        if (!debtByManager[cSur]) debtByManager[cSur] = { count:0, total_balance:0, max_days:0 };
+        debtByManager[cSur].count++;
+        debtByManager[cSur].total_balance += c.balance;
+        debtByManager[cSur].max_days = Math.max(debtByManager[cSur].max_days, c.daysOverdue||0);
+      });
+    }
+  } catch (debtErr) { /* ДЗ не критична для остального контекста */ }
+  var debtSummary = Object.keys(debtByManager).map(function(sur) {
+    var d = debtByManager[sur];
+    return { manager: sur, debtor_count: d.count, total_balance: Math.round(d.total_balance), max_days_overdue: d.max_days };
+  }).sort(function(a,b){ return b.total_balance - a.total_balance; });
+
+  return {
+    commercial_head: true,
+    period: period || Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM'),
+    team: teamSummary,
+    debt_by_manager: debtSummary,
+  };
+}
+
+function buildCommercialHeadAiTasksPrompt_(name, context) {
+  return 'Ты - коммерческий директор транспортной компании (перевозки тралами и ' +
+    'длинномерами), который каждое утро даёт руководителю группы продаж короткий и ТОЧНЫЙ ' +
+    'разбор дня по ЕЁ команде - как живой директор, который помнит, кто из менеджеров и где ' +
+    'отстаёт. Этот человек РУКОВОДИТ своей группой менеджеров (2-6 человек) - ставит им ' +
+    'задачи и спрашивает результат, а не продаёт лично за них. Ниже - реальные данные её ' +
+    'команды за текущий месяц в формате JSON.\n\n' +
+    'Данные:\n' + JSON.stringify(context, null, 0) + '\n\n' +
+    'ВАЖНЫЕ ФАКТЫ:\n' +
+    '- team[] - каждый менеджер команды: план продаж, факт, % выполнения, прогноз к концу ' +
+    'месяца по темпу. pct/forecast_pct - null, если план не задан за этот месяц (не пиши ' +
+    'задачу про план для такого менеджера).\n' +
+    '- debt_by_manager[] - дебиторская задолженность ПО КАЖДОМУ менеджеру команды (число ' +
+    'должников, общая сумма долга, максимальная просрочка в днях) - если у кого-то заметная ' +
+    'сумма/много дней просрочки, это тема для задачи "спроси с [менеджера] по дебиторке".\n' +
+    '- ГЛАВНОЕ ПРАВИЛО ФОРМУЛИРОВОК: рекомендации - с позиции РУКОВОДИТЕЛЯ группы, не ' +
+    'продавца. НЕ пиши "позвони клиенту"/"продай" - пиши "спроси с [менеджера] почему ' +
+    'отстаёт от плана"/"проконтролируй закрытие ДЗ у [менеджера]"/"разберись с [менеджером], ' +
+    'почему прогноз ниже плана".\n' +
+    '- ФОРМАТ ЧИСЕЛ: суммы в рублях с пробелом-разделителем тысяч ("7 618 250", НЕ ' +
+    '"7618250").\n\n' +
+    'Сформулируй РОВНО 5 задач на сегодня, опираясь ТОЛЬКО на переданные данные (не выдумывай ' +
+    'фактов) - приоритет тем, кто сильнее всего отстаёт от плана/прогноза, и тем, у кого ' +
+    'заметная дебиторка.\n\n' +
+    'Требования к ответу:\n' +
+    '- Ответь СТРОГО валидным JSON без markdown-обёртки (без ```), без текста до/после.\n' +
+    '- Формат: {"tasks":[{"title":"...","why":"...","category":"выручка|дебиторка"},' +
+    '... ровно 5 штук],"plan_advice":"..."}\n' +
+    '- "title" - короткая формулировка КОНКРЕТНОГО действия (до 90 символов) с позиции ' +
+    'руководителя.\n' +
+    '- "why" - 1-2 фразы, ПОЧЕМУ важно сегодня, со ссылкой на конкретный факт (имя, %, ' +
+    'сумма) - не общие слова.\n' +
+    '- "category" - "выручка" (план/темп продаж) или "дебиторка" (долги клиентов).\n' +
+    '- "plan_advice" - 2-4 предложения, что подтянуть в команде сегодня, опираясь на team[]/' +
+    'debt_by_manager[].\n' +
+    '- Пиши по-русски, обращение на "ты", по-деловому, тоном директора, который знает свою ' +
+    'команду лично - без длинного тире (используй обычный дефис), без канцелярита и воды.';
 }
 
 // Компактный набор фактов о менеджере для промпта ИИ - ТОЛЬКО из уже существующих бэкенд-
@@ -9403,6 +10056,126 @@ function buildLogistAiTasksPrompt_(logistName, context) {
     'и воды.';
 }
 
+// ── ИИ-ЗАДАЧИ ДЛЯ РЫЩАНОВА (2026-08-25) ────────────────────────────────────────────────────
+// Влад: "ИИ задачи по сотрудникам логистам, это путевые в основном по своему и наемному
+// парку" - руководитель отдела, а не брокер найма - контекст компанейский (все логисты сразу,
+// путевые и по своим водителям, и по наёмным поставщикам), а не по одному поставщику, как у
+// обычного логиста. См. plans/2026-08-25-ryschanow-personal-page.md.
+function buildRyschanowAiContext_(ss, orders, period) {
+  var bundle = buildRyschanowSummaryBundle_(ss, orders, period || null);
+
+  // primary_logist (2026-08-26, Влад: "поставить кому-то из логистов задачу собрать путевые
+  // с водителей, допустим что на рейсах Крысало больше всего был Сильчев" / "Рустем ставит
+  // задачу логисту по наёмной технике") - логист с наибольшим числом заказов этого водителя/
+  // поставщика (argmaxLogist_ уже посчитан на бэкенде в aggregateOrdersRows), чтобы промпт
+  // мог рекомендовать ДЕЛЕГИРОВАНИЕ конкретному человеку, а не звонок/требование от Рыщанова
+  // лично.
+  var noWaybillDrivers = (bundle.by_driver_no_waybill || []).slice(0, 8).map(function(d) {
+    return { name: d.name, no_waybill: d.no_waybill || 0, orders: d.orders || 0, primary_logist: d.primary_logist || '' };
+  });
+  var noWaybillSuppliers = (bundle.by_supplier_no_waybill || []).slice(0, 8).map(function(s) {
+    return { name: s.name, no_waybill: s.no_waybill || 0, orders: s.orders || 0, primary_logist: s.primary_logist || '' };
+  });
+  var logistsSummary = (bundle.by_logist || [])
+    .filter(function(l) { return RYSCHANOW_ALL_LOGISTS_SUR_.indexOf((l.name||'').trim().split(' ')[0].toLowerCase()) >= 0; })
+    .map(function(l) {
+      return {
+        name: l.name, orders: l.orders || 0, hired_orders: l.hired_orders || 0,
+        margin_qualified: Math.round(l.hired_margin_qualified || 0),
+        margin_unqualified: Math.round(l.hired_margin_unqualified || 0),
+        // own_fleet_focus (2026-08-26, Влад: "тут вообще не надо рекомендовать Рустему
+        // работать с логистами, которые ведут наш парк, по поводу найма") - Сильчев/Кан/
+        // Махура заточены под собственный парк тралов (isOwnTralLogistName_), обсуждение
+        // ставок НАЙМА через них - роль-мисматч, даже если у них случайно есть hired_orders.
+        own_fleet_focus: isOwnTralLogistName_(l.name),
+      };
+    });
+
+  return {
+    ryschanow: true,
+    period: period || Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM'),
+    no_waybill_drivers: noWaybillDrivers,
+    no_waybill_suppliers: noWaybillSuppliers,
+    logists: logistsSummary,
+    qual_margin_all_logists: Math.round(bundle.qual_margin_all_logists || 0),
+  };
+}
+
+function buildRyschanowAiTasksPrompt_(name, context) {
+  return 'Ты - директор по логистике транспортной компании (перевозки тралами и ' +
+    'длинномерами), который каждое утро даёт руководителю отдела логистики короткий и ' +
+    'ТОЧНЫЙ разбор дня по ВСЕМУ отделу - как живой директор, который помнит, кто из ' +
+    'логистов и где отстаёт, а не формальный отчёт по цифрам. Этот человек - РУКОВОДИТЕЛЬ ' +
+    'ВСЕГО отдела логистики (не брокерит найм лично и не звонит водителям/поставщикам сам) - ' +
+    'у него в подчинении логисты, которые ведут своих водителей и наёмных поставщиков. Его ' +
+    'работа - ставить задачи подчинённым логистам и спрашивать с них результат, а НЕ ' +
+    'выполнять их работу за них. Ниже - реальные компанейские данные за текущий месяц в ' +
+    'формате JSON.\n\n' +
+    'Данные:\n' + JSON.stringify(context, null, 0) + '\n\n' +
+    'ВАЖНЫЕ ФАКТЫ О ТОМ, КАК УСТРОЕНА РАБОТА (используй их, чтобы не писать ошибочных ' +
+    'советов):\n' +
+    '- ГЛАВНОЕ ПРАВИЛО ФОРМУЛИРОВОК (2026-08-26, прямое указание): рекомендации должны быть ' +
+    'С ПОЗИЦИИ РУКОВОДИТЕЛЯ, а не исполнителя. НИКОГДА не пиши "позвони [водителю]", ' +
+    '"потребуй у [поставщика]", "обзвони", "свяжись лично" - это работа логиста, не ' +
+    'директора по логистике. Вместо этого - "поставь задачу [конкретному логисту] собрать ' +
+    'путевые у [водителя]" или "спроси с [логиста] по путевым [поставщика]". Пример из ' +
+    'реальной правки: НЕПРАВИЛЬНО "Позвони Крысало Алексею и добей сдачу путевых" - ' +
+    'ПРАВИЛЬНО "Поставь Сильчеву задачу собрать путевые с Крысало Алексея" (Сильчев - его ' +
+    'primary_logist, см. ниже).\n' +
+    '- no_waybill_drivers - СВОИ водители (собственный парк) без сданных путевых листов, ' +
+    'отсортированы по количеству. no_waybill_suppliers - НАЁМНЫЕ поставщики (перевозчики) ' +
+    'без сданных путевых. Это ДВЕ РАЗНЫЕ зоны ответственности: за своих водителей отвечает ' +
+    'диспетчер/сам водитель, за наёмных поставщиков - конкретный логист, который с ними ' +
+    'работал. Если оба списка не пусты - задача про своих водителей и задача про наёмных ' +
+    'поставщиков должны быть РАЗНЫМИ задачами, не смешивай их в одну.\n' +
+    '- primary_logist (в no_waybill_drivers/no_waybill_suppliers) - логист, который реально ' +
+    'ведёт этого водителя/поставщика (больше всего заказов через него) - ИСПОЛЬЗУЙ ЭТО ИМЯ в ' +
+    'формулировке задачи как того, кому Рыщанов ставит задачу собрать путевые. Если ' +
+    'primary_logist пустая строка - не выдумывай имя, сформулируй задачу без указания ' +
+    'конкретного логиста ("поставь задачу ответственному логисту...").\n' +
+    '- logists[] - сводка по каждому логисту компании (заказы/маржа найма квалифицирующая ' +
+    '>=23%/неквалифицирующая <23%, own_fleet_focus). Если у кого-то margin_unqualified ' +
+    'заметно больше margin_qualified (или margin_qualified около нуля при заметном числе ' +
+    'заказов) - это сигнал проблемы со ставками поставщиков, стоит сделать задачу "спроси с ' +
+    '[имя логиста] пересмотр ставок с поставщиками" с указанием конкретных цифр из его ' +
+    'строки. ИСКЛЮЧЕНИЕ: если own_fleet_focus у логиста true - это логист, который ведёт ' +
+    'НАШ СОБСТВЕННЫЙ парк (не найм), НЕ строй для него задачу про ставки поставщиков/найма, ' +
+    'даже если у него есть margin_unqualified - это не его основная зона ответственности, ' +
+    'выбери для темы "ставки поставщиков" другого логиста из logists[] (own_fleet_focus: ' +
+    'false), а если таких с проблемной маржой нет - пропусти эту тему совсем.\n' +
+    '- НЕ указывай в "plan_advice" сам % выполнения плана по валовой прибыли - эта цифра ' +
+    'уже показана прямо на странице живым виджетом и обновляется в реальном времени в ' +
+    'течение дня, а твой текст кэшируется на весь день - если повторить её словами, она ' +
+    'разойдётся с тем, что видно на экране. Пиши про КОНКРЕТНЫЕ ДЕЙСТВИЯ и КОНКРЕТНЫХ ЛЮДЕЙ ' +
+    '(водителей/поставщиков/логистов) - без своей копии процента плана.\n' +
+    '- ФОРМАТ ЧИСЕЛ: все суммы в рублях пиши с пробелом как разделителем тысяч (например, ' +
+    '"7 618 250", а НЕ "7618250").\n\n' +
+    'Сформулируй РОВНО 5 задач на сегодня. Разумный баланс: минимум 1 задача про своих ' +
+    'водителей без путевых (если no_waybill_drivers не пуст), минимум 1 задача про наёмных ' +
+    'поставщиков без путевых (если no_waybill_suppliers не пуст), 1-2 задачи про конкретных ' +
+    'логистов из logists[] с проблемной маржой (не own_fleet_focus) - но если по какой-то ' +
+    'теме данных нет (список пуст или все подходящие own_fleet_focus:true), не выдумывай, ' +
+    'просто перераспредели на другие темы.\n\n' +
+    'Требования к ответу:\n' +
+    '- Ответь СТРОГО валидным JSON без markdown-обёртки (без ```), без текста до/после.\n' +
+    '- Формат: {"tasks":[{"title":"...","why":"...","category":"поставщики|документы"},' +
+    '... ровно 5 штук],"plan_advice":"..."}\n' +
+    '- "title" - короткая формулировка КОНКРЕТНОГО действия (до 90 символов) с позиции ' +
+    'руководителя - что поставить/проверить/спросить с логиста сегодня (см. ГЛАВНОЕ ПРАВИЛО ' +
+    'выше), а не общая тема и не действие, которое Рыщанов делает лично.\n' +
+    '- "why" - 1-2 фразы, ПОЧЕМУ это важно именно сегодня, со ссылкой на конкретный факт из ' +
+    'данных (имя, количество, сумма) - не общие слова.\n' +
+    '- "category" - одна из двух: "документы" (путевые - свои или наёмные), "поставщики" ' +
+    '(маржа/ставки логистов и поставщиков).\n' +
+    '- "plan_advice" - 2-4 предложения, КОНКРЕТНО что подтянуть в отделе сегодня, с опорой ' +
+    'на конкретных людей из no_waybill_drivers/no_waybill_suppliers/logists - БЕЗ повторения ' +
+    'процента плана по ВП (см. выше).\n' +
+    '- Задачи должны быть РАЗНЫЕ по теме (не 5 вариаций одного и того же) и опираться ТОЛЬКО ' +
+    'на переданные данные, не выдумывай факты, которых нет в JSON.\n' +
+    '- Пиши по-русски, обращение на "ты", по-деловому, тоном директора, который знает свой ' +
+    'отдел лично - без длинного тире (используй обычный дефис), без канцелярита и воды.';
+}
+
 // POST https://api.kie.ai/codex/v1/responses - reasoning-модель (см. reference-память
 // kie.ai - "у каждой модели свой URL/формат", этот путь для GPT-5). Ключ - только из Script
 // Properties, никогда не в коде (правило репозитория).
@@ -9492,10 +10265,22 @@ function generateManagerAiTasksCached_(ss, orders, managerName, period, force) {
     buildAiTasksPrompt_, force);
 }
 
+function generateCommercialHeadAiTasksCached_(ss, orders, headName, period, force) {
+  return generateAiTasksCached_(ss, headName, 'commercial_head',
+    function() { return buildCommercialHeadAiContext_(ss, orders, headName, period); },
+    buildCommercialHeadAiTasksPrompt_, force);
+}
+
 function generateLogistAiTasksCached_(ss, orders, logistName, period, force) {
   return generateAiTasksCached_(ss, logistName, 'logist',
     function() { return buildLogistAiContext_(ss, orders, logistName, period); },
     buildLogistAiTasksPrompt_, force);
+}
+
+function generateRyschanowAiTasksCached_(ss, orders, name, period, force) {
+  return generateAiTasksCached_(ss, name, 'ryschanow',
+    function() { return buildRyschanowAiContext_(ss, orders, period); },
+    buildRyschanowAiTasksPrompt_, force);
 }
 
 // ── ПЛАНЫ МЕНЕДЖЕРОВ (лист "Планы_менеджеров", Влад вводит вручную каждый месяц) ──
@@ -9596,6 +10381,18 @@ const FUNNEL_EXCLUDE_OTHER_PAYMENT_VARIANT = true;
 // независимо друг от друга.
 const FUNNEL_EXCLUDE_CASH_PAYMENTS = true;
 
+// Логист с наибольшим числом заказов из {логист: счётчик} - "ответственный логист" по
+// конкретному водителю/поставщику (2026-08-26, страница Рыщанова: "поставить кому-то из
+// логистов задачу", не звонить/требовать самому - см. buildRyschanowAiContext_/
+// buildRyschanowAiTasksPrompt_). '' если счётчиков нет (мог случиться заказ без mgr_l).
+function argmaxLogist_(logCounts) {
+  var best = '', bestN = 0;
+  Object.keys(logCounts || {}).forEach(function(name) {
+    if (logCounts[name] > bestN) { bestN = logCounts[name]; best = name; }
+  });
+  return best;
+}
+
 // Чистая функция: нормализованные строки заказов -> агрегированный JSON для дашборда.
 // Используется и для текущего месяца (Заказы_данные), и для архивов прошлых периодов.
 function aggregateOrdersRows(rows) {
@@ -9689,6 +10486,11 @@ function aggregateOrdersRows(rows) {
   const supplierMap = {};
   const allHiredDeals = []; // общекорпоративный список сделок найма (2026-08-10, "Общие сделки")
   const driverMap   = {};
+  // "Топ логистов с несданными путевыми" (2026-08-26, страница Рыщанова) - за каждую
+  // недостающую путёвку (свой водитель ИЛИ наёмный поставщик) отвечает логист заказа
+  // (mgrLog) - считаем ОБА источника в одну сумму на логиста, тот же принцип фильтрации
+  // (!isInternalOrder && !isServiceRow), что уже у driverMap/supplierMap.no_waybill выше.
+  const logistNoWaybillMap = {};
   const problemOrders = [];
   const mgrDetailMap = {}; // персональная разбивка по менеджеру (для личной страницы)
   const logistDetailMap = {}; // персональная разбивка по логисту (для личной страницы, 2026-08-10)
@@ -9750,6 +10552,14 @@ function aggregateOrdersRows(rows) {
     const dateStr   = dateVal(row, 'date_s');
     const mgrSales  = str(row, 'mgr_s');
     const hw        = yes(row, 'waybill'); // есть ли путёвка - нужно в нескольких местах ниже
+    // Поднято к началу цикла (2026-08-19, Влад: "нет путёвки" по водителям/поставщикам
+    // считало и служебные ("Прочее") строки - раньше isServiceRow объявлялась только внутри
+    // блока "Статус документов" ниже, а блоки "По поставщикам"/"По водителям" идут РАНЬШЕ
+    // него в цикле и физически не могли на неё ссылаться). Теперь доступна везде в итерации -
+    // тот же принцип исключения, что уже в основной воронке документов.
+    const paymentVariant = str(row, 'payment_variant');
+    const isServiceRow = (FUNNEL_EXCLUDE_OTHER_PAYMENT_VARIANT && paymentVariant === 'Прочее') ||
+                         (FUNNEL_EXCLUDE_CASH_PAYMENTS && paymentVariant === 'Наличный');
 
     // С июля 2026: 8%/8%/2%/2% от маржи найма платится только если маржа найма >=23% -
     // порог проверяется ПО КОМПАНИИ ЗА МЕСЯЦ ЦЕЛИКОМ (тот же % что и KPI "Маржа найма" на
@@ -9937,9 +10747,14 @@ function aggregateOrdersRows(rows) {
       const isInternalOrder = isInt || ordInList(str(row, 'customer'), INTERNAL_CLIENTS);
       if (!supplierMap[supplier]) {
         supplierMap[supplier] = { name:supplier, orders:0, revenue:0, cost:0, extra_costs:0, profit:0,
-          no_waybill:0, not_posted:0, no_realiz:0, complete:0 };
+          no_waybill:0, not_posted:0, no_realiz:0, complete:0, logCounts:{} };
       }
       supplierMap[supplier].orders++;
+      // "Ответственный логист" по этому поставщику (2026-08-26, Влад: "Рустем ставит задачу
+      // логисту по наёмной технике", не требует путевые у поставщика лично) - логист с
+      // наибольшим числом заказов через этого поставщика, см. primary_logist в
+      // buildRyschanowAiContext_ ниже.
+      if (mgrLog) supplierMap[supplier].logCounts[mgrLog] = (supplierMap[supplier].logCounts[mgrLog] || 0) + 1;
       supplierMap[supplier].revenue += amount;
       supplierMap[supplier].cost    += hiredCost; // "Стоимость найма" - что заплатили перевозчику
       supplierMap[supplier].profit  += profit;
@@ -9951,7 +10766,22 @@ function aggregateOrdersRows(rows) {
       // "Сумма вознаграждения 2" в 1С день в день). margin (см. supplierList ниже) остаётся
       // равен "Прибыль" - именно эта сумма и есть маржа с учётом всех затрат.
       supplierMap[supplier].extra_costs += (amount - hiredCost - profit);
-      if (!hw && !isInternalOrder) supplierMap[supplier].no_waybill++;
+      // Служебные строки ("Вариант расчёта" = Прочее/Наличный) НЕ считаем как "нет путёвки" -
+      // структурно у них путёвки в принципе не бывает, это не реальная недостача документа
+      // (Влад, 2026-08-19: тот же принцип, что уже в основной воронке документов, здесь
+      // раньше не применялся - "нет путёвки" по поставщикам/водителям завышало цифру).
+      // Знаменатель "%" (2026-08-26, Влад: "сравним с поступлением путевых, ведём %") - ТА ЖЕ
+      // популяция заказов, что и числитель (!isInternalOrder && !isServiceRow), просто без
+      // условия !hw - считаем ВСЕ заказы, у которых путёвка в принципе требуется, не только
+      // те, где она отсутствует.
+      if (!isInternalOrder && !isServiceRow) {
+        if (mgrLog) {
+          if (!logistNoWaybillMap[mgrLog]) logistNoWaybillMap[mgrLog] = { name: mgrLog, no_waybill_own: 0, no_waybill_hired: 0, orders_own: 0, orders_hired: 0 };
+          logistNoWaybillMap[mgrLog].orders_hired++;
+          if (!hw) logistNoWaybillMap[mgrLog].no_waybill_hired++;
+        }
+        if (!hw) supplierMap[supplier].no_waybill++;
+      }
 
       // Общекорпоративный список сделок найма (2026-08-10, "Общие сделки" на личной странице
       // логиста - Влад: "он видит абсолютно всю ситуацию по направлению") - КАЖДАЯ наёмная
@@ -9979,7 +10809,8 @@ function aggregateOrdersRows(rows) {
         // тоже учитывается) - раньше эта цифра считалась отдельно в блоке "Статус документов"
         // по более узкому условию (!isInt, без !isInternalOrder), что расходилось с "Общими
         // сделками" по тому же поставщику. Один источник на обе вкладки (2026-08-10).
-        if (!hw && !isInternalOrder) lds.no_waybill++;
+        // !isServiceRow добавлен 2026-08-19 - см. комментарий у supplierMap.no_waybill выше.
+        if (!hw && !isInternalOrder && !isServiceRow) lds.no_waybill++;
         ld.deals.push({
           id: str(row,'id'), date: dateStr, customer: str(row,'customer'), supplier: supplier,
           amount: amount, cost: hiredCost, margin: profit,
@@ -10002,9 +10833,8 @@ function aggregateOrdersRows(rows) {
     }
 
     // ── Статус документов (внешние заказы, разбивка по декадам) ──
-    const paymentVariant = str(row, 'payment_variant');
-    const isServiceRow = (FUNNEL_EXCLUDE_OTHER_PAYMENT_VARIANT && paymentVariant === 'Прочее') ||
-                         (FUNNEL_EXCLUDE_CASH_PAYMENTS && paymentVariant === 'Наличный');
+    // paymentVariant/isServiceRow теперь объявлены в начале цикла (см. комментарий выше) -
+    // используются здесь без изменений.
     if (!isInt && !isServiceRow) {
       const dayNum2 = parseInt((dateStr||'').split('-')[2]) || 0;
       const dec = dayNum2 <= 10 ? 0 : dayNum2 <= 20 ? 1 : 2;
@@ -10106,14 +10936,30 @@ function aggregateOrdersRows(rows) {
       const isInternalOrder = isInt || ordInList(str(row, 'customer'), INTERNAL_CLIENTS);
       if (!driverMap[driverName]) {
         driverMap[driverName] = { name: driverName, orders: 0, amount: 0, no_waybill: 0,
-          orders_long: 0, no_waybill_long: 0 }; // сегмент "Длинномер" (2026-08-11, страница Васина)
+          orders_long: 0, no_waybill_long: 0, logCounts: {} }; // сегмент "Длинномер" (2026-08-11, страница Васина)
       }
       driverMap[driverName].orders++;
       driverMap[driverName].amount += amount;
-      if (!hw && !isInternalOrder) driverMap[driverName].no_waybill++;
+      // "Ответственный логист" по этому водителю (2026-08-26, Влад: "поставить кому-то из
+      // логистов задачу собрать путевые с водителей, допустим что на рейсах Крысало больше
+      // всего был Сильчев") - логист с наибольшим числом заказов этого водителя.
+      if (mgrLog) driverMap[driverName].logCounts[mgrLog] = (driverMap[driverName].logCounts[mgrLog] || 0) + 1;
+      // !isServiceRow добавлен 2026-08-19 (Влад: "Не сданные путевые листы" считало и
+      // служебные строки "Прочее" - у Войткуна за июль показывало 8, реально 4, см.
+      // комментарий у supplierMap.no_waybill выше - тот же принцип).
+      // Знаменатель "%" (2026-08-26) - см. тот же комментарий у supplierMap выше, зеркальная
+      // логика для своего парка.
+      if (!isInternalOrder && !isServiceRow) {
+        if (mgrLog) {
+          if (!logistNoWaybillMap[mgrLog]) logistNoWaybillMap[mgrLog] = { name: mgrLog, no_waybill_own: 0, no_waybill_hired: 0, orders_own: 0, orders_hired: 0 };
+          logistNoWaybillMap[mgrLog].orders_own++;
+          if (!hw) logistNoWaybillMap[mgrLog].no_waybill_own++;
+        }
+        if (!hw) driverMap[driverName].no_waybill++;
+      }
       if (equip === 'Длинномер') {
         driverMap[driverName].orders_long++;
-        if (!hw && !isInternalOrder) driverMap[driverName].no_waybill_long++;
+        if (!hw && !isInternalOrder && !isServiceRow) driverMap[driverName].no_waybill_long++;
       }
     }
   }
@@ -10165,6 +11011,7 @@ function aggregateOrdersRows(rows) {
       // Полная воронка (2026-08-10, "Общие сделки" на личной странице логиста) - раньше был
       // только no_waybill, теперь та же разбивка, что и в logist_detail.by_supplier.
       not_posted: s.not_posted, no_realiz: s.no_realiz, complete: s.complete,
+      primary_logist: argmaxLogist_(s.logCounts), // 2026-08-26, см. argmaxLogist_ выше
     };
   }).sort(function(a,b){ return b.revenue-a.revenue; });
 
@@ -10304,10 +11151,31 @@ function aggregateOrdersRows(rows) {
     by_driver_no_waybill: Object.values(driverMap)
       .filter(function(d){ return d.no_waybill > 0; })
       .sort(function(a,b){ return b.no_waybill-a.no_waybill; })
-      .slice(0, 25),
+      .slice(0, 25)
+      .map(function(d){ return { name: d.name, orders: d.orders, amount: d.amount, no_waybill: d.no_waybill, primary_logist: argmaxLogist_(d.logCounts) }; }), // primary_logist 2026-08-26
     by_supplier_no_waybill: supplierList
       .filter(function(s){ return s.no_waybill > 0; })
       .sort(function(a,b){ return b.no_waybill-a.no_waybill; }),
+    // "Топ логистов с несданными путевыми" (2026-08-26, страница Рыщанова) - логист отвечает
+    // и за свой парк, и за наём одновременно, total = сумма обоих счётчиков. % (2026-08-26,
+    // Влад: "выведем количество заказов, сравним с поступлением путевых, ведём % и расставим
+    // топ согласно %") - orders_own/orders_hired считаются той же ТОЧНО популяцией заказов
+    // (!isInternalOrder && !isServiceRow), что и числитель, просто без условия !hw - топ
+    // сортируется по проценту, не по абсолютному счётчику (у логиста с 5 заказами без путёвки
+    // из 5 проблема серьёзнее, чем у того, у кого 20 из 200).
+    by_logist_no_waybill: Object.values(logistNoWaybillMap)
+      .map(function(l){
+        var ordersTotal = l.orders_own + l.orders_hired;
+        var noWaybillTotal = l.no_waybill_own + l.no_waybill_hired;
+        return {
+          name: l.name,
+          orders_own: l.orders_own, orders_hired: l.orders_hired, orders_total: ordersTotal,
+          no_waybill_own: l.no_waybill_own, no_waybill_hired: l.no_waybill_hired, no_waybill_total: noWaybillTotal,
+          no_waybill_pct: ordersTotal > 0 ? Math.round(noWaybillTotal/ordersTotal*100) : 0,
+        };
+      })
+      .filter(function(l){ return l.no_waybill_total > 0; })
+      .sort(function(a,b){ return b.no_waybill_pct - a.no_waybill_pct || b.no_waybill_total - a.no_waybill_total; }),
     // Длинномеры целиком (2026-08-11, личная страница Васина) - см. getLongHaulDetail_.
     by_driver_no_waybill_long: Object.values(driverMap)
       .filter(function(d){ return d.no_waybill_long > 0; })

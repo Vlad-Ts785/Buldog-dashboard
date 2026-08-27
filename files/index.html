@@ -11075,7 +11075,7 @@ function crmAskWhoAmI_(onDone) {
       + '<div class="crm-modal-actions"><button class="tab-btn" onclick="closeCrmModal()">Отмена</button><button class="tab-btn active" onclick="crmSaveWhoAmI_()">Сохранить</button></div>';
     overlay.style.display = 'flex';
     window.crmWhoAmIDone_ = onDone;
-  });
+  }).catch(function() { alert('Нет соединения с сервером - не удалось загрузить список сотрудников.'); });
 }
 function crmSaveWhoAmI_() {
   var val = document.getElementById('crm-whoami-select').value;
@@ -11088,13 +11088,29 @@ function crmSetChatSearch_(v) {
   crmChatSearch_ = (v || '').trim().toLowerCase();
   renderCrmChatsList();
 }
+// Дополнительные фильтры (CRM_ARCHITECTURE.md: канал/ответственный/просроченные) -
+// накладываются НА ОСНОВНОЙ фильтр (chip'ы выше), не заменяют его - см. crmChatMatchesFilter_.
+var crmChatExtraFilter_ = { channel: null, overdue: false, responsible: null };
 function crmToggleMoreFilters_() {
   var box = document.getElementById('crm-more-filters');
   var show = box.style.display === 'none';
   if (show) {
     box.innerHTML = ''
-      + '<select onchange="crmChatFilter_=this.value===\'\'?\'all\':(\'ch:\'+this.value);renderCrmChatFilters_();renderCrmChatsList()"><option value="">Все каналы</option><option value="avito">Авито</option><option value="call">Звонок</option></select>'
-      + '<span class="muted" style="font-size:11px">Расширенные фильтры по ответственному/периоду/просрочке - в разработке (Фаза 2)</span>';
+      + '<select id="crm-filter-channel" onchange="crmChatExtraFilter_.channel=this.value||null;renderCrmChatsList()"><option value="">Все каналы</option><option value="avito">Авито</option><option value="call">Звонок</option></select>'
+      + '<select id="crm-filter-responsible"><option value="">Все ответственные</option></select>'
+      + '<span class="crm-filter-chip' + (crmChatExtraFilter_.overdue ? ' active' : '') + '" onclick="crmChatExtraFilter_.overdue=!crmChatExtraFilter_.overdue;this.classList.toggle(\'active\');renderCrmChatsList()">Просроченные (&gt;2ч без ответа)</span>';
+    document.getElementById('crm-filter-channel').value = crmChatExtraFilter_.channel || '';
+    fetchFromYardApi_('/crm/employees', {}).then(function(r) {
+      var sel = document.getElementById('crm-filter-responsible');
+      if (!r.ok || !sel) return;
+      (r.data.employees || []).forEach(function(e) {
+        var opt = document.createElement('option');
+        opt.value = e.extension; opt.textContent = e.name;
+        sel.appendChild(opt);
+      });
+      sel.value = crmChatExtraFilter_.responsible || '';
+      sel.onchange = function() { crmChatExtraFilter_.responsible = sel.value || null; renderCrmChatsList(); };
+    }).catch(function() {}); // список ответственных не загрузился - остальные фильтры (канал/просрочка) всё равно работают
   }
   box.style.display = show ? 'flex' : 'none';
 }
@@ -11127,12 +11143,23 @@ function loadCrmChats() {
   });
 }
 
+// CRM_ARCHITECTURE.md, "Данные и состояния" - статусы выводятся из уже существующих
+// полей, не заводим отдельную таблицу. "Новый"/"Жду ответа" - ниже максимально точно
+// по документу (единственное отступление: "ещё не было исходящего" в доке проверяет ВСЮ
+// историю переписки, а список чатов несёт только last_direction - используем его как
+// честное приближение "ещё не отвечали", без притворства, что это 100% то же самое).
 function crmChatMatchesFilter_(c) {
-  if (crmChatFilter_.indexOf('ch:') === 0) return c.channel === crmChatFilter_.slice(3);
-  if (crmChatFilter_ === 'new') return c.stage === 'new';
-  if (crmChatFilter_ === 'waiting') return c.last_direction === 'in' && Number(c.unread_count || 0) > 0;
-  if (crmChatFilter_ === 'mine') return !!CRM_MY_EXTENSION_ && String(c.responsible_extension || '') === String(CRM_MY_EXTENSION_);
-  if (crmChatFilter_ === 'unassigned') return !c.responsible_name;
+  if (crmChatFilter_ === 'new' && !(c.stage === 'new' && c.last_direction !== 'out')) return false;
+  if (crmChatFilter_ === 'waiting' && c.last_direction !== 'in') return false;
+  if (crmChatFilter_ === 'mine' && !(CRM_MY_EXTENSION_ && String(c.responsible_extension || '') === String(CRM_MY_EXTENSION_))) return false;
+  if (crmChatFilter_ === 'unassigned' && c.responsible_name) return false;
+
+  if (crmChatExtraFilter_.channel && c.channel !== crmChatExtraFilter_.channel) return false;
+  if (crmChatExtraFilter_.responsible && String(c.responsible_extension || '') !== String(crmChatExtraFilter_.responsible)) return false;
+  if (crmChatExtraFilter_.overdue) {
+    var isOverdue = c.last_direction === 'in' && c.last_at && (Date.now() - new Date(c.last_at).getTime()) > 2 * 3600000;
+    if (!isOverdue) return false;
+  }
   return true;
 }
 function crmChatMatchesSearch_(c) {
@@ -11237,12 +11264,14 @@ function openCrmChatThread(clientKey) {
     if (!r.ok) { thread.innerHTML = '<div style="color:var(--red);padding:16px;font-size:13px">Не удалось загрузить переписку</div>'; return; }
     renderCrmThread(r.data.client, r.data.messages, r.data.deal);
     // Открыли тред - переписка прочитана; тихо гасим бейджи, не блокируя отрисовку.
+    // Сбой этого запроса не критичен (бейдж останется как был до следующего опроса) -
+    // проглатываем молча, не мешаем менеджеру уже открытой перепиской.
     postToYardApi_('/crm/messages/read', { client_key: clientKey }).then(function() {
       var cached = crmChatsCache.find(function(c) { return c.client_key === clientKey; });
       if (cached) cached.unread_count = 0;
       renderCrmChatsList();
       crmRefreshUnreadBadge_();
-    });
+    }).catch(function() {});
   }).catch(function() {
     if (crmActiveChatKey !== clientKey) return;
     thread.innerHTML = '<div style="color:var(--red);padding:16px;font-size:13px">Нет соединения с сервером</div>';
@@ -11328,7 +11357,7 @@ function crmSaveChatBrief_(dealId) {
     var savedEl = document.getElementById('crm-ctx-brief-saved');
     if (savedEl) { savedEl.style.display = ''; setTimeout(function() { if (savedEl) savedEl.style.display = 'none'; }, 2000); }
     loadCrmChats(); // подтянуть обновлённый бриф в строку списка слева
-  });
+  }).catch(function() { alert('Нет соединения с сервером - заявка не сохранена, попробуйте ещё раз.'); });
 }
 
 function crmSendThreadMessage() {

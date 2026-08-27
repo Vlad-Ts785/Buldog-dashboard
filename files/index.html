@@ -10858,7 +10858,7 @@ function crmOpenDeal(id) {
       content.innerHTML = '<div style="color:var(--red);padding:16px">Не удалось загрузить: ' + crmEsc((r.data && r.data.error) || 'ошибка сервера') + '</div>';
       return;
     }
-    content.innerHTML = crmModalHtml(r.data.deal, r.data.calls);
+    content.innerHTML = crmModalHtml(r.data.deal, r.data.calls, r.data.messages, r.data.employees);
   }).catch(function() {
     if (crmModalDealId !== id) return;
     content.innerHTML = '<div style="color:var(--red);padding:16px">Нет соединения с сервером</div>';
@@ -10870,9 +10870,10 @@ function closeCrmModal() {
   document.getElementById('crm-modal-overlay').style.display = 'none';
 }
 
-function crmModalHtml(d, calls) {
+function crmModalHtml(d, calls, messages, employees) {
   var phone = crmFmtPhone(d.client_phone);
   var stageLabel = (CRM_STAGE_DEFS.find(function(s) { return s.key === d.stage; }) || {}).label || d.stage;
+  var isAvito = d.client_phone.indexOf('avito:') === 0; // синтетический ключ авито-клиента (см. план, Фаза 4)
   var callsHtml = calls.length
     ? calls.map(function(c) {
         var badge = c.connected
@@ -10887,6 +10888,36 @@ function crmModalHtml(d, calls) {
       }).join('')
     : '<div class="muted" style="font-size:12px;padding:6px 0">Звонков не зафиксировано</div>';
 
+  var employeeOptions = '<option value="">Без ответственного</option>'
+    + (employees || []).map(function(e) {
+        return '<option value="' + e.extension + '"' + (e.extension === d.responsible_extension ? ' selected' : '') + '>' + crmEsc(e.name) + '</option>';
+      }).join('');
+
+  // Чат Авито (Фаза 4в плана - "переписываться прямо с нашей системы, как в Битриксе").
+  // Для call-сделок раздела нет вообще - у звонков нет текстовой переписки.
+  var chatHtml = '';
+  if (isAvito) {
+    var msgsHtml = (messages || []).length
+      ? messages.map(function(m) {
+          var side = m.direction === 'out' ? 'flex-end' : 'flex-start';
+          var bg = m.direction === 'out' ? 'var(--green)' : 'var(--bg3)';
+          var color = m.direction === 'out' ? '#fff' : 'var(--text)';
+          return '<div style="display:flex;justify-content:' + side + '">'
+            + '<div style="max-width:80%;background:' + bg + ';color:' + color + ';border-radius:10px;padding:7px 11px;font-size:13px">' + crmEsc(m.text) + '</div>'
+            + '</div>';
+        }).join('')
+      : '<div class="muted" style="font-size:12px;padding:6px 0">Сообщений нет</div>';
+    chatHtml = '<div class="crm-modal-section">'
+      + '<div class="crm-modal-section-title">Чат (Авито)</div>'
+      + '<div style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;margin-bottom:8px">' + msgsHtml + '</div>'
+      + '<div style="display:flex;gap:6px">'
+      +   '<input type="text" id="crm-f-chat-text" placeholder="Написать клиенту..." style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:7px 10px;font-size:13px" onkeydown="if(event.key===\'Enter\')crmSendAvitoMessage(\'' + d.client_phone + '\')">'
+      +   '<button class="tab-btn active" onclick="crmSendAvitoMessage(\'' + d.client_phone + '\')">Отправить</button>'
+      + '</div>'
+      + '<div id="crm-chat-error" style="color:var(--red);font-size:11px;margin-top:4px"></div>'
+      + '</div>';
+  }
+
   return ''
     + '<div class="crm-modal-header">'
     +   '<div><div class="crm-modal-title">' + (crmEsc(d.client_name) || phone) + '</div>'
@@ -10900,7 +10931,7 @@ function crmModalHtml(d, calls) {
     +     '<div class="crm-modal-field"><label>Номер заказа 1С</label><input type="text" id="crm-f-order" value="' + crmEsc(d.order_1c_number || '') + '"></div>'
     +   '</div>'
     +   (d.loss_reason ? '<div class="crm-modal-static" style="color:var(--red);margin-top:4px">Причина отказа: ' + crmEsc(d.loss_reason) + '</div>' : '')
-    +   '<div class="crm-modal-static muted" style="margin-top:8px">Ответственный: ' + crmEsc(d.responsible_name || '—') + '</div>'
+    +   '<div class="crm-modal-field" style="margin-top:8px"><label>Ответственный</label><select id="crm-f-responsible" style="width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:7px 10px;font-size:13px">' + employeeOptions + '</select></div>'
     + '</div>'
     + '<div class="crm-modal-section">'
     +   '<div class="crm-modal-section-title">Контакт</div>'
@@ -10909,6 +10940,7 @@ function crmModalHtml(d, calls) {
     +     '<div class="crm-modal-field"><label>E-mail</label><input type="email" id="crm-f-email" value="' + crmEsc(d.client_email || '') + '"></div>'
     +   '</div>'
     + '</div>'
+    + chatHtml
     + '<div class="crm-modal-section">'
     +   '<div class="crm-modal-section-title">История звонков (' + d.calls_count + ')</div>'
     +   '<div class="crm-calls-list">' + callsHtml + '</div>'
@@ -10926,6 +10958,7 @@ function crmSaveDeal(id) {
     order_1c_number: document.getElementById('crm-f-order').value,
     client_name: document.getElementById('crm-f-name').value,
     client_email: document.getElementById('crm-f-email').value,
+    responsible_extension: document.getElementById('crm-f-responsible').value,
   };
   postToYardApi_('/crm/deals/update', params).then(function(r) {
     if (!r.ok) {
@@ -10934,6 +10967,30 @@ function crmSaveDeal(id) {
     }
     closeCrmModal();
     loadCrmData();
+  });
+}
+
+// Отправка сообщения клиенту в Авито-чат прямо из карточки сделки (Влад, 27.08: "возможность
+// переписываться прямо с нашей системы, как в Битриксе"). chat_id узнаём отдельным запросом -
+// он появляется только после ПЕРВОГО входящего сообщения от клиента (пока клиент не написал
+// нам первым, переписки с ним в нашей системе просто не существует - это ограничение самого
+// Авито, не наше: написать НЕЗНАКОМОМУ человеку первым через API нельзя).
+function crmSendAvitoMessage(clientKey) {
+  var input = document.getElementById('crm-f-chat-text');
+  var errEl = document.getElementById('crm-chat-error');
+  var text = input.value.trim();
+  if (!text) return;
+  errEl.textContent = '';
+  fetchFromYardApi_('/crm/avito/chat_id', { client_key: clientKey }).then(function(r) {
+    if (!r.ok || !r.data.chat_id) {
+      errEl.textContent = 'Не найден чат с этим клиентом - клиент ещё не писал нам первым.';
+      return;
+    }
+    return postToYardApi_('/crm/avito/send', { chat_id: r.data.chat_id, text: text, client_key: clientKey }).then(function(r2) {
+      if (!r2.ok) { errEl.textContent = 'Не удалось отправить: ' + (r2.data && r2.data.error || 'ошибка сервера'); return; }
+      input.value = '';
+      crmOpenDeal(crmModalDealId); // перезагрузить карточку - подтянет отправленное сообщение в историю
+    });
   });
 }
 // Снимок закрытого месяца с сервера, если он уже перенесён (см. period_snapshots на VPS) -

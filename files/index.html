@@ -316,6 +316,43 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .p2-attention{border-color:rgba(226,75,74,.4);}
 .p2-attention:hover{border-color:rgba(226,75,74,.55);}
 
+/* строки "метрика-значение" с точечным лидером (ГОСТ раздел 4) */
+.p2-rows{display:flex;flex-direction:column;}
+.p2-row{display:flex;align-items:baseline;gap:8px;min-height:24px;font-size:12px;}
+.p2-row-label{color:var(--muted);white-space:nowrap;}
+.p2-leader{flex:1;border-bottom:1px dotted rgba(255,255,255,.12);transform:translateY(-3px);}
+.p2-row-val{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:500;font-variant-numeric:tabular-nums;color:var(--text);white-space:nowrap;}
+.p2-row-aux{font-family:'JetBrains Mono',monospace;font-size:11px;font-variant-numeric:tabular-nums;color:var(--muted);min-width:4.5ch;text-align:right;white-space:nowrap;}
+.p2-row-aux--bad{color:var(--red);}
+.p2-row--total{border-top:1px solid var(--border);margin-top:5px;padding-top:6px;}
+.p2-row--total .p2-row-label{color:var(--text);}
+
+/* дни-колонки поступлений (ГОСТ раздел 4): прошлые 35%, сегодня 100%, будущие плейсхолдеры */
+.p2-days{display:flex;align-items:flex-end;gap:2px;height:38px;}
+.p2-day{flex:1;border-radius:2px 2px 0 0;background:var(--green);opacity:.35;min-height:2px;}
+.p2-day--today{opacity:1;}
+.p2-day--future{opacity:1;background:rgba(255,255,255,.07);height:2px;}
+.p2-days-foot{display:flex;justify-content:space-between;font-size:9px;color:var(--muted);font-family:'JetBrains Mono',monospace;margin-top:3px;}
+
+/* вафля парка (ГОСТ раздел 4): юнит 12px = одна машина */
+.p2-units{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;}
+.p2-unit{width:12px;height:12px;border-radius:3px;background:var(--bg4);flex:none;}
+.p2-unit--work{background:var(--green);}
+.p2-unit--repair{background:var(--red);}
+.p2-unit--nodriver{background:transparent;border:1px solid var(--border-strong, rgba(255,255,255,.16));}
+.p2-unit--idle{background:var(--amber);}
+.p2-legend{display:flex;flex-direction:column;}
+.p2-legend-row{display:flex;align-items:center;gap:7px;min-height:22px;font-size:11.5px;}
+.p2-legend-count{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--text);min-width:2.5ch;text-align:right;}
+.p2-legend-name{color:var(--muted);}
+
+/* ярус 3 (затраты + найм + незакрытые): единый ритм с .grid-2 - тот же gap и отступ */
+.p2-tier3-grid{margin-bottom:16px;}
+@media (max-width:1100px){.p2-tier3-grid{grid-template-columns:1fr 1fr !important;}}
+@media (max-width:640px){.p2-tier3-grid{grid-template-columns:1fr !important;}}
+/* вердикт и KPI-ряд - тот же вертикальный ритм 16px, что у .grid-2 */
+#page-main .kpi-grid{margin-bottom:16px;}
+
 /* ремонт: строчная таблица, число + цвет порога, без полос (спека дизайн-агента:
    полоса рядом с денежными полосами создаёт ложную рифму) */
 .p2-rep-tbl{width:100%;border-collapse:collapse;font-size:12.5px;}
@@ -940,13 +977,13 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           <div class="kpi-value amber" id="k-debt-total">—</div>
           <div class="kpi-sub" id="k-debt-breakdown" style="margin-top:6px;line-height:1.7"></div>
           <div class="kpi-sub" id="k-debt-week-saldo" style="margin-top:4px"></div>
-          <div style="position:relative;height:44px;margin-top:10px"><canvas id="chart-debt-mini"></canvas></div>
+          <div style="position:relative;height:44px;margin-top:10px" id="chart-debt-mini"></div>
           <svg class="p2-drill-chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5 11 8l-5 4.5"/></svg>
         </div>
       </div>
 
-      <!-- ЯРУС 2: парк - агрегат слева, боль (ремонт) справа (Влад, 2026-07-04 порядок сохранён) -->
-      <div class="grid-2">
+      <!-- ЯРУС 2: парк - агрегат слева (уже), боль (ремонт) справа (шире) - пропорции превью -->
+      <div class="grid-2" style="grid-template-columns:5fr 7fr">
         <div class="card" id="p2-fleet-card">
           <div class="card-title">Статус парка</div>
           <div id="fleet-status"></div>
@@ -5260,6 +5297,9 @@ function renderKPI() {
 // начала года - "года показывать не нужно" (Влад, 2026-08-16). Тот же s.month_balance
 // уже считается бэкендом и используется на полной странице "Поступления" (см.
 // renderReceiptsKPIs), тут просто другой ракурс на то же число.
+// ГОСТ-редизайн 28.08 (как в превью "Панель 2.0"): hero-число + дни-колонки месяца
+// (прошлые дни 35%, сегодня 100%, будущие - плейсхолдеры) + строки с точечным лидером.
+// Источник тот же - D.receipts (r.daily уже грузится для страницы "Поступления").
 function renderMainReceiptsSummary() {
   var el = document.getElementById('main-receipts-summary');
   if (!el) return;
@@ -5271,32 +5311,52 @@ function renderMainReceiptsSummary() {
   var s = r.summary;
   var w = r.week || {};
 
+  // дни-колонки: r.daily = [{date:'YYYY-MM-DD', bank, cash}] за текущий месяц
+  var daysHtml = '';
+  var daily = r.daily || [];
+  if (daily.length && r.month) {
+    var byDay = {};
+    daily.forEach(function(d) {
+      var dayN = parseInt(String(d.date).slice(8, 10), 10);
+      if (dayN) byDay[dayN] = (byDay[dayN] || 0) + (d.bank || 0) + (d.cash || 0);
+    });
+    var parts = String(r.month).split('-');
+    var dim = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10), 0).getDate();
+    var today = new Date();
+    var isCurMonth = today.getFullYear() === parseInt(parts[0], 10) && (today.getMonth() + 1) === parseInt(parts[1], 10);
+    var todayN = isCurMonth ? today.getDate() : dim;
+    var maxDay = 0;
+    Object.keys(byDay).forEach(function(k) { maxDay = Math.max(maxDay, byDay[k]); });
+    if (maxDay > 0) {
+      var cols = '';
+      for (var dn = 1; dn <= dim; dn++) {
+        if (dn > todayN) { cols += '<div class="p2-day p2-day--future"></div>'; continue; }
+        var v = byDay[dn] || 0;
+        var hPct = Math.max(4, v / maxDay * 100);
+        cols += '<div class="p2-day' + (dn === todayN ? ' p2-day--today' : '') + '" style="height:' + hPct.toFixed(0) + '%" title="' + dn + ' число · ' + fmtK2(v) + ' ₽"></div>';
+      }
+      daysHtml = '<div class="p2-days">' + cols + '</div>' +
+        '<div class="p2-days-foot"><span>1</span><span>сегодня</span><span>' + dim + '</span></div>';
+    }
+  }
+
   var weekPct = null;
   if (w.prev_total > 0) weekPct = Math.round(((w.total || 0) - w.prev_total) / w.prev_total * 100);
-  var weekUp = weekPct !== null && weekPct >= 0;
-  var weekSub = weekPct === null ? '' :
-    '<div style="font-size:11px;color:' + (weekUp ? 'var(--green)' : 'var(--red)') + ';margin-top:2px">' +
-      (weekUp ? '▲' : '▼') + ' ' + (weekUp ? '+' : '') + weekPct + '%</div>';
-
-  function miniStat(label, valueHtml, sub, fullRow) {
-    return '<div' + (fullRow ? ' style="grid-column:1/-1"' : '') + '>' +
-      '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">' + label + '</div>' +
-      '<div style="font-size:15px;font-weight:600;color:var(--text)">' + valueHtml + '</div>' +
-      (sub || '') +
-    '</div>';
-  }
+  var weekAux = weekPct === null ? '' :
+    '<span class="p2-row-aux' + (weekPct < 0 ? ' p2-row-aux--bad' : '') + '">' + (weekPct >= 0 ? '+' : '') + weekPct + '%</span>';
 
   var monthBalance = s.month_balance;
   var balHtml = monthBalance == null ? '—' :
     '<span style="color:' + (monthBalance >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (monthBalance >= 0 ? '+' : '') + fmt(monthBalance) + '</span>';
 
   el.innerHTML =
-    '<div style="font-size:22px;font-weight:600;color:var(--text);line-height:1.2">' + fmt(s.total_month) + '</div>' +
-    '<div style="font-size:11px;color:var(--muted);margin-top:4px">за ' + formatMonthLabel(r.month).toLowerCase() + '</div>' +
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 16px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">' +
-      miniStat('Сегодня', fmt(s.total_today)) +
-      miniStat('На неделе', fmt(w.total || 0), weekSub) +
-      miniStat('Сальдо за ' + formatMonthLabel(r.month).toLowerCase(), balHtml, null, true) +
+    '<div class="kpi-value" style="color:var(--text)">' + fmt(s.total_month) + '</div>' +
+    '<div class="kpi-sub2">за ' + formatMonthLabel(r.month).toLowerCase() + '</div>' +
+    (daysHtml ? '<div style="margin-top:10px">' + daysHtml + '</div>' : '') +
+    '<div class="p2-rows" style="margin-top:10px">' +
+      '<div class="p2-row"><span class="p2-row-label">Сегодня</span><span class="p2-leader"></span><span class="p2-row-val">' + fmt(s.total_today) + '</span></div>' +
+      '<div class="p2-row"><span class="p2-row-label">За неделю</span><span class="p2-leader"></span><span class="p2-row-val">' + fmt(w.total || 0) + '</span>' + weekAux + '</div>' +
+      '<div class="p2-row p2-row--total"><span class="p2-row-label">Сальдо месяца</span><span class="p2-leader"></span><span class="p2-row-val">' + balHtml + '</span></div>' +
     '</div>';
 }
 
@@ -5350,8 +5410,14 @@ function renderDebtMiniCard() {
   });
   var total = current30 + over30 + over60;
   if (totalEl) totalEl.textContent = fmt(total);
-  if (breakdownEl) breakdownEl.innerHTML =
-    'Текущая: ' + fmt(current30) + '<br>Короткая: ' + fmt(over30) + '<br>Средняя: ' + fmt(over60);
+  // Строки с точечным лидером и aux-долей (ГОСТ раздел 4, как в превью "Панель 2.0")
+  function debtRow(label, v, isTotalRow) {
+    var share = total > 0 ? Math.round(v / total * 100) + '%' : '';
+    return '<div class="p2-row' + (isTotalRow ? ' p2-row--total' : '') + '"><span class="p2-row-label">' + label + '</span><span class="p2-leader"></span>' +
+      '<span class="p2-row-val">' + fmt(v) + '</span><span class="p2-row-aux">' + share + '</span></div>';
+  }
+  if (breakdownEl) breakdownEl.innerHTML = '<div class="p2-rows">' +
+    debtRow('Текущая', current30) + debtRow('Короткая', over30) + debtRow('Средняя', over60) + '</div>';
 
   // Сальдо за неделю (Влад, 2026-07-19: "сальдо неделя выведи мне на панель куда-нибудь в
   // блок дебиторская задолженность" - тот же смысл, что кнопка "Неделя" в "Что изменилось"
@@ -5382,30 +5448,44 @@ function renderDebtMiniCard() {
   }
 
   // Мини-график - долг 0-90 дней по дням (debt.history[].debt0to90, копится с момента
-  // деплоя этой фичи, как и вся остальная история ДЗ - старые дни дадут 0).
-  var ctx = document.getElementById('chart-debt-mini');
+  // деплоя фичи). ГОСТ-редизайн 28.08: инлайн-SVG monotone cubic (Chart.js убран с
+  // этой карточки) - area 14%, конечная точка с кольцом фона, цвет всей линии по
+  // ТРЕНДУ окна: рост долга = red, снижение = green, флэт = muted (порог ±2%).
+  var svgBox = document.getElementById('chart-debt-mini');
   var hist = (debt.history || []).filter(function(h) { return h.debt0to90 > 0; });
-  if (ctx && hist.length >= 2) {
-    if (ctx._chart) ctx._chart.destroy();
-    ctx._chart = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: hist.map(function(h){ return h.date; }),
-        datasets: [{
-          data: hist.map(function(h){ return h.debt0to90; }),
-          borderColor: '#EF9F27', backgroundColor: 'rgba(239,159,39,0.12)',
-          fill: true, tension: 0.35, pointRadius: 0, borderWidth: 2,
-        }]
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { enabled: false } },
-        scales: { x: { display: false }, y: { display: false } },
-      }
-    });
-  } else if (ctx && ctx._chart) {
-    ctx._chart.destroy();
-    ctx._chart = null;
+  if (svgBox && hist.length >= 2) {
+    var pts = hist.map(function(h){ return h.debt0to90; });
+    var n = pts.length, w = 400, hgt = 40;
+    var mn = Math.min.apply(null, pts), mx = Math.max.apply(null, pts);
+    var span = (mx - mn) || 1;
+    mn -= span * 0.15; mx += span * 0.15; span = mx - mn;
+    var xs = [], ys = [];
+    for (var i = 0; i < n; i++) { xs.push(i / (n - 1) * w); ys.push(hgt - (pts[i] - mn) / span * hgt); }
+    var dxs = [], slopes = [];
+    for (i = 0; i < n - 1; i++) { dxs.push(xs[i+1] - xs[i]); slopes.push((ys[i+1] - ys[i]) / (xs[i+1] - xs[i])); }
+    var tg = [slopes[0]];
+    for (i = 1; i < n - 1; i++) { tg.push((slopes[i-1] * slopes[i] <= 0) ? 0 : (slopes[i-1] + slopes[i]) / 2); }
+    tg.push(slopes[n-2]);
+    var d = 'M' + xs[0].toFixed(1) + ',' + ys[0].toFixed(1);
+    for (i = 0; i < n - 1; i++) {
+      d += 'C' + (xs[i] + dxs[i]/3).toFixed(1) + ',' + (ys[i] + tg[i]*dxs[i]/3).toFixed(1) + ' ' +
+        (xs[i+1] - dxs[i]/3).toFixed(1) + ',' + (ys[i+1] - tg[i+1]*dxs[i]/3).toFixed(1) + ' ' +
+        xs[i+1].toFixed(1) + ',' + ys[i+1].toFixed(1);
+    }
+    var rising = pts[n-1] > pts[0] * 1.02;
+    var falling = pts[n-1] < pts[0] * 0.98;
+    var col = rising ? '#E24B4A' : (falling ? '#1D9E75' : '#8b8980');
+    svgBox.innerHTML =
+      '<svg viewBox="0 0 400 40" preserveAspectRatio="none" style="display:block;width:100%;height:100%" aria-hidden="true">' +
+      '<defs><linearGradient id="p2dg" x1="0" y1="0" x2="0" y2="1">' +
+      '<stop offset="0" stop-color="' + col + '" stop-opacity="0.14"/>' +
+      '<stop offset="1" stop-color="' + col + '" stop-opacity="0"/></linearGradient></defs>' +
+      '<path d="' + d + ' L400,40 L0,40 Z" fill="url(#p2dg)"/>' +
+      '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '<circle cx="' + xs[n-1].toFixed(1) + '" cy="' + ys[n-1].toFixed(1) + '" r="4" fill="' + col + '" stroke="#17171d" stroke-width="2"/>' +
+      '</svg>';
+  } else if (svgBox) {
+    svgBox.innerHTML = '';
   }
 }
 
@@ -5566,37 +5646,45 @@ function renderFleetStatus() {
   const yest = snap(dates[dates.length - 1]);
   const prev = snap(dates[dates.length - 2]);
 
-  function frow(label, today, y, p, higherGood, cls) {
-    const hasY = y !== null && y !== undefined;
-    const hasP = p !== null && p !== undefined;
-    const hist = (hasP ? '<span class="fleet-h2">' + p + '</span>' : '') +
-                 (hasY ? '<span class="fleet-h1">' + y + '</span>' : '');
-    let arr = '';
-    if (hasY) {
-      const diff = today - y;
-      if (diff > 0) arr = '<span class="fleet-arr ' + (higherGood ? 'up-good' : 'up-bad') + '">↑</span>';
-      else if (diff < 0) arr = '<span class="fleet-arr ' + (higherGood ? 'dn-bad' : 'dn-good') + '">↓</span>';
-      else arr = '<span class="fleet-arr flat">→</span>';
-    }
-    return '<div class="fleet-row">' +
-      '<span class="fleet-row-label">' + label + '</span>' +
-      '<span class="fleet-row-hist">' + hist + '</span>' +
-      '<span class="fleet-row-val ' + cls + '">' + today + '</span>' +
-      arr +
+  // Вафля (unit chart, ГОСТ раздел 4, как в превью "Панель 2.0"): одна машина = один
+  // квадрат 12px. в работе = green, ремонт = red, без водителя = пустой контур,
+  // без заказа = amber. Динамика вчера/позавчера - стрелкой в легенде группы (не
+  // отдельными колонками цифр, как раньше - вафля сама показывает состав).
+  function waffle(g) {
+    var html = '';
+    [['p2-unit--work', g.working||0], ['p2-unit--nodriver', g.noDriver||0],
+     ['p2-unit--repair', g.repair||0], ['p2-unit--idle', g.noOrder||0]].forEach(function(k) {
+      for (var i = 0; i < k[1]; i++) html += '<i class="p2-unit ' + k[0] + '"></i>';
+    });
+    // расхождение суммы статусов с размером парка не прячем - серые "нет статуса"
+    var accounted = (g.working||0) + (g.noDriver||0) + (g.repair||0) + (g.noOrder||0);
+    for (var j = accounted; j < (g.total||0); j++) html += '<i class="p2-unit"></i>';
+    return '<div class="p2-units">' + html + '</div>';
+  }
+  function arrowFor(today, y, higherGood) {
+    if (y === null || y === undefined) return '';
+    var diff = today - y;
+    if (diff > 0) return '<span class="fleet-arr ' + (higherGood ? 'up-good' : 'up-bad') + '">↑</span>';
+    if (diff < 0) return '<span class="fleet-arr ' + (higherGood ? 'dn-bad' : 'dn-good') + '">↓</span>';
+    return '';
+  }
+  function legendRow(swatchClass, count, label, arrow) {
+    return '<div class="p2-legend-row"><i class="p2-unit ' + swatchClass + '" style="width:10px;height:10px"></i>' +
+      '<span class="p2-legend-count">' + count + '</span><span class="p2-legend-name">' + label + '</span>' + (arrow||'') + '</div>';
+  }
+  function groupBlock(title, g, yWork, yRepair, yNoDrv) {
+    return '<div class="fleet-block-title">' + title + ' · ' + (g.total||0) + ' ед.</div>' +
+      waffle(g) +
+      '<div class="p2-legend">' +
+        legendRow('p2-unit--work', g.working||0, 'в работе', arrowFor(g.working||0, yWork, true)) +
+        legendRow('p2-unit--repair', g.repair||0, 'ремонт', arrowFor(g.repair||0, yRepair, false)) +
+        legendRow('p2-unit--nodriver', g.noDriver||0, 'без водителя', arrowFor(g.noDriver||0, yNoDrv, false)) +
+        legendRow('p2-unit--idle', g.noOrder||0, 'без заказа', '') +
       '</div>';
   }
 
-  const trRows =
-    frow('В работе',     tr.working||0,  yest && yest.workTrails,     prev && prev.workTrails,     true,  'green') +
-    frow('Ремонт',       tr.repair||0,   yest && yest.repairTrails,   prev && prev.repairTrails,   false, 'red')   +
-    frow('Без водителя', tr.noDriver||0, yest && yest.noDriverTrails, prev && prev.noDriverTrails, false, 'amber') +
-    frow('Без заказа',   tr.noOrder||0,  null, null, false, '');
-
-  const tkRows =
-    frow('В работе',     tk.working||0,  yest && yest.workTrucks,     prev && prev.workTrucks,     true,  'green') +
-    frow('Ремонт',       tk.repair||0,   yest && yest.repairTrucks,   prev && prev.repairTrucks,   false, 'red')   +
-    frow('Без водителя', tk.noDriver||0, yest && yest.noDriverTrucks, prev && prev.noDriverTrucks, false, 'amber') +
-    frow('Без заказа',   tk.noOrder||0,  null, null, false, '');
+  const trRows = groupBlock('Тралы', tr, yest && yest.workTrails, yest && yest.repairTrails, yest && yest.noDriverTrails);
+  const tkRows = groupBlock('Длинномеры', tk, yest && yest.workTrucks, yest && yest.repairTrucks, yest && yest.noDriverTrucks);
 
   const totalWorking  = (tr.working||0)  + (tk.working||0);
   const totalRepair   = (tr.repair||0)   + (tk.repair||0);
@@ -5632,8 +5720,8 @@ function renderFleetStatus() {
   // то же для длинномеров -> "Борт"). Тот же приём, что карточки на Панели (ДЗ, Маржа найма).
   document.getElementById('fleet-status').innerHTML =
     '<div class="fleet-grid">' +
-      '<div class="fleet-block" style="cursor:pointer" onclick="goToVehiclesWithType(TRAL_ALL_FILTER)"><div class="fleet-block-title">Тралы · ' + (tr.total||36) + ' ед.</div>' + trRows + '</div>' +
-      '<div class="fleet-block" style="cursor:pointer" onclick="goToVehiclesWithType(\'Борт\')"><div class="fleet-block-title">Длинномеры · ' + (tk.total||19) + ' ед.</div>' + tkRows + '</div>' +
+      '<div class="fleet-block" style="cursor:pointer" onclick="goToVehiclesWithType(TRAL_ALL_FILTER)">' + trRows + '</div>' +
+      '<div class="fleet-block" style="cursor:pointer" onclick="goToVehiclesWithType(\'Борт\')">' + tkRows + '</div>' +
     '</div>' +
     footer;
 }

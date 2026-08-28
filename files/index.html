@@ -145,6 +145,10 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   font-size:17px;font-weight:500;letter-spacing:.02em;text-transform:uppercase;
   color:var(--text);padding-bottom:16px;
 }
+/* Должность рядом с ФИО на личной странице (стандарт шапки один на все страницы:
+   заголовок Unbounded + строка даты/времени; Влад, 29.08). */
+.page-header-sub{font-size:12px;color:var(--muted);padding-bottom:16px;}
+.page-header-sub:empty{display:none;}
 @media (max-width:640px){.page-header-title{font-size:14px;}}
 
 main{padding:24px 28px;max-width:1400px;width:100%;}
@@ -1256,6 +1260,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
       <div class="page-header-title" id="page-title">Панель управления</div>
       <!-- Строка периода и свежести (превью "Панель 2.0", доточка 28.08): месяц, день N из M,
            время данных 1С. Заполняется updatePagePeriod_() из render(). -->
+      <div class="page-header-sub" id="page-subtitle"></div>
       <div class="p2-page-period" id="page-period"></div>
     </div>
     <div id="period-selector-wrap" style="display:none;align-items:center;gap:8px;padding-bottom:16px">
@@ -3488,6 +3493,14 @@ window.Clc = {
 
 </script>
 
+<!-- Drawer «Пропавшие клиенты» личной страницы (превью 29.08): тяжёлый ленивый
+     запрос уходит только по явному открытию, а не по клику в общем ряду вкладок. -->
+<div class="mp-drawer-bk" id="mp-lost-bk" onclick="mpCloseLostDrawer_()"></div>
+<div class="mp-drawer" id="mp-lost-drawer">
+  <h3>Пропавшие клиенты</h3>
+  <div id="mp-lost-body"><div style="font-size:13px;color:var(--muted)">Загрузка…</div></div>
+</div>
+
 <!-- ═══ КАРТОЧКА МАШИНЫ ════════════════════════════════════ -->
 <div class="vcard-overlay" id="vcard-overlay" onclick="closeVehicleCard()"></div>
 <div class="vcard-panel" id="vcard-panel">
@@ -4056,10 +4069,15 @@ function renderMyPage() {
     // итерация), Влад её отклонил: "не нравится, как ФИО и полоска выглядят рядом - ФИО на
     // самый верх, полоску опусти вниз одним блоком на всю длину, как было". Полоска плана -
     // снова отдельный полноширинный блок в renderMyPageManager (см. ниже по файлу).
-    var headerHtml = '<div style="margin-bottom:'+(isManagerRole||isLogistRole?'16':'8')+'px">'+
-      '<div style="font-size:19px;font-weight:700;color:var(--text)">'+current.name+'</div>'+
-      '<div style="font-size:13px;color:var(--muted);margin-top:2px">'+positionLabel(current.name, current.type)+'</div>'+
-    '</div>';
+    // ФИО и должность переехали в ОБЩУЮ шапку страницы (заголовок Unbounded + строка
+    // даты/времени - тот же стандарт, что на главной). Дублирующий блок в теле убран,
+    // иначе имя было бы напечатано дважды и разными шрифтами (Влад, 29.08).
+    setText('page-title', current.name);
+    setText('page-subtitle', positionLabel(current.name, current.type));
+    var phEl = document.querySelector('.page-header');
+    if (phEl) phEl.style.display = '';
+    try { updatePagePeriod_(); } catch(e) {}
+    var headerHtml = '';
 
     // Переключатель периода (2026-08-11) - "Текущий месяц" / "Прошлый месяц", доступен всем
     // ролям (admin-предпросмотр и реальный вход manager/logist).
@@ -4143,7 +4161,7 @@ function isLiveMonthKey_(period) {
 
 // Вкладки нового блока личной страницы менеджера (2026-08-12, по образцу "Обзор заказов").
 let myPageMgrTab = 'top'; // 'top' | 'lost' | 'debt' | 'docs' | 'receipts'
-function setMyPageMgrTab(tab) { myPageMgrTab = tab; renderMyPage(); }
+function setMyPageMgrTab(tab) { if (tab === 'lost') tab = 'top'; myPageMgrTab = tab; renderMyPage(); }
 // "Поступления" на личной странице менеджера (Влад, 2026-08-16: "внутри вкладки должен быть
 // выбор сегодня/вчера/неделя/месяц... все поступления должны относиться к конкретному
 // менеджеру") - те же готовые списки, что и на общей странице "Поступления" (D.receipts),
@@ -4264,6 +4282,13 @@ var PAGE_COL = { red:'#E24B4A', amber:'#EF9F27', green:'#1D9E75', blue:'#378ADD'
 // Десятичный знак - ЗАПЯТАЯ (ГОСТ раздел 2). В легаси была точка («5.0 млн»),
 // поймано при переносе кабины смены 29.08 - правится тут, для всей личной страницы.
 function pageMln_(n) { var x=Math.abs(n||0); var sg=(n||0)<0?'-':''; return x>=1000000 ? sg+(x/1000000).toFixed(1).replace('.',',')+' млн ₽' : sg+Math.round(x).toLocaleString('ru-RU')+' ₽'; }
+// Экранирование для строк, приходящих из 1С (имена контрагентов и т.п.). Внутри
+// калькулятора свой escHtml_ живёт в IIFE и снаружи недоступен - здесь глобальный.
+function pageEsc_(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
 function pageFr_(n) { return n ? Math.round(n).toLocaleString('ru-RU')+' ₽' : '—'; }
 function pageBlock_(title, bodyHtml) {
   return '<div class="card" style="margin-bottom:14px;padding:16px 18px">'+
@@ -4516,6 +4541,69 @@ function mpStatsHtml_(faktVal, planVal, sur) {
       debtTotal>0 ? '<b>'+pageFr_(debtOver30)+'</b> просрочено &gt;30 дн.' : 'долгов нет', overPctV)+
   '</div>';
 }
+/* ── Drawer «Пропавшие клиенты» (превью 29.08). Тот же серверный запрос
+   manager_lost_customers и тот же кэш, что был у вкладки - меняется только
+   способ показа: по требованию, а не постоянной пилюлей в таб-баре. ── */
+function mpOpenLostDrawer_() {
+  var bk = document.getElementById('mp-lost-bk'), dr = document.getElementById('mp-lost-drawer');
+  if (!bk || !dr) return;
+  bk.classList.add('show');
+  setTimeout(function(){ dr.classList.add('show'); }, 40);
+  mpRenderLostBody_();
+}
+function mpCloseLostDrawer_() {
+  var bk = document.getElementById('mp-lost-bk'), dr = document.getElementById('mp-lost-drawer');
+  if (bk) bk.classList.remove('show');
+  if (dr) dr.classList.remove('show');
+}
+function mpRenderLostBody_() {
+  var body = document.getElementById('mp-lost-body');
+  if (!body) return;
+  var cur = myPageCurrentEntry_();
+  if (!cur) { body.innerHTML = '<div style="font-size:13px;color:var(--muted)">Нет данных</div>'; return; }
+  var key = cur.name + '::' + (myPagePeriod || 'current');
+  var entry = mgrLostCache[key];
+  if (!entry) {
+    body.innerHTML = '<div style="font-size:13px;color:var(--muted)">Загрузка… обычно 5-15 сек.</div>';
+    if (!mgrLostLoading) {
+      mgrLostLoading = true;
+      apiFetchJson({ action:'manager_lost_customers', manager:cur.name, period: myPagePeriod || '' }).then(function(data){
+        mgrLostLoading = false;
+        mgrLostCache[key] = (data && data.error) ? { error:data.error } : { data:(data && data.customers) || [] };
+        mpRenderLostBody_();
+      }).catch(function(e){
+        mgrLostLoading = false;
+        mgrLostCache[key] = { error: e.message };
+        mpRenderLostBody_();
+      });
+    }
+    return;
+  }
+  if (entry.error) {
+    // Ошибка обязана иметь выход, а не быть тупиком (эргономист, 29.08).
+    body.innerHTML = '<div style="font-size:13px;color:'+PAGE_COL.red+'">Не удалось загрузить: '+pageEsc_(entry.error)+'</div>'+
+      '<button class="mp-regen" style="margin-top:10px" onclick="mpRetryLost_()">Повторить</button>';
+    return;
+  }
+  var rows = (entry.data||[]).slice(0,30);
+  if (!rows.length) {
+    body.innerHTML = '<div style="font-size:13px;color:var(--muted)">Пропавших клиентов нет — все, кто заказывал за 3 месяца, на связи</div>';
+    return;
+  }
+  body.innerHTML = rows.map(function(c){
+    return '<div class="mp-lost">'+
+      '<span class="mp-lost__v">'+pageMln_(c.amount_total)+'</span>'+
+      '<div class="mp-lost__n">'+pageEsc_(c.name)+'</div>'+
+      '<div class="mp-lost__s">'+(c.days_since||0)+' дн. тишины · '+(c.orders_total||0)+' зак. за 3 мес.</div>'+
+    '</div>';
+  }).join('');
+}
+function mpRetryLost_() {
+  var cur = myPageCurrentEntry_();
+  if (!cur) return;
+  delete mgrLostCache[cur.name + '::' + (myPagePeriod || 'current')];
+  mpRenderLostBody_();
+}
 function mpScrollToTabs_() {
   setTimeout(function(){
     var t = document.getElementById('mp-tabs-card');
@@ -4550,6 +4638,7 @@ function mpInitLight_() {
     if (el) el.classList.add('on');
     if (!raf && !document.hidden) raf = requestAnimationFrame(tick);
   });
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape') mpCloseLostDrawer_(); });
   page.addEventListener('pointerleave', function(){
     var el = document.getElementById('mp-light');
     if (el) el.classList.remove('on');
@@ -4892,45 +4981,36 @@ function renderMyPageManager(el, current, selectorHtml, d) {
   // 2026-08-12) - зарплата и документы уже покрыты блоком зарплаты выше и вкладкой "Воронка
   // документов" ниже.
   html += '<div class="card" id="mp-tabs-card" style="margin-bottom:16px">';
-  html += '<div class="tab-bar">'+
+  // Четыре вкладки + «Пропавшие клиенты» отдельной ghost-кнопкой в drawer (превью
+  // 29.08): это самый тяжёлый лениво загружаемый запрос и самая редкая по частоте
+  // вкладка - её запрос уходит только по явному открытию, а не по клику в общем
+  // ряду. Заодно пятая пилюля уходит из тесного таб-бара.
+  html += '<div class="mp-tabrow"><div class="tab-bar" style="margin-bottom:0">'+
     '<button class="tab-btn'+(myPageMgrTab==='top'?' active':'')+'" onclick="setMyPageMgrTab(\'top\')">Топ заказчиков</button>'+
-    '<button class="tab-btn'+(myPageMgrTab==='lost'?' active':'')+'" onclick="setMyPageMgrTab(\'lost\')">Пропавшие клиенты</button>'+
     '<button class="tab-btn'+(myPageMgrTab==='debt'?' active':'')+'" onclick="setMyPageMgrTab(\'debt\')">Дебиторская задолженность</button>'+
     '<button class="tab-btn'+(myPageMgrTab==='docs'?' active':'')+'" onclick="setMyPageMgrTab(\'docs\')">Воронка документов</button>'+
     '<button class="tab-btn'+(myPageMgrTab==='receipts'?' active':'')+'" onclick="setMyPageMgrTab(\'receipts\')">Поступления</button>'+
+  '</div>'+
+  '<button class="mp-ghostbtn" onclick="mpOpenLostDrawer_()">'+
+    '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.7-4.7M8 10.5h5"/></svg>'+
+    'Пропавшие клиенты</button>'+
   '</div>';
 
   if (myPageMgrTab === 'top') {
-    html += rowsList((d.top_customers||[]).slice(0,15).map(function(c){
-      return { left:c.name, sub:c.orders+' зак.', right:mln(c.amount), color:'var(--text)' };
-    }), 'Нет заказов в этом месяце');
-
-  } else if (myPageMgrTab === 'lost') {
-    // Пропавшие клиенты за 3 месяца (Влад: "все кто заказывал у нас последние три месяца и
-    // не заказывал больше двух недель, приоритет по объёму выручки от большего к меньшему") -
-    // лениво по клику (тяжёлая операция на бэкенде - читает 3 архивных листа).
-    var lostKey = current + '::' + (myPagePeriod || 'current');
-    var lostEntry = mgrLostCache[lostKey];
-    if (!lostEntry) {
-      html += '<div style="font-size:13px;color:var(--muted);padding:8px 0">Загрузка…</div>';
-      if (!mgrLostLoading) {
-        mgrLostLoading = true;
-        apiFetchJson({ action: 'manager_lost_customers', manager: current, period: myPagePeriod || '' }).then(function(data) {
-          mgrLostLoading = false;
-          mgrLostCache[lostKey] = data && data.error ? { error: data.error } : { data: (data && data.customers) || [] };
-          renderMyPage();
-        }).catch(function(e) {
-          mgrLostLoading = false;
-          mgrLostCache[lostKey] = { error: e.message };
-          renderMyPage();
-        });
-      }
-    } else if (lostEntry.error) {
-      html += '<div style="font-size:13px;color:'+COL.red+';padding:8px 0">Ошибка: '+lostEntry.error+'</div>';
+    // bar-per-row (превью 29.08): короткий однородный список одной метрики - полоса
+    // сразу показывает концентрацию выручки, чего столбик чисел на глаз не даёт.
+    var tcRows = (d.top_customers||[]).slice(0,15);
+    if (!tcRows.length) {
+      html += '<div style="font-size:13px;color:var(--muted);padding:8px 0">Нет заказов в этом месяце</div>';
     } else {
-      html += rowsList(lostEntry.data.slice(0,30).map(function(c){
-        return { left:c.name, sub:c.days_since+' дн. тишины · '+c.orders_total+' зак. за 3 мес.', right:mln(c.amount_total), color:COL.amber };
-      }), 'Пропавших клиентов нет - все, кто заказывал за 3 месяца, на связи');
+      var tcMax = Math.max.apply(null, tcRows.map(function(c){ return c.amount||0; })) || 1;
+      html += tcRows.map(function(c){
+        return '<div class="mp-tc">'+
+          '<div class="mp-tc__n"><span class="nm">'+pageEsc_(c.name)+'</span><span class="sb">'+(c.orders||0)+' зак.</span></div>'+
+          '<div class="mp-tc__bw"><div class="mp-tc__bt"><div class="mp-tc__bf" style="width:'+Math.round((c.amount||0)/tcMax*100)+'%"></div></div></div>'+
+          '<div class="mp-tc__v">'+mln(c.amount)+'</div>'+
+        '</div>';
+      }).join('');
     }
 
   } else if (myPageMgrTab === 'debt') {
@@ -4952,11 +5032,24 @@ function renderMyPageManager(el, current, selectorHtml, d) {
       {key:'90+', label:'90+ дн.', value: dAgg.summary.overdue_90_plus},
       {key:'dead', label:'Мёртвая (600+)', value: dDead.overdue_dead},
     ];
-    html += '<div style="margin-bottom:12px;font-size:13px;color:var(--muted)">Итого долг: <b style="color:'+COL.red+'">'+mln(dAgg.summary.total_balance)+'</b> · должников: '+dAgg.summary.debtor_count+'</div>';
+    html += '<div style="margin-bottom:10px;font-size:13px;color:var(--muted)">Итого долг: <b style="color:'+COL.red+'">'+mln(dAgg.summary.total_balance)+'</b> · должников: '+dAgg.summary.debtor_count+'</div>';
+    // Лестница распределения долга по возрасту (превью 29.08): цвета - продолжение
+    // уже существующего risk-градиента ageCls (>90 red, >30 amber, else green),
+    // «мёртвая» - тот же red приглушённее: это та же ось тяжести, а не иной статус.
+    var bucketColors = { '0-30':COL.green, '30-60':COL.amber, '60-90':'#BA7517', '90+':COL.red, 'dead':pageHex2rgba_(COL.red,0.55) };
+    var bucketSum = buckets.reduce(function(a,b){ return a + Math.max(0,b.value||0); }, 0);
+    if (bucketSum > 0) {
+      html += '<div class="mp-debtladder">'+buckets.map(function(b){
+        if (!(b.value > 0)) return '';
+        return '<div class="mp-debtladder__s" style="flex-grow:'+(b.value/bucketSum*100).toFixed(2)+';background:'+bucketColors[b.key]+'" title="'+b.label+': '+mln(b.value)+'"></div>';
+      }).join('')+'</div>';
+    }
+    // Чипы-бакеты работают как легенда лестницы: свотч того же цвета, неактивные притушены.
     html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'+
       buckets.map(function(b){
         var active = mgrDebtBuckets.has(b.key);
-        return '<button onclick="setMgrDebtBucket(\''+b.key+'\')" style="cursor:pointer;background:'+(active?'rgba(255,255,255,.12)':'var(--bg3)')+';border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:11px;color:var(--text)">'+b.label+' <b>'+mln(b.value)+'</b></button>';
+        return '<button onclick="setMgrDebtBucket(\''+b.key+'\')" style="cursor:pointer;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:11px;color:var(--text);display:inline-flex;align-items:center;gap:6px;opacity:'+(active||!mgrDebtBuckets.size?'1':'.5')+';transition:opacity .15s">'+
+          '<span style="width:7px;height:7px;border-radius:2px;background:'+bucketColors[b.key]+'"></span>'+b.label+' <b>'+mln(b.value)+'</b></button>';
       }).join('')+
     '</div>';
 
@@ -12655,6 +12748,7 @@ function showPage(id, el) {
   if (el) el.classList.add('active');
   var titleText = PAGE_TITLES[id] || '';
   setText('page-title', titleText);
+  setText('page-subtitle', '');   // должность - только на личной странице
   // Личная страница (2026-08-12, Влад: "разделительная линия вверху не нужна - там ФИО
   // будет") - при пустом заголовке (my-page) прячем всю .page-header целиком, а не только
   // текст - иначе пустая полоса с чертой-разделителем всё равно оставалась НАД настоящей

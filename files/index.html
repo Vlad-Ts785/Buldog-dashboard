@@ -5480,8 +5480,11 @@ function renderMainReceiptsSummary() {
   var balHtml = monthBalance == null ? '—' :
     '<span style="color:' + (monthBalance >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (monthBalance >= 0 ? '+' : '') + fmt(monthBalance) + '</span>';
 
+  // Хиро месяца: сегодняшний слой из банка, когда лента жива (bankAdjustedMonthTotal_) -
+  // растёт при каждой СМС вместе со строкой "Сегодня", не ждёт часового отчёта 1С.
+  var monthHero = (typeof bankAdjustedMonthTotal_ === 'function') ? bankAdjustedMonthTotal_(s) : s.total_month;
   el.innerHTML =
-    '<div class="kpi-value" style="color:var(--text)" id="main-receipts-hero">' + fmt(s.total_month) + '</div>' +
+    '<div class="kpi-value" style="color:var(--text)" id="main-receipts-hero">' + fmt(monthHero) + '</div>' +
     '<div class="kpi-sub2">за ' + formatMonthLabel(r.month).toLowerCase() + '</div>' +
     (daysHtml ? '<div style="margin-top:10px">' + daysHtml + '</div>' : '') +
     '<div class="p2-rows" style="margin-top:10px">' +
@@ -6959,10 +6962,14 @@ function renderReceipts() {
 
 function renderReceiptsKPI(r) {
   var s = r.summary;
+  // Месяц с живым сегодняшним слоем из банка (та же формула, что хиро на Панели -
+  // цифры обязаны биться между страницами, project_data_consistency_principle).
+  var monthWithBank = (typeof bankAdjustedMonthTotal_ === 'function') ? bankAdjustedMonthTotal_(s) : s.total_month;
   document.getElementById('receipts-kpi-month').innerHTML =
     '<div class="kpi-label">Поступления за ' + formatMonthLabel(r.month).toLowerCase() + '</div>' +
-    '<div class="kpi-value">' + fmt(s.total_month) + '</div>' +
-    '<div class="kpi-sub">безнал ' + fmt(s.total_bank) + ' + нал ' + fmt(s.total_cash) + '</div>';
+    '<div class="kpi-value">' + fmt(monthWithBank) + '</div>' +
+    '<div class="kpi-sub">безнал ' + fmt(s.total_bank) + ' + нал ' + fmt(s.total_cash) +
+      (monthWithBank !== s.total_month ? ' · сегодня по банку' : '') + '</div>';
 
   // Сегодня + Среднее в день - один блок (Влад, 2026-08-13: "некоторые блоки можно объединить
   // в один по смыслу, не нужно городить два этажа") - две родственные суточные метрики.
@@ -13049,13 +13056,30 @@ function bankEsc_(s) {
   });
 }
 
-// Сводка банка за СЕГОДНЯ, только если лента реально жива (есть хоть одна операция с
-// сегодняшней датой) - телефон умер/молчит с утра -> null, и KPI тихо падают на 1С.
+// Сводка банка за СЕГОДНЯ. Лента считается живой, если есть хоть одна операция за
+// сегодня ИЛИ за вчера (Влад, 28.08: "новый день обнуляется и считается по приходам с
+// СМС") - поэтому с полуночи "Сегодня" честно начинается с 0 ₽ по банку, не ждёт первой
+// платёжки. Телефон молчит больше суток (ни сегодня, ни вчера) -> null, KPI тихо
+// падают обратно на 1С - самолечение при умершем канале.
 function bankTodaySummary_() {
   if (!BANK_OPS || !BANK_OPS.summary || !BANK_OPS.ops) return null;
-  var today = BANK_OPS.today;
-  var hasToday = BANK_OPS.ops.some(function(o) { return o.occurred_at && o.occurred_at.slice(0, 10) === today; });
-  return hasToday ? BANK_OPS.summary : null;
+  var alive = BANK_OPS.ops.length > 0; // сервер отдаёт только сегодня+вчера
+  return alive ? BANK_OPS.summary : null;
+}
+
+// Общая сумма поступлений за месяц с живым сегодняшним слоем (Влад, 28.08: "вместе с ней
+// должна меняться общая сумма поступлений"): месяц из 1С МИНУС сегодняшняя 1С-цифра
+// ПЛЮС сегодняшняя банковская - сегодня всегда из банка, старше - из 1С, без двойного
+// счёта, когда 1С докатывает сегодняшние поступления своим часовым отчётом.
+function bankAdjustedMonthTotal_(s) {
+  var bs = bankTodaySummary_();
+  if (!bs) return s.total_month;
+  // 1С-цифру "сегодня" вычитаем, только если она про ТОТ ЖЕ день, что банковский today.
+  // Иначе (вкладка открыта через полночь, payload 1С ещё вчерашний) вчерашний день уже
+  // корректно лежит внутри месяца - вычитание занизило бы сумму до перезагрузки.
+  var d1c = (typeof D !== 'undefined' && D && D.receipts && D.receipts.today && D.receipts.today.date) || null;
+  var sameDay = !!(d1c && BANK_OPS && d1c === BANK_OPS.today);
+  return (s.total_month || 0) - (sameDay ? (s.total_today || 0) : 0) + (Number(bs.today_in) || 0);
 }
 
 function fetchBankOps_() {
@@ -13357,6 +13381,19 @@ function bankWinScene_(deltaToday, toastHtml) {
       card.classList.remove('bank-kpi-pop'); void card.offsetWidth; card.classList.add('bank-kpi-pop');
       valEl.classList.add('bank-val-flash');
       if (from != null && from !== to) p2OdoWithTicks_(valEl, from, to, uiSounds.winTick);
+      // Общая сумма за месяц накручивается СИНХРОННО (Влад, 28.08: "вместе с ней должна
+      // меняться общая сумма поступлений") - тики не дублируем, звук ведёт "Сегодня".
+      var monthEl = null;
+      if (card === receiptsCard) {
+        var monthCard = document.getElementById('receipts-kpi-month');
+        monthEl = monthCard ? monthCard.querySelector('.kpi-value') : null;
+      } else {
+        monthEl = document.getElementById('main-receipts-hero');
+      }
+      if (monthEl && D && D.receipts && D.receipts.summary && deltaToday) {
+        var monthTo = bankAdjustedMonthTotal_(D.receipts.summary);
+        p2OdoWithTicks_(monthEl, monthTo - deltaToday, monthTo, function() {});
+      }
       setTimeout(function() { valEl.classList.remove('bank-val-flash'); }, 1300);
     });
   }, 380);

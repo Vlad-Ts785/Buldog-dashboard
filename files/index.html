@@ -383,13 +383,20 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 /* Hover-физика карточки (канон ГОСТа из канбана уровня 5, Влад 28.08): карточка
    не просто перекрашивается - приподнимается в объёме. Перспектива на странице,
    preserve-3d на сетках, подъём translateY(-1px) translateZ(22px). */
-#page-main{perspective:1400px;position:relative;}
-#page-main .kpi-grid,#page-main .grid-2,#page-main .p2-tier3-grid{transform-style:preserve-3d;}
-#page-main .kpi,#page-main .card{
+/* ОБЩИЙ СТАНДАРТ ДЛЯ ВСЕХ СТРАНИЦ (Влад, 29.08: «как организована физика анимации
+   на главной - это вписанный стандарт, нужно привести всё к одному значению»).
+   Раньше правило было прибито к #page-main и потому не доезжало до остальных
+   страниц - теперь оно на .page. Исключение одно: #page-crm (канбан) - там своя
+   drag-физика, и perspective у предка ломает захват карточки (ГОСТ раздел 6). */
+.page:not(#page-crm){perspective:1400px;position:relative;}
+.page:not(#page-crm) .kpi-grid,.page:not(#page-crm) .grid-2,
+.page:not(#page-crm) .p2-tier3-grid,.page:not(#page-crm) .mp-tier,
+.page:not(#page-crm) .mp-stats{transform-style:preserve-3d;}
+.page:not(#page-crm) .kpi,.page:not(#page-crm) .card{
   transition:border-color .12s ease-out,background-color .12s ease-out,transform .12s ease-out;
   will-change:transform;
 }
-#page-main .kpi:hover,#page-main .card:hover{
+.page:not(#page-crm) .kpi:hover,.page:not(#page-crm) .card:hover{
   border-color:var(--border-strong, rgba(255,255,255,.16));background:#191920;
   transform:translateY(-1px) translateZ(22px);
 }
@@ -401,8 +408,8 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 }
 .p2-light.on{opacity:1;}
 @media (prefers-reduced-motion: reduce){
-  #page-main{perspective:none;}
-  #page-main .kpi:hover,#page-main .card:hover{transform:none;}
+  .page{perspective:none;}
+  .page .kpi:hover,.page .card:hover{transform:none;}
   .p2-light{display:none;}
 }
 
@@ -4307,6 +4314,109 @@ function planProgressBar(label, factPct, forecastPct, factVal, forecastVal, plan
   h += '</div>';
   return h;
 }
+/* ═══ ЗАРПЛАТА, ВАРИАНТ «Б» (превью утверждено Владом 28-29.08) ═══
+   Анатомия ровно как в превью: лид-плашка «ближайший рычаг» -> лестница ступеней
+   оклада -> стек-полоса долей + легенда -> строки компонентов со свотчем и % ->
+   «Итого на сегодня» 25px -> двухзонная полоса сегодня/прогноз со штриховкой.
+   Пороги окладов - те же, что в okladByRev() (единственный источник истины). */
+var MP_OKLAD_TIERS = [ {threshold:2000000, oklad:30000}, {threshold:5000000, oklad:50000},
+                       {threshold:8000000, oklad:100000}, {threshold:10000000, oklad:150000} ];
+
+// Лид-плашка: самый близкий рычаг заработка. Приоритет - порог маржи найма 23%
+// (там ставка прыгает с 0% на 8%, это самый сильный рычаг), иначе - ступень оклада.
+function mpSalLeverHtml_(sal) {
+  if (!sal) return '';
+  if (sal.newRules && sal.hiredMarginUnqual > 0) {
+    var lost = Math.round(sal.hiredMarginUnqual * 0.08);
+    return '<div class="mp-lead"><div class="mp-lead__line">'+
+      '<span class="mp-lead__dot" style="background:'+PAGE_COL.amber+'"></span>'+
+      'Ближайший рычаг: <b>'+pageFr_(sal.hiredMarginUnqual)+'</b> маржи найма ниже порога 23% — '+
+      'если поднять её выше, это <b>+'+pageFr_(lost)+'</b> к зарплате'+
+    '</div></div>';
+  }
+  var next = null;
+  for (var i=0; i<MP_OKLAD_TIERS.length; i++) { if ((sal.total||0) < MP_OKLAD_TIERS[i].threshold) { next = MP_OKLAD_TIERS[i]; break; } }
+  if (!next) {
+    return '<div class="mp-lead"><div class="mp-lead__line">'+
+      '<span class="mp-lead__dot" style="background:'+PAGE_COL.green+'"></span>'+
+      'Максимальная ступень оклада пройдена — <b>'+pageFr_(sal.oklad)+'</b>'+
+    '</div></div>';
+  }
+  var needed = next.threshold - (sal.total||0);
+  return '<div class="mp-lead"><div class="mp-lead__line">'+
+    '<span class="mp-lead__dot" style="background:'+PAGE_COL.amber+'"></span>'+
+    'Ближайший рычаг: до оклада <b>'+pageFr_(next.oklad)+'</b> не хватает <b>'+pageFr_(needed)+'</b> оборота'+
+  '</div></div>';
+}
+// Лестница ступеней оклада: пройденные сплошным зелёным, текущая частично залита
+// янтарным, будущие - пустой трек. Ширина сегмента пропорциональна интервалу.
+function mpSalTierLadderHtml_(sal) {
+  if (!sal) return '';
+  var total = sal.total || 0, bounds = [0], i;
+  for (i=0; i<MP_OKLAD_TIERS.length; i++) bounds.push(MP_OKLAD_TIERS[i].threshold);
+  var maxV = bounds[bounds.length-1], segs = '';
+  for (i=1; i<bounds.length; i++) {
+    var lo = bounds[i-1], hi = bounds[i], w = (hi-lo)/maxV*100;
+    var cls = 'mp-tier-seg', fill = '';
+    if (total >= hi) cls += ' mp-tier-seg--done';
+    else if (total > lo) fill = '<div class="mp-tier-seg__fill" style="width:'+((total-lo)/(hi-lo)*100).toFixed(1)+'%"></div>';
+    var ttl = pageMln_(lo)+'–'+pageMln_(hi)+': оклад '+pageFr_(MP_OKLAD_TIERS[i-1].oklad);
+    segs += '<div class="'+cls+'" style="flex-grow:'+w.toFixed(2)+'" title="'+ttl+'">'+fill+'</div>';
+  }
+  var next = null;
+  for (i=0; i<MP_OKLAD_TIERS.length; i++) { if (total < MP_OKLAD_TIERS[i].threshold) { next = MP_OKLAD_TIERS[i]; break; } }
+  var capRight = next ? pageMln_(total)+' из '+pageMln_(next.threshold) : 'максимальная ступень';
+  var midLabel = next ? '<b>'+pageMln_(next.threshold)+' → '+pageFr_(next.oklad)+'</b>' : '<b>всё пройдено</b>';
+  return '<div class="mp-tier-wrap">'+
+    '<div class="mp-tier-cap"><span>Ступень оклада</span><span>'+capRight+'</span></div>'+
+    '<div class="mp-tier-track">'+segs+'</div>'+
+    '<div class="mp-tier-labels"><span>0</span><span>'+midLabel+'</span><span>'+
+      pageMln_(maxV)+' → '+pageFr_(MP_OKLAD_TIERS[MP_OKLAD_TIERS.length-1].oklad)+'</span></div>'+
+  '</div>';
+}
+// Стек-полоса долей + легенда. Один hue разной насыщенности не берём: компоненты
+// уже имеют свои закреплённые цвета в строках ниже, полоса повторяет их 1:1.
+function mpSalShareHtml_(parts, totalSal) {
+  var sum = parts.reduce(function(a,p){ return a + Math.max(0,p.v); }, 0);
+  if (!(sum > 0)) return '';
+  var segs = '', leg = '';
+  parts.forEach(function(pp){
+    if (pp.v <= 0) return;
+    segs += '<div class="mp-share__seg" style="flex-grow:'+(pp.v/sum*100).toFixed(2)+';background:'+pp.bg+'"></div>';
+    leg += '<span><span class="sw" style="background:'+pp.sw+'"></span>'+pp.k+'<span class="v">'+pageFr_(pp.v)+'</span></span>';
+  });
+  return '<div class="mp-share">'+segs+'</div><div class="mp-share-legend">'+leg+'</div>';
+}
+// Строка компонента: свотч + название, сумма справа, под ней формула и % доли.
+function mpSalRow_(swColor, label, val, detail, pct) {
+  // Честный ноль: pageFr_(0) даёт «—», а прочерк читается как «расчёт не пришёл»,
+  // хотя оклад 0 при обороте ниже первой ступени - нормальное значение.
+  var valTxt = (val ? pageFr_(val) : '0 ₽');
+  return '<div class="mp-srow">'+
+    '<div class="mp-srow__top">'+
+      '<span class="mp-srow__k"><span class="mp-srow__sw" style="background:'+swColor+'"></span>'+label+'</span>'+
+      '<span class="mp-srow__v">'+valTxt+'</span>'+
+    '</div>'+
+    (detail || pct ? '<div class="mp-srow__d"><span>'+(detail||'')+'</span><span class="mp-srow__aux">'+(pct||'')+'</span></div>' : '')+
+  '</div>';
+}
+// Двухзонная полоса «Сегодня / Прогноз»: сплошная зелёная до факта, дальше синяя
+// штриховка до прогноза - «это ещё не заработано». Дельта-чип нейтрально синий.
+function mpSalForecastBarHtml_(todayVal, fcVal) {
+  if (!(fcVal > todayVal)) return '';
+  var max = fcVal * 1.02;
+  var factW = max > 0 ? todayVal/max*100 : 0;
+  var fcW = max > 0 ? (fcVal-todayVal)/max*100 : 0;
+  return '<div class="mp-fcbar">'+
+    '<div class="mp-dual">'+
+      '<div class="mp-dual__fact" style="width:'+factW.toFixed(1)+'%;background:'+PAGE_COL.green+'"></div>'+
+      '<div class="mp-dual__fc" style="left:'+factW.toFixed(1)+'%;width:'+fcW.toFixed(1)+'%;background:repeating-linear-gradient(45deg,'+pageHex2rgba_(PAGE_COL.blue,0.30)+' 0 4px,transparent 4px 8px)"></div>'+
+    '</div>'+
+    '<div class="mp-fclabels"><span class="f">Сегодня '+pageFr_(todayVal)+'</span>'+
+      '<span class="p">Прогноз '+pageFr_(fcVal)+' <span class="mp-chip">+'+pageFr_(fcVal-todayVal)+'</span></span></div>'+
+    '<div class="mp-fcnote">Прогноз на конец месяца при текущем темпе — не гарантия.</div>'+
+  '</div>';
+}
 function pageHex2rgba_(hex, a) { var r=parseInt(hex.slice(1,3),16), g=parseInt(hex.slice(3,5),16), b=parseInt(hex.slice(5,7),16); return 'rgba('+r+','+g+','+b+','+a+')'; }
 
 /* ═══ КАБИНА СМЕНЫ: строка состояния и плашки метрик (превью 29.08) ═══ */
@@ -4688,18 +4798,12 @@ function renderMyPageManager(el, current, selectorHtml, d) {
   // непроверяемой, "откуда-то взялась". Комиссия считается НЕ от общего прогнозного оборота
   // (тот идёт только в ступень оклада), а от ownProfitBase (выручка своего парка минус
   // затраты) - плюс отдельный бонус с маржи найма, который в ручном счёте легко упустить).
-  var salForecastHtml = '';
+  // Вариант «Б»: прогноз показывается ДВУХЗОННОЙ ПОЛОСОЙ (сегодня -> прогноз со
+  // штриховкой), а не повтором всей разбивки мелким шрифтом - дублирующая копия
+  // структуры убрана по превью. Нужна только итоговая сумма прогноза.
+  var salForecastTotal = 0;
   if (salForecast && Math.abs(salForecast.total_sal - sal.total_sal) > 100) {
-    var fBreakdown = pageForecastRow_('Оклад (по ступени оборота '+mln(salForecast.total)+')', salForecast.oklad);
-    if (salForecast.newRules) {
-      fBreakdown += pageForecastRow_('Комиссия своего парка ('+(salForecast.rate*100).toString().replace('.',',')+'% × '+fr(salForecast.ownProfitBase)+')', salForecast.ownComm);
-      if (salForecast.hiredMargin || salForecast.hiredMarginUnqual) fBreakdown += pageForecastRow_('Бонус с маржи найма (8% × '+fr(salForecast.hiredMargin)+')', salForecast.hiredBonus);
-    } else {
-      fBreakdown += pageForecastRow_('Комиссия своего парка ('+(salForecast.rate*100).toString().replace('.',',')+'% × '+fr(salForecast.ownRev)+')', salForecast.ownComm);
-      if (salForecast.hiredBonus) fBreakdown += pageForecastRow_('Бонус с маржи найма', salForecast.hiredBonus);
-    }
-    if (salForecast.bonus15m) fBreakdown += pageForecastRow_('Премия за оборот &gt;15М', salForecast.bonus15m);
-    salForecastHtml = pageForecastWrap_(fBreakdown, salForecast.total_sal);
+    salForecastTotal = salForecast.total_sal;
   }
   // Расчёт зарплаты - "такой же длинный", прямо с вкладки "Зарплата" (Влад, 2026-08-12) - те
   // же компоненты calcMgr, в стиле строка-значение (как у остальных личных страниц), а не
@@ -4709,33 +4813,58 @@ function renderMyPageManager(el, current, selectorHtml, d) {
     salaryBody = '<div style="font-size:13px;color:var(--muted)">Формула зарплаты для этого сотрудника пока не согласована - расчёт временно не показывается.</div>';
   } else if (!sal) {
     salaryBody = '<div style="font-size:13px;color:var(--muted)">Нет данных для расчёта за этот период.</div>';
-  } else if (sal.newRules) {
-    var srows = salRow('Оклад', sal.oklad, 'По ступени оборота '+mln(sal.total)) + okladNextTierNote_(sal.total);
-    var ownCost = sal.ownRev - sal.ownProfitBase;
-    srows += salRow('Комиссия своего парка', sal.ownComm,
-      pctBadge_((sal.rate*100).toString().replace('.',',')+'%', COL.blue)+' × '+fr(sal.ownProfitBase)+
-      (ownCost>1 ? ', база = выручка '+fr(sal.ownRev)+' минус затраты '+fr(ownCost) : ''));
-    if (sal.hiredMargin || sal.hiredMarginUnqual) {
-      var hParts = [];
-      if (sal.hiredMargin) hParts.push(fr(sal.hiredMargin)+' маржа ≥23% '+pctBadge_('8%', COL.green));
-      if (sal.hiredMarginUnqual) hParts.push(fr(sal.hiredMarginUnqual)+' маржа &lt;23% '+mutedBadge_('0%'));
-      srows += salRow('Бонус с маржи найма', sal.hiredBonus, hParts.join('&nbsp;&nbsp;/&nbsp;&nbsp;'));
-    }
-    if (sal.bonus15m) srows += salRow('Премия за оборот &gt;15М', sal.bonus15m);
-    salaryBody = srows + salTotalRow(sal.total_sal) + salForecastHtml;
   } else {
-    var srows2 = salRow('Оклад', sal.oklad) + okladNextTierNote_(sal.total);
-    srows2 += salRow('Комиссия своего парка', sal.ownComm, pctBadge_((sal.rate*100).toString().replace('.',',')+'%', COL.blue)+' × '+fr(sal.ownRev));
-    if (sal.isPrus) {
-      srows2 += salRow('Найм', sal.hiredBonus, pctBadge_(Math.round((sal.prusHiredPct||0)*100)+'%', COL.green)+' от '+fr(sal.hiredMargin));
-    } else if (sal.logPart || sal.nonLogPart) {
-      var lParts = [];
-      if (sal.logPart) lParts.push(fr(sal.logPart)+' как логист '+pctBadge_('10%', COL.green));
-      if (sal.nonLogPart) lParts.push(fr(sal.nonLogPart)+' логист другой '+pctBadge_('5%', COL.blue));
-      srows2 += salRow('Бонус с маржи найма', sal.hiredBonus, lParts.join('&nbsp;&nbsp;/&nbsp;&nbsp;'));
+    // ═══ Вариант «Б» (превью утверждено): рычаг -> лестница -> доли -> строки ->
+    // итого -> двухзонная полоса. Сами СУММЫ не пересчитываются, берутся из calcMgr.
+    var SW_OKLAD = 'rgba(255,255,255,.3)', SW_COMM = COL.blue, SW_BONUS = COL.green, SW_PREM = COL.amber;
+    var srows = '', parts = [];
+    var totalSal = sal.total_sal || 0;
+    function pctOf(v){ return totalSal > 0 && v > 0 ? Math.round(v/totalSal*100)+'%' : ''; }
+
+    srows += mpSalRow_(SW_OKLAD, 'Оклад', sal.oklad, 'По ступени оборота '+mln(sal.total), pctOf(sal.oklad));
+    parts.push({ k:'Оклад', v:sal.oklad||0, bg:'rgba(255,255,255,.12)', sw:SW_OKLAD });
+
+    if (sal.newRules) {
+      var ownCost = sal.ownRev - sal.ownProfitBase;
+      srows += mpSalRow_(SW_COMM, 'Комиссия своего парка', sal.ownComm,
+        pctBadge_((sal.rate*100).toString().replace('.',',')+'%', COL.blue)+' × '+fr(sal.ownProfitBase)+
+        (ownCost>1 ? ', база = выручка минус затраты '+fr(ownCost) : ''), pctOf(sal.ownComm));
+      if (sal.hiredMargin || sal.hiredMarginUnqual) {
+        var hParts = [];
+        if (sal.hiredMargin) hParts.push(fr(sal.hiredMargin)+' маржа ≥23% '+pctBadge_('8%', COL.green));
+        if (sal.hiredMarginUnqual) hParts.push(fr(sal.hiredMarginUnqual)+' маржа &lt;23% '+mutedBadge_('0%'));
+        srows += mpSalRow_(SW_BONUS, 'Бонус с маржи найма', sal.hiredBonus,
+          hParts.join('&nbsp;&nbsp;/&nbsp;&nbsp;'), pctOf(sal.hiredBonus));
+      }
+    } else {
+      srows += mpSalRow_(SW_COMM, 'Комиссия своего парка', sal.ownComm,
+        pctBadge_((sal.rate*100).toString().replace('.',',')+'%', COL.blue)+' × '+fr(sal.ownRev), pctOf(sal.ownComm));
+      if (sal.isPrus) {
+        srows += mpSalRow_(SW_BONUS, 'Найм', sal.hiredBonus,
+          pctBadge_(Math.round((sal.prusHiredPct||0)*100)+'%', COL.green)+' от '+fr(sal.hiredMargin), pctOf(sal.hiredBonus));
+      } else if (sal.logPart || sal.nonLogPart) {
+        var lParts = [];
+        if (sal.logPart) lParts.push(fr(sal.logPart)+' как логист '+pctBadge_('10%', COL.green));
+        if (sal.nonLogPart) lParts.push(fr(sal.nonLogPart)+' логист другой '+pctBadge_('5%', COL.blue));
+        srows += mpSalRow_(SW_BONUS, 'Бонус с маржи найма', sal.hiredBonus,
+          lParts.join('&nbsp;&nbsp;/&nbsp;&nbsp;'), pctOf(sal.hiredBonus));
+      }
     }
-    if (sal.bonus15m) srows2 += salRow('Премия за оборот &gt;15М', sal.bonus15m);
-    salaryBody = srows2 + salTotalRow(sal.total_sal) + salForecastHtml;
+    if (sal.ownComm) parts.push({ k:'Комиссия', v:sal.ownComm, bg:pageHex2rgba_(COL.blue,0.34), sw:SW_COMM });
+    if (sal.hiredBonus) parts.push({ k:'Бонус', v:sal.hiredBonus, bg:pageHex2rgba_(COL.green,0.34), sw:SW_BONUS });
+    if (sal.bonus15m) {
+      srows += mpSalRow_(SW_PREM, 'Премия за оборот &gt;15М', sal.bonus15m, '', pctOf(sal.bonus15m));
+      parts.push({ k:'Премия', v:sal.bonus15m, bg:pageHex2rgba_(COL.amber,0.34), sw:SW_PREM });
+    }
+
+    salaryBody =
+      mpSalLeverHtml_(sal) +
+      mpSalTierLadderHtml_(sal) +
+      mpSalShareHtml_(parts, totalSal) +
+      srows +
+      '<div class="mp-total"><span class="mp-total__k">Итого на сегодня</span>'+
+        '<span class="mp-total__v">'+(totalSal ? pageFr_(totalSal) : '0 ₽')+'</span></div>' +
+      (salForecastTotal ? mpSalForecastBarHtml_(totalSal, salForecastTotal) : '');
   }
 
   var html = selectorHtml;

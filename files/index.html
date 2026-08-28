@@ -4072,11 +4072,18 @@ function renderMyPage() {
     // ФИО и должность переехали в ОБЩУЮ шапку страницы (заголовок Unbounded + строка
     // даты/времени - тот же стандарт, что на главной). Дублирующий блок в теле убран,
     // иначе имя было бы напечатано дважды и разными шрифтами (Влад, 29.08).
-    setText('page-title', current.name);
-    setText('page-subtitle', positionLabel(current.name, current.type));
-    var phEl = document.querySelector('.page-header');
-    if (phEl) phEl.style.display = '';
-    try { updatePagePeriod_(); } catch(e) {}
+    myPageHeaderName_ = current.name;
+    myPageHeaderRole_ = positionLabel(current.name, current.type);
+    // Пишем в общую шапку ТОЛЬКО когда личная страница реально открыта - renderMyPage()
+    // вызывается и с других экранов (обновление данных, admin-предпросмотр).
+    var myPageEl = document.getElementById('page-my-page');
+    if (myPageEl && myPageEl.classList.contains('active')) {
+      setText('page-title', myPageHeaderName_);
+      setText('page-subtitle', myPageHeaderRole_);
+      var phEl = document.querySelector('.page-header');
+      if (phEl) phEl.style.display = '';
+      try { updatePagePeriod_(); } catch(e) {}
+    }
     var headerHtml = '';
 
     // Переключатель периода (2026-08-11) - "Текущий месяц" / "Прошлый месяц", доступен всем
@@ -4161,6 +4168,9 @@ function isLiveMonthKey_(period) {
 
 // Вкладки нового блока личной страницы менеджера (2026-08-12, по образцу "Обзор заказов").
 let myPageMgrTab = 'top'; // 'top' | 'lost' | 'debt' | 'docs' | 'receipts'
+// ФИО и должность для ОБЩЕЙ шапки страницы - хранятся в состоянии, подставляются
+// в шапку только из showPage() для id==='my-page' (см. комментарий там).
+var myPageHeaderName_ = '', myPageHeaderRole_ = '';
 function setMyPageMgrTab(tab) { if (tab === 'lost') tab = 'top'; myPageMgrTab = tab; renderMyPage(); }
 // "Поступления" на личной странице менеджера (Влад, 2026-08-16: "внутри вкладки должен быть
 // выбор сегодня/вчера/неделя/месяц... все поступления должны относиться к конкретному
@@ -12746,15 +12756,22 @@ function showPage(id, el) {
   document.querySelectorAll('.sidebar-nav-item').forEach(b => b.classList.remove('active'));
   document.getElementById('page-' + id).classList.add('active');
   if (el) el.classList.add('active');
-  var titleText = PAGE_TITLES[id] || '';
+  // Личная страница подставляет в общий заголовок ФИО и должность сотрудника.
+  // ВАЖНО: значения берутся ЗДЕСЬ, из состояния, а не пишутся renderMyPage() напрямую -
+  // иначе фамилия менеджера протекала в шапку ДРУГИХ страниц (Влад поймал на главной
+  // в админском аккаунте 29.08: рендер личной страницы затирал заголовок «Панель
+  // управления»). Шапка - общий на все страницы элемент, писать в неё можно только
+  // из одного места, и только для текущей страницы.
+  var titleText = (id === 'my-page') ? (myPageHeaderName_ || '') : (PAGE_TITLES[id] || '');
   setText('page-title', titleText);
-  setText('page-subtitle', '');   // должность - только на личной странице
+  setText('page-subtitle', (id === 'my-page') ? (myPageHeaderRole_ || '') : '');
   // Личная страница (2026-08-12, Влад: "разделительная линия вверху не нужна - там ФИО
   // будет") - при пустом заголовке (my-page) прячем всю .page-header целиком, а не только
   // текст - иначе пустая полоса с чертой-разделителем всё равно оставалась НАД настоящей
   // шапкой (ФИО+должность) внутри содержимого страницы.
   var pageHeaderEl = document.querySelector('.page-header');
   if (pageHeaderEl) pageHeaderEl.style.display = titleText ? '' : 'none';
+  try { updatePagePeriod_(); } catch(e) {}   // время в шапке свежее сразу, не через 30 сек
   if (id === 'dynamics') loadHistoryData();
   if (id === 'clients') loadClientsData();
   if (id === 'crm') loadCrmData();

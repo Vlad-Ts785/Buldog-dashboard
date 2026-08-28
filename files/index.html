@@ -3551,8 +3551,12 @@ async function loadData() {
       fetchReceiptsFromServer_().then(function(r) {
         if (r && !r.error && D) { D.receipts = r; renderReceipts(); }
       }).catch(function() {});
-      // Живая лента банковских операций (поллинг раз в минуту) - только админ, как и
-      // остальные общекорпоративные деньги.
+    }
+    // Живая лента банковских операций (поллинг раз в минуту) - админ (вся общекорпоративная
+    // страница "Поступления"/Панель) и, с 29.08 (план Фаза 4, "все менеджеры видят все
+    // поступления"), реальный вход менеджера - вкладка «Поступления» на личной странице.
+    // Логисты сознательно не включены - "Поступления" структурно не про них (см. CLAUDE.md).
+    if (D.role === 'admin' || D.role === 'manager') {
       startBankOpsPolling_();
     }
   } catch(e) {
@@ -4550,6 +4554,22 @@ function renderMyPageManager(el, current, selectorHtml, d) {
     // конкретному менеджеру") - фильтруем уже загруженные глобальные списки D.receipts по
     // фамилии этого менеджера (тот же приём, что и в других вкладках выше - problem_orders,
     // debt), без отдельного запроса к серверу.
+    // Живая карточка "Поступления по компании сегодня" (план 2026-08-28-bank-operations-
+    // live-feed.md, Фаза 4, Влад 29.08: "все менеджеры видят все поступления, которые
+    // идут... где можем идентифицировать - фамилия, имя менеджера"). СВЕРХУ над историей
+    // ЭТОГО менеджера ниже - разные по смыслу блоки: этот company-wide и живой, история
+    // ниже - только своя и из 1С. Скелет статичный (id'ы), наполняет renderMgrBankLive_()
+    // на каждом опросе, поэтому сама вкладка не дёргается заново на каждый тик поллинга.
+    html += '<div class="card" id="mgr-bank-today-card" style="margin-bottom:16px">'+
+      '<div class="sec-header"><div>'+
+        '<div class="sec-title">Поступления по компании — сегодня</div>'+
+        '<div class="sec-sub">Живьём из банка · видно всем менеджерам · без списаний</div>'+
+      '</div></div>'+
+      '<div class="kpi-label">Сегодня (вся компания)</div>'+
+      '<div class="kpi-value" id="mgr-bank-today-val">—</div>'+
+      '<div id="mgr-bank-feed" style="margin-top:10px"></div>'+
+    '</div>';
+
     var recPeriodMap = {
       yesterday: (D.receipts && D.receipts.yesterday) || null,
       today: (D.receipts && D.receipts.today) || null,
@@ -4627,6 +4647,11 @@ function renderMyPageManager(el, current, selectorHtml, d) {
   html += '</div>';
 
   el.innerHTML = html;
+  // Карточка "Поступления по компании сегодня" (Фаза 4) существует в DOM только когда
+  // myPageMgrTab==='receipts' - в остальных вкладках renderMgrBankLive_ тихо no-op'ится
+  // (card не найдена). Наполняем сразу из уже имеющегося BANK_OPS, не дожидаясь следующего
+  // тика 60-секундного поллинга.
+  renderMgrBankLive_();
 }
 
 // Личная страница руководителя коммерческой группы - Ахтамова/Гусейнова (2026-08-26, см.
@@ -13757,6 +13782,7 @@ function fetchBankOps_() {
     });
     bankOpsMaxSeenId_ = maxId;
     renderBankLive_();
+    renderMgrBankLive_(); // личная страница менеджера (план Фаза 4) - no-op, если карточки сейчас нет в DOM
     // Перерисовать KPI "Сегодня" (страница Поступления) и строку на Панели - у них
     // появился/обновился банковский источник.
     if (D && D.receipts && !D.receipts.error && D.receipts.summary) renderReceiptsKPI(D.receipts);
@@ -13793,6 +13819,75 @@ uiSounds.winTick = function() {
   uiBlip_(f * 0.5, f * 0.5, 0.03, 0.02, 'triangle');
 };
 
+/* ── Градация фанфар по сумме платёжки (Влад, 28.08, утверждено на превью "Фанфары по
+   сумме" - перенос 1:1). Уровень по МАКСИМАЛЬНОЙ операции пачки: <100 тыс - уровень 1
+   (uiSounds.win, без изменений), от 100 тыс - 2, от 500 тыс - 3, от 1 млн - 4. ── */
+
+// Уровень 2 "Крупный клиент" - отличим с ПЕРВОЙ ноты: двойной трубный зов "та-та-дааа",
+// потом фанфара и громкий колокольный каскад
+uiSounds.win2 = function() {
+  uiBlip_(784.0, 784.0, 0.09, 0.09, 'sine', 0);
+  uiBlip_(784.0, 784.0, 0.09, 0.085, 'sine', 0.12);
+  uiBlip_(1046.5, 1046.5, 0.5, 0.1, 'sine', 0.24);
+  uiBlip_(196.0, 196.0, 1.2, 0.06, 'triangle', 0);
+  uiBlip_(130.8, 130.8, 1.3, 0.07, 'triangle', 0.42);
+  uiBlip_(523.3, 523.3, 0.3, 0.09, 'sine', 0.42);
+  uiBlip_(659.3, 659.3, 0.35, 0.09, 'sine', 0.5);
+  uiBlip_(784.0, 784.0, 0.4, 0.09, 'sine', 0.58);
+  uiBlip_(1046.5, 1046.5, 0.8, 0.11, 'sine', 0.66);
+  uiBlip_(1318.5, 1318.5, 0.5, 0.08, 'sine', 0.8);
+  uiBlip_(1568.0, 1568.0, 0.55, 0.075, 'sine', 0.9);
+  uiBlip_(2093.0, 2093.0, 0.8, 0.06, 'sine', 1.0);
+  uiBlip_(2637.0, 2637.0, 0.9, 0.035, 'sine', 1.1);
+};
+// Уровень 3 "Большой день" - двойная фанфара с модуляцией C -> F + россыпь колокольчиков
+uiSounds.win3 = function() {
+  uiSounds.win();
+  uiBlip_(174.6, 174.6, 1.4, 0.07, 'triangle', 0.55);
+  uiBlip_(698.5, 698.5, 0.35, 0.1, 'sine', 0.6);
+  uiBlip_(880.0, 880.0, 0.4, 0.1, 'sine', 0.69);
+  uiBlip_(1046.5, 1046.5, 0.5, 0.1, 'sine', 0.78);
+  uiBlip_(1396.9, 1396.9, 0.95, 0.11, 'sine', 0.87);
+  uiBlip_(880.0, 880.0, 0.8, 0.05, 'sine', 0.96);
+  uiBlip_(1046.5, 1046.5, 0.8, 0.05, 'sine', 0.96);
+  var scale3 = [1568, 1760, 2093, 2349, 2637];
+  for (var i = 0; i < 6; i++) uiBlip_(scale3[i % 5], scale3[i % 5] * 1.06, 0.05, 0.03, 'sine', 1.05 + i * 0.06);
+  uiBlip_(2793.8, 2793.8, 0.9, 0.02, 'sine', 1.3);
+};
+// Уровень 4 "Миллионник" - туш: литавры + три восходящие ступени (C -> D -> E) + широкий
+// финальный аккорд с долгим колокольным шлейфом (хвост дозвучивает после сцены - одобрено)
+uiSounds.win4 = function() {
+  uiBlip_(90, 45, 0.5, 0.12, 'sine', 0);
+  uiBlip_(60, 40, 0.6, 0.09, 'triangle', 0.02);
+  uiBlip_(900, 500, 0.04, 0.05, 'triangle', 0);
+  uiBlip_(130.8, 130.8, 1.2, 0.07, 'triangle', 0.1);
+  uiBlip_(523.3, 523.3, 0.3, 0.1, 'sine', 0.1);
+  uiBlip_(659.3, 659.3, 0.32, 0.1, 'sine', 0.18);
+  uiBlip_(784.0, 784.0, 0.38, 0.1, 'sine', 0.26);
+  uiBlip_(1046.5, 1046.5, 0.6, 0.11, 'sine', 0.34);
+  uiBlip_(146.8, 146.8, 1.2, 0.07, 'triangle', 0.55);
+  uiBlip_(587.3, 587.3, 0.3, 0.1, 'sine', 0.55);
+  uiBlip_(740.0, 740.0, 0.32, 0.1, 'sine', 0.63);
+  uiBlip_(880.0, 880.0, 0.38, 0.1, 'sine', 0.71);
+  uiBlip_(1174.7, 1174.7, 0.6, 0.11, 'sine', 0.79);
+  uiBlip_(164.8, 164.8, 1.6, 0.08, 'triangle', 1.0);
+  uiBlip_(659.3, 659.3, 0.32, 0.1, 'sine', 1.0);
+  uiBlip_(830.6, 830.6, 0.34, 0.1, 'sine', 1.08);
+  uiBlip_(987.8, 987.8, 0.4, 0.1, 'sine', 1.16);
+  uiBlip_(1318.5, 1318.5, 1.1, 0.12, 'sine', 1.24);
+  uiBlip_(987.8, 987.8, 1.1, 0.05, 'sine', 1.35);
+  uiBlip_(1975.5, 1975.5, 0.9, 0.03, 'sine', 1.4);
+  var scale4 = [1661.2, 1975.5, 2637.0, 3135.9];
+  for (var j = 0; j < 8; j++) uiBlip_(scale4[j % 4], scale4[j % 4] * 1.05, 0.05, 0.028, 'sine', 1.45 + j * 0.07);
+  uiBlip_(3520.0, 2637.0, 1.2, 0.015, 'sine', 1.9);
+};
+function bankWinLevel_(maxAmount) {
+  return maxAmount >= 1000000 ? 4 : maxAmount >= 500000 ? 3 : maxAmount >= 100000 ? 2 : 1;
+}
+function bankWinFanfare_(level) {
+  (level === 4 ? uiSounds.win4 : level === 3 ? uiSounds.win3 : level === 2 ? uiSounds.win2 : uiSounds.win)();
+}
+
 // Полноэкранный canvas для салюта (создаётся лениво, поверх всего, клики пропускает)
 function bankConfettiCanvas_() {
   var c = document.getElementById('bank-confetti');
@@ -13806,6 +13901,7 @@ function bankCelebrate5_(canvas, originX, originY, opts, onDone) {
   if (document.hidden) { if (onDone) onDone(); return; }
   var HEXES = (opts && opts.colors && opts.colors.length) ? opts.colors
             : ['#1D9E75', '#EF9F27', '#e8e6df', '#378ADD'];
+  var mult = (opts && opts.mult) || 1; // множитель числа частиц для залпов миллионника
   function hexToRgb(h) {
     h = h.replace('#', '');
     if (h.length === 3) { h = h.charAt(0) + h.charAt(0) + h.charAt(1) + h.charAt(1) + h.charAt(2) + h.charAt(2); }
@@ -13847,7 +13943,7 @@ function bankCelebrate5_(canvas, originX, originY, opts, onDone) {
     var p, c, k, ang, spd, wide;
     st.parts.push({ kind: 'ring', x: x, y: y, age: 0, delay: 0, dur: 0.45, maxR: rand(60, 85), lw: 3.2, c: hexToRgb('#e8e6df') });
     st.parts.push({ kind: 'ring', x: x, y: y, age: 0, delay: 0.09, dur: 0.62, maxR: rand(105, 140), lw: 2.0, c: pick() });
-    var nPetals = 115 + ((Math.random() * 25) | 0);
+    var nPetals = Math.round((115 + ((Math.random() * 25) | 0)) * mult);
     for (k = 0; k < nPetals; k++) {
       wide = Math.random() < 0.28 ? 1.7 : 1.0;
       ang = -Math.PI / 2 + (Math.random() - Math.random()) * 0.95 * wide;
@@ -13866,7 +13962,7 @@ function bankCelebrate5_(canvas, originX, originY, opts, onDone) {
       };
       st.parts.push(p);
     }
-    var nSparks = 48 + ((Math.random() * 14) | 0);
+    var nSparks = Math.round((48 + ((Math.random() * 14) | 0)) * mult);
     for (k = 0; k < nSparks; k++) {
       ang = -Math.PI / 2 + (Math.random() - Math.random()) * 1.35;
       spd = rand(50, 280);
@@ -14008,36 +14104,65 @@ function bankFlySum_(fromEl, toEl, amountText, onArrive) {
 // Хореография победы по раскадровке mxWin (t=0..2200), цель - видимая карточка
 // «Сегодня»: на странице Поступления - KPI, на Панели - карточка «Поступления».
 // deltaToday - сумма НОВЫХ сегодняшних поступлений (для одометра от старого к новому).
-function bankWinScene_(deltaToday, toastHtml) {
+function bankWinScene_(deltaToday, toastHtml, level, mgrTotal) {
+  level = level || 1;
   var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   var receiptsCard = document.getElementById('receipts-kpi-today');
   var mainCard = document.getElementById('main-receipts-card');
+  // Карточка личной страницы менеджера (план Фаза 4, 29.08) - существует в DOM, только пока
+  // менеджер реально на вкладке «Поступления» (renderMyPageManager генерирует её на лету,
+  // в отличие от статичной разметки admin-карточек). mgrTotal - готовая сумма "сегодня по
+  // компании" от вызывающей стороны (D.role==='manager' передаёт её явно).
+  var mgrCard = document.getElementById('mgr-bank-today-card');
   var card = (receiptsCard && receiptsCard.offsetParent) ? receiptsCard
-           : (mainCard && mainCard.offsetParent) ? mainCard : null;
+           : (mainCard && mainCard.offsetParent) ? mainCard
+           : (mgrCard && mgrCard.offsetParent) ? mgrCard : null;
   var valEl = null;
   if (card === receiptsCard) valEl = receiptsCard.querySelector('.kpi-value');
   else if (card === mainCard) valEl = document.getElementById('main-receipts-today-val');
-  var bs = bankTodaySummary_();
-  var to = bs ? (Number(bs.today_in) || 0) : null;
-  var from = (to != null && deltaToday) ? to - deltaToday : null;
+  else if (card === mgrCard) valEl = document.getElementById('mgr-bank-today-val');
+  var to, from;
+  if (card === mgrCard) {
+    to = mgrTotal != null ? mgrTotal : null;
+    from = (to != null && deltaToday) ? to - deltaToday : null;
+  } else {
+    var bs = bankTodaySummary_();
+    to = bs ? (Number(bs.today_in) || 0) : null;
+    from = (to != null && deltaToday) ? to - deltaToday : null;
+  }
 
   if (!card || !valEl || reduced) {
     // другая страница открыта или reduced-motion: фанфара + тост, без хореографии
-    uiSounds.win();
+    bankWinFanfare_(level);
     p2Toast(toastHtml, 'green');
     return;
   }
   // t=0: подсветка карточки (mx-win-glow), гаснет с t=300
   card.classList.add('bank-win-glow');
   setTimeout(function() { card.classList.remove('bank-win-glow'); }, 300);
-  // t=180: салют из верхней кромки карточки
+  // t=180: салют из верхней кромки карточки. Растёт с уровнем (утверждено на превью
+  // "Фанфары по сумме"): 1-2 - один залп, 3 - двойной, 4 (от 1 млн) - четыре золотых
+  // залпа волной, последний на вершине третьей ступени фанфары.
   setTimeout(function() {
     var cr = card.getBoundingClientRect();
-    bankCelebrate5_(bankConfettiCanvas_(), cr.left + cr.width / 2, cr.top + 6,
-      { colors: ['#1D9E75', '#EF9F27', '#e8e6df', '#378ADD'] });
+    var cx = cr.left + cr.width / 2, cy = cr.top + 6;
+    var cv = bankConfettiCanvas_();
+    var BASE = ['#1D9E75', '#EF9F27', '#e8e6df', '#378ADD'];
+    var GOLD = ['#EF9F27', '#EF9F27', '#e8e6df', '#1D9E75']; // amber двойным весом, токены ГОСТа
+    if (level <= 2) {
+      bankCelebrate5_(cv, cx, cy, { colors: BASE });
+    } else if (level === 3) {
+      bankCelebrate5_(cv, cx, cy, { colors: BASE });
+      setTimeout(function() { bankCelebrate5_(cv, cx - cr.width * 0.35, cy + 4, { colors: BASE, mult: 0.8 }); }, 240);
+    } else {
+      bankCelebrate5_(cv, cx, cy, { colors: GOLD, mult: 1.35 });
+      setTimeout(function() { bankCelebrate5_(cv, cx - cr.width * 0.4, cy + 4, { colors: GOLD, mult: 1.05 }); }, 260);
+      setTimeout(function() { bankCelebrate5_(cv, cx + cr.width * 0.4, cy + 4, { colors: GOLD, mult: 1.05 }); }, 480);
+      setTimeout(function() { bankCelebrate5_(cv, cx, cy - 30, { colors: GOLD, mult: 1.2 }); }, 1240);
+    }
   }, 180);
-  // t=200: фанфара
-  setTimeout(function() { uiSounds.win(); }, 200);
+  // t=200: фанфара своего уровня
+  setTimeout(function() { bankWinFanfare_(level); }, 200);
   // t=300: единый тост (green - деньги); t=380: сумма отделяется от тоста и летит дугой
   // в KPI (500ms) - удар: pop 280ms + flash + одометр 900ms под кассовые тики
   // (как t=260..1800 в mxWin)
@@ -14051,38 +14176,60 @@ function bankWinScene_(deltaToday, toastHtml) {
       if (from != null && from !== to) p2OdoWithTicks_(valEl, from, to, uiSounds.winTick);
       // Общая сумма за месяц накручивается СИНХРОННО (Влад, 28.08: "вместе с ней должна
       // меняться общая сумма поступлений") - тики не дублируем, звук ведёт "Сегодня".
-      var monthEl = null;
-      if (card === receiptsCard) {
-        var monthCard = document.getElementById('receipts-kpi-month');
-        monthEl = monthCard ? monthCard.querySelector('.kpi-value') : null;
-      } else {
-        monthEl = document.getElementById('main-receipts-hero');
-      }
-      if (monthEl && D && D.receipts && D.receipts.summary && deltaToday) {
-        var monthTo = bankAdjustedMonthTotal_(D.receipts.summary);
-        p2OdoWithTicks_(monthEl, monthTo - deltaToday, monthTo, function() {});
+      // На карточке менеджера месячного KPI нет вообще (не просили) - пропускаем этот шаг.
+      if (card !== mgrCard) {
+        var monthEl = null;
+        if (card === receiptsCard) {
+          var monthCard = document.getElementById('receipts-kpi-month');
+          monthEl = monthCard ? monthCard.querySelector('.kpi-value') : null;
+        } else {
+          monthEl = document.getElementById('main-receipts-hero');
+        }
+        if (monthEl && D && D.receipts && D.receipts.summary && deltaToday) {
+          var monthTo = bankAdjustedMonthTotal_(D.receipts.summary);
+          p2OdoWithTicks_(monthEl, monthTo - deltaToday, monthTo, function() {});
+        }
       }
       setTimeout(function() { valEl.classList.remove('bank-val-flash'); }, 1300);
     });
   }, 380);
 }
 
+// isManagerAudience - роль зрителя банковской ленты (план Фаза 4, 29.08). Менеджер видит
+// ВСЕ поступления компании ("все менеджеры видят все поступления, которые идут"), но
+// СПИСАНИЯ не показываем и не озвучиваем вообще - это не их зона ответственности и не их
+// дело видеть, куда компания платит (в отличие от админа, который видит оба направления).
 function bankAnnounceNewOps_(ops) {
+  var isManagerAudience = D && D.role === 'manager';
   var today = BANK_OPS && BANK_OPS.today;
   var ins = ops.filter(function(o) { return o.direction === 'in'; });
-  var outs = ops.filter(function(o) { return o.direction === 'out'; });
+  var outs = isManagerAudience ? [] : ops.filter(function(o) { return o.direction === 'out'; });
   var insSum = ins.reduce(function(a, o) { return a + (Number(o.amount) || 0); }, 0);
   var outsSum = outs.reduce(function(a, o) { return a + (Number(o.amount) || 0); }, 0);
   var insTodaySum = ins.reduce(function(a, o) {
     return a + ((o.occurred_at && o.occurred_at.slice(0, 10) === today) ? (Number(o.amount) || 0) : 0);
   }, 0);
+  // Фамилия/имя менеджера рядом с контрагентом, если СМС-контрагент опознан (план Фаза 4) -
+  // видно и админу, и менеджерам, единая точка сборки текста тоста для обеих аудиторий.
+  function withMgr_(o) {
+    var name = bankEsc_(o.counterparty || '');
+    return o.matched_manager ? name + ' · ' + bankEsc_(o.matched_manager) : name;
+  }
   var parts = [];
-  if (ins.length === 1) parts.push('Поступление <b style="color:var(--green)">+' + fmt(insSum) + '</b> · ' + bankEsc_(ins[0].counterparty || ''));
+  if (ins.length === 1) parts.push('Поступление <b style="color:var(--green)">+' + fmt(insSum) + '</b> · ' + withMgr_(ins[0]));
   else if (ins.length > 1) parts.push('Поступления: <b style="color:var(--green)">+' + fmt(insSum) + '</b> (' + ins.length + ' шт.)');
   if (outs.length === 1) parts.push('Списание <b>−' + fmt(outsSum) + '</b> · ' + bankEsc_(outs[0].counterparty || ''));
   else if (outs.length > 1) parts.push('Списания: <b>−' + fmt(outsSum) + '</b> (' + outs.length + ' шт.)');
   if (ins.length) {
-    bankWinScene_(insTodaySum || insSum, parts.join('<br>'));
+    // Уровень - по МАКСИМАЛЬНОЙ операции пачки, не по сумме (одна платёжка 1,2 млн даёт
+    // "Миллионник", а десять по 15 тыс не должны звучать как миллионник только за счёт
+    // сложения - утверждено на превью "Фанфары по сумме").
+    var maxIn = ins.reduce(function(m, o) { return Math.max(m, Number(o.amount) || 0); }, 0);
+    var level = bankWinLevel_(maxIn);
+    // mgrTotal - "сегодня по компании" целиком (BANK_OPS.summary.today_in), нужен только
+    // сцене на карточке менеджера - на админских целях bankWinScene_ сам берёт из bankTodaySummary_.
+    var mgrTotal = (BANK_OPS && BANK_OPS.summary) ? (Number(BANK_OPS.summary.today_in) || 0) : null;
+    bankWinScene_(insTodaySum || insSum, parts.join('<br>'), level, mgrTotal);
     // списание в том же обновлении - attention после фанфары, не каша (правило ГОСТ раздел 8)
     if (outs.length) setTimeout(function() { uiSounds.attention(); }, 1400);
   } else if (outs.length) {
@@ -14130,13 +14277,56 @@ function renderBankLive_() {
   if (feedEl) {
     feedEl.innerHTML = todayOps.map(function(o) {
       var isIn = o.direction === 'in';
+      // Опознанный менеджер (план Фаза 4, 29.08) - показываем ВМЕСТО номера документа,
+      // он важнее для быстрого просмотра; номер документа никуда не делся, просто не
+      // дублируем два малозначимых поля рядом.
+      var docSlot = o.matched_manager
+        ? '<span class="bank-op-doc" style="color:var(--text)">' + bankEsc_(o.matched_manager) + '</span>'
+        : (o.doc_number ? '<span class="bank-op-doc">№' + bankEsc_(o.doc_number) + '</span>' : '<span class="bank-op-doc"></span>');
       return '<div class="bank-op">' +
         '<span class="bank-op-time">' + (o.occurred_at ? o.occurred_at.slice(11, 16) : '—') + '</span>' +
         '<span class="bank-op-name">' + bankEsc_(o.counterparty || 'Без названия') + '</span>' +
-        '<span class="bank-op-doc">' + (o.doc_number ? '№' + bankEsc_(o.doc_number) : '') + '</span>' +
+        docSlot +
         '<span class="bank-op-sum" style="color:' + (isIn ? 'var(--green)' : 'var(--muted)') + '">' + (isIn ? '+' : '−') + fmt(o.amount) + '</span>' +
         '</div>';
     }).join('') || '<div class="muted" style="font-size:12.5px;padding:4px 0">Сегодня операций ещё не было - жду СМС от банка</div>';
+  }
+}
+
+// Живая карточка "Поступления по компании сегодня" на личной странице менеджера (план
+// Фаза 4, 29.08: "все менеджеры видят все поступления... где можем идентифицировать - там
+// будет фамилия, имя менеджера"). В отличие от renderBankLive_ (админ): БЕЗ фильтра по
+// текущему менеджеру (company-wide, специально, по прямому решению Влада), БЕЗ списаний
+// (не их зона ответственности), БЕЗ остатка по счёту (не просили - более чувствительная
+// цифра, чем поток входящих, решил не показывать по умолчанию). Карточка существует в DOM,
+// только пока реально открыта вкладка «Поступления» на «Моей странице» - функция тихо
+// no-op'ится в любой другой момент, как и renderBankLive_ для админских целей.
+function renderMgrBankLive_() {
+  var card = document.getElementById('mgr-bank-today-card');
+  if (!card) return;
+  if (!BANK_OPS) return;
+  var today = BANK_OPS.today;
+  var todayIns = (BANK_OPS.ops || []).filter(function(o) {
+    return o.direction === 'in' && o.occurred_at && o.occurred_at.slice(0, 10) === today;
+  });
+  var total = todayIns.reduce(function(s, o) { return s + (Number(o.amount) || 0); }, 0);
+
+  var valEl = document.getElementById('mgr-bank-today-val');
+  if (valEl) valEl.textContent = fmt(total);
+
+  var feedEl = document.getElementById('mgr-bank-feed');
+  if (feedEl) {
+    feedEl.innerHTML = todayIns.map(function(o) {
+      var mgrSlot = o.matched_manager
+        ? '<span class="bank-op-doc" style="color:var(--text)">' + bankEsc_(o.matched_manager) + '</span>'
+        : '<span class="bank-op-doc"></span>';
+      return '<div class="bank-op">' +
+        '<span class="bank-op-time">' + (o.occurred_at ? o.occurred_at.slice(11, 16) : '—') + '</span>' +
+        '<span class="bank-op-name">' + bankEsc_(o.counterparty || 'Без названия') + '</span>' +
+        mgrSlot +
+        '<span class="bank-op-sum" style="color:var(--green)">+' + fmt(o.amount) + '</span>' +
+        '</div>';
+    }).join('') || '<div class="muted" style="font-size:12.5px;padding:4px 0">Сегодня поступлений ещё не было - жду СМС от банка</div>';
   }
 }
 

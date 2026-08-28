@@ -352,6 +352,9 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 @media (max-width:640px){.p2-tier3-grid{grid-template-columns:1fr !important;}}
 /* вердикт и KPI-ряд - тот же вертикальный ритм 16px, что у .grid-2 */
 #page-main .kpi-grid{margin-bottom:16px;}
+/* строка периода в шапке: "Август 2026 · день 28 из 31 · данные 1С 11:40" */
+.p2-page-period{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;padding-bottom:16px;white-space:nowrap;}
+.p2-page-period b{color:var(--text);font-weight:500;}
 
 /* ремонт: строчная таблица, число + цвет порога, без полос (спека дизайн-агента:
    полоса рядом с денежными полосами создаёт ложную рифму) */
@@ -376,7 +379,9 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .p2-bar-row{display:grid;grid-template-columns:100px 1fr 96px;align-items:center;gap:10px;min-height:24px;}
 .p2-bar-label{font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .p2-bar-tag{font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-left:5px;}
-.p2-bar-track{height:6px;border-radius:3px;background:var(--bg4);overflow:hidden;}
+/* трек полосы БЕЗ подложки (дата-виз спека: у рейтинга/долей нет предела - серый трек
+   на всю ширину рисовал бы ложный потолок; подложка - только там, где есть предел) */
+.p2-bar-track{height:6px;border-radius:3px;overflow:hidden;}
 .p2-bar-fill{height:100%;border-radius:3px;background:var(--blue);transition:width .5s ease;}
 .p2-bar-fill--red{background:var(--red);}
 .p2-bar-val{font-family:'JetBrains Mono',monospace;font-size:12px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
@@ -385,7 +390,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 /* топ менеджеров: полоса на общей шкале + личная засечка плана (bullet-грамматика) */
 .p2-mgr-row{display:grid;grid-template-columns:100px 1fr 64px 38px;align-items:center;gap:10px;min-height:26px;}
 .p2-mgr-track{position:relative;height:16px;}
-.p2-mgr-barwrap{position:absolute;left:0;top:5px;height:6px;width:100%;border-radius:3px;background:var(--bg4);overflow:hidden;}
+.p2-mgr-barwrap{position:absolute;left:0;top:5px;height:6px;width:100%;border-radius:3px;overflow:hidden;}
 .p2-mgr-bar{height:100%;border-radius:3px;transition:width .5s ease;}
 .p2-mgr-tick{position:absolute;top:2px;width:2px;height:12px;border-radius:1px;background:var(--muted);}
 .p2-mgr-pct{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums;}
@@ -887,7 +892,12 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 
   <!-- Page header (sticky title) -->
   <div class="page-header" style="display:flex;align-items:baseline;justify-content:space-between;gap:16px">
-    <div class="page-header-title" id="page-title">Панель управления</div>
+    <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
+      <div class="page-header-title" id="page-title">Панель управления</div>
+      <!-- Строка периода и свежести (превью "Панель 2.0", доточка 28.08): месяц, день N из M,
+           время данных 1С. Заполняется updatePagePeriod_() из render(). -->
+      <div class="p2-page-period" id="page-period"></div>
+    </div>
     <div id="period-selector-wrap" style="display:none;align-items:center;gap:8px;padding-bottom:16px">
       <label style="font-size:12px;color:var(--muted)">Период:</label>
       <select id="period-select" onchange="changePeriod(this.value)" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 10px;font-size:13px">
@@ -1048,8 +1058,12 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           <div class="p2-bars" id="chart-vehicles-bars"></div>
         </div>
         <div class="card">
-          <div class="card-title">Топ менеджеров</div>
+          <div class="sec-header">
+            <div class="card-title" style="margin-bottom:0">Топ менеджеров</div>
+            <div class="sec-sub">факт против личного плана</div>
+          </div>
           <div id="mgr-list"></div>
+          <div class="p2-rep-foot">засечка - личный план · цвет полосы - прогноз выполнения</div>
         </div>
       </div>
 
@@ -4835,6 +4849,7 @@ function render() {
   const t = D.updated ? new Date(D.updated).toLocaleString('ru',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'}) : '';
   setText('nav-updated', 'Обновлено: ' + t);
   checkDataFreshness(); // плашка "обновление не проходит", см. Этап 0.3
+  updatePagePeriod_(); // "Август 2026 · день N из M · данные 1С HH:MM" в шапке
   applyRoleUI();
 
   if (D.role === 'manager' || D.role === 'logist' || (D.role === 'admin' && viewAsEntry)) {
@@ -5333,7 +5348,7 @@ function renderMainReceiptsSummary() {
         if (dn > todayN) { cols += '<div class="p2-day p2-day--future"></div>'; continue; }
         var v = byDay[dn] || 0;
         var hPct = Math.max(4, v / maxDay * 100);
-        cols += '<div class="p2-day' + (dn === todayN ? ' p2-day--today' : '') + '" style="height:' + hPct.toFixed(0) + '%" title="' + dn + ' число · ' + fmtK2(v) + ' ₽"></div>';
+        cols += '<div class="p2-day' + (dn === todayN ? ' p2-day--today' : '') + '" style="height:' + hPct.toFixed(0) + '%" title="' + dn + ' число · ' + p2Mln(v) + ' ₽"></div>';
       }
       daysHtml = '<div class="p2-days">' + cols + '</div>' +
         '<div class="p2-days-foot"><span>1</span><span>сегодня</span><span>' + dim + '</span></div>';
@@ -5385,6 +5400,31 @@ function setBullet(prefix, factRatio, forecastRatio, color) {
 }
 function bulletColorByForecastPct_(forecastPct) {
   return forecastPct >= 100 ? 'var(--green)' : forecastPct >= 90 ? 'var(--amber)' : 'var(--red)';
+}
+
+// Сокращённые суммы с ДЕСЯТИЧНОЙ ЗАПЯТОЙ (ГОСТ раздел 2 / дата-виз спека: "8,9 млн", не
+// "8.9 млн") - для блоков Панели 2.0. Глобальный fmtK2 (с точкой) не тронут - другие
+// страницы дашборда переезжают на запятую своим шагом редизайна, не молча заодно.
+function p2Mln(n) {
+  var v = Math.abs(n || 0), sign = (n || 0) < 0 ? '-' : '';
+  if (v >= 1000000) return sign + (v / 1000000).toFixed(1).replace('.', ',') + ' млн';
+  if (v >= 1000) return sign + Math.round(v / 1000) + ' тыс';
+  return sign + Math.round(v);
+}
+
+// Строка периода в шапке (превью "Панель 2.0"): "Август 2026 · день 28 из 31 · данные 1С 11:40"
+function updatePagePeriod_() {
+  var el = document.getElementById('page-period');
+  if (!el) return;
+  var now = new Date();
+  var dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  var monthLabel = formatMonthLabel(now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0'));
+  var updStr = '';
+  if (D && D.updated) {
+    var u = new Date(D.updated);
+    if (!isNaN(u.getTime())) updStr = ' · данные 1С ' + u.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
+  }
+  el.innerHTML = monthLabel + ' · <b>день ' + now.getDate() + ' из ' + dim + '</b>' + updStr;
 }
 
 // Карточка "Дебиторская задолженность" на Панели - заменила "Поступления" (Влад,
@@ -5563,13 +5603,13 @@ function renderVerdict() {
     var wPct = Math.round(((r.week.total || 0) - r.week.prev_total) / r.week.prev_total * 100);
     if (wPct <= -15) {
       items.push({ cls: 'bad', w: 1000 + Math.abs(r.week.prev_total - r.week.total), goto: 'main-receipts-card',
-        html: 'Поступления недели ' + fmtK2(r.week.total || 0) + ' · <span class="p2-verdict__num">' + wPct + '%</span>' });
+        html: 'Поступления недели ' + p2Mln(r.week.total || 0) + ' · <span class="p2-verdict__num">' + wPct + '%</span>' });
     }
   }
   // 2. ДЗ растёт (тот же класс "кэш")
   if (p2VerdictData.debtWeekSaldo != null && p2VerdictData.debtWeekSaldo > 1000000) {
     items.push({ cls: 'bad', w: 1000 + p2VerdictData.debtWeekSaldo, goto: 'k-debt-card',
-      html: 'ДЗ <span class="p2-verdict__num">+' + fmtK2(p2VerdictData.debtWeekSaldo) + '</span> за неделю' });
+      html: 'ДЗ <span class="p2-verdict__num">+' + p2Mln(p2VerdictData.debtWeekSaldo) + '</span> за неделю' });
   }
   // 3. Ремонт - доля парка (класс "активы")
   var f = D.fleet || {};
@@ -5600,7 +5640,7 @@ function renderVerdict() {
   var ds = (D.debt && D.debt.summary) || {};
   if ((ds.old_unclosed_orders_amount || 0) > 1000000) {
     items.push({ cls: 'warn', w: 100 + (ds.old_unclosed_orders_amount / 1000000), goto: 'main-old-orders-card',
-      html: (ds.old_unclosed_orders_count || 0) + ' заказов не оформлено · ' + fmtK2(ds.old_unclosed_orders_amount) });
+      html: (ds.old_unclosed_orders_count || 0) + ' заказов не оформлено · ' + p2Mln(ds.old_unclosed_orders_amount) });
   }
   // 7. Машина в минусе за месяц (класс "хвосты")
   var negVeh = (D.vehicles || []).filter(function(v) { return v.profit < 0; });
@@ -5755,12 +5795,12 @@ function renderCostChart() {
     return '<div class="p2-bar-row">' +
       '<span class="p2-bar-label">' + c.name + '</span>' +
       '<div class="p2-bar-track"><div class="p2-bar-fill' + (c.red ? ' p2-bar-fill--red' : '') + '" style="width:' + (c.val/maxVal*100).toFixed(1) + '%"></div></div>' +
-      '<span class="p2-bar-val">' + fmtK2(c.val) + ' ₽' + (revPct !== null ? ' <span>' + revPct + '%</span>' : '') + '</span>' +
+      '<span class="p2-bar-val">' + p2Mln(c.val) + ' ₽' + (revPct !== null ? ' <span>' + revPct.replace('.', ',') + '%</span>' : '') + '</span>' +
     '</div>';
   }).join('');
 
-  const footer = '<div class="p2-rep-foot">Итого <b style="color:var(--text);font-family:\'JetBrains Mono\',monospace">' + fmtK2(total) + ' ₽</b>' +
-    (totalRevPct !== null ? ' · ' + totalRevPct + '% от выручки' : '') + '</div>';
+  const footer = '<div class="p2-rep-foot">Итого <b style="color:var(--text);font-family:\'JetBrains Mono\',monospace">' + p2Mln(total) + ' ₽</b>' +
+    (totalRevPct !== null ? ' · ' + totalRevPct.replace('.', ',') + '% от выручки' : '') + '</div>';
 
   document.getElementById('cost-cards').innerHTML = rows + footer;
 }
@@ -5780,7 +5820,7 @@ function renderVehicleChart() {
     return '<div class="p2-bar-row">' +
       '<span class="p2-bar-label">' + v.gos + '<span class="p2-bar-tag">' + (v.type || '') + '</span></span>' +
       '<div class="p2-bar-track"><div class="p2-bar-fill' + (v.profit < 0 ? ' p2-bar-fill--red' : '') + '" style="width:' + w.toFixed(1) + '%"></div></div>' +
-      '<span class="p2-bar-val" style="color:' + (v.profit < 0 ? 'var(--red)' : 'var(--text)') + '">' + fmtK2(v.profit) + ' ₽</span>' +
+      '<span class="p2-bar-val" style="color:' + (v.profit < 0 ? 'var(--red)' : 'var(--text)') + '">' + p2Mln(v.profit) + ' ₽</span>' +
     '</div>';
   }).join('');
 }
@@ -5790,7 +5830,9 @@ function renderVehicleChart() {
 // своей цели (полоса против засечки). Ранг медалями-картинками убран (ГОСТ запрет №2,
 // медали были эмодзи-иконками - Влад, 2026-07-04) - вместо них просто порядок в списке.
 function renderMgrList() {
-  const mgrs = (D.orders.by_manager||[]).filter(m => isSales(m.name)).sort((a,b) => b.amount-a.amount).slice(0, 6);
+  // ВСЕ менеджеры-продажники (эргономист: "все - план/факт нужен по каждому,
+  // руководители смотрят своих"; слайс до 6 убран доточкой 28.08).
+  const mgrs = (D.orders.by_manager||[]).filter(m => isSales(m.name)).sort((a,b) => b.amount-a.amount);
   const paceRatio = calcPaceRatio_(D.orders.period);
 
   // общая шкала - максимум из (факт, план) по всем, ×1.05 (запас, чтобы засечка плана
@@ -5800,7 +5842,6 @@ function renderMgrList() {
   maxVal = (maxVal || 1) * 1.05;
 
   document.getElementById('mgr-list').innerHTML = mgrs.map(function(m, i) {
-    const pct = m.pct || 0;
     const faktForPace = m.amount_thru_yesterday != null ? m.amount_thru_yesterday : (m.amount||0);
     const forecast = faktForPace * paceRatio;
     const forecastPct = m.plan > 0 ? (forecast / m.plan * 100) : 0;
@@ -5809,10 +5850,13 @@ function renderMgrList() {
     const color = !m.plan ? 'var(--muted)' : bulletColorByForecastPct_(forecastPct);
     const barW = Math.min(100, (m.amount || 0) / maxVal * 100);
     const tick = m.plan ? '<span class="p2-mgr-tick" style="left:' + Math.min(100, m.plan / maxVal * 100).toFixed(1) + '%"></span>' : '';
-    return '<div class="p2-mgr-row">' +
-      '<span class="p2-bar-label">' + cleanName(m.name) + '</span>' +
+    // Только фамилия (как в превью) - полное ФИО не влезает в колонку 100px и рушит
+    // сканируемость; полные имена живут на странице "По менеджерам".
+    const surname = cleanName(m.name).trim().split(' ')[0];
+    return '<div class="p2-mgr-row" title="' + cleanName(m.name) + '">' +
+      '<span class="p2-bar-label">' + surname + '</span>' +
       '<div class="p2-mgr-track"><div class="p2-mgr-barwrap"><div class="p2-mgr-bar" style="width:' + barW.toFixed(1) + '%;background:' + color + '"></div></div>' + tick + '</div>' +
-      '<span class="p2-bar-val">' + fmtK2(m.amount) + '</span>' +
+      '<span class="p2-bar-val">' + p2Mln(m.amount) + '</span>' +
       '<span class="p2-mgr-pct">' + (m.plan ? Math.round(forecastPct) + '%' : '—') + '</span>' +
     '</div>';
   }).join('');

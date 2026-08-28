@@ -301,6 +301,21 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .p2-verdict__num{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;}
 .p2-verdict__empty{font-size:12.5px;color:var(--muted);}
 
+/* табло-карусель (ГОСТ: сплит-флэп, утверждено 28.08) */
+.p2-verdict.p2-board{cursor:pointer;gap:12px;flex-wrap:nowrap;}
+.p2-flap-dot{width:6px;height:6px;border-radius:50%;flex:none;background:var(--muted);transition:background-color .3s ease;}
+.p2-flap-dot.p2-verdict__item--bad,.p2-verdict__item--bad.p2-flap-dot{background:var(--red);}
+.p2-verdict__item--warn.p2-flap-dot{background:var(--amber);}
+.p2-verdict__item--good.p2-flap-dot{background:var(--green);}
+.p2-flap{font-family:'JetBrains Mono',monospace;font-size:13px;font-variant-numeric:tabular-nums;
+  display:inline-flex;flex:1;min-width:0;overflow:hidden;white-space:nowrap;}
+.p2-flap span{display:inline-block;min-width:.62em;text-align:center;}
+.p2-flap span.spinning{color:var(--muted);opacity:.85;}
+.p2-flap span.landed{color:var(--text);}
+.p2-flap-counter{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;flex:none;}
+.p2-flap-paused{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);flex:none;opacity:0;transition:opacity .2s ease;}
+.p2-verdict.p2-board:hover .p2-flap-paused{opacity:.7;}
+
 /* bullet-чарт: шкала 0-120% плана, тик всегда на 83.3% (константа) */
 .p2-bullet{position:relative;height:16px;margin-top:2px;}
 .p2-bullet__track{position:absolute;left:0;right:0;top:5px;height:6px;border-radius:3px;background:var(--bg4);}
@@ -389,6 +404,26 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   #page-main{perspective:none;}
   #page-main .kpi:hover,#page-main .card:hover{transform:none;}
   .p2-light{display:none;}
+}
+
+/* ═══ ЕДИНЫЙ ТОСТ (ГОСТ раздел 4, жёсткое правило Влада 28.08: один принцип на все
+   уведомления - как в канбане: всплывает плитка и потихоньку исчезает). ═══ */
+.p2-toast{
+  position:fixed;left:50%;bottom:22px;transform:translate(-50%,14px);opacity:0;
+  background:var(--bg4);border:1px solid rgba(255,255,255,.16);border-radius:10px;
+  padding:9px 16px;font-size:12.5px;color:var(--text);z-index:3000;
+  display:flex;align-items:center;gap:9px;max-width:min(560px,90vw);
+  pointer-events:none;white-space:normal;
+  transition:opacity .32s cubic-bezier(.32,.72,0,1),transform .32s cubic-bezier(.32,.72,0,1);
+}
+.p2-toast.show{opacity:1;transform:translate(-50%,0);}
+.p2-toast.hiding{transition-duration:.2s;}
+.p2-toast__dot{width:6px;height:6px;border-radius:50%;flex:none;background:var(--amber);}
+.p2-toast__dot--green{background:var(--green);}
+.p2-toast__dot--red{background:var(--red);}
+.p2-toast b{font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:500;font-variant-numeric:tabular-nums;}
+@media (prefers-reduced-motion: reduce){
+  .p2-toast{transition:opacity .2s ease;transform:translate(-50%,0);}
 }
 /* строка периода в шапке: "Август 2026 · день 28 из 31 · данные 1С 11:40" */
 .p2-page-period{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;padding-bottom:16px;white-space:nowrap;}
@@ -3083,7 +3118,7 @@ async function setMyPagePeriod(period) {
     }
     myPagePeriod = period;
   } catch (e) {
-    alert('Не удалось загрузить прошлый месяц: ' + e.message);
+    p2ToastErr('Не удалось загрузить прошлый месяц: ' + e.message);
   } finally {
     myPagePeriodLoading = false;
     renderMyPage();
@@ -5531,6 +5566,34 @@ setInterval(function() { try { updatePagePeriod_(); } catch(e) {} }, 30000);
    сравнивает. Деньги выросли - фанфара выигрыша + одометр под мажорные тики.
    Долг вырос - attention + одометр под глухие нисходящие тики. Первый рендер
    молчит (базы нет). Порог 10 000 ₽ - копеечное дрожание не событие. */
+/* ═══ ЕДИНЫЙ ТОСТ (ГОСТ раздел 4): единственный канал уведомлений всей системы.
+   p2Toast(text, type) - type: 'green' успех/деньги, 'amber' инфо (default),
+   'red' ошибка. Повторный вызов ретаргетит плашку и перезапускает таймер.
+   p2ToastErr(text) - шорткат ошибки (замена бывших alert'ов). */
+var p2ToastEl_ = null, p2ToastTimer_ = null;
+function p2Toast(text, type) {
+  type = type || 'amber';
+  if (!p2ToastEl_) {
+    p2ToastEl_ = document.createElement('div');
+    p2ToastEl_.className = 'p2-toast';
+    p2ToastEl_.innerHTML = '<span class="p2-toast__dot"></span><span class="p2-toast__text"></span>';
+    document.body.appendChild(p2ToastEl_);
+  }
+  var dot = p2ToastEl_.querySelector('.p2-toast__dot');
+  dot.className = 'p2-toast__dot' + (type !== 'amber' ? ' p2-toast__dot--' + type : '');
+  p2ToastEl_.querySelector('.p2-toast__text').innerHTML = text;
+  p2ToastEl_.classList.remove('hiding');
+  // форс-рефлоу, чтобы повторный показ анимировался, а не мигал
+  void p2ToastEl_.offsetWidth;
+  p2ToastEl_.classList.add('show');
+  clearTimeout(p2ToastTimer_);
+  p2ToastTimer_ = setTimeout(function() {
+    p2ToastEl_.classList.add('hiding');
+    p2ToastEl_.classList.remove('show');
+  }, 5000);
+}
+function p2ToastErr(text) { p2Toast(text, 'red'); }
+
 var p2PrevVals_ = null;
 var p2CurDebtTotal_ = null;
 var P2_SOUND_THRESHOLD_ = 10000;
@@ -5571,12 +5634,18 @@ function p2DataSoundCheck_() {
     uiSounds.growth(); // ОДНА фанфара на обновление, не по разу на метрику
     if (revGrew) p2OdoWithTicks_(document.getElementById('k-revenue-total'), prev.rev, cur.rev, uiSounds.moneyTick);
     if (recGrew) p2OdoWithTicks_(document.getElementById('main-receipts-hero'), prev.rec, cur.rec, uiSounds.moneyTick);
+    // тост-уведомление (единый канал, ГОСТ раздел 4) - обе метрики одной плиткой
+    var parts = [];
+    if (revGrew) parts.push('Выручка <b>+' + p2Mln(cur.rev - prev.rev) + ' ₽</b>');
+    if (recGrew) parts.push('Поступления <b>+' + p2Mln(cur.rec - prev.rec) + ' ₽</b>');
+    p2Toast(parts.join(' · '), 'green');
   }
   if (debtGrew) {
     var delay = (revGrew || recGrew) ? 1200 : 0; // после фанфары, не каша
     setTimeout(function() {
       uiSounds.attention();
       p2OdoWithTicks_(document.getElementById('k-debt-total'), prev.debt, cur.debt, uiSounds.debtTick);
+      p2Toast('Дебиторка <b>+' + p2Mln(cur.debt - prev.debt) + ' ₽</b> с прошлого обновления', 'amber');
     }, delay);
   }
 }
@@ -5743,81 +5812,169 @@ function renderOldOrdersCard() {
 // значения из D - новых запросов к серверу не делает. debtWeekSaldo приходит асинхронно
 // (см. renderDebtMiniCard) - функция вызывается повторно, когда он становится известен.
 var p2VerdictData = { debtWeekSaldo: null };
-function renderVerdict() {
-  var el = document.getElementById('p2-verdict');
-  if (!el || !D) return;
-  var items = []; // {cls, w, html, goto}
+/* ═══ ТАБЛО-КАРУСЕЛЬ МЕТРИК (Влад, 28.08, утверждено на превью "Табло вердикта"):
+   одна строка, 10 ключевых метрик, ротация раз в 10 сек, каждая смена -
+   сплит-флэп перещёлкивание символов волной слева направо, как табло аэропорта.
+   Пауза на hover (дочитать), клик - переход к блоку метрики, тихий шелест
+   (каждая 3-я фиксация), счётчик позиции справа. Заменила worst-first вердикт. ═══ */
+var p2FlapIdx_ = 0;
+var p2FlapMetrics_ = [];
+var p2FlapTimers_ = [];
+var p2FlapPaused_ = false;
+var P2_FLAP_GLYPHS_ = 'АБВГДЕЖЗИКЛМНОПРСТУФХЦЧШЩЭЮЯ0123456789%·+-,';
+var P2_FLAP_ROTATE_MS_ = 10000;
+
+// собрать 10 метрик из уже посчитанных данных (без новых запросов)
+function p2BuildFlapMetrics_() {
   var s = D.summary || {};
-  var os = (D.orders && D.orders.summary) || {};
+  var m = [];
   var totalRevenue = s.salesFakt || 0;
   var salesPlan = s.salesPlan || 0;
-
-  // 1. Поступления недели (класс "кэш" - самый тяжёлый)
+  var faktForPace = s.salesFaktThruYesterday != null ? s.salesFaktThruYesterday : totalRevenue;
+  var revForecast = faktForPace * calcPaceRatio_(D.orders && D.orders.period);
+  var revForecastPct = salesPlan > 0 ? (revForecast / salesPlan * 100) : 0;
+  var revCls = revForecastPct >= 100 ? 'good' : revForecastPct >= 90 ? 'warn' : 'bad';
+  if (totalRevenue > 0) {
+    m.push({ cls: revCls, goto: 'k-revenue-total',
+      text: 'Выручка ' + p2Mln(totalRevenue) + (salesPlan > 0 ? ' · ' + Math.round(totalRevenue / salesPlan * 100) + '% плана' : '') });
+    if (salesPlan > 0) m.push({ cls: revCls, goto: 'k-revenue-total',
+      text: 'Прогноз выручки ' + p2Mln(revForecast) + ' · ' + Math.round(revForecastPct) + '% плана' });
+  }
+  var profit = s.profit || 0;
+  if (profit !== 0) {
+    var marginPct = totalRevenue > 0 ? (profit / totalRevenue * 100) : 0;
+    m.push({ cls: profit >= 0 ? 'good' : 'bad', goto: 'k-profit',
+      text: 'Валовая прибыль ' + p2Mln(profit) + ' · маржа ' + marginPct.toFixed(1).replace('.', ',') + '%' });
+  }
   var r = D.receipts;
-  if (r && r.week && r.week.prev_total > 0) {
-    var wPct = Math.round(((r.week.total || 0) - r.week.prev_total) / r.week.prev_total * 100);
-    if (wPct <= -15) {
-      items.push({ cls: 'bad', w: 1000 + Math.abs(r.week.prev_total - r.week.total), goto: 'main-receipts-card',
-        html: 'Поступления недели ' + p2Mln(r.week.total || 0) + ' · <span class="p2-verdict__num">' + wPct + '%</span>' });
+  if (r && r.summary) {
+    if (r.summary.total_today != null) m.push({ cls: 'good', goto: 'main-receipts-card',
+      text: 'Поступления сегодня ' + p2Mln(r.summary.total_today) });
+    if (r.week && r.week.prev_total > 0) {
+      var wPct = Math.round(((r.week.total || 0) - r.week.prev_total) / r.week.prev_total * 100);
+      m.push({ cls: wPct <= -15 ? 'bad' : (wPct < 0 ? 'warn' : 'good'), goto: 'main-receipts-card',
+        text: 'Поступления недели ' + p2Mln(r.week.total || 0) + ' · ' + (wPct >= 0 ? '+' : '') + wPct + '%' });
     }
   }
-  // 2. ДЗ растёт (тот же класс "кэш")
-  if (p2VerdictData.debtWeekSaldo != null && p2VerdictData.debtWeekSaldo > 1000000) {
-    items.push({ cls: 'bad', w: 1000 + p2VerdictData.debtWeekSaldo, goto: 'k-debt-card',
-      html: 'ДЗ <span class="p2-verdict__num">+' + p2Mln(p2VerdictData.debtWeekSaldo) + '</span> за неделю' });
+  if (p2CurDebtTotal_ != null) {
+    var saldo = p2VerdictData.debtWeekSaldo;
+    var debtCls = (saldo != null && saldo > 1000000) ? 'bad' : (saldo != null && saldo > 0 ? 'warn' : 'good');
+    m.push({ cls: debtCls, goto: 'k-debt-card',
+      text: 'ДЗ ' + p2Mln(p2CurDebtTotal_) + (saldo != null ? ' · ' + (saldo > 0 ? '+' : '') + p2Mln(saldo) + ' за неделю' : '') });
   }
-  // 3. Ремонт - доля парка (класс "активы")
   var f = D.fleet || {};
   var totalFleet = ((f.trailers || {}).total || 36) + ((f.trucks || {}).total || 19);
   var totalRepair = ((f.trailers || {}).repair || 0) + ((f.trucks || {}).repair || 0);
-  var repPct = totalFleet > 0 ? Math.round(totalRepair / totalFleet * 100) : 0;
-  if (repPct >= 20 && totalRepair > 0) {
-    items.push({ cls: 'warn', w: 500 + repPct, goto: 'main-repair-count',
-      html: 'В ремонте <span class="p2-verdict__num">' + totalRepair + '</span> машин · ' + repPct + '% парка' });
-  }
-  // 4. Без водителя (тот же класс "активы")
   var totalNoDriver = ((f.trailers || {}).noDriver || 0) + ((f.trucks || {}).noDriver || 0);
-  var noDrvPct = totalFleet > 0 ? Math.round(totalNoDriver / totalFleet * 100) : 0;
-  if (noDrvPct >= 10 && totalNoDriver > 0) {
-    items.push({ cls: 'warn', w: 500 + noDrvPct, goto: 'p2-fleet-card',
-      html: 'Без водителя <span class="p2-verdict__num">' + totalNoDriver + '</span> машин' });
+  var totalWorking = ((f.trailers || {}).working || 0) + ((f.trucks || {}).working || 0);
+  if (totalRepair > 0) {
+    var repPct = Math.round(totalRepair / totalFleet * 100);
+    m.push({ cls: repPct >= 20 ? 'warn' : 'good', goto: 'main-repair-count',
+      text: 'В ремонте ' + totalRepair + ' машин · ' + repPct + '% парка' });
   }
-  // 5. Прогноз выручки (класс "план") - те же переменные, что в renderKPI, локальны там,
-  // поэтому дублируем расчёт (дёшево, не отдельный запрос к серверу).
-  var faktForPace = s.salesFaktThruYesterday != null ? s.salesFaktThruYesterday : totalRevenue;
-  var revForecast_ = faktForPace * calcPaceRatio_(D.orders && D.orders.period);
-  var revForecastPct_ = salesPlan > 0 ? (revForecast_ / salesPlan * 100) : 0;
-  if (salesPlan > 0 && revForecastPct_ < 95) {
-    items.push({ cls: 'warn', w: 200 + (95 - revForecastPct_), goto: 'k-revenue-total',
-      html: 'Прогноз выручки <span class="p2-verdict__num">' + Math.round(revForecastPct_) + '%</span> плана' });
+  if (totalNoDriver > 0) {
+    m.push({ cls: Math.round(totalNoDriver / totalFleet * 100) >= 10 ? 'warn' : 'good', goto: 'p2-fleet-card',
+      text: 'Без водителя ' + totalNoDriver + ' машин' });
   }
-  // 6. Незакрытые заказы (класс "хвосты")
   var ds = (D.debt && D.debt.summary) || {};
-  if ((ds.old_unclosed_orders_amount || 0) > 1000000) {
-    items.push({ cls: 'warn', w: 100 + (ds.old_unclosed_orders_amount / 1000000), goto: 'main-old-orders-card',
-      html: (ds.old_unclosed_orders_count || 0) + ' заказов не оформлено · ' + p2Mln(ds.old_unclosed_orders_amount) });
+  if (ds.old_unclosed_orders_count) {
+    m.push({ cls: (ds.old_unclosed_orders_amount || 0) > 1000000 ? 'warn' : 'good', goto: 'main-old-orders-card',
+      text: 'Незакрытые заказы ' + ds.old_unclosed_orders_count + ' · ' + p2Mln(ds.old_unclosed_orders_amount || 0) });
   }
-  // 7. Машина в минусе за месяц (класс "хвосты")
-  var negVeh = (D.vehicles || []).filter(function(v) { return v.profit < 0; });
-  if (negVeh.length) {
-    items.push({ cls: 'warn', w: 100 + negVeh.length, goto: 'chart-vehicles-bars',
-      html: negVeh.length === 1 ? 'Машина ' + negVeh[0].gos + ' в минусе за месяц' : negVeh.length + ' машины в минусе за месяц' });
+  if (totalWorking > 0 && totalFleet > 0) {
+    var loadPct = Math.round(totalWorking / totalFleet * 100);
+    m.push({ cls: loadPct >= 70 ? 'good' : loadPct >= 50 ? 'warn' : 'bad', goto: 'p2-fleet-card',
+      text: 'Загрузка парка ' + loadPct + '% · в работе ' + totalWorking + ' из ' + totalFleet });
   }
+  return m.slice(0, 10);
+}
 
-  items.sort(function(a, b) { return b.w - a.w; }); // worst-first по эффекту внутри класса; bad уже тяжелее warn через базовый вес
-  items = items.slice(0, 4);
+function p2FlapClearTimers_() {
+  p2FlapTimers_.forEach(clearInterval);
+  p2FlapTimers_ = [];
+}
+function p2FlapRandGlyph_() {
+  return P2_FLAP_GLYPHS_[Math.floor(Math.random() * P2_FLAP_GLYPHS_.length)];
+}
+// показать метрику с посимвольным перещёлкиванием (волна слева направо)
+function p2FlapShow_(m, animate) {
+  var flapEl = document.getElementById('p2-flap');
+  var dotEl = document.getElementById('p2-flap-dot');
+  var cntEl = document.getElementById('p2-flap-counter');
+  if (!flapEl) return;
+  var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  dotEl.className = 'p2-verdict__item--' + m.cls + ' p2-flap-dot';
+  cntEl.textContent = (p2FlapIdx_ + 1) + '/' + p2FlapMetrics_.length;
+  p2FlapClearTimers_();
+  flapEl.innerHTML = '';
+  var text = m.text;
+  for (var i = 0; i < text.length; i++) {
+    var sp = document.createElement('span');
+    var ch = text[i];
+    if (ch === ' ') { sp.innerHTML = '&nbsp;'; sp.className = 'landed'; }
+    else if (!animate || reduced || document.hidden) { sp.textContent = ch; sp.className = 'landed'; }
+    else {
+      sp.textContent = p2FlapRandGlyph_(); sp.className = 'spinning';
+      (function(el2, target, pos) {
+        var flips = 3 + Math.floor(pos * 0.35) + Math.floor(Math.random() * 3);
+        var n = 0;
+        var t = setInterval(function() {
+          n++;
+          if (n >= flips) {
+            clearInterval(t);
+            el2.textContent = target;
+            el2.className = 'landed';
+          } else { el2.textContent = p2FlapRandGlyph_(); }
+        }, 45);
+        p2FlapTimers_.push(t);
+      })(sp, ch, i);
+    }
+    flapEl.appendChild(sp);
+  }
+}
 
-  // Мета-плашка (день/время) убрана из вердикта - переехала в шапку страницы
-  // (updatePagePeriod_), тут дублировала (Влад, 28.08). Вердикт - только фразы.
-  var html = '';
-  if (!items.length) {
-    html += '<span class="p2-verdict__empty">Отклонений нет</span>';
+function p2FlapNext_() {
+  if (!p2FlapMetrics_.length) return;
+  p2FlapIdx_ = (p2FlapIdx_ + 1) % p2FlapMetrics_.length;
+  p2FlapShow_(p2FlapMetrics_[p2FlapIdx_], true);
+}
+
+// renderVerdict: имя сохранено (вызывается из renderMain и debt-async) - теперь
+// пересобирает карусель; текущая метрика перещёлкивается, если её текст изменился.
+var p2FlapStarted_ = false;
+function renderVerdict() {
+  var el = document.getElementById('p2-verdict');
+  if (!el || !D) return;
+  var prevText = p2FlapMetrics_.length ? p2FlapMetrics_[p2FlapIdx_ % p2FlapMetrics_.length].text : null;
+  p2FlapMetrics_ = p2BuildFlapMetrics_();
+  if (!p2FlapMetrics_.length) {
+    el.innerHTML = '<span class="p2-verdict__empty">Нет данных</span>';
+    return;
+  }
+  if (p2FlapIdx_ >= p2FlapMetrics_.length) p2FlapIdx_ = 0;
+  if (!p2FlapStarted_) {
+    p2FlapStarted_ = true;
+    el.innerHTML = '<span class="p2-flap-dot" id="p2-flap-dot"></span>' +
+      '<span class="p2-flap" id="p2-flap"></span>' +
+      '<span class="p2-flap-paused">ПАУЗА</span>' +
+      '<span class="p2-flap-counter" id="p2-flap-counter"></span>';
+    el.classList.add('p2-board');
+    el.addEventListener('pointerenter', function() { p2FlapPaused_ = true; });
+    el.addEventListener('pointerleave', function() { p2FlapPaused_ = false; });
+    el.addEventListener('click', function() {
+      var cur = p2FlapMetrics_[p2FlapIdx_];
+      if (cur) { uiSounds.navClick(); p2VerdictGoto(cur.goto); }
+    });
+    setInterval(function() {
+      if (p2FlapPaused_ || document.hidden) return;
+      p2FlapNext_();
+    }, P2_FLAP_ROTATE_MS_);
+    p2FlapShow_(p2FlapMetrics_[0], true);
   } else {
-    html += items.map(function(it) {
-      return '<span class="p2-verdict__item p2-verdict__item--' + it.cls + '" onclick="p2VerdictGoto(\'' + it.goto + '\')">' + it.html + '</span>';
-    }).join('');
+    var cur = p2FlapMetrics_[p2FlapIdx_];
+    if (cur && cur.text !== prevText) p2FlapShow_(cur, true); // данные изменились - перещёлкнуть
+    else if (cur) p2FlapShow_(cur, false); // тот же текст - просто обновить счётчик/точку
   }
-  el.innerHTML = html;
 }
 function p2VerdictGoto(id) {
   var t = document.getElementById(id);
@@ -7332,7 +7489,7 @@ function quickSetOrderPlanStatus(idx, newStatus, selectEl) {
   }
   apiFetchJson(params).then(function(data) {
     if (data.error) {
-      alert(data.error);
+      p2ToastErr(data.error);
       selectEl.value = prevStatus || '';
       selectEl.disabled = false;
       return;
@@ -7340,7 +7497,7 @@ function quickSetOrderPlanStatus(idx, newStatus, selectEl) {
     o.status = newStatus;
     renderOrderPlan(); // перекрасит фон строки целиком - фон зависит от статуса
   }).catch(function() {
-    alert('Не удалось сохранить статус, попробуйте ещё раз');
+    p2ToastErr('Не удалось сохранить статус, попробуйте ещё раз');
     selectEl.value = prevStatus || '';
     selectEl.disabled = false;
   });
@@ -10403,10 +10560,10 @@ function buildDeptSheet_(dept, getM, getL, useNewRules) {
 }
 
 function exportSalaryToExcel_() {
-  if (!D || !D.orders) { alert('Нет данных для экспорта.'); return; }
+  if (!D || !D.orders) { p2Toast('Нет данных для экспорта', 'amber'); return; }
   var useNewRules = isNewRulesPeriod(D.orders.period);
   if (!useNewRules) {
-    alert('Экспорт доступен только для периодов с июля 2026 (действующие правила расчёта). ' +
+    p2Toast('Экспорт доступен только для периодов с июля 2026 (действующие правила расчёта). ' +
       'Формулы в файле написаны под текущие правила - для более старых периодов действовала другая формула.');
     return;
   }
@@ -10641,7 +10798,7 @@ async function debtSetStatus(selectEl, contragent) {
       document.getElementById('vcard-content').innerHTML = buildDebtCard_(c);
     }
   } catch (e) {
-    alert('Ошибка записи статуса: ' + e.message);
+    p2ToastErr('Ошибка записи статуса: ' + e.message);
   } finally {
     selectEl.disabled = false;
   }
@@ -11553,13 +11710,13 @@ function crmUpdatePushButton_() {
   }).catch(function() {}); // нет активной регистрации ещё - обычное состояние до первого клика
 }
 function crmEnablePush() {
-  if (!crmPushSupported_()) { alert('Этот браузер не поддерживает push-уведомления.'); return; }
+  if (!crmPushSupported_()) { p2Toast('Этот браузер не поддерживает push-уведомления', 'amber'); return; }
   var btn = document.getElementById('crm-push-btn');
   if (btn) { btn.disabled = true; btn.textContent = 'Включаем...'; }
   Notification.requestPermission().then(function(perm) {
     if (perm !== 'granted') {
       if (btn) { btn.disabled = false; btn.textContent = '🔔 Включить уведомления'; }
-      alert('Уведомления не разрешены в браузере - без этого разрешения push работать не будет. Проверьте настройки сайта в браузере.');
+      p2Toast('Уведомления не разрешены в браузере - без этого разрешения push работать не будет. Проверьте настройки сайта в браузере.');
       return;
     }
     navigator.serviceWorker.register('/files/sw.js').then(function(reg) {
@@ -11574,7 +11731,7 @@ function crmEnablePush() {
       crmUpdatePushButton_();
     }).catch(function(err) {
       if (btn) { btn.disabled = false; btn.textContent = '🔔 Включить уведомления'; }
-      alert('Не удалось включить уведомления: ' + err.message);
+      p2ToastErr('Не удалось включить уведомления: ' + err.message);
     });
   });
 }
@@ -11639,7 +11796,7 @@ function crmSetChatFilter_(key) {
 // компонент). Нужен только для фильтра "Мои" - остальной CRM в идентичности не нуждается.
 function crmAskWhoAmI_(onDone) {
   fetchFromYardApi_('/crm/employees', {}).then(function(r) {
-    if (!r.ok) { alert('Не удалось загрузить список сотрудников'); return; }
+    if (!r.ok) { p2ToastErr('Не удалось загрузить список сотрудников'); return; }
     var options = (r.data.employees || []).map(function(e) {
       return '<option value="' + e.extension + '">' + crmEsc(e.name) + '</option>';
     }).join('');
@@ -11652,7 +11809,7 @@ function crmAskWhoAmI_(onDone) {
       + '<div class="crm-modal-actions"><button class="tab-btn" onclick="closeCrmModal()">Отмена</button><button class="tab-btn active" onclick="crmSaveWhoAmI_()">Сохранить</button></div>';
     overlay.style.display = 'flex';
     window.crmWhoAmIDone_ = onDone;
-  }).catch(function() { alert('Нет соединения с сервером - не удалось загрузить список сотрудников.'); });
+  }).catch(function() { p2ToastErr('Нет соединения с сервером - не удалось загрузить список сотрудников.'); });
 }
 function crmSaveWhoAmI_() {
   var val = document.getElementById('crm-whoami-select').value;
@@ -11930,11 +12087,11 @@ function crmSaveChatBrief_(dealId) {
   var fields = crmReadBriefFields_('crm-ctx');
   fields.id = dealId;
   postToYardApi_('/crm/deals/update', fields).then(function(r) {
-    if (!r.ok) { alert('Не удалось сохранить: ' + (r.data && r.data.error || 'ошибка сервера')); return; }
+    if (!r.ok) { p2ToastErr('Не удалось сохранить: ' + (r.data && r.data.error || 'ошибка сервера')); return; }
     var savedEl = document.getElementById('crm-ctx-brief-saved');
     if (savedEl) { savedEl.style.display = ''; setTimeout(function() { if (savedEl) savedEl.style.display = 'none'; }, 2000); }
     loadCrmChats(); // подтянуть обновлённый бриф в строку списка слева
-  }).catch(function() { alert('Нет соединения с сервером - заявка не сохранена, попробуйте ещё раз.'); });
+  }).catch(function() { p2ToastErr('Нет соединения с сервером - заявка не сохранена, попробуйте ещё раз.'); });
 }
 
 function crmSendThreadMessage() {
@@ -12144,7 +12301,7 @@ function crmChangeStage(id, stage) {
   }
   postToYardApi_('/crm/deals/stage', params).then(function(r) {
     if (!r.ok) {
-      alert('Не удалось изменить стадию: ' + (r.data && r.data.error || 'ошибка сервера'));
+      p2ToastErr('Не удалось изменить стадию: ' + (r.data && r.data.error || 'ошибка сервера'));
       renderCrmBoard();
       return;
     }
@@ -12299,7 +12456,7 @@ function crmSaveDeal(id) {
   for (var k in brief) params[k] = brief[k];
   postToYardApi_('/crm/deals/update', params).then(function(r) {
     if (!r.ok) {
-      alert('Не удалось сохранить: ' + (r.data && r.data.error || 'ошибка сервера'));
+      p2ToastErr('Не удалось сохранить: ' + (r.data && r.data.error || 'ошибка сервера'));
       return;
     }
     closeCrmModal();
@@ -12867,6 +13024,13 @@ function toggleUiSound() {
   var nav = document.querySelector('.sidebar-nav');
   if (nav) nav.addEventListener('click', function(e){
     if (e.target.closest('.sidebar-nav-item')) uiSounds.navClick();
+  });
+  // Клик по плиткам-переходам (Влад, 28.08: "плитки, нажимая на которые переходим в
+  // раздел, сопроводить звуком") - тот же navClick-тик, что у пунктов меню: переход
+  // есть переход, один принцип. Ловит: проваливаемые карточки (.p2-drill - ДЗ,
+  // Поступления, Маржа найма, Незакрытые) и блоки парка (переход на Технику).
+  document.addEventListener('click', function(e){
+    if (e.target.closest('.p2-drill') || e.target.closest('.fleet-block[onclick]')) uiSounds.navClick();
   });
 })();
 

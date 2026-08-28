@@ -824,13 +824,8 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .crm-toast-body{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .crm-sound-toggle{font-size:11px;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:4px;padding:0 8px;}
 @media(prefers-reduced-motion:reduce){.crm-toast{animation:none;}}
-/* Тост банковской операции - канон ГОСТа раздел 4: снизу по центру, вход 320ms / выход
-   200ms по drawer-кривой, автоскрытие 5с (управляется из bankShowToast_). */
-.bank-toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,130%);opacity:0;background:var(--bg3);border:1px solid var(--border-strong);border-radius:var(--radius);padding:12px 18px;z-index:2500;font-size:13px;color:var(--text);max-width:440px;transition:transform .32s cubic-bezier(.32,.72,0,1),opacity .32s cubic-bezier(.32,.72,0,1);pointer-events:none;}
-.bank-toast.show{transform:translate(-50%,0);opacity:1;}
-.bank-toast.hiding{transition-duration:.2s;}
-.bank-toast b{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;}
-@media(prefers-reduced-motion:reduce){.bank-toast{transition:opacity .2s;transform:translate(-50%,0);}}
+/* Уведомления банковских операций идут ЕДИНЫМ тостом p2Toast (ГОСТ раздел 4, запрет
+   самодельных плашек) - своего CSS у них нет. Ниже - только строки ленты. */
 /* Строка ленты движения по счёту: время | контрагент | документ | сумма */
 .bank-op{display:grid;grid-template-columns:44px 1fr auto auto;gap:10px;align-items:baseline;padding:5px 0;border-bottom:1px solid var(--border);font-size:12.5px;}
 .bank-op:last-child{border-bottom:none;}
@@ -13337,7 +13332,7 @@ function bankWinScene_(deltaToday, toastHtml) {
   if (!card || !valEl || reduced) {
     // другая страница открыта или reduced-motion: фанфара + тост, без хореографии
     uiSounds.win();
-    bankShowToast_(toastHtml);
+    p2Toast(toastHtml, 'green');
     return;
   }
   // t=0: подсветка карточки (mx-win-glow), гаснет с t=300
@@ -13351,11 +13346,12 @@ function bankWinScene_(deltaToday, toastHtml) {
   }, 180);
   // t=200: фанфара
   setTimeout(function() { uiSounds.win(); }, 200);
-  // t=300: тост; t=380: сумма отделяется от тоста и летит дугой в KPI (500ms) -
-  // удар: pop 280ms + flash + одометр 900ms под кассовые тики (как t=260..1800 в mxWin)
-  setTimeout(function() { bankShowToast_(toastHtml); }, 300);
+  // t=300: единый тост (green - деньги); t=380: сумма отделяется от тоста и летит дугой
+  // в KPI (500ms) - удар: pop 280ms + flash + одометр 900ms под кассовые тики
+  // (как t=260..1800 в mxWin)
+  setTimeout(function() { p2Toast(toastHtml, 'green'); }, 300);
   setTimeout(function() {
-    var toastEl = document.getElementById('bank-toast');
+    var toastEl = p2ToastEl_; // плашка единого канала уже создана вызовом выше (t=300)
     if (!toastEl) { return; }
     bankFlySum_(toastEl, valEl, '+' + fmt(deltaToday), function() {
       card.classList.remove('bank-kpi-pop'); void card.offsetWidth; card.classList.add('bank-kpi-pop');
@@ -13386,30 +13382,12 @@ function bankAnnounceNewOps_(ops) {
     if (outs.length) setTimeout(function() { uiSounds.attention(); }, 1400);
   } else if (outs.length) {
     uiSounds.attention();
-    bankShowToast_(parts.join('<br>'));
+    p2Toast(parts.join('<br>'), 'amber');
   }
 }
 
-function bankShowToast_(html) {
-  var t = document.getElementById('bank-toast');
-  if (!t) {
-    t = document.createElement('div');
-    t.id = 'bank-toast';
-    t.className = 'bank-toast';
-    document.body.appendChild(t);
-  }
-  t.innerHTML = html;
-  t.classList.remove('hiding');
-  // Принудительный reflow вместо rAF: в скрытой вкладке rAF не тикает (ГОСТ раздел 5 -
-  // у каждой rAF-зависимости обязана быть ветка hidden), а reflow запускает transition всегда.
-  void t.offsetWidth;
-  t.classList.add('show');
-  clearTimeout(t._hideTimer);
-  t._hideTimer = setTimeout(function() {
-    t.classList.add('hiding');
-    t.classList.remove('show');
-  }, 5000);
-}
+// Уведомления - ТОЛЬКО через единый p2Toast (ГОСТ раздел 4, запрет №16 и запрет
+// самодельных плашек). Своей плашки у банковского модуля нет.
 
 function renderBankLive_() {
   var card = document.getElementById('bank-live-card');

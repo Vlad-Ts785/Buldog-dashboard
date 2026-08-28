@@ -803,6 +803,16 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .bank-op-name{color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .bank-op-doc{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--muted);}
 .bank-op-sum{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right;min-width:11ch;}
+/* Победная сцена нового банковского поступления - перенос 1:1 из канбана уровня 5
+   (examples/design-reference-kanban.html: mx-win-glow / mxKpiPop / mx-fly / confetti-canvas).
+   Одобрено Владом 28.08: поступление денег = та же победа, что закрытая сделка. */
+#bank-confetti{position:fixed;inset:0;pointer-events:none;z-index:2600;}
+.bank-fly{position:fixed;z-index:2700;pointer-events:none;font-family:'JetBrains Mono',monospace;font-weight:700;font-size:15px;color:var(--green);text-shadow:0 2px 12px rgba(29,158,117,.6);}
+.bank-win-glow{border-color:color-mix(in srgb,var(--green) 45%,transparent)!important;background:color-mix(in srgb,var(--green) 7%,var(--bg2))!important;transition:border-color .12s cubic-bezier(.23,1,.32,1),background-color .12s cubic-bezier(.23,1,.32,1)!important;}
+@keyframes bankKpiPop{0%{transform:scale(1);}50%{transform:scale(1.06);}100%{transform:scale(1);}}
+.bank-kpi-pop{animation:bankKpiPop 280ms cubic-bezier(.34,1.45,.5,1);}
+.bank-val-flash{color:var(--amber)!important;}
+@media(prefers-reduced-motion:reduce){.bank-kpi-pop{animation:none;}.bank-win-glow{transition:none!important;}}
 </style>
 </head>
 <body>
@@ -5449,7 +5459,7 @@ function renderMainReceiptsSummary() {
       // иначе 1С; месяц/неделя/сальдо всегда 1С - банк только сегодняшний слой.
       (function() {
         var bs = (typeof bankTodaySummary_ === 'function') ? bankTodaySummary_() : null;
-        return '<div class="p2-row"><span class="p2-row-label">Сегодня' + (bs ? ' (банк)' : '') + '</span><span class="p2-leader"></span><span class="p2-row-val">' + fmt(bs ? bs.today_in : s.total_today) + '</span></div>';
+        return '<div class="p2-row"><span class="p2-row-label">Сегодня' + (bs ? ' (банк)' : '') + '</span><span class="p2-leader"></span><span class="p2-row-val" id="main-receipts-today-val">' + fmt(bs ? bs.today_in : s.total_today) + '</span></div>';
       })() +
       '<div class="p2-row"><span class="p2-row-label">За неделю</span><span class="p2-leader"></span><span class="p2-row-val">' + fmt(w.total || 0) + '</span>' + weekAux + '</div>' +
       '<div class="p2-row p2-row--total"><span class="p2-row-label">Сальдо месяца</span><span class="p2-leader"></span><span class="p2-row-val">' + balHtml + '</span></div>' +
@@ -12912,19 +12922,308 @@ function fetchBankOps_() {
   }).catch(function() {});
 }
 
+/* ── Победная сцена нового поступления - перенос 1:1 из design-reference-kanban.html
+   («Уровень 5»: mxWin t=0..2200, celebrate5, mxFlySum, sounds5). Одобрено Владом 28.08:
+   полная сцена и полная громкость канбана - банковское поступление празднуется так же,
+   как сделка, перетащенная в «Успешные». Списание сцену не получает - attention как было. */
+
+// sounds5.success из канбана - БЕЗ BI-скидки x0.7 (в отличие от uiSounds.growth)
+uiSounds.win = function() {
+  uiBlip_(130.8, 130.8, 1.5, 0.07, 'triangle');
+  uiBlip_(261.6, 261.6, 1.4, 0.05, 'sine', 0.05);
+  uiBlip_(523.3, 523.3, 0.35, 0.1, 'sine', 0);
+  uiBlip_(659.3, 659.3, 0.4, 0.1, 'sine', 0.09);
+  uiBlip_(784.0, 784.0, 0.5, 0.1, 'sine', 0.18);
+  uiBlip_(1046.5, 1046.5, 0.9, 0.11, 'sine', 0.27);
+  uiBlip_(659.3, 659.3, 0.8, 0.05, 'sine', 0.36);
+  uiBlip_(784.0, 784.0, 0.8, 0.05, 'sine', 0.36);
+  uiBlip_(2093.0, 2093.0, 0.6, 0.025, 'sine', 0.45);
+  uiBlip_(2637.0, 2093.0, 0.4, 0.015, 'sine', 0.6);
+};
+// sounds5.moneyTick канбана (громче деликатного uiSounds.moneyTick панели)
+uiSounds.winTick = function() {
+  var scale = [1568, 1760, 1976, 2093, 2349];
+  var f = scale[Math.floor(Math.random() * scale.length)];
+  uiBlip_(f, f * 1.06, 0.04, 0.05, 'sine');
+  uiBlip_(f * 0.5, f * 0.5, 0.03, 0.02, 'triangle');
+};
+
+// Полноэкранный canvas для салюта (создаётся лениво, поверх всего, клики пропускает)
+function bankConfettiCanvas_() {
+  var c = document.getElementById('bank-confetti');
+  if (!c) { c = document.createElement('canvas'); c.id = 'bank-confetti'; document.body.appendChild(c); }
+  return c;
+}
+
+// celebrate5 из канбана уровня 5 - скопировано буквально (кольца + лепестки + искры),
+// rAF самоостанавливается, когда частиц не осталось.
+function bankCelebrate5_(canvas, originX, originY, opts, onDone) {
+  if (document.hidden) { if (onDone) onDone(); return; }
+  var HEXES = (opts && opts.colors && opts.colors.length) ? opts.colors
+            : ['#1D9E75', '#EF9F27', '#e8e6df', '#378ADD'];
+  function hexToRgb(h) {
+    h = h.replace('#', '');
+    if (h.length === 3) { h = h.charAt(0) + h.charAt(0) + h.charAt(1) + h.charAt(1) + h.charAt(2) + h.charAt(2); }
+    var n = parseInt(h, 16);
+    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+  }
+  function shade(c, f) {
+    var r, g, b;
+    if (f >= 1) {
+      var t = f - 1;
+      r = Math.round(c.r + (255 - c.r) * t);
+      g = Math.round(c.g + (255 - c.g) * t);
+      b = Math.round(c.b + (255 - c.b) * t);
+    } else {
+      r = Math.round(c.r * f); g = Math.round(c.g * f); b = Math.round(c.b * f);
+    }
+    return 'rgb(' + r + ',' + g + ',' + b + ')';
+  }
+  var PALETTE = [];
+  for (var i = 0; i < HEXES.length; i++) { PALETTE.push(hexToRgb(HEXES[i])); }
+  var rect = canvas.getBoundingClientRect();
+  var dpr = Math.min(window.devicePixelRatio || 1, 2);
+  var W = Math.max(1, Math.round(rect.width));
+  var H = Math.max(1, Math.round(rect.height));
+  if (canvas.width !== W * dpr || canvas.height !== H * dpr) {
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+  }
+  var st = canvas.__c5state;
+  if (!st) { st = canvas.__c5state = { running: false, parts: [], cbs: [], raf: 0, last: 0 }; }
+  if (typeof onDone === 'function') { st.cbs.push(onDone); }
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function pick() { return PALETTE[(Math.random() * PALETTE.length) | 0]; }
+  function spawnBurst(x, y) {
+    var p, c, k, ang, spd, wide;
+    st.parts.push({ kind: 'ring', x: x, y: y, age: 0, delay: 0, dur: 0.45, maxR: rand(60, 85), lw: 3.2, c: hexToRgb('#e8e6df') });
+    st.parts.push({ kind: 'ring', x: x, y: y, age: 0, delay: 0.09, dur: 0.62, maxR: rand(105, 140), lw: 2.0, c: pick() });
+    var nPetals = 115 + ((Math.random() * 25) | 0);
+    for (k = 0; k < nPetals; k++) {
+      wide = Math.random() < 0.28 ? 1.7 : 1.0;
+      ang = -Math.PI / 2 + (Math.random() - Math.random()) * 0.95 * wide;
+      spd = rand(230, 760);
+      c = pick();
+      p = {
+        kind: 'petal',
+        x: x + rand(-6, 6), y: y + rand(-6, 6),
+        vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd - rand(0, 120),
+        rot: rand(0, Math.PI * 2), vr: rand(-11, 11),
+        ph: rand(0, Math.PI * 2), phs: rand(6, 14),
+        w: rand(5, 11), h: rand(3, 6.5),
+        drag: rand(1.0, 2.1),
+        age: 0, life: rand(1.25, 1.95),
+        bright: shade(c, 1.28), dark: shade(c, 0.62)
+      };
+      st.parts.push(p);
+    }
+    var nSparks = 48 + ((Math.random() * 14) | 0);
+    for (k = 0; k < nSparks; k++) {
+      ang = -Math.PI / 2 + (Math.random() - Math.random()) * 1.35;
+      spd = rand(50, 280);
+      c = Math.random() < 0.55 ? hexToRgb('#EF9F27') : pick();
+      st.parts.push({
+        kind: 'spark',
+        x: x, y: y, px: x, py: y,
+        vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd - rand(0, 60),
+        tw: rand(0, Math.PI * 2), tws: rand(7, 16),
+        age: 0, life: rand(1.7, 2.65),
+        col: 'rgb(' + c.r + ',' + c.g + ',' + c.b + ')'
+      });
+    }
+  }
+  spawnBurst(originX, originY);
+  if (st.running) { return; }
+  st.running = true;
+  st.last = 0;
+  var ctx = canvas.getContext('2d');
+  var G_PETAL = 1150, G_SPARK = 150;
+  function frame(t) {
+    if (!st.last) { st.last = t; }
+    var dt = Math.min((t - st.last) / 1000, 0.033);
+    st.last = t;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    var alive = [];
+    var i, p, k1, fade, flip, a, pr;
+    for (i = 0; i < st.parts.length; i++) {
+      p = st.parts[i];
+      p.age += dt;
+      if (p.kind === 'ring') {
+        if (p.age < p.delay) { alive.push(p); continue; }
+        pr = (p.age - p.delay) / p.dur;
+        if (pr >= 1) { continue; }
+        var e = 1 - (1 - pr) * (1 - pr) * (1 - pr);
+        a = (1 - pr) * 0.9;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.maxR * e, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(' + p.c.r + ',' + p.c.g + ',' + p.c.b + ',' + a.toFixed(3) + ')';
+        ctx.lineWidth = p.lw * (1 - pr * 0.6);
+        ctx.stroke();
+        alive.push(p);
+      } else if (p.kind === 'petal') {
+        if (p.age >= p.life || p.y > H + 40) { continue; }
+        k1 = 1 / (1 + p.drag * dt);
+        p.vx *= k1;
+        p.vy = (p.vy + G_PETAL * dt) * k1;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.rot += p.vr * dt;
+        p.ph += p.phs * dt;
+        flip = Math.cos(p.ph);
+        fade = p.age > p.life * 0.7 ? (p.life - p.age) / (p.life * 0.3) : 1;
+        ctx.globalAlpha = fade;
+        ctx.fillStyle = flip >= 0 ? p.bright : p.dark;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rot);
+        ctx.scale(1, Math.max(Math.abs(flip), 0.12));
+        ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+        ctx.restore();
+        ctx.globalAlpha = 1;
+        alive.push(p);
+      } else {
+        if (p.age >= p.life || p.y > H + 20) { continue; }
+        p.px = p.x; p.py = p.y;
+        k1 = 1 / (1 + 1.4 * dt);
+        p.vx *= k1;
+        p.vy = (p.vy + G_SPARK * dt) * k1;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.tw += p.tws * dt;
+        fade = p.age > p.life * 0.55 ? (p.life - p.age) / (p.life * 0.45) : 1;
+        a = fade * (0.5 + 0.5 * Math.abs(Math.sin(p.tw)));
+        ctx.globalAlpha = a;
+        ctx.strokeStyle = p.col;
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(p.px - p.vx * 0.045, p.py - p.vy * 0.045);
+        ctx.lineTo(p.x, p.y);
+        ctx.stroke();
+        ctx.fillStyle = p.col;
+        ctx.fillRect(p.x - 1.2, p.y - 1.2, 2.4, 2.4);
+        ctx.globalAlpha = 1;
+        alive.push(p);
+      }
+    }
+    st.parts = alive;
+    if (st.parts.length === 0) {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+      st.running = false;
+      st.raf = 0;
+      var cbs = st.cbs.splice(0, st.cbs.length);
+      for (var j = 0; j < cbs.length; j++) {
+        try { cbs[j](); } catch (e2) {}
+      }
+      return;
+    }
+    st.raf = window.requestAnimationFrame(frame);
+  }
+  st.raf = window.requestAnimationFrame(frame);
+}
+
+// mxFlySum из канбана: дуга 500ms, scale 1.15->0.7, растворение на последних 15%
+function bankFlySum_(fromEl, toEl, amountText, onArrive) {
+  if (document.hidden) { if (onArrive) onArrive(); return; }
+  var f = fromEl.getBoundingClientRect();
+  var t = toEl.getBoundingClientRect();
+  var fly = document.createElement('div');
+  fly.className = 'bank-fly';
+  fly.textContent = amountText;
+  fly.style.left = f.left + 'px';
+  fly.style.top = f.top + 'px';
+  fly.style.transition = 'none';
+  document.body.appendChild(fly);
+  var x0 = 0, y0 = 0;
+  var x1 = t.left + t.width * 0.5 - f.left, y1 = t.top + t.height * 0.5 - f.top;
+  var cx = x1 * 0.5, cy = Math.min(y0, y1) - 90; // контрольная точка дуги
+  var start = null, dur = 500;
+  function frame(ts) {
+    if (!start) start = ts;
+    var p = Math.min(1, (ts - start) / dur);
+    var e = p * p * (3 - 2 * p); // smoothstep ~ ease-flight
+    var ix = (1 - e) * (1 - e) * x0 + 2 * (1 - e) * e * cx + e * e * x1;
+    var iy = (1 - e) * (1 - e) * y0 + 2 * (1 - e) * e * cy + e * e * y1;
+    var sc = 1.15 - 0.45 * e;
+    fly.style.transform = 'translate(' + ix + 'px,' + iy + 'px) scale(' + sc + ')';
+    fly.style.opacity = p > 0.85 ? String(1 - (p - 0.85) / 0.15) : '1';
+    if (p < 1) { requestAnimationFrame(frame); }
+    else { document.body.removeChild(fly); if (onArrive) onArrive(); }
+  }
+  requestAnimationFrame(frame);
+}
+
+// Хореография победы по раскадровке mxWin (t=0..2200), цель - видимая карточка
+// «Сегодня»: на странице Поступления - KPI, на Панели - карточка «Поступления».
+// deltaToday - сумма НОВЫХ сегодняшних поступлений (для одометра от старого к новому).
+function bankWinScene_(deltaToday, toastHtml) {
+  var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var receiptsCard = document.getElementById('receipts-kpi-today');
+  var mainCard = document.getElementById('main-receipts-card');
+  var card = (receiptsCard && receiptsCard.offsetParent) ? receiptsCard
+           : (mainCard && mainCard.offsetParent) ? mainCard : null;
+  var valEl = null;
+  if (card === receiptsCard) valEl = receiptsCard.querySelector('.kpi-value');
+  else if (card === mainCard) valEl = document.getElementById('main-receipts-today-val');
+  var bs = bankTodaySummary_();
+  var to = bs ? (Number(bs.today_in) || 0) : null;
+  var from = (to != null && deltaToday) ? to - deltaToday : null;
+
+  if (!card || !valEl || reduced) {
+    // другая страница открыта или reduced-motion: фанфара + тост, без хореографии
+    uiSounds.win();
+    bankShowToast_(toastHtml);
+    return;
+  }
+  // t=0: подсветка карточки (mx-win-glow), гаснет с t=300
+  card.classList.add('bank-win-glow');
+  setTimeout(function() { card.classList.remove('bank-win-glow'); }, 300);
+  // t=180: салют из верхней кромки карточки
+  setTimeout(function() {
+    var cr = card.getBoundingClientRect();
+    bankCelebrate5_(bankConfettiCanvas_(), cr.left + cr.width / 2, cr.top + 6,
+      { colors: ['#1D9E75', '#EF9F27', '#e8e6df', '#378ADD'] });
+  }, 180);
+  // t=200: фанфара
+  setTimeout(function() { uiSounds.win(); }, 200);
+  // t=300: тост; t=380: сумма отделяется от тоста и летит дугой в KPI (500ms) -
+  // удар: pop 280ms + flash + одометр 900ms под кассовые тики (как t=260..1800 в mxWin)
+  setTimeout(function() { bankShowToast_(toastHtml); }, 300);
+  setTimeout(function() {
+    var toastEl = document.getElementById('bank-toast');
+    if (!toastEl) { return; }
+    bankFlySum_(toastEl, valEl, '+' + fmt(deltaToday), function() {
+      card.classList.remove('bank-kpi-pop'); void card.offsetWidth; card.classList.add('bank-kpi-pop');
+      valEl.classList.add('bank-val-flash');
+      if (from != null && from !== to) p2OdoWithTicks_(valEl, from, to, uiSounds.winTick);
+      setTimeout(function() { valEl.classList.remove('bank-val-flash'); }, 1300);
+    });
+  }, 380);
+}
+
 function bankAnnounceNewOps_(ops) {
+  var today = BANK_OPS && BANK_OPS.today;
   var ins = ops.filter(function(o) { return o.direction === 'in'; });
   var outs = ops.filter(function(o) { return o.direction === 'out'; });
   var insSum = ins.reduce(function(a, o) { return a + (Number(o.amount) || 0); }, 0);
   var outsSum = outs.reduce(function(a, o) { return a + (Number(o.amount) || 0); }, 0);
-  if (ins.length) uiSounds.growth();
-  if (outs.length) setTimeout(function() { uiSounds.attention(); }, ins.length ? 1200 : 0);
+  var insTodaySum = ins.reduce(function(a, o) {
+    return a + ((o.occurred_at && o.occurred_at.slice(0, 10) === today) ? (Number(o.amount) || 0) : 0);
+  }, 0);
   var parts = [];
   if (ins.length === 1) parts.push('Поступление <b style="color:var(--green)">+' + fmt(insSum) + '</b> · ' + bankEsc_(ins[0].counterparty || ''));
   else if (ins.length > 1) parts.push('Поступления: <b style="color:var(--green)">+' + fmt(insSum) + '</b> (' + ins.length + ' шт.)');
   if (outs.length === 1) parts.push('Списание <b>−' + fmt(outsSum) + '</b> · ' + bankEsc_(outs[0].counterparty || ''));
   else if (outs.length > 1) parts.push('Списания: <b>−' + fmt(outsSum) + '</b> (' + outs.length + ' шт.)');
-  if (parts.length) bankShowToast_(parts.join('<br>'));
+  if (ins.length) {
+    bankWinScene_(insTodaySum || insSum, parts.join('<br>'));
+    // списание в том же обновлении - attention после фанфары, не каша (правило ГОСТ раздел 8)
+    if (outs.length) setTimeout(function() { uiSounds.attention(); }, 1400);
+  } else if (outs.length) {
+    uiSounds.attention();
+    bankShowToast_(parts.join('<br>'));
+  }
 }
 
 function bankShowToast_(html) {

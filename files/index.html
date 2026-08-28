@@ -3551,8 +3551,12 @@ async function loadData() {
       fetchReceiptsFromServer_().then(function(r) {
         if (r && !r.error && D) { D.receipts = r; renderReceipts(); }
       }).catch(function() {});
-      // Живая лента банковских операций (поллинг раз в минуту) - только админ, как и
-      // остальные общекорпоративные деньги.
+    }
+    // Живая лента банковских операций (поллинг раз в минуту) - админ (вся общекорпоративная
+    // страница "Поступления"/Панель) и, с 29.08 (план Фаза 4, "все менеджеры видят все
+    // поступления"), реальный вход менеджера - вкладка «Поступления» на личной странице.
+    // Логисты сознательно не включены - "Поступления" структурно не про них (см. CLAUDE.md).
+    if (D.role === 'admin' || D.role === 'manager') {
       startBankOpsPolling_();
     }
   } catch(e) {
@@ -4550,6 +4554,22 @@ function renderMyPageManager(el, current, selectorHtml, d) {
     // конкретному менеджеру") - фильтруем уже загруженные глобальные списки D.receipts по
     // фамилии этого менеджера (тот же приём, что и в других вкладках выше - problem_orders,
     // debt), без отдельного запроса к серверу.
+    // Живая карточка "Поступления по компании сегодня" (план 2026-08-28-bank-operations-
+    // live-feed.md, Фаза 4, Влад 29.08: "все менеджеры видят все поступления, которые
+    // идут... где можем идентифицировать - фамилия, имя менеджера"). СВЕРХУ над историей
+    // ЭТОГО менеджера ниже - разные по смыслу блоки: этот company-wide и живой, история
+    // ниже - только своя и из 1С. Скелет статичный (id'ы), наполняет renderMgrBankLive_()
+    // на каждом опросе, поэтому сама вкладка не дёргается заново на каждый тик поллинга.
+    html += '<div class="card" id="mgr-bank-today-card" style="margin-bottom:16px">'+
+      '<div class="sec-header"><div>'+
+        '<div class="sec-title">Поступления по компании — сегодня</div>'+
+        '<div class="sec-sub">Живьём из банка · видно всем менеджерам · без списаний</div>'+
+      '</div></div>'+
+      '<div class="kpi-label">Сегодня (вся компания)</div>'+
+      '<div class="kpi-value" id="mgr-bank-today-val">—</div>'+
+      '<div id="mgr-bank-feed" style="margin-top:10px"></div>'+
+    '</div>';
+
     var recPeriodMap = {
       yesterday: (D.receipts && D.receipts.yesterday) || null,
       today: (D.receipts && D.receipts.today) || null,
@@ -4627,6 +4647,11 @@ function renderMyPageManager(el, current, selectorHtml, d) {
   html += '</div>';
 
   el.innerHTML = html;
+  // Карточка "Поступления по компании сегодня" (Фаза 4) существует в DOM только когда
+  // myPageMgrTab==='receipts' - в остальных вкладках renderMgrBankLive_ тихо no-op'ится
+  // (card не найдена). Наполняем сразу из уже имеющегося BANK_OPS, не дожидаясь следующего
+  // тика 60-секундного поллинга.
+  renderMgrBankLive_();
 }
 
 // Личная страница руководителя коммерческой группы - Ахтамова/Гусейнова (2026-08-26, см.
@@ -13757,6 +13782,7 @@ function fetchBankOps_() {
     });
     bankOpsMaxSeenId_ = maxId;
     renderBankLive_();
+    renderMgrBankLive_(); // личная страница менеджера (план Фаза 4) - no-op, если карточки сейчас нет в DOM
     // Перерисовать KPI "Сегодня" (страница Поступления) и строку на Панели - у них
     // появился/обновился банковский источник.
     if (D && D.receipts && !D.receipts.error && D.receipts.summary) renderReceiptsKPI(D.receipts);
@@ -14078,19 +14104,32 @@ function bankFlySum_(fromEl, toEl, amountText, onArrive) {
 // Хореография победы по раскадровке mxWin (t=0..2200), цель - видимая карточка
 // «Сегодня»: на странице Поступления - KPI, на Панели - карточка «Поступления».
 // deltaToday - сумма НОВЫХ сегодняшних поступлений (для одометра от старого к новому).
-function bankWinScene_(deltaToday, toastHtml, level) {
+function bankWinScene_(deltaToday, toastHtml, level, mgrTotal) {
   level = level || 1;
   var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   var receiptsCard = document.getElementById('receipts-kpi-today');
   var mainCard = document.getElementById('main-receipts-card');
+  // Карточка личной страницы менеджера (план Фаза 4, 29.08) - существует в DOM, только пока
+  // менеджер реально на вкладке «Поступления» (renderMyPageManager генерирует её на лету,
+  // в отличие от статичной разметки admin-карточек). mgrTotal - готовая сумма "сегодня по
+  // компании" от вызывающей стороны (D.role==='manager' передаёт её явно).
+  var mgrCard = document.getElementById('mgr-bank-today-card');
   var card = (receiptsCard && receiptsCard.offsetParent) ? receiptsCard
-           : (mainCard && mainCard.offsetParent) ? mainCard : null;
+           : (mainCard && mainCard.offsetParent) ? mainCard
+           : (mgrCard && mgrCard.offsetParent) ? mgrCard : null;
   var valEl = null;
   if (card === receiptsCard) valEl = receiptsCard.querySelector('.kpi-value');
   else if (card === mainCard) valEl = document.getElementById('main-receipts-today-val');
-  var bs = bankTodaySummary_();
-  var to = bs ? (Number(bs.today_in) || 0) : null;
-  var from = (to != null && deltaToday) ? to - deltaToday : null;
+  else if (card === mgrCard) valEl = document.getElementById('mgr-bank-today-val');
+  var to, from;
+  if (card === mgrCard) {
+    to = mgrTotal != null ? mgrTotal : null;
+    from = (to != null && deltaToday) ? to - deltaToday : null;
+  } else {
+    var bs = bankTodaySummary_();
+    to = bs ? (Number(bs.today_in) || 0) : null;
+    from = (to != null && deltaToday) ? to - deltaToday : null;
+  }
 
   if (!card || !valEl || reduced) {
     // другая страница открыта или reduced-motion: фанфара + тост, без хореографии
@@ -14137,33 +14176,47 @@ function bankWinScene_(deltaToday, toastHtml, level) {
       if (from != null && from !== to) p2OdoWithTicks_(valEl, from, to, uiSounds.winTick);
       // Общая сумма за месяц накручивается СИНХРОННО (Влад, 28.08: "вместе с ней должна
       // меняться общая сумма поступлений") - тики не дублируем, звук ведёт "Сегодня".
-      var monthEl = null;
-      if (card === receiptsCard) {
-        var monthCard = document.getElementById('receipts-kpi-month');
-        monthEl = monthCard ? monthCard.querySelector('.kpi-value') : null;
-      } else {
-        monthEl = document.getElementById('main-receipts-hero');
-      }
-      if (monthEl && D && D.receipts && D.receipts.summary && deltaToday) {
-        var monthTo = bankAdjustedMonthTotal_(D.receipts.summary);
-        p2OdoWithTicks_(monthEl, monthTo - deltaToday, monthTo, function() {});
+      // На карточке менеджера месячного KPI нет вообще (не просили) - пропускаем этот шаг.
+      if (card !== mgrCard) {
+        var monthEl = null;
+        if (card === receiptsCard) {
+          var monthCard = document.getElementById('receipts-kpi-month');
+          monthEl = monthCard ? monthCard.querySelector('.kpi-value') : null;
+        } else {
+          monthEl = document.getElementById('main-receipts-hero');
+        }
+        if (monthEl && D && D.receipts && D.receipts.summary && deltaToday) {
+          var monthTo = bankAdjustedMonthTotal_(D.receipts.summary);
+          p2OdoWithTicks_(monthEl, monthTo - deltaToday, monthTo, function() {});
+        }
       }
       setTimeout(function() { valEl.classList.remove('bank-val-flash'); }, 1300);
     });
   }, 380);
 }
 
+// isManagerAudience - роль зрителя банковской ленты (план Фаза 4, 29.08). Менеджер видит
+// ВСЕ поступления компании ("все менеджеры видят все поступления, которые идут"), но
+// СПИСАНИЯ не показываем и не озвучиваем вообще - это не их зона ответственности и не их
+// дело видеть, куда компания платит (в отличие от админа, который видит оба направления).
 function bankAnnounceNewOps_(ops) {
+  var isManagerAudience = D && D.role === 'manager';
   var today = BANK_OPS && BANK_OPS.today;
   var ins = ops.filter(function(o) { return o.direction === 'in'; });
-  var outs = ops.filter(function(o) { return o.direction === 'out'; });
+  var outs = isManagerAudience ? [] : ops.filter(function(o) { return o.direction === 'out'; });
   var insSum = ins.reduce(function(a, o) { return a + (Number(o.amount) || 0); }, 0);
   var outsSum = outs.reduce(function(a, o) { return a + (Number(o.amount) || 0); }, 0);
   var insTodaySum = ins.reduce(function(a, o) {
     return a + ((o.occurred_at && o.occurred_at.slice(0, 10) === today) ? (Number(o.amount) || 0) : 0);
   }, 0);
+  // Фамилия/имя менеджера рядом с контрагентом, если СМС-контрагент опознан (план Фаза 4) -
+  // видно и админу, и менеджерам, единая точка сборки текста тоста для обеих аудиторий.
+  function withMgr_(o) {
+    var name = bankEsc_(o.counterparty || '');
+    return o.matched_manager ? name + ' · ' + bankEsc_(o.matched_manager) : name;
+  }
   var parts = [];
-  if (ins.length === 1) parts.push('Поступление <b style="color:var(--green)">+' + fmt(insSum) + '</b> · ' + bankEsc_(ins[0].counterparty || ''));
+  if (ins.length === 1) parts.push('Поступление <b style="color:var(--green)">+' + fmt(insSum) + '</b> · ' + withMgr_(ins[0]));
   else if (ins.length > 1) parts.push('Поступления: <b style="color:var(--green)">+' + fmt(insSum) + '</b> (' + ins.length + ' шт.)');
   if (outs.length === 1) parts.push('Списание <b>−' + fmt(outsSum) + '</b> · ' + bankEsc_(outs[0].counterparty || ''));
   else if (outs.length > 1) parts.push('Списания: <b>−' + fmt(outsSum) + '</b> (' + outs.length + ' шт.)');
@@ -14173,7 +14226,10 @@ function bankAnnounceNewOps_(ops) {
     // сложения - утверждено на превью "Фанфары по сумме").
     var maxIn = ins.reduce(function(m, o) { return Math.max(m, Number(o.amount) || 0); }, 0);
     var level = bankWinLevel_(maxIn);
-    bankWinScene_(insTodaySum || insSum, parts.join('<br>'), level);
+    // mgrTotal - "сегодня по компании" целиком (BANK_OPS.summary.today_in), нужен только
+    // сцене на карточке менеджера - на админских целях bankWinScene_ сам берёт из bankTodaySummary_.
+    var mgrTotal = (BANK_OPS && BANK_OPS.summary) ? (Number(BANK_OPS.summary.today_in) || 0) : null;
+    bankWinScene_(insTodaySum || insSum, parts.join('<br>'), level, mgrTotal);
     // списание в том же обновлении - attention после фанфары, не каша (правило ГОСТ раздел 8)
     if (outs.length) setTimeout(function() { uiSounds.attention(); }, 1400);
   } else if (outs.length) {
@@ -14221,13 +14277,56 @@ function renderBankLive_() {
   if (feedEl) {
     feedEl.innerHTML = todayOps.map(function(o) {
       var isIn = o.direction === 'in';
+      // Опознанный менеджер (план Фаза 4, 29.08) - показываем ВМЕСТО номера документа,
+      // он важнее для быстрого просмотра; номер документа никуда не делся, просто не
+      // дублируем два малозначимых поля рядом.
+      var docSlot = o.matched_manager
+        ? '<span class="bank-op-doc" style="color:var(--text)">' + bankEsc_(o.matched_manager) + '</span>'
+        : (o.doc_number ? '<span class="bank-op-doc">№' + bankEsc_(o.doc_number) + '</span>' : '<span class="bank-op-doc"></span>');
       return '<div class="bank-op">' +
         '<span class="bank-op-time">' + (o.occurred_at ? o.occurred_at.slice(11, 16) : '—') + '</span>' +
         '<span class="bank-op-name">' + bankEsc_(o.counterparty || 'Без названия') + '</span>' +
-        '<span class="bank-op-doc">' + (o.doc_number ? '№' + bankEsc_(o.doc_number) : '') + '</span>' +
+        docSlot +
         '<span class="bank-op-sum" style="color:' + (isIn ? 'var(--green)' : 'var(--muted)') + '">' + (isIn ? '+' : '−') + fmt(o.amount) + '</span>' +
         '</div>';
     }).join('') || '<div class="muted" style="font-size:12.5px;padding:4px 0">Сегодня операций ещё не было - жду СМС от банка</div>';
+  }
+}
+
+// Живая карточка "Поступления по компании сегодня" на личной странице менеджера (план
+// Фаза 4, 29.08: "все менеджеры видят все поступления... где можем идентифицировать - там
+// будет фамилия, имя менеджера"). В отличие от renderBankLive_ (админ): БЕЗ фильтра по
+// текущему менеджеру (company-wide, специально, по прямому решению Влада), БЕЗ списаний
+// (не их зона ответственности), БЕЗ остатка по счёту (не просили - более чувствительная
+// цифра, чем поток входящих, решил не показывать по умолчанию). Карточка существует в DOM,
+// только пока реально открыта вкладка «Поступления» на «Моей странице» - функция тихо
+// no-op'ится в любой другой момент, как и renderBankLive_ для админских целей.
+function renderMgrBankLive_() {
+  var card = document.getElementById('mgr-bank-today-card');
+  if (!card) return;
+  if (!BANK_OPS) return;
+  var today = BANK_OPS.today;
+  var todayIns = (BANK_OPS.ops || []).filter(function(o) {
+    return o.direction === 'in' && o.occurred_at && o.occurred_at.slice(0, 10) === today;
+  });
+  var total = todayIns.reduce(function(s, o) { return s + (Number(o.amount) || 0); }, 0);
+
+  var valEl = document.getElementById('mgr-bank-today-val');
+  if (valEl) valEl.textContent = fmt(total);
+
+  var feedEl = document.getElementById('mgr-bank-feed');
+  if (feedEl) {
+    feedEl.innerHTML = todayIns.map(function(o) {
+      var mgrSlot = o.matched_manager
+        ? '<span class="bank-op-doc" style="color:var(--text)">' + bankEsc_(o.matched_manager) + '</span>'
+        : '<span class="bank-op-doc"></span>';
+      return '<div class="bank-op">' +
+        '<span class="bank-op-time">' + (o.occurred_at ? o.occurred_at.slice(11, 16) : '—') + '</span>' +
+        '<span class="bank-op-name">' + bankEsc_(o.counterparty || 'Без названия') + '</span>' +
+        mgrSlot +
+        '<span class="bank-op-sum" style="color:var(--green)">+' + fmt(o.amount) + '</span>' +
+        '</div>';
+    }).join('') || '<div class="muted" style="font-size:12.5px;padding:4px 0">Сегодня поступлений ещё не было - жду СМС от банка</div>';
   }
 }
 

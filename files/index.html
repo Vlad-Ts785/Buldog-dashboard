@@ -365,8 +365,31 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
    1) любая карточка - рамка ярче + фон на полступени (просто "слышит" курсор);
    2) проваливаемая (.p2-drill) - ещё cursor:pointer + сдвиг шеврона;
    3) attention (ДЗ) - рамка дополнительно краснеет. */
-#page-main .kpi,#page-main .card{transition:border-color .15s ease,background-color .15s ease;}
-#page-main .kpi:hover,#page-main .card:hover{border-color:var(--border-strong, rgba(255,255,255,.16));background:#191920;}
+/* Hover-физика карточки (канон ГОСТа из канбана уровня 5, Влад 28.08): карточка
+   не просто перекрашивается - приподнимается в объёме. Перспектива на странице,
+   preserve-3d на сетках, подъём translateY(-1px) translateZ(22px). */
+#page-main{perspective:1400px;position:relative;}
+#page-main .kpi-grid,#page-main .grid-2,#page-main .p2-tier3-grid{transform-style:preserve-3d;}
+#page-main .kpi,#page-main .card{
+  transition:border-color .12s ease-out,background-color .12s ease-out,transform .12s ease-out;
+  will-change:transform;
+}
+#page-main .kpi:hover,#page-main .card:hover{
+  border-color:var(--border-strong, rgba(255,255,255,.16));background:#191920;
+  transform:translateY(-1px) translateZ(22px);
+}
+/* курсорный свет за карточками (канон раздела 7): radial blue 7%, гаснет без курсора */
+.p2-light{
+  position:absolute;inset:0;z-index:-1;pointer-events:none;
+  background:radial-gradient(600px circle at 50% 20%, rgba(55,138,221,.07), transparent 70%);
+  opacity:0;transition:opacity .25s ease;
+}
+.p2-light.on{opacity:1;}
+@media (prefers-reduced-motion: reduce){
+  #page-main{perspective:none;}
+  #page-main .kpi:hover,#page-main .card:hover{transform:none;}
+  .p2-light{display:none;}
+}
 /* строка периода в шапке: "Август 2026 · день 28 из 31 · данные 1С 11:40" */
 .p2-page-period{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;padding-bottom:16px;white-space:nowrap;}
 .p2-page-period b{color:var(--text);font-weight:500;}
@@ -944,6 +967,10 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
          Порядок и ярусы - спека эргономиста: причинная цепочка денег (выручка → прибыль
          → пришло → должны), парк, экономика, рейтинги, служебный подвал. -->
     <div id="page-main" class="page active">
+
+      <!-- Курсорный свет за карточками (канон ГОСТа раздел 7) - слой позади,
+           двигается за мышью с инерцией, гаснет при уходе курсора. -->
+      <div class="p2-light" id="p2-light"></div>
 
       <!-- ЯРУС 0: вердикт - генерируется renderVerdict() из уже посчитанных данных,
            максимум 4 фразы worst-first, только отклонения от нормы. Клик по фразе -
@@ -12700,6 +12727,35 @@ function toggleUiSound() {
   if (nav) nav.addEventListener('click', function(e){
     if (e.target.closest('.sidebar-nav-item')) uiSounds.navClick();
   });
+})();
+
+/* ═══ Курсорный свет панели (канон ГОСТа раздел 7, код из канбана уровня 5):
+   lerp 0.12/кадр к позиции мыши, rAF самоостанавливается в покое - не крутит
+   видеокарту, когда никто не двигает мышь. Reduced-motion скрывает слой CSS-ом. */
+(function initPanelLight_() {
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  var pm = document.getElementById('page-main');
+  var light = document.getElementById('p2-light');
+  if (!pm || !light) return;
+  var target = { x: 50, y: 20 }, cur = { x: 50, y: 20 };
+  var looping = false;
+  function tick() {
+    cur.x += (target.x - cur.x) * 0.12;
+    cur.y += (target.y - cur.y) * 0.12;
+    light.style.background = 'radial-gradient(600px circle at ' + cur.x.toFixed(1) + '% ' + cur.y.toFixed(1) + '%, rgba(55,138,221,.07), transparent 70%)';
+    if (Math.abs(target.x - cur.x) < 0.05 && Math.abs(target.y - cur.y) < 0.05) { looping = false; return; }
+    requestAnimationFrame(tick);
+  }
+  function ensureLoop() { if (!looping) { looping = true; requestAnimationFrame(tick); } }
+  pm.addEventListener('pointermove', function(e) {
+    var r = pm.getBoundingClientRect();
+    if (!r.width || !r.height) return; // страница скрыта - деление на ноль дало бы NaN в CSS
+    target.x = Math.max(0, Math.min(100, (e.clientX - r.left) / r.width * 100));
+    target.y = Math.max(0, Math.min(100, (e.clientY - r.top) / r.height * 100));
+    light.classList.add('on');
+    ensureLoop();
+  });
+  pm.addEventListener('pointerleave', function() { light.classList.remove('on'); });
 })();
 </script>
 <!-- Подключаем после основного скрипта, без async/defer - гарантирует, что initGoogleSignIn()

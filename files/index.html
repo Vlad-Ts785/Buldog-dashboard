@@ -291,7 +291,6 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 /* вердикт (ярус 0) */
 .p2-verdict{display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:10px 16px;
   margin-bottom:16px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);}
-.p2-verdict__meta{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums;}
 .p2-verdict__item{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--text);
   white-space:nowrap;cursor:pointer;border-radius:6px;padding:3px 5px;margin:-3px -5px;
   transition:background-color .13s ease;}
@@ -5420,11 +5419,16 @@ function p2Mln(n) {
   return sign + Math.round(v);
 }
 
-// Строка периода в шапке (превью "Панель 2.0"): "Август 2026 · день 28 из 31 · данные 1С 11:40"
+// Строка периода в шапке: "ЧТ 28.08 · 11:47 · Август 2026 · день 28 из 31 · данные 1С 11:40"
+// Префикс дня недели/времени переехал сюда из мета-плашки вердикта (Влад, 28.08:
+// "поставь ещё ЧТ 28.08 · 11:47, а саму плашку первую можно убрать - дублирует").
 function updatePagePeriod_() {
   var el = document.getElementById('page-period');
   if (!el) return;
   var now = new Date();
+  var wd = now.toLocaleDateString('ru', { weekday: 'short' }).toUpperCase();
+  var dm = now.toLocaleDateString('ru', { day: '2-digit', month: '2-digit' });
+  var tm = now.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
   var dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
   var monthLabel = formatMonthLabel(now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0'));
   var updStr = '';
@@ -5432,7 +5436,7 @@ function updatePagePeriod_() {
     var u = new Date(D.updated);
     if (!isNaN(u.getTime())) updStr = ' · данные 1С ' + u.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
   }
-  el.innerHTML = monthLabel + ' · <b>день ' + now.getDate() + ' из ' + dim + '</b>' + updStr;
+  el.innerHTML = wd + ' ' + dm + ' · ' + tm + ' · ' + monthLabel + ' · <b>день ' + now.getDate() + ' из ' + dim + '</b>' + updStr;
 }
 
 // Карточка "Дебиторская задолженность" на Панели - заменила "Поступления" (Влад,
@@ -5660,8 +5664,9 @@ function renderVerdict() {
   items.sort(function(a, b) { return b.w - a.w; }); // worst-first по эффекту внутри класса; bad уже тяжелее warn через базовый вес
   items = items.slice(0, 4);
 
-  var metaStr = D.updated ? new Date(D.updated).toLocaleString('ru', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
-  var html = '<span class="p2-verdict__meta">' + metaStr + '</span>';
+  // Мета-плашка (день/время) убрана из вердикта - переехала в шапку страницы
+  // (updatePagePeriod_), тут дублировала (Влад, 28.08). Вердикт - только фразы.
+  var html = '';
   if (!items.length) {
     html += '<span class="p2-verdict__empty">Отклонений нет</span>';
   } else {

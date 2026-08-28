@@ -789,6 +789,20 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .crm-toast-body{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .crm-sound-toggle{font-size:11px;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:4px;padding:0 8px;}
 @media(prefers-reduced-motion:reduce){.crm-toast{animation:none;}}
+/* Тост банковской операции - канон ГОСТа раздел 4: снизу по центру, вход 320ms / выход
+   200ms по drawer-кривой, автоскрытие 5с (управляется из bankShowToast_). */
+.bank-toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,130%);opacity:0;background:var(--bg3);border:1px solid var(--border-strong);border-radius:var(--radius);padding:12px 18px;z-index:2500;font-size:13px;color:var(--text);max-width:440px;transition:transform .32s cubic-bezier(.32,.72,0,1),opacity .32s cubic-bezier(.32,.72,0,1);pointer-events:none;}
+.bank-toast.show{transform:translate(-50%,0);opacity:1;}
+.bank-toast.hiding{transition-duration:.2s;}
+.bank-toast b{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;}
+@media(prefers-reduced-motion:reduce){.bank-toast{transition:opacity .2s;transform:translate(-50%,0);}}
+/* Строка ленты движения по счёту: время | контрагент | документ | сумма */
+.bank-op{display:grid;grid-template-columns:44px 1fr auto auto;gap:10px;align-items:baseline;padding:5px 0;border-bottom:1px solid var(--border);font-size:12.5px;}
+.bank-op:last-child{border-bottom:none;}
+.bank-op-time{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;font-size:11px;color:var(--muted);}
+.bank-op-name{color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.bank-op-doc{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--muted);}
+.bank-op-sum{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right;min-width:11ch;}
 </style>
 </head>
 <body>
@@ -1179,6 +1193,22 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
           <div class="kpi" id="receipts-kpi-today"></div>
           <div class="kpi" id="receipts-kpi-org"></div>
           <div class="kpi" id="receipts-kpi-ytd"></div>
+        </div>
+
+        <!-- Живая лента движения по счёту (план 2026-08-28-bank-operations-live-feed.md):
+             банковские СМС СберБизнеса с телефона через api.yardhub.ru, обновление раз в
+             минуту. Только сегодняшний слой - история остаётся за 1С (правило источников,
+             Влад 28.08). Карточка видна всегда (админ), пустое состояние - тихое. -->
+        <div class="card" id="bank-live-card" style="display:none;margin-bottom:16px">
+          <div class="sec-header" style="align-items:flex-start">
+            <div>
+              <div class="sec-title">Движение по счёту сегодня</div>
+              <div class="sec-sub" id="bank-live-sub"></div>
+            </div>
+            <div id="bank-live-balance" style="text-align:right"></div>
+          </div>
+          <div id="bank-live-summary" style="margin-bottom:8px"></div>
+          <div id="bank-live-feed"></div>
         </div>
 
         <!-- Поступления этой недели vs прошлой (Влад, 2026-08-16: "ниже должно быть поступление
@@ -2819,6 +2849,9 @@ async function loadData() {
       fetchReceiptsFromServer_().then(function(r) {
         if (r && !r.error && D) { D.receipts = r; renderReceipts(); }
       }).catch(function() {});
+      // Живая лента банковских операций (поллинг раз в минуту) - только админ, как и
+      // остальные общекорпоративные деньги.
+      startBankOpsPolling_();
     }
   } catch(e) {
     document.getElementById('error-block').style.display = 'block';
@@ -5412,7 +5445,12 @@ function renderMainReceiptsSummary() {
     '<div class="kpi-sub2">за ' + formatMonthLabel(r.month).toLowerCase() + '</div>' +
     (daysHtml ? '<div style="margin-top:10px">' + daysHtml + '</div>' : '') +
     '<div class="p2-rows" style="margin-top:10px">' +
-      '<div class="p2-row"><span class="p2-row-label">Сегодня</span><span class="p2-leader"></span><span class="p2-row-val">' + fmt(s.total_today) + '</span></div>' +
+      // "Сегодня" - из живых банковских СМС, когда лента жива (правило источников 28.08),
+      // иначе 1С; месяц/неделя/сальдо всегда 1С - банк только сегодняшний слой.
+      (function() {
+        var bs = (typeof bankTodaySummary_ === 'function') ? bankTodaySummary_() : null;
+        return '<div class="p2-row"><span class="p2-row-label">Сегодня' + (bs ? ' (банк)' : '') + '</span><span class="p2-leader"></span><span class="p2-row-val">' + fmt(bs ? bs.today_in : s.total_today) + '</span></div>';
+      })() +
       '<div class="p2-row"><span class="p2-row-label">За неделю</span><span class="p2-leader"></span><span class="p2-row-val">' + fmt(w.total || 0) + '</span>' + weekAux + '</div>' +
       '<div class="p2-row p2-row--total"><span class="p2-row-label">Сальдо месяца</span><span class="p2-leader"></span><span class="p2-row-val">' + balHtml + '</span></div>' +
     '</div>';
@@ -6766,10 +6804,17 @@ function renderReceiptsKPI(r) {
 
   // Сегодня + Среднее в день - один блок (Влад, 2026-08-13: "некоторые блоки можно объединить
   // в один по смыслу, не нужно городить два этажа") - две родственные суточные метрики.
-  document.getElementById('receipts-kpi-today').innerHTML =
-    '<div class="kpi-label">Сегодня</div>' +
-    '<div class="kpi-value">' + fmt(s.total_today) + '</div>' +
-    '<div class="kpi-sub2">Среднее в день: ' + fmt(s.avg_per_day) + '</div>';
+  // С 28.08 "Сегодня" считается из живых банковских СМС, если лента жива (Влад: "сегодняшние
+  // поступления лучше считать из смс, остальные из 1с") - 1С-цифра остаётся строкой ниже.
+  var bankToday = (typeof bankTodaySummary_ === 'function') ? bankTodaySummary_() : null;
+  document.getElementById('receipts-kpi-today').innerHTML = bankToday
+    ? '<div class="kpi-label">Сегодня</div>' +
+      '<div class="kpi-value">' + fmt(bankToday.today_in) + '</div>' +
+      '<div class="kpi-sub2">по СМС банка живьём · в 1С пока ' + fmt(s.total_today) + '</div>' +
+      '<div class="kpi-sub2">Среднее в день: ' + fmt(s.avg_per_day) + '</div>'
+    : '<div class="kpi-label">Сегодня</div>' +
+      '<div class="kpi-value">' + fmt(s.total_today) + '</div>' +
+      '<div class="kpi-sub2">Среднее в день: ' + fmt(s.avg_per_day) + '</div>';
 
   // Кликабельно (Влад, 2026-08-16: "нажимая на любое юрлицо, должно автоматически
   // сортироваться по поступлению выбранного юрлица") - клик фильтрует таблицу "По клиентам"
@@ -12814,6 +12859,148 @@ function toggleUiSound() {
     if (e.target.closest('.sidebar-nav-item')) uiSounds.navClick();
   });
 })();
+
+/* ═══ Живое движение по банковскому счёту (план 2026-08-28-bank-operations-live-feed.md) ═══
+   Телефон с банковской симкой шлёт СМС СберБизнеса на api.yardhub.ru (СМС Пересыльщик,
+   вебхук) - дашборд поллит /api/bank/operations раз в минуту. Правило источников (Влад,
+   28.08): банк - живой слой ТОЛЬКО за сегодня, всё старше одного дня - только 1С.
+   Новая операция за время сессии - тост (ГОСТ раздел 4) + канонические звуковые события
+   данных (раздел 8): поступление - фанфара growth, списание - attention; оба сразу -
+   фанфара первой, attention через 1.2с, как на панели. Первый ответ - базовая линия,
+   молчит. document.hidden - тихо обновляем цифры без звука и тоста. */
+var BANK_OPS = null;
+var bankOpsMaxSeenId_ = null; // null = ещё не было успешного ответа (первый - без звука)
+var bankOpsPollTimer_ = null;
+
+// Свой экранировщик: escHtml_ калькулятора живёт внутри его замыкания, снаружи недоступен.
+// Имена контрагентов приходят из внешних СМС - в innerHTML только через экранирование.
+function bankEsc_(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+// Сводка банка за СЕГОДНЯ, только если лента реально жива (есть хоть одна операция с
+// сегодняшней датой) - телефон умер/молчит с утра -> null, и KPI тихо падают на 1С.
+function bankTodaySummary_() {
+  if (!BANK_OPS || !BANK_OPS.summary || !BANK_OPS.ops) return null;
+  var today = BANK_OPS.today;
+  var hasToday = BANK_OPS.ops.some(function(o) { return o.occurred_at && o.occurred_at.slice(0, 10) === today; });
+  return hasToday ? BANK_OPS.summary : null;
+}
+
+function fetchBankOps_() {
+  if (!SESSION_TOKEN && !ID_TOKEN) return;
+  fetchFromYardApi_('/bank/operations').then(function(r) {
+    if (!r.ok || !r.data || r.data.error || !r.data.ops) return; // сервер молчит - остаёмся на прежнем
+    var prevMax = bankOpsMaxSeenId_;
+    BANK_OPS = r.data;
+    var maxId = prevMax || 0, newOps = [];
+    BANK_OPS.ops.forEach(function(o) {
+      if (o.id > maxId) maxId = o.id;
+      if (prevMax !== null && o.id > prevMax) newOps.push(o);
+    });
+    bankOpsMaxSeenId_ = maxId;
+    renderBankLive_();
+    // Перерисовать KPI "Сегодня" (страница Поступления) и строку на Панели - у них
+    // появился/обновился банковский источник.
+    if (D && D.receipts && !D.receipts.error && D.receipts.summary) renderReceiptsKPI(D.receipts);
+    if (typeof renderMainReceiptsSummary === 'function') renderMainReceiptsSummary();
+    // В режиме "смотреть как сотрудник" деньги компании не озвучиваем и не показываем
+    // (тот же принцип, что p2DataSoundCheck_).
+    if (newOps.length && !document.hidden && !viewAsEntry) bankAnnounceNewOps_(newOps);
+  }).catch(function() {});
+}
+
+function bankAnnounceNewOps_(ops) {
+  var ins = ops.filter(function(o) { return o.direction === 'in'; });
+  var outs = ops.filter(function(o) { return o.direction === 'out'; });
+  var insSum = ins.reduce(function(a, o) { return a + (Number(o.amount) || 0); }, 0);
+  var outsSum = outs.reduce(function(a, o) { return a + (Number(o.amount) || 0); }, 0);
+  if (ins.length) uiSounds.growth();
+  if (outs.length) setTimeout(function() { uiSounds.attention(); }, ins.length ? 1200 : 0);
+  var parts = [];
+  if (ins.length === 1) parts.push('Поступление <b style="color:var(--green)">+' + fmt(insSum) + '</b> · ' + bankEsc_(ins[0].counterparty || ''));
+  else if (ins.length > 1) parts.push('Поступления: <b style="color:var(--green)">+' + fmt(insSum) + '</b> (' + ins.length + ' шт.)');
+  if (outs.length === 1) parts.push('Списание <b>−' + fmt(outsSum) + '</b> · ' + bankEsc_(outs[0].counterparty || ''));
+  else if (outs.length > 1) parts.push('Списания: <b>−' + fmt(outsSum) + '</b> (' + outs.length + ' шт.)');
+  if (parts.length) bankShowToast_(parts.join('<br>'));
+}
+
+function bankShowToast_(html) {
+  var t = document.getElementById('bank-toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'bank-toast';
+    t.className = 'bank-toast';
+    document.body.appendChild(t);
+  }
+  t.innerHTML = html;
+  t.classList.remove('hiding');
+  // Принудительный reflow вместо rAF: в скрытой вкладке rAF не тикает (ГОСТ раздел 5 -
+  // у каждой rAF-зависимости обязана быть ветка hidden), а reflow запускает transition всегда.
+  void t.offsetWidth;
+  t.classList.add('show');
+  clearTimeout(t._hideTimer);
+  t._hideTimer = setTimeout(function() {
+    t.classList.add('hiding');
+    t.classList.remove('show');
+  }, 5000);
+}
+
+function renderBankLive_() {
+  var card = document.getElementById('bank-live-card');
+  if (!card) return;
+  if (!BANK_OPS || !D || D.role !== 'admin' || viewAsEntry) { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+  var s = BANK_OPS.summary || {};
+  var today = BANK_OPS.today;
+  var todayOps = (BANK_OPS.ops || []).filter(function(o) { return o.occurred_at && o.occurred_at.slice(0, 10) === today; });
+
+  var subEl = document.getElementById('bank-live-sub');
+  if (subEl) subEl.textContent = 'СМС СберБизнеса живьём · обновление раз в минуту · история старше сегодня - по 1С';
+
+  var balEl = document.getElementById('bank-live-balance');
+  if (balEl) {
+    balEl.innerHTML = (s.last_balance != null)
+      ? '<div class="kpi-label">Баланс</div>' +
+        '<div style="font-family:\'JetBrains Mono\',monospace;font-variant-numeric:tabular-nums;font-size:17px;color:var(--text)">' + fmt(s.last_balance) + '</div>' +
+        '<div class="sec-sub" style="font-variant-numeric:tabular-nums">на ' + (s.last_op_at ? s.last_op_at.slice(11, 16) : '—') + '</div>'
+      : '';
+  }
+
+  var sumEl = document.getElementById('bank-live-summary');
+  if (sumEl) {
+    sumEl.innerHTML = todayOps.length
+      ? '<div style="display:flex;gap:20px;font-size:12.5px;color:var(--muted)">' +
+          '<span>Пришло <b style="color:var(--green);font-family:\'JetBrains Mono\',monospace;font-variant-numeric:tabular-nums">+' + fmt(s.today_in || 0) + '</b></span>' +
+          '<span>Ушло <b style="color:var(--text);font-family:\'JetBrains Mono\',monospace;font-variant-numeric:tabular-nums">−' + fmt(s.today_out || 0) + '</b></span>' +
+          '<span>Операций <b style="color:var(--text);font-family:\'JetBrains Mono\',monospace;font-variant-numeric:tabular-nums">' + todayOps.length + '</b></span>' +
+        '</div>'
+      : '';
+  }
+
+  var feedEl = document.getElementById('bank-live-feed');
+  if (feedEl) {
+    feedEl.innerHTML = todayOps.map(function(o) {
+      var isIn = o.direction === 'in';
+      return '<div class="bank-op">' +
+        '<span class="bank-op-time">' + (o.occurred_at ? o.occurred_at.slice(11, 16) : '—') + '</span>' +
+        '<span class="bank-op-name">' + bankEsc_(o.counterparty || 'Без названия') + '</span>' +
+        '<span class="bank-op-doc">' + (o.doc_number ? '№' + bankEsc_(o.doc_number) : '') + '</span>' +
+        '<span class="bank-op-sum" style="color:' + (isIn ? 'var(--green)' : 'var(--muted)') + '">' + (isIn ? '+' : '−') + fmt(o.amount) + '</span>' +
+        '</div>';
+    }).join('') || '<div class="muted" style="font-size:12.5px;padding:4px 0">Сегодня операций ещё не было - жду СМС от банка</div>';
+  }
+}
+
+function startBankOpsPolling_() {
+  if (bankOpsPollTimer_) return;
+  fetchBankOps_();
+  bankOpsPollTimer_ = setInterval(fetchBankOps_, 60000);
+  // вернулись во вкладку - обновить сразу, не ждать до минуты
+  document.addEventListener('visibilitychange', function() { if (!document.hidden) fetchBankOps_(); });
+}
 
 /* ═══ Курсорный свет панели (канон ГОСТа раздел 7, код из канбана уровня 5):
    lerp 0.12/кадр к позиции мыши, rAF самоостанавливается в покое - не крутит

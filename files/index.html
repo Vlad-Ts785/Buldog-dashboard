@@ -4912,6 +4912,7 @@ function render() {
   renderMyPage();
   renderDebt();
   renderReceipts();
+  p2DataSoundCheck_(); // звуковые события данных - ПОСЛЕ всех рендеров (ДЗ-total готов)
 }
 
 // Показывает/скрывает пункты сайдбара в зависимости от роли. Менеджер видит только
@@ -5407,7 +5408,7 @@ function renderMainReceiptsSummary() {
     '<span style="color:' + (monthBalance >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (monthBalance >= 0 ? '+' : '') + fmt(monthBalance) + '</span>';
 
   el.innerHTML =
-    '<div class="kpi-value" style="color:var(--text)">' + fmt(s.total_month) + '</div>' +
+    '<div class="kpi-value" style="color:var(--text)" id="main-receipts-hero">' + fmt(s.total_month) + '</div>' +
     '<div class="kpi-sub2">за ' + formatMonthLabel(r.month).toLowerCase() + '</div>' +
     (daysHtml ? '<div style="margin-top:10px">' + daysHtml + '</div>' : '') +
     '<div class="p2-rows" style="margin-top:10px">' +
@@ -5477,6 +5478,61 @@ function updatePagePeriod_() {
 // тик раз в 30 сек, дёшево (одна замена textContent, без анимаций).
 setInterval(function() { try { updatePagePeriod_(); } catch(e) {} }, 30000);
 
+/* ═══ ЗВУКОВЫЕ СОБЫТИЯ ДАННЫХ (ГОСТ раздел 8, Влад 28.08) ═══
+   Панель запоминает выручку/поступления/ДЗ и на каждом обновлении внутри сессии
+   сравнивает. Деньги выросли - фанфара выигрыша + одометр под мажорные тики.
+   Долг вырос - attention + одометр под глухие нисходящие тики. Первый рендер
+   молчит (базы нет). Порог 10 000 ₽ - копеечное дрожание не событие. */
+var p2PrevVals_ = null;
+var p2CurDebtTotal_ = null;
+var P2_SOUND_THRESHOLD_ = 10000;
+
+// одометр значения с звуковыми тиками: from -> to за 900ms, тик каждые ~80ms
+function p2OdoWithTicks_(el, from, to, tickFn) {
+  if (!el || document.hidden) return;
+  var start = null, dur = 900;
+  var tickTimer = setInterval(function() { tickFn(); }, 80);
+  setTimeout(function() { clearInterval(tickTimer); }, dur + 50);
+  function frame(ts) {
+    if (!start) start = ts;
+    var p = Math.min(1, (ts - start) / dur);
+    var e = 1 - Math.pow(1 - p, 4);
+    el.textContent = fmt(from + (to - from) * e);
+    if (p < 1) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+
+function p2DataSoundCheck_() {
+  if (!D || D.role !== 'admin' || viewAsEntry) return; // панель видит только админ
+  var cur = {
+    rev: (D.summary && D.summary.salesFakt) || 0,
+    rec: (D.receipts && D.receipts.summary && D.receipts.summary.total_month) || 0,
+    debt: p2CurDebtTotal_
+  };
+  var prev = p2PrevVals_;
+  p2PrevVals_ = cur;
+  if (!prev) return; // первый рендер - только запоминаем
+  if (document.hidden) return; // вкладка скрыта - без звуков и одометров
+
+  var revGrew = cur.rev - prev.rev >= P2_SOUND_THRESHOLD_;
+  var recGrew = cur.rec - prev.rec >= P2_SOUND_THRESHOLD_;
+  var debtGrew = cur.debt != null && prev.debt != null && cur.debt - prev.debt >= P2_SOUND_THRESHOLD_;
+
+  if (revGrew || recGrew) {
+    uiSounds.growth(); // ОДНА фанфара на обновление, не по разу на метрику
+    if (revGrew) p2OdoWithTicks_(document.getElementById('k-revenue-total'), prev.rev, cur.rev, uiSounds.moneyTick);
+    if (recGrew) p2OdoWithTicks_(document.getElementById('main-receipts-hero'), prev.rec, cur.rec, uiSounds.moneyTick);
+  }
+  if (debtGrew) {
+    var delay = (revGrew || recGrew) ? 1200 : 0; // после фанфары, не каша
+    setTimeout(function() {
+      uiSounds.attention();
+      p2OdoWithTicks_(document.getElementById('k-debt-total'), prev.debt, cur.debt, uiSounds.debtTick);
+    }, delay);
+  }
+}
+
 // Карточка "Дебиторская задолженность" на Панели - заменила "Поступления" (Влад,
 // 2026-07-16: "выведи на панель... сумму от 0 до 90 дней... динамику в виде графика").
 // Всегда "чистый" снимок без переключателей (те - рабочий инструмент вкладки ДЗ, тут -
@@ -5499,6 +5555,7 @@ function renderDebtMiniCard() {
     else if (c.daysOverdue <= 90) over60 += c.balance;
   });
   var total = current30 + over30 + over60;
+  p2CurDebtTotal_ = total; // для звукового механизма сравнения (p2DataSoundCheck_)
   if (totalEl) totalEl.textContent = fmt(total);
   // Строки с точечным лидером и aux-долей (ГОСТ раздел 4, как в превью "Панель 2.0")
   function debtRow(label, v, isTotalRow) {
@@ -12710,7 +12767,36 @@ var uiSounds = {
   // "вдох-выдох" ручного обновления данных
   refresh: function(){ uiBlip_(330, 520, 0.10, 0.020, 'triangle', 0); uiBlip_(520, 349, 0.14, 0.026, 'sine', 0.10); },
   // микрощелчок тумблера (режим просмотра, вкл/выкл звука)
-  toggle: function(){ uiBlip_(470, 530, 0.06, 0.030, 'sine', 0); uiBlip_(235, 265, 0.06, 0.015, 'sine', 0); }
+  toggle: function(){ uiBlip_(470, 530, 0.06, 0.030, 'sine', 0); uiBlip_(235, 265, 0.06, 0.015, 'sine', 0); },
+  // ═══ звуковые события ДАННЫХ (ГОСТ раздел 8, Влад 28.08) ═══
+  // деньги выросли: фанфара выигрыша из канбана (C5-E5-G5-C6), громкость x0.7 - BI тише игры
+  growth: function(){
+    uiBlip_(130.8, 130.8, 1.5, 0.049, 'triangle');
+    uiBlip_(261.6, 261.6, 1.4, 0.035, 'sine', 0.05);
+    uiBlip_(523.3, 523.3, 0.35, 0.07, 'sine', 0);
+    uiBlip_(659.3, 659.3, 0.4, 0.07, 'sine', 0.09);
+    uiBlip_(784.0, 784.0, 0.5, 0.07, 'sine', 0.18);
+    uiBlip_(1046.5, 1046.5, 0.9, 0.077, 'sine', 0.27);
+    uiBlip_(659.3, 659.3, 0.8, 0.035, 'sine', 0.36);
+    uiBlip_(784.0, 784.0, 0.8, 0.035, 'sine', 0.36);
+    uiBlip_(2093.0, 2093.0, 0.6, 0.018, 'sine', 0.45);
+  },
+  // тик накрутки денег: пентатоника, случайная нота - серия складывается в перелив
+  moneyTick: function(){
+    var scale = [1568, 1760, 1976, 2093, 2349];
+    var f = scale[Math.floor(Math.random() * scale.length)];
+    uiBlip_(f, f * 1.06, 0.04, 0.035, 'sine');
+    uiBlip_(f * 0.5, f * 0.5, 0.03, 0.015, 'triangle');
+  },
+  // рост долга: attention-"покашливание" (деликатный регистр, не сирена)
+  attention: function(){
+    uiBlip_(330, 322, 0.06, 0.045, 'triangle', 0);
+    uiBlip_(294, 286, 0.08, 0.060, 'triangle', 0.12);
+  },
+  // тик накрутки ДОЛГА: глухой нисходящий полутон - рост долга не празднуется
+  debtTick: function(){
+    uiBlip_(494, 466, 0.045, 0.030, 'triangle');
+  }
 };
 function toggleUiSound() {
   uiSoundOn = !uiSoundOn;

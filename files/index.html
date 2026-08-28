@@ -13772,7 +13772,11 @@ function bankCelebrate5_(canvas, originX, originY, opts, onDone) {
   var PALETTE = [];
   for (var i = 0; i < HEXES.length; i++) { PALETTE.push(hexToRgb(HEXES[i])); }
   var rect = canvas.getBoundingClientRect();
-  var dpr = Math.min(window.devicePixelRatio || 1, 2);
+  // dpr намеренно 1 (отличие от канбана, где холст был размером с доску): полноэкранный
+  // 2D-canvas в физическом разрешении экрана (x1.5-2) уводит встроенную графику в
+  // слайдшоу (поймано Владом на превью фанфар 28.08) - у частиц в полёте
+  // ретина-чёткость всё равно не видна.
+  var dpr = 1;
   var W = Math.max(1, Math.round(rect.width));
   var H = Math.max(1, Math.round(rect.height));
   if (canvas.width !== W * dpr || canvas.height !== H * dpr) {
@@ -13826,7 +13830,8 @@ function bankCelebrate5_(canvas, originX, originY, opts, onDone) {
   if (st.running) { return; }
   st.running = true;
   st.last = 0;
-  var ctx = canvas.getContext('2d');
+  // desynchronized - браузер не ждёт компоновку страницы при выводе кадра холста
+  var ctx = canvas.getContext('2d', { desynchronized: true });
   var G_PETAL = 1150, G_SPARK = 150;
   function frame(t) {
     if (!st.last) { st.last = t; }
@@ -13864,12 +13869,13 @@ function bankCelebrate5_(canvas, originX, originY, opts, onDone) {
         fade = p.age > p.life * 0.7 ? (p.life - p.age) / (p.life * 0.3) : 1;
         ctx.globalAlpha = fade;
         ctx.fillStyle = flip >= 0 ? p.bright : p.dark;
-        ctx.save();
-        ctx.translate(p.x, p.y);
-        ctx.rotate(p.rot);
-        ctx.scale(1, Math.max(Math.abs(flip), 0.12));
+        // одна матрица вместо save/translate/rotate/scale/restore - главный пожиратель
+        // кадра на ~140 лепестках, встроенная графика на этом захлёбывалась
+        var cosR = Math.cos(p.rot), sinR = Math.sin(p.rot);
+        var sy = Math.max(Math.abs(flip), 0.12);
+        ctx.setTransform(dpr * cosR, dpr * sinR, -dpr * sinR * sy, dpr * cosR * sy, dpr * p.x, dpr * p.y);
         ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
-        ctx.restore();
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.globalAlpha = 1;
         alive.push(p);
       } else {

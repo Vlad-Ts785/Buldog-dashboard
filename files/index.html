@@ -731,10 +731,11 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
          просто теперь ещё и урезает сайдбар/лейбл через applyRoleUI(), как для реального
          входа manager/logist. Данные не перезапрашиваются - у admin и так есть всё в D. -->
     <div style="position:relative">
-      <button type="button" class="sidebar-refresh" id="view-as-btn" onclick="toggleViewAsPanel(event)"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 10s3-5.3 8-5.3S18 10 18 10s-3 5.3-8 5.3S2 10 2 10z"/><circle cx="10" cy="10" r="2.3"/></svg><span id="view-as-btn-label">Смотреть как сотрудник</span></button>
+      <button type="button" class="sidebar-refresh" id="view-as-btn" onclick="uiSounds.toggle();toggleViewAsPanel(event)"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 10s3-5.3 8-5.3S18 10 18 10s-3 5.3-8 5.3S2 10 2 10z"/><circle cx="10" cy="10" r="2.3"/></svg><span id="view-as-btn-label">Смотреть как сотрудник</span></button>
       <div id="view-as-panel" style="display:none;position:absolute;bottom:calc(100% + 4px);left:0;right:0;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px;z-index:50;max-height:280px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.4)"></div>
     </div>
-    <button class="sidebar-refresh" onclick="loadData()" style="margin-top:6px"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15.6 6.6A6 6 0 1 0 16 10"/><path d="M16 3v4h-4"/></svg><span>Обновить данные</span></button>
+    <button class="sidebar-refresh" onclick="uiSounds.refresh();loadData()" style="margin-top:6px"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15.6 6.6A6 6 0 1 0 16 10"/><path d="M16 3v4h-4"/></svg><span>Обновить данные</span></button>
+    <button class="sidebar-refresh" onclick="toggleUiSound()" style="margin-top:6px"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8v4h3l4 3.2V4.8L6.5 8z"/><path d="M13.2 7.2a4 4 0 0 1 0 5.6"/><path d="M15.4 5a7 7 0 0 1 0 10"/></svg><span id="sound-btn-label">Звук: вкл</span></button>
     <button class="sidebar-refresh" onclick="logoutUser()" style="margin-top:6px"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4H4.5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1H8"/><path d="M12.3 6.7 15.8 10l-3.5 3.3"/><line x1="15.6" y1="10" x2="7.3" y2="10"/></svg><span>Выйти</span></button>
   </div>
 </aside>
@@ -12228,6 +12229,62 @@ function fmtK2(n) { if(Math.abs(n)>=1000000)return(n/1000000).toFixed(1)+' мл�
 function pct(n) { return (Math.round((n||0)*10)/10).toFixed(1)+'%'; }
 function setText(id, val) { const el=document.getElementById(id); if(el) el.textContent=val; }
 function setHTML(id, val) { const el=document.getElementById(id); if(el) el.innerHTML=val; }
+
+/* ═══ ЗВУК ИНТЕРФЕЙСА - деликатный регистр soundsD (DESIGN_SYSTEM.md раздел 8) ═══
+   Дашборд открыт весь рабочий день - звук на грани слышимости, тёплые 200-660 Гц,
+   только по действию пользователя (никаких hover-звуков). Web Audio, без файлов.
+   Выключатель обязателен (кнопка в футере сайдбара), выбор помнится в localStorage. */
+var uiAudioCtx = null;
+var uiSoundOn = (function(){
+  try { return localStorage.getItem('yardhub_sound_on') !== 'off'; } catch(e){ return true; }
+})();
+function uiGetCtx_() {
+  try {
+    if (!uiAudioCtx) uiAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (uiAudioCtx.state === 'suspended') uiAudioCtx.resume();
+    return uiAudioCtx;
+  } catch(e){ return null; }
+}
+function uiBlip_(f1, f2, dur, vol, type, delay) {
+  if (!uiSoundOn) return;
+  var ctx = uiGetCtx_();
+  if (!ctx) return;
+  try {
+    var t = ctx.currentTime + (delay || 0);
+    var o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type || 'sine';
+    o.frequency.setValueAtTime(f1, t);
+    if (f2 && f2 !== f1) o.frequency.exponentialRampToValueAtTime(f2, t + dur);
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(ctx.destination);
+    o.start(t); o.stop(t + dur + 0.02);
+  } catch(e){}
+}
+var uiSounds = {
+  // тихий тик выбора пункта меню
+  navClick: function(){ uiBlip_(392, 440, 0.05, 0.022, 'sine'); },
+  // "вдох-выдох" ручного обновления данных
+  refresh: function(){ uiBlip_(330, 520, 0.10, 0.020, 'triangle', 0); uiBlip_(520, 349, 0.14, 0.026, 'sine', 0.10); },
+  // микрощелчок тумблера (режим просмотра, вкл/выкл звука)
+  toggle: function(){ uiBlip_(470, 530, 0.06, 0.030, 'sine', 0); uiBlip_(235, 265, 0.06, 0.015, 'sine', 0); }
+};
+function toggleUiSound() {
+  uiSoundOn = !uiSoundOn;
+  try { localStorage.setItem('yardhub_sound_on', uiSoundOn ? 'on' : 'off'); } catch(e){}
+  var label = document.getElementById('sound-btn-label');
+  if (label) label.textContent = uiSoundOn ? 'Звук: вкл' : 'Звук: выкл';
+  if (uiSoundOn) uiSounds.toggle();
+}
+(function initUiSound_() {
+  var label = document.getElementById('sound-btn-label');
+  if (label) label.textContent = uiSoundOn ? 'Звук: вкл' : 'Звук: выкл';
+  // делегирование - не трогаем showPage и onclick-атрибуты
+  var nav = document.querySelector('.sidebar-nav');
+  if (nav) nav.addEventListener('click', function(e){
+    if (e.target.closest('.sidebar-nav-item')) uiSounds.navClick();
+  });
+})();
 </script>
 <!-- Подключаем после основного скрипта, без async/defer - гарантирует, что initGoogleSignIn()
      уже объявлена к моменту, когда библиотека Google готова и мы её вызываем. -->

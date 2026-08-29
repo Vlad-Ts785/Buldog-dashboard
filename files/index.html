@@ -1430,7 +1430,29 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   appearance:none;border:1px solid var(--border);background:var(--bg3);color:var(--muted);
   height:22px;padding:0 9px;border-radius:6px;font-size:10.5px;font-family:inherit;
   cursor:pointer;margin-left:2px;transition:color .12s ease-out,border-color .12s ease-out;
-}#page-logistics-plan .monthnav-today:hover{color:var(--text);border-color:var(--border-strong);}#page-logistics-plan .spacer{flex:1 1 auto;}#page-logistics-plan .kpis{display:flex;gap:2px;align-items:stretch;}#page-logistics-plan .kpi{
+}#page-logistics-plan .monthnav-today:hover{color:var(--text);border-color:var(--border-strong);}#page-logistics-plan .spacer{flex:1 1 auto;}
+/* Присутствие на доске (Влад, 30.08: "пользователи, которые прямо сейчас
+   работают в системе онлайн... подсвечивать ярко, если реально что-то прям
+   сейчас редактирует") - крупные плитки с тремя буквами, только админ-режим.
+   Три состояния, ЦВЕТ несёт весь смысл:
+   - отсутствует (нет heartbeat >20с) - вообще без цвета, только контур;
+   - на странице, но бездействует - залит своим цветом (idColor), неподвижно;
+   - реально сейчас что-то делает (<12с с последнего действия) - тот же цвет
+     И мигает (lpTagGlow - именованное исключение ГОСТа №9 "свечение
+     ожидания", расширенное 30.08 на присутствие тем же приёмом с тем же
+     "да" Влада: "мигание сотрудников... как у нас плитки мигают"). */
+#page-logistics-plan .presence{display:flex;gap:5px;align-items:center;}
+#page-logistics-plan .pres-tile{
+  width:32px;height:32px;border-radius:8px;flex:none;
+  display:flex;align-items:center;justify-content:center;
+  font-family:'JetBrains Mono',monospace;font-size:10.5px;font-weight:700;letter-spacing:.01em;
+  border:1px solid var(--border);color:var(--muted2);background:transparent;
+  transition:background-color .25s ease-out,color .25s ease-out,border-color .25s ease-out;
+}
+#page-logistics-plan .pres-tile.online{border-color:transparent;}
+#page-logistics-plan .pres-tile.active{animation:lpTagGlow 2.4s ease-in-out infinite;}
+@media(prefers-reduced-motion:reduce){#page-logistics-plan .pres-tile.active{animation:none;box-shadow:0 0 8px 1px currentColor;}}
+#page-logistics-plan .kpis{display:flex;gap:2px;align-items:stretch;}#page-logistics-plan .kpi{
   /* НАЙДЕННЫЙ БАГ (Влад, 29.08: "наведи порядок, а не криво, как сейчас") -
      класс .kpi совпадает по имени с карточкой на главной панели дашборда
      (background/border/border-radius), и каскад работает ПОСВОЙСТВЕННО, не
@@ -2389,6 +2411,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   </div>
 
   <div class="kpis" id="lp-kpis"></div>
+  <div class="presence" id="lp-presence" title="Кто сейчас на странице"></div>
   <div class="spacer"></div>
 
   <div class="controls">
@@ -17758,6 +17781,7 @@ rowsEl.addEventListener("pointerdown", function(e){
   if (IS_TOUCH_) return;   /* драг/растяжка на тач выключены - палец должен просто скроллить */
   var el = e.target.closest(".seg");
   if (!el) return;
+  markActive_();   /* захватил плитку - живой признак присутствия, не ждать saveSegs() в конце жеста */
   var seg = STATE.segs.find(function(s){ return s.id === el.dataset.id; });
   if (!seg) return;
   e.preventDefault();
@@ -18093,6 +18117,7 @@ function pushSegToServer_(w){
     .catch(function(){ return { ok:false }; });
 }
 function saveSegs(){
+  markActive_();   /* любая мутация - живой признак "реально сейчас редактирует", см. presence */
   var current = {};
   try{
     var wires = [];
@@ -18223,6 +18248,58 @@ function fetchPlanSegs_(){
   }).catch(function(){});
 }
 setInterval(fetchPlanSegs_, 7000);
+/* ---------- Присутствие на доске (Влад, 30.08: "пользователи, которые прямо
+   сейчас работают в системе онлайн... подсвечивать ярко, если реально
+   что-то прям сейчас редактирует") - см. .presence в CSS для полной картины
+   состояний. Свой человек для heartbeat - D.logistName (менеджеры вкладку не
+   открывают, но || D.managerName на всякий случай); админ тоже шлёт
+   heartbeat - упрощает код (не решаем "считается ли он"), просто не попадает
+   в рендер, т.к. плитки строятся только по ростеру логистов. */
+var lastInteractionAt_ = 0;
+function markActive_(){ lastInteractionAt_ = Date.now(); }
+var presenceList_ = [];   /* [{display_name, seen_ago, active_ago}] с сервера */
+function sendPresence_(){
+  if (!SESSION_TOKEN && !ID_TOKEN) return;
+  var myName = (typeof D !== "undefined" && D && (D.logistName || D.managerName)) || "";
+  if (!myName) return;
+  var active = (Date.now() - lastInteractionAt_) < 12000;
+  postToYardApi_("/plan/presence", {name: myName, active: active ? "1" : "0"}).catch(function(){});
+}
+function fetchPresence_(){
+  if (!SESSION_TOKEN && !ID_TOKEN) return;
+  if (document.hidden) return;
+  if (!pageRoot.classList.contains("active")) return;
+  fetchFromYardApi_("/plan/presence", {}).then(function(r){
+    if (!r.ok || !r.data || !Array.isArray(r.data.users)) return;
+    presenceList_ = r.data.users;
+    renderPresence_();
+  }).catch(function(){});
+}
+/* Крупные плитки, три буквы фамилии (тот же приём, что у бейджа рейса) -
+   ростер логистов (тралы+длинномеры, без дублей), только в админ-режиме
+   (Влад, 29.08: "это для админ-режима"). Цвет несёт весь смысл состояния:
+   отсутствует - без цвета (пустой контур), на странице - залит своим цветом
+   неподвижно, реально действует прямо сейчас - тот же цвет и мигает. */
+function renderPresence_(){
+  var el = document.getElementById("lp-presence");
+  if (!el) return;
+  if (STATE.role !== "admin"){ el.innerHTML = ""; return; }
+  var seen = {}, roster = [];
+  LOG_TRAL.concat(LOG_LONG).forEach(function(p){
+    if (seen[p.full]) return; seen[p.full] = 1; roster.push(p);
+  });
+  el.innerHTML = roster.map(function(p){
+    var row = presenceList_.find(function(u){ return u.display_name === p.full; });
+    var online = !!row && row.seen_ago <= 20;
+    var active = !!row && row.active_ago != null && row.active_ago <= 12;
+    var cls = "pres-tile" + (online ? " online" : "") + (active ? " active" : "");
+    var style = online ? ' style="background:' + hexA(idColor(p.id), .3) + ';color:' + idColor(p.id) + ';"' : "";
+    var title = p.full + (active ? " · сейчас действует" : online ? " · на странице" : " · не на странице");
+    return '<span class="' + cls + '"' + style + ' title="' + title + '">' + three(p) + '</span>';
+  }).join("");
+}
+setInterval(sendPresence_, 7000);
+setInterval(fetchPresence_, 7000);
 /* локальный кэш - только чтобы лента не была пустой до первого ответа сервера */
 function loadSegs(){
   try{
@@ -18259,6 +18336,7 @@ rowsEl.addEventListener("pointerdown", function(e){
   if (e.target.closest(".seg") || e.target.closest(".rowhead") || e.target.closest(".hide-btn")) return;
   var track = e.target.closest(".track");
   if (!track) return;
+  markActive_();
   var vi = parseInt(track.dataset.v, 10);
   var hw = ZOOM[STATE.zoom];
   var tr = track.getBoundingClientRect();
@@ -18777,6 +18855,7 @@ function initLP(){
   board.scrollLeft = Math.max(0, (nowHour() - 42) * ZOOM[STATE.zoom]);
   updateMonthLabel_();       /* после scrollLeft - ярлык месяца сразу соответствует видимому дню */
   fetchPlanSegs_();          /* свежие записи с сервера сразу при открытии, не ждать до 7 сек поллинга */
+  sendPresence_(); fetchPresence_();   /* то же самое для присутствия - не ждать первый тик */
 }
 window.LP = { init: initLP };
 

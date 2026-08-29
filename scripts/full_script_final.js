@@ -4093,12 +4093,18 @@ function buildManagerView_(orders, managerName, ss, period) {
       by_manager: myManagerRow,
       by_logist: myLogistRow,
       by_manager_detail: detailWrapped,
-      // Проблемные заказы этого менеджера (2026-08-12, вкладка "Воронка документов" на личной
-      // странице - тот же формат/источник, что "Обзор заказов → Проблемные заказы", просто
-      // отфильтровано на одного человека, приватность - другие менеджеры не видны).
-      problem_orders: (orders.problem_orders || []).filter(function(p) {
-        return String(p.mgr || '').trim().split(' ')[0].toLowerCase() === managerName.trim().split(' ')[0].toLowerCase();
-      }),
+      // Проблемные заказы (2026-08-12, вкладка "Воронка документов" на личной странице -
+      // тот же формат/источник, что "Обзор заказов → Проблемные заказы"). Обычный менеджер
+      // видит ТОЛЬКО свои (приватность), руководитель группы (2026-08-29, Влад: "ниже должна
+      // быть такая же, как в других разделах, «Проблемные документы»") - по всей своей
+      // команде, тот же расширенный доступ, что уже даёт ему team_by_manager.
+      problem_orders: (function() {
+        const surs = commercialHeadTeam_(managerName) ||
+                     [managerName.trim().split(' ')[0].toLowerCase()];
+        return (orders.problem_orders || []).filter(function(p) {
+          return surs.indexOf(String(p.mgr || '').trim().split(' ')[0].toLowerCase()) >= 0;
+        });
+      })(),
     },
   };
 

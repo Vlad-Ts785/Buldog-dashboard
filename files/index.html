@@ -5729,7 +5729,7 @@ function renderCommercialHeadCustomersBlock_(cfg) {
       var key = String(c.name||'').trim().toLowerCase();
       seen[key] = (seen[key] || 0) + 1;
       rows.push({ name: c.name, manager: cleanName(nm), managerFull: nm, orders: c.orders||0,
-                  amount: c.amount||0, payment: c.payment||0, balance: c.balance||0, key: key });
+                  amount: c.amount||0, key: key });
     });
   });
   if (!rows.length) return '<div style="font-size:13px;color:var(--muted);padding:8px 0">Данных по заказчикам группы за этот период нет</div>';
@@ -5744,8 +5744,11 @@ function renderCommercialHeadCustomersBlock_(cfg) {
     {key:'name', label:'Заказчик', num:false},
     {key:'manager', label:'Менеджер', num:false},
     {key:'orders', label:'Заказов', num:true},
-    {key:'amount', label:'Выручка', num:true},
-    {key:'balance', label:'Не оплачено', num:true}
+    {key:'amount', label:'Выручка', num:true}
+    // Колонки «Не оплачено» здесь НЕТ и она не нужна: balance в top_customers - это
+    // накопительный остаток из 1С по всем заказам клиента, а не долг за период, и рядом
+    // с месячной выручкой он читался как «сумасшедшие цифры» (Влад, 29.08). Долги живут
+    // на своей странице «Дебиторская задолженность», где считаются по своей формуле.
   ];
   var head = cols.map(function(c){
     var active = headCustSort_.col === c.key;
@@ -5766,7 +5769,6 @@ function renderCommercialHeadCustomersBlock_(cfg) {
       '<td class="muted">'+pageEsc_(r.manager)+'</td>'+
       '<td class="num muted">'+r.orders+'</td>'+
       '<td class="num"><b>'+fmt(r.amount)+'</b> <span class="muted" style="font-size:10px">'+share.toFixed(1).replace('.',',')+'%</span></td>'+
-      '<td class="num'+(r.balance>0?'':' muted')+'"'+(r.balance>0?' style="color:'+PAGE_COL.amber+'"':'')+'>'+(r.balance>0?fmt(r.balance):'—')+'</td>'+
     '</tr>';
   }).join('');
   var h = '<div style="margin-bottom:10px;font-size:13px;color:var(--muted)">Заказчиков: <b>'+rows.length+'</b> · выручка по ним: <b>'+pageMln_(total)+'</b> '+
@@ -5775,28 +5777,111 @@ function renderCommercialHeadCustomersBlock_(cfg) {
   return h;
 }
 
-// Документы группы - воронка оформления по каждому менеджеру. Источник тот же, что у
-// менеджера (by_manager_detail[имя].doc), просто по всем членам группы: team_by_manager_detail
-// приходит при самостоятельном входе руководителя, by_manager_detail - при admin-предпросмотре.
+// Документы группы за ДВА ПОСЛЕДНИХ МЕСЯЦА (Влад, 29.08: «пусть содержит информацию за два
+// последних месяца... там где-то должен быть акцент, что это за два месяца»). Текущий месяц
+// уже загружен, прошлый догружается фоново теми же запросами, что переключатель периода
+// (my_page_period / orders_period), и кладётся в chDocsPrevCache. Пока не пришёл - показываем
+// один месяц и честно пишем «загружаем второй», а не молчим и не притворяемся, что это два.
+var chDocsPrevCache = {};   // 'YYYY-MM' -> { orders } | { error }
+var chDocsPrevLoading = false;
+function loadChDocsPrevIfNeeded_(prevKey) {
+  if (chDocsPrevCache[prevKey] || chDocsPrevLoading) return;
+  // Прошлый месяц мог быть уже загружен переключателем периода - берём оттуда бесплатно.
+  if (myPagePeriodCache[prevKey] && myPagePeriodCache[prevKey].orders) {
+    chDocsPrevCache[prevKey] = { orders: myPagePeriodCache[prevKey].orders };
+    return;
+  }
+  chDocsPrevLoading = true;
+  var req = (D.role === 'admin')
+    ? apiFetchJson({ action: 'orders_period', period: prevKey })
+    : apiFetchJson({ action: 'my_page_period', period: prevKey });
+  req.then(function(data) {
+    chDocsPrevLoading = false;
+    if (data && data.error) chDocsPrevCache[prevKey] = { error: data.error };
+    else if (data && data.orders && data.orders.error) chDocsPrevCache[prevKey] = { error: data.orders.error };
+    else chDocsPrevCache[prevKey] = { orders: (data && data.orders) || {} };
+    renderMyPage();
+  }).catch(function(e) {
+    chDocsPrevLoading = false;
+    chDocsPrevCache[prevKey] = { error: e.message };
+    renderMyPage();
+  });
+}
+// Ключ месяца, предшествующего заданному ('2026-09' -> '2026-08').
+function prevMonthOf_(key) {
+  var m = /^(\d{4})-(\d{2})$/.exec(String(key||''));
+  if (!m) return prevMonthKey_();
+  var y = +m[1], mo = +m[2] - 1;      // 0-based
+  var d = new Date(y, mo - 1, 1);
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+}
+function monthNameRu_(key) {
+  var m = /^(\d{4})-(\d{2})$/.exec(String(key||''));
+  if (!m) return key || '';
+  var names = ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'];
+  return names[+m[2]-1] || key;
+}
+// Фильтр статуса в «Проблемных документах» группы - своё состояние, не мешается с
+// менеджерским (myPageMgrProblemsFilter), у них разные списки.
+var chProblemsFilter = '';
+function setChProblemsFilter(f) { chProblemsFilter = f; renderMyPage(); }
+
 function renderCommercialHeadDocsBlock_(cfg) {
   var teamSur = (cfg.members||[]).map(function(x){ return x.toLowerCase(); });
-  var src = (D.orders && D.orders.team_by_manager_detail) || (D.orders && D.orders.by_manager_detail) || {};
-  var rows = [];
-  Object.keys(src).forEach(function(nm) {
-    if (teamSur.indexOf(String(nm).trim().split(' ')[0].toLowerCase()) < 0) return;
-    var doc = (src[nm] || {}).doc || {};
-    var noWb = (doc.no_waybill_own||0) + (doc.no_waybill_hired||0);
-    var np = doc.waybill_not_posted||0, nr = doc.posted_no_realiz||0, ok = doc.complete||0;
-    var tot = noWb + np + nr + ok;
-    if (!tot) return;
-    rows.push({ name: cleanName(nm), noWb: noWb, np: np, nr: nr, ok: ok, tot: tot, open: noWb+np+nr });
-  });
-  if (!rows.length) return '<div style="font-size:13px;color:var(--muted);padding:8px 0">Данных по документам группы за этот период нет</div>';
+  function inTeamName(nm) { return teamSur.indexOf(String(nm||'').trim().split(' ')[0].toLowerCase()) >= 0; }
+
+  var curKey = (D.orders && D.orders.period) || '';
+  var prevKey = prevMonthOf_(curKey);
+  loadChDocsPrevIfNeeded_(prevKey);
+  var prevEntry = chDocsPrevCache[prevKey];
+  var prevOrders = (prevEntry && !prevEntry.error) ? prevEntry.orders : null;
+
+  // Складываем воронку по каждому менеджеру за оба месяца. Источник один и тот же -
+  // team_by_manager_detail (self-login) либо by_manager_detail (admin-предпросмотр).
+  function detailOf(o) {
+    return (o && (o.team_by_manager_detail || o.by_manager_detail)) || {};
+  }
+  var agg = {};
+  function addMonth(o, tag) {
+    var src = detailOf(o);
+    Object.keys(src).forEach(function(nm) {
+      if (!inTeamName(nm)) return;
+      var doc = (src[nm] || {}).doc || {};
+      if (!agg[nm]) agg[nm] = { name: cleanName(nm), noWb:0, np:0, nr:0, ok:0, months:{} };
+      var noWb = (doc.no_waybill_own||0) + (doc.no_waybill_hired||0);
+      agg[nm].noWb += noWb;
+      agg[nm].np   += doc.waybill_not_posted||0;
+      agg[nm].nr   += doc.posted_no_realiz||0;
+      agg[nm].ok   += doc.complete||0;
+      agg[nm].months[tag] = noWb + (doc.waybill_not_posted||0) + (doc.posted_no_realiz||0) + (doc.complete||0);
+    });
+  }
+  addMonth(D.orders, 'cur');
+  if (prevOrders) addMonth(prevOrders, 'prev');
+
+  var rows = Object.keys(agg).map(function(k){ var r = agg[k]; r.tot = r.noWb+r.np+r.nr+r.ok; r.open = r.noWb+r.np+r.nr; return r; })
+                             .filter(function(r){ return r.tot > 0; });
+  var amber2 = '#BA7517';
+  var h = '';
+
+  // АКЦЕНТ на охвате периода - первое, что видно в блоке.
+  var coverTxt = prevOrders
+    ? 'за два месяца: <b>' + monthNameRu_(prevKey) + '</b> и <b>' + monthNameRu_(curKey) + '</b>'
+    : (prevEntry && prevEntry.error)
+      ? 'только <b>' + monthNameRu_(curKey) + '</b> — прошлый месяц не загрузился (' + pageEsc_(prevEntry.error) + ')'
+      : 'пока только <b>' + monthNameRu_(curKey) + '</b> — догружаем ' + monthNameRu_(prevKey) + '…';
+  h += '<div style="display:inline-flex;align-items:center;gap:8px;background:var(--bg3);border:1px solid ' +
+       (prevOrders ? 'var(--border)' : pageHex2rgba_(PAGE_COL.amber,0.45)) + ';border-radius:8px;' +
+       'padding:6px 12px;font-size:12px;margin-bottom:12px">' +
+       '<span style="width:7px;height:7px;border-radius:2px;background:' + (prevOrders ? PAGE_COL.blue : PAGE_COL.amber) + '"></span>' +
+       'Документы ' + coverTxt + '</div>';
+
+  if (!rows.length) return h + '<div style="font-size:13px;color:var(--muted);padding:8px 0">Данных по документам группы за этот период нет</div>';
+
   rows.sort(function(a,b){ return b.open - a.open; });
   var T = rows.reduce(function(a,r){ a.noWb+=r.noWb; a.np+=r.np; a.nr+=r.nr; a.ok+=r.ok; a.tot+=r.tot; return a; },
                       {noWb:0,np:0,nr:0,ok:0,tot:0});
-  var amber2 = '#BA7517';
-  var h = '<div style="font-family:JetBrains Mono,monospace;font-size:21px;font-weight:700;margin-bottom:10px">'+
+  h += '<div style="font-family:JetBrains Mono,monospace;font-size:21px;font-weight:700;margin-bottom:10px">'+
     T.ok+' из '+T.tot+' готово</div>';
   h += '<div class="mp-debtladder" style="margin-bottom:12px">'+
     [{v:T.noWb,c:PAGE_COL.red,l:'Нет путёвки'},{v:T.np,c:PAGE_COL.amber,l:'Не проведено'},
@@ -5809,24 +5894,55 @@ function renderCommercialHeadDocsBlock_(cfg) {
     '<th class="num">Готово</th><th class="num">Итого</th></tr></thead><tbody>'+
     rows.map(function(r){
       return '<tr><td><b>'+pageEsc_(r.name)+'</b></td>'+
-        '<td class="num" style="color:'+(r.noWb?PAGE_COL.red:'var(--muted)')+'">'+(r.noWb||'\u2014')+'</td>'+
-        '<td class="num" style="color:'+(r.np?PAGE_COL.amber:'var(--muted)')+'">'+(r.np||'\u2014')+'</td>'+
-        '<td class="num" style="color:'+(r.nr?amber2:'var(--muted)')+'">'+(r.nr||'\u2014')+'</td>'+
+        '<td class="num" style="color:'+(r.noWb?PAGE_COL.red:'var(--muted)')+'">'+(r.noWb||'—')+'</td>'+
+        '<td class="num" style="color:'+(r.np?PAGE_COL.amber:'var(--muted)')+'">'+(r.np||'—')+'</td>'+
+        '<td class="num" style="color:'+(r.nr?amber2:'var(--muted)')+'">'+(r.nr||'—')+'</td>'+
         '<td class="num" style="color:'+PAGE_COL.green+'">'+r.ok+'</td>'+
         '<td class="num muted">'+r.tot+'</td></tr>';
     }).join('')+
   '</tbody></table></div>';
+
+  // ═══ ПРОБЛЕМНЫЕ ДОКУМЕНТЫ - тот же формат и та же строка-шаблон (problemOrderRowHtml_),
+  // что «Обзор заказов → Проблемные заказы» и вкладка менеджера. Тоже за два месяца.
+  var problems = [];
+  function addProblems(o) {
+    ((o && o.problem_orders) || []).forEach(function(pr){ if (inTeamName(pr.mgr)) problems.push(pr); });
+  }
+  addProblems(D.orders);
+  if (prevOrders) addProblems(prevOrders);
+  var pFiltered = problems.filter(function(pr){
+    return !chProblemsFilter || (pr.status||'').indexOf(chProblemsFilter) >= 0;
+  }).slice().sort(function(a,b){ return (a.date||'').localeCompare(b.date||''); });
+
+  h += '<div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">';
+  h += '<div style="font-size:13px;font-weight:600;margin-bottom:10px">Проблемные документы</div>';
+  h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">';
+  h += '<div class="tab-bar" style="margin-bottom:0;border-bottom:none;padding-bottom:0;gap:4px">'+
+    '<button class="tab-btn'+(!chProblemsFilter?' active':'')+'" onclick="setChProblemsFilter(\'\')">Все</button>'+
+    '<button class="tab-btn'+(chProblemsFilter==='нет путёвки'?' active':'')+'" onclick="setChProblemsFilter(\'нет путёвки\')">Нет путёвки</button>'+
+    '<button class="tab-btn'+(chProblemsFilter==='не проведён'?' active':'')+'" onclick="setChProblemsFilter(\'не проведён\')">Не проведён</button>'+
+    '<button class="tab-btn'+(chProblemsFilter==='нет реализации'?' active':'')+'" onclick="setChProblemsFilter(\'нет реализации\')">Нет реализации</button>'+
+  '</div>';
+  h += '<span class="muted" style="font-size:11px">'+pFiltered.length+' из '+problems.length+' заказов</span>';
+  h += '</div>';
+  h += '<div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
+    '<th>Номер</th><th>Дата</th><th>Декада</th><th>Клиент</th><th>Менеджер</th>'+
+    '<th>Водитель/наёмник</th><th class="num">Сумма</th><th class="num">Оплата</th><th>Статус</th>'+
+  '</tr></thead><tbody>'+
+    (pFiltered.length ? pFiltered.slice(0,100).map(problemOrderRowHtml_).join('')
+                      : '<tr><td colspan="9" style="color:'+PAGE_COL.green+';padding:14px">Нет проблемных заказов</td></tr>')+
+  '</tbody></table></div>';
+  if (pFiltered.length > 100) h += '<div class="muted" style="font-size:11px;margin-top:8px">Показаны первые 100 из '+pFiltered.length+' — начиная с самых старых.</div>';
+  h += '</div>';
   return h;
 }
 
-// Блок "Поступления" для личной страницы руководителя группы (2026-08-26, Влад: "точно по
-// такому же принципу, как у нас уже это построено" - переиспользует myPageReceiptsPeriod/
-
-// Блок "Поступления" для личной страницы руководителя группы (2026-08-26, Влад: "точно по
-// такому же принципу, как у нас уже это построено" - переиспользует myPageReceiptsPeriod/
-// setMyPageReceiptsPeriod, тот же state/setter, что у обычного менеджера, просто team-scoped
-// фильтрация вместо одной фамилии, и добавлена вкладка "По менеджерам" (rd.by_manager, тот
-// же формат, что renderReceiptsManagers на company-wide странице "Поступления").
+// Период вкладки «Поступления» у руководителя - СВОЁ состояние, отдельно от менеджерского
+// (myPageReceiptsPeriod, дефолт 'today'). Влад, 29.08: «поступления пусть по умолчанию
+// открываются с этой недели» - руководителю нужна картина недели, а не одного дня;
+// менеджеру дефолт не меняем, у него другой вопрос к этой вкладке.
+var chReceiptsPeriod = 'week';
+function setChReceiptsPeriod(p) { chReceiptsPeriod = p; renderMyPage(); }
 function renderCommercialHeadReceiptsBlock_(cfg) {
   var teamSurLower = cfg.members.map(function(s){ return s.toLowerCase(); });
   function inTeam(name) { return teamSurLower.indexOf(String(name||'').trim().split(' ')[0].toLowerCase()) >= 0; }
@@ -5834,13 +5950,14 @@ function renderCommercialHeadReceiptsBlock_(cfg) {
 
   var html = '<div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">';
   html += '<div class="tab-bar" style="margin-bottom:14px;border-bottom:none;padding-bottom:0;gap:4px">'+
-    '<button class="tab-btn'+(myPageReceiptsPeriod==='by_manager'?' active':'')+'" onclick="setMyPageReceiptsPeriod(\'by_manager\')">По менеджерам</button>'+
-    '<button class="tab-btn'+(myPageReceiptsPeriod==='yesterday'?' active':'')+'" onclick="setMyPageReceiptsPeriod(\'yesterday\')">Вчера</button>'+
-    '<button class="tab-btn'+(myPageReceiptsPeriod==='today'?' active':'')+'" onclick="setMyPageReceiptsPeriod(\'today\')">Сегодня</button>'+
-    '<button class="tab-btn'+(myPageReceiptsPeriod==='week'?' active':'')+'" onclick="setMyPageReceiptsPeriod(\'week\')">Эта неделя</button>'+
+    '<button class="tab-btn'+(chReceiptsPeriod==='by_manager'?' active':'')+'" onclick="setChReceiptsPeriod(\'by_manager\')">По менеджерам</button>'+
+    '<button class="tab-btn'+(chReceiptsPeriod==='yesterday'?' active':'')+'" onclick="setChReceiptsPeriod(\'yesterday\')">Вчера</button>'+
+    '<button class="tab-btn'+(chReceiptsPeriod==='today'?' active':'')+'" onclick="setChReceiptsPeriod(\'today\')">Сегодня</button>'+
+    '<button class="tab-btn'+(chReceiptsPeriod==='week'?' active':'')+'" onclick="setChReceiptsPeriod(\'week\')">Эта неделя</button>'+
+    '<button class="tab-btn'+(chReceiptsPeriod==='this_month'?' active':'')+'" onclick="setChReceiptsPeriod(\'this_month\')">Месяц</button>'+
   '</div>';
 
-  if (myPageReceiptsPeriod === 'by_manager') {
+  if (chReceiptsPeriod === 'by_manager') {
     var rawByMgr = (D.receipts && D.receipts.by_manager) || [];
     var byMgr = rawByMgr.filter(function(m){ return inTeam(m.manager); });
     var teamTotal = byMgr.reduce(function(s,m){ return s+(m.amount||0); }, 0);
@@ -5859,15 +5976,16 @@ function renderCommercialHeadReceiptsBlock_(cfg) {
       yesterday: (D.receipts && D.receipts.yesterday) || null,
       today: (D.receipts && D.receipts.today) || null,
       week: (D.receipts && D.receipts.week) || null,
+      this_month: (D.receipts && D.receipts.this_month) || null,
     };
-    var recPeriod = recPeriodMap[myPageReceiptsPeriod] || recPeriodMap.today;
-    var showDate = myPageReceiptsPeriod === 'week';
+    var recPeriod = recPeriodMap[chReceiptsPeriod] || recPeriodMap.week || recPeriodMap.today;
+    var showDate = chReceiptsPeriod === 'week' || chReceiptsPeriod === 'this_month';
     if (!recPeriod) {
       html += '<div class="muted" style="padding:14px 0">Нет данных "Поступления"</div>';
     } else {
       var teamReceipts = (recPeriod.transactions || []).filter(function(t) { return inTeam(t.manager); });
       var teamReceiptsTotal = teamReceipts.reduce(function(s, t) { return s + t.amount; }, 0);
-      var periodLabel = {yesterday:'вчера', today:'сегодня', week:'на этой неделе'}[myPageReceiptsPeriod];
+      var periodLabel = {yesterday:'вчера', today:'сегодня', week:'на этой неделе', this_month:'в этом месяце'}[chReceiptsPeriod];
       html += '<div style="font-size:13px;color:var(--muted);margin-bottom:10px">Поступлений '+periodLabel+': '+
         '<b style="color:var(--text)">'+fmt(teamReceiptsTotal)+'</b> · '+teamReceipts.length+' плат.</div>';
       html += '<div style="overflow-x:auto"><table class="tbl"><thead><tr>'+

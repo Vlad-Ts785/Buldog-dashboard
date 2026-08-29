@@ -4093,12 +4093,18 @@ function buildManagerView_(orders, managerName, ss, period) {
       by_manager: myManagerRow,
       by_logist: myLogistRow,
       by_manager_detail: detailWrapped,
-      // Проблемные заказы этого менеджера (2026-08-12, вкладка "Воронка документов" на личной
-      // странице - тот же формат/источник, что "Обзор заказов → Проблемные заказы", просто
-      // отфильтровано на одного человека, приватность - другие менеджеры не видны).
-      problem_orders: (orders.problem_orders || []).filter(function(p) {
-        return String(p.mgr || '').trim().split(' ')[0].toLowerCase() === managerName.trim().split(' ')[0].toLowerCase();
-      }),
+      // Проблемные заказы (2026-08-12, вкладка "Воронка документов" на личной странице -
+      // тот же формат/источник, что "Обзор заказов → Проблемные заказы"). Обычный менеджер
+      // видит ТОЛЬКО свои (приватность), руководитель группы (2026-08-29, Влад: "ниже должна
+      // быть такая же, как в других разделах, «Проблемные документы»") - по всей своей
+      // команде, тот же расширенный доступ, что уже даёт ему team_by_manager.
+      problem_orders: (function() {
+        const surs = commercialHeadTeam_(managerName) ||
+                     [managerName.trim().split(' ')[0].toLowerCase()];
+        return (orders.problem_orders || []).filter(function(p) {
+          return surs.indexOf(String(p.mgr || '').trim().split(' ')[0].toLowerCase()) >= 0;
+        });
+      })(),
     },
   };
 
@@ -4109,17 +4115,20 @@ function buildManagerView_(orders, managerName, ss, period) {
   if (teamByManager) {
     result.orders.team_by_manager = teamByManager;
     result.orders.managerPlans = orders.managerPlans || {}; // нужен planOf() на фронтенде
-    // Документы группы (2026-08-29, вкладка "Документы" на странице руководителя,
-    // renderCommercialHeadDocsBlock_) - ТОЛЬКО счётчики воронки оформления по каждому
-    // члену группы, без списков сделок/клиентов: руководителю нужно видеть, у кого
-    // проседает оформление, а не чужую клиентскую базу (тот же принцип приватности,
-    // что и у team_by_manager - команда, но не вся компания).
-    const teamDocs = {};
+    // Нижний блок страницы руководителя (2026-08-29, Влад: «пусть там будет воронка по
+    // документам... и вкладка с заказчиками: какой заказчик у какого менеджера принёс
+    // сколько выручки»). Отдаём ТОЛЬКО две ветки по каждому члену группы:
+    //   doc           - счётчики воронки оформления (у кого проседают документы),
+    //   top_customers - топ-10 заказчиков по выручке (name/orders/amount/payment/balance).
+    // Списки сделок, пропавших клиентов и должников НЕ отдаём - руководителю для этих
+    // двух вкладок они не нужны, а лишние ПДн в ответе не нужны тем более.
+    const teamDetail = {};
     Object.keys(orders.by_manager_detail || {}).forEach(function(nm) {
       if (teamSurs.indexOf(String(nm).trim().split(' ')[0].toLowerCase()) < 0) return;
-      teamDocs[nm] = { doc: (orders.by_manager_detail[nm] || {}).doc || {} };
+      const src = orders.by_manager_detail[nm] || {};
+      teamDetail[nm] = { doc: src.doc || {}, top_customers: src.top_customers || [] };
     });
-    result.orders.team_by_manager_detail = teamDocs;
+    result.orders.team_by_manager_detail = teamDetail;
   }
 
   // ДЗ, отфильтрованная на этого менеджера ИЛИ на всю его команду (руководитель группы,

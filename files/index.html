@@ -432,9 +432,15 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .page:not(#page-crm) .card:has(table){will-change:auto;}
 .page:not(#page-crm) .card:has(table):hover{transform:none;}
 /* курсорный свет за карточками (канон раздела 7): radial blue 7%, гаснет без курсора */
-.p2-light{
-  position:absolute;inset:0;z-index:-1;pointer-events:none;
-  background:radial-gradient(600px circle at 50% 20%, rgba(55,138,221,.07), transparent 70%);
+/* КУРСОРНЫЙ СВЕТ - ЕДИНЫЙ СЛОЙ (канон ГОСТа раздел 7). Живёт ВНУТРИ СЕТКИ ПЛИТОК, а не
+   на всей странице: карточки непрозрачны, поэтому на странице свет виден ровно там, где
+   открыт фон - в сетке это узкие зазоры (мягкий ореол, то, что нужно), а ниже, под
+   таблицами и в пустом хвосте, он открывался целиком и читался как отдельный фонарь
+   (Влад, 29.08: «наверху устраивает, внизу отчётливо видно - хочу везде одинаково»).
+   Числа - единственные разрешённые: радиус 600px, синий 7%, спад к 70%, lerp 0.12. */
+.p2-light,.mp-light{
+  position:absolute;inset:0;z-index:0;pointer-events:none;border-radius:inherit;
+  background:radial-gradient(600px circle at var(--lx,50%) var(--ly,50%), rgba(55,138,221,.07), transparent 70%);
   opacity:0;transition:opacity .25s ease;
 }
 .p2-light.on{opacity:1;}
@@ -792,10 +798,17 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
    правилу «превью = контракт». Курсорный свет - обязательный стандарт ГОСТа
    раздел 7. Порядок ярусов (план → задачи → зарплата) сохранён. */
 #page-my-page{position:relative;perspective:1400px;}
-.mp-light{position:absolute;inset:0;z-index:0;pointer-events:none;opacity:0;transition:opacity .25s ease;
-  background:radial-gradient(600px circle at var(--lx,50%) var(--ly,30%),rgba(55,138,221,.07),transparent 70%);}
+/* .mp-light описан вместе с .p2-light выше - один набор чисел на оба */
 .mp-light.on{opacity:1;}
-#page-my-page > *:not(.mp-light){position:relative;z-index:1;}
+/* Сетка плиток - носитель света: она же контейнер для абсолютного слоя, плитки внутри
+   поднимаются над ним. Схема «свет на z-index:-1» не используется - она пропадает
+   целиком, стоит любому предку создать stacking-контекст. */
+.kpi-grid,.mp-tier,.mp-stats,.p2-tier3-grid,.grid-2{position:relative;}
+.kpi-grid > *:not(.mp-light):not(.p2-light),
+.mp-tier > *:not(.mp-light):not(.p2-light),
+.mp-stats > *:not(.mp-light):not(.p2-light),
+.p2-tier3-grid > *:not(.mp-light):not(.p2-light),
+.grid-2 > *:not(.mp-light):not(.p2-light){position:relative;z-index:1;}
 @media(prefers-reduced-motion:reduce){.mp-light{display:none;}}
 
 /* строка состояния - ответ «день хороший или плохой» до всякого чтения */
@@ -1363,7 +1376,6 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 
       <!-- Курсорный свет за карточками (канон ГОСТа раздел 7) - слой позади,
            двигается за мышью с инерцией, гаснет при уходе курсора. -->
-      <div class="p2-light" id="p2-light"></div>
 
       <!-- ЯРУС 0: вердикт - генерируется renderVerdict() из уже посчитанных данных,
            максимум 4 фразы worst-first, только отклонения от нормы. Клик по фразе -
@@ -4946,39 +4958,76 @@ function mpScrollToTabs_() {
     if (t) t.scrollIntoView({ behavior:'smooth', block:'start' });
   }, 30);
 }
+// ═══ КУРСОРНЫЙ СВЕТ - ОДИН ДВИЖОК НА ВЕСЬ ПРОЕКТ (ГОСТ раздел 7) ═══
+// Влад, 29.08: «стандарт - чтобы свечение было везде абсолютно одинаковым». Двумя
+// реализациями это не гарантируется, поэтому главная и личные страницы ходят через одну
+// функцию с одними числами: радиус 600px, синий 7%, спад к 70%, lerp 0.12/кадр,
+// координаты в ПИКСЕЛЯХ ОТ ВЬЮПОРТА (слой fixed - см. пояснение в CSS .p2-light).
+// rAF самоостанавливается в покое, чтобы не крутить видеокарту впустую.
+var cursorLightInited_ = {};
+var LIGHT_GRID_SEL_ = '.kpi-grid,.mp-tier,.mp-stats,.p2-tier3-grid,.grid-2';
+function initCursorLight_(pageId, lightClass) {
+  if (cursorLightInited_[pageId]) return;
+  var page = document.getElementById(pageId);
+  if (!page) return;
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    cursorLightInited_[pageId] = true; return;
+  }
+  cursorLightInited_[pageId] = true;
+  // Состояние на КАЖДУЮ сетку: у каждой свой слой и своя точка, но числа общие.
+  var st = new WeakMap();
+  function lightOf(grid) {
+    var el = grid.querySelector(':scope > .' + lightClass);
+    if (!el) {
+      el = document.createElement('div');
+      el.className = lightClass;
+      grid.insertBefore(el, grid.firstChild);
+    }
+    return el;
+  }
+  function step(grid) {
+    var s = st.get(grid);
+    if (!s) return;
+    var el = lightOf(grid);
+    var dx = s.tx-s.cx, dy = s.ty-s.cy;
+    s.cx += dx*0.12; s.cy += dy*0.12;
+    el.style.setProperty('--lx', s.cx.toFixed(2)+'%');
+    el.style.setProperty('--ly', s.cy.toFixed(2)+'%');
+    if (Math.abs(dx) < 0.05 && Math.abs(dy) < 0.05) { s.raf = null; return; }
+    s.raf = requestAnimationFrame(function(){ step(grid); });
+  }
+  page.addEventListener('pointermove', function(e) {
+    var grid = e.target.closest ? e.target.closest(LIGHT_GRID_SEL_) : null;
+    // Мышь вне сетки плиток - свет гаснет: под таблицами и в пустых зонах его нет.
+    page.querySelectorAll('.' + lightClass + '.on').forEach(function(l) {
+      if (!grid || l.parentElement !== grid) l.classList.remove('on');
+    });
+    if (!grid) return;
+    var r = grid.getBoundingClientRect();
+    if (!r.width || !r.height) return;   // guard: скрытая вкладка -> NaN в CSS
+    var s = st.get(grid);
+    if (!s) { s = { tx:50, ty:50, cx:50, cy:50, raf:null }; st.set(grid, s); }
+    s.tx = ((e.clientX-r.left)/r.width)*100;
+    s.ty = ((e.clientY-r.top)/r.height)*100;
+    lightOf(grid).classList.add('on');
+    if (!s.raf && !document.hidden) s.raf = requestAnimationFrame(function(){ step(grid); });
+  });
+  page.addEventListener('pointerleave', function() {
+    page.querySelectorAll('.' + lightClass + '.on').forEach(function(l){ l.classList.remove('on'); });
+  });
+}
+
 // Курсорный свет личной страницы - обязательный стандарт ГОСТа (раздел 7).
 var mpLightInited_ = false;
 function mpInitLight_() {
+  initCursorLight_('page-my-page', 'mp-light');
   if (mpLightInited_) return;
   var page = document.getElementById('page-my-page');
   if (!page) return;
-  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) { mpLightInited_ = true; return; }
   mpLightInited_ = true;
-  var tx=50, ty=30, cx=50, cy=30, raf=null;
-  function tick(){
-    var el = document.getElementById('mp-light');
-    if (!el) { raf=null; return; }
-    var dx=tx-cx, dy=ty-cy;
-    cx+=dx*0.12; cy+=dy*0.12;
-    el.style.setProperty('--lx', cx.toFixed(2)+'%');
-    el.style.setProperty('--ly', cy.toFixed(2)+'%');
-    if (Math.abs(dx)<0.05 && Math.abs(dy)<0.05) { raf=null; return; }
-    raf=requestAnimationFrame(tick);
-  }
-  page.addEventListener('pointermove', function(e){
-    var r = page.getBoundingClientRect();
-    if (!r.width || !r.height) return;   // guard: скрытая вкладка -> NaN в CSS
-    tx = ((e.clientX-r.left)/r.width)*100;
-    ty = ((e.clientY-r.top)/r.height)*100;
-    var el = document.getElementById('mp-light');
-    if (el) el.classList.add('on');
-    if (!raf && !document.hidden) raf = requestAnimationFrame(tick);
-  });
+  // Сам свет ведёт общий движок (initCursorLight_ выше) - здесь остаётся только то, что
+  // к нему не относится: закрытие drawer'а по Escape.
   document.addEventListener('keydown', function(e){ if (e.key === 'Escape') mpCloseLostDrawer_(); });
-  page.addEventListener('pointerleave', function(){
-    var el = document.getElementById('mp-light');
-    if (el) el.classList.remove('on');
-  });
 }
 function pctBadge_(text, colorHex) {
   return '<span style="background:'+pageHex2rgba_(colorHex,0.15)+';color:'+colorHex+';padding:1px 6px;border-radius:3px;font-size:10.5px;font-weight:600;white-space:nowrap">'+text+'</span>';
@@ -5301,7 +5350,6 @@ function renderMyPageManager(el, current, selectorHtml, d) {
 
   // ═══ КАБИНА СМЕНЫ (превью утверждено Владом 29.08, перенос 1:1) ═══
   // Слой курсорного света - обязательный стандарт ГОСТа (раздел 7).
-  html += '<div class="mp-light" id="mp-light"></div>';
 
   // Строка состояния: ответ «день хороший или плохой» ДО всякого чтения.
   html += mpStatusStripHtml_(plan, fakt, planForecast, dayRateNums);
@@ -5653,7 +5701,6 @@ function renderMyPageCommercialHead_(el, current, selectorHtml, d) {
   }
 
   var html = selectorHtml;
-  html += '<div class="mp-light" id="mp-light"></div>';
   // Строка состояния - про ОТДЕЛ (то же ядро mpLagDays_, что у менеджера).
   html += mpStatusStripHtml_(deptPlan, deptFakt, deptForecast, deptDayNums,
     { leverCap: 'Группе нужно сегодня', prefix: 'Отдел: ', planTail: true });
@@ -15537,34 +15584,10 @@ function startBankOpsPolling_() {
   document.addEventListener('visibilitychange', function() { if (!document.hidden) fetchBankOps_(); });
 }
 
-/* ═══ Курсорный свет панели (канон ГОСТа раздел 7, код из канбана уровня 5):
-   lerp 0.12/кадр к позиции мыши, rAF самоостанавливается в покое - не крутит
-   видеокарту, когда никто не двигает мышь. Reduced-motion скрывает слой CSS-ом. */
-(function initPanelLight_() {
-  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  var pm = document.getElementById('page-main');
-  var light = document.getElementById('p2-light');
-  if (!pm || !light) return;
-  var target = { x: 50, y: 20 }, cur = { x: 50, y: 20 };
-  var looping = false;
-  function tick() {
-    cur.x += (target.x - cur.x) * 0.12;
-    cur.y += (target.y - cur.y) * 0.12;
-    light.style.background = 'radial-gradient(600px circle at ' + cur.x.toFixed(1) + '% ' + cur.y.toFixed(1) + '%, rgba(55,138,221,.07), transparent 70%)';
-    if (Math.abs(target.x - cur.x) < 0.05 && Math.abs(target.y - cur.y) < 0.05) { looping = false; return; }
-    requestAnimationFrame(tick);
-  }
-  function ensureLoop() { if (!looping) { looping = true; requestAnimationFrame(tick); } }
-  pm.addEventListener('pointermove', function(e) {
-    var r = pm.getBoundingClientRect();
-    if (!r.width || !r.height) return; // страница скрыта - деление на ноль дало бы NaN в CSS
-    target.x = Math.max(0, Math.min(100, (e.clientX - r.left) / r.width * 100));
-    target.y = Math.max(0, Math.min(100, (e.clientY - r.top) / r.height * 100));
-    light.classList.add('on');
-    ensureLoop();
-  });
-  pm.addEventListener('pointerleave', function() { light.classList.remove('on'); });
-})();
+/* Курсорный свет главной панели - ТОТ ЖЕ движок, что у личных страниц
+   (initCursorLight_, ГОСТ раздел 7). Своей копии здесь больше нет: две реализации
+   одного эффекта неизбежно расходились в числах, а Влад просил «везде одинаково». */
+initCursorLight_('page-main', 'p2-light');
 </script>
 <!-- Подключаем после основного скрипта, без async/defer - гарантирует, что initGoogleSignIn()
      уже объявлена к моменту, когда библиотека Google готова и мы её вызываем. -->

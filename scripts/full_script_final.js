@@ -4109,6 +4109,17 @@ function buildManagerView_(orders, managerName, ss, period) {
   if (teamByManager) {
     result.orders.team_by_manager = teamByManager;
     result.orders.managerPlans = orders.managerPlans || {}; // нужен planOf() на фронтенде
+    // Документы группы (2026-08-29, вкладка "Документы" на странице руководителя,
+    // renderCommercialHeadDocsBlock_) - ТОЛЬКО счётчики воронки оформления по каждому
+    // члену группы, без списков сделок/клиентов: руководителю нужно видеть, у кого
+    // проседает оформление, а не чужую клиентскую базу (тот же принцип приватности,
+    // что и у team_by_manager - команда, но не вся компания).
+    const teamDocs = {};
+    Object.keys(orders.by_manager_detail || {}).forEach(function(nm) {
+      if (teamSurs.indexOf(String(nm).trim().split(' ')[0].toLowerCase()) < 0) return;
+      teamDocs[nm] = { doc: (orders.by_manager_detail[nm] || {}).doc || {} };
+    });
+    result.orders.team_by_manager_detail = teamDocs;
   }
 
   // ДЗ, отфильтрованная на этого менеджера ИЛИ на всю его команду (руководитель группы,

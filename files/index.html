@@ -2386,10 +2386,12 @@ function bindDrag_(marker,type){
     marker.on('dragstart',function(){
         if(dragDebounceT_){clearTimeout(dragDebounceT_);dragDebounceT_=null;}
         marker.closePopup();
+        if(typeof uiSounds!=='undefined')uiSounds.dragGrab(); // зажали флаг - тон вверх
     });
     marker.on('dragend',function(e){
         var p=e.target.getLatLng();
         if(type==='load')lc=p;else uc=p;
+        if(typeof uiSounds!=='undefined')uiSounds.dragDrop(); // отпустили - тон вниз, сразу на отпускание, не ждёт пересчёта
         if(dragDebounceT_)clearTimeout(dragDebounceT_);
         dragDebounceT_=setTimeout(function(){
             dragDebounceT_=null;
@@ -2417,20 +2419,27 @@ function initMap(){
         else{clrP();setP('load',e.latlng);revG(e.latlng,'load');}
     });
 }
-// Маркеры - те же коды, что на ленте маршрута (превью=контракт): база - полый квадрат,
-// погрузка/выгрузка - светлые залитые круги с тёмной обводкой.
+// База - полый квадрат (лента маршрута использует тот же код на линиях, но не на точках -
+// сами флаги слишком мелкие для компактной ленты). Погрузка/выгрузка - два РАЗНЫХ по форме
+// и цвету флага (Влад, 29.08: "один флажок, другой - другой флажок"), не перекрашенный
+// дубль: погрузка - прямоугольный флаг зелёным (--green), выгрузка - треугольный вымпел
+// амброй (--amber) - красный не берём, он по всему дашборду уже значит "плохо".
+// Штриховой SVG currentColor-стиля нет смысла (флаг заливной, не значок в тексте) -
+// цвет токена задан явно в самом SVG. Основание флагштока = якорь = точка на карте.
 function icBase(){return L.divIcon({html:'<div style="width:14px;height:14px;background:transparent;border:2.5px solid rgba(255,255,255,.75);box-shadow:0 1px 6px rgba(0,0,0,.5);"></div>',iconSize:[14,14],iconAnchor:[7,7],className:''});}
-function ic(){return L.divIcon({html:'<div style="width:14px;height:14px;background:#e8e6df;border:2.5px solid #17171d;border-radius:50%;box-shadow:0 1px 6px rgba(0,0,0,.5);"></div>',iconSize:[14,14],iconAnchor:[7,7],className:''});}
+function icLoad(){return L.divIcon({html:'<div style="filter:drop-shadow(0 1px 5px rgba(0,0,0,.55))"><svg width="22" height="28" viewBox="0 0 22 28"><line x1="4" y1="26" x2="4" y2="3" stroke="#1D9E75" stroke-width="1.8" stroke-linecap="round"/><path d="M4 4 L18 4 L13.2 8 L18 12 L4 12 Z" fill="#1D9E75" stroke="#1D9E75" stroke-width="1.2" stroke-linejoin="round"/><circle cx="4" cy="26" r="2.4" fill="#17171d" stroke="#1D9E75" stroke-width="1.4"/></svg></div>',iconSize:[22,28],iconAnchor:[4,26],popupAnchor:[2,-24],className:''});}
+function icUnload(){return L.divIcon({html:'<div style="filter:drop-shadow(0 1px 5px rgba(0,0,0,.55))"><svg width="22" height="28" viewBox="0 0 22 28"><line x1="4" y1="26" x2="4" y2="3" stroke="#EF9F27" stroke-width="1.8" stroke-linecap="round"/><path d="M4 4 L18 8 L4 13 Z" fill="#EF9F27" stroke="#EF9F27" stroke-width="1.2" stroke-linejoin="round"/><circle cx="4" cy="26" r="2.4" fill="#17171d" stroke="#EF9F27" stroke-width="1.4"/></svg></div>',iconSize:[22,28],iconAnchor:[4,26],popupAnchor:[2,-24],className:''});}
 function setP(t,p){
     if(t==='load'){
         lc=p;if(mL)map.removeLayer(mL);
-        mL=L.marker(p,{icon:ic(),draggable:true}).addTo(map).bindPopup('Погрузка').openPopup();
+        mL=L.marker(p,{icon:icLoad(),draggable:true}).addTo(map).bindPopup('Погрузка').openPopup();
         bindDrag_(mL,'load');
     } else {
         uc=p;if(mU)map.removeLayer(mU);
-        mU=L.marker(p,{icon:ic(),draggable:true}).addTo(map).bindPopup('Выгрузка').openPopup();
+        mU=L.marker(p,{icon:icUnload(),draggable:true}).addTo(map).bindPopup('Выгрузка').openPopup();
         bindDrag_(mU,'unload');
     }
+    if(typeof uiSounds!=='undefined')uiSounds.dragDrop(); // точка "легла" на карту - нажатие/клик
     routeAll();
 }
 function clrP(){
@@ -2446,8 +2455,8 @@ function swapAdr(){
     var a=document.getElementById('clc-loadAddr'),b=document.getElementById('clc-unloadAddr'),t=a.value;a.value=b.value;b.value=t;
     var tp=lc;lc=uc;uc=tp;
     if(mL){map.removeLayer(mL);mL=null;}if(mU){map.removeLayer(mU);mU=null;}
-    if(lc){mL=L.marker(lc,{icon:ic(),draggable:true}).addTo(map).bindPopup('Погрузка');bindDrag_(mL,'load');}
-    if(uc){mU=L.marker(uc,{icon:ic(),draggable:true}).addTo(map).bindPopup('Выгрузка');bindDrag_(mU,'unload');}
+    if(lc){mL=L.marker(lc,{icon:icLoad(),draggable:true}).addTo(map).bindPopup('Погрузка');bindDrag_(mL,'load');}
+    if(uc){mU=L.marker(uc,{icon:icUnload(),draggable:true}).addTo(map).bindPopup('Выгрузка');bindDrag_(mU,'unload');}
     routeAll();
 }
 
@@ -14364,6 +14373,11 @@ var uiSounds = {
   refresh: function(){ uiBlip_(330, 520, 0.10, 0.020, 'triangle', 0); uiBlip_(520, 349, 0.14, 0.026, 'sine', 0.10); },
   // микрощелчок тумблера (режим просмотра, вкл/выкл звука)
   toggle: function(){ uiBlip_(470, 530, 0.06, 0.030, 'sine', 0); uiBlip_(235, 265, 0.06, 0.015, 'sine', 0); },
+  // калькулятор, 29.08: зажали/отпустили точку на карте - направление тона = семантика
+  // (раздел 8 ГОСТа), зажатие/укладка нового флага - "подъём", вверх; отпускание/укладка -
+  // нисходящее глиссандо, как и положено "укладке" по правилу
+  dragGrab: function(){ uiBlip_(330, 415, 0.055, 0.028, 'sine'); },
+  dragDrop: function(){ uiBlip_(415, 294, 0.09, 0.032, 'sine'); },
   // ═══ звуковые события ДАННЫХ (ГОСТ раздел 8, Влад 28.08) ═══
   // деньги выросли: фанфара выигрыша из канбана (C5-E5-G5-C6), громкость x0.7 - BI тише игры
   growth: function(){

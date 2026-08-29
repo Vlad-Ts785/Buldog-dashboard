@@ -660,6 +660,16 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .clc-flow-dash{animation:clcDashFlow 1.1s linear infinite;}
 @keyframes clcDashFlow{to{stroke-dashoffset:-30;}}
 @media(prefers-reduced-motion:reduce){.clc-flow-dash{animation:none;}}
+/* Курсорный свет калькулятора - обязательный стандарт ГОСТа (раздел 7), канон 1:1 из
+   личной страницы (mp-light/mpInitLight_). Drawer истории (.clc2-drawer/-bk) исключён из
+   блока position:relative ниже - у него уже свой position:fixed на весь экран (z-index
+   1500+), трогать нельзя. */
+#page-calculator{position:relative;}
+.clc-light{position:absolute;inset:0;z-index:0;pointer-events:none;opacity:0;transition:opacity .25s ease;
+  background:radial-gradient(600px circle at var(--lx,50%) var(--ly,30%),rgba(55,138,221,.07),transparent 70%);}
+.clc-light.on{opacity:1;}
+#page-calculator > *:not(.clc-light):not(.clc2-drawer):not(.clc2-drawer-bk){position:relative;z-index:1;}
+@media(prefers-reduced-motion:reduce){.clc-light{display:none;}}
 .clc2-map-hint{position:absolute;left:12px;bottom:10px;z-index:500;background:rgba(37,37,48,.92);border:1px solid var(--border);border-radius:8px;padding:7px 11px;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--muted);line-height:1.7;font-variant-numeric:tabular-nums;pointer-events:none;}
 .clc2-map-hint .tot{border-top:1px solid var(--border);padding-top:3px;margin-top:3px;color:var(--text);}
 .clc2-ribbon{padding:12px 16px 8px;border-top:1px solid var(--border);}
@@ -2097,6 +2107,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
       <!-- ═══ КАЛЬКУЛЯТОР 2.0 «Табло рейса» (утверждено на превью 28.08, превью = контракт;
            plans/2026-08-28-calculator-cockpit-redesign.md). Кокпит: маршрутная строка кольцом
            -> карта+лента / груз -> табло цены сплит-флэп. Все id входов движка сохранены. -->
+      <div class="clc-light" id="clc-light"></div>
       <div class="clc2-head">
         <button class="clc2-head-btn" onclick="Clc.openHist()"><span class="clc2-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></span>История</button>
         <span class="mgr" id="clc2-mgr"></span>
@@ -3551,10 +3562,46 @@ function copyPhrase(){
 }
 
 var clcMapInited=false,clcHistLoadedOnce=false;
+// Курсорный свет калькулятора - обязательный стандарт ГОСТа (раздел 7), 1:1 канон
+// личной страницы (mpInitLight_): lerp 0.12/кадр, rAF сам останавливается в покое,
+// reduced-motion выключает свет вовсе, guard от нулевых размеров скрытой вкладки.
+var clcLightInited_=false;
+function clcInitLight_(){
+    if(clcLightInited_)return;
+    var page=document.getElementById('page-calculator');
+    if(!page)return;
+    if(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches){clcLightInited_=true;return;}
+    clcLightInited_=true;
+    var tx=50,ty=30,cx=50,cy=30,raf=null;
+    function tick(){
+        var el=document.getElementById('clc-light');
+        if(!el){raf=null;return;}
+        var dx=tx-cx,dy=ty-cy;
+        cx+=dx*0.12;cy+=dy*0.12;
+        el.style.setProperty('--lx',cx.toFixed(2)+'%');
+        el.style.setProperty('--ly',cy.toFixed(2)+'%');
+        if(Math.abs(dx)<0.05&&Math.abs(dy)<0.05){raf=null;return;}
+        raf=requestAnimationFrame(tick);
+    }
+    page.addEventListener('pointermove',function(e){
+        var r=page.getBoundingClientRect();
+        if(!r.width||!r.height)return; // скрытая вкладка - деление на ноль дало бы NaN в CSS
+        tx=((e.clientX-r.left)/r.width)*100;
+        ty=((e.clientY-r.top)/r.height)*100;
+        var el=document.getElementById('clc-light');
+        if(el)el.classList.add('on');
+        if(!raf&&!document.hidden)raf=requestAnimationFrame(tick);
+    });
+    page.addEventListener('pointerleave',function(){
+        var el=document.getElementById('clc-light');
+        if(el)el.classList.remove('on');
+    });
+}
 function initPage(){
   if(!clcMapInited){ initMap(); clcMapInited=true; }
   else if(map){ setTimeout(function(){ map.invalidateSize(); }, 50); }
   if(!clcHistLoadedOnce){ clcHistLoadedOnce=true; loadServerHistory(); }
+  clcInitLight_();
   // кокпит 2.0: первичное состояние табло/графики + фокус сразу в погрузку
   var mgr=document.getElementById('clc2-mgr');
   if(mgr&&typeof D!=='undefined'&&D)mgr.textContent=D.managerName||D.logistName||(D.role==='admin'?'директор':'');

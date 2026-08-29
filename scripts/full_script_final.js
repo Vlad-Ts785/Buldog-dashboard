@@ -4109,6 +4109,20 @@ function buildManagerView_(orders, managerName, ss, period) {
   if (teamByManager) {
     result.orders.team_by_manager = teamByManager;
     result.orders.managerPlans = orders.managerPlans || {}; // нужен planOf() на фронтенде
+    // Нижний блок страницы руководителя (2026-08-29, Влад: «пусть там будет воронка по
+    // документам... и вкладка с заказчиками: какой заказчик у какого менеджера принёс
+    // сколько выручки»). Отдаём ТОЛЬКО две ветки по каждому члену группы:
+    //   doc           - счётчики воронки оформления (у кого проседают документы),
+    //   top_customers - топ-10 заказчиков по выручке (name/orders/amount/payment/balance).
+    // Списки сделок, пропавших клиентов и должников НЕ отдаём - руководителю для этих
+    // двух вкладок они не нужны, а лишние ПДн в ответе не нужны тем более.
+    const teamDetail = {};
+    Object.keys(orders.by_manager_detail || {}).forEach(function(nm) {
+      if (teamSurs.indexOf(String(nm).trim().split(' ')[0].toLowerCase()) < 0) return;
+      const src = orders.by_manager_detail[nm] || {};
+      teamDetail[nm] = { doc: src.doc || {}, top_customers: src.top_customers || [] };
+    });
+    result.orders.team_by_manager_detail = teamDetail;
   }
 
   // ДЗ, отфильтрованная на этого менеджера ИЛИ на всю его команду (руководитель группы,

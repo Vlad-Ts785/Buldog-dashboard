@@ -1274,9 +1274,6 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
     <div class="sidebar-nav-item" onclick="showPage('commercial-head-salary',this)" data-page="commercial-head-salary" style="display:none">
       <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="16" height="9" rx="1.6"/><circle cx="10" cy="10.5" r="2"/></svg></span> Зарплата
     </div>
-    <div class="sidebar-nav-item" onclick="showPage('commercial-head-receipts',this)" data-page="commercial-head-receipts" style="display:none">
-      <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="15" height="10" rx="1.6"/><path d="M2.5 8.5h15"/><line x1="5.5" y1="12" x2="8.5" y2="12"/></svg></span> Поступления
-    </div>
     <div class="sidebar-nav-item" onclick="showPage('commercial-head-debt',this)" data-page="commercial-head-debt" style="display:none">
       <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2.5h10v15l-2.5-1.6L10 17.5l-2.5-1.6L5 17.5z"/><line x1="7.5" y1="6.5" x2="12.5" y2="6.5"/><line x1="7.5" y1="9.5" x2="12.5" y2="9.5"/><line x1="7.5" y1="12.5" x2="10.5" y2="12.5"/></svg></span> Дебиторская задолженность
     </div>
@@ -2110,9 +2107,6 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
          2026-08-26) ═══ - см. renderCommercialHeadSalaryPage_/renderCommercialHeadDebtPage_. -->
     <div id="page-commercial-head-salary" class="page">
       <div id="commercial-head-salary-content"><p style="color:var(--muted);padding:16px">Данные загружаются...</p></div>
-    </div>
-    <div id="page-commercial-head-receipts" class="page">
-      <div id="commercial-head-receipts-content"><p style="color:var(--muted);padding:16px">Данные загружаются...</p></div>
     </div>
     <div id="page-commercial-head-debt" class="page">
       <div id="commercial-head-debt-content"><p style="color:var(--muted);padding:16px">Данные загружаются...</p></div>
@@ -3671,7 +3665,6 @@ const PAGE_TITLES = {
   'my-page': '',
   'ryschanow-salary': 'Зарплата',
   'commercial-head-salary': 'Зарплата',
-  'commercial-head-receipts': 'Поступления',
   'commercial-head-debt': 'Дебиторская задолженность',
   'order-plan': 'План задание',
   calculator: 'Калькулятор стоимости перевозки',
@@ -4896,10 +4889,12 @@ function mpHeadStatsHtml_(cfg, byManagerAll, deptFakt, deptPlan, headSur) {
   // tab начинается с 'page:' - плитка уводит на отдельную страницу меню, иначе
   // переключает вкладку нижнего блока (дебиторка живёт отдельным пунктом меню, Влад 29.08).
   function cell(tab, color, cap, val, layers, subHtml, pct) {
-    // 'page:<id>' - уводит на отдельную страницу меню, 'scroll:team' - подводит к блоку
-    // «Моя группа» на этой же странице (разбивка по людям живёт там, отдельной вкладки нет).
-    var act = tab.indexOf('page:') === 0 ? 'goToPage_(\''+tab.slice(5)+'\')' : 'mpScrollToTeam_()';
-    var hint = tab.indexOf('page:') === 0 ? 'Открыть страницу' : 'Показать разбивку по менеджерам';
+    // 'page:<id>' - уводит на отдельную страницу меню (дебиторка), 'tab:<key>' -
+    // открывает вкладку нижнего блока и подводит к ней.
+    var isPage = tab.indexOf('page:') === 0;
+    var act = isPage ? 'goToPage_(\''+tab.slice(4+1)+'\')'
+                     : 'setMyPageMgrTab(\''+tab.slice(4)+'\');mpScrollToTabs_()';
+    var hint = isPage ? 'Открыть страницу' : 'Открыть вкладку';
     return '<div class="mp-stat" onclick="'+act+'" title="'+hint+'">'+
       '<div class="mp-stat__cap"><span class="mp-stat__dot" style="background:'+color+'"></span>'+cap+
         '<span class="mp-stat__chev">›</span></div>'+
@@ -4918,10 +4913,10 @@ function mpHeadStatsHtml_(cfg, byManagerAll, deptFakt, deptPlan, headSur) {
   var overPctV = debtTotal > 0 ? Math.min(100, debtOver30/debtTotal*100) : 0;
 
   return '<div class="mp-stats mp-cell-stats">'+
-    cell('scroll:team', PAGE_COL.blue, 'Выручка отдела', pageFr_(deptFakt),
+    cell('tab:customers', PAGE_COL.blue, 'Выручка отдела', pageFr_(deptFakt),
       [{cap:'за неделю', val:revWeek}, {cap:'мой вклад', val:(myRow.amount||0)}],
       deptPlan>0 ? '<b>'+Math.round(planPctV)+'%</b> от плана '+pageMln_(deptPlan) : 'плана на месяц нет', planPctV)+
-    cell('page:commercial-head-receipts', PAGE_COL.green, 'Поступления', pageFr_(recMonth),
+    cell('tab:receipts', PAGE_COL.green, 'Поступления', pageFr_(recMonth),
       [{cap:'за неделю', val:recWeek}, {cap:'сегодня', val:recToday, live:true}],
       deptFakt>0 ? '<b>'+Math.round(recPctV)+'%</b> от выручки дошло до счёта' : 'нет выручки за месяц', recPctV)+
     cell('page:commercial-head-debt', PAGE_COL.amber, 'Дебиторка', pageFr_(debtTotal),
@@ -4937,17 +4932,6 @@ function mpScrollToTeam_() {
     var t = document.querySelector('#page-my-page .mp-cell-salary');
     if (t) t.scrollIntoView({ behavior:'smooth', block:'center' });
   }, 30);
-}
-
-// Отдельная страница меню «Поступления» руководителя группы (Влад, 29.08: «поступления тоже
-// нужно убирать и делать отдельную страничку»). Содержимое ТО ЖЕ, что было вкладкой -
-// renderCommercialHeadReceiptsBlock_, просто в своей карточке на своей странице.
-function renderCommercialHeadReceiptsPage_() {
-  var el = document.getElementById('commercial-head-receipts-content');
-  if (!el || !D) return;
-  var cfg = currentCommercialHeadCfg_();
-  if (!cfg) { el.innerHTML = '<div class="muted" style="padding:16px">Отдел не найден</div>'; return; }
-  el.innerHTML = '<div class="card" style="margin-bottom:16px">' + renderCommercialHeadReceiptsBlock_(cfg) + '</div>';
 }
 
 // Переход на отдельную страницу меню из плитки/кнопки: сам находит пункт сайдбара,
@@ -5687,17 +5671,156 @@ function renderMyPageCommercialHead_(el, current, selectorHtml, d) {
   html += mpHeadTeamHtml_(cfg, byManagerAll, managerPlans, paceRatio, headSur);
   html += '</div>';
 
-  // Нижнего блока вкладок здесь НЕТ (Влад, 29.08: «этот нижний блок у старших менеджеров
-  // вообще убрать»): поступления и дебиторка группы живут отдельными пунктами меню, разбивку
-  // по людям даёт блок «Моя группа» выше. Страница руководителя - ровно один экран.
-  // Drawer «Пропавшие клиенты» - не вкладка, а разовое действие, поэтому остаётся строкой.
-  html += '<div style="display:flex;justify-content:flex-end;margin-bottom:16px">'+
-    '<button class="mp-ghostbtn" onclick="mpOpenLostDrawer_()">'+
-      '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.7-4.7M8 10.5h5"/></svg>'+
-      'Пропавшие клиенты</button></div>';
+  // Нижний блок (Влад, 29.08 - вернуть, но другим составом: «воронка по документам,
+  // поступления с фильтрами по дням/неделе/месяцу, и вкладка с заказчиками - какой
+  // заказчик у какого менеджера принёс сколько выручки»). Дебиторка сюда НЕ вернулась:
+  // она осталась отдельным пунктом меню, как Влад решил в том же разговоре.
+  // Состояние вкладки общее с менеджерской страницей (myPageMgrTab), чужие ключи сводим
+  // к 'customers'.
+  var HEAD_TABS = ['customers','receipts','docs'];
+  var headTab = HEAD_TABS.indexOf(myPageMgrTab) >= 0 ? myPageMgrTab : 'customers';
+
+  html += '<div class="card" id="mp-tabs-card" style="margin-bottom:16px">';
+  html += '<div class="mp-tabrow"><div class="tab-bar" style="margin-bottom:0">'+
+    '<button class="tab-btn'+(headTab==='customers'?' active':'')+'" onclick="setMyPageMgrTab(\'customers\')">Заказчики группы</button>'+
+    '<button class="tab-btn'+(headTab==='receipts'?' active':'')+'" onclick="setMyPageMgrTab(\'receipts\')">Поступления</button>'+
+    '<button class="tab-btn'+(headTab==='docs'?' active':'')+'" onclick="setMyPageMgrTab(\'docs\')">Воронка документов</button>'+
+  '</div>'+
+  '<button class="mp-ghostbtn" onclick="mpOpenLostDrawer_()">'+
+    '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.7-4.7M8 10.5h5"/></svg>'+
+    'Пропавшие клиенты</button>'+
+  '</div>';
+  if (headTab === 'receipts') {
+    html += renderCommercialHeadReceiptsBlock_(cfg);
+  } else if (headTab === 'docs') {
+    html += renderCommercialHeadDocsBlock_(cfg);
+  } else {
+    html += renderCommercialHeadCustomersBlock_(cfg);
+  }
+  html += '</div>';
 
   el.innerHTML = html;
 }
+
+// Заказчики группы (Влад, 29.08: «кто сколько, какой заказчик у какого менеджера принёс
+// сколько выручки»). Строки - заказчики ВСЕЙ группы, склеенные из топ-10 каждого
+// менеджера (team_by_manager_detail.top_customers). Один заказчик может работать с
+// двумя менеджерами - тогда он даёт две строки, и это НЕ ошибка: руководителю важно
+// видеть, что клиент разделён, а не суммировать его вслепую (см. правило «один клиент =
+// один ответственный» в CRM_ARCHITECTURE.md - расхождение здесь как раз и подсвечивает
+// нарушение). Дубли помечаются значком, чтобы это было видно сразу.
+var headCustSort_ = { col: 'amount', dir: -1 };
+function setHeadCustSort(col) {
+  if (headCustSort_.col === col) { headCustSort_.dir *= -1; }
+  else {
+    headCustSort_.col = col;
+    headCustSort_.dir = (col === 'name' || col === 'manager') ? 1 : -1;
+  }
+  renderMyPage();
+}
+function renderCommercialHeadCustomersBlock_(cfg) {
+  var teamSur = (cfg.members||[]).map(function(x){ return x.toLowerCase(); });
+  var src = (D.orders && D.orders.team_by_manager_detail) || (D.orders && D.orders.by_manager_detail) || {};
+  var rows = [], seen = {};
+  Object.keys(src).forEach(function(nm) {
+    if (teamSur.indexOf(String(nm).trim().split(' ')[0].toLowerCase()) < 0) return;
+    ((src[nm] || {}).top_customers || []).forEach(function(c) {
+      if (!(c.amount > 0)) return;
+      var key = String(c.name||'').trim().toLowerCase();
+      seen[key] = (seen[key] || 0) + 1;
+      rows.push({ name: c.name, manager: cleanName(nm), managerFull: nm, orders: c.orders||0,
+                  amount: c.amount||0, payment: c.payment||0, balance: c.balance||0, key: key });
+    });
+  });
+  if (!rows.length) return '<div style="font-size:13px;color:var(--muted);padding:8px 0">Данных по заказчикам группы за этот период нет</div>';
+  var total = rows.reduce(function(a,r){ return a + r.amount; }, 0);
+  rows.sort(function(a,b){
+    var av = a[headCustSort_.col], bv = b[headCustSort_.col];
+    // Знак ПЕРЕД разностью: dir=-1 -> убывание (▼). См. ГОСТ, «Сортируемая таблица».
+    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * headCustSort_.dir;
+    return String(av||'').localeCompare(String(bv||''), 'ru') * headCustSort_.dir;
+  });
+  var cols = [
+    {key:'name', label:'Заказчик', num:false},
+    {key:'manager', label:'Менеджер', num:false},
+    {key:'orders', label:'Заказов', num:true},
+    {key:'amount', label:'Выручка', num:true},
+    {key:'balance', label:'Не оплачено', num:true}
+  ];
+  var head = cols.map(function(c){
+    var active = headCustSort_.col === c.key;
+    var arrow = active ? (headCustSort_.dir === -1 ? ' ▼' : ' ▲') : ' ↕';
+    return '<th class="sortable'+(c.num?' num':'')+'" onclick="setHeadCustSort(\''+c.key+'\')"'+
+      (active?' style="color:var(--text)"':'')+'>'+c.label+
+      '<span style="font-size:10px;opacity:'+(active?'1':'.3')+'">'+arrow+'</span></th>';
+  }).join('');
+  var body = rows.map(function(r){
+    var share = total > 0 ? r.amount/total*100 : 0;
+    var dup = seen[r.key] > 1
+      ? ' <span title="этот заказчик есть и у другого менеджера группы" style="font-size:10px;color:'+PAGE_COL.amber+'">общий</span>'
+      : '';
+    return '<tr>'+
+      '<td><b>'+pageEsc_(r.name)+'</b>'+dup+
+        '<div style="height:3px;border-radius:2px;background:var(--bg4);margin-top:4px;max-width:220px">'+
+          '<div style="width:'+Math.min(100,share).toFixed(1)+'%;height:100%;border-radius:2px;background:'+PAGE_COL.blue+'"></div></div></td>'+
+      '<td class="muted">'+pageEsc_(r.manager)+'</td>'+
+      '<td class="num muted">'+r.orders+'</td>'+
+      '<td class="num"><b>'+fmt(r.amount)+'</b> <span class="muted" style="font-size:10px">'+share.toFixed(1).replace('.',',')+'%</span></td>'+
+      '<td class="num'+(r.balance>0?'':' muted')+'"'+(r.balance>0?' style="color:'+PAGE_COL.amber+'"':'')+'>'+(r.balance>0?fmt(r.balance):'—')+'</td>'+
+    '</tr>';
+  }).join('');
+  var h = '<div style="margin-bottom:10px;font-size:13px;color:var(--muted)">Заказчиков: <b>'+rows.length+'</b> · выручка по ним: <b>'+pageMln_(total)+'</b> '+
+    '<span style="font-size:11px">(топ-10 по каждому менеджеру группы)</span></div>';
+  h += '<div style="overflow-x:auto"><table class="tbl" style="min-width:620px"><thead><tr>'+head+'</tr></thead><tbody>'+body+'</tbody></table></div>';
+  return h;
+}
+
+// Документы группы - воронка оформления по каждому менеджеру. Источник тот же, что у
+// менеджера (by_manager_detail[имя].doc), просто по всем членам группы: team_by_manager_detail
+// приходит при самостоятельном входе руководителя, by_manager_detail - при admin-предпросмотре.
+function renderCommercialHeadDocsBlock_(cfg) {
+  var teamSur = (cfg.members||[]).map(function(x){ return x.toLowerCase(); });
+  var src = (D.orders && D.orders.team_by_manager_detail) || (D.orders && D.orders.by_manager_detail) || {};
+  var rows = [];
+  Object.keys(src).forEach(function(nm) {
+    if (teamSur.indexOf(String(nm).trim().split(' ')[0].toLowerCase()) < 0) return;
+    var doc = (src[nm] || {}).doc || {};
+    var noWb = (doc.no_waybill_own||0) + (doc.no_waybill_hired||0);
+    var np = doc.waybill_not_posted||0, nr = doc.posted_no_realiz||0, ok = doc.complete||0;
+    var tot = noWb + np + nr + ok;
+    if (!tot) return;
+    rows.push({ name: cleanName(nm), noWb: noWb, np: np, nr: nr, ok: ok, tot: tot, open: noWb+np+nr });
+  });
+  if (!rows.length) return '<div style="font-size:13px;color:var(--muted);padding:8px 0">Данных по документам группы за этот период нет</div>';
+  rows.sort(function(a,b){ return b.open - a.open; });
+  var T = rows.reduce(function(a,r){ a.noWb+=r.noWb; a.np+=r.np; a.nr+=r.nr; a.ok+=r.ok; a.tot+=r.tot; return a; },
+                      {noWb:0,np:0,nr:0,ok:0,tot:0});
+  var amber2 = '#BA7517';
+  var h = '<div style="font-family:JetBrains Mono,monospace;font-size:21px;font-weight:700;margin-bottom:10px">'+
+    T.ok+' из '+T.tot+' готово</div>';
+  h += '<div class="mp-debtladder" style="margin-bottom:12px">'+
+    [{v:T.noWb,c:PAGE_COL.red,l:'Нет путёвки'},{v:T.np,c:PAGE_COL.amber,l:'Не проведено'},
+     {v:T.nr,c:amber2,l:'Нет реализации'},{v:T.ok,c:PAGE_COL.green,l:'Готово'}].map(function(b){
+      if (!(b.v > 0)) return '';
+      return '<div class="mp-debtladder__s" style="flex-grow:'+b.v+';background:'+b.c+'" title="'+b.l+': '+b.v+'"></div>';
+    }).join('')+'</div>';
+  h += '<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Менеджер</th>'+
+    '<th class="num">Нет путёвки</th><th class="num">Не проведено</th><th class="num">Нет реализации</th>'+
+    '<th class="num">Готово</th><th class="num">Итого</th></tr></thead><tbody>'+
+    rows.map(function(r){
+      return '<tr><td><b>'+pageEsc_(r.name)+'</b></td>'+
+        '<td class="num" style="color:'+(r.noWb?PAGE_COL.red:'var(--muted)')+'">'+(r.noWb||'\u2014')+'</td>'+
+        '<td class="num" style="color:'+(r.np?PAGE_COL.amber:'var(--muted)')+'">'+(r.np||'\u2014')+'</td>'+
+        '<td class="num" style="color:'+(r.nr?amber2:'var(--muted)')+'">'+(r.nr||'\u2014')+'</td>'+
+        '<td class="num" style="color:'+PAGE_COL.green+'">'+r.ok+'</td>'+
+        '<td class="num muted">'+r.tot+'</td></tr>';
+    }).join('')+
+  '</tbody></table></div>';
+  return h;
+}
+
+// Блок "Поступления" для личной страницы руководителя группы (2026-08-26, Влад: "точно по
+// такому же принципу, как у нас уже это построено" - переиспользует myPageReceiptsPeriod/
 
 // Блок "Поступления" для личной страницы руководителя группы (2026-08-26, Влад: "точно по
 // такому же принципу, как у нас уже это построено" - переиспользует myPageReceiptsPeriod/
@@ -6684,7 +6807,6 @@ function applyRoleUI() {
       item.style.display = (page === 'my-page' || page === 'order-plan' || page === 'calculator' ||
         (page === 'ryschanow-salary' && isRyschanowViewer) ||
         (page === 'commercial-head-salary' && isCommercialHeadViewer) ||
-        (page === 'commercial-head-receipts' && isCommercialHeadViewer) ||
         (page === 'commercial-head-debt' && isCommercialHeadViewer)) ? '' : 'none';
     });
     document.querySelectorAll('.sidebar-nav-section').forEach(function(s){ s.style.display = 'none'; });
@@ -6696,7 +6818,7 @@ function applyRoleUI() {
     // обычной админ-панели - там уже есть "Зарплата"/"ДЗ" по всем сотрудникам сразу. Без этого
     // условия они лезли поверх со своим style="display:none" из HTML (2026-08-27, Влад: "на
     // моей странице 3 раза зарплата").
-    var personalOnlyPages = ['ryschanow-salary', 'commercial-head-salary', 'commercial-head-debt', 'commercial-head-receipts'];
+    var personalOnlyPages = ['ryschanow-salary', 'commercial-head-salary', 'commercial-head-debt'];
     document.querySelectorAll('.sidebar-nav-item').forEach(function(item) {
       item.style.display = personalOnlyPages.indexOf(item.getAttribute('data-page')) >= 0 ? 'none' : '';
     });
@@ -11520,10 +11642,13 @@ function renderCommercialHeadSalaryPage_() {
 // вместо одной фамилии. Своё параллельное состояние (chDebt*) - НЕ переиспользует mgrDebt*
 // (те жёстко вызывают renderMyPage()) - тот же приём, что уже использовался для параллельных
 // вкладок Рыщанова/группы отдела выше.
-// Пустой набор = показываем ВСЁ - так же, как общая страница «Дебиторка»
-// (debtBucketFilters). Раньше здесь по умолчанию стояли ['0-30','30-60','60-90'], то есть
-// руководитель при входе НЕ видел просрочку 90+ и мёртвую - самое важное было спрятано.
-let chDebtBuckets = new Set();
+// НЕ ТРОГАТЬ дефолт: ['0-30','30-60','60-90'] выбраны Владом НАМЕРЕННО (подтвердил
+// 29.08: «это я специально сделал, так и должно быть»). Руководитель при входе видит
+// рабочую, взыскиваемую часть долга; 90+ и мёртвая включаются чипами по желанию.
+// Выглядит как «важное спрятано» - и один раз уже было «исправлено» по этой логике;
+// это осознанное решение, а не упущение. Общая страница «Дебиторка» стартует с пустым
+// набором - там другой пользователь и другая задача, расхождение тоже намеренное.
+let chDebtBuckets = new Set(['0-30','30-60','60-90']);
 let chDebtSort = { col: 'balance', dir: -1 }; // -1 = по убыванию (▼), крупные долги сверху
 function setChDebtBucket(bucket) {
   if (chDebtBuckets.has(bucket)) chDebtBuckets.delete(bucket);
@@ -13050,7 +13175,6 @@ function showPage(id, el) {
   if (id === 'ryschanow-salary') renderRyschanowSalaryPage_();
   if (id === 'commercial-head-salary') renderCommercialHeadSalaryPage_();
   if (id === 'commercial-head-debt') renderCommercialHeadDebtPage_();
-  if (id === 'commercial-head-receipts') renderCommercialHeadReceiptsPage_();
 
   var wrap = document.getElementById('period-selector-wrap');
   if (wrap) {

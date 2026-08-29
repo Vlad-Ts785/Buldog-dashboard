@@ -18050,6 +18050,29 @@ function saveSegs(){
     }).catch(function(){});
   });
 }
+/* Подстраховка от закрытия/обновления вкладки ровно в тот момент, когда saveSegs()
+   ещё не подтвердился сервером (тот же баг класса "613 исчезла" - Влад, 30.08).
+   Обычный fetch() обрывается, когда страница уходит; sendBeacon переживает уход -
+   специально для этого и существует. Шлём только неподтверждённую разницу (тот же
+   принцип диффа, что в saveSegs), best-effort, без колбэка успеха - страница уже
+   закрывается, проверить результат негде; следующий визит/поллинг сверит заново. */
+function flushSegsOnUnload_(){
+  if (!navigator.sendBeacon || !SESSION_TOKEN) return;
+  if (!pageRoot.classList.contains("active")) return;
+  STATE.segs.forEach(function(s){
+    var w = segToWire_(s);
+    if (!w) return;
+    var wireStr = JSON.stringify(w);
+    if (segsSnapshot_[w.id] === wireStr) return;   /* уже подтверждена - слать нечего */
+    var qs = Object.keys(w).map(function(k){
+      return (w[k] !== undefined && w[k] !== null) ? (k + "=" + encodeURIComponent(w[k])) : null;
+    }).filter(Boolean).join("&");
+    qs += (qs ? "&" : "") + "session_token=" + encodeURIComponent(SESSION_TOKEN);
+    navigator.sendBeacon(YARD_API_BASE + "/plan/seg?" + qs);
+  });
+}
+document.addEventListener("visibilitychange", function(){ if (document.hidden) flushSegsOnUnload_(); });
+window.addEventListener("pagehide", flushSegsOnUnload_);
 /* Имя с сервера -> объект человека для бейджа. Ищем в живом ростере; не нашли
    (уволился/отдел/др. написание) - синтетический объект по тем же правилам кода
    и цвета, подпись честно остаётся как записана. */
@@ -18063,7 +18086,7 @@ function personByName_(name, pool){
 function applyServerSegs_(rows){
   var byGos = {};
   STATE.vehicles.forEach(function(v){ if (v.gos) byGos[v.gos] = v.i; });
-  var segs = [], snap = {};
+  var segs = [], snap = {}, seenIds = {};
   rows.forEach(function(r){
     var vi = byGos[r.vehicle_gos];
     if (vi == null) return;   /* машина выбыла из парка - строку не рисуем, но и не удаляем на сервере */
@@ -18075,11 +18098,33 @@ function applyServerSegs_(rows){
       seg.from = r.route_from || ""; seg.to = r.route_to || "";
     }
     segs.push(seg);
+    seenIds[r.id] = true;
     var w = segToWire_.call(null, seg);   /* снимок = ровно то, что мы бы сами послали */
     if (w) snap[w.id] = JSON.stringify(w);
   });
+  /* НЕ теряем локальные правки, которых сервер ещё не видел (создали/подвинули
+     секунду назад, POST ещё в пути или не долетел) - иначе плановый поллинг молча
+     стирает работу логиста прямо из-под рук (поймано Владом 30.08: "протянул 613
+     в ремонт, он исчез" - гонка между локальным созданием и опросом сервера,
+     особенно вероятна при одновременной работе с двух устройств). Запись, которой
+     нет в свежем ответе сервера, ОСТАЁТСЯ, если её текущий вид не совпадает с
+     последним ПОДТВЕРЖДЁННЫМ снимком (значит ещё не подтверждена); если совпадает -
+     она была подтверждена раньше и сейчас реально удалена (в т.ч. нами же, другой
+     вкладкой), тогда доверяем серверу. */
+  var hadPending = false;
+  STATE.segs.forEach(function(s){
+    if (seenIds[s.id]) return;
+    var w = segToWire_(s);
+    if (!w) return;
+    var wireStr = JSON.stringify(w);
+    if (segsSnapshot_[s.id] === wireStr) return;   /* было подтверждено, теперь пусто - реально удалена */
+    segs.push(s);
+    snap[s.id] = segsSnapshot_[s.id];   /* НЕ подтверждена - следующий saveSegs() досошлёт */
+    hadPending = true;
+  });
   STATE.segs = segs;
   segsSnapshot_ = snap;
+  return hadPending;
 }
 function fetchPlanSegs_(){
   if (!SESSION_TOKEN && !ID_TOKEN) return;
@@ -18100,8 +18145,9 @@ function fetchPlanSegs_(){
     if (!firstFetch && r.data.max_updated === planMaxUpdated_ && r.data.count === Object.keys(segsSnapshot_).length) return;
     if (drag || create || arr) return;   /* рука на плитке - применим следующим тиком */
     planMaxUpdated_ = r.data.max_updated;
-    applyServerSegs_(r.data.segs);
+    var hadPending = applyServerSegs_(r.data.segs);
     renderRows(); renderKpis();
+    if (hadPending) saveSegs();   /* самовосстановление - досылаем то, что не подтвердилось раньше */
   }).catch(function(){});
 }
 setInterval(fetchPlanSegs_, 7000);

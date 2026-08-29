@@ -124,6 +124,8 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   display:flex;align-items:center;justify-content:center;gap:8px;
 }
 .sidebar-refresh:hover{border-color:var(--green);color:var(--green);}
+.sidebar-refresh:disabled{opacity:.55;cursor:default;}
+.sidebar-refresh:disabled:hover{border-color:var(--border);color:var(--muted);}
 .sidebar-refresh svg{width:15px;height:15px;flex-shrink:0;display:block;}
 
 /* ── MAIN ──────────────────────────────────────────────── */
@@ -3904,6 +3906,7 @@ function handleCredentialResponse(response) {
 function logoutUser() {
   clearAuthTokens_();
   D = null;
+  lastAppliedHash_ = null; // иначе следующий вход того же дня сравнится с хэшем чужой сессии
   if (window.google && google.accounts && google.accounts.id) google.accounts.id.disableAutoSelect();
   showLoginScreen();
 }
@@ -3919,26 +3922,67 @@ function initGoogleSignIn() {
   else showLoginScreen();
 }
 
+// ── Единая точка записи в D (план 2026-08-28, Этап 1) ───────────────────────────────────
+// Все источники данных - первая загрузка, кнопка "Обновить данные", будущий поллинг
+// (Этап 3), восстановление снапшота из localStorage (Этап 4) - идут через applyData(), а
+// не пишут в D напрямую. Каждый следующий параллельный чат добавляет сюда свой вызов, а не
+// переписывает эту функцию - см. правило "маленькие диффы при параллельных сессиях" в
+// CLAUDE.md.
+//
+// Хэш-сравнение (~15 строк по плану) - patch сравнивается по JSON.stringify с прошлым
+// применённым патчем; при полном совпадении и opts.skipIfUnchanged - render() не
+// вызывается вообще, DOM не трогается (сохраняет скролл/выделение/открытые модалки).
+// Сегодня для полной загрузки почти всегда "меняется" - ответ Apps Script разный при
+// каждом запросе даже когда цифры те же (див. D.updated и т.п.) - реальный эффект
+// раскроется в Этапе 3, когда поллинг станет слать маленькие чистые патчи напрямую с VPS,
+// без Apps Script. Инфраструктура нужна уже сейчас, чтобы Этап 3 не переписывал этот кусок.
+// ВНИМАНИЕ (план, не решено): JSON.stringify всего D.debt на телефоне может быть заметным
+// по CPU при большом массиве - если Влад заметит подтормаживание при обновлении, чинить
+// здесь первым делом (план: "замерить стоимость на ДЗ-массиве на телефоне").
+var lastAppliedHash_ = null;
+function applyData(patch, opts) {
+  opts = opts || {};
+  var isFirstLoad = !D;
+  var hash = null;
+  try { hash = JSON.stringify(patch); } catch (e) { /* циклическая ссылка и т.п. - считаем изменившимся */ }
+  var unchanged = !isFirstLoad && hash !== null && hash === lastAppliedHash_;
+  if (hash !== null) lastAppliedHash_ = hash;
+  D = isFirstLoad ? patch : Object.assign(D, patch);
+  if (unchanged && opts.skipIfUnchanged) return false; // ничего не поменялось - DOM не трогаем
+  render();
+  return true;
+}
+
 let loadDataInFlight_ = false; // защита кнопки от двойного клика (аудит 29.08) - без неё
                                 // два параллельных вызова пишут в D в произвольном порядке
 async function loadData() {
   if (loadDataInFlight_) return;
   loadDataInFlight_ = true;
+  // Полноэкранный лоадер - ТОЛЬКО на самый первый вход (план 2026-08-28, Этап 1, "я бы
+  // хотел, чтобы у нас не было загрузок вообще... при первом старте пусть будет"). Кнопка
+  // "Обновить данные"/повторный заход уже показывают disabled+"Обновляю..." (Этап 0.3) -
+  // этого достаточно, страница при этом остаётся интерактивной.
+  var isFirstLoad = !D;
   var refreshBtn = document.getElementById('refresh-btn');
   var refreshLabel = refreshBtn ? refreshBtn.querySelector('span') : null;
   var refreshLabelOrig = refreshLabel ? refreshLabel.textContent : null;
   if (refreshBtn) refreshBtn.disabled = true;
   if (refreshLabel) refreshLabel.textContent = 'Обновляю…';
-  document.getElementById('loading').style.display = 'flex';
-  startLoadingPhrases();
+  if (isFirstLoad) {
+    document.getElementById('loading').style.display = 'flex';
+    startLoadingPhrases();
+  }
   try {
-    D = await fetchJsonWithRetry_(apiUrl({}));
-    if (D.needLogin) { clearAuthTokens_(); showLoginScreen(D.error); return; }
-    if (D.error) throw new Error(D.error);
-    saveSessionTokenFromResponse_(D);
+    // Во временную переменную, не в D напрямую (Этап 1) - если ответ окажется needLogin/
+    // error, старый рабочий D должен остаться нетронутым, а не затираться битым/пустым
+    // ответом до самого throw.
+    var fetched = await fetchJsonWithRetry_(apiUrl({}));
+    if (fetched.needLogin) { clearAuthTokens_(); showLoginScreen(fetched.error); return; }
+    if (fetched.error) throw new Error(fetched.error);
+    saveSessionTokenFromResponse_(fetched);
     hideLoginScreen();
     document.getElementById('error-block').style.display = 'none';
-    render();
+    applyData(fetched, { skipIfUnchanged: true });
     // "Поступления" - на экране уже живые данные из основного payload (D.receipts, посчитаны
     // Apps Script), это МГНОВЕННЫЙ фолбэк. В фоне, не блокируя загрузку страницы, пробуем
     // подменить на свежий расчёт с сервера (2026-08-18, см. /api/receipts) - если сервер не
@@ -3959,8 +4003,6 @@ async function loadData() {
       startBankOpsPolling_();
     }
   } catch(e) {
-    document.getElementById('error-block').style.display = 'block';
-    document.getElementById('error-block').querySelector('b').textContent = 'Ошибка: ' + e.message;
     // "Unexpected token '<' ... is not valid JSON" - сервер вернул HTML-страницу вместо
     // данных (обычно скрипт не задеплоен или временно упал), это не про адрес/ключ - раньше
     // блок всегда предлагал "укажи URL", что путало (Влад, 2026-07-04: "не пойму, что он от
@@ -3969,13 +4011,26 @@ async function loadData() {
     var hint = (msg.indexOf('Unexpected token') >= 0 || msg.indexOf('is not valid JSON') >= 0)
       ? 'Сервер вернул страницу вместо данных - обычно значит, что Apps Script не задеплоен или временно упал на стороне Google. Обнови страницу через минуту; если не поможет - нужно передеплоить scripts/full_script_final.js в Apps Script.'
       : 'Попробуй обновить страницу. Если ошибка повторяется - напиши, что тут написано, разберёмся.';
-    document.getElementById('error-block-hint').textContent = hint;
+    if (isFirstLoad) {
+      // Первый заход - страница ещё пустая, разворачивать есть куда: полный блок с адресом
+      // Apps Script и подсказкой по причине.
+      document.getElementById('error-block').style.display = 'block';
+      document.getElementById('error-block').querySelector('b').textContent = 'Ошибка: ' + e.message;
+      document.getElementById('error-block-hint').textContent = hint;
+    } else {
+      // Повторная загрузка (Этап 1 плана 2026-08-28) - остаёмся на старых данных, экран не
+      // гасим и не перекрываем баннером на всю ширину; тост (единый канал ГОСТа) сообщает
+      // и сам гаснет, не требуя действия.
+      p2ToastErr('Не удалось обновить данные - ' + hint);
+    }
   } finally {
     // finally, не просто "после catch" (аудит 29.08) - выше есть ранний return при
     // needLogin, без finally он обходил бы очистку и намертво вешал бы кнопку disabled
     // до следующей перезагрузки страницы.
-    document.getElementById('loading').style.display = 'none';
-    stopLoadingPhrases();
+    if (isFirstLoad) {
+      document.getElementById('loading').style.display = 'none';
+      stopLoadingPhrases();
+    }
     loadDataInFlight_ = false;
     if (refreshBtn) refreshBtn.disabled = false;
     if (refreshLabel) refreshLabel.textContent = refreshLabelOrig;
@@ -7030,17 +7085,27 @@ function applyRoleUI() {
     // Ахтамова/Гусейнова (2026-08-26) - те же два пункта, что у Рыщанова, но для руководителей
     // коммерческих групп - см. COMMERCIAL_HEAD_SUR_FRONT_.
     var isCommercialHeadViewer = COMMERCIAL_HEAD_SUR_FRONT_.indexOf(curPersonSur) >= 0;
+    // Собрано в список ОДИН раз (план 2026-08-28, Этап 1) - тот же список используется и
+    // для фильтра пунктов сайдбара ниже, и для гварда навигации после него, чтобы они не
+    // могли разойтись. Калькулятор не зависит от серверных данных (D.role) - считает
+    // офлайн в браузере, поэтому доступен и менеджерам/логистам, а не только админ-панели.
+    var allowedPages_ = ['my-page', 'order-plan', 'calculator'];
+    if (isRyschanowViewer) allowedPages_.push('ryschanow-salary');
+    if (isCommercialHeadViewer) allowedPages_.push('commercial-head-salary', 'commercial-head-debt');
     document.querySelectorAll('.sidebar-nav-item').forEach(function(item) {
       const page = item.getAttribute('data-page');
-      // Калькулятор не зависит от серверных данных (D.role) - считает офлайн в браузере,
-      // поэтому доступен и менеджерам/логистам, а не только админ-панели.
-      item.style.display = (page === 'my-page' || page === 'order-plan' || page === 'calculator' ||
-        (page === 'ryschanow-salary' && isRyschanowViewer) ||
-        (page === 'commercial-head-salary' && isCommercialHeadViewer) ||
-        (page === 'commercial-head-debt' && isCommercialHeadViewer)) ? '' : 'none';
+      item.style.display = allowedPages_.indexOf(page) >= 0 ? '' : 'none';
     });
     document.querySelectorAll('.sidebar-nav-section').forEach(function(s){ s.style.display = 'none'; });
-    showPage('my-page');
+    // Переключаем страницу ТОЛЬКО если текущая активная не разрешена этой роли (Этап 1) -
+    // раньше showPage('my-page') вызывался безусловно при КАЖДОМ render(), значит тихое
+    // обновление (следующий шаг этого же этапа) выкидывало бы менеджера/логиста с открытой
+    // вкладки ("План задания", "Калькулятор") обратно на личную страницу. Первый заход
+    // (page-main активна в статичном HTML) под этот гвард всё равно не подпадает - main
+    // не входит в allowedPages_, значит showPage('my-page') сработает как и раньше.
+    var activePageEl_ = document.querySelector('.page.active');
+    var activePageId_ = activePageEl_ ? activePageEl_.id.replace(/^page-/, '') : null;
+    if (!activePageId_ || allowedPages_.indexOf(activePageId_) < 0) showPage('my-page');
   } else {
     if (sidebarLabel) sidebarLabel.textContent = 'Админ панель';
     // Персональные пункты (Зарплата/ДЗ Рыщанова и руководителей коммерческих групп) - только

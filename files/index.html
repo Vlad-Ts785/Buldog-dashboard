@@ -1356,17 +1356,43 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   --tint-green:#0f6a4c; --tint-blue:#1c5ea8; --tint-amber:#8a5a12;
   --tint-purple:#584fb0; --tint-red:#a23b3a;
   --seg-text-onfill:#1b1f27;
-}#page-logistics-plan *{box-sizing:border-box;}#page-logistics-plan.active{
+}html[data-theme="light"] #page-logistics-plan .dr-date-input{color-scheme:light;}/* <main> - общий на все страницы отступ 24/28px и max-width:1400px (читаемая
+   ширина текстовых/табличных страниц) - Планировке, наоборот, нужна вся ширина
+   до самого края: это широкая лента с осью времени, не колонка текста, и именно
+   эту ширину освобождает сворачивание сайдбара (иначе сворачивание визуально
+   ничего не давало - упиралось в тот же max-width, найдено 29.08). :has() снимает
+   отступ/потолок ширины ТОЛЬКО пока активна эта вкладка, других страниц не
+   касается. */
+main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
+/* .rows внутри Планировки - width:max-content (31 день * зум = многие тысячи px) -
+   у flex/grid-элемента по умолчанию min-width:auto, а не 0, значит браузер НЕ
+   даёт родителю сжаться меньше контента, даже если у родителя overflow:auto -
+   это "утекает" вверх по всей цепочке (main -> .main-wrap -> body) и превращает
+   ленту в горизонтальный скролл ВСЕЙ СТРАНИЦЫ вместо внутреннего скролла .board
+   (найдено 29.08 сразу после снятия max-width выше - тот же класс бага, что уже
+   чинили по вертикали). min-width:0 только пока активна вкладка - других страниц
+   не касается. */
+.main-wrap:has(main > #page-logistics-plan.active){min-width:0;}
+#page-logistics-plan *{box-sizing:border-box;}#page-logistics-plan.active{
   /* заменяет исходное body{...} прототипа - теперь это .page внутри дашборда, не
-     отдельный документ. Присоединяется к готовой flex-цепочке .main-wrap
-     (display:flex;flex-direction:column) как обычный растущий flex-ребёнок -
-     .board-wrap внутри уже flex:1;min-height:0 (правка от 29.08, тот самый баг
-     с корзиной ниже экрана), верхнему уровню достаточно кооперировать так же. */
-  display:flex; flex-direction:column; flex:1; min-height:0;
+     отдельный документ. НЕДОСТАТОЧНО просто "flex:1;min-height:0" и кооперации с
+     .main-wrap - у него `min-height:100vh` (не `height`), это НЕ верхняя граница,
+     а нижняя: контейнер свободно растёт под контент, значит flex:1 ничего не
+     ограничивает, и вся цепочка `overflow:hidden`/`auto` ниже (.board-wrap,
+     .board) никогда не получает реальный бюджет высоты - схлопывается страница
+     целиком вместо внутреннего скролла (найдено 29.08 на реальном парке 56 машин:
+     горизонтальный скролл .board утекал на самый низ ВСЕЙ страницы, за все
+     56 строк, вместо того чтобы остаться у нижнего края экрана). Фикс - явная
+     `height:100vh`, независимая от того, ограничен ли предок: общая шапка
+     дашборда (`.page-header`) для этой вкладки скрыта (см. PAGE_TITLES -
+     пустой titleText, тот же приём, что у `my-page`) - счfar выше вкладки нет,
+     ничего выше вкладки нет, 100vh совпадает с окном без вычитания отступов. */
+  height:100vh;
+  display:flex; flex-direction:column; flex:1; min-height:0; min-width:0;
   background:var(--bg); color:var(--text);
   font-family:'Golos Text',system-ui,-apple-system,'Segoe UI',sans-serif;
   font-size:13px; overflow:hidden;
-}#page-logistics-plan .mono{font-family:'JetBrains Mono',ui-monospace,'Cascadia Mono',monospace;font-variant-numeric:tabular-nums;}#page-logistics-plan /* ================= Шапка ================= */
+}#page-logistics-plan .mono{font-family:'JetBrains Mono',ui-monospace,'Cascadia Mono',monospace;font-variant-numeric:tabular-nums;}/* ================= Шапка ================= */
 .top{
   flex:none;
   display:flex;align-items:flex-end;gap:22px;flex-wrap:wrap;
@@ -1375,7 +1401,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 }#page-logistics-plan h1{
   font-family:'Unbounded',system-ui,sans-serif;font-weight:600;font-size:19px;
   margin:0;letter-spacing:-0.01em;line-height:1.1;
-}#page-logistics-plan .sub{font-size:11px;color:var(--muted);margin-top:5px;letter-spacing:.02em;}#page-logistics-plan /* переход между месяцами - Влад, #page-logistics-plan 29.08: «стрелки, #page-logistics-plan просто переход, #page-logistics-plan без прогрузки».
+}#page-logistics-plan .sub{font-size:11px;color:var(--muted);margin-top:5px;letter-spacing:.02em;}/* переход между месяцами - Влад, #page-logistics-plan 29.08: «стрелки, #page-logistics-plan просто переход, #page-logistics-plan без прогрузки».
    В демо реальные данные есть только за август 2026 - соседний месяц честно
    говорит об этом тостом, #page-logistics-plan а не подсовывает выдуманный график под видом настоящего
    (см. правило проекта "цифры бьются везде" - никогда не показывать похожее на
@@ -1405,19 +1431,25 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   appearance:none;border:1px solid var(--border);background:var(--bg3);color:var(--muted);
   font-family:inherit;font-size:11.5px;font-weight:500;padding:5px 11px;border-radius:8px;cursor:pointer;
   transition:border-color .15s var(--ease-out-soft),color .15s var(--ease-out-soft),background-color .15s var(--ease-out-soft);
-}#page-logistics-plan .chip:hover{color:var(--text);border-color:var(--border-strong);}#page-logistics-plan .chip[aria-pressed="true"]{background:var(--bg4);color:var(--text);border-color:var(--border-strong);}#page-logistics-plan .chip:focus-visible, #page-logistics-plan .toast button:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:8px;}#page-logistics-plan /* ================= Легенда ================= */
+}#page-logistics-plan .chip:hover{color:var(--text);border-color:var(--border-strong);}#page-logistics-plan .chip[aria-pressed="true"]{background:var(--bg4);color:var(--text);border-color:var(--border-strong);}#page-logistics-plan .chip:focus-visible, #page-logistics-plan .toast button:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:8px;}/* ================= Легенда ================= */
 .legend{
+  /* Скрыто по просьбе Влада, 29.08: «обозначения только место занимает... может,
+     в будущем понадобится, но сейчас показывать не нужно» - НЕ удалено, только
+     display:none. renderLegend() продолжает честно писать содержимое в DOM при
+     каждом рендере (раскраска/фильтр/зум по-прежнему это триггерят) - вернуть
+     обратно = убрать одну эту строку, логика ничего не потеряла. */
+  display:none;
   flex:none;
-  display:flex;gap:16px;align-items:center;flex-wrap:wrap;
+  gap:16px;align-items:center;flex-wrap:wrap;
   padding:8px 22px;border-bottom:1px solid var(--border);background:var(--bg);
   font-size:10.5px;color:var(--muted);position:relative;z-index:20;
-}#page-logistics-plan .lg{display:flex;align-items:center;gap:6px;}#page-logistics-plan .sw{width:16px;height:9px;border-radius:3px;flex:none;}#page-logistics-plan .lg-note{margin-left:auto;font-size:10px;opacity:.75;}#page-logistics-plan /* ================= Доска ================= */
-.board-wrap{position:relative;display:flex;flex-direction:column;flex:1 1 auto;min-height:0;overflow:hidden;}#page-logistics-plan .board{position:relative;flex:1 1 auto;min-height:0;overflow:auto;scrollbar-width:auto;}#page-logistics-plan /* Влад, #page-logistics-plan 29.08: «добавить нормальные горизонтальный и вертикальный скроллы, #page-logistics-plan чтобы
+}#page-logistics-plan .lg{display:flex;align-items:center;gap:6px;}#page-logistics-plan .sw{width:16px;height:9px;border-radius:3px;flex:none;}#page-logistics-plan .lg-note{margin-left:auto;font-size:10px;opacity:.75;}/* ================= Доска ================= */
+.board-wrap{position:relative;display:flex;flex-direction:column;flex:1 1 auto;min-height:0;min-width:0;overflow:hidden;}#page-logistics-plan .board{position:relative;flex:1 1 auto;min-height:0;min-width:0;overflow:auto;scrollbar-width:auto;}/* Влад, #page-logistics-plan 29.08: «добавить нормальные горизонтальный и вертикальный скроллы, #page-logistics-plan чтобы
    зажал и таскал, #page-logistics-plan как обычный документ/сайт» - было scrollbar-width:thin (едва
    заметная полоска), #page-logistics-plan теперь полноразмерный стилизованный скролл в обе стороны. */
 .board::-webkit-scrollbar{width:14px;height:14px;}#page-logistics-plan .board::-webkit-scrollbar-track{background:var(--bg2);}#page-logistics-plan .board::-webkit-scrollbar-thumb{
   background:var(--bg4);border:3px solid var(--bg2);border-radius:8px;
-}#page-logistics-plan .board::-webkit-scrollbar-thumb:hover{background:var(--border-strong);}#page-logistics-plan .board::-webkit-scrollbar-corner{background:var(--bg2);}#page-logistics-plan /* Мини-скраббер снизу БЫЛ и УДАЛЁН (Влад, #page-logistics-plan 29.08: «убери, #page-logistics-plan основного скролла
+}#page-logistics-plan .board::-webkit-scrollbar-thumb:hover{background:var(--border-strong);}#page-logistics-plan .board::-webkit-scrollbar-corner{background:var(--bg2);}/* Мини-скраббер снизу БЫЛ и УДАЛЁН (Влад, #page-logistics-plan 29.08: «убери, #page-logistics-plan основного скролла
    достаточно») - осталась полноразмерная нативная полоса .board выше. */
 /* Курсорного света здесь НЕТ - осознанное отступление от ГОСТа раздела 7
    (обычно обязателен на каждой странице). Влад, #page-logistics-plan 29.08: на BI-панели курсор
@@ -1438,7 +1470,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 }#page-logistics-plan .head-corner .t1{font-size:9px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);}#page-logistics-plan .head-corner .t2{font-size:11px;color:var(--text);margin-top:3px;}#page-logistics-plan .head-scale{position:relative;flex:none;height:46px;}#page-logistics-plan .day{
   position:absolute;top:0;height:46px;border-left:1px solid var(--border-strong);
   padding:5px 0 0 6px;overflow:hidden;cursor:pointer;
-}#page-logistics-plan .day.weekend{background:var(--weekend-tint);}#page-logistics-plan .day.today{background:rgba(55,138,221,.07);}#page-logistics-plan .day-n{font-size:11px;font-weight:600;line-height:1;}#page-logistics-plan .day-w{font-size:9px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;margin-top:2px;}#page-logistics-plan .hours{position:absolute;left:0;right:0;bottom:0;height:13px;}#page-logistics-plan .hr{position:absolute;bottom:0;font-size:8.5px;color:var(--muted);line-height:1;}#page-logistics-plan:not(.z-day) .hr{display:none;}#page-logistics-plan .rows{position:relative;z-index:1;width:max-content;min-width:100%;}#page-logistics-plan /* Влад, #page-logistics-plan 29.08: «нет разделительной линии, #page-logistics-plan выглядит как незаконченная таблица» -
+}#page-logistics-plan .day.weekend{background:var(--weekend-tint);}#page-logistics-plan .day.today{background:rgba(55,138,221,.07);}#page-logistics-plan .day-n{font-size:11px;font-weight:600;line-height:1;}#page-logistics-plan .day-w{font-size:9px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;margin-top:2px;}#page-logistics-plan .hours{position:absolute;left:0;right:0;bottom:0;height:13px;}#page-logistics-plan .hr{position:absolute;bottom:0;font-size:8.5px;color:var(--muted);line-height:1;}#page-logistics-plan:not(.z-day) .hr{display:none;}#page-logistics-plan .rows{position:relative;z-index:1;width:max-content;min-width:100%;}/* Влад, #page-logistics-plan 29.08: «нет разделительной линии, #page-logistics-plan выглядит как незаконченная таблица» -
    так и было: .grouphead был шириной ТОЛЬКО замороженной колонки (var(--lane-w)), #page-logistics-plan верх/низ-бордер обрывался ровно на её границе, #page-logistics-plan а вся полоса времени справа
    оставалась вообще без черты. Теперь бордер - на ПОЛНОШИРИННОЙ внешней полосе
    (тот же приём max-content/min-width:100%, #page-logistics-plan что и у .row), #page-logistics-plan текст-ярлык - на
@@ -1465,7 +1497,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 }#page-logistics-plan .row:hover .rowhead{background:var(--row-hover);}#page-logistics-plan body.can-arrange .rowhead{cursor:grab;touch-action:none;}#page-logistics-plan body.can-arrange .rowhead:active{cursor:grabbing;}#page-logistics-plan .rh1{display:flex;align-items:center;gap:7px;line-height:1;}#page-logistics-plan .tag{
   font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:600;letter-spacing:.04em;
   padding:2px 5px;border-radius:3px;background:var(--bg4);color:var(--muted);flex:none;
-}#page-logistics-plan /* семейство техники цветом - те же группы, #page-logistics-plan что логисты держат в голове
+}/* семейство техники цветом - те же группы, #page-logistics-plan что логисты держат в голове
    (в их таблице это правила «Раздвижка / Корыто / Рапид / Бортовой / Площадка»).
    Внутри razd/koryto - 4 тональности одного оттенка по рангу (см. typeRank в JS):
    больше осей/раздвижнее = темнее заливка, #page-logistics-plan текст остаётся тем же для читаемости. */
@@ -1481,7 +1513,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 }#page-logistics-plan .now{
   position:absolute;top:0;bottom:0;width:1px;background:var(--blue);z-index:9;pointer-events:none;
   box-shadow:0 0 0 1px rgba(55,138,221,.18);
-}#page-logistics-plan .now-head{position:absolute;top:0;bottom:0;width:1px;background:var(--blue);z-index:17;pointer-events:none;}#page-logistics-plan /* ---- отрезки ----
+}#page-logistics-plan .now-head{position:absolute;top:0;bottom:0;width:1px;background:var(--blue);z-index:17;pointer-events:none;}#page-logistics-plan .now-tag{position:absolute;top:2px;left:4px;font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--blue);background:var(--bg);padding:1px 4px;border-radius:3px;white-space:nowrap;}/* ---- отрезки ----
    Влад, #page-logistics-plan 29.08: «полоски чуть шире по вертикали, #page-logistics-plan больше информации, #page-logistics-plan не обрезай
    фамилии» - высота выросла с 22 до 28px (строка с 44 до 52px), #page-logistics-plan подпись человека
    и маршрут разведены по ДВУМ строкам внутри бара вместо одной обрезанной.
@@ -1512,14 +1544,14 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
      тени и свечения через opacity заранее отрисованного слоя, не анимацией свойств;
      находка аудита состояний 29.08). transform-переход драг ставит inline сам. */
   transition:opacity .14s var(--ease-out-soft);
-}#page-logistics-plan /* hover - световой оверлей вместо filter:brightness (brightness - незаконный канал
+}/* hover - световой оверлей вместо filter:brightness (brightness - незаконный канал
    по ГОСТу; и БЕЗ подъёма transform - он ломает sticky-подпись, #page-logistics-plan см. коммент выше) */
 .seg .hov{position:absolute;inset:0;border-radius:inherit;pointer-events:none;
-  background:rgba(255,255,255,.10);opacity:0;transition:opacity .12s var(--ease-out-soft);}html[data-theme="light"] #page-logistics-plan .seg .hov{background:rgba(20,26,38,.07);}#page-logistics-plan .seg:hover .hov{opacity:1;}#page-logistics-plan /* кольцо - один слот на плитку, #page-logistics-plan приоритет: конфликт(red) > «под данные»(amber) > открыта(blue) */
+  background:rgba(255,255,255,.10);opacity:0;transition:opacity .12s var(--ease-out-soft);}html[data-theme="light"] #page-logistics-plan .seg .hov{background:rgba(20,26,38,.07);}#page-logistics-plan .seg:hover .hov{opacity:1;}/* кольцо - один слот на плитку, #page-logistics-plan приоритет: конфликт(red) > «под данные»(amber) > открыта(blue) */
 .seg .ring{position:absolute;inset:-2px;border-radius:8px;pointer-events:none;
-  opacity:0;transition:opacity .15s var(--ease-out-soft);}#page-logistics-plan .seg.is-open .ring{opacity:1;box-shadow:0 0 0 1.5px var(--blue);}#page-logistics-plan .seg.needs-passport .ring{opacity:1;box-shadow:0 0 0 1.5px var(--amber);}#page-logistics-plan .seg.overlap .ring{opacity:1;box-shadow:0 0 0 1.5px var(--red);}#page-logistics-plan /* завершённый рейс - приглушение всего элемента (значение между .82 драга и .28 ghosted) */
+  opacity:0;transition:opacity .15s var(--ease-out-soft);}#page-logistics-plan .seg.is-open .ring{opacity:1;box-shadow:0 0 0 1.5px var(--blue);}#page-logistics-plan .seg.needs-passport .ring{opacity:1;box-shadow:0 0 0 1.5px var(--amber);}#page-logistics-plan .seg.overlap .ring{opacity:1;box-shadow:0 0 0 1.5px var(--red);}/* завершённый рейс - приглушение всего элемента (значение между .82 драга и .28 ghosted) */
 .seg.is-past{opacity:.68;}#page-logistics-plan .seg.lifted{cursor:grabbing;opacity:.82;z-index:900;pointer-events:none;
-  box-shadow:0 2px 6px rgba(0,0,0,.4),0 16px 32px rgba(0,0,0,.5);}#page-logistics-plan .seg.bad{box-shadow:inset 0 0 0 1.5px var(--red);}#page-logistics-plan /* ПОДПИСЬ - position:sticky внутри отрезка, #page-logistics-plan привязана к скроллу .board (ближайший
+  box-shadow:0 2px 6px rgba(0,0,0,.4),0 16px 32px rgba(0,0,0,.5);}#page-logistics-plan .seg.bad{box-shadow:inset 0 0 0 1.5px var(--red);}/* ПОДПИСЬ - position:sticky внутри отрезка, #page-logistics-plan привязана к скроллу .board (ближайший
    реальный scroll-контейнер), #page-logistics-plan а .seg{overflow:hidden}#page-logistics-plan держит её в границах самого
    бара. Итог - «Ремонт»/«Без водителя»/маршрут видны, #page-logistics-plan пока в кадре ЛЮБАЯ часть
    длинной (многодневной) полосы, #page-logistics-plan а не только момент, #page-logistics-plan когда виден именно её левый
@@ -1543,7 +1575,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   /* воздух слева: бейдж не прилипает вплотную к рамке плитки (Влад, 29.08 -
      «как будто обрезает основную рамку») */
   margin-left:4px;
-}#page-logistics-plan .seg-txt{overflow:hidden;text-overflow:ellipsis;font-weight:500;}#page-logistics-plan /* бейдж идентичности: МЕНеджер (3 буквы, #page-logistics-plan ярко) над ЛОГистом (3 буквы, #page-logistics-plan приглушён);
+}#page-logistics-plan .seg-txt{overflow:hidden;text-overflow:ellipsis;font-weight:500;}/* бейдж идентичности: МЕНеджер (3 буквы, #page-logistics-plan ярко) над ЛОГистом (3 буквы, #page-logistics-plan приглушён);
    непрозрачный - читается поверх любой заливки в любом режиме раскраски */
 .seg-id{
   /* БЕЗ фиксированной height:20px - две строки текста (9px, line-height 1.15)
@@ -1559,19 +1591,19 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 }#page-logistics-plan .seg-id b, #page-logistics-plan .seg-id i{
   font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;font-style:normal;
   line-height:1.2;letter-spacing:.04em;color:var(--text);
-}#page-logistics-plan .seg-id i{font-weight:500;color:var(--muted);}#page-logistics-plan /* точка водителя: залита = назначен на машину, #page-logistics-plan кольцо = вакансия */
-.seg-drv{position:absolute;top:-2px;right:-2px;width:6px;height:6px;border-radius:50%;}#page-logistics-plan .seg-drv.on{display:none;}#page-logistics-plan /* норму не отмечаем - только отсутствие */
-.seg-drv.off{background:var(--bg2);border:1.5px solid var(--red);}#page-logistics-plan /* прогресс активного рейса - 2px снизу, #page-logistics-plan transform:scaleX (не width) */
+}#page-logistics-plan .seg-id i{font-weight:500;color:var(--muted);}/* точка водителя: залита = назначен на машину, #page-logistics-plan кольцо = вакансия */
+.seg-drv{position:absolute;top:-2px;right:-2px;width:6px;height:6px;border-radius:50%;}#page-logistics-plan .seg-drv.on{display:none;}/* норму не отмечаем - только отсутствие */
+.seg-drv.off{background:var(--bg2);border:1.5px solid var(--red);}/* прогресс активного рейса - 2px снизу, #page-logistics-plan transform:scaleX (не width) */
 .seg-prog{position:absolute;left:0;right:0;bottom:0;height:2px;border-radius:0 0 6px 6px;
   overflow:hidden;background:rgba(139,137,128,.18);pointer-events:none;}#page-logistics-plan .seg-prog i{display:block;height:100%;transform:scaleX(calc(var(--progress,0)/100));
   transform-origin:left;background:currentColor;}#page-logistics-plan .seg-code{
   font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:600;letter-spacing:.02em;
   white-space:nowrap;
-}#page-logistics-plan .hnd{position:absolute;top:0;bottom:0;width:6px;cursor:ew-resize;z-index:2;}#page-logistics-plan .hnd.l{left:0;}#page-logistics-plan .hnd.r{right:0;}#page-logistics-plan /* Зумы - стандарт Влада 29.08: «неделя» = только МЕН/ЛОГ (бейдж, #page-logistics-plan без маршрута), #page-logistics-plan «месяц» = только ЛОГист, #page-logistics-plan всё - первыми тремя буквами. Служебные плашки (без
+}#page-logistics-plan .hnd{position:absolute;top:0;bottom:0;width:6px;cursor:ew-resize;z-index:2;}#page-logistics-plan .hnd.l{left:0;}#page-logistics-plan .hnd.r{right:0;}/* Зумы - стандарт Влада 29.08: «неделя» = только МЕН/ЛОГ (бейдж, #page-logistics-plan без маршрута), #page-logistics-plan «месяц» = только ЛОГист, #page-logistics-plan всё - первыми тремя буквами. Служебные плашки (без
    бейджа) на обоих зумах остаются чистым цветом. */
-:root.z-week .seg .seg-txt{display:none;}#page-logistics-plan.z-week .seg-label{margin-left:2px;}#page-logistics-plan.z-month .seg{height:16px;top:18px;border-radius:3px;font-size:0;}#page-logistics-plan.z-month .seg .seg-txt{display:none;}#page-logistics-plan.z-month .seg-label{margin-left:1px;}#page-logistics-plan.z-month .seg-id{height:12px;padding:0 3px;background:transparent;box-shadow:none;}#page-logistics-plan.z-month .seg-id b{display:none;}#page-logistics-plan /* менеджер уходит */
-:root.z-month .seg-id i{font-size:9px;color:var(--text);}#page-logistics-plan /* логист остаётся читаемым */
-:root.z-month .seg-drv{display:none;}#page-logistics-plan.z-month .seg-prog{display:none;}#page-logistics-plan /* Крупное ВРЕМЯ, #page-logistics-plan ЗАФИКСИРОВАННОЕ на экране, #page-logistics-plan пока тянут/растягивают/рисуют
+#page-logistics-plan.z-week .seg .seg-txt{display:none;}#page-logistics-plan.z-week .seg-label{margin-left:2px;}#page-logistics-plan.z-month .seg{height:16px;top:18px;border-radius:3px;font-size:0;}#page-logistics-plan.z-month .seg .seg-txt{display:none;}#page-logistics-plan.z-month .seg-label{margin-left:1px;}#page-logistics-plan.z-month .seg-id{height:12px;padding:0 3px;background:transparent;box-shadow:none;}#page-logistics-plan.z-month .seg-id b{display:none;}/* менеджер уходит */
+#page-logistics-plan.z-month .seg-id i{font-size:9px;color:var(--text);}/* логист остаётся читаемым */
+#page-logistics-plan.z-month .seg-drv{display:none;}#page-logistics-plan.z-month .seg-prog{display:none;}/* Крупное ВРЕМЯ, #page-logistics-plan ЗАФИКСИРОВАННОЕ на экране, #page-logistics-plan пока тянут/растягивают/рисуют
    (Влад, #page-logistics-plan 29.08: «бейджик двигался вместе с плиткой - глазами не уследить; пусть
    время стоит на месте, #page-logistics-plan а я двигаю плиткой рукой не глядя на неё»). Раньше это
    был тултип, #page-logistics-plan гоняющийся за курсором - теперь одна неподвижная точка вверху
@@ -1594,7 +1626,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   font-family:'JetBrains Mono',ui-monospace,monospace;font-size:25px;font-weight:600;
   font-variant-numeric:tabular-nums;color:var(--text);line-height:1;
 }#page-logistics-plan .hud-arrow{color:var(--muted);font-size:15px;}#page-logistics-plan .hud-dur{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);
-  font-variant-numeric:tabular-nums;white-space:nowrap;}#page-logistics-plan /* Корзина, #page-logistics-plan всплывающая при захвате плитки (Влад, #page-logistics-plan 29.08: «как на смартфонах -
+  font-variant-numeric:tabular-nums;white-space:nowrap;}/* Корзина, #page-logistics-plan всплывающая при захвате плитки (Влад, #page-logistics-plan 29.08: «как на смартфонах -
    зажал, #page-logistics-plan внизу появляется корзина, #page-logistics-plan роняешь туда - удаляется»). Стоит НАД
    скраббером (тот 18px внизу доски), #page-logistics-plan появляется только пока плитку реально
    тащат (не во время растяжки за край - там нечего "уронить"), #page-logistics-plan подсвечивается
@@ -1613,13 +1645,13 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 }#page-logistics-plan .trash-zone.on{opacity:1;transform:translate(-50%,0) scale(1);}#page-logistics-plan .trash-zone.armed{
   background:var(--red);border-color:var(--red);color:#fff;
   transform:translate(-50%,0) scale(1.18);
-}#page-logistics-plan .trash-zone svg{width:24px;height:24px;}#page-logistics-plan /* линия примагничивания */
+}#page-logistics-plan .trash-zone svg{width:24px;height:24px;}/* линия примагничивания */
 .magnet{
   position:absolute;top:1px;bottom:1px;width:2px;background:var(--amber);z-index:8;
   pointer-events:none;opacity:0;transform:scaleY(.7);
   transition:opacity .12s var(--ease-out-soft),transform .12s var(--ease-overshoot);
   box-shadow:0 0 8px rgba(239,159,39,.5);
-}#page-logistics-plan .magnet.on{opacity:.9;transform:scaleY(1);}#page-logistics-plan /* Уровень 3 «супер» с изолированного магнит-стенда (Влад, #page-logistics-plan 29.08: «просто супер, #page-logistics-plan внедряем срочно») - вспышка на СТЫКЕ обоих краёв, #page-logistics-plan искры, #page-logistics-plan прошитый шов. */
+}#page-logistics-plan .magnet.on{opacity:.9;transform:scaleY(1);}/* Уровень 3 «супер» с изолированного магнит-стенда (Влад, #page-logistics-plan 29.08: «просто супер, #page-logistics-plan внедряем срочно») - вспышка на СТЫКЕ обоих краёв, #page-logistics-plan искры, #page-logistics-plan прошитый шов. */
 @keyframes kiss{
   0%{opacity:0;transform:scaleY(.35);} 55%{opacity:1;transform:scaleY(1.18);}
   100%{opacity:0;transform:scaleY(1);}
@@ -1629,23 +1661,26 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   0%{opacity:1;transform:translate(0,0) scale(1);}
   100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(.25);}
 }#page-logistics-plan .spark{position:absolute;width:4px;height:4px;border-radius:50%;background:var(--amber);
-  pointer-events:none;animation:spark .42s var(--ease-out-strong) 1 forwards;z-index:9;}#page-logistics-plan .seam{position:absolute;top:0;width:6px;margin-left:-3px;pointer-events:none;z-index:6;opacity:0;}#page-logistics-plan .seam.on{opacity:1;}#page-logistics-plan .seam path{fill:none;stroke:var(--amber);stroke-width:1.4;stroke-dasharray:3 3;}#page-logistics-plan /* прицел в начало нового диапазона при смене масштаба */
+  pointer-events:none;animation:spark .42s var(--ease-out-strong) 1 forwards;z-index:9;}#page-logistics-plan .seam{position:absolute;top:0;width:6px;margin-left:-3px;pointer-events:none;z-index:6;opacity:0;}#page-logistics-plan .seam.on{opacity:1;}#page-logistics-plan .seam path{fill:none;stroke:var(--amber);stroke-width:1.4;stroke-dasharray:3 3;}/* прицел в начало нового диапазона при смене масштаба */
 .day.primed{animation:primed .5s var(--ease-out-strong) 1;}
-@keyframes primed{from{background:rgba(55,138,221,.34);}to{background:rgba(55,138,221,0);}}#page-logistics-plan /* ================= Шторка ================= */
+@keyframes primed{from{background:rgba(55,138,221,.34);}to{background:rgba(55,138,221,0);}}/* ================= Шторка ================= */
 .scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);opacity:0;pointer-events:none;
   transition:opacity .32s var(--ease-in-out);z-index:50;}#page-logistics-plan .scrim.open{opacity:1;pointer-events:auto;}#page-logistics-plan .drawer{
   position:fixed;top:0;right:0;bottom:0;width:min(390px,90vw);background:var(--bg2);
   border-left:1px solid var(--border-strong);padding:22px 20px;z-index:51;
   transform:translateX(100%);transition:transform .38s var(--ease-overshoot);overflow:auto;
-}#page-logistics-plan .drawer.open{transform:translateX(0);}#page-logistics-plan .dr-eyebrow{font-size:9px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);}#page-logistics-plan .dr-title{font-size:19px;font-weight:600;margin:7px 0 18px;}#page-logistics-plan .dr-row{display:flex;justify-content:space-between;gap:14px;padding:9px 0;border-bottom:1px solid var(--border);font-size:12px;}#page-logistics-plan .dr-row span:first-child{color:var(--muted);}#page-logistics-plan .dr-row span:last-child{text-align:right;}#page-logistics-plan .dr-note{margin-top:18px;font-size:11px;color:var(--muted);line-height:1.5;}#page-logistics-plan .dr-actions{display:flex;gap:8px;margin-top:20px;}#page-logistics-plan .dr-del{display:inline-flex;align-items:center;gap:6px;color:var(--red);}#page-logistics-plan .dr-del:hover{border-color:var(--red);}#page-logistics-plan .dr-del svg{width:13px;height:13px;flex:none;}#page-logistics-plan .cr-types{display:flex;gap:6px;flex-wrap:wrap;margin:16px 0;}#page-logistics-plan .cr-field{margin-bottom:12px;}#page-logistics-plan .cr-field .grp-label{display:block;margin-bottom:6px;}#page-logistics-plan .cr-opts{display:flex;gap:6px;flex-wrap:wrap;}#page-logistics-plan .cr-input{
+}#page-logistics-plan .drawer.open{transform:translateX(0);}#page-logistics-plan .dr-eyebrow{font-size:9px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);}#page-logistics-plan .dr-title{font-size:19px;font-weight:600;margin:7px 0 18px;}#page-logistics-plan .dr-row{display:flex;justify-content:space-between;gap:14px;padding:9px 0;border-bottom:1px solid var(--border);font-size:12px;}#page-logistics-plan .dr-row span:first-child{color:var(--muted);}#page-logistics-plan .dr-row span:last-child{text-align:right;}#page-logistics-plan .dr-note{margin-top:18px;font-size:11px;color:var(--muted);line-height:1.5;}#page-logistics-plan .dr-row-edit{align-items:center;}#page-logistics-plan .dr-date-input{
+  background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);
+  font-family:inherit;font-size:11.5px;padding:4px 7px;color-scheme:dark;
+}#page-logistics-plan .dr-date-input:focus-visible{outline:2px solid var(--blue);outline-offset:1px;}#page-logistics-plan .dr-actions{display:flex;gap:8px;margin-top:20px;flex-wrap:wrap;}#page-logistics-plan .dr-save{color:var(--green);}#page-logistics-plan .dr-save:hover{border-color:var(--green);}#page-logistics-plan .dr-del{display:inline-flex;align-items:center;gap:6px;color:var(--red);}#page-logistics-plan .dr-del:hover{border-color:var(--red);}#page-logistics-plan .dr-del svg{width:13px;height:13px;flex:none;}#page-logistics-plan .cr-types{display:flex;gap:6px;flex-wrap:wrap;margin:16px 0;}#page-logistics-plan .cr-field{margin-bottom:12px;}#page-logistics-plan .cr-field .grp-label{display:block;margin-bottom:6px;}#page-logistics-plan .cr-opts{display:flex;gap:6px;flex-wrap:wrap;}#page-logistics-plan .cr-input{
   width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);
   font-family:inherit;font-size:12px;padding:7px 10px;
-}#page-logistics-plan .cr-input:focus-visible{outline:2px solid var(--blue);outline-offset:1px;}#page-logistics-plan .cr-actions{display:flex;gap:8px;margin-top:18px;}#page-logistics-plan /* черновик отрезка во время протяжки по пустому месту - тот же язык, #page-logistics-plan что и .seg, #page-logistics-plan но пунктирная рамка вместо заливки по смыслу состояния (состояние ещё не выбрано) */
+}#page-logistics-plan .cr-input:focus-visible{outline:2px solid var(--blue);outline-offset:1px;}#page-logistics-plan .cr-actions{display:flex;gap:8px;margin-top:18px;}/* черновик отрезка во время протяжки по пустому месту - тот же язык, #page-logistics-plan что и .seg, #page-logistics-plan но пунктирная рамка вместо заливки по смыслу состояния (состояние ещё не выбрано) */
 .seg-draft{
   position:absolute;top:4px;height:22px;border-radius:4px;pointer-events:none;
   background:rgba(139,137,128,.14);box-shadow:inset 0 0 0 1.5px var(--border-strong);
   left:calc(var(--s) * var(--hw));width:calc(var(--l) * var(--hw));
-}#page-logistics-plan /* ================= Тост ================= */
+}/* ================= Тост ================= */
 .toast{
   position:fixed;left:50%;bottom:22px;transform:translate(-50%,14px);opacity:0;
   background:var(--bg3);border:1px solid var(--border-strong);border-radius:10px;
@@ -2228,6 +2263,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 
 <div class="top">
   <div>
+    <h1>Планировка</h1>
     <div class="sub">Парк из Штатки · <span class="mono" id="lp-clock">--:--:--</span></div>
   </div>
 
@@ -14145,8 +14181,14 @@ function showPage(id, el) {
   // будет") - при пустом заголовке (my-page) прячем всю .page-header целиком, а не только
   // текст - иначе пустая полоса с чертой-разделителем всё равно оставалась НАД настоящей
   // шапкой (ФИО+должность) внутри содержимого страницы.
+  // «Планировка» (2026-08-29, Влад: шапка должна двигаться одним блоком от заголовка до
+  // календаря) - та же логика: общая шапка дашборда здесь тоже лишняя, у страницы своя,
+  // самодостаточная (заголовок + часы + KPI + стрелки месяца в одном .top). titleText
+  // остаётся непустым (PAGE_TITLES всё ещё хранит "Планировка" - вдруг понадобится
+  // где-то ещё), поэтому скрытие - явным условием по id, не побочным эффектом пустой
+  // строки, как у my-page.
   var pageHeaderEl = document.querySelector('.page-header');
-  if (pageHeaderEl) pageHeaderEl.style.display = titleText ? '' : 'none';
+  if (pageHeaderEl) pageHeaderEl.style.display = (titleText && id !== 'logistics-plan') ? '' : 'none';
   try { updatePagePeriod_(); } catch(e) {}   // время в шапке свежее сразу, не через 30 сек
   // Ленивый рендер по вкладкам (план 2026-08-28, Этап 2) - если группа этой страницы не
   // рисовалась с последнего обновления данных (render() пометил её "грязной", т.к. в тот
@@ -16632,6 +16674,12 @@ var ICON_TRASH = '<svg ' + SVG_ATTR + '><path d="M4 6h12M8 6V4h4v2M6 6l1 11h6l1-
 var NOW0_ = new Date();
 var YEAR = NOW0_.getFullYear(), MONTH = NOW0_.getMonth();
 var DAYS = new Date(YEAR, MONTH + 1, 0).getDate(), HOURS = DAYS * 24;
+/* YEAR/MONTH выше - ВСЕГДА текущий месяц (переход по месяцам ещё не подключён -
+   см. monthArrowClick), значит "сегодня" - просто число месяца минус 1. Раньше
+   здесь был хардкод d===28 (день 29.08 на момент переноса) - 1 сентября подсветка
+   осталась бы на дне 29 августа, того же класса баг, что уже чинили у YEAR/MONTH
+   самих. */
+var TODAY_D_ = NOW0_.getDate() - 1;
 var WD = ["вс","пн","вт","ср","чт","пт","сб"];
 var ZOOM = {day:46, "3d":17, week:8, month:2.4};
 
@@ -16881,7 +16929,7 @@ function renderScale(){
   var out = [];
   for (var d = 0; d < DAYS; d++){
     var dt = new Date(YEAR, MONTH, d + 1);
-    var w = dt.getDay(), cls = "day" + ((w === 0 || w === 6) ? " weekend" : "") + (d === 28 ? " today" : "");
+    var w = dt.getDay(), cls = "day" + ((w === 0 || w === 6) ? " weekend" : "") + (d === TODAY_D_ ? " today" : "");
     var hrs = "";
     if (STATE.zoom === "day"){
       for (var h = 0; h < 24; h += 2){
@@ -16893,7 +16941,11 @@ function renderScale(){
       '<div class="day-w">' + WD[w] + '</div>' +
       '<div class="hours">' + hrs + '</div></div>');
   }
-  out.push('<div class="now-head" id="lp-nowHead" style="left:' + (nowHour() * hw) + 'px"></div>');
+  /* подпись "сейчас" на линии текущего времени - тот же приём, что "вы здесь" у
+     дней-колонок (ГОСТ раздел 4): без неё тонкая синяя линия ничего не объясняет
+     сама по себе (Влад, 29.08: "непонятная синяя линия"). */
+  out.push('<div class="now-head" id="lp-nowHead" style="left:' + (nowHour() * hw) + 'px">' +
+    '<span class="now-tag">сейчас</span></div>');
   scaleEl.innerHTML = out.join("");
 }
 
@@ -16971,8 +17023,16 @@ function untilLabel(s){
   if (end % 24 === 0) return "до " + Math.min(DAYS, end / 24) + "." + mm;
   return "до " + fmt(end);
 }
+/* Адрес - НЕ обязательное поле создания рейса (логист может не знать точку на
+   момент постановки), но пустое поле никогда не должно подменяться выдуманным
+   городом - раньше при пустом from/to подставлялись PLACES[0]/PLACES[1] "для
+   красоты", и плитка показывала реальный на вид маршрут, которого никто не
+   вводил (Влад, 29.08, поймано на живом парке). "не указано" - честная замена. */
+function routeLabel_(from, to){
+  return (from || "не указано") + " → " + (to || "не указано");
+}
 function segLabel(s){
-  if (s.kind === "trip") return s.from + " → " + s.to;
+  if (s.kind === "trip") return routeLabel_(s.from, s.to);
   var base = s.kind === "repair" ? "Ремонт" : s.kind === "maint" ? "ТО" :
              s.kind === "noorder" ? "Без заказа" : s.kind === "driveroff" ? "Без водителя" : "";
   return base ? base + " · " + untilLabel(s) : "";
@@ -17094,6 +17154,7 @@ function renderHiddenCount(){
    Шаг сетки - ПОЛЧАСА (Влад, 29.08): часы хранятся дробными (…,8, 8.5, 9,…),
    hm()/fmt() ниже поэтому считают минуты, а не только час. */
 var hud = document.getElementById("lp-timeHud");
+var hudWrap = document.querySelector("#page-logistics-plan .board-wrap"); /* позиционирующий предок HUD - см. showBadge() */
 var hudFrom = document.getElementById("lp-hudFrom"), hudTo = document.getElementById("lp-hudTo"),
     hudDur = document.getElementById("lp-hudDur");
 var trashZone = document.getElementById("lp-trashZone");
@@ -17108,10 +17169,24 @@ function durLabel(l){
   var h = Math.floor(l), m = Math.round((l - h) * 60);
   return m ? h + " ч " + m + " мин" : h + " ч";
 }
+/* HUD раньше стоял неподвижно у верха доски (Влад, 29.08 на демо-парке: «глаза
+   отдыхают в одном месте») - на реальных 56 машинах эта неподвижная точка часто
+   оказывается ДАЛЕКО от строки, которую реально тащат/растягивают, вплоть до
+   «вообще не видно» (Влад, 29.08, повторно - уже на боевом парке). x/y (курсор)
+   передавались сюда всегда, но не использовались - подключаем: HUD следует ПО
+   ВЕРТИКАЛИ за курсором (координата - внутри .board-wrap, не всей страницы),
+   горизонталь остаётся центрированной (left:50% в CSS) - так HUD не бегает и по
+   X, и по Y одновременно, только компенсирует высоту доски. */
 function showBadge(seg, x, y, snapped){
   hudFrom.textContent = hm(seg.s);
   hudTo.textContent = hm(seg.s + seg.l);
   hudDur.textContent = durLabel(seg.l) + (snapped ? " · примагничено" : "");
+  if (hudWrap && typeof y === "number"){
+    var wr = hudWrap.getBoundingClientRect();
+    var top = y - wr.top - 96;                              /* приподнят над курсором, не под пальцем/стрелкой */
+    top = Math.max(8, Math.min(top, wr.height - 104));       /* не уезжает выше/ниже видимой области доски */
+    hud.style.top = top + "px";
+  }
   hud.classList.add("on");
 }
 function hideBadge(){ hud.classList.remove("on"); }
@@ -17811,8 +17886,8 @@ function openCreateDrawer(vi, s, l){
         '<div class="cr-field"><span class="grp-label">Логист</span><div class="cr-opts" id="lp-crLg">' +
           logistPool.map(function(p, i){ return '<button class="chip cr-opt" data-i="' + i + '" aria-pressed="' + (i === lgIdx) + '">' + personShort(p) + '</button>'; }).join("") +
         '</div></div>' +
-        '<div class="cr-field"><span class="grp-label">Откуда</span><input class="cr-input" id="lp-crFrom" list="lp-crPlaces" value="' + fromVal + '"></div>' +
-        '<div class="cr-field"><span class="grp-label">Куда</span><input class="cr-input" id="lp-crTo" list="lp-crPlaces" value="' + toVal + '"></div>' +
+        '<div class="cr-field"><span class="grp-label">Откуда</span><input class="cr-input" id="lp-crFrom" list="lp-crPlaces" placeholder="можно не указывать" value="' + fromVal + '"></div>' +
+        '<div class="cr-field"><span class="grp-label">Куда</span><input class="cr-input" id="lp-crTo" list="lp-crPlaces" placeholder="можно не указывать" value="' + toVal + '"></div>' +
         '<datalist id="lp-crPlaces">' + PLACES.map(function(p){ return "<option value=\"" + p + "\">"; }).join("") + '</datalist>'
         : '') +
       '<div class="dr-note">Длину и время можно поправить прямо на ленте - потянуть за край, как у обычного отрезка.</div>' +
@@ -17832,7 +17907,12 @@ function openCreateDrawer(vi, s, l){
       var clash = STATE.segs.some(function(x){ return x.v === vi && s < x.s + x.l && x.s < s + l; });
       if (clash){ S.reject(); toast("Пересечение с другим отрезком - не создал", null); return; }
       if (kind === "driveroff") pushDriver(v, s, l);
-      else if (kind === "trip") push(v, "trip", s, l, {mg:MANAGERS[mgIdx], lg:logistPool[lgIdx], from:fromVal || PLACES[0], to:toVal || PLACES[1]});
+      /* from/to НЕ обязательны - логист может ещё не знать точку на момент постановки
+         (Влад, 29.08: "возможность создавать заявки без указания адресов должна
+         быть"). Раньше пустое поле подменялось PLACES[0]/PLACES[1] - реальный на вид
+         город, которого никто не вводил; оставляем как есть, честно пусто -
+         routeLabel_() показывает "не указано" на отображении, не здесь. */
+      else if (kind === "trip") push(v, "trip", s, l, {mg:MANAGERS[mgIdx], lg:logistPool[lgIdx], from:fromVal, to:toVal});
       else push(v, kind, s, l);
       STATE.lastEdited = s;
       saveSegs();
@@ -17846,38 +17926,92 @@ function openCreateDrawer(vi, s, l){
   drawer.classList.add("open"); drawer.setAttribute("aria-hidden", "false");
   scrim.classList.add("open");
 }
+/* Ручной ввод дат в шторке (Влад, 29.08: «должна быть возможность ручного
+   редактирования дат») - раньше Начало/Окончание были просто текстом, менять
+   можно было только тяня плитку по ленте пикселем. Для длинных/точных интервалов
+   (недели простоя, окно ТО) это неудобно. Родные <input type="datetime-local"> -
+   свой пикер не изобретаем. Коммит идёт ЧЕРЕЗ commit() - тот же путь, что у
+   драга/растяжки (ГОСТ раздел 6: любой способ поменять s/l обязан проверять
+   пересечение перед коммитом, откат по той же схеме). */
+function hToLocalInputVal_(h){
+  var d = Math.floor(h / 24) + 1, rem = ((h % 24) + 24) % 24;
+  var hh = Math.floor(rem), mm = Math.round((rem - hh) * 60);
+  if (mm === 60){ mm = 0; hh += 1; }
+  if (d < 1){ d = 1; hh = 0; mm = 0; }
+  if (d > DAYS){ d = DAYS; hh = 23; mm = 59; }
+  var p2 = function(n){ return (n < 10 ? "0" : "") + n; };
+  return YEAR + "-" + p2(MONTH + 1) + "-" + p2(d) + "T" + p2(hh) + ":" + p2(mm);
+}
+function localInputValToH_(val){
+  var m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(val || "");
+  if (!m) return null;
+  return (parseInt(m[3], 10) - 1) * 24 + parseInt(m[4], 10) + parseInt(m[5], 10) / 60;
+}
 function openDrawer(seg){
   var v = STATE.vehicles[seg.v];
-  var rows = [["Машина", v.type + " · " + v.gos], ["Тягач", v.tractor],
+  var infoRows = [["Машина", v.type + " · " + v.gos], ["Тягач", v.tractor],
               ["Прицеп", (v.trailer || "-") + (v.trailerGos ? " · " + v.trailerGos : "")],
               ["Водитель", v.driver || "нет"], ["График", v.schedule || "-"]];
-  if (seg.kind === "trip"){
-    rows = [["Маршрут", seg.from + " → " + seg.to], ["Менеджер", seg.mg.code + " " + seg.mg.full],
-            ["Логист", seg.lg.code + " " + seg.lg.full],
-            ["Начало", fmt(seg.s)], ["Окончание", fmt(seg.s + seg.l)],
-            ["Длительность", durLabel(seg.l)]].concat(rows);
-  } else {
-    rows = [["Состояние", segLabel(seg)], ["Начало", fmt(seg.s)],
-            ["Окончание", fmt(seg.s + seg.l)], ["Длительность", durLabel(seg.l)]].concat(rows);
-  }
+  var topRows = seg.kind === "trip"
+    ? [["Маршрут", routeLabel_(seg.from, seg.to)], ["Менеджер", seg.mg.code + " " + seg.mg.full],
+       ["Логист", seg.lg.code + " " + seg.lg.full]]
+    : [["Состояние", segLabel(seg)]];
+  var rowsHtml = function(rows){
+    return rows.map(function(p){
+      return '<div class="dr-row"><span>' + p[0] + '</span><span class="' +
+        (/Машина/.test(p[0]) ? "mono" : "") + '">' + p[1] + "</span></div>";
+    }).join("");
+  };
   drawer.innerHTML = '<div class="dr-eyebrow">' +
     (seg.kind === "trip" ? "Рейс" : "Состояние машины") + '</div>' +
     '<div class="dr-title">' + segLabel(seg) + "</div>" +
-    rows.map(function(p){
-      return '<div class="dr-row"><span>' + p[0] + '</span><span class="' +
-        (/Начало|Окончание|Длительность|Машина/.test(p[0]) ? "mono" : "") + '">' + p[1] + "</span></div>";
-    }).join("") +
+    rowsHtml(topRows) +
+    '<div class="dr-row dr-row-edit"><span>Начало</span><input type="datetime-local" class="dr-date-input mono" id="lp-drStart" value="' +
+      hToLocalInputVal_(seg.s) + '"></div>' +
+    '<div class="dr-row dr-row-edit"><span>Окончание</span><input type="datetime-local" class="dr-date-input mono" id="lp-drEnd" value="' +
+      hToLocalInputVal_(seg.s + seg.l) + '"></div>' +
+    '<div class="dr-row"><span>Длительность</span><span class="mono" id="lp-drDurLabel">' + durLabel(seg.l) + '</span></div>' +
+    rowsHtml(infoRows) +
     '<div class="dr-note">Паспортные данные водителя для пропуска здесь не показаны намеренно: ' +
     'они живут в карточке водителя на сервере и отдаются по роли, с записью в журнал. ' +
     'Это следующий шаг - он же убирает у логиста поток запросов «скинь данные на пропуск».</div>' +
     '<div class="dr-actions">' +
     '<button class="chip dr-close" id="lp-drClose">Закрыть</button>' +
+    '<button class="chip dr-save" id="lp-drSaveDates">Сохранить даты</button>' +
     '<button class="chip dr-del" id="lp-drDel" title="Удалить запись">' + ICON_TRASH + " Удалить</button>" +
     '</div>';
   drawer.classList.add("open"); drawer.setAttribute("aria-hidden", "false");
   scrim.classList.add("open");
   document.getElementById("lp-drClose").onclick = closeDrawer;
   document.getElementById("lp-drDel").onclick = function(){ deleteSeg(seg); };
+  var startEl = document.getElementById("lp-drStart"), endEl = document.getElementById("lp-drEnd"),
+      durEl = document.getElementById("lp-drDurLabel");
+  function refreshDurPreview(){
+    var s = localInputValToH_(startEl.value), e = localInputValToH_(endEl.value);
+    durEl.textContent = (s != null && e != null && e > s) ? durLabel(e - s) : "—";
+  }
+  startEl.oninput = refreshDurPreview; endEl.oninput = refreshDurPreview;
+  document.getElementById("lp-drSaveDates").onclick = function(){
+    var newS = localInputValToH_(startEl.value), newE = localInputValToH_(endEl.value);
+    if (newS == null || newE == null){ toast("Некорректная дата", null); return; }
+    if (newE <= newS){ toast("Окончание должно быть позже начала", null); return; }
+    var newL = newE - newS;
+    var clash = STATE.segs.some(function(x){
+      return x !== seg && x.v === seg.v && newS < x.s + x.l && x.s < newS + newL;
+    });
+    if (clash){ S.reject(); toast("Пересечение с другим отрезком - не сохранил", null); return; }
+    var before = {s: seg.s, l: seg.l, v: seg.v};
+    seg.s = newS; seg.l = newL;
+    S.drop();
+    /* commit() сам НЕ перерисовывает ленту - у драга/растяжки плитка уже
+       переставлена на новое место инлайн, в момент pointerup, до commit(). Здесь
+       такого шага нет (правки идут через поля, не жест), поэтому renderRows()
+       нужен явно - иначе новые даты сохранятся в данных, но плитка визуально
+       останется на старом месте до следующего чужого триггера перерисовки. */
+    commit(seg, before, "Даты изменены вручную");
+    renderRows();
+    closeDrawer();
+  };
 }
 /* корзина - Влад, 29.08: «где-то должна появляться корзина, куда можно удалить
    заказ». Кладём в шторку (уже открыта по клику на плитку) + отмена тостом, как

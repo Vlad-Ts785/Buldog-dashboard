@@ -1690,7 +1690,16 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   white-space:nowrap;
 }#page-logistics-plan .hnd{position:absolute;top:0;bottom:0;width:6px;cursor:ew-resize;z-index:2;}#page-logistics-plan .hnd.l{left:0;}#page-logistics-plan .hnd.r{right:0;}/* Зумы - стандарт Влада 29.08: «неделя» = только МЕН/ЛОГ (бейдж, #page-logistics-plan без маршрута), #page-logistics-plan «месяц» = только ЛОГист, #page-logistics-plan всё - первыми тремя буквами. Служебные плашки (без
    бейджа) на обоих зумах остаются чистым цветом. */
-#page-logistics-plan.z-week .seg .seg-txt{display:none;}#page-logistics-plan.z-week .seg-label{margin-left:2px;}#page-logistics-plan.z-month .seg{height:16px;top:18px;border-radius:3px;font-size:0;}#page-logistics-plan.z-month .seg .seg-txt{display:none;}#page-logistics-plan.z-month .seg-label{margin-left:1px;}#page-logistics-plan.z-month .seg-id{height:12px;padding:0 3px;background:transparent;box-shadow:none;}#page-logistics-plan.z-month .seg-id b{display:none;}/* менеджер уходит */
+#page-logistics-plan.z-week .seg .seg-txt{display:none;}#page-logistics-plan.z-week .seg-label{margin-left:2px;}#page-logistics-plan.z-month .seg{height:16px;top:18px;border-radius:3px;font-size:0;}#page-logistics-plan.z-month .seg .seg-txt{display:none;}#page-logistics-plan.z-month .seg-label{margin-left:1px;}
+/* У статусных отрезков (ремонт/ТО/без заказа/без водителя) нет бейджа МЕН/ЛОГ -
+   единственная опознавательная надпись у них - именно этот текст. Скрытие текста
+   на зумах неделя/месяц было рассчитано на РЕЙСЫ (бейдж остаётся опознавательным
+   знаком вместо него) - для статусов оно оставляло голую цветную полосу совсем
+   без надписи (Влад, 30.08: "полоска Ремонт вообще не имеет никаких надписей").
+   Отменяем скрытие для всех НЕ-trip отрезков на обоих зумах. */
+#page-logistics-plan.z-week .seg:not([data-kind="trip"]) .seg-txt{display:inline;}
+#page-logistics-plan.z-month .seg:not([data-kind="trip"]){font-size:9px;}
+#page-logistics-plan.z-month .seg:not([data-kind="trip"]) .seg-txt{display:inline;}#page-logistics-plan.z-month .seg-id{height:12px;padding:0 3px;background:transparent;box-shadow:none;}#page-logistics-plan.z-month .seg-id b{display:none;}/* менеджер уходит */
 #page-logistics-plan.z-month .seg-id i{font-size:9px;color:var(--text);}/* логист остаётся читаемым */
 #page-logistics-plan.z-month .seg-drv{display:none;}#page-logistics-plan.z-month .seg-prog{display:none;}/* Крупное ВРЕМЯ, #page-logistics-plan ЗАФИКСИРОВАННОЕ на экране, #page-logistics-plan пока тянут/растягивают/рисуют
    (Влад, #page-logistics-plan 29.08: «бейджик двигался вместе с плиткой - глазами не уследить; пусть
@@ -17098,7 +17107,17 @@ function lpVpColor_(factPct){
    как только протяжка кончилась и время ушло за её конец - возвращается само. */
 function lpAwaiting_(v){
   if (v.vacant) return false;
-  if (/ремонт/i.test(v.statusToday || '')) return false;
+  /* Штатка-статус "ремонт" - подстраховка ТОЛЬКО для машин, у которых на доске
+     Планировки вообще ничего не заведено (реальный ремонт есть, а отрезок под
+     него ещё не нарисован - переходный период, доска только запущена). Как
+     только у машины появился хоть один отрезок - доска Планировки становится
+     точнее статичного текста Штатки для НЕЁ: дата окончания в отрезке сама
+     решает, идёт ли ремонт сейчас. Без этой оговорки статус "ремонт" в Штатке
+     (который не привязан к дате и вручную не снимается) навсегда блокировал
+     свечение даже после того, как отрезок ремонта в Планировке уже закончился
+     (живой баг, Влад, 30.08: "ремонт окончен, свечение не началось"). */
+  var hasOwnSegs = ((STATE && STATE.segs) || []).some(function(s){ return s.v === v.i; });
+  if (!hasOwnSegs && /ремонт/i.test(v.statusToday || '')) return false;
   return !lpActiveSeg_(v);
 }
 function lpActiveSeg_(v){
@@ -17291,6 +17310,7 @@ function makeSeg(s){
   var active = s.kind === "trip" && s.s <= now && now < s.s + s.l;
   el.className = cls;
   el.dataset.id = s.id;
+  el.dataset.kind = s.kind;   /* для CSS - см. z-week/z-month: у статусных отрезков нет бейджа МЕН/ЛОГ */
   el.style.setProperty("--s", s.s);
   el.style.setProperty("--l", s.l);
   if (active) el.style.setProperty("--progress",

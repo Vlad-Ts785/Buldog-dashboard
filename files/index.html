@@ -384,25 +384,44 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
    1) любая карточка - рамка ярче + фон на полступени (просто "слышит" курсор);
    2) проваливаемая (.p2-drill) - ещё cursor:pointer + сдвиг шеврона;
    3) attention (ДЗ) - рамка дополнительно краснеет. */
-/* Hover-физика карточки (канон ГОСТа из канбана уровня 5, Влад 28.08): карточка
-   не просто перекрашивается - приподнимается в объёме. Перспектива на странице,
-   preserve-3d на сетках, подъём translateY(-1px) translateZ(22px). */
+/* Hover-физика карточки (канон ГОСТа из канбана уровня 5, Влад 28.08): элемент
+   не просто перекрашивается - откликается движением. Точные числа и почему они
+   такие - в блоке «ЖЁСТКО ЗАФИКСИРОВАННАЯ ФИЗИКА» ниже. */
 /* ОБЩИЙ СТАНДАРТ ДЛЯ ВСЕХ СТРАНИЦ (Влад, 29.08: «как организована физика анимации
    на главной - это вписанный стандарт, нужно привести всё к одному значению»).
    Раньше правило было прибито к #page-main и потому не доезжало до остальных
    страниц - теперь оно на .page. Исключение одно: #page-crm (канбан) - там своя
    drag-физика, и perspective у предка ломает захват карточки (ГОСТ раздел 6). */
-.page:not(#page-crm){perspective:1400px;position:relative;}
+/* ЖЁСТКО ЗАФИКСИРОВАННАЯ ФИЗИКА (Влад, 29.08: «есть плитки, которые классно работают -
+   на главной умеренное движение и небольшой вылет, акцентирует внимание. А на других
+   она скачет, прыгает и сильно вылетает. Эти параметры нужно жёстко зафиксировать»).
+   Два уровня, третьего нет:
+     ПЛИТКА  (.kpi/.mp-stat) - подъём 1px + вылет translateZ(22px). Эталон - главная.
+     ПОВЕРХНОСТЬ (.card/.mp-status) - только подъём 1px, БЕЗ вылета.
+   Перспектива живёт на КОНТЕЙНЕРЕ плиток, а не на всей странице. Замерено: при
+   перспективе на странице один и тот же CSS уводил плитку вверху экрана на -10,2px
+   по Y, а внизу на +5,8px - «прыжок» зависел от места на странице. С перспективой на
+   сетке обе дают -2,05px, одинаково. Широкая карточка при том же translateZ росла на
+   +16,5px против +4,3px у плитки - отсюда «сильно вылетает», поэтому у поверхностей
+   вылета нет вовсе. */
+.page:not(#page-crm){position:relative;}
 .page:not(#page-crm) .kpi-grid,.page:not(#page-crm) .grid-2,
 .page:not(#page-crm) .p2-tier3-grid,.page:not(#page-crm) .mp-tier,
-.page:not(#page-crm) .mp-stats{transform-style:preserve-3d;}
+.page:not(#page-crm) .mp-stats{perspective:1400px;}
 .page:not(#page-crm) .kpi,.page:not(#page-crm) .card{
   transition:border-color .12s ease-out,background-color .12s ease-out,transform .12s ease-out;
   will-change:transform;
 }
-.page:not(#page-crm) .kpi:hover,.page:not(#page-crm) .card:hover{
+/* ПЛИТКА - подъём с вылетом */
+.page:not(#page-crm) .kpi:hover{
   border-color:var(--border-strong, rgba(255,255,255,.16));background:#191920;
   transform:translateY(-1px) translateZ(22px);
+}
+/* ПОВЕРХНОСТЬ - тот же цветовой отклик, но только подъём: крупный блок, вылетая,
+   уезжает на десяток пикселей и раздражает (см. пояснение выше) */
+.page:not(#page-crm) .card:hover{
+  border-color:var(--border-strong, rgba(255,255,255,.16));background:#191920;
+  transform:translateY(-1px);
 }
 /* ИСКЛЮЧЕНИЕ: карточка с ТАБЛИЦЕЙ не приподнимается (Влад, 29.08: «большие крупные
    таблицы анимировать не нужно, слишком раздражает, когда она дёргается; на небольших
@@ -420,8 +439,8 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 }
 .p2-light.on{opacity:1;}
 @media (prefers-reduced-motion: reduce){
-  .page{perspective:none;}
-  .page .kpi:hover,.page .card:hover{transform:none;}
+  .page .kpi-grid,.page .grid-2,.page .p2-tier3-grid,.page .mp-tier,.page .mp-stats{perspective:none;}
+  .page .kpi:hover,.page .card:hover,.mp-stat:hover,.mp-status:hover{transform:none;}
   .p2-light{display:none;}
 }
 
@@ -778,7 +797,8 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   padding:16px 22px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;
   gap:20px;position:relative;overflow:hidden;flex-wrap:wrap;
   transition:border-color .12s ease-out,transform .12s ease-out;will-change:transform;}
-.mp-status:hover{border-color:var(--border-strong,rgba(255,255,255,.16));transform:translateY(-1px) translateZ(22px);}
+/* поверхность во всю ширину - только подъём, без вылета (см. канон физики выше) */
+.mp-status:hover{border-color:var(--border-strong,rgba(255,255,255,.16));transform:translateY(-1px);}
 .mp-status::before{content:'';position:absolute;inset:0;opacity:.1;pointer-events:none;}
 .mp-status--bad::before{background:var(--red);}
 .mp-status--good::before{background:var(--green);}
@@ -812,7 +832,8 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .mp-stat{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);
   padding:15px 16px 14px;display:flex;flex-direction:column;height:100%;cursor:pointer;
   transition:border-color .12s ease-out,background-color .12s ease-out,transform .12s ease-out;will-change:transform;}
-.mp-stat:hover{border-color:var(--border-strong,rgba(255,255,255,.16));background:#191920;transform:translateY(-1px) translateZ(18px);}
+/* ровно те же числа, что у .kpi на главной - эталон один на весь проект (было 18px) */
+.mp-stat:hover{border-color:var(--border-strong,rgba(255,255,255,.16));background:#191920;transform:translateY(-1px) translateZ(22px);}
 .mp-stat:hover .mp-stat__chev{opacity:1;transform:translateX(0);}
 @media(prefers-reduced-motion:reduce){.mp-stat:hover{transform:none;}}
 .mp-stat__cap{display:flex;align-items:center;gap:7px;font-size:10px;color:var(--muted);font-weight:600;

@@ -4956,6 +4956,11 @@ function renderMyPageManager(el, current, selectorHtml, d) {
       parts.push({ k:'Премия', v:sal.bonus15m, bg:pageHex2rgba_(COL.amber,0.34), sw:SW_PREM });
     }
 
+    // Ступень оклада выросла -> фанфара + тост (один раз на ступень, см.
+    // mpTierSoundCheck_). Только для ТЕКУЩЕГО месяца: в архивном периоде
+    // «достижения» уже случились и праздновать их заново нельзя.
+    if (!myPagePeriod) mpTierSoundCheck_(current, sal.oklad, D.orders.period);
+
     salaryBody =
       mpSalLeverHtml_(sal) +
       mpSalTierLadderHtml_(sal) +
@@ -14317,19 +14322,56 @@ function toggleUiSound() {
 (function initUiSound_() {
   var label = document.getElementById('sound-btn-label');
   if (label) label.textContent = uiSoundOn ? 'Звук: вкл' : 'Звук: выкл';
-  // делегирование - не трогаем showPage и onclick-атрибуты
-  var nav = document.querySelector('.sidebar-nav');
-  if (nav) nav.addEventListener('click', function(e){
-    if (e.target.closest('.sidebar-nav-item')) uiSounds.navClick();
-  });
-  // Клик по плиткам-переходам (Влад, 28.08: "плитки, нажимая на которые переходим в
-  // раздел, сопроводить звуком") - тот же navClick-тик, что у пунктов меню: переход
-  // есть переход, один принцип. Ловит: проваливаемые карточки (.p2-drill - ДЗ,
-  // Поступления, Маржа найма, Незакрытые) и блоки парка (переход на Технику).
+  // Частный обработчик сайдбара убран: он дублировал общее делегирование ниже, и
+  // пункт меню щёлкал ДВАЖДЫ (поймано счётчиком вызовов 29.08). Ровно та причина,
+  // по которой правило и должно быть одно, а не список обработчиков.
+  // ЕДИНОЕ ПРАВИЛО (Влад, 28.08 -> обобщено 29.08): ЛЮБОЙ переход внутри дашборда
+  // звучит одинаково - тем же navClick-тиком, что и пункт меню. Не важно, чем
+  // пользователь переключился: пунктом сайдбара, вкладкой, кликабельной плиткой,
+  // чипом-фильтром или строкой-ссылкой - для человека это одно действие «я иду
+  // в другое место», и звук обязан быть один. Перечислять места по одному больше
+  // не нужно: селектор ниже - и есть правило (ГОСТ раздел 8).
+  var NAV_SOUND_SEL = [
+    '.sidebar-nav-item',        // меню
+    '.tab-btn',                 // вкладки любого таб-бара
+    '.month-tab',               // Текущий/Прошлый месяц
+    '.p2-drill',                // проваливаемые карточки главной панели
+    '.fleet-block[onclick]',    // блоки парка
+    '.mp-stat',                 // плашки Выручка/Поступления/Дебиторка личной страницы
+    '.mp-ghostbtn',             // «Пропавшие клиенты» (drawer)
+    '.p2-board',                // табло-карусель метрик
+    '[data-nav-sound]'          // явная пометка для всего, что не попало в список
+  ].join(',');
   document.addEventListener('click', function(e){
-    if (e.target.closest('.p2-drill') || e.target.closest('.fleet-block[onclick]')) uiSounds.navClick();
+    if (e.target.closest(NAV_SOUND_SEL)) uiSounds.navClick();
   });
 })();
+
+/* ═══ ДОСТИЖЕНИЕ СТУПЕНИ ОКЛАДА - праздничный звук (Влад, 29.08) ═══
+   30 000 / 50 000 / 100 000 / 150 000 ₽: событие редкое (максимум 4 раза за месяц
+   на человека), поэтому ему положена фанфара, а не деликатный тик. Дедупликация по
+   паре «сотрудник + ступень + месяц»: сыграет ОДИН раз, а не на каждом рендере и
+   не при каждом заходе на страницу. Первый заход только запоминает текущий уровень
+   и молчит - иначе фанфара играла бы всем сразу при первом открытии. */
+function mpTierSoundCheck_(personName, okladNow, period) {
+  try {
+    if (!personName) return;
+    okladNow = Number(okladNow) || 0;   // 0 - ВАЛИДНОЕ значение (оборот ниже первой
+    // ступени). Раньше стоял guard `!okladNow`, из-за которого база не записывалась,
+    // и первая достигнутая ступень трактовалась как «первый заход» - фанфара
+    // молчала именно там, где она была нужнее всего (поймано 29.08).
+    var key = 'mp_oklad_tier:' + personName + ':' + (period || '');
+    var prev = localStorage.getItem(key);
+    localStorage.setItem(key, String(okladNow));
+    if (prev === null) return;                 // первый заход - только база, тишина
+    if (Number(prev) >= okladNow) return;      // не выросло (или пересчёт вниз)
+    if (document.hidden) return;               // не празднуем в фоновой вкладке
+    if (typeof uiSounds !== 'undefined' && uiSounds.growth) uiSounds.growth();
+    if (typeof p2Toast === 'function') {
+      p2Toast('Ступень оклада: <b>' + Math.round(okladNow).toLocaleString('ru-RU') + ' ₽</b>', 'green');
+    }
+  } catch (e) { /* localStorage может быть недоступен - звук не критичен */ }
+}
 
 /* ═══ Живое движение по банковскому счёту (план 2026-08-28-bank-operations-live-feed.md) ═══
    Телефон с банковской симкой шлёт СМС СберБизнеса на api.yardhub.ru (СМС Пересыльщик,

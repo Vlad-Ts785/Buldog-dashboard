@@ -1428,7 +1428,18 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   appearance:none;border:1px solid var(--border);background:var(--bg3);color:var(--muted);
   height:22px;padding:0 9px;border-radius:6px;font-size:10.5px;font-family:inherit;
   cursor:pointer;margin-left:2px;transition:color .12s ease-out,border-color .12s ease-out;
-}#page-logistics-plan .monthnav-today:hover{color:var(--text);border-color:var(--border-strong);}#page-logistics-plan .spacer{flex:1 1 auto;}#page-logistics-plan .kpis{display:flex;gap:2px;align-items:stretch;}#page-logistics-plan .kpi{padding:4px 14px 4px 0;margin-right:12px;border-right:1px solid var(--border);}#page-logistics-plan .kpi:last-child{border-right:0;margin-right:0;}#page-logistics-plan .kpi-label{
+}#page-logistics-plan .monthnav-today:hover{color:var(--text);border-color:var(--border-strong);}#page-logistics-plan .spacer{flex:1 1 auto;}#page-logistics-plan .kpis{display:flex;gap:2px;align-items:stretch;}#page-logistics-plan .kpi{
+  /* НАЙДЕННЫЙ БАГ (Влад, 29.08: "наведи порядок, а не криво, как сейчас") -
+     класс .kpi совпадает по имени с карточкой на главной панели дашборда
+     (background/border/border-radius), и каскад работает ПОСВОЙСТВЕННО, не
+     "правило целиком": #page-logistics-plan .kpi специфичнее по селектору, но
+     раз это правило НЕ объявляло background/border/border-radius само, эти
+     конкретные свойства всё равно брались из чужого правила - специфичность
+     тут ни при чём, конкурировать было некому. Явно гасим - плоский ряд с
+     разделительными линиями, не отдельные плашки-пилюли. */
+  background:transparent;border:0;border-radius:0;
+  padding:4px 14px 4px 0;margin-right:12px;border-right:1px solid var(--border);
+}#page-logistics-plan .kpi:last-child{border-right:0;margin-right:0;}#page-logistics-plan .kpi-label{
   font-size:9px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;
   color:var(--muted);margin-bottom:3px;white-space:nowrap;
 }#page-logistics-plan .kpi-val{font-size:17px;font-weight:600;line-height:1;}#page-logistics-plan .controls{display:flex;gap:14px;align-items:center;flex-wrap:wrap;}#page-logistics-plan .grp{display:flex;align-items:center;gap:6px;}#page-logistics-plan .grp-label{
@@ -18358,7 +18369,15 @@ function initLP(){
   STATE.vehicles = [];
   STATE.segs = [];
   STATE.seq = 1;
-  STATE.role = (typeof D !== "undefined" && D && D.role === "admin") ? "admin" : "logist";
+  /* Васин - временно полный (админский) доступ к Планировке (Влад, 29.08:
+     "он сейчас будет участником нашего бета-тестирования... у него будет
+     временно админ-режим") - ТОЛЬКО ему, остальные логисты/менеджеры остаются
+     в урезанном режиме. Фамилия - тот же способ узнавания Васина, что уже
+     используется в дашборде (isVasinEntry_ и др.: первое слово D.logistName,
+     нижний регистр). Убрать - когда бета-тест закончится, снять это условие. */
+  var isVasinBeta_ = typeof D !== "undefined" && D && D.role === "logist" &&
+    (D.logistName || "").trim().split(" ")[0].toLowerCase() === "васин";
+  STATE.role = (typeof D !== "undefined" && D && (D.role === "admin" || isVasinBeta_)) ? "admin" : "logist";
   buildVehicles();
   buildRoster();
   STATE.typeLegend = buildTypeLegend();

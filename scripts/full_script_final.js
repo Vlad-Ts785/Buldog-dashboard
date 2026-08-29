@@ -5704,7 +5704,13 @@ function readMainPayloadCache_(ss) {
   var json = row.slice(2).join('');
   if (!json) return null;
   try {
-    return JSON.parse(json);
+    var parsed = JSON.parse(json);
+    // Возраст ИМЕННО этого кэша (план 2026-08-28, Этап 0.1) - записан в saveMainPayloadCache_
+    // как row[1], до сих пор нигде не читался. Честный источник для карточки Штатки на
+    // фронтенде - её "обн. HH:MM" раньше показывал D.updated (время СБОРКИ ОТВЕТА, не время
+    // самого кэша), см. renderFleetStatus в index.html.
+    parsed.fleet_cache_at = row[1] || null;
+    return parsed;
   } catch (parseErr) {
     return null;
   }
@@ -5746,6 +5752,7 @@ function getMainPayloadCacheOrLive_(ss, staffData) {
     history:  getHistoryData(ss),
     driverOrderCounts: getDriverOrderCounts_(ss, defaultRange.from, defaultRange.to),
     periods: getAvailablePeriods(ss),
+    fleet_cache_at: new Date().toISOString(), // кэша ещё нет - считаем живьём прямо сейчас, честно
   }, freshFinancials);
 }
 
@@ -7095,10 +7102,23 @@ function getRevenueDateComparison_(ss) {
   try {
     const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const prevMonthKey = Utilities.formatDate(prevMonthDate, 'Europe/Moscow', 'yyyy-MM');
-    const archive = ss.getSheetByName(ORDERS_ARCHIVE_PFX + prevMonthKey);
-    if (archive && archive.getLastRow() >= 5) {
-      const rows = parseOrdersRawRows(archive.getDataRange().getValues()).rows;
-      result.prev_month = sumManagerRevenueThruDay_(rows, currentDay);
+    // Кэш 6ч (как у prev_year ниже) - горячая точка №1 замера 29.08: без кэша читает ВЕСЬ
+    // лист архива (~1000 строк x 44 колонки) при КАЖДОМ заходе на дашборд, это ~4-5 из
+    // типичных 12 секунд загрузки. Архив прошлого месяца меняется редко (только поздняя
+    // коррекция 1С в первые дни месяца, см. archiveOrdersIfNeeded) - 6ч задержка в этом
+    // случае приемлема для второстепенной сравнительной цифры, план 2026-08-28.
+    const cache = CacheService.getScriptCache();
+    const cacheKey = 'prev_month_revenue_v1_' + prevMonthKey + '_' + currentDay;
+    const cached = cache.get(cacheKey);
+    if (cached !== null) {
+      result.prev_month = parseFloat(cached);
+    } else {
+      const archive = ss.getSheetByName(ORDERS_ARCHIVE_PFX + prevMonthKey);
+      if (archive && archive.getLastRow() >= 5) {
+        const rows = parseOrdersRawRows(archive.getDataRange().getValues()).rows;
+        result.prev_month = sumManagerRevenueThruDay_(rows, currentDay);
+        try { cache.put(cacheKey, String(result.prev_month), 21600); } catch (cacheErr) { /* кэш не критичен */ }
+      }
     }
   } catch (e1) { /* архива нет или не распознан - просто не показываем строку */ }
 

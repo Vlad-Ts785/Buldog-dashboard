@@ -1327,7 +1327,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
       <button type="button" class="sidebar-refresh" id="view-as-btn" onclick="uiSounds.toggle();toggleViewAsPanel(event)"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 10s3-5.3 8-5.3S18 10 18 10s-3 5.3-8 5.3S2 10 2 10z"/><circle cx="10" cy="10" r="2.3"/></svg><span id="view-as-btn-label">Смотреть как сотрудник</span></button>
       <div id="view-as-panel" style="display:none;position:absolute;bottom:calc(100% + 4px);left:0;right:0;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px;z-index:50;max-height:280px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.4)"></div>
     </div>
-    <button class="sidebar-refresh" onclick="uiSounds.refresh();loadData()" style="margin-top:6px"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15.6 6.6A6 6 0 1 0 16 10"/><path d="M16 3v4h-4"/></svg><span>Обновить данные</span></button>
+    <button id="refresh-btn" class="sidebar-refresh" onclick="uiSounds.refresh();loadData()" style="margin-top:6px"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15.6 6.6A6 6 0 1 0 16 10"/><path d="M16 3v4h-4"/></svg><span>Обновить данные</span></button>
     <button class="sidebar-refresh" onclick="toggleUiSound()" style="margin-top:6px"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8v4h3l4 3.2V4.8L6.5 8z"/><path d="M13.2 7.2a4 4 0 0 1 0 5.6"/><path d="M15.4 5a7 7 0 0 1 0 10"/></svg><span id="sound-btn-label">Звук: вкл</span></button>
     <button class="sidebar-refresh" onclick="logoutUser()" style="margin-top:6px"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4H4.5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1H8"/><path d="M12.3 6.7 15.8 10l-3.5 3.3"/><line x1="15.6" y1="10" x2="7.3" y2="10"/></svg><span>Выйти</span></button>
   </div>
@@ -3919,7 +3919,16 @@ function initGoogleSignIn() {
   else showLoginScreen();
 }
 
+let loadDataInFlight_ = false; // защита кнопки от двойного клика (аудит 29.08) - без неё
+                                // два параллельных вызова пишут в D в произвольном порядке
 async function loadData() {
+  if (loadDataInFlight_) return;
+  loadDataInFlight_ = true;
+  var refreshBtn = document.getElementById('refresh-btn');
+  var refreshLabel = refreshBtn ? refreshBtn.querySelector('span') : null;
+  var refreshLabelOrig = refreshLabel ? refreshLabel.textContent : null;
+  if (refreshBtn) refreshBtn.disabled = true;
+  if (refreshLabel) refreshLabel.textContent = 'Обновляю…';
   document.getElementById('loading').style.display = 'flex';
   startLoadingPhrases();
   try {
@@ -3936,7 +3945,10 @@ async function loadData() {
     // ответил или вернул ошибку, тихо остаёмся на уже отрисованных данных, ничего не ломается.
     if (D.role === 'admin') {
       fetchReceiptsFromServer_().then(function(r) {
-        if (r && !r.error && D) { D.receipts = r; renderReceipts(); }
+        // Обе секции читают D.receipts (аудит 29.08: раньше обновлялась только страница
+        // "Поступления" - сводка "main-receipts-summary" на Панели оставалась на версии из
+        // основного payload до следующего события, хотя источник у них общий).
+        if (r && !r.error && D) { D.receipts = r; renderReceipts(); renderMainReceiptsSummary(); }
       }).catch(function() {});
     }
     // Живая лента банковских операций (поллинг раз в минуту) - админ (вся общекорпоративная
@@ -3958,9 +3970,16 @@ async function loadData() {
       ? 'Сервер вернул страницу вместо данных - обычно значит, что Apps Script не задеплоен или временно упал на стороне Google. Обнови страницу через минуту; если не поможет - нужно передеплоить scripts/full_script_final.js в Apps Script.'
       : 'Попробуй обновить страницу. Если ошибка повторяется - напиши, что тут написано, разберёмся.';
     document.getElementById('error-block-hint').textContent = hint;
+  } finally {
+    // finally, не просто "после catch" (аудит 29.08) - выше есть ранний return при
+    // needLogin, без finally он обходил бы очистку и намертво вешал бы кнопку disabled
+    // до следующей перезагрузки страницы.
+    document.getElementById('loading').style.display = 'none';
+    stopLoadingPhrases();
+    loadDataInFlight_ = false;
+    if (refreshBtn) refreshBtn.disabled = false;
+    if (refreshLabel) refreshLabel.textContent = refreshLabelOrig;
   }
-  document.getElementById('loading').style.display = 'none';
-  stopLoadingPhrases();
 }
 
 // Должность для шапки личной страницы (Влад, 2026-08-10: "вверху надпись - фамилия, имя,
@@ -6967,9 +6986,8 @@ function renderMyPageVasin(el, current, selectorHtml) {
 }
 
 function render() {
-  const t = D.updated ? new Date(D.updated).toLocaleString('ru',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'}) : '';
-  setText('nav-updated', 'Обновлено: ' + t);
-  checkDataFreshness(); // плашка "обновление не проходит", см. Этап 0.3
+  updateFreshnessDisplays_(); // честно из последнего известного data_age_min, см. Этап 0.1
+  checkDataFreshness(); // свежий опрос + плашка "обновление не проходит", см. Этап 0.1/0.3
   updatePagePeriod_(); // "Август 2026 · день N из M · данные 1С HH:MM" в шапке
   applyRoleUI();
 
@@ -7213,18 +7231,24 @@ function renderSalesTabsForPeriod() {
     if (D.summary && periodSalesPlan !== null) D.summary.salesPlan = periodSalesPlan;
     if (D.summary && periodSalesFaktThruYesterday !== null) D.summary.salesFaktThruYesterday = periodSalesFaktThruYesterday;
   }
-  renderSales();
-  renderSalesMgr();
-  renderSalesLog();
-  renderSalesSalary();
-  D.orders = realOrders;
-  if (D.summary) D.summary.profit = realProfit;
-  if (D.summary) D.summary.profit_tral = realProfitTral;
-  if (D.summary) D.summary.profit_long = realProfitLong;
-  if (D.summary) D.summary.special_trals_profit = realSpecialTralsProfit;
-  if (D.summary) D.summary.salesFakt = realSalesFakt;
-  if (D.summary) D.summary.salesPlan = realSalesPlan;
-  if (D.summary) D.summary.salesFaktThruYesterday = realSalesFaktThruYesterday;
+  // try/finally (аудит 29.08) - без него исключение в любом из 4 внутренних рендеров
+  // навсегда оставляло бы весь дашборд на цифрах чужого периода (D.orders/D.summary не
+  // возвращались бы обратно). Тот же приём, что renderMyPage выше по файлу.
+  try {
+    renderSales();
+    renderSalesMgr();
+    renderSalesLog();
+    renderSalesSalary();
+  } finally {
+    D.orders = realOrders;
+    if (D.summary) D.summary.profit = realProfit;
+    if (D.summary) D.summary.profit_tral = realProfitTral;
+    if (D.summary) D.summary.profit_long = realProfitLong;
+    if (D.summary) D.summary.special_trals_profit = realSpecialTralsProfit;
+    if (D.summary) D.summary.salesFakt = realSalesFakt;
+    if (D.summary) D.summary.salesPlan = realSalesPlan;
+    if (D.summary) D.summary.salesFaktThruYesterday = realSalesFaktThruYesterday;
+  }
 }
 
 // ── ВЫБОР ДИАПАЗОНА (Техника / Водители) ────────────────────
@@ -7554,11 +7578,11 @@ function updatePagePeriod_() {
   var tm = now.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
   var dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
   var monthLabel = formatMonthLabel(now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0'));
+  // Честный источник (план 2026-08-28, Этап 0.1) - тот же liveDataAgeMin_(), что и nav-updated
+  // в сайдбаре (см. checkDataFreshness выше по файлу), а не D.updated (время запроса, не данных).
   var updStr = '';
-  if (D && D.updated) {
-    var u = new Date(D.updated);
-    if (!isNaN(u.getTime())) updStr = ' · данные 1С ' + u.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
-  }
+  var age = (typeof liveDataAgeMin_ === 'function') ? liveDataAgeMin_() : null;
+  if (age != null) updStr = ' · данные 1С ' + fmtAgo_(age) + ' назад';
   el.innerHTML = wd + ' ' + dm + ' · ' + tm + ' · ' + monthLabel + ' · <b>день ' + now.getDate() + ' из ' + dim + '</b>' + updStr;
 }
 // Часы в шапке живые, не снимок момента загрузки (Влад, 28.08: "часы замерли") -
@@ -7760,6 +7784,8 @@ function renderDebtMiniCard() {
 
 // ── ГЛАВНАЯ ────────────────────────────────────────────────
 function renderMain() {
+  if (!D) return; // гвард (аудит 29.08) - без него любой из подрендеров ниже падает на
+                   // TypeError при частичном/ещё не пришедшем D, обрывая весь render()
   renderFleetStatus();
   renderCostChart();
   renderVehicleChart();
@@ -8050,8 +8076,14 @@ function renderFleetStatus() {
   const pct = Math.round(totalWorking / totalFleet * 100);
   const barColor = pct >= 70 ? 'var(--green)' : pct >= 50 ? 'var(--amber)' : 'var(--red)';
 
-  const updStr = D.updated ? (function() {
-    var dt = new Date(D.updated);
+  // Честный источник (план 2026-08-28, Этап 0.1) - fleet_cache_at это время ЗАПИСИ кэша
+  // Штатки (saveMainPayloadCache_, 6 раз/сутки), а не D.updated (время сборки ЭТОГО ответа) -
+  // раньше карточка показывала свежее на вид время, даже когда состав парка кэширован
+  // до 3 часов назад. Фолбэк на D.updated - пока не задеплоен новый scripts/full_script_final.js
+  // (frontend/backend деплоятся раздельно, см. CLAUDE.md).
+  const fleetTs = D.fleet_cache_at || D.updated;
+  const updStr = fleetTs ? (function() {
+    var dt = new Date(fleetTs);
     return dt.toLocaleDateString('ru', {day:'2-digit', month:'2-digit'}) +
            ' · ' + dt.toLocaleTimeString('ru', {hour:'2-digit', minute:'2-digit'});
   })() : '—';
@@ -8147,6 +8179,8 @@ function renderVehicleChart() {
 // своей цели (полоса против засечки). Ранг медалями-картинками убран (ГОСТ запрет №2,
 // медали были эмодзи-иконками - Влад, 2026-07-04) - вместо них просто порядок в списке.
 function renderMgrList() {
+  if (!D || !D.orders) return; // гвард (аудит 29.08) - была реальная бомба на пути
+                                // render(): D.orders.by_manager на TypeError при частичном D
   // ВСЕ менеджеры-продажники (эргономист: "все - план/факт нужен по каждому,
   // руководители смотрят своих"; слайс до 6 убран доточкой 28.08).
   const mgrs = (D.orders.by_manager||[]).filter(m => isSales(m.name)).sort((a,b) => b.amount-a.amount);
@@ -14409,11 +14443,27 @@ function fetchReceiptsFromServer_() {
 // уже работает через тихий фолбэк на Apps Script и данные показывает честные; пугать
 // пользователя тем, что от него не зависит и на цифры не влияет, значит приучить не читать
 // плашку вообще.
+//
+// Честный таймстемп (план 2026-08-28, Этап 0.1). D.updated - ложь: ставится в момент СБОРКИ
+// ОТВЕТА (new Date() в doGet), это время ЗАПРОСА, а не данных, и физически не может показать
+// устаревание - та же слепота, из-за которой авария 19.08 висела 8 часов незамеченной. Честный
+// источник - "data_age_min" в этом же ответе /api/import_status: сервер уже сам считает
+// возраст данных по самому отстающему из import-orders-raw/import-debt (max minutes_since_ok,
+// т.е. с последнего РЕАЛЬНОГО импорта, а не с последнего опроса cron - см. api/server.js).
+// dataFreshnessCheckedAtMs_ - клиентские часы в момент фетча, чтобы между опросами счётчик
+// тикал сам (updatePagePeriod_ дергается каждые 30 сек) и не выглядел замороженным.
+let dataFreshnessMin_ = null;
+let dataFreshnessCheckedAtMs_ = null;
 function checkDataFreshness() {
-  var box = document.getElementById('nav-stale');
-  if (!box) return;
   fetchFromYardApi_('/import_status', {}).then(function(r) {
-    if (!r.ok || !r.data || !r.data.scripts) return;
+    if (!r.ok || !r.data) return;
+    if (typeof r.data.data_age_min === 'number') {
+      dataFreshnessMin_ = r.data.data_age_min;
+      dataFreshnessCheckedAtMs_ = Date.now();
+      updateFreshnessDisplays_();
+    }
+    var box = document.getElementById('nav-stale');
+    if (!box || !r.data.scripts) return;
     var broken = r.data.scripts.filter(function(s) { return !s.healthy; });
     if (!broken.length) { box.style.display = 'none'; return; }
     var lines = broken.map(function(s) {
@@ -14426,10 +14476,23 @@ function checkDataFreshness() {
   }).catch(function() { /* сервер недоступен - молчим, см. комментарий выше */ });
 }
 function fmtAgo_(min) {
+  if (min < 1) return 'меньше минуты';
   if (min < 60) return min + ' мин';
   var h = Math.floor(min / 60);
   if (h < 24) return h + ' ч';
   return Math.floor(h / 24) + ' дн';
+}
+// Текущий "живой" возраст данных в минутах - экстраполирован от последнего реального опроса
+// клиентскими часами, не отдельным сетевым запросом (следующий стадии - поллинг, Этап 3).
+function liveDataAgeMin_() {
+  if (dataFreshnessMin_ == null || dataFreshnessCheckedAtMs_ == null) return null;
+  return dataFreshnessMin_ + Math.floor((Date.now() - dataFreshnessCheckedAtMs_) / 60000);
+}
+// Единая точка записи в оба места со свежестью в интерфейсе (сайдбар + шапка страницы) -
+// раньше оба читали D.updated независимо и оба врали одинаково; теперь один честный источник.
+function updateFreshnessDisplays_() {
+  var age = liveDataAgeMin_();
+  setText('nav-updated', age != null ? 'Данные 1С: ' + fmtAgo_(age) + ' назад' : 'Данные 1С: нет данных');
 }
 
 function loadClientsData() {

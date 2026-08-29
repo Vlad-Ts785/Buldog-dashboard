@@ -2774,12 +2774,20 @@ function calc(){
         else if(zone==='mkad'){esc=ESC_ZONE.mkad;escNote='МКАД';}
         else if(zone==='ckad'){esc=ESC_ZONE.ckad;escNote='МО до ЦКАД';}
         else{var er=ESC_CAT[ecat][escortBand(a2)];esc=ESC_FAR_BASE+rn(a2*er);escNote='Кат.'+ecat+' · 20 000 + '+a2+' км × '+er+' ₽';}
+        // Влад, 29.08: сопровождение едет с грузом КАЖДУЮ ходку кругового рейса, не одну
+        // на весь заказ - при loopCount=2 машина сопровождения физически выезжает дважды.
+        // Раньше esc был плоским (не зависел от loopCount) - расхождение поймано на живом
+        // расчёте (49 000 ₽ не менялись между ×1 и ×2). Метод - тот же raw-multiply без
+        // повторного rn(), что и у ldAll (round базовую сумму один раз, множить как есть).
+        if(loopCount>1){esc=esc*loopCount;escNote+=' ×'+loopCount;}
     }
     // Машина прикрытия (Влад, 28.08, по законодательству о крупногабаритных перевозках):
     // обязательна при ширине груза > 3,5 м или длине > 19 м (автопоезд длиннее ~24 м).
-    // Стоимость: 21 000 ₽ смена + 60 ₽/км, едет плечо с грузом каждую ходку.
+    // Стоимость: 21 000 ₽ смена + 60 ₽/км, едет плечо с грузом каждую ходку - ВСЯ формула
+    // (не только км-часть) умножается на loopCount (Влад, 29.08: та же логика, что и у
+    // сопровождения выше - прикрытие тоже выезжает заново на каждый цикл).
     var escortCar=0,escortNeed=(wh>3.5||ln>19);
-    if(escortNeed)escortCar=rn(21000+60*a2*loopCount);
+    if(escortNeed)escortCar=rn((21000+60*a2)*loopCount);
     var sub=rn(shift*coef*coefOver)+e1+ldAll+loopBackTotal+e2+esc+escortCar,total=rn(sub*trips);
     document.getElementById('clc-totalPrice').textContent=total?total.toLocaleString()+' ₽':'0 ₽';
     // Кокпит 2.0: вывод - через табло (сплит-флэп + стековая полоса + легенда).

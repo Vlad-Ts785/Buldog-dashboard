@@ -816,6 +816,11 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
    стояли на одной линии независимо от длины подписи (Влад, 29.08) */
 .mp-stat__val{font-family:'JetBrains Mono',monospace;font-size:23px;font-weight:700;color:var(--text);
   font-variant-numeric:tabular-nums;line-height:1.05;letter-spacing:-.01em;}
+/* Вторая цифра плитки - «за неделю» (Влад, 29.08). Занимает пустое поле между
+   крупной суммой и подвалом, поэтому плитка перестала выглядеть полупустой. */
+.mp-stat__week{margin-top:12px;display:flex;align-items:baseline;gap:7px;}
+.mp-stat__week-cap{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;}
+.mp-stat__week-val{font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;}
 .mp-stat__foot{margin-top:auto;padding-top:12px;}
 .mp-stat__sub{font-size:10.5px;color:var(--muted);line-height:1.4;}
 .mp-stat__sub b{color:var(--text);font-family:'JetBrains Mono',monospace;font-weight:500;}
@@ -4533,20 +4538,31 @@ function mpStatsHtml_(faktVal, planVal, sur) {
   var recPctV = faktVal > 0 ? Math.min(100, recTotal/faktVal*100) : 0;
   var overPctV = debtTotal > 0 ? Math.min(100, debtOver30/debtTotal*100) : 0;
 
-  function cell(id, tab, color, cap, val, subHtml, pct) {
+  function cell(id, tab, color, cap, val, subHtml, pct, weekVal) {
     return '<div class="mp-stat" onclick="setMyPageMgrTab(\''+tab+'\');mpScrollToTabs_()" title="Открыть вкладку">'+
       '<div class="mp-stat__cap"><span class="mp-stat__dot" style="background:'+color+'"></span>'+cap+
         '<span class="mp-stat__chev">›</span></div>'+
       '<div class="mp-stat__val">'+val+'</div>'+
+      ((weekVal != null) ? '<div class="mp-stat__week"><span class="mp-stat__week-cap">за неделю</span><span class="mp-stat__week-val">'+pageFr_(weekVal)+'</span></div>' : '')+
       '<div class="mp-stat__foot"><div class="mp-stat__sub">'+subHtml+'</div>'+
         '<div class="mp-stat__bar"><div class="mp-stat__fill" style="width:'+pct.toFixed(1)+'%;background:'+color+'"></div></div>'+
       '</div></div>';
   }
+  // Недельные цифры (Влад, 29.08). Выручка - поле amount_week из расчёта заказов
+  // (добавлено в ОБЕ копии: Apps Script и VPS). Поступления - из уже загруженного
+  // D.receipts.week. Обе «недели» считаются от ОДНОГО понедельника, значит сопоставимы.
+  var mgrRowW = (D.orders.by_manager||[]).filter(function(m){
+    return String(m.name||'').trim().split(' ')[0].toLowerCase() === sur.toLowerCase();
+  })[0] || {};
+  var revWeek = (mgrRowW.amount_week != null) ? mgrRowW.amount_week : null;
+  var recWeek = ((D.receipts && D.receipts.week && D.receipts.week.transactions) || [])
+    .filter(function(t){ return String(t.manager||'').trim().split(' ')[0].toLowerCase() === sur.toLowerCase(); })
+    .reduce(function(a,t){ return a + (t.amount||0); }, 0);
   return '<div class="mp-stats mp-cell-stats">'+
     cell('rev','top',PAGE_COL.blue,'Выручка', pageFr_(faktVal),
-      planVal>0 ? '<b>'+Math.round(planPctV)+'%</b> от плана '+pageMln_(planVal) : 'плана на месяц нет', planPctV)+
+      planVal>0 ? '<b>'+Math.round(planPctV)+'%</b> от плана '+pageMln_(planVal) : 'плана на месяц нет', planPctV, revWeek)+
     cell('rec','receipts',PAGE_COL.green,'Поступления', pageFr_(recTotal),
-      faktVal>0 ? '<b>'+Math.round(recPctV)+'%</b> от выручки дошло до счёта' : 'нет выручки за месяц', recPctV)+
+      faktVal>0 ? '<b>'+Math.round(recPctV)+'%</b> от выручки дошло до счёта' : 'нет выручки за месяц', recPctV, recWeek)+
     cell('debt','debt',PAGE_COL.amber,'Дебиторка', pageFr_(debtTotal),
       debtTotal>0 ? '<b>'+pageFr_(debtOver30)+'</b> просрочено &gt;30 дн.' : 'долгов нет', overPctV)+
   '</div>';

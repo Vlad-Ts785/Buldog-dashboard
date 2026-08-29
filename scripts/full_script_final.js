@@ -10451,6 +10451,15 @@ function aggregateOrdersRows(rows) {
     d.setDate(d.getDate() - 1);
     return Utilities.formatDate(d, 'Europe/Moscow', 'yyyy-MM-dd');
   })();
+  // Начало недели (понедельник) - ТО ЖЕ определение, что у поступлений (см. week в
+  // receipts): иначе «выручка за неделю» и «поступления за неделю» на одной плитке
+  // считались бы за разные отрезки и не бились бы между собой.
+  const weekStartStr = (function() {
+    var d = new Date();
+    var dow = d.getDay();                    // 0=вс,1=пн,...
+    d.setDate(d.getDate() - ((dow + 6) % 7));
+    return Utilities.formatDate(d, 'Europe/Moscow', 'yyyy-MM-dd');
+  })();
   // Динамика "сегодня vs вчера" по менеджеру (Влад, 2026-07-17: "то же самое по менеджерам
   // в количестве заказов - на сколько увеличилось по сравнению с предыдущим днём... по
   // нажатию показать какие именно заказы"). Отдельная история не нужна - "Дата создания"
@@ -10638,7 +10647,7 @@ function aggregateOrdersRows(rows) {
     // ── По менеджеру продаж ──
     if (mgrSales && ordInList(mgrSales, TRAL_MANAGERS)) {
       if (!managerMap[mgrSales]) {
-        managerMap[mgrSales] = { name: mgrSales, orders:0, amount:0, amount_thru_yesterday:0, payment:0, cash:0, profit:0, hired_orders:0, hired_cost:0,
+        managerMap[mgrSales] = { name: mgrSales, orders:0, amount:0, amount_thru_yesterday:0, amount_week:0, payment:0, cash:0, profit:0, hired_orders:0, hired_cost:0,
           internal_orders:0, internal_amount:0, internal_amount_thru_yesterday:0, internal_payment:0,
           own_amount:0, own_profit:0, hired_margin_total:0, hired_margin_qualified:0, hired_margin_unqualified:0,
           hired_extra_costs:0,
@@ -10648,6 +10657,7 @@ function aggregateOrdersRows(rows) {
       m.orders++;
       m.amount  += amount;
       if (isThruYesterday) m.amount_thru_yesterday += amount;
+      if (dateStr !== '' && dateStr >= weekStartStr) m.amount_week += amount;
       m.payment += payment;
       m.cash    += num(row, 'cash');
       if (isHired) m.profit += profit;   // прибыль только по найму

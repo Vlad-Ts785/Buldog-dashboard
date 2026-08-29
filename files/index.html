@@ -1508,7 +1508,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
    (тот же приём max-content/min-width:100%, #page-logistics-plan что и у .row), #page-logistics-plan текст-ярлык - на
    sticky-обёртке ВНУТРИ неё (тот же паттерн, #page-logistics-plan что у .seg-label). Заодно кликабельна
    вся полоса целиком, #page-logistics-plan не только узкий ярлык слева. */
-.grouphead{
+#page-logistics-plan .grouphead{
   position:relative;z-index:12;display:flex;align-items:center;
   height:26px;background:var(--bg);cursor:pointer;user-select:none;
   border-top:1px solid var(--border);border-bottom:1px solid var(--border);
@@ -1626,7 +1626,13 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
 }#page-logistics-plan .seg-id i{font-weight:500;color:var(--muted);}/* точка водителя: залита = назначен на машину, #page-logistics-plan кольцо = вакансия */
 .seg-drv{position:absolute;top:-2px;right:-2px;width:6px;height:6px;border-radius:50%;}#page-logistics-plan .seg-drv.on{display:none;}/* норму не отмечаем - только отсутствие */
 .seg-drv.off{background:var(--bg2);border:1.5px solid var(--red);}/* прогресс активного рейса - 2px снизу, #page-logistics-plan transform:scaleX (не width) */
-.seg-prog{position:absolute;left:0;right:0;bottom:0;height:2px;border-radius:0 0 6px 6px;
+#page-logistics-plan .seg-prog{
+  /* Скрыт по просьбе Влада, 29.08: "пока вообще прогресс убери, не нужен он
+     пока... будем по-другому анимировать его" - НЕ удалено, только display:none.
+     JS (renderRows/тик) продолжает честно писать --progress и вставлять
+     разметку - вернуть обратно = убрать одну эту строку. */
+  display:none;
+  position:absolute;left:0;right:0;bottom:0;height:2px;border-radius:0 0 6px 6px;
   overflow:hidden;background:rgba(139,137,128,.18);pointer-events:none;}#page-logistics-plan .seg-prog i{display:block;height:100%;transform:scaleX(calc(var(--progress,0)/100));
   transform-origin:left;background:currentColor;}#page-logistics-plan .seg-code{
   font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:600;letter-spacing:.02em;
@@ -1678,7 +1684,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   background:var(--red);border-color:var(--red);color:#fff;
   transform:translate(-50%,0) scale(1.18);
 }#page-logistics-plan .trash-zone svg{width:24px;height:24px;}/* линия примагничивания */
-.magnet{
+#page-logistics-plan .magnet{
   position:absolute;top:1px;bottom:1px;width:2px;background:var(--amber);z-index:8;
   pointer-events:none;opacity:0;transform:scaleY(.7);
   transition:opacity .12s var(--ease-out-soft),transform .12s var(--ease-overshoot);
@@ -1715,12 +1721,12 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);
   font-family:inherit;font-size:12px;padding:7px 10px;
 }#page-logistics-plan .cr-input:focus-visible{outline:2px solid var(--blue);outline-offset:1px;}#page-logistics-plan .cr-actions{display:flex;gap:8px;margin-top:18px;}/* черновик отрезка во время протяжки по пустому месту - тот же язык, #page-logistics-plan что и .seg, #page-logistics-plan но пунктирная рамка вместо заливки по смыслу состояния (состояние ещё не выбрано) */
-.seg-draft{
+#page-logistics-plan .seg-draft{
   position:absolute;top:4px;height:22px;border-radius:4px;pointer-events:none;
   background:rgba(139,137,128,.14);box-shadow:inset 0 0 0 1.5px var(--border-strong);
   left:calc(var(--s) * var(--hw));width:calc(var(--l) * var(--hw));
 }/* ================= Тост ================= */
-.toast{
+#page-logistics-plan .toast{
   position:fixed;left:50%;bottom:22px;transform:translate(-50%,14px);opacity:0;
   background:var(--bg3);border:1px solid var(--border-strong);border-radius:10px;
   padding:11px 15px;display:flex;align-items:center;gap:14px;font-size:12px;z-index:60;
@@ -2392,6 +2398,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
 <!-- Своё контекстное меню плитки вместо браузерного (Влад, 29.08: "должно возникать
      меню нашего приложения... на пустом месте ничего не должно происходить") -->
 <div class="ctxmenu" id="lp-ctxMenu">
+  <button class="ctxmenu-item" id="lp-ctxOpen">Открыть</button>
   <button class="ctxmenu-item" id="lp-ctxCopy">Копировать заявку</button>
   <button class="ctxmenu-item ctxmenu-del" id="lp-ctxDel">Удалить заявку</button>
 </div>
@@ -17798,12 +17805,10 @@ window.addEventListener("pointerup", function(e){
   }
   if (!d.lifted){
     el.style.transform = ""; el.style.transition = "";
-    /* кольцо «открыта в шторке» - персистентный маркер, гаснет в closeDrawer() */
-    var prev = rowsEl.querySelector(".seg.is-open");
-    if (prev) prev.classList.remove("is-open");
-    el.classList.add("is-open");
-    STATE.openId = seg.id;
-    openDrawer(seg);
+    /* Простой клик - маленькое меню у курсора (Копировать/Удалить/Открыть),
+       НЕ сразу полная шторка (Влад, 29.08: "не должно возникать боковой
+       панели... маленькое наше окошко"). Полная шторка - через "Открыть". */
+    openCtxMenu_(seg, e.clientX, e.clientY);
     return;
   }
 
@@ -18117,6 +18122,13 @@ function copySegAfter_(seg, openAfter){
    те же интерактивные поля, что и в шторке СОЗДАНИЯ (openCreateDrawer выше),
    просто предзаполненные текущими значениями, а не пустые. */
 function openDrawer(seg){
+  /* кольцо "открыто в шторке" - переживает перерендер через STATE.openId
+     (renderRows читает его на каждой плитке), ставим здесь ОДИН раз для любого
+     входа (клик по плитке, "Открыть" в контекстном меню) - раньше это делал
+     каждый вызывающий код отдельно, дублируя одну и ту же логику. */
+  var prevOpenId = STATE.openId;
+  STATE.openId = seg.id;
+  if (prevOpenId !== seg.id) renderRows();
   var v = STATE.vehicles[seg.v];
   var isTrip = seg.kind === "trip";
   var logistPool = v.long ? LOG_LONG : LOG_TRAL;
@@ -18244,25 +18256,35 @@ window.addEventListener("keydown", function(e){ if (e.key === "Escape"){ closeDr
 /* Своё контекстное меню плитки, не браузерное (Влад, 29.08: "при нажатии... не
    должно возникать стандартного браузерного меню, а должно возникать меню
    нашего приложения - Копировать заявку, Удалить заявку. На пустом месте
-   ничего не должно происходить, тем более браузерное меню"). Правая кнопка на
-   всей доске (не только на плитке) - preventDefault ВСЕГДА (иначе пустое место
-   всё равно откроет системное меню), но САМО меню показываем только если под
-   курсором реальная плитка. */
+   ничего не должно происходить, тем более браузерное меню"). preventDefault -
+   на ВСЕЙ странице (не только доске - правило #21 ГОСТа не делает исключений
+   для шторки/панелей), но САМО меню показываем только если под курсором
+   реальная плитка. Простой ЛЕВЫЙ клик по плитке (Влад, 29.08, повторно: "не
+   должна вылетать боковая панель на этом действии") зовёт ТУ ЖЕ функцию, что и
+   правая кнопка - одно меню, два способа его вызвать; полная шторка теперь
+   доступна через пункт "Открыть", не первым действием. */
 var ctxMenu = document.getElementById("lp-ctxMenu");
 var ctxMenuSeg = null;
 function closeCtxMenu_(){ ctxMenu.classList.remove("open"); ctxMenuSeg = null; }
-board.addEventListener("contextmenu", function(e){
+function openCtxMenu_(seg, x, y){
+  ctxMenuSeg = seg;
+  var mw = 172, mh = 120;                                 /* примерные размеры - не уехать за край экрана */
+  ctxMenu.style.left = Math.min(x, window.innerWidth - mw - 8) + "px";
+  ctxMenu.style.top = Math.min(y, window.innerHeight - mh - 8) + "px";
+  ctxMenu.classList.add("open");
+}
+pageRoot.addEventListener("contextmenu", function(e){
   e.preventDefault();
   var el = e.target.closest(".seg");
   if (!el) { closeCtxMenu_(); return; }
   var seg = STATE.segs.find(function(s){ return s.id === el.dataset.id; });
   if (!seg) { closeCtxMenu_(); return; }
-  ctxMenuSeg = seg;
-  var mw = 172, mh = 92;                                  /* примерные размеры - не уехать за край экрана */
-  ctxMenu.style.left = Math.min(e.clientX, window.innerWidth - mw - 8) + "px";
-  ctxMenu.style.top = Math.min(e.clientY, window.innerHeight - mh - 8) + "px";
-  ctxMenu.classList.add("open");
+  openCtxMenu_(seg, e.clientX, e.clientY);
 });
+document.getElementById("lp-ctxOpen").onclick = function(){
+  if (ctxMenuSeg) openDrawer(ctxMenuSeg);
+  closeCtxMenu_();
+};
 document.getElementById("lp-ctxCopy").onclick = function(){
   if (ctxMenuSeg) copySegAfter_(ctxMenuSeg, false);
   closeCtxMenu_();

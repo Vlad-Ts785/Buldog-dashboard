@@ -1795,6 +1795,18 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
 @media (prefers-reduced-motion: reduce){#page-logistics-plan *{transition-duration:.001ms !important;animation-duration:.001ms !important;}#page-logistics-plan .seg:hover{transform:none;}
 }
 
+/* Тач-устройство (Влад, 30.08: "заблокированы все сенсорные функции, кроме
+   перемещения по планировке") - .seg/.rowhead держали touch-action:none, чтобы
+   JS сам вёл жест драга/растяжки/перестройки пальцем; на телефоне это ЖЕ самое
+   правило перехватывало обычный скролл пальцем в тот момент, когда касание
+   попадало на плитку или замороженную колонку - отсюда и "навигация отвратительно
+   работает". Драг на тач-устройствах теперь выключен целиком в JS (см. IS_TOUCH_ у
+   #page-logistics-plan.is-touch), поэтому и хват браузера через touch-action ему
+   больше не нужен - возвращаем pan-обеим осям + оставляем manipulation (без
+   двойного тапа-зум, который на плотной доске только мешал бы). */
+#page-logistics-plan.is-touch .seg,
+#page-logistics-plan.is-touch .rowhead{touch-action:manipulation;cursor:default;}
+
 @media(prefers-reduced-motion:reduce){.bank-kpi-pop{animation:none;}.bank-win-glow{transition:none!important;}}
 </style>
 </head>
@@ -16968,6 +16980,22 @@ var board = document.getElementById("lp-board");
 var rowsEl = document.getElementById("lp-rows");
 var scaleEl = document.getElementById("lp-scale");
 
+/* Тип управления - Влад, 30.08: "сенсорное управление отличается от мыши... на
+   телефоне должны быть заблокированы все сенсорные функции, кроме перемещения
+   по планировке". Признак - "основной указатель грубый" (палец), не ширина экрана
+   и не user-agent: у десктопа с тачскрином останется мышь как основной ввод, а у
+   планшета-без-мыши это правильно определится как touch. Считаем один раз при
+   открытии вкладки - тип ввода устройства не меняется посреди работы. На тач-
+   устройстве драг/растяжка/перестановка строк ВЫКЛЮЧЕНЫ целиком (см. три
+   pointerdown ниже) - создание и правка идут ТОЛЬКО через шторку/быстрое меню
+   (openCreateDrawer/openCtxMenu_), навигация - обычным пальцевым скроллом
+   .board, который эти же обработчики раньше перехватывали (touch-action:none
+   на .seg/.rowhead - см. правило #page-logistics-plan.is-touch в CSS). */
+var IS_TOUCH_ = (function(){
+  try { return matchMedia("(pointer: coarse)").matches; } catch(e){ return false; }
+})();
+if (IS_TOUCH_) pageRoot.classList.add("is-touch");
+
 function visible(v){
   if (STATE.hidden[v.i] && !STATE.showHidden) return false;
   if (STATE.showHidden) return !!STATE.hidden[v.i];
@@ -17627,6 +17655,7 @@ function autoscrollTick(){
 /* ---------- перестановка машин: только админ и старший логист ---------- */
 var arr = null;
 rowsEl.addEventListener("pointerdown", function(e){
+  if (IS_TOUCH_) return;   /* перестановка строк - функция сверх "перемещения", на тач выключена */
   if (!canArrange()) return;
   if (e.target.closest(".hide-btn")) return;
   var head = e.target.closest(".rowhead");
@@ -17713,6 +17742,7 @@ function flipRows(mutate){
 var drag = null, raf = 0;
 
 rowsEl.addEventListener("pointerdown", function(e){
+  if (IS_TOUCH_) return;   /* драг/растяжка на тач выключены - палец должен просто скроллить */
   var el = e.target.closest(".seg");
   if (!el) return;
   var seg = STATE.segs.find(function(s){ return s.id === el.dataset.id; });
@@ -17918,7 +17948,7 @@ window.addEventListener("pointerup", function(e){
       /* проверка пересечений и у растяжки - раньше была только у переноса, из-за
          чего растяжкой можно было молча закоммитить наложение (аудит 29.08) */
       var rClash = STATE.segs.some(function(x){
-        return x !== seg && x.v === seg.v && seg.s < x.s + x.l && x.s < seg.s + seg.l;
+        return x.id !== seg.id && x.v === seg.v && seg.s < x.s + x.l && x.s < seg.s + seg.l;
       });
       if (rClash){
         seg.s = d.s0; seg.l = d.l0;
@@ -17966,7 +17996,7 @@ window.addEventListener("pointerup", function(e){
     newV = parseInt(track.dataset.v, 10);
   }
   var clash = STATE.segs.some(function(s){
-    return s !== seg && s.v === newV && newS < s.s + s.l && s.s < newS + seg.l;
+    return s.id !== seg.id && s.v === newV && newS < s.s + s.l && s.s < newS + seg.l;
   });
 
   /* вернуть в поток и уложить по FLIP с overshoot */
@@ -18212,6 +18242,7 @@ function loadSegs(){
    плюс двойной клик как быстрый путь без протяжки (создаёт запись на 4 часа). ---------- */
 var create = null;
 rowsEl.addEventListener("pointerdown", function(e){
+  if (IS_TOUCH_) return;   /* создание протяжкой на тач выключено - см. click ниже, тапом через шторку */
   if (e.target.closest(".seg") || e.target.closest(".rowhead") || e.target.closest(".hide-btn")) return;
   var track = e.target.closest(".track");
   if (!track) return;
@@ -18260,6 +18291,7 @@ window.addEventListener("pointerup", function(){
   openCreateDrawer(c.vi, c.s, c.l);
 });
 rowsEl.addEventListener("dblclick", function(e){
+  if (IS_TOUCH_) return;   /* на тач то же самое делает одиночный тап, см. ниже */
   if (e.target.closest(".seg") || e.target.closest(".rowhead")) return;
   var track = e.target.closest(".track");
   if (!track) return;
@@ -18269,6 +18301,33 @@ rowsEl.addEventListener("dblclick", function(e){
   var raw = (e.clientX - tr.left) / hw;
   var snap = snapHour(raw, magnetTargets(vi, null));
   openCreateDrawer(vi, snap !== null ? snap : roundStep(raw), 8);   /* смена по умолчанию - 8 часов */
+});
+
+/* ---------- тач-устройства: тап вместо драга (Влад, 30.08) ----------
+   Драг/растяжка/протяжка/перестановка строк выключены выше целиком - весь ввод
+   на тач идёт через click, который браузер и так генерирует ТОЛЬКО когда касание
+   не превратилось в скролл (та же развилка, что нативная, бесплатно - без
+   собственного порога движения, как у мыши). Тап по плитке - то же маленькое
+   меню (Открыть/Копировать/Удалить), что у мыши при простом клике; тап по
+   пустому месту трека - то же окно создания, что у двойного клика на десктопе,
+   с той же длительностью по умолчанию (8 часов). */
+rowsEl.addEventListener("click", function(e){
+  if (!IS_TOUCH_) return;
+  var el = e.target.closest(".seg");
+  if (el){
+    var seg = STATE.segs.find(function(s){ return s.id === el.dataset.id; });
+    if (seg) openCtxMenu_(seg, e.clientX, e.clientY);
+    return;
+  }
+  if (e.target.closest(".rowhead") || e.target.closest(".hide-btn")) return;
+  var track = e.target.closest(".track");
+  if (!track) return;
+  var vi = parseInt(track.dataset.v, 10);
+  var hw = ZOOM[STATE.zoom];
+  var tr = track.getBoundingClientRect();
+  var raw = (e.clientX - tr.left) / hw;
+  var snap = snapHour(raw, magnetTargets(vi, null));
+  openCreateDrawer(vi, snap !== null ? snap : roundStep(raw), 8);
 });
 
 /* ---------- шторка ---------- */
@@ -18484,10 +18543,22 @@ function openDrawer(seg){
       if (newS == null || newE == null){ toast("Некорректная дата", null); return; }
       if (newE <= newS){ toast("Окончание должно быть позже начала", null); return; }
       var newL = newE - newS;
+      /* x.id !== seg.id, НЕ x !== seg (было) - шторка может простоять открытой
+         дольше 7 секунд (человек вручную набирает даты), а поллинг синка за это
+         время успевает подменить STATE.segs свежими объектами с сервера (тот же
+         id, новый экземпляр). Сравнение по ССЫЛКЕ тогда находило "чужой" отрезок
+         ровно там, где на самом деле лежит текущая версия ЭТОЙ ЖЕ записи - и
+         ложно ловило "пересечение с другим отрезком" при попытке сохранить
+         (живой баг, Влад, 30.08, машина "613" - редактировал даты ремонта,
+         получил отказ на ровном месте). seg сам достаём из актуального STATE.segs
+         по id - если запись УЖЕ переехала/удалилась на сервере, работаем со
+         свежей версией, а не с оторванной от жизни копией. */
+      var liveSeg = STATE.segs.find(function(x){ return x.id === seg.id; }) || seg;
       var clash = STATE.segs.some(function(x){
-        return x !== seg && x.v === seg.v && newS < x.s + x.l && x.s < newS + newL;
+        return x.id !== seg.id && x.v === liveSeg.v && newS < x.s + x.l && x.s < newS + newL;
       });
       if (clash){ S.reject(); toast("Пересечение с другим отрезком - не сохранил", null); return; }
+      seg = liveSeg;
       var before = {s: seg.s, l: seg.l, v: seg.v};
       seg.s = newS; seg.l = newL;
       if (isTrip){ seg.mg = MANAGERS[mgIdx]; seg.lg = logistPool[lgIdx]; seg.from = fromVal; seg.to = toVal; }

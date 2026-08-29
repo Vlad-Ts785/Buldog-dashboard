@@ -7040,6 +7040,45 @@ function renderMyPageVasin(el, current, selectorHtml) {
   el.innerHTML = html;
 }
 
+// ── Ленивый рендер по вкладкам (план 2026-08-28, Этап 2) ────────────────────────────────
+// render() раньше безусловно вызывал 9 render-функций на КАЖДОЕ обновление данных, хотя
+// из 11 секций на экране видны максимум 3 (замер агентов 29.08) - остальные 8 рисовались
+// в скрытые display:none вкладки, которые в этот момент никто не смотрел. Теперь рисуется
+// только группа ТЕКУЩЕЙ активной страницы, остальные помечаются "грязными" и дорисовываются
+// в showPage() при реальном переключении на них - если пользователь так и не откроет
+// вкладку "Продажи", она вообще ни разу не отрисуется зря.
+// Прецедент такого подхода уже есть в проекте (dynamics/clients/crm/global-stats/order-plan
+// грузятся и рисуются только по showPage) - здесь тот же принцип применён к оставшимся
+// секциям, которые раньше шли через общий render().
+var RENDER_GROUPS_ = {
+  main:     { pages: ['main'],                                        fns: [renderKPI, renderMainReceiptsSummary, renderMain] },
+  vehicles: { pages: ['vehicles'],                                     fns: [renderVehiclesTable, renderRepairBlock] },
+  drivers:  { pages: ['drivers'],                                      fns: [renderDrivers] },
+  sales:    { pages: ['sales', 'sales-mgr', 'sales-log', 'sales-salary'], fns: [renderSalesTabsForPeriod] },
+  myPage:   { pages: ['my-page'],                                      fns: [renderMyPage] },
+  debt:     { pages: ['debt'],                                         fns: [renderDebt] },
+  receipts: { pages: ['receipts'],                                     fns: [renderReceipts] },
+};
+var dirtyGroups_ = {};
+Object.keys(RENDER_GROUPS_).forEach(function(k) { dirtyGroups_[k] = true; }); // до первой загрузки - всё "грязное"
+
+function groupForPage_(pageId) {
+  var keys = Object.keys(RENDER_GROUPS_);
+  for (var i = 0; i < keys.length; i++) {
+    if (RENDER_GROUPS_[keys[i]].pages.indexOf(pageId) >= 0) return keys[i];
+  }
+  return null;
+}
+function renderGroup_(key) {
+  var g = RENDER_GROUPS_[key];
+  // !D - данные ещё не пришли (страница открыта раньше первого ответа сервера); НЕ снимаем
+  // dirty, чтобы сработало при следующей реальной попытке (render() после загрузки, или
+  // следующий showPage на эту же вкладку).
+  if (!g || !D) return;
+  g.fns.forEach(function(fn) { fn(); });
+  dirtyGroups_[key] = false;
+}
+
 function render() {
   updateFreshnessDisplays_(); // честно из последнего известного data_age_min, см. Этап 0.1
   checkDataFreshness(); // свежий опрос + плашка "обновление не проходит", см. Этап 0.1/0.3
@@ -7054,17 +7093,15 @@ function render() {
     return;
   }
 
-  renderKPI();
-  renderMainReceiptsSummary();
-  renderMain();
-  renderVehiclesTable();
-  renderDrivers();
-  renderRepairBlock();
-  renderSalesTabsForPeriod();
-  renderMyPage();
-  renderDebt();
-  renderReceipts();
-  p2DataSoundCheck_(); // звуковые события данных - ПОСЛЕ всех рендеров (ДЗ-total готов)
+  var activeEl = document.querySelector('.page.active');
+  var activePageId = activeEl ? activeEl.id.replace(/^page-/, '') : 'main';
+  var activeGroup = groupForPage_(activePageId);
+  Object.keys(RENDER_GROUPS_).forEach(function(key) {
+    if (key === activeGroup) renderGroup_(key);
+    else dirtyGroups_[key] = true; // не активна сейчас - дорисуется в showPage при переходе
+  });
+  p2DataSoundCheck_(); // звук/одометр считают ПО D напрямую (calcDebtTotal90_) - не зависят
+                        // от того, какая группа реально перерисовалась в этом цикле
 }
 
 // Показывает/скрывает пункты сайдбара в зависимости от роли. Менеджер видит только
@@ -7709,10 +7746,15 @@ function p2OdoWithTicks_(el, from, to, tickFn) {
 
 function p2DataSoundCheck_() {
   if (!D || D.role !== 'admin' || viewAsEntry) return; // панель видит только админ
+  // debt - СЧИТАЕМ напрямую из D.debt через calcDebtTotal90_ (план 2026-08-28, Этап 2), не
+  // читаем p2CurDebtTotal_. Та переменная пишется только КАК ПОБОЧНЫЙ ЭФФЕКТ renderDebtMiniCard
+  // (вызывается из renderMainReceiptsSummary), а при ленивом рендере по вкладкам "Панель" не
+  // каждый раз перерисовывается - звук не должен зависеть от того, что реально нарисовано.
+  var debtBuckets_ = calcDebtTotal90_(D.debt);
   var cur = {
     rev: (D.summary && D.summary.salesFakt) || 0,
     rec: (D.receipts && D.receipts.summary && D.receipts.summary.total_month) || 0,
-    debt: p2CurDebtTotal_
+    debt: debtBuckets_ ? debtBuckets_.total : null
   };
   var prev = p2PrevVals_;
   p2PrevVals_ = cur;
@@ -7748,15 +7790,15 @@ function p2DataSoundCheck_() {
 // Всегда "чистый" снимок без переключателей (те - рабочий инструмент вкладки ДЗ, тут -
 // быстрый обзор): без банкротов (Влад: "чтобы не показывало банкротов вообще нигде") и
 // без учёта 600-дневного фильтра (для 0-90 дней он в принципе не может сработать).
-function renderDebtMiniCard() {
-  var debt = D.debt;
-  var totalEl = document.getElementById('k-debt-total');
-  var breakdownEl = document.getElementById('k-debt-breakdown');
-  if (!debt || !debt.by_customer) {
-    if (totalEl) totalEl.textContent = '—';
-    if (breakdownEl) breakdownEl.textContent = '';
-    return;
-  }
+// Сумма ДЗ 0-90 дней (без банкротов/исключённых статусов) - общая формула для карточки
+// на Панели И для звукового сравнения p2DataSoundCheck_ (план 2026-08-28, Этап 2). Раньше
+// p2DataSoundCheck_ читал готовое значение из p2CurDebtTotal_, которое писалось только
+// ВНУТРИ этого рендера - при ленивом рендере по вкладкам (Этап 2) "Панель" не всегда
+// перерисовывается, и p2CurDebtTotal_ мог остаться от прошлого раза (см. план, "Скрытая
+// связка звука"). Вынесено в чистую функцию от D.debt - звук теперь считает сам, не
+// зависит от того, рисовалась ли в этом цикле карточка.
+function calcDebtTotal90_(debt) {
+  if (!debt || !debt.by_customer) return null;
   var customers = debt.by_customer.filter(function(c) { return c.status !== 'Банкрот' && DEBT_STATUS_EXCLUDE_FROM_TOTAL.indexOf(c.status) < 0; });
   var current30 = 0, over30 = 0, over60 = 0;
   customers.forEach(function(c) {
@@ -7764,8 +7806,21 @@ function renderDebtMiniCard() {
     else if (c.daysOverdue <= 60) over30 += c.balance;
     else if (c.daysOverdue <= 90) over60 += c.balance;
   });
-  var total = current30 + over30 + over60;
-  p2CurDebtTotal_ = total; // для звукового механизма сравнения (p2DataSoundCheck_)
+  return { total: current30 + over30 + over60, current30: current30, over30: over30, over60: over60 };
+}
+function renderDebtMiniCard() {
+  var debt = D.debt;
+  var totalEl = document.getElementById('k-debt-total');
+  var breakdownEl = document.getElementById('k-debt-breakdown');
+  var buckets = calcDebtTotal90_(debt);
+  if (!buckets) {
+    if (totalEl) totalEl.textContent = '—';
+    if (breakdownEl) breakdownEl.textContent = '';
+    return;
+  }
+  var current30 = buckets.current30, over30 = buckets.over30, over60 = buckets.over60;
+  var total = buckets.total;
+  p2CurDebtTotal_ = total; // для renderVerdict ниже по этому же циклу render() (main-группа)
   if (totalEl) totalEl.textContent = fmt(total);
   // Строки с точечным лидером и aux-долей (ГОСТ раздел 4, как в превью "Панель 2.0")
   function debtRow(label, v, isTotalRow) {
@@ -13474,6 +13529,11 @@ function showPage(id, el) {
   var pageHeaderEl = document.querySelector('.page-header');
   if (pageHeaderEl) pageHeaderEl.style.display = titleText ? '' : 'none';
   try { updatePagePeriod_(); } catch(e) {}   // время в шапке свежее сразу, не через 30 сек
+  // Ленивый рендер по вкладкам (план 2026-08-28, Этап 2) - если группа этой страницы не
+  // рисовалась с последнего обновления данных (render() пометил её "грязной", т.к. в тот
+  // момент была активна другая вкладка), дорисовываем именно сейчас, при реальном открытии.
+  var lazyGroup_ = (typeof groupForPage_ === 'function') ? groupForPage_(id) : null;
+  if (lazyGroup_ && dirtyGroups_[lazyGroup_]) renderGroup_(lazyGroup_);
   if (id === 'dynamics') loadHistoryData();
   if (id === 'clients') loadClientsData();
   if (id === 'crm') loadCrmData();

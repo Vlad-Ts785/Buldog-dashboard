@@ -2374,6 +2374,26 @@ TECH=TECH.filter(function(t){return t.w>=10;});
 var map,mL,mU,mBase,layerBase=null,layerLoad=null,layerUnload=null,lc=null,uc=null;
 var d1=0,d2=0,d3=0,running=0,loadedOk=false,hist=JSON.parse(localStorage.getItem('yrd_calc_history')||'[]'),gT=null;
 var LK={a1:0,a2:0,a3:0};
+var dragDebounceT_=null;
+// Влад, 2026-08-29: точки погрузки/выгрузки можно тащить по карте - пересчёт НЕ на каждое
+// движение (дорого и дёргано), а с задержкой после того, как точка "застыла" (dragend +
+// небольшая пауза, отменяется, если пользователь снова взялся за маркер).
+function bindDrag_(marker,type){
+    marker.on('dragstart',function(){
+        if(dragDebounceT_){clearTimeout(dragDebounceT_);dragDebounceT_=null;}
+        marker.closePopup();
+    });
+    marker.on('dragend',function(e){
+        var p=e.target.getLatLng();
+        if(type==='load')lc=p;else uc=p;
+        if(dragDebounceT_)clearTimeout(dragDebounceT_);
+        dragDebounceT_=setTimeout(function(){
+            dragDebounceT_=null;
+            revG(p,type);
+            routeAll();
+        },450);
+    });
+}
 
 function initMap(){
     map=L.map('clc-map',{zoomControl:false}).setView([55.76,37.62],11);
@@ -2398,11 +2418,19 @@ function initMap(){
 function icBase(){return L.divIcon({html:'<div style="width:14px;height:14px;background:transparent;border:2.5px solid rgba(255,255,255,.75);box-shadow:0 1px 6px rgba(0,0,0,.5);"></div>',iconSize:[14,14],iconAnchor:[7,7],className:''});}
 function ic(){return L.divIcon({html:'<div style="width:14px;height:14px;background:#e8e6df;border:2.5px solid #17171d;border-radius:50%;box-shadow:0 1px 6px rgba(0,0,0,.5);"></div>',iconSize:[14,14],iconAnchor:[7,7],className:''});}
 function setP(t,p){
-    if(t==='load'){lc=p;if(mL)map.removeLayer(mL);mL=L.marker(p,{icon:ic()}).addTo(map).bindPopup('Погрузка').openPopup();}
-    else{uc=p;if(mU)map.removeLayer(mU);mU=L.marker(p,{icon:ic()}).addTo(map).bindPopup('Выгрузка').openPopup();}
+    if(t==='load'){
+        lc=p;if(mL)map.removeLayer(mL);
+        mL=L.marker(p,{icon:ic(),draggable:true}).addTo(map).bindPopup('Погрузка').openPopup();
+        bindDrag_(mL,'load');
+    } else {
+        uc=p;if(mU)map.removeLayer(mU);
+        mU=L.marker(p,{icon:ic(),draggable:true}).addTo(map).bindPopup('Выгрузка').openPopup();
+        bindDrag_(mU,'unload');
+    }
     routeAll();
 }
 function clrP(){
+    if(dragDebounceT_){clearTimeout(dragDebounceT_);dragDebounceT_=null;} // не дать отложенному пересчёту утащенной точки ожить после сброса
     if(mL){map.removeLayer(mL);mL=null;}if(mU){map.removeLayer(mU);mU=null;}
     if(layerBase){map.removeLayer(layerBase);layerBase=null;}if(layerLoad){map.removeLayer(layerLoad);layerLoad=null;}if(layerUnload){map.removeLayer(layerUnload);layerUnload=null;}
     lc=null;uc=null;d1=0;d2=0;d3=0;loadedOk=false;
@@ -2410,11 +2438,12 @@ function clrP(){
     calc();
 }
 function swapAdr(){
+    if(dragDebounceT_){clearTimeout(dragDebounceT_);dragDebounceT_=null;} // то же самое - точки сейчас поменяются местами, старый отложенный пересчёт неактуален
     var a=document.getElementById('clc-loadAddr'),b=document.getElementById('clc-unloadAddr'),t=a.value;a.value=b.value;b.value=t;
     var tp=lc;lc=uc;uc=tp;
     if(mL){map.removeLayer(mL);mL=null;}if(mU){map.removeLayer(mU);mU=null;}
-    if(lc)mL=L.marker(lc,{icon:ic()}).addTo(map).bindPopup('Погрузка');
-    if(uc)mU=L.marker(uc,{icon:ic()}).addTo(map).bindPopup('Выгрузка');
+    if(lc){mL=L.marker(lc,{icon:ic(),draggable:true}).addTo(map).bindPopup('Погрузка');bindDrag_(mL,'load');}
+    if(uc){mU=L.marker(uc,{icon:ic(),draggable:true}).addTo(map).bindPopup('Выгрузка');bindDrag_(mU,'unload');}
     routeAll();
 }
 

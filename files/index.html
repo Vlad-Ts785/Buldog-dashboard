@@ -5706,6 +5706,27 @@ function renderCommercialHeadTeamBlock_(cfg, byManagerAll, managerPlans, paceRat
     '<th class="num">Прогноз</th><th class="num">Отставание</th></tr></thead><tbody>'+body+'</tbody></table></div>';
 }
 
+// Состояние вкладки «Дебиторка группы»: активные корзины по возрасту и сортировка
+// колонок. СВОЁ, не общее с менеджерской вкладкой (mgrDebtBuckets) и не общее с
+// глобальной ДЗ (debtSort) - у руководителя другой набор строк, и переключение
+// фильтра на одной странице не должно менять вид другой.
+var headDebtBuckets = new Set();
+var headDebtSort = { col: 'balance', dir: -1 };
+function setHeadDebtBucket(bucket) {
+  if (headDebtBuckets.has(bucket)) headDebtBuckets.delete(bucket);
+  else headDebtBuckets.add(bucket);
+  renderMyPage();
+}
+function setHeadDebtSort(col) {
+  if (headDebtSort.col === col) { headDebtSort.dir *= -1; }
+  else {
+    headDebtSort.col = col;
+    // текст - А-Я, числа - по убыванию (тот же принцип, что setDebtSort на общей ДЗ)
+    headDebtSort.dir = (col === 'contragent' || col === 'manager') ? 1 : -1;
+  }
+  renderMyPage();
+}
+
 // Дебиторка группы - то же ядро, что у менеджера (computeDebtAggregates_/debtDeadAndStatus_),
 // плюс колонка «чей клиент»: руководителю важно, к кому идти с долгом.
 function renderCommercialHeadDebtBlock_(cfg) {
@@ -5715,11 +5736,11 @@ function renderCommercialHeadDebtBlock_(cfg) {
   if (!all.length) return '<div style="font-size:13px;color:var(--muted);padding:8px 0">Долгов по группе нет</div>';
   var agg = computeDebtAggregates_(all), dead = debtDeadAndStatus_(all);
   var buckets = [
-    {label:'0-30 дн.', value: agg.summary.current_0_30, color: PAGE_COL.green},
-    {label:'30-60 дн.', value: agg.summary.overdue_30_60, color: PAGE_COL.amber},
-    {label:'60-90 дн.', value: agg.summary.overdue_60_90, color: '#BA7517'},
-    {label:'90+ дн.', value: agg.summary.overdue_90_plus, color: PAGE_COL.red},
-    {label:'Мёртвая (600+)', value: dead.overdue_dead, color: pageHex2rgba_(PAGE_COL.red,0.55)}
+    {key:'0-30', label:'0-30 дн.', value: agg.summary.current_0_30, color: PAGE_COL.green},
+    {key:'30-60', label:'30-60 дн.', value: agg.summary.overdue_30_60, color: PAGE_COL.amber},
+    {key:'60-90', label:'60-90 дн.', value: agg.summary.overdue_60_90, color: '#BA7517'},
+    {key:'90+', label:'90+ дн.', value: agg.summary.overdue_90_plus, color: PAGE_COL.red},
+    {key:'dead', label:'Мёртвая (600+)', value: dead.overdue_dead, color: pageHex2rgba_(PAGE_COL.red,0.55)}
   ];
   var sum = buckets.reduce(function(a,b){ return a + Math.max(0,b.value||0); }, 0);
   var h = '<div style="margin-bottom:10px;font-size:13px;color:var(--muted)">Итого долг группы: '+
@@ -5730,24 +5751,60 @@ function renderCommercialHeadDebtBlock_(cfg) {
       return '<div class="mp-debtladder__s" style="flex-grow:'+(b.value/sum*100).toFixed(2)+';background:'+b.color+'" title="'+b.label+': '+pageMln_(b.value)+'"></div>';
     }).join('')+'</div>';
   }
-  // Пустые корзины не показываем: здесь чипы - легенда к полоске выше (не фильтр, как у
-  // менеджера), а «Мёртвая 0 ₽» в легенде - шум, которому нечего пояснять.
-  h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'+buckets.filter(function(b){ return b.value > 0; }).map(function(b){
-    return '<span style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:11px;display:inline-flex;align-items:center;gap:6px">'+
-      '<span style="width:7px;height:7px;border-radius:2px;background:'+b.color+'"></span>'+b.label+' <b>'+pageMln_(b.value)+'</b></span>';
-  }).join('')+'</div>';
-  var rows = all.slice().sort(function(a,b){ return b.balance - a.balance; }).slice(0, 40);
-  h += '<div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
-    '<th>Контрагент</th><th>Менеджер</th><th class="num">Баланс</th><th class="num">Дней просрочки</th></tr></thead><tbody>'+
-    rows.map(function(c){
-      var cls = c.daysOverdue > 90 ? 'red' : c.daysOverdue > 30 ? 'amber' : 'green';
-      return '<tr><td>'+pageEsc_(c.contragent)+'</td>'+
-        '<td class="muted">'+pageEsc_(cleanName(c.manager||''))+'</td>'+
-        '<td class="num"><b>'+fmt(c.balance)+'</b></td>'+
-        '<td class="num '+cls+'">'+c.daysOverdue+'</td></tr>';
-    }).join('')+
-  '</tbody></table></div>';
-  if (all.length > rows.length) h += '<div class="muted" style="font-size:11px;margin-top:8px">Показаны 40 крупнейших из '+all.length+'. Полный список \u2014 на странице «Дебиторка».</div>';
+  // Чипы диапазонов - РАБОЧИЕ фильтры (Влад, 29.08: «не нажимается кнопка на диапазонах»),
+  // не просто легенда: клик включает/выключает корзину, ничего не выбрано - показываем всё.
+  // Пустые корзины остаются кликабельными, но помечены как пустые - иначе набор чипов
+  // прыгал бы от месяца к месяцу и по ним нельзя было бы целиться привычно.
+  h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'+buckets.map(function(b){
+    var on = headDebtBuckets.has(b.key), dim = (!on && headDebtBuckets.size) || !(b.value > 0);
+    return '<button onclick="setHeadDebtBucket(\''+b.key+'\')" style="cursor:pointer;background:'+(on?pageHex2rgba_(PAGE_COL.blue,0.14):'var(--bg3)')+
+      ';border:1px solid '+(on?PAGE_COL.blue:'var(--border)')+';border-radius:8px;padding:6px 10px;font-size:11px;color:var(--text);'+
+      'display:inline-flex;align-items:center;gap:6px;opacity:'+(dim?'.5':'1')+';transition:opacity .15s,border-color .15s,background .15s">'+
+      '<span style="width:7px;height:7px;border-radius:2px;background:'+b.color+'"></span>'+b.label+' <b>'+pageMln_(b.value)+'</b></button>';
+  }).join('')+
+  (headDebtBuckets.size ? '<button onclick="headDebtBuckets.clear();renderMyPage()" style="cursor:pointer;background:none;border:none;color:var(--muted);font-size:11px;padding:6px 4px;text-decoration:underline dotted">сбросить</button>' : '')+
+  '</div>';
+
+  // Фильтр по возрасту + сортировка по колонке. Список НЕ обрезается: с сортировкой
+  // обрезка врала бы («40 крупнейших», отсортированных по дням просрочки - это не топ-40
+  // по просрочке, а топ-40 по балансу в другом порядке).
+  var filtered = headDebtBuckets.size
+    ? all.filter(function(c){ return Array.from(headDebtBuckets).some(function(bk){ return debtInBucket_(c.daysOverdue, bk); }); })
+    : all;
+  var rows = filtered.slice().sort(function(a,b){
+    var av = a[headDebtSort.col], bv = b[headDebtSort.col];
+    if (headDebtSort.col === 'manager') { av = cleanName(av||''); bv = cleanName(bv||''); }
+    // dir = -1 -> убывание (▼), +1 -> возрастание (▲) - см. пояснение у debtSort
+    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * headDebtSort.dir;
+    return String(av||'').localeCompare(String(bv||''), 'ru') * headDebtSort.dir;
+  });
+  var cols = [
+    {key:'contragent', label:'Контрагент', num:false},
+    {key:'manager', label:'Менеджер', num:false},
+    {key:'balance', label:'Баланс', num:true},
+    {key:'daysOverdue', label:'Дней просрочки', num:true}
+  ];
+  var head = cols.map(function(c){
+    var active = headDebtSort.col === c.key;
+    var arrow = active ? (headDebtSort.dir === -1 ? ' \u25bc' : ' \u25b2') : ' \u21c5';
+    return '<th class="sortable'+(c.num?' num':'')+'" onclick="setHeadDebtSort(\''+c.key+'\')"'+
+      (active?' style="color:var(--text)"':'')+'>'+c.label+
+      '<span style="opacity:'+(active?'1':'.45')+';font-size:10px">'+arrow+'</span></th>';
+  }).join('');
+  var body = !rows.length
+    ? '<tr><td colspan="4" class="muted" style="padding:14px">Нет должников по этому фильтру</td></tr>'
+    : rows.map(function(c){
+        var cls = c.daysOverdue > 90 ? 'red' : c.daysOverdue > 30 ? 'amber' : 'green';
+        return '<tr><td>'+pageEsc_(c.contragent)+'</td>'+
+          '<td class="muted">'+pageEsc_(cleanName(c.manager||''))+'</td>'+
+          '<td class="num"><b>'+fmt(c.balance)+'</b></td>'+
+          '<td class="num '+cls+'">'+c.daysOverdue+'</td></tr>';
+      }).join('');
+  h += '<div style="overflow-x:auto"><table class="tbl"><thead><tr>'+head+'</tr></thead><tbody>'+body+'</tbody></table></div>';
+  if (headDebtBuckets.size) {
+    var fSum = rows.reduce(function(a,c){ return a + (c.balance||0); }, 0);
+    h += '<div class="muted" style="font-size:11px;margin-top:8px">Показано '+rows.length+' из '+all.length+' \u00b7 на сумму <b>'+pageMln_(fSum)+'</b></div>';
+  }
   return h;
 }
 
@@ -8148,7 +8205,8 @@ function renderVehiclesTable() {
     } else {
       av = a[col]; bv = b[col];
     }
-    if (typeof av === 'number') return (bv - av) * dir;
+    // dir = -1 -> убывание (▼), +1 -> возрастание (▲) - см. пояснение у debtSort
+    if (typeof av === 'number') return (av - bv) * dir;
     return String(av||'').localeCompare(String(bv||''), 'ru') * dir;
   });
 
@@ -12934,9 +12992,13 @@ function renderDebt() {
   if (debtStatusFilter) {
     customersFiltered = customersFiltered.filter(function(c){ return (c.status || '(без статуса)') === debtStatusFilter; });
   }
+  // dir = -1 -> по убыванию (стрелка ▼), dir = +1 -> по возрастанию (▲). Знак стоит
+  // ПЕРЕД разностью, а не после: (bv-av) уже само по себе убывание, и умножение на -1
+  // давало возрастание под стрелкой «убывание» - страница открывалась с самыми мелкими
+  // долгами сверху (найдено 29.08).
   customersFiltered = customersFiltered.slice().sort(function(a, b) {
     var av = a[debtSort.col], bv = b[debtSort.col];
-    if (typeof av === 'number') return (bv - av) * debtSort.dir;
+    if (typeof av === 'number') return (av - bv) * debtSort.dir;
     return String(av||'').localeCompare(String(bv||''), 'ru') * debtSort.dir;
   });
   var debtTheadRow = document.getElementById('debt-customers-thead-row');
@@ -13109,7 +13171,7 @@ var clientsRangeTo = '';
 var clientsSegmentFilter = '';
 // Сортировка "Топ клиенты" - Влад, 2026-07-07: "хочу фильтровать по выручке, по заказам,
 // по последнему заказу". Сортировка на уже загруженных данных, без похода на сервер.
-var clientsTopSort = { col: 'revenue', dir: 1 };
+var clientsTopSort = { col: 'revenue', dir: -1 }; // -1 = убывание: топ клиентов сверху
 var CLIENT_TOP_COLS = [
   { key: 'name',            label: 'Клиент',          num: false },
   { key: 'manager',         label: 'Менеджер',        num: false },
@@ -14364,7 +14426,8 @@ function renderClientsTable_(list, mode) {
     var col = clientsTopSort.col, dir = clientsTopSort.dir;
     var sorted = list.slice().sort(function(a, b) {
       var av = a[col], bv = b[col];
-      if (typeof av === 'number') return (bv - av) * dir;
+      // dir = -1 -> убывание (▼), +1 -> возрастание (▲) - см. пояснение у debtSort
+      if (typeof av === 'number') return (av - bv) * dir;
       return String(av || '').localeCompare(String(bv || ''), 'ru') * dir;
     });
     var headHtml = '<th>#</th>' + CLIENT_TOP_COLS.map(function(c) {
@@ -14396,9 +14459,10 @@ function setClientsTopSort(col) {
   if (clientsTopSort.col === col) { clientsTopSort.dir *= -1; }
   else {
     clientsTopSort.col = col;
-    // dir=1 - по числовым колонкам это убывание (больше сверху, нужное для "топ клиентов"),
-    // по текстовым - А-Я. Для "Последний заказ" исключение - сначала свежие (убывание дат).
-    clientsTopSort.dir = (col === 'last_order') ? -1 : 1;
+    // Числовые колонки открываем по убыванию (топ клиентов - больше сверху), текстовые -
+    // А-Я. «Последний заказ» - текстовая дата, но по убыванию: сначала свежие.
+    var numCol = CLIENT_TOP_COLS.filter(function(c){ return c.key === col; })[0];
+    clientsTopSort.dir = (col === 'last_order' || (numCol && numCol.num)) ? -1 : 1;
   }
   showClientsTab('top');
 }

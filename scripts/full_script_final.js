@@ -4093,12 +4093,18 @@ function buildManagerView_(orders, managerName, ss, period) {
       by_manager: myManagerRow,
       by_logist: myLogistRow,
       by_manager_detail: detailWrapped,
-      // Проблемные заказы этого менеджера (2026-08-12, вкладка "Воронка документов" на личной
-      // странице - тот же формат/источник, что "Обзор заказов → Проблемные заказы", просто
-      // отфильтровано на одного человека, приватность - другие менеджеры не видны).
-      problem_orders: (orders.problem_orders || []).filter(function(p) {
-        return String(p.mgr || '').trim().split(' ')[0].toLowerCase() === managerName.trim().split(' ')[0].toLowerCase();
-      }),
+      // Проблемные заказы (2026-08-12, вкладка "Воронка документов" на личной странице -
+      // тот же формат/источник, что "Обзор заказов → Проблемные заказы"). Обычный менеджер
+      // видит ТОЛЬКО свои (приватность), руководитель группы (2026-08-29, Влад: "ниже должна
+      // быть такая же, как в других разделах, «Проблемные документы»") - по всей своей
+      // команде, тот же расширенный доступ, что уже даёт ему team_by_manager.
+      problem_orders: (function() {
+        const surs = commercialHeadTeam_(managerName) ||
+                     [managerName.trim().split(' ')[0].toLowerCase()];
+        return (orders.problem_orders || []).filter(function(p) {
+          return surs.indexOf(String(p.mgr || '').trim().split(' ')[0].toLowerCase()) >= 0;
+        });
+      })(),
     },
   };
 
@@ -4109,6 +4115,20 @@ function buildManagerView_(orders, managerName, ss, period) {
   if (teamByManager) {
     result.orders.team_by_manager = teamByManager;
     result.orders.managerPlans = orders.managerPlans || {}; // нужен planOf() на фронтенде
+    // Нижний блок страницы руководителя (2026-08-29, Влад: «пусть там будет воронка по
+    // документам... и вкладка с заказчиками: какой заказчик у какого менеджера принёс
+    // сколько выручки»). Отдаём ТОЛЬКО две ветки по каждому члену группы:
+    //   doc           - счётчики воронки оформления (у кого проседают документы),
+    //   top_customers - топ-10 заказчиков по выручке (name/orders/amount/payment/balance).
+    // Списки сделок, пропавших клиентов и должников НЕ отдаём - руководителю для этих
+    // двух вкладок они не нужны, а лишние ПДн в ответе не нужны тем более.
+    const teamDetail = {};
+    Object.keys(orders.by_manager_detail || {}).forEach(function(nm) {
+      if (teamSurs.indexOf(String(nm).trim().split(' ')[0].toLowerCase()) < 0) return;
+      const src = orders.by_manager_detail[nm] || {};
+      teamDetail[nm] = { doc: src.doc || {}, top_customers: src.top_customers || [] };
+    });
+    result.orders.team_by_manager_detail = teamDetail;
   }
 
   // ДЗ, отфильтрованная на этого менеджера ИЛИ на всю его команду (руководитель группы,
@@ -10451,6 +10471,15 @@ function aggregateOrdersRows(rows) {
     d.setDate(d.getDate() - 1);
     return Utilities.formatDate(d, 'Europe/Moscow', 'yyyy-MM-dd');
   })();
+  // Начало недели (понедельник) - ТО ЖЕ определение, что у поступлений (см. week в
+  // receipts): иначе «выручка за неделю» и «поступления за неделю» на одной плитке
+  // считались бы за разные отрезки и не бились бы между собой.
+  const weekStartStr = (function() {
+    var d = new Date();
+    var dow = d.getDay();                    // 0=вс,1=пн,...
+    d.setDate(d.getDate() - ((dow + 6) % 7));
+    return Utilities.formatDate(d, 'Europe/Moscow', 'yyyy-MM-dd');
+  })();
   // Динамика "сегодня vs вчера" по менеджеру (Влад, 2026-07-17: "то же самое по менеджерам
   // в количестве заказов - на сколько увеличилось по сравнению с предыдущим днём... по
   // нажатию показать какие именно заказы"). Отдельная история не нужна - "Дата создания"
@@ -10638,7 +10667,7 @@ function aggregateOrdersRows(rows) {
     // ── По менеджеру продаж ──
     if (mgrSales && ordInList(mgrSales, TRAL_MANAGERS)) {
       if (!managerMap[mgrSales]) {
-        managerMap[mgrSales] = { name: mgrSales, orders:0, amount:0, amount_thru_yesterday:0, payment:0, cash:0, profit:0, hired_orders:0, hired_cost:0,
+        managerMap[mgrSales] = { name: mgrSales, orders:0, amount:0, amount_thru_yesterday:0, amount_week:0, amount_yesterday:0, payment:0, cash:0, profit:0, hired_orders:0, hired_cost:0,
           internal_orders:0, internal_amount:0, internal_amount_thru_yesterday:0, internal_payment:0,
           own_amount:0, own_profit:0, hired_margin_total:0, hired_margin_qualified:0, hired_margin_unqualified:0,
           hired_extra_costs:0,
@@ -10648,6 +10677,8 @@ function aggregateOrdersRows(rows) {
       m.orders++;
       m.amount  += amount;
       if (isThruYesterday) m.amount_thru_yesterday += amount;
+      if (dateStr !== '' && dateStr >= weekStartStr) m.amount_week += amount;
+      if (dateStr === yesterdayStr) m.amount_yesterday += amount;
       m.payment += payment;
       m.cash    += num(row, 'cash');
       if (isHired) m.profit += profit;   // прибыль только по найму

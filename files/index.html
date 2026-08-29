@@ -16850,8 +16850,12 @@ function buildVehicles(){
   });
   loadSegs();   /* восстановить реальные рейсы, введённые логистами - см. saveSegs() */
 }
+/* случайный суффикс СЕССИИ в id записи - записи теперь общие через сервер, и два
+   логиста с одинаковым счётчиком seq выдали бы один id (и молча перезаписали бы
+   друг друга через upsert). 8 hex-знаков - коллизия сессий практически исключена. */
+var SEG_ID_SUFFIX_ = Math.floor(Math.random() * 0xffffffff).toString(16);
 function push(v, kind, s, l, extra){
-  var o = {id:"s" + (STATE.seq++), v:v.i, kind:kind, s:s, l:l};
+  var o = {id:"s" + (STATE.seq++) + "-" + SEG_ID_SUFFIX_, v:v.i, kind:kind, s:s, l:l};
   if (extra) for (var k in extra) o[k] = extra[k];
   STATE.segs.push(o);
 }
@@ -17885,39 +17889,149 @@ function commit(seg, before, text){
   });
   renderKpis();
 }
-/* ---------- персист реальных рейсов - ключ по ГОСНОМЕРУ, не по индексу массива:
-   STATE.vehicles пересобирается заново из D.vehicles при каждом входе на вкладку
-   (см. initLP), порядок/состав парка мог чуть измениться - индекс i не устойчив
-   между визитами, госномер устойчив. ---------- */
-function saveSegs(){
-  try{
-    var out = STATE.segs.map(function(s){
-      var v = STATE.vehicles[s.v];
-      if (!v || !v.gos) return null;
-      var o = {id:s.id, gos:v.gos, kind:s.kind, s:s.s, l:s.l};
-      if (s.kind === "trip"){ o.mg = s.mg; o.lg = s.lg; o.from = s.from; o.to = s.to; }
-      return o;
-    }).filter(Boolean);
-    localStorage.setItem("yard.plan.segs", JSON.stringify(out));
-  }catch(e){}
+/* ---------- ОБЩИЕ рейсы через сервер (Влад, 30.08: "все должны видеть в мгновение,
+   кто-то протянул, поставил заказ... общая работа в этой песочнице") ----------
+   До этого записи жили ТОЛЬКО в localStorage браузера - каждый логист видел только
+   свои. Теперь источник истины - таблица plan_segs на api.yardhub.ru (эндпоинты
+   /api/plan/segs|seg|seg_delete, checkSession - тот же session_token, что у CRM).
+   Архитектура синка:
+   - saveSegs() СРАВНИВАЕТ текущее состояние со снимком последней синхронизации и
+     шлёт на сервер только разницу (upsert изменённых/новых, delete исчезнувших) -
+     все точки мутации (драг, растяжка, создание, удаление, undo, правка в шторке,
+     копирование) УЖЕ зовут saveSegs(), ничего в них менять не пришлось;
+   - поллинг раз в 7 сек (тот же паттерн, что CRM-канбан: мало людей, WebSocket не
+     оправдан) забирает полный снимок; max_updated+count как дешёвый детектор "ничего
+     не менялось - не перерисовывать"; во время активного жеста применение чужих
+     правок откладывается до следующего тика (не дёргать DOM под рукой);
+   - localStorage остаётся ТОЛЬКО кэшем мгновенной отрисовки до первого ответа
+     сервера, не источником;
+   - ключ машины - ГОСНОМЕР (как и раньше): индекс в STATE.vehicles не устойчив
+     между визитами;
+   - id записи теперь с суффиксом сессии (см. push()) - два логиста, создающие
+     записи одновременно, не выдадут один id. */
+var segsSnapshot_ = {};          /* id -> сериализованная строка последнего синка */
+var planMaxUpdated_ = "";        /* от сервера, для дешёвого "ничего не изменилось" */
+var planFirstFetchDone_ = false;
+function segToWire_(s){
+  var v = STATE.vehicles[s.v];
+  if (!v || !v.gos) return null;
+  return {
+    id: s.id, gos: v.gos, kind: s.kind, s: Math.round(s.s * 100) / 100, l: Math.round(s.l * 100) / 100,
+    mg: (s.mg && s.mg.full) || "", lg: (s.lg && s.lg.full) || "",
+    from: s.from || "", to: s.to || ""
+  };
 }
+function pushSegToServer_(w){
+  return postToYardApi_("/plan/seg", {id:w.id, gos:w.gos, kind:w.kind, s:w.s, l:w.l,
+    mg:w.mg, lg:w.lg, from:w.from, to:w.to})
+    .catch(function(){ return { ok:false }; });
+}
+function saveSegs(){
+  var current = {};
+  try{
+    var wires = [];
+    STATE.segs.forEach(function(s){
+      var w = segToWire_(s);
+      if (!w) return;
+      wires.push(w);
+      current[w.id] = JSON.stringify(w);
+    });
+    localStorage.setItem("yard.plan.segs", JSON.stringify(wires));   /* кэш мгновенной отрисовки */
+  }catch(e){}
+  /* разница со снимком -> сервер. Ошибки сети НЕ откатывают локальное состояние -
+     запись доедет со следующим saveSegs (снимок обновляется только при успехе). */
+  Object.keys(current).forEach(function(id){
+    if (segsSnapshot_[id] === current[id]) return;
+    var w = JSON.parse(current[id]);
+    pushSegToServer_(w).then(function(r){
+      if (r && r.ok) segsSnapshot_[id] = current[id];
+      else toast("Не сохранилось на сервер - запись пока только у вас", null);
+    });
+  });
+  Object.keys(segsSnapshot_).forEach(function(id){
+    if (current[id]) return;
+    postToYardApi_("/plan/seg_delete", {id:id}).then(function(r){
+      if (r && r.ok) delete segsSnapshot_[id];
+      else toast("Удаление не дошло до сервера - повторится автоматически", null);
+    }).catch(function(){});
+  });
+}
+/* Имя с сервера -> объект человека для бейджа. Ищем в живом ростере; не нашли
+   (уволился/отдел/др. написание) - синтетический объект по тем же правилам кода
+   и цвета, подпись честно остаётся как записана. */
+function personByName_(name, pool){
+  if (!name) return null;
+  for (var i = 0; i < pool.length; i++) if (pool[i].full === name) return pool[i];
+  var parts = String(name).trim().split(" ");
+  var code = ((parts[0] || "")[0] || "") + ((parts[1] || "")[0] || "");
+  return {full:name, code:code.toUpperCase(), id:stableTint12_(parts[0] || name)};
+}
+function applyServerSegs_(rows){
+  var byGos = {};
+  STATE.vehicles.forEach(function(v){ if (v.gos) byGos[v.gos] = v.i; });
+  var segs = [], snap = {};
+  rows.forEach(function(r){
+    var vi = byGos[r.vehicle_gos];
+    if (vi == null) return;   /* машина выбыла из парка - строку не рисуем, но и не удаляем на сервере */
+    var seg = {id:r.id, v:vi, kind:r.kind, s:parseFloat(r.start_hour), l:parseFloat(r.length_hours)};
+    if (r.kind === "trip"){
+      var v = STATE.vehicles[vi];
+      seg.mg = personByName_(r.manager_name, MANAGERS);
+      seg.lg = personByName_(r.logist_name, (v && v.long) ? LOG_LONG : LOG_TRAL);
+      seg.from = r.route_from || ""; seg.to = r.route_to || "";
+    }
+    segs.push(seg);
+    var w = segToWire_.call(null, seg);   /* снимок = ровно то, что мы бы сами послали */
+    if (w) snap[w.id] = JSON.stringify(w);
+  });
+  STATE.segs = segs;
+  segsSnapshot_ = snap;
+}
+function fetchPlanSegs_(){
+  if (!SESSION_TOKEN && !ID_TOKEN) return;
+  if (document.hidden) return;
+  if (!pageRoot.classList.contains("active")) return;
+  fetchFromYardApi_("/plan/segs", {}).then(function(r){
+    if (!r.ok || !r.data || !Array.isArray(r.data.segs)) return;
+    var firstFetch = !planFirstFetchDone_;
+    planFirstFetchDone_ = true;
+    /* Первый ответ и сервер пуст, а локально записи есть (создали до появления
+       синка / офлайн) - локальное СТАНОВИТСЯ серверным: снимок пуст, saveSegs()
+       выпушит всё. Иначе - сервер главный, локальное замещается. */
+    if (firstFetch && r.data.count === 0 && STATE.segs.length > 0){
+      segsSnapshot_ = {};
+      saveSegs();
+      return;
+    }
+    if (!firstFetch && r.data.max_updated === planMaxUpdated_ && r.data.count === Object.keys(segsSnapshot_).length) return;
+    if (drag || create || arr) return;   /* рука на плитке - применим следующим тиком */
+    planMaxUpdated_ = r.data.max_updated;
+    applyServerSegs_(r.data.segs);
+    renderRows(); renderKpis();
+  }).catch(function(){});
+}
+setInterval(fetchPlanSegs_, 7000);
+/* локальный кэш - только чтобы лента не была пустой до первого ответа сервера */
 function loadSegs(){
   try{
     var raw = JSON.parse(localStorage.getItem("yard.plan.segs") || "[]");
     if (!Array.isArray(raw)) return;
     var byGos = {};
     STATE.vehicles.forEach(function(v){ if (v.gos) byGos[v.gos] = v.i; });
-    var maxSeq = 0;
     raw.forEach(function(o){
       var vi = byGos[o.gos];
-      if (vi == null) return;   /* машина сменила номер/выбыла из парка - запись не восстанавливаем молча */
+      if (vi == null) return;
       var seg = {id:o.id, v:vi, kind:o.kind, s:o.s, l:o.l};
-      if (o.kind === "trip"){ seg.mg = o.mg; seg.lg = o.lg; seg.from = o.from; seg.to = o.to; }
+      if (o.kind === "trip"){
+        var v = STATE.vehicles[vi];
+        seg.mg = (o.mg && o.mg.full) ? o.mg : personByName_(o.mg, MANAGERS);
+        seg.lg = (o.lg && o.lg.full) ? o.lg : personByName_(o.lg, (v && v.long) ? LOG_LONG : LOG_TRAL);
+        seg.from = o.from; seg.to = o.to;
+      }
       STATE.segs.push(seg);
-      var n = parseInt(String(o.id).replace(/\D/g, ""), 10);
-      if (n > maxSeq) maxSeq = n;
+      /* снимок НЕ трогаем: до первого ответа сервера мы не знаем, что там - пусть
+         первый fetch решит (миграция или замещение), не гоним дубли вслепую */
     });
-    if (maxSeq + 1 > STATE.seq) STATE.seq = maxSeq + 1;
   }catch(e){}
 }
 
@@ -18409,6 +18523,7 @@ function initLP(){
      и если встать вплотную к «сейчас», экран выглядит пустым не по вине ленты. */
   board.scrollLeft = Math.max(0, (nowHour() - 42) * ZOOM[STATE.zoom]);
   updateMonthLabel_();       /* после scrollLeft - ярлык месяца сразу соответствует видимому дню */
+  fetchPlanSegs_();          /* свежие записи с сервера сразу при открытии, не ждать до 7 сек поллинга */
 }
 window.LP = { init: initLP };
 

@@ -1348,8 +1348,10 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
      схлопывался «по содержимому» вместо фиксированных 236px - отсюда была
      диагональная «лестница» замороженной колонки, которую поймал Влад. */
   --hw:17px;          /* ширина одного часа - меняется зумом, не темой */
-  --lane-w:236px;     /* замороженная левая колонка */
-  --row-h:52px;       /* было 44 - Влад, 29.08: полоски шире по вертикали */
+  --lane-w:340px;     /* замороженная левая колонка - Влад, 30.08: «плитки должны быть
+                         чуть длиннее», фамилии обрезались многоточием на 236px */
+  --row-h:58px;       /* было 44 -> 52 (29.08) -> 58: карточка стала отдельной плиткой
+                         со скруглением и зазорами (30.08), внешние поля добавили 6px */
 }html[data-theme="light"] #page-logistics-plan{
   --bg:#f2f4f7; --bg2:#ffffff; --bg3:#eceff3; --bg4:#e1e5eb;
   --border:rgba(20,26,38,0.10); --border-strong:rgba(20,26,38,0.20);
@@ -1539,15 +1541,36 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
    марка ушла в справочный кегль. Вторая строка: прицеп, его тип, водитель.
    Справа - план по ВП и время окончания протяжки. Высота строки НЕ растёт: всё
    помещается в те же --row-h (52px), проверено замером. */
+/* ПЛИТКА СЦЕПКИ (Влад, 30.08: «сделать дизайн, как у нас в превью: скруглить края,
+   чтобы были расстояния между ними»). rowhead остаётся sticky-контейнером колонки и
+   якорем для .hide-btn, а видимая плитка - .rhcard внутри неё: свой фон, рамка,
+   радиус и внешние поля, дающие зазор между соседями. */
+#page-logistics-plan .rowhead{background:transparent;border-right:none;padding:0;}
+#page-logistics-plan .rhcard{
+  background:var(--bg2);border:1px solid var(--border);border-radius:9px;
+  margin:3px 6px 3px 3px;padding:5px 10px;height:calc(100% - 6px);
+  display:flex;flex-direction:column;justify-content:center;overflow:hidden;
+  transition:border-color .12s ease-out,background-color .12s ease-out;}
+#page-logistics-plan .row:hover .rowhead{background:transparent;}
+#page-logistics-plan .row:hover .rhcard{border-color:var(--border-strong);background:var(--row-hover);}
 #page-logistics-plan .gos{font-size:14px;font-weight:600;color:var(--text);}
+/* время окончания рейса - в ПЕРВОЙ строке, сразу за номером */
+#page-logistics-plan .rh1 .until{font-family:'JetBrains Mono',monospace;font-size:10.5px;
+  color:var(--muted);flex:none;white-space:nowrap;}
+#page-logistics-plan .rh1 .until b{color:var(--text);font-weight:500;}
 #page-logistics-plan .tractor{font-size:9px;font-weight:500;color:var(--muted2);letter-spacing:.03em;}
 #page-logistics-plan .rh2{display:flex;align-items:center;gap:5px;}
 #page-logistics-plan .rh2 .tr{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;flex:none;}
-#page-logistics-plan .rh2 .kind{flex:none;overflow:hidden;text-overflow:ellipsis;}
+#page-logistics-plan .rh2 .kind{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;}
 #page-logistics-plan .rh2 .sep{color:var(--muted2);flex:none;}
-#page-logistics-plan .rh2 .drv{font-size:11.5px;color:var(--text);overflow:hidden;text-overflow:ellipsis;}
+/* Фамилия НЕ сжимается: при нехватке места многоточие достаётся типу прицепа выше -
+   имя человека логист читает, а «раздвижка 4 оси» и так понятна по плашке типа. */
+#page-logistics-plan .rh2 .drv{font-size:11.5px;color:var(--text);flex:none;white-space:nowrap;}
 #page-logistics-plan .rh2 .drv.nd{color:var(--red);font-weight:500;}
-#page-logistics-plan .rh2 .rside{margin-left:auto;display:flex;align-items:center;gap:7px;flex:none;padding-left:8px;}
+/* Процент ВП прижат к правому краю плитки и НИЧЕГО не делит с ним место, поэтому
+   у всех машин стоит в одной вертикали (Влад, 30.08: «они все в общей массе должны
+   быть в одной условной вертикальной линии»). Фамилия слева ужимается сама. */
+#page-logistics-plan .rh2 .rside{margin-left:auto;flex:none;padding-left:10px;}
 #page-logistics-plan .rh2 .vp{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;
   font-size:10px;display:inline-flex;align-items:center;gap:4px;}
 #page-logistics-plan .rh2 .vp i{width:5px;height:5px;border-radius:1.5px;flex:none;background:currentColor;}
@@ -17163,18 +17186,24 @@ function renderRows(){
       var actSeg = lpActiveSeg_(v);
       var endLbl = actSeg ? lpSegEndLabel_(actSeg) : null;
       var vp = lpVpPct_(v.gos);
-      var rside = "";
-      if (vp !== null) rside += '<span class="vp" style="color:' + lpVpColor_(vp) +
-        '" title="план по валовой прибыли: факт ' + vp + '% на сегодня, цвет - по прогнозу на конец месяца"><i></i>' + vp + '%</span>';
-      if (endLbl) rside += '<span class="until">до <b>' + endLbl + '</b></span>';
+      /* Время окончания рейса - в первой строке за номером; процент ВП - во второй,
+         прижат вправо. Так процент у всех машин стоит в одной вертикали, а время не
+         толкает его влево-вправо в зависимости от длины фамилии (Влад, 30.08). */
+      var rside = (vp !== null)
+        ? '<span class="vp" style="color:' + lpVpColor_(vp) +
+          '" title="план по валовой прибыли: факт ' + vp + '% на сегодня, цвет - по прогнозу на конец месяца"><i></i>' + vp + '%</span>'
+        : "";
       head.innerHTML =
+        '<div class="rhcard">' +
         '<div class="rh1"><span class="tag ' + tagClass(v.type) + '">' + v.type + '</span>' +
         (v.tractor ? '<span class="tractor">' + v.tractor + '</span>' : '') +
-        '<span class="gos">' + v.gos + '</span></div>' +
+        '<span class="gos">' + v.gos + '</span>' +
+        (endLbl ? '<span class="until">до <b>' + endLbl + '</b></span>' : '') + '</div>' +
         '<div class="rh2"><span class="tr">' + (v.trailerGos || v.trailer || "без прицепа") + '</span>' +
         (v.trailer && v.trailerGos ? '<span class="sep">·</span><span class="kind">' + v.trailer + '</span>' : '') +
         '<span class="sep">·</span><span class="drv' + (v.vacant ? " nd" : "") + '">' + drv + '</span>' +
         (rside ? '<span class="rside">' + rside + '</span>' : '') + '</div>' +
+        '</div>' +
         '<span class="hide-btn" data-hide="' + v.i + '" title="' +
         (STATE.hidden[v.i] ? "Показать машину" : "Скрыть машину") + '">' +
         (STATE.hidden[v.i] ? ICON_EYE : ICON_EYE_OFF) + '</span>';

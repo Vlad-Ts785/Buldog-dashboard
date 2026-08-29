@@ -2342,7 +2342,7 @@ var FAR_LIMIT=200,FAR_SHIFT=30000,K_COEF=1.5,OV_COEF=2,EMPTY_RATE=120;
 // Доплата за негабарит (сопровождение) — прайс ООО БУЛЬДОГ от 12.06.2026
 var ESC_ZONE={sadovoe:12000,mkad:10000,ckad:20000};
 var ESC_FAR_BASE=20000,ESC_FAR_MIN=200;
-var ESC_CAT={1:[55,50,45],2:[100,90,80]}; // ₽/км по полосам [200-500, 501-1000, 1001-2000]; 3 кат. — индивидуально
+var ESC_CAT={1:[55,50,45],2:[100,90,80],3:[110,100,90]}; // ₽/км по полосам [200-500, 501-1000, 1001-2000]
 function escortBand(d){return d<=500?0:d<=1000?1:2;}
 function tralByMass(w){if(w<=20)return P.tral;if(w<=25)return P.t20;if(w<=34)return P.t25;if(w<=44)return P.t35;if(w<=49)return P.t45;if(w<=59)return P.t50;return null;}
 // Влад, 2026-08-17: "выбрали буровую 110т - калькулятор должен сам подобрать категорию
@@ -2675,13 +2675,15 @@ function calc(){
     var ldAll=ld*loopCount,loopBackTotal=ldBack*(loopCount-1);
     var esc=0,escNote='';
     if(neg){
-        // категория сопровождения теперь только по массе - сверхгабарит больше не
-        // выбрасывает в «Кат. 3 - индивидуально» (он обрабатывается коэффициентом ×2)
+        // категория сопровождения - только по массе (1: до 45 т, 2: до 80 т, 3: от 80 т) -
+        // геометрический сверхгабарит на неё не влияет, он обрабатывается коэффициентом ×2
+        // выше. Кат.3 получила свою тарифную сетку 29.08 (Влад, прайс: 200-500 км - 110,
+        // 501-1000 км - 100, 1001-2000 км - 90 ₽/км) - раньше требовала ручного
+        // согласования с руководителем, теперь считается автоматически как кат.1/2.
         var zone=manual?document.getElementById('clc-escZone').value:(autoZone||(isFar?'far':'ckad')),ecat=(w<=45?1:w<=80?2:3);
         if(zone==='sadovoe'){esc=ESC_ZONE.sadovoe;escNote='Садовое';}
         else if(zone==='mkad'){esc=ESC_ZONE.mkad;escNote='МКАД';}
         else if(zone==='ckad'){esc=ESC_ZONE.ckad;escNote='МО до ЦКАД';}
-        else if(ecat===3){esc=0;escNote='Кат. 3 — индивидуально с руководителем';}
         else{var er=ESC_CAT[ecat][escortBand(a2)];esc=ESC_FAR_BASE+rn(a2*er);escNote='Кат.'+ecat+' · 20 000 + '+a2+' км × '+er+' ₽';}
     }
     // Машина прикрытия (Влад, 28.08, по законодательству о крупногабаритных перевозках):

@@ -818,9 +818,13 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   font-variant-numeric:tabular-nums;line-height:1.05;letter-spacing:-.01em;}
 /* Вторая цифра плитки - «за неделю» (Влад, 29.08). Занимает пустое поле между
    крупной суммой и подвалом, поэтому плитка перестала выглядеть полупустой. */
-.mp-stat__week{margin-top:12px;display:flex;align-items:baseline;gap:7px;}
+.mp-stat__layers{margin-top:12px;display:flex;flex-direction:column;gap:5px;}
+.mp-stat__week{display:flex;align-items:baseline;justify-content:space-between;gap:10px;}
 .mp-stat__week-cap{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;}
 .mp-stat__week-val{font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;}
+/* «Сегодня» в поступлениях - живой слой из банка: сюда прилетает новая платёжка
+   этого менеджера (победная сцена, ГОСТ раздел 8). Поэтому у него свой id. */
+.mp-stat__week--live .mp-stat__week-val{color:var(--green);}
 .mp-stat__foot{margin-top:auto;padding-top:12px;}
 .mp-stat__sub{font-size:10.5px;color:var(--muted);line-height:1.4;}
 .mp-stat__sub b{color:var(--text);font-family:'JetBrains Mono',monospace;font-weight:500;}
@@ -4567,12 +4571,16 @@ function mpStatsHtml_(faktVal, planVal, sur) {
   var recPctV = faktVal > 0 ? Math.min(100, recTotal/faktVal*100) : 0;
   var overPctV = debtTotal > 0 ? Math.min(100, debtOver30/debtTotal*100) : 0;
 
-  function cell(id, tab, color, cap, val, subHtml, pct, weekVal) {
+  function cell(id, tab, color, cap, val, subHtml, pct, layers) {
     return '<div class="mp-stat" onclick="setMyPageMgrTab(\''+tab+'\');mpScrollToTabs_()" title="Открыть вкладку">'+
       '<div class="mp-stat__cap"><span class="mp-stat__dot" style="background:'+color+'"></span>'+cap+
         '<span class="mp-stat__chev">›</span></div>'+
       '<div class="mp-stat__val">'+val+'</div>'+
-      ((weekVal != null) ? '<div class="mp-stat__week"><span class="mp-stat__week-cap">за неделю</span><span class="mp-stat__week-val">'+pageFr_(weekVal)+'</span></div>' : '')+
+      ((layers && layers.length) ? '<div class="mp-stat__layers">'+layers.map(function(L){
+        return '<div class="mp-stat__week'+(L.live?' mp-stat__week--live':'')+'">'+
+          '<span class="mp-stat__week-cap">'+L.cap+'</span>'+
+          '<span class="mp-stat__week-val"'+(L.id?' id="'+L.id+'"':'')+'>'+pageFr_(L.val)+'</span></div>';
+      }).join('')+'</div>' : '')+
       '<div class="mp-stat__foot"><div class="mp-stat__sub">'+subHtml+'</div>'+
         '<div class="mp-stat__bar"><div class="mp-stat__fill" style="width:'+pct.toFixed(1)+'%;background:'+color+'"></div></div>'+
       '</div></div>';
@@ -4584,14 +4592,27 @@ function mpStatsHtml_(faktVal, planVal, sur) {
     return String(m.name||'').trim().split(' ')[0].toLowerCase() === sur.toLowerCase();
   })[0] || {};
   var revWeek = (mgrRowW.amount_week != null) ? mgrRowW.amount_week : null;
-  var recWeek = ((D.receipts && D.receipts.week && D.receipts.week.transactions) || [])
-    .filter(function(t){ return String(t.manager||'').trim().split(' ')[0].toLowerCase() === sur.toLowerCase(); })
-    .reduce(function(a,t){ return a + (t.amount||0); }, 0);
+  var revYday = (mgrRowW.amount_yesterday != null) ? mgrRowW.amount_yesterday : null;
+  function sumMine_(bucket) {
+    return ((D.receipts && D.receipts[bucket] && D.receipts[bucket].transactions) || [])
+      .filter(function(t){ return String(t.manager||'').trim().split(' ')[0].toLowerCase() === sur.toLowerCase(); })
+      .reduce(function(a,t){ return a + (t.amount||0); }, 0);
+  }
+  var recWeek = sumMine_('week');
+  // «Сегодня» у поступлений - ЖИВОЙ слой: 1С-цифра дня плюс банковские платёжки
+  // этого менеджера, опознанные по контрагенту (СМС-лента, Фаза 4). Именно в это
+  // значение прилетает сумма новой платёжки победной сценой.
+  var recToday = sumMine_('today') + mpBankTodayForManager_(sur);
+  var revLayers = [{cap:'за неделю', val:revWeek}];
+  if (revYday != null) revLayers.push({cap:'за вчера', val:revYday});
+  var recLayers = [{cap:'за неделю', val:recWeek},
+                   {cap:'сегодня', val:recToday, id:'mp-rec-today-val', live:true}];
   return '<div class="mp-stats mp-cell-stats">'+
     cell('rev','top',PAGE_COL.blue,'Выручка', pageFr_(faktVal),
-      planVal>0 ? '<b>'+Math.round(planPctV)+'%</b> от плана '+pageMln_(planVal) : 'плана на месяц нет', planPctV, revWeek)+
+      planVal>0 ? '<b>'+Math.round(planPctV)+'%</b> от плана '+pageMln_(planVal) : 'плана на месяц нет', planPctV,
+      (revWeek != null ? revLayers : null))+
     cell('rec','receipts',PAGE_COL.green,'Поступления', pageFr_(recTotal),
-      faktVal>0 ? '<b>'+Math.round(recPctV)+'%</b> от выручки дошло до счёта' : 'нет выручки за месяц', recPctV, recWeek)+
+      faktVal>0 ? '<b>'+Math.round(recPctV)+'%</b> от выручки дошло до счёта' : 'нет выручки за месяц', recPctV, recLayers)+
     cell('debt','debt',PAGE_COL.amber,'Дебиторка', pageFr_(debtTotal),
       debtTotal>0 ? '<b>'+pageFr_(debtOver30)+'</b> просрочено &gt;30 дн.' : 'долгов нет', overPctV)+
   '</div>';
@@ -4658,6 +4679,20 @@ function mpRetryLost_() {
   if (!cur) return;
   delete mgrLostCache[cur.name + '::' + (myPagePeriod || 'current')];
   mpRenderLostBody_();
+}
+// Сколько банковских поступлений СЕГОДНЯ опознано за этим менеджером (СМС-лента,
+// сопоставление по контрагенту делает сервер - поле matched_manager). Это живой
+// слой поверх 1С-цифры дня: банк знает про деньги раньше, чем 1С их докатит.
+function mpBankTodayForManager_(sur) {
+  if (typeof BANK_OPS === 'undefined' || !BANK_OPS || !BANK_OPS.ops) return 0;
+  var today = BANK_OPS.today;
+  return BANK_OPS.ops.reduce(function(a, o) {
+    if (o.direction !== 'in') return a;
+    if (!o.occurred_at || o.occurred_at.slice(0, 10) !== today) return a;
+    var mm = String(o.matched_manager || '').trim().split(' ')[0].toLowerCase();
+    if (!mm || mm !== String(sur || '').toLowerCase()) return a;
+    return a + (Number(o.amount) || 0);
+  }, 0);
 }
 function mpScrollToTabs_() {
   setTimeout(function(){
@@ -14799,6 +14834,8 @@ function bankFlySum_(fromEl, toEl, amountText, onArrive) {
 // Хореография победы по раскадровке mxWin (t=0..2200), цель - видимая карточка
 // «Сегодня»: на странице Поступления - KPI, на Панели - карточка «Поступления».
 // deltaToday - сумма НОВЫХ сегодняшних поступлений (для одометра от старого к новому).
+// Цель одометра для плитки личной страницы (её «сегодня» после прихода платёжки).
+var mpTileTodayTarget_ = null;
 function bankWinScene_(deltaToday, toastHtml, level, mgrTotal) {
   level = level || 1;
   var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -14809,15 +14846,28 @@ function bankWinScene_(deltaToday, toastHtml, level, mgrTotal) {
   // в отличие от статичной разметки admin-карточек). mgrTotal - готовая сумма "сегодня по
   // компании" от вызывающей стороны (D.role==='manager' передаёт её явно).
   var mgrCard = document.getElementById('mgr-bank-today-card');
-  var card = (receiptsCard && receiptsCard.offsetParent) ? receiptsCard
+  // Плитка «Поступления» на личной странице (Влад, 29.08: «поступление падает в эту
+  // ячейку со звуком»). Она видна ВСЕГДА, пока открыта личная страница - в отличие
+  // от mgrCard, который живёт только на вкладке «Поступления», - поэтому у неё
+  // высший приоритет: деньги менеджера должны прилетать туда, куда он смотрит.
+  var tileVal = document.getElementById('mp-rec-today-val');
+  var tileCard = tileVal ? tileVal.closest('.mp-stat') : null;
+  var card = (tileCard && tileCard.offsetParent) ? tileCard
+           : (receiptsCard && receiptsCard.offsetParent) ? receiptsCard
            : (mainCard && mainCard.offsetParent) ? mainCard
            : (mgrCard && mgrCard.offsetParent) ? mgrCard : null;
   var valEl = null;
-  if (card === receiptsCard) valEl = receiptsCard.querySelector('.kpi-value');
+  if (card === tileCard) valEl = tileVal;
+  else if (card === receiptsCard) valEl = receiptsCard.querySelector('.kpi-value');
   else if (card === mainCard) valEl = document.getElementById('main-receipts-today-val');
   else if (card === mgrCard) valEl = document.getElementById('mgr-bank-today-val');
   var to, from;
-  if (card === mgrCard) {
+  if (card === tileCard) {
+    // В плитке личной страницы «сегодня» - это деньги ЭТОГО менеджера, а не всей
+    // компании: одометр обязан крутиться к той же цифре, что там уже написана.
+    to = mpTileTodayTarget_;
+    from = (to != null && deltaToday) ? to - deltaToday : null;
+  } else if (card === mgrCard) {
     to = mgrTotal != null ? mgrTotal : null;
     from = (to != null && deltaToday) ? to - deltaToday : null;
   } else {
@@ -14919,6 +14969,29 @@ function bankAnnounceNewOps_(ops) {
     // Уровень - по МАКСИМАЛЬНОЙ операции пачки, не по сумме (одна платёжка 1,2 млн даёт
     // "Миллионник", а десять по 15 тыс не должны звучать как миллионник только за счёт
     // сложения - утверждено на превью "Фанфары по сумме").
+    // Личная страница: празднуем только платёжки, ОПОЗНАННЫЕ за этим менеджером.
+    // Чужие деньги в его плитку падать не должны - там его личная цифра дня.
+    var myTile = document.getElementById('mp-rec-today-val');
+    if (myTile) {
+      var meSur = String((myPageCurrentEntry_() && myPageCurrentEntry_().name) || '')
+        .trim().split(' ')[0].toLowerCase();
+      var mine = ins.filter(function(o) {
+        return String(o.matched_manager || '').trim().split(' ')[0].toLowerCase() === meSur;
+      });
+      if (!mine.length) {
+        // Пришли не его деньги: тихо обновляем общие цифры, сцену не играем.
+        renderMyPage();
+        return;
+      }
+      ins = mine;
+      insSum = ins.reduce(function(a, o) { return a + (Number(o.amount) || 0); }, 0);
+      insTodaySum = ins.reduce(function(a, o) {
+        return a + ((o.occurred_at && o.occurred_at.slice(0, 10) === today) ? (Number(o.amount) || 0) : 0);
+      }, 0);
+      // Куда должен докрутиться одометр плитки - её же «сегодня» ПОСЛЕ прихода.
+      var curTile = parseFloat(String(myTile.textContent).replace(/[^0-9]/g, '')) || 0;
+      mpTileTodayTarget_ = curTile + insTodaySum;
+    }
     var maxIn = ins.reduce(function(m, o) { return Math.max(m, Number(o.amount) || 0); }, 0);
     var level = bankWinLevel_(maxIn);
     // mgrTotal - "сегодня по компании" целиком (BANK_OPS.summary.today_in), нужен только

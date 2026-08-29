@@ -934,6 +934,28 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .mp-debtladder{display:flex;gap:2px;height:10px;border-radius:3px;overflow:hidden;margin-bottom:10px;}
 .mp-debtladder__s{min-width:6px;}
 
+/* «Моя группа» - блок старшего менеджера (превью «Кабина группы», утверждено 29.08).
+   Стоит там, где у менеджера расчёт зарплаты: у руководителя зарплата на отдельной
+   странице, а место занимает то, чего у менеджера нет - состояние подчинённых. */
+.mp-tm{padding:9px 0;border-bottom:1px solid rgba(255,255,255,.05);transition:background-color .13s;}
+.mp-tm:last-of-type{border-bottom:none;}
+.mp-tm:hover{background:var(--bg3);margin:0 -8px;padding:9px 8px;border-radius:6px;}
+.mp-tm__top{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:5px;}
+.mp-tm__name{font-size:12.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.mp-tm__me{font-size:9px;font-family:'JetBrains Mono',monospace;color:var(--muted);background:var(--bg4);
+  padding:1px 6px;border-radius:5px;margin-left:6px;}
+.mp-tm__nums{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--muted);white-space:nowrap;
+  font-variant-numeric:tabular-nums;flex:none;}
+.mp-tm__nums b{color:var(--text);font-weight:600;}
+.mp-tm__track{height:8px;border-radius:4px;background:var(--bg4);position:relative;overflow:hidden;}
+.mp-tm__fill{position:absolute;left:0;top:0;bottom:0;border-radius:4px;}
+.mp-tm__fc{position:absolute;top:0;bottom:0;}
+.mp-tm__tick{position:absolute;top:-3px;bottom:-3px;width:2px;background:rgba(255,255,255,.75);left:83.3%;}
+.mp-tm__lag{font-size:10.5px;font-family:'JetBrains Mono',monospace;margin-top:4px;font-variant-numeric:tabular-nums;}
+.mp-team-foot{margin-top:auto;padding-top:12px;border-top:1px dashed rgba(255,255,255,.10);
+  font-size:11.5px;color:var(--muted);line-height:1.5;}
+.mp-team-foot b{color:var(--text);font-family:'JetBrains Mono',monospace;font-weight:600;}
+
 /* drawer «Пропавшие клиенты» */
 .mp-drawer-bk{position:fixed;inset:0;background:rgba(0,0,0,.5);opacity:0;pointer-events:none;
   transition:opacity .24s ease-in-out;z-index:1500;}
@@ -4489,9 +4511,13 @@ function mpLagDays_(planVal, faktVal) {
   }
   return { lag: today - atDay, schedToday: sched[today], today: today };
 }
-function mpStatusStripHtml_(planVal, faktVal, forecastVal, dayNums) {
+function mpStatusStripHtml_(planVal, faktVal, forecastVal, dayNums, opts) {
+  // opts (страница руководителя, 29.08): та же строка состояния, но про ОТДЕЛ -
+  // prefix «Отдел: », рычаг «Группе нужно сегодня», хвост «· плана N». Слова
+  // вердикта и пороги общие, чтобы менеджер и руководитель читали одинаково.
+  opts = opts || {};
   var L = mpLagDays_(planVal, faktVal);
-  var word, cls, sub, leverCap = 'Сегодня нужно', leverVal = '—';
+  var word, cls, sub, leverCap = opts.leverCap || 'Сегодня нужно', leverVal = '—';
   var now = new Date(), dayOfMonth = now.getDate();
   var isWknd = (now.getDay()===0 || now.getDay()===6);
   if (dayNums) leverVal = pageFr_(isWknd ? dayNums.perWeekend : dayNums.perWorkday);
@@ -4519,6 +4545,10 @@ function mpStatusStripHtml_(planVal, faktVal, forecastVal, dayNums) {
     word = 'ИДЁШЬ В ГРАФИКЕ'; cls = 'good';
     sub = 'Факт <b>'+pageFr_(faktVal)+'</b> · по графику <b>'+pageFr_(L ? L.schedToday : 0)+'</b>';
   }
+  // Префикс делает фразу продолжением («Отдел: факт …»), поэтому первая буква строки
+  // опускается в нижний регистр - иначе получается «Отдел: Факт».
+  if (opts.prefix) sub = opts.prefix + sub.charAt(0).toLowerCase() + sub.slice(1);
+  if (opts.planTail && planVal > 0 && faktVal < planVal) sub += ' · плана <b>'+pageFr_(planVal)+'</b>';
   return '<div class="mp-status mp-status--'+cls+'">'+
     '<div class="mp-status__l"><div class="mp-status__word">'+word+'</div>'+
       '<div class="mp-status__sub">'+sub+'</div></div>'+
@@ -4665,6 +4695,138 @@ function mpBankTodayForManager_(sur) {
     return a + (Number(o.amount) || 0);
   }, 0);
 }
+/* ═══ «Моя группа» - блок старшего менеджера (превью «Кабина группы», 29.08) ═══
+   Сортировка ПО ОТСТАВАНИЮ (у кого больше - выше). Оценочных слов («худший» и
+   подобных) в интерфейсе нет: Влад 29.08 попросил их избегать - показываем факт
+   (сколько дней), а вывод человек делает сам. */
+function mpHeadTeamHtml_(cfg, byManagerAll, managerPlans, paceRatio, headSur) {
+  var mgrIdx = {};
+  (byManagerAll||[]).forEach(function(m){ mgrIdx[String(m.name||'').trim().split(' ')[0].toLowerCase()] = m; });
+  var rows = [], deptFcSum = 0, deptPlanSum = 0, shortfallBySur = [];
+  (cfg.members||[]).forEach(function(sur){
+    var lo = sur.toLowerCase(), m = mgrIdx[lo];
+    var plan = (managerPlans||{})[lo] || 0;
+    if (!m && !plan) return;
+    var isPrus = lo === 'прус-роскошный';
+    var fakt = m ? ((m.amount||0) - (isPrus ? (m.internal_amount||0) : 0)) : 0;
+    var thru = m ? ((m.amount_thru_yesterday != null ? m.amount_thru_yesterday : (m.amount||0))
+                    - (isPrus ? (m.internal_amount_thru_yesterday != null ? m.internal_amount_thru_yesterday : (m.internal_amount||0)) : 0)) : 0;
+    var fc = thru * paceRatio;
+    var L = mpLagDays_(plan, fakt);
+    deptFcSum += fc; deptPlanSum += plan;
+    if (plan > 0 && fc < plan) shortfallBySur.push({ name: m ? m.name : sur, gap: plan - fc });
+    rows.push({ name: m ? m.name : sur, sur: sur, plan: plan, fakt: fakt, fc: fc,
+                lag: L ? L.lag : null, me: lo === headSur });
+  });
+  // по отставанию: у кого больше - выше; без плана - в конец
+  rows.sort(function(a,b){
+    if (a.lag == null) return 1;
+    if (b.lag == null) return -1;
+    return b.lag - a.lag;
+  });
+  var body = rows.map(function(r){
+    var pct = r.plan > 0 ? r.fakt/r.plan*100 : 0;
+    var fcPct = r.plan > 0 ? r.fc/r.plan*100 : 0;
+    var col = fcPct >= 100 ? PAGE_COL.green : fcPct >= 90 ? PAGE_COL.amber : PAGE_COL.red;
+    var factW = Math.min(pct,120) * 0.833;
+    var fcW = Math.max(0, Math.min(fcPct,120) - Math.min(pct,120)) * 0.833;
+    var lagTxt = (r.lag == null) ? 'плана нет'
+      : r.lag > 0.5 ? 'отставание ' + r.lag.toFixed(1).replace('.',',') + ' дня'
+      : r.lag < -0.5 ? 'опережение ' + Math.abs(r.lag).toFixed(1).replace('.',',') + ' дня'
+      : 'идёт в графике';
+    var lagCol = (r.lag == null) ? 'var(--muted)'
+      : r.lag > 0.5 ? PAGE_COL.red : r.lag < -0.5 ? PAGE_COL.green : 'var(--muted)';
+    return '<div class="mp-tm">'+
+      '<div class="mp-tm__top">'+
+        '<span class="mp-tm__name">'+pageEsc_(r.name)+(r.me?'<span class="mp-tm__me">это я</span>':'')+'</span>'+
+        '<span class="mp-tm__nums">'+(r.plan>0
+          ? '<b>'+pageMln_(r.fakt)+'</b> из '+pageMln_(r.plan)+' · '+Math.round(pct)+'%'
+          : '<b>'+pageMln_(r.fakt)+'</b>')+'</span>'+
+      '</div>'+
+      (r.plan>0 ? '<div class="mp-tm__track">'+
+        '<div class="mp-tm__fill" style="width:'+factW.toFixed(1)+'%;background:'+col+'"></div>'+
+        '<div class="mp-tm__fc" style="left:'+factW.toFixed(1)+'%;width:'+fcW.toFixed(1)+'%;background:repeating-linear-gradient(45deg,'+pageHex2rgba_(col,0.35)+' 0 4px,transparent 4px 8px)"></div>'+
+        '<div class="mp-tm__tick"></div></div>' : '')+
+      '<div class="mp-tm__lag" style="color:'+lagCol+'">'+lagTxt+
+        (r.plan>0 ? ' · прогноз '+pageMln_(r.fc)+' ('+Math.round(fcPct)+'%)' : '')+'</div>'+
+    '</div>';
+  }).join('');
+
+  var foot = '';
+  if (deptPlanSum > 0) {
+    var gap = deptPlanSum - deptFcSum;
+    shortfallBySur.sort(function(a,b){ return b.gap - a.gap; });
+    var top2 = shortfallBySur.slice(0,2);
+    // Недоборы называем ПОИМЁННО с суммой каждого, а не «из них N млн» одним числом:
+    // сумма личных недоборов бывает БОЛЬШЕ общего разрыва (те, кто идёт с опережением,
+    // часть перекрывают), и фраза «не хватает 7,4, из них 7,5» читалась как ошибка.
+    foot = '<div class="mp-team-foot">' +
+      (gap > 0
+        ? 'Если каждый закроет свой план — отдел выйдет на <b>'+pageMln_(deptPlanSum)+'</b>. Сейчас по прогнозу <b>'+pageMln_(deptFcSum)+'</b>: не хватает <b>'+pageMln_(gap)+'</b>'+
+          (top2.length ? '. Основной недобор — '+top2.map(function(x){ return pageEsc_(String(x.name).split(' ')[0])+' ('+pageMln_(x.gap)+')'; }).join(' и ') : '')+'.'
+        : 'По прогнозу отдел закрывает план: <b>'+pageMln_(deptFcSum)+'</b> при плане <b>'+pageMln_(deptPlanSum)+'</b>.')+
+    '</div>';
+  }
+  return '<div class="card mp-cell-salary"><div class="card-title" style="display:flex;justify-content:space-between;align-items:center">'+
+      '<span>Моя группа</span><span class="mp-tasks__count">по отставанию</span></div>'+
+    body + foot + '</div>';
+}
+
+// Три плитки руководителя: выручка/поступления/дебиторка ОТДЕЛА, третий слой -
+// личный вклад самого руководителя (он ведёт и свои продажи тоже).
+function mpHeadStatsHtml_(cfg, byManagerAll, deptFakt, deptPlan, headSur) {
+  var teamSur = (cfg.members||[]).map(function(x){ return x.toLowerCase(); });
+  function inTeam(name){ return teamSur.indexOf(String(name||'').trim().split(' ')[0].toLowerCase()) >= 0; }
+  function sumRec(bucket){
+    return ((D.receipts && D.receipts[bucket] && D.receipts[bucket].transactions) || [])
+      .filter(function(t){ return inTeam(t.manager); })
+      .reduce(function(a,t){ return a + (t.amount||0); }, 0);
+  }
+  var recMonth = sumRec('this_month'), recWeek = sumRec('week'), recToday = sumRec('today');
+  var mgrIdx = {};
+  (byManagerAll||[]).forEach(function(m){ mgrIdx[String(m.name||'').trim().split(' ')[0].toLowerCase()] = m; });
+  var myRow = mgrIdx[headSur] || {};
+  var revWeek = (cfg.members||[]).reduce(function(a,sur){
+    var m = mgrIdx[sur.toLowerCase()];
+    return a + ((m && m.amount_week) || 0);
+  }, 0);
+  var teamDebt = ((D.debt && D.debt.by_customer) || []).filter(function(c){ return inTeam(c.manager); });
+  var debtTotal = teamDebt.reduce(function(a,c){ return a + (c.balance||0); }, 0);
+  var debtOver30 = teamDebt.reduce(function(a,c){ return a + ((c.daysOverdue||0) > 30 ? (c.balance||0) : 0); }, 0);
+  var debtorCount = teamDebt.filter(function(c){ return (c.balance||0) > 0; }).length;
+
+  function cell(tab, color, cap, val, layers, subHtml, pct) {
+    return '<div class="mp-stat" onclick="setMyPageMgrTab(\''+tab+'\');mpScrollToTabs_()" title="Открыть вкладку">'+
+      '<div class="mp-stat__cap"><span class="mp-stat__dot" style="background:'+color+'"></span>'+cap+
+        '<span class="mp-stat__chev">›</span></div>'+
+      '<div class="mp-stat__val">'+val+'</div>'+
+      ((layers && layers.length) ? '<div class="mp-stat__layers">'+layers.map(function(L){
+        return '<div class="mp-stat__week'+(L.live?' mp-stat__week--live':'')+'">'+
+          '<span class="mp-stat__week-cap">'+L.cap+'</span>'+
+          '<span class="mp-stat__week-val"'+(L.style?' style="'+L.style+'"':'')+'>'+(L.raw != null ? L.raw : pageFr_(L.val))+'</span></div>';
+      }).join('')+'</div>' : '')+
+      '<div class="mp-stat__foot"><div class="mp-stat__sub">'+subHtml+'</div>'+
+        '<div class="mp-stat__bar"><div class="mp-stat__fill" style="width:'+pct.toFixed(1)+'%;background:'+color+'"></div></div>'+
+      '</div></div>';
+  }
+  var planPctV = deptPlan > 0 ? Math.min(100, deptFakt/deptPlan*100) : 0;
+  var recPctV = deptFakt > 0 ? Math.min(100, recMonth/deptFakt*100) : 0;
+  var overPctV = debtTotal > 0 ? Math.min(100, debtOver30/debtTotal*100) : 0;
+
+  return '<div class="mp-stats mp-cell-stats">'+
+    cell('team', PAGE_COL.blue, 'Выручка отдела', pageFr_(deptFakt),
+      [{cap:'за неделю', val:revWeek}, {cap:'мой вклад', val:(myRow.amount||0)}],
+      deptPlan>0 ? '<b>'+Math.round(planPctV)+'%</b> от плана '+pageMln_(deptPlan) : 'плана на месяц нет', planPctV)+
+    cell('receipts', PAGE_COL.green, 'Поступления', pageFr_(recMonth),
+      [{cap:'за неделю', val:recWeek}, {cap:'сегодня', val:recToday, live:true}],
+      deptFakt>0 ? '<b>'+Math.round(recPctV)+'%</b> от выручки дошло до счёта' : 'нет выручки за месяц', recPctV)+
+    cell('debt', PAGE_COL.amber, 'Дебиторка', pageFr_(debtTotal),
+      [{cap:'просрочено', val:debtOver30, style:'color:'+PAGE_COL.amber},
+       {cap:'должников', raw:String(debtorCount)}],
+      debtTotal>0 ? '<b>'+Math.round(overPctV)+'%</b> долга просрочено &gt;30 дн.' : 'долгов нет', overPctV)+
+  '</div>';
+}
+
 function mpScrollToTabs_() {
   setTimeout(function(){
     var t = document.getElementById('mp-tabs-card');
@@ -5325,15 +5487,12 @@ function renderMyPageCommercialHead_(el, current, selectorHtml, d) {
 
   // team_by_manager - только при самостоятельном входе (buildManagerView_ уже отфильтровал
   // на сервере, см. commercialHeadTeam_). Admin-предпросмотр видит company-wide
-  // D.orders.by_manager напрямую - renderDeptGroupTableHtml_ сама выберет из него только
-  // cfg.members (get() внутри неё ищет ПО ФАМИЛИИ, лишние строки просто игнорируются), так
-  // что передавать можно любой из двух источников без разницы в итоговой табличке.
+  // D.orders.by_manager напрямую - renderCommercialHeadTeamBlock_/mpHeadTeamHtml_ сами
+  // выберут из него только cfg.members (поиск ПО ФАМИЛИИ, лишние строки игнорируются), так
+  // что передавать можно любой из двух источников без разницы в итоге.
   var byManagerAll = (D.orders && D.orders.team_by_manager) || (D.orders && D.orders.by_manager) || [];
   var managerPlans = (D.orders && D.orders.managerPlans) || {};
   var paceRatio = calcPaceRatio_((D.orders||{}).period);
-
-  var html = selectorHtml;
-  html += renderAiTasksBlockHtml_(current, 'commercial_head');
 
   // План отдела (сумма планов команды) vs факт (сумма выручки команды) - тот же приём, что
   // "Валовая прибыль своего парка" у Рыщанова, просто по выручке продаж, не по ВП.
@@ -5352,23 +5511,226 @@ function renderMyPageCommercialHead_(el, current, selectorHtml, d) {
       deptFaktThru += mThru - mIntThru;
     }
   });
-  if (deptPlan > 0) {
-    var deptPct = deptFakt / deptPlan * 100;
-    var deptForecast = deptFaktThru * paceRatio;
-    var deptForecastPct = deptForecast / deptPlan * 100;
-    html += planProgressBar('Выполнение плана продаж отдела', deptPct, deptForecastPct, deptFakt, deptForecast, deptPlan);
+  var deptForecast = deptFaktThru * paceRatio;
+
+  // "Сколько группе нужно делать в день, чтобы догнать" - ТОТ ЖЕ расчёт с весом выходных,
+  // что у менеджера (weekendRatio_), просто остаток берётся по плану отдела.
+  var deptDayRateHtml = '', deptDayNums = null;
+  if (isLiveMonthKey_((D.orders||{}).period) && deptPlan > 0) {
+    var remD = deptPlan - deptFakt;
+    if (remD > 0) {
+      var nD = new Date(), dimD = new Date(nD.getFullYear(), nD.getMonth()+1, 0).getDate();
+      var rwD = 0, rwkD = 0;
+      for (var dd = nD.getDate()+1; dd <= dimD; dd++) {
+        var dowD = new Date(nD.getFullYear(), nD.getMonth(), dd).getDay();
+        if (dowD === 0 || dowD === 6) rwkD++; else rwD++;
+      }
+      var wrD = weekendRatio_(), denD = rwD + rwkD*wrD;
+      if (denD > 0) {
+        var perWD = remD/denD, perWkD = perWD*wrD;
+        deptDayNums = { perWorkday: perWD, perWeekend: perWkD };
+        deptDayRateHtml = '<div class="mp-dashed"><div class="mp-dashed__c">Чтобы догнать</div>'+
+          '<div class="mp-dashed__t">Группе в среднем <b>'+mln(perWD)+'</b> в рабочий день'+
+          (rwkD>0 ? ' и <b>'+mln(perWkD)+'</b> в выходной (объём в выходной ниже)' : '')+
+          ' \u2014 осталось '+rwD+' раб. + '+rwkD+' вых. дней.</div></div>';
+      }
+    } else {
+      deptDayRateHtml = '<div class="mp-dashed"><div class="mp-dashed__t" style="color:'+COL.green+'">План отдела уже выполнен</div></div>';
+    }
   }
 
-  // Табличка группы отдела - переиспользует ТУ ЖЕ логику, что страница "По менеджерам"
-  // (Влад: "точно такая же табличка... её прям структуру оттуда берём"), включая дельту
-  // "▲+N к сегодня" и click-to-expand (renderDeptGroupTableHtml_, module scope).
-  html += renderDeptGroupTableHtml_(cfg, byManagerAll, managerPlans, paceRatio, 'renderMyPage');
+  // Вкладка нижнего блока. Состояние общее с менеджерской страницей (myPageMgrTab), но
+  // набор вкладок другой - чужие ключи ('top'/'lost' от менеджера) сводим к 'team'.
+  var HEAD_TABS = ['team','receipts','debt','docs'];
+  var headTab = HEAD_TABS.indexOf(myPageMgrTab) >= 0 ? myPageMgrTab : 'team';
 
-  // Вкладки "Поступления" (по менеджерам/вчера/сегодня/эта неделя) - см.
-  // renderCommercialHeadReceiptsBlock_ ниже.
-  html += renderCommercialHeadReceiptsBlock_(cfg);
+  var html = selectorHtml;
+  html += '<div class="mp-light" id="mp-light"></div>';
+  // Строка состояния - про ОТДЕЛ (то же ядро mpLagDays_, что у менеджера).
+  html += mpStatusStripHtml_(deptPlan, deptFakt, deptForecast, deptDayNums,
+    { leverCap: 'Группе нужно сегодня', prefix: 'Отдел: ', planTail: true });
+
+  html += '<div class="mp-tier">';
+  if (deptPlan > 0) {
+    html += planProgressBar('Путь к плану отдела', deptFakt/deptPlan*100, deptForecast/deptPlan*100,
+      deptFakt, deptForecast, deptPlan, deptDayRateHtml);
+  } else {
+    html += '<div class="card mp-cell-plan"><div class="card-title">Путь к плану отдела</div>'+
+      '<div style="font-size:13px;color:var(--muted)">Планов команды на этот месяц в таблице нет</div></div>';
+  }
+  html += mpHeadStatsHtml_(cfg, byManagerAll, deptFakt, deptPlan, headSur);
+  html += renderAiTasksBlockHtml_(current, 'commercial_head');
+  html += mpHeadTeamHtml_(cfg, byManagerAll, managerPlans, paceRatio, headSur);
+  html += '</div>';
+
+  // Нижний блок - того же формата, что у менеджера: вкладки + ghost-кнопка drawer.
+  html += '<div class="card" id="mp-tabs-card" style="margin-bottom:16px">';
+  html += '<div class="mp-tabrow"><div class="tab-bar" style="margin-bottom:0">'+
+    '<button class="tab-btn'+(headTab==='team'?' active':'')+'" onclick="setMyPageMgrTab(\'team\')">Менеджеры группы</button>'+
+    '<button class="tab-btn'+(headTab==='receipts'?' active':'')+'" onclick="setMyPageMgrTab(\'receipts\')">Поступления</button>'+
+    '<button class="tab-btn'+(headTab==='debt'?' active':'')+'" onclick="setMyPageMgrTab(\'debt\')">Дебиторка группы</button>'+
+    '<button class="tab-btn'+(headTab==='docs'?' active':'')+'" onclick="setMyPageMgrTab(\'docs\')">Документы</button>'+
+  '</div>'+
+  '<button class="mp-ghostbtn" onclick="mpOpenLostDrawer_()">'+
+    '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.7-4.7M8 10.5h5"/></svg>'+
+    'Пропавшие клиенты</button>'+
+  '</div>';
+
+  if (headTab === 'receipts') {
+    html += renderCommercialHeadReceiptsBlock_(cfg);
+  } else if (headTab === 'debt') {
+    html += renderCommercialHeadDebtBlock_(cfg);
+  } else if (headTab === 'docs') {
+    html += renderCommercialHeadDocsBlock_(cfg);
+  } else {
+    html += renderCommercialHeadTeamBlock_(cfg, byManagerAll, managerPlans, paceRatio, headSur);
+  }
+  html += '</div>';
 
   el.innerHTML = html;
+}
+
+// Вкладка «Менеджеры группы» - ровно те колонки, что в утверждённом превью: план, факт,
+// %, прогноз, отставание в днях. Денежные срезы (заказы/оплата/найм) руководителю дают
+// три плитки выше и страница «По менеджерам» - здесь нужен ответ «кто не успевает».
+function renderCommercialHeadTeamBlock_(cfg, byManagerAll, managerPlans, paceRatio, headSur) {
+  var idx = {};
+  (byManagerAll||[]).forEach(function(m){ idx[String(m.name||'').trim().split(' ')[0].toLowerCase()] = m; });
+  var rows = [];
+  (cfg.members||[]).forEach(function(sur) {
+    var lo = sur.toLowerCase(), m = idx[lo], plan = (managerPlans||{})[lo] || 0;
+    if (!m && !plan) return;
+    var isPrus = lo === 'прус-роскошный';
+    var fakt = m ? ((m.amount||0) - (isPrus ? (m.internal_amount||0) : 0)) : 0;
+    var thru = m ? ((m.amount_thru_yesterday != null ? m.amount_thru_yesterday : (m.amount||0))
+                    - (isPrus ? (m.internal_amount_thru_yesterday != null ? m.internal_amount_thru_yesterday : (m.internal_amount||0)) : 0)) : 0;
+    var L = mpLagDays_(plan, fakt);
+    rows.push({ name: m ? cleanName(m.name) : sur, plan: plan, fakt: fakt, fc: thru*paceRatio,
+                lag: L ? L.lag : null, me: lo === headSur,
+                todayOrders: (m && m.today_new_orders) || 0, todayAmount: (m && m.today_new_amount) || 0 });
+  });
+  rows.sort(function(a,b){
+    if (a.lag == null) return 1;
+    if (b.lag == null) return -1;
+    return b.lag - a.lag;
+  });
+  if (!rows.length) return '<div style="font-size:13px;color:var(--muted);padding:8px 0">Данных по группе за этот период нет</div>';
+  var body = rows.map(function(r){
+    var pct = r.plan > 0 ? Math.round(r.fakt/r.plan*100) : 0;
+    var fcPct = r.plan > 0 ? Math.round(r.fc/r.plan*100) : 0;
+    var pctCol = fcPct >= 100 ? PAGE_COL.green : fcPct >= 90 ? PAGE_COL.amber : PAGE_COL.red;
+    var lagTxt = (r.lag == null) ? '\u2014'
+      : r.lag > 0.5 ? '+'+r.lag.toFixed(1).replace('.',',')+' дн.'
+      : r.lag < -0.5 ? '\u2212'+Math.abs(r.lag).toFixed(1).replace('.',',')+' дн.'
+      : 'в графике';
+    var lagCol = (r.lag == null) ? 'var(--muted)'
+      : r.lag > 0.5 ? PAGE_COL.red : r.lag < -0.5 ? PAGE_COL.green : 'var(--muted)';
+    // «▲+N сегодня» - та же дельта, что на странице «По менеджерам»: показывает, что
+    // человек УЖЕ сегодня привёз, до того как это попадёт в месячные итоги.
+    var todayBadge = r.todayOrders > 0
+      ? ' <span style="font-size:10px;color:'+PAGE_COL.green+'">\u25b2+'+r.todayOrders+' \u00b7 '+pageMln_(r.todayAmount)+'</span>'
+      : '';
+    return '<tr'+(r.me?' style="background:rgba(55,138,221,.06)"':'')+'>'+
+      '<td><b>'+pageEsc_(r.name)+'</b>'+(r.me?' <span style="font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(55,138,221,.15);color:'+PAGE_COL.blue+'">это я</span>':'')+'</td>'+
+      '<td class="num'+(r.plan?'':' muted')+'">'+(r.plan ? fmt(r.plan) : '\u2014')+'</td>'+
+      '<td class="num"><b>'+fmt(r.fakt)+'</b>'+todayBadge+'</td>'+
+      '<td class="num" style="color:'+(r.plan?pctCol:'var(--muted)')+'">'+(r.plan ? pct+'%' : '\u2014')+'</td>'+
+      '<td class="num'+(r.plan?'':' muted')+'">'+(r.plan ? fmt(r.fc)+' ('+fcPct+'%)' : '\u2014')+'</td>'+
+      '<td class="num" style="color:'+lagCol+'">'+lagTxt+'</td>'+
+    '</tr>';
+  }).join('');
+  return '<div style="overflow-x:auto"><table class="tbl" style="min-width:620px"><thead><tr>'+
+    '<th>Менеджер</th><th class="num">План</th><th class="num">Факт</th><th class="num">%</th>'+
+    '<th class="num">Прогноз</th><th class="num">Отставание</th></tr></thead><tbody>'+body+'</tbody></table></div>';
+}
+
+// Дебиторка группы - то же ядро, что у менеджера (computeDebtAggregates_/debtDeadAndStatus_),
+// плюс колонка «чей клиент»: руководителю важно, к кому идти с долгом.
+function renderCommercialHeadDebtBlock_(cfg) {
+  var teamSur = (cfg.members||[]).map(function(x){ return x.toLowerCase(); });
+  function inTeam(name){ return teamSur.indexOf(String(name||'').trim().split(' ')[0].toLowerCase()) >= 0; }
+  var all = ((D.debt && D.debt.by_customer) || []).filter(function(c){ return inTeam(c.manager); });
+  if (!all.length) return '<div style="font-size:13px;color:var(--muted);padding:8px 0">Долгов по группе нет</div>';
+  var agg = computeDebtAggregates_(all), dead = debtDeadAndStatus_(all);
+  var buckets = [
+    {label:'0-30 дн.', value: agg.summary.current_0_30, color: PAGE_COL.green},
+    {label:'30-60 дн.', value: agg.summary.overdue_30_60, color: PAGE_COL.amber},
+    {label:'60-90 дн.', value: agg.summary.overdue_60_90, color: '#BA7517'},
+    {label:'90+ дн.', value: agg.summary.overdue_90_plus, color: PAGE_COL.red},
+    {label:'Мёртвая (600+)', value: dead.overdue_dead, color: pageHex2rgba_(PAGE_COL.red,0.55)}
+  ];
+  var sum = buckets.reduce(function(a,b){ return a + Math.max(0,b.value||0); }, 0);
+  var h = '<div style="margin-bottom:10px;font-size:13px;color:var(--muted)">Итого долг группы: '+
+    '<b style="color:'+PAGE_COL.red+'">'+pageMln_(agg.summary.total_balance)+'</b> \u00b7 должников: '+agg.summary.debtor_count+'</div>';
+  if (sum > 0) {
+    h += '<div class="mp-debtladder">'+buckets.map(function(b){
+      if (!(b.value > 0)) return '';
+      return '<div class="mp-debtladder__s" style="flex-grow:'+(b.value/sum*100).toFixed(2)+';background:'+b.color+'" title="'+b.label+': '+pageMln_(b.value)+'"></div>';
+    }).join('')+'</div>';
+  }
+  // Пустые корзины не показываем: здесь чипы - легенда к полоске выше (не фильтр, как у
+  // менеджера), а «Мёртвая 0 ₽» в легенде - шум, которому нечего пояснять.
+  h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'+buckets.filter(function(b){ return b.value > 0; }).map(function(b){
+    return '<span style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:11px;display:inline-flex;align-items:center;gap:6px">'+
+      '<span style="width:7px;height:7px;border-radius:2px;background:'+b.color+'"></span>'+b.label+' <b>'+pageMln_(b.value)+'</b></span>';
+  }).join('')+'</div>';
+  var rows = all.slice().sort(function(a,b){ return b.balance - a.balance; }).slice(0, 40);
+  h += '<div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
+    '<th>Контрагент</th><th>Менеджер</th><th class="num">Баланс</th><th class="num">Дней просрочки</th></tr></thead><tbody>'+
+    rows.map(function(c){
+      var cls = c.daysOverdue > 90 ? 'red' : c.daysOverdue > 30 ? 'amber' : 'green';
+      return '<tr><td>'+pageEsc_(c.contragent)+'</td>'+
+        '<td class="muted">'+pageEsc_(cleanName(c.manager||''))+'</td>'+
+        '<td class="num"><b>'+fmt(c.balance)+'</b></td>'+
+        '<td class="num '+cls+'">'+c.daysOverdue+'</td></tr>';
+    }).join('')+
+  '</tbody></table></div>';
+  if (all.length > rows.length) h += '<div class="muted" style="font-size:11px;margin-top:8px">Показаны 40 крупнейших из '+all.length+'. Полный список \u2014 на странице «Дебиторка».</div>';
+  return h;
+}
+
+// Документы группы - воронка оформления по каждому менеджеру. Источник тот же, что у
+// менеджера (by_manager_detail[имя].doc), просто по всем членам группы: team_by_manager_detail
+// приходит при самостоятельном входе руководителя, by_manager_detail - при admin-предпросмотре.
+function renderCommercialHeadDocsBlock_(cfg) {
+  var teamSur = (cfg.members||[]).map(function(x){ return x.toLowerCase(); });
+  var src = (D.orders && D.orders.team_by_manager_detail) || (D.orders && D.orders.by_manager_detail) || {};
+  var rows = [];
+  Object.keys(src).forEach(function(nm) {
+    if (teamSur.indexOf(String(nm).trim().split(' ')[0].toLowerCase()) < 0) return;
+    var doc = (src[nm] || {}).doc || {};
+    var noWb = (doc.no_waybill_own||0) + (doc.no_waybill_hired||0);
+    var np = doc.waybill_not_posted||0, nr = doc.posted_no_realiz||0, ok = doc.complete||0;
+    var tot = noWb + np + nr + ok;
+    if (!tot) return;
+    rows.push({ name: cleanName(nm), noWb: noWb, np: np, nr: nr, ok: ok, tot: tot, open: noWb+np+nr });
+  });
+  if (!rows.length) return '<div style="font-size:13px;color:var(--muted);padding:8px 0">Данных по документам группы за этот период нет</div>';
+  rows.sort(function(a,b){ return b.open - a.open; });
+  var T = rows.reduce(function(a,r){ a.noWb+=r.noWb; a.np+=r.np; a.nr+=r.nr; a.ok+=r.ok; a.tot+=r.tot; return a; },
+                      {noWb:0,np:0,nr:0,ok:0,tot:0});
+  var amber2 = '#BA7517';
+  var h = '<div style="font-family:JetBrains Mono,monospace;font-size:21px;font-weight:700;margin-bottom:10px">'+
+    T.ok+' из '+T.tot+' готово</div>';
+  h += '<div class="mp-debtladder" style="margin-bottom:12px">'+
+    [{v:T.noWb,c:PAGE_COL.red,l:'Нет путёвки'},{v:T.np,c:PAGE_COL.amber,l:'Не проведено'},
+     {v:T.nr,c:amber2,l:'Нет реализации'},{v:T.ok,c:PAGE_COL.green,l:'Готово'}].map(function(b){
+      if (!(b.v > 0)) return '';
+      return '<div class="mp-debtladder__s" style="flex-grow:'+b.v+';background:'+b.c+'" title="'+b.l+': '+b.v+'"></div>';
+    }).join('')+'</div>';
+  h += '<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Менеджер</th>'+
+    '<th class="num">Нет путёвки</th><th class="num">Не проведено</th><th class="num">Нет реализации</th>'+
+    '<th class="num">Готово</th><th class="num">Итого</th></tr></thead><tbody>'+
+    rows.map(function(r){
+      return '<tr><td><b>'+pageEsc_(r.name)+'</b></td>'+
+        '<td class="num" style="color:'+(r.noWb?PAGE_COL.red:'var(--muted)')+'">'+(r.noWb||'\u2014')+'</td>'+
+        '<td class="num" style="color:'+(r.np?PAGE_COL.amber:'var(--muted)')+'">'+(r.np||'\u2014')+'</td>'+
+        '<td class="num" style="color:'+(r.nr?amber2:'var(--muted)')+'">'+(r.nr||'\u2014')+'</td>'+
+        '<td class="num" style="color:'+PAGE_COL.green+'">'+r.ok+'</td>'+
+        '<td class="num muted">'+r.tot+'</td></tr>';
+    }).join('')+
+  '</tbody></table></div>';
+  return h;
 }
 
 // Блок "Поступления" для личной страницы руководителя группы (2026-08-26, Влад: "точно по
@@ -10225,7 +10587,7 @@ function toggleMgrToday(name) {
 }
 
 // Конфиг отделов (2026-08-26, вынесен в module scope из renderSalesMgr - нужен и личным
-// страницам руководителей групп Ахтамовой/Гусейновой, см. renderDeptGroupTableHtml_ ниже,
+// страницам руководителей групп Ахтамовой/Гусейновой (renderMyPageCommercialHead_),
 // plans/2026-08-26-ahtamova-guseinova-personal-pages.md). ПОВЕДЕНИЕ НЕ МЕНЯЛОСЬ - тот же
 // массив, просто перемещён, чтобы не жить внутри одной конкретной функции.
 var DEPT_CFG = [
@@ -10241,184 +10603,6 @@ var DEPT_CFG = [
   { color:'#06B6D4', name:'Ратников Максим',  head:null,        members:['Ратников'], solo:true },
 ];
 var HEAD_FULL = { 'Цуцурин':'Цуцурин Владислав Дмитриевич','Ахтамова':'Ахтамова Лиана Анатольевна','Гусейнова':'Гусейнова Айнур','Рыщанов':'Рыщанов Рустем' };
-
-// Параллельное состояние тоггла "что добавилось сегодня" для табличек группы отдела на
-// личных страницах руководителей (2026-08-26) - НЕ переиспользует mgrTodayVisible/
-// mgrTodayKey/toggleMgrToday страницы "По менеджерам" (те жёстко вызывают renderSalesMgr())
-// - свой параллельный toggle с именем функции повторного рендера параметром (тот же приём,
-// что уже использовался для параллельных вкладок Рыщанова - не трогать чужой рабочий код).
-var deptGroupTodayVisible = false, deptGroupTodayKey = '';
-function toggleDeptGroupToday(name, rerenderFnName) {
-  if (deptGroupTodayVisible && deptGroupTodayKey === name) { deptGroupTodayVisible = false; deptGroupTodayKey = ''; }
-  else { deptGroupTodayVisible = true; deptGroupTodayKey = name; }
-  if (typeof window[rerenderFnName] === 'function') window[rerenderFnName]();
-  if (deptGroupTodayVisible) {
-    var row = document.getElementById('dept-group-today-row');
-    if (row) row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }
-}
-
-// Табличка группы отдела - переиспользуемая версия deptBlock()/mgrRow()/planBar() со
-// страницы "По менеджерам" (см. renderSalesMgr ниже) для личных страниц руководителей
-// команд (2026-08-26, Ахтамова/Гусейнова: "точно такая же табличка... её прям структуру
-// оттуда берём"). ТА ЖЕ логика/цифры (дельта "сегодня" на today_new_orders/
-// today_new_amount/today_new_list, click-to-expand, план-бар), но НЕ трогает
-// renderSalesMgr()/её DOM id (те заняты статикой страницы "По менеджерам") - параллельная
-// реализация, тот же приём, что уже использовался для "Загрузки парка"/техники/водителей
-// на странице Рыщанова.
-// cfg - запись из DEPT_CFG. byManagerAll - D.orders.by_manager (company-wide, полный
-// список - и у admin-предпросмотра, и у self-login руководителя группы через
-// buildManagerView_). rerenderFnName - имя глобальной функции для повторного рендера при
-// клике на дельту (у каждого вызывающего контекста своя, передаётся строкой).
-function renderDeptGroupTableHtml_(cfg, byManagerAll, managerPlans, paceRatio, rerenderFnName) {
-  function fmtN(n) { return n ? Math.round(n).toLocaleString('ru-RU') : '—'; }
-  var mgrIdx = {};
-  (byManagerAll||[]).forEach(function(m) { mgrIdx[String(m.name||'').trim().split(' ')[0].toLowerCase()] = m; });
-  function get(sur) { return mgrIdx[sur.toLowerCase()] || null; }
-  var plans = managerPlans || {};
-  function planOf(sur) { return plans[sur.toLowerCase()] || 0; }
-
-  function planBar(amount, plan, amountForPace) {
-    if (!plan) return '';
-    var pct = Math.round(amount / plan * 100);
-    var barW = Math.min(pct, 100);
-    var barC = pct >= 80 ? '#1D9E75' : pct >= 60 ? '#EF9F27' : '#E24B4A';
-    var pctC = pct >= 80 ? 'color:#1D9E75' : pct >= 60 ? 'color:#EF9F27' : 'color:#E24B4A';
-    var forecast = (amountForPace != null ? amountForPace : amount) * paceRatio;
-    var forecastPct = Math.round(forecast / plan * 100);
-    var fCol = forecastPct >= 100 ? '#1D9E75' : forecastPct >= 70 ? '#EF9F27' : '#E24B4A';
-    return '<div style="display:flex;align-items:center;gap:5px;margin-top:3px">' +
-      '<div style="flex:1;min-width:40px;height:3px;border-radius:2px;background:rgba(255,255,255,0.1)">' +
-        '<div style="width:'+barW+'%;height:100%;border-radius:2px;background:'+barC+'"></div>' +
-      '</div>' +
-      '<span style="font-size:10px;font-weight:500;'+pctC+'">'+pct+'%</span>' +
-      '<span style="font-size:10px;color:var(--muted)">из '+fmtN(plan)+'</span>' +
-    '</div>' +
-    '<div style="font-size:10px;color:var(--muted);margin-top:2px">Прогноз: <span style="color:'+fCol+';font-weight:500">'+fmtN(forecast)+' ('+forecastPct+'%)</span></div>';
-  }
-
-  function mgrRow(m, isHead, isPrus, plan) {
-    if (!m) {
-      var fn = HEAD_FULL[isHead] || isHead || '';
-      return '<tr style="opacity:0.5"><td><b>'+fn+'</b> <span style="font-size:10px;color:var(--muted)">рук.</span></td>' +
-        '<td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td></tr>';
-    }
-    var orders  = (m.orders||0)  - (isPrus?(m.internal_orders||0):0);
-    var amount  = (m.amount||0)  - (isPrus?(m.internal_amount||0):0);
-    var payment = (m.payment||0) - (isPrus?(m.internal_payment||0):0);
-    var profit  = m.profit||0;
-    var name    = cleanName(m.name);
-    var mAmountThru = m.amount_thru_yesterday != null ? m.amount_thru_yesterday : (m.amount||0);
-    var mIntThru = isPrus ? (m.internal_amount_thru_yesterday != null ? m.internal_amount_thru_yesterday : (m.internal_amount||0)) : 0;
-    var amountForPace = mAmountThru - mIntThru;
-    var hTag = isHead ? ' <span style="font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(29,158,117,.15);color:#1D9E75">рук.</span>' : '';
-    var escName = String(m.name||'').replace(/'/g,"\\'");
-    var todayOrders = m.today_new_orders || 0, todayAmount = m.today_new_amount || 0;
-    var ordersBadge = todayOrders > 0
-      ? ' <span onclick="event.stopPropagation();toggleDeptGroupToday(\''+escName+'\',\''+rerenderFnName+'\')" style="font-size:10px;color:var(--green);cursor:pointer;text-decoration:underline dotted;white-space:nowrap">▲+'+todayOrders+'</span>'
-      : '';
-    var amountBadge = todayAmount > 0
-      ? ' <span onclick="event.stopPropagation();toggleDeptGroupToday(\''+escName+'\',\''+rerenderFnName+'\')" style="font-size:10px;color:var(--green);cursor:pointer;text-decoration:underline dotted;white-space:nowrap">▲+'+fmtN(todayAmount)+'</span>'
-      : '';
-    var mainRow = '<tr>' +
-      '<td><b>'+name+'</b>'+hTag+ planBar(amount, plan, amountForPace) +'</td>' +
-      '<td class="num">'+orders+ordersBadge+'</td>' +
-      '<td class="num">'+fmtN(amount)+amountBadge+'</td>' +
-      '<td class="num green">'+fmtN(payment)+'</td>' +
-      '<td class="num '+(profit>0?'green':profit<0?'red':'muted')+'">'+fmtN(profit)+'</td>' +
-      '<td class="num muted">'+((m.hired_orders||0)||'—')+'</td>' +
-    '</tr>';
-    // Разворачивается ПРЯМО ПОД строкой этого менеджера, тот же приём, что mgr-today-row
-    // на "По менеджерам" - свой id (dept-group-today-row), не коллизирует.
-    var todayRow = '';
-    if (deptGroupTodayVisible && deptGroupTodayKey === m.name) {
-      var todayList = m.today_new_list || [];
-      todayRow = '<tr id="dept-group-today-row"><td colspan="6" style="background:rgba(255,255,255,0.03);padding:10px 14px;border-top:1px dashed var(--border)">' +
-        '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">' +
-          '<div style="font-size:12px;font-weight:600">Что добавилось сегодня</div>' +
-          '<div class="muted" style="font-size:11px">'+todayList.length+' '+(todayList.length===1?'заказ':'заказов')+' · '+fmtN(todayAmount)+'</div>' +
-        '</div>' +
-        (todayList.length
-          ? '<table style="width:100%;font-size:12px;border-collapse:collapse">' +
-              todayList.map(function(o) {
-                return '<tr><td style="padding:2px 10px 2px 0;color:var(--muted)">'+(o.id||'—')+'</td>' +
-                  '<td style="padding:2px 10px 2px 0">'+(o.customer||'').substring(0,50)+'</td>' +
-                  '<td class="num" style="padding:2px 0">'+fmtN(o.amount||0)+'</td></tr>';
-              }).join('') +
-            '</table>'
-          : '<div class="muted" style="font-size:12px">Нет данных</div>') +
-      '</td></tr>';
-    }
-    return mainRow + todayRow;
-  }
-
-  function calcDept(members) {
-    var s = {orders:0,amount:0,amount_thru_yesterday:0,payment:0,profit:0,plan:0};
-    members.forEach(function(sur) {
-      var m = get(sur);
-      var ip = sur.toLowerCase() === 'прус-роскошный';
-      s.orders  += m ? (m.orders||0)  - (ip?(m.internal_orders||0):0)  : 0;
-      s.amount  += m ? (m.amount||0)  - (ip?(m.internal_amount||0):0)  : 0;
-      var mThru = m ? (m.amount_thru_yesterday != null ? m.amount_thru_yesterday : m.amount||0) : 0;
-      var mIntThru = ip && m ? (m.internal_amount_thru_yesterday != null ? m.internal_amount_thru_yesterday : (m.internal_amount||0)) : 0;
-      s.amount_thru_yesterday += mThru - mIntThru;
-      s.payment += m ? (m.payment||0) - (ip?(m.internal_payment||0):0) : 0;
-      s.profit  += m ? (m.profit||0) : 0;
-      s.plan    += planOf(sur);
-    });
-    return s;
-  }
-
-  var st = calcDept(cfg.members);
-  var color = cfg.color;
-  var memberList = cfg.solo ? '' : cfg.members.filter(function(s){ return s!==cfg.head && get(s); }).join(' · ');
-  var h = '<div class="card" style="margin-bottom:16px;padding:0;overflow:hidden">';
-  h += '<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border);background:rgba(255,255,255,0.03);border-left:3px solid '+color+'">';
-  h += '<div style="flex:1">';
-  h += '<div style="font-size:13px;font-weight:600;color:'+color+'">'+cfg.name+(cfg.solo ? '' : ' <span style="font-weight:400;color:var(--muted);font-size:12px">— руководитель группы</span>')+'</div>';
-  if (memberList) h += '<div style="font-size:11px;color:var(--muted);margin-top:2px">'+memberList+'</div>';
-  h += '</div>';
-  if (st.amount > 0) {
-    h += '<div style="text-align:right;white-space:nowrap">';
-    h += '<div style="font-size:11px;color:var(--muted)">'+(cfg.solo?'выручка':'итого группы')+'</div>';
-    h += '<div style="font-size:13px;font-weight:600">'+fmtN(st.amount)+'</div>';
-    h += '<div style="font-size:11px;color:#1D9E75">прибыль найм: '+fmtN(st.profit)+'</div>';
-    h += '</div>';
-  }
-  h += '</div>';
-  h += '<div style="overflow-x:auto"><table class="tbl" style="min-width:600px"><thead><tr>' +
-    '<th>Менеджер</th><th class="num">Заказов</th><th class="num">Сумма</th>' +
-    '<th class="num">Оплата</th><th class="num">Прибыль найм</th><th class="num">Найм</th>' +
-  '</tr></thead><tbody>';
-  cfg.members.forEach(function(sur) {
-    var m = get(sur);
-    var isHead = (sur === cfg.head);
-    var isPrus = sur.toLowerCase() === 'прус-роскошный';
-    var plan = planOf(sur);
-    if (!m && isHead) { h += mgrRow(null, cfg.head, false, plan); }
-    else if (m) { h += mgrRow(m, isHead ? cleanName(m.name) : null, isPrus, plan); }
-  });
-  if (st.plan > 0) {
-    var dPct = Math.round(st.amount / st.plan * 100);
-    var dBarW = Math.min(dPct, 100);
-    var dBarC = dPct >= 80 ? '#1D9E75' : dPct >= 60 ? '#EF9F27' : '#E24B4A';
-    h += '<tr style="background:rgba(255,255,255,0.03);border-top:1px solid var(--border)">' +
-      '<td colspan="2" style="font-size:12px;color:var(--muted);padding:8px 12px">Итого отдела</td>' +
-      '<td class="num" style="padding:8px 12px">' +
-        '<div style="display:flex;align-items:center;justify-content:flex-end;gap:6px">' +
-          '<span style="font-size:12px;font-weight:500">'+fmtN(st.amount)+'</span>' +
-          '<div style="width:50px;height:4px;border-radius:2px;background:rgba(255,255,255,0.1)">' +
-            '<div style="width:'+dBarW+'%;height:100%;border-radius:2px;background:'+dBarC+'"></div>' +
-          '</div>' +
-          '<span style="font-size:11px;font-weight:600;color:'+dBarC+'">'+dPct+'%</span>' +
-        '</div>' +
-      '</td>' +
-      '<td colspan="3" style="font-size:11px;color:var(--muted);padding:8px 12px">из '+fmtN(st.plan)+'</td>' +
-    '</tr>';
-  }
-  h += '</tbody></table></div></div>';
-  return h;
-}
 
 function renderSalesMgr() {
   if (!D || !D.orders) return;
@@ -11326,7 +11510,7 @@ function renderRyschanowSalaryPage_() {
 
 // Текущий просматриваемый руководитель коммерческой группы - self-login (D.managerName) или
 // admin-предпросмотр (viewAsEntry). Возвращает запись DEPT_CFG (color/name/head/members) -
-// используется личной страницей (renderMyPageCommercialHead_/renderDeptGroupTableHtml_).
+// используется личной страницей (renderMyPageCommercialHead_).
 function currentCommercialHeadCfg_() {
   var previewing = D && D.role === 'admin' && typeof viewAsEntry !== 'undefined' && viewAsEntry;
   var name = previewing ? viewAsEntry.name : ((D && D.managerName) || '');

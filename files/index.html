@@ -1777,6 +1777,28 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   50%{box-shadow:0 2px 6px rgba(0,0,0,.35),0 0 0 4px rgba(239,159,39,0);}
 }
 @media(prefers-reduced-motion:reduce){#page-logistics-plan .seg-daymode{animation:none;}}
+/* Вакантная машина (Влад, 30.08, утверждено превью lp-vacant-preview) - фоновая
+   полоса "без водителя", НЕ настоящая заявка (см. vacantBandRange_ в JS) -
+   поэтому НЕ .seg (не перетаскивается, pointer-events:none, нет ring/hnd).
+   Пунктирные верх/низ отличают её от реальной плитки на глаз - настоящие
+   заявки всегда со сплошной границей/заливкой. */
+#page-logistics-plan .track-vacant{
+  position:absolute;top:6px;bottom:6px;pointer-events:none;z-index:0;
+  background-image:repeating-linear-gradient(135deg,rgba(139,137,128,.15) 0 10px,rgba(139,137,128,.06) 10px 20px);
+  border-top:1px dashed rgba(139,137,128,.4);border-bottom:1px dashed rgba(139,137,128,.4);
+}
+/* Ремонт ОДНОВРЕМЕННО с вакантностью (Влад, 30.08: "единственный момент, когда
+   два статуса могут накладываться друг на друга") - полосатый оверлей ПОВЕРХ
+   обычной плитки ремонта, не переопределяет её paint()-заливку (та остаётся
+   inline-стилем с более высоким приоритетом) - тот же приём, что .ring/.hov:
+   отдельный слой поверх, а не борьба с инлайн-цветом. Работает в любом режиме
+   раскраски (Состояние/Менеджер/Логист), не только "Состояние". */
+#page-logistics-plan .seg-vacant-stripe{
+  position:absolute;inset:0;border-radius:inherit;pointer-events:none;z-index:1;
+  background-image:repeating-linear-gradient(45deg,
+    rgba(139,137,128,.4) 0 7px, rgba(139,137,128,.4) 7px 14px,
+    transparent 14px 21px, transparent 21px 28px);
+}
 /* прогресс активного рейса - 2px снизу, #page-logistics-plan transform:scaleX (не width) */
 #page-logistics-plan .seg-prog{
   /* Скрыт по просьбе Влада, 29.08: "пока вообще прогресс убери, не нужен он
@@ -18758,6 +18780,21 @@ function renderRows(){
       track.style.width = trackW + "px";
       track.dataset.v = v.i;
 
+      /* Вакантная машина (v.vacant, Штатка) - фоновая полоса "без водителя",
+         НЕ настоящая заявка (см. vacantBandRange_/isVacantRepairOverlap_
+         выше) - добавляется ДО заявок, чтобы реальные плитки (в т.ч.
+         полосатый ремонт поверх неё) легли визуально сверху по порядку DOM. */
+      if (v.vacant){
+        var vb = vacantBandRange_();
+        if (vb.l > 0){
+          var vbEl = document.createElement("div");
+          vbEl.className = "track-vacant";
+          vbEl.title = "Без водителя (авто, по данным Штатки) - до конца месяца";
+          vbEl.style.left = (vb.s * hw) + "px";
+          vbEl.style.width = (vb.l * hw) + "px";
+          track.appendChild(vbEl);
+        }
+      }
       (byV[v.i] || []).forEach(function(s){ track.appendChild(makeSeg(s)); });
 
       var nw = document.createElement("div");
@@ -18830,12 +18867,39 @@ function segLabel(s){
    поменять на 21/24 одним числом. */
 var DAY_MODE_THRESHOLD_H_ = 22;
 function isDayMode_(s){ return s.kind === "trip" && s.l > DAY_MODE_THRESHOLD_H_; }
+/* Вакантные машины (Влад, 30.08: "машина, где не закреплено вообще ни одного
+   водителя, автоматически должна протягиваться в планировке на неопределённый
+   срок, пусть это будет до конца месяца") - утверждено превью (артефакт
+   lp-vacant-preview): НЕ настоящая заявка, а честный фоновый индикатор,
+   вычисляется из v.vacant (тот же признак Штатки, что уже красит фамилию
+   водителя красным в шапке строки) - сам появляется/исчезает вслед за
+   Штаткой, ничего не хранится и не синкается. От "сейчас" (когда логист
+   реально смотрит ленту) до конца ТЕКУЩЕГО календарного месяца - не с начала
+   месяца назад, вакантность - снимок состояния сейчас, не факт про прошлое. */
+function vacantBandRange_(){
+  var start = nowHour(), end = DAYS_EPOCH_MONTH_ * 24;
+  return {s: start, l: Math.max(0, end - start)};
+}
+/* «Единственный момент, когда два статуса могут накладываться» (Влад, 30.08) -
+   ремонт поверх вакантной полосы полосатый. Проверяем ПЕРЕСЕЧЕНИЕ по времени
+   с самой полосой (а не просто "машина вакантна") - ремонт целиком в прошлом
+   или целиком после конца месяца полосатым не считается, полоса туда и не
+   дотягивается. */
+function isVacantRepairOverlap_(s){
+  if (s.kind !== "repair") return false;
+  var v = STATE.vehicles[s.v];
+  if (!v || !v.vacant) return false;
+  var band = vacantBandRange_();
+  if (band.l <= 0) return false;
+  return s.s < band.s + band.l && band.s < s.s + s.l;
+}
 function makeSeg(s){
   var el = document.createElement("div");
   var now = nowHour();
   var cls = "seg";
   if (s.s + s.l <= now) cls += " is-past";                     /* завершён - приглушаем */
   if (STATE.openId === s.id) cls += " is-open";                /* кольцо переживает перерендер */
+  var vacantStripe = isVacantRepairOverlap_(s);
   var active = s.kind === "trip" && s.s <= now && now < s.s + s.l;
   el.className = cls;
   el.dataset.id = s.id;
@@ -18858,6 +18922,7 @@ function makeSeg(s){
     (active ? '<span class="seg-prog"><i></i></span>' : "") +
     (s.needsData ? '<span class="seg-nd" title="Под данные - документы для пропуска ещё не собраны"></span>' : "") +
     (isDayMode_(s) ? '<span class="seg-daymode" title="Суточный режим - рейс дольше 22 часов">суточный</span>' : "") +
+    (vacantStripe ? '<span class="seg-vacant-stripe" title="Машина без водителя (вакант) - ремонт идёт одновременно с вакансией"></span>' : "") +
     '<span class="hov"></span><span class="ring"></span>' +
     '<span class="hnd l"></span><span class="hnd r"></span>';
   paint(el, s);

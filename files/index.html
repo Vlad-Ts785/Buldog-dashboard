@@ -1645,6 +1645,10 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
 #page-logistics-plan .tractor{font-size:9px;font-weight:500;color:var(--muted2);letter-spacing:.03em;}
 #page-logistics-plan .rh2{display:flex;align-items:center;gap:5px;}
 #page-logistics-plan .rh2 .tr{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;flex:none;}
+/* «Без прицепа» - тот же приём, что у «вакант» водителя (.drv.nd) - Влад, 30.08,
+   через параллельную сессию: «когда прицепа нет - показывать это красным, как уже
+   сделано для вакант». */
+#page-logistics-plan .rh2 .tr.nd{color:var(--red);font-weight:500;}
 #page-logistics-plan .rh2 .kind{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;}
 #page-logistics-plan .rh2 .sep{color:var(--muted2);flex:none;}
 /* Фамилия НЕ сжимается: при нехватке места многоточие достаётся типу прицепа выше -
@@ -1834,8 +1838,9 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
    длительности на ручной выбор (см. TRIP_MODE_OPTS_ в JS), сама плашка и CSS не
    поменялись ни на йоту - "дальний" рисуется тем же классом, что и "суточный"
    (Влад: "добавь такую же золочёную плашку при выборе дальней"). */
-/* Вакантная машина (Влад, 30.08, утверждено превью lp-vacant-preview) - фоновая
-   полоса "без водителя", НЕ настоящая заявка (см. vacantBandRange_ в JS) -
+/* Вакантная машина (Влад, 30.08, утверждено превью lp-vacant-preview; источник
+   вакантности позже переведён на fleet_assignments, см. lpComputeVacant_) -
+   фоновая полоса "вакант", НЕ настоящая заявка (см. vacantBandRange_ в JS) -
    поэтому НЕ .seg (не перетаскивается, pointer-events:none, нет ring/hnd).
    Пунктирные верх/низ отличают её от реальной плитки на глаз - настоящие
    заявки всегда со сплошной границей/заливкой. */
@@ -1957,7 +1962,13 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
 }#page-logistics-plan .ctxmenu.open{display:flex;}#page-logistics-plan .ctxmenu-item{
   appearance:none;border:none;background:transparent;color:var(--text);
   font-family:inherit;font-size:12.5px;text-align:left;padding:8px 10px;border-radius:7px;cursor:pointer;
-}#page-logistics-plan .ctxmenu-item:hover{background:var(--bg4);}#page-logistics-plan .ctxmenu-del{color:var(--red);}#page-logistics-plan .cr-types{display:flex;gap:6px;flex-wrap:wrap;margin:16px 0;}#page-logistics-plan .cr-field{margin-bottom:12px;}#page-logistics-plan .cr-field .grp-label{display:block;margin-bottom:6px;}#page-logistics-plan .cr-opts{display:flex;gap:6px;flex-wrap:wrap;}#page-logistics-plan .cr-input{
+}#page-logistics-plan .ctxmenu-item:hover{background:var(--bg4);}#page-logistics-plan .ctxmenu-del{color:var(--red);}
+/* "Занят" в пикере сцепки - буквально .fp-item.used/.fc-sub из Справочников
+   (Влад, через параллельную сессию: "это уже реализовано у нас где-то...
+   можно скопировать 1-в-1"), просто со своим селектором - .fc-sub там
+   завязан на .fleet-chip, которого в контекстном меню нет. */
+#page-logistics-plan .ctxmenu-item.used{opacity:.4;}
+#page-logistics-plan .ctxmenu-item .fc-sub{color:var(--muted);font-size:10.5px;}#page-logistics-plan .cr-types{display:flex;gap:6px;flex-wrap:wrap;margin:16px 0;}#page-logistics-plan .cr-field{margin-bottom:12px;}#page-logistics-plan .cr-field .grp-label{display:block;margin-bottom:6px;}#page-logistics-plan .cr-opts{display:flex;gap:6px;flex-wrap:wrap;}#page-logistics-plan .cr-input{
   width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);
   font-family:inherit;font-size:12px;padding:7px 10px;
 }#page-logistics-plan .cr-input:focus-visible{outline:2px solid var(--blue);outline-offset:1px;}#page-logistics-plan .cr-actions{display:flex;gap:8px;margin-top:18px;}
@@ -2670,6 +2681,13 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
            Цвет/Парк и сбрасывал aria-pressed у соседней кнопки при каждом
            клике "Сегодня" (найдено при переносе кнопки сюда, 30.08). -->
       <button class="chip" id="lp-monthToday" data-solo="1" title="Перейти к сегодняшнему дню">Сегодня</button>
+      <!-- Влад, 30.08 (после ложной тревоги "данные пропали" - на деле Васин
+           живьём тестировал доску): "надо железобетонно сделать так, чтобы в
+           планировке не пропадали данные, или к ней доверия не будет... это
+           должно сразу работать чётко" - самообслуживаемое восстановление,
+           не "спроси Клода покопаться в логах сервера". Только admin - тот же
+           уровень доступа, что у "Смотреть как сотрудник"/presence. -->
+      <button class="chip" id="lp-historyBtn" data-solo="1" style="display:none" title="Журнал изменений заявок - восстановить любую перезаписанную/удалённую">История</button>
     </div>
   </div>
 </div>
@@ -18818,11 +18836,39 @@ function buildVehicles(){
       gos:f.gos || "", trailer:f.trailer || "", trailerGos:"",
       statusToday:f.status || "", drivers:drivers, schedule:"", days:"", long:isLong
     };
-    v.driver = v.drivers[0] || "";
-    v.vacant = /вакант|арест/i.test(v.driver) || !v.driver;
+    v.driverStaffText_ = v.drivers[0] || "";   /* сырой текст Штатки - см. lpApplyFleetDriverStatus_ */
+    lpApplyFleetDriverStatus_(v);
     STATE.vehicles.push(v);
   });
   loadSegs();   /* восстановить реальные рейсы, введённые логистами - см. saveSegs() */
+}
+/* Влад, 30.08, через параллельную сессию, дословно: "у нас статус водителя тянется
+   из штатки. Все теперь всё должно тянуться из нашей системы. Замыкаем это... если
+   водителя нет за тягачем, значит вакант" - источник истины теперь fleet_assignments
+   (Справочники), не текстовое поле водителя из Штатки с регэкспом на "вакант"/"арест".
+   Правило безусловное: нет ОТКРЫТОЙ записи kind='driver' на этом tractor_gos - вакант,
+   без исключений (сегодняшний "посев" из Штатки в fleet_assignments уже покрывает
+   почти весь парк - см. координацию с параллельной сессией). Меняется и v.vacant, и
+   САМО ИМЯ (v.driver) - НАЙДЕННЫЙ БАГ при живом тесте: первая версия правила только
+   v.vacant, а имя оставляла из Штатки - на машине, где Штатка молчит (пусто), но
+   fleet_assignments знает реального водителя, строка показывала пустое имя вместо
+   него (v.vacant корректно false, а показать нечего).
+   ВРЕМЕННЫЙ ФОЛБЭК только на первые доли секунды загрузки страницы: buildVehicles()
+   вызывается СИНХРОННО, а fetchFleetData_() - сетевой запрос, ответ ещё не пришёл.
+   Показать "вакант" всему парку на секунду, пока грузится - хуже, чем на секунду
+   довериться Штатке; как только fleet_assignments реально пришёл (fleetDataLoaded_),
+   пересчитываем ВЕСЬ парк заново (см. fetchFleetData_) и фолбэк больше не участвует. */
+var fleetDataLoaded_ = false;
+function lpApplyFleetDriverStatus_(v){
+  if (!fleetDataLoaded_){
+    v.driver = v.driverStaffText_;
+    v.vacant = /вакант|арест/i.test(v.driver) || !v.driver;
+    return;
+  }
+  var assign = lpFleetOpenOnTractor_("driver", v.gos, 1);
+  v.vacant = !assign;
+  v.driver = assign ? lpFleetPersonName_(assign.resource_key) : "";
+  v.drivers = v.driver ? [v.driver] : [];
 }
 /* случайный суффикс СЕССИИ в id записи - записи теперь общие через сервер, и два
    логиста с одинаковым счётчиком seq выдали бы один id (и молча перезаписали бы
@@ -18850,6 +18896,32 @@ var SEG_ID_SUFFIX_ = Math.floor(Math.random() * 0xffffffff).toString(16);
       строки ПЕРЕД любым overwrite/delete - даже если оба клиентских слоя
       когда-нибудь не сработают, данные восстановимы из истории, а не потеряны
       навсегда молча. */
+/* Влад, 30.08 (СРОЧНО, второй заход того же вечера - "у него в планировке пусто" уже
+   был закрыт, теперь ДРУГОЙ, более серьёзный случай): "было много данных, походу они
+   слетели... такое количество данных исчезнуть и появиться от ручных действий не
+   может". Прав - раскопано ПОСЕКУНДНО по plan_segs_history: три заявки, которые
+   Васин только что правил (needsData включил, растянул сроки), в ТОЧНО ОДНУ И ТУ ЖЕ
+   секунду были молча ПЕРЕЗАПИСАНЫ обратно на старые значения - и updated_by у всех
+   трёх был dlinnomertral@gmail.com (сам Влад, открытая вкладка Планировки, ничего
+   руками не трогал в этот момент). Механизм - НЕ Васин против Васина, а собственная
+   вкладка Влада: applyServerSegs_ (при поллинге) хранит "непонятно исчезнувшие" со
+   своей стороны записи как "возможно ещё не подтверждённые" (это специально сделано
+   для ЗАЩИТЫ свежесозданных заявок от гонки с поллингом, см. комментарий у
+   applyServerSegs_) - но эта же защита не отличала "я это только что создал/подвинул
+   сам" от "эта запись просто выпала из МОЕГО расчёта byGos на этом конкретном
+   поллинге" (возможный триггер - гос.номер этих 3 машин на секунду разошёлся с тем,
+   что знает вкладка Влада, могло быть из-за одновременной работы над Штаткой в
+   параллельной сессии). Второй случай ЛОЖНО помечался как "нужно досослать" -
+   saveSegs() послушно отправлял СТАРУЮ версию записи на сервер поверх СВЕЖЕЙ
+   Васинской, откуда и "перезапись за секунду". ЖЕЛЕЗОБЕТОННЫЙ фикс (Влад: "это
+   должно сразу работать чётко", не "починим по мере багов") - вместо доверия
+   расхождению со снимком, теперь отслеживаем ЯВНО, какие id пользователь САМ
+   создал/подвинул в этой сессии (dirtySegIds_ ниже). saveSegs()/flushSegsOnUnload_/
+   applyServerSegs_ отправляют на сервер и "спасают" от исчезновения ТОЛЬКО то, что
+   реально в dirtySegIds_ - расхождение со снимком у НЕ своей записи теперь просто
+   молча уступает серверу (тот, у кого нет причин сомневаться в своих данных, не
+   имеет права их переписывать). */
+var dirtySegIds_ = {};
 function push(v, kind, s, l, extra){
   var id;
   do { id = "s" + (STATE.seq++) + "-" + SEG_ID_SUFFIX_; }
@@ -18857,6 +18929,7 @@ function push(v, kind, s, l, extra){
   var o = {id:id, v:v.i, kind:kind, s:s, l:l};
   if (extra) for (var k in extra) o[k] = extra[k];
   STATE.segs.push(o);
+  dirtySegIds_[id] = true;
 }
 /* «Без водителя» - раньше отдельная тонкая подполоса без подписи (Влад, 29.08:
    «непонятное назначение, убрать»), теперь ОБЫЧНЫЙ блокирующий отрезок наравне с
@@ -19201,7 +19274,14 @@ function renderRows(){
       /* Фамилия Имя, без отчества (Влад, 29.08: "отчество не нужно, лишнее
          место занимает") - полное "Фамилия Имя Отчество" не помещалось в
          узкую шапку строки и обрезалось многоточием на середине отчества. */
-      var drv = v.driver ? v.driver.trim().split(" ").slice(0, 2).join(" ") : "нет водителя";
+      /* Влад, 30.08, через параллельную сессию: "у некоторых водителей разные
+         статусы - вакант, где-то написано без водителя. Должно быть всё
+         единообразно - если водителя нет за тягачем, значит вакант" - подпись
+         теперь зависит от v.vacant (источник - fleet_assignments, см.
+         lpComputeVacant_), а не от того, что дословно написано в Штатке -
+         там могло остаться что угодно ("Вакант"/"Арест"/пусто), пока её
+         текстовое поле не обновится. */
+      var drv = v.vacant ? "Вакант" : v.driver.trim().split(" ").slice(0, 2).join(" ");
       /* Вторая строка: прицеп · тип прицепа · водитель, справа план по ВП и конец
          протяжки (Влад, 30.08 - порядок назван дословно). Свечение плашки вешаем
          классом на .row, чтобы CSS сам решал, светиться ей или нет. */
@@ -19221,7 +19301,7 @@ function renderRows(){
         (v.tractor ? '<span class="tractor">' + v.tractor + '</span>' : '') +
         '<span class="gos">' + v.gos + '</span>' +
         (endLbl ? '<span class="until">до <b>' + endLbl + '</b></span>' : '') + '</div>' +
-        '<div class="rh2"><span class="tr">' + (v.trailerGos || v.trailer || "без прицепа") + '</span>' +
+        '<div class="rh2"><span class="tr' + (!v.trailerGos && !v.trailer ? " nd" : "") + '">' + (v.trailerGos || v.trailer || "без прицепа") + '</span>' +
         (v.trailer && v.trailerGos ? '<span class="sep">·</span><span class="kind">' + v.trailer + '</span>' : '') +
         '<span class="sep">·</span><span class="drv' + (v.vacant ? " nd" : "") + '">' + drv + '</span>' +
         (rside ? '<span class="rside">' + rside + '</span>' : '') + '</div>' +
@@ -19235,16 +19315,17 @@ function renderRows(){
       track.style.width = trackW + "px";
       track.dataset.v = v.i;
 
-      /* Вакантная машина (v.vacant, Штатка) - фоновая полоса "без водителя",
-         НЕ настоящая заявка (см. vacantBandRange_/isVacantRepairOverlap_
-         выше) - добавляется ДО заявок, чтобы реальные плитки (в т.ч.
-         полосатый ремонт поверх неё) легли визуально сверху по порядку DOM. */
+      /* Вакантная машина (v.vacant, теперь из fleet_assignments - см.
+         lpComputeVacant_) - фоновая полоса "вакант", НЕ настоящая заявка (см.
+         vacantBandRange_/isVacantRepairOverlap_ выше) - добавляется ДО
+         заявок, чтобы реальные плитки (в т.ч. полосатый ремонт поверх неё)
+         легли визуально сверху по порядку DOM. */
       if (v.vacant){
         var vb = vacantBandRange_(v);
         if (vb.l > 0){
           var vbEl = document.createElement("div");
           vbEl.className = "track-vacant";
-          vbEl.title = "Без водителя (авто, по данным Штатки) - до конца месяца";
+          vbEl.title = "Вакант (нет закреплённого водителя) - до конца месяца";
           vbEl.style.left = (vb.s * hw) + "px";
           vbEl.style.width = (vb.l * hw) + "px";
           track.appendChild(vbEl);
@@ -19444,7 +19525,7 @@ function makeSeg(s){
     (s.kind === "trip" && s.tripMode ? '<span class="seg-daymode" title="' + tripModeLabel_(s.tripMode) + ' - указано вручную при создании">' + tripModeLabel_(s.tripMode).toLowerCase() + '</span>' : "") +
     "</span>" +
     (active ? '<span class="seg-prog"><i></i></span>' : "") +
-    (vacantStripe ? '<span class="seg-vacant-stripe" title="Машина без водителя (вакант) - ремонт идёт одновременно с вакансией"></span>' : "") +
+    (vacantStripe ? '<span class="seg-vacant-stripe" title="Машина вакантна - ремонт идёт одновременно с вакансией"></span>' : "") +
     '<span class="hov"></span><span class="ring"></span>' +
     '<span class="hnd l"></span><span class="hnd r"></span>';
   paint(el, s);
@@ -20192,11 +20273,13 @@ function flashBad(el){
 }
 function commit(seg, before, text){
   STATE.lastEdited = seg.s;                    /* смена масштаба целится сюда, см. клик по "Масштаб" */
+  dirtySegIds_[seg.id] = true;                  /* см. разбор у dirtySegIds_ выше - реально своя правка */
   saveSegs();
   toast(text, function(){
     S.undo();
     seg.s = before.s; seg.l = before.l; seg.v = before.v;
     STATE.lastEdited = before.s;
+    dirtySegIds_[seg.id] = true;                /* отмена - тоже своя, явная правка */
     saveSegs();
     renderRows();
   });
@@ -20265,9 +20348,16 @@ function saveSegs(){
      запись доедет со следующим saveSegs (снимок обновляется только при успехе). */
   Object.keys(current).forEach(function(id){
     if (segsSnapshot_[id] === current[id]) return;
+    /* Влад, 30.08 (СРОЧНО): расхождение со снимком САМО ПО СЕБЕ не повод слать
+       запись на сервер - см. большой разбор у dirtySegIds_ выше. Расхождение
+       у ЧУЖОЙ (не тронутой лично нами в этой сессии) записи означает "мой
+       локальный вид устарел", а не "нужно продавить свою версию" - молча
+       обновляем СВОЙ снимок под то, что реально пришло с сервером в
+       applyServerSegs_, и ничего никуда не шлём. */
+    if (!dirtySegIds_[id]) { segsSnapshot_[id] = current[id]; return; }
     var w = JSON.parse(current[id]);
     pushSegToServer_(w).then(function(r){
-      if (r && r.ok) segsSnapshot_[id] = current[id];
+      if (r && r.ok){ segsSnapshot_[id] = current[id]; delete dirtySegIds_[id]; }
       else toast("Не сохранилось на сервер - запись пока только у вас", null);
     });
   });
@@ -20289,6 +20379,9 @@ function flushSegsOnUnload_(){
   if (!navigator.sendBeacon || !SESSION_TOKEN) return;
   if (!pageRoot.classList.contains("active")) return;
   STATE.segs.forEach(function(s){
+    if (!dirtySegIds_[s.id]) return;   /* Влад, 30.08 (СРОЧНО) - см. разбор у dirtySegIds_: чужая
+      запись, которая просто "выглядит иначе" со своей стороны, НЕ повод слать её на visibilitychange
+      (переключение вкладки, не обязательно закрытие) - именно так тихо затёрло Васина. */
     var w = segToWire_(s);
     if (!w) return;
     var wireStr = JSON.stringify(w);
@@ -20342,9 +20435,21 @@ function applyServerSegs_(rows){
      последним ПОДТВЕРЖДЁННЫМ снимком (значит ещё не подтверждена); если совпадает -
      она была подтверждена раньше и сейчас реально удалена (в т.ч. нами же, другой
      вкладкой), тогда доверяем серверу. */
+  /* Влад, 30.08 (СРОЧНО, живой случай - 3 Васинские правки затёрты за секунду
+     ЧУЖОЙ, открытой у Влада вкладкой): "сохраняем то, чего сервер не увидел"
+     раньше проверяла ТОЛЬКО расхождение со снимком - этого мало. Расхождение
+     само по себе означает "мой вид отличается от сервера", а НЕ "это моя
+     несохранённая правка" - у пассивного зрителя, который сам ничего не
+     трогал, вид может разойтись из-за любой мелочи на его стороне (например,
+     на миг не резолвится гос.номер при перестроении парка) - и тогда старая
+     логика ошибочно "спасала" ЧУЖИЕ устаревшие данные и следующим saveSegs()
+     давила ими свежую правку другого логиста. dirtySegIds_ - явный список
+     того, что САМ пользователь создал/подвинул в этой сессии; расхождение у
+     НЕ своей записи теперь просто молча уступает серверу. */
   var hadPending = false;
   STATE.segs.forEach(function(s){
     if (seenIds[s.id]) return;
+    if (!dirtySegIds_[s.id]) return;   /* не наша правка - серверу видней, тихо отдаём его версию */
     var w = segToWire_(s);
     if (!w) return;
     var wireStr = JSON.stringify(w);
@@ -20370,6 +20475,11 @@ function fetchPlanSegs_(){
        выпушит всё. Иначе - сервер главный, локальное замещается. */
     if (firstFetch && r.data.count === 0 && STATE.segs.length > 0){
       segsSnapshot_ = {};
+      /* Бутстрап с пустого сервера - ВСЁ локальное (пришедшее из кэша
+         localStorage, не через push()) нужно выпустить целиком, dirtySegIds_
+         это не отследит сам (см. разбор выше) - помечаем явно, только для
+         этого разового случая. */
+      STATE.segs.forEach(function(s){ dirtySegIds_[s.id] = true; });
       saveSegs();
       return;
     }
@@ -20927,6 +21037,7 @@ function deleteSeg(seg){
   toast("Запись удалена", function(){
     STATE.segs.splice(idx, 0, seg);
     STATE.lastEdited = seg.s;
+    dirtySegIds_[seg.id] = true;                /* восстановление после удаления - тоже своя правка */
     saveSegs();
     S.undo();
     renderRows(); renderKpis();
@@ -21010,7 +21121,16 @@ function fetchFleetData_(){
     .then(function(results){
       var sprav = results[0], fleet = results[1];
       if (sprav.ok){ FLEET_PEOPLE_ = sprav.data.people || []; FLEET_ASSETS_ = sprav.data.assets || []; }
-      if (fleet.ok) FLEET_ASSIGN_ = fleet.data.assignments || [];
+      if (fleet.ok){
+        FLEET_ASSIGN_ = fleet.data.assignments || [];
+        /* Источник истины по "есть водитель/вакант" только что реально стал
+           доступен (см. lpComputeVacant_) - весь парк построен ДО этого момента
+           на временном фолбэке по Штатке, пересчитываем начисто и перерисовываем. */
+        var wasLoaded = fleetDataLoaded_;
+        fleetDataLoaded_ = true;
+        STATE.vehicles.forEach(function(v){ lpApplyFleetDriverStatus_(v); });
+        if (!wasLoaded) renderRows();
+      }
     }).catch(function(){});   /* нет сети/сбой - меню просто не покажет "кто сейчас сидит", посадить/зацепить всё равно работает */
 }
 function lpFleetOpenOnTractor_(kind, tractorGos, slot){
@@ -21051,7 +21171,19 @@ function renderFleetMenuMain_(){
   items.push('<button class="ctxmenu-item" data-fa="couple-trailer">' + (trlAssign ? "Переприцепить" : "Зацепить прицеп") + "</button>");
   fleetMenu.innerHTML = items.join("");
   [].forEach.call(fleetMenu.querySelectorAll("[data-fa]"), function(btn){
-    btn.onclick = function(){ handleFleetMenuAction_(btn.dataset.fa); };
+    /* НАЙДЕННЫЙ БАГ (Влад, 30.08, через параллельную сессию: "Посадить" не
+       открывает список). "Посадить"/"Зацепить" зовут renderFleetPicker_,
+       который тут же заменяет fleetMenu.innerHTML - САМА нажатая кнопка
+       выпадает из DOM в момент клика. Событие click продолжает всплывать
+       (клики не отменяются заменой innerHTML) и доходит до document-
+       обработчика "клик вне меню - закрыть" (см. ниже, общий с lp-ctxMenu) -
+       тот делает e.target.closest(".ctxmenu"), а e.target уже ОТКРЕПЛЁН от
+       DOM (родителя нет) - closest возвращает null, обработчик считает клик
+       "снаружи" и тут же закрывает ТОЛЬКО ЧТО отрисованный пикер. Для
+       "Высадить"/"Отцепить" бага не было видно - те и так сами закрывают
+       меню, лишний вызов не отличить. stopPropagation - событие никогда не
+       доходит до document, чужому обработчику нечего перепутать. */
+    btn.onclick = function(e){ e.stopPropagation(); handleFleetMenuAction_(btn.dataset.fa); };
   });
 }
 function handleFleetMenuAction_(action){
@@ -21074,30 +21206,89 @@ function fleetDoUncouple_(kind, v){
 /* Список для "Посадить"/"Зацепить" - тот же строгий автокомплит "начинается с
    введённого", что у lpWireCustomerInput_ (поле "Заказчик") - переиспользуем
    приём, не изобретаем новый список для контекстного меню. */
+/* Влад, 30.08, через параллельную сессию: "в пикере прицепа/водителя должны в
+   приоритете первыми показываться те, что раньше уже были на этой машине - для
+   удобства, кайфовая работа". История уже есть целиком в FLEET_ASSIGN_ (GET
+   /fleet/state отдаёт ВСЮ историю, не только открытые записи) - чисто сортировка
+   на клиенте, бэкенд не трогаем. "Недавность" - позднее из valid_from/valid_to
+   среди ВСЕХ записей этого resource_key на ЭТОМ тягаче (valid_to важнее, если
+   запись уже закрыта - это момент, когда он в последний раз реально стоял здесь;
+   valid_from - если запись всё ещё открыта). */
+function lpFleetRecencyOnTractor_(kind, tractorGos){
+  var recency = {};
+  (FLEET_ASSIGN_ || []).forEach(function(a){
+    if (a.kind !== kind || a.tractor_gos !== tractorGos) return;
+    var t = a.valid_to || a.valid_from || "";
+    if (!recency[a.resource_key] || t > recency[a.resource_key]) recency[a.resource_key] = t;
+  });
+  return recency;
+}
+/* Фамилия Имя, без отчества - тот же приём, что у подписи в шапке строки
+   (Влад, 29.08: "отчество не нужно, лишнее место занимает"), тут по отдельной
+   просьбе Влада 30.08 конкретно для пикера "Кого посадить". */
+function lpShortName_(fullName){
+  return (fullName || "").trim().split(" ").slice(0, 2).join(" ");
+}
+/* "Занят" - копия паттерна fleetOpenPicker_/.fp-item.used из Справочников
+   (files/index.html) буквально, не по мотивам (Влад сам это подсказал - тот
+   же принцип, что ГОСТ уже требует для другого повторного паттерна). Ресурс
+   занят, если у него открыта запись kind на ДРУГОМ тягаче, чем этот. */
+function lpFleetUsedElsewhere_(kind, resourceKey, exceptTractorGos){
+  return (FLEET_ASSIGN_ || []).filter(function(a){
+    return a.kind === kind && String(a.resource_key) === String(resourceKey) && !a.valid_to && a.tractor_gos !== exceptTractorGos;
+  })[0] || null;
+}
 function renderFleetPicker_(kind, v){
   var pool = kind === "driver"
     ? (FLEET_PEOPLE_ || []).filter(function(p){ return p.roles && p.roles.indexOf("driver") >= 0; })
     : (FLEET_ASSETS_ || []).filter(function(a){ return a.asset_type === "trailer"; });
+  var recency = lpFleetRecencyOnTractor_(kind, v.gos);
+  pool = pool.slice().sort(function(a, b){
+    var ra = recency[a.id] || "", rb = recency[b.id] || "";
+    if (ra && !rb) return -1;
+    if (!ra && rb) return 1;
+    if (ra !== rb) return ra > rb ? -1 : 1;   /* недавние - выше */
+    return 0;
+  });
   fleetMenu.innerHTML =
     '<div class="grp-label" style="padding:2px 8px 6px">' + (kind === "driver" ? "Кого посадить" : "Какой прицеп") + '</div>' +
     '<input autocomplete="off" class="cr-input" id="lp-fleetPickInput" placeholder="начните вводить" style="margin-bottom:4px">' +
     '<div id="lp-fleetPickList" style="max-height:220px;overflow-y:auto"></div>' +
     '<button class="ctxmenu-item" id="lp-fleetPickBack">← Назад</button>';
-  document.getElementById("lp-fleetPickBack").onclick = renderFleetMenuMain_;
+  document.getElementById("lp-fleetPickBack").onclick = function(e){ e.stopPropagation(); renderFleetMenuMain_(); };
   var input = document.getElementById("lp-fleetPickInput");
   var list = document.getElementById("lp-fleetPickList");
   function refresh(){
     var val = input.value.trim().toLowerCase();
     var matches = pool.filter(function(p){
-      var name = kind === "driver" ? (p.full_name || "") : (p.id + " " + (p.name || ""));
+      var name = kind === "driver" ? lpShortName_(p.full_name) : (p.id + " " + (p.name || ""));
       return !val || name.toLowerCase().indexOf(val) === 0;
     }).slice(0, 15);
     list.innerHTML = matches.map(function(p){
-      var name = kind === "driver" ? p.full_name : (p.id + (p.name ? " · " + p.name : ""));
-      return '<button class="ctxmenu-item" data-id="' + pageEsc_(String(p.id)) + '">' + pageEsc_(name) + "</button>";
+      var name = kind === "driver" ? lpShortName_(p.full_name) : (p.id + (p.name ? " · " + p.name : ""));
+      var busy = lpFleetUsedElsewhere_(kind, p.id, v.gos);
+      return '<button class="ctxmenu-item' + (busy ? " used" : "") + '" data-id="' + pageEsc_(String(p.id)) +
+        '" data-busy-gos="' + (busy ? pageEsc_(busy.tractor_gos) : "") + '">' + pageEsc_(name) +
+        (busy ? ' <span class="fc-sub">занят</span>' : "") + "</button>";
     }).join("") || '<div style="padding:8px 10px;color:var(--muted);font-size:11.5px">Ничего не нашлось</div>';
     [].forEach.call(list.querySelectorAll("[data-id]"), function(btn){
-      btn.onclick = function(){ fleetDoCouple_(kind, v, btn.dataset.id); };
+      btn.onclick = function(e){
+        e.stopPropagation();
+        var busyGos = btn.dataset.busyGos;
+        /* Влад, через параллельную сессию: "если водитель занят (сидит на
+           другой машине) - подтверждение ПЕРЕД пересадкой; если свободен -
+           сразу, без диалога". /api/fleet/couple и так атомарно закрывает
+           старую запись сам - подтверждение только для человека, не для
+           сервера (тот же паттерн, что уже есть у "под данные" - см.
+           showConfirmDialog_ выше). */
+        if (!busyGos){ fleetDoCouple_(kind, v, btn.dataset.id); return; }
+        var name = btn.textContent.replace(/\s*занят\s*$/, "").trim();
+        showConfirmDialog_(
+          "Уверены, что хотите " + (kind === "driver" ? "посадить" : "прицепить") + " <b>" + pageEsc_(name) +
+          "</b>? Сейчас " + (kind === "driver" ? "он на машине" : "он на") + " <b>" + pageEsc_(busyGos) + "</b>.",
+          function(ok){ if (ok) fleetDoCouple_(kind, v, btn.dataset.id); }
+        );
+      };
     });
   }
   input.oninput = refresh;
@@ -21125,7 +21316,14 @@ function fleetApplyOptimistic_(v, kind, resourceKeyOrNull){
     v.drivers = v.driver ? [v.driver] : [];
     v.vacant = !v.driver;
   } else {
+    /* Влад, 30.08 (через параллельную сессию): "Отцепить" не отражался на
+       строке - v.trailerGos чистился, а v.trailer (текст типа прицепа из
+       Штатки, отдельное поле) оставался старым, и рендер строки падал
+       обратно на него (v.trailerGos || v.trailer || "без прицепа"). Чистим
+       ОБА поля на отцепке, оба заполняем на прицепке. */
+    var asset = resourceKeyOrNull ? (FLEET_ASSETS_ || []).filter(function(a){ return String(a.id) === String(resourceKeyOrNull); })[0] : null;
     v.trailerGos = resourceKeyOrNull || "";
+    v.trailer = asset ? (asset.name || "") : "";
   }
   renderRows();
 }

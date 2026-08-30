@@ -2921,6 +2921,17 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
       <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">VIN *</label>
         <input autocomplete="off" id="asset-vin" type="text" maxlength="17" placeholder="17 символов"
           style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;text-transform:uppercase"></div>
+      <!-- Масса и год выпуска - общие для тягача и прицепа (30.08, Влад по реальной СТС:
+           "технически допустимая масса", "год выпуска" - у трала своя СТС не менее
+           реальная, чем у тягача). -->
+      <div style="display:flex;gap:10px;margin-bottom:12px">
+        <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Технически допустимая масса, кг</label>
+          <input autocomplete="off" id="asset-gross-weight" type="number" min="0" placeholder="41000"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Год выпуска</label>
+          <input autocomplete="off" id="asset-manufacture-year" type="number" min="1970" max="2100" placeholder="2021"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+      </div>
       <!-- Тягач - колёсная формула (30.08, Влад: "заложить функцию ввода формулы колёс -
            4х2, 6х4, 8х4"). -->
       <div id="asset-tractor-fields" style="display:none">
@@ -2994,6 +3005,25 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
       <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Заметка</label>
         <input autocomplete="off" id="asset-notes" type="text" maxlength="300" placeholder="необязательно"
           style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+      <!-- Документы техники (СТС и т.п.) - 30.08, Влад: "храним передачу таких данных...
+           добавить сами эти файлы СДСКи в базу". Доступно только для УЖЕ существующей
+           записи (assetOpenForm_ переключает display) - до первого сохранения нет
+           asset_id, к которому прикреплять файл. -->
+      <div id="asset-docs-section" style="display:none;margin-bottom:12px;padding-top:10px;border-top:1px solid var(--border)">
+        <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:6px">Документы (СТС и т.п.)</label>
+        <div id="asset-docs-list" style="margin-bottom:8px"></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="asset-doc-type" style="background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 8px;color:var(--text);font-size:12px">
+            <option value="sts">СТС</option>
+            <option value="other">Другое</option>
+          </select>
+          <input autocomplete="off" id="asset-doc-file" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" style="flex:1;min-width:0;font-size:12px;color:var(--muted)">
+          <button type="button" onclick="assetDocUpload_()"
+            style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:7px 12px;font-size:12px;cursor:pointer;white-space:nowrap">Загрузить</button>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">PDF/JPG/PNG/WEBP, до 15 МБ</div>
+        <div id="asset-doc-error" style="display:none;color:var(--red);font-size:12px;margin-top:6px"></div>
+      </div>
       <div id="asset-error" style="display:none;color:var(--red);font-size:12px;margin-bottom:10px"></div>
       <div style="display:flex;gap:10px;margin-top:6px">
         <button type="button" onclick="assetSave_()" data-nav-sound
@@ -10486,6 +10516,8 @@ function assetOpenForm_(id) {
   document.getElementById('asset-manufacturer').value = a ? (a.manufacturer || '') : '';
   document.getElementById('asset-name').value = a ? (a.name || '') : '';
   document.getElementById('asset-vin').value = a ? (a.vin || '') : '';
+  document.getElementById('asset-gross-weight').value = a ? (a.gross_weight_kg || '') : '';
+  document.getElementById('asset-manufacture-year').value = a ? (a.manufacture_year || '') : '';
   document.getElementById('asset-wheel-formula').value = a ? (a.wheel_formula || '') : '';
   document.getElementById('asset-trailer-type').value = a ? (a.trailer_type || '') : '';
   document.getElementById('asset-axle-count').value = a ? (a.axle_count || '') : '';
@@ -10504,6 +10536,10 @@ function assetOpenForm_(id) {
   document.getElementById('asset-notes').value = a ? (a.notes || '') : '';
   document.getElementById('asset-error').style.display = 'none';
   document.getElementById('asset-del-btn').style.display = a ? '' : 'none';
+  // Документы - только у уже сохранённой записи (нужен asset_id, к которому прикреплять).
+  document.getElementById('asset-docs-section').style.display = a ? '' : 'none';
+  document.getElementById('asset-doc-error').style.display = 'none';
+  if (a) assetDocsLoad_(a.id); else document.getElementById('asset-docs-list').innerHTML = '';
   var bk = document.getElementById('asset-bk'), dr = document.getElementById('asset-drawer');
   bk.classList.add('show');
   setTimeout(function() { dr.classList.add('show'); }, 40);
@@ -10527,6 +10563,8 @@ function assetSave_() {
     manufacturer: document.getElementById('asset-manufacturer').value.trim(),
     name: document.getElementById('asset-name').value.trim(),
     vin: vin,
+    gross_weight_kg: document.getElementById('asset-gross-weight').value,
+    manufacture_year: document.getElementById('asset-manufacture-year').value,
     wheel_formula: document.getElementById('asset-wheel-formula').value.trim(),
     trailer_type: document.getElementById('asset-trailer-type').value.trim(),
     axle_count: document.getElementById('asset-axle-count').value,
@@ -10574,6 +10612,75 @@ function assetRestore_(id) {
     p2Toast('Восстановлено', 'green');
     renderDirectory();
   }).catch(function(e) { p2ToastErr('Ошибка сети: ' + e.message); });
+}
+
+// ═══ ДОКУМЕНТЫ ТЕХНИКИ (СТС и т.п.) - 30.08, Влад: "храним передачу таких данных...
+// добавить сами эти файлы СДСКи в базу". Файлы лежат на диске сервера, не в MySQL -
+// список тянем при каждом открытии карточки существующей записи (см. assetOpenForm_),
+// не кэшируем на клиенте. ═══
+var ASSET_DOC_TYPE_LABELS_ = { sts: 'СТС', other: 'Другое' };
+function assetDocFmtBytes_(n) {
+  n = Number(n) || 0;
+  return n >= 1024 * 1024 ? (n / (1024 * 1024)).toFixed(1).replace('.', ',') + ' МБ'
+    : Math.max(1, Math.round(n / 1024)) + ' КБ';
+}
+function assetDocsLoad_(assetId) {
+  var list = document.getElementById('asset-docs-list');
+  list.innerHTML = '<div class="muted" style="font-size:12px">Загрузка…</div>';
+  fetchFromYardApi_('/sprav/asset_documents', { asset_id: assetId }).then(function(r) {
+    // Карточку могли закрыть/переоткрыть на другую запись, пока шёл запрос.
+    if (assetEditId_ !== assetId) return;
+    if (!r.ok) { list.innerHTML = '<div style="font-size:12px;color:var(--red)">Не удалось загрузить список</div>'; return; }
+    assetDocsPaint_(r.data.documents || []);
+  }).catch(function() {
+    if (assetEditId_ !== assetId) return;
+    list.innerHTML = '<div style="font-size:12px;color:var(--red)">Нет соединения с сервером</div>';
+  });
+}
+function assetDocsPaint_(docs) {
+  var list = document.getElementById('asset-docs-list');
+  if (!docs.length) { list.innerHTML = '<div class="muted" style="font-size:12px">Документов пока нет</div>'; return; }
+  list.innerHTML = docs.map(function(d) {
+    var typeLabel = ASSET_DOC_TYPE_LABELS_[d.doc_type] || d.doc_type || '';
+    var dt = d.uploaded_at ? new Date(d.uploaded_at).toLocaleDateString('ru-RU') : '';
+    var href = YARD_API_BASE + '/sprav/asset_document_file?session_token=' + encodeURIComponent(SESSION_TOKEN) + '&id=' + encodeURIComponent(d.id);
+    return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">'
+      + '<a href="' + pageEscAttr_(href) + '" target="_blank" rel="noopener" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);text-decoration:none" title="' + pageEsc_(d.original_name || '') + '">' + pageEsc_(d.original_name || 'файл') + '</a>'
+      + '<span class="muted" style="white-space:nowrap">' + pageEsc_(typeLabel) + (typeLabel ? ' · ' : '') + assetDocFmtBytes_(d.size_bytes) + ' · ' + pageEsc_(dt) + '</span>'
+      + '<button type="button" onclick="assetDocDelete_(\'' + pageEscAttr_(d.id) + '\')" title="Удалить" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;line-height:1;padding:2px 4px">×</button>'
+      + '</div>';
+  }).join('');
+}
+function assetDocUpload_() {
+  var errEl = document.getElementById('asset-doc-error');
+  errEl.style.display = 'none';
+  var assetId = assetEditId_;
+  if (!assetId) return;
+  var fileInput = document.getElementById('asset-doc-file');
+  var file = fileInput.files && fileInput.files[0];
+  if (!file) { errEl.textContent = 'Выберите файл'; errEl.style.display = ''; return; }
+  var docType = document.getElementById('asset-doc-type').value;
+  var fd = new FormData();
+  fd.append('file', file);
+  var qs = 'session_token=' + encodeURIComponent(SESSION_TOKEN) + '&asset_id=' + encodeURIComponent(assetId) + '&doc_type=' + encodeURIComponent(docType);
+  fetch(YARD_API_BASE + '/sprav/asset_document_upload?' + qs, { method: 'POST', body: fd })
+    .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); })
+    .then(function(r) {
+      if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось загрузить файл'; errEl.style.display = ''; return; }
+      fileInput.value = '';
+      p2Toast('Файл загружен', 'green');
+      assetDocsLoad_(assetId);
+    }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+function assetDocDelete_(id) {
+  if (!confirm('Удалить файл?')) return;
+  var assetId = assetEditId_;
+  var errEl = document.getElementById('asset-doc-error');
+  postToYardApi_('/sprav/asset_document_delete', { id: id }).then(function(r) {
+    if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось удалить'; errEl.style.display = ''; return; }
+    p2Toast('Файл удалён', 'amber');
+    assetDocsLoad_(assetId);
+  }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
 }
 
 // ═══ КАРТОЧКА СЦЕПКИ (Влад, 30.08: «сочетание водителя, полуприцепа, тягача даёт в

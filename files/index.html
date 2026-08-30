@@ -1645,6 +1645,10 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
 #page-logistics-plan .tractor{font-size:9px;font-weight:500;color:var(--muted2);letter-spacing:.03em;}
 #page-logistics-plan .rh2{display:flex;align-items:center;gap:5px;}
 #page-logistics-plan .rh2 .tr{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;flex:none;}
+/* «Без прицепа» - тот же приём, что у «вакант» водителя (.drv.nd) - Влад, 30.08,
+   через параллельную сессию: «когда прицепа нет - показывать это красным, как уже
+   сделано для вакант». */
+#page-logistics-plan .rh2 .tr.nd{color:var(--red);font-weight:500;}
 #page-logistics-plan .rh2 .kind{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;}
 #page-logistics-plan .rh2 .sep{color:var(--muted2);flex:none;}
 /* Фамилия НЕ сжимается: при нехватке места многоточие достаётся типу прицепа выше -
@@ -19171,7 +19175,7 @@ function renderRows(){
         (v.tractor ? '<span class="tractor">' + v.tractor + '</span>' : '') +
         '<span class="gos">' + v.gos + '</span>' +
         (endLbl ? '<span class="until">до <b>' + endLbl + '</b></span>' : '') + '</div>' +
-        '<div class="rh2"><span class="tr">' + (v.trailerGos || v.trailer || "без прицепа") + '</span>' +
+        '<div class="rh2"><span class="tr' + (!v.trailerGos && !v.trailer ? " nd" : "") + '">' + (v.trailerGos || v.trailer || "без прицепа") + '</span>' +
         (v.trailer && v.trailerGos ? '<span class="sep">·</span><span class="kind">' + v.trailer + '</span>' : '') +
         '<span class="sep">·</span><span class="drv' + (v.vacant ? " nd" : "") + '">' + drv + '</span>' +
         (rside ? '<span class="rside">' + rside + '</span>' : '') + '</div>' +
@@ -21031,7 +21035,19 @@ function renderFleetMenuMain_(){
   items.push('<button class="ctxmenu-item" data-fa="couple-trailer">' + (trlAssign ? "Переприцепить" : "Зацепить прицеп") + "</button>");
   fleetMenu.innerHTML = items.join("");
   [].forEach.call(fleetMenu.querySelectorAll("[data-fa]"), function(btn){
-    btn.onclick = function(){ handleFleetMenuAction_(btn.dataset.fa); };
+    /* НАЙДЕННЫЙ БАГ (Влад, 30.08, через параллельную сессию: "Посадить" не
+       открывает список). "Посадить"/"Зацепить" зовут renderFleetPicker_,
+       который тут же заменяет fleetMenu.innerHTML - САМА нажатая кнопка
+       выпадает из DOM в момент клика. Событие click продолжает всплывать
+       (клики не отменяются заменой innerHTML) и доходит до document-
+       обработчика "клик вне меню - закрыть" (см. ниже, общий с lp-ctxMenu) -
+       тот делает e.target.closest(".ctxmenu"), а e.target уже ОТКРЕПЛЁН от
+       DOM (родителя нет) - closest возвращает null, обработчик считает клик
+       "снаружи" и тут же закрывает ТОЛЬКО ЧТО отрисованный пикер. Для
+       "Высадить"/"Отцепить" бага не было видно - те и так сами закрывают
+       меню, лишний вызов не отличить. stopPropagation - событие никогда не
+       доходит до document, чужому обработчику нечего перепутать. */
+    btn.onclick = function(e){ e.stopPropagation(); handleFleetMenuAction_(btn.dataset.fa); };
   });
 }
 function handleFleetMenuAction_(action){
@@ -21063,7 +21079,7 @@ function renderFleetPicker_(kind, v){
     '<input autocomplete="off" class="cr-input" id="lp-fleetPickInput" placeholder="начните вводить" style="margin-bottom:4px">' +
     '<div id="lp-fleetPickList" style="max-height:220px;overflow-y:auto"></div>' +
     '<button class="ctxmenu-item" id="lp-fleetPickBack">← Назад</button>';
-  document.getElementById("lp-fleetPickBack").onclick = renderFleetMenuMain_;
+  document.getElementById("lp-fleetPickBack").onclick = function(e){ e.stopPropagation(); renderFleetMenuMain_(); };
   var input = document.getElementById("lp-fleetPickInput");
   var list = document.getElementById("lp-fleetPickList");
   function refresh(){
@@ -21077,7 +21093,7 @@ function renderFleetPicker_(kind, v){
       return '<button class="ctxmenu-item" data-id="' + pageEsc_(String(p.id)) + '">' + pageEsc_(name) + "</button>";
     }).join("") || '<div style="padding:8px 10px;color:var(--muted);font-size:11.5px">Ничего не нашлось</div>';
     [].forEach.call(list.querySelectorAll("[data-id]"), function(btn){
-      btn.onclick = function(){ fleetDoCouple_(kind, v, btn.dataset.id); };
+      btn.onclick = function(e){ e.stopPropagation(); fleetDoCouple_(kind, v, btn.dataset.id); };
     });
   }
   input.oninput = refresh;
@@ -21105,7 +21121,14 @@ function fleetApplyOptimistic_(v, kind, resourceKeyOrNull){
     v.drivers = v.driver ? [v.driver] : [];
     v.vacant = !v.driver;
   } else {
+    /* Влад, 30.08 (через параллельную сессию): "Отцепить" не отражался на
+       строке - v.trailerGos чистился, а v.trailer (текст типа прицепа из
+       Штатки, отдельное поле) оставался старым, и рендер строки падал
+       обратно на него (v.trailerGos || v.trailer || "без прицепа"). Чистим
+       ОБА поля на отцепке, оба заполняем на прицепке. */
+    var asset = resourceKeyOrNull ? (FLEET_ASSETS_ || []).filter(function(a){ return String(a.id) === String(resourceKeyOrNull); })[0] : null;
     v.trailerGos = resourceKeyOrNull || "";
+    v.trailer = asset ? (asset.name || "") : "";
   }
   renderRows();
 }

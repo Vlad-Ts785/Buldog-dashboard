@@ -1962,7 +1962,13 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
 }#page-logistics-plan .ctxmenu.open{display:flex;}#page-logistics-plan .ctxmenu-item{
   appearance:none;border:none;background:transparent;color:var(--text);
   font-family:inherit;font-size:12.5px;text-align:left;padding:8px 10px;border-radius:7px;cursor:pointer;
-}#page-logistics-plan .ctxmenu-item:hover{background:var(--bg4);}#page-logistics-plan .ctxmenu-del{color:var(--red);}#page-logistics-plan .cr-types{display:flex;gap:6px;flex-wrap:wrap;margin:16px 0;}#page-logistics-plan .cr-field{margin-bottom:12px;}#page-logistics-plan .cr-field .grp-label{display:block;margin-bottom:6px;}#page-logistics-plan .cr-opts{display:flex;gap:6px;flex-wrap:wrap;}#page-logistics-plan .cr-input{
+}#page-logistics-plan .ctxmenu-item:hover{background:var(--bg4);}#page-logistics-plan .ctxmenu-del{color:var(--red);}
+/* "Занят" в пикере сцепки - буквально .fp-item.used/.fc-sub из Справочников
+   (Влад, через параллельную сессию: "это уже реализовано у нас где-то...
+   можно скопировать 1-в-1"), просто со своим селектором - .fc-sub там
+   завязан на .fleet-chip, которого в контекстном меню нет. */
+#page-logistics-plan .ctxmenu-item.used{opacity:.4;}
+#page-logistics-plan .ctxmenu-item .fc-sub{color:var(--muted);font-size:10.5px;}#page-logistics-plan .cr-types{display:flex;gap:6px;flex-wrap:wrap;margin:16px 0;}#page-logistics-plan .cr-field{margin-bottom:12px;}#page-logistics-plan .cr-field .grp-label{display:block;margin-bottom:6px;}#page-logistics-plan .cr-opts{display:flex;gap:6px;flex-wrap:wrap;}#page-logistics-plan .cr-input{
   width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);
   font-family:inherit;font-size:12px;padding:7px 10px;
 }#page-logistics-plan .cr-input:focus-visible{outline:2px solid var(--blue);outline-offset:1px;}#page-logistics-plan .cr-actions{display:flex;gap:8px;margin-top:18px;}
@@ -21133,6 +21139,21 @@ function lpFleetRecencyOnTractor_(kind, tractorGos){
   });
   return recency;
 }
+/* Фамилия Имя, без отчества - тот же приём, что у подписи в шапке строки
+   (Влад, 29.08: "отчество не нужно, лишнее место занимает"), тут по отдельной
+   просьбе Влада 30.08 конкретно для пикера "Кого посадить". */
+function lpShortName_(fullName){
+  return (fullName || "").trim().split(" ").slice(0, 2).join(" ");
+}
+/* "Занят" - копия паттерна fleetOpenPicker_/.fp-item.used из Справочников
+   (files/index.html) буквально, не по мотивам (Влад сам это подсказал - тот
+   же принцип, что ГОСТ уже требует для другого повторного паттерна). Ресурс
+   занят, если у него открыта запись kind на ДРУГОМ тягаче, чем этот. */
+function lpFleetUsedElsewhere_(kind, resourceKey, exceptTractorGos){
+  return (FLEET_ASSIGN_ || []).filter(function(a){
+    return a.kind === kind && String(a.resource_key) === String(resourceKey) && !a.valid_to && a.tractor_gos !== exceptTractorGos;
+  })[0] || null;
+}
 function renderFleetPicker_(kind, v){
   var pool = kind === "driver"
     ? (FLEET_PEOPLE_ || []).filter(function(p){ return p.roles && p.roles.indexOf("driver") >= 0; })
@@ -21156,15 +21177,34 @@ function renderFleetPicker_(kind, v){
   function refresh(){
     var val = input.value.trim().toLowerCase();
     var matches = pool.filter(function(p){
-      var name = kind === "driver" ? (p.full_name || "") : (p.id + " " + (p.name || ""));
+      var name = kind === "driver" ? lpShortName_(p.full_name) : (p.id + " " + (p.name || ""));
       return !val || name.toLowerCase().indexOf(val) === 0;
     }).slice(0, 15);
     list.innerHTML = matches.map(function(p){
-      var name = kind === "driver" ? p.full_name : (p.id + (p.name ? " · " + p.name : ""));
-      return '<button class="ctxmenu-item" data-id="' + pageEsc_(String(p.id)) + '">' + pageEsc_(name) + "</button>";
+      var name = kind === "driver" ? lpShortName_(p.full_name) : (p.id + (p.name ? " · " + p.name : ""));
+      var busy = lpFleetUsedElsewhere_(kind, p.id, v.gos);
+      return '<button class="ctxmenu-item' + (busy ? " used" : "") + '" data-id="' + pageEsc_(String(p.id)) +
+        '" data-busy-gos="' + (busy ? pageEsc_(busy.tractor_gos) : "") + '">' + pageEsc_(name) +
+        (busy ? ' <span class="fc-sub">занят</span>' : "") + "</button>";
     }).join("") || '<div style="padding:8px 10px;color:var(--muted);font-size:11.5px">Ничего не нашлось</div>';
     [].forEach.call(list.querySelectorAll("[data-id]"), function(btn){
-      btn.onclick = function(e){ e.stopPropagation(); fleetDoCouple_(kind, v, btn.dataset.id); };
+      btn.onclick = function(e){
+        e.stopPropagation();
+        var busyGos = btn.dataset.busyGos;
+        /* Влад, через параллельную сессию: "если водитель занят (сидит на
+           другой машине) - подтверждение ПЕРЕД пересадкой; если свободен -
+           сразу, без диалога". /api/fleet/couple и так атомарно закрывает
+           старую запись сам - подтверждение только для человека, не для
+           сервера (тот же паттерн, что уже есть у "под данные" - см.
+           showConfirmDialog_ выше). */
+        if (!busyGos){ fleetDoCouple_(kind, v, btn.dataset.id); return; }
+        var name = btn.textContent.replace(/\s*занят\s*$/, "").trim();
+        showConfirmDialog_(
+          "Уверены, что хотите " + (kind === "driver" ? "посадить" : "прицепить") + " <b>" + pageEsc_(name) +
+          "</b>? Сейчас " + (kind === "driver" ? "он на машине" : "он на") + " <b>" + pageEsc_(busyGos) + "</b>.",
+          function(ok){ if (ok) fleetDoCouple_(kind, v, btn.dataset.id); }
+        );
+      };
     });
   }
   input.oninput = refresh;

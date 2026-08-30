@@ -1127,6 +1127,32 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   font-weight:600;margin:18px 0 10px;padding-top:14px;border-top:1px solid var(--border);}
 .asset-form-section:first-of-type{margin-top:0;padding-top:0;border-top:none;}
 @media(max-width:820px){.asset-form-grid{grid-template-columns:1fr;}}
+/* Вкладка "Сцепка" (30.08, Влад - вариант "список-таблица" из трёх превью) - чипы
+   тягач/прицеп/водитель кликабельны, открывают fleet-picker; строка истории
+   раскрывается под строкой тягача. */
+.fleet-chip{display:inline-flex;align-items:center;gap:6px;background:var(--bg3);border:1px solid var(--border);
+  border-radius:7px;padding:5px 10px;cursor:pointer;transition:border-color .15s var(--ease-out-soft,ease),background .15s var(--ease-out-soft,ease);}
+.fleet-chip:hover{border-color:var(--border-strong,rgba(255,255,255,.16));background:var(--bg4);}
+.fleet-chip.empty{color:var(--muted);border-style:dashed;}
+.fleet-chip .fc-gos{font-family:'JetBrains Mono',monospace;font-weight:600;font-size:12px;}
+.fleet-chip .fc-sub{color:var(--muted);font-size:10.5px;}
+.fleet-hist-btn{background:none;border:none;color:var(--muted);cursor:pointer;padding:4px;font-size:14px;line-height:1;}
+.fleet-hist-btn:hover{color:var(--amber);}
+.fleet-hist-row{display:none;background:var(--bg);}
+.fleet-hist-row.on{display:table-row;}
+.fleet-hist-row td{padding:10px 14px 14px 20px;}
+.fleet-timeline{display:flex;flex-direction:column;gap:6px;}
+.fleet-tlitem{display:flex;align-items:baseline;gap:10px;font-size:11.5px;}
+.fleet-tldate{color:var(--muted);font-family:'JetBrains Mono',monospace;min-width:130px;flex:none;}
+.fleet-picker{position:fixed;z-index:1600;background:var(--bg4);border:1px solid var(--border-strong,rgba(255,255,255,.16));
+  border-radius:9px;box-shadow:0 10px 26px rgba(0,0,0,.45);padding:6px;min-width:230px;max-height:280px;overflow-y:auto;
+  opacity:0;transform:translateY(-4px);pointer-events:none;transition:opacity .12s ease,transform .12s ease;}
+.fleet-picker.on{opacity:1;transform:translateY(0);pointer-events:auto;}
+.fp-item{padding:7px 10px;border-radius:6px;cursor:pointer;font-size:12px;}
+.fp-item:hover{background:var(--bg3);}
+.fp-item .fc-gos{font-family:'JetBrains Mono',monospace;font-weight:600;}
+.fp-item.used{opacity:.4;}
+.fp-empty{padding:7px 10px;color:var(--red);font-size:11.5px;cursor:pointer;border-top:1px solid var(--border);margin-top:4px;}
 .mp-lost{padding:9px 0;border-bottom:1px solid rgba(var(--ink),.05);}
 .mp-lost__n{font-size:12.5px;color:var(--text);font-weight:500;}
 .mp-lost__s{font-size:11px;color:var(--muted);margin-top:2px;}
@@ -2728,6 +2754,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
           <button class="tab-btn active" onclick="showDirTab('people',this)">Сотрудники</button>
           <button class="tab-btn" onclick="showDirTab('legal',this)">Юридические лица</button>
           <button class="tab-btn" onclick="showDirTab('assets',this)">Материальные средства</button>
+          <button class="tab-btn" onclick="showDirTab('fleet',this)">Сцепка</button>
         </div>
 
         <!-- ── Сотрудники (физические лица) ── -->
@@ -2844,8 +2871,39 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
             </table>
           </div>
         </div>
+
+        <!-- ── Сцепка (30.08, Влад: «нужно соединять тягач-полуприцеп-водителя между собой,
+             менять местами, разъединять и фиксировать все даты» - вариант "список-таблица",
+             выбран Владом из трёх превью-макетов). Пишет в ту же fleet_assignments, что и
+             карточка сцепки на вкладке "Сотрудники" (drvCardCoupleDriver_ и т.п.) - это
+             второй интерфейс над теми же данными, не отдельная система. Сама атомарная
+             логика (авто-расцепка ресурса с прежнего места) - на сервере, /api/fleet/couple,
+             ничего дублировать в JS не нужно. -->
+        <div id="dir-tab-fleet" style="display:none">
+          <div style="display:flex;gap:8px;margin:12px 0">
+            <input autocomplete="off" id="fleet-search" type="text" placeholder="Поиск по госномеру, марке, водителю…"
+              oninput="fleetTabPaint_()"
+              style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:12.5px;outline:none">
+          </div>
+          <div id="fleet-loading" style="color:var(--muted);padding:20px 0;font-size:13px">Загрузка…</div>
+          <div id="fleet-wrap" style="display:none;overflow-x:auto;max-height:620px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm)">
+            <table class="tbl">
+              <thead><tr>
+                <th style="position:sticky;top:0;background:var(--bg2);z-index:1">Тягач</th>
+                <th style="position:sticky;top:0;background:var(--bg2);z-index:1">Прицеп</th>
+                <th style="position:sticky;top:0;background:var(--bg2);z-index:1">Водитель</th>
+                <th class="num" style="position:sticky;top:0;background:var(--bg2);z-index:1">История</th>
+              </tr></thead>
+              <tbody id="fleet-body"></tbody>
+            </table>
+          </div>
+          <div id="fleet-error" style="display:none;color:var(--red);font-size:12px;margin-top:10px"></div>
+        </div>
       </div>
     </div>
+    <!-- Всплывающий пикер выбора ресурса для вкладки "Сцепка" - один на страницу, как
+         контекстное меню (раздел 4 DESIGN_SYSTEM.md), позиционируется под нажатым чипом. -->
+    <div id="fleet-picker" class="fleet-picker"></div>
 
     <!-- Форма добавления/правки сотрудника - тот же drawer-канон, что "Пропавшие клиенты"
          (.mp-drawer/.mp-drawer-bk, дашборд-уровня, не завязан на конкретную страницу). -->
@@ -10038,8 +10096,8 @@ var legalEditId_ = null;         // id редактируемого юрлица
 var assetEditId_ = null;         // id редактируемого актива, null = форма "новый"
 
 function renderDirectory() {
-  var loadingEls = ['drv-reg-loading', 'legal-loading', 'asset-loading'].map(function(id) { return document.getElementById(id); });
-  var wrapEls = ['drv-reg-wrap', 'legal-wrap', 'asset-wrap'].map(function(id) { return document.getElementById(id); });
+  var loadingEls = ['drv-reg-loading', 'legal-loading', 'asset-loading', 'fleet-loading'].map(function(id) { return document.getElementById(id); });
+  var wrapEls = ['drv-reg-wrap', 'legal-wrap', 'asset-wrap', 'fleet-wrap'].map(function(id) { return document.getElementById(id); });
   if (!loadingEls[0]) return;
   loadingEls.forEach(function(el) { if (el) { el.style.display = ''; el.textContent = 'Загрузка…'; } });
   wrapEls.forEach(function(el) { if (el) el.style.display = 'none'; });
@@ -10066,16 +10124,17 @@ function renderDirectory() {
     drvRegPaint_();
     legalPaint_();
     assetsPaint_();
+    fleetTabPaint_();
   }).catch(function(e) {
     loadingEls.forEach(function(el) { if (el) el.textContent = 'Ошибка сети: ' + e.message; });
   });
 }
 
-// Вкладки раздела - три РАЗНЫХ справочника в одной карточке, тот же tab-bar canon, что
-// "Поступления" (showReceiptsTab) - все три уже отрисованы после renderDirectory(),
+// Вкладки раздела - ЧЕТЫРЕ справочника в одной карточке, тот же tab-bar canon, что
+// "Поступления" (showReceiptsTab) - все уже отрисованы после renderDirectory(),
 // переключение вкладки - просто показ/скрытие, без повторного похода на сервер.
 function showDirTab(tab, el) {
-  ['people', 'legal', 'assets'].forEach(function(t) {
+  ['people', 'legal', 'assets', 'fleet'].forEach(function(t) {
     var panel = document.getElementById('dir-tab-' + t);
     if (panel) panel.style.display = (t === tab) ? '' : 'none';
   });
@@ -10922,8 +10981,167 @@ function renderDirectory_thenRepaintCard_() {
     fleetAssignments_ = (fleet.ok && fleet.data.assignments) || [];
     drvRegPaint_();
     assetsPaint_();
+    fleetTabPaint_();
     if (drvCardDriverId_) drvCardPaint_();
   });
+}
+
+// ═══ ВКЛАДКА "СЦЕПКА" (30.08, Влад: "нужно соединять тягач-полуприцеп-водителя между
+// собой, менять местами, разъединять и фиксировать все даты" - вариант "список-таблица",
+// выбран из трёх превью-макетов). Второй интерфейс над той же fleet_assignments, что и
+// карточка сцепки выше (drvCardCoupleDriver_ и т.п.) - НЕ отдельная система. Авто-
+// расцепка ресурса с прежнего места - логика СЕРВЕРА (/api/fleet/couple, атомарная
+// транзакция), здесь только показываем, что она произошла (тост). ═══
+function fleetPersonName_(id) {
+  var p = (spravPeople_ || []).filter(function(x) { return String(x.id) === String(id); })[0];
+  return p ? p.full_name : null;
+}
+function fleetAssetById_(id) {
+  return (spravAssets_ || []).filter(function(x) { return String(x.id) === String(id); })[0] || null;
+}
+function fleetLabelFor_(kind, id) {
+  if (!id) return '';
+  if (kind === 'trailer') return id;
+  return fleetPersonName_(id) || id;
+}
+
+function fleetTabPaint_() {
+  var body = document.getElementById('fleet-body');
+  if (!body || !spravAssets_) return;
+  var tractors = spravAssets_.filter(function(a) { return a.asset_type === 'tractor' && !a.is_deleted; });
+  var q = (document.getElementById('fleet-search').value || '').trim().toLowerCase();
+  if (q) {
+    tractors = tractors.filter(function(t) {
+      var openDrv = fleetOpenOnTractor_('driver', t.id, 1);
+      var driverName = openDrv ? (fleetPersonName_(openDrv.resource_key) || '') : '';
+      var hay = [t.id, t.manufacturer, t.name, driverName].filter(Boolean).join(' ').toLowerCase();
+      return hay.indexOf(q) >= 0;
+    });
+  }
+  if (!tractors.length) {
+    body.innerHTML = '<tr><td colspan="4" class="muted" style="padding:14px">Ничего не найдено</td></tr>';
+    return;
+  }
+  body.innerHTML = tractors.map(fleetRowHtml_).join('');
+}
+
+function fleetRowHtml_(t) {
+  var idAttr = pageEscAttr_(t.id);
+  var idData = pageEsc_(t.id);
+  var openTrailer = fleetOpenOnTractor_('trailer', t.id, 1);
+  var openDriver = fleetOpenOnTractor_('driver', t.id, 1);
+  var trailerCell, driverCell;
+  if (openTrailer) {
+    var tr = fleetAssetById_(openTrailer.resource_key);
+    trailerCell = '<span class="fleet-chip" onclick="fleetOpenPicker_(this,\'trailer\',\'' + idAttr + '\')">' +
+      '<span class="fc-gos">' + pageEsc_(openTrailer.resource_key) + '</span>' +
+      (tr && tr.trailer_type ? '<span class="fc-sub">' + pageEsc_(tr.trailer_type) + '</span>' : '') + '</span>';
+  } else {
+    trailerCell = '<span class="fleet-chip empty" onclick="fleetOpenPicker_(this,\'trailer\',\'' + idAttr + '\')">+ прицепить</span>';
+  }
+  if (openDriver) {
+    var nm = fleetPersonName_(openDriver.resource_key);
+    driverCell = '<span class="fleet-chip" onclick="fleetOpenPicker_(this,\'driver\',\'' + idAttr + '\')">' +
+      '<span class="fc-gos" style="font-family:inherit;font-weight:500">' + pageEsc_(nm || openDriver.resource_key) + '</span></span>';
+  } else {
+    driverCell = '<span class="fleet-chip empty" onclick="fleetOpenPicker_(this,\'driver\',\'' + idAttr + '\')">+ посадить</span>';
+  }
+  var histCount = (fleetAssignments_ || []).filter(function(a) { return a.tractor_gos === t.id; }).length;
+  return '<tr>' +
+    '<td><div class="mono" style="font-weight:600">' + pageEsc_(t.id) + '</div>' +
+      '<div class="muted" style="font-size:10.5px">' + [t.manufacturer, t.name].filter(Boolean).map(pageEsc_).join(' ') + '</div></td>' +
+    '<td>' + trailerCell + '</td>' +
+    '<td>' + driverCell + '</td>' +
+    '<td class="num"><button class="fleet-hist-btn" onclick="fleetToggleHist_(\'' + idAttr + '\')" title="История">' + (histCount ? '●●●' : '—') + '</button></td>' +
+  '</tr>' +
+  '<tr class="fleet-hist-row" data-fleet-hist-for="' + idData + '"><td colspan="4">' + fleetHistoryHtml_(t.id) + '</td></tr>';
+}
+
+function fleetHistoryHtml_(tractorId) {
+  var events = (fleetAssignments_ || []).filter(function(a) { return a.tractor_gos === tractorId; })
+    .slice().sort(function(a, b) { return (a.valid_from || '').localeCompare(b.valid_from || ''); });
+  if (!events.length) return '<div class="muted" style="font-size:12px;padding:4px 0">История пока пуста</div>';
+  var lines = [];
+  events.forEach(function(e) {
+    var kindLabel = e.kind === 'trailer' ? 'Прицеп' : 'Водитель';
+    var who = pageEsc_(fleetLabelFor_(e.kind, e.resource_key));
+    lines.push({ at: e.valid_from, act: kindLabel + ' ' + who + ' — сцеплен', by: e.created_by || e.updated_by });
+    if (e.valid_to) lines.push({ at: e.valid_to, act: kindLabel + ' ' + who + ' — расцеплен', by: e.updated_by });
+  });
+  lines.sort(function(a, b) { return (a.at || '').localeCompare(b.at || ''); });
+  return '<div class="fleet-timeline">' + lines.map(function(l) {
+    return '<div class="fleet-tlitem"><span class="fleet-tldate">' + pageEsc_(l.at || '') + '</span><span>' + l.act + '</span>' +
+      (l.by ? ' <span class="muted">— ' + pageEsc_(l.by) + '</span>' : '') + '</div>';
+  }).join('') + '</div>';
+}
+
+function fleetToggleHist_(tractorId) {
+  var row = document.querySelector('.fleet-hist-row[data-fleet-hist-for="' + CSS.escape(tractorId) + '"]');
+  if (row) row.classList.toggle('on');
+}
+
+var fleetPickerTarget_ = null;
+function fleetOpenPicker_(anchorEl, role, tractorId) {
+  fleetPickerTarget_ = { role: role, tractorId: tractorId };
+  var picker = document.getElementById('fleet-picker');
+  var pool = role === 'trailer'
+    ? (spravAssets_ || []).filter(function(a) { return a.asset_type === 'trailer' && !a.is_deleted; })
+    : (spravPeople_ || []).filter(function(p) { return (p.roles || []).indexOf('driver') >= 0 && !p.is_deleted; });
+  var usedIds = (fleetAssignments_ || []).filter(function(a) { return a.kind === role && !a.valid_to; }).map(function(a) { return a.resource_key; });
+  var current = fleetOpenOnTractor_(role, tractorId, 1);
+  var currentId = current ? current.resource_key : null;
+  var items = pool.map(function(p) {
+    var isUsed = usedIds.indexOf(p.id) >= 0 && p.id !== currentId;
+    var label = role === 'trailer'
+      ? '<span class="fc-gos">' + pageEsc_(p.id) + '</span>' + (p.trailer_type ? ' <span class="fc-sub">' + pageEsc_(p.trailer_type) + '</span>' : '')
+      : pageEsc_(p.full_name);
+    return '<div class="fp-item' + (isUsed ? ' used' : '') + '" onclick="fleetPickerSelect_(\'' + pageEscAttr_(p.id) + '\')">' + label +
+      (isUsed ? ' <span class="fc-sub">занят</span>' : '') + '</div>';
+  }).join('');
+  picker.innerHTML = items + (currentId ? '<div class="fp-empty" onclick="fleetPickerSelect_(\'\')">— освободить —</div>' : '');
+  var r = anchorEl.getBoundingClientRect();
+  picker.style.left = r.left + 'px';
+  picker.style.top = (r.bottom + 4) + 'px';
+  picker.classList.add('on');
+}
+function fleetPickerSelect_(id) {
+  var t = fleetPickerTarget_;
+  document.getElementById('fleet-picker').classList.remove('on');
+  fleetPickerTarget_ = null;
+  if (!t) return;
+  if (!id) { fleetUncouple_(t.role, t.tractorId); return; }
+  fleetCouple_(t.role, t.tractorId, id);
+}
+document.addEventListener('click', function(e) {
+  var picker = document.getElementById('fleet-picker');
+  if (picker && picker.classList.contains('on') && !picker.contains(e.target) && !e.target.closest('.fleet-chip')) {
+    picker.classList.remove('on');
+  }
+});
+
+function fleetCouple_(kind, tractorGos, resourceKey) {
+  var errEl = document.getElementById('fleet-error');
+  errEl.style.display = 'none';
+  postToYardApi_('/fleet/couple', { kind: kind, tractor_gos: tractorGos, resource_key: resourceKey, slot: 1 }).then(function(r) {
+    if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось сцепить'; errEl.style.display = ''; return; }
+    // Сервер сам расцепил ресурс с прежнего места (атомарная транзакция /api/fleet/couple) -
+    // показываем это явно тостом, а не молчим (Влад, 30.08: "если цепляем занятого - от той
+    // машины он должен оцепиться" - эта строка подтверждает, что так и произошло).
+    var extra = [];
+    if (r.data.replaced_resource) extra.push('прежний ' + (kind === 'trailer' ? 'прицеп' : 'водитель') + ' ' + fleetLabelFor_(kind, r.data.replaced_resource) + ' расцеплен');
+    if (r.data.closed_from_tractor) extra.push('расцеплен с ' + r.data.closed_from_tractor);
+    p2Toast('Сцеплено' + (extra.length ? ' — ' + extra.join(', ') : ''), 'green');
+    return renderDirectory_thenRepaintCard_();
+  }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+function fleetUncouple_(kind, tractorGos) {
+  var errEl = document.getElementById('fleet-error');
+  errEl.style.display = 'none';
+  postToYardApi_('/fleet/uncouple', { kind: kind, tractor_gos: tractorGos, slot: 1 }).then(function(r) {
+    if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось расцепить'; errEl.style.display = ''; return; }
+    p2Toast('Расцеплено', 'amber');
+    return renderDirectory_thenRepaintCard_();
+  }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
 }
 
 function drvCardCopy_() {

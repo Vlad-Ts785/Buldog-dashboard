@@ -2656,12 +2656,14 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
             <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:var(--muted);margin-right:auto">
               <input autocomplete="off" type="checkbox" id="asset-show-deleted" onchange="renderDirectory()"> Показать удалённых</label>
             <button onclick="assetOpenForm_(null)" data-nav-sound
-              style="background:var(--green);color:#fff;border:none;border-radius:7px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer">+ Добавить полуприцеп</button>
+              style="background:var(--green);color:#fff;border:none;border-radius:7px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer">+ Добавить</button>
           </div>
           <div id="asset-loading" style="color:var(--muted);padding:20px 0;font-size:13px">Загрузка…</div>
+          <!-- 'tractor' добавлен 30.08 (Влад: "тип техники мы выберем - тягач или полуприцеп"),
+               колонка "Категория" различает их в общем списке. -->
           <div id="asset-wrap" style="display:none;overflow-x:auto">
             <table class="tbl">
-              <thead><tr><th>Госномер</th><th>Тип</th><th>Характеристики</th><th>Юрлицо</th><th>Сцепка сейчас</th><th class="num">Действия</th></tr></thead>
+              <thead><tr><th>Категория</th><th>Госномер</th><th>Марка/модель</th><th>Характеристики</th><th>Юрлицо</th><th>Сцепка сейчас</th><th class="num">Действия</th></tr></thead>
               <tbody id="asset-body"></tbody>
             </table>
           </div>
@@ -2775,17 +2777,84 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
         background:transparent;border:1px solid rgba(226,75,74,.4);color:var(--red);border-radius:8px;padding:9px;font-size:13px;cursor:pointer">Удалить юрлицо</button>
     </div>
 
-    <!-- Форма добавления/правки материального средства (пока только полуприцепы). -->
+    <!-- Форма добавления/правки материального средства - тягач или полуприцеп (30.08,
+         Влад: "тип техники мы выберем"). Тип выбирается только при создании (переключает,
+         какой блок характеристик показан) - у существующей записи заблокирован, менять тип
+         физической единицы техники задним числом не имеет смысла. -->
     <div class="mp-drawer-bk" id="asset-bk" onclick="assetCloseForm_()"></div>
     <div class="mp-drawer" id="asset-drawer">
-      <h3 id="asset-drawer-title">Добавить полуприцеп</h3>
+      <h3 id="asset-drawer-title">Добавить технику</h3>
+      <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Тип техники *</label>
+        <select id="asset-type-select" onchange="assetToggleTypeFields_()"
+          style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px">
+          <option value="trailer">Полуприцеп</option>
+          <option value="tractor">Тягач</option>
+        </select></div>
       <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Госномер *</label>
         <input autocomplete="off" id="asset-id" type="text" maxlength="64" placeholder="ЕМ 5270 50"
           style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
-      <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Тип</label>
-        <input autocomplete="off" id="asset-name" type="text" maxlength="150" placeholder="Трал Корыто легк"
-          style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
-      <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Характеристики</label>
+      <div style="display:flex;gap:10px;margin-bottom:12px">
+        <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Производитель</label>
+          <input autocomplete="off" id="asset-manufacturer" type="text" maxlength="100" placeholder="Faymonville, Scania…"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Марка/модель</label>
+          <input autocomplete="off" id="asset-name" type="text" maxlength="150" placeholder="Трал Корыто легк"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+      </div>
+      <!-- Тягач - колёсная формула (30.08, Влад: "заложить функцию ввода формулы колёс -
+           4х2, 6х4, 8х4"). -->
+      <div id="asset-tractor-fields" style="display:none">
+        <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Колёсная формула</label>
+          <input autocomplete="off" id="asset-wheel-formula" type="text" maxlength="20" placeholder="6х4"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+      </div>
+      <!-- Полуприцеп - карточка характеристик (30.08, Влад по реальному чертежу Faymonville:
+           длина, оси, площадка, раздвижение, тип корыто/прямой, аппарели - "заранее
+           предусмотрим, в будущем разработаем систему размещения груза для расчёта нагрузки
+           на оси"). Числа - миллиметры, как в самих чертежах. -->
+      <div id="asset-trailer-fields" style="display:none">
+        <div style="display:flex;gap:10px;margin-bottom:12px">
+          <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Тип талла</label>
+            <select id="asset-trailer-type" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px">
+              <option value="">— не указано —</option>
+              <option value="korito">Корыто</option>
+              <option value="straight">Прямой</option>
+            </select></div>
+          <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Количество осей</label>
+            <input autocomplete="off" id="asset-axle-count" type="number" min="1" max="20" placeholder="8"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        </div>
+        <div style="display:flex;gap:10px;margin-bottom:12px">
+          <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Длина, мм</label>
+            <input autocomplete="off" id="asset-length" type="number" min="0" placeholder="17700"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+          <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Длина площадки, мм</label>
+            <input autocomplete="off" id="asset-platform-length" type="number" min="0" placeholder="14000"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        </div>
+        <div style="display:flex;gap:10px;margin-bottom:12px">
+          <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Ширина, мм</label>
+            <input autocomplete="off" id="asset-width" type="number" min="0" placeholder="2990"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+          <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Шины</label>
+            <input autocomplete="off" id="asset-tire-size" type="text" maxlength="30" placeholder="235/75R17.5"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        </div>
+        <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Межосевые расстояния</label>
+          <input autocomplete="off" id="asset-axle-spacing" type="text" maxlength="100" placeholder="1360х7, 1240"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        <div style="margin-bottom:12px">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text)">
+            <input autocomplete="off" type="checkbox" id="asset-extendable" onchange="assetToggleExtendable_()"> Раздвижная площадка</label></div>
+        <div id="asset-extendable-fields" style="display:none;margin-bottom:12px">
+          <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Длина в разложенном виде, мм</label>
+          <input autocomplete="off" id="asset-length-max" type="number" min="0" placeholder="37200"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Аппарели</label>
+          <input autocomplete="off" id="asset-ramps" type="text" maxlength="150" placeholder="есть, гидравлические / нет"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+      </div>
+      <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Характеристики одной строкой (для карточки отправки)</label>
         <input autocomplete="off" id="asset-spec" type="text" maxlength="150" placeholder="0,5 х 6,2; 35 тн"
           style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
       <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">На балансе (юрлицо)</label>
@@ -10204,28 +10273,50 @@ function legalEntityName_(id) {
   var le = (spravLegalEntities_ || []).filter(function(x) { return String(x.id) === String(id); })[0];
   return le ? le.name : '';
 }
+var ASSET_TYPE_LABELS_ = { trailer: 'Полуприцеп', tractor: 'Тягач' };
+// Строка характеристик для таблицы, когда "Характеристики одной строкой" не заполнена
+// вручную - собираем из структурированных полей (30.08), чтобы ввод длины/осей/формулы
+// колёс уже сегодня был виден в списке, не только храним "на будущее".
+function assetSpecSummary_(a) {
+  if (a.spec) return a.spec;
+  if (a.asset_type === 'tractor') {
+    return a.wheel_formula ? 'Формула колёс: ' + a.wheel_formula : '';
+  }
+  var parts = [];
+  if (a.axle_count) parts.push(a.axle_count + ' ' + (a.axle_count === 1 ? 'ось' : 'осей'));
+  if (a.length_mm) parts.push((a.length_mm / 1000).toLocaleString('ru-RU') + ' м');
+  if (a.trailer_type) parts.push(a.trailer_type === 'korito' ? 'корыто' : a.trailer_type === 'straight' ? 'прямой' : a.trailer_type);
+  return parts.join(', ');
+}
 function assetsPaint_() {
   var body = document.getElementById('asset-body');
   if (!body || !spravAssets_) return;
   var showDeleted = document.getElementById('asset-show-deleted').checked;
   var rows = spravAssets_.filter(function(a) { return showDeleted || !a.is_deleted; });
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="6" class="muted" style="padding:14px">Материалки пока нет — добавьте первую</td></tr>';
+    body.innerHTML = '<tr><td colspan="7" class="muted" style="padding:14px">Материалки пока нет — добавьте первую</td></tr>';
     return;
   }
   body.innerHTML = rows.map(function(a) {
     var idEsc = pageEscAttr_(a.id);
-    var open = fleetOpenAssignment_('trailer', a.id);
-    var tractorCell = open ? '<span class="mono">' + pageEsc_(open.tractor_gos) + '</span>' : '<span class="muted">не сцеплен</span>';
+    var isTractor = a.asset_type === 'tractor';
+    // "Сцепка сейчас" - вопрос "к какому тягачу прицеплен ЭТОТ полуприцеп" не имеет смысла
+    // для самого тягача (его живой статус - в Штатке, не здесь) - показываем прочерк.
+    var open = isTractor ? null : fleetOpenAssignment_('trailer', a.id);
+    var tractorCell = isTractor ? '<span class="muted">—</span>'
+      : (open ? '<span class="mono">' + pageEsc_(open.tractor_gos) + '</span>' : '<span class="muted">не сцеплен</span>');
     var actions = a.is_deleted
       ? '<button onclick="assetRestore_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);' +
         'color:var(--green);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Восстановить</button>'
       : '<button onclick="assetOpenForm_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);' +
         'color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Править</button>';
+    var modelCell = [a.manufacturer, a.name].filter(Boolean).map(pageEsc_).join(' ') || '—';
+    var specText = assetSpecSummary_(a);
     return '<tr' + (a.is_deleted ? spravDeletedRowStyle_() : '') + '>' +
+      '<td class="muted">' + (ASSET_TYPE_LABELS_[a.asset_type] || a.asset_type) + '</td>' +
       '<td class="mono"><b>' + pageEsc_(a.id) + '</b>' + (a.is_deleted ? ' <span class="muted" style="font-size:11px">(удалено)</span>' : '') + '</td>' +
-      '<td class="muted">' + (a.name ? pageEsc_(a.name) : '—') + '</td>' +
-      '<td class="muted">' + (a.spec ? pageEsc_(a.spec) : '—') + '</td>' +
+      '<td class="muted">' + modelCell + '</td>' +
+      '<td class="muted">' + (specText ? pageEsc_(specText) : '—') + '</td>' +
       '<td class="muted">' + (a.legal_entity_id ? pageEsc_(legalEntityName_(a.legal_entity_id)) : '—') + '</td>' +
       '<td>' + tractorCell + '</td>' +
       '<td class="num">' + actions + '</td>' +
@@ -10237,15 +10328,43 @@ function assetLegalEntityOptions_(selectedId) {
     return '<option value="' + pageEsc_(le.id) + '"' + (String(le.id) === String(selectedId) ? ' selected' : '') + '>' + pageEsc_(le.name) + '</option>';
   }).join('');
 }
+// Показывает блок полей нужного типа техники (тягач/полуприцеп), прячет чужой -
+// вызывается и при смене select'а, и при открытии формы на готовую запись.
+function assetToggleTypeFields_() {
+  var type = document.getElementById('asset-type-select').value;
+  document.getElementById('asset-tractor-fields').style.display = type === 'tractor' ? '' : 'none';
+  document.getElementById('asset-trailer-fields').style.display = type === 'trailer' ? '' : 'none';
+}
+function assetToggleExtendable_() {
+  var on = document.getElementById('asset-extendable').checked;
+  document.getElementById('asset-extendable-fields').style.display = on ? '' : 'none';
+}
 function assetOpenForm_(id) {
   assetEditId_ = id;
   var a = id ? (spravAssets_ || []).filter(function(x) { return String(x.id) === String(id); })[0] : null;
   assetEditSnapshot_ = a ? a.updated_at : null;
-  document.getElementById('asset-drawer-title').textContent = a ? 'Править полуприцеп' : 'Добавить полуприцеп';
+  document.getElementById('asset-drawer-title').textContent = a ? 'Править технику' : 'Добавить технику';
+  var typeSelect = document.getElementById('asset-type-select');
+  typeSelect.value = a ? a.asset_type : 'trailer';
+  typeSelect.disabled = !!a; // тип физической единицы техники не меняют задним числом
+  assetToggleTypeFields_();
   var idInput = document.getElementById('asset-id');
   idInput.value = a ? a.id : '';
   idInput.disabled = !!a; // госномер - естественный первичный ключ, у существующей записи не меняется
+  document.getElementById('asset-manufacturer').value = a ? (a.manufacturer || '') : '';
   document.getElementById('asset-name').value = a ? (a.name || '') : '';
+  document.getElementById('asset-wheel-formula').value = a ? (a.wheel_formula || '') : '';
+  document.getElementById('asset-trailer-type').value = a ? (a.trailer_type || '') : '';
+  document.getElementById('asset-axle-count').value = a ? (a.axle_count || '') : '';
+  document.getElementById('asset-length').value = a ? (a.length_mm || '') : '';
+  document.getElementById('asset-platform-length').value = a ? (a.platform_length_mm || '') : '';
+  document.getElementById('asset-width').value = a ? (a.width_mm || '') : '';
+  document.getElementById('asset-tire-size').value = a ? (a.tire_size || '') : '';
+  document.getElementById('asset-axle-spacing').value = a ? (a.axle_spacing || '') : '';
+  document.getElementById('asset-extendable').checked = !!(a && a.extendable);
+  document.getElementById('asset-length-max').value = a ? (a.length_max_mm || '') : '';
+  assetToggleExtendable_();
+  document.getElementById('asset-ramps').value = a ? (a.ramps || '') : '';
   document.getElementById('asset-spec').value = a ? (a.spec || '') : '';
   document.getElementById('asset-legal-entity').innerHTML = assetLegalEntityOptions_(a ? a.legal_entity_id : '');
   document.getElementById('asset-notes').value = a ? (a.notes || '') : '';
@@ -10254,7 +10373,7 @@ function assetOpenForm_(id) {
   var bk = document.getElementById('asset-bk'), dr = document.getElementById('asset-drawer');
   bk.classList.add('show');
   setTimeout(function() { dr.classList.add('show'); }, 40);
-  setTimeout(function() { (idInput.disabled ? document.getElementById('asset-name') : idInput).focus(); }, 120);
+  setTimeout(function() { (idInput.disabled ? document.getElementById('asset-manufacturer') : idInput).focus(); }, 120);
 }
 function assetCloseForm_() {
   var bk = document.getElementById('asset-bk'), dr = document.getElementById('asset-drawer');
@@ -10266,9 +10385,22 @@ function assetSave_() {
   errEl.style.display = 'none';
   var id = assetEditId_ || document.getElementById('asset-id').value.trim();
   if (!id) { errEl.textContent = 'Госномер обязателен'; errEl.style.display = ''; return; }
+  var assetType = document.getElementById('asset-type-select').value;
   var params = {
-    id: id, asset_type: 'trailer',
+    id: id, asset_type: assetType,
+    manufacturer: document.getElementById('asset-manufacturer').value.trim(),
     name: document.getElementById('asset-name').value.trim(),
+    wheel_formula: document.getElementById('asset-wheel-formula').value.trim(),
+    trailer_type: document.getElementById('asset-trailer-type').value,
+    axle_count: document.getElementById('asset-axle-count').value,
+    length_mm: document.getElementById('asset-length').value,
+    platform_length_mm: document.getElementById('asset-platform-length').value,
+    width_mm: document.getElementById('asset-width').value,
+    tire_size: document.getElementById('asset-tire-size').value.trim(),
+    axle_spacing: document.getElementById('asset-axle-spacing').value.trim(),
+    extendable: document.getElementById('asset-extendable').checked ? '1' : '0',
+    length_max_mm: document.getElementById('asset-length-max').value,
+    ramps: document.getElementById('asset-ramps').value.trim(),
     spec: document.getElementById('asset-spec').value.trim(),
     legal_entity_id: document.getElementById('asset-legal-entity').value,
     notes: document.getElementById('asset-notes').value.trim(),
@@ -10276,7 +10408,7 @@ function assetSave_() {
   if (assetEditId_ && assetEditSnapshot_) params.expected_updated_at = assetEditSnapshot_;
   postToYardApi_('/sprav/asset', params).then(function(r) {
     if (!r.ok) { errEl.textContent = 'Не удалось сохранить: ' + (r.data && r.data.error || 'ошибка сервера'); errEl.style.display = ''; return; }
-    p2Toast(assetEditId_ ? 'Изменения сохранены' : 'Полуприцеп добавлен', 'green');
+    p2Toast(assetEditId_ ? 'Изменения сохранены' : (ASSET_TYPE_LABELS_[assetType] || 'Техника') + ' добавлен(а)', 'green');
     assetCloseForm_();
     renderDirectory();
   }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });

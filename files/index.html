@@ -10939,7 +10939,7 @@ function drvCardCoupleDriver_() {
   var gos = (document.getElementById('drv-card-tractor-input').value || '').trim();
   var errEl = document.getElementById('drv-card-error');
   if (!gos) { errEl.textContent = 'Введите госномер тягача'; errEl.style.display = ''; return; }
-  postToYardApi_('/fleet/couple', { kind: 'driver', tractor_gos: gos, resource_key: drvCardDriverId_, slot: 1 }).then(function(r) {
+  postToYardApi_('/fleet/couple', { kind: 'driver', tractor_gos: gos, resource_key: drvCardDriverId_, slot: 1, source: 'sprav' }).then(function(r) {
     if (!r.ok) { errEl.textContent = r.data && r.data.error || 'Не удалось сцепить'; errEl.style.display = ''; return; }
     p2Toast('Сцеплен с ' + gos, 'green');
     return renderDirectory_thenRepaintCard_();
@@ -10962,7 +10962,7 @@ function drvCardCoupleTrailer_() {
     : Promise.resolve({ ok: true });
   regPromise.then(function(rr) {
     if (!rr.ok) throw new Error(rr.data && rr.data.error || 'Не удалось сохранить прицеп');
-    return postToYardApi_('/fleet/couple', { kind: 'trailer', tractor_gos: openDrv.tractor_gos, resource_key: gos, slot: 1 });
+    return postToYardApi_('/fleet/couple', { kind: 'trailer', tractor_gos: openDrv.tractor_gos, resource_key: gos, slot: 1, source: 'sprav' });
   }).then(function(r) {
     if (!r.ok) { errEl.textContent = r.data && r.data.error || 'Не удалось прицепить'; errEl.style.display = ''; return; }
     p2Toast('Прицеп ' + gos + ' сцеплен', 'green');
@@ -10971,7 +10971,7 @@ function drvCardCoupleTrailer_() {
 }
 
 function drvCardUncouple_(kind, tractorGos, slot) {
-  postToYardApi_('/fleet/uncouple', { kind: kind, tractor_gos: tractorGos, slot: slot }).then(function(r) {
+  postToYardApi_('/fleet/uncouple', { kind: kind, tractor_gos: tractorGos, slot: slot, source: 'sprav' }).then(function(r) {
     if (!r.ok) { p2ToastErr(r.data && r.data.error || 'Не удалось расцепить'); return; }
     p2Toast(kind === 'driver' ? 'Расцеплено' : 'Прицеп отцеплен', 'amber');
     return renderDirectory_thenRepaintCard_();
@@ -11068,6 +11068,17 @@ function fleetRowHtml_(t) {
   '<tr class="fleet-hist-row" data-fleet-hist-for="' + idData + '"><td colspan="4">' + fleetHistoryHtml_(t.id) + '</td></tr>';
 }
 
+// Метка источника действия (30.08, Влад: "фиксируется история, что тот-то высадил
+// ИЗ ПЛАНИРОВКИ тогда-то") - column source на fleet_assignments ведёт себя как
+// updated_by (перезаписывается ПОСЛЕДНИМ действием над строкой) - для закрытой
+// записи это источник закрытия, для открытой - источник открытия. Открывающее
+// действие уже закрытой строки эту метку теряет (source перезаписан закрытием) -
+// известное упрощение v1, кому/когда всё равно видно через created_by/valid_from.
+var FLEET_SOURCE_LABELS_ = { sprav: 'из Справочников', planirovka: 'из Планировки' };
+function fleetSourceTag_(source) {
+  var label = FLEET_SOURCE_LABELS_[source];
+  return label ? ' <span class="muted">(' + pageEsc_(label) + ')</span>' : '';
+}
 function fleetHistoryHtml_(tractorId) {
   var events = (fleetAssignments_ || []).filter(function(a) { return a.tractor_gos === tractorId; })
     .slice().sort(function(a, b) { return (a.valid_from || '').localeCompare(b.valid_from || ''); });
@@ -11076,13 +11087,15 @@ function fleetHistoryHtml_(tractorId) {
   events.forEach(function(e) {
     var kindLabel = e.kind === 'trailer' ? 'Прицеп' : 'Водитель';
     var who = pageEsc_(fleetLabelFor_(e.kind, e.resource_key));
-    lines.push({ at: e.valid_from, act: kindLabel + ' ' + who + ' — сцеплен', by: e.created_by || e.updated_by });
-    if (e.valid_to) lines.push({ at: e.valid_to, act: kindLabel + ' ' + who + ' — расцеплен', by: e.updated_by });
+    // source относится к ПОСЛЕДНЕМУ действию над строкой - вешаем его на закрытие,
+    // если оно есть, иначе на открытие (см. пояснение у FLEET_SOURCE_LABELS_ выше).
+    lines.push({ at: e.valid_from, act: kindLabel + ' ' + who + ' — сцеплен', by: e.created_by || e.updated_by, tag: e.valid_to ? '' : fleetSourceTag_(e.source) });
+    if (e.valid_to) lines.push({ at: e.valid_to, act: kindLabel + ' ' + who + ' — расцеплен', by: e.updated_by, tag: fleetSourceTag_(e.source) });
   });
   lines.sort(function(a, b) { return (a.at || '').localeCompare(b.at || ''); });
   return '<div class="fleet-timeline">' + lines.map(function(l) {
     return '<div class="fleet-tlitem"><span class="fleet-tldate">' + pageEsc_(l.at || '') + '</span><span>' + l.act + '</span>' +
-      (l.by ? ' <span class="muted">— ' + pageEsc_(l.by) + '</span>' : '') + '</div>';
+      (l.by ? ' <span class="muted">— ' + pageEsc_(l.by) + '</span>' : '') + (l.tag || '') + '</div>';
   }).join('') + '</div>';
 }
 
@@ -11133,7 +11146,7 @@ document.addEventListener('click', function(e) {
 function fleetCouple_(kind, tractorGos, resourceKey) {
   var errEl = document.getElementById('fleet-error');
   errEl.style.display = 'none';
-  postToYardApi_('/fleet/couple', { kind: kind, tractor_gos: tractorGos, resource_key: resourceKey, slot: 1 }).then(function(r) {
+  postToYardApi_('/fleet/couple', { kind: kind, tractor_gos: tractorGos, resource_key: resourceKey, slot: 1, source: 'sprav' }).then(function(r) {
     if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось сцепить'; errEl.style.display = ''; return; }
     // Сервер сам расцепил ресурс с прежнего места (атомарная транзакция /api/fleet/couple) -
     // показываем это явно тостом, а не молчим (Влад, 30.08: "если цепляем занятого - от той
@@ -11148,7 +11161,7 @@ function fleetCouple_(kind, tractorGos, resourceKey) {
 function fleetUncouple_(kind, tractorGos) {
   var errEl = document.getElementById('fleet-error');
   errEl.style.display = 'none';
-  postToYardApi_('/fleet/uncouple', { kind: kind, tractor_gos: tractorGos, slot: 1 }).then(function(r) {
+  postToYardApi_('/fleet/uncouple', { kind: kind, tractor_gos: tractorGos, slot: 1, source: 'sprav' }).then(function(r) {
     if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось расцепить'; errEl.style.display = ''; return; }
     p2Toast('Расцеплено', 'amber');
     return renderDirectory_thenRepaintCard_();

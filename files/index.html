@@ -2557,6 +2557,11 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
         <!-- ── Сотрудники (физические лица) ── -->
         <div id="dir-tab-people">
           <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0">
+            <!-- Мягкое удаление (30.08, аудит) - "Удалить" на сервере больше не стирает
+                 запись навсегда, только помечает. По умолчанию архив скрыт, эта галочка -
+                 единственный способ увидеть/восстановить. -->
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:var(--muted);margin-right:auto">
+              <input autocomplete="off" type="checkbox" id="drv-reg-show-deleted" onchange="renderDirectory()"> Показать удалённых</label>
             <input autocomplete="off" id="drv-reg-search" type="text" placeholder="Поиск по имени…"
               oninput="drvRegPaint_()"
               style="background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:6px 10px;color:var(--text);font-size:12px;width:180px;outline:none">
@@ -2574,7 +2579,9 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
 
         <!-- ── Юридические лица (СВОИ - ЯРД-Империал/Бульдог/Технопарк, не контрагенты) ── -->
         <div id="dir-tab-legal" style="display:none">
-          <div style="display:flex;justify-content:flex-end;margin:12px 0">
+          <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:12px 0">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:var(--muted);margin-right:auto">
+              <input autocomplete="off" type="checkbox" id="legal-show-deleted" onchange="renderDirectory()"> Показать удалённых</label>
             <button onclick="legalOpenForm_(null)" data-nav-sound
               style="background:var(--green);color:#fff;border:none;border-radius:7px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer">+ Добавить юрлицо</button>
           </div>
@@ -2590,7 +2597,9 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
         <!-- ── Материальные средства (пока только полуприцепы - тягач НЕ дублируется, живой
              из Штатки, тот же принцип, что у fleet_assignments). ── -->
         <div id="dir-tab-assets" style="display:none">
-          <div style="display:flex;justify-content:flex-end;margin:12px 0">
+          <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:12px 0">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:var(--muted);margin-right:auto">
+              <input autocomplete="off" type="checkbox" id="asset-show-deleted" onchange="renderDirectory()"> Показать удалённых</label>
             <button onclick="assetOpenForm_(null)" data-nav-sound
               style="background:var(--green);color:#fff;border:none;border-radius:7px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer">+ Добавить полуприцеп</button>
           </div>
@@ -2615,6 +2624,28 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
           style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
       <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Телефон</label>
         <input autocomplete="off" id="drv-reg-phone" type="text" placeholder="+7 900 000-00-00"
+          style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+      <!-- ИНН/СНИЛС/дата рождения/дата приёма/адрес (30.08, аудит Справочников - были в
+           базе с импорта 1С, но не в форме: правка карточки без этих полей стирала бы их
+           на сервере, если бы не COALESCE-страховка; теперь поля видны и редактируемы). -->
+      <div style="display:flex;gap:10px;margin-bottom:12px">
+        <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">ИНН</label>
+          <input autocomplete="off" id="drv-reg-inn" type="text" placeholder="12 цифр"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">СНИЛС</label>
+          <input autocomplete="off" id="drv-reg-snils" type="text" placeholder="000-000-000 00"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+      </div>
+      <div style="display:flex;gap:10px;margin-bottom:12px">
+        <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Дата рождения</label>
+          <input autocomplete="off" id="drv-reg-birth-date" type="date"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark"></div>
+        <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Дата приёма</label>
+          <input autocomplete="off" id="drv-reg-hire-date" type="date"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark"></div>
+      </div>
+      <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Адрес по прописке</label>
+        <input autocomplete="off" id="drv-reg-address" type="text" placeholder="необязательно"
           style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
       <!-- Роли (Влад, 30.08: "от физических лиц пойдут: водитель, менеджер, механик") -
            многие-ко-многим, один человек может совмещать роли. -->
@@ -9647,7 +9678,15 @@ function renderDirectory() {
   if (!loadingEls[0]) return;
   loadingEls.forEach(function(el) { if (el) { el.style.display = ''; el.textContent = 'Загрузка…'; } });
   wrapEls.forEach(function(el) { if (el) el.style.display = 'none'; });
-  Promise.all([fetchFromYardApi_('/sprav/state', {}), fetchFromYardApi_('/fleet/state', {})]).then(function(results) {
+  // Мягкое удаление (30.08, аудит) - если хоть одна из трёх галочек "Показать удалённых"
+  // отмечена, тянем архив тоже (include_deleted=1) - сервер по умолчанию его прячет.
+  var wantDeleted = ['drv-reg-show-deleted', 'legal-show-deleted', 'asset-show-deleted'].some(function(id) {
+    var el = document.getElementById(id); return el && el.checked;
+  });
+  Promise.all([
+    fetchFromYardApi_('/sprav/state', wantDeleted ? { include_deleted: '1' } : {}),
+    fetchFromYardApi_('/fleet/state', {}),
+  ]).then(function(results) {
     var sprav = results[0], fleet = results[1];
     if (!sprav.ok) {
       loadingEls.forEach(function(el) { if (el) el.textContent = 'Ошибка загрузки: ' + (sprav.data && sprav.data.error || 'неизвестная'); });
@@ -9709,13 +9748,20 @@ function spravRolesLabel_(roles) {
   if (!roles || !roles.length) return '<span class="muted">—</span>';
   return roles.map(function(r) { return SPRAV_ROLE_LABELS_[r] || r; }).join(', ');
 }
+// Строка удалённой записи - приглушаем текст и меняем набор действий на "Восстановить"
+// (30.08, аудит: раньше "Удалить" стирало запись навсегда без следа).
+function spravDeletedRowStyle_() { return ' style="opacity:.55"'; }
 
 // ── Сотрудники (физические лица) ────────────────────────────
 function drvRegPaint_() {
   var body = document.getElementById('drv-reg-body');
   if (!body || !spravPeople_) return;
+  var showDeleted = document.getElementById('drv-reg-show-deleted').checked;
   var q = (document.getElementById('drv-reg-search').value || '').trim().toLowerCase();
-  var rows = spravPeople_.filter(function(d) { return !q || d.full_name.toLowerCase().indexOf(q) >= 0; });
+  var rows = spravPeople_.filter(function(d) {
+    if (!showDeleted && d.is_deleted) return false;
+    return !q || d.full_name.toLowerCase().indexOf(q) >= 0;
+  });
   if (!rows.length) {
     body.innerHTML = '<tr><td colspan="6" class="muted" style="padding:14px">' +
       (spravPeople_.length ? 'Ничего не найдено' : 'Сотрудников пока нет — добавьте первого') + '</td></tr>';
@@ -9727,18 +9773,20 @@ function drvRegPaint_() {
     var open = isDriver ? fleetOpenAssignment_('driver', d.id) : null;
     var tractorCell = !isDriver ? '<span class="muted">—</span>'
       : (open ? '<span class="mono">' + pageEsc_(open.tractor_gos) + '</span>' : '<span class="muted">не сцеплен</span>');
-    return '<tr>' +
-      '<td><b>' + pageEsc_(d.full_name) + '</b></td>' +
+    var actions = d.is_deleted
+      ? '<button onclick="drvRegRestore_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);' +
+        'color:var(--green);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Восстановить</button>'
+      : (isDriver ? '<button onclick="drvCardOpen_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);' +
+        'color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;margin-right:6px">Карточка</button>' : '') +
+        '<button onclick="drvRegOpenForm_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);' +
+        'color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Править</button>';
+    return '<tr' + (d.is_deleted ? spravDeletedRowStyle_() : '') + '>' +
+      '<td><b>' + pageEsc_(d.full_name) + '</b>' + (d.is_deleted ? ' <span class="muted" style="font-size:11px">(удалён)</span>' : '') + '</td>' +
       '<td>' + spravRolesLabel_(d.roles) + '</td>' +
       '<td class="muted">' + (d.phone ? pageEsc_(d.phone) : '—') + '</td>' +
       '<td>' + (isDriver ? drvDocBadge_(d) : '<span class="muted">—</span>') + '</td>' +
       '<td>' + tractorCell + '</td>' +
-      '<td class="num" style="white-space:nowrap">' +
-        (isDriver ? '<button onclick="drvCardOpen_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);' +
-        'color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;margin-right:6px">Карточка</button>' : '') +
-        '<button onclick="drvRegOpenForm_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);' +
-        'color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Править</button>' +
-      '</td>' +
+      '<td class="num" style="white-space:nowrap">' + actions + '</td>' +
     '</tr>';
   }).join('');
 }
@@ -9751,13 +9799,24 @@ function drvRegToggleDriverFields_() {
   if (box) box.style.display = checked ? '' : 'none';
 }
 
+// expected_updated_at (30.08, аудит - optimistic locking) - запоминаем updated_at ЗАПИСИ,
+// которую видит пользователь, отдельно от её полей формы. drvRegSave_ отправит его назад -
+// сервер сверит перед записью и откажет (409), если кто-то другой успел сохранить раньше.
+var drvRegEditSnapshot_ = null;
+
 function drvRegOpenForm_(id) {
   fleetDriversEditId_ = id;
   var d = id ? (spravPeople_ || []).filter(function(x) { return String(x.id) === String(id); })[0] : null;
+  drvRegEditSnapshot_ = d ? d.updated_at : null;
   var roles = d ? (d.roles || []) : [];
   document.getElementById('drv-reg-drawer-title').textContent = d ? 'Править сотрудника' : 'Добавить сотрудника';
   document.getElementById('drv-reg-name').value = d ? d.full_name : '';
   document.getElementById('drv-reg-phone').value = d ? (d.phone || '') : '';
+  document.getElementById('drv-reg-inn').value = d ? (d.inn || '') : '';
+  document.getElementById('drv-reg-snils').value = d ? (d.snils || '') : '';
+  document.getElementById('drv-reg-birth-date').value = d ? (d.birth_date || '') : '';
+  document.getElementById('drv-reg-hire-date').value = d ? (d.hire_date || '') : '';
+  document.getElementById('drv-reg-address').value = d ? (d.address || '') : '';
   document.getElementById('drv-reg-role-driver').checked = roles.indexOf('driver') >= 0;
   document.getElementById('drv-reg-role-manager').checked = roles.indexOf('manager') >= 0;
   document.getElementById('drv-reg-role-mechanic').checked = roles.indexOf('mechanic') >= 0;
@@ -9798,25 +9857,42 @@ function drvRegSave_() {
   var params = {
     id: id, name: name,
     phone: document.getElementById('drv-reg-phone').value.trim(),
+    inn: document.getElementById('drv-reg-inn').value.trim(),
+    snils: document.getElementById('drv-reg-snils').value.trim(),
+    birth_date: document.getElementById('drv-reg-birth-date').value,
+    hire_date: document.getElementById('drv-reg-hire-date').value,
+    address: document.getElementById('drv-reg-address').value.trim(),
     roles: roles.join(','),
     license_number: document.getElementById('drv-reg-license-num').value.trim(),
     license_expiry: document.getElementById('drv-reg-license-exp').value,
     medical_expiry: document.getElementById('drv-reg-medical-exp').value,
     notes: document.getElementById('drv-reg-notes').value.trim(),
   };
+  if (fleetDriversEditId_ && drvRegEditSnapshot_) params.expected_updated_at = drvRegEditSnapshot_;
   postToYardApi_('/sprav/person', params).then(function(r) {
-    if (!r.ok) { errEl.textContent = 'Не удалось сохранить: ' + (r.data && r.data.error || 'ошибка сервера'); errEl.style.display = ''; return; }
+    if (!r.ok) {
+      // 409 - кто-то другой сохранил эту же карточку раньше (optimistic locking, 30.08) -
+      // показываем ПРИЧИНУ сервера, не общую фразу, и не закрываем форму, чтобы не потерять
+      // то, что пользователь только что ввёл.
+      errEl.textContent = 'Не удалось сохранить: ' + (r.data && r.data.error || 'ошибка сервера');
+      errEl.style.display = '';
+      return;
+    }
     p2Toast(fleetDriversEditId_ ? 'Изменения сохранены' : 'Сотрудник добавлен', 'green');
     drvRegCloseForm_();
     renderDirectory();
   }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
 }
 
+// Удаление - МЯГКОЕ (30.08, аудит): запись переезжает в архив ("Показать удалённых"),
+// восстановима кнопкой "Восстановить". confirm() всё ещё уместен (действие меняет
+// видимость записи и требует внимания), но текст больше не утверждает необратимость -
+// её больше нет.
 function drvRegDelete_() {
   if (!fleetDriversEditId_) return;
   var d = (spravPeople_ || []).filter(function(x) { return String(x.id) === String(fleetDriversEditId_); })[0];
   var name = d ? d.full_name : 'этого сотрудника';
-  if (!confirm('Удалить ' + name + '? Это нельзя отменить.')) return;
+  if (!confirm('Удалить ' + name + ' из активного списка? Запись переедет в архив - её можно будет восстановить через "Показать удалённых".')) return;
   var errEl = document.getElementById('drv-reg-error');
   postToYardApi_('/sprav/person_delete', { id: fleetDriversEditId_ }).then(function(r) {
     if (!r.ok) {
@@ -9826,34 +9902,50 @@ function drvRegDelete_() {
       errEl.style.display = '';
       return;
     }
-    p2Toast('Сотрудник удалён', 'amber');
+    p2Toast('Сотрудник перемещён в архив', 'amber');
     drvRegCloseForm_();
     renderDirectory();
   }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
 }
+function drvRegRestore_(id) {
+  postToYardApi_('/sprav/person_restore', { id: id }).then(function(r) {
+    if (!r.ok) { p2ToastErr((r.data && r.data.error) || 'Не удалось восстановить'); return; }
+    p2Toast('Сотрудник восстановлен', 'green');
+    renderDirectory();
+  }).catch(function(e) { p2ToastErr('Ошибка сети: ' + e.message); });
+}
 
 // ── Юридические лица (СВОИ - не контрагенты) ────────────────
+var legalEditSnapshot_ = null;
+
 function legalPaint_() {
   var body = document.getElementById('legal-body');
   if (!body || !spravLegalEntities_) return;
-  if (!spravLegalEntities_.length) {
+  var showDeleted = document.getElementById('legal-show-deleted').checked;
+  var rows = spravLegalEntities_.filter(function(le) { return showDeleted || !le.is_deleted; });
+  if (!rows.length) {
     body.innerHTML = '<tr><td colspan="4" class="muted" style="padding:14px">Юрлиц пока нет — добавьте первое</td></tr>';
     return;
   }
-  body.innerHTML = spravLegalEntities_.map(function(le) {
+  body.innerHTML = rows.map(function(le) {
     var idEsc = String(le.id).replace(/'/g, "\\'");
-    return '<tr>' +
-      '<td><b>' + pageEsc_(le.name) + '</b></td>' +
+    var actions = le.is_deleted
+      ? '<button onclick="legalRestore_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);' +
+        'color:var(--green);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Восстановить</button>'
+      : '<button onclick="legalOpenForm_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);' +
+        'color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Править</button>';
+    return '<tr' + (le.is_deleted ? spravDeletedRowStyle_() : '') + '>' +
+      '<td><b>' + pageEsc_(le.name) + '</b>' + (le.is_deleted ? ' <span class="muted" style="font-size:11px">(удалено)</span>' : '') + '</td>' +
       '<td class="muted">' + (le.full_name ? pageEsc_(le.full_name) : '—') + '</td>' +
       '<td class="muted">' + (le.notes ? pageEsc_(le.notes) : '—') + '</td>' +
-      '<td class="num"><button onclick="legalOpenForm_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);' +
-      'color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Править</button></td>' +
+      '<td class="num">' + actions + '</td>' +
     '</tr>';
   }).join('');
 }
 function legalOpenForm_(id) {
   legalEditId_ = id;
   var le = id ? (spravLegalEntities_ || []).filter(function(x) { return String(x.id) === String(id); })[0] : null;
+  legalEditSnapshot_ = le ? le.updated_at : null;
   document.getElementById('legal-drawer-title').textContent = le ? 'Править юрлицо' : 'Добавить юрлицо';
   document.getElementById('legal-name').value = le ? le.name : '';
   document.getElementById('legal-fullname').value = le ? (le.full_name || '') : '';
@@ -9881,6 +9973,7 @@ function legalSave_() {
     full_name: document.getElementById('legal-fullname').value.trim(),
     notes: document.getElementById('legal-notes').value.trim(),
   };
+  if (legalEditId_ && legalEditSnapshot_) params.expected_updated_at = legalEditSnapshot_;
   postToYardApi_('/sprav/legal_entity', params).then(function(r) {
     if (!r.ok) { errEl.textContent = 'Не удалось сохранить: ' + (r.data && r.data.error || 'ошибка сервера'); errEl.style.display = ''; return; }
     p2Toast(legalEditId_ ? 'Изменения сохранены' : 'Юрлицо добавлено', 'green');
@@ -9892,7 +9985,7 @@ function legalDelete_() {
   if (!legalEditId_) return;
   var le = (spravLegalEntities_ || []).filter(function(x) { return String(x.id) === String(legalEditId_); })[0];
   var name = le ? le.name : 'это юрлицо';
-  if (!confirm('Удалить ' + name + '? Это нельзя отменить.')) return;
+  if (!confirm('Удалить ' + name + ' из активного списка? Запись переедет в архив - её можно будет восстановить через "Показать удалённых".')) return;
   var errEl = document.getElementById('legal-error');
   postToYardApi_('/sprav/legal_entity_delete', { id: legalEditId_ }).then(function(r) {
     if (!r.ok) {
@@ -9902,13 +9995,22 @@ function legalDelete_() {
       errEl.style.display = '';
       return;
     }
-    p2Toast('Юрлицо удалено', 'amber');
+    p2Toast('Юрлицо перемещено в архив', 'amber');
     legalCloseForm_();
     renderDirectory();
   }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
 }
+function legalRestore_(id) {
+  postToYardApi_('/sprav/legal_entity_restore', { id: id }).then(function(r) {
+    if (!r.ok) { p2ToastErr((r.data && r.data.error) || 'Не удалось восстановить'); return; }
+    p2Toast('Юрлицо восстановлено', 'green');
+    renderDirectory();
+  }).catch(function(e) { p2ToastErr('Ошибка сети: ' + e.message); });
+}
 
 // ── Материальные средства (пока только полуприцепы) ─────────
+var assetEditSnapshot_ = null;
+
 function legalEntityName_(id) {
   var le = (spravLegalEntities_ || []).filter(function(x) { return String(x.id) === String(id); })[0];
   return le ? le.name : '';
@@ -9916,22 +10018,28 @@ function legalEntityName_(id) {
 function assetsPaint_() {
   var body = document.getElementById('asset-body');
   if (!body || !spravAssets_) return;
-  if (!spravAssets_.length) {
+  var showDeleted = document.getElementById('asset-show-deleted').checked;
+  var rows = spravAssets_.filter(function(a) { return showDeleted || !a.is_deleted; });
+  if (!rows.length) {
     body.innerHTML = '<tr><td colspan="6" class="muted" style="padding:14px">Материалки пока нет — добавьте первую</td></tr>';
     return;
   }
-  body.innerHTML = spravAssets_.map(function(a) {
+  body.innerHTML = rows.map(function(a) {
     var idEsc = String(a.id).replace(/'/g, "\\'");
     var open = fleetOpenAssignment_('trailer', a.id);
     var tractorCell = open ? '<span class="mono">' + pageEsc_(open.tractor_gos) + '</span>' : '<span class="muted">не сцеплен</span>';
-    return '<tr>' +
-      '<td class="mono"><b>' + pageEsc_(a.id) + '</b></td>' +
+    var actions = a.is_deleted
+      ? '<button onclick="assetRestore_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);' +
+        'color:var(--green);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Восстановить</button>'
+      : '<button onclick="assetOpenForm_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);' +
+        'color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Править</button>';
+    return '<tr' + (a.is_deleted ? spravDeletedRowStyle_() : '') + '>' +
+      '<td class="mono"><b>' + pageEsc_(a.id) + '</b>' + (a.is_deleted ? ' <span class="muted" style="font-size:11px">(удалено)</span>' : '') + '</td>' +
       '<td class="muted">' + (a.name ? pageEsc_(a.name) : '—') + '</td>' +
       '<td class="muted">' + (a.spec ? pageEsc_(a.spec) : '—') + '</td>' +
       '<td class="muted">' + (a.legal_entity_id ? pageEsc_(legalEntityName_(a.legal_entity_id)) : '—') + '</td>' +
       '<td>' + tractorCell + '</td>' +
-      '<td class="num"><button onclick="assetOpenForm_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);' +
-      'color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Править</button></td>' +
+      '<td class="num">' + actions + '</td>' +
     '</tr>';
   }).join('');
 }
@@ -9943,6 +10051,7 @@ function assetLegalEntityOptions_(selectedId) {
 function assetOpenForm_(id) {
   assetEditId_ = id;
   var a = id ? (spravAssets_ || []).filter(function(x) { return String(x.id) === String(id); })[0] : null;
+  assetEditSnapshot_ = a ? a.updated_at : null;
   document.getElementById('asset-drawer-title').textContent = a ? 'Править полуприцеп' : 'Добавить полуприцеп';
   var idInput = document.getElementById('asset-id');
   idInput.value = a ? a.id : '';
@@ -9975,6 +10084,7 @@ function assetSave_() {
     legal_entity_id: document.getElementById('asset-legal-entity').value,
     notes: document.getElementById('asset-notes').value.trim(),
   };
+  if (assetEditId_ && assetEditSnapshot_) params.expected_updated_at = assetEditSnapshot_;
   postToYardApi_('/sprav/asset', params).then(function(r) {
     if (!r.ok) { errEl.textContent = 'Не удалось сохранить: ' + (r.data && r.data.error || 'ошибка сервера'); errEl.style.display = ''; return; }
     p2Toast(assetEditId_ ? 'Изменения сохранены' : 'Полуприцеп добавлен', 'green');
@@ -9986,7 +10096,7 @@ function assetDelete_() {
   if (!assetEditId_) return;
   var a = (spravAssets_ || []).filter(function(x) { return String(x.id) === String(assetEditId_); })[0];
   var name = a ? a.id : 'этот актив';
-  if (!confirm('Удалить ' + name + '? Это нельзя отменить.')) return;
+  if (!confirm('Удалить ' + name + ' из активного списка? Запись переедет в архив - её можно будет восстановить через "Показать удалённых".')) return;
   var errEl = document.getElementById('asset-error');
   postToYardApi_('/sprav/asset_delete', { id: assetEditId_ }).then(function(r) {
     if (!r.ok) {
@@ -9994,10 +10104,17 @@ function assetDelete_() {
       errEl.style.display = '';
       return;
     }
-    p2Toast('Удалено', 'amber');
+    p2Toast('Перемещено в архив', 'amber');
     assetCloseForm_();
     renderDirectory();
   }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+function assetRestore_(id) {
+  postToYardApi_('/sprav/asset_restore', { id: id }).then(function(r) {
+    if (!r.ok) { p2ToastErr((r.data && r.data.error) || 'Не удалось восстановить'); return; }
+    p2Toast('Восстановлено', 'green');
+    renderDirectory();
+  }).catch(function(e) { p2ToastErr('Ошибка сети: ' + e.message); });
 }
 
 // ═══ КАРТОЧКА СЦЕПКИ (Влад, 30.08: «сочетание водителя, полуприцепа, тягача даёт в

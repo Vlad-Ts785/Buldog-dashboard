@@ -1749,7 +1749,28 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   0%,100%{opacity:1;box-shadow:0 0 0 2px var(--bg2),0 0 6px 1px rgba(226,75,74,.7);}
   50%{opacity:.35;box-shadow:0 0 0 2px var(--bg2),0 0 2px 0 rgba(226,75,74,.3);}
 }
-@media(prefers-reduced-motion:reduce){#page-logistics-plan .seg-nd{animation:none;opacity:.85;}}/* прогресс активного рейса - 2px снизу, #page-logistics-plan transform:scaleX (не width) */
+@media(prefers-reduced-motion:reduce){#page-logistics-plan .seg-nd{animation:none;opacity:.85;}}
+/* «Суточный режим» (Влад, 30.08: "давай визуализируем... три варианта", выбран
+   вариант «значок», подпись 30.08 второй заход - "вместо 24 часов слово
+   суточный") - тихий вариант, специально: если суточных рейсов на ленте
+   одновременно много (частый режим для длинных плеч), любой из двух других
+   вариантов (бегущая штриховка/засечки) давал бы заметную нагрузку на глаза
+   по всему экрану - значок конкурирует за внимание меньше всего. text-
+   transform:uppercase, "суточный" в HTML строчными - тот же приём, что у
+   .day-month-tag. */
+#page-logistics-plan .seg-daymode{
+  position:absolute;top:-8px;left:36px;z-index:2;
+  font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:700;
+  letter-spacing:.02em;text-transform:uppercase;color:#1a1204;background:var(--amber);
+  border-radius:4px;padding:1px 5px;box-shadow:0 2px 6px rgba(0,0,0,.35);
+  animation:lpDayModePulse 3s ease-in-out infinite;white-space:nowrap;
+}
+@keyframes lpDayModePulse{
+  0%,100%{box-shadow:0 2px 6px rgba(0,0,0,.35),0 0 0 0 rgba(239,159,39,.5);}
+  50%{box-shadow:0 2px 6px rgba(0,0,0,.35),0 0 0 4px rgba(239,159,39,0);}
+}
+@media(prefers-reduced-motion:reduce){#page-logistics-plan .seg-daymode{animation:none;}}
+/* прогресс активного рейса - 2px снизу, #page-logistics-plan transform:scaleX (не width) */
 #page-logistics-plan .seg-prog{
   /* Скрыт по просьбе Влада, 29.08: "пока вообще прогресс убери, не нужен он
      пока... будем по-другому анимировать его" - НЕ удалено, только display:none.
@@ -18648,6 +18669,15 @@ function segLabel(s){
              s.kind === "noorder" ? "Без заказа" : s.kind === "driveroff" ? "Без водителя" : "";
   return base ? base + " · " + untilLabel(s) : "";
 }
+/* «Суточный режим» (Влад, 30.08: "машины, которые работают в суточном
+   режиме... если машина протянута на более чем 22 часа - это три смены") -
+   ничего не хранится, считается на лету из самой длительности рейса, как
+   "Свободные сейчас" в фильтрах. Раньше логисты писали "Суточный режим"
+   вручную прямо в поле "Куда" - рабочий обход при отсутствии сигнала,
+   больше не нужен. Порог - отдельная константа, Влад может попросить
+   поменять на 21/24 одним числом. */
+var DAY_MODE_THRESHOLD_H_ = 22;
+function isDayMode_(s){ return s.kind === "trip" && s.l > DAY_MODE_THRESHOLD_H_; }
 function makeSeg(s){
   var el = document.createElement("div");
   var now = nowHour();
@@ -18675,6 +18705,7 @@ function makeSeg(s){
     '<span class="seg-txt">' + segLabel(s) + "</span></span>" +
     (active ? '<span class="seg-prog"><i></i></span>' : "") +
     (s.needsData ? '<span class="seg-nd" title="Под данные - документы для пропуска ещё не собраны"></span>' : "") +
+    (isDayMode_(s) ? '<span class="seg-daymode" title="Суточный режим - рейс дольше 22 часов">суточный</span>' : "") +
     '<span class="hov"></span><span class="ring"></span>' +
     '<span class="hnd l"></span><span class="hnd r"></span>';
   paint(el, s);

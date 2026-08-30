@@ -2713,6 +2713,10 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   <button class="ctxmenu-item" id="lp-ctxCopy">Копировать заявку</button>
   <button class="ctxmenu-item ctxmenu-del" id="lp-ctxDel">Удалить заявку</button>
 </div>
+<!-- ПКМ по шапке строки тягача - сцепка/расцепка водителя и прицепа (Влад, 30.08
+     вечером, через параллельную сессию: "высадить, посадить, отцепить, зацепить").
+     Содержимое строится в JS - зависит от того, кто сейчас сидит/прицеплен. -->
+<div class="ctxmenu" id="lp-fleetMenu"></div>
 <div class="toast" id="lp-toast"><span id="lp-toastText"></span><button id="lp-toastBtn">Отменить</button></div>
 <!-- Диалог подтверждения (Влад, 30.08: "под данные... при переносе... должно
      выскакивать диалоговое окно... Ок/Отмена") - НОВЫЙ вид элемента для
@@ -20889,13 +20893,165 @@ function openCtxMenu_(seg, x, y){
   ctxMenu.style.top = Math.min(y, window.innerHeight - mh - 8) + "px";
   ctxMenu.classList.add("open");
 }
+/* ПКМ по шапке строки тягача - сцепка/расцепка (Влад, 30.08 вечером, через
+   параллельную сессию Справочников, дословно: "нам нужна возможность расцепить
+   и пересадить водителя. При нажатии ПКМ в планировке на сцепке должно вылазить
+   диалоговое окно: высадить, посадить, отцепить и зацепить. Если нажимаешь
+   посадить - вылазит список водителей, при посадке он высаживается с той, где
+   сидел. И обязательно фиксируется история... ИЗ ПЛАНИРОВКИ тогда-то"). Бэкенд
+   (/api/fleet/couple, /api/fleet/uncouple - атомарная транзакция, сервер САМ
+   закрывает старую запись ресурса, где бы он ни стоял) уже построен и проверен
+   параллельной сессией на вкладке "Сцепка" в Справочниках - здесь только зовём
+   те же 2 эндпоинта с source=planirovka, чтобы история отличала, откуда пришло
+   действие. Подполосы-визуализация сцепки прямо на ленте (drag-жест
+   переприцепки) - отдельная, ещё не начатая задача (см. координацию сессий в
+   scripts/DEPLOY_LOG.md); до неё ПКМ на .rowhead - единственное на доске место,
+   где "эта конкретная машина" уже однозначно адресуема одним кликом. */
+var FLEET_PEOPLE_ = [], FLEET_ASSETS_ = [], FLEET_ASSIGN_ = [];
+function fetchFleetData_(){
+  return Promise.all([fetchFromYardApi_("/sprav/state", {}), fetchFromYardApi_("/fleet/state", {})])
+    .then(function(results){
+      var sprav = results[0], fleet = results[1];
+      if (sprav.ok){ FLEET_PEOPLE_ = sprav.data.people || []; FLEET_ASSETS_ = sprav.data.assets || []; }
+      if (fleet.ok) FLEET_ASSIGN_ = fleet.data.assignments || [];
+    }).catch(function(){});   /* нет сети/сбой - меню просто не покажет "кто сейчас сидит", посадить/зацепить всё равно работает */
+}
+function lpFleetOpenOnTractor_(kind, tractorGos, slot){
+  return (FLEET_ASSIGN_ || []).filter(function(a){
+    return a.kind === kind && a.tractor_gos === tractorGos && (a.slot || 1) === (slot || 1) && !a.valid_to;
+  })[0] || null;
+}
+function lpFleetPersonName_(id){
+  var p = (FLEET_PEOPLE_ || []).filter(function(x){ return String(x.id) === String(id); })[0];
+  return p ? p.full_name : String(id);
+}
+function lpFleetAssetLabel_(id){
+  var a = (FLEET_ASSETS_ || []).filter(function(x){ return String(x.id) === String(id); })[0];
+  return a ? (a.id + (a.name ? " · " + a.name : "")) : String(id);
+}
+
+var fleetMenu = document.getElementById("lp-fleetMenu");
+var fleetMenuVi_ = null;
+function closeFleetMenu_(){ fleetMenu.classList.remove("open"); fleetMenuVi_ = null; }
+function openFleetMenu_(vi, x, y){
+  var v = STATE.vehicles[vi];
+  if (!v || !v.gos) return;
+  fleetMenuVi_ = vi;
+  renderFleetMenuMain_();
+  fleetMenu.style.left = Math.min(x, window.innerWidth - 220 - 8) + "px";
+  fleetMenu.style.top = Math.min(y, window.innerHeight - 220 - 8) + "px";
+  fleetMenu.classList.add("open");
+}
+function renderFleetMenuMain_(){
+  var v = STATE.vehicles[fleetMenuVi_];
+  if (!v){ closeFleetMenu_(); return; }
+  var drvAssign = lpFleetOpenOnTractor_("driver", v.gos, 1);
+  var trlAssign = lpFleetOpenOnTractor_("trailer", v.gos, 1);
+  var items = [];
+  if (drvAssign) items.push('<button class="ctxmenu-item" data-fa="uncouple-driver">Высадить · ' + pageEsc_(lpFleetPersonName_(drvAssign.resource_key)) + "</button>");
+  items.push('<button class="ctxmenu-item" data-fa="couple-driver">' + (drvAssign ? "Пересадить водителя" : "Посадить водителя") + "</button>");
+  if (trlAssign) items.push('<button class="ctxmenu-item" data-fa="uncouple-trailer">Отцепить · ' + pageEsc_(lpFleetAssetLabel_(trlAssign.resource_key)) + "</button>");
+  items.push('<button class="ctxmenu-item" data-fa="couple-trailer">' + (trlAssign ? "Переприцепить" : "Зацепить прицеп") + "</button>");
+  fleetMenu.innerHTML = items.join("");
+  [].forEach.call(fleetMenu.querySelectorAll("[data-fa]"), function(btn){
+    btn.onclick = function(){ handleFleetMenuAction_(btn.dataset.fa); };
+  });
+}
+function handleFleetMenuAction_(action){
+  var v = STATE.vehicles[fleetMenuVi_];
+  if (!v){ closeFleetMenu_(); return; }
+  if (action === "uncouple-driver") return fleetDoUncouple_("driver", v);
+  if (action === "uncouple-trailer") return fleetDoUncouple_("trailer", v);
+  if (action === "couple-driver") return renderFleetPicker_("driver", v);
+  if (action === "couple-trailer") return renderFleetPicker_("trailer", v);
+}
+function fleetDoUncouple_(kind, v){
+  postToYardApi_("/fleet/uncouple", {kind:kind, tractor_gos:v.gos, slot:1, source:"planirovka"}).then(function(r){
+    if (!r || !r.ok){ toast((r && r.data && r.data.error) || "Не удалось расцепить", null); return; }
+    toast(kind === "driver" ? "Водитель высажен" : "Прицеп отцеплен", null);
+    fleetApplyOptimistic_(v, kind, null);
+    fetchFleetData_();
+  }).catch(function(){ toast("Ошибка сети - не расцепил", null); });
+  closeFleetMenu_();
+}
+/* Список для "Посадить"/"Зацепить" - тот же строгий автокомплит "начинается с
+   введённого", что у lpWireCustomerInput_ (поле "Заказчик") - переиспользуем
+   приём, не изобретаем новый список для контекстного меню. */
+function renderFleetPicker_(kind, v){
+  var pool = kind === "driver"
+    ? (FLEET_PEOPLE_ || []).filter(function(p){ return p.roles && p.roles.indexOf("driver") >= 0; })
+    : (FLEET_ASSETS_ || []).filter(function(a){ return a.asset_type === "trailer"; });
+  fleetMenu.innerHTML =
+    '<div class="grp-label" style="padding:2px 8px 6px">' + (kind === "driver" ? "Кого посадить" : "Какой прицеп") + '</div>' +
+    '<input autocomplete="off" class="cr-input" id="lp-fleetPickInput" placeholder="начните вводить" style="margin-bottom:4px">' +
+    '<div id="lp-fleetPickList" style="max-height:220px;overflow-y:auto"></div>' +
+    '<button class="ctxmenu-item" id="lp-fleetPickBack">← Назад</button>';
+  document.getElementById("lp-fleetPickBack").onclick = renderFleetMenuMain_;
+  var input = document.getElementById("lp-fleetPickInput");
+  var list = document.getElementById("lp-fleetPickList");
+  function refresh(){
+    var val = input.value.trim().toLowerCase();
+    var matches = pool.filter(function(p){
+      var name = kind === "driver" ? (p.full_name || "") : (p.id + " " + (p.name || ""));
+      return !val || name.toLowerCase().indexOf(val) === 0;
+    }).slice(0, 15);
+    list.innerHTML = matches.map(function(p){
+      var name = kind === "driver" ? p.full_name : (p.id + (p.name ? " · " + p.name : ""));
+      return '<button class="ctxmenu-item" data-id="' + pageEsc_(String(p.id)) + '">' + pageEsc_(name) + "</button>";
+    }).join("") || '<div style="padding:8px 10px;color:var(--muted);font-size:11.5px">Ничего не нашлось</div>';
+    [].forEach.call(list.querySelectorAll("[data-id]"), function(btn){
+      btn.onclick = function(){ fleetDoCouple_(kind, v, btn.dataset.id); };
+    });
+  }
+  input.oninput = refresh;
+  refresh();
+  input.focus();
+}
+function fleetDoCouple_(kind, v, resourceKey){
+  postToYardApi_("/fleet/couple", {kind:kind, tractor_gos:v.gos, resource_key:resourceKey, slot:1, source:"planirovka"}).then(function(r){
+    if (!r || !r.ok){ toast((r && r.data && r.data.error) || "Не удалось сцепить", null); return; }
+    toast(kind === "driver" ? "Водитель посажен" : "Прицеп зацеплен", null);
+    fleetApplyOptimistic_(v, kind, resourceKey);
+    fetchFleetData_();
+  }).catch(function(){ toast("Ошибка сети - не сцепил", null); });
+  closeFleetMenu_();
+}
+/* Мгновенный отклик до подтверждения с сервера (Влад: "чтобы кайфовали, а не
+   просто работало") - доска сейчас берёт driver/trailer из кэша Штатки, а не
+   из fleet_assignments напрямую (координация со Справочниками, подполосы ещё
+   не подключены) - без этой правки строка визуально не поменялась бы, пока
+   Штатка не досчитает (до 3 часов). Правим ТОЛЬКО отображение конкретной
+   строки - временный, оптимистичный текст до следующего полного обновления. */
+function fleetApplyOptimistic_(v, kind, resourceKeyOrNull){
+  if (kind === "driver"){
+    v.driver = resourceKeyOrNull ? lpFleetPersonName_(resourceKeyOrNull) : "";
+    v.drivers = v.driver ? [v.driver] : [];
+    v.vacant = !v.driver;
+  } else {
+    v.trailerGos = resourceKeyOrNull || "";
+  }
+  renderRows();
+}
+
 pageRoot.addEventListener("contextmenu", function(e){
   e.preventDefault();
   var el = e.target.closest(".seg");
-  if (!el) { closeCtxMenu_(); return; }
-  var seg = STATE.segs.find(function(s){ return s.id === el.dataset.id; });
-  if (!seg) { closeCtxMenu_(); return; }
-  openCtxMenu_(seg, e.clientX, e.clientY);
+  if (el){
+    var seg = STATE.segs.find(function(s){ return s.id === el.dataset.id; });
+    closeFleetMenu_();
+    if (!seg) { closeCtxMenu_(); return; }
+    openCtxMenu_(seg, e.clientX, e.clientY);
+    return;
+  }
+  var rh = e.target.closest(".rowhead");
+  if (rh){
+    var row = rh.closest(".row");
+    var vi = row ? parseInt(row.dataset.v, 10) : NaN;
+    closeCtxMenu_();
+    if (!isNaN(vi)) openFleetMenu_(vi, e.clientX, e.clientY);
+    return;
+  }
+  closeCtxMenu_(); closeFleetMenu_();
 });
 document.getElementById("lp-ctxOpen").onclick = function(){
   if (ctxMenuSeg) openDrawer(ctxMenuSeg);
@@ -20911,8 +21067,10 @@ document.getElementById("lp-ctxDel").onclick = function(){
 };
 document.addEventListener("click", function(e){
   if (ctxMenu.classList.contains("open") && !e.target.closest(".ctxmenu")) closeCtxMenu_();
+  if (fleetMenu.classList.contains("open") && !e.target.closest(".ctxmenu")) closeFleetMenu_();
 });
 board.addEventListener("scroll", closeCtxMenu_);          /* меню на fixed-координатах - при скролле лента уедет из-под него */
+board.addEventListener("scroll", closeFleetMenu_);
 /* было отдельной копией hm() с ручным h/24+1 и ИСКУССТВЕННЫМ ЗАЖИМОМ дня до
    DAYS ("d > DAYS ? DAYS : d") - имело смысл, пока DAYS была границей одного
    месяца, но лента теперь продолжается в следующий месяц: тот же зажим тихо
@@ -21030,6 +21188,7 @@ function initLP(){
   updateMonthLabel_();       /* после scrollLeft - ярлык месяца сразу соответствует видимому дню */
   fetchPlanSegs_();          /* свежие записи с сервера сразу при открытии, не ждать до 7 сек поллинга */
   sendPresence_(); fetchPresence_();   /* то же самое для присутствия - не ждать первый тик */
+  fetchFleetData_();         /* ростер водителей/прицепов + текущая сцепка - для ПКМ-меню на .rowhead */
 }
 window.LP = { init: initLP };
 

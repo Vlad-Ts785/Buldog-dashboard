@@ -10227,11 +10227,21 @@ function fleetOpenAssignment_(kind, resourceKey) {
     return a.kind === kind && String(a.resource_key) === String(resourceKey) && !a.valid_to;
   })[0] || null;
 }
-// Открытая запись данного слота НА тягаче - "что СЕЙЧАС висит на этой машине".
+// Открытая запись НА тягаче - "что СЕЙЧАС висит на этой машине". slot необязателен:
+// без него ищем ЛЮБОЙ открытый слот этого kind на тягаче (при нескольких — самый
+// свежий по valid_from). 31.08, тот же баг класса, что коллега нашёл и починил в
+// Планировке (см. README VPS, "жёсткий slot:1") - раньше ВСЕГДА искали ТОЛЬКО slot 1,
+// и если на тягаче исторически (тесты/бета) остался открытым водитель на слоте 2/3,
+// он никогда не находился здесь и не закрывался новой посадкой - "призрак" занятости
+// навсегда. Явный slot-аргумент по-прежнему поддержан (вдруг понадобится точный слот).
 function fleetOpenOnTractor_(kind, tractorGos, slot) {
-  return (fleetAssignments_ || []).filter(function(a) {
-    return a.kind === kind && a.tractor_gos === tractorGos && (a.slot || 1) === (slot || 1) && !a.valid_to;
-  })[0] || null;
+  var matches = (fleetAssignments_ || []).filter(function(a) {
+    return a.kind === kind && a.tractor_gos === tractorGos && !a.valid_to &&
+      (slot == null || (a.slot || 1) === slot);
+  });
+  if (matches.length <= 1) return matches[0] || null;
+  matches.sort(function(a, b) { return (b.valid_from || '').localeCompare(a.valid_from || ''); });
+  return matches[0];
 }
 // Ближайший из двух сроков документов - для бейджа "Документы" в таблице (только у роли "водитель").
 // Статус документов - ОДНА логика для бейджа/KPI/фильтра/сортировки, а не 4 копии
@@ -11022,7 +11032,7 @@ function drvCardPaint_() {
     var v = ((D && D.vehicles) || []).filter(function(x) { return x.gos === openDrv.tractor_gos; })[0];
     html += '<div style="display:flex;justify-content:space-between;align-items:center">' +
       '<div><b>' + pageEsc_(openDrv.tractor_gos) + '</b>' + (v && v.marka ? ' <span class="muted">' + pageEsc_(v.marka) + '</span>' : '') + '</div>' +
-      '<button onclick="drvCardUncouple_(\'driver\',\'' + pageEscAttr_(openDrv.tractor_gos) + '\',1)" ' +
+      '<button onclick="drvCardUncouple_(\'driver\',\'' + pageEscAttr_(openDrv.tractor_gos) + '\',' + (openDrv.slot || 1) + ')" ' +
       'style="background:transparent;border:1px solid rgba(226,75,74,.4);color:var(--red);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Расцепить</button></div>';
   } else {
     html += '<div style="display:flex;gap:8px">' +
@@ -11036,7 +11046,7 @@ function drvCardPaint_() {
 
   // ── Шаг 2: прицеп (только если тягач уже есть) ──
   if (openDrv) {
-    var openTr = fleetOpenOnTractor_('trailer', openDrv.tractor_gos, 1);
+    var openTr = fleetOpenOnTractor_('trailer', openDrv.tractor_gos);
     html += '<div style="border-top:1px solid var(--border);padding-top:14px;margin-bottom:14px">';
     html += '<div class="dr-eyebrow" style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Полуприцеп</div>';
     if (openTr) {
@@ -11045,7 +11055,7 @@ function drvCardPaint_() {
         '<div><b>' + pageEsc_(openTr.resource_key) + '</b>' +
         (tr && tr.name ? '<div class="muted" style="font-size:12px">' + pageEsc_(tr.name) +
           (tr.spec ? ' (' + pageEsc_(tr.spec) + ')' : '') + '</div>' : '') + '</div>' +
-        '<button onclick="drvCardUncouple_(\'trailer\',\'' + pageEscAttr_(openDrv.tractor_gos) + '\',1)" ' +
+        '<button onclick="drvCardUncouple_(\'trailer\',\'' + pageEscAttr_(openDrv.tractor_gos) + '\',' + (openTr.slot || 1) + ')" ' +
         'style="background:transparent;border:1px solid rgba(226,75,74,.4);color:var(--red);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Отцепить</button></div>';
     } else {
       html += '<div style="display:flex;flex-direction:column;gap:6px">' +
@@ -11065,7 +11075,7 @@ function drvCardPaint_() {
   }
 
   // ── Шаг 3: готовый текст (только когда есть и тягач, и прицеп) ──
-  var openTrFinal = openDrv ? fleetOpenOnTractor_('trailer', openDrv.tractor_gos, 1) : null;
+  var openTrFinal = openDrv ? fleetOpenOnTractor_('trailer', openDrv.tractor_gos) : null;
   if (openDrv && openTrFinal) {
     html += '<div style="border-top:1px solid var(--border);padding-top:14px">' +
       '<button onclick="drvCardCopy_()" data-nav-sound style="width:100%;background:var(--blue);color:#fff;border:none;' +
@@ -11080,7 +11090,9 @@ function drvCardCoupleDriver_() {
   var gos = (document.getElementById('drv-card-tractor-input').value || '').trim();
   var errEl = document.getElementById('drv-card-error');
   if (!gos) { errEl.textContent = 'Введите госномер тягача'; errEl.style.display = ''; return; }
-  postToYardApi_('/fleet/couple', { kind: 'driver', tractor_gos: gos, resource_key: drvCardDriverId_, slot: 1, source: 'sprav' }).then(function(r) {
+  // Слот - РЕАЛЬНОГО текущего occupant'а тягача, не хардкод 1 (см. fleetCouple_ выше).
+  var slot = (fleetOpenOnTractor_('driver', gos) || {}).slot || 1;
+  postToYardApi_('/fleet/couple', { kind: 'driver', tractor_gos: gos, resource_key: drvCardDriverId_, slot: slot, source: 'sprav' }).then(function(r) {
     if (!r.ok) { errEl.textContent = r.data && r.data.error || 'Не удалось сцепить'; errEl.style.display = ''; return; }
     p2Toast('Сцеплен с ' + gos, 'green');
     return renderDirectory_thenRepaintCard_();
@@ -11101,9 +11113,10 @@ function drvCardCoupleTrailer_() {
   var regPromise = (type || spec)
     ? postToYardApi_('/sprav/asset', { id: gos, asset_type: 'trailer', name: type, spec: spec })
     : Promise.resolve({ ok: true });
+  var slot = (fleetOpenOnTractor_('trailer', openDrv.tractor_gos) || {}).slot || 1;
   regPromise.then(function(rr) {
     if (!rr.ok) throw new Error(rr.data && rr.data.error || 'Не удалось сохранить прицеп');
-    return postToYardApi_('/fleet/couple', { kind: 'trailer', tractor_gos: openDrv.tractor_gos, resource_key: gos, slot: 1, source: 'sprav' });
+    return postToYardApi_('/fleet/couple', { kind: 'trailer', tractor_gos: openDrv.tractor_gos, resource_key: gos, slot: slot, source: 'sprav' });
   }).then(function(r) {
     if (!r.ok) { errEl.textContent = r.data && r.data.error || 'Не удалось прицепить'; errEl.style.display = ''; return; }
     p2Toast('Прицеп ' + gos + ' сцеплен', 'green');
@@ -11164,7 +11177,7 @@ function fleetTabPaint_() {
   var q = (document.getElementById('fleet-search').value || '').trim().toLowerCase();
   if (q) {
     tractors = tractors.filter(function(t) {
-      var openDrv = fleetOpenOnTractor_('driver', t.id, 1);
+      var openDrv = fleetOpenOnTractor_('driver', t.id);
       var driverName = openDrv ? (fleetPersonName_(openDrv.resource_key) || '') : '';
       var hay = [t.id, t.manufacturer, t.name, driverName].filter(Boolean).join(' ').toLowerCase();
       return hay.indexOf(q) >= 0;
@@ -11180,8 +11193,8 @@ function fleetTabPaint_() {
 function fleetRowHtml_(t) {
   var idAttr = pageEscAttr_(t.id);
   var idData = pageEsc_(t.id);
-  var openTrailer = fleetOpenOnTractor_('trailer', t.id, 1);
-  var openDriver = fleetOpenOnTractor_('driver', t.id, 1);
+  var openTrailer = fleetOpenOnTractor_('trailer', t.id);
+  var openDriver = fleetOpenOnTractor_('driver', t.id);
   var trailerCell, driverCell;
   if (openTrailer) {
     var tr = fleetAssetById_(openTrailer.resource_key);
@@ -11253,7 +11266,7 @@ function fleetOpenPicker_(anchorEl, role, tractorId) {
     ? (spravAssets_ || []).filter(function(a) { return a.asset_type === 'trailer' && !a.is_deleted; })
     : (spravPeople_ || []).filter(function(p) { return (p.roles || []).indexOf('driver') >= 0 && !p.is_deleted; });
   var usedIds = (fleetAssignments_ || []).filter(function(a) { return a.kind === role && !a.valid_to; }).map(function(a) { return a.resource_key; });
-  var current = fleetOpenOnTractor_(role, tractorId, 1);
+  var current = fleetOpenOnTractor_(role, tractorId);
   var currentId = current ? current.resource_key : null;
   var items = pool.map(function(p) {
     var isUsed = usedIds.indexOf(p.id) >= 0 && p.id !== currentId;
@@ -11287,7 +11300,12 @@ document.addEventListener('click', function(e) {
 function fleetCouple_(kind, tractorGos, resourceKey) {
   var errEl = document.getElementById('fleet-error');
   errEl.style.display = 'none';
-  postToYardApi_('/fleet/couple', { kind: kind, tractor_gos: tractorGos, resource_key: resourceKey, slot: 1, source: 'sprav' }).then(function(r) {
+  // Слот - РЕАЛЬНОГО текущего occupant'а этого тягача, не хардкод 1 (31.08, тот же баг
+  // класса, что коллега нашёл в Планировке - "занят" мог врать про чужой тягач). Сервер
+  // при посадке закрывает старого занимающего ТОЛЬКО в ТОМ ЖЕ слоте - если целиться
+  // мимо (в 1, когда он реально на 2/3), старая запись зависает "призраком" навсегда.
+  var slot = (fleetOpenOnTractor_(kind, tractorGos) || {}).slot || 1;
+  postToYardApi_('/fleet/couple', { kind: kind, tractor_gos: tractorGos, resource_key: resourceKey, slot: slot, source: 'sprav' }).then(function(r) {
     if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось сцепить'; errEl.style.display = ''; return; }
     // Сервер сам расцепил ресурс с прежнего места (атомарная транзакция /api/fleet/couple) -
     // показываем это явно тостом, а не молчим (Влад, 30.08: "если цепляем занятого - от той
@@ -11302,7 +11320,10 @@ function fleetCouple_(kind, tractorGos, resourceKey) {
 function fleetUncouple_(kind, tractorGos) {
   var errEl = document.getElementById('fleet-error');
   errEl.style.display = 'none';
-  postToYardApi_('/fleet/uncouple', { kind: kind, tractor_gos: tractorGos, slot: 1, source: 'sprav' }).then(function(r) {
+  // Тот же принцип, что в fleetCouple_ выше - расцепляем РЕАЛЬНЫЙ открытый слот, а не
+  // хардкод 1, иначе отцепить можно "мимо" - occupant на 2/3 останется висеть.
+  var slot = (fleetOpenOnTractor_(kind, tractorGos) || {}).slot || 1;
+  postToYardApi_('/fleet/uncouple', { kind: kind, tractor_gos: tractorGos, slot: slot, source: 'sprav' }).then(function(r) {
     if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось расцепить'; errEl.style.display = ''; return; }
     p2Toast('Расцеплено', 'amber');
     return renderDirectory_thenRepaintCard_();
@@ -11314,7 +11335,7 @@ function drvCardCopy_() {
   var openDrv = fleetOpenAssignment_('driver', drvCardDriverId_);
   if (!d || !openDrv) return;
   var v = ((D && D.vehicles) || []).filter(function(x) { return x.gos === openDrv.tractor_gos; })[0];
-  var openTr = fleetOpenOnTractor_('trailer', openDrv.tractor_gos, 1);
+  var openTr = fleetOpenOnTractor_('trailer', openDrv.tractor_gos);
   var tr = openTr ? (spravAssets_ || []).filter(function(x) { return x.id === openTr.resource_key; })[0] : null;
   // Формат - тот же, что в исходной Google-таблице «Планировка» (Влад, 30.08), с
   // WhatsApp-разметкой *жирного* - карточка копируется и отправляется как есть.

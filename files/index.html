@@ -1318,7 +1318,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   --bg:#0f0f13; --bg2:#17171d; --bg3:#1e1e26; --bg4:#252530;
   --border:rgba(255,255,255,0.08); --border-strong:rgba(255,255,255,0.16);
   --text:#e8e6df; --muted:#8b8980; --muted2:#5c5a52;
-  --row-hover:#191920; --grid-line:rgba(255,255,255,.055); --weekend-tint:rgba(255,255,255,.022);
+  --row-hover:#191920; --grid-line:rgba(255,255,255,.055); --grid-line-minor:rgba(255,255,255,.03); --weekend-tint:rgba(255,255,255,.022);
   --ph-bg:rgba(255,255,255,.05);
   --green:#1D9E75; --red:#E24B4A; --amber:#EF9F27; --blue:#378ADD; --purple:#7F77DD;
   /* приглушённые надписи ПО ЦВЕТУ поверх translucent-заливок (бейджи техники,
@@ -1356,7 +1356,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   --bg:#f2f4f7; --bg2:#ffffff; --bg3:#eceff3; --bg4:#e1e5eb;
   --border:rgba(20,26,38,0.10); --border-strong:rgba(20,26,38,0.20);
   --text:#1b1f27; --muted:#5c6474; --muted2:#9199a8;
-  --row-hover:#eaeef3; --grid-line:rgba(20,26,38,.09); --weekend-tint:rgba(20,26,38,.035);
+  --row-hover:#eaeef3; --grid-line:rgba(20,26,38,.09); --grid-line-minor:rgba(20,26,38,.05); --weekend-tint:rgba(20,26,38,.035);
   --ph-bg:rgba(20,26,38,.055);
   --tint-green:#0f6a4c; --tint-blue:#1c5ea8; --tint-amber:#8a5a12;
   --tint-purple:#584fb0; --tint-red:#a23b3a;
@@ -1627,10 +1627,28 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   background:var(--bg4);border:1px solid var(--border);color:var(--muted);
   display:none;align-items:center;justify-content:center;cursor:pointer;
   transition:color .12s ease-out,border-color .12s ease-out;
-}#page-logistics-plan body.can-arrange .row:hover .hide-btn{display:flex;}#page-logistics-plan .hide-btn:hover{color:var(--text);border-color:var(--border-strong);}#page-logistics-plan .hide-btn svg{width:11px;height:11px;}#page-logistics-plan .row.is-hidden .rowhead{opacity:.5;}#page-logistics-plan .track{position:relative;flex:none;height:var(--row-h);}#page-logistics-plan .track::before{
+}#page-logistics-plan body.can-arrange .row:hover .hide-btn{display:flex;}#page-logistics-plan .hide-btn:hover{color:var(--text);border-color:var(--border-strong);}#page-logistics-plan .hide-btn svg{width:11px;height:11px;}#page-logistics-plan .row.is-hidden .rowhead{opacity:.5;}#page-logistics-plan .track{position:relative;flex:none;height:var(--row-h);}/* Вертикальная сетка часов - Влад, 30.08: "у нас в планировке это всегда была
+   сетка, а тут просто горизонтальные линии... добавь вертикальные на все
+   масштабы в зависимости от логики: на самом крупном (сутки) - каждый час".
+   Базовое правило (действует на Неделе/Месяце, где часовая сетка слилась бы
+   в сплошную заливку - 8px/2.4px на час) - только граница дня, как было.
+   На Сутках/3 днях - вторым слоем добавляется более частая, но более тусклая
+   линия (--grid-line-minor) поверх той же границы дня (--grid-line, ярче) -
+   "главная/второстепенная" сетка, час не спорит по яркости с сутками. */
+#page-logistics-plan .track::before{
   content:'';position:absolute;inset:0;pointer-events:none;
   background:
     repeating-linear-gradient(90deg,var(--grid-line) 0 1px,transparent 1px calc(var(--hw)*24));
+}
+#page-logistics-plan.z-day .track::before{
+  background:
+    repeating-linear-gradient(90deg,var(--grid-line) 0 1px,transparent 1px calc(var(--hw)*24)),
+    repeating-linear-gradient(90deg,var(--grid-line-minor) 0 1px,transparent 1px var(--hw));
+}
+#page-logistics-plan.z-3d .track::before{
+  background:
+    repeating-linear-gradient(90deg,var(--grid-line) 0 1px,transparent 1px calc(var(--hw)*24)),
+    repeating-linear-gradient(90deg,var(--grid-line-minor) 0 1px,transparent 1px calc(var(--hw)*3));
 }#page-logistics-plan .now{
   position:absolute;top:0;bottom:0;width:1px;background:var(--blue);z-index:9;pointer-events:none;
   box-shadow:0 0 0 1px rgba(55,138,221,.18);
@@ -1714,7 +1732,24 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   line-height:1.2;letter-spacing:.04em;color:var(--text);
 }#page-logistics-plan .seg-id i{font-weight:500;color:var(--muted);}/* точка водителя: залита = назначен на машину, #page-logistics-plan кольцо = вакансия */
 .seg-drv{position:absolute;top:-2px;right:-2px;width:6px;height:6px;border-radius:50%;}#page-logistics-plan .seg-drv.on{display:none;}/* норму не отмечаем - только отсутствие */
-.seg-drv.off{background:var(--bg2);border:1.5px solid var(--red);}/* прогресс активного рейса - 2px снизу, #page-logistics-plan transform:scaleX (не width) */
+.seg-drv.off{background:var(--bg2);border:1.5px solid var(--red);}
+/* «Под данные» (Влад, 30.08: «когда машина планируется под пропуск... нужна
+   галочка... визуально отражаться... с маленькой мигающей красной лампочкой»,
+   вариант B из превью, утверждён) - мигающая точка в ПРОТИВОПОЛОЖНОМ углу от
+   .seg-drv (та занимает верх-право под вакансию водителя), чтобы не спорили
+   за один угол на узкой плитке. Мигание привязано к состоянию (гаснет само,
+   когда сняли галочку) - тот же класс обоснования, что у "свечения ожидания"
+   и присутствия, не новое голое исключение ГОСТа №9. */
+#page-logistics-plan .seg-nd{
+  position:absolute;top:-3px;left:-3px;width:7px;height:7px;border-radius:50%;
+  background:var(--red);box-shadow:0 0 0 2px var(--bg2);z-index:2;
+  animation:lpNdBlink 1.4s ease-in-out infinite;
+}
+@keyframes lpNdBlink{
+  0%,100%{opacity:1;box-shadow:0 0 0 2px var(--bg2),0 0 6px 1px rgba(226,75,74,.7);}
+  50%{opacity:.35;box-shadow:0 0 0 2px var(--bg2),0 0 2px 0 rgba(226,75,74,.3);}
+}
+@media(prefers-reduced-motion:reduce){#page-logistics-plan .seg-nd{animation:none;opacity:.85;}}/* прогресс активного рейса - 2px снизу, #page-logistics-plan transform:scaleX (не width) */
 #page-logistics-plan .seg-prog{
   /* Скрыт по просьбе Влада, 29.08: "пока вообще прогресс убери, не нужен он
      пока... будем по-другому анимировать его" - НЕ удалено, только display:none.
@@ -1818,7 +1853,22 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
 }#page-logistics-plan .ctxmenu-item:hover{background:var(--bg4);}#page-logistics-plan .ctxmenu-del{color:var(--red);}#page-logistics-plan .cr-types{display:flex;gap:6px;flex-wrap:wrap;margin:16px 0;}#page-logistics-plan .cr-field{margin-bottom:12px;}#page-logistics-plan .cr-field .grp-label{display:block;margin-bottom:6px;}#page-logistics-plan .cr-opts{display:flex;gap:6px;flex-wrap:wrap;}#page-logistics-plan .cr-input{
   width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);
   font-family:inherit;font-size:12px;padding:7px 10px;
-}#page-logistics-plan .cr-input:focus-visible{outline:2px solid var(--blue);outline-offset:1px;}#page-logistics-plan .cr-actions{display:flex;gap:8px;margin-top:18px;}/* черновик отрезка во время протяжки по пустому месту - тот же язык, #page-logistics-plan что и .seg, #page-logistics-plan но пунктирная рамка вместо заливки по смыслу состояния (состояние ещё не выбрано) */
+}#page-logistics-plan .cr-input:focus-visible{outline:2px solid var(--blue);outline-offset:1px;}#page-logistics-plan .cr-actions{display:flex;gap:8px;margin-top:18px;}
+/* Галочка «под данные» (Влад, 30.08) - отдельный акцентный чип, не в общем ряду
+   .cr-opts: это не выбор ИЗ вариантов, а отдельный переключатель "да/нет" на
+   всю запись, визуально явно выделен янтарным (тот же токен, что «свечение
+   ожидания» - предупреждающий смысл общий). Иконка галочки видна ТОЛЬКО когда
+   включено (aria-pressed=true) - выключенное состояние читается как обычный
+   неактивный чип, а не полу-нажатая кнопка. */
+#page-logistics-plan .data-chip{
+  display:flex;align-items:center;gap:6px;width:100%;justify-content:center;margin-top:4px;
+  border:1px solid var(--border);background:var(--bg3);color:var(--muted);
+}
+#page-logistics-plan .data-chip svg{width:13px;height:13px;display:none;}
+#page-logistics-plan .data-chip[aria-pressed="true"]{
+  border-color:var(--amber);background:rgba(239,159,39,.14);color:var(--amber);
+}
+#page-logistics-plan .data-chip[aria-pressed="true"] svg{display:block;}/* черновик отрезка во время протяжки по пустому месту - тот же язык, #page-logistics-plan что и .seg, #page-logistics-plan но пунктирная рамка вместо заливки по смыслу состояния (состояние ещё не выбрано) */
 #page-logistics-plan .seg-draft{
   position:absolute;top:4px;height:22px;border-radius:4px;pointer-events:none;
   background:rgba(139,137,128,.14);box-shadow:inset 0 0 0 1.5px var(--border-strong);
@@ -1833,6 +1883,35 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   appearance:none;background:none;border:0;color:var(--blue);font-family:inherit;font-size:12px;
   font-weight:600;cursor:pointer;padding:0;
 }
+/* ================= Диалог подтверждения («под данные») =================
+   Новый паттерн (Влад, 30.08) - блокирующий вопрос ДО действия, а не тост
+   ПОСЛЕ с отменой (как у удаления/переноса без риска). Центр экрана, тот же
+   язык скрима, что у шторки, но своя отдельная сцена. */
+#page-logistics-plan .confirm-scrim{
+  position:fixed;inset:0;background:rgba(0,0,0,.55);opacity:0;pointer-events:none;
+  transition:opacity .2s var(--ease-in-out);z-index:70;
+}#page-logistics-plan .confirm-scrim.open{opacity:1;pointer-events:auto;}
+#page-logistics-plan .confirm-box{
+  position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(.96);opacity:0;
+  pointer-events:none;z-index:71;width:340px;max-width:calc(100vw - 40px);
+  background:var(--bg2);border:1px solid var(--border-strong);border-radius:var(--radius);
+  padding:20px 22px;box-shadow:0 24px 60px rgba(0,0,0,.5);
+  transition:opacity .18s var(--ease-out-soft),transform .22s var(--ease-out-soft);
+}#page-logistics-plan .confirm-box.open{opacity:1;transform:translate(-50%,-50%) scale(1);pointer-events:auto;}
+#page-logistics-plan .confirm-eyebrow{
+  display:flex;align-items:center;gap:7px;font-family:'JetBrains Mono',monospace;font-size:9.5px;
+  font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--amber);margin-bottom:10px;
+}#page-logistics-plan .confirm-eyebrow svg{width:13px;height:13px;}
+#page-logistics-plan .confirm-text{font-size:13.5px;line-height:1.55;color:var(--text);margin-bottom:20px;}
+#page-logistics-plan .confirm-text b{color:var(--amber);}
+#page-logistics-plan .confirm-actions{display:flex;gap:8px;justify-content:flex-end;}
+#page-logistics-plan .dbtn{
+  appearance:none;border:1px solid var(--border);background:var(--bg3);color:var(--muted);
+  font-family:inherit;font-size:12px;font-weight:600;padding:8px 16px;border-radius:8px;cursor:pointer;
+  transition:border-color .12s ease-out,color .12s ease-out,background-color .12s ease-out;
+}#page-logistics-plan .dbtn:hover{color:var(--text);border-color:var(--border-strong);}
+#page-logistics-plan .dbtn.primary{background:var(--amber);border-color:var(--amber);color:#1a1204;}
+#page-logistics-plan .dbtn.primary:hover{background:#f3ac3d;border-color:#f3ac3d;}
 
 @media (prefers-reduced-motion: reduce){#page-logistics-plan *{transition-duration:.001ms !important;animation-duration:.001ms !important;}#page-logistics-plan .seg:hover{transform:none;}
 }
@@ -2521,6 +2600,22 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   <button class="ctxmenu-item ctxmenu-del" id="lp-ctxDel">Удалить заявку</button>
 </div>
 <div class="toast" id="lp-toast"><span id="lp-toastText"></span><button id="lp-toastBtn">Отменить</button></div>
+<!-- Диалог подтверждения (Влад, 30.08: "под данные... при переносе... должно
+     выскакивать диалоговое окно... Ок/Отмена") - НОВЫЙ вид элемента для
+     дашборда: везде до этого решения подтверждали тостом ПОСЛЕ факта с
+     отменой, здесь - блокирующий вопрос ДО, для более рискового действия
+     (перенос заявки, где документы ещё не собраны, на другую машину). Своя
+     сцена/скрим, не переиспользует .scrim/.drawer шторки - те к этому моменту
+     уже закрыты, но развязка чище. -->
+<div class="confirm-scrim" id="lp-confirmScrim"></div>
+<div class="confirm-box" id="lp-confirmBox" role="alertdialog" aria-modal="true">
+  <div class="confirm-eyebrow"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 6v5M10 14h.01"/><circle cx="10" cy="10" r="8"/></svg>Под данные</div>
+  <div class="confirm-text" id="lp-confirmText"></div>
+  <div class="confirm-actions">
+    <button class="dbtn" id="lp-confirmCancel">Отмена</button>
+    <button class="dbtn primary" id="lp-confirmOk">Ок</button>
+  </div>
+</div>
 
 </div>
 
@@ -17013,6 +17108,7 @@ var ICON_EYE = '<svg ' + SVG_ATTR + '><path d="M2 10c1.7-2.9 5-6 8-6s6.3 3.1 8 6
 var ICON_CHEVRON = '<svg class="gh-chev" ' + SVG_ATTR + '><path d="M6 8l4 4 4-4"/></svg>';
 var ICON_TRASH = '<svg ' + SVG_ATTR + '><path d="M4 6h12M8 6V4h4v2M6 6l1 11h6l1-11"/></svg>';
 var ICON_COPY = '<svg ' + SVG_ATTR + '><rect x="7" y="7" width="10" height="10" rx="1.6"/><path d="M13 7V4.6A1.6 1.6 0 0 0 11.4 3H4.6A1.6 1.6 0 0 0 3 4.6v6.8A1.6 1.6 0 0 0 4.6 13H7"/></svg>';
+var ICON_CHECK = '<svg ' + SVG_ATTR + '><path d="M4 10.5l4 4 8-8"/></svg>';
 
 /* Реальный текущий месяц, не захардкоженный "август 2026" демо-прототипа -
    иначе 1 сентября лента продолжала бы рисовать август. YEAR/MONTH - месяц
@@ -17551,6 +17647,7 @@ function makeSeg(s){
   el.innerHTML = '<span class="seg-label">' + head +
     '<span class="seg-txt">' + segLabel(s) + "</span></span>" +
     (active ? '<span class="seg-prog"><i></i></span>' : "") +
+    (s.needsData ? '<span class="seg-nd" title="Под данные - документы для пропуска ещё не собраны"></span>' : "") +
     '<span class="hov"></span><span class="ring"></span>' +
     '<span class="hnd l"></span><span class="hnd r"></span>';
   paint(el, s);
@@ -18266,7 +18363,26 @@ window.addEventListener("pointerup", function(e){
   if (clash){ flashBad(el); S.reject(); toast("Пересечение с другим отрезком - не поставил", null); }
   else if (before.s !== seg.s || before.v !== seg.v){
     S.drop();
-    commit(seg, before, before.v !== seg.v ? "Перенесено на другую машину" : "Сдвинуто по времени");
+    /* «Под данные» (Влад, 30.08) - перенос НА ДРУГУЮ МАШИНУ конкретно (не
+       сдвиг по времени на своей же строке) спрашивает подтверждение, документы
+       для пропуска уже могли собираться под старую машину. Плитка уже легла
+       на новое место физикой драга выше (жест не прерываем на середине -
+       блокирующий диалог посреди активного pointer-жеста не покажешь), вопрос
+       задаём ПОСЛЕ визуального приземления; "Отмена" откатывает и позицию, и
+       машину, без commit()/saveSegs() - как будто переноса и не было. */
+    if (before.v !== seg.v && seg.needsData){
+      showConfirmDialog_('Данная заявка <b>под данные</b>. Уверены, что вы её хотите перепланировать на другую машину?', function(ok){
+        if (ok){ S.drop(); commit(seg, before, "Перенесено на другую машину"); return; }
+        /* откат чисто через данные + полный renderRows() - проще и надёжнее
+           ручного перетаскивания DOM-узла: рендер сам восстановит верную
+           строку/позицию/sticky-подпись из STATE.segs, не дублируем его логику */
+        S.undo();
+        seg.s = before.s; seg.v = before.v;
+        renderRows();
+      });
+    } else {
+      commit(seg, before, before.v !== seg.v ? "Перенесено на другую машину" : "Сдвинуто по времени");
+    }
   }
 });
 
@@ -18315,12 +18431,12 @@ function segToWire_(s){
   return {
     id: s.id, gos: v.gos, kind: s.kind, s: Math.round(s.s * 100) / 100, l: Math.round(s.l * 100) / 100,
     mg: (s.mg && s.mg.full) || "", lg: (s.lg && s.lg.full) || "",
-    from: s.from || "", to: s.to || ""
+    from: s.from || "", to: s.to || "", nd: s.needsData ? 1 : 0
   };
 }
 function pushSegToServer_(w){
   return postToYardApi_("/plan/seg", {id:w.id, gos:w.gos, kind:w.kind, s:w.s, l:w.l,
-    mg:w.mg, lg:w.lg, from:w.from, to:w.to})
+    mg:w.mg, lg:w.lg, from:w.from, to:w.to, needs_data:w.nd})
     .catch(function(){ return { ok:false }; });
 }
 function saveSegs(){
@@ -18394,7 +18510,8 @@ function applyServerSegs_(rows){
   rows.forEach(function(r){
     var vi = byGos[r.vehicle_gos];
     if (vi == null) return;   /* машина выбыла из парка - строку не рисуем, но и не удаляем на сервере */
-    var seg = {id:r.id, v:vi, kind:r.kind, s:parseFloat(r.start_hour), l:parseFloat(r.length_hours)};
+    var seg = {id:r.id, v:vi, kind:r.kind, s:parseFloat(r.start_hour), l:parseFloat(r.length_hours),
+               needsData: !!Number(r.needs_data)};
     if (r.kind === "trip"){
       var v = STATE.vehicles[vi];
       seg.mg = personByName_(r.manager_name, MANAGERS);
@@ -18517,7 +18634,7 @@ function loadSegs(){
     raw.forEach(function(o){
       var vi = byGos[o.gos];
       if (vi == null) return;
-      var seg = {id:o.id, v:vi, kind:o.kind, s:o.s, l:o.l};
+      var seg = {id:o.id, v:vi, kind:o.kind, s:o.s, l:o.l, needsData: !!o.nd};
       if (o.kind === "trip"){
         var v = STATE.vehicles[vi];
         seg.mg = (o.mg && o.mg.full) ? o.mg : personByName_(o.mg, MANAGERS);
@@ -18633,7 +18750,7 @@ var scrim = document.getElementById("lp-scrim"), drawer = document.getElementByI
 
 function openCreateDrawer(vi, s, l){
   var v = STATE.vehicles[vi];
-  var kind = "trip", mgIdx = 0, lgIdx = 0, fromVal = "", toVal = "";
+  var kind = "trip", mgIdx = 0, lgIdx = 0, fromVal = "", toVal = "", ndVal = false;
   /* Даты - тоже редактируемые поля, не текст (Влад, 29.08: "создание события:
      также должна быть возможность выбирать даты") - протяжка/двойной клик на
      ленте задают ПЕРВОНАЧАЛЬНОЕ s/l, но не единственный способ их поставить;
@@ -18661,7 +18778,8 @@ function openCreateDrawer(vi, s, l){
         '</div></div>' +
         '<div class="cr-field"><span class="grp-label">Откуда</span><input autocomplete="off" class="cr-input" id="lp-crFrom" list="lp-crPlaces" placeholder="можно не указывать" value="' + fromVal + '"></div>' +
         '<div class="cr-field"><span class="grp-label">Куда</span><input autocomplete="off" class="cr-input" id="lp-crTo" list="lp-crPlaces" placeholder="можно не указывать" value="' + toVal + '"></div>' +
-        '<datalist id="lp-crPlaces">' + PLACES.map(function(p){ return "<option value=\"" + p + "\">"; }).join("") + '</datalist>'
+        '<datalist id="lp-crPlaces">' + PLACES.map(function(p){ return "<option value=\"" + p + "\">"; }).join("") + '</datalist>' +
+        '<button class="chip data-chip" id="lp-crNd" aria-pressed="' + ndVal + '" title="Документы для пропуска ещё не собраны - плитка будет мигать, перенос на другую машину спросит подтверждение">' + ICON_CHECK + 'Под данные</button>'
         : '') +
       '<div class="dr-note">Длину и время можно поправить и прямо на ленте - потянуть за край, как у обычного отрезка.</div>' +
       '<div class="cr-actions"><button class="chip cr-cancel">Отмена</button><button class="chip cr-submit" aria-pressed="true">Создать</button></div>';
@@ -18674,6 +18792,7 @@ function openCreateDrawer(vi, s, l){
       [].forEach.call(drawer.querySelector("#lp-crLg").children, function(btn, i){ btn.onclick = function(){ lgIdx = i; render(); }; });
       drawer.querySelector("#lp-crFrom").oninput = function(ev){ fromVal = ev.target.value; };
       drawer.querySelector("#lp-crTo").oninput = function(ev){ toVal = ev.target.value; };
+      drawer.querySelector("#lp-crNd").onclick = function(){ ndVal = !ndVal; render(); };
     }
     var crStartEl = document.getElementById("lp-crStart"), crEndEl = document.getElementById("lp-crEnd"),
         crDurEl = document.getElementById("lp-crDurLabel");
@@ -18697,7 +18816,7 @@ function openCreateDrawer(vi, s, l){
          быть"). Раньше пустое поле подменялось PLACES[0]/PLACES[1] - реальный на вид
          город, которого никто не вводил; оставляем как есть, честно пусто -
          routeLabel_() показывает "не указано" на отображении, не здесь. */
-      else if (kind === "trip") push(v, "trip", s, l, {mg:MANAGERS[mgIdx], lg:logistPool[lgIdx], from:fromVal, to:toVal});
+      else if (kind === "trip") push(v, "trip", s, l, {mg:MANAGERS[mgIdx], lg:logistPool[lgIdx], from:fromVal, to:toVal, needsData:ndVal});
       else push(v, kind, s, l);
       STATE.lastEdited = s;
       saveSegs();
@@ -18747,7 +18866,7 @@ function copySegAfter_(seg, openAfter){
   var newS = seg.s + seg.l;
   var clash = STATE.segs.some(function(x){ return x.v === seg.v && newS < x.s + x.l && x.s < newS + seg.l; });
   if (clash){ S.reject(); toast("Сразу после - место занято, подвиньте копию вручную", null); return; }
-  var extra = isTrip ? {mg: seg.mg, lg: seg.lg, from: seg.from, to: seg.to} : undefined;
+  var extra = isTrip ? {mg: seg.mg, lg: seg.lg, from: seg.from, to: seg.to, needsData: seg.needsData} : undefined;
   push(v, seg.kind, newS, seg.l, extra);
   var copySeg = STATE.segs[STATE.segs.length - 1];
   STATE.lastEdited = newS;
@@ -18776,6 +18895,7 @@ function openDrawer(seg){
   var lgIdx = isTrip ? Math.max(0, logistPool.indexOf(seg.lg)) : 0;
   var fromVal = isTrip ? (seg.from || "") : "";
   var toVal = isTrip ? (seg.to || "") : "";
+  var ndVal = !!seg.needsData;
   var startVal = hToLocalInputVal_(seg.s), endVal = hToLocalInputVal_(seg.s + seg.l);
 
   var infoRows = [["Машина", v.type + " · " + v.gos], ["Тягач", v.tractor],
@@ -18801,7 +18921,8 @@ function openDrawer(seg){
         '</div></div>' +
         '<div class="cr-field"><span class="grp-label">Откуда</span><input autocomplete="off" class="cr-input" id="lp-drFrom" list="lp-crPlaces" placeholder="можно не указывать" value="' + fromVal + '"></div>' +
         '<div class="cr-field"><span class="grp-label">Куда</span><input autocomplete="off" class="cr-input" id="lp-drTo" list="lp-crPlaces" placeholder="можно не указывать" value="' + toVal + '"></div>' +
-        '<datalist id="lp-crPlaces">' + PLACES.map(function(p){ return "<option value=\"" + p + "\">"; }).join("") + '</datalist>'
+        '<datalist id="lp-crPlaces">' + PLACES.map(function(p){ return "<option value=\"" + p + "\">"; }).join("") + '</datalist>' +
+        '<button class="chip data-chip" id="lp-drNd" aria-pressed="' + ndVal + '" title="Документы для пропуска ещё не собраны - плитка будет мигать, перенос на другую машину спросит подтверждение">' + ICON_CHECK + 'Под данные</button>'
         : rowsHtml([["Состояние", segLabel(seg)]])) +
       '<div class="dr-row dr-row-edit"><span>Начало</span><input autocomplete="off" type="datetime-local" class="dr-date-input mono" id="lp-drStart" value="' + startVal + '"></div>' +
       '<div class="dr-row dr-row-edit"><span>Окончание</span><input autocomplete="off" type="datetime-local" class="dr-date-input mono" id="lp-drEnd" value="' + endVal + '"></div>' +
@@ -18826,6 +18947,7 @@ function openDrawer(seg){
       [].forEach.call(document.getElementById("lp-drLg").children, function(btn, i){ btn.onclick = function(){ lgIdx = i; render(); }; });
       document.getElementById("lp-drFrom").oninput = function(ev){ fromVal = ev.target.value; };
       document.getElementById("lp-drTo").oninput = function(ev){ toVal = ev.target.value; };
+      document.getElementById("lp-drNd").onclick = function(){ ndVal = !ndVal; render(); };
     }
     var startEl = document.getElementById("lp-drStart"), endEl = document.getElementById("lp-drEnd"),
         durEl = document.getElementById("lp-drDurLabel");
@@ -18859,7 +18981,7 @@ function openDrawer(seg){
       seg = liveSeg;
       var before = {s: seg.s, l: seg.l, v: seg.v};
       seg.s = newS; seg.l = newL;
-      if (isTrip){ seg.mg = MANAGERS[mgIdx]; seg.lg = logistPool[lgIdx]; seg.from = fromVal; seg.to = toVal; }
+      if (isTrip){ seg.mg = MANAGERS[mgIdx]; seg.lg = logistPool[lgIdx]; seg.from = fromVal; seg.to = toVal; seg.needsData = ndVal; }
       S.drop();
       /* commit() сам НЕ перерисовывает ленту - у драга/растяжки плитка уже
          переставлена на новое место инлайн, в момент pointerup, до commit(). Здесь
@@ -18903,7 +19025,35 @@ function closeDrawer(){
   STATE.openId = null;
 }
 scrim.onclick = closeDrawer;
-window.addEventListener("keydown", function(e){ if (e.key === "Escape"){ closeDrawer(); closeCtxMenu_(); } });
+
+/* Диалог подтверждения «под данные» (Влад, 30.08) - callback-стиль, не Promise:
+   проще звать из синхронного кода pointerup (см. движение плитки ниже), не
+   ломая остальной поток async/await, которого в этом модуле нигде больше нет.
+   Одновременно активен только один такой диалог - если открыть новый поверх
+   старого, старый коллбэк тихо теряется (в этой доске такого сценария нет:
+   следующий диалог может открыться только после закрытия текущего жестом). */
+var confirmScrim_ = document.getElementById("lp-confirmScrim");
+var confirmBox_ = document.getElementById("lp-confirmBox");
+var confirmCb_ = null;
+function showConfirmDialog_(html, cb){
+  document.getElementById("lp-confirmText").innerHTML = html;
+  confirmCb_ = cb;
+  confirmScrim_.classList.add("open"); confirmBox_.classList.add("open");
+}
+function closeConfirmDialog_(result){
+  confirmScrim_.classList.remove("open"); confirmBox_.classList.remove("open");
+  var cb = confirmCb_; confirmCb_ = null;
+  if (cb) cb(result);
+}
+document.getElementById("lp-confirmOk").onclick = function(){ closeConfirmDialog_(true); };
+document.getElementById("lp-confirmCancel").onclick = function(){ closeConfirmDialog_(false); };
+confirmScrim_.onclick = function(){ closeConfirmDialog_(false); };
+
+window.addEventListener("keydown", function(e){
+  if (e.key !== "Escape") return;
+  if (confirmBox_.classList.contains("open")){ closeConfirmDialog_(false); return; }
+  closeDrawer(); closeCtxMenu_();
+});
 
 /* Своё контекстное меню плитки, не браузерное (Влад, 29.08: "при нажатии... не
    должно возникать стандартного браузерного меню, а должно возникать меню

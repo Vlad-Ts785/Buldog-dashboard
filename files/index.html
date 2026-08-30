@@ -18657,6 +18657,24 @@ function lpAwaiting_(v){
   if (!hasOwnSegs && /ремонт/i.test(v.statusToday || '')) return false;
   return !lpActiveSeg_(v);
 }
+/* НАЙДЕННЫЙ БАГ (Влад, 30.08, живой пример: "Тибукин Виктор" - свободна не
+   светится, хотя заявки нет; подсказка "машина перемещалась путём зажатия").
+   Перенос плитки на ДРУГУЮ машину (см. drag pointerup ниже) не зовёт полный
+   renderRows() после commit() - специально, комментарий тут же: "плитка уже
+   переставлена на новое место инлайн... renderRows не нужен". Верно для
+   ПЕРЕМЕЩЁННОЙ плитки, но НЕВЕРНО для строки, с которой она УЕХАЛА - её класс
+   "awaiting" (свечение "ждёт заказ") выставляется только внутри renderRows()
+   и застревал в состоянии "было занято" до следующего полного рендера
+   (обычно поллинг, до 7 сек - для СВОЕГО же действия это заметная, лишняя
+   задержка обратной связи). Точечно перевыставляем класс ТОЛЬКО на нужной
+   строке - без полного renderRows(), не трогая ещё анимирующуюся перенесённую
+   плитку в других местах DOM. */
+function refreshAwaiting_(vi){
+  var row = rowsEl.querySelector('.row[data-v="' + vi + '"]');
+  var v = STATE.vehicles[vi];
+  if (!row || !v) return;
+  row.classList.toggle("awaiting", lpAwaiting_(v));
+}
 function lpActiveSeg_(v){
   var h = nowHour(), segs = (STATE && STATE.segs) || [];
   for (var i = 0; i < segs.length; i++){
@@ -19715,7 +19733,11 @@ window.addEventListener("pointerup", function(e){
        машину, без commit()/saveSegs() - как будто переноса и не было. */
     if (before.v !== seg.v && seg.needsData){
       showConfirmDialog_('Данная заявка <b>под данные</b>. Уверены, что вы её хотите перепланировать на другую машину?', function(ok){
-        if (ok){ S.drop(); commit(seg, before, "Перенесено на другую машину"); return; }
+        if (ok){
+          S.drop(); commit(seg, before, "Перенесено на другую машину");
+          refreshAwaiting_(before.v); refreshAwaiting_(seg.v);
+          return;
+        }
         /* откат чисто через данные + полный renderRows() - проще и надёжнее
            ручного перетаскивания DOM-узла: рендер сам восстановит верную
            строку/позицию/sticky-подпись из STATE.segs, не дублируем его логику */
@@ -19725,6 +19747,7 @@ window.addEventListener("pointerup", function(e){
       });
     } else {
       commit(seg, before, before.v !== seg.v ? "Перенесено на другую машину" : "Сдвинуто по времени");
+      if (before.v !== seg.v){ refreshAwaiting_(before.v); refreshAwaiting_(seg.v); }
     }
   }
 });

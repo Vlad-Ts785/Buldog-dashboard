@@ -21070,10 +21070,35 @@ function fleetDoUncouple_(kind, v){
 /* Список для "Посадить"/"Зацепить" - тот же строгий автокомплит "начинается с
    введённого", что у lpWireCustomerInput_ (поле "Заказчик") - переиспользуем
    приём, не изобретаем новый список для контекстного меню. */
+/* Влад, 30.08, через параллельную сессию: "в пикере прицепа/водителя должны в
+   приоритете первыми показываться те, что раньше уже были на этой машине - для
+   удобства, кайфовая работа". История уже есть целиком в FLEET_ASSIGN_ (GET
+   /fleet/state отдаёт ВСЮ историю, не только открытые записи) - чисто сортировка
+   на клиенте, бэкенд не трогаем. "Недавность" - позднее из valid_from/valid_to
+   среди ВСЕХ записей этого resource_key на ЭТОМ тягаче (valid_to важнее, если
+   запись уже закрыта - это момент, когда он в последний раз реально стоял здесь;
+   valid_from - если запись всё ещё открыта). */
+function lpFleetRecencyOnTractor_(kind, tractorGos){
+  var recency = {};
+  (FLEET_ASSIGN_ || []).forEach(function(a){
+    if (a.kind !== kind || a.tractor_gos !== tractorGos) return;
+    var t = a.valid_to || a.valid_from || "";
+    if (!recency[a.resource_key] || t > recency[a.resource_key]) recency[a.resource_key] = t;
+  });
+  return recency;
+}
 function renderFleetPicker_(kind, v){
   var pool = kind === "driver"
     ? (FLEET_PEOPLE_ || []).filter(function(p){ return p.roles && p.roles.indexOf("driver") >= 0; })
     : (FLEET_ASSETS_ || []).filter(function(a){ return a.asset_type === "trailer"; });
+  var recency = lpFleetRecencyOnTractor_(kind, v.gos);
+  pool = pool.slice().sort(function(a, b){
+    var ra = recency[a.id] || "", rb = recency[b.id] || "";
+    if (ra && !rb) return -1;
+    if (!ra && rb) return 1;
+    if (ra !== rb) return ra > rb ? -1 : 1;   /* недавние - выше */
+    return 0;
+  });
   fleetMenu.innerHTML =
     '<div class="grp-label" style="padding:2px 8px 6px">' + (kind === "driver" ? "Кого посадить" : "Какой прицеп") + '</div>' +
     '<input autocomplete="off" class="cr-input" id="lp-fleetPickInput" placeholder="начните вводить" style="margin-bottom:4px">' +

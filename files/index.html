@@ -21279,6 +21279,21 @@ function renderFleetPicker_(kind, v){
   var pool = kind === "driver"
     ? (FLEET_PEOPLE_ || []).filter(function(p){ return p.roles && p.roles.indexOf("driver") >= 0; })
     : (FLEET_ASSETS_ || []).filter(function(a){ return a.asset_type === "trailer"; });
+  /* Влад, 31.08, живой пример - машина с Межевичем: "если межевич сидит, то он
+     не должен быть в выпадающем списке". Кто уже открыт НА ЭТОЙ ЖЕ машине -
+     текущий occupant ИЛИ залежавшийся дубль-"призрак" с прошлого посева
+     Штатки (см. большой разбор у lpFleetOpenOnTractor_) - не должен предлагаться
+     как обычный, ничем не помеченный кандидат в её же собственном пикере, это
+     не "занят на другой", это "уже тут". lpFleetUsedElsewhere_ ниже сюда не
+     годится - он НАРОЧНО исключает этот же тягач (иначе текущий водитель
+     всегда значился бы "занят" сам у себя) - именно это исключение и пускало
+     сюда лишних. Убираем целиком из списка, не тускло помечаем - Влад прямо
+     попросил "не должен быть в списке", не "должен быть тусклым". */
+  pool = pool.filter(function(p){
+    return !(FLEET_ASSIGN_ || []).some(function(a){
+      return a.kind === kind && a.tractor_gos === v.gos && !a.valid_to && String(a.resource_key) === String(p.id);
+    });
+  });
   var recency = lpFleetRecencyOnTractor_(kind, v.gos);
   pool = pool.slice().sort(function(a, b){
     var ra = recency[a.id] || "", rb = recency[b.id] || "";

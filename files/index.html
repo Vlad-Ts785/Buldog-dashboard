@@ -18930,9 +18930,17 @@ function syncAllBlinks_(){
    не посадим водителя" на практике ограничен тем же горизонтом, что и вся
    остальная лента (следующий месяц ещё не подключён, см. monthArrowClick). */
 function vacantBandRange_(v){
+  /* НАЙДЕННЫЙ БАГ (Влад, 30.08, на живой "613" - вакант + ремонт до 06.09,
+     полосатость не появлялась): "последняя запись" считалась по ЛЮБОМУ kind,
+     включая сам ремонт - а ремонт на вакантной машине именно и ЕСТЬ то самое
+     "накладывается" (Влад: "единственный момент, когда два статуса
+     накладываются"), не повод сдвигать старт полосы ПОСЛЕ него. Только
+     kind==="trip" считается "реальной работой", которая закрывает вакантность -
+     ремонт/ТО/без заказа/без водителя её не закрывают, полоса должна их
+     покрывать, не заканчиваться на них. */
   var lastEnd = 0;
   STATE.segs.forEach(function(s){
-    if (s.v !== v.i) return;
+    if (s.v !== v.i || s.kind !== "trip") return;
     var end = s.s + s.l;
     if (end > lastEnd) lastEnd = end;
   });
@@ -20043,7 +20051,19 @@ window.addEventListener("pointerup", function(){
 });
 rowsEl.addEventListener("dblclick", function(e){
   if (IS_TOUCH_) return;   /* на тач то же самое делает одиночный тап, см. ниже */
-  if (e.target.closest(".seg") || e.target.closest(".rowhead")) return;
+  /* Влад, 30.08: "сделай, чтобы двойное нажатие на плашку вызывало меню
+     редактирования" - раньше двойной клик ИМЕННО по существующей плитке
+     ничего не делал (эта ветка просто выходила - двойной клик был только
+     способом создать НОВУЮ запись на пустом месте трека). Третий, независимый
+     путь к тому же меню (Открыть/Копировать/Удалить) - наравне с обычным
+     левым кликом и правым/контекстным - на случай проблем с любым из них. */
+  var segEl = e.target.closest(".seg");
+  if (segEl){
+    var seg = STATE.segs.find(function(s){ return s.id === segEl.dataset.id; });
+    if (seg) openCtxMenu_(seg, e.clientX, e.clientY);
+    return;
+  }
+  if (e.target.closest(".rowhead")) return;
   var track = e.target.closest(".track");
   if (!track) return;
   var vi = parseInt(track.dataset.v, 10);

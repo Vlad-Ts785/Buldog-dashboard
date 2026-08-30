@@ -3877,8 +3877,15 @@ function getSessionSecret_() {
   return secret;
 }
 
-function issueSessionToken_(email) {
-  var payload = JSON.stringify({ email: email, exp: Date.now() + SESSION_TOKEN_TTL_MS });
+// role - добавлена 30.08 (аудит Справочников): раньше токен нёс только email, роль
+// сервер api.yardhub.ru вообще не мог узнать - proверка доступа к /api/sprav/*
+// (500 сотрудников с ИНН/СНИЛС) была ТОЛЬКО косметическим скрытием пункта меню на
+// фронтенде. role кладём тем же значением, что уже лежит в листе "Доступ"
+// (admin/manager/logist) - сервер сверяет её сам, см. checkSession/requireRole_
+// в api/server.js. Необязательный параметр - старые вызовы (если где-то остались)
+// просто не проставят роль, а не сломаются.
+function issueSessionToken_(email, role) {
+  var payload = JSON.stringify({ email: email, role: role || '', exp: Date.now() + SESSION_TOKEN_TTL_MS });
   var payloadB64 = Utilities.base64EncodeWebSafe(payload);
   var sig = Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(payloadB64, getSessionSecret_()));
   return payloadB64 + '.' + sig;
@@ -5006,7 +5013,7 @@ function doGet(e) {
   // Кладём в ответ только у трёх "полных" загрузок страницы ниже (admin/manager/logist) -
   // этого достаточно, фронтенд читает токен один раз при загрузке и использует дальше для
   // всех запросов, включая мелкие action=... (которым сам токен в ответе не нужен).
-  var freshSessionToken = issueSessionToken_(email);
+  var freshSessionToken = issueSessionToken_(email, access.role);
 
   try {
     // Отдельный endpoint для истории по машинам (тяжёлые данные, грузим лениво) - только admin

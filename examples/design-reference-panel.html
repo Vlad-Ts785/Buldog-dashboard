@@ -1,0 +1,699 @@
+<title>ЯРД Пульс</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Unbounded:wght@500&display=swap" rel="stylesheet">
+
+<style>
+/* ===== Токены (дизайн-система YARD + моушн-токены) ===== */
+:root{
+  --bg:#0f0f13; --bg2:#17171d; --bg3:#1e1e26; --bg4:#252530;
+  --border:rgba(255,255,255,0.08); --border-strong:rgba(255,255,255,0.16);
+  --text:#e8e6df; --muted:#8b8980;
+  --green:#1D9E75; --red:#E24B4A; --amber:#EF9F27; --blue:#378ADD; --purple:#7F77DD;
+  --font-ui:'Golos Text',system-ui,sans-serif;
+  --font-num:'JetBrains Mono',ui-monospace,Consolas,monospace;
+  --font-display:'Unbounded',var(--font-ui);
+  --ease-out-strong:cubic-bezier(0.16,1,0.3,1);
+  --ease-out-soft:cubic-bezier(0.25,1,0.5,1);
+  --ease-in-out:cubic-bezier(0.65,0,0.35,1);
+  --ease-in-exit:cubic-bezier(0.55,0,1,0.45);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);font-size:13px;line-height:1.45;-webkit-font-smoothing:antialiased}
+
+/* ===== Каркас ===== */
+.d5-wrap{max-width:1480px;margin:0 auto;padding:20px 24px 40px}
+.d5-topbar{display:flex;align-items:center;gap:16px;margin-bottom:6px}
+.d5-title{font-family:var(--font-display);font-size:17px;font-weight:500;letter-spacing:.02em;color:var(--text)}
+.d5-period{font-family:var(--font-num);font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.d5-period b{color:var(--text);font-weight:500}
+.d5-actions{margin-left:auto;display:flex;gap:8px}
+.d5-btn{background:var(--bg3);border:1px solid var(--border);color:var(--muted);
+  border-radius:8px;padding:6px 12px;font-size:12px;font-family:var(--font-ui);cursor:pointer;
+  transition:border-color .15s ease,color .15s ease}
+.d5-btn:hover{border-color:var(--green);color:var(--green)}
+.d5-btn:disabled{opacity:.5;cursor:default}
+.d5-note{font-size:11.5px;color:var(--muted);margin:0 0 14px;max-width:100ch;line-height:1.5}
+.d5-note b{color:var(--text)}
+
+/* ===== Строка вердикта ===== */
+.d5-status{display:flex;align-items:center;gap:20px;flex-wrap:wrap;
+  padding:10px 16px;margin-bottom:16px;
+  background:var(--bg2);border:1px solid var(--border);border-radius:10px}
+.d5-status__meta{font-family:var(--font-num);font-size:11px;letter-spacing:.02em;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.d5-status__item{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--text);white-space:nowrap}
+.d5-status__item::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--muted);flex:none}
+.d5-status__item--bad::before{background:var(--red)}
+.d5-status__item--warn::before{background:var(--amber)}
+.d5-status__item--good::before{background:var(--green)}
+.d5-status__item--good{color:var(--muted)}
+.d5-status__num{font-family:var(--font-num);font-variant-numeric:tabular-nums}
+
+/* ===== Сетка ===== */
+.d5-grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px}
+.d5-span4{grid-column:span 4}.d5-span5{grid-column:span 5}.d5-span3{grid-column:span 3}.d5-span12{grid-column:span 12}
+@media(max-width:1100px){.d5-span4,.d5-span5,.d5-span3{grid-column:span 6}}
+@media(max-width:720px){.d5-span4,.d5-span5,.d5-span3,.d5-span12{grid-column:span 12}}
+
+/* ===== Карточка ===== */
+.d5-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;
+  padding:18px 20px;display:flex;flex-direction:column;gap:13px;min-width:0;position:relative;
+  transition:border-color .15s ease,background-color .15s ease}
+.d5-card:hover{border-color:var(--border-strong);background:#191920}
+.d5-card--attention{border-color:rgba(226,75,74,.38)}
+.d5-card--attention:hover{border-color:rgba(226,75,74,.55)}
+
+.d5-head{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:22px}
+.d5-label{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:8px}
+.d5-label__dot{width:6px;height:6px;border-radius:50%;background:var(--red);flex:none}
+
+.d5-badge{font-family:var(--font-num);font-size:11px;font-weight:500;font-variant-numeric:tabular-nums;
+  line-height:1;padding:4px 7px;border-radius:6px;white-space:nowrap}
+.d5-badge--good{color:#2fbe93;background:rgba(29,158,117,.13)}
+.d5-badge--bad{color:#ec6e6d;background:rgba(226,75,74,.13)}
+.d5-badge--neutral{color:var(--muted);background:var(--bg4)}
+
+.d5-value{display:flex;align-items:baseline;gap:7px;white-space:nowrap}
+.d5-value__num{font-family:var(--font-num);font-weight:500;font-size:31px;line-height:1;
+  letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--text)}
+.d5-value__unit{font-family:var(--font-num);font-size:17px;color:var(--muted)}
+.d5-card--sub .d5-value__num{font-size:25px}
+.d5-card--sub .d5-value__unit{font-size:15px}
+
+/* ===== Bullet chart (спека дата-виз агента): шкала 0-120% плана ===== */
+.d5-bullet{position:relative;height:16px}
+.d5-bullet__track{position:absolute;left:0;right:0;top:4px;height:8px;border-radius:4px;background:rgba(255,255,255,.06)}
+.d5-bullet__factwrap{position:absolute;left:0;top:4px;height:8px;border-radius:4px;overflow:hidden}
+.d5-bullet__fact{width:100%;height:100%;border-radius:4px 0 0 4px}
+.d5-bullet__fc{position:absolute;top:4px;height:8px;opacity:.3}
+.d5-bullet__tick{position:absolute;top:0;width:2px;height:16px;border-radius:1px;background:rgba(232,230,223,.9)}
+.d5-plan__caption{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted)}
+.d5-plan__caption b{font-family:var(--font-num);font-weight:500;font-variant-numeric:tabular-nums;color:var(--text)}
+.d5-plan{display:flex;flex-direction:column;gap:7px}
+
+/* заполнение: translateX внутри overflow (радиусы не искажаются) */
+.intro .d5-anim-fill{transform:translateX(-100%);transition:transform 550ms var(--ease-out-strong)}
+.intro .d5-anim-fill.go{transform:translateX(0)}
+.no-intro .d5-anim-fill{transform:translateX(0)}
+.intro .d5-bullet__fc{opacity:0;transition:opacity 200ms var(--ease-out-soft)}
+.intro .d5-bullet__fc.go{opacity:.3}
+.no-intro .d5-bullet__fc{opacity:.3}
+
+/* ===== Строки метрика-значение (спека дизайн-агента) ===== */
+.d5-rows{display:flex;flex-direction:column;margin-top:auto}
+.d5-row{display:grid;grid-template-columns:max-content 1fr max-content max-content;
+  align-items:baseline;column-gap:10px;min-height:27px}
+.d5-row__label{color:var(--muted);white-space:nowrap}
+.d5-row__leader{border-bottom:1px dotted rgba(255,255,255,.12);transform:translateY(-4px)}
+.d5-row__value{font-family:var(--font-num);font-size:12.5px;font-weight:500;font-variant-numeric:tabular-nums;color:var(--text);text-align:right;white-space:nowrap}
+.d5-row__aux{font-family:var(--font-num);font-size:11.5px;font-variant-numeric:tabular-nums;color:var(--muted);text-align:right;min-width:5.5ch;white-space:nowrap}
+.d5-row__aux--bad{color:var(--red)}
+.d5-row__aux--good{color:var(--green)}
+.d5-row--total{border-top:1px solid var(--border);margin-top:6px;padding-top:8px}
+.d5-row--total .d5-row__label{color:var(--text)}
+.d5-row--total .d5-row__value{font-weight:600}
+
+/* ===== Спарклайн ДЗ (дата-виз: monotone cubic, area wash, точка с кольцом) ===== */
+.d5-spark{display:block;width:100%;height:40px}
+.intro .d5-spark-line{transition:stroke-dashoffset 600ms var(--ease-out-soft)}
+.intro .d5-spark-area,.intro .d5-spark-dot{opacity:0;transition:opacity 200ms var(--ease-out-soft)}
+.intro .d5-spark-area.go{opacity:1}
+.intro .d5-spark-dot.go{opacity:1}
+.no-intro .d5-spark-area,.no-intro .d5-spark-dot{opacity:1}
+
+/* ===== Дневные колонки поступлений (дата-виз) ===== */
+.d5-days{display:flex;align-items:flex-end;gap:2px;height:44px}
+.d5-day{flex:1;border-radius:2px 2px 0 0;background:var(--green);opacity:.35;min-height:2px;transform-origin:bottom}
+.d5-day--today{opacity:1}
+.d5-day--future{opacity:1;background:rgba(255,255,255,.07)}
+.intro .d5-day{transform:scaleY(0);transition:transform 450ms var(--ease-out-strong)}
+.intro .d5-day.go{transform:scaleY(1)}
+.no-intro .d5-day{transform:scaleY(1)}
+.d5-days-foot{display:flex;justify-content:space-between;font-size:9px;color:var(--muted);font-family:var(--font-num);margin-top:3px}
+
+/* ===== Затраты: bar-per-row (дата-виз, вместо пончика) ===== */
+.d5-cost{display:grid;grid-template-columns:82px 1fr 112px;gap:10px;align-items:center;min-height:24px}
+.d5-cost__name{font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.d5-cost__barwrap{height:6px;border-radius:3px;overflow:hidden}
+.d5-cost__bar{height:100%;border-radius:3px;background:var(--blue)}
+.d5-cost__bar--red{background:var(--red)}
+.d5-cost__val{font-family:var(--font-num);font-size:11.5px;color:var(--text);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.d5-cost__val span{color:var(--muted);font-size:10.5px}
+.d5-share{display:flex;flex-direction:column;gap:7px}
+.d5-share__track{position:relative;height:3px;border-radius:2px;background:var(--bg4)}
+.d5-share__fill{position:absolute;top:0;bottom:0;left:0;border-radius:2px;background:rgba(255,255,255,.30)}
+.d5-share__caption{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted)}
+.d5-share__caption b{font-family:var(--font-num);font-weight:500;color:var(--text)}
+
+/* ===== Peek-строка под hover ===== */
+.d5-peek{min-height:15px;font-size:11.5px;color:var(--muted);opacity:0;transition:opacity .15s ease}
+.d5-card:hover .d5-peek{opacity:1}
+
+/* ===== Статус парка: вафля (дизайн-агент) ===== */
+.d5-fleet{display:grid;grid-template-columns:190px 1fr 230px;gap:28px;align-items:start}
+@media(max-width:720px){.d5-fleet{grid-template-columns:1fr}}
+.d5-fleet__util{font-family:var(--font-num);font-size:31px;font-weight:500;line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.d5-fleet__sub{font-size:11.5px;color:var(--muted);margin-top:6px}
+.d5-fleet__groups{display:flex;flex-direction:column;gap:16px}
+.d5-fleet__ghead{display:flex;align-items:baseline;gap:8px;margin-bottom:7px}
+.d5-fleet__gname{font-size:12px;font-weight:500;color:var(--text)}
+.d5-fleet__gcount{font-family:var(--font-num);font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.d5-units{display:flex;flex-wrap:wrap;gap:4px;max-width:calc(18*16px)}
+.d5-unit{width:12px;height:12px;border-radius:3px;background:var(--bg4)}
+.d5-unit--work{background:var(--green)}
+.d5-unit--idle{background:var(--amber)}
+.d5-unit--nodriver{background:transparent;border:1px solid var(--border-strong)}
+.d5-unit--repair{background:var(--red)}
+.d5-unit--na{background:var(--bg3)}
+.d5-legend{display:flex;flex-direction:column}
+.d5-legend__row{display:grid;grid-template-columns:12px 3.5ch 1fr;align-items:center;column-gap:10px;min-height:26px}
+.d5-legend__swatch{width:10px;height:10px;border-radius:2px}
+.d5-legend__count{font-family:var(--font-num);font-size:12.5px;font-weight:500;font-variant-numeric:tabular-nums;text-align:right}
+.d5-legend__name{font-size:12px;color:var(--muted)}
+.d5-legend__row--dim .d5-legend__count{color:var(--muted)}
+
+/* ===== Хореография первой загрузки (моушн-агент): stagger 55ms ===== */
+@keyframes d5CardIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.intro .d5-card{animation:d5CardIn 450ms var(--ease-out-strong) both}
+.intro .d5-status{animation:d5CardIn 350ms var(--ease-out-strong) both}
+.no-intro .d5-card,.no-intro .d5-status{opacity:1;transform:none}
+
+/* ===== Живое обновление: тикер + блип (моушн-агент) ===== */
+.d5-tickbox{position:relative;display:inline-block;overflow:hidden;vertical-align:baseline}
+.d5-tick-old{position:absolute;left:0;top:0}
+.d5-card::after{content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;background:var(--green);opacity:0}
+.d5-card.blip::after{animation:d5Blip 400ms var(--ease-in-out)}
+.d5-card.blip-red::after{background:var(--red);animation:d5Blip 400ms var(--ease-in-out)}
+@keyframes d5Blip{0%{opacity:0}25%{opacity:.08}100%{opacity:0}}
+
+@media (prefers-reduced-motion: reduce){
+  .intro .d5-card,.intro .d5-status{animation:none;opacity:1;transform:none}
+  .intro .d5-anim-fill{transform:translateX(0);transition:none}
+  .intro .d5-bullet__fc{opacity:.3;transition:none}
+  .intro .d5-spark-line{transition:none;stroke-dashoffset:0 !important}
+  .intro .d5-spark-area,.intro .d5-spark-dot{opacity:1;transition:none}
+  .intro .d5-day{transform:scaleY(1);transition:none}
+}
+</style>
+
+<div class="d5-wrap">
+
+  <div class="d5-topbar">
+    <div class="d5-title">ЯРД ПУЛЬС</div>
+    <div class="d5-period">Август 2026 · <b>день 27 из 31</b></div>
+    <div class="d5-actions">
+      <button class="d5-btn" id="d5Refresh">Обновить данные</button>
+      <button class="d5-btn" id="d5Sound">Звук: вкл</button>
+    </div>
+  </div>
+  <p class="d5-note"><b>Превью уровня 5, не рабочая панель:</b> цифры со скриншота текущего дашборда, зашиты статично. Обнови страницу, чтобы пересмотреть хореографию загрузки; "Обновить данные" - симуляция живого прихода цифр.</p>
+
+  <div class="d5-status">
+    <span class="d5-status__meta" id="d5Meta">СР 27.08 · 09:41 · данные 1С 09:12</span>
+    <span class="d5-status__item d5-status__item--bad">ДЗ выросла на <span class="d5-status__num">2,3 млн</span> за неделю</span>
+    <span class="d5-status__item d5-status__item--warn">Поступления недели <span class="d5-status__num">-28%</span></span>
+    <span class="d5-status__item d5-status__item--warn"><span class="d5-status__num">12</span> машин в ремонте</span>
+    <span class="d5-status__item d5-status__item--good">Прогноз выручки <span class="d5-status__num">94%</span> плана</span>
+  </div>
+
+  <div class="d5-grid">
+
+    <!-- ЯРУС 1 -->
+    <article class="d5-card d5-span4" data-i="0">
+      <header class="d5-head">
+        <h3 class="d5-label">Общая выручка</h3>
+        <span class="d5-badge d5-badge--good">+11% к июлю</span>
+      </header>
+      <div class="d5-value"><span class="d5-value__num" id="vRev">57 052 166</span><span class="d5-value__unit">₽</span></div>
+      <div class="d5-plan">
+        <div class="d5-bullet" title="Шкала 0-120% плана. Заливка янтарная: прогноз 94% - к плану не успеваем">
+          <div class="d5-bullet__track"></div>
+          <div class="d5-bullet__fc" style="left:calc(67.9% + 2px);width:10.4%;background:var(--amber)"></div>
+          <div class="d5-bullet__factwrap" style="width:67.9%"><div class="d5-bullet__fact d5-anim-fill" style="background:var(--amber)"></div></div>
+          <div class="d5-bullet__tick" style="left:83.3%" title="План 70,0 млн"></div>
+        </div>
+        <div class="d5-plan__caption"><span>план 70,0 млн</span><span><b>81,5%</b></span></div>
+      </div>
+      <div class="d5-rows">
+        <div class="d5-row">
+          <span class="d5-row__label">Прогноз месяца</span><i class="d5-row__leader"></i>
+          <span class="d5-row__value">66,1 млн</span><span class="d5-row__aux">94%</span>
+        </div>
+        <div class="d5-row">
+          <span class="d5-row__label">Свой парк</span><i class="d5-row__leader"></i>
+          <span class="d5-row__value">50,9 млн</span><span class="d5-row__aux">89%</span>
+        </div>
+      </div>
+      <footer class="d5-peek">до плана 12,9 млн - нужно 3,2 млн/день до конца месяца</footer>
+    </article>
+
+    <article class="d5-card d5-span4" data-i="1">
+      <header class="d5-head">
+        <h3 class="d5-label">Поступления</h3>
+        <span class="d5-badge d5-badge--good">сальдо +5,4 млн</span>
+      </header>
+      <div class="d5-value"><span class="d5-value__num" id="vRec">58 274 460</span><span class="d5-value__unit">₽</span></div>
+      <div>
+        <div class="d5-days" id="d5Days"></div>
+        <div class="d5-days-foot"><span>1 авг</span><span>сегодня · 27</span><span>31</span></div>
+      </div>
+      <div class="d5-rows">
+        <div class="d5-row">
+          <span class="d5-row__label">Сегодня</span><i class="d5-row__leader"></i>
+          <span class="d5-row__value" id="vRecToday">933 088 ₽</span><span class="d5-row__aux"></span>
+        </div>
+        <div class="d5-row">
+          <span class="d5-row__label">За неделю</span><i class="d5-row__leader"></i>
+          <span class="d5-row__value">6 652 288 ₽</span><span class="d5-row__aux d5-row__aux--bad">-28%</span>
+        </div>
+      </div>
+      <footer class="d5-peek">серые столбики - оставшиеся дни месяца</footer>
+    </article>
+
+    <article class="d5-card d5-card--attention d5-span4" data-i="2">
+      <header class="d5-head">
+        <h3 class="d5-label"><span class="d5-label__dot"></span>Дебиторка</h3>
+        <span class="d5-badge d5-badge--bad">+2,3 млн за неделю</span>
+      </header>
+      <div class="d5-value"><span class="d5-value__num" id="vDebt">24 763 904</span><span class="d5-value__unit">₽</span></div>
+      <svg class="d5-spark" id="d5Spark" viewBox="0 0 400 40" preserveAspectRatio="none" aria-hidden="true"></svg>
+      <div class="d5-rows">
+        <div class="d5-row">
+          <span class="d5-row__label">Текущая</span><i class="d5-row__leader"></i>
+          <span class="d5-row__value">20,4 млн</span><span class="d5-row__aux">82%</span>
+        </div>
+        <div class="d5-row">
+          <span class="d5-row__label">Короткая просрочка</span><i class="d5-row__leader"></i>
+          <span class="d5-row__value">4,0 млн</span><span class="d5-row__aux">16%</span>
+        </div>
+        <div class="d5-row">
+          <span class="d5-row__label">Средняя просрочка</span><i class="d5-row__leader"></i>
+          <span class="d5-row__value">383 тыс</span><span class="d5-row__aux">2%</span>
+        </div>
+      </div>
+      <footer class="d5-peek">растёт четвёртую неделю подряд - линия красная, пока тренд вверх</footer>
+    </article>
+
+    <!-- ЯРУС 2 -->
+    <article class="d5-card d5-card--sub d5-span5" data-i="3">
+      <header class="d5-head">
+        <h3 class="d5-label">Валовая прибыль</h3>
+        <span class="d5-badge d5-badge--neutral">маржа 52,3%</span>
+      </header>
+      <div class="d5-value"><span class="d5-value__num" id="vVp">29 815 763</span><span class="d5-value__unit">₽</span></div>
+      <div class="d5-plan">
+        <div class="d5-bullet" title="Прогноз 118% пересекает тик плана - идём на перевыполнение">
+          <div class="d5-bullet__track"></div>
+          <div class="d5-bullet__fc" style="left:calc(82.8% + 2px);width:15.9%;background:var(--green)"></div>
+          <div class="d5-bullet__factwrap" style="width:82.8%"><div class="d5-bullet__fact d5-anim-fill" style="background:var(--green)"></div></div>
+          <div class="d5-bullet__tick" style="left:83.3%" title="План 30,0 млн"></div>
+        </div>
+        <div class="d5-plan__caption"><span>план ВП 30,0 млн</span><span><b>99,4%</b> · прогноз <b style="color:var(--green)">+18%</b></span></div>
+      </div>
+      <div class="d5-rows">
+        <div class="d5-row">
+          <span class="d5-row__label">Тралы</span><i class="d5-row__leader"></i>
+          <span class="d5-row__value">21,5 млн</span><span class="d5-row__aux">53%</span>
+        </div>
+        <div class="d5-row">
+          <span class="d5-row__label">Длинномеры</span><i class="d5-row__leader"></i>
+          <span class="d5-row__value">8,3 млн</span><span class="d5-row__aux">49%</span>
+        </div>
+        <div class="d5-row d5-row--total">
+          <span class="d5-row__label">Чистая, расчётная</span><i class="d5-row__leader"></i>
+          <span class="d5-row__value">~8,9 млн</span><span class="d5-row__aux">15,7%</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="d5-card d5-card--sub d5-span4" data-i="4">
+      <header class="d5-head">
+        <h3 class="d5-label">Структура затрат</h3>
+        <span class="d5-badge d5-badge--neutral">19,2 млн</span>
+      </header>
+      <div style="display:flex;flex-direction:column;gap:2px" id="d5Costs"></div>
+      <div class="d5-share" style="margin-top:auto">
+        <div class="d5-share__track"><div class="d5-share__fill" style="width:39.2%"></div></div>
+        <div class="d5-share__caption"><span>доля от выручки</span><span><b>39,2%</b></span></div>
+      </div>
+    </article>
+
+    <article class="d5-card d5-card--sub d5-span3" data-i="5">
+      <header class="d5-head">
+        <h3 class="d5-label">Маржа найма</h3>
+        <span class="d5-badge d5-badge--neutral">10,5% выручки</span>
+      </header>
+      <div class="d5-value"><span class="d5-value__num" id="vHire">22,7</span><span class="d5-value__unit">%</span></div>
+      <div class="d5-rows">
+        <div class="d5-row">
+          <span class="d5-row__label">Прибыль</span><i class="d5-row__leader"></i>
+          <span class="d5-row__value">1,36 млн</span><span class="d5-row__aux"></span>
+        </div>
+        <div class="d5-row">
+          <span class="d5-row__label">Выручка найма</span><i class="d5-row__leader"></i>
+          <span class="d5-row__value">6,01 млн</span><span class="d5-row__aux"></span>
+        </div>
+      </div>
+    </article>
+
+    <!-- ЯРУС 3 -->
+    <article class="d5-card d5-span12" data-i="6">
+      <header class="d5-head">
+        <h3 class="d5-label">Статус парка</h3>
+        <span class="d5-badge d5-badge--neutral">55 машин</span>
+      </header>
+      <div class="d5-fleet">
+        <div>
+          <div class="d5-fleet__util" id="vUtil">51%</div>
+          <div class="d5-fleet__sub">в работе 28 из 55</div>
+        </div>
+        <div class="d5-fleet__groups" id="d5Units"></div>
+        <div class="d5-legend">
+          <div class="d5-legend__row">
+            <span class="d5-legend__swatch" style="background:var(--green)"></span>
+            <span class="d5-legend__count">28</span><span class="d5-legend__name">в работе</span>
+          </div>
+          <div class="d5-legend__row">
+            <span class="d5-legend__swatch" style="background:var(--red)"></span>
+            <span class="d5-legend__count">12</span><span class="d5-legend__name">в ремонте</span>
+          </div>
+          <div class="d5-legend__row">
+            <span class="d5-legend__swatch" style="background:transparent;border:1px solid var(--border-strong)"></span>
+            <span class="d5-legend__count">12</span><span class="d5-legend__name">без водителя</span>
+          </div>
+          <div class="d5-legend__row">
+            <span class="d5-legend__swatch" style="background:var(--amber)"></span>
+            <span class="d5-legend__count">0</span><span class="d5-legend__name">без заказа</span>
+          </div>
+          <div class="d5-legend__row d5-legend__row--dim">
+            <span class="d5-legend__swatch" style="background:var(--bg3)"></span>
+            <span class="d5-legend__count">3</span><span class="d5-legend__name">нет статуса</span>
+          </div>
+        </div>
+      </div>
+    </article>
+
+  </div>
+</div>
+
+<script>
+(function(){
+  'use strict';
+
+  /* ===== данные (со скриншота) ===== */
+  var D = {
+    rev: 57052166, rec: 58274460, recToday: 933088, debt: 24763904,
+    vp: 29815763, hire: 22.7, util: 51,
+    debtSpark: [21.9,22.4,22.2,22.8,23.1,22.7,22.9,23.4,23.2,22.6,22.1,21.8,21.5,21.9,22.3,22.0,21.6,21.2,21.5,21.9,22.4,22.8,22.5,22.9,23.3,23.0,23.5,24.1,24.5,24.76],
+    recDays: [1.8,2.4,0.3,0.2,3.1,2.7,2.2,1.9,2.6,0.4,0.1,2.9,3.3,2.1,1.7,2.4,0.2,0.3,3.6,2.8,2.3,1.4,2.7,0.3,0.2,3.1,0.93],
+    daysInMonth: 31,
+    costs: [
+      {name:'ФОТ', v:7.6, pct:'39,8%', red:false},
+      {name:'Топливо', v:6.9, pct:'35,9%', red:false},
+      {name:'Запчасти', v:2.3, pct:'12,0%', red:false},
+      {name:'Проходные', v:1.9, pct:'10,1%', red:false},
+      {name:'Штрафы', v:0.432, pct:'2,2%', red:true}
+    ],
+    fleet: [
+      {name:'Тралы', total:36, work:19, nodriver:5, repair:9, na:3},
+      {name:'Длинномеры', total:19, work:9, nodriver:7, repair:3, na:0}
+    ]
+  };
+  function fmtRub(n){ return Math.round(n).toLocaleString('ru-RU'); }
+
+  /* ===== звук (пакет soundsD - агент-саунддизайнер) ===== */
+  var audioCtx = null, soundOn = true;
+  function getCtx(){
+    try{
+      if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if(audioCtx.state === 'suspended') audioCtx.resume();
+      return audioCtx;
+    }catch(e){ return null; }
+  }
+  function blip(f1, f2, dur, vol, type, delay){
+    if(!soundOn) return;
+    var ctx = getCtx();
+    if(!ctx) return;
+    try{
+      var t = ctx.currentTime + (delay || 0);
+      var o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = type || 'sine';
+      o.frequency.setValueAtTime(f1, t);
+      if(f2 && f2 !== f1) o.frequency.exponentialRampToValueAtTime(f2, t + dur);
+      g.gain.setValueAtTime(vol, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(t); o.stop(t + dur + 0.02);
+    }catch(e){}
+  }
+  var soundsD = {
+    boot: function(){ blip(415,440,0.30,0.028,'sine',0); blip(208,220,0.30,0.015,'sine',0.02); blip(622,659,0.34,0.020,'sine',0.05); },
+    tickUp: function(){ blip(587,659,0.07,0.016,'sine',0); },
+    tickDown: function(){ blip(659,587,0.07,0.016,'sine',0); },
+    refresh: function(){ blip(330,520,0.10,0.020,'triangle',0); blip(520,349,0.14,0.026,'sine',0.10); },
+    attention: function(){ blip(330,322,0.06,0.045,'triangle',0); blip(294,286,0.08,0.060,'triangle',0.12); },
+    toggle: function(){ blip(470,530,0.06,0.030,'sine',0); blip(235,265,0.06,0.015,'sine',0); }
+  };
+  document.getElementById('d5Sound').addEventListener('click', function(){
+    soundOn = !soundOn;
+    this.textContent = soundOn ? 'Звук: вкл' : 'Звук: выкл';
+    if(soundOn) soundsD.toggle();
+  });
+
+  /* ===== рендер: спарклайн ДЗ (monotone cubic - дата-виз агент) ===== */
+  function monotonePath(pts, w, h, pad){
+    var n = pts.length;
+    var min = Math.min.apply(null, pts), max = Math.max.apply(null, pts);
+    var span = (max - min) || 1;
+    min -= span * 0.15; max += span * 0.15; span = max - min;
+    var xs = [], ys = [];
+    for(var i = 0; i < n; i++){
+      xs.push(i / (n - 1) * w);
+      ys.push(h - (pts[i] - min) / span * h);
+    }
+    // Fritsch-Carlson тангенсы
+    var dx = [], dy = [], m = [];
+    for(i = 0; i < n - 1; i++){ dx.push(xs[i+1]-xs[i]); dy.push(ys[i+1]-ys[i]); m.push(dy[i]/dx[i]); }
+    var t = [m[0]];
+    for(i = 1; i < n - 1; i++){
+      t.push((m[i-1]*m[i] <= 0) ? 0 : (m[i-1]+m[i])/2);
+    }
+    t.push(m[n-2]);
+    var d = 'M' + xs[0].toFixed(1) + ',' + ys[0].toFixed(1);
+    for(i = 0; i < n - 1; i++){
+      var c1x = xs[i] + dx[i]/3, c1y = ys[i] + t[i]*dx[i]/3;
+      var c2x = xs[i+1] - dx[i]/3, c2y = ys[i+1] - t[i+1]*dx[i]/3;
+      d += 'C' + c1x.toFixed(1) + ',' + c1y.toFixed(1) + ' ' + c2x.toFixed(1) + ',' + c2y.toFixed(1) + ' ' + xs[i+1].toFixed(1) + ',' + ys[i+1].toFixed(1);
+    }
+    return {d:d, lastX:xs[n-1], lastY:ys[n-1]};
+  }
+  (function renderSpark(){
+    var svg = document.getElementById('d5Spark');
+    var p = monotonePath(D.debtSpark, 400, 40);
+    // рост за окно > 2% - линия красная (семантика "растёт = плохо")
+    var rising = D.debtSpark[D.debtSpark.length-1] > D.debtSpark[0] * 1.02;
+    var col = rising ? 'var(--red)' : 'var(--green)';
+    svg.innerHTML =
+      '<defs><linearGradient id="sparkG" x1="0" y1="0" x2="0" y2="1">' +
+      '<stop offset="0" stop-color="#E24B4A" stop-opacity="0.14"/>' +
+      '<stop offset="1" stop-color="#E24B4A" stop-opacity="0"/></linearGradient></defs>' +
+      '<path class="d5-spark-area" d="' + p.d + ' L400,40 L0,40 Z" fill="url(#sparkG)"/>' +
+      '<path class="d5-spark-line" d="' + p.d + '" fill="none" stroke="' + col + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" pathLength="1"/>' +
+      '<circle class="d5-spark-dot" cx="' + p.lastX + '" cy="' + p.lastY + '" r="4" fill="' + col + '" stroke="#17171d" stroke-width="2"/>';
+  })();
+
+  /* ===== рендер: дневные колонки поступлений ===== */
+  (function renderDays(){
+    var box = document.getElementById('d5Days');
+    var max = Math.max.apply(null, D.recDays);
+    var html = '';
+    for(var i = 0; i < D.daysInMonth; i++){
+      if(i < D.recDays.length){
+        var hPct = Math.max(4, D.recDays[i] / max * 100);
+        var today = (i === D.recDays.length - 1) ? ' d5-day--today' : '';
+        html += '<div class="d5-day' + today + '" style="height:' + hPct.toFixed(0) + '%" title="' + (i+1) + ' авг · ' + D.recDays[i].toFixed(1).replace('.', ',') + ' млн"></div>';
+      } else {
+        html += '<div class="d5-day d5-day--future" style="height:2px" title="' + (i+1) + ' авг"></div>';
+      }
+    }
+    box.innerHTML = html;
+  })();
+
+  /* ===== рендер: затраты bar-per-row ===== */
+  (function renderCosts(){
+    var box = document.getElementById('d5Costs');
+    var max = D.costs[0].v;
+    var html = '';
+    D.costs.forEach(function(c){
+      var w = (c.v / max * 100).toFixed(1);
+      var vLabel = c.v >= 1 ? c.v.toFixed(1).replace('.', ',') + ' млн' : Math.round(c.v*1000) + ' тыс';
+      html += '<div class="d5-cost">' +
+        '<span class="d5-cost__name">' + c.name + '</span>' +
+        '<div class="d5-cost__barwrap"><div class="d5-cost__bar d5-anim-fill' + (c.red ? ' d5-cost__bar--red' : '') + '" style="width:' + w + '%"></div></div>' +
+        '<span class="d5-cost__val">' + vLabel + ' <span>' + c.pct + '</span></span>' +
+        '</div>';
+    });
+    box.innerHTML = html;
+  })();
+
+  /* ===== рендер: вафля парка ===== */
+  (function renderFleet(){
+    var box = document.getElementById('d5Units');
+    var html = '';
+    D.fleet.forEach(function(g){
+      html += '<div><div class="d5-fleet__ghead"><span class="d5-fleet__gname">' + g.name + '</span><span class="d5-fleet__gcount">' + g.total + ' ед</span></div><div class="d5-units">';
+      var kinds = [['work', g.work, 'в работе'], ['nodriver', g.nodriver, 'без водителя'], ['repair', g.repair, 'ремонт'], ['na', g.na, 'нет статуса']];
+      kinds.forEach(function(k){
+        for(var i = 0; i < k[1]; i++){
+          html += '<i class="d5-unit d5-unit--' + k[0] + '" title="' + g.name + ' · ' + k[2] + '"></i>';
+        }
+      });
+      html += '</div></div>';
+    });
+    box.innerHTML = html;
+  })();
+
+  /* ===== хореография первой загрузки (моушн-агент, t=0..1200) ===== */
+  document.documentElement.classList.add('intro'); // превью: играет при каждой загрузке; в проде - гейт localStorage раз в день
+  var odoTargets = [
+    {el:'vRev', val:D.rev, fmt:fmtRub},
+    {el:'vRec', val:D.rec, fmt:fmtRub},
+    {el:'vDebt', val:D.debt, fmt:fmtRub},
+    {el:'vVp', val:D.vp, fmt:fmtRub},
+    {el:'vHire', val:D.hire, fmt:function(n){ return n.toFixed(1).replace('.', ','); }},
+    {el:'vUtil', val:D.util, fmt:function(n){ return Math.round(n) + '%'; }}
+  ];
+  // одометр: от 92% к 100% за 550ms (не от нуля - "секунда лжи")
+  function odo(el, target, fmt){
+    if(document.hidden){ el.textContent = fmt(target); return; }
+    var from = target * 0.92;
+    var start = null, dur = 550;
+    function frame(ts){
+      if(!start) start = ts;
+      var p = Math.min(1, (ts - start) / dur);
+      var e = 1 - Math.pow(1 - p, 4);
+      el.textContent = fmt(from + (target - from) * e);
+      if(p < 1) requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
+  var cardDelay = function(i){ return 80 + i * 55; };
+  // задержки входа карточек
+  document.querySelectorAll('.d5-card[data-i]').forEach(function(card){
+    var i = parseInt(card.getAttribute('data-i'), 10);
+    card.style.animationDelay = cardDelay(i) + 'ms';
+  });
+  // цифры: вход карточки +120
+  var odoCardIndex = {vRev:0, vRec:1, vDebt:2, vVp:3, vHire:5, vUtil:6};
+  odoTargets.forEach(function(t){
+    var el = document.getElementById(t.el);
+    setTimeout(function(){ odo(el, t.val, t.fmt); }, cardDelay(odoCardIndex[t.el]) + 120);
+  });
+  // заполнения bullet/затрат: вход карточки +150
+  setTimeout(function(){
+    document.querySelectorAll('.d5-anim-fill').forEach(function(f){ f.classList.add('go'); });
+  }, cardDelay(0) + 150);
+  // прогноз-сегменты bullet: чуть позже факта
+  setTimeout(function(){
+    document.querySelectorAll('.d5-bullet__fc').forEach(function(f){ f.classList.add('go'); });
+  }, cardDelay(0) + 550);
+  // спарклайн: вход карточки ДЗ +180, площадь +580, точка +630
+  setTimeout(function(){
+    var line = document.querySelector('.d5-spark-line');
+    if(line) line.style.strokeDashoffset = '0';
+  }, cardDelay(2) + 180);
+  setTimeout(function(){
+    var a = document.querySelector('.d5-spark-area');
+    if(a) a.classList.add('go');
+  }, cardDelay(2) + 580);
+  setTimeout(function(){
+    var d = document.querySelector('.d5-spark-dot');
+    if(d) d.classList.add('go');
+  }, cardDelay(2) + 630);
+  // колонки дней: стаггер 8ms
+  setTimeout(function(){
+    document.querySelectorAll('.d5-day').forEach(function(day, i){
+      setTimeout(function(){ day.classList.add('go'); }, i * 8);
+    });
+  }, cardDelay(1) + 150);
+  // boot-звук: сцена статична к ~1150
+  setTimeout(function(){ soundsD.boot(); }, 1150);
+  // spark line: в intro стартует с dashoffset 1 (CSS), выставим стартовое значение явно
+  (function(){
+    var line = document.querySelector('.d5-spark-line');
+    if(line && document.documentElement.classList.contains('intro')) line.style.strokeDashoffset = '1';
+  })();
+
+  /* ===== "Обновить данные": тикер + чип + блип (моушн-агент) ===== */
+  function ticker(el, newText, up){
+    var old = el.textContent;
+    if(old === newText) return;
+    if(document.hidden){ el.textContent = newText; return; }
+    var box = document.createElement('span');
+    box.className = 'd5-tickbox';
+    var oldSpan = document.createElement('span');
+    oldSpan.className = 'd5-tick-old';
+    oldSpan.textContent = old;
+    var newSpan = document.createElement('span');
+    newSpan.textContent = newText;
+    newSpan.style.opacity = '0';
+    newSpan.style.display = 'inline-block';
+    newSpan.style.transform = 'translateY(' + (up ? '6px' : '-6px') + ')';
+    el.textContent = '';
+    box.appendChild(oldSpan);
+    box.appendChild(newSpan);
+    el.appendChild(box);
+    oldSpan.style.transition = 'opacity 160ms cubic-bezier(0.55,0,1,0.45), transform 160ms cubic-bezier(0.55,0,1,0.45)';
+    newSpan.style.transition = 'opacity 220ms cubic-bezier(0.16,1,0.3,1), transform 220ms cubic-bezier(0.16,1,0.3,1)';
+    requestAnimationFrame(function(){
+      oldSpan.style.opacity = '0';
+      oldSpan.style.transform = 'translateY(' + (up ? '-6px' : '6px') + ')';
+      setTimeout(function(){
+        newSpan.style.opacity = '1';
+        newSpan.style.transform = 'translateY(0)';
+      }, 60);
+    });
+    setTimeout(function(){ el.textContent = newText; }, 320);
+  }
+  function cardBlip(el, red){
+    var cls = red ? 'blip-red' : 'blip';
+    el.classList.remove('blip', 'blip-red');
+    void el.offsetWidth;
+    el.classList.add(cls);
+    setTimeout(function(){ el.classList.remove(cls); }, 450);
+  }
+
+  var refreshBtn = document.getElementById('d5Refresh');
+  refreshBtn.addEventListener('click', function(){
+    refreshBtn.disabled = true;
+    soundsD.refresh();
+    // t+500: поступления подросли
+    setTimeout(function(){
+      var add = 150000 + Math.round(Math.random() * 120000);
+      D.recToday += add; D.rec += add;
+      var recCard = document.getElementById('vRec').closest('.d5-card');
+      ticker(document.getElementById('vRec'), fmtRub(D.rec), true);
+      ticker(document.getElementById('vRecToday'), fmtRub(D.recToday) + ' ₽', true);
+      cardBlip(recCard, false);
+      soundsD.tickUp();
+    }, 500);
+    // t+900: дебиторка выросла - внимание
+    setTimeout(function(){
+      var add = 90000 + Math.round(Math.random() * 80000);
+      D.debt += add;
+      var debtCard = document.getElementById('vDebt').closest('.d5-card');
+      ticker(document.getElementById('vDebt'), fmtRub(D.debt), true);
+      cardBlip(debtCard, true);
+      soundsD.attention();
+    }, 900);
+    // метка свежести
+    setTimeout(function(){
+      var now = new Date();
+      var hh = String(now.getHours()).padStart(2, '0');
+      var mm = String(now.getMinutes()).padStart(2, '0');
+      document.getElementById('d5Meta').textContent = 'СР 27.08 · ' + hh + ':' + mm + ' · данные 1С только что';
+      refreshBtn.disabled = false;
+    }, 1400);
+  });
+})();
+</script>

@@ -3877,8 +3877,15 @@ function getSessionSecret_() {
   return secret;
 }
 
-function issueSessionToken_(email) {
-  var payload = JSON.stringify({ email: email, exp: Date.now() + SESSION_TOKEN_TTL_MS });
+// role - добавлена 30.08 (аудит Справочников): раньше токен нёс только email, роль
+// сервер api.yardhub.ru вообще не мог узнать - proверка доступа к /api/sprav/*
+// (500 сотрудников с ИНН/СНИЛС) была ТОЛЬКО косметическим скрытием пункта меню на
+// фронтенде. role кладём тем же значением, что уже лежит в листе "Доступ"
+// (admin/manager/logist) - сервер сверяет её сам, см. checkSession/requireRole_
+// в api/server.js. Необязательный параметр - старые вызовы (если где-то остались)
+// просто не проставят роль, а не сломаются.
+function issueSessionToken_(email, role) {
+  var payload = JSON.stringify({ email: email, role: role || '', exp: Date.now() + SESSION_TOKEN_TTL_MS });
   var payloadB64 = Utilities.base64EncodeWebSafe(payload);
   var sig = Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(payloadB64, getSessionSecret_()));
   return payloadB64 + '.' + sig;
@@ -4093,12 +4100,18 @@ function buildManagerView_(orders, managerName, ss, period) {
       by_manager: myManagerRow,
       by_logist: myLogistRow,
       by_manager_detail: detailWrapped,
-      // Проблемные заказы этого менеджера (2026-08-12, вкладка "Воронка документов" на личной
-      // странице - тот же формат/источник, что "Обзор заказов → Проблемные заказы", просто
-      // отфильтровано на одного человека, приватность - другие менеджеры не видны).
-      problem_orders: (orders.problem_orders || []).filter(function(p) {
-        return String(p.mgr || '').trim().split(' ')[0].toLowerCase() === managerName.trim().split(' ')[0].toLowerCase();
-      }),
+      // Проблемные заказы (2026-08-12, вкладка "Воронка документов" на личной странице -
+      // тот же формат/источник, что "Обзор заказов → Проблемные заказы"). Обычный менеджер
+      // видит ТОЛЬКО свои (приватность), руководитель группы (2026-08-29, Влад: "ниже должна
+      // быть такая же, как в других разделах, «Проблемные документы»") - по всей своей
+      // команде, тот же расширенный доступ, что уже даёт ему team_by_manager.
+      problem_orders: (function() {
+        const surs = commercialHeadTeam_(managerName) ||
+                     [managerName.trim().split(' ')[0].toLowerCase()];
+        return (orders.problem_orders || []).filter(function(p) {
+          return surs.indexOf(String(p.mgr || '').trim().split(' ')[0].toLowerCase()) >= 0;
+        });
+      })(),
     },
   };
 
@@ -4109,6 +4122,20 @@ function buildManagerView_(orders, managerName, ss, period) {
   if (teamByManager) {
     result.orders.team_by_manager = teamByManager;
     result.orders.managerPlans = orders.managerPlans || {}; // нужен planOf() на фронтенде
+    // Нижний блок страницы руководителя (2026-08-29, Влад: «пусть там будет воронка по
+    // документам... и вкладка с заказчиками: какой заказчик у какого менеджера принёс
+    // сколько выручки»). Отдаём ТОЛЬКО две ветки по каждому члену группы:
+    //   doc           - счётчики воронки оформления (у кого проседают документы),
+    //   top_customers - топ-10 заказчиков по выручке (name/orders/amount/payment/balance).
+    // Списки сделок, пропавших клиентов и должников НЕ отдаём - руководителю для этих
+    // двух вкладок они не нужны, а лишние ПДн в ответе не нужны тем более.
+    const teamDetail = {};
+    Object.keys(orders.by_manager_detail || {}).forEach(function(nm) {
+      if (teamSurs.indexOf(String(nm).trim().split(' ')[0].toLowerCase()) < 0) return;
+      const src = orders.by_manager_detail[nm] || {};
+      teamDetail[nm] = { doc: src.doc || {}, top_customers: src.top_customers || [] };
+    });
+    result.orders.team_by_manager_detail = teamDetail;
   }
 
   // ДЗ, отфильтрованная на этого менеджера ИЛИ на всю его команду (руководитель группы,
@@ -4986,7 +5013,7 @@ function doGet(e) {
   // Кладём в ответ только у трёх "полных" загрузок страницы ниже (admin/manager/logist) -
   // этого достаточно, фронтенд читает токен один раз при загрузке и использует дальше для
   // всех запросов, включая мелкие action=... (которым сам токен в ответе не нужен).
-  var freshSessionToken = issueSessionToken_(email);
+  var freshSessionToken = issueSessionToken_(email, access.role);
 
   try {
     // Отдельный endpoint для истории по машинам (тяжёлые данные, грузим лениво) - только admin
@@ -5684,7 +5711,13 @@ function readMainPayloadCache_(ss) {
   var json = row.slice(2).join('');
   if (!json) return null;
   try {
-    return JSON.parse(json);
+    var parsed = JSON.parse(json);
+    // Возраст ИМЕННО этого кэша (план 2026-08-28, Этап 0.1) - записан в saveMainPayloadCache_
+    // как row[1], до сих пор нигде не читался. Честный источник для карточки Штатки на
+    // фронтенде - её "обн. HH:MM" раньше показывал D.updated (время СБОРКИ ОТВЕТА, не время
+    // самого кэша), см. renderFleetStatus в index.html.
+    parsed.fleet_cache_at = row[1] || null;
+    return parsed;
   } catch (parseErr) {
     return null;
   }
@@ -5726,6 +5759,7 @@ function getMainPayloadCacheOrLive_(ss, staffData) {
     history:  getHistoryData(ss),
     driverOrderCounts: getDriverOrderCounts_(ss, defaultRange.from, defaultRange.to),
     periods: getAvailablePeriods(ss),
+    fleet_cache_at: new Date().toISOString(), // кэша ещё нет - считаем живьём прямо сейчас, честно
   }, freshFinancials);
 }
 
@@ -6676,14 +6710,26 @@ const ORDERS_RAW_SHEET    = 'Заказы_сырые';
 const ORDERS_NORM_SHEET   = 'Заказы_данные';
 const ORDERS_ARCHIVE_PFX  = 'Заказы_';   // + YYYY-MM, например «Заказы_2026-05»
 
+// Клиенты, чьи заказы НЕ участвуют вообще НИ В ЧЁМ - ни в выручке (даже общей, не только
+// коммерческой), ни в марже найма, ни в зарплате, ни во вкладке "Внутренние перевозки" -
+// строка пропускается в самом начале цикла aggregateOrdersRows, до любых счётчиков (см.
+// "continue" сразу после totalOrders++ там). Это НЕ то же самое, что INTERNAL_CLIENTS ниже -
+// внутренние перевозки между своими подразделениями всё равно считаются как факт
+// хозяйственной деятельности (просто не как коммерческая выручка), а здесь - буквально "как
+// будто заказа не было" (Влад, 2026-08-28): личная перевозка собственника под видом заказа,
+// случайно попавшая в 1С с суммой выручки и наймом, искажает маржу найма/зарплату
+// незначительной, но заметной цифрой.
+const FULLY_EXCLUDED_CLIENTS = ['БАЗА ДМД'];
+
 // Внутренние заказчики — выручка есть, поступлений нет; считаем отдельно
 const INTERNAL_CLIENTS = [
   'ТЕХНО ПАРК', 'ОТДЕЛ БУРОВЫХ РАБОТ', 'КРАНМАСТЕР',
-  'МЕГАКРАН', 'БАЗА ДМД', 'БУЛЬДОГ ООО',
+  'МЕГАКРАН', 'БУЛЬДОГ ООО',
   // 'БАЗА' убрано 2026-08-14 (Влад: "Автобаза 2020 это клиент, остальные внутренние",
   // найдено при сверке мега-базы с БДР) - короткое слово случайно резало реального клиента
   // "АВТОБАЗА 2020 ООО" по совпадению подстроки (indexOf-фильтр в inList_/ordInList).
-  // "БАЗА ДМД" (выше) - точное совпадение, настоящий внутренний КА, остаётся.
+  // "БАЗА ДМД" переехала в FULLY_EXCLUDED_CLIENTS выше 2026-08-28 - она НЕ настоящий
+  // внутренний КА, а редкие личные перевозки собственника, не должна быть даже здесь.
   'УМИАТ ЯРД', // Влад, 2026-07-05: тег "(НАШ)" в 1С, найдено при анализе клиентской базы
   'ОТДЕЛ ЭКСКАВАТОРОВ ДМД', 'ОТДЕЛ КРАНОВ ДМД', 'ТД ЯРД', // Влад, 2026-07-06: старые внутренние КА, сейчас это ТЕХНО ПАРК (НАШ)
   'Панасюк Роман Викторович' // Влад, 2026-08-15: разбирал 2 строки Васина за август (100 800 ₽,
@@ -7063,10 +7109,23 @@ function getRevenueDateComparison_(ss) {
   try {
     const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const prevMonthKey = Utilities.formatDate(prevMonthDate, 'Europe/Moscow', 'yyyy-MM');
-    const archive = ss.getSheetByName(ORDERS_ARCHIVE_PFX + prevMonthKey);
-    if (archive && archive.getLastRow() >= 5) {
-      const rows = parseOrdersRawRows(archive.getDataRange().getValues()).rows;
-      result.prev_month = sumManagerRevenueThruDay_(rows, currentDay);
+    // Кэш 6ч (как у prev_year ниже) - горячая точка №1 замера 29.08: без кэша читает ВЕСЬ
+    // лист архива (~1000 строк x 44 колонки) при КАЖДОМ заходе на дашборд, это ~4-5 из
+    // типичных 12 секунд загрузки. Архив прошлого месяца меняется редко (только поздняя
+    // коррекция 1С в первые дни месяца, см. archiveOrdersIfNeeded) - 6ч задержка в этом
+    // случае приемлема для второстепенной сравнительной цифры, план 2026-08-28.
+    const cache = CacheService.getScriptCache();
+    const cacheKey = 'prev_month_revenue_v1_' + prevMonthKey + '_' + currentDay;
+    const cached = cache.get(cacheKey);
+    if (cached !== null) {
+      result.prev_month = parseFloat(cached);
+    } else {
+      const archive = ss.getSheetByName(ORDERS_ARCHIVE_PFX + prevMonthKey);
+      if (archive && archive.getLastRow() >= 5) {
+        const rows = parseOrdersRawRows(archive.getDataRange().getValues()).rows;
+        result.prev_month = sumManagerRevenueThruDay_(rows, currentDay);
+        try { cache.put(cacheKey, String(result.prev_month), 21600); } catch (cacheErr) { /* кэш не критичен */ }
+      }
     }
   } catch (e1) { /* архива нет или не распознан - просто не показываем строку */ }
 
@@ -10439,6 +10498,15 @@ function aggregateOrdersRows(rows) {
     d.setDate(d.getDate() - 1);
     return Utilities.formatDate(d, 'Europe/Moscow', 'yyyy-MM-dd');
   })();
+  // Начало недели (понедельник) - ТО ЖЕ определение, что у поступлений (см. week в
+  // receipts): иначе «выручка за неделю» и «поступления за неделю» на одной плитке
+  // считались бы за разные отрезки и не бились бы между собой.
+  const weekStartStr = (function() {
+    var d = new Date();
+    var dow = d.getDay();                    // 0=вс,1=пн,...
+    d.setDate(d.getDate() - ((dow + 6) % 7));
+    return Utilities.formatDate(d, 'Europe/Moscow', 'yyyy-MM-dd');
+  })();
   // Динамика "сегодня vs вчера" по менеджеру (Влад, 2026-07-17: "то же самое по менеджерам
   // в количестве заказов - на сколько увеличилось по сравнению с предыдущим днём... по
   // нажатию показать какие именно заказы"). Отдельная история не нужна - "Дата создания"
@@ -10547,6 +10615,9 @@ function aggregateOrdersRows(rows) {
   }
 
   for (const row of rows) {
+    // FULLY_EXCLUDED_CLIENTS - пропускаем строку целиком, ДО totalOrders++ и любых других
+    // счётчиков, чтобы она не попала вообще никуда (см. комментарий у константы выше).
+    if (ordInList(str(row, 'customer'), FULLY_EXCLUDED_CLIENTS)) continue;
     totalOrders++;
     const amount    = num(row, 'amount');
     const payment   = num(row, 'payment');   // Оплата итого (累计)
@@ -10623,7 +10694,7 @@ function aggregateOrdersRows(rows) {
     // ── По менеджеру продаж ──
     if (mgrSales && ordInList(mgrSales, TRAL_MANAGERS)) {
       if (!managerMap[mgrSales]) {
-        managerMap[mgrSales] = { name: mgrSales, orders:0, amount:0, amount_thru_yesterday:0, payment:0, cash:0, profit:0, hired_orders:0, hired_cost:0,
+        managerMap[mgrSales] = { name: mgrSales, orders:0, amount:0, amount_thru_yesterday:0, amount_week:0, amount_yesterday:0, payment:0, cash:0, profit:0, hired_orders:0, hired_cost:0,
           internal_orders:0, internal_amount:0, internal_amount_thru_yesterday:0, internal_payment:0,
           own_amount:0, own_profit:0, hired_margin_total:0, hired_margin_qualified:0, hired_margin_unqualified:0,
           hired_extra_costs:0,
@@ -10633,6 +10704,8 @@ function aggregateOrdersRows(rows) {
       m.orders++;
       m.amount  += amount;
       if (isThruYesterday) m.amount_thru_yesterday += amount;
+      if (dateStr !== '' && dateStr >= weekStartStr) m.amount_week += amount;
+      if (dateStr === yesterdayStr) m.amount_yesterday += amount;
       m.payment += payment;
       m.cash    += num(row, 'cash');
       if (isHired) m.profit += profit;   // прибыль только по найму

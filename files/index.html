@@ -1838,8 +1838,9 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
    длительности на ручной выбор (см. TRIP_MODE_OPTS_ в JS), сама плашка и CSS не
    поменялись ни на йоту - "дальний" рисуется тем же классом, что и "суточный"
    (Влад: "добавь такую же золочёную плашку при выборе дальней"). */
-/* Вакантная машина (Влад, 30.08, утверждено превью lp-vacant-preview) - фоновая
-   полоса "без водителя", НЕ настоящая заявка (см. vacantBandRange_ в JS) -
+/* Вакантная машина (Влад, 30.08, утверждено превью lp-vacant-preview; источник
+   вакантности позже переведён на fleet_assignments, см. lpComputeVacant_) -
+   фоновая полоса "вакант", НЕ настоящая заявка (см. vacantBandRange_ в JS) -
    поэтому НЕ .seg (не перетаскивается, pointer-events:none, нет ring/hnd).
    Пунктирные верх/низ отличают её от реальной плитки на глаз - настоящие
    заявки всегда со сплошной границей/заливкой. */
@@ -18745,11 +18746,39 @@ function buildVehicles(){
       gos:f.gos || "", trailer:f.trailer || "", trailerGos:"",
       statusToday:f.status || "", drivers:drivers, schedule:"", days:"", long:isLong
     };
-    v.driver = v.drivers[0] || "";
-    v.vacant = /вакант|арест/i.test(v.driver) || !v.driver;
+    v.driverStaffText_ = v.drivers[0] || "";   /* сырой текст Штатки - см. lpApplyFleetDriverStatus_ */
+    lpApplyFleetDriverStatus_(v);
     STATE.vehicles.push(v);
   });
   loadSegs();   /* восстановить реальные рейсы, введённые логистами - см. saveSegs() */
+}
+/* Влад, 30.08, через параллельную сессию, дословно: "у нас статус водителя тянется
+   из штатки. Все теперь всё должно тянуться из нашей системы. Замыкаем это... если
+   водителя нет за тягачем, значит вакант" - источник истины теперь fleet_assignments
+   (Справочники), не текстовое поле водителя из Штатки с регэкспом на "вакант"/"арест".
+   Правило безусловное: нет ОТКРЫТОЙ записи kind='driver' на этом tractor_gos - вакант,
+   без исключений (сегодняшний "посев" из Штатки в fleet_assignments уже покрывает
+   почти весь парк - см. координацию с параллельной сессией). Меняется и v.vacant, и
+   САМО ИМЯ (v.driver) - НАЙДЕННЫЙ БАГ при живом тесте: первая версия правила только
+   v.vacant, а имя оставляла из Штатки - на машине, где Штатка молчит (пусто), но
+   fleet_assignments знает реального водителя, строка показывала пустое имя вместо
+   него (v.vacant корректно false, а показать нечего).
+   ВРЕМЕННЫЙ ФОЛБЭК только на первые доли секунды загрузки страницы: buildVehicles()
+   вызывается СИНХРОННО, а fetchFleetData_() - сетевой запрос, ответ ещё не пришёл.
+   Показать "вакант" всему парку на секунду, пока грузится - хуже, чем на секунду
+   довериться Штатке; как только fleet_assignments реально пришёл (fleetDataLoaded_),
+   пересчитываем ВЕСЬ парк заново (см. fetchFleetData_) и фолбэк больше не участвует. */
+var fleetDataLoaded_ = false;
+function lpApplyFleetDriverStatus_(v){
+  if (!fleetDataLoaded_){
+    v.driver = v.driverStaffText_;
+    v.vacant = /вакант|арест/i.test(v.driver) || !v.driver;
+    return;
+  }
+  var assign = lpFleetOpenOnTractor_("driver", v.gos, 1);
+  v.vacant = !assign;
+  v.driver = assign ? lpFleetPersonName_(assign.resource_key) : "";
+  v.drivers = v.driver ? [v.driver] : [];
 }
 /* случайный суффикс СЕССИИ в id записи - записи теперь общие через сервер, и два
    логиста с одинаковым счётчиком seq выдали бы один id (и молча перезаписали бы
@@ -19155,7 +19184,14 @@ function renderRows(){
       /* Фамилия Имя, без отчества (Влад, 29.08: "отчество не нужно, лишнее
          место занимает") - полное "Фамилия Имя Отчество" не помещалось в
          узкую шапку строки и обрезалось многоточием на середине отчества. */
-      var drv = v.driver ? v.driver.trim().split(" ").slice(0, 2).join(" ") : "нет водителя";
+      /* Влад, 30.08, через параллельную сессию: "у некоторых водителей разные
+         статусы - вакант, где-то написано без водителя. Должно быть всё
+         единообразно - если водителя нет за тягачем, значит вакант" - подпись
+         теперь зависит от v.vacant (источник - fleet_assignments, см.
+         lpComputeVacant_), а не от того, что дословно написано в Штатке -
+         там могло остаться что угодно ("Вакант"/"Арест"/пусто), пока её
+         текстовое поле не обновится. */
+      var drv = v.vacant ? "Вакант" : v.driver.trim().split(" ").slice(0, 2).join(" ");
       /* Вторая строка: прицеп · тип прицепа · водитель, справа план по ВП и конец
          протяжки (Влад, 30.08 - порядок назван дословно). Свечение плашки вешаем
          классом на .row, чтобы CSS сам решал, светиться ей или нет. */
@@ -19189,16 +19225,17 @@ function renderRows(){
       track.style.width = trackW + "px";
       track.dataset.v = v.i;
 
-      /* Вакантная машина (v.vacant, Штатка) - фоновая полоса "без водителя",
-         НЕ настоящая заявка (см. vacantBandRange_/isVacantRepairOverlap_
-         выше) - добавляется ДО заявок, чтобы реальные плитки (в т.ч.
-         полосатый ремонт поверх неё) легли визуально сверху по порядку DOM. */
+      /* Вакантная машина (v.vacant, теперь из fleet_assignments - см.
+         lpComputeVacant_) - фоновая полоса "вакант", НЕ настоящая заявка (см.
+         vacantBandRange_/isVacantRepairOverlap_ выше) - добавляется ДО
+         заявок, чтобы реальные плитки (в т.ч. полосатый ремонт поверх неё)
+         легли визуально сверху по порядку DOM. */
       if (v.vacant){
         var vb = vacantBandRange_(v);
         if (vb.l > 0){
           var vbEl = document.createElement("div");
           vbEl.className = "track-vacant";
-          vbEl.title = "Без водителя (авто, по данным Штатки) - до конца месяца";
+          vbEl.title = "Вакант (нет закреплённого водителя) - до конца месяца";
           vbEl.style.left = (vb.s * hw) + "px";
           vbEl.style.width = (vb.l * hw) + "px";
           track.appendChild(vbEl);
@@ -19398,7 +19435,7 @@ function makeSeg(s){
     (s.kind === "trip" && s.tripMode ? '<span class="seg-daymode" title="' + tripModeLabel_(s.tripMode) + ' - указано вручную при создании">' + tripModeLabel_(s.tripMode).toLowerCase() + '</span>' : "") +
     "</span>" +
     (active ? '<span class="seg-prog"><i></i></span>' : "") +
-    (vacantStripe ? '<span class="seg-vacant-stripe" title="Машина без водителя (вакант) - ремонт идёт одновременно с вакансией"></span>' : "") +
+    (vacantStripe ? '<span class="seg-vacant-stripe" title="Машина вакантна - ремонт идёт одновременно с вакансией"></span>' : "") +
     '<span class="hov"></span><span class="ring"></span>' +
     '<span class="hnd l"></span><span class="hnd r"></span>';
   paint(el, s);
@@ -20994,7 +21031,16 @@ function fetchFleetData_(){
     .then(function(results){
       var sprav = results[0], fleet = results[1];
       if (sprav.ok){ FLEET_PEOPLE_ = sprav.data.people || []; FLEET_ASSETS_ = sprav.data.assets || []; }
-      if (fleet.ok) FLEET_ASSIGN_ = fleet.data.assignments || [];
+      if (fleet.ok){
+        FLEET_ASSIGN_ = fleet.data.assignments || [];
+        /* Источник истины по "есть водитель/вакант" только что реально стал
+           доступен (см. lpComputeVacant_) - весь парк построен ДО этого момента
+           на временном фолбэке по Штатке, пересчитываем начисто и перерисовываем. */
+        var wasLoaded = fleetDataLoaded_;
+        fleetDataLoaded_ = true;
+        STATE.vehicles.forEach(function(v){ lpApplyFleetDriverStatus_(v); });
+        if (!wasLoaded) renderRows();
+      }
     }).catch(function(){});   /* нет сети/сбой - меню просто не покажет "кто сейчас сидит", посадить/зацепить всё равно работает */
 }
 function lpFleetOpenOnTractor_(kind, tractorGos, slot){

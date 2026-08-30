@@ -1352,6 +1352,13 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
                          чуть длиннее», фамилии обрезались многоточием на 236px */
   --row-h:52px;       /* было 44 - Влад, 29.08: полоски шире по вертикали. Пробовали 58
                          под плитку со скруглением (30.08) - откатили вместе с ней */
+  /* Общий такт ВСЕХ миганий на доске (Влад, 30.08: "все мигания должны иметь
+     один общий такт и быть синхронизированы") - раньше у каждого своя
+     длительность (2.4с/1.4с/3.6с/3с), теперь одна на все. Синхронизация ФАЗЫ
+     (не только длительности) - JS, см. LP_BLINK_TACT_S_/syncBlink_ и её вызовы
+     в конце renderRows()/renderPresence_()/renderScale(); число здесь ДОЛЖНО
+     совпадать с LP_BLINK_TACT_S_ в JS - меняешь одно, меняй и другое. */
+  --lp-blink-tact:2.4s;
 }html[data-theme="light"] #page-logistics-plan{
   --bg:#f2f4f7; --bg2:#ffffff; --bg3:#eceff3; --bg4:#e1e5eb;
   --border:rgba(20,26,38,0.10); --border-strong:rgba(20,26,38,0.20);
@@ -1448,7 +1455,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   transition:background-color .25s ease-out,color .25s ease-out,border-color .25s ease-out;
 }
 #page-logistics-plan .pres-tile.online{border-color:transparent;}
-#page-logistics-plan .pres-tile.active{animation:lpTagGlow 2.4s ease-in-out infinite;}
+#page-logistics-plan .pres-tile.active{animation:lpTagGlow var(--lp-blink-tact) ease-in-out infinite;}
 @media(prefers-reduced-motion:reduce){#page-logistics-plan .pres-tile.active{animation:none;box-shadow:0 0 8px 1px currentColor;}}
 #page-logistics-plan .kpis{display:flex;gap:2px;align-items:stretch;}#page-logistics-plan .kpi{
   /* НАЙДЕННЫЙ БАГ (Влад, 29.08: "наведи порядок, а не криво, как сейчас") -
@@ -1541,7 +1548,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   font-family:'JetBrains Mono',monospace;
   font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
   color:var(--blue);white-space:nowrap;margin-bottom:2px;
-  animation:lpNeonFlicker 3.6s linear infinite;
+  animation:lpNeonFlicker var(--lp-blink-tact) linear infinite;
 }
 @keyframes lpNeonFlicker{
   0%,2%,5%,38%,44%,68%,100%{opacity:1;text-shadow:0 0 4px var(--blue),0 0 10px rgba(55,138,221,.7),0 0 20px rgba(55,138,221,.4);}
@@ -1746,11 +1753,18 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
    .seg-drv (та занимает верх-право под вакансию водителя), чтобы не спорили
    за один угол на узкой плитке. Мигание привязано к состоянию (гаснет само,
    когда сняли галочку) - тот же класс обоснования, что у "свечения ожидания"
-   и присутствия, не новое голое исключение ГОСТа №9. */
+   и присутствия, не новое голое исключение ГОСТа №9.
+   НАЙДЕННЫЙ БАГ (Влад, 30.08): позиционировалась абсолютно относительно
+   .seg (вся плитка), а .seg-txt/.seg-id едут по скроллу sticky-подписью
+   (.seg-label) - на длинной плитке лампочка оставалась на месте появления и
+   "уезжала" от подписи при скролле. Перенесена ВНУТРЬ .seg-label (см. JS,
+   makeSeg) - .seg-label сама position:sticky, значит становится containing
+   block для абсолютных потомков, и лампочка теперь едет вместе с подписью,
+   а не с координатами тайла. */
 #page-logistics-plan .seg-nd{
   position:absolute;top:-3px;left:-3px;width:7px;height:7px;border-radius:50%;
   background:var(--red);box-shadow:0 0 0 2px var(--bg2);z-index:2;
-  animation:lpNdBlink 1.4s ease-in-out infinite;
+  animation:lpNdBlink var(--lp-blink-tact) ease-in-out infinite;
 }
 @keyframes lpNdBlink{
   0%,100%{opacity:1;box-shadow:0 0 0 2px var(--bg2),0 0 6px 1px rgba(226,75,74,.7);}
@@ -1764,13 +1778,15 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
    вариантов (бегущая штриховка/засечки) давал бы заметную нагрузку на глаза
    по всему экрану - значок конкурирует за внимание меньше всего. text-
    transform:uppercase, "суточный" в HTML строчными - тот же приём, что у
-   .day-month-tag. */
+   .day-month-tag. Та же правка, что у .seg-nd выше (Влад, 30.08: "не едет
+   вместе с плашкой") - перенесена ВНУТРЬ .seg-label, теперь едет вместе со
+   sticky-подписью при скролле, а не остаётся на координате всей плитки. */
 #page-logistics-plan .seg-daymode{
   position:absolute;top:-8px;left:36px;z-index:2;
   font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:700;
   letter-spacing:.02em;text-transform:uppercase;color:#1a1204;background:var(--amber);
   border-radius:4px;padding:1px 5px;box-shadow:0 2px 6px rgba(0,0,0,.35);
-  animation:lpDayModePulse 3s ease-in-out infinite;white-space:nowrap;
+  animation:lpDayModePulse var(--lp-blink-tact) ease-in-out infinite;white-space:nowrap;
 }
 @keyframes lpDayModePulse{
   0%,100%{box-shadow:0 2px 6px rgba(0,0,0,.35),0 0 0 0 rgba(239,159,39,.5);}
@@ -18709,6 +18725,7 @@ function renderScale(){
   out.push('<div class="now-head" id="lp-nowHead" style="left:' + (nowHour() * hw) + 'px">' +
     '<span class="now-tag">сейчас</span></div>');
   scaleEl.innerHTML = out.join("");
+  syncAllBlinks_();   /* .day-month-tag пересоздана - подхватить общий такт */
 }
 
 function renderRows(){
@@ -18785,7 +18802,7 @@ function renderRows(){
          выше) - добавляется ДО заявок, чтобы реальные плитки (в т.ч.
          полосатый ремонт поверх неё) легли визуально сверху по порядку DOM. */
       if (v.vacant){
-        var vb = vacantBandRange_();
+        var vb = vacantBandRange_(v);
         if (vb.l > 0){
           var vbEl = document.createElement("div");
           vbEl.className = "track-vacant";
@@ -18809,6 +18826,7 @@ function renderRows(){
 
   rowsEl.innerHTML = "";
   rowsEl.appendChild(frag);
+  syncAllBlinks_();   /* точки/бейджи/тег-свечение пересозданы - подхватить общий такт */
 }
 
 /* дата окончания служебной плашки = правый край отрезка (Влад, 29.08).
@@ -18867,17 +18885,58 @@ function segLabel(s){
    поменять на 21/24 одним числом. */
 var DAY_MODE_THRESHOLD_H_ = 22;
 function isDayMode_(s){ return s.kind === "trip" && s.l > DAY_MODE_THRESHOLD_H_; }
+/* Общий такт миганий (Влад, 30.08: "все мигания должны иметь один общий такт
+   и быть синхронизированы") - раньше у "свечения ожидания"/присутствия
+   (lpTagGlow), точки "под данные" (lpNdBlink), неоновой подписи месяца
+   (lpNeonFlicker) и значка "суточный" (lpDayModePulse) была РАЗНАЯ
+   длительность (2.4/1.4/3.6/3с) - CSS-часть унификации в
+   #page-logistics-plan{--lp-blink-tact:...} (ЧИСЛО ТАМ ДОЛЖНО СОВПАДАТЬ С
+   ЭТИМ). Но одной длительности мало - у CSS-анимации своя точка отсчёта
+   времени = момент появления элемента в DOM, а плитки/бейджи/лампочки
+   создаются в РАЗНЫЕ моменты (поллинг каждые 7с, ручные правки, зум) - даже
+   с одинаковой длительностью они бы мигали каждый по своей фазе, не в такт.
+   syncBlink_() решает это отрицательным animation-delay, посчитанным от
+   ОБЩИХ настенных часов (Date.now()) - элемент выглядит так, будто его
+   анимация уже идёт нужное время С НАЧАЛА ОБЩЕГО такта, а не с нуля с
+   момента своего рождения. Вызывается в конце renderRows()/renderPresence_/
+   renderScale() - везде, где эти классы (пере)создаются. */
+var LP_BLINK_TACT_S_ = 2.4;
+function syncBlink_(el){
+  var t = (Date.now() / 1000) % LP_BLINK_TACT_S_;
+  el.style.animationDelay = "-" + t.toFixed(3) + "s";
+}
+function syncAllBlinks_(){
+  [].forEach.call(pageRoot.querySelectorAll(
+    ".seg-nd, .seg-daymode, .day-month-tag, .row.awaiting .tag, .pres-tile.active"
+  ), syncBlink_);
+}
 /* Вакантные машины (Влад, 30.08: "машина, где не закреплено вообще ни одного
    водителя, автоматически должна протягиваться в планировке на неопределённый
    срок, пусть это будет до конца месяца") - утверждено превью (артефакт
    lp-vacant-preview): НЕ настоящая заявка, а честный фоновый индикатор,
    вычисляется из v.vacant (тот же признак Штатки, что уже красит фамилию
    водителя красным в шапке строки) - сам появляется/исчезает вслед за
-   Штаткой, ничего не хранится и не синкается. От "сейчас" (когда логист
-   реально смотрит ленту) до конца ТЕКУЩЕГО календарного месяца - не с начала
-   месяца назад, вакантность - снимок состояния сейчас, не факт про прошлое. */
-function vacantBandRange_(){
-  var start = nowHour(), end = DAYS_EPOCH_MONTH_ * 24;
+   Штаткой, ничего не хранится и не синкается.
+
+   НАЙДЕННЫЙ БАГ формулировки (Влад, 30.08, второй заход): старт полосы
+   считался от "сейчас" - неверно, "сейчас" это момент, когда логист СМОТРИТ
+   на ленту, а не момент, когда машина СТАЛА вакантной. Правильно (дословно):
+   "должна начинаться с начала месяца, если в течение месяца не было ни одной
+   заявки, или после последней заявки. Допустим, до 15-го числа работал
+   человек, уволился... полоска до того момента, пока не посадим водителя".
+   Старт = конец САМОЙ ПОЗДНЕЙ реальной записи этой машины в текущем месяце
+   (любого kind - трактуем "заявка" широко, не только рейс), а если записей
+   вообще нет - с начала месяца (0). Конец по-прежнему конец месяца - "пока
+   не посадим водителя" на практике ограничен тем же горизонтом, что и вся
+   остальная лента (следующий месяц ещё не подключён, см. monthArrowClick). */
+function vacantBandRange_(v){
+  var lastEnd = 0;
+  STATE.segs.forEach(function(s){
+    if (s.v !== v.i) return;
+    var end = s.s + s.l;
+    if (end > lastEnd) lastEnd = end;
+  });
+  var start = Math.max(0, lastEnd), end = DAYS_EPOCH_MONTH_ * 24;
   return {s: start, l: Math.max(0, end - start)};
 }
 /* «Единственный момент, когда два статуса могут накладываться» (Влад, 30.08) -
@@ -18889,7 +18948,7 @@ function isVacantRepairOverlap_(s){
   if (s.kind !== "repair") return false;
   var v = STATE.vehicles[s.v];
   if (!v || !v.vacant) return false;
-  var band = vacantBandRange_();
+  var band = vacantBandRange_(v);
   if (band.l <= 0) return false;
   return s.s < band.s + band.l && band.s < s.s + s.l;
 }
@@ -18918,10 +18977,11 @@ function makeSeg(s){
       '<span class="seg-drv ' + (v && v.vacant ? "off" : "on") + '"></span></span>';
   }
   el.innerHTML = '<span class="seg-label">' + head +
-    '<span class="seg-txt">' + segLabel(s) + "</span></span>" +
-    (active ? '<span class="seg-prog"><i></i></span>' : "") +
+    '<span class="seg-txt">' + segLabel(s) + "</span>" +
     (s.needsData ? '<span class="seg-nd" title="Под данные - документы для пропуска ещё не собраны"></span>' : "") +
     (isDayMode_(s) ? '<span class="seg-daymode" title="Суточный режим - рейс дольше 22 часов">суточный</span>' : "") +
+    "</span>" +
+    (active ? '<span class="seg-prog"><i></i></span>' : "") +
     (vacantStripe ? '<span class="seg-vacant-stripe" title="Машина без водителя (вакант) - ремонт идёт одновременно с вакансией"></span>' : "") +
     '<span class="hov"></span><span class="ring"></span>' +
     '<span class="hnd l"></span><span class="hnd r"></span>';
@@ -19896,6 +19956,7 @@ function renderPresence_(){
     var title = p.full + (active ? " · сейчас действует" : online ? " · на странице" : " · не на странице");
     return '<span class="' + cls + '"' + style + ' title="' + title + '">' + three(p) + '</span>';
   }).join("");
+  syncAllBlinks_();   /* плитки присутствия пересозданы - подхватить общий такт */
 }
 setInterval(sendPresence_, 7000);
 setInterval(fetchPresence_, 7000);

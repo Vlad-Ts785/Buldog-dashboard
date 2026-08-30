@@ -1804,6 +1804,10 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   50%{box-shadow:0 2px 6px rgba(0,0,0,.35),0 0 0 4px rgba(239,159,39,0);}
 }
 @media(prefers-reduced-motion:reduce){#page-logistics-plan .seg-daymode{animation:none;}}
+/* 30.08, второй заход того же дня - источник подписи сменился с авто-расчёта по
+   длительности на ручной выбор (см. TRIP_MODE_OPTS_ в JS), сама плашка и CSS не
+   поменялись ни на йоту - "дальний" рисуется тем же классом, что и "суточный"
+   (Влад: "добавь такую же золочёную плашку при выборе дальней"). */
 /* Вакантная машина (Влад, 30.08, утверждено превью lp-vacant-preview) - фоновая
    полоса "без водителя", НЕ настоящая заявка (см. vacantBandRange_ в JS) -
    поэтому НЕ .seg (не перетаскивается, pointer-events:none, нет ring/hnd).
@@ -18709,6 +18713,36 @@ function refreshAwaiting_(vi){
   if (!row || !v) return;
   row.classList.toggle("awaiting", lpAwaiting_(v));
 }
+/* Глубокий разбор, Влад, 30.08 (второй заход - "уже второй раз замечаю эту
+   проблему... эта функция у нас работала чётко"): точечный refreshAwaiting_
+   выше закрывал ТОЛЬКО перенос плитки на другую машину (первый найденный
+   случай, "Тибукин Виктор"). Живые скриншоты 30.08 показали ещё МИНИМУМ два
+   независимых пути к тому же симптому - НЕ мутация конкретной строки, а
+   расхождение с самим ходом часов:
+   1. Растяжка за край (resizeL/resizeR) и сдвиг по ВРЕМЕНИ на СВОЕЙ ЖЕ строке
+      (drag mode="move", before.v === seg.v) шли через commit() БЕЗ единого
+      refreshAwaiting_ - у растяжки его не было вообще, у сдвига по времени
+      условие "if (before.v !== seg.v)" нарочно исключало ровно этот случай.
+      И то, и другое меняет s.s/s.l - момент, когда "сейчас" попадает в отрезок
+      или выходит из него, вообще-то мог сдвинуться. ИСПРАВЛЕНО НАВСЕГДА -
+      вызов перенесён ВНУТРЬ самого commit() (ниже), а не в каждый вызывающий
+      код по отдельности: новый способ менять seg (какой бы ни появился в
+      будущем) получает это бесплатно, если идёт через commit().
+   2. САМЫЙ вероятный настоящий виновник по скриншотам (три РАЗНЫЕ машины разом
+      не светятся, без следа недавнего действия именно на них) - poll
+      fetchPlanSegs_ (ниже) на "ничего не изменилось" (max_updated совпал)
+      делает return ДО renderRows() - это специально сделанная экономия сети/
+      DOM, но она молча останавливает и пересчёт "сейчас" тоже. Отрезок мог
+      закончиться ПРОСТО ОТ ХОДА ЧАСОВ, без единого клика - агент Планировки
+      узнаёт об этом с сервера, только если max_updated реально сдвинулся, а
+      если в системе минуту-две никто ничего не трогал (типичный вечер/ночь),
+      "сейчас" застревает в прошлом на неопределённый срок, пока кто-нибудь
+      другой не сделает ЛЮБУЮ правку где угодно на доске. Это НЕ баг мутации -
+      его нельзя закрыть точечным refreshAwaiting_(vi) в каком-то одном месте,
+      нужен периодический пересчёт НЕЗАВИСИМО от того, изменились ли данные. */
+function refreshAllAwaiting_(){
+  STATE.vehicles.forEach(function(v){ refreshAwaiting_(v.i); });
+}
 function lpActiveSeg_(v){
   var h = nowHour(), segs = (STATE && STATE.segs) || [];
   for (var i = 0; i < segs.length; i++){
@@ -18919,7 +18953,11 @@ function driveroffReasonLabel_(code){
   return f ? f[1] : null;
 }
 function segLabel(s){
-  if (s.kind === "trip") return routeLabel_(s.from, s.to);
+  /* Заказчик - Влад, 30.08: "это наименование заказчика, оно должно быть... и в
+     протяжке" - показываем прямо в подписи (плитка на ленте + заголовок шторки),
+     один источник (segLabel), не дублируем формат в двух местах. Пусто, если не
+     указан - как и раньше с route_from/route_to. */
+  if (s.kind === "trip") return (s.customer ? s.customer + " · " : "") + routeLabel_(s.from, s.to);
   var base = s.kind === "repair" ? "Ремонт" : s.kind === "maint" ? "ТО" :
              s.kind === "noorder" ? "Без заказа" : s.kind === "driveroff" ? "Без водителя" : "";
   if (s.kind === "driveroff"){
@@ -18928,15 +18966,24 @@ function segLabel(s){
   }
   return base ? base + " · " + untilLabel(s) : "";
 }
-/* «Суточный режим» (Влад, 30.08: "машины, которые работают в суточном
-   режиме... если машина протянута на более чем 22 часа - это три смены") -
-   ничего не хранится, считается на лету из самой длительности рейса, как
-   "Свободные сейчас" в фильтрах. Раньше логисты писали "Суточный режим"
-   вручную прямо в поле "Куда" - рабочий обход при отсутствии сигнала,
-   больше не нужен. Порог - отдельная константа, Влад может попросить
-   поменять на 21/24 одним числом. */
-var DAY_MODE_THRESHOLD_H_ = 22;
-function isDayMode_(s){ return s.kind === "trip" && s.l > DAY_MODE_THRESHOLD_H_; }
+/* «Суточный»/«Дальний» режим рейса - РУЧНОЙ выбор при создании заявки (Влад,
+   30.08, второй заход в тот же день: "выяснилось, что есть рейсы, которые мы
+   протягиваем на несколько суток, но их нельзя называть «суточные». Это
+   «дальний»... суточный и дальний - это теперь не автоматический статус при
+   протяжке, а ручной ввод при создании заявки... когда будет навигация
+   подключена, возможно, это будет автоматизировано, сейчас пока ручной").
+   ДО этой правки статус считался на лету по длительности (>22ч = суточный,
+   см. историю коммита) - ломалось ровно на том кейсе, который Влад и поймал:
+   48-часовой рейс (несколько суток подряд, а не одна удлинённая смена) тоже
+   считался "суточным", хотя это другая по сути вещь ("дальний"). Порог
+   длительности не может отличить два эти случая друг от друга - только
+   логист знает, что это на самом деле. TRIP_MODE_ - список для чипов выбора
+   в шторке (как DRIVEROFF_REASONS_), "" - режим не указан (по умолчанию). */
+var TRIP_MODE_OPTS_ = [["", "Не указан"], ["daily", "Суточный"], ["long", "Дальний"]];
+function tripModeLabel_(code){
+  var f = TRIP_MODE_OPTS_.filter(function(p){ return p[0] === code; })[0];
+  return (f && f[0]) ? f[1] : null;
+}
 /* Общий такт миганий (Влад, 30.08: "все мигания должны иметь один общий такт
    и быть синхронизированы") - раньше у "свечения ожидания"/присутствия
    (lpTagGlow), точки "под данные" (lpNdBlink), неоновой подписи месяца
@@ -19039,7 +19086,10 @@ function makeSeg(s){
   el.innerHTML = '<span class="seg-label">' + head +
     '<span class="seg-txt">' + segLabel(s) + "</span>" +
     (s.needsData ? '<span class="seg-nd" title="Под данные - документы для пропуска ещё не собраны"></span>' : "") +
-    (isDayMode_(s) ? '<span class="seg-daymode" title="Суточный режим - рейс дольше 22 часов">суточный</span>' : "") +
+    /* один и тот же "золочёный" значок для обоих режимов (Влад, 30.08: "добавь
+       такую же золочёную плашку при выборе дальней") - меняется только подпись,
+       CSS-класс общий (.seg-daymode), см. tripModeLabel_ выше. */
+    (s.kind === "trip" && s.tripMode ? '<span class="seg-daymode" title="' + tripModeLabel_(s.tripMode) + ' - указано вручную при создании">' + tripModeLabel_(s.tripMode).toLowerCase() + '</span>' : "") +
     "</span>" +
     (active ? '<span class="seg-prog"><i></i></span>' : "") +
     (vacantStripe ? '<span class="seg-vacant-stripe" title="Машина без водителя (вакант) - ремонт идёт одновременно с вакансией"></span>' : "") +
@@ -19768,8 +19818,7 @@ window.addEventListener("pointerup", function(e){
     if (before.v !== seg.v && seg.needsData){
       showConfirmDialog_('Данная заявка <b>под данные</b>. Уверены, что вы её хотите перепланировать на другую машину?', function(ok){
         if (ok){
-          S.drop(); commit(seg, before, "Перенесено на другую машину");
-          refreshAwaiting_(before.v); refreshAwaiting_(seg.v);
+          S.drop(); commit(seg, before, "Перенесено на другую машину");   /* commit() сам обновит "ждёт заказ" на обеих строках */
           return;
         }
         /* откат чисто через данные + полный renderRows() - проще и надёжнее
@@ -19780,8 +19829,7 @@ window.addEventListener("pointerup", function(e){
         renderRows();
       });
     } else {
-      commit(seg, before, before.v !== seg.v ? "Перенесено на другую машину" : "Сдвинуто по времени");
-      if (before.v !== seg.v){ refreshAwaiting_(before.v); refreshAwaiting_(seg.v); }
+      commit(seg, before, before.v !== seg.v ? "Перенесено на другую машину" : "Сдвинуто по времени");   /* commit() сам обновит "ждёт заказ" */
     }
   }
 });
@@ -19801,6 +19849,13 @@ function commit(seg, before, text){
     renderRows();
   });
   renderKpis();
+  /* ЗДЕСЬ, а не в каждом вызывающем коде - см. разбор у refreshAllAwaiting_ выше
+     (Влад, 30.08, второй заход). before.v и seg.v могут быть одной и той же
+     машиной (растяжка/сдвиг по времени) или разными (перенос) - оба случая
+     годятся переставить "сейчас попадает/не попадает в отрезок" безусловно,
+     лишний вызов на той же строке не вредит (toggle идемпотентен). */
+  refreshAwaiting_(before.v);
+  if (seg.v !== before.v) refreshAwaiting_(seg.v);
 }
 /* ---------- ОБЩИЕ рейсы через сервер (Влад, 30.08: "все должны видеть в мгновение,
    кто-то протянул, поставил заказ... общая работа в этой песочнице") ----------
@@ -19831,12 +19886,14 @@ function segToWire_(s){
   return {
     id: s.id, gos: v.gos, kind: s.kind, s: Math.round(s.s * 100) / 100, l: Math.round(s.l * 100) / 100,
     mg: (s.mg && s.mg.full) || "", lg: (s.lg && s.lg.full) || "",
-    from: s.from || "", to: s.to || "", nd: s.needsData ? 1 : 0, reason: s.reason || ""
+    from: s.from || "", to: s.to || "", customer: s.customer || "", nd: s.needsData ? 1 : 0, reason: s.reason || "",
+    trip_mode: s.tripMode || ""
   };
 }
 function pushSegToServer_(w){
   return postToYardApi_("/plan/seg", {id:w.id, gos:w.gos, kind:w.kind, s:w.s, l:w.l,
-    mg:w.mg, lg:w.lg, from:w.from, to:w.to, needs_data:w.nd, reason:w.reason})
+    mg:w.mg, lg:w.lg, from:w.from, to:w.to, customer:w.customer, needs_data:w.nd, reason:w.reason,
+    trip_mode:w.trip_mode})
     .catch(function(){ return { ok:false }; });
 }
 function saveSegs(){
@@ -19916,7 +19973,8 @@ function applyServerSegs_(rows){
       var v = STATE.vehicles[vi];
       seg.mg = personByName_(r.manager_name, MANAGERS);
       seg.lg = personByName_(r.logist_name, (v && v.long) ? LOG_LONG : LOG_TRAL);
-      seg.from = r.route_from || ""; seg.to = r.route_to || "";
+      seg.from = r.route_from || ""; seg.to = r.route_to || ""; seg.customer = r.customer || "";
+      seg.tripMode = r.trip_mode || "";
     }
     segs.push(seg);
     seenIds[r.id] = true;
@@ -19963,7 +20021,19 @@ function fetchPlanSegs_(){
       saveSegs();
       return;
     }
-    if (!firstFetch && r.data.max_updated === planMaxUpdated_ && r.data.count === Object.keys(segsSnapshot_).length) return;
+    if (!firstFetch && r.data.max_updated === planMaxUpdated_ && r.data.count === Object.keys(segsSnapshot_).length){
+      /* "На сервере ничего не изменилось" НЕ значит "на экране ничего не должно
+         измениться" - см. разбор у refreshAllAwaiting_ (Влад, 30.08, второй
+         заход: "уже второй раз замечаю эту проблему"). Отрезок мог закончиться
+         просто от хода часов, без единого чужого клика - если в системе минуту-
+         две никто не правил доску, ЭТОТ return раньше молча замораживал "сейчас"
+         на весь тот простой. Дешёвый пересчёт (toggle класса, не renderRows())
+         на каждый тик поллинга - тот же порядок стоимости, что уже платим здесь
+         за сам fetch, лишним не считаем. */
+      refreshAllAwaiting_();
+      renderKpis();
+      return;
+    }
     if (drag || create || arr) return;   /* рука на плитке - применим следующим тиком */
     planMaxUpdated_ = r.data.max_updated;
     var hadPending = applyServerSegs_(r.data.segs);
@@ -20040,7 +20110,8 @@ function loadSegs(){
         var v = STATE.vehicles[vi];
         seg.mg = (o.mg && o.mg.full) ? o.mg : personByName_(o.mg, MANAGERS);
         seg.lg = (o.lg && o.lg.full) ? o.lg : personByName_(o.lg, (v && v.long) ? LOG_LONG : LOG_TRAL);
-        seg.from = o.from; seg.to = o.to;
+        seg.from = o.from; seg.to = o.to; seg.customer = o.customer || "";
+        seg.tripMode = o.trip_mode || "";
       }
       STATE.segs.push(seg);
       /* снимок НЕ трогаем: до первого ответа сервера мы не знаем, что там - пусть
@@ -20158,12 +20229,46 @@ rowsEl.addEventListener("click", function(e){
   openCreateDrawer(vi, snap !== null ? snap : roundStep(raw), 8);
 });
 
+/* «Заказчик» в шторках Планировки (Влад, 30.08: "это наименование заказчика...
+   у нас уже в план задания выбор заказчика, её можно применить и тут") - тот же
+   список и то же строгое правило "начинается с введённого", что в План задания
+   (orderPlanCustomerList_ объявлена в основном скрипте страницы - отдельный
+   <script> Планировки не модуль и не IIFE, видит её как обычный глобал). Своя,
+   а не разделяемая с План задания разметка (id инпута/бокса свои у создания и
+   редактирования шторки) - подсказки вешаются через DOM API, не строкой в
+   innerHTML с onclick= (как у orderPlanCustomerInput_) - меньше экранирования,
+   тот же стиль, что у остальных полей этой шторки (fromVal/toVal через .oninput). */
+function lpWireCustomerInput_(inputId, boxId, setVal){
+  var input = document.getElementById(inputId), box = document.getElementById(boxId);
+  if (!input || !box) return;
+  function refresh(){
+    var val = input.value.trim().toLowerCase();
+    if (!val){ box.style.display = "none"; box.innerHTML = ""; return; }
+    var matches = orderPlanCustomerList_().filter(function(n){
+      return n.toLowerCase().indexOf(val) === 0;
+    }).slice(0, 15);
+    if (!matches.length){ box.style.display = "none"; box.innerHTML = ""; return; }
+    box.innerHTML = matches.map(function(n){
+      return '<div style="padding:7px 10px;cursor:pointer;font-size:13px;color:var(--text)">' + n.replace(/</g, "&lt;") + "</div>";
+    }).join("");
+    [].forEach.call(box.children, function(row, i){
+      row.onmousedown = function(){ input.value = matches[i]; setVal(matches[i]); box.style.display = "none"; };
+      row.onmouseover = function(){ row.style.background = "var(--bg4)"; };
+      row.onmouseout = function(){ row.style.background = ""; };
+    });
+    box.style.display = "block";
+  }
+  input.oninput = function(){ setVal(input.value); refresh(); };
+  input.onfocus = refresh;
+  input.onblur = function(){ setTimeout(function(){ box.style.display = "none"; }, 150); };
+}
+
 /* ---------- шторка ---------- */
 var scrim = document.getElementById("lp-scrim"), drawer = document.getElementById("lp-drawer");
 
 function openCreateDrawer(vi, s, l){
   var v = STATE.vehicles[vi];
-  var kind = "trip", mgIdx = 0, lgIdx = 0, fromVal = "", toVal = "", ndVal = false, reasonIdx = 0;
+  var kind = "trip", mgIdx = 0, lgIdx = 0, fromVal = "", toVal = "", customerVal = "", ndVal = false, reasonIdx = 0, tripModeIdx = 0;
   /* Даты - тоже редактируемые поля, не текст (Влад, 29.08: "создание события:
      также должна быть возможность выбирать даты") - протяжка/двойной клик на
      ленте задают ПЕРВОНАЧАЛЬНОЕ s/l, но не единственный способ их поставить;
@@ -20190,6 +20295,10 @@ function openCreateDrawer(vi, s, l){
         return '<button class="chip cr-type" data-k="' + p[0] + '" aria-pressed="' + (kind === p[0]) + '">' + p[1] + '</button>';
       }).join("") + '</div>' +
       (isTrip ?
+        '<div class="cr-field"><span class="grp-label">Заказчик</span><div style="position:relative">' +
+          '<input autocomplete="off" class="cr-input" id="lp-crCustomer" placeholder="начните вводить название" value="' + (customerVal || "").replace(/"/g, "&quot;") + '">' +
+          '<div id="lp-crCustomer-suggest" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg3);border:1px solid var(--border);border-radius:8px;margin-top:4px;max-height:220px;overflow-y:auto;z-index:10"></div>' +
+        '</div></div>' +
         '<div class="cr-field"><span class="grp-label">Менеджер</span><div class="cr-opts" id="lp-crMg">' +
           MANAGERS.map(function(m, i){ return '<button class="chip cr-opt" data-i="' + i + '" aria-pressed="' + (i === mgIdx) + '">' + personShort(m) + '</button>'; }).join("") +
         '</div></div>' +
@@ -20199,6 +20308,9 @@ function openCreateDrawer(vi, s, l){
         '<div class="cr-field"><span class="grp-label">Откуда</span><input autocomplete="off" class="cr-input" id="lp-crFrom" list="lp-crPlaces" placeholder="можно не указывать" value="' + fromVal + '"></div>' +
         '<div class="cr-field"><span class="grp-label">Куда</span><input autocomplete="off" class="cr-input" id="lp-crTo" list="lp-crPlaces" placeholder="можно не указывать" value="' + toVal + '"></div>' +
         '<datalist id="lp-crPlaces">' + PLACES.map(function(p){ return "<option value=\"" + p + "\">"; }).join("") + '</datalist>' +
+        '<div class="cr-field"><span class="grp-label">Режим</span><div class="cr-opts" id="lp-crMode">' +
+          TRIP_MODE_OPTS_.map(function(p, i){ return '<button class="chip cr-opt" data-i="' + i + '" aria-pressed="' + (i === tripModeIdx) + '">' + p[1] + '</button>'; }).join("") +
+        '</div></div>' +
         '<button class="chip data-chip" id="lp-crNd" aria-pressed="' + ndVal + '" title="Документы для пропуска ещё не собраны - плитка будет мигать, перенос на другую машину спросит подтверждение">' + ICON_CHECK + 'Под данные</button>'
         : isDriverOff ?
         '<div class="cr-field"><span class="grp-label">Причина</span><div class="cr-opts" id="lp-crReason">' +
@@ -20215,10 +20327,12 @@ function openCreateDrawer(vi, s, l){
       [].forEach.call(drawer.querySelector("#lp-crReason").children, function(btn, i){ btn.onclick = function(){ reasonIdx = i; render(); }; });
     }
     if (isTrip){
+      lpWireCustomerInput_("lp-crCustomer", "lp-crCustomer-suggest", function(v){ customerVal = v; });
       [].forEach.call(drawer.querySelector("#lp-crMg").children, function(btn, i){ btn.onclick = function(){ mgIdx = i; render(); }; });
       [].forEach.call(drawer.querySelector("#lp-crLg").children, function(btn, i){ btn.onclick = function(){ lgIdx = i; render(); }; });
       drawer.querySelector("#lp-crFrom").oninput = function(ev){ fromVal = ev.target.value; };
       drawer.querySelector("#lp-crTo").oninput = function(ev){ toVal = ev.target.value; };
+      [].forEach.call(drawer.querySelector("#lp-crMode").children, function(btn, i){ btn.onclick = function(){ tripModeIdx = i; render(); }; });
       drawer.querySelector("#lp-crNd").onclick = function(){ ndVal = !ndVal; render(); };
     }
     var crStartEl = document.getElementById("lp-crStart"), crEndEl = document.getElementById("lp-crEnd"),
@@ -20243,7 +20357,7 @@ function openCreateDrawer(vi, s, l){
          быть"). Раньше пустое поле подменялось PLACES[0]/PLACES[1] - реальный на вид
          город, которого никто не вводил; оставляем как есть, честно пусто -
          routeLabel_() показывает "не указано" на отображении, не здесь. */
-      else if (kind === "trip") push(v, "trip", s, l, {mg:MANAGERS[mgIdx], lg:logistPool[lgIdx], from:fromVal, to:toVal, needsData:ndVal});
+      else if (kind === "trip") push(v, "trip", s, l, {mg:MANAGERS[mgIdx], lg:logistPool[lgIdx], from:fromVal, to:toVal, customer:customerVal, needsData:ndVal, tripMode:TRIP_MODE_OPTS_[tripModeIdx][0]});
       else push(v, kind, s, l);
       STATE.lastEdited = s;
       saveSegs();
@@ -20293,7 +20407,7 @@ function copySegAfter_(seg, openAfter){
   var newS = seg.s + seg.l;
   var clash = STATE.segs.some(function(x){ return x.v === seg.v && newS < x.s + x.l && x.s < newS + seg.l; });
   if (clash){ S.reject(); toast("Сразу после - место занято, подвиньте копию вручную", null); return; }
-  var extra = isTrip ? {mg: seg.mg, lg: seg.lg, from: seg.from, to: seg.to, needsData: seg.needsData}
+  var extra = isTrip ? {mg: seg.mg, lg: seg.lg, from: seg.from, to: seg.to, customer: seg.customer, needsData: seg.needsData, tripMode: seg.tripMode}
     : seg.kind === "driveroff" ? {reason: seg.reason} : undefined;
   push(v, seg.kind, newS, seg.l, extra);
   var copySeg = STATE.segs[STATE.segs.length - 1];
@@ -20324,8 +20438,10 @@ function openDrawer(seg){
   var lgIdx = isTrip ? Math.max(0, logistPool.indexOf(seg.lg)) : 0;
   var fromVal = isTrip ? (seg.from || "") : "";
   var toVal = isTrip ? (seg.to || "") : "";
+  var customerVal = isTrip ? (seg.customer || "") : "";
   var ndVal = !!seg.needsData;
   var reasonIdx = isDriverOff ? Math.max(0, DRIVEROFF_REASONS_.map(function(p){ return p[0]; }).indexOf(seg.reason)) : 0;
+  var tripModeIdx = isTrip ? Math.max(0, TRIP_MODE_OPTS_.map(function(p){ return p[0]; }).indexOf(seg.tripMode || "")) : 0;
   var startVal = hToLocalInputVal_(seg.s), endVal = hToLocalInputVal_(seg.s + seg.l);
 
   var infoRows = [["Машина", v.type + " · " + v.gos], ["Тягач", v.tractor],
@@ -20343,6 +20459,10 @@ function openDrawer(seg){
       (isTrip ? "Рейс" : "Состояние машины") + '</div>' +
       '<div class="dr-title">' + segLabel(seg) + "</div>" +
       (isTrip ?
+        '<div class="cr-field"><span class="grp-label">Заказчик</span><div style="position:relative">' +
+          '<input autocomplete="off" class="cr-input" id="lp-drCustomer" placeholder="начните вводить название" value="' + (customerVal || "").replace(/"/g, "&quot;") + '">' +
+          '<div id="lp-drCustomer-suggest" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg3);border:1px solid var(--border);border-radius:8px;margin-top:4px;max-height:220px;overflow-y:auto;z-index:10"></div>' +
+        '</div></div>' +
         '<div class="cr-field"><span class="grp-label">Менеджер</span><div class="cr-opts" id="lp-drMg">' +
           MANAGERS.map(function(m, i){ return '<button class="chip cr-opt" data-i="' + i + '" aria-pressed="' + (i === mgIdx) + '">' + personShort(m) + '</button>'; }).join("") +
         '</div></div>' +
@@ -20352,6 +20472,9 @@ function openDrawer(seg){
         '<div class="cr-field"><span class="grp-label">Откуда</span><input autocomplete="off" class="cr-input" id="lp-drFrom" list="lp-crPlaces" placeholder="можно не указывать" value="' + fromVal + '"></div>' +
         '<div class="cr-field"><span class="grp-label">Куда</span><input autocomplete="off" class="cr-input" id="lp-drTo" list="lp-crPlaces" placeholder="можно не указывать" value="' + toVal + '"></div>' +
         '<datalist id="lp-crPlaces">' + PLACES.map(function(p){ return "<option value=\"" + p + "\">"; }).join("") + '</datalist>' +
+        '<div class="cr-field"><span class="grp-label">Режим</span><div class="cr-opts" id="lp-drMode">' +
+          TRIP_MODE_OPTS_.map(function(p, i){ return '<button class="chip cr-opt" data-i="' + i + '" aria-pressed="' + (i === tripModeIdx) + '">' + p[1] + '</button>'; }).join("") +
+        '</div></div>' +
         '<button class="chip data-chip" id="lp-drNd" aria-pressed="' + ndVal + '" title="Документы для пропуска ещё не собраны - плитка будет мигать, перенос на другую машину спросит подтверждение">' + ICON_CHECK + 'Под данные</button>'
         : isDriverOff ?
         '<div class="cr-field"><span class="grp-label">Причина</span><div class="cr-opts" id="lp-drReason">' +
@@ -20377,10 +20500,12 @@ function openDrawer(seg){
     document.getElementById("lp-drClose").onclick = closeDrawer;
     document.getElementById("lp-drDel").onclick = function(){ deleteSeg(seg); };
     if (isTrip){
+      lpWireCustomerInput_("lp-drCustomer", "lp-drCustomer-suggest", function(v){ customerVal = v; });
       [].forEach.call(document.getElementById("lp-drMg").children, function(btn, i){ btn.onclick = function(){ mgIdx = i; render(); }; });
       [].forEach.call(document.getElementById("lp-drLg").children, function(btn, i){ btn.onclick = function(){ lgIdx = i; render(); }; });
       document.getElementById("lp-drFrom").oninput = function(ev){ fromVal = ev.target.value; };
       document.getElementById("lp-drTo").oninput = function(ev){ toVal = ev.target.value; };
+      [].forEach.call(document.getElementById("lp-drMode").children, function(btn, i){ btn.onclick = function(){ tripModeIdx = i; render(); }; });
       document.getElementById("lp-drNd").onclick = function(){ ndVal = !ndVal; render(); };
     }
     if (isDriverOff){
@@ -20418,7 +20543,7 @@ function openDrawer(seg){
       seg = liveSeg;
       var before = {s: seg.s, l: seg.l, v: seg.v};
       seg.s = newS; seg.l = newL;
-      if (isTrip){ seg.mg = MANAGERS[mgIdx]; seg.lg = logistPool[lgIdx]; seg.from = fromVal; seg.to = toVal; seg.needsData = ndVal; }
+      if (isTrip){ seg.mg = MANAGERS[mgIdx]; seg.lg = logistPool[lgIdx]; seg.from = fromVal; seg.to = toVal; seg.customer = customerVal; seg.needsData = ndVal; seg.tripMode = TRIP_MODE_OPTS_[tripModeIdx][0]; }
       if (isDriverOff){ seg.reason = DRIVEROFF_REASONS_[reasonIdx][0]; }
       S.drop();
       /* commit() сам НЕ перерисовывает ленту - у драга/растяжки плитка уже

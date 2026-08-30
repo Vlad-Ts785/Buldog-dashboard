@@ -1520,11 +1520,29 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
 #page-logistics-plan .day.day-next-month .day-w{opacity:.55;}
 #page-logistics-plan .day.day-next-month:hover .day-n,
 #page-logistics-plan .day.day-next-month:hover .day-w{opacity:.9;}
+/* Влад, 30.08: "СЕНТЯБРЬ" большими буквами не должна пересекать дату - раньше
+   position:absolute сажала подпись месяца ПРЯМО НА число дня (top:1px совпадал
+   с началом .day-n). Теперь обычная строка В ПОТОКЕ, первой (см. JS выше) -
+   день/день-недели просто сдвигаются вниз на её высоту, наложения нет ни при
+   какой ширине ячейки. Плюс "неоновая вывеска: бегание, затухание" (Влад,
+   30.08, явное расширение исключения ГОСТа №9 - см. DESIGN_SYSTEM.md): здесь
+   это ЧИСТО декоративно, не привязано к состоянию, как два предыдущих
+   расширения того же дня - разрешено намеренно, т.к. ячейка ровно одна на
+   весь месяц (не тиражируется по экрану) и её и так надо заметить (переход
+   на новый месяц - редкое, значимое событие на ленте). */
 #page-logistics-plan .day-month-tag{
-  position:absolute;top:1px;left:2px;font-family:'JetBrains Mono',monospace;
-  font-size:8px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
-  color:var(--blue);white-space:nowrap;
-}#page-logistics-plan .hours{position:absolute;left:0;right:0;bottom:0;height:13px;}#page-logistics-plan .hr{position:absolute;bottom:0;font-size:8.5px;color:var(--muted);line-height:1;}#page-logistics-plan:not(.z-day) .hr{display:none;}#page-logistics-plan .rows{position:relative;z-index:1;width:max-content;min-width:100%;}/* Влад, #page-logistics-plan 29.08: «нет разделительной линии, #page-logistics-plan выглядит как незаконченная таблица» -
+  font-family:'JetBrains Mono',monospace;
+  font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--blue);white-space:nowrap;margin-bottom:2px;
+  animation:lpNeonFlicker 3.6s linear infinite;
+}
+@keyframes lpNeonFlicker{
+  0%,2%,5%,38%,44%,68%,100%{opacity:1;text-shadow:0 0 4px var(--blue),0 0 10px rgba(55,138,221,.7),0 0 20px rgba(55,138,221,.4);}
+  3%,4%{opacity:.3;text-shadow:0 0 2px var(--blue);}
+  40%,42%{opacity:.55;text-shadow:0 0 2px var(--blue);}
+  70%,71%{opacity:.4;text-shadow:0 0 1px var(--blue);}
+}
+@media(prefers-reduced-motion:reduce){#page-logistics-plan .day-month-tag{animation:none;text-shadow:0 0 6px rgba(55,138,221,.55);}}#page-logistics-plan .hours{position:absolute;left:0;right:0;bottom:0;height:13px;}#page-logistics-plan .hr{position:absolute;bottom:0;font-size:8.5px;color:var(--muted);line-height:1;}#page-logistics-plan:not(.z-day) .hr{display:none;}#page-logistics-plan .rows{position:relative;z-index:1;width:max-content;min-width:100%;}/* Влад, #page-logistics-plan 29.08: «нет разделительной линии, #page-logistics-plan выглядит как незаконченная таблица» -
    так и было: .grouphead был шириной ТОЛЬКО замороженной колонки (var(--lane-w)), #page-logistics-plan верх/низ-бордер обрывался ровно на её границе, #page-logistics-plan а вся полоса времени справа
    оставалась вообще без черты. Теперь бордер - на ПОЛНОШИРИННОЙ внешней полосе
    (тот же приём max-content/min-width:100%, #page-logistics-plan что и у .row), #page-logistics-plan текст-ярлык - на
@@ -17198,11 +17216,16 @@ function renderScale(){
     }
     /* подпись месяца - только на САМОМ первом дне перехода, не на каждой
        ячейке следующего месяца - иначе шумно */
+    /* Влад, 30.08: "СЕНТЯБРЬ" большими буквами, не сокращение "СЕН" (текст -
+       CSS text-transform:uppercase, тут просто полное слово) - и НЕ должна
+       пересекать число дня, поэтому строкой ВЫШЕ day-n, в потоке, не поверх
+       (см. .day-month-tag в CSS - раньше стояла position:absolute прямо на
+       числе). */
     var monthTag = (isNextMonth && dt.getDate() === 1)
-      ? '<div class="day-month-tag">' + MONTH_NAMES[dt.getMonth()].slice(0, 3) + '</div>' : "";
+      ? '<div class="day-month-tag">' + MONTH_NAMES[dt.getMonth()] + '</div>' : "";
     out.push('<div class="' + cls + '" data-day="' + d + '" style="left:' + (d * 24 * hw) + 'px;width:' + (24 * hw) + 'px">' +
-      '<div class="day-n mono">' + dt.getDate() + '</div>' +
-      '<div class="day-w">' + WD[w] + '</div>' + monthTag +
+      monthTag + '<div class="day-n mono">' + dt.getDate() + '</div>' +
+      '<div class="day-w">' + WD[w] + '</div>' +
       '<div class="hours">' + hrs + '</div></div>');
   }
   /* подпись "сейчас" на линии текущего времени - тот же приём, что "вы здесь" у
@@ -17579,11 +17602,18 @@ function rangeStart(hour, zoom){
   }
   return day * 24;                                                 /* сутки и 3 дня - к началу дня */
 }
-function primeTo(hour){
+/* flashHour - НАЙДЕННЫЙ БАГ (Влад, 30.08: "при нажатии Сегодня мигает экран
+   за два дня до этого"): мигание всегда подсвечивало день СКРОЛЛ-ЦЕЛИ (hour),
+   а для кнопки "Сегодня" скролл-цель специально сдвинута НАЗАД от настоящего
+   "сейчас" (см. lp-monthToday ниже), чтобы центрировать - значит мигал не тот
+   день. Параметр опционален: клик по дню/стрелки месяца передают только hour
+   (мигает то же, к чему скроллим - так и было верно), кнопка "Сегодня" сверху
+   передаёт РЕАЛЬНЫЙ час "сейчас" отдельно. */
+function primeTo(hour, flashHour){
   var x = Math.max(0, hour * ZOOM[STATE.zoom]);
   if (prefersReduced()) board.scrollLeft = x;
   else board.scrollTo({left:x, behavior:"smooth"});
-  var cell = scaleEl.children[Math.floor(hour / 24)];
+  var cell = scaleEl.children[Math.floor((flashHour != null ? flashHour : hour) / 24)];
   if (cell && !prefersReduced()){
     cell.classList.remove("primed");
     void cell.offsetWidth;                                          /* перезапустить анимацию */
@@ -17638,8 +17668,13 @@ function monthArrowClick(dir){
 document.getElementById("lp-monthPrev").addEventListener("click", function(){ monthArrowClick(-1); });
 document.getElementById("lp-monthNext").addEventListener("click", function(){ monthArrowClick(1); });
 document.getElementById("lp-monthToday").addEventListener("click", function(){
+  /* Влад, 30.08: «Сегодня» должна центрировать сегодняшний день РОВНО
+     ПОСЕРЕДИНЕ (было - сдвиг на фикс. 42ч влево, чтобы "сейчас" не липло к
+     самому краю; заменено на честное центрирование по ширине видимой доски). */
   S.nav();
-  primeTo(Math.max(0, nowHour() - 42));
+  var now = nowHour();
+  var halfViewHours = (board.clientWidth / ZOOM[STATE.zoom]) / 2;
+  primeTo(Math.max(0, now - halfViewHours), now);
 });
 
 /* ---------- скрыть/показать машину (только админ/старший логист) ---------- */

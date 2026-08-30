@@ -2745,7 +2745,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
      уже закрыты, но развязка чище. -->
 <div class="confirm-scrim" id="lp-confirmScrim"></div>
 <div class="confirm-box" id="lp-confirmBox" role="alertdialog" aria-modal="true">
-  <div class="confirm-eyebrow"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 6v5M10 14h.01"/><circle cx="10" cy="10" r="8"/></svg>Под данные</div>
+  <div class="confirm-eyebrow"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 6v5M10 14h.01"/><circle cx="10" cy="10" r="8"/></svg><span id="lp-confirmEyebrow">Под данные</span></div>
   <div class="confirm-text" id="lp-confirmText"></div>
   <div class="confirm-actions">
     <button class="dbtn" id="lp-confirmCancel">Отмена</button>
@@ -18911,7 +18911,7 @@ function lpApplyFleetDriverStatus_(v){
     v.vacant = /вакант|арест/i.test(v.driver) || !v.driver;
     return;
   }
-  var assign = lpFleetOpenOnTractor_("driver", v.gos, 1);
+  var assign = lpFleetOpenOnTractor_("driver", v.gos);   /* без slot - см. разбор у lpFleetOpenOnTractor_ */
   v.vacant = !assign;
   v.driver = assign ? lpFleetPersonName_(assign.resource_key) : "";
   v.drivers = v.driver ? [v.driver] : [];
@@ -20306,7 +20306,7 @@ window.addEventListener("pointerup", function(e){
         S.undo();
         seg.s = before.s; seg.v = before.v;
         renderRows();
-      });
+      }, "Под данные");
     } else {
       commit(seg, before, before.v !== seg.v ? "Перенесено на другую машину" : "Сдвинуто по времени");   /* commit() сам обновит "ждёт заказ" */
     }
@@ -21107,8 +21107,13 @@ scrim.onclick = closeDrawer;
 var confirmScrim_ = document.getElementById("lp-confirmScrim");
 var confirmBox_ = document.getElementById("lp-confirmBox");
 var confirmCb_ = null;
-function showConfirmDialog_(html, cb){
+/* eyebrow (Влад, 30.08: "причём тут под данные" - переиспользовал диалог для
+   "занят" на пересадке водителя, а заголовок остался жёстко "Под данные" от
+   первого, для кого диалог и строился) - теперь параметр, по умолчанию
+   нейтральный "Подтверждение", каждый вызывающий код называет своим словом. */
+function showConfirmDialog_(html, cb, eyebrow){
   document.getElementById("lp-confirmText").innerHTML = html;
+  document.getElementById("lp-confirmEyebrow").textContent = eyebrow || "Подтверждение";
   confirmCb_ = cb;
   confirmScrim_.classList.add("open"); confirmBox_.classList.add("open");
 }
@@ -21179,10 +21184,30 @@ function fetchFleetData_(){
       }
     }).catch(function(){});   /* нет сети/сбой - меню просто не покажет "кто сейчас сидит", посадить/зацепить всё равно работает */
 }
+/* НАЙДЕННЫЙ БАГ (Влад, 31.08, живой пример: "Пантелеев занят" - на самом деле
+   на этой машине сидит Мавлитян, а не Пантелеев). Корень - и здесь, и в
+   fleetDoCouple_/fleetDoUncouple_ ниже, и в Справочниках (files/index.html,
+   fleetCouple_/fleetUncouple_ - тот же паттерн, отдельная территория коллеги)
+   slot при посадке ВСЕГДА жёстко 1. Сервер при новой посадке закрывает
+   старого водителя ТОЛЬКО на том же slot (см. api/server.js, шаг 2 транзакции
+   /api/fleet/couple - это осознанно, слот держит смысл "несколько водителей на
+   одном тягаче"), поэтому если у машины исторически (тест/бета) остался
+   открытым slot 2 или 3, а искать/сажать всегда в slot 1 - старая запись
+   никогда не увидит новую и не закроется, водитель "призраком" висит занятым
+   навсегда. Раскопано по plan_segs... то есть fleet_assignments_history нет
+   (эта таблица без истории-снимков, в отличие от plan_segs) - 6 тягачей нашлись
+   с двумя одновременно открытыми driver-записями в разных слотах (см. README на
+   VPS, запись 31.08). Слот здесь теперь необязательный параметр - без него
+   ищем ЛЮБОЙ открытый слот (не только 1), при нескольких - берём САМЫЙ СВЕЖИЙ
+   по valid_from (вероятнее отражает реальность, как в этом самом случае). */
 function lpFleetOpenOnTractor_(kind, tractorGos, slot){
-  return (FLEET_ASSIGN_ || []).filter(function(a){
-    return a.kind === kind && a.tractor_gos === tractorGos && (a.slot || 1) === (slot || 1) && !a.valid_to;
-  })[0] || null;
+  var matches = (FLEET_ASSIGN_ || []).filter(function(a){
+    return a.kind === kind && a.tractor_gos === tractorGos && !a.valid_to &&
+      (slot == null || (a.slot || 1) === slot);
+  });
+  if (!matches.length) return null;
+  if (matches.length === 1) return matches[0];
+  return matches.slice().sort(function(a, b){ return (b.valid_from || "") > (a.valid_from || "") ? 1 : -1; })[0];
 }
 function lpFleetPersonName_(id){
   var p = (FLEET_PEOPLE_ || []).filter(function(x){ return String(x.id) === String(id); })[0];
@@ -21208,8 +21233,8 @@ function openFleetMenu_(vi, x, y){
 function renderFleetMenuMain_(){
   var v = STATE.vehicles[fleetMenuVi_];
   if (!v){ closeFleetMenu_(); return; }
-  var drvAssign = lpFleetOpenOnTractor_("driver", v.gos, 1);
-  var trlAssign = lpFleetOpenOnTractor_("trailer", v.gos, 1);
+  var drvAssign = lpFleetOpenOnTractor_("driver", v.gos);   /* без slot - см. разбор у lpFleetOpenOnTractor_ */
+  var trlAssign = lpFleetOpenOnTractor_("trailer", v.gos);
   var items = [];
   if (drvAssign) items.push('<button class="ctxmenu-item" data-fa="uncouple-driver">Высадить · ' + pageEsc_(lpFleetPersonName_(drvAssign.resource_key)) + "</button>");
   items.push('<button class="ctxmenu-item" data-fa="couple-driver">' + (drvAssign ? "Пересадить водителя" : "Посадить водителя") + "</button>");
@@ -21241,7 +21266,12 @@ function handleFleetMenuAction_(action){
   if (action === "couple-trailer") return renderFleetPicker_("trailer", v);
 }
 function fleetDoUncouple_(kind, v){
-  postToYardApi_("/fleet/uncouple", {kind:kind, tractor_gos:v.gos, slot:1, source:"planirovka"}).then(function(r){
+  /* Слот РЕАЛЬНОГО текущего occupant'а, не жёсткий 1 - см. большой разбор у
+     lpFleetOpenOnTractor_ (иначе высадка бьёт мимо, если occupant случайно
+     оказался на slot 2/3 - тот же класс бага, что "Пантелеев занят"). */
+  var cur = lpFleetOpenOnTractor_(kind, v.gos);
+  var slot = cur ? (cur.slot || 1) : 1;
+  postToYardApi_("/fleet/uncouple", {kind:kind, tractor_gos:v.gos, slot:slot, source:"planirovka"}).then(function(r){
     if (!r || !r.ok){ toast((r && r.data && r.data.error) || "Не удалось расцепить", null); return; }
     toast(kind === "driver" ? "Водитель высажен" : "Прицеп отцеплен", null);
     fleetApplyOptimistic_(v, kind, null);
@@ -21280,9 +21310,16 @@ function lpShortName_(fullName){
    же принцип, что ГОСТ уже требует для другого повторного паттерна). Ресурс
    занят, если у него открыта запись kind на ДРУГОМ тягаче, чем этот. */
 function lpFleetUsedElsewhere_(kind, resourceKey, exceptTractorGos){
-  return (FLEET_ASSIGN_ || []).filter(function(a){
+  var matches = (FLEET_ASSIGN_ || []).filter(function(a){
     return a.kind === kind && String(a.resource_key) === String(resourceKey) && !a.valid_to && a.tractor_gos !== exceptTractorGos;
-  })[0] || null;
+  });
+  if (!matches.length) return null;
+  if (matches.length === 1) return matches[0];
+  /* Тот же случай, что у lpFleetOpenOnTractor_ - если у ресурса несколько
+     одновременно открытых записей (устаревшие "призраки"), диалог
+     подтверждения должен называть САМУЮ ВЕРОЯТНУЮ реальную машину, не первую
+     попавшуюся. */
+  return matches.slice().sort(function(a, b){ return (b.valid_from || "") > (a.valid_from || "") ? 1 : -1; })[0];
 }
 function renderFleetPicker_(kind, v){
   var pool = kind === "driver"
@@ -21332,7 +21369,8 @@ function renderFleetPicker_(kind, v){
         showConfirmDialog_(
           "Уверены, что хотите " + (kind === "driver" ? "посадить" : "прицепить") + " <b>" + pageEsc_(name) +
           "</b>? Сейчас " + (kind === "driver" ? "он на машине" : "он на") + " <b>" + pageEsc_(busyGos) + "</b>.",
-          function(ok){ if (ok) fleetDoCouple_(kind, v, btn.dataset.id); }
+          function(ok){ if (ok) fleetDoCouple_(kind, v, btn.dataset.id); },
+          kind === "driver" ? "Пересадка водителя" : "Переприцепка"
         );
       };
     });
@@ -21342,7 +21380,14 @@ function renderFleetPicker_(kind, v){
   input.focus();
 }
 function fleetDoCouple_(kind, v, resourceKey){
-  postToYardApi_("/fleet/couple", {kind:kind, tractor_gos:v.gos, resource_key:resourceKey, slot:1, source:"planirovka"}).then(function(r){
+  /* Слот РЕАЛЬНОГО текущего occupant'а этого тягача (не жёсткий 1) - сервер
+     при посадке закрывает старого только на ТОМ ЖЕ слоте (см. большой разбор
+     у lpFleetOpenOnTractor_) - метясь всегда в 1, можно посадить нового мимо
+     старого, если тот на 2/3, и оба останутся открытыми одновременно. Машина
+     вакантна - слот честно 1 (новая запись с нуля). */
+  var cur = lpFleetOpenOnTractor_(kind, v.gos);
+  var slot = cur ? (cur.slot || 1) : 1;
+  postToYardApi_("/fleet/couple", {kind:kind, tractor_gos:v.gos, resource_key:resourceKey, slot:slot, source:"planirovka"}).then(function(r){
     if (!r || !r.ok){ toast((r && r.data && r.data.error) || "Не удалось сцепить", null); return; }
     toast(kind === "driver" ? "Водитель посажен" : "Прицеп зацеплен", null);
     fleetApplyOptimistic_(v, kind, resourceKey);

@@ -2995,12 +2995,40 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
     <div class="mp-drawer-bk" id="legal-bk" onclick="legalCloseForm_()"></div>
     <div class="mp-drawer" id="legal-drawer">
       <h3 id="legal-drawer-title">Добавить юрлицо</h3>
+      <!-- Автозаполнение по ИНН (30.08, Влад: "как в Битриксе - вводишь ИНН, заполняется
+           вся карточка") - при вводе 10/12 цифр дёргаем /sprav/legal_lookup (проксирует
+           DaData, ключ на сервере), автозаполненные поля остаются РЕДАКТИРУЕМЫМИ - можно
+           поправить руками, если ЕГРЮЛ ошибся или нужно другое написание. -->
+      <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">ИНН</label>
+        <input autocomplete="off" id="legal-inn" type="text" inputmode="numeric" maxlength="12" placeholder="10 или 12 цифр - автозаполнит карточку"
+          oninput="legalInnInput_()"
+          style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace">
+        <div id="legal-inn-status" style="font-size:11px;color:var(--muted);margin-top:4px;min-height:14px"></div></div>
       <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Название *</label>
         <input autocomplete="off" id="legal-name" type="text" maxlength="150" placeholder="ЯРД-Империал"
           style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
       <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Полное название</label>
         <input autocomplete="off" id="legal-fullname" type="text" maxlength="300" placeholder="ООО «Бульдог»"
           style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+      <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Юридический адрес</label>
+        <input autocomplete="off" id="legal-address" type="text" maxlength="500" placeholder="автозаполнится по ИНН"
+          style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+      <div style="display:flex;gap:10px;margin-bottom:12px">
+        <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">КПП</label>
+          <input autocomplete="off" id="legal-kpp" type="text" maxlength="9"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+        <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">ОГРН</label>
+          <input autocomplete="off" id="legal-ogrn" type="text" maxlength="15"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+      </div>
+      <div style="display:flex;gap:10px;margin-bottom:12px">
+        <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Директор (ФИО)</label>
+          <input autocomplete="off" id="legal-director-name" type="text" maxlength="200"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Должность</label>
+          <input autocomplete="off" id="legal-director-post" type="text" maxlength="200"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+      </div>
       <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Заметка</label>
         <input autocomplete="off" id="legal-notes" type="text" maxlength="300" placeholder="необязательно"
           style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
@@ -10468,6 +10496,9 @@ function drvRegRestore_(id) {
 
 // ── Юридические лица (СВОИ - не контрагенты) ────────────────
 var legalEditSnapshot_ = null;
+// egrul_status - НЕ поле формы (просто индикатор "действующая/ликвидирована" из ЕГРЮЛ),
+// хранится тут между открытием карточки и сохранением, чтобы не терялось при автозаполнении.
+var legalLastEgrulStatus_ = null;
 
 function legalPaint_() {
   var body = document.getElementById('legal-body');
@@ -10498,8 +10529,16 @@ function legalOpenForm_(id) {
   var le = id ? (spravLegalEntities_ || []).filter(function(x) { return String(x.id) === String(id); })[0] : null;
   legalEditSnapshot_ = le ? le.updated_at : null;
   document.getElementById('legal-drawer-title').textContent = le ? 'Править юрлицо' : 'Добавить юрлицо';
+  document.getElementById('legal-inn').value = le ? (le.inn || '') : '';
   document.getElementById('legal-name').value = le ? le.name : '';
   document.getElementById('legal-fullname').value = le ? (le.full_name || '') : '';
+  document.getElementById('legal-address').value = le ? (le.legal_address || '') : '';
+  document.getElementById('legal-kpp').value = le ? (le.kpp || '') : '';
+  document.getElementById('legal-ogrn').value = le ? (le.ogrn || '') : '';
+  document.getElementById('legal-director-name').value = le ? (le.director_name || '') : '';
+  document.getElementById('legal-director-post').value = le ? (le.director_post || '') : '';
+  document.getElementById('legal-inn-status').textContent = '';
+  legalLastEgrulStatus_ = le ? (le.egrul_status || null) : null;
   document.getElementById('legal-notes').value = le ? (le.notes || '') : '';
   document.getElementById('legal-error').style.display = 'none';
   document.getElementById('legal-del-btn').style.display = le ? '' : 'none';
@@ -10513,6 +10552,44 @@ function legalCloseForm_() {
   if (bk) bk.classList.remove('show');
   if (dr) dr.classList.remove('show');
 }
+// Автозаполнение по ИНН (30.08, Влад: "как в Битриксе - вводишь ИНН, заполняется вся
+// карточка"). Debounce 500ms - не бьём по DaData на каждое нажатие клавиши. Поля
+// остаются РЕДАКТИРУЕМЫМИ после автозаполнения - можно поправить руками.
+var legalInnDebounce_ = null;
+function legalInnInput_() {
+  var innEl = document.getElementById('legal-inn');
+  var digits = innEl.value.replace(/\D/g, '').slice(0, 12);
+  if (digits !== innEl.value) innEl.value = digits;
+  var statusEl = document.getElementById('legal-inn-status');
+  clearTimeout(legalInnDebounce_);
+  if (digits.length !== 10 && digits.length !== 12) {
+    statusEl.textContent = digits.length ? 'ИНН - 10 или 12 цифр' : '';
+    statusEl.style.color = 'var(--muted)';
+    return;
+  }
+  statusEl.textContent = 'Ищу в ЕГРЮЛ…';
+  statusEl.style.color = 'var(--muted)';
+  legalInnDebounce_ = setTimeout(function() {
+    fetchFromYardApi_('/sprav/legal_lookup', { inn: digits }).then(function(r) {
+      // ИНН могли успеть поменять, пока шёл запрос - не затираем чужой ввод устаревшим ответом.
+      if (document.getElementById('legal-inn').value.replace(/\D/g, '') !== digits) return;
+      if (!r.ok) { statusEl.textContent = (r.data && r.data.error) || 'Ошибка поиска'; statusEl.style.color = 'var(--red)'; return; }
+      if (!r.data.found) { statusEl.textContent = 'Не найдено в ЕГРЮЛ - заполните вручную'; statusEl.style.color = 'var(--amber)'; return; }
+      var d = r.data;
+      if (d.name) document.getElementById('legal-name').value = d.name;
+      if (d.full_name) document.getElementById('legal-fullname').value = d.full_name;
+      if (d.legal_address) document.getElementById('legal-address').value = d.legal_address;
+      if (d.kpp) document.getElementById('legal-kpp').value = d.kpp;
+      if (d.ogrn) document.getElementById('legal-ogrn').value = d.ogrn;
+      if (d.director_name) document.getElementById('legal-director-name').value = d.director_name;
+      if (d.director_post) document.getElementById('legal-director-post').value = d.director_post;
+      legalLastEgrulStatus_ = d.egrul_status || null;
+      var liquidated = d.egrul_status === 'LIQUIDATED' || d.egrul_status === 'BANKRUPT';
+      statusEl.textContent = 'Найдено: ' + (d.name || '') + (liquidated ? ' - ВНИМАНИЕ, статус: ' + d.egrul_status : '');
+      statusEl.style.color = liquidated ? 'var(--red)' : 'var(--green)';
+    }).catch(function(e) { statusEl.textContent = 'Ошибка сети: ' + e.message; statusEl.style.color = 'var(--red)'; });
+  }, 500);
+}
 function legalSave_() {
   var errEl = document.getElementById('legal-error');
   errEl.style.display = 'none';
@@ -10522,6 +10599,13 @@ function legalSave_() {
   var params = {
     id: id, name: name,
     full_name: document.getElementById('legal-fullname').value.trim(),
+    inn: document.getElementById('legal-inn').value.trim(),
+    kpp: document.getElementById('legal-kpp').value.trim(),
+    ogrn: document.getElementById('legal-ogrn').value.trim(),
+    legal_address: document.getElementById('legal-address').value.trim(),
+    director_name: document.getElementById('legal-director-name').value.trim(),
+    director_post: document.getElementById('legal-director-post').value.trim(),
+    egrul_status: legalLastEgrulStatus_ || '',
     notes: document.getElementById('legal-notes').value.trim(),
   };
   if (legalEditId_ && legalEditSnapshot_) params.expected_updated_at = legalEditSnapshot_;

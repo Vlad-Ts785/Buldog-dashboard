@@ -2525,35 +2525,60 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
 </div>
 
     <!-- ═══ ВОДИТЕЛИ ════════════════════════════════════════════ -->
+    <!-- ═══ ВОДИТЕЛИ - реестр людей (Влад, 30.08: "не просто захардкодить, а создать
+         систему ввода и хранения... не просто водители, а сотрудники, уже можем
+         добавлять людей"). Раньше здесь была таблица производительности по машинам -
+         она ПЕРЕЕХАЛА в "Динамику" (renderDrivers, вызывается из renderDynamics) -
+         тематически это статистика по времени, ей место там же, где "Статусы машин по
+         дням". Эта страница теперь - реестр людей: создание/правка/удаление,
+         backend - fleet_drivers на api.yardhub.ru (см. plans/2026-08-29-logistics-
+         planning-board.md, "Фаза 2, полная спецификация"). ═══ -->
     <div id="page-drivers" class="page">
       <div class="card">
         <div class="sec-header">
           <div class="sec-title">Водители</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <select id="filter-driver-type" onchange="renderDrivers()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;">
-              <option value="">Все типы</option>
-              <option value="__all_tral__">Все тралы</option>
-            </select>
-            <select id="filter-driver-status" onchange="renderDrivers()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;">
-              <option value="">Все статусы</option>
-              <option value="В работе">В работе</option>
-              <option value="Ремонт">Ремонт</option>
-              <option value="Без водителя">Без водителя</option>
-            </select>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <input autocomplete="off" id="drv-reg-search" type="text" placeholder="Поиск по имени…"
+              oninput="renderDriverRegistry()"
+              style="background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:6px 10px;color:var(--text);font-size:12px;width:180px;outline:none">
+            <button onclick="drvRegOpenForm_(null)" data-nav-sound
+              style="background:var(--green);color:#fff;border:none;border-radius:7px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer">+ Добавить водителя</button>
           </div>
         </div>
-        <table class="tbl">
-          <thead><tr><th>Водитель</th><th>Машина</th><th>Тип</th><th>Статус</th><th class="num">Заказов</th><th class="num">План</th><th class="num">Факт</th><th class="num">%</th><th class="num">Прогноз</th><th>Оценка</th></tr></thead>
-          <tbody id="drivers-body"></tbody>
-        </table>
+        <div id="drv-reg-loading" style="color:var(--muted);padding:20px 0;font-size:13px">Загрузка…</div>
+        <div id="drv-reg-wrap" style="display:none;overflow-x:auto">
+          <table class="tbl">
+            <thead><tr><th>ФИО</th><th>Телефон</th><th>Заметка</th><th class="num">Правка</th></tr></thead>
+            <tbody id="drv-reg-body"></tbody>
+          </table>
+        </div>
       </div>
-      <div id="drivers-orders-block" class="card" style="margin-top:16px;">
-        <div class="card-title">Топ водителей по количеству заказов</div>
-        <table class="tbl">
-          <thead><tr><th>#</th><th>Водитель</th><th class="num">Заказов</th><th class="num">Выручка</th><th></th></tr></thead>
-          <tbody id="drivers-orders-body"></tbody>
-        </table>
+    </div>
+
+    <!-- Форма добавления/правки водителя - тот же drawer-канон, что "Пропавшие клиенты"
+         (.mp-drawer/.mp-drawer-bk, дашборд-уровня, не завязан на конкретную страницу),
+         поля - тот же formRow_-стиль, что форма создания заявки в "Плане задания". -->
+    <div class="mp-drawer-bk" id="drv-reg-bk" onclick="drvRegCloseForm_()"></div>
+    <div class="mp-drawer" id="drv-reg-drawer">
+      <h3 id="drv-reg-drawer-title">Добавить водителя</h3>
+      <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">ФИО *</label>
+        <input autocomplete="off" id="drv-reg-name" type="text" placeholder="Фамилия Имя Отчество"
+          style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+      <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Телефон</label>
+        <input autocomplete="off" id="drv-reg-phone" type="text" placeholder="+7 900 000-00-00"
+          style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+      <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Заметка</label>
+        <input autocomplete="off" id="drv-reg-notes" type="text" placeholder="необязательно"
+          style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+      <div id="drv-reg-error" style="display:none;color:var(--red);font-size:12px;margin-bottom:10px"></div>
+      <div style="display:flex;gap:10px;margin-top:6px">
+        <button type="button" onclick="drvRegSave_()" data-nav-sound
+          style="flex:1;background:var(--green);color:#fff;border:none;border-radius:8px;padding:10px;font-size:14px;font-weight:600;cursor:pointer">Сохранить</button>
+        <button type="button" onclick="drvRegCloseForm_()"
+          style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px 16px;font-size:14px;cursor:pointer">Отмена</button>
       </div>
+      <button type="button" id="drv-reg-del-btn" onclick="drvRegDelete_()" data-nav-sound style="display:none;margin-top:10px;width:100%;
+        background:transparent;border:1px solid rgba(226,75,74,.4);color:var(--red);border-radius:8px;padding:9px;font-size:13px;cursor:pointer">Удалить водителя</button>
     </div>
 
     <!-- ═══ ДИНАМИКА ════════════════════════════════════════════ -->
@@ -2598,6 +2623,39 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
         <div class="card-title">Тенденция статусов парка по дням</div>
         <div id="hist-trend-loading" style="color:var(--muted);font-size:13px;padding:20px 0">Загрузка...</div>
         <canvas id="chart-status-trend" style="display:none;max-height:300px"></canvas>
+      </div>
+
+      <!-- Производительность по водителям - ПЕРЕЕХАЛА сюда со страницы "Водители"
+           (Влад, 30.08: та страница стала реестром людей, эта статистика по времени -
+           её тематическое место рядом со "Статусы машин по дням"). renderDrivers()
+           не переименована - логика и DOM id внутри не менялись, только контейнер. -->
+      <div class="card" style="margin-top:16px">
+        <div class="sec-header">
+          <div class="sec-title">Водители — план/факт</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <select id="filter-driver-type" onchange="renderDrivers()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;">
+              <option value="">Все типы</option>
+              <option value="__all_tral__">Все тралы</option>
+            </select>
+            <select id="filter-driver-status" onchange="renderDrivers()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;">
+              <option value="">Все статусы</option>
+              <option value="В работе">В работе</option>
+              <option value="Ремонт">Ремонт</option>
+              <option value="Без водителя">Без водителя</option>
+            </select>
+          </div>
+        </div>
+        <table class="tbl">
+          <thead><tr><th>Водитель</th><th>Машина</th><th>Тип</th><th>Статус</th><th class="num">Заказов</th><th class="num">План</th><th class="num">Факт</th><th class="num">%</th><th class="num">Прогноз</th><th>Оценка</th></tr></thead>
+          <tbody id="drivers-body"></tbody>
+        </table>
+      </div>
+      <div id="drivers-orders-block" class="card" style="margin-top:16px;">
+        <div class="card-title">Топ водителей по количеству заказов</div>
+        <table class="tbl">
+          <thead><tr><th>#</th><th>Водитель</th><th class="num">Заказов</th><th class="num">Выручка</th><th></th></tr></thead>
+          <tbody id="drivers-orders-body"></tbody>
+        </table>
       </div>
     </div>
 
@@ -7844,7 +7902,7 @@ function renderMyPageVasin(el, current, selectorHtml) {
 var RENDER_GROUPS_ = {
   main:     { pages: ['main'],                                        fns: [renderKPI, renderMainReceiptsSummary, renderMain] },
   vehicles: { pages: ['vehicles'],                                     fns: [renderVehiclesTable, renderRepairBlock] },
-  drivers:  { pages: ['drivers'],                                      fns: [renderDrivers] },
+  drivers:  { pages: ['drivers'],                                      fns: [renderDriverRegistry] },
   sales:    { pages: ['sales', 'sales-mgr', 'sales-log', 'sales-salary'], fns: [renderSalesTabsForPeriod] },
   myPage:   { pages: ['my-page'],                                      fns: [renderMyPage] },
   debt:     { pages: ['debt'],                                         fns: [renderDebt] },
@@ -9428,6 +9486,117 @@ function driverForecastStatus_(forecastPct) {
   if (forecastPct >= 80)  return { cls: 'amber',  label: 'Добавить заказов' };
   if (forecastPct >= 50)  return { cls: 'orange', label: 'Загрузить срочно' };
   return { cls: 'red', label: 'Простой — разобраться' };
+}
+
+// ═══ РЕЕСТР ВОДИТЕЛЕЙ (Влад, 30.08: "не хардкодить, а создать систему ввода и
+// хранения... не просто водители, а сотрудники, уже можем добавлять людей") ═══
+// Backend - fleet_drivers на api.yardhub.ru (plans/2026-08-29-logistics-planning-
+// board.md, "Фаза 2, полная спецификация"), тот же canon, что fleet_trailers/
+// fleet_assignments для сцепки на "Планировке" - reuse одних и тех же таблиц.
+// Своё состояние (fleetDrivers_), НЕ часть D - отдельный источник, отдельный fetch.
+var fleetDrivers_ = null;      // [{id, full_name, phone, notes, ...}] после первой загрузки
+var fleetDriversEditId_ = null; // id редактируемой записи, null = форма "новый"
+
+function renderDriverRegistry() {
+  var loadingEl = document.getElementById('drv-reg-loading');
+  var wrapEl = document.getElementById('drv-reg-wrap');
+  if (!loadingEl || !wrapEl) return;
+  loadingEl.style.display = ''; loadingEl.textContent = 'Загрузка…';
+  wrapEl.style.display = 'none';
+  fetchFromYardApi_('/fleet/state', {}).then(function(r) {
+    if (!r.ok) { loadingEl.textContent = 'Ошибка загрузки: ' + (r.data && r.data.error || 'неизвестная'); return; }
+    fleetDrivers_ = r.data.drivers || [];
+    loadingEl.style.display = 'none';
+    wrapEl.style.display = '';
+    drvRegPaint_();
+  }).catch(function(e) {
+    loadingEl.textContent = 'Ошибка сети: ' + e.message;
+  });
+}
+
+function drvRegPaint_() {
+  var body = document.getElementById('drv-reg-body');
+  if (!body || !fleetDrivers_) return;
+  var q = (document.getElementById('drv-reg-search').value || '').trim().toLowerCase();
+  var rows = fleetDrivers_.filter(function(d) { return !q || d.full_name.toLowerCase().indexOf(q) >= 0; });
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="4" class="muted" style="padding:14px">' +
+      (fleetDrivers_.length ? 'Ничего не найдено' : 'Водителей пока нет — добавьте первого') + '</td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map(function(d) {
+    var idEsc = String(d.id).replace(/'/g, "\\'");
+    return '<tr>' +
+      '<td><b>' + pageEsc_(d.full_name) + '</b></td>' +
+      '<td class="muted">' + (d.phone ? pageEsc_(d.phone) : '—') + '</td>' +
+      '<td class="muted">' + (d.notes ? pageEsc_(d.notes) : '—') + '</td>' +
+      '<td class="num"><button onclick="drvRegOpenForm_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);' +
+      'color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Править</button></td>' +
+    '</tr>';
+  }).join('');
+}
+
+function drvRegOpenForm_(id) {
+  fleetDriversEditId_ = id;
+  var d = id ? (fleetDrivers_ || []).filter(function(x) { return String(x.id) === String(id); })[0] : null;
+  document.getElementById('drv-reg-drawer-title').textContent = d ? 'Править водителя' : 'Добавить водителя';
+  document.getElementById('drv-reg-name').value = d ? d.full_name : '';
+  document.getElementById('drv-reg-phone').value = d ? (d.phone || '') : '';
+  document.getElementById('drv-reg-notes').value = d ? (d.notes || '') : '';
+  document.getElementById('drv-reg-error').style.display = 'none';
+  document.getElementById('drv-reg-del-btn').style.display = d ? '' : 'none';
+  var bk = document.getElementById('drv-reg-bk'), dr = document.getElementById('drv-reg-drawer');
+  bk.classList.add('show');
+  setTimeout(function() { dr.classList.add('show'); }, 40);
+  setTimeout(function() { document.getElementById('drv-reg-name').focus(); }, 120);
+}
+function drvRegCloseForm_() {
+  var bk = document.getElementById('drv-reg-bk'), dr = document.getElementById('drv-reg-drawer');
+  if (bk) bk.classList.remove('show');
+  if (dr) dr.classList.remove('show');
+}
+
+function fleetGenId_(prefix) {
+  return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+function drvRegSave_() {
+  var errEl = document.getElementById('drv-reg-error');
+  errEl.style.display = 'none';
+  var name = document.getElementById('drv-reg-name').value.trim();
+  if (!name) { errEl.textContent = 'ФИО обязательно'; errEl.style.display = ''; return; }
+  var id = fleetDriversEditId_ || fleetGenId_('drv_');
+  var params = {
+    id: id, name: name,
+    phone: document.getElementById('drv-reg-phone').value.trim(),
+    notes: document.getElementById('drv-reg-notes').value.trim(),
+  };
+  postToYardApi_('/fleet/driver', params).then(function(r) {
+    if (!r.ok) { errEl.textContent = 'Не удалось сохранить: ' + (r.data && r.data.error || 'ошибка сервера'); errEl.style.display = ''; return; }
+    p2Toast(fleetDriversEditId_ ? 'Изменения сохранены' : 'Водитель добавлен', 'green');
+    drvRegCloseForm_();
+    renderDriverRegistry();
+  }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+
+function drvRegDelete_() {
+  if (!fleetDriversEditId_) return;
+  var d = (fleetDrivers_ || []).filter(function(x) { return String(x.id) === String(fleetDriversEditId_); })[0];
+  var name = d ? d.full_name : 'этого водителя';
+  if (!confirm('Удалить ' + name + '? Это нельзя отменить.')) return;
+  var errEl = document.getElementById('drv-reg-error');
+  postToYardApi_('/fleet/driver_delete', { id: fleetDriversEditId_ }).then(function(r) {
+    if (!r.ok) {
+      // 409 - водитель сейчас сцеплен с тягачом на "Планировке" (сервер держит целостность
+      // активной сцепки) - показываем ПРИЧИНУ сервера, не общую фразу.
+      errEl.textContent = (r.data && r.data.error) || 'Не удалось удалить';
+      errEl.style.display = '';
+      return;
+    }
+    p2Toast('Водитель удалён', 'amber');
+    drvRegCloseForm_();
+    renderDriverRegistry();
+  }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
 }
 
 function renderDrivers() {
@@ -11095,6 +11264,10 @@ function setHistPeriod(months, btn) {
 }
 
 function renderDynamics() {
+  // Таблица "Водители - план/факт" переехала на эту страницу (30.08, см. разметку
+  // выше) - у неё свой источник (D), не histData, поэтому рендерим её независимо от
+  // того, дошли ли данные истории статусов машин.
+  renderDrivers();
   if (!histData) return;
   var filtered = histPeriod > 0 ? (function() {
     var cutoff = new Date();

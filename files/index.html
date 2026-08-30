@@ -18319,7 +18319,7 @@ function push(v, kind, s, l, extra){
 /* «Без водителя» - раньше отдельная тонкая подполоса без подписи (Влад, 29.08:
    «непонятное назначение, убрать»), теперь ОБЫЧНЫЙ блокирующий отрезок наравне с
    ремонтом - тот же push(), просто отдельная функция для читаемости вызова. */
-function pushDriver(v, s, l){ push(v, "driveroff", s, l); }
+function pushDriver(v, s, l, reason){ push(v, "driveroff", s, l, {reason: reason}); }
 
 /* ---------- цвет ---------- */
 var STATE_FILL = {
@@ -18685,10 +18685,26 @@ function untilLabel(s){
 function routeLabel_(from, to){
   return (from || "не указано") + " → " + (to || "не указано");
 }
+/* Подстатус «без водителя» (Влад, 30.08: "нажимая без водителя, нужно
+   выбрать один из статусов: в выходной, отпуск, или приёмка. статус
+   считается как без водителя, а подстатус отражается в планировке") -
+   [код, подпись]. Считается ВСЕГДА как driveroff (renderKpis/isFreeNow/
+   фильтры проверяют только kind, не reason) - подстатус только для
+   отображения на плитке/в шторке. Массив, не объект - тот же порядок
+   везде, где строится список чипов выбора. */
+var DRIVEROFF_REASONS_ = [["dayoff","Выходной"], ["vacation","Отпуск"], ["intake","Приёмка"]];
+function driveroffReasonLabel_(code){
+  var f = DRIVEROFF_REASONS_.filter(function(p){ return p[0] === code; })[0];
+  return f ? f[1] : null;
+}
 function segLabel(s){
   if (s.kind === "trip") return routeLabel_(s.from, s.to);
   var base = s.kind === "repair" ? "Ремонт" : s.kind === "maint" ? "ТО" :
              s.kind === "noorder" ? "Без заказа" : s.kind === "driveroff" ? "Без водителя" : "";
+  if (s.kind === "driveroff"){
+    var reasonLbl = driveroffReasonLabel_(s.reason);
+    if (reasonLbl) base += " · " + reasonLbl;
+  }
   return base ? base + " · " + untilLabel(s) : "";
 }
 /* «Суточный режим» (Влад, 30.08: "машины, которые работают в суточном
@@ -19511,12 +19527,12 @@ function segToWire_(s){
   return {
     id: s.id, gos: v.gos, kind: s.kind, s: Math.round(s.s * 100) / 100, l: Math.round(s.l * 100) / 100,
     mg: (s.mg && s.mg.full) || "", lg: (s.lg && s.lg.full) || "",
-    from: s.from || "", to: s.to || "", nd: s.needsData ? 1 : 0
+    from: s.from || "", to: s.to || "", nd: s.needsData ? 1 : 0, reason: s.reason || ""
   };
 }
 function pushSegToServer_(w){
   return postToYardApi_("/plan/seg", {id:w.id, gos:w.gos, kind:w.kind, s:w.s, l:w.l,
-    mg:w.mg, lg:w.lg, from:w.from, to:w.to, needs_data:w.nd})
+    mg:w.mg, lg:w.lg, from:w.from, to:w.to, needs_data:w.nd, reason:w.reason})
     .catch(function(){ return { ok:false }; });
 }
 function saveSegs(){
@@ -19591,7 +19607,7 @@ function applyServerSegs_(rows){
     var vi = byGos[r.vehicle_gos];
     if (vi == null) return;   /* машина выбыла из парка - строку не рисуем, но и не удаляем на сервере */
     var seg = {id:r.id, v:vi, kind:r.kind, s:parseFloat(r.start_hour), l:parseFloat(r.length_hours),
-               needsData: !!Number(r.needs_data)};
+               needsData: !!Number(r.needs_data), reason: r.reason || ""};
     if (r.kind === "trip"){
       var v = STATE.vehicles[vi];
       seg.mg = personByName_(r.manager_name, MANAGERS);
@@ -19714,7 +19730,7 @@ function loadSegs(){
     raw.forEach(function(o){
       var vi = byGos[o.gos];
       if (vi == null) return;
-      var seg = {id:o.id, v:vi, kind:o.kind, s:o.s, l:o.l, needsData: !!o.nd};
+      var seg = {id:o.id, v:vi, kind:o.kind, s:o.s, l:o.l, needsData: !!o.nd, reason: o.reason || ""};
       if (o.kind === "trip"){
         var v = STATE.vehicles[vi];
         seg.mg = (o.mg && o.mg.full) ? o.mg : personByName_(o.mg, MANAGERS);
@@ -19830,7 +19846,7 @@ var scrim = document.getElementById("lp-scrim"), drawer = document.getElementByI
 
 function openCreateDrawer(vi, s, l){
   var v = STATE.vehicles[vi];
-  var kind = "trip", mgIdx = 0, lgIdx = 0, fromVal = "", toVal = "", ndVal = false;
+  var kind = "trip", mgIdx = 0, lgIdx = 0, fromVal = "", toVal = "", ndVal = false, reasonIdx = 0;
   /* Даты - тоже редактируемые поля, не текст (Влад, 29.08: "создание события:
      также должна быть возможность выбирать даты") - протяжка/двойной клик на
      ленте задают ПЕРВОНАЧАЛЬНОЕ s/l, но не единственный способ их поставить;
@@ -19839,7 +19855,14 @@ function openCreateDrawer(vi, s, l){
   function render(){
     var isTrip = kind === "trip";
     var logistPool = v.long ? LOG_LONG : LOG_TRAL;
-    var typeBtns = [["trip","Рейс"], ["repair","Ремонт"], ["maint","ТО"], ["driveroff","Выходной"]];
+    var isDriverOff = kind === "driveroff";
+    /* Влад, 30.08 (через параллельный чат): "вместо выходной должно быть без
+       водителя. нажимая без водителя, нужно выбрать один из статусов: в
+       выходной, отпуск, или приёмка. статус считается как без водителя, а
+       подстатус отражается в планировке" - пилюля переименована (kind
+       остаётся "driveroff", меняется только подпись кнопки), подстатус -
+       отдельный ряд чипов, виден только когда этот тип выбран. */
+    var typeBtns = [["trip","Рейс"], ["repair","Ремонт"], ["maint","ТО"], ["driveroff","Без водителя"]];
     drawer.innerHTML =
       '<div class="dr-eyebrow">Новая запись</div>' +
       '<div class="dr-title">' + v.type + " · " + v.gos + '</div>' +
@@ -19860,6 +19883,10 @@ function openCreateDrawer(vi, s, l){
         '<div class="cr-field"><span class="grp-label">Куда</span><input autocomplete="off" class="cr-input" id="lp-crTo" list="lp-crPlaces" placeholder="можно не указывать" value="' + toVal + '"></div>' +
         '<datalist id="lp-crPlaces">' + PLACES.map(function(p){ return "<option value=\"" + p + "\">"; }).join("") + '</datalist>' +
         '<button class="chip data-chip" id="lp-crNd" aria-pressed="' + ndVal + '" title="Документы для пропуска ещё не собраны - плитка будет мигать, перенос на другую машину спросит подтверждение">' + ICON_CHECK + 'Под данные</button>'
+        : isDriverOff ?
+        '<div class="cr-field"><span class="grp-label">Причина</span><div class="cr-opts" id="lp-crReason">' +
+          DRIVEROFF_REASONS_.map(function(p, i){ return '<button class="chip cr-opt" data-i="' + i + '" aria-pressed="' + (i === reasonIdx) + '">' + p[1] + '</button>'; }).join("") +
+        '</div></div>'
         : '') +
       '<div class="dr-note">Длину и время можно поправить и прямо на ленте - потянуть за край, как у обычного отрезка.</div>' +
       '<div class="cr-actions"><button class="chip cr-cancel">Отмена</button><button class="chip cr-submit" aria-pressed="true">Создать</button></div>';
@@ -19867,6 +19894,9 @@ function openCreateDrawer(vi, s, l){
     [].forEach.call(drawer.querySelectorAll(".cr-type"), function(btn){
       btn.onclick = function(){ kind = btn.dataset.k; render(); };
     });
+    if (isDriverOff){
+      [].forEach.call(drawer.querySelector("#lp-crReason").children, function(btn, i){ btn.onclick = function(){ reasonIdx = i; render(); }; });
+    }
     if (isTrip){
       [].forEach.call(drawer.querySelector("#lp-crMg").children, function(btn, i){ btn.onclick = function(){ mgIdx = i; render(); }; });
       [].forEach.call(drawer.querySelector("#lp-crLg").children, function(btn, i){ btn.onclick = function(){ lgIdx = i; render(); }; });
@@ -19890,7 +19920,7 @@ function openCreateDrawer(vi, s, l){
       s = ns; l = ne - ns;
       var clash = STATE.segs.some(function(x){ return x.v === vi && s < x.s + x.l && x.s < s + l; });
       if (clash){ S.reject(); toast("Пересечение с другим отрезком - не создал", null); return; }
-      if (kind === "driveroff") pushDriver(v, s, l);
+      if (kind === "driveroff") pushDriver(v, s, l, DRIVEROFF_REASONS_[reasonIdx][0]);
       /* from/to НЕ обязательны - логист может ещё не знать точку на момент постановки
          (Влад, 29.08: "возможность создавать заявки без указания адресов должна
          быть"). Раньше пустое поле подменялось PLACES[0]/PLACES[1] - реальный на вид
@@ -19946,7 +19976,8 @@ function copySegAfter_(seg, openAfter){
   var newS = seg.s + seg.l;
   var clash = STATE.segs.some(function(x){ return x.v === seg.v && newS < x.s + x.l && x.s < newS + seg.l; });
   if (clash){ S.reject(); toast("Сразу после - место занято, подвиньте копию вручную", null); return; }
-  var extra = isTrip ? {mg: seg.mg, lg: seg.lg, from: seg.from, to: seg.to, needsData: seg.needsData} : undefined;
+  var extra = isTrip ? {mg: seg.mg, lg: seg.lg, from: seg.from, to: seg.to, needsData: seg.needsData}
+    : seg.kind === "driveroff" ? {reason: seg.reason} : undefined;
   push(v, seg.kind, newS, seg.l, extra);
   var copySeg = STATE.segs[STATE.segs.length - 1];
   STATE.lastEdited = newS;
@@ -19970,12 +20001,14 @@ function openDrawer(seg){
   if (prevOpenId !== seg.id) renderRows();
   var v = STATE.vehicles[seg.v];
   var isTrip = seg.kind === "trip";
+  var isDriverOff = seg.kind === "driveroff";
   var logistPool = v.long ? LOG_LONG : LOG_TRAL;
   var mgIdx = isTrip ? Math.max(0, MANAGERS.indexOf(seg.mg)) : 0;
   var lgIdx = isTrip ? Math.max(0, logistPool.indexOf(seg.lg)) : 0;
   var fromVal = isTrip ? (seg.from || "") : "";
   var toVal = isTrip ? (seg.to || "") : "";
   var ndVal = !!seg.needsData;
+  var reasonIdx = isDriverOff ? Math.max(0, DRIVEROFF_REASONS_.map(function(p){ return p[0]; }).indexOf(seg.reason)) : 0;
   var startVal = hToLocalInputVal_(seg.s), endVal = hToLocalInputVal_(seg.s + seg.l);
 
   var infoRows = [["Машина", v.type + " · " + v.gos], ["Тягач", v.tractor],
@@ -20003,6 +20036,10 @@ function openDrawer(seg){
         '<div class="cr-field"><span class="grp-label">Куда</span><input autocomplete="off" class="cr-input" id="lp-drTo" list="lp-crPlaces" placeholder="можно не указывать" value="' + toVal + '"></div>' +
         '<datalist id="lp-crPlaces">' + PLACES.map(function(p){ return "<option value=\"" + p + "\">"; }).join("") + '</datalist>' +
         '<button class="chip data-chip" id="lp-drNd" aria-pressed="' + ndVal + '" title="Документы для пропуска ещё не собраны - плитка будет мигать, перенос на другую машину спросит подтверждение">' + ICON_CHECK + 'Под данные</button>'
+        : isDriverOff ?
+        '<div class="cr-field"><span class="grp-label">Причина</span><div class="cr-opts" id="lp-drReason">' +
+          DRIVEROFF_REASONS_.map(function(p, i){ return '<button class="chip cr-opt" data-i="' + i + '" aria-pressed="' + (i === reasonIdx) + '">' + p[1] + '</button>'; }).join("") +
+        '</div></div>'
         : rowsHtml([["Состояние", segLabel(seg)]])) +
       '<div class="dr-row dr-row-edit"><span>Начало</span><input autocomplete="off" type="datetime-local" class="dr-date-input mono" id="lp-drStart" value="' + startVal + '"></div>' +
       '<div class="dr-row dr-row-edit"><span>Окончание</span><input autocomplete="off" type="datetime-local" class="dr-date-input mono" id="lp-drEnd" value="' + endVal + '"></div>' +
@@ -20028,6 +20065,9 @@ function openDrawer(seg){
       document.getElementById("lp-drFrom").oninput = function(ev){ fromVal = ev.target.value; };
       document.getElementById("lp-drTo").oninput = function(ev){ toVal = ev.target.value; };
       document.getElementById("lp-drNd").onclick = function(){ ndVal = !ndVal; render(); };
+    }
+    if (isDriverOff){
+      [].forEach.call(document.getElementById("lp-drReason").children, function(btn, i){ btn.onclick = function(){ reasonIdx = i; render(); }; });
     }
     var startEl = document.getElementById("lp-drStart"), endEl = document.getElementById("lp-drEnd"),
         durEl = document.getElementById("lp-drDurLabel");
@@ -20062,6 +20102,7 @@ function openDrawer(seg){
       var before = {s: seg.s, l: seg.l, v: seg.v};
       seg.s = newS; seg.l = newL;
       if (isTrip){ seg.mg = MANAGERS[mgIdx]; seg.lg = logistPool[lgIdx]; seg.from = fromVal; seg.to = toVal; seg.needsData = ndVal; }
+      if (isDriverOff){ seg.reason = DRIVEROFF_REASONS_[reasonIdx][0]; }
       S.drop();
       /* commit() сам НЕ перерисовывает ленту - у драга/растяжки плитка уже
          переставлена на новое место инлайн, в момент pointerup, до commit(). Здесь

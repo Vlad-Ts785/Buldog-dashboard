@@ -18555,7 +18555,15 @@ function buildRoster(){
   var rows = [];
   try{
     if (window.buildMyPageRoster_ && typeof D !== "undefined" && D && D.orders){
-      rows = buildMyPageRoster_(D.orders.by_manager, D.orders.by_logist) || [];
+      /* 30.08, "у Васина пусто в Планировке": для роли логист/менеджер D.orders.by_manager/
+         by_logist урезаны на бэкенде до СВОЕЙ строки (Апп Скрипт, buildLogistView_/
+         buildManagerView_ - приватность выручки коллег) - пикер "Менеджер"/"Логист" в
+         шторке рейса тогда показывал бы только самого себя. Сервер теперь дополнительно
+         шлёт roster_managers/roster_logists - те же имена, БЕЗ единой цифры, для ЭТОЙ
+         роли специально (см. buildNameOnlyRoster_ в full_script_final.js). Admin их не
+         получает вообще (не нужно - у него уже полный by_manager/by_logist), поэтому
+         || безопасен для обеих ролей. */
+      rows = buildMyPageRoster_(D.orders.roster_managers || D.orders.by_manager, D.orders.roster_logists || D.orders.by_logist) || [];
     }
   }catch(e){}
   var mgrs = [], tral = [], long = [], seen = {};
@@ -19203,7 +19211,7 @@ function routeLabel_(from, to){
    фильтры проверяют только kind, не reason) - подстатус только для
    отображения на плитке/в шторке. Массив, не объект - тот же порядок
    везде, где строится список чипов выбора. */
-var DRIVEROFF_REASONS_ = [["dayoff","Выходной"], ["vacation","Отпуск"], ["intake","Приёмка"]];
+var DRIVEROFF_REASONS_ = [["dayoff","Выходной"], ["vacation","Отпуск"], ["intake","Приёмка"], ["sick","Больничный"]];
 function driveroffReasonLabel_(code){
   var f = DRIVEROFF_REASONS_.filter(function(p){ return p[0] === code; })[0];
   return f ? f[1] : null;

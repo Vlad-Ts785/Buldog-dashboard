@@ -4099,6 +4099,10 @@ function buildManagerView_(orders, managerName, ss, period) {
       period: orders.period,
       by_manager: myManagerRow,
       by_logist: myLogistRow,
+      // Пикер "Менеджер"/"Логист" в шторке Планировки - те же имена-без-цифр, что у
+      // buildLogistView_ (см. buildNameOnlyRoster_ там же).
+      roster_managers: buildNameOnlyRoster_(orders.by_manager),
+      roster_logists:  buildNameOnlyRoster_(orders.by_logist),
       by_manager_detail: detailWrapped,
       // Проблемные заказы (2026-08-12, вкладка "Воронка документов" на личной странице -
       // тот же формат/источник, что "Обзор заказов → Проблемные заказы"). Обычный менеджер
@@ -4192,6 +4196,10 @@ function buildManagerView_(orders, managerName, ss, period) {
       }
     } catch (recErr) { /* "Поступления" не критичны для остальной личной страницы - просто не показываем вкладку */ }
   }
+
+  // Планировка - тот же фикс, что у buildLogistView_ (30.08, "у Васина пусто"): менеджерам
+  // тоже открыта вкладка (allowedPages_ на фронтенде), значит им тоже нужен состав парка.
+  result.vehicles = ss ? buildLogistParkFromStaff_(ss) : [];
 
   return result;
 }
@@ -4411,7 +4419,41 @@ function buildLogistView_(orders, logistName, ss, period) {
     role: 'logist',
     logistName: logistName,
     orders: ordersOut,
+    // Планировка (30.08, инцидент "у Васина пусто, все KPI по нулям"): доска строится
+    // из D.vehicles, который у admin приходит из aggregateFinHistoryForRange, а у
+    // логиста НЕ приходил вообще - вкладка честно рисовала пустой парк. Отдаём лёгкий
+    // состав парка прямо из Штатки, БЕЗ финансовых полей (profit/plan/выручка машин -
+    // не для роли логиста; buildVehicles() на фронтенде читает только
+    // type/marka/gos/trailer/status/driver, а проценты плана у строк без plan просто
+    // не отрисуются - это осознанно, не недоделка).
+    vehicles: ss ? buildLogistParkFromStaff_(ss) : [],
+    // Пикер "Менеджер"/"Логист" в шторке создания рейса Планировки (buildRoster() на
+    // фронтенде читает orders.roster_managers/roster_logists В ПРИОРИТЕТЕ, если они есть,
+    // иначе - обычные by_manager/by_logist, как у admin) - ТОЛЬКО имена, ни одной цифры
+    // выручки другого сотрудника наружу не идёт.
+    roster_managers: buildNameOnlyRoster_(orders.by_manager),
+    roster_logists:  buildNameOnlyRoster_(orders.by_logist),
   };
+}
+// Только .name из массива по_manager/by_logist - ни оборота, ни количества заказов
+// наружу для чужой роли не отдаём (Планировке нужны исключительно имена для пикера).
+function buildNameOnlyRoster_(list) {
+  return (list || []).map(function(p) { return { name: p.name }; });
+}
+// Лёгкий состав парка для логиста/менеджера - та же Штатка, что у getFleetStatus/
+// buildStaffMarkas_, только нужные Планировке поля. ~55 строк, чтение мгновенное, кэша не требует.
+function buildLogistParkFromStaff_(ss) {
+  var staff = getStaffData(ss);
+  var out = [];
+  Object.keys(staff).forEach(function(k) {
+    var v = staff[k];
+    out.push({
+      gos: v.gosOriginal, marka: v.marka, type: v.type, status: v.status,
+      trailer: v.trailerGos,
+      driver: [v.driver, v.driver2, v.driver3].filter(function(d){ return d; }).join(' / '),
+    });
+  });
+  return out;
 }
 function getLogistView_(ss, logistName) { return buildLogistView_(getOrdersData(ss), logistName, ss, null); }
 function getLogistViewForPeriod_(ss, logistName, period) { return buildLogistView_(getOrdersDataForPeriod(ss, period), logistName, ss, period); }

@@ -5703,6 +5703,9 @@ function positionLabel(name, type) {
   if (type === 'logist') {
     if (sur === 'рыщанов') return 'Руководитель отдела логистики';
     if (sur === 'васин')   return 'Логист (длинномеры)';
+    // Начальники автоколонн (2026-08-30, Барыльченко) - не логисты-брокеры найма по
+    // должности, хоть и заведены с ролью logist в "Доступ" - см. COLUMN_HEAD_SUR_FRONT_.
+    if (sur === 'барыльченко') return 'Начальник автоколонны (длинномеры)';
     return 'Логист';
   }
   return (sur === 'ахтамова' || sur === 'гусейнова') ? 'Руководитель отдела продаж' : 'Менеджер по продажам';
@@ -5734,16 +5737,20 @@ function dedupeMyPageEntries_(rawEntries) {
 // рисковать задвоением, если 1С в итоге запишет отчество чуть иначе, чем здесь. Ничего
 // вручную убирать не нужно - как только появится реальная запись, она перекроет заглушку
 // сама (условие ниже просто перестанет срабатывать).
-// Два разных повода тут оказаться:
+// Три разных повода тут оказаться:
 // - Ратников - новый менеджер, заказов пока нет ВООБЩЕ (временно, до первых сделок).
 // - Рыщанов (2026-08-25) - руководитель отдела логистики, лично сделки не ведёт (см.
 //   plans/2026-08-25-ryschanow-personal-page.md) - в 1С заказы с mgr_l="Рыщанов" могут не
 //   появляться НИКОГДА, это не "пока нет", а постоянная особенность роли. Type:'logist'
 //   (не 'manager') - его страница/позиция резолвятся именно по этому типу
 //   (isRyschanowEntry_/positionLabel).
+// - Барыльченко (2026-08-30) - начальник автоколонны длинномеров, та же постоянная
+//   особенность роли, что у Рыщанова: не брокер найма, в 1С НИКОГДА не будет строки
+//   mgr_l="Барыльченко" - см. plans/2026-08-30-avtokolonna-head-personal-page.md.
 var ALWAYS_PREVIEW_ROSTER_ = [
   { name: 'Ратников Максим Михайлович', type: 'manager', sur: 'ратников' },
   { name: 'Рыщанов Рустем', type: 'logist', sur: 'рыщанов' },
+  { name: 'Барыльченко Пётр Иванович', type: 'logist', sur: 'барыльченко' },
 ];
 // Единая точка сборки ростера дропдауна (2026-08-21) - раньше concat+dedupe дублировался в
 // трёх местах (myPageCurrentEntry_/renderMyPage/viewAsRoster_), из-за чего правка вроде этой
@@ -5784,6 +5791,14 @@ function myPageCurrentEntry_() {
 }
 function isVasinEntry_(entry) {
   return !!entry && entry.type === 'logist' && entry.name.trim().split(' ')[0].toLowerCase() === 'васин';
+}
+// Начальники автоколонн (2026-08-30, новая роль, первый - Барыльченко Пётр, колонна
+// длинномеров, см. plans/2026-08-30-avtokolonna-head-personal-page.md) - Влад: "интерфейс
+// как у Васина... расчёт ЗП такой же как у Васина" - та же renderMyPageVasin, зеркало
+// isColumnHeadName_ на бэкенде. Расширяемый список (не только Барыльченко в будущем).
+var COLUMN_HEAD_SUR_FRONT_ = ['барыльченко'];
+function isColumnHeadEntry_(entry) {
+  return !!entry && entry.type === 'logist' && COLUMN_HEAD_SUR_FRONT_.indexOf(entry.name.trim().split(' ')[0].toLowerCase()) >= 0;
 }
 // Рыщанов - руководитель отдела логистики (2026-08-25, см. plans/2026-08-25-ryschanow-
 // personal-page.md), не брокер найма - своя отдельная страница (renderMyPageRyschanow), как
@@ -5860,7 +5875,7 @@ async function setMyPagePeriod(period) {
       // донагружает машины+водителей через уже существующий action=vehicles_period (тот же,
       // что "Техника"/"Водители") - только для них, чтобы не тратить лишний запрос на
       // остальных сотрудников, у которых машин на странице нет.
-      var wantVehicles = isVasinEntry_(myPageCurrentEntry_()) || isRyschanowEntry_(myPageCurrentEntry_());
+      var wantVehicles = isVasinEntry_(myPageCurrentEntry_()) || isRyschanowEntry_(myPageCurrentEntry_()) || isColumnHeadEntry_(myPageCurrentEntry_());
       var fromServer = await fetchOrdersPeriodFromServer_(period);
       var reqs = [ fromServer ? Promise.resolve(fromServer) : apiFetchJson({ action: 'orders_period', period: period }) ];
       if (wantVehicles) {
@@ -6022,8 +6037,9 @@ function renderMyPage() {
       selectorHtml += '</select></div>';
     }
 
-    if (isVasinEntry_(current)) {
-      // Васин - другая роль (не брокер найма), другой источник данных - см. renderMyPageVasin.
+    if (isVasinEntry_(current) || isColumnHeadEntry_(current)) {
+      // Васин / начальник автоколонны (Барыльченко) - другая роль (не брокер найма), другой
+      // источник данных - см. renderMyPageVasin, тот же интерфейс/формула ЗП для обоих.
       renderMyPageVasin(el, current.name, selectorHtml);
     } else if (isRyschanowEntry_(current)) {
       // Рыщанов - руководитель отдела логистики, не брокер найма - см. renderMyPageRyschanow.
@@ -8811,11 +8827,16 @@ function applyRoleUI() {
     // Ахтамова/Гусейнова (2026-08-26) - те же два пункта, что у Рыщанова, но для руководителей
     // коммерческих групп - см. COMMERCIAL_HEAD_SUR_FRONT_.
     var isCommercialHeadViewer = COMMERCIAL_HEAD_SUR_FRONT_.indexOf(curPersonSur) >= 0;
+    // Начальник автоколонны (2026-08-30, Барыльченко) - Влад перечислил РОВНО 3 пункта
+    // ("личная станица потом планировка и потом калькулятор"), без "План задание" - в
+    // отличие от обычных логистов/менеджеров, у которых он есть по умолчанию ниже.
+    var isColumnHeadViewer = COLUMN_HEAD_SUR_FRONT_.indexOf(curPersonSur) >= 0;
     // Собрано в список ОДИН раз (план 2026-08-28, Этап 1) - тот же список используется и
     // для фильтра пунктов сайдбара ниже, и для гварда навигации после него, чтобы они не
     // могли разойтись. Калькулятор не зависит от серверных данных (D.role) - считает
     // офлайн в браузере, поэтому доступен и менеджерам/логистам, а не только админ-панели.
-    var allowedPages_ = ['my-page', 'order-plan', 'calculator', 'logistics-plan'];
+    var allowedPages_ = ['my-page', 'calculator', 'logistics-plan'];
+    if (!isColumnHeadViewer) allowedPages_.push('order-plan');
     if (isRyschanowViewer) allowedPages_.push('ryschanow-salary');
     if (isCommercialHeadViewer) allowedPages_.push('commercial-head-salary', 'commercial-head-debt');
     document.querySelectorAll('.sidebar-nav-item').forEach(function(item) {
@@ -21824,6 +21845,12 @@ function renderFleetMenuMain_(){
   var drvAssign = lpFleetOpenOnTractor_("driver", v.gos);   /* без slot - см. разбор у lpFleetOpenOnTractor_ */
   var trlAssign = lpFleetOpenOnTractor_("trailer", v.gos);
   var items = [];
+  /* "Копировать" (Влад, 31.08, третий заход - по скриншоту меню сцепки: "нужно
+     чтобы в меню ПКМ была кнопка копировать") - тот же lpCopyRow_, что уже
+     висит на правом клике по .rh1 (см. contextmenu-обработчик ниже) - НЕ
+     убираем ту прямую копию, просто добавляем сюда же как явный пункт меню,
+     на случай если правым кликнули не точно по верхней строке. */
+  items.push('<button class="ctxmenu-item" data-fa="copy">Копировать</button>');
   if (drvAssign) items.push('<button class="ctxmenu-item" data-fa="uncouple-driver">Высадить · ' + pageEsc_(lpFleetPersonName_(drvAssign.resource_key)) + "</button>");
   items.push('<button class="ctxmenu-item" data-fa="couple-driver">' + (drvAssign ? "Пересадить водителя" : "Посадить водителя") + "</button>");
   if (trlAssign) items.push('<button class="ctxmenu-item" data-fa="uncouple-trailer">Отцепить · ' + pageEsc_(lpFleetAssetLabel_(trlAssign.resource_key)) + "</button>");
@@ -21848,6 +21875,7 @@ function renderFleetMenuMain_(){
 function handleFleetMenuAction_(action){
   var v = STATE.vehicles[fleetMenuVi_];
   if (!v){ closeFleetMenu_(); return; }
+  if (action === "copy"){ lpCopyRow_(fleetMenuVi_); closeFleetMenu_(); return; }
   if (action === "uncouple-driver") return fleetDoUncouple_("driver", v);
   if (action === "uncouple-trailer") return fleetDoUncouple_("trailer", v);
   if (action === "couple-driver") return renderFleetPicker_("driver", v);

@@ -1,0 +1,2124 @@
+<title>Планировка ЯРД</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Unbounded:wght@500;600&display=swap" rel="stylesheet">
+
+<style>
+:root{
+  /* ---- ГОСТ, раздел 1: токены. Дашборд по ГОСТу тёмный единственно, но здесь -
+     ЭКСПЕРИМЕНТ по прямой просьбе Влада, 29.08: кнопка светлого режима для этого
+     инструмента, НЕ системная тема - логист переключает сам. Явный toggle кладёт
+     data-theme="light" на <html>; ниже переопределяются только поверхностные и
+     служебные токены, акцентные (green/red/amber/blue/purple) - те же, что в
+     остальном дашборде, тема их не трогает. Пока не в DESIGN_SYSTEM.md - решение
+     принимать после того, как Влад пощупает переключатель на практике. ---- */
+  --bg:#0f0f13; --bg2:#17171d; --bg3:#1e1e26; --bg4:#252530;
+  --border:rgba(255,255,255,0.08); --border-strong:rgba(255,255,255,0.16);
+  --text:#e8e6df; --muted:#8b8980;
+  --row-hover:#191920; --grid-line:rgba(255,255,255,.055); --weekend-tint:rgba(255,255,255,.022);
+  --ph-bg:rgba(255,255,255,.05);
+  --green:#1D9E75; --red:#E24B4A; --amber:#EF9F27; --blue:#378ADD; --purple:#7F77DD;
+  /* приглушённые надписи ПО ЦВЕТУ поверх translucent-заливок (бейджи техники,
+     состояния отрезков) - на тёмном фоне светлый тон, на светлом тёмный тон
+     одного и того же hue, чтобы контраст не проваливался при переключении темы */
+  --tint-green:#8fd9bf; --tint-blue:#a9cdf2; --tint-amber:#f0c98a;
+  --tint-purple:#c1bcf0; --tint-red:#eeadac;
+  --seg-text-onfill:#e8e6df;
+
+  /* ---- ГОСТ, раздел 5: кривые (структурные, тема их не касается) ---- */
+  --ease-out-strong:cubic-bezier(0.16,1,0.3,1);
+  --ease-out-soft:cubic-bezier(0.25,1,0.5,1);
+  --ease-in-out:cubic-bezier(0.65,0,0.35,1);
+  --ease-flip:cubic-bezier(.22,.9,.28,1);
+  --ease-overshoot:cubic-bezier(.34,1.45,.5,1);
+  --ease-drawer:cubic-bezier(.32,.72,0,1);
+
+  /* ---- ПРЕДЛОЖЕНИЕ, в ГОСТе ещё нет: палитра принадлежности (структурная) ----
+     12 слотов для режимов «раскрасить по менеджеру / по логисту».
+     Выведены из пяти канонических тонов сдвигом светлоты, новых семейств не заводим. */
+  --id-1:#1D9E75; --id-2:#378ADD; --id-3:#EF9F27; --id-4:#7F77DD; --id-5:#E24B4A; --id-6:#2FBF9A;
+  --id-7:#5FA8E8; --id-8:#C9812A; --id-9:#A79BE8; --id-10:#B85C5B; --id-11:#158060; --id-12:#2C6DAF;
+
+  /* ВАЖНО: эти три ниже - структурные размеры, НЕ цвет темы. Раньше жили внутри
+     :root[data-theme="light"] по ошибке правки 29.08 - в тёмной теме (значение по
+     умолчанию) были не определены, из-за чего width:var(--lane-w) у каждой строки
+     схлопывался «по содержимому» вместо фиксированных 236px - отсюда была
+     диагональная «лестница» замороженной колонки, которую поймал Влад. */
+  --hw:17px;          /* ширина одного часа - меняется зумом, не темой */
+  --lane-w:236px;     /* замороженная левая колонка */
+  --row-h:52px;       /* было 44 - Влад, 29.08: полоски шире по вертикали */
+}
+:root[data-theme="light"]{
+  --bg:#f2f4f7; --bg2:#ffffff; --bg3:#eceff3; --bg4:#e1e5eb;
+  --border:rgba(20,26,38,0.10); --border-strong:rgba(20,26,38,0.20);
+  --text:#1b1f27; --muted:#5c6474;
+  --row-hover:#eaeef3; --grid-line:rgba(20,26,38,.09); --weekend-tint:rgba(20,26,38,.035);
+  --ph-bg:rgba(20,26,38,.055);
+  --tint-green:#0f6a4c; --tint-blue:#1c5ea8; --tint-amber:#8a5a12;
+  --tint-purple:#584fb0; --tint-red:#a23b3a;
+  --seg-text-onfill:#1b1f27;
+}
+*{box-sizing:border-box;}
+html,body{height:100%;}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:'Golos Text',system-ui,-apple-system,'Segoe UI',sans-serif;
+  font-size:13px; overflow:hidden;
+  /* flex-колонка на всю высоту экрана - раньше .board-wrap считал свою высоту
+     как calc(100vh - 128px) магическим числом, а когда шапка выросла (добавился
+     ряд перехода по месяцам), число не обновили - .board-wrap стал на ~90px выше
+     реального остатка экрана, и корзина у его нижнего края уехала ЗА пределы
+     видимой области (Влад, 29.08: «я не увидел корзины» - она рисовалась,
+     физически ниже экрана). Flex сам считает остаток независимо от высоты шапки. */
+  height:100vh; display:flex; flex-direction:column;
+}
+.mono{font-family:'JetBrains Mono',ui-monospace,'Cascadia Mono',monospace;font-variant-numeric:tabular-nums;}
+
+/* ================= Шапка ================= */
+.top{
+  flex:none;
+  display:flex;align-items:flex-end;gap:22px;flex-wrap:wrap;
+  padding:16px 22px 12px;border-bottom:1px solid var(--border);background:var(--bg2);
+  position:relative;z-index:30;
+}
+h1{
+  font-family:'Unbounded',system-ui,sans-serif;font-weight:600;font-size:19px;
+  margin:0;letter-spacing:-0.01em;line-height:1.1;
+}
+.sub{font-size:11px;color:var(--muted);margin-top:5px;letter-spacing:.02em;}
+/* переход между месяцами - Влад, 29.08: «стрелки, просто переход, без прогрузки».
+   В демо реальные данные есть только за август 2026 - соседний месяц честно
+   говорит об этом тостом, а не подсовывает выдуманный график под видом настоящего
+   (см. правило проекта "цифры бьются везде" - никогда не показывать похожее на
+   реальные данные там, где их нет). */
+/* position:absolute, не в потоке .controls - Влад, 29.08: «перенеси в
+   противоположную сторону экрана от надписи "Планировка"». Обычным flex-порядком
+   («последняя группа в .controls») этого не добиться надёжно: .controls сам
+   переносится на вторую строку при узком окне (много чипов фильтров), и тогда
+   последняя группа съезжает влево, а не остаётся у правого края - поймано числами
+   при проверке (492px из 1400 - это середина экрана, не угол). Абсолютное
+   позиционирование от .top (у него уже position:relative) держит правый верхний
+   угол железно, независимо от того, сколько чипов ниже переносится. */
+.monthnav{
+  position:absolute;top:16px;right:22px;z-index:31;
+  display:flex;align-items:center;gap:4px;
+}
+.monthnav-btn{
+  appearance:none;border:1px solid var(--border);background:var(--bg3);color:var(--muted);
+  width:22px;height:22px;border-radius:6px;display:flex;align-items:center;justify-content:center;
+  cursor:pointer;transition:color .12s ease-out,border-color .12s ease-out;
+}
+.monthnav-btn:hover{color:var(--text);border-color:var(--border-strong);}
+.monthnav-btn svg{width:13px;height:13px;}
+.monthnav-label{font-size:11px;color:var(--muted);min-width:96px;text-align:center;}
+.spacer{flex:1 1 auto;}
+
+.kpis{display:flex;gap:2px;align-items:stretch;}
+.kpi{padding:4px 14px 4px 0;margin-right:12px;border-right:1px solid var(--border);}
+.kpi:last-child{border-right:0;margin-right:0;}
+.kpi-label{
+  font-size:9px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--muted);margin-bottom:3px;white-space:nowrap;
+}
+.kpi-val{font-size:17px;font-weight:600;line-height:1;}
+
+.controls{display:flex;gap:14px;align-items:center;flex-wrap:wrap;}
+.grp{display:flex;align-items:center;gap:6px;}
+.grp-label{
+  font-size:9px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);
+  margin-right:2px;
+}
+.chip{
+  appearance:none;border:1px solid var(--border);background:var(--bg3);color:var(--muted);
+  font-family:inherit;font-size:11.5px;font-weight:500;padding:5px 11px;border-radius:8px;cursor:pointer;
+  transition:border-color .15s var(--ease-out-soft),color .15s var(--ease-out-soft),background-color .15s var(--ease-out-soft);
+}
+.chip:hover{color:var(--text);border-color:var(--border-strong);}
+.chip[aria-pressed="true"]{background:var(--bg4);color:var(--text);border-color:var(--border-strong);}
+.chip:focus-visible,.toast button:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:8px;}
+
+/* ================= Легенда ================= */
+.legend{
+  flex:none;
+  display:flex;gap:16px;align-items:center;flex-wrap:wrap;
+  padding:8px 22px;border-bottom:1px solid var(--border);background:var(--bg);
+  font-size:10.5px;color:var(--muted);position:relative;z-index:20;
+}
+.lg{display:flex;align-items:center;gap:6px;}
+.sw{width:16px;height:9px;border-radius:3px;flex:none;}
+.lg-note{margin-left:auto;font-size:10px;opacity:.75;}
+
+/* ================= Доска ================= */
+.board-wrap{position:relative;display:flex;flex-direction:column;flex:1 1 auto;min-height:0;overflow:hidden;}
+.board{position:relative;flex:1 1 auto;min-height:0;overflow:auto;scrollbar-width:auto;}
+/* Влад, 29.08: «добавить нормальные горизонтальный и вертикальный скроллы, чтобы
+   зажал и таскал, как обычный документ/сайт» - было scrollbar-width:thin (едва
+   заметная полоска), теперь полноразмерный стилизованный скролл в обе стороны. */
+.board::-webkit-scrollbar{width:14px;height:14px;}
+.board::-webkit-scrollbar-track{background:var(--bg2);}
+.board::-webkit-scrollbar-thumb{
+  background:var(--bg4);border:3px solid var(--bg2);border-radius:8px;
+}
+.board::-webkit-scrollbar-thumb:hover{background:var(--border-strong);}
+.board::-webkit-scrollbar-corner{background:var(--bg2);}
+
+/* Мини-скраббер снизу БЫЛ и УДАЛЁН (Влад, 29.08: «убери, основного скролла
+   достаточно») - осталась полноразмерная нативная полоса .board выше. */
+/* Курсорного света здесь НЕТ - осознанное отступление от ГОСТа раздела 7
+   (обычно обязателен на каждой странице). Влад, 29.08: на BI-панели курсор
+   почти неподвижен, а здесь логист непрерывно ведёт мышью по сетке весь день -
+   бегущее свечение под курсором на рабочем инструменте раздражает, а не украшает.
+   См. `plans/2026-08-29-logistics-planning-board.md`, раздел «Отступления от ГОСТа». */
+
+/* width:max-content обязателен: sticky-элемент липнет только внутри своего
+   родителя, а строка шириной с экран уносит левую колонку при скролле вправо */
+.head{
+  position:sticky;top:0;z-index:14;display:flex;background:var(--bg2);
+  border-bottom:1px solid var(--border-strong);
+  width:max-content;min-width:100%;
+}
+.head-corner{
+  position:sticky;left:0;z-index:16;width:var(--lane-w);flex:none;background:var(--bg2);
+  border-right:1px solid var(--border-strong);padding:7px 12px;
+  display:flex;flex-direction:column;justify-content:center;
+}
+.head-corner .t1{font-size:9px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);}
+.head-corner .t2{font-size:11px;color:var(--text);margin-top:3px;}
+.head-scale{position:relative;flex:none;height:46px;}
+.day{
+  position:absolute;top:0;height:46px;border-left:1px solid var(--border-strong);
+  padding:5px 0 0 6px;overflow:hidden;cursor:pointer;
+}
+.day.weekend{background:var(--weekend-tint);}
+.day.today{background:rgba(55,138,221,.07);}
+.day-n{font-size:11px;font-weight:600;line-height:1;}
+.day-w{font-size:9px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;margin-top:2px;}
+.hours{position:absolute;left:0;right:0;bottom:0;height:13px;}
+.hr{position:absolute;bottom:0;font-size:8.5px;color:var(--muted);line-height:1;}
+:root:not(.z-day) .hr{display:none;}
+
+.rows{position:relative;z-index:1;width:max-content;min-width:100%;}
+/* Влад, 29.08: «нет разделительной линии, выглядит как незаконченная таблица» -
+   так и было: .grouphead был шириной ТОЛЬКО замороженной колонки (var(--lane-w)),
+   верх/низ-бордер обрывался ровно на её границе, а вся полоса времени справа
+   оставалась вообще без черты. Теперь бордер - на ПОЛНОШИРИННОЙ внешней полосе
+   (тот же приём max-content/min-width:100%, что и у .row), текст-ярлык - на
+   sticky-обёртке ВНУТРИ неё (тот же паттерн, что у .seg-label). Заодно кликабельна
+   вся полоса целиком, не только узкий ярлык слева. */
+.grouphead{
+  position:relative;z-index:12;display:flex;align-items:center;
+  height:26px;background:var(--bg);cursor:pointer;user-select:none;
+  border-top:1px solid var(--border);border-bottom:1px solid var(--border);
+  width:max-content;min-width:100%;
+}
+.grouphead-label{
+  position:sticky;left:0;z-index:1;display:flex;align-items:center;gap:8px;
+  width:var(--lane-w);flex:none;padding:0 12px;
+}
+.grouphead b{font-size:10px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);}
+.grouphead i{font-style:normal;font-size:10px;color:var(--muted);opacity:.7;}
+.gh-chev{width:12px;height:12px;flex:none;color:var(--muted);transition:transform .15s var(--ease-out-soft);}
+.grouphead.collapsed .gh-chev{transform:rotate(-90deg);}
+
+.row{display:flex;height:var(--row-h);border-bottom:1px solid var(--border);width:max-content;min-width:100%;}
+.row.ghosted .rowhead,.row.ghosted .track{opacity:.28;}
+.row.shifting{will-change:transform;}
+.rowcard{
+  position:fixed;z-index:960;pointer-events:none;width:var(--lane-w);height:var(--row-h);
+  background:var(--bg3);border:1px solid var(--border-strong);border-radius:8px;
+  padding:5px 10px;overflow:hidden;opacity:.82;
+  box-shadow:0 2px 6px rgba(0,0,0,.4),0 16px 32px rgba(0,0,0,.5);
+}
+.row.drop{background:rgba(29,158,117,.07);box-shadow:inset 0 0 0 1.5px rgba(29,158,117,.4);
+  transition:background-color .15s ease-out,box-shadow .15s ease-out;}
+.rowhead{
+  position:sticky;left:0;z-index:10;width:var(--lane-w);flex:none;background:var(--bg2);
+  border-right:1px solid var(--border-strong);padding:5px 10px;overflow:hidden;
+  transition:background-color .12s ease-out;
+}
+.row:hover .rowhead{background:var(--row-hover);}
+body.can-arrange .rowhead{cursor:grab;touch-action:none;}
+body.can-arrange .rowhead:active{cursor:grabbing;}
+.rh1{display:flex;align-items:center;gap:7px;line-height:1;}
+.tag{
+  font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:600;letter-spacing:.04em;
+  padding:2px 5px;border-radius:3px;background:var(--bg4);color:var(--muted);flex:none;
+}
+/* семейство техники цветом - те же группы, что логисты держат в голове
+   (в их таблице это правила «Раздвижка / Корыто / Рапид / Бортовой / Площадка»).
+   Внутри razd/koryto - 4 тональности одного оттенка по рангу (см. typeRank в JS):
+   больше осей/раздвижнее = темнее заливка, текст остаётся тем же для читаемости. */
+.tag.f-razd-1  {background:rgba(29,158,117,.10); color:var(--tint-green);}
+.tag.f-razd-2  {background:rgba(29,158,117,.18); color:var(--tint-green);}
+.tag.f-razd-3  {background:rgba(29,158,117,.27); color:var(--tint-green);}
+.tag.f-razd-4  {background:rgba(29,158,117,.38); color:var(--tint-green);}
+.tag.f-koryto-1{background:rgba(55,138,221,.10); color:var(--tint-blue);}
+.tag.f-koryto-2{background:rgba(55,138,221,.18); color:var(--tint-blue);}
+.tag.f-koryto-3{background:rgba(55,138,221,.27); color:var(--tint-blue);}
+.tag.f-koryto-4{background:rgba(55,138,221,.38); color:var(--tint-blue);}
+.tag.f-rapid {background:rgba(239,159,39,.20); color:var(--tint-amber);}
+.tag.f-bort  {background:rgba(127,119,221,.22);color:var(--tint-purple);}
+.tag.f-panel {background:rgba(226,75,74,.18);  color:var(--tint-red);}
+.gos{font-family:'JetBrains Mono',monospace;font-size:11.5px;font-weight:500;letter-spacing:-.01em;}
+.rh2{font-size:10px;color:var(--muted);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.rh2 .nd{color:var(--red);}
+.hide-btn{
+  position:absolute;right:8px;top:8px;width:18px;height:18px;border-radius:5px;
+  background:var(--bg4);border:1px solid var(--border);color:var(--muted);
+  display:none;align-items:center;justify-content:center;cursor:pointer;
+  transition:color .12s ease-out,border-color .12s ease-out;
+}
+body.can-arrange .row:hover .hide-btn{display:flex;}
+.hide-btn:hover{color:var(--text);border-color:var(--border-strong);}
+.hide-btn svg{width:11px;height:11px;}
+.row.is-hidden .rowhead{opacity:.5;}
+
+.track{position:relative;flex:none;height:var(--row-h);}
+.track::before{
+  content:'';position:absolute;inset:0;pointer-events:none;
+  background:
+    repeating-linear-gradient(90deg,var(--grid-line) 0 1px,transparent 1px calc(var(--hw)*24));
+}
+.now{
+  position:absolute;top:0;bottom:0;width:1px;background:var(--blue);z-index:9;pointer-events:none;
+  box-shadow:0 0 0 1px rgba(55,138,221,.18);
+}
+.now-head{position:absolute;top:0;bottom:0;width:1px;background:var(--blue);z-index:17;pointer-events:none;}
+
+/* ---- отрезки ----
+   Влад, 29.08: «полоски чуть шире по вертикали, больше информации, не обрезай
+   фамилии» - высота выросла с 22 до 28px (строка с 44 до 52px), подпись человека
+   и маршрут разведены по ДВУМ строкам внутри бара вместо одной обрезанной.
+   «Тонкие подполосы под строкой - непонятно зачем, убрать» - .dstrip больше нет;
+   недоступность водителя (выходной/нет водителя) теперь ОБЫЧНЫЙ блок в общей
+   полосе, как ремонт - с той же подписью и тем же участием в примагничивании и
+   проверке пересечений (см. JS: driveroff больше не исключение). */
+.seg{
+  /* БЕЗ overflow:hidden И БЕЗ постоянного will-change:transform - важно, оба
+     ломают sticky-подпись внутри (.seg-label) одинаковым образом: overflow (даже
+     hidden) делает .seg собственным scroll-контейнером, will-change:transform
+     (как и сам transform) делает .seg containing block для потомков - в обоих
+     случаях sticky начинает считаться от .seg вместо реального скролла .board,
+     и подпись просто застывает на месте вместо того чтобы следовать за прокруткой.
+     will-change включается ТОЧЕЧНО в JS на время самого драга (см. lift()/pointerup) -
+     это и корректнее по смыслу самого свойства (хинт нужен только пока анимируем),
+     и чинит sticky в состоянии покоя, когда подпись обязана быть видна. Клип по
+     ширине бара - max-width на .seg-label + ellipsis на .seg-txt. */
+  /* 32px, не 28 (Влад, 29.08 - «пошире по вертикали») - в строке 52px это центрирует
+     плитку с симметричным зазором 10px сверху/снизу, а не 12px как раньше; бейдж
+     МЕН/ЛОГ внутри (22px) получает воздух со всех сторон автоматически через
+     align-items:center на .seg-label, без отдельных правил под каждую сторону */
+  position:absolute;top:10px;height:32px;border-radius:6px;
+  left:calc(var(--s) * var(--hw));width:calc(var(--l) * var(--hw));
+  font-size:10.5px;line-height:1.3;white-space:nowrap;cursor:grab;touch-action:none;
+  user-select:none;
+  /* transition ТОЛЬКО opacity - box-shadow/filter из transition убраны (запрет ГОСТа:
+     тени и свечения через opacity заранее отрисованного слоя, не анимацией свойств;
+     находка аудита состояний 29.08). transform-переход драг ставит inline сам. */
+  transition:opacity .14s var(--ease-out-soft);
+}
+/* hover - световой оверлей вместо filter:brightness (brightness - незаконный канал
+   по ГОСТу; и БЕЗ подъёма transform - он ломает sticky-подпись, см. коммент выше) */
+.seg .hov{position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+  background:rgba(255,255,255,.10);opacity:0;transition:opacity .12s var(--ease-out-soft);}
+:root[data-theme="light"] .seg .hov{background:rgba(20,26,38,.07);}
+.seg:hover .hov{opacity:1;}
+/* кольцо - один слот на плитку, приоритет: конфликт(red) > «под данные»(amber) > открыта(blue) */
+.seg .ring{position:absolute;inset:-2px;border-radius:8px;pointer-events:none;
+  opacity:0;transition:opacity .15s var(--ease-out-soft);}
+.seg.is-open .ring{opacity:1;box-shadow:0 0 0 1.5px var(--blue);}
+.seg.needs-passport .ring{opacity:1;box-shadow:0 0 0 1.5px var(--amber);}
+.seg.overlap .ring{opacity:1;box-shadow:0 0 0 1.5px var(--red);}
+/* завершённый рейс - приглушение всего элемента (значение между .82 драга и .28 ghosted) */
+.seg.is-past{opacity:.68;}
+.seg.lifted{cursor:grabbing;opacity:.82;z-index:900;pointer-events:none;
+  box-shadow:0 2px 6px rgba(0,0,0,.4),0 16px 32px rgba(0,0,0,.5);}
+.seg.bad{box-shadow:inset 0 0 0 1.5px var(--red);}
+/* ПОДПИСЬ - position:sticky внутри отрезка, привязана к скроллу .board (ближайший
+   реальный scroll-контейнер), а .seg{overflow:hidden} держит её в границах самого
+   бара. Итог - «Ремонт»/«Без водителя»/маршрут видны, пока в кадре ЛЮБАЯ часть
+   длинной (многодневной) полосы, а не только момент, когда виден именно её левый
+   край - раньше подпись пропадала за экраном на длинных ремонтах. */
+.seg-label{
+  /* display:INLINE-flex, не flex - ключевая деталь: обычный (block) flex-контейнер
+     без явной ширины растягивается на всю доступную ширину (родитель .seg порой
+     шириной в тысячи px на многодневной полосе) - тогда sticky нечего «прилеплять»,
+     коробка и так покрывает весь диапазон. inline-flex сжимается по содержимому
+     (как раньше делал inline-block), и вот ЭТУ маленькую коробку sticky уже реально
+     двигает вслед за скроллом .board. Ловушка поймана и проверена числами 29.08. */
+  /* «Бейдж-корпус» по выбору Влада 29.08 (уровень 5 мастерской) с его поправкой:
+     бейдж идентичности и маршрут - ОДИН sticky-ряд, едут по скроллу ВМЕСТЕ
+     («рейс должен ехать вместе с фамилией»), а не бейдж отдельно от текста. */
+  /* left отсчитывается от скролл-контейнера .board, а НЕ от видимого просвета -
+     замороженная колонка (--lane-w) сама sticky-контент того же контейнера и
+     ПЕРЕКРЫВАЕТ всё, что прилипло левее её ширины. Прилипаем сразу ЗА колонку -
+     иначе подпись длинной плитки визуально пряталась под ней (поймано 29.08). */
+  position:sticky;left:calc(var(--lane-w) + 8px);display:inline-flex;flex-direction:row;
+  align-items:center;gap:6px;height:100%;max-width:calc(100% - 8px);
+  /* воздух слева: бейдж не прилипает вплотную к рамке плитки (Влад, 29.08 -
+     «как будто обрезает основную рамку») */
+  margin-left:4px;
+}
+.seg-txt{overflow:hidden;text-overflow:ellipsis;font-weight:500;}
+/* бейдж идентичности: МЕНеджер (3 буквы, ярко) над ЛОГистом (3 буквы, приглушён);
+   непрозрачный - читается поверх любой заливки в любом режиме раскраски */
+.seg-id{
+  /* БЕЗ фиксированной height:20px - две строки текста (9px, line-height 1.15)
+     сами по себе занимают ~20.7px, а нулевой вертикальный паддинг при жёсткой
+     высоте 20px давал буквам упираться в собственную рамку (Влад, 29.08:
+     «вылазят на границу»). Теперь высота - от паддинга, а не наоборот: бейдж
+     растёт под текст, а не текст сжимается под бейдж. */
+  position:relative;display:inline-flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:1px;flex:none;padding:3px 8px;border-radius:5px;
+  background:var(--idfill,var(--bg4));
+  box-shadow:inset 0 0 0 1px var(--border-strong);   /* статичная кромка - бейдж читается
+    как самостоятельная бирка, а не обрезок заливки (акцент по просьбе Влада 29.08) */
+}
+.seg-id b,.seg-id i{
+  font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;font-style:normal;
+  line-height:1.2;letter-spacing:.04em;color:var(--text);
+}
+.seg-id i{font-weight:500;color:var(--muted);}
+/* точка водителя: залита = назначен на машину, кольцо = вакансия */
+.seg-drv{position:absolute;top:-2px;right:-2px;width:6px;height:6px;border-radius:50%;}
+.seg-drv.on{display:none;}                     /* норму не отмечаем - только отсутствие */
+.seg-drv.off{background:var(--bg2);border:1.5px solid var(--red);}
+/* прогресс активного рейса - 2px снизу, transform:scaleX (не width) */
+.seg-prog{position:absolute;left:0;right:0;bottom:0;height:2px;border-radius:0 0 6px 6px;
+  overflow:hidden;background:rgba(139,137,128,.18);pointer-events:none;}
+.seg-prog i{display:block;height:100%;transform:scaleX(calc(var(--progress,0)/100));
+  transform-origin:left;background:currentColor;}
+.seg-code{
+  font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:600;letter-spacing:.02em;
+  white-space:nowrap;
+}
+.hnd{position:absolute;top:0;bottom:0;width:6px;cursor:ew-resize;z-index:2;}
+.hnd.l{left:0;} .hnd.r{right:0;}
+/* Зумы - стандарт Влада 29.08: «неделя» = только МЕН/ЛОГ (бейдж, без маршрута),
+   «месяц» = только ЛОГист, всё - первыми тремя буквами. Служебные плашки (без
+   бейджа) на обоих зумах остаются чистым цветом. */
+:root.z-week .seg .seg-txt{display:none;}
+:root.z-week .seg-label{margin-left:2px;}
+:root.z-month .seg{height:16px;top:18px;border-radius:3px;font-size:0;}
+:root.z-month .seg .seg-txt{display:none;}
+:root.z-month .seg-label{margin-left:1px;}
+:root.z-month .seg-id{height:12px;padding:0 3px;background:transparent;box-shadow:none;}
+:root.z-month .seg-id b{display:none;}                    /* менеджер уходит */
+:root.z-month .seg-id i{font-size:9px;color:var(--text);} /* логист остаётся читаемым */
+:root.z-month .seg-drv{display:none;}
+:root.z-month .seg-prog{display:none;}
+
+/* Крупное ВРЕМЯ, ЗАФИКСИРОВАННОЕ на экране, пока тянут/растягивают/рисуют
+   (Влад, 29.08: «бейджик двигался вместе с плиткой - глазами не уследить; пусть
+   время стоит на месте, а я двигаю плиткой рукой не глядя на неё»). Раньше это
+   был тултип, гоняющийся за курсором - теперь одна неподвижная точка вверху
+   доски, крупный моно-шрифт (25px - 2-й ярус hero по ГОСТу раздел 2), глаза
+   отдыхают в одном месте на весь жест. */
+.time-hud{
+  position:absolute;top:10px;left:50%;z-index:980;pointer-events:none;
+  transform:translate(-50%,-6px);opacity:0;width:400px;
+  /* ШИРИНА ФИКСИРОВАННАЯ, не по контенту: translateX(-50%) считается от неё, и
+     если бы ширина «дышала» вместе с длиной текста (то короче, то с
+     «· примагничено»), сам HUD ехал бы по горизонтали вместе с содержимым - ровно
+     та беготня за плиткой, от которой Влад просил избавиться. Фиксированная
+     ширина = гарантированно одна и та же точка на экране при любом тексте внутри,
+     хоть с минутами, хоть без. */
+  background:var(--bg4);border:1px solid var(--border-strong);border-radius:10px;
+  padding:10px 16px;display:flex;flex-direction:column;align-items:center;gap:4px;
+  box-shadow:0 10px 26px rgba(0,0,0,.45);
+  transition:opacity .12s var(--ease-out-soft),transform .12s var(--ease-out-soft);
+}
+.time-hud.on{opacity:1;transform:translate(-50%,0);}
+.hud-times{display:flex;align-items:baseline;gap:10px;white-space:nowrap;}
+.hud-time{
+  font-family:'JetBrains Mono',ui-monospace,monospace;font-size:25px;font-weight:600;
+  font-variant-numeric:tabular-nums;color:var(--text);line-height:1;
+}
+.hud-arrow{color:var(--muted);font-size:15px;}
+.hud-dur{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);
+  font-variant-numeric:tabular-nums;white-space:nowrap;}
+
+/* Корзина, всплывающая при захвате плитки (Влад, 29.08: «как на смартфонах -
+   зажал, внизу появляется корзина, роняешь туда - удаляется»). Стоит НАД
+   скраббером (тот 18px внизу доски), появляется только пока плитку реально
+   тащат (не во время растяжки за край - там нечего "уронить"), подсвечивается
+   красным, когда курсор действительно над ней - тот самый сигнал "отпусти
+   здесь". Хит-тест координат - в JS (см. pointermove для drag), pointer-events
+   здесь none, чтобы не мешать document.elementFromPoint определять строку. */
+.trash-zone{
+  position:absolute;bottom:30px;left:50%;z-index:975;pointer-events:none;
+  transform:translate(-50%,18px) scale(.85);opacity:0;
+  width:60px;height:60px;border-radius:50%;
+  background:var(--bg4);border:1px solid var(--border-strong);color:var(--muted);
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 10px 26px rgba(0,0,0,.45);
+  transition:opacity .16s var(--ease-out-soft),transform .16s var(--ease-out-soft),
+             background-color .12s ease-out,border-color .12s ease-out,color .12s ease-out;
+}
+.trash-zone.on{opacity:1;transform:translate(-50%,0) scale(1);}
+.trash-zone.armed{
+  background:var(--red);border-color:var(--red);color:#fff;
+  transform:translate(-50%,0) scale(1.18);
+}
+.trash-zone svg{width:24px;height:24px;}
+
+/* линия примагничивания */
+.magnet{
+  position:absolute;top:1px;bottom:1px;width:2px;background:var(--amber);z-index:8;
+  pointer-events:none;opacity:0;transform:scaleY(.7);
+  transition:opacity .12s var(--ease-out-soft),transform .12s var(--ease-overshoot);
+  box-shadow:0 0 8px rgba(239,159,39,.5);
+}
+.magnet.on{opacity:.9;transform:scaleY(1);}
+
+/* Уровень 3 «супер» с изолированного магнит-стенда (Влад, 29.08: «просто супер,
+   внедряем срочно») - вспышка на СТЫКЕ обоих краёв, искры, прошитый шов. */
+@keyframes kiss{
+  0%{opacity:0;transform:scaleY(.35);} 55%{opacity:1;transform:scaleY(1.18);}
+  100%{opacity:0;transform:scaleY(1);}
+}
+.edge-flash{position:absolute;top:3px;bottom:3px;width:3px;background:var(--amber);
+  border-radius:2px;pointer-events:none;opacity:0;z-index:7;}
+.edge-flash.go{animation:kiss .3s var(--ease-out-strong) 1;}
+@keyframes spark{
+  0%{opacity:1;transform:translate(0,0) scale(1);}
+  100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(.25);}
+}
+.spark{position:absolute;width:4px;height:4px;border-radius:50%;background:var(--amber);
+  pointer-events:none;animation:spark .42s var(--ease-out-strong) 1 forwards;z-index:9;}
+.seam{position:absolute;top:0;width:6px;margin-left:-3px;pointer-events:none;z-index:6;opacity:0;}
+.seam.on{opacity:1;}
+.seam path{fill:none;stroke:var(--amber);stroke-width:1.4;stroke-dasharray:3 3;}
+
+/* прицел в начало нового диапазона при смене масштаба */
+.day.primed{animation:primed .5s var(--ease-out-strong) 1;}
+@keyframes primed{from{background:rgba(55,138,221,.34);}to{background:rgba(55,138,221,0);}}
+
+/* ================= Шторка ================= */
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);opacity:0;pointer-events:none;
+  transition:opacity .32s var(--ease-in-out);z-index:50;}
+.scrim.open{opacity:1;pointer-events:auto;}
+.drawer{
+  position:fixed;top:0;right:0;bottom:0;width:min(390px,90vw);background:var(--bg2);
+  border-left:1px solid var(--border-strong);padding:22px 20px;z-index:51;
+  transform:translateX(100%);transition:transform .38s var(--ease-overshoot);overflow:auto;
+}
+.drawer.open{transform:translateX(0);}
+.dr-eyebrow{font-size:9px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);}
+.dr-title{font-size:19px;font-weight:600;margin:7px 0 18px;}
+.dr-row{display:flex;justify-content:space-between;gap:14px;padding:9px 0;border-bottom:1px solid var(--border);font-size:12px;}
+.dr-row span:first-child{color:var(--muted);}
+.dr-row span:last-child{text-align:right;}
+.dr-note{margin-top:18px;font-size:11px;color:var(--muted);line-height:1.5;}
+.dr-actions{display:flex;gap:8px;margin-top:20px;}
+.dr-del{display:inline-flex;align-items:center;gap:6px;color:var(--red);}
+.dr-del:hover{border-color:var(--red);}
+.dr-del svg{width:13px;height:13px;flex:none;}
+.cr-types{display:flex;gap:6px;flex-wrap:wrap;margin:16px 0;}
+.cr-field{margin-bottom:12px;}
+.cr-field .grp-label{display:block;margin-bottom:6px;}
+.cr-opts{display:flex;gap:6px;flex-wrap:wrap;}
+.cr-input{
+  width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);
+  font-family:inherit;font-size:12px;padding:7px 10px;
+}
+.cr-input:focus-visible{outline:2px solid var(--blue);outline-offset:1px;}
+.cr-actions{display:flex;gap:8px;margin-top:18px;}
+/* черновик отрезка во время протяжки по пустому месту - тот же язык, что и .seg,
+   но пунктирная рамка вместо заливки по смыслу состояния (состояние ещё не выбрано) */
+.seg-draft{
+  position:absolute;top:4px;height:22px;border-radius:4px;pointer-events:none;
+  background:rgba(139,137,128,.14);box-shadow:inset 0 0 0 1.5px var(--border-strong);
+  left:calc(var(--s) * var(--hw));width:calc(var(--l) * var(--hw));
+}
+
+/* ================= Тост ================= */
+.toast{
+  position:fixed;left:50%;bottom:22px;transform:translate(-50%,14px);opacity:0;
+  background:var(--bg3);border:1px solid var(--border-strong);border-radius:10px;
+  padding:11px 15px;display:flex;align-items:center;gap:14px;font-size:12px;z-index:60;
+  pointer-events:none;transition:opacity .28s var(--ease-in-out),transform .32s var(--ease-drawer);
+}
+.toast.show{opacity:1;transform:translate(-50%,0);pointer-events:auto;}
+.toast button{
+  appearance:none;background:none;border:0;color:var(--blue);font-family:inherit;font-size:12px;
+  font-weight:600;cursor:pointer;padding:0;
+}
+
+@media (prefers-reduced-motion: reduce){
+  *{transition-duration:.001ms !important;animation-duration:.001ms !important;}
+  .seg:hover{transform:none;}
+}
+</style>
+
+<div class="top">
+  <div>
+    <h1>Планировка</h1>
+    <div class="sub">Парк из Штатки · <span class="mono" id="clock">--:--:--</span></div>
+  </div>
+
+  <div class="kpis" id="kpis"></div>
+  <div class="spacer"></div>
+
+  <div class="controls">
+    <div class="grp">
+      <span class="grp-label">Масштаб</span>
+      <button class="chip" data-zoom="day">Сутки</button>
+      <button class="chip" data-zoom="3d" aria-pressed="true">3 дня</button>
+      <button class="chip" data-zoom="week">Неделя</button>
+      <button class="chip" data-zoom="month">Месяц</button>
+    </div>
+    <div class="grp">
+      <span class="grp-label">Цвет</span>
+      <button class="chip" data-color="state" aria-pressed="true">Состояние</button>
+      <button class="chip" data-color="manager">Менеджер</button>
+      <button class="chip" data-color="logist">Логист</button>
+    </div>
+    <div class="grp">
+      <span class="grp-label">Парк</span>
+      <button class="chip" data-filter="all" aria-pressed="true">Все</button>
+      <button class="chip" data-filter="tral">Тралы</button>
+      <button class="chip" data-filter="long">Длинномеры</button>
+      <button class="chip" data-filter="razd">Раздвижки</button>
+      <button class="chip" data-filter="koryto">Корыта</button>
+      <button class="chip" data-filter="rapid">Рапиды</button>
+      <button class="chip" data-filter="faymon">Файмоны</button>
+      <button class="chip" data-filter="free">Свободные сейчас</button>
+    </div>
+    <div class="grp">
+      <span class="grp-label">Роль</span>
+      <button class="chip" data-role="admin" aria-pressed="true">Админ</button>
+      <button class="chip" data-role="logist">Логист</button>
+    </div>
+    <div class="grp">
+      <button class="chip" id="hiddenBtn" data-solo="1">Скрытые: 0</button>
+      <button class="chip" id="sndBtn" data-solo="1" aria-pressed="true">Звук вкл</button>
+      <button class="chip" id="themeBtn" data-solo="1" title="Эксперимент, 29.08 - решаем по ощущениям">Тема: тёмная</button>
+    </div>
+  </div>
+
+  <!-- Переход по месяцам - Влад, 29.08: «перенеси в противоположную сторону
+       экрана от надписи "Планировка"» (была слева, рядом с h1). position:absolute
+       в CSS держит правый верхний угол железно, вне зависимости от того, сколько
+       чипов ниже переносится на вторую строку - см. комментарий у .monthnav. -->
+  <div class="monthnav" id="monthNav" data-nav-sound>
+    <button class="monthnav-btn" id="monthPrev" title="Предыдущий месяц" aria-label="Предыдущий месяц">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l-6 6 6 6"/></svg>
+    </button>
+    <span class="monthnav-label mono" id="monthLabel">Август 2026</span>
+    <button class="monthnav-btn" id="monthNext" title="Следующий месяц" aria-label="Следующий месяц">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4l6 6-6 6"/></svg>
+    </button>
+  </div>
+</div>
+
+<div class="legend" id="legend"></div>
+
+<div class="board-wrap">
+  <div class="board" id="board">
+    <div class="head" id="head">
+      <div class="head-corner">
+        <div class="t1">Сцепка</div>
+        <div class="t2" id="dutyLine">Дежурство</div>
+      </div>
+      <div class="head-scale" id="scale"></div>
+    </div>
+    <div class="rows" id="rows"></div>
+  </div>
+  <div class="time-hud" id="timeHud">
+    <div class="hud-times">
+      <span class="hud-time" id="hudFrom">--:--</span>
+      <span class="hud-arrow">→</span>
+      <span class="hud-time" id="hudTo">--:--</span>
+    </div>
+    <div class="hud-dur" id="hudDur"></div>
+  </div>
+  <div class="trash-zone" id="trashZone" title="Перетащи сюда, чтобы удалить">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 6h12M8 6V4h4v2M6 6l1 11h6l1-11M8.5 9v5M11.5 9v5"/>
+    </svg>
+  </div>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true"></aside>
+<div class="toast" id="toast"><span id="toastText"></span><button id="toastBtn">Отменить</button></div>
+
+<script>
+"use strict";
+
+/* ==========================================================================
+   ДАННЫЕ. Парк и дневная сетка - НАСТОЯЩИЕ, выгружены из листа «Штатка»
+   основной таблицы дашборда за август 2026 (56 машин, 777 заявок за месяц).
+   Формат дня: '.'=пусто, '0'-'9'=число заявок, R=ремонт, V=выходной,
+   W=ремонт+выходной, T=ТО. Часы внутри дня синтезированы детерминированно
+   (в Штатке часа нет, он есть только в Планировке логистов).
+   ========================================================================== */
+var FLEET = [["ПР-8","SCANIA R620","О 894 ХМ 797","Прямой Раздвижка 8 осей (Faymonville)","ХУ 5875 77","В работе","Войткун В./Межевич С.","7/0","...1112001.00011111110RRR211..."],["ТКР-3+5","SCANIA R520","М 800 АЕ 797","","","","","","..............................."],["ТКР-4","SCANIA R620","В 776 ЕТ 797","Корыто 4 оси раздвижной (Faymonville)","УУ 4720 77","В работе","Ставчук Ф./Шленсков М.","2025-1","..11111002.12111RR1111111111..."],["ТКР-4","VOLVO FH 12.500","В 318 АО 997","Корыто 4 оси раздвижной (Faymonville)","УХ 5545 77","В работе","Шленсков М.","","RRRRRRRRRRRRRRRRRRVV1R111RR1..."],["КР-3","SCANIA R520","А 674 ЕВ 797","Корыто 3 оси раздвижной","УУ 4381 77","В работе","Косов С.","20/20","1111R1211R.2230.111212111111..."],["К-3","SCANIA R520","Е 623 ЕТ 797","Корыто 3 оси тяжелое","ТВ 5639 77","В работе","Пантелеев Д./не т.","7/0","RRRRRRRRRRRRRRRRRRRRRRRRRRR1..."],["ПР-5","VOLVO FH TRUCK","Х 531 ЕВ 797","Прямой Раздвижка 5 осей (ТСМ)","УУ 5539 77","В работе","Выскребенцев С./не т.","7/0","VVVVVVVVVV1RRR1.111111111111..."],["ПР-5","SCANIA G440","С 702 КН 797","Прямой Раздвижка 5 осей (ТСМ)","УУ 5540 77","Без водителя","Семенцов С.","","VVVVV11111.VV11.111VVVVVVVVV..."],["ПР-4","SCANIA R520","В 277 ЕА 797","Прямой Раздвижка 4 оси (ТСМ)","УУ 4386 77","В работе","Крысало А./не т.","60/15","...4111R01.V11..1213R1011111..."],["ПР-4","SCANIA R520","В 274 ЕР 797","Прямой Раздвижка 4 оси (ТСМ)","УУ 4388 77","В работе","Микуляк И.","7/0","VVVVV11111.111..12V111111111..."],["ПР-4","SCANIA R520","В 276 ЕН 797","Прямой Раздвижка 4 оси (ТСМ) В","УХ 1023 77","В работе","Шатаев А./не т.","7/0","...11111R1.111..121111V11111..."],["ПР-4","SCANIA R520","В 276 ЕТ 797","Прямой Раздвижка 4 оси (ТСМ)","УУ 4384 77","В работе","Вафин М./Пантелеев Д.","7/0","...1111111.111..111114V11111..."],["ПР-4","SCANIA R520","В 276 ЕЕ 797","Прямой Раздвижка 4 оси (ТСМ)","УУ 4385 77","Ремонт","Магомедов Ш.","7/0","...1111111.111..1111RV1111RRRR."],["ПР-4","XCMG Hanvan","А 538 СО 797","Прямой Раздвижка 4 оси (ТСМ)","УУ 4387 77","Ремонт","Тибукин В./не т.","15/15",".............VVVVVVVVVVVVRRR..."],["ПР-4","КАМАЗ 5490-S5","Е 372 СА 750","Прямой Раздвижка 4 оси (ТСМ)","УТ 4774 77","Без водителя","Сысуев Д.","2025-1","...2111111VVVVVVVVVVVVVVVVVVVVV"],["ПР-4","КАМАЗ 5490-S5","Н 652 ХН 797","Прямой Раздвижка 4 оси (ТСМ)","УХ 1026 77","В работе","Тишин С.","","VVVVVVVVVVR111..11111VV11111..."],["ПР-4","КАМАЗ 5490-S5","М 844 ЕА 797","Прямой Раздвижка 4 оси (ТСМ)","УХ 1025 77","Без водителя","Ибрагимов А./не т.","7/0","VVVV111RRRRRRRVVVVVVVVVVRRRWWWW"],["ПР-4","КАМАЗ 5490-S5","Е 079 ЕТ 797","Прямой Раздвижка 4 оси (ТСМ)","ЕТ 2255 50","В работе","Титаев И./Ходанов К.","7/0","...R112204.111..111111111111..."],["ПР-4","КАМАЗ 5490-S5","С 594 НХ 797","Прямой Раздвижка 4 оси (ТСМ)","УХ 1022 77","Без водителя","Агаханов А./не т.","15\\15","...11111RRRRRRRRRRRRRRRRRVVVVVV"],["ПР-4","КАМАЗ 5490-S5","С 969 СВ 750","Прямой Раздвижка 4 оси (ТСМ)","ЕН 0459 50","В работе","Симоненко В./не т.","7/0","...R1111111111..111211111111..."],["ПР-3","КАМАЗ 5490-S5","Н 270 ЕР 797","Прямой Раздвижка 3 оси (ТСМ) без оси","ЕМ 0680 50","В работе","Максимов П./не т.","2025-0","RRRR112RRR.1TTRRRRTTTTT11111..."],["ПР-3","КАМАЗ 5490-S5","Х 775 МУ 797","Прямой Раздвижка 3 оси (ТСМ)","ЕМ 0674 50","Ремонт","вакант/не т.","7/0","WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW"],["ПР-3","КАМАЗ 5490-S5","А 798 ВА 797","Прямой Раздвижка 3 оси (ТСМ)","ЕМ 0681 50","Ремонт","","15/15","...31111RRRRRRRRRRRRRRRRRRRRRRR"],["Рапид","КАМАЗ 5490-S5","В 325 МХ 797","Прямой Рапид 3 оси (ТСМ)","ЕС 9402 50","Ремонт","вакант/не т.","15/15","WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW"],["Рапид","КАМАЗ 5490-S5","Е 137 ЕТ 797","Прямой Рапид 3 оси (ТСМ)","ЕМ 0677 50","В работе","Овсяников Д./не т.","15/15","...2111101.111..1111111R1221..."],["Рапид","КАМАЗ 5490-S5","Т 183 СА 750","Прямой Рапид 3 оси (ТСМ)","ЕМ 0676 50","Ремонт","Алиев Б./Мусаев К.","15/15","VVVVVVVVVVVVVV..11V11111121R..."],["Рапид","КАМАЗ 5490-S5","Х 981 СА 750","Прямой Рапид 3 оси (ТСМ)","ЕС 9431 50","В работе","Егоров С./не т.","15/15","...R11T101.12VVVV112111V1321..."],["Рапид","SCANIA P114","О 545 ХВ 48","Прямой Рапид 3 оси (ЧМЗАП)","ВА 4721 78","В работе","Ярмамедов Ч./не т.","7/0","...2112011.111..111111111212..."],["Рапид","SCANIA R114","В 151 МУ 98","Прямой Рапид 3 оси (ЧМЗАП)","ТА 4928 77","Без водителя","Станкевич А./не т.","7/0","...31111031111..11111WWWWWWWWWW"],["Рапид","SCANIA P360","Х 586 АВ 797","Прямой Рапид 3 оси (ТСМ)","ЕС 9432 50","В работе","Абдурашидов Р./не т.","15/15","WWWWWWWWWWWWWWWWWWWWWWWWWRR1111"],["Рапид","SCANIA P360","К 403 ХХ 797","Прямой Рапид 3 оси (Зеленый)","ЕЕ 1369 77","В работе","Абдурашидов И./не т.","7/0","...11R110311R1..111111111321111"],["Рапид","КАМАЗ 65206-S5","К 709 СМ 750","Прямой Рапид 2 оси (Зеленый)","АЕ 4898 48","Без водителя","вакант/Голоснов С.","7/0","VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV"],["К-3","VOLVO FM TRUCK","В 968 СЕ 47","Корыто 3 оси тяжелое","ЕМ 0628 50","Ремонт","вакант/не т.","7/0","RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR"],["К-3","КАМАЗ 65206-S5","М 797 НК 790","Корыто 3 оси раздвижной","УУ 4383 77","Ремонт","вакант/не т.","15/15","RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR"],["К-3","КАМАЗ 65206-S5","У 589 ОХ 750","Корыто 3 оси лёгкое","ЕМ 5271 50","","не т./не т.","15/15","..............................."],["К-3","КАМАЗ 65206-S5","У 660 ОХ 750","Корыто 3 оси лёгкое","ЕМ 5270 50","","не т./не т.","7/0","..............................."],["Борт","КАМАЗ 5490-S5","Е 129 ЕТ 797","(площадка)","ВН 8026 78","В работе","Чечетов П./не т.","7/0","111111111111111011111101111...."],["Борт","КАМАЗ 5490-S5","Т 134 СА 750","Длинномер","УХ 6525 77","В работе","Лобахин Н./не т.","2025-0","1VV111110111112111111101111...."],["Борт","КАМАЗ 5490-S5","Е 309 ЕА 797","Длинномер","УХ 6756 77","В работе","Запара В./не т.","7/0","VVVVVVVVVRR1111011111111111...."],["Борт","КАМАЗ 5490-S5","Е 318 ЕА 797","Длинномер","УУ 1006 77","Без водителя","Пазиенко С./не т.","2025-0","1V1111V10111111V1111VVVVVVVVVVV"],["Борт","КАМАЗ 5490-S5","Е 326 ЕА 797","Длинномер","УТ 6805 77","В работе","Бамматов М./не т.","2025-0","RRRRR111R1111220221213333333333"],["Борт","КАМАЗ 5490-S5","Е 344 СА 750","Длинномер","УХ 8420 77","В работе","Кондратов Ю./не т.","7/0","111111111111111011111VV1111...."],["Борт","КАМАЗ 5490-S5","М 768 ЕА 797","(лопнула рама)","УУ 7658 77","Без водителя","Бобокулов А./не т.","2025-0","111111211121121RRRR1111111V...."],["Борт","MERSEDES BENZ ACTROS","Е 224 СН 797","(площадка)","ВН 8027 78","В работе","Ющенко Д./не т.","7/0","1111121R11RR122011111101211...."],["Борт","MERSEDES BENZ AXOR","В 023 УО 750","(2-оси)","УА 0763 48","Ремонт","Коба Е./не т.","7/0","1RRRRRRRRRRRRRRRRRRRRRRRRRRRRRR"],["Борт","MERSEDES BENZ AXOR","В 027 УО 750","Длинномер","ТВ 3842 77","В работе","Крюков В./не т.","60/10","11111RRRRRRRRRRRRRRRRRRR133333."],["Борт","MERSEDES BENZ AXOR","В 065 ТХ 797","Длинномер","УХ 6753 77","Без водителя","Муртузалиев А./не т.","30/30","11111111111114101111V111VVVVVVV"],["Борт","MERSEDES BENZ AXOR","У 079 ОР 797","Длинномер","УХ 6755 77","Без водителя","вакант/Романчук А.","7/0","WWWWWVRRRRRRRRVVVRR11111VVVVVVV"],["Борт","MERSEDES BENZ AXOR","У 459 ОУ 797","(площадка)","УА5395 48","В работе","Шамордин Е./не т.","60/10","1RRRRRRRRRRR211RRRR1RRRRR11...."],["Борт","MERSEDES BENZ AXOR","А 613 ОЕ 750","Длинномер","УУ 7183 77","Ремонт","вакант/не т.","30/30","WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW"],["Борт","MERSEDES BENZ AXOR","Х 790 УО 750","Длинномер","УУ 7184 77","Без водителя","Янушкевич В./Межевич Э.","2025-0","VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV"],["Борт","SCANIA P340 LA4X2HNA","В 141 УС 198","Длинномер","УУ 7659 77","Без водителя","вакант/не т.","7/0","1RRRR111RRRRRRVV11111VVVVVVVVVV"],["Борт","SCANIA P360 LA4X2HNA","У 735 ЕК 790","Длинномер","УХ 6522 77","Без водителя","Горбунов А./не т.","7/0","VVVVVR111111222V1111111VVVVVVVV"],["Борт","SCANIA R410 LA4X2MN","У 089 СЕ 797","Длинномер","ММ 1766 60","В работе","Наража А./не т.","7/0","11111111V111RR20111213333333333"],["Борт","SCANIA R420 LA6X2","Е 425 МУ 797","Длинномер","УХ 6526 77","Ремонт","Шленсков С./не т.","7/0","1111111RRRRRRRVVVVRRRRRRRRRRR.."],["Борт","SCANIA P360 LA4X2HNA","А 840 КО 797","Длинномер","АТ 2122 47","","арест/арест","арест","..............................."]];
+
+/* Семейство техники по префиксу типа - совпадает с делением, которое логисты уже
+   держат в голове (в их таблице это группы «7-8-9 осей» / «Корыто» / «Рапиды» и т.д.). */
+function typeFamily(type){
+  if (/^Рапид|^П-\d/.test(type)) return "rapid";
+  if (/^ПР|^ТПР/.test(type)) return "razd";
+  if (/^ТКР|^КР|^К-/.test(type)) return "koryto";
+  if (/^Борт/.test(type)) return "bort";
+  if (/Панелевоз/.test(type)) return "panel";
+  return "razd";
+}
+/* Тональность ВНУТРИ семейства - Влад, 29.08: «ПР-4, ПР-3, ПР-5 должны различаться
+   между собой, одного оттенка, но разных тональностей; ТКР-4 должно отличаться от
+   КР-3, тем более от нераздвижного К-3». Ранг растёт с осностью/сложностью машины -
+   больше осей/раздвижнее = темнее и насыщеннее заливка бейджа. Только razd/koryto
+   имеют подтипы в парке; Рапид/Борт остаются одним тоном (подтипов не заводили). */
+var TYPE_RANK = {
+  "ПР-3":1, "ПР-4":2, "ПР-5":3, "ПР-8":4,
+  "К-3":1, "КР-3":2, "ТКР-4":3, "ТКР-3+5":4
+};
+function typeRank(type){ return TYPE_RANK[type] || 1; }
+function tagClass(type){
+  var fam = typeFamily(type);
+  return (fam === "razd" || fam === "koryto") ? "f-" + fam + "-" + typeRank(type) : "f-" + fam;
+}
+
+/* Реестр людей. Обозначение построено ОДНИМ правилом: первая буква фамилии +
+   первая буква имени. Никаких ручных исключений - в этом вся суть стандарта. */
+var MANAGERS = [
+  {full:"Савиток Олеся",     code:"СО", id:1},
+  {full:"Цегельников Вячеслав", code:"ЦВ", id:2},
+  {full:"Ахтамова Лиана",    code:"АЛ", id:3},
+  {full:"Гусейнова Айнур",   code:"ГА", id:4},
+  {full:"Гуштюк Ирина",      code:"ГИ", id:5},
+  {full:"Филипчук Екатерина",code:"ФЕ", id:6},
+  {full:"Ратников Максим",   code:"РМ", id:7},
+  {full:"Отдел экскаваторов",code:"ОЭ", id:8,  dept:true},
+  {full:"Отдел кранов",      code:"ОК", id:9,  dept:true},
+  {full:"Отдел буровых",     code:"ОБ", id:10, dept:true}
+];
+/* тона разведены намеренно: синий и фиолетовый рядом запрещены ГОСТом (раздел 1) */
+var LOG_TRAL = [
+  {full:"Сильчев Максим", code:"СМ", id:3},
+  {full:"Кан Михаил",     code:"КМ", id:1},
+  {full:"Прус-Роскошный Роман", code:"ПР", id:10}
+];
+var LOG_LONG = [{full:"Васин Максим", code:"ВМ", id:2}];
+
+/* Подпись человека на плитке - Влад, 29.08: «пробуем фамилию вместо кода, и для
+   логиста, и для менеджера»; двухбуквенный КОД остаётся только у смежных отделов
+   (ОЭ/ОК/ОБ - `dept:true`), это не люди, сокращать их нечем. `full` хранится как
+   "Фамилия Имя" - берём первое слово. */
+function personShort(p){ return p.dept ? p.code : p.full.split(" ")[0]; }
+/* Влад, 29.08 (выбор уровня 5): на плитке - ПЕРВЫЕ ТРИ БУКВЫ фамилии, капсом,
+   и менеджер, и логист обязательно. Отделы (ОЭ/ОК/ОБ) остаются своим кодом. */
+function three(p){ return p.dept ? p.code : p.full.split(" ")[0].substring(0,3).toUpperCase(); }
+
+var PLACES = ["Липецк","Череповец","Подольск","Мытищи","Домодедово","Капотня","Терехово",
+  "Крым","Сочи","Владикавказ","СПб","Краснодар","Казань","Пермь","Рязанская обл.","Зеленоград",
+  "Ногинск","Одинцово","Люберцы","Химки","Красногорск","Брянск","Обнинск","Солнцево",
+  "Апрелевка","Ховрино","Строгино","Раменское","Балашиха","Сергач","Ростов","Воронеж"];
+
+/* штриховые SVG - ГОСТ раздел 4/«Иконки»: fill:none, currentColor, stroke-width 1.6 */
+var SVG_ATTR = 'viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"';
+var ICON_EYE_OFF = '<svg ' + SVG_ATTR + '><path d="M3 3l14 14M8.6 8.7a2.4 2.4 0 003.3 3.3M6.1 6.2C4 7.5 2.5 9.4 2 10c1.7 2.9 5 6 8 6 1.2 0 2.4-.4 3.5-1.1M11 4.2c.3 0 .7-.1 1-.1 3 0 6.3 3.1 8 6-.4.7-1.1 1.8-2.1 2.9"/></svg>';
+var ICON_EYE = '<svg ' + SVG_ATTR + '><path d="M2 10c1.7-2.9 5-6 8-6s6.3 3.1 8 6c-1.7 2.9-5 6-8 6s-6.3-3.1-8-6z"/><circle cx="10" cy="10" r="2.4"/></svg>';
+var ICON_CHEVRON = '<svg class="gh-chev" ' + SVG_ATTR + '><path d="M6 8l4 4 4-4"/></svg>';
+var ICON_TRASH = '<svg ' + SVG_ATTR + '><path d="M4 6h12M8 6V4h4v2M6 6l1 11h6l1-11"/></svg>';
+
+var DAYS = 31, HOURS = DAYS * 24, MONTH = 7, YEAR = 2026; // MONTH: 7 = август
+var WD = ["вс","пн","вт","ср","чт","пт","сб"];
+var ZOOM = {day:46, "3d":17, week:8, month:2.4};
+
+/* детерминированный ГПСЧ - при каждой загрузке одна и та же картина */
+function rnd32(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+/* ---------- построение отрезков из дневной сетки Штатки ---------- */
+var STATE = {
+  zoom:"3d", color:"state", filter:"all", role:"admin",
+  vehicles:[], segs:[], seq:1,
+  order:null,          /* порядок машин, задаёт админ перетаскиванием */
+  hidden:{},           /* скрытые машины */
+  showHidden:false,
+  collapsed:{},        /* свёрнутые группы (Тралы/Длинномеры) по индексу группы */
+  typeLegend:[],       /* заполняется buildTypeLegend() после buildVehicles() */
+  openId:null,         /* id плитки, открытой в шторке (кольцо переживает перерендер) */
+  lastEdited:null      /* час последней созданной/сдвинутой/удалённой записи -
+                           СЕССИОННОЕ, не сохраняется между визитами (Влад, 29.08:
+                           «по умолчанию всегда начинается с сегодня»); используется
+                           только сменой масштаба внутри одного визита */
+};
+
+/* ---------- звук: регистр «праздничный» из ГОСТа раздел 8 ----------
+   Примитив blip перенесён из examples/design-reference-kanban.html без правок. */
+var soundOn = true, actx = null;
+function getCtx(){
+  try{
+    if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === "suspended") actx.resume();
+    return actx;
+  }catch(e){ return null; }
+}
+function blip(freqFrom, freqTo, dur, vol, type, delay){
+  if (!soundOn || document.hidden) return;
+  var ctx = getCtx(); if (!ctx) return;
+  try{
+    var t = ctx.currentTime + (delay || 0);
+    var osc = ctx.createOscillator(), gain = ctx.createGain();
+    osc.type = type || "sine";
+    osc.frequency.setValueAtTime(freqFrom, t);
+    if (freqTo && freqTo !== freqFrom) osc.frequency.exponentialRampToValueAtTime(freqTo, t + dur);
+    gain.gain.setValueAtTime(vol, t);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(t); osc.stop(t + dur + 0.02);
+  }catch(e){}
+}
+var S = {
+  /* взял отрезок - тик с низом, «вес» даёт низ, а не громкость */
+  lift:   function(){ blip(1300, 950, 0.045, 0.07, "sine"); blip(320, 260, 0.06, 0.045, "triangle"); },
+  /* пройденный час при растяжении - тот самый тик-тик-тик, очень короткий */
+  tick:   function(){ blip(2350, 2350, 0.013, 0.017, "sine"); },
+  /* примагничивание - короткий восходящий щелчок с призвуком, «сталь к стали» */
+  /* уровень 3 стенда, 29.08: короткое трёхнотное арпеджио вместо одной ноты -
+     Влад одобрил, «просто супер» */
+  magnet: function(){
+    blip(1750, 2400, 0.026, 0.05, "sine"); blip(540, 720, 0.032, 0.022, "triangle");
+    blip(1400, 1400, 0.028, 0.04, "sine", 0.06);
+    blip(1900, 1900, 0.03, 0.045, "sine", 0.09);
+    blip(2500, 2500, 0.05, 0.05, "sine", 0.12);
+  },
+  /* уложил - глиссандо вниз = удар с затуханием корпуса */
+  drop:   function(){ blip(200, 70, 0.14, 0.11, "sine"); blip(900, 500, 0.035, 0.045, "triangle");
+                      blip(140, 90, 0.1, 0.055, "triangle", 0.01); },
+  reject: function(){ blip(190, 120, 0.11, 0.055, "triangle"); },
+  /* удаление - короткий финальный «щелчок вниз», отличим от drop (нет второго слоя-удара) */
+  del:    function(){ blip(650, 260, 0.11, 0.08, "triangle"); blip(180, 90, 0.08, 0.045, "sine", 0.02); },
+  /* строка встала на новое место в списке машин */
+  settle: function(){ blip(1100, 780, 0.05, 0.06, "sine"); blip(260, 210, 0.07, 0.035, "triangle"); },
+  /* отмена - спокойно, вниз, без праздника */
+  undo:   function(){ blip(560, 400, 0.09, 0.04, "sine"); },
+  /* единый звук любого перехода - ГОСТ раздел 8 */
+  nav:    function(){ blip(392, 440, 0.05, 0.022, "sine"); }
+};
+/* одно делегирование на весь документ, а не обработчик на каждый новый элемент */
+document.addEventListener("click", function(e){
+  if (e.target.closest(".chip,[data-nav-sound]")) S.nav();
+});
+
+/* Демо-набор - Влад, 29.08: «мне не нужно вок машин, мне нужно примерное
+   понимание, как это выглядит» - полный парк (56 машин из Штатки) урезан до
+   представительной выборки: все 4 тональности раздвижки (ПР-3/4/5/8), все 4
+   тональности корыта (К-3/КР-3/ТКР-4/ТКР-3+5), пара рапидов, пара бортов разных
+   состояний (в рейсе/ремонт/без водителя). Индексы - позиции в FLEET выше;
+   полный массив остаётся источником данных, вернуть весь парк - тривиально
+   (DEMO_INDEXES = FLEET.map(function(_,i){return i;})). */
+var DEMO_INDEXES = [0, 6, 8, 12, 20, 21, 1, 2, 4, 5, 33, 24, 25, 36, 40, 44, 47, 54];
+
+function buildVehicles(){
+  var rnd = rnd32(20260829);
+  var fleet = DEMO_INDEXES.map(function(i){ return FLEET[i]; });
+  fleet.forEach(function(f, vi){
+    var isLong = f[0] === "Борт";
+    var v = {
+      i:vi, type:f[0], tractor:f[1], gos:f[2], trailer:f[3], trailerGos:f[4],
+      statusToday:f[5], drivers:(f[6]||"").split("/").filter(Boolean), schedule:f[7],
+      days:f[8], long:isLong
+    };
+    v.driver = v.drivers[0] || "";
+    v.vacant = /вакант|арест/i.test(v.driver) || !v.driver;
+    STATE.vehicles.push(v);
+
+    var d = 0, busyUntil = 0;
+    while (d < DAYS){
+      var ch = v.days.charAt(d) || ".";
+      if (ch === "."){ d++; continue; }
+
+      if (ch === "R" || ch === "T" || ch === "V" || ch === "W"){
+        var run = 1;
+        while (d + run < DAYS && v.days.charAt(d + run) === ch) run++;
+        var s0 = d * 24, len = run * 24;
+        if (ch === "R" || ch === "W") push(v, "repair", s0, len);
+        if (ch === "T") push(v, "maint", s0, len);
+        if (ch === "V" || ch === "W") pushDriver(v, s0, len);
+        d += run;
+        continue;
+      }
+
+      var n = parseInt(ch, 10);
+      if (n === 0){ push(v, "noorder", d * 24, 24); d++; continue; }
+
+      /* выезд 5..9 утра, но не раньше, чем машина освободилась от прошлого рейса */
+      var cur = Math.max(busyUntil, d * 24 + 5 + Math.floor(rnd() * 5));
+      for (var k = 0; k < n; k++){
+        if (cur >= (d + 1) * 24 + 14) break;   /* заявка дня не уезжает дальше суток */
+        if (blockedAt(v, cur)) break;
+        var dur = 5 + Math.floor(rnd() * 12);                  // 5..16 часов
+        if (n === 1 && rnd() < 0.35) dur += Math.floor(rnd() * 8);
+        dur = Math.min(dur, freeRun(v, cur));   /* не заезжать в ремонт и ТО */
+        if (dur < 3 || cur + dur > HOURS) break;
+        var mg = MANAGERS[Math.floor(rnd() * MANAGERS.length)];
+        var lg = (v.long ? LOG_LONG : LOG_TRAL)[Math.floor(rnd() * (v.long ? LOG_LONG.length : LOG_TRAL.length))];
+        var a = PLACES[Math.floor(rnd() * PLACES.length)], b = PLACES[Math.floor(rnd() * PLACES.length)];
+        if (b === a) b = PLACES[(PLACES.indexOf(a) + 5) % PLACES.length];
+        push(v, "trip", cur, dur, {mg:mg, lg:lg, from:a, to:b});
+        cur += dur + 1 + Math.floor(rnd() * 3);
+        busyUntil = cur;
+      }
+      d++;
+    }
+  });
+}
+/* машина физически недоступна в этот час: ремонт, ТО, ремонт+выходной */
+function blockedAt(v, hour){
+  var ch = v.days.charAt(Math.floor(hour / 24)) || ".";
+  return ch === "R" || ch === "T" || ch === "W";
+}
+/* сколько часов подряд машина свободна начиная с start (потолок 40) */
+function freeRun(v, start){
+  var n = 0;
+  while (n < 40 && start + n < HOURS && !blockedAt(v, start + n)) n++;
+  return n;
+}
+function push(v, kind, s, l, extra){
+  var o = {id:"s" + (STATE.seq++), v:v.i, kind:kind, s:s, l:l};
+  if (extra) for (var k in extra) o[k] = extra[k];
+  STATE.segs.push(o);
+}
+/* «Без водителя» - раньше отдельная тонкая подполоса без подписи (Влад, 29.08:
+   «непонятное назначение, убрать»), теперь ОБЫЧНЫЙ блокирующий отрезок наравне с
+   ремонтом - тот же push(), просто отдельная функция для читаемости вызова. */
+function pushDriver(v, s, l){ push(v, "driveroff", s, l); }
+
+/* ---------- цвет ---------- */
+var STATE_FILL = {
+  trip:     "rgba(29,158,117,.30)",
+  noorder:  "rgba(239,159,39,.26)",
+  repair:   "rgba(226,75,74,.26)",
+  maint:    "rgba(226,75,74,.16)",
+  driveroff:"rgba(139,137,128,.26)"
+};
+function cssVar(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function stateTextColor(kind){
+  var m = {trip:"--tint-green", noorder:"--tint-amber", repair:"--tint-red", maint:"--tint-red", driveroff:"--muted"};
+  return cssVar(m[kind] || "--muted");
+}
+function idColor(n){ return cssVar("--id-" + ((n - 1) % 12 + 1)); }
+function hexA(hex, a){
+  hex = hex.replace("#", "");
+  var r = parseInt(hex.substr(0,2),16), g = parseInt(hex.substr(2,2),16), b = parseInt(hex.substr(4,2),16);
+  return "rgba(" + r + "," + g + "," + b + "," + a + ")";
+}
+function paint(el, seg){
+  var mode = STATE.color;
+  if (mode !== "state" && seg.kind === "trip"){
+    var who = mode === "manager" ? seg.mg : seg.lg;
+    var c = idColor(who.id);
+    el.style.background = hexA(c, .34);
+    el.style.color = "var(--seg-text-onfill)";
+    el.style.boxShadow = "inset 0 0 0 1px " + hexA(c, .55);
+    el.style.setProperty("--idfill", hexA(c, .55));   /* бейдж - насыщеннее заливки */
+    return;
+  }
+  if (mode !== "state"){
+    el.style.background = "rgba(139,137,128,.13)";
+    el.style.color = "var(--muted)";
+    el.style.boxShadow = "none";
+    el.style.removeProperty("--idfill");
+    return;
+  }
+  el.style.background = STATE_FILL[seg.kind] || "rgba(139,137,128,.16)";
+  el.style.color = stateTextColor(seg.kind);
+  el.style.boxShadow = "none";
+  el.style.removeProperty("--idfill");                /* режим «Состояние» - нейтральный bg4 */
+}
+
+/* ---------- отрисовка ---------- */
+var board = document.getElementById("board");
+var rowsEl = document.getElementById("rows");
+var scaleEl = document.getElementById("scale");
+
+function visible(v){
+  if (STATE.hidden[v.i] && !STATE.showHidden) return false;
+  if (STATE.showHidden) return !!STATE.hidden[v.i];
+  if (STATE.filter === "tral") return !v.long;
+  if (STATE.filter === "long") return v.long;
+  if (STATE.filter === "razd") return typeFamily(v.type) === "razd";
+  if (STATE.filter === "koryto") return typeFamily(v.type) === "koryto";
+  if (STATE.filter === "rapid") return typeFamily(v.type) === "rapid";
+  if (STATE.filter === "faymon") return /faymonville/i.test(v.trailer || "");
+  if (STATE.filter === "free") return isFreeNow(v.i);
+  return true;
+}
+/* порядок машин задаёт админ перетаскиванием карточки; хранится по индексам */
+function orderedVehicles(){
+  if (!STATE.order) return STATE.vehicles.slice();
+  var byI = {}; STATE.vehicles.forEach(function(v){ byI[v.i] = v; });
+  var out = [], seen = {};
+  STATE.order.forEach(function(i){ if (byI[i] && !seen[i]){ out.push(byI[i]); seen[i] = 1; } });
+  STATE.vehicles.forEach(function(v){ if (!seen[v.i]) out.push(v); });
+  return out;
+}
+function saveOrder(){
+  try{
+    localStorage.setItem("yard.plan.order", JSON.stringify(STATE.order));
+    localStorage.setItem("yard.plan.hidden", JSON.stringify(Object.keys(STATE.hidden)));
+  }catch(e){}
+}
+function loadOrder(){
+  try{
+    var o = JSON.parse(localStorage.getItem("yard.plan.order") || "null");
+    if (Array.isArray(o)) STATE.order = o;
+    var h = JSON.parse(localStorage.getItem("yard.plan.hidden") || "[]");
+    if (Array.isArray(h)) h.forEach(function(i){ STATE.hidden[i] = true; });
+  }catch(e){}
+}
+/* Индивидуальные настройки просмотра (Влад, 29.08: «если логист под себя сохранил
+   цветовую схему, фильтры - так и должно быть при следующем заходе»). Порядок
+   машин/скрытые - уже свои ключи выше (saveOrder/loadOrder), здесь - масштаб,
+   раскраска, фильтр парка. НЕ входит: последний отредактированный блок и роль -
+   это сессионное, не настройка (см. «по умолчанию всегда день сегодня»). */
+function saveSettings(){
+  try{
+    localStorage.setItem("yard.plan.settings", JSON.stringify({
+      zoom:STATE.zoom, color:STATE.color, filter:STATE.filter
+    }));
+  }catch(e){}
+}
+function loadSettings(){
+  try{
+    var s = JSON.parse(localStorage.getItem("yard.plan.settings") || "null");
+    if (!s) return;
+    if (ZOOM[s.zoom]) STATE.zoom = s.zoom;
+    if (["state","manager","logist"].indexOf(s.color) >= 0) STATE.color = s.color;
+    if (s.filter) STATE.filter = s.filter;
+  }catch(e){}
+}
+/* после loadSettings() - проставить aria-pressed на реально выбранные чипы,
+   иначе кнопки покажут "Все/Состояние/3 дня" по умолчанию, а лента - сохранённое */
+function syncControlChips(){
+  [["zoom", STATE.zoom], ["color", STATE.color], ["filter", STATE.filter]].forEach(function(p){
+    var group = document.querySelector('[data-' + p[0] + '="' + p[1] + '"]');
+    if (!group) return;
+    [].forEach.call(group.parentNode.querySelectorAll(".chip"), function(x){ x.setAttribute("aria-pressed", "false"); });
+    group.setAttribute("aria-pressed", "true");
+  });
+}
+function canArrange(){ return STATE.role === "admin"; }
+
+/* ---------- светлый режим: ЭКСПЕРИМЕНТ, кнопка, не системная тема (Влад, 29.08) ---------- */
+function applyTheme(name){
+  document.documentElement.setAttribute("data-theme", name);
+  var b = document.getElementById("themeBtn");
+  b.textContent = "Тема: " + (name === "light" ? "светлая" : "тёмная");
+  renderRows();                 /* .seg красится инлайн-стилем при отрисовке - без пересборки не подхватит новые токены */
+  try{ localStorage.setItem("yard.plan.theme", name); }catch(e){}
+}
+function toggleTheme(){
+  applyTheme(document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light");
+}
+function loadTheme(){
+  var saved = "dark";
+  try{ saved = localStorage.getItem("yard.plan.theme") || "dark"; }catch(e){}
+  document.documentElement.setAttribute("data-theme", saved);
+  document.getElementById("themeBtn").textContent = "Тема: " + (saved === "light" ? "светлая" : "тёмная");
+}
+function nowHour(){
+  var d = new Date();
+  var day = (d.getFullYear() === YEAR && d.getMonth() === MONTH) ? d.getDate() : 29;
+  return (day - 1) * 24 + d.getHours() + d.getMinutes() / 60;
+}
+function isFreeNow(vi){
+  /* "без водителя" теперь БЛОКИРУЕТ, как ремонт - машину без водителя нельзя
+     считать свободной для диспетчеризации, поэтому исключения для driveroff
+     больше нет (было раньше, когда это была декоративная подполоса) */
+  var h = nowHour();
+  return !STATE.segs.some(function(s){
+    return s.v === vi && s.s <= h && s.s + s.l > h;
+  });
+}
+
+function renderScale(){
+  var hw = ZOOM[STATE.zoom];
+  scaleEl.style.width = (HOURS * hw) + "px";
+  var out = [];
+  for (var d = 0; d < DAYS; d++){
+    var dt = new Date(YEAR, MONTH, d + 1);
+    var w = dt.getDay(), cls = "day" + ((w === 0 || w === 6) ? " weekend" : "") + (d === 28 ? " today" : "");
+    var hrs = "";
+    if (STATE.zoom === "day"){
+      for (var h = 0; h < 24; h += 2){
+        hrs += '<span class="hr mono" style="left:' + (h * hw + 3) + 'px">' + (h < 10 ? "0" + h : h) + '</span>';
+      }
+    }
+    out.push('<div class="' + cls + '" data-day="' + d + '" style="left:' + (d * 24 * hw) + 'px;width:' + (24 * hw) + 'px">' +
+      '<div class="day-n mono">' + (d + 1) + '</div>' +
+      '<div class="day-w">' + WD[w] + '</div>' +
+      '<div class="hours">' + hrs + '</div></div>');
+  }
+  out.push('<div class="now-head" id="nowHead" style="left:' + (nowHour() * hw) + 'px"></div>');
+  scaleEl.innerHTML = out.join("");
+}
+
+function renderRows(){
+  var hw = ZOOM[STATE.zoom], trackW = HOURS * hw;
+  var byV = {};
+  STATE.segs.forEach(function(s){ (byV[s.v] = byV[s.v] || []).push(s); });
+
+  var frag = document.createDocumentFragment();
+  var groups = [
+    {name:"Тралы", test:function(v){ return !v.long; }},
+    {name:"Длинномеры 13,6 м", test:function(v){ return v.long; }}
+  ];
+
+  var ordered = orderedVehicles();
+  groups.forEach(function(g, gi){
+    var list = ordered.filter(function(v){ return g.test(v) && visible(v); });
+    if (!list.length) return;
+    var collapsed = !!STATE.collapsed[gi];
+    var gh = document.createElement("div");
+    gh.className = "grouphead" + (collapsed ? " collapsed" : "");
+    gh.dataset.grp = gi;
+    gh.innerHTML = '<span class="grouphead-label">' + ICON_CHEVRON + "<b>" + g.name +
+      "</b><i class='mono'>" + list.length + "</i></span>";
+    frag.appendChild(gh);
+    if (collapsed) return;
+
+    list.forEach(function(v){
+      var row = document.createElement("div");
+      row.className = "row" + (STATE.hidden[v.i] ? " is-hidden" : "");
+      row.dataset.v = v.i;
+      row.dataset.grp = gi;
+
+      var head = document.createElement("div");
+      head.className = "rowhead";     /* position:sticky из CSS - сама служит контекстом для .hide-btn */
+      var drv = v.driver || "нет водителя";
+      head.innerHTML =
+        '<div class="rh1"><span class="tag ' + tagClass(v.type) + '">' + v.type + '</span>' +
+        '<span class="gos">' + v.gos + '</span></div>' +
+        '<div class="rh2">' + (v.trailer || "без прицепа") + ' · ' +
+        '<span class="' + (v.vacant ? "nd" : "") + '">' + drv + '</span></div>' +
+        '<span class="hide-btn" data-hide="' + v.i + '" title="' +
+        (STATE.hidden[v.i] ? "Показать машину" : "Скрыть машину") + '">' +
+        (STATE.hidden[v.i] ? ICON_EYE : ICON_EYE_OFF) + '</span>';
+      row.appendChild(head);
+
+      var track = document.createElement("div");
+      track.className = "track";
+      track.style.width = trackW + "px";
+      track.dataset.v = v.i;
+
+      (byV[v.i] || []).forEach(function(s){ track.appendChild(makeSeg(s)); });
+
+      var nw = document.createElement("div");
+      nw.className = "now";
+      nw.style.left = (nowHour() * hw) + "px";
+      track.appendChild(nw);
+
+      row.appendChild(track);
+      frag.appendChild(row);
+    });
+  });
+
+  rowsEl.innerHTML = "";
+  rowsEl.appendChild(frag);
+}
+
+/* дата окончания служебной плашки = правый край отрезка (Влад, 29.08).
+   Конец ровно в полночь = «по последний занятый день включительно» (26.08),
+   иначе - дата и время конца. */
+function untilLabel(s){
+  var end = s.s + s.l;
+  var mm = (MONTH + 1 < 10 ? "0" : "") + (MONTH + 1);
+  if (end % 24 === 0) return "до " + Math.min(DAYS, end / 24) + "." + mm;
+  return "до " + fmt(end);
+}
+function segLabel(s){
+  if (s.kind === "trip") return s.from + " → " + s.to;
+  var base = s.kind === "repair" ? "Ремонт" : s.kind === "maint" ? "ТО" :
+             s.kind === "noorder" ? "Без заказа" : s.kind === "driveroff" ? "Без водителя" : "";
+  return base ? base + " · " + untilLabel(s) : "";
+}
+function makeSeg(s){
+  var el = document.createElement("div");
+  var now = nowHour();
+  var cls = "seg";
+  if (s.s + s.l <= now) cls += " is-past";                     /* завершён - приглушаем */
+  if (STATE.openId === s.id) cls += " is-open";                /* кольцо переживает перерендер */
+  var active = s.kind === "trip" && s.s <= now && now < s.s + s.l;
+  el.className = cls;
+  el.dataset.id = s.id;
+  el.style.setProperty("--s", s.s);
+  el.style.setProperty("--l", s.l);
+  if (active) el.style.setProperty("--progress",
+    Math.round((now - s.s) / s.l * 100));
+  /* «Бейдж-корпус» (уровень 5 мастерской, выбор Влада 29.08): бейдж МЕН/ЛОГ и
+     маршрут - один sticky-ряд, едут по скроллу вместе. Вакансию водителя машины
+     отмечает красная точка на бейдже (норму не отмечаем - только отсутствие). */
+  var head = "";
+  if (s.kind === "trip"){
+    var v = STATE.vehicles[s.v];
+    head = '<span class="seg-id"><b>' + three(s.mg) + '</b><i>' + three(s.lg) + '</i>' +
+      '<span class="seg-drv ' + (v && v.vacant ? "off" : "on") + '"></span></span>';
+  }
+  el.innerHTML = '<span class="seg-label">' + head +
+    '<span class="seg-txt">' + segLabel(s) + "</span></span>" +
+    (active ? '<span class="seg-prog"><i></i></span>' : "") +
+    '<span class="hov"></span><span class="ring"></span>' +
+    '<span class="hnd l"></span><span class="hnd r"></span>';
+  paint(el, s);
+  return el;
+}
+
+function renderKpis(){
+  var h = nowHour(), inWork = 0, rep = 0, noOrd = 0, noDrv = 0;
+  STATE.vehicles.forEach(function(v){
+    var here = STATE.segs.filter(function(s){ return s.v === v.i && s.s <= h && s.s + s.l > h; });
+    if (here.some(function(s){ return s.kind === "trip"; })) inWork++;
+    else if (here.some(function(s){ return s.kind === "repair" || s.kind === "maint"; })) rep++;
+    else if (here.some(function(s){ return s.kind === "noorder"; })) noOrd++;
+    else if (here.some(function(s){ return s.kind === "driveroff"; })) noDrv++;
+  });
+  var free = STATE.vehicles.length - inWork - rep - noOrd - noDrv;
+  var k = [["Парк", STATE.vehicles.length], ["В рейсе", inWork], ["Ремонт и ТО", rep],
+           ["Без заказа", noOrd], ["Нет водителя", noDrv], ["Свободны", free]];
+  document.getElementById("kpis").innerHTML = k.map(function(p){
+    return '<div class="kpi"><div class="kpi-label">' + p[0] + '</div>' +
+           '<div class="kpi-val mono">' + p[1] + "</div></div>";
+  }).join("");
+}
+
+/* легенда типов техники - из РЕАЛЬНОГО состава парка (после buildVehicles), не
+   статичный список: показывает ровно те типы/тональности, что есть на экране */
+function buildTypeLegend(){
+  var seen = {}, out = [], famOrder = {razd:0, koryto:1, rapid:2, bort:3, panel:4};
+  STATE.vehicles.forEach(function(v){
+    if (seen[v.type]) return; seen[v.type] = 1;
+    out.push([v.type, tagClass(v.type), typeFamily(v.type)]);
+  });
+  out.sort(function(a, b){
+    if (famOrder[a[2]] !== famOrder[b[2]]) return famOrder[a[2]] - famOrder[b[2]];
+    return typeRank(a[0]) - typeRank(b[0]);
+  });
+  return out;
+}
+function renderLegend(){
+  var items;
+  if (STATE.color === "state"){
+    items = [["В рейсе", STATE_FILL.trip], ["Без заказа", STATE_FILL.noorder],
+             ["Ремонт", STATE_FILL.repair], ["ТО", STATE_FILL.maint],
+             ["Водитель недоступен", "rgba(139,137,128,.26)"], ["Вакансия", "rgba(226,75,74,.22)"]];
+  } else {
+    var src = STATE.color === "manager" ? MANAGERS : LOG_TRAL.concat(LOG_LONG);
+    items = src.map(function(p){ return [p.code + " " + p.full, hexA(idColor(p.id), .34)]; });
+  }
+  var typeBit = STATE.typeLegend.map(function(p){
+    return '<span class="lg"><span class="tag ' + p[1] + '" style="padding:1px 6px">' + p[0] + '</span></span>';
+  }).join("");
+  var note = canArrange()
+    ? "тянуть карточку машины вверх-вниз - переставить порядок · тянуть отрезок - сдвинуть/растянуть/перенести · протянуть по пустому месту или двойной клик - новая запись"
+    : "тянуть тело - сдвинуть · тянуть за край - растянуть · протянуть по пустому месту или двойной клик - новая запись";
+  document.getElementById("legend").innerHTML =
+    items.map(function(p){
+      return '<span class="lg"><span class="sw" style="background:' + p[1] + '"></span>' + p[0] + "</span>";
+    }).join("") + '<span style="width:1px;height:14px;background:var(--border)"></span>' + typeBit +
+    '<span class="lg-note">' + note + '</span>';
+}
+
+function renderDuty(){
+  var d = new Date();
+  var day = (d.getFullYear() === YEAR && d.getMonth() === MONTH) ? d.getDate() : 29;
+  var tral = LOG_TRAL[(day - 1) % LOG_TRAL.length];
+  document.getElementById("dutyLine").innerHTML =
+    "Дежурят: " + tral.code + " тралы · " + LOG_LONG[0].code + " борта";
+}
+
+function renderAll(){
+  document.documentElement.style.setProperty("--hw", ZOOM[STATE.zoom] + "px");
+  document.documentElement.className = "z-" + STATE.zoom;
+  document.body.classList.toggle("can-arrange", canArrange());
+  renderScale(); renderRows(); renderKpis(); renderLegend(); renderDuty(); renderHiddenCount();
+}
+function renderHiddenCount(){
+  var n = Object.keys(STATE.hidden).length;
+  var b = document.getElementById("hiddenBtn");
+  b.textContent = STATE.showHidden ? "Показаны скрытые (" + n + ")" : "Скрытые: " + n;
+  b.style.display = canArrange() ? "" : "none";
+}
+
+/* ---------- крупное фиксированное время, пока тянут/растягивают/рисуют ----------
+   Шаг сетки - ПОЛЧАСА (Влад, 29.08): часы хранятся дробными (…,8, 8.5, 9,…),
+   hm()/fmt() ниже поэтому считают минуты, а не только час. */
+var hud = document.getElementById("timeHud");
+var hudFrom = document.getElementById("hudFrom"), hudTo = document.getElementById("hudTo"),
+    hudDur = document.getElementById("hudDur");
+var trashZone = document.getElementById("trashZone");
+function hm(h){
+  var totalMin = Math.round((((h % 24) + 24) % 24) * 60);
+  var hh = Math.floor(totalMin / 60), mm = totalMin % 60;
+  var dd = Math.floor(h / 24) + 1;
+  return dd + "." + (MONTH + 1 < 10 ? "0" : "") + (MONTH + 1) + " " + (hh < 10 ? "0" : "") + hh +
+         ":" + (mm < 10 ? "0" : "") + mm;
+}
+function durLabel(l){
+  var h = Math.floor(l), m = Math.round((l - h) * 60);
+  return m ? h + " ч " + m + " мин" : h + " ч";
+}
+function showBadge(seg, x, y, snapped){
+  hudFrom.textContent = hm(seg.s);
+  hudTo.textContent = hm(seg.s + seg.l);
+  hudDur.textContent = durLabel(seg.l) + (snapped ? " · примагничено" : "");
+  hud.classList.add("on");
+}
+function hideBadge(){ hud.classList.remove("on"); }
+
+/* ---------- примагничивание ---------- */
+var magnetEl = null;
+function magnetTargets(vi, selfId){
+  var t = [];
+  for (var d = 0; d <= DAYS; d++){ t.push(d * 24); t.push(d * 24 + 8); }  /* полночь и начало смены */
+  STATE.segs.forEach(function(s){
+    if (s.v === vi && s.id !== selfId){ t.push(s.s); t.push(s.s + s.l); }
+  });
+  t.push(Math.round(nowHour()));
+  return t;
+}
+function snapHour(raw, targets){
+  var thr = Math.max(0.25, 10 / ZOOM[STATE.zoom]);   /* магнит ~10px экрана, но не меньше 15 минут -
+    ниже, чем раньше (было 45 мин): шаг сетки теперь 30 мин, порог не должен глотать сам шаг */
+  var best = null, bd = thr;
+  for (var i = 0; i < targets.length; i++){
+    var d = Math.abs(raw - targets[i]);
+    if (d <= bd){ bd = d; best = targets[i]; }
+  }
+  return best;
+}
+function showMagnet(track, hour){
+  if (!magnetEl){ magnetEl = document.createElement("div"); magnetEl.className = "magnet"; }
+  if (magnetEl.parentNode !== track) track.appendChild(magnetEl);
+  magnetEl.style.left = (hour * ZOOM[STATE.zoom]) + "px";
+  magnetEl.classList.add("on");
+}
+function hideMagnet(){ if (magnetEl) magnetEl.classList.remove("on"); }
+
+/* ---------- уровень 3 «супер» примагничивания: вспышка на стыке, искры, шов -----
+   Перенесено 1:1 с изолированного стенда (examples/prototype-magnet-demo.html,
+   уровень 3), Влад одобрил и попросил внедрить срочно, 29.08. Общие переиспользуемые
+   элементы, реparent'ятся на текущий трек - тот же приём, что и у showMagnet(). ---------- */
+var edgeA = null, edgeB = null, seamEl = null, seamPath = null;
+function ensureFx(){
+  if (!edgeA){ edgeA = document.createElement("div"); edgeA.className = "edge-flash"; }
+  if (!edgeB){ edgeB = document.createElement("div"); edgeB.className = "edge-flash"; }
+  if (!seamEl){
+    seamEl = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    seamEl.setAttribute("class", "seam");
+    seamPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    seamEl.appendChild(seamPath);
+  }
+}
+function kissEffect(track, myEdgeHour, neighborEdgeHour){
+  ensureFx();
+  var hw = ZOOM[STATE.zoom];
+  if (edgeA.parentNode !== track) track.appendChild(edgeA);
+  if (edgeB.parentNode !== track) track.appendChild(edgeB);
+  edgeA.style.left = (myEdgeHour * hw - 1.5) + "px";
+  edgeA.classList.remove("go"); void edgeA.offsetWidth; edgeA.classList.add("go");
+  edgeB.style.left = (neighborEdgeHour * hw - 1.5) + "px";
+  edgeB.classList.remove("go"); void edgeB.offsetWidth; edgeB.classList.add("go");
+}
+function sparkBurst(track, hour){
+  if (prefersReduced()) return;
+  var hw = ZOOM[STATE.zoom];
+  for (var i = 0; i < 4; i++){
+    var s = document.createElement("div");
+    s.className = "spark";
+    var ang = (Math.PI * 2 * i / 4) + Math.random() * .6;
+    s.style.setProperty("--dx", (Math.cos(ang) * 14) + "px");
+    s.style.setProperty("--dy", (Math.sin(ang) * 10) + "px");
+    s.style.left = (hour * hw - 2) + "px";
+    s.style.top = "22px";
+    track.appendChild(s);
+    (function(el){ setTimeout(function(){ el.remove(); }, 430); })(s);
+  }
+}
+function seamOn(track, hour){
+  ensureFx();
+  if (seamEl.parentNode !== track) track.appendChild(seamEl);
+  seamEl.style.left = (hour * ZOOM[STATE.zoom] - 3) + "px";
+  var h = track.clientHeight || 52;
+  seamEl.setAttribute("height", h);
+  seamEl.setAttribute("width", 6);
+  var len = Math.max(1, h - 12);
+  seamPath.setAttribute("d", "M3 6 L3 " + (h - 6));
+  seamPath.style.transition = "none";
+  seamPath.style.strokeDasharray = len;
+  seamPath.style.strokeDashoffset = len;
+  seamEl.classList.add("on");
+  requestAnimationFrame(function(){
+    seamPath.style.transition = "stroke-dashoffset .3s var(--ease-out-strong)";
+    seamPath.style.strokeDashoffset = 0;
+  });
+}
+function seamOff(){ if (seamEl) seamEl.classList.remove("on"); }
+
+/* ---------- прицел в начало нового диапазона при смене масштаба ---------- */
+function rangeStart(hour, zoom){
+  var day = Math.floor(hour / 24);
+  if (zoom === "month") return 0;
+  if (zoom === "week"){
+    var wd = (new Date(YEAR, MONTH, day + 1).getDay() + 6) % 7;   /* 0 = понедельник */
+    return Math.max(0, (day - wd) * 24);
+  }
+  return day * 24;                                                 /* сутки и 3 дня - к началу дня */
+}
+function primeTo(hour){
+  var x = Math.max(0, hour * ZOOM[STATE.zoom]);
+  if (prefersReduced()) board.scrollLeft = x;
+  else board.scrollTo({left:x, behavior:"smooth"});
+  var cell = scaleEl.children[Math.floor(hour / 24)];
+  if (cell && !prefersReduced()){
+    cell.classList.remove("primed");
+    void cell.offsetWidth;                                          /* перезапустить анимацию */
+    cell.classList.add("primed");
+  }
+}
+
+/* ---------- клик по дню в шапке - экран сразу переходит на этот день (Влад, 29.08) ---------- */
+scaleEl.addEventListener("click", function(e){
+  var day = e.target.closest(".day");
+  if (!day) return;
+  S.nav();
+  primeTo(parseInt(day.dataset.day, 10) * 24);
+});
+
+/* ---------- переход между месяцами - стрелки, без перезагрузки ---------- */
+var MONTH_NAMES = ["январь","февраль","март","апрель","май","июнь","июль","август",
+  "сентябрь","октябрь","ноябрь","декабрь"];
+function monthArrowClick(dir){
+  var target = MONTH + dir;   /* 0-based: 7 = август */
+  var label = MONTH_NAMES[((target % 12) + 12) % 12] + " " + (YEAR + Math.floor(target / 12));
+  if (target === MONTH){ return; }
+  toast(label.charAt(0).toUpperCase() + label.slice(1) + " - в демо данные только за август 2026 " +
+        "(на сервере переход будет обычным соседним месяцем, как в их Google Таблице)", null);
+}
+document.getElementById("monthPrev").addEventListener("click", function(){ monthArrowClick(-1); });
+document.getElementById("monthNext").addEventListener("click", function(){ monthArrowClick(1); });
+
+/* ---------- скрыть/показать машину (только админ/старший логист) ---------- */
+rowsEl.addEventListener("click", function(e){
+  var btn = e.target.closest(".hide-btn");
+  if (!btn || !canArrange()) return;
+  var vi = parseInt(btn.dataset.hide, 10);
+  if (STATE.hidden[vi]) delete STATE.hidden[vi]; else STATE.hidden[vi] = true;
+  saveOrder();
+  S.nav();
+  renderRows(); renderHiddenCount();
+});
+
+/* ---------- свернуть/развернуть группу (Тралы / Длинномеры) ---------- */
+rowsEl.addEventListener("click", function(e){
+  var gh = e.target.closest(".grouphead");
+  if (!gh) return;
+  var gi = gh.dataset.grp;
+  STATE.collapsed[gi] = !STATE.collapsed[gi];
+  S.nav();
+  renderRows();
+});
+
+/* ---------- автопрокрутка к краю во время захвата (Влад, 29.08: «при захвате
+   плитки должна быть навигация по всей планировке вверх-вниз, влево-вправо») ----------
+   Курсор подошёл к краю .board во время любого перетаскивания (плитка/перестановка
+   машин/протяжка создания) - лента сама едет в ту сторону, скорость растёт ближе
+   к самому краю. Один общий цикл на все три вида захвата. */
+var asVX = 0, asVY = 0, asRAF = 0;
+function updateAutoscroll(cx, cy){
+  var r = board.getBoundingClientRect(), margin = 56, maxSpeed = 16;
+  asVX = 0; asVY = 0;
+  if (cx < r.left + margin) asVX = -maxSpeed * (1 - Math.max(0, cx - r.left) / margin);
+  else if (cx > r.right - margin) asVX = maxSpeed * (1 - Math.max(0, r.right - cx) / margin);
+  if (cy < r.top + margin) asVY = -maxSpeed * (1 - Math.max(0, cy - r.top) / margin);
+  else if (cy > r.bottom - margin) asVY = maxSpeed * (1 - Math.max(0, r.bottom - cy) / margin);
+  if ((asVX || asVY) && !asRAF) asRAF = requestAnimationFrame(autoscrollTick);
+}
+function stopAutoscroll(){ asVX = 0; asVY = 0; }
+function autoscrollTick(){
+  if (!drag && !create && !arr){ asRAF = 0; asVX = 0; asVY = 0; return; }
+  if (asVX || asVY){
+    board.scrollLeft += asVX; board.scrollTop += asVY;
+    asRAF = requestAnimationFrame(autoscrollTick);
+  } else { asRAF = 0; }
+}
+
+/* ---------- перестановка машин: только админ и старший логист ---------- */
+var arr = null;
+rowsEl.addEventListener("pointerdown", function(e){
+  if (!canArrange()) return;
+  if (e.target.closest(".hide-btn")) return;
+  var head = e.target.closest(".rowhead");
+  if (!head) return;
+  var row = head.closest(".row");
+  e.preventDefault();
+  head.setPointerCapture && head.setPointerCapture(e.pointerId);
+  head.style.transition = "transform 100ms var(--ease-out-soft)";
+  head.style.transform = "scale(.97)";
+  arr = {row:row, head:head, x0:e.clientX, y0:e.clientY, lifted:false,
+         card:null, cur:0, tgt:0, moved:false};
+}, {passive:false});
+
+window.addEventListener("pointermove", function(e){
+  if (!arr) return;
+  updateAutoscroll(e.clientX, e.clientY);
+  var dy = e.clientY - arr.y0;
+  if (!arr.lifted){
+    if (Math.abs(dy) + Math.abs(e.clientX - arr.x0) < 5) return;
+    var r = arr.head.getBoundingClientRect();
+    arr.card = document.createElement("div");
+    arr.card.className = "rowcard";
+    arr.card.innerHTML = arr.head.innerHTML;
+    arr.card.style.left = r.left + "px";
+    arr.card.style.top = r.top + "px";
+    document.body.appendChild(arr.card);
+    arr.baseY = r.top; arr.grabY = e.clientY - r.top;
+    arr.row.classList.add("ghosted");
+    arr.head.style.transform = "";
+    arr.lifted = true;
+    S.lift();
+  }
+  arr.tgt = (e.clientY - arr.grabY) - arr.baseY;
+  if (prefersReduced() || document.hidden) arr.cur = arr.tgt;
+  else arr.cur += (arr.tgt - arr.cur) * 0.28;                        /* тот же lerp 0.28 */
+  arr.card.style.transform = "translateY(" + arr.cur + "px) scale(1.03)";
+
+  var over = document.elementFromPoint(arr.card.getBoundingClientRect().left + 20, e.clientY);
+  over = over && over.closest ? over.closest(".row") : null;
+  if (!over || over === arr.row) return;
+  if (over.dataset.grp !== arr.row.dataset.grp) return;              /* трал не станет длинномером */
+  flipRows(function(){
+    var after = e.clientY > over.getBoundingClientRect().top + over.offsetHeight / 2;
+    rowsEl.insertBefore(arr.row, after ? over.nextSibling : over);
+  });
+  arr.moved = true;
+}, {passive:true});
+
+window.addEventListener("pointerup", function(){
+  if (!arr) return;
+  stopAutoscroll();
+  var a = arr; arr = null;
+  a.head.style.transform = ""; a.head.style.transition = "";
+  if (!a.lifted) return;
+  a.row.classList.remove("ghosted");
+  if (a.card) a.card.remove();
+  if (a.moved){
+    STATE.order = [].map.call(rowsEl.querySelectorAll(".row"), function(r){ return parseInt(r.dataset.v, 10); });
+    saveOrder();
+    S.settle();
+    toast("Порядок машин сохранён", null);
+  }
+});
+
+/* FLIP соседей - 300ms, кривая --ease-flip, как в канбане */
+function flipRows(mutate){
+  var rows = [].slice.call(rowsEl.querySelectorAll(".row"));
+  var before = rows.map(function(r){ return r.getBoundingClientRect().top; });
+  mutate();
+  if (prefersReduced()) return;
+  rows.forEach(function(r, i){
+    var d = before[i] - r.getBoundingClientRect().top;
+    if (!d) return;
+    r.style.transition = "none";
+    r.style.transform = "translateY(" + d + "px)";
+    requestAnimationFrame(function(){
+      r.style.transition = "transform 300ms var(--ease-flip)";
+      r.style.transform = "";
+    });
+  });
+}
+
+/* ---------- перетаскивание отрезков: ГОСТ, раздел 6, числа буквально ---------- */
+var drag = null, raf = 0;
+
+rowsEl.addEventListener("pointerdown", function(e){
+  var el = e.target.closest(".seg");
+  if (!el) return;
+  var seg = STATE.segs.find(function(s){ return s.id === el.dataset.id; });
+  if (!seg) return;
+  e.preventDefault();
+  el.setPointerCapture(e.pointerId);
+
+  var mode = e.target.classList.contains("hnd")
+    ? (e.target.classList.contains("l") ? "resizeL" : "resizeR") : "move";
+
+  el.style.transition = "transform 100ms var(--ease-out-soft)";
+  el.style.transform = "scale(.97)";                       /* фаза 1: отклик мгновенно */
+  el.style.willChange = "transform";                        /* точечно, см. комментарий у .seg в CSS */
+
+  tCache = {};                                              /* сегменты могли измениться с прошлого драга */
+  drag = {el:el, seg:seg, mode:mode, x0:e.clientX, y0:e.clientY,
+          s0:seg.s, l0:seg.l, v0:seg.v, lifted:false,
+          cur:{x:0,y:0}, tgt:{x:0,y:0}, ph:null, row:null, ok:true,
+          track:el.parentNode, targets:magnetTargets(seg.v, seg.id),
+          lastEdge:null, lastSnap:null, trashArmed:false};
+  if (mode !== "move") S.lift();
+}, {passive:false});
+
+var tCache = {};
+function targetsFor(vi, selfId){
+  var k = vi + "|" + selfId;
+  if (!tCache[k]) tCache[k] = magnetTargets(vi, selfId);
+  return tCache[k];
+}
+/* шаг сетки - 30 минут (Влад, 29.08); округляем к ближайшей половине часа всюду,
+   где нет примагничивания к конкретной границе */
+function roundStep(h){ return Math.round(h * 2) / 2; }
+function edgeTick(drag, edge){
+  var r = roundStep(edge);
+  if (drag.lastEdge !== r){ drag.lastEdge = r; S.tick(); }
+}
+
+window.addEventListener("pointermove", function(e){
+  if (!drag) return;
+  var dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
+  var hw = ZOOM[STATE.zoom];
+
+  if (!drag.lifted && Math.abs(dx) + Math.abs(dy) < 4) return;
+  updateAutoscroll(e.clientX, e.clientY);
+
+  if (drag.mode !== "move"){
+    var raw = (drag.mode === "resizeR" ? drag.s0 + drag.l0 : drag.s0) + dx / hw;
+    var snap = snapHour(raw, drag.targets);
+    var val = snap !== null ? snap : roundStep(raw);
+    if (drag.mode === "resizeR"){
+      drag.seg.l = Math.max(.5, Math.min(HOURS - drag.seg.s, val - drag.seg.s));
+    } else {
+      var ns = Math.max(0, Math.min(val, drag.s0 + drag.l0 - .5));
+      drag.seg.s = ns; drag.seg.l = drag.s0 + drag.l0 - ns;
+    }
+    drag.el.style.transition = "none";
+    drag.el.style.transform = "";
+    drag.el.style.setProperty("--s", drag.seg.s);
+    drag.el.style.setProperty("--l", drag.seg.l);
+    edgeTick(drag, val);                                   /* тик на каждый пройденный получас */
+    if (snap !== null){
+      if (drag.lastSnap !== snap){
+        drag.lastSnap = snap; S.magnet();
+        kissEffect(drag.track, val, snap); sparkBurst(drag.track, snap); seamOn(drag.track, snap);
+      }
+      showMagnet(drag.track, snap);
+    } else { drag.lastSnap = null; hideMagnet(); seamOff(); }
+    showBadge(drag.seg, e.clientX, e.clientY, snap !== null);
+    drag.lifted = true;
+    return;
+  }
+
+  if (!drag.lifted){ lift(e); }
+  /* смещение ОТ точки подъёма, не абсолютная координата */
+  drag.tgt.x = (e.clientX - drag.grabX) - drag.baseX;
+  drag.tgt.y = (e.clientY - drag.grabY) - drag.baseY;
+  /* reduced-motion: rAF-цикл tick() не работает, позицию пишем 1:1 прямо здесь -
+     без lerp и наклона, но плитка ОБЯЗАНА следовать за курсором (аудит 29.08:
+     раньше она визуально замирала на месте до самого отпускания) */
+  if (prefersReduced()){
+    drag.cur.x = drag.tgt.x; drag.cur.y = drag.tgt.y;
+    drag.el.style.transform = "translate(" + drag.cur.x + "px," + drag.cur.y + "px) scale(1.03)";
+  }
+
+  /* корзина - как на смартфонах: появилась в момент подъёма, курсор попал в её
+     границы - подсветилась, отпустил здесь - удаление (см. pointerup ниже) */
+  trashZone.classList.add("on");
+  var tz = trashZone.getBoundingClientRect();
+  var overTrash = e.clientX >= tz.left && e.clientX <= tz.right &&
+                  e.clientY >= tz.top && e.clientY <= tz.bottom;
+  if (overTrash !== drag.trashArmed){
+    drag.trashArmed = overTrash;
+    trashZone.classList.toggle("armed", overTrash);
+    if (overTrash) S.magnet();
+  }
+  if (overTrash){
+    /* целимся в корзину - час/строка сейчас не при делах, гасим их подсказки */
+    if (drag.row){ drag.row.classList.remove("drop"); drag.row = null; }
+    hideBadge(); hideMagnet();
+    return;
+  }
+
+  var row = document.elementFromPoint(e.clientX, e.clientY);
+  row = row && row.closest ? row.closest(".row") : null;
+  if (row !== drag.row){
+    if (drag.row) drag.row.classList.remove("drop");
+    drag.row = row;
+    if (row) row.classList.add("drop");
+  }
+
+  /* живое время и примагничивание начала рейса */
+  var tk = row ? row.querySelector(".track") : drag.track;
+  var vi = tk ? parseInt(tk.dataset.v, 10) : drag.seg.v;
+  var tr = tk.getBoundingClientRect();
+  var rawS = (e.clientX - drag.grabX - tr.left) / hw;
+  /* НАЙДЕНО И ИСПРАВЛЕНО 29.08 (магнит-стенд): targetsFor() отдаёт сырые края
+     соседей (их начало/конец). При ПЕРЕМЕЩЕНИИ мы примагничиваем НАЧАЛО своей
+     плитки - значит «мой конец коснулся начала соседа» требует цели вида
+     (край соседа − моя длина), иначе магнит работал только когда сосед СЛЕВА
+     (там начало плитки случайно совпадает с сырым краем), а справа не работал
+     вовсе, что Влад и поймал на изолированном стенде. */
+  var rawTargets = targetsFor(vi, drag.seg.id);
+  var moveTargets = rawTargets.concat(rawTargets.map(function(t){ return t - drag.seg.l; }));
+  var snapM = snapHour(rawS, moveTargets);
+  drag.previewS = Math.max(0, Math.min(HOURS - drag.seg.l, snapM !== null ? snapM : roundStep(rawS)));
+  edgeTick(drag, drag.previewS);
+  if (snapM !== null){
+    if (drag.lastSnap !== snapM){
+      drag.lastSnap = snapM; S.magnet();
+      /* точка касания - либо НАЧАЛО плитки коснулось цели напрямую (raw-цель),
+         либо КОНЕЦ коснулся (raw-цель через сдвиг на -длину, см. moveTargets
+         выше) - выясняем, какой случай, чтобы вспышку рисовать в РЕАЛЬНОЙ точке
+         стыка, а не всегда у начала */
+      var atStart = rawTargets.some(function(t){ return Math.abs(t - drag.previewS) < 0.01; });
+      var contact = atStart ? drag.previewS : drag.previewS + drag.seg.l;
+      kissEffect(tk, contact, contact); sparkBurst(tk, contact); seamOn(tk, contact);
+    }
+    showMagnet(tk, snapM);
+  } else { drag.lastSnap = null; hideMagnet(); seamOff(); }
+  showBadge({s:drag.previewS, l:drag.seg.l}, e.clientX, e.clientY, snapM !== null);
+}, {passive:true});
+
+function lift(e){
+  var el = drag.el, r = el.getBoundingClientRect();
+  drag.grabX = e.clientX - r.left; drag.grabY = e.clientY - r.top;
+  drag.baseX = r.left; drag.baseY = r.top;
+  var ph = document.createElement("div");
+  ph.style.cssText = "position:absolute;top:11px;height:28px;border-radius:4px;" +
+    "background:var(--ph-bg);left:" + (drag.seg.s * ZOOM[STATE.zoom]) + "px;width:" +
+    (drag.seg.l * ZOOM[STATE.zoom]) + "px;";
+  el.parentNode.appendChild(ph);
+  drag.ph = ph;
+
+  el.style.transition = "opacity 140ms var(--ease-out-soft)";
+  el.classList.add("lifted");
+  el.style.position = "fixed";
+  el.style.left = r.left + "px"; el.style.top = r.top + "px";
+  el.style.width = r.width + "px";
+  document.body.appendChild(el);
+  drag.cur.x = 0; drag.cur.y = 0; drag.tgt.x = 0; drag.tgt.y = 0;
+  drag.lifted = true;
+  if (!prefersReduced()) raf = requestAnimationFrame(tick);
+  else el.style.transform = "scale(1.03)";
+}
+
+function tick(){
+  if (!drag || !drag.lifted || drag.mode !== "move"){ raf = 0; return; }
+  var prevX = drag.cur.x;
+  if (document.hidden){                                   /* ГОСТ: ветка hidden */
+    drag.cur.x = drag.tgt.x; drag.cur.y = drag.tgt.y;
+  } else {
+    drag.cur.x += (drag.tgt.x - drag.cur.x) * 0.28;       /* lerp 0.28 */
+    drag.cur.y += (drag.tgt.y - drag.cur.y) * 0.28;
+  }
+  var tilt = Math.max(-7, Math.min(7, (drag.tgt.x - drag.cur.x) * 0.10));
+  /* сжатие-растяжение по скорости - уровень 3 стенда, одобрено 29.08. НОВЫЙ приём
+     раздела 6 ГОСТа (был только lerp/наклон/scale) - записать в DESIGN_SYSTEM.md
+     как расширение канона перетаскивания, не тихо. Канал тот же (transform). */
+  var vx = drag.cur.x - prevX;
+  drag.velHist = (drag.velHist || 0) * 0.6 + vx * 0.4;
+  var stretch = prefersReduced() ? 0 : Math.max(-.16, Math.min(.16, drag.velHist * 0.05));
+  var sx = 1.03 * (1 + Math.abs(stretch)), sy = 1.03 * (1 - Math.abs(stretch) * 0.5);
+  drag.el.style.transform = "translate(" + drag.cur.x + "px," + drag.cur.y +
+                            "px) rotate(" + tilt + "deg) scale(" + sx + "," + sy + ")";
+  raf = requestAnimationFrame(tick);
+}
+
+window.addEventListener("pointerup", function(e){
+  if (!drag) return;
+  stopAutoscroll();
+  var d = drag; drag = null;
+  if (raf){ cancelAnimationFrame(raf); raf = 0; }
+  if (d.row) d.row.classList.remove("drop");
+
+  var el = d.el, seg = d.seg;
+  var before = {s:d.s0, l:d.l0, v:d.v0};
+  el.style.willChange = "";                    /* сняли точечный хинт - см. .seg в CSS */
+
+  hideBadge(); hideMagnet(); seamOff();
+
+  if (d.mode !== "move"){
+    if (seg.s !== d.s0 || seg.l !== d.l0){
+      /* проверка пересечений и у растяжки - раньше была только у переноса, из-за
+         чего растяжкой можно было молча закоммитить наложение (аудит 29.08) */
+      var rClash = STATE.segs.some(function(x){
+        return x !== seg && x.v === seg.v && seg.s < x.s + x.l && x.s < seg.s + seg.l;
+      });
+      if (rClash){
+        seg.s = d.s0; seg.l = d.l0;
+        el.style.setProperty("--s", seg.s); el.style.setProperty("--l", seg.l);
+        flashBad(el); S.reject();
+        toast("Пересечение с другим отрезком - вернул как было", null);
+      } else { commit(seg, before, "Отрезок изменён"); S.drop(); }
+    }
+    el.style.transition = "";
+    return;
+  }
+  if (!d.lifted){
+    el.style.transform = ""; el.style.transition = "";
+    /* кольцо «открыта в шторке» - персистентный маркер, гаснет в closeDrawer() */
+    var prev = rowsEl.querySelector(".seg.is-open");
+    if (prev) prev.classList.remove("is-open");
+    el.classList.add("is-open");
+    STATE.openId = seg.id;
+    openDrawer(seg);
+    return;
+  }
+
+  trashZone.classList.remove("on", "armed");
+  if (d.trashArmed){
+    /* уронили в корзину - плитка втягивается в иконку и исчезает, ЗАТЕМ удаление
+       из данных (тот же путь, что и «Удалить» в шторке - отмена тостом работает
+       одинаково что там, что здесь) */
+    var cur = el.getBoundingClientRect();
+    el.style.left = cur.left + "px"; el.style.top = cur.top + "px"; el.style.transform = "";
+    var tzr = trashZone.getBoundingClientRect();
+    var dxT = (tzr.left + tzr.width / 2) - (cur.left + cur.width / 2);
+    var dyT = (tzr.top + tzr.height / 2) - (cur.top + cur.height / 2);
+    requestAnimationFrame(function(){
+      el.style.transition = "transform 220ms var(--ease-in-out), opacity 220ms var(--ease-in-out)";
+      el.style.transform = "translate(" + dxT + "px," + dyT + "px) scale(.12) rotate(14deg)";
+      el.style.opacity = "0";
+    });
+    if (d.ph) d.ph.remove();
+    setTimeout(function(){ el.remove(); deleteSeg(seg); }, 230);
+    return;
+  }
+
+  var track = d.row ? d.row.querySelector(".track") : null;
+  var newS = seg.s, newV = seg.v;
+  if (track){
+    newS = d.previewS != null ? d.previewS : newS;                  /* уже примагничено выше */
+    newV = parseInt(track.dataset.v, 10);
+  }
+  var clash = STATE.segs.some(function(s){
+    return s !== seg && s.v === newV && newS < s.s + s.l && s.s < newS + seg.l;
+  });
+
+  /* вернуть в поток и уложить по FLIP с overshoot */
+  var r1 = el.getBoundingClientRect();
+  el.style.position = ""; el.style.left = ""; el.style.top = ""; el.style.width = "";
+  el.classList.remove("lifted");
+  if (!clash){ seg.s = newS; seg.v = newV; }
+  var destTrack = clash ? d.ph.parentNode
+    : rowsEl.querySelector('.track[data-v="' + newV + '"]') || d.ph.parentNode;
+  el.style.setProperty("--s", seg.s); el.style.setProperty("--l", seg.l);
+  destTrack.appendChild(el);
+  if (d.ph) d.ph.remove();
+
+  var r2 = el.getBoundingClientRect();
+  el.style.transition = "none";
+  el.style.transform = "translate(" + (r1.left - r2.left) + "px," + (r1.top - r2.top) + "px) scale(1.03)";
+  requestAnimationFrame(function(){
+    el.style.transition = "transform 380ms var(--ease-overshoot),opacity 140ms var(--ease-out-soft)";
+    el.style.transform = "";
+    setTimeout(function(){ el.style.transition = ""; }, 400);  /* вернуть штатные переходы */
+  });
+
+  if (clash){ flashBad(el); S.reject(); toast("Пересечение с другим отрезком - не поставил", null); }
+  else if (before.s !== seg.s || before.v !== seg.v){
+    S.drop();
+    commit(seg, before, before.v !== seg.v ? "Перенесено на другую машину" : "Сдвинуто по времени");
+  }
+});
+
+function flashBad(el){
+  el.classList.add("bad");
+  setTimeout(function(){ el.classList.remove("bad"); }, 600);
+}
+function commit(seg, before, text){
+  STATE.lastEdited = seg.s;                    /* смена масштаба целится сюда, см. клик по "Масштаб" */
+  toast(text, function(){
+    S.undo();
+    seg.s = before.s; seg.l = before.l; seg.v = before.v;
+    STATE.lastEdited = before.s;
+    renderRows();
+  });
+  renderKpis();
+}
+
+/* ---------- создание записи: протяжка по пустому месту трека, либо двойной клик
+   (Влад, 29.08: «методику создания заказа... может быть правой клавишей, может
+   быть двойные щелчки, может быть плитки, которые перетаскиваем на линию»).
+   Выбран вариант «рисуем протяжкой прямо на линии времени» - использует ТУ ЖЕ
+   физику магнита/тика/бейджика, что и растяжка существующего отрезка (раздел 6),
+   плюс двойной клик как быстрый путь без протяжки (создаёт запись на 4 часа). ---------- */
+var create = null;
+rowsEl.addEventListener("pointerdown", function(e){
+  if (e.target.closest(".seg") || e.target.closest(".rowhead") || e.target.closest(".hide-btn")) return;
+  var track = e.target.closest(".track");
+  if (!track) return;
+  var vi = parseInt(track.dataset.v, 10);
+  var hw = ZOOM[STATE.zoom];
+  var tr = track.getBoundingClientRect();
+  var startRaw = (e.clientX - tr.left) / hw;
+  var targets = magnetTargets(vi, null);
+  var snap0 = snapHour(startRaw, targets);
+  create = {track:track, vi:vi, x0:e.clientX, s0:snap0 !== null ? snap0 : roundStep(startRaw),
+            targets:targets, ghost:null, lastEdge:null, lastSnap:null, moved:false};
+});
+window.addEventListener("pointermove", function(e){
+  if (!create) return;
+  var hw = ZOOM[STATE.zoom];
+  var dx = e.clientX - create.x0;
+  if (!create.moved && Math.abs(dx) < 4) return;
+  updateAutoscroll(e.clientX, e.clientY);
+  if (!create.ghost){
+    create.ghost = document.createElement("div");
+    create.ghost.className = "seg-draft";
+    create.track.appendChild(create.ghost);
+    create.moved = true;
+  }
+  var endRaw = create.s0 + dx / hw;
+  var snap = snapHour(endRaw, create.targets);
+  var endVal = snap !== null ? snap : roundStep(endRaw);
+  var lo = Math.min(create.s0, endVal), hi = Math.max(create.s0, endVal);
+  create.s = lo; create.l = Math.max(.5, hi - lo);
+  create.ghost.style.setProperty("--s", create.s);
+  create.ghost.style.setProperty("--l", create.l);
+  edgeTick(create, endVal);
+  if (snap !== null){
+    if (create.lastSnap !== snap){ create.lastSnap = snap; S.magnet(); }
+    showMagnet(create.track, snap);
+  } else { create.lastSnap = null; hideMagnet(); }
+  showBadge({s:create.s, l:create.l}, e.clientX, e.clientY, snap !== null);
+});
+window.addEventListener("pointerup", function(){
+  if (!create) return;
+  stopAutoscroll();
+  var c = create; create = null;
+  hideBadge(); hideMagnet();
+  if (c.ghost) c.ghost.remove();
+  if (!c.moved) return;                          /* просто клик по пустому месту - ничего не делаем */
+  openCreateDrawer(c.vi, c.s, c.l);
+});
+rowsEl.addEventListener("dblclick", function(e){
+  if (e.target.closest(".seg") || e.target.closest(".rowhead")) return;
+  var track = e.target.closest(".track");
+  if (!track) return;
+  var vi = parseInt(track.dataset.v, 10);
+  var hw = ZOOM[STATE.zoom];
+  var tr = track.getBoundingClientRect();
+  var raw = (e.clientX - tr.left) / hw;
+  var snap = snapHour(raw, magnetTargets(vi, null));
+  openCreateDrawer(vi, snap !== null ? snap : roundStep(raw), 8);   /* смена по умолчанию - 8 часов */
+});
+
+/* ---------- шторка ---------- */
+var scrim = document.getElementById("scrim"), drawer = document.getElementById("drawer");
+
+function openCreateDrawer(vi, s, l){
+  var v = STATE.vehicles[vi];
+  var kind = "trip", mgIdx = 0, lgIdx = 0, fromVal = "", toVal = "";
+  function render(){
+    var isTrip = kind === "trip";
+    var logistPool = v.long ? LOG_LONG : LOG_TRAL;
+    var typeBtns = [["trip","Рейс"], ["repair","Ремонт"], ["maint","ТО"], ["driveroff","Выходной"]];
+    drawer.innerHTML =
+      '<div class="dr-eyebrow">Новая запись</div>' +
+      '<div class="dr-title">' + v.type + " · " + v.gos + '</div>' +
+      '<div class="dr-row"><span>Начало</span><span class="mono">' + fmt(s) + '</span></div>' +
+      '<div class="dr-row"><span>Окончание</span><span class="mono">' + fmt(s + l) + " (" + l + ' ч)</span></div>' +
+      '<div class="cr-types">' + typeBtns.map(function(p){
+        return '<button class="chip cr-type" data-k="' + p[0] + '" aria-pressed="' + (kind === p[0]) + '">' + p[1] + '</button>';
+      }).join("") + '</div>' +
+      (isTrip ?
+        '<div class="cr-field"><span class="grp-label">Менеджер</span><div class="cr-opts" id="crMg">' +
+          MANAGERS.map(function(m, i){ return '<button class="chip cr-opt" data-i="' + i + '" aria-pressed="' + (i === mgIdx) + '">' + personShort(m) + '</button>'; }).join("") +
+        '</div></div>' +
+        '<div class="cr-field"><span class="grp-label">Логист</span><div class="cr-opts" id="crLg">' +
+          logistPool.map(function(p, i){ return '<button class="chip cr-opt" data-i="' + i + '" aria-pressed="' + (i === lgIdx) + '">' + personShort(p) + '</button>'; }).join("") +
+        '</div></div>' +
+        '<div class="cr-field"><span class="grp-label">Откуда</span><input class="cr-input" id="crFrom" list="crPlaces" value="' + fromVal + '"></div>' +
+        '<div class="cr-field"><span class="grp-label">Куда</span><input class="cr-input" id="crTo" list="crPlaces" value="' + toVal + '"></div>' +
+        '<datalist id="crPlaces">' + PLACES.map(function(p){ return "<option value=\"" + p + "\">"; }).join("") + '</datalist>'
+        : '') +
+      '<div class="dr-note">Длину и время можно поправить прямо на ленте - потянуть за край, как у обычного отрезка.</div>' +
+      '<div class="cr-actions"><button class="chip cr-cancel">Отмена</button><button class="chip cr-submit" aria-pressed="true">Создать</button></div>';
+
+    [].forEach.call(drawer.querySelectorAll(".cr-type"), function(btn){
+      btn.onclick = function(){ kind = btn.dataset.k; render(); };
+    });
+    if (isTrip){
+      [].forEach.call(drawer.querySelector("#crMg").children, function(btn, i){ btn.onclick = function(){ mgIdx = i; render(); }; });
+      [].forEach.call(drawer.querySelector("#crLg").children, function(btn, i){ btn.onclick = function(){ lgIdx = i; render(); }; });
+      drawer.querySelector("#crFrom").oninput = function(ev){ fromVal = ev.target.value; };
+      drawer.querySelector("#crTo").oninput = function(ev){ toVal = ev.target.value; };
+    }
+    drawer.querySelector(".cr-cancel").onclick = closeDrawer;
+    drawer.querySelector(".cr-submit").onclick = function(){
+      var clash = STATE.segs.some(function(x){ return x.v === vi && s < x.s + x.l && x.s < s + l; });
+      if (clash){ S.reject(); toast("Пересечение с другим отрезком - не создал", null); return; }
+      if (kind === "driveroff") pushDriver(v, s, l);
+      else if (kind === "trip") push(v, "trip", s, l, {mg:MANAGERS[mgIdx], lg:logistPool[lgIdx], from:fromVal || PLACES[0], to:toVal || PLACES[1]});
+      else push(v, kind, s, l);
+      STATE.lastEdited = s;
+      closeDrawer();
+      renderRows(); renderKpis();
+      S.drop();
+      toast(isTrip ? "Заявка создана" : "Запись добавлена", null);
+    };
+  }
+  render();
+  drawer.classList.add("open"); drawer.setAttribute("aria-hidden", "false");
+  scrim.classList.add("open");
+}
+function openDrawer(seg){
+  var v = STATE.vehicles[seg.v];
+  var rows = [["Машина", v.type + " · " + v.gos], ["Тягач", v.tractor],
+              ["Прицеп", (v.trailer || "-") + (v.trailerGos ? " · " + v.trailerGos : "")],
+              ["Водитель", v.driver || "нет"], ["График", v.schedule || "-"]];
+  if (seg.kind === "trip"){
+    rows = [["Маршрут", seg.from + " → " + seg.to], ["Менеджер", seg.mg.code + " " + seg.mg.full],
+            ["Логист", seg.lg.code + " " + seg.lg.full],
+            ["Начало", fmt(seg.s)], ["Окончание", fmt(seg.s + seg.l)],
+            ["Длительность", durLabel(seg.l)]].concat(rows);
+  } else {
+    rows = [["Состояние", segLabel(seg)], ["Начало", fmt(seg.s)],
+            ["Окончание", fmt(seg.s + seg.l)], ["Длительность", durLabel(seg.l)]].concat(rows);
+  }
+  drawer.innerHTML = '<div class="dr-eyebrow">' +
+    (seg.kind === "trip" ? "Рейс" : "Состояние машины") + '</div>' +
+    '<div class="dr-title">' + segLabel(seg) + "</div>" +
+    rows.map(function(p){
+      return '<div class="dr-row"><span>' + p[0] + '</span><span class="' +
+        (/Начало|Окончание|Длительность|Машина/.test(p[0]) ? "mono" : "") + '">' + p[1] + "</span></div>";
+    }).join("") +
+    '<div class="dr-note">Паспортные данные водителя для пропуска здесь не показаны намеренно: ' +
+    'они живут в карточке водителя на сервере и отдаются по роли, с записью в журнал. ' +
+    'Это следующий шаг - он же убирает у логиста поток запросов «скинь данные на пропуск».</div>' +
+    '<div class="dr-actions">' +
+    '<button class="chip dr-close" id="drClose">Закрыть</button>' +
+    '<button class="chip dr-del" id="drDel" title="Удалить запись">' + ICON_TRASH + " Удалить</button>" +
+    '</div>';
+  drawer.classList.add("open"); drawer.setAttribute("aria-hidden", "false");
+  scrim.classList.add("open");
+  document.getElementById("drClose").onclick = closeDrawer;
+  document.getElementById("drDel").onclick = function(){ deleteSeg(seg); };
+}
+/* корзина - Влад, 29.08: «где-то должна появляться корзина, куда можно удалить
+   заказ». Кладём в шторку (уже открыта по клику на плитку) + отмена тостом, как
+   у любого другого разрушающего действия на доске. */
+function deleteSeg(seg){
+  var idx = STATE.segs.indexOf(seg);
+  if (idx < 0) return;
+  STATE.segs.splice(idx, 1);
+  STATE.lastEdited = seg.s;
+  closeDrawer();
+  renderRows(); renderKpis();
+  S.del();
+  toast("Запись удалена", function(){
+    STATE.segs.splice(idx, 0, seg);
+    STATE.lastEdited = seg.s;
+    S.undo();
+    renderRows(); renderKpis();
+  });
+}
+function closeDrawer(){
+  drawer.classList.remove("open"); drawer.setAttribute("aria-hidden", "true");
+  scrim.classList.remove("open");
+  var open = rowsEl.querySelector(".seg.is-open");
+  if (open) open.classList.remove("is-open");
+  STATE.openId = null;
+}
+scrim.onclick = closeDrawer;
+window.addEventListener("keydown", function(e){ if (e.key === "Escape") closeDrawer(); });
+function fmt(h){
+  var d = Math.floor(h / 24) + 1, rem = ((h % 24) + 24) % 24;
+  var hh = Math.floor(rem), mm = Math.round((rem - hh) * 60);
+  if (mm === 60){ mm = 0; hh += 1; }
+  return (d > DAYS ? DAYS : d) + "." + (MONTH + 1 < 10 ? "0" : "") + (MONTH + 1) +
+         " " + (hh < 10 ? "0" : "") + hh + ":" + (mm < 10 ? "0" : "") + mm;
+}
+
+/* ---------- тост ---------- */
+var toastEl = document.getElementById("toast"), toastT = 0;
+function toast(text, undoFn){
+  document.getElementById("toastText").textContent = text;
+  var btn = document.getElementById("toastBtn");
+  btn.style.display = undoFn ? "" : "none";
+  btn.onclick = function(){ if (undoFn) undoFn(); hideToast(); };
+  toastEl.classList.add("show");
+  clearTimeout(toastT);
+  toastT = setTimeout(hideToast, 5000);
+}
+function hideToast(){ toastEl.classList.remove("show"); }
+
+/* ---------- управление ---------- */
+document.querySelector(".controls").addEventListener("click", function(e){
+  var b = e.target.closest(".chip");
+  if (!b) return;
+
+  if (b.dataset.solo){                                    /* переключатели сами по себе */
+    if (b === document.getElementById("sndBtn")){
+      soundOn = !soundOn;
+      b.setAttribute("aria-pressed", String(soundOn));
+      b.textContent = soundOn ? "Звук вкл" : "Звук выкл";
+    } else if (b === document.getElementById("hiddenBtn")){
+      STATE.showHidden = !STATE.showHidden;
+      b.setAttribute("aria-pressed", String(STATE.showHidden));
+      renderRows();
+    } else if (b === document.getElementById("themeBtn")){
+      toggleTheme();
+    }
+    return;
+  }
+
+  var grp = b.parentNode;
+  [].forEach.call(grp.querySelectorAll(".chip"), function(x){ x.setAttribute("aria-pressed", "false"); });
+  b.setAttribute("aria-pressed", "true");
+
+  if (b.dataset.zoom){
+    /* Влад, 29.08: «при смене масштаба - попадаешь на блок, который редактировал
+       последним». Если за сессию уже что-то трогали - целимся туда, а не в центр
+       текущей прокрутки; если ещё ничего не редактировали - ведём себя как раньше
+       (остаёмся на том же дне, куда были прокручены). */
+    var oldZoom = STATE.zoom;
+    var h = STATE.lastEdited != null ? STATE.lastEdited
+      : board.scrollLeft / ZOOM[oldZoom] + (board.clientWidth / 2) / ZOOM[oldZoom];
+    STATE.zoom = b.dataset.zoom;
+    saveSettings();
+    renderAll();
+    primeTo(rangeStart(h, STATE.zoom));                    /* прицел к началу нового диапазона */
+  } else if (b.dataset.color){ STATE.color = b.dataset.color; saveSettings(); renderRows(); renderLegend(); }
+  else if (b.dataset.filter){ STATE.filter = b.dataset.filter; saveSettings(); renderRows(); }
+  else if (b.dataset.role){
+    STATE.role = b.dataset.role;
+    if (!canArrange()) STATE.showHidden = false;            /* режим «показать скрытые» - только у роли, что скрывает */
+    document.body.classList.toggle("can-arrange", canArrange());
+    renderRows(); renderLegend(); renderHiddenCount();
+  }
+});
+
+function prefersReduced(){
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+/* живые значения обязаны тикать - ГОСТ, раздел 0 п.6 */
+function tickClock(){
+  var d = new Date(), p = function(n){ return (n < 10 ? "0" : "") + n; };
+  document.getElementById("clock").textContent = p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+}
+setInterval(tickClock, 1000);
+setInterval(function(){
+  var hw = ZOOM[STATE.zoom], x = nowHour() * hw;
+  [].forEach.call(document.querySelectorAll(".now"), function(n){ n.style.left = x + "px"; });
+  var nh = document.getElementById("nowHead"); if (nh) nh.style.left = x + "px";
+  renderKpis();
+  /* прошлое/прогресс пересчитываются тем же минутным тиком (не отдельный таймер);
+     во время жеста не дёргаем DOM - дорисуем следующим тиком */
+  if (!drag && !create && !arr) renderRows();
+}, 60000);
+
+loadTheme();
+loadOrder();
+loadSettings();
+buildVehicles();
+STATE.typeLegend = buildTypeLegend();
+syncControlChips();
+renderAll();
+tickClock();
+/* «Сейчас» ставим в правую треть: в Штатке текущий день заполняют задним числом,
+   и если встать вплотную к «сейчас», экран выглядит пустым не по вине ленты. */
+board.scrollLeft = Math.max(0, (nowHour() - 42) * ZOOM[STATE.zoom]);
+</script>

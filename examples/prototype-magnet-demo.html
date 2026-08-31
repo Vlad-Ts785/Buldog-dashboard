@@ -1,0 +1,431 @@
+<title>Магнит плиток</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&family=Unbounded:wght@500;600&display=swap" rel="stylesheet">
+
+<style>
+/* ============================================================================
+   ТРИ УРОВНЯ одной функции: примагничивание плитки к соседней при перетаскивании
+   и растяжке. Влад, 29.08: «от текущей до средней и супер крутой на эффекты
+   притягивания и перемещения». Баг предыдущей версии (не магнитилась к соседу
+   СПРАВА при перемещении) исправлен во всех трёх - см. moveTargets() в JS.
+   ============================================================================ */
+:root{
+  --bg:#0f0f13; --bg2:#17171d; --bg3:#1e1e26; --bg4:#252530;
+  --border:rgba(255,255,255,0.08); --border-strong:rgba(255,255,255,0.16);
+  --text:#e8e6df; --muted:#8b8980;
+  --green:#1D9E75; --amber:#EF9F27; --blue:#378ADD; --red:#E24B4A;
+  --ease-out-strong:cubic-bezier(0.16,1,0.3,1);
+  --ease-out-soft:cubic-bezier(0.25,1,0.5,1);
+  --ease-overshoot:cubic-bezier(.34,1.45,.5,1);
+  --pxh:40px;
+}
+*{box-sizing:border-box;}
+body{
+  margin:0;background:var(--bg);color:var(--text);
+  font-family:'Golos Text',system-ui,sans-serif;font-size:13px;
+  display:flex;flex-direction:column;align-items:center;padding:36px 20px 60px;
+}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;}
+
+.head{max-width:760px;text-align:center;margin-bottom:8px;}
+h1{font-family:'Unbounded',sans-serif;font-size:19px;font-weight:600;margin:0 0 10px;letter-spacing:-.01em;}
+.head p{font-size:12.5px;color:var(--muted);line-height:1.6;margin:0;}
+.head b{color:var(--text);font-weight:600;}
+
+.zone{max-width:760px;width:100%;margin-top:36px;}
+.zone-head{display:flex;align-items:baseline;gap:12px;margin-bottom:4px;}
+.zone-num{font-family:'JetBrains Mono',monospace;font-size:10.5px;font-weight:700;color:var(--blue);letter-spacing:.08em;}
+.zone-name{font-family:'Unbounded',sans-serif;font-size:15px;font-weight:600;}
+.zone-desc{font-size:11.5px;color:var(--muted);line-height:1.55;margin:4px 0 14px;max-width:660px;}
+
+.stage{position:relative;padding:18px;background:var(--bg2);border:1px solid var(--border);border-radius:14px;}
+
+.hud{
+  position:absolute;top:10px;left:50%;transform:translate(-50%,-6px);z-index:20;
+  width:250px;pointer-events:none;opacity:0;
+  background:var(--bg4);border:1px solid var(--border-strong);border-radius:10px;
+  padding:7px 12px;display:flex;flex-direction:column;align-items:center;gap:2px;
+  box-shadow:0 10px 26px rgba(0,0,0,.45);
+  transition:opacity .12s var(--ease-out-soft),transform .12s var(--ease-out-soft);
+}
+.hud.on{opacity:1;transform:translate(-50%,0);}
+.hud-t{font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:600;line-height:1;}
+.hud-s{font-size:10px;color:var(--muted);}
+.hud-s.snapped{color:var(--amber);}
+
+.track{position:relative;height:76px;margin-top:40px;border-radius:10px;background:var(--bg3);}
+.track::before{
+  content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+  background:repeating-linear-gradient(90deg,var(--border) 0 1px,transparent 1px var(--pxh));
+}
+.hourlbl{position:absolute;top:-18px;font-size:8.5px;color:var(--muted);transform:translateX(-50%);}
+
+.tile{
+  position:absolute;top:12px;height:48px;border-radius:8px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:500;color:var(--text);user-select:none;
+  left:calc(var(--s) * var(--pxh));width:calc(var(--l) * var(--pxh));
+}
+.tile.fixed{background:rgba(139,137,128,.16);color:var(--muted);cursor:default;}
+.tile.free{
+  background:rgba(29,158,117,.30);cursor:grab;touch-action:none;
+  transition:box-shadow .18s var(--ease-out-soft),opacity .14s var(--ease-out-soft);
+}
+.tile.free.lifted{cursor:grabbing;opacity:.85;z-index:50;pointer-events:none;
+  box-shadow:0 2px 6px rgba(0,0,0,.4),0 14px 26px rgba(0,0,0,.5);}
+.tile.free.snapped-ring{box-shadow:inset 0 0 0 1.5px var(--amber);}
+.hnd{position:absolute;top:0;bottom:0;width:8px;cursor:ew-resize;z-index:2;}
+.hnd.l{left:0;} .hnd.r{right:0;}
+
+.ghost{position:absolute;top:12px;height:48px;border-radius:8px;background:rgba(29,158,117,.16);
+  pointer-events:none;opacity:0;z-index:1;}
+
+.magnet{position:absolute;top:4px;bottom:4px;width:2px;background:var(--amber);
+  z-index:5;pointer-events:none;opacity:0;
+  transition:opacity .12s var(--ease-out-soft),transform .12s var(--ease-overshoot);
+  box-shadow:0 0 8px rgba(239,159,39,.5);transform:scaleY(.7);}
+.magnet.on{opacity:.95;transform:scaleY(1);}
+
+@keyframes kiss{
+  0%{opacity:0;transform:scaleY(.35);} 55%{opacity:1;transform:scaleY(1.18);}
+  100%{opacity:0;transform:scaleY(1);}
+}
+.edge-flash{position:absolute;top:4px;bottom:4px;width:3px;background:var(--amber);
+  border-radius:2px;pointer-events:none;opacity:0;z-index:4;}
+.edge-flash.go{animation:kiss .3s var(--ease-out-strong) 1;}
+
+@keyframes spark{
+  0%{opacity:1;transform:translate(0,0) scale(1);}
+  100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(.25);}
+}
+.spark{position:absolute;width:4px;height:4px;border-radius:50%;background:var(--amber);
+  pointer-events:none;animation:spark .42s var(--ease-out-strong) 1 forwards;z-index:6;}
+
+.seam{position:absolute;top:0;height:76px;pointer-events:none;z-index:3;opacity:0;
+  transition:opacity .1s linear;}
+.seam.on{opacity:1;}
+.seam path{fill:none;stroke:var(--amber);stroke-width:1.4;stroke-dasharray:3 3;}
+
+.legend{display:flex;gap:16px;align-items:center;margin-top:14px;font-size:10.5px;color:var(--muted);flex-wrap:wrap;}
+.lg{display:flex;align-items:center;gap:6px;}
+.sw{width:14px;height:8px;border-radius:3px;flex:none;}
+.reset{
+  margin-top:12px;appearance:none;border:1px solid var(--border);background:var(--bg3);color:var(--muted);
+  font-family:inherit;font-size:11px;font-weight:500;padding:6px 14px;border-radius:8px;cursor:pointer;
+  transition:border-color .15s var(--ease-out-soft),color .15s var(--ease-out-soft);
+}
+.reset:hover{color:var(--text);border-color:var(--border-strong);}
+
+@media (prefers-reduced-motion: reduce){
+  *{transition-duration:.001ms !important;animation-duration:.001ms !important;}
+}
+</style>
+
+<div class="head">
+  <h1>Магнит плиток - три уровня</h1>
+  <p>Одна и та же механика (плитка не может налезть на соседа, край сам доезжает
+    вплотную), три степени зрелища. Тяни зелёную <b>«Тяни меня»</b> к любому из двух
+    серых соседей - слева и справа магнитится одинаково.</p>
+</div>
+
+<div id="zones"></div>
+
+<script>
+"use strict";
+var PXH = 40;
+
+var LEVELS = [
+  {n:1, name:"Уровень 1 - как есть", desc:"Янтарная линия у точки примагничивания, один щелчок, плитка доезжает мгновенно. Без движения "+
+    "во время самого полёта - только доскок в момент касания."},
+  {n:2, name:"Уровень 2 - мягче и заметнее", desc:"+ плитка слегка тянется/сжимается по направлению движения (то же ощущение веса, что и в основной ленте, "+
+    "просто виднее); линия примагничивания влетает с лёгким перелётом; в точке стыка - короткая вспышка на ОБОИХ краях "+
+    "(твой и соседний одновременно - видно, что они теперь «слиплись»); звук на терцию богаче."},
+  {n:3, name:"Уровень 3 - супер", desc:"+ искры в точке касания; шов между плитками прошивается пунктиром (stroke-dashoffset, разрешённое ГОСТом свойство "+
+    "для анимации); лёгкий шлейф позади плитки на быстром броске; при защёлкивании - едва заметный отскок (overshoot); "+
+    "звук - короткое трёхнотное арпеджио вместо одной ноты."}
+];
+
+/* ---------- звук: примитив 1:1 из основной ленты ---------- */
+var actx = null;
+function getCtx(){ try{ if(!actx) actx=new (window.AudioContext||window.webkitAudioContext)();
+  if(actx.state==="suspended") actx.resume(); return actx; }catch(e){ return null; } }
+function blip(f0,f1,dur,vol,type,delay){
+  var ctx=getCtx(); if(!ctx) return;
+  try{
+    var t=ctx.currentTime+(delay||0);
+    var osc=ctx.createOscillator(), gain=ctx.createGain();
+    osc.type=type||"sine"; osc.frequency.setValueAtTime(f0,t);
+    if(f1&&f1!==f0) osc.frequency.exponentialRampToValueAtTime(f1,t+dur);
+    gain.gain.setValueAtTime(vol,t); gain.gain.exponentialRampToValueAtTime(.0001,t+dur);
+    osc.connect(gain); gain.connect(ctx.destination); osc.start(t); osc.stop(t+dur+.02);
+  }catch(e){}
+}
+function soundMagnet(level){
+  blip(1750,2400,.026,.05,"sine"); blip(540,720,.032,.022,"triangle");
+  if (level>=2) blip(2600,2600,.02,.028,"sine",.03);
+  if (level>=3){ blip(1400,1400,.028,.04,"sine",.06); blip(1900,1900,.03,.045,"sine",.09); blip(2500,2500,.05,.05,"sine",.12); }
+}
+function soundDrop(level){
+  blip(200,70,.14,.11,"sine"); blip(900,500,.035,.045,"triangle"); blip(140,90,.1,.055,"triangle",.01);
+  if (level>=3) blip(2200,2600,.09,.03,"sine",.1);
+}
+function soundTick(){ blip(2350,2350,.013,.017,"sine"); }
+function soundLift(){ blip(1300,950,.045,.07,"sine"); blip(320,260,.06,.045,"triangle"); }
+function soundReject(){ blip(190,120,.11,.055,"triangle"); }
+
+function roundStep(h){ return Math.round(h*2)/2; }
+function fmt(h){
+  var hh=Math.floor(((h%24)+24)%24), mm=Math.round((h-Math.floor(h))*60);
+  if (mm===60){mm=0;hh=(hh+1)%24;}
+  return (hh<10?"0":"")+hh+":"+(mm<10?"0":"")+mm;
+}
+function prefersReduced(){ return window.matchMedia("(prefers-reduced-motion: reduce)").matches; }
+function snapNearest(raw, targets, thrPx){
+  var thr = thrPx/PXH, best=null, bd=thr;
+  for (var i=0;i<targets.length;i++){ var d=Math.abs(raw-targets[i]); if (d<=bd){ bd=d; best=targets[i]; } }
+  return best;
+}
+
+/* A: [1,6]  B: [10,15] - фиксированные соседи, одинаковые во всех трёх зонах */
+var NEIGH = [{s:1,l:5},{s:10,l:5}];
+function edgeTargets(){                       /* сырые края соседей - корректны для РАСТЯЖКИ напрямую */
+  var t=[]; NEIGH.forEach(function(n){ t.push(n.s); t.push(n.s+n.l); }); return t;
+}
+/* ИСПРАВЛЕНО 29.08: при ПЕРЕМЕЩЕНИИ снимается координата НАЧАЛА плитки, поэтому
+   «конец плитки коснулся начала соседа» требует цели, сдвинутой на минус длину
+   плитки - раньше в списке были только сырые края (start/end соседей напрямую),
+   из-за чего магнит слева срабатывал случайно (плитка А слева, её конец 6 сам по
+   себе валидная цель начала), а справа - никогда (нужная точка 10-l не входила
+   в список ни при какой длине плитки). Теперь оба направления равноправны. */
+function moveTargets(len){
+  var raw = edgeTargets();
+  return raw.concat(raw.map(function(t){ return t - len; }));
+}
+
+function zoneHTML(L){
+  return '<section class="zone" data-level="'+L.n+'">'+
+    '<div class="zone-head"><span class="zone-num mono">УРОВЕНЬ '+L.n+'</span>'+
+    '<span class="zone-name">'+L.name.replace(/^Уровень \d+\s*-\s*/,'')+'</span></div>'+
+    '<div class="zone-desc">'+L.desc+'</div>'+
+    '<div class="stage">'+
+      '<div class="hud"><div class="hud-t mono"></div><div class="hud-s"></div></div>'+
+      '<div class="track">'+
+        (function(){ var h=''; for(var i=0;i<=16;i++) h+='<div class="hourlbl mono" style="left:'+(i*PXH)+'px">'+(i<10?'0':'')+i+':00</div>'; return h; })()+
+        '<div class="ghost"></div>'+
+        '<div class="tile fixed" style="--s:1;--l:5">Рейс А</div>'+
+        '<div class="tile fixed" style="--s:10;--l:5">Рейс Б</div>'+
+        '<div class="tile free" style="--s:7.5;--l:1.5">Тяни меня<span class="hnd l"></span><span class="hnd r"></span></div>'+
+        '<div class="magnet"></div>'+
+        '<div class="edge-flash edge-a"></div><div class="edge-flash edge-b"></div>'+
+        '<svg class="seam"><path d=""/></svg>'+
+      '</div>'+
+    '</div>'+
+    '<div class="legend">'+
+      '<span class="lg"><span class="sw" style="background:rgba(139,137,128,.16)"></span>соседи</span>'+
+      '<span class="lg"><span class="sw" style="background:rgba(29,158,117,.30)"></span>твоя плитка</span>'+
+      '<span class="lg"><span class="sw" style="background:var(--amber)"></span>примагничено</span>'+
+    '</div>'+
+    '<button class="reset">Вернуть на место</button>'+
+  '</section>';
+}
+
+function initZone(root, level){
+  var track = root.querySelector(".track");
+  var tileC = root.querySelector(".tile.free");
+  var ghost = root.querySelector(".ghost");
+  var magnetEl = root.querySelector(".magnet");
+  var edgeA = root.querySelector(".edge-a"), edgeB = root.querySelector(".edge-b");
+  var seam = root.querySelector(".seam"), seamPath = seam.querySelector("path");
+  var hud = root.querySelector(".hud"), hudT = root.querySelector(".hud-t"), hudS = root.querySelector(".hud-s");
+  var C0 = {s:7.5, l:1.5};
+  var seg = {s:C0.s, l:C0.l};
+
+  function draw(){ tileC.style.setProperty("--s", seg.s); tileC.style.setProperty("--l", seg.l); }
+  function showHud(snapped){
+    hudT.textContent = fmt(seg.s) + " → " + fmt(seg.s + seg.l);
+    var h=Math.floor(seg.l), m=Math.round((seg.l-h)*60);
+    hudS.textContent = (m ? h+" ч "+m+" мин" : h+" ч") + (snapped ? " · примагничено" : "");
+    hudS.className = "hud-s" + (snapped ? " snapped" : "");
+    hud.classList.add("on");
+  }
+  function hideHud(){ hud.classList.remove("on"); }
+  function showMagnet(hour){ magnetEl.style.left = (hour*PXH)+"px"; magnetEl.classList.add("on"); }
+  function hideMagnet(){ magnetEl.classList.remove("on"); }
+
+  /* уровень 2+: вспышка на обоих краях-стыка + кольцо на самой плитке */
+  function kissEffect(myEdgeHour, neighborEdgeHour){
+    if (level < 2) return;
+    tileC.classList.add("snapped-ring");
+    edgeA.style.left = (myEdgeHour*PXH-1.5)+"px";
+    edgeA.classList.remove("go"); void edgeA.offsetWidth; edgeA.classList.add("go");
+    edgeB.style.left = (neighborEdgeHour*PXH-1.5)+"px";
+    edgeB.classList.remove("go"); void edgeB.offsetWidth; edgeB.classList.add("go");
+  }
+  function clearKiss(){ tileC.classList.remove("snapped-ring"); }
+
+  /* уровень 3: искры + сшивающий шов */
+  function sparkBurst(hour, midY){
+    if (level < 3 || prefersReduced()) return;
+    for (var i=0;i<4;i++){
+      var s = document.createElement("span");
+      s.className = "spark";
+      var ang = (Math.PI*2*i/4) + Math.random()*.6;
+      s.style.setProperty("--dx", (Math.cos(ang)*14)+"px");
+      s.style.setProperty("--dy", (Math.sin(ang)*10)+"px");
+      s.style.left = (hour*PXH-2)+"px"; s.style.top = (midY-2)+"px";
+      track.appendChild(s);
+      (function(el){ setTimeout(function(){ el.remove(); }, 430); })(s);
+    }
+  }
+  function seamOn(hour){
+    if (level < 3) return;
+    var x = hour*PXH;
+    seamPath.setAttribute("d", "M"+x+" 14 L"+x+" 62");
+    var len = 48;
+    seamPath.style.strokeDasharray = len;
+    seamPath.style.strokeDashoffset = len;
+    seam.style.left = "0px";
+    seam.classList.add("on");
+    requestAnimationFrame(function(){
+      seamPath.style.transition = "stroke-dashoffset .32s " + "var(--ease-out-strong)";
+      seamPath.style.strokeDashoffset = 0;
+    });
+  }
+  function seamOff(){
+    if (level < 3) return;
+    seam.classList.remove("on");
+    seamPath.style.transition = "";
+  }
+
+  var drag = null, raf = 0, lastSnap = null, lastEdge = null, velHist = 0;
+
+  root.querySelector(".track").addEventListener("pointerdown", function(e){
+    var mode = e.target.classList.contains("hnd")
+      ? (e.target.classList.contains("l") ? "resizeL" : "resizeR") : "move";
+    if (e.target !== tileC && !e.target.classList.contains("hnd")) return;
+    e.preventDefault();
+    tileC.setPointerCapture(e.pointerId);
+    tileC.style.transform = "scale(.97)";
+    tileC.style.transition = "transform 100ms var(--ease-out-soft)";
+    drag = {mode:mode, x0:e.clientX, s0:seg.s, l0:seg.l, lifted:false, grabX:0,
+            cur:{x:0}, tgt:{x:0}};
+    lastSnap = null; lastEdge = null; velHist = 0;
+    if (mode !== "move") soundLift();
+  });
+
+  window.addEventListener("pointermove", function(e){
+    if (!drag) return;
+    var dx = e.clientX - drag.x0;
+    if (!drag.lifted && Math.abs(dx) < 4) return;
+
+    if (drag.mode !== "move"){
+      var raw = (drag.mode === "resizeR" ? drag.s0+drag.l0 : drag.s0) + dx/PXH;
+      var sn = snapNearest(raw, edgeTargets(), 14);
+      var val = sn !== null ? sn : roundStep(raw);
+      if (drag.mode === "resizeR") seg.l = Math.max(.5, val - seg.s);
+      else { var ns = Math.max(0, Math.min(val, drag.s0+drag.l0-.5)); seg.s = ns; seg.l = drag.s0+drag.l0-ns; }
+      tileC.style.transition = "none"; tileC.style.transform = ""; draw();
+      var edge = Math.round(val*2)/2;
+      if (lastEdge !== edge){ lastEdge = edge; soundTick(); }
+      if (sn !== null){
+        if (lastSnap!==sn){ lastSnap=sn; soundMagnet(level); kissEffect(val, sn); sparkBurst(sn, 38); seamOn(sn); }
+        showMagnet(sn);
+      } else { if (lastSnap!==null) clearKiss(); lastSnap=null; hideMagnet(); seamOff(); }
+      showHud(sn !== null);
+      drag.lifted = true;
+      return;
+    }
+
+    if (!drag.lifted){
+      var r = tileC.getBoundingClientRect(), tr = track.getBoundingClientRect();
+      drag.grabX = e.clientX - r.left;
+      tileC.classList.add("lifted");
+      tileC.style.transition = "opacity 140ms var(--ease-out-soft)";
+      drag.cur.x = 0; drag.tgt.x = 0;
+      drag.lifted = true; soundLift();
+      if (!prefersReduced()) raf = requestAnimationFrame(function tick(){
+        if (!drag || !drag.lifted || drag.mode!=="move"){ raf=0; return; }
+        var prevX = drag.cur.x;
+        drag.cur.x += (drag.tgt.x - drag.cur.x) * 0.28;
+        var vx = drag.cur.x - prevX;
+        velHist = velHist*0.6 + vx*0.4;
+        var tilt = Math.max(-7, Math.min(7, (drag.tgt.x-drag.cur.x)*0.10));
+        var sx = 1, sy = 1;
+        if (level >= 2){
+          var stretch = Math.max(-.16, Math.min(.16, velHist*0.05));
+          sx = 1 + Math.abs(stretch); sy = 1 - Math.abs(stretch)*0.5;
+        }
+        tileC.style.transform = "translateX("+drag.cur.x+"px) rotate("+tilt+"deg) scale("+(1.03*sx)+","+(1.03*sy)+")";
+        if (level >= 3){
+          var speed = Math.abs(velHist);
+          if (speed > 1.2 && !prefersReduced()){
+            ghost.style.setProperty("--s", seg.s); ghost.style.setProperty("--l", seg.l);
+            ghost.style.left = (drag.cur.x - vx*2) + "px";
+            ghost.style.transform = "translateX("+(seg.s*PXH)+"px)";
+            ghost.style.width = (seg.l*PXH)+"px";
+            ghost.style.left = "0px";
+            ghost.style.transform = "translateX("+(seg.s*PXH + prevX - vx*2)+"px)";
+            ghost.style.opacity = Math.min(.22, speed*0.03);
+          } else { ghost.style.opacity = 0; }
+        }
+        raf = requestAnimationFrame(tick);
+      });
+    }
+    var trRect = track.getBoundingClientRect();
+    var rawS = (e.clientX - drag.grabX - trRect.left) / PXH;
+    var sn2 = snapNearest(rawS, moveTargets(seg.l), 14);
+    var previewS = Math.max(0, Math.min(16-seg.l, sn2 !== null ? sn2 : roundStep(rawS)));
+    var edge2 = Math.round(previewS*2)/2;
+    if (lastEdge !== edge2){ lastEdge = edge2; soundTick(); }
+    if (sn2 !== null){
+      if (lastSnap!==sn2){
+        lastSnap=sn2; soundMagnet(level);
+        var myEdge = (Math.abs(previewS-sn2)<0.01) ? previewS : previewS+seg.l;
+        kissEffect(myEdge, sn2); sparkBurst(sn2, 38); seamOn(sn2);
+      }
+      showMagnet(sn2);
+    } else { if (lastSnap!==null) clearKiss(); lastSnap=null; hideMagnet(); seamOff(); }
+    drag.previewS = previewS;
+    showHud(sn2 !== null);
+    drag.tgt.x = (previewS - drag.s0) * PXH;
+    if (prefersReduced()){ drag.cur.x = drag.tgt.x; tileC.style.transform = "translateX("+drag.cur.x+"px) scale(1.03)"; }
+  });
+
+  window.addEventListener("pointerup", function(){
+    if (!drag) return;
+    var d = drag; drag = null;
+    if (raf){ cancelAnimationFrame(raf); raf = 0; }
+    hideHud(); hideMagnet(); clearKiss(); seamOff(); ghost.style.opacity = 0;
+    tileC.classList.remove("lifted");
+    var wasSnapped = lastSnap !== null;
+    tileC.style.transform = ""; tileC.style.transition = level>=3
+      ? "transform 220ms var(--ease-overshoot)" : "";
+
+    if (d.mode !== "move"){ soundDrop(level); setTimeout(function(){ tileC.style.transition=""; },220); return; }
+    if (!d.lifted){ tileC.style.transition=""; return; }
+
+    var newS = d.previewS != null ? d.previewS : seg.s;
+    var overlapsA = newS < 6 && newS + seg.l > 1;
+    var overlapsB = newS < 15 && newS + seg.l > 10;
+    if (overlapsA || overlapsB){
+      soundReject();
+      tileC.style.boxShadow = "inset 0 0 0 1.5px var(--red)";
+      setTimeout(function(){ tileC.style.boxShadow = ""; }, 400);
+      draw();
+    } else {
+      seg.s = newS; draw(); soundDrop(level);
+    }
+    setTimeout(function(){ tileC.style.transition=""; },220);
+  });
+
+  root.querySelector(".reset").addEventListener("click", function(){
+    seg.s = C0.s; seg.l = C0.l; draw(); clearKiss(); hideMagnet(); seamOff();
+  });
+  draw();
+}
+
+var host = document.getElementById("zones");
+host.innerHTML = LEVELS.map(zoneHTML).join("");
+[].forEach.call(host.querySelectorAll(".zone"), function(root, i){ initZone(root, LEVELS[i].n); });
+</script>

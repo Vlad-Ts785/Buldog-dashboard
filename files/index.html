@@ -1593,7 +1593,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   40%,42%{opacity:.55;text-shadow:0 0 2px var(--blue);}
   70%,71%{opacity:.4;text-shadow:0 0 1px var(--blue);}
 }
-@media(prefers-reduced-motion:reduce){#page-logistics-plan .day-month-tag{animation:none;text-shadow:0 0 6px rgba(55,138,221,.55);}}#page-logistics-plan .hours{position:absolute;left:0;right:0;bottom:0;height:13px;}#page-logistics-plan .hr{position:absolute;bottom:0;font-size:8.5px;color:var(--muted);line-height:1;}#page-logistics-plan:not(.z-day) .hr{display:none;}#page-logistics-plan .rows{position:relative;z-index:1;width:max-content;min-width:100%;}/* Влад, #page-logistics-plan 29.08: «нет разделительной линии, #page-logistics-plan выглядит как незаконченная таблица» -
+@media(prefers-reduced-motion:reduce){#page-logistics-plan .day-month-tag{animation:none;text-shadow:0 0 6px rgba(55,138,221,.55);}}#page-logistics-plan .hours{position:absolute;left:0;right:0;bottom:0;height:13px;}#page-logistics-plan .hr{position:absolute;bottom:0;font-size:8.5px;color:var(--muted);line-height:1;}#page-logistics-plan:not(.z-day):not(.z-3d) .hr{display:none;}#page-logistics-plan .rows{position:relative;z-index:1;width:max-content;min-width:100%;}/* Влад, #page-logistics-plan 29.08: «нет разделительной линии, #page-logistics-plan выглядит как незаконченная таблица» -
    так и было: .grouphead был шириной ТОЛЬКО замороженной колонки (var(--lane-w)), #page-logistics-plan верх/низ-бордер обрывался ровно на её границе, #page-logistics-plan а вся полоса времени справа
    оставалась вообще без черты. Теперь бордер - на ПОЛНОШИРИННОЙ внешней полосе
    (тот же приём max-content/min-width:100%, #page-logistics-plan что и у .row), #page-logistics-plan текст-ярлык - на
@@ -1682,7 +1682,18 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   background:var(--bg4);border:1px solid var(--border);color:var(--muted);
   display:none;align-items:center;justify-content:center;cursor:pointer;
   transition:color .12s ease-out,border-color .12s ease-out;
-}#page-logistics-plan body.can-arrange .row:hover .hide-btn{display:flex;}#page-logistics-plan .hide-btn:hover{color:var(--text);border-color:var(--border-strong);}#page-logistics-plan .hide-btn svg{width:11px;height:11px;}#page-logistics-plan .row.is-hidden .rowhead{opacity:.5;}#page-logistics-plan .track{position:relative;flex:none;height:var(--row-h);}/* Вертикальная сетка часов - Влад, 30.08: "у нас в планировке это всегда была
+}#page-logistics-plan body.can-arrange .row:hover .hide-btn{display:flex;}#page-logistics-plan .hide-btn:hover{color:var(--text);border-color:var(--border-strong);}#page-logistics-plan .hide-btn svg{width:11px;height:11px;}
+/* Копировать данные машины (Влад, 31.08, со слов логистов: "тягач модель
+   госномер, прицеп госномер с типом, водитель с телефоном") - та же плашка,
+   что hide-btn, но БЕЗ can-arrange гейта (это не редактирование, а чтение -
+   доступно всем ролям, кто вообще видит Планировку, включая менеджера) и
+   левее по X, чтобы не перекрываться с ней. */
+#page-logistics-plan .copy-btn{
+  position:absolute;right:30px;top:8px;width:18px;height:18px;border-radius:5px;
+  background:var(--bg4);border:1px solid var(--border);color:var(--muted);
+  display:none;align-items:center;justify-content:center;cursor:pointer;
+  transition:color .12s ease-out,border-color .12s ease-out;
+}#page-logistics-plan .row:hover .copy-btn{display:flex;}#page-logistics-plan .copy-btn:hover{color:var(--text);border-color:var(--border-strong);}#page-logistics-plan .copy-btn svg{width:11px;height:11px;}#page-logistics-plan .row.is-hidden .rowhead{opacity:.5;}#page-logistics-plan .track{position:relative;flex:none;height:var(--row-h);}/* Вертикальная сетка часов - Влад, 30.08: "у нас в планировке это всегда была
    сетка, а тут просто горизонтальные линии... добавь вертикальные на все
    масштабы в зависимости от логики: на самом крупном (сутки) - каждый час".
    Базовое правило (действует на Неделе/Месяце, где часовая сетка слилась бы
@@ -18768,6 +18779,21 @@ function buildRoster(){
       rows = buildMyPageRoster_(D.orders.roster_managers || D.orders.by_manager, D.orders.roster_logists || D.orders.by_logist) || [];
     }
   }catch(e){}
+  /* НАЙДЕННЫЙ БАГ (31.08, Влад живьём в офисе с логистами: "у Кана не все менеджеры и
+     почему-то он сам как логист, и Рыщанов"; следом - "у Васина оказывается тоже такая
+     проблема"). Первая часть (не все менеджеры/логисты) - серверный баг, roster_managers/
+     roster_logists лежали СНАРУЖИ orders, не внутри (см. buildLogistView_ в
+     full_script_final.js, починено там же) - фронтенд тихо получал undefined и откатывался
+     на urezannyi by_manager/by_logist (только своя строка). Вторая часть - отдельная,
+     остаётся и после серверного фикса: Рыщанов - руководитель отдела логистики, НЕ
+     диспетчер (у него НИКОГДА не бывает реальных заказов с mgr_l="Рыщанов" в 1С -
+     постоянная особенность роли, не "пока нет", см. isRyschanowLogistName_). Он в
+     ALWAYS_PREVIEW_ROSTER_ намеренно (нужен как выбираемый человек для "Личной
+     страницы"/"Смотреть как сотрудник"), но поле "Логист" здесь - другой смысл (кто
+     реально везёт рейс), его сюда подмешивать не нужно - убираем точечно, не трогая
+     buildMyPageRoster_ целиком (Ратников там нужен - реальный менеджер, заказов пока
+     физически нет, тот же принцип должен работать и для Планировки). */
+  rows = rows.filter(function(r){ return (r.name || "").trim().split(" ")[0].toLowerCase() !== "рыщанов"; });
   var mgrs = [], tral = [], long = [], seen = {};
   rows.forEach(function(r){
     var full = (r.name || "").trim();
@@ -18969,6 +18995,10 @@ function lpApplyFleetDriverStatus_(v){
   v.vacant = !assign;
   v.driver = assign ? lpFleetPersonName_(assign.resource_key) : "";
   v.drivers = v.driver ? [v.driver] : [];
+  /* Телефон - только для "Копировать данные" (см. lpCopyText_), сам resource_key
+     нужен ЗДЕСЬ отдельно от v.driver (имени), т.к. по одному имени телефон не
+     найти обратно - в FLEET_PEOPLE_ ключ поиска именно id/resource_key. */
+  v.driverResourceKey = assign ? assign.resource_key : null;
 }
 /* случайный суффикс СЕССИИ в id записи - записи теперь общие через сервер, и два
    логиста с одинаковым счётчиком seq выдали бы один id (и молча перезаписали бы
@@ -19311,8 +19341,27 @@ function renderScale(){
     var w = dt.getDay(), cls = "day" + ((w === 0 || w === 6) ? " weekend" : "") +
       (d === TODAY_D_ ? " today" : "") + (isNextMonth ? " day-next-month" : "");
     var hrs = "";
+    /* Влад, 31.08, со слов логистов: "на масштабе 3 дня тоже нужна шкала
+       времени, новых вертикальных линий не нужно, время нарезать по текущей
+       разметке" - на "3 дня" вертикальная сетка часов УЖЕ есть (CSS,
+       .z-3d .track::before - минорная линия каждые var(--hw)*3, то есть
+       каждые 3 часа), просто не было подписей рядом с ней. Шаг подписи здесь
+       (3) сознательно повторяет ТОТ ЖЕ шаг, что уже рисует CSS-сетка - если
+       он там когда-то изменится, поменять надо в обоих местах (JS и CSS
+       рядом, .z-3d .track::before, оставил на него ссылку). */
     if (STATE.zoom === "day"){
       for (var h = 0; h < 24; h += 2){
+        hrs += '<span class="hr mono" style="left:' + (h * hw + 3) + 'px">' + (h < 10 ? "0" + h : h) + '</span>';
+      }
+    } else if (STATE.zoom === "2d"){
+      /* тот же принцип, что у 3d ниже (шаг подписи = шаг CSS-сетки, см. .z-2d
+         .track::before) - раз логисты попросили эту шкалу для 3д, для 2д
+         (31.08, добавлен тем же днём) она нужна по той же причине. */
+      for (var h = 0; h < 24; h += 2){
+        hrs += '<span class="hr mono" style="left:' + (h * hw + 3) + 'px">' + (h < 10 ? "0" + h : h) + '</span>';
+      }
+    } else if (STATE.zoom === "3d"){
+      for (var h = 0; h < 24; h += 3){
         hrs += '<span class="hr mono" style="left:' + (h * hw + 3) + 'px">' + (h < 10 ? "0" + h : h) + '</span>';
       }
     }
@@ -19405,6 +19454,7 @@ function renderRows(){
         (v.trailer && v.trailerGos ? '<span class="sep">·</span><span class="kind">' + v.trailer + '</span>' : '') +
         '<span class="sep">·</span><span class="drv' + (v.vacant ? " nd" : "") + '">' + drv + '</span>' +
         (rside ? '<span class="rside">' + rside + '</span>' : '') + '</div>' +
+        '<span class="copy-btn" data-copy="' + v.i + '" title="Скопировать тягач/прицеп/водителя">' + ICON_COPY + '</span>' +
         '<span class="hide-btn" data-hide="' + v.i + '" title="' +
         (STATE.hidden[v.i] ? "Показать машину" : "Скрыть машину") + '">' +
         (STATE.hidden[v.i] ? ICON_EYE : ICON_EYE_OFF) + '</span>';
@@ -19425,7 +19475,7 @@ function renderRows(){
         if (vb.l > 0){
           var vbEl = document.createElement("div");
           vbEl.className = "track-vacant";
-          vbEl.title = "Вакант (нет закреплённого водителя) - до конца месяца";
+          vbEl.title = "Вакант (нет закреплённого водителя) - пока не посадим водителя";
           vbEl.style.left = (vb.s * hw) + "px";
           vbEl.style.width = (vb.l * hw) + "px";
           track.appendChild(vbEl);
@@ -19558,9 +19608,23 @@ function syncAllBlinks_(){
    человек, уволился... полоска до того момента, пока не посадим водителя".
    Старт = конец САМОЙ ПОЗДНЕЙ реальной записи этой машины в текущем месяце
    (любого kind - трактуем "заявка" широко, не только рейс), а если записей
-   вообще нет - с начала месяца (0). Конец по-прежнему конец месяца - "пока
-   не посадим водителя" на практике ограничен тем же горизонтом, что и вся
-   остальная лента (следующий месяц ещё не подключён, см. monthArrowClick). */
+   вообще нет - с начала месяца (0).
+
+   НАЙДЕННЫЙ БАГ (Влад, 31.08, "сегодня 31 число, на сентябрь уже должно быть
+   видно" - вакантная машина в августе не показывала полосу дальше 31.08,
+   хотя лента визуально продолжается в сентябрь): конец полосы был жёстко
+   DAYS_EPOCH_MONTH_*24 (конец МЕСЯЦА ЭПОХИ, т.е. всегда конец августа) -
+   комментарий "следующий месяц ещё не подключён" был верен на 30.08, но
+   устарел уже 29.08 тем же днём, когда лента стала честно ОДНОЙ непрерывной
+   шкалой на два месяца вперёд (см. DAYS/HOURS выше и monthArrowClick -
+   "дальше не подключено" там значит третий месяц и позже, не сентябрь).
+   Бизнес-правило Влада (дословно, 31.08): "вакант установлен до конца
+   месяца, если к концу месяца сохраняется - автоматом продлевается до
+   следующего". Раз данные УЖЕ одна непрерывная лента на всю HOURS, для
+   ЭТОГО правила "продление" не отдельное действие - полоса просто не должна
+   упираться в границу августа, а тянуться до конца того же горизонта, что и
+   вся остальная лента (HOURS) - тогда 31.08 в сентябрьской части уже видно
+   само собой, без ручного "продлить". */
 function vacantBandRange_(v){
   /* НАЙДЕННЫЙ БАГ (Влад, 30.08, на живой "613" - вакант + ремонт до 06.09,
      полосатость не появлялась): "последняя запись" считалась по ЛЮБОМУ kind,
@@ -19576,7 +19640,7 @@ function vacantBandRange_(v){
     var end = s.s + s.l;
     if (end > lastEnd) lastEnd = end;
   });
-  var start = Math.max(0, lastEnd), end = DAYS_EPOCH_MONTH_ * 24;
+  var start = Math.max(0, lastEnd), end = HOURS;
   return {s: start, l: Math.max(0, end - start)};
 }
 /* «Единственный момент, когда два статуса могут накладываться» (Влад, 30.08) -
@@ -19934,6 +19998,40 @@ rowsEl.addEventListener("click", function(e){
   saveOrder();
   S.nav();
   renderRows(); renderHiddenCount();
+});
+
+/* ---------- копировать тягач/прицеп/водителя (Влад, 31.08, со слов
+   логистов: "тягач модель госномер, прицеп госномер с типом и водитель с
+   телефоном") - чистое чтение, БЕЗ гейта по роли (в отличие от hide-btn
+   выше) - доступно и логисту, и менеджеру, и админу одинаково. ---------- */
+function lpCopyText_(v){
+  var lines = [];
+  lines.push("Тягач: " + (v.tractor ? v.tractor + " " : "") + v.gos);
+  lines.push(v.trailerGos || v.trailer
+    ? "Прицеп: " + [v.trailerGos, v.trailer].filter(Boolean).join(", ")
+    : "Прицеп: без прицепа");
+  if (v.vacant || !v.driver){
+    lines.push("Водитель: вакант");
+  } else {
+    var phone = lpFleetPersonPhone_(v.driverResourceKey);
+    lines.push("Водитель: " + v.driver + (phone ? ", " + phone : ""));
+  }
+  return lines.join("\n");
+}
+rowsEl.addEventListener("click", function(e){
+  var btn = e.target.closest(".copy-btn");
+  if (!btn) return;
+  var vi = parseInt(btn.dataset.copy, 10);
+  var v = STATE.vehicles[vi];
+  if (!v) return;
+  var text = lpCopyText_(v);
+  if (!navigator.clipboard || !navigator.clipboard.writeText){
+    toast("Браузер не поддерживает копирование", null);
+    return;
+  }
+  navigator.clipboard.writeText(text)
+    .then(function(){ toast("Скопировано", null); })
+    .catch(function(){ toast("Не удалось скопировать", null); });
 });
 
 /* ---------- свернуть/развернуть группу (Тралы / Длинномеры) ---------- */
@@ -21266,6 +21364,15 @@ function lpFleetOpenOnTractor_(kind, tractorGos, slot){
 function lpFleetPersonName_(id){
   var p = (FLEET_PEOPLE_ || []).filter(function(x){ return String(x.id) === String(id); })[0];
   return p ? p.full_name : String(id);
+}
+/* Телефон - только для "Копировать данные" (lpCopyText_). /sprav/state для роли
+   логист/менеджер отдаёт урезанный набор полей (31.08, см. api/server.js на
+   VPS) - phone туда добавлен точечно, ровно под эту задачу, остальные ПДн
+   (ИНН/СНИЛС/дата рождения/адрес/номер прав) по-прежнему не идут дальше
+   admin - см. DEPLOY_LOG.md. */
+function lpFleetPersonPhone_(id){
+  var p = (FLEET_PEOPLE_ || []).filter(function(x){ return String(x.id) === String(id); })[0];
+  return (p && p.phone) ? p.phone : "";
 }
 function lpFleetAssetLabel_(id){
   var a = (FLEET_ASSETS_ || []).filter(function(x){ return String(x.id) === String(id); })[0];

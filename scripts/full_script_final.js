@@ -4394,6 +4394,21 @@ function buildLogistView_(orders, logistName, ss, period) {
     // менеджеров, ни что-либо за пределами наёмного парка сюда не попадает.
     by_hired_supplier: orders.by_hired_supplier || [],
     all_hired_deals:   orders.all_hired_deals || [],
+    // НАЙДЕННЫЙ БАГ (31.08, Влад живьём: "у Кана не все менеджеры и он сам как логист, и
+    // Рыщанов" - то же самое у Васина). Пикер "Менеджер"/"Логист" в шторке Планировки читает
+    // D.orders.roster_managers/roster_logists (фронтенд, buildRoster()) - ЭТИ ДВА ПОЛЯ РАНЬШЕ
+    // ЛЕЖАЛИ СНАРУЖИ, рядом с orders (см. ниже, было return{...orders:ordersOut,roster_managers:...}),
+    // а не ВНУТРИ него - D.orders.roster_managers был всегда undefined для роли "логист",
+    // фронтенд тихо откатывался на D.orders.by_manager, которого у логиста в ordersOut вообще
+    // НЕТ (только by_logist), и на D.orders.by_logist - урезанный ДО СВОЕЙ СТРОКИ (myLogistRow
+    // выше, приватность). Реальных имён не оставалось почти совсем - показывались только
+    // ALWAYS_PREVIEW_ROSTER_ заглушки с фронтенда (Ратников/Рыщанов - те были добавлены для
+    // другого экрана, "Смотреть как сотрудник", не для этого пикера). buildManagerView_ выше
+    // кладёт эти же два поля ПРАВИЛЬНО, внутри result.orders - здесь просто повторяем тот же
+    // паттерн. orders.by_manager/by_logist ниже - ПОЛНЫЙ company-wide параметр функции (ДО
+    // урезания в myLogistRow), не ordersOut - иначе получили бы тот же баг заново.
+    roster_managers: buildNameOnlyRoster_(orders.by_manager),
+    roster_logists:  buildNameOnlyRoster_(orders.by_logist),
   };
   if (ss && isVasinName_(logistName)) {
     ordersOut.long_haul = buildLongHaulBundle_(ss, orders, period || null);
@@ -4427,12 +4442,6 @@ function buildLogistView_(orders, logistName, ss, period) {
     // type/marka/gos/trailer/status/driver, а проценты плана у строк без plan просто
     // не отрисуются - это осознанно, не недоделка).
     vehicles: ss ? buildLogistParkFromStaff_(ss) : [],
-    // Пикер "Менеджер"/"Логист" в шторке создания рейса Планировки (buildRoster() на
-    // фронтенде читает orders.roster_managers/roster_logists В ПРИОРИТЕТЕ, если они есть,
-    // иначе - обычные by_manager/by_logist, как у admin) - ТОЛЬКО имена, ни одной цифры
-    // выручки другого сотрудника наружу не идёт.
-    roster_managers: buildNameOnlyRoster_(orders.by_manager),
-    roster_logists:  buildNameOnlyRoster_(orders.by_logist),
   };
 }
 // Только .name из массива по_manager/by_logist - ни оборота, ни количества заказов

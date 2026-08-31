@@ -2038,28 +2038,26 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
    (та остаётся inline-стилем с более высоким приоритетом) - тот же приём, что
    .ring/.hov: отдельный слой поверх, а не борьба с инлайн-цветом. Работает в
    любом режиме раскраски (Состояние/Менеджер/Логист), не только "Состояние".
-   Влад, 31.08 (пятый заход, живой пример - "Ремонт до 04.09" целиком тонул в
-   полоску и склеенный текст, хотя реально без водителя машина была только
-   ЧАСТЬ этого срока): "нужно, чтобы вот сам этот кусок, где идёт пересечение,
-   отображался [полосато]" - НЕ вся плитка ремонта. Раньше .seg-vacant-stripe
-   растягивался на весь `.seg` (inset:0) - теперь `.seg-overlap-badge` занимает
-   только ГЕОМЕТРИЧЕСКОЕ пересечение (см. lpRepairOverlapRange_ в JS), позиция/
-   ширина - % от родного `.seg`. Плавающий "бейдж" с собственным скруглением и
-   тенью, визуально отдельный кусок внутри более длинной плитки - не просто
-   смена заливки на всю ширину. */
+   Влад, 31.08 (седьмой заход, живой пример - "жёсткое недопонимание", прислал
+   скрин): "клонировать принцип вакант + ремонт на без водителя + ремонт... в
+   моменте пересечения этот кусок должен отражаться КАК вакант + ремонт". Не
+   изобретаем новый вид - буквально копируем визуальный язык `.track-vacant`
+   (пунктирная граница сверху/снизу, тот же серый rgba(139,137,128)) +
+   полупрозрачную штриховку ПРЯМО на заливке ремонта (transparent-промежутки -
+   это НЕ отдельный красный слой, это родная заливка ремонта, видна сквозь).
+   Никакого скругления/тени "бейджа" - раньше пробовали плавающий элемент со
+   своим фоном и тенью, это была ОШИБКА (см. git-историю 31.08) - выглядело
+   чужеродно и не похоже на уже одобренный `.track-vacant`. Confined к
+   ГЕОМЕТРИЧЕСКОМУ пересечению (lpRepairOverlapRange_ в JS, % от родного
+   `.seg`) - НЕ вся плитка ремонта целиком, только кусок, где реально нет
+   водителя. */
 #page-logistics-plan .seg-overlap-badge{
-  position:absolute;top:0;bottom:0;border-radius:6px;overflow:hidden;z-index:2;
-  display:flex;align-items:center;pointer-events:none;
-  box-shadow:0 0 0 1px rgba(0,0,0,.35),0 2px 5px rgba(0,0,0,.35);
-}
-/* Влад, 31.08 (шестой заход, по присланному скрину): серая полоса шире и
-   плотнее красной, не поровну - 26px серой (плотность .55, было .4) на 14px
-   прозрачной (даёт красный из фона плитки). */
-#page-logistics-plan .seg-overlap-stripe{
-  position:absolute;inset:0;pointer-events:none;
+  position:absolute;top:0;bottom:0;pointer-events:none;z-index:2;
+  display:flex;align-items:center;
+  border-top:1px dashed rgba(139,137,128,.4);border-bottom:1px dashed rgba(139,137,128,.4);
   background-image:repeating-linear-gradient(45deg,
-    rgba(139,137,128,.55) 0 13px, rgba(139,137,128,.55) 13px 26px,
-    transparent 26px 33px, transparent 33px 40px);
+    rgba(139,137,128,.4) 0 10px, rgba(139,137,128,.4) 10px 20px,
+    transparent 20px 30px, transparent 30px 40px);
 }
 #page-logistics-plan .seg-overlap-txt{
   position:relative;z-index:1;padding:0 8px;white-space:nowrap;overflow:hidden;
@@ -20436,7 +20434,7 @@ function makeSeg(s){
     var leftPct = (overlapRange.s - s.s) / s.l * 100;
     var widthPct = overlapRange.l / s.l * 100;
     badgeHtml = '<span class="seg-overlap-badge" style="left:' + leftPct + '%;width:' + widthPct + '%" title="Ремонт идёт одновременно с отсутствием водителя (вакансия или заявка «Без водителя»)">' +
-      '<span class="seg-overlap-stripe"></span><span class="seg-overlap-txt">' + badgeTxt + '</span></span>';
+      '<span class="seg-overlap-txt">' + badgeTxt + '</span></span>';
   }
   el.innerHTML = '<span class="seg-label">' + head +
     '<span class="seg-txt">' + segTxt + "</span>" +

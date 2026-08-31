@@ -1743,6 +1743,11 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
 }
 #page-logistics-plan .lp-m-chip-free.active{background:rgba(29,158,117,.28);}
 #page-logistics-plan .lp-m-chip-free i{width:6px;height:6px;border-radius:50%;background:var(--green);flex:none;}
+#page-logistics-plan .lp-m-filter-badge{
+  display:inline-flex;align-items:center;gap:4px;background:rgba(239,159,39,.14);color:var(--amber);
+  border:1px solid rgba(239,159,39,.32);font-size:11px;font-weight:600;padding:5px 8px;border-radius:20px;
+  cursor:pointer;white-space:nowrap;
+}
 #page-logistics-plan .lp-m-daystrip{flex:none;display:flex;gap:6px;padding:0 14px 10px;}
 #page-logistics-plan .lp-m-daystrip .d{flex:1 1 0;text-align:center;padding:6px 0 5px;border-radius:8px;cursor:pointer;}
 #page-logistics-plan .lp-m-daystrip .d .n{font-size:13px;font-weight:700;font-family:'JetBrains Mono',monospace;}
@@ -2852,6 +2857,13 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   <div class="lp-m-top">
     <div class="lp-m-date"><span class="lp-m-wd" id="lpMWd"></span><span class="mono" id="lpMDate"></span></div>
     <div class="lp-m-spacer"></div>
+    <!-- Влад, 31.08: "вижу только длинномеры" - на деле не баг, а STATE.filter
+         с десктопа, залипший в localStorage (yard.plan.settings) - панель
+         фильтров, где его видно/можно снять, на мобильном спрятана вместе со
+         всей .controls. Без этого чипа сбросить фильтр с телефона было
+         НЕОТКУДА - см. lpMRenderFilterBadge_. Виден только когда фильтр НЕ
+         "все", тап сбрасывает. -->
+    <div class="lp-m-filter-badge" id="lpMFilterBadge" style="display:none" title="Тронуть - сбросить фильтр">Фильтр: <span id="lpMFilterBadgeText"></span> ✕</div>
     <div class="lp-m-chip-free" id="lpMChipFree"><i></i><span id="lpMFreeCount">0</span> свободно</div>
   </div>
   <!-- Переключатель Список/Таблица (Влад, 31.08: "сделаем два варианта...
@@ -19740,8 +19752,16 @@ function lpMRenderDaystrip_(){
   }
   document.getElementById("lpMDaystrip").innerHTML = html;
 }
+var LP_M_FILTER_LABELS_ = {tral:"Тралы", long:"Длинномеры", razd:"Раздвижки", koryto:"Корыта", rapid:"Рапиды", faymon:"Файмоны", free:"Свободные сейчас"};
+function lpMRenderFilterBadge_(){
+  var badge = document.getElementById("lpMFilterBadge");
+  if (STATE.filter === "all"){ badge.style.display = "none"; return; }
+  badge.style.display = "inline-flex";
+  document.getElementById("lpMFilterBadgeText").textContent = LP_M_FILTER_LABELS_[STATE.filter] || STATE.filter;
+}
 function lpMRenderList_(){
   if (!pageRoot.classList.contains("lp-mobile")) return;
+  lpMRenderFilterBadge_();   /* виден и полезен в обоих моб. подрежимах (Список/Таблица) - шапка общая */
   lpMRenderTop_();
   lpMRenderDaystrip_();
   var dayIdx = TODAY_D_ + lpMDayOffset_;
@@ -19872,6 +19892,17 @@ document.getElementById("lpMChipFree").onclick = function(){
   lpMFilterFree_ = !lpMFilterFree_;
   document.getElementById("lpMChipFree").classList.toggle("active", lpMFilterFree_);
   lpMRenderList_();
+};
+/* Тап по бейджу фильтра - сброс на "Все", тот же путь, что у десктопного чипа
+   (.controls, delegated-обработчик ниже: STATE.filter = ...; saveSettings();
+   renderRows();) - синхронизируем и десктопные chip'ы (syncControlChips), раз
+   пользователь вернётся на десктоп той же сессией, там должно быть видно то
+   же "Все", а не расхождение. */
+document.getElementById("lpMFilterBadge").onclick = function(){
+  STATE.filter = "all";
+  saveSettings();
+  syncControlChips();
+  renderRows();
 };
 /* Список <-> Таблица - см. большой разбор у HTML/CSS выше (.lp-mode-table).
    При входе в Таблицу - board.scrollLeft к "сейчас" заново: .board-wrap лежал
@@ -22135,6 +22166,19 @@ function initLP(){
      ожидается для этого сценария, переоткрытие вкладки подхватит новое
      состояние. */
   pageRoot.classList.toggle("lp-mobile", lpIsMobileViewport_());
+  /* НАЙДЕННЫЙ БАГ (31.08, живой пример Влада на мобильной "Таблице": "если
+     длинномеры сворачиваю - пропадает вообще планировка... эта проблема уже
+     была сегодня описана" - та же история, что у Миши днём раньше). Корень:
+     STATE.collapsed НЕ сбрасывался здесь (в отличие от vehicles/segs ниже) -
+     он живёт в объекте STATE верхнего уровня, который создаётся ОДИН раз на
+     всю загрузку страницы, а initLP() вызывается заново при КАЖДОМ открытии
+     вкладки (см. большой разбор у push()/STATE.seq чуть ниже - тот же класс
+     ситуации). Свернул группу, ушёл с вкладки, вернулся - она всё ещё
+     свёрнута; свернул ОБЕ - лента пуста, и ничто, кроме ПОЛНОЙ перезагрузки
+     страницы (не просто смены вкладки), это не чинит - reload заново создаёт
+     STATE.collapsed=={}, а обычное открытие вкладки - нет. Сбрасываем здесь,
+     тем же принципом "пересобираем начисто", что уже применён к vehicles/segs. */
+  STATE.collapsed = {};
   STATE.vehicles = [];
   STATE.segs = [];
   /* STATE.seq НЕ трогаем здесь - см. развёрнутый разбор у push() (Влад, 30.08,

@@ -7555,6 +7555,10 @@ function renderMyPageCommercialHead_(el, current, selectorHtml, d) {
   html += '</div>';
 
   el.innerHTML = html;
+  // Карточка "Поступления по компании сегодня" существует в DOM только когда
+  // headTab==='receipts' - в остальных вкладках renderMgrBankLive_ тихо no-op'ится (карточка
+  // не найдена), тот же приём, что у renderMyPageManager.
+  renderMgrBankLive_();
 }
 
 // Заказчики группы (Влад, 29.08: «кто сколько, какой заказчик у какого менеджера принёс
@@ -7804,6 +7808,24 @@ function renderCommercialHeadReceiptsBlock_(cfg) {
   var fmt = pageFr_;
 
   var html = '<div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">';
+  // Живая карточка "Поступления по компании сегодня" - та же самая (id'ы/renderMgrBankLive_),
+  // что уже есть у обычного менеджера (renderMyPageManager, Фаза 4 плана банковского фида).
+  // Не было здесь изначально - страница руководителя группы построена 2026-08-26, ДО того как
+  // появился банковский фид (2026-08-28/29). Обнаружено 2026-08-31 (Влад проверял поступления
+  // Гусейновой, не увидел свежую оплату "Ростехстрой" - она уже пришла по банку, но 1С её ещё
+  // не подтвердила, а этой карточки на странице руководителя не было вообще). Company-wide/
+  // неотфильтрованная - тот же принцип, что и у менеджера ("все менеджеры видят все
+  // поступления, где можем идентифицировать - фамилия, имя менеджера", Влад 29.08), не
+  // team-scoped - это тот же самый общий "сегодняшний" слой для всех.
+  html += '<div class="card" id="mgr-bank-today-card" style="margin-bottom:16px">'+
+    '<div class="sec-header"><div>'+
+      '<div class="sec-title">Поступления по компании — сегодня</div>'+
+      '<div class="sec-sub">Живьём из банка · видно всем менеджерам · без списаний</div>'+
+    '</div></div>'+
+    '<div class="kpi-label">Сегодня (вся компания)</div>'+
+    '<div class="kpi-value" id="mgr-bank-today-val">—</div>'+
+    '<div id="mgr-bank-feed" style="margin-top:10px"></div>'+
+  '</div>';
   html += '<div class="tab-bar" style="margin-bottom:14px;border-bottom:none;padding-bottom:0;gap:4px">'+
     '<button class="tab-btn'+(chReceiptsPeriod==='by_manager'?' active':'')+'" onclick="setChReceiptsPeriod(\'by_manager\')">По менеджерам</button>'+
     '<button class="tab-btn'+(chReceiptsPeriod==='yesterday'?' active':'')+'" onclick="setChReceiptsPeriod(\'yesterday\')">Вчера</button>'+

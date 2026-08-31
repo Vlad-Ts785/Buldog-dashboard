@@ -1435,8 +1435,22 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
      `height:100vh`, независимая от того, ограничен ли предок: общая шапка
      дашборда (`.page-header`) для этой вкладки скрыта (см. PAGE_TITLES -
      пустой titleText, тот же приём, что у `my-page`) - счfar выше вкладки нет,
-     ничего выше вкладки нет, 100vh совпадает с окном без вычитания отступов. */
+     ничего выше вкладки нет, 100vh совпадает с окном без вычитания отступов.
+
+     НАЙДЕННЫЙ БАГ (31.08, живой пример - Влад на телефоне: кнопки "Список/
+     Таблица" и масштаб оказались внизу экрана, под адресной строкой браузера,
+     хотя в разметке они ПЕРВЫЕ, до самой ленты). 100vh на мобильном браузере -
+     классическая ловушка: считается по МАКСИМАЛЬНОЙ высоте экрана, как будто
+     адресная строка уже скрылась - при первой отрисовке (строка ещё видна)
+     это БОЛЬШЕ, чем реально видимая область, поэтому низ страницы (там, где
+     .board должен был получить свой внутренний скролл) вылезал за пределы
+     экрана - ехать приходилось уже ВСЕЙ странице целиком, утаскивая мою
+     мини-шапку вниз вместе с остальным. 100dvh - актуальная ("динамическая")
+     видимая высота, пересчитывается сама при показе/скрытии адресной строки -
+     старые браузеры её не знают и тихо используют строку выше (100vh) как
+     фолбэк, ничего не ломается. */
   height:100vh;
+  height:100dvh;
   display:flex; flex-direction:column; flex:1; min-height:0; min-width:0;
   background:var(--bg); color:var(--text);
   font-family:'Golos Text',system-ui,-apple-system,'Segoe UI',sans-serif;
@@ -1593,7 +1607,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   40%,42%{opacity:.55;text-shadow:0 0 2px var(--blue);}
   70%,71%{opacity:.4;text-shadow:0 0 1px var(--blue);}
 }
-@media(prefers-reduced-motion:reduce){#page-logistics-plan .day-month-tag{animation:none;text-shadow:0 0 6px rgba(55,138,221,.55);}}#page-logistics-plan .hours{position:absolute;left:0;right:0;bottom:0;height:13px;}#page-logistics-plan .hr{position:absolute;bottom:0;font-size:8.5px;color:var(--muted);line-height:1;}#page-logistics-plan:not(.z-day):not(.z-3d) .hr{display:none;}#page-logistics-plan .rows{position:relative;z-index:1;width:max-content;min-width:100%;}/* Влад, #page-logistics-plan 29.08: «нет разделительной линии, #page-logistics-plan выглядит как незаконченная таблица» -
+@media(prefers-reduced-motion:reduce){#page-logistics-plan .day-month-tag{animation:none;text-shadow:0 0 6px rgba(55,138,221,.55);}}#page-logistics-plan .hours{position:absolute;left:0;right:0;bottom:0;height:13px;}#page-logistics-plan .hr{position:absolute;bottom:0;font-size:8.5px;color:var(--muted);line-height:1;}#page-logistics-plan:not(.z-day):not(.z-2d):not(.z-3d) .hr{display:none;}#page-logistics-plan .rows{position:relative;z-index:1;width:max-content;min-width:100%;}/* Влад, #page-logistics-plan 29.08: «нет разделительной линии, #page-logistics-plan выглядит как незаконченная таблица» -
    так и было: .grouphead был шириной ТОЛЬКО замороженной колонки (var(--lane-w)), #page-logistics-plan верх/низ-бордер обрывался ровно на её границе, #page-logistics-plan а вся полоса времени справа
    оставалась вообще без черты. Теперь бордер - на ПОЛНОШИРИННОЙ внешней полосе
    (тот же приём max-content/min-width:100%, #page-logistics-plan что и у .row), #page-logistics-plan текст-ярлык - на
@@ -1686,35 +1700,63 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
 /* Копировать данные машины (Влад, 31.08, со слов логистов: "тягач модель
    госномер, прицеп госномер с типом, водитель с телефоном") - была отдельной
    плашкой-иконкой рядом с hide-btn, но Влад, 31.08 (второй заход): "не
-   нравится как расположено, пересекает валовую прибыль %" - убрана, теперь
-   правый клик по верхней строке (.rh1 - госномер/тягач), см. contextmenu ниже.
-   Нижняя строка (.rh2 - прицеп/водитель) по-прежнему открывает меню сцепки
-   правым кликом, как раньше - разделили по строкам, не по всей .rowhead. */
+   нравится как расположено, пересекает валовую прибыль %" - убрана. Пробовали
+   разделить .rowhead по строкам (верхняя - прямая копия по ПКМ, нижняя - меню
+   сцепки), но Влад, 31.08 (пятый заход): "мне нужно чтобы копирование было
+   только через ПКМ, а ПКМ срабатывало и на госномере" - разделение снято, вся
+   .rowhead целиком открывает одно меню сцепки (см. contextmenu ниже), внутри
+   него первым пунктом "Копировать". */
 #page-logistics-plan .row.is-hidden .rowhead{opacity:.5;}
-/* ═══ МОБИЛЬНЫЙ РЕЖИМ "Список" (31.08) - утверждённое превью lp-mobile-preview,
-   перенесено 1:1 (ГОСТ раздел 0.6 "превью = контракт"): токены/радиусы/motion -
-   те же, что уже объявлены на :root дашборда выше, эти правила только СВОИ
-   компоненты. Видимость - через .lp-mobile на #page-logistics-plan (см.
-   lpIsMobileViewport_), десктопные .top/.legend/.board-wrap не трогаются. */
+/* ═══ МОБИЛЬНЫЙ РЕЖИМ "Таблица" (31.08, штурм-сессия агентов после живого
+   теста с Каном/Мишей) - утверждённое превью lp-mobile-v2-preview, перенесено
+   1:1 (ГОСТ раздел 0.6 "превью = контракт"). Режим "Список" (первая версия
+   того же дня) убран ЦЕЛИКОМ по итогу теста - Влад: "Список вообще
+   бесполезный интерфейс" - если понадобится референс, искать в git-истории
+   файла на 31.08 (коммиты до этой правки). Управление ЦЕЛИКОМ сверху (три
+   строки - дата/поиск/свободно, масштаб+Сегодня, тип), лента - ТА ЖЕ
+   десктопная (.rowhead/.track/.seg, не отдельный рендер), просто сжата через
+   CSS ниже (.lp-mode-table). Видимость - через .lp-mobile на
+   #page-logistics-plan (см. lpIsMobileViewport_), десктопные .top/.legend не
+   трогаются. .lp-mode-table теперь ставится ВМЕСТЕ с .lp-mobile в initLP() -
+   раньше это был переключатель между двумя режимами, сейчас просто исторически
+   оставленное имя класса единственного мобильного режима (не переименовано
+   намеренно - слишком много завязанных на него правил ниже, риск не стоит
+   косметики). */
 #page-logistics-plan .lp-m-root{display:none;}
-#page-logistics-plan.lp-mobile .lp-m-root{display:flex;flex-direction:column;min-height:0;min-width:0;}
-/* Список - .lp-m-root сам растягивается (внутри него скроллится список).
-   Таблица - .lp-m-root сжимается до высоты своей шапки, растягивается
-   .board-wrap (десктопная лента, показанная поверх, см. .lp-mode-table ниже) */
-#page-logistics-plan.lp-mobile:not(.lp-mode-table) .lp-m-root{flex:1 1 auto;}
-#page-logistics-plan.lp-mobile.lp-mode-table .lp-m-root{flex:none;}
+/* Влад, 31.08: "при сильном протягивании вниз страница обновляется... это
+   раздражает" - нативный "потяни, чтобы обновить" мобильного браузера,
+   срабатывает от овер-скролла ВВЕРХ, даже если тянут внутри вложенного
+   скролл-контейнера (.board ниже - у него своя пара правил). Здесь - тот же
+   приём на корневом уровне, вторым слоем (Влад и раньше явно просил
+   "железобетонно", не одно место) - на десктоп не действует, там мышь, не
+   палец. */
+#page-logistics-plan.lp-mobile{overscroll-behavior:contain;}
+/* .lp-m-root теперь ВСЕГДА только шапка (fit-content по высоте, не
+   растягивается) - вся оставшаяся высота уходит десктопной ленте
+   (.board-wrap), см. HTML: .lp-m-root стоит ПЕРЕД .board-wrap в разметке
+   (НАЙДЕННЫЙ БАГ 31.08 - раньше стоял ПОСЛЕ, при flex-direction:column это
+   рисовало ленту НАД шапкой управления - "кнопки внизу" из жалобы Влада). */
+#page-logistics-plan.lp-mobile .lp-m-root{display:flex;flex-direction:column;flex:none;min-width:0;}
 #page-logistics-plan.lp-mobile .top,
-#page-logistics-plan.lp-mobile .legend,
+#page-logistics-plan.lp-mobile .legend{display:none;}
 #page-logistics-plan.lp-mobile .board-wrap{display:none;}
 #page-logistics-plan.lp-mobile.lp-mode-table .board-wrap{display:flex;}
-#page-logistics-plan.lp-mobile:not(.lp-mode-table) .lp-m-body-list{display:flex;flex-direction:column;flex:1 1 auto;min-height:0;}
-#page-logistics-plan.lp-mobile.lp-mode-table .lp-m-body-list{display:none;}
-#page-logistics-plan .lp-m-modeswitch{flex:none;display:flex;gap:4px;padding:0 14px 10px;}
-#page-logistics-plan .lp-m-ms{
+#page-logistics-plan .lp-m-zoom{display:none;}
+/* 5 масштабов (Сутки/2дня/3дня/Неделя/Месяц) на узком экране РАВНОЙ шириной
+   (как у фильтров ниже) читались бы плохо - разная длина подписи ("Сутки"
+   против "2 дня"); своя ширина по контенту + горизонтальный скролл строки,
+   не сжатие текста. */
+/* padding теперь на .lp-m-zoomrow (родитель, см. выше) - .lp-m-zoom только
+   сама скроллящаяся строка сегментов рядом с кнопкой "Сегодня". */
+#page-logistics-plan.lp-mode-table .lp-m-zoom{flex:1 1 auto;display:flex;gap:4px;overflow-x:auto;min-width:0;}
+#page-logistics-plan .lp-m-zoom .lp-m-tf{flex:none;padding:7px 12px;white-space:nowrap;}
+#page-logistics-plan .lp-m-table-filters{display:none;}
+#page-logistics-plan.lp-mode-table .lp-m-table-filters{flex:none;display:flex;gap:4px;padding:0 14px 10px;}
+#page-logistics-plan .lp-m-tf{
   flex:1 1 0;appearance:none;border:1px solid var(--border);background:var(--bg3);color:var(--muted);
-  font-family:inherit;font-size:12px;font-weight:600;padding:7px 0;border-radius:8px;cursor:pointer;
+  font-family:inherit;font-size:11.5px;font-weight:600;padding:6px 0;border-radius:8px;cursor:pointer;
 }
-#page-logistics-plan .lp-m-ms[aria-pressed="true"]{background:var(--bg4);color:var(--text);border-color:var(--border-strong);}
+#page-logistics-plan .lp-m-tf[aria-pressed="true"]{background:var(--bg4);color:var(--text);border-color:var(--border-strong);}
 /* Табличный режим - минимальная боковая колонка ("госномер + фамилия И.О.
    водителя", буквально по словам Влада 31.08) поверх ТОЙ ЖЕ десктопной ленты
    (.rowhead/.track/.seg - не отдельный рендер), просто урезаны через display:
@@ -1732,66 +1774,91 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
 #page-logistics-plan.lp-mobile.lp-mode-table .rh2 .rside{display:none;}
 #page-logistics-plan.lp-mobile.lp-mode-table .gos{font-size:13px;}
 #page-logistics-plan.lp-mobile.lp-mode-table .rh2 .drv{font-size:11px;}
-#page-logistics-plan .lp-m-top{flex:none;display:flex;align-items:center;gap:10px;padding:14px 14px 8px;}
-#page-logistics-plan .lp-m-date{font-size:16px;font-weight:700;}
+/* Свой пинч-зум убран 31.08 (см. JS-комментарий на его месте), но нативный
+   зум ВСЕЙ СТРАНИЦЫ двумя пальцами (браузер это умеет сам, viewport не
+   запрещает) оставлять не стоит - на телефоне это разъедет фиксированную
+   мини-шапку/масштаб с самой лентой, выглядело бы как поломка, не решение.
+   pan-x/pan-y БЕЗ pinch-zoom - обычный скролл работает, случайный зум
+   двумя пальцами - нет. */
+#page-logistics-plan.lp-mobile.lp-mode-table .board{touch-action:pan-x pan-y;overscroll-behavior:contain;}
+/* Долгое нажатие -> перетаскивание заявки (см. JS "ПЕРЕТАСКИВАНИЕ ДОЛГИМ
+   НАЖАТИЕМ"). .pressing - визуальный отклик ВО ВРЕМЯ удержания (до
+   подтверждения долгого нажатия), тот же приём "сжалась", что уже у обычного
+   мышиного захвата ниже (scale .97) - не значит "уже можно тащить", только
+   "жму, подожди". .lifted/.row.drop - уже существующие десктопные классы,
+   переиспользуются как есть, не дублируем стили. */
+#page-logistics-plan.lp-mobile.lp-mode-table .seg.pressing{transform:scale(.97);transition:transform 100ms var(--ease-out-soft);}
+/* "Плитка должна дрожать как в мобильных приложениях" (Влад, 31.08) - момент
+   подтверждения долгого нажатия, ДО начала реального перетаскивания (JS
+   снимает класс на первом touchmove - см. lpTUpdateDrag_, иначе анимация и
+   inline-transform драга дрались бы за один и тот же кадр). Конечное число
+   повторов (4), не infinite - раздел 5 ГОСТа запрещает вечные пульсы без
+   именованного исключения, здесь и не нужен: жест короткий, сама цель уже
+   "приподнялась" через .lifted к моменту, когда дрожание кончится. */
+@keyframes lpTWiggle{0%,100%{transform:rotate(-2deg) scale(1.04);}50%{transform:rotate(2deg) scale(1.04);}}
+#page-logistics-plan.lp-mobile.lp-mode-table .seg.lp-t-armed{animation:lpTWiggle .15s ease-in-out 4;}
+@media(prefers-reduced-motion:reduce){
+  #page-logistics-plan.lp-mobile.lp-mode-table .seg.lp-t-armed{animation:none;}
+}
+#page-logistics-plan .lp-m-top{flex:none;display:flex;align-items:center;gap:8px;padding:14px 14px 8px;}
+#page-logistics-plan .lp-m-date{font-size:15px;font-weight:700;}
 #page-logistics-plan .lp-m-wd{color:var(--muted);font-weight:600;margin-right:6px;text-transform:uppercase;font-size:12px;}
 #page-logistics-plan .lp-m-spacer{flex:1 1 auto;}
+/* Влад, 31.08 (штурм-сессия): "поиск по госномеру" - новое, чего в первом
+   превью не было. Иконка в шапке -> раскрывает .lp-m-search-overlay поверх
+   шапки (не отдельный экран - остаёмся на той же странице), фильтрует уже
+   отрисованные .rowhead в живом .board через JS (см. lpMSearchFilter_) -
+   ничего заново не рендерит. */
+#page-logistics-plan .lp-m-icon-btn{
+  flex:none;width:30px;height:30px;border-radius:8px;background:var(--bg3);border:1px solid var(--border);
+  display:flex;align-items:center;justify-content:center;color:var(--muted);cursor:pointer;
+  transition:background-color .15s var(--ease-out-soft),color .15s var(--ease-out-soft);
+}
+#page-logistics-plan .lp-m-icon-btn svg{width:14px;height:14px;}
+#page-logistics-plan .lp-m-icon-btn[aria-pressed="true"]{background:var(--bg4);color:var(--text);border-color:var(--border-strong);}
 #page-logistics-plan .lp-m-chip-free{
   display:inline-flex;align-items:center;gap:5px;background:rgba(29,158,117,.14);color:var(--green);
   border:1px solid rgba(29,158,117,.32);font-size:12px;font-weight:600;padding:6px 10px 6px 8px;
-  border-radius:20px;cursor:pointer;transition:background-color .15s var(--ease-out-soft);
+  border-radius:20px;cursor:pointer;transition:background-color .15s var(--ease-out-soft);white-space:nowrap;
 }
 #page-logistics-plan .lp-m-chip-free.active{background:rgba(29,158,117,.28);}
 #page-logistics-plan .lp-m-chip-free i{width:6px;height:6px;border-radius:50%;background:var(--green);flex:none;}
-#page-logistics-plan .lp-m-daystrip{flex:none;display:flex;gap:6px;padding:0 14px 10px;}
-#page-logistics-plan .lp-m-daystrip .d{flex:1 1 0;text-align:center;padding:6px 0 5px;border-radius:8px;cursor:pointer;}
-#page-logistics-plan .lp-m-daystrip .d .n{font-size:13px;font-weight:700;font-family:'JetBrains Mono',monospace;}
-#page-logistics-plan .lp-m-daystrip .d .w{font-size:8.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:1px;}
-#page-logistics-plan .lp-m-daystrip .d.today{background:var(--bg3);}
-#page-logistics-plan .lp-m-daystrip .d.today .n{color:var(--text);}
-#page-logistics-plan .lp-m-daystrip .d:not(.today) .n{color:var(--muted);}
-#page-logistics-plan .lp-m-daystrip .d.weekend .n{color:var(--red);}
-#page-logistics-plan .lp-m-listwrap{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;touch-action:pan-y;}
-#page-logistics-plan .lp-m-list{padding:2px 10px 24px;}
-#page-logistics-plan .lp-m-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;margin-bottom:8px;overflow:hidden;}
-#page-logistics-plan .lp-m-main{display:flex;align-items:center;gap:10px;padding:12px;cursor:pointer;min-height:48px;}
-#page-logistics-plan .lp-m-dot{width:8px;height:8px;border-radius:50%;flex:none;}
-#page-logistics-plan .lp-m-dot.st-green{background:var(--green);box-shadow:0 0 0 3px rgba(29,158,117,.18);}
-#page-logistics-plan .lp-m-dot.st-red{background:var(--red);box-shadow:0 0 0 3px rgba(226,75,74,.18);}
-#page-logistics-plan .lp-m-dot.st-muted{background:var(--muted2, var(--muted));box-shadow:0 0 0 3px rgba(139,137,128,.1);}
-#page-logistics-plan .lp-m-dot.st-amber{background:var(--amber);box-shadow:0 0 0 3px rgba(239,159,39,.18);}
-#page-logistics-plan .lp-m-id{flex:none;display:flex;flex-direction:column;align-items:flex-start;gap:1px;min-width:0;}
-#page-logistics-plan .lp-m-gos{font-size:16px;font-weight:700;font-family:'JetBrains Mono',monospace;white-space:nowrap;}
-#page-logistics-plan .lp-m-tag{font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:700;padding:1.5px 4px;border-radius:3px;background:var(--bg4);color:var(--muted);}
-#page-logistics-plan .lp-m-mid{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:2px;}
-#page-logistics-plan .lp-m-drv{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-#page-logistics-plan .lp-m-drv.vacant{color:var(--red);}
-#page-logistics-plan .lp-m-status{font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-#page-logistics-plan .lp-m-couple{flex:none;width:30px;height:30px;border-radius:8px;background:var(--bg3);display:flex;align-items:center;justify-content:center;color:var(--muted);}
-#page-logistics-plan .lp-m-couple svg{width:14px;height:14px;}
-#page-logistics-plan .lp-m-add{flex:none;width:30px;height:30px;border-radius:8px;background:var(--bg3);display:flex;align-items:center;justify-content:center;color:var(--muted);}
-#page-logistics-plan .lp-m-add svg{width:14px;height:14px;}
-#page-logistics-plan .lp-m-chev{flex:none;color:var(--muted);transition:transform .22s var(--ease-out-strong);}
-#page-logistics-plan .lp-m-chev svg{width:13px;height:13px;display:block;}
-#page-logistics-plan .lp-m-card.open .lp-m-chev{transform:rotate(180deg);}
-#page-logistics-plan .lp-m-strip{position:relative;height:5px;margin:0 12px 12px;border-radius:3px;background:var(--bg4);overflow:hidden;cursor:pointer;}
-#page-logistics-plan .lp-m-strip .blk{position:absolute;top:0;bottom:0;border-radius:2px;}
-#page-logistics-plan .lp-m-strip .blk.trip{background:var(--green);}
-#page-logistics-plan .lp-m-strip .blk.repair,#page-logistics-plan .lp-m-strip .blk.maint{background:var(--red);}
-#page-logistics-plan .lp-m-strip .blk.driveroff{background:var(--muted);}
-#page-logistics-plan .lp-m-strip .blk.noorder{background:var(--amber);}
-#page-logistics-plan .lp-m-strip .now{position:absolute;top:-2px;bottom:-2px;width:1.5px;background:var(--blue);box-shadow:0 0 3px rgba(55,138,221,.5);z-index:2;}
-/* аккордеон - grid-template-rows 0fr/1fr (ГОСТ раздел 5 - только transform/
-   opacity/grid-track, никогда напрямую height) */
-#page-logistics-plan .lp-m-acc{display:grid;grid-template-rows:0fr;transition:grid-template-rows 280ms var(--ease-out-strong);}
-#page-logistics-plan .lp-m-card.open .lp-m-acc{grid-template-rows:1fr;}
-#page-logistics-plan .lp-m-acc-in{overflow:hidden;}
-#page-logistics-plan .lp-m-acc-body{padding:2px 12px 12px 30px;display:flex;flex-direction:column;gap:1px;}
-#page-logistics-plan .lp-m-ev{display:flex;align-items:center;gap:9px;padding:8px 6px;border-radius:8px;cursor:pointer;}
-#page-logistics-plan .lp-m-ev:active{background:var(--bg3);}
-#page-logistics-plan .lp-m-ev .evdot{width:5px;height:5px;border-radius:50%;flex:none;}
-#page-logistics-plan .lp-m-ev .evtime{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--muted);flex:none;width:80px;}
-#page-logistics-plan .lp-m-ev .evtxt{font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;}#page-logistics-plan .track{position:relative;flex:none;height:var(--row-h);}/* Вертикальная сетка часов - Влад, 30.08: "у нас в планировке это всегда была
+#page-logistics-plan .lp-m-filter-badge{
+  display:inline-flex;align-items:center;gap:4px;background:rgba(239,159,39,.14);color:var(--amber);
+  border:1px solid rgba(239,159,39,.32);font-size:11px;font-weight:600;padding:5px 8px;border-radius:20px;
+  cursor:pointer;white-space:nowrap;
+}
+/* Строка 2 - масштаб (сегментированная группа, тот же принцип, что и Тип
+   ниже) + отдельная кнопка "Сегодня" (Влад, 31.08: "убрать кнопку месяц и
+   вместо неё поставить кнопку сегодня, чтобы центровало на сегодняшнем дне") -
+   визуально ОТДЕЛЕНА от масштаба (не шестой сегмент пилюли), это не уровень
+   зума, это переход-действие - та же логика уже применена на десктопе, где
+   "Сегодня" (#lp-monthToday) стоит отдельным чипом вне группы "Масштаб". */
+#page-logistics-plan .lp-m-zoomrow{flex:none;display:flex;align-items:center;gap:8px;padding:0 14px 8px;}
+#page-logistics-plan .lp-m-today{
+  flex:none;appearance:none;border:1px solid rgba(55,138,221,.4);background:rgba(55,138,221,.16);color:#8dbdf0;
+  font-family:inherit;font-size:11.5px;font-weight:700;padding:7px 12px;border-radius:9px;cursor:pointer;white-space:nowrap;
+}
+#page-logistics-plan .lp-m-today:active{transform:scale(.96);}
+/* Оверлей поиска - выезжает поверх .lp-m-top/.lp-m-zoomrow сверху вниз,
+   .lp-m-root - его positioning context (см. HTML, оверлей - прямой потомок). */
+#page-logistics-plan .lp-m-root{position:relative;}
+#page-logistics-plan .lp-m-search-overlay{
+  position:absolute;inset:0 0 auto 0;z-index:5;background:var(--bg2);padding:14px 14px 10px;
+  border-bottom:1px solid var(--border-strong);transform:translateY(-100%);opacity:0;pointer-events:none;
+  transition:transform 220ms var(--ease-out-strong),opacity 180ms var(--ease-out-strong);
+}
+#page-logistics-plan .lp-m-search-overlay.show{transform:translateY(0);opacity:1;pointer-events:auto;}
+#page-logistics-plan .lp-m-search-row{display:flex;gap:8px;align-items:center;}
+#page-logistics-plan .lp-m-search-input{
+  flex:1 1 auto;background:var(--bg3);border:1px solid var(--border-strong);border-radius:9px;color:var(--text);
+  font-family:inherit;font-size:15px;padding:8px 11px;min-width:0;
+}
+#page-logistics-plan .lp-m-search-input:focus{outline:none;border-color:var(--blue);}
+#page-logistics-plan .lp-m-search-input::placeholder{color:var(--muted2,var(--muted));}
+/* Найденное совпадение - на месте, непройденное - глушится (тот же приём
+   .dim, что и у пустых строк ленты в других местах дашборда). */
+#page-logistics-plan.lp-mobile .row.lp-m-search-dim{opacity:.22;}#page-logistics-plan .track{position:relative;flex:none;height:var(--row-h);}/* Вертикальная сетка часов - Влад, 30.08: "у нас в планировке это всегда была
    сетка, а тут просто горизонтальные линии... добавь вертикальные на все
    масштабы в зависимости от логики: на самом крупном (сутки) - каждый час".
    Базовое правило (действует на Неделе/Месяце, где часовая сетка слилась бы
@@ -2809,6 +2876,70 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   </div>
 </div>
 
+<!-- ═══ МОБИЛЬНЫЙ РЕЖИМ "Таблица" (31.08, штурм-сессия агентов после живого
+     теста с Каном/Мишей - "давай Соберем агентов и проведем штурм сеесию...
+     Список вообще бесполезный интерфейс... кнопки внизу неудобно, всё наверх,
+     кнопка масштаба, убрать месяц, вместо неё сегодня"). Показывается ТОЛЬКО
+     при #page-logistics-plan.lp-mobile (см. lpIsMobileViewport_ в JS) -
+     десктоп это не затрагивает вообще, тот же .top/.legend/.board-wrap ниже
+     просто прячутся на узком экране, ничего в них не меняется. СТОИТ ПЕРЕД
+     .board-wrap НАМЕРЕННО (найденный баг предыдущей версии - шапка стояла
+     ПОСЛЕ ленты в разметке, при flex-column это рисовало ленту НАД кнопками
+     управления). Шторка/фleet-меню/тост/confirm - ОБЩИЕ с десктопом
+     (#lp-drawer и т.д. ниже), не дублируются - реальные действия
+     (открыть/создать/сцепка) зовут ТЕ ЖЕ функции (openDrawer/
+     openCreateDrawer/openFleetMenu_), что и десктоп, просто из новой
+     компактной раскладки. Список карточек (первая версия того же дня) убран
+     целиком - см. большой разбор в CSS выше. -->
+<div class="lp-m-root" id="lpMRoot">
+  <div class="lp-m-top">
+    <div class="lp-m-date"><span class="lp-m-wd" id="lpMWd"></span><span class="mono" id="lpMDate"></span></div>
+    <div class="lp-m-spacer"></div>
+    <!-- Влад, 31.08: "вижу только длинномеры" - на деле не баг, а STATE.filter
+         с десктопа, залипший в localStorage (yard.plan.settings) - панель
+         фильтров, где его видно/можно снять, на мобильном спрятана вместе со
+         всей .controls. Без этого чипа сбросить фильтр с телефона было
+         НЕОТКУДА - см. lpMRenderFilterBadge_. Виден только когда фильтр НЕ
+         "все", тап сбрасывает. -->
+    <div class="lp-m-filter-badge" id="lpMFilterBadge" style="display:none" title="Тронуть - сбросить фильтр">Фильтр: <span id="lpMFilterBadgeText"></span> ✕</div>
+    <!-- Поиск по госномеру - новое по итогу штурм-сессии, не дублирует
+         данные, просто фильтрует уже отрисованные .rowhead живой ленты
+         (lpMSearchFilter_ в JS). -->
+    <button class="lp-m-icon-btn" id="lpMSearchBtn" type="button" title="Найти машину по госномеру" aria-pressed="false">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="9" cy="9" r="6"/><path d="M17 17l-4-4"/></svg>
+    </button>
+    <div class="lp-m-chip-free" id="lpMChipFree"><i></i><span id="lpMFreeCount">0</span> свободно</div>
+  </div>
+  <!-- Масштаб + "Сегодня" - Влад, 31.08 (штурм-сессия): "убрать кнопку месяц
+       и вместо неё поставить кнопку сегодня, чтобы по нажатию центровало на
+       сегодняшнем дне". "Сегодня" НЕ шестой сегмент масштаба - ретранслирует
+       клик на десктопный #lp-monthToday (уже умеет честно центрировать
+       сегодня, ничего нового не пишем), масштаб - на СКРЫТЫЙ десктопный
+       .chip[data-zoom], как и было (см. обработчики в JS). -->
+  <div class="lp-m-zoomrow">
+    <div class="lp-m-zoom" id="lpMZoom">
+      <button class="lp-m-tf" data-zoom="day" aria-pressed="false">Сутки</button>
+      <button class="lp-m-tf" data-zoom="2d" aria-pressed="false">2 дня</button>
+      <button class="lp-m-tf" data-zoom="3d" aria-pressed="true">3 дня</button>
+      <button class="lp-m-tf" data-zoom="week" aria-pressed="false">Неделя</button>
+    </div>
+    <button class="lp-m-today" id="lpMToday" type="button" title="К сегодняшнему дню">Сегодня</button>
+  </div>
+  <!-- Тип парка - те же значения STATE.filter, что у десктопных чипов "Парк"
+       (all/tral/long) - visible(v) уже умеет их фильтровать, ничего нового. -->
+  <div class="lp-m-table-filters" id="lpMTableFilters">
+    <button class="lp-m-tf" data-filter="all" aria-pressed="true">Все</button>
+    <button class="lp-m-tf" data-filter="tral" aria-pressed="false">Тралы</button>
+    <button class="lp-m-tf" data-filter="long" aria-pressed="false">Длинномеры</button>
+  </div>
+  <div class="lp-m-search-overlay" id="lpMSearchOverlay">
+    <div class="lp-m-search-row">
+      <input class="lp-m-search-input" id="lpMSearchInput" placeholder="госномер, например В776" autocomplete="off" inputmode="search">
+      <button class="lp-m-icon-btn" id="lpMSearchClose" type="button" title="Закрыть поиск">✕</button>
+    </div>
+  </div>
+</div>
+
 <div class="legend" id="lp-legend"></div>
 
 <div class="board-wrap">
@@ -2836,39 +2967,6 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
     <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
       <path d="M4 6h12M8 6V4h4v2M6 6l1 11h6l1-11M8.5 9v5M11.5 9v5"/>
     </svg>
-  </div>
-</div>
-
-<!-- ═══ МОБИЛЬНЫЙ РЕЖИМ (Влад, 31.08: "давай пробуй накати на живую работу" -
-     утверждено превью lp-mobile-preview, режим "Список"; режим "Таблица" -
-     следующим заходом). Показывается ТОЛЬКО при #page-logistics-plan.lp-mobile
-     (см. lpIsMobileViewport_ в JS) - десктоп это не затрагивает вообще, тот же
-     .top/.legend/.board-wrap выше просто прячутся на узком экране, ничего в них
-     не меняется. Шторка/фleet-меню/тост/confirm - ОБЩИЕ с десктопом (#lp-drawer
-     и т.д. ниже), не дублируются - реальные действия (открыть/создать/сцепка)
-     зовут ТЕ ЖЕ функции (openDrawer/openCreateDrawer/openFleetMenu_), что и
-     десктоп, просто из новой компактной раскладки. -->
-<div class="lp-m-root" id="lpMRoot">
-  <div class="lp-m-top">
-    <div class="lp-m-date"><span class="lp-m-wd" id="lpMWd"></span><span class="mono" id="lpMDate"></span></div>
-    <div class="lp-m-spacer"></div>
-    <div class="lp-m-chip-free" id="lpMChipFree"><i></i><span id="lpMFreeCount">0</span> свободно</div>
-  </div>
-  <!-- Переключатель Список/Таблица (Влад, 31.08: "сделаем два варианта...
-       что бы можно было сравнить") - общая шапка выше остаётся ОДНОЙ на оба
-       режима, переключается только тело: .lp-m-body-list (карточки, свои
-       lpM*-функции) или сам десктопный .board-wrap (см. CSS .lp-mode-table
-       ниже) - табличный режим НЕ дублирует рендер ленты, показывает ТУ ЖЕ
-       доску, что и десктоп, только колонка/шапка сжаты через CSS. -->
-  <div class="lp-m-modeswitch">
-    <button class="lp-m-ms" data-mode="list" aria-pressed="true">Список</button>
-    <button class="lp-m-ms" data-mode="table" aria-pressed="false">Таблица</button>
-  </div>
-  <div class="lp-m-body-list" id="lpMBodyList">
-    <div class="lp-m-daystrip" id="lpMDaystrip"></div>
-    <div class="lp-m-listwrap" id="lpMListWrap">
-      <div class="lp-m-list" id="lpMList"></div>
-    </div>
   </div>
 </div>
 
@@ -19655,12 +19753,18 @@ function renderRowsInner_(){
         ? '<span class="vp" style="color:' + lpVpColor_(vp) +
           '" title="план по валовой прибыли: факт ' + vp + '% на сегодня, цвет - по прогнозу на конец месяца"><i></i>' + vp + '%</span>'
         : "";
+      /* Влад, 31.08: "достаточно отражать только буквы и цифры госномера без
+         регионов в мобильной версии" - только .lp-mobile, десктоп видит
+         полный номер как раньше (см. lpGosShort_). */
+      var isMobileNow_ = pageRoot.classList.contains("lp-mobile");
+      var gosLabel_ = isMobileNow_ ? lpGosShort_(v.gos) : v.gos;
+      var trailerGosLabel_ = isMobileNow_ ? lpGosShort_(v.trailerGos) : v.trailerGos;
       head.innerHTML =
-        '<div class="rh1" title="ПКМ - скопировать тягач/прицеп/водителя"><span class="tag ' + tagClass(v.type) + '">' + v.type + '</span>' +
+        '<div class="rh1"><span class="tag ' + tagClass(v.type) + '">' + v.type + '</span>' +
         (v.tractor ? '<span class="tractor">' + v.tractor + '</span>' : '') +
-        '<span class="gos">' + v.gos + '</span>' +
+        '<span class="gos">' + gosLabel_ + '</span>' +
         (endLbl ? '<span class="until">до <b>' + endLbl + '</b></span>' : '') + '</div>' +
-        '<div class="rh2"><span class="tr' + (!v.trailerGos && !v.trailer ? " nd" : "") + '">' + (v.trailerGos || v.trailer || "без прицепа") + '</span>' +
+        '<div class="rh2"><span class="tr' + (!v.trailerGos && !v.trailer ? " nd" : "") + '">' + (trailerGosLabel_ || v.trailer || "без прицепа") + '</span>' +
         (v.trailer && v.trailerGos ? '<span class="sep">·</span><span class="kind">' + v.trailer + '</span>' : '') +
         '<span class="sep">·</span><span class="drv' + (v.vacant ? " nd" : "") + '">' + drv + '</span>' +
         (rside ? '<span class="rside">' + rside + '</span>' : '') + '</div>' +
@@ -19705,237 +19809,341 @@ function renderRowsInner_(){
   rowsEl.innerHTML = "";
   rowsEl.appendChild(frag);
   syncAllBlinks_();   /* точки/бейджи/тег-свечение пересозданы - подхватить общий такт */
-  /* Мобильный список (31.08) - ОДНА точка подключения вместо правки 18+ мест,
+  /* Мобильная шапка (31.08) - ОДНА точка подключения вместо правки 18+ мест,
      где вызывается renderRows() (drag/create/delete/couple/poll/zoom/фильтр/…) -
      renderRowsInner_ и так уже единственное место, где STATE.segs/vehicles
      гарантированно свежие после любого действия, дешёвый ранний возврат внутри
-     lpMRenderList_ делает вызов почти бесплатным на десктопе. */
-  lpMRenderList_();
+     lpMSync_ делает вызов почти бесплатным на десктопе. */
+  lpMSync_();
 }
 
-/* ═══════════ МОБИЛЬНЫЙ РЕЖИМ "Список" (Влад, 31.08: "давай пробуй накати на
-   живую работу") ═══════════
-   Утверждённое превью (артефакт lp-mobile-preview) - вертикальный список
-   карточек вместо часовой ленты на узком экране, "госномер + фамилия И.О.
-   водителя" по прямым словам Влада, минимальная шапка ("не нужно большая
-   шапка... как можно больше места под планировку"). ГОСТ раздел 0.6
-   "превью = контракт" - визуальные детали (цвет=смысл через точку, не
-   border-left; тип - подписанный mono-бейдж, как и на десктопе, не безликий
-   цветной квадрат; аккордеон через grid-template-rows, не height) перенесены
-   как в превью, кроме одного: сцепка (Посадить/Высадить) там была через
-   долгое нажатие - здесь ОТДЕЛЬНАЯ иконка уже есть на карточке, долгий тап
-   избыточен и рискует конфликтовать с вертикальным скроллом списка, поэтому
-   тут просто обычный тап по иконке.
+/* ═══════════ МОБИЛЬНЫЙ РЕЖИМ "Таблица" (31.08, штурм-сессия агентов после
+   живого теста Влада с Каном/Мишей) ═══════════
+   Список карточек (первая версия того же дня, утверждённое превью
+   lp-mobile-preview) убран ЦЕЛИКОМ - Влад: "Список вообще бесполезный
+   интерфейс". Осталась только сжатая ТА ЖЕ десктопная лента (.rowhead/
+   .track/.seg из renderRowsInner_ выше - НЕ отдельный рендер), управление -
+   три строки сверху (дата/поиск/свободно, масштаб+Сегодня, тип парка), см.
+   HTML/CSS. Референс на убранный Список - git-история файла на 31.08.
    РЕАЛЬНЫЕ ДЕЙСТВИЯ НЕ ДУБЛИРУЮТ ЛОГИКУ - зовут ТЕ ЖЕ функции, что и
-   десктоп: openDrawer (просмотр/правка), openCreateDrawer (новая запись),
-   openFleetMenu_ (посадить/высадить/отцепить/прицепить) - тот же код, та же
-   шторка/меню, просто из новой раскладки. Табличный режим (второй вариант
-   превью) - следующим заходом, здесь только "Список". */
+   десктоп: openDrawer/openCreateDrawer/openFleetMenu_/commit - тот же код,
+   та же шторка/меню/сохранение, просто из сжатой раскладки Таблицы. */
 function lpIsMobileViewport_(){ return window.innerWidth <= 680; }
-var lpMDayOffset_ = 0;      /* 0 = сегодня; смещение в днях от TODAY_D_ - тот же якорь эпохи, что и весь модуль */
-var lpMOpenVi_ = null;      /* индекс машины с развёрнутым аккордеоном (только одна за раз) */
-var lpMFilterFree_ = false;
 
-function lpMShortName_(full){ return (full || "").trim().split(" ").slice(0, 2).join(" "); }
+/* Влад, 31.08: "достаточно отражать только буквы и цифры госномера без
+   регионов в мобильной версии" - "О 894 ХМ 797" -> "О 894 ХМ". Регион -
+   последняя группа цифр через пробел, у всего парка компании он и так почти
+   всегда один и тот же (не несёт информации на узком экране). Только
+   мобильная разметка - десктоп читает v.gos напрямую, не через этот хелпер. */
+function lpGosShort_(gos){ return (gos || "").replace(/\s+\d+\s*$/, ""); }
 
-/* Подпись - через segLabel(s), тот же единый источник, что и десктопная
-   плитка/шторка (Влад, 30.08: "один источник, не дублируем формат в двух
-   местах") - сюда НЕ переписывать свою версию текста по kind, только точки/
-   приоритет сортировки/время своё для мобильной карточки. */
-function lpMKindStatus_(s, isNow){
-  var dot = s.kind === "trip" ? "st-green" : (s.kind === "repair" || s.kind === "maint") ? "st-red" : s.kind === "noorder" ? "st-amber" : "st-muted";
-  var prio = s.kind === "trip" ? 1 : (s.kind === "repair" || s.kind === "maint") ? 3 : 2;
-  if (s.kind === "trip") return {dot:dot, text:(isNow ? "В рейсе " : "Рейс ") + untilLabel(s) + " · " + segLabel(s), prio:prio};
-  return {dot:dot, text:segLabel(s) + " " + untilLabel(s), prio:prio};
-}
-/* Сегменты машины на видимый день - те же STATE.segs, что и десктоп, просто
-   срез по абсолютному часовому диапазону дня (day*24..day*24+24), тот же
-   приём, что vacantBandRange_/isVacantRepairOverlap_ уже используют. */
-function lpMSegsForDay_(vi, dayIdx){
-  var from = dayIdx * 24, to = from + 24;
-  return STATE.segs.filter(function(s){ return s.v === vi && s.s < to && s.s + s.l > from; })
-    .sort(function(a, b){ return a.s - b.s; });
-}
-function lpMCardStatus_(v, dayIdx, segs){
-  if (v.vacant) return {dot:"st-red", text:"Нужно посадить водителя", prio:-1};
-  if (dayIdx === TODAY_D_){
-    var h = nowHour();
-    var active = segs.filter(function(s){ return s.s <= h && s.s + s.l > h; })[0];
-    if (active) return lpMKindStatus_(active, true);
-  }
-  if (!segs.length) return {dot:"st-green", text:"Свободен", prio:0};
-  return lpMKindStatus_(segs[0], false);
-}
-
-function lpMRenderTop_(){
-  var dt = hourToDate_((TODAY_D_ + lpMDayOffset_) * 24);
+function lpMRenderTopDate_(){
+  var dt = hourToDate_(TODAY_D_ * 24);
   var wd = WD[dt.getDay()];
   document.getElementById("lpMWd").textContent = wd.charAt(0).toUpperCase() + wd.slice(1);
   document.getElementById("lpMDate").textContent = dt.getDate() + " " + MONTH_NAMES[dt.getMonth()].slice(0, 3);
 }
-function lpMRenderDaystrip_(){
-  var html = "";
-  for (var off = -2; off <= 3; off++){
-    var dt = hourToDate_((TODAY_D_ + off) * 24);
-    var wd = dt.getDay();
-    html += '<div class="d' + (off === lpMDayOffset_ ? " today" : "") + (wd === 0 || wd === 6 ? " weekend" : "") +
-      '" data-off="' + off + '"><div class="n mono">' + dt.getDate() + '</div><div class="w">' + WD[wd] + '</div></div>';
+/* "N свободно" - тот же isFreeNow(), что уже стоит за десктопным чипом
+   "Свободные сейчас" (STATE.filter==='free', см. visible()) - число ЖИВОЕ на
+   любой момент, независимо от того, какой фильтр выбран сейчас. */
+function lpMRenderFreeCount_(){
+  var n = STATE.vehicles.filter(visible).filter(function(v){ return isFreeNow(v.i); }).length;
+  document.getElementById("lpMFreeCount").textContent = n;
+}
+var LP_M_FILTER_LABELS_ = {tral:"Тралы", long:"Длинномеры", razd:"Раздвижки", koryto:"Корыта", rapid:"Рапиды", faymon:"Файмоны", free:"Свободные сейчас"};
+function lpMRenderFilterBadge_(){
+  var badge = document.getElementById("lpMFilterBadge");
+  if (STATE.filter === "all"){ badge.style.display = "none"; }
+  else {
+    badge.style.display = "inline-flex";
+    document.getElementById("lpMFilterBadgeText").textContent = LP_M_FILTER_LABELS_[STATE.filter] || STATE.filter;
   }
-  document.getElementById("lpMDaystrip").innerHTML = html;
-}
-function lpMRenderList_(){
-  if (!pageRoot.classList.contains("lp-mobile")) return;
-  lpMRenderTop_();
-  lpMRenderDaystrip_();
-  var dayIdx = TODAY_D_ + lpMDayOffset_;
-  var rows = STATE.vehicles.filter(visible).map(function(v){
-    var segs = lpMSegsForDay_(v.i, dayIdx);
-    return {v:v, segs:segs, st:lpMCardStatus_(v, dayIdx, segs)};
+  /* Чипы "Все/Тралы/Длинномеры" и "Сутки/2дня/3дня/Неделя" - синхронизируем
+     aria-pressed ЗДЕСЬ ЖЕ (не только по своему клику), чтобы отражали
+     STATE.filter/STATE.zoom, даже если они поменялись другим путём (бейдж-
+     сброс, чип "свободно", десктоп той же сессией) - тот же принцип, что
+     syncControlChips() уже делает для десктопных чипов. Два раздельных
+     forEach, не один общий - у зум-кнопок нет data-filter (и наоборот),
+     общий "btn.dataset.filter === STATE.filter" на зум-кнопках всегда false
+     (dataset.filter===undefined) и стирал бы им правильную подсветку. */
+  [].forEach.call(document.querySelectorAll(".lp-m-table-filters .lp-m-tf"), function(btn){
+    btn.setAttribute("aria-pressed", String(btn.dataset.filter === STATE.filter));
   });
-  var freeN = rows.filter(function(r){ return r.st.prio === 0; }).length;
-  document.getElementById("lpMFreeCount").textContent = freeN;
-  if (lpMFilterFree_) rows = rows.filter(function(r){ return r.st.prio === 0; });
-  rows.sort(function(a, b){ return a.st.prio - b.st.prio; });
-
-  var nowLeftPct = (dayIdx === TODAY_D_) ? ((nowHour() - dayIdx * 24) / 24) * 100 : null;
-  var listEl = document.getElementById("lpMList");
-  listEl.innerHTML = rows.map(function(r){
-    var v = r.v, segs = r.segs, st = r.st;
-    var driverHtml = v.vacant
-      ? '<div class="lp-m-drv vacant">ВАКАНТ</div>'
-      : '<div class="lp-m-drv">' + pageEsc_(lpMShortName_(v.driver)) + '</div>';
-    var dayFrom = dayIdx * 24;
-    var blocks = segs.map(function(s){
-      var l = Math.max(0, (s.s - dayFrom) / 24 * 100), r2 = Math.min(100, (s.s + s.l - dayFrom) / 24 * 100);
-      return '<span class="blk ' + s.kind + '" style="left:' + l + '%;width:' + Math.max(0.8, r2 - l) + '%"></span>';
-    }).join("");
-    var nowTick = nowLeftPct !== null ? '<span class="now" style="left:' + nowLeftPct + '%"></span>' : "";
-    var accBody = segs.length
-      ? segs.map(function(s){
-          var dotCls = s.kind === "trip" ? "st-green" : (s.kind === "repair" || s.kind === "maint") ? "st-red" : s.kind === "noorder" ? "st-amber" : "st-muted";
-          return '<div class="lp-m-ev" data-id="' + s.id + '">' +
-            '<span class="evdot ' + dotCls + '"></span>' +
-            '<span class="evtime mono">' + fmt(s.s) + '–' + fmt(s.s + s.l) + '</span>' +
-            '<span class="evtxt">' + pageEsc_(segLabel(s)) + '</span></div>';
-        }).join("")
-      : '<div style="padding:8px 6px;font-size:11.5px;color:var(--muted)">Событий нет</div>';
-    return '<div class="lp-m-card' + (lpMOpenVi_ === v.i ? " open" : "") + '" data-vi="' + v.i + '">' +
-      '<div class="lp-m-main" data-vi="' + v.i + '">' +
-        '<span class="lp-m-dot ' + st.dot + '"></span>' +
-        '<div class="lp-m-id"><span class="lp-m-gos mono">' + pageEsc_(v.gos) + '</span><span class="lp-m-tag">' + pageEsc_(v.type) + '</span></div>' +
-        '<div class="lp-m-mid">' + driverHtml + '<div class="lp-m-status">' + pageEsc_(st.text) + '</div></div>' +
-        '<span class="lp-m-couple" data-vi="' + v.i + '" title="Посадить/высадить водителя"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="6.5" r="3"/><path d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6"/></svg></span>' +
-        '<span class="lp-m-add" data-vi="' + v.i + '" title="Новая запись"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M10 4v12M4 10h12"/></svg></span>' +
-        '<span class="lp-m-chev"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6l4 4 4-4"/></svg></span>' +
-      '</div>' +
-      '<div class="lp-m-strip" data-vi="' + v.i + '">' + blocks + nowTick + '</div>' +
-      '<div class="lp-m-acc"><div class="lp-m-acc-in"><div class="lp-m-acc-body">' + accBody + '</div></div></div>' +
-    '</div>';
-  }).join("");
-}
-
-/* ---- взаимодействие: тап карточки/полосы -> аккордеон дня ---- */
-document.getElementById("lpMList").addEventListener("click", function(e){
-  if (e.target.closest(".lp-m-couple") || e.target.closest(".lp-m-add") || e.target.closest(".lp-m-ev")) return;
-  var trigger = e.target.closest(".lp-m-main") || e.target.closest(".lp-m-strip");
-  if (!trigger) return;
-  var vi = parseInt(trigger.dataset.vi, 10);
-  lpMOpenVi_ = (lpMOpenVi_ === vi) ? null : vi;
-  lpMRenderList_();
-});
-/* тап по событию внутри аккордеона -> та же шторка, что у десктопа */
-document.getElementById("lpMList").addEventListener("click", function(e){
-  var ev = e.target.closest(".lp-m-ev");
-  if (!ev) return;
-  var seg = STATE.segs.filter(function(s){ return s.id === ev.dataset.id; })[0];
-  if (seg) openDrawer(seg);
-});
-/* "+" на карточке -> то же окно создания, что у десктопа (8ч по умолчанию -
-   тот же дефолт, что уже принят для тач/двойного клика) */
-document.getElementById("lpMList").addEventListener("click", function(e){
-  var btn = e.target.closest(".lp-m-add");
-  if (!btn) return;
-  openCreateDrawer(parseInt(btn.dataset.vi, 10), nowHour(), 8);
-});
-/* иконка сцепки -> то же меню Посадить/Высадить/Отцепить/Прицепить, что у
-   десктопа (ПКМ по шапке строки) - тут обычный тап по выделенной иконке.
-   НАЙДЕННЫЙ БАГ (тот же класс, что уже чинили у самого fleet-меню, 31.08,
-   комментарий у renderFleetMenuMain_): без stopPropagation клик всплывает до
-   document-обработчика "клик вне .ctxmenu - закрыть" (см. ниже) - кнопка
-   .lp-m-couple лежит ВНЕ .ctxmenu по определению (она на мобильной карточке),
-   тот handler видит именно её как "клик снаружи" и тут же закрывает меню,
-   которое сам же openFleetMenu_ секундой раньше открыл. */
-document.getElementById("lpMList").addEventListener("click", function(e){
-  var btn = e.target.closest(".lp-m-couple");
-  if (!btn) return;
-  e.stopPropagation();
-  var rect = btn.getBoundingClientRect();
-  openFleetMenu_(parseInt(btn.dataset.vi, 10), rect.left, rect.bottom + 6);
-});
-/* переключение дня - клик по полоске дат */
-document.getElementById("lpMDaystrip").addEventListener("click", function(e){
-  var d = e.target.closest(".d");
-  if (!d) return;
-  lpMDayOffset_ = parseInt(d.dataset.off, 10);
-  lpMOpenVi_ = null;
-  lpMRenderList_();
-});
-/* переключение дня - свайп по всему списку (тот же приём направления-замка,
-   что уже стоит на утверждённом превью) */
-(function(){
-  var wrap = document.getElementById("lpMListWrap"), list = document.getElementById("lpMList"), sw = null;
-  wrap.addEventListener("touchstart", function(e){
-    if (e.touches.length !== 1) return;
-    sw = {x0:e.touches[0].clientX, y0:e.touches[0].clientY, dx:0, lock:null};
-  }, {passive:true});
-  wrap.addEventListener("touchmove", function(e){
-    if (!sw) return;
-    var dx = e.touches[0].clientX - sw.x0, dy = e.touches[0].clientY - sw.y0;
-    if (sw.lock === null && (Math.abs(dx) > 6 || Math.abs(dy) > 6)) sw.lock = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
-    if (sw.lock !== "x") return;
-    sw.dx = dx;
-    list.style.transform = "translateX(" + dx + "px)";
-    list.style.opacity = String(Math.max(.4, 1 - Math.abs(dx) / 260));
-  }, {passive:true});
-  wrap.addEventListener("touchend", function(){
-    if (!sw) return;
-    if (sw.lock === "x" && Math.abs(sw.dx) > 60){
-      lpMDayOffset_ += sw.dx < 0 ? 1 : -1;
-      lpMOpenVi_ = null;
-      lpMRenderList_();
-    }
-    list.style.transition = "transform 220ms var(--ease-out-strong), opacity 220ms var(--ease-out-strong)";
-    list.style.transform = ""; list.style.opacity = "";
-    setTimeout(function(){ list.style.transition = ""; }, 230);
-    sw = null;
+  [].forEach.call(document.querySelectorAll(".lp-m-zoom .lp-m-tf"), function(btn){
+    btn.setAttribute("aria-pressed", String(btn.dataset.zoom === STATE.zoom));
   });
-})();
-/* фильтр "свободно" */
-document.getElementById("lpMChipFree").onclick = function(){
-  lpMFilterFree_ = !lpMFilterFree_;
-  document.getElementById("lpMChipFree").classList.toggle("active", lpMFilterFree_);
-  lpMRenderList_();
+  document.getElementById("lpMChipFree").classList.toggle("active", STATE.filter === "free");
+}
+/* Поиск по госномеру (новое, по итогу штурм-сессии) - НЕ отдельный рендер:
+   фильтрует уже отрисованные .row живой ленты через dim-класс, ничего не
+   запрашивает и не пересчитывает. Совпадение - по НАЧАЛУ госномера без
+   пробелов/региона (та же короткая форма, что уже в .gos - lpGosShort_),
+   регистронезависимо. */
+function lpMSearchFilter_(){
+  var overlay = document.getElementById("lpMSearchOverlay");
+  if (!overlay || !overlay.classList.contains("show")) return;
+  var q = document.getElementById("lpMSearchInput").value.trim().toUpperCase().replace(/\s+/g, "");
+  var firstMatch = null;
+  [].forEach.call(document.querySelectorAll("#page-logistics-plan .row"), function(row){
+    var head = row.querySelector(".rowhead .gos");
+    var gos = head ? head.textContent.toUpperCase().replace(/\s+/g, "") : "";
+    var match = !q || gos.indexOf(q) === 0;
+    row.classList.toggle("lp-m-search-dim", !match);
+    if (match && q && !firstMatch) firstMatch = row;
+  });
+  if (firstMatch) firstMatch.scrollIntoView({block:"center"});
+}
+function lpMOpenSearch_(){
+  document.getElementById("lpMSearchOverlay").classList.add("show");
+  document.getElementById("lpMSearchBtn").setAttribute("aria-pressed", "true");
+  setTimeout(function(){ document.getElementById("lpMSearchInput").focus(); }, 240);
+}
+function lpMCloseSearch_(){
+  document.getElementById("lpMSearchOverlay").classList.remove("show");
+  document.getElementById("lpMSearchBtn").setAttribute("aria-pressed", "false");
+  document.getElementById("lpMSearchInput").value = "";
+  [].forEach.call(document.querySelectorAll("#page-logistics-plan .row.lp-m-search-dim"), function(row){
+    row.classList.remove("lp-m-search-dim");
+  });
+}
+document.getElementById("lpMSearchBtn").onclick = function(){
+  var overlay = document.getElementById("lpMSearchOverlay");
+  if (overlay.classList.contains("show")) lpMCloseSearch_(); else lpMOpenSearch_();
 };
-/* Список <-> Таблица - см. большой разбор у HTML/CSS выше (.lp-mode-table).
-   При входе в Таблицу - board.scrollLeft к "сейчас" заново: .board-wrap лежал
-   display:none, а браузер может забыть/обнулить scrollLeft у элемента без
-   раскладки, пока он скрыт (проверено живьём - без этого таблица открывалась
-   на 1 января эпохи, а не на сегодня). */
-[].forEach.call(document.querySelectorAll(".lp-m-ms"), function(btn){
+document.getElementById("lpMSearchClose").onclick = lpMCloseSearch_;
+document.getElementById("lpMSearchInput").addEventListener("input", lpMSearchFilter_);
+
+function lpMSync_(){
+  if (!pageRoot.classList.contains("lp-mobile")) return;
+  lpMRenderTopDate_();
+  lpMRenderFreeCount_();
+  lpMRenderFilterBadge_();
+  lpMSearchFilter_();   /* лента перерисована - живой фильтр поиска нужно применить заново к новым .row */
+}
+
+/* Тап по бейджу фильтра - сброс на "Все", тот же путь, что у десктопного чипа
+   (.controls, delegated-обработчик ниже: STATE.filter = ...; saveSettings();
+   renderRows();) - синхронизируем и десктопные chip'ы (syncControlChips), раз
+   пользователь вернётся на десктоп той же сессией, там должно быть видно то
+   же "Все", а не расхождение. */
+document.getElementById("lpMFilterBadge").onclick = function(){
+  STATE.filter = "all";
+  saveSettings();
+  syncControlChips();
+  renderRows();
+};
+/* Чипы "Все/Тралы/Длинномеры" - тот же путь, что у десктопного чипа "Парк"
+   (delegated-обработчик .controls ниже: STATE.filter=...; saveSettings();
+   renderRows();). Скоуп ИМЕННО .lp-m-table-filters .lp-m-tf, не общий
+   ".lp-m-tf" - тот же класс используют и зум-кнопки ниже (data-zoom, без
+   data-filter) - общий селектор поймал бы их тоже и стёр STATE.filter в
+   undefined при клике на масштаб. */
+[].forEach.call(document.querySelectorAll(".lp-m-table-filters .lp-m-tf"), function(btn){
   btn.onclick = function(){
-    [].forEach.call(document.querySelectorAll(".lp-m-ms"), function(b){ b.setAttribute("aria-pressed", "false"); });
-    btn.setAttribute("aria-pressed", "true");
-    var table = btn.dataset.mode === "table";
-    pageRoot.classList.toggle("lp-mode-table", table);
-    if (table){
-      /* центрируем "сейчас" по РЕАЛЬНОЙ видимой ширине узкого экрана - фикс.
-         смещение "-42ч", что на десктопе (ставит "сейчас" в правую треть
-         широкого экрана), на телефоне унесло бы линию далеко за край. */
-      var hw = ZOOM[STATE.zoom], visibleHours = board.clientWidth / hw;
-      board.scrollLeft = Math.max(0, (nowHour() - visibleHours / 2) * hw);
-    }
+    STATE.filter = btn.dataset.filter;
+    saveSettings();
+    syncControlChips();
+    renderRows();
   };
 });
+/* Чип "свободно" - тот же STATE.filter, значение "free" (уже существует на
+   десктопе как чип "Свободные сейчас", см. visible()) - тап переключает
+   между "free" и "all", тот же путь сохранения/синка, что у чипов типа
+   выше. STATE.filter - одно взаимоисключающее значение, как и на десктопе,
+   комбинировать с "Тралы/Длинномеры" не с чем. */
+document.getElementById("lpMChipFree").onclick = function(){
+  STATE.filter = (STATE.filter === "free") ? "all" : "free";
+  saveSettings();
+  syncControlChips();
+  renderRows();
+};
+/* Масштаб (Сутки/2дня/3дня/Неделя) - Влад, 31.08 (третий заход): "масштаб
+   пусть будет кнопками сверху как и в десктопной версии" - заменяет убранный
+   пинч-зум (см. комментарий ниже). НЕ дублирует логику десктопного зум-чипа
+   (умный прицел на STATE.lastEdited/scrollLeft, primeTo) - просто
+   РЕТРАНСЛИРУЕТ клик на СКРЫТЫЙ десктопный .chip[data-zoom] через .click(),
+   та же логика срабатывает одна на двоих. */
+[].forEach.call(document.querySelectorAll(".lp-m-zoom .lp-m-tf"), function(btn){
+  btn.onclick = function(){
+    var desktopChip = pageRoot.querySelector('.controls .chip[data-zoom="' + btn.dataset.zoom + '"]');
+    if (desktopChip) desktopChip.click();
+  };
+});
+/* "Сегодня" (штурм-сессия 31.08, заменяет убранную кнопку "Месяц" в шапке) -
+   ретранслирует клик на десктопный #lp-monthToday - тот уже умеет честно
+   центрировать "сейчас" по видимой ширине доски (см. его обработчик ниже),
+   ничего нового не пишем, только жмём чужую кнопку из своей раскладки. */
+document.getElementById("lpMToday").onclick = function(){
+  var desktopBtn = document.getElementById("lp-monthToday");
+  if (desktopBtn) desktopBtn.click();
+};
+
+/* Пинч-зум - БЫЛ (непрерывное масштабирование через --hw, живой тест
+   проходил чисто), но Влад после реальной пробы на телефоне, 31.08, тем же
+   вечером: "масштаб пальцами плохая идея, отключай. Масштаб пусть будет
+   кнопками сверху как и в десктопной версии" - убран целиком, не оставлен
+   выключенным про запас. Замена - .lp-m-zoom выше (см. HTML/CSS и
+   обработчик рядом) - те же 4 дискретных масштаба, что на десктопе (без
+   "Месяц" - см. кнопку "Сегодня" выше), просто ретранслируют клик на
+   СКРЫТЫЙ десктопный чип (.controls .chip[data-zoom]) - вся логика (умный
+   прицел на STATE.lastEdited, primeTo) уже там, не дублируем. Если пинч
+   когда-то понадобится снова - искать в git-истории этот файл на 31.08, не
+   писать заново с нуля. */
+
+/* ===================== ПЕРЕТАСКИВАНИЕ ЗАЯВКИ ДОЛГИМ НАЖАТИЕМ (Влад, 31.08) =====================
+   "при зажатии заявки она могла перемещаться, как на смартфонах когда
+   зажимаешь приложение - супер удобно". НАРОЧНО отдельный, независимый от
+   десктопного мышиного драга канал (тот целиком пропускает touch - см.
+   `if (IS_TOUCH_) return;` в начале его pointerdown, 30.08) - не втискиваем
+   сюда общую систему с её замыканиями (drag/lift()/магнит), поднимаем свою,
+   компактную: долгое нажатие (420ms, тот же порог, что уже у сцепки в
+   Списке) БЕЗ значимого сдвига - это "начинаем тащить"; сдвиг ДО истечения
+   таймера - это обычный скролл пальцем, не жест. Только режим "Таблица" -
+   в "Списке" плиток с точным временем нет, тащить нечего. Магнит-примагничивание
+   к соседям (как у мыши) сюда НЕ перенесено - только шаг в полчаса, тот же,
+   что у обычного создания - первая версия, можно усилить позже. */
+(function(){
+  if (!IS_TOUCH_) return;
+  var LONG_PRESS_MS = 420, MOVE_CANCEL_PX = 8, HOUR_STEP = 0.5, DBLTAP_MS = 300;
+  var pending = null, dragT = null;
+  var lastTapSegId_ = null, lastTapAt_ = 0;
+
+  function clearPending_(){
+    if (pending){
+      if (pending.timer) clearTimeout(pending.timer);
+      pending.el.classList.remove("pressing");
+    }
+    pending = null;
+  }
+  /* Влад, 31.08: "диалоговое окно только при двойном нажатии" - короткий тап
+     (таймер долгого нажатия не успел сработать, драг не поднялся) больше НЕ
+     открывает меню сам по себе (см. отдельный разбор у click-обработчика
+     30.08 чуть выше по файлу - там он теперь явно пропускает Таблицу) -
+     только ВТОРОЙ тап по ТОЙ ЖЕ плитке в пределах DBLTAP_MS, тот же принцип,
+     что уже даёт двойной клик мышью на десктопе. */
+  function handleShortTap_(seg, el, x, y){
+    var now = Date.now();
+    if (lastTapSegId_ === seg.id && now - lastTapAt_ < DBLTAP_MS){
+      lastTapSegId_ = null; lastTapAt_ = 0;
+      openCtxMenu_(seg, x, y);
+    } else {
+      lastTapSegId_ = seg.id; lastTapAt_ = now;
+    }
+  }
+  rowsEl.addEventListener("touchstart", function(e){
+    if (!pageRoot.classList.contains("lp-mode-table") || dragT || e.touches.length !== 1) return;
+    var el = e.target.closest(".seg");
+    if (!el) return;
+    var seg = STATE.segs.find(function(s){ return s.id === el.dataset.id; });
+    if (!seg) return;
+    var t = e.touches[0];
+    pending = {el:el, seg:seg, x0:t.clientX, y0:t.clientY};
+    el.classList.add("pressing");
+    pending.timer = setTimeout(function(){
+      if (!pending) return;
+      var p = pending; pending = null;
+      p.el.classList.remove("pressing");
+      if (navigator.vibrate) navigator.vibrate(10);
+      lpTStartDrag_(p.el, p.seg, p.x0, p.y0);
+    }, LONG_PRESS_MS);
+  }, {passive:true});
+  rowsEl.addEventListener("touchmove", function(e){
+    if (pending){
+      var t = e.touches[0];
+      if (Math.abs(t.clientX - pending.x0) > MOVE_CANCEL_PX || Math.abs(t.clientY - pending.y0) > MOVE_CANCEL_PX) clearPending_();
+      return;   /* до подтверждения - палец волен скроллить, ничего не блокируем */
+    }
+    if (!dragT) return;
+    e.preventDefault();
+    lpTUpdateDrag_(e.touches[0]);
+  }, {passive:false});
+  rowsEl.addEventListener("touchend", function(e){
+    if (dragT){
+      /* Подавляем синтетический click, который браузер шлёт следом за
+         touchend, ДАЖЕ после реального перемещения пальцем - без этого он
+         доходил бы до общего click-обработчика плитки (тот, впрочем, уже
+         сам пропускает Таблицу - см. разбор там - двойная страховка). */
+      e.preventDefault();
+      clearPending_();
+      lpTEndDrag_();
+      return;
+    }
+    if (pending){
+      var seg = pending.seg, el = pending.el;
+      var t = (e.changedTouches && e.changedTouches[0]) || {clientX:0, clientY:0};
+      clearPending_();
+      handleShortTap_(seg, el, t.clientX, t.clientY);
+      return;
+    }
+    clearPending_();
+  }, {passive:false});   /* touchend по умолчанию и так passive:false в браузерах, но явно - надёжнее (e.preventDefault() выше зависит от этого) */
+  rowsEl.addEventListener("touchcancel", function(){
+    clearPending_();
+    if (dragT) lpTAbortDrag_(true);
+  });
+
+  function lpTStartDrag_(el, seg, x0, y0){
+    /* Влад, 31.08: "плитка должна дрожать как в мобильных приложениях и
+       перемещаться с анимацией" - .lp-t-armed (см. CSS, keyframes lpTWiggle,
+       4 коротких колебания и сама останавливается - не бесконечный цикл,
+       раздел 5 ГОСТа запрещает вечные пульсы без именованного исключения)
+       играет РОВНО до первого реального движения пальца - снимается в
+       lpTUpdateDrag_, иначе CSS-анимация трогала бы тот же transform, что и
+       JS ниже (перетаскивание), и они дрались бы за кадр. */
+    el.classList.add("lifted", "lp-t-armed");
+    dragT = {el:el, seg:seg, hw:parseFloat(getComputedStyle(pageRoot).getPropertyValue("--hw")) || ZOOM[STATE.zoom],
+             s0:seg.s, l0:seg.l, v0:seg.v, x0:x0, y0:y0, curDx:0, hoverRow:null, moved:false};
+  }
+  function lpTUpdateDrag_(t){
+    if (!dragT.moved){ dragT.moved = true; dragT.el.classList.remove("lp-t-armed"); }
+    var dx = t.clientX - dragT.x0, dy = t.clientY - dragT.y0;
+    dragT.curDx = dx;
+    dragT.el.style.transform = "translate(" + dx + "px," + dy + "px) scale(1.03)";
+    var row = document.elementFromPoint(t.clientX, t.clientY);
+    row = row && row.closest ? row.closest(".row") : null;
+    if (row !== dragT.hoverRow){
+      if (dragT.hoverRow) dragT.hoverRow.classList.remove("drop");
+      dragT.hoverRow = row;
+      if (row) row.classList.add("drop");
+    }
+  }
+  function lpTSettle_(el){
+    el.classList.remove("lifted", "lp-t-armed");
+    el.style.transition = "transform 150ms var(--ease-out-strong)";
+    el.style.transform = "";
+    setTimeout(function(){ el.style.transition = ""; }, 160);
+  }
+  function lpTEndDrag_(){
+    var d = dragT; dragT = null;
+    if (d.hoverRow) d.hoverRow.classList.remove("drop");
+    lpTSettle_(d.el);
+
+    var newS = Math.round((d.s0 + d.curDx / d.hw) / HOUR_STEP) * HOUR_STEP;
+    newS = Math.max(0, Math.min(HOURS - d.seg.l, newS));
+    var trackEl = d.hoverRow ? d.hoverRow.querySelector(".track") : null;
+    var newV = trackEl ? parseInt(trackEl.dataset.v, 10) : d.v0;
+    if (newS === d.s0 && newV === d.v0) return;   /* не сдвинулось - коммитить нечего */
+
+    var clash = STATE.segs.some(function(s){
+      return s.id !== d.seg.id && s.v === newV && newS < s.s + s.l && s.s < newS + d.seg.l;
+    });
+    if (clash){
+      flashBad(d.el); S.reject();
+      toast("Пересечение с другим отрезком - не поставил", null);
+      return;
+    }
+    var before = {s:d.s0, l:d.l0, v:d.v0};
+    d.seg.s = newS; d.seg.v = newV;
+    S.drop();
+    commit(d.seg, before, "Отрезок перенесён");
+    renderRows();   /* commit() не перерисовывает сам на успехе - переезд на другую строку иначе не отразится в DOM */
+  }
+  function lpTAbortDrag_(){
+    var d = dragT; dragT = null;
+    if (d.hoverRow) d.hoverRow.classList.remove("drop");
+    lpTSettle_(d.el);
+  }
+})();
 
 /* дата окончания служебной плашки = правый край отрезка (Влад, 29.08).
    Конец ровно в полночь = «по последний занятый день включительно» (26.08),
@@ -21313,6 +21521,19 @@ rowsEl.addEventListener("click", function(e){
   if (!IS_TOUCH_) return;
   var el = e.target.closest(".seg");
   if (el){
+    /* НАЙДЕННЫЙ БАГ (31.08, живой пример - Влад: "при зажатии плитки заказа
+       вылезает диалоговое окно, оно мешает перемещать плитку"). В мобильной
+       "Таблице" тап по плитке теперь запускает долгое нажатие -> драг (см.
+       "ПЕРЕТАСКИВАНИЕ ДОЛГИМ НАЖАТИЕМ" ниже) - а браузер ВСЁ РАВНО генерирует
+       синтетический click в конце касания (это не отменяется происходившим
+       раньше touchmove/touchend, если явно не остановить - см. preventDefault
+       в lpTEndDrag_/lpTAbortDrag_ ниже), и этот ЖЕ обработчик, построенный
+       ещё 30.08 под "тап = меню" (когда драга в Таблице не было), продолжал
+       открывать меню поверх только что передвинутой/перемещаемой плитки.
+       Теперь в Таблице тап по плитке меню НЕ открывает вообще - только
+       двойной тап (см. lpTDblTap_ рядом с драгом - "диалоговое окно только
+       при двойном нажатии", тот же принцип, что уже даёт dblclick мыши). */
+    if (pageRoot.classList.contains("lp-mode-table")) return;
     var seg = STATE.segs.find(function(s){ return s.id === el.dataset.id; });
     if (seg) openCtxMenu_(seg, e.clientX, e.clientY);
     return;
@@ -21842,6 +22063,13 @@ function renderFleetMenuMain_(){
      убираем ту прямую копию, просто добавляем сюда же как явный пункт меню,
      на случай если правым кликнули не точно по верхней строке. */
   items.push('<button class="ctxmenu-item" data-fa="copy">Копировать</button>');
+  /* Скачать СТС (Влад, 31.08, четвёртый заход: "нужно чтобы можно было скачать
+     стс на тягач и прицеп") - файл ищется по факту клика (lpDownloadSts_), не
+     заранее - Планировка не подгружает sprav_asset_documents целиком (это отдельный
+     запрос на каждый актив, как в Справочниках). "СТС прицепа" показываем только
+     если прицеп вообще сцеплен - иначе скачивать нечего. */
+  items.push('<button class="ctxmenu-item" data-fa="sts-tractor">Скачать СТС тягача</button>');
+  if (trlAssign) items.push('<button class="ctxmenu-item" data-fa="sts-trailer">Скачать СТС прицепа</button>');
   if (drvAssign) items.push('<button class="ctxmenu-item" data-fa="uncouple-driver">Высадить · ' + pageEsc_(lpFleetPersonName_(drvAssign.resource_key)) + "</button>");
   items.push('<button class="ctxmenu-item" data-fa="couple-driver">' + (drvAssign ? "Пересадить водителя" : "Посадить водителя") + "</button>");
   if (trlAssign) items.push('<button class="ctxmenu-item" data-fa="uncouple-trailer">Отцепить · ' + pageEsc_(lpFleetAssetLabel_(trlAssign.resource_key)) + "</button>");
@@ -21867,10 +22095,33 @@ function handleFleetMenuAction_(action){
   var v = STATE.vehicles[fleetMenuVi_];
   if (!v){ closeFleetMenu_(); return; }
   if (action === "copy"){ lpCopyRow_(fleetMenuVi_); closeFleetMenu_(); return; }
+  if (action === "sts-tractor"){ lpDownloadSts_(v.gos); closeFleetMenu_(); return; }
+  if (action === "sts-trailer"){
+    var trl = lpFleetOpenOnTractor_("trailer", v.gos);
+    if (trl) lpDownloadSts_(trl.resource_key);
+    closeFleetMenu_();
+    return;
+  }
   if (action === "uncouple-driver") return fleetDoUncouple_("driver", v);
   if (action === "uncouple-trailer") return fleetDoUncouple_("trailer", v);
   if (action === "couple-driver") return renderFleetPicker_("driver", v);
   if (action === "couple-trailer") return renderFleetPicker_("trailer", v);
+}
+/* Скачивание СТС (31.08) - тот же эндпоинт/приём, что карточка техники в
+   Справочниках (assetDocsLoad_/assetDocsPaint_) - ищем документ doc_type='sts'
+   среди документов актива и открываем файл в новой вкладке. Not preloaded - на
+   каждый клик отдельный запрос, Планировка не носит с собой список документов
+   всего парка. asset_id для тягача = его госномер (v.gos), для прицепа -
+   resource_key открытой сцепки (тот же id, что sprav_assets.id). */
+function lpDownloadSts_(assetId){
+  fetchFromYardApi_('/sprav/asset_documents', { asset_id: assetId }).then(function(r){
+    if (!r.ok){ toast('Не удалось получить документы', null); return; }
+    var docs = (r.data && r.data.documents) || [];
+    var sts = docs.filter(function(d){ return d.doc_type === 'sts'; })[0];
+    if (!sts){ toast('СТС не загружен для ' + assetId, null); return; }
+    var href = YARD_API_BASE + '/sprav/asset_document_file?session_token=' + encodeURIComponent(SESSION_TOKEN) + '&id=' + encodeURIComponent(sts.id);
+    window.open(href, '_blank');
+  }).catch(function(){ toast('Ошибка сети - не удалось получить СТС', null); });
 }
 function fleetDoUncouple_(kind, v){
   /* Слот РЕАЛЬНОГО текущего occupant'а, не жёсткий 1 - см. большой разбор у
@@ -22051,19 +22302,14 @@ pageRoot.addEventListener("contextmenu", function(e){
     openCtxMenu_(seg, e.clientX, e.clientY);
     return;
   }
-  /* Влад, 31.08 (второй заход): разделили шапку строки по строкам - верхняя
-     (.rh1, госномер/тягач) правым кликом КОПИРУЕТ данные, нижняя (остальная
-     .rowhead - прицеп/водитель) по-прежнему открывает меню сцепки, как раньше.
-     Проверяем .rh1 ПЕРВЫМ (он вложен внутрь .rowhead - иначе общий .rowhead-
-     блок перехватил бы клик раньше, чем дойдёт до узкого .rh1). */
-  var rh1 = e.target.closest(".rh1");
-  if (rh1){
-    var row1 = rh1.closest(".row");
-    var vi1 = row1 ? parseInt(row1.dataset.v, 10) : NaN;
-    closeCtxMenu_(); closeFleetMenu_();
-    if (!isNaN(vi1)) lpCopyRow_(vi1);
-    return;
-  }
+  /* Влад, 31.08 (пятый заход - разделение по .rh1/.rh2 из второго захода
+     ОТМЕНЕНО): "мне нужно чтобы копирование было только через ПКМ, а ПКМ
+     срабатывало и на госномере" - т.е. правый клик по .rh1 (госномер/тягач)
+     не должен сразу копировать в обход меню, должен открывать ТО ЖЕ меню
+     сцепки, что и остальная .rowhead - "Копировать" там уже есть первым
+     пунктом. Вся шапка строки теперь ведёт себя одинаково, без вложенного
+     частного случая. lpCopyRow_ никуда не делась - её по-прежнему зовёт
+     "Копировать" внутри меню (handleFleetMenuAction_). */
   var rh = e.target.closest(".rowhead");
   if (rh){
     var row = rh.closest(".row");
@@ -22184,9 +22430,48 @@ function initLP(){
      что уже есть у IS_TOUCH_ выше) - разворот телефона посреди работы не
      ожидается для этого сценария, переоткрытие вкладки подхватит новое
      состояние. */
-  pageRoot.classList.toggle("lp-mobile", lpIsMobileViewport_());
+  var isMobile_ = lpIsMobileViewport_();
+  pageRoot.classList.toggle("lp-mobile", isMobile_);
+  /* Таблица - единственный мобильный режим с 31.08 (Список убран целиком по
+     итогу штурм-сессии) - .lp-mode-table раньше переключал живой человек
+     через .lp-m-modeswitch (см. git-история), теперь просто всегда включен
+     вместе с .lp-mobile. Оставлен отдельным классом (не слит с .lp-mobile) -
+     под ним всё ещё держится большой пласт CSS/JS (сжатая .rowhead, драг
+     долгим нажатием, wiggle-анимация), переименовывать рискованнее, чем
+     оставить два класса синхронными. */
+  pageRoot.classList.toggle("lp-mode-table", isMobile_);
+  /* НАЙДЕННЫЙ БАГ (31.08, живой пример Влада на мобильной "Таблице": "если
+     длинномеры сворачиваю - пропадает вообще планировка... эта проблема уже
+     была сегодня описана" - та же история, что у Миши днём раньше). Корень:
+     STATE.collapsed НЕ сбрасывался здесь (в отличие от vehicles/segs ниже) -
+     он живёт в объекте STATE верхнего уровня, который создаётся ОДИН раз на
+     всю загрузку страницы, а initLP() вызывается заново при КАЖДОМ открытии
+     вкладки (см. большой разбор у push()/STATE.seq чуть ниже - тот же класс
+     ситуации). Свернул группу, ушёл с вкладки, вернулся - она всё ещё
+     свёрнута; свернул ОБЕ - лента пуста, и ничто, кроме ПОЛНОЙ перезагрузки
+     страницы (не просто смены вкладки), это не чинит - reload заново создаёт
+     STATE.collapsed=={}, а обычное открытие вкладки - нет. Сбрасываем здесь,
+     тем же принципом "пересобираем начисто", что уже применён к vehicles/segs. */
+  STATE.collapsed = {};
   STATE.vehicles = [];
   STATE.segs = [];
+  /* НАЙДЕННЫЙ БАГ (31.08, Влад: "зашёл в планировку, прогулялся на другую
+     вкладку, вернулся - там пусто, помогает только обновление страницы").
+     Корень - ТОТ ЖЕ класс, что у STATE.collapsed чуть выше: segsSnapshot_ и
+     planMaxUpdated_ (см. fetchPlanSegs_ ниже) - тоже переменные ВЕРХНЕГО
+     уровня модуля, живут всю загрузку страницы, initLP() их не трогал. При
+     возврате на вкладку STATE.segs обнуляется (строка выше), но снимок с
+     ПРЕДЫДУЩЕГО захода остаётся - следующий fetchPlanSegs_() видит на сервере
+     тот же max_updated и то же количество записей, что и в устаревшем
+     снимке (сервер и правда не менялся, пока логист гулял по другим
+     вкладкам) и решает "ничего не изменилось", молча пропуская
+     applyServerSegs_()+renderRows() - лента остаётся пустой навсегда, пока
+     не будет полной перезагрузки страницы (та обнуляет ВСЕ переменные модуля
+     с нуля, а не только STATE). Сбрасываем здесь же, тем же принципом
+     "пересобираем начисто" - следующий fetchPlanSegs_() увидит "снимка нет"
+     и честно перерисует. */
+  segsSnapshot_ = {};
+  planMaxUpdated_ = "";
   /* STATE.seq НЕ трогаем здесь - см. развёрнутый разбор у push() (Влад, 30.08,
      пропажа заявки на "894"). initLP() вызывается заново при КАЖДОМ открытии
      вкладки за одну загрузку страницы (см. комментарий у window.LP ниже) - если
@@ -22209,8 +22494,19 @@ function initLP(){
   syncControlChips();
   renderAll();
   /* «Сейчас» ставим в правую треть: в Штатке текущий день заполняют задним числом,
-     и если встать вплотную к «сейчас», экран выглядит пустым не по вине ленты. */
-  board.scrollLeft = Math.max(0, (nowHour() - 42) * ZOOM[STATE.zoom]);
+     и если встать вплотную к «сейчас», экран выглядит пустым не по вине ленты.
+     Мобильная Таблица - экран УЗКИЙ (не широкий десктоп), фикс. смещение "-42ч"
+     унесло бы "сейчас" далеко за правый край видимой области - центрируем
+     честно по реальной ширине (тот же приём, что раньше жил в обработчике
+     переключателя Список/Таблица, до того как Список убрали 31.08 и открытие
+     стало сразу Таблицей - без этой ветки телефон при каждом заходе на вкладку
+     открывался бы вне "сейчас", пока пользователь не нажмёт "Сегодня" вручную). */
+  if (isMobile_){
+    var mHw = ZOOM[STATE.zoom], mVisibleHours = board.clientWidth / mHw;
+    board.scrollLeft = Math.max(0, (nowHour() - mVisibleHours / 2) * mHw);
+  } else {
+    board.scrollLeft = Math.max(0, (nowHour() - 42) * ZOOM[STATE.zoom]);
+  }
   updateMonthLabel_();       /* после scrollLeft - ярлык месяца сразу соответствует видимому дню */
   fetchPlanSegs_();          /* свежие записи с сервера сразу при открытии, не ждать до 7 сек поллинга */
   sendPresence_(); fetchPresence_();   /* то же самое для присутствия - не ждать первый тик */

@@ -6078,6 +6078,29 @@ function getRepairsData(staffData) {
   return repairs;
 }
 
+// Деньги по машине (выручка/ФОТ/топливо/запчасти/штрафы/проходные/прибыль) - с сервера
+// (park_reports, план 2026-08-31), тихий null при любой проблеме - вызывающий откатывается
+// на старое чтение Sheets ровно как раньше. Тип/статус/план техники сервер НЕ отдаёт - та
+// часть (Штатка) мигрирует отдельно, другим чатом, см. CLAUDE.md.
+function fetchParkHistoryFromServer_(fromDate, toDate) {
+  try {
+    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    if (!apiKey) return null;
+    var fromStr = Utilities.formatDate(fromDate, 'Europe/Moscow', 'yyyy-MM-dd');
+    var toStr = Utilities.formatDate(toDate, 'Europe/Moscow', 'yyyy-MM-dd');
+    var resp = UrlFetchApp.fetch(
+      'https://api.yardhub.ru/api/park_history?from=' + fromStr + '&to=' + toStr,
+      { headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true }
+    );
+    if (resp.getResponseCode() !== 200) return null;
+    var data = JSON.parse(resp.getContentText());
+    if (!data || !data.vehicles) return null;
+    return data; // { vehicles: [{gos,revenue,fot,fuel,parts,fines,tolls,profit,plan}], months_covered: [...] }
+  } catch (err) {
+    return null;
+  }
+}
+
 // Строит массив машин (страница "Техника") за диапазон дат, по месяцам. Для каждого
 // затронутого месяца - сначала пробуем "Данные_1С_история" (авторитетно: пишется из
 // отдельного письма 1С "за прошлый месяц", см. importParkReports()/writeParkHistoryForMonth_()).
@@ -6087,9 +6110,24 @@ function getRepairsData(staffData) {
 // ([2]=Тип,[3]=Статус,[4]=Выручка,[5]=ФОТ,[6]=Топливо,[7]=Запчасти,[8]=Штрафы,[9]=Проходные,
 // [10]=Валовая прибыль,[11]=План ВП) - можно обрабатывать одинаково независимо от источника.
 // Марка/прицеп/водитель - "текущее состояние" из Штатки (staffData), не историзируются.
-function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate) {
+//
+// С 2026-08-31: сами ЦИФРЫ ДЕНЕГ (revenue/fot/fuel/parts/fines/tolls/profit) сначала пробуем
+// взять с сервера (fetchParkHistoryFromServer_) - Sheets ниже по-прежнему читаются ВСЕГДА
+// (тип/статус/план машины по-прежнему только там, Штатка ещё не переехала), но если сервер
+// покрывает месяц - его числа ПЕРЕЗАПИСЫВАЮТ то, что вычиталось из листа для этого месяца
+// (см. блок "перезаписываем деньги с сервера" в конце функции). Тихий фолбэк на Sheets-числа,
+// если сервер недоступен или не покрывает месяц - ничего не ломается, просто медленнее.
+// skipServerOverride - ТОЛЬКО для verifyServerParkHistory_ (сверка сервер vs Sheets на
+// одинаковом staffData/диапазоне) - в обычной работе всегда false/не передаётся.
+function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate, skipServerOverride) {
   var from = new Date(fromDate); from.setHours(0, 0, 0, 0);
   var to = new Date(toDate); to.setHours(23, 59, 59, 999);
+
+  var serverPark_ = skipServerOverride ? null : fetchParkHistoryFromServer_(from, to);
+  var serverParkByGos_ = {};
+  if (serverPark_) {
+    serverPark_.vehicles.forEach(function(v) { serverParkByGos_[normalizeGos(v.gos)] = v; });
+  }
 
   var monthKeys = [];
   var cursor = new Date(from.getFullYear(), from.getMonth(), 1);
@@ -6221,6 +6259,16 @@ function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate) {
       }
     }
     if (driverByGos[gos]) agg.driver = driverByGos[gos].driver; // приоритет - водитель за сам период
+    // Перезаписываем деньги с сервера (план 2026-08-31) - ТОЛЬКО 7 финансовых полей, если
+    // сервер знает эту машину за запрошенный диапазон; план/тип/статус/марка/прицеп/водитель
+    // остаются из Sheets-логики выше (Штатка ещё не переехала). Не найдена на сервере (новая
+    // машина, диапазон уходит в непокрытые месяцы) - тихо остаёмся на числах из Sheets.
+    var serverV_ = serverParkByGos_[normalizeGos(gos)];
+    if (serverV_) {
+      agg.revenue = serverV_.revenue; agg.fot = serverV_.fot; agg.fuel = serverV_.fuel;
+      agg.parts = serverV_.parts; agg.fines = serverV_.fines; agg.tolls = serverV_.tolls;
+      agg.profit = serverV_.profit;
+    }
     result.push(agg);
   });
   return result;
@@ -6949,6 +6997,41 @@ function verifyServerOrdersCalc(period) {
     Logger.log('⚠️ РАСХОЖДЕНИЯ серверного и локального расчёта за ' + mk + ' (' + problems.length + '):');
     problems.forEach(function(p) { Logger.log('  - ' + p); });
     Logger.log('Если серверный расчёт включён (USE_SERVER_ORDERS_CALC=on) - выключи его, пока не разобрались.');
+  }
+  return problems;
+}
+
+// Сверка сервера (park_reports) с Sheets (Данные_1С_история/История_финансов) для отчёта
+// "Парк" - план переноса 2026-08-31. Запускать вручную в редакторе после каждого реального
+// закрытия месяца (когда "Отчет парк [месяц]" реально архивируется 1С), тот же принцип, что
+// verifyServerOrdersCalc/verifyServerDebtCalc. period по умолчанию - текущий месяц целиком.
+function verifyServerParkHistory_(fromDateStr, toDateStr) {
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var from = fromDateStr ? new Date(fromDateStr) : new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1);
+  var to = toDateStr ? new Date(toDateStr) : new Date(new Date().getFullYear(), new Date().getMonth(), 0);
+  var staffData = getStaffData(ss);
+
+  var sheetsOnly = aggregateFinHistoryForRange(ss, staffData, from, to, true); // skipServerOverride
+  var withServer = aggregateFinHistoryForRange(ss, staffData, from, to, false);
+
+  var sheetsByGos = {}; sheetsOnly.forEach(function(v) { sheetsByGos[v.gos] = v; });
+  var problems = [];
+  withServer.forEach(function(sv) {
+    var a = sheetsByGos[sv.gos];
+    if (!a) { problems.push(sv.gos + ': есть после сервера, НЕТ в чистом Sheets-расчёте (новая машина?)'); return; }
+    ['revenue', 'fot', 'fuel', 'parts', 'fines', 'tolls', 'profit'].forEach(function(f) {
+      if (Math.abs((a[f] || 0) - (sv[f] || 0)) >= 1) {
+        problems.push(sv.gos + '.' + f + ': Sheets=' + a[f] + ' сервер=' + sv[f]);
+      }
+    });
+  });
+
+  if (problems.length === 0) {
+    Logger.log('✅ Сервер и Sheets по Парку за ' + Utilities.formatDate(from, 'Europe/Moscow', 'yyyy-MM-dd') +
+      ' - ' + Utilities.formatDate(to, 'Europe/Moscow', 'yyyy-MM-dd') + ' совпадают полностью (' + withServer.length + ' машин).');
+  } else {
+    Logger.log('⚠️ РАСХОЖДЕНИЯ сервера и Sheets по Парку (' + problems.length + '):');
+    problems.forEach(function(p) { Logger.log('  - ' + p); });
   }
   return problems;
 }

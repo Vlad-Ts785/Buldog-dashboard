@@ -2032,19 +2032,35 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   background-image:repeating-linear-gradient(135deg,rgba(139,137,128,.15) 0 10px,rgba(139,137,128,.06) 10px 20px);
   border-top:1px dashed rgba(139,137,128,.4);border-bottom:1px dashed rgba(139,137,128,.4);
 }
-/* Ремонт ОДНОВРЕМЕННО с вакантностью (Влад, 30.08: "единственный момент, когда
-   два статуса могут накладываться друг на друга") - полосатый оверлей ПОВЕРХ
-   обычной плитки ремонта, не переопределяет её paint()-заливку (та остаётся
-   inline-стилем с более высоким приоритетом) - тот же приём, что .ring/.hov:
-   отдельный слой поверх, а не борьба с инлайн-цветом. Работает в любом режиме
-   раскраски (Состояние/Менеджер/Логист), не только "Состояние". */
-#page-logistics-plan .seg-vacant-stripe{
-  position:absolute;inset:0;border-radius:inherit;pointer-events:none;z-index:1;
-  /* Влад, 31.08 (четвёртый заход): "полоска должна быть чуть-чуть шире" -
-     14px/14px (цвет/прозрачно) -> 20px/20px по образцу присланного скрина. */
+/* Ремонт ОДНОВРЕМЕННО с вакантностью/"без водителя" (Влад, 30.08: "единственный
+   момент, когда два статуса могут накладываться друг на друга") - полосатый
+   оверлей ПОВЕРХ обычной плитки ремонта, не переопределяет её paint()-заливку
+   (та остаётся inline-стилем с более высоким приоритетом) - тот же приём, что
+   .ring/.hov: отдельный слой поверх, а не борьба с инлайн-цветом. Работает в
+   любом режиме раскраски (Состояние/Менеджер/Логист), не только "Состояние".
+   Влад, 31.08 (пятый заход, живой пример - "Ремонт до 04.09" целиком тонул в
+   полоску и склеенный текст, хотя реально без водителя машина была только
+   ЧАСТЬ этого срока): "нужно, чтобы вот сам этот кусок, где идёт пересечение,
+   отображался [полосато]" - НЕ вся плитка ремонта. Раньше .seg-vacant-stripe
+   растягивался на весь `.seg` (inset:0) - теперь `.seg-overlap-badge` занимает
+   только ГЕОМЕТРИЧЕСКОЕ пересечение (см. lpRepairOverlapRange_ в JS), позиция/
+   ширина - % от родного `.seg`. Плавающий "бейдж" с собственным скруглением и
+   тенью, визуально отдельный кусок внутри более длинной плитки - не просто
+   смена заливки на всю ширину. */
+#page-logistics-plan .seg-overlap-badge{
+  position:absolute;top:0;bottom:0;border-radius:6px;overflow:hidden;z-index:2;
+  display:flex;align-items:center;pointer-events:none;
+  box-shadow:0 0 0 1px rgba(0,0,0,.35),0 2px 5px rgba(0,0,0,.35);
+}
+#page-logistics-plan .seg-overlap-stripe{
+  position:absolute;inset:0;pointer-events:none;
   background-image:repeating-linear-gradient(45deg,
     rgba(139,137,128,.4) 0 10px, rgba(139,137,128,.4) 10px 20px,
     transparent 20px 30px, transparent 30px 40px);
+}
+#page-logistics-plan .seg-overlap-txt{
+  position:relative;z-index:1;padding:0 8px;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;color:var(--text);
 }
 /* прогресс активного рейса - 2px снизу, #page-logistics-plan transform:scaleX (не width) */
 #page-logistics-plan .seg-prog{
@@ -19782,7 +19798,7 @@ function renderRowsInner_(){
 
       /* Вакантная машина (v.vacant, теперь из fleet_assignments - см.
          lpComputeVacant_) - фоновая полоса "вакант", НЕ настоящая заявка (см.
-         vacantBandRange_/isVacantRepairOverlap_ выше) - добавляется ДО
+         vacantBandRange_/lpRepairOverlapRange_ выше) - добавляется ДО
          заявок, чтобы реальные плитки (в т.ч. полосатый ремонт поверх неё)
          легли визуально сверху по порядку DOM. */
       if (v.vacant){
@@ -19798,7 +19814,7 @@ function renderRowsInner_(){
       }
       /* Влад, 31.08 (второй заход): "статус ремонт и без водителя должны
          накладываться друг на друга... вид как на скрине" - раньше полосатый
-         оверлей (см. isVacantRepairOverlap_ ниже) срабатывал ТОЛЬКО поверх
+         оверлей (см. lpRepairOverlapRange_ ниже) срабатывал ТОЛЬКО поверх
          автоматической полосы "вакант" (v.vacant, .track-vacant выше), не
          поверх РУЧНОЙ заявки kind==="driveroff" (которую логист сам тянет на
          ленте - частый случай, по словам Влада). Заявки той же машины НЕ
@@ -20293,7 +20309,7 @@ function syncAllBlinks_(){
 /* Влад, 31.08 (третий заход, живой пример - протянул "Ремонт" на существующую
    заявку "Без водителя", получил отказ "Пересечение с другим отрезком -
    вернул как было"): та же пара статусов, что уже разрешена ВИЗУАЛЬНО
-   (isVacantRepairOverlap_/.seg-vacant-stripe ниже), должна быть разрешена и
+   (lpRepairOverlapRange_/.seg-overlap-badge ниже), должна быть разрешена и
    на уровне самого ДЕЙСТВИЯ - иначе полосатость показывает результат, до
    которого просто нельзя дотянуться. Общая проверка "клэша" (перенос/
    растяжка/создание/правка в шторке - 5 разных мест ниже, у каждого своя
@@ -20347,15 +20363,32 @@ function lpOverlappingSegsOfKind_(s, kind){
       s.s < o.s + o.l && o.s < s.s + s.l;
   });
 }
-function isVacantRepairOverlap_(s){
-  if (s.kind !== "repair") return false;
+/* Влад, 31.08 (пятый заход, живой пример - "Ремонт до 04.09" тонул в полоску
+   ЦЕЛИКОМ, хотя без водителя машина была только ЧАСТЬ этого срока): "нужно,
+   чтобы вот сам этот кусок, где идёт пересечение, отображался [полосато]" -
+   считаем не просто "есть пересечение" (было isVacantRepairOverlap_), а САМ
+   диапазон пересечения - от него зависят left/width бейджа в makeSeg ниже.
+   Несколько источников "нет водителя" (полоса + driveroff-заявки) объединяются
+   в ОДИН диапазон от самого раннего начала до самого позднего конца (тот же
+   принцип огрубления, что и раньше - не городим несколько бейджей на одну
+   плитку ремонта ради редкого случая). */
+function lpRepairOverlapRange_(s){
+  if (s.kind !== "repair") return null;
   var v = STATE.vehicles[s.v];
-  if (!v) return false;
+  if (!v) return null;
+  var os = null, oe = null;
+  function extend(rs, rl){
+    var a = Math.max(s.s, rs), b = Math.min(s.s + s.l, rs + rl);
+    if (b > a){ os = (os == null) ? a : Math.min(os, a); oe = (oe == null) ? b : Math.max(oe, b); }
+  }
   if (v.vacant){
     var band = vacantBandRange_(v);
-    if (band.l > 0 && s.s < band.s + band.l && band.s < s.s + s.l) return true;
+    if (band.l > 0) extend(band.s, band.l);
   }
-  return lpOverlappingSegsOfKind_(s, "driveroff").length > 0;
+  var driveroffSegs = lpOverlappingSegsOfKind_(s, "driveroff");
+  driveroffSegs.forEach(function(o){ extend(o.s, o.l); });
+  if (os == null) return null;
+  return {s: os, l: oe - os, driveroffSegs: driveroffSegs};
 }
 function makeSeg(s){
   var el = document.createElement("div");
@@ -20363,7 +20396,7 @@ function makeSeg(s){
   var cls = "seg";
   if (s.s + s.l <= now) cls += " is-past";                     /* завершён - приглушаем */
   if (STATE.openId === s.id) cls += " is-open";                /* кольцо переживает перерендер */
-  var vacantStripe = isVacantRepairOverlap_(s);
+  var overlapRange = lpRepairOverlapRange_(s);
   var active = s.kind === "trip" && s.s <= now && now < s.s + s.l;
   el.className = cls;
   el.dataset.id = s.id;
@@ -20381,27 +20414,26 @@ function makeSeg(s){
     head = '<span class="seg-id"><b>' + three(s.mg) + '</b><i>' + three(s.lg) + '</i>' +
       '<span class="seg-drv ' + (v && v.vacant ? "off" : "on") + '"></span></span>';
   }
-  /* Влад, 31.08 (четвёртый заход, живой пример): "текст должен не
-     пересекаться, а идти друг за другом: «Ремонт до такого-то числа» и «Без
-     водителя до такого-то числа»" - у ремонта и заявки "без водителя" КАЖДЫЙ
-     свой независимый sticky-подпись (см. .seg-label выше - "привязана к
-     скроллу .board"), и когда они лежат друг на друге по времени, оба
-     одновременно норовят прилипнуть к левому краю ОДНОГО и того же видимого
-     просвета - подписи наезжают друг на друга нечитаемо. Настоящая
-     геометрическая стыковка (подвинуть driveroff-подпись ровно на ширину
-     перекрывающего ремонта) недостижима чистым CSS без знания соседа - вместо
-     этого ОБЪЕДИНЯЕМ подписи в одну строку на верхней (полосатой) плитке
-     ремонта - "Ремонт · до X · Без водителя · до Y" - и ГЛУШИМ собственную
-     подпись driveroff-плитки, пока её перекрывает ремонт (иначе тот же самый
-     текст показался бы дважды - на своей плитке и в склейке ремонта). Тот же
-     принцип огрубления, что уже у самой полосатости - подпись гасится/
-     склеивается ЦЕЛИКОМ на весь отрезок, не только на пересекающемся куске. */
+  /* Влад, 31.08 (пятый заход): текст пересечения живёт ТОЛЬКО внутри бейджа
+     (.seg-overlap-badge ниже), сам плиточный .seg-label гасится целиком, когда
+     есть бейдж - иначе его собственный sticky-label мог бы уехать ПОД бейдж
+     при скролле и воспроизвести ту же коллизию текста заново, просто уровнем
+     глубже (тот класс бага, что уже чинили четвёртым заходом). "Ремонт до X"
+     отдельно вне бейджа НЕ показываем - тот же принцип огрубления, что и у
+     самого диапазона выше: один бейдж на плитку содержит всю нужную
+     информацию сам, не размазываем её по плитке. */
   var segTxt = segLabel(s);
-  if (s.kind === "repair" && vacantStripe){
-    var ovDriveroff = lpOverlappingSegsOfKind_(s, "driveroff");
-    if (ovDriveroff.length) segTxt += " · " + ovDriveroff.map(segLabel).join(" · ");
-  } else if (s.kind === "driveroff" && lpOverlappingSegsOfKind_(s, "repair").length){
+  if (overlapRange || (s.kind === "driveroff" && lpOverlappingSegsOfKind_(s, "repair").length)){
     segTxt = "";
+  }
+  var badgeHtml = "";
+  if (overlapRange){
+    var badgeTxt = segLabel(s);
+    if (overlapRange.driveroffSegs.length) badgeTxt += " · " + overlapRange.driveroffSegs.map(segLabel).join(" · ");
+    var leftPct = (overlapRange.s - s.s) / s.l * 100;
+    var widthPct = overlapRange.l / s.l * 100;
+    badgeHtml = '<span class="seg-overlap-badge" style="left:' + leftPct + '%;width:' + widthPct + '%" title="Ремонт идёт одновременно с отсутствием водителя (вакансия или заявка «Без водителя»)">' +
+      '<span class="seg-overlap-stripe"></span><span class="seg-overlap-txt">' + badgeTxt + '</span></span>';
   }
   el.innerHTML = '<span class="seg-label">' + head +
     '<span class="seg-txt">' + segTxt + "</span>" +
@@ -20412,7 +20444,7 @@ function makeSeg(s){
     (s.kind === "trip" && s.tripMode ? '<span class="seg-daymode" title="' + tripModeLabel_(s.tripMode) + ' - указано вручную при создании">' + tripModeLabel_(s.tripMode).toLowerCase() + '</span>' : "") +
     "</span>" +
     (active ? '<span class="seg-prog"><i></i></span>' : "") +
-    (vacantStripe ? '<span class="seg-vacant-stripe" title="Ремонт идёт одновременно с отсутствием водителя (вакансия или заявка «Без водителя»)"></span>' : "") +
+    badgeHtml +
     '<span class="hov"></span><span class="ring"></span>' +
     '<span class="hnd l"></span><span class="hnd r"></span>';
   paint(el, s);

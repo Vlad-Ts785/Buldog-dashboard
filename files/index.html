@@ -1737,6 +1737,13 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
    скролл при этом продолжает работать) - без этого свой обработчик дрался бы
    с браузерным. */
 #page-logistics-plan.lp-mobile.lp-mode-table .board{touch-action:pan-x pan-y;}
+/* Долгое нажатие -> перетаскивание заявки (см. JS "ПЕРЕТАСКИВАНИЕ ДОЛГИМ
+   НАЖАТИЕМ"). .pressing - визуальный отклик ВО ВРЕМЯ удержания (до
+   подтверждения долгого нажатия), тот же приём "сжалась", что уже у обычного
+   мышиного захвата ниже (scale .97) - не значит "уже можно тащить", только
+   "жму, подожди". .lifted/.row.drop - уже существующие десктопные классы,
+   переиспользуются как есть, не дублируем стили. */
+#page-logistics-plan.lp-mobile.lp-mode-table .seg.pressing{transform:scale(.97);transition:transform 100ms var(--ease-out-soft);}
 #page-logistics-plan .lp-m-top{flex:none;display:flex;align-items:center;gap:10px;padding:14px 14px 8px;}
 #page-logistics-plan .lp-m-date{font-size:16px;font-weight:700;}
 #page-logistics-plan .lp-m-wd{color:var(--muted);font-weight:600;margin-right:6px;text-transform:uppercase;font-size:12px;}
@@ -19992,6 +19999,121 @@ document.getElementById("lpMFilterBadge").onclick = function(){
   }
   board.addEventListener("touchend", endPinch_);
   board.addEventListener("touchcancel", endPinch_);
+})();
+
+/* ===================== ПЕРЕТАСКИВАНИЕ ЗАЯВКИ ДОЛГИМ НАЖАТИЕМ (Влад, 31.08) =====================
+   "при зажатии заявки она могла перемещаться, как на смартфонах когда
+   зажимаешь приложение - супер удобно". НАРОЧНО отдельный, независимый от
+   десктопного мышиного драга канал (тот целиком пропускает touch - см.
+   `if (IS_TOUCH_) return;` в начале его pointerdown, 30.08) - не втискиваем
+   сюда общую систему с её замыканиями (drag/lift()/магнит), поднимаем свою,
+   компактную: долгое нажатие (420ms, тот же порог, что уже у сцепки в
+   Списке) БЕЗ значимого сдвига - это "начинаем тащить"; сдвиг ДО истечения
+   таймера - это обычный скролл пальцем, не жест. Только режим "Таблица" -
+   в "Списке" плиток с точным временем нет, тащить нечего. Магнит-примагничивание
+   к соседям (как у мыши) сюда НЕ перенесено - только шаг в полчаса, тот же,
+   что у обычного создания - первая версия, можно усилить позже. */
+(function(){
+  if (!IS_TOUCH_) return;
+  var LONG_PRESS_MS = 420, MOVE_CANCEL_PX = 8, HOUR_STEP = 0.5;
+  var pending = null, dragT = null;
+
+  function clearPending_(){
+    if (pending){
+      if (pending.timer) clearTimeout(pending.timer);
+      pending.el.classList.remove("pressing");
+    }
+    pending = null;
+  }
+  rowsEl.addEventListener("touchstart", function(e){
+    if (!pageRoot.classList.contains("lp-mode-table") || dragT || e.touches.length !== 1) return;
+    var el = e.target.closest(".seg");
+    if (!el) return;
+    var seg = STATE.segs.find(function(s){ return s.id === el.dataset.id; });
+    if (!seg) return;
+    var t = e.touches[0];
+    pending = {el:el, seg:seg, x0:t.clientX, y0:t.clientY};
+    el.classList.add("pressing");
+    pending.timer = setTimeout(function(){
+      if (!pending) return;
+      var p = pending; pending = null;
+      p.el.classList.remove("pressing");
+      if (navigator.vibrate) navigator.vibrate(10);
+      lpTStartDrag_(p.el, p.seg, p.x0, p.y0);
+    }, LONG_PRESS_MS);
+  }, {passive:true});
+  rowsEl.addEventListener("touchmove", function(e){
+    if (pending){
+      var t = e.touches[0];
+      if (Math.abs(t.clientX - pending.x0) > MOVE_CANCEL_PX || Math.abs(t.clientY - pending.y0) > MOVE_CANCEL_PX) clearPending_();
+      return;   /* до подтверждения - палец волен скроллить, ничего не блокируем */
+    }
+    if (!dragT) return;
+    e.preventDefault();
+    lpTUpdateDrag_(e.touches[0]);
+  }, {passive:false});
+  rowsEl.addEventListener("touchend", function(){
+    clearPending_();
+    if (dragT) lpTEndDrag_();
+  });
+  rowsEl.addEventListener("touchcancel", function(){
+    clearPending_();
+    if (dragT) lpTAbortDrag_(true);
+  });
+
+  function lpTStartDrag_(el, seg, x0, y0){
+    el.classList.add("lifted");
+    dragT = {el:el, seg:seg, hw:parseFloat(getComputedStyle(pageRoot).getPropertyValue("--hw")) || ZOOM[STATE.zoom],
+             s0:seg.s, l0:seg.l, v0:seg.v, x0:x0, y0:y0, curDx:0, hoverRow:null};
+  }
+  function lpTUpdateDrag_(t){
+    var dx = t.clientX - dragT.x0, dy = t.clientY - dragT.y0;
+    dragT.curDx = dx;
+    dragT.el.style.transform = "translate(" + dx + "px," + dy + "px) scale(1.03)";
+    var row = document.elementFromPoint(t.clientX, t.clientY);
+    row = row && row.closest ? row.closest(".row") : null;
+    if (row !== dragT.hoverRow){
+      if (dragT.hoverRow) dragT.hoverRow.classList.remove("drop");
+      dragT.hoverRow = row;
+      if (row) row.classList.add("drop");
+    }
+  }
+  function lpTSettle_(el){
+    el.classList.remove("lifted");
+    el.style.transition = "transform 150ms var(--ease-out-strong)";
+    el.style.transform = "";
+    setTimeout(function(){ el.style.transition = ""; }, 160);
+  }
+  function lpTEndDrag_(){
+    var d = dragT; dragT = null;
+    if (d.hoverRow) d.hoverRow.classList.remove("drop");
+    lpTSettle_(d.el);
+
+    var newS = Math.round((d.s0 + d.curDx / d.hw) / HOUR_STEP) * HOUR_STEP;
+    newS = Math.max(0, Math.min(HOURS - d.seg.l, newS));
+    var trackEl = d.hoverRow ? d.hoverRow.querySelector(".track") : null;
+    var newV = trackEl ? parseInt(trackEl.dataset.v, 10) : d.v0;
+    if (newS === d.s0 && newV === d.v0) return;   /* не сдвинулось - коммитить нечего */
+
+    var clash = STATE.segs.some(function(s){
+      return s.id !== d.seg.id && s.v === newV && newS < s.s + s.l && s.s < newS + d.seg.l;
+    });
+    if (clash){
+      flashBad(d.el); S.reject();
+      toast("Пересечение с другим отрезком - не поставил", null);
+      return;
+    }
+    var before = {s:d.s0, l:d.l0, v:d.v0};
+    d.seg.s = newS; d.seg.v = newV;
+    S.drop();
+    commit(d.seg, before, "Отрезок перенесён");
+    renderRows();   /* commit() не перерисовывает сам на успехе - переезд на другую строку иначе не отразится в DOM */
+  }
+  function lpTAbortDrag_(){
+    var d = dragT; dragT = null;
+    if (d.hoverRow) d.hoverRow.classList.remove("drop");
+    lpTSettle_(d.el);
+  }
 })();
 
 /* дата окончания служебной плашки = правый край отрезка (Влад, 29.08).

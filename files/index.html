@@ -19665,12 +19665,26 @@ function visible(v){
   return true;
 }
 /* порядок машин задаёт админ перетаскиванием карточки; хранится по индексам */
+/* НАЙДЕННЫЙ БАГ (Влад, 01.09: "переместил два трала наверх, но они вернулись
+   обратно - не сохранилось моя персонализация"). STATE.order хранил индексы
+   (v.i) в STATE.vehicles - тот же класс проблемы, что уже решён в другом
+   месте этого файла ("индекс в STATE.vehicles не устойчив между визитами -
+   парк пересобирается заново при каждом открытии", см. комментарий у
+   plan_segs про ключ по ГОСНОМЕРУ, не по индексу). Штатка/сортировка парка
+   между визитами может дать другой порядок исходного массива - те же самые
+   числа-индексы из вчерашнего localStorage сегодня указывают на ДРУГИЕ
+   машины (или мимо массива вовсе), и order молча переставал совпадать,
+   откатываясь к порядку по умолчанию. Матчим по v.gos - госномер не
+   меняется от визита к визиту. Сохранение (см. pointerup ниже) переводит
+   индекс в госномер В МОМЕНТ сохранения - dataset.v/track.dataset.v и весь
+   остальной индексный адрес намеренно НЕ трогаем, они стабильны В ПРЕДЕЛАХ
+   одной загрузки страницы, ломается только персистентность МЕЖДУ визитами. */
 function orderedVehicles(){
   if (!STATE.order) return STATE.vehicles.slice();
-  var byI = {}; STATE.vehicles.forEach(function(v){ byI[v.i] = v; });
+  var byGos = {}; STATE.vehicles.forEach(function(v){ if (v.gos) byGos[v.gos] = v; });
   var out = [], seen = {};
-  STATE.order.forEach(function(i){ if (byI[i] && !seen[i]){ out.push(byI[i]); seen[i] = 1; } });
-  STATE.vehicles.forEach(function(v){ if (!seen[v.i]) out.push(v); });
+  STATE.order.forEach(function(gos){ if (byGos[gos] && !seen[gos]){ out.push(byGos[gos]); seen[gos] = 1; } });
+  STATE.vehicles.forEach(function(v){ if (!v.gos || !seen[v.gos]) out.push(v); });
   return out;
 }
 function saveOrder(){
@@ -21118,7 +21132,14 @@ window.addEventListener("pointerup", function(){
   a.row.classList.remove("ghosted");
   if (a.card) a.card.remove();
   if (a.moved){
-    STATE.order = [].map.call(rowsEl.querySelectorAll(".row"), function(r){ return parseInt(r.dataset.v, 10); });
+    /* dataset.v - индекс, стабилен только в пределах ЭТОЙ загрузки страницы -
+       переводим в госномер именно здесь, на границе сохранения (см. разбор у
+       orderedVehicles выше), а не меняем сам dataset.v - тот используется как
+       адрес машины ВЕЗДЕ в файле, трогать рискованнее, чем нужно для фикса. */
+    STATE.order = [].map.call(rowsEl.querySelectorAll(".row"), function(r){
+      var v = STATE.vehicles[parseInt(r.dataset.v, 10)];
+      return v && v.gos;
+    }).filter(Boolean);
     saveOrder();
     S.settle();
     toast("Порядок машин сохранён", null);

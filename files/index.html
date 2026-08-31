@@ -1682,7 +1682,18 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   background:var(--bg4);border:1px solid var(--border);color:var(--muted);
   display:none;align-items:center;justify-content:center;cursor:pointer;
   transition:color .12s ease-out,border-color .12s ease-out;
-}#page-logistics-plan body.can-arrange .row:hover .hide-btn{display:flex;}#page-logistics-plan .hide-btn:hover{color:var(--text);border-color:var(--border-strong);}#page-logistics-plan .hide-btn svg{width:11px;height:11px;}#page-logistics-plan .row.is-hidden .rowhead{opacity:.5;}#page-logistics-plan .track{position:relative;flex:none;height:var(--row-h);}/* Вертикальная сетка часов - Влад, 30.08: "у нас в планировке это всегда была
+}#page-logistics-plan body.can-arrange .row:hover .hide-btn{display:flex;}#page-logistics-plan .hide-btn:hover{color:var(--text);border-color:var(--border-strong);}#page-logistics-plan .hide-btn svg{width:11px;height:11px;}
+/* Копировать данные машины (Влад, 31.08, со слов логистов: "тягач модель
+   госномер, прицеп госномер с типом, водитель с телефоном") - та же плашка,
+   что hide-btn, но БЕЗ can-arrange гейта (это не редактирование, а чтение -
+   доступно всем ролям, кто вообще видит Планировку, включая менеджера) и
+   левее по X, чтобы не перекрываться с ней. */
+#page-logistics-plan .copy-btn{
+  position:absolute;right:30px;top:8px;width:18px;height:18px;border-radius:5px;
+  background:var(--bg4);border:1px solid var(--border);color:var(--muted);
+  display:none;align-items:center;justify-content:center;cursor:pointer;
+  transition:color .12s ease-out,border-color .12s ease-out;
+}#page-logistics-plan .row:hover .copy-btn{display:flex;}#page-logistics-plan .copy-btn:hover{color:var(--text);border-color:var(--border-strong);}#page-logistics-plan .copy-btn svg{width:11px;height:11px;}#page-logistics-plan .row.is-hidden .rowhead{opacity:.5;}#page-logistics-plan .track{position:relative;flex:none;height:var(--row-h);}/* Вертикальная сетка часов - Влад, 30.08: "у нас в планировке это всегда была
    сетка, а тут просто горизонтальные линии... добавь вертикальные на все
    масштабы в зависимости от логики: на самом крупном (сутки) - каждый час".
    Базовое правило (действует на Неделе/Месяце, где часовая сетка слилась бы
@@ -18972,6 +18983,10 @@ function lpApplyFleetDriverStatus_(v){
   v.vacant = !assign;
   v.driver = assign ? lpFleetPersonName_(assign.resource_key) : "";
   v.drivers = v.driver ? [v.driver] : [];
+  /* Телефон - только для "Копировать данные" (см. lpCopyText_), сам resource_key
+     нужен ЗДЕСЬ отдельно от v.driver (имени), т.к. по одному имени телефон не
+     найти обратно - в FLEET_PEOPLE_ ключ поиска именно id/resource_key. */
+  v.driverResourceKey = assign ? assign.resource_key : null;
 }
 /* случайный суффикс СЕССИИ в id записи - записи теперь общие через сервер, и два
    логиста с одинаковым счётчиком seq выдали бы один id (и молча перезаписали бы
@@ -19314,8 +19329,20 @@ function renderScale(){
     var w = dt.getDay(), cls = "day" + ((w === 0 || w === 6) ? " weekend" : "") +
       (d === TODAY_D_ ? " today" : "") + (isNextMonth ? " day-next-month" : "");
     var hrs = "";
+    /* Влад, 31.08, со слов логистов: "на масштабе 3 дня тоже нужна шкала
+       времени, новых вертикальных линий не нужно, время нарезать по текущей
+       разметке" - на "3 дня" вертикальная сетка часов УЖЕ есть (CSS,
+       .z-3d .track::before - минорная линия каждые var(--hw)*3, то есть
+       каждые 3 часа), просто не было подписей рядом с ней. Шаг подписи здесь
+       (3) сознательно повторяет ТОТ ЖЕ шаг, что уже рисует CSS-сетка - если
+       он там когда-то изменится, поменять надо в обоих местах (JS и CSS
+       рядом, .z-3d .track::before, оставил на него ссылку). */
     if (STATE.zoom === "day"){
       for (var h = 0; h < 24; h += 2){
+        hrs += '<span class="hr mono" style="left:' + (h * hw + 3) + 'px">' + (h < 10 ? "0" + h : h) + '</span>';
+      }
+    } else if (STATE.zoom === "3d"){
+      for (var h = 0; h < 24; h += 3){
         hrs += '<span class="hr mono" style="left:' + (h * hw + 3) + 'px">' + (h < 10 ? "0" + h : h) + '</span>';
       }
     }
@@ -19408,6 +19435,7 @@ function renderRows(){
         (v.trailer && v.trailerGos ? '<span class="sep">·</span><span class="kind">' + v.trailer + '</span>' : '') +
         '<span class="sep">·</span><span class="drv' + (v.vacant ? " nd" : "") + '">' + drv + '</span>' +
         (rside ? '<span class="rside">' + rside + '</span>' : '') + '</div>' +
+        '<span class="copy-btn" data-copy="' + v.i + '" title="Скопировать тягач/прицеп/водителя">' + ICON_COPY + '</span>' +
         '<span class="hide-btn" data-hide="' + v.i + '" title="' +
         (STATE.hidden[v.i] ? "Показать машину" : "Скрыть машину") + '">' +
         (STATE.hidden[v.i] ? ICON_EYE : ICON_EYE_OFF) + '</span>';
@@ -19951,6 +19979,40 @@ rowsEl.addEventListener("click", function(e){
   saveOrder();
   S.nav();
   renderRows(); renderHiddenCount();
+});
+
+/* ---------- копировать тягач/прицеп/водителя (Влад, 31.08, со слов
+   логистов: "тягач модель госномер, прицеп госномер с типом и водитель с
+   телефоном") - чистое чтение, БЕЗ гейта по роли (в отличие от hide-btn
+   выше) - доступно и логисту, и менеджеру, и админу одинаково. ---------- */
+function lpCopyText_(v){
+  var lines = [];
+  lines.push("Тягач: " + (v.tractor ? v.tractor + " " : "") + v.gos);
+  lines.push(v.trailerGos || v.trailer
+    ? "Прицеп: " + [v.trailerGos, v.trailer].filter(Boolean).join(", ")
+    : "Прицеп: без прицепа");
+  if (v.vacant || !v.driver){
+    lines.push("Водитель: вакант");
+  } else {
+    var phone = lpFleetPersonPhone_(v.driverResourceKey);
+    lines.push("Водитель: " + v.driver + (phone ? ", " + phone : ""));
+  }
+  return lines.join("\n");
+}
+rowsEl.addEventListener("click", function(e){
+  var btn = e.target.closest(".copy-btn");
+  if (!btn) return;
+  var vi = parseInt(btn.dataset.copy, 10);
+  var v = STATE.vehicles[vi];
+  if (!v) return;
+  var text = lpCopyText_(v);
+  if (!navigator.clipboard || !navigator.clipboard.writeText){
+    toast("Браузер не поддерживает копирование", null);
+    return;
+  }
+  navigator.clipboard.writeText(text)
+    .then(function(){ toast("Скопировано", null); })
+    .catch(function(){ toast("Не удалось скопировать", null); });
 });
 
 /* ---------- свернуть/развернуть группу (Тралы / Длинномеры) ---------- */
@@ -21283,6 +21345,15 @@ function lpFleetOpenOnTractor_(kind, tractorGos, slot){
 function lpFleetPersonName_(id){
   var p = (FLEET_PEOPLE_ || []).filter(function(x){ return String(x.id) === String(id); })[0];
   return p ? p.full_name : String(id);
+}
+/* Телефон - только для "Копировать данные" (lpCopyText_). /sprav/state для роли
+   логист/менеджер отдаёт урезанный набор полей (31.08, см. api/server.js на
+   VPS) - phone туда добавлен точечно, ровно под эту задачу, остальные ПДн
+   (ИНН/СНИЛС/дата рождения/адрес/номер прав) по-прежнему не идут дальше
+   admin - см. DEPLOY_LOG.md. */
+function lpFleetPersonPhone_(id){
+  var p = (FLEET_PEOPLE_ || []).filter(function(x){ return String(x.id) === String(id); })[0];
+  return (p && p.phone) ? p.phone : "";
 }
 function lpFleetAssetLabel_(id){
   var a = (FLEET_ASSETS_ || []).filter(function(x){ return String(x.id) === String(id); })[0];

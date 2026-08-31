@@ -1756,12 +1756,51 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
    потеряло свои состояния (.rowcard клонирует head.innerHTML и рассчитан на
    ПЛОСКУЮ шапку). Фон и границы живут на самой .rowhead, как раньше; новую
    вложенность в шапку строки не добавлять. */
-#page-logistics-plan .gos{font-size:14px;font-weight:600;color:var(--text);}
+/* НАЙДЕННЫЙ БАГ (Влад, 01.09, живой скрин: госномер переносится на 3-4
+   строки вертикально внутри шапки) - .gos никогда не имел white-space:
+   nowrap, просто до сих пор это не всплывало, пока в .rh1 не стало тесно
+   (добавился .rh-omni). .rowhead уже overflow:hidden - при нехватке места
+   правильная деградация ОБРЕЗАТЬ край строки, не переносить текст на
+   несколько строк ломая всю высоту шапки. */
+#page-logistics-plan .gos{font-size:14px;font-weight:600;color:var(--text);white-space:nowrap;flex:none;}
 /* время окончания рейса - в ПЕРВОЙ строке, сразу за номером */
 #page-logistics-plan .rh1 .until{font-family:'JetBrains Mono',monospace;font-size:10.5px;
   color:var(--muted);flex:none;white-space:nowrap;}
 #page-logistics-plan .rh1 .until b{color:var(--text);font-weight:500;}
-#page-logistics-plan .tractor{font-size:9px;font-weight:500;color:var(--muted2);letter-spacing:.03em;}
+/* Живая точка "где машина сейчас" (Влад, 31.08-01.09: "визуализируй машину в
+   движении и населённый пункт ближайший") - варианты обсуждены в чате, выбран
+   компактный бейдж (вариант "E") в трёх состояниях. Пустой .rh-omni-slot -
+   ВСЕГДА в разметке (см. renderRowsInner_ в JS), заполняется/пустеет отдельно
+   от общего рендера ленты (lpRenderOmniBadges_, тик раз в 30с - тот же
+   интервал, что у поллера Omnicomm на сервере, чаще дёргать нечего). Три
+   состояния - меньше активности у машины, меньше "жизни" у индикатора:
+   live (едет) - ровный пульс; idle (стоит, не заглушена) - резкое мигание
+   (та же метафора аварийки); off (заглушена) - вся плашка притушена,
+   анимации нет совсем. */
+/* Влад, 01.09: "индикацию местонахождения надо жёстко привязать к краю
+   области над валовой прибылью" - раньше .rh-omni-slot был обычным
+   flex-элементом ПОСЛЕ госномера, его горизонтальная позиция плавала от
+   строки к строке (зависела от длины тягача/номера) - бейджи не выстраивались
+   в колонку. margin-left:auto на САМ слот (не на внутренний .rh-omni)
+   прижимает его к правому краю .rh1, тот же приём, что уже держит .rside
+   (ВП%) прижатым справа в .rh2 - две строки теперь одна над другой. */
+#page-logistics-plan .rh-omni-slot{margin-left:auto;flex:none;}
+#page-logistics-plan .rh-omni{
+  display:inline-flex;align-items:center;gap:4px;padding:1px 7px;
+  border-radius:10px;font-family:'JetBrains Mono',monospace;font-size:9.5px;font-weight:600;
+  white-space:nowrap;flex:none;cursor:pointer;
+}
+#page-logistics-plan .rh-omni i{width:5px;height:5px;border-radius:50%;flex:none;}
+#page-logistics-plan .rh-omni.live{background:rgba(55,138,221,.16);border:1px solid rgba(55,138,221,.4);color:var(--tint-blue,#8dbdf0);}
+#page-logistics-plan .rh-omni.live i{background:#378ADD;animation:rhOmniBlink 1.3s ease-in-out infinite;}
+#page-logistics-plan .rh-omni.idle{background:rgba(239,159,39,.14);border:1px solid rgba(239,159,39,.4);color:var(--tint-amber,#f0c67a);}
+#page-logistics-plan .rh-omni.idle i{background:#EF9F27;animation:rhOmniHazard 1s step-end infinite;}
+#page-logistics-plan .rh-omni.off{background:rgba(139,137,128,.12);border:1px solid rgba(139,137,128,.3);color:var(--muted);opacity:.75;}
+#page-logistics-plan .rh-omni.off i{background:#8b8980;}
+@keyframes rhOmniBlink{0%,100%{opacity:1;}50%{opacity:.25;}}
+@keyframes rhOmniHazard{0%,100%{opacity:1;}50%{opacity:.15;}}
+@media(prefers-reduced-motion:reduce){#page-logistics-plan .rh-omni i{animation:none;}}
+#page-logistics-plan .tractor{font-size:9px;font-weight:500;color:var(--muted2);letter-spacing:.03em;white-space:nowrap;flex:none;}
 #page-logistics-plan .rh2{display:flex;align-items:center;gap:5px;}
 #page-logistics-plan .rh2 .tr{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;flex:none;}
 /* «Без прицепа» - тот же приём, что у «вакант» водителя (.drv.nd) - Влад, 30.08,
@@ -1873,6 +1912,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
 #page-logistics-plan.lp-mobile.lp-mode-table .rh1 .tag,
 #page-logistics-plan.lp-mobile.lp-mode-table .rh1 .tractor,
 #page-logistics-plan.lp-mobile.lp-mode-table .rh1 .until,
+#page-logistics-plan.lp-mobile.lp-mode-table .rh-omni,
 #page-logistics-plan.lp-mobile.lp-mode-table .rh2 .tr,
 #page-logistics-plan.lp-mobile.lp-mode-table .rh2 .sep,
 #page-logistics-plan.lp-mobile.lp-mode-table .rh2 .kind,
@@ -19551,7 +19591,27 @@ var ICON_CHECK = '<svg ' + SVG_ATTR + '><path d="M4 10.5l4 4 8-8"/></svg>';
    реально продолжается"), поэтому DAYS считает эпоху + ЕЩЁ ОДИН месяц вперёд -
    всегда есть куда идти, независимо от того, какое сегодня число. */
 var NOW0_ = new Date();
-var YEAR = NOW0_.getFullYear(), MONTH = NOW0_.getMonth();
+/* НАЙДЕННЫЙ БАГ (Влад, 01.09, живой пример: "заявки в октябрь уехали...
+   августа теперь нету" - весь август молча съехал на месяц вперёд ровно в
+   полночь смены месяца). Корень: epoch = "1-е число ТЕКУЩЕГО календарного
+   месяца" ломается РОВНО в эту полночь - все УЖЕ сохранённые записи созданы
+   клиентами со старым epoch (август), а свежая страница 1 сентября честно
+   считает их часы от 1 сентября - то, что было "31.08", рисуется как
+   "01.10". Пересчитывать/сдвигать уже сохранённые часы в базе (пробовал,
+   откатил - см. git-историю) решает симптом ровно на сегодняшний день, но
+   тот же баг вернётся 1 октября, 1 ноября и на КАЖДОЙ границе месяца, плюс
+   после такого сдвига данные "сегодня минус пара дней" уходят в
+   отрицательные часы - лента их физически не рисует (координата левее
+   начала трека, за пределы scrollLeft=0 не прокрутить).
+   Правильный фикс - НЕДЕЛЯ ЗАПАСА: эпоха = месяц, которому принадлежит
+   "сегодня МИНУС EPOCH_GRACE_DAYS_", не "сегодня" впрямую. Первую неделю
+   каждого нового календарного месяца лента ещё честно живёт в СТАРОМ epoch -
+   том же, которым уже помечены свежие записи - переход происходит плавно
+   на 8-е число, а не рывком в полночь 1-го, и происходит АВТОМАТИЧЕСКИ на
+   каждой будущей границе месяца, без ручного вмешательства. */
+var EPOCH_GRACE_DAYS_ = 7;
+var EPOCH_ANCHOR_ = new Date(NOW0_.getTime() - EPOCH_GRACE_DAYS_ * 86400000);
+var YEAR = EPOCH_ANCHOR_.getFullYear(), MONTH = EPOCH_ANCHOR_.getMonth();
 var DAYS_EPOCH_MONTH_ = new Date(YEAR, MONTH + 1, 0).getDate();      /* дней в месяце эпохи - граница "маленьких" ячеек */
 var DAYS = DAYS_EPOCH_MONTH_ + new Date(YEAR, MONTH + 2, 0).getDate(); /* + весь следующий месяц */
 var HOURS = DAYS * 24;
@@ -19849,12 +19909,26 @@ function visible(v){
   return true;
 }
 /* порядок машин задаёт админ перетаскиванием карточки; хранится по индексам */
+/* НАЙДЕННЫЙ БАГ (Влад, 01.09: "переместил два трала наверх, но они вернулись
+   обратно - не сохранилось моя персонализация"). STATE.order хранил индексы
+   (v.i) в STATE.vehicles - тот же класс проблемы, что уже решён в другом
+   месте этого файла ("индекс в STATE.vehicles не устойчив между визитами -
+   парк пересобирается заново при каждом открытии", см. комментарий у
+   plan_segs про ключ по ГОСНОМЕРУ, не по индексу). Штатка/сортировка парка
+   между визитами может дать другой порядок исходного массива - те же самые
+   числа-индексы из вчерашнего localStorage сегодня указывают на ДРУГИЕ
+   машины (или мимо массива вовсе), и order молча переставал совпадать,
+   откатываясь к порядку по умолчанию. Матчим по v.gos - госномер не
+   меняется от визита к визиту. Сохранение (см. pointerup ниже) переводит
+   индекс в госномер В МОМЕНТ сохранения - dataset.v/track.dataset.v и весь
+   остальной индексный адрес намеренно НЕ трогаем, они стабильны В ПРЕДЕЛАХ
+   одной загрузки страницы, ломается только персистентность МЕЖДУ визитами. */
 function orderedVehicles(){
   if (!STATE.order) return STATE.vehicles.slice();
-  var byI = {}; STATE.vehicles.forEach(function(v){ byI[v.i] = v; });
+  var byGos = {}; STATE.vehicles.forEach(function(v){ if (v.gos) byGos[v.gos] = v; });
   var out = [], seen = {};
-  STATE.order.forEach(function(i){ if (byI[i] && !seen[i]){ out.push(byI[i]); seen[i] = 1; } });
-  STATE.vehicles.forEach(function(v){ if (!seen[v.i]) out.push(v); });
+  STATE.order.forEach(function(gos){ if (byGos[gos] && !seen[gos]){ out.push(byGos[gos]); seen[gos] = 1; } });
+  STATE.vehicles.forEach(function(v){ if (!v.gos || !seen[v.gos]) out.push(v); });
   return out;
 }
 function saveOrder(){
@@ -20177,8 +20251,6 @@ function renderRowsInner_(){
          протяжки (Влад, 30.08 - порядок назван дословно). Свечение плашки вешаем
          классом на .row, чтобы CSS сам решал, светиться ей или нет. */
       if (lpAwaiting_(v)) row.classList.add("awaiting");
-      var actSeg = lpActiveSeg_(v);
-      var endLbl = actSeg ? lpSegEndLabel_(actSeg) : null;
       var vp = lpVpPct_(v.gos);
       /* Время окончания рейса - в первой строке за номером; процент ВП - во второй,
          прижат вправо. Так процент у всех машин стоит в одной вертикали, а время не
@@ -20197,7 +20269,7 @@ function renderRowsInner_(){
         '<div class="rh1"><span class="tag ' + tagClass(v.type) + '">' + v.type + '</span>' +
         (v.tractor ? '<span class="tractor">' + v.tractor + '</span>' : '') +
         '<span class="gos">' + gosLabel_ + '</span>' +
-        (endLbl ? '<span class="until">до <b>' + endLbl + '</b></span>' : '') + '</div>' +
+        '<span class="rh-omni-slot" data-gos="' + lpOmniNormPlate_(v.gos) + '"></span>' + '</div>' +
         '<div class="rh2"><span class="tr' + (!v.trailerGos && !v.trailer ? " nd" : "") + '">' + (trailerGosLabel_ || v.trailer || "без прицепа") + '</span>' +
         (v.trailer && v.trailerGos ? '<span class="sep">·</span><span class="kind">' + v.trailer + '</span>' : '') +
         '<span class="sep">·</span><span class="drv' + (v.vacant ? " nd" : "") + '">' + drv + '</span>' +
@@ -20265,6 +20337,10 @@ function renderRowsInner_(){
      гарантированно свежие после любого действия, дешёвый ранний возврат внутри
      lpMSync_ делает вызов почти бесплатным на десктопе. */
   lpMSync_();
+  /* .rh-omni-slot только что пересозданы заново (новый DOM) - заполняем их
+     уже накопленным lpOmniByGos_ сразу, не дожидаясь следующего 30с тика
+     lpOmniFetch_ (тот же принцип, что и у lpMSync_ строкой выше). */
+  lpRenderOmniBadges_();
 }
 
 /* ═══════════ МОБИЛЬНЫЙ РЕЖИМ "Таблица" (31.08, штурм-сессия агентов после
@@ -21300,7 +21376,14 @@ window.addEventListener("pointerup", function(){
   a.row.classList.remove("ghosted");
   if (a.card) a.card.remove();
   if (a.moved){
-    STATE.order = [].map.call(rowsEl.querySelectorAll(".row"), function(r){ return parseInt(r.dataset.v, 10); });
+    /* dataset.v - индекс, стабилен только в пределах ЭТОЙ загрузки страницы -
+       переводим в госномер именно здесь, на границе сохранения (см. разбор у
+       orderedVehicles выше), а не меняем сам dataset.v - тот используется как
+       адрес машины ВЕЗДЕ в файле, трогать рискованнее, чем нужно для фикса. */
+    STATE.order = [].map.call(rowsEl.querySelectorAll(".row"), function(r){
+      var v = STATE.vehicles[parseInt(r.dataset.v, 10)];
+      return v && v.gos;
+    }).filter(Boolean);
     saveOrder();
     S.settle();
     toast("Порядок машин сохранён", null);
@@ -21866,6 +21949,23 @@ function fetchPlanSegs_(){
       return;
     }
     if (drag || create || arr) return;   /* рука на плитке - применим следующим тиком */
+    /* НАЙДЕННЫЙ БАГ (Влад, 01.09: "почему-то пропали заявки... такое и раньше
+       было"): сервер данные не терял - напрямую сверено в MySQL, 92 записи на
+       месте. Проблема в клиенте: только ПЕРВЫЙ фетч (ветка firstFetch выше)
+       был защищён от ответа "count:0" - любой СЛЕДУЮЩИЙ тик слепо доверял
+       такому ответу и звал applyServerSegs_([]), которая честно стирает
+       ВСЁ, что не помечено как "моя несохранённая правка" (dirtySegIds_) - то
+       есть всю доску у пассивного зрителя, из-за одного кратковременного
+       глюка сети/сервера (тот же класс нестабильности, что уже описан в
+       CLAUDE.md про Apps Script /exec - здесь дешёвый /plan/segs, но
+       единичные сбои бывают у любого канала). У живой доски с историей
+       записей 0 сегментов почти никогда не бывает ПРАВДОЙ - это тревожный
+       сигнал, не факт, тот же принцип "тихий фолбэк, не доверять аномалии",
+       что уже применён к другим каналам данных. */
+    if (!firstFetch && r.data.count === 0 && Object.keys(segsSnapshot_).length > 0){
+      console.error("[Планировка] сервер вернул 0 записей при непустом локальном снимке - похоже на сбой, пропускаю тик", {snapshotSize: Object.keys(segsSnapshot_).length});
+      return;
+    }
     planMaxUpdated_ = r.data.max_updated;
     var hadPending = applyServerSegs_(r.data.segs);
     renderRows(); renderKpis();
@@ -22520,6 +22620,135 @@ function fetchFleetData_(){
       }
     }).catch(function(){});   /* нет сети/сбой - меню просто не покажет "кто сейчас сидит", посадить/зацепить всё равно работает */
 }
+
+/* ═══ «Где машина сейчас» - живые координаты Omnicomm в шапке строки (Влад,
+   31.08-01.09: "визуализируй... машина в движении и населённый пункт
+   ближайший", выбран компактный бейдж, три состояния, сокращения городов,
+   500м от базы = "База") ═══
+   Данные - ТОТ ЖЕ эндпоинт, что уже питает вкладку «Навигация» (параллельная
+   сессия, plans/2026-08-31-omnicomm-telematics-integration.md, коммит
+   b122335) - ничего нового на сервере не поднимаем, второй потребитель одних
+   и тех же координат. `plate` от Omnicomm приходит "грязным" (модель+
+   госномер одной строкой, напр. "КАМАЗ 5490-S5 Х 775 МУ 797", иногда с
+   хвостовым примечанием в скобках) - вытаскиваем госномер регуляркой и
+   сверяем по НОРМАЛИЗОВАННОМУ виду (без пробелов, верхний регистр) с v.gos. */
+var lpOmniByGos_ = {};   /* нормализованный gos -> {speed, ignition, stale, place} */
+var LP_OMNI_BASE_ = {lat:55.467403, lng:37.778261, name:"База"};   /* тот же BASE, что в калькуляторе (см. var BASE выше в файле) */
+/* Стартовый список - крупные города/узлы на типичных маршрутах компании из
+   Москвы. НЕ исчерпывающий - если рейсы часто идут в город, которого здесь
+   нет, дописать сюда одной строкой {name, lat, lng}, больше ничего менять не
+   надо. Короткие имена (Тула, Москва) остаются как есть - сокращение только
+   у длинных (Влад: "Санкт-Петербург - СПб, Екатеринбург - ЕКБ"). */
+var LP_OMNI_CITIES_ = [
+  {name:"Москва", lat:55.7558, lng:37.6173}, {name:"Тула", lat:54.1961, lng:37.6182},
+  {name:"Рязань", lat:54.6296, lng:39.7412}, {name:"Владимир", lat:56.1290, lng:40.4070},
+  {name:"Тверь", lat:56.8587, lng:35.9176}, {name:"Смоленск", lat:54.7826, lng:32.0453},
+  {name:"Калуга", lat:54.5137, lng:36.2612}, {name:"Орёл", lat:52.9703, lng:36.0635},
+  {name:"Курск", lat:51.7304, lng:36.1926}, {name:"Воронеж", lat:51.6720, lng:39.1843},
+  {name:"Липецк", lat:52.6103, lng:39.5947}, {name:"Тамбов", lat:52.7213, lng:41.4523},
+  {name:"Ярославль", lat:57.6261, lng:39.8845}, {name:"Кострома", lat:57.7665, lng:40.9269},
+  {name:"Иваново", lat:57.0004, lng:40.9739}, {name:"Н.Новгород", lat:56.3269, lng:44.0059},
+  {name:"Казань", lat:55.7887, lng:49.1221}, {name:"Чебоксары", lat:56.1439, lng:47.2489},
+  {name:"Самара", lat:53.1959, lng:50.1002}, {name:"Саратов", lat:51.5462, lng:46.0348},
+  {name:"Волгоград", lat:48.7080, lng:44.5133}, {name:"Ростов", lat:47.2357, lng:39.7015},
+  {name:"Краснодар", lat:45.0355, lng:38.9753}, {name:"СПб", lat:59.9311, lng:30.3609},
+  {name:"В.Новгород", lat:58.5215, lng:31.2755}, {name:"Псков", lat:57.8194, lng:28.3319},
+  {name:"Вологда", lat:59.2181, lng:39.8886}, {name:"Пермь", lat:58.0105, lng:56.2502},
+  {name:"ЕКБ", lat:56.8389, lng:60.6057}, {name:"Челябинск", lat:55.1644, lng:61.4368},
+  {name:"Уфа", lat:54.7388, lng:55.9721}
+];
+function lpOmniNormPlate_(s){ return String(s || "").toUpperCase().replace(/[^А-ЯЁ0-9]/g, ""); }
+/* Госномер - паттерн "Буква ЦЦЦ ББ ЦЦ[Ц]" (кириллические буквы, допустимые в
+   плитах - А В Е К М Н О Р С Т У Х) ГДЕ-ТО в строке, не обязательно после
+   последнего пробела - модель впереди и хвостовые примечания в скобках
+   ("(ПР-5, верт.апп.)") отбрасываются автоматически, потому что регулярка
+   ищет сам паттерн, а не режет строку по позиции. */
+var LP_OMNI_PLATE_RE_ = /([АВЕКМНОРСТУХ]\s?\d{3}\s?[АВЕКМНОРСТУХ]{2}\s?\d{2,3})/i;
+function lpOmniExtractPlate_(raw){
+  var m = LP_OMNI_PLATE_RE_.exec(String(raw || "").toUpperCase());
+  return m ? m[1] : "";
+}
+function lpHaversineKm_(lat1, lng1, lat2, lng2){
+  var R = 6371, toRad = Math.PI / 180;
+  var dLat = (lat2 - lat1) * toRad, dLng = (lng2 - lng1) * toRad;
+  var a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1*toRad) * Math.cos(lat2*toRad) * Math.sin(dLng/2) * Math.sin(dLng/2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+/* Ближайшая ТОЧКА из известного списка - не точный геокодинг (Omnicomm адрес
+   не отдаёт клиенту, см. разбор в чате) - честное приближение "где-то рядом
+   с X", достаточное для беглого взгляда на доску, не для навигации (для
+   точного маршрута/адреса уже есть вкладка «Навигация» с картой). */
+function lpOmniNearestPlace_(lat, lng){
+  if (lpHaversineKm_(lat, lng, LP_OMNI_BASE_.lat, LP_OMNI_BASE_.lng) <= 0.5) return LP_OMNI_BASE_.name;
+  var best = "", bestKm = Infinity;
+  LP_OMNI_CITIES_.forEach(function(c){
+    var km = lpHaversineKm_(lat, lng, c.lat, c.lng);
+    if (km < bestKm){ bestKm = km; best = c.name; }
+  });
+  return best;
+}
+function lpOmniFetch_(){
+  if (!pageRoot.classList.contains("active") || document.hidden) return;
+  fetchFromYardApi_("/omnicomm/locations").then(function(r){
+    if (!r.ok || !r.data || !Array.isArray(r.data.vehicles)) return;
+    var byGos = {};
+    r.data.vehicles.forEach(function(v){
+      var plate = lpOmniExtractPlate_(v.plate);
+      if (!plate) return;
+      byGos[lpOmniNormPlate_(plate)] = {
+        speed: v.speed, ignition: v.ignition, stale: v.stale, omnicommId: v.omnicommId,
+        place: (v.latitude != null && v.longitude != null) ? lpOmniNearestPlace_(v.latitude, v.longitude) : ""
+      };
+    });
+    lpOmniByGos_ = byGos;
+    lpRenderOmniBadges_();
+  }).catch(function(){});
+}
+/* Три состояния - меньше активности у машины, меньше "жизни" у индикатора:
+   live (едет, ignition && speed>3) - ровный синий пульс; idle (стоит, не
+   заглушена) - резкое амбер-мигание (метафора аварийки); off (заглушена) -
+   вся плашка притушена, анимации нет совсем. Порог speed>3 - тот же, что уже
+   принят на вкладке «Навигация» (см. navStatusClass_) - не отдельная
+   договорённость, а то же самое "едет/стоит" одним и тем же числом. */
+/* Влад, 01.09: "убери статус стоит/заглушен/километры, оставь только точку,
+   город и цвет - места мало, нет места для статуса". Состояние теперь несут
+   ТОЛЬКО цвет+анимация точки (см. CSS .rh-omni.live/.idle/.off) - текст
+   всегда просто название места, слово-состояние ушло в title (наведение). */
+function lpOmniBadgeHtml_(o){
+  if (!o || o.stale || !o.place) return "";
+  var cls = (o.ignition && o.speed > 3) ? "live" : o.ignition ? "idle" : "off";
+  var title = (cls === "live" ? "В движении, " + Math.round(o.speed) + " км/ч"
+    : cls === "idle" ? "Стоит, зажигание включено" : "Двигатель заглушён") + " - открыть на карте «Навигация»";
+  return '<span class="rh-omni ' + cls + '" data-omni-id="' + pageEsc_(o.omnicommId) + '" title="' + title + '"><i></i><b>' + pageEsc_(o.place) + '</b></span>';
+}
+function lpRenderOmniBadges_(){
+  [].forEach.call(document.querySelectorAll(".rh-omni-slot"), function(el){
+    el.innerHTML = lpOmniBadgeHtml_(lpOmniByGos_[el.dataset.gos]);
+  });
+}
+/* Влад, 01.09: "отличная идея - при нажатии на эту часть перекидывает на
+   страницу навигации на эту машину" - переиспользуем ТУ ЖЕ страницу и ТУ ЖЕ
+   функцию выбора машины, что уже есть у вкладки «Навигация» (window.NAV,
+   NAV.select(omnicommId) - центрирует карту и подсвечивает строку списка),
+   ничего не дублируем. showPage сама подсвечивает пункт бокового меню -
+   передаём ему ссылку на этот пункт, тот же приём, что и у самого пункта
+   меню (onclick="showPage('navigation',this)"). */
+rowsEl.addEventListener("click", function(e){
+  var badge = e.target.closest(".rh-omni");
+  if (!badge || !badge.dataset.omniId) return;
+  e.stopPropagation();
+  var omniId = badge.dataset.omniId;
+  showPage("navigation", document.querySelector('.sidebar-nav-item[data-page="navigation"]'));
+  /* NAV.init() внутри showPage запускает СВОЙ асинхронный запрос координат -
+     первый вызов select() может застать список/карту ещё пустыми (центрирование
+     тихо не сработает, но подсветку строки уже проставит). Второй вызов чуть
+     позже - подстраховка на случай, если первый прошёл раньше ответа сервера,
+     без обращения к внутренностям чужого модуля Навигации. */
+  if (window.NAV){ NAV.select(omniId); setTimeout(function(){ NAV.select(omniId); }, 700); }
+});
+setInterval(lpOmniFetch_, 30000);   /* тот же интервал, что у поллера Omnicomm на сервере - чаще спрашивать нечего */
+
 /* НАЙДЕННЫЙ БАГ (Влад, 31.08, живой пример: "Пантелеев занят" - на самом деле
    на этой машине сидит Мавлитян, а не Пантелеев). Корень - и здесь, и в
    fleetDoCouple_/fleetDoUncouple_ ниже, и в Справочниках (files/index.html,
@@ -23035,6 +23264,7 @@ function initLP(){
   fetchPlanSegs_();          /* свежие записи с сервера сразу при открытии, не ждать до 7 сек поллинга */
   sendPresence_(); fetchPresence_();   /* то же самое для присутствия - не ждать первый тик */
   fetchFleetData_();         /* ростер водителей/прицепов + текущая сцепка - для ПКМ-меню на .rowhead */
+  lpOmniFetch_();            /* координаты Omnicomm сразу при открытии, не ждать до 30 сек поллинга */
 }
 window.LP = { init: initLP };
 

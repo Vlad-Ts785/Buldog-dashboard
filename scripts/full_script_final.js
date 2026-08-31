@@ -4218,6 +4218,19 @@ function isRyschanowLogistName_(name) {
   return (name||'').trim().split(' ')[0].toLowerCase() === 'рыщанов';
 }
 
+// Начальники автоколонн (2026-08-30, новая роль, первый - Барыльченко Пётр Иванович,
+// колонна длинномеров, см. plans/2026-08-30-avtokolonna-head-personal-page.md). Влад:
+// "интерфейс как у Васина... расчёт ЗП такой же как у Васина" - буквально та же личная
+// страница/формула (2.5% от ВП длинномеров компании), просто другая должность (не логист-
+// брокер найма). Роль в листе "Доступ" - обычный logist, подмена интерфейса по фамилии,
+// тот же приём, что isVasinName_/isOwnTralLogistName_/isRyschanowLogistName_ выше.
+// Расширяемый список - "первый у нас будет Барыльченко" подразумевает не последний
+// (следующий кандидат - Дьячков, колонна тралов, пока не заведён).
+var COLUMN_HEAD_SUR_ = ['барыльченко'];
+function isColumnHeadName_(name) {
+  return COLUMN_HEAD_SUR_.indexOf((name||'').trim().split(' ')[0].toLowerCase()) >= 0;
+}
+
 // 'YYYY-MM' предыдущего месяца относительно переданного - для сравнения "ВП тралов к прошлому
 // месяцу" у own-tral логистов (см. ниже). day=1 перед вычитанием месяца - та же защита от
 // перепрыгивания через 2 месяца, что и в prevMonthKey_() на фронтенде.
@@ -4387,7 +4400,7 @@ function buildLogistView_(orders, logistName, ss, period) {
     by_hired_supplier: orders.by_hired_supplier || [],
     all_hired_deals:   orders.all_hired_deals || [],
   };
-  if (ss && isVasinName_(logistName)) {
+  if (ss && (isVasinName_(logistName) || isColumnHeadName_(logistName))) {
     ordersOut.long_haul = buildLongHaulBundle_(ss, orders, period || null);
   }
   // "ВП тралов к прошлому месяцу" (2026-08-13) - лёгкий архивный запрос ТОЛЬКО для own-tral

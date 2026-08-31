@@ -1732,6 +1732,11 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
 #page-logistics-plan.lp-mobile.lp-mode-table .rh2 .rside{display:none;}
 #page-logistics-plan.lp-mobile.lp-mode-table .gos{font-size:13px;}
 #page-logistics-plan.lp-mobile.lp-mode-table .rh2 .drv{font-size:11px;}
+/* Пинч-зум (см. JS ниже, "ПИНЧ-ЗУМ В ТАБЛИЦЕ") - явно перечисленные pan-x/pan-y
+   БЕЗ pinch-zoom отключают нативный зум СТРАНИЦЫ на этом элементе (обычный
+   скролл при этом продолжает работать) - без этого свой обработчик дрался бы
+   с браузерным. */
+#page-logistics-plan.lp-mobile.lp-mode-table .board{touch-action:pan-x pan-y;}
 #page-logistics-plan .lp-m-top{flex:none;display:flex;align-items:center;gap:10px;padding:14px 14px 8px;}
 #page-logistics-plan .lp-m-date{font-size:16px;font-weight:700;}
 #page-logistics-plan .lp-m-wd{color:var(--muted);font-weight:600;margin-right:6px;text-transform:uppercase;font-size:12px;}
@@ -19945,6 +19950,49 @@ document.getElementById("lpMFilterBadge").onclick = function(){
     }
   };
 });
+
+/* ===================== ПИНЧ-ЗУМ В ТАБЛИЦЕ (Влад, 31.08) =====================
+   "хочу что бы работал зум растягивая и стягивая пальцы... планировка
+   масштабировалась" - десктопные масштабы (Сутки/2дня/3дня/Неделя/Месяц)
+   переключают ZOOM[STATE.zoom] дискретно; здесь - НЕПРЕРЫВНОЕ масштабирование
+   тем же каналом (--hw, CSS-переменная часа в пикселях). Сегменты/шкала уже
+   реагируют на --hw САМИ через calc(var(--s)*var(--hw)) в CSS (см. .seg,
+   .head-scale .day) - трогать их не нужно; единственное, что НЕ следует за
+   CSS-переменной само - ширина .track/.head-scale (жёсткий inline px из
+   renderRowsInner_/renderScale) - пересчитываем её сами, с троттлингом через
+   requestAnimationFrame (не на каждый touchmove - дорого при полном парке). */
+(function(){
+  var MIN_HW = 6, MAX_HW = 60;
+  var pinch = null, pinchRAF = 0;
+  function currentHw_(){ return parseFloat(getComputedStyle(pageRoot).getPropertyValue("--hw")) || ZOOM[STATE.zoom]; }
+  function applyTrackWidths_(hw){
+    var w = HOURS * hw;
+    [].forEach.call(pageRoot.querySelectorAll(".track"), function(t){ t.style.width = w + "px"; });
+    if (scaleEl) scaleEl.style.width = w + "px";
+  }
+  function dist_(t0, t1){ return Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY); }
+  board.addEventListener("touchstart", function(e){
+    if (!pageRoot.classList.contains("lp-mode-table")) return;
+    if (e.touches.length !== 2) return;
+    var rect = board.getBoundingClientRect();
+    var midX = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
+    var hw0 = currentHw_();
+    pinch = {dist0:dist_(e.touches[0], e.touches[1]), hw0:hw0, anchorHour:(board.scrollLeft + midX) / hw0, midX:midX};
+  }, {passive:true});
+  board.addEventListener("touchmove", function(e){
+    if (!pinch || e.touches.length !== 2) return;
+    e.preventDefault();   /* не даём браузеру заодно зумить всю страницу - см. touch-action ниже, второй слой защиты */
+    var hw = Math.max(MIN_HW, Math.min(MAX_HW, pinch.hw0 * (dist_(e.touches[0], e.touches[1]) / pinch.dist0)));
+    pageRoot.style.setProperty("--hw", hw + "px");
+    board.scrollLeft = Math.max(0, pinch.anchorHour * hw - pinch.midX);   /* точка под пальцами не "уезжает" */
+    if (!pinchRAF) pinchRAF = requestAnimationFrame(function(){ pinchRAF = 0; applyTrackWidths_(hw); });
+  }, {passive:false});
+  function endPinch_(e){
+    if (pinch && e.touches.length < 2){ applyTrackWidths_(currentHw_()); pinch = null; }
+  }
+  board.addEventListener("touchend", endPinch_);
+  board.addEventListener("touchcancel", endPinch_);
+})();
 
 /* дата окончания служебной плашки = правый край отрезка (Влад, 29.08).
    Конец ровно в полночь = «по последний занятый день включительно» (26.08),

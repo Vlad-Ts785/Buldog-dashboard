@@ -4453,13 +4453,26 @@ function buildNameOnlyRoster_(list) {
 // buildStaffMarkas_, только нужные Планировке поля. ~55 строк, чтение мгновенное, кэша не требует.
 function buildLogistParkFromStaff_(ss) {
   var staff = getStaffData(ss);
+  // ВП%/план по машине (31.08, Влад: "открой логистам видение валовой % как у меня" -
+  // раньше сознательно не отдавали финансовые поля этой роли, см. комментарий в
+  // buildLogistView_ ниже про инцидент 30.08 - Влад решил иначе сегодня). Тот же
+  // источник и тот же диапазон (месяц по сегодня), что у admin D.vehicles/страницы
+  // "Техника" (aggregateFinHistoryForRange) - lpVpPct_ на фронте не различает роль,
+  // просто читает plan/profit по госномеру, если они есть в ответе.
+  var range = getCurrentMonthRange_();
+  var finByGos = {};
+  aggregateFinHistoryForRange(ss, staff, range.from, range.to).forEach(function(f) {
+    finByGos[normalizeGos(f.gos)] = f;
+  });
   var out = [];
   Object.keys(staff).forEach(function(k) {
     var v = staff[k];
+    var f = finByGos[k];   // k - уже нормализованный ключ, см. getStaffData
     out.push({
       gos: v.gosOriginal, marka: v.marka, type: v.type, status: v.status,
       trailer: v.trailerGos,
       driver: [v.driver, v.driver2, v.driver3].filter(function(d){ return d; }).join(' / '),
+      profit: f ? f.profit : 0, plan: f ? f.plan : 0,
     });
   });
   return out;

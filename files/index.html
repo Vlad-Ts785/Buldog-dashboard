@@ -1684,16 +1684,13 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   transition:color .12s ease-out,border-color .12s ease-out;
 }#page-logistics-plan body.can-arrange .row:hover .hide-btn{display:flex;}#page-logistics-plan .hide-btn:hover{color:var(--text);border-color:var(--border-strong);}#page-logistics-plan .hide-btn svg{width:11px;height:11px;}
 /* Копировать данные машины (Влад, 31.08, со слов логистов: "тягач модель
-   госномер, прицеп госномер с типом, водитель с телефоном") - та же плашка,
-   что hide-btn, но БЕЗ can-arrange гейта (это не редактирование, а чтение -
-   доступно всем ролям, кто вообще видит Планировку, включая менеджера) и
-   левее по X, чтобы не перекрываться с ней. */
-#page-logistics-plan .copy-btn{
-  position:absolute;right:30px;top:8px;width:18px;height:18px;border-radius:5px;
-  background:var(--bg4);border:1px solid var(--border);color:var(--muted);
-  display:none;align-items:center;justify-content:center;cursor:pointer;
-  transition:color .12s ease-out,border-color .12s ease-out;
-}#page-logistics-plan .row:hover .copy-btn{display:flex;}#page-logistics-plan .copy-btn:hover{color:var(--text);border-color:var(--border-strong);}#page-logistics-plan .copy-btn svg{width:11px;height:11px;}#page-logistics-plan .row.is-hidden .rowhead{opacity:.5;}#page-logistics-plan .track{position:relative;flex:none;height:var(--row-h);}/* Вертикальная сетка часов - Влад, 30.08: "у нас в планировке это всегда была
+   госномер, прицеп госномер с типом, водитель с телефоном") - была отдельной
+   плашкой-иконкой рядом с hide-btn, но Влад, 31.08 (второй заход): "не
+   нравится как расположено, пересекает валовую прибыль %" - убрана, теперь
+   правый клик по верхней строке (.rh1 - госномер/тягач), см. contextmenu ниже.
+   Нижняя строка (.rh2 - прицеп/водитель) по-прежнему открывает меню сцепки
+   правым кликом, как раньше - разделили по строкам, не по всей .rowhead. */
+#page-logistics-plan .row.is-hidden .rowhead{opacity:.5;}#page-logistics-plan .track{position:relative;flex:none;height:var(--row-h);}/* Вертикальная сетка часов - Влад, 30.08: "у нас в планировке это всегда была
    сетка, а тут просто горизонтальные линии... добавь вертикальные на все
    масштабы в зависимости от логики: на самом крупном (сутки) - каждый час".
    Базовое правило (действует на Неделе/Месяце, где часовая сетка слилась бы
@@ -19446,7 +19443,7 @@ function renderRows(){
           '" title="план по валовой прибыли: факт ' + vp + '% на сегодня, цвет - по прогнозу на конец месяца"><i></i>' + vp + '%</span>'
         : "";
       head.innerHTML =
-        '<div class="rh1"><span class="tag ' + tagClass(v.type) + '">' + v.type + '</span>' +
+        '<div class="rh1" title="ПКМ - скопировать тягач/прицеп/водителя"><span class="tag ' + tagClass(v.type) + '">' + v.type + '</span>' +
         (v.tractor ? '<span class="tractor">' + v.tractor + '</span>' : '') +
         '<span class="gos">' + v.gos + '</span>' +
         (endLbl ? '<span class="until">до <b>' + endLbl + '</b></span>' : '') + '</div>' +
@@ -19454,7 +19451,6 @@ function renderRows(){
         (v.trailer && v.trailerGos ? '<span class="sep">·</span><span class="kind">' + v.trailer + '</span>' : '') +
         '<span class="sep">·</span><span class="drv' + (v.vacant ? " nd" : "") + '">' + drv + '</span>' +
         (rside ? '<span class="rside">' + rside + '</span>' : '') + '</div>' +
-        '<span class="copy-btn" data-copy="' + v.i + '" title="Скопировать тягач/прицеп/водителя">' + ICON_COPY + '</span>' +
         '<span class="hide-btn" data-hide="' + v.i + '" title="' +
         (STATE.hidden[v.i] ? "Показать машину" : "Скрыть машину") + '">' +
         (STATE.hidden[v.i] ? ICON_EYE : ICON_EYE_OFF) + '</span>';
@@ -20018,10 +20014,10 @@ function lpCopyText_(v){
   }
   return lines.join("\n");
 }
-rowsEl.addEventListener("click", function(e){
-  var btn = e.target.closest(".copy-btn");
-  if (!btn) return;
-  var vi = parseInt(btn.dataset.copy, 10);
+/* Была отдельной кнопкой-иконкой (click на .copy-btn) - Влад, 31.08 (второй заход):
+   "не нравится как расположено, пересекает валовую прибыль % - сделай через ПКМ".
+   Теперь вызывается из contextmenu-обработчика ниже (правый клик по .rh1). */
+function lpCopyRow_(vi){
   var v = STATE.vehicles[vi];
   if (!v) return;
   var text = lpCopyText_(v);
@@ -20032,7 +20028,7 @@ rowsEl.addEventListener("click", function(e){
   navigator.clipboard.writeText(text)
     .then(function(){ toast("Скопировано", null); })
     .catch(function(){ toast("Не удалось скопировать", null); });
-});
+}
 
 /* ---------- свернуть/развернуть группу (Тралы / Длинномеры) ---------- */
 rowsEl.addEventListener("click", function(e){
@@ -21603,6 +21599,19 @@ pageRoot.addEventListener("contextmenu", function(e){
     closeFleetMenu_();
     if (!seg) { closeCtxMenu_(); return; }
     openCtxMenu_(seg, e.clientX, e.clientY);
+    return;
+  }
+  /* Влад, 31.08 (второй заход): разделили шапку строки по строкам - верхняя
+     (.rh1, госномер/тягач) правым кликом КОПИРУЕТ данные, нижняя (остальная
+     .rowhead - прицеп/водитель) по-прежнему открывает меню сцепки, как раньше.
+     Проверяем .rh1 ПЕРВЫМ (он вложен внутрь .rowhead - иначе общий .rowhead-
+     блок перехватил бы клик раньше, чем дойдёт до узкого .rh1). */
+  var rh1 = e.target.closest(".rh1");
+  if (rh1){
+    var row1 = rh1.closest(".row");
+    var vi1 = row1 ? parseInt(row1.dataset.v, 10) : NaN;
+    closeCtxMenu_(); closeFleetMenu_();
+    if (!isNaN(vi1)) lpCopyRow_(vi1);
     return;
   }
   var rh = e.target.closest(".rowhead");

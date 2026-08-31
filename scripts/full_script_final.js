@@ -9548,8 +9548,20 @@ function getOrdersData(ss) {
   if (computed) {
     // Ростер логистов/менеджеров худеет в первые дни месяца, пока 1С ещё не прислала
     // свежих заказов - см. buildRosterFallback_ (01.09, "из окошек логистов осталось
-    // только два").
-    if (computed.orders) computed.orders._rosterFallback = buildRosterFallback_(computed, monthKey);
+    // только два"). НАЙДЕННЫЙ БАГ (01.09, второй заход, Влад живьём: "не вижу лампочек
+    // всех логистов" - фикс не подействовал именно для роли admin): buildManagerView_/
+    // buildLogistView_ кладут roster_managers/roster_logists только В СВОЙ приватный
+    // ответ (myManagerRow/myLogistRow) - у admin этих функций в цепочке вообще нет, он
+    // получает ЭТОТ САМЫЙ computed.orders напрямую, где by_manager/by_logist остаются
+    // сырыми (месячными, пустыми в начале сентября) без единого поля roster_*. Кладём
+    // те же смёрженные поля СРАЗУ на сырой объект - buildManagerView_/buildLogistView_
+    // ниже по цепочке всё равно перезатрут их своей (тоже верной) версией для приватных
+    // ролей, а admin теперь получает готовые смёрженные имена без обхода.
+    if (computed.orders) {
+      computed.orders._rosterFallback = buildRosterFallback_(computed, monthKey);
+      computed.orders.roster_managers = mergeRosterFallback_(buildNameOnlyRoster_(computed.orders.by_manager), computed.orders._rosterFallback && computed.orders._rosterFallback.managers);
+      computed.orders.roster_logists = mergeRosterFallback_(buildNameOnlyRoster_(computed.orders.by_logist), computed.orders._rosterFallback && computed.orders._rosterFallback.logists);
+    }
     return joinManagerPlans_(ss, computed, monthKey);
   }
 

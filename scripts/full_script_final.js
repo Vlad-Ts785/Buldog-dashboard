@@ -9504,7 +9504,20 @@ function serverCalcLooksSane_(data, expectedPeriod) {
   if (!data || !data.orders || !data.orders.summary) return false;
   if (data.period !== expectedPeriod) return false;
   var s = data.orders.summary;
-  if (typeof s.total_orders !== 'number' || s.total_orders <= 0) return false;
+  if (typeof s.total_orders !== 'number') return false;
+  // НАЙДЕННЫЙ БАГ (01.09, копал "лампочки логистов" - причина оказалась на шаг
+  // РАНЬШЕ моего первого фикса): total_orders<=0 всегда считался признаком
+  // "сервер сломан" - но в первые дни НОВОГО календарного месяца это ЗАКОННОЕ
+  // состояние (1С физически ещё не прислала ни одного заказа за месяц), не
+  // поломка. Из-за этого serverCalcLooksSane_ отклонял ЦЕЛИКОМ верный (просто
+  // пустой) ответ сервера, fetchOrdersComputedFromServer_ возвращал null,
+  // getOrdersData() тихо падал на легаси-путь через лист - roster-фолбэк
+  // (buildRosterFallback_, см. запись выше) там вообще не применяется, потому
+  // и не сработал, хотя сам код был верен. Разрешаем 0 заказов ТОЛЬКО для
+  // ТЕКУЩЕГО календарного месяца - для архивных периодов 0 заказов по-прежнему
+  // считается поломкой (там 0 не бывает законным, это НЕ ослабление защиты).
+  var isCurrentMonth = expectedPeriod === Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+  if (s.total_orders <= 0 && !isCurrentMonth) return false;
   if (typeof s.total_amount !== 'number') return false;
   if (typeof s.hired_margin_qualifies !== 'boolean') return false;
   if (!Array.isArray(data.orders.by_manager) || !Array.isArray(data.orders.by_logist)) return false;

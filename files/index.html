@@ -2888,7 +2888,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
                колонка "Категория" различает их в общем списке. -->
           <div id="asset-wrap" style="display:none;overflow-x:auto">
             <table class="tbl">
-              <thead><tr><th>Категория</th><th>Госномер</th><th>Марка/модель</th><th>Характеристики</th><th>Юрлицо</th><th>Сцепка сейчас</th><th class="num">Действия</th></tr></thead>
+              <thead><tr><th>Категория</th><th>Госномер</th><th>Марка/модель</th><th>Характеристики</th><th>Владелец</th><th>Сцепка сейчас</th><th class="num">Действия</th></tr></thead>
               <tbody id="asset-body"></tbody>
             </table>
           </div>
@@ -3199,7 +3199,15 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
           <input autocomplete="off" id="asset-spec" type="text" maxlength="150" placeholder="0,5 х 6,2; 35 тн"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
         <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">На балансе (юрлицо)</label>
-          <select id="asset-legal-entity" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px"><option value="">— не указано —</option></select></div>
+          <select id="asset-legal-entity" onchange="if(this.value)document.getElementById('asset-owner-person').value=''"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px"><option value="">— не указано —</option></select></div>
+        <!-- Владелец-физлицо (31.08, Влад: часть техники в СТС оформлена не на ООО, а на
+             конкретного человека - "добавить в физлица и привязать к машинам"). Взаимно
+             исключающее с юрлицом выше - выбор одного очищает другое, техника либо на
+             балансе организации, либо оформлена на физлицо, не оба сразу. -->
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Владелец (физлицо, если не юрлицо)</label>
+          <select id="asset-owner-person" onchange="if(this.value)document.getElementById('asset-legal-entity').value=''"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px"><option value="">— не указано —</option></select></div>
         <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Заметка</label>
           <input autocomplete="off" id="asset-notes" type="text" maxlength="300" placeholder="необязательно"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
@@ -10763,7 +10771,8 @@ function assetsPaint_() {
       '<td class="mono"><b>' + pageEsc_(a.id) + '</b>' + (a.is_deleted ? ' <span class="muted" style="font-size:11px">(удалено)</span>' : '') + '</td>' +
       '<td class="muted">' + modelCell + '</td>' +
       '<td class="muted">' + (specText ? pageEsc_(specText) : '—') + '</td>' +
-      '<td class="muted">' + (a.legal_entity_id ? pageEsc_(legalEntityName_(a.legal_entity_id)) : '—') + '</td>' +
+      '<td class="muted">' + (a.legal_entity_id ? pageEsc_(legalEntityName_(a.legal_entity_id))
+        : a.owner_person_id ? pageEsc_(fleetPersonName_(a.owner_person_id) || a.owner_person_id) + ' <span style="font-size:10px">(физлицо)</span>' : '—') + '</td>' +
       '<td>' + tractorCell + '</td>' +
       '<td class="num">' + actions + '</td>' +
     '</tr>';
@@ -10777,6 +10786,16 @@ function assetLegalEntityOptions_(selectedId) {
   var list = (spravLegalEntities_ || []).filter(function(le) { return le.is_own || String(le.id) === String(selectedId); });
   return '<option value="">— не указано —</option>' + list.map(function(le) {
     return '<option value="' + pageEsc_(le.id) + '"' + (String(le.id) === String(selectedId) ? ' selected' : '') + '>' + pageEsc_(le.name) + '</option>';
+  }).join('');
+}
+// Владелец-физлицо (31.08) - в отличие от юрлица, здесь НЕ фильтруем по роли (это не
+// обязательно сотрудник-водитель, это просто человек, на кого оформлен ПТС/СТС) - весь
+// sprav_people, отсортированный по имени для удобства поиска в длинном списке.
+function assetOwnerPersonOptions_(selectedId) {
+  var list = (spravPeople_ || []).filter(function(p) { return !p.is_deleted || String(p.id) === String(selectedId); })
+    .slice().sort(function(a, b) { return (a.full_name || '').localeCompare(b.full_name || '', 'ru'); });
+  return '<option value="">— не указано —</option>' + list.map(function(p) {
+    return '<option value="' + pageEsc_(p.id) + '"' + (String(p.id) === String(selectedId) ? ' selected' : '') + '>' + pageEsc_(p.full_name) + '</option>';
   }).join('');
 }
 // Показывает блок полей нужного типа техники (тягач/полуприцеп), прячет чужой -
@@ -10824,6 +10843,7 @@ function assetOpenForm_(id) {
   document.getElementById('asset-ramps').value = a ? (a.ramps || '') : '';
   document.getElementById('asset-spec').value = a ? (a.spec || '') : '';
   document.getElementById('asset-legal-entity').innerHTML = assetLegalEntityOptions_(a ? a.legal_entity_id : '');
+  document.getElementById('asset-owner-person').innerHTML = assetOwnerPersonOptions_(a ? a.owner_person_id : '');
   document.getElementById('asset-notes').value = a ? (a.notes || '') : '';
   document.getElementById('asset-error').style.display = 'none';
   document.getElementById('asset-del-btn').style.display = a ? '' : 'none';
@@ -10872,6 +10892,7 @@ function assetSave_() {
     ramps: document.getElementById('asset-ramps').value.trim(),
     spec: document.getElementById('asset-spec').value.trim(),
     legal_entity_id: document.getElementById('asset-legal-entity').value,
+    owner_person_id: document.getElementById('asset-owner-person').value,
     notes: document.getElementById('asset-notes').value.trim(),
   };
   if (assetEditId_ && assetEditSnapshot_) params.expected_updated_at = assetEditSnapshot_;

@@ -22021,6 +22021,13 @@ function renderFleetMenuMain_(){
      убираем ту прямую копию, просто добавляем сюда же как явный пункт меню,
      на случай если правым кликнули не точно по верхней строке. */
   items.push('<button class="ctxmenu-item" data-fa="copy">Копировать</button>');
+  /* Скачать СТС (Влад, 31.08, четвёртый заход: "нужно чтобы можно было скачать
+     стс на тягач и прицеп") - файл ищется по факту клика (lpDownloadSts_), не
+     заранее - Планировка не подгружает sprav_asset_documents целиком (это отдельный
+     запрос на каждый актив, как в Справочниках). "СТС прицепа" показываем только
+     если прицеп вообще сцеплен - иначе скачивать нечего. */
+  items.push('<button class="ctxmenu-item" data-fa="sts-tractor">Скачать СТС тягача</button>');
+  if (trlAssign) items.push('<button class="ctxmenu-item" data-fa="sts-trailer">Скачать СТС прицепа</button>');
   if (drvAssign) items.push('<button class="ctxmenu-item" data-fa="uncouple-driver">Высадить · ' + pageEsc_(lpFleetPersonName_(drvAssign.resource_key)) + "</button>");
   items.push('<button class="ctxmenu-item" data-fa="couple-driver">' + (drvAssign ? "Пересадить водителя" : "Посадить водителя") + "</button>");
   if (trlAssign) items.push('<button class="ctxmenu-item" data-fa="uncouple-trailer">Отцепить · ' + pageEsc_(lpFleetAssetLabel_(trlAssign.resource_key)) + "</button>");
@@ -22046,10 +22053,33 @@ function handleFleetMenuAction_(action){
   var v = STATE.vehicles[fleetMenuVi_];
   if (!v){ closeFleetMenu_(); return; }
   if (action === "copy"){ lpCopyRow_(fleetMenuVi_); closeFleetMenu_(); return; }
+  if (action === "sts-tractor"){ lpDownloadSts_(v.gos); closeFleetMenu_(); return; }
+  if (action === "sts-trailer"){
+    var trl = lpFleetOpenOnTractor_("trailer", v.gos);
+    if (trl) lpDownloadSts_(trl.resource_key);
+    closeFleetMenu_();
+    return;
+  }
   if (action === "uncouple-driver") return fleetDoUncouple_("driver", v);
   if (action === "uncouple-trailer") return fleetDoUncouple_("trailer", v);
   if (action === "couple-driver") return renderFleetPicker_("driver", v);
   if (action === "couple-trailer") return renderFleetPicker_("trailer", v);
+}
+/* Скачивание СТС (31.08) - тот же эндпоинт/приём, что карточка техники в
+   Справочниках (assetDocsLoad_/assetDocsPaint_) - ищем документ doc_type='sts'
+   среди документов актива и открываем файл в новой вкладке. Not preloaded - на
+   каждый клик отдельный запрос, Планировка не носит с собой список документов
+   всего парка. asset_id для тягача = его госномер (v.gos), для прицепа -
+   resource_key открытой сцепки (тот же id, что sprav_assets.id). */
+function lpDownloadSts_(assetId){
+  fetchFromYardApi_('/sprav/asset_documents', { asset_id: assetId }).then(function(r){
+    if (!r.ok){ toast('Не удалось получить документы', null); return; }
+    var docs = (r.data && r.data.documents) || [];
+    var sts = docs.filter(function(d){ return d.doc_type === 'sts'; })[0];
+    if (!sts){ toast('СТС не загружен для ' + assetId, null); return; }
+    var href = YARD_API_BASE + '/sprav/asset_document_file?session_token=' + encodeURIComponent(SESSION_TOKEN) + '&id=' + encodeURIComponent(sts.id);
+    window.open(href, '_blank');
+  }).catch(function(){ toast('Ошибка сети - не удалось получить СТС', null); });
 }
 function fleetDoUncouple_(kind, v){
   /* Слот РЕАЛЬНОГО текущего occupant'а, не жёсткий 1 - см. большой разбор у

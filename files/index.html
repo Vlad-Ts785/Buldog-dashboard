@@ -1435,8 +1435,22 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
      `height:100vh`, независимая от того, ограничен ли предок: общая шапка
      дашборда (`.page-header`) для этой вкладки скрыта (см. PAGE_TITLES -
      пустой titleText, тот же приём, что у `my-page`) - счfar выше вкладки нет,
-     ничего выше вкладки нет, 100vh совпадает с окном без вычитания отступов. */
+     ничего выше вкладки нет, 100vh совпадает с окном без вычитания отступов.
+
+     НАЙДЕННЫЙ БАГ (31.08, живой пример - Влад на телефоне: кнопки "Список/
+     Таблица" и масштаб оказались внизу экрана, под адресной строкой браузера,
+     хотя в разметке они ПЕРВЫЕ, до самой ленты). 100vh на мобильном браузере -
+     классическая ловушка: считается по МАКСИМАЛЬНОЙ высоте экрана, как будто
+     адресная строка уже скрылась - при первой отрисовке (строка ещё видна)
+     это БОЛЬШЕ, чем реально видимая область, поэтому низ страницы (там, где
+     .board должен был получить свой внутренний скролл) вылезал за пределы
+     экрана - ехать приходилось уже ВСЕЙ странице целиком, утаскивая мою
+     мини-шапку вниз вместе с остальным. 100dvh - актуальная ("динамическая")
+     видимая высота, пересчитывается сама при показе/скрытии адресной строки -
+     старые браузеры её не знают и тихо используют строку выше (100vh) как
+     фолбэк, ничего не ломается. */
   height:100vh;
+  height:100dvh;
   display:flex; flex-direction:column; flex:1; min-height:0; min-width:0;
   background:var(--bg); color:var(--text);
   font-family:'Golos Text',system-ui,-apple-system,'Segoe UI',sans-serif;
@@ -1762,6 +1776,18 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
    "жму, подожди". .lifted/.row.drop - уже существующие десктопные классы,
    переиспользуются как есть, не дублируем стили. */
 #page-logistics-plan.lp-mobile.lp-mode-table .seg.pressing{transform:scale(.97);transition:transform 100ms var(--ease-out-soft);}
+/* "Плитка должна дрожать как в мобильных приложениях" (Влад, 31.08) - момент
+   подтверждения долгого нажатия, ДО начала реального перетаскивания (JS
+   снимает класс на первом touchmove - см. lpTUpdateDrag_, иначе анимация и
+   inline-transform драга дрались бы за один и тот же кадр). Конечное число
+   повторов (4), не infinite - раздел 5 ГОСТа запрещает вечные пульсы без
+   именованного исключения, здесь и не нужен: жест короткий, сама цель уже
+   "приподнялась" через .lifted к моменту, когда дрожание кончится. */
+@keyframes lpTWiggle{0%,100%{transform:rotate(-2deg) scale(1.04);}50%{transform:rotate(2deg) scale(1.04);}}
+#page-logistics-plan.lp-mobile.lp-mode-table .seg.lp-t-armed{animation:lpTWiggle .15s ease-in-out 4;}
+@media(prefers-reduced-motion:reduce){
+  #page-logistics-plan.lp-mobile.lp-mode-table .seg.lp-t-armed{animation:none;}
+}
 #page-logistics-plan .lp-m-top{flex:none;display:flex;align-items:center;gap:10px;padding:14px 14px 8px;}
 #page-logistics-plan .lp-m-date{font-size:16px;font-weight:700;}
 #page-logistics-plan .lp-m-wd{color:var(--muted);font-weight:600;margin-right:6px;text-transform:uppercase;font-size:12px;}
@@ -19698,12 +19724,18 @@ function renderRowsInner_(){
         ? '<span class="vp" style="color:' + lpVpColor_(vp) +
           '" title="план по валовой прибыли: факт ' + vp + '% на сегодня, цвет - по прогнозу на конец месяца"><i></i>' + vp + '%</span>'
         : "";
+      /* Влад, 31.08: "достаточно отражать только буквы и цифры госномера без
+         регионов в мобильной версии" - только .lp-mobile, десктоп видит
+         полный номер как раньше (см. lpGosShort_). */
+      var isMobileNow_ = pageRoot.classList.contains("lp-mobile");
+      var gosLabel_ = isMobileNow_ ? lpGosShort_(v.gos) : v.gos;
+      var trailerGosLabel_ = isMobileNow_ ? lpGosShort_(v.trailerGos) : v.trailerGos;
       head.innerHTML =
         '<div class="rh1"><span class="tag ' + tagClass(v.type) + '">' + v.type + '</span>' +
         (v.tractor ? '<span class="tractor">' + v.tractor + '</span>' : '') +
-        '<span class="gos">' + v.gos + '</span>' +
+        '<span class="gos">' + gosLabel_ + '</span>' +
         (endLbl ? '<span class="until">до <b>' + endLbl + '</b></span>' : '') + '</div>' +
-        '<div class="rh2"><span class="tr' + (!v.trailerGos && !v.trailer ? " nd" : "") + '">' + (v.trailerGos || v.trailer || "без прицепа") + '</span>' +
+        '<div class="rh2"><span class="tr' + (!v.trailerGos && !v.trailer ? " nd" : "") + '">' + (trailerGosLabel_ || v.trailer || "без прицепа") + '</span>' +
         (v.trailer && v.trailerGos ? '<span class="sep">·</span><span class="kind">' + v.trailer + '</span>' : '') +
         '<span class="sep">·</span><span class="drv' + (v.vacant ? " nd" : "") + '">' + drv + '</span>' +
         (rside ? '<span class="rside">' + rside + '</span>' : '') + '</div>' +
@@ -19780,6 +19812,12 @@ var lpMOpenVi_ = null;      /* индекс машины с развёрнуты
 var lpMFilterFree_ = false;
 
 function lpMShortName_(full){ return (full || "").trim().split(" ").slice(0, 2).join(" "); }
+/* Влад, 31.08: "достаточно отражать только буквы и цифры госномера без
+   регионов в мобильной версии" - "О 894 ХМ 797" -> "О 894 ХМ". Регион -
+   последняя группа цифр через пробел, у всего парка компании он и так почти
+   всегда один и тот же (не несёт информации на узком экране). Только
+   мобильная разметка - десктоп читает v.gos напрямую, не через этот хелпер. */
+function lpGosShort_(gos){ return (gos || "").replace(/\s+\d+\s*$/, ""); }
 
 /* Подпись - через segLabel(s), тот же единый источник, что и десктопная
    плитка/шторка (Влад, 30.08: "один источник, не дублируем формат в двух
@@ -19889,7 +19927,7 @@ function lpMRenderList_(){
     return '<div class="lp-m-card' + (lpMOpenVi_ === v.i ? " open" : "") + '" data-vi="' + v.i + '">' +
       '<div class="lp-m-main" data-vi="' + v.i + '">' +
         '<span class="lp-m-dot ' + st.dot + '"></span>' +
-        '<div class="lp-m-id"><span class="lp-m-gos mono">' + pageEsc_(v.gos) + '</span><span class="lp-m-tag">' + pageEsc_(v.type) + '</span></div>' +
+        '<div class="lp-m-id"><span class="lp-m-gos mono">' + pageEsc_(lpGosShort_(v.gos)) + '</span><span class="lp-m-tag">' + pageEsc_(v.type) + '</span></div>' +
         '<div class="lp-m-mid">' + driverHtml + '<div class="lp-m-status">' + pageEsc_(st.text) + '</div></div>' +
         '<span class="lp-m-couple" data-vi="' + v.i + '" title="Посадить/высадить водителя"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="6.5" r="3"/><path d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6"/></svg></span>' +
         '<span class="lp-m-add" data-vi="' + v.i + '" title="Новая запись"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M10 4v12M4 10h12"/></svg></span>' +
@@ -20066,8 +20104,9 @@ document.getElementById("lpMFilterBadge").onclick = function(){
    что у обычного создания - первая версия, можно усилить позже. */
 (function(){
   if (!IS_TOUCH_) return;
-  var LONG_PRESS_MS = 420, MOVE_CANCEL_PX = 8, HOUR_STEP = 0.5;
+  var LONG_PRESS_MS = 420, MOVE_CANCEL_PX = 8, HOUR_STEP = 0.5, DBLTAP_MS = 300;
   var pending = null, dragT = null;
+  var lastTapSegId_ = null, lastTapAt_ = 0;
 
   function clearPending_(){
     if (pending){
@@ -20075,6 +20114,21 @@ document.getElementById("lpMFilterBadge").onclick = function(){
       pending.el.classList.remove("pressing");
     }
     pending = null;
+  }
+  /* Влад, 31.08: "диалоговое окно только при двойном нажатии" - короткий тап
+     (таймер долгого нажатия не успел сработать, драг не поднялся) больше НЕ
+     открывает меню сам по себе (см. отдельный разбор у click-обработчика
+     30.08 чуть выше по файлу - там он теперь явно пропускает Таблицу) -
+     только ВТОРОЙ тап по ТОЙ ЖЕ плитке в пределах DBLTAP_MS, тот же принцип,
+     что уже даёт двойной клик мышью на десктопе. */
+  function handleShortTap_(seg, el, x, y){
+    var now = Date.now();
+    if (lastTapSegId_ === seg.id && now - lastTapAt_ < DBLTAP_MS){
+      lastTapSegId_ = null; lastTapAt_ = 0;
+      openCtxMenu_(seg, x, y);
+    } else {
+      lastTapSegId_ = seg.id; lastTapAt_ = now;
+    }
   }
   rowsEl.addEventListener("touchstart", function(e){
     if (!pageRoot.classList.contains("lp-mode-table") || dragT || e.touches.length !== 1) return;
@@ -20103,21 +20157,45 @@ document.getElementById("lpMFilterBadge").onclick = function(){
     e.preventDefault();
     lpTUpdateDrag_(e.touches[0]);
   }, {passive:false});
-  rowsEl.addEventListener("touchend", function(){
+  rowsEl.addEventListener("touchend", function(e){
+    if (dragT){
+      /* Подавляем синтетический click, который браузер шлёт следом за
+         touchend, ДАЖЕ после реального перемещения пальцем - без этого он
+         доходил бы до общего click-обработчика плитки (тот, впрочем, уже
+         сам пропускает Таблицу - см. разбор там - двойная страховка). */
+      e.preventDefault();
+      clearPending_();
+      lpTEndDrag_();
+      return;
+    }
+    if (pending){
+      var seg = pending.seg, el = pending.el;
+      var t = (e.changedTouches && e.changedTouches[0]) || {clientX:0, clientY:0};
+      clearPending_();
+      handleShortTap_(seg, el, t.clientX, t.clientY);
+      return;
+    }
     clearPending_();
-    if (dragT) lpTEndDrag_();
-  });
+  }, {passive:false});   /* touchend по умолчанию и так passive:false в браузерах, но явно - надёжнее (e.preventDefault() выше зависит от этого) */
   rowsEl.addEventListener("touchcancel", function(){
     clearPending_();
     if (dragT) lpTAbortDrag_(true);
   });
 
   function lpTStartDrag_(el, seg, x0, y0){
-    el.classList.add("lifted");
+    /* Влад, 31.08: "плитка должна дрожать как в мобильных приложениях и
+       перемещаться с анимацией" - .lp-t-armed (см. CSS, keyframes lpTWiggle,
+       4 коротких колебания и сама останавливается - не бесконечный цикл,
+       раздел 5 ГОСТа запрещает вечные пульсы без именованного исключения)
+       играет РОВНО до первого реального движения пальца - снимается в
+       lpTUpdateDrag_, иначе CSS-анимация трогала бы тот же transform, что и
+       JS ниже (перетаскивание), и они дрались бы за кадр. */
+    el.classList.add("lifted", "lp-t-armed");
     dragT = {el:el, seg:seg, hw:parseFloat(getComputedStyle(pageRoot).getPropertyValue("--hw")) || ZOOM[STATE.zoom],
-             s0:seg.s, l0:seg.l, v0:seg.v, x0:x0, y0:y0, curDx:0, hoverRow:null};
+             s0:seg.s, l0:seg.l, v0:seg.v, x0:x0, y0:y0, curDx:0, hoverRow:null, moved:false};
   }
   function lpTUpdateDrag_(t){
+    if (!dragT.moved){ dragT.moved = true; dragT.el.classList.remove("lp-t-armed"); }
     var dx = t.clientX - dragT.x0, dy = t.clientY - dragT.y0;
     dragT.curDx = dx;
     dragT.el.style.transform = "translate(" + dx + "px," + dy + "px) scale(1.03)";
@@ -20130,7 +20208,7 @@ document.getElementById("lpMFilterBadge").onclick = function(){
     }
   }
   function lpTSettle_(el){
-    el.classList.remove("lifted");
+    el.classList.remove("lifted", "lp-t-armed");
     el.style.transition = "transform 150ms var(--ease-out-strong)";
     el.style.transform = "";
     setTimeout(function(){ el.style.transition = ""; }, 160);
@@ -21543,6 +21621,19 @@ rowsEl.addEventListener("click", function(e){
   if (!IS_TOUCH_) return;
   var el = e.target.closest(".seg");
   if (el){
+    /* НАЙДЕННЫЙ БАГ (31.08, живой пример - Влад: "при зажатии плитки заказа
+       вылезает диалоговое окно, оно мешает перемещать плитку"). В мобильной
+       "Таблице" тап по плитке теперь запускает долгое нажатие -> драг (см.
+       "ПЕРЕТАСКИВАНИЕ ДОЛГИМ НАЖАТИЕМ" ниже) - а браузер ВСЁ РАВНО генерирует
+       синтетический click в конце касания (это не отменяется происходившим
+       раньше touchmove/touchend, если явно не остановить - см. preventDefault
+       в lpTEndDrag_/lpTAbortDrag_ ниже), и этот ЖЕ обработчик, построенный
+       ещё 30.08 под "тап = меню" (когда драга в Таблице не было), продолжал
+       открывать меню поверх только что передвинутой/перемещаемой плитки.
+       Теперь в Таблице тап по плитке меню НЕ открывает вообще - только
+       двойной тап (см. lpTDblTap_ рядом с драгом - "диалоговое окно только
+       при двойном нажатии", тот же принцип, что уже даёт dblclick мыши). */
+    if (pageRoot.classList.contains("lp-mode-table")) return;
     var seg = STATE.segs.find(function(s){ return s.id === el.dataset.id; });
     if (seg) openCtxMenu_(seg, e.clientX, e.clientY);
     return;

@@ -2040,9 +2040,11 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
    раскраски (Состояние/Менеджер/Логист), не только "Состояние". */
 #page-logistics-plan .seg-vacant-stripe{
   position:absolute;inset:0;border-radius:inherit;pointer-events:none;z-index:1;
+  /* Влад, 31.08 (четвёртый заход): "полоска должна быть чуть-чуть шире" -
+     14px/14px (цвет/прозрачно) -> 20px/20px по образцу присланного скрина. */
   background-image:repeating-linear-gradient(45deg,
-    rgba(139,137,128,.4) 0 7px, rgba(139,137,128,.4) 7px 14px,
-    transparent 14px 21px, transparent 21px 28px);
+    rgba(139,137,128,.4) 0 10px, rgba(139,137,128,.4) 10px 20px,
+    transparent 20px 30px, transparent 30px 40px);
 }
 /* прогресс активного рейса - 2px снизу, #page-logistics-plan transform:scaleX (не width) */
 #page-logistics-plan .seg-prog{
@@ -20336,6 +20338,15 @@ function vacantBandRange_(v){
    та же намеренная огрубление, что уже было у полосы: нет частичной штриховки
    только на пересекающемся куске, весь ремонт целиком полосатый, если ХОТЬ
    где-то пересёкся). */
+/* Общий хелпер - все заявки kind===kind той же машины, пересекающиеся с s по
+   времени (используется и для полосатости, и для склейки подписи ниже - один
+   источник, не две копии одной и той же проверки пересечения). */
+function lpOverlappingSegsOfKind_(s, kind){
+  return STATE.segs.filter(function(o){
+    return o.v === s.v && o.kind === kind && o.id !== s.id &&
+      s.s < o.s + o.l && o.s < s.s + s.l;
+  });
+}
 function isVacantRepairOverlap_(s){
   if (s.kind !== "repair") return false;
   var v = STATE.vehicles[s.v];
@@ -20344,10 +20355,7 @@ function isVacantRepairOverlap_(s){
     var band = vacantBandRange_(v);
     if (band.l > 0 && s.s < band.s + band.l && band.s < s.s + s.l) return true;
   }
-  return STATE.segs.some(function(o){
-    return o.v === s.v && o.kind === "driveroff" && o.id !== s.id &&
-      s.s < o.s + o.l && o.s < s.s + s.l;
-  });
+  return lpOverlappingSegsOfKind_(s, "driveroff").length > 0;
 }
 function makeSeg(s){
   var el = document.createElement("div");
@@ -20373,8 +20381,30 @@ function makeSeg(s){
     head = '<span class="seg-id"><b>' + three(s.mg) + '</b><i>' + three(s.lg) + '</i>' +
       '<span class="seg-drv ' + (v && v.vacant ? "off" : "on") + '"></span></span>';
   }
+  /* Влад, 31.08 (четвёртый заход, живой пример): "текст должен не
+     пересекаться, а идти друг за другом: «Ремонт до такого-то числа» и «Без
+     водителя до такого-то числа»" - у ремонта и заявки "без водителя" КАЖДЫЙ
+     свой независимый sticky-подпись (см. .seg-label выше - "привязана к
+     скроллу .board"), и когда они лежат друг на друге по времени, оба
+     одновременно норовят прилипнуть к левому краю ОДНОГО и того же видимого
+     просвета - подписи наезжают друг на друга нечитаемо. Настоящая
+     геометрическая стыковка (подвинуть driveroff-подпись ровно на ширину
+     перекрывающего ремонта) недостижима чистым CSS без знания соседа - вместо
+     этого ОБЪЕДИНЯЕМ подписи в одну строку на верхней (полосатой) плитке
+     ремонта - "Ремонт · до X · Без водителя · до Y" - и ГЛУШИМ собственную
+     подпись driveroff-плитки, пока её перекрывает ремонт (иначе тот же самый
+     текст показался бы дважды - на своей плитке и в склейке ремонта). Тот же
+     принцип огрубления, что уже у самой полосатости - подпись гасится/
+     склеивается ЦЕЛИКОМ на весь отрезок, не только на пересекающемся куске. */
+  var segTxt = segLabel(s);
+  if (s.kind === "repair" && vacantStripe){
+    var ovDriveroff = lpOverlappingSegsOfKind_(s, "driveroff");
+    if (ovDriveroff.length) segTxt += " · " + ovDriveroff.map(segLabel).join(" · ");
+  } else if (s.kind === "driveroff" && lpOverlappingSegsOfKind_(s, "repair").length){
+    segTxt = "";
+  }
   el.innerHTML = '<span class="seg-label">' + head +
-    '<span class="seg-txt">' + segLabel(s) + "</span>" +
+    '<span class="seg-txt">' + segTxt + "</span>" +
     (s.needsData ? '<span class="seg-nd" title="Под данные - документы для пропуска ещё не собраны"></span>' : "") +
     /* один и тот же "золочёный" значок для обоих режимов (Влад, 30.08: "добавь
        такую же золочёную плашку при выборе дальней") - меняется только подпись,

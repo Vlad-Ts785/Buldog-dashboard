@@ -1697,10 +1697,41 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
    компоненты. Видимость - через .lp-mobile на #page-logistics-plan (см.
    lpIsMobileViewport_), десктопные .top/.legend/.board-wrap не трогаются. */
 #page-logistics-plan .lp-m-root{display:none;}
-#page-logistics-plan.lp-mobile .lp-m-root{display:flex;flex-direction:column;flex:1 1 auto;min-height:0;min-width:0;}
+#page-logistics-plan.lp-mobile .lp-m-root{display:flex;flex-direction:column;min-height:0;min-width:0;}
+/* Список - .lp-m-root сам растягивается (внутри него скроллится список).
+   Таблица - .lp-m-root сжимается до высоты своей шапки, растягивается
+   .board-wrap (десктопная лента, показанная поверх, см. .lp-mode-table ниже) */
+#page-logistics-plan.lp-mobile:not(.lp-mode-table) .lp-m-root{flex:1 1 auto;}
+#page-logistics-plan.lp-mobile.lp-mode-table .lp-m-root{flex:none;}
 #page-logistics-plan.lp-mobile .top,
 #page-logistics-plan.lp-mobile .legend,
 #page-logistics-plan.lp-mobile .board-wrap{display:none;}
+#page-logistics-plan.lp-mobile.lp-mode-table .board-wrap{display:flex;}
+#page-logistics-plan.lp-mobile:not(.lp-mode-table) .lp-m-body-list{display:flex;flex-direction:column;flex:1 1 auto;min-height:0;}
+#page-logistics-plan.lp-mobile.lp-mode-table .lp-m-body-list{display:none;}
+#page-logistics-plan .lp-m-modeswitch{flex:none;display:flex;gap:4px;padding:0 14px 10px;}
+#page-logistics-plan .lp-m-ms{
+  flex:1 1 0;appearance:none;border:1px solid var(--border);background:var(--bg3);color:var(--muted);
+  font-family:inherit;font-size:12px;font-weight:600;padding:7px 0;border-radius:8px;cursor:pointer;
+}
+#page-logistics-plan .lp-m-ms[aria-pressed="true"]{background:var(--bg4);color:var(--text);border-color:var(--border-strong);}
+/* Табличный режим - минимальная боковая колонка ("госномер + фамилия И.О.
+   водителя", буквально по словам Влада 31.08) поверх ТОЙ ЖЕ десктопной ленты
+   (.rowhead/.track/.seg - не отдельный рендер), просто урезаны через display:
+   none лишние подписи (тип/марка/прицеп/%ВП) и сжата ширина колонки. Touch-
+   поведение уже соответствует (IS_TOUCH_, 30.08) - драг/растяжка выключены,
+   тап по плитке/пустому месту работают как и должны. */
+#page-logistics-plan.lp-mobile.lp-mode-table{--lane-w:104px;}
+#page-logistics-plan.lp-mobile.lp-mode-table .head-corner .t1{display:none;}
+#page-logistics-plan.lp-mobile.lp-mode-table .rh1 .tag,
+#page-logistics-plan.lp-mobile.lp-mode-table .rh1 .tractor,
+#page-logistics-plan.lp-mobile.lp-mode-table .rh1 .until,
+#page-logistics-plan.lp-mobile.lp-mode-table .rh2 .tr,
+#page-logistics-plan.lp-mobile.lp-mode-table .rh2 .sep,
+#page-logistics-plan.lp-mobile.lp-mode-table .rh2 .kind,
+#page-logistics-plan.lp-mobile.lp-mode-table .rh2 .rside{display:none;}
+#page-logistics-plan.lp-mobile.lp-mode-table .gos{font-size:13px;}
+#page-logistics-plan.lp-mobile.lp-mode-table .rh2 .drv{font-size:11px;}
 #page-logistics-plan .lp-m-top{flex:none;display:flex;align-items:center;gap:10px;padding:14px 14px 8px;}
 #page-logistics-plan .lp-m-date{font-size:16px;font-weight:700;}
 #page-logistics-plan .lp-m-wd{color:var(--muted);font-weight:600;margin-right:6px;text-transform:uppercase;font-size:12px;}
@@ -2823,9 +2854,21 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
     <div class="lp-m-spacer"></div>
     <div class="lp-m-chip-free" id="lpMChipFree"><i></i><span id="lpMFreeCount">0</span> свободно</div>
   </div>
-  <div class="lp-m-daystrip" id="lpMDaystrip"></div>
-  <div class="lp-m-listwrap" id="lpMListWrap">
-    <div class="lp-m-list" id="lpMList"></div>
+  <!-- Переключатель Список/Таблица (Влад, 31.08: "сделаем два варианта...
+       что бы можно было сравнить") - общая шапка выше остаётся ОДНОЙ на оба
+       режима, переключается только тело: .lp-m-body-list (карточки, свои
+       lpM*-функции) или сам десктопный .board-wrap (см. CSS .lp-mode-table
+       ниже) - табличный режим НЕ дублирует рендер ленты, показывает ТУ ЖЕ
+       доску, что и десктоп, только колонка/шапка сжаты через CSS. -->
+  <div class="lp-m-modeswitch">
+    <button class="lp-m-ms" data-mode="list" aria-pressed="true">Список</button>
+    <button class="lp-m-ms" data-mode="table" aria-pressed="false">Таблица</button>
+  </div>
+  <div class="lp-m-body-list" id="lpMBodyList">
+    <div class="lp-m-daystrip" id="lpMDaystrip"></div>
+    <div class="lp-m-listwrap" id="lpMListWrap">
+      <div class="lp-m-list" id="lpMList"></div>
+    </div>
   </div>
 </div>
 
@@ -19830,6 +19873,26 @@ document.getElementById("lpMChipFree").onclick = function(){
   document.getElementById("lpMChipFree").classList.toggle("active", lpMFilterFree_);
   lpMRenderList_();
 };
+/* Список <-> Таблица - см. большой разбор у HTML/CSS выше (.lp-mode-table).
+   При входе в Таблицу - board.scrollLeft к "сейчас" заново: .board-wrap лежал
+   display:none, а браузер может забыть/обнулить scrollLeft у элемента без
+   раскладки, пока он скрыт (проверено живьём - без этого таблица открывалась
+   на 1 января эпохи, а не на сегодня). */
+[].forEach.call(document.querySelectorAll(".lp-m-ms"), function(btn){
+  btn.onclick = function(){
+    [].forEach.call(document.querySelectorAll(".lp-m-ms"), function(b){ b.setAttribute("aria-pressed", "false"); });
+    btn.setAttribute("aria-pressed", "true");
+    var table = btn.dataset.mode === "table";
+    pageRoot.classList.toggle("lp-mode-table", table);
+    if (table){
+      /* центрируем "сейчас" по РЕАЛЬНОЙ видимой ширине узкого экрана - фикс.
+         смещение "-42ч", что на десктопе (ставит "сейчас" в правую треть
+         широкого экрана), на телефоне унесло бы линию далеко за край. */
+      var hw = ZOOM[STATE.zoom], visibleHours = board.clientWidth / hw;
+      board.scrollLeft = Math.max(0, (nowHour() - visibleHours / 2) * hw);
+    }
+  };
+});
 
 /* дата окончания служебной плашки = правый край отрезка (Влад, 29.08).
    Конец ровно в полночь = «по последний занятый день включительно» (26.08),

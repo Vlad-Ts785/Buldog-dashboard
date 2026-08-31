@@ -1715,6 +1715,13 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   font-family:inherit;font-size:12px;font-weight:600;padding:7px 0;border-radius:8px;cursor:pointer;
 }
 #page-logistics-plan .lp-m-ms[aria-pressed="true"]{background:var(--bg4);color:var(--text);border-color:var(--border-strong);}
+#page-logistics-plan .lp-m-table-filters{display:none;}
+#page-logistics-plan.lp-mode-table .lp-m-table-filters{flex:none;display:flex;gap:4px;padding:0 14px 10px;}
+#page-logistics-plan .lp-m-tf{
+  flex:1 1 0;appearance:none;border:1px solid var(--border);background:var(--bg3);color:var(--muted);
+  font-family:inherit;font-size:11.5px;font-weight:600;padding:6px 0;border-radius:8px;cursor:pointer;
+}
+#page-logistics-plan .lp-m-tf[aria-pressed="true"]{background:var(--bg4);color:var(--text);border-color:var(--border-strong);}
 /* Табличный режим - минимальная боковая колонка ("госномер + фамилия И.О.
    водителя", буквально по словам Влада 31.08) поверх ТОЙ ЖЕ десктопной ленты
    (.rowhead/.track/.seg - не отдельный рендер), просто урезаны через display:
@@ -2887,6 +2894,16 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   <div class="lp-m-modeswitch">
     <button class="lp-m-ms" data-mode="list" aria-pressed="true">Список</button>
     <button class="lp-m-ms" data-mode="table" aria-pressed="false">Таблица</button>
+  </div>
+  <!-- Влад, 31.08 (второй заход): "в режиме таблицы должны быть фильтра тралы
+       и длинномеры" - видна ТОЛЬКО в Таблице (.lp-mode-table ниже), те же
+       значения STATE.filter, что у десктопных чипов "Парк" (all/tral/long) -
+       renderRows() уже умеет их фильтровать (visible(v)), ничего нового не
+       считаем. -->
+  <div class="lp-m-table-filters" id="lpMTableFilters">
+    <button class="lp-m-tf" data-filter="all" aria-pressed="true">Все</button>
+    <button class="lp-m-tf" data-filter="tral" aria-pressed="false">Тралы</button>
+    <button class="lp-m-tf" data-filter="long" aria-pressed="false">Длинномеры</button>
   </div>
   <div class="lp-m-body-list" id="lpMBodyList">
     <div class="lp-m-daystrip" id="lpMDaystrip"></div>
@@ -19788,9 +19805,19 @@ function lpMRenderDaystrip_(){
 var LP_M_FILTER_LABELS_ = {tral:"Тралы", long:"Длинномеры", razd:"Раздвижки", koryto:"Корыта", rapid:"Рапиды", faymon:"Файмоны", free:"Свободные сейчас"};
 function lpMRenderFilterBadge_(){
   var badge = document.getElementById("lpMFilterBadge");
-  if (STATE.filter === "all"){ badge.style.display = "none"; return; }
-  badge.style.display = "inline-flex";
-  document.getElementById("lpMFilterBadgeText").textContent = LP_M_FILTER_LABELS_[STATE.filter] || STATE.filter;
+  if (STATE.filter === "all"){ badge.style.display = "none"; }
+  else {
+    badge.style.display = "inline-flex";
+    document.getElementById("lpMFilterBadgeText").textContent = LP_M_FILTER_LABELS_[STATE.filter] || STATE.filter;
+  }
+  /* чипы "Все/Тралы/Длинномеры" в Таблице - синхронизируем aria-pressed
+     ЗДЕСЬ ЖЕ (не только по своему клику), чтобы отражали STATE.filter, даже
+     если он поменялся другим путём (бейдж-сброс выше, десктоп той же
+     сессией) - тот же принцип, что syncControlChips() уже делает для
+     десктопных чипов. */
+  [].forEach.call(document.querySelectorAll(".lp-m-tf"), function(btn){
+    btn.setAttribute("aria-pressed", String(btn.dataset.filter === STATE.filter));
+  });
 }
 function lpMRenderList_(){
   if (!pageRoot.classList.contains("lp-mobile")) return;
@@ -19937,6 +19964,17 @@ document.getElementById("lpMFilterBadge").onclick = function(){
   syncControlChips();
   renderRows();
 };
+/* Чипы "Все/Тралы/Длинномеры" в Таблице - тот же путь, что у десктопного
+   чипа "Парк" (delegated-обработчик .controls ниже: STATE.filter=...;
+   saveSettings(); renderRows();). */
+[].forEach.call(document.querySelectorAll(".lp-m-tf"), function(btn){
+  btn.onclick = function(){
+    STATE.filter = btn.dataset.filter;
+    saveSettings();
+    syncControlChips();
+    renderRows();
+  };
+});
 /* Список <-> Таблица - см. большой разбор у HTML/CSS выше (.lp-mode-table).
    При входе в Таблицу - board.scrollLeft к "сейчас" заново: .board-wrap лежал
    display:none, а браузер может забыть/обнулить scrollLeft у элемента без

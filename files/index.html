@@ -1706,7 +1706,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
 #page-logistics-plan .rh-omni{
   display:inline-flex;align-items:center;gap:4px;padding:1px 7px;
   border-radius:10px;font-family:'JetBrains Mono',monospace;font-size:9.5px;font-weight:600;
-  white-space:nowrap;flex:none;
+  white-space:nowrap;flex:none;cursor:pointer;
 }
 #page-logistics-plan .rh-omni i{width:5px;height:5px;border-radius:50%;flex:none;}
 #page-logistics-plan .rh-omni.live{background:rgba(55,138,221,.16);border:1px solid rgba(55,138,221,.4);color:var(--tint-blue,#8dbdf0);}
@@ -22461,7 +22461,7 @@ function lpOmniFetch_(){
       var plate = lpOmniExtractPlate_(v.plate);
       if (!plate) return;
       byGos[lpOmniNormPlate_(plate)] = {
-        speed: v.speed, ignition: v.ignition, stale: v.stale,
+        speed: v.speed, ignition: v.ignition, stale: v.stale, omnicommId: v.omnicommId,
         place: (v.latitude != null && v.longitude != null) ? lpOmniNearestPlace_(v.latitude, v.longitude) : ""
       };
     });
@@ -22482,15 +22482,35 @@ function lpOmniFetch_(){
 function lpOmniBadgeHtml_(o){
   if (!o || o.stale || !o.place) return "";
   var cls = (o.ignition && o.speed > 3) ? "live" : o.ignition ? "idle" : "off";
-  var title = cls === "live" ? "В движении, " + Math.round(o.speed) + " км/ч"
-    : cls === "idle" ? "Стоит, зажигание включено" : "Двигатель заглушён";
-  return '<span class="rh-omni ' + cls + '" title="' + title + '"><i></i><b>' + pageEsc_(o.place) + '</b></span>';
+  var title = (cls === "live" ? "В движении, " + Math.round(o.speed) + " км/ч"
+    : cls === "idle" ? "Стоит, зажигание включено" : "Двигатель заглушён") + " - открыть на карте «Навигация»";
+  return '<span class="rh-omni ' + cls + '" data-omni-id="' + pageEsc_(o.omnicommId) + '" title="' + title + '"><i></i><b>' + pageEsc_(o.place) + '</b></span>';
 }
 function lpRenderOmniBadges_(){
   [].forEach.call(document.querySelectorAll(".rh-omni-slot"), function(el){
     el.innerHTML = lpOmniBadgeHtml_(lpOmniByGos_[el.dataset.gos]);
   });
 }
+/* Влад, 01.09: "отличная идея - при нажатии на эту часть перекидывает на
+   страницу навигации на эту машину" - переиспользуем ТУ ЖЕ страницу и ТУ ЖЕ
+   функцию выбора машины, что уже есть у вкладки «Навигация» (window.NAV,
+   NAV.select(omnicommId) - центрирует карту и подсвечивает строку списка),
+   ничего не дублируем. showPage сама подсвечивает пункт бокового меню -
+   передаём ему ссылку на этот пункт, тот же приём, что и у самого пункта
+   меню (onclick="showPage('navigation',this)"). */
+rowsEl.addEventListener("click", function(e){
+  var badge = e.target.closest(".rh-omni");
+  if (!badge || !badge.dataset.omniId) return;
+  e.stopPropagation();
+  var omniId = badge.dataset.omniId;
+  showPage("navigation", document.querySelector('.sidebar-nav-item[data-page="navigation"]'));
+  /* NAV.init() внутри showPage запускает СВОЙ асинхронный запрос координат -
+     первый вызов select() может застать список/карту ещё пустыми (центрирование
+     тихо не сработает, но подсветку строки уже проставит). Второй вызов чуть
+     позже - подстраховка на случай, если первый прошёл раньше ответа сервера,
+     без обращения к внутренностям чужого модуля Навигации. */
+  if (window.NAV){ NAV.select(omniId); setTimeout(function(){ NAV.select(omniId); }, 700); }
+});
 setInterval(lpOmniFetch_, 30000);   /* тот же интервал, что у поллера Omnicomm на сервере - чаще спрашивать нечего */
 
 /* НАЙДЕННЫЙ БАГ (Влад, 31.08, живой пример: "Пантелеев занят" - на самом деле

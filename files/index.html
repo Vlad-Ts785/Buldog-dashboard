@@ -1674,7 +1674,13 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
    потеряло свои состояния (.rowcard клонирует head.innerHTML и рассчитан на
    ПЛОСКУЮ шапку). Фон и границы живут на самой .rowhead, как раньше; новую
    вложенность в шапку строки не добавлять. */
-#page-logistics-plan .gos{font-size:14px;font-weight:600;color:var(--text);}
+/* НАЙДЕННЫЙ БАГ (Влад, 01.09, живой скрин: госномер переносится на 3-4
+   строки вертикально внутри шапки) - .gos никогда не имел white-space:
+   nowrap, просто до сих пор это не всплывало, пока в .rh1 не стало тесно
+   (добавился .rh-omni). .rowhead уже overflow:hidden - при нехватке места
+   правильная деградация ОБРЕЗАТЬ край строки, не переносить текст на
+   несколько строк ломая всю высоту шапки. */
+#page-logistics-plan .gos{font-size:14px;font-weight:600;color:var(--text);white-space:nowrap;flex:none;}
 /* время окончания рейса - в ПЕРВОЙ строке, сразу за номером */
 #page-logistics-plan .rh1 .until{font-family:'JetBrains Mono',monospace;font-size:10.5px;
   color:var(--muted);flex:none;white-space:nowrap;}
@@ -1704,7 +1710,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
 @keyframes rhOmniBlink{0%,100%{opacity:1;}50%{opacity:.25;}}
 @keyframes rhOmniHazard{0%,100%{opacity:1;}50%{opacity:.15;}}
 @media(prefers-reduced-motion:reduce){#page-logistics-plan .rh-omni i{animation:none;}}
-#page-logistics-plan .tractor{font-size:9px;font-weight:500;color:var(--muted2);letter-spacing:.03em;}
+#page-logistics-plan .tractor{font-size:9px;font-weight:500;color:var(--muted2);letter-spacing:.03em;white-space:nowrap;flex:none;}
 #page-logistics-plan .rh2{display:flex;align-items:center;gap:5px;}
 #page-logistics-plan .rh2 .tr{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;flex:none;}
 /* «Без прицепа» - тот же приём, что у «вакант» водителя (.drv.nd) - Влад, 30.08,
@@ -21661,6 +21667,23 @@ function fetchPlanSegs_(){
       return;
     }
     if (drag || create || arr) return;   /* рука на плитке - применим следующим тиком */
+    /* НАЙДЕННЫЙ БАГ (Влад, 01.09: "почему-то пропали заявки... такое и раньше
+       было"): сервер данные не терял - напрямую сверено в MySQL, 92 записи на
+       месте. Проблема в клиенте: только ПЕРВЫЙ фетч (ветка firstFetch выше)
+       был защищён от ответа "count:0" - любой СЛЕДУЮЩИЙ тик слепо доверял
+       такому ответу и звал applyServerSegs_([]), которая честно стирает
+       ВСЁ, что не помечено как "моя несохранённая правка" (dirtySegIds_) - то
+       есть всю доску у пассивного зрителя, из-за одного кратковременного
+       глюка сети/сервера (тот же класс нестабильности, что уже описан в
+       CLAUDE.md про Apps Script /exec - здесь дешёвый /plan/segs, но
+       единичные сбои бывают у любого канала). У живой доски с историей
+       записей 0 сегментов почти никогда не бывает ПРАВДОЙ - это тревожный
+       сигнал, не факт, тот же принцип "тихий фолбэк, не доверять аномалии",
+       что уже применён к другим каналам данных. */
+    if (!firstFetch && r.data.count === 0 && Object.keys(segsSnapshot_).length > 0){
+      console.error("[Планировка] сервер вернул 0 записей при непустом локальном снимке - похоже на сбой, пропускаю тик", {snapshotSize: Object.keys(segsSnapshot_).length});
+      return;
+    }
     planMaxUpdated_ = r.data.max_updated;
     var hadPending = applyServerSegs_(r.data.segs);
     renderRows(); renderKpis();
@@ -22406,16 +22429,16 @@ function lpOmniFetch_(){
    вся плашка притушена, анимации нет совсем. Порог speed>3 - тот же, что уже
    принят на вкладке «Навигация» (см. navStatusClass_) - не отдельная
    договорённость, а то же самое "едет/стоит" одним и тем же числом. */
+/* Влад, 01.09: "убери статус стоит/заглушен/километры, оставь только точку,
+   город и цвет - места мало, нет места для статуса". Состояние теперь несут
+   ТОЛЬКО цвет+анимация точки (см. CSS .rh-omni.live/.idle/.off) - текст
+   всегда просто название места, слово-состояние ушло в title (наведение). */
 function lpOmniBadgeHtml_(o){
   if (!o || o.stale || !o.place) return "";
-  if (o.ignition && o.speed > 3){
-    return '<span class="rh-omni live" title="В движении, ' + Math.round(o.speed) + ' км/ч"><i></i><b>' +
-      pageEsc_(o.place) + ' · ' + Math.round(o.speed) + ' км/ч</b></span>';
-  }
-  if (o.ignition){
-    return '<span class="rh-omni idle" title="Стоит, зажигание включено"><i></i><b>' + pageEsc_(o.place) + ' · стоит</b></span>';
-  }
-  return '<span class="rh-omni off" title="Двигатель заглушён"><i></i><b>' + pageEsc_(o.place) + ' · заглушен</b></span>';
+  var cls = (o.ignition && o.speed > 3) ? "live" : o.ignition ? "idle" : "off";
+  var title = cls === "live" ? "В движении, " + Math.round(o.speed) + " км/ч"
+    : cls === "idle" ? "Стоит, зажигание включено" : "Двигатель заглушён";
+  return '<span class="rh-omni ' + cls + '" title="' + title + '"><i></i><b>' + pageEsc_(o.place) + '</b></span>';
 }
 function lpRenderOmniBadges_(){
   [].forEach.call(document.querySelectorAll(".rh-omni-slot"), function(el){

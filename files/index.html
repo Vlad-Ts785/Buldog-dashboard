@@ -20141,7 +20141,7 @@ document.getElementById("lpMToday").onclick = function(){
     if (newS === d.s0 && newV === d.v0) return;   /* не сдвинулось - коммитить нечего */
 
     var clash = STATE.segs.some(function(s){
-      return s.id !== d.seg.id && s.v === newV && newS < s.s + s.l && s.s < newS + d.seg.l;
+      return s.id !== d.seg.id && s.v === newV && newS < s.s + s.l && s.s < newS + d.seg.l && !lpOverlapAllowed_(d.seg.kind, s.kind);
     });
     if (clash){
       flashBad(d.el); S.reject();
@@ -20288,6 +20288,19 @@ function syncAllBlinks_(){
    упираться в границу августа, а тянуться до конца того же горизонта, что и
    вся остальная лента (HOURS) - тогда 31.08 в сентябрьской части уже видно
    само собой, без ручного "продлить". */
+/* Влад, 31.08 (третий заход, живой пример - протянул "Ремонт" на существующую
+   заявку "Без водителя", получил отказ "Пересечение с другим отрезком -
+   вернул как было"): та же пара статусов, что уже разрешена ВИЗУАЛЬНО
+   (isVacantRepairOverlap_/.seg-vacant-stripe ниже), должна быть разрешена и
+   на уровне самого ДЕЙСТВИЯ - иначе полосатость показывает результат, до
+   которого просто нельзя дотянуться. Общая проверка "клэша" (перенос/
+   растяжка/создание/правка в шторке - 5 разных мест ниже, у каждого своя
+   копия) считала "ремонт" и "без водителя" обычным конфликтом и откатывала
+   действие целиком. Единая функция "эта пара разрешена накладываться" - чтобы
+   не разъезжалось поштучно по каждой копии при следующей правке. */
+function lpOverlapAllowed_(kindA, kindB){
+  return (kindA === "repair" && kindB === "driveroff") || (kindA === "driveroff" && kindB === "repair");
+}
 function vacantBandRange_(v){
   /* НАЙДЕННЫЙ БАГ (Влад, 30.08, на живой "613" - вакант + ремонт до 06.09,
      полосатость не появлялась): "последняя запись" считалась по ЛЮБОМУ kind,
@@ -21045,7 +21058,7 @@ window.addEventListener("pointerup", function(e){
       /* проверка пересечений и у растяжки - раньше была только у переноса, из-за
          чего растяжкой можно было молча закоммитить наложение (аудит 29.08) */
       var rClash = STATE.segs.some(function(x){
-        return x.id !== seg.id && x.v === seg.v && seg.s < x.s + x.l && x.s < seg.s + seg.l;
+        return x.id !== seg.id && x.v === seg.v && seg.s < x.s + x.l && x.s < seg.s + seg.l && !lpOverlapAllowed_(seg.kind, x.kind);
       });
       if (rClash){
         seg.s = d.s0; seg.l = d.l0;
@@ -21093,7 +21106,7 @@ window.addEventListener("pointerup", function(e){
     newV = parseInt(track.dataset.v, 10);
   }
   var clash = STATE.segs.some(function(s){
-    return s.id !== seg.id && s.v === newV && newS < s.s + s.l && s.s < newS + seg.l;
+    return s.id !== seg.id && s.v === newV && newS < s.s + s.l && s.s < newS + seg.l && !lpOverlapAllowed_(seg.kind, s.kind);
   });
 
   /* вернуть в поток и уложить по FLIP с overshoot */
@@ -21702,7 +21715,7 @@ function openCreateDrawer(vi, s, l){
       if (ns == null || ne == null){ toast("Некорректная дата", null); return; }
       if (ne <= ns){ toast("Окончание должно быть позже начала", null); return; }
       s = ns; l = ne - ns;
-      var clash = STATE.segs.some(function(x){ return x.v === vi && s < x.s + x.l && x.s < s + l; });
+      var clash = STATE.segs.some(function(x){ return x.v === vi && s < x.s + x.l && x.s < s + l && !lpOverlapAllowed_(kind, x.kind); });
       if (clash){ S.reject(); toast("Пересечение с другим отрезком - не создал", null); return; }
       if (kind === "driveroff") pushDriver(v, s, l, DRIVEROFF_REASONS_[reasonIdx][0]);
       /* from/to НЕ обязательны - логист может ещё не знать точку на момент постановки
@@ -21758,7 +21771,7 @@ function copySegAfter_(seg, openAfter){
   var v = STATE.vehicles[seg.v];
   var isTrip = seg.kind === "trip";
   var newS = seg.s + seg.l;
-  var clash = STATE.segs.some(function(x){ return x.v === seg.v && newS < x.s + x.l && x.s < newS + seg.l; });
+  var clash = STATE.segs.some(function(x){ return x.v === seg.v && newS < x.s + x.l && x.s < newS + seg.l && !lpOverlapAllowed_(seg.kind, x.kind); });
   if (clash){ S.reject(); toast("Сразу после - место занято, подвиньте копию вручную", null); return; }
   var extra = isTrip ? {mg: seg.mg, lg: seg.lg, from: seg.from, to: seg.to, customer: seg.customer, needsData: seg.needsData, tripMode: seg.tripMode}
     : seg.kind === "driveroff" ? {reason: seg.reason} : undefined;
@@ -21890,7 +21903,7 @@ function openDrawer(seg){
          свежей версией, а не с оторванной от жизни копией. */
       var liveSeg = STATE.segs.find(function(x){ return x.id === seg.id; }) || seg;
       var clash = STATE.segs.some(function(x){
-        return x.id !== seg.id && x.v === liveSeg.v && newS < x.s + x.l && x.s < newS + newL;
+        return x.id !== seg.id && x.v === liveSeg.v && newS < x.s + x.l && x.s < newS + newL && !lpOverlapAllowed_(liveSeg.kind, x.kind);
       });
       if (clash){ S.reject(); toast("Пересечение с другим отрезком - не сохранил", null); return; }
       seg = liveSeg;

@@ -20752,7 +20752,7 @@ document.getElementById("lpMFilterBadge").onclick = function(){
   STATE.filter = "all";
   saveSettings();
   syncControlChips();
-  renderRows();
+  renderRows(); renderKpis();
 };
 /* Чипы "Все/Тралы/Длинномеры" - тот же путь, что у десктопного чипа "Парк"
    (delegated-обработчик .controls ниже: STATE.filter=...; saveSettings();
@@ -20765,7 +20765,7 @@ document.getElementById("lpMFilterBadge").onclick = function(){
     STATE.filter = btn.dataset.filter;
     saveSettings();
     syncControlChips();
-    renderRows();
+    renderRows(); renderKpis();
   };
 });
 /* Чип "свободно" - тот же STATE.filter, значение "free" (уже существует на
@@ -20777,7 +20777,7 @@ document.getElementById("lpMChipFree").onclick = function(){
   STATE.filter = (STATE.filter === "free") ? "all" : "free";
   saveSettings();
   syncControlChips();
-  renderRows();
+  renderRows(); renderKpis();
 };
 /* Масштаб (Сутки/2дня/3дня/Неделя) - Влад, 31.08 (третий заход): "масштаб
    пусть будет кнопками сверху как и в десктопной версии" - заменяет убранный
@@ -21240,16 +21240,21 @@ function makeSeg(s){
 }
 
 function renderKpis(){
+  // 01.09, Влад: цифры в шапке должны меняться при клике на фильтр ПАРК
+  // (Тралы/Длинномеры/...), а не всегда показывать весь парк - тот же visible(),
+  // что уже фильтрует сами строки доски (see renderRowsInner_), просто применённый
+  // и к счётчикам шапки, чтобы они не расходились с тем, что реально на экране.
   var h = nowHour(), inWork = 0, rep = 0, noOrd = 0, noDrv = 0;
-  STATE.vehicles.forEach(function(v){
+  var scope = STATE.vehicles.filter(visible);
+  scope.forEach(function(v){
     var here = STATE.segs.filter(function(s){ return s.v === v.i && s.s <= h && s.s + s.l > h; });
     if (here.some(function(s){ return s.kind === "trip"; })) inWork++;
     else if (here.some(function(s){ return s.kind === "repair" || s.kind === "maint"; })) rep++;
     else if (here.some(function(s){ return s.kind === "noorder"; })) noOrd++;
     else if (here.some(function(s){ return s.kind === "driveroff"; })) noDrv++;
   });
-  var free = STATE.vehicles.length - inWork - rep - noOrd - noDrv;
-  var k = [["Парк", STATE.vehicles.length], ["В рейсе", inWork], ["Ремонт и ТО", rep],
+  var free = scope.length - inWork - rep - noOrd - noDrv;
+  var k = [["Парк", scope.length], ["В рейсе", inWork], ["Ремонт и ТО", rep],
            ["Без заказа", noOrd], ["Нет водителя", noDrv], ["Свободны", free]];
   document.getElementById("lp-kpis").innerHTML = k.map(function(p){
     return '<div class="kpi"><div class="kpi-label">' + p[0] + '</div>' +
@@ -23473,7 +23478,7 @@ pageRoot.querySelector(".controls").addEventListener("click", function(e){
     if (b === document.getElementById("lp-hiddenBtn")){
       STATE.showHidden = !STATE.showHidden;
       b.setAttribute("aria-pressed", String(STATE.showHidden));
-      renderRows();
+      renderRows(); renderKpis();
     }
     return;
   }
@@ -23495,7 +23500,7 @@ pageRoot.querySelector(".controls").addEventListener("click", function(e){
     renderAll();
     primeTo(rangeStart(h, STATE.zoom));                    /* прицел к началу нового диапазона */
   } else if (b.dataset.color){ STATE.color = b.dataset.color; saveSettings(); renderRows(); renderLegend(); }
-  else if (b.dataset.filter){ STATE.filter = b.dataset.filter; saveSettings(); renderRows(); }
+  else if (b.dataset.filter){ STATE.filter = b.dataset.filter; saveSettings(); renderRows(); renderKpis(); }
 });
 
 function prefersReduced(){

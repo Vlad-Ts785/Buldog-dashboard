@@ -10210,14 +10210,19 @@ function p2VerdictGoto(id) {
 // (осознанно, MVP - см. рекомендацию коллеги: сервер-агрегат делаем ПОТОМ, когда
 // формулы устоятся - 01.09 у них было 4 захода правок подряд).
 
-// Та же эпоха час-счёта, что вся Планировка (её собственные EPOCH0_/dateToHour_) -
-// 1-е число месяца "сегодня минус 7 дней" (grace period на границе месяца, тот же
-// класс бага, что уже чинили в самой Планировке). Пересчитывается на каждый вызов -
-// этой карточке не нужен весь механизм ленты/скролла, только тот же час-индекс, что
-// хранится в start_hour/length_hours на сервере.
+// Эпоха час-счёта (01.09, второй заход, ДО того как это сломалось) - см.
+// plans/2026-09-01-plan-segs-fixed-epoch.md: старая формула Планировки (месяц
+// "сегодня минус 7 дней") НЕ решает границу месяца, только откладывает на неделю -
+// 8 сентября эпоха скачком уедет на сентябрь, и ВСЕ start_hour/length_hours
+// (посчитанные от 1 августа) переинтерпретируются со сдвигом на 744 часа. План
+// фиксирует НАВСЕГДА постоянную точку - 1 августа 2026 (равна уже действующей
+// сейчас эпохе, поэтому смысл существующих чисел в БД не меняется, миграция не
+// нужна). Беру ТУ ЖЕ константу здесь заранее - иначе эта карточка сломается
+// синхронно с сентябрьской границей ровно тем же багом, который уже пойман и
+// расписан коллегой. Когда План (шаг 2, аудит ~15-20 мест в самой Планировке)
+// будет реализован - эта строка уже не потребует правки, обе стороны совпадут.
 function fleetEpoch0_() {
-  var anchor = new Date(Date.now() - 7 * 86400000);
-  return new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+  return new Date(2026, 7, 1); // 1 августа 2026, 00:00 локального времени - раз и навсегда
 }
 function fleetDateToHour_(dt) {
   return (dt.getTime() - fleetEpoch0_().getTime()) / 3600000;
@@ -10239,8 +10244,19 @@ function fetchFleetLiveStatus_() {
     var assigns = (fleetRes.data && fleetRes.data.assignments) || [];
     var hasOpenDriver = {};
     assigns.forEach(function(a) { if (a.kind === 'driver' && !a.valid_to) hasOpenDriver[a.tractor_gos] = true; });
+    // НАЙДЕННЫЙ БАГ (01.09, Влад: "показывает чушь" - 0% в работе/ремонте у ОБЕИХ групп,
+    // хотя данные реально есть): mysql2 отдаёт DECIMAL-колонки (start_hour/length_hours)
+    // СТРОКАМИ ('696.50'), не числами - подтверждено прямым curl на /api/plan/segs.
+    // "s.start_hour + s.length_hours" молча становится КОНКАТЕНАЦИЕЙ строк ("696.50" +
+    // "95.50" = "696.5095.50"), сравнение с часом даёт NaN > h = всегда false - ни один
+    // сегмент никогда не "покрывает текущий час", всё падает в noOrder/free. Приводим к
+    // Number ЗДЕСЬ, один раз при приёме ответа - дальше по коду везде уже настоящие числа.
     var segsByGos = {};
-    segs.forEach(function(s) { (segsByGos[s.vehicle_gos] = segsByGos[s.vehicle_gos] || []).push(s); });
+    segs.forEach(function(s) {
+      s.start_hour = parseFloat(s.start_hour);
+      s.length_hours = parseFloat(s.length_hours);
+      (segsByGos[s.vehicle_gos] = segsByGos[s.vehicle_gos] || []).push(s);
+    });
     return {segsByGos: segsByGos, hasOpenDriver: hasOpenDriver};
   }).catch(function() { return null; });
 }
@@ -10386,6 +10402,21 @@ function fleetPaint_(tr, tk) {
     var utilPct = g.total ? Math.round(g.working / g.total * 100) : 0;
     var accounted = g.working + g.repair + g.noDriver + g.noOrder;
     var naG = Math.max(0, g.total - accounted);
+    // Влад, 01.09: "мне цифрами надо видеть сколько и какие статусы по двум колоннам
+    // тралы и длинномеры, а не только общие суммы" - раньше разбивка числами была
+    // только в общей легенде сверху (сумма по обеим группам), у самих групп - только
+    // вафля квадратиками, без цифр рядом. Добавлена строка чисел под вафлей КАЖДОЙ
+    // группы - тот же .fleet-ti/.fleet-sep, что уже был в старом футере карточки
+    // (переиспользуем готовый паттерн, не изобретаем новый).
+    var statsRow = '<div class="fleet-total-row" style="margin:8px 0 0;font-size:10.5px">' +
+      '<span class="fleet-ti green">В работе <b>' + g.working + '</b></span>' +
+      '<span class="fleet-sep">·</span>' +
+      '<span class="fleet-ti red">Ремонт <b>' + g.repair + '</b></span>' +
+      '<span class="fleet-sep">·</span>' +
+      '<span class="fleet-ti">Без вод. <b>' + g.noDriver + '</b></span>' +
+      '<span class="fleet-sep">·</span>' +
+      '<span class="fleet-ti amber">Без зак. <b>' + g.noOrder + '</b></span>' +
+    '</div>';
     return '<div class="fleet-block" style="cursor:pointer" onclick="goToVehiclesWithType(\'' + filterVal + '\')">' +
       '<div class="p2-group-head">' +
         '<div class="p2-group-name-wrap"><span class="p2-group-name">' + name + '</span>' +
@@ -10397,6 +10428,7 @@ function fleetPaint_(tr, tk) {
         unitCluster('nodriver', g.noDriver, name + ' · без водителя') + unitCluster('idle', g.noOrder, name + ' · без заказа') +
         unitCluster('na', naG, name + ' · нет статуса') +
       '</div>' +
+      statsRow +
     '</div>';
   }
 

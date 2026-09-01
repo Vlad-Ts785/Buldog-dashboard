@@ -1582,7 +1582,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
 #page-logistics-plan .pres-tile.online{border-color:transparent;}
 #page-logistics-plan .pres-tile.active{animation:lpTagGlow var(--lp-blink-tact) ease-in-out infinite;}
 @media(prefers-reduced-motion:reduce){#page-logistics-plan .pres-tile.active{animation:none;box-shadow:0 0 8px 1px currentColor;}}
-#page-logistics-plan .kpis{display:flex;gap:2px;align-items:stretch;}#page-logistics-plan .kpi{
+#page-logistics-plan .kpis{display:flex;gap:2px;align-items:stretch;flex-wrap:wrap;row-gap:8px;}#page-logistics-plan .kpi{
   /* НАЙДЕННЫЙ БАГ (Влад, 29.08: "наведи порядок, а не криво, как сейчас") -
      класс .kpi совпадает по имени с карточкой на главной панели дашборда
      (background/border/border-radius), и каскад работает ПОСВОЙСТВЕННО, не
@@ -21098,18 +21098,38 @@ function renderKpis(){
   // (Тралы/Длинномеры/...), а не всегда показывать весь парк - тот же visible(),
   // что уже фильтрует сами строки доски (see renderRowsInner_), просто применённый
   // и к счётчикам шапки, чтобы они не расходились с тем, что реально на экране.
-  var h = nowHour(), inWork = 0, rep = 0, noOrd = 0, noDrv = 0;
+  var h = nowHour(), inWork = 0, rep = 0, noOrd = 0, noDrv = 0, free = 0;
   var scope = STATE.vehicles.filter(visible);
+  var scopeIdx = {}; scope.forEach(function(v){ scopeIdx[v.i] = true; });
+  // "Без заказа" vs "Свободны" (01.09, Влад): "Без заказа" - вообще пустой день
+  // (ни одного рейса за СЕГОДНЯ целиком, машина исправна, с водителем) - раньше
+  // такие машины молча попадали в "Свободны" вместе с теми, кто просто освободился
+  // МЕЖДУ рейсами. "Свободны" теперь - именно второе: сегодня рейс(ы) уже был(и),
+  // сейчас между ними/после них ничего не покрывает текущий час.
+  var dayStart = TODAY_D_ * 24, dayEnd = dayStart + 24;
   scope.forEach(function(v){
     var here = STATE.segs.filter(function(s){ return s.v === v.i && s.s <= h && s.s + s.l > h; });
-    if (here.some(function(s){ return s.kind === "trip"; })) inWork++;
-    else if (here.some(function(s){ return s.kind === "repair" || s.kind === "maint"; })) rep++;
-    else if (here.some(function(s){ return s.kind === "noorder"; })) noOrd++;
-    else if (here.some(function(s){ return s.kind === "driveroff"; })) noDrv++;
+    if (here.some(function(s){ return s.kind === "trip"; })) { inWork++; return; }
+    if (here.some(function(s){ return s.kind === "repair" || s.kind === "maint"; })) { rep++; return; }
+    if (here.some(function(s){ return s.kind === "noorder"; })) { noOrd++; return; }
+    if (here.some(function(s){ return s.kind === "driveroff"; })) { noDrv++; return; }
+    var hadTripToday = STATE.segs.some(function(s){
+      return s.v === v.i && s.kind === "trip" && s.s < dayEnd && s.s + s.l > dayStart;
+    });
+    if (hadTripToday) free++; else noOrd++;
   });
-  var free = scope.length - inWork - rep - noOrd - noDrv;
+  // "Заказов" (01.09, Влад): рейсы за СЕГОДНЯ в текущем фильтре, обычный рейс = 1,
+  // "Суточный" (s.tripMode==='daily') = 3 - один такой отрезок на ленте на деле
+  // означает несколько подряд идущих загрузок за день, а не одну.
+  var totalOrders = 0;
+  STATE.segs.forEach(function(s){
+    if (scopeIdx[s.v] && s.kind === "trip" && s.s < dayEnd && s.s + s.l > dayStart){
+      totalOrders += (s.tripMode === "daily") ? 3 : 1;
+    }
+  });
   var k = [["Парк", scope.length], ["В рейсе", inWork], ["Ремонт и ТО", rep],
-           ["Без заказа", noOrd], ["Нет водителя", noDrv], ["Свободны", free]];
+           ["Без заказа", noOrd], ["Нет водителя", noDrv], ["Свободны", free],
+           ["Заказов", totalOrders]];
   document.getElementById("lp-kpis").innerHTML = k.map(function(p){
     return '<div class="kpi"><div class="kpi-label">' + p[0] + '</div>' +
            '<div class="kpi-val mono">' + p[1] + "</div></div>";

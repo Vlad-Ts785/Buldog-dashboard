@@ -21022,8 +21022,15 @@ function renderKpis(){
     var here = STATE.segs.filter(function(s){ return s.v === v.i && s.s <= h && s.s + s.l > h; });
     if (here.some(function(s){ return s.kind === "trip"; })) { inWork++; return; }
     if (here.some(function(s){ return s.kind === "repair" || s.kind === "maint"; })) { rep++; return; }
+    // "Нет водителя" (01.09, Влад: "все эти машины со статусом вакант... заказ везти
+    // некому, это не пустой день, это без водителя") - v.vacant (источник истины -
+    // fleet_assignments, см. lpApplyFleetDriverStatus_) - ЭТО ЖЕ САМОЕ "нет
+    // водителя", даже когда никто не проставил на сегодня явный сегмент
+    // kind==='driveroff' (тот - отдельный плановый статус: отпуск/больничный у
+    // НАЗНАЧЕННОГО водителя). Раньше проверялся только явный сегмент - вакантная
+    // машина без сегмента молча утекала в "Без заказа"/"Свободны".
+    if (v.vacant || here.some(function(s){ return s.kind === "driveroff"; })) { noDrv++; return; }
     if (here.some(function(s){ return s.kind === "noorder"; })) { noOrd++; return; }
-    if (here.some(function(s){ return s.kind === "driveroff"; })) { noDrv++; return; }
     var hadTripToday = STATE.segs.some(function(s){
       return s.v === v.i && s.kind === "trip" && s.s < dayEnd && s.s + s.l > dayStart;
     });
@@ -22715,7 +22722,11 @@ function fetchFleetData_(){
         var wasLoaded = fleetDataLoaded_;
         fleetDataLoaded_ = true;
         STATE.vehicles.forEach(function(v){ lpApplyFleetDriverStatus_(v); });
-        if (!wasLoaded) renderRows();
+        // renderKpis() тоже зависит от v.vacant (01.09, "Нет водителя" в шапке) -
+        // до этого момента вакантность бралась из временного Штатка-фолбэка
+        // (см. комментарий у lpApplyFleetDriverStatus_ выше), число в шапке могло
+        // на долю секунды показать неверную картину, если не пересчитать здесь же.
+        if (!wasLoaded){ renderRows(); renderKpis(); }
       }
     }).catch(function(){});   /* нет сети/сбой - меню просто не покажет "кто сейчас сидит", посадить/зацепить всё равно работает */
 }

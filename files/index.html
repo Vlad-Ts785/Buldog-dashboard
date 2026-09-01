@@ -10193,108 +10193,231 @@ function p2VerdictGoto(id) {
   if (t) t.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
+// ── Статус парка (01.09) - источник переключён со Штатки на Планировку ─────────────
+// Влад: "нужно добавить что теперь эти данные тянутся с планировки" + "уведомление
+// если парк меняет статус... кто-то в планировке протянул ремонт на сегодня, тут
+// должно сразу отразиться, вышел водитель увидели". Формулы статуса портированы 1:1
+// из renderKpis() (сама Планировка, files/index.html) - см. память проекта
+// project_logistics_planning_kpi_rules.md, НЕ выводить заново по интуиции (два разных
+// сигнала "вакант"/явный driveroff-сегмент, "без заказа"=весь день пусто ≠ "свободна
+// между рейсами" - Влад дважды поправлял эту логику 01.09). Тип техники (Тралы/
+// Длинномеры) и состав парка - по-прежнему из Штатки (D.vehicles), подтверждено
+// коллегой из сессии Планировки 01.09: тип техники почти не меняется, "почти сразу
+// отразить" касается именно СТАТУСА (что сейчас с машиной), а не состава парка.
+// Источники: GET /plan/segs (рейсы/ремонт/ТО и т.п. на сегодня) + GET /fleet/state
+// (кто вакантен - fleet_assignments) - оба уже живые, поллятся Планировкой каждые
+// 7с, тот же интервал используем здесь, отдельного серверного агрегата пока нет
+// (осознанно, MVP - см. рекомендацию коллеги: сервер-агрегат делаем ПОТОМ, когда
+// формулы устоятся - 01.09 у них было 4 захода правок подряд).
+
+// Та же эпоха час-счёта, что вся Планировка (её собственные EPOCH0_/dateToHour_) -
+// 1-е число месяца "сегодня минус 7 дней" (grace period на границе месяца, тот же
+// класс бага, что уже чинили в самой Планировке). Пересчитывается на каждый вызов -
+// этой карточке не нужен весь механизм ленты/скролла, только тот же час-индекс, что
+// хранится в start_hour/length_hours на сервере.
+function fleetEpoch0_() {
+  var anchor = new Date(Date.now() - 7 * 86400000);
+  return new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+}
+function fleetDateToHour_(dt) {
+  return (dt.getTime() - fleetEpoch0_().getTime()) / 3600000;
+}
+
+var fleetLiveState_ = null;        // {segsByGos, hasOpenDriver} - последний успешный снимок
+var fleetLivePrevSnapshot_ = null; // {tr:{...}, tk:{...}} - для сравнения при следующем тике (тост/пульс)
+var fleetLivePollTimer_ = null;
+var FLEET_SEG_LABELS_ = {work: 'в работе', repair: 'в ремонте', nodriver: 'без водителя', idle: 'без заказа'};
+
+function fetchFleetLiveStatus_() {
+  return Promise.all([
+    fetchFromYardApi_('/plan/segs', {}),
+    fetchFromYardApi_('/fleet/state', {})
+  ]).then(function(results) {
+    var segsRes = results[0], fleetRes = results[1];
+    if (!segsRes.ok || !fleetRes.ok) return null;
+    var segs = (segsRes.data && segsRes.data.segs) || [];
+    var assigns = (fleetRes.data && fleetRes.data.assignments) || [];
+    var hasOpenDriver = {};
+    assigns.forEach(function(a) { if (a.kind === 'driver' && !a.valid_to) hasOpenDriver[a.tractor_gos] = true; });
+    var segsByGos = {};
+    segs.forEach(function(s) { (segsByGos[s.vehicle_gos] = segsByGos[s.vehicle_gos] || []).push(s); });
+    return {segsByGos: segsByGos, hasOpenDriver: hasOpenDriver};
+  }).catch(function() { return null; });
+}
+
+// Тот же приоритет статусов, что renderKpis() Планировки: рейс > ремонт/ТО > (вакант
+// ИЛИ явный driveroff) > явный noorder > (был рейс сегодня ? работает, сейчас между
+// рейсами : без заказа весь день). У этой карточки только 4 визуальных бакета (в
+// работе/ремонт/без водителя/без заказа) - "свободна между рейсами" визуально
+// попадает в "в работе" (машина операционно в деле сегодня), это НЕ то же самое, что
+// "Без заказа" у renderKpis() (там это отдельная восьмая цифра шапки Планировки).
+function computeFleetGroupLive_(vehicles, live) {
+  var h = fleetDateToHour_(new Date());
+  var dayStart = Math.floor(h / 24) * 24, dayEnd = dayStart + 24;
+  var working = 0, repair = 0, noDriver = 0, noOrder = 0;
+  vehicles.forEach(function(v) {
+    var segs = live.segsByGos[v.gos] || [];
+    var here = segs.filter(function(s) { return s.start_hour <= h && s.start_hour + s.length_hours > h; });
+    if (here.some(function(s) { return s.kind === 'trip'; })) { working++; return; }
+    if (here.some(function(s) { return s.kind === 'repair' || s.kind === 'maint'; })) { repair++; return; }
+    var vacant = !live.hasOpenDriver[v.gos];
+    if (vacant || here.some(function(s) { return s.kind === 'driveroff'; })) { noDriver++; return; }
+    if (here.some(function(s) { return s.kind === 'noorder'; })) { noOrder++; return; }
+    var hadTripToday = segs.some(function(s) { return s.kind === 'trip' && s.start_hour < dayEnd && s.start_hour + s.length_hours > dayStart; });
+    if (hadTripToday) working++; else noOrder++;
+  });
+  return {total: vehicles.length, working: working, repair: repair, noDriver: noDriver, noOrder: noOrder};
+}
+function fleetVehiclesByType_() {
+  var trals = [], longs = [];
+  (D.vehicles || []).forEach(function(v) {
+    if (!v.gos) return;
+    (v.type === 'Борт' || (v.type || '').indexOf('Борт') === 0 ? longs : trals).push(v);
+  });
+  return {trals: trals, longs: longs};
+}
+
 function renderFleetStatus() {
-  const f = D.fleet || {}; const tr = f.trailers || {}; const tk = f.trucks || {};
-  const hist = D.history || [];
-  const today = new Date().toISOString().split('T')[0];
-
-  // Берём последние 2 уникальные даты до сегодня, игнорируя строки где всё нули
-  const dates = [...new Set(
-    hist.filter(h => h.workTrails || h.repairTrails || h.noDriverTrails || h.workTrucks || h.repairTrucks || h.noDriverTrucks)
-        .map(h => h.date)
-  )].filter(d => d < today).sort();
-  const snap = (date) => {
-    if (!date) return null;
-    const recs = hist.filter(h => h.date === date);
-    return recs.length ? recs[recs.length - 1] : null;
-  };
-  const yest = snap(dates[dates.length - 1]);
-  const prev = snap(dates[dates.length - 2]);
-
-  // Вафля (unit chart, ГОСТ раздел 4, как в превью "Панель 2.0"): одна машина = один
-  // квадрат 12px. в работе = green, ремонт = red, без водителя = пустой контур,
-  // без заказа = amber. Динамика вчера/позавчера - стрелкой в легенде группы (не
-  // отдельными колонками цифр, как раньше - вафля сама показывает состав).
-  function waffle(g) {
-    var html = '';
-    [['p2-unit--work', g.working||0], ['p2-unit--nodriver', g.noDriver||0],
-     ['p2-unit--repair', g.repair||0], ['p2-unit--idle', g.noOrder||0]].forEach(function(k) {
-      for (var i = 0; i < k[1]; i++) html += '<i class="p2-unit ' + k[0] + '"></i>';
+  // fleetStartLivePoll_ САМА себя останавливает, когда #page-main не активна (см.
+  // fleetPollTick_) - значит при возврате на главную поллинг нужно перезапускать
+  // явно КАЖДЫЙ раз, не только при первом вызове, иначе после ухода на другую
+  // вкладку и обратно карточка молча замрёт на последнем снимке навсегда
+  // (idempotent - fleetStartLivePoll_ сама не даст создать второй интервал).
+  fleetStartLivePoll_();
+  if (!fleetLiveState_) {
+    document.getElementById('fleet-status').innerHTML =
+      '<div class="muted" style="padding:24px 0;text-align:center;font-size:12px">Загрузка из Планировки…</div>';
+    return;
+  }
+  fleetRenderFromLiveState_();
+}
+function fleetStartLivePoll_() {
+  if (fleetLivePollTimer_) return;
+  fleetPollTick_();
+  fleetLivePollTimer_ = setInterval(fleetPollTick_, 7000); // тот же интервал, что fetchPlanSegs_ Планировки
+}
+function fleetStopLivePoll_() {
+  clearInterval(fleetLivePollTimer_);
+  fleetLivePollTimer_ = null;
+}
+function fleetPollTick_() {
+  if (document.hidden) return;
+  var pageEl = document.getElementById('page-main');
+  if (!pageEl || !pageEl.classList.contains('active')) { fleetStopLivePoll_(); return; }
+  fetchFleetLiveStatus_().then(function(live) {
+    if (!live) return;
+    fleetLiveState_ = live;
+    fleetRenderFromLiveState_();
+  });
+}
+function fleetRenderFromLiveState_() {
+  var byType = fleetVehiclesByType_();
+  var tr = computeFleetGroupLive_(byType.trals, fleetLiveState_);
+  var tk = computeFleetGroupLive_(byType.longs, fleetLiveState_);
+  fleetPaint_(tr, tk);
+  fleetDetectChangesAndNotify_(tr, tk);
+  fleetLivePrevSnapshot_ = {tr: tr, tk: tk};
+}
+// Изменение цифр между двумя тиками поллинга (Влад, 01.09: "кто-то протянул ремонт на
+// сегодня, тут должно сразу отразиться... может анимации добавить") - лёгкая вспышка
+// яркости на изменившемся сегменте полосы/легенды (НЕ дрожание/скачок геометрии, тот
+// же принцип motion, что уже в ГОСТе для живых счётчиков) + тост (ГОСТ раздел 4:
+// "тост - единственный канал уведомлений всей системы"). Первый рендер после загрузки
+// пропускаем - не с чем сравнивать, не пугаем тостом на пустом месте.
+function fleetDetectChangesAndNotify_(tr, tk) {
+  if (!fleetLivePrevSnapshot_) return;
+  var prev = fleetLivePrevSnapshot_, changes = [];
+  function diff(prevG, curG, groupName) {
+    ['work', 'repair', 'nodriver', 'idle'].forEach(function(seg) {
+      var key = seg === 'work' ? 'working' : seg === 'repair' ? 'repair' : seg === 'nodriver' ? 'noDriver' : 'noOrder';
+      if (prevG[key] !== curG[key]) changes.push({seg: seg, group: groupName, delta: curG[key] - prevG[key]});
     });
-    // расхождение суммы статусов с размером парка не прячем - серые "нет статуса"
-    var accounted = (g.working||0) + (g.noDriver||0) + (g.repair||0) + (g.noOrder||0);
-    for (var j = accounted; j < (g.total||0); j++) html += '<i class="p2-unit"></i>';
-    return '<div class="p2-units">' + html + '</div>';
   }
-  function arrowFor(today, y, higherGood) {
-    if (y === null || y === undefined) return '';
-    var diff = today - y;
-    if (diff > 0) return '<span class="fleet-arr ' + (higherGood ? 'up-good' : 'up-bad') + '">↑</span>';
-    if (diff < 0) return '<span class="fleet-arr ' + (higherGood ? 'dn-bad' : 'dn-good') + '">↓</span>';
-    return '';
+  diff(prev.tr, tr, 'Тралы');
+  diff(prev.tk, tk, 'Длинномеры');
+  if (!changes.length) return;
+  var uniqueSegs = {};
+  changes.forEach(function(c) { uniqueSegs[c.seg] = true; });
+  Object.keys(uniqueSegs).forEach(function(seg) {
+    document.querySelectorAll('[data-fleet-seg$="-' + seg + '"], [data-fleet-legend="' + seg + '"] .p2-legend-count').forEach(function(el) {
+      el.classList.remove('pulse'); void el.offsetWidth; el.classList.add('pulse');
+    });
+  });
+  var lines = changes.map(function(c) {
+    return c.group + ': ' + FLEET_SEG_LABELS_[c.seg] + ' ' + (c.delta > 0 ? '+' : '') + c.delta;
+  });
+  p2Toast('Статус парка обновился (Планировка) — ' + lines.join(', '), 'amber');
+}
+
+function fleetPaint_(tr, tk) {
+  var totalWorking = tr.working + tk.working, totalRepair = tr.repair + tk.repair;
+  var totalNoDriver = tr.noDriver + tk.noDriver, totalNoOrder = tr.noOrder + tk.noOrder;
+  var totalFleet = tr.total + tk.total;
+  var pct = totalFleet ? Math.round(totalWorking / totalFleet * 100) : 0;
+  var totalNa = Math.max(0, totalFleet - totalWorking - totalRepair - totalNoDriver - totalNoOrder);
+
+  function compBar(g, idPrefix) {
+    var total = g.total || 1;
+    var accounted = g.working + g.repair + g.noDriver + g.noOrder;
+    var na = Math.max(0, g.total - accounted);
+    var segs = [['work', g.working, 'В работе'], ['repair', g.repair, 'Ремонт'],
+                ['nodriver', g.noDriver, 'Без водителя'], ['idle', g.noOrder, 'Без заказа']];
+    var html = segs.map(function(s) {
+      if (!s[1]) return '';
+      return '<span class="fleet-comp-seg fleet-comp-seg--' + s[0] + '" data-fleet-seg="' + idPrefix + '-' + s[0] + '" style="width:' + (s[1] / total * 100) + '%" title="' + s[2] + ': ' + s[1] + '"></span>';
+    }).join('');
+    if (na) html += '<span class="fleet-comp-seg fleet-comp-seg--na" style="width:' + (na / total * 100) + '%" title="Нет статуса: ' + na + '"></span>';
+    return '<div class="fleet-comp-bar">' + html + '</div>';
   }
-  function legendRow(swatchClass, count, label, arrow) {
-    return '<div class="p2-legend-row"><i class="p2-unit ' + swatchClass + '" style="width:10px;height:10px"></i>' +
-      '<span class="p2-legend-count">' + count + '</span><span class="p2-legend-name">' + label + '</span>' + (arrow||'') + '</div>';
+  function legendRow(cls, count, label, share, dim) {
+    return '<div class="p2-legend-row' + (dim ? ' p2-legend-row--dim' : '') + '" data-fleet-legend="' + cls + '">' +
+      '<i class="p2-unit p2-unit--' + cls + '" style="width:10px;height:10px"></i>' +
+      '<span class="p2-legend-name">' + label + '</span>' +
+      '<span class="p2-legend-count">' + count + '</span>' +
+      '<span class="p2-legend-share">' + share + '%</span></div>';
   }
-  function groupBlock(title, g, yWork, yRepair, yNoDrv) {
-    return '<div class="fleet-block-title">' + title + ' · ' + (g.total||0) + ' ед.</div>' +
-      waffle(g) +
-      '<div class="p2-legend">' +
-        legendRow('p2-unit--work', g.working||0, 'в работе', arrowFor(g.working||0, yWork, true)) +
-        legendRow('p2-unit--repair', g.repair||0, 'ремонт', arrowFor(g.repair||0, yRepair, false)) +
-        legendRow('p2-unit--nodriver', g.noDriver||0, 'без водителя', arrowFor(g.noDriver||0, yNoDrv, false)) +
-        legendRow('p2-unit--idle', g.noOrder||0, 'без заказа', '') +
-      '</div>';
+  function unitCluster(cls, count, label) {
+    if (!count) return '';
+    var units = '';
+    for (var i = 0; i < count; i++) units += '<i class="p2-unit p2-unit--' + cls + '" title="' + label + '"></i>';
+    return '<span class="p2-cluster">' + units + '</span>';
   }
-
-  const trRows = groupBlock('Тралы', tr, yest && yest.workTrails, yest && yest.repairTrails, yest && yest.noDriverTrails);
-  const tkRows = groupBlock('Длинномеры', tk, yest && yest.workTrucks, yest && yest.repairTrucks, yest && yest.noDriverTrucks);
-
-  const totalWorking  = (tr.working||0)  + (tk.working||0);
-  const totalRepair   = (tr.repair||0)   + (tk.repair||0);
-  const totalNoDriver = (tr.noDriver||0) + (tk.noDriver||0);
-  const totalFleet    = (tr.total||36)   + (tk.total||19);
-  const pct = Math.round(totalWorking / totalFleet * 100);
-  const barColor = pct >= 70 ? 'var(--green)' : pct >= 50 ? 'var(--amber)' : 'var(--red)';
-
-  // Честный источник (план 2026-08-28, Этап 0.1) - fleet_cache_at это время ЗАПИСИ кэша
-  // Штатки (saveMainPayloadCache_, 6 раз/сутки), а не D.updated (время сборки ЭТОГО ответа) -
-  // раньше карточка показывала свежее на вид время, даже когда состав парка кэширован
-  // до 3 часов назад. Фолбэк на D.updated - пока не задеплоен новый scripts/full_script_final.js
-  // (frontend/backend деплоятся раздельно, см. CLAUDE.md).
-  const fleetTs = D.fleet_cache_at || D.updated;
-  const updStr = fleetTs ? (function() {
-    var dt = new Date(fleetTs);
-    return dt.toLocaleDateString('ru', {day:'2-digit', month:'2-digit'}) +
-           ' · ' + dt.toLocaleTimeString('ru', {hour:'2-digit', minute:'2-digit'});
-  })() : '—';
-
-  const footer =
-    '<div class="fleet-footer">' +
-      '<div class="fleet-total-row">' +
-        '<span class="fleet-ti green">В работе <b>' + totalWorking + '</b></span>' +
-        '<span class="fleet-sep">·</span>' +
-        '<span class="fleet-ti red">Ремонт <b>' + totalRepair + '</b></span>' +
-        '<span class="fleet-sep">·</span>' +
-        '<span class="fleet-ti amber">Без вод. <b>' + totalNoDriver + '</b></span>' +
+  function groupBlock(name, g, filterVal) {
+    var utilPct = g.total ? Math.round(g.working / g.total * 100) : 0;
+    var accounted = g.working + g.repair + g.noDriver + g.noOrder;
+    var naG = Math.max(0, g.total - accounted);
+    return '<div class="fleet-block" style="cursor:pointer" onclick="goToVehiclesWithType(\'' + filterVal + '\')">' +
+      '<div class="p2-group-head">' +
+        '<div class="p2-group-name-wrap"><span class="p2-group-name">' + name + '</span>' +
+        '<span class="p2-group-util">' + utilPct + '% в работе</span></div>' +
+        '<span class="p2-group-total">' + g.total + ' ед</span>' +
       '</div>' +
-      '<div class="fleet-bar-wrap"><div class="fleet-bar-fill" style="width:' + pct + '%;background:' + barColor + '"></div></div>' +
-      '<div class="fleet-bar-meta">' +
-        '<span class="fleet-pct" style="color:' + barColor + '">Загрузка ' + pct + '%</span>' +
-        '<span class="fleet-updated">обн. ' + updStr + '</span>' +
+      '<div class="p2-units">' +
+        unitCluster('work', g.working, name + ' · в работе') + unitCluster('repair', g.repair, name + ' · в ремонте') +
+        unitCluster('nodriver', g.noDriver, name + ' · без водителя') + unitCluster('idle', g.noOrder, name + ' · без заказа') +
+        unitCluster('na', naG, name + ' · нет статуса') +
       '</div>' +
     '</div>';
+  }
+
+  var updStr = new Date().toLocaleTimeString('ru', {hour: '2-digit', minute: '2-digit'});
+  var legend =
+    legendRow('work', totalWorking, 'В работе', totalFleet ? Math.round(totalWorking / totalFleet * 100) : 0) +
+    legendRow('repair', totalRepair, 'В ремонте', totalFleet ? Math.round(totalRepair / totalFleet * 100) : 0) +
+    legendRow('nodriver', totalNoDriver, 'Без водителя', totalFleet ? Math.round(totalNoDriver / totalFleet * 100) : 0) +
+    legendRow('idle', totalNoOrder, 'Без заказа', totalFleet ? Math.round(totalNoOrder / totalFleet * 100) : 0) +
+    (totalNa ? legendRow('na', totalNa, 'Нет статуса', Math.round(totalNa / totalFleet * 100), true) : '');
 
   // Клик по блоку - переход на "Технику" с готовым фильтром по типу (Влад, 2026-07-16:
-  // "нажимаю на тралы, меня перебрасывает в технику, и сразу фильтр стоит на все тралы";
-  // то же для длинномеров -> "Борт"). Тот же приём, что карточки на Панели (ДЗ, Маржа найма).
+  // "нажимаю на тралы, меня перебрасывает в технику, и сразу фильтр стоит на все тралы").
   document.getElementById('fleet-status').innerHTML =
-    '<div class="fleet-grid">' +
-      '<div class="fleet-block" style="cursor:pointer" onclick="goToVehiclesWithType(TRAL_ALL_FILTER)">' + trRows + '</div>' +
-      '<div class="fleet-block" style="cursor:pointer" onclick="goToVehiclesWithType(\'Борт\')">' + tkRows + '</div>' +
-    '</div>' +
-    footer;
+    '<div class="fleet-hero"><span class="fleet-hero-num">' + pct + '</span><span class="fleet-hero-unit">%</span></div>' +
+    '<div class="fleet-hero-sub">в работе <b>' + totalWorking + '</b> из <b>' + totalFleet + '</b> машин</div>' +
+    compBar({total: totalFleet, working: totalWorking, repair: totalRepair, noDriver: totalNoDriver, noOrder: totalNoOrder}, 'total') +
+    '<div class="p2-legend">' + legend + '</div>' +
+    '<div class="p2-groups">' + groupBlock('Тралы', tr, TRAL_ALL_FILTER) + groupBlock('Длинномеры', tk, 'Борт') + '</div>' +
+    '<div class="fleet-footer" style="margin-top:12px;padding-top:10px"><div class="fleet-bar-meta" style="justify-content:flex-end">' +
+      '<span class="fleet-updated">из Планировки · обн. ' + updStr + '</span></div></div>';
 }
 
 function goToVehiclesWithType(typeVal) {

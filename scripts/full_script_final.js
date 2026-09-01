@@ -4101,8 +4101,8 @@ function buildManagerView_(orders, managerName, ss, period) {
       by_logist: myLogistRow,
       // Пикер "Менеджер"/"Логист" в шторке Планировки - те же имена-без-цифр, что у
       // buildLogistView_ (см. buildNameOnlyRoster_ там же).
-      roster_managers: buildNameOnlyRoster_(orders.by_manager),
-      roster_logists:  buildNameOnlyRoster_(orders.by_logist),
+      roster_managers: mergeRosterFallback_(buildNameOnlyRoster_(orders.by_manager), orders._rosterFallback && orders._rosterFallback.managers),
+      roster_logists:  mergeRosterFallback_(buildNameOnlyRoster_(orders.by_logist), orders._rosterFallback && orders._rosterFallback.logists),
       by_manager_detail: detailWrapped,
       // Проблемные заказы (2026-08-12, вкладка "Воронка документов" на личной странице -
       // тот же формат/источник, что "Обзор заказов → Проблемные заказы"). Обычный менеджер
@@ -4420,8 +4420,8 @@ function buildLogistView_(orders, logistName, ss, period) {
     // кладёт эти же два поля ПРАВИЛЬНО, внутри result.orders - здесь просто повторяем тот же
     // паттерн. orders.by_manager/by_logist ниже - ПОЛНЫЙ company-wide параметр функции (ДО
     // урезания в myLogistRow), не ordersOut - иначе получили бы тот же баг заново.
-    roster_managers: buildNameOnlyRoster_(orders.by_manager),
-    roster_logists:  buildNameOnlyRoster_(orders.by_logist),
+    roster_managers: mergeRosterFallback_(buildNameOnlyRoster_(orders.by_manager), orders._rosterFallback && orders._rosterFallback.managers),
+    roster_logists:  mergeRosterFallback_(buildNameOnlyRoster_(orders.by_logist), orders._rosterFallback && orders._rosterFallback.logists),
   };
   if (ss && (isVasinName_(logistName) || isColumnHeadName_(logistName))) {
     ordersOut.long_haul = buildLongHaulBundle_(ss, orders, period || null);
@@ -4461,6 +4461,53 @@ function buildLogistView_(orders, logistName, ss, period) {
 // наружу для чужой роли не отдаём (Планировке нужны исключительно имена для пикера).
 function buildNameOnlyRoster_(list) {
   return (list || []).map(function(p) { return { name: p.name }; });
+}
+// НАЙДЕННЫЙ БАГ (Влад, 01.09, живой пример: "из окошек логистов осталось только
+// два" - тот же класс, что и эпоха Планировки, но в другой системе). roster_managers/
+// roster_logists строятся ИЗ orders.by_manager/by_logist ТЕКУЩЕГО месяца - 1 сентября
+// он почти пуст (реальных заказов 1С за сентябрь ещё почти нет), значит и ростер
+// почти пуст. Ростер по смыслу - "кто у нас сейчас работает", не "кто уже успел
+// получить заказ в ЭТОМ календарном месяце" - не должен мгновенно худеть в первые
+// дни месяца. ВАЖНО: фолбэк - ОТДЕЛЬНОЕ поле (_rosterFallback), НЕ подмешивается в
+// сам orders.by_manager/by_logist - те остаются чистым источником для финансовых
+// расчётов (тот же принцип, что уже применён к managerPlans в joinManagerPlans_ -
+// "план существует независимо от того, есть ли заказы в этом периоде", комментарий
+// там же). Только ИМЕНА для пикера/присутствия, ни одной финансовой цифры прошлого
+// месяца сюда не попадает.
+var ROSTER_MIN_SIZE_ = 5;
+// НАЙДЕННЫЙ БАГ (01.09, третий заход, подтверждено через diag_roster): computed -
+// это САМ orders-объект (fetchOrdersComputedFromServer_ возвращает data.orders
+// напрямую), не обёртка с полем .orders - "computed.orders"/"prev.orders" всегда
+// были undefined, mgrCount/logCount всегда 0, а "if (!prev || !prev.orders) return
+// null" всегда обрубал функцию раньше реального фолбэка. Читаем по_manager/по_logist
+// НАПРЯМУЮ с обоих объектов, без вложенности.
+function buildRosterFallback_(computed, monthKey) {
+  try {
+    var mgrCount = (computed.by_manager || []).length;
+    var logCount = (computed.by_logist || []).length;
+    if (mgrCount >= ROSTER_MIN_SIZE_ && logCount >= ROSTER_MIN_SIZE_) return null;
+    var prev = fetchOrdersComputedFromServer_(prevMonthKey_(monthKey));
+    if (!prev) return null;
+    return {
+      managers: buildNameOnlyRoster_(prev.by_manager),
+      logists:  buildNameOnlyRoster_(prev.by_logist)
+    };
+  } catch (err) { return null; }
+}
+function prevMonthKey_(monthKey) {
+  var parts = monthKey.split('-');
+  var y = parseInt(parts[0], 10), m = parseInt(parts[1], 10);   // m - 1-indexed месяц
+  var d = new Date(y, m - 2, 1);                                // -2, т.к. Date() месяц 0-indexed
+  return Utilities.formatDate(d, 'Europe/Moscow', 'yyyy-MM');
+}
+function mergeRosterFallback_(current, fallback) {
+  if (!fallback || !fallback.length) return current;
+  var seen = {}, out = (current || []).slice();
+  out.forEach(function(p) { seen[p.name] = true; });
+  fallback.forEach(function(p) {
+    if (!seen[p.name]) { seen[p.name] = true; out.push({ name: p.name }); }
+  });
+  return out;
 }
 // Лёгкий состав парка для логиста/менеджера - та же Штатка, что у getFleetStatus/
 // buildStaffMarkas_, только нужные Планировке поля. ~55 строк, чтение мгновенное, кэша не требует.
@@ -5044,6 +5091,10 @@ function updateOrderPlanStatus_(personName, p) {
 
 function doGet(e) {
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
+
+  // diag_roster (01.09) - убрана: помогла найти настоящий баг (computed.orders вместо
+  // computed напрямую, см. buildRosterFallback_/getOrdersData ниже), корень найден и
+  // подтверждён числами, диагностика больше не нужна.
 
   // ── ВРЕМЕННО (2026-08-19, перенос ДЗ на сервер) - экспорт листа "ДЗ_Статусы" (ручные
   // статусы/комментарии, НЕ из 1С - разовый + периодический перенос, см.
@@ -9463,7 +9514,20 @@ function serverCalcLooksSane_(data, expectedPeriod) {
   if (!data || !data.orders || !data.orders.summary) return false;
   if (data.period !== expectedPeriod) return false;
   var s = data.orders.summary;
-  if (typeof s.total_orders !== 'number' || s.total_orders <= 0) return false;
+  if (typeof s.total_orders !== 'number') return false;
+  // НАЙДЕННЫЙ БАГ (01.09, копал "лампочки логистов" - причина оказалась на шаг
+  // РАНЬШЕ моего первого фикса): total_orders<=0 всегда считался признаком
+  // "сервер сломан" - но в первые дни НОВОГО календарного месяца это ЗАКОННОЕ
+  // состояние (1С физически ещё не прислала ни одного заказа за месяц), не
+  // поломка. Из-за этого serverCalcLooksSane_ отклонял ЦЕЛИКОМ верный (просто
+  // пустой) ответ сервера, fetchOrdersComputedFromServer_ возвращал null,
+  // getOrdersData() тихо падал на легаси-путь через лист - roster-фолбэк
+  // (buildRosterFallback_, см. запись выше) там вообще не применяется, потому
+  // и не сработал, хотя сам код был верен. Разрешаем 0 заказов ТОЛЬКО для
+  // ТЕКУЩЕГО календарного месяца - для архивных периодов 0 заказов по-прежнему
+  // считается поломкой (там 0 не бывает законным, это НЕ ослабление защиты).
+  var isCurrentMonth = expectedPeriod === Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+  if (s.total_orders <= 0 && !isCurrentMonth) return false;
   if (typeof s.total_amount !== 'number') return false;
   if (typeof s.hired_margin_qualifies !== 'boolean') return false;
   if (!Array.isArray(data.orders.by_manager) || !Array.isArray(data.orders.by_logist)) return false;
@@ -9504,7 +9568,33 @@ function getOrdersData(ss) {
   // единственный источник (Влад вводит вручную), сервер не должен иметь свою копию вообще -
   // проще и надёжнее просто наложить joinManagerPlans_ поверх ЛЮБОГО источника заказов.
   var computed = fetchOrdersComputedFromServer_(monthKey);
-  if (computed) return joinManagerPlans_(ss, computed, monthKey);
+  if (computed) {
+    // Ростер логистов/менеджеров худеет в первые дни месяца, пока 1С ещё не прислала
+    // свежих заказов - см. buildRosterFallback_ (01.09, "из окошек логистов осталось
+    // только два"). НАЙДЕННЫЙ БАГ (01.09, второй заход, Влад живьём: "не вижу лампочек
+    // всех логистов" - фикс не подействовал именно для роли admin): buildManagerView_/
+    // buildLogistView_ кладут roster_managers/roster_logists только В СВОЙ приватный
+    // ответ (myManagerRow/myLogistRow) - у admin этих функций в цепочке вообще нет, он
+    // получает ЭТОТ САМЫЙ computed.orders напрямую, где by_manager/by_logist остаются
+    // сырыми (месячными, пустыми в начале сентября) без единого поля roster_*. Кладём
+    // те же смёрженные поля СРАЗУ на сырой объект - buildManagerView_/buildLogistView_
+    // ниже по цепочке всё равно перезатрут их своей (тоже верной) версией для приватных
+    // ролей, а admin теперь получает готовые смёрженные имена без обхода.
+    // НАЙДЕННЫЙ БАГ (01.09, третий заход, через diag_roster подтверждено числами):
+    // fetchOrdersComputedFromServer_ возвращает data.orders НАПРЯМУЮ (см. её же тело -
+    // "return data.orders;") - то есть computed САМ И ЕСТЬ orders-объект (with by_manager/
+    // by_logist/summary НА ВЕРХНЕМ уровне), а НЕ обёртка с полем .orders внутри. Три
+    // предыдущих захода писали computed.orders.roster_* - проверка "if (computed.orders)"
+    // всегда была false (такого вложенного поля не существует), весь блок был мёртвым
+    // кодом с самого первого коммита - buildRosterFallback_ ни разу не выполнился. Кладём
+    // поля НА САМ computed, без лишней вложенности - тот же объект, что уходит дальше в
+    // buildManagerView_/buildLogistView_ как параметр orders, где orders._rosterFallback/
+    // orders.roster_managers читаются уже верно (там вложенности никогда не было).
+    computed._rosterFallback = buildRosterFallback_(computed, monthKey);
+    computed.roster_managers = mergeRosterFallback_(buildNameOnlyRoster_(computed.by_manager), computed._rosterFallback && computed._rosterFallback.managers);
+    computed.roster_logists = mergeRosterFallback_(buildNameOnlyRoster_(computed.by_logist), computed._rosterFallback && computed._rosterFallback.logists);
+    return joinManagerPlans_(ss, computed, monthKey);
+  }
 
   var fromServer = fetchOrdersRawFromServer_(monthKey);
   var rows = fromServer ? fromServer.rows : null;

@@ -3318,7 +3318,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
                колонка "Категория" различает их в общем списке. -->
           <div id="asset-wrap" style="display:none;overflow-x:auto">
             <table class="tbl">
-              <thead><tr><th>Категория</th><th>Госномер</th><th>Марка/модель</th><th>Характеристики</th><th>Владелец</th><th>Сцепка сейчас</th><th class="num">Действия</th></tr></thead>
+              <thead><tr><th>Категория</th><th>Отдел</th><th>Госномер</th><th>Марка/модель</th><th>Характеристики</th><th>Владелец</th><th>Сцепка сейчас</th><th class="num">Действия</th></tr></thead>
               <tbody id="asset-body"></tbody>
             </table>
           </div>
@@ -3538,6 +3538,17 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
         <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Госномер *</label>
           <input autocomplete="off" id="asset-id" type="text" maxlength="64" placeholder="ЕМ 5270 50"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        <!-- Отдел (01.09, Влад: "по умолчанию все, что у нас сейчас есть - отдел тралы, там я
+             должен иметь возможность переключить на отдел экскаваторов") - пусто = Тралы,
+             непустое значение выводит машину из ВСЕХ расчётов дашборда на чтении (Панель/
+             Техника/Планировка), см. plans/2026-09-01-vehicle-department-field.md. Список
+             открытый, как у "Сектора" полуприцепа - datalist подсказывает, не ограничивает. -->
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Отдел</label>
+          <input autocomplete="off" id="asset-department" type="text" maxlength="30" placeholder="пусто = Тралы" list="asset-department-list"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none">
+          <datalist id="asset-department-list">
+            <option value="экскаваторы"><option value="в аресте">
+          </datalist></div>
         <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Производитель</label>
           <input autocomplete="off" id="asset-manufacturer" type="text" maxlength="100" placeholder="Faymonville, Scania…"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
@@ -11228,7 +11239,7 @@ function assetsPaint_() {
   var showDeleted = document.getElementById('asset-show-deleted').checked;
   var rows = spravAssets_.filter(function(a) { return showDeleted || !a.is_deleted; });
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="7" class="muted" style="padding:14px">Материалки пока нет — добавьте первую</td></tr>';
+    body.innerHTML = '<tr><td colspan="8" class="muted" style="padding:14px">Материалки пока нет — добавьте первую</td></tr>';
     return;
   }
   body.innerHTML = rows.map(function(a) {
@@ -11248,6 +11259,10 @@ function assetsPaint_() {
     var specText = assetSpecSummary_(a);
     return '<tr' + (a.is_deleted ? spravDeletedRowStyle_() : '') + '>' +
       '<td class="muted">' + (ASSET_TYPE_LABELS_[a.asset_type] || a.asset_type) + '</td>' +
+      // Отдел (01.09) - пусто = Тралы (тихо, без бейджа), непустое значение выводит машину из
+      // расчётов - подсвечиваем, чтобы это было видно с первого взгляда, не только при клике
+      // "Править". См. plans/2026-09-01-vehicle-department-field.md.
+      '<td>' + (a.department ? pctBadge_(pageEsc_(a.department), '#f59e0b') : '<span class="muted">Тралы</span>') + '</td>' +
       '<td class="mono"><b>' + pageEsc_(a.id) + '</b>' + (a.is_deleted ? ' <span class="muted" style="font-size:11px">(удалено)</span>' : '') + '</td>' +
       '<td class="muted">' + modelCell + '</td>' +
       '<td class="muted">' + (specText ? pageEsc_(specText) : '—') + '</td>' +
@@ -11301,6 +11316,7 @@ function assetOpenForm_(id) {
   var idInput = document.getElementById('asset-id');
   idInput.value = a ? a.id : '';
   idInput.disabled = !!a; // госномер - естественный первичный ключ, у существующей записи не меняется
+  document.getElementById('asset-department').value = a ? (a.department || '') : '';
   document.getElementById('asset-manufacturer').value = a ? (a.manufacturer || '') : '';
   document.getElementById('asset-name').value = a ? (a.name || '') : '';
   document.getElementById('asset-vin').value = a ? (a.vin || '') : '';
@@ -11351,6 +11367,7 @@ function assetSave_() {
   var assetType = document.getElementById('asset-type-select').value;
   var params = {
     id: id, asset_type: assetType,
+    department: document.getElementById('asset-department').value.trim(),
     manufacturer: document.getElementById('asset-manufacturer').value.trim(),
     name: document.getElementById('asset-name').value.trim(),
     vin: vin,
@@ -21022,8 +21039,15 @@ function renderKpis(){
     var here = STATE.segs.filter(function(s){ return s.v === v.i && s.s <= h && s.s + s.l > h; });
     if (here.some(function(s){ return s.kind === "trip"; })) { inWork++; return; }
     if (here.some(function(s){ return s.kind === "repair" || s.kind === "maint"; })) { rep++; return; }
+    // "Нет водителя" (01.09, Влад: "все эти машины со статусом вакант... заказ везти
+    // некому, это не пустой день, это без водителя") - v.vacant (источник истины -
+    // fleet_assignments, см. lpApplyFleetDriverStatus_) - ЭТО ЖЕ САМОЕ "нет
+    // водителя", даже когда никто не проставил на сегодня явный сегмент
+    // kind==='driveroff' (тот - отдельный плановый статус: отпуск/больничный у
+    // НАЗНАЧЕННОГО водителя). Раньше проверялся только явный сегмент - вакантная
+    // машина без сегмента молча утекала в "Без заказа"/"Свободны".
+    if (v.vacant || here.some(function(s){ return s.kind === "driveroff"; })) { noDrv++; return; }
     if (here.some(function(s){ return s.kind === "noorder"; })) { noOrd++; return; }
-    if (here.some(function(s){ return s.kind === "driveroff"; })) { noDrv++; return; }
     var hadTripToday = STATE.segs.some(function(s){
       return s.v === v.i && s.kind === "trip" && s.s < dayEnd && s.s + s.l > dayStart;
     });
@@ -21038,7 +21062,13 @@ function renderKpis(){
       totalOrders += (s.tripMode === "daily") ? 3 : 1;
     }
   });
-  var k = [["Парк", scope.length], ["В рейсе", inWork], ["Ремонт и ТО", rep],
+  // "В работе" (01.09, Влад): "Всего - Ремонт - Без водителя" - операционно
+  // доступные машины (везёт/свободна/без заказа, но не заблокирована ремонтом
+  // или отсутствием водителя), отдельно от "В рейсе" (только те, кто везёт
+  // прямо сейчас). По построению равно inWork+noOrd+free - тот же результат,
+  // но формула Влада явная и проверяемая на глаз.
+  var inWorkTotal = scope.length - rep - noDrv;
+  var k = [["Парк", scope.length], ["В работе", inWorkTotal], ["В рейсе", inWork], ["Ремонт и ТО", rep],
            ["Без заказа", noOrd], ["Нет водителя", noDrv], ["Свободны", free],
            ["Заказов", totalOrders]];
   document.getElementById("lp-kpis").innerHTML = k.map(function(p){
@@ -22709,7 +22739,11 @@ function fetchFleetData_(){
         var wasLoaded = fleetDataLoaded_;
         fleetDataLoaded_ = true;
         STATE.vehicles.forEach(function(v){ lpApplyFleetDriverStatus_(v); });
-        if (!wasLoaded) renderRows();
+        // renderKpis() тоже зависит от v.vacant (01.09, "Нет водителя" в шапке) -
+        // до этого момента вакантность бралась из временного Штатка-фолбэка
+        // (см. комментарий у lpApplyFleetDriverStatus_ выше), число в шапке могло
+        // на долю секунды показать неверную картину, если не пересчитать здесь же.
+        if (!wasLoaded){ renderRows(); renderKpis(); }
       }
     }).catch(function(){});   /* нет сети/сбой - меню просто не покажет "кто сейчас сидит", посадить/зацепить всё равно работает */
 }

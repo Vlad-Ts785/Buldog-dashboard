@@ -5910,14 +5910,44 @@ function normalizeGos(gos) {
     .replace(/Т/g,'T').replace(/У/g,'Y').replace(/Х/g,'X');
 }
 
-// Машины, полностью исключённые из ВСЕХ расчётов дашборда (2026-08-11, Влад: "убери из всех
-// расчётов, её нет, она в аресте" - госномер "А 840 КО 797", SCANIA). Единая точка исключения -
-// getStaffData ниже (состав парка - источник для статуса парка/"Техники"/"Водителей"/личной
-// страницы Васина) + aggregateFinHistoryForRange (двойная защита - вдруг в истории остались
-// строки без записи в Штатке, например если её ещё не убрали из листа физически).
-const EXCLUDED_VEHICLE_GOS = ['A840KO797'];
+// Машины, исключённые из ВСЕХ расчётов дашборда - план 2026-09-01
+// (plans/2026-09-01-vehicle-department-field.md). Влад: "в справочнике на каждое
+// материальное средство нужно добавить отдел... если машина закреплена за другим отделом,
+// она выпадает из расчёта" - заменяет прежний статический список (2026-08-11 SCANIA в
+// аресте, 2026-09-01 У589ОХ750/У660ОХ750 в отделе экскаваторов, см. память
+// project_vehicles_temporarily_excluded_from_calcs). Источник истины теперь
+// sprav_assets.department на сервере - переключается через UI Справочников, БЕЗ деплоя
+// кода. Тихий фолбэк на старый статический список, если сервер недоступен (тот же принцип
+// "мягкого перехода", что у водителя по машине/fetchVehicleDriversFromServer_).
+var EXCLUDED_VEHICLE_GOS_FALLBACK_ = ['A840KO797', 'Y589OX750', 'Y660OX750'];
+var _excludedDeptGosCache_; // undefined = ещё не спрашивали сервер в этом выполнении
+function fetchExcludedVehicleGosFromServer_() {
+  if (_excludedDeptGosCache_ !== undefined) return _excludedDeptGosCache_;
+  try {
+    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    if (!apiKey) { _excludedDeptGosCache_ = null; return null; }
+    var resp = UrlFetchApp.fetch(
+      'https://api.yardhub.ru/api/vehicle_departments',
+      { headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true }
+    );
+    if (resp.getResponseCode() !== 200) { _excludedDeptGosCache_ = null; return null; }
+    var data = JSON.parse(resp.getContentText());
+    var set = {};
+    if (data && data.departments) {
+      Object.keys(data.departments).forEach(function(gos) { set[normalizeGos(gos)] = data.departments[gos]; });
+    }
+    _excludedDeptGosCache_ = set; // сервер ответил - {} тоже валидный ответ (никто не исключён)
+    return set;
+  } catch (err) {
+    _excludedDeptGosCache_ = null;
+    return null;
+  }
+}
 function isExcludedVehicleGos_(gos) {
-  return EXCLUDED_VEHICLE_GOS.indexOf(normalizeGos(gos)) >= 0;
+  var normalized = normalizeGos(gos);
+  var fromServer = fetchExcludedVehicleGosFromServer_();
+  if (fromServer !== null) return !!fromServer[normalized]; // сервер ответил - доверяем целиком
+  return EXCLUDED_VEHICLE_GOS_FALLBACK_.indexOf(normalized) >= 0; // сервер недоступен - фолбэк
 }
 
 // Читаем Штатку один раз — возвращаем карту госномер → {type, status, marka}

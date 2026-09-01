@@ -2486,6 +2486,11 @@ function getDebtData(ss, compareDaysBack) {
   var computed = fetchDebtComputedFromServer_(compareDaysBack);
   if (computed) return computed;
 
+  // Гвард (Ревизор, 01.09, план plans/2026-09-01-apps-script-elimination.md, этап 0.5) -
+  // сервер недоступен, читаем ДЗ_данные напрямую. Email-канал ДЗ остановлен 17-19.08 (см.
+  // CLAUDE.md/"Свежесть данных") - эти цифры МОГУТ быть неделями устаревшими, не только что
+  // просроченными на день-два, как в честном штатном режиме. Помечаем явно.
+  var staleFallback = true;
   const sheet = ss.getSheetByName(DEBT_RAW_SHEET);
   if (!sheet || sheet.getLastRow() < 2) return null;
 
@@ -2788,6 +2793,10 @@ function getDebtData(ss, compareDaysBack) {
     debt_changes_by_org: debtChangesByOrg,
     debt_changes_compare_date: debtChangesCompareDate,
     debt_changes_days_back: compareDaysBack,
+    stale_fallback: staleFallback,
+    stale_fallback_warning: staleFallback
+      ? 'Сервер недоступен - показаны последние данные из Google Таблицы, канал 1С в неё больше не пишет (остановлен), цифры могут быть устаревшими на недели.'
+      : undefined,
   };
 }
 
@@ -3219,6 +3228,10 @@ function getReceiptsData(ss, ordersData) {
   var fromServer = fetchReceiptsComputedFromServer_();
   if (fromServer) return fromServer;
 
+  // Гвард (Ревизор, 01.09, план plans/2026-09-01-apps-script-elimination.md, этап 0.5) -
+  // сервер недоступен, читаем Поступления_данные напрямую. Email-канал остановлен 17.08 -
+  // эти цифры МОГУТ быть неделями устаревшими (см. CLAUDE.md/"Свежесть данных"). Помечаем.
+  var staleFallback = true;
   const liveSheet = ss.getSheetByName(RECEIPTS_SHEET);
   const liveRows = receiptsReadSheetRows_(liveSheet);
   if (!liveRows.length) {
@@ -3439,6 +3452,10 @@ function getReceiptsData(ss, ordersData) {
       total: weekTransactions.reduce(function(s, r) { return s + r.amount; }, 0),
       prev_total: prevWeekTotal, prev_date_from: prevWeekStartStr, prev_date_to: prevWeekEndStr,
     },
+    stale_fallback: staleFallback,
+    stale_fallback_warning: staleFallback
+      ? 'Сервер недоступен - показаны последние данные из Google Таблицы, канал 1С в неё больше не пишет (остановлен), цифры могут быть устаревшими на недели.'
+      : undefined,
   };
 }
 
@@ -5135,12 +5152,17 @@ function doGet(e) {
   }
 
   // ── ВРЕМЕННО (2026-08-19, перенос ДЗ на сервер) - экспорт листа "ДЗ_Статусы" (ручные
-  // статусы/комментарии, НЕ из 1С - разовый + периодический перенос, см.
-  // plans/2026-07-08-debt-receivables-tab.md). УБРАТЬ после того, как запись статусов тоже
-  // переедет на сервер (пока фронтенд продолжает писать статусы сюда же, в лист).
+  // статусы/комментарии, НЕ из 1С). НЕ временный - это постоянный мост (гигиена 01.09,
+  // план plans/2026-09-01-apps-script-elimination.md, этап 0.4): пометка "УБРАТЬ" от 19.08
+  // была преждевременной - import-debt-status.js на VPS до сих пор зовёт его каждые 10 мин
+  // (cron), запись статусов из UI по-прежнему двойная (лист + сервер), лист остаётся
+  // источником для сверки. Единственная правка сегодня - ключ был отдельным хардкодом в
+  // открытом коде, теперь тот же YARD_API_KEY, что у остальных постоянных мостов
+  // (access_list, park_history и т.д.) - один секрет вместо россыпи разных.
   if (e && e.parameter && e.parameter.action === 'export_debt_status') {
     var edsKey = e.parameter.key || '';
-    if (edsKey !== '7f2a9c1e6b4d8035a1c9ef26b8d40317') {
+    var edsExpected = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY') || '';
+    if (!edsExpected || edsKey !== edsExpected) {
       return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
     }
     var statusSheet = ss.getSheetByName('ДЗ_Статусы');
@@ -9810,12 +9832,23 @@ function getOrdersData(ss) {
 
   var fromServer = fetchOrdersRawFromServer_(monthKey);
   var rows = fromServer ? fromServer.rows : null;
+  var staleFallback = false;
   if (!rows) {
     const norm = ss.getSheetByName(ORDERS_NORM_SHEET);
     if (!norm || norm.getLastRow() < 2) return { error: 'Нет данных заказов' };
     rows = norm.getRange(2, 1, norm.getLastRow() - 1, 44).getValues();
+    // Гвард (Ревизор, 01.09, план plans/2026-09-01-apps-script-elimination.md, этап 0.5):
+    // если мы здесь - сервер НЕДОСТУПЕН ЦЕЛИКОМ (и computed, и raw пути отказали). Лист
+    // "Заказы_данные" при этом уже НЕ обновляется email-рассылкой (остановлена 17-19.08,
+    // см. CLAUDE.md/"Свежесть данных") - "тихий фолбэк" раньше молча выдавал эти цифры за
+    // живые. Честно помечаем - фронтенд покажет плашку вместо тишины.
+    staleFallback = true;
   }
   const result = noteServerDataQuality_(aggregateOrdersRows(rows), fromServer);
+  if (staleFallback) {
+    result.stale_fallback = true;
+    result.stale_fallback_warning = 'Сервер недоступен - показаны последние данные из Google Таблицы, канал 1С в неё больше не пишет (остановлен), цифры могут быть устаревшими на недели.';
+  }
   const smartLost = computeLostCustomers_(ss, rows, monthKey);
   if (smartLost) result.lost_customers = smartLost;
   return joinManagerPlans_(ss, result, monthKey);

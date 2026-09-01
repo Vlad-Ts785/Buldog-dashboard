@@ -1097,6 +1097,9 @@ function runAll() {
   try { normalizeReport();         log.push('✅ Нормализация выполнена'); }
   catch(e) { errors.push('❌ Нормализация: ' + e.message); }
 
+  try { syncVehicleTypesToServer_(); log.push('✅ Типы техники отправлены на сервер'); }
+  catch(e) { errors.push('❌ Типы техники на сервер: ' + e.message); }
+
   try { normalizeOrders();         log.push('✅ Заказы нормализованы'); }
   catch(e) { errors.push('❌ Заказы (норм.): ' + e.message); }
 
@@ -1469,8 +1472,15 @@ function normalizeReport() {
 
     const revenue = parseFloat(row[5]) || 0;
     const profit  = parseFloat(row[12]) || 0;
-    if (revenue === 0 && profit === 0) continue;
-
+    // Фильтр "revenue===0 && profit===0 -> пропустить" убран (2026-09-01, Влад: "система
+    // должна работать идеально") - машина с честным нулём (простаивает, или 1-2 число
+    // месяца, когда ни у кого ещё не было рейса) не мусор, это правда. Раньше в начале
+    // каждого месяца фильтр вычищал ПОЧТИ ВСЕХ (у всех пока нули) - vehicles.length
+    // обнулялся, срабатывала защита ниже "нет данных, лист не трогаем", и Нормализованные_
+    // данные молча застревали на данных ПРОШЛОГО месяца (найдено 1 сентября - "Валовая
+    // прибыль" на Панели показывала фактически август вместо сентября, маржа 82266%).
+    // Настоящая защита от битого/пустого отчёта 1С - lastRow < 10 в начале функции (проверка
+    // СЫРОГО листа Данные_1С, до всякой построчной фильтрации) - её не трогаем, она верна.
     const gosRaw = extractGosNumber(fullName);
     if (!gosRaw) continue;
 
@@ -4101,8 +4111,8 @@ function buildManagerView_(orders, managerName, ss, period) {
       by_logist: myLogistRow,
       // Пикер "Менеджер"/"Логист" в шторке Планировки - те же имена-без-цифр, что у
       // buildLogistView_ (см. buildNameOnlyRoster_ там же).
-      roster_managers: buildNameOnlyRoster_(orders.by_manager),
-      roster_logists:  buildNameOnlyRoster_(orders.by_logist),
+      roster_managers: mergeRosterFallback_(buildNameOnlyRoster_(orders.by_manager), orders._rosterFallback && orders._rosterFallback.managers),
+      roster_logists:  mergeRosterFallback_(buildNameOnlyRoster_(orders.by_logist), orders._rosterFallback && orders._rosterFallback.logists),
       by_manager_detail: detailWrapped,
       // Проблемные заказы (2026-08-12, вкладка "Воронка документов" на личной странице -
       // тот же формат/источник, что "Обзор заказов → Проблемные заказы"). Обычный менеджер
@@ -4420,8 +4430,8 @@ function buildLogistView_(orders, logistName, ss, period) {
     // кладёт эти же два поля ПРАВИЛЬНО, внутри result.orders - здесь просто повторяем тот же
     // паттерн. orders.by_manager/by_logist ниже - ПОЛНЫЙ company-wide параметр функции (ДО
     // урезания в myLogistRow), не ordersOut - иначе получили бы тот же баг заново.
-    roster_managers: buildNameOnlyRoster_(orders.by_manager),
-    roster_logists:  buildNameOnlyRoster_(orders.by_logist),
+    roster_managers: mergeRosterFallback_(buildNameOnlyRoster_(orders.by_manager), orders._rosterFallback && orders._rosterFallback.managers),
+    roster_logists:  mergeRosterFallback_(buildNameOnlyRoster_(orders.by_logist), orders._rosterFallback && orders._rosterFallback.logists),
   };
   if (ss && (isVasinName_(logistName) || isColumnHeadName_(logistName))) {
     ordersOut.long_haul = buildLongHaulBundle_(ss, orders, period || null);
@@ -4461,6 +4471,53 @@ function buildLogistView_(orders, logistName, ss, period) {
 // наружу для чужой роли не отдаём (Планировке нужны исключительно имена для пикера).
 function buildNameOnlyRoster_(list) {
   return (list || []).map(function(p) { return { name: p.name }; });
+}
+// НАЙДЕННЫЙ БАГ (Влад, 01.09, живой пример: "из окошек логистов осталось только
+// два" - тот же класс, что и эпоха Планировки, но в другой системе). roster_managers/
+// roster_logists строятся ИЗ orders.by_manager/by_logist ТЕКУЩЕГО месяца - 1 сентября
+// он почти пуст (реальных заказов 1С за сентябрь ещё почти нет), значит и ростер
+// почти пуст. Ростер по смыслу - "кто у нас сейчас работает", не "кто уже успел
+// получить заказ в ЭТОМ календарном месяце" - не должен мгновенно худеть в первые
+// дни месяца. ВАЖНО: фолбэк - ОТДЕЛЬНОЕ поле (_rosterFallback), НЕ подмешивается в
+// сам orders.by_manager/by_logist - те остаются чистым источником для финансовых
+// расчётов (тот же принцип, что уже применён к managerPlans в joinManagerPlans_ -
+// "план существует независимо от того, есть ли заказы в этом периоде", комментарий
+// там же). Только ИМЕНА для пикера/присутствия, ни одной финансовой цифры прошлого
+// месяца сюда не попадает.
+var ROSTER_MIN_SIZE_ = 5;
+// НАЙДЕННЫЙ БАГ (01.09, третий заход, подтверждено через diag_roster): computed -
+// это САМ orders-объект (fetchOrdersComputedFromServer_ возвращает data.orders
+// напрямую), не обёртка с полем .orders - "computed.orders"/"prev.orders" всегда
+// были undefined, mgrCount/logCount всегда 0, а "if (!prev || !prev.orders) return
+// null" всегда обрубал функцию раньше реального фолбэка. Читаем по_manager/по_logist
+// НАПРЯМУЮ с обоих объектов, без вложенности.
+function buildRosterFallback_(computed, monthKey) {
+  try {
+    var mgrCount = (computed.by_manager || []).length;
+    var logCount = (computed.by_logist || []).length;
+    if (mgrCount >= ROSTER_MIN_SIZE_ && logCount >= ROSTER_MIN_SIZE_) return null;
+    var prev = fetchOrdersComputedFromServer_(prevMonthKey_(monthKey));
+    if (!prev) return null;
+    return {
+      managers: buildNameOnlyRoster_(prev.by_manager),
+      logists:  buildNameOnlyRoster_(prev.by_logist)
+    };
+  } catch (err) { return null; }
+}
+function prevMonthKey_(monthKey) {
+  var parts = monthKey.split('-');
+  var y = parseInt(parts[0], 10), m = parseInt(parts[1], 10);   // m - 1-indexed месяц
+  var d = new Date(y, m - 2, 1);                                // -2, т.к. Date() месяц 0-indexed
+  return Utilities.formatDate(d, 'Europe/Moscow', 'yyyy-MM');
+}
+function mergeRosterFallback_(current, fallback) {
+  if (!fallback || !fallback.length) return current;
+  var seen = {}, out = (current || []).slice();
+  out.forEach(function(p) { seen[p.name] = true; });
+  fallback.forEach(function(p) {
+    if (!seen[p.name]) { seen[p.name] = true; out.push({ name: p.name }); }
+  });
+  return out;
 }
 // Лёгкий состав парка для логиста/менеджера - та же Штатка, что у getFleetStatus/
 // buildStaffMarkas_, только нужные Планировке поля. ~55 строк, чтение мгновенное, кэша не требует.
@@ -5045,6 +5102,10 @@ function updateOrderPlanStatus_(personName, p) {
 function doGet(e) {
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
 
+  // diag_roster (01.09) - убрана: помогла найти настоящий баг (computed.orders вместо
+  // computed напрямую, см. buildRosterFallback_/getOrdersData ниже), корень найден и
+  // подтверждён числами, диагностика больше не нужна.
+
   // ── ВРЕМЕННО (2026-08-19, перенос ДЗ на сервер) - экспорт листа "ДЗ_Статусы" (ручные
   // статусы/комментарии, НЕ из 1С - разовый + периодический перенос, см.
   // plans/2026-07-08-debt-receivables-tab.md). УБРАТЬ после того, как запись статусов тоже
@@ -5066,6 +5127,19 @@ function doGet(e) {
     return ContentService.createTextOutput(JSON.stringify({ rows: statusRows })).setMimeType(ContentService.MimeType.JSON);
   }
   // ── конец временного экспорта ──────────────────────────────────────────────────────────────
+
+  // ── ВРЕМЕННО (2026-09-01, пересчитать кэш НОВЫМ кодом - includeExcluded=true, чтобы кэш
+  // содержал ВСЕХ машин для живого фильтра) - УБРАТЬ после использования.
+  if (e && e.parameter && e.parameter.action === 'refresh_main_cache') {
+    var rmcKey = e.parameter.key || '';
+    if (rmcKey !== 'b83e5f107ac2694d38fb1e0c96a72d5e') {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var rmcSs = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+    saveMainPayloadCache_(rmcSs);
+    return ContentService.createTextOutput(JSON.stringify({ ok: true, refreshed_at: new Date().toISOString() })).setMimeType(ContentService.MimeType.JSON);
+  }
+  // ── конец временного форс-обновления ───────────────────────────────────────────────────────
 
   // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём.
   // Сначала пробуем свой токен сессии (живёт до 48ч, см. issueSessionToken_) - только если
@@ -5718,7 +5792,9 @@ var MAIN_PAYLOAD_CACHE_CHUNK_SIZE = 45000; // с запасом от лимит�
 // staffMarkas/access_log) - те живые, считаются в doGet() напрямую, см. комментарий там.
 function buildHeavyMainPayload_(ss, staffData) {
   var defaultRange = getCurrentMonthRange_();
-  var vehiclesData = aggregateFinHistoryForRange(ss, staffData, defaultRange.from, defaultRange.to);
+  // includeExcluded=true (01.09) - кэш должен считать ВСЕ машины, включая department-
+  // исключённые; видимость применяется живым фильтром при отдаче, см. getMainPayloadCacheOrLive_.
+  var vehiclesData = aggregateFinHistoryForRange(ss, staffData, defaultRange.from, defaultRange.to, false, true);
   var ordersData = getOrdersData(ss);
   return {
     summary:  getSummaryData(ss, ordersData),
@@ -5758,7 +5834,7 @@ function ensureMainPayloadCacheSheet_(ss) {
 // JSON-чанки...) - перезаписывается целиком за один setValues(), чтобы doGet() не мог
 // прочитать кэш "наполовину записанным" при совпадении по времени с runAll().
 function saveMainPayloadCache_(ss) {
-  var staffData = getStaffData(ss);
+  var staffData = getStaffData(ss, true); // includeExcluded - см. комментарий у getStaffData
   var payload = buildHeavyMainPayload_(ss, staffData);
   var json = JSON.stringify(payload);
   var chunks = [];
@@ -5823,7 +5899,19 @@ function getMainPayloadCacheOrLive_(ss, staffData) {
     receipts: getReceiptsData(ss, ordersData),
   };
   var cached = readMainPayloadCache_(ss);
-  if (cached) return Object.assign({}, cached, freshFinancials);
+  if (cached) {
+    var merged = Object.assign({}, cached, freshFinancials);
+    // Живой фильтр по department (01.09, Влад: "это должно мгновенно срабатывать") - cached
+    // посчитан кэш-триггером до 3 часов назад для ВСЕХ машин (см. includeExcluded в
+    // saveMainPayloadCache_), department мог измениться через UI Справочников уже ПОСЛЕ
+    // этого расчёта. isExcludedVehicleGos_ сама бьёт на сервер живьём при каждом вызове -
+    // фильтрация здесь всегда актуальна, без ожидания следующего runAll().
+    if (merged.vehicles) {
+      merged.vehicles = merged.vehicles.filter(function(v) { return !isExcludedVehicleGos_(v.gos); });
+      merged.drivers = deriveDriversFromVehicles(merged.vehicles);
+    }
+    return merged;
+  }
 
   // Кэша нет вообще (первый запуск после деплоя, до первого runAll()) - остальное (медленные
   // Штатка-поля) считаем живьём. ordersData уже посчитан выше - buildHeavyMainPayload_ здесь
@@ -5849,18 +5937,67 @@ function normalizeGos(gos) {
     .replace(/Т/g,'T').replace(/У/g,'Y').replace(/Х/g,'X');
 }
 
-// Машины, полностью исключённые из ВСЕХ расчётов дашборда (2026-08-11, Влад: "убери из всех
-// расчётов, её нет, она в аресте" - госномер "А 840 КО 797", SCANIA). Единая точка исключения -
-// getStaffData ниже (состав парка - источник для статуса парка/"Техники"/"Водителей"/личной
-// страницы Васина) + aggregateFinHistoryForRange (двойная защита - вдруг в истории остались
-// строки без записи в Штатке, например если её ещё не убрали из листа физически).
-const EXCLUDED_VEHICLE_GOS = ['A840KO797'];
+// Машины, исключённые из ВСЕХ расчётов дашборда - план 2026-09-01
+// (plans/2026-09-01-vehicle-department-field.md). Влад: "в справочнике на каждое
+// материальное средство нужно добавить отдел... если машина закреплена за другим отделом,
+// она выпадает из расчёта" - заменяет прежний статический список (2026-08-11 SCANIA в
+// аресте, 2026-09-01 У589ОХ750/У660ОХ750 в отделе экскаваторов, см. память
+// project_vehicles_temporarily_excluded_from_calcs). Источник истины теперь
+// sprav_assets.department на сервере - переключается через UI Справочников, БЕЗ деплоя
+// кода. Тихий фолбэк на старый статический список, если сервер недоступен (тот же принцип
+// "мягкого перехода", что у водителя по машине/fetchVehicleDriversFromServer_).
+var EXCLUDED_VEHICLE_GOS_FALLBACK_ = ['A840KO797', 'Y589OX750', 'Y660OX750'];
+var _excludedDeptGosCache_; // undefined = ещё не спрашивали сервер в этом выполнении
+function fetchExcludedVehicleGosFromServer_() {
+  if (_excludedDeptGosCache_ !== undefined) return _excludedDeptGosCache_;
+  try {
+    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    if (!apiKey) { _excludedDeptGosCache_ = null; return null; }
+    var resp = UrlFetchApp.fetch(
+      'https://api.yardhub.ru/api/vehicle_departments',
+      { headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true }
+    );
+    if (resp.getResponseCode() !== 200) { _excludedDeptGosCache_ = null; return null; }
+    var data = JSON.parse(resp.getContentText());
+    var set = {};
+    if (data && data.departments) {
+      Object.keys(data.departments).forEach(function(gos) { set[normalizeGos(gos)] = data.departments[gos]; });
+    }
+    _excludedDeptGosCache_ = set; // сервер ответил - {} тоже валидный ответ (никто не исключён)
+    return set;
+  } catch (err) {
+    _excludedDeptGosCache_ = null;
+    return null;
+  }
+}
 function isExcludedVehicleGos_(gos) {
-  return EXCLUDED_VEHICLE_GOS.indexOf(normalizeGos(gos)) >= 0;
+  var normalized = normalizeGos(gos);
+  // 01.09, вторая правка того же дня. Первая правка ("статический список - гарантированный
+  // пол") лечила симптом (SCANIA не было в sprav_assets, поэтому департамент-проверка её не
+  // видела), но не причину - и сломала ДРУГОЕ: Влад вернул У660ОХ750 обратно в Тралы через
+  // UI Справочников (эксперимент), а машина всё равно осталась исключена, потому что
+  // статический список ('Y660OX750') проверялся БЕЗУСЛОВНО, раньше department. Настоящая
+  // причина регрессии SCANIA устранена на уровне ДАННЫХ - SCANIA теперь тоже заведена в
+  // sprav_assets с department='арест' (см. память project_vehicles_temporarily_excluded_
+  // from_calcs) - значит department с сервера снова единственный источник истины, когда
+  // сервер отвечает; статический список - ТОЛЬКО настоящий фолбэк на случай недоступности
+  // сервера, не постоянный пол. Правило Влада (01.09): "если машина в отделе [не Тралы] -
+  // убираем её везде, если машина не в отделе [Тралы] - учитываем везде" - department
+  // ДОЛЖЕН быть единственным источником истины, редактируемым через UI без деплоя.
+  var fromServer = fetchExcludedVehicleGosFromServer_();
+  if (fromServer !== null) return !!fromServer[normalized];
+  return EXCLUDED_VEHICLE_GOS_FALLBACK_.indexOf(normalized) >= 0; // сервер недоступен - фолбэк
 }
 
 // Читаем Штатку один раз — возвращаем карту госномер → {type, status, marka}
-function getStaffData(ss) {
+// includeExcluded (01.09) - true ТОЛЬКО для построения тяжёлого кэшируемого payload'а
+// (saveMainPayloadCache_/buildHeavyMainPayload_) - нужно, чтобы department-исключённая
+// машина не выпадала из СЧИТАННЫХ данных на 3 часа (до следующего runAll()), а появлялась/
+// пропадала МГНОВЕННО (Влад, 01.09: "это должно мгновенно срабатывать") - реальная
+// видимость применяется живым фильтром при каждой отдаче кэша, см. getMainPayloadCacheOrLive_.
+// Все остальные вызовы (fleet/repairs/staffMarkas в doGet() - и так живые, без кэша) как и
+// раньше фильтруют сразу здесь.
+function getStaffData(ss, includeExcluded) {
   const sheet = ss.getSheetByName('Штатка');
   if (!sheet) return {};
 
@@ -5900,7 +6037,7 @@ function getStaffData(ss) {
     var driver3    = driver3Col >= 0 && driver3Col < row.length ? String(row[driver3Col] || '').trim() : '';
 
     if (!gos || !type) continue;
-    if (isExcludedVehicleGos_(gos)) continue;
+    if (!includeExcluded && isExcludedVehicleGos_(gos)) continue;
 
     var gosClean = normalizeGos(gos);
     map[gosClean] = { type: type, status: status, marka: marka, trailerGos: trailerGos, gosOriginal: gos, plan: plan, driver: driver, driver2: driver2, driver3: driver3, rowIndex: i };
@@ -6078,6 +6215,50 @@ function getRepairsData(staffData) {
   return repairs;
 }
 
+// Деньги по машине (выручка/ФОТ/топливо/запчасти/штрафы/проходные/прибыль) - с сервера
+// (park_reports, план 2026-08-31), тихий null при любой проблеме - вызывающий откатывается
+// на старое чтение Sheets ровно как раньше. Тип/статус/план техники сервер НЕ отдаёт - та
+// часть (Штатка) мигрирует отдельно, другим чатом, см. CLAUDE.md.
+function fetchParkHistoryFromServer_(fromDate, toDate) {
+  try {
+    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    if (!apiKey) return null;
+    var fromStr = Utilities.formatDate(fromDate, 'Europe/Moscow', 'yyyy-MM-dd');
+    var toStr = Utilities.formatDate(toDate, 'Europe/Moscow', 'yyyy-MM-dd');
+    var resp = UrlFetchApp.fetch(
+      'https://api.yardhub.ru/api/park_history?from=' + fromStr + '&to=' + toStr,
+      { headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true }
+    );
+    if (resp.getResponseCode() !== 200) return null;
+    var data = JSON.parse(resp.getContentText());
+    if (!data || !data.vehicles) return null;
+    return data; // { vehicles: [{gos,revenue,fot,fuel,parts,fines,tolls,profit,plan}], months_covered: [...] }
+  } catch (err) {
+    return null;
+  }
+}
+
+// Водитель по машине НА ДАТУ (fleet_assignments/Планировка-Справочники) - план 2026-09-01.
+// Тихий null при любой проблеме - вызывающий откатывается на История_финансов ровно как
+// раньше. Покрывает только даты С 30.08.2026 (см. комментарий у места вызова).
+function fetchVehicleDriversFromServer_(asOfDate) {
+  try {
+    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    if (!apiKey) return null;
+    var asOfStr = Utilities.formatDate(asOfDate, 'Europe/Moscow', 'yyyy-MM-dd');
+    var resp = UrlFetchApp.fetch(
+      'https://api.yardhub.ru/api/vehicle_drivers?asOf=' + asOfStr,
+      { headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true }
+    );
+    if (resp.getResponseCode() !== 200) return null;
+    var data = JSON.parse(resp.getContentText());
+    if (!data || !data.drivers) return null;
+    return data.drivers;
+  } catch (err) {
+    return null;
+  }
+}
+
 // Строит массив машин (страница "Техника") за диапазон дат, по месяцам. Для каждого
 // затронутого месяца - сначала пробуем "Данные_1С_история" (авторитетно: пишется из
 // отдельного письма 1С "за прошлый месяц", см. importParkReports()/writeParkHistoryForMonth_()).
@@ -6087,9 +6268,28 @@ function getRepairsData(staffData) {
 // ([2]=Тип,[3]=Статус,[4]=Выручка,[5]=ФОТ,[6]=Топливо,[7]=Запчасти,[8]=Штрафы,[9]=Проходные,
 // [10]=Валовая прибыль,[11]=План ВП) - можно обрабатывать одинаково независимо от источника.
 // Марка/прицеп/водитель - "текущее состояние" из Штатки (staffData), не историзируются.
-function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate) {
+//
+// С 2026-08-31: сами ЦИФРЫ ДЕНЕГ (revenue/fot/fuel/parts/fines/tolls/profit) сначала пробуем
+// взять с сервера (fetchParkHistoryFromServer_) - Sheets ниже по-прежнему читаются ВСЕГДА
+// (тип/статус/план машины по-прежнему только там, Штатка ещё не переехала), но если сервер
+// покрывает месяц - его числа ПЕРЕЗАПИСЫВАЮТ то, что вычиталось из листа для этого месяца
+// (см. блок "перезаписываем деньги с сервера" в конце функции). Тихий фолбэк на Sheets-числа,
+// если сервер недоступен или не покрывает месяц - ничего не ломается, просто медленнее.
+// skipServerOverride - ТОЛЬКО для verifyServerParkHistory_ (сверка сервер vs Sheets на
+// одинаковом staffData/диапазоне) - в обычной работе всегда false/не передаётся.
+// includeExcluded (01.09) - ТОЛЬКО для saveMainPayloadCache_/buildHeavyMainPayload_, см.
+// комментарий у getStaffData - считает данные ДЛЯ ВСЕХ машин, включая department-
+// исключённые, чтобы фильтрация видимости применялась живым фильтром при отдаче кэша, а не
+// пропадала из кэша на 3 часа.
+function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate, skipServerOverride, includeExcluded) {
   var from = new Date(fromDate); from.setHours(0, 0, 0, 0);
   var to = new Date(toDate); to.setHours(23, 59, 59, 999);
+
+  var serverPark_ = skipServerOverride ? null : fetchParkHistoryFromServer_(from, to);
+  var serverParkByGos_ = {};
+  if (serverPark_) {
+    serverPark_.vehicles.forEach(function(v) { serverParkByGos_[normalizeGos(v.gos)] = v; });
+  }
 
   var monthKeys = [];
   var cursor = new Date(from.getFullYear(), from.getMonth(), 1);
@@ -6140,9 +6340,9 @@ function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate) {
 
   var allGos = {};
   Object.keys(parkHistByMonth).forEach(function(mk) {
-    Object.keys(parkHistByMonth[mk]).forEach(function(g) { if (!isExcludedVehicleGos_(g)) allGos[g] = true; });
+    Object.keys(parkHistByMonth[mk]).forEach(function(g) { if (includeExcluded || !isExcludedVehicleGos_(g)) allGos[g] = true; });
   });
-  Object.keys(fallbackByVehicleMonth).forEach(function(g) { if (!isExcludedVehicleGos_(g)) allGos[g] = true; });
+  Object.keys(fallbackByVehicleMonth).forEach(function(g) { if (includeExcluded || !isExcludedVehicleGos_(g)) allGos[g] = true; });
   // Штатка - источник истины по составу парка (Влад, 2026-07-19: "не все тралы показывает
   // как ремонтные, которые в штатке отмечены как ремонт" - машина, у которой за весь период
   // не было ни одной строки в 1С-истории (простояла в ремонте, ни одного заказа), раньше
@@ -6159,11 +6359,30 @@ function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate) {
     });
   }
 
-  // Водитель ЗА ВЫБРАННЫЙ ПЕРИОД, а не сегодняшний живой - Данные_1С_история этого не хранит,
-  // поэтому смотрим отдельно в История_финансов (там есть колонка "Водитель" с 2026-07-04) -
-  // берём самую позднюю запись внутри диапазона [from, to]. Влад, 2026-07-04: карточка машины
-  // должна показывать данные именно за выбранный период, а не "как сейчас".
+  // Водитель ЗА ВЫБРАННЫЙ ПЕРИОД, а не сегодняшний живой - карточка машины должна показывать
+  // данные именно за выбранный период, а не "как сейчас" (Влад, 2026-07-04).
+  //
+  // МЯГКИЙ ПЕРЕХОД (план 2026-09-01, Влад: "старая история должна сохраниться, новая пишется
+  // по-новому"): с 30.08.2026 источник - сервер (fleet_assignments/Планировка-Справочники,
+  // "кто был на машине на дату", см. /api/vehicle_drivers) - у него РЕАЛЬНАЯ история с датами
+  // (valid_from/valid_to), не просто текущее состояние. До 30.08 такой истории на сервере
+  // физически НЕТ (Справочники начали писать её только с этого дня) - для более старых
+  // диапазонов остаёмся на "История_финансов" (Google Таблица, лист и его ежедневная запись
+  // НЕ трогались и не тронуты - это и есть сохранённая старая история, ничего не удаляли).
+  var FLEET_ASSIGNMENTS_START_ = new Date(2026, 7, 30); // 30 августа 2026 (месяц 0-indexed)
   var driverByGos = {};
+  if (to >= FLEET_ASSIGNMENTS_START_) {
+    var driverAsOf_ = to > new Date() ? new Date() : to; // не спрашивать сервер "на будущее"
+    var serverDrivers_ = fetchVehicleDriversFromServer_(driverAsOf_);
+    if (serverDrivers_) {
+      Object.keys(serverDrivers_).forEach(function(gos) {
+        driverByGos[gos] = { date: driverAsOf_, driver: serverDrivers_[gos] };
+      });
+    }
+  }
+  // Дозаполняем из Sheets только тех, кого сервер НЕ покрыл (диапазон целиком/частично до
+  // 30.08, машина не в fleet_assignments, или сервер недоступен) - цикл не менялся, только
+  // добавлена проверка "сервер уже ответил - не перезатирать более свежий ответ".
   var histForDriver = ss.getSheetByName('История_финансов');
   if (histForDriver && histForDriver.getLastRow() > 1 && histForDriver.getLastColumn() >= 13) {
     var dData = histForDriver.getRange(2, 1, histForDriver.getLastRow() - 1, 13).getValues();
@@ -6174,6 +6393,7 @@ function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate) {
       var dGos = String(dr[1] || '').trim();
       var dDriver = String(dr[12] || '').trim();
       if (!dGos || !dDriver) continue;
+      if (driverByGos[dGos]) continue; // сервер уже дал более свежий ответ на этот госномер
       var existingD = driverByGos[dGos];
       if (!existingD || dd > existingD.date) driverByGos[dGos] = { date: dd, driver: dDriver };
     }
@@ -6221,6 +6441,16 @@ function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate) {
       }
     }
     if (driverByGos[gos]) agg.driver = driverByGos[gos].driver; // приоритет - водитель за сам период
+    // Перезаписываем деньги с сервера (план 2026-08-31) - ТОЛЬКО 7 финансовых полей, если
+    // сервер знает эту машину за запрошенный диапазон; план/тип/статус/марка/прицеп/водитель
+    // остаются из Sheets-логики выше (Штатка ещё не переехала). Не найдена на сервере (новая
+    // машина, диапазон уходит в непокрытые месяцы) - тихо остаёмся на числах из Sheets.
+    var serverV_ = serverParkByGos_[normalizeGos(gos)];
+    if (serverV_) {
+      agg.revenue = serverV_.revenue; agg.fot = serverV_.fot; agg.fuel = serverV_.fuel;
+      agg.parts = serverV_.parts; agg.fines = serverV_.fines; agg.tolls = serverV_.tolls;
+      agg.profit = serverV_.profit;
+    }
     result.push(agg);
   });
   return result;
@@ -6326,7 +6556,73 @@ const RISCHANOV_SPECIAL_TRALS_GOS = [
 ];
 const RISCHANOV_ORDER_UNTIL = new Date('2026-11-01T00:00:00+03:00'); // рукописная пометка на приказе - сверить с Владом ближе к сроку, не начислять без нового приказа
 
+// Мост типа техники (план 2026-09-01) - Apps Script по-прежнему остаётся источником
+// истины по Штатке (та мигрирует отдельно, другая сессия), но не держит его при себе:
+// шлёт на сервер узкую карту "госномер -> тип" (не всю Штатку), чтобы /api/park_summary
+// мог делать разбивку Тралы/Длинномеры без обращения к Таблице на каждый запрос дашборда.
+function syncVehicleTypesToServer_() {
+  var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+  if (!apiKey) return;
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var staffData = getStaffData(ss);
+  var vehicles = Object.keys(staffData).map(function(gos) {
+    return { gos: staffData[gos].gosOriginal || gos, type: staffData[gos].type || '' };
+  });
+  if (!vehicles.length) return;
+  UrlFetchApp.fetch('https://api.yardhub.ru/api/vehicle_types', {
+    method: 'post', contentType: 'application/json',
+    headers: { 'X-Api-Key': apiKey },
+    payload: JSON.stringify({ vehicles: vehicles }),
+    muteHttpExceptions: true,
+  });
+}
+
+// Деньги (revenue/fot/fuel/parts/fines/tolls/profit/margin/тралы-длинномеры/спецтралы) - с
+// сервера первым делом (план 2026-09-01, Влад: "сервер и алгоритмы должны жить на сервере").
+// Тихий null при любой проблеме - вызывающий откатывается на Нормализованные_данные ровно
+// как раньше. profitPlan/salesPlan/salesFakt/revenueComparison сервер не считает - остаются
+// как были, накладываются поверх ниже.
+function fetchParkSummaryFromServer_(monthKey) {
+  try {
+    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    if (!apiKey) return null;
+    var resp = UrlFetchApp.fetch(
+      'https://api.yardhub.ru/api/park_summary?month=' + encodeURIComponent(monthKey),
+      { headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true }
+    );
+    if (resp.getResponseCode() !== 200) return null;
+    var data = JSON.parse(resp.getContentText());
+    if (!data || typeof data.revenue !== 'number') return null;
+    return data;
+  } catch (err) {
+    return null;
+  }
+}
+
 function getSummaryData(ss, ordersData) {
+  var monthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+  var serverSummary = fetchParkSummaryFromServer_(monthKey);
+  if (serverSummary) {
+    var sfp0 = computeSalesFaktPlan_(ordersData);
+    var rischanovOrderActive0 = new Date() < RISCHANOV_ORDER_UNTIL;
+    return {
+      revenue: serverSummary.revenue, profit: serverSummary.profit, fot: serverSummary.fot,
+      fuel: serverSummary.fuel, parts: serverSummary.parts, fines: serverSummary.fines,
+      tolls: serverSummary.tolls, margin: serverSummary.margin,
+      profit_tral: serverSummary.profit_tral, profit_long: serverSummary.profit_long,
+      own_revenue_tral: serverSummary.own_revenue_tral, own_revenue_long: serverSummary.own_revenue_long,
+      special_trals_profit: rischanovOrderActive0 ? serverSummary.special_trals_profit : 0,
+      special_trals_bonus_active: rischanovOrderActive0,
+      lossCount: serverSummary.lossCount, vehicleCount: serverSummary.vehicleCount,
+      salesPlan: sfp0.salesPlan, salesFakt: sfp0.salesFakt,
+      salesFaktThruYesterday: sfp0.salesFaktThruYesterday,
+      salesPayment: sfp0.salesPayment, salesPayNal: sfp0.salesPayNal,
+      salesPct: sfp0.salesPlan > 0 ? (sfp0.salesFakt / sfp0.salesPlan * 100) : 0,
+      profitPlan: 50400000,
+      revenueComparison: getRevenueDateComparison_(ss),
+    };
+  }
+
   const norm = ss.getSheetByName('Нормализованные_данные');
   if (!norm || norm.getLastRow() < 2) return {};
 
@@ -6949,6 +7245,41 @@ function verifyServerOrdersCalc(period) {
     Logger.log('⚠️ РАСХОЖДЕНИЯ серверного и локального расчёта за ' + mk + ' (' + problems.length + '):');
     problems.forEach(function(p) { Logger.log('  - ' + p); });
     Logger.log('Если серверный расчёт включён (USE_SERVER_ORDERS_CALC=on) - выключи его, пока не разобрались.');
+  }
+  return problems;
+}
+
+// Сверка сервера (park_reports) с Sheets (Данные_1С_история/История_финансов) для отчёта
+// "Парк" - план переноса 2026-08-31. Запускать вручную в редакторе после каждого реального
+// закрытия месяца (когда "Отчет парк [месяц]" реально архивируется 1С), тот же принцип, что
+// verifyServerOrdersCalc/verifyServerDebtCalc. period по умолчанию - текущий месяц целиком.
+function verifyServerParkHistory_(fromDateStr, toDateStr) {
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var from = fromDateStr ? new Date(fromDateStr) : new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1);
+  var to = toDateStr ? new Date(toDateStr) : new Date(new Date().getFullYear(), new Date().getMonth(), 0);
+  var staffData = getStaffData(ss);
+
+  var sheetsOnly = aggregateFinHistoryForRange(ss, staffData, from, to, true); // skipServerOverride
+  var withServer = aggregateFinHistoryForRange(ss, staffData, from, to, false);
+
+  var sheetsByGos = {}; sheetsOnly.forEach(function(v) { sheetsByGos[v.gos] = v; });
+  var problems = [];
+  withServer.forEach(function(sv) {
+    var a = sheetsByGos[sv.gos];
+    if (!a) { problems.push(sv.gos + ': есть после сервера, НЕТ в чистом Sheets-расчёте (новая машина?)'); return; }
+    ['revenue', 'fot', 'fuel', 'parts', 'fines', 'tolls', 'profit'].forEach(function(f) {
+      if (Math.abs((a[f] || 0) - (sv[f] || 0)) >= 1) {
+        problems.push(sv.gos + '.' + f + ': Sheets=' + a[f] + ' сервер=' + sv[f]);
+      }
+    });
+  });
+
+  if (problems.length === 0) {
+    Logger.log('✅ Сервер и Sheets по Парку за ' + Utilities.formatDate(from, 'Europe/Moscow', 'yyyy-MM-dd') +
+      ' - ' + Utilities.formatDate(to, 'Europe/Moscow', 'yyyy-MM-dd') + ' совпадают полностью (' + withServer.length + ' машин).');
+  } else {
+    Logger.log('⚠️ РАСХОЖДЕНИЯ сервера и Sheets по Парку (' + problems.length + '):');
+    problems.forEach(function(p) { Logger.log('  - ' + p); });
   }
   return problems;
 }
@@ -9380,7 +9711,20 @@ function serverCalcLooksSane_(data, expectedPeriod) {
   if (!data || !data.orders || !data.orders.summary) return false;
   if (data.period !== expectedPeriod) return false;
   var s = data.orders.summary;
-  if (typeof s.total_orders !== 'number' || s.total_orders <= 0) return false;
+  if (typeof s.total_orders !== 'number') return false;
+  // НАЙДЕННЫЙ БАГ (01.09, копал "лампочки логистов" - причина оказалась на шаг
+  // РАНЬШЕ моего первого фикса): total_orders<=0 всегда считался признаком
+  // "сервер сломан" - но в первые дни НОВОГО календарного месяца это ЗАКОННОЕ
+  // состояние (1С физически ещё не прислала ни одного заказа за месяц), не
+  // поломка. Из-за этого serverCalcLooksSane_ отклонял ЦЕЛИКОМ верный (просто
+  // пустой) ответ сервера, fetchOrdersComputedFromServer_ возвращал null,
+  // getOrdersData() тихо падал на легаси-путь через лист - roster-фолбэк
+  // (buildRosterFallback_, см. запись выше) там вообще не применяется, потому
+  // и не сработал, хотя сам код был верен. Разрешаем 0 заказов ТОЛЬКО для
+  // ТЕКУЩЕГО календарного месяца - для архивных периодов 0 заказов по-прежнему
+  // считается поломкой (там 0 не бывает законным, это НЕ ослабление защиты).
+  var isCurrentMonth = expectedPeriod === Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+  if (s.total_orders <= 0 && !isCurrentMonth) return false;
   if (typeof s.total_amount !== 'number') return false;
   if (typeof s.hired_margin_qualifies !== 'boolean') return false;
   if (!Array.isArray(data.orders.by_manager) || !Array.isArray(data.orders.by_logist)) return false;
@@ -9421,7 +9765,33 @@ function getOrdersData(ss) {
   // единственный источник (Влад вводит вручную), сервер не должен иметь свою копию вообще -
   // проще и надёжнее просто наложить joinManagerPlans_ поверх ЛЮБОГО источника заказов.
   var computed = fetchOrdersComputedFromServer_(monthKey);
-  if (computed) return joinManagerPlans_(ss, computed, monthKey);
+  if (computed) {
+    // Ростер логистов/менеджеров худеет в первые дни месяца, пока 1С ещё не прислала
+    // свежих заказов - см. buildRosterFallback_ (01.09, "из окошек логистов осталось
+    // только два"). НАЙДЕННЫЙ БАГ (01.09, второй заход, Влад живьём: "не вижу лампочек
+    // всех логистов" - фикс не подействовал именно для роли admin): buildManagerView_/
+    // buildLogistView_ кладут roster_managers/roster_logists только В СВОЙ приватный
+    // ответ (myManagerRow/myLogistRow) - у admin этих функций в цепочке вообще нет, он
+    // получает ЭТОТ САМЫЙ computed.orders напрямую, где by_manager/by_logist остаются
+    // сырыми (месячными, пустыми в начале сентября) без единого поля roster_*. Кладём
+    // те же смёрженные поля СРАЗУ на сырой объект - buildManagerView_/buildLogistView_
+    // ниже по цепочке всё равно перезатрут их своей (тоже верной) версией для приватных
+    // ролей, а admin теперь получает готовые смёрженные имена без обхода.
+    // НАЙДЕННЫЙ БАГ (01.09, третий заход, через diag_roster подтверждено числами):
+    // fetchOrdersComputedFromServer_ возвращает data.orders НАПРЯМУЮ (см. её же тело -
+    // "return data.orders;") - то есть computed САМ И ЕСТЬ orders-объект (with by_manager/
+    // by_logist/summary НА ВЕРХНЕМ уровне), а НЕ обёртка с полем .orders внутри. Три
+    // предыдущих захода писали computed.orders.roster_* - проверка "if (computed.orders)"
+    // всегда была false (такого вложенного поля не существует), весь блок был мёртвым
+    // кодом с самого первого коммита - buildRosterFallback_ ни разу не выполнился. Кладём
+    // поля НА САМ computed, без лишней вложенности - тот же объект, что уходит дальше в
+    // buildManagerView_/buildLogistView_ как параметр orders, где orders._rosterFallback/
+    // orders.roster_managers читаются уже верно (там вложенности никогда не было).
+    computed._rosterFallback = buildRosterFallback_(computed, monthKey);
+    computed.roster_managers = mergeRosterFallback_(buildNameOnlyRoster_(computed.by_manager), computed._rosterFallback && computed._rosterFallback.managers);
+    computed.roster_logists = mergeRosterFallback_(buildNameOnlyRoster_(computed.by_logist), computed._rosterFallback && computed._rosterFallback.logists);
+    return joinManagerPlans_(ss, computed, monthKey);
+  }
 
   var fromServer = fetchOrdersRawFromServer_(monthKey);
   var rows = fromServer ? fromServer.rows : null;

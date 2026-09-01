@@ -185,12 +185,14 @@
       `/api/park_history` использует её как fallback ТОЛЬКО когда собственный `plan_wp`
       строки `park_reports` равен 0 (архивные месяцы, уже с планом при разовом переносе -
       не трогает). Проверено на живых данных - план августа перестал быть нулевым.
-- [ ] 2.2 `/api/fleet_summary` (checkSession): аналог getStaffData+getFleetStatus+
-      getRepairsData+staffMarkas с сервера. Сверка с Sheets-версией на живых данных
-      (verify-функция, как verifyServerOrdersCalc). ТИП уже есть (vehicle_types), СТАТУС
-      уже есть (vehicle_status_daily/fleet_assignments), ПЛАН уже есть (vehicle_plans) -
-      марка/прицеп/водитель тоже уже мигрированы (fleet_assignments) - фактически ВСЕ
-      узкие карты для этого эндпоинта уже существуют, осталось собрать их в один ответ.
+- [x] **2.2 - СДЕЛАНО 01.09.** `/api/fleet_summary` (checkSession) собирает type
+      (vehicle_types) + marka (sprav_assets) + plan (vehicle_plans) + driver/trailerGos
+      (fleet_assignments) + status (vehicle_status_daily, самый свежий день - НЕ живой
+      "сейчас", тот уже есть на фронте отдельно через /plan/segs+/fleet/state - см. память
+      project_plan_segs_fleet_state_shared_contract). Найден и исправлен баг в JOIN (перепутаны
+      колонки в ON) - MySQL сразу отказал понятной ошибкой. Проверено на живых данных: 53
+      машины, 52 с планом, все со статусом, 39 с водителем (остальные вакант). **НЕ подключено
+      никуда как источник чтения** - готово, ждёт 2.3 (построчная сверка перед переключением).
 - [ ] 2.3 aggregateFinHistoryForRange/getSummaryData: убрать обязательное чтение Штатки -
       теперь ВСЕ узкие карты (2.2) готовы, можно снять зависимость от `staffData`
       целиком, перезаписывая `agg.plan` из `serverV_.plan` (сейчас сознательно НЕ

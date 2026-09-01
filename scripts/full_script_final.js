@@ -5106,6 +5106,34 @@ function doGet(e) {
   // computed напрямую, см. buildRosterFallback_/getOrdersData ниже), корень найден и
   // подтверждён числами, диагностика больше не нужна.
 
+  // ── ПОСТОЯННЫЙ мост (2026-09-01, план plans/2026-09-01-apps-script-elimination.md,
+  // этап 1.1) - список доступа ("Доступ": email/имя/роль) продолжает жить в Google
+  // Таблице (Влад правит лист руками, отзыв доступа там уже мгновенный на стороне
+  // Apps Script) - сервер зеркалирует его в access_users cron'ом раз в 5 минут (как
+  // import-debt-status.js зеркалирует статусы ДЗ). НЕ временный - это постоянный мост,
+  // пока Влад не решит перенести сам список доступа в UI Справочников. Ключ - тот же
+  // YARD_API_KEY, что и остальной server<->AppsScript обмен (не отдельный секрет).
+  if (e && e.parameter && e.parameter.action === 'access_list') {
+    var alKey = e.parameter.key || '';
+    var alExpected = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY') || '';
+    if (!alExpected || alKey !== alExpected) {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var alSheet = ss.getSheetByName('Доступ');
+    var alRows = [];
+    if (alSheet && alSheet.getLastRow() > 1) {
+      var alData = alSheet.getRange(2, 1, alSheet.getLastRow() - 1, 3).getValues();
+      alRows = alData.map(function(r) {
+        return {
+          email: String(r[0] || '').trim().toLowerCase(),
+          name: String(r[1] || '').trim(),
+          role: String(r[2] || '').trim().toLowerCase(),
+        };
+      }).filter(function(r) { return r.email; });
+    }
+    return ContentService.createTextOutput(JSON.stringify({ users: alRows })).setMimeType(ContentService.MimeType.JSON);
+  }
+
   // ── ВРЕМЕННО (2026-08-19, перенос ДЗ на сервер) - экспорт листа "ДЗ_Статусы" (ручные
   // статусы/комментарии, НЕ из 1С - разовый + периодический перенос, см.
   // plans/2026-07-08-debt-receivables-tab.md). УБРАТЬ после того, как запись статусов тоже

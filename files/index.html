@@ -5875,8 +5875,21 @@ function hideLoginScreen() {
   if (mainWrap) mainWrap.style.display = '';
 }
 
-function handleCredentialResponse(response) {
+async function handleCredentialResponse(response) {
   localStorage.setItem('id_token', response.credential);
+  // Сервер сам умеет входить через Google (2026-09-01, план plans/2026-09-01-apps-
+  // script-elimination.md, этап 1.4) - пробуем получить session_token напрямую у него,
+  // ДО перезагрузки. Тихий мягкий переход: сервер недоступен/эндпоинт ещё не готов по
+  // любой причине - просто идём дальше без своего токена, как раньше; Apps Script при
+  // следующей загрузке всё равно сам проверит id_token и выдаст сессию своим путём -
+  // ничего не ломается, просто на один шаг медленнее.
+  try {
+    var authResp = await fetch('https://api.yardhub.ru/api/auth/google?id_token=' + encodeURIComponent(response.credential));
+    var authData = await authResp.json();
+    if (authData && authData.session_token) {
+      localStorage.setItem('session_token', authData.session_token);
+    }
+  } catch (e) { /* сервер недоступен - фолбэк на Apps Script при загрузке ниже */ }
   // Перезагружаем страницу целиком вместо попытки обновить интерфейс на месте -
   // сразу после закрытия всплывающего окна входа браузер иногда ведёт себя иначе,
   // чем при обычной загрузке. Перезагрузка - тот же путь, что и ручное обновление,
@@ -13711,11 +13724,27 @@ var histPeriod = 3;
 var histChartFinance = null;
 var histChartCosts = null;
 
+// Этап 0.3 (план 2026-09-01-apps-script-elimination.md) - история статусов теперь с
+// сервера (vehicle_status_daily, снимок из Планировки, покрытие с 30.08 - см. память
+// project_vehicles_temporarily_excluded_from_calcs), а не только из Штатки/Apps Script.
+// Оба источника запрашиваются параллельно, сервер приоритетнее для тех же (машина, дата) -
+// Apps Script остаётся фолбэком для более старых дат, куда снимок ещё не дотягивается,
+// и на случай, если сервер недоступен (тогда просто остаётся старое поведение целиком).
 function ensureHistData() {
   if (histData !== null) return Promise.resolve(histData);
-  return apiFetchJson({ action: 'vehicle_history' })
-    .then(function(d) { histData = d.history || []; return histData; })
-    .catch(function() { histData = []; return histData; });
+  return Promise.all([
+    apiFetchJson({ action: 'vehicle_history' }).catch(function() { return { history: [] }; }),
+    fetchFromYardApi_('/vehicle_status_history')
+      .then(function(r) { return r.ok ? r.data : { history: [] }; })
+      .catch(function() { return { history: [] }; }),
+  ]).then(function(results) {
+    var oldRows = results[0].history || [];
+    var newRows = results[1].history || [];
+    var covered = {};
+    newRows.forEach(function(r) { covered[r.gos + '|' + r.date] = true; });
+    histData = newRows.concat(oldRows.filter(function(r) { return !covered[r.gos + '|' + r.date]; }));
+    return histData;
+  });
 }
 
 function loadHistoryData() {

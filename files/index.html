@@ -845,6 +845,18 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .nav-mk-chip b{font:600 10.5px/1 var(--font-mono,monospace);color:var(--text);}
 .nav-mk-chip span{font:700 10px/1 var(--font-mono,monospace);color:var(--c);padding-left:6px;
   border-left:1px solid var(--border);}
+/* Развёрнутая карточка (наведение/выбор) - Влад, 01.09: "рядом с гос-номером
+   хочу видеть тип прицепа, гос-номер прицепа, кто водитель". В покое чип
+   остаётся однострочным (номер тягача + скорость, как раньше) - иначе на
+   ~90 машинах разом карта превращается в кашу; вторая строка появляется
+   только вместе с уже существующим hot/sel-раскрытием. */
+.nav-mk-chip-l2{display:none;font:10px/1.3 var(--font-mono,monospace);color:var(--muted);
+  padding-top:2px;margin-top:2px;border-top:1px solid var(--border);white-space:nowrap;}
+.nav-mk.is-hot .nav-mk-chip,.nav-mk.is-sel .nav-mk-chip{flex-direction:column;align-items:flex-start;gap:0;}
+.nav-mk.is-hot .nav-mk-chip-l2,.nav-mk.is-sel .nav-mk-chip-l2{display:block;}
+.nav-mk-chip-l1{display:flex;align-items:center;gap:6px;}
+.nav-mk-chip-l1 .nav-mk-tag{font:600 8.5px/1 var(--font-mono,monospace);letter-spacing:.05em;color:var(--muted);
+  border:1px solid var(--border);border-radius:3px;padding:1px 4px;}
 @media (prefers-reduced-motion:reduce){
   .nav-mk-halo{animation:none!important;opacity:.3;}
 }
@@ -16945,12 +16957,19 @@ function navMarkerIcon_(v, cls, hot, sel) {
   var hd = v.direction != null ? v.direction : 0;
   var speedTxt = (cls === 'is-moving' && v.speed != null) ? '<span>' + Math.round(v.speed) + '</span>' : '';
   var classes = 'nav-mk ' + cls + (hot ? ' is-hot' : '') + (sel ? ' is-sel' : '');
+  // Строка 1 - как в покое (номер тягача + скорость), строка 2 - показывается только
+  // при наведении/выборе (CSS .is-hot/.is-sel), Влад 01.09: "рядом с гос-номером хочу
+  // видеть тип прицепа, гос-номер прицепа, кто водитель". v.type - это и есть тип
+  // прицепа (ПР-4/Длинномер/КР-3 и т.п., тот же смысл, что тег в списке слева).
+  var typeTag = v.type ? '<b class="nav-mk-tag">' + navEsc_(v.type) + '</b>' : '';
+  var line1 = '<div class="nav-mk-chip-l1">' + typeTag + '<b>' + navEsc_(v.gos || v.omnicommId || '') + '</b>' + speedTxt + '</div>';
+  var line2 = '<div class="nav-mk-chip-l2">' + navEsc_(v.trailerGos || 'без прицепа') + ' · ' + navEsc_(v.driverName || 'без водителя') + '</div>';
   return L.divIcon({
     html: '<div class="' + classes + '" style="--c:' + color + ';--hd:' + hd + 'deg;">' +
       '<div class="nav-mk-halo"></div>' +
       '<div class="nav-mk-arrow"><i></i></div>' +
       '<div class="nav-mk-core"></div>' +
-      '<div class="nav-mk-chip"><b>' + navEsc_(v.gos || v.omnicommId || '') + '</b>' + speedTxt + '</div>' +
+      '<div class="nav-mk-chip">' + line1 + line2 + '</div>' +
       '</div>',
     iconSize: [0, 0], iconAnchor: [0, 0], className: ''
   });
@@ -17162,10 +17181,13 @@ function navDrawAllTrails_(tracksById) {
     var latlngs = pts.map(function (p) { return [p.lat, p.lng]; });
     var color = navMarkerColor_(navStatusClass_(v));
     var selected = v.omnicommId === navSelectedId_;
-    // без выделения - все хвосты ровным тонким цветом; выбрали машину - её
-    // хвост чуть плотнее, остальные притушены, чтобы не спорили за внимание
-    var weight = selected ? 3 : 2;
-    var opacity = hasSelection ? (selected ? 0.85 : 0.16) : 0.5;
+    // без выделения - все хвосты ровным цветом; выбрали машину - её хвост
+    // плотнее, остальные притушены, чтобы не спорили за внимание. Влад,
+    // 01.09, живой пример у Тольятти: "хвосты очень тусклые, почти не
+    // видно" - на светлой подложке OSM прежние 2px/0.5 терялись среди
+    // дорог/рек того же оттенка, подняли толщину и непрозрачность.
+    var weight = selected ? 4 : 3;
+    var opacity = hasSelection ? (selected ? 0.95 : 0.3) : 0.78;
     var existing = navTrailLayers_[v.omnicommId];
     if (existing) {
       existing.setLatLngs(latlngs);

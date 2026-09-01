@@ -1097,6 +1097,9 @@ function runAll() {
   try { normalizeReport();         log.push('✅ Нормализация выполнена'); }
   catch(e) { errors.push('❌ Нормализация: ' + e.message); }
 
+  try { syncVehicleTypesToServer_(); log.push('✅ Типы техники отправлены на сервер'); }
+  catch(e) { errors.push('❌ Типы техники на сервер: ' + e.message); }
+
   try { normalizeOrders();         log.push('✅ Заказы нормализованы'); }
   catch(e) { errors.push('❌ Заказы (норм.): ' + e.message); }
 
@@ -1469,8 +1472,15 @@ function normalizeReport() {
 
     const revenue = parseFloat(row[5]) || 0;
     const profit  = parseFloat(row[12]) || 0;
-    if (revenue === 0 && profit === 0) continue;
-
+    // Фильтр "revenue===0 && profit===0 -> пропустить" убран (2026-09-01, Влад: "система
+    // должна работать идеально") - машина с честным нулём (простаивает, или 1-2 число
+    // месяца, когда ни у кого ещё не было рейса) не мусор, это правда. Раньше в начале
+    // каждого месяца фильтр вычищал ПОЧТИ ВСЕХ (у всех пока нули) - vehicles.length
+    // обнулялся, срабатывала защита ниже "нет данных, лист не трогаем", и Нормализованные_
+    // данные молча застревали на данных ПРОШЛОГО месяца (найдено 1 сентября - "Валовая
+    // прибыль" на Панели показывала фактически август вместо сентября, маржа 82266%).
+    // Настоящая защита от битого/пустого отчёта 1С - lastRow < 10 в начале функции (проверка
+    // СЫРОГО листа Данные_1С, до всякой построчной фильтрации) - её не трогаем, она верна.
     const gosRaw = extractGosNumber(fullName);
     if (!gosRaw) continue;
 
@@ -6152,6 +6162,27 @@ function fetchParkHistoryFromServer_(fromDate, toDate) {
   }
 }
 
+// Водитель по машине НА ДАТУ (fleet_assignments/Планировка-Справочники) - план 2026-09-01.
+// Тихий null при любой проблеме - вызывающий откатывается на История_финансов ровно как
+// раньше. Покрывает только даты С 30.08.2026 (см. комментарий у места вызова).
+function fetchVehicleDriversFromServer_(asOfDate) {
+  try {
+    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    if (!apiKey) return null;
+    var asOfStr = Utilities.formatDate(asOfDate, 'Europe/Moscow', 'yyyy-MM-dd');
+    var resp = UrlFetchApp.fetch(
+      'https://api.yardhub.ru/api/vehicle_drivers?asOf=' + asOfStr,
+      { headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true }
+    );
+    if (resp.getResponseCode() !== 200) return null;
+    var data = JSON.parse(resp.getContentText());
+    if (!data || !data.drivers) return null;
+    return data.drivers;
+  } catch (err) {
+    return null;
+  }
+}
+
 // Строит массив машин (страница "Техника") за диапазон дат, по месяцам. Для каждого
 // затронутого месяца - сначала пробуем "Данные_1С_история" (авторитетно: пишется из
 // отдельного письма 1С "за прошлый месяц", см. importParkReports()/writeParkHistoryForMonth_()).
@@ -6248,11 +6279,30 @@ function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate, skipServer
     });
   }
 
-  // Водитель ЗА ВЫБРАННЫЙ ПЕРИОД, а не сегодняшний живой - Данные_1С_история этого не хранит,
-  // поэтому смотрим отдельно в История_финансов (там есть колонка "Водитель" с 2026-07-04) -
-  // берём самую позднюю запись внутри диапазона [from, to]. Влад, 2026-07-04: карточка машины
-  // должна показывать данные именно за выбранный период, а не "как сейчас".
+  // Водитель ЗА ВЫБРАННЫЙ ПЕРИОД, а не сегодняшний живой - карточка машины должна показывать
+  // данные именно за выбранный период, а не "как сейчас" (Влад, 2026-07-04).
+  //
+  // МЯГКИЙ ПЕРЕХОД (план 2026-09-01, Влад: "старая история должна сохраниться, новая пишется
+  // по-новому"): с 30.08.2026 источник - сервер (fleet_assignments/Планировка-Справочники,
+  // "кто был на машине на дату", см. /api/vehicle_drivers) - у него РЕАЛЬНАЯ история с датами
+  // (valid_from/valid_to), не просто текущее состояние. До 30.08 такой истории на сервере
+  // физически НЕТ (Справочники начали писать её только с этого дня) - для более старых
+  // диапазонов остаёмся на "История_финансов" (Google Таблица, лист и его ежедневная запись
+  // НЕ трогались и не тронуты - это и есть сохранённая старая история, ничего не удаляли).
+  var FLEET_ASSIGNMENTS_START_ = new Date(2026, 7, 30); // 30 августа 2026 (месяц 0-indexed)
   var driverByGos = {};
+  if (to >= FLEET_ASSIGNMENTS_START_) {
+    var driverAsOf_ = to > new Date() ? new Date() : to; // не спрашивать сервер "на будущее"
+    var serverDrivers_ = fetchVehicleDriversFromServer_(driverAsOf_);
+    if (serverDrivers_) {
+      Object.keys(serverDrivers_).forEach(function(gos) {
+        driverByGos[gos] = { date: driverAsOf_, driver: serverDrivers_[gos] };
+      });
+    }
+  }
+  // Дозаполняем из Sheets только тех, кого сервер НЕ покрыл (диапазон целиком/частично до
+  // 30.08, машина не в fleet_assignments, или сервер недоступен) - цикл не менялся, только
+  // добавлена проверка "сервер уже ответил - не перезатирать более свежий ответ".
   var histForDriver = ss.getSheetByName('История_финансов');
   if (histForDriver && histForDriver.getLastRow() > 1 && histForDriver.getLastColumn() >= 13) {
     var dData = histForDriver.getRange(2, 1, histForDriver.getLastRow() - 1, 13).getValues();
@@ -6263,6 +6313,7 @@ function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate, skipServer
       var dGos = String(dr[1] || '').trim();
       var dDriver = String(dr[12] || '').trim();
       if (!dGos || !dDriver) continue;
+      if (driverByGos[dGos]) continue; // сервер уже дал более свежий ответ на этот госномер
       var existingD = driverByGos[dGos];
       if (!existingD || dd > existingD.date) driverByGos[dGos] = { date: dd, driver: dDriver };
     }
@@ -6425,7 +6476,73 @@ const RISCHANOV_SPECIAL_TRALS_GOS = [
 ];
 const RISCHANOV_ORDER_UNTIL = new Date('2026-11-01T00:00:00+03:00'); // рукописная пометка на приказе - сверить с Владом ближе к сроку, не начислять без нового приказа
 
+// Мост типа техники (план 2026-09-01) - Apps Script по-прежнему остаётся источником
+// истины по Штатке (та мигрирует отдельно, другая сессия), но не держит его при себе:
+// шлёт на сервер узкую карту "госномер -> тип" (не всю Штатку), чтобы /api/park_summary
+// мог делать разбивку Тралы/Длинномеры без обращения к Таблице на каждый запрос дашборда.
+function syncVehicleTypesToServer_() {
+  var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+  if (!apiKey) return;
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var staffData = getStaffData(ss);
+  var vehicles = Object.keys(staffData).map(function(gos) {
+    return { gos: staffData[gos].gosOriginal || gos, type: staffData[gos].type || '' };
+  });
+  if (!vehicles.length) return;
+  UrlFetchApp.fetch('https://api.yardhub.ru/api/vehicle_types', {
+    method: 'post', contentType: 'application/json',
+    headers: { 'X-Api-Key': apiKey },
+    payload: JSON.stringify({ vehicles: vehicles }),
+    muteHttpExceptions: true,
+  });
+}
+
+// Деньги (revenue/fot/fuel/parts/fines/tolls/profit/margin/тралы-длинномеры/спецтралы) - с
+// сервера первым делом (план 2026-09-01, Влад: "сервер и алгоритмы должны жить на сервере").
+// Тихий null при любой проблеме - вызывающий откатывается на Нормализованные_данные ровно
+// как раньше. profitPlan/salesPlan/salesFakt/revenueComparison сервер не считает - остаются
+// как были, накладываются поверх ниже.
+function fetchParkSummaryFromServer_(monthKey) {
+  try {
+    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    if (!apiKey) return null;
+    var resp = UrlFetchApp.fetch(
+      'https://api.yardhub.ru/api/park_summary?month=' + encodeURIComponent(monthKey),
+      { headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true }
+    );
+    if (resp.getResponseCode() !== 200) return null;
+    var data = JSON.parse(resp.getContentText());
+    if (!data || typeof data.revenue !== 'number') return null;
+    return data;
+  } catch (err) {
+    return null;
+  }
+}
+
 function getSummaryData(ss, ordersData) {
+  var monthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+  var serverSummary = fetchParkSummaryFromServer_(monthKey);
+  if (serverSummary) {
+    var sfp0 = computeSalesFaktPlan_(ordersData);
+    var rischanovOrderActive0 = new Date() < RISCHANOV_ORDER_UNTIL;
+    return {
+      revenue: serverSummary.revenue, profit: serverSummary.profit, fot: serverSummary.fot,
+      fuel: serverSummary.fuel, parts: serverSummary.parts, fines: serverSummary.fines,
+      tolls: serverSummary.tolls, margin: serverSummary.margin,
+      profit_tral: serverSummary.profit_tral, profit_long: serverSummary.profit_long,
+      own_revenue_tral: serverSummary.own_revenue_tral, own_revenue_long: serverSummary.own_revenue_long,
+      special_trals_profit: rischanovOrderActive0 ? serverSummary.special_trals_profit : 0,
+      special_trals_bonus_active: rischanovOrderActive0,
+      lossCount: serverSummary.lossCount, vehicleCount: serverSummary.vehicleCount,
+      salesPlan: sfp0.salesPlan, salesFakt: sfp0.salesFakt,
+      salesFaktThruYesterday: sfp0.salesFaktThruYesterday,
+      salesPayment: sfp0.salesPayment, salesPayNal: sfp0.salesPayNal,
+      salesPct: sfp0.salesPlan > 0 ? (sfp0.salesFakt / sfp0.salesPlan * 100) : 0,
+      profitPlan: 50400000,
+      revenueComparison: getRevenueDateComparison_(ss),
+    };
+  }
+
   const norm = ss.getSheetByName('Нормализованные_данные');
   if (!norm || norm.getLastRow() < 2) return {};
 

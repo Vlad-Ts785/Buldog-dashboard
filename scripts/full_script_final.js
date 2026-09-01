@@ -1100,6 +1100,9 @@ function runAll() {
   try { syncVehicleTypesToServer_(); log.push('✅ Типы техники отправлены на сервер'); }
   catch(e) { errors.push('❌ Типы техники на сервер: ' + e.message); }
 
+  try { syncVehiclePlansToServer_(); log.push('✅ Планы ВП отправлены на сервер'); }
+  catch(e) { errors.push('❌ Планы ВП на сервер: ' + e.message); }
+
   try { normalizeOrders();         log.push('✅ Заказы нормализованы'); }
   catch(e) { errors.push('❌ Заказы (норм.): ' + e.message); }
 
@@ -6607,6 +6610,28 @@ function syncVehicleTypesToServer_() {
   });
   if (!vehicles.length) return;
   UrlFetchApp.fetch('https://api.yardhub.ru/api/vehicle_types', {
+    method: 'post', contentType: 'application/json',
+    headers: { 'X-Api-Key': apiKey },
+    payload: JSON.stringify({ vehicles: vehicles }),
+    muteHttpExceptions: true,
+  });
+}
+
+// Мост плана ВП по машине (план 2026-09-01, этап 2 - тот же приём, что syncVehicleTypesToServer_
+// выше). Найденная дыра: park_reports.plan_wp = 0 для августа/сентября (FTP-отчёт 1С план не
+// содержит, только Штатка его знает) - сервер (/api/park_history) сам подставит эту карту
+// ТОЛЬКО туда, где своего plan_wp в строке нет, архивные месяцы (уже перенесены с планом) не
+// трогает.
+function syncVehiclePlansToServer_() {
+  var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+  if (!apiKey) return;
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var staffData = getStaffData(ss);
+  var vehicles = Object.keys(staffData).map(function(gos) {
+    return { gos: staffData[gos].gosOriginal || gos, plan: staffData[gos].plan || 0 };
+  });
+  if (!vehicles.length) return;
+  UrlFetchApp.fetch('https://api.yardhub.ru/api/vehicle_plans', {
     method: 'post', contentType: 'application/json',
     headers: { 'X-Api-Key': apiKey },
     payload: JSON.stringify({ vehicles: vehicles }),

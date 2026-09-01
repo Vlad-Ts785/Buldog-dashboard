@@ -793,7 +793,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .nav-item:hover{background:var(--bg3);}
 .nav-item.active{background:var(--bg3);}
 .nav-dot{width:9px;height:9px;border-radius:50%;flex:none;background:var(--muted);}
-.nav-dot.is-moving{background:var(--green);}
+.nav-dot.is-moving{background:var(--blue);}
 .nav-dot.is-idle{background:var(--amber);}
 .nav-dot.is-stale{background:var(--red);}
 .nav-item.nav-item-notrack{cursor:default;opacity:.55;}
@@ -809,6 +809,41 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .nav-map-card{padding:0;overflow:hidden;position:relative;}
 .nav-map{width:100%;height:100%;min-height:300px;}
 .nav-marker-dot{border-radius:50%;box-shadow:0 0 0 2px var(--bg2);}
+
+/* ── метка v3 (01.09, «уровень 3» - утверждённый визуальный язык, перенесённый
+   с превью на настоящую карту): конус курса у едущих, дыхание у стоящих не
+   заглушенных, расходящееся кольцо неопределённости у потерявших связь,
+   светящаяся плашка госномер+скорость. Цвет только через --c (var(--blue)/
+   var(--amber)/var(--muted)/var(--red)) - канон Планировки не трогаем. ── */
+.nav-mk{position:relative;width:0;height:0;}
+.nav-mk-cone{position:absolute;left:0;top:0;width:64px;height:64px;margin:-32px 0 0 -32px;
+  border-radius:50%;opacity:0;pointer-events:none;
+  background:conic-gradient(from calc(var(--hd,0deg) - 16deg),
+    color-mix(in srgb,var(--c) 38%,transparent) 0deg, transparent 32deg, transparent 328deg);
+  transition:opacity .25s ease;}
+.nav-mk.is-moving .nav-mk-cone{opacity:1;}
+.nav-mk-aura{position:absolute;left:0;top:0;width:26px;height:26px;margin:-13px 0 0 -13px;
+  border-radius:50%;background:radial-gradient(circle,color-mix(in srgb,var(--c) 34%,transparent),transparent 70%);
+  opacity:0;pointer-events:none;}
+.nav-mk.is-idle .nav-mk-aura{opacity:1;animation:navAuraBreathe 2.3s ease-in-out infinite;}
+@keyframes navAuraBreathe{0%,100%{transform:scale(.78);opacity:.55;}50%{transform:scale(1.15);opacity:1;}}
+.nav-mk-lost-ring{position:absolute;left:0;top:0;width:16px;height:16px;margin:-8px 0 0 -8px;
+  border-radius:50%;border:1.5px dashed color-mix(in srgb,var(--c) 65%,transparent);opacity:0;pointer-events:none;}
+.nav-mk.is-stale .nav-mk-lost-ring{opacity:1;animation:navLostGrow 2.6s ease-out infinite;}
+@keyframes navLostGrow{0%{transform:scale(1);opacity:.6;}100%{transform:scale(3.6);opacity:0;}}
+.nav-mk-core{position:absolute;left:-6px;top:-6px;width:12px;height:12px;border-radius:50%;background:var(--c);
+  box-shadow:0 0 0 2px var(--bg2),0 0 10px 1px color-mix(in srgb,var(--c) 60%,transparent);}
+.nav-mk-chip{position:absolute;left:11px;top:-11px;display:flex;align-items:center;gap:6px;
+  padding:3px 7px;border-radius:6px;background:linear-gradient(180deg,rgba(16,22,31,.92),rgba(9,13,19,.92));
+  border:1px solid color-mix(in srgb,var(--c) 35%,var(--border));white-space:nowrap;
+  opacity:.6;transform:translateX(-2px);transition:opacity .18s ease,transform .18s ease;pointer-events:none;}
+.nav-mk.is-hot .nav-mk-chip,.nav-mk.is-sel .nav-mk-chip{opacity:1;transform:none;}
+.nav-mk-chip b{font:600 10.5px/1 var(--font-mono,monospace);color:var(--text);}
+.nav-mk-chip span{font:700 10px/1 var(--font-mono,monospace);color:var(--c);padding-left:6px;
+  border-left:1px solid var(--border);}
+@media (prefers-reduced-motion:reduce){
+  .nav-mk-aura,.nav-mk-lost-ring{animation:none!important;opacity:.7;}
+}
 
 /* HUD «Диспетчерская» - чехол поверх настоящей Leaflet-карты, координаты карта
    считает сама, HUD только оформление + панель выбранной машины. Токены - те же
@@ -830,7 +865,8 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   cursor:pointer;transition:background .15s ease,color .15s ease;}
 .hud-close:hover{background:var(--bg3);color:var(--text);}
 
-.hud-detail{position:absolute;inset:0;z-index:1403;pointer-events:none;opacity:0;transition:opacity .2s ease;}
+.hud-detail{position:absolute;inset:0;z-index:1403;pointer-events:none;opacity:0;transition:opacity .2s ease;
+  --st-c:var(--blue);} /* цвет статуса выбранной машины - выставляет JS (navUpdateHud_), везде ниже - var(--st-c), не хардкод */
 .hud-detail.show{opacity:1;}
 .hud-detail .hud-lower,.hud-detail .hud-cluster{pointer-events:auto;}
 
@@ -838,7 +874,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   background:rgba(15,15,19,.88);border:1px solid var(--border);padding:12px 16px 14px;
   transform:translateY(10px);opacity:0;transition:transform .34s cubic-bezier(.16,1,.3,1),opacity .34s cubic-bezier(.16,1,.3,1);}
 .hud-detail.show .hud-lower{transform:none;opacity:1;}
-.hud-rule{height:1px;background:linear-gradient(90deg,var(--green) 0%,var(--green) 22%,var(--border-strong,rgba(255,255,255,.16)) 22%,var(--border-strong,rgba(255,255,255,.16)) 100%);}
+.hud-rule{height:1px;background:linear-gradient(90deg,var(--st-c) 0%,var(--st-c) 22%,var(--border-strong,rgba(255,255,255,.16)) 22%,var(--border-strong,rgba(255,255,255,.16)) 100%);}
 .hud-kicker{display:flex;align-items:baseline;gap:8px;margin:9px 0 4px;}
 .hud-k{font:600 9.5px/1 var(--font-mono,monospace);letter-spacing:.2em;color:var(--muted);}
 .hud-id{font:500 9.5px/1 var(--font-mono,monospace);letter-spacing:.14em;color:var(--muted);opacity:.65;}
@@ -865,24 +901,31 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .hud-cbrk.bl{bottom:-1px;left:-1px;border-bottom-width:1px;border-left-width:1px;}
 .hud-cbrk.br{bottom:-1px;right:-1px;border-bottom-width:1px;border-right-width:1px;}
 .hud-state{display:flex;align-items:center;gap:6px;padding-bottom:10px;margin-bottom:12px;
-  border-bottom:1px solid var(--border);font:600 9px/1 var(--font-mono,monospace);letter-spacing:.12em;color:var(--green);}
+  border-bottom:1px solid var(--border);font:600 9px/1 var(--font-mono,monospace);letter-spacing:.12em;color:var(--st-c);}
 .hud-state.off{color:var(--muted);}
-.hud-sq{width:6px;height:6px;background:var(--green);flex:none;box-shadow:0 0 8px rgba(29,158,117,.8);}
+.hud-sq{width:6px;height:6px;background:var(--st-c);flex:none;box-shadow:0 0 8px color-mix(in srgb,var(--st-c) 80%,transparent);}
 .hud-state.off .hud-sq{background:var(--muted);box-shadow:none;}
 .hud-cap{font:600 8.5px/1 var(--font-mono,monospace);letter-spacing:.2em;color:var(--muted);margin-bottom:10px;}
 .hud-i-cmp{margin-top:14px;padding-top:14px;border-top:1px solid var(--border);}
 .hud-spd{display:flex;align-items:flex-end;gap:6px;}
 .hud-spd-val{font:700 clamp(34px,5vw,52px)/.85 var(--font-mono,monospace);letter-spacing:-.03em;
-  color:#f6f4ee;font-variant-numeric:tabular-nums;text-shadow:0 0 20px rgba(29,158,117,.45);}
+  color:#f6f4ee;font-variant-numeric:tabular-nums;text-shadow:0 0 20px color-mix(in srgb,var(--st-c) 55%,transparent);}
 .hud-detail .hud-state.off ~ .hud-inst .hud-spd-val{text-shadow:none;color:var(--text);}
 .hud-spd-unit{font:500 10px/1 var(--font-mono,monospace);letter-spacing:.12em;color:var(--muted);padding-bottom:7px;}
 .hud-ticks{display:flex;gap:2px;height:14px;margin-top:10px;}
 .hud-ticks i{flex:1;background:var(--bg4);border-radius:1px;height:6px;align-self:flex-end;}
-.hud-ticks i.hud-on{background:var(--green);}
+.hud-ticks i.hud-on{background:var(--st-c);}
 .hud-compass{display:flex;align-items:center;gap:10px;}
 .hud-compass svg{width:64px;height:64px;flex:none;}
 .hud-deg{font:600 17px/1 var(--font-mono,monospace);color:var(--text);font-variant-numeric:tabular-nums;}
 #hud-compass-ring{transform-origin:100px 100px;transition:transform .5s cubic-bezier(.16,1,.3,1);}
+#hud-compass-needle{fill:var(--st-c);}
+
+/* ── спарклайн скорости за 30 мин (реальная история, /api/omnicomm/track) ── */
+.hud-spark-wrap{margin-top:10px;}
+.hud-spark{display:block;width:100%;height:32px;overflow:visible;}
+.hud-spark-cap{display:flex;justify-content:space-between;font:500 8.5px/1 var(--font-mono,monospace);
+  letter-spacing:.1em;color:var(--muted);text-transform:uppercase;margin-top:4px;}
 
 @media(max-width:980px){
   .hud-cluster{width:min(260px,70%);right:12px;}
@@ -3047,6 +3090,10 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
                   <div class="hud-cap">СКОРОСТЬ</div>
                   <div class="hud-spd"><span class="hud-spd-val" id="hud-speed">0</span><span class="hud-spd-unit">КМ/Ч</span></div>
                   <div class="hud-ticks" id="hud-ticks"></div>
+                  <div class="hud-spark-wrap" id="hud-spark-wrap" style="display:none">
+                    <div class="hud-spark" id="hud-spark"></div>
+                    <div class="hud-spark-cap"><span>−30 мин</span><span>скорость</span><span>сейчас</span></div>
+                  </div>
                 </div>
                 <div class="hud-i-cmp">
                   <div class="hud-cap">КУРС</div>
@@ -3055,7 +3102,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
                       <circle cx="100" cy="100" r="86" fill="none" stroke="rgba(255,255,255,.07)"/>
                       <circle cx="100" cy="100" r="60" fill="none" stroke="rgba(255,255,255,.05)"/>
                       <g id="hud-compass-ring"></g>
-                      <path d="M100 16 L94.5 7 L105.5 7 Z" fill="var(--green)"/>
+                      <path id="hud-compass-needle" d="M100 16 L94.5 7 L105.5 7 Z"/>
                     </svg>
                     <div class="hud-rdg"><span class="hud-deg" id="hud-deg">—</span></div>
                   </div>
@@ -17026,29 +17073,29 @@ function navStatusLabel_(v) {
   return 'стоит';
 }
 function navMarkerColor_(cls) {
-  return cls === 'is-moving' ? 'var(--green)' : cls === 'is-idle' ? 'var(--amber)' : cls === 'is-stale' ? 'var(--red)' : 'var(--muted)';
+  return cls === 'is-moving' ? 'var(--blue)' : cls === 'is-idle' ? 'var(--amber)' : cls === 'is-stale' ? 'var(--red)' : 'var(--muted)';
 }
-// Выбранная машина получает "ретикул" (уголки захвата) вместо обычной точки -
-// тот же визуальный язык, что в HUD-концепте «Диспетчерская будущего» (согласован
-// Владом 31.08). Позицию/поворот считает сама Leaflet - мы просто меняем иконку.
-function navMarkerIcon_(cls, selected) {
+// Метка «уровень 3» (01.09, утверждённый визуальный язык, перенесён с превью на
+// настоящую карту - см. plans/2026-08-31-omnicomm-telematics-integration.md):
+// конус курса у едущих, дыхание у стоящих не заглушенных, расходящееся кольцо у
+// потерявших связь, светящаяся плашка госномер+скорость. Позицию/поворот считает
+// сама Leaflet - мы только меняем HTML иконки. hot/sel - раскрывают плашку
+// (hover/выбор), у остальных она едва заметна (opacity .6, не 5 см текста разом
+// на весь экран при 50+ машинах).
+function navMarkerIcon_(v, cls, hot, sel) {
   var color = navMarkerColor_(cls);
-  if (!selected) {
-    return L.divIcon({
-      html: '<div class="nav-marker-dot" style="width:14px;height:14px;background:' + color + ';"></div>',
-      iconSize: [14, 14], iconAnchor: [7, 7], className: ''
-    });
-  }
-  var c = 'position:absolute;width:10px;height:10px;border:0 solid ' + color + ';';
+  var hd = (v.direction != null ? v.direction : 0) - 90; // conic-gradient 0deg = вправо, курс - от севера
+  var speedTxt = (cls === 'is-moving' && v.speed != null) ? '<span>' + Math.round(v.speed) + '</span>' : '';
+  var classes = 'nav-mk ' + cls + (hot ? ' is-hot' : '') + (sel ? ' is-sel' : '');
   return L.divIcon({
-    html: '<div style="position:relative;width:36px;height:36px;">' +
-      '<div style="' + c + 'top:0;left:0;border-top-width:1.5px;border-left-width:1.5px;"></div>' +
-      '<div style="' + c + 'top:0;right:0;border-top-width:1.5px;border-right-width:1.5px;"></div>' +
-      '<div style="' + c + 'bottom:0;left:0;border-bottom-width:1.5px;border-left-width:1.5px;"></div>' +
-      '<div style="' + c + 'bottom:0;right:0;border-bottom-width:1.5px;border-right-width:1.5px;"></div>' +
-      '<div style="position:absolute;left:50%;top:50%;width:9px;height:9px;margin:-4.5px;border-radius:50%;background:' + color + ';box-shadow:0 0 10px ' + color + ';"></div>' +
+    html: '<div class="' + classes + '" style="--c:' + color + ';--hd:' + hd + 'deg;">' +
+      '<div class="nav-mk-cone"></div>' +
+      '<div class="nav-mk-aura"></div>' +
+      '<div class="nav-mk-lost-ring"></div>' +
+      '<div class="nav-mk-core"></div>' +
+      '<div class="nav-mk-chip"><b>' + navEsc_(v.gos || v.omnicommId || '') + '</b>' + speedTxt + '</div>' +
       '</div>',
-    iconSize: [36, 36], iconAnchor: [18, 18], className: ''
+    iconSize: [0, 0], iconAnchor: [0, 0], className: ''
   });
 }
 
@@ -17110,6 +17157,7 @@ function navRenderList_() {
   }).join('') || '<div style="padding:14px;color:var(--muted);font-size:13px;">Нет данных</div>';
 }
 
+var navHoveredId_ = null;
 function navRenderMarkers_() {
   if (!navMap_) return;
   var seenIds = {};
@@ -17118,14 +17166,18 @@ function navRenderMarkers_() {
     seenIds[v.omnicommId] = true;
     var cls = navStatusClass_(v);
     var selected = (v.omnicommId === navSelectedId_);
+    var hot = (v.omnicommId === navHoveredId_);
     var pos = [v.latitude, v.longitude];
     var existing = navMarkers_[v.omnicommId];
     if (existing) {
       existing.setLatLng(pos);
-      existing.setIcon(navMarkerIcon_(cls, selected));
+      existing.setIcon(navMarkerIcon_(v, cls, hot, selected));
     } else {
-      var m = L.marker(pos, { icon: navMarkerIcon_(cls, selected) }).addTo(navMap_);
-      m.on('click', (function (id) { return function () { NAV.select(id); }; })(v.omnicommId));
+      var m = L.marker(pos, { icon: navMarkerIcon_(v, cls, hot, selected) }).addTo(navMap_);
+      var id = v.omnicommId;
+      m.on('click', function () { NAV.select(id); });
+      m.on('mouseover', function () { navHoveredId_ = id; navRenderMarkers_(); });
+      m.on('mouseout', function () { if (navHoveredId_ === id) { navHoveredId_ = null; navRenderMarkers_(); } });
       navMarkers_[v.omnicommId] = m;
     }
   });
@@ -17134,7 +17186,11 @@ function navRenderMarkers_() {
     if (!seenIds[id]) { navMap_.removeLayer(navMarkers_[id]); delete navMarkers_[id]; }
   });
   // если выбранная машина обновилась (свежий live-снимок) - обновить и HUD-панель
-  if (navSelectedId_) navUpdateHud_();
+  if (navSelectedId_) {
+    navUpdateHud_();
+    var selV = navVehicles_.filter(function (x) { return x.omnicommId === navSelectedId_; })[0];
+    if (selV) navLoadTrail_(selV); // хвост тоже обновляем на каждом тике поллинга, не только при выборе
+  }
 }
 
 // Полный состав парка - из Штатки (D.vehicles, тот же источник, что у «Планировки»
@@ -17253,6 +17309,78 @@ function navUpdateHud_() {
   }
   var ring = document.getElementById('hud-compass-ring');
   if (ring && v.direction != null) ring.style.transform = 'rotate(' + (-v.direction) + 'deg)';
+  // цвет статуса на всю панель (титр/шкала/спарклайн) - тот же канон, что у точки на карте
+  var detailEl = document.getElementById('hud-detail');
+  if (detailEl) detailEl.style.setProperty('--st-c', navMarkerColor_(navStatusClass_(v)));
+}
+
+/* ── Хвост за 30 минут + спарклайн скорости (реальная история,
+   GET /api/omnicomm/track) - Влад, 01.09: "нужен хвост, координаты за
+   последние 30 минут" + "уровень 3" на превью. Тянем ТОЛЬКО для выбранной
+   машины - на весь парк разом было бы 50+ хвостов и каша на карте. ── */
+var navTrailLayers_ = [];
+function navClearTrail_() {
+  navTrailLayers_.forEach(function (l) { navMap_.removeLayer(l); });
+  navTrailLayers_ = [];
+}
+function navDrawTrail_(points, color) {
+  navClearTrail_();
+  if (!navMap_ || points.length < 2) return;
+  var maxSpeed = 0;
+  points.forEach(function (p) { if (p.speed != null) maxSpeed = Math.max(maxSpeed, p.speed); });
+  maxSpeed = Math.max(maxSpeed, 20); // не даём хвосту исчезать на постоянно медленных отрезках
+  var n = points.length;
+  for (var i = 1; i < n; i++) {
+    var a = points[i - 1], b = points[i];
+    var back = 1 - i / n; // 0 - самый свежий конец хвоста, 1 - самый старый
+    var fade = Math.pow(1 - back, 1.7);
+    var spdRatio = Math.min(1, (b.speed || 0) / maxSpeed);
+    var weight = (1.5 + spdRatio * 5) * fade;
+    if (weight < 0.4) continue;
+    var opacity = (0.12 + spdRatio * 0.55) * fade;
+    // сияние + ядро - тот же приём, что в превью "уровня 3", просто через два Leaflet-полилайна
+    navTrailLayers_.push(L.polyline([[a.lat, a.lng], [b.lat, b.lng]], {
+      color: color, weight: weight * 2.4, opacity: opacity * 0.4, lineCap: 'round', interactive: false
+    }).addTo(navMap_));
+    navTrailLayers_.push(L.polyline([[a.lat, a.lng], [b.lat, b.lng]], {
+      color: color, weight: weight, opacity: Math.min(0.92, opacity * 1.8), lineCap: 'round', interactive: false
+    }).addTo(navMap_));
+  }
+}
+function navBuildSparkline_(points, currentSpeed) {
+  var wrap = document.getElementById('hud-spark-wrap');
+  var el = document.getElementById('hud-spark');
+  if (!el || !wrap) return;
+  if (!points || points.length < 2) { wrap.style.display = 'none'; return; }
+  wrap.style.display = '';
+  var vals = points.map(function (p) { return p.speed || 0; });
+  vals.push(currentSpeed || 0);
+  var max = Math.max(30, Math.max.apply(null, vals));
+  var w = 266, h = 32, n = vals.length, d = '';
+  for (var i = 0; i < n; i++) {
+    var x = (i / (n - 1)) * w, y = h - (vals[i] / max) * h;
+    d += (i ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1) + ' ';
+  }
+  var dArea = d + 'L' + w + ' ' + h + ' L0 ' + h + ' Z';
+  var lx = w, ly = h - (vals[n - 1] / max) * h;
+  el.innerHTML = '<svg class="hud-spark" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">' +
+    '<defs><linearGradient id="hud-sg" x1="0" y1="0" x2="0" y2="1">' +
+    '<stop offset="0%" stop-color="var(--st-c)" stop-opacity=".35"/>' +
+    '<stop offset="100%" stop-color="var(--st-c)" stop-opacity="0"/></linearGradient></defs>' +
+    '<path d="' + dArea + '" fill="url(#hud-sg)"/>' +
+    '<path d="' + d + '" fill="none" stroke="var(--st-c)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>' +
+    '<circle cx="' + lx.toFixed(1) + '" cy="' + ly.toFixed(1) + '" r="2.6" fill="var(--st-c)"/>' +
+    '</svg>';
+}
+function navLoadTrail_(v) {
+  fetchFromYardApi_('/omnicomm/track', { omnicommId: v.omnicommId }).then(function (r) {
+    // машину могли переключить/закрыть, пока ждали ответ - не рисуем хвост чужой машине
+    if (navSelectedId_ !== v.omnicommId) return;
+    if (!r.ok || !r.data || !Array.isArray(r.data.points)) { navClearTrail_(); return; }
+    var color = navMarkerColor_(navStatusClass_(v));
+    navDrawTrail_(r.data.points, color);
+    navBuildSparkline_(r.data.points, v.speed);
+  }).catch(function () {}); // тихий фолбэк - без хвоста, не без карты
 }
 // setText() уже определена глобально (используется в showPage и др.) - переиспользуем,
 // не дублируем.
@@ -17270,6 +17398,8 @@ function navSelect(omnicommId) {
   if (detail) detail.classList.add('show');
   var closeBtn = document.getElementById('hud-close');
   if (closeBtn) closeBtn.style.display = '';
+  navClearTrail_();
+  if (v && v.omnicommId) navLoadTrail_(v);
 }
 function navDeselect() {
   navSelectedId_ = null;
@@ -17279,6 +17409,7 @@ function navDeselect() {
   if (detail) detail.classList.remove('show');
   var closeBtn = document.getElementById('hud-close');
   if (closeBtn) closeBtn.style.display = 'none';
+  navClearTrail_();
 }
 
 function navTickClock_() {

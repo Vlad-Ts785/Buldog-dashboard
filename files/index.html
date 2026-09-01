@@ -852,8 +852,11 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
    только вместе с уже существующим hot/sel-раскрытием. */
 .nav-mk-chip-l2{display:none;font:10px/1.3 var(--font-mono,monospace);color:var(--muted);
   padding-top:2px;margin-top:2px;border-top:1px solid var(--border);white-space:nowrap;}
+.nav-mk-chip-l3{display:none;font:9.5px/1.3 var(--font-mono,monospace);color:var(--muted);
+  opacity:.75;white-space:nowrap;font-variant-numeric:tabular-nums;}
 .nav-mk.is-hot .nav-mk-chip,.nav-mk.is-sel .nav-mk-chip{flex-direction:column;align-items:flex-start;gap:0;}
-.nav-mk.is-hot .nav-mk-chip-l2,.nav-mk.is-sel .nav-mk-chip-l2{display:block;}
+.nav-mk.is-hot .nav-mk-chip-l2,.nav-mk.is-sel .nav-mk-chip-l2,
+.nav-mk.is-hot .nav-mk-chip-l3,.nav-mk.is-sel .nav-mk-chip-l3{display:block;}
 .nav-mk-chip-l1{display:flex;align-items:center;gap:6px;}
 .nav-mk-chip-l1 .nav-mk-tag{font:600 8.5px/1 var(--font-mono,monospace);letter-spacing:.05em;color:var(--muted);
   border:1px solid var(--border);border-radius:3px;padding:1px 4px;}
@@ -3318,7 +3321,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
                колонка "Категория" различает их в общем списке. -->
           <div id="asset-wrap" style="display:none;overflow-x:auto">
             <table class="tbl">
-              <thead><tr><th>Категория</th><th>Госномер</th><th>Марка/модель</th><th>Характеристики</th><th>Владелец</th><th>Сцепка сейчас</th><th class="num">Действия</th></tr></thead>
+              <thead><tr><th>Категория</th><th>Отдел</th><th>Госномер</th><th>Марка/модель</th><th>Характеристики</th><th>Владелец</th><th>Сцепка сейчас</th><th class="num">Действия</th></tr></thead>
               <tbody id="asset-body"></tbody>
             </table>
           </div>
@@ -3538,14 +3541,26 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
         <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Госномер *</label>
           <input autocomplete="off" id="asset-id" type="text" maxlength="64" placeholder="ЕМ 5270 50"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        <!-- Отдел (01.09, Влад: "по умолчанию все, что у нас сейчас есть - отдел тралы, там я
+             должен иметь возможность переключить на отдел экскаваторов") - пусто = Тралы,
+             непустое значение выводит машину из ВСЕХ расчётов дашборда на чтении (Панель/
+             Техника/Планировка), см. plans/2026-09-01-vehicle-department-field.md. Список
+             открытый, как у "Сектора" полуприцепа - datalist подсказывает, не ограничивает. -->
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Отдел</label>
+          <input autocomplete="off" id="asset-department" type="text" maxlength="30" placeholder="пусто = Тралы" list="asset-department-list"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none">
+          <datalist id="asset-department-list">
+            <option value="экскаваторы"><option value="в аресте">
+          </datalist></div>
         <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Производитель</label>
           <input autocomplete="off" id="asset-manufacturer" type="text" maxlength="100" placeholder="Faymonville, Scania…"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
         <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Марка/модель</label>
           <input autocomplete="off" id="asset-name" type="text" maxlength="150" placeholder="Трал Корыто легк"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
-        <!-- VIN - обязательная характеристика и у тягача, и у прицепа (Влад, 30.08). -->
-        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">VIN *</label>
+        <!-- VIN - было жёстко обязательным полем (Влад, 30.08), снято 01.09 (карточки заводятся
+             наспех по госномеру, VIN не всегда под рукой сразу) - поле осталось, необязательное. -->
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">VIN</label>
           <input autocomplete="off" id="asset-vin" type="text" maxlength="17" placeholder="17 символов"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;text-transform:uppercase"></div>
         <!-- Цвет - из СТС (30.08, пакетный разбор с Google Диска), опционально. -->
@@ -11228,7 +11243,7 @@ function assetsPaint_() {
   var showDeleted = document.getElementById('asset-show-deleted').checked;
   var rows = spravAssets_.filter(function(a) { return showDeleted || !a.is_deleted; });
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="7" class="muted" style="padding:14px">Материалки пока нет — добавьте первую</td></tr>';
+    body.innerHTML = '<tr><td colspan="8" class="muted" style="padding:14px">Материалки пока нет — добавьте первую</td></tr>';
     return;
   }
   body.innerHTML = rows.map(function(a) {
@@ -11248,6 +11263,10 @@ function assetsPaint_() {
     var specText = assetSpecSummary_(a);
     return '<tr' + (a.is_deleted ? spravDeletedRowStyle_() : '') + '>' +
       '<td class="muted">' + (ASSET_TYPE_LABELS_[a.asset_type] || a.asset_type) + '</td>' +
+      // Отдел (01.09) - пусто = Тралы (тихо, без бейджа), непустое значение выводит машину из
+      // расчётов - подсвечиваем, чтобы это было видно с первого взгляда, не только при клике
+      // "Править". См. plans/2026-09-01-vehicle-department-field.md.
+      '<td>' + (a.department ? pctBadge_(pageEsc_(a.department), '#f59e0b') : '<span class="muted">Тралы</span>') + '</td>' +
       '<td class="mono"><b>' + pageEsc_(a.id) + '</b>' + (a.is_deleted ? ' <span class="muted" style="font-size:11px">(удалено)</span>' : '') + '</td>' +
       '<td class="muted">' + modelCell + '</td>' +
       '<td class="muted">' + (specText ? pageEsc_(specText) : '—') + '</td>' +
@@ -11301,6 +11320,7 @@ function assetOpenForm_(id) {
   var idInput = document.getElementById('asset-id');
   idInput.value = a ? a.id : '';
   idInput.disabled = !!a; // госномер - естественный первичный ключ, у существующей записи не меняется
+  document.getElementById('asset-department').value = a ? (a.department || '') : '';
   document.getElementById('asset-manufacturer').value = a ? (a.manufacturer || '') : '';
   document.getElementById('asset-name').value = a ? (a.name || '') : '';
   document.getElementById('asset-vin').value = a ? (a.vin || '') : '';
@@ -11346,11 +11366,14 @@ function assetSave_() {
   errEl.style.display = 'none';
   var id = assetEditId_ || document.getElementById('asset-id').value.trim();
   if (!id) { errEl.textContent = 'Госномер обязателен'; errEl.style.display = ''; return; }
+  // VIN был жёстко обязателен на фронтенде (30.08) - Влад снял требование 01.09 (карточки
+  // заводятся наспех по госномеру, VIN не всегда под рукой сразу) - поле остаётся, просто
+  // необязательное, серверной блокировки для него не было и раньше.
   var vin = document.getElementById('asset-vin').value.trim();
-  if (!vin) { errEl.textContent = 'VIN обязателен'; errEl.style.display = ''; return; }
   var assetType = document.getElementById('asset-type-select').value;
   var params = {
     id: id, asset_type: assetType,
+    department: document.getElementById('asset-department').value.trim(),
     manufacturer: document.getElementById('asset-manufacturer').value.trim(),
     name: document.getElementById('asset-name').value.trim(),
     vin: vin,
@@ -16937,10 +16960,26 @@ function navStatusClass_(v) {
   return '';
 }
 function navStatusLabel_(v) {
-  if (v.stale) return 'нет связи';
+  if (v.stale) return 'нет связи' + (v.actualDataAt ? ' · ' + navFormatTime_(v.actualDataAt) : '');
   if (v.ignition && v.speed > 3) return Math.round(v.speed) + ' км/ч';
   if (v.ignition) return 'на месте, не заглушена';
   return 'стоит';
+}
+// Влад, 01.09: "данные Omnicomm иногда застывают... нужна надпись 'Актуально
+// на' рядом с гос-номером". actualDataAt - реальное время GPS-фиксации от
+// Omnicomm (сервер: actual_date), НЕ время нашего опроса - именно оно
+// застревает при сбое на стороне Omnicomm, см. api/server.js DATA_STALE_SEC.
+function navFormatTime_(iso) {
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  var pad = function (n) { return n < 10 ? '0' + n : '' + n; };
+  return pad(d.getHours()) + ':' + pad(d.getMinutes());
+}
+function navFormatDateTime_(iso) {
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return '—';
+  var pad = function (n) { return n < 10 ? '0' + n : '' + n; };
+  return pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
 }
 function navMarkerColor_(cls) {
   return cls === 'is-moving' ? 'var(--blue)' : cls === 'is-idle' ? 'var(--amber)' : cls === 'is-stale' ? 'var(--red)' : 'var(--muted)';
@@ -16956,20 +16995,30 @@ function navMarkerIcon_(v, cls, hot, sel) {
   var color = navMarkerColor_(cls);
   var hd = v.direction != null ? v.direction : 0;
   var speedTxt = (cls === 'is-moving' && v.speed != null) ? '<span>' + Math.round(v.speed) + '</span>' : '';
+  // Влад, 01.09: "данные Omnicomm иногда застывают - визуально нужно понимать,
+  // что данные неактуальны". У "нет связи" вместо скорости (которая всё равно
+  // от того же старого замера) показываем время последних РЕАЛЬНЫХ данных -
+  // видно уже в свёрнутом виде, не только при наведении, это и есть визуальное
+  // отличие от едущих/заведённых (плюс уже имеющийся красный цвет/пунктирный
+  // круг сноса - ничего нового изобретать не пришлось, statusClass_ теперь
+  // корректно ловит "застывшие" машины через api/server.js DATA_STALE_SEC).
+  var staleTxt = (cls === 'is-stale' && v.actualDataAt) ? '<span>' + navEsc_(navFormatTime_(v.actualDataAt)) + '</span>' : '';
   var classes = 'nav-mk ' + cls + (hot ? ' is-hot' : '') + (sel ? ' is-sel' : '');
-  // Строка 1 - как в покое (номер тягача + скорость), строка 2 - показывается только
-  // при наведении/выборе (CSS .is-hot/.is-sel), Влад 01.09: "рядом с гос-номером хочу
-  // видеть тип прицепа, гос-номер прицепа, кто водитель". v.type - это и есть тип
-  // прицепа (ПР-4/Длинномер/КР-3 и т.п., тот же смысл, что тег в списке слева).
+  // Строка 1 - как в покое (номер тягача + скорость/время последних данных),
+  // строки 2-3 - показываются только при наведении/выборе (CSS .is-hot/.is-sel),
+  // Влад 01.09: "рядом с гос-номером хочу видеть тип прицепа, гос-номер
+  // прицепа, кто водитель". v.type - это и есть тип прицепа (ПР-4/Длинномер/
+  // КР-3 и т.п., тот же смысл, что тег в списке слева).
   var typeTag = v.type ? '<b class="nav-mk-tag">' + navEsc_(v.type) + '</b>' : '';
-  var line1 = '<div class="nav-mk-chip-l1">' + typeTag + '<b>' + navEsc_(v.gos || v.omnicommId || '') + '</b>' + speedTxt + '</div>';
+  var line1 = '<div class="nav-mk-chip-l1">' + typeTag + '<b>' + navEsc_(v.gos || v.omnicommId || '') + '</b>' + speedTxt + staleTxt + '</div>';
   var line2 = '<div class="nav-mk-chip-l2">' + navEsc_(v.trailerGos || 'без прицепа') + ' · ' + navEsc_(v.driverName || 'без водителя') + '</div>';
+  var line3 = '<div class="nav-mk-chip-l3">Актуально на ' + (v.actualDataAt ? navEsc_(navFormatDateTime_(v.actualDataAt)) : '—') + '</div>';
   return L.divIcon({
     html: '<div class="' + classes + '" style="--c:' + color + ';--hd:' + hd + 'deg;">' +
       '<div class="nav-mk-halo"></div>' +
       '<div class="nav-mk-arrow"><i></i></div>' +
       '<div class="nav-mk-core"></div>' +
-      '<div class="nav-mk-chip">' + line1 + line2 + '</div>' +
+      '<div class="nav-mk-chip">' + line1 + line2 + line3 + '</div>' +
       '</div>',
     iconSize: [0, 0], iconAnchor: [0, 0], className: ''
   });
@@ -17138,6 +17187,7 @@ function navFetch_() {
           speed: t ? t.speed : null, direction: t ? t.direction : null,
           ignition: t ? t.ignition : false, stale: t ? t.stale : true,
           updatedAt: t ? t.updatedAt : null,
+          actualDataAt: t ? t.actualDataAt : null,
         };
       });
     } else {
@@ -22808,7 +22858,15 @@ var LP_OMNI_CITIES_ = [
   {name:"Канаш", lat:55.5083, lng:47.4889}, {name:"Йошкар-Ола", lat:56.6316, lng:47.8998},
   {name:"Волжск", lat:55.8681, lng:48.3617}, {name:"Зеленодольск", lat:55.8500, lng:48.5039},
   {name:"Саранск", lat:54.1838, lng:45.1749}, {name:"Пенза", lat:53.2007, lng:45.0046},
-  {name:"Ульяновск", lat:54.3142, lng:48.4031}, {name:"Тольятти", lat:53.5303, lng:49.3461}
+  {name:"Ульяновск", lat:54.3142, lng:48.4031}, {name:"Тольятти", lat:53.5303, lng:49.3461},
+  /* Влад, 01.09, живой пример у Карачева: машина писалась "Орёл" (~100 км),
+     хотя реально была в 17 км от Брянска - областного центра того же ранга,
+     что Владимир/Рязань/Тверь выше, но забытого при первой сборке списка.
+     Алгоритм тут ни при чём - честно взял ближайшую ИЗ ИМЕЮЩИХСЯ точек,
+     просто самой точки не было. Заодно добавлен Белгород - такой же по
+     значимости центр на юго-западном направлении (М2), которого тоже не
+     было. */
+  {name:"Брянск", lat:53.2434, lng:34.3644}, {name:"Белгород", lat:50.5977, lng:36.5858}
 ];
 /* Округа Москвы по азимуту от центра (Кремль) - Omnicomm не отдаёт точный
    адрес, поэтому для машин внутри/около МКАД (радиус условно ~20 км от

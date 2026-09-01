@@ -5875,8 +5875,21 @@ function hideLoginScreen() {
   if (mainWrap) mainWrap.style.display = '';
 }
 
-function handleCredentialResponse(response) {
+async function handleCredentialResponse(response) {
   localStorage.setItem('id_token', response.credential);
+  // Сервер сам умеет входить через Google (2026-09-01, план plans/2026-09-01-apps-
+  // script-elimination.md, этап 1.4) - пробуем получить session_token напрямую у него,
+  // ДО перезагрузки. Тихий мягкий переход: сервер недоступен/эндпоинт ещё не готов по
+  // любой причине - просто идём дальше без своего токена, как раньше; Apps Script при
+  // следующей загрузке всё равно сам проверит id_token и выдаст сессию своим путём -
+  // ничего не ломается, просто на один шаг медленнее.
+  try {
+    var authResp = await fetch('https://api.yardhub.ru/api/auth/google?id_token=' + encodeURIComponent(response.credential));
+    var authData = await authResp.json();
+    if (authData && authData.session_token) {
+      localStorage.setItem('session_token', authData.session_token);
+    }
+  } catch (e) { /* сервер недоступен - фолбэк на Apps Script при загрузке ниже */ }
   // Перезагружаем страницу целиком вместо попытки обновить интерфейс на месте -
   // сразу после закрытия всплывающего окна входа браузер иногда ведёт себя иначе,
   // чем при обычной загрузке. Перезагрузка - тот же путь, что и ручное обновление,

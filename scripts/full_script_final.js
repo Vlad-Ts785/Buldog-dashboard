@@ -5128,6 +5128,19 @@ function doGet(e) {
   }
   // ── конец временного экспорта ──────────────────────────────────────────────────────────────
 
+  // ── ВРЕМЕННО (2026-09-01, пересчитать кэш НОВЫМ кодом - includeExcluded=true, чтобы кэш
+  // содержал ВСЕХ машин для живого фильтра) - УБРАТЬ после использования.
+  if (e && e.parameter && e.parameter.action === 'refresh_main_cache') {
+    var rmcKey = e.parameter.key || '';
+    if (rmcKey !== 'b83e5f107ac2694d38fb1e0c96a72d5e') {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var rmcSs = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+    saveMainPayloadCache_(rmcSs);
+    return ContentService.createTextOutput(JSON.stringify({ ok: true, refreshed_at: new Date().toISOString() })).setMimeType(ContentService.MimeType.JSON);
+  }
+  // ── конец временного форс-обновления ───────────────────────────────────────────────────────
+
   // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём.
   // Сначала пробуем свой токен сессии (живёт до 48ч, см. issueSessionToken_) - только если
   // его нет или он истёк, идём проверять Google id_token (тот живёт ~1 час, это уже требует
@@ -5779,7 +5792,9 @@ var MAIN_PAYLOAD_CACHE_CHUNK_SIZE = 45000; // с запасом от лимит�
 // staffMarkas/access_log) - те живые, считаются в doGet() напрямую, см. комментарий там.
 function buildHeavyMainPayload_(ss, staffData) {
   var defaultRange = getCurrentMonthRange_();
-  var vehiclesData = aggregateFinHistoryForRange(ss, staffData, defaultRange.from, defaultRange.to);
+  // includeExcluded=true (01.09) - кэш должен считать ВСЕ машины, включая department-
+  // исключённые; видимость применяется живым фильтром при отдаче, см. getMainPayloadCacheOrLive_.
+  var vehiclesData = aggregateFinHistoryForRange(ss, staffData, defaultRange.from, defaultRange.to, false, true);
   var ordersData = getOrdersData(ss);
   return {
     summary:  getSummaryData(ss, ordersData),
@@ -5819,7 +5834,7 @@ function ensureMainPayloadCacheSheet_(ss) {
 // JSON-чанки...) - перезаписывается целиком за один setValues(), чтобы doGet() не мог
 // прочитать кэш "наполовину записанным" при совпадении по времени с runAll().
 function saveMainPayloadCache_(ss) {
-  var staffData = getStaffData(ss);
+  var staffData = getStaffData(ss, true); // includeExcluded - см. комментарий у getStaffData
   var payload = buildHeavyMainPayload_(ss, staffData);
   var json = JSON.stringify(payload);
   var chunks = [];
@@ -5884,7 +5899,19 @@ function getMainPayloadCacheOrLive_(ss, staffData) {
     receipts: getReceiptsData(ss, ordersData),
   };
   var cached = readMainPayloadCache_(ss);
-  if (cached) return Object.assign({}, cached, freshFinancials);
+  if (cached) {
+    var merged = Object.assign({}, cached, freshFinancials);
+    // Живой фильтр по department (01.09, Влад: "это должно мгновенно срабатывать") - cached
+    // посчитан кэш-триггером до 3 часов назад для ВСЕХ машин (см. includeExcluded в
+    // saveMainPayloadCache_), department мог измениться через UI Справочников уже ПОСЛЕ
+    // этого расчёта. isExcludedVehicleGos_ сама бьёт на сервер живьём при каждом вызове -
+    // фильтрация здесь всегда актуальна, без ожидания следующего runAll().
+    if (merged.vehicles) {
+      merged.vehicles = merged.vehicles.filter(function(v) { return !isExcludedVehicleGos_(v.gos); });
+      merged.drivers = deriveDriversFromVehicles(merged.vehicles);
+    }
+    return merged;
+  }
 
   // Кэша нет вообще (первый запуск после деплоя, до первого runAll()) - остальное (медленные
   // Штатка-поля) считаем живьём. ordersData уже посчитан выше - buildHeavyMainPayload_ здесь
@@ -5910,26 +5937,67 @@ function normalizeGos(gos) {
     .replace(/Т/g,'T').replace(/У/g,'Y').replace(/Х/g,'X');
 }
 
-// Машины, полностью исключённые из ВСЕХ расчётов дашборда. Единая точка исключения -
-// getStaffData ниже (состав парка - источник для статуса парка/"Техники"/"Планировки"/
-// "Водителей"/личной страницы Васина) + aggregateFinHistoryForRange (двойная защита - вдруг
-// в истории остались строки без записи в Штатке, например если её ещё не убрали из листа
-// физически). Серверная сторона (park_reports, /api/park_history и /api/park_summary в
-// api/server.js на VPS) держит СВОЙ зеркальный список (EXCLUDED_VEHICLE_GOS_SERVER_) -
-// править ОБА при любом изменении, иначе Панель (сервер первым) и фолбэк-Sheets разойдутся.
-// - 2026-08-11, Влад: "убери из всех расчётов, её нет, она в аресте" - "А 840 КО 797", SCANIA.
-// - 2026-09-01, Влад: "временно вышли из нашего отдела и перешли в отдел экскаваторов...
-//   вывести из всех расчётов за август, июль... историю не стирать... отчёты всё равно будут
-//   приходить, но не должны на что-то влиять" - "У 589 ОХ 750" и "У 660 ОХ 750", КАМАЗ К-3.
-//   См. память project_vehicles_temporarily_excluded_from_calcs. Возврат в парк - убрать
-//   строку отсюда (и из серверного списка) и запись из памяти актуализировать, не удалять.
-const EXCLUDED_VEHICLE_GOS = ['A840KO797', 'Y589OX750', 'Y660OX750'];
+// Машины, исключённые из ВСЕХ расчётов дашборда - план 2026-09-01
+// (plans/2026-09-01-vehicle-department-field.md). Влад: "в справочнике на каждое
+// материальное средство нужно добавить отдел... если машина закреплена за другим отделом,
+// она выпадает из расчёта" - заменяет прежний статический список (2026-08-11 SCANIA в
+// аресте, 2026-09-01 У589ОХ750/У660ОХ750 в отделе экскаваторов, см. память
+// project_vehicles_temporarily_excluded_from_calcs). Источник истины теперь
+// sprav_assets.department на сервере - переключается через UI Справочников, БЕЗ деплоя
+// кода. Тихий фолбэк на старый статический список, если сервер недоступен (тот же принцип
+// "мягкого перехода", что у водителя по машине/fetchVehicleDriversFromServer_).
+var EXCLUDED_VEHICLE_GOS_FALLBACK_ = ['A840KO797', 'Y589OX750', 'Y660OX750'];
+var _excludedDeptGosCache_; // undefined = ещё не спрашивали сервер в этом выполнении
+function fetchExcludedVehicleGosFromServer_() {
+  if (_excludedDeptGosCache_ !== undefined) return _excludedDeptGosCache_;
+  try {
+    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    if (!apiKey) { _excludedDeptGosCache_ = null; return null; }
+    var resp = UrlFetchApp.fetch(
+      'https://api.yardhub.ru/api/vehicle_departments',
+      { headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true }
+    );
+    if (resp.getResponseCode() !== 200) { _excludedDeptGosCache_ = null; return null; }
+    var data = JSON.parse(resp.getContentText());
+    var set = {};
+    if (data && data.departments) {
+      Object.keys(data.departments).forEach(function(gos) { set[normalizeGos(gos)] = data.departments[gos]; });
+    }
+    _excludedDeptGosCache_ = set; // сервер ответил - {} тоже валидный ответ (никто не исключён)
+    return set;
+  } catch (err) {
+    _excludedDeptGosCache_ = null;
+    return null;
+  }
+}
 function isExcludedVehicleGos_(gos) {
-  return EXCLUDED_VEHICLE_GOS.indexOf(normalizeGos(gos)) >= 0;
+  var normalized = normalizeGos(gos);
+  // 01.09, вторая правка того же дня. Первая правка ("статический список - гарантированный
+  // пол") лечила симптом (SCANIA не было в sprav_assets, поэтому департамент-проверка её не
+  // видела), но не причину - и сломала ДРУГОЕ: Влад вернул У660ОХ750 обратно в Тралы через
+  // UI Справочников (эксперимент), а машина всё равно осталась исключена, потому что
+  // статический список ('Y660OX750') проверялся БЕЗУСЛОВНО, раньше department. Настоящая
+  // причина регрессии SCANIA устранена на уровне ДАННЫХ - SCANIA теперь тоже заведена в
+  // sprav_assets с department='арест' (см. память project_vehicles_temporarily_excluded_
+  // from_calcs) - значит department с сервера снова единственный источник истины, когда
+  // сервер отвечает; статический список - ТОЛЬКО настоящий фолбэк на случай недоступности
+  // сервера, не постоянный пол. Правило Влада (01.09): "если машина в отделе [не Тралы] -
+  // убираем её везде, если машина не в отделе [Тралы] - учитываем везде" - department
+  // ДОЛЖЕН быть единственным источником истины, редактируемым через UI без деплоя.
+  var fromServer = fetchExcludedVehicleGosFromServer_();
+  if (fromServer !== null) return !!fromServer[normalized];
+  return EXCLUDED_VEHICLE_GOS_FALLBACK_.indexOf(normalized) >= 0; // сервер недоступен - фолбэк
 }
 
 // Читаем Штатку один раз — возвращаем карту госномер → {type, status, marka}
-function getStaffData(ss) {
+// includeExcluded (01.09) - true ТОЛЬКО для построения тяжёлого кэшируемого payload'а
+// (saveMainPayloadCache_/buildHeavyMainPayload_) - нужно, чтобы department-исключённая
+// машина не выпадала из СЧИТАННЫХ данных на 3 часа (до следующего runAll()), а появлялась/
+// пропадала МГНОВЕННО (Влад, 01.09: "это должно мгновенно срабатывать") - реальная
+// видимость применяется живым фильтром при каждой отдаче кэша, см. getMainPayloadCacheOrLive_.
+// Все остальные вызовы (fleet/repairs/staffMarkas в doGet() - и так живые, без кэша) как и
+// раньше фильтруют сразу здесь.
+function getStaffData(ss, includeExcluded) {
   const sheet = ss.getSheetByName('Штатка');
   if (!sheet) return {};
 
@@ -5969,7 +6037,7 @@ function getStaffData(ss) {
     var driver3    = driver3Col >= 0 && driver3Col < row.length ? String(row[driver3Col] || '').trim() : '';
 
     if (!gos || !type) continue;
-    if (isExcludedVehicleGos_(gos)) continue;
+    if (!includeExcluded && isExcludedVehicleGos_(gos)) continue;
 
     var gosClean = normalizeGos(gos);
     map[gosClean] = { type: type, status: status, marka: marka, trailerGos: trailerGos, gosOriginal: gos, plan: plan, driver: driver, driver2: driver2, driver3: driver3, rowIndex: i };
@@ -6209,7 +6277,11 @@ function fetchVehicleDriversFromServer_(asOfDate) {
 // если сервер недоступен или не покрывает месяц - ничего не ломается, просто медленнее.
 // skipServerOverride - ТОЛЬКО для verifyServerParkHistory_ (сверка сервер vs Sheets на
 // одинаковом staffData/диапазоне) - в обычной работе всегда false/не передаётся.
-function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate, skipServerOverride) {
+// includeExcluded (01.09) - ТОЛЬКО для saveMainPayloadCache_/buildHeavyMainPayload_, см.
+// комментарий у getStaffData - считает данные ДЛЯ ВСЕХ машин, включая department-
+// исключённые, чтобы фильтрация видимости применялась живым фильтром при отдаче кэша, а не
+// пропадала из кэша на 3 часа.
+function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate, skipServerOverride, includeExcluded) {
   var from = new Date(fromDate); from.setHours(0, 0, 0, 0);
   var to = new Date(toDate); to.setHours(23, 59, 59, 999);
 
@@ -6268,9 +6340,9 @@ function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate, skipServer
 
   var allGos = {};
   Object.keys(parkHistByMonth).forEach(function(mk) {
-    Object.keys(parkHistByMonth[mk]).forEach(function(g) { if (!isExcludedVehicleGos_(g)) allGos[g] = true; });
+    Object.keys(parkHistByMonth[mk]).forEach(function(g) { if (includeExcluded || !isExcludedVehicleGos_(g)) allGos[g] = true; });
   });
-  Object.keys(fallbackByVehicleMonth).forEach(function(g) { if (!isExcludedVehicleGos_(g)) allGos[g] = true; });
+  Object.keys(fallbackByVehicleMonth).forEach(function(g) { if (includeExcluded || !isExcludedVehicleGos_(g)) allGos[g] = true; });
   // Штатка - источник истины по составу парка (Влад, 2026-07-19: "не все тралы показывает
   // как ремонтные, которые в штатке отмечены как ремонт" - машина, у которой за весь период
   // не было ни одной строки в 1С-истории (простояла в ремонте, ни одного заказа), раньше

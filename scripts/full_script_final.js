@@ -1097,6 +1097,9 @@ function runAll() {
   try { normalizeReport();         log.push('✅ Нормализация выполнена'); }
   catch(e) { errors.push('❌ Нормализация: ' + e.message); }
 
+  try { syncVehicleTypesToServer_(); log.push('✅ Типы техники отправлены на сервер'); }
+  catch(e) { errors.push('❌ Типы техники на сервер: ' + e.message); }
+
   try { normalizeOrders();         log.push('✅ Заказы нормализованы'); }
   catch(e) { errors.push('❌ Заказы (норм.): ' + e.message); }
 
@@ -6432,7 +6435,73 @@ const RISCHANOV_SPECIAL_TRALS_GOS = [
 ];
 const RISCHANOV_ORDER_UNTIL = new Date('2026-11-01T00:00:00+03:00'); // рукописная пометка на приказе - сверить с Владом ближе к сроку, не начислять без нового приказа
 
+// Мост типа техники (план 2026-09-01) - Apps Script по-прежнему остаётся источником
+// истины по Штатке (та мигрирует отдельно, другая сессия), но не держит его при себе:
+// шлёт на сервер узкую карту "госномер -> тип" (не всю Штатку), чтобы /api/park_summary
+// мог делать разбивку Тралы/Длинномеры без обращения к Таблице на каждый запрос дашборда.
+function syncVehicleTypesToServer_() {
+  var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+  if (!apiKey) return;
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var staffData = getStaffData(ss);
+  var vehicles = Object.keys(staffData).map(function(gos) {
+    return { gos: staffData[gos].gosOriginal || gos, type: staffData[gos].type || '' };
+  });
+  if (!vehicles.length) return;
+  UrlFetchApp.fetch('https://api.yardhub.ru/api/vehicle_types', {
+    method: 'post', contentType: 'application/json',
+    headers: { 'X-Api-Key': apiKey },
+    payload: JSON.stringify({ vehicles: vehicles }),
+    muteHttpExceptions: true,
+  });
+}
+
+// Деньги (revenue/fot/fuel/parts/fines/tolls/profit/margin/тралы-длинномеры/спецтралы) - с
+// сервера первым делом (план 2026-09-01, Влад: "сервер и алгоритмы должны жить на сервере").
+// Тихий null при любой проблеме - вызывающий откатывается на Нормализованные_данные ровно
+// как раньше. profitPlan/salesPlan/salesFakt/revenueComparison сервер не считает - остаются
+// как были, накладываются поверх ниже.
+function fetchParkSummaryFromServer_(monthKey) {
+  try {
+    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    if (!apiKey) return null;
+    var resp = UrlFetchApp.fetch(
+      'https://api.yardhub.ru/api/park_summary?month=' + encodeURIComponent(monthKey),
+      { headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true }
+    );
+    if (resp.getResponseCode() !== 200) return null;
+    var data = JSON.parse(resp.getContentText());
+    if (!data || typeof data.revenue !== 'number') return null;
+    return data;
+  } catch (err) {
+    return null;
+  }
+}
+
 function getSummaryData(ss, ordersData) {
+  var monthKey = Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+  var serverSummary = fetchParkSummaryFromServer_(monthKey);
+  if (serverSummary) {
+    var sfp0 = computeSalesFaktPlan_(ordersData);
+    var rischanovOrderActive0 = new Date() < RISCHANOV_ORDER_UNTIL;
+    return {
+      revenue: serverSummary.revenue, profit: serverSummary.profit, fot: serverSummary.fot,
+      fuel: serverSummary.fuel, parts: serverSummary.parts, fines: serverSummary.fines,
+      tolls: serverSummary.tolls, margin: serverSummary.margin,
+      profit_tral: serverSummary.profit_tral, profit_long: serverSummary.profit_long,
+      own_revenue_tral: serverSummary.own_revenue_tral, own_revenue_long: serverSummary.own_revenue_long,
+      special_trals_profit: rischanovOrderActive0 ? serverSummary.special_trals_profit : 0,
+      special_trals_bonus_active: rischanovOrderActive0,
+      lossCount: serverSummary.lossCount, vehicleCount: serverSummary.vehicleCount,
+      salesPlan: sfp0.salesPlan, salesFakt: sfp0.salesFakt,
+      salesFaktThruYesterday: sfp0.salesFaktThruYesterday,
+      salesPayment: sfp0.salesPayment, salesPayNal: sfp0.salesPayNal,
+      salesPct: sfp0.salesPlan > 0 ? (sfp0.salesFakt / sfp0.salesPlan * 100) : 0,
+      profitPlan: 50400000,
+      revenueComparison: getRevenueDateComparison_(ss),
+    };
+  }
+
   const norm = ss.getSheetByName('Нормализованные_данные');
   if (!norm || norm.getLastRow() < 2) return {};
 

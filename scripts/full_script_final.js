@@ -6162,6 +6162,27 @@ function fetchParkHistoryFromServer_(fromDate, toDate) {
   }
 }
 
+// Водитель по машине НА ДАТУ (fleet_assignments/Планировка-Справочники) - план 2026-09-01.
+// Тихий null при любой проблеме - вызывающий откатывается на История_финансов ровно как
+// раньше. Покрывает только даты С 30.08.2026 (см. комментарий у места вызова).
+function fetchVehicleDriversFromServer_(asOfDate) {
+  try {
+    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    if (!apiKey) return null;
+    var asOfStr = Utilities.formatDate(asOfDate, 'Europe/Moscow', 'yyyy-MM-dd');
+    var resp = UrlFetchApp.fetch(
+      'https://api.yardhub.ru/api/vehicle_drivers?asOf=' + asOfStr,
+      { headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true }
+    );
+    if (resp.getResponseCode() !== 200) return null;
+    var data = JSON.parse(resp.getContentText());
+    if (!data || !data.drivers) return null;
+    return data.drivers;
+  } catch (err) {
+    return null;
+  }
+}
+
 // Строит массив машин (страница "Техника") за диапазон дат, по месяцам. Для каждого
 // затронутого месяца - сначала пробуем "Данные_1С_история" (авторитетно: пишется из
 // отдельного письма 1С "за прошлый месяц", см. importParkReports()/writeParkHistoryForMonth_()).
@@ -6258,11 +6279,30 @@ function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate, skipServer
     });
   }
 
-  // Водитель ЗА ВЫБРАННЫЙ ПЕРИОД, а не сегодняшний живой - Данные_1С_история этого не хранит,
-  // поэтому смотрим отдельно в История_финансов (там есть колонка "Водитель" с 2026-07-04) -
-  // берём самую позднюю запись внутри диапазона [from, to]. Влад, 2026-07-04: карточка машины
-  // должна показывать данные именно за выбранный период, а не "как сейчас".
+  // Водитель ЗА ВЫБРАННЫЙ ПЕРИОД, а не сегодняшний живой - карточка машины должна показывать
+  // данные именно за выбранный период, а не "как сейчас" (Влад, 2026-07-04).
+  //
+  // МЯГКИЙ ПЕРЕХОД (план 2026-09-01, Влад: "старая история должна сохраниться, новая пишется
+  // по-новому"): с 30.08.2026 источник - сервер (fleet_assignments/Планировка-Справочники,
+  // "кто был на машине на дату", см. /api/vehicle_drivers) - у него РЕАЛЬНАЯ история с датами
+  // (valid_from/valid_to), не просто текущее состояние. До 30.08 такой истории на сервере
+  // физически НЕТ (Справочники начали писать её только с этого дня) - для более старых
+  // диапазонов остаёмся на "История_финансов" (Google Таблица, лист и его ежедневная запись
+  // НЕ трогались и не тронуты - это и есть сохранённая старая история, ничего не удаляли).
+  var FLEET_ASSIGNMENTS_START_ = new Date(2026, 7, 30); // 30 августа 2026 (месяц 0-indexed)
   var driverByGos = {};
+  if (to >= FLEET_ASSIGNMENTS_START_) {
+    var driverAsOf_ = to > new Date() ? new Date() : to; // не спрашивать сервер "на будущее"
+    var serverDrivers_ = fetchVehicleDriversFromServer_(driverAsOf_);
+    if (serverDrivers_) {
+      Object.keys(serverDrivers_).forEach(function(gos) {
+        driverByGos[gos] = { date: driverAsOf_, driver: serverDrivers_[gos] };
+      });
+    }
+  }
+  // Дозаполняем из Sheets только тех, кого сервер НЕ покрыл (диапазон целиком/частично до
+  // 30.08, машина не в fleet_assignments, или сервер недоступен) - цикл не менялся, только
+  // добавлена проверка "сервер уже ответил - не перезатирать более свежий ответ".
   var histForDriver = ss.getSheetByName('История_финансов');
   if (histForDriver && histForDriver.getLastRow() > 1 && histForDriver.getLastColumn() >= 13) {
     var dData = histForDriver.getRange(2, 1, histForDriver.getLastRow() - 1, 13).getValues();
@@ -6273,6 +6313,7 @@ function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate, skipServer
       var dGos = String(dr[1] || '').trim();
       var dDriver = String(dr[12] || '').trim();
       if (!dGos || !dDriver) continue;
+      if (driverByGos[dGos]) continue; // сервер уже дал более свежий ответ на этот госномер
       var existingD = driverByGos[dGos];
       if (!existingD || dd > existingD.date) driverByGos[dGos] = { date: dd, driver: dDriver };
     }

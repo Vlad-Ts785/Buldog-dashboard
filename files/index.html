@@ -10325,7 +10325,13 @@ function renderFleetStatus() {
 function fleetStartLivePoll_() {
   if (fleetLivePollTimer_) return;
   fleetPollTick_();
-  fleetLivePollTimer_ = setInterval(fleetPollTick_, 7000); // тот же интервал, что fetchPlanSegs_ Планировки
+  // Влад, 02.09: "почему не мгновенно... в планировке статус поменялся - бац - и тут уже
+  // тоже увидели" - было 7000ms (тот же ритм, что fetchPlanSegs_ Планировки), при
+  // просмотре обеих вкладок рядом чувствовалось как задержка. Настоящий push (WebSocket) -
+  // отдельная инфраструктурная задача, общая с Планировкой, не делаем походя здесь.
+  // Дешёвый компромисс - чаще опрашивать: 2500ms ощущается почти мгновенно человеком,
+  // при этом не бьёт по серверу сильнее Планировки на порядок (тот же лёгкий /plan/segs).
+  fleetLivePollTimer_ = setInterval(fleetPollTick_, 2500);
 }
 function fleetStopLivePoll_() {
   clearInterval(fleetLivePollTimer_);

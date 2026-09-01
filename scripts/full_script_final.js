@@ -5128,19 +5128,6 @@ function doGet(e) {
   }
   // ── конец временного экспорта ──────────────────────────────────────────────────────────────
 
-  // ── ВРЕМЕННО (2026-09-01, пересчитать кэш НОВЫМ кодом - includeExcluded=true, чтобы кэш
-  // содержал ВСЕХ машин для живого фильтра) - УБРАТЬ после использования.
-  if (e && e.parameter && e.parameter.action === 'refresh_main_cache') {
-    var rmcKey = e.parameter.key || '';
-    if (rmcKey !== 'b83e5f107ac2694d38fb1e0c96a72d5e') {
-      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
-    }
-    var rmcSs = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-    saveMainPayloadCache_(rmcSs);
-    return ContentService.createTextOutput(JSON.stringify({ ok: true, refreshed_at: new Date().toISOString() })).setMimeType(ContentService.MimeType.JSON);
-  }
-  // ── конец временного форс-обновления ───────────────────────────────────────────────────────
-
   // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём.
   // Сначала пробуем свой токен сессии (живёт до 48ч, см. issueSessionToken_) - только если
   // его нет или он истёк, идём проверять Google id_token (тот живёт ~1 час, это уже требует

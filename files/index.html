@@ -17010,13 +17010,10 @@ function navPopulateTypeFilter_() {
 }
 function navSetFilter(val) {
   navTypeFilter_ = val || '';
-  navSelectedId_ = null; // выбранная машина могла отфильтроваться - закрываем HUD, не показываем её призраком
-  var detail = document.getElementById('hud-detail');
-  if (detail) detail.classList.remove('show');
-  var closeBtn = document.getElementById('hud-close');
-  if (closeBtn) closeBtn.style.display = 'none';
+  navSelectedId_ = null; // выбранная машина могла отфильтроваться - не показываем её призраком
   navRenderList_();
   navRenderMarkers_();
+  navDrawAllTrails_(navLastTracks_); // сняли выделение - все хвосты обратно к ровной яркости
 }
 
 function navRenderList_() {
@@ -17075,12 +17072,6 @@ function navRenderMarkers_() {
     if (!seenIds[id]) { navMap_.removeLayer(navMarkers_[id]); delete navMarkers_[id]; }
   });
   navSyncDriftCircles_(navFilteredVehicles_());
-  // если выбранная машина обновилась (свежий live-снимок) - обновить и HUD-панель
-  if (navSelectedId_) {
-    navUpdateHud_();
-    var selV = navVehicles_.filter(function (x) { return x.omnicommId === navSelectedId_; })[0];
-    if (selV) navLoadTrail_(selV); // хвост тоже обновляем на каждом тике поллинга, не только при выборе
-  }
 }
 
 // Полный состав парка - из Штатки (D.vehicles, тот же источник, что у «Планировки»
@@ -17144,140 +17135,59 @@ function navFetch_() {
   }).catch(function () {}); // сервер недоступен - просто не обновляем, без ошибки на экране
 }
 
-// ── HUD-панель выбранной машины (концепт «Диспетчерская будущего», перенесён в
-// продакшен 31.08 по слову Влада «запускай в работу»). Водитель/прицеп - реальный
-// join с fleet_assignments на сервере (api/server.js), не выдумка - см. план.
-var navHudCompassBuilt_ = false;
-function navBuildCompassRing_() {
-  if (navHudCompassBuilt_) return;
-  navHudCompassBuilt_ = true;
-  var ring = document.getElementById('hud-compass-ring');
-  if (!ring) return;
-  var NS = 'http://www.w3.org/2000/svg';
-  for (var a = 0; a < 360; a += 15) {
-    var major = a % 90 === 0;
-    var r1 = 86, r2 = major ? 68 : 76;
-    var rad = a * Math.PI / 180;
-    var ln = document.createElementNS(NS, 'line');
-    ln.setAttribute('x1', (100 + r1 * Math.sin(rad)).toFixed(2));
-    ln.setAttribute('y1', (100 - r1 * Math.cos(rad)).toFixed(2));
-    ln.setAttribute('x2', (100 + r2 * Math.sin(rad)).toFixed(2));
-    ln.setAttribute('y2', (100 - r2 * Math.cos(rad)).toFixed(2));
-    ln.setAttribute('stroke', major ? 'rgba(232,230,223,.46)' : 'rgba(232,230,223,.17)');
-    ln.setAttribute('stroke-width', major ? 1.5 : 1);
-    ring.appendChild(ln);
-  }
+/* ── Хвосты (история движения) - ВСЕ машины сразу, не по клику (Влад, 01.09:
+   "хвосты сразу должны быть загружены на всех машинах... я открыл карту и
+   уже вижу, кто куда едет и откуда"). Один массовый запрос на весь парк
+   (GET /api/omnicomm/tracks) вместо N запросов по выбору. Один тонкий
+   полилайн на машину - без затухающих сегментов "уровня 3", это уже не тот
+   дизайн (Влад: "чуть-чуть потоньше, не обязательно такой широкий"). Глубина
+   - 3 часа (сервер: omnicomm_vehicle_track, чистка раз в цикл поллера),
+   пишется поллер каждые ~30 сек, как и раньше - глубину увеличили, частоту
+   записи не трогали. ── */
+var navTrailLayers_ = {}; // omnicommId -> L.polyline
+var navLastTracks_ = {}; // последний ответ /omnicomm/tracks - переиспользуем при смене выделения без нового запроса
+function navClearAllTrails_() {
+  Object.keys(navTrailLayers_).forEach(function (id) { navMap_.removeLayer(navTrailLayers_[id]); });
+  navTrailLayers_ = {};
 }
-function navBuildSpeedTicks_(speed) {
-  var el = document.getElementById('hud-ticks');
-  if (!el) return;
-  var MAXV = 90, N = 20;
-  var html = '';
-  for (var i = 0; i < N; i++) {
-    var v = i * MAXV / (N - 1);
-    html += '<i' + (v <= speed ? ' class="hud-on"' : '') + '></i>';
-  }
-  el.innerHTML = html;
-}
-function navUpdateHud_() {
-  var v = navVehicles_.filter(function (x) { return x.omnicommId === navSelectedId_; })[0];
-  if (!v) return;
-  navBuildCompassRing_();
-  setText('hud-name', v.driverName || 'Водитель не назначен');
-  setText('hud-gos', v.gos || v.omnicommId || '');
-  setText('hud-tractor', v.gos || '—');
-  setText('hud-trailer', v.trailerGos || '—');
-  setText('hud-model', v.model || '—');
-  setText('hud-speed', Math.round(v.speed || 0));
-  setText('hud-deg', (v.direction != null ? Math.round(v.direction) + '°' : '—'));
-  navBuildSpeedTicks_(v.speed || 0);
-  var stateEl = document.getElementById('hud-state');
-  var moving = v.ignition && v.speed > 3;
-  if (stateEl) {
-    stateEl.classList.toggle('off', !moving);
-    setText('hud-state-txt', v.stale ? 'НЕТ СВЯЗИ' : moving ? 'В ДВИЖЕНИИ' : (v.ignition ? 'НА МЕСТЕ, ЗАЖИГАНИЕ ВКЛ' : 'СТОИТ'));
-  }
-  var ring = document.getElementById('hud-compass-ring');
-  if (ring && v.direction != null) ring.style.transform = 'rotate(' + (-v.direction) + 'deg)';
-  // цвет статуса на всю панель (титр/шкала/спарклайн) - тот же канон, что у точки на карте
-  var detailEl = document.getElementById('hud-detail');
-  if (detailEl) detailEl.style.setProperty('--st-c', navMarkerColor_(navStatusClass_(v)));
-}
-
-/* ── Хвост за 30 минут + спарклайн скорости (реальная история,
-   GET /api/omnicomm/track) - Влад, 01.09: "нужен хвост, координаты за
-   последние 30 минут" + "уровень 3" на превью. Тянем ТОЛЬКО для выбранной
-   машины - на весь парк разом было бы 50+ хвостов и каша на карте. ── */
-var navTrailLayers_ = [];
-function navClearTrail_() {
-  navTrailLayers_.forEach(function (l) { navMap_.removeLayer(l); });
-  navTrailLayers_ = [];
-}
-function navDrawTrail_(points, color) {
-  navClearTrail_();
-  if (!navMap_ || points.length < 2) return;
-  var maxSpeed = 0;
-  points.forEach(function (p) { if (p.speed != null) maxSpeed = Math.max(maxSpeed, p.speed); });
-  maxSpeed = Math.max(maxSpeed, 20); // не даём хвосту исчезать на постоянно медленных отрезках
-  var n = points.length;
-  // Влад, 01.09: "хвосты должны быть пожирнее и за час" - было 30 мин с крутым
-  // затуханием (заметно только у самой точки), стало 60 мин (сервер уже отдаёт
-  // час, см. GET /api/omnicomm/track) + толще база + более пологое затухание,
-  // чтобы весь час оставался читаемым, а не гас через первую же минуту.
-  for (var i = 1; i < n; i++) {
-    var a = points[i - 1], b = points[i];
-    var back = 1 - i / n; // 0 - самый свежий конец хвоста, 1 - самый старый
-    var fade = Math.pow(1 - back, 1.15);
-    var spdRatio = Math.min(1, (b.speed || 0) / maxSpeed);
-    var weight = (3 + spdRatio * 7) * fade;
-    if (weight < 0.6) continue;
-    var opacity = (0.22 + spdRatio * 0.55) * fade;
-    // сияние + ядро - тот же приём, что в превью "уровня 3", просто через два Leaflet-полилайна
-    navTrailLayers_.push(L.polyline([[a.lat, a.lng], [b.lat, b.lng]], {
-      color: color, weight: weight * 2.4, opacity: opacity * 0.4, lineCap: 'round', interactive: false
-    }).addTo(navMap_));
-    navTrailLayers_.push(L.polyline([[a.lat, a.lng], [b.lat, b.lng]], {
-      color: color, weight: weight, opacity: Math.min(0.92, opacity * 1.8), lineCap: 'round', interactive: false
-    }).addTo(navMap_));
-  }
-}
-function navBuildSparkline_(points, currentSpeed) {
-  var wrap = document.getElementById('hud-spark-wrap');
-  var el = document.getElementById('hud-spark');
-  if (!el || !wrap) return;
-  if (!points || points.length < 2) { wrap.style.display = 'none'; return; }
-  wrap.style.display = '';
-  var vals = points.map(function (p) { return p.speed || 0; });
-  vals.push(currentSpeed || 0);
-  var max = Math.max(30, Math.max.apply(null, vals));
-  var w = 266, h = 32, n = vals.length, d = '';
-  for (var i = 0; i < n; i++) {
-    var x = (i / (n - 1)) * w, y = h - (vals[i] / max) * h;
-    d += (i ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1) + ' ';
-  }
-  var dArea = d + 'L' + w + ' ' + h + ' L0 ' + h + ' Z';
-  var lx = w, ly = h - (vals[n - 1] / max) * h;
-  el.innerHTML = '<svg class="hud-spark" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">' +
-    '<defs><linearGradient id="hud-sg" x1="0" y1="0" x2="0" y2="1">' +
-    '<stop offset="0%" stop-color="var(--st-c)" stop-opacity=".35"/>' +
-    '<stop offset="100%" stop-color="var(--st-c)" stop-opacity="0"/></linearGradient></defs>' +
-    '<path d="' + dArea + '" fill="url(#hud-sg)"/>' +
-    '<path d="' + d + '" fill="none" stroke="var(--st-c)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>' +
-    '<circle cx="' + lx.toFixed(1) + '" cy="' + ly.toFixed(1) + '" r="2.6" fill="var(--st-c)"/>' +
-    '</svg>';
-}
-function navLoadTrail_(v) {
-  fetchFromYardApi_('/omnicomm/track', { omnicommId: v.omnicommId }).then(function (r) {
-    // машину могли переключить/закрыть, пока ждали ответ - не рисуем хвост чужой машине
-    if (navSelectedId_ !== v.omnicommId) return;
-    if (!r.ok || !r.data || !Array.isArray(r.data.points)) { navClearTrail_(); return; }
+function navDrawAllTrails_(tracksById) {
+  if (!navMap_ || !tracksById) return;
+  var hasSelection = !!navSelectedId_;
+  var seen = {};
+  navVehicles_.forEach(function (v) {
+    if (!v.omnicommId) return;
+    var pts = tracksById[v.omnicommId];
+    if (!pts || pts.length < 2) return;
+    seen[v.omnicommId] = true;
+    var latlngs = pts.map(function (p) { return [p.lat, p.lng]; });
     var color = navMarkerColor_(navStatusClass_(v));
-    navDrawTrail_(r.data.points, color);
-    navBuildSparkline_(r.data.points, v.speed);
-  }).catch(function () {}); // тихий фолбэк - без хвоста, не без карты
+    var selected = v.omnicommId === navSelectedId_;
+    // без выделения - все хвосты ровным тонким цветом; выбрали машину - её
+    // хвост чуть плотнее, остальные притушены, чтобы не спорили за внимание
+    var weight = selected ? 3 : 2;
+    var opacity = hasSelection ? (selected ? 0.85 : 0.16) : 0.5;
+    var existing = navTrailLayers_[v.omnicommId];
+    if (existing) {
+      existing.setLatLngs(latlngs);
+      existing.setStyle({ color: color, weight: weight, opacity: opacity });
+      if (selected) existing.bringToFront();
+    } else {
+      navTrailLayers_[v.omnicommId] = L.polyline(latlngs, {
+        color: color, weight: weight, opacity: opacity, lineCap: 'round', interactive: false
+      }).addTo(navMap_);
+    }
+  });
+  Object.keys(navTrailLayers_).forEach(function (id) {
+    if (!seen[id]) { navMap_.removeLayer(navTrailLayers_[id]); delete navTrailLayers_[id]; }
+  });
 }
-// setText() уже определена глобально (используется в showPage и др.) - переиспользуем,
-// не дублируем.
+function navLoadAllTrails_() {
+  fetchFromYardApi_('/omnicomm/tracks', { minutes: 180 }).then(function (r) {
+    if (!r.ok || !r.data || !r.data.tracks) return;
+    navLastTracks_ = r.data.tracks;
+    navDrawAllTrails_(navLastTracks_);
+  }).catch(function () {}); // тихий фолбэк - без хвостов, не без карты
+}
 
 function navSelect(omnicommId) {
   navSelectedId_ = omnicommId;
@@ -17287,33 +17197,14 @@ function navSelect(omnicommId) {
   if (navMap_ && v && v.latitude != null && v.longitude != null) {
     navMap_.setView([v.latitude, v.longitude], Math.max(navMap_.getZoom(), 12));
   }
-  navUpdateHud_();
-  var detail = document.getElementById('hud-detail');
-  if (detail) detail.classList.add('show');
-  var closeBtn = document.getElementById('hud-close');
-  if (closeBtn) closeBtn.style.display = '';
-  navClearTrail_();
-  if (v && v.omnicommId) navLoadTrail_(v);
+  navDrawAllTrails_(navLastTracks_); // подсветить хвост выбранной машины, остальные притушить
 }
 function navDeselect() {
   navSelectedId_ = null;
   navRenderList_();
   navRenderMarkers_();
-  var detail = document.getElementById('hud-detail');
-  if (detail) detail.classList.remove('show');
-  var closeBtn = document.getElementById('hud-close');
-  if (closeBtn) closeBtn.style.display = 'none';
-  navClearTrail_();
+  navDrawAllTrails_(navLastTracks_); // вернуть все хвосты к ровной яркости
 }
-
-function navTickClock_() {
-  var el = document.getElementById('hud-clock');
-  if (!el) return;
-  var d = new Date();
-  var pad = function (n) { return n < 10 ? '0' + n : '' + n; };
-  el.textContent = pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
-}
-var navClockTimer_ = null;
 
 function navInit() {
   if (!navInited_) {
@@ -17327,14 +17218,12 @@ function navInit() {
   }
   navRenderList_(); // плейсхолдер сразу, не ждать первого ответа сервера - иначе список пустой
   navFetch_();
+  navLoadAllTrails_();
   if (navPollTimer_) clearInterval(navPollTimer_);
   navPollTimer_ = setInterval(function () {
     // Опрашиваем, только пока вкладка реально открыта - не жжём попусту в фоне.
-    if (document.getElementById('page-navigation').classList.contains('active')) navFetch_();
+    if (document.getElementById('page-navigation').classList.contains('active')) { navFetch_(); navLoadAllTrails_(); }
   }, 30000);
-  navTickClock_();
-  if (navClockTimer_) clearInterval(navClockTimer_);
-  navClockTimer_ = setInterval(navTickClock_, 1000);
 }
 
 window.NAV = { init: navInit, select: navSelect, deselect: navDeselect, setFilter: navSetFilter };

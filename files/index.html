@@ -21400,7 +21400,14 @@ var arr = null;
 rowsEl.addEventListener("pointerdown", function(e){
   if (IS_TOUCH_) return;   /* перестановка строк - функция сверх "перемещения", на тач выключена */
   if (!canArrange()) return;
-  if (e.target.closest(".hide-btn")) return;
+  /* НАЙДЕННЫЙ БАГ (Влад, 01.09: "при нажатии не перебрасывает на страницу
+     навигации" - клик по .rh-omni вообще не доходил до своего обработчика).
+     Тот же класс ловушки, что уже решён для .hide-btn: этот pointerdown
+     стоит РАНЬШЕ клика по бейджу в очереди, ставит setPointerCapture на
+     .rowhead и готовится к драгу перестановки строк - для мыши это глушит
+     последующий click, даже если пользователь никуда не сдвинул курсор
+     (arr.moved остаётся false, но событие уже перехвачено). */
+  if (e.target.closest(".hide-btn") || e.target.closest(".rh-omni")) return;
   var head = e.target.closest(".rowhead");
   if (!head) return;
   var row = head.closest(".row");

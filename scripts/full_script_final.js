@@ -4475,16 +4475,22 @@ function buildNameOnlyRoster_(list) {
 // там же). Только ИМЕНА для пикера/присутствия, ни одной финансовой цифры прошлого
 // месяца сюда не попадает.
 var ROSTER_MIN_SIZE_ = 5;
+// НАЙДЕННЫЙ БАГ (01.09, третий заход, подтверждено через diag_roster): computed -
+// это САМ orders-объект (fetchOrdersComputedFromServer_ возвращает data.orders
+// напрямую), не обёртка с полем .orders - "computed.orders"/"prev.orders" всегда
+// были undefined, mgrCount/logCount всегда 0, а "if (!prev || !prev.orders) return
+// null" всегда обрубал функцию раньше реального фолбэка. Читаем по_manager/по_logist
+// НАПРЯМУЮ с обоих объектов, без вложенности.
 function buildRosterFallback_(computed, monthKey) {
   try {
-    var mgrCount = (computed.orders && computed.orders.by_manager || []).length;
-    var logCount = (computed.orders && computed.orders.by_logist || []).length;
+    var mgrCount = (computed.by_manager || []).length;
+    var logCount = (computed.by_logist || []).length;
     if (mgrCount >= ROSTER_MIN_SIZE_ && logCount >= ROSTER_MIN_SIZE_) return null;
     var prev = fetchOrdersComputedFromServer_(prevMonthKey_(monthKey));
-    if (!prev || !prev.orders) return null;
+    if (!prev) return null;
     return {
-      managers: buildNameOnlyRoster_(prev.orders.by_manager),
-      logists:  buildNameOnlyRoster_(prev.orders.by_logist)
+      managers: buildNameOnlyRoster_(prev.by_manager),
+      logists:  buildNameOnlyRoster_(prev.by_logist)
     };
   } catch (err) { return null; }
 }
@@ -5085,6 +5091,10 @@ function updateOrderPlanStatus_(personName, p) {
 
 function doGet(e) {
   const ss = SpreadsheetApp.openById('1jCPRXYDFcTpZIHdJfngZveOQFycu6qbcl-MoXBxtBRM');
+
+  // diag_roster (01.09) - убрана: помогла найти настоящий баг (computed.orders вместо
+  // computed напрямую, см. buildRosterFallback_/getOrdersData ниже), корень найден и
+  // подтверждён числами, диагностика больше не нужна.
 
   // ── ВРЕМЕННО (2026-08-19, перенос ДЗ на сервер) - экспорт листа "ДЗ_Статусы" (ручные
   // статусы/комментарии, НЕ из 1С - разовый + периодический перенос, см.
@@ -9504,7 +9514,20 @@ function serverCalcLooksSane_(data, expectedPeriod) {
   if (!data || !data.orders || !data.orders.summary) return false;
   if (data.period !== expectedPeriod) return false;
   var s = data.orders.summary;
-  if (typeof s.total_orders !== 'number' || s.total_orders <= 0) return false;
+  if (typeof s.total_orders !== 'number') return false;
+  // НАЙДЕННЫЙ БАГ (01.09, копал "лампочки логистов" - причина оказалась на шаг
+  // РАНЬШЕ моего первого фикса): total_orders<=0 всегда считался признаком
+  // "сервер сломан" - но в первые дни НОВОГО календарного месяца это ЗАКОННОЕ
+  // состояние (1С физически ещё не прислала ни одного заказа за месяц), не
+  // поломка. Из-за этого serverCalcLooksSane_ отклонял ЦЕЛИКОМ верный (просто
+  // пустой) ответ сервера, fetchOrdersComputedFromServer_ возвращал null,
+  // getOrdersData() тихо падал на легаси-путь через лист - roster-фолбэк
+  // (buildRosterFallback_, см. запись выше) там вообще не применяется, потому
+  // и не сработал, хотя сам код был верен. Разрешаем 0 заказов ТОЛЬКО для
+  // ТЕКУЩЕГО календарного месяца - для архивных периодов 0 заказов по-прежнему
+  // считается поломкой (там 0 не бывает законным, это НЕ ослабление защиты).
+  var isCurrentMonth = expectedPeriod === Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM');
+  if (s.total_orders <= 0 && !isCurrentMonth) return false;
   if (typeof s.total_amount !== 'number') return false;
   if (typeof s.hired_margin_qualifies !== 'boolean') return false;
   if (!Array.isArray(data.orders.by_manager) || !Array.isArray(data.orders.by_logist)) return false;
@@ -9557,11 +9580,19 @@ function getOrdersData(ss) {
     // те же смёрженные поля СРАЗУ на сырой объект - buildManagerView_/buildLogistView_
     // ниже по цепочке всё равно перезатрут их своей (тоже верной) версией для приватных
     // ролей, а admin теперь получает готовые смёрженные имена без обхода.
-    if (computed.orders) {
-      computed.orders._rosterFallback = buildRosterFallback_(computed, monthKey);
-      computed.orders.roster_managers = mergeRosterFallback_(buildNameOnlyRoster_(computed.orders.by_manager), computed.orders._rosterFallback && computed.orders._rosterFallback.managers);
-      computed.orders.roster_logists = mergeRosterFallback_(buildNameOnlyRoster_(computed.orders.by_logist), computed.orders._rosterFallback && computed.orders._rosterFallback.logists);
-    }
+    // НАЙДЕННЫЙ БАГ (01.09, третий заход, через diag_roster подтверждено числами):
+    // fetchOrdersComputedFromServer_ возвращает data.orders НАПРЯМУЮ (см. её же тело -
+    // "return data.orders;") - то есть computed САМ И ЕСТЬ orders-объект (with by_manager/
+    // by_logist/summary НА ВЕРХНЕМ уровне), а НЕ обёртка с полем .orders внутри. Три
+    // предыдущих захода писали computed.orders.roster_* - проверка "if (computed.orders)"
+    // всегда была false (такого вложенного поля не существует), весь блок был мёртвым
+    // кодом с самого первого коммита - buildRosterFallback_ ни разу не выполнился. Кладём
+    // поля НА САМ computed, без лишней вложенности - тот же объект, что уходит дальше в
+    // buildManagerView_/buildLogistView_ как параметр orders, где orders._rosterFallback/
+    // orders.roster_managers читаются уже верно (там вложенности никогда не было).
+    computed._rosterFallback = buildRosterFallback_(computed, monthKey);
+    computed.roster_managers = mergeRosterFallback_(buildNameOnlyRoster_(computed.by_manager), computed._rosterFallback && computed._rosterFallback.managers);
+    computed.roster_logists = mergeRosterFallback_(buildNameOnlyRoster_(computed.by_logist), computed._rosterFallback && computed._rosterFallback.logists);
     return joinManagerPlans_(ss, computed, monthKey);
   }
 

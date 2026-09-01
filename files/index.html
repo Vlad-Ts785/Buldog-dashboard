@@ -796,9 +796,16 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .nav-dot.is-moving{background:var(--green);}
 .nav-dot.is-idle{background:var(--amber);}
 .nav-dot.is-stale{background:var(--red);}
+.nav-item.nav-item-notrack{cursor:default;opacity:.55;}
+.nav-item.nav-item-notrack:hover{background:none;}
 .nav-item-main{flex:1;min-width:0;}
+.nav-item-line1{display:flex;align-items:baseline;gap:6px;overflow:hidden;}
+.nav-item-tag{flex:none;font:600 9.5px/1 var(--font-mono,monospace);letter-spacing:.06em;color:var(--muted);
+  border:1px solid var(--border);border-radius:3px;padding:2px 5px;}
+.nav-item-model{flex:none;font-size:11.5px;color:var(--muted);white-space:nowrap;}
 .nav-item-plate{font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.nav-item-meta{font:12px/1.3 var(--font-mono,monospace);color:var(--muted);font-variant-numeric:tabular-nums;}
+.nav-item-line2{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;}
+.nav-item-meta{font:12px/1.3 var(--font-mono,monospace);color:var(--muted);font-variant-numeric:tabular-nums;flex:none;padding-left:8px;}
 .nav-map-card{padding:0;overflow:hidden;position:relative;}
 .nav-map{width:100%;height:100%;min-height:300px;}
 .nav-marker-dot{border-radius:50%;box-shadow:0 0 0 2px var(--bg2);}
@@ -16983,6 +16990,12 @@ var navInited_ = false;
 // Своя мини-экранировка (не общая escHtml_ - та приватна внутри IIFE калькулятора,
 // см. plans/2026-08-17-calculator-dashboard-integration.md). plate приходит из Omnicomm
 // (внешние данные) - на innerHTML не пускаем сырым.
+// Своя копия нормализации госномера для сверки (не lpOmniNormPlate_ у Планировки -
+// та приватна внутри ЕЁ IIFE, несмотря на комментарий "не IIFE" рядом с другой
+// функцией того же файла - там речь про другую обёртку; проверено 01.09, функция
+// реально недоступна снаружи). Логика намеренно идентична - тот же принцип
+// сверки госномеров, что уже работает у бейджа в Планировке.
+function navNormPlate_(s) { return String(s || '').toUpperCase().replace(/[^А-ЯЁ0-9]/g, ''); }
 function navEsc_(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
@@ -17033,20 +17046,32 @@ function navRenderList_() {
   if (head) head.textContent = 'Техника (' + navVehicles_.length + ')';
   if (!listEl) return;
   listEl.innerHTML = navVehicles_.map(function (v) {
-    var cls = navStatusClass_(v);
-    var active = (v.omnicommId === navSelectedId_) ? ' active' : '';
-    return '<div class="nav-item' + active + '" onclick="NAV.select(\'' + v.omnicommId + '\')">' +
+    var cls = v.hasTelemetry === false ? '' : navStatusClass_(v);
+    var active = (v.omnicommId && v.omnicommId === navSelectedId_) ? ' active' : '';
+    var clickable = v.omnicommId ? ' onclick="NAV.select(\'' + v.omnicommId + '\')"' : '';
+    // Формат "как в Планировке" (rh1/rh2, Влад 01.09): тип + модель + госномер на
+    // первой строке, прицеп · водитель на второй - вместо сырого имени Omnicomm.
+    var line1 = (v.type ? '<span class="nav-item-tag">' + navEsc_(v.type) + '</span>' : '') +
+      (v.tractor ? '<span class="nav-item-model">' + navEsc_(v.tractor) + '</span>' : '') +
+      '<span class="nav-item-plate">' + navEsc_(v.gos || v.plate || v.omnicommId || '') + '</span>';
+    var line2 = navEsc_(v.trailerGos || 'без прицепа') +
+      (v.driverName ? ' · ' + navEsc_(v.driverName) : ' · без водителя');
+    var meta = v.hasTelemetry === false ? 'нет телематики' : navStatusLabel_(v);
+    return '<div class="nav-item' + active + (v.omnicommId ? '' : ' nav-item-notrack') + '"' + clickable + '>' +
       '<span class="nav-dot ' + cls + '"></span>' +
-      '<span class="nav-item-main"><div class="nav-item-plate">' + navEsc_(v.plate || v.omnicommId) + '</div></span>' +
-      '<span class="nav-item-meta">' + navStatusLabel_(v) + '</span>' +
+      '<span class="nav-item-main"><div class="nav-item-line1">' + line1 + '</div>' +
+      '<div class="nav-item-line2">' + line2 + '</div></span>' +
+      '<span class="nav-item-meta">' + meta + '</span>' +
       '</div>';
   }).join('') || '<div style="padding:14px;color:var(--muted);font-size:13px;">Нет данных</div>';
 }
 
 function navRenderMarkers_() {
   if (!navMap_) return;
+  var seenIds = {};
   navVehicles_.forEach(function (v) {
-    if (v.latitude == null || v.longitude == null) return;
+    if (!v.omnicommId || v.latitude == null || v.longitude == null) return;
+    seenIds[v.omnicommId] = true;
     var cls = navStatusClass_(v);
     var selected = (v.omnicommId === navSelectedId_);
     var pos = [v.latitude, v.longitude];
@@ -17060,14 +17085,69 @@ function navRenderMarkers_() {
       navMarkers_[v.omnicommId] = m;
     }
   });
+  // машина пропала из свежего снимка (сменился госномер/сцепка) - убрать старый маркер
+  Object.keys(navMarkers_).forEach(function (id) {
+    if (!seenIds[id]) { navMap_.removeLayer(navMarkers_[id]); delete navMarkers_[id]; }
+  });
   // если выбранная машина обновилась (свежий live-снимок) - обновить и HUD-панель
   if (navSelectedId_) navUpdateHud_();
+}
+
+// Полный состав парка - из Штатки (D.vehicles, тот же источник, что у «Планировки»
+// - buildVehicles()), НЕ из Omnicomm: у Omnicomm 119 объектов аккаунта, включая
+// служебные LADA/JCB, которые не входят в наш парк тралов/длинномеров. Сверка по
+// госномеру (lpOmniNormPlate_ - та же нормализация, что уже использует бейдж в
+// Планировке) сама по себе отфильтровывает всё лишнее - машина не из Штатки просто
+// никогда не появится в списке, гадать/исключать вручную не нужно.
+function navBuildRoster_() {
+  if (typeof D === 'undefined' || !D || !Array.isArray(D.vehicles)) return null;
+  return D.vehicles.map(function (f) {
+    var driverText = String(f.driver || '').split('/')[0].trim();
+    return {
+      type: f.type || '',
+      tractor: String(f.marka || '').split(' ')[0],
+      marka: f.marka || '',
+      gos: f.gos || '',
+      normGos: navNormPlate_(f.gos || ''),
+      trailerText: f.trailer || '',
+      driverText: driverText,
+    };
+  }).filter(function (r) { return r.normGos; });
 }
 
 function navFetch_() {
   fetchFromYardApi_('/omnicomm/locations').then(function (r) {
     if (!r.ok || !r.data || !r.data.vehicles) return; // тихий фолбэк - молчим, не ломаем UI
-    navVehicles_ = r.data.vehicles;
+    var telemetryByGos = {};
+    r.data.vehicles.forEach(function (t) {
+      var norm = navNormPlate_(t.gosNumber || '');
+      if (norm) telemetryByGos[norm] = t;
+    });
+    var roster = navBuildRoster_();
+    if (roster && roster.length) {
+      navVehicles_ = roster.map(function (rv) {
+        var t = telemetryByGos[rv.normGos];
+        return {
+          omnicommId: t ? t.omnicommId : null,
+          hasTelemetry: !!t,
+          gos: rv.gos, plate: rv.gos, type: rv.type, tractor: rv.tractor,
+          driverName: (t && t.driverName) || rv.driverText || '',
+          trailerGos: (t && t.trailerGos) || rv.trailerText || '',
+          model: (t && t.model) || rv.marka || '',
+          latitude: t ? t.latitude : null, longitude: t ? t.longitude : null,
+          speed: t ? t.speed : null, direction: t ? t.direction : null,
+          ignition: t ? t.ignition : false, stale: t ? t.stale : true,
+          updatedAt: t ? t.updatedAt : null,
+        };
+      });
+    } else {
+      // D ещё не загружен (Навигацию открыли раньше главной панели) - показываем
+      // как есть от Omnicomm, без сверки со Штаткой; следующий тик (30 сек) или
+      // повторное открытие вкладки подтянет уже полный состав.
+      navVehicles_ = r.data.vehicles.map(function (t) {
+        return Object.assign({ hasTelemetry: true, gos: t.gosNumber || t.plate }, t);
+      });
+    }
     navRenderList_();
     navRenderMarkers_();
   }).catch(function () {}); // сервер недоступен - просто не обновляем, без ошибки на экране
@@ -17113,8 +17193,8 @@ function navUpdateHud_() {
   if (!v) return;
   navBuildCompassRing_();
   setText('hud-name', v.driverName || 'Водитель не назначен');
-  setText('hud-gos', v.gosNumber || v.omnicommId);
-  setText('hud-tractor', v.gosNumber || '—');
+  setText('hud-gos', v.gos || v.omnicommId || '');
+  setText('hud-tractor', v.gos || '—');
   setText('hud-trailer', v.trailerGos || '—');
   setText('hud-model', v.model || '—');
   setText('hud-speed', Math.round(v.speed || 0));

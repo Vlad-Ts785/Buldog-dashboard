@@ -6864,9 +6864,12 @@ function getFleetStatus(staffData, fleetSummaryByGos) {
     }
   }
 
+  // total - динамически (сумма 4 бакетов), не хардкод (было 36/19 - найдено расходящимся
+  // с реальным составом парка 02.09 при сверке с /api/main_payload: факт 34 трейлера, не
+  // 36 - старые магические числа устарели вместе с составом парка).
   return {
-    trailers: { total:36, working:tWork, noDriver:tNoDrv, repair:tRepair, noOrder:tNoOrder },
-    trucks:   { total:19, working:lWork, noDriver:lNoDrv, repair:lRepair, noOrder:lNoOrder },
+    trailers: { total: tWork+tRepair+tNoDrv+tNoOrder, working:tWork, noDriver:tNoDrv, repair:tRepair, noOrder:tNoOrder },
+    trucks:   { total: lWork+lRepair+lNoDrv+lNoOrder, working:lWork, noDriver:lNoDrv, repair:lRepair, noOrder:lNoOrder },
   };
 }
 

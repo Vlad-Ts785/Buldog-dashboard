@@ -23281,15 +23281,20 @@ function closeHistoryDrawer_(){
   historyScrim_.classList.remove("open");
 }
 historyScrim_.onclick = closeHistoryDrawer_;
-function openHistoryDrawer_(){
+/* v (необязательно, 02.09 второй заход - Влад: "будет история по конкретной
+   машине в меню ПКМ") - когда передана машина, лента фильтруется на сервере
+   по её госномеру (?gos=), заголовок называет её явно; без аргумента - вся
+   доска целиком, как раньше (кнопка у лампочек присутствия). */
+function openHistoryDrawer_(v){
+  var scoped = v && v.gos;
   historyDrawer_.innerHTML =
-    '<div class="dr-eyebrow">Планировка</div><div class="dr-title">История действий</div>' +
+    '<div class="dr-eyebrow">Планировка</div><div class="dr-title">История' + (scoped ? " · " + pageEsc_(v.gos) : " действий") + '</div>' +
     '<div class="dr-note" id="lp-histBody">Загрузка…</div>' +
     '<div class="dr-actions"><button class="chip dr-close" id="lp-histClose">Закрыть</button></div>';
   document.getElementById("lp-histClose").onclick = closeHistoryDrawer_;
   historyDrawer_.classList.add("open"); historyDrawer_.setAttribute("aria-hidden", "false");
   historyScrim_.classList.add("open");
-  fetchFromYardApi_("/plan/activity", {limit: 150}).then(function(r){
+  fetchFromYardApi_("/plan/activity", scoped ? {limit: 150, gos: v.gos} : {limit: 150}).then(function(r){
     var body = document.getElementById("lp-histBody");
     if (!body) return;   /* панель уже закрыли, пока ответ шёл */
     if (!r.ok || !r.data || !Array.isArray(r.data.events)){
@@ -23305,7 +23310,7 @@ function openHistoryDrawer_(){
     if (body) body.textContent = "Ошибка сети - попробуйте ещё раз.";
   });
 }
-document.getElementById("lp-historyBtn").onclick = openHistoryDrawer_;
+document.getElementById("lp-historyBtn").onclick = function(){ openHistoryDrawer_(); };
 
 /* Диалог подтверждения «под данные» (Влад, 30.08) - callback-стиль, не Promise:
    проще звать из синхронного кода pointerup (см. движение плитки ниже), не
@@ -23686,6 +23691,10 @@ function renderFleetMenuMain_(){
      убираем ту прямую копию, просто добавляем сюда же как явный пункт меню,
      на случай если правым кликнули не точно по верхней строке. */
   items.push('<button class="ctxmenu-item" data-fa="copy">Копировать</button>');
+  /* "История" по конкретной машине (02.09, второй заход - тот же журнал, что у
+     кнопки истории рядом с лампочками присутствия, только отфильтрован по
+     госномеру, см. openHistoryDrawer_(v)/?gos= на сервере). */
+  items.push('<button class="ctxmenu-item" data-fa="history">История</button>');
   /* Скачать СТС (Влад, 31.08, четвёртый заход: "нужно чтобы можно было скачать
      стс на тягач и прицеп") - файл ищется по факту клика (lpDownloadSts_), не
      заранее - Планировка не подгружает sprav_asset_documents целиком (это отдельный
@@ -23718,6 +23727,7 @@ function handleFleetMenuAction_(action){
   var v = STATE.vehicles[fleetMenuVi_];
   if (!v){ closeFleetMenu_(); return; }
   if (action === "copy"){ lpCopyRow_(fleetMenuVi_); closeFleetMenu_(); return; }
+  if (action === "history"){ closeFleetMenu_(); openHistoryDrawer_(v); return; }
   if (action === "sts-tractor"){ lpDownloadSts_(v.gos); closeFleetMenu_(); return; }
   if (action === "sts-trailer"){
     var trl = lpFleetOpenOnTractor_("trailer", v.gos);

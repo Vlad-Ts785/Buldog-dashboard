@@ -22014,6 +22014,14 @@ function autoscrollTick(){
 var arr = null;
 rowsEl.addEventListener("pointerdown", function(e){
   if (IS_TOUCH_) return;   /* перестановка строк - функция сверх "перемещения", на тач выключена */
+  /* НАЙДЕННЫЙ БАГ (Влад, 02.09: "ПКМ не вызывает заявку, а вызывает меню...").
+     Ни один pointerdown-обработчик на доске не проверял КАКАЯ кнопка мыши -
+     правый клик запускал ТУ ЖЕ логику драга (setPointerCapture,
+     preventDefault), что и левый, и к моменту, когда браузер поднимал
+     нативный contextmenu, курсор уже был "захвачен" драгом - оба события
+     срабатывали одновременно, побеждал драг. e.button===0 - только левая
+     кнопка (см. те же 2 гейта у остальных pointerdown ниже по файлу). */
+  if (e.button !== 0) return;
   if (!canReorder()) return;
   /* НАЙДЕННЫЙ БАГ (Влад, 01.09: "при нажатии не перебрасывает на страницу
      навигации" - клик по .rh-omni вообще не доходил до своего обработчика).
@@ -22115,6 +22123,7 @@ var drag = null, raf = 0;
 
 rowsEl.addEventListener("pointerdown", function(e){
   if (IS_TOUCH_) return;   /* драг/растяжка на тач выключены - палец должен просто скроллить */
+  if (e.button !== 0) return;   /* только левая - см. разбор у первого pointerdown выше по файлу */
   var el = e.target.closest(".seg");
   if (!el) return;
   markActive_();   /* захватил плитку - живой признак присутствия, не ждать saveSegs() в конце жеста */
@@ -22771,6 +22780,7 @@ function loadSegs(){
 var create = null;
 rowsEl.addEventListener("pointerdown", function(e){
   if (IS_TOUCH_) return;   /* создание протяжкой на тач выключено - см. click ниже, тапом через шторку */
+  if (e.button !== 0) return;   /* только левая - см. разбор у первого pointerdown выше по файлу */
   if (e.target.closest(".seg") || e.target.closest(".rowhead") || e.target.closest(".hide-btn")) return;
   var track = e.target.closest(".track");
   if (!track) return;

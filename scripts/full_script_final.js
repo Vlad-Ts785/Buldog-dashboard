@@ -1616,8 +1616,9 @@ function createTopDriversByPlan() {
 function saveDailyStats() {
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
 
-  // Используем getFleetStatus — тот же источник, что и дашборд
-  const fleet = getFleetStatus(getStaffData(ss));
+  // Используем getFleetStatus — тот же источник, что и дашборд (живой статус с сервера,
+  // этап 2.4-2, 02.09 - Штатку больше никто не ведёт, фолбэк только при недоступности сервера)
+  const fleet = getFleetStatus(getStaffData(ss), fetchFleetSummaryFromServer_());
   const tr = fleet.trailers;
   const tk = fleet.trucks;
 
@@ -3516,8 +3517,9 @@ function buildSummaryText() {
     }
   }
 
-  // Статус парка — из Штатки (все машины, включая без выручки)
-  var fleet = getFleetStatus(getStaffData(ss));
+  // Статус парка — живой с сервера (все машины, включая без выручки; этап 2.4-2, 02.09 -
+  // Штатку больше никто не ведёт, фолбэк только при недоступности сервера)
+  var fleet = getFleetStatus(getStaffData(ss), fetchFleetSummaryFromServer_());
   var workT = fleet.trailers.working, repairT = fleet.trailers.repair, noDriverT = fleet.trailers.noDriver;
   var workL = fleet.trucks.working,   repairL = fleet.trucks.repair,   noDriverL = fleet.trucks.noDriver;
 
@@ -5795,19 +5797,24 @@ function doGet(e) {
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
-    const staffData = getStaffData(ss); // читаем Штатку один раз - ЖИВОЙ документ, всегда live
+    const staffData = getStaffData(ss); // читаем Штатку один раз - фолбэк на случай недоступности сервера
+
+    // Живой статус (этап 2.4-2, 02.09) для fleet/repairs ниже. Отдельный вызов от того,
+    // что делает aggregateFinHistoryForRange (внутри getMainPayloadCacheOrLive_ ниже, если
+    // кэш устарел) - /api/fleet_summary лёгкий (53 машины, несколько простых SELECT), два
+    // вызова за один заход дешевле, чем городить общий кэш ради этого прямо сейчас.
+    const fleetSummaryByGos_admin_ = fetchFleetSummaryFromServer_();
 
     const data = Object.assign(
       {
         updated: new Date().toISOString(),
         role:    'admin',
         session_token: freshSessionToken,
-        // Живые поля - НЕ кэшируются в runAll() (см. buildHeavyMainPayload_). Штатка -
-        // "живой документ" (CLAUDE.md), её правят руками вне расписания runAll() - если
-        // закэшировать статус машины/ремонты на 3 часа, правки будут "зависать", это
-        // регресс, а не ускорение. Штатка маленькая (~55 строк), расчёт и так мгновенный.
-        fleet:       getFleetStatus(staffData),
-        repairs:     getRepairsData(staffData),
+        // Живые поля - НЕ кэшируются в runAll() (см. buildHeavyMainPayload_). Статус -
+        // с сервера (см. fleetSummaryByGos_admin_ выше), Штатка - фолбэк только если
+        // сервер недоступен.
+        fleet:       getFleetStatus(staffData, fleetSummaryByGos_admin_),
+        repairs:     getRepairsData(staffData, fleetSummaryByGos_admin_),
         staffMarkas: buildStaffMarkas_(staffData),
         // Активность сотрудников (2026-08-13) - дешёвый листовой запрос (десяток строк).
         access_log:  getAccessLogSummary_(ss),
@@ -6257,16 +6264,21 @@ function setupShtatkaAutoMigration() {
 }
 
 // Список машин в ремонте из Штатки
-function getRepairsData(staffData) {
+// fleetSummaryByGos (этап 2.4-2, 02.09) - живой статус с сервера, ключ normalizeGos(),
+// тот же формат, что staffData. Штатка - фолбэк только когда сервер недоступен (см.
+// getFleetStatus рядом за тем же обоснованием - Штатку больше никто не ведёт).
+function getRepairsData(staffData, fleetSummaryByGos) {
   const repairs = [];
   const statuses = ['Ремонт', 'ремонт', 'РЕМОНТ'];
 
   for (const [gos, info] of Object.entries(staffData)) {
-    if (statuses.some(s => info.status.includes(s))) {
+    var fs = fleetSummaryByGos ? fleetSummaryByGos[gos] : null;
+    var status = (fs && fs.status) || info.status;
+    if (statuses.some(s => status.includes(s))) {
       repairs.push({
         gos: info.gosOriginal,
         type: info.type,
-        status: info.status,
+        status: status,
         driver: info.driver,
       });
     }
@@ -6369,6 +6381,11 @@ function fetchVehicleDriversFromServer_(asOfDate) {
 function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate, skipServerOverride, includeExcluded) {
   var from = new Date(fromDate); from.setHours(0, 0, 0, 0);
   var to = new Date(toDate); to.setHours(23, 59, 59, 999);
+  // "Диапазон включает сегодня" (этап 2.4-2, 02.09) - живой статус с сервера имеет смысл
+  // ТОЛЬКО для текущего/дефолтного вида ("Техника" без выбора периода) - для АРХИВНОГО
+  // месяца (например, выбрали "Июль") подставлять статус "прямо сейчас" было бы неверно
+  // (историческая финансовая запись со статусом из сегодня, вводит в заблуждение).
+  var rangeIncludesToday_ = to >= new Date(new Date().setHours(0, 0, 0, 0));
 
   var serverPark_ = skipServerOverride ? null : fetchParkHistoryFromServer_(from, to);
   var serverParkByGos_ = {};
@@ -6535,15 +6552,18 @@ function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate, skipServer
     // fleet_assignments), чем на лист, который скоро перестанут обновлять. Тип - тоже 0
     // расхождений оба раза, но остаётся ФОЛБЭКОМ (не поверх), т.к. и так уже надёжно
     // приходит из истории почти всегда - переключать поверх нет смысла, только риск.
-    // Статус/водитель НЕ трогаем: status - другой природы (снимок за вчера, не текущий
-    // момент - сверка 02.09 показала 25/53 честных расхождений, не просто разница
-    // формулировок, а реальная смена состояния за сутки - переключать рано), водитель уже
-    // отдельно приоритетный ниже (driverByGos).
+    // Водитель НЕ трогаем здесь - уже отдельно приоритетный ниже (driverByGos).
     var fsInfo = fleetSummaryByGos_ ? fleetSummaryByGos_[normalizeGos(gos)] : null;
     if (fsInfo) {
       if (fsInfo.marka) agg.marka = fsInfo.marka;
       if (fsInfo.trailerGos) agg.trailer = fsInfo.trailerGos;
       if (!agg.type && fsInfo.type) agg.type = fsInfo.type; // фолбэк тем же приёмом, что Штатка выше
+      // Статус - живой с сервера ПОВЕРХ (этап 2.4-2, 02.09, Влад подтвердил: Штатку больше
+      // никто не ведёт, статус из неё - замороженные старые данные, живой расчёт по
+      // Планировке сверен с уже проверенной картой "Статус парка" - 53/53 совпадение).
+      // ТОЛЬКО когда диапазон включает сегодня - иначе это статус "прямо сейчас",
+      // приклеенный к архивной финансовой строке, вводит в заблуждение.
+      if (rangeIncludesToday_ && fsInfo.status) agg.status = fsInfo.status;
     }
     if (driverByGos[gos]) agg.driver = driverByGos[gos].driver; // приоритет - водитель за сам период
     // Перезаписываем деньги с сервера (план 2026-08-31) - ТОЛЬКО 7 финансовых полей, если
@@ -6816,14 +6836,21 @@ function getSummaryData(ss, ordersData) {
 
 // staffData — результат getStaffData(ss). Считаем по всему парку (включая машины без выручки).
 // Длинномеры = тип начинается на "Борт", всё остальное = тралы.
-function getFleetStatus(staffData) {
+// fleetSummaryByGos (этап 2.4-2, 02.09, Влад подтвердил: "Штатку уже никто не ведёт, все
+// работают в Планировке в дашборде") - живой статус с сервера (computeLiveVehicleStatus_,
+// api/server.js), сверен с уже проверенной картой "Статус парка" на главной - 53/53
+// совпадение (не с самой Штаткой - та больше не источник правды). Ключ - normalizeGos(),
+// тот же формат, что staffData. Штатка остаётся фолбэком ТОЛЬКО на случай, если сервер
+// недоступен (null) - тихая деградация, не завязка на неё как на истину.
+function getFleetStatus(staffData, fleetSummaryByGos) {
   var tWork=0, tRepair=0, tNoDrv=0, tNoOrder=0;
   var lWork=0, lRepair=0, lNoDrv=0, lNoOrder=0;
 
   for (var gos in staffData) {
     var v = staffData[gos];
     var type   = v.type   || '';
-    var status = v.status || '';
+    var fs = fleetSummaryByGos ? fleetSummaryByGos[gos] : null;
+    var status = (fs && fs.status) || v.status || '';
     var isTruck   = type === 'Борт' || type.indexOf('Борт') === 0;
     var isWork    = status.indexOf('В работе')    >= 0;
     var isRepair  = status.indexOf('Ремонт')      >= 0;

@@ -1760,7 +1760,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   position:sticky;left:0;z-index:10;width:var(--lane-w);flex:none;background:var(--bg2);
   border-right:1px solid var(--border-strong);padding:5px 10px;overflow:hidden;
   transition:background-color .12s ease-out;
-}#page-logistics-plan .row:hover .rowhead{background:var(--row-hover);}#page-logistics-plan body.can-arrange .rowhead{cursor:grab;touch-action:none;}#page-logistics-plan body.can-arrange .rowhead:active{cursor:grabbing;}#page-logistics-plan .rh1{display:flex;align-items:center;gap:7px;line-height:1;}#page-logistics-plan .tag{
+}#page-logistics-plan .row:hover .rowhead{background:var(--row-hover);}#page-logistics-plan.can-reorder .rowhead{cursor:grab;touch-action:none;}#page-logistics-plan.can-reorder .rowhead:active{cursor:grabbing;}#page-logistics-plan .rh1{display:flex;align-items:center;gap:7px;line-height:1;}#page-logistics-plan .tag{
   font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:600;letter-spacing:.04em;
   padding:2px 5px;border-radius:3px;background:var(--bg4);color:var(--muted);flex:none;
 }/* семейство техники цветом - те же группы, #page-logistics-plan что логисты держат в голове
@@ -1864,7 +1864,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   background:var(--bg4);border:1px solid var(--border);color:var(--muted);
   display:none;align-items:center;justify-content:center;cursor:pointer;
   transition:color .12s ease-out,border-color .12s ease-out;
-}#page-logistics-plan body.can-arrange .row:hover .hide-btn{display:flex;}#page-logistics-plan .hide-btn:hover{color:var(--text);border-color:var(--border-strong);}#page-logistics-plan .hide-btn svg{width:11px;height:11px;}
+}#page-logistics-plan.can-arrange .row:hover .hide-btn{display:flex;}#page-logistics-plan .hide-btn:hover{color:var(--text);border-color:var(--border-strong);}#page-logistics-plan .hide-btn svg{width:11px;height:11px;}
 /* Копировать данные машины (Влад, 31.08, со слов логистов: "тягач модель
    госномер, прицеп госномер с типом, водитель с телефоном") - была отдельной
    плашкой-иконкой рядом с hide-btn, но Влад, 31.08 (второй заход): "не
@@ -20285,6 +20285,15 @@ function saveOrder(){
     localStorage.setItem("yard.plan.order", JSON.stringify(STATE.order));
     localStorage.setItem("yard.plan.hidden", JSON.stringify(Object.keys(STATE.hidden)));
   }catch(e){}
+  /* Личный порядок - на сервер, привязан к пользователю (Влад, 02.09: "железно
+     сохраняться у каждого персонально, за ним настройки не меняются"). localStorage
+     выше остаётся мгновенным локальным кэшем/офлайн-фолбэком - тихая отправка на
+     сервер не блокирует и не может испортить то, что уже сохранилось локально.
+     "Скрытые" НЕ уходят на сервер - Влад просил именно про порядок машин, скрытие
+     трогать не просили, остаётся как было (только localStorage, только у себя). */
+  if (STATE.order && STATE.order.length){
+    postToYardApi_("/plan/row_order", { order: STATE.order.join(",") }).catch(function(){});
+  }
 }
 function loadOrder(){
   try{
@@ -20293,6 +20302,20 @@ function loadOrder(){
     var h = JSON.parse(localStorage.getItem("yard.plan.hidden") || "[]");
     if (Array.isArray(h)) h.forEach(function(i){ STATE.hidden[i] = true; });
   }catch(e){}
+}
+/* Личный порядок с сервера (Влад, 02.09) - вызывается ПОСЛЕ loadOrder() и после
+   первой отрисовки: localStorage выше уже дал мгновенную картинку без ожидания
+   сети, сервер, когда ответит, - источник истины (переживает смену
+   устройства/браузера, localStorage - нет) - перекрывает локальное, если знает
+   порядок для этого пользователя, и тихо перерисовывает. Ошибка/пусто - молча
+   остаёмся на уже применённом localStorage-фолбэке, ничего не ломаем. */
+function loadOrderFromServer_(){
+  fetchFromYardApi_("/plan/row_order", {}).then(function(r){
+    if (r.ok && r.data && Array.isArray(r.data.order) && r.data.order.length){
+      STATE.order = r.data.order;
+      renderRows();
+    }
+  }).catch(function(){});
 }
 /* Индивидуальные настройки просмотра (Влад, 29.08: «если логист под себя сохранил
    цветовую схему, фильтры - так и должно быть при следующем заходе»). Порядок
@@ -20326,6 +20349,13 @@ function syncControlChips(){
   });
 }
 function canArrange(){ return STATE.role === "admin"; }
+/* Кто может тянуть карточки машин, меняя порядок строк - раньше совпадало с
+   canArrange() (только admin). 02.09, Влад: "открыть возможность ВСЕМ
+   логистам перемещать технику... железно сохраняться у каждого персонально".
+   ОТДЕЛЬНАЯ от canArrange() функция, не расширение её целиком - canArrange()
+   остаётся только про скрытие машин (см. .hide-btn/renderHiddenCount ниже),
+   об этом Влад не просил, открывать не нужно. */
+function canReorder(){ return STATE.role === "admin" || STATE.role === "logist"; }
 
 /* Своей кнопки темы у вкладки больше нет (было - ЭКСПЕРИМЕНТ 29.08, до появления
    настоящего глобального переключателя, plans/2026-08-29-light-theme-toggle.md).
@@ -21375,7 +21405,7 @@ function renderLegend(){
   var typeBit = STATE.typeLegend.map(function(p){
     return '<span class="lg"><span class="tag ' + p[1] + '" style="padding:1px 6px">' + p[0] + '</span></span>';
   }).join("");
-  var note = canArrange()
+  var note = canReorder()
     ? "тянуть карточку машины вверх-вниз - переставить порядок · тянуть отрезок - сдвинуть/растянуть/перенести · протянуть по пустому месту или двойной клик - новая запись"
     : "тянуть тело - сдвинуть · тянуть за край - растянуть · протянуть по пустому месту или двойной клик - новая запись";
   document.getElementById("lp-legend").innerHTML =
@@ -21397,6 +21427,7 @@ function renderAll(){
   pageRoot.style.setProperty("--hw", ZOOM[STATE.zoom] + "px");
   setZoomClass_(STATE.zoom);
   pageRoot.classList.toggle("can-arrange", canArrange());
+  pageRoot.classList.toggle("can-reorder", canReorder());
   renderScale(); renderRows(); renderKpis(); renderLegend(); renderHiddenCount();
 }
 function renderHiddenCount(){
@@ -21707,11 +21738,11 @@ function autoscrollTick(){
   } else { asRAF = 0; }
 }
 
-/* ---------- перестановка машин: только админ и старший логист ---------- */
+/* ---------- перестановка машин: 02.09 открыто всем логистам (см. canReorder()) ---------- */
 var arr = null;
 rowsEl.addEventListener("pointerdown", function(e){
   if (IS_TOUCH_) return;   /* перестановка строк - функция сверх "перемещения", на тач выключена */
-  if (!canArrange()) return;
+  if (!canReorder()) return;
   /* НАЙДЕННЫЙ БАГ (Влад, 01.09: "при нажатии не перебрасывает на страницу
      навигации" - клик по .rh-omni вообще не доходил до своего обработчика).
      Тот же класс ловушки, что уже решён для .hide-btn: этот pointerdown
@@ -23638,6 +23669,7 @@ setInterval(function(){
 }, 60000);
 
 loadOrder();
+loadOrderFromServer_();
 loadSettings();
 
 /* z-масштаб живёт как класс на pageRoot (используют CSS-правила #page-logistics-plan.z-*) -

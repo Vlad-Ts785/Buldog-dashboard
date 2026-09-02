@@ -6526,16 +6526,21 @@ function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate, skipServer
         agg.gos = staffInfo.gosOriginal || agg.gos;
       }
     }
-    // fleet_summary (этап 2.3, 01.09) - марка/прицеп С СЕРВЕРА, ПОВЕРХ Штатки (не
-    // фолбэк) - сверено 01.09, 0 расхождений. Штатка мигрирует отдельно, этим полям
-    // безопаснее опираться на уже мигрированный источник (sprav_assets/fleet_assignments),
-    // чем на лист, который скоро перестанут обновлять. Статус/водитель НЕ трогаем -
-    // status другой природы (снимок за день, не тот же момент), водитель уже отдельно
-    // приоритетный ниже (driverByGos).
+    // fleet_summary (этап 2.3, 01.09-02.09, 2 захода сверки) - марка/прицеп С СЕРВЕРА,
+    // ПОВЕРХ Штатки (не фолбэк) - сверено дважды, 0 расхождений. Штатка мигрирует отдельно,
+    // этим полям безопаснее опираться на уже мигрированный источник (sprav_assets/
+    // fleet_assignments), чем на лист, который скоро перестанут обновлять. Тип - тоже 0
+    // расхождений оба раза, но остаётся ФОЛБЭКОМ (не поверх), т.к. и так уже надёжно
+    // приходит из истории почти всегда - переключать поверх нет смысла, только риск.
+    // Статус/водитель НЕ трогаем: status - другой природы (снимок за вчера, не текущий
+    // момент - сверка 02.09 показала 25/53 честных расхождений, не просто разница
+    // формулировок, а реальная смена состояния за сутки - переключать рано), водитель уже
+    // отдельно приоритетный ниже (driverByGos).
     var fsInfo = fleetSummaryByGos_ ? fleetSummaryByGos_[normalizeGos(gos)] : null;
     if (fsInfo) {
       if (fsInfo.marka) agg.marka = fsInfo.marka;
       if (fsInfo.trailerGos) agg.trailer = fsInfo.trailerGos;
+      if (!agg.type && fsInfo.type) agg.type = fsInfo.type; // фолбэк тем же приёмом, что Штатка выше
     }
     if (driverByGos[gos]) agg.driver = driverByGos[gos].driver; // приоритет - водитель за сам период
     // Перезаписываем деньги с сервера (план 2026-08-31) - ТОЛЬКО 7 финансовых полей, если
@@ -7418,6 +7423,11 @@ function verifyFleetSummary_() {
     return out;
   }
   var typeMismatch = [], planMismatch = [], missingOnServer = [], markaDiff = 0, driverDiff = 0, trailerDiff = 0;
+  // status - добавлено 02.09 (второй заход этапа 2.3, Влад на связи) - fleet_summary отдаёт
+  // СНИМОК самого свежего дня (vehicle_status_daily), Штатка - живую колонку СЕЙЧАС, поэтому
+  // расхождения здесь ОЖИДАЕМЫ по природе полей (не то же самое измерение) - считаем и
+  // показываем примеры, но не считаем "проблемой" саму по себе.
+  var statusDiff = 0, statusExamples = [];
   Object.keys(staffData).forEach(function(gosNorm) {
     var sh = staffData[gosNorm];
     var svKey = normalizeGosLikeServer_(sh.gosOriginal);
@@ -7428,6 +7438,10 @@ function verifyFleetSummary_() {
     if ((sh.marka || '') !== (sv.marka || '')) markaDiff++;
     if ((sh.driver || '') !== (sv.driver || '')) driverDiff++;
     if ((sh.trailerGos || '') !== (sv.trailerGos || '')) trailerDiff++;
+    if ((sh.status || '') !== (sv.status || '')) {
+      statusDiff++;
+      if (statusExamples.length < 10) statusExamples.push(sh.gosOriginal + ': Штатка="' + sh.status + '" сервер(' + sv.status_as_of + ')="' + sv.status + '"');
+    }
   });
 
   return {
@@ -7439,6 +7453,8 @@ function verifyFleetSummary_() {
     marka_diff_count: markaDiff,   // информационно, не обязано быть 0
     driver_diff_count: driverDiff, // информационно, не обязано быть 0
     trailer_diff_count: trailerDiff, // информационно, не обязано быть 0
+    status_diff_count: statusDiff, // информационно (снимок дня vs живая колонка) - см. примеры
+    status_diff_examples: statusExamples,
   };
 }
 

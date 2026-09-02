@@ -3239,6 +3239,10 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
 <div class="ctxmenu" id="lp-ctxMenu">
   <button class="ctxmenu-item" id="lp-ctxOpen">Открыть</button>
   <button class="ctxmenu-item" id="lp-ctxCopy">Копировать заявку</button>
+  <!-- "Отбой" (02.09, Влад: "логисты если заказ дали отбой нажимают её...
+       в истории это событие сохраняется... подсвечивается красным") - только
+       для рейсов (kind==='trip'), показ/скрытие - в openCtxMenu_ в JS. -->
+  <button class="ctxmenu-item ctxmenu-del" id="lp-ctxCancel">Отбой</button>
   <button class="ctxmenu-item ctxmenu-del" id="lp-ctxDel">Удалить заявку</button>
 </div>
 <!-- ПКМ по шапке строки тягача - сцепка/расцепка водителя и прицепа (Влад, 30.08
@@ -23232,6 +23236,34 @@ function deleteSeg(seg){
     renderRows(); renderKpis();
   });
 }
+/* "Отбой" (02.09, Влад: "логисты если заказ дали отбой нажимают её и в
+   истории это событие сохраняется... в истории также это подсвечивается
+   красным") - НЕ через обычный saveSegs()-дифф (deleteSeg выше) - тот
+   батчит удаление молча, к моменту отправки на сервер уже не помнит
+   "почему" удалили, а отбой должен остаться в истории ОТДЕЛЬНЫМ действием
+   (action='cancel', не 'delete'). Зовём /plan/seg_delete НАПРЯМУЮ с
+   reason=cancel, минуя общий дифф-цикл (тот же приём, что fleetDoUncouple_/
+   fleetDoCouple_ - прямой вызов, не через STATE.segs diff). Без отмены
+   тостом (в отличие от deleteSeg) - отбой заказа клиентом это осознанное
+   бизнес-событие, не случайная правка логиста, откатывать нечего. */
+function lpCancelSeg_(seg){
+  var idx = STATE.segs.indexOf(seg);
+  if (idx < 0) return;
+  var label = segLabel(seg);
+  postToYardApi_("/plan/seg_delete", {id: seg.id, reason: "cancel"}).then(function(r){
+    if (!r || !r.ok) toast("Отбой не записан на сервер - попробуйте ещё раз", null);
+    else { delete segsSnapshot_[seg.id]; delete dirtySegIds_[seg.id]; }
+  }).catch(function(){ toast("Ошибка сети - отбой не записан", null); });
+  STATE.segs.splice(idx, 1);
+  STATE.lastEdited = seg.s;
+  try{
+    var wires = STATE.segs.map(segToWire_).filter(Boolean);
+    localStorage.setItem("yard.plan.segs", JSON.stringify(wires));
+  }catch(e){}
+  renderRows(); renderKpis();
+  S.del();
+  toast("Отбой записан - " + label, null);
+}
 function closeDrawer(){
   drawer.classList.remove("open"); drawer.setAttribute("aria-hidden", "true");
   scrim.classList.remove("open");
@@ -23269,6 +23301,8 @@ function lpHistLine_(ev){
       return "изменил(а) " + kindLbl + " на <b>" + gos + "</b>";
     case "seg_delete":
       return "удалил(а) " + kindLbl + " на <b>" + gos + "</b>";
+    case "seg_cancel":
+      return "отбой заказа на <b>" + gos + "</b>";
     case "fleet_couple":
       return (ev.kind === "driver" ? "посадил(а) водителя " : "зацепил(а) прицеп ") +
         "<b>" + (ev.who || "?") + "</b> на <b>" + gos + "</b>";
@@ -23305,8 +23339,12 @@ function openHistoryDrawer_(v){
     }
     if (!r.data.events.length){ body.textContent = "Пока пусто - действий ещё не было."; return; }
     body.innerHTML = r.data.events.map(function(ev){
+      /* Отбой - красным (Влад, 02.09: "в истории также это подсвечивается
+         красным цветом") - единственный тип события с акцентным цветом,
+         остальные нейтральные. */
+      var isCancel = ev.type === "seg_cancel";
       return '<div class="dr-row" style="display:block"><div style="color:var(--muted);font-size:10.5px;margin-bottom:2px" class="mono">' +
-        lpHistTime_(ev.at) + ' · ' + (ev.by || "—") + '</div><div>' + lpHistLine_(ev) + '</div></div>';
+        lpHistTime_(ev.at) + ' · ' + (ev.by || "—") + '</div><div' + (isCancel ? ' style="color:var(--red);font-weight:600"' : '') + '>' + lpHistLine_(ev) + '</div></div>';
     }).join("");
   }).catch(function(){
     var body = document.getElementById("lp-histBody");
@@ -23356,15 +23394,21 @@ window.addEventListener("keydown", function(e){
    ничего не должно происходить, тем более браузерное меню"). preventDefault -
    на ВСЕЙ странице (не только доске - правило #21 ГОСТа не делает исключений
    для шторки/панелей), но САМО меню показываем только если под курсором
-   реальная плитка. Простой ЛЕВЫЙ клик по плитке (Влад, 29.08, повторно: "не
-   должна вылетать боковая панель на этом действии") зовёт ТУ ЖЕ функцию, что и
-   правая кнопка - одно меню, два способа его вызвать; полная шторка теперь
-   доступна через пункт "Открыть", не первым действием. */
+   реальная плитка.
+   02.09, Влад: "добавь вызов этого меню через ПКМ, ЛКМ убери" - разворот
+   решения 29.08 выше (тогда левый клик открывал ТО ЖЕ меню, что правая
+   кнопка). Теперь только ПРАВАЯ кнопка (contextmenu-обработчик ниже) зовёт
+   openCtxMenu_ - левый клик без драга идёт сразу в openDrawer (см.
+   pointerup-обработчик драга выше по файлу). */
 var ctxMenu = document.getElementById("lp-ctxMenu");
 var ctxMenuSeg = null;
 function closeCtxMenu_(){ ctxMenu.classList.remove("open"); ctxMenuSeg = null; }
 function openCtxMenu_(seg, x, y){
   ctxMenuSeg = seg;
+  /* "Отбой" - только для рейсов (kind==='trip'), см. lpCancelSeg_ ниже -
+     отменять "ремонт"/"без заказа"/"без водителя" отбоем бессмысленно,
+     это не заказ клиента. */
+  document.getElementById("lp-ctxCancel").style.display = seg.kind === "trip" ? "" : "none";
   var mw = 172, mh = 120;                                 /* примерные размеры - не уехать за край экрана */
   ctxMenu.style.left = Math.min(x, window.innerWidth - mw - 8) + "px";
   ctxMenu.style.top = Math.min(y, window.innerHeight - mh - 8) + "px";
@@ -23974,6 +24018,10 @@ document.getElementById("lp-ctxCopy").onclick = function(){
 };
 document.getElementById("lp-ctxDel").onclick = function(){
   if (ctxMenuSeg) deleteSeg(ctxMenuSeg);
+  closeCtxMenu_();
+};
+document.getElementById("lp-ctxCancel").onclick = function(){
+  if (ctxMenuSeg) lpCancelSeg_(ctxMenuSeg);
   closeCtxMenu_();
 };
 document.addEventListener("click", function(e){

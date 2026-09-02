@@ -1103,6 +1103,9 @@ function runAll() {
   try { syncVehiclePlansToServer_(); log.push('✅ Планы ВП отправлены на сервер'); }
   catch(e) { errors.push('❌ Планы ВП на сервер: ' + e.message); }
 
+  try { syncManagerPlansToServer_(); log.push('✅ Планы менеджеров отправлены на сервер'); }
+  catch(e) { errors.push('❌ Планы менеджеров на сервер: ' + e.message); }
+
   try { normalizeOrders();         log.push('✅ Заказы нормализованы'); }
   catch(e) { errors.push('❌ Заказы (норм.): ' + e.message); }
 
@@ -11042,6 +11045,42 @@ function getManagerPlans_(ss, monthKey) {
 // "Внутренних перевозок" - та же строка "Планы_менеджеров", ключ "Внутренние" (не человек,
 // но механизм тот же самый - Влад сам вписывает план в тот же лист, без отдельной константы
 // в коде, см. Влад 2026-07-03: "откуда цифра 10 миллионов - установить план").
+// Мост планов менеджеров на сервер (2026-09-02, план plans/2026-09-01-apps-script-
+// elimination.md, этап 3.1) - НАЙДЕНА ДЫРА при первой проверке /api/main_payload:
+// manager_plans на сервере застряла на августе (13 строк), сентябрь - 0, salesPlan везде
+// показывал 0. Причина - старый мост (export_manager_plans в doGet, import-manager-
+// plans.js на VPS) был убран из doGet ещё раньше ("убрать после переноса" в его же
+// комментарии), а VPS-скрипт остался ссылаться на несуществующий action - молча ничего не
+// делал с тех пор. Этот дашборд НИКОГДА не зависел от manager_plans-таблицы на сервере
+// напрямую (joinManagerPlans_ ВСЕГДА читает лист живьём, см. выше) - но serveр-side
+// main_payload читает именно эту таблицу через orders-calc.js, ей тоже нужен рабочий мост.
+// Тот же приём, что vehicle_plans/access_list - полная перезаливка (Влад правит редко,
+// вручную раз в месяц, TRUNCATE+reload безопасен и достаточен).
+function syncManagerPlansToServer_() {
+  var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+  if (!apiKey) return;
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var sheet = ss.getSheetByName('Планы_менеджеров');
+  if (!sheet || sheet.getLastRow() < 2) return;
+  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
+  var rows = [];
+  data.forEach(function(r) {
+    // Та же защита от Date-мутации ячейки, что и в getManagerPlans_ ниже (реальный баг,
+    // пойманный 2026-07-02 - план был 0 у всех из-за несовпадения типов).
+    var mk = r[0] instanceof Date ? Utilities.formatDate(r[0], 'Europe/Moscow', 'yyyy-MM') : String(r[0] || '').trim();
+    var name = String(r[1] || '').trim();
+    if (!mk || !name) return;
+    rows.push({ month: mk, manager: name, plan: parseFloat(r[2]) || 0 });
+  });
+  if (!rows.length) return;
+  UrlFetchApp.fetch('https://api.yardhub.ru/api/manager_plans', {
+    method: 'post', contentType: 'application/json',
+    headers: { 'X-Api-Key': apiKey },
+    payload: JSON.stringify({ plans: rows }),
+    muteHttpExceptions: true,
+  });
+}
+
 function joinManagerPlans_(ss, ordersResult, monthKey) {
   if (!ordersResult) return ordersResult;
   const plans = getManagerPlans_(ss, monthKey);

@@ -2562,8 +2562,9 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
     <!-- Плашка "обновление не проходит" (Этап 0.3 плана устранения аудита). 19.08.2026 импорт
          заказов был мёртв 8 часов, а дашборд всё это время показывал устаревшие цифры без
          единого признака - и на них считалась зарплата. Молчаливо устаревшие данные хуже
-         явной ошибки: явную видно, эту нет. Заполняется checkDataFreshness(), скрыта пока
-         всё в порядке. -->
+         явной ошибки: явную видно, эту нет. Заполняется checkDataFreshness() (импорт-скрипты
+         сломаны) И checkStaleFallbacks_() (01.09, сервер целиком недоступен - см.
+         renderNavStale_), скрыта пока всё в порядке. -->
     <div id="nav-stale" style="display:none;margin-bottom:8px;padding:8px 10px;border-radius:6px;
          background:rgba(239,159,39,.12);border:1px solid rgba(239,159,39,.35);
          font-size:11px;line-height:1.45;color:#EF9F27"></div>
@@ -5942,6 +5943,7 @@ function applyData(patch, opts) {
   var unchanged = !isFirstLoad && hash !== null && hash === lastAppliedHash_;
   if (hash !== null) lastAppliedHash_ = hash;
   D = isFirstLoad ? patch : Object.assign(D, patch);
+  checkStaleFallbacks_(); // см. определение выше - независимо от skipIfUnchanged, дёшево
   if (unchanged && opts.skipIfUnchanged) return false; // ничего не поменялось - DOM не трогаем
   render();
   return true;
@@ -10323,7 +10325,13 @@ function renderFleetStatus() {
 function fleetStartLivePoll_() {
   if (fleetLivePollTimer_) return;
   fleetPollTick_();
-  fleetLivePollTimer_ = setInterval(fleetPollTick_, 7000); // тот же интервал, что fetchPlanSegs_ Планировки
+  // Влад, 02.09: "почему не мгновенно... в планировке статус поменялся - бац - и тут уже
+  // тоже увидели" - было 7000ms (тот же ритм, что fetchPlanSegs_ Планировки), при
+  // просмотре обеих вкладок рядом чувствовалось как задержка. Настоящий push (WebSocket) -
+  // отдельная инфраструктурная задача, общая с Планировкой, не делаем походя здесь.
+  // Дешёвый компромисс - чаще опрашивать: 2500ms ощущается почти мгновенно человеком,
+  // при этом не бьёт по серверу сильнее Планировки на порядок (тот же лёгкий /plan/segs).
+  fleetLivePollTimer_ = setInterval(fleetPollTick_, 2500);
 }
 function fleetStopLivePoll_() {
   clearInterval(fleetLivePollTimer_);
@@ -11698,8 +11706,8 @@ function assetDocUpload_() {
   var docType = document.getElementById('asset-doc-type').value;
   var fd = new FormData();
   fd.append('file', file);
-  var qs = 'session_token=' + encodeURIComponent(SESSION_TOKEN) + '&asset_id=' + encodeURIComponent(assetId) + '&doc_type=' + encodeURIComponent(docType);
-  fetch(YARD_API_BASE + '/sprav/asset_document_upload?' + qs, { method: 'POST', body: fd })
+  var qs = 'asset_id=' + encodeURIComponent(assetId) + '&doc_type=' + encodeURIComponent(docType);
+  fetch(YARD_API_BASE + '/sprav/asset_document_upload?' + qs, { method: 'POST', headers: { 'X-Session-Token': SESSION_TOKEN }, body: fd })
     .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); })
     .then(function(r) {
       if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось загрузить файл'; errEl.style.display = ''; return; }
@@ -17126,13 +17134,21 @@ function fmtDateRu(dateStr) {
 // Script (see verifySessionToken() в api/server.js). Никакого отдельного секрета в браузере
 // больше нет вообще.
 const YARD_API_BASE = 'https://api.yardhub.ru/api';
+// session_token теперь уходит в заголовок X-Session-Token, не в query-string (2026-09-01,
+// план plans/2026-09-01-apps-script-elimination.md, этап 1.4 - находка карты фронтенда:
+// токен в URL попадает в логи сервера/nginx и историю браузера). Сервер уже год умеет
+// принимать оба способа (checkSession в api/server.js проверяет query first, header -
+// фолбэк) - здесь просто перестаём слать явно чувствительное в самом заметном месте.
+// Единственное исключение - прямая ссылка-скачивание СТС (asset_document_file), там
+// токен вынужденно остаётся в URL: браузер не умеет слать кастомные заголовки на переход
+// по <a href>, а превращать скачивание в blob-fetch ради этого - несоразмерно.
 function fetchFromYardApi_(path, params) {
-  var merged = Object.assign({ session_token: SESSION_TOKEN }, params || {});
-  var qs = Object.keys(merged).map(function(k) {
-    return merged[k] ? (k + '=' + encodeURIComponent(merged[k])) : null;
+  var qs = Object.keys(params || {}).map(function(k) {
+    return params[k] ? (k + '=' + encodeURIComponent(params[k])) : null;
   }).filter(Boolean).join('&');
-  return fetch(YARD_API_BASE + path + (qs ? '?' + qs : ''))
-    .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); });
+  return fetch(YARD_API_BASE + path + (qs ? '?' + qs : ''), {
+    headers: { 'X-Session-Token': SESSION_TOKEN },
+  }).then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); });
 }
 function fetchClientAnalyticsFromServer_(params) {
   return fetchFromYardApi_('/client_analytics', params).then(function(r) { return r.data; });
@@ -17140,16 +17156,17 @@ function fetchClientAnalyticsFromServer_(params) {
 // POST-вариант fetchFromYardApi_ (запись стадии сделки) - те же параметры, что и
 // checkSession-эндпоинты сервера читают из query, метод - POST.
 function postToYardApi_(path, params) {
-  var merged = Object.assign({ session_token: SESSION_TOKEN }, params || {});
   // Пустая строка - ЗНАЧИМОЕ значение здесь (например, "менеджер стёр неверный
   // автобриф"), не отсутствие параметра - раньше отбрасывалась молча, и такая очистка
   // никогда не долетала до сервера, хотя сервер её честно обрабатывает. Пропускаем
   // только реально отсутствующие поля (undefined/null), не пустые.
-  var qs = Object.keys(merged).map(function(k) {
-    return (merged[k] !== undefined && merged[k] !== null) ? (k + '=' + encodeURIComponent(merged[k])) : null;
+  var qs = Object.keys(params || {}).map(function(k) {
+    return (params[k] !== undefined && params[k] !== null) ? (k + '=' + encodeURIComponent(params[k])) : null;
   }).filter(Boolean).join('&');
-  return fetch(YARD_API_BASE + path + (qs ? '?' + qs : ''), { method: 'POST' })
-    .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); });
+  return fetch(YARD_API_BASE + path + (qs ? '?' + qs : ''), {
+    method: 'POST',
+    headers: { 'X-Session-Token': SESSION_TOKEN },
+  }).then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); });
 }
 
 // ── НАВИГАЦИЯ (живые координаты техники с Omnicomm Online, опрос раз в 30 сек на сервере -
@@ -17621,10 +17638,9 @@ function crmRefreshUnreadBadge_() {
 // разрешения без клика пользователя, и это правильно с точки зрения UX (не спамить
 // разрешениями сразу при заходе).
 function postToYardApiWithBody_(path, bodyObj) {
-  var qs = 'session_token=' + encodeURIComponent(SESSION_TOKEN);
-  return fetch(YARD_API_BASE + path + '?' + qs, {
+  return fetch(YARD_API_BASE + path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-Session-Token': SESSION_TOKEN },
     body: JSON.stringify(bodyObj),
   }).then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); });
 }
@@ -18462,6 +18478,21 @@ function fetchReceiptsFromServer_() {
 // тикал сам (updatePagePeriod_ дергается каждые 30 сек) и не выглядел замороженным.
 let dataFreshnessMin_ = null;
 let dataFreshnessCheckedAtMs_ = null;
+// #nav-stale обслуживает ДВА независимых источника тревоги - checkDataFreshness() (импорт-
+// скрипты сломаны) и checkStaleFallbacks_() (Ревизор, 01.09, план plans/2026-09-01-apps-
+// script-elimination.md, этап 0.5 - сервер целиком недоступен, дашборд молча откатился на
+// замороженный Google-лист). Оба пишут в свою переменную и зовут общий рендер - иначе
+// поздний вызов одного источника стирал бы предупреждение другого.
+var navStaleBrokenBlock_ = '';
+var navStaleFallbackBlock_ = '';
+function renderNavStale_() {
+  var box = document.getElementById('nav-stale');
+  if (!box) return;
+  var blocks = [navStaleBrokenBlock_, navStaleFallbackBlock_].filter(Boolean);
+  if (!blocks.length) { box.style.display = 'none'; return; }
+  box.innerHTML = blocks.join('<br><br>');
+  box.style.display = 'block';
+}
 function checkDataFreshness() {
   fetchFromYardApi_('/import_status', {}).then(function(r) {
     if (!r.ok || !r.data) return;
@@ -18470,18 +18501,32 @@ function checkDataFreshness() {
       dataFreshnessCheckedAtMs_ = Date.now();
       updateFreshnessDisplays_();
     }
-    var box = document.getElementById('nav-stale');
-    if (!box || !r.data.scripts) return;
+    if (!r.data.scripts) return;
     var broken = r.data.scripts.filter(function(s) { return !s.healthy; });
-    if (!broken.length) { box.style.display = 'none'; return; }
     var lines = broken.map(function(s) {
       return s.label + ' - ' + s.problem +
         (s.minutes_since_run !== null ? ' (' + fmtAgo_(s.minutes_since_run) + ')' : '');
     });
-    box.innerHTML = '<b>Обновление не проходит</b><br>' + lines.join('<br>') +
-      '<br><span style="opacity:.75">Цифры могут быть устаревшими</span>';
-    box.style.display = 'block';
+    navStaleBrokenBlock_ = broken.length
+      ? '<b>Обновление не проходит</b><br>' + lines.join('<br>') +
+        '<br><span style="opacity:.75">Цифры могут быть устаревшими</span>'
+      : '';
+    renderNavStale_();
   }).catch(function() { /* сервер недоступен - молчим, см. комментарий выше */ });
+}
+// Сервер целиком недоступен (не путать с "импорт-скрипт сломан" выше, это про VPS в
+// принципе) - Apps Script тихо откатился на чтение Google Таблицы напрямую, а эти каналы
+// (Заказы/ДЗ/Поступления) уже НЕ обновляются email-рассылкой 1С (остановлена 17-19.08) -
+// цифры могут быть неделями устаревшими, а не просто "час не обновлялось". Зовётся из
+// applyData() на каждую загрузку - поле stale_fallback приходит прямо в D.orders/D.debt/
+// D.receipts от getOrdersData/getDebtData/getReceiptsData в Apps Script.
+function checkStaleFallbacks_() {
+  var msgs = [];
+  if (D && D.orders && D.orders.stale_fallback) msgs.push('<b>Заказы:</b> ' + D.orders.stale_fallback_warning);
+  if (D && D.debt && D.debt.stale_fallback) msgs.push('<b>ДЗ:</b> ' + D.debt.stale_fallback_warning);
+  if (D && D.receipts && D.receipts.stale_fallback) msgs.push('<b>Поступления:</b> ' + D.receipts.stale_fallback_warning);
+  navStaleFallbackBlock_ = msgs.length ? msgs.join('<br><br>') : '';
+  renderNavStale_();
 }
 function fmtAgo_(min) {
   if (min < 1) return 'меньше минуты';

@@ -6095,6 +6095,19 @@ async function loadData() {
       ? 'Сервер вернул страницу вместо данных - обычно значит, что Apps Script не задеплоен или временно упал на стороне Google. Обнови страницу через минуту; если не поможет - нужно передеплоить scripts/full_script_final.js в Apps Script.'
       : 'Попробуй обновить страницу. Если ошибка повторяется - напиши, что тут написано, разберёмся.';
     if (isFirstLoad) {
+      // Аварийный фолбэк (этап 3.2, см. fetchMainPayloadFallback_) - прежде чем показать
+      // голый экран ошибки, пробуем сервер напрямую. Молча ничего не даёт для manager/logist
+      // (там пока нет своего view, requireRole_ отказывает) - тогда просто идём дальше к
+      // обычному экрану ошибки, как раньше.
+      var fallback = await fetchMainPayloadFallback_();
+      if (fallback) {
+        saveSessionTokenFromResponse_(fallback);
+        hideLoginScreen();
+        document.getElementById('error-block').style.display = 'none';
+        applyData(fallback, { skipIfUnchanged: true });
+        p2ToastErr('Apps Script недоступен - показаны данные с резервного сервера. Состояние парка (Техника/Планировка) могло не обновиться, обнови страницу через минуту.');
+        return;
+      }
       // Первый заход - страница ещё пустая, разворачивать есть куда: полный блок с адресом
       // Apps Script и подсказкой по причине.
       document.getElementById('error-block').style.display = 'block';
@@ -18612,6 +18625,20 @@ function fetchOrdersPeriodFromServer_(period) {
 function fetchReceiptsFromServer_() {
   return fetchFromYardApi_('/receipts', {}).then(function(r) {
     return r.ok ? r.data : null;
+  }).catch(function() { return null; });
+}
+
+// Аварийный фолбэк на сервер (2026-09-02, этап 3.2 плана apps-script-elimination.md) -
+// используется в loadData() ТОЛЬКО когда Apps Script целиком не ответил на самом первом
+// заходе (D ещё пуст, показать нечего, кроме голого экрана ошибки). /api/main_payload
+// пока admin-only и намеренно НЕ включает fleet/repairs/staffMarkas (живая Штатка, блокер
+// этапа 2.4 - см. план) - это НЕ быстрый путь взамен Apps Script, а именно аварийная сетка:
+// лучше показать деньги/заказы/ДЗ с честной пометкой, что парк не обновился, чем пустой
+// экран. null - сервер тоже недоступен, или роль не admin (requireRole_ вернёт 403 - у
+// manager/logist сервер так и должен отказать, для них своего view пока нет).
+function fetchMainPayloadFallback_() {
+  return fetchFromYardApi_('/main_payload', {}).then(function(r) {
+    return (r.ok && r.data && !r.data.error) ? r.data : null;
   }).catch(function() { return null; });
 }
 

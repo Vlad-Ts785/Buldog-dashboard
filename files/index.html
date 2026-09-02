@@ -1889,12 +1889,10 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
 @media(prefers-reduced-motion:reduce){
   #page-logistics-plan .row.awaiting .tag{animation:none;box-shadow:0 0 8px 1px currentColor;}
 }
-#page-logistics-plan .hide-btn{
-  position:absolute;right:8px;top:8px;width:18px;height:18px;border-radius:5px;
-  background:var(--bg4);border:1px solid var(--border);color:var(--muted);
-  display:none;align-items:center;justify-content:center;cursor:pointer;
-  transition:color .12s ease-out,border-color .12s ease-out;
-}#page-logistics-plan.can-arrange .row:hover .hide-btn{display:flex;}#page-logistics-plan .hide-btn:hover{color:var(--text);border-color:var(--border-strong);}#page-logistics-plan .hide-btn svg{width:11px;height:11px;}
+/* .hide-btn (иконка на плашке машины) убрана 02.09 - Влад: "кнопку скрыть
+   убери с плашки машины и пусть будет скрыть в выпадающем списке ПКМ" -
+   действие переехало в меню сцепки (renderFleetMenuMain_/data-fa="toggle-
+   hide" ниже по файлу), как "История" чуть раньше тем же днём. */
 /* Копировать данные машины (Влад, 31.08, со слов логистов: "тягач модель
    госномер, прицеп госномер с типом, водитель с телефоном") - была отдельной
    плашкой-иконкой рядом с hide-btn, но Влад, 31.08 (второй заход): "не
@@ -20108,8 +20106,9 @@ var PLACES = ["Липецк","Череповец","Подольск","Мытищ
 
 /* штриховые SVG - ГОСТ раздел 4/«Иконки»: fill:none, currentColor, stroke-width 1.6 */
 var SVG_ATTR = 'viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"';
-var ICON_EYE_OFF = '<svg ' + SVG_ATTR + '><path d="M3 3l14 14M8.6 8.7a2.4 2.4 0 003.3 3.3M6.1 6.2C4 7.5 2.5 9.4 2 10c1.7 2.9 5 6 8 6 1.2 0 2.4-.4 3.5-1.1M11 4.2c.3 0 .7-.1 1-.1 3 0 6.3 3.1 8 6-.4.7-1.1 1.8-2.1 2.9"/></svg>';
-var ICON_EYE = '<svg ' + SVG_ATTR + '><path d="M2 10c1.7-2.9 5-6 8-6s6.3 3.1 8 6c-1.7 2.9-5 6-8 6s-6.3-3.1-8-6z"/><circle cx="10" cy="10" r="2.4"/></svg>';
+/* ICON_EYE/ICON_EYE_OFF (кнопка "скрыть машину" на плашке) убраны 02.09 -
+   действие переехало в меню ПКМ (renderFleetMenuMain_), своей иконки там
+   нет, текстовый пункт меню. */
 var ICON_CHEVRON = '<svg class="gh-chev" ' + SVG_ATTR + '><path d="M6 8l4 4 4-4"/></svg>';
 var ICON_TRASH = '<svg ' + SVG_ATTR + '><path d="M4 6h12M8 6V4h4v2M6 6l1 11h6l1-11"/></svg>';
 var ICON_COPY = '<svg ' + SVG_ATTR + '><rect x="7" y="7" width="10" height="10" rx="1.6"/><path d="M13 7V4.6A1.6 1.6 0 0 0 11.4 3H4.6A1.6 1.6 0 0 0 3 4.6v6.8A1.6 1.6 0 0 0 4.6 13H7"/></svg>';
@@ -20849,10 +20848,7 @@ function renderRowsInner_(){
         '<div class="rh2"><span class="tr' + (!v.trailerGos && !v.trailer ? " nd" : "") + '">' + (trailerGosLabel_ || v.trailer || "без прицепа") + '</span>' +
         (v.trailer && v.trailerGos ? '<span class="sep">·</span><span class="kind">' + v.trailer + '</span>' : '') +
         '<span class="sep">·</span><span class="drv' + (v.vacant ? " nd" : "") + '">' + drv + '</span>' +
-        (rside ? '<span class="rside">' + rside + '</span>' : '') + '</div>' +
-        '<span class="hide-btn" data-hide="' + v.i + '" title="' +
-        (STATE.hidden[v.i] ? "Показать машину" : "Скрыть машину") + '">' +
-        (STATE.hidden[v.i] ? ICON_EYE : ICON_EYE_OFF) + '</span>';
+        (rside ? '<span class="rside">' + rside + '</span>' : '') + '</div>';
       row.appendChild(head);
 
       var track = document.createElement("div");
@@ -21928,16 +21924,19 @@ document.getElementById("lp-monthToday").addEventListener("click", function(){
   primeTo(Math.max(0, now - halfViewHours), now);
 });
 
-/* ---------- скрыть/показать машину (только админ/старший логист) ---------- */
-rowsEl.addEventListener("click", function(e){
-  var btn = e.target.closest(".hide-btn");
-  if (!btn || !canArrange()) return;
-  var vi = parseInt(btn.dataset.hide, 10);
+/* ---------- скрыть/показать машину (только админ/старший логист) - 02.09,
+   Влад: "кнопку скрыть убери с плашки машины и пусть будет скрыть в
+   выпадающем списке ПКМ" - была отдельной иконкой на плашке (.hide-btn,
+   убрана), теперь пункт меню сцепки (renderFleetMenuMain_/
+   handleFleetMenuAction_ ниже, data-fa="toggle-hide") - сама логика
+   переезда переставлена без изменений. ---------- */
+function lpToggleHidden_(vi){
+  if (!canArrange()) return;
   if (STATE.hidden[vi]) delete STATE.hidden[vi]; else STATE.hidden[vi] = true;
   saveOrder();
   S.nav();
   renderRows(); renderHiddenCount();
-});
+}
 
 /* ---------- копировать тягач/прицеп/водителя (Влад, 31.08, со слов
    логистов: "тягач модель госномер, прицеп госномер с типом и водитель с
@@ -22332,10 +22331,14 @@ window.addEventListener("pointerup", function(e){
   }
   if (!d.lifted){
     el.style.transform = ""; el.style.transition = "";
-    /* Простой клик - маленькое меню у курсора (Копировать/Удалить/Открыть),
-       НЕ сразу полная шторка (Влад, 29.08: "не должно возникать боковой
-       панели... маленькое наше окошко"). Полная шторка - через "Открыть". */
-    openCtxMenu_(seg, e.clientX, e.clientY);
+    /* 02.09, Влад: "добавь вызов этого меню через ПКМ, ЛКМ убери" - разворот
+       решения 29.08 (тогда левый клик открывал маленькое меню, не боковую
+       панель напрямую). Теперь маленькое меню (Открыть/Копировать/Отбой/
+       Удалить) - ТОЛЬКО через правую кнопку (contextmenu-обработчик
+       ниже), левый клик идёт сразу в полную шторку - то же действие, что
+       раньше давал пункт "Открыть" в этом меню, просто без промежуточного
+       шага. */
+    openDrawer(seg);
     return;
   }
 
@@ -23706,6 +23709,13 @@ function renderFleetMenuMain_(){
   items.push('<button class="ctxmenu-item" data-fa="couple-driver">' + (drvAssign ? "Пересадить водителя" : "Посадить водителя") + "</button>");
   if (trlAssign) items.push('<button class="ctxmenu-item" data-fa="uncouple-trailer">Отцепить · ' + pageEsc_(lpFleetAssetLabel_(trlAssign.resource_key)) + "</button>");
   items.push('<button class="ctxmenu-item" data-fa="couple-trailer">' + (trlAssign ? "Переприцепить" : "Зацепить прицеп") + "</button>");
+  /* "Скрыть/Показать машину" (02.09, Влад: "кнопку скрыть убери с плашки
+     машины и пусть будет скрыть в выпадающем списке ПКМ") - была отдельной
+     иконкой на плашке (только на hover, только admin) - тот же гейт
+     доступа здесь, canArrange(). */
+  if (canArrange()){
+    items.push('<button class="ctxmenu-item" data-fa="toggle-hide">' + (STATE.hidden[v.i] ? "Показать машину" : "Скрыть машину") + '</button>');
+  }
   fleetMenu.innerHTML = items.join("");
   [].forEach.call(fleetMenu.querySelectorAll("[data-fa]"), function(btn){
     /* НАЙДЕННЫЙ БАГ (Влад, 30.08, через параллельную сессию: "Посадить" не
@@ -23728,6 +23738,7 @@ function handleFleetMenuAction_(action){
   if (!v){ closeFleetMenu_(); return; }
   if (action === "copy"){ lpCopyRow_(fleetMenuVi_); closeFleetMenu_(); return; }
   if (action === "history"){ closeFleetMenu_(); openHistoryDrawer_(v); return; }
+  if (action === "toggle-hide"){ closeFleetMenu_(); lpToggleHidden_(fleetMenuVi_); return; }
   if (action === "sts-tractor"){ lpDownloadSts_(v.gos); closeFleetMenu_(); return; }
   if (action === "sts-trailer"){
     var trl = lpFleetOpenOnTractor_("trailer", v.gos);

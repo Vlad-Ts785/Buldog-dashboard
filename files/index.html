@@ -9196,11 +9196,30 @@ function renderGroup_(key) {
   dirtyGroups_[key] = false;
 }
 
+// Механик - реальный вход ИЛИ admin-предпросмотр "как [механик]" (2026-09-02, Влад:
+// "Смотреть как должно быть для механика и колонника" - колонник/Барыльченко уже работает
+// через обычную ветку manager/logist ниже, роль в "Доступ" у него logist; механику нужна
+// отдельная проверка, т.к. у него настоящая, отдельная роль mechanic). У роли нет Личной
+// страницы (D для реального входа собирается САМ loadMechanicData_(), там нет D.orders -
+// renderMyPage()/myPageCurrentEntry_() на этом упали бы; для admin-предпросмотра D.orders
+// технически ЕСТЬ - это полный D админа, но рендерить там всё равно нечего, у механика нет
+// персональной вкладки).
+function isMechanicView_() {
+  return !!(D.role === 'mechanic' || (D.role === 'admin' && viewAsEntry && viewAsEntry.type === 'mechanic'));
+}
+
 function render() {
   updateFreshnessDisplays_(); // честно из последнего известного data_age_min, см. Этап 0.1
   checkDataFreshness(); // свежий опрос + плашка "обновление не проходит", см. Этап 0.1/0.3
   updatePagePeriod_(); // "Август 2026 · день N из M · данные 1С HH:MM" в шапке
   applyRoleUI();
+
+  if (isMechanicView_()) {
+    // applyRoleUI() уже сузил сайдбар и переключил на "Планировку" - здесь рендерить
+    // больше нечего (нет Личной страницы), но и ниже (renderGroup_ по вкладкам) не нужно -
+    // "Планировка" не часть RENDER_GROUPS_, у неё свой showPage-триггер (LP.init()).
+    return;
+  }
 
   if (D.role === 'manager' || D.role === 'logist' || (D.role === 'admin' && viewAsEntry)) {
     // Менеджеру/логисту урезанные данные с сервера - другие вкладки на них упадут, не рендерим
@@ -9232,8 +9251,8 @@ function applyRoleUI() {
   // зарплаты, ни личных данных, которые она бы показывала (D для этой роли собирается
   // САМ фронтендом в loadMechanicData_(), там нет D.orders - renderMyPage() на этом
   // сломался бы, поэтому ветка manager/logist ниже эту роль не подхватывает вообще).
-  if (D.role === 'mechanic') {
-    if (sidebarLabel) sidebarLabel.textContent = D.mechanicName || 'Механик';
+  if (isMechanicView_()) {
+    if (sidebarLabel) sidebarLabel.textContent = previewing ? viewAsEntry.name : (D.mechanicName || 'Механик');
     var mechAllowed_ = ['calculator', 'logistics-plan'];
     document.querySelectorAll('.sidebar-nav-item').forEach(function(item) {
       item.style.display = mechAllowed_.indexOf(item.getAttribute('data-page')) >= 0 ? '' : 'none';
@@ -9310,6 +9329,23 @@ function viewAsRoster_() {
     .sort(function(a,b){ return a.name.localeCompare(b.name, 'ru'); });
 }
 
+// Механики (2026-09-02, Влад: "Смотреть как должно быть для механика") - НЕ из
+// D.orders.roster_* (Apps Script, by_manager/by_logist) - механики там никогда не появятся,
+// они не оформляют сделок в 1С. Единственный источник правды "кто сейчас механик" -
+// access_users на сервере (живое зеркало листа "Доступ"), поэтому список грузится
+// отдельным лёгким запросом, лениво (при первом открытии панели), с кэшем на сессию
+// вкладки браузера - список меняется редко, гонять его на каждое открытие панели незачем.
+var mechanicsRosterCache_ = null; // null = ещё не грузили, [] = загружен и пуст
+function loadMechanicsRoster_() {
+  if (mechanicsRosterCache_ !== null) return Promise.resolve(mechanicsRosterCache_);
+  return fetchFromYardApi_('/access_users', { role: 'mechanic' }).then(function(r) {
+    mechanicsRosterCache_ = (r.ok && r.data && Array.isArray(r.data.users))
+      ? r.data.users.map(function(u){ return { name: u.name, type: 'mechanic' }; })
+      : [];
+    return mechanicsRosterCache_;
+  }).catch(function() { mechanicsRosterCache_ = []; return mechanicsRosterCache_; });
+}
+
 function updateViewAsButton_() {
   var btn = document.getElementById('view-as-btn');
   if (!btn) return;
@@ -9336,6 +9372,14 @@ function toggleViewAsPanel(ev) {
   if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
   renderViewAsPanel_();
   panel.style.display = 'block';
+  // Механики - лениво, только при первом реальном открытии панели (не на каждой загрузке
+  // страницы) - перерисовываем панель повторно, когда список придёт, ЕСЛИ она всё ещё
+  // открыта (админ мог успеть закрыть её раньше, чем ответит сеть).
+  if (mechanicsRosterCache_ === null) {
+    loadMechanicsRoster_().then(function() {
+      if (panel.style.display === 'block') renderViewAsPanel_();
+    });
+  }
 }
 
 function renderViewAsPanel_() {
@@ -9350,6 +9394,9 @@ function renderViewAsPanel_() {
   }
   var managers = roster.filter(function(e){ return e.type === 'manager'; });
   var logists  = roster.filter(function(e){ return e.type === 'logist'; });
+  // Механики (2026-09-02) - отдельный источник (mechanicsRosterCache_, не D.orders), может
+  // быть null (ещё грузится - показываем "Загрузка…", запрос уже ушёл в toggleViewAsPanel).
+  var mechanics = mechanicsRosterCache_ || [];
   var html = '';
   if (viewAsEntry) {
     html += '<div onclick="setViewAs(null,null)" style="padding:7px 10px;font-size:13px;cursor:pointer;border-radius:4px;color:var(--red);border-bottom:1px solid var(--border);margin-bottom:4px" '+
@@ -9357,7 +9404,9 @@ function renderViewAsPanel_() {
   }
   if (managers.length) html += '<div style="padding:6px 10px 2px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Менеджеры</div>' + managers.map(rowHtml).join('');
   if (logists.length) html += '<div style="padding:6px 10px 2px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Логисты</div>' + logists.map(rowHtml).join('');
-  if (!roster.length) html += '<div style="padding:8px 10px;font-size:12px;color:var(--muted)">Нет данных</div>';
+  if (mechanics.length) html += '<div style="padding:6px 10px 2px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Механики</div>' + mechanics.map(rowHtml).join('');
+  else if (mechanicsRosterCache_ === null) html += '<div style="padding:6px 10px 2px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Механики</div><div style="padding:7px 10px;font-size:12px;color:var(--muted)">Загрузка…</div>';
+  if (!roster.length && !mechanics.length && mechanicsRosterCache_ !== null) html += '<div style="padding:8px 10px;font-size:12px;color:var(--muted)">Нет данных</div>';
   panel.innerHTML = html;
 }
 

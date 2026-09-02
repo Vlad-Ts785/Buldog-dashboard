@@ -20860,22 +20860,20 @@ function renderRowsInner_(){
       track.style.width = trackW + "px";
       track.dataset.v = v.i;
 
-      /* Вакантная машина (v.vacant, теперь из fleet_assignments - см.
-         lpComputeVacant_) - фоновая полоса "вакант", НЕ настоящая заявка (см.
-         vacantBandRange_/lpRepairOverlapRange_ выше) - добавляется ДО
-         заявок, чтобы реальные плитки (в т.ч. полосатый ремонт поверх неё)
-         легли визуально сверху по порядку DOM. */
-      if (v.vacant){
-        var vb = vacantBandRange_(v);
-        if (vb.l > 0){
-          var vbEl = document.createElement("div");
-          vbEl.className = "track-vacant";
-          vbEl.title = "Вакант (нет закреплённого водителя) - пока не посадим водителя";
-          vbEl.style.left = (vb.s * hw) + "px";
-          vbEl.style.width = (vb.l * hw) + "px";
-          track.appendChild(vbEl);
-        }
-      }
+      /* Вакантные полосы (02.09: НЕСКОЛЬКО диапазонов из полной истории
+         fleet_assignments, не один живой флаг v.vacant - см. разбор у
+         vacantBandRanges_/lpRepairOverlapRange_ выше, машина "797"/Титаев)
+         - фоновые полосы, НЕ настоящие заявки - добавляются ДО заявок,
+         чтобы реальные плитки (в т.ч. полосатый ремонт поверх них) легли
+         визуально сверху по порядку DOM. */
+      vacantBandRanges_(v).forEach(function(vb){
+        var vbEl = document.createElement("div");
+        vbEl.className = "track-vacant";
+        vbEl.title = "Вакант (нет закреплённого водителя)" + (vb.s + vb.l >= HOURS ? " - пока не посадим водителя" : " - до посадки водителя");
+        vbEl.style.left = (vb.s * hw) + "px";
+        vbEl.style.width = (vb.l * hw) + "px";
+        track.appendChild(vbEl);
+      });
       /* Влад, 31.08 (второй заход): "статус ремонт и без водителя должны
          накладываться друг на друга... вид как на скрине" - раньше полосатый
          оверлей (см. lpRepairOverlapRange_ ниже) срабатывал ТОЛЬКО поверх
@@ -21387,23 +21385,58 @@ function syncAllBlinks_(){
 function lpOverlapAllowed_(kindA, kindB){
   return (kindA === "repair" && kindB === "driveroff") || (kindA === "driveroff" && kindB === "repair");
 }
-function vacantBandRange_(v){
-  /* НАЙДЕННЫЙ БАГ (Влад, 30.08, на живой "613" - вакант + ремонт до 06.09,
-     полосатость не появлялась): "последняя запись" считалась по ЛЮБОМУ kind,
-     включая сам ремонт - а ремонт на вакантной машине именно и ЕСТЬ то самое
-     "накладывается" (Влад: "единственный момент, когда два статуса
-     накладываются"), не повод сдвигать старт полосы ПОСЛЕ него. Только
-     kind==="trip" считается "реальной работой", которая закрывает вакантность -
-     ремонт/ТО/без заказа/без водителя её не закрывают, полоса должна их
-     покрывать, не заканчиваться на них. */
-  var lastEnd = 0;
-  STATE.segs.forEach(function(s){
-    if (s.v !== v.i || s.kind !== "trip") return;
-    var end = s.s + s.l;
-    if (end > lastEnd) lastEnd = end;
+/* valid_from/valid_to из fleet_assignments - те же MSK wall-clock строки
+   "YYYY-MM-DD HH:MM:SS", что и everywhere в проекте (см. разбор в чате 02.09
+   про часовой сдвиг сервера) - разбираем вручную, не через new Date(строка)
+   (неоднозначный парсинг пробел/Т между браузерами), компоненты кладём в
+   ЛОКАЛЬНОЙ таймзоне - тот же приём, что у EPOCH0_ (new Date(YEAR,MONTH,1)). */
+function lpFleetDateToHour_(s){
+  var m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(s || "");
+  if (!m) return null;
+  return dateToHour_(new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]));
+}
+/* НАЙДЕННЫЙ БАГ (Влад, 02.09, живой пример - машина "797"/Титаев: "как не
+   было вакант, так и нет, хотя должна быть до того момента как в неё
+   посадили водителя"). Раньше полоса строилась от ОДНОГО живого флага
+   v.vacant - как только на машину сажали водителя, v.vacant становился
+   false, и ВСЯ полоса пропадала целиком, включая честный ПРОШЛЫЙ период,
+   когда машина реально была вакантна - лента "забывала" факт задним числом.
+   Теперь - НЕСКОЛЬКО диапазонов, построенных из ПОЛНОЙ истории
+   fleet_assignments (не только открытых записей - /api/fleet/state отдаёт
+   вообще все, включая закрытые), а не одного живого флага: промежутки, где
+   НИ ОДНА запись kind="driver" не покрывает время, - и есть вакантные
+   полосы, с честным концом ровно в момент, когда появилась следующая
+   запись (посадили водителя), а не "пока текущая машина не станет
+   невакантной вообще". Если запись всё ещё открыта (valid_to пуст) -
+   считается покрывающей до конца ленты (HOURS), как и раньше у последней
+   актуальной. Несколько slot-записей на одну машину (историческая
+   messiness, см. разбор "Пантелеев занят" выше по файлу) - сливаются в
+   покрытие обычным merge пересекающихся интервалов, не мешают результату. */
+function vacantBandRanges_(v){
+  var covered = (FLEET_ASSIGN_ || [])
+    .filter(function(a){ return a.kind === "driver" && a.tractor_gos === v.gos; })
+    .map(function(a){
+      var s = lpFleetDateToHour_(a.valid_from);
+      if (s == null) return null;
+      var e = a.valid_to ? lpFleetDateToHour_(a.valid_to) : HOURS;
+      if (e == null) e = HOURS;
+      return [Math.max(0, s), Math.min(HOURS, Math.max(s, e))];
+    })
+    .filter(Boolean)
+    .sort(function(a, b){ return a[0] - b[0]; });
+  var merged = [];
+  covered.forEach(function(iv){
+    var last = merged[merged.length - 1];
+    if (last && iv[0] <= last[1]) last[1] = Math.max(last[1], iv[1]);
+    else merged.push(iv.slice());
   });
-  var start = Math.max(0, lastEnd), end = HOURS;
-  return {s: start, l: Math.max(0, end - start)};
+  var gaps = [], cursor = 0;
+  merged.forEach(function(iv){
+    if (iv[0] > cursor) gaps.push({s: cursor, l: iv[0] - cursor});
+    cursor = Math.max(cursor, iv[1]);
+  });
+  if (cursor < HOURS) gaps.push({s: cursor, l: HOURS - cursor});
+  return gaps.filter(function(g){ return g.l > 0; });
 }
 /* «Единственный момент, когда два статуса могут накладываться» (Влад, 30.08) -
    ремонт поверх вакантной полосы полосатый. Проверяем ПЕРЕСЕЧЕНИЕ по времени
@@ -21449,10 +21482,7 @@ function lpRepairOverlapRange_(s){
     var a = Math.max(s.s, rs), b = Math.min(s.s + s.l, rs + rl);
     if (b > a){ os = (os == null) ? a : Math.min(os, a); oe = (oe == null) ? b : Math.max(oe, b); }
   }
-  if (v.vacant){
-    var band = vacantBandRange_(v);
-    if (band.l > 0) extend(band.s, band.l);
-  }
+  vacantBandRanges_(v).forEach(function(band){ extend(band.s, band.l); });
   var driveroffSegs = lpOverlappingSegsOfKind_(s, "driveroff");
   driveroffSegs.forEach(function(o){ extend(o.s, o.l); });
   if (os == null) return null;

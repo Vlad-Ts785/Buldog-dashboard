@@ -1637,7 +1637,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
 #page-logistics-plan .pres-tile.online{border-color:transparent;}
 #page-logistics-plan .pres-tile.active{animation:lpTagGlow var(--lp-blink-tact) ease-in-out infinite;}
 @media(prefers-reduced-motion:reduce){#page-logistics-plan .pres-tile.active{animation:none;box-shadow:0 0 8px 1px currentColor;}}
-#page-logistics-plan .kpis{display:flex;gap:2px;align-items:stretch;flex-wrap:wrap;row-gap:8px;}#page-logistics-plan .kpi{
+#page-logistics-plan .kpis{display:flex;gap:2px;align-items:stretch;flex-wrap:wrap;row-gap:12px;}#page-logistics-plan .kpi{
   /* НАЙДЕННЫЙ БАГ (Влад, 29.08: "наведи порядок, а не криво, как сейчас") -
      класс .kpi совпадает по имени с карточкой на главной панели дашборда
      (background/border/border-radius), и каскад работает ПОСВОЙСТВЕННО, не
@@ -1646,12 +1646,33 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
      конкретные свойства всё равно брались из чужого правила - специфичность
      тут ни при чём, конкурировать было некому. Явно гасим - плоский ряд с
      разделительными линиями, не отдельные плашки-пилюли. */
-  background:transparent;border:0;border-radius:0;
-  padding:4px 14px 4px 0;margin-right:12px;border-right:1px solid var(--border);
+  background:transparent;border:0;border-radius:0;flex:0 0 auto;
+  padding:4px 20px 4px 0;margin-right:18px;border-right:1px solid var(--border);
+  min-width:82px;
 }#page-logistics-plan .kpi:last-child{border-right:0;margin-right:0;}#page-logistics-plan .kpi-label{
   font-size:9px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;
-  color:var(--muted);margin-bottom:3px;white-space:nowrap;
-}#page-logistics-plan .kpi-val{font-size:17px;font-weight:600;line-height:1;}#page-logistics-plan .controls{display:flex;gap:14px;align-items:center;flex-wrap:wrap;}#page-logistics-plan .grp{display:flex;align-items:center;gap:6px;}#page-logistics-plan .grp-label{
+  color:var(--muted);margin-bottom:4px;white-space:nowrap;text-align:center;
+}#page-logistics-plan .kpi-val{font-size:19px;font-weight:600;line-height:1;}
+/* Вчера/сегодня/завтра под каждой метрикой (Влад, 02.09: "хотим видеть не
+   только за сегодня, но и за вчера и завтра"; дизайн-штурм с 3 вариантами -
+   выбрана "вафля-триплет" из варианта Б, без спарклайнов - Влад отдельно
+   отклонил кривые линии: "кривые линии ненужны", "вот так тупо надо"). Вчера
+   и завтра - мельче и приглушены, сегодня - крупное по центру, как раньше. */
+#page-logistics-plan .kpi-trio{display:flex;align-items:baseline;justify-content:center;gap:7px;}
+#page-logistics-plan .kpi-ghost{font-size:12px;font-weight:500;color:var(--muted);opacity:.6;min-width:11px;text-align:center;}
+#page-logistics-plan .kpi-delta{margin-top:3px;font-size:10px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:2px;}
+#page-logistics-plan .kpi-delta.up{color:var(--green);}
+#page-logistics-plan .kpi-delta.down{color:var(--red);}
+#page-logistics-plan .kpi-delta.flat{color:var(--muted);opacity:.55;}
+#page-logistics-plan .kpi-delta.watch{color:var(--amber);}
+/* Новый заказ на сегодня/завтра прилетел живьём с сервера (не от нас) -
+   вспышка на числе "Заказов", видно ВСЕМ, кто сейчас смотрит доску (Влад,
+   02.09: "должна быть анимация для всех"). Та же вспышка, что у карточки
+   "Статус парка" на главной (fleetSegPulse, см. ~340) - единый язык "что-то
+   изменилось живьём" по всему дашборду, не новая анимация с нуля. */
+#page-logistics-plan .kpi.kpi-pulse .kpi-val{animation:fleetSegPulse 1.1s ease-out;}
+@media(prefers-reduced-motion:reduce){#page-logistics-plan .kpi.kpi-pulse .kpi-val{animation:none;}}
+#page-logistics-plan .controls{display:flex;gap:14px;align-items:center;flex-wrap:wrap;}#page-logistics-plan .grp{display:flex;align-items:center;gap:6px;}#page-logistics-plan .grp-label{
   font-size:9px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);
   margin-right:2px;
 }#page-logistics-plan .chip{
@@ -21337,60 +21358,102 @@ function makeSeg(s){
   return el;
 }
 
-function renderKpis(){
-  // 01.09, Влад: цифры в шапке должны меняться при клике на фильтр ПАРК
-  // (Тралы/Длинномеры/...), а не всегда показывать весь парк - тот же visible(),
-  // что уже фильтрует сами строки доски (see renderRowsInner_), просто применённый
-  // и к счётчикам шапки, чтобы они не расходились с тем, что реально на экране.
-  var h = nowHour(), inWork = 0, rep = 0, noOrd = 0, noDrv = 0, free = 0;
-  var scope = STATE.vehicles.filter(visible);
+/* Один и тот же алгоритм бакетов для ЛЮБОГО дня (01.09-формула Влада не
+   тронута для "сегодня" - см. проверку эквивалентности ниже), просто вынесен
+   в функцию и параметризован часом/границами дня, чтобы 02.09 посчитать то же
+   самое для вчера/завтра. Для вчера/завтра "час" - тот же час суток, что
+   сейчас, но сдвинутый на ±24 (h-24/h+24) - "как выглядела бы доска в это же
+   время вчера" / "как она распланирована на это же время завтра", а не
+   бессмысленное "прямо сейчас" для дня, которого ещё(уже) нет. */
+function kpiCountsAt_(scope, h, dayStart, dayEnd){
   var scopeIdx = {}; scope.forEach(function(v){ scopeIdx[v.i] = true; });
-  // "Без заказа" vs "Свободны" (01.09, Влад): "Без заказа" - вообще пустой день
-  // (ни одного рейса за СЕГОДНЯ целиком, машина исправна, с водителем) - раньше
-  // такие машины молча попадали в "Свободны" вместе с теми, кто просто освободился
-  // МЕЖДУ рейсами. "Свободны" теперь - именно второе: сегодня рейс(ы) уже был(и),
-  // сейчас между ними/после них ничего не покрывает текущий час.
-  var dayStart = TODAY_D_ * 24, dayEnd = dayStart + 24;
+  var inWork = 0, rep = 0, noOrd = 0, noDrv = 0, free = 0;
   scope.forEach(function(v){
     var here = STATE.segs.filter(function(s){ return s.v === v.i && s.s <= h && s.s + s.l > h; });
     if (here.some(function(s){ return s.kind === "trip"; })) { inWork++; return; }
     if (here.some(function(s){ return s.kind === "repair" || s.kind === "maint"; })) { rep++; return; }
-    // "Нет водителя" (01.09, Влад: "все эти машины со статусом вакант... заказ везти
-    // некому, это не пустой день, это без водителя") - v.vacant (источник истины -
-    // fleet_assignments, см. lpApplyFleetDriverStatus_) - ЭТО ЖЕ САМОЕ "нет
-    // водителя", даже когда никто не проставил на сегодня явный сегмент
-    // kind==='driveroff' (тот - отдельный плановый статус: отпуск/больничный у
-    // НАЗНАЧЕННОГО водителя). Раньше проверялся только явный сегмент - вакантная
-    // машина без сегмента молча утекала в "Без заказа"/"Свободны".
+    // "Нет водителя" (01.09, Влад): v.vacant - источник истины (fleet_assignments,
+    // см. lpApplyFleetDriverStatus_) - ТЕКУЩАЯ вакансия, не расписана по дням;
+    // используем как есть для всех трёх колонок - упрощение, вакансия обычно не
+    // скачет туда-сюда в пределах суток.
     if (v.vacant || here.some(function(s){ return s.kind === "driveroff"; })) { noDrv++; return; }
     if (here.some(function(s){ return s.kind === "noorder"; })) { noOrd++; return; }
-    var hadTripToday = STATE.segs.some(function(s){
+    var hadTrip = STATE.segs.some(function(s){
       return s.v === v.i && s.kind === "trip" && s.s < dayEnd && s.s + s.l > dayStart;
     });
-    if (hadTripToday) free++; else noOrd++;
+    if (hadTrip) free++; else noOrd++;
   });
-  // "Заказов" (01.09, Влад): рейсы за СЕГОДНЯ в текущем фильтре, обычный рейс = 1,
-  // "Суточный" (s.tripMode==='daily') = 3 - один такой отрезок на ленте на деле
-  // означает несколько подряд идущих загрузок за день, а не одну.
   var totalOrders = 0;
   STATE.segs.forEach(function(s){
     if (scopeIdx[s.v] && s.kind === "trip" && s.s < dayEnd && s.s + s.l > dayStart){
       totalOrders += (s.tripMode === "daily") ? 3 : 1;
     }
   });
-  // "В работе" (01.09, Влад): "Всего - Ремонт - Без водителя" - операционно
-  // доступные машины (везёт/свободна/без заказа, но не заблокирована ремонтом
-  // или отсутствием водителя), отдельно от "В рейсе" (только те, кто везёт
-  // прямо сейчас). По построению равно inWork+noOrd+free - тот же результат,
-  // но формула Влада явная и проверяемая на глаз.
   var inWorkTotal = scope.length - rep - noDrv;
-  var k = [["Парк", scope.length], ["В работе", inWorkTotal], ["В рейсе", inWork], ["Ремонт и ТО", rep],
-           ["Без заказа", noOrd], ["Нет водителя", noDrv], ["Свободны", free],
-           ["Заказов", totalOrders]];
-  document.getElementById("lp-kpis").innerHTML = k.map(function(p){
-    return '<div class="kpi"><div class="kpi-label">' + p[0] + '</div>' +
-           '<div class="kpi-val mono">' + p[1] + "</div></div>";
+  return {park: scope.length, work: inWorkTotal, trip: inWork, repair: rep,
+          noOrder: noOrd, noDriver: noDrv, free: free, orders: totalOrders};
+}
+var KPI_ROWS_ = [
+  {key: "park",     label: "Парк",         goodUp: null},
+  {key: "work",     label: "В работе",     goodUp: true},
+  {key: "trip",     label: "В рейсе",      goodUp: true},
+  {key: "repair",   label: "Ремонт и ТО",  goodUp: false},
+  {key: "noOrder",  label: "Без заказа",   goodUp: false},
+  {key: "noDriver", label: "Нет водителя", goodUp: false},
+  {key: "free",     label: "Свободны",     goodUp: null},
+  {key: "orders",   label: "Заказов",      goodUp: true}
+];
+var kpiPrevSnapshot_ = null;  /* {filter, today, tomorrow} заказов - детект "новый заказ" на живых тиках */
+function renderKpis(){
+  // 01.09, Влад: цифры в шапке должны меняться при клике на фильтр ПАРК
+  // (Тралы/Длинномеры/...), а не всегда показывать весь парк - тот же visible(),
+  // что уже фильтрует сами строки доски (see renderRowsInner_), просто применённый
+  // и к счётчикам шапки, чтобы они не расходились с тем, что реально на экране.
+  var h = nowHour();
+  var scope = STATE.vehicles.filter(visible);
+  var dayStart = TODAY_D_ * 24, dayEnd = dayStart + 24;
+  var todayC = kpiCountsAt_(scope, h, dayStart, dayEnd);
+  var yestC  = kpiCountsAt_(scope, h - 24, dayStart - 24, dayEnd - 24);
+  var tomC   = kpiCountsAt_(scope, h + 24, dayStart + 24, dayEnd + 24);
+
+  document.getElementById("lp-kpis").innerHTML = KPI_ROWS_.map(function(row){
+    var y = yestC[row.key], t = todayC[row.key], n = tomC[row.key];
+    var d = n - t, dCls;
+    if (d === 0) dCls = "flat";
+    else if (row.goodUp === null) dCls = "watch";
+    else dCls = (row.goodUp ? d > 0 : d < 0) ? "up" : "down";
+    var dArrow = d > 0 ? "▲" : (d < 0 ? "▼" : "–");
+    var dText = d === 0 ? "" : (" " + (d > 0 ? ("+" + d) : String(d)));
+    return '<div class="kpi" data-kpi="' + row.key + '">' +
+      '<div class="kpi-label">' + row.label + '</div>' +
+      '<div class="kpi-trio mono">' +
+        '<span class="kpi-ghost">' + y + '</span>' +
+        '<span class="kpi-val">' + t + '</span>' +
+        '<span class="kpi-ghost">' + n + '</span>' +
+      '</div>' +
+      '<div class="kpi-delta mono ' + dCls + '">' + dArrow + dText + '</div>' +
+    '</div>';
   }).join("");
+
+  // Живое уведомление "появился новый заказ" (Влад, 02.09: "должна быть анимация
+  // для всех") - сравниваем счётчик "Заказов" с прошлым рендером В ТОМ ЖЕ
+  // фильтре парка (иначе переключение "Тралы"/"Длинномеры" само по себе читалось
+  // бы как "появился заказ" - другой фильтр даёт другое число заказов без единой
+  // новой записи). Растёт число - значит прилетел ЧУЖОЙ, не наш локальный тик.
+  var snap = {filter: STATE.filter, today: todayC.orders, tomorrow: tomC.orders};
+  if (kpiPrevSnapshot_ && kpiPrevSnapshot_.filter === snap.filter){
+    var newToday = snap.today > kpiPrevSnapshot_.today;
+    var newTom = snap.tomorrow > kpiPrevSnapshot_.tomorrow;
+    if (newToday || newTom){
+      var ordersEl = document.querySelector('#lp-kpis .kpi[data-kpi="orders"]');
+      if (ordersEl){
+        ordersEl.classList.remove("kpi-pulse"); void ordersEl.offsetWidth; ordersEl.classList.add("kpi-pulse");
+      }
+      toast(newToday && newTom ? "Новый заказ - на сегодня и на завтра" :
+            (newToday ? "Новый заказ на сегодня" : "Новый заказ на завтра"));
+    }
+  }
+  kpiPrevSnapshot_ = snap;
 }
 
 /* легенда типов техники - из РЕАЛЬНОГО состава парка (после buildVehicles), не

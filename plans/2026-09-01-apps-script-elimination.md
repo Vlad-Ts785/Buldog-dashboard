@@ -228,7 +228,7 @@
 
 ### Этап 3 - Главный payload с сервера
 
-- [ ] 3.1 `/api/main_payload` (checkSession, role-aware): собирает то же, что doGet без
+- [~] 3.1 `/api/main_payload` (checkSession, role-aware): собирает то же, что doGet без
       action - orders/summary/debt/receipts уже готовы (agregated эндпоинты есть),
       vehicles/drivers - из этапа 2, history - История_показателей -> таблица (или из
       vehicle_status_daily агрегатом; разовый импорт старых 30 дней из листа для графика),
@@ -238,6 +238,22 @@
       на фронте). **Кэш (Ревизор, 🟡):** in-memory кэш 60-120 сек в процессе Node (не
       Redis) - иначе на 1ГБ RAM пересчёт на каждый вход = приглашение к OOM; апгрейд RAM
       (П.2) - предпосылка этого этапа, не пожелание.
+      **01-02.09, ночь (Влад спал/отъехал):** admin-путь `/api/main_payload` собран через
+      loopback-композицию уже проверенных эндпоинтов (orders_computed/debt_computed/
+      receipts/park_summary/fleet_summary/park_history), НЕ дублирует денежную логику.
+      Сознательно исключает fleet/repairs/staffMarkas (живая Штатка, блокер 2.4) и
+      revenueComparison (ещё Sheets). При первой проверке нашлась дыра: manager_plans на
+      сервере застряла на августе (13 строк, сентябрь - 0) - старый мост
+      (export_manager_plans в doGet + import-manager-plans.js на VPS) был мёртв, action
+      убран из doGet раньше, VPS-скрипт молча слал запрос в никуда, не был в crontab.
+      Починено тем же приёмом, что vehicle_plans: `syncManagerPlansToServer_()` в Apps
+      Script (из runAll(), полная перезаливка листа) + `POST /api/manager_plans`
+      (TRUNCATE+reload, checkServerKey). Apps Script v365 (live). При тестовом прогоне
+      TRUNCATE на пару минут стёр реальные июнь/июль/август на сервере (лист-источник не
+      пострадал) - восстановлено тем же разовым запуском, сентябрь пуст закономерно
+      (Влад ещё не внёс план на новый месяц). **НЕ доделано:** manager/logist-урезанные
+      view, in-memory кэш, апгрейд RAM (П.2) - без него не включать. `/api/main_payload`
+      НЕ подключён ни к какому фронтенду и не будет подключаться (3.2) без Влада на связи.
 - [ ] 3.2 Фронтенд: loadData() пробует `/api/main_payload` первым, Apps Script - фолбэк.
       Построчная сверка JSON двух источников на всех ролях ДО переключения по умолчанию.
 - [ ] 3.3 Глобальная статистика: `month_summary` уже в MySQL (8 месяцев) -

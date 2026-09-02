@@ -1623,10 +1623,19 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
    Занимает угол, который освободил .monthnav (Влад, 30.08: "лампочки с
    логистами поставить туда, где у нас сейчас выбор месяцев") - тот же
    position:absolute, что раньше держал правый верхний угол за monthnav. */
-#page-logistics-plan .presence{
+#page-logistics-plan .presence-wrap{
   position:absolute;top:16px;right:22px;z-index:31;
   display:flex;gap:5px;align-items:center;
 }
+#page-logistics-plan .presence{display:flex;gap:5px;align-items:center;}
+#page-logistics-plan .pres-history-btn{
+  width:32px;height:32px;border-radius:8px;flex:none;
+  display:flex;align-items:center;justify-content:center;
+  border:1px solid var(--border);color:var(--muted2);background:transparent;cursor:pointer;
+  transition:color .15s var(--ease-out-soft),border-color .15s var(--ease-out-soft),background-color .15s var(--ease-out-soft);
+}
+#page-logistics-plan .pres-history-btn svg{width:16px;height:16px;}
+#page-logistics-plan .pres-history-btn:hover{color:var(--text);border-color:var(--border-strong);background:var(--bg3);}
 #page-logistics-plan .pres-tile{
   width:32px;height:32px;border-radius:8px;flex:none;
   display:flex;align-items:center;justify-content:center;
@@ -3055,8 +3064,17 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   <div class="spacer"></div>
   <!-- Присутствие - Влад, 30.08: "лампочки с логистами поставить туда, где у
        нас сейчас выбор месяцев" - занимает угол, который освободил monthnav
-       (см. .presence в CSS, position:absolute тот же, что был у .monthnav). -->
-  <div class="presence" id="lp-presence" title="Кто сейчас на странице"></div>
+       (см. .presence-wrap в CSS, position:absolute тот же, что был у .monthnav).
+       02.09: кнопка "История" (Влад: "там где лампочки логистов") - обёрнуты
+       в общий флекс-контейнер вместо позиционирования кнопки отдельно самой по
+       себе - ширина .presence зависит от размера ростера, вручную считать
+       отступ для соседней кнопки было бы хрупко. -->
+  <div class="presence-wrap" id="lp-presenceWrap">
+    <button class="pres-history-btn" id="lp-historyBtn" type="button" title="История действий в Планировке">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 5.5v3.5h3.5"/><path d="M4.3 9A6.5 6.5 0 1 0 5.1 5"/><path d="M10.5 7v3.5l2.5 1.5"/></svg>
+    </button>
+    <div class="presence" id="lp-presence" title="Кто сейчас на странице"></div>
+  </div>
 
   <div class="controls">
     <div class="grp">
@@ -3091,13 +3109,6 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
            Цвет/Парк и сбрасывал aria-pressed у соседней кнопки при каждом
            клике "Сегодня" (найдено при переносе кнопки сюда, 30.08). -->
       <button class="chip" id="lp-monthToday" data-solo="1" title="Перейти к сегодняшнему дню">Сегодня</button>
-      <!-- Влад, 30.08 (после ложной тревоги "данные пропали" - на деле Васин
-           живьём тестировал доску): "надо железобетонно сделать так, чтобы в
-           планировке не пропадали данные, или к ней доверия не будет... это
-           должно сразу работать чётко" - самообслуживаемое восстановление,
-           не "спроси Клода покопаться в логах сервера". Только admin - тот же
-           уровень доступа, что у "Смотреть как сотрудник"/presence. -->
-      <button class="chip" id="lp-historyBtn" data-solo="1" style="display:none" title="Журнал изменений заявок - восстановить любую перезаписанную/удалённую">История</button>
     </div>
   </div>
 </div>
@@ -3198,6 +3209,12 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
 
 <div class="scrim" id="lp-scrim"></div>
 <aside class="drawer" id="lp-drawer" aria-hidden="true"></aside>
+<!-- 02.09, Влад: кнопка "История" рядом с лампочками присутствия - "по нажатию
+     могу посмотреть кто что делал". ОТДЕЛЬНАЯ пара scrim/drawer от #lp-scrim/
+     #lp-drawer выше (та занята созданием/правкой рейса, свой STATE.openId) -
+     не переиспользуем один и тот же элемент под два разных назначения. -->
+<div class="scrim" id="lp-historyScrim"></div>
+<aside class="drawer" id="lp-historyDrawer" aria-hidden="true"></aside>
 <!-- Своё контекстное меню плитки вместо браузерного (Влад, 29.08: "должно возникать
      меню нашего приложения... на пустом месте ничего не должно происходить") -->
 <div class="ctxmenu" id="lp-ctxMenu">
@@ -22597,6 +22614,11 @@ function fetchPresence_(){
 function renderPresence_(){
   var el = document.getElementById("lp-presence");
   if (!el) return;
+  /* Кнопка "История" (02.09) - та же видимость, что у лампочек присутствия
+     (Влад, 29.08, про сами лампочки: "это для админ-режима") - лёгкий
+     аудит-след "кто что делал" логично держать тем же уровнем доступа. */
+  var histBtn_ = document.getElementById("lp-historyBtn");
+  if (histBtn_) histBtn_.style.display = STATE.role === "admin" ? "" : "none";
   if (STATE.role !== "admin"){ el.innerHTML = ""; return; }
   var seen = {}, roster = [];
   LOG_TRAL.concat(LOG_LONG).forEach(function(p){
@@ -23123,6 +23145,75 @@ function closeDrawer(){
 }
 scrim.onclick = closeDrawer;
 
+/* ═══ Панель "История" (02.09, Влад: "кнопка история... по нажатию я могу
+   посмотреть кто что делал") - лента событий с сервера (/api/plan/activity,
+   plan_segs_history + fleet_assignments source='planirovka'), СВОЯ пара
+   scrim/drawer (#lp-historyScrim/#lp-historyDrawer), не переиспользует
+   #lp-scrim/#lp-drawer (та занята созданием/правкой рейса). ═══ */
+var historyScrim_ = document.getElementById("lp-historyScrim"), historyDrawer_ = document.getElementById("lp-historyDrawer");
+var LP_HIST_KIND_LABEL_ = {trip:"рейс", repair:"ремонт", maint:"ТО", noorder:"без заказа", driveroff:"без водителя"};
+/* MSK - сервер отдаёт `at` в UTC (та же схема, что везде на VPS - см. память
+   project_month_boundary_bug_class про соседний часовой сдвиг). */
+function lpHistTime_(iso){
+  var d = new Date(iso);
+  var msk = new Date(d.getTime() + 3 * 3600000);
+  var dd = String(msk.getUTCDate()).padStart(2, "0"), mm = String(msk.getUTCMonth() + 1).padStart(2, "0");
+  var hh = String(msk.getUTCHours()).padStart(2, "0"), mi = String(msk.getUTCMinutes()).padStart(2, "0");
+  return dd + "." + mm + " " + hh + ":" + mi;
+}
+function lpHistLine_(ev){
+  var kindLbl = LP_HIST_KIND_LABEL_[ev.kind] || ev.kind || "запись";
+  var gos = ev.vehicle_gos || "?";
+  switch (ev.type){
+    case "seg_create":
+      var route = (ev.kind === "trip" && (ev.route_from || ev.route_to))
+        ? " (" + (ev.route_from || "?") + " → " + (ev.route_to || "?") + ")" : "";
+      return "создал(а) " + kindLbl + " на <b>" + gos + "</b>" + route;
+    case "seg_overwrite":
+      return "изменил(а) " + kindLbl + " на <b>" + gos + "</b>";
+    case "seg_delete":
+      return "удалил(а) " + kindLbl + " на <b>" + gos + "</b>";
+    case "fleet_couple":
+      return (ev.kind === "driver" ? "посадил(а) водителя " : "зацепил(а) прицеп ") +
+        "<b>" + (ev.who || "?") + "</b> на <b>" + gos + "</b>";
+    case "fleet_uncouple":
+      return (ev.kind === "driver" ? "снял(а) водителя " : "отцепил(а) прицеп ") +
+        "<b>" + (ev.who || "?") + "</b> с <b>" + gos + "</b>";
+    default:
+      return ev.type;
+  }
+}
+function closeHistoryDrawer_(){
+  historyDrawer_.classList.remove("open"); historyDrawer_.setAttribute("aria-hidden", "true");
+  historyScrim_.classList.remove("open");
+}
+historyScrim_.onclick = closeHistoryDrawer_;
+function openHistoryDrawer_(){
+  historyDrawer_.innerHTML =
+    '<div class="dr-eyebrow">Планировка</div><div class="dr-title">История действий</div>' +
+    '<div class="dr-note" id="lp-histBody">Загрузка…</div>' +
+    '<div class="dr-actions"><button class="chip dr-close" id="lp-histClose">Закрыть</button></div>';
+  document.getElementById("lp-histClose").onclick = closeHistoryDrawer_;
+  historyDrawer_.classList.add("open"); historyDrawer_.setAttribute("aria-hidden", "false");
+  historyScrim_.classList.add("open");
+  fetchFromYardApi_("/plan/activity", {limit: 150}).then(function(r){
+    var body = document.getElementById("lp-histBody");
+    if (!body) return;   /* панель уже закрыли, пока ответ шёл */
+    if (!r.ok || !r.data || !Array.isArray(r.data.events)){
+      body.textContent = "Не удалось загрузить историю - попробуйте ещё раз."; return;
+    }
+    if (!r.data.events.length){ body.textContent = "Пока пусто - действий ещё не было."; return; }
+    body.innerHTML = r.data.events.map(function(ev){
+      return '<div class="dr-row" style="display:block"><div style="color:var(--muted);font-size:10.5px;margin-bottom:2px" class="mono">' +
+        lpHistTime_(ev.at) + ' · ' + (ev.by || "—") + '</div><div>' + lpHistLine_(ev) + '</div></div>';
+    }).join("");
+  }).catch(function(){
+    var body = document.getElementById("lp-histBody");
+    if (body) body.textContent = "Ошибка сети - попробуйте ещё раз.";
+  });
+}
+document.getElementById("lp-historyBtn").onclick = openHistoryDrawer_;
+
 /* Диалог подтверждения «под данные» (Влад, 30.08) - callback-стиль, не Promise:
    проще звать из синхронного кода pointerup (см. движение плитки ниже), не
    ломая остальной поток async/await, которого в этом модуле нигде больше нет.
@@ -23154,6 +23245,7 @@ confirmScrim_.onclick = function(){ closeConfirmDialog_(false); };
 window.addEventListener("keydown", function(e){
   if (e.key !== "Escape") return;
   if (confirmBox_.classList.contains("open")){ closeConfirmDialog_(false); return; }
+  if (historyDrawer_.classList.contains("open")){ closeHistoryDrawer_(); return; }
   closeDrawer(); closeCtxMenu_();
 });
 
@@ -23193,6 +23285,13 @@ function openCtxMenu_(seg, x, y){
    где "эта конкретная машина" уже однозначно адресуема одним кликом. */
 var FLEET_PEOPLE_ = [], FLEET_ASSETS_ = [], FLEET_ASSIGN_ = [];
 function fetchFleetData_(){
+  /* Та же защита от лишних запросов, что у fetchPlanSegs_ (не спрашивать сервер,
+     пока вкладка Планировки скрыта/не активна) - актуально теперь, когда эта
+     функция ушла на поллинг (см. setInterval ниже), а не вызывается только
+     по требованию. Прямые вызовы из fleetDoCouple_/fleetDoUncouple_/initLP()
+     всегда происходят, когда вкладка уже открыта и активна - гейт их не заденет. */
+  if (document.hidden) return;
+  if (!pageRoot.classList.contains("active")) return;
   return Promise.all([fetchFromYardApi_("/sprav/state", {}), fetchFromYardApi_("/fleet/state", {})])
     .then(function(results){
       var sprav = results[0], fleet = results[1];
@@ -23202,14 +23301,21 @@ function fetchFleetData_(){
         /* Источник истины по "есть водитель/вакант" только что реально стал
            доступен (см. lpComputeVacant_) - весь парк построен ДО этого момента
            на временном фолбэке по Штатке, пересчитываем начисто и перерисовываем. */
-        var wasLoaded = fleetDataLoaded_;
         fleetDataLoaded_ = true;
         STATE.vehicles.forEach(function(v){ lpApplyFleetDriverStatus_(v); });
-        // renderKpis() тоже зависит от v.vacant (01.09, "Нет водителя" в шапке) -
-        // до этого момента вакантность бралась из временного Штатка-фолбэка
-        // (см. комментарий у lpApplyFleetDriverStatus_ выше), число в шапке могло
-        // на долю секунды показать неверную картину, если не пересчитать здесь же.
-        if (!wasLoaded){ renderRows(); renderKpis(); }
+        /* 02.09, Влад (после Титаева): "полоска вакант должна закончиться на
+           моменте когда посадили водителя" - НАЙДЕННЫЙ БАГ: эта функция
+           перерисовывала строки ТОЛЬКО при первой загрузке (!wasLoaded) или
+           сразу после действия ТЕКУЩЕГО пользователя (fleetDoCouple_/
+           fleetDoUncouple_ вызывают её вручную) - на ЧУЖОМ открытом экране,
+           если водителя посадил кто-то ДРУГОЙ, полоска "вакант"/строка
+           "Вакант" не исчезала НИКОГДА без ручного обновления страницы, в
+           отличие от рейсов (fetchPlanSegs_ - живой поллинг раз в 7с). Теперь
+           перерисовываем ПРИ КАЖДОМ успешном ответе, не только при первом, и
+           сама функция теперь живёт на поллинге (см. setInterval ниже) - тот
+           же принцип, что уже работает для рейсов, просто реже (сцепка/
+           пересадка водителя происходит НАМНОГО реже правок рейса). */
+        renderRows(); renderKpis();
       }
     }).catch(function(){});   /* нет сети/сбой - меню просто не покажет "кто сейчас сидит", посадить/зацепить всё равно работает */
 }
@@ -23412,6 +23518,13 @@ rowsEl.addEventListener("click", function(e){
   if (window.NAV){ NAV.select(omniId); setTimeout(function(){ NAV.select(omniId); }, 700); }
 });
 setInterval(lpOmniFetch_, 30000);   /* тот же интервал, что у поллера Omnicomm на сервере - чаще спрашивать нечего */
+/* 02.09, Влад: "полоска вакант должна закончиться на моменте когда посадили
+   водителя" - раньше fetchFleetData_() обновлялась только один раз при
+   загрузке страницы + сразу после действия ТЕКУЩЕГО пользователя, на чужом
+   открытом экране "Вакант"/полоса не исчезали без ручного обновления.
+   Реже, чем рейсы (fetchPlanSegs_, 7с) - сцепка/пересадка водителя происходит
+   на порядок реже правки рейса, гонять сервер с той же частотой смысла нет. */
+setInterval(fetchFleetData_, 20000);
 
 /* НАЙДЕННЫЙ БАГ (Влад, 31.08, живой пример: "Пантелеев занят" - на самом деле
    на этой машине сидит Мавлитян, а не Пантелеев). Корень - и здесь, и в

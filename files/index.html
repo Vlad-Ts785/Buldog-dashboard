@@ -5813,6 +5813,8 @@ function clearAuthTokens_() {
   SESSION_TOKEN = '';
   localStorage.removeItem('id_token');
   localStorage.removeItem('session_token');
+  localStorage.removeItem('user_role');
+  localStorage.removeItem('user_name');
 }
 
 // Google Apps Script иногда временно отдаёт HTML-страницу (или пустой ответ) вместо JSON,
@@ -5906,6 +5908,13 @@ async function handleCredentialResponse(response) {
     var authData = await authResp.json();
     if (authData && authData.session_token) {
       localStorage.setItem('session_token', authData.session_token);
+      // Роль/имя (2026-09-02, роль "механик") - сервер уже отдаёт их прямо в ответе входа
+      // (access_users, этап 1 плана apps-script-elimination). Кэшируем, чтобы loadData()
+      // при КАЖДОЙ следующей загрузке (не только сразу после входа) знал роль ДО первого
+      // запроса и мог для ролей без Apps Script-пути (механик) вообще не дёргать doGet -
+      // id_token живёт ~час, повторно его не перепроверить на обычной перезагрузке.
+      if (authData.role) localStorage.setItem('user_role', authData.role);
+      if (authData.name) localStorage.setItem('user_name', authData.name);
     }
   } catch (e) { /* сервер недоступен - фолбэк на Apps Script при загрузке ниже */ }
   // Перезагружаем страницу целиком вместо попытки обновить интерфейс на месте -
@@ -5966,6 +5975,33 @@ function applyData(patch, opts) {
   return true;
 }
 
+// Роль "механик" (2026-09-02, Влад: "нужно ввести отдельную роль механик... доступ к
+// Планировке, как у логистов", без Личной страницы/зарплаты сейчас) - единственный источник
+// данных ей нужен уже готов на сервере (/api/fleet_summary, checkSessionOrServerKey, БЕЗ
+// requireRole_ - открыт для любой валидной сессии, правок на сервере не понадобилось).
+// Формирует D САМА, минуя doGet целиком (см. loadData()) - vehicles приводим к тому же
+// формату {gos, marka, type, trailer, driver, status}, что buildVehicles() в модуле
+// Планировки уже читает из D.vehicles (см. plans/2026-08-30-avtokolonna-head-personal-
+// page.md - тот же формат использовался для роли logist).
+async function loadMechanicData_() {
+  var r = await fetchFromYardApi_('/fleet_summary', {});
+  if (!r.ok || !r.data || r.data.error) {
+    throw new Error((r.data && r.data.error) || 'Не удалось загрузить состав парка');
+  }
+  var vehicles = Object.values(r.data.vehicles || {}).map(function(v) {
+    return {
+      gos: v.gos || '', marka: v.marka || '', type: v.type || '',
+      trailer: v.trailerGos || '', driver: v.driver || '', status: v.status || '',
+    };
+  });
+  applyData({
+    role: 'mechanic',
+    mechanicName: localStorage.getItem('user_name') || 'Механик',
+    vehicles: vehicles,
+    updated: new Date().toISOString(),
+  }, { skipIfUnchanged: true });
+}
+
 let loadDataInFlight_ = false; // защита кнопки от двойного клика (аудит 29.08) - без неё
                                 // два параллельных вызова пишут в D в произвольном порядке
 async function loadData() {
@@ -5986,6 +6022,17 @@ async function loadData() {
     startLoadingPhrases();
   }
   try {
+    // Роль "механик" (2026-09-02, plans/2026-09-01-apps-script-elimination.md - "с 1
+    // сентября в Apps Script не добавляется ничего нового") - целиком через сервер, doGet
+    // вообще не дёргаем. Роль знаем ИЗ КЭША localStorage (записан при входе, см.
+    // handleCredentialResponse) - id_token живёт ~час, на обычной перезагрузке его уже не
+    // перепроверить, а session_token сам по себе роль не несёт.
+    if (localStorage.getItem('user_role') === 'mechanic') {
+      await loadMechanicData_();
+      hideLoginScreen();
+      document.getElementById('error-block').style.display = 'none';
+      return;
+    }
     // Во временную переменную, не в D напрямую (Этап 1) - если ответ окажется needLogin/
     // error, старый рабочий D должен остаться нетронутым, а не затираться битым/пустым
     // ответом до самого throw.
@@ -9197,6 +9244,24 @@ function render() {
 function applyRoleUI() {
   const sidebarLabel = document.querySelector('.sidebar-logo-label');
   const previewing = D.role === 'admin' && !!viewAsEntry;
+  // Механик (2026-09-02) - отдельная, самая узкая роль: только "Планировка" + Калькулятор
+  // (Влад: "доступ к Планировке, как у логистов"), без Личной страницы - у механика нет ни
+  // зарплаты, ни личных данных, которые она бы показывала (D для этой роли собирается
+  // САМ фронтендом в loadMechanicData_(), там нет D.orders - renderMyPage() на этом
+  // сломался бы, поэтому ветка manager/logist ниже эту роль не подхватывает вообще).
+  if (D.role === 'mechanic') {
+    if (sidebarLabel) sidebarLabel.textContent = D.mechanicName || 'Механик';
+    var mechAllowed_ = ['calculator', 'logistics-plan'];
+    document.querySelectorAll('.sidebar-nav-item').forEach(function(item) {
+      item.style.display = mechAllowed_.indexOf(item.getAttribute('data-page')) >= 0 ? '' : 'none';
+    });
+    document.querySelectorAll('.sidebar-nav-section').forEach(function(s){ s.style.display = 'none'; });
+    var mechActiveEl_ = document.querySelector('.page.active');
+    var mechActiveId_ = mechActiveEl_ ? mechActiveEl_.id.replace(/^page-/, '') : null;
+    if (!mechActiveId_ || mechAllowed_.indexOf(mechActiveId_) < 0) showPage('logistics-plan');
+    updateViewAsButton_();
+    return;
+  }
   if (D.role === 'manager' || D.role === 'logist' || previewing) {
     if (sidebarLabel) sidebarLabel.textContent = previewing ? viewAsEntry.name : (D.managerName || D.logistName || (D.role === 'logist' ? 'Логист' : 'Менеджер'));
     // "Зарплата" - отдельный пункт меню (2026-08-26, Влад: "Отдельная и единственная"), виден

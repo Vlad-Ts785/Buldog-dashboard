@@ -1100,6 +1100,9 @@ function runAll() {
   try { syncVehicleTypesToServer_(); log.push('✅ Типы техники отправлены на сервер'); }
   catch(e) { errors.push('❌ Типы техники на сервер: ' + e.message); }
 
+  try { syncVehiclePlansToServer_(); log.push('✅ Планы ВП отправлены на сервер'); }
+  catch(e) { errors.push('❌ Планы ВП на сервер: ' + e.message); }
+
   try { normalizeOrders();         log.push('✅ Заказы нормализованы'); }
   catch(e) { errors.push('❌ Заказы (норм.): ' + e.message); }
 
@@ -5773,6 +5776,22 @@ function doGet(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
 
+    // Явный запрет-по-умолчанию для ЛЮБОЙ роли кроме admin/manager/logist (2026-09-02,
+    // найдено при заведении роли "механик") - НАЙДЕНА ДЫРА: до этой правки любая роль, не
+    // равная 'manager'/'logist' (опечатка в листе "Доступ", будущая роль), молча проваливалась
+    // в блок ниже и получала ПОЛНЫЙ admin-payload (все финансы/зарплаты всей компании), т.к.
+    // тот блок ничем не был огорожен. Новые роли (механик и т.п.) по решению 2026-09-01
+    // (plans/2026-09-01-apps-script-elimination.md, инвариант "не добавлять новое в Apps
+    // Script") обслуживаются ЦЕЛИКОМ через сервер, минуя doGet - фронтенд для них сюда вообще
+    // не должен доходить. Эта проверка - защита на случай, если всё же дойдёт (например,
+    // Apps Script-логин как "вторая дверь" при недоступности api.yardhub.ru) - честный отказ,
+    // не молчаливая утечка.
+    if (access.role !== 'admin') {
+      return ContentService.createTextOutput(JSON.stringify({
+        error: 'Для роли "' + access.role + '" данные обслуживаются отдельно и здесь недоступны',
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
     const staffData = getStaffData(ss); // читаем Штатку один раз - ЖИВОЙ документ, всегда live
 
     const data = Object.assign(
@@ -6275,6 +6294,32 @@ function fetchParkHistoryFromServer_(fromDate, toDate) {
   }
 }
 
+// Марка/тип/план по машине (/api/fleet_summary, план 2026-09-01, этап 2.3) - сверено с
+// Штаткой 01.09 (verifyFleetSummary_): type/plan/marka/trailerGos совпали 100% (0 из 53
+// расхождений). Тихий null при любой проблеме - вызывающий откатывается на Штатку ровно
+// как раньше. Возвращает карту, ключ - normalizeGos() (тот же формат, что staffData), не
+// сырой ответ сервера (у него ключи в другой нормализации - см. verifyFleetSummary_).
+function fetchFleetSummaryFromServer_() {
+  try {
+    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    if (!apiKey) return null;
+    var resp = UrlFetchApp.fetch('https://api.yardhub.ru/api/fleet_summary', {
+      headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true,
+    });
+    if (resp.getResponseCode() !== 200) return null;
+    var data = JSON.parse(resp.getContentText());
+    if (!data || !data.vehicles) return null;
+    var byGos = {};
+    Object.keys(data.vehicles).forEach(function(k) {
+      var v = data.vehicles[k];
+      if (v && v.gos) byGos[normalizeGos(v.gos)] = v;
+    });
+    return byGos;
+  } catch (err) {
+    return null;
+  }
+}
+
 // Водитель по машине НА ДАТУ (fleet_assignments/Планировка-Справочники) - план 2026-09-01.
 // Тихий null при любой проблеме - вызывающий откатывается на История_финансов ровно как
 // раньше. Покрывает только даты С 30.08.2026 (см. комментарий у места вызова).
@@ -6327,6 +6372,10 @@ function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate, skipServer
   if (serverPark_) {
     serverPark_.vehicles.forEach(function(v) { serverParkByGos_[normalizeGos(v.gos)] = v; });
   }
+  // fleet_summary (этап 2.3, 01.09) - марка/тип/план по машине, сверено с Штаткой
+  // (verifyFleetSummary_, 0 расхождений). null при недоступности сервера - каждое
+  // обращение ниже само откатывается на staffData, как и раньше.
+  var fleetSummaryByGos_ = skipServerOverride ? null : fetchFleetSummaryFromServer_();
 
   var monthKeys = [];
   var cursor = new Date(from.getFullYear(), from.getMonth(), 1);
@@ -6477,17 +6526,33 @@ function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate, skipServer
         agg.gos = staffInfo.gosOriginal || agg.gos;
       }
     }
+    // fleet_summary (этап 2.3, 01.09) - марка/прицеп С СЕРВЕРА, ПОВЕРХ Штатки (не
+    // фолбэк) - сверено 01.09, 0 расхождений. Штатка мигрирует отдельно, этим полям
+    // безопаснее опираться на уже мигрированный источник (sprav_assets/fleet_assignments),
+    // чем на лист, который скоро перестанут обновлять. Статус/водитель НЕ трогаем -
+    // status другой природы (снимок за день, не тот же момент), водитель уже отдельно
+    // приоритетный ниже (driverByGos).
+    var fsInfo = fleetSummaryByGos_ ? fleetSummaryByGos_[normalizeGos(gos)] : null;
+    if (fsInfo) {
+      if (fsInfo.marka) agg.marka = fsInfo.marka;
+      if (fsInfo.trailerGos) agg.trailer = fsInfo.trailerGos;
+    }
     if (driverByGos[gos]) agg.driver = driverByGos[gos].driver; // приоритет - водитель за сам период
     // Перезаписываем деньги с сервера (план 2026-08-31) - ТОЛЬКО 7 финансовых полей, если
-    // сервер знает эту машину за запрошенный диапазон; план/тип/статус/марка/прицеп/водитель
-    // остаются из Sheets-логики выше (Штатка ещё не переехала). Не найдена на сервере (новая
-    // машина, диапазон уходит в непокрытые месяцы) - тихо остаёмся на числах из Sheets.
+    // сервер знает эту машину за запрошенный диапазон; тип/статус остаются из Sheets-логики
+    // выше (Штатка ещё не переехала для них). Не найдена на сервере (новая машина, диапазон
+    // уходит в непокрытые месяцы) - тихо остаёмся на числах из Sheets.
     var serverV_ = serverParkByGos_[normalizeGos(gos)];
     if (serverV_) {
       agg.revenue = serverV_.revenue; agg.fot = serverV_.fot; agg.fuel = serverV_.fuel;
       agg.parts = serverV_.parts; agg.fines = serverV_.fines; agg.tolls = serverV_.tolls;
       agg.profit = serverV_.profit;
     }
+    // План ВП (этап 2.3, 01.09) - НАЙДЕННАЯ ДЫРА: agg.plan из цикла по месяцам (r[11])
+    // остаётся 0 для месяцев, куда 1С по FTP план не присылает (архивные месяцы, перенесённые
+    // разово, план несут - см. память project_park_report_server_migration). Подстраховываемся
+    // ТОЛЬКО когда история дала честный 0 - не перезаписываем реальный исторический план.
+    if (!agg.plan && fsInfo && fsInfo.plan) agg.plan = fsInfo.plan;
     result.push(agg);
   });
   return result;
@@ -6607,6 +6672,28 @@ function syncVehicleTypesToServer_() {
   });
   if (!vehicles.length) return;
   UrlFetchApp.fetch('https://api.yardhub.ru/api/vehicle_types', {
+    method: 'post', contentType: 'application/json',
+    headers: { 'X-Api-Key': apiKey },
+    payload: JSON.stringify({ vehicles: vehicles }),
+    muteHttpExceptions: true,
+  });
+}
+
+// Мост плана ВП по машине (план 2026-09-01, этап 2 - тот же приём, что syncVehicleTypesToServer_
+// выше). Найденная дыра: park_reports.plan_wp = 0 для августа/сентября (FTP-отчёт 1С план не
+// содержит, только Штатка его знает) - сервер (/api/park_history) сам подставит эту карту
+// ТОЛЬКО туда, где своего plan_wp в строке нет, архивные месяцы (уже перенесены с планом) не
+// трогает.
+function syncVehiclePlansToServer_() {
+  var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+  if (!apiKey) return;
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var staffData = getStaffData(ss);
+  var vehicles = Object.keys(staffData).map(function(gos) {
+    return { gos: staffData[gos].gosOriginal || gos, plan: staffData[gos].plan || 0 };
+  });
+  if (!vehicles.length) return;
+  UrlFetchApp.fetch('https://api.yardhub.ru/api/vehicle_plans', {
     method: 'post', contentType: 'application/json',
     headers: { 'X-Api-Key': apiKey },
     payload: JSON.stringify({ vehicles: vehicles }),
@@ -7290,6 +7377,71 @@ function verifyServerOrdersCalc(period) {
 // "Парк" - план переноса 2026-08-31. Запускать вручную в редакторе после каждого реального
 // закрытия месяца (когда "Отчет парк [месяц]" реально архивируется 1С), тот же принцип, что
 // verifyServerOrdersCalc/verifyServerDebtCalc. period по умолчанию - текущий месяц целиком.
+// ── Сверка Штатка vs /api/fleet_summary (этап 2.3, 01.09) - ДО переключения чтения.
+// type/plan должны совпадать почти точно (обе стороны в конечном счёте берут значение из
+// Штатки - vehicle_types/vehicle_plans синхронизируются ИЗ неё же). marka/driver/trailer -
+// НЕ обязаны совпадать: fleet_assignments/sprav_assets мигрированы отдельной сессией и
+// местами УЖЕ точнее Штатки (та же причина, по которой водитель по машине переехал на
+// fleet_assignments ещё 30.08 - см. память project_park_report_server_migration) -
+// расхождения здесь информационные, не баг. status тоже не сравниваем - fleet_summary
+// отдаёт вчерашний снимок, Штатка - живую колонку, они по определению не про один момент.
+function verifyFleetSummary_() {
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var staffData = getStaffData(ss);
+  var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+  // fleet_summary - checkSessionOrServerKey (правка 01.09 специально под эту сверку,
+  // тот же приём, что у /api/receipts) - Apps Script звонит своим X-Api-Key, как везде.
+  var resp = UrlFetchApp.fetch('https://api.yardhub.ru/api/fleet_summary', {
+    headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true,
+  });
+  if (resp.getResponseCode() !== 200) {
+    return { error: 'fleet_summary HTTP ' + resp.getResponseCode() + ': ' + resp.getContentText().slice(0, 300) };
+  }
+  var data = JSON.parse(resp.getContentText());
+  var vehicles = data.vehicles || {};
+
+  // ВАЖНО: ключи staffData нормализованы через normalizeGos() (кириллица -> ЛАТИНИЦА -
+  // "A538CO797"), а ключи vehicles с сервера - через normalizeGosServer_() в api/server.js
+  // (латиница -> КИРИЛЛИЦА, пробелы/пунктуация убраны - "А538СО797"). Один и тот же
+  // госномер, но РАЗНЫЕ строки - сравнение "в лоб" по ключу staffData всегда давало бы
+  // "нет на сервере" (поймано именно так при первом прогоне этой сверки 01.09). Строим
+  // ключ сервера ТЕМ ЖЕ алгоритмом, что normalizeGosServer_ на VPS - не полагаемся на
+  // "и так совпадёт", чтобы не словить второй такой же баг.
+  var latToRusForVerify_ = { A:'А', B:'В', E:'Е', K:'К', M:'М', H:'Н', O:'О', P:'Р', C:'С', T:'Т', X:'Х', Y:'У' };
+  function normalizeGosLikeServer_(g) {
+    var cleaned = String(g || '').replace(/[^A-Za-zА-Яа-я0-9]/g, '').toUpperCase();
+    var out = '';
+    for (var i = 0; i < cleaned.length; i++) {
+      var ch = cleaned.charAt(i);
+      out += latToRusForVerify_[ch] || ch;
+    }
+    return out;
+  }
+  var typeMismatch = [], planMismatch = [], missingOnServer = [], markaDiff = 0, driverDiff = 0, trailerDiff = 0;
+  Object.keys(staffData).forEach(function(gosNorm) {
+    var sh = staffData[gosNorm];
+    var svKey = normalizeGosLikeServer_(sh.gosOriginal);
+    var sv = vehicles[svKey];
+    if (!sv) { missingOnServer.push(sh.gosOriginal); return; }
+    if ((sh.type || '') !== (sv.type || '')) typeMismatch.push(sh.gosOriginal + ': Штатка="' + sh.type + '" сервер="' + sv.type + '"');
+    if (Math.abs((sh.plan || 0) - (sv.plan || 0)) >= 1) planMismatch.push(sh.gosOriginal + ': Штатка=' + sh.plan + ' сервер=' + sv.plan);
+    if ((sh.marka || '') !== (sv.marka || '')) markaDiff++;
+    if ((sh.driver || '') !== (sv.driver || '')) driverDiff++;
+    if ((sh.trailerGos || '') !== (sv.trailerGos || '')) trailerDiff++;
+  });
+
+  return {
+    staffData_count: Object.keys(staffData).length,
+    server_count: Object.keys(vehicles).length,
+    missing_on_server: missingOnServer,
+    type_mismatch: typeMismatch,
+    plan_mismatch: planMismatch,
+    marka_diff_count: markaDiff,   // информационно, не обязано быть 0
+    driver_diff_count: driverDiff, // информационно, не обязано быть 0
+    trailer_diff_count: trailerDiff, // информационно, не обязано быть 0
+  };
+}
+
 function verifyServerParkHistory_(fromDateStr, toDateStr) {
   var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
   var from = fromDateStr ? new Date(fromDateStr) : new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1);

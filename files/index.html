@@ -1623,10 +1623,19 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
    Занимает угол, который освободил .monthnav (Влад, 30.08: "лампочки с
    логистами поставить туда, где у нас сейчас выбор месяцев") - тот же
    position:absolute, что раньше держал правый верхний угол за monthnav. */
-#page-logistics-plan .presence{
+#page-logistics-plan .presence-wrap{
   position:absolute;top:16px;right:22px;z-index:31;
   display:flex;gap:5px;align-items:center;
 }
+#page-logistics-plan .presence{display:flex;gap:5px;align-items:center;}
+#page-logistics-plan .pres-history-btn{
+  width:32px;height:32px;border-radius:8px;flex:none;
+  display:flex;align-items:center;justify-content:center;
+  border:1px solid var(--border);color:var(--muted2);background:transparent;cursor:pointer;
+  transition:color .15s var(--ease-out-soft),border-color .15s var(--ease-out-soft),background-color .15s var(--ease-out-soft);
+}
+#page-logistics-plan .pres-history-btn svg{width:16px;height:16px;}
+#page-logistics-plan .pres-history-btn:hover{color:var(--text);border-color:var(--border-strong);background:var(--bg3);}
 #page-logistics-plan .pres-tile{
   width:32px;height:32px;border-radius:8px;flex:none;
   display:flex;align-items:center;justify-content:center;
@@ -1781,7 +1790,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   position:sticky;left:0;z-index:10;width:var(--lane-w);flex:none;background:var(--bg2);
   border-right:1px solid var(--border-strong);padding:5px 10px;overflow:hidden;
   transition:background-color .12s ease-out;
-}#page-logistics-plan .row:hover .rowhead{background:var(--row-hover);}#page-logistics-plan body.can-arrange .rowhead{cursor:grab;touch-action:none;}#page-logistics-plan body.can-arrange .rowhead:active{cursor:grabbing;}#page-logistics-plan .rh1{display:flex;align-items:center;gap:7px;line-height:1;}#page-logistics-plan .tag{
+}#page-logistics-plan .row:hover .rowhead{background:var(--row-hover);}#page-logistics-plan.can-reorder .rowhead{cursor:grab;touch-action:none;}#page-logistics-plan.can-reorder .rowhead:active{cursor:grabbing;}#page-logistics-plan .rh1{display:flex;align-items:center;gap:7px;line-height:1;}#page-logistics-plan .tag{
   font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:600;letter-spacing:.04em;
   padding:2px 5px;border-radius:3px;background:var(--bg4);color:var(--muted);flex:none;
 }/* семейство техники цветом - те же группы, #page-logistics-plan что логисты держат в голове
@@ -1885,7 +1894,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   background:var(--bg4);border:1px solid var(--border);color:var(--muted);
   display:none;align-items:center;justify-content:center;cursor:pointer;
   transition:color .12s ease-out,border-color .12s ease-out;
-}#page-logistics-plan body.can-arrange .row:hover .hide-btn{display:flex;}#page-logistics-plan .hide-btn:hover{color:var(--text);border-color:var(--border-strong);}#page-logistics-plan .hide-btn svg{width:11px;height:11px;}
+}#page-logistics-plan.can-arrange .row:hover .hide-btn{display:flex;}#page-logistics-plan .hide-btn:hover{color:var(--text);border-color:var(--border-strong);}#page-logistics-plan .hide-btn svg{width:11px;height:11px;}
 /* Копировать данные машины (Влад, 31.08, со слов логистов: "тягач модель
    госномер, прицеп госномер с типом, водитель с телефоном") - была отдельной
    плашкой-иконкой рядом с hide-btn, но Влад, 31.08 (второй заход): "не
@@ -3076,8 +3085,17 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
   <div class="spacer"></div>
   <!-- Присутствие - Влад, 30.08: "лампочки с логистами поставить туда, где у
        нас сейчас выбор месяцев" - занимает угол, который освободил monthnav
-       (см. .presence в CSS, position:absolute тот же, что был у .monthnav). -->
-  <div class="presence" id="lp-presence" title="Кто сейчас на странице"></div>
+       (см. .presence-wrap в CSS, position:absolute тот же, что был у .monthnav).
+       02.09: кнопка "История" (Влад: "там где лампочки логистов") - обёрнуты
+       в общий флекс-контейнер вместо позиционирования кнопки отдельно самой по
+       себе - ширина .presence зависит от размера ростера, вручную считать
+       отступ для соседней кнопки было бы хрупко. -->
+  <div class="presence-wrap" id="lp-presenceWrap">
+    <button class="pres-history-btn" id="lp-historyBtn" type="button" title="История действий в Планировке">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 5.5v3.5h3.5"/><path d="M4.3 9A6.5 6.5 0 1 0 5.1 5"/><path d="M10.5 7v3.5l2.5 1.5"/></svg>
+    </button>
+    <div class="presence" id="lp-presence" title="Кто сейчас на странице"></div>
+  </div>
 
   <div class="controls">
     <div class="grp">
@@ -3112,13 +3130,6 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
            Цвет/Парк и сбрасывал aria-pressed у соседней кнопки при каждом
            клике "Сегодня" (найдено при переносе кнопки сюда, 30.08). -->
       <button class="chip" id="lp-monthToday" data-solo="1" title="Перейти к сегодняшнему дню">Сегодня</button>
-      <!-- Влад, 30.08 (после ложной тревоги "данные пропали" - на деле Васин
-           живьём тестировал доску): "надо железобетонно сделать так, чтобы в
-           планировке не пропадали данные, или к ней доверия не будет... это
-           должно сразу работать чётко" - самообслуживаемое восстановление,
-           не "спроси Клода покопаться в логах сервера". Только admin - тот же
-           уровень доступа, что у "Смотреть как сотрудник"/presence. -->
-      <button class="chip" id="lp-historyBtn" data-solo="1" style="display:none" title="Журнал изменений заявок - восстановить любую перезаписанную/удалённую">История</button>
     </div>
   </div>
 </div>
@@ -3219,6 +3230,12 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
 
 <div class="scrim" id="lp-scrim"></div>
 <aside class="drawer" id="lp-drawer" aria-hidden="true"></aside>
+<!-- 02.09, Влад: кнопка "История" рядом с лампочками присутствия - "по нажатию
+     могу посмотреть кто что делал". ОТДЕЛЬНАЯ пара scrim/drawer от #lp-scrim/
+     #lp-drawer выше (та занята созданием/правкой рейса, свой STATE.openId) -
+     не переиспользуем один и тот же элемент под два разных назначения. -->
+<div class="scrim" id="lp-historyScrim"></div>
+<aside class="drawer" id="lp-historyDrawer" aria-hidden="true"></aside>
 <!-- Своё контекстное меню плитки вместо браузерного (Влад, 29.08: "должно возникать
      меню нашего приложения... на пустом месте ничего не должно происходить") -->
 <div class="ctxmenu" id="lp-ctxMenu">
@@ -5817,6 +5834,8 @@ function clearAuthTokens_() {
   SESSION_TOKEN = '';
   localStorage.removeItem('id_token');
   localStorage.removeItem('session_token');
+  localStorage.removeItem('user_role');
+  localStorage.removeItem('user_name');
 }
 
 // Google Apps Script иногда временно отдаёт HTML-страницу (или пустой ответ) вместо JSON,
@@ -5910,6 +5929,13 @@ async function handleCredentialResponse(response) {
     var authData = await authResp.json();
     if (authData && authData.session_token) {
       localStorage.setItem('session_token', authData.session_token);
+      // Роль/имя (2026-09-02, роль "механик") - сервер уже отдаёт их прямо в ответе входа
+      // (access_users, этап 1 плана apps-script-elimination). Кэшируем, чтобы loadData()
+      // при КАЖДОЙ следующей загрузке (не только сразу после входа) знал роль ДО первого
+      // запроса и мог для ролей без Apps Script-пути (механик) вообще не дёргать doGet -
+      // id_token живёт ~час, повторно его не перепроверить на обычной перезагрузке.
+      if (authData.role) localStorage.setItem('user_role', authData.role);
+      if (authData.name) localStorage.setItem('user_name', authData.name);
     }
   } catch (e) { /* сервер недоступен - фолбэк на Apps Script при загрузке ниже */ }
   // Перезагружаем страницу целиком вместо попытки обновить интерфейс на месте -
@@ -5970,6 +5996,33 @@ function applyData(patch, opts) {
   return true;
 }
 
+// Роль "механик" (2026-09-02, Влад: "нужно ввести отдельную роль механик... доступ к
+// Планировке, как у логистов", без Личной страницы/зарплаты сейчас) - единственный источник
+// данных ей нужен уже готов на сервере (/api/fleet_summary, checkSessionOrServerKey, БЕЗ
+// requireRole_ - открыт для любой валидной сессии, правок на сервере не понадобилось).
+// Формирует D САМА, минуя doGet целиком (см. loadData()) - vehicles приводим к тому же
+// формату {gos, marka, type, trailer, driver, status}, что buildVehicles() в модуле
+// Планировки уже читает из D.vehicles (см. plans/2026-08-30-avtokolonna-head-personal-
+// page.md - тот же формат использовался для роли logist).
+async function loadMechanicData_() {
+  var r = await fetchFromYardApi_('/fleet_summary', {});
+  if (!r.ok || !r.data || r.data.error) {
+    throw new Error((r.data && r.data.error) || 'Не удалось загрузить состав парка');
+  }
+  var vehicles = Object.values(r.data.vehicles || {}).map(function(v) {
+    return {
+      gos: v.gos || '', marka: v.marka || '', type: v.type || '',
+      trailer: v.trailerGos || '', driver: v.driver || '', status: v.status || '',
+    };
+  });
+  applyData({
+    role: 'mechanic',
+    mechanicName: localStorage.getItem('user_name') || 'Механик',
+    vehicles: vehicles,
+    updated: new Date().toISOString(),
+  }, { skipIfUnchanged: true });
+}
+
 let loadDataInFlight_ = false; // защита кнопки от двойного клика (аудит 29.08) - без неё
                                 // два параллельных вызова пишут в D в произвольном порядке
 async function loadData() {
@@ -5990,6 +6043,17 @@ async function loadData() {
     startLoadingPhrases();
   }
   try {
+    // Роль "механик" (2026-09-02, plans/2026-09-01-apps-script-elimination.md - "с 1
+    // сентября в Apps Script не добавляется ничего нового") - целиком через сервер, doGet
+    // вообще не дёргаем. Роль знаем ИЗ КЭША localStorage (записан при входе, см.
+    // handleCredentialResponse) - id_token живёт ~час, на обычной перезагрузке его уже не
+    // перепроверить, а session_token сам по себе роль не несёт.
+    if (localStorage.getItem('user_role') === 'mechanic') {
+      await loadMechanicData_();
+      hideLoginScreen();
+      document.getElementById('error-block').style.display = 'none';
+      return;
+    }
     // Во временную переменную, не в D напрямую (Этап 1) - если ответ окажется needLogin/
     // error, старый рабочий D должен остаться нетронутым, а не затираться битым/пустым
     // ответом до самого throw.
@@ -9170,11 +9234,30 @@ function renderGroup_(key) {
   dirtyGroups_[key] = false;
 }
 
+// Механик - реальный вход ИЛИ admin-предпросмотр "как [механик]" (2026-09-02, Влад:
+// "Смотреть как должно быть для механика и колонника" - колонник/Барыльченко уже работает
+// через обычную ветку manager/logist ниже, роль в "Доступ" у него logist; механику нужна
+// отдельная проверка, т.к. у него настоящая, отдельная роль mechanic). У роли нет Личной
+// страницы (D для реального входа собирается САМ loadMechanicData_(), там нет D.orders -
+// renderMyPage()/myPageCurrentEntry_() на этом упали бы; для admin-предпросмотра D.orders
+// технически ЕСТЬ - это полный D админа, но рендерить там всё равно нечего, у механика нет
+// персональной вкладки).
+function isMechanicView_() {
+  return !!(D.role === 'mechanic' || (D.role === 'admin' && viewAsEntry && viewAsEntry.type === 'mechanic'));
+}
+
 function render() {
   updateFreshnessDisplays_(); // честно из последнего известного data_age_min, см. Этап 0.1
   checkDataFreshness(); // свежий опрос + плашка "обновление не проходит", см. Этап 0.1/0.3
   updatePagePeriod_(); // "Август 2026 · день N из M · данные 1С HH:MM" в шапке
   applyRoleUI();
+
+  if (isMechanicView_()) {
+    // applyRoleUI() уже сузил сайдбар и переключил на "Планировку" - здесь рендерить
+    // больше нечего (нет Личной страницы), но и ниже (renderGroup_ по вкладкам) не нужно -
+    // "Планировка" не часть RENDER_GROUPS_, у неё свой showPage-триггер (LP.init()).
+    return;
+  }
 
   if (D.role === 'manager' || D.role === 'logist' || (D.role === 'admin' && viewAsEntry)) {
     // Менеджеру/логисту урезанные данные с сервера - другие вкладки на них упадут, не рендерим
@@ -9201,6 +9284,24 @@ function render() {
 function applyRoleUI() {
   const sidebarLabel = document.querySelector('.sidebar-logo-label');
   const previewing = D.role === 'admin' && !!viewAsEntry;
+  // Механик (2026-09-02) - отдельная, самая узкая роль: только "Планировка" + Калькулятор
+  // (Влад: "доступ к Планировке, как у логистов"), без Личной страницы - у механика нет ни
+  // зарплаты, ни личных данных, которые она бы показывала (D для этой роли собирается
+  // САМ фронтендом в loadMechanicData_(), там нет D.orders - renderMyPage() на этом
+  // сломался бы, поэтому ветка manager/logist ниже эту роль не подхватывает вообще).
+  if (isMechanicView_()) {
+    if (sidebarLabel) sidebarLabel.textContent = previewing ? viewAsEntry.name : (D.mechanicName || 'Механик');
+    var mechAllowed_ = ['calculator', 'logistics-plan'];
+    document.querySelectorAll('.sidebar-nav-item').forEach(function(item) {
+      item.style.display = mechAllowed_.indexOf(item.getAttribute('data-page')) >= 0 ? '' : 'none';
+    });
+    document.querySelectorAll('.sidebar-nav-section').forEach(function(s){ s.style.display = 'none'; });
+    var mechActiveEl_ = document.querySelector('.page.active');
+    var mechActiveId_ = mechActiveEl_ ? mechActiveEl_.id.replace(/^page-/, '') : null;
+    if (!mechActiveId_ || mechAllowed_.indexOf(mechActiveId_) < 0) showPage('logistics-plan');
+    updateViewAsButton_();
+    return;
+  }
   if (D.role === 'manager' || D.role === 'logist' || previewing) {
     if (sidebarLabel) sidebarLabel.textContent = previewing ? viewAsEntry.name : (D.managerName || D.logistName || (D.role === 'logist' ? 'Логист' : 'Менеджер'));
     // "Зарплата" - отдельный пункт меню (2026-08-26, Влад: "Отдельная и единственная"), виден
@@ -9266,6 +9367,23 @@ function viewAsRoster_() {
     .sort(function(a,b){ return a.name.localeCompare(b.name, 'ru'); });
 }
 
+// Механики (2026-09-02, Влад: "Смотреть как должно быть для механика") - НЕ из
+// D.orders.roster_* (Apps Script, by_manager/by_logist) - механики там никогда не появятся,
+// они не оформляют сделок в 1С. Единственный источник правды "кто сейчас механик" -
+// access_users на сервере (живое зеркало листа "Доступ"), поэтому список грузится
+// отдельным лёгким запросом, лениво (при первом открытии панели), с кэшем на сессию
+// вкладки браузера - список меняется редко, гонять его на каждое открытие панели незачем.
+var mechanicsRosterCache_ = null; // null = ещё не грузили, [] = загружен и пуст
+function loadMechanicsRoster_() {
+  if (mechanicsRosterCache_ !== null) return Promise.resolve(mechanicsRosterCache_);
+  return fetchFromYardApi_('/access_users', { role: 'mechanic' }).then(function(r) {
+    mechanicsRosterCache_ = (r.ok && r.data && Array.isArray(r.data.users))
+      ? r.data.users.map(function(u){ return { name: u.name, type: 'mechanic' }; })
+      : [];
+    return mechanicsRosterCache_;
+  }).catch(function() { mechanicsRosterCache_ = []; return mechanicsRosterCache_; });
+}
+
 function updateViewAsButton_() {
   var btn = document.getElementById('view-as-btn');
   if (!btn) return;
@@ -9292,6 +9410,14 @@ function toggleViewAsPanel(ev) {
   if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
   renderViewAsPanel_();
   panel.style.display = 'block';
+  // Механики - лениво, только при первом реальном открытии панели (не на каждой загрузке
+  // страницы) - перерисовываем панель повторно, когда список придёт, ЕСЛИ она всё ещё
+  // открыта (админ мог успеть закрыть её раньше, чем ответит сеть).
+  if (mechanicsRosterCache_ === null) {
+    loadMechanicsRoster_().then(function() {
+      if (panel.style.display === 'block') renderViewAsPanel_();
+    });
+  }
 }
 
 function renderViewAsPanel_() {
@@ -9306,6 +9432,9 @@ function renderViewAsPanel_() {
   }
   var managers = roster.filter(function(e){ return e.type === 'manager'; });
   var logists  = roster.filter(function(e){ return e.type === 'logist'; });
+  // Механики (2026-09-02) - отдельный источник (mechanicsRosterCache_, не D.orders), может
+  // быть null (ещё грузится - показываем "Загрузка…", запрос уже ушёл в toggleViewAsPanel).
+  var mechanics = mechanicsRosterCache_ || [];
   var html = '';
   if (viewAsEntry) {
     html += '<div onclick="setViewAs(null,null)" style="padding:7px 10px;font-size:13px;cursor:pointer;border-radius:4px;color:var(--red);border-bottom:1px solid var(--border);margin-bottom:4px" '+
@@ -9313,7 +9442,9 @@ function renderViewAsPanel_() {
   }
   if (managers.length) html += '<div style="padding:6px 10px 2px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Менеджеры</div>' + managers.map(rowHtml).join('');
   if (logists.length) html += '<div style="padding:6px 10px 2px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Логисты</div>' + logists.map(rowHtml).join('');
-  if (!roster.length) html += '<div style="padding:8px 10px;font-size:12px;color:var(--muted)">Нет данных</div>';
+  if (mechanics.length) html += '<div style="padding:6px 10px 2px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Механики</div>' + mechanics.map(rowHtml).join('');
+  else if (mechanicsRosterCache_ === null) html += '<div style="padding:6px 10px 2px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Механики</div><div style="padding:7px 10px;font-size:12px;color:var(--muted)">Загрузка…</div>';
+  if (!roster.length && !mechanics.length && mechanicsRosterCache_ !== null) html += '<div style="padding:8px 10px;font-size:12px;color:var(--muted)">Нет данных</div>';
   panel.innerHTML = html;
 }
 
@@ -20351,6 +20482,15 @@ function saveOrder(){
     localStorage.setItem("yard.plan.order", JSON.stringify(STATE.order));
     localStorage.setItem("yard.plan.hidden", JSON.stringify(Object.keys(STATE.hidden)));
   }catch(e){}
+  /* Личный порядок - на сервер, привязан к пользователю (Влад, 02.09: "железно
+     сохраняться у каждого персонально, за ним настройки не меняются"). localStorage
+     выше остаётся мгновенным локальным кэшем/офлайн-фолбэком - тихая отправка на
+     сервер не блокирует и не может испортить то, что уже сохранилось локально.
+     "Скрытые" НЕ уходят на сервер - Влад просил именно про порядок машин, скрытие
+     трогать не просили, остаётся как было (только localStorage, только у себя). */
+  if (STATE.order && STATE.order.length){
+    postToYardApi_("/plan/row_order", { order: STATE.order.join(",") }).catch(function(){});
+  }
 }
 function loadOrder(){
   try{
@@ -20359,6 +20499,20 @@ function loadOrder(){
     var h = JSON.parse(localStorage.getItem("yard.plan.hidden") || "[]");
     if (Array.isArray(h)) h.forEach(function(i){ STATE.hidden[i] = true; });
   }catch(e){}
+}
+/* Личный порядок с сервера (Влад, 02.09) - вызывается ПОСЛЕ loadOrder() и после
+   первой отрисовки: localStorage выше уже дал мгновенную картинку без ожидания
+   сети, сервер, когда ответит, - источник истины (переживает смену
+   устройства/браузера, localStorage - нет) - перекрывает локальное, если знает
+   порядок для этого пользователя, и тихо перерисовывает. Ошибка/пусто - молча
+   остаёмся на уже применённом localStorage-фолбэке, ничего не ломаем. */
+function loadOrderFromServer_(){
+  fetchFromYardApi_("/plan/row_order", {}).then(function(r){
+    if (r.ok && r.data && Array.isArray(r.data.order) && r.data.order.length){
+      STATE.order = r.data.order;
+      renderRows();
+    }
+  }).catch(function(){});
 }
 /* Индивидуальные настройки просмотра (Влад, 29.08: «если логист под себя сохранил
    цветовую схему, фильтры - так и должно быть при следующем заходе»). Порядок
@@ -20392,6 +20546,13 @@ function syncControlChips(){
   });
 }
 function canArrange(){ return STATE.role === "admin"; }
+/* Кто может тянуть карточки машин, меняя порядок строк - раньше совпадало с
+   canArrange() (только admin). 02.09, Влад: "открыть возможность ВСЕМ
+   логистам перемещать технику... железно сохраняться у каждого персонально".
+   ОТДЕЛЬНАЯ от canArrange() функция, не расширение её целиком - canArrange()
+   остаётся только про скрытие машин (см. .hide-btn/renderHiddenCount ниже),
+   об этом Влад не просил, открывать не нужно. */
+function canReorder(){ return STATE.role === "admin" || STATE.role === "logist"; }
 
 /* Своей кнопки темы у вкладки больше нет (было - ЭКСПЕРИМЕНТ 29.08, до появления
    настоящего глобального переключателя, plans/2026-08-29-light-theme-toggle.md).
@@ -21483,7 +21644,7 @@ function renderLegend(){
   var typeBit = STATE.typeLegend.map(function(p){
     return '<span class="lg"><span class="tag ' + p[1] + '" style="padding:1px 6px">' + p[0] + '</span></span>';
   }).join("");
-  var note = canArrange()
+  var note = canReorder()
     ? "тянуть карточку машины вверх-вниз - переставить порядок · тянуть отрезок - сдвинуть/растянуть/перенести · протянуть по пустому месту или двойной клик - новая запись"
     : "тянуть тело - сдвинуть · тянуть за край - растянуть · протянуть по пустому месту или двойной клик - новая запись";
   document.getElementById("lp-legend").innerHTML =
@@ -21505,6 +21666,7 @@ function renderAll(){
   pageRoot.style.setProperty("--hw", ZOOM[STATE.zoom] + "px");
   setZoomClass_(STATE.zoom);
   pageRoot.classList.toggle("can-arrange", canArrange());
+  pageRoot.classList.toggle("can-reorder", canReorder());
   renderScale(); renderRows(); renderKpis(); renderLegend(); renderHiddenCount();
 }
 function renderHiddenCount(){
@@ -21815,11 +21977,11 @@ function autoscrollTick(){
   } else { asRAF = 0; }
 }
 
-/* ---------- перестановка машин: только админ и старший логист ---------- */
+/* ---------- перестановка машин: 02.09 открыто всем логистам (см. canReorder()) ---------- */
 var arr = null;
 rowsEl.addEventListener("pointerdown", function(e){
   if (IS_TOUCH_) return;   /* перестановка строк - функция сверх "перемещения", на тач выключена */
-  if (!canArrange()) return;
+  if (!canReorder()) return;
   /* НАЙДЕННЫЙ БАГ (Влад, 01.09: "при нажатии не перебрасывает на страницу
      навигации" - клик по .rh-omni вообще не доходил до своего обработчика).
      Тот же класс ловушки, что уже решён для .hide-btn: этот pointerdown
@@ -22515,6 +22677,11 @@ function fetchPresence_(){
 function renderPresence_(){
   var el = document.getElementById("lp-presence");
   if (!el) return;
+  /* Кнопка "История" (02.09) - та же видимость, что у лампочек присутствия
+     (Влад, 29.08, про сами лампочки: "это для админ-режима") - лёгкий
+     аудит-след "кто что делал" логично держать тем же уровнем доступа. */
+  var histBtn_ = document.getElementById("lp-historyBtn");
+  if (histBtn_) histBtn_.style.display = STATE.role === "admin" ? "" : "none";
   if (STATE.role !== "admin"){ el.innerHTML = ""; return; }
   var seen = {}, roster = [];
   LOG_TRAL.concat(LOG_LONG).forEach(function(p){
@@ -23041,6 +23208,75 @@ function closeDrawer(){
 }
 scrim.onclick = closeDrawer;
 
+/* ═══ Панель "История" (02.09, Влад: "кнопка история... по нажатию я могу
+   посмотреть кто что делал") - лента событий с сервера (/api/plan/activity,
+   plan_segs_history + fleet_assignments source='planirovka'), СВОЯ пара
+   scrim/drawer (#lp-historyScrim/#lp-historyDrawer), не переиспользует
+   #lp-scrim/#lp-drawer (та занята созданием/правкой рейса). ═══ */
+var historyScrim_ = document.getElementById("lp-historyScrim"), historyDrawer_ = document.getElementById("lp-historyDrawer");
+var LP_HIST_KIND_LABEL_ = {trip:"рейс", repair:"ремонт", maint:"ТО", noorder:"без заказа", driveroff:"без водителя"};
+/* MSK - сервер отдаёт `at` в UTC (та же схема, что везде на VPS - см. память
+   project_month_boundary_bug_class про соседний часовой сдвиг). */
+function lpHistTime_(iso){
+  var d = new Date(iso);
+  var msk = new Date(d.getTime() + 3 * 3600000);
+  var dd = String(msk.getUTCDate()).padStart(2, "0"), mm = String(msk.getUTCMonth() + 1).padStart(2, "0");
+  var hh = String(msk.getUTCHours()).padStart(2, "0"), mi = String(msk.getUTCMinutes()).padStart(2, "0");
+  return dd + "." + mm + " " + hh + ":" + mi;
+}
+function lpHistLine_(ev){
+  var kindLbl = LP_HIST_KIND_LABEL_[ev.kind] || ev.kind || "запись";
+  var gos = ev.vehicle_gos || "?";
+  switch (ev.type){
+    case "seg_create":
+      var route = (ev.kind === "trip" && (ev.route_from || ev.route_to))
+        ? " (" + (ev.route_from || "?") + " → " + (ev.route_to || "?") + ")" : "";
+      return "создал(а) " + kindLbl + " на <b>" + gos + "</b>" + route;
+    case "seg_overwrite":
+      return "изменил(а) " + kindLbl + " на <b>" + gos + "</b>";
+    case "seg_delete":
+      return "удалил(а) " + kindLbl + " на <b>" + gos + "</b>";
+    case "fleet_couple":
+      return (ev.kind === "driver" ? "посадил(а) водителя " : "зацепил(а) прицеп ") +
+        "<b>" + (ev.who || "?") + "</b> на <b>" + gos + "</b>";
+    case "fleet_uncouple":
+      return (ev.kind === "driver" ? "снял(а) водителя " : "отцепил(а) прицеп ") +
+        "<b>" + (ev.who || "?") + "</b> с <b>" + gos + "</b>";
+    default:
+      return ev.type;
+  }
+}
+function closeHistoryDrawer_(){
+  historyDrawer_.classList.remove("open"); historyDrawer_.setAttribute("aria-hidden", "true");
+  historyScrim_.classList.remove("open");
+}
+historyScrim_.onclick = closeHistoryDrawer_;
+function openHistoryDrawer_(){
+  historyDrawer_.innerHTML =
+    '<div class="dr-eyebrow">Планировка</div><div class="dr-title">История действий</div>' +
+    '<div class="dr-note" id="lp-histBody">Загрузка…</div>' +
+    '<div class="dr-actions"><button class="chip dr-close" id="lp-histClose">Закрыть</button></div>';
+  document.getElementById("lp-histClose").onclick = closeHistoryDrawer_;
+  historyDrawer_.classList.add("open"); historyDrawer_.setAttribute("aria-hidden", "false");
+  historyScrim_.classList.add("open");
+  fetchFromYardApi_("/plan/activity", {limit: 150}).then(function(r){
+    var body = document.getElementById("lp-histBody");
+    if (!body) return;   /* панель уже закрыли, пока ответ шёл */
+    if (!r.ok || !r.data || !Array.isArray(r.data.events)){
+      body.textContent = "Не удалось загрузить историю - попробуйте ещё раз."; return;
+    }
+    if (!r.data.events.length){ body.textContent = "Пока пусто - действий ещё не было."; return; }
+    body.innerHTML = r.data.events.map(function(ev){
+      return '<div class="dr-row" style="display:block"><div style="color:var(--muted);font-size:10.5px;margin-bottom:2px" class="mono">' +
+        lpHistTime_(ev.at) + ' · ' + (ev.by || "—") + '</div><div>' + lpHistLine_(ev) + '</div></div>';
+    }).join("");
+  }).catch(function(){
+    var body = document.getElementById("lp-histBody");
+    if (body) body.textContent = "Ошибка сети - попробуйте ещё раз.";
+  });
+}
+document.getElementById("lp-historyBtn").onclick = openHistoryDrawer_;
+
 /* Диалог подтверждения «под данные» (Влад, 30.08) - callback-стиль, не Promise:
    проще звать из синхронного кода pointerup (см. движение плитки ниже), не
    ломая остальной поток async/await, которого в этом модуле нигде больше нет.
@@ -23072,6 +23308,7 @@ confirmScrim_.onclick = function(){ closeConfirmDialog_(false); };
 window.addEventListener("keydown", function(e){
   if (e.key !== "Escape") return;
   if (confirmBox_.classList.contains("open")){ closeConfirmDialog_(false); return; }
+  if (historyDrawer_.classList.contains("open")){ closeHistoryDrawer_(); return; }
   closeDrawer(); closeCtxMenu_();
 });
 
@@ -23111,6 +23348,13 @@ function openCtxMenu_(seg, x, y){
    где "эта конкретная машина" уже однозначно адресуема одним кликом. */
 var FLEET_PEOPLE_ = [], FLEET_ASSETS_ = [], FLEET_ASSIGN_ = [];
 function fetchFleetData_(){
+  /* Та же защита от лишних запросов, что у fetchPlanSegs_ (не спрашивать сервер,
+     пока вкладка Планировки скрыта/не активна) - актуально теперь, когда эта
+     функция ушла на поллинг (см. setInterval ниже), а не вызывается только
+     по требованию. Прямые вызовы из fleetDoCouple_/fleetDoUncouple_/initLP()
+     всегда происходят, когда вкладка уже открыта и активна - гейт их не заденет. */
+  if (document.hidden) return;
+  if (!pageRoot.classList.contains("active")) return;
   return Promise.all([fetchFromYardApi_("/sprav/state", {}), fetchFromYardApi_("/fleet/state", {})])
     .then(function(results){
       var sprav = results[0], fleet = results[1];
@@ -23120,14 +23364,21 @@ function fetchFleetData_(){
         /* Источник истины по "есть водитель/вакант" только что реально стал
            доступен (см. lpComputeVacant_) - весь парк построен ДО этого момента
            на временном фолбэке по Штатке, пересчитываем начисто и перерисовываем. */
-        var wasLoaded = fleetDataLoaded_;
         fleetDataLoaded_ = true;
         STATE.vehicles.forEach(function(v){ lpApplyFleetDriverStatus_(v); });
-        // renderKpis() тоже зависит от v.vacant (01.09, "Нет водителя" в шапке) -
-        // до этого момента вакантность бралась из временного Штатка-фолбэка
-        // (см. комментарий у lpApplyFleetDriverStatus_ выше), число в шапке могло
-        // на долю секунды показать неверную картину, если не пересчитать здесь же.
-        if (!wasLoaded){ renderRows(); renderKpis(); }
+        /* 02.09, Влад (после Титаева): "полоска вакант должна закончиться на
+           моменте когда посадили водителя" - НАЙДЕННЫЙ БАГ: эта функция
+           перерисовывала строки ТОЛЬКО при первой загрузке (!wasLoaded) или
+           сразу после действия ТЕКУЩЕГО пользователя (fleetDoCouple_/
+           fleetDoUncouple_ вызывают её вручную) - на ЧУЖОМ открытом экране,
+           если водителя посадил кто-то ДРУГОЙ, полоска "вакант"/строка
+           "Вакант" не исчезала НИКОГДА без ручного обновления страницы, в
+           отличие от рейсов (fetchPlanSegs_ - живой поллинг раз в 7с). Теперь
+           перерисовываем ПРИ КАЖДОМ успешном ответе, не только при первом, и
+           сама функция теперь живёт на поллинге (см. setInterval ниже) - тот
+           же принцип, что уже работает для рейсов, просто реже (сцепка/
+           пересадка водителя происходит НАМНОГО реже правок рейса). */
+        renderRows(); renderKpis();
       }
     }).catch(function(){});   /* нет сети/сбой - меню просто не покажет "кто сейчас сидит", посадить/зацепить всё равно работает */
 }
@@ -23330,6 +23581,13 @@ rowsEl.addEventListener("click", function(e){
   if (window.NAV){ NAV.select(omniId); setTimeout(function(){ NAV.select(omniId); }, 700); }
 });
 setInterval(lpOmniFetch_, 30000);   /* тот же интервал, что у поллера Omnicomm на сервере - чаще спрашивать нечего */
+/* 02.09, Влад: "полоска вакант должна закончиться на моменте когда посадили
+   водителя" - раньше fetchFleetData_() обновлялась только один раз при
+   загрузке страницы + сразу после действия ТЕКУЩЕГО пользователя, на чужом
+   открытом экране "Вакант"/полоса не исчезали без ручного обновления.
+   Реже, чем рейсы (fetchPlanSegs_, 7с) - сцепка/пересадка водителя происходит
+   на порядок реже правки рейса, гонять сервер с той же частотой смысла нет. */
+setInterval(fetchFleetData_, 20000);
 
 /* НАЙДЕННЫЙ БАГ (Влад, 31.08, живой пример: "Пантелеев занят" - на самом деле
    на этой машине сидит Мавлитян, а не Пантелеев). Корень - и здесь, и в
@@ -23746,6 +24004,7 @@ setInterval(function(){
 }, 60000);
 
 loadOrder();
+loadOrderFromServer_();
 loadSettings();
 
 /* z-масштаб живёт как класс на pageRoot (используют CSS-правила #page-logistics-plan.z-*) -

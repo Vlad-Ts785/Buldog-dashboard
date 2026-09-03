@@ -616,10 +616,11 @@ function boot(){
   var invite=qs.get('invite');
   if(invite && !DEMO){
     show('s-loading');
-    api('/driver/claim_invite?'+q({code:invite})).then(function(j){
+    api('/driver/claim_invite?'+q({code:invite}), {method:'POST'}).then(function(j){
       if(j.__status===200 && j.device_token){ S.token=j.device_token; localStorage.setItem('driver_token',S.token); S.person=j.person; history.replaceState(null,'',location.pathname); $('w-name').textContent=(j.person&&j.person.full_name||'').split(' ')[1]||'водитель'; show('s-welcome'); }
-      else { show('s-revoked'); }
-    }).catch(function(){ toast('Нет связи. Откройте ссылку ещё раз, когда появится интернет',true); show('s-revoked'); });
+      else if(j.__status){ show('s-revoked'); } // сервер ответил и отклонил код - ссылка правда недействительна
+      else { toast('Нет связи. Откройте ссылку ещё раз, когда появится интернет',true); show('s-loading'); } // сети не было вообще - код мог остаться рабочим, не хороним ссылку молча
+    }).catch(function(){ toast('Нет связи. Откройте ссылку ещё раз, когда появится интернет',true); show('s-loading'); });
     return;
   }
   if(DEMO){ if(qs.get('screen')==='welcome'){ $('w-name').textContent='Магомед'; show('s-welcome'); return; } if(qs.get('screen')==='revoked'){ show('s-revoked'); return; } if(qs.get('screen')==='notrip'){ demoState.trip=null; } }

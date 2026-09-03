@@ -1124,6 +1124,9 @@ function runAll() {
   try { saveMonthSummary_(SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID), Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM')); log.push('✅ Сводка месяца сохранена'); }
   catch(e) { errors.push('❌ Сводка месяца: ' + e.message); }
 
+  try { syncMonthSummaryToServer_(); log.push('✅ История месяцев отправлена на сервер'); }
+  catch(e) { errors.push('❌ История месяцев на сервер: ' + e.message); }
+
   // 1С шлёт отчёт ДЗ раз в день в 15:00 (Влад, 2026-07-08) - в остальные прогоны письма
   // просто не будет, importDebtReport() кинет ошибку "не найдено за 2 дня", которая
   // безопасно уходит в errors и не ломает остальной пайплайн. saveDebtHistory() читает уже
@@ -11107,6 +11110,40 @@ function syncManagerPlansToServer_() {
     method: 'post', contentType: 'application/json',
     headers: { 'X-Api-Key': apiKey },
     payload: JSON.stringify({ plans: rows }),
+    muteHttpExceptions: true,
+  });
+}
+
+// Мост "История_месяцев" на сервер (2026-09-03) - тот же класс дыры, что вчера у
+// manager_plans, найдено вживую (Влад: "выручка по августу неадекватная" - дашборд
+// показывал 27.9М вместо реальных 61.9М). Старый мост (import-month-summary.js на VPS,
+// action=export_month_summary) был ОДНОРАЗОВЫМ, не в crontab, а action давно убран из
+// doGet - таблица month_summary на сервере молча застряла на снимке от 15-17 августа,
+// никогда не обновлялась при закрытии месяца. Тот же приём, что syncManagerPlansToServer_
+// выше - полная перезаливка (Влад не правит этот лист руками).
+function syncMonthSummaryToServer_() {
+  var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+  if (!apiKey) return;
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var sheet = ss.getSheetByName(MONTH_SUMMARY_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) return;
+  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, MONTH_SUMMARY_HEADERS.length).getValues();
+  var rows = [];
+  data.forEach(function(r) {
+    var mk = monthKeyFrom_(r[0]);
+    if (!mk) return;
+    rows.push({
+      month: mk, revenue: r[1] || 0, salesPlan: r[2] || 0, profit: r[3] || 0,
+      profitTral: r[4] || 0, profitLong: r[5] || 0, fot: r[6] || 0, fuel: r[7] || 0,
+      parts: r[8] || 0, fines: r[9] || 0, tolls: r[10] || 0, hiredProfit: r[11] || 0,
+      hiredRevenue: r[12] || 0, cash: r[14] || 0, commercial: r[15] || 0,
+    });
+  });
+  if (!rows.length) return;
+  UrlFetchApp.fetch('https://api.yardhub.ru/api/month_summary', {
+    method: 'post', contentType: 'application/json',
+    headers: { 'X-Api-Key': apiKey },
+    payload: JSON.stringify({ months: rows }),
     muteHttpExceptions: true,
   });
 }

@@ -16191,6 +16191,11 @@ function mdDefaultDir_(col) {
 }
 function mdSortVal_(row, col) {
   if (col === 'doc_ref') return Number(mdDocShort_(row.doc_ref)) || 0;
+  // "Процент" не хранится на объекте рейса - считается только при отрисовке (renderVeh_),
+  // поэтому row.pct раньше был всегда undefined -> все строки "равны" -Infinity -> клик
+  // по заголовку ничего не менял (Влад: "нажимаю фильтр процента, он почему-то не
+  // скачет"). Считаем то же самое здесь, что и в mdRenderVeh_ ниже.
+  if (col === 'pct') return (row.order_amount && row.order_amount > 0) ? (row.amount / row.order_amount * 100) : -Infinity;
   var v = row[col];
   return (col === 'route' || col === 'cargo' || col === 'period_from' || col === 'trip_date') ? (v || '') : (v == null ? -Infinity : v);
 }

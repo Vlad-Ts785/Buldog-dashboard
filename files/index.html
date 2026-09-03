@@ -4045,7 +4045,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
          попап (openMachinistDetail_), тот же .crm-modal-overlay/.crm-modal, что и выбор
          раздела выше, но шире - внутри таблица рейсов до 9 колонок. -->
     <div id="machinist-detail-overlay" class="crm-modal-overlay" style="display:none" onmousedown="if(event.target===this)closeMachinistDetail_()">
-      <div class="crm-modal" style="max-width:960px" id="machinist-detail-content"></div>
+      <div class="crm-modal" style="max-width:min(1280px,96vw)" id="machinist-detail-content"></div>
     </div>
 
     <!-- ═══ ДЗ (ДЕБИТОРСКАЯ ЗАДОЛЖЕННОСТЬ) ═════════════════════ -->
@@ -16135,6 +16135,14 @@ function mdShort_(v) {
   var m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
   return m ? (m[3] + '.' + m[2] + '.' + m[1]) : '—';
 }
+// "Таблица заказов 000471882 от 05.08.2026 9:06:18" -> "№471882 · 05.08" (2026-09-04,
+// Влад: "нечитабельно ... время не нужно, слово таблица заказов не нужно"). Тот же приём
+// для штрафов ("Ввод начислений и удержаний водителям 000012025 от ...").
+function mdDocShort_(text) {
+  var m = String(text || '').match(/(\d{5,})\s+от\s+(\d{2})\.(\d{2})\.\d{4}/);
+  if (!m) return text || '—';
+  return '№' + m[1].replace(/^0+/, '') + ' · ' + m[2] + '.' + m[3];
+}
 
 function renderMachinistDetail_(driverName, summaryRow, detail) {
   var box = document.getElementById('machinist-detail-content');
@@ -16172,7 +16180,7 @@ function renderMachinistDetail_(driverName, summaryRow, detail) {
   } else {
     var fineRows = detail.fines.map(function(f) {
       return '<tr><td>' + mdShort_(f.period_from) + ' - ' + mdShort_(f.period_to) + '</td>' +
-        '<td style="font-size:12px;color:var(--muted)">' + (f.doc_ref || '—') + '</td>' +
+        '<td style="color:var(--muted)">' + mdDocShort_(f.doc_ref) + '</td>' +
         '<td class="num" style="color:var(--red)">' + fr(f.amount) + '</td></tr>';
     }).join('');
     finesHtml = '<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Период</th><th>Документ</th><th class="num">Сумма</th></tr></thead>' +
@@ -16185,7 +16193,7 @@ function renderMachinistDetail_(driverName, summaryRow, detail) {
   var vehiclesHtml = (detail.vehicles || []).map(function(v) {
     var tripRows = v.trips.map(function(t) {
       return '<tr><td>' + mdShort_(t.trip_date) + '</td>' +
-        '<td style="font-size:12px;color:var(--muted)">' + (t.doc_ref || '—') + '</td>' +
+        '<td style="color:var(--muted)">' + mdDocShort_(t.doc_ref) + '</td>' +
         '<td>' + (t.equipment_type || '—') + '</td>' +
         '<td style="font-size:12.5px">' + (t.route || '—') + '</td>' +
         '<td class="num">' + (t.km_mkad ? Math.round(t.km_mkad).toLocaleString('ru-RU') : '—') + '</td>' +

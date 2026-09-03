@@ -4001,7 +4001,20 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
 
     <!-- ═══ ЗАРПЛАТА ════════════════════════════════════════════ -->
     <div id="page-sales-salary" class="page">
-      <div id="salary-content"><p style="color:var(--muted);padding:16px">Данные загружаются...</p></div>
+      <!-- Вкладки "По менеджерам"/"По машинистам" (2026-09-03, Влад: "уже зарплата по
+           менеджерам и зарплата по машинистам будет") - тот же tab-bar canon, что уже у
+           "Справочников" (showDirTab) и "Поступлений" (showReceiptsTab), не отдельное
+           всплывающее окно, как в 1С - см. план plans/2026-09-03-machinist-salary-page.md. -->
+      <div class="card" style="margin-bottom:16px">
+        <div class="sec-header" id="salary-tab-bar" style="gap:6px">
+          <button class="tab-btn active" onclick="showSalaryTab('managers',this)">По менеджерам</button>
+          <button class="tab-btn" onclick="showSalaryTab('machinists',this)">По машинистам</button>
+        </div>
+      </div>
+      <div id="salary-tab-managers">
+        <div id="salary-content"><p style="color:var(--muted);padding:16px">Данные загружаются...</p></div>
+      </div>
+      <div id="salary-tab-machinists" style="display:none"></div>
     </div>
 
     <!-- ═══ ДЗ (ДЕБИТОРСКАЯ ЗАДОЛЖЕННОСТЬ) ═════════════════════ -->
@@ -5742,7 +5755,8 @@ const PAGE_TITLES = {
   sales: 'Продажи - обзор',
   'sales-mgr': 'Менеджеры - заказы 1С',
   'sales-log': 'Логисты - найм техники',
-  'sales-salary': 'Зарплата - коммерческий отдел',
+  'sales-salary': 'Зарплата', // 2026-09-03 - была "Зарплата - коммерческий отдел", но с
+  // вкладкой "По машинистам" страница уже не только про коммерческий отдел
   // 'my-page' - без заголовка (Влад, 2026-08-12: "слово личная страница убрать") - шапка
   // самой страницы (ФИО+должность) уже несёт этот смысл, дублирующий заголовок не нужен.
   'my-page': '',
@@ -15873,6 +15887,137 @@ function calcHead_(members, headSur, useNewRules, getM) {
 function calcVolumeBonus(deptRevTotal) {
   if ((deptRevTotal||0) < 30000000) return 0;
   return Math.floor(deptRevTotal / 10000000) * 10000;
+}
+
+// ── Зарплата → По машинистам (2026-09-03, план plans/2026-09-03-machinist-salary-page.md) -
+// вкладка внутри страницы "Зарплата", тот же tab-bar canon, что "Справочники"/"Поступления"
+// (showDirTab/showReceiptsTab). Ленивая загрузка при первом открытии вкладки - тот же приём,
+// что loadGlobalStatsData(): один запрос на месяц, кэш в module-scope переменной.
+function showSalaryTab(tab, el) {
+  ['managers', 'machinists'].forEach(function(t) {
+    var panel = document.getElementById('salary-tab-' + t);
+    if (panel) panel.style.display = (t === tab) ? '' : 'none';
+  });
+  document.querySelectorAll('#salary-tab-bar .tab-btn').forEach(function(b) { b.classList.remove('active'); });
+  if (el) el.classList.add('active');
+  if (tab === 'machinists') loadMachinistSalaryData();
+}
+
+var machinistSalaryData_ = {}; // {monthKey: {rows, available_months}} - кэш по месяцу
+var machinistSalaryMonth_ = null;
+var machinistSalaryFilter_ = 'all'; // all/трал/длинномер
+var machinistSalarySort_ = { col: 'net_amount', dir: -1 };
+
+function loadMachinistSalaryData(month) {
+  var el = document.getElementById('salary-tab-machinists');
+  if (!el) return;
+  var mk = month || machinistSalaryMonth_;
+  if (mk && machinistSalaryData_[mk]) { machinistSalaryMonth_ = mk; renderMachinistSalary(); return; }
+  el.innerHTML = '<p style="color:var(--muted);padding:16px">Данные загружаются...</p>';
+  fetchFromYardApi_('/driver_payroll', mk ? { month: mk } : {}).then(function(r) {
+    if (!r.ok || !r.data || r.data.error) throw new Error((r.data && r.data.error) || 'Ошибка загрузки');
+    var d = r.data;
+    machinistSalaryData_[d.month] = d;
+    machinistSalaryMonth_ = d.month;
+    renderMachinistSalary();
+  }).catch(function(e) {
+    el.innerHTML = '<p style="color:var(--muted);padding:16px">Не удалось загрузить: ' + (e.message || e) + '</p>';
+  });
+}
+
+function machinistSalarySetFilter_(f) {
+  machinistSalaryFilter_ = f;
+  renderMachinistSalary();
+}
+function machinistSalarySort_click_(col) {
+  if (machinistSalarySort_.col === col) {
+    machinistSalarySort_.dir *= -1;
+  } else {
+    // Первый клик по числовой колонке - по убыванию (ищут крупное), по ФИО - А-Я.
+    machinistSalarySort_ = { col: col, dir: col === 'driver_name' ? 1 : -1 };
+  }
+  renderMachinistSalary();
+}
+
+var MACHINIST_SALARY_COLS_ = [
+  { key: 'driver_name', label: 'Машинист', num: false },
+  { key: 'hours', label: 'Часы', num: true },
+  { key: 'work_orders_amount', label: 'Работа по заказам', num: true },
+  { key: 'seniority_amount', label: 'Выслуга лет', num: true },
+  { key: 'mileage_mkad_amount', label: 'Км за МКАД', num: true },
+  { key: 'accruals_amount', label: 'Начисления', num: true },
+  { key: 'advance_amount', label: 'Аванс/Нал', num: true },
+  { key: 'gibdd_fines_amount', label: 'Штрафы ГИБДД', num: true },
+  { key: 'other_deductions_amount', label: 'Проч. удержания', num: true },
+  { key: 'deductions_amount', label: 'Удержания', num: true },
+  { key: 'total_amount', label: 'Итого', num: true },
+  { key: 'ndfl_amount', label: 'НДФЛ', num: true },
+  { key: 'net_amount', label: 'К начислению', num: true },
+];
+
+function renderMachinistSalary() {
+  var el = document.getElementById('salary-tab-machinists');
+  if (!el) return;
+  var d = machinistSalaryData_[machinistSalaryMonth_];
+  if (!d) return;
+
+  var rows = (d.rows || []).filter(function(r) {
+    return machinistSalaryFilter_ === 'all' || r.vehicle_bucket === machinistSalaryFilter_;
+  });
+  var sort = machinistSalarySort_;
+  rows = rows.slice().sort(function(a, b) {
+    var av = a[sort.col], bv = b[sort.col];
+    if (sort.col === 'driver_name') return String(av).localeCompare(String(bv)) * sort.dir;
+    return ((av || 0) - (bv || 0)) * sort.dir;
+  });
+
+  var totalNet = rows.reduce(function(s, r) { return s + (r.net_amount || 0); }, 0);
+  var monthOpts = (d.available_months || [machinistSalaryMonth_]).map(function(mk) {
+    return '<option value="' + mk + '"' + (mk === machinistSalaryMonth_ ? ' selected' : '') + '>' + formatMonthLabel(mk) + '</option>';
+  }).join('');
+
+  var head = MACHINIST_SALARY_COLS_.map(function(c) {
+    var arrow = sort.col === c.key ? (sort.dir === -1 ? '▼' : '▲') : '↕';
+    var arrowStyle = sort.col === c.key ? '' : 'opacity:.35';
+    return '<th class="sortable' + (c.num ? ' num' : '') + '" onclick="machinistSalarySort_click_(\'' + c.key + '\')">' +
+      c.label + '<span style="font-size:10px;margin-left:4px;' + arrowStyle + '">' + arrow + '</span></th>';
+  }).join('');
+
+  var body = rows.map(function(r) {
+    var cells = MACHINIST_SALARY_COLS_.map(function(c) {
+      if (c.key === 'driver_name') {
+        var badgeColor = r.vehicle_bucket === 'трал' ? 'var(--green)' : r.vehicle_bucket === 'длинномер' ? 'var(--blue)' : 'var(--muted)';
+        return '<td>' + r.driver_name + ' <span style="font-size:10.5px;color:' + badgeColor + '">· ' + r.vehicle_bucket + '</span></td>';
+      }
+      var v = r[c.key] || 0;
+      var isDeduction = ['advance_amount', 'gibdd_fines_amount', 'other_deductions_amount', 'deductions_amount', 'ndfl_amount'].indexOf(c.key) >= 0;
+      var color = isDeduction && v ? 'var(--red)' : '';
+      return '<td class="num" style="' + (color ? 'color:' + color : '') + '">' + (v ? Math.round(v).toLocaleString('ru-RU') : '—') + '</td>';
+    }).join('');
+    return '<tr>' + cells + '</tr>';
+  }).join('') || '<tr><td colspan="' + MACHINIST_SALARY_COLS_.length + '" class="muted">Нет данных за выбранный месяц/фильтр</td></tr>';
+
+  el.innerHTML =
+    '<div class="card" style="margin-bottom:16px">' +
+      '<div class="sec-header" style="justify-content:space-between;flex-wrap:wrap;gap:10px">' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+          '<button class="crm-filter-chip' + (machinistSalaryFilter_ === 'all' ? ' active' : '') + '" onclick="machinistSalarySetFilter_(\'all\')">Все (' + (d.rows || []).length + ')</button>' +
+          '<button class="crm-filter-chip' + (machinistSalaryFilter_ === 'трал' ? ' active' : '') + '" onclick="machinistSalarySetFilter_(\'трал\')">Тралы</button>' +
+          '<button class="crm-filter-chip' + (machinistSalaryFilter_ === 'длинномер' ? ' active' : '') + '" onclick="machinistSalarySetFilter_(\'длинномер\')">Длинномеры</button>' +
+          '<button class="crm-filter-chip' + (machinistSalaryFilter_ === 'не определено' ? ' active' : '') + '" onclick="machinistSalarySetFilter_(\'не определено\')">Не определено</button>' +
+        '</div>' +
+        '<select onchange="loadMachinistSalaryData(this.value)" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12.5px">' + monthOpts + '</select>' +
+      '</div>' +
+      '<div class="muted" style="font-size:11.5px;padding:0 20px 10px">' +
+        'Тип (трал/длинномер) определяем по технике, на которой человек реально работал в этом месяце - НЕ по данным 1С (там все машинисты числятся под одним отделом). ' +
+        '«Не определено» - для месяца ещё нет истории назначений на технику.' +
+      '</div>' +
+    '</div>' +
+    '<div class="card">' +
+      '<div class="sec-header"><div class="sec-title">Начисления машинистам</div>' +
+        '<div class="sec-sub">К начислению всего: ' + Math.round(totalNet).toLocaleString('ru-RU') + ' ₽ · ' + rows.length + ' чел.</div></div>' +
+      '<div style="overflow-x:auto"><table class="tbl"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>' +
+    '</div>';
 }
 
 function renderSalesSalary() {

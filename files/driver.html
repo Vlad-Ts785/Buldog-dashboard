@@ -49,6 +49,33 @@ button:disabled{cursor:default}
 .gos{font-family:var(--font-num);font-size:20px;font-weight:600;letter-spacing:.06em;font-variant-numeric:tabular-nums;
   background:var(--bg3);border:2px solid var(--border);border-radius:8px;padding:8px 12px;white-space:nowrap}
 
+/* ── Навигация «Зарплата / Рейсы» - два больших переключателя, элдерли-friendly ── */
+.nav{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.nav__btn{min-height:60px;border-radius:8px;background:var(--bg3);border:2px solid var(--border-strong);
+  font-size:18px;font-weight:700;color:var(--muted);display:flex;align-items:center;justify-content:center;gap:8px;
+  transition:background-color .15s ease,color .15s ease,border-color .15s ease}
+.nav__btn svg{width:22px;height:22px;stroke:currentColor;flex:none}
+.nav__btn[aria-pressed="true"]{background:var(--green);border-color:var(--green);color:#0f0f13}
+.nav__btn:active{transform:scale(.98)}
+
+/* ── Зарплата - крупная hero-сумма, "к начислению" важнее всего на экране ── */
+.pay-hero{font-family:var(--font-num);font-size:36px;font-weight:700;letter-spacing:-.01em;line-height:1.1;
+  font-variant-numeric:tabular-nums}
+.pay-hero--muted{font-family:var(--font-ui);font-size:19px;font-weight:500;color:var(--muted);line-height:1.4}
+.pay-note{font-size:14px;color:var(--muted);line-height:1.4}
+/* ── Список рейсов в зарплате - максимально просто: дата · маршрут · сумма, больше
+   ничего (Влад, 03.09: "чтобы их не путать с НДФЛ"). Маршрут переносится, не режется -
+   обрезанный адрес хуже, чем длинная строка. ── */
+.pay-trips{display:flex;flex-direction:column;margin-top:10px;padding-top:2px;border-top:1px solid var(--border)}
+.pay-trip{display:grid;grid-template-columns:52px 1fr max-content;column-gap:10px;align-items:start;padding:10px 0;border-bottom:1px solid var(--border)}
+.pay-trip:last-child{border-bottom:0}
+.pay-trip__date{font-family:var(--font-num);font-size:15px;color:var(--muted);font-variant-numeric:tabular-nums;padding-top:1px}
+.pay-trip__route{font-size:16px;line-height:1.3;overflow-wrap:anywhere}
+.pay-trip__amount{font-family:var(--font-num);font-size:17px;font-weight:600;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.pay-toggle{width:100%;min-height:52px;margin-top:10px;border-radius:8px;background:var(--bg3);border:2px solid var(--border-strong);
+  font-size:16px;font-weight:600;color:var(--text)}
+.pay-toggle:active{background:var(--bg4)}
+
 /* ── Полоса связи (единственный сдвигающий элемент, только офлайн/очередь) ── */
 .netbar{display:flex;align-items:center;gap:10px;background:var(--bg4);border-radius:8px;padding:10px 14px;margin-bottom:12px;
   font-size:15px;color:var(--amber);font-weight:600}
@@ -231,6 +258,28 @@ button:disabled{cursor:default}
       <span id="m-net-text">Нет связи</span>
     </div>
 
+    <!-- Переключатель разделов - Влад, 03.09: "у него тоже должна быть менюшка типа
+         Зарплата, Рейсы". Два больших переключателя, не таб-бар мелкими буквами -
+         водители часто пожилые, крупно и однозначно. Зарплата - экран по умолчанию. -->
+    <nav class="nav">
+      <button class="nav__btn" id="nav-salary" aria-pressed="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        Зарплата
+      </button>
+      <button class="nav__btn" id="nav-trips" aria-pressed="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="7" width="15" height="12" rx="1"/><path d="M16 11h4l3 4v4h-7M5 19a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM18 19a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></svg>
+        Рейсы
+      </button>
+    </nav>
+
+    <!-- ── Зарплата ── -->
+    <div id="view-salary">
+      <div id="pay-list"></div>
+      <p class="pay-note" id="pay-note"></p>
+    </div>
+
+    <!-- ── Рейсы (то, что уже было единственным экраном) ── -->
+    <div class="hidden" id="view-trips">
     <section class="card" id="m-trip">
       <div class="head"><div class="label">Текущий рейс</div><span class="badge badge--neutral" id="m-badge">Не начат</span></div>
       <div class="hero" id="m-customer"></div>
@@ -259,6 +308,7 @@ button:disabled{cursor:default}
         <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
       </button>
       <div class="hist__list" id="m-hist-list"></div>
+    </div>
     </div>
 
     <div class="tools">
@@ -321,7 +371,7 @@ var DEMO = qs.get('demo') === '1';
 var $ = function(id){ return document.getElementById(id); };
 
 /* ── состояние ── */
-var S = { token: localStorage.getItem('driver_token') || '', person:null, gos:null, trip:null, trips:[], events:{}, photosByStage:{}, online:navigator.onLine, queueCount:0, soundOn: localStorage.getItem('driver_sound') !== 'off', pushOn:false, pendingCamera:null, lastStageAt:0, deferredInstall:null };
+var S = { token: localStorage.getItem('driver_token') || '', person:null, gos:null, trip:null, trips:[], events:{}, photosByStage:{}, online:navigator.onLine, queueCount:0, soundOn: localStorage.getItem('driver_sound') !== 'off', pushOn:false, pendingCamera:null, lastStageAt:0, deferredInstall:null, view:'salary', payroll:null };
 
 /* ── звук: один короткий подтверждающий тон + «покашливание» на ошибку, выключатель ниже ── */
 var actx = null;
@@ -415,6 +465,14 @@ function loadState(silent){
     renderAll();
   }).catch(function(){ if(!silent) toast('Нет связи - экран может быть не свежим'); renderNet(); });
 }
+// Зарплата - редкие данные (отчёт 1С, не живой поток), грузим ОТДЕЛЬНО от рейсов и без
+// 30-секундного поллинга (см. setInterval ниже - тот только для flush() очереди).
+function loadPayroll(){
+  return api('/driver/payroll').then(function(j){
+    if(j.__status!==200) return;
+    S.payroll=j; renderSalary();
+  }).catch(function(){ /* останется "Загружаю…" до следующего открытия - не пугаем тостом ради второстепенного экрана */ });
+}
 
 /* ── рендер ── */
 function show(id){ ['s-loading','s-welcome','s-revoked','s-main'].forEach(function(s){ $(s).classList.toggle('hidden', s!==id); }); $('dock').classList.toggle('hidden', id!=='s-main'); }
@@ -454,9 +512,63 @@ function renderAll(){
     }).join('');
     renderSteps();
   }
-  renderMain(); renderHist(); renderNet(); renderTools();
+  renderMain(); renderHist(); renderNet(); renderTools(); renderSalary();
   $('m-foot').textContent = 'TS HUB · '+VERSION+(DEMO?' · демо':'');
 }
+/* ── переключатель Зарплата/Рейсы - крупные кнопки, Зарплата по умолчанию (Влад, 03.09) ── */
+function setView(v){
+  S.view=v;
+  $('nav-salary').setAttribute('aria-pressed', v==='salary'?'true':'false');
+  $('nav-trips').setAttribute('aria-pressed', v==='trips'?'true':'false');
+  $('view-salary').classList.toggle('hidden', v!=='salary');
+  $('view-trips').classList.toggle('hidden', v!=='trips');
+  renderMain(); // видимость закреплённой кнопки рейса зависит от текущей вкладки
+}
+$('nav-salary').addEventListener('click', function(){ snd.tap(); setView('salary'); });
+$('nav-trips').addEventListener('click', function(){ snd.tap(); setView('trips'); });
+function fmtMoney(n){ return Math.round(Number(n)||0).toLocaleString('ru-RU')+' ₽'; }
+function fmtPayDate(iso){ if(!iso) return ''; var d=new Date(iso); var p=function(n){ return (n<10?'0':'')+n; }; return p(d.getDate())+'.'+p(d.getMonth()+1); }
+var payTripsOpen={}; // month_key -> bool, разворот списка поездок по клику (кроме самого свежего месяца - тот открыт сразу)
+function tripsHtml(trips){
+  if(!trips.length) return '<div class="pay-trip"><span></span><span class="pay-trip__route" style="color:var(--muted)">Поездок не найдено</span><span></span></div>';
+  return trips.map(function(t){
+    return '<div class="pay-trip"><span class="pay-trip__date">'+fmtPayDate(t.date)+'</span>'+
+      '<span class="pay-trip__route">'+esc(t.route||'Место не указано')+'</span>'+
+      '<span class="pay-trip__amount">'+fmtMoney(t.amount)+'</span></div>';
+  }).join('');
+}
+function renderSalary(){
+  var list=$('pay-list');
+  if(!S.payroll){ list.innerHTML='<section class="card"><div class="pay-hero--muted">Загружаю…</div></section>'; $('pay-note').textContent=''; return; }
+  var months=S.payroll.months||[];
+  if(!months.length){
+    list.innerHTML='<section class="card"><div class="pay-hero--muted">Данных пока нет.<br>Появятся после первого отчёта из 1С.</div></section>';
+    $('pay-note').textContent=''; return;
+  }
+  // Максимально просто (Влад, 03.09): только дата · маршрут · сумма на каждую поездку,
+  // ни НДФЛ, ни начислений/удержаний отдельно - hero-сумма месяца уже готовый итог.
+  // Самый свежий месяц - список сразу развёрнут, более старый - по кнопке (иначе на
+  // одном экране сразу два длинных чека, тяжело читать).
+  list.innerHTML=months.map(function(m,i){
+    if(!m.found){
+      return '<section class="card"><div class="head"><div class="label">'+esc(m.month_label)+'</div></div>'+
+        '<div class="pay-hero--muted">Нет данных за этот месяц</div></section>';
+    }
+    var isOpen = i===0 || payTripsOpen[m.month_key];
+    var toggle = i===0 ? '' : '<button class="pay-toggle" data-pay-toggle="'+esc(m.month_key)+'">'+(isOpen?'Скрыть рейсы':'Показать рейсы ('+m.trips.length+')')+'</button>';
+    return '<section class="card">'+
+      '<div class="head"><div class="label">'+esc(m.month_label)+'</div>'+(i===0?'<span class="badge badge--good">Последний отчёт</span>':'')+'</div>'+
+      '<div class="pay-hero">'+fmtMoney(m.net_amount)+'</div>'+
+      (isOpen ? '<div class="pay-trips">'+tripsHtml(m.trips)+'</div>' : '')+
+      toggle+
+      '</section>';
+  }).join('');
+  $('pay-note').textContent = 'Данные из 1С за прошедший отчётный период. Если сумма кажется неверной - скажите логисту.';
+}
+document.addEventListener('click', function(e){
+  var b=e.target.closest('[data-pay-toggle]'); if(!b) return;
+  var mk=b.getAttribute('data-pay-toggle'); payTripsOpen[mk]=!payTripsOpen[mk]; snd.tap(); renderSalary();
+});
 function renderBadge(){
   var t=S.trip; if(!t) return; var idx=stageIdx(t.stage);
   var b=$('m-badge'); b.textContent = idx<0?'Не начат':(idx===STAGES.length-1?'Рейс закрыт':stageName(t.stage)); b.className='badge '+(idx<0?'badge--neutral':'badge--good');
@@ -479,7 +591,8 @@ function renderSteps(){
 }
 function camSvg(){ return '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>'; }
 function renderMain(){
-  var t=S.trip, btn=$('main-btn'); if(!t){ $('dock').classList.add('hidden'); return; }
+  var t=S.trip, btn=$('main-btn');
+  if(S.view!=='trips' || !t){ $('dock').classList.add('hidden'); return; }
   $('dock').classList.remove('hidden');
   var cur=stageIdx(t.stage), next=STAGES[cur+1];
   btn.className='main'; btn.disabled=false;
@@ -604,6 +717,7 @@ function demoApi(path){
     d={__status:200, person:{full_name:'Бамматов Магомед Ильмаксудович'}, vehicle_gos:'Е 326 ЕА 797', trip:t.trip, events:evs};
   }
   else if(path.indexOf('/driver/trips')===0) d={__status:200, trips:t.trips};
+  else if(path.indexOf('/driver/payroll')===0) d={__status:200, months:t.payrollMonths};
   else if(path.indexOf('/driver/trip_event')===0){ var ev=new URLSearchParams(path.split('?')[1]).get('event'); if(ev!=='problem'){ t.trip.stage=ev; } d={__status:200, event_id:++t.eid}; }
   else if(path.indexOf('/driver/trip_photo')===0) d={__status:200, id:'x'};
   else d={__status:200};
@@ -611,7 +725,19 @@ function demoApi(path){
 }
 var nowH=(Date.now()-EPOCH0)/3600000;
 var demoState={ eid:100, trip:{ id:'demo-1', customer:'СУ 910', route_from:'База, Домодедово', route_to:'Подольск, Большая Серпуховская 43', start_hour:Math.floor(nowH/24)*24+7, length_hours:8, order_number:'000473993', stage: qs.get('stage')||null, stage_updated_at:null },
-  trips:[ {id:'d2',customer:'ГК Мосинжстрой',start_hour:nowH-30,stage:'unloaded'}, {id:'d3',customer:'Стройтранс',start_hour:nowH-54,stage:'unloaded'}, {id:'d4',customer:'ООО Техно-Кран',start_hour:nowH-100,stage:'loaded'} ] };
+  trips:[ {id:'d2',customer:'ГК Мосинжстрой',start_hour:nowH-30,stage:'unloaded'}, {id:'d3',customer:'Стройтранс',start_hour:nowH-54,stage:'unloaded'}, {id:'d4',customer:'ООО Техно-Кран',start_hour:nowH-100,stage:'loaded'} ],
+  payrollMonths:[
+    { month_key:'2026-08', month_label:'Август 2026', found:true, net_amount:252196.06, trips:[
+      {date:'2026-08-01', route:'Сосновый бор - Бутово', amount:5000.76},
+      {date:'2026-08-01', route:'База - Бутово', amount:5000.76},
+      {date:'2026-08-02', route:'Щербинка - Москва, ул. Иркутская, 7 стр1', amount:5000.76},
+      {date:'2026-08-05', route:'Апрелевка - Наро-Фоминск', amount:9000.32}
+    ]},
+    { month_key:'2026-07', month_label:'Июль 2026', found:true, net_amount:238410.5, trips:[
+      {date:'2026-07-03', route:'Домодедово - Ступино', amount:6200.4},
+      {date:'2026-07-10', route:'Чехов - Серпухов', amount:5800.0}
+    ]}
+  ] };
 if(DEMO && qs.get('demo_offline')==='1'){ S.online=false; S.queueCount=2; }
 
 /* ── старт ── */
@@ -640,7 +766,8 @@ function boot(){
   }
   if(DEMO){ if(qs.get('screen')==='welcome'){ $('w-name').textContent='Магомед'; show('s-welcome'); return; } if(qs.get('screen')==='revoked'){ show('s-revoked'); return; } if(qs.get('screen')==='notrip'){ demoState.trip=null; } }
   if(!S.token && !DEMO){ show('s-revoked'); return; }
-  show('s-loading'); refreshQueueCount(); loadState(); flush();
+  setView('salary'); // первым делом зарплата (Влад, 03.09) - до того, как данные рейса ещё грузятся
+  show('s-loading'); refreshQueueCount(); loadState(); loadPayroll(); flush();
 }
 boot();
 })();

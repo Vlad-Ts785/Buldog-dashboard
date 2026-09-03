@@ -11025,7 +11025,7 @@ function renderVehiclesTable() {
       '<td><span class="badge ' + stCls + '">' + (v.status||'—') + '</span></td>' +
       '<td class="muted">' + ((v.driver||'').trim().split(' ')[0] || '—') + '</td>' +
       '<td class="num">' + fmt(v.revenue) + '</td>' +
-      '<td class="num muted">' + fmt(v.fot) + '</td>' +
+      '<td class="num muted"' + (v.driver ? ' style="cursor:pointer;text-decoration:underline dotted" onclick="event.stopPropagation();openDriverSalaryFromVehicle_(\'' + (v.driver||'').replace(/'/g,"\\'") + '\')" title="Зарплата ' + ((v.driver||'').trim().split(' ')[0]) + ' - открыть в разделе Зарплата"' : '') + '>' + fmt(v.fot) + '</td>' +
       '<td class="num ' + fuelCellClass(v, fuelStats) + '"><b>' + fmt(v.fuel) + '</b></td>' +
       '<td class="num muted">' + fmt(v.parts) + '</td>' +
       '<td class="num ' + finesCls + '">' + (v.fines ? fmt(Math.abs(v.fines)) : '—') + '</td>' +
@@ -15944,12 +15944,16 @@ function chooseSalaryTarget_(tab) {
 // панель внутри страницы "Зарплата", попадают сюда через попап-выбор выше (не через
 // tab-bar - убран 2026-09-03 по правке Влада). Ленивая загрузка при первом открытии - тот
 // же приём, что loadGlobalStatsData(): один запрос на месяц, кэш в module-scope переменной.
-function showSalaryTab(tab) {
+// month - опционально (2026-09-04, нужен openDriverSalaryFromVehicle_ ниже, чтобы
+// загрузить КОНКРЕТНЫЙ месяц одним запросом, не default + повторный - иначе гонка двух
+// fetch). Возвращает Promise (или undefined для вкладки "managers" - у неё нет async-
+// загрузки данным путём).
+function showSalaryTab(tab, month) {
   ['managers', 'machinists'].forEach(function(t) {
     var panel = document.getElementById('salary-tab-' + t);
     if (panel) panel.style.display = (t === tab) ? '' : 'none';
   });
-  if (tab === 'machinists') loadMachinistSalaryData();
+  if (tab === 'machinists') return loadMachinistSalaryData(month);
 }
 
 var machinistSalaryData_ = {}; // {monthKey: {rows, available_months}} - кэш по месяцу
@@ -15957,13 +15961,15 @@ var machinistSalaryMonth_ = null;
 var machinistSalaryFilter_ = 'all'; // all/трал/длинномер
 var machinistSalarySort_ = { col: 'net_amount', dir: -1 };
 
+// Возвращает Promise (2026-09-04, нужно openDriverSalaryFromVehicle_ ниже - дождаться
+// реальной загрузки данных перед тем, как открывать карточку конкретного машиниста).
 function loadMachinistSalaryData(month) {
   var el = document.getElementById('salary-tab-machinists');
-  if (!el) return;
+  if (!el) return Promise.resolve();
   var mk = month || machinistSalaryMonth_;
-  if (mk && machinistSalaryData_[mk]) { machinistSalaryMonth_ = mk; renderMachinistSalary(); return; }
+  if (mk && machinistSalaryData_[mk]) { machinistSalaryMonth_ = mk; renderMachinistSalary(); return Promise.resolve(); }
   el.innerHTML = '<p style="color:var(--muted);padding:16px">Данные загружаются...</p>';
-  fetchFromYardApi_('/driver_payroll', mk ? { month: mk } : {}).then(function(r) {
+  return fetchFromYardApi_('/driver_payroll', mk ? { month: mk } : {}).then(function(r) {
     if (!r.ok || !r.data || r.data.error) throw new Error((r.data && r.data.error) || 'Ошибка загрузки');
     var d = r.data;
     machinistSalaryData_[d.month] = d;
@@ -15971,6 +15977,31 @@ function loadMachinistSalaryData(month) {
     renderMachinistSalary();
   }).catch(function(e) {
     el.innerHTML = '<p style="color:var(--muted);padding:16px">Не удалось загрузить: ' + (e.message || e) + '</p>';
+  });
+}
+
+// Клик по ФОТ машины в "Технике" (2026-09-04, Влад: "по нажатию на цифру зарплаты
+// водителя попадать прямо сразу в зарплаты, в его полную выкладку в разделе Зарплата") -
+// переключает на страницу "Зарплата" -> вкладка "По машинистам", грузит месяц (по
+// диапазону дат, выбранному в Технике - #range-from, иначе текущий календарный) и сразу
+// открывает карточку детализации найденного машиниста (openMachinistDetail_). Если ФИО из
+// Штатки не совпало с 1С - карточка всё равно откроется, просто без сводной строки сверху
+// (тот же приём, что и обычный клик по строке таблицы «По машинистам» - graceful, не
+// падаем и не молчим).
+function openDriverSalaryFromVehicle_(driverName) {
+  if (!driverName) return;
+  var from = document.getElementById('range-from') ? document.getElementById('range-from').value : '';
+  var mk = from ? from.slice(0, 7) : (function() {
+    var now = new Date();
+    return now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+  })();
+  // НЕ через chooseSalaryTarget_ - та вызывает showSalaryTab() без месяца (свой,
+  // параллельный fetch с дефолтным месяцем) - здесь нужен ОДИН запрос сразу на
+  // конкретный mk, иначе гонка двух fetch может оставить открытым не тот месяц.
+  showPage('sales-salary', document.querySelector('[data-page="sales-salary"]'));
+  setText('page-title', 'Зарплата - машинисты');
+  showSalaryTab('machinists', mk).then(function() {
+    openMachinistDetail_(driverName);
   });
 }
 

@@ -16002,6 +16002,7 @@ var MACHINIST_SALARY_COLS_ = [
   { key: 'total_amount', label: 'Итого', num: true },
   { key: 'ndfl_amount', label: 'НДФЛ', num: true },
   { key: 'net_amount', label: 'К начислению', num: true },
+  { key: 'order_pct', label: 'Процент', num: true },
 ];
 // "Удержания" сворачивает 3 своих слагаемых (2026-09-04, Влад: "таблица слишком широкая ...
 // изначально свёрнута, но при желании можно раскрыть") - Аванс/Штрафы/Проч. удержания
@@ -16055,8 +16056,14 @@ function renderMachinistSalary() {
   var body = rows.map(function(r) {
     var cells = cols.map(function(c) {
       if (c.key === 'driver_name') {
-        var badgeColor = r.vehicle_bucket === 'трал' ? 'var(--green)' : r.vehicle_bucket === 'длинномер' ? 'var(--blue)' : 'var(--muted)';
+        var badgeColor = r.vehicle_bucket === 'трал' ? 'var(--green)' : r.vehicle_bucket === 'длинномер' ? 'var(--blue)' : r.vehicle_bucket === 'файмонвиль' ? 'var(--purple)' : 'var(--muted)';
         return '<td>' + r.driver_name + ' <span style="font-size:10.5px;color:' + badgeColor + '">· ' + r.vehicle_bucket + '</span></td>';
+      }
+      if (c.key === 'order_pct') {
+        // Общий процент - зарплата/стоимость заказа за месяц (2026-09-04, Влад: "после
+        // К начислению по каждому водителю дай общий процент ... больше 20% - красным").
+        var pct = r.order_pct;
+        return '<td class="num" style="color:' + mdPctColor_(pct) + '">' + (pct != null ? pct.toFixed(1) + '%' : '—') + '</td>';
       }
       var v = r[c.key] || 0;
       var isDeduction = ['advance_amount', 'gibdd_fines_amount', 'other_deductions_amount', 'deductions_amount', 'ndfl_amount'].indexOf(c.key) >= 0;
@@ -16076,6 +16083,7 @@ function renderMachinistSalary() {
           '<button class="crm-filter-chip' + (machinistSalaryFilter_ === 'all' ? ' active' : '') + '" onclick="machinistSalarySetFilter_(\'all\')">Все (' + (d.rows || []).length + ')</button>' +
           '<button class="crm-filter-chip' + (machinistSalaryFilter_ === 'трал' ? ' active' : '') + '" onclick="machinistSalarySetFilter_(\'трал\')">Тралы</button>' +
           '<button class="crm-filter-chip' + (machinistSalaryFilter_ === 'длинномер' ? ' active' : '') + '" onclick="machinistSalarySetFilter_(\'длинномер\')">Длинномеры</button>' +
+          '<button class="crm-filter-chip' + (machinistSalaryFilter_ === 'файмонвиль' ? ' active' : '') + '" onclick="machinistSalarySetFilter_(\'файмонвиль\')">Файмонвиль</button>' +
           '<button class="crm-filter-chip' + (machinistSalaryFilter_ === 'не определено' ? ' active' : '') + '" onclick="machinistSalarySetFilter_(\'не определено\')">Не определено</button>' +
         '</div>' +
         '<select onchange="loadMachinistSalaryData(this.value)" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12.5px">' + monthOpts + '</select>' +
@@ -16302,14 +16310,26 @@ function renderMachinistDetail_(driverName, summaryRow, detail) {
 
   var badge = '';
   if (summaryRow) {
-    var badgeColor = summaryRow.vehicle_bucket === 'трал' ? 'var(--green)' : summaryRow.vehicle_bucket === 'длинномер' ? 'var(--blue)' : 'var(--muted)';
+    var badgeColor = summaryRow.vehicle_bucket === 'трал' ? 'var(--green)' : summaryRow.vehicle_bucket === 'длинномер' ? 'var(--blue)' : summaryRow.vehicle_bucket === 'файмонвиль' ? 'var(--purple)' : 'var(--muted)';
     badge = ' <span style="font-size:12px;font-weight:500;color:' + badgeColor + '">· ' + summaryRow.vehicle_bucket + '</span>';
   }
 
   var summaryGrid = '';
   if (summaryRow) {
+    // "Заказов" - количество (2026-09-04, Влад: "после начисления ещё нужно количество
+    // заказов: цифра") - НЕ деньги, четвёртый элемент it[3]='count' переключает формат
+    // на голое число вместо mdFr_.
+    var allTrips = (detail.vehicles || []).reduce(function(acc, v) { return acc.concat(v.trips); }, []);
+    var tripsTotal = allTrips.length;
+    // Общий процент (2026-09-04, Влад: "рядом [с К начислению] ещё поставить общий
+    // процент") - тот же агрегат, что "средний процент" в подвале таблицы по машине
+    // (сумма зарплаты/сумма стоимости заказов), но по ВСЕМ машинам сразу, не по одной.
+    var totalOrderAmt = allTrips.reduce(function(s, t) { return s + (t.order_amount || 0); }, 0);
+    var totalTripAmt = allTrips.reduce(function(s, t) { return s + (t.amount || 0); }, 0);
+    var overallPct = totalOrderAmt > 0 ? (totalTripAmt / totalOrderAmt * 100) : null;
     var items = [
       ['Начисления', summaryRow.accruals_amount, ''],
+      ['Заказов', tripsTotal, '', 'count'],
       ['Аванс/Нал', summaryRow.advance_amount, 'var(--red)'],
       ['Штрафы ГИБДД', summaryRow.gibdd_fines_amount, 'var(--red)'],
       ['Проч. удержания', summaryRow.other_deductions_amount, 'var(--red)'],
@@ -16319,8 +16339,12 @@ function renderMachinistDetail_(driverName, summaryRow, detail) {
     ];
     summaryGrid = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:16px">' +
       items.map(function(it) {
+        var val = it[3] === 'count' ? String(it[1]) : mdFr_(it[1]);
+        if (it[0] === 'К начислению' && overallPct != null) {
+          val += ' <span style="font-size:12px;font-weight:600;color:' + mdPctColor_(overallPct) + '">(' + overallPct.toFixed(1) + '%)</span>';
+        }
         return '<div><div style="font-size:11px;color:var(--muted)">' + it[0] + '</div>' +
-          '<div style="font-size:14px;font-weight:600;' + (it[2] ? 'color:' + it[2] : '') + '">' + mdFr_(it[1]) + '</div></div>';
+          '<div style="font-size:14px;font-weight:600;' + (it[2] ? 'color:' + it[2] : '') + '">' + val + '</div></div>';
       }).join('') +
     '</div>';
   }

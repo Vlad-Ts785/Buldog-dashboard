@@ -12588,9 +12588,18 @@ function renderVcardChart(days) {
 var globalStatsMonths = null; // [{month, revenue, salesPlan, profit, profitTral, profitLong, fot, fuel, parts, fines, tolls, hiredProfit, hiredRevenue}]
 var globalStatsChart = null;
 
+// Сервер первым (2026-09-03, Влад вживую: "эта страница долго грузится") - /api/global_stats
+// сверен с Apps Script построчно, 0 расхождений в живых месяцах (кроме двух находок:
+// cash за январь-май был занижен в 1000 раз В САМИХ ДАННЫХ архива, починено на сервере;
+// июль-сентябрь у Apps Script устарели - читает History_месяцев без переcчёта, сервер
+// живой). Apps Script - фолбэк, если сервер недоступен (тот же общий приём, что и
+// fetchFromYardApi_ везде).
 function loadGlobalStatsData() {
   if (globalStatsMonths !== null) { renderGlobalStats(); return; }
-  apiFetchJson({ action: 'global_stats' }).then(function(d) {
+  fetchFromYardApi_('/global_stats', {}).then(function(r) {
+    if (r.ok && r.data && !r.data.error) return r.data;
+    return apiFetchJson({ action: 'global_stats' });
+  }).then(function(d) {
     globalStatsMonths = d.months || [];
     renderGlobalStats();
   }).catch(function() {

@@ -202,10 +202,13 @@ button:disabled{cursor:default}
   <section class="full hidden" id="s-welcome">
     <h1>Здравствуйте, <span id="w-name">водитель</span>.</h1>
     <p>Это ваш экран рейсов. Здесь будет виден рейс на сегодня и кнопка, что нажать дальше.</p>
-    <p class="muted">Добавьте его на главный экран телефона, чтобы открывать одним касанием.</p>
-    <button class="btn-big" id="w-install">Добавить на экран</button>
+    <p class="muted">Эта ссылка теперь всегда ваша - можно просто открывать её снова из этого же
+      сообщения, ничего заново вводить не нужно. Хотите значок на рабочем столе, чтобы не
+      искать сообщение - нажмите ниже; если телефон предложит только «ярлык» вместо
+      «приложения» - это тоже нормально, работает точно так же.</p>
+    <button class="btn-big" id="w-install">Добавить значок на экран</button>
     <div class="install-steps hidden" id="w-steps"></div>
-    <button class="btn-ghost" id="w-skip">Позже</button>
+    <button class="btn-ghost" id="w-skip">Понятно, дальше</button>
   </section>
 
   <section class="full hidden" id="s-revoked">
@@ -614,6 +617,11 @@ if(DEMO && qs.get('demo_offline')==='1'){ S.online=false; S.queueCount=2; }
 /* ── старт ── */
 function boot(){
   var invite=qs.get('invite');
+  // Доступ уже сохранён на этом телефоне (обычный сценарий: водитель открыл ту же ссылку
+  // из WhatsApp повторно, вместо значка на столе) - код одноразовый, ВТОРОЙ обмен сервер
+  // законно отклонит. Ссылку в этом случае просто игнорируем и идём как обычно, иначе
+  // человек с рабочим доступом увидит "Ссылка недействительна" и решит, что его отключили.
+  if(invite && S.token){ history.replaceState(null,'',location.pathname); invite=null; }
   if(invite && !DEMO){
     show('s-loading');
     api('/driver/claim_invite?'+q({code:invite}), {method:'POST'}).then(function(j){

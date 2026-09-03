@@ -16135,13 +16135,51 @@ function mdShort_(v) {
   var m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
   return m ? (m[3] + '.' + m[2] + '.' + m[1]) : '—';
 }
-// "Таблица заказов 000471882 от 05.08.2026 9:06:18" -> "№471882 · 05.08" (2026-09-04,
-// Влад: "нечитабельно ... время не нужно, слово таблица заказов не нужно"). Тот же приём
-// для штрафов ("Ввод начислений и удержаний водителям 000012025 от ...").
+// "Таблица заказов 000471882 от 05.08.2026 9:06:18" -> "471882" (2026-09-04, Влад:
+// "убери дату, оставь вообще только номер ... даже сам значок номера не нужен, просто
+// цифры"). Тот же приём для штрафов ("Ввод начислений и удержаний водителям 000012025...").
 function mdDocShort_(text) {
-  var m = String(text || '').match(/(\d{5,})\s+от\s+(\d{2})\.(\d{2})\.\d{4}/);
-  if (!m) return text || '—';
-  return '№' + m[1].replace(/^0+/, '') + ' · ' + m[2] + '.' + m[3];
+  var m = String(text || '').match(/(\d{5,})/);
+  return m ? String(Number(m[1])) : '—';
+}
+function mdEsc_(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+// Ячейка в одну строку с многоточием, если не влезло, полный текст - в title по наведению
+// (2026-09-04, Влад: "мне нужно, чтобы все эти перевозки были в одну строчку" - адрес и
+// груз бывают длинными, обрезка надёжнее и проще "бегущей строки", которая на многих
+// строках таблицы сразу была бы просто раздражающей).
+function mdEllipsisCell_(text, maxWidth) {
+  var t = text || '—';
+  return '<td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:' + maxWidth + 'px;font-size:12.5px" title="' + mdEsc_(t) + '">' + mdEsc_(t) + '</td>';
+}
+// Строка фильтров под заголовком - по одному текстовому полю на колонку (2026-09-04,
+// Влад: "по всем колонкам возможность фильтрации"). Фильтрует по textContent ячейки
+// (полный текст, даже если визуально обрезан многоточием) - подстрока, без учёта регистра,
+// строка видна только если ВСЕ заполненные фильтры совпали (mdFilterTable_ ниже).
+function mdFilterRow_(count) {
+  var cells = '';
+  for (var i = 0; i < count; i++) {
+    cells += '<th style="padding:2px 4px"><input type="text" placeholder="Фильтр" oninput="mdFilterTable_(this)" ' +
+      'style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:2px 5px;font-size:10.5px;color:var(--text)"></th>';
+  }
+  return '<tr>' + cells + '</tr>';
+}
+function mdFilterTable_(inputEl) {
+  var table = inputEl.closest('table');
+  var filters = Array.prototype.map.call(inputEl.closest('tr').querySelectorAll('input'), function(i) {
+    return i.value.trim().toLowerCase();
+  });
+  table.querySelectorAll('tbody tr').forEach(function(row) {
+    var cells = row.children;
+    var visible = true;
+    for (var i = 0; i < filters.length; i++) {
+      if (!filters[i]) continue;
+      var cellText = cells[i] ? cells[i].textContent.toLowerCase() : '';
+      if (cellText.indexOf(filters[i]) === -1) { visible = false; break; }
+    }
+    row.style.display = visible ? '' : 'none';
+  });
 }
 
 function renderMachinistDetail_(driverName, summaryRow, detail) {
@@ -16183,36 +16221,42 @@ function renderMachinistDetail_(driverName, summaryRow, detail) {
         '<td style="color:var(--muted)">' + mdDocShort_(f.doc_ref) + '</td>' +
         '<td class="num" style="color:var(--red)">' + fr(f.amount) + '</td></tr>';
     }).join('');
-    finesHtml = '<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Период</th><th>Документ</th><th class="num">Сумма</th></tr></thead>' +
-      '<tbody>' + fineRows + '</tbody>' +
+    finesHtml = '<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Период</th><th>Документ</th><th class="num">Сумма</th></tr>' +
+      mdFilterRow_(3) +
+      '</thead><tbody>' + fineRows + '</tbody>' +
       '<tfoot><tr><td colspan="2" style="font-weight:600">Итого штрафы/удержания</td>' +
       '<td class="num" style="font-weight:600;color:var(--red)">' + fr(detail.fines_subtotal) + '</td></tr></tfoot>' +
       '</table></div>';
   }
 
-  var vehiclesHtml = (detail.vehicles || []).map(function(v) {
+  // Колонки (2026-09-04, правка Влада): Оборудование убрано, Сумма/НДФЛ убраны (остаётся
+  // только К начислению - итоговая цифра на руки), Стоимость заказа - в самый конец,
+  // Процент (доля зарплаты машиниста от стоимости заказа) - после неё. Маршрут/Груз - в
+  // одну строку с многоточием (mdEllipsisCell_), Документ - голый номер (mdDocShort_).
+  var vehiclesHtml = (detail.vehicles || []).map(function(v, vi) {
+    var netSubtotal = v.trips.reduce(function(s, t) { return s + (t.net_amount || 0); }, 0);
     var tripRows = v.trips.map(function(t) {
+      var pct = (t.order_amount && t.order_amount > 0) ? (t.amount / t.order_amount * 100) : null;
       return '<tr><td>' + mdShort_(t.trip_date) + '</td>' +
         '<td style="color:var(--muted)">' + mdDocShort_(t.doc_ref) + '</td>' +
-        '<td>' + (t.equipment_type || '—') + '</td>' +
-        '<td style="font-size:12.5px">' + (t.route || '—') + '</td>' +
-        '<td style="font-size:12.5px">' + (t.cargo || '—') + '</td>' +
-        '<td class="num" style="color:var(--muted)">' + (t.order_amount != null ? fr(t.order_amount) : '—') + '</td>' +
+        mdEllipsisCell_(t.route, 240) +
+        mdEllipsisCell_(t.cargo, 160) +
         '<td class="num">' + (t.km_mkad ? Math.round(t.km_mkad).toLocaleString('ru-RU') : '—') + '</td>' +
         '<td class="num">' + (t.hours || '—') + '</td>' +
-        '<td class="num">' + fr(t.amount) + '</td>' +
-        '<td class="num" style="color:var(--red)">' + fr(t.ndfl_amount) + '</td>' +
-        '<td class="num" style="font-weight:600">' + fr(t.net_amount) + '</td></tr>';
+        '<td class="num" style="font-weight:600">' + fr(t.net_amount) + '</td>' +
+        '<td class="num" style="color:var(--muted)">' + (t.order_amount != null ? fr(t.order_amount) : '—') + '</td>' +
+        '<td class="num">' + (pct != null ? pct.toFixed(1) + '%' : '—') + '</td></tr>';
     }).join('');
     return '<div class="crm-modal-section">' +
       '<div class="crm-modal-section-title">' + v.vehicle_name + ' · рейсов: ' + v.trips.length + '</div>' +
-      '<div style="overflow-x:auto"><table class="tbl"><thead><tr>' +
-        '<th>Дата</th><th>Документ</th><th>Оборудование</th><th>Маршрут</th><th>Груз</th>' +
-        '<th class="num">Стоимость заказа</th>' +
-        '<th class="num">Км МКАД</th><th class="num">Часы</th><th class="num">Сумма</th><th class="num">НДФЛ</th><th class="num">К начислению</th>' +
-      '</tr></thead><tbody>' + tripRows + '</tbody>' +
-      '<tfoot><tr><td colspan="8" style="font-weight:600">Итого по машине</td>' +
-      '<td class="num" style="font-weight:600">' + fr(v.subtotal) + '</td><td></td><td></td></tr></tfoot>' +
+      '<div style="overflow-x:auto"><table class="tbl" id="md-veh-' + vi + '"><thead><tr>' +
+        '<th>Дата</th><th>Документ</th><th>Маршрут</th><th>Груз</th>' +
+        '<th class="num">Км МКАД</th><th class="num">Часы</th><th class="num">К начислению</th>' +
+        '<th class="num">Стоимость заказа</th><th class="num">Процент</th>' +
+      '</tr>' + mdFilterRow_(9) +
+      '</thead><tbody>' + tripRows + '</tbody>' +
+      '<tfoot><tr><td colspan="6" style="font-weight:600">Итого по машине</td>' +
+      '<td class="num" style="font-weight:600">' + fr(netSubtotal) + '</td><td></td><td></td></tr></tfoot>' +
       '</table></div>' +
     '</div>';
   }).join('') || '<div class="crm-modal-static muted">Рейсов не найдено</div>';

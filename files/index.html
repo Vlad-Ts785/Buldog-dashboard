@@ -22268,11 +22268,40 @@ window.addEventListener("pointerup", function(){
     /* dataset.v - индекс, стабилен только в пределах ЭТОЙ загрузки страницы -
        переводим в госномер именно здесь, на границе сохранения (см. разбор у
        orderedVehicles выше), а не меняем сам dataset.v - тот используется как
-       адрес машины ВЕЗДЕ в файле, трогать рискованнее, чем нужно для фикса. */
-    STATE.order = [].map.call(rowsEl.querySelectorAll(".row"), function(r){
+       адрес машины ВЕЗДЕ в файле, трогать рискованнее, чем нужно для фикса.
+
+       НАЙДЕННЫЙ БАГ (Влад, 03.09: "у меня поменялось расположение машин, мы
+       же настроили персональные настройки"). rowsEl.querySelectorAll(".row")
+       видит ТОЛЬКО строки, реально отрисованные ПРЯМО СЕЙЧАС - под активным
+       фильтром парка (Тралы/Длинномеры/...) или свёрнутой группой это
+       ПОДМНОЖЕСТВО всего парка. Раньше STATE.order полностью ПЕРЕЗАПИСЫВАЛСЯ
+       этим подмножеством - каждая перетаскивание под фильтром молча роняло
+       из сохранённого порядка ВСЕ машины, которых не было видно в этот
+       момент (другие типы техники). Они не терялись физически (orderedVehicles
+       ниже дозаписывает "не найденных в order" в конце), но их МЕСТО в
+       порядке стиралось и на следующей отрисовке они уезжали в конец/другое
+       место - выглядело как "весь порядок случайно поменялся".
+       Фикс - СЛИЯНИЕ, не перезапись: берём ПОЛНЫЙ текущий порядок
+       (orderedVehicles() - уже включает fallback для машин, которых раньше
+       не было в STATE.order), заменяем в нём ТОЛЬКО подпоследовательность
+       видимых машин на их новый порядок (первое место, где раньше встретилась
+       видимая машина), всё невидимое остаётся на своих местах нетронутым. */
+    var visibleNewOrder_ = [].map.call(rowsEl.querySelectorAll(".row"), function(r){
       var v = STATE.vehicles[parseInt(r.dataset.v, 10)];
       return v && v.gos;
     }).filter(Boolean);
+    var fullOrder_ = orderedVehicles().map(function(v){ return v.gos; }).filter(Boolean);
+    var visibleSet_ = {}; visibleNewOrder_.forEach(function(g){ visibleSet_[g] = true; });
+    var merged_ = [], spliced_ = false;
+    fullOrder_.forEach(function(g){
+      if (visibleSet_[g]){
+        if (!spliced_){ merged_ = merged_.concat(visibleNewOrder_); spliced_ = true; }
+      } else {
+        merged_.push(g);
+      }
+    });
+    if (!spliced_) merged_ = merged_.concat(visibleNewOrder_);
+    STATE.order = merged_;
     saveOrder();
     S.settle();
     toast("Порядок машин сохранён", null);

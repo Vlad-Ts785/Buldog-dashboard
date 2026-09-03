@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0f0f13">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Рейс">
+<title>Рейс · TS HUB</title>
+<link rel="manifest" href="driver.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@500;600;700&family=JetBrains+Mono:wght@500;600;700&family=Unbounded:wght@500&display=swap" rel="stylesheet">
+<style>
+/* ── Экран водителя (Фаза 2 плана plans/2026-09-03-employee-mobile-app.md).
+   Токены - DESIGN_SYSTEM.md раздел 1, без единого нового hex. Паттерн "экран водителя"
+   (размеры под кабину/перчатки/солнце) - НОВЫЙ, см. раздел 4 ГОСТа после одобрения. ── */
+:root{
+  --bg:#0f0f13; --bg2:#17171d; --bg3:#1e1e26; --bg4:#252530;
+  --border:rgba(255,255,255,0.08); --border-strong:rgba(255,255,255,0.16);
+  --text:#e8e6df; --muted:#8b8980;
+  --green:#1D9E75; --red:#E24B4A; --amber:#EF9F27; --blue:#378ADD; --purple:#7F77DD;
+  --font-ui:'Golos Text',system-ui,sans-serif;
+  --font-num:'JetBrains Mono',ui-monospace,Consolas,monospace;
+  --font-display:'Unbounded',var(--font-ui);
+  --ease-out-strong:cubic-bezier(0.16,1,0.3,1);
+  --ease-out-soft:cubic-bezier(0.25,1,0.5,1);
+  --ease-in-exit:cubic-bezier(0.55,0,1,0.45);
+  --safe-b:env(safe-area-inset-bottom,0px);
+  --dock-h:120px; /* высота закреплённой зоны главной кнопки */
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{background:var(--bg)}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);font-size:17px;font-weight:500;line-height:1.4;
+  -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent;overscroll-behavior-y:contain;min-height:100vh}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;touch-action:manipulation}
+button:disabled{cursor:default}
+.mono{font-family:var(--font-num);font-variant-numeric:tabular-nums}
+.hidden{display:none!important}
+
+/* ── Каркас ── */
+.wrap{max-width:520px;margin:0 auto;padding:12px 16px calc(var(--dock-h) + var(--safe-b) + 20px)}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:56px;padding:4px 0 8px}
+.top__title{font-family:var(--font-display);font-size:18px;font-weight:500;letter-spacing:.02em}
+.top__name{font-size:14px;color:var(--muted);margin-top:2px}
+.gos{font-family:var(--font-num);font-size:20px;font-weight:600;letter-spacing:.06em;font-variant-numeric:tabular-nums;
+  background:var(--bg3);border:2px solid var(--border);border-radius:8px;padding:8px 12px;white-space:nowrap}
+
+/* ── Полоса связи (единственный сдвигающий элемент, только офлайн/очередь) ── */
+.netbar{display:flex;align-items:center;gap:10px;background:var(--bg4);border-radius:8px;padding:10px 14px;margin-bottom:12px;
+  font-size:15px;color:var(--amber);font-weight:600}
+.netbar svg{flex:none;width:20px;height:20px;stroke:var(--amber)}
+.netbar .mono{color:var(--text)}
+
+/* ── Карточка (канон d5: капс-лейбл + бейдж → hero → строки-лидеры) ── */
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px;
+  margin-bottom:12px;transition:border-color .15s ease}
+.card--attention{border-color:rgba(226,75,74,.45)}
+.head{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:24px}
+.label{font-size:13px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.badge{font-family:var(--font-num);font-size:13px;font-weight:600;line-height:1;padding:6px 9px;border-radius:6px;white-space:nowrap}
+.badge--good{color:#2fbe93;background:rgba(29,158,117,.13)}
+.badge--warn{color:var(--amber);background:rgba(239,159,39,.13)}
+.badge--neutral{color:var(--muted);background:var(--bg4)}
+.hero{font-size:24px;font-weight:600;line-height:1.2;letter-spacing:-.01em}
+.hero--muted{color:var(--muted);font-size:20px;font-weight:500}
+.rows{display:flex;flex-direction:column}
+.row{display:grid;grid-template-columns:max-content 1fr max-content;align-items:baseline;column-gap:10px;min-height:34px}
+.row__label{color:var(--muted);white-space:nowrap}
+.row__leader{border-bottom:2px dotted rgba(255,255,255,.12);transform:translateY(-6px)}
+.row__value{font-family:var(--font-num);font-weight:600;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;max-width:60vw;overflow:hidden;text-overflow:ellipsis}
+.row__value--text{font-family:var(--font-ui);font-weight:600}
+/* адреса - на всю ширину с переносом, лидер не рисуем: «Подольск, Большая Сер…» водителю бесполезен */
+.row--addr{grid-template-columns:1fr;row-gap:2px;min-height:0;padding:6px 0 8px}
+.row--addr .row__label{font-size:13px;letter-spacing:.06em;text-transform:uppercase}
+.row--addr .row__value{font-family:var(--font-ui);font-weight:600;text-align:left;white-space:normal;max-width:none;line-height:1.3;font-size:18px}
+
+/* ── Степпер стадий ── */
+.steps{display:flex;flex-direction:column}
+.step{display:grid;grid-template-columns:28px 1fr max-content;align-items:center;column-gap:12px;min-height:48px;position:relative;padding:0 6px;border-radius:8px}
+.step--current{background:var(--bg3)}
+.step__dot{width:22px;height:22px;border-radius:50%;border:2px solid var(--border-strong);display:flex;align-items:center;justify-content:center;
+  background:var(--bg2);position:relative;z-index:1;transition:background-color .2s var(--ease-out-soft),border-color .2s var(--ease-out-soft),transform .25s var(--ease-out-strong)}
+.step__dot svg{width:12px;height:12px;stroke:#0f0f13;stroke-width:3;opacity:0;transition:opacity .2s ease}
+.step--done .step__dot{background:var(--green);border-color:var(--green)}
+.step--done .step__dot svg{opacity:1}
+.step--current .step__dot{border-color:var(--green)}
+.step--done.step--just .step__dot{transform:scale(1.18)}
+.step::before{content:"";position:absolute;left:16px;top:0;bottom:0;width:2px;background:var(--border)}
+.step:first-child::before{top:50%}
+.step:last-child::before{bottom:50%}
+.step__name{font-size:17px;font-weight:600}
+.step--future .step__name{color:var(--muted);font-weight:500}
+.step__time{font-family:var(--font-num);font-size:16px;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums}
+.step__photo{grid-column:2/4;display:flex;align-items:center;justify-content:space-between;gap:10px;background:rgba(239,159,39,.10);border-radius:8px;padding:8px 10px;margin:-2px 0 8px;font-size:15px;color:var(--amber);font-weight:600}
+.step__photo .mono{color:var(--text)}
+.step__photo--ok{background:rgba(29,158,117,.10);color:#2fbe93}
+.btn-mini{min-height:44px;padding:0 14px;border-radius:8px;background:var(--bg4);border:2px solid var(--border-strong);font-size:15px;font-weight:600;color:var(--text);display:inline-flex;align-items:center;gap:8px}
+.btn-mini svg{width:18px;height:18px;stroke:currentColor}
+.btn-mini:active{transform:scale(.97);background:var(--bg3)}
+
+/* ── Кнопка «Проблема» - единственная красная рамка на экране ── */
+.problem{width:100%;min-height:60px;border-radius:8px;background:var(--bg3);border:2px solid var(--red);font-size:18px;font-weight:600;
+  display:flex;align-items:center;justify-content:center;gap:10px;margin:28px 0 12px;transition:transform .1s ease,background-color .1s ease}
+.problem svg{width:22px;height:22px;stroke:var(--red)}
+.problem:active{transform:scale(.98);background:var(--bg4)}
+
+/* ── История (свёрнута по умолчанию) ── */
+.hist{margin-bottom:12px}
+.hist__toggle{width:100%;display:flex;align-items:center;justify-content:space-between;min-height:56px;padding:0 16px;
+  background:var(--bg2);border:1px solid var(--border);border-radius:12px}
+.hist__toggle svg{width:20px;height:20px;stroke:var(--muted);transition:transform .2s var(--ease-out-soft)}
+.hist--open .hist__toggle svg{transform:rotate(180deg)}
+.hist__toggle .badge{margin-left:auto;margin-right:10px}
+.hist__list{display:none;flex-direction:column;padding:6px 16px 10px;background:var(--bg2);border:1px solid var(--border);border-top:0;border-radius:0 0 12px 12px;margin-top:-6px}
+.hist--open .hist__toggle{border-radius:12px 12px 0 0}
+.hist--open .hist__list{display:flex}
+.hist__row{display:grid;grid-template-columns:max-content 1fr max-content;column-gap:12px;align-items:center;min-height:44px;border-bottom:1px solid var(--border)}
+.hist__row:last-child{border-bottom:0}
+.hist__date{font-family:var(--font-num);font-size:15px;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums}
+.hist__cust{font-size:16px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ── Настройки (звук, уведомления, установка) - под всем, не в углах ── */
+.tools{display:flex;flex-direction:column;gap:10px;margin-top:6px}
+.tool{width:100%;min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 16px;
+  background:var(--bg2);border:1px solid var(--border);border-radius:12px;font-size:16px;font-weight:600}
+.tool svg{width:22px;height:22px;stroke:var(--muted);flex:none}
+.tool__state{font-family:var(--font-num);font-size:14px;color:var(--muted);margin-left:auto}
+.tool__state--on{color:#2fbe93}
+.tool:active{background:var(--bg3)}
+.foot{margin-top:18px;text-align:center;font-family:var(--font-num);font-size:12px;color:var(--muted)}
+
+/* ── Док главной кнопки (закреплён снизу, под большим пальцем) ── */
+.dock{position:fixed;left:0;right:0;bottom:0;padding:12px 16px calc(var(--safe-b) + 16px);
+  background:linear-gradient(to top,var(--bg) 70%,rgba(15,15,19,0));pointer-events:none}
+.dock > *{pointer-events:auto}
+.dock__inner{max-width:520px;margin:0 auto}
+.main{position:relative;width:100%;min-height:80px;border-radius:8px;background:var(--green);color:#0f0f13;overflow:hidden;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;user-select:none;-webkit-user-select:none;
+  transition:transform .1s ease,background-color .15s ease}
+.main:active{transform:scale(.985)}
+.main__hint{font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;opacity:.75}
+.main__text{font-size:22px;font-weight:700;letter-spacing:-.01em;display:flex;align-items:center;gap:10px}
+.main__text svg{width:24px;height:24px;stroke:#0f0f13;stroke-width:2.2}
+.main__fill{position:absolute;inset:0;background:rgba(15,15,19,.22);transform:scaleX(0);transform-origin:left;pointer-events:none}
+.main.holding .main__fill{transform:scaleX(1);transition:transform 600ms linear}
+.main.flash{background:#e8e6df}
+.main.sent{background:var(--bg3);color:var(--muted)}
+.main:disabled{opacity:.6}
+.main--done{background:var(--bg3);color:var(--text)}
+.main--done .main__hint{color:#2fbe93;opacity:1}
+
+/* ── Лист «Проблема» (снизу, bg4) ── */
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:70;opacity:0;pointer-events:none;transition:opacity .2s ease}
+.scrim.on{opacity:1;pointer-events:auto}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:71;background:var(--bg4);border-radius:12px 12px 0 0;padding:14px 16px calc(var(--safe-b) + 16px);
+  transform:translateY(100%);transition:transform .32s cubic-bezier(.32,.72,0,1);max-height:88vh;overflow:auto}
+.sheet.on{transform:translateY(0)}
+.sheet__grip{width:44px;height:4px;border-radius:2px;background:var(--border-strong);margin:0 auto 12px}
+.sheet__title{font-size:20px;font-weight:700;margin-bottom:12px}
+.chips{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px}
+.chip{min-height:48px;padding:0 16px;border-radius:8px;background:var(--bg3);border:2px solid var(--border-strong);font-size:16px;font-weight:600}
+.chip[aria-pressed="true"]{border-color:var(--red);background:rgba(226,75,74,.13)}
+.sheet textarea{width:100%;min-height:88px;background:var(--bg3);border:2px solid var(--border-strong);border-radius:8px;padding:12px;font:inherit;color:var(--text);resize:none;margin-bottom:12px}
+.sheet textarea:focus{outline:0;border-color:var(--text)}
+.sheet__actions{display:flex;flex-direction:column;gap:10px}
+.btn-red{width:100%;min-height:64px;border-radius:8px;background:var(--red);color:#0f0f13;font-size:20px;font-weight:700}
+.btn-red:disabled{opacity:.45}
+.btn-red:active{background:#ec6e6d}
+.btn-ghost{width:100%;min-height:56px;border-radius:8px;background:var(--bg3);border:2px solid var(--border-strong);font-size:17px;font-weight:600}
+
+/* ── Полноэкранные состояния (первый вход / отозван / загрузка) ── */
+.full{min-height:calc(100vh - 40px);display:flex;flex-direction:column;justify-content:center;gap:16px;padding:0 4px}
+.full h1{font-family:var(--font-display);font-size:24px;font-weight:500;line-height:1.25}
+.full p{font-size:18px;color:var(--text);line-height:1.5}
+.full p.muted{color:var(--muted);font-size:16px}
+.btn-big{width:100%;min-height:72px;border-radius:8px;background:var(--green);color:#0f0f13;font-size:20px;font-weight:700}
+.btn-big:active{transform:scale(.985)}
+.install-steps{display:flex;flex-direction:column;gap:8px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px 16px;font-size:16px}
+.install-steps b{font-family:var(--font-num);color:var(--muted);margin-right:8px}
+
+/* ── Тост (единый, снизу над доком) ── */
+.toast{position:fixed;left:16px;right:16px;bottom:calc(var(--dock-h) + var(--safe-b) + 8px);z-index:60;background:var(--bg4);border:1px solid var(--border-strong);
+  border-radius:8px;padding:12px 14px;font-size:16px;font-weight:600;transform:translateY(12px);opacity:0;pointer-events:none;transition:transform .22s var(--ease-out-strong),opacity .22s ease;text-align:center}
+.toast.on{transform:translateY(0);opacity:1}
+.toast--bad{border-color:var(--red)}
+
+@media(prefers-reduced-motion:reduce){
+  *{transition:none!important;animation:none!important}
+  .main.holding .main__fill{transform:scaleX(1)}
+}
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <!-- Состояние: загрузка / первый вход / отозван -->
+  <section class="full hidden" id="s-loading"><p class="muted">Загружаю…</p></section>
+
+  <section class="full hidden" id="s-welcome">
+    <h1>Здравствуйте, <span id="w-name">водитель</span>.</h1>
+    <p>Это ваш экран рейсов. Здесь будет виден рейс на сегодня и кнопка, что нажать дальше.</p>
+    <p class="muted">Эта ссылка теперь всегда ваша - можно просто открывать её снова из этого же
+      сообщения, ничего заново вводить не нужно. Хотите значок на рабочем столе, чтобы не
+      искать сообщение - нажмите ниже; если телефон предложит только «ярлык» вместо
+      «приложения» - это тоже нормально, работает точно так же.</p>
+    <button class="btn-big" id="w-install">Добавить значок на экран</button>
+    <div class="install-steps hidden" id="w-steps"></div>
+    <button class="btn-ghost" id="w-skip">Понятно, дальше</button>
+  </section>
+
+  <section class="full hidden" id="s-revoked">
+    <h1 id="rv-title">Ссылка больше не работает.</h1>
+    <p id="rv-text">Спросите новую у логиста - он выдаст её за минуту.</p>
+  </section>
+
+  <!-- Основной экран -->
+  <div class="hidden" id="s-main">
+    <header class="top">
+      <div>
+        <div class="top__title">Рейс</div>
+        <div class="top__name" id="m-name"></div>
+      </div>
+      <div class="gos" id="m-gos"></div>
+    </header>
+
+    <div class="netbar hidden" id="m-net">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l22 22M16.7 11.6A10.9 10.9 0 0 1 19 13M5 13a10.9 10.9 0 0 1 5.2-2.5M10.7 5.1A16 16 0 0 1 22.6 9M1.4 9a15.9 15.9 0 0 1 4.7-2.9M8.5 16.4a6 6 0 0 1 7 0M12 20h.01"/></svg>
+      <span id="m-net-text">Нет связи</span>
+    </div>
+
+    <section class="card" id="m-trip">
+      <div class="head"><div class="label">Текущий рейс</div><span class="badge badge--neutral" id="m-badge">Не начат</span></div>
+      <div class="hero" id="m-customer"></div>
+      <div class="rows" id="m-rows"></div>
+    </section>
+
+    <section class="card hidden" id="m-notrip">
+      <div class="head"><div class="label">Рейс</div></div>
+      <div class="hero hero--muted">Рейсов пока нет.<br>Как логист назначит - появится здесь.</div>
+    </section>
+
+    <section class="card" id="m-stepcard">
+      <div class="head"><div class="label">Стадии</div><span class="badge badge--neutral mono" id="m-stepcount">0 / 5</span></div>
+      <div class="steps" id="m-steps"></div>
+    </section>
+
+    <button class="problem" id="m-problem">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01"/></svg>
+      Проблема
+    </button>
+
+    <div class="hist" id="m-hist">
+      <button class="hist__toggle" id="m-hist-toggle">
+        <span class="label">Последние 7 дней</span>
+        <span class="badge badge--neutral mono" id="m-hist-count">0</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <div class="hist__list" id="m-hist-list"></div>
+    </div>
+
+    <div class="tools">
+      <button class="tool hidden" id="t-push">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+        Уведомления о рейсах <span class="tool__state" id="t-push-state">выкл</span>
+      </button>
+      <button class="tool" id="t-sound">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg>
+        Звук <span class="tool__state" id="t-sound-state">вкл</span>
+      </button>
+      <button class="tool hidden" id="t-install">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+        Добавить на экран
+      </button>
+    </div>
+    <div class="foot" id="m-foot"></div>
+  </div>
+</div>
+
+<div class="dock hidden" id="dock"><div class="dock__inner">
+  <button class="main" id="main-btn">
+    <span class="main__fill"></span>
+    <span class="main__hint" id="main-hint">Удерживайте</span>
+    <span class="main__text" id="main-text">Выехал</span>
+  </button>
+</div></div>
+
+<div class="scrim" id="scrim"></div>
+<div class="sheet" id="sheet">
+  <div class="sheet__grip"></div>
+  <div class="sheet__title">Что случилось?</div>
+  <div class="chips" id="chips"></div>
+  <textarea id="p-text" placeholder="Коротко, своими словами" autocomplete="off"></textarea>
+  <div class="sheet__actions">
+    <button class="btn-ghost" id="p-photo">Сфотографировать</button>
+    <button class="btn-red" id="p-send" disabled>Отправить логисту</button>
+    <button class="btn-ghost" id="p-cancel">Закрыть</button>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<input type="file" accept="image/*" capture="environment" id="cam" class="hidden">
+
+<script>
+(function(){
+'use strict';
+var VERSION = '2026-09-03.1';
+var API = 'https://api.yardhub.ru/api';
+var EPOCH0 = new Date('2026-08-01T00:00:00+03:00').getTime(); // контракт с Планировкой, не менять
+var STAGES = [
+  { key:'enroute',   name:'Выехал',      btn:'Выехал',      photo:false },
+  { key:'at_load',   name:'На погрузке', btn:'На погрузке', photo:false },
+  { key:'loaded',    name:'Загрузился',  btn:'Загрузился',  photo:true, photoHint:'груз на трале сбоку и с госномером' },
+  { key:'at_unload', name:'На выгрузке', btn:'На выгрузке', photo:false },
+  { key:'unloaded',  name:'Выгрузился',  btn:'Выгрузился',  photo:true, photoHint:'груз и акт с подписью получателя' }
+];
+var PROBLEM_CHIPS = ['Нет крана','Груз не готов','Не пускают','Ждём документы','Поломка','ДТП','Другое'];
+var qs = new URLSearchParams(location.search);
+var DEMO = qs.get('demo') === '1';
+var $ = function(id){ return document.getElementById(id); };
+
+/* ── состояние ── */
+var S = { token: localStorage.getItem('driver_token') || '', person:null, gos:null, trip:null, trips:[], events:{}, photosByStage:{}, online:navigator.onLine, queueCount:0, soundOn: localStorage.getItem('driver_sound') !== 'off', pushOn:false, pendingCamera:null, lastStageAt:0, deferredInstall:null };
+
+/* ── звук: один короткий подтверждающий тон + «покашливание» на ошибку, выключатель ниже ── */
+var actx = null;
+function blip(f1,f2,dur,vol,type){
+  if(!S.soundOn) return;
+  try{
+    if(!actx) actx = new (window.AudioContext||window.webkitAudioContext)();
+    var o=actx.createOscillator(), g=actx.createGain(), t=actx.currentTime;
+    o.type=type||'sine'; o.frequency.setValueAtTime(f1,t); o.frequency.exponentialRampToValueAtTime(f2,t+dur);
+    g.gain.setValueAtTime(vol,t); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t+dur+0.02);
+  }catch(e){}
+}
+var snd = { confirm:function(){ blip(880,1320,.08,.06,'sine'); }, attention:function(){ blip(420,300,.12,.06,'triangle'); }, tap:function(){ blip(392,440,.05,.022,'sine'); } };
+function vib(p){ try{ if(navigator.vibrate) navigator.vibrate(p); }catch(e){} }
+
+/* ── тост ── */
+var toastT=null;
+function toast(msg,bad){ var t=$('toast'); t.textContent=msg; t.className='toast on'+(bad?' toast--bad':''); clearTimeout(toastT); toastT=setTimeout(function(){ t.className='toast'; },2600); }
+
+/* ── API ── */
+function api(path, opts){
+  opts = opts||{};
+  if(DEMO) return demoApi(path, opts);
+  var h = opts.headers||{}; if(S.token) h['X-Driver-Token']=S.token;
+  return fetch(API+path, { method:opts.method||'GET', headers:h, body:opts.body }).then(function(r){
+    return r.json().catch(function(){ return {}; }).then(function(j){ j.__status=r.status; return j; });
+  });
+}
+function q(o){ return Object.keys(o).filter(function(k){ return o[k]!==null && o[k]!==undefined && o[k]!==''; }).map(function(k){ return encodeURIComponent(k)+'='+encodeURIComponent(o[k]); }).join('&'); }
+
+/* ── офлайн-очередь (IndexedDB): события и фото уходят по порядку, когда есть сеть ── */
+var db=null;
+function idb(){ return new Promise(function(res,rej){ if(db) return res(db); var r=indexedDB.open('driver-queue',1); r.onupgradeneeded=function(){ r.result.createObjectStore('q',{keyPath:'id'}); }; r.onsuccess=function(){ db=r.result; res(db); }; r.onerror=function(){ rej(r.error); }; }); }
+function qAll(){ return idb().then(function(d){ return new Promise(function(res){ var out=[]; var c=d.transaction('q').objectStore('q').openCursor(); c.onsuccess=function(){ var cur=c.result; if(cur){ out.push(cur.value); cur.continue(); } else res(out.sort(function(a,b){ return a.id-b.id; })); }; }); }); }
+function qPut(item){ return idb().then(function(d){ return new Promise(function(res){ var t=d.transaction('q','readwrite'); t.objectStore('q').put(item); t.oncomplete=res; }); }); }
+function qDel(id){ return idb().then(function(d){ return new Promise(function(res){ var t=d.transaction('q','readwrite'); t.objectStore('q').delete(id); t.oncomplete=res; }); }); }
+function refreshQueueCount(){ if(DEMO && qs.get('demo_offline')==='1'){ renderNet(); return Promise.resolve(); } return qAll().then(function(items){ S.queueCount=items.length; renderNet(); }); }
+var flushing=false;
+function flush(){
+  if(flushing || !navigator.onLine) return Promise.resolve();
+  flushing=true;
+  return qAll().then(function(items){
+    var chain=Promise.resolve();
+    items.forEach(function(it){
+      chain=chain.then(function(){
+        if(it.type==='event'){
+          return api('/driver/trip_event?'+q({seg_id:it.seg_id,event:it.event,note:it.note})).then(function(j){
+            if(j.__status===200){ S.events[it.event]=S.events[it.event]||{}; S.events[it.event].event_id=j.event_id; it.done=true; return qAll().then(function(all){ return Promise.all(all.filter(function(p){ return p.type==='photo' && p.eventTemp===it.id; }).map(function(p){ p.event_id=j.event_id; return qPut(p); })); }).then(function(){ return qDel(it.id); }); }
+            if(j.__status===409 || j.__status===403 || j.__status===404){ toast('Стадия не принята: '+(j.error||''),true); snd.attention(); return qDel(it.id).then(loadState); }
+            throw new Error('net');
+          });
+        }
+        if(it.type==='photo'){
+          var fd=new FormData(); fd.append('file', it.blob, 'photo.jpg');
+          return api('/driver/trip_photo?'+q({seg_id:it.seg_id,event_id:it.event_id||''}),{method:'POST',body:fd}).then(function(j){
+            if(j.__status===200){ markPhotoSent(it); return qDel(it.id); }
+            if(j.__status===403||j.__status===400){ return qDel(it.id); }
+            throw new Error('net');
+          });
+        }
+        if(it.type==='problem'){
+          return api('/driver/trip_event?'+q({seg_id:it.seg_id,event:'problem',note:it.note})).then(function(j){
+            if(j.__status===200){ return qAll().then(function(all){ return Promise.all(all.filter(function(p){ return p.type==='photo' && p.eventTemp===it.id; }).map(function(p){ p.event_id=j.event_id; return qPut(p); })); }).then(function(){ return qDel(it.id); }); }
+            if(j.__status>=400 && j.__status<500){ return qDel(it.id); }
+            throw new Error('net');
+          });
+        }
+        return qDel(it.id);
+      });
+    });
+    return chain;
+  }).catch(function(){ /* сеть - попробуем позже */ }).then(function(){ flushing=false; return refreshQueueCount(); });
+}
+function markPhotoSent(it){ var s=S.photosByStage[it.stage]; if(s){ s.sent=(s.sent||0)+1; renderSteps(); } }
+window.addEventListener('online', function(){ S.online=true; renderNet(); flush(); });
+window.addEventListener('offline', function(){ S.online=false; renderNet(); });
+document.addEventListener('visibilitychange', function(){ if(!document.hidden){ flush(); if(S.token) loadState(true); } });
+setInterval(function(){ if(S.token && !document.hidden) flush(); }, 30000);
+
+/* ── загрузка состояния ── */
+function loadState(silent){
+  return Promise.all([api('/driver/me'), api('/driver/trips?days=7')]).then(function(r){
+    var me=r[0], tr=r[1];
+    if(me.__status===401){ show('s-revoked'); return; }
+    if(me.__status!==200){ if(!silent){ toast('Сервер не отвечает, показываю что есть'); } return; }
+    S.person=me.person; S.gos=me.vehicle_gos; S.trip=me.trip; S.trips=(tr.trips||[]);
+    if(S.trip && S.trip.id!==S.tripId){ S.tripId=S.trip.id; S.photosByStage={}; S.events={}; }
+    // Сервер - источник правды по временам стадий; локальные (ещё в очереди) не трогаем.
+    (me.events||[]).forEach(function(e){ if(e.event==='problem') return; S.events[e.event]={at:fmtT(e.at), event_id:e.id}; });
+    renderAll();
+  }).catch(function(){ if(!silent) toast('Нет связи - экран может быть не свежим'); renderNet(); });
+}
+
+/* ── рендер ── */
+function show(id){ ['s-loading','s-welcome','s-revoked','s-main'].forEach(function(s){ $(s).classList.toggle('hidden', s!==id); }); $('dock').classList.toggle('hidden', id!=='s-main'); }
+function fmtDT(h){ var d=new Date(EPOCH0+Number(h)*3600000); var p=function(n){ return (n<10?'0':'')+n; }; return p(d.getDate())+'.'+p(d.getMonth()+1)+', '+p(d.getHours())+':'+p(d.getMinutes()); }
+function fmtD(h){ var d=new Date(EPOCH0+Number(h)*3600000); var p=function(n){ return (n<10?'0':'')+n; }; return p(d.getDate())+'.'+p(d.getMonth()+1); }
+function fmtLen(h){ h=Number(h); if(h>=48) return Math.round(h/24)+' дн'; if(h>=24) return '1 сут'; return Math.round(h)+' ч'; }
+function fmtT(iso){ if(!iso) return ''; var d=new Date(iso.replace(' ','T')); var p=function(n){ return (n<10?'0':'')+n; }; return p(d.getHours())+':'+p(d.getMinutes()); }
+function stageIdx(key){ for(var i=0;i<STAGES.length;i++) if(STAGES[i].key===key) return i; return -1; }
+function stageName(key){ var i=stageIdx(key); return i<0?'Не начат':STAGES[i].name; }
+function renderNet(){
+  var n=$('m-net'); var off=!S.online; var qc=S.queueCount;
+  if(!off && !qc){ n.classList.add('hidden'); return; }
+  n.classList.remove('hidden');
+  $('m-net-text').innerHTML = off ? 'Нет связи · не отправлено: <span class="mono">'+qc+'</span>. Отправлю сам, как появится' : 'Отправляю: <span class="mono">'+qc+'</span>';
+}
+function renderAll(){
+  show('s-main');
+  $('m-name').textContent = S.person ? S.person.full_name.split(' ').slice(0,2).join(' ') : '';
+  $('m-gos').textContent = S.gos || '—';
+  $('m-gos').classList.toggle('hidden', !S.gos);
+  var t=S.trip;
+  $('m-trip').classList.toggle('hidden', !t); $('m-stepcard').classList.toggle('hidden', !t); $('m-problem').classList.toggle('hidden', !t);
+  $('m-notrip').classList.toggle('hidden', !!t);
+  if(t){
+    $('m-customer').textContent = t.customer || 'Заказчик не указан';
+    renderBadge();
+    var rows=[];
+    if(t.route_from) rows.push(['Откуда', t.route_from, true]);
+    if(t.route_to) rows.push(['Куда', t.route_to, true]);
+    if(!t.route_from && !t.route_to) rows.push(['Маршрут', 'уточнить у логиста', true, true]);
+    rows.push(['Подача', fmtDT(t.start_hour)]);
+    rows.push(['Работа', fmtLen(t.length_hours)]);
+    if(t.order_number) rows.push(['Заказ 1С', t.order_number]);
+    $('m-rows').innerHTML = rows.map(function(r){
+      if(r[2]) return '<div class="row row--addr"><span class="row__label">'+r[0]+'</span><span class="row__value"'+(r[3]?' style="color:var(--muted)"':'')+'>'+esc(r[1])+'</span></div>';
+      return '<div class="row"><span class="row__label">'+r[0]+'</span><span class="row__leader"></span><span class="row__value">'+esc(r[1])+'</span></div>';
+    }).join('');
+    renderSteps();
+  }
+  renderMain(); renderHist(); renderNet(); renderTools();
+  $('m-foot').textContent = 'TS HUB · '+VERSION+(DEMO?' · демо':'');
+}
+function renderBadge(){
+  var t=S.trip; if(!t) return; var idx=stageIdx(t.stage);
+  var b=$('m-badge'); b.textContent = idx<0?'Не начат':(idx===STAGES.length-1?'Рейс закрыт':stageName(t.stage)); b.className='badge '+(idx<0?'badge--neutral':'badge--good');
+}
+function renderSteps(){
+  var t=S.trip; if(!t) return; var cur=stageIdx(t.stage); renderBadge();
+  $('m-stepcount').textContent=(cur+1)+' / '+STAGES.length;
+  $('m-steps').innerHTML = STAGES.map(function(st,i){
+    var cls = i<=cur ? 'step step--done' : (i===cur+1 ? 'step step--current' : 'step step--future');
+    if(i===cur && S.justKey===st.key) cls+=' step--just';
+    var time = i<=cur ? (S.events[st.key]&&S.events[st.key].at ? S.events[st.key].at : (i===cur && t.stage_updated_at ? fmtT(t.stage_updated_at) : '')) : '';
+    var photo='';
+    if(st.photo && i<=cur){
+      var ps=S.photosByStage[st.key]||{taken:0,sent:0};
+      if(ps.taken===0) photo='<div class="step__photo">Нет фото <button class="btn-mini" data-photo="'+st.key+'">'+camSvg()+'Снять</button></div>';
+      else photo='<div class="step__photo'+(ps.sent>=ps.taken?' step__photo--ok':'')+'">'+(ps.sent>=ps.taken?'Фото отправлено: ':'Фото ждёт связи: ')+'<span class="mono">'+ps.taken+'</span><button class="btn-mini" data-photo="'+st.key+'">'+camSvg()+'Ещё</button></div>';
+    }
+    return '<div class="'+cls+'"><span class="step__dot"><svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span><span class="step__name">'+st.name+'</span><span class="step__time">'+time+'</span>'+photo+'</div>';
+  }).join('');
+}
+function camSvg(){ return '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>'; }
+function renderMain(){
+  var t=S.trip, btn=$('main-btn'); if(!t){ $('dock').classList.add('hidden'); return; }
+  $('dock').classList.remove('hidden');
+  var cur=stageIdx(t.stage), next=STAGES[cur+1];
+  btn.className='main'; btn.disabled=false;
+  if(!next){ btn.className='main main--done'; btn.disabled=true; $('main-hint').textContent='Рейс закрыт · логист видит'; $('main-text').textContent='Спасибо'; return; }
+  $('main-hint').textContent='Удерживайте';
+  $('main-text').innerHTML = esc(next.btn)+(next.photo?camSvg():'');
+}
+function renderHist(){
+  var list=S.trips.filter(function(x){ return !S.trip || x.id!==S.trip.id; });
+  $('m-hist-count').textContent=list.length;
+  $('m-hist-list').innerHTML = list.length ? list.map(function(x){ return '<div class="hist__row"><span class="hist__date">'+fmtD(x.start_hour)+'</span><span class="hist__cust">'+esc(x.customer||'—')+'</span><span class="badge '+(x.stage==='unloaded'?'badge--good':'badge--neutral')+'">'+(x.stage==='unloaded'?'закрыт':stageName(x.stage))+'</span></div>'; }).join('') : '<div class="hist__row"><span class="hist__cust" style="color:var(--muted)">Пусто</span></div>';
+}
+function renderTools(){
+  $('t-sound-state').textContent=S.soundOn?'вкл':'выкл'; $('t-sound-state').className='tool__state'+(S.soundOn?' tool__state--on':'');
+  var canPush = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  $('t-push').classList.toggle('hidden', !canPush || DEMO);
+  $('t-push-state').textContent=S.pushOn?'вкл':'выкл'; $('t-push-state').className='tool__state'+(S.pushOn?' tool__state--on':'');
+  $('t-install').classList.toggle('hidden', !S.deferredInstall);
+}
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+
+/* ── главная кнопка: удержание 600 мс, смещение >12px = отмена, блокировка 2 с после ── */
+(function(){
+  var btn=$('main-btn'), holdT=null, sx=0, sy=0, held=false;
+  function start(e){
+    if(btn.disabled || Date.now()-S.lastStageAt<2000) return;
+    var p=e.touches?e.touches[0]:e; sx=p.clientX; sy=p.clientY; held=false;
+    btn.classList.add('holding'); vib([30]);
+    holdT=setTimeout(function(){ held=true; fire(); },600);
+  }
+  function move(e){ if(!holdT) return; var p=e.touches?e.touches[0]:e; if(Math.abs(p.clientX-sx)>12||Math.abs(p.clientY-sy)>12) cancel(); }
+  function cancel(){ clearTimeout(holdT); holdT=null; btn.classList.remove('holding'); }
+  function fire(){
+    clearTimeout(holdT); holdT=null; btn.classList.remove('holding');
+    var t=S.trip; if(!t) return; var cur=stageIdx(t.stage), next=STAGES[cur+1]; if(!next) return;
+    S.lastStageAt=Date.now(); vib([60,40,60]); snd.confirm();
+    btn.classList.add('flash'); setTimeout(function(){ btn.classList.remove('flash'); },150);
+    // оптимистично: стадия уже отмечена, событие - в очередь, сервер догонит
+    var now=new Date(); var p=function(n){ return (n<10?'0':'')+n; };
+    t.stage=next.key; t.stage_updated_at=null; S.events[next.key]={at:p(now.getHours())+':'+p(now.getMinutes())}; S.justKey=next.key;
+    var item={id:Date.now(), type:'event', seg_id:t.id, event:next.key, note:null, stage:next.key};
+    qPut(item).then(function(){ refreshQueueCount(); return flush(); });
+    renderSteps(); renderMain();
+    if(next.photo){ S.pendingCamera={stage:next.key, eventTemp:item.id}; setTimeout(openCamera, 350); toast('Сфотографируйте: '+next.photoHint); }
+  }
+  btn.addEventListener('touchstart', start, {passive:true}); btn.addEventListener('touchmove', move, {passive:true});
+  btn.addEventListener('touchend', cancel); btn.addEventListener('touchcancel', cancel);
+  btn.addEventListener('mousedown', start); btn.addEventListener('mousemove', move); btn.addEventListener('mouseup', cancel); btn.addEventListener('mouseleave', cancel);
+})();
+
+/* ── фото: камера → сжатие до 1600px JPEG → очередь ── */
+function openCamera(){ $('cam').value=''; $('cam').click(); }
+$('cam').addEventListener('change', function(){
+  var f=$('cam').files[0]; var pc=S.pendingCamera; S.pendingCamera=null; if(!f||!pc) return;
+  compress(f).then(function(blob){
+    var item={id:Date.now(), type:'photo', seg_id:S.trip?S.trip.id:'', stage:pc.stage, blob:blob, eventTemp:pc.eventTemp||null, event_id:pc.event_id||null};
+    var ps=S.photosByStage[pc.stage]=S.photosByStage[pc.stage]||{taken:0,sent:0}; ps.taken++;
+    renderSteps(); snd.tap(); vib([30]);
+    return qPut(item).then(function(){ refreshQueueCount(); return flush(); });
+  });
+});
+function compress(file){
+  return new Promise(function(res){
+    var img=new Image(), url=URL.createObjectURL(file);
+    img.onload=function(){
+      var max=1600, w=img.width, h=img.height, k=Math.min(1, max/Math.max(w,h));
+      var c=document.createElement('canvas'); c.width=Math.round(w*k); c.height=Math.round(h*k);
+      c.getContext('2d').drawImage(img,0,0,c.width,c.height); URL.revokeObjectURL(url);
+      c.toBlob(function(b){ res(b||file); },'image/jpeg',0.8);
+    };
+    img.onerror=function(){ res(file); }; img.src=url;
+  });
+}
+document.addEventListener('click', function(e){
+  var b=e.target.closest('[data-photo]'); if(!b) return;
+  var key=b.getAttribute('data-photo'); var ev=S.events[key]||{};
+  S.pendingCamera={stage:key, event_id:ev.event_id||null, eventTemp:ev.event_id?null:null}; openCamera();
+});
+
+/* ── «Проблема» ── */
+var pChip=null, pPhotoTemp=null;
+$('chips').innerHTML=PROBLEM_CHIPS.map(function(c){ return '<button class="chip" aria-pressed="false" data-chip="'+esc(c)+'">'+esc(c)+'</button>'; }).join('');
+function sheet(on){ $('scrim').classList.toggle('on',on); $('sheet').classList.toggle('on',on); if(!on){ pChip=null; $('p-text').value=''; document.querySelectorAll('.chip').forEach(function(c){ c.setAttribute('aria-pressed','false'); }); $('p-send').disabled=true; } }
+$('m-problem').addEventListener('click', function(){ snd.tap(); sheet(true); });
+$('scrim').addEventListener('click', function(){ sheet(false); }); $('p-cancel').addEventListener('click', function(){ sheet(false); });
+$('chips').addEventListener('click', function(e){ var c=e.target.closest('.chip'); if(!c) return; document.querySelectorAll('.chip').forEach(function(x){ x.setAttribute('aria-pressed', x===c?'true':'false'); }); pChip=c.getAttribute('data-chip'); $('p-send').disabled=false; vib([20]); });
+$('p-text').addEventListener('input', function(){ $('p-send').disabled=!(pChip||$('p-text').value.trim()); });
+$('p-photo').addEventListener('click', function(){ pPhotoTemp=pPhotoTemp||('p'+Date.now()); S.pendingCamera={stage:'problem', eventTemp:pPhotoTemp}; openCamera(); });
+$('p-send').addEventListener('click', function(){
+  var note=[pChip,$('p-text').value.trim()].filter(Boolean).join(': ').slice(0,500);
+  var item={id:Date.now(), type:'problem', seg_id:S.trip?S.trip.id:'', note:note};
+  if(pPhotoTemp){ item.id=isNaN(Number(pPhotoTemp.slice(1)))?item.id:Number(pPhotoTemp.slice(1)); }
+  qPut(item).then(function(){ return qAll(); }).then(function(all){ return Promise.all(all.filter(function(p){ return p.type==='photo'&&p.eventTemp===pPhotoTemp; }).map(function(p){ p.eventTemp=item.id; return qPut(p); })); }).then(function(){ refreshQueueCount(); return flush(); });
+  pPhotoTemp=null; sheet(false); vib([60,40,60]); snd.confirm(); toast('Логисту отправлено');
+});
+
+/* ── история / звук / push / установка ── */
+$('m-hist-toggle').addEventListener('click', function(){ $('m-hist').classList.toggle('hist--open'); snd.tap(); });
+$('t-sound').addEventListener('click', function(){ S.soundOn=!S.soundOn; localStorage.setItem('driver_sound', S.soundOn?'on':'off'); renderTools(); if(S.soundOn) snd.tap(); });
+window.addEventListener('beforeinstallprompt', function(e){ e.preventDefault(); S.deferredInstall=e; renderTools(); });
+function doInstall(){ if(S.deferredInstall){ S.deferredInstall.prompt(); S.deferredInstall=null; renderTools(); } else { $('w-steps').classList.remove('hidden'); $('w-steps').innerHTML = /iPhone|iPad/.test(navigator.userAgent) ? '<div><b>1</b>Нажмите «Поделиться» внизу Safari</div><div><b>2</b>Выберите «На экран Домой»</div><div><b>3</b>Нажмите «Добавить»</div>' : '<div><b>1</b>Меню браузера (три точки)</div><div><b>2</b>«Добавить на главный экран» или «Установить»</div><div><b>3</b>Подтвердите</div>'; } }
+$('t-install').addEventListener('click', doInstall); $('w-install').addEventListener('click', doInstall);
+$('w-skip').addEventListener('click', function(){ localStorage.setItem('driver_welcomed','1'); loadState(); });
+$('t-push').addEventListener('click', function(){
+  if(S.pushOn) return;
+  navigator.serviceWorker.register('/files/sw.js').then(function(reg){
+    return api('/driver/push/vapid_public_key').then(function(r){ if(!r.key) throw new Error('no key');
+      return reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:b64ToU8(r.key)}); });
+  }).then(function(sub){ return api('/driver/push/subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({subscription:sub.toJSON()})}); })
+  .then(function(){ S.pushOn=true; renderTools(); toast('Уведомления включены'); snd.confirm(); })
+  .catch(function(){ toast('Не удалось включить уведомления',true); snd.attention(); });
+});
+function b64ToU8(s){ var p='='.repeat((4-s.length%4)%4); var b=(s+p).replace(/-/g,'+').replace(/_/g,'/'); var r=atob(b); var a=new Uint8Array(r.length); for(var i=0;i<r.length;i++) a[i]=r.charCodeAt(i); return a; }
+if('serviceWorker' in navigator && !DEMO){ navigator.serviceWorker.register('/files/sw.js').then(function(reg){ return reg.pushManager.getSubscription(); }).then(function(sub){ S.pushOn=!!sub; renderTools(); }).catch(function(){}); }
+
+/* ── демо-режим для превью (?demo=1): те же экраны, данные выдуманы, сеть имитируется ── */
+function demoApi(path){
+  var d={}; var t=demoState;
+  if(path.indexOf('/driver/me')===0){
+    var doneIdx=t.trip?stageIdx(t.trip.stage):-1, evs=[];
+    for(var i=0;i<=doneIdx;i++){ var d0=new Date(Date.now()-(doneIdx-i)*47*60000); evs.push({id:i+1, event:STAGES[i].key, at:d0.getFullYear()+'-'+('0'+(d0.getMonth()+1)).slice(-2)+'-'+('0'+d0.getDate()).slice(-2)+' '+('0'+d0.getHours()).slice(-2)+':'+('0'+d0.getMinutes()).slice(-2)+':00'}); }
+    d={__status:200, person:{full_name:'Бамматов Магомед Ильмаксудович'}, vehicle_gos:'Е 326 ЕА 797', trip:t.trip, events:evs};
+  }
+  else if(path.indexOf('/driver/trips')===0) d={__status:200, trips:t.trips};
+  else if(path.indexOf('/driver/trip_event')===0){ var ev=new URLSearchParams(path.split('?')[1]).get('event'); if(ev!=='problem'){ t.trip.stage=ev; } d={__status:200, event_id:++t.eid}; }
+  else if(path.indexOf('/driver/trip_photo')===0) d={__status:200, id:'x'};
+  else d={__status:200};
+  return new Promise(function(res){ setTimeout(function(){ res(d); }, 250); });
+}
+var nowH=(Date.now()-EPOCH0)/3600000;
+var demoState={ eid:100, trip:{ id:'demo-1', customer:'СУ 910', route_from:'База, Домодедово', route_to:'Подольск, Большая Серпуховская 43', start_hour:Math.floor(nowH/24)*24+7, length_hours:8, order_number:'000473993', stage: qs.get('stage')||null, stage_updated_at:null },
+  trips:[ {id:'d2',customer:'ГК Мосинжстрой',start_hour:nowH-30,stage:'unloaded'}, {id:'d3',customer:'Стройтранс',start_hour:nowH-54,stage:'unloaded'}, {id:'d4',customer:'ООО Техно-Кран',start_hour:nowH-100,stage:'loaded'} ] };
+if(DEMO && qs.get('demo_offline')==='1'){ S.online=false; S.queueCount=2; }
+
+/* ── старт ── */
+function boot(){
+  var invite=qs.get('invite');
+  // Доступ уже сохранён на этом телефоне (обычный сценарий: водитель открыл ту же ссылку
+  // из WhatsApp повторно, вместо значка на столе) - код одноразовый, ВТОРОЙ обмен сервер
+  // законно отклонит. Ссылку в этом случае просто игнорируем и идём как обычно, иначе
+  // человек с рабочим доступом увидит "Ссылка недействительна" и решит, что его отключили.
+  if(invite && S.token){ history.replaceState(null,'',location.pathname); invite=null; }
+  if(invite && !DEMO){
+    show('s-loading');
+    api('/driver/claim_invite?'+q({code:invite}), {method:'POST'}).then(function(j){
+      if(j.__status===200 && j.device_token){ S.token=j.device_token; localStorage.setItem('driver_token',S.token); S.person=j.person; history.replaceState(null,'',location.pathname); $('w-name').textContent=(j.person&&j.person.full_name||'').split(' ')[1]||'водитель'; show('s-welcome'); }
+      else if(j.__status){
+        // Сервер ответил и отклонил код - показываем ЕГО текст (три разных причины теперь
+        // различаются: уже использована / отозвана / устарела), не общую фразу для всех.
+        if(j.alreadyUsed){ $('rv-title').textContent='Доступ уже выдан.'; }
+        else { $('rv-title').textContent='Ссылка больше не работает.'; }
+        $('rv-text').textContent = j.error || 'Спросите новую у логиста - он выдаст её за минуту.';
+        show('s-revoked');
+      }
+      else { toast('Нет связи. Откройте ссылку ещё раз, когда появится интернет',true); show('s-loading'); } // сети не было вообще - код мог остаться рабочим, не хороним ссылку молча
+    }).catch(function(){ toast('Нет связи. Откройте ссылку ещё раз, когда появится интернет',true); show('s-loading'); });
+    return;
+  }
+  if(DEMO){ if(qs.get('screen')==='welcome'){ $('w-name').textContent='Магомед'; show('s-welcome'); return; } if(qs.get('screen')==='revoked'){ show('s-revoked'); return; } if(qs.get('screen')==='notrip'){ demoState.trip=null; } }
+  if(!S.token && !DEMO){ show('s-revoked'); return; }
+  show('s-loading'); refreshQueueCount(); loadState(); flush();
+}
+boot();
+})();
+</script>
+</body>
+</html>

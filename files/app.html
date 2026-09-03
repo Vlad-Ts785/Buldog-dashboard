@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TS HUB</title>
+<style>
+  html,body{margin:0;padding:0;background:#0f0f13;color:#8b8980;font-family:system-ui,sans-serif;
+    height:100%;display:flex;align-items:center;justify-content:center;font-size:14px}
+</style>
+</head>
+<body>
+Загрузка…
+<script>
+// Единая точка входа для нативного Android-приложения (TWA) - 03.09.2026, Влад: "все
+// используют одно приложение, каждая роль видит своё". Один значок на телефоне у ВСЕХ
+// ролей (админ/менеджер/логист/механик/водитель), но НЕ один файл - это специально:
+// files/index.html (~2.6 МБ, полный BI-дашборд) и files/driver.html (~50 КБ, экран
+// водителя под 4G/кабину) остаются раздельными по причинам из плана
+// plans/2026-09-03-employee-mobile-app.md, раздел 2.1 - здесь ТОЛЬКО решаем, куда вести
+// при открытии приложения, не смешивая сами страницы.
+//
+// Только чтение localStorage - никаких сетевых запросов, редирект мгновенный. Источники
+// истины ролей РАЗНЫЕ и это нормально: у водителя - driver_token (files/driver.html,
+// ссылка-приглашение, driver_devices на сервере), у офисных ролей - id_token/
+// session_token (files/index.html, вход через Google). Первый когда-либо запуск на
+// чистом телефоне без обоих токенов - уводим на index.html, у него уже есть экран входа
+// через Google; для водителя первый вход всегда идёт по ссылке-приглашению напрямую на
+// driver.html (её выдают вручную), не через значок приложения - значок нужен со ВТОРОГО
+// открытия и дальше.
+try {
+  if (localStorage.getItem('driver_token')) {
+    location.replace('driver.html');
+  } else {
+    location.replace('index.html');
+  }
+} catch (e) {
+  // localStorage недоступен (приватный режим и т.п.) - безопасный дефолт, как и раньше
+  location.replace('index.html');
+}
+</script>
+</body>
+</html>

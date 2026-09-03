@@ -6056,12 +6056,22 @@ async function loadData() {
       document.getElementById('error-block').style.display = 'none';
       return;
     }
-    // Во временную переменную, не в D напрямую (Этап 1) - если ответ окажется needLogin/
-    // error, старый рабочий D должен остаться нетронутым, а не затираться битым/пустым
-    // ответом до самого throw.
-    var fetched = await fetchJsonWithRetry_(apiUrl({}));
-    if (fetched.needLogin) { clearAuthTokens_(); showLoginScreen(fetched.error); return; }
-    if (fetched.error) throw new Error(fetched.error);
+    // Сервер - ПЕРВЫМ (этап 3.2, доразвёрнуто 02.09) - /api/main_payload построчно сверен
+    // с Apps Script (fleet/repairs/staffMarkas/driverOrderCounts/session_token - 0
+    // расхождений, кроме revenueComparison - второстепенная цифра, фронтенд и так тихо
+    // прячет её при отсутствии). Пробуем БЕЗ ЗНАНИЯ роли заранее - main_payload сам
+    // отказывает не-admin (requireRole_), тихо возвращает null (fetchMainPayloadFromServer_),
+    // тогда просто идём в Apps Script ниже - тот обслуживает все роли, как раньше.
+    // manager/logist пока ВСЕГДА идут в Apps Script - своего view на сервере ещё нет.
+    var fetched = await fetchMainPayloadFromServer_();
+    if (!fetched) {
+      // Во временную переменную, не в D напрямую (Этап 1) - если ответ окажется needLogin/
+      // error, старый рабочий D должен остаться нетронутым, а не затираться битым/пустым
+      // ответом до самого throw.
+      fetched = await fetchJsonWithRetry_(apiUrl({}));
+      if (fetched.needLogin) { clearAuthTokens_(); showLoginScreen(fetched.error); return; }
+      if (fetched.error) throw new Error(fetched.error);
+    }
     saveSessionTokenFromResponse_(fetched);
     hideLoginScreen();
     document.getElementById('error-block').style.display = 'none';
@@ -6095,8 +6105,9 @@ async function loadData() {
       ? 'Сервер вернул страницу вместо данных - обычно значит, что Apps Script не задеплоен или временно упал на стороне Google. Обнови страницу через минуту; если не поможет - нужно передеплоить scripts/full_script_final.js в Apps Script.'
       : 'Попробуй обновить страницу. Если ошибка повторяется - напиши, что тут написано, разберёмся.';
     if (isFirstLoad) {
-      // Первый заход - страница ещё пустая, разворачивать есть куда: полный блок с адресом
-      // Apps Script и подсказкой по причине.
+      // Сервер уже пробовался ПЕРВЫМ выше (до Apps Script) - если мы здесь, значит либо
+      // сервер тоже недоступен, либо роль не admin И Apps Script упал. Повторять тот же
+      // запрос второй раз подряд бессмысленно - показываем обычный экран ошибки.
       document.getElementById('error-block').style.display = 'block';
       document.getElementById('error-block').querySelector('b').textContent = 'Ошибка: ' + e.message;
       document.getElementById('error-block-hint').textContent = hint;
@@ -12577,9 +12588,18 @@ function renderVcardChart(days) {
 var globalStatsMonths = null; // [{month, revenue, salesPlan, profit, profitTral, profitLong, fot, fuel, parts, fines, tolls, hiredProfit, hiredRevenue}]
 var globalStatsChart = null;
 
+// Сервер первым (2026-09-03, Влад вживую: "эта страница долго грузится") - /api/global_stats
+// сверен с Apps Script построчно, 0 расхождений в живых месяцах (кроме двух находок:
+// cash за январь-май был занижен в 1000 раз В САМИХ ДАННЫХ архива, починено на сервере;
+// июль-сентябрь у Apps Script устарели - читает History_месяцев без переcчёта, сервер
+// живой). Apps Script - фолбэк, если сервер недоступен (тот же общий приём, что и
+// fetchFromYardApi_ везде).
 function loadGlobalStatsData() {
   if (globalStatsMonths !== null) { renderGlobalStats(); return; }
-  apiFetchJson({ action: 'global_stats' }).then(function(d) {
+  fetchFromYardApi_('/global_stats', {}).then(function(r) {
+    if (r.ok && r.data && !r.data.error) return r.data;
+    return apiFetchJson({ action: 'global_stats' });
+  }).then(function(d) {
     globalStatsMonths = d.months || [];
     renderGlobalStats();
   }).catch(function() {
@@ -18612,6 +18632,20 @@ function fetchOrdersPeriodFromServer_(period) {
 function fetchReceiptsFromServer_() {
   return fetchFromYardApi_('/receipts', {}).then(function(r) {
     return r.ok ? r.data : null;
+  }).catch(function() { return null; });
+}
+
+// Главный payload с сервера - ОСНОВНОЙ путь для admin (2026-09-02, этап 3.2 плана apps-
+// script-elimination.md, доразвёрнуто до полного разворота в тот же день: fleet/repairs/
+// staffMarkas/driverOrderCounts/session_token добавлены и построчно сверены с Apps Script -
+// 0 расхождений, кроме revenueComparison, второстепенной цифры, которую фронтенд и так
+// тихо прячет при отсутствии). loadData() зовёт эту функцию ПЕРВОЙ, Apps Script - только
+// если она вернула null: сервер недоступен, ИЛИ роль не admin (requireRole_ вернёт 403 -
+// у manager/logist сервер так и должен отказать, своего view для них пока нет, они всегда
+// идут в Apps Script).
+function fetchMainPayloadFromServer_() {
+  return fetchFromYardApi_('/main_payload', {}).then(function(r) {
+    return (r.ok && r.data && !r.data.error) ? r.data : null;
   }).catch(function() { return null; });
 }
 

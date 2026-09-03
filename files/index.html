@@ -16153,39 +16153,147 @@ function mdEllipsisCell_(text, maxWidth) {
   var t = text || '—';
   return '<td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:' + maxWidth + 'px;font-size:12.5px" title="' + mdEsc_(t) + '">' + mdEsc_(t) + '</td>';
 }
-// Строка фильтров под заголовком - по одному текстовому полю на колонку (2026-09-04,
-// Влад: "по всем колонкам возможность фильтрации"). Фильтрует по textContent ячейки
-// (полный текст, даже если визуально обрезан многоточием) - подстрока, без учёта регистра,
-// строка видна только если ВСЕ заполненные фильтры совпали (mdFilterTable_ ниже).
-function mdFilterRow_(count) {
-  var cells = '';
-  for (var i = 0; i < count; i++) {
-    cells += '<th style="padding:2px 4px"><input type="text" placeholder="Фильтр" oninput="mdFilterTable_(this)" ' +
-      'style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:2px 5px;font-size:10.5px;color:var(--text)"></th>';
-  }
-  return '<tr>' + cells + '</tr>';
+// Сортируемые таблицы детализации (2026-09-04, Влад поправил после первой версии с
+// текстовыми фильтрами под заголовком: "какую-то чушь сделал ... обычная просто
+// фильтрация, как в Excel. Нажал, отфильтровал ... по возрастанию, по убыванию" - т.е.
+// канон "Сортируемая таблица" из DESIGN_SYSTEM.md (раздел 4), тот же, что везде в
+// проекте (Техника/Дебиторка/Зарплата по машинистам), а НЕ отдельный ряд text-input
+// фильтров - см. добавленную туда же пометку). machinistDetailData_ хранит последнюю
+// загруженную детализацию, чтобы пересортировать по клику БЕЗ повторного запроса к
+// серверу - те же head/body/foot собираются заново из одного состояния {col, dir}.
+var machinistDetailData_ = null; // { driverName, summaryRow, detail }
+var machinistDetailFinesSort_ = { col: 'amount', dir: -1 };
+var machinistDetailVehSort_ = {}; // {vi: {col, dir}} - своё состояние на каждую таблицу-машину
+
+var MD_FINES_COLS_ = [
+  { key: 'period_from', label: 'Период', num: false },
+  { key: 'doc_ref', label: 'Документ', num: false },
+  { key: 'amount', label: 'Сумма', num: true },
+];
+// Порядок и состав (2026-09-04, правка Влада): Оборудование убрано, Сумма/НДФЛ убраны
+// (остаётся только К начислению - итоговая цифра на руки), Стоимость заказа - в конец,
+// Процент (доля зарплаты машиниста от стоимости заказа, >20% - красным, Влад) - после неё.
+var MD_TRIP_COLS_ = [
+  { key: 'trip_date', label: 'Дата', num: false },
+  { key: 'doc_ref', label: 'Документ', num: false },
+  { key: 'route', label: 'Маршрут', num: false },
+  { key: 'cargo', label: 'Груз', num: false },
+  { key: 'km_mkad', label: 'Км МКАД', num: true },
+  { key: 'hours', label: 'Часы', num: true },
+  { key: 'net_amount', label: 'К начислению', num: true },
+  { key: 'order_amount', label: 'Стоимость заказа', num: true },
+  { key: 'pct', label: 'Процент', num: true },
+];
+// Первый клик: числа - по убыванию (крупное), текст - А-Я, даты - убывание (свежие
+// сначала) - тот же порядок правил, что в разделе "Сортируемая таблица" ГОСТа.
+function mdDefaultDir_(col) {
+  return (col === 'route' || col === 'cargo') ? 1 : -1;
 }
-function mdFilterTable_(inputEl) {
-  var table = inputEl.closest('table');
-  var filters = Array.prototype.map.call(inputEl.closest('tr').querySelectorAll('input'), function(i) {
-    return i.value.trim().toLowerCase();
+function mdSortVal_(row, col) {
+  if (col === 'doc_ref') return Number(mdDocShort_(row.doc_ref)) || 0;
+  var v = row[col];
+  return (col === 'route' || col === 'cargo' || col === 'period_from' || col === 'trip_date') ? (v || '') : (v == null ? -Infinity : v);
+}
+function mdSortRows_(rows, cols, sort) {
+  var colDef = cols.filter(function(c) { return c.key === sort.col; })[0];
+  var isNum = colDef ? (colDef.num || sort.col === 'doc_ref') : false;
+  return rows.slice().sort(function(a, b) {
+    var av = mdSortVal_(a, sort.col), bv = mdSortVal_(b, sort.col);
+    if (isNum) return ((av || 0) - (bv || 0)) * sort.dir;
+    return String(av).localeCompare(String(bv), 'ru') * sort.dir;
   });
-  table.querySelectorAll('tbody tr').forEach(function(row) {
-    var cells = row.children;
-    var visible = true;
-    for (var i = 0; i < filters.length; i++) {
-      if (!filters[i]) continue;
-      var cellText = cells[i] ? cells[i].textContent.toLowerCase() : '';
-      if (cellText.indexOf(filters[i]) === -1) { visible = false; break; }
-    }
-    row.style.display = visible ? '' : 'none';
-  });
+}
+function mdSortHead_(cols, sort, onclickFn, prefixArg) {
+  var pre = prefixArg != null ? prefixArg + ',' : '';
+  return cols.map(function(c) {
+    var active = sort.col === c.key;
+    var arrow = active ? (sort.dir === -1 ? '▼' : '▲') : '↕';
+    var arrowStyle = active ? '' : 'opacity:.35';
+    return '<th class="sortable' + (c.num ? ' num' : '') + '" onclick="' + onclickFn + '(' + pre + '\'' + c.key + '\')">' +
+      c.label + '<span style="font-size:10px;margin-left:4px;' + arrowStyle + '">' + arrow + '</span></th>';
+  }).join('');
+}
+function mdFr_(n) { return Math.round(n || 0).toLocaleString('ru-RU') + ' ₽'; }
+// >20% - красным (2026-09-04, Влад: "везде проценты, где больше 20%, подсвечивать
+// красным цветом") - относится именно к этой колонке (доля зарплаты машиниста от
+// стоимости заказа), у других % на дашборде своя, обратная семантика (% плана - зелёный
+// сверху), путать нельзя.
+function mdPctColor_(pct) { return pct != null && pct > 20 ? 'var(--red)' : ''; }
+
+function mdSortFines_(col) {
+  if (machinistDetailFinesSort_.col === col) machinistDetailFinesSort_.dir *= -1;
+  else machinistDetailFinesSort_ = { col: col, dir: col === 'amount' ? -1 : 1 };
+  mdRenderFines_();
+}
+function mdRenderFines_() {
+  var wrap = document.getElementById('md-fines-wrap');
+  if (!wrap || !machinistDetailData_) return;
+  var detail = machinistDetailData_.detail;
+  if (!detail.fines || !detail.fines.length) {
+    wrap.innerHTML = '<div class="crm-modal-static muted">Штрафов и удержаний нет</div>';
+    return;
+  }
+  var rows = mdSortRows_(detail.fines, MD_FINES_COLS_, machinistDetailFinesSort_);
+  var body = rows.map(function(f) {
+    return '<tr><td>' + mdShort_(f.period_from) + ' - ' + mdShort_(f.period_to) + '</td>' +
+      '<td style="color:var(--muted)">' + mdDocShort_(f.doc_ref) + '</td>' +
+      '<td class="num" style="color:var(--red)">' + mdFr_(f.amount) + '</td></tr>';
+  }).join('');
+  wrap.innerHTML = '<div style="overflow-x:auto"><table class="tbl"><thead><tr>' +
+    mdSortHead_(MD_FINES_COLS_, machinistDetailFinesSort_, 'mdSortFines_') +
+    '</tr></thead><tbody>' + body + '</tbody>' +
+    '<tfoot><tr><td colspan="2" style="font-weight:600">Итого штрафы/удержания</td>' +
+    '<td class="num" style="font-weight:600;color:var(--red)">' + mdFr_(detail.fines_subtotal) + '</td></tr></tfoot>' +
+    '</table></div>';
+}
+
+function mdSortVeh_(vi, col) {
+  var cur = machinistDetailVehSort_[vi] || { col: '', dir: 1 };
+  machinistDetailVehSort_[vi] = cur.col === col ? { col: col, dir: cur.dir * -1 } : { col: col, dir: mdDefaultDir_(col) };
+  mdRenderVeh_(vi);
+}
+function mdRenderVeh_(vi) {
+  var wrap = document.getElementById('md-veh-wrap-' + vi);
+  if (!wrap || !machinistDetailData_) return;
+  var v = machinistDetailData_.detail.vehicles[vi];
+  var sort = machinistDetailVehSort_[vi];
+  var rows = mdSortRows_(v.trips, MD_TRIP_COLS_, sort);
+  var netSubtotal = v.trips.reduce(function(s, t) { return s + (t.net_amount || 0); }, 0);
+  var orderSubtotal = v.trips.reduce(function(s, t) { return s + (t.order_amount || 0); }, 0);
+  // "Средний процент" (Влад, "нужна общая стоимость заказов и средний процент, низу") -
+  // агрегат (сумма зарплаты / сумма стоимости заказов), не среднее арифметическое по
+  // строкам - честнее при разных по размеру рейсах (крупный рейс не теряется в среднем).
+  var avgPct = orderSubtotal > 0 ? (v.trips.reduce(function(s, t) { return s + (t.amount || 0); }, 0) / orderSubtotal * 100) : null;
+  var body = rows.map(function(t) {
+    var pct = (t.order_amount && t.order_amount > 0) ? (t.amount / t.order_amount * 100) : null;
+    return '<tr><td>' + mdShort_(t.trip_date) + '</td>' +
+      '<td style="color:var(--muted)">' + mdDocShort_(t.doc_ref) + '</td>' +
+      mdEllipsisCell_(t.route, 240) +
+      mdEllipsisCell_(t.cargo, 160) +
+      '<td class="num">' + (t.km_mkad ? Math.round(t.km_mkad).toLocaleString('ru-RU') : '—') + '</td>' +
+      '<td class="num">' + (t.hours || '—') + '</td>' +
+      '<td class="num" style="font-weight:600">' + mdFr_(t.net_amount) + '</td>' +
+      '<td class="num" style="color:var(--muted)">' + (t.order_amount != null ? mdFr_(t.order_amount) : '—') + '</td>' +
+      '<td class="num" style="color:' + mdPctColor_(pct) + '">' + (pct != null ? pct.toFixed(1) + '%' : '—') + '</td></tr>';
+  }).join('');
+  wrap.innerHTML =
+    '<div style="overflow-x:auto"><table class="tbl"><thead><tr>' +
+      mdSortHead_(MD_TRIP_COLS_, sort, 'mdSortVeh_', vi) +
+    '</tr></thead><tbody>' + body + '</tbody>' +
+    '<tfoot><tr><td colspan="6" style="font-weight:600">Итого по машине</td>' +
+    '<td class="num" style="font-weight:600">' + mdFr_(netSubtotal) + '</td>' +
+    '<td class="num" style="font-weight:600;color:var(--muted)">' + mdFr_(orderSubtotal) + '</td>' +
+    '<td class="num" style="font-weight:600;color:' + mdPctColor_(avgPct) + '">' + (avgPct != null ? avgPct.toFixed(1) + '%' : '—') + '</td>' +
+    '</tr></tfoot>' +
+    '</table></div>';
 }
 
 function renderMachinistDetail_(driverName, summaryRow, detail) {
   var box = document.getElementById('machinist-detail-content');
   if (!box) return;
-  function fr(n) { return Math.round(n || 0).toLocaleString('ru-RU') + ' ₽'; }
+  machinistDetailData_ = { driverName: driverName, summaryRow: summaryRow, detail: detail };
+  machinistDetailFinesSort_ = { col: 'amount', dir: -1 };
+  machinistDetailVehSort_ = {};
 
   var badge = '';
   if (summaryRow) {
@@ -16207,57 +16315,16 @@ function renderMachinistDetail_(driverName, summaryRow, detail) {
     summaryGrid = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:16px">' +
       items.map(function(it) {
         return '<div><div style="font-size:11px;color:var(--muted)">' + it[0] + '</div>' +
-          '<div style="font-size:14px;font-weight:600;' + (it[2] ? 'color:' + it[2] : '') + '">' + fr(it[1]) + '</div></div>';
+          '<div style="font-size:14px;font-weight:600;' + (it[2] ? 'color:' + it[2] : '') + '">' + mdFr_(it[1]) + '</div></div>';
       }).join('') +
     '</div>';
   }
 
-  var finesHtml;
-  if (!detail.fines || !detail.fines.length) {
-    finesHtml = '<div class="crm-modal-static muted">Штрафов и удержаний нет</div>';
-  } else {
-    var fineRows = detail.fines.map(function(f) {
-      return '<tr><td>' + mdShort_(f.period_from) + ' - ' + mdShort_(f.period_to) + '</td>' +
-        '<td style="color:var(--muted)">' + mdDocShort_(f.doc_ref) + '</td>' +
-        '<td class="num" style="color:var(--red)">' + fr(f.amount) + '</td></tr>';
-    }).join('');
-    finesHtml = '<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Период</th><th>Документ</th><th class="num">Сумма</th></tr>' +
-      mdFilterRow_(3) +
-      '</thead><tbody>' + fineRows + '</tbody>' +
-      '<tfoot><tr><td colspan="2" style="font-weight:600">Итого штрафы/удержания</td>' +
-      '<td class="num" style="font-weight:600;color:var(--red)">' + fr(detail.fines_subtotal) + '</td></tr></tfoot>' +
-      '</table></div>';
-  }
-
-  // Колонки (2026-09-04, правка Влада): Оборудование убрано, Сумма/НДФЛ убраны (остаётся
-  // только К начислению - итоговая цифра на руки), Стоимость заказа - в самый конец,
-  // Процент (доля зарплаты машиниста от стоимости заказа) - после неё. Маршрут/Груз - в
-  // одну строку с многоточием (mdEllipsisCell_), Документ - голый номер (mdDocShort_).
   var vehiclesHtml = (detail.vehicles || []).map(function(v, vi) {
-    var netSubtotal = v.trips.reduce(function(s, t) { return s + (t.net_amount || 0); }, 0);
-    var tripRows = v.trips.map(function(t) {
-      var pct = (t.order_amount && t.order_amount > 0) ? (t.amount / t.order_amount * 100) : null;
-      return '<tr><td>' + mdShort_(t.trip_date) + '</td>' +
-        '<td style="color:var(--muted)">' + mdDocShort_(t.doc_ref) + '</td>' +
-        mdEllipsisCell_(t.route, 240) +
-        mdEllipsisCell_(t.cargo, 160) +
-        '<td class="num">' + (t.km_mkad ? Math.round(t.km_mkad).toLocaleString('ru-RU') : '—') + '</td>' +
-        '<td class="num">' + (t.hours || '—') + '</td>' +
-        '<td class="num" style="font-weight:600">' + fr(t.net_amount) + '</td>' +
-        '<td class="num" style="color:var(--muted)">' + (t.order_amount != null ? fr(t.order_amount) : '—') + '</td>' +
-        '<td class="num">' + (pct != null ? pct.toFixed(1) + '%' : '—') + '</td></tr>';
-    }).join('');
+    machinistDetailVehSort_[vi] = { col: 'trip_date', dir: 1 }; // хронологически, как в отчёте, до первого клика
     return '<div class="crm-modal-section">' +
       '<div class="crm-modal-section-title">' + v.vehicle_name + ' · рейсов: ' + v.trips.length + '</div>' +
-      '<div style="overflow-x:auto"><table class="tbl" id="md-veh-' + vi + '"><thead><tr>' +
-        '<th>Дата</th><th>Документ</th><th>Маршрут</th><th>Груз</th>' +
-        '<th class="num">Км МКАД</th><th class="num">Часы</th><th class="num">К начислению</th>' +
-        '<th class="num">Стоимость заказа</th><th class="num">Процент</th>' +
-      '</tr>' + mdFilterRow_(9) +
-      '</thead><tbody>' + tripRows + '</tbody>' +
-      '<tfoot><tr><td colspan="6" style="font-weight:600">Итого по машине</td>' +
-      '<td class="num" style="font-weight:600">' + fr(netSubtotal) + '</td><td></td><td></td></tr></tfoot>' +
-      '</table></div>' +
+      '<div id="md-veh-wrap-' + vi + '"></div>' +
     '</div>';
   }).join('') || '<div class="crm-modal-static muted">Рейсов не найдено</div>';
 
@@ -16268,8 +16335,11 @@ function renderMachinistDetail_(driverName, summaryRow, detail) {
       '<button class="crm-modal-close" onclick="closeMachinistDetail_()">&times;</button>' +
     '</div>' +
     summaryGrid +
-    '<div class="crm-modal-section"><div class="crm-modal-section-title">Штрафы ГИБДД / удержания</div>' + finesHtml + '</div>' +
+    '<div class="crm-modal-section"><div class="crm-modal-section-title">Штрафы ГИБДД / удержания</div><div id="md-fines-wrap"></div></div>' +
     vehiclesHtml;
+
+  mdRenderFines_();
+  (detail.vehicles || []).forEach(function(v, vi) { mdRenderVeh_(vi); });
 }
 
 function renderSalesSalary() {

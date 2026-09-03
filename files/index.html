@@ -4040,6 +4040,14 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
       <div id="salary-tab-machinists" style="display:none"></div>
     </div>
 
+    <!-- Детализация машиниста (2026-09-04, Влад: "нужен полный расклад как в отчёте по
+         клику на машиниста") - клик по строке в таблице "По машинистам" открывает этот
+         попап (openMachinistDetail_), тот же .crm-modal-overlay/.crm-modal, что и выбор
+         раздела выше, но шире - внутри таблица рейсов до 9 колонок. -->
+    <div id="machinist-detail-overlay" class="crm-modal-overlay" style="display:none" onmousedown="if(event.target===this)closeMachinistDetail_()">
+      <div class="crm-modal" style="max-width:min(1280px,96vw)" id="machinist-detail-content"></div>
+    </div>
+
     <!-- ═══ ДЗ (ДЕБИТОРСКАЯ ЗАДОЛЖЕННОСТЬ) ═════════════════════ -->
     <div id="page-debt" class="page">
       <div id="debt-empty" style="display:none;color:var(--muted);padding:16px">
@@ -15995,6 +16003,15 @@ var MACHINIST_SALARY_COLS_ = [
   { key: 'ndfl_amount', label: 'НДФЛ', num: true },
   { key: 'net_amount', label: 'К начислению', num: true },
 ];
+// "Удержания" сворачивает 3 своих слагаемых (2026-09-04, Влад: "таблица слишком широкая ...
+// изначально свёрнута, но при желании можно раскрыть") - Аванс/Штрафы/Проч. удержания
+// скрыты по умолчанию, сама колонка "Удержания" (сумма трёх) остаётся видна всегда.
+var MACHINIST_SALARY_DEDUCTION_COLS_ = ['advance_amount', 'gibdd_fines_amount', 'other_deductions_amount'];
+var machinistSalaryDeductionsExpanded_ = false;
+function machinistSalaryToggleDeductions_() {
+  machinistSalaryDeductionsExpanded_ = !machinistSalaryDeductionsExpanded_;
+  renderMachinistSalary();
+}
 
 function renderMachinistSalary() {
   var el = document.getElementById('salary-tab-machinists');
@@ -16017,15 +16034,26 @@ function renderMachinistSalary() {
     return '<option value="' + mk + '"' + (mk === machinistSalaryMonth_ ? ' selected' : '') + '>' + formatMonthLabel(mk) + '</option>';
   }).join('');
 
-  var head = MACHINIST_SALARY_COLS_.map(function(c) {
+  var cols = MACHINIST_SALARY_COLS_.filter(function(c) {
+    return machinistSalaryDeductionsExpanded_ || MACHINIST_SALARY_DEDUCTION_COLS_.indexOf(c.key) === -1;
+  });
+
+  var head = cols.map(function(c) {
     var arrow = sort.col === c.key ? (sort.dir === -1 ? '▼' : '▲') : '↕';
     var arrowStyle = sort.col === c.key ? '' : 'opacity:.35';
+    var toggle = '';
+    if (c.key === 'deductions_amount') {
+      toggle = '<span onclick="event.stopPropagation();machinistSalaryToggleDeductions_()" ' +
+        'title="' + (machinistSalaryDeductionsExpanded_ ? 'Свернуть Аванс/Штрафы/Проч.' : 'Показать Аванс/Штрафы/Проч. отдельно') + '" ' +
+        'style="cursor:pointer;margin-right:5px;display:inline-block;transition:transform .15s;transform:rotate(' +
+        (machinistSalaryDeductionsExpanded_ ? '90' : '0') + 'deg)">▸</span>';
+    }
     return '<th class="sortable' + (c.num ? ' num' : '') + '" onclick="machinistSalarySort_click_(\'' + c.key + '\')">' +
-      c.label + '<span style="font-size:10px;margin-left:4px;' + arrowStyle + '">' + arrow + '</span></th>';
+      toggle + c.label + '<span style="font-size:10px;margin-left:4px;' + arrowStyle + '">' + arrow + '</span></th>';
   }).join('');
 
   var body = rows.map(function(r) {
-    var cells = MACHINIST_SALARY_COLS_.map(function(c) {
+    var cells = cols.map(function(c) {
       if (c.key === 'driver_name') {
         var badgeColor = r.vehicle_bucket === 'трал' ? 'var(--green)' : r.vehicle_bucket === 'длинномер' ? 'var(--blue)' : 'var(--muted)';
         return '<td>' + r.driver_name + ' <span style="font-size:10.5px;color:' + badgeColor + '">· ' + r.vehicle_bucket + '</span></td>';
@@ -16035,8 +16063,11 @@ function renderMachinistSalary() {
       var color = isDeduction && v ? 'var(--red)' : '';
       return '<td class="num" style="' + (color ? 'color:' + color : '') + '">' + (v ? Math.round(v).toLocaleString('ru-RU') : '—') + '</td>';
     }).join('');
-    return '<tr>' + cells + '</tr>';
-  }).join('') || '<tr><td colspan="' + MACHINIST_SALARY_COLS_.length + '" class="muted">Нет данных за выбранный месяц/фильтр</td></tr>';
+    // Клик по строке - полный расклад как в отчёте 1С (2026-09-04, план Фаза 2,
+    // openMachinistDetail_ ниже). Экранируем имя для безопасной вставки в onclick.
+    var safeName = String(r.driver_name).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    return '<tr class="clickable" onclick="openMachinistDetail_(\'' + safeName + '\')" style="cursor:pointer">' + cells + '</tr>';
+  }).join('') || '<tr><td colspan="' + cols.length + '" class="muted">Нет данных за выбранный месяц/фильтр</td></tr>';
 
   el.innerHTML =
     '<div class="card" style="margin-bottom:16px">' +
@@ -16051,7 +16082,7 @@ function renderMachinistSalary() {
       '</div>' +
       '<div class="muted" style="font-size:11.5px;padding:0 20px 10px">' +
         'Тип (трал/длинномер) определяем по технике, на которой человек реально работал в этом месяце - НЕ по данным 1С (там все машинисты числятся под одним отделом). ' +
-        '«Не определено» - для месяца ещё нет истории назначений на технику.' +
+        '«Не определено» - для месяца ещё нет истории назначений на технику. Клик по строке - полный расклад как в отчёте 1С (штрафы и рейсы по машинам).' +
       '</div>' +
     '</div>' +
     '<div class="card">' +
@@ -16059,6 +16090,142 @@ function renderMachinistSalary() {
         '<div class="sec-sub">К начислению всего: ' + Math.round(totalNet).toLocaleString('ru-RU') + ' ₽ · ' + rows.length + ' чел.</div></div>' +
       '<div style="overflow-x:auto"><table class="tbl"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>' +
     '</div>';
+}
+
+// ── Детализация машиниста - штрафы построчно + рейсы по машинам (2026-09-04, план Фаза 2,
+// Влад: "нужен полный расклад как в отчёте по клику на машиниста"). Ленивая загрузка на
+// клик - /api/driver_payroll_detail отдаёт только выбранного машиниста, не всех сразу
+// (детализация - это сотни строк на весь месяц). Модалка переиспользует
+// .crm-modal-overlay/.crm-modal (те же токены, что и попап выбора раздела «Зарплата»
+// выше) - #machinist-detail-overlay в HTML. ──
+var machinistDetailDriver_ = null; // ФИО текущего открытого машиниста - защита от гонки,
+                                    // если успели открыть другого, пока грузился первый
+
+function openMachinistDetail_(driverName) {
+  var overlay = document.getElementById('machinist-detail-overlay');
+  var box = document.getElementById('machinist-detail-content');
+  if (!overlay || !box) return;
+  machinistDetailDriver_ = driverName;
+  overlay.style.display = 'flex';
+  box.innerHTML = '<div class="crm-modal-header"><div class="crm-modal-title">' + driverName + '</div>' +
+    '<button class="crm-modal-close" onclick="closeMachinistDetail_()">&times;</button></div>' +
+    '<p style="color:var(--muted);padding:16px 0">Загрузка...</p>';
+
+  var d = machinistSalaryData_[machinistSalaryMonth_];
+  var summaryRow = (d && d.rows || []).filter(function(r) { return r.driver_name === driverName; })[0] || null;
+
+  fetchFromYardApi_('/driver_payroll_detail', { month: machinistSalaryMonth_, driver: driverName }).then(function(r) {
+    if (!r.ok || !r.data || r.data.error) throw new Error((r.data && r.data.error) || 'Ошибка загрузки');
+    if (machinistDetailDriver_ !== driverName) return; // пока грузилось, открыли другого/закрыли
+    renderMachinistDetail_(driverName, summaryRow, r.data);
+  }).catch(function(e) {
+    if (machinistDetailDriver_ !== driverName) return;
+    box.innerHTML = '<div class="crm-modal-header"><div class="crm-modal-title">' + driverName + '</div>' +
+      '<button class="crm-modal-close" onclick="closeMachinistDetail_()">&times;</button></div>' +
+      '<p style="color:var(--muted);padding:16px 0">Не удалось загрузить: ' + (e.message || e) + '</p>';
+  });
+}
+function closeMachinistDetail_() {
+  var overlay = document.getElementById('machinist-detail-overlay');
+  if (overlay) overlay.style.display = 'none';
+  machinistDetailDriver_ = null;
+}
+// "2026-08-01T00:00:00.000Z" (ISO из mysql2) -> "01.08.2026"
+function mdShort_(v) {
+  var m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? (m[3] + '.' + m[2] + '.' + m[1]) : '—';
+}
+// "Таблица заказов 000471882 от 05.08.2026 9:06:18" -> "№471882 · 05.08" (2026-09-04,
+// Влад: "нечитабельно ... время не нужно, слово таблица заказов не нужно"). Тот же приём
+// для штрафов ("Ввод начислений и удержаний водителям 000012025 от ...").
+function mdDocShort_(text) {
+  var m = String(text || '').match(/(\d{5,})\s+от\s+(\d{2})\.(\d{2})\.\d{4}/);
+  if (!m) return text || '—';
+  return '№' + m[1].replace(/^0+/, '') + ' · ' + m[2] + '.' + m[3];
+}
+
+function renderMachinistDetail_(driverName, summaryRow, detail) {
+  var box = document.getElementById('machinist-detail-content');
+  if (!box) return;
+  function fr(n) { return Math.round(n || 0).toLocaleString('ru-RU') + ' ₽'; }
+
+  var badge = '';
+  if (summaryRow) {
+    var badgeColor = summaryRow.vehicle_bucket === 'трал' ? 'var(--green)' : summaryRow.vehicle_bucket === 'длинномер' ? 'var(--blue)' : 'var(--muted)';
+    badge = ' <span style="font-size:12px;font-weight:500;color:' + badgeColor + '">· ' + summaryRow.vehicle_bucket + '</span>';
+  }
+
+  var summaryGrid = '';
+  if (summaryRow) {
+    var items = [
+      ['Начисления', summaryRow.accruals_amount, ''],
+      ['Аванс/Нал', summaryRow.advance_amount, 'var(--red)'],
+      ['Штрафы ГИБДД', summaryRow.gibdd_fines_amount, 'var(--red)'],
+      ['Проч. удержания', summaryRow.other_deductions_amount, 'var(--red)'],
+      ['Итого', summaryRow.total_amount, ''],
+      ['НДФЛ', summaryRow.ndfl_amount, 'var(--red)'],
+      ['К начислению', summaryRow.net_amount, 'var(--green)'],
+    ];
+    summaryGrid = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:16px">' +
+      items.map(function(it) {
+        return '<div><div style="font-size:11px;color:var(--muted)">' + it[0] + '</div>' +
+          '<div style="font-size:14px;font-weight:600;' + (it[2] ? 'color:' + it[2] : '') + '">' + fr(it[1]) + '</div></div>';
+      }).join('') +
+    '</div>';
+  }
+
+  var finesHtml;
+  if (!detail.fines || !detail.fines.length) {
+    finesHtml = '<div class="crm-modal-static muted">Штрафов и удержаний нет</div>';
+  } else {
+    var fineRows = detail.fines.map(function(f) {
+      return '<tr><td>' + mdShort_(f.period_from) + ' - ' + mdShort_(f.period_to) + '</td>' +
+        '<td style="color:var(--muted)">' + mdDocShort_(f.doc_ref) + '</td>' +
+        '<td class="num" style="color:var(--red)">' + fr(f.amount) + '</td></tr>';
+    }).join('');
+    finesHtml = '<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Период</th><th>Документ</th><th class="num">Сумма</th></tr></thead>' +
+      '<tbody>' + fineRows + '</tbody>' +
+      '<tfoot><tr><td colspan="2" style="font-weight:600">Итого штрафы/удержания</td>' +
+      '<td class="num" style="font-weight:600;color:var(--red)">' + fr(detail.fines_subtotal) + '</td></tr></tfoot>' +
+      '</table></div>';
+  }
+
+  var vehiclesHtml = (detail.vehicles || []).map(function(v) {
+    var tripRows = v.trips.map(function(t) {
+      return '<tr><td>' + mdShort_(t.trip_date) + '</td>' +
+        '<td style="color:var(--muted)">' + mdDocShort_(t.doc_ref) + '</td>' +
+        '<td>' + (t.equipment_type || '—') + '</td>' +
+        '<td style="font-size:12.5px">' + (t.route || '—') + '</td>' +
+        '<td style="font-size:12.5px">' + (t.cargo || '—') + '</td>' +
+        '<td class="num" style="color:var(--muted)">' + (t.order_amount != null ? fr(t.order_amount) : '—') + '</td>' +
+        '<td class="num">' + (t.km_mkad ? Math.round(t.km_mkad).toLocaleString('ru-RU') : '—') + '</td>' +
+        '<td class="num">' + (t.hours || '—') + '</td>' +
+        '<td class="num">' + fr(t.amount) + '</td>' +
+        '<td class="num" style="color:var(--red)">' + fr(t.ndfl_amount) + '</td>' +
+        '<td class="num" style="font-weight:600">' + fr(t.net_amount) + '</td></tr>';
+    }).join('');
+    return '<div class="crm-modal-section">' +
+      '<div class="crm-modal-section-title">' + v.vehicle_name + ' · рейсов: ' + v.trips.length + '</div>' +
+      '<div style="overflow-x:auto"><table class="tbl"><thead><tr>' +
+        '<th>Дата</th><th>Документ</th><th>Оборудование</th><th>Маршрут</th><th>Груз</th>' +
+        '<th class="num">Стоимость заказа</th>' +
+        '<th class="num">Км МКАД</th><th class="num">Часы</th><th class="num">Сумма</th><th class="num">НДФЛ</th><th class="num">К начислению</th>' +
+      '</tr></thead><tbody>' + tripRows + '</tbody>' +
+      '<tfoot><tr><td colspan="8" style="font-weight:600">Итого по машине</td>' +
+      '<td class="num" style="font-weight:600">' + fr(v.subtotal) + '</td><td></td><td></td></tr></tfoot>' +
+      '</table></div>' +
+    '</div>';
+  }).join('') || '<div class="crm-modal-static muted">Рейсов не найдено</div>';
+
+  box.innerHTML =
+    '<div class="crm-modal-header">' +
+      '<div><div class="crm-modal-title">' + driverName + badge + '</div>' +
+        '<div class="crm-modal-sub">' + formatMonthLabel(detail.month) + '</div></div>' +
+      '<button class="crm-modal-close" onclick="closeMachinistDetail_()">&times;</button>' +
+    '</div>' +
+    summaryGrid +
+    '<div class="crm-modal-section"><div class="crm-modal-section-title">Штрафы ГИБДД / удержания</div>' + finesHtml + '</div>' +
+    vehiclesHtml;
 }
 
 function renderSalesSalary() {

@@ -1124,6 +1124,7 @@ function runAll() {
   try { saveMonthSummary_(SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID), Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM')); log.push('✅ Сводка месяца сохранена'); }
   catch(e) { errors.push('❌ Сводка месяца: ' + e.message); }
 
+  try { syncAccessLogToServer(); log.push('✅ Логи входов отправлены на сервер'); } catch (e) { log.push('⚠️ Логи входов: ' + e.message); }
   try { syncMonthSummaryToServer_(); log.push('✅ История месяцев отправлена на сервер'); }
   catch(e) { errors.push('❌ История месяцев на сервер: ' + e.message); }
 
@@ -11126,6 +11127,26 @@ function syncManagerPlansToServer_() {
 // doGet - таблица month_summary на сервере молча застряла на снимке от 15-17 августа,
 // никогда не обновлялась при закрытии месяца. Тот же приём, что syncManagerPlansToServer_
 // выше - полная перезаливка (Влад не правит этот лист руками).
+// Перенос заходов из "Логи_входов" на сервер (04.09, Влад: "и старые данные подтяни, чтобы
+// в общем было, и сохрани на сервер"). Сервер держит их в отдельной колонке legacy_visits
+// и суммирует с живым счётчиком (/api/main_payload) - вызов ИДЕМПОТЕНТЕН, можно слать
+// каждый runAll. Без "_" в конце - чтобы можно было запустить руками из редактора
+// (см. память: раннеры с "_" не видны в списке "Выполнить").
+function syncAccessLogToServer() {
+  var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+  if (!apiKey) return;
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var rows = getAccessLogSummary_(ss); // {email, name, role, first_visit, last_visit, count}
+  if (!rows.length) return;
+  var resp = UrlFetchApp.fetch('https://api.yardhub.ru/api/access_log_import', {
+    method: 'post', contentType: 'application/json',
+    headers: { 'X-Api-Key': apiKey },
+    payload: JSON.stringify({ rows: rows }),
+    muteHttpExceptions: true,
+  });
+  if (resp.getResponseCode() !== 200) throw new Error('HTTP ' + resp.getResponseCode() + ': ' + resp.getContentText().slice(0, 200));
+}
+
 function syncMonthSummaryToServer_() {
   var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
   if (!apiKey) return;

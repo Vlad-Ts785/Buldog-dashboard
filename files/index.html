@@ -18615,6 +18615,7 @@ var CRM = (function () {
   function el(id) { return document.getElementById(id); }
   function reduced() { return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
   function safeImg(u) { return /^https:\/\/[a-z0-9.-]*avito\.st\//i.test(String(u || '')) ? u : ''; } // только CDN Авито - чужие URL в img не пускаем
+  function safeHref(u) { return /^https:\/\/[a-z0-9.-]*avito\.ru\//i.test(String(u || '')) ? u : ''; } // ссылки на объявление - только avito.ru
   function api(path, params) { return fetchFromYardApi_(path, params || {}); }
   function post(path, params) { return postToYardApi_(path, params || {}); }
   function toast(text, type, action) { if (typeof p2Toast === 'function') p2Toast(text, type || 'amber', action); }
@@ -19174,7 +19175,7 @@ var CRM = (function () {
     var actions = '<div class="dr-section"><div class="dr-label">Действия</div><div class="dr-actions">' +
       (avito ? '<button class="crm-chip" data-nav-sound onclick="CRM.openChatFor(\'' + esc(d.client_phone) + '\')">' + ico('chat') + 'Открыть чат</button>' : '') +
       (tel ? '<a class="crm-chip" href="' + tel + '" data-nav-sound>' + ico('phone') + 'Позвонить</a>' : '') +
-      (data.chats && data.chats[0] && data.chats[0].item_url ? '<a class="crm-chip" href="' + esc(data.chats[0].item_url) + '" target="_blank" rel="noopener">' + ico('external') + 'Объявление на Авито</a>' : '') + '</div></div>';
+      (data.chats && data.chats[0] && safeHref(data.chats[0].item_url) ? '<a class="crm-chip" href="' + esc(safeHref(data.chats[0].item_url)) + '" target="_blank" rel="noopener">' + ico('external') + 'Объявление на Авито</a>' : '') + '</div></div>';
 
     var timeline = '<div class="dr-section"><div class="dr-label">История <span class="aux">' + ((data.calls || []).length + (data.messages || []).length) + '</span></div>' + timelineHtml(data) + '</div>';
     var other = (data.other_deals || []).length ? '<div class="dr-section"><div class="dr-label">Другие сделки клиента</div>' + data.other_deals.map(function (o) { var os = STAGE_BY[o.stage] || {}; return '<div class="dr-row"><span><span class="kb-stage-dot" style="--stage:' + (os.color || 'var(--muted)') + ';display:inline-block;margin-right:6px"></span>' + esc(os.label || o.stage) + (o.loss_reason ? ' · ' + esc(o.loss_reason) : '') + '</span><span class="mono">' + (Number(o.amount) ? money(o.amount) : '—') + ' · ' + fmtDT(o.created_at) + '</span></div>'; }).join('') + '</div>' : '';
@@ -19566,7 +19567,7 @@ var CRM = (function () {
       '<div class="cx-kv"><span>Первый контакт</span><span class="num">' + fmtDT(c.first_contact_at) + '</span></div>' +
       '<div class="cx-kv"><span>Сделок</span><span class="num">' + (t.deals || []).length + '</span></div>' +
       '<div class="cx-kv"><span>Ответственный</span><span>' + (c.responsible_name ? esc(c.responsible_name) : '<span style="color:var(--muted)">не назначен</span>') + '</span></div></section>';
-    var item = ch ? '<section><div class="cx-sec-label">Объявление' + ((t.chats || []).length > 1 ? '<span class="cx-sec-aux">' + t.chats.length + '</span>' : '') + '</div><div class="cx-item-title">' + esc(ch.item_title || 'Без названия') + '</div>' + (ch.item_url ? '<a class="cx-link" href="' + esc(ch.item_url) + '" target="_blank" rel="noopener">' + ico('external') + 'Открыть на Авито</a>' : '') + '</section>' : '';
+    var item = ch ? '<section><div class="cx-sec-label">Объявление' + ((t.chats || []).length > 1 ? '<span class="cx-sec-aux">' + t.chats.length + '</span>' : '') + '</div><div class="cx-item-title">' + esc(ch.item_title || 'Без названия') + '</div>' + (safeHref(ch.item_url) ? '<a class="cx-link" href="' + esc(safeHref(ch.item_url)) + '" target="_blank" rel="noopener">' + ico('external') + 'Открыть на Авито</a>' : '') + '</section>' : '';
     var brief = '<section><div class="cx-sec-label">Заявка<span class="cx-sec-aux dr-saved" id="cx-saved-brief"></span></div>' + (d ? briefFieldsHtml('cx', d) + '<div class="dr-actions" style="margin-top:8px"><button class="crm-chip" onclick="CRM.saveCtxBrief(' + d.id + ')">' + ico('check') + 'Сохранить заявку</button></div>' : '<div class="cx-empty" style="padding:8px 0;align-items:flex-start;text-align:left"><p>Сделки пока нет - появится при новом обращении клиента.</p><button class="crm-chip" onclick="CRM.createDealFor(\'' + esc(t.key) + '\')">Создать сделку</button></div>') + '</section>';
     var deal = d ? '<section><div class="cx-sec-label">Сделка<span class="cx-sec-aux">#' + d.id + '</span></div>' +
       '<div class="cx-kv cx-stage"><span>Стадия</span><span><select class="dr-select" onchange="CRM.setStage(' + d.id + ',this.value)">' + STAGES.map(function (s) { return '<option value="' + s.key + '"' + (s.key === d.stage ? ' selected' : '') + '>' + esc(s.label) + '</option>'; }).join('') + '</select></span></div>' +

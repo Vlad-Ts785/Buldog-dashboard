@@ -3570,6 +3570,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
           <button class="tab-btn" onclick="showDirTab('legal',this)">Юридические лица</button>
           <button class="tab-btn" onclick="showDirTab('assets',this)">Материальные средства</button>
           <button class="tab-btn" onclick="showDirTab('fleet',this)">Сцепка</button>
+          <button class="tab-btn" onclick="showDirTab('plans',this)">Планы продаж</button>
         </div>
 
         <!-- ── Сотрудники (физические лица) ── -->
@@ -3715,6 +3716,48 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
             </table>
           </div>
           <div id="fleet-error" style="display:none;color:var(--red);font-size:12px;margin-top:10px"></div>
+        </div>
+
+        <!-- ── Планы продаж (04.09, Влад: "уходим от Excel-таблиц... инструмент, где я каждый
+             месяц могу выставить план сотрудникам") - заменяет Google-лист "Планы_менеджеров".
+             Источник - manager_plans на сервере (GET/POST /api/manager_plans), см.
+             plans/2026-09-04-sales-plans-tool.md. Строки: менеджеры из этого же справочника
+             (роль "Менеджер") + служебные ключи (внутренние перевозки, ВП парка Рыщанова). ── -->
+        <div id="dir-tab-plans" style="display:none">
+          <div style="display:flex;align-items:center;gap:8px;margin:12px 0;flex-wrap:wrap">
+            <button class="tab-btn" onclick="plansShiftMonth_(-1)" title="Предыдущий месяц">←</button>
+            <div id="plans-month-label" style="font-weight:600;font-size:14px;min-width:150px;text-align:center">—</div>
+            <button class="tab-btn" onclick="plansShiftMonth_(1)" title="Следующий месяц">→</button>
+            <div style="flex:1"></div>
+            <button class="tab-btn" onclick="plansCopyPrev_()">Скопировать из прошлого месяца</button>
+            <button class="tab-btn" id="plans-save-btn" onclick="plansSave_()" style="border-color:var(--green);color:var(--green)">Сохранить</button>
+          </div>
+          <div id="plans-loading" style="color:var(--muted);padding:20px 0;font-size:13px">Загрузка…</div>
+          <div id="plans-wrap" style="display:none">
+            <div class="kpi-grid" style="margin:0 0 12px">
+              <div class="kpi"><div class="kpi-label">План по менеджерам</div><div class="kpi-value" id="plans-kpi-mgr">—</div></div>
+              <div class="kpi"><div class="kpi-label">Внутренние перевозки</div><div class="kpi-value" id="plans-kpi-int">—</div></div>
+              <div class="kpi"><div class="kpi-label">Итого план продаж</div><div class="kpi-value" id="plans-kpi-total">—</div></div>
+              <div class="kpi"><div class="kpi-label">Последнее изменение</div><div class="kpi-value" id="plans-kpi-upd" style="font-size:13px">—</div></div>
+            </div>
+            <div style="overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius-sm)">
+              <table class="tbl">
+                <thead><tr>
+                  <th>Сотрудник</th>
+                  <th>Роль</th>
+                  <th class="num" style="width:220px">План, ₽</th>
+                </tr></thead>
+                <tbody id="plans-body"></tbody>
+              </table>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap">
+              <input autocomplete="off" id="plans-add-name" type="text" maxlength="60" placeholder="Добавить строку: фамилия или служебный ключ"
+                style="flex:1;min-width:240px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:12.5px;outline:none">
+              <button class="tab-btn" onclick="plansAddRow_()">Добавить</button>
+            </div>
+            <div style="font-size:11.5px;color:var(--muted);margin-top:8px">Ключ строки - фамилия (первое слово ФИО в 1С). Лист «Планы_менеджеров» в Google теперь только зеркало, правки там не учитываются.</div>
+          </div>
+          <div id="plans-error" style="display:none;color:var(--red);font-size:12px;margin-top:10px"></div>
         </div>
       </div>
     </div>
@@ -11467,12 +11510,200 @@ function renderDirectory() {
 // "Поступления" (showReceiptsTab) - все уже отрисованы после renderDirectory(),
 // переключение вкладки - просто показ/скрытие, без повторного похода на сервер.
 function showDirTab(tab, el) {
-  ['people', 'legal', 'assets', 'fleet'].forEach(function(t) {
+  ['people', 'legal', 'assets', 'fleet', 'plans'].forEach(function(t) {
     var panel = document.getElementById('dir-tab-' + t);
     if (panel) panel.style.display = (t === tab) ? '' : 'none';
   });
   document.querySelectorAll('#dir-tab-bar .tab-btn').forEach(function(b) { b.classList.remove('active'); });
   if (el) el.classList.add('active');
+  // "Планы продаж" - свой источник (manager_plans на сервере, не /sprav/state), грузится
+  // лениво при первом открытии вкладки, дальше - только при смене месяца.
+  if (tab === 'plans' && !plansLoadedOnce_) plansTabLoad_(plansMonth_ || plansCurMonthKey_());
+}
+
+// ── Планы продаж (04.09, plans/2026-09-04-sales-plans-tool.md) ──────────────────────────
+// Влад: "инструмент, где я каждый месяц могу выставить план сотрудникам... уходим от
+// Excel-таблиц". Источник истины - manager_plans на сервере (GET /api/manager_plans?month=,
+// POST /api/manager_plans/set), Google-лист "Планы_менеджеров" с этого дня - read-only
+// зеркало. Ключ строки - фамилия в нижнем регистре (первое слово ФИО): тот же ключ, что
+// joinManagerPlans строит из by_manager[].name и по которому план ложится на "По
+// менеджерам"/Панель/личные страницы. Служебные ключи не про людей - см. PLANS_SPECIAL_.
+var plansMonth_ = null;         // 'YYYY-MM' открытого месяца
+var plansRows_ = [];            // [{key, manager, label, role, plan, fromServer}]
+var plansMeta_ = null;          // {updated_by, updated_at} самой свежей строки месяца
+var plansLoadedOnce_ = false;
+var plansDirty_ = false;
+var PLANS_SPECIAL_ = {
+  'внутренние': { manager: 'Внутренние', label: 'Внутренние перевозки', role: 'логисты' },
+  'рыщанов_вп': { manager: 'рыщанов_вп', label: 'ВП своего парка (план Рыщанова)', role: 'служебный' },
+};
+function plansCurMonthKey_() {
+  var d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+function plansShiftKey_(key, delta) {
+  var p = key.split('-').map(Number);
+  var d = new Date(p[0], p[1] - 1 + delta, 1);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+function plansKeyOf_(name) { return String(name || '').trim().split(' ')[0].toLowerCase(); }
+function plansFmt_(n) { return Math.round(n || 0).toLocaleString('ru-RU'); }
+function plansParse_(v) { return parseInt(String(v || '').replace(/\D/g, ''), 10) || 0; }
+
+// Ростер строк месяца: менеджеры из Справочников (роль "Менеджер", не удалённые) + все
+// строки, которые уже есть на сервере за этот месяц (в т.ч. старые ключи вроде Цуцурин/
+// Прус-роскошный - не теряем чужие данные) + служебные ключи всегда.
+function plansBuildRows_(serverPlans) {
+  var byKey = {};
+  (spravPeople_ || []).forEach(function(p) {
+    if (p.is_deleted || (p.roles || []).indexOf('manager') < 0) return;
+    var key = plansKeyOf_(p.full_name);
+    if (!key || byKey[key]) return;
+    byKey[key] = { key: key, manager: p.full_name.trim().split(' ')[0], label: p.full_name, role: 'менеджер', plan: 0, fromServer: false };
+  });
+  (serverPlans || []).forEach(function(r) {
+    var key = plansKeyOf_(r.manager);
+    if (!key) return;
+    if (!byKey[key]) {
+      var sp = PLANS_SPECIAL_[key];
+      byKey[key] = { key: key, manager: sp ? sp.manager : r.manager, label: sp ? sp.label : r.manager, role: sp ? sp.role : '—', plan: 0, fromServer: true };
+    }
+    byKey[key].plan = Number(r.plan) || 0;
+    byKey[key].fromServer = true;
+  });
+  Object.keys(PLANS_SPECIAL_).forEach(function(key) {
+    if (!byKey[key]) byKey[key] = { key: key, manager: PLANS_SPECIAL_[key].manager, label: PLANS_SPECIAL_[key].label, role: PLANS_SPECIAL_[key].role, plan: 0, fromServer: false };
+  });
+  var rows = Object.values(byKey);
+  rows.sort(function(a, b) {
+    var sa = PLANS_SPECIAL_[a.key] ? 1 : 0, sb = PLANS_SPECIAL_[b.key] ? 1 : 0;
+    if (sa !== sb) return sa - sb; // служебные - в конец
+    return a.label.localeCompare(b.label, 'ru');
+  });
+  return rows;
+}
+
+function plansTabLoad_(month) {
+  var loading = document.getElementById('plans-loading'), wrap = document.getElementById('plans-wrap'), err = document.getElementById('plans-error');
+  if (!loading) return;
+  plansMonth_ = month;
+  plansDirty_ = false;
+  loading.style.display = ''; loading.textContent = 'Загрузка…'; wrap.style.display = 'none'; err.style.display = 'none';
+  var label = document.getElementById('plans-month-label');
+  if (label) label.textContent = formatMonthLabel(month);
+  // Ростер менеджеров нужен из /sprav/state - если вкладку открыли раньше, чем
+  // renderDirectory() успел его загрузить, дотягиваем сами (без дублирования запроса, когда он уже есть).
+  var needSprav = !(spravPeople_ && spravPeople_.length);
+  Promise.all([
+    fetchFromYardApi_('/manager_plans', { month: month }),
+    needSprav ? fetchFromYardApi_('/sprav/state', {}) : Promise.resolve(null),
+  ]).then(function(res) {
+    var r = res[0], s = res[1];
+    if (s && s.ok && s.data && s.data.people) spravPeople_ = s.data.people;
+    if (!r.ok || !r.data || r.data.error) throw new Error((r.data && r.data.error) || 'ошибка сервера');
+    plansRows_ = plansBuildRows_(r.data.plans);
+    plansMeta_ = (r.data.plans || []).reduce(function(m, p) {
+      return (!m || (p.updated_at || '') > (m.updated_at || '')) ? p : m;
+    }, null);
+    plansLoadedOnce_ = true;
+    loading.style.display = 'none'; wrap.style.display = '';
+    plansPaint_();
+  }).catch(function(e) {
+    loading.style.display = 'none';
+    err.style.display = ''; err.textContent = 'Не удалось загрузить планы: ' + e.message;
+  });
+}
+
+function plansPaint_() {
+  var body = document.getElementById('plans-body');
+  if (!body) return;
+  body.innerHTML = plansRows_.map(function(r, i) {
+    var special = !!PLANS_SPECIAL_[r.key];
+    return '<tr' + (special ? ' style="background:rgba(var(--ink),.03)"' : '') + '>' +
+      '<td><b>' + pageEsc_(r.label) + '</b>' + (r.key !== plansKeyOf_(r.label) && !special ? '' : '') + '</td>' +
+      '<td class="muted">' + pageEsc_(r.role) + '</td>' +
+      '<td class="num"><input autocomplete="off" inputmode="numeric" data-plan-idx="' + i + '" value="' + plansFmt_(r.plan) + '" ' +
+        'oninput="plansOnInput_(this)" onblur="this.value=plansFmt_(plansParse_(this.value))" ' +
+        'style="width:170px;text-align:right;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:6px 10px;color:var(--text);font-size:13px;font-variant-numeric:tabular-nums;outline:none"></td>' +
+    '</tr>';
+  }).join('');
+  plansPaintTotals_();
+}
+function plansOnInput_(inp) {
+  var idx = parseInt(inp.getAttribute('data-plan-idx'), 10);
+  if (!plansRows_[idx]) return;
+  plansRows_[idx].plan = plansParse_(inp.value);
+  plansDirty_ = true;
+  plansPaintTotals_();
+}
+function plansPaintTotals_() {
+  var mgr = 0, internal = 0;
+  plansRows_.forEach(function(r) {
+    if (r.key === 'внутренние') internal += r.plan;
+    else if (!PLANS_SPECIAL_[r.key]) mgr += r.plan;
+  });
+  var set = function(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
+  set('plans-kpi-mgr', plansFmt_(mgr) + ' ₽');
+  set('plans-kpi-int', plansFmt_(internal) + ' ₽');
+  set('plans-kpi-total', plansFmt_(mgr + internal) + ' ₽');
+  set('plans-kpi-upd', plansMeta_ && plansMeta_.updated_at
+    ? plansMeta_.updated_at.slice(0, 16) + (plansMeta_.updated_by ? ' · ' + plansMeta_.updated_by.split('@')[0] : '')
+    : 'ещё не сохранялся');
+  var saveBtn = document.getElementById('plans-save-btn');
+  if (saveBtn) saveBtn.textContent = plansDirty_ ? 'Сохранить *' : 'Сохранить';
+}
+function plansShiftMonth_(delta) {
+  if (plansDirty_ && !confirm('Есть несохранённые изменения плана - уйти без сохранения?')) return;
+  plansTabLoad_(plansShiftKey_(plansMonth_ || plansCurMonthKey_(), delta));
+}
+function plansAddRow_() {
+  var inp = document.getElementById('plans-add-name');
+  var name = (inp && inp.value || '').trim();
+  var key = plansKeyOf_(name);
+  if (!key) return;
+  if (plansRows_.some(function(r) { return r.key === key; })) { p2Toast('Строка «' + name + '» уже есть', 'amber'); return; }
+  var sp = PLANS_SPECIAL_[key];
+  plansRows_.push({ key: key, manager: sp ? sp.manager : name.split(' ')[0], label: sp ? sp.label : name, role: sp ? sp.role : '—', plan: 0, fromServer: false });
+  inp.value = '';
+  plansDirty_ = true;
+  plansPaint_();
+}
+// Копия прошлого месяца - только в форму (не на сервер), сохранить нужно явно.
+function plansCopyPrev_() {
+  var prev = plansShiftKey_(plansMonth_ || plansCurMonthKey_(), -1);
+  fetchFromYardApi_('/manager_plans', { month: prev }).then(function(r) {
+    if (!r.ok || !r.data || !r.data.plans || !r.data.plans.length) { p2Toast('За ' + formatMonthLabel(prev) + ' плана нет', 'amber'); return; }
+    var byKey = {};
+    plansRows_.forEach(function(row) { byKey[row.key] = row; });
+    r.data.plans.forEach(function(p) {
+      var key = plansKeyOf_(p.manager);
+      if (byKey[key]) byKey[key].plan = Number(p.plan) || 0;
+      else {
+        var sp = PLANS_SPECIAL_[key];
+        plansRows_.push({ key: key, manager: sp ? sp.manager : p.manager, label: sp ? sp.label : p.manager, role: sp ? sp.role : '—', plan: Number(p.plan) || 0, fromServer: false });
+      }
+    });
+    plansDirty_ = true;
+    plansPaint_();
+    p2Toast('Скопировано из ' + formatMonthLabel(prev) + ' - проверьте и нажмите «Сохранить»', 'amber');
+  }).catch(function(e) { p2ToastErr('Не удалось прочитать прошлый месяц: ' + e.message); });
+}
+function plansSave_() {
+  if (!plansMonth_) return;
+  var btn = document.getElementById('plans-save-btn');
+  if (btn) btn.disabled = true;
+  var plans = plansRows_.map(function(r) { return { manager: r.manager, plan: r.plan }; });
+  postToYardApiWithBody_('/manager_plans/set', { month: plansMonth_, plans: plans }).then(function(r) {
+    if (!r.ok || !r.data || r.data.error) throw new Error((r.data && r.data.error) || 'ошибка сервера');
+    plansDirty_ = false;
+    p2Toast('План на ' + formatMonthLabel(plansMonth_) + ' сохранён (' + r.data.saved + ' строк)', 'green');
+    // Перечитать месяц (updated_by/updated_at) и освежить D - план сразу виден на Панели,
+    // "По менеджерам" и личных страницах без ручного "Обновить данные".
+    plansTabLoad_(plansMonth_);
+    if (typeof loadData === 'function') loadData();
+  }).catch(function(e) {
+    p2ToastErr('Не удалось сохранить план: ' + e.message);
+  }).finally(function() { if (btn) btn.disabled = false; });
 }
 
 // Открытая (valid_to===null) запись данного kind/resource_key - "где ресурс СЕЙЧАС".

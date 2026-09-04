@@ -3567,6 +3567,21 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
           <input autocomplete="off" id="legal-director-post" type="text" maxlength="200"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
       </div>
+      <!-- Светофор риска (02.09, Влад: "хочу найти бесплатный сервис, который будет давать
+           светофор по компаниям") - Checko.ru (бесплатный тариф, 100 запросов/день), формула
+           СВОЯ и прозрачная (см. checkoComputeLight_ на сервере) из официальных реестров:
+           ЕГРЮЛ/банкротство/дисквалификация/санкции/массовый адрес. Не автоматически - по
+           кнопке (квота общая на весь дашборд, не бьём по API при каждом открытии карточки).
+           Только для существующей записи - у новой ещё нет id, сохранять некуда. -->
+      <div class="asset-form-section">Проверка контрагента</div>
+      <div class="asset-form-grid">
+        <div class="asset-form-full" id="legal-risk-wrap">
+          <button type="button" id="legal-risk-btn" onclick="legalCheckRisk_()" data-nav-sound
+            style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:8px 14px;font-size:12.5px;cursor:pointer">
+            Проверить контрагента</button>
+          <div id="legal-risk-result" style="margin-top:10px"></div>
+        </div>
+      </div>
       <!-- Банковские реквизиты (31.08, Влад: "добавь возможность добавить банковские
            реквизиты") - вводятся вручную, не автозаполняются (лукап по БИК - отдельная
            задача, не запрошена сейчас). -->
@@ -11428,6 +11443,13 @@ var legalEditSnapshot_ = null;
 // хранится тут между открытием карточки и сохранением, чтобы не терялось при автозаполнении.
 var legalLastEgrulStatus_ = null;
 
+// Светофор риска - общие для списка (точка) и карточки (dot+подпись+причины).
+function legalRiskColor_(light) {
+  return light === 'red' ? 'var(--red)' : (light === 'yellow' ? 'var(--amber)' : (light === 'green' ? 'var(--green)' : 'var(--muted)'));
+}
+function legalRiskLabel_(light) {
+  return light === 'red' ? 'Красный' : (light === 'yellow' ? 'Жёлтый' : 'Зелёный');
+}
 function legalPaint_() {
   var body = document.getElementById('legal-body');
   if (!body || !spravLegalEntities_) return;
@@ -11446,8 +11468,14 @@ function legalPaint_() {
         'color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Править</button>';
     var ownBadge = le.is_own
       ? ' <span style="background:rgba(94,196,124,.15);color:var(--green);border-radius:5px;padding:1px 6px;font-size:10px;font-weight:600;vertical-align:middle">СВОЯ</span>' : '';
+    // Точка светофора в списке (02.09, Влад: "светофор по компаниям", множественное число -
+    // видеть все сразу, не только по одной в карточке). Нет проверки - вообще без точки, не
+    // серая "неизвестно"-точка (см. правило проекта: цвет только по делу, не для decoration).
+    var riskDot = le.risk_light
+      ? ' <span title="Проверка контрагента: ' + legalRiskLabel_(le.risk_light) + '" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' +
+        legalRiskColor_(le.risk_light) + ';vertical-align:middle;margin-left:2px"></span>' : '';
     return '<tr' + (le.is_deleted ? spravDeletedRowStyle_() : '') + '>' +
-      '<td><b>' + pageEsc_(le.name) + '</b>' + ownBadge + (le.is_deleted ? ' <span class="muted" style="font-size:11px">(удалено)</span>' : '') + '</td>' +
+      '<td><b>' + pageEsc_(le.name) + '</b>' + ownBadge + riskDot + (le.is_deleted ? ' <span class="muted" style="font-size:11px">(удалено)</span>' : '') + '</td>' +
       '<td class="muted">' + (le.full_name ? pageEsc_(le.full_name) : '—') + '</td>' +
       '<td class="muted">' + (le.notes ? pageEsc_(le.notes) : '—') + '</td>' +
       '<td class="num">' + actions + '</td>' +
@@ -11477,6 +11505,13 @@ function legalOpenForm_(id) {
   document.getElementById('legal-notes').value = le ? (le.notes || '') : '';
   document.getElementById('legal-error').style.display = 'none';
   document.getElementById('legal-del-btn').style.display = le ? '' : 'none';
+  // Светофор - показать уже сохранённый результат, если проверяли раньше; у новой записи
+  // (le===null) кнопка есть, но проверить нечего, пока не сохранили - см. legalCheckRisk_.
+  document.getElementById('legal-risk-btn').textContent = 'Проверить контрагента';
+  document.getElementById('legal-risk-btn').disabled = false;
+  var cachedReasons = [];
+  if (le && le.risk_reasons) { try { cachedReasons = JSON.parse(le.risk_reasons) || []; } catch (e) {} }
+  legalRenderRiskResult_(le ? le.risk_light : null, cachedReasons, le ? le.risk_checked_at : null);
   var bk = document.getElementById('legal-bk'), dr = document.getElementById('legal-drawer');
   bk.classList.add('show');
   setTimeout(function() { dr.classList.add('show'); }, 40);
@@ -11555,6 +11590,45 @@ function legalSave_() {
     legalCloseForm_();
     renderDirectory();
   }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+// Рисует блок результата в карточке - и для уже сохранённого (кэш из БД, открытие
+// карточки), и для только что пришедшего живого ответа (после нажатия кнопки).
+function legalRenderRiskResult_(light, reasons, checkedAt) {
+  var el = document.getElementById('legal-risk-result');
+  if (!el) return;
+  if (!light) { el.innerHTML = '<div class="muted" style="font-size:12px">Ещё не проверялось</div>'; return; }
+  var color = legalRiskColor_(light);
+  var reasonsHtml = (reasons && reasons.length)
+    ? '<ul style="margin:6px 0 0;padding-left:18px;font-size:12px;color:var(--muted)">' +
+      reasons.map(function(r) { return '<li>' + pageEsc_(r) + '</li>'; }).join('') + '</ul>'
+    : '<div class="muted" style="font-size:12px;margin-top:4px">Рисков по официальным реестрам не найдено</div>';
+  var whenHtml = checkedAt ? '<div class="muted" style="font-size:11px;margin-top:8px">Проверено: ' + pageEsc_(checkedAt) + '</div>' : '';
+  el.innerHTML =
+    '<div style="display:flex;align-items:center;gap:8px">' +
+      '<span style="width:10px;height:10px;border-radius:50%;background:' + color + ';flex:none"></span>' +
+      '<span style="font-size:13px;font-weight:600;color:' + color + '">' + legalRiskLabel_(light) + '</span>' +
+    '</div>' + reasonsHtml + whenHtml;
+}
+// Живая проверка через Checko.ru (см. /api/sprav/legal_entity_risk_check на сервере) -
+// только для уже сохранённой записи (id нужен, чтобы кэшировать результат в БД) и с
+// заполненным ИНН. Квота бесплатного тарифа общая на весь дашборд (100/день) - поэтому
+// по кнопке, не автоматически при каждом открытии карточки.
+function legalCheckRisk_() {
+  if (!legalEditId_) { p2Toast('Сначала сохраните юрлицо - потом можно проверить', 'red'); return; }
+  var inn = document.getElementById('legal-inn').value.trim();
+  if (!inn) { p2Toast('Заполните ИНН перед проверкой', 'red'); return; }
+  var btn = document.getElementById('legal-risk-btn');
+  btn.disabled = true; btn.textContent = 'Проверяю…';
+  postToYardApi_('/sprav/legal_entity_risk_check', { id: legalEditId_, inn: inn }).then(function(r) {
+    btn.disabled = false; btn.textContent = 'Проверить контрагента';
+    if (!r.ok) { p2Toast('Не удалось проверить: ' + (r.data && r.data.error || 'ошибка сервера'), 'red'); return; }
+    legalRenderRiskResult_(r.data.light, r.data.reasons, r.data.checked_at);
+    // Обновляем запись в памяти, чтобы точка в списке (legalPaint_) сразу показала новый
+    // цвет без полной перезагрузки Справочников.
+    var le = (spravLegalEntities_ || []).filter(function(x) { return String(x.id) === String(legalEditId_); })[0];
+    if (le) { le.risk_light = r.data.light; le.risk_reasons = JSON.stringify(r.data.reasons); le.risk_checked_at = r.data.checked_at; }
+    legalPaint_();
+  }).catch(function(e) { btn.disabled = false; btn.textContent = 'Проверить контрагента'; p2Toast('Ошибка сети: ' + e.message, 'red'); });
 }
 function legalDelete_() {
   if (!legalEditId_) return;

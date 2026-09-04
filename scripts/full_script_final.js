@@ -1103,6 +1103,9 @@ function runAll() {
   try { syncVehiclePlansToServer_(); log.push('✅ Планы ВП отправлены на сервер'); }
   catch(e) { errors.push('❌ Планы ВП на сервер: ' + e.message); }
 
+  try { mirrorManagerPlansFromServer_(); log.push('✅ Планы менеджеров: лист обновлён с сервера (зеркало)'); }
+  catch(e) { errors.push('❌ Зеркало планов менеджеров с сервера: ' + e.message); }
+
   try { normalizeOrders();         log.push('✅ Заказы нормализованы'); }
   catch(e) { errors.push('❌ Заказы (норм.): ' + e.message); }
 
@@ -1120,6 +1123,10 @@ function runAll() {
   // содержали сегодняшний снимок, а Заказы_данные/Нормализованные_данные - свежий импорт.
   try { saveMonthSummary_(SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID), Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM')); log.push('✅ Сводка месяца сохранена'); }
   catch(e) { errors.push('❌ Сводка месяца: ' + e.message); }
+
+  try { syncAccessLogToServer(); log.push('✅ Логи входов отправлены на сервер'); } catch (e) { log.push('⚠️ Логи входов: ' + e.message); }
+  try { syncMonthSummaryToServer_(); log.push('✅ История месяцев отправлена на сервер'); }
+  catch(e) { errors.push('❌ История месяцев на сервер: ' + e.message); }
 
   // 1С шлёт отчёт ДЗ раз в день в 15:00 (Влад, 2026-07-08) - в остальные прогоны письма
   // просто не будет, importDebtReport() кинет ошибку "не найдено за 2 дня", которая
@@ -1613,8 +1620,9 @@ function createTopDriversByPlan() {
 function saveDailyStats() {
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
 
-  // Используем getFleetStatus — тот же источник, что и дашборд
-  const fleet = getFleetStatus(getStaffData(ss));
+  // Используем getFleetStatus — тот же источник, что и дашборд (живой статус с сервера,
+  // этап 2.4-2, 02.09 - Штатку больше никто не ведёт, фолбэк только при недоступности сервера)
+  const fleet = getFleetStatus(getStaffData(ss), fetchFleetSummaryFromServer_());
   const tr = fleet.trailers;
   const tk = fleet.trucks;
 
@@ -3513,8 +3521,9 @@ function buildSummaryText() {
     }
   }
 
-  // Статус парка — из Штатки (все машины, включая без выручки)
-  var fleet = getFleetStatus(getStaffData(ss));
+  // Статус парка — живой с сервера (все машины, включая без выручки; этап 2.4-2, 02.09 -
+  // Штатку больше никто не ведёт, фолбэк только при недоступности сервера)
+  var fleet = getFleetStatus(getStaffData(ss), fetchFleetSummaryFromServer_());
   var workT = fleet.trailers.working, repairT = fleet.trailers.repair, noDriverT = fleet.trailers.noDriver;
   var workL = fleet.trucks.working,   repairL = fleet.trucks.repair,   noDriverL = fleet.trucks.noDriver;
 
@@ -4515,7 +4524,12 @@ function buildRosterFallback_(computed, monthKey) {
   try {
     var mgrCount = (computed.by_manager || []).length;
     var logCount = (computed.by_logist || []).length;
-    if (mgrCount >= ROSTER_MIN_SIZE_ && logCount >= ROSTER_MIN_SIZE_) return null;
+    // 04.09: порог убран (Влад: "у Миши не все менеджеры видны") - при 9 менеджерах с
+    // сентябрьскими заказами (>= 5) фолбэк пропускался, Котельников/Филипчук/Ратников
+    // выпадали. Слияние дедуплицировано и без цифр - делать ВСЕГДА. Зеркально с
+    // applyRosterFallback_ в api/server.js (основной путь). mgrCount/logCount оставлены
+    // для читаемости диагностики. НЕ задеплоено в живой /exec - лимит 200 версий
+    // Apps Script (см. память project_apps_script_version_limit_gotcha).
     var prev = fetchOrdersComputedFromServer_(prevMonthKey_(monthKey));
     if (!prev) return null;
     return {
@@ -5792,19 +5806,24 @@ function doGet(e) {
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
-    const staffData = getStaffData(ss); // читаем Штатку один раз - ЖИВОЙ документ, всегда live
+    const staffData = getStaffData(ss); // читаем Штатку один раз - фолбэк на случай недоступности сервера
+
+    // Живой статус (этап 2.4-2, 02.09) для fleet/repairs ниже. Отдельный вызов от того,
+    // что делает aggregateFinHistoryForRange (внутри getMainPayloadCacheOrLive_ ниже, если
+    // кэш устарел) - /api/fleet_summary лёгкий (53 машины, несколько простых SELECT), два
+    // вызова за один заход дешевле, чем городить общий кэш ради этого прямо сейчас.
+    const fleetSummaryByGos_admin_ = fetchFleetSummaryFromServer_();
 
     const data = Object.assign(
       {
         updated: new Date().toISOString(),
         role:    'admin',
         session_token: freshSessionToken,
-        // Живые поля - НЕ кэшируются в runAll() (см. buildHeavyMainPayload_). Штатка -
-        // "живой документ" (CLAUDE.md), её правят руками вне расписания runAll() - если
-        // закэшировать статус машины/ремонты на 3 часа, правки будут "зависать", это
-        // регресс, а не ускорение. Штатка маленькая (~55 строк), расчёт и так мгновенный.
-        fleet:       getFleetStatus(staffData),
-        repairs:     getRepairsData(staffData),
+        // Живые поля - НЕ кэшируются в runAll() (см. buildHeavyMainPayload_). Статус -
+        // с сервера (см. fleetSummaryByGos_admin_ выше), Штатка - фолбэк только если
+        // сервер недоступен.
+        fleet:       getFleetStatus(staffData, fleetSummaryByGos_admin_),
+        repairs:     getRepairsData(staffData, fleetSummaryByGos_admin_),
         staffMarkas: buildStaffMarkas_(staffData),
         // Активность сотрудников (2026-08-13) - дешёвый листовой запрос (десяток строк).
         access_log:  getAccessLogSummary_(ss),
@@ -5966,6 +5985,15 @@ function getMainPayloadCacheOrLive_(ss, staffData) {
       merged.vehicles = merged.vehicles.filter(function(v) { return !isExcludedVehicleGos_(v.gos); });
       merged.drivers = deriveDriversFromVehicles(merged.vehicles);
     }
+    // periods - ТОЖЕ живьём поверх кэша, тем же приёмом (2026-09-04, Влад: "куда август
+    // делся?" - до этой правки cached.periods держал старый список ДО 3 часов, а после
+    // фикса getAvailablePeriods() (сервер первым) - до следующего runAll(), т.е. до 3
+    // ЧАСОВ ПОСЛЕ ДЕПЛОЯ; loadAvailablePeriods() на фронте берёт D.periods напрямую и
+    // отдельный action=available_periods, где список уже был верным, не вызывает вообще).
+    // getAvailablePeriods() теперь дешёвый (один HTTP-запрос на сервер вместо скана
+    // вкладок Google-таблицы) - можно всегда считать живьём, как summary/orders/debt/
+    // receipts выше, без ожидания следующего triggered-пересчёта кэша.
+    merged.periods = getAvailablePeriods(ss);
     return merged;
   }
 
@@ -6254,16 +6282,21 @@ function setupShtatkaAutoMigration() {
 }
 
 // Список машин в ремонте из Штатки
-function getRepairsData(staffData) {
+// fleetSummaryByGos (этап 2.4-2, 02.09) - живой статус с сервера, ключ normalizeGos(),
+// тот же формат, что staffData. Штатка - фолбэк только когда сервер недоступен (см.
+// getFleetStatus рядом за тем же обоснованием - Штатку больше никто не ведёт).
+function getRepairsData(staffData, fleetSummaryByGos) {
   const repairs = [];
   const statuses = ['Ремонт', 'ремонт', 'РЕМОНТ'];
 
   for (const [gos, info] of Object.entries(staffData)) {
-    if (statuses.some(s => info.status.includes(s))) {
+    var fs = fleetSummaryByGos ? fleetSummaryByGos[gos] : null;
+    var status = (fs && fs.status) || info.status;
+    if (statuses.some(s => status.includes(s))) {
       repairs.push({
         gos: info.gosOriginal,
         type: info.type,
-        status: info.status,
+        status: status,
         driver: info.driver,
       });
     }
@@ -6366,6 +6399,11 @@ function fetchVehicleDriversFromServer_(asOfDate) {
 function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate, skipServerOverride, includeExcluded) {
   var from = new Date(fromDate); from.setHours(0, 0, 0, 0);
   var to = new Date(toDate); to.setHours(23, 59, 59, 999);
+  // "Диапазон включает сегодня" (этап 2.4-2, 02.09) - живой статус с сервера имеет смысл
+  // ТОЛЬКО для текущего/дефолтного вида ("Техника" без выбора периода) - для АРХИВНОГО
+  // месяца (например, выбрали "Июль") подставлять статус "прямо сейчас" было бы неверно
+  // (историческая финансовая запись со статусом из сегодня, вводит в заблуждение).
+  var rangeIncludesToday_ = to >= new Date(new Date().setHours(0, 0, 0, 0));
 
   var serverPark_ = skipServerOverride ? null : fetchParkHistoryFromServer_(from, to);
   var serverParkByGos_ = {};
@@ -6526,16 +6564,24 @@ function aggregateFinHistoryForRange(ss, staffData, fromDate, toDate, skipServer
         agg.gos = staffInfo.gosOriginal || agg.gos;
       }
     }
-    // fleet_summary (этап 2.3, 01.09) - марка/прицеп С СЕРВЕРА, ПОВЕРХ Штатки (не
-    // фолбэк) - сверено 01.09, 0 расхождений. Штатка мигрирует отдельно, этим полям
-    // безопаснее опираться на уже мигрированный источник (sprav_assets/fleet_assignments),
-    // чем на лист, который скоро перестанут обновлять. Статус/водитель НЕ трогаем -
-    // status другой природы (снимок за день, не тот же момент), водитель уже отдельно
-    // приоритетный ниже (driverByGos).
+    // fleet_summary (этап 2.3, 01.09-02.09, 2 захода сверки) - марка/прицеп С СЕРВЕРА,
+    // ПОВЕРХ Штатки (не фолбэк) - сверено дважды, 0 расхождений. Штатка мигрирует отдельно,
+    // этим полям безопаснее опираться на уже мигрированный источник (sprav_assets/
+    // fleet_assignments), чем на лист, который скоро перестанут обновлять. Тип - тоже 0
+    // расхождений оба раза, но остаётся ФОЛБЭКОМ (не поверх), т.к. и так уже надёжно
+    // приходит из истории почти всегда - переключать поверх нет смысла, только риск.
+    // Водитель НЕ трогаем здесь - уже отдельно приоритетный ниже (driverByGos).
     var fsInfo = fleetSummaryByGos_ ? fleetSummaryByGos_[normalizeGos(gos)] : null;
     if (fsInfo) {
       if (fsInfo.marka) agg.marka = fsInfo.marka;
       if (fsInfo.trailerGos) agg.trailer = fsInfo.trailerGos;
+      if (!agg.type && fsInfo.type) agg.type = fsInfo.type; // фолбэк тем же приёмом, что Штатка выше
+      // Статус - живой с сервера ПОВЕРХ (этап 2.4-2, 02.09, Влад подтвердил: Штатку больше
+      // никто не ведёт, статус из неё - замороженные старые данные, живой расчёт по
+      // Планировке сверен с уже проверенной картой "Статус парка" - 53/53 совпадение).
+      // ТОЛЬКО когда диапазон включает сегодня - иначе это статус "прямо сейчас",
+      // приклеенный к архивной финансовой строке, вводит в заблуждение.
+      if (rangeIncludesToday_ && fsInfo.status) agg.status = fsInfo.status;
     }
     if (driverByGos[gos]) agg.driver = driverByGos[gos].driver; // приоритет - водитель за сам период
     // Перезаписываем деньги с сервера (план 2026-08-31) - ТОЛЬКО 7 финансовых полей, если
@@ -6808,14 +6854,21 @@ function getSummaryData(ss, ordersData) {
 
 // staffData — результат getStaffData(ss). Считаем по всему парку (включая машины без выручки).
 // Длинномеры = тип начинается на "Борт", всё остальное = тралы.
-function getFleetStatus(staffData) {
+// fleetSummaryByGos (этап 2.4-2, 02.09, Влад подтвердил: "Штатку уже никто не ведёт, все
+// работают в Планировке в дашборде") - живой статус с сервера (computeLiveVehicleStatus_,
+// api/server.js), сверен с уже проверенной картой "Статус парка" на главной - 53/53
+// совпадение (не с самой Штаткой - та больше не источник правды). Ключ - normalizeGos(),
+// тот же формат, что staffData. Штатка остаётся фолбэком ТОЛЬКО на случай, если сервер
+// недоступен (null) - тихая деградация, не завязка на неё как на истину.
+function getFleetStatus(staffData, fleetSummaryByGos) {
   var tWork=0, tRepair=0, tNoDrv=0, tNoOrder=0;
   var lWork=0, lRepair=0, lNoDrv=0, lNoOrder=0;
 
   for (var gos in staffData) {
     var v = staffData[gos];
     var type   = v.type   || '';
-    var status = v.status || '';
+    var fs = fleetSummaryByGos ? fleetSummaryByGos[gos] : null;
+    var status = (fs && fs.status) || v.status || '';
     var isTruck   = type === 'Борт' || type.indexOf('Борт') === 0;
     var isWork    = status.indexOf('В работе')    >= 0;
     var isRepair  = status.indexOf('Ремонт')      >= 0;
@@ -6829,9 +6882,12 @@ function getFleetStatus(staffData) {
     }
   }
 
+  // total - динамически (сумма 4 бакетов), не хардкод (было 36/19 - найдено расходящимся
+  // с реальным составом парка 02.09 при сверке с /api/main_payload: факт 34 трейлера, не
+  // 36 - старые магические числа устарели вместе с составом парка).
   return {
-    trailers: { total:36, working:tWork, noDriver:tNoDrv, repair:tRepair, noOrder:tNoOrder },
-    trucks:   { total:19, working:lWork, noDriver:lNoDrv, repair:lRepair, noOrder:lNoOrder },
+    trailers: { total: tWork+tRepair+tNoDrv+tNoOrder, working:tWork, noDriver:tNoDrv, repair:tRepair, noOrder:tNoOrder },
+    trucks:   { total: lWork+lRepair+lNoDrv+lNoOrder, working:lWork, noDriver:lNoDrv, repair:lRepair, noOrder:lNoOrder },
   };
 }
 
@@ -7418,6 +7474,11 @@ function verifyFleetSummary_() {
     return out;
   }
   var typeMismatch = [], planMismatch = [], missingOnServer = [], markaDiff = 0, driverDiff = 0, trailerDiff = 0;
+  // status - добавлено 02.09 (второй заход этапа 2.3, Влад на связи) - fleet_summary отдаёт
+  // СНИМОК самого свежего дня (vehicle_status_daily), Штатка - живую колонку СЕЙЧАС, поэтому
+  // расхождения здесь ОЖИДАЕМЫ по природе полей (не то же самое измерение) - считаем и
+  // показываем примеры, но не считаем "проблемой" саму по себе.
+  var statusDiff = 0, statusExamples = [];
   Object.keys(staffData).forEach(function(gosNorm) {
     var sh = staffData[gosNorm];
     var svKey = normalizeGosLikeServer_(sh.gosOriginal);
@@ -7428,6 +7489,10 @@ function verifyFleetSummary_() {
     if ((sh.marka || '') !== (sv.marka || '')) markaDiff++;
     if ((sh.driver || '') !== (sv.driver || '')) driverDiff++;
     if ((sh.trailerGos || '') !== (sv.trailerGos || '')) trailerDiff++;
+    if ((sh.status || '') !== (sv.status || '')) {
+      statusDiff++;
+      if (statusExamples.length < 10) statusExamples.push(sh.gosOriginal + ': Штатка="' + sh.status + '" сервер(' + sv.status_as_of + ')="' + sv.status + '"');
+    }
   });
 
   return {
@@ -7439,6 +7504,8 @@ function verifyFleetSummary_() {
     marka_diff_count: markaDiff,   // информационно, не обязано быть 0
     driver_diff_count: driverDiff, // информационно, не обязано быть 0
     trailer_diff_count: trailerDiff, // информационно, не обязано быть 0
+    status_diff_count: statusDiff, // информационно (снимок дня vs живая колонка) - см. примеры
+    status_diff_examples: statusExamples,
   };
 }
 
@@ -11002,6 +11069,12 @@ function generateRyschanowAiTasksCached_(ss, orders, name, period, force) {
 // чтобы план можно было менять по месяцам без правки скрипта. См.
 // plans/2026-07-02-manager-revenue-single-source.md.
 function getManagerPlans_(ss, monthKey) {
+  // 04.09.2026 - источник истины теперь СЕРВЕР (manager_plans, правится в дашборде:
+  // Справочники -> Планы продаж, план plans/2026-09-04-sales-plans-tool.md). Лист
+  // "Планы_менеджеров" - read-only зеркало (mirrorManagerPlansFromServer_ ниже), читаем его
+  // только как тихий фолбэк при недоступности сервера - тот же приём, что у заказов/ДЗ.
+  var fromServer = fetchManagerPlansFromServer_(monthKey);
+  if (fromServer) return fromServer;
   const sheet = ss.getSheetByName('Планы_менеджеров');
   if (!sheet || sheet.getLastRow() < 2) return {};
   const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
@@ -11026,6 +11099,129 @@ function getManagerPlans_(ss, monthKey) {
 // "Внутренних перевозок" - та же строка "Планы_менеджеров", ключ "Внутренние" (не человек,
 // но механизм тот же самый - Влад сам вписывает план в тот же лист, без отдельной константы
 // в коде, см. Влад 2026-07-03: "откуда цифра 10 миллионов - установить план").
+// Мост планов менеджеров на сервер (2026-09-02, план plans/2026-09-01-apps-script-
+// elimination.md, этап 3.1) - НАЙДЕНА ДЫРА при первой проверке /api/main_payload:
+// manager_plans на сервере застряла на августе (13 строк), сентябрь - 0, salesPlan везде
+// показывал 0. Причина - старый мост (export_manager_plans в doGet, import-manager-
+// plans.js на VPS) был убран из doGet ещё раньше ("убрать после переноса" в его же
+// комментарии), а VPS-скрипт остался ссылаться на несуществующий action - молча ничего не
+// делал с тех пор. Этот дашборд НИКОГДА не зависел от manager_plans-таблицы на сервере
+// напрямую (joinManagerPlans_ ВСЕГДА читает лист живьём, см. выше) - но serveр-side
+// main_payload читает именно эту таблицу через orders-calc.js, ей тоже нужен рабочий мост.
+// Тот же приём, что vehicle_plans/access_list - полная перезаливка (Влад правит редко,
+// вручную раз в месяц, TRUNCATE+reload безопасен и достаточен).
+// 04.09.2026 - НАПРАВЛЕНИЕ РАЗВЁРНУТО (plans/2026-09-04-sales-plans-tool.md, Влад: "уходим
+// от Excel-таблиц... делаем всё через дашборд и сервер"). Прежний syncManagerPlansToServer_
+// (лист -> сервер, TRUNCATE) удалён: он затирал бы каждые 3 часа то, что Влад ввёл в UI.
+// Сервер (manager_plans) - единственный источник, этот мост теперь СЕРВЕР -> ЛИСТ: лист
+// "Планы_менеджеров" переписывается целиком как read-only зеркало (инвариант 3 плана
+// миграции - привычный аудит глазами в Google-таблице сохраняется). Роут-приёмник старого
+// направления на сервере отвечает 405 - даже старая версия скрипта ничего не сотрёт.
+function fetchManagerPlansFromServer_(monthKey) {
+  try {
+    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    if (!apiKey) return null;
+    var resp = UrlFetchApp.fetch(
+      'https://api.yardhub.ru/api/manager_plans' + (monthKey ? '?month=' + encodeURIComponent(monthKey) : ''),
+      { headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true }
+    );
+    if (resp.getResponseCode() !== 200) return null;
+    var data = JSON.parse(resp.getContentText());
+    if (!data || !Array.isArray(data.plans)) return null;
+    if (!monthKey) return data.plans; // сырые строки всех месяцев - для зеркала
+    var plans = {};
+    data.plans.forEach(function(p) {
+      var name = String(p.manager || '').trim().toLowerCase();
+      if (name) plans[name] = parseFloat(p.plan) || 0;
+    });
+    return plans;
+  } catch (err) {
+    return null;
+  }
+}
+
+function mirrorManagerPlansFromServer_() {
+  var rows = fetchManagerPlansFromServer_(null);
+  if (!rows || !rows.length) return; // сервер недоступен/пусто - зеркало не трогаем
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var sheet = ss.getSheetByName('Планы_менеджеров') || ss.insertSheet('Планы_менеджеров');
+  var values = [['Месяц', 'Менеджер', 'План', 'ЗЕРКАЛО СЕРВЕРА с 04.09.2026 - правки здесь НЕ учитываются, план ставится в дашборде: Справочники -> Планы продаж']];
+  rows.forEach(function(p) { values.push([String(p.month), String(p.manager), Number(p.plan) || 0, '']); });
+  sheet.clearContents();
+  sheet.getRange(1, 1, values.length, 4).setValues(values);
+  // Месяц - явно текст, иначе Google Таблица превращает "2026-09" в дату (баг 2026-07-02).
+  sheet.getRange(2, 1, Math.max(1, values.length - 1), 1).setNumberFormat('@');
+}
+
+// Мост "История_месяцев" на сервер (2026-09-03) - тот же класс дыры, что вчера у
+// manager_plans, найдено вживую (Влад: "выручка по августу неадекватная" - дашборд
+// показывал 27.9М вместо реальных 61.9М). Старый мост (import-month-summary.js на VPS,
+// action=export_month_summary) был ОДНОРАЗОВЫМ, не в crontab, а action давно убран из
+// doGet - таблица month_summary на сервере молча застряла на снимке от 15-17 августа,
+// никогда не обновлялась при закрытии месяца. Тот же приём, что syncManagerPlansToServer_
+// выше - полная перезаливка (Влад не правит этот лист руками).
+// Перенос заходов из "Логи_входов" на сервер (04.09, Влад: "и старые данные подтяни, чтобы
+// в общем было, и сохрани на сервер"). Сервер держит их в отдельной колонке legacy_visits
+// и суммирует с живым счётчиком (/api/main_payload) - вызов ИДЕМПОТЕНТЕН, можно слать
+// каждый runAll. Без "_" в конце - чтобы можно было запустить руками из редактора
+// (см. память: раннеры с "_" не видны в списке "Выполнить").
+function syncAccessLogToServer() {
+  var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+  if (!apiKey) return;
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var rows = getAccessLogSummary_(ss); // {email, name, role, first_visit, last_visit, count}
+  if (!rows.length) return;
+  var resp = UrlFetchApp.fetch('https://api.yardhub.ru/api/access_log_import', {
+    method: 'post', contentType: 'application/json',
+    headers: { 'X-Api-Key': apiKey },
+    payload: JSON.stringify({ rows: rows }),
+    muteHttpExceptions: true,
+  });
+  if (resp.getResponseCode() !== 200) throw new Error('HTTP ' + resp.getResponseCode() + ': ' + resp.getContentText().slice(0, 200));
+}
+
+// Отдельный частый триггер для syncAccessLogToServer (04.09, Влад: "Филипчук точно заходила
+// сегодня, но я её не вижу"). Менеджеры/логисты грузят страницу через doGet (сервер отдаёт им
+// 403 на /api/main_payload), их визиты пишет logAccessVisit_ в лист - на сервер они попадают
+// ТОЛЬКО этой синхронизацией. runAll ходит 6 раз в сутки (до 3 ч задержки) - для карточки
+// "Активность сотрудников" это долго, поэтому свой триггер раз в 15 минут. Запустить ОДИН раз
+// руками из редактора (Выполнить -> setupAccessLogSyncTrigger); повторный запуск безопасен -
+// старые триггеры этой функции удаляются перед созданием нового.
+function setupAccessLogSyncTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'syncAccessLogToServer') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('syncAccessLogToServer').timeBased().everyMinutes(15).create();
+  Logger.log('Триггер syncAccessLogToServer каждые 15 минут создан');
+}
+
+function syncMonthSummaryToServer_() {
+  var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+  if (!apiKey) return;
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var sheet = ss.getSheetByName(MONTH_SUMMARY_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) return;
+  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, MONTH_SUMMARY_HEADERS.length).getValues();
+  var rows = [];
+  data.forEach(function(r) {
+    var mk = monthKeyFrom_(r[0]);
+    if (!mk) return;
+    rows.push({
+      month: mk, revenue: r[1] || 0, salesPlan: r[2] || 0, profit: r[3] || 0,
+      profitTral: r[4] || 0, profitLong: r[5] || 0, fot: r[6] || 0, fuel: r[7] || 0,
+      parts: r[8] || 0, fines: r[9] || 0, tolls: r[10] || 0, hiredProfit: r[11] || 0,
+      hiredRevenue: r[12] || 0, cash: r[14] || 0, commercial: r[15] || 0,
+    });
+  });
+  if (!rows.length) return;
+  UrlFetchApp.fetch('https://api.yardhub.ru/api/month_summary', {
+    method: 'post', contentType: 'application/json',
+    headers: { 'X-Api-Key': apiKey },
+    payload: JSON.stringify({ months: rows }),
+    muteHttpExceptions: true,
+  });
+}
+
 function joinManagerPlans_(ss, ordersResult, monthKey) {
   if (!ordersResult) return ordersResult;
   const plans = getManagerPlans_(ss, monthKey);
@@ -11049,7 +11245,31 @@ function joinManagerPlans_(ss, ordersResult, monthKey) {
 
 
 // Список месяцев, по которым есть архив (для выпадающего списка на дашборде)
+// Сервер первым (2026-09-04, Влад вживую: "куда август делся?") - НАЙДЕНО: скан вкладок
+// ниже зависит от email-канала 1С, который остановлен 17-19.08 (см. "КРИТИЧЕСКОЕ ОТКРЫТИЕ"
+// в plans/2026-09-01-apps-script-elimination.md) - вкладка "Заказы_2026-08" не создалась
+// вообще, месяц молча выпал из списка (и любой следующий месяц выпадал бы так же). Сервер
+// строит список из orders_normalized/orders_archive - тех же таблиц, откуда дашборд и так
+// уже читает сами данные периода, независимо от мёртвого email-канала.
+function fetchAvailablePeriodsFromServer_() {
+  try {
+    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    if (!apiKey) return null;
+    var resp = UrlFetchApp.fetch('https://api.yardhub.ru/api/available_periods', {
+      headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true,
+    });
+    if (resp.getResponseCode() !== 200) return null;
+    var data = JSON.parse(resp.getContentText());
+    if (!data || !Array.isArray(data.periods) || !data.periods.length) return null;
+    return data.periods;
+  } catch (err) {
+    return null;
+  }
+}
+
 function getAvailablePeriods(ss) {
+  var fromServer = fetchAvailablePeriodsFromServer_();
+  if (fromServer) return fromServer;
   // Текущий календарный месяц исключаем, даже если под его именем случайно завалялся
   // архивный лист (Влад, 2026-08-04: "2026-08" в выпадающем списке дублировал "Текущий
   // месяц" и падал с "Архив за 2026-08 пуст" - в списке архивов ему в принципе не место,

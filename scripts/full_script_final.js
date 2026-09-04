@@ -1103,8 +1103,8 @@ function runAll() {
   try { syncVehiclePlansToServer_(); log.push('✅ Планы ВП отправлены на сервер'); }
   catch(e) { errors.push('❌ Планы ВП на сервер: ' + e.message); }
 
-  try { syncManagerPlansToServer_(); log.push('✅ Планы менеджеров отправлены на сервер'); }
-  catch(e) { errors.push('❌ Планы менеджеров на сервер: ' + e.message); }
+  try { mirrorManagerPlansFromServer_(); log.push('✅ Планы менеджеров: лист обновлён с сервера (зеркало)'); }
+  catch(e) { errors.push('❌ Зеркало планов менеджеров с сервера: ' + e.message); }
 
   try { normalizeOrders();         log.push('✅ Заказы нормализованы'); }
   catch(e) { errors.push('❌ Заказы (норм.): ' + e.message); }
@@ -11060,6 +11060,12 @@ function generateRyschanowAiTasksCached_(ss, orders, name, period, force) {
 // чтобы план можно было менять по месяцам без правки скрипта. См.
 // plans/2026-07-02-manager-revenue-single-source.md.
 function getManagerPlans_(ss, monthKey) {
+  // 04.09.2026 - источник истины теперь СЕРВЕР (manager_plans, правится в дашборде:
+  // Справочники -> Планы продаж, план plans/2026-09-04-sales-plans-tool.md). Лист
+  // "Планы_менеджеров" - read-only зеркало (mirrorManagerPlansFromServer_ ниже), читаем его
+  // только как тихий фолбэк при недоступности сервера - тот же приём, что у заказов/ДЗ.
+  var fromServer = fetchManagerPlansFromServer_(monthKey);
+  if (fromServer) return fromServer;
   const sheet = ss.getSheetByName('Планы_менеджеров');
   if (!sheet || sheet.getLastRow() < 2) return {};
   const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
@@ -11095,29 +11101,47 @@ function getManagerPlans_(ss, monthKey) {
 // main_payload читает именно эту таблицу через orders-calc.js, ей тоже нужен рабочий мост.
 // Тот же приём, что vehicle_plans/access_list - полная перезаливка (Влад правит редко,
 // вручную раз в месяц, TRUNCATE+reload безопасен и достаточен).
-function syncManagerPlansToServer_() {
-  var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
-  if (!apiKey) return;
+// 04.09.2026 - НАПРАВЛЕНИЕ РАЗВЁРНУТО (plans/2026-09-04-sales-plans-tool.md, Влад: "уходим
+// от Excel-таблиц... делаем всё через дашборд и сервер"). Прежний syncManagerPlansToServer_
+// (лист -> сервер, TRUNCATE) удалён: он затирал бы каждые 3 часа то, что Влад ввёл в UI.
+// Сервер (manager_plans) - единственный источник, этот мост теперь СЕРВЕР -> ЛИСТ: лист
+// "Планы_менеджеров" переписывается целиком как read-only зеркало (инвариант 3 плана
+// миграции - привычный аудит глазами в Google-таблице сохраняется). Роут-приёмник старого
+// направления на сервере отвечает 405 - даже старая версия скрипта ничего не сотрёт.
+function fetchManagerPlansFromServer_(monthKey) {
+  try {
+    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    if (!apiKey) return null;
+    var resp = UrlFetchApp.fetch(
+      'https://api.yardhub.ru/api/manager_plans' + (monthKey ? '?month=' + encodeURIComponent(monthKey) : ''),
+      { headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true }
+    );
+    if (resp.getResponseCode() !== 200) return null;
+    var data = JSON.parse(resp.getContentText());
+    if (!data || !Array.isArray(data.plans)) return null;
+    if (!monthKey) return data.plans; // сырые строки всех месяцев - для зеркала
+    var plans = {};
+    data.plans.forEach(function(p) {
+      var name = String(p.manager || '').trim().toLowerCase();
+      if (name) plans[name] = parseFloat(p.plan) || 0;
+    });
+    return plans;
+  } catch (err) {
+    return null;
+  }
+}
+
+function mirrorManagerPlansFromServer_() {
+  var rows = fetchManagerPlansFromServer_(null);
+  if (!rows || !rows.length) return; // сервер недоступен/пусто - зеркало не трогаем
   var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-  var sheet = ss.getSheetByName('Планы_менеджеров');
-  if (!sheet || sheet.getLastRow() < 2) return;
-  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
-  var rows = [];
-  data.forEach(function(r) {
-    // Та же защита от Date-мутации ячейки, что и в getManagerPlans_ ниже (реальный баг,
-    // пойманный 2026-07-02 - план был 0 у всех из-за несовпадения типов).
-    var mk = r[0] instanceof Date ? Utilities.formatDate(r[0], 'Europe/Moscow', 'yyyy-MM') : String(r[0] || '').trim();
-    var name = String(r[1] || '').trim();
-    if (!mk || !name) return;
-    rows.push({ month: mk, manager: name, plan: parseFloat(r[2]) || 0 });
-  });
-  if (!rows.length) return;
-  UrlFetchApp.fetch('https://api.yardhub.ru/api/manager_plans', {
-    method: 'post', contentType: 'application/json',
-    headers: { 'X-Api-Key': apiKey },
-    payload: JSON.stringify({ plans: rows }),
-    muteHttpExceptions: true,
-  });
+  var sheet = ss.getSheetByName('Планы_менеджеров') || ss.insertSheet('Планы_менеджеров');
+  var values = [['Месяц', 'Менеджер', 'План', 'ЗЕРКАЛО СЕРВЕРА с 04.09.2026 - правки здесь НЕ учитываются, план ставится в дашборде: Справочники -> Планы продаж']];
+  rows.forEach(function(p) { values.push([String(p.month), String(p.manager), Number(p.plan) || 0, '']); });
+  sheet.clearContents();
+  sheet.getRange(1, 1, values.length, 4).setValues(values);
+  // Месяц - явно текст, иначе Google Таблица превращает "2026-09" в дату (баг 2026-07-02).
+  sheet.getRange(2, 1, Math.max(1, values.length - 1), 1).setNumberFormat('@');
 }
 
 // Мост "История_месяцев" на сервер (2026-09-03) - тот же класс дыры, что вчера у

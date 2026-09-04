@@ -12072,6 +12072,16 @@ function legalRiskColor_(light) {
 function legalRiskLabel_(light) {
   return light === 'red' ? 'Красный' : (light === 'yellow' ? 'Жёлтый' : 'Зелёный');
 }
+// Текст для title-подсказки над точкой в списке (04.09, Влад: "можно при наведении более
+// подробную информацию") - причины из risk_reasons (JSON-строка из БД), не только цвет.
+function legalRiskTooltip_(le) {
+  var reasons = [];
+  if (le.risk_reasons) { try { reasons = JSON.parse(le.risk_reasons) || []; } catch (e) {} }
+  var head = 'Проверка контрагента: ' + legalRiskLabel_(le.risk_light);
+  if (le.risk_checked_at) head += ' (' + le.risk_checked_at + ')';
+  if (!reasons.length) return head + '\nРисков по официальным реестрам не найдено';
+  return head + '\n' + reasons.map(function(r) { return '— ' + r; }).join('\n');
+}
 function legalPaint_() {
   var body = document.getElementById('legal-body');
   if (!body || !spravLegalEntities_) return;
@@ -12113,8 +12123,10 @@ function legalPaint_() {
     // Точка светофора в списке (02.09, Влад: "светофор по компаниям", множественное число -
     // видеть все сразу, не только по одной в карточке). Нет проверки - вообще без точки, не
     // серая "неизвестно"-точка (см. правило проекта: цвет только по делу, не для decoration).
+    // При наведении - не только цвет, но и САМИ причины (04.09, Влад: "можно при наведении
+    // более подробную информацию") - обычный title, переносы строк браузер показывает как есть.
     var riskDot = le.risk_light
-      ? ' <span title="Проверка контрагента: ' + legalRiskLabel_(le.risk_light) + '" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' +
+      ? ' <span title="' + pageEscAttr_(legalRiskTooltip_(le)) + '" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' +
         legalRiskColor_(le.risk_light) + ';vertical-align:middle;margin-left:2px"></span>' : '';
     return '<tr' + (le.is_deleted ? spravDeletedRowStyle_() : '') + '>' +
       '<td><b>' + pageEsc_(le.name) + '</b>' + ownBadge + riskDot + (le.inn ? ' <span class="muted" style="font-size:11px">ИНН ' + pageEsc_(le.inn) + '</span>' : '') + (le.is_deleted ? ' <span class="muted" style="font-size:11px">(удалено)</span>' : '') + '</td>' +

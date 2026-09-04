@@ -6604,7 +6604,10 @@ var COMMERCIAL_HEAD_SUR_FRONT_ = ['ахтамова', 'гусейнова'];
 // CRM для менеджеров - поимённо (Влад, 04.09: «открой доступ к CRM Филипчук пока только»).
 // Тот же список продублирован на сервере (CRM_MANAGER_SURNAMES в api/server.js) - фронт
 // только прячет пункт меню, право решает сервер. Расширять - в ОБЕИХ точках.
-var CRM_MANAGER_SUR_FRONT_ = ['филипчук'];
+// 04.09, позже тем же днём (Влад: «всем менеджерам открой CRM») - правило зеркалит сервер
+// (isCrmAllowed_ в api/server.js): ЛЮБОЙ менеджер - да; список фамилий ниже оставлен
+// пустым как точечное расширение для других ролей (логист и т.п.), если понадобится.
+var CRM_MANAGER_SUR_FRONT_ = [];
 function isCommercialHeadEntry_(entry) {
   return !!entry && entry.type === 'manager' && COMMERCIAL_HEAD_SUR_FRONT_.indexOf(entry.name.trim().split(' ')[0].toLowerCase()) >= 0;
 }
@@ -9694,7 +9697,8 @@ function applyRoleUI() {
     if (!isColumnHeadViewer) allowedPages_.push('order-plan');
     if (isRyschanowViewer) allowedPages_.push('ryschanow-salary');
     if (isCommercialHeadViewer) allowedPages_.push('commercial-head-salary', 'commercial-head-debt');
-    if (CRM_MANAGER_SUR_FRONT_.indexOf(curPersonSur) >= 0) allowedPages_.push('crm');
+    var isManagerViewer_ = previewing ? !!(viewAsEntry && viewAsEntry.type === 'manager') : (D.role === 'manager');
+    if (isManagerViewer_ || CRM_MANAGER_SUR_FRONT_.indexOf(curPersonSur) >= 0) allowedPages_.push('crm');
     document.querySelectorAll('.sidebar-nav-item').forEach(function(item) {
       const page = item.getAttribute('data-page');
       item.style.display = allowedPages_.indexOf(page) >= 0 ? '' : 'none';

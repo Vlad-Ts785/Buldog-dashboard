@@ -5985,6 +5985,15 @@ function getMainPayloadCacheOrLive_(ss, staffData) {
       merged.vehicles = merged.vehicles.filter(function(v) { return !isExcludedVehicleGos_(v.gos); });
       merged.drivers = deriveDriversFromVehicles(merged.vehicles);
     }
+    // periods - ТОЖЕ живьём поверх кэша, тем же приёмом (2026-09-04, Влад: "куда август
+    // делся?" - до этой правки cached.periods держал старый список ДО 3 часов, а после
+    // фикса getAvailablePeriods() (сервер первым) - до следующего runAll(), т.е. до 3
+    // ЧАСОВ ПОСЛЕ ДЕПЛОЯ; loadAvailablePeriods() на фронте берёт D.periods напрямую и
+    // отдельный action=available_periods, где список уже был верным, не вызывает вообще).
+    // getAvailablePeriods() теперь дешёвый (один HTTP-запрос на сервер вместо скана
+    // вкладок Google-таблицы) - можно всегда считать живьём, как summary/orders/debt/
+    // receipts выше, без ожидания следующего triggered-пересчёта кэша.
+    merged.periods = getAvailablePeriods(ss);
     return merged;
   }
 

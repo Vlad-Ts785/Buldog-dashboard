@@ -12079,10 +12079,27 @@ var legalLastEgrulStatus_ = null;
 
 // Светофор риска - общие для списка (точка) и карточки (dot+подпись+причины).
 function legalRiskColor_(light) {
-  return light === 'red' ? 'var(--red)' : (light === 'yellow' ? 'var(--amber)' : (light === 'green' ? 'var(--green)' : 'var(--muted)'));
+  return (light === 'red' || light === 'bankrupt') ? 'var(--red)'
+    : (light === 'yellow' ? 'var(--amber)' : (light === 'green' ? 'var(--green)' : 'var(--muted)'));
 }
 function legalRiskLabel_(light) {
-  return light === 'red' ? 'Красный' : (light === 'yellow' ? 'Жёлтый' : 'Зелёный');
+  return light === 'bankrupt' ? 'Банкрот' : (light === 'red' ? 'Красный' : (light === 'yellow' ? 'Жёлтый' : (light === 'green' ? 'Зелёный' : String(light || ''))));
+}
+// Маркер светофора - цветная точка; для банкрота - череп (Влад, 05.09: "вместо красного
+// круга череп ставить банкроты"). Череп - Tabler "skull" инлайн-SVG в красном, не emoji
+// (ГОСТ: emoji в интерфейсе нет; размер/цвет - как у точки). Одна функция на все места:
+// список юрлиц, драйвер, таблицы ДЗ, карточка контрагента.
+function legalRiskMarkHtml_(light, size, style) {
+  style = style || '';
+  if (light === 'bankrupt') {
+    var s = Math.round(size * 1.7);
+    return '<svg width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="Банкрот" style="display:inline-block;vertical-align:middle;flex:none;' + style + '">' +
+      '<path d="M12 4c4.418 0 8 3.358 8 7.5c0 1.901-.755 3.637-2 4.96V19a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-2.54C4.755 15.137 4 13.401 4 11.5 4 7.358 7.582 4 12 4z"/>' +
+      '<path d="M10 17v3"/><path d="M14 17v3"/>' +
+      '<path d="M9 11m-1 0a1 1 0 1 0 2 0a1 1 0 1 0-2 0"/><path d="M15 11m-1 0a1 1 0 1 0 2 0a1 1 0 1 0-2 0"/></svg>';
+  }
+  return '<span style="display:inline-block;width:' + size + 'px;height:' + size + 'px;border-radius:50%;background:' +
+    legalRiskColor_(light) + ';vertical-align:middle;flex:none;' + style + '"></span>';
 }
 // Текст для title-подсказки над точкой в списке (04.09, Влад: "можно при наведении более
 // подробную информацию") - причины из risk_reasons (JSON-строка из БД), не только цвет.
@@ -12138,8 +12155,8 @@ function legalPaint_() {
     // При наведении - не только цвет, но и САМИ причины (04.09, Влад: "можно при наведении
     // более подробную информацию") - обычный title, переносы строк браузер показывает как есть.
     var riskDot = le.risk_light
-      ? ' <span title="' + pageEscAttr_(legalRiskTooltip_(le)) + '" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' +
-        legalRiskColor_(le.risk_light) + ';vertical-align:middle;margin-left:2px"></span>' : '';
+      ? ' <span title="' + pageEscAttr_(legalRiskTooltip_(le)) + '" style="display:inline-block;vertical-align:middle;margin-left:2px">' +
+        legalRiskMarkHtml_(le.risk_light, 8) + '</span>' : '';
     return '<tr' + (le.is_deleted ? spravDeletedRowStyle_() : '') + '>' +
       '<td><b>' + pageEsc_(le.name) + '</b>' + ownBadge + riskDot + (le.inn ? ' <span class="muted" style="font-size:11px">ИНН ' + pageEsc_(le.inn) + '</span>' : '') + (le.is_deleted ? ' <span class="muted" style="font-size:11px">(удалено)</span>' : '') + '</td>' +
       '<td class="muted">' + (le.full_name ? pageEsc_(le.full_name) : '—') + '</td>' +
@@ -12271,7 +12288,7 @@ function legalRenderRiskResult_(light, reasons, checkedAt) {
   var whenHtml = checkedAt ? '<div class="muted" style="font-size:11px;margin-top:8px">Проверено: ' + pageEsc_(checkedAt) + '</div>' : '';
   el.innerHTML =
     '<div style="display:flex;align-items:center;gap:8px">' +
-      '<span style="width:10px;height:10px;border-radius:50%;background:' + color + ';flex:none"></span>' +
+      legalRiskMarkHtml_(light, 10) +
       '<span style="font-size:13px;font-weight:600;color:' + color + '">' + legalRiskLabel_(light) + '</span>' +
     '</div>' + reasonsHtml + whenHtml;
 }
@@ -17974,7 +17991,7 @@ function debtRiskBlockHtml_(contragent) {
     : '<div class="muted" style="font-size:12px;margin-top:2px">Рисков по официальным реестрам не найдено</div>';
   return '<div style="margin-bottom:16px;padding:10px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px">' +
     '<div style="display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:' + color + '">' +
-      '<span style="width:9px;height:9px;border-radius:50%;background:' + color + ';flex:none"></span>' +
+      legalRiskMarkHtml_(m.light, 9) +
       'Проверка контрагента: ' + legalRiskLabel_(m.light) +
       (m.checked_at ? '<span class="muted" style="font-weight:400;font-size:11px;margin-left:auto">' + pageEsc_(m.checked_at) + '</span>' : '') +
     '</div>' + reasons + '</div>';
@@ -17986,16 +18003,16 @@ function debtRiskDotHtml_(contragent) {
   var body = (m.reasons && m.reasons.length)
     ? m.reasons.map(function(x) { return '— ' + x; }).join('\n')
     : 'Рисков по официальным реестрам не найдено';
-  return '<span title="' + pageEscAttr_(head + '\n' + body) + '" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' +
-    legalRiskColor_(m.light) + ';vertical-align:middle;margin-right:6px"></span>';
+  return '<span title="' + pageEscAttr_(head + '\n' + body) + '" style="display:inline-block;vertical-align:middle;margin-right:6px">' +
+    legalRiskMarkHtml_(m.light, 8) + '</span>';
 }
 function debtRiskStatusText_(data) {
-  var n = 0, by = { red: 0, yellow: 0, green: 0 };
+  var n = 0, by = { bankrupt: 0, red: 0, yellow: 0, green: 0 };
   Object.keys(data.by_contragent || {}).forEach(function(k) {
     var m = data.by_contragent[k];
     if (m && m.light) { n++; by[m.light] = (by[m.light] || 0) + 1; }
   });
-  var base = n ? ('проверено ' + n + ': ' + by.red + ' красных · ' + by.yellow + ' жёлтых · ' + by.green + ' зелёных')
+  var base = n ? ('проверено ' + n + ': ' + (by.bankrupt ? by.bankrupt + ' банкротов · ' : '') + by.red + ' красных · ' + by.yellow + ' жёлтых · ' + by.green + ' зелёных')
                : 'ещё никто не проверен';
   // Последний прогон (cron 06:10 МСК или ручной) - чтобы было видно, что автомат живой.
   var lr = data.last_run;

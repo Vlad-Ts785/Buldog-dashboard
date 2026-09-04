@@ -136,6 +136,16 @@ FTP гораздо чаще, чем 1С физически кладёт туда
 пункта 1 - `getMainPayloadCacheOrLive_` берёт этот кэш как базу и ПЕРЕЗАПИСЫВАЕТ поверх
 свежими `summary`/`orders`/`debt`/`receipts` (`Object.assign({}, cached, freshFinancials)`).
 
+**Пятое (2026-09-04, стоило четырёх заходов на одну жалобу "куда август делся?"): у admin
+главный payload `D` с 02.09 приходит с СЕРВЕРА (`/api/main_payload`, `loadData()` зовёт
+его ПЕРВЫМ), Apps Script `/exec` для admin - только фолбэк.** Любая живая проверка
+"что реально видит Влад" обязана бить в `/api/main_payload` (подписанный session_token,
+общий `SESSION_SECRET`), а не в `/exec` - три правильных фикса Apps Script-пути подряд не
+дошли до экрана, потому что браузер тот путь уже не использует. manager/logist/mechanic -
+по-прежнему Apps Script (своего view на сервере ещё нет). Список периодов (`periods`) на
+сервере теперь из `orders_normalized`+`orders_archive` (`listAvailablePeriods_`), НЕ из
+`period_snapshots` - тот разовый и не пополняется при закрытии месяца.
+
 **Отдельно, четвёртое - но это уже не про данные, а про КОД страницы:** `yardhub.ru`
 кэшируется прокси на 10 минут (`Cache-Control: max-age=600`) + свой кэш браузера
 пользователя поверх. После любого деплоя `files/index.html`, если у Влада "сайт не грузит"

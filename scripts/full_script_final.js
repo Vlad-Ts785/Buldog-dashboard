@@ -11147,6 +11147,21 @@ function syncAccessLogToServer() {
   if (resp.getResponseCode() !== 200) throw new Error('HTTP ' + resp.getResponseCode() + ': ' + resp.getContentText().slice(0, 200));
 }
 
+// Отдельный частый триггер для syncAccessLogToServer (04.09, Влад: "Филипчук точно заходила
+// сегодня, но я её не вижу"). Менеджеры/логисты грузят страницу через doGet (сервер отдаёт им
+// 403 на /api/main_payload), их визиты пишет logAccessVisit_ в лист - на сервер они попадают
+// ТОЛЬКО этой синхронизацией. runAll ходит 6 раз в сутки (до 3 ч задержки) - для карточки
+// "Активность сотрудников" это долго, поэтому свой триггер раз в 15 минут. Запустить ОДИН раз
+// руками из редактора (Выполнить -> setupAccessLogSyncTrigger); повторный запуск безопасен -
+// старые триггеры этой функции удаляются перед созданием нового.
+function setupAccessLogSyncTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'syncAccessLogToServer') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('syncAccessLogToServer').timeBased().everyMinutes(15).create();
+  Logger.log('Триггер syncAccessLogToServer каждые 15 минут создан');
+}
+
 function syncMonthSummaryToServer_() {
   var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
   if (!apiKey) return;

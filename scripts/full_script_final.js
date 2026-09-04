@@ -4523,7 +4523,12 @@ function buildRosterFallback_(computed, monthKey) {
   try {
     var mgrCount = (computed.by_manager || []).length;
     var logCount = (computed.by_logist || []).length;
-    if (mgrCount >= ROSTER_MIN_SIZE_ && logCount >= ROSTER_MIN_SIZE_) return null;
+    // 04.09: порог убран (Влад: "у Миши не все менеджеры видны") - при 9 менеджерах с
+    // сентябрьскими заказами (>= 5) фолбэк пропускался, Котельников/Филипчук/Ратников
+    // выпадали. Слияние дедуплицировано и без цифр - делать ВСЕГДА. Зеркально с
+    // applyRosterFallback_ в api/server.js (основной путь). mgrCount/logCount оставлены
+    // для читаемости диагностики. НЕ задеплоено в живой /exec - лимит 200 версий
+    // Apps Script (см. память project_apps_script_version_limit_gotcha).
     var prev = fetchOrdersComputedFromServer_(prevMonthKey_(monthKey));
     if (!prev) return null;
     return {

@@ -3954,12 +3954,21 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
         <!-- Сектор - внутренний шифр компании (Влад, 30.08: "указывай не корытыми/прямыми,
              а как мы обозначили - ТКР4, ПР4, ПР3, К3, борт и так далее" - тип площадки +
              раздвижная/нет + число осей одним кодом). Список открытый - datalist только
-             подсказывает, не ограничивает. -->
+             подсказывает, не ограничивает.
+             НАЙДЕННЫЙ БАГ (Влад, 04.09: "выпадающий список чтобы сменить тип не работает" -
+             живой пример, прицеп УУ 4383 77 должен быть "КР-3", подсказки не помогали).
+             Подсказки были БЕЗ дефисов ("ТКР4"/"ПР3"/"К3") и без половины реальных кодов -
+             проверил живой парк (SELECT DISTINCT vehicle_type FROM vehicle_types) - реальные
+             коды ВСЕ через дефис (К-3/КР-3/ПР-3/ПР-4/ПР-5/ПР-8/ТКР-3+5/ТКР-4/Борт/Рапид),
+             "КР-3" в списке подсказок не было ВООБЩЕ. Поле - input+datalist, не select
+             (можно было ввести руками), но неверный формат подсказок сбивал с толку.
+             Полный список - все реально встречающиеся в парке коды. -->
         <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Сектор</label>
-          <input autocomplete="off" id="asset-trailer-type" type="text" maxlength="20" placeholder="ТКР4, ПР3, К3, борт…" list="asset-trailer-type-list"
+          <input autocomplete="off" id="asset-trailer-type" type="text" maxlength="20" placeholder="ТКР-4, ПР-3, К-3, Борт…" list="asset-trailer-type-list"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none">
           <datalist id="asset-trailer-type-list">
-            <option value="ТКР4"><option value="ПР4"><option value="ПР3"><option value="К3"><option value="борт">
+            <option value="К-3"><option value="КР-3"><option value="ПР-3"><option value="ПР-4"><option value="ПР-5">
+            <option value="ПР-8"><option value="ТКР-4"><option value="ТКР-3+5"><option value="Рапид"><option value="Борт">
           </datalist></div>
         <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Количество осей</label>
           <input autocomplete="off" id="asset-axle-count" type="number" min="1" max="20" placeholder="8"
@@ -6592,6 +6601,10 @@ function isRyschanowEntry_(entry) {
 // (renderMyPageCommercialHead_), тот же принцип, что у Рыщанова/Васина выше (не флейвор
 // renderMyPageManager). Зеркало commercialHeadTeam_ на бэкенде.
 var COMMERCIAL_HEAD_SUR_FRONT_ = ['ахтамова', 'гусейнова'];
+// CRM для менеджеров - поимённо (Влад, 04.09: «открой доступ к CRM Филипчук пока только»).
+// Тот же список продублирован на сервере (CRM_MANAGER_SURNAMES в api/server.js) - фронт
+// только прячет пункт меню, право решает сервер. Расширять - в ОБЕИХ точках.
+var CRM_MANAGER_SUR_FRONT_ = ['филипчук'];
 function isCommercialHeadEntry_(entry) {
   return !!entry && entry.type === 'manager' && COMMERCIAL_HEAD_SUR_FRONT_.indexOf(entry.name.trim().split(' ')[0].toLowerCase()) >= 0;
 }
@@ -9681,6 +9694,7 @@ function applyRoleUI() {
     if (!isColumnHeadViewer) allowedPages_.push('order-plan');
     if (isRyschanowViewer) allowedPages_.push('ryschanow-salary');
     if (isCommercialHeadViewer) allowedPages_.push('commercial-head-salary', 'commercial-head-debt');
+    if (CRM_MANAGER_SUR_FRONT_.indexOf(curPersonSur) >= 0) allowedPages_.push('crm');
     document.querySelectorAll('.sidebar-nav-item').forEach(function(item) {
       const page = item.getAttribute('data-page');
       item.style.display = allowedPages_.indexOf(page) >= 0 ? '' : 'none';
@@ -18681,8 +18695,20 @@ var CRM = (function () {
       if (typeof initCursorLight_ === 'function') initCursorLight_('page-crm', 'p2-light');
       updateMeLabel();
       updatePushButton();
+      autoMeForManager();
     }
     load();
+  }
+  // Менеджер под своим логином - это и есть "я": подбираем сотрудника по фамилии из
+  // D.managerName ("Фамилия Имя ...") и убираем выбор (чужую фамилию ему выбирать нечего).
+  function autoMeForManager() {
+    if (typeof D === 'undefined' || !D || D.role !== 'manager' || !D.managerName) return;
+    var sur = String(D.managerName).trim().split(/\s+/)[0].toLowerCase();
+    ensureEmployees().then(function (emps) {
+      var hit = emps.find(function (e) { return String(e.name || '').toLowerCase().split(/\s+/).indexOf(sur) >= 0; });
+      if (hit) { S.me = String(hit.extension); try { localStorage.setItem('crmMyExtension', S.me); } catch (e) {} updateMeLabel(); }
+      var btn = el('crm-me-btn'); if (btn) { btn.disabled = true; btn.title = 'Вы вошли под своим аккаунтом'; }
+    });
   }
   function load() {
     var loading = el('crm-loading'), body = el('crm-body');
@@ -21081,7 +21107,11 @@ var MANAGERS = [], LOG_TRAL = [], LOG_LONG = [];
 var DEPTS_ = [
   {full:"Отдел экскаваторов",code:"ОЭ", id:8,  dept:true},
   {full:"Отдел кранов",      code:"ОК", id:9,  dept:true},
-  {full:"Отдел буровых",     code:"ОБ", id:10, dept:true}
+  {full:"Отдел буровых",     code:"ОБ", id:10, dept:true},
+  /* 04.09, Влад: "добавь сюда БАЗА там где менеджеры и наши" - тот же
+     псевдо-менеджер для внутренних рейсов, что ОЭ/ОК/ОБ, просто "наш"
+     объект - База (те же координаты, что LP_OMNI_BASE_ выше по файлу). */
+  {full:"База",              code:"БАЗА", id:11, dept:true}
 ];
 /* устойчивый (не зависящий от порядка загрузки) тон бейджа по фамилии - палитра
    --id-1..12 циклическая, коллизия цвета двух разных людей не страшна: подпись

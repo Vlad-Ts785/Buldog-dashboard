@@ -4440,7 +4440,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
             <div id="debt-risk-tools" style="display:none;align-items:center;gap:8px;margin-left:auto;margin-right:10px">
               <span id="debt-risk-status" class="muted" style="font-size:11px"></span>
               <button type="button" id="debt-risk-batch-btn" onclick="debtRunRiskBatch_()" data-nav-sound
-                style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;cursor:pointer;white-space:nowrap">Проверить текущих (0–30 дн.)</button>
+                style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;cursor:pointer;white-space:nowrap" title="Тот же приоритетный прогон, что cron каждое утро в 06:10 МСК">Проверить сейчас</button>
             </div>
             <div class="debt-mgr-filter" style="position:relative">
               <button type="button" id="debt-mgr-filter-btn" onclick="toggleDebtMgrDropdown(event)" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;cursor:pointer;white-space:nowrap">Все менеджеры ▾</button>
@@ -17995,30 +17995,47 @@ function debtRiskStatusText_(data) {
     var m = data.by_contragent[k];
     if (m && m.light) { n++; by[m.light] = (by[m.light] || 0) + 1; }
   });
-  return n ? ('проверено ' + n + ': ' + by.red + ' красных · ' + by.yellow + ' жёлтых · ' + by.green + ' зелёных')
-           : 'ещё никто не проверен';
+  var base = n ? ('проверено ' + n + ': ' + by.red + ' красных · ' + by.yellow + ' жёлтых · ' + by.green + ' зелёных')
+               : 'ещё никто не проверен';
+  // Последний прогон (cron 06:10 МСК или ручной) - чтобы было видно, что автомат живой.
+  var lr = data.last_run;
+  if (lr) {
+    var used = (lr.quota || []).reduce(function(s, q) { return s + (q.used || 0); }, 0);
+    var lim = (lr.quota || []).reduce(function(s, q) { return s + (q.limit || 0); }, 0);
+    base += ' · ' + (lr.mode === 'auto' ? 'автопрогон ' : 'прогон ') + lr.finished_at + ': проверено ' + lr.checked +
+      (lr.due_count > lr.checked + lr.failed ? ', в очереди ' + (lr.due_count - lr.checked - lr.failed) : '') +
+      (lr.failed ? ', ошибок ' + lr.failed : '') +
+      (lim ? ', квота ' + used + '/' + lim : '');
+  }
+  return base;
 }
+// Кнопка запускает ТОТ ЖЕ приоритетный прогон, что cron каждое утро (04.09, Влад:
+// "автоматически каждый день... без моего участия") - /api/debt/risk_check_auto, алгоритм
+// приоритетов описан на сервере (debtRiskAutoRun_). Отдельной "партии 0-30" в UI больше
+// нет - один алгоритм на автомат и на руку, чтобы не расходились.
 function debtRunRiskBatch_() {
   var btn = document.getElementById('debt-risk-batch-btn'), st = document.getElementById('debt-risk-status');
   if (!btn) return;
+  var label = 'Проверить сейчас';
   btn.disabled = true; btn.textContent = 'Проверяю…';
-  if (st) st.textContent = 'запросы к Checko идут по одному - до минуты';
-  postToYardApi_('/debt/risk_check_batch', { max_days: 30, limit: 50 }).then(function(r) {
-    btn.disabled = false; btn.textContent = 'Проверить текущих (0–30 дн.)';
+  if (st) st.textContent = 'запросы к Checko идут по одному - до пары минут';
+  postToYardApi_('/debt/risk_check_auto', {}).then(function(r) {
+    btn.disabled = false; btn.textContent = label;
     if (!r.ok) { p2Toast('Не удалось проверить: ' + (r.data && r.data.error || 'ошибка сервера'), 'red'); return; }
     var d = r.data;
-    var msg = 'Проверено ' + d.checked + ' из ' + d.candidates + ' текущих должников' +
-      (d.skipped_cached ? ', уже были: ' + d.skipped_cached : '') +
-      (d.unmatched && d.unmatched.length ? ', без юрлица в справочнике: ' + d.unmatched.length : '') +
-      (d.failed && d.failed.length ? ', ошибок: ' + d.failed.length : '') +
-      (d.today_request_count != null ? '. Квота Checko сегодня: ' + d.today_request_count + '/100' : '') +
-      (d.stopped_by_quota ? ' - остановлено, квота на исходе' : '');
-    p2Toast(msg, d.failed && d.failed.length ? 'red' : 'green');
-    if (d.unmatched && d.unmatched.length) console.warn('[ДЗ/светофор] не сопоставлены с юрлицом:', d.unmatched);
-    if (d.failed && d.failed.length) console.warn('[ДЗ/светофор] ошибки проверки:', d.failed);
+    var used = (d.quota || []).reduce(function(s, q) { return s + (q.used || 0); }, 0);
+    var lim = (d.quota || []).reduce(function(s, q) { return s + (q.limit || 0); }, 0);
+    var msg = 'Проверено ' + d.checked + ' (к проверке было ' + d.due + ' из ' + d.candidates + ')' +
+      (d.left_in_queue > 0 ? ', в очереди на завтра: ' + d.left_in_queue : '') +
+      (d.unmatched ? ', без юрлица в справочнике: ' + d.unmatched : '') +
+      (d.failed ? ', ошибок: ' + d.failed : '') +
+      (lim ? '. Квота Checko: ' + used + '/' + lim : '') +
+      (d.stopped_by_quota ? ' - остановлено, квота исчерпана' : '');
+    p2Toast(msg, d.failed ? 'red' : 'green');
+    if (d.by_bucket) console.info('[ДЗ/светофор] проверено по корзинам:', d.by_bucket);
     loadDebtRiskLights_(function(data) { if (st) st.textContent = debtRiskStatusText_(data); renderDebt(); });
   }).catch(function(e) {
-    btn.disabled = false; btn.textContent = 'Проверить текущих (0–30 дн.)';
+    btn.disabled = false; btn.textContent = label;
     p2Toast('Ошибка сети: ' + e.message, 'red');
   });
 }

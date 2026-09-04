@@ -4433,6 +4433,15 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
         <div class="card" style="margin-top:16px;margin-bottom:16px">
           <div class="sec-header">
             <div class="sec-title">Должники</div>
+            <!-- Светофор риска по контрагентам (04.09, Влад: "перед названием КА лампочку...
+                 начнём с всех текущих 0-30 дней") - точки в строках берутся из кэша юрлиц
+                 (Справочники, тот же Checko), кнопка запускает партию проверок на сервере
+                 (/api/debt/risk_check_batch), показывается только admin - см. renderDebt(). -->
+            <div id="debt-risk-tools" style="display:none;align-items:center;gap:8px;margin-left:auto;margin-right:10px">
+              <span id="debt-risk-status" class="muted" style="font-size:11px"></span>
+              <button type="button" id="debt-risk-batch-btn" onclick="debtRunRiskBatch_()" data-nav-sound
+                style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;cursor:pointer;white-space:nowrap">Проверить текущих (0–30 дн.)</button>
+            </div>
             <div class="debt-mgr-filter" style="position:relative">
               <button type="button" id="debt-mgr-filter-btn" onclick="toggleDebtMgrDropdown(event)" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;cursor:pointer;white-space:nowrap">Все менеджеры ▾</button>
               <div id="debt-mgr-filter-panel" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px;z-index:50;min-width:220px;max-height:280px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.4)"></div>
@@ -17914,6 +17923,68 @@ async function debtSaveComment(contragent) {
   }
 }
 
+// ── Светофор риска в ДЗ (04.09, Влад: "в инструменте по работе с ДЗ хочу видеть перед
+// названием КА лампочку. Поскольку количество запросов ограничено начнём с всех текущих
+// 0-30 дней") - точка = тот же кэш проверки юрлица, что в Справочниках (legalCheckRisk_),
+// сопоставление должник -> юрлицо делает сервер (/api/debt/risk_lights: точное имя / ИНН
+// в имени / уникальный префикс - в ДЗ ИНН нет вообще). Карта грузится один раз при первом
+// рендере ДЗ и заново после партии - отдельным лёгким запросом, НЕ через главный payload,
+// чтобы не ждать "Обновить данные".
+var debtRiskMap_ = null;        // contragent -> {light, reasons[], checked_at, legal_entity_id, inn}
+var debtRiskLoading_ = false;
+function loadDebtRiskLights_(then) {
+  if (debtRiskLoading_) return;
+  debtRiskLoading_ = true;
+  fetchFromYardApi_('/debt/risk_lights', {}).then(function(r) {
+    debtRiskLoading_ = false;
+    if (!r.ok || !r.data || !r.data.by_contragent) return;
+    debtRiskMap_ = r.data.by_contragent;
+    if (then) then(r.data);
+  }).catch(function() { debtRiskLoading_ = false; });
+}
+function debtRiskDotHtml_(contragent) {
+  var m = debtRiskMap_ && debtRiskMap_[contragent];
+  if (!m || !m.light) return '';
+  var head = 'Проверка контрагента: ' + legalRiskLabel_(m.light) + (m.checked_at ? ' (' + m.checked_at + ')' : '');
+  var body = (m.reasons && m.reasons.length)
+    ? m.reasons.map(function(x) { return '— ' + x; }).join('\n')
+    : 'Рисков по официальным реестрам не найдено';
+  return '<span title="' + pageEscAttr_(head + '\n' + body) + '" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' +
+    legalRiskColor_(m.light) + ';vertical-align:middle;margin-right:6px"></span>';
+}
+function debtRiskStatusText_(data) {
+  var n = 0, by = { red: 0, yellow: 0, green: 0 };
+  Object.keys(data.by_contragent || {}).forEach(function(k) {
+    var m = data.by_contragent[k];
+    if (m && m.light) { n++; by[m.light] = (by[m.light] || 0) + 1; }
+  });
+  return n ? ('проверено ' + n + ': ' + by.red + ' красных · ' + by.yellow + ' жёлтых · ' + by.green + ' зелёных')
+           : 'ещё никто не проверен';
+}
+function debtRunRiskBatch_() {
+  var btn = document.getElementById('debt-risk-batch-btn'), st = document.getElementById('debt-risk-status');
+  if (!btn) return;
+  btn.disabled = true; btn.textContent = 'Проверяю…';
+  if (st) st.textContent = 'запросы к Checko идут по одному - до минуты';
+  postToYardApi_('/debt/risk_check_batch', { max_days: 30, limit: 50 }).then(function(r) {
+    btn.disabled = false; btn.textContent = 'Проверить текущих (0–30 дн.)';
+    if (!r.ok) { p2Toast('Не удалось проверить: ' + (r.data && r.data.error || 'ошибка сервера'), 'red'); return; }
+    var d = r.data;
+    var msg = 'Проверено ' + d.checked + ' из ' + d.candidates + ' текущих должников' +
+      (d.skipped_cached ? ', уже были: ' + d.skipped_cached : '') +
+      (d.unmatched && d.unmatched.length ? ', без юрлица в справочнике: ' + d.unmatched.length : '') +
+      (d.failed && d.failed.length ? ', ошибок: ' + d.failed.length : '') +
+      (d.today_request_count != null ? '. Квота Checko сегодня: ' + d.today_request_count + '/100' : '') +
+      (d.stopped_by_quota ? ' - остановлено, квота на исходе' : '');
+    p2Toast(msg, d.failed && d.failed.length ? 'red' : 'green');
+    if (d.unmatched && d.unmatched.length) console.warn('[ДЗ/светофор] не сопоставлены с юрлицом:', d.unmatched);
+    if (d.failed && d.failed.length) console.warn('[ДЗ/светофор] ошибки проверки:', d.failed);
+    loadDebtRiskLights_(function(data) { if (st) st.textContent = debtRiskStatusText_(data); renderDebt(); });
+  }).catch(function(e) {
+    btn.disabled = false; btn.textContent = 'Проверить текущих (0–30 дн.)';
+    p2Toast('Ошибка сети: ' + e.message, 'red');
+  });
+}
 function renderDebt() {
   if (!D) return;
   const debt = D.debt;
@@ -17926,6 +17997,15 @@ function renderDebt() {
   }
   if (emptyEl) emptyEl.style.display = 'none';
   if (bodyEl) bodyEl.style.display = 'block';
+  // Светофор риска (04.09) - карта точек грузится один раз при первом показе ДЗ (дальше
+  // рендер синхронный из debtRiskMap_); кнопка партии - только admin (сервер тоже требует).
+  var riskTools = document.getElementById('debt-risk-tools');
+  if (riskTools) riskTools.style.display = (D.role === 'admin') ? 'flex' : 'none';
+  if (debtRiskMap_ === null) loadDebtRiskLights_(function(data) {
+    var st = document.getElementById('debt-risk-status');
+    if (st) st.textContent = debtRiskStatusText_(data);
+    renderDebt();
+  });
 
   const ageToggleBtn = document.getElementById('debt-age-toggle-btn');
   if (ageToggleBtn) {
@@ -18290,7 +18370,7 @@ function renderDebt() {
       'style="background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:0 4px" title="Карточка контрагента">📝' +
       (c.comment ? '<span style="color:var(--amber)">●</span>' : '') + '</button>';
     return '<tr class="debt-row-toggle" onclick="toggleDebtDetail(' + i + ')" style="cursor:pointer">' +
-      '<td>' + cardBtn + '<span id="debt-arrow-' + i + '" class="muted" style="display:inline-block;width:14px">▸</span><b>' + c.contragent + '</b>' + byOrgLine + '</td>' +
+      '<td>' + cardBtn + '<span id="debt-arrow-' + i + '" class="muted" style="display:inline-block;width:14px">▸</span>' + debtRiskDotHtml_(c.contragent) + '<b>' + c.contragent + '</b>' + byOrgLine + '</td>' +
       '<td class="muted">' + cleanName(c.manager) + '</td>' +
       '<td class="num"><b>' + fmt(c.balance) + '</b></td>' +
       '<td class="num ' + ageCls(c.daysOverdue) + '">' + c.daysOverdue + '</td>' +

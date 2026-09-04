@@ -6592,6 +6592,10 @@ function isRyschanowEntry_(entry) {
 // (renderMyPageCommercialHead_), тот же принцип, что у Рыщанова/Васина выше (не флейвор
 // renderMyPageManager). Зеркало commercialHeadTeam_ на бэкенде.
 var COMMERCIAL_HEAD_SUR_FRONT_ = ['ахтамова', 'гусейнова'];
+// CRM для менеджеров - поимённо (Влад, 04.09: «открой доступ к CRM Филипчук пока только»).
+// Тот же список продублирован на сервере (CRM_MANAGER_SURNAMES в api/server.js) - фронт
+// только прячет пункт меню, право решает сервер. Расширять - в ОБЕИХ точках.
+var CRM_MANAGER_SUR_FRONT_ = ['филипчук'];
 function isCommercialHeadEntry_(entry) {
   return !!entry && entry.type === 'manager' && COMMERCIAL_HEAD_SUR_FRONT_.indexOf(entry.name.trim().split(' ')[0].toLowerCase()) >= 0;
 }
@@ -9681,6 +9685,7 @@ function applyRoleUI() {
     if (!isColumnHeadViewer) allowedPages_.push('order-plan');
     if (isRyschanowViewer) allowedPages_.push('ryschanow-salary');
     if (isCommercialHeadViewer) allowedPages_.push('commercial-head-salary', 'commercial-head-debt');
+    if (CRM_MANAGER_SUR_FRONT_.indexOf(curPersonSur) >= 0) allowedPages_.push('crm');
     document.querySelectorAll('.sidebar-nav-item').forEach(function(item) {
       const page = item.getAttribute('data-page');
       item.style.display = allowedPages_.indexOf(page) >= 0 ? '' : 'none';
@@ -18679,8 +18684,20 @@ var CRM = (function () {
       if (typeof initCursorLight_ === 'function') initCursorLight_('page-crm', 'p2-light');
       updateMeLabel();
       updatePushButton();
+      autoMeForManager();
     }
     load();
+  }
+  // Менеджер под своим логином - это и есть "я": подбираем сотрудника по фамилии из
+  // D.managerName ("Фамилия Имя ...") и убираем выбор (чужую фамилию ему выбирать нечего).
+  function autoMeForManager() {
+    if (typeof D === 'undefined' || !D || D.role !== 'manager' || !D.managerName) return;
+    var sur = String(D.managerName).trim().split(/\s+/)[0].toLowerCase();
+    ensureEmployees().then(function (emps) {
+      var hit = emps.find(function (e) { return String(e.name || '').toLowerCase().split(/\s+/).indexOf(sur) >= 0; });
+      if (hit) { S.me = String(hit.extension); try { localStorage.setItem('crmMyExtension', S.me); } catch (e) {} updateMeLabel(); }
+      var btn = el('crm-me-btn'); if (btn) { btn.disabled = true; btn.title = 'Вы вошли под своим аккаунтом'; }
+    });
   }
   function load() {
     var loading = el('crm-loading'), body = el('crm-body');

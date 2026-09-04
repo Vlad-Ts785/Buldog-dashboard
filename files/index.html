@@ -3954,12 +3954,21 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
         <!-- Сектор - внутренний шифр компании (Влад, 30.08: "указывай не корытыми/прямыми,
              а как мы обозначили - ТКР4, ПР4, ПР3, К3, борт и так далее" - тип площадки +
              раздвижная/нет + число осей одним кодом). Список открытый - datalist только
-             подсказывает, не ограничивает. -->
+             подсказывает, не ограничивает.
+             НАЙДЕННЫЙ БАГ (Влад, 04.09: "выпадающий список чтобы сменить тип не работает" -
+             живой пример, прицеп УУ 4383 77 должен быть "КР-3", подсказки не помогали).
+             Подсказки были БЕЗ дефисов ("ТКР4"/"ПР3"/"К3") и без половины реальных кодов -
+             проверил живой парк (SELECT DISTINCT vehicle_type FROM vehicle_types) - реальные
+             коды ВСЕ через дефис (К-3/КР-3/ПР-3/ПР-4/ПР-5/ПР-8/ТКР-3+5/ТКР-4/Борт/Рапид),
+             "КР-3" в списке подсказок не было ВООБЩЕ. Поле - input+datalist, не select
+             (можно было ввести руками), но неверный формат подсказок сбивал с толку.
+             Полный список - все реально встречающиеся в парке коды. -->
         <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Сектор</label>
-          <input autocomplete="off" id="asset-trailer-type" type="text" maxlength="20" placeholder="ТКР4, ПР3, К3, борт…" list="asset-trailer-type-list"
+          <input autocomplete="off" id="asset-trailer-type" type="text" maxlength="20" placeholder="ТКР-4, ПР-3, К-3, Борт…" list="asset-trailer-type-list"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none">
           <datalist id="asset-trailer-type-list">
-            <option value="ТКР4"><option value="ПР4"><option value="ПР3"><option value="К3"><option value="борт">
+            <option value="К-3"><option value="КР-3"><option value="ПР-3"><option value="ПР-4"><option value="ПР-5">
+            <option value="ПР-8"><option value="ТКР-4"><option value="ТКР-3+5"><option value="Рапид"><option value="Борт">
           </datalist></div>
         <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Количество осей</label>
           <input autocomplete="off" id="asset-axle-count" type="number" min="1" max="20" placeholder="8"
@@ -16525,6 +16534,7 @@ var MD_FINES_COLS_ = [
 var MD_TRIP_COLS_ = [
   { key: 'trip_date', label: 'Дата', num: false },
   { key: 'doc_ref', label: 'Документ', num: false },
+  { key: 'logist', label: 'Логист', num: false },
   { key: 'route', label: 'Маршрут', num: false },
   { key: 'cargo', label: 'Груз', num: false },
   { key: 'km_mkad', label: 'Км МКАД', num: true },
@@ -16536,7 +16546,7 @@ var MD_TRIP_COLS_ = [
 // Первый клик: числа - по убыванию (крупное), текст - А-Я, даты - убывание (свежие
 // сначала) - тот же порядок правил, что в разделе "Сортируемая таблица" ГОСТа.
 function mdDefaultDir_(col) {
-  return (col === 'route' || col === 'cargo') ? 1 : -1;
+  return (col === 'route' || col === 'cargo' || col === 'logist') ? 1 : -1;
 }
 function mdSortVal_(row, col) {
   if (col === 'doc_ref') return Number(mdDocShort_(row.doc_ref)) || 0;
@@ -16546,7 +16556,7 @@ function mdSortVal_(row, col) {
   // скачет"). Считаем то же самое здесь, что и в mdRenderVeh_ ниже.
   if (col === 'pct') return (row.order_amount && row.order_amount > 0) ? (row.amount / row.order_amount * 100) : -Infinity;
   var v = row[col];
-  return (col === 'route' || col === 'cargo' || col === 'period_from' || col === 'trip_date') ? (v || '') : (v == null ? -Infinity : v);
+  return (col === 'route' || col === 'cargo' || col === 'logist' || col === 'period_from' || col === 'trip_date') ? (v || '') : (v == null ? -Infinity : v);
 }
 function mdSortRows_(rows, cols, sort) {
   var colDef = cols.filter(function(c) { return c.key === sort.col; })[0];
@@ -16622,6 +16632,7 @@ function mdRenderVeh_(vi) {
     var pct = (t.order_amount && t.order_amount > 0) ? (t.amount / t.order_amount * 100) : null;
     return '<tr><td>' + mdShort_(t.trip_date) + '</td>' +
       '<td style="color:var(--muted)">' + mdDocShort_(t.doc_ref) + '</td>' +
+      '<td>' + (t.logist ? String(t.logist).trim().split(' ')[0] : '—') + '</td>' +
       mdEllipsisCell_(t.route, 240) +
       mdEllipsisCell_(t.cargo, 160) +
       '<td class="num">' + (t.km_mkad ? Math.round(t.km_mkad).toLocaleString('ru-RU') : '—') + '</td>' +
@@ -16634,7 +16645,7 @@ function mdRenderVeh_(vi) {
     '<div style="overflow-x:auto"><table class="tbl"><thead><tr>' +
       mdSortHead_(MD_TRIP_COLS_, sort, 'mdSortVeh_', vi) +
     '</tr></thead><tbody>' + body + '</tbody>' +
-    '<tfoot><tr><td colspan="6" style="font-weight:600">Итого по машине</td>' +
+    '<tfoot><tr><td colspan="7" style="font-weight:600">Итого по машине</td>' +
     '<td class="num" style="font-weight:600">' + mdFr_(netSubtotal) + '</td>' +
     '<td class="num" style="font-weight:600;color:var(--muted)">' + mdFr_(orderSubtotal) + '</td>' +
     '<td class="num" style="font-weight:600;color:' + mdPctColor_(avgPct) + '">' + (avgPct != null ? avgPct.toFixed(1) + '%' : '—') + '</td>' +
@@ -21096,7 +21107,11 @@ var MANAGERS = [], LOG_TRAL = [], LOG_LONG = [];
 var DEPTS_ = [
   {full:"Отдел экскаваторов",code:"ОЭ", id:8,  dept:true},
   {full:"Отдел кранов",      code:"ОК", id:9,  dept:true},
-  {full:"Отдел буровых",     code:"ОБ", id:10, dept:true}
+  {full:"Отдел буровых",     code:"ОБ", id:10, dept:true},
+  /* 04.09, Влад: "добавь сюда БАЗА там где менеджеры и наши" - тот же
+     псевдо-менеджер для внутренних рейсов, что ОЭ/ОК/ОБ, просто "наш"
+     объект - База (те же координаты, что LP_OMNI_BASE_ выше по файлу). */
+  {full:"База",              code:"БАЗА", id:11, dept:true}
 ];
 /* устойчивый (не зависящий от порядка загрузки) тон бейджа по фамилии - палитра
    --id-1..12 циклическая, коллизия цвета двух разных людей не страшна: подпись

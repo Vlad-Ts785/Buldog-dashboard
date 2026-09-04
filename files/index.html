@@ -8138,6 +8138,9 @@ function renderMyPageManager(el, current, selectorHtml, d) {
       }).join('')+
     '</div>';
 
+    // Светофор риска (04.09) - карта общая с главной ДЗ, грузится один раз, перерисовка
+    // этой же страницы, когда придёт.
+    ensureDebtRiskMap_(renderMyPage);
     var dFiltered = allDebt.filter(function(c){
       if (mgrDebtBuckets.size && !Array.from(mgrDebtBuckets).some(function(bk){ return debtInBucket_(c.daysOverdue, bk); })) return false;
       return true;
@@ -8155,7 +8158,7 @@ function renderMyPageManager(el, current, selectorHtml, d) {
           var isOpen = mgrDebtOpenRow === c.contragent;
           var contragentEsc = c.contragent.replace(/'/g,"\\'");
           var row = '<tr class="debt-row-toggle" onclick="toggleMgrDebtDetail(\''+contragentEsc+'\')" style="cursor:pointer">'+
-            '<td><span class="muted" style="display:inline-block;width:14px">'+(isOpen?'▾':'▸')+'</span><b>'+c.contragent+'</b>'+byOrgLine+'</td>'+
+            '<td><span class="muted" style="display:inline-block;width:14px">'+(isOpen?'▾':'▸')+'</span>'+debtRiskDotHtml_(c.contragent)+'<b>'+c.contragent+'</b>'+byOrgLine+'</td>'+
             '<td class="num"><b>'+fmt(c.balance)+'</b></td>'+
             '<td class="num '+ageCls(c.daysOverdue)+'">'+c.daysOverdue+'</td>'+
             '<td class="muted">'+(c.status||'—')+'</td>'+
@@ -16448,6 +16451,8 @@ function renderCommercialHeadDebtPage_() {
     (chDebtBuckets.size ? '<button onclick="clearChDebtBuckets()" style="cursor:pointer;background:none;border:none;color:var(--muted);font-size:11px;padding:6px 4px;text-decoration:underline dotted">сбросить</button>' : '')+
   '</div>';
 
+  // Светофор риска (04.09) - та же карта, что на главной ДЗ и личной странице.
+  ensureDebtRiskMap_(renderCommercialHeadDebtPage_);
   var dFiltered = allDebt.filter(function(c){
     if (chDebtBuckets.size && !Array.from(chDebtBuckets).some(function(bk){ return debtInBucket_(c.daysOverdue, bk); })) return false;
     return true;
@@ -16471,7 +16476,7 @@ function renderCommercialHeadDebtPage_() {
         var isOpen = chDebtOpenRow === c.contragent;
         var contragentEsc = c.contragent.replace(/'/g,"\\'");
         var row = '<tr class="debt-row-toggle" onclick="toggleChDebtDetail(\''+contragentEsc+'\')" style="cursor:pointer">'+
-          '<td><span class="muted" style="display:inline-block;width:14px">'+(isOpen?'▾':'▸')+'</span><b>'+c.contragent+'</b>'+byOrgLine+'</td>'+
+          '<td><span class="muted" style="display:inline-block;width:14px">'+(isOpen?'▾':'▸')+'</span>'+debtRiskDotHtml_(c.contragent)+'<b>'+c.contragent+'</b>'+byOrgLine+'</td>'+
           '<td class="muted">'+(c.manager||'—')+'</td>'+
           '<td class="num"><b>'+fmt(c.balance)+'</b></td>'+
           '<td class="num '+ageCls(c.daysOverdue)+'">'+c.daysOverdue+'</td>'+
@@ -17877,8 +17882,9 @@ function buildDebtCard_(c) {
   var commentEsc = (c.comment || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
   return '<div style="padding:20px">' +
-    '<div style="font-size:17px;font-weight:700;margin-bottom:4px">' + c.contragent + '</div>' +
-    '<div class="muted" style="font-size:13px;margin-bottom:16px">' + cleanName(c.manager) + '</div>' +
+    '<div style="font-size:17px;font-weight:700;margin-bottom:4px">' + debtRiskDotHtml_(c.contragent) + c.contragent + '</div>' +
+    '<div class="muted" style="font-size:13px;margin-bottom:8px">' + cleanName(c.manager) + '</div>' +
+    debtRiskBlockHtml_(c.contragent) +
     '<div style="display:flex;gap:24px;margin-bottom:16px">' +
       '<div><div class="muted" style="font-size:11px;text-transform:uppercase">Баланс</div><div style="font-size:20px;font-weight:700;color:var(--amber)">' + fmt(c.balance) + '</div></div>' +
       '<div><div class="muted" style="font-size:11px;text-transform:uppercase">Дней просрочки</div><div style="font-size:20px;font-weight:700">' + c.daysOverdue + '</div></div>' +
@@ -17941,6 +17947,37 @@ function loadDebtRiskLights_(then) {
     debtRiskMap_ = r.data.by_contragent;
     if (then) then(r.data);
   }).catch(function() { debtRiskLoading_ = false; });
+}
+// Для страниц, где ДЗ рисуется не renderDebt() (личная страница менеджера, ДЗ
+// руководителя группы): подгрузить карту один раз и перерисовать (Влад, 04.09: "логика
+// должна быть везде... у всех в ДЗ должно это появиться"). Роли без доступа к
+// /debt/risk_lights (сервер пускает admin/manager) - не дёргаем сервер вовсе; при отказе
+// ставим пустую карту, чтобы каждый рендер не повторял запрос.
+function ensureDebtRiskMap_(rerender) {
+  if (debtRiskMap_ !== null || debtRiskLoading_) return;
+  if (!D || (D.role !== 'admin' && D.role !== 'manager')) { debtRiskMap_ = {}; return; }
+  debtRiskLoading_ = true;
+  fetchFromYardApi_('/debt/risk_lights', {}).then(function(r) {
+    debtRiskLoading_ = false;
+    debtRiskMap_ = (r.ok && r.data && r.data.by_contragent) ? r.data.by_contragent : {};
+    if (rerender) rerender();
+  }).catch(function() { debtRiskLoading_ = false; debtRiskMap_ = {}; });
+}
+// Блок для карточки контрагента - цвет + причины целиком, не только tooltip.
+function debtRiskBlockHtml_(contragent) {
+  var m = debtRiskMap_ && debtRiskMap_[contragent];
+  if (!m || !m.light) return '';
+  var color = legalRiskColor_(m.light);
+  var reasons = (m.reasons && m.reasons.length)
+    ? '<ul style="margin:4px 0 0;padding-left:16px;font-size:12px;color:var(--muted)">' +
+      m.reasons.map(function(x) { return '<li>' + pageEsc_(x) + '</li>'; }).join('') + '</ul>'
+    : '<div class="muted" style="font-size:12px;margin-top:2px">Рисков по официальным реестрам не найдено</div>';
+  return '<div style="margin-bottom:16px;padding:10px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px">' +
+    '<div style="display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:' + color + '">' +
+      '<span style="width:9px;height:9px;border-radius:50%;background:' + color + ';flex:none"></span>' +
+      'Проверка контрагента: ' + legalRiskLabel_(m.light) +
+      (m.checked_at ? '<span class="muted" style="font-weight:400;font-size:11px;margin-left:auto">' + pageEsc_(m.checked_at) + '</span>' : '') +
+    '</div>' + reasons + '</div>';
 }
 function debtRiskDotHtml_(contragent) {
   var m = debtRiskMap_ && debtRiskMap_[contragent];
@@ -18218,7 +18255,7 @@ function renderDebt() {
         var up = x.diff > 0;
         var color = up ? 'var(--red)' : 'var(--green)';
         return '<tr>' +
-          '<td><b>' + x.contragent + '</b></td>' +
+          '<td>' + debtRiskDotHtml_(x.contragent) + '<b>' + x.contragent + '</b></td>' +
           '<td class="muted">' + (x.manager ? cleanName(x.manager) : '—') + '</td>' +
           '<td class="num muted">' + fmt(x.yesterday) + '</td>' +
           '<td class="num">' + fmt(x.today) + '</td>' +
@@ -18401,7 +18438,7 @@ function renderDebt() {
   document.getElementById('debt-guarantees-total').textContent = fmt(guaranteesTotal);
   document.getElementById('debt-guarantees-body').innerHTML = guarantees.map(function(g) {
     return '<tr>' +
-      '<td><b>' + g.contragent + '</b></td>' +
+      '<td>' + debtRiskDotHtml_(g.contragent) + '<b>' + g.contragent + '</b></td>' +
       '<td class="muted">' + cleanName(g.manager) + '</td>' +
       '<td class="num"><b>' + fmt(g.guaranteeDeposit) + '</b></td>' +
     '</tr>';

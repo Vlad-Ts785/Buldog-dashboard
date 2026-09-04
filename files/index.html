@@ -3655,6 +3655,8 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
           <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:12px 0">
             <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:var(--muted);margin-right:auto">
               <input autocomplete="off" type="checkbox" id="legal-show-deleted" onchange="renderDirectory()"> Показать удалённых</label>
+            <input autocomplete="off" type="search" id="legal-search" placeholder="Поиск: название или ИНН" oninput="legalPaint_()"
+              style="flex:1;max-width:360px;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:6px 10px;font-size:12.5px">
             <button onclick="legalOpenForm_(null)" data-nav-sound
               style="background:var(--green);color:#fff;border:none;border-radius:7px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer">+ Добавить юрлицо</button>
           </div>
@@ -11813,12 +11815,32 @@ function legalPaint_() {
   var body = document.getElementById('legal-body');
   if (!body || !spravLegalEntities_) return;
   var showDeleted = document.getElementById('legal-show-deleted').checked;
-  var rows = spravLegalEntities_.filter(function(le) { return showDeleted || !le.is_deleted; });
-  if (!rows.length) {
+  var all = spravLegalEntities_.filter(function(le) { return showDeleted || !le.is_deleted; });
+  // Контрагенты из 1С (04.09, импорт ~17 тыс. юрлиц/ИП, is_own = 0) - в DOM только по поиску
+  // (название/полное/ИНН, от 2 символов, не больше 200 строк), иначе вкладка встаёт.
+  // СВОИ (is_own = 1) - всегда, как и раньше: их единицы.
+  var searchEl = document.getElementById('legal-search');
+  var q = ((searchEl && searchEl.value) || '').trim().toLowerCase();
+  var cpCount = all.filter(function(le) { return !le.is_own; }).length;
+  var rows, note = '';
+  if (q.length >= 2) {
+    var hit = all.filter(function(le) {
+      return String(le.name || '').toLowerCase().indexOf(q) >= 0 || String(le.full_name || '').toLowerCase().indexOf(q) >= 0 ||
+        String(le.inn || '').indexOf(q) >= 0;
+    });
+    rows = hit.slice(0, 200);
+    if (hit.length > 200) note = 'Показаны первые 200 из ' + hit.length + ' — уточните запрос';
+    else if (!hit.length) note = 'Ничего не найдено';
+  } else {
+    rows = all.filter(function(le) { return le.is_own; });
+    if (cpCount) note = 'Контрагентов из 1С: ' + cpCount.toLocaleString('ru-RU') + ' — введите название или ИНН, чтобы найти';
+  }
+  if (!rows.length && !note) {
     body.innerHTML = '<tr><td colspan="4" class="muted" style="padding:14px">Юрлиц пока нет — добавьте первое</td></tr>';
     return;
   }
-  body.innerHTML = rows.map(function(le) {
+  var noteRow = note ? '<tr><td colspan="4" class="muted" style="padding:10px 14px;font-size:12px">' + note + '</td></tr>' : '';
+  body.innerHTML = noteRow + rows.map(function(le) {
     var idEsc = pageEscAttr_(le.id);
     var actions = le.is_deleted
       ? '<button onclick="legalRestore_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);' +
@@ -11828,7 +11850,7 @@ function legalPaint_() {
     var ownBadge = le.is_own
       ? ' <span style="background:rgba(94,196,124,.15);color:var(--green);border-radius:5px;padding:1px 6px;font-size:10px;font-weight:600;vertical-align:middle">СВОЯ</span>' : '';
     return '<tr' + (le.is_deleted ? spravDeletedRowStyle_() : '') + '>' +
-      '<td><b>' + pageEsc_(le.name) + '</b>' + ownBadge + (le.is_deleted ? ' <span class="muted" style="font-size:11px">(удалено)</span>' : '') + '</td>' +
+      '<td><b>' + pageEsc_(le.name) + '</b>' + ownBadge + (le.inn ? ' <span class="muted" style="font-size:11px">ИНН ' + pageEsc_(le.inn) + '</span>' : '') + (le.is_deleted ? ' <span class="muted" style="font-size:11px">(удалено)</span>' : '') + '</td>' +
       '<td class="muted">' + (le.full_name ? pageEsc_(le.full_name) : '—') + '</td>' +
       '<td class="muted">' + (le.notes ? pageEsc_(le.notes) : '—') + '</td>' +
       '<td class="num">' + actions + '</td>' +

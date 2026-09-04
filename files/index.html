@@ -211,6 +211,50 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .sidebar.collapsed .sidebar-refresh{justify-content:center;padding:7px 0;}
 @media(max-width:900px){ .sidebar-collapse-btn{display:none;} }
 
+/* ── Кастомизация меню (05.09, Влад: "зажал меню - перешло в режим кастома... передвинуть
+   как канбанчик, скрыть") - ГОСТ раздел 6 "Долгое нажатие -> режим перестановки", числа
+   буквально: 550мс/6px, дрожание ±1° с фазовым сдвигом, grip 2x3, плашка "Готово"
+   200ms --ease-out-strong, drag: opacity .82, двухслойная тень, scale 1.03, lerp 0.28,
+   FLIP 300ms, укладка overshoot 380ms. Кривые - литералами: переменные --ease-* объявлены
+   не на :root, а внутри страниц (CRM/Планировка), сайдбар их не видит. */
+.sidebar-nav-item .menu-grip{display:none;margin-left:auto;width:8px;height:12px;flex:none;color:var(--muted);opacity:.7;}
+.sidebar-nav-item .menu-grip svg{width:8px;height:12px;display:block;}
+.sidebar-nav-item .menu-eye{display:none;margin-left:4px;width:18px;height:18px;flex:none;border:1px solid var(--border);border-radius:5px;background:var(--bg2);color:var(--muted);align-items:center;justify-content:center;cursor:pointer;}
+.sidebar-nav-item .menu-eye svg{width:11px;height:11px;display:block;}
+/* В режиме подписи не переносим - длинные ("Глобальная статистика") режутся многоточием,
+   иначе с grip+глазом строка становилась двухэтажной. */
+.sidebar.menu-customizing .sidebar-nav-item{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;gap:8px;padding-right:6px;}
+.sidebar.menu-customizing .sidebar-nav-item{cursor:grab;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:none;outline:1px dashed rgba(255,255,255,.16);outline-offset:-1px;}
+.sidebar.menu-customizing .sidebar-nav-item:hover{transform:none;background:var(--bg3);}
+.sidebar.menu-customizing .sidebar-nav-item .menu-grip{display:block;}
+.sidebar.menu-customizing .sidebar-nav-item .menu-eye{display:inline-flex;}
+.sidebar.menu-customizing .sidebar-nav-item .menu-eye:hover{color:var(--text);border-color:rgba(255,255,255,.16);}
+.sidebar.menu-customizing .sidebar-nav-item.menu-hidden{opacity:.42;}
+.sidebar.menu-customizing .sidebar-nav-item.menu-hidden .menu-eye{color:var(--red);border-color:rgba(226,75,74,.4);}
+.sidebar.menu-customizing .sidebar-nav-item.menu-wiggle{animation:menuWiggle .25s ease-in-out infinite;}
+@keyframes menuWiggle{0%{transform:rotate(-1deg);}50%{transform:rotate(1deg);}100%{transform:rotate(-1deg);}}
+.sidebar-nav-item.menu-placeholder{visibility:hidden;}
+.menu-drag-card{position:fixed;z-index:1000;pointer-events:none;box-sizing:border-box;opacity:.82;cursor:grabbing;
+  background:var(--bg3);color:var(--text);box-shadow:0 2px 6px rgba(0,0,0,.4),0 16px 32px rgba(0,0,0,.5);
+  transition:opacity 140ms cubic-bezier(.25,1,.5,1);will-change:transform;}
+.menu-drag-card .menu-grip{display:block;}
+.menu-drag-card .menu-eye{display:inline-flex;}
+.menu-done-bar{display:none;position:sticky;bottom:0;margin:10px 0 0;padding:8px;gap:6px;align-items:center;
+  background:var(--bg2);border:1px solid var(--border);border-radius:9px;
+  opacity:0;transform:translateY(6px);transition:opacity 200ms cubic-bezier(0.16,1,0.3,1),transform 200ms cubic-bezier(0.16,1,0.3,1);}
+.sidebar.menu-customizing .menu-done-bar{display:flex;opacity:1;transform:none;}
+.menu-done-bar button{appearance:none;border:1px solid var(--border);background:var(--bg3);color:var(--muted);border-radius:7px;padding:5px 9px;font-size:11.5px;cursor:pointer;font-family:inherit;white-space:nowrap;}
+.menu-done-bar button:hover{color:var(--text);border-color:rgba(255,255,255,.16);}
+.menu-done-bar button.primary{background:var(--green);border-color:var(--green);color:#fff;font-weight:600;}
+.menu-hint-badge{position:absolute;left:10px;top:calc(100% + 3px);z-index:6;pointer-events:none;white-space:nowrap;
+  background:var(--bg4);border:1px solid rgba(255,255,255,.16);color:var(--text);font-size:10.5px;padding:4px 8px;border-radius:6px;box-shadow:0 6px 16px rgba(0,0,0,.35);}
+.sidebar-nav-item.menu-hint-pulse{animation:menuHintPulse 1.1s ease-in-out 3;}
+@keyframes menuHintPulse{0%,100%{box-shadow:0 0 0 0 rgba(55,138,221,0);}50%{box-shadow:0 0 0 2px rgba(55,138,221,.55);}}
+@media(prefers-reduced-motion:reduce){
+  .sidebar.menu-customizing .sidebar-nav-item.menu-wiggle{animation:none;}
+  .sidebar-nav-item.menu-hint-pulse{animation:none;box-shadow:0 0 0 2px rgba(55,138,221,.45);}
+}
+
 /* ── MAIN ──────────────────────────────────────────────── */
 .main-wrap{
   margin-left:var(--sidebar);flex:1;
@@ -2788,7 +2832,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
     <div class="sidebar-nav-item" onclick="showPage('directory',this)" data-page="directory">
       <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="14" height="14" rx="1.6"/><line x1="3" y1="8" x2="17" y2="8"/><line x1="7" y1="11.3" x2="13" y2="11.3"/><line x1="7" y1="14.3" x2="13" y2="14.3"/></svg></span> Справочники
     </div>
-    <div class="sidebar-nav-section">
+    <div class="sidebar-nav-section" data-section="park">
       <span class="sidebar-nav-section-label">Парк</span>
       <div class="sidebar-nav-section-line"></div>
     </div>
@@ -2807,7 +2851,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
       <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2c-3 0-5.5 2.4-5.5 5.6C4.5 11.8 10 18 10 18s5.5-6.2 5.5-10.4C15.5 4.4 13 2 10 2z"/><circle cx="10" cy="7.6" r="2"/></svg></span> Навигация
     </div>
 
-    <div class="sidebar-nav-section">
+    <div class="sidebar-nav-section" data-section="sales">
       <span class="sidebar-nav-section-label">Продажи</span>
       <div class="sidebar-nav-section-line"></div>
     </div>
@@ -2862,6 +2906,14 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
     </div>
     <div class="sidebar-nav-item" onclick="showPage('debt',this)" data-page="debt">
       <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2.5h10v15l-2.5-1.6L10 17.5l-2.5-1.6L5 17.5z"/><line x1="7.5" y1="6.5" x2="12.5" y2="6.5"/><line x1="7.5" y1="9.5" x2="12.5" y2="9.5"/><line x1="7.5" y1="12.5" x2="10.5" y2="12.5"/></svg></span> ДЗ
+    </div>
+    <!-- Плашка режима кастомизации меню (05.09) - видна только в .menu-customizing, всегда
+         последний ребёнок nav (menuApplyCfg_ переставляет её в конец после любой
+         перестановки пунктов). См. блок "Кастомизация меню" в JS. -->
+    <div class="menu-done-bar" id="menu-done-bar">
+      <span class="muted" id="menu-done-target" style="font-size:10.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+      <button type="button" onclick="menuCfgReset_()" title="Вернуть стандартный порядок и показать все пункты">Сброс</button>
+      <button type="button" class="primary" onclick="menuExitCustomize_()" data-nav-sound>Готово</button>
     </div>
   </nav>
 
@@ -9750,6 +9802,7 @@ function applyRoleUI() {
     var mechActiveEl_ = document.querySelector('.page.active');
     var mechActiveId_ = mechActiveEl_ ? mechActiveEl_.id.replace(/^page-/, '') : null;
     if (!mechActiveId_ || mechAllowed_.indexOf(mechActiveId_) < 0) showPage('logistics-plan');
+    applyMenuConfig_();   // кастом меню поверх ролевого фильтра (05.09), см. блок "Кастомизация меню"
     updateViewAsButton_();
     return;
   }
@@ -9806,6 +9859,7 @@ function applyRoleUI() {
     });
     document.querySelectorAll('.sidebar-nav-section').forEach(function(s){ s.style.display = ''; });
   }
+  applyMenuConfig_();   // кастом меню поверх ролевого фильтра (05.09), см. блок "Кастомизация меню"
   updateViewAsButton_();
 }
 
@@ -18541,6 +18595,362 @@ function initSidebarCollapse_() {
   setSidebarCollapseBtnTitle_(collapsed);
 }
 initSidebarCollapse_();
+
+// ── Кастомизация меню (05.09, Влад: "зажал меню - перешло в режим кастома: передвинуть
+// как канбанчик, скрыть и тому подобное. Только для админа. При входе в просмотрщик
+// сотрудника я могу также настраивать ему, как будет меню у него. У сотрудника
+// кастомизации быть не должно"). Паттерн и физика - ГОСТ раздел 6 ("Долгое нажатие ->
+// режим перестановки" + Drag & Drop), числа буквально. Хранение - на сервере
+// (/api/menu_config, таблица menu_configs), ключ "admin" или "role:фамилия";
+// localStorage - только кэш для мгновенной отрисовки до ответа сервера. Порядок = токены
+// ВСЕХ детей nav (пункты по data-page и разделители "#park"/"#sales"), поэтому пункт
+// можно унести в другой раздел; новые пункты, которых в сохранённом порядке нет, встают
+// в конец - админ их переставит. Кастом накладывается ПОВЕРХ ролевого фильтра
+// applyRoleUI(): он умеет только прятать и переставлять, показать лишнее роли не может.
+var MENU_CFG_LS_ = 'yard.menu.cfg.';
+var menuCfgCache_ = {};        // key -> cfg | null (null = на сервере конфига нет)
+var menuCfgInflight_ = {};
+var menuCustomizing_ = false;
+var menuDefaultOrder_ = null;  // токены в исходном порядке DOM
+var menuSaveTimer_ = null;
+var menuSuppressClick_ = false;
+var menuHold_ = null;          // долгое нажатие: {item, x0, y0, pid, timer}
+var menuDrag_ = null;          // активное перетаскивание
+var menuHintDone_ = false, menuHintTimer_ = null;
+
+function menuPrefersReduced_() { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } }
+function menuSur_(name) { return String(name || '').trim().split(/\s+/)[0].toLowerCase().replace(/ё/g, 'е'); }
+function menuCfgKey_() {
+  if (typeof D === 'undefined' || !D || !D.role) return null;
+  if (D.role === 'admin') return viewAsEntry ? (viewAsEntry.type + ':' + menuSur_(viewAsEntry.name)) : 'admin';
+  return D.role + ':' + menuSur_(D.managerName || D.logistName || D.mechanicName || '');
+}
+function menuNav_() { return document.querySelector('.sidebar-nav'); }
+function menuToken_(el) {
+  if (el.classList.contains('sidebar-nav-item')) return el.getAttribute('data-page');
+  if (el.classList.contains('sidebar-nav-section')) return '#' + (el.getAttribute('data-section') || '');
+  return null;
+}
+function menuChildren_() {
+  var nav = menuNav_();
+  return nav ? [].slice.call(nav.children).filter(function(el) { return !!menuToken_(el); }) : [];
+}
+function menuItems_() { var nav = menuNav_(); return nav ? [].slice.call(nav.querySelectorAll('.sidebar-nav-item')) : []; }
+
+// Применить конфиг к DOM: порядок (пункты + разделители) и скрытые. Вызывается из
+// applyRoleUI() ПОСЛЕ ролевого фильтра - тот уже выставил display по роли, мы только
+// дополнительно прячем. В режиме кастомизации скрытые не прячем, а гасим (.menu-hidden).
+function menuApplyCfg_(cfg) {
+  var nav = menuNav_(); if (!nav) return;
+  if (!menuDefaultOrder_) menuDefaultOrder_ = menuChildren_().map(menuToken_);
+  var order = (cfg && Array.isArray(cfg.order) && cfg.order.length) ? cfg.order : menuDefaultOrder_;
+  var byTok = {}; menuChildren_().forEach(function(el) { byTok[menuToken_(el)] = el; });
+  var placed = {};
+  order.forEach(function(t) { if (byTok[t] && !placed[t]) { nav.appendChild(byTok[t]); placed[t] = true; } });
+  menuDefaultOrder_.forEach(function(t) { if (!placed[t] && byTok[t]) nav.appendChild(byTok[t]); });
+  var doneBar = document.getElementById('menu-done-bar');
+  if (doneBar) nav.appendChild(doneBar);
+  var hidden = (cfg && Array.isArray(cfg.hidden)) ? cfg.hidden : [];
+  var items = menuItems_();
+  // Гвард: спрятать всё нельзя - если не останется ни одного видимого по роли пункта,
+  // скрытие игнорируем целиком (человек не должен остаться с пустым меню).
+  var roleVisible = items.filter(function(it) { return it.style.display !== 'none'; });
+  if (!roleVisible.filter(function(it) { return hidden.indexOf(it.getAttribute('data-page')) < 0; }).length) hidden = [];
+  items.forEach(function(it) {
+    var isHidden = hidden.indexOf(it.getAttribute('data-page')) >= 0;
+    it.classList.toggle('menu-hidden', isHidden);
+    if (isHidden && !menuCustomizing_ && it.style.display !== 'none') it.style.display = 'none';
+  });
+  // Подпись на плашке - чьё меню правим; обновляется и при смене "Смотреть как" прямо в режиме.
+  var lbl = document.getElementById('menu-done-target');
+  if (lbl && menuCustomizing_) lbl.textContent = viewAsEntry ? String(viewAsEntry.name).split(' ')[0] : 'Админ';
+}
+function applyMenuConfig_() {
+  var key = menuCfgKey_(); if (!key) return;
+  var cfg = menuCfgCache_[key];
+  if (cfg === undefined) {
+    try { var raw = localStorage.getItem(MENU_CFG_LS_ + key); if (raw) cfg = JSON.parse(raw); } catch (e) {}
+    if (cfg === undefined) cfg = null;
+    menuCfgFetch_(key);
+  }
+  menuApplyCfg_(cfg);
+  menuHintMaybe_();
+}
+function menuCfgFetch_(key) {
+  if (menuCfgInflight_[key]) return;
+  if (typeof fetchFromYardApi_ !== 'function' || typeof SESSION_TOKEN === 'undefined' || !SESSION_TOKEN) return;
+  menuCfgInflight_[key] = true;
+  // Сотруднику ключ не передаём - сервер сам выводит его из access_users по email сессии.
+  var params = (D && D.role === 'admin') ? { key: key } : {};
+  fetchFromYardApi_('/menu_config', params).then(function(r) {
+    delete menuCfgInflight_[key];
+    if (!r.ok || !r.data) return;
+    var cfg = r.data.config || null;
+    menuCfgCache_[key] = cfg;
+    try { if (cfg) localStorage.setItem(MENU_CFG_LS_ + key, JSON.stringify(cfg)); else localStorage.removeItem(MENU_CFG_LS_ + key); } catch (e) {}
+    if (menuCfgKey_() === key) menuApplyCfg_(cfg);
+  }).catch(function() { delete menuCfgInflight_[key]; });
+}
+function menuCfgFromDom_() {
+  var hidden = menuItems_().filter(function(it) { return it.classList.contains('menu-hidden'); })
+    .map(function(it) { return it.getAttribute('data-page'); });
+  return { v: 1, order: menuChildren_().map(menuToken_), hidden: hidden };
+}
+function menuCfgSave_(immediate) {
+  if (!D || D.role !== 'admin') return;
+  var key = menuCfgKey_(); if (!key) return;
+  var cfg = menuCfgFromDom_();
+  menuCfgCache_[key] = cfg;
+  try { localStorage.setItem(MENU_CFG_LS_ + key, JSON.stringify(cfg)); } catch (e) {}
+  clearTimeout(menuSaveTimer_);
+  var doSave = function() {
+    postToYardApi_('/menu_config', { key: key, config: JSON.stringify(cfg) }).then(function(r) {
+      if (!r.ok) p2Toast('Меню не сохранилось на сервере: ' + (r.data && r.data.error || 'ошибка'), 'red');
+    }).catch(function() { p2Toast('Меню не сохранилось: нет связи с сервером', 'red'); });
+  };
+  if (immediate) doSave(); else menuSaveTimer_ = setTimeout(doSave, 400);
+}
+function menuCfgReset_() {
+  if (!D || D.role !== 'admin') return;
+  var key = menuCfgKey_(); if (!key) return;
+  clearTimeout(menuSaveTimer_);
+  menuCfgCache_[key] = null;
+  try { localStorage.removeItem(MENU_CFG_LS_ + key); } catch (e) {}
+  menuItems_().forEach(function(it) { it.classList.remove('menu-hidden'); });
+  menuApplyCfg_(null);
+  if (menuCustomizing_) menuWiggle_(null);
+  postToYardApi_('/menu_config', { key: key, reset: '1' }).catch(function() {});
+  p2Toast('Меню сброшено к стандартному', 'green');
+}
+
+// ── режим кастомизации ──
+function menuEnterCustomize_() {
+  if (menuCustomizing_ || !D || D.role !== 'admin') return;
+  var sb = document.querySelector('.sidebar'); if (!sb) return;
+  if (sb.classList.contains('collapsed')) toggleSidebarCollapse();   // подписи нужны, чтобы понимать, что двигаешь
+  menuCustomizing_ = true;
+  sb.classList.add('menu-customizing');
+  menuHintDismiss_();
+  applyRoleUI();   // display по роли заново: скрытые кастомом становятся видимыми (гашёными); подпись плашки - там же
+  menuWiggle_(null);
+  if (typeof uiSounds !== 'undefined' && uiSounds.toggle) uiSounds.toggle();
+}
+function menuExitCustomize_() {
+  if (!menuCustomizing_) return;
+  if (menuDrag_) menuDragEnd_(true);
+  menuCustomizing_ = false;
+  menuSuppressClick_ = false;
+  var sb = document.querySelector('.sidebar');
+  if (sb) sb.classList.remove('menu-customizing');
+  menuItems_().forEach(function(it) {
+    it.classList.remove('menu-wiggle');
+    it.style.animationDelay = ''; it.style.animationDuration = ''; it.style.transition = ''; it.style.transform = '';
+  });
+  menuCfgSave_(true);
+  applyRoleUI();
+  if (typeof uiSounds !== 'undefined' && uiSounds.toggle) uiSounds.toggle();
+}
+// Дрожание ±1° всех пунктов, кроме удерживаемого - у каждого свой фазовый сдвиг
+// (duration/delay по индексу, ±15% от базовых ~0.22-0.28s), чтобы не дрожали синхронно.
+function menuWiggle_(exceptEl) {
+  if (!menuCustomizing_ || menuPrefersReduced_()) return;
+  menuItems_().forEach(function(it, i) {
+    if (it === exceptEl || it.classList.contains('menu-placeholder')) { it.classList.remove('menu-wiggle'); return; }
+    it.style.animationDuration = (0.25 * (0.85 + ((i * 7) % 31) / 100)).toFixed(3) + 's';
+    it.style.animationDelay = '-' + ((i * 37) % 250) + 'ms';
+    it.classList.add('menu-wiggle');
+  });
+}
+function menuWiggleStop_() { menuItems_().forEach(function(it) { it.classList.remove('menu-wiggle'); }); }
+function menuToggleHidden_(item) {
+  if (!item) return;
+  var willHide = !item.classList.contains('menu-hidden');
+  if (willHide) {
+    var visible = menuItems_().filter(function(it) { return it.style.display !== 'none' && !it.classList.contains('menu-hidden'); });
+    if (visible.length <= 1) { p2Toast('Хотя бы один пункт должен остаться', 'red'); return; }
+  }
+  item.classList.toggle('menu-hidden', willHide);
+  menuCfgSave_(false);
+  if (typeof uiSounds !== 'undefined' && uiSounds.toggle) uiSounds.toggle();
+}
+// Grip (6 точек 2x3) и "глаз" в каждом пункте - видны только в режиме (CSS).
+function menuDecorateItems_() {
+  menuItems_().forEach(function(it) {
+    if (it.querySelector('.menu-grip')) return;
+    var grip = document.createElement('span'); grip.className = 'menu-grip';
+    grip.innerHTML = '<svg viewBox="0 0 10 14" fill="currentColor"><circle cx="3" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/><circle cx="3" cy="7" r="1.3"/><circle cx="7" cy="7" r="1.3"/><circle cx="3" cy="12" r="1.3"/><circle cx="7" cy="12" r="1.3"/></svg>';
+    var eye = document.createElement('span'); eye.className = 'menu-eye'; eye.title = 'Скрыть / показать пункт';
+    eye.innerHTML = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 10s3-5.3 8-5.3S18 10 18 10s-3 5.3-8 5.3S2 10 2 10z"/><circle cx="10" cy="10" r="2.3"/></svg>';
+    it.appendChild(grip); it.appendChild(eye);
+  });
+}
+// Подсказка первого визита (ГОСТ): на ОДНОМ пункте, гаснет через 5с или при первом входе в режим.
+function menuHintMaybe_() {
+  if (menuHintDone_ || !D || D.role !== 'admin' || viewAsEntry || menuCustomizing_) return;
+  menuHintDone_ = true;
+  try { if (localStorage.getItem('yard.menu.hint') === '1') return; } catch (e) {}
+  var first = document.querySelector('.sidebar-nav .sidebar-nav-item[data-page="main"]'); if (!first) return;
+  var b = document.createElement('div'); b.className = 'menu-hint-badge'; b.id = 'menu-hint-badge';
+  b.textContent = 'Держи здесь ~0,5 сек - настроить меню';
+  first.style.position = 'relative'; first.appendChild(b); first.classList.add('menu-hint-pulse');
+  menuHintTimer_ = setTimeout(menuHintDismiss_, 5000);
+}
+function menuHintDismiss_() {
+  clearTimeout(menuHintTimer_);
+  var b = document.getElementById('menu-hint-badge'); if (b) b.remove();
+  var f = document.querySelector('.sidebar-nav-item.menu-hint-pulse'); if (f) { f.classList.remove('menu-hint-pulse'); f.style.position = ''; }
+  try { localStorage.setItem('yard.menu.hint', '1'); } catch (e) {}
+}
+
+// ── долгое нажатие и перетаскивание (ГОСТ раздел 6) ──
+function menuHoldCancel_() {
+  var h = menuHold_; menuHold_ = null; if (!h) return;
+  clearTimeout(h.timer); h.item.style.transform = ''; h.item.style.transition = '';
+}
+function menuDragStart_(item, e, immediate) {
+  if (menuDrag_) return;
+  menuDrag_ = { item: item, card: null, x0: e.clientX, y0: e.clientY, baseX: 0, baseY: 0, curX: 0, curY: 0, tgtX: 0, tgtY: 0,
+                raf: 0, origNext: item.nextSibling, moved: false, lifted: false, pid: e.pointerId };
+  if (!immediate) {
+    // фаза 1: отклик сразу, подъём - после 5px сдвига
+    item.style.transition = 'transform 100ms cubic-bezier(.25,1,.5,1)';
+    item.style.transform = 'scale(.97)';
+  }
+  try { if (e.pointerId != null && item.setPointerCapture) item.setPointerCapture(e.pointerId); } catch (err) {}
+  if (immediate) menuDragLift_();
+}
+function menuDragLift_() {
+  var d = menuDrag_; if (!d || d.lifted) return;
+  d.item.classList.remove('menu-wiggle');
+  d.item.style.transform = ''; d.item.style.transition = '';
+  var r = d.item.getBoundingClientRect();
+  var card = document.createElement('div');
+  card.className = 'menu-drag-card sidebar-nav-item' + (d.item.classList.contains('menu-hidden') ? ' menu-hidden' : '');
+  card.innerHTML = d.item.innerHTML;
+  card.style.left = r.left + 'px'; card.style.top = r.top + 'px';
+  card.style.width = r.width + 'px'; card.style.height = r.height + 'px';
+  document.body.appendChild(card);
+  d.card = card; d.baseX = r.left; d.baseY = r.top; d.lifted = true;
+  d.item.classList.add('menu-placeholder');
+  menuWiggleStop_();   // дрожание - CSS-анимация transform, перекрыла бы FLIP соседей; на время драга гасим
+  document.body.style.cursor = 'grabbing';
+  if (typeof uiSounds !== 'undefined' && uiSounds.dragGrab) uiSounds.dragGrab();
+  menuDragTick_();
+}
+function menuDragTick_() {
+  var d = menuDrag_; if (!d || !d.lifted) return;
+  if (menuPrefersReduced_()) { d.curX = d.tgtX; d.curY = d.tgtY; }
+  else { d.curX += (d.tgtX - d.curX) * 0.28; d.curY += (d.tgtY - d.curY) * 0.28; }
+  var tilt = Math.max(-7, Math.min(7, (d.tgtX - d.curX) * 0.10));
+  d.card.style.transform = 'translate(' + d.curX + 'px,' + d.curY + 'px) rotate(' + tilt + 'deg) scale(1.03)';
+  d.raf = requestAnimationFrame(menuDragTick_);
+}
+function menuDragMove_(e) {
+  var d = menuDrag_; if (!d) return;
+  if (!d.lifted) {
+    if (Math.abs(e.clientX - d.x0) + Math.abs(e.clientY - d.y0) < 5) return;
+    menuDragLift_();
+  }
+  d.tgtX = e.clientX - d.x0; d.tgtY = e.clientY - d.y0;
+  var nav = menuNav_();
+  var over = document.elementFromPoint(d.baseX + 20, e.clientY);
+  var target = (over && over.closest) ? (over.closest('.sidebar-nav-item') || over.closest('.sidebar-nav-section')) : null;
+  if (!target || target === d.item || !nav.contains(target) || target.classList.contains('menu-drag-card')) return;
+  var tr = target.getBoundingClientRect();
+  var after = e.clientY > tr.top + tr.height / 2;
+  var doneBar = document.getElementById('menu-done-bar');
+  var ref = after ? (target.nextSibling || doneBar) : target;
+  if (ref === d.item || (after && target.nextSibling === d.item)) return;
+  menuFlip_(function() { nav.insertBefore(d.item, ref); });
+  d.moved = true;
+}
+function menuDragEnd_(cancel) {
+  var d = menuDrag_; menuDrag_ = null; if (!d) return;
+  cancelAnimationFrame(d.raf);
+  document.body.style.cursor = '';
+  if (!d.lifted) { d.item.style.transform = ''; d.item.style.transition = ''; return; }
+  var nav = menuNav_();
+  if (cancel && d.moved) menuFlip_(function() { nav.insertBefore(d.item, d.origNext || document.getElementById('menu-done-bar')); });
+  // укладка "первый-последний": карточка летит к плейсхолдеру, overshoot 380ms
+  // (отмена - зеркально, без overshoot, 340ms --ease-drawer)
+  var to = d.item.getBoundingClientRect();
+  var dur = menuPrefersReduced_() ? 0 : (cancel ? 340 : 380);
+  var curve = cancel ? 'cubic-bezier(.32,.72,0,1)' : 'cubic-bezier(.34,1.45,.5,1)';
+  var card = d.card, item = d.item;
+  card.style.transition = 'transform ' + dur + 'ms ' + curve + ', opacity 140ms cubic-bezier(.25,1,.5,1)';
+  card.style.transform = 'translate(' + (to.left - d.baseX) + 'px,' + (to.top - d.baseY) + 'px) rotate(0deg) scale(1)';
+  card.style.opacity = '1';
+  setTimeout(function() {
+    card.remove();
+    item.classList.remove('menu-placeholder');
+    if (menuCustomizing_) menuWiggle_(null);
+  }, dur);
+  if (!cancel && d.moved) {
+    menuCfgSave_(false);
+    if (typeof uiSounds !== 'undefined' && uiSounds.dragDrop) uiSounds.dragDrop();
+  }
+}
+// FLIP соседей - 300ms cubic-bezier(.22,.9,.28,1), снять позиции до/после мутации.
+function menuFlip_(mutate) {
+  var els = menuChildren_();
+  var before = els.map(function(el) { return el.getBoundingClientRect().top; });
+  mutate();
+  if (menuPrefersReduced_()) return;
+  els.forEach(function(el, i) {
+    if (el.classList.contains('menu-placeholder')) return;
+    var dlt = before[i] - el.getBoundingClientRect().top;
+    if (!dlt) return;
+    el.style.transition = 'none'; el.style.transform = 'translateY(' + dlt + 'px)';
+    requestAnimationFrame(function() { el.style.transition = 'transform 300ms cubic-bezier(.22,.9,.28,1)'; el.style.transform = ''; });
+  });
+}
+(function menuInit_() {
+  var nav = menuNav_(); if (!nav) return;
+  menuDecorateItems_();
+  nav.addEventListener('contextmenu', function(e) { if (menuCustomizing_ || menuHold_) e.preventDefault(); });
+  // Клики: в режиме кастомизации пункты не переключают страницы (capture - раньше inline
+  // onclick самого пункта); "глаз" прячет/показывает; клик по пустому месту - выход.
+  nav.addEventListener('click', function(e) {
+    if (menuSuppressClick_) { menuSuppressClick_ = false; e.stopPropagation(); e.preventDefault(); return; }
+    if (!menuCustomizing_) return;
+    if (e.target.closest('#menu-done-bar')) return;
+    e.stopPropagation(); e.preventDefault();
+    var eye = e.target.closest('.menu-eye');
+    if (eye) { menuToggleHidden_(eye.closest('.sidebar-nav-item')); return; }
+    if (!e.target.closest('.sidebar-nav-item') && !e.target.closest('.sidebar-nav-section')) menuExitCustomize_();
+  }, true);
+  nav.addEventListener('pointerdown', function(e) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (typeof D === 'undefined' || !D || D.role !== 'admin') return;   // у сотрудника кастомизации нет
+    if (e.target.closest('.menu-eye') || e.target.closest('#menu-done-bar')) return;
+    var item = e.target.closest('.sidebar-nav-item'); if (!item) return;
+    if (menuCustomizing_) { menuDragStart_(item, e, false); return; }
+    // долгое нажатие: 550мс без сдвига > 6px; отклик scale(.97) - с первой миллисекунды
+    menuHoldCancel_();
+    item.style.transition = 'transform 100ms cubic-bezier(.25,1,.5,1)';
+    item.style.transform = 'scale(.97)';
+    var ptype = e.pointerType, pid = e.pointerId;
+    menuHold_ = { item: item, x0: e.clientX, y0: e.clientY, pid: pid, timer: setTimeout(function() {
+      var h = menuHold_; menuHold_ = null; if (!h) return;
+      h.item.style.transform = ''; h.item.style.transition = '';
+      menuSuppressClick_ = true;   // отпускание после удержания - не клик по пункту
+      menuEnterCustomize_();
+      // удерживаемый пункт поднимаем сразу - можно тащить, не отпуская (ГОСТ, фаза 2)
+      menuDragStart_(h.item, { clientX: h.x0, clientY: h.y0, pointerId: pid, pointerType: ptype }, true);
+    }, 550) };
+  });
+  window.addEventListener('pointermove', function(e) {
+    if (menuHold_ && (Math.abs(e.clientX - menuHold_.x0) > 6 || Math.abs(e.clientY - menuHold_.y0) > 6)) menuHoldCancel_();
+    if (menuDrag_) menuDragMove_(e);
+  }, { passive: true });
+  window.addEventListener('pointerup', function() { if (menuHold_) menuHoldCancel_(); if (menuDrag_) menuDragEnd_(false); });
+  window.addEventListener('pointercancel', function() { if (menuHold_) menuHoldCancel_(); if (menuDrag_) menuDragEnd_(true); });
+  document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Escape') return;
+    if (menuDrag_) { menuDragEnd_(true); e.preventDefault(); }
+    else if (menuCustomizing_) { menuExitCustomize_(); e.preventDefault(); }
+  });
+})();
 
 function showPage(id, el) {
   closeMobileSidebar(); // выбрали страницу - меню на телефоне больше не нужно открытым

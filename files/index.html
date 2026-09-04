@@ -6404,6 +6404,14 @@ function applyData(patch, opts) {
   if (hash !== null) lastAppliedHash_ = hash;
   D = isFirstLoad ? patch : Object.assign(D, patch);
   checkStaleFallbacks_(); // см. определение выше - независимо от skipIfUnchanged, дёшево
+  // Список периодов - на каждый applyData, не только на первый заход (2026-09-04, Влад:
+  // "куда август делся?", часть 3) - раньше пересчитывался ТОЛЬКО при первой навигации на
+  // страницу с выбором периода за всю жизнь вкладки; "Обновить данные" без ухода со
+  // страницы новый D.periods получал, но на select не переносил. Дёшево - без сети, просто
+  // читает уже пришедший D.periods (см. loadAvailablePeriods()). Только admin - у
+  // manager/logist/mechanic страниц с выбором периода в сайдбаре нет вообще, а сам action
+  // на сервере для них запрещён (лишний отклонённый запрос на каждое обновление).
+  if (D.role === 'admin' && typeof loadAvailablePeriods === 'function') loadAvailablePeriods();
   if (unchanged && opts.skipIfUnchanged) return false; // ничего не поменялось - DOM не трогаем
   render();
   return true;
@@ -18422,7 +18430,15 @@ function showPage(id, el) {
   var wrap = document.getElementById('period-selector-wrap');
   if (wrap) {
     wrap.style.display = PERIOD_PAGES.indexOf(id) >= 0 ? 'flex' : 'none';
-    if (PERIOD_PAGES.indexOf(id) >= 0 && !availablePeriods.length) loadAvailablePeriods();
+    // Без гварда "!availablePeriods.length" (2026-09-04, Влад: "куда август делся?", часть
+    // 3) - старый гвард грузил список РОВНО ОДИН РАЗ за жизнь вкладки браузера и больше
+    // никогда, даже если открыть эту же страницу заново или нажать "Обновить данные"
+    // (loadData() список не трогает вообще, см. applyData()). Бэкенд к этому моменту уже
+    // чинили дважды (v373/v374), а список на экране оставался старым, пока Влад не закрывал
+    // и не открывал вкладку заново - для пользователя выглядело так, будто фикс не подействовал.
+    // loadAvailablePeriods() сама дешёвая (читает уже загруженный D.periods, без сети) -
+    // пересчитывать её на каждый заход на страницу с выбором периода ничего не стоит.
+    if (PERIOD_PAGES.indexOf(id) >= 0) loadAvailablePeriods();
   }
 
   var rangeWrap = document.getElementById('range-selector-wrap');

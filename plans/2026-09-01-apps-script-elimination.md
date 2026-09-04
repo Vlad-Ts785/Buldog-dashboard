@@ -543,7 +543,7 @@ CRUD во внешней Google Таблице логистов (31 дневна
 | 8 | kp_issue | `/api/calc/kp_issue` | **ГОТОВ** (сам doGet - лишний прокси, фронт может звать сервер напрямую - дешёвая победа) |
 | 9 | vehicle_history | `/api/vehicle_status_history` (0.3) + История_финансов до 01.09 | нет |
 | 10 | vehicle_orders_history | нужен `/api/vehicle_orders_history` (orders_normalized+archive уже в MySQL) | нет - ВЫПАЛ из этапов, добавлен в 3.4 |
-| 11 | available_periods | вывод из period_snapshots + orders_normalized месяцев | нет - ВЫПАЛ, добавлен в 3.4 |
+| 11 | available_periods | `/api/available_periods` (UNION orders_normalized+orders_archive) | **СДЕЛАНО 04.09** - найдено вживую (Влад: "куда август делся?"), скан вкладок "Заказы_YYYY-MM" зависел от мёртвого email-канала (см. "КРИТИЧЕСКОЕ ОТКРЫТИЕ"), сентябрь и далее выпадали бы так же. Apps Script (v373) - сервер первым, скан - фолбэк |
 | 12 | orders_period | `/api/orders_period` | **ГОТОВ** (двухуровневый) |
 | 13 | global_stats | `/api/global_stats` (3.3, month_summary) | нет |
 | 14 | send_telegram_logists | этап 4.3 | нет |

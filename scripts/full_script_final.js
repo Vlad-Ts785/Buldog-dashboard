@@ -11236,7 +11236,31 @@ function joinManagerPlans_(ss, ordersResult, monthKey) {
 
 
 // Список месяцев, по которым есть архив (для выпадающего списка на дашборде)
+// Сервер первым (2026-09-04, Влад вживую: "куда август делся?") - НАЙДЕНО: скан вкладок
+// ниже зависит от email-канала 1С, который остановлен 17-19.08 (см. "КРИТИЧЕСКОЕ ОТКРЫТИЕ"
+// в plans/2026-09-01-apps-script-elimination.md) - вкладка "Заказы_2026-08" не создалась
+// вообще, месяц молча выпал из списка (и любой следующий месяц выпадал бы так же). Сервер
+// строит список из orders_normalized/orders_archive - тех же таблиц, откуда дашборд и так
+// уже читает сами данные периода, независимо от мёртвого email-канала.
+function fetchAvailablePeriodsFromServer_() {
+  try {
+    var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+    if (!apiKey) return null;
+    var resp = UrlFetchApp.fetch('https://api.yardhub.ru/api/available_periods', {
+      headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true,
+    });
+    if (resp.getResponseCode() !== 200) return null;
+    var data = JSON.parse(resp.getContentText());
+    if (!data || !Array.isArray(data.periods) || !data.periods.length) return null;
+    return data.periods;
+  } catch (err) {
+    return null;
+  }
+}
+
 function getAvailablePeriods(ss) {
+  var fromServer = fetchAvailablePeriodsFromServer_();
+  if (fromServer) return fromServer;
   // Текущий календарный месяц исключаем, даже если под его именем случайно завалялся
   // архивный лист (Влад, 2026-08-04: "2026-08" в выпадающем списке дублировал "Текущий
   // месяц" и падал с "Архив за 2026-08 пуст" - в списке архивов ему в принципе не место,

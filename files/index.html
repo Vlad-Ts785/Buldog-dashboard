@@ -16844,6 +16844,12 @@ function showSalaryTab(tab, month) {
     var panel = document.getElementById('salary-tab-' + t);
     if (panel) panel.style.display = (t === tab) ? '' : 'none';
   });
+  // Общий селектор периода в шапке страницы - только для вкладки "коммерческий отдел"
+  // (05.09, Влад: "не задваивался выбор периода, зачем он два раза"): у машинистов свой
+  // выбор месяца рядом с таблицей, и он работает по ДРУГОМУ источнику (driver_payroll,
+  // месяцы приходят из 1С), общий период на него не влиял вообще.
+  var periodWrap = document.getElementById('period-selector-wrap');
+  if (periodWrap) periodWrap.style.display = (tab === 'machinists') ? 'none' : 'flex';
   if (tab === 'machinists') return loadMachinistSalaryData(month);
 }
 
@@ -17008,7 +17014,12 @@ function renderMachinistSalary() {
           '<button class="crm-filter-chip' + (machinistSalaryFilter_ === 'файмонвиль' ? ' active' : '') + '" onclick="machinistSalarySetFilter_(\'файмонвиль\')">Файмонвиль</button>' +
           '<button class="crm-filter-chip' + (machinistSalaryFilter_ === 'не определено' ? ' active' : '') + '" onclick="machinistSalarySetFilter_(\'не определено\')">Не определено</button>' +
         '</div>' +
-        '<select onchange="loadMachinistSalaryData(this.value)" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12.5px">' + monthOpts + '</select>' +
+        '<div style="display:flex;gap:8px;align-items:center">' +
+          // Выгрузка на печать (05.09) - файл со сводной таблицей и развёрткой по каждому машинисту.
+          '<button type="button" id="machinist-export-btn" onclick="machinistSalaryExport_()" ' +
+            'style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12.5px;cursor:pointer;font-family:inherit">Выгрузить для печати</button>' +
+          '<select onchange="loadMachinistSalaryData(this.value)" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12.5px">' + monthOpts + '</select>' +
+        '</div>' +
       '</div>' +
       '<div class="muted" style="font-size:11.5px;padding:0 20px 10px">' +
         'Тип (трал/длинномер) определяем по технике, на которой человек реально работал в этом месяце - НЕ по данным 1С (там все машинисты числятся под одним отделом). ' +
@@ -17020,6 +17031,127 @@ function renderMachinistSalary() {
         '<div class="sec-sub">К начислению всего: ' + Math.round(totalNet).toLocaleString('ru-RU') + ' ₽ · ' + rows.length + ' чел.</div></div>' +
       '<div style="overflow-x:auto"><table class="tbl"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>' +
     '</div>';
+}
+
+// ── Выгрузка страницы на печать (05.09, Влад: "добавь возможность выгрузки файла страницы
+// с подробной информацией развёрткой по водителю для последующей печати"). Скачивается
+// самостоятельный HTML: сводная таблица + по КАЖДОМУ машинисту его рейсы и штрафы, каждый
+// с новой страницы (page-break). Детализация берётся одним запросом на весь месяц
+// (/api/driver_payroll_detail_all), не по одному водителю - иначе 55 запросов подряд.
+var machinistExportBusy_ = false;
+function machinistSalaryExport_() {
+  if (machinistExportBusy_) return;
+  var d = machinistSalaryData_[machinistSalaryMonth_];
+  if (!d) return;
+  var btn = document.getElementById('machinist-export-btn');
+  machinistExportBusy_ = true;
+  if (btn) { btn.disabled = true; btn.textContent = 'Готовлю файл…'; }
+  fetchFromYardApi_('/driver_payroll_detail_all', { month: machinistSalaryMonth_ }).then(function(r) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Выгрузить для печати'; }
+    machinistExportBusy_ = false;
+    if (!r.ok || !r.data || r.data.error) { p2Toast('Не удалось выгрузить: ' + ((r.data && r.data.error) || 'ошибка сервера'), 'red'); return; }
+    var html = machinistBuildPrintHtml_(d, r.data.by_driver || {});
+    var blob = new Blob(['﻿' + html], { type: 'text/html;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'Зарплата машинистов ' + formatMonthLabel(machinistSalaryMonth_) + '.html';
+    document.body.appendChild(a); a.click();
+    setTimeout(function() { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    p2Toast('Файл скачан - откройте и печатайте (Ctrl+P)', 'green');
+  }).catch(function(e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Выгрузить для печати'; }
+    machinistExportBusy_ = false;
+    p2Toast('Ошибка сети: ' + e.message, 'red');
+  });
+}
+function machinistBuildPrintHtml_(d, byDriver) {
+  var esc = function(v) { return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
+  var num = function(v) { return v ? Math.round(v).toLocaleString('ru-RU') : '—'; };
+  var rows = (d.rows || []).filter(function(r) {
+    return machinistSalaryFilter_ === 'all' || r.vehicle_bucket === machinistSalaryFilter_;
+  }).slice().sort(function(a, b) { return (b.net_amount || 0) - (a.net_amount || 0); });
+  var totalNet = rows.reduce(function(s, r) { return s + (r.net_amount || 0); }, 0);
+  var now = new Date();
+  var stamp = String(now.getDate()).padStart(2, '0') + '.' + String(now.getMonth() + 1).padStart(2, '0') + '.' +
+              now.getFullYear() + ' ' + String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+
+  // Сводная таблица - те же колонки, что на экране, но всегда с раскрытыми удержаниями:
+  // на бумаге сворачивать нечего, а для сверки с 1С нужны все слагаемые.
+  var sumHead = ['Машинист', 'Тип', 'Часы', 'Работа по заказам', 'Выслуга', 'Км за МКАД', 'Начисления',
+                 'Аванс/Нал', 'Штрафы', 'Проч. удерж.', 'Удержания', 'Итого', 'НДФЛ', 'К начислению', '%'];
+  var sumBody = rows.map(function(r) {
+    return '<tr><td class="l">' + esc(r.driver_name) + '</td><td class="l dim">' + esc(r.vehicle_bucket) + '</td>' +
+      '<td>' + num(r.hours) + '</td><td>' + num(r.work_orders_amount) + '</td><td>' + num(r.seniority_amount) + '</td>' +
+      '<td>' + num(r.mileage_mkad_amount) + '</td><td>' + num(r.accruals_amount) + '</td>' +
+      '<td>' + num(r.advance_amount) + '</td><td>' + num(r.gibdd_fines_amount) + '</td><td>' + num(r.other_deductions_amount) + '</td>' +
+      '<td>' + num(r.deductions_amount) + '</td><td>' + num(r.total_amount) + '</td><td>' + num(r.ndfl_amount) + '</td>' +
+      '<td class="b">' + num(r.net_amount) + '</td><td>' + (r.order_pct != null ? r.order_pct.toFixed(1) + '%' : '—') + '</td></tr>';
+  }).join('');
+
+  var perDriver = rows.map(function(r) {
+    var det = byDriver[r.driver_name] || { trips: [], fines: [] };
+    var trips = det.trips || [], fines = det.fines || [];
+    // Рейсы сгруппированы по машине - как в отчёте 1С и как в карточке на экране.
+    var byVeh = {};
+    trips.forEach(function(t) { (byVeh[t.vehicle_name || '—'] = byVeh[t.vehicle_name || '—'] || []).push(t); });
+    var vehBlocks = Object.keys(byVeh).map(function(veh) {
+      var list = byVeh[veh];
+      var sumNet = list.reduce(function(s, t) { return s + (Number(t.net_amount) || Number(t.amount) || 0); }, 0);
+      var sumOrder = list.reduce(function(s, t) { return s + (Number(t.order_amount) || 0); }, 0);
+      var body = list.map(function(t) {
+        var pct = (Number(t.order_amount) > 0) ? (100 * (Number(t.amount) || 0) / Number(t.order_amount)) : null;
+        return '<tr><td>' + esc(mdShort_(t.trip_date)) + '</td><td>' + esc(mdDocShort_(t.doc_ref)) + '</td>' +
+          '<td class="l">' + esc(t.logist ? String(t.logist).split(' ')[0] : '—') + '</td>' +
+          '<td class="l">' + esc(t.route || '—') + '</td><td class="l">' + esc(t.order_cargo || '—') + '</td>' +
+          '<td>' + num(t.km_mkad) + '</td><td>' + num(t.hours) + '</td>' +
+          '<td>' + num(t.amount) + '</td><td>' + num(t.order_amount) + '</td>' +
+          '<td>' + (pct != null ? pct.toFixed(1) + '%' : '—') + '</td></tr>';
+      }).join('');
+      return '<div class="veh">' + esc(veh) + ' · рейсов: ' + list.length + '</div>' +
+        '<table class="t"><thead><tr><th>Дата</th><th>Документ</th><th class="l">Логист</th><th class="l">Маршрут</th>' +
+        '<th class="l">Груз</th><th>Км МКАД</th><th>Часы</th><th>К начислению</th><th>Стоимость заказа</th><th>%</th></tr></thead>' +
+        '<tbody>' + body + '<tr class="tot"><td colspan="7">Итого по машине</td><td>' + num(sumNet) + '</td><td>' + num(sumOrder) + '</td>' +
+        '<td>' + (sumOrder > 0 ? (100 * sumNet / sumOrder).toFixed(1) + '%' : '—') + '</td></tr></tbody></table>';
+    }).join('');
+    var finesBlock = fines.length
+      ? '<div class="veh">Штрафы ГИБДД / удержания</div><table class="t narrow"><thead><tr><th>Период с</th><th>по</th>' +
+        '<th class="l">Документ</th><th>Сумма</th></tr></thead><tbody>' +
+        fines.map(function(f) {
+          return '<tr><td>' + esc(mdShort_(f.period_from)) + '</td><td>' + esc(mdShort_(f.period_to)) + '</td>' +
+            '<td class="l">' + esc(mdDocShort_(f.doc_ref)) + '</td><td>' + num(f.amount) + '</td></tr>';
+        }).join('') + '</tbody></table>'
+      : '<div class="dim" style="margin-top:6px">Штрафов и удержаний нет</div>';
+    return '<section class="drv"><h2>' + esc(r.driver_name) + ' <span class="dim">· ' + esc(r.vehicle_bucket) + '</span></h2>' +
+      '<div class="kv">' +
+        '<span><b>Часы:</b> ' + num(r.hours) + '</span><span><b>Начисления:</b> ' + num(r.accruals_amount) + ' ₽</span>' +
+        '<span><b>Удержания:</b> ' + num(r.deductions_amount) + ' ₽</span><span><b>Итого:</b> ' + num(r.total_amount) + ' ₽</span>' +
+        '<span><b>НДФЛ:</b> ' + num(r.ndfl_amount) + ' ₽</span><span><b>К начислению:</b> ' + num(r.net_amount) + ' ₽</span>' +
+        '<span><b>Процент:</b> ' + (r.order_pct != null ? r.order_pct.toFixed(1) + '%' : '—') + '</span>' +
+      '</div>' + (vehBlocks || '<div class="dim">Рейсов за месяц нет</div>') + finesBlock + '</section>';
+  }).join('');
+
+  return '<!doctype html><html lang="ru"><head><meta charset="utf-8">' +
+    '<title>Зарплата машинистов ' + esc(formatMonthLabel(machinistSalaryMonth_)) + '</title><style>' +
+    '@page{size:A4 landscape;margin:12mm}' +
+    'body{font-family:Arial,Helvetica,sans-serif;font-size:9pt;color:#000;background:#fff;margin:0;padding:14px}' +
+    'h1{font-size:15pt;margin:0 0 2px}h2{font-size:11pt;margin:0 0 6px;border-bottom:1px solid #000;padding-bottom:3px}' +
+    '.dim{color:#555;font-weight:400}.sub{color:#555;font-size:8.5pt;margin-bottom:12px}' +
+    'table{border-collapse:collapse;width:100%;margin:4px 0 10px}' +
+    'th,td{border:1px solid #999;padding:3px 5px;text-align:right;white-space:nowrap}' +
+    'th{background:#eee;font-size:8pt;text-align:right}th.l,td.l{text-align:left;white-space:normal}' +
+    'td.b{font-weight:700}tr.tot td{font-weight:700;background:#f3f3f3}' +
+    '.veh{font-weight:700;font-size:9.5pt;margin-top:8px}table.narrow{width:auto;min-width:60%}' +
+    '.kv{display:flex;flex-wrap:wrap;gap:4px 16px;margin:4px 0 8px;font-size:9pt}' +
+    '.drv{page-break-before:always;break-before:page}' +
+    '@media print{.no-print{display:none}}' +
+    '</style></head><body>' +
+    '<h1>Зарплата машинистов — ' + esc(formatMonthLabel(machinistSalaryMonth_)) + '</h1>' +
+    '<div class="sub">Выгружено ' + stamp + ' · ' + rows.length + ' чел. · к начислению всего ' + num(totalNet) + ' ₽' +
+      (machinistSalaryFilter_ !== 'all' ? ' · фильтр: ' + esc(machinistSalaryFilter_) : '') + '</div>' +
+    '<table class="t"><thead><tr>' + sumHead.map(function(h, i) { return '<th' + (i < 2 ? ' class="l"' : '') + '>' + h + '</th>'; }).join('') + '</tr></thead>' +
+    '<tbody>' + sumBody + '</tbody></table>' +
+    perDriver +
+    '</body></html>';
 }
 
 // ── Детализация машиниста - штрафы построчно + рейсы по машинам (2026-09-04, план Фаза 2,

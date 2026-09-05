@@ -13,6 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@500;600;700&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
 /* ── Мобильная Планировка (plans/2026-09-05-mobile-planning-page.md). Отдельная лёгкая
    страница для логиста в поле. Токены - DESIGN_SYSTEM.md раздел 1, без нового hex.
@@ -345,6 +346,11 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
   <symbol id="i-wifi-off" viewBox="0 0 24 24"><path d="M3 3l18 18M8.5 16.5a5 5 0 0 1 7 0M5 12.5a10 10 0 0 1 4-2.5M12 7a14 14 0 0 1 10 4"/><circle cx="12" cy="20" r="1"/></symbol>
   <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></symbol>
 </svg>
+<div class="state" id="loginState" hidden>
+  <h1>TS HUB · Планировка</h1>
+  <p>Войдите тем же аккаунтом Google, что и в дашборде.</p>
+  <div id="googleBtn" style="margin-top:8px"></div>
+</div>
 <div class="app" id="app">
   <header class="hdr" id="hdr">
     <div class="hdr-row hdr-row1">
@@ -381,7 +387,7 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 <div class="scrim" id="scrim"></div>
 <div class="sheet" id="sheet"><div class="grip" id="grip"></div><div class="sh-head" id="shHead"></div><div class="sh-body" id="shBody"></div><div class="sh-foot" id="shFoot"></div></div>
 <div class="ovl" id="ovl"><div class="ovl-head" id="ovlHead"></div><div class="ovl-body" id="ovlBody"></div><div class="ovl-foot" id="ovlFoot" hidden></div></div>
-<div class="demo-tag" id="demoTag" hidden>ДЕМО · v4</div>
+<div class="demo-tag" id="demoTag" hidden>ДЕМО · v5</div>
 <script>
 "use strict";
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -425,6 +431,24 @@ function untilLabel(s){
 }
 /* Правило пересечений - копия lpOverlapAllowed_ (index.html:21772): только Ремонт + Без водителя */
 function overlapAllowed(a, b){ return (a === "repair" && b === "driveroff") || (a === "driveroff" && b === "repair"); }
+/* Нормализация госномера - копия normalizeGosServer_ (api/server.js) буквально: лат/кир
+   омографы к одной букве, без пробелов/дефисов, капс. Нужна, чтобы сверять vehicle_gos из
+   plan_segs/fleet_assignments с gos из /api/main_payload - разные эндпоинты, форматирование
+   пробелов не гарантированно побайтово совпадает. */
+function normGos(g){
+  var latToRus = {A:"А",B:"В",E:"Е",K:"К",M:"М",H:"Н",O:"О",P:"Р",C:"С",T:"Т",X:"Х",Y:"У"};
+  var cleaned = String(g || "").replace(/[^A-Za-zА-Яа-я0-9]/g, "").toUpperCase();
+  var out = ""; for (var i = 0; i < cleaned.length; i++){ var ch = cleaned[i]; out += latToRus[ch] || ch; }
+  return out;
+}
+/* "YYYY-MM-DD HH:MM:SS" (MSK wall-clock со стороны сервера) -> часы от эпохи ленты, тот же
+   приём без явного часового пояса, что lpFleetDateToHour_ на десктопе - корректно, пока
+   устройство физически выставлено на московское время (тот же документированный допуск). */
+function wallToHour(str){
+  var m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(str || "");
+  if (!m) return null;
+  return dateToHour_(new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]));
+}
 var DRIVEROFF_REASONS = [["dayoff","Выходной"],["vacation","Отпуск"],["sick","Больничный"],["intake","Приёмка"]];
 function reasonLabel(code){ var f = DRIVEROFF_REASONS.filter(function(p){ return p[0] === code; })[0]; return f ? f[1] : ""; }
 var KIND_LABEL = {trip:"Рейс", repair:"Ремонт", maint:"ТО", noorder:"Без заказа", driveroff:"Без водителя"};
@@ -434,7 +458,7 @@ var PLACES = ["Липецк","Череповец","Подольск","Мытищ
    1. Состояние
    ═══════════════════════════════════════════════════════════════════════════ */
 var M = {
-  vehicles: [], segs: [], people: [], trailers: [], managers: [], logists: [], me: {name:"", role:""},
+  vehicles: [], segs: [], people: [], trailers: [], managers: [], logists: [], assignments: [], me: {name:"", role:""},
   sel: null,           // id выделенной плитки (или "draft")
   draft: null,         // черновик заявки {id:"draft", v, kind, s, l, ...}
   zoom: 1,             // индекс в LEVELS
@@ -504,7 +528,7 @@ function makeDemoApi(){
       if (r < 0.28){ h += 0.5 * Math.floor(rnd()*16) + 1; continue; }
       var kind = r < 0.86 ? "trip" : r < 0.92 ? "repair" : r < 0.95 ? "maint" : "driveroff";
       var l = kind === "trip" ? pick([8,8,8,9,10,12,24,24,48]) : kind === "driveroff" ? pick([24,48,24*7]) : pick([8,24,48,72]);
-      var s = {id:"d"+(seqn++)+"-demo", v:vi, kind:kind, s:h, l:l, needsData:false, reason:"", tripMode:"", mg:"", lg:"", from:"", to:"", customer:"", updatedBy:pick(logists), updatedAt: now - rnd()*48};
+      var s = {id:"d"+(seqn++)+"-demo", v:vi, kind:kind, s:h, l:l, needsData:false, reason:"", tripMode:"", mg:"", lg:pick(logists), from:"", to:"", customer:"", updatedBy:pick(logists), updatedAt: now - rnd()*48};
       if (kind === "trip"){ s.customer = pick(customers); s.from = pick(["Москва","Домодедово","Мытищи","Подольск","Химки"]); s.to = pick(PLACES); s.mg = pick(managers); s.lg = pick(logists); s.needsData = rnd() < 0.15; if (l >= 48) s.tripMode = "long"; else if (l === 24 && rnd() < .5) s.tripMode = "daily"; }
       if (kind === "driveroff") s.reason = pick(["dayoff","vacation","sick","intake"]);
       segs.push(s); h += l + (rnd() < .5 ? 0 : 0.5 * Math.floor(rnd()*10));
@@ -519,6 +543,93 @@ function makeDemoApi(){
     couple: function(kind, gos, key){ return later({ok:true}); },
     uncouple: function(kind, gos){ return later({ok:true}); },
     activity: function(gos){ return later({events:[{by:"Кан Михаил", t:"12 мин назад", what:"перенёс заявку"},{by:"Сильчев Андрей", t:"вчера 18:40", what:"поставил рейс"}]}); }
+  };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   2б. Живой режим - api.yardhub.ru. Все эндпоинты уже существуют и открыты роли
+   logist/manager/admin (спека бэкенда 05.09) - нового серверного кода не потребовалось.
+   ═══════════════════════════════════════════════════════════════════════════ */
+var API_BASE_ = "https://api.yardhub.ru/api";
+var GOOGLE_CLIENT_ID_ = "872723319158-cmr4v5v31fk3uv8ass3vvdch7at66n8e.apps.googleusercontent.com"; // публичный OAuth client id, не секрет (тот же, что в index.html/server.js)
+function sessionToken_(){ try { return localStorage.getItem("session_token") || ""; } catch(e){ return ""; } }
+function setSessionToken_(t){ try { localStorage.setItem("session_token", t); } catch(e){} }
+function apiGet_(path, params){
+  var qs = Object.keys(params || {}).map(function(k){ return params[k] != null ? k + "=" + encodeURIComponent(params[k]) : null; }).filter(Boolean).join("&");
+  return fetch(API_BASE_ + path + (qs ? "?" + qs : ""), {headers:{"X-Session-Token": sessionToken_()}})
+    .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(d){ return {ok: r.ok && !d.error, status:r.status, data:d}; }); });
+}
+function apiPost_(path, params){
+  var qs = Object.keys(params || {}).map(function(k){ return (params[k] !== undefined && params[k] !== null) ? k + "=" + encodeURIComponent(params[k]) : null; }).filter(Boolean).join("&");
+  return fetch(API_BASE_ + path + (qs ? "?" + qs : ""), {method:"POST", headers:{"X-Session-Token": sessionToken_()}})
+    .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(d){ return {ok: r.ok && !d.error, status:r.status, data:d}; }); });
+}
+function isRyschanowName_(n){ return /рыщанов/i.test(n || ""); }
+/* Слот текущего occupant'а (kind,gos) - копия принципа lpFleetOpenOnTractor_ на десктопе:
+   coupling/uncoupling ВСЕГДА метится в реальный открытый слот, не жёсткий 1 - иначе посадка
+   нового мимо старого на слоте 2/3 оставляет обоих открытыми одновременно. */
+function fleetOpenSlot_(kind, gos){
+  var g = normGos(gos);
+  var open = (M.assignments || []).filter(function(a){ return a.kind === kind && !a.valid_to && normGos(a.tractor_gos) === g; });
+  return open.length ? (open[0].slot || 1) : 1;
+}
+function refreshAssignmentsLive_(){
+  if (API.demo) return;
+  apiGet_("/fleet/state").then(function(r){ if (r.ok) applyPollFleet_(r.data.assignments || []); });
+}
+function activityEventLabel_(ev){
+  if (ev.type === "fleet_couple") return (ev.kind === "driver" ? "посадил " : "прицепил ") + (ev.who || "");
+  if (ev.type === "fleet_uncouple") return (ev.kind === "driver" ? "высадил " : "отцепил ") + (ev.who || "");
+  var what = ev.kind === "trip" ? (ev.customer || [ev.route_from, ev.route_to].filter(Boolean).join(" → ") || "рейс") : (KIND_LABEL[ev.kind] || ev.kind || "");
+  if (ev.type === "seg_create") return "поставил: " + what;
+  if (ev.type === "seg_overwrite") return "изменил: " + what;
+  if (ev.type === "seg_delete") return "удалил: " + what;
+  return what;
+}
+function agoFromIso_(iso){
+  if (!iso) return "";
+  var d = new Date(iso), m = Math.round((Date.now() - d.getTime()) / 60000);
+  if (m < 1) return "только что"; if (m < 60) return m + " мин назад"; if (m < 24*60) return Math.round(m / 60) + " ч назад";
+  return p2(d.getDate()) + "." + p2(d.getMonth() + 1) + " " + p2(d.getHours()) + ":" + p2(d.getMinutes());
+}
+function makeLiveApi(){
+  return {
+    demo: false,
+    load: function(){
+      return apiGet_("/main_payload").then(function(r){
+        if (!r.ok) throw new Error((r.data && r.data.error) || "Ошибка входа");
+        var mp = r.data;
+        if (mp.session_token) setSessionToken_(mp.session_token);
+        var meName = mp.logistName || mp.managerName || (function(){ try { return localStorage.getItem("user_name") || ""; } catch(e){ return ""; } })() || "";
+        try { if (meName) localStorage.setItem("user_name", meName); if (mp.role) localStorage.setItem("user_role", mp.role); } catch(e){}
+        var ord = mp.orders || {};
+        var rosterM = (ord.roster_managers || ord.by_manager || []).map(function(p){ return p.name; });
+        /* Рыщанов - руководитель отдела логистики, не диспетчер, никогда не бывает
+           реальным логистом рейса (комментарий index.html:20449-20463) - убираем точечно
+           из списка выбора, как и на десктопе. */
+        var rosterL = (ord.roster_logists || ord.by_logist || []).map(function(p){ return p.name; }).filter(function(n){ return !isRyschanowName_(n); });
+        return Promise.all([apiGet_("/plan/segs"), apiGet_("/sprav/state"), apiGet_("/fleet/state")]).then(function(rr){
+          var segsR = rr[0], spravR = rr[1], fleetR = rr[2];
+          var assignments = (fleetR.ok && fleetR.data.assignments) || [];
+          var openByPerson = {}, openByTrailer = {};
+          assignments.forEach(function(a){ if (a.valid_to) return; if (a.kind === "driver") openByPerson[a.resource_key] = a.tractor_gos; else if (a.kind === "trailer") openByTrailer[a.resource_key] = a.tractor_gos; });
+          var people = ((spravR.ok && spravR.data.people) || []).filter(function(p){ return (p.roles || []).indexOf("driver") >= 0; }).map(function(p){ return {id:p.id, full_name:p.full_name, on:openByPerson[p.id] || ""}; });
+          var trailers = ((spravR.ok && spravR.data.assets) || []).filter(function(a){ return a.asset_type === "trailer"; }).map(function(a){ return {id:a.id, name:a.id, type:a.trailer_type || a.spec || "", on:openByTrailer[a.id] || ""}; });
+          var vehicles = (mp.vehicles || []).map(function(v){ return {gos:v.gos, marka:v.marka, type:v.type, driver:v.driver || "", trailerGos:v.trailer || ""}; });
+          return {vehicles:vehicles, segs:(segsR.ok && segsR.data.segs) || [], people:people, trailers:trailers, managers:rosterM, logists:rosterL, assignments:assignments, me:{name:meName, role:mp.role || ""}};
+        });
+      });
+    },
+    saveSeg: function(w){ return apiPost_("/plan/seg", w).then(function(r){ if (!r.ok) throw new Error((r.data && r.data.error) || "Ошибка сохранения"); return {ok:true}; }); },
+    deleteSeg: function(id, reason){ return apiPost_("/plan/seg_delete", reason ? {id:id, reason:reason} : {id:id}); },
+    couple: function(kind, gos, key){ return apiPost_("/fleet/couple", {kind:kind, tractor_gos:gos, resource_key:key, slot:fleetOpenSlot_(kind, gos), source:"planirovka_m"}).then(function(r){ refreshAssignmentsLive_(); return r; }); },
+    uncouple: function(kind, gos){ return apiPost_("/fleet/uncouple", {kind:kind, tractor_gos:gos, slot:fleetOpenSlot_(kind, gos), source:"planirovka_m"}).then(function(r){ refreshAssignmentsLive_(); return r; }); },
+    activity: function(gos){
+      return apiGet_("/plan/activity", {gos:gos, limit:60}).then(function(r){
+        var ev = (r.ok && r.data.events) || [];
+        return {events: ev.map(function(x){ return {by:x.by || "—", what:activityEventLabel_(x), t:agoFromIso_(x.at)}; })};
+      });
+    }
   };
 }
 
@@ -654,8 +765,13 @@ function placeSeg(el, s){
   var tier = w < 44 ? "tiny" : w < 90 ? "small" : w < 140 ? "mid" : "big";
   el.className = "seg k-" + s.kind + (tier === "tiny" ? " tiny" : tier === "small" ? " small" : "") + (s.s + s.l <= now ? " past" : "") + (s.id === M.sel ? " sel" : "") + (s.id === "draft" ? " draft" : "");
   el.querySelector(".seg-txt").textContent = segShort(s, tier);
+  /* Бейдж: у рейса МЕН над ЛОГ; у технического статуса - только код поставившего (Влад
+     05.09: «все технические статусы подписывать, как и заявки, кто поставил»). Логист не
+     выбирается руками - это тот, кто ставит (lg = M.me.name при создании). */
   var idEl = el.querySelector(".seg-id");
-  if (s.kind === "trip" && (s.mg || s.lg)){ idEl.innerHTML = "<b>" + esc(s.mg ? three(s.mg) : "—") + "</b><i>" + esc(s.lg ? three(s.lg) : "—") + "</i>"; idEl.hidden = false; } else idEl.hidden = true;
+  if (s.kind === "trip" && (s.mg || s.lg)){ idEl.innerHTML = "<b>" + esc(s.mg ? three(s.mg) : "—") + "</b><i>" + esc(s.lg ? three(s.lg) : "—") + "</i>"; idEl.hidden = false; }
+  else if (s.kind !== "trip" && s.lg){ idEl.innerHTML = "<i>" + esc(three(s.lg)) + "</i>"; idEl.hidden = false; }
+  else idEl.hidden = true;
   el.querySelector(".nd").hidden = !s.needsData;
   var active = s.kind === "trip" && s.s <= now && now < s.s + s.l;
   var pr = el.querySelector(".prog");
@@ -1189,7 +1305,6 @@ function renderSegSheet(){
      выбирать менеджера, это важно» - строка ниже сгиба полулиста = невидима). Имя в обиходе +
      3-буквенный код, как на плитке. */
   if (trip) h.push('<div class="f-label">Менеджер</div><div class="days" id="fMgChips">' + [{v:"", t:"Не указан"}].concat(M.managers.map(function(m){ return {v:m, t:mgChipLabel(m)}; })).map(function(o){ return '<button data-v="' + esc(o.v) + '" aria-pressed="' + (form.mg === o.v) + '">' + esc(o.t) + '</button>'; }).join("") + '</div>');
-  if (trip) h.push('<div class="f-label">Логист</div><div class="days" id="fLgChips">' + M.logists.map(function(m){ return '<button data-v="' + esc(m) + '" aria-pressed="' + (form.lg === m) + '">' + esc(mgChipLabel(m)) + (m === M.me.name ? ' · я' : '') + '</button>'; }).join("") + '</div>');
   h.push('<div class="timebox"><button class="stp" id="fMinus">−30</button><button class="cur" id="fTime">' + fmtTime(form.s) + '<small>' + fmtDayLong(form.s) + '</small></button><button class="stp" id="fPlus">+30</button></div>');
   if (form.timeOpen){
     var d0 = dayStartOf(nowHour()) - 24, days = [];
@@ -1242,7 +1357,7 @@ function segSheetClick(e){
   var id = b.id;
   if (b.parentNode && b.parentNode.id === "fKind"){ form.kind = b.dataset.k; if (form.kind !== "trip"){ form.customer = ""; form.mg = ""; if (form.l === 8) form.l = 24; } else if (form.l === 24 && !form.tripMode) form.l = 8; if (form.kind === "driveroff" && !form.reason) form.reason = "dayoff"; formApplyToSeg(); renderSegSheet(); return; }
   if (b.parentNode && b.parentNode.id === "fReason"){ form.reason = b.dataset.r; formApplyToSeg(); renderSegSheet(); return; }
-  if (b.parentNode && (b.parentNode.id === "fMgChips" || b.parentNode.id === "fLgChips")){ var pid = b.parentNode.id; form[pid === "fMgChips" ? "mg" : "lg"] = b.dataset.v; vib(4); formApplyToSeg(); renderSegSheet(); var ch = $(pid); if (ch){ var on = ch.querySelector('[aria-pressed="true"]'); if (on) on.scrollIntoView({block:"nearest", inline:"center"}); } return; }
+  if (b.parentNode && b.parentNode.id === "fMgChips"){ form.mg = b.dataset.v; vib(4); formApplyToSeg(); renderSegSheet(); var ch = $("fMgChips"); if (ch){ var on = ch.querySelector('[aria-pressed="true"]'); if (on) on.scrollIntoView({block:"nearest", inline:"center"}); } return; }
   if (b.parentNode && b.parentNode.id === "fDur"){ form.l = +b.dataset.l; formApplyToSeg(); renderSegSheet(); return; }
   if (b.parentNode && b.parentNode.id === "fDays"){ var d = +b.dataset.d; form.s = d + (form.s - dayStartOf(form.s)); formApplyToSeg(); renderSegSheet(); return; }
   if (b.parentNode && b.parentNode.id === "fHours"){ form.s = dayStartOf(form.s) + (+b.dataset.h) + (form.s % 1); formApplyToSeg(); renderSegSheet(); return; }
@@ -1265,7 +1380,7 @@ function putDraft(){
   var bad = overlaps(d.v, d.s, d.l, "draft", d.kind);
   if (bad){ vib(30); rejectToast(bad, d, function(after){ form.s = clamp(after, 0, HOURS - form.l); formApplyToSeg(); renderSegSheet(); }); return; }
   var auto = d.kind === "trip" && (!d.customer || !d.mg);
-  var s = {id:newSegId(), v:d.v, kind:d.kind, s:d.s, l:d.l, customer:d.customer, from:d.from, to:d.to, mg:d.mg, lg:d.lg, needsData:d.needsData || auto, reason:d.reason, tripMode:d.tripMode, updatedBy:M.me.name, updatedAt:nowHour()};
+  var s = {id:newSegId(), v:d.v, kind:d.kind, s:d.s, l:d.l, customer:d.customer, from:d.from, to:d.to, mg:d.mg, lg:M.me.name || d.lg, needsData:d.needsData || auto, reason:d.reason, tripMode:d.tripMode, updatedBy:M.me.name, updatedAt:nowHour()};
   dropDraft(); M.segs.push(s); closeSheet();
   refreshSeg(s.id); layoutRows(); var saved = saveSeg(s); vib([8,40,8]);
   var el = segEls[s.id]; if (el && !REDUCED){ el.style.transform = "scale(.9)"; el.style.transition = "transform .38s var(--ease-overshoot)"; requestAnimationFrame(function(){ el.style.transform = ""; }); setTimeout(function(){ el.style.transition = ""; }, 400); }
@@ -1545,10 +1660,96 @@ $("corner") ; document.querySelector(".corner").addEventListener("click", functi
 /* ═══════════════════════════════════════════════════════════════════════════
    8. Загрузка и запуск
    ═══════════════════════════════════════════════════════════════════════════ */
+/* Один и тот же ingest() для демо и живого режима: демо кладёт segs уже в внутреннем
+   формате (поле .v = индекс машины), сервер отдаёт "сырые" строки с vehicle_gos (строка) -
+   различаем по наличию .v (0 - валидный индекс, поэтому проверка "!= null", не "!v"). */
+function wireRowToSeg_(r, gosIndex){
+  var vi = gosIndex[normGos(r.vehicle_gos)];
+  if (vi == null) return null; // машина выбыла из парка (department и т.п.) - не рисуем, но и не трогаем на сервере
+  var seg = {id:r.id, v:vi, kind:r.kind, s:parseFloat(r.start_hour), l:parseFloat(r.length_hours),
+    needsData: !!Number(r.needs_data), reason:r.reason || "", updatedBy:r.updated_by || "",
+    updatedAt: r.updated_at ? wallToHour(r.updated_at) : null};
+  if (r.kind === "trip"){ seg.mg = r.manager_name || ""; seg.lg = r.logist_name || ""; seg.from = r.route_from || ""; seg.to = r.route_to || ""; seg.customer = r.customer || ""; seg.tripMode = r.trip_mode || ""; }
+  else seg.lg = r.logist_name || "";
+  return seg;
+}
 function ingest(data){
   M.vehicles = (data.vehicles || []).map(function(v, i){ return {i:i, gos:v.gos, gosShort:gosShort(v.gos), marka:v.marka || "", type:v.type || "", long:(v.type || "").indexOf("Борт") === 0, driver:v.driver || "", driverShort:surnameIO(v.driver || ""), trailerGos:v.trailerGos || ""}; });
-  M.segs = data.segs || []; M.people = data.people || []; M.trailers = data.trailers || []; M.managers = data.managers || []; M.logists = data.logists || []; M.me = data.me || M.me;
+  var gosIndex = {}; M.vehicles.forEach(function(v){ gosIndex[normGos(v.gos)] = v.i; });
+  M.segs = (data.segs || []).map(function(r){ return r.v != null ? r : wireRowToSeg_(r, gosIndex); }).filter(Boolean);
+  M.people = data.people || []; M.trailers = data.trailers || []; M.managers = data.managers || []; M.logists = data.logists || []; M.assignments = data.assignments || [];
+  M.me = data.me || M.me;
   M.segs.forEach(function(s){ M.snap[s.id] = JSON.stringify(segToWire(s)); });
+}
+/* ── Поллинг живого режима: сегменты 7 с, назначения 20 с (те же интервалы, что десктоп).
+   Патч по id, не полная перерисовка; чужую правку под пальцем/в открытой шторке не трогаем -
+   тот же класс защиты, что segsSnapshot_/dirtySegIds_ в index.html (правки 30.08). ── */
+function applyPollSegs_(rows){
+  var gosIndex = {}; M.vehicles.forEach(function(v){ gosIndex[normGos(v.gos)] = v.i; });
+  var next = {};
+  rows.forEach(function(r){ var seg = wireRowToSeg_(r, gosIndex); if (seg) next[r.id] = seg; });
+  var skipId = (st === "DRAGGING" && drag) ? drag.id : (st === "RESIZING" && rsz) ? rsz.seg.id : null;
+  var editingId = (sheetKind === "seg" && sheetData && sheetData.id !== "draft") ? sheetData.id : null;
+  var touched = false;
+  Object.keys(next).forEach(function(id){
+    if (id === skipId || id === editingId || M.dirty[id]) return;
+    var cur = segById(id);
+    if (!cur){ M.segs.push(next[id]); M.snap[id] = JSON.stringify(segToWire(next[id])); refreshSeg(id); touched = true; return; }
+    var before = JSON.stringify(segToWire(cur));
+    Object.assign(cur, next[id]);
+    var after = JSON.stringify(segToWire(cur));
+    if (after !== before){ M.snap[id] = after; refreshSeg(id); touched = true; if (segEls[id] && !document.hidden) haloSeg_(id); }
+  });
+  M.segs.slice().forEach(function(s){
+    if (s.id === skipId || s.id === editingId || M.dirty[s.id] || next[s.id]) return;
+    var idx = M.segs.indexOf(s); if (idx >= 0) M.segs.splice(idx, 1);
+    if (segEls[s.id]){ segEls[s.id].remove(); delete segEls[s.id]; }
+    if (M.sel === s.id) deselect();
+    touched = true;
+  });
+  if (touched) layoutRows();
+}
+function haloSeg_(id){ var el = segEls[id]; if (!el) return; el.classList.remove("halo"); void el.offsetWidth; el.classList.add("halo"); }
+function applyPollFleet_(rows){
+  M.assignments = rows;
+  var byGosDriver = {}, byGosTrailer = {}, byPersonGos = {}, byTrailerGos = {};
+  rows.forEach(function(a){
+    if (a.valid_to) return;
+    if (a.kind === "driver"){ byGosDriver[normGos(a.tractor_gos)] = a.resource_key; byPersonGos[a.resource_key] = a.tractor_gos; }
+    else if (a.kind === "trailer"){ byGosTrailer[normGos(a.tractor_gos)] = a.resource_key; byTrailerGos[a.resource_key] = a.tractor_gos; }
+  });
+  var peopleById = {}; M.people.forEach(function(p){ peopleById[p.id] = p; p.on = byPersonGos[p.id] || ""; });
+  M.trailers.forEach(function(t){ t.on = byTrailerGos[t.id] || ""; });
+  var changed = false;
+  M.vehicles.forEach(function(v){
+    var g = normGos(v.gos);
+    var pid = byGosDriver[g], name = pid ? ((peopleById[pid] && peopleById[pid].full_name) || v.driver) : "";
+    if (name !== v.driver){ v.driver = name; v.driverShort = surnameIO(name); changed = true; }
+    var trGos = byGosTrailer[g] || ""; if (trGos !== v.trailerGos){ v.trailerGos = trGos; changed = true; }
+  });
+  if (changed) rerenderHeads();
+}
+var lastInteractionAt_ = Date.now(), pollSegsTimer_ = null, pollFleetTimer_ = null;
+document.addEventListener("touchstart", function(){ lastInteractionAt_ = Date.now(); }, {passive:true, capture:true});
+document.addEventListener("click", function(){ lastInteractionAt_ = Date.now(); }, {capture:true});
+function sendPresence_(){
+  if (!M.me.name) return;
+  apiPost_("/plan/presence", {name:M.me.name, active: (Date.now() - lastInteractionAt_ < 12000) ? "1" : "0"});
+}
+function startPolling_(){
+  pollSegsTimer_ = setInterval(function(){
+    if (document.hidden) return;
+    sendPresence_();
+    apiGet_("/plan/segs").then(function(r){ if (r.ok) applyPollSegs_(r.data.segs || []); });
+  }, 7000);
+  pollFleetTimer_ = setInterval(function(){
+    if (document.hidden) return;
+    apiGet_("/fleet/state").then(function(r){ if (r.ok) applyPollFleet_(r.data.assignments || []); });
+  }, 20000);
+  document.addEventListener("visibilitychange", function(){
+    if (document.hidden) return;
+    apiGet_("/plan/segs").then(function(r){ if (r.ok) applyPollSegs_(r.data.segs || []); });
+  });
 }
 /* Реальная высота видимого окна - от visualViewport, не от vh/dvh: внутри просмотрщика
    артефактов claude.ai и при открытой клавиатуре CSS-единицы врут, и подвал листа с
@@ -1560,13 +1761,29 @@ function syncVvh(){
 syncVvh();
 if (window.visualViewport) window.visualViewport.addEventListener("resize", syncVvh);
 window.addEventListener("resize", syncVvh);
-function boot(){
-  try { M.collapsed = JSON.parse(localStorage.getItem("plan_m_collapsed") || "{}") || {}; } catch(e){ M.collapsed = {}; }
-  try { var z = localStorage.getItem("plan_m_zoom"); if (z != null) M.zoom = clamp(+z, 0, 3); } catch(e){}
-  try { var th = localStorage.getItem("plan_m_theme"); if (th) setTheme(th); } catch(e){}
-  buildZoomSeg($("zoomseg")); buildZoomSeg($("zoomsegL"));
-  API = makeDemoApi(); if (API.demo) $("demoTag").hidden = false;
-  cacheGeom(); setHw(hwFor(M.zoom));
+/* ── Вход (живой режим, без сессии) - тот же Google-виджет и тот же /api/auth/google, что
+   в index.html; localStorage.session_token общий по origin - если логист уже вошёл в
+   дашборд на этом телефоне, эта страница подхватывает сессию без повторного входа. ── */
+function showLogin_(){
+  $("app").hidden = true; board.classList.remove("skel"); $("loginState").hidden = false;
+  if (window.google && google.accounts && google.accounts.id) initGoogleButton_();
+  else { var iv = setInterval(function(){ if (window.google && google.accounts && google.accounts.id){ clearInterval(iv); initGoogleButton_(); } }, 200); setTimeout(function(){ clearInterval(iv); }, 15000); }
+}
+function initGoogleButton_(){
+  google.accounts.id.initialize({client_id: GOOGLE_CLIENT_ID_, callback: onGoogleCredential_});
+  $("googleBtn").innerHTML = "";
+  google.accounts.id.renderButton($("googleBtn"), {theme:"filled_black", size:"large", text:"signin_with", locale:"ru"});
+}
+function onGoogleCredential_(resp){
+  apiGet_("/auth/google", {id_token: resp.credential}).then(function(r){
+    if (!r.ok || !r.data.session_token){ toast("Не удалось войти", (r.data && r.data.error) || "", null, {err:true}); return; }
+    setSessionToken_(r.data.session_token);
+    try { if (r.data.name) localStorage.setItem("user_name", r.data.name); if (r.data.role) localStorage.setItem("user_role", r.data.role); } catch(e){}
+    $("loginState").hidden = true; $("app").hidden = false; board.classList.add("skel");
+    startLoadFlow_();
+  }).catch(function(){ toast("Ошибка сети при входе", null, null, {err:true}); });
+}
+function startLoadFlow_(){
   API.load().then(function(data){
     ingest(data);
     board.classList.remove("skel");
@@ -1577,8 +1794,26 @@ function boot(){
     try { var sc = sessionStorage.getItem("plan_m_scroll"); if (sc){ var p = sc.split(","); board.scrollLeft = +p[0]; board.scrollTop = +p[1]; restored = true; } } catch(e){}
     if (!restored) scrollToHour(nowHour(), 0.3, false);
     renderWindow(true); renderNow(); pinLabels();
-    setInterval(function(){ renderNow(); refreshAll(); }, 60000);
+    if (API.demo) setInterval(function(){ renderNow(); refreshAll(); }, 60000);
+    else { setInterval(renderNow, 60000); startPolling_(); }
+  }).catch(function(err){
+    var msg = String((err && err.message) || err || "");
+    if (!API.demo && /Не авторизован|нужен id_token|Доступ отозван/i.test(msg)){ try { localStorage.removeItem("session_token"); } catch(e){} showLogin_(); return; }
+    board.classList.remove("skel");
+    toast("Не удалось загрузить", msg, function(){ board.classList.add("skel"); startLoadFlow_(); }, {err:true, btn:"Повторить", ms:8000});
   });
+}
+function boot(){
+  try { M.collapsed = JSON.parse(localStorage.getItem("plan_m_collapsed") || "{}") || {}; } catch(e){ M.collapsed = {}; }
+  try { var z = localStorage.getItem("plan_m_zoom"); if (z != null) M.zoom = clamp(+z, 0, 3); } catch(e){}
+  try { var th = localStorage.getItem("plan_m_theme"); if (th) setTheme(th); } catch(e){}
+  buildZoomSeg($("zoomseg")); buildZoomSeg($("zoomsegL"));
+  cacheGeom(); setHw(hwFor(M.zoom));
+  if (IS_DEMO){ API = makeDemoApi(); $("demoTag").hidden = false; startLoadFlow_(); }
+  else {
+    API = makeLiveApi();
+    if (sessionToken_()) startLoadFlow_(); else showLogin_();
+  }
   window.addEventListener("resize", function(){
     var V = LEVELS[M.zoom].hours, cH = hourAtClientX(G.bl + G.laneW + G.trackW / 2);
     cacheGeom(); setHw(hwFor(M.zoom)); board.scrollLeft = cH * G.hw - G.trackW / 2; renderWindow(true); renderNow();

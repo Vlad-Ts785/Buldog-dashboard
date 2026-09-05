@@ -17195,6 +17195,8 @@ function machinistSalaryExport_() {
 function machinistBuildPrintHtml_(d, byDriver) {
   var esc = function(v) { return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
   var num = function(v) { return v ? Math.round(v).toLocaleString('ru-RU') : '—'; };
+  // Часы округлять нельзя (11,5 ч превращались в 12) - только рубли.
+  var hrs = function(v) { return v ? String(v).replace('.', ',') : '—'; };
   var rows = (d.rows || []).filter(function(r) {
     return machinistSalaryFilter_ === 'all' || r.vehicle_bucket === machinistSalaryFilter_;
   }).slice().sort(function(a, b) { return (b.net_amount || 0) - (a.net_amount || 0); });
@@ -17209,7 +17211,7 @@ function machinistBuildPrintHtml_(d, byDriver) {
                  'Аванс/Нал', 'Штрафы', 'Проч. удерж.', 'Удержания', 'Итого', 'НДФЛ', 'К начислению', '%'];
   var sumBody = rows.map(function(r) {
     return '<tr><td class="l">' + esc(r.driver_name) + '</td><td class="l dim">' + esc(r.vehicle_bucket) + '</td>' +
-      '<td>' + num(r.hours) + '</td><td>' + num(r.work_orders_amount) + '</td><td>' + num(r.seniority_amount) + '</td>' +
+      '<td>' + hrs(r.hours) + '</td><td>' + num(r.work_orders_amount) + '</td><td>' + num(r.seniority_amount) + '</td>' +
       '<td>' + num(r.mileage_mkad_amount) + '</td><td>' + num(r.accruals_amount) + '</td>' +
       '<td>' + num(r.advance_amount) + '</td><td>' + num(r.gibdd_fines_amount) + '</td><td>' + num(r.other_deductions_amount) + '</td>' +
       '<td>' + num(r.deductions_amount) + '</td><td>' + num(r.total_amount) + '</td><td>' + num(r.ndfl_amount) + '</td>' +
@@ -17226,20 +17228,28 @@ function machinistBuildPrintHtml_(d, byDriver) {
       var list = byVeh[veh];
       var sumNet = list.reduce(function(s, t) { return s + (Number(t.net_amount) || Number(t.amount) || 0); }, 0);
       var sumOrder = list.reduce(function(s, t) { return s + (Number(t.order_amount) || 0); }, 0);
+      // Процент - доля НАЧИСЛЕННОГО (до НДФЛ) в стоимости заказа: так считается процент в
+      // каждой строке и так же считает экран. До 06.09 итог печати брал в числитель net -
+      // получалось 10.5% против 12.1% на экране при одинаковых строках.
+      var sumGross = list.reduce(function(s, t) { return s + (Number(t.amount) || 0); }, 0);
       var body = list.map(function(t) {
         var pct = (Number(t.order_amount) > 0) ? (100 * (Number(t.amount) || 0) / Number(t.order_amount)) : null;
         return '<tr><td>' + esc(mdShort_(t.trip_date)) + '</td><td>' + esc(mdDocShort_(t.doc_ref)) + '</td>' +
           '<td class="l">' + esc(t.logist ? String(t.logist).split(' ')[0] : '—') + '</td>' +
           '<td class="l">' + esc(t.route || '—') + '</td><td class="l">' + esc(t.order_cargo || '—') + '</td>' +
-          '<td>' + num(t.km_mkad) + '</td><td>' + num(t.hours) + '</td>' +
-          '<td>' + num(t.amount) + '</td><td>' + num(t.order_amount) + '</td>' +
-          '<td>' + (pct != null ? pct.toFixed(1) + '%' : '—') + '</td></tr>';
+          '<td>' + num(t.km_mkad) + '</td><td>' + hrs(t.hours) + '</td>' +
+          // ДО 06.09 здесь стояло t.amount (начислено, 17 241), а на экране - net_amount
+          // (15 000, на руки): распечатка противоречила экрану той же строки, и колонка
+          // не сходилась со своим же итогом. Показываем ровно то же, что на экране.
+          '<td>' + num(t.net_amount != null ? t.net_amount : t.amount) + '</td><td>' + num(t.order_amount) + '</td>' +
+          '<td' + (pct != null && pct > 20 ? ' class="hi"' : '') + '>' + (pct != null ? pct.toFixed(1) + '%' : '—') + '</td></tr>';
       }).join('');
       return '<div class="veh">' + esc(veh) + ' · рейсов: ' + list.length + '</div>' +
         '<table class="t"><thead><tr><th>Дата</th><th>Документ</th><th class="l">Логист</th><th class="l">Маршрут</th>' +
         '<th class="l">Груз</th><th>Км МКАД</th><th>Часы</th><th>К начислению</th><th>Стоимость заказа</th><th>%</th></tr></thead>' +
         '<tbody>' + body + '<tr class="tot"><td colspan="7">Итого по машине</td><td>' + num(sumNet) + '</td><td>' + num(sumOrder) + '</td>' +
-        '<td>' + (sumOrder > 0 ? (100 * sumNet / sumOrder).toFixed(1) + '%' : '—') + '</td></tr></tbody></table>';
+        '<td' + (sumOrder > 0 && 100 * sumGross / sumOrder > 20 ? ' class="hi"' : '') + '>' +
+        (sumOrder > 0 ? (100 * sumGross / sumOrder).toFixed(1) + '%' : '—') + '</td></tr></tbody></table>';
     }).join('');
     var finesBlock = fines.length
       ? '<div class="veh">Штрафы ГИБДД / удержания</div><table class="t narrow"><thead><tr><th>Период с</th><th>по</th>' +
@@ -17272,6 +17282,7 @@ function machinistBuildPrintHtml_(d, byDriver) {
     '.kv{display:flex;flex-wrap:wrap;gap:4px 16px;margin:4px 0 8px;font-size:9pt}' +
     '.drv{page-break-before:always;break-before:page}' +
     '.warn{border:1px solid #000;padding:6px 8px;margin:0 0 10px;font-size:9pt;font-weight:700}' +
+    'td.hi{font-weight:700;text-decoration:underline}' +
     '@media print{.no-print{display:none}}' +
     '</style></head><body>' +
     '<h1>Зарплата машинистов — ' + esc(formatMonthLabel(machinistSalaryMonth_)) + '</h1>' +
@@ -17284,6 +17295,9 @@ function machinistBuildPrintHtml_(d, byDriver) {
     '<table class="t"><thead><tr>' + sumHead.map(function(h, i) { return '<th' + (i < 2 ? ' class="l"' : '') + '>' + h + '</th>'; }).join('') + '</tr></thead>' +
     '<tbody>' + sumBody + '</tbody></table>' +
     perDriver +
+    '<div class="sub" style="margin-top:14px">«К начислению» по рейсу - сумма на руки, после НДФЛ 13%. ' +
+    'Колонка «%» - доля НАЧИСЛЕННОГО (до НДФЛ) в стоимости заказа, то есть затраты компании на машиниста; ' +
+    'поэтому её база больше суммы в колонке «К начислению». Подчёркнуты рейсы, где эта доля выше 20%.</div>' +
     '</body></html>';
 }
 
@@ -17376,9 +17390,9 @@ var MD_TRIP_COLS_ = [
   { key: 'cargo', label: 'Груз', num: false },
   { key: 'km_mkad', label: 'Км МКАД', num: true },
   { key: 'hours', label: 'Часы', num: true },
-  { key: 'net_amount', label: 'К начислению', num: true },
+  { key: 'net_amount', label: 'К начислению', num: true, hint: 'Сумма на руки - после удержания НДФЛ 13%' },
   { key: 'order_amount', label: 'Стоимость заказа', num: true },
-  { key: 'pct', label: 'Процент', num: true },
+  { key: 'pct', label: 'Процент', num: true, hint: 'Доля НАЧИСЛЕННОГО (до НДФЛ) в стоимости заказа - это затраты компании на машиниста, поэтому база больше, чем в колонке «К начислению»' },
 ];
 // Первый клик: числа - по убыванию (крупное), текст - А-Я, даты - убывание (свежие
 // сначала) - тот же порядок правил, что в разделе "Сортируемая таблица" ГОСТа.
@@ -17410,7 +17424,7 @@ function mdSortHead_(cols, sort, onclickFn, prefixArg) {
     var active = sort.col === c.key;
     var arrow = active ? (sort.dir === -1 ? '▼' : '▲') : '↕';
     var arrowStyle = active ? '' : 'opacity:.35';
-    return '<th class="sortable' + (c.num ? ' num' : '') + '" onclick="' + onclickFn + '(' + pre + '\'' + c.key + '\')">' +
+    return '<th class="sortable' + (c.num ? ' num' : '') + '"' + (c.hint ? ' title="' + c.hint + '"' : '') + ' onclick="' + onclickFn + '(' + pre + '\'' + c.key + '\')">' +
       c.label + '<span style="font-size:10px;margin-left:4px;' + arrowStyle + '">' + arrow + '</span></th>';
   }).join('');
 }

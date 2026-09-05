@@ -4479,12 +4479,30 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
         </div>
         <div class="kpi-grid" id="debt-kpi">
           <div class="kpi" id="debt-kpi-total"></div>
+          <!-- ДЗ по дням (05.09, Влад: "сейчас какая-то каша... идти в сторону общей
+               задолженности без информации по КА") - было 7 равнозначных линий с точками на
+               каждом дне и легендой в две строки, причём "Общая ДЗ" = сумма остальных шести,
+               а состав по юрлицам и так есть цифрами в соседней карточке "Общая ДЗ".
+               Осталась ОДНА линия общей суммы (вариант A дизайн-штурма): сверху сумма и
+               изменение за период, внизу коридор минимум/пик и чипы юрлиц. Мегакран и
+               Стройтранс по умолчанию ВЫКЛЮЧЕНЫ (Влад, 05.09) - их долг мал и зашумляет
+               кривую; выбор личный, хранится в localStorage. -->
           <div class="kpi" id="debt-kpi-chart">
-            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
-              <div class="kpi-label" style="margin-bottom:0">ДЗ по дням</div>
-              <div class="muted" style="font-size:11px;white-space:nowrap">Должников: <b id="debt-kpi-debtor-count" style="color:var(--text)">—</b></div>
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+              <div>
+                <div class="kpi-label" style="margin-bottom:2px">ДЗ по дням</div>
+                <div class="mono" id="debt-chart-total" style="font-size:22px;font-weight:700;line-height:1.15">—</div>
+              </div>
+              <div style="text-align:right;white-space:nowrap">
+                <div class="mono" id="debt-chart-delta" style="font-size:12.5px;font-weight:600">—</div>
+                <div class="muted" style="font-size:11px">Должников: <b id="debt-kpi-debtor-count" style="color:var(--text)">—</b></div>
+              </div>
             </div>
-            <div class="chart-wrap" style="height:150px"><canvas id="chart-debt-history"></canvas></div>
+            <div class="chart-wrap" style="height:118px;margin-top:4px"><canvas id="chart-debt-history"></canvas></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:6px;font-size:10.5px;color:var(--muted)">
+              <span id="debt-chart-minmax">—</span>
+              <span id="debt-chart-orgs" style="display:flex;gap:3px;flex-wrap:wrap;justify-content:flex-end"></span>
+            </div>
           </div>
           <div class="kpi" id="debt-kpi-overdue"></div>
           <div class="kpi" id="debt-kpi-status"></div>
@@ -17793,6 +17811,43 @@ function debtInBucket_(days, bucket) {
 // отделам не хардкодится). Пусто = все менеджеры. Панель поверх кнопки, закрывается по
 // клику вне неё.
 let debtManagerFilters = new Set();
+// Юрлица, исключённые из линии "ДЗ по дням" (05.09, Влад: "по умолчанию отключены
+// Мегакран, Стройтранс") - их долг мал и зашумляет кривую общей суммы. Выбор личный
+// (localStorage), поэтому у каждого свой; сама сумма в карточке и в подсказке графика
+// считается по включённым, и в подсказке явно написано, кто исключён - молча искажать
+// цифру нельзя.
+var DEBT_CHART_OFF_KEY_ = 'yard.debt.chartOffOrgs';
+var DEBT_CHART_OFF_DEFAULT_ = ['Мегакран', 'Стройтранс'];
+function debtChartOffOrgs_(all) {
+  var raw = null, off;
+  try { raw = localStorage.getItem(DEBT_CHART_OFF_KEY_); } catch (e) {}
+  if (raw == null) off = DEBT_CHART_OFF_DEFAULT_.slice();
+  else { try { off = JSON.parse(raw); } catch (e) { off = DEBT_CHART_OFF_DEFAULT_.slice(); } }
+  if (!Array.isArray(off)) off = [];
+  if (!all) return off;
+  off = off.filter(function(o) { return all.indexOf(o) >= 0; });
+  // Выключить ВСЕ юрлица нельзя - пустой график не сообщает ничего.
+  if (off.length >= all.length) off = [];
+  return off;
+}
+function debtChartOrgList_() {
+  var hist = (typeof D !== 'undefined' && D && D.debt && D.debt.history) || [];
+  var all = [];
+  hist.forEach(function(h) { Object.keys(h.byOrg || {}).forEach(function(o) { if (all.indexOf(o) < 0) all.push(o); }); });
+  return all;
+}
+function debtChartToggleOrg(name) {
+  var all = debtChartOrgList_();
+  var off = debtChartOffOrgs_(all);
+  var i = off.indexOf(name);
+  if (i >= 0) off.splice(i, 1);
+  else {
+    if (off.length + 1 >= all.length) { p2Toast('Хотя бы одно юрлицо должно остаться в графике', 'red'); return; }
+    off.push(name);
+  }
+  try { localStorage.setItem(DEBT_CHART_OFF_KEY_, JSON.stringify(off)); } catch (e) {}
+  renderDebt();
+}
 function debtMgrToggle(name) {
   if (debtManagerFilters.has(name)) debtManagerFilters.delete(name);
   else debtManagerFilters.add(name);
@@ -18509,52 +18564,85 @@ function renderDebt() {
     }
   }
 
-  // История - линия по дням (та же логика построения, что и "Выручка по дням" на "Обзоре").
-  // hist уже получен выше (для стрелок тенденций в KPI). Показывает ВСЕ долги без учёта
-  // фильтра "до 600 дней" (Влад, 2026-07-12: "хорошо что график будет показывать реальную
-  // картину с учётом всех долгов") - использует debt.history напрямую, не agg.
-  // Плюс линии по КАЖДОМУ ЮРЛИЦУ группы (Влад, 2026-07-14: "не график по клиентам, а
-  // график линию по долгу каждого нашего юрлица - Бульдог, Стройтранс, Ярд" - уточнение
-  // предыдущего запроса про "линии по контрагентам", там на самом деле имелись в виду
-  // наши 5 юрлиц, не клиенты) - используем разбивку по юрлицам, которая уже есть в каждой
-  // точке истории (hist[].byOrg), отдельный лист по клиентам за 2026-07-12 больше не нужен.
+  // График "ДЗ по дням" (05.09, Влад: "сейчас какая-то каша... идти в сторону общей
+  // задолженности без информации по КА", выбран вариант A дизайн-штурма). Было: 7
+  // равнозначных линий (общая + 6 юрлиц) с точками на КАЖДОМ из 60 дней и легендой в две
+  // строки; при этом "Общая ДЗ" - ровно сумма остальных шести, а состав по юрлицам уже
+  // есть цифрами в соседней карточке "Общая ДЗ" - то есть одно и то же рисовалось дважды и
+  // съедало всю карточку. Стало: ОДНА линия суммы с заливкой, без точек (кроме конечной),
+  // без легенды; освободившееся место ушло под саму сумму, изменение за период и коридор
+  // минимум/пик. Мегакран и Стройтранс по умолчанию исключены из суммы (Влад, 05.09) -
+  // мелкие долги зашумляют кривую; переключается чипами, выбор личный (localStorage).
   const ctx = document.getElementById('chart-debt-history');
   if (ctx && hist.length) {
     if (ctx._chart) ctx._chart.destroy();
-    const debtOrgColors = { 'Бульдог':'#378ADD', 'Ярд Империал':'#1D9E75', 'Стройтранс':'#E24B4A', 'Техно Парк':'#8B5CF6', 'Мегакран':'#F472B6', 'Умиат Ярд':'#22D3EE' };
-    const orgNames = {};
-    hist.forEach(function(h) { Object.keys(h.byOrg || {}).forEach(function(o) { orgNames[o] = true; }); });
-    const datasets = [{
-      label: 'Общая ДЗ', data: hist.map(function(h){ return h.balance; }),
-      borderColor: '#EF9F27', backgroundColor: 'rgba(239,159,39,0.12)', fill: true, tension: 0.25, pointRadius: 2, borderWidth: 2.5,
-    }];
-    // Точки на линиях юрлиц (Влад, 2026-07-17: "в графике по всем нашим фирмам должны быть
-    // точки с информацией как в общей ДЗ") - раньше pointRadius:0 у линий юрлиц, из-за чего
-    // навести курсор и увидеть подсказку было почти невозможно (в отличие от "Общая ДЗ" с
-    // pointRadius:2). mode:'index' ниже - наводишь на день, видишь сразу все юрлица.
-    Object.keys(orgNames).forEach(function(org) {
-      datasets.push({
-        label: org, data: hist.map(function(h) { return (h.byOrg && h.byOrg[org]) || 0; }),
-        borderColor: debtOrgColors[org] || '#94A3B8', backgroundColor: 'transparent',
-        fill: false, tension: 0.25, pointRadius: 2, borderWidth: 1.5,
-      });
+    var orgAll_ = [];
+    hist.forEach(function(h){ Object.keys(h.byOrg || {}).forEach(function(o){ if (orgAll_.indexOf(o) < 0) orgAll_.push(o); }); });
+    // Порядок чипов - по величине долга на последний день (крупные первыми).
+    var lastPoint_ = hist[hist.length-1];
+    orgAll_.sort(function(a, b){ return ((lastPoint_.byOrg||{})[b]||0) - ((lastPoint_.byOrg||{})[a]||0); });
+    var off_ = debtChartOffOrgs_(orgAll_);
+    // Ряд = общий баланс минус выключенные юрлица (в каждой точке своя разбивка).
+    var series_ = hist.map(function(h){
+      var v = h.balance;
+      off_.forEach(function(o){ v -= ((h.byOrg||{})[o] || 0); });
+      return Math.max(0, v);
     });
+    var first_ = series_[0], now_ = series_[series_.length-1];
+    var min_ = Math.min.apply(null, series_), max_ = Math.max.apply(null, series_);
+    var diff_ = now_ - first_;
+    setText('debt-chart-total', fmt(now_));
+    var deltaEl_ = document.getElementById('debt-chart-delta');
+    if (deltaEl_) {
+      // Для долга рост - плохо: цвет по смыслу, а не по знаку (ГОСТ, раздел "цвет = семантика").
+      deltaEl_.textContent = (Math.abs(diff_) < 1 ? 'без изменений' : (diff_ > 0 ? '+' : '−') + fmtK2(Math.abs(diff_))) + ' за период';
+      deltaEl_.style.color = Math.abs(diff_) < 1 ? 'var(--muted)' : (diff_ > 0 ? 'var(--red)' : 'var(--green)');
+    }
+    setHTML('debt-chart-minmax', 'минимум <b class="mono" style="color:var(--green)">' + fmtK2(min_) +
+      '</b> · пик <b class="mono" style="color:var(--red)">' + fmtK2(max_) + '</b>');
+    var chipsEl_ = document.getElementById('debt-chart-orgs');
+    if (chipsEl_) {
+      chipsEl_.innerHTML = orgAll_.map(function(o){
+        var isOff = off_.indexOf(o) >= 0;
+        var safe = o.replace(/'/g, "\\'");
+        return '<button type="button" onclick="debtChartToggleOrg(\'' + safe + '\')" title="' +
+          (isOff ? 'Включить в сумму' : 'Исключить из суммы') + '" ' +
+          'style="cursor:pointer;font-family:inherit;font-size:10px;padding:1px 6px;border-radius:5px;border:1px solid ' +
+          (isOff ? 'var(--border)' : 'var(--border-strong)') + ';background:' + (isOff ? 'transparent' : 'var(--bg3)') +
+          ';color:' + (isOff ? 'var(--muted)' : 'var(--text)') + ';opacity:' + (isOff ? '.55' : '1') + '">' + o + '</button>';
+      }).join('');
+    }
+    // Заливка по ГОСТу (спарклайн/area: градиент 14% -> 0), конечная точка r4 с кольцом
+    // цвета фона; остальные точки скрыты и появляются только под курсором.
+    var c2d_ = ctx.getContext('2d');
+    var grad_ = c2d_.createLinearGradient(0, 0, 0, 118);
+    grad_.addColorStop(0, 'rgba(239,159,39,0.16)');
+    grad_.addColorStop(1, 'rgba(239,159,39,0)');
     ctx._chart = new Chart(ctx, {
       type: 'line',
       data: {
         labels: hist.map(function(h){ return h.date.slice(8,10) + '.' + h.date.slice(5,7); }),
-        datasets: datasets
+        datasets: [{
+          label: 'ДЗ', data: series_,
+          borderColor: '#EF9F27', backgroundColor: grad_, fill: true, tension: 0.25, borderWidth: 2,
+          pointRadius: series_.map(function(_, i){ return i === series_.length-1 ? 4 : 0; }),
+          pointBackgroundColor: '#EF9F27', pointBorderColor: themeVar_('--bg2', '#17171d'), pointBorderWidth: 2,
+          pointHoverRadius: 4, pointHoverBorderWidth: 2,
+        }]
       },
       options: {
         responsive:true, maintainAspectRatio:false,
         interaction: { mode: 'index', intersect: false },
         plugins:{
-          legend:{display:true, position:'bottom', labels:{color:chartMuted_(), font:{size:10}, boxWidth:10}},
-          tooltip:{callbacks:{label:function(c){ return ' ' + c.dataset.label + ': ' + fmt(c.raw); }}}
+          legend:{display:false},
+          tooltip:{callbacks:{
+            title:function(items){ return items.length ? items[0].label : ''; },
+            label:function(c){ return ' ' + fmt(c.raw) + (off_.length ? ' (без ' + off_.join(', ') + ')' : ''); }
+          }}
         },
         scales:{
-          x:{ticks:{color:chartMuted_(),font:{size:11}}, grid:{display:false}},
-          y:{ticks:{color:chartMuted_(),callback:v=>fmtK(v)}, grid:{color:chartGrid_(0.04)}}
+          x:{ticks:{color:chartMuted_(),font:{size:10},maxTicksLimit:4,maxRotation:0,autoSkip:true}, grid:{display:false}},
+          y:{ticks:{color:chartMuted_(),font:{size:10},maxTicksLimit:3,callback:v=>fmtK(v)}, grid:{color:chartGrid_(0.04)}}
         }
       }
     });

@@ -6409,11 +6409,25 @@ function apiUrl(params) {
 
 // Сохраняет свежий токен сессии из ответа сервера (приходит только у "полных" загрузок
 // страницы - см. freshSessionToken в doGet()), чтобы следующие запросы шли уже по нему.
+//
+// Роль/имя (06.09) - раньше кэшировались ТОЛЬКО в handleCredentialResponse(), то есть в
+// момент самого Google-попапа. Сессия живёт 48ч и молча продлевается КАЖДОЙ обычной
+// загрузкой без нового попапа - у любого, кто вошёл давно и с тех пор просто открывал
+// дашборд, localStorage.user_role мог оставаться пустым НАВСЕГДА, хотя session_token
+// исправно обновлялся здесь же. Ровно это сломало роутинг files/app.html на мобильную
+// Планировку (files/plan-m.html) - Влад открыл дашборд с телефона, session_token был
+// свежий, а user_role - пустой, и app.html честно откатился на index.html "как раньше".
+// Обе ветки ответа (сервер main_payload И фолбэк на Apps Script doGet) кладут role в тот
+// же D.role (используется по всему файлу, напр. `D.role === 'admin'` ниже) - читаем role
+// здесь же, единожды, на каждой успешной загрузке, а не только при явном входе.
 function saveSessionTokenFromResponse_(data) {
   if (data && data.session_token) {
     SESSION_TOKEN = data.session_token;
     localStorage.setItem('session_token', data.session_token);
   }
+  if (data && data.role) localStorage.setItem('user_role', data.role);
+  var freshName = data && (data.managerName || data.logistName);
+  if (freshName) localStorage.setItem('user_name', freshName);
 }
 
 function clearAuthTokens_() {

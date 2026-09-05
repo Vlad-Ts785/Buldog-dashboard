@@ -3302,6 +3302,33 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
         </div>
       </div>
 
+      <!-- Платные дороги (Автодор, 05.09) - отдельная карточка (Влад: "отдельной карточкой
+           Платные дороги", НЕ в блок расходов "Проходные" на Панели - тот источник другой,
+           из 1С/Штатки). "Без привязки" - принцип "расхождение показывается, не прячется"
+           (та же логика, что у вафли парка, раздел 4 DESIGN_SYSTEM.md). -->
+      <div class="card" style="margin-top:16px;">
+        <div class="sec-header">
+          <div class="sec-title">Платные дороги</div>
+          <div class="sec-sub" id="avtodor-month-label"></div>
+        </div>
+        <div style="display:flex;gap:28px;flex-wrap:wrap;margin-bottom:14px">
+          <div>
+            <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Всего с начала данных</div>
+            <div id="avtodor-total-all" style="font-size:22px;font-weight:700">—</div>
+          </div>
+          <div>
+            <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">За текущий месяц</div>
+            <div id="avtodor-total-month" style="font-size:22px;font-weight:700">—</div>
+          </div>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="tbl">
+            <thead><tr id="avtodor-head"></tr></thead>
+            <tbody id="avtodor-body"></tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="card" style="margin-top:16px;">
         <div class="sec-header">
           <div class="sec-title">Все машины в ремонте</div>
@@ -3910,7 +3937,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
           <input autocomplete="off" id="asset-department" type="text" maxlength="30" placeholder="пусто = Тралы" list="asset-department-list"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none">
           <datalist id="asset-department-list">
-            <option value="экскаваторы"><option value="в аресте">
+            <option value="экскаваторы"><option value="в аресте"><option value="восстановление">
           </datalist></div>
         <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Производитель</label>
           <input autocomplete="off" id="asset-manufacturer" type="text" maxlength="100" placeholder="Faymonville, Scania…"
@@ -6117,6 +6144,8 @@ const PAGE_TITLES = {
 let API_URL = localStorage.getItem('api_url') || API_URL_DEFAULT;
 let D = null;
 let vehSort = {col:'profit', dir:-1};
+let avtodorSort = {col:'total_paid', dir:-1};
+let avtodorData_ = null; // кэш /api/avtodor_summary - страница "Техника" открывается часто, грузим один раз за сессию
 
 function setApiUrl(u){ API_URL = u.trim(); localStorage.setItem('api_url', API_URL); }
 
@@ -11205,6 +11234,67 @@ var VEH_COLS = [
   {key:'profit',   label:'Прибыль',  num:true},
   {key:'plan_pct', label:'% плана',  num:true},
 ];
+
+// Платные дороги (Автодор, 05.09) - карточка на "Технике", тот же канон сортируемой
+// таблицы, что у "Все машины" выше (см. DESIGN_SYSTEM.md раздел 4). Данные грузятся
+// один раз при первом открытии страницы (loadAvtodorSummary_, вызывается из showPage) -
+// не часть main_payload, отдельный нечастый эндпоинт.
+var AVTODOR_COLS = [
+  {key:'gos',        label:'Госномер',  num:false},
+  {key:'model',      label:'Марка',     num:false},
+  {key:'trips',      label:'Проездов',  num:true},
+  {key:'total_paid', label:'Сумма',     num:true},
+];
+function setAvtodorSort(col) {
+  if (avtodorSort.col === col) { avtodorSort.dir *= -1; }
+  else { avtodorSort.col = col; avtodorSort.dir = AVTODOR_COLS.find(function(c){return c.key===col;}).num ? -1 : 1; }
+  renderAvtodorTable();
+}
+function loadAvtodorSummary_() {
+  if (avtodorData_) { renderAvtodorTable(); return; } // уже загружено в этой сессии
+  fetchFromYardApi_('/avtodor_summary', {}).then(function(r) {
+    if (!r.ok) return;
+    avtodorData_ = r.data;
+    renderAvtodorTable();
+  }).catch(function() {});
+}
+function renderAvtodorTable() {
+  if (!avtodorData_) return;
+  var headEl = document.getElementById('avtodor-head'), bodyEl = document.getElementById('avtodor-body');
+  if (!headEl || !bodyEl) return;
+  document.getElementById('avtodor-total-all').textContent = p2Mln(avtodorData_.total_all) + ' ₽';
+  document.getElementById('avtodor-total-month').textContent = p2Mln(avtodorData_.total_month) + ' ₽';
+  document.getElementById('avtodor-month-label').textContent = avtodorData_.month_label || '';
+
+  var col = avtodorSort.col, dir = avtodorSort.dir;
+  var vehicles = avtodorData_.vehicles.slice().sort(function(a, b) {
+    var av = a[col], bv = b[col];
+    if (typeof av === 'number') return (av - bv) * dir;
+    return String(av || '').localeCompare(String(bv || ''), 'ru') * dir;
+  });
+
+  var headHtml = '';
+  AVTODOR_COLS.forEach(function(c) {
+    var active = avtodorSort.col === c.key;
+    var arrow = active ? (avtodorSort.dir === -1 ? ' ▼' : ' ▲') : ' ↕';
+    var arrowOpacity = active ? '1' : '0.3';
+    headHtml += '<th class="sortable' + (c.num ? ' num' : '') + '" onclick="setAvtodorSort(\'' + c.key + '\')">' +
+      c.label + '<span style="font-size:10px;opacity:' + arrowOpacity + '">' + arrow + '</span></th>';
+  });
+  headEl.innerHTML = headHtml;
+
+  // Непривязанные транспондеры - НЕ прячем, показываем приглушённым текстом с пометкой
+  // (принцип "расхождение показывается, не прячется" - раздел 4 DESIGN_SYSTEM.md, та же
+  // логика, что у "нет статуса" в вафле парка).
+  bodyEl.innerHTML = vehicles.map(function(v) {
+    return '<tr' + (v.matched ? '' : ' class="muted"') + '>' +
+      '<td>' + (v.matched ? '<b>' + v.gos + '</b>' : v.gos) + '</td>' +
+      '<td class="muted">' + (v.model || '—') + '</td>' +
+      '<td class="num">' + v.trips + '</td>' +
+      '<td class="num"><b>' + p2Mln(v.total_paid) + ' ₽</b></td>' +
+    '</tr>';
+  }).join('');
+}
 
 function setVehSort(col) {
   if (vehSort.col === col) { vehSort.dir *= -1; }
@@ -18088,6 +18178,7 @@ function showPage(id, el) {
   if (id === 'crm') loadCrmData();
   if (id === 'global-stats') loadGlobalStatsData();
   if (id === 'order-plan') loadOrderPlanData();
+  if (id === 'vehicles') loadAvtodorSummary_();
   // Карта Leaflet не может инициализироваться, пока страница скрыта (display:none даёт
   // контейнеру нулевой размер - плитки карты не подтягиваются) - инициализируем/пересчитываем
   // размер только при реальном открытии вкладки.

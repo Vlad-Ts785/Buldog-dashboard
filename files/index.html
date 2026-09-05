@@ -4488,21 +4488,20 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
                Стройтранс по умолчанию ВЫКЛЮЧЕНЫ (Влад, 05.09) - их долг мал и зашумляет
                кривую; выбор личный, хранится в localStorage. -->
           <div class="kpi" id="debt-kpi-chart">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
-              <div>
-                <div class="kpi-label" style="margin-bottom:2px">ДЗ по дням</div>
-                <div class="mono" id="debt-chart-total" style="font-size:22px;font-weight:700;line-height:1.15">—</div>
-              </div>
-              <div style="text-align:right;white-space:nowrap">
-                <div class="mono" id="debt-chart-delta" style="font-size:12.5px;font-weight:600">—</div>
-                <div class="muted" style="font-size:11px">Должников: <b id="debt-kpi-debtor-count" style="color:var(--text)">—</b></div>
-              </div>
+            <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">
+              <div class="kpi-label" style="margin-bottom:0">ДЗ по дням</div>
+              <div class="muted" style="font-size:11px;white-space:nowrap">Должников: <b id="debt-kpi-debtor-count" style="color:var(--text)">—</b></div>
             </div>
-            <div class="chart-wrap" style="height:118px;margin-top:4px"><canvas id="chart-debt-history"></canvas></div>
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:6px;font-size:10.5px;color:var(--muted)">
+            <div class="chart-wrap" style="height:150px;margin-top:8px"><canvas id="chart-debt-history"></canvas></div>
+            <!-- Одна строка итогов вместо крупной суммы (05.09, Влад: "цифру ДЗ вообще
+                 убери, она есть в другом окне" - сумма живёт в соседней карточке "Общая
+                 ДЗ"). Справа - какие юрлица не входят в линию; клик разворачивает чипы,
+                 в покое блок остаётся чистым, как в превью. -->
+            <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-top:8px;font-size:10.5px;color:var(--muted);white-space:nowrap">
               <span id="debt-chart-minmax">—</span>
-              <span id="debt-chart-orgs" style="display:flex;gap:3px;flex-wrap:wrap;justify-content:flex-end"></span>
+              <span id="debt-chart-off-label" onclick="debtChartToggleOrgPanel_()" style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px"></span>
             </div>
+            <div id="debt-chart-orgs" style="display:none;gap:4px;flex-wrap:wrap;margin-top:6px"></div>
           </div>
           <div class="kpi" id="debt-kpi-overdue"></div>
           <div class="kpi" id="debt-kpi-status"></div>
@@ -17836,6 +17835,12 @@ function debtChartOrgList_() {
   hist.forEach(function(h) { Object.keys(h.byOrg || {}).forEach(function(o) { if (all.indexOf(o) < 0) all.push(o); }); });
   return all;
 }
+// Панель чипов свёрнута: под графиком одна строка "без Мегакрана, Стройтранса", клик по
+// ней разворачивает переключатели. В превью чипов не было - в покое блок остаётся чистым.
+function debtChartToggleOrgPanel_() {
+  var el = document.getElementById('debt-chart-orgs');
+  if (el) el.style.display = (el.style.display === 'flex') ? 'none' : 'flex';
+}
 function debtChartToggleOrg(name) {
   var all = debtChartOrgList_();
   var off = debtChartOffOrgs_(all);
@@ -17847,6 +17852,8 @@ function debtChartToggleOrg(name) {
   }
   try { localStorage.setItem(DEBT_CHART_OFF_KEY_, JSON.stringify(off)); } catch (e) {}
   renderDebt();
+  var panel = document.getElementById('debt-chart-orgs');   // после перерисовки панель не должна схлопываться под рукой
+  if (panel) panel.style.display = 'flex';
 }
 function debtMgrToggle(name) {
   if (debtManagerFilters.has(name)) debtManagerFilters.delete(name);
@@ -18591,22 +18598,23 @@ function renderDebt() {
     var first_ = series_[0], now_ = series_[series_.length-1];
     var min_ = Math.min.apply(null, series_), max_ = Math.max.apply(null, series_);
     var diff_ = now_ - first_;
-    setText('debt-chart-total', fmt(now_));
-    var deltaEl_ = document.getElementById('debt-chart-delta');
-    if (deltaEl_) {
-      // Для долга рост - плохо: цвет по смыслу, а не по знаку (ГОСТ, раздел "цвет = семантика").
-      deltaEl_.textContent = (Math.abs(diff_) < 1 ? 'без изменений' : (diff_ > 0 ? '+' : '−') + fmtK2(Math.abs(diff_))) + ' за период';
-      deltaEl_.style.color = Math.abs(diff_) < 1 ? 'var(--muted)' : (diff_ > 0 ? 'var(--red)' : 'var(--green)');
-    }
-    setHTML('debt-chart-minmax', 'минимум <b class="mono" style="color:var(--green)">' + fmtK2(min_) +
-      '</b> · пик <b class="mono" style="color:var(--red)">' + fmtK2(max_) + '</b>');
+    // Крупной суммы в блоке НЕТ (05.09, Влад: "цифру ДЗ вообще убери, она есть в другом
+    // окне") - сумма живёт в соседней карточке "Общая ДЗ". Здесь одна строка итогов:
+    // изменение за период и коридор минимум-пик.
+    var deltaTxt_ = Math.abs(diff_) < 1 ? 'без изменений' : (diff_ > 0 ? '+' : '−') + fmtK2(Math.abs(diff_));
+    // Для долга рост - плохо: цвет по смыслу, а не по знаку (ГОСТ, "цвет = семантика").
+    var deltaColor_ = Math.abs(diff_) < 1 ? 'var(--muted)' : (diff_ > 0 ? 'var(--red)' : 'var(--green)');
+    setHTML('debt-chart-minmax',
+      '<b class="mono" style="color:' + deltaColor_ + '">' + deltaTxt_ + '</b> за период · ' +
+      '<span class="mono">' + fmtK2(min_) + ' → ' + fmtK2(max_) + '</span>');
+    var offLabel_ = document.getElementById('debt-chart-off-label');
+    if (offLabel_) offLabel_.textContent = off_.length ? ('кроме: ' + off_.join(', ')) : 'все юрлица';
     var chipsEl_ = document.getElementById('debt-chart-orgs');
     if (chipsEl_) {
       chipsEl_.innerHTML = orgAll_.map(function(o){
         var isOff = off_.indexOf(o) >= 0;
         var safe = o.replace(/'/g, "\\'");
-        return '<button type="button" onclick="debtChartToggleOrg(\'' + safe + '\')" title="' +
-          (isOff ? 'Включить в сумму' : 'Исключить из суммы') + '" ' +
+        return '<button type="button" onclick="debtChartToggleOrg(\'' + safe + '\')" ' +
           'style="cursor:pointer;font-family:inherit;font-size:10px;padding:1px 6px;border-radius:5px;border:1px solid ' +
           (isOff ? 'var(--border)' : 'var(--border-strong)') + ';background:' + (isOff ? 'transparent' : 'var(--bg3)') +
           ';color:' + (isOff ? 'var(--muted)' : 'var(--text)') + ';opacity:' + (isOff ? '.55' : '1') + '">' + o + '</button>';

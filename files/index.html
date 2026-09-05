@@ -3976,6 +3976,13 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
           <div id="legal-risk-result" style="margin-top:10px"></div>
         </div>
       </div>
+      <!-- Связанные данные 1С (05.09, Влад: "давай свяжи") - что найдено по полю
+           "Название в 1С": заказы, поступления, текущий долг. Скрыто, если поле не
+           заполнено (тогда под полем горит жёлтая подсказка про отсутствие связи). -->
+      <div class="asset-form-section" id="legal-linked-section" style="display:none">Связанные данные 1С</div>
+      <div class="asset-form-grid" id="legal-linked-grid" style="display:none">
+        <div class="asset-form-full" id="legal-linked-body"></div>
+      </div>
       <!-- Банковские реквизиты (31.08, Влад: "добавь возможность добавить банковские
            реквизиты") - вводятся вручную, не автозаполняются (лукап по БИК - отдельная
            задача, не запрошена сейчас). -->
@@ -8406,7 +8413,7 @@ function renderMyPageManager(el, current, selectorHtml, d) {
         '</tr></thead><tbody>'+
           (byCust.length
             ? byCust.map(function(c) {
-                return '<tr><td>'+c.customer+'</td>'+
+                return '<tr><td>'+cpLightHtml_(c.customer)+c.customer+'</td>'+
                   '<td class="muted">'+(c.orgs || '—')+'</td>'+
                   '<td class="num">'+fmt(c.amount)+'</td>'+
                   '<td class="num muted">'+c.count+'</td></tr>';
@@ -8877,7 +8884,7 @@ function renderCommercialHeadReceiptsBlock_(cfg) {
               return '<tr>'+
                 (showDate ? '<td class="muted">'+receiptsShortDate_(t.date)+'</td>' : '')+
                 '<td class="muted">'+(t.manager||'—')+'</td>'+
-                '<td>'+t.customer+'</td>'+
+                '<td>'+cpLightHtml_(t.customer)+t.customer+'</td>'+
                 '<td class="muted">'+(t.orgName || '—')+'</td>'+
                 '<td class="muted">'+(t.docNumber || '—')+'</td>'+
                 '<td class="num">'+fmt(t.amount)+'</td>'+
@@ -12296,6 +12303,7 @@ function legalOpenForm_(id) {
   document.getElementById('legal-name-1c').value = le ? (le.name_1c || '') : '';
   legalRender1cHint_(le);
   legalLoad1cNames_();
+  legalLoadLinked_(le ? le.id : null);
   document.getElementById('legal-address').value = le ? (le.legal_address || '') : '';
   document.getElementById('legal-kpp').value = le ? (le.kpp || '') : '';
   document.getElementById('legal-ogrn').value = le ? (le.ogrn || '') : '';
@@ -12342,6 +12350,35 @@ function legalLoad1cNames_() {
     if (!r.ok || !r.data || !Array.isArray(r.data.names)) return;
     var dl = document.getElementById('legal-1c-names');
     if (dl) dl.innerHTML = r.data.names.map(function(n) { return '<option value="' + pageEscAttr_(n) + '"></option>'; }).join('');
+  }).catch(function() {});
+}
+// Сводка "что связано с этой карточкой" по полю "Название в 1С" (05.09, Влад: "давай
+// свяжи"): заказы, поступления, текущий долг - тем же ключом, которым связана дебиторка.
+function legalLoadLinked_(id) {
+  var sec = document.getElementById('legal-linked-section'), grid = document.getElementById('legal-linked-grid'),
+      body = document.getElementById('legal-linked-body');
+  if (!sec || !grid || !body) return;
+  sec.style.display = 'none'; grid.style.display = 'none'; body.innerHTML = '';
+  if (!id || !D || D.role !== 'admin') return;
+  fetchFromYardApi_('/sprav/legal_entity_summary', { id: id }).then(function(r) {
+    if (!r.ok || !r.data || !r.data.linked) return;
+    if (legalEditId_ !== id) return;   // карточку успели переключить, пока шёл запрос
+    var d = r.data, money = pageFr_;
+    function tile(label, value, sub, color) {
+      return '<div style="flex:1 1 150px;min-width:150px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px">' +
+        '<div class="muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.05em">' + label + '</div>' +
+        '<div class="mono" style="font-size:17px;font-weight:600;margin-top:3px' + (color ? ';color:' + color : '') + '">' + value + '</div>' +
+        (sub ? '<div class="muted" style="font-size:11px;margin-top:2px">' + sub + '</div>' : '') + '</div>';
+    }
+    var o = d.orders || {}, rc = d.receipts || {}, db = d.debt || {};
+    body.innerHTML = '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+      tile('Заказов', o.count || 0, o.amount ? ('на ' + money(o.amount)) : 'нет данных') +
+      tile('Прибыль по заказам', o.profit ? money(o.profit) : '—', o.last_date ? ('последний ' + o.last_date) : '') +
+      tile('Поступления', rc.amount ? money(rc.amount) : '—', rc.last_date ? ('последнее ' + rc.last_date) : (rc.count ? '' : 'нет данных')) +
+      tile('Текущий долг', db.balance ? money(db.balance) : '—', db.days_overdue ? (db.days_overdue + ' дн. просрочки') : '',
+           db.balance ? 'var(--amber)' : '') +
+    '</div>';
+    sec.style.display = ''; grid.style.display = '';
   }).catch(function() {});
 }
 function legalCloseForm_() {
@@ -13729,7 +13766,7 @@ function renderReceiptsDayTransactions_(day, prefix) {
   if (!bodyEl) return;
   bodyEl.innerHTML = (day.transactions || []).map(function(t) {
     var mgrCls = t.manager === 'Не определён' ? ' class="muted"' : '';
-    return '<tr><td>' + t.customer + '</td>' +
+    return '<tr><td>' + cpLightHtml_(t.customer) + t.customer + '</td>' +
       '<td' + mgrCls + '>' + t.manager + '</td>' +
       '<td class="muted">' + (t.orgName || '—') + '</td>' +
       '<td class="muted">' + (t.docNumber || '—') + '</td>' +
@@ -13786,7 +13823,7 @@ function renderReceiptsWeekTransactions_(week) {
   bodyEl.innerHTML = rows.map(function(t) {
     var mgrCls = t.manager === 'Не определён' ? ' class="muted"' : '';
     return '<tr><td class="muted">' + receiptsShortDate_(t.date) + '</td>' +
-      '<td>' + t.customer + '</td>' +
+      '<td>' + cpLightHtml_(t.customer) + t.customer + '</td>' +
       '<td' + mgrCls + '>' + t.manager + '</td>' +
       '<td class="muted">' + (t.orgName || '—') + '</td>' +
       '<td class="muted">' + (t.docNumber || '—') + '</td>' +
@@ -13996,7 +14033,7 @@ function renderReceiptsCustomers(r) {
   document.getElementById('receipts-customers-body').innerHTML = shown.map(function(c) {
     var mgrCls = c.manager === 'Не определён' ? ' class="muted"' : '';
     var displayAmount = filter ? ((c.orgAmounts && c.orgAmounts[filter]) || 0) : c.amount;
-    return '<tr><td>' + c.customer + '</td>' +
+    return '<tr><td>' + cpLightHtml_(c.customer) + c.customer + '</td>' +
       '<td' + mgrCls + '>' + c.manager + '</td>' +
       '<td class="muted">' + (c.orgs || '—') + '</td>' +
       '<td class="num">' + fmt(displayAmount) + '</td>' +
@@ -18141,6 +18178,33 @@ function debtRiskBlockHtml_(contragent) {
       (m.checked_at ? '<span class="muted" style="font-weight:400;font-size:11px;margin-left:auto">' + pageEsc_(m.checked_at) + '</span>' : '') +
     '</div>' + reasons + '</div>';
 }
+// ── Единая связь "имя контрагента из 1С -> карточка юрлица" (05.09, Влад: "давай свяжи").
+// Одна карта на весь сайт (/api/counterparty/lights: дебиторка + заказы + поступления +
+// история клиентов), поэтому лампочка выглядит и работает одинаково на любой странице.
+// Ключ - имя КАК В 1С, то самое, что теперь хранится в карточке юрлица (name_1c).
+var cpLights_ = null, cpLightsLoading_ = false;
+function cpEnsureLights_(rerender) {
+  if (cpLights_ !== null || cpLightsLoading_) return;
+  if (!D || (D.role !== 'admin' && D.role !== 'manager')) { cpLights_ = {}; return; }
+  cpLightsLoading_ = true;
+  fetchFromYardApi_('/counterparty/lights', {}).then(function(r) {
+    cpLightsLoading_ = false;
+    cpLights_ = (r.ok && r.data && r.data.by_name) ? r.data.by_name : {};
+    if (rerender) try { rerender(); } catch (e) {}
+  }).catch(function() { cpLightsLoading_ = false; cpLights_ = {}; });
+}
+// Лампочка рядом с именем заказчика на любой странице. Пусто, если контрагент не связан
+// с карточкой юрлица или ещё не проверялся - цвет только по делу (ГОСТ).
+function cpLightHtml_(name, size) {
+  var m = cpLights_ && cpLights_[String(name || '').trim()];
+  if (!m || !m.light) return '';
+  var head = 'Проверка контрагента: ' + legalRiskLabel_(m.light) + (m.checked_at ? ' (' + m.checked_at + ')' : '');
+  var body = (m.reasons && m.reasons.length)
+    ? m.reasons.map(function(x) { return '— ' + x; }).join('\n')
+    : 'Рисков по официальным реестрам не найдено';
+  return '<span title="' + pageEscAttr_(head + '\n' + body) + '" style="display:inline-block;vertical-align:middle;margin-right:5px">' +
+    legalRiskMarkHtml_(m.light, size || 7, '', m.marker) + '</span>';
+}
 function debtRiskDotHtml_(contragent) {
   var m = debtRiskMap_ && debtRiskMap_[contragent];
   if (!m || !m.light) return '';
@@ -19203,6 +19267,11 @@ function showPage(id, el) {
   if (id === 'dynamics') loadHistoryData();
   if (id === 'clients') loadClientsData();
   if (id === 'counterparty') cpInit_();
+  // Единая карта связей 1С (05.09) - грузится один раз при первом заходе на любую
+  // страницу, где показан заказчик, и перерисовывает её, когда придёт.
+  if (id === 'clients') cpEnsureLights_(function() { if (typeof renderClientsBody === 'function') renderClientsBody(); });
+  if (id === 'receipts') cpEnsureLights_(function() { if (typeof renderReceipts === 'function') renderReceipts(); });
+  if (id === 'my-page') cpEnsureLights_(function() { if (typeof renderMyPage === 'function') renderMyPage(); });
   if (id === 'crm') loadCrmData();
   if (id === 'global-stats') loadGlobalStatsData();
   if (id === 'order-plan') loadOrderPlanData();
@@ -21156,7 +21225,7 @@ function renderClientsTable_(list, mode) {
         c.label + '<span style="font-size:10px;opacity:' + arrowOpacity + '">' + arrow + '</span></th>';
     }).join('');
     var rows = sorted.map(function(c, i) {
-      return '<tr><td>' + (i+1) + '</td><td>' + c.name + '</td><td>' + (c.manager ? cleanName(c.manager) : '—') + '</td>' +
+      return '<tr><td>' + (i+1) + '</td><td>' + cpLightHtml_(c.name) + c.name + '</td><td>' + (c.manager ? cleanName(c.manager) : '—') + '</td>' +
         '<td class="num">' + c.orders + '</td><td class="num">' + fmt(c.revenue) + '</td>' +
         '<td class="num">' + fmt(c.avg_order_value) + '</td><td>' + fmtDateRu(c.last_order) + '</td>' +
         '<td class="num ' + segBadgeClass_(c.segment) + '">' + c.segment + '</td></tr>';
@@ -21165,7 +21234,7 @@ function renderClientsTable_(list, mode) {
   }
 
   var rows = list.map(function(c, i) {
-    return '<tr><td>' + (i+1) + '</td><td>' + c.name + '</td><td class="num">' + c.orders + '</td>' +
+    return '<tr><td>' + (i+1) + '</td><td>' + cpLightHtml_(c.name) + c.name + '</td><td class="num">' + c.orders + '</td>' +
       '<td class="num">' + fmt(c.revenue) + '</td><td>' + fmtDateRu(c.last_order) + '</td>' +
       '<td class="num amber">' + c.recency_days + ' дн</td></tr>';
   }).join('');

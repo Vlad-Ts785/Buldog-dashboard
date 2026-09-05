@@ -3934,6 +3934,17 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
         <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Полное название</label>
           <input autocomplete="off" id="legal-fullname" type="text" maxlength="300" placeholder="ООО «Бульдог»"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        <!-- Название в 1С (05.09, Влад: "нужно сделать колонку с названием 1С и сделать
+             взаимосвязи, чтобы это всё на сайте друг друга понимало") - именно по нему
+             дебиторка и отчёты 1С находят эту карточку. У импортированных из выгрузки
+             заполнено автоматически; у заведённых вручную (имя приходит из ЕГРЮЛ в другом
+             формате) вписывается здесь - список подсказок = контрагенты ДЗ без пары. -->
+        <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Название в 1С</label>
+          <input autocomplete="off" id="legal-name-1c" type="text" maxlength="300" list="legal-1c-names"
+            placeholder="как контрагент называется в 1С - по нему связывается дебиторка"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none">
+          <datalist id="legal-1c-names"></datalist>
+          <div id="legal-name-1c-hint" class="muted" style="font-size:11px;margin-top:4px;min-height:14px"></div></div>
         <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Юридический адрес</label>
           <input autocomplete="off" id="legal-address" type="text" maxlength="500" placeholder="автозаполнится по ИНН"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
@@ -12235,7 +12246,7 @@ function legalPaint_() {
   if (q.length >= 2) {
     var hit = all.filter(function(le) {
       return String(le.name || '').toLowerCase().indexOf(q) >= 0 || String(le.full_name || '').toLowerCase().indexOf(q) >= 0 ||
-        String(le.inn || '').indexOf(q) >= 0;
+        String(le.name_1c || '').toLowerCase().indexOf(q) >= 0 || String(le.inn || '').indexOf(q) >= 0;
     });
     rows = hit.slice(0, 200);
     if (hit.length > 200) note = 'Показаны первые 200 из ' + hit.length + ' — уточните запрос';
@@ -12282,6 +12293,9 @@ function legalOpenForm_(id) {
   document.getElementById('legal-inn').value = le ? (le.inn || '') : '';
   document.getElementById('legal-name').value = le ? le.name : '';
   document.getElementById('legal-fullname').value = le ? (le.full_name || '') : '';
+  document.getElementById('legal-name-1c').value = le ? (le.name_1c || '') : '';
+  legalRender1cHint_(le);
+  legalLoad1cNames_();
   document.getElementById('legal-address').value = le ? (le.legal_address || '') : '';
   document.getElementById('legal-kpp').value = le ? (le.kpp || '') : '';
   document.getElementById('legal-ogrn').value = le ? (le.ogrn || '') : '';
@@ -12308,6 +12322,27 @@ function legalOpenForm_(id) {
   bk.classList.add('show');
   setTimeout(function() { dr.classList.add('show'); }, 40);
   setTimeout(function() { document.getElementById('legal-name').focus(); }, 120);
+}
+// Подсказка под полем "Название в 1С": заполнено - связь с дебиторкой есть; пусто у
+// карточки, заведённой вручную - это и есть причина, по которой должник не находится.
+function legalRender1cHint_(le) {
+  var el = document.getElementById('legal-name-1c-hint');
+  if (!el) return;
+  if (!le) { el.textContent = 'Если контрагент есть в 1С - впишите его название оттуда, иначе дебиторка не свяжется с карточкой.'; el.style.color = ''; return; }
+  if (le.name_1c) { el.textContent = 'Связь с данными 1С настроена.'; el.style.color = 'var(--green)'; return; }
+  el.textContent = 'Не заполнено - дебиторка и отчёты 1С не свяжутся с этой карточкой. Начните вводить: в подсказках имена должников без пары.';
+  el.style.color = 'var(--amber)';
+}
+// Список имён из ДЗ без пары - подсказки для поля (admin, один раз за сессию вкладки).
+var legal1cNamesLoaded_ = false;
+function legalLoad1cNames_() {
+  if (legal1cNamesLoaded_ || !D || D.role !== 'admin') return;
+  legal1cNamesLoaded_ = true;
+  fetchFromYardApi_('/debt/unmatched_names', {}).then(function(r) {
+    if (!r.ok || !r.data || !Array.isArray(r.data.names)) return;
+    var dl = document.getElementById('legal-1c-names');
+    if (dl) dl.innerHTML = r.data.names.map(function(n) { return '<option value="' + pageEscAttr_(n) + '"></option>'; }).join('');
+  }).catch(function() {});
 }
 function legalCloseForm_() {
   var bk = document.getElementById('legal-bk'), dr = document.getElementById('legal-drawer');
@@ -12361,6 +12396,7 @@ function legalSave_() {
   var params = {
     id: id, name: name,
     full_name: document.getElementById('legal-fullname').value.trim(),
+    name_1c: document.getElementById('legal-name-1c').value.trim(),
     inn: document.getElementById('legal-inn').value.trim(),
     kpp: document.getElementById('legal-kpp').value.trim(),
     ogrn: document.getElementById('legal-ogrn').value.trim(),

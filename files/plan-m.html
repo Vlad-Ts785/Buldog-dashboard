@@ -885,7 +885,7 @@ function handleTap(p, t){
   if (p.rh){ var vi = +p.rh.dataset.v; deselect(); openVehicleSheet(M.vehicles[vi]); return; }
   if (p.segEl){
     var id = p.segEl.dataset.id;
-    if (id === "draft"){ return; }
+    if (id === "draft"){ if (sheetState === "closed") openSegSheet("draft"); else setDetent("full"); return; }
     if (M.sel === id) openSegSheet(id); else { select(id); vib(6); }
     return;
   }
@@ -913,6 +913,9 @@ function onLongPress(){
 }
 function createDraft(vi, s, l, kind, extra){
   M.draft = Object.assign({id:"draft", v:vi, kind:kind || "trip", s:clamp(s, 0, HOURS - l), l:l, mg:"", lg:M.me.name || "", from:"", to:"", customer:"", needsData:false, reason:"", tripMode:""}, extra || {});
+  /* черновик вне окна рендера (копия «на завтра», «новый рейс» после длинного дальнего) -
+     сначала подвинуть ленту, иначе плитки черновика физически нет и ручки/тап не работают */
+  if (M.draft.s >= win.e || M.draft.s + M.draft.l <= win.s) scrollToHour(M.draft.s, 0.15, false);
   renderWindow(true); select("draft");
 }
 function dropDraft(){ if (!M.draft) return; if (M.sel === "draft") deselect(); M.draft = null; var el = segEls["draft"]; if (el){ el.remove(); delete segEls["draft"]; } }
@@ -1096,7 +1099,12 @@ function setDetent(d){ sheetState = d; sheet.className = "sheet " + d; scrim.cla
 function closeSheet(viaBack){
   if (sheetState === "closed") return;
   var cb = sheetOnClose; sheetOnClose = null;
+  /* Черновик живёт только вместе со своим листом: закрыли лист любым путём (свайп, Back,
+     «Отмена») - черновик снимается. Иначе на ленте оставалась «синяя рамка», в которую не
+     войти (Влад, живая проба 05.09). «Поставить» снимает черновик сам ДО закрытия. */
+  var wasDraftSheet = M.draft && (sheetKind === "seg" || sheetKind === "vehicle");
   sheetState = "closed"; sheet.className = "sheet"; scrim.classList.remove("on"); sheetKind = null;
+  if (wasDraftSheet) dropDraft();
   if (cb) cb();
   if (!viaBack) histPop();
 }
@@ -1148,6 +1156,10 @@ function renderSegSheet(){
   if (form.kind === "driveroff") h.push('<div class="f-label">Причина</div><div class="chips" id="fReason">' + DRIVEROFF_REASONS.map(function(p){ return '<button class="chip" data-r="' + p[0] + '" aria-pressed="' + (form.reason === p[0]) + '">' + p[1] + '</button>'; }).join("") + '</div>');
   h.push('<div class="frow tap" id="fVeh"><div class="k">Машина</div><div class="v mono">' + esc(v.gosShort) + ' <span style="color:var(--muted);font-family:var(--font-ui);font-weight:500">· ' + esc(v.driverShort || "нет водителя") + '</span></div><svg class="go"><use href="#i-right"/></svg></div>');
   if (trip) h.push('<div class="frow tap" id="fCust"><div class="k">Заказчик</div><div class="v' + (form.customer ? '' : ' ph') + '">' + esc(form.customer || "Кому едем") + '</div><svg class="go"><use href="#i-right"/></svg></div>');
+  /* Менеджер - сразу под заказчиком, чипами, «Не указан» первым (Влад 05.09: «не увидел где
+     выбирать менеджера, это важно» - строка ниже сгиба полулиста = невидима). Имя в обиходе +
+     3-буквенный код, как на плитке. */
+  if (trip) h.push('<div class="f-label">Менеджер</div><div class="days" id="fMgChips">' + [{v:"", t:"Не указан"}].concat(M.managers.map(function(m){ return {v:m, t:mgChipLabel(m)}; })).map(function(o){ return '<button data-v="' + esc(o.v) + '" aria-pressed="' + (form.mg === o.v) + '">' + esc(o.t) + '</button>'; }).join("") + '</div>');
   h.push('<div class="timebox"><button class="stp" id="fMinus">−30</button><button class="cur" id="fTime">' + fmtTime(form.s) + '<small>' + fmtDayLong(form.s) + '</small></button><button class="stp" id="fPlus">+30</button></div>');
   if (form.timeOpen){
     var d0 = dayStartOf(nowHour()) - 24, days = [];
@@ -1162,7 +1174,6 @@ function renderSegSheet(){
   if (trip){
     h.push('<div class="frow tap" id="fFrom"><div class="k">Откуда</div><div class="v' + (form.from ? '' : ' ph') + '">' + esc(form.from || "не указано") + '</div><svg class="go"><use href="#i-right"/></svg></div>');
     h.push('<div class="frow tap" id="fTo"><div class="k">Куда</div><div class="v' + (form.to ? '' : ' ph') + '">' + esc(form.to || "не указано") + '</div><svg class="go"><use href="#i-right"/></svg></div>');
-    h.push('<div class="frow tap" id="fMg"><div class="k">Менеджер</div><div class="v' + (form.mg ? '' : ' ph') + '">' + esc(form.mg ? shortName(form.mg) : "Не указан") + '</div><svg class="go"><use href="#i-right"/></svg></div>');
     h.push('<div class="tgl"><span>Под данные</span><button class="sw" id="fNd" role="switch" aria-checked="' + form.needsData + '"></button></div>');
     h.push('<div class="tgl"><span>Суточный <small style="color:var(--muted);font-weight:500">(3 загрузки)</small></span><button class="sw" id="fDaily" role="switch" aria-checked="' + (form.tripMode === "daily") + '"></button></div>');
     if (!form.customer || !form.mg) h.push('<div class="info warn">Без заказчика или менеджера заявка встанет «под данные» - дозаполните с компьютера</div>');
@@ -1175,6 +1186,7 @@ function renderSegSheet(){
   shFoot.innerHTML = (isDraft ? '<button class="btn primary" id="fPut"' + (bad ? ' disabled' : '') + '>Поставить</button>'
     : '<button class="btn ghost danger-ghost" id="fCancelSeg" style="color:var(--tint-red)">Отбой</button><button class="btn primary" id="fSave"' + (!changed || bad ? ' disabled' : '') + '>Сохранить</button>');
 }
+function mgChipLabel(full){ var p = (full || "").trim().split(/\s+/); return (p[1] ? p[1] + " " : "") + three(full); }
 function agoLabel(h){ var m = Math.round((nowHour() - h) * 60); if (m < 1) return "только что"; if (m < 60) return m + " мин назад"; if (m < 24*60) return Math.round(m/60) + " ч назад"; return fmtDay(h) + " " + fmtTime(h); }
 shBody.addEventListener("click", function(e){
   if (sheetKind === "seg") segSheetClick(e);
@@ -1196,6 +1208,7 @@ function segSheetClick(e){
   var id = b.id;
   if (b.parentNode && b.parentNode.id === "fKind"){ form.kind = b.dataset.k; if (form.kind !== "trip"){ form.customer = ""; form.mg = ""; if (form.l === 8) form.l = 24; } else if (form.l === 24 && !form.tripMode) form.l = 8; if (form.kind === "driveroff" && !form.reason) form.reason = "dayoff"; formApplyToSeg(); renderSegSheet(); return; }
   if (b.parentNode && b.parentNode.id === "fReason"){ form.reason = b.dataset.r; formApplyToSeg(); renderSegSheet(); return; }
+  if (b.parentNode && b.parentNode.id === "fMgChips"){ form.mg = b.dataset.v; vib(4); formApplyToSeg(); renderSegSheet(); var ch = $("fMgChips"); if (ch){ var on = ch.querySelector('[aria-pressed="true"]'); if (on) on.scrollIntoView({block:"nearest", inline:"center"}); } return; }
   if (b.parentNode && b.parentNode.id === "fDur"){ form.l = +b.dataset.l; formApplyToSeg(); renderSegSheet(); return; }
   if (b.parentNode && b.parentNode.id === "fDays"){ var d = +b.dataset.d; form.s = d + (form.s - dayStartOf(form.s)); formApplyToSeg(); renderSegSheet(); return; }
   if (b.parentNode && b.parentNode.id === "fHours"){ form.s = dayStartOf(form.s) + (+b.dataset.h) + (form.s % 1); formApplyToSeg(); renderSegSheet(); return; }
@@ -1317,7 +1330,6 @@ shFoot.addEventListener("click", function(e){
   if (b.id === "vBack"){ dropDraft(); vsheet.step = 1; renderVehicleSheet(); }
   else if (b.id === "vPut"){ var v = vsheet.v; var s = {id:newSegId(), v:v.i, kind:vsheet.kind, s:vsheet.s, l:vsheet.l, reason:vsheet.reason, needsData:false, mg:"", lg:M.me.name, from:"", to:"", customer:"", tripMode:"", updatedBy:M.me.name, updatedAt:nowHour()}; dropDraft(); M.segs.push(s); closeSheet(); refreshSeg(s.id); layoutRows(); saveSeg(s); vib([8,40,8]); toast("Поставлено: " + segLabel(s), v.gosShort, function(){ deleteSegQuiet(s.id); }); }
 });
-sheet.addEventListener("transitionend", function(){ if (sheetState === "closed" && sheetKind === null && M.draft && vsheet && vsheet.step === 2) { dropDraft(); } });
 function peopleItems(v){
   var items = [], free = [], other = [];
   M.people.forEach(function(p){ if (p.on === v.gos) return; (p.on ? other : free).push({v:p.id, t:p.full_name, on:p.on, sub:p.on ? "сейчас на " + gosShort(p.on) : "свободен"}); });

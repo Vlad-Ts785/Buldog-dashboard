@@ -19546,6 +19546,28 @@ function cpLoadHistory_() {
 }
 
 function showPage(id, el) {
+  // «Планировка» с узкого сенсорного экрана - уводим на отдельную мобильную страницу
+  // (files/plan-m.html, план plans/2026-09-05-mobile-planning-page.md), НЕ рендерим здесь
+  // старую сжатую "Мобильную Таблицу" (#page-logistics-plan.lp-mobile) - Влад, 06.09: живьём
+  // с телефона зашёл через обычный браузер (не через app.html/значок приложения), долго
+  // листал старое боковое меню, прежде чем вручную набрать адрес новой страницы: "хочу,
+  // чтобы уже всё работало, не только по ссылке, а вообще просто зашёл и работает". Роутинг
+  // app.html при открытии ЗНАЧКА приложения эту ситуацию уже решает - здесь закрываем ВТОРОЙ
+  // путь входа, через обычный браузер и вкладку "Планировка" внутри уже открытого index.html.
+  // Проверка ДО любой отрисовки страницы - редирект мгновенный, без вспышки старой Таблицы.
+  // Остальные вкладки (Панель и т.д.) не трогаем - тот же телефон, тот же index.html, та же
+  // роль спокойно продолжают открываться как раньше (см. видео - Влад САМ только что смотрел
+  // Панель админа с телефона, эта функциональность нужна и дальше).
+  if (id === 'logistics-plan') {
+    var lpMobile_ = false, lpOptOut_ = false, lpRole_ = '';
+    try { lpMobile_ = window.matchMedia && window.matchMedia('(pointer: coarse)').matches && window.innerWidth <= 680; } catch(e){}
+    try { lpOptOut_ = sessionStorage.getItem('plan_m_optout') === '1'; } catch(e){}
+    try { lpRole_ = (typeof D !== 'undefined' && D && D.role) || localStorage.getItem('user_role') || ''; } catch(e){}
+    if (lpMobile_ && !lpOptOut_ && (lpRole_ === 'logist' || lpRole_ === 'manager' || lpRole_ === 'admin')) {
+      location.href = 'plan-m.html';
+      return;
+    }
+  }
   closeMobileSidebar(); // выбрали страницу - меню на телефоне больше не нужно открытым
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.sidebar-nav-item').forEach(b => b.classList.remove('active'));

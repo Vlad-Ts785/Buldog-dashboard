@@ -4878,6 +4878,15 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
       <div class="card">
         <div class="sec-header">
           <div class="sec-title">История запросов</div>
+          <!-- Чистка кэша (05.09, Влад: "для админа сделай возможность чистить кэш") - только
+               admin, см. cpInit_. "Очистить кэш" не трогает историю: записи остаются, но
+               перестают отдаваться как готовый ответ, следующая проверка пойдёт к Checko. -->
+          <div id="cp-admin-tools" style="display:none;align-items:center;gap:6px;margin-left:auto">
+            <button type="button" onclick="cpCacheClear_('cache')" title="Следующая проверка любого ИНН пойдёт к Checko заново (расходует квоту)"
+              style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:5px 10px;font-size:11.5px;cursor:pointer">Очистить кэш</button>
+            <button type="button" onclick="cpCacheClear_('history')" title="Удалить записи истории проверок"
+              style="background:transparent;border:1px solid rgba(226,75,74,.4);color:var(--red);border-radius:7px;padding:5px 10px;font-size:11.5px;cursor:pointer">Очистить историю</button>
+          </div>
           <div class="muted" style="font-size:11px">клик по строке - открыть результат</div>
         </div>
         <div style="overflow-x:auto">
@@ -19007,7 +19016,28 @@ var cpInited_ = false, cpBusy_ = false;
 function cpInit_() {
   var inn = document.getElementById('cp-inn');
   if (!cpInited_) { cpInited_ = true; if (inn) setTimeout(function() { inn.focus(); }, 80); }
+  var tools = document.getElementById('cp-admin-tools');
+  if (tools) tools.style.display = (D && D.role === 'admin') ? 'flex' : 'none';
   cpLoadHistory_();
+}
+// Чистка кэша/истории - только admin (сервер тоже проверяет). "cache" - записи остаются,
+// но помечаются негодными для кэша; "history" - удаление, поэтому с подтверждением.
+function cpCacheClear_(mode) {
+  if (!D || D.role !== 'admin') return;
+  var params = { mode: mode };
+  if (mode === 'history') {
+    if (!confirm('Удалить всю историю проверок? Кэш тоже пропадёт - следующие проверки пойдут к Checko заново.')) return;
+    params.confirm = '1';
+  }
+  postToYardApi_('/counterparty/cache_clear', params).then(function(r) {
+    if (!r.ok) { p2Toast('Не удалось: ' + (r.data && r.data.error || 'ошибка сервера'), 'red'); return; }
+    var n = (r.data && r.data.affected) || 0;
+    p2Toast(mode === 'cache'
+      ? ('Кэш сброшен: ' + n + ' - следующая проверка пойдёт к Checko заново')
+      : ('История очищена: удалено записей - ' + n), 'green');
+    if (mode === 'history') { var el = document.getElementById('cp-result'); if (el) el.innerHTML = ''; }
+    cpLoadHistory_();
+  }).catch(function(e) { p2Toast('Ошибка сети: ' + e.message, 'red'); });
 }
 function cpFmtMoney_(v) { return (v == null) ? '—' : Math.round(v).toLocaleString('ru-RU') + ' ₽'; }
 function cpFmtDate_(s) {

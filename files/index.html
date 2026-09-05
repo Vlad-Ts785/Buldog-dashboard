@@ -211,6 +211,50 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .sidebar.collapsed .sidebar-refresh{justify-content:center;padding:7px 0;}
 @media(max-width:900px){ .sidebar-collapse-btn{display:none;} }
 
+/* ── Кастомизация меню (05.09, Влад: "зажал меню - перешло в режим кастома... передвинуть
+   как канбанчик, скрыть") - ГОСТ раздел 6 "Долгое нажатие -> режим перестановки", числа
+   буквально: 550мс/6px, дрожание ±1° с фазовым сдвигом, grip 2x3, плашка "Готово"
+   200ms --ease-out-strong, drag: opacity .82, двухслойная тень, scale 1.03, lerp 0.28,
+   FLIP 300ms, укладка overshoot 380ms. Кривые - литералами: переменные --ease-* объявлены
+   не на :root, а внутри страниц (CRM/Планировка), сайдбар их не видит. */
+.sidebar-nav-item .menu-grip{display:none;margin-left:auto;width:8px;height:12px;flex:none;color:var(--muted);opacity:.7;}
+.sidebar-nav-item .menu-grip svg{width:8px;height:12px;display:block;}
+.sidebar-nav-item .menu-eye{display:none;margin-left:4px;width:18px;height:18px;flex:none;border:1px solid var(--border);border-radius:5px;background:var(--bg2);color:var(--muted);align-items:center;justify-content:center;cursor:pointer;}
+.sidebar-nav-item .menu-eye svg{width:11px;height:11px;display:block;}
+/* В режиме подписи не переносим - длинные ("Глобальная статистика") режутся многоточием,
+   иначе с grip+глазом строка становилась двухэтажной. */
+.sidebar.menu-customizing .sidebar-nav-item{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;gap:8px;padding-right:6px;}
+.sidebar.menu-customizing .sidebar-nav-item{cursor:grab;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:none;outline:1px dashed rgba(255,255,255,.16);outline-offset:-1px;}
+.sidebar.menu-customizing .sidebar-nav-item:hover{transform:none;background:var(--bg3);}
+.sidebar.menu-customizing .sidebar-nav-item .menu-grip{display:block;}
+.sidebar.menu-customizing .sidebar-nav-item .menu-eye{display:inline-flex;}
+.sidebar.menu-customizing .sidebar-nav-item .menu-eye:hover{color:var(--text);border-color:rgba(255,255,255,.16);}
+.sidebar.menu-customizing .sidebar-nav-item.menu-hidden{opacity:.42;}
+.sidebar.menu-customizing .sidebar-nav-item.menu-hidden .menu-eye{color:var(--red);border-color:rgba(226,75,74,.4);}
+.sidebar.menu-customizing .sidebar-nav-item.menu-wiggle{animation:menuWiggle .25s ease-in-out infinite;}
+@keyframes menuWiggle{0%{transform:rotate(-1deg);}50%{transform:rotate(1deg);}100%{transform:rotate(-1deg);}}
+.sidebar-nav-item.menu-placeholder{visibility:hidden;}
+.menu-drag-card{position:fixed;z-index:1000;pointer-events:none;box-sizing:border-box;opacity:.82;cursor:grabbing;
+  background:var(--bg3);color:var(--text);box-shadow:0 2px 6px rgba(0,0,0,.4),0 16px 32px rgba(0,0,0,.5);
+  transition:opacity 140ms cubic-bezier(.25,1,.5,1);will-change:transform;}
+.menu-drag-card .menu-grip{display:block;}
+.menu-drag-card .menu-eye{display:inline-flex;}
+.menu-done-bar{display:none;position:sticky;bottom:0;margin:10px 0 0;padding:8px;gap:6px;align-items:center;
+  background:var(--bg2);border:1px solid var(--border);border-radius:9px;
+  opacity:0;transform:translateY(6px);transition:opacity 200ms cubic-bezier(0.16,1,0.3,1),transform 200ms cubic-bezier(0.16,1,0.3,1);}
+.sidebar.menu-customizing .menu-done-bar{display:flex;opacity:1;transform:none;}
+.menu-done-bar button{appearance:none;border:1px solid var(--border);background:var(--bg3);color:var(--muted);border-radius:7px;padding:5px 9px;font-size:11.5px;cursor:pointer;font-family:inherit;white-space:nowrap;}
+.menu-done-bar button:hover{color:var(--text);border-color:rgba(255,255,255,.16);}
+.menu-done-bar button.primary{background:var(--green);border-color:var(--green);color:#fff;font-weight:600;}
+.menu-hint-badge{position:absolute;left:10px;top:calc(100% + 3px);z-index:6;pointer-events:none;white-space:nowrap;
+  background:var(--bg4);border:1px solid rgba(255,255,255,.16);color:var(--text);font-size:10.5px;padding:4px 8px;border-radius:6px;box-shadow:0 6px 16px rgba(0,0,0,.35);}
+.sidebar-nav-item.menu-hint-pulse{animation:menuHintPulse 1.1s ease-in-out 3;}
+@keyframes menuHintPulse{0%,100%{box-shadow:0 0 0 0 rgba(55,138,221,0);}50%{box-shadow:0 0 0 2px rgba(55,138,221,.55);}}
+@media(prefers-reduced-motion:reduce){
+  .sidebar.menu-customizing .sidebar-nav-item.menu-wiggle{animation:none;}
+  .sidebar-nav-item.menu-hint-pulse{animation:none;box-shadow:0 0 0 2px rgba(55,138,221,.45);}
+}
+
 /* ── MAIN ──────────────────────────────────────────────── */
 .main-wrap{
   margin-left:var(--sidebar);flex:1;
@@ -2788,7 +2832,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
     <div class="sidebar-nav-item" onclick="showPage('directory',this)" data-page="directory">
       <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="14" height="14" rx="1.6"/><line x1="3" y1="8" x2="17" y2="8"/><line x1="7" y1="11.3" x2="13" y2="11.3"/><line x1="7" y1="14.3" x2="13" y2="14.3"/></svg></span> Справочники
     </div>
-    <div class="sidebar-nav-section">
+    <div class="sidebar-nav-section" data-section="park">
       <span class="sidebar-nav-section-label">Парк</span>
       <div class="sidebar-nav-section-line"></div>
     </div>
@@ -2807,12 +2851,17 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
       <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2c-3 0-5.5 2.4-5.5 5.6C4.5 11.8 10 18 10 18s5.5-6.2 5.5-10.4C15.5 4.4 13 2 10 2z"/><circle cx="10" cy="7.6" r="2"/></svg></span> Навигация
     </div>
 
-    <div class="sidebar-nav-section">
+    <div class="sidebar-nav-section" data-section="sales">
       <span class="sidebar-nav-section-label">Продажи</span>
       <div class="sidebar-nav-section-line"></div>
     </div>
     <div class="sidebar-nav-item" onclick="showPage('crm',this)" data-page="crm">
       <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="4" height="14" rx="1"/><rect x="8" y="3" width="4" height="9" rx="1"/><rect x="13" y="3" width="4" height="11" rx="1"/></svg></span> CRM
+    </div>
+    <!-- «Проверка контрагента» (05.09, Влад: "менеджерам со старшим вкладку... вводят ИНН и им
+         даётся весь расклад через наш сервис") - admin + manager, см. applyRoleUI и cp*_ в JS. -->
+    <div class="sidebar-nav-item" onclick="showPage('counterparty',this)" data-page="counterparty">
+      <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2.5l6 2.3v4.7c0 3.6-2.5 6.6-6 8-3.5-1.4-6-4.4-6-8V4.8z"/><path d="M7.3 10l1.9 1.9 3.6-3.8"/></svg></span> Проверка контрагента
     </div>
     <!-- «Поступления» - переехала сюда из шапки меню (Влад, 30.08: «перенеси в раздел
          продажи», слот наверху занят «Справочниками»); сама страница/её JS не менялись,
@@ -2862,6 +2911,14 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
     </div>
     <div class="sidebar-nav-item" onclick="showPage('debt',this)" data-page="debt">
       <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2.5h10v15l-2.5-1.6L10 17.5l-2.5-1.6L5 17.5z"/><line x1="7.5" y1="6.5" x2="12.5" y2="6.5"/><line x1="7.5" y1="9.5" x2="12.5" y2="9.5"/><line x1="7.5" y1="12.5" x2="10.5" y2="12.5"/></svg></span> ДЗ
+    </div>
+    <!-- Плашка режима кастомизации меню (05.09) - видна только в .menu-customizing, всегда
+         последний ребёнок nav (menuApplyCfg_ переставляет её в конец после любой
+         перестановки пунктов). См. блок "Кастомизация меню" в JS. -->
+    <div class="menu-done-bar" id="menu-done-bar">
+      <span class="muted" id="menu-done-target" style="font-size:10.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+      <button type="button" onclick="menuCfgReset_()" title="Вернуть стандартный порядок и показать все пункты">Сброс</button>
+      <button type="button" class="primary" onclick="menuExitCustomize_()" data-nav-sound>Готово</button>
     </div>
   </nav>
 
@@ -3597,6 +3654,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
           <button class="tab-btn" onclick="showDirTab('legal',this)">Юридические лица</button>
           <button class="tab-btn" onclick="showDirTab('assets',this)">Материальные средства</button>
           <button class="tab-btn" onclick="showDirTab('fleet',this)">Сцепка</button>
+          <button class="tab-btn" onclick="showDirTab('plans',this)">Планы продаж</button>
         </div>
 
         <!-- ── Сотрудники (физические лица) ── -->
@@ -3682,6 +3740,8 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
           <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:12px 0">
             <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:var(--muted);margin-right:auto">
               <input autocomplete="off" type="checkbox" id="legal-show-deleted" onchange="renderDirectory()"> Показать удалённых</label>
+            <input autocomplete="off" type="search" id="legal-search" placeholder="Поиск: название или ИНН" oninput="legalPaint_()"
+              style="flex:1;max-width:360px;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:6px 10px;font-size:12.5px">
             <button onclick="legalOpenForm_(null)" data-nav-sound
               style="background:var(--green);color:#fff;border:none;border-radius:7px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer">+ Добавить юрлицо</button>
           </div>
@@ -3740,6 +3800,48 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
             </table>
           </div>
           <div id="fleet-error" style="display:none;color:var(--red);font-size:12px;margin-top:10px"></div>
+        </div>
+
+        <!-- ── Планы продаж (04.09, Влад: "уходим от Excel-таблиц... инструмент, где я каждый
+             месяц могу выставить план сотрудникам") - заменяет Google-лист "Планы_менеджеров".
+             Источник - manager_plans на сервере (GET/POST /api/manager_plans), см.
+             plans/2026-09-04-sales-plans-tool.md. Строки: менеджеры из этого же справочника
+             (роль "Менеджер") + служебные ключи (внутренние перевозки, ВП парка Рыщанова). ── -->
+        <div id="dir-tab-plans" style="display:none">
+          <div style="display:flex;align-items:center;gap:8px;margin:12px 0;flex-wrap:wrap">
+            <button class="tab-btn" onclick="plansShiftMonth_(-1)" title="Предыдущий месяц">←</button>
+            <div id="plans-month-label" style="font-weight:600;font-size:14px;min-width:150px;text-align:center">—</div>
+            <button class="tab-btn" onclick="plansShiftMonth_(1)" title="Следующий месяц">→</button>
+            <div style="flex:1"></div>
+            <button class="tab-btn" onclick="plansCopyPrev_()">Скопировать из прошлого месяца</button>
+            <button class="tab-btn" id="plans-save-btn" onclick="plansSave_()" style="border-color:var(--green);color:var(--green)">Сохранить</button>
+          </div>
+          <div id="plans-loading" style="color:var(--muted);padding:20px 0;font-size:13px">Загрузка…</div>
+          <div id="plans-wrap" style="display:none">
+            <div class="kpi-grid" style="margin:0 0 12px">
+              <div class="kpi"><div class="kpi-label">План по менеджерам</div><div class="kpi-value" id="plans-kpi-mgr">—</div></div>
+              <div class="kpi"><div class="kpi-label">Внутренние перевозки</div><div class="kpi-value" id="plans-kpi-int">—</div></div>
+              <div class="kpi"><div class="kpi-label">Итого план продаж</div><div class="kpi-value" id="plans-kpi-total">—</div></div>
+              <div class="kpi"><div class="kpi-label">Последнее изменение</div><div class="kpi-value" id="plans-kpi-upd" style="font-size:13px">—</div></div>
+            </div>
+            <div style="overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius-sm)">
+              <table class="tbl">
+                <thead><tr>
+                  <th>Сотрудник</th>
+                  <th>Роль</th>
+                  <th class="num" style="width:220px">План, ₽</th>
+                </tr></thead>
+                <tbody id="plans-body"></tbody>
+              </table>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap">
+              <input autocomplete="off" id="plans-add-name" type="text" maxlength="60" placeholder="Добавить строку: фамилия или служебный ключ"
+                style="flex:1;min-width:240px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:12.5px;outline:none">
+              <button class="tab-btn" onclick="plansAddRow_()">Добавить</button>
+            </div>
+            <div style="font-size:11.5px;color:var(--muted);margin-top:8px">Ключ строки - фамилия (первое слово ФИО в 1С). Лист «Планы_менеджеров» в Google теперь только зеркало, правки там не учитываются.</div>
+          </div>
+          <div id="plans-error" style="display:none;color:var(--red);font-size:12px;margin-top:10px"></div>
         </div>
       </div>
     </div>
@@ -3859,6 +3961,17 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
         <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Полное название</label>
           <input autocomplete="off" id="legal-fullname" type="text" maxlength="300" placeholder="ООО «Бульдог»"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        <!-- Название в 1С (05.09, Влад: "нужно сделать колонку с названием 1С и сделать
+             взаимосвязи, чтобы это всё на сайте друг друга понимало") - именно по нему
+             дебиторка и отчёты 1С находят эту карточку. У импортированных из выгрузки
+             заполнено автоматически; у заведённых вручную (имя приходит из ЕГРЮЛ в другом
+             формате) вписывается здесь - список подсказок = контрагенты ДЗ без пары. -->
+        <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Название в 1С</label>
+          <input autocomplete="off" id="legal-name-1c" type="text" maxlength="300" list="legal-1c-names"
+            placeholder="как контрагент называется в 1С - по нему связывается дебиторка"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none">
+          <datalist id="legal-1c-names"></datalist>
+          <div id="legal-name-1c-hint" class="muted" style="font-size:11px;margin-top:4px;min-height:14px"></div></div>
         <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Юридический адрес</label>
           <input autocomplete="off" id="legal-address" type="text" maxlength="500" placeholder="автозаполнится по ИНН"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
@@ -3874,6 +3987,28 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
         <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Должность</label>
           <input autocomplete="off" id="legal-director-post" type="text" maxlength="200"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+      </div>
+      <!-- Светофор риска (02.09, Влад: "хочу найти бесплатный сервис, который будет давать
+           светофор по компаниям") - Checko.ru (бесплатный тариф, 100 запросов/день), формула
+           СВОЯ и прозрачная (см. checkoComputeLight_ на сервере) из официальных реестров:
+           ЕГРЮЛ/банкротство/дисквалификация/санкции/массовый адрес. Не автоматически - по
+           кнопке (квота общая на весь дашборд, не бьём по API при каждом открытии карточки).
+           Только для существующей записи - у новой ещё нет id, сохранять некуда. -->
+      <div class="asset-form-section">Проверка контрагента</div>
+      <div class="asset-form-grid">
+        <div class="asset-form-full" id="legal-risk-wrap">
+          <button type="button" id="legal-risk-btn" onclick="legalCheckRisk_()" data-nav-sound
+            style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:8px 14px;font-size:12.5px;cursor:pointer">
+            Проверить контрагента</button>
+          <div id="legal-risk-result" style="margin-top:10px"></div>
+        </div>
+      </div>
+      <!-- Связанные данные 1С (05.09, Влад: "давай свяжи") - что найдено по полю
+           "Название в 1С": заказы, поступления, текущий долг. Скрыто, если поле не
+           заполнено (тогда под полем горит жёлтая подсказка про отсутствие связи). -->
+      <div class="asset-form-section" id="legal-linked-section" style="display:none">Связанные данные 1С</div>
+      <div class="asset-form-grid" id="legal-linked-grid" style="display:none">
+        <div class="asset-form-full" id="legal-linked-body"></div>
       </div>
       <!-- Банковские реквизиты (31.08, Влад: "добавь возможность добавить банковские
            реквизиты") - вводятся вручную, не автозаполняются (лукап по БИК - отдельная
@@ -4380,12 +4515,20 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
         </div>
         <div class="kpi-grid" id="debt-kpi">
           <div class="kpi" id="debt-kpi-total"></div>
+          <!-- ДЗ по дням (05.09, Влад: "сейчас какая-то каша... идти в сторону общей
+               задолженности без информации по КА") - было 7 равнозначных линий с точками на
+               каждом дне и легендой в две строки, причём "Общая ДЗ" = сумма остальных шести,
+               а состав по юрлицам и так есть цифрами в соседней карточке "Общая ДЗ".
+               Осталась ОДНА линия общей суммы (вариант A дизайн-штурма): сверху сумма и
+               изменение за период, внизу коридор минимум/пик и чипы юрлиц. Мегакран и
+               Стройтранс по умолчанию ВЫКЛЮЧЕНЫ (Влад, 05.09) - их долг мал и зашумляет
+               кривую; выбор личный, хранится в localStorage. -->
           <div class="kpi" id="debt-kpi-chart">
-            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">
               <div class="kpi-label" style="margin-bottom:0">ДЗ по дням</div>
               <div class="muted" style="font-size:11px;white-space:nowrap">Должников: <b id="debt-kpi-debtor-count" style="color:var(--text)">—</b></div>
             </div>
-            <div class="chart-wrap" style="height:150px"><canvas id="chart-debt-history"></canvas></div>
+            <div class="chart-wrap" style="height:190px;margin-top:8px"><canvas id="chart-debt-history"></canvas></div>
           </div>
           <div class="kpi" id="debt-kpi-overdue"></div>
           <div class="kpi" id="debt-kpi-status"></div>
@@ -4409,6 +4552,15 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
         <div class="card" style="margin-top:16px;margin-bottom:16px">
           <div class="sec-header">
             <div class="sec-title">Должники</div>
+            <!-- Светофор риска по контрагентам (04.09, Влад: "перед названием КА лампочку...
+                 начнём с всех текущих 0-30 дней") - точки в строках берутся из кэша юрлиц
+                 (Справочники, тот же Checko), кнопка запускает партию проверок на сервере
+                 (/api/debt/risk_check_batch), показывается только admin - см. renderDebt(). -->
+            <div id="debt-risk-tools" style="display:none;align-items:center;gap:8px;margin-left:auto;margin-right:10px">
+              <span id="debt-risk-status" class="muted" style="font-size:11px"></span>
+              <button type="button" id="debt-risk-batch-btn" onclick="debtRunRiskBatch_()" data-nav-sound
+                style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;cursor:pointer;white-space:nowrap" title="Тот же приоритетный прогон, что cron каждое утро в 06:10 МСК">Проверить сейчас</button>
+            </div>
             <div class="debt-mgr-filter" style="position:relative">
               <button type="button" id="debt-mgr-filter-btn" onclick="toggleDebtMgrDropdown(event)" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;cursor:pointer;white-space:nowrap">Все менеджеры ▾</button>
               <div id="debt-mgr-filter-panel" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px;z-index:50;min-width:220px;max-height:280px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.4)"></div>
@@ -4765,6 +4917,49 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
     </div>
 
     <!-- ═══ КЛИЕНТЫ ══════════════════════════════════════════════ -->
+    <!-- «Проверка контрагента» (05.09, Влад: "менеджерам со старшим вкладку... вводят ИНН и им
+         даётся весь расклад через наш сервис; сохраняется история запросов") - тот же Checko и
+         светофор, что в Справочниках/ДЗ (сервер /api/counterparty/check|history). Логика - cp*_
+         функции в JS. Доступ: admin + manager (applyRoleUI). Повтор ИНН за 7 дней - из кэша. -->
+    <div id="page-counterparty" class="page">
+      <div class="card" style="margin-bottom:16px">
+        <div class="sec-header">
+          <div class="sec-title">Проверка по ИНН</div>
+          <div class="muted" style="font-size:11px">ЕГРЮЛ · Федресурс · ФНС через Checko · повтор за 7 дней - из кэша</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
+          <input autocomplete="off" id="cp-inn" type="text" inputmode="numeric" maxlength="12" placeholder="ИНН - 10 или 12 цифр"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();cpCheck_(false);}"
+            style="width:240px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-size:14px;outline:none;font-family:'JetBrains Mono',ui-monospace,monospace;letter-spacing:.04em">
+          <button type="button" id="cp-check-btn" onclick="cpCheck_(false)" data-nav-sound
+            style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer">Проверить</button>
+          <span id="cp-status" class="muted" style="font-size:12px"></span>
+        </div>
+        <div id="cp-result" style="margin-top:14px"></div>
+      </div>
+      <div class="card">
+        <div class="sec-header">
+          <div class="sec-title">История запросов</div>
+          <!-- Чистка кэша (05.09, Влад: "для админа сделай возможность чистить кэш") - только
+               admin, см. cpInit_. "Очистить кэш" не трогает историю: записи остаются, но
+               перестают отдаваться как готовый ответ, следующая проверка пойдёт к Checko. -->
+          <div id="cp-admin-tools" style="display:none;align-items:center;gap:6px;margin-left:auto">
+            <button type="button" onclick="cpCacheClear_('cache')" title="Следующая проверка любого ИНН пойдёт к Checko заново (расходует квоту)"
+              style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:5px 10px;font-size:11.5px;cursor:pointer">Очистить кэш</button>
+            <button type="button" onclick="cpCacheClear_('history')" title="Удалить записи истории проверок"
+              style="background:transparent;border:1px solid rgba(226,75,74,.4);color:var(--red);border-radius:7px;padding:5px 10px;font-size:11.5px;cursor:pointer">Очистить историю</button>
+          </div>
+          <div class="muted" style="font-size:11px">клик по строке - открыть результат</div>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="tbl">
+            <thead><tr><th>Когда</th><th>ИНН</th><th>Компания</th><th>Светофор</th><th>Кто</th></tr></thead>
+            <tbody id="cp-history-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <div id="page-clients" class="page">
       <div id="clients-loading" style="color:var(--muted);padding:16px">Загрузка клиентской аналитики...</div>
       <div id="clients-body" style="display:none">
@@ -6124,6 +6319,7 @@ const PAGE_TITLES = {
   managers: 'Менеджеры',
   dynamics: 'Динамика',
   clients: 'База клиентов',
+  counterparty: 'Проверка контрагента',
   crm: 'CRM',
   sales: 'Продажи - обзор',
   'sales-mgr': 'Менеджеры - заказы 1С',
@@ -6382,6 +6578,14 @@ function applyData(patch, opts) {
   if (hash !== null) lastAppliedHash_ = hash;
   D = isFirstLoad ? patch : Object.assign(D, patch);
   checkStaleFallbacks_(); // см. определение выше - независимо от skipIfUnchanged, дёшево
+  // Список периодов - на каждый applyData, не только на первый заход (2026-09-04, Влад:
+  // "куда август делся?", часть 3) - раньше пересчитывался ТОЛЬКО при первой навигации на
+  // страницу с выбором периода за всю жизнь вкладки; "Обновить данные" без ухода со
+  // страницы новый D.periods получал, но на select не переносил. Дёшево - без сети, просто
+  // читает уже пришедший D.periods (см. loadAvailablePeriods()). Только admin - у
+  // manager/logist/mechanic страниц с выбором периода в сайдбаре нет вообще, а сам action
+  // на сервере для них запрещён (лишний отклонённый запрос на каждое обновление).
+  if (D.role === 'admin' && typeof loadAvailablePeriods === 'function') loadAvailablePeriods();
   if (unchanged && opts.skipIfUnchanged) return false; // ничего не поменялось - DOM не трогаем
   render();
   return true;
@@ -6639,6 +6843,13 @@ function isRyschanowEntry_(entry) {
 // (renderMyPageCommercialHead_), тот же принцип, что у Рыщанова/Васина выше (не флейвор
 // renderMyPageManager). Зеркало commercialHeadTeam_ на бэкенде.
 var COMMERCIAL_HEAD_SUR_FRONT_ = ['ахтамова', 'гусейнова'];
+// CRM для менеджеров - поимённо (Влад, 04.09: «открой доступ к CRM Филипчук пока только»).
+// Тот же список продублирован на сервере (CRM_MANAGER_SURNAMES в api/server.js) - фронт
+// только прячет пункт меню, право решает сервер. Расширять - в ОБЕИХ точках.
+// 04.09, позже тем же днём (Влад: «всем менеджерам открой CRM») - правило зеркалит сервер
+// (isCrmAllowed_ в api/server.js): ЛЮБОЙ менеджер - да; список фамилий ниже оставлен
+// пустым как точечное расширение для других ролей (логист и т.п.), если понадобится.
+var CRM_MANAGER_SUR_FRONT_ = [];
 function isCommercialHeadEntry_(entry) {
   return !!entry && entry.type === 'manager' && COMMERCIAL_HEAD_SUR_FRONT_.indexOf(entry.name.trim().split(' ')[0].toLowerCase()) >= 0;
 }
@@ -8092,6 +8303,9 @@ function renderMyPageManager(el, current, selectorHtml, d) {
       }).join('')+
     '</div>';
 
+    // Светофор риска (04.09) - карта общая с главной ДЗ, грузится один раз, перерисовка
+    // этой же страницы, когда придёт.
+    ensureDebtRiskMap_(renderMyPage);
     var dFiltered = allDebt.filter(function(c){
       if (mgrDebtBuckets.size && !Array.from(mgrDebtBuckets).some(function(bk){ return debtInBucket_(c.daysOverdue, bk); })) return false;
       return true;
@@ -8109,7 +8323,7 @@ function renderMyPageManager(el, current, selectorHtml, d) {
           var isOpen = mgrDebtOpenRow === c.contragent;
           var contragentEsc = c.contragent.replace(/'/g,"\\'");
           var row = '<tr class="debt-row-toggle" onclick="toggleMgrDebtDetail(\''+contragentEsc+'\')" style="cursor:pointer">'+
-            '<td><span class="muted" style="display:inline-block;width:14px">'+(isOpen?'▾':'▸')+'</span><b>'+c.contragent+'</b>'+byOrgLine+'</td>'+
+            '<td><span class="muted" style="display:inline-block;width:14px">'+(isOpen?'▾':'▸')+'</span>'+debtRiskDotHtml_(c.contragent)+'<b>'+c.contragent+'</b>'+byOrgLine+'</td>'+
             '<td class="num"><b>'+fmt(c.balance)+'</b></td>'+
             '<td class="num '+ageCls(c.daysOverdue)+'">'+c.daysOverdue+'</td>'+
             '<td class="muted">'+(c.status||'—')+'</td>'+
@@ -8245,7 +8459,7 @@ function renderMyPageManager(el, current, selectorHtml, d) {
         '</tr></thead><tbody>'+
           (byCust.length
             ? byCust.map(function(c) {
-                return '<tr><td>'+c.customer+'</td>'+
+                return '<tr><td>'+cpLightHtml_(c.customer)+c.customer+'</td>'+
                   '<td class="muted">'+(c.orgs || '—')+'</td>'+
                   '<td class="num">'+fmt(c.amount)+'</td>'+
                   '<td class="num muted">'+c.count+'</td></tr>';
@@ -8716,7 +8930,7 @@ function renderCommercialHeadReceiptsBlock_(cfg) {
               return '<tr>'+
                 (showDate ? '<td class="muted">'+receiptsShortDate_(t.date)+'</td>' : '')+
                 '<td class="muted">'+(t.manager||'—')+'</td>'+
-                '<td>'+t.customer+'</td>'+
+                '<td>'+cpLightHtml_(t.customer)+t.customer+'</td>'+
                 '<td class="muted">'+(t.orgName || '—')+'</td>'+
                 '<td class="muted">'+(t.docNumber || '—')+'</td>'+
                 '<td class="num">'+fmt(t.amount)+'</td>'+
@@ -9701,6 +9915,7 @@ function applyRoleUI() {
     var mechActiveEl_ = document.querySelector('.page.active');
     var mechActiveId_ = mechActiveEl_ ? mechActiveEl_.id.replace(/^page-/, '') : null;
     if (!mechActiveId_ || mechAllowed_.indexOf(mechActiveId_) < 0) showPage('logistics-plan');
+    applyMenuConfig_();   // кастом меню поверх ролевого фильтра (05.09), см. блок "Кастомизация меню"
     updateViewAsButton_();
     return;
   }
@@ -9728,6 +9943,12 @@ function applyRoleUI() {
     if (!isColumnHeadViewer) allowedPages_.push('order-plan');
     if (isRyschanowViewer) allowedPages_.push('ryschanow-salary');
     if (isCommercialHeadViewer) allowedPages_.push('commercial-head-salary', 'commercial-head-debt');
+    var isManagerViewer_ = previewing ? !!(viewAsEntry && viewAsEntry.type === 'manager') : (D.role === 'manager');
+    if (isManagerViewer_ || CRM_MANAGER_SUR_FRONT_.indexOf(curPersonSur) >= 0) allowedPages_.push('crm');
+    // "Проверка контрагента" (05.09, Влад: "менеджерам со старшим") - всем менеджерам, включая
+    // руководителей коммерческих групп (у них та же роль manager); сервер тоже пускает только
+    // admin/manager (requireRole_ на /api/counterparty/*).
+    if (isManagerViewer_) allowedPages_.push('counterparty');
     document.querySelectorAll('.sidebar-nav-item').forEach(function(item) {
       const page = item.getAttribute('data-page');
       item.style.display = allowedPages_.indexOf(page) >= 0 ? '' : 'none';
@@ -9755,6 +9976,7 @@ function applyRoleUI() {
     });
     document.querySelectorAll('.sidebar-nav-section').forEach(function(s){ s.style.display = ''; });
   }
+  applyMenuConfig_();   // кастом меню поверх ролевого фильтра (05.09), см. блок "Кастомизация меню"
   updateViewAsButton_();
 }
 
@@ -10575,7 +10797,7 @@ function renderAccessLog() {
   }
   document.getElementById('access-log-body').innerHTML = log.map(function(r) {
     return '<tr><td>'+(r.name||r.email||'—')+'</td><td class="muted">'+(r.role||'—')+'</td>'+
-      '<td class="num"><b>'+(r.count||0)+'</b></td>'+
+      '<td class="num"><b>'+(r.count != null ? r.count : (r.visits||0))+'</b></td>'+ // count - контракт Apps Script, visits - имя поля в таблице сервера (04.09, после переезда main_payload)
       '<td class="muted">'+fmtVisit(r.first_visit)+'</td>'+
       '<td class="muted">'+fmtVisit(r.last_visit)+'</td></tr>';
   }).join('');
@@ -11555,12 +11777,200 @@ function renderDirectory() {
 // "Поступления" (showReceiptsTab) - все уже отрисованы после renderDirectory(),
 // переключение вкладки - просто показ/скрытие, без повторного похода на сервер.
 function showDirTab(tab, el) {
-  ['people', 'legal', 'assets', 'fleet'].forEach(function(t) {
+  ['people', 'legal', 'assets', 'fleet', 'plans'].forEach(function(t) {
     var panel = document.getElementById('dir-tab-' + t);
     if (panel) panel.style.display = (t === tab) ? '' : 'none';
   });
   document.querySelectorAll('#dir-tab-bar .tab-btn').forEach(function(b) { b.classList.remove('active'); });
   if (el) el.classList.add('active');
+  // "Планы продаж" - свой источник (manager_plans на сервере, не /sprav/state), грузится
+  // лениво при первом открытии вкладки, дальше - только при смене месяца.
+  if (tab === 'plans' && !plansLoadedOnce_) plansTabLoad_(plansMonth_ || plansCurMonthKey_());
+}
+
+// ── Планы продаж (04.09, plans/2026-09-04-sales-plans-tool.md) ──────────────────────────
+// Влад: "инструмент, где я каждый месяц могу выставить план сотрудникам... уходим от
+// Excel-таблиц". Источник истины - manager_plans на сервере (GET /api/manager_plans?month=,
+// POST /api/manager_plans/set), Google-лист "Планы_менеджеров" с этого дня - read-only
+// зеркало. Ключ строки - фамилия в нижнем регистре (первое слово ФИО): тот же ключ, что
+// joinManagerPlans строит из by_manager[].name и по которому план ложится на "По
+// менеджерам"/Панель/личные страницы. Служебные ключи не про людей - см. PLANS_SPECIAL_.
+var plansMonth_ = null;         // 'YYYY-MM' открытого месяца
+var plansRows_ = [];            // [{key, manager, label, role, plan, fromServer}]
+var plansMeta_ = null;          // {updated_by, updated_at} самой свежей строки месяца
+var plansLoadedOnce_ = false;
+var plansDirty_ = false;
+var PLANS_SPECIAL_ = {
+  'внутренние': { manager: 'Внутренние', label: 'Внутренние перевозки', role: 'логисты' },
+  'рыщанов_вп': { manager: 'рыщанов_вп', label: 'ВП своего парка (план Рыщанова)', role: 'служебный' },
+};
+function plansCurMonthKey_() {
+  var d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+function plansShiftKey_(key, delta) {
+  var p = key.split('-').map(Number);
+  var d = new Date(p[0], p[1] - 1 + delta, 1);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+function plansKeyOf_(name) { return String(name || '').trim().split(' ')[0].toLowerCase(); }
+function plansFmt_(n) { return Math.round(n || 0).toLocaleString('ru-RU'); }
+function plansParse_(v) { return parseInt(String(v || '').replace(/\D/g, ''), 10) || 0; }
+
+// Ростер строк месяца: менеджеры из Справочников (роль "Менеджер", не удалённые) + все
+// строки, которые уже есть на сервере за этот месяц (в т.ч. старые ключи вроде Цуцурин/
+// Прус-роскошный - не теряем чужие данные) + служебные ключи всегда.
+function plansBuildRows_(serverPlans) {
+  var byKey = {};
+  (spravPeople_ || []).forEach(function(p) {
+    if (p.is_deleted || (p.roles || []).indexOf('manager') < 0) return;
+    var key = plansKeyOf_(p.full_name);
+    if (!key || byKey[key]) return;
+    byKey[key] = { key: key, manager: p.full_name.trim().split(' ')[0], label: p.full_name, role: 'менеджер', plan: 0, fromServer: false };
+  });
+  (serverPlans || []).forEach(function(r) {
+    var key = plansKeyOf_(r.manager);
+    if (!key) return;
+    if (!byKey[key]) {
+      var sp = PLANS_SPECIAL_[key];
+      byKey[key] = { key: key, manager: sp ? sp.manager : r.manager, label: sp ? sp.label : r.manager, role: sp ? sp.role : '—', plan: 0, fromServer: true };
+    }
+    byKey[key].plan = Number(r.plan) || 0;
+    byKey[key].fromServer = true;
+  });
+  Object.keys(PLANS_SPECIAL_).forEach(function(key) {
+    if (!byKey[key]) byKey[key] = { key: key, manager: PLANS_SPECIAL_[key].manager, label: PLANS_SPECIAL_[key].label, role: PLANS_SPECIAL_[key].role, plan: 0, fromServer: false };
+  });
+  var rows = Object.values(byKey);
+  rows.sort(function(a, b) {
+    var sa = PLANS_SPECIAL_[a.key] ? 1 : 0, sb = PLANS_SPECIAL_[b.key] ? 1 : 0;
+    if (sa !== sb) return sa - sb; // служебные - в конец
+    return a.label.localeCompare(b.label, 'ru');
+  });
+  return rows;
+}
+
+function plansTabLoad_(month) {
+  var loading = document.getElementById('plans-loading'), wrap = document.getElementById('plans-wrap'), err = document.getElementById('plans-error');
+  if (!loading) return;
+  plansMonth_ = month;
+  plansDirty_ = false;
+  loading.style.display = ''; loading.textContent = 'Загрузка…'; wrap.style.display = 'none'; err.style.display = 'none';
+  var label = document.getElementById('plans-month-label');
+  if (label) label.textContent = formatMonthLabel(month);
+  // Ростер менеджеров нужен из /sprav/state - если вкладку открыли раньше, чем
+  // renderDirectory() успел его загрузить, дотягиваем сами (без дублирования запроса, когда он уже есть).
+  var needSprav = !(spravPeople_ && spravPeople_.length);
+  Promise.all([
+    fetchFromYardApi_('/manager_plans', { month: month }),
+    needSprav ? fetchFromYardApi_('/sprav/state', {}) : Promise.resolve(null),
+  ]).then(function(res) {
+    var r = res[0], s = res[1];
+    if (s && s.ok && s.data && s.data.people) spravPeople_ = s.data.people;
+    if (!r.ok || !r.data || r.data.error) throw new Error((r.data && r.data.error) || 'ошибка сервера');
+    plansRows_ = plansBuildRows_(r.data.plans);
+    plansMeta_ = (r.data.plans || []).reduce(function(m, p) {
+      return (!m || (p.updated_at || '') > (m.updated_at || '')) ? p : m;
+    }, null);
+    plansLoadedOnce_ = true;
+    loading.style.display = 'none'; wrap.style.display = '';
+    plansPaint_();
+  }).catch(function(e) {
+    loading.style.display = 'none';
+    err.style.display = ''; err.textContent = 'Не удалось загрузить планы: ' + e.message;
+  });
+}
+
+function plansPaint_() {
+  var body = document.getElementById('plans-body');
+  if (!body) return;
+  body.innerHTML = plansRows_.map(function(r, i) {
+    var special = !!PLANS_SPECIAL_[r.key];
+    return '<tr' + (special ? ' style="background:rgba(var(--ink),.03)"' : '') + '>' +
+      '<td><b>' + pageEsc_(r.label) + '</b>' + (r.key !== plansKeyOf_(r.label) && !special ? '' : '') + '</td>' +
+      '<td class="muted">' + pageEsc_(r.role) + '</td>' +
+      '<td class="num"><input autocomplete="off" inputmode="numeric" data-plan-idx="' + i + '" value="' + plansFmt_(r.plan) + '" ' +
+        'oninput="plansOnInput_(this)" onblur="this.value=plansFmt_(plansParse_(this.value))" ' +
+        'style="width:170px;text-align:right;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:6px 10px;color:var(--text);font-size:13px;font-variant-numeric:tabular-nums;outline:none"></td>' +
+    '</tr>';
+  }).join('');
+  plansPaintTotals_();
+}
+function plansOnInput_(inp) {
+  var idx = parseInt(inp.getAttribute('data-plan-idx'), 10);
+  if (!plansRows_[idx]) return;
+  plansRows_[idx].plan = plansParse_(inp.value);
+  plansDirty_ = true;
+  plansPaintTotals_();
+}
+function plansPaintTotals_() {
+  var mgr = 0, internal = 0;
+  plansRows_.forEach(function(r) {
+    if (r.key === 'внутренние') internal += r.plan;
+    else if (!PLANS_SPECIAL_[r.key]) mgr += r.plan;
+  });
+  var set = function(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
+  set('plans-kpi-mgr', plansFmt_(mgr) + ' ₽');
+  set('plans-kpi-int', plansFmt_(internal) + ' ₽');
+  set('plans-kpi-total', plansFmt_(mgr + internal) + ' ₽');
+  set('plans-kpi-upd', plansMeta_ && plansMeta_.updated_at
+    ? plansMeta_.updated_at.slice(0, 16) + (plansMeta_.updated_by ? ' · ' + plansMeta_.updated_by.split('@')[0] : '')
+    : 'ещё не сохранялся');
+  var saveBtn = document.getElementById('plans-save-btn');
+  if (saveBtn) saveBtn.textContent = plansDirty_ ? 'Сохранить *' : 'Сохранить';
+}
+function plansShiftMonth_(delta) {
+  if (plansDirty_ && !confirm('Есть несохранённые изменения плана - уйти без сохранения?')) return;
+  plansTabLoad_(plansShiftKey_(plansMonth_ || plansCurMonthKey_(), delta));
+}
+function plansAddRow_() {
+  var inp = document.getElementById('plans-add-name');
+  var name = (inp && inp.value || '').trim();
+  var key = plansKeyOf_(name);
+  if (!key) return;
+  if (plansRows_.some(function(r) { return r.key === key; })) { p2Toast('Строка «' + name + '» уже есть', 'amber'); return; }
+  var sp = PLANS_SPECIAL_[key];
+  plansRows_.push({ key: key, manager: sp ? sp.manager : name.split(' ')[0], label: sp ? sp.label : name, role: sp ? sp.role : '—', plan: 0, fromServer: false });
+  inp.value = '';
+  plansDirty_ = true;
+  plansPaint_();
+}
+// Копия прошлого месяца - только в форму (не на сервер), сохранить нужно явно.
+function plansCopyPrev_() {
+  var prev = plansShiftKey_(plansMonth_ || plansCurMonthKey_(), -1);
+  fetchFromYardApi_('/manager_plans', { month: prev }).then(function(r) {
+    if (!r.ok || !r.data || !r.data.plans || !r.data.plans.length) { p2Toast('За ' + formatMonthLabel(prev) + ' плана нет', 'amber'); return; }
+    var byKey = {};
+    plansRows_.forEach(function(row) { byKey[row.key] = row; });
+    r.data.plans.forEach(function(p) {
+      var key = plansKeyOf_(p.manager);
+      if (byKey[key]) byKey[key].plan = Number(p.plan) || 0;
+      else {
+        var sp = PLANS_SPECIAL_[key];
+        plansRows_.push({ key: key, manager: sp ? sp.manager : p.manager, label: sp ? sp.label : p.manager, role: sp ? sp.role : '—', plan: Number(p.plan) || 0, fromServer: false });
+      }
+    });
+    plansDirty_ = true;
+    plansPaint_();
+    p2Toast('Скопировано из ' + formatMonthLabel(prev) + ' - проверьте и нажмите «Сохранить»', 'amber');
+  }).catch(function(e) { p2ToastErr('Не удалось прочитать прошлый месяц: ' + e.message); });
+}
+function plansSave_() {
+  if (!plansMonth_) return;
+  var btn = document.getElementById('plans-save-btn');
+  if (btn) btn.disabled = true;
+  var plans = plansRows_.map(function(r) { return { manager: r.manager, plan: r.plan }; });
+  postToYardApiWithBody_('/manager_plans/set', { month: plansMonth_, plans: plans }).then(function(r) {
+    if (!r.ok || !r.data || r.data.error) throw new Error((r.data && r.data.error) || 'ошибка сервера');
+    plansDirty_ = false;
+    p2Toast('План на ' + formatMonthLabel(plansMonth_) + ' сохранён (' + r.data.saved + ' строк)', 'green');
+    // Перечитать месяц (updated_by/updated_at) и освежить D - план сразу виден на Панели,
+    // "По менеджерам" и личных страницах без ручного "Обновить данные".
+    plansTabLoad_(plansMonth_);
+    if (typeof loadData === 'function') loadData();
+  }).catch(function(e) {
+    p2ToastErr('Не удалось сохранить план: ' + e.message);
+  }).finally(function() { if (btn) btn.disabled = false; });
 }
 
 // Открытая (valid_to===null) запись данного kind/resource_key - "где ресурс СЕЙЧАС".
@@ -11899,16 +12309,72 @@ var legalEditSnapshot_ = null;
 // хранится тут между открытием карточки и сохранением, чтобы не терялось при автозаполнении.
 var legalLastEgrulStatus_ = null;
 
+// Светофор риска - общие для списка (точка) и карточки (dot+подпись+причины).
+function legalRiskColor_(light) {
+  return (light === 'red' || light === 'bankrupt') ? 'var(--red)'
+    : (light === 'yellow' ? 'var(--amber)' : (light === 'green' ? 'var(--green)' : 'var(--muted)'));
+}
+function legalRiskLabel_(light) {
+  return light === 'bankrupt' ? 'Банкрот' : (light === 'red' ? 'Красный' : (light === 'yellow' ? 'Жёлтый' : (light === 'green' ? 'Зелёный' : String(light || ''))));
+}
+// Маркер светофора - цветная точка; для банкрота - череп (Влад, 05.09: "вместо красного
+// круга череп ставить банкроты"). Череп - Tabler "skull" инлайн-SVG в красном, не emoji
+// (ГОСТ: emoji в интерфейсе нет; размер/цвет - как у точки). Одна функция на все места:
+// список юрлиц, драйвер, таблицы ДЗ, карточка контрагента.
+// marker - "!" / "!!!" с сервера (risk_marker: банкрот или недоимка >= 1 млн -> "!",
+// недоимка >= 10 млн -> "!!!"; Влад, 05.09: "вместо черепа красный восклицательный знак").
+// Глиф текстом (JetBrains Mono, жирный, красный), размер - от размера точки, чтобы стоять в
+// той же строке. Череп убран.
+function legalRiskMarkHtml_(light, size, style, marker) {
+  style = style || '';
+  if (!marker && light === 'bankrupt') marker = '!';
+  if (marker === '!' || marker === '!!!') {
+    return '<span style="display:inline-block;line-height:1;font-family:\'JetBrains Mono\',ui-monospace,monospace;font-weight:800;font-size:' +
+      Math.round(size * 1.6) + 'px;color:var(--red);vertical-align:middle;letter-spacing:-0.08em;flex:none;' + style + '" aria-label="Внимание">' + marker + '</span>';
+  }
+  return '<span style="display:inline-block;width:' + size + 'px;height:' + size + 'px;border-radius:50%;background:' +
+    legalRiskColor_(light) + ';vertical-align:middle;flex:none;' + style + '"></span>';
+}
+// Текст для title-подсказки над точкой в списке (04.09, Влад: "можно при наведении более
+// подробную информацию") - причины из risk_reasons (JSON-строка из БД), не только цвет.
+function legalRiskTooltip_(le) {
+  var reasons = [];
+  if (le.risk_reasons) { try { reasons = JSON.parse(le.risk_reasons) || []; } catch (e) {} }
+  var head = 'Проверка контрагента: ' + legalRiskLabel_(le.risk_light);
+  if (le.risk_checked_at) head += ' (' + le.risk_checked_at + ')';
+  if (!reasons.length) return head + '\nРисков по официальным реестрам не найдено';
+  return head + '\n' + reasons.map(function(r) { return '— ' + r; }).join('\n');
+}
 function legalPaint_() {
   var body = document.getElementById('legal-body');
   if (!body || !spravLegalEntities_) return;
   var showDeleted = document.getElementById('legal-show-deleted').checked;
-  var rows = spravLegalEntities_.filter(function(le) { return showDeleted || !le.is_deleted; });
-  if (!rows.length) {
+  var all = spravLegalEntities_.filter(function(le) { return showDeleted || !le.is_deleted; });
+  // Контрагенты из 1С (04.09, импорт ~17 тыс. юрлиц/ИП, is_own = 0) - в DOM только по поиску
+  // (название/полное/ИНН, от 2 символов, не больше 200 строк), иначе вкладка встаёт.
+  // СВОИ (is_own = 1) - всегда, как и раньше: их единицы.
+  var searchEl = document.getElementById('legal-search');
+  var q = ((searchEl && searchEl.value) || '').trim().toLowerCase();
+  var cpCount = all.filter(function(le) { return !le.is_own; }).length;
+  var rows, note = '';
+  if (q.length >= 2) {
+    var hit = all.filter(function(le) {
+      return String(le.name || '').toLowerCase().indexOf(q) >= 0 || String(le.full_name || '').toLowerCase().indexOf(q) >= 0 ||
+        String(le.name_1c || '').toLowerCase().indexOf(q) >= 0 || String(le.inn || '').indexOf(q) >= 0;
+    });
+    rows = hit.slice(0, 200);
+    if (hit.length > 200) note = 'Показаны первые 200 из ' + hit.length + ' — уточните запрос';
+    else if (!hit.length) note = 'Ничего не найдено';
+  } else {
+    rows = all.filter(function(le) { return le.is_own; });
+    if (cpCount) note = 'Контрагентов из 1С: ' + cpCount.toLocaleString('ru-RU') + ' — введите название или ИНН, чтобы найти';
+  }
+  if (!rows.length && !note) {
     body.innerHTML = '<tr><td colspan="4" class="muted" style="padding:14px">Юрлиц пока нет — добавьте первое</td></tr>';
     return;
   }
-  body.innerHTML = rows.map(function(le) {
+  var noteRow = note ? '<tr><td colspan="4" class="muted" style="padding:10px 14px;font-size:12px">' + note + '</td></tr>' : '';
+  body.innerHTML = noteRow + rows.map(function(le) {
     var idEsc = pageEscAttr_(le.id);
     var actions = le.is_deleted
       ? '<button onclick="legalRestore_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);' +
@@ -11917,8 +12383,16 @@ function legalPaint_() {
         'color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Править</button>';
     var ownBadge = le.is_own
       ? ' <span style="background:rgba(94,196,124,.15);color:var(--green);border-radius:5px;padding:1px 6px;font-size:10px;font-weight:600;vertical-align:middle">СВОЯ</span>' : '';
+    // Точка светофора в списке (02.09, Влад: "светофор по компаниям", множественное число -
+    // видеть все сразу, не только по одной в карточке). Нет проверки - вообще без точки, не
+    // серая "неизвестно"-точка (см. правило проекта: цвет только по делу, не для decoration).
+    // При наведении - не только цвет, но и САМИ причины (04.09, Влад: "можно при наведении
+    // более подробную информацию") - обычный title, переносы строк браузер показывает как есть.
+    var riskDot = le.risk_light
+      ? ' <span title="' + pageEscAttr_(legalRiskTooltip_(le)) + '" style="display:inline-block;vertical-align:middle;margin-left:2px">' +
+        legalRiskMarkHtml_(le.risk_light, 8, '', le.risk_marker) + '</span>' : '';
     return '<tr' + (le.is_deleted ? spravDeletedRowStyle_() : '') + '>' +
-      '<td><b>' + pageEsc_(le.name) + '</b>' + ownBadge + (le.is_deleted ? ' <span class="muted" style="font-size:11px">(удалено)</span>' : '') + '</td>' +
+      '<td><b>' + pageEsc_(le.name) + '</b>' + ownBadge + riskDot + (le.inn ? ' <span class="muted" style="font-size:11px">ИНН ' + pageEsc_(le.inn) + '</span>' : '') + (le.is_deleted ? ' <span class="muted" style="font-size:11px">(удалено)</span>' : '') + '</td>' +
       '<td class="muted">' + (le.full_name ? pageEsc_(le.full_name) : '—') + '</td>' +
       '<td class="muted">' + (le.notes ? pageEsc_(le.notes) : '—') + '</td>' +
       '<td class="num">' + actions + '</td>' +
@@ -11933,6 +12407,10 @@ function legalOpenForm_(id) {
   document.getElementById('legal-inn').value = le ? (le.inn || '') : '';
   document.getElementById('legal-name').value = le ? le.name : '';
   document.getElementById('legal-fullname').value = le ? (le.full_name || '') : '';
+  document.getElementById('legal-name-1c').value = le ? (le.name_1c || '') : '';
+  legalRender1cHint_(le);
+  legalLoad1cNames_();
+  legalLoadLinked_(le ? le.id : null);
   document.getElementById('legal-address').value = le ? (le.legal_address || '') : '';
   document.getElementById('legal-kpp').value = le ? (le.kpp || '') : '';
   document.getElementById('legal-ogrn').value = le ? (le.ogrn || '') : '';
@@ -11948,10 +12426,67 @@ function legalOpenForm_(id) {
   document.getElementById('legal-notes').value = le ? (le.notes || '') : '';
   document.getElementById('legal-error').style.display = 'none';
   document.getElementById('legal-del-btn').style.display = le ? '' : 'none';
+  // Светофор - показать уже сохранённый результат, если проверяли раньше; у новой записи
+  // (le===null) кнопка есть, но проверить нечего, пока не сохранили - см. legalCheckRisk_.
+  document.getElementById('legal-risk-btn').textContent = 'Проверить контрагента';
+  document.getElementById('legal-risk-btn').disabled = false;
+  var cachedReasons = [];
+  if (le && le.risk_reasons) { try { cachedReasons = JSON.parse(le.risk_reasons) || []; } catch (e) {} }
+  legalRenderRiskResult_(le ? le.risk_light : null, cachedReasons, le ? le.risk_checked_at : null, le ? le.risk_marker : null);
   var bk = document.getElementById('legal-bk'), dr = document.getElementById('legal-drawer');
   bk.classList.add('show');
   setTimeout(function() { dr.classList.add('show'); }, 40);
   setTimeout(function() { document.getElementById('legal-name').focus(); }, 120);
+}
+// Подсказка под полем "Название в 1С": заполнено - связь с дебиторкой есть; пусто у
+// карточки, заведённой вручную - это и есть причина, по которой должник не находится.
+function legalRender1cHint_(le) {
+  var el = document.getElementById('legal-name-1c-hint');
+  if (!el) return;
+  if (!le) { el.textContent = 'Если контрагент есть в 1С - впишите его название оттуда, иначе дебиторка не свяжется с карточкой.'; el.style.color = ''; return; }
+  if (le.name_1c) { el.textContent = 'Связь с данными 1С настроена.'; el.style.color = 'var(--green)'; return; }
+  el.textContent = 'Не заполнено - дебиторка и отчёты 1С не свяжутся с этой карточкой. Начните вводить: в подсказках имена должников без пары.';
+  el.style.color = 'var(--amber)';
+}
+// Список имён из ДЗ без пары - подсказки для поля (admin, один раз за сессию вкладки).
+var legal1cNamesLoaded_ = false;
+function legalLoad1cNames_() {
+  if (legal1cNamesLoaded_ || !D || D.role !== 'admin') return;
+  legal1cNamesLoaded_ = true;
+  fetchFromYardApi_('/debt/unmatched_names', {}).then(function(r) {
+    if (!r.ok || !r.data || !Array.isArray(r.data.names)) return;
+    var dl = document.getElementById('legal-1c-names');
+    if (dl) dl.innerHTML = r.data.names.map(function(n) { return '<option value="' + pageEscAttr_(n) + '"></option>'; }).join('');
+  }).catch(function() {});
+}
+// Сводка "что связано с этой карточкой" по полю "Название в 1С" (05.09, Влад: "давай
+// свяжи"): заказы, поступления, текущий долг - тем же ключом, которым связана дебиторка.
+function legalLoadLinked_(id) {
+  var sec = document.getElementById('legal-linked-section'), grid = document.getElementById('legal-linked-grid'),
+      body = document.getElementById('legal-linked-body');
+  if (!sec || !grid || !body) return;
+  sec.style.display = 'none'; grid.style.display = 'none'; body.innerHTML = '';
+  if (!id || !D || D.role !== 'admin') return;
+  fetchFromYardApi_('/sprav/legal_entity_summary', { id: id }).then(function(r) {
+    if (!r.ok || !r.data || !r.data.linked) return;
+    if (legalEditId_ !== id) return;   // карточку успели переключить, пока шёл запрос
+    var d = r.data, money = pageFr_;
+    function tile(label, value, sub, color) {
+      return '<div style="flex:1 1 150px;min-width:150px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px">' +
+        '<div class="muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.05em">' + label + '</div>' +
+        '<div class="mono" style="font-size:17px;font-weight:600;margin-top:3px' + (color ? ';color:' + color : '') + '">' + value + '</div>' +
+        (sub ? '<div class="muted" style="font-size:11px;margin-top:2px">' + sub + '</div>' : '') + '</div>';
+    }
+    var o = d.orders || {}, rc = d.receipts || {}, db = d.debt || {};
+    body.innerHTML = '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+      tile('Заказов', o.count || 0, o.amount ? ('на ' + money(o.amount)) : 'нет данных') +
+      tile('Прибыль по заказам', o.profit ? money(o.profit) : '—', o.last_date ? ('последний ' + o.last_date) : '') +
+      tile('Поступления', rc.amount ? money(rc.amount) : '—', rc.last_date ? ('последнее ' + rc.last_date) : (rc.count ? '' : 'нет данных')) +
+      tile('Текущий долг', db.balance ? money(db.balance) : '—', db.days_overdue ? (db.days_overdue + ' дн. просрочки') : '',
+           db.balance ? 'var(--amber)' : '') +
+    '</div>';
+    sec.style.display = ''; grid.style.display = '';
+  }).catch(function() {});
 }
 function legalCloseForm_() {
   var bk = document.getElementById('legal-bk'), dr = document.getElementById('legal-drawer');
@@ -12005,6 +12540,7 @@ function legalSave_() {
   var params = {
     id: id, name: name,
     full_name: document.getElementById('legal-fullname').value.trim(),
+    name_1c: document.getElementById('legal-name-1c').value.trim(),
     inn: document.getElementById('legal-inn').value.trim(),
     kpp: document.getElementById('legal-kpp').value.trim(),
     ogrn: document.getElementById('legal-ogrn').value.trim(),
@@ -12026,6 +12562,45 @@ function legalSave_() {
     legalCloseForm_();
     renderDirectory();
   }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+// Рисует блок результата в карточке - и для уже сохранённого (кэш из БД, открытие
+// карточки), и для только что пришедшего живого ответа (после нажатия кнопки).
+function legalRenderRiskResult_(light, reasons, checkedAt, marker) {
+  var el = document.getElementById('legal-risk-result');
+  if (!el) return;
+  if (!light) { el.innerHTML = '<div class="muted" style="font-size:12px">Ещё не проверялось</div>'; return; }
+  var color = legalRiskColor_(light);
+  var reasonsHtml = (reasons && reasons.length)
+    ? '<ul style="margin:6px 0 0;padding-left:18px;font-size:12px;color:var(--muted)">' +
+      reasons.map(function(r) { return '<li>' + pageEsc_(r) + '</li>'; }).join('') + '</ul>'
+    : '<div class="muted" style="font-size:12px;margin-top:4px">Рисков по официальным реестрам не найдено</div>';
+  var whenHtml = checkedAt ? '<div class="muted" style="font-size:11px;margin-top:8px">Проверено: ' + pageEsc_(checkedAt) + '</div>' : '';
+  el.innerHTML =
+    '<div style="display:flex;align-items:center;gap:8px">' +
+      legalRiskMarkHtml_(light, 10, '', marker) +
+      '<span style="font-size:13px;font-weight:600;color:' + color + '">' + legalRiskLabel_(light) + '</span>' +
+    '</div>' + reasonsHtml + whenHtml;
+}
+// Живая проверка через Checko.ru (см. /api/sprav/legal_entity_risk_check на сервере) -
+// только для уже сохранённой записи (id нужен, чтобы кэшировать результат в БД) и с
+// заполненным ИНН. Квота бесплатного тарифа общая на весь дашборд (100/день) - поэтому
+// по кнопке, не автоматически при каждом открытии карточки.
+function legalCheckRisk_() {
+  if (!legalEditId_) { p2Toast('Сначала сохраните юрлицо - потом можно проверить', 'red'); return; }
+  var inn = document.getElementById('legal-inn').value.trim();
+  if (!inn) { p2Toast('Заполните ИНН перед проверкой', 'red'); return; }
+  var btn = document.getElementById('legal-risk-btn');
+  btn.disabled = true; btn.textContent = 'Проверяю…';
+  postToYardApi_('/sprav/legal_entity_risk_check', { id: legalEditId_, inn: inn }).then(function(r) {
+    btn.disabled = false; btn.textContent = 'Проверить контрагента';
+    if (!r.ok) { p2Toast('Не удалось проверить: ' + (r.data && r.data.error || 'ошибка сервера'), 'red'); return; }
+    legalRenderRiskResult_(r.data.light, r.data.reasons, r.data.checked_at, r.data.marker || null);
+    // Обновляем запись в памяти, чтобы точка в списке (legalPaint_) сразу показала новый
+    // цвет без полной перезагрузки Справочников.
+    var le = (spravLegalEntities_ || []).filter(function(x) { return String(x.id) === String(legalEditId_); })[0];
+    if (le) { le.risk_light = r.data.light; le.risk_marker = r.data.marker || null; le.risk_reasons = JSON.stringify(r.data.reasons); le.risk_checked_at = r.data.checked_at; }
+    legalPaint_();
+  }).catch(function(e) { btn.disabled = false; btn.textContent = 'Проверить контрагента'; p2Toast('Ошибка сети: ' + e.message, 'red'); });
 }
 function legalDelete_() {
   if (!legalEditId_) return;
@@ -13304,7 +13879,7 @@ function renderReceiptsDayTransactions_(day, prefix) {
   if (!bodyEl) return;
   bodyEl.innerHTML = (day.transactions || []).map(function(t) {
     var mgrCls = t.manager === 'Не определён' ? ' class="muted"' : '';
-    return '<tr><td>' + t.customer + '</td>' +
+    return '<tr><td>' + cpLightHtml_(t.customer) + t.customer + '</td>' +
       '<td' + mgrCls + '>' + t.manager + '</td>' +
       '<td class="muted">' + (t.orgName || '—') + '</td>' +
       '<td class="muted">' + (t.docNumber || '—') + '</td>' +
@@ -13361,7 +13936,7 @@ function renderReceiptsWeekTransactions_(week) {
   bodyEl.innerHTML = rows.map(function(t) {
     var mgrCls = t.manager === 'Не определён' ? ' class="muted"' : '';
     return '<tr><td class="muted">' + receiptsShortDate_(t.date) + '</td>' +
-      '<td>' + t.customer + '</td>' +
+      '<td>' + cpLightHtml_(t.customer) + t.customer + '</td>' +
       '<td' + mgrCls + '>' + t.manager + '</td>' +
       '<td class="muted">' + (t.orgName || '—') + '</td>' +
       '<td class="muted">' + (t.docNumber || '—') + '</td>' +
@@ -13571,7 +14146,7 @@ function renderReceiptsCustomers(r) {
   document.getElementById('receipts-customers-body').innerHTML = shown.map(function(c) {
     var mgrCls = c.manager === 'Не определён' ? ' class="muted"' : '';
     var displayAmount = filter ? ((c.orgAmounts && c.orgAmounts[filter]) || 0) : c.amount;
-    return '<tr><td>' + c.customer + '</td>' +
+    return '<tr><td>' + cpLightHtml_(c.customer) + c.customer + '</td>' +
       '<td' + mgrCls + '>' + c.manager + '</td>' +
       '<td class="muted">' + (c.orgs || '—') + '</td>' +
       '<td class="num">' + fmt(displayAmount) + '</td>' +
@@ -16188,6 +16763,8 @@ function renderCommercialHeadDebtPage_() {
     (chDebtBuckets.size ? '<button onclick="clearChDebtBuckets()" style="cursor:pointer;background:none;border:none;color:var(--muted);font-size:11px;padding:6px 4px;text-decoration:underline dotted">сбросить</button>' : '')+
   '</div>';
 
+  // Светофор риска (04.09) - та же карта, что на главной ДЗ и личной странице.
+  ensureDebtRiskMap_(renderCommercialHeadDebtPage_);
   var dFiltered = allDebt.filter(function(c){
     if (chDebtBuckets.size && !Array.from(chDebtBuckets).some(function(bk){ return debtInBucket_(c.daysOverdue, bk); })) return false;
     return true;
@@ -16211,7 +16788,7 @@ function renderCommercialHeadDebtPage_() {
         var isOpen = chDebtOpenRow === c.contragent;
         var contragentEsc = c.contragent.replace(/'/g,"\\'");
         var row = '<tr class="debt-row-toggle" onclick="toggleChDebtDetail(\''+contragentEsc+'\')" style="cursor:pointer">'+
-          '<td><span class="muted" style="display:inline-block;width:14px">'+(isOpen?'▾':'▸')+'</span><b>'+c.contragent+'</b>'+byOrgLine+'</td>'+
+          '<td><span class="muted" style="display:inline-block;width:14px">'+(isOpen?'▾':'▸')+'</span>'+debtRiskDotHtml_(c.contragent)+'<b>'+c.contragent+'</b>'+byOrgLine+'</td>'+
           '<td class="muted">'+(c.manager||'—')+'</td>'+
           '<td class="num"><b>'+fmt(c.balance)+'</b></td>'+
           '<td class="num '+ageCls(c.daysOverdue)+'">'+c.daysOverdue+'</td>'+
@@ -17329,6 +17906,22 @@ function debtInBucket_(days, bucket) {
 // отделам не хардкодится). Пусто = все менеджеры. Панель поверх кнопки, закрывается по
 // клику вне неё.
 let debtManagerFilters = new Set();
+// Скрытые линии графика "ДЗ по дням" (05.09, Влад: "по умолчанию включен Бульдог").
+// Хранится СПИСОК СКРЫТЫХ подписей: по умолчанию видны только "Общая ДЗ" и "Бульдог",
+// остальные наши юрлица скрыты - их долг мал и линии сливались в кашу. Переключается
+// кликом по легенде (см. onClick у графика), выбор личный и переживает перерисовку.
+var DEBT_CHART_HIDDEN_KEY_ = 'yard.debt.chartHidden';
+function debtChartHiddenSet_(orgNames) {
+  var raw = null, hidden;
+  try { raw = localStorage.getItem(DEBT_CHART_HIDDEN_KEY_); } catch (e) {}
+  if (raw == null) {
+    hidden = (orgNames || []).filter(function(o) { return o !== 'Бульдог'; });   // первый заход
+  } else {
+    try { hidden = JSON.parse(raw); } catch (e) { hidden = []; }
+  }
+  if (!Array.isArray(hidden)) hidden = [];
+  return hidden;
+}
 function debtMgrToggle(name) {
   if (debtManagerFilters.has(name)) debtManagerFilters.delete(name);
   else debtManagerFilters.add(name);
@@ -17617,8 +18210,9 @@ function buildDebtCard_(c) {
   var commentEsc = (c.comment || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
   return '<div style="padding:20px">' +
-    '<div style="font-size:17px;font-weight:700;margin-bottom:4px">' + c.contragent + '</div>' +
-    '<div class="muted" style="font-size:13px;margin-bottom:16px">' + cleanName(c.manager) + '</div>' +
+    '<div style="font-size:17px;font-weight:700;margin-bottom:4px">' + debtRiskDotHtml_(c.contragent) + c.contragent + '</div>' +
+    '<div class="muted" style="font-size:13px;margin-bottom:8px">' + cleanName(c.manager) + '</div>' +
+    debtRiskBlockHtml_(c.contragent) +
     '<div style="display:flex;gap:24px;margin-bottom:16px">' +
       '<div><div class="muted" style="font-size:11px;text-transform:uppercase">Баланс</div><div style="font-size:20px;font-weight:700;color:var(--amber)">' + fmt(c.balance) + '</div></div>' +
       '<div><div class="muted" style="font-size:11px;text-transform:uppercase">Дней просрочки</div><div style="font-size:20px;font-weight:700">' + c.daysOverdue + '</div></div>' +
@@ -17663,6 +18257,143 @@ async function debtSaveComment(contragent) {
   }
 }
 
+// ── Светофор риска в ДЗ (04.09, Влад: "в инструменте по работе с ДЗ хочу видеть перед
+// названием КА лампочку. Поскольку количество запросов ограничено начнём с всех текущих
+// 0-30 дней") - точка = тот же кэш проверки юрлица, что в Справочниках (legalCheckRisk_),
+// сопоставление должник -> юрлицо делает сервер (/api/debt/risk_lights: точное имя / ИНН
+// в имени / уникальный префикс - в ДЗ ИНН нет вообще). Карта грузится один раз при первом
+// рендере ДЗ и заново после партии - отдельным лёгким запросом, НЕ через главный payload,
+// чтобы не ждать "Обновить данные".
+var debtRiskMap_ = null;        // contragent -> {light, reasons[], checked_at, legal_entity_id, inn}
+var debtRiskLoading_ = false;
+function loadDebtRiskLights_(then) {
+  if (debtRiskLoading_) return;
+  debtRiskLoading_ = true;
+  fetchFromYardApi_('/debt/risk_lights', {}).then(function(r) {
+    debtRiskLoading_ = false;
+    if (!r.ok || !r.data || !r.data.by_contragent) return;
+    debtRiskMap_ = r.data.by_contragent;
+    if (then) then(r.data);
+  }).catch(function() { debtRiskLoading_ = false; });
+}
+// Для страниц, где ДЗ рисуется не renderDebt() (личная страница менеджера, ДЗ
+// руководителя группы): подгрузить карту один раз и перерисовать (Влад, 04.09: "логика
+// должна быть везде... у всех в ДЗ должно это появиться"). Роли без доступа к
+// /debt/risk_lights (сервер пускает admin/manager) - не дёргаем сервер вовсе; при отказе
+// ставим пустую карту, чтобы каждый рендер не повторял запрос.
+function ensureDebtRiskMap_(rerender) {
+  if (debtRiskMap_ !== null || debtRiskLoading_) return;
+  if (!D || (D.role !== 'admin' && D.role !== 'manager')) { debtRiskMap_ = {}; return; }
+  debtRiskLoading_ = true;
+  fetchFromYardApi_('/debt/risk_lights', {}).then(function(r) {
+    debtRiskLoading_ = false;
+    debtRiskMap_ = (r.ok && r.data && r.data.by_contragent) ? r.data.by_contragent : {};
+    if (rerender) rerender();
+  }).catch(function() { debtRiskLoading_ = false; debtRiskMap_ = {}; });
+}
+// Блок для карточки контрагента - цвет + причины целиком, не только tooltip.
+function debtRiskBlockHtml_(contragent) {
+  var m = debtRiskMap_ && debtRiskMap_[contragent];
+  if (!m || !m.light) return '';
+  var color = legalRiskColor_(m.light);
+  var reasons = (m.reasons && m.reasons.length)
+    ? '<ul style="margin:4px 0 0;padding-left:16px;font-size:12px;color:var(--muted)">' +
+      m.reasons.map(function(x) { return '<li>' + pageEsc_(x) + '</li>'; }).join('') + '</ul>'
+    : '<div class="muted" style="font-size:12px;margin-top:2px">Рисков по официальным реестрам не найдено</div>';
+  return '<div style="margin-bottom:16px;padding:10px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px">' +
+    '<div style="display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:' + color + '">' +
+      legalRiskMarkHtml_(m.light, 9, '', m.marker) +
+      'Проверка контрагента: ' + legalRiskLabel_(m.light) +
+      (m.checked_at ? '<span class="muted" style="font-weight:400;font-size:11px;margin-left:auto">' + pageEsc_(m.checked_at) + '</span>' : '') +
+    '</div>' + reasons + '</div>';
+}
+// ── Единая связь "имя контрагента из 1С -> карточка юрлица" (05.09, Влад: "давай свяжи").
+// Одна карта на весь сайт (/api/counterparty/lights: дебиторка + заказы + поступления +
+// история клиентов), поэтому лампочка выглядит и работает одинаково на любой странице.
+// Ключ - имя КАК В 1С, то самое, что теперь хранится в карточке юрлица (name_1c).
+var cpLights_ = null, cpLightsLoading_ = false;
+function cpEnsureLights_(rerender) {
+  if (cpLights_ !== null || cpLightsLoading_) return;
+  if (!D || (D.role !== 'admin' && D.role !== 'manager')) { cpLights_ = {}; return; }
+  cpLightsLoading_ = true;
+  fetchFromYardApi_('/counterparty/lights', {}).then(function(r) {
+    cpLightsLoading_ = false;
+    cpLights_ = (r.ok && r.data && r.data.by_name) ? r.data.by_name : {};
+    if (rerender) try { rerender(); } catch (e) {}
+  }).catch(function() { cpLightsLoading_ = false; cpLights_ = {}; });
+}
+// Лампочка рядом с именем заказчика на любой странице. Пусто, если контрагент не связан
+// с карточкой юрлица или ещё не проверялся - цвет только по делу (ГОСТ).
+function cpLightHtml_(name, size) {
+  var m = cpLights_ && cpLights_[String(name || '').trim()];
+  if (!m || !m.light) return '';
+  var head = 'Проверка контрагента: ' + legalRiskLabel_(m.light) + (m.checked_at ? ' (' + m.checked_at + ')' : '');
+  var body = (m.reasons && m.reasons.length)
+    ? m.reasons.map(function(x) { return '— ' + x; }).join('\n')
+    : 'Рисков по официальным реестрам не найдено';
+  return '<span title="' + pageEscAttr_(head + '\n' + body) + '" style="display:inline-block;vertical-align:middle;margin-right:5px">' +
+    legalRiskMarkHtml_(m.light, size || 7, '', m.marker) + '</span>';
+}
+function debtRiskDotHtml_(contragent) {
+  var m = debtRiskMap_ && debtRiskMap_[contragent];
+  if (!m || !m.light) return '';
+  var head = 'Проверка контрагента: ' + legalRiskLabel_(m.light) + (m.checked_at ? ' (' + m.checked_at + ')' : '');
+  var body = (m.reasons && m.reasons.length)
+    ? m.reasons.map(function(x) { return '— ' + x; }).join('\n')
+    : 'Рисков по официальным реестрам не найдено';
+  return '<span title="' + pageEscAttr_(head + '\n' + body) + '" style="display:inline-block;vertical-align:middle;margin-right:6px">' +
+    legalRiskMarkHtml_(m.light, 8, '', m.marker) + '</span>';
+}
+function debtRiskStatusText_(data) {
+  var n = 0, by = { bankrupt: 0, red: 0, yellow: 0, green: 0 };
+  Object.keys(data.by_contragent || {}).forEach(function(k) {
+    var m = data.by_contragent[k];
+    if (m && m.light) { n++; by[m.light] = (by[m.light] || 0) + 1; }
+  });
+  var base = n ? ('проверено ' + n + ': ' + (by.bankrupt ? by.bankrupt + ' банкротов · ' : '') + by.red + ' красных · ' + by.yellow + ' жёлтых · ' + by.green + ' зелёных')
+               : 'ещё никто не проверен';
+  // Последний прогон (cron 06:10 МСК или ручной) - чтобы было видно, что автомат живой.
+  var lr = data.last_run;
+  if (lr) {
+    var used = (lr.quota || []).reduce(function(s, q) { return s + (q.used || 0); }, 0);
+    var lim = (lr.quota || []).reduce(function(s, q) { return s + (q.limit || 0); }, 0);
+    base += ' · ' + (lr.mode === 'auto' ? 'автопрогон ' : 'прогон ') + lr.finished_at + ': проверено ' + lr.checked +
+      (lr.due_count > lr.checked + lr.failed ? ', в очереди ' + (lr.due_count - lr.checked - lr.failed) : '') +
+      (lr.failed ? ', ошибок ' + lr.failed : '') +
+      (lim ? ', квота ' + used + '/' + lim : '');
+  }
+  return base;
+}
+// Кнопка запускает ТОТ ЖЕ приоритетный прогон, что cron каждое утро (04.09, Влад:
+// "автоматически каждый день... без моего участия") - /api/debt/risk_check_auto, алгоритм
+// приоритетов описан на сервере (debtRiskAutoRun_). Отдельной "партии 0-30" в UI больше
+// нет - один алгоритм на автомат и на руку, чтобы не расходились.
+function debtRunRiskBatch_() {
+  var btn = document.getElementById('debt-risk-batch-btn'), st = document.getElementById('debt-risk-status');
+  if (!btn) return;
+  var label = 'Проверить сейчас';
+  btn.disabled = true; btn.textContent = 'Проверяю…';
+  if (st) st.textContent = 'запросы к Checko идут по одному - до пары минут';
+  postToYardApi_('/debt/risk_check_auto', {}).then(function(r) {
+    btn.disabled = false; btn.textContent = label;
+    if (!r.ok) { p2Toast('Не удалось проверить: ' + (r.data && r.data.error || 'ошибка сервера'), 'red'); return; }
+    var d = r.data;
+    var used = (d.quota || []).reduce(function(s, q) { return s + (q.used || 0); }, 0);
+    var lim = (d.quota || []).reduce(function(s, q) { return s + (q.limit || 0); }, 0);
+    var msg = 'Проверено ' + d.checked + ' (к проверке было ' + d.due + ' из ' + d.candidates + ')' +
+      (d.left_in_queue > 0 ? ', в очереди на завтра: ' + d.left_in_queue : '') +
+      (d.unmatched ? ', без юрлица в справочнике: ' + d.unmatched : '') +
+      (d.failed ? ', ошибок: ' + d.failed : '') +
+      (lim ? '. Квота Checko: ' + used + '/' + lim : '') +
+      (d.stopped_by_quota ? ' - остановлено, квота исчерпана' : '');
+    p2Toast(msg, d.failed ? 'red' : 'green');
+    if (d.by_bucket) console.info('[ДЗ/светофор] проверено по корзинам:', d.by_bucket);
+    loadDebtRiskLights_(function(data) { if (st) st.textContent = debtRiskStatusText_(data); renderDebt(); });
+  }).catch(function(e) {
+    btn.disabled = false; btn.textContent = label;
+    p2Toast('Ошибка сети: ' + e.message, 'red');
+  });
+}
 function renderDebt() {
   if (!D) return;
   const debt = D.debt;
@@ -17675,6 +18406,15 @@ function renderDebt() {
   }
   if (emptyEl) emptyEl.style.display = 'none';
   if (bodyEl) bodyEl.style.display = 'block';
+  // Светофор риска (04.09) - карта точек грузится один раз при первом показе ДЗ (дальше
+  // рендер синхронный из debtRiskMap_); кнопка партии - только admin (сервер тоже требует).
+  var riskTools = document.getElementById('debt-risk-tools');
+  if (riskTools) riskTools.style.display = (D.role === 'admin') ? 'flex' : 'none';
+  if (debtRiskMap_ === null) loadDebtRiskLights_(function(data) {
+    var st = document.getElementById('debt-risk-status');
+    if (st) st.textContent = debtRiskStatusText_(data);
+    renderDebt();
+  });
 
   const ageToggleBtn = document.getElementById('debt-age-toggle-btn');
   if (ageToggleBtn) {
@@ -17887,7 +18627,7 @@ function renderDebt() {
         var up = x.diff > 0;
         var color = up ? 'var(--red)' : 'var(--green)';
         return '<tr>' +
-          '<td><b>' + x.contragent + '</b></td>' +
+          '<td>' + debtRiskDotHtml_(x.contragent) + '<b>' + x.contragent + '</b></td>' +
           '<td class="muted">' + (x.manager ? cleanName(x.manager) : '—') + '</td>' +
           '<td class="num muted">' + fmt(x.yesterday) + '</td>' +
           '<td class="num">' + fmt(x.today) + '</td>' +
@@ -17898,34 +18638,32 @@ function renderDebt() {
     }
   }
 
-  // История - линия по дням (та же логика построения, что и "Выручка по дням" на "Обзоре").
-  // hist уже получен выше (для стрелок тенденций в KPI). Показывает ВСЕ долги без учёта
-  // фильтра "до 600 дней" (Влад, 2026-07-12: "хорошо что график будет показывать реальную
-  // картину с учётом всех долгов") - использует debt.history напрямую, не agg.
-  // Плюс линии по КАЖДОМУ ЮРЛИЦУ группы (Влад, 2026-07-14: "не график по клиентам, а
-  // график линию по долгу каждого нашего юрлица - Бульдог, Стройтранс, Ярд" - уточнение
-  // предыдущего запроса про "линии по контрагентам", там на самом деле имелись в виду
-  // наши 5 юрлиц, не клиенты) - используем разбивку по юрлицам, которая уже есть в каждой
-  // точке истории (hist[].byOrg), отдельный лист по клиентам за 2026-07-12 больше не нужен.
+  // График "ДЗ по дням" (05.09, Влад: "сделай именно так" + скриншот прежнего вида,
+  // "по умолчанию включен Бульдог"). Линии по общей ДЗ и по каждому нашему юрлицу с
+  // легендой снизу - как было; изменилось одно: по умолчанию ВИДНЫ только "Общая ДЗ" и
+  // "Бульдог", остальные юрлица скрыты и включаются кликом по легенде. Набор видимых
+  // запоминается лично (localStorage) - у каждого свой, перерисовка его не сбрасывает.
   const ctx = document.getElementById('chart-debt-history');
   if (ctx && hist.length) {
     if (ctx._chart) ctx._chart.destroy();
     const debtOrgColors = { 'Бульдог':'#378ADD', 'Ярд Империал':'#1D9E75', 'Стройтранс':'#E24B4A', 'Техно Парк':'#8B5CF6', 'Мегакран':'#F472B6', 'Умиат Ярд':'#22D3EE' };
-    const orgNames = {};
-    hist.forEach(function(h) { Object.keys(h.byOrg || {}).forEach(function(o) { orgNames[o] = true; }); });
-    const datasets = [{
+    var orgNames_ = [];
+    hist.forEach(function(h){ Object.keys(h.byOrg || {}).forEach(function(o){ if (orgNames_.indexOf(o) < 0) orgNames_.push(o); }); });
+    // Порядок линий - по величине долга на последний день, чтобы легенда читалась сверху вниз.
+    var lastPoint_ = hist[hist.length-1];
+    orgNames_.sort(function(a, b){ return ((lastPoint_.byOrg||{})[b]||0) - ((lastPoint_.byOrg||{})[a]||0); });
+    var hidden_ = debtChartHiddenSet_(orgNames_);
+    var datasets = [{
       label: 'Общая ДЗ', data: hist.map(function(h){ return h.balance; }),
       borderColor: '#EF9F27', backgroundColor: 'rgba(239,159,39,0.12)', fill: true, tension: 0.25, pointRadius: 2, borderWidth: 2.5,
+      hidden: hidden_.indexOf('Общая ДЗ') >= 0,
     }];
-    // Точки на линиях юрлиц (Влад, 2026-07-17: "в графике по всем нашим фирмам должны быть
-    // точки с информацией как в общей ДЗ") - раньше pointRadius:0 у линий юрлиц, из-за чего
-    // навести курсор и увидеть подсказку было почти невозможно (в отличие от "Общая ДЗ" с
-    // pointRadius:2). mode:'index' ниже - наводишь на день, видишь сразу все юрлица.
-    Object.keys(orgNames).forEach(function(org) {
+    orgNames_.forEach(function(org) {
       datasets.push({
         label: org, data: hist.map(function(h) { return (h.byOrg && h.byOrg[org]) || 0; }),
         borderColor: debtOrgColors[org] || '#94A3B8', backgroundColor: 'transparent',
         fill: false, tension: 0.25, pointRadius: 2, borderWidth: 1.5,
+        hidden: hidden_.indexOf(org) >= 0,
       });
     });
     ctx._chart = new Chart(ctx, {
@@ -17938,7 +18676,20 @@ function renderDebt() {
         responsive:true, maintainAspectRatio:false,
         interaction: { mode: 'index', intersect: false },
         plugins:{
-          legend:{display:true, position:'bottom', labels:{color:chartMuted_(), font:{size:10}, boxWidth:10}},
+          legend:{
+            display:true, position:'bottom',
+            labels:{color:chartMuted_(), font:{size:10}, boxWidth:10},
+            // Клик по легенде - штатное переключение Chart.js плюс запоминание выбора:
+            // иначе следующий рендер (обновление данных, смена вкладки) вернул бы всё назад.
+            onClick: function(e, item, legend) {
+              var ch = legend.chart, i = item.datasetIndex;
+              ch.setDatasetVisibility(i, !ch.isDatasetVisible(i));
+              ch.update();
+              var off = [];
+              ch.data.datasets.forEach(function(ds, idx){ if (!ch.isDatasetVisible(idx)) off.push(ds.label); });
+              try { localStorage.setItem(DEBT_CHART_HIDDEN_KEY_, JSON.stringify(off)); } catch (err) {}
+            }
+          },
           tooltip:{callbacks:{label:function(c){ return ' ' + c.dataset.label + ': ' + fmt(c.raw); }}}
         },
         scales:{
@@ -18039,7 +18790,7 @@ function renderDebt() {
       'style="background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:0 4px" title="Карточка контрагента">📝' +
       (c.comment ? '<span style="color:var(--amber)">●</span>' : '') + '</button>';
     return '<tr class="debt-row-toggle" onclick="toggleDebtDetail(' + i + ')" style="cursor:pointer">' +
-      '<td>' + cardBtn + '<span id="debt-arrow-' + i + '" class="muted" style="display:inline-block;width:14px">▸</span><b>' + c.contragent + '</b>' + byOrgLine + '</td>' +
+      '<td>' + cardBtn + '<span id="debt-arrow-' + i + '" class="muted" style="display:inline-block;width:14px">▸</span>' + debtRiskDotHtml_(c.contragent) + '<b>' + c.contragent + '</b>' + byOrgLine + '</td>' +
       '<td class="muted">' + cleanName(c.manager) + '</td>' +
       '<td class="num"><b>' + fmt(c.balance) + '</b></td>' +
       '<td class="num ' + ageCls(c.daysOverdue) + '">' + c.daysOverdue + '</td>' +
@@ -18070,7 +18821,7 @@ function renderDebt() {
   document.getElementById('debt-guarantees-total').textContent = fmt(guaranteesTotal);
   document.getElementById('debt-guarantees-body').innerHTML = guarantees.map(function(g) {
     return '<tr>' +
-      '<td><b>' + g.contragent + '</b></td>' +
+      '<td>' + debtRiskDotHtml_(g.contragent) + '<b>' + g.contragent + '</b></td>' +
       '<td class="muted">' + cleanName(g.manager) + '</td>' +
       '<td class="num"><b>' + fmt(g.guaranteeDeposit) + '</b></td>' +
     '</tr>';
@@ -18140,6 +18891,486 @@ function initSidebarCollapse_() {
 }
 initSidebarCollapse_();
 
+// ── Кастомизация меню (05.09, Влад: "зажал меню - перешло в режим кастома: передвинуть
+// как канбанчик, скрыть и тому подобное. Только для админа. При входе в просмотрщик
+// сотрудника я могу также настраивать ему, как будет меню у него. У сотрудника
+// кастомизации быть не должно"). Паттерн и физика - ГОСТ раздел 6 ("Долгое нажатие ->
+// режим перестановки" + Drag & Drop), числа буквально. Хранение - на сервере
+// (/api/menu_config, таблица menu_configs), ключ "admin" или "role:фамилия";
+// localStorage - только кэш для мгновенной отрисовки до ответа сервера. Порядок = токены
+// ВСЕХ детей nav (пункты по data-page и разделители "#park"/"#sales"), поэтому пункт
+// можно унести в другой раздел; новые пункты, которых в сохранённом порядке нет, встают
+// в конец - админ их переставит. Кастом накладывается ПОВЕРХ ролевого фильтра
+// applyRoleUI(): он умеет только прятать и переставлять, показать лишнее роли не может.
+var MENU_CFG_LS_ = 'yard.menu.cfg.';
+var menuCfgCache_ = {};        // key -> cfg | null (null = на сервере конфига нет)
+var menuCfgInflight_ = {};
+var menuCustomizing_ = false;
+var menuDefaultOrder_ = null;  // токены в исходном порядке DOM
+var menuSaveTimer_ = null;
+var menuSuppressClick_ = false;
+var menuHold_ = null;          // долгое нажатие: {item, x0, y0, pid, timer}
+var menuDrag_ = null;          // активное перетаскивание
+var menuHintDone_ = false, menuHintTimer_ = null;
+
+function menuPrefersReduced_() { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } }
+function menuSur_(name) { return String(name || '').trim().split(/\s+/)[0].toLowerCase().replace(/ё/g, 'е'); }
+function menuCfgKey_() {
+  if (typeof D === 'undefined' || !D || !D.role) return null;
+  if (D.role === 'admin') return viewAsEntry ? (viewAsEntry.type + ':' + menuSur_(viewAsEntry.name)) : 'admin';
+  return D.role + ':' + menuSur_(D.managerName || D.logistName || D.mechanicName || '');
+}
+function menuNav_() { return document.querySelector('.sidebar-nav'); }
+function menuToken_(el) {
+  if (el.classList.contains('sidebar-nav-item')) return el.getAttribute('data-page');
+  if (el.classList.contains('sidebar-nav-section')) return '#' + (el.getAttribute('data-section') || '');
+  return null;
+}
+function menuChildren_() {
+  var nav = menuNav_();
+  return nav ? [].slice.call(nav.children).filter(function(el) { return !!menuToken_(el); }) : [];
+}
+function menuItems_() { var nav = menuNav_(); return nav ? [].slice.call(nav.querySelectorAll('.sidebar-nav-item')) : []; }
+
+// Применить конфиг к DOM: порядок (пункты + разделители) и скрытые. Вызывается из
+// applyRoleUI() ПОСЛЕ ролевого фильтра - тот уже выставил display по роли, мы только
+// дополнительно прячем. В режиме кастомизации скрытые не прячем, а гасим (.menu-hidden).
+function menuApplyCfg_(cfg) {
+  var nav = menuNav_(); if (!nav) return;
+  if (!menuDefaultOrder_) menuDefaultOrder_ = menuChildren_().map(menuToken_);
+  var order = (cfg && Array.isArray(cfg.order) && cfg.order.length) ? cfg.order : menuDefaultOrder_;
+  var byTok = {}; menuChildren_().forEach(function(el) { byTok[menuToken_(el)] = el; });
+  var placed = {};
+  order.forEach(function(t) { if (byTok[t] && !placed[t]) { nav.appendChild(byTok[t]); placed[t] = true; } });
+  menuDefaultOrder_.forEach(function(t) { if (!placed[t] && byTok[t]) nav.appendChild(byTok[t]); });
+  var doneBar = document.getElementById('menu-done-bar');
+  if (doneBar) nav.appendChild(doneBar);
+  var hidden = (cfg && Array.isArray(cfg.hidden)) ? cfg.hidden : [];
+  var items = menuItems_();
+  // Гвард: спрятать всё нельзя - если не останется ни одного видимого по роли пункта,
+  // скрытие игнорируем целиком (человек не должен остаться с пустым меню).
+  var roleVisible = items.filter(function(it) { return it.style.display !== 'none'; });
+  if (!roleVisible.filter(function(it) { return hidden.indexOf(it.getAttribute('data-page')) < 0; }).length) hidden = [];
+  items.forEach(function(it) {
+    var isHidden = hidden.indexOf(it.getAttribute('data-page')) >= 0;
+    it.classList.toggle('menu-hidden', isHidden);
+    if (isHidden && !menuCustomizing_ && it.style.display !== 'none') it.style.display = 'none';
+  });
+  // Подпись на плашке - чьё меню правим; обновляется и при смене "Смотреть как" прямо в режиме.
+  var lbl = document.getElementById('menu-done-target');
+  if (lbl && menuCustomizing_) lbl.textContent = viewAsEntry ? String(viewAsEntry.name).split(' ')[0] : 'Админ';
+}
+function applyMenuConfig_() {
+  var key = menuCfgKey_(); if (!key) return;
+  var cfg = menuCfgCache_[key];
+  if (cfg === undefined) {
+    try { var raw = localStorage.getItem(MENU_CFG_LS_ + key); if (raw) cfg = JSON.parse(raw); } catch (e) {}
+    if (cfg === undefined) cfg = null;
+    menuCfgFetch_(key);
+  }
+  menuApplyCfg_(cfg);
+  menuHintMaybe_();
+}
+function menuCfgFetch_(key) {
+  if (menuCfgInflight_[key]) return;
+  if (typeof fetchFromYardApi_ !== 'function' || typeof SESSION_TOKEN === 'undefined' || !SESSION_TOKEN) return;
+  menuCfgInflight_[key] = true;
+  // Сотруднику ключ не передаём - сервер сам выводит его из access_users по email сессии.
+  var params = (D && D.role === 'admin') ? { key: key } : {};
+  fetchFromYardApi_('/menu_config', params).then(function(r) {
+    delete menuCfgInflight_[key];
+    if (!r.ok || !r.data) return;
+    var cfg = r.data.config || null;
+    menuCfgCache_[key] = cfg;
+    try { if (cfg) localStorage.setItem(MENU_CFG_LS_ + key, JSON.stringify(cfg)); else localStorage.removeItem(MENU_CFG_LS_ + key); } catch (e) {}
+    if (menuCfgKey_() === key) menuApplyCfg_(cfg);
+  }).catch(function() { delete menuCfgInflight_[key]; });
+}
+function menuCfgFromDom_() {
+  var hidden = menuItems_().filter(function(it) { return it.classList.contains('menu-hidden'); })
+    .map(function(it) { return it.getAttribute('data-page'); });
+  return { v: 1, order: menuChildren_().map(menuToken_), hidden: hidden };
+}
+function menuCfgSave_(immediate) {
+  if (!D || D.role !== 'admin') return;
+  var key = menuCfgKey_(); if (!key) return;
+  var cfg = menuCfgFromDom_();
+  menuCfgCache_[key] = cfg;
+  try { localStorage.setItem(MENU_CFG_LS_ + key, JSON.stringify(cfg)); } catch (e) {}
+  clearTimeout(menuSaveTimer_);
+  var doSave = function() {
+    postToYardApi_('/menu_config', { key: key, config: JSON.stringify(cfg) }).then(function(r) {
+      if (!r.ok) p2Toast('Меню не сохранилось на сервере: ' + (r.data && r.data.error || 'ошибка'), 'red');
+    }).catch(function() { p2Toast('Меню не сохранилось: нет связи с сервером', 'red'); });
+  };
+  if (immediate) doSave(); else menuSaveTimer_ = setTimeout(doSave, 400);
+}
+function menuCfgReset_() {
+  if (!D || D.role !== 'admin') return;
+  var key = menuCfgKey_(); if (!key) return;
+  clearTimeout(menuSaveTimer_);
+  menuCfgCache_[key] = null;
+  try { localStorage.removeItem(MENU_CFG_LS_ + key); } catch (e) {}
+  menuItems_().forEach(function(it) { it.classList.remove('menu-hidden'); });
+  menuApplyCfg_(null);
+  if (menuCustomizing_) menuWiggle_(null);
+  postToYardApi_('/menu_config', { key: key, reset: '1' }).catch(function() {});
+  p2Toast('Меню сброшено к стандартному', 'green');
+}
+
+// ── режим кастомизации ──
+function menuEnterCustomize_() {
+  if (menuCustomizing_ || !D || D.role !== 'admin') return;
+  var sb = document.querySelector('.sidebar'); if (!sb) return;
+  if (sb.classList.contains('collapsed')) toggleSidebarCollapse();   // подписи нужны, чтобы понимать, что двигаешь
+  menuCustomizing_ = true;
+  sb.classList.add('menu-customizing');
+  menuHintDismiss_();
+  applyRoleUI();   // display по роли заново: скрытые кастомом становятся видимыми (гашёными); подпись плашки - там же
+  menuWiggle_(null);
+  if (typeof uiSounds !== 'undefined' && uiSounds.toggle) uiSounds.toggle();
+}
+function menuExitCustomize_() {
+  if (!menuCustomizing_) return;
+  if (menuDrag_) menuDragEnd_(true);
+  menuCustomizing_ = false;
+  menuSuppressClick_ = false;
+  var sb = document.querySelector('.sidebar');
+  if (sb) sb.classList.remove('menu-customizing');
+  menuItems_().forEach(function(it) {
+    it.classList.remove('menu-wiggle');
+    it.style.animationDelay = ''; it.style.animationDuration = ''; it.style.transition = ''; it.style.transform = '';
+  });
+  menuCfgSave_(true);
+  applyRoleUI();
+  if (typeof uiSounds !== 'undefined' && uiSounds.toggle) uiSounds.toggle();
+}
+// Дрожание ±1° всех пунктов, кроме удерживаемого - у каждого свой фазовый сдвиг
+// (duration/delay по индексу, ±15% от базовых ~0.22-0.28s), чтобы не дрожали синхронно.
+function menuWiggle_(exceptEl) {
+  if (!menuCustomizing_ || menuPrefersReduced_()) return;
+  menuItems_().forEach(function(it, i) {
+    if (it === exceptEl || it.classList.contains('menu-placeholder')) { it.classList.remove('menu-wiggle'); return; }
+    it.style.animationDuration = (0.25 * (0.85 + ((i * 7) % 31) / 100)).toFixed(3) + 's';
+    it.style.animationDelay = '-' + ((i * 37) % 250) + 'ms';
+    it.classList.add('menu-wiggle');
+  });
+}
+function menuWiggleStop_() { menuItems_().forEach(function(it) { it.classList.remove('menu-wiggle'); }); }
+function menuToggleHidden_(item) {
+  if (!item) return;
+  var willHide = !item.classList.contains('menu-hidden');
+  if (willHide) {
+    var visible = menuItems_().filter(function(it) { return it.style.display !== 'none' && !it.classList.contains('menu-hidden'); });
+    if (visible.length <= 1) { p2Toast('Хотя бы один пункт должен остаться', 'red'); return; }
+  }
+  item.classList.toggle('menu-hidden', willHide);
+  menuCfgSave_(false);
+  if (typeof uiSounds !== 'undefined' && uiSounds.toggle) uiSounds.toggle();
+}
+// Grip (6 точек 2x3) и "глаз" в каждом пункте - видны только в режиме (CSS).
+function menuDecorateItems_() {
+  menuItems_().forEach(function(it) {
+    if (it.querySelector('.menu-grip')) return;
+    var grip = document.createElement('span'); grip.className = 'menu-grip';
+    grip.innerHTML = '<svg viewBox="0 0 10 14" fill="currentColor"><circle cx="3" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/><circle cx="3" cy="7" r="1.3"/><circle cx="7" cy="7" r="1.3"/><circle cx="3" cy="12" r="1.3"/><circle cx="7" cy="12" r="1.3"/></svg>';
+    var eye = document.createElement('span'); eye.className = 'menu-eye'; eye.title = 'Скрыть / показать пункт';
+    eye.innerHTML = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 10s3-5.3 8-5.3S18 10 18 10s-3 5.3-8 5.3S2 10 2 10z"/><circle cx="10" cy="10" r="2.3"/></svg>';
+    it.appendChild(grip); it.appendChild(eye);
+  });
+}
+// Подсказка первого визита (ГОСТ): на ОДНОМ пункте, гаснет через 5с или при первом входе в режим.
+function menuHintMaybe_() {
+  if (menuHintDone_ || !D || D.role !== 'admin' || viewAsEntry || menuCustomizing_) return;
+  menuHintDone_ = true;
+  try { if (localStorage.getItem('yard.menu.hint') === '1') return; } catch (e) {}
+  var first = document.querySelector('.sidebar-nav .sidebar-nav-item[data-page="main"]'); if (!first) return;
+  var b = document.createElement('div'); b.className = 'menu-hint-badge'; b.id = 'menu-hint-badge';
+  b.textContent = 'Держи здесь ~0,5 сек - настроить меню';
+  first.style.position = 'relative'; first.appendChild(b); first.classList.add('menu-hint-pulse');
+  menuHintTimer_ = setTimeout(menuHintDismiss_, 5000);
+}
+function menuHintDismiss_() {
+  clearTimeout(menuHintTimer_);
+  var b = document.getElementById('menu-hint-badge'); if (b) b.remove();
+  var f = document.querySelector('.sidebar-nav-item.menu-hint-pulse'); if (f) { f.classList.remove('menu-hint-pulse'); f.style.position = ''; }
+  try { localStorage.setItem('yard.menu.hint', '1'); } catch (e) {}
+}
+
+// ── долгое нажатие и перетаскивание (ГОСТ раздел 6) ──
+function menuHoldCancel_() {
+  var h = menuHold_; menuHold_ = null; if (!h) return;
+  clearTimeout(h.timer); h.item.style.transform = ''; h.item.style.transition = '';
+}
+function menuDragStart_(item, e, immediate) {
+  if (menuDrag_) return;
+  menuDrag_ = { item: item, card: null, x0: e.clientX, y0: e.clientY, baseX: 0, baseY: 0, curX: 0, curY: 0, tgtX: 0, tgtY: 0,
+                raf: 0, origNext: item.nextSibling, moved: false, lifted: false, pid: e.pointerId };
+  if (!immediate) {
+    // фаза 1: отклик сразу, подъём - после 5px сдвига
+    item.style.transition = 'transform 100ms cubic-bezier(.25,1,.5,1)';
+    item.style.transform = 'scale(.97)';
+  }
+  try { if (e.pointerId != null && item.setPointerCapture) item.setPointerCapture(e.pointerId); } catch (err) {}
+  if (immediate) menuDragLift_();
+}
+function menuDragLift_() {
+  var d = menuDrag_; if (!d || d.lifted) return;
+  d.item.classList.remove('menu-wiggle');
+  d.item.style.transform = ''; d.item.style.transition = '';
+  var r = d.item.getBoundingClientRect();
+  var card = document.createElement('div');
+  card.className = 'menu-drag-card sidebar-nav-item' + (d.item.classList.contains('menu-hidden') ? ' menu-hidden' : '');
+  card.innerHTML = d.item.innerHTML;
+  card.style.left = r.left + 'px'; card.style.top = r.top + 'px';
+  card.style.width = r.width + 'px'; card.style.height = r.height + 'px';
+  document.body.appendChild(card);
+  d.card = card; d.baseX = r.left; d.baseY = r.top; d.lifted = true;
+  d.item.classList.add('menu-placeholder');
+  menuWiggleStop_();   // дрожание - CSS-анимация transform, перекрыла бы FLIP соседей; на время драга гасим
+  document.body.style.cursor = 'grabbing';
+  if (typeof uiSounds !== 'undefined' && uiSounds.dragGrab) uiSounds.dragGrab();
+  menuDragTick_();
+}
+function menuDragTick_() {
+  var d = menuDrag_; if (!d || !d.lifted) return;
+  if (menuPrefersReduced_()) { d.curX = d.tgtX; d.curY = d.tgtY; }
+  else { d.curX += (d.tgtX - d.curX) * 0.28; d.curY += (d.tgtY - d.curY) * 0.28; }
+  var tilt = Math.max(-7, Math.min(7, (d.tgtX - d.curX) * 0.10));
+  d.card.style.transform = 'translate(' + d.curX + 'px,' + d.curY + 'px) rotate(' + tilt + 'deg) scale(1.03)';
+  d.raf = requestAnimationFrame(menuDragTick_);
+}
+function menuDragMove_(e) {
+  var d = menuDrag_; if (!d) return;
+  if (!d.lifted) {
+    if (Math.abs(e.clientX - d.x0) + Math.abs(e.clientY - d.y0) < 5) return;
+    menuDragLift_();
+  }
+  d.tgtX = e.clientX - d.x0; d.tgtY = e.clientY - d.y0;
+  var nav = menuNav_();
+  var over = document.elementFromPoint(d.baseX + 20, e.clientY);
+  var target = (over && over.closest) ? (over.closest('.sidebar-nav-item') || over.closest('.sidebar-nav-section')) : null;
+  if (!target || target === d.item || !nav.contains(target) || target.classList.contains('menu-drag-card')) return;
+  var tr = target.getBoundingClientRect();
+  var after = e.clientY > tr.top + tr.height / 2;
+  var doneBar = document.getElementById('menu-done-bar');
+  var ref = after ? (target.nextSibling || doneBar) : target;
+  if (ref === d.item || (after && target.nextSibling === d.item)) return;
+  menuFlip_(function() { nav.insertBefore(d.item, ref); });
+  d.moved = true;
+}
+function menuDragEnd_(cancel) {
+  var d = menuDrag_; menuDrag_ = null; if (!d) return;
+  cancelAnimationFrame(d.raf);
+  document.body.style.cursor = '';
+  if (!d.lifted) { d.item.style.transform = ''; d.item.style.transition = ''; return; }
+  var nav = menuNav_();
+  if (cancel && d.moved) menuFlip_(function() { nav.insertBefore(d.item, d.origNext || document.getElementById('menu-done-bar')); });
+  // укладка "первый-последний": карточка летит к плейсхолдеру, overshoot 380ms
+  // (отмена - зеркально, без overshoot, 340ms --ease-drawer)
+  var to = d.item.getBoundingClientRect();
+  var dur = menuPrefersReduced_() ? 0 : (cancel ? 340 : 380);
+  var curve = cancel ? 'cubic-bezier(.32,.72,0,1)' : 'cubic-bezier(.34,1.45,.5,1)';
+  var card = d.card, item = d.item;
+  card.style.transition = 'transform ' + dur + 'ms ' + curve + ', opacity 140ms cubic-bezier(.25,1,.5,1)';
+  card.style.transform = 'translate(' + (to.left - d.baseX) + 'px,' + (to.top - d.baseY) + 'px) rotate(0deg) scale(1)';
+  card.style.opacity = '1';
+  setTimeout(function() {
+    card.remove();
+    item.classList.remove('menu-placeholder');
+    if (menuCustomizing_) menuWiggle_(null);
+  }, dur);
+  if (!cancel && d.moved) {
+    menuCfgSave_(false);
+    if (typeof uiSounds !== 'undefined' && uiSounds.dragDrop) uiSounds.dragDrop();
+  }
+}
+// FLIP соседей - 300ms cubic-bezier(.22,.9,.28,1), снять позиции до/после мутации.
+function menuFlip_(mutate) {
+  var els = menuChildren_();
+  var before = els.map(function(el) { return el.getBoundingClientRect().top; });
+  mutate();
+  if (menuPrefersReduced_()) return;
+  els.forEach(function(el, i) {
+    if (el.classList.contains('menu-placeholder')) return;
+    var dlt = before[i] - el.getBoundingClientRect().top;
+    if (!dlt) return;
+    el.style.transition = 'none'; el.style.transform = 'translateY(' + dlt + 'px)';
+    requestAnimationFrame(function() { el.style.transition = 'transform 300ms cubic-bezier(.22,.9,.28,1)'; el.style.transform = ''; });
+  });
+}
+(function menuInit_() {
+  var nav = menuNav_(); if (!nav) return;
+  menuDecorateItems_();
+  nav.addEventListener('contextmenu', function(e) { if (menuCustomizing_ || menuHold_) e.preventDefault(); });
+  // Клики: в режиме кастомизации пункты не переключают страницы (capture - раньше inline
+  // onclick самого пункта); "глаз" прячет/показывает; клик по пустому месту - выход.
+  nav.addEventListener('click', function(e) {
+    if (menuSuppressClick_) { menuSuppressClick_ = false; e.stopPropagation(); e.preventDefault(); return; }
+    if (!menuCustomizing_) return;
+    if (e.target.closest('#menu-done-bar')) return;
+    e.stopPropagation(); e.preventDefault();
+    var eye = e.target.closest('.menu-eye');
+    if (eye) { menuToggleHidden_(eye.closest('.sidebar-nav-item')); return; }
+    if (!e.target.closest('.sidebar-nav-item') && !e.target.closest('.sidebar-nav-section')) menuExitCustomize_();
+  }, true);
+  nav.addEventListener('pointerdown', function(e) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (typeof D === 'undefined' || !D || D.role !== 'admin') return;   // у сотрудника кастомизации нет
+    if (e.target.closest('.menu-eye') || e.target.closest('#menu-done-bar')) return;
+    var item = e.target.closest('.sidebar-nav-item'); if (!item) return;
+    if (menuCustomizing_) { menuDragStart_(item, e, false); return; }
+    // долгое нажатие: 550мс без сдвига > 6px; отклик scale(.97) - с первой миллисекунды
+    menuHoldCancel_();
+    item.style.transition = 'transform 100ms cubic-bezier(.25,1,.5,1)';
+    item.style.transform = 'scale(.97)';
+    var ptype = e.pointerType, pid = e.pointerId;
+    menuHold_ = { item: item, x0: e.clientX, y0: e.clientY, pid: pid, timer: setTimeout(function() {
+      var h = menuHold_; menuHold_ = null; if (!h) return;
+      h.item.style.transform = ''; h.item.style.transition = '';
+      menuSuppressClick_ = true;   // отпускание после удержания - не клик по пункту
+      menuEnterCustomize_();
+      // удерживаемый пункт поднимаем сразу - можно тащить, не отпуская (ГОСТ, фаза 2)
+      menuDragStart_(h.item, { clientX: h.x0, clientY: h.y0, pointerId: pid, pointerType: ptype }, true);
+    }, 550) };
+  });
+  window.addEventListener('pointermove', function(e) {
+    if (menuHold_ && (Math.abs(e.clientX - menuHold_.x0) > 6 || Math.abs(e.clientY - menuHold_.y0) > 6)) menuHoldCancel_();
+    if (menuDrag_) menuDragMove_(e);
+  }, { passive: true });
+  window.addEventListener('pointerup', function() { if (menuHold_) menuHoldCancel_(); if (menuDrag_) menuDragEnd_(false); });
+  window.addEventListener('pointercancel', function() { if (menuHold_) menuHoldCancel_(); if (menuDrag_) menuDragEnd_(true); });
+  document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Escape') return;
+    if (menuDrag_) { menuDragEnd_(true); e.preventDefault(); }
+    else if (menuCustomizing_) { menuExitCustomize_(); e.preventDefault(); }
+  });
+})();
+
+// ── Проверка контрагента по ИНН (05.09, Влад: "менеджерам со старшим вкладку проверка
+// контрагента: вводят ИНН - и им даётся весь расклад через наш сервис; сохраняется история
+// запросов"). Тот же Checko/светофор, что в Справочниках и ДЗ (сервер:
+// /api/counterparty/check, /api/counterparty/history). Повторная проверка того же ИНН в
+// течение 7 дней отдаётся из кэша (квота 300/день общая), "Обновить данные" - заново.
+var cpInited_ = false, cpBusy_ = false;
+function cpInit_() {
+  var inn = document.getElementById('cp-inn');
+  if (!cpInited_) { cpInited_ = true; if (inn) setTimeout(function() { inn.focus(); }, 80); }
+  var tools = document.getElementById('cp-admin-tools');
+  if (tools) tools.style.display = (D && D.role === 'admin') ? 'flex' : 'none';
+  cpLoadHistory_();
+}
+// Чистка кэша/истории - только admin (сервер тоже проверяет). "cache" - записи остаются,
+// но помечаются негодными для кэша; "history" - удаление, поэтому с подтверждением.
+function cpCacheClear_(mode) {
+  if (!D || D.role !== 'admin') return;
+  var params = { mode: mode };
+  if (mode === 'history') {
+    if (!confirm('Удалить всю историю проверок? Кэш тоже пропадёт - следующие проверки пойдут к Checko заново.')) return;
+    params.confirm = '1';
+  }
+  postToYardApi_('/counterparty/cache_clear', params).then(function(r) {
+    if (!r.ok) { p2Toast('Не удалось: ' + (r.data && r.data.error || 'ошибка сервера'), 'red'); return; }
+    var n = (r.data && r.data.affected) || 0;
+    p2Toast(mode === 'cache'
+      ? ('Кэш сброшен: ' + n + ' - следующая проверка пойдёт к Checko заново')
+      : ('История очищена: удалено записей - ' + n), 'green');
+    if (mode === 'history') { var el = document.getElementById('cp-result'); if (el) el.innerHTML = ''; }
+    cpLoadHistory_();
+  }).catch(function(e) { p2Toast('Ошибка сети: ' + e.message, 'red'); });
+}
+function cpFmtMoney_(v) { return (v == null) ? '—' : Math.round(v).toLocaleString('ru-RU') + ' ₽'; }
+function cpFmtDate_(s) {
+  var m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? (m[3] + '.' + m[2] + '.' + m[1]) : (s || '—');
+}
+function cpCheck_(force) {
+  var innEl = document.getElementById('cp-inn'), st = document.getElementById('cp-status'), btn = document.getElementById('cp-check-btn');
+  if (!innEl || !st || !btn) return;
+  var inn = (innEl.value || '').replace(/\D/g, '');
+  innEl.value = inn;
+  if (inn.length !== 10 && inn.length !== 12) { st.textContent = 'ИНН - 10 или 12 цифр'; st.style.color = 'var(--red)'; return; }
+  if (cpBusy_) return;
+  cpBusy_ = true; btn.disabled = true; btn.textContent = 'Проверяю…'; st.textContent = ''; st.style.color = '';
+  postToYardApi_('/counterparty/check', force ? { inn: inn, force: '1' } : { inn: inn }).then(function(r) {
+    cpBusy_ = false; btn.disabled = false; btn.textContent = 'Проверить';
+    if (!r.ok) { st.textContent = (r.data && r.data.error) || 'Ошибка сервера'; st.style.color = 'var(--red)'; return; }
+    cpRenderResult_(r.data);
+    cpLoadHistory_();
+  }).catch(function(e) {
+    cpBusy_ = false; btn.disabled = false; btn.textContent = 'Проверить';
+    st.textContent = 'Ошибка сети: ' + e.message; st.style.color = 'var(--red)';
+  });
+}
+function cpRenderResult_(d) {
+  var el = document.getElementById('cp-result'); if (!el) return;
+  var c = d.card || {};
+  var color = legalRiskColor_(d.light);
+  var mono = "font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums";
+  var reasons = (d.reasons && d.reasons.length)
+    ? '<ul style="margin:8px 0 0;padding-left:18px;font-size:12.5px;line-height:1.5">' + d.reasons.map(function(x) { return '<li>' + pageEsc_(x) + '</li>'; }).join('') + '</ul>'
+    : '<div class="muted" style="font-size:12.5px;margin-top:6px">Рисков по официальным реестрам не найдено</div>';
+  function row(label, value) {
+    if (value == null || value === '') return '';
+    return '<div style="display:flex;gap:12px;padding:6px 0;border-bottom:1px solid var(--border)">' +
+      '<div class="muted" style="flex:0 0 150px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;padding-top:2px">' + label + '</div>' +
+      '<div style="flex:1;font-size:13px;min-width:0;word-break:break-word">' + value + '</div></div>';
+  }
+  var founders = (c.founders || []).map(function(f) {
+    return pageEsc_(f.name) + (f.share != null ? ' <span class="muted">' + f.share + '%</span>' : '');
+  }).join('<br>');
+  var contacts = (c.phones || []).map(pageEsc_).concat((c.emails || []).map(pageEsc_)).join(' · ');
+  el.innerHTML =
+    '<div style="display:grid;grid-template-columns:minmax(240px,1fr) 2fr;gap:16px;align-items:start">' +
+      '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px">' +
+        '<div style="display:flex;align-items:center;gap:10px">' + legalRiskMarkHtml_(d.light, 14, '', d.marker) +
+          '<div><div style="font-size:17px;font-weight:700;color:' + color + '">' + legalRiskLabel_(d.light) + '</div>' +
+          '<div class="muted" style="font-size:11px">' + (d.from_cache ? 'из кэша, проверка ' : 'проверено ') + pageEsc_(d.checked_at || '') + '</div></div></div>' +
+        reasons +
+        '<div style="margin-top:12px"><button type="button" onclick="cpCheck_(true)" style="background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Обновить данные (новый запрос)</button></div>' +
+      '</div>' +
+      '<div>' +
+        '<div style="font-size:16px;font-weight:700;margin-bottom:2px">' + pageEsc_(c.name_short || ('ИНН ' + d.inn)) + '</div>' +
+        (c.name_full ? '<div class="muted" style="font-size:12px;margin-bottom:8px">' + pageEsc_(c.name_full) + '</div>' : '') +
+        row('ИНН / КПП / ОГРН', '<span style="' + mono + '">' + pageEsc_((c.inn || d.inn) + (c.kpp ? ' / ' + c.kpp : '') + (c.ogrn ? ' / ' + c.ogrn : '')) + '</span>') +
+        row('Статус', pageEsc_(c.status || '')) +
+        row('Зарегистрирована', c.reg_date ? cpFmtDate_(c.reg_date) : '') +
+        row('Адрес', pageEsc_(c.address || '')) +
+        row('Руководитель', c.head_name ? pageEsc_(c.head_name) + (c.head_post ? ' <span class="muted">' + pageEsc_(c.head_post) + '</span>' : '') : '') +
+        row('Учредители', founders) +
+        row('Вид деятельности', pageEsc_(c.okved || '')) +
+        row('Сотрудников', c.employees != null ? c.employees + (c.employees_year ? ' <span class="muted">(' + pageEsc_(c.employees_year) + ')</span>' : '') : '') +
+        row('Уставный капитал', c.capital != null ? cpFmtMoney_(c.capital) : '') +
+        row('Налогов уплачено', c.taxes_paid != null ? cpFmtMoney_(c.taxes_paid) + (c.taxes_year ? ' <span class="muted">(' + pageEsc_(c.taxes_year) + ')</span>' : '') : '') +
+        row('Недоимка', (c.nedoimka != null && c.nedoimka > 0) ? '<span style="color:var(--red);font-weight:600">' + cpFmtMoney_(c.nedoimka) + '</span>' : '') +
+        row('Реестр МСП', pageEsc_(c.msp || '')) +
+        row('Контакты', contacts) +
+        row('Лицензии / дела о банкротстве', (c.licenses || 0) + ' / ' + (c.bankrupt_cases || 0)) +
+      '</div>' +
+    '</div>';
+}
+function cpLoadHistory_() {
+  var body = document.getElementById('cp-history-body'); if (!body) return;
+  fetchFromYardApi_('/counterparty/history', { limit: 50 }).then(function(r) {
+    if (!r.ok || !r.data) { body.innerHTML = '<tr><td colspan="5" class="muted" style="padding:12px">История недоступна</td></tr>'; return; }
+    var items = r.data.items || [];
+    if (!items.length) { body.innerHTML = '<tr><td colspan="5" class="muted" style="padding:12px">Проверок ещё не было</td></tr>'; return; }
+    body.innerHTML = items.map(function(it) {
+      var innEsc = pageEscAttr_(it.inn);
+      return '<tr style="cursor:pointer" onclick="document.getElementById(\'cp-inn\').value=\'' + innEsc + '\';cpCheck_(false)" title="Открыть результат">' +
+        '<td class="muted" style="white-space:nowrap;font-family:\'JetBrains Mono\',ui-monospace,monospace">' + pageEsc_(it.requested_at || '') + '</td>' +
+        '<td style="font-family:\'JetBrains Mono\',ui-monospace,monospace">' + pageEsc_(it.inn) + '</td>' +
+        '<td>' + pageEsc_(it.name_short || '—') + '</td>' +
+        '<td>' + (it.light
+          ? legalRiskMarkHtml_(it.light, 8, 'margin-right:6px', it.marker) + '<span style="font-size:12px;color:' + legalRiskColor_(it.light) + '">' + legalRiskLabel_(it.light) + '</span>'
+          : '<span class="muted">—</span>') +
+          (it.from_cache ? ' <span class="muted" style="font-size:10px">из кэша</span>' : '') + '</td>' +
+        '<td class="muted" style="font-size:12px">' + pageEsc_(it.requested_by || '') + '</td>' +
+      '</tr>';
+    }).join('');
+  }).catch(function() { body.innerHTML = '<tr><td colspan="5" class="muted" style="padding:12px">Ошибка сети</td></tr>'; });
+}
+
 function showPage(id, el) {
   closeMobileSidebar(); // выбрали страницу - меню на телефоне больше не нужно открытым
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -18175,6 +19406,12 @@ function showPage(id, el) {
   if (lazyGroup_ && dirtyGroups_[lazyGroup_]) renderGroup_(lazyGroup_);
   if (id === 'dynamics') loadHistoryData();
   if (id === 'clients') loadClientsData();
+  if (id === 'counterparty') cpInit_();
+  // Единая карта связей 1С (05.09) - грузится один раз при первом заходе на любую
+  // страницу, где показан заказчик, и перерисовывает её, когда придёт.
+  if (id === 'clients') cpEnsureLights_(function() { if (typeof renderClientsBody === 'function') renderClientsBody(); });
+  if (id === 'receipts') cpEnsureLights_(function() { if (typeof renderReceipts === 'function') renderReceipts(); });
+  if (id === 'my-page') cpEnsureLights_(function() { if (typeof renderMyPage === 'function') renderMyPage(); });
   if (id === 'crm') loadCrmData();
   if (id === 'global-stats') loadGlobalStatsData();
   if (id === 'order-plan') loadOrderPlanData();
@@ -18192,7 +19429,15 @@ function showPage(id, el) {
   var wrap = document.getElementById('period-selector-wrap');
   if (wrap) {
     wrap.style.display = PERIOD_PAGES.indexOf(id) >= 0 ? 'flex' : 'none';
-    if (PERIOD_PAGES.indexOf(id) >= 0 && !availablePeriods.length) loadAvailablePeriods();
+    // Без гварда "!availablePeriods.length" (2026-09-04, Влад: "куда август делся?", часть
+    // 3) - старый гвард грузил список РОВНО ОДИН РАЗ за жизнь вкладки браузера и больше
+    // никогда, даже если открыть эту же страницу заново или нажать "Обновить данные"
+    // (loadData() список не трогает вообще, см. applyData()). Бэкенд к этому моменту уже
+    // чинили дважды (v373/v374), а список на экране оставался старым, пока Влад не закрывал
+    // и не открывал вкладку заново - для пользователя выглядело так, будто фикс не подействовал.
+    // loadAvailablePeriods() сама дешёвая (читает уже загруженный D.periods, без сети) -
+    // пересчитывать её на каждый заход на страницу с выбором периода ничего не стоит.
+    if (PERIOD_PAGES.indexOf(id) >= 0) loadAvailablePeriods();
   }
 
   var rangeWrap = document.getElementById('range-selector-wrap');
@@ -18796,8 +20041,20 @@ var CRM = (function () {
       if (typeof initCursorLight_ === 'function') initCursorLight_('page-crm', 'p2-light');
       updateMeLabel();
       updatePushButton();
+      autoMeForManager();
     }
     load();
+  }
+  // Менеджер под своим логином - это и есть "я": подбираем сотрудника по фамилии из
+  // D.managerName ("Фамилия Имя ...") и убираем выбор (чужую фамилию ему выбирать нечего).
+  function autoMeForManager() {
+    if (typeof D === 'undefined' || !D || D.role !== 'manager' || !D.managerName) return;
+    var sur = String(D.managerName).trim().split(/\s+/)[0].toLowerCase();
+    ensureEmployees().then(function (emps) {
+      var hit = emps.find(function (e) { return String(e.name || '').toLowerCase().split(/\s+/).indexOf(sur) >= 0; });
+      if (hit) { S.me = String(hit.extension); try { localStorage.setItem('crmMyExtension', S.me); } catch (e) {} updateMeLabel(); }
+      var btn = el('crm-me-btn'); if (btn) { btn.disabled = true; btn.title = 'Вы вошли под своим аккаунтом'; }
+    });
   }
   function load() {
     var loading = el('crm-loading'), body = el('crm-body');
@@ -20109,7 +21366,7 @@ function renderClientsTable_(list, mode) {
         c.label + '<span style="font-size:10px;opacity:' + arrowOpacity + '">' + arrow + '</span></th>';
     }).join('');
     var rows = sorted.map(function(c, i) {
-      return '<tr><td>' + (i+1) + '</td><td>' + c.name + '</td><td>' + (c.manager ? cleanName(c.manager) : '—') + '</td>' +
+      return '<tr><td>' + (i+1) + '</td><td>' + cpLightHtml_(c.name) + c.name + '</td><td>' + (c.manager ? cleanName(c.manager) : '—') + '</td>' +
         '<td class="num">' + c.orders + '</td><td class="num">' + fmt(c.revenue) + '</td>' +
         '<td class="num">' + fmt(c.avg_order_value) + '</td><td>' + fmtDateRu(c.last_order) + '</td>' +
         '<td class="num ' + segBadgeClass_(c.segment) + '">' + c.segment + '</td></tr>';
@@ -20118,7 +21375,7 @@ function renderClientsTable_(list, mode) {
   }
 
   var rows = list.map(function(c, i) {
-    return '<tr><td>' + (i+1) + '</td><td>' + c.name + '</td><td class="num">' + c.orders + '</td>' +
+    return '<tr><td>' + (i+1) + '</td><td>' + cpLightHtml_(c.name) + c.name + '</td><td class="num">' + c.orders + '</td>' +
       '<td class="num">' + fmt(c.revenue) + '</td><td>' + fmtDateRu(c.last_order) + '</td>' +
       '<td class="num amber">' + c.recency_days + ' дн</td></tr>';
   }).join('');

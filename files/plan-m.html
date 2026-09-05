@@ -56,7 +56,7 @@ input{font:inherit;color:inherit}
 svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
 
 /* ── Каркас: шапка 2 строки (88 px) + лента ── */
-.app{display:flex;flex-direction:column;height:100vh;height:100dvh;padding-top:var(--safe-t)}
+.app{display:flex;flex-direction:column;height:100vh;height:var(--vvh,100dvh);padding-top:var(--safe-t)}
 .hdr{flex:none;background:var(--bg);border-bottom:1px solid var(--border);position:relative;z-index:40}
 .hdr-row{display:flex;align-items:center;gap:6px;height:var(--hdr-row);padding:0 8px}
 .hdr-row1 .grow{flex:1 1 auto;min-width:0}
@@ -217,10 +217,10 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 /* Высота листа меняется ПО ДЕТЕНТУ (52% / 92%), а не сдвигом одного высокого листа вниз -
    иначе подвал с «Поставить» в полулисте уезжает за нижний край экрана (Влад, живая проба
    05.09: «кнопка не свайпается до туда»). Подвал всегда прижат к видимому низу. */
-.sheet{position:fixed;left:0;right:0;bottom:0;height:52vh;height:52dvh;z-index:95;background:var(--bg2);border-radius:12px 12px 0 0;
+.sheet{position:fixed;left:0;right:0;bottom:0;height:calc(var(--vvh,100vh) * .52);z-index:95;background:var(--bg2);border-radius:12px 12px 0 0;
   transform:translateY(105%);transition:transform .32s var(--ease-drawer),height .28s var(--ease-drawer);display:flex;flex-direction:column;box-shadow:0 -8px 32px rgba(0,0,0,.4)}
-.sheet.half{transform:none;height:52vh;height:52dvh}
-.sheet.full{transform:none;height:92vh;height:92dvh}
+.sheet.half{transform:none;height:calc(var(--vvh,100vh) * .52)}
+.sheet.full{transform:none;height:calc(var(--vvh,100vh) * .92)}
 .sheet .grip{flex:none;height:22px;display:flex;align-items:center;justify-content:center;touch-action:none}
 .sheet .grip::before{content:"";width:44px;height:4px;border-radius:2px;background:var(--border-strong)}
 .sh-head{flex:none;display:flex;align-items:center;gap:8px;padding:0 8px 8px 8px;min-height:44px}
@@ -380,7 +380,7 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 <div class="scrim" id="scrim"></div>
 <div class="sheet" id="sheet"><div class="grip" id="grip"></div><div class="sh-head" id="shHead"></div><div class="sh-body" id="shBody"></div><div class="sh-foot" id="shFoot"></div></div>
 <div class="ovl" id="ovl"><div class="ovl-head" id="ovlHead"></div><div class="ovl-body" id="ovlBody"></div><div class="ovl-foot" id="ovlFoot" hidden></div></div>
-<div class="demo-tag" id="demoTag" hidden>ДЕМО · синтетика</div>
+<div class="demo-tag" id="demoTag" hidden>ДЕМО · v3</div>
 <script>
 "use strict";
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -1513,6 +1513,16 @@ function ingest(data){
   M.segs = data.segs || []; M.people = data.people || []; M.trailers = data.trailers || []; M.managers = data.managers || []; M.logists = data.logists || []; M.me = data.me || M.me;
   M.segs.forEach(function(s){ M.snap[s.id] = JSON.stringify(segToWire(s)); });
 }
+/* Реальная высота видимого окна - от visualViewport, не от vh/dvh: внутри просмотрщика
+   артефактов claude.ai и при открытой клавиатуре CSS-единицы врут, и подвал листа с
+   «Поставить» уезжал за экран (видео Влада 05.09 23:12). */
+function syncVvh(){
+  var vv = window.visualViewport, h = vv ? vv.height : window.innerHeight;
+  document.documentElement.style.setProperty("--vvh", Math.round(h) + "px");
+}
+syncVvh();
+if (window.visualViewport) window.visualViewport.addEventListener("resize", syncVvh);
+window.addEventListener("resize", syncVvh);
 function boot(){
   try { M.collapsed = JSON.parse(localStorage.getItem("plan_m_collapsed") || "{}") || {}; } catch(e){ M.collapsed = {}; }
   try { var z = localStorage.getItem("plan_m_zoom"); if (z != null) M.zoom = clamp(+z, 0, 3); } catch(e){}

@@ -2858,6 +2858,11 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
     <div class="sidebar-nav-item" onclick="showPage('crm',this)" data-page="crm">
       <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="4" height="14" rx="1"/><rect x="8" y="3" width="4" height="9" rx="1"/><rect x="13" y="3" width="4" height="11" rx="1"/></svg></span> CRM
     </div>
+    <!-- «Проверка контрагента» (05.09, Влад: "менеджерам со старшим вкладку... вводят ИНН и им
+         даётся весь расклад через наш сервис") - admin + manager, см. applyRoleUI и cp*_ в JS. -->
+    <div class="sidebar-nav-item" onclick="showPage('counterparty',this)" data-page="counterparty">
+      <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2.5l6 2.3v4.7c0 3.6-2.5 6.6-6 8-3.5-1.4-6-4.4-6-8V4.8z"/><path d="M7.3 10l1.9 1.9 3.6-3.8"/></svg></span> Проверка контрагента
+    </div>
     <!-- «Поступления» - переехала сюда из шапки меню (Влад, 30.08: «перенеси в раздел
          продажи», слот наверху занят «Справочниками»); сама страница/её JS не менялись,
          id="page-receipts" и весь код внутри - тот же. -->
@@ -4850,6 +4855,40 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
     </div>
 
     <!-- ═══ КЛИЕНТЫ ══════════════════════════════════════════════ -->
+    <!-- «Проверка контрагента» (05.09, Влад: "менеджерам со старшим вкладку... вводят ИНН и им
+         даётся весь расклад через наш сервис; сохраняется история запросов") - тот же Checko и
+         светофор, что в Справочниках/ДЗ (сервер /api/counterparty/check|history). Логика - cp*_
+         функции в JS. Доступ: admin + manager (applyRoleUI). Повтор ИНН за 7 дней - из кэша. -->
+    <div id="page-counterparty" class="page">
+      <div class="card" style="margin-bottom:16px">
+        <div class="sec-header">
+          <div class="sec-title">Проверка по ИНН</div>
+          <div class="muted" style="font-size:11px">ЕГРЮЛ · Федресурс · ФНС через Checko · повтор за 7 дней - из кэша</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
+          <input autocomplete="off" id="cp-inn" type="text" inputmode="numeric" maxlength="12" placeholder="ИНН - 10 или 12 цифр"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();cpCheck_(false);}"
+            style="width:240px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-size:14px;outline:none;font-family:'JetBrains Mono',ui-monospace,monospace;letter-spacing:.04em">
+          <button type="button" id="cp-check-btn" onclick="cpCheck_(false)" data-nav-sound
+            style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer">Проверить</button>
+          <span id="cp-status" class="muted" style="font-size:12px"></span>
+        </div>
+        <div id="cp-result" style="margin-top:14px"></div>
+      </div>
+      <div class="card">
+        <div class="sec-header">
+          <div class="sec-title">История запросов</div>
+          <div class="muted" style="font-size:11px">клик по строке - открыть результат</div>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="tbl">
+            <thead><tr><th>Когда</th><th>ИНН</th><th>Компания</th><th>Светофор</th><th>Кто</th></tr></thead>
+            <tbody id="cp-history-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <div id="page-clients" class="page">
       <div id="clients-loading" style="color:var(--muted);padding:16px">Загрузка клиентской аналитики...</div>
       <div id="clients-body" style="display:none">
@@ -6209,6 +6248,7 @@ const PAGE_TITLES = {
   managers: 'Менеджеры',
   dynamics: 'Динамика',
   clients: 'База клиентов',
+  counterparty: 'Проверка контрагента',
   crm: 'CRM',
   sales: 'Продажи - обзор',
   'sales-mgr': 'Менеджеры - заказы 1С',
@@ -9832,6 +9872,10 @@ function applyRoleUI() {
     if (isCommercialHeadViewer) allowedPages_.push('commercial-head-salary', 'commercial-head-debt');
     var isManagerViewer_ = previewing ? !!(viewAsEntry && viewAsEntry.type === 'manager') : (D.role === 'manager');
     if (isManagerViewer_ || CRM_MANAGER_SUR_FRONT_.indexOf(curPersonSur) >= 0) allowedPages_.push('crm');
+    // "Проверка контрагента" (05.09, Влад: "менеджерам со старшим") - всем менеджерам, включая
+    // руководителей коммерческих групп (у них та же роль manager); сервер тоже пускает только
+    // admin/manager (requireRole_ на /api/counterparty/*).
+    if (isManagerViewer_) allowedPages_.push('counterparty');
     document.querySelectorAll('.sidebar-nav-item').forEach(function(item) {
       const page = item.getAttribute('data-page');
       item.style.display = allowedPages_.indexOf(page) >= 0 ? '' : 'none';
@@ -12143,14 +12187,16 @@ function legalRiskLabel_(light) {
 // круга череп ставить банкроты"). Череп - Tabler "skull" инлайн-SVG в красном, не emoji
 // (ГОСТ: emoji в интерфейсе нет; размер/цвет - как у точки). Одна функция на все места:
 // список юрлиц, драйвер, таблицы ДЗ, карточка контрагента.
-function legalRiskMarkHtml_(light, size, style) {
+// marker - "!" / "!!!" с сервера (risk_marker: банкрот или недоимка >= 1 млн -> "!",
+// недоимка >= 10 млн -> "!!!"; Влад, 05.09: "вместо черепа красный восклицательный знак").
+// Глиф текстом (JetBrains Mono, жирный, красный), размер - от размера точки, чтобы стоять в
+// той же строке. Череп убран.
+function legalRiskMarkHtml_(light, size, style, marker) {
   style = style || '';
-  if (light === 'bankrupt') {
-    var s = Math.round(size * 1.7);
-    return '<svg width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="Банкрот" style="display:inline-block;vertical-align:middle;flex:none;' + style + '">' +
-      '<path d="M12 4c4.418 0 8 3.358 8 7.5c0 1.901-.755 3.637-2 4.96V19a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-2.54C4.755 15.137 4 13.401 4 11.5 4 7.358 7.582 4 12 4z"/>' +
-      '<path d="M10 17v3"/><path d="M14 17v3"/>' +
-      '<path d="M9 11m-1 0a1 1 0 1 0 2 0a1 1 0 1 0-2 0"/><path d="M15 11m-1 0a1 1 0 1 0 2 0a1 1 0 1 0-2 0"/></svg>';
+  if (!marker && light === 'bankrupt') marker = '!';
+  if (marker === '!' || marker === '!!!') {
+    return '<span style="display:inline-block;line-height:1;font-family:\'JetBrains Mono\',ui-monospace,monospace;font-weight:800;font-size:' +
+      Math.round(size * 1.6) + 'px;color:var(--red);vertical-align:middle;letter-spacing:-0.08em;flex:none;' + style + '" aria-label="Внимание">' + marker + '</span>';
   }
   return '<span style="display:inline-block;width:' + size + 'px;height:' + size + 'px;border-radius:50%;background:' +
     legalRiskColor_(light) + ';vertical-align:middle;flex:none;' + style + '"></span>';
@@ -12210,7 +12256,7 @@ function legalPaint_() {
     // более подробную информацию") - обычный title, переносы строк браузер показывает как есть.
     var riskDot = le.risk_light
       ? ' <span title="' + pageEscAttr_(legalRiskTooltip_(le)) + '" style="display:inline-block;vertical-align:middle;margin-left:2px">' +
-        legalRiskMarkHtml_(le.risk_light, 8) + '</span>' : '';
+        legalRiskMarkHtml_(le.risk_light, 8, '', le.risk_marker) + '</span>' : '';
     return '<tr' + (le.is_deleted ? spravDeletedRowStyle_() : '') + '>' +
       '<td><b>' + pageEsc_(le.name) + '</b>' + ownBadge + riskDot + (le.inn ? ' <span class="muted" style="font-size:11px">ИНН ' + pageEsc_(le.inn) + '</span>' : '') + (le.is_deleted ? ' <span class="muted" style="font-size:11px">(удалено)</span>' : '') + '</td>' +
       '<td class="muted">' + (le.full_name ? pageEsc_(le.full_name) : '—') + '</td>' +
@@ -12248,7 +12294,7 @@ function legalOpenForm_(id) {
   document.getElementById('legal-risk-btn').disabled = false;
   var cachedReasons = [];
   if (le && le.risk_reasons) { try { cachedReasons = JSON.parse(le.risk_reasons) || []; } catch (e) {} }
-  legalRenderRiskResult_(le ? le.risk_light : null, cachedReasons, le ? le.risk_checked_at : null);
+  legalRenderRiskResult_(le ? le.risk_light : null, cachedReasons, le ? le.risk_checked_at : null, le ? le.risk_marker : null);
   var bk = document.getElementById('legal-bk'), dr = document.getElementById('legal-drawer');
   bk.classList.add('show');
   setTimeout(function() { dr.classList.add('show'); }, 40);
@@ -12330,7 +12376,7 @@ function legalSave_() {
 }
 // Рисует блок результата в карточке - и для уже сохранённого (кэш из БД, открытие
 // карточки), и для только что пришедшего живого ответа (после нажатия кнопки).
-function legalRenderRiskResult_(light, reasons, checkedAt) {
+function legalRenderRiskResult_(light, reasons, checkedAt, marker) {
   var el = document.getElementById('legal-risk-result');
   if (!el) return;
   if (!light) { el.innerHTML = '<div class="muted" style="font-size:12px">Ещё не проверялось</div>'; return; }
@@ -12342,7 +12388,7 @@ function legalRenderRiskResult_(light, reasons, checkedAt) {
   var whenHtml = checkedAt ? '<div class="muted" style="font-size:11px;margin-top:8px">Проверено: ' + pageEsc_(checkedAt) + '</div>' : '';
   el.innerHTML =
     '<div style="display:flex;align-items:center;gap:8px">' +
-      legalRiskMarkHtml_(light, 10) +
+      legalRiskMarkHtml_(light, 10, '', marker) +
       '<span style="font-size:13px;font-weight:600;color:' + color + '">' + legalRiskLabel_(light) + '</span>' +
     '</div>' + reasonsHtml + whenHtml;
 }
@@ -12359,11 +12405,11 @@ function legalCheckRisk_() {
   postToYardApi_('/sprav/legal_entity_risk_check', { id: legalEditId_, inn: inn }).then(function(r) {
     btn.disabled = false; btn.textContent = 'Проверить контрагента';
     if (!r.ok) { p2Toast('Не удалось проверить: ' + (r.data && r.data.error || 'ошибка сервера'), 'red'); return; }
-    legalRenderRiskResult_(r.data.light, r.data.reasons, r.data.checked_at);
+    legalRenderRiskResult_(r.data.light, r.data.reasons, r.data.checked_at, r.data.marker || null);
     // Обновляем запись в памяти, чтобы точка в списке (legalPaint_) сразу показала новый
     // цвет без полной перезагрузки Справочников.
     var le = (spravLegalEntities_ || []).filter(function(x) { return String(x.id) === String(legalEditId_); })[0];
-    if (le) { le.risk_light = r.data.light; le.risk_reasons = JSON.stringify(r.data.reasons); le.risk_checked_at = r.data.checked_at; }
+    if (le) { le.risk_light = r.data.light; le.risk_marker = r.data.marker || null; le.risk_reasons = JSON.stringify(r.data.reasons); le.risk_checked_at = r.data.checked_at; }
     legalPaint_();
   }).catch(function(e) { btn.disabled = false; btn.textContent = 'Проверить контрагента'; p2Toast('Ошибка сети: ' + e.message, 'red'); });
 }
@@ -18045,7 +18091,7 @@ function debtRiskBlockHtml_(contragent) {
     : '<div class="muted" style="font-size:12px;margin-top:2px">Рисков по официальным реестрам не найдено</div>';
   return '<div style="margin-bottom:16px;padding:10px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px">' +
     '<div style="display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:' + color + '">' +
-      legalRiskMarkHtml_(m.light, 9) +
+      legalRiskMarkHtml_(m.light, 9, '', m.marker) +
       'Проверка контрагента: ' + legalRiskLabel_(m.light) +
       (m.checked_at ? '<span class="muted" style="font-weight:400;font-size:11px;margin-left:auto">' + pageEsc_(m.checked_at) + '</span>' : '') +
     '</div>' + reasons + '</div>';
@@ -18058,7 +18104,7 @@ function debtRiskDotHtml_(contragent) {
     ? m.reasons.map(function(x) { return '— ' + x; }).join('\n')
     : 'Рисков по официальным реестрам не найдено';
   return '<span title="' + pageEscAttr_(head + '\n' + body) + '" style="display:inline-block;vertical-align:middle;margin-right:6px">' +
-    legalRiskMarkHtml_(m.light, 8) + '</span>';
+    legalRiskMarkHtml_(m.light, 8, '', m.marker) + '</span>';
 }
 function debtRiskStatusText_(data) {
   var n = 0, by = { bankrupt: 0, red: 0, yellow: 0, green: 0 };
@@ -18952,6 +18998,109 @@ function menuFlip_(mutate) {
   });
 })();
 
+// ── Проверка контрагента по ИНН (05.09, Влад: "менеджерам со старшим вкладку проверка
+// контрагента: вводят ИНН - и им даётся весь расклад через наш сервис; сохраняется история
+// запросов"). Тот же Checko/светофор, что в Справочниках и ДЗ (сервер:
+// /api/counterparty/check, /api/counterparty/history). Повторная проверка того же ИНН в
+// течение 7 дней отдаётся из кэша (квота 300/день общая), "Обновить данные" - заново.
+var cpInited_ = false, cpBusy_ = false;
+function cpInit_() {
+  var inn = document.getElementById('cp-inn');
+  if (!cpInited_) { cpInited_ = true; if (inn) setTimeout(function() { inn.focus(); }, 80); }
+  cpLoadHistory_();
+}
+function cpFmtMoney_(v) { return (v == null) ? '—' : Math.round(v).toLocaleString('ru-RU') + ' ₽'; }
+function cpFmtDate_(s) {
+  var m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? (m[3] + '.' + m[2] + '.' + m[1]) : (s || '—');
+}
+function cpCheck_(force) {
+  var innEl = document.getElementById('cp-inn'), st = document.getElementById('cp-status'), btn = document.getElementById('cp-check-btn');
+  if (!innEl || !st || !btn) return;
+  var inn = (innEl.value || '').replace(/\D/g, '');
+  innEl.value = inn;
+  if (inn.length !== 10 && inn.length !== 12) { st.textContent = 'ИНН - 10 или 12 цифр'; st.style.color = 'var(--red)'; return; }
+  if (cpBusy_) return;
+  cpBusy_ = true; btn.disabled = true; btn.textContent = 'Проверяю…'; st.textContent = ''; st.style.color = '';
+  postToYardApi_('/counterparty/check', force ? { inn: inn, force: '1' } : { inn: inn }).then(function(r) {
+    cpBusy_ = false; btn.disabled = false; btn.textContent = 'Проверить';
+    if (!r.ok) { st.textContent = (r.data && r.data.error) || 'Ошибка сервера'; st.style.color = 'var(--red)'; return; }
+    cpRenderResult_(r.data);
+    cpLoadHistory_();
+  }).catch(function(e) {
+    cpBusy_ = false; btn.disabled = false; btn.textContent = 'Проверить';
+    st.textContent = 'Ошибка сети: ' + e.message; st.style.color = 'var(--red)';
+  });
+}
+function cpRenderResult_(d) {
+  var el = document.getElementById('cp-result'); if (!el) return;
+  var c = d.card || {};
+  var color = legalRiskColor_(d.light);
+  var mono = "font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums";
+  var reasons = (d.reasons && d.reasons.length)
+    ? '<ul style="margin:8px 0 0;padding-left:18px;font-size:12.5px;line-height:1.5">' + d.reasons.map(function(x) { return '<li>' + pageEsc_(x) + '</li>'; }).join('') + '</ul>'
+    : '<div class="muted" style="font-size:12.5px;margin-top:6px">Рисков по официальным реестрам не найдено</div>';
+  function row(label, value) {
+    if (value == null || value === '') return '';
+    return '<div style="display:flex;gap:12px;padding:6px 0;border-bottom:1px solid var(--border)">' +
+      '<div class="muted" style="flex:0 0 150px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;padding-top:2px">' + label + '</div>' +
+      '<div style="flex:1;font-size:13px;min-width:0;word-break:break-word">' + value + '</div></div>';
+  }
+  var founders = (c.founders || []).map(function(f) {
+    return pageEsc_(f.name) + (f.share != null ? ' <span class="muted">' + f.share + '%</span>' : '');
+  }).join('<br>');
+  var contacts = (c.phones || []).map(pageEsc_).concat((c.emails || []).map(pageEsc_)).join(' · ');
+  el.innerHTML =
+    '<div style="display:grid;grid-template-columns:minmax(240px,1fr) 2fr;gap:16px;align-items:start">' +
+      '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px">' +
+        '<div style="display:flex;align-items:center;gap:10px">' + legalRiskMarkHtml_(d.light, 14, '', d.marker) +
+          '<div><div style="font-size:17px;font-weight:700;color:' + color + '">' + legalRiskLabel_(d.light) + '</div>' +
+          '<div class="muted" style="font-size:11px">' + (d.from_cache ? 'из кэша, проверка ' : 'проверено ') + pageEsc_(d.checked_at || '') + '</div></div></div>' +
+        reasons +
+        '<div style="margin-top:12px"><button type="button" onclick="cpCheck_(true)" style="background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Обновить данные (новый запрос)</button></div>' +
+      '</div>' +
+      '<div>' +
+        '<div style="font-size:16px;font-weight:700;margin-bottom:2px">' + pageEsc_(c.name_short || ('ИНН ' + d.inn)) + '</div>' +
+        (c.name_full ? '<div class="muted" style="font-size:12px;margin-bottom:8px">' + pageEsc_(c.name_full) + '</div>' : '') +
+        row('ИНН / КПП / ОГРН', '<span style="' + mono + '">' + pageEsc_((c.inn || d.inn) + (c.kpp ? ' / ' + c.kpp : '') + (c.ogrn ? ' / ' + c.ogrn : '')) + '</span>') +
+        row('Статус', pageEsc_(c.status || '')) +
+        row('Зарегистрирована', c.reg_date ? cpFmtDate_(c.reg_date) : '') +
+        row('Адрес', pageEsc_(c.address || '')) +
+        row('Руководитель', c.head_name ? pageEsc_(c.head_name) + (c.head_post ? ' <span class="muted">' + pageEsc_(c.head_post) + '</span>' : '') : '') +
+        row('Учредители', founders) +
+        row('Вид деятельности', pageEsc_(c.okved || '')) +
+        row('Сотрудников', c.employees != null ? c.employees + (c.employees_year ? ' <span class="muted">(' + pageEsc_(c.employees_year) + ')</span>' : '') : '') +
+        row('Уставный капитал', c.capital != null ? cpFmtMoney_(c.capital) : '') +
+        row('Налогов уплачено', c.taxes_paid != null ? cpFmtMoney_(c.taxes_paid) + (c.taxes_year ? ' <span class="muted">(' + pageEsc_(c.taxes_year) + ')</span>' : '') : '') +
+        row('Недоимка', (c.nedoimka != null && c.nedoimka > 0) ? '<span style="color:var(--red);font-weight:600">' + cpFmtMoney_(c.nedoimka) + '</span>' : '') +
+        row('Реестр МСП', pageEsc_(c.msp || '')) +
+        row('Контакты', contacts) +
+        row('Лицензии / дела о банкротстве', (c.licenses || 0) + ' / ' + (c.bankrupt_cases || 0)) +
+      '</div>' +
+    '</div>';
+}
+function cpLoadHistory_() {
+  var body = document.getElementById('cp-history-body'); if (!body) return;
+  fetchFromYardApi_('/counterparty/history', { limit: 50 }).then(function(r) {
+    if (!r.ok || !r.data) { body.innerHTML = '<tr><td colspan="5" class="muted" style="padding:12px">История недоступна</td></tr>'; return; }
+    var items = r.data.items || [];
+    if (!items.length) { body.innerHTML = '<tr><td colspan="5" class="muted" style="padding:12px">Проверок ещё не было</td></tr>'; return; }
+    body.innerHTML = items.map(function(it) {
+      var innEsc = pageEscAttr_(it.inn);
+      return '<tr style="cursor:pointer" onclick="document.getElementById(\'cp-inn\').value=\'' + innEsc + '\';cpCheck_(false)" title="Открыть результат">' +
+        '<td class="muted" style="white-space:nowrap;font-family:\'JetBrains Mono\',ui-monospace,monospace">' + pageEsc_(it.requested_at || '') + '</td>' +
+        '<td style="font-family:\'JetBrains Mono\',ui-monospace,monospace">' + pageEsc_(it.inn) + '</td>' +
+        '<td>' + pageEsc_(it.name_short || '—') + '</td>' +
+        '<td>' + (it.light
+          ? legalRiskMarkHtml_(it.light, 8, 'margin-right:6px', it.marker) + '<span style="font-size:12px;color:' + legalRiskColor_(it.light) + '">' + legalRiskLabel_(it.light) + '</span>'
+          : '<span class="muted">—</span>') +
+          (it.from_cache ? ' <span class="muted" style="font-size:10px">из кэша</span>' : '') + '</td>' +
+        '<td class="muted" style="font-size:12px">' + pageEsc_(it.requested_by || '') + '</td>' +
+      '</tr>';
+    }).join('');
+  }).catch(function() { body.innerHTML = '<tr><td colspan="5" class="muted" style="padding:12px">Ошибка сети</td></tr>'; });
+}
+
 function showPage(id, el) {
   closeMobileSidebar(); // выбрали страницу - меню на телефоне больше не нужно открытым
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -18987,6 +19136,7 @@ function showPage(id, el) {
   if (lazyGroup_ && dirtyGroups_[lazyGroup_]) renderGroup_(lazyGroup_);
   if (id === 'dynamics') loadHistoryData();
   if (id === 'clients') loadClientsData();
+  if (id === 'counterparty') cpInit_();
   if (id === 'crm') loadCrmData();
   if (id === 'global-stats') loadGlobalStatsData();
   if (id === 'order-plan') loadOrderPlanData();

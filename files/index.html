@@ -17140,6 +17140,15 @@ function renderMachinistSalary() {
           '<select onchange="loadMachinistSalaryData(this.value)" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12.5px">' + monthOpts + '</select>' +
         '</div>' +
       '</div>' +
+      // Незакрытый месяц (06.09): в сводке 1С его ещё нет, строки собраны из рейсов и
+      // штрафов. Выслуга/аванс/прочие удержания приходят только сводкой - молча показать
+      // такую зарплату как окончательную нельзя, предупреждаем явно.
+      (d.partial ? '<div style="padding:0 20px 10px"><div class="alert amber" style="margin:0">' +
+        '<span class="alert-icon">!</span><span class="alert-text">' +
+        '<b>Месяц ещё не закрыт.</b> В отчёте 1С сводки за ' + formatMonthLabel(machinistSalaryMonth_) +
+        ' пока нет - суммы посчитаны по уже загруженным рейсам и штрафам. ' +
+        'Выслуга, аванс и прочие удержания появятся только после закрытия месяца, сейчас они не учтены.' +
+        '</span></div></div>' : '') +
       '<div class="muted" style="font-size:11.5px;padding:0 20px 10px">' +
         'Тип (трал/длинномер) определяем по технике, на которой человек реально работал в этом месяце - НЕ по данным 1С (там все машинисты числятся под одним отделом). ' +
         '«Не определено» - для месяца ещё нет истории назначений на технику. Клик по строке - полный расклад как в отчёте 1С (штрафы и рейсы по машинам).' +
@@ -17262,11 +17271,16 @@ function machinistBuildPrintHtml_(d, byDriver) {
     '.veh{font-weight:700;font-size:9.5pt;margin-top:8px}table.narrow{width:auto;min-width:60%}' +
     '.kv{display:flex;flex-wrap:wrap;gap:4px 16px;margin:4px 0 8px;font-size:9pt}' +
     '.drv{page-break-before:always;break-before:page}' +
+    '.warn{border:1px solid #000;padding:6px 8px;margin:0 0 10px;font-size:9pt;font-weight:700}' +
     '@media print{.no-print{display:none}}' +
     '</style></head><body>' +
     '<h1>Зарплата машинистов — ' + esc(formatMonthLabel(machinistSalaryMonth_)) + '</h1>' +
     '<div class="sub">Выгружено ' + stamp + ' · ' + rows.length + ' чел. · к начислению всего ' + num(totalNet) + ' ₽' +
       (machinistSalaryFilter_ !== 'all' ? ' · фильтр: ' + esc(machinistSalaryFilter_) : '') + '</div>' +
+    // На бумаге предупреждение о незакрытом месяце важнее, чем на экране: распечатку
+    // могут отдать человеку как окончательный расчёт.
+    (d.partial ? '<div class="warn">Месяц не закрыт: сводки 1С за этот период ещё нет, суммы посчитаны по загруженным ' +
+      'рейсам и штрафам. Выслуга, аванс и прочие удержания не учтены.</div>' : '') +
     '<table class="t"><thead><tr>' + sumHead.map(function(h, i) { return '<th' + (i < 2 ? ' class="l"' : '') + '>' + h + '</th>'; }).join('') + '</tr></thead>' +
     '<tbody>' + sumBody + '</tbody></table>' +
     perDriver +

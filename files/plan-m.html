@@ -166,8 +166,11 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 @keyframes seghalo{0%{box-shadow:0 0 0 3px rgba(55,138,221,.7)}100%{box-shadow:0 0 0 3px rgba(55,138,221,0)}}
 .seg-in{position:absolute;left:0;top:0;height:100%;max-width:100%;display:inline-flex;align-items:center;gap:5px;padding:0 6px;
   white-space:nowrap;overflow:hidden;transform-origin:left center;transform:translateX(var(--pin,0px)) scaleX(calc(1/var(--k,1)))}
-.seg-id{font-family:var(--font-num);font-size:9.5px;font-weight:700;letter-spacing:.04em;padding:3px 5px;border-radius:4px;
+/* бейдж МЕН/ЛОГ - как на десктопе (менеджер ярко над логистом приглушённо), Влад 05.09:
+   «на плашках не вижу логиста, это важно» */
+.seg-id{display:inline-flex;flex-direction:column;align-items:center;gap:1px;font-family:var(--font-num);font-size:9px;font-weight:700;letter-spacing:.04em;padding:2px 5px;border-radius:4px;
   background:var(--bg4);color:var(--text);box-shadow:inset 0 0 0 1px var(--border-strong);flex:none;line-height:1.1}
+.seg-id i{font-style:normal;font-weight:500;color:var(--muted)}
 .seg-txt{overflow:hidden;text-overflow:ellipsis;font-weight:600;font-size:11.5px}
 .seg.tiny .seg-in{display:none}
 .seg.small .seg-id{display:none}
@@ -211,10 +214,13 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 /* ── Листы (bottom sheet) ── */
 .scrim{position:fixed;inset:0;background:var(--scrim);z-index:90;opacity:0;pointer-events:none;transition:opacity .2s ease}
 .scrim.on{opacity:1;pointer-events:auto}
-.sheet{position:fixed;left:0;right:0;bottom:0;height:92vh;height:92dvh;z-index:95;background:var(--bg2);border-radius:12px 12px 0 0;
-  transform:translateY(100%);transition:transform .32s var(--ease-drawer);display:flex;flex-direction:column;box-shadow:0 -8px 32px rgba(0,0,0,.4)}
-.sheet.half{transform:translateY(40vh);transform:translateY(40dvh)}
-.sheet.full{transform:none}
+/* Высота листа меняется ПО ДЕТЕНТУ (52% / 92%), а не сдвигом одного высокого листа вниз -
+   иначе подвал с «Поставить» в полулисте уезжает за нижний край экрана (Влад, живая проба
+   05.09: «кнопка не свайпается до туда»). Подвал всегда прижат к видимому низу. */
+.sheet{position:fixed;left:0;right:0;bottom:0;height:52vh;height:52dvh;z-index:95;background:var(--bg2);border-radius:12px 12px 0 0;
+  transform:translateY(105%);transition:transform .32s var(--ease-drawer),height .28s var(--ease-drawer);display:flex;flex-direction:column;box-shadow:0 -8px 32px rgba(0,0,0,.4)}
+.sheet.half{transform:none;height:52vh;height:52dvh}
+.sheet.full{transform:none;height:92vh;height:92dvh}
 .sheet .grip{flex:none;height:22px;display:flex;align-items:center;justify-content:center;touch-action:none}
 .sheet .grip::before{content:"";width:44px;height:4px;border-radius:2px;background:var(--border-strong)}
 .sh-head{flex:none;display:flex;align-items:center;gap:8px;padding:0 8px 8px 8px;min-height:44px}
@@ -647,7 +653,8 @@ function placeSeg(el, s){
   var tier = w < 44 ? "tiny" : w < 90 ? "small" : w < 140 ? "mid" : "big";
   el.className = "seg k-" + s.kind + (tier === "tiny" ? " tiny" : tier === "small" ? " small" : "") + (s.s + s.l <= now ? " past" : "") + (s.id === M.sel ? " sel" : "") + (s.id === "draft" ? " draft" : "");
   el.querySelector(".seg-txt").textContent = segShort(s, tier);
-  var idEl = el.querySelector(".seg-id"); if (s.kind === "trip" && s.mg){ idEl.textContent = three(s.mg); idEl.hidden = false; } else idEl.hidden = true;
+  var idEl = el.querySelector(".seg-id");
+  if (s.kind === "trip" && (s.mg || s.lg)){ idEl.innerHTML = "<b>" + esc(s.mg ? three(s.mg) : "—") + "</b><i>" + esc(s.lg ? three(s.lg) : "—") + "</i>"; idEl.hidden = false; } else idEl.hidden = true;
   el.querySelector(".nd").hidden = !s.needsData;
   var active = s.kind === "trip" && s.s <= now && now < s.s + s.l;
   var pr = el.querySelector(".prog");
@@ -1160,6 +1167,7 @@ function renderSegSheet(){
      выбирать менеджера, это важно» - строка ниже сгиба полулиста = невидима). Имя в обиходе +
      3-буквенный код, как на плитке. */
   if (trip) h.push('<div class="f-label">Менеджер</div><div class="days" id="fMgChips">' + [{v:"", t:"Не указан"}].concat(M.managers.map(function(m){ return {v:m, t:mgChipLabel(m)}; })).map(function(o){ return '<button data-v="' + esc(o.v) + '" aria-pressed="' + (form.mg === o.v) + '">' + esc(o.t) + '</button>'; }).join("") + '</div>');
+  if (trip) h.push('<div class="f-label">Логист</div><div class="days" id="fLgChips">' + M.logists.map(function(m){ return '<button data-v="' + esc(m) + '" aria-pressed="' + (form.lg === m) + '">' + esc(mgChipLabel(m)) + (m === M.me.name ? ' · я' : '') + '</button>'; }).join("") + '</div>');
   h.push('<div class="timebox"><button class="stp" id="fMinus">−30</button><button class="cur" id="fTime">' + fmtTime(form.s) + '<small>' + fmtDayLong(form.s) + '</small></button><button class="stp" id="fPlus">+30</button></div>');
   if (form.timeOpen){
     var d0 = dayStartOf(nowHour()) - 24, days = [];
@@ -1208,7 +1216,7 @@ function segSheetClick(e){
   var id = b.id;
   if (b.parentNode && b.parentNode.id === "fKind"){ form.kind = b.dataset.k; if (form.kind !== "trip"){ form.customer = ""; form.mg = ""; if (form.l === 8) form.l = 24; } else if (form.l === 24 && !form.tripMode) form.l = 8; if (form.kind === "driveroff" && !form.reason) form.reason = "dayoff"; formApplyToSeg(); renderSegSheet(); return; }
   if (b.parentNode && b.parentNode.id === "fReason"){ form.reason = b.dataset.r; formApplyToSeg(); renderSegSheet(); return; }
-  if (b.parentNode && b.parentNode.id === "fMgChips"){ form.mg = b.dataset.v; vib(4); formApplyToSeg(); renderSegSheet(); var ch = $("fMgChips"); if (ch){ var on = ch.querySelector('[aria-pressed="true"]'); if (on) on.scrollIntoView({block:"nearest", inline:"center"}); } return; }
+  if (b.parentNode && (b.parentNode.id === "fMgChips" || b.parentNode.id === "fLgChips")){ var pid = b.parentNode.id; form[pid === "fMgChips" ? "mg" : "lg"] = b.dataset.v; vib(4); formApplyToSeg(); renderSegSheet(); var ch = $(pid); if (ch){ var on = ch.querySelector('[aria-pressed="true"]'); if (on) on.scrollIntoView({block:"nearest", inline:"center"}); } return; }
   if (b.parentNode && b.parentNode.id === "fDur"){ form.l = +b.dataset.l; formApplyToSeg(); renderSegSheet(); return; }
   if (b.parentNode && b.parentNode.id === "fDays"){ var d = +b.dataset.d; form.s = d + (form.s - dayStartOf(form.s)); formApplyToSeg(); renderSegSheet(); return; }
   if (b.parentNode && b.parentNode.id === "fHours"){ form.s = dayStartOf(form.s) + (+b.dataset.h) + (form.s % 1); formApplyToSeg(); renderSegSheet(); return; }

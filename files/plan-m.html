@@ -387,7 +387,7 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 <div class="scrim" id="scrim"></div>
 <div class="sheet" id="sheet"><div class="grip" id="grip"></div><div class="sh-head" id="shHead"></div><div class="sh-body" id="shBody"></div><div class="sh-foot" id="shFoot"></div></div>
 <div class="ovl" id="ovl"><div class="ovl-head" id="ovlHead"></div><div class="ovl-body" id="ovlBody"></div><div class="ovl-foot" id="ovlFoot" hidden></div></div>
-<div class="demo-tag" id="demoTag" hidden>ДЕМО · v5</div>
+<div class="demo-tag" id="demoTag" hidden>ДЕМО · v6</div>
 <script>
 "use strict";
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -608,15 +608,22 @@ function makeLiveApi(){
            реальным логистом рейса (комментарий index.html:20449-20463) - убираем точечно
            из списка выбора, как и на десктопе. */
         var rosterL = (ord.roster_logists || ord.by_logist || []).map(function(p){ return p.name; }).filter(function(n){ return !isRyschanowName_(n); });
-        return Promise.all([apiGet_("/plan/segs"), apiGet_("/sprav/state"), apiGet_("/fleet/state")]).then(function(rr){
-          var segsR = rr[0], spravR = rr[1], fleetR = rr[2];
+        return Promise.all([apiGet_("/plan/segs"), apiGet_("/sprav/state"), apiGet_("/fleet/state"), apiGet_("/plan/row_order")]).then(function(rr){
+          var segsR = rr[0], spravR = rr[1], fleetR = rr[2], orderR = rr[3];
           var assignments = (fleetR.ok && fleetR.data.assignments) || [];
           var openByPerson = {}, openByTrailer = {};
           assignments.forEach(function(a){ if (a.valid_to) return; if (a.kind === "driver") openByPerson[a.resource_key] = a.tractor_gos; else if (a.kind === "trailer") openByTrailer[a.resource_key] = a.tractor_gos; });
           var people = ((spravR.ok && spravR.data.people) || []).filter(function(p){ return (p.roles || []).indexOf("driver") >= 0; }).map(function(p){ return {id:p.id, full_name:p.full_name, on:openByPerson[p.id] || ""}; });
           var trailers = ((spravR.ok && spravR.data.assets) || []).filter(function(a){ return a.asset_type === "trailer"; }).map(function(a){ return {id:a.id, name:a.id, type:a.trailer_type || a.spec || "", on:openByTrailer[a.id] || ""}; });
           var vehicles = (mp.vehicles || []).map(function(v){ return {gos:v.gos, marka:v.marka, type:v.type, driver:v.driver || "", trailerGos:v.trailer || ""}; });
-          return {vehicles:vehicles, segs:(segsR.ok && segsR.data.segs) || [], people:people, trailers:trailers, managers:rosterM, logists:rosterL, assignments:assignments, me:{name:meName, role:mp.role || ""}};
+          /* Личный порядок машин (Влад, 02.09 на десктопе - "железно сохраняться у каждого
+             персонально"): /api/plan/row_order уже хранит его на сервере, ключ - user_email
+             сессии (тот же для index.html и plan-m.html - один и тот же логист получит ТОТ
+             ЖЕ порядок на телефоне, что сохранил на компьютере). Только чтение - переставить
+             строки жестом с телефона в v1 нельзя (осознанно, план раздел 4.5), значит писать
+             сюда нечего. */
+          var order = (orderR.ok && orderR.data && Array.isArray(orderR.data.order)) ? orderR.data.order : null;
+          return {vehicles:vehicles, segs:(segsR.ok && segsR.data.segs) || [], people:people, trailers:trailers, managers:rosterM, logists:rosterL, assignments:assignments, order:order, me:{name:meName, role:mp.role || ""}};
         });
       });
     },
@@ -1678,7 +1685,21 @@ function wireRowToSeg_(r, gosIndex){
   return seg;
 }
 function ingest(data){
-  M.vehicles = (data.vehicles || []).map(function(v, i){ return {i:i, gos:v.gos, gosShort:gosShort(v.gos), marka:v.marka || "", type:v.type || "", long:(v.type || "").indexOf("Борт") === 0, driver:v.driver || "", driverShort:surnameIO(v.driver || ""), trailerGos:v.trailerGos || ""}; });
+  var rawVehicles = (data.vehicles || []).map(function(v){ return {gos:v.gos, gosShort:gosShort(v.gos), marka:v.marka || "", type:v.type || "", long:(v.type || "").indexOf("Борт") === 0, driver:v.driver || "", driverShort:surnameIO(v.driver || ""), trailerGos:v.trailerGos || ""}; });
+  /* Личный порядок строк (тот же, что на десктопе - копия orderedVehicles_ 1:1, по
+     госномеру, не по индексу: индекс не переживает визит, если состав парка/выдача сервера
+     пересобралась в другом порядке - ровно баг, найденный на десктопе 01.09). Внутри каждой
+     группы (Тралы/Длинномеры) относительный порядок наследуется от этого общего списка,
+     групповые заголовки строятся уже ПОСЛЕ - тот же приём, что buildRows() на десктопе. */
+  var order = data.order;
+  if (order && order.length){
+    var byGos = {}; rawVehicles.forEach(function(v){ if (v.gos) byGos[normGos(v.gos)] = v; });
+    var out = [], seen = {};
+    order.forEach(function(gos){ var key = normGos(gos), v = byGos[key]; if (v && !seen[key]){ out.push(v); seen[key] = 1; } });
+    rawVehicles.forEach(function(v){ var key = normGos(v.gos); if (!v.gos || !seen[key]) out.push(v); });
+    rawVehicles = out;
+  }
+  M.vehicles = rawVehicles.map(function(v, i){ v.i = i; return v; });
   var gosIndex = {}; M.vehicles.forEach(function(v){ gosIndex[normGos(v.gos)] = v.i; });
   M.segs = (data.segs || []).map(function(r){ return r.v != null ? r : wireRowToSeg_(r, gosIndex); }).filter(Boolean);
   M.people = data.people || []; M.trailers = data.trailers || []; M.managers = data.managers || []; M.logists = data.logists || []; M.assignments = data.assignments || [];

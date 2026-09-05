@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="theme-color" content="#0f0f13">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -202,7 +202,7 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 .hud.bad{border-color:var(--red)}
 .hud.bad .to{color:var(--tint-red)}
 .hud.zoom{top:calc(var(--safe-t) + 100px);font-family:var(--font-ui);font-size:14px}
-.toast{position:fixed;left:12px;right:12px;bottom:calc(var(--safe-b) + 14px);z-index:80;display:flex;align-items:center;gap:10px;
+.toast{position:fixed;left:12px;right:12px;bottom:calc(var(--safe-b) + 14px);z-index:106; /* выше листа (95) и оверлея (100): тост - ответ на нажатие, он обязан быть виден над ними */display:flex;align-items:center;gap:10px;
   background:var(--bg4);border:1px solid var(--border-strong);border-radius:12px;padding:10px 12px 10px 14px;font-size:14px;font-weight:600;
   transform:translateY(20px);opacity:0;transition:transform .2s var(--ease-out-strong),opacity .2s ease;pointer-events:none}
 .toast.on{transform:none;opacity:1;pointer-events:auto}
@@ -221,9 +221,9 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
   transform:translateY(105%);transition:transform .32s var(--ease-drawer),height .28s var(--ease-drawer);display:flex;flex-direction:column;box-shadow:0 -8px 32px rgba(0,0,0,.4)}
 .sheet.half{transform:none;height:calc(var(--vvh,100vh) * .52)}
 .sheet.full{transform:none;height:calc(var(--vvh,100vh) * .92)}
-.sheet .grip{flex:none;height:22px;display:flex;align-items:center;justify-content:center;touch-action:none}
+.sheet .grip{flex:none;height:28px;display:flex;align-items:center;justify-content:center;touch-action:none}
 .sheet .grip::before{content:"";width:44px;height:4px;border-radius:2px;background:var(--border-strong)}
-.sh-head{flex:none;display:flex;align-items:center;gap:8px;padding:0 8px 8px 8px;min-height:44px}
+.sh-head{flex:none;display:flex;align-items:center;gap:8px;padding:0 8px 8px 8px;min-height:44px;touch-action:none}
 .sh-head .ttl{flex:1 1 auto;min-width:0;font-size:18px;font-weight:700;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sh-head .ttl small{display:block;font-size:12px;color:var(--muted);font-weight:500;font-family:var(--font-num)}
 .sh-body{flex:1 1 auto;min-height:0;overflow:auto;padding:0 12px 12px;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
@@ -233,6 +233,7 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 .btn:active{transform:scale(.98)}
 .btn.primary{flex:1 1 auto;background:var(--green);color:#0f0f13}
 .btn.primary:disabled{opacity:.45}
+.btn.primary[data-bad="1"]{background:var(--bg3);color:var(--tint-red);border:2px solid var(--red);font-size:15px}
 .btn.ghost{background:var(--bg3);border:2px solid var(--border-strong);color:var(--text)}
 .btn.danger{background:var(--red);color:#fff}
 .f-label{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:14px 0 6px}
@@ -292,7 +293,7 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 .list-row.muted{color:var(--muted)}
 
 /* ── Полноэкранные оверлеи: поиск, пикеры, дата ── */
-.ovl{position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;flex-direction:column;padding-top:var(--safe-t);
+.ovl{position:fixed;left:0;right:0;top:0;height:var(--vvh,100vh);z-index:100;background:var(--bg);display:flex;flex-direction:column;padding-top:var(--safe-t);
   transform:translateY(-8px);opacity:0;pointer-events:none;transition:opacity .2s ease,transform .24s var(--ease-out-strong)}
 .ovl.on{transform:none;opacity:1;pointer-events:auto}
 .ovl-head{flex:none;display:flex;align-items:center;gap:8px;padding:8px}
@@ -380,7 +381,7 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 <div class="scrim" id="scrim"></div>
 <div class="sheet" id="sheet"><div class="grip" id="grip"></div><div class="sh-head" id="shHead"></div><div class="sh-body" id="shBody"></div><div class="sh-foot" id="shFoot"></div></div>
 <div class="ovl" id="ovl"><div class="ovl-head" id="ovlHead"></div><div class="ovl-body" id="ovlBody"></div><div class="ovl-foot" id="ovlFoot" hidden></div></div>
-<div class="demo-tag" id="demoTag" hidden>ДЕМО · v3</div>
+<div class="demo-tag" id="demoTag" hidden>ДЕМО · v4</div>
 <script>
 "use strict";
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -882,6 +883,15 @@ function handleMouseClick(e){
 /* ── Тап ── */
 function handleTap(p, t){
   if (Date.now() - lastScrollAt < 80) return;
+  /* Полулист черновика открыт: тап по ленте = «поставь сюда» (машина + час), тап по
+     черновику = развернуть лист. Всё остальное (чужие плитки, шапки строк, группы) -
+     игнор, иначе форма тихо ломалась: снималось выделение, открывался лист чужой заявки,
+     а черновик оставался сиротой (аудит 05.09, п.4). */
+  if (sheetState === "half" && sheetKind === "seg" && form && form.id === "draft" && M.draft){
+    if (p.segEl && p.segEl.dataset.id === "draft"){ setDetent("full"); return; }
+    if (p.tr && p.tr.dataset.v != null){ form.v = +p.tr.dataset.v; form.s = clamp(snapH(hourAtClientX(t.clientX), 0.5), 0, HOURS - form.l); vib(4); formApplyToSeg(); renderSegSheet(); return; }
+    return;
+  }
   if (p.gh){ toggleGroup(p.gh.dataset.g); return; }
   if (p.sc){
     var now = Date.now();
@@ -1100,20 +1110,25 @@ function openSheet(kind, data, detent){
   sheetState = detent || "full";
   sheet.className = "sheet " + sheetState; scrim.classList.toggle("on", sheetState === "full");
   renderSheet();
-  if (hist.depth < 1) histPush();
+  if (sheetState !== "closed" && hist.depth < 1) histPush();
 }
 function setDetent(d){ sheetState = d; sheet.className = "sheet " + d; scrim.classList.toggle("on", d === "full"); }
-function closeSheet(viaBack){
+function closeSheet(viaBack, explicit){
   if (sheetState === "closed") return;
   var cb = sheetOnClose; sheetOnClose = null;
   /* Черновик живёт только вместе со своим листом: закрыли лист любым путём (свайп, Back,
      «Отмена») - черновик снимается. Иначе на ленте оставалась «синяя рамка», в которую не
-     войти (Влад, живая проба 05.09). «Поставить» снимает черновик сам ДО закрытия. */
+     войти (Влад, живая проба 05.09). «Поставить» снимает черновик сам ДО закрытия.
+     Молча удаляет только явная «Отмена»; свайп/Back/скрим при заполненной форме - тост
+     «Вернуть» 6 с (аудит 05.09: grip 22 px рядом с шапкой, случайный свайп терял заявку). */
   var wasDraftSheet = M.draft && (sheetKind === "seg" || sheetKind === "vehicle");
+  var keep = wasDraftSheet && !explicit && M.draft.kind === "trip" && (M.draft.customer || M.draft.from || M.draft.to || M.draft.mg);
+  var snap = keep ? Object.assign({}, M.draft) : null;
   sheetState = "closed"; sheet.className = "sheet"; scrim.classList.remove("on"); sheetKind = null;
   if (wasDraftSheet) dropDraft();
   if (cb) cb();
   if (!viaBack) histPop();
+  if (snap) toast("Заявка убрана", M.vehicles[snap.v].gosShort + " · " + fmtDay(snap.s) + " " + fmtTime(snap.s), function(){ createDraft(snap.v, snap.s, snap.l, snap.kind, snap); openSegSheet("draft"); }, {btn:"Вернуть", ms:6000});
 }
 window.addEventListener("popstate", function(){
   if (hist.ignore > 0){ hist.ignore--; return; }
@@ -1123,16 +1138,23 @@ window.addEventListener("popstate", function(){
 scrim.addEventListener("click", function(){ if (sheetKind === "seg" && sheetData.id === "draft") setDetent("half"); else closeSheet(); });
 /* grip: свайп вниз закрывает, тап - переключает детент */
 (function(){
-  var g = $("grip"), y0 = 0, moved = false;
-  g.addEventListener("touchstart", function(e){ y0 = e.touches[0].clientY; moved = false; }, {passive:true});
-  g.addEventListener("touchmove", function(e){ var dy = e.touches[0].clientY - y0; if (Math.abs(dy) > 12) moved = true; }, {passive:true});
-  g.addEventListener("touchend", function(e){ var dy = e.changedTouches[0].clientY - y0; if (dy > 60){ if (sheetState === "full" && sheetKind === "seg" && sheetData.id === "draft") setDetent("half"); else closeSheet(); } else if (dy < -40) setDetent("full"); else if (!moved) setDetent(sheetState === "full" ? "half" : "full"); });
-  g.addEventListener("click", function(){ if (!("ontouchstart" in window)) setDetent(sheetState === "full" ? "half" : "full"); });
+  var y0 = 0, moved = false, onHead = false;
+  [$("grip"), shHead].forEach(function(g){
+    g.addEventListener("touchstart", function(e){ y0 = e.touches[0].clientY; moved = false; onHead = (g === shHead); }, {passive:true});
+    g.addEventListener("touchmove", function(e){ var dy = e.touches[0].clientY - y0; if (Math.abs(dy) > 12) moved = true; }, {passive:true});
+    g.addEventListener("touchend", function(e){
+      var dy = e.changedTouches[0].clientY - y0;
+      if (dy > 60){ if (sheetState === "full" && sheetKind === "seg" && sheetData.id === "draft") setDetent("half"); else closeSheet(); }
+      else if (dy < -40) setDetent("full");
+      else if (!moved && !onHead) setDetent(sheetState === "full" ? "half" : "full");
+    });
+  });
+  $("grip").addEventListener("click", function(){ if (!("ontouchstart" in window)) setDetent(sheetState === "full" ? "half" : "full"); });
 })();
 function renderSheet(){ if (sheetKind === "seg") renderSegSheet(); else if (sheetKind === "vehicle") renderVehicleSheet(); else if (sheetKind === "more") renderMoreSheet(); else if (sheetKind === "confirm") renderConfirmSheet(); else if (sheetKind === "settings") renderSettingsSheet(); }
 function renderSheetIfDraft(){ if (sheetKind === "seg" && sheetState !== "closed") renderSegSheet(); }
 function shHeadHtml(title, sub, right){ return '<button class="hbtn" id="shCancel">Отмена</button><div class="ttl">' + esc(title) + (sub ? "<small>" + esc(sub) + "</small>" : "") + '</div>' + (right || ""); }
-shHead.addEventListener("click", function(e){ if (e.target.closest("#shCancel")){ if (sheetKind === "seg" && sheetData.id === "draft") dropDraft(); closeSheet(); } });
+shHead.addEventListener("click", function(e){ if (e.target.closest("#shCancel")) closeSheet(false, true); });
 
 /* ── Лист заявки: создание / правка ── */
 var DUR_TRIP = [["Местный", 8],["Смена", 12],["Сутки", 24],["Дальний", 48],["3 дня", 72]];
@@ -1191,8 +1213,12 @@ function renderSegSheet(){
   if (isVacant(v) && trip) h.push('<div class="info warn">На машине нет водителя</div>');
   if (!isDraft) h.push('<div class="who">Изменил: <b>' + esc(s.updatedBy ? shortName(s.updatedBy) : "—") + '</b>' + (s.updatedAt != null ? ' · ' + agoLabel(s.updatedAt) : '') + '</div>');
   shBody.innerHTML = h.join("");
-  shFoot.innerHTML = (isDraft ? '<button class="btn primary" id="fPut"' + (bad ? ' disabled' : '') + '>Поставить</button>'
-    : '<button class="btn ghost danger-ghost" id="fCancelSeg" style="color:var(--tint-red)">Отбой</button><button class="btn primary" id="fSave"' + (!changed || bad ? ' disabled' : '') + '>Сохранить</button>');
+  /* Кнопка сама говорит, что будет: «Поставить · под данные», «Пересекается: …» (тап -
+     тост с причиной и «Поставить после»), «Нет связи». Серая немая кнопка без причины -
+     то, на чём споткнулся Влад 05.09. */
+  var putLabel = !M.online ? "Нет связи" : bad ? "Пересекается: " + segLabel(bad).slice(0, 26) : (trip && (!form.customer || !form.mg)) ? "Поставить · под данные" : "Поставить";
+  shFoot.innerHTML = (isDraft ? '<button class="btn primary" id="fPut" data-bad="' + (bad ? 1 : 0) + '"' + (!M.online ? ' disabled' : '') + '>' + esc(putLabel) + '</button>'
+    : '<button class="btn ghost" id="fCancelSeg" style="color:var(--tint-red)">Отбой</button><button class="btn primary" id="fSave" data-bad="' + (bad ? 1 : 0) + '"' + (!changed || !M.online ? ' disabled' : '') + '>' + esc(!M.online ? "Нет связи" : bad ? "Пересекается: " + segLabel(bad).slice(0, 26) : "Сохранить") + '</button>');
 }
 function mgChipLabel(full){ var p = (full || "").trim().split(/\s+/); return (p[1] ? p[1] + " " : "") + three(full); }
 function agoLabel(h){ var m = Math.round((nowHour() - h) * 60); if (m < 1) return "только что"; if (m < 60) return m + " мин назад"; if (m < 24*60) return Math.round(m/60) + " ч назад"; return fmtDay(h) + " " + fmtTime(h); }
@@ -1228,26 +1254,31 @@ function segSheetClick(e){
   else if (id === "fDaily"){ form.tripMode = form.tripMode === "daily" ? "" : "daily"; if (form.tripMode === "daily") form.l = 24; }
   else if (id === "fCust"){ openPicker({title:"Заказчик", items:customerItems(), allowNew:true, value:form.customer, onPick:function(val){ form.customer = val; formApplyToSeg(); renderSegSheet(); }}); return; }
   else if (id === "fFrom" || id === "fTo"){ var key = id === "fFrom" ? "from" : "to"; openPicker({title:id === "fFrom" ? "Откуда" : "Куда", items:placeItems(form.customer), allowNew:true, value:form[key], onPick:function(val){ form[key] = val; formApplyToSeg(); renderSegSheet(); }}); return; }
-  else if (id === "fMg"){ openPicker({title:"Менеджер", items:[{v:"", t:"Не указан"}].concat(M.managers.map(function(m){ return {v:m, t:shortName(m)}; })), value:form.mg, onPick:function(val){ form.mg = val; formApplyToSeg(); renderSegSheet(); }}); return; }
   else if (id === "fVeh"){ openPicker({title:"Машина", items:vehicleItems(form.s, form.l), value:M.vehicles[form.v].gos, onPick:function(val){ var vv = M.vehicles.filter(function(x){ return x.gos === val; })[0]; if (vv){ form.v = vv.i; formApplyToSeg(); renderSegSheet(); } }}); return; }
   else return;
   formApplyToSeg(); renderSegSheet();
 }
 function putDraft(){
   if (!M.draft) return;
+  if (!M.online){ vib([30,30]); toast("Нет связи - заявка не сохранится", null, null, {err:true}); return; }
   var d = M.draft; formApplyToSeg();
-  var bad = overlaps(d.v, d.s, d.l, "draft", d.kind); if (bad){ rejectToast(bad, d, null); return; }
+  var bad = overlaps(d.v, d.s, d.l, "draft", d.kind);
+  if (bad){ vib(30); rejectToast(bad, d, function(after){ form.s = clamp(after, 0, HOURS - form.l); formApplyToSeg(); renderSegSheet(); }); return; }
   var auto = d.kind === "trip" && (!d.customer || !d.mg);
   var s = {id:newSegId(), v:d.v, kind:d.kind, s:d.s, l:d.l, customer:d.customer, from:d.from, to:d.to, mg:d.mg, lg:d.lg, needsData:d.needsData || auto, reason:d.reason, tripMode:d.tripMode, updatedBy:M.me.name, updatedAt:nowHour()};
   dropDraft(); M.segs.push(s); closeSheet();
-  refreshSeg(s.id); layoutRows(); saveSeg(s); vib([8,40,8]);
+  refreshSeg(s.id); layoutRows(); var saved = saveSeg(s); vib([8,40,8]);
   var el = segEls[s.id]; if (el && !REDUCED){ el.style.transform = "scale(.9)"; el.style.transition = "transform .38s var(--ease-overshoot)"; requestAnimationFrame(function(){ el.style.transform = ""; }); setTimeout(function(){ el.style.transition = ""; }, 400); }
   var v = M.vehicles[s.v];
-  toast("Поставлено: " + v.gosShort + (auto ? " · под данные" : ""), fmtDayLong(s.s) + " " + fmtTime(s.s) + " → " + fmtTime(s.s + s.l) + (isVacant(v) && s.kind === "trip" ? " · машина без водителя" : ""), function(){ deleteSegQuiet(s.id); });
+  /* «Отменить» ждёт подтверждения POST - иначе удаление уходит раньше вставки и заявка
+     воскресает после поллинга (аудит 05.09, п.7) */
+  toast("Поставлено: " + v.gosShort + (auto ? " · под данные" : ""), fmtDayLong(s.s) + " " + fmtTime(s.s) + " → " + fmtTime(s.s + s.l) + (isVacant(v) && s.kind === "trip" ? " · машина без водителя" : ""), function(){ saved.then(function(){ deleteSegQuiet(s.id); }); });
 }
 function deleteSegQuiet(id){ var s = segById(id); if (!s) return; M.segs.splice(M.segs.indexOf(s), 1); if (M.sel === id) deselect(); refreshSeg(id); layoutRows(); API.deleteSeg(id, ""); }
 function saveForm(){
   var s = segById(form.id); if (!s) return;
+  if (!M.online){ vib([30,30]); toast("Нет связи - не сохранится", null, null, {err:true}); return; }
+  var bad0 = overlaps(form.v, form.s, form.l, form.id, form.kind); if (bad0){ vib(30); rejectToast(bad0, form, null); return; }
   var before = {kind:s.kind, v:s.v, s:s.s, l:s.l, customer:s.customer, from:s.from, to:s.to, mg:s.mg, needsData:s.needsData, tripMode:s.tripMode, reason:s.reason};
   formApplyToSeg(); s.updatedBy = M.me.name; s.updatedAt = nowHour(); closeSheet();
   commit(s, before, "Сохранено", segLabel(s));
@@ -1336,7 +1367,7 @@ function syncVDraft(){ if (!M.draft) return; M.draft.s = vsheet.s; M.draft.l = v
 shFoot.addEventListener("click", function(e){
   var b = e.target.closest("button"); if (!b || sheetKind !== "vehicle") return;
   if (b.id === "vBack"){ dropDraft(); vsheet.step = 1; renderVehicleSheet(); }
-  else if (b.id === "vPut"){ var v = vsheet.v; var s = {id:newSegId(), v:v.i, kind:vsheet.kind, s:vsheet.s, l:vsheet.l, reason:vsheet.reason, needsData:false, mg:"", lg:M.me.name, from:"", to:"", customer:"", tripMode:"", updatedBy:M.me.name, updatedAt:nowHour()}; dropDraft(); M.segs.push(s); closeSheet(); refreshSeg(s.id); layoutRows(); saveSeg(s); vib([8,40,8]); toast("Поставлено: " + segLabel(s), v.gosShort, function(){ deleteSegQuiet(s.id); }); }
+  else if (b.id === "vPut"){ if (!M.online){ vib([30,30]); toast("Нет связи - не сохранится", null, null, {err:true}); return; } var v = vsheet.v; var s = {id:newSegId(), v:v.i, kind:vsheet.kind, s:vsheet.s, l:vsheet.l, reason:vsheet.reason, needsData:false, mg:"", lg:M.me.name, from:"", to:"", customer:"", tripMode:"", updatedBy:M.me.name, updatedAt:nowHour()}; dropDraft(); M.segs.push(s); closeSheet(); refreshSeg(s.id); layoutRows(); var saved2 = saveSeg(s); vib([8,40,8]); toast("Поставлено: " + segLabel(s), v.gosShort, function(){ saved2.then(function(){ deleteSegQuiet(s.id); }); }); }
 });
 function peopleItems(v){
   var items = [], free = [], other = [];
@@ -1439,7 +1470,13 @@ function openOvl(cfg){
   ovl.classList.add("on");
   histPush();
   renderOvlList();
-  var inp = $("ovlInput"); if (inp){ inp.addEventListener("input", renderOvlList); if (cfg.autofocus) setTimeout(function(){ inp.focus(); }, 260); }
+  var inp = $("ovlInput"); if (inp){
+    inp.addEventListener("input", renderOvlList);
+    /* Enter/«Готово» на клавиатуре = выбрать первую строку (при allowNew это «новое значение») */
+    inp.addEventListener("keydown", function(ev){ if (ev.key === "Enter"){ ev.preventDefault(); var first = $("ovlBody").querySelector(".res"); if (first) first.click(); } });
+    inp.addEventListener("focus", function(){ try { inp.select(); } catch(e){} });
+    if (cfg.autofocus) setTimeout(function(){ inp.focus(); }, 260);
+  }
 }
 function closeOvl(viaBack){ if (!ovlState) return; ovl.classList.remove("on"); ovlState = null; if (!viaBack) histPop(); }
 $("ovlHead").addEventListener("click", function(e){ if (e.target.closest("#ovlBack")) closeOvl(); });

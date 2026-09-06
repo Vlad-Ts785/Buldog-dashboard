@@ -352,6 +352,7 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
@@ -406,7 +407,7 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 <div class="scrim" id="scrim"></div>
 <div class="sheet" id="sheet"><div class="grip" id="grip"></div><div class="sh-head" id="shHead"></div><div class="sh-body" id="shBody"></div><div class="sh-foot" id="shFoot"></div></div>
 <div class="ovl" id="ovl"><div class="ovl-head" id="ovlHead"></div><div class="ovl-body" id="ovlBody"></div><div class="ovl-foot" id="ovlFoot" hidden></div></div>
-<div class="demo-tag" id="demoTag" hidden>ДЕМО · v9</div>
+<div class="demo-tag" id="demoTag" hidden>ДЕМО · v10</div>
 <script>
 "use strict";
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -533,8 +534,8 @@ function makeDemoApi(){
     var drv = (rnd() < 0.08) ? "" : surn[i % surn.length] + " " + pick(ini);
     var tr = long ? "" : ("ЕК " + (1000 + Math.floor(rnd()*9000)) + " 50");
     vehicles.push({gos:gos, marka:pick(["Volvo FH","Scania R","MAN TGX","КАМАЗ 65209","Mercedes Actros"]), type: long ? "Борт" : pick(["Трал ПР-4","Трал Рапид","Трал Корыто","Трал Файмон"]), driver:drv, trailerGos:tr});
-    if (drv) people.push({id:"p"+i, full_name:drv, on:gos});
-    if (tr) trailers.push({id:tr, name:tr, type:pick(["ПР-4","Рапид","Корыто"]), on:gos});
+    if (drv) people.push({id:"p"+i, full_name:drv, phone:"+7 9" + (10 + Math.floor(rnd()*89)) + " " + (100 + Math.floor(rnd()*900)) + "-" + (10 + Math.floor(rnd()*89)) + "-" + (10 + Math.floor(rnd()*89)), on:gos});
+    if (tr) trailers.push({id:tr, name:pick(["Faymonville STBZ-4", "Broshuis 3ABD", "Тонар 9746", ""]), type:pick(["ПР-4","Рапид","Корыто"]), on:gos});
   }
   for (var k = 0; k < 8; k++){ people.push({id:"pf"+k, full_name:surn[(k*7+3)%surn.length] + " " + pick(ini), on:""}); }
   for (var t = 0; t < 4; t++){ trailers.push({id:"ЕК " + (5000+t*17) + " 50", name:"ЕК " + (5000+t*17) + " 50", type:pick(["ПР-4","Рапид"]), on:""}); }
@@ -640,8 +641,10 @@ function makeLiveApi(){
           var assignments = (fleetR.ok && fleetR.data.assignments) || [];
           var openByPerson = {}, openByTrailer = {};
           assignments.forEach(function(a){ if (a.valid_to) return; if (a.kind === "driver") openByPerson[a.resource_key] = a.tractor_gos; else if (a.kind === "trailer") openByTrailer[a.resource_key] = a.tractor_gos; });
-          var people = ((spravR.ok && spravR.data.people) || []).filter(function(p){ return (p.roles || []).indexOf("driver") >= 0; }).map(function(p){ return {id:p.id, full_name:p.full_name, on:openByPerson[p.id] || ""}; });
-          var trailers = ((spravR.ok && spravR.data.assets) || []).filter(function(a){ return a.asset_type === "trailer"; }).map(function(a){ return {id:a.id, name:a.id, type:a.trailer_type || a.spec || "", on:openByTrailer[a.id] || ""}; });
+          /* phone - для «Скопировать данные для пропуска» (тот же срез, что 31.08 открыли
+             логисту в /api/sprav/state ради кнопки копирования на десктопе) */
+          var people = ((spravR.ok && spravR.data.people) || []).filter(function(p){ return (p.roles || []).indexOf("driver") >= 0; }).map(function(p){ return {id:p.id, full_name:p.full_name, phone:p.phone || "", on:openByPerson[p.id] || ""}; });
+          var trailers = ((spravR.ok && spravR.data.assets) || []).filter(function(a){ return a.asset_type === "trailer"; }).map(function(a){ return {id:a.id, name:(a.name && a.name !== a.id) ? a.name : "", type:a.trailer_type || a.spec || "", on:openByTrailer[a.id] || ""}; });
           var vehicles = (mp.vehicles || []).map(function(v){ return {gos:v.gos, marka:v.marka, type:v.type, driver:v.driver || "", trailerGos:v.trailer || ""}; });
           /* Личный порядок машин (Влад, 02.09 на десктопе - "железно сохраняться у каждого
              персонально"): /api/plan/row_order уже хранит его на сервере, ключ - user_email
@@ -1269,8 +1272,12 @@ var sheetState = "closed", sheetKind = null, sheetData = null, sheetOnClose = nu
 /* Кнопка Back (TWA/браузер) закрывает лист/оверлей, а не приложение. Свой счётчик глубины,
    НЕ history.state: history.back() асинхронен, и «закрыл лист -> тут же открыл другой» в одном
    тике читал устаревший state, второй back() уходил СО СТРАНИЦЫ (поймано в превью 05.09). */
-var hist = {depth:0, ignore:0};
-function histPush(){ history.pushState({d:hist.depth + 1}, ""); hist.depth++; }
+var hist = {depth:0, ignore:0, pendingPush:false};
+/* Пока history.back() ещё «в полёте» (popstate не пришёл), новый pushState лёг бы ПОВЕРХ
+   ещё не снятой записи - следующий back() снял бы уже не нашу запись, а саму страницу
+   (поймано 06.09 в тесте «закрыл лист -> сразу открыл другой -> закрыл»: уносило на
+   index.html). Поэтому в этот момент push откладываем и делаем его в popstate. */
+function histPush(){ if (hist.ignore > 0){ hist.pendingPush = true; return; } history.pushState({d:hist.depth + 1}, ""); hist.depth++; }
 function histPop(){ if (hist.depth > 0){ hist.depth--; hist.ignore++; history.back(); } }
 function openSheet(kind, data, detent){
   sheetKind = kind; sheetData = data || {};
@@ -1298,7 +1305,11 @@ function closeSheet(viaBack, explicit){
   if (snap) toast("Заявка убрана", M.vehicles[snap.v].gosShort + " · " + fmtDay(snap.s) + " " + fmtTime(snap.s), function(){ createDraft(snap.v, snap.s, snap.l, snap.kind, snap); openSegSheet("draft"); }, {btn:"Вернуть", ms:6000});
 }
 window.addEventListener("popstate", function(){
-  if (hist.ignore > 0){ hist.ignore--; return; }
+  if (hist.ignore > 0){
+    hist.ignore--;
+    if (hist.pendingPush){ hist.pendingPush = false; if (sheetState !== "closed" || ovlState){ history.pushState({d:hist.depth + 1}, ""); hist.depth++; } }
+    return;
+  }
   hist.depth = Math.max(0, hist.depth - 1);
   if (ovlState) closeOvl(true); else if (sheetState !== "closed") closeSheet(true);
 });
@@ -1477,6 +1488,39 @@ function vehicleItems(s, l){
   return items;
 }
 
+/* ── Копирование данных для пропуска (Влад 06.09: «обязательно, чтобы с мобильной можно
+   было копировать данные на водителя... одним пальцем»). Формат - копия lpCopyText_ с
+   десктопа буквально: три строки Тягач / Прицеп / Водитель с телефоном. Один тап -
+   в буфер - тост с тем, что скопировано; дальше логист вставляет в WhatsApp/Telegram. ── */
+function copyVehicleText_(v){
+  var lines = [];
+  lines.push("Тягач: " + (v.marka ? v.marka + " " : "") + v.gos);
+  var tr = v.trailerGos ? M.trailers.filter(function(t){ return t.id === v.trailerGos; })[0] : null;
+  lines.push(v.trailerGos ? "Прицеп: " + [v.trailerGos, tr && tr.name].filter(Boolean).join(", ") : "Прицеп: без прицепа");
+  if (!v.driver) lines.push("Водитель: вакант");
+  else {
+    var p = M.people.filter(function(x){ return x.on === v.gos; })[0] || M.people.filter(function(x){ return x.full_name === v.driver; })[0];
+    lines.push("Водитель: " + v.driver + (p && p.phone ? ", " + p.phone : ""));
+  }
+  return lines.join("\n");
+}
+/* Цепочка: системный буфер -> при отказе (WebView без разрешения, нет фокуса) старый
+   способ через скрытое выделение -> только потом честная ошибка. */
+function copyLegacy_(text){
+  return new Promise(function(res, rej){
+    try { var ta = document.createElement("textarea"); ta.value = text; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.top = "0"; ta.style.opacity = "0"; document.body.appendChild(ta); ta.focus(); ta.select(); ta.setSelectionRange(0, text.length); var ok = document.execCommand("copy"); ta.remove(); ok ? res() : rej(new Error("execCommand")); } catch(e){ rej(e); }
+  });
+}
+function copyToClipboard_(text){
+  if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text).catch(function(){ return copyLegacy_(text); });
+  return copyLegacy_(text);
+}
+function copyVehicle_(v){
+  var text = copyVehicleText_(v);
+  copyToClipboard_(text).then(function(){ vib([8,40,8]); toast("Скопировано: " + v.gosShort, text.replace(/\n/g, " · "), null, {ms:4000}); })
+    .catch(function(){ vib(30); toast("Не удалось скопировать", "Открой карточку машины и выдели текст вручную", null, {err:true}); });
+}
+
 /* ── Лист машины ── */
 var vsheet = null;
 function openVehicleSheet(v){ if (!v) return; vsheet = {v:v, step:1, kind:null, reason:"", s:snapH(nowHour(), 0.5), l:24, act:null}; openSheet("vehicle", {}, "full"); }
@@ -1488,6 +1532,8 @@ function renderVehicleSheet(){
     var nx = nextSeg(v); if (nx) h.push('<div class="frow"><div class="k">Дальше</div><div class="v">' + esc(fmtDay(nx.s) + " " + fmtTime(nx.s) + " · " + segLabel(nx)) + '</div></div>');
     h.push('<div class="frow"><div class="k">Водитель</div><div class="v' + (v.driver ? '' : ' ph') + '">' + esc(v.driver || "нет") + '</div></div>');
     h.push('<div class="frow"><div class="k">Прицеп</div><div class="v mono' + (v.trailerGos ? '' : ' ph') + '">' + esc(v.trailerGos || "нет") + '</div></div>');
+    /* Крупная кнопка сразу под данными - одним пальцем, без поиска по меню */
+    h.push('<button class="btn ghost" data-a="copy" style="width:100%;height:auto;min-height:56px;padding:8px 14px;margin-top:12px;justify-content:flex-start;gap:12px"><svg style="width:22px;height:22px"><use href="#i-copy"/></svg><span style="text-align:left">Скопировать данные для пропуска<small style="display:block;font-size:12px;color:var(--muted);font-weight:500">тягач · прицеп · водитель с телефоном</small></span></button>');
     h.push('<div class="f-label">Машина</div><div class="chips" id="vKind"><button class="chip r" data-k="repair">Ремонт</button><button class="chip r" data-k="maint">ТО</button><button class="chip" data-k="noorder">Без заказа</button></div>');
     h.push('<div class="f-label">Водитель' + (v.driverShort ? " · " + esc(v.driverShort) : "") + '</div><div class="chips" id="vOff">' + DRIVEROFF_REASONS.map(function(p){ return '<button class="chip" data-r="' + p[0] + '">' + p[1] + '</button>'; }).join("") + '</div>');
     h.push('<div class="f-label">Действия</div>');
@@ -1526,6 +1572,7 @@ function vehicleSheetClick(e){
   if (a === "trpick"){ openPicker({title:"Прицеп на " + v.gosShort, search:true, items:trailerItems(v), value:"", confirmText:function(item){ return (item.on ? "Переприцепить с " + gosShort(item.on) : "Зацепить") + " " + item.t; }, onPick:function(val, item){ doCouple("trailer", v, item); }}); return; }
   if (a === "drvoff"){ closeSheet(); doUncouple("driver", v); return; }
   if (a === "troff"){ closeSheet(); doUncouple("trailer", v); return; }
+  if (a === "copy"){ copyVehicle_(v); return; }
   if (a === "hist"){ openHistory(v); return; }
   if (a === "newtrip"){ closeSheet(); var s0 = snapH(Math.max(nowHour(), viewStartH() + 1), 0.5); var b0 = busyUntil(v); if (b0) s0 = snapH(b0.s + b0.l, 0.5); createDraft(v.i, s0, 8, "trip"); scrollToHour(s0, 0.15, true); openSegSheet("draft"); return; }
 }
@@ -1586,13 +1633,15 @@ function openMoreSheet(id){ openSheet("more", {id:id}, "full"); }
 function renderMoreSheet(){
   var s = segById(sheetData.id); if (!s){ closeSheet(); return; }
   shHead.innerHTML = shHeadHtml("Ещё", segLabel(s), "");
-  shBody.innerHTML = '<div class="list-row" data-a="copy"><span>Копировать на завтра<span class="sub">та же заявка, +24 ч</span></span><svg class="go"><use href="#i-right"/></svg></div>' +
+  shBody.innerHTML = '<div class="list-row" data-a="copydrv"><span>Скопировать данные для пропуска<span class="sub">тягач · прицеп · водитель с телефоном</span></span><svg class="go"><use href="#i-copy"/></svg></div>' +
+    '<div class="list-row" data-a="copy"><span>Копировать заявку на завтра<span class="sub">та же заявка, +24 ч</span></span><svg class="go"><use href="#i-right"/></svg></div>' +
     '<div class="list-row" data-a="cancel"><span>Отбой<span class="sub">снять с доски, останется в истории</span></span></div>' +
     '<div class="list-row danger" data-a="del"><span>Удалить<span class="sub">исчезнет совсем</span></span></div>';
   shFoot.innerHTML = "";
 }
 function moreSheetClick(e){
   var b = e.target.closest(".list-row"); if (!b) return; var id = sheetData.id, s = segById(id);
+  if (b.dataset.a === "copydrv"){ copyVehicle_(M.vehicles[s.v]); return; }
   if (b.dataset.a === "copy"){ closeSheet(); deselect(); createDraft(s.v, s.s + 24, s.l, s.kind, {customer:s.customer, from:s.from, to:s.to, mg:s.mg, lg:s.lg, needsData:s.needsData, reason:s.reason, tripMode:s.tripMode}); scrollToHour(s.s + 24, 0.15, true); openSegSheet("draft"); }
   else if (b.dataset.a === "cancel"){ closeSheet(); cancelSeg(id); }
   else if (b.dataset.a === "del"){ openSheet("confirm", {title:"Удалить заявку?", text:"Это не отбой - запись исчезнет из истории.", yesLabel:"Удалить", yes:function(){ deleteSeg(id); }}, "full"); }
@@ -1605,7 +1654,7 @@ function renderConfirmSheet(){
 /* ── Настройки (тема - развилка для Влада, версия) ── */
 /* Меню (кнопка ≡ в шапке, Влад 06.09: «должна быть возможность вернуться в меню дашборда
    из планировки») - навигация наверху, настройки ниже. */
-var PAGE_VERSION_ = "v9 · 06.09";
+var PAGE_VERSION_ = "v10 · 06.09";
 function renderSettingsSheet(){
   var theme = document.documentElement.getAttribute("data-theme") || "dark";
   shHead.innerHTML = shHeadHtml("Меню", (M.me.name || "") + (API.demo ? " · демо" : ""), "");

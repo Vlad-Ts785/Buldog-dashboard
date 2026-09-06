@@ -19560,7 +19560,15 @@ function showPage(id, el) {
   // Панель админа с телефона, эта функциональность нужна и дальше).
   if (id === 'logistics-plan') {
     var lpMobile_ = false, lpOptOut_ = false, lpRole_ = '';
-    try { lpMobile_ = window.matchMedia && window.matchMedia('(pointer: coarse)').matches && window.innerWidth <= 680; } catch(e){}
+    /* «Телефон» - по СЕНСОРУ, не по ширине (06.09, Васин: раскладушка с развёрнутым экраном
+       шире 680px открыла веб-версию; Сильчев: «версия для компьютера» в браузере тоже
+       обходила порог ширины). Основной ввод - палец (pointer:coarse) И нет hover - это
+       телефон/планшет при любой ширине; узкий экран с coarse - страховка для старых
+       браузеров без hover-медиа. Ноутбук с тачскрином: основной ввод мышь -> не телефон. */
+    try {
+      var mmLP_ = window.matchMedia;
+      lpMobile_ = mmLP_ ? ((mmLP_('(pointer: coarse)').matches && mmLP_('(hover: none)').matches) || (mmLP_('(pointer: coarse)').matches && window.innerWidth <= 680)) : (window.innerWidth <= 680);
+    } catch(e){}
     try { lpOptOut_ = sessionStorage.getItem('plan_m_optout') === '1'; } catch(e){}
     try { lpRole_ = (typeof D !== 'undefined' && D && D.role) || localStorage.getItem('user_role') || ''; } catch(e){}
     if (lpMobile_ && !lpOptOut_ && (lpRole_ === 'logist' || lpRole_ === 'manager' || lpRole_ === 'admin')) {

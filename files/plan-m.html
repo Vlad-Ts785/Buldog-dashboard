@@ -65,7 +65,10 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 .hbtn{min-width:44px;height:44px;display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:8px;
   padding:0 10px;font-weight:600;font-size:15px;color:var(--text);white-space:nowrap}
 .hbtn:active{background:var(--bg3)}
-.hbtn.icon{padding:0;width:44px}
+.hbtn.icon{padding:0;width:40px;min-width:40px}
+.hdr-row1{gap:4px}
+.hdr-row1 .hdate{padding:0 6px;font-size:14px}
+.hdr-row1 .free{padding:0 8px;font-size:12.5px}
 .hbtn.icon svg{width:22px;height:22px}
 .hdate{font-size:15px;font-weight:600}
 .hdate .wd{color:var(--muted);font-weight:500;margin-right:4px}
@@ -348,6 +351,7 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
@@ -367,6 +371,7 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 <div class="app" id="app">
   <header class="hdr" id="hdr">
     <div class="hdr-row hdr-row1">
+      <button class="hbtn icon" id="btnMenu" aria-label="Меню"><svg><use href="#i-menu"/></svg></button>
       <button class="hbtn hdate" id="btnDate"><span class="wd" id="hdWd">Сб,</span><span id="hdDate">6 сен</span><svg><use href="#i-chev"/></svg></button>
       <button class="today" id="btnToday" hidden>Сегодня</button>
       <div class="grow"></div>
@@ -401,7 +406,7 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 <div class="scrim" id="scrim"></div>
 <div class="sheet" id="sheet"><div class="grip" id="grip"></div><div class="sh-head" id="shHead"></div><div class="sh-body" id="shBody"></div><div class="sh-foot" id="shFoot"></div></div>
 <div class="ovl" id="ovl"><div class="ovl-head" id="ovlHead"></div><div class="ovl-body" id="ovlBody"></div><div class="ovl-foot" id="ovlFoot" hidden></div></div>
-<div class="demo-tag" id="demoTag" hidden>ДЕМО · v7</div>
+<div class="demo-tag" id="demoTag" hidden>ДЕМО · v8</div>
 <script>
 "use strict";
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -1598,25 +1603,34 @@ function renderConfirmSheet(){
   shFoot.innerHTML = '<button class="btn ghost" id="cfNo" style="flex:1">Отмена</button><button class="btn danger" id="cfYes" style="flex:1">' + esc(sheetData.yesLabel) + '</button>';
 }
 /* ── Настройки (тема - развилка для Влада, версия) ── */
+/* Меню (кнопка ≡ в шапке, Влад 06.09: «должна быть возможность вернуться в меню дашборда
+   из планировки») - навигация наверху, настройки ниже. */
+var PAGE_VERSION_ = "v8 · 06.09";
 function renderSettingsSheet(){
   var theme = document.documentElement.getAttribute("data-theme") || "dark";
-  shHead.innerHTML = shHeadHtml("Ещё", (M.me.name || "") + (API.demo ? " · демо" : ""), "");
-  shBody.innerHTML = '<div class="f-label">Тема</div><div class="seg4" id="sTheme"><button data-t="dark" aria-pressed="' + (theme === "dark") + '">Тёмная</button><button data-t="light" aria-pressed="' + (theme === "light") + '">Светлая</button><button data-t="auto" aria-pressed="' + (theme === "auto") + '">Как в телефоне</button></div>' +
+  shHead.innerHTML = shHeadHtml("Меню", (M.me.name || "") + (API.demo ? " · демо" : ""), "");
+  shBody.innerHTML =
+    '<div class="list-row" data-a="dash"><span>Дашборд<span class="sub">Панель, личная страница, остальные разделы</span></span><svg class="go"><use href="#i-right"/></svg></div>' +
+    '<div class="list-row" data-a="full"><span>Планировка на компьютере<span class="sub">полная версия доски</span></span><svg class="go"><use href="#i-right"/></svg></div>' +
+    '<div class="list-row" data-a="reload"><span>Обновить данные</span></div>' +
+    '<div class="f-label">Тема</div><div class="seg4" id="sTheme"><button data-t="dark" aria-pressed="' + (theme === "dark") + '">Тёмная</button><button data-t="light" aria-pressed="' + (theme === "light") + '">Светлая</button><button data-t="auto" aria-pressed="' + (theme === "auto") + '">Как в телефоне</button></div>' +
     '<div class="info">Светлая - проверить на солнце. Это отступление от ГОСТа, решает Влад.</div>' +
     '<div class="f-label">Группы</div><div class="list-row" data-a="expand"><span>Развернуть все</span></div>' +
-    '<div class="f-label">Версия</div><div class="frow"><div class="k">Страница</div><div class="v mono">plan-m · превью 05.09</div></div>' +
-    '<div class="list-row muted" data-a="full"><span>Полная версия дашборда</span></div>';
+    '<div class="f-label">Версия</div><div class="frow"><div class="k">Страница</div><div class="v mono">plan-m · ' + PAGE_VERSION_ + '</div></div>' +
+    '<div class="list-row muted" data-a="logout"><span>Выйти</span></div>';
   shFoot.innerHTML = "";
 }
 function settingsClick(e){
   var b = e.target.closest("button, .list-row"); if (!b) return;
   if (b.parentNode && b.parentNode.id === "sTheme"){ setTheme(b.dataset.t); renderSettingsSheet(); return; }
   if (b.dataset.a === "expand"){ M.collapsed = {}; try { localStorage.setItem("plan_m_collapsed", "{}"); } catch(e2){} buildRows(); renderWindow(true); closeSheet(); }
+  if (b.dataset.a === "reload"){ location.reload(); return; }
   /* sessionStorage, не localStorage - это разовый выбор "сейчас нужен весь дашборд"
      (например, задача с компьютера-подобной раскладкой), не отказ от мобильной страницы
-     навсегда. app.html читает этот флаг тем же ключом; в новой вкладке/после перезапуска
-     TWA логист снова попадёт на plan-m.html. */
-  if (b.dataset.a === "full"){ try { sessionStorage.setItem("plan_m_optout", "1"); } catch(e3){} location.href = "index.html"; }
+     навсегда. app.html/index.html читают этот флаг тем же ключом; в новой вкладке/после
+     перезапуска TWA логист снова попадёт на plan-m.html. */
+  if (b.dataset.a === "dash" || b.dataset.a === "full"){ try { sessionStorage.setItem("plan_m_optout", "1"); } catch(e3){} location.href = "index.html"; return; }
+  if (b.dataset.a === "logout"){ try { ["session_token","id_token","user_role","user_name"].forEach(function(k){ localStorage.removeItem(k); }); } catch(e4){} location.href = "index.html"; }
 }
 function setTheme(t){
   try { localStorage.setItem("plan_m_theme", t); } catch(e){}
@@ -1705,7 +1719,8 @@ $("btnPlus").addEventListener("click", function(){
   var s0 = snapH(Math.max(nowHour(), viewStartH() + 1), 0.5);
   openPicker({title:"Машина", items:vehicleItems(s0, 8), onPick:function(val){ var vv = M.vehicles.filter(function(x){ return x.gos === val; })[0]; if (!vv) return; deselect(); createDraft(vv.i, s0, 8, "trip"); if (vv.long ? M.collapsed.long : M.collapsed.tral) toggleGroup(vv.long ? "long" : "tral"); scrollRowToTop(vv.i, false); openSegSheet("draft"); }});
 });
-$("corner") ; document.querySelector(".corner").addEventListener("click", function(){ openSheet("settings", {}, "full"); });
+document.querySelector(".corner").addEventListener("click", function(){ openSheet("settings", {}, "full"); });
+$("btnMenu").addEventListener("click", function(){ openSheet("settings", {}, "full"); });
 
 /* ═══════════════════════════════════════════════════════════════════════════
    8. Загрузка и запуск
@@ -1854,7 +1869,8 @@ function setLoadbar_(state, text){
   $("loadbarT").textContent = text || "";
   btn.hidden = state !== "err";
 }
-$("loadbarBtn").addEventListener("click", function(){ startLoadFlow_(); });
+var loadAttempt_ = 0;
+$("loadbarBtn").addEventListener("click", function(){ loadAttempt_ = 0; startLoadFlow_(); });
 /* Скелет - НАСТОЯЩИЙ (06.09): раньше класс .skel красил .rowhead, которых до buildRows()
    физически нет - «скелет» был невидим, страница выглядела пустой всю загрузку. */
 function renderSkeleton_(){
@@ -1869,7 +1885,7 @@ function startLoadFlow_(){
   if (!M.vehicles.length) renderSkeleton_();
   clearTimeout(loadTimer_); loadTimer_ = setTimeout(function(){ if ($("loadbar").classList.contains("on") && !$("loadbar").classList.contains("err")) setLoadbar_("loading", "Загружаю парк… медленная сеть"); }, 4000);
   API.load().then(function(data){
-    clearTimeout(loadTimer_);
+    clearTimeout(loadTimer_); loadAttempt_ = 0;
     ingest(data);
     board.classList.remove("skel");
     /* дефолт свёрнутости: группа самого логиста развёрнута (Васин - борта, остальные - тралы) */
@@ -1897,6 +1913,9 @@ function startLoadFlow_(){
     if (!API.demo && /Не авторизован|нужен id_token|Доступ отозван/i.test(msg)){ try { localStorage.removeItem("session_token"); } catch(e){} showLogin_(); return; }
     board.classList.remove("skel");
     if (/abort/i.test(msg) || err && err.name === "AbortError") msg = "сервер не ответил за 20 с";
+    /* Один автоповтор через 2,5 с (Влад 06.09: «без сюрпризов, что нет планировки») - разовый
+       обрыв мобильной сети не должен требовать от логиста ничего. Второй сбой - уже кнопка. */
+    if (loadAttempt_ < 1){ loadAttempt_++; setLoadbar_("loading", "Не получилось, повторяю…"); setTimeout(startLoadFlow_, 2500); return; }
     setLoadbar_("err", "Не удалось загрузить: " + msg);
   });
 }

@@ -93,6 +93,18 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 .hdr-row2.acting .zoomseg{opacity:0;pointer-events:none}
 
 /* полоса связи (единственный сдвигающий элемент) и зона отмены драга */
+/* Полоса загрузки/ошибки под шапкой - ВИДИМАЯ, в отличие от скелета (06.09, Сильчев:
+   «пустой интерфейс» - это была просто загрузка без индикатора). Ошибка - постоянная, с
+   кнопкой, не исчезающий тост. */
+.loadbar{display:none;align-items:center;justify-content:space-between;gap:10px;min-height:44px;padding:6px 12px;background:var(--bg4);color:var(--muted);font-size:14px;font-weight:600}
+.loadbar.on{display:flex}
+.loadbar.err{color:var(--tint-red)}
+.loadbar button{flex:none;min-height:36px;padding:0 12px;border-radius:8px;background:var(--bg3);border:1px solid var(--border-strong);color:var(--text);font-size:14px;font-weight:600}
+.loadbar .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--muted);margin-right:8px;animation:blink 1.2s ease-in-out infinite}
+.skel-row{height:var(--row-h);border-bottom:1px solid var(--border);padding:9px 8px}
+.skel-row i{display:block;height:12px;border-radius:4px;background:var(--bg3);width:62px}
+.skel-row i+i{width:48px;height:9px;margin-top:6px}
+.skel-track{height:var(--row-h);border-bottom:1px solid var(--border)}
 .netbar{display:none;align-items:center;gap:8px;height:40px;padding:0 12px;background:var(--bg4);color:var(--amber);font-size:14px;font-weight:600}
 .netbar.on{display:flex}
 .netbar .mono{color:var(--text)}
@@ -373,6 +385,7 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
       </div>
     </div>
     <div class="netbar" id="netbar"><svg><use href="#i-wifi-off"/></svg><span>Нет связи · данные на <span class="mono" id="netAt">--:--</span></span></div>
+    <div class="loadbar" id="loadbar"><span><span class="dot" id="loadbarDot"></span><span id="loadbarT">Загружаю парк…</span></span><button id="loadbarBtn" hidden>Повторить</button></div>
     <div class="cancelzone" id="cancelzone"><svg><use href="#i-undo"/></svg><span>Отпустите здесь - вернуть на место</span></div>
   </header>
   <div id="board" class="skel">
@@ -388,7 +401,7 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 <div class="scrim" id="scrim"></div>
 <div class="sheet" id="sheet"><div class="grip" id="grip"></div><div class="sh-head" id="shHead"></div><div class="sh-body" id="shBody"></div><div class="sh-foot" id="shFoot"></div></div>
 <div class="ovl" id="ovl"><div class="ovl-head" id="ovlHead"></div><div class="ovl-body" id="ovlBody"></div><div class="ovl-foot" id="ovlFoot" hidden></div></div>
-<div class="demo-tag" id="demoTag" hidden>ДЕМО · v6</div>
+<div class="demo-tag" id="demoTag" hidden>ДЕМО · v7</div>
 <script>
 "use strict";
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -555,10 +568,15 @@ var API_BASE_ = "https://api.yardhub.ru/api";
 var GOOGLE_CLIENT_ID_ = "872723319158-cmr4v5v31fk3uv8ass3vvdch7at66n8e.apps.googleusercontent.com"; // публичный OAuth client id, не секрет (тот же, что в index.html/server.js)
 function sessionToken_(){ try { return localStorage.getItem("session_token") || ""; } catch(e){ return ""; } }
 function setSessionToken_(t){ try { localStorage.setItem("session_token", t); } catch(e){} }
-function apiGet_(path, params){
+/* Таймаут 20 с на GET: зависший запрос по плохой мобильной сети раньше оставлял страницу
+   пустой навсегда без единого слова (06.09). Теперь - в catch -> полоса ошибки с «Повторить». */
+function apiGet_(path, params, timeoutMs){
   var qs = Object.keys(params || {}).map(function(k){ return params[k] != null ? k + "=" + encodeURIComponent(params[k]) : null; }).filter(Boolean).join("&");
-  return fetch(API_BASE_ + path + (qs ? "?" + qs : ""), {headers:{"X-Session-Token": sessionToken_()}})
-    .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(d){ return {ok: r.ok && !d.error, status:r.status, data:d}; }); });
+  var ctrl = (typeof AbortController !== "undefined") ? new AbortController() : null;
+  var timer = ctrl ? setTimeout(function(){ ctrl.abort(); }, timeoutMs || 20000) : null;
+  return fetch(API_BASE_ + path + (qs ? "?" + qs : ""), {headers:{"X-Session-Token": sessionToken_()}, signal: ctrl ? ctrl.signal : undefined})
+    .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(d){ return {ok: r.ok && !d.error, status:r.status, data:d}; }); })
+    .finally(function(){ if (timer) clearTimeout(timer); });
 }
 function apiPost_(path, params){
   var qs = Object.keys(params || {}).map(function(k){ return (params[k] !== undefined && params[k] !== null) ? k + "=" + encodeURIComponent(params[k]) : null; }).filter(Boolean).join("&");
@@ -596,21 +614,24 @@ function agoFromIso_(iso){
 function makeLiveApi(){
   return {
     demo: false,
+    /* Парк - с быстрого /api/fleet_summary (~10 мс на сервере, уже без исключённых по
+       department, живой водитель/прицеп), НЕ с /api/main_payload (~1 с на сервере: пять
+       внутренних запросов ради личной страницы, которая здесь не нужна). 06.09, Сильчев:
+       «пустой интерфейс» - это был именно этот тяжёлый запрос на критическом пути по
+       мобильной сети. Имя/роль/ростеры менеджеров - фоном через loadProfile() ниже, до их
+       прихода берём кэш localStorage (тот же, что пишет index.html при входе). */
     load: function(){
-      return apiGet_("/main_payload").then(function(r){
-        if (!r.ok) throw new Error((r.data && r.data.error) || "Ошибка входа");
-        var mp = r.data;
-        if (mp.session_token) setSessionToken_(mp.session_token);
-        var meName = mp.logistName || mp.managerName || (function(){ try { return localStorage.getItem("user_name") || ""; } catch(e){ return ""; } })() || "";
-        try { if (meName) localStorage.setItem("user_name", meName); if (mp.role) localStorage.setItem("user_role", mp.role); } catch(e){}
-        var ord = mp.orders || {};
-        var rosterM = (ord.roster_managers || ord.by_manager || []).map(function(p){ return p.name; });
-        /* Рыщанов - руководитель отдела логистики, не диспетчер, никогда не бывает
-           реальным логистом рейса (комментарий index.html:20449-20463) - убираем точечно
-           из списка выбора, как и на десктопе. */
-        var rosterL = (ord.roster_logists || ord.by_logist || []).map(function(p){ return p.name; }).filter(function(n){ return !isRyschanowName_(n); });
-        return Promise.all([apiGet_("/plan/segs"), apiGet_("/sprav/state"), apiGet_("/fleet/state"), apiGet_("/plan/row_order")]).then(function(rr){
-          var segsR = rr[0], spravR = rr[1], fleetR = rr[2], orderR = rr[3];
+      var cachedName = "", cachedRole = "";
+      try { cachedName = localStorage.getItem("user_name") || ""; cachedRole = localStorage.getItem("user_role") || ""; } catch(e){}
+      return Promise.all([apiGet_("/fleet_summary"), apiGet_("/plan/segs"), apiGet_("/sprav/state"), apiGet_("/fleet/state"), apiGet_("/plan/row_order")]).then(function(rr){
+          var fsR = rr[0], segsR = rr[1], spravR = rr[2], fleetR = rr[3], orderR = rr[4];
+          if (!fsR.ok){
+            var e0 = (fsR.data && fsR.data.error) || ("Сервер: " + fsR.status);
+            if (fsR.status === 401 || (fsR.data && fsR.data.needLogin)) e0 = "Не авторизован";
+            throw new Error(e0);
+          }
+          var mp = {vehicles: Object.keys(fsR.data.vehicles || {}).map(function(k){ var v = fsR.data.vehicles[k]; return {gos:v.gos, marka:v.marka, type:v.type, driver:v.driver, trailer:v.trailerGos}; })};
+          var meName = cachedName, rosterM = [], rosterL = [];
           var assignments = (fleetR.ok && fleetR.data.assignments) || [];
           var openByPerson = {}, openByTrailer = {};
           assignments.forEach(function(a){ if (a.valid_to) return; if (a.kind === "driver") openByPerson[a.resource_key] = a.tractor_gos; else if (a.kind === "trailer") openByTrailer[a.resource_key] = a.tractor_gos; });
@@ -624,9 +645,26 @@ function makeLiveApi(){
              строки жестом с телефона в v1 нельзя (осознанно, план раздел 4.5), значит писать
              сюда нечего. */
           var order = (orderR.ok && orderR.data && Array.isArray(orderR.data.order)) ? orderR.data.order : null;
-          return {vehicles:vehicles, segs:(segsR.ok && segsR.data.segs) || [], people:people, trailers:trailers, managers:rosterM, logists:rosterL, assignments:assignments, order:order, me:{name:meName, role:mp.role || ""}};
-        });
+          return {vehicles:vehicles, segs:(segsR.ok && segsR.data.segs) || [], people:people, trailers:trailers, managers:rosterM, logists:rosterL, assignments:assignments, order:order, me:{name:meName, role:cachedRole}};
       });
+    },
+    /* Профиль фоном: ФИО (для lg «кто поставил»), роль, ростер менеджеров для чипов в листе,
+       свежий session_token. Не блокирует первый кадр. */
+    loadProfile: function(){
+      return apiGet_("/main_payload", null, 30000).then(function(r){
+        if (!r.ok) return null;
+        var mp = r.data;
+        if (mp.session_token) setSessionToken_(mp.session_token);
+        var name = mp.logistName || mp.managerName || "";
+        try { if (name) localStorage.setItem("user_name", name); if (mp.role) localStorage.setItem("user_role", mp.role); } catch(e){}
+        var ord = mp.orders || {};
+        /* Рыщанов - руководитель отдела логистики, не диспетчер, никогда не бывает
+           реальным логистом рейса (комментарий index.html:20449-20463) - убираем точечно
+           из списка выбора, как и на десктопе. */
+        return {name:name, role:mp.role || "",
+          managers:(ord.roster_managers || ord.by_manager || []).map(function(p){ return p.name; }),
+          logists:(ord.roster_logists || ord.by_logist || []).map(function(p){ return p.name; }).filter(function(n){ return !isRyschanowName_(n); })};
+      }).catch(function(){ return null; });
     },
     saveSeg: function(w){ return apiPost_("/plan/seg", w).then(function(r){ if (!r.ok) throw new Error((r.data && r.data.error) || "Ошибка сохранения"); return {ok:true}; }); },
     deleteSeg: function(id, reason){ return apiPost_("/plan/seg_delete", reason ? {id:id, reason:reason} : {id:id}); },
@@ -1809,8 +1847,29 @@ function onGoogleCredential_(resp){
     startLoadFlow_();
   }).catch(function(){ toast("Ошибка сети при входе", null, null, {err:true}); });
 }
+function setLoadbar_(state, text){
+  var bar = $("loadbar"), btn = $("loadbarBtn");
+  bar.className = "loadbar" + (state ? " on" : "") + (state === "err" ? " err" : "");
+  $("loadbarDot").hidden = state !== "loading";
+  $("loadbarT").textContent = text || "";
+  btn.hidden = state !== "err";
+}
+$("loadbarBtn").addEventListener("click", function(){ startLoadFlow_(); });
+/* Скелет - НАСТОЯЩИЙ (06.09): раньше класс .skel красил .rowhead, которых до buildRows()
+   физически нет - «скелет» был невидим, страница выглядела пустой всю загрузку. */
+function renderSkeleton_(){
+  var l = [], t = [];
+  for (var i = 0; i < 12; i++){ l.push('<div class="skel-row"><i></i><i></i></div>'); t.push('<div class="skel-track"></div>'); }
+  lanes.innerHTML = l.join(""); tracks.innerHTML = t.join("");
+}
+var loadStartedAt_ = 0, loadTimer_ = null;
 function startLoadFlow_(){
+  loadStartedAt_ = Date.now();
+  setLoadbar_("loading", "Загружаю парк…");
+  if (!M.vehicles.length) renderSkeleton_();
+  clearTimeout(loadTimer_); loadTimer_ = setTimeout(function(){ if ($("loadbar").classList.contains("on") && !$("loadbar").classList.contains("err")) setLoadbar_("loading", "Загружаю парк… медленная сеть"); }, 4000);
   API.load().then(function(data){
+    clearTimeout(loadTimer_);
     ingest(data);
     board.classList.remove("skel");
     /* дефолт свёрнутости: группа самого логиста развёрнута (Васин - борта, остальные - тралы) */
@@ -1820,13 +1879,25 @@ function startLoadFlow_(){
     try { var sc = sessionStorage.getItem("plan_m_scroll"); if (sc){ var p = sc.split(","); board.scrollLeft = +p[0]; board.scrollTop = +p[1]; restored = true; } } catch(e){}
     if (!restored) scrollToHour(nowHour(), 0.3, false);
     renderWindow(true); renderNow(); pinLabels();
+    setLoadbar_(null, "");
     if (API.demo) setInterval(function(){ renderNow(); refreshAll(); }, 60000);
-    else { setInterval(renderNow, 60000); startPolling_(); }
+    else {
+      setInterval(renderNow, 60000); startPolling_();
+      if (API.loadProfile) API.loadProfile().then(function(p){
+        if (!p) return;
+        if (p.name) M.me.name = p.name; if (p.role) M.me.role = p.role;
+        if (p.managers && p.managers.length) M.managers = p.managers;
+        if (p.logists && p.logists.length) M.logists = p.logists;
+        if (sheetKind === "seg" && sheetState !== "closed") renderSegSheet();
+      });
+    }
   }).catch(function(err){
+    clearTimeout(loadTimer_);
     var msg = String((err && err.message) || err || "");
     if (!API.demo && /Не авторизован|нужен id_token|Доступ отозван/i.test(msg)){ try { localStorage.removeItem("session_token"); } catch(e){} showLogin_(); return; }
     board.classList.remove("skel");
-    toast("Не удалось загрузить", msg, function(){ board.classList.add("skel"); startLoadFlow_(); }, {err:true, btn:"Повторить", ms:8000});
+    if (/abort/i.test(msg) || err && err.name === "AbortError") msg = "сервер не ответил за 20 с";
+    setLoadbar_("err", "Не удалось загрузить: " + msg);
   });
 }
 function boot(){

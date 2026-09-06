@@ -203,9 +203,13 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
   transition:box-shadow .12s ease}
 .slot.locked{box-shadow:0 0 0 2px rgba(55,138,221,.5)}
 .slot.bad{border-color:var(--red);background:rgba(226,75,74,.18)}
-.ghost{position:fixed;left:0;top:0;z-index:60;pointer-events:none;will-change:transform;opacity:.9;
+/* НАЙДЕННЫЙ БАГ (06.09, видео Влада): класс призрака драга назывался .ghost и совпадал с
+   вариантом кнопки .btn.ghost - кнопка «Скопировать данные для пропуска» (и «Отбой»/«Назад»/
+   «Отмена» в подвалах листов) получала position:fixed;top:0;pointer-events:none: уезжала в
+   угол экрана и не принимала касания. Теперь призрак - .dragghost, имена не пересекаются. */
+.dragghost{position:fixed;left:0;top:0;z-index:60;pointer-events:none;will-change:transform;opacity:.9;
   box-shadow:0 2px 6px rgba(0,0,0,.4),0 16px 32px rgba(0,0,0,.5)}
-.ghost.lift{animation:wig .15s ease-in-out 2}
+.dragghost.lift{animation:wig .15s ease-in-out 2}
 @keyframes wig{0%,100%{rotate:0deg}50%{rotate:1.5deg}}
 .pressing{transform:scale(.97);transition:transform .1s ease}
 
@@ -347,7 +351,7 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 }
 .hdr-row1 .zoomseg{display:none}
 @media (prefers-reduced-motion:reduce){
-  .tracks.anim,.sheet,.ovl,.toast,.ghost.lift,.nd,.seg.halo,.rowhead.halo{transition:none;animation:none}
+  .tracks.anim,.sheet,.ovl,.toast,.dragghost.lift,.nd,.seg.halo,.rowhead.halo{transition:none;animation:none}
 }
 </style>
 </head>
@@ -409,7 +413,7 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 <div class="scrim" id="scrim"></div>
 <div class="sheet" id="sheet"><div class="grip" id="grip"></div><div class="sh-head" id="shHead"></div><div class="sh-body" id="shBody"></div><div class="sh-foot" id="shFoot"></div></div>
 <div class="ovl" id="ovl"><div class="ovl-head" id="ovlHead"></div><div class="ovl-body" id="ovlBody"></div><div class="ovl-foot" id="ovlFoot" hidden></div></div>
-<div class="demo-tag" id="demoTag" hidden>ДЕМО · v12</div>
+<div class="demo-tag" id="demoTag" hidden>ДЕМО · v13</div>
 <script>
 "use strict";
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -1116,7 +1120,7 @@ function startDrag(segEl, t){
   if (!M.online){ vib([30,30]); toast("Нет связи - изменения недоступны", null, null, {err:true}); return; }
   st = "DRAGGING"; vib(12);
   var r = segEl.getBoundingClientRect();
-  ghostEl = segEl.cloneNode(true); removeHandles(ghostEl); ghostEl.classList.remove("sel","pressing","src"); ghostEl.classList.add("ghost"); if (!REDUCED) ghostEl.classList.add("lift");
+  ghostEl = segEl.cloneNode(true); removeHandles(ghostEl); ghostEl.classList.remove("sel","pressing","src"); ghostEl.classList.add("dragghost"); if (!REDUCED) ghostEl.classList.add("lift");
   ghostEl.style.width = r.width + "px"; ghostEl.style.height = r.height + "px"; ghostEl.style.left = "0"; ghostEl.style.top = "0";
   ghostEl.style.transform = "translate3d(" + r.left + "px," + r.top + "px,0) scale(1.04)";
   document.body.appendChild(ghostEl);
@@ -1687,7 +1691,7 @@ function renderConfirmSheet(){
 /* ── Настройки (тема - развилка для Влада, версия) ── */
 /* Меню (кнопка ≡ в шапке, Влад 06.09: «должна быть возможность вернуться в меню дашборда
    из планировки») - навигация наверху, настройки ниже. */
-var PAGE_VERSION_ = "v12 · 06.09";
+var PAGE_VERSION_ = "v13 · 06.09";
 function renderSettingsSheet(){
   var theme = document.documentElement.getAttribute("data-theme") || "dark";
   shHead.innerHTML = shHeadHtml("Меню", (M.me.name || "") + (API.demo ? " · демо" : ""), "");

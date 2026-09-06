@@ -22720,7 +22720,14 @@ function buildRoster(){
 function personShort(p){ return p.dept ? p.code : p.full.split(" ")[0]; }
 /* Влад, 29.08 (выбор уровня 5): на плитке - ПЕРВЫЕ ТРИ БУКВЫ фамилии, капсом,
    и менеджер, и логист обязательно. Отделы (ОЭ/ОК/ОБ) остаются своим кодом. */
-function three(p){ return p.dept ? p.code : p.full.split(" ")[0].substring(0,3).toUpperCase(); }
+/* НАЙДЕННЫЙ БАГ (06.09, Влад с ноутбука + Сильчев с телефона, один и тот же тост «Доска
+   Планировки не смогла перерисоваться»): рейс БЕЗ менеджера. Мобильная Планировка
+   (files/plan-m.html, решение Влада 05.09: менеджер необязателен, «Не указан» первым) пишет
+   manager_name=NULL - applyServerSegs_ через personByName_(null) кладёт в seg.mg null, а
+   three(null) падал на p.dept и ронял ВЕСЬ renderRowsInner_ (два таких рейса в базе: Кан
+   11:17, Сильчев 12:35 - точное совпадение по времени с жалобами). Пустой человек - это
+   легитимное состояние данных, доска обязана его переживать: рисуем «—», как на мобильной. */
+function three(p){ if (!p) return "—"; return p.dept ? p.code : (p.full || "").split(" ")[0].substring(0,3).toUpperCase() || "—"; }
 
 var PLACES = ["Липецк","Череповец","Подольск","Мытищи","Домодедово","Капотня","Терехово",
   "Крым","Сочи","Владикавказ","СПб","Краснодар","Казань","Пермь","Рязанская обл.","Зеленоград",
@@ -23021,7 +23028,10 @@ function hexA(hex, a){
 }
 function paint(el, seg){
   var mode = STATE.color;
-  if (mode !== "state" && seg.kind === "trip"){
+  /* who может быть null (рейс без менеджера/логиста с мобильной Планировки, 06.09) -
+     в режимах раскраски «Менеджер»/«Логист» такой рейс красим нейтрально, как статус,
+     а не роняем перерисовку на who.id */
+  if (mode !== "state" && seg.kind === "trip" && (mode === "manager" ? seg.mg : seg.lg)){
     var who = mode === "manager" ? seg.mg : seg.lg;
     var c = idColor(who.id);
     el.style.background = hexA(c, .34);

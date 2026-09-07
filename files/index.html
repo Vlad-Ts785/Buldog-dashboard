@@ -30,9 +30,6 @@
      "генератор коммерческих предложений... текст является настоящим текстом". Работает
      целиком в браузере, без сервера - тот же принцип, что у Leaflet/Chart.js выше. -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<!-- SheetJS - экспорт вкладки "Зарплата" в Excel с живыми формулами
-     (plans/2026-08-24-salary-excel-export.md) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root {
   --bg:#0f0f13;--bg2:#17171d;--bg3:#1e1e26;--bg4:#252530;
@@ -16626,12 +16623,9 @@ function renderCommercialHeadDebtPage_() {
   el.innerHTML = '<div class="card" style="margin-bottom:16px">' + html + '</div>';
 }
 
-// Состав "обычных" (не спецформула) отделов - ОБЩИЙ источник для renderSalesSalary() и
-// buildSalaryWorkbook_() (plans/2026-08-24-salary-excel-export.md), чтобы список членов
-// команды не разъезжался между экраном и Excel-экспортом (тот же класс риска, что уже дважды
-// ловили на TRAL_MANAGERS). Отдел Рыщанова сюда НЕ входит - его members зависит от
-// ALL_LOGISTS, которая считается только внутри renderSalesSalary() (нужен useNewRules), и в
-// экспорт (только коммерческий отдел) он не входит вообще.
+// Состав "обычных" (не спецформула) отделов - используется renderSalesSalary(). Отдел
+// Рыщанова сюда НЕ входит - его members зависит от ALL_LOGISTS, которая считается только
+// внутри renderSalesSalary() (нужен useNewRules).
 var COMMERCIAL_DEPTS = [
   { color:'#1D9E75', bgA:'29,158,117', label:'Отдел Ахтамовой',  head:'ахтамова',  headName:'Ахтамова Лиана',  ownSales:true,  specialHead:false,
     members:['ахтамова','цегельников','гуштюк','дербенцева','шейко'] },
@@ -17583,11 +17577,13 @@ function renderSalesSalary() {
   summaryHtml += '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">';
   summaryHtml += '<div style="font-size:14px;font-weight:600">Фонд оплаты труда - коммерческий отдел</div>';
   summaryHtml += '<div style="display:flex;align-items:center;gap:16px">';
-  // Экспорт в Excel (plans/2026-08-24-salary-excel-export.md) - только коммерческий отдел
-  // (Ахтамова/Гусейнова), только для действующих (useNewRules) периодов - см. проверку внутри
-  // exportSalaryToExcel_.
-  summaryHtml += '<button onclick="exportSalaryToExcel_()" style="background:rgba(29,158,117,.12);border:1px solid rgba(29,158,117,.35);' +
-    'color:#1D9E75;padding:7px 14px;border-radius:7px;font-size:12px;cursor:pointer;white-space:nowrap">📤 Экспорт в Excel</button>';
+  // Выгрузка для печати (07.09, замена Excel-экспорта - Влад: "как сейчас эксель уберу мне
+  // не нравится... нужна выгрузка в том же формате и принципе как сделано у водителей такая
+  // табличка понятная") - тот же паттерн, что "Зарплата - По машинистам"
+  // (machinistBuildPrintHtml_): самостоятельный HTML-файл, Ctrl+P, БЕЗ формул/пересчёта -
+  // просто снимок того, что уже на экране. См. salaryPrintExport_() ниже.
+  summaryHtml += '<button onclick="salaryPrintExport_()" style="background:rgba(29,158,117,.12);border:1px solid rgba(29,158,117,.35);' +
+    'color:#1D9E75;padding:7px 14px;border-radius:7px;font-size:12px;cursor:pointer;white-space:nowrap">🖨️ Выгрузить для печати</button>';
   summaryHtml += '<div style="font-size:22px;font-weight:700;color:#1D9E75">'+fr(totalPayroll)+'</div>';
   summaryHtml += '</div></div>';
   summaryHtml += marginBannerHtml+warningHtml+'</div>';
@@ -17595,174 +17591,68 @@ function renderSalesSalary() {
   el.innerHTML = summaryHtml + html;
 }
 
-// ── ЭКСПОРТ ЗАРПЛАТЫ В EXCEL (plans/2026-08-24-salary-excel-export.md) ──────────────────────
-// Влад, 2026-08-24: "нужна возможность выгружать в эксель данные со страницы зарплата, в
-// екселе должна сохраняться логика и должны быть прописаны формулы". Согласовано: снимок
-// ТЕКУЩЕГО периода (базовые цифры - числа, каждый шаг расчёта - настоящая Excel-формула,
-// ссылающаяся на них), только коммерческий отдел (Ахтамова/Гусейнова, без логистов/Рыщанова/
-// скрытой строки Цуцурина).
-//
-// ПРИНЦИП: эта функция НЕ пересчитывает бизнес-логику самостоятельно - она берёт ГОТОВЫЕ,
-// уже отрендеренные на экране объекты (calcHead/calcMgr, ТЕ ЖЕ вызовы, что использует
-// renderSalesSalary()) и раскладывает их числа по ячейкам + формулы, которые обязаны при
-// пересчёте Excel'ем дать то же число, что уже на экране. Если когда-нибудь бизнес-логика
-// (calcMgr/calcHead/okladByRev/mgrRate) изменится - экспорт автоматически подхватит новые
-// цифры (он вызывает те же функции), но конкретные ФОРМУЛЫ ниже (тарифная сетка оклада,
-// проценты, пороги) захардкожены под правила, действующие на 2026-08-24 - при следующем
-// изменении порогов/ставок нужно синхронно поправить и здесь.
+// ── ВЫГРУЗКА ЗАРПЛАТЫ ДЛЯ ПЕЧАТИ ─────────────────────────────────────────────────────────
+// Влад, 2026-08-24, первая версия - "нужна возможность выгружать в эксель... должны быть
+// прописаны формулы" (Excel с живыми формулами, только коммерческий отдел). 07.09, тот же
+// Влад - "как сейчас эксель убери мне не нравится... нужна выгрузка в том же формате и
+// принципе как сделано у водителей такая табличка понятная" - т.е. канон "Выгрузка для
+// печати" (см. machinistBuildPrintHtml_ на странице "Зарплата - По машинистам"):
+// самостоятельный скачиваемый HTML-файл, Ctrl+P - и, в отличие от Excel-версии, ЭТО НЕ
+// пересчитанная копия бизнес-логики со своими формулами (риск разъехаться с настоящим
+// расчётом - тот же класс, что уже дважды ронял зарплату Сурковой/INTERNAL_CLIENTS, см. план
+// ниже), а ПРОСТОЙ СНИМОК того, что уже отрендерено на экране (#salary-content) - те же
+// карточки отделов, что видит Влад, включая Рыщанова/логистов/скрытую строку Цуцурина (в
+// Excel-версии их не было - там был только коммерческий отдел). Формулы Excel-версии
+// подробно описаны в plans/2026-08-24-salary-excel-export.md - план помечен заменённым.
+function salaryPrintExport_() {
+  var content = document.getElementById('salary-content');
+  if (!content || !content.innerHTML.trim()) { p2Toast('Нет данных для выгрузки', 'amber'); return; }
+  var period = (D && D.orders && D.orders.period) || '';
+  var periodLabel = period ? formatMonthLabel(period) : 'текущий месяц';
+  var now = new Date();
+  var stamp = String(now.getDate()).padStart(2, '0') + '.' + String(now.getMonth() + 1).padStart(2, '0') + '.' +
+              now.getFullYear() + ' ' + String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
 
-function xlCell_(v) {
-  if (typeof v === 'number') return { t: 'n', v: v };
-  return { t: 's', v: String(v == null ? '' : v) };
-}
-// Формула + закэшированное значение. SheetJS МОЛЧА ВЫБРАСЫВАЕТ ячейку-формулу без 'v' при
-// записи файла (проверено на реальной библиотеке 2026-08-24, до фикса файл открывался бы с
-// пустыми ячейками вместо формул) - ровно так работает и настоящий Excel, где у формулы
-// всегда есть последнее вычисленное значение рядом с самой формулой. 'val' - ГОТОВОЕ число
-// из calcMgr/calcHead_ (та же переменная, что уже показана на экране), а не пересчитанное
-// заново - гарантирует, что открытый файл и экран совпадают буква в букву без пересчёта Excel.
-function xlFormula_(f, val) {
-  return { t: 'n', f: f, v: val };
-}
+  // Печатная тема - светлая (концы значения из :root[data-theme="light"] выше по файлу) +
+  // минимальный набор компонентов (.card/.tbl/.kpi), которые реально встречаются внутри
+  // #salary-content (renderCommercialDeptCardHtml_/renderRyschanowDeptCardHtml_ и т.д.) -
+  // на бумаге тёмная тема дашборда не нужна, тот же принцип, что и у machinistBuildPrintHtml_.
+  var html = '<!doctype html><html lang="ru"><head><meta charset="utf-8">' +
+    '<title>Зарплата - Коммерческий отдел ' + mdEsc_(periodLabel) + '</title><style>' +
+    ':root{--bg2:#ffffff;--bg3:#e2e7ed;--border:rgba(15,22,35,0.16);--text:#0f1623;--muted:#4a5568;' +
+    '--ink:15,22,35;--green:#1D9E75;--red:#E24B4A;--amber:#EF9F27;--blue:#378ADD;--purple:#7F77DD;' +
+    '--tint-green:#0a5940;--tint-blue:#164a86;--tint-amber:#6f480d;--tint-purple:#453d8c;--tint-red:#8a2c2b;--tint-orange:#78430c;' +
+    '--radius:12px}' +
+    '@page{size:A4 landscape;margin:12mm}' +
+    'body{font-family:Arial,Helvetica,sans-serif;font-size:12px;color:var(--text);background:#fff;margin:0;padding:14px}' +
+    'h1{font-size:16pt;margin:0 0 2px}.sub{color:var(--muted);font-size:11px;margin-bottom:14px}' +
+    '.card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;page-break-inside:avoid}' +
+    '.kpi{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px}' +
+    '.kpi-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;font-weight:500}' +
+    '.kpi-value{font-size:18px;font-weight:600;color:var(--text)}' +
+    '.kpi-value.green{color:var(--green)}.kpi-value.red{color:var(--red)}.kpi-value.amber{color:var(--amber)}' +
+    '.tbl{width:100%;border-collapse:collapse;font-size:11px;margin-top:6px}' +
+    '.tbl th{text-align:left;padding:6px 8px;color:var(--muted);font-weight:500;font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border);white-space:nowrap}' +
+    '.tbl td{padding:6px 8px;border-bottom:1px solid rgba(var(--ink),.06);color:var(--text)}' +
+    '.tbl tr:last-child td{border-bottom:none}' +
+    '.tbl tfoot td{padding:6px 8px;border-top:2px solid var(--border);color:var(--text);font-size:10.5px;background:var(--bg3)}' +
+    '.tbl .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}' +
+    '.tbl .green{color:var(--tint-green)}.tbl .red{color:var(--tint-red)}.tbl .amber{color:var(--tint-amber)}' +
+    '.tbl .orange{color:var(--tint-orange)}.tbl .blue{color:var(--tint-blue)}.tbl .muted{color:var(--muted);font-size:10px}' +
+    'button{display:none}' + // кнопка "Выгрузить для печати" сама попадает в снимок - на бумаге не нужна
+    '</style></head><body>' +
+    '<h1>Зарплата - Коммерческий отдел</h1>' +
+    '<div class="sub">' + mdEsc_(periodLabel) + ' &middot; выгружено ' + stamp + '</div>' +
+    content.innerHTML +
+    '</body></html>';
 
-// Строит один лист (один отдел) как массив строк ячеек + возвращает объект листа SheetJS.
-// dept - запись из COMMERCIAL_DEPTS. getM/getL/useNewRules - как в renderSalesSalary().
-function buildDeptSheet_(dept, getM, getL, useNewRules) {
-  var rows = [];
-  var HEADERS = ['Сотрудник', 'Оборот (свой+найм)', 'Своя выручка', 'База % своего парка (выручка минус затраты 1С)',
-    'Маржа найма квалиф. (≥23%)', 'Оклад', '% своего парка', '% найма (8%)', 'Премия ≥15М обор.', 'ИТОГО'];
-  rows.push(HEADERS.map(xlCell_));
-
-  // ── Строки команды (без руководителя) ──────────────────────────────────────────────────
-  var memberRowStart = rows.length; // 0-based индекс строки (после заголовка)
-  var memberSurs = dept.members.filter(function(s){ return s !== dept.head; });
-  var memberFundSum = 0; // сумма total_sal команды - копится тут же, чтобы не вызывать calcMgr дважды
-  memberSurs.forEach(function(sur) {
-    var c = calcMgr(sur, true, getM, getL, useNewRules);
-    if (!c || !c.total) return; // нет данных/уволен - как на экране, строку не рисуем
-    memberFundSum += c.total_sal;
-    var r = rows.length; // текущая строка (0-based)
-    var rowNum = r + 1;  // Excel 1-based
-    var rate = mgrRate(sur);
-    rows.push([
-      xlCell_(capName(sur)),
-      xlCell_(c.total),
-      xlCell_(c.ownRev),
-      xlCell_(c.ownProfitBase),
-      xlCell_(c.hiredMargin),
-      xlFormula_('IF(B'+rowNum+'>=10000000,150000,IF(B'+rowNum+'>=8000000,100000,IF(B'+rowNum+'>=5000000,50000,IF(B'+rowNum+'>=2000000,30000,0))))', c.oklad),
-      xlFormula_('ROUND(D'+rowNum+'*'+rate+',0)', c.ownComm),
-      xlFormula_('ROUND(E'+rowNum+'*0.08,0)', c.hiredBonus),
-      xlFormula_('IF(B'+rowNum+'>=15000000,100000,0)', c.bonus15m),
-      xlFormula_('F'+rowNum+'+G'+rowNum+'+H'+rowNum+'+I'+rowNum, c.total_sal),
-    ]);
-  });
-  var memberRowEnd = rows.length - 1; // последняя строка команды (0-based), может быть < memberRowStart если команда пуста
-
-  // ── Личные продажи руководителя (includeOklad:false - как на экране) ──────────────────
-  var headHM = dept.ownSales ? calcMgr(dept.head, false, getM, getL, useNewRules) : null;
-  var headHMRow = null;
-  if (headHM) {
-    var r2 = rows.length, rowNum2 = r2 + 1;
-    var rate2 = mgrRate(dept.head);
-    headHMRow = rowNum2;
-    rows.push([
-      xlCell_(capName(dept.head) + ' - личные продажи'),
-      xlCell_(headHM.total),
-      xlCell_(headHM.ownRev),
-      xlCell_(headHM.ownProfitBase),
-      xlCell_(headHM.hiredMargin),
-      xlCell_(0), // оклад по личным продажам не начисляется (includeOklad:false) - см. calcMgr
-      xlFormula_('ROUND(D'+rowNum2+'*'+rate2+',0)', headHM.ownComm),
-      xlFormula_('ROUND(E'+rowNum2+'*0.08,0)', headHM.hiredBonus),
-      xlFormula_('IF(B'+rowNum2+'>=15000000,100000,0)', headHM.bonus15m),
-      xlFormula_('F'+rowNum2+'+G'+rowNum2+'+H'+rowNum2+'+I'+rowNum2, headHM.total_sal),
-    ]);
-  }
-
-  // ── Команда руководителя (агрегат calcHead - формулы SUM/COUNTIF по диапазону команды) ──
-  var headHC = calcHead_(dept.members, dept.head, useNewRules, getM);
-  var teamRowNum = rows.length + 1;
-  var hasTeam = memberRowEnd >= memberRowStart;
-  var memberRange = hasTeam ? ('B'+(memberRowStart+1)+':B'+(memberRowEnd+1)) : null;
-  var memberRangeD = hasTeam ? ('D'+(memberRowStart+1)+':D'+(memberRowEnd+1)) : null;
-  var memberRangeE = hasTeam ? ('E'+(memberRowStart+1)+':E'+(memberRowEnd+1)) : null;
-  rows.push([
-    xlCell_(capName(dept.head) + ' - команда (0.8% выручки + 2% маржи найма + премия за укомплект.)'),
-    xlCell_(headHC.deptRev),
-    xlCell_(headHC.deptOwnRev),
-    xlCell_(headHC.deptOwnProfitBase),
-    xlCell_(headHC.deptQualMargin),
-    xlCell_(20000), // оклад руководителя - фикс, не зависит от порогов
-    xlFormula_(hasTeam ? 'ROUND(SUM('+memberRangeD+')*0.008,0)' : '0', headHC.pct08),
-    xlFormula_(hasTeam ? 'ROUND(SUM('+memberRangeE+')*0.02,0)' : '0', headHC.margin2),
-    xlFormula_(hasTeam ? 'IF(COUNTIF('+memberRange+',">0")>=4,COUNTIF('+memberRange+',">=2000000")*20000,0)' : '0', headHC.mgrBonus),
-    xlFormula_('F'+teamRowNum+'+G'+teamRowNum+'+H'+teamRowNum+'+I'+teamRowNum, headHC.total),
-  ]);
-
-  // ── Премия за объём отдела (порог 30М, 10т за каждые 10М) ──────────────────────────────
-  var volRowNum = rows.length + 1;
-  var deptRevTotalFormula = 'B'+teamRowNum + (headHMRow ? '+B'+headHMRow : '');
-  var deptRevTotal = headHC.deptRev + (headHM ? headHM.total : 0);
-  var volumeBonus = calcVolumeBonus(deptRevTotal); // та же функция, что и на экране
-  rows.push([
-    xlCell_('Премия за объём отдела (выручка ≥30М, 10т за каждые полных 10М)'),
-    xlFormula_(deptRevTotalFormula, deptRevTotal), // "Оборот" колонка тут = выручка отдела целиком, для наглядности
-    xlCell_(''), xlCell_(''), xlCell_(''),
-    xlCell_(''), xlCell_(''), xlCell_(''), xlCell_(''),
-    xlFormula_('IF(B'+volRowNum+'<30000000,0,INT(B'+volRowNum+'/10000000)*10000)', volumeBonus),
-  ]);
-
-  // ── ИТОГО по отделу ──────────────────────────────────────────────────────────────────
-  var totalRowNum = rows.length + 1;
-  var sumParts = ['J'+teamRowNum, (headHMRow ? 'J'+headHMRow : '0'), 'J'+volRowNum];
-  var deptFund = headHC.total + (headHM ? headHM.total_sal : 0) + volumeBonus + memberFundSum;
-  if (hasTeam) sumParts.push('SUM(J'+(memberRowStart+1)+':J'+(memberRowEnd+1)+')');
-  rows.push([
-    xlCell_('ИТОГО ПО ОТДЕЛУ'), xlCell_(''), xlCell_(''), xlCell_(''), xlCell_(''),
-    xlCell_(''), xlCell_(''), xlCell_(''), xlCell_(''),
-    xlFormula_(sumParts.join('+'), deptFund),
-  ]);
-
-  // Собираем worksheet вручную (не aoa_to_sheet - тому формулы не передать напрямую)
-  var ws = {};
-  var maxCol = 0;
-  rows.forEach(function(rowCells, r) {
-    maxCol = Math.max(maxCol, rowCells.length - 1);
-    rowCells.forEach(function(cellObj, c) {
-      ws[XLSX.utils.encode_cell({ r: r, c: c })] = cellObj;
-    });
-  });
-  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rows.length - 1, c: maxCol } });
-  ws['!cols'] = [{ wch: 42 }, { wch: 16 }, { wch: 14 }, { wch: 20 }, { wch: 18 }, { wch: 11 }, { wch: 12 }, { wch: 12 }, { wch: 13 }, { wch: 13 }];
-  return ws;
-}
-
-function exportSalaryToExcel_() {
-  if (!D || !D.orders) { p2Toast('Нет данных для экспорта', 'amber'); return; }
-  var useNewRules = isNewRulesPeriod(D.orders.period);
-  if (!useNewRules) {
-    p2Toast('Экспорт доступен только для периодов с июля 2026 (действующие правила расчёта). ' +
-      'Формулы в файле написаны под текущие правила - для более старых периодов действовала другая формула.');
-    return;
-  }
-  var allMgrs = D.orders.by_manager || [];
-  var allLogs = D.orders.by_logist || [];
-  var mgrIdx = {}, logIdx = {};
-  allMgrs.forEach(function(m) { mgrIdx[(m.name||'').trim().split(' ')[0].toLowerCase()] = m; });
-  allLogs.forEach(function(l) { logIdx[(l.name||'').trim().split(' ')[0].toLowerCase()] = l; });
-  function getM(sur) { return mgrIdx[sur.toLowerCase()] || null; }
-  function getL(sur) { return logIdx[sur.toLowerCase()] || null; }
-
-  var wb = XLSX.utils.book_new();
-  COMMERCIAL_DEPTS.forEach(function(dept) {
-    var ws = buildDeptSheet_(dept, getM, getL, useNewRules);
-    XLSX.utils.book_append_sheet(wb, ws, dept.headName.split(' ')[0]);
-  });
-
-  var period = D.orders.period || '';
-  var fname = 'Зарплата_' + (period || 'период') + '.xlsx';
-  XLSX.writeFile(wb, fname);
+  var blob = new Blob(['﻿' + html], { type: 'text/html;charset=utf-8' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'Зарплата ' + periodLabel + '.html';
+  document.body.appendChild(a); a.click();
+  setTimeout(function() { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  p2Toast('Файл скачан - откройте и печатайте (Ctrl+P)', 'green');
 }
 
 function renderSalesLog() {

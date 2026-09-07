@@ -6988,11 +6988,24 @@ function aiTasksTodayKey_(managerName) {
   var d = new Date();
   return managerName + '::' + d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 }
+// 07.09, план plans/2026-09-07-ai-tasks-server-port.md (Влад: "вся движуха через скрипт
+// идёт, нужно сделать через сервер") - Фаза 1, ТОЛЬКО роль manager: сервер первым, тихий
+// фолбэк на Apps Script (тот же принцип, что везде на дашборде). Logist/commercial_head/
+// ryschanow пока ВСЕГДА идут в Apps Script (Фаза 2, ещё не перенесены) - возвращает null
+// сразу, без похода на сервер, чтобы не тратить лишний запрос впустую.
+function fetchAiTasksFromServer_(managerName, role, force) {
+  if (role !== 'manager') return Promise.resolve(null);
+  return fetchFromYardApi_('/ai_tasks', { person: managerName, force: force ? '1' : undefined }).then(function(r) {
+    return (r.ok && r.data && !r.data.error) ? r.data : null;
+  }).catch(function() { return null; });
+}
 function loadAiTasksIfNeeded_(managerName, role) {
   var key = aiTasksTodayKey_(managerName);
   if (aiTasksCache[key] || aiTasksLoadingKey === key) return;
   aiTasksLoadingKey = key;
-  apiFetchJson({ action: 'generate_ai_tasks', manager: managerName, role: role || 'manager' }).then(function(data) {
+  fetchAiTasksFromServer_(managerName, role, false).then(function(fromServer) {
+    return fromServer || apiFetchJson({ action: 'generate_ai_tasks', manager: managerName, role: role || 'manager' });
+  }).then(function(data) {
     aiTasksLoadingKey = null;
     aiTasksCache[key] = data && data.error ? { error: data.error } : data;
     renderMyPage();
@@ -7014,7 +7027,9 @@ function retryAiTasks_(managerName, role) {
   delete aiTasksCache[key];
   aiTasksLoadingKey = key;
   renderMyPage();
-  apiFetchJson({ action: 'generate_ai_tasks', manager: managerName, role: role || 'manager', force: '1' }).then(function(data) {
+  fetchAiTasksFromServer_(managerName, role, true).then(function(fromServer) {
+    return fromServer || apiFetchJson({ action: 'generate_ai_tasks', manager: managerName, role: role || 'manager', force: '1' });
+  }).then(function(data) {
     aiTasksLoadingKey = null;
     aiTasksCache[key] = data && data.error ? { error: data.error } : data;
     renderMyPage();

@@ -17018,6 +17018,7 @@ function machinistBuildPrintHtml_(d, byDriver) {
         var pct = (Number(t.order_amount) > 0) ? (100 * (Number(t.amount) || 0) / Number(t.order_amount)) : null;
         return '<tr><td>' + esc(mdShort_(t.trip_date)) + '</td><td>' + esc(mdDocShort_(t.doc_ref)) + '</td>' +
           '<td class="l">' + esc(t.logist ? String(t.logist).split(' ')[0] : '—') + '</td>' +
+          '<td class="l">' + esc(t.equipment_type || '—') + '</td>' +
           '<td class="l">' + esc(t.route || '—') + '</td><td class="l">' + esc(t.order_cargo || '—') + '</td>' +
           '<td>' + num(t.km_mkad) + '</td><td>' + hrs(t.hours) + '</td>' +
           // ДО 06.09 здесь стояло t.amount (начислено, 17 241), а на экране - net_amount
@@ -17027,9 +17028,9 @@ function machinistBuildPrintHtml_(d, byDriver) {
           '<td' + (pct != null && pct > 20 ? ' class="hi"' : '') + '>' + (pct != null ? pct.toFixed(1) + '%' : '—') + '</td></tr>';
       }).join('');
       return '<div class="veh">' + esc(veh) + ' · рейсов: ' + list.length + '</div>' +
-        '<table class="t"><thead><tr><th>Дата</th><th>Документ</th><th class="l">Логист</th><th class="l">Маршрут</th>' +
+        '<table class="t"><thead><tr><th>Дата</th><th>Документ</th><th class="l">Логист</th><th class="l">Оборудование</th><th class="l">Маршрут</th>' +
         '<th class="l">Груз</th><th>Км МКАД</th><th>Часы</th><th>К начислению</th><th>Стоимость заказа</th><th>%</th></tr></thead>' +
-        '<tbody>' + body + '<tr class="tot"><td colspan="7">Итого по машине</td><td>' + num(sumNet) + '</td><td>' + num(sumOrder) + '</td>' +
+        '<tbody>' + body + '<tr class="tot"><td colspan="8">Итого по машине</td><td>' + num(sumNet) + '</td><td>' + num(sumOrder) + '</td>' +
         '<td' + (sumOrder > 0 && 100 * sumGross / sumOrder > 20 ? ' class="hi"' : '') + '>' +
         (sumOrder > 0 ? (100 * sumGross / sumOrder).toFixed(1) + '%' : '—') + '</td></tr></tbody></table>';
     }).join('');
@@ -17164,10 +17165,13 @@ var MD_FINES_COLS_ = [
 // Порядок и состав (2026-09-04, правка Влада): Оборудование убрано, Сумма/НДФЛ убраны
 // (остаётся только К начислению - итоговая цифра на руки), Стоимость заказа - в конец,
 // Процент (доля зарплаты машиниста от стоимости заказа, >20% - красным, Влад) - после неё.
+// 07.09 - Оборудование ВЕРНУЛИ (Влад: "добавь колонку оборудование ... после колонки
+// логиста"), данные никуда не девались (equipment_type уже шёл в API, просто не рисовался).
 var MD_TRIP_COLS_ = [
   { key: 'trip_date', label: 'Дата', num: false },
   { key: 'doc_ref', label: 'Документ', num: false },
   { key: 'logist', label: 'Логист', num: false },
+  { key: 'equipment_type', label: 'Оборудование', num: false },
   { key: 'route', label: 'Маршрут', num: false },
   { key: 'cargo', label: 'Груз', num: false },
   { key: 'km_mkad', label: 'Км МКАД', num: true },
@@ -17179,7 +17183,7 @@ var MD_TRIP_COLS_ = [
 // Первый клик: числа - по убыванию (крупное), текст - А-Я, даты - убывание (свежие
 // сначала) - тот же порядок правил, что в разделе "Сортируемая таблица" ГОСТа.
 function mdDefaultDir_(col) {
-  return (col === 'route' || col === 'cargo' || col === 'logist') ? 1 : -1;
+  return (col === 'route' || col === 'cargo' || col === 'logist' || col === 'equipment_type') ? 1 : -1;
 }
 function mdSortVal_(row, col) {
   if (col === 'doc_ref') return Number(mdDocShort_(row.doc_ref)) || 0;
@@ -17189,7 +17193,7 @@ function mdSortVal_(row, col) {
   // скачет"). Считаем то же самое здесь, что и в mdRenderVeh_ ниже.
   if (col === 'pct') return (row.order_amount && row.order_amount > 0) ? (row.amount / row.order_amount * 100) : -Infinity;
   var v = row[col];
-  return (col === 'route' || col === 'cargo' || col === 'logist' || col === 'period_from' || col === 'trip_date') ? (v || '') : (v == null ? -Infinity : v);
+  return (col === 'route' || col === 'cargo' || col === 'logist' || col === 'equipment_type' || col === 'period_from' || col === 'trip_date') ? (v || '') : (v == null ? -Infinity : v);
 }
 function mdSortRows_(rows, cols, sort) {
   var colDef = cols.filter(function(c) { return c.key === sort.col; })[0];
@@ -17266,6 +17270,7 @@ function mdRenderVeh_(vi) {
     return '<tr><td>' + mdShort_(t.trip_date) + '</td>' +
       '<td style="color:var(--muted)">' + mdDocShort_(t.doc_ref) + '</td>' +
       '<td>' + (t.logist ? String(t.logist).trim().split(' ')[0] : '—') + '</td>' +
+      mdEllipsisCell_(t.equipment_type, 140) +
       mdEllipsisCell_(t.route, 240) +
       mdEllipsisCell_(t.cargo, 160) +
       '<td class="num">' + (t.km_mkad ? Math.round(t.km_mkad).toLocaleString('ru-RU') : '—') + '</td>' +
@@ -17278,7 +17283,7 @@ function mdRenderVeh_(vi) {
     '<div style="overflow-x:auto"><table class="tbl"><thead><tr>' +
       mdSortHead_(MD_TRIP_COLS_, sort, 'mdSortVeh_', vi) +
     '</tr></thead><tbody>' + body + '</tbody>' +
-    '<tfoot><tr><td colspan="7" style="font-weight:600">Итого по машине</td>' +
+    '<tfoot><tr><td colspan="8" style="font-weight:600">Итого по машине</td>' +
     '<td class="num" style="font-weight:600">' + mdFr_(netSubtotal) + '</td>' +
     '<td class="num" style="font-weight:600;color:var(--muted)">' + mdFr_(orderSubtotal) + '</td>' +
     '<td class="num" style="font-weight:600;color:' + mdPctColor_(avgPct) + '">' + (avgPct != null ? avgPct.toFixed(1) + '%' : '—') + '</td>' +

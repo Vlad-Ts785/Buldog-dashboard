@@ -10979,7 +10979,11 @@ function callKieGpt5_(promptText) {
     model: 'gpt-5.6-luna',
     stream: false,
     input: [{ role: 'user', content: [{ type: 'input_text', text: promptText }] }],
-    reasoning: { effort: 'medium' },
+    // 07.09, Влад: "хотелось бы, чтобы побыстрее генерировал" - "low" даёт ~50 сек вместо
+    // ~60-120 у "medium" без потери качества (сверено живьём на серверной копии этого же
+    // вызова, api/lib/kie-ai-tasks.js - тот же порт). "minimal" ПРОБОВАЛИ и ОТКЛОНИЛИ - kie.ai
+    // отвечает мгновенным HTTP 500 (не поддерживается для этой модели/эндпоинта).
+    reasoning: { effort: 'low' },
   };
   const resp = UrlFetchApp.fetch(KIE_GPT5_URL, {
     method: 'post',

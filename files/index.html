@@ -7746,7 +7746,17 @@ function renderAiTasksBlockHtml_(personName, role) {
   if (!aiEntry) {
     aiBody = '<div style="font-size:13px;color:var(--muted);padding:8px 0">Генерируется… обычно 5-15 сек.</div>';
   } else if (aiEntry.error) {
-    aiBody = '<div style="font-size:13px;color:'+PAGE_COL.red+';padding:8px 0">Не удалось сгенерировать: '+aiEntry.error+'</div>'+
+    // 07.09, Влад заметил на скриншотах, что kie.ai (сторонний поставщик ИИ) отдаёт HTTP 500
+    // подряд часами (не единичный сбой, как считалось раньше - см. память
+    // feedback_debug_thoroughly_and_generalize) - "Server exception, please try again later".
+    // Раньше сюда шёл СЫРОЙ текст ошибки (kie.ai HTTP 500: {"error":{...}}) - пугающий JSON
+    // прямо на странице у менеджера, который вообще ни при чём. Показываем спокойное сообщение
+    // для похожих на сбой поставщика ошибок, сырой текст - в title по наведению (для отладки).
+    var aiErrIsProviderDown = /kie\.ai HTTP 5\d\d/.test(aiEntry.error || '');
+    var aiErrShown = aiErrIsProviderDown
+      ? 'ИИ-подсказки временно недоступны - сбой у поставщика ИИ, не у дашборда. Остальные данные считаются как обычно.'
+      : ('Не удалось сгенерировать: ' + aiEntry.error);
+    aiBody = '<div style="font-size:13px;color:'+(aiErrIsProviderDown ? PAGE_COL.amber : PAGE_COL.red)+';padding:8px 0" title="'+aiEntry.error.replace(/"/g,'&quot;')+'">'+aiErrShown+'</div>'+
       '<button onclick="retryAiTasks_(\''+personName.replace(/'/g,"\\'")+'\',\''+roleEsc+'\')" style="margin-top:6px;cursor:pointer;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:12px;color:var(--text)">Повторить</button>';
   } else {
     // Бейдж категории (2026-08-12) - помогает быстро понять баланс задач на день, не только

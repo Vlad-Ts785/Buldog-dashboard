@@ -25032,7 +25032,8 @@ function applyServerSegs_(rows){
     var vi = byGos[r.vehicle_gos];
     if (vi == null) return;   /* машина выбыла из парка - строку не рисуем, но и не удаляем на сервере */
     var seg = {id:r.id, v:vi, kind:r.kind, s:parseFloat(r.start_hour), l:parseFloat(r.length_hours),
-               needsData: !!Number(r.needs_data), reason: r.reason || ""};
+               needsData: !!Number(r.needs_data), reason: r.reason || "",
+               createdByName: r.created_by_name || "", createdAt: r.created_at_label || ""};
     if (r.kind === "trip"){
       var v = STATE.vehicles[vi];
       seg.mg = personByName_(r.manager_name, MANAGERS);
@@ -25564,6 +25565,14 @@ function openDrawer(seg){
   var infoRows = [["Машина", v.type + " · " + v.gos], ["Тягач", v.tractor],
               ["Прицеп", (v.trailer || "-") + (v.trailerGos ? " · " + v.trailerGos : "")],
               ["Водитель", v.driver || "нет"], ["График", v.schedule || "-"]];
+  /* "Кто поставил" (Влад, 07.09, со скриншотом карточки "Без водителя": "мне нужно
+     в карточке статуса видеть кто его поставил. Ремонт без водителя и т.д.") -
+     createdByName приходит с сервера уже резолвленным email->ФИО (applyServerSegs_).
+     Совсем новая, ещё не сохранённая запись (создаётся прямо сейчас) - поля с
+     сервера ещё нет, показывать нечего, строку не добавляем вовсе (не "—" -
+     честное отсутствие данных, а не будущий факт, который появится после
+     сохранения). */
+  if (seg.createdByName) infoRows.push(["Поставил", seg.createdByName + (seg.createdAt ? " · " + seg.createdAt : "")]);
   var rowsHtml = function(rows){
     return rows.map(function(p){
       return '<div class="dr-row"><span>' + p[0] + '</span><span class="' +

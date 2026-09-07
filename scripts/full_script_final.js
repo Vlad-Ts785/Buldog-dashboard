@@ -10960,11 +10960,23 @@ function buildRyschanowAiTasksPrompt_(name, context) {
 // POST https://api.kie.ai/codex/v1/responses - reasoning-модель (см. reference-память
 // kie.ai - "у каждой модели свой URL/формат", этот путь для GPT-5). Ключ - только из Script
 // Properties, никогда не в коде (правило репозитория).
+//
+// 07.09, найдено Владом - прислал живой прайс-лист kie.ai: у них в каталоге модель
+// называется "gpt-5.4" (через точку), а в нашем коде было "gpt-5-4" (через дефис) - имени
+// с дефисом в их каталоге вообще нет. Скорее всего именно это (не разовый сбой сервера)
+// было причиной "стабильный HTTP 500 весь вечер" - kie.ai недавно чистил/обновлял каталог
+// моделей (баннер про Seedance 2.5), алиас перестал матчиться. Заодно (тем же выбором
+// Влада, AskUserQuestion) сменили модель на gpt-5.6-luna - то же семейство, но заметно
+// дешевле ($0.056/$0.336 за млн токенов вход/выход против $0.70/$5.60 у gpt-5.4) - для
+// задачи "5 коротких задач в JSON" запас качества топовой модели не нужен, риск - НЕ
+// проверено вживую на реальном длинном промпте (буклет правил + JSON-данные), первая
+// генерация после деплоя ОБЯЗАНА быть проверена глазами (текст задач/формулировки), не
+// просто "код без ошибок" - если качество хуже gpt-5.4, откатить model обратно.
 function callKieGpt5_(promptText) {
   const key = PropertiesService.getScriptProperties().getProperty('KIE_API_KEY');
   if (!key) throw new Error('KIE_API_KEY не настроен в Script Properties - добавь вручную в редакторе Apps Script (Настройки проекта -> Свойства скрипта)');
   const payload = {
-    model: 'gpt-5-4',
+    model: 'gpt-5.6-luna',
     stream: false,
     input: [{ role: 'user', content: [{ type: 'input_text', text: promptText }] }],
     reasoning: { effort: 'medium' },
@@ -11036,7 +11048,7 @@ function generateAiTasksCached_(ss, personName, role, contextFn, promptFn, force
   const prompt = promptFn(personName, context);
   const rawText = callKieGpt5_(prompt);
   const parsed = parseAiTasksResponse_(rawText);
-  const generatedAt = saveAiTasksCache_(ss, dateKey, personName, parsed.tasks, parsed.plan_advice, 'gpt-5-4', role);
+  const generatedAt = saveAiTasksCache_(ss, dateKey, personName, parsed.tasks, parsed.plan_advice, 'gpt-5.6-luna', role);
   return { tasks: parsed.tasks, plan_advice: parsed.plan_advice, generated_at: generatedAt, cached: false };
 }
 

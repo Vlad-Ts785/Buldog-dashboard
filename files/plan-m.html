@@ -413,7 +413,7 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 <div class="scrim" id="scrim"></div>
 <div class="sheet" id="sheet"><div class="grip" id="grip"></div><div class="sh-head" id="shHead"></div><div class="sh-body" id="shBody"></div><div class="sh-foot" id="shFoot"></div></div>
 <div class="ovl" id="ovl"><div class="ovl-head" id="ovlHead"></div><div class="ovl-body" id="ovlBody"></div><div class="ovl-foot" id="ovlFoot" hidden></div></div>
-<div class="demo-tag" id="demoTag" hidden>ДЕМО · v13</div>
+<div class="demo-tag" id="demoTag" hidden>ДЕМО · v14</div>
 <script>
 "use strict";
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -1347,7 +1347,7 @@ var form = null;
 function openSegSheet(id){
   var s = segById(id); if (!s) return;
   var isDraft = id === "draft";
-  form = {id:id, kind:s.kind, v:s.v, s:s.s, l:s.l, customer:s.customer || "", from:s.from || "", to:s.to || "", mg:s.mg || "", lg:s.lg || "", needsData:!!s.needsData, tripMode:s.tripMode || "", reason:s.reason || "", timeOpen:false, orig:JSON.stringify([s.kind, s.v, s.s, s.l, s.customer, s.from, s.to, s.mg, s.needsData, s.tripMode, s.reason])};
+  form = {id:id, kind:s.kind, v:s.v, s:s.s, l:s.l, customer:s.customer || "", from:s.from || "", to:s.to || "", mg:s.mg || "", lg:s.lg || "", needsData:!!s.needsData, tripMode:s.tripMode || "", reason:s.reason || "", timeOpen:false, orig:JSON.stringify([s.kind, s.v, s.s, s.l, s.customer, s.from, s.to, s.mg, s.lg, s.needsData, s.tripMode, s.reason])};
   if (isDraft) select("draft"); else select(id);
   sheetOnClose = null;
   openSheet("seg", {id:id}, isDraft ? "half" : "full");
@@ -1360,7 +1360,7 @@ function formApplyToSeg(){
 function renderSegSheet(){
   var s = segById(form.id); if (!s){ closeSheet(); return; }
   var isDraft = form.id === "draft", v = M.vehicles[form.v], trip = form.kind === "trip";
-  var changed = JSON.stringify([form.kind, form.v, form.s, form.l, form.customer, form.from, form.to, form.mg, form.needsData, form.tripMode, form.reason]) !== form.orig;
+  var changed = JSON.stringify([form.kind, form.v, form.s, form.l, form.customer, form.from, form.to, form.mg, form.lg, form.needsData, form.tripMode, form.reason]) !== form.orig;
   shHead.innerHTML = shHeadHtml(isDraft ? "Новая заявка" : (KIND_LABEL[form.kind] || "Заявка"), v.gosShort + " · " + (v.driverShort || "нет водителя"), isDraft ? "" : '<button class="hbtn icon" id="shMore" aria-label="Ещё"><svg><use href="#i-more"/></svg></button>');
   var h = [];
   if (isDraft){
@@ -1373,6 +1373,15 @@ function renderSegSheet(){
      выбирать менеджера, это важно» - строка ниже сгиба полулиста = невидима). Имя в обиходе +
      3-буквенный код, как на плитке. */
   if (trip) h.push('<div class="f-label">Менеджер</div><div class="days" id="fMgChips">' + [{v:"", t:"Не указан"}].concat(M.managers.map(function(m){ return {v:m, t:mgChipLabel(m)}; })).map(function(o){ return '<button data-v="' + esc(o.v) + '" aria-pressed="' + (form.mg === o.v) + '">' + esc(o.t) + '</button>'; }).join("") + '</div>');
+  /* Логист - вернули по просьбе логистов (06.09): «определяется автоматически» решение
+     05.09 не учло, что заявку часто ставит один логист за другого (подменяет, помогает с
+     тралами) - в такой заявке логистом должен остаться тот, чья это на самом деле работа,
+     не тот, кто нажал кнопку. Автоподстановка себя при СОЗДАНИИ (createDraft) остаётся -
+     это по-прежнему угадывание по умолчанию, просто теперь его можно поправить одним тапом,
+     как менеджера. Список - тот же M.logists (роль из sprav_people_roles/orders, без
+     Рыщанова - isRyschanowName_ уже фильтрует на загрузке). */
+  var lgRoster = M.logists.length ? M.logists : (M.me.name ? [M.me.name] : []); // ростер ещё грузится фоном (loadProfile) - хоть себя показать, не пустой список
+  if (trip) h.push('<div class="f-label">Логист</div><div class="days" id="fLgChips">' + lgRoster.map(function(m){ return {v:m, t:mgChipLabel(m) + (m === M.me.name ? " · я" : "")}; }).map(function(o){ return '<button data-v="' + esc(o.v) + '" aria-pressed="' + (form.lg === o.v) + '">' + esc(o.t) + '</button>'; }).join("") + '</div>');
   h.push('<div class="timebox"><button class="stp" id="fMinus">−30</button><button class="cur" id="fTime">' + fmtTime(form.s) + '<small>' + fmtDayLong(form.s) + '</small></button><button class="stp" id="fPlus">+30</button></div>');
   if (form.timeOpen){
     var d0 = dayStartOf(nowHour()) - 24, days = [];
@@ -1425,7 +1434,7 @@ function segSheetClick(e){
   var id = b.id;
   if (b.parentNode && b.parentNode.id === "fKind"){ form.kind = b.dataset.k; if (form.kind !== "trip"){ form.customer = ""; form.mg = ""; if (form.l === 8) form.l = 24; } else if (form.l === 24 && !form.tripMode) form.l = 8; if (form.kind === "driveroff" && !form.reason) form.reason = "dayoff"; formApplyToSeg(); renderSegSheet(); return; }
   if (b.parentNode && b.parentNode.id === "fReason"){ form.reason = b.dataset.r; formApplyToSeg(); renderSegSheet(); return; }
-  if (b.parentNode && b.parentNode.id === "fMgChips"){ form.mg = b.dataset.v; vib(4); formApplyToSeg(); renderSegSheet(); var ch = $("fMgChips"); if (ch){ var on = ch.querySelector('[aria-pressed="true"]'); if (on) on.scrollIntoView({block:"nearest", inline:"center"}); } return; }
+  if (b.parentNode && (b.parentNode.id === "fMgChips" || b.parentNode.id === "fLgChips")){ var chId = b.parentNode.id; form[chId === "fMgChips" ? "mg" : "lg"] = b.dataset.v; vib(4); formApplyToSeg(); renderSegSheet(); var ch = $(chId); if (ch){ var on = ch.querySelector('[aria-pressed="true"]'); if (on) on.scrollIntoView({block:"nearest", inline:"center"}); } return; }
   if (b.parentNode && b.parentNode.id === "fDur"){ form.l = +b.dataset.l; formApplyToSeg(); renderSegSheet(); return; }
   if (b.parentNode && b.parentNode.id === "fDays"){ var d = +b.dataset.d; form.s = d + (form.s - dayStartOf(form.s)); formApplyToSeg(); renderSegSheet(); return; }
   if (b.parentNode && b.parentNode.id === "fHours"){ form.s = dayStartOf(form.s) + (+b.dataset.h) + (form.s % 1); formApplyToSeg(); renderSegSheet(); return; }
@@ -1691,7 +1700,7 @@ function renderConfirmSheet(){
 /* ── Настройки (тема - развилка для Влада, версия) ── */
 /* Меню (кнопка ≡ в шапке, Влад 06.09: «должна быть возможность вернуться в меню дашборда
    из планировки») - навигация наверху, настройки ниже. */
-var PAGE_VERSION_ = "v13 · 06.09";
+var PAGE_VERSION_ = "v14 · 07.09";
 function renderSettingsSheet(){
   var theme = document.documentElement.getAttribute("data-theme") || "dark";
   shHead.innerHTML = shHeadHtml("Меню", (M.me.name || "") + (API.demo ? " · демо" : ""), "");

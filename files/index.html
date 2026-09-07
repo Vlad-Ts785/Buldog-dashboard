@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TS HUB — Панель управления</title>
+<title>ЯРД HUB — Панель управления</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -13,7 +13,7 @@
      это дефолт (plans/2026-08-29-light-theme-toggle.md). -->
 <script>try{if(localStorage.getItem('yardhub_theme')==='light')document.documentElement.setAttribute('data-theme','light')}catch(e){}</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
-<!-- Unbounded - display-шрифт бренда "TS HUB" в сайдбаре (DESIGN_SYSTEM.md, раздел 2:
+<!-- Unbounded - display-шрифт бренда "ЯРД HUB" в сайдбаре (DESIGN_SYSTEM.md, раздел 2:
      Unbounded ТОЛЬКО для брендовых/display-мест, не внутри карточек). Остальная
      типографика дашборда пока system stack - полный переход шрифтов по ГОСТу -
      отдельный этап редизайна, не смешан с меню. -->
@@ -118,7 +118,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   font-size:10px;font-weight:600;letter-spacing:.1em;
   color:var(--muted);text-transform:uppercase;margin-bottom:8px;
 }
-/* Бренд "TS HUB" - только текст, без логотипа-иконки (DESIGN_SYSTEM.md раздел 4/Сайдбар,
+/* Бренд "ЯРД HUB" - только текст, без логотипа-иконки (DESIGN_SYSTEM.md раздел 4/Сайдбар,
    утверждено Владом 28.08). Unbounded 600 19px, "HUB" - зелёным. */
 .sidebar-logo-text{
   font-family:'Unbounded','Arial Narrow',sans-serif;
@@ -210,6 +210,50 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .sidebar.collapsed .sidebar-nav-item{font-size:0;justify-content:center;gap:0;padding:8px 0;}
 .sidebar.collapsed .sidebar-refresh{justify-content:center;padding:7px 0;}
 @media(max-width:900px){ .sidebar-collapse-btn{display:none;} }
+
+/* ── Кастомизация меню (05.09, Влад: "зажал меню - перешло в режим кастома... передвинуть
+   как канбанчик, скрыть") - ГОСТ раздел 6 "Долгое нажатие -> режим перестановки", числа
+   буквально: 550мс/6px, дрожание ±1° с фазовым сдвигом, grip 2x3, плашка "Готово"
+   200ms --ease-out-strong, drag: opacity .82, двухслойная тень, scale 1.03, lerp 0.28,
+   FLIP 300ms, укладка overshoot 380ms. Кривые - литералами: переменные --ease-* объявлены
+   не на :root, а внутри страниц (CRM/Планировка), сайдбар их не видит. */
+.sidebar-nav-item .menu-grip{display:none;margin-left:auto;width:8px;height:12px;flex:none;color:var(--muted);opacity:.7;}
+.sidebar-nav-item .menu-grip svg{width:8px;height:12px;display:block;}
+.sidebar-nav-item .menu-eye{display:none;margin-left:4px;width:18px;height:18px;flex:none;border:1px solid var(--border);border-radius:5px;background:var(--bg2);color:var(--muted);align-items:center;justify-content:center;cursor:pointer;}
+.sidebar-nav-item .menu-eye svg{width:11px;height:11px;display:block;}
+/* В режиме подписи не переносим - длинные ("Глобальная статистика") режутся многоточием,
+   иначе с grip+глазом строка становилась двухэтажной. */
+.sidebar.menu-customizing .sidebar-nav-item{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;gap:8px;padding-right:6px;}
+.sidebar.menu-customizing .sidebar-nav-item{cursor:grab;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:none;outline:1px dashed rgba(255,255,255,.16);outline-offset:-1px;}
+.sidebar.menu-customizing .sidebar-nav-item:hover{transform:none;background:var(--bg3);}
+.sidebar.menu-customizing .sidebar-nav-item .menu-grip{display:block;}
+.sidebar.menu-customizing .sidebar-nav-item .menu-eye{display:inline-flex;}
+.sidebar.menu-customizing .sidebar-nav-item .menu-eye:hover{color:var(--text);border-color:rgba(255,255,255,.16);}
+.sidebar.menu-customizing .sidebar-nav-item.menu-hidden{opacity:.42;}
+.sidebar.menu-customizing .sidebar-nav-item.menu-hidden .menu-eye{color:var(--red);border-color:rgba(226,75,74,.4);}
+.sidebar.menu-customizing .sidebar-nav-item.menu-wiggle{animation:menuWiggle .25s ease-in-out infinite;}
+@keyframes menuWiggle{0%{transform:rotate(-1deg);}50%{transform:rotate(1deg);}100%{transform:rotate(-1deg);}}
+.sidebar-nav-item.menu-placeholder{visibility:hidden;}
+.menu-drag-card{position:fixed;z-index:1000;pointer-events:none;box-sizing:border-box;opacity:.82;cursor:grabbing;
+  background:var(--bg3);color:var(--text);box-shadow:0 2px 6px rgba(0,0,0,.4),0 16px 32px rgba(0,0,0,.5);
+  transition:opacity 140ms cubic-bezier(.25,1,.5,1);will-change:transform;}
+.menu-drag-card .menu-grip{display:block;}
+.menu-drag-card .menu-eye{display:inline-flex;}
+.menu-done-bar{display:none;position:sticky;bottom:0;margin:10px 0 0;padding:8px;gap:6px;align-items:center;
+  background:var(--bg2);border:1px solid var(--border);border-radius:9px;
+  opacity:0;transform:translateY(6px);transition:opacity 200ms cubic-bezier(0.16,1,0.3,1),transform 200ms cubic-bezier(0.16,1,0.3,1);}
+.sidebar.menu-customizing .menu-done-bar{display:flex;opacity:1;transform:none;}
+.menu-done-bar button{appearance:none;border:1px solid var(--border);background:var(--bg3);color:var(--muted);border-radius:7px;padding:5px 9px;font-size:11.5px;cursor:pointer;font-family:inherit;white-space:nowrap;}
+.menu-done-bar button:hover{color:var(--text);border-color:rgba(255,255,255,.16);}
+.menu-done-bar button.primary{background:var(--green);border-color:var(--green);color:#fff;font-weight:600;}
+.menu-hint-badge{position:absolute;left:10px;top:calc(100% + 3px);z-index:6;pointer-events:none;white-space:nowrap;
+  background:var(--bg4);border:1px solid rgba(255,255,255,.16);color:var(--text);font-size:10.5px;padding:4px 8px;border-radius:6px;box-shadow:0 6px 16px rgba(0,0,0,.35);}
+.sidebar-nav-item.menu-hint-pulse{animation:menuHintPulse 1.1s ease-in-out 3;}
+@keyframes menuHintPulse{0%,100%{box-shadow:0 0 0 0 rgba(55,138,221,0);}50%{box-shadow:0 0 0 2px rgba(55,138,221,.55);}}
+@media(prefers-reduced-motion:reduce){
+  .sidebar.menu-customizing .sidebar-nav-item.menu-wiggle{animation:none;}
+  .sidebar-nav-item.menu-hint-pulse{animation:none;box-shadow:0 0 0 2px rgba(55,138,221,.45);}
+}
 
 /* ── MAIN ──────────────────────────────────────────────── */
 .main-wrap{
@@ -2182,159 +2226,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
    .rowhead целиком открывает одно меню сцепки (см. contextmenu ниже), внутри
    него первым пунктом "Копировать". */
 #page-logistics-plan .row.is-hidden .rowhead{opacity:.5;}
-/* ═══ МОБИЛЬНЫЙ РЕЖИМ "Таблица" (31.08, штурм-сессия агентов после живого
-   теста с Каном/Мишей) - утверждённое превью lp-mobile-v2-preview, перенесено
-   1:1 (ГОСТ раздел 0.6 "превью = контракт"). Режим "Список" (первая версия
-   того же дня) убран ЦЕЛИКОМ по итогу теста - Влад: "Список вообще
-   бесполезный интерфейс" - если понадобится референс, искать в git-истории
-   файла на 31.08 (коммиты до этой правки). Управление ЦЕЛИКОМ сверху (три
-   строки - дата/поиск/свободно, масштаб+Сегодня, тип), лента - ТА ЖЕ
-   десктопная (.rowhead/.track/.seg, не отдельный рендер), просто сжата через
-   CSS ниже (.lp-mode-table). Видимость - через .lp-mobile на
-   #page-logistics-plan (см. lpIsMobileViewport_), десктопные .top/.legend не
-   трогаются. .lp-mode-table теперь ставится ВМЕСТЕ с .lp-mobile в initLP() -
-   раньше это был переключатель между двумя режимами, сейчас просто исторически
-   оставленное имя класса единственного мобильного режима (не переименовано
-   намеренно - слишком много завязанных на него правил ниже, риск не стоит
-   косметики). */
-#page-logistics-plan .lp-m-root{display:none;}
-/* Влад, 31.08: "при сильном протягивании вниз страница обновляется... это
-   раздражает" - нативный "потяни, чтобы обновить" мобильного браузера,
-   срабатывает от овер-скролла ВВЕРХ, даже если тянут внутри вложенного
-   скролл-контейнера (.board ниже - у него своя пара правил). Здесь - тот же
-   приём на корневом уровне, вторым слоем (Влад и раньше явно просил
-   "железобетонно", не одно место) - на десктоп не действует, там мышь, не
-   палец. */
-#page-logistics-plan.lp-mobile{overscroll-behavior:contain;}
-/* .lp-m-root теперь ВСЕГДА только шапка (fit-content по высоте, не
-   растягивается) - вся оставшаяся высота уходит десктопной ленте
-   (.board-wrap), см. HTML: .lp-m-root стоит ПЕРЕД .board-wrap в разметке
-   (НАЙДЕННЫЙ БАГ 31.08 - раньше стоял ПОСЛЕ, при flex-direction:column это
-   рисовало ленту НАД шапкой управления - "кнопки внизу" из жалобы Влада). */
-#page-logistics-plan.lp-mobile .lp-m-root{display:flex;flex-direction:column;flex:none;min-width:0;}
-#page-logistics-plan.lp-mobile .top,
-#page-logistics-plan.lp-mobile .legend{display:none;}
-#page-logistics-plan.lp-mobile .board-wrap{display:none;}
-#page-logistics-plan.lp-mobile.lp-mode-table .board-wrap{display:flex;}
-#page-logistics-plan .lp-m-zoom{display:none;}
-/* 5 масштабов (Сутки/2дня/3дня/Неделя/Месяц) на узком экране РАВНОЙ шириной
-   (как у фильтров ниже) читались бы плохо - разная длина подписи ("Сутки"
-   против "2 дня"); своя ширина по контенту + горизонтальный скролл строки,
-   не сжатие текста. */
-/* padding теперь на .lp-m-zoomrow (родитель, см. выше) - .lp-m-zoom только
-   сама скроллящаяся строка сегментов рядом с кнопкой "Сегодня". */
-#page-logistics-plan.lp-mode-table .lp-m-zoom{flex:1 1 auto;display:flex;gap:4px;overflow-x:auto;min-width:0;}
-#page-logistics-plan .lp-m-zoom .lp-m-tf{flex:none;padding:7px 12px;white-space:nowrap;}
-#page-logistics-plan .lp-m-table-filters{display:none;}
-#page-logistics-plan.lp-mode-table .lp-m-table-filters{flex:none;display:flex;gap:4px;padding:0 14px 10px;}
-#page-logistics-plan .lp-m-tf{
-  flex:1 1 0;appearance:none;border:1px solid var(--border);background:var(--bg3);color:var(--muted);
-  font-family:inherit;font-size:11.5px;font-weight:600;padding:6px 0;border-radius:8px;cursor:pointer;
-}
-#page-logistics-plan .lp-m-tf[aria-pressed="true"]{background:var(--bg4);color:var(--text);border-color:var(--border-strong);}
-/* Табличный режим - минимальная боковая колонка ("госномер + фамилия И.О.
-   водителя", буквально по словам Влада 31.08) поверх ТОЙ ЖЕ десктопной ленты
-   (.rowhead/.track/.seg - не отдельный рендер), просто урезаны через display:
-   none лишние подписи (тип/марка/прицеп/%ВП) и сжата ширина колонки. Touch-
-   поведение уже соответствует (IS_TOUCH_, 30.08) - драг/растяжка выключены,
-   тап по плитке/пустому месту работают как и должны. */
-#page-logistics-plan.lp-mobile.lp-mode-table{--lane-w:104px;}
-#page-logistics-plan.lp-mobile.lp-mode-table .head-corner .t1{display:none;}
-#page-logistics-plan.lp-mobile.lp-mode-table .rh1 .tag,
-#page-logistics-plan.lp-mobile.lp-mode-table .rh1 .tractor,
-#page-logistics-plan.lp-mobile.lp-mode-table .rh1 .until,
-#page-logistics-plan.lp-mobile.lp-mode-table .rh-omni,
-#page-logistics-plan.lp-mobile.lp-mode-table .rh2 .tr,
-#page-logistics-plan.lp-mobile.lp-mode-table .rh2 .sep,
-#page-logistics-plan.lp-mobile.lp-mode-table .rh2 .kind,
-#page-logistics-plan.lp-mobile.lp-mode-table .rh2 .rside{display:none;}
-#page-logistics-plan.lp-mobile.lp-mode-table .gos{font-size:13px;}
-#page-logistics-plan.lp-mobile.lp-mode-table .rh2 .drv{font-size:11px;}
-/* Свой пинч-зум убран 31.08 (см. JS-комментарий на его месте), но нативный
-   зум ВСЕЙ СТРАНИЦЫ двумя пальцами (браузер это умеет сам, viewport не
-   запрещает) оставлять не стоит - на телефоне это разъедет фиксированную
-   мини-шапку/масштаб с самой лентой, выглядело бы как поломка, не решение.
-   pan-x/pan-y БЕЗ pinch-zoom - обычный скролл работает, случайный зум
-   двумя пальцами - нет. */
-#page-logistics-plan.lp-mobile.lp-mode-table .board{touch-action:pan-x pan-y;overscroll-behavior:contain;}
-/* Долгое нажатие -> перетаскивание заявки (см. JS "ПЕРЕТАСКИВАНИЕ ДОЛГИМ
-   НАЖАТИЕМ"). .pressing - визуальный отклик ВО ВРЕМЯ удержания (до
-   подтверждения долгого нажатия), тот же приём "сжалась", что уже у обычного
-   мышиного захвата ниже (scale .97) - не значит "уже можно тащить", только
-   "жму, подожди". .lifted/.row.drop - уже существующие десктопные классы,
-   переиспользуются как есть, не дублируем стили. */
-#page-logistics-plan.lp-mobile.lp-mode-table .seg.pressing{transform:scale(.97);transition:transform 100ms var(--ease-out-soft);}
-/* "Плитка должна дрожать как в мобильных приложениях" (Влад, 31.08) - момент
-   подтверждения долгого нажатия, ДО начала реального перетаскивания (JS
-   снимает класс на первом touchmove - см. lpTUpdateDrag_, иначе анимация и
-   inline-transform драга дрались бы за один и тот же кадр). Конечное число
-   повторов (4), не infinite - раздел 5 ГОСТа запрещает вечные пульсы без
-   именованного исключения, здесь и не нужен: жест короткий, сама цель уже
-   "приподнялась" через .lifted к моменту, когда дрожание кончится. */
-@keyframes lpTWiggle{0%,100%{transform:rotate(-2deg) scale(1.04);}50%{transform:rotate(2deg) scale(1.04);}}
-#page-logistics-plan.lp-mobile.lp-mode-table .seg.lp-t-armed{animation:lpTWiggle .15s ease-in-out 4;}
-@media(prefers-reduced-motion:reduce){
-  #page-logistics-plan.lp-mobile.lp-mode-table .seg.lp-t-armed{animation:none;}
-}
-#page-logistics-plan .lp-m-top{flex:none;display:flex;align-items:center;gap:8px;padding:14px 14px 8px;}
-#page-logistics-plan .lp-m-date{font-size:15px;font-weight:700;}
-#page-logistics-plan .lp-m-wd{color:var(--muted);font-weight:600;margin-right:6px;text-transform:uppercase;font-size:12px;}
-#page-logistics-plan .lp-m-spacer{flex:1 1 auto;}
-/* Влад, 31.08 (штурм-сессия): "поиск по госномеру" - новое, чего в первом
-   превью не было. Иконка в шапке -> раскрывает .lp-m-search-overlay поверх
-   шапки (не отдельный экран - остаёмся на той же странице), фильтрует уже
-   отрисованные .rowhead в живом .board через JS (см. lpMSearchFilter_) -
-   ничего заново не рендерит. */
-#page-logistics-plan .lp-m-icon-btn{
-  flex:none;width:30px;height:30px;border-radius:8px;background:var(--bg3);border:1px solid var(--border);
-  display:flex;align-items:center;justify-content:center;color:var(--muted);cursor:pointer;
-  transition:background-color .15s var(--ease-out-soft),color .15s var(--ease-out-soft);
-}
-#page-logistics-plan .lp-m-icon-btn svg{width:14px;height:14px;}
-#page-logistics-plan .lp-m-icon-btn[aria-pressed="true"]{background:var(--bg4);color:var(--text);border-color:var(--border-strong);}
-#page-logistics-plan .lp-m-chip-free{
-  display:inline-flex;align-items:center;gap:5px;background:rgba(29,158,117,.14);color:var(--green);
-  border:1px solid rgba(29,158,117,.32);font-size:12px;font-weight:600;padding:6px 10px 6px 8px;
-  border-radius:20px;cursor:pointer;transition:background-color .15s var(--ease-out-soft);white-space:nowrap;
-}
-#page-logistics-plan .lp-m-chip-free.active{background:rgba(29,158,117,.28);}
-#page-logistics-plan .lp-m-chip-free i{width:6px;height:6px;border-radius:50%;background:var(--green);flex:none;}
-#page-logistics-plan .lp-m-filter-badge{
-  display:inline-flex;align-items:center;gap:4px;background:rgba(239,159,39,.14);color:var(--amber);
-  border:1px solid rgba(239,159,39,.32);font-size:11px;font-weight:600;padding:5px 8px;border-radius:20px;
-  cursor:pointer;white-space:nowrap;
-}
-/* Строка 2 - масштаб (сегментированная группа, тот же принцип, что и Тип
-   ниже) + отдельная кнопка "Сегодня" (Влад, 31.08: "убрать кнопку месяц и
-   вместо неё поставить кнопку сегодня, чтобы центровало на сегодняшнем дне") -
-   визуально ОТДЕЛЕНА от масштаба (не шестой сегмент пилюли), это не уровень
-   зума, это переход-действие - та же логика уже применена на десктопе, где
-   "Сегодня" (#lp-monthToday) стоит отдельным чипом вне группы "Масштаб". */
-#page-logistics-plan .lp-m-zoomrow{flex:none;display:flex;align-items:center;gap:8px;padding:0 14px 8px;}
-#page-logistics-plan .lp-m-today{
-  flex:none;appearance:none;border:1px solid rgba(55,138,221,.4);background:rgba(55,138,221,.16);color:#8dbdf0;
-  font-family:inherit;font-size:11.5px;font-weight:700;padding:7px 12px;border-radius:9px;cursor:pointer;white-space:nowrap;
-}
-#page-logistics-plan .lp-m-today:active{transform:scale(.96);}
-/* Оверлей поиска - выезжает поверх .lp-m-top/.lp-m-zoomrow сверху вниз,
-   .lp-m-root - его positioning context (см. HTML, оверлей - прямой потомок). */
-#page-logistics-plan .lp-m-root{position:relative;}
-#page-logistics-plan .lp-m-search-overlay{
-  position:absolute;inset:0 0 auto 0;z-index:5;background:var(--bg2);padding:14px 14px 10px;
-  border-bottom:1px solid var(--border-strong);transform:translateY(-100%);opacity:0;pointer-events:none;
-  transition:transform 220ms var(--ease-out-strong),opacity 180ms var(--ease-out-strong);
-}
-#page-logistics-plan .lp-m-search-overlay.show{transform:translateY(0);opacity:1;pointer-events:auto;}
-#page-logistics-plan .lp-m-search-row{display:flex;gap:8px;align-items:center;}
-#page-logistics-plan .lp-m-search-input{
-  flex:1 1 auto;background:var(--bg3);border:1px solid var(--border-strong);border-radius:9px;color:var(--text);
-  font-family:inherit;font-size:15px;padding:8px 11px;min-width:0;
-}
-#page-logistics-plan .lp-m-search-input:focus{outline:none;border-color:var(--blue);}
-#page-logistics-plan .lp-m-search-input::placeholder{color:var(--muted2,var(--muted));}
-/* Найденное совпадение - на месте, непройденное - глушится (тот же приём
-   .dim, что и у пустых строк ленты в других местах дашборда). */
-#page-logistics-plan.lp-mobile .row.lp-m-search-dim{opacity:.22;}#page-logistics-plan .track{position:relative;flex:none;height:var(--row-h);}/* Вертикальная сетка часов - Влад, 30.08: "у нас в планировке это всегда была
+#page-logistics-plan .track{position:relative;flex:none;height:var(--row-h);}/* Вертикальная сетка часов - Влад, 30.08: "у нас в планировке это всегда была
    сетка, а тут просто горизонтальные линии... добавь вертикальные на все
    масштабы в зависимости от логики: на самом крупном (сутки) - каждый час".
    Базовое правило (действует на Неделе/Месяце, где часовая сетка слилась бы
@@ -2724,18 +2616,6 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
 @media (prefers-reduced-motion: reduce){#page-logistics-plan *{transition-duration:.001ms !important;animation-duration:.001ms !important;}#page-logistics-plan .seg:hover{transform:none;}
 }
 
-/* Тач-устройство (Влад, 30.08: "заблокированы все сенсорные функции, кроме
-   перемещения по планировке") - .seg/.rowhead держали touch-action:none, чтобы
-   JS сам вёл жест драга/растяжки/перестройки пальцем; на телефоне это ЖЕ самое
-   правило перехватывало обычный скролл пальцем в тот момент, когда касание
-   попадало на плитку или замороженную колонку - отсюда и "навигация отвратительно
-   работает". Драг на тач-устройствах теперь выключен целиком в JS (см. IS_TOUCH_ у
-   #page-logistics-plan.is-touch), поэтому и хват браузера через touch-action ему
-   больше не нужен - возвращаем pan-обеим осям + оставляем manipulation (без
-   двойного тапа-зум, который на плотной доске только мешал бы). */
-#page-logistics-plan.is-touch .seg,
-#page-logistics-plan.is-touch .rowhead{touch-action:manipulation;cursor:default;}
-
 @media(prefers-reduced-motion:reduce){.bank-kpi-pop{animation:none;}.bank-win-glow{transition:none!important;}}
 </style>
 </head>
@@ -2750,7 +2630,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
 
 <!-- ═══ ЭКРАН ВХОДА ═════════════════════════════════════════ -->
 <div id="login-screen" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:1000;flex-direction:column;align-items:center;justify-content:center;gap:18px">
-  <div style="font-size:20px;font-weight:600;color:var(--text)">TS HUB — Дашборд</div>
+  <div style="font-size:20px;font-weight:600;color:var(--text)">ЯРД HUB — Дашборд</div>
   <div id="login-error" style="display:none;font-size:13px;color:var(--red);background:rgba(226,75,74,.1);border:1px solid rgba(226,75,74,.3);border-radius:8px;padding:10px 16px;max-width:340px;text-align:center"></div>
   <div id="google-signin-btn"></div>
   <div style="font-size:12px;color:var(--muted)">Войдите через рабочий Google-аккаунт</div>
@@ -2762,7 +2642,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
     <div class="sidebar-logo-row">
       <div>
         <div class="sidebar-logo-label">Админ панель</div>
-        <div class="sidebar-logo-text">TS <b>HUB</b></div>
+        <div class="sidebar-logo-text">ЯРД <b>HUB</b></div>
       </div>
       <!-- Сворачивание меню (2026-08-29, Влад: нужно место под "Планировку" -
            "добавить на первый ярус", была внизу подвала, малозаметная) -->
@@ -2788,7 +2668,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
     <div class="sidebar-nav-item" onclick="showPage('directory',this)" data-page="directory">
       <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="14" height="14" rx="1.6"/><line x1="3" y1="8" x2="17" y2="8"/><line x1="7" y1="11.3" x2="13" y2="11.3"/><line x1="7" y1="14.3" x2="13" y2="14.3"/></svg></span> Справочники
     </div>
-    <div class="sidebar-nav-section">
+    <div class="sidebar-nav-section" data-section="park">
       <span class="sidebar-nav-section-label">Парк</span>
       <div class="sidebar-nav-section-line"></div>
     </div>
@@ -2807,12 +2687,17 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
       <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2c-3 0-5.5 2.4-5.5 5.6C4.5 11.8 10 18 10 18s5.5-6.2 5.5-10.4C15.5 4.4 13 2 10 2z"/><circle cx="10" cy="7.6" r="2"/></svg></span> Навигация
     </div>
 
-    <div class="sidebar-nav-section">
+    <div class="sidebar-nav-section" data-section="sales">
       <span class="sidebar-nav-section-label">Продажи</span>
       <div class="sidebar-nav-section-line"></div>
     </div>
     <div class="sidebar-nav-item" onclick="showPage('crm',this)" data-page="crm">
       <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="4" height="14" rx="1"/><rect x="8" y="3" width="4" height="9" rx="1"/><rect x="13" y="3" width="4" height="11" rx="1"/></svg></span> CRM
+    </div>
+    <!-- «Проверка контрагента» (05.09, Влад: "менеджерам со старшим вкладку... вводят ИНН и им
+         даётся весь расклад через наш сервис") - admin + manager, см. applyRoleUI и cp*_ в JS. -->
+    <div class="sidebar-nav-item" onclick="showPage('counterparty',this)" data-page="counterparty">
+      <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2.5l6 2.3v4.7c0 3.6-2.5 6.6-6 8-3.5-1.4-6-4.4-6-8V4.8z"/><path d="M7.3 10l1.9 1.9 3.6-3.8"/></svg></span> Проверка контрагента
     </div>
     <!-- «Поступления» - переехала сюда из шапки меню (Влад, 30.08: «перенеси в раздел
          продажи», слот наверху занят «Справочниками»); сама страница/её JS не менялись,
@@ -2862,6 +2747,14 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
     </div>
     <div class="sidebar-nav-item" onclick="showPage('debt',this)" data-page="debt">
       <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2.5h10v15l-2.5-1.6L10 17.5l-2.5-1.6L5 17.5z"/><line x1="7.5" y1="6.5" x2="12.5" y2="6.5"/><line x1="7.5" y1="9.5" x2="12.5" y2="9.5"/><line x1="7.5" y1="12.5" x2="10.5" y2="12.5"/></svg></span> ДЗ
+    </div>
+    <!-- Плашка режима кастомизации меню (05.09) - видна только в .menu-customizing, всегда
+         последний ребёнок nav (menuApplyCfg_ переставляет её в конец после любой
+         перестановки пунктов). См. блок "Кастомизация меню" в JS. -->
+    <div class="menu-done-bar" id="menu-done-bar">
+      <span class="muted" id="menu-done-target" style="font-size:10.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+      <button type="button" onclick="menuCfgReset_()" title="Вернуть стандартный порядок и показать все пункты">Сброс</button>
+      <button type="button" class="primary" onclick="menuExitCustomize_()" data-nav-sound>Готово</button>
     </div>
   </nav>
 
@@ -3302,6 +3195,33 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
         </div>
       </div>
 
+      <!-- Платные дороги (Автодор, 05.09) - отдельная карточка (Влад: "отдельной карточкой
+           Платные дороги", НЕ в блок расходов "Проходные" на Панели - тот источник другой,
+           из 1С/Штатки). "Без привязки" - принцип "расхождение показывается, не прячется"
+           (та же логика, что у вафли парка, раздел 4 DESIGN_SYSTEM.md). -->
+      <div class="card" style="margin-top:16px;">
+        <div class="sec-header">
+          <div class="sec-title">Платные дороги</div>
+          <div class="sec-sub" id="avtodor-month-label"></div>
+        </div>
+        <div style="display:flex;gap:28px;flex-wrap:wrap;margin-bottom:14px">
+          <div>
+            <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Всего с начала данных</div>
+            <div id="avtodor-total-all" style="font-size:22px;font-weight:700">—</div>
+          </div>
+          <div>
+            <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">За текущий месяц</div>
+            <div id="avtodor-total-month" style="font-size:22px;font-weight:700">—</div>
+          </div>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="tbl">
+            <thead><tr id="avtodor-head"></tr></thead>
+            <tbody id="avtodor-body"></tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="card" style="margin-top:16px;">
         <div class="sec-header">
           <div class="sec-title">Все машины в ремонте</div>
@@ -3407,70 +3327,6 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
            Цвет/Парк и сбрасывал aria-pressed у соседней кнопки при каждом
            клике "Сегодня" (найдено при переносе кнопки сюда, 30.08). -->
       <button class="chip" id="lp-monthToday" data-solo="1" title="Перейти к сегодняшнему дню">Сегодня</button>
-    </div>
-  </div>
-</div>
-
-<!-- ═══ МОБИЛЬНЫЙ РЕЖИМ "Таблица" (31.08, штурм-сессия агентов после живого
-     теста с Каном/Мишей - "давай Соберем агентов и проведем штурм сеесию...
-     Список вообще бесполезный интерфейс... кнопки внизу неудобно, всё наверх,
-     кнопка масштаба, убрать месяц, вместо неё сегодня"). Показывается ТОЛЬКО
-     при #page-logistics-plan.lp-mobile (см. lpIsMobileViewport_ в JS) -
-     десктоп это не затрагивает вообще, тот же .top/.legend/.board-wrap ниже
-     просто прячутся на узком экране, ничего в них не меняется. СТОИТ ПЕРЕД
-     .board-wrap НАМЕРЕННО (найденный баг предыдущей версии - шапка стояла
-     ПОСЛЕ ленты в разметке, при flex-column это рисовало ленту НАД кнопками
-     управления). Шторка/фleet-меню/тост/confirm - ОБЩИЕ с десктопом
-     (#lp-drawer и т.д. ниже), не дублируются - реальные действия
-     (открыть/создать/сцепка) зовут ТЕ ЖЕ функции (openDrawer/
-     openCreateDrawer/openFleetMenu_), что и десктоп, просто из новой
-     компактной раскладки. Список карточек (первая версия того же дня) убран
-     целиком - см. большой разбор в CSS выше. -->
-<div class="lp-m-root" id="lpMRoot">
-  <div class="lp-m-top">
-    <div class="lp-m-date"><span class="lp-m-wd" id="lpMWd"></span><span class="mono" id="lpMDate"></span></div>
-    <div class="lp-m-spacer"></div>
-    <!-- Влад, 31.08: "вижу только длинномеры" - на деле не баг, а STATE.filter
-         с десктопа, залипший в localStorage (yard.plan.settings) - панель
-         фильтров, где его видно/можно снять, на мобильном спрятана вместе со
-         всей .controls. Без этого чипа сбросить фильтр с телефона было
-         НЕОТКУДА - см. lpMRenderFilterBadge_. Виден только когда фильтр НЕ
-         "все", тап сбрасывает. -->
-    <div class="lp-m-filter-badge" id="lpMFilterBadge" style="display:none" title="Тронуть - сбросить фильтр">Фильтр: <span id="lpMFilterBadgeText"></span> ✕</div>
-    <!-- Поиск по госномеру - новое по итогу штурм-сессии, не дублирует
-         данные, просто фильтрует уже отрисованные .rowhead живой ленты
-         (lpMSearchFilter_ в JS). -->
-    <button class="lp-m-icon-btn" id="lpMSearchBtn" type="button" title="Найти машину по госномеру" aria-pressed="false">
-      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="9" cy="9" r="6"/><path d="M17 17l-4-4"/></svg>
-    </button>
-    <div class="lp-m-chip-free" id="lpMChipFree"><i></i><span id="lpMFreeCount">0</span> свободно</div>
-  </div>
-  <!-- Масштаб + "Сегодня" - Влад, 31.08 (штурм-сессия): "убрать кнопку месяц
-       и вместо неё поставить кнопку сегодня, чтобы по нажатию центровало на
-       сегодняшнем дне". "Сегодня" НЕ шестой сегмент масштаба - ретранслирует
-       клик на десктопный #lp-monthToday (уже умеет честно центрировать
-       сегодня, ничего нового не пишем), масштаб - на СКРЫТЫЙ десктопный
-       .chip[data-zoom], как и было (см. обработчики в JS). -->
-  <div class="lp-m-zoomrow">
-    <div class="lp-m-zoom" id="lpMZoom">
-      <button class="lp-m-tf" data-zoom="day" aria-pressed="false">Сутки</button>
-      <button class="lp-m-tf" data-zoom="2d" aria-pressed="false">2 дня</button>
-      <button class="lp-m-tf" data-zoom="3d" aria-pressed="true">3 дня</button>
-      <button class="lp-m-tf" data-zoom="week" aria-pressed="false">Неделя</button>
-    </div>
-    <button class="lp-m-today" id="lpMToday" type="button" title="К сегодняшнему дню">Сегодня</button>
-  </div>
-  <!-- Тип парка - те же значения STATE.filter, что у десктопных чипов "Парк"
-       (all/tral/long) - visible(v) уже умеет их фильтровать, ничего нового. -->
-  <div class="lp-m-table-filters" id="lpMTableFilters">
-    <button class="lp-m-tf" data-filter="all" aria-pressed="true">Все</button>
-    <button class="lp-m-tf" data-filter="tral" aria-pressed="false">Тралы</button>
-    <button class="lp-m-tf" data-filter="long" aria-pressed="false">Длинномеры</button>
-  </div>
-  <div class="lp-m-search-overlay" id="lpMSearchOverlay">
-    <div class="lp-m-search-row">
-      <input class="lp-m-search-input" id="lpMSearchInput" placeholder="госномер, например В776" autocomplete="off" inputmode="search">
-      <button class="lp-m-icon-btn" id="lpMSearchClose" type="button" title="Закрыть поиск">✕</button>
     </div>
   </div>
 </div>
@@ -3877,6 +3733,17 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
         <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Полное название</label>
           <input autocomplete="off" id="legal-fullname" type="text" maxlength="300" placeholder="ООО «Бульдог»"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        <!-- Название в 1С (05.09, Влад: "нужно сделать колонку с названием 1С и сделать
+             взаимосвязи, чтобы это всё на сайте друг друга понимало") - именно по нему
+             дебиторка и отчёты 1С находят эту карточку. У импортированных из выгрузки
+             заполнено автоматически; у заведённых вручную (имя приходит из ЕГРЮЛ в другом
+             формате) вписывается здесь - список подсказок = контрагенты ДЗ без пары. -->
+        <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Название в 1С</label>
+          <input autocomplete="off" id="legal-name-1c" type="text" maxlength="300" list="legal-1c-names"
+            placeholder="как контрагент называется в 1С - по нему связывается дебиторка"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none">
+          <datalist id="legal-1c-names"></datalist>
+          <div id="legal-name-1c-hint" class="muted" style="font-size:11px;margin-top:4px;min-height:14px"></div></div>
         <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Юридический адрес</label>
           <input autocomplete="off" id="legal-address" type="text" maxlength="500" placeholder="автозаполнится по ИНН"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
@@ -3907,6 +3774,13 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
             Проверить контрагента</button>
           <div id="legal-risk-result" style="margin-top:10px"></div>
         </div>
+      </div>
+      <!-- Связанные данные 1С (05.09, Влад: "давай свяжи") - что найдено по полю
+           "Название в 1С": заказы, поступления, текущий долг. Скрыто, если поле не
+           заполнено (тогда под полем горит жёлтая подсказка про отсутствие связи). -->
+      <div class="asset-form-section" id="legal-linked-section" style="display:none">Связанные данные 1С</div>
+      <div class="asset-form-grid" id="legal-linked-grid" style="display:none">
+        <div class="asset-form-full" id="legal-linked-body"></div>
       </div>
       <!-- Банковские реквизиты (31.08, Влад: "добавь возможность добавить банковские
            реквизиты") - вводятся вручную, не автозаполняются (лукап по БИК - отдельная
@@ -3970,7 +3844,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
           <input autocomplete="off" id="asset-department" type="text" maxlength="30" placeholder="пусто = Тралы" list="asset-department-list"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none">
           <datalist id="asset-department-list">
-            <option value="экскаваторы"><option value="в аресте">
+            <option value="экскаваторы"><option value="в аресте"><option value="восстановление">
           </datalist></div>
         <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Производитель</label>
           <input autocomplete="off" id="asset-manufacturer" type="text" maxlength="100" placeholder="Faymonville, Scania…"
@@ -4004,6 +3878,15 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
         <div id="asset-tractor-fields" style="display:none">
           <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Колёсная формула</label>
           <input autocomplete="off" id="asset-wheel-formula" type="text" maxlength="20" placeholder="6х4"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        <!-- Транспондер Автодора (05.09, Влад: "справочники тягачи... привязать транспортеры
+             туда, где у нас информация по тягачу") - номер физического устройства оплаты
+             платных дорог, установленного на ЭТОТ тягач. Нужен, чтобы разносить выгрузку
+             проездов из ЛК Автодора (там машина идентифицируется только этим номером,
+             не гос.номером) по конкретной технике - см. project_avtodor_toll_integration. -->
+        <div id="asset-transponder-field" style="display:none">
+          <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Транспондер Автодора</label>
+          <input autocomplete="off" id="asset-transponder" type="text" maxlength="30" placeholder="3086595000026102175"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
       </div>
       <!-- Полуприцеп - карточка характеристик (30.08, Влад по реальному чертежу Faymonville:
@@ -4404,12 +4287,20 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
         </div>
         <div class="kpi-grid" id="debt-kpi">
           <div class="kpi" id="debt-kpi-total"></div>
+          <!-- ДЗ по дням (05.09, Влад: "сейчас какая-то каша... идти в сторону общей
+               задолженности без информации по КА") - было 7 равнозначных линий с точками на
+               каждом дне и легендой в две строки, причём "Общая ДЗ" = сумма остальных шести,
+               а состав по юрлицам и так есть цифрами в соседней карточке "Общая ДЗ".
+               Осталась ОДНА линия общей суммы (вариант A дизайн-штурма): сверху сумма и
+               изменение за период, внизу коридор минимум/пик и чипы юрлиц. Мегакран и
+               Стройтранс по умолчанию ВЫКЛЮЧЕНЫ (Влад, 05.09) - их долг мал и зашумляет
+               кривую; выбор личный, хранится в localStorage. -->
           <div class="kpi" id="debt-kpi-chart">
-            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">
               <div class="kpi-label" style="margin-bottom:0">ДЗ по дням</div>
               <div class="muted" style="font-size:11px;white-space:nowrap">Должников: <b id="debt-kpi-debtor-count" style="color:var(--text)">—</b></div>
             </div>
-            <div class="chart-wrap" style="height:150px"><canvas id="chart-debt-history"></canvas></div>
+            <div class="chart-wrap" style="height:190px;margin-top:8px"><canvas id="chart-debt-history"></canvas></div>
           </div>
           <div class="kpi" id="debt-kpi-overdue"></div>
           <div class="kpi" id="debt-kpi-status"></div>
@@ -4433,6 +4324,15 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
         <div class="card" style="margin-top:16px;margin-bottom:16px">
           <div class="sec-header">
             <div class="sec-title">Должники</div>
+            <!-- Светофор риска по контрагентам (04.09, Влад: "перед названием КА лампочку...
+                 начнём с всех текущих 0-30 дней") - точки в строках берутся из кэша юрлиц
+                 (Справочники, тот же Checko), кнопка запускает партию проверок на сервере
+                 (/api/debt/risk_check_batch), показывается только admin - см. renderDebt(). -->
+            <div id="debt-risk-tools" style="display:none;align-items:center;gap:8px;margin-left:auto;margin-right:10px">
+              <span id="debt-risk-status" class="muted" style="font-size:11px"></span>
+              <button type="button" id="debt-risk-batch-btn" onclick="debtRunRiskBatch_()" data-nav-sound
+                style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;cursor:pointer;white-space:nowrap" title="Тот же приоритетный прогон, что cron каждое утро в 06:10 МСК">Проверить сейчас</button>
+            </div>
             <div class="debt-mgr-filter" style="position:relative">
               <button type="button" id="debt-mgr-filter-btn" onclick="toggleDebtMgrDropdown(event)" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;cursor:pointer;white-space:nowrap">Все менеджеры ▾</button>
               <div id="debt-mgr-filter-panel" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px;z-index:50;min-width:220px;max-height:280px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.4)"></div>
@@ -4789,6 +4689,49 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
     </div>
 
     <!-- ═══ КЛИЕНТЫ ══════════════════════════════════════════════ -->
+    <!-- «Проверка контрагента» (05.09, Влад: "менеджерам со старшим вкладку... вводят ИНН и им
+         даётся весь расклад через наш сервис; сохраняется история запросов") - тот же Checko и
+         светофор, что в Справочниках/ДЗ (сервер /api/counterparty/check|history). Логика - cp*_
+         функции в JS. Доступ: admin + manager (applyRoleUI). Повтор ИНН за 7 дней - из кэша. -->
+    <div id="page-counterparty" class="page">
+      <div class="card" style="margin-bottom:16px">
+        <div class="sec-header">
+          <div class="sec-title">Проверка по ИНН</div>
+          <div class="muted" style="font-size:11px">ЕГРЮЛ · Федресурс · ФНС через Checko · повтор за 7 дней - из кэша</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
+          <input autocomplete="off" id="cp-inn" type="text" inputmode="numeric" maxlength="12" placeholder="ИНН - 10 или 12 цифр"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();cpCheck_(false);}"
+            style="width:240px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-size:14px;outline:none;font-family:'JetBrains Mono',ui-monospace,monospace;letter-spacing:.04em">
+          <button type="button" id="cp-check-btn" onclick="cpCheck_(false)" data-nav-sound
+            style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer">Проверить</button>
+          <span id="cp-status" class="muted" style="font-size:12px"></span>
+        </div>
+        <div id="cp-result" style="margin-top:14px"></div>
+      </div>
+      <div class="card">
+        <div class="sec-header">
+          <div class="sec-title">История запросов</div>
+          <!-- Чистка кэша (05.09, Влад: "для админа сделай возможность чистить кэш") - только
+               admin, см. cpInit_. "Очистить кэш" не трогает историю: записи остаются, но
+               перестают отдаваться как готовый ответ, следующая проверка пойдёт к Checko. -->
+          <div id="cp-admin-tools" style="display:none;align-items:center;gap:6px;margin-left:auto">
+            <button type="button" onclick="cpCacheClear_('cache')" title="Следующая проверка любого ИНН пойдёт к Checko заново (расходует квоту)"
+              style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:5px 10px;font-size:11.5px;cursor:pointer">Очистить кэш</button>
+            <button type="button" onclick="cpCacheClear_('history')" title="Удалить записи истории проверок"
+              style="background:transparent;border:1px solid rgba(226,75,74,.4);color:var(--red);border-radius:7px;padding:5px 10px;font-size:11.5px;cursor:pointer">Очистить историю</button>
+          </div>
+          <div class="muted" style="font-size:11px">клик по строке - открыть результат</div>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="tbl">
+            <thead><tr><th>Когда</th><th>ИНН</th><th>Компания</th><th>Светофор</th><th>Кто</th></tr></thead>
+            <tbody id="cp-history-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <div id="page-clients" class="page">
       <div id="clients-loading" style="color:var(--muted);padding:16px">Загрузка клиентской аналитики...</div>
       <div id="clients-body" style="display:none">
@@ -6148,6 +6091,7 @@ const PAGE_TITLES = {
   managers: 'Менеджеры',
   dynamics: 'Динамика',
   clients: 'База клиентов',
+  counterparty: 'Проверка контрагента',
   crm: 'CRM',
   sales: 'Продажи - обзор',
   'sales-mgr': 'Менеджеры - заказы 1С',
@@ -6168,6 +6112,8 @@ const PAGE_TITLES = {
 let API_URL = localStorage.getItem('api_url') || API_URL_DEFAULT;
 let D = null;
 let vehSort = {col:'profit', dir:-1};
+let avtodorSort = {col:'total_paid', dir:-1};
+let avtodorData_ = null; // кэш /api/avtodor_summary - страница "Техника" открывается часто, грузим один раз за сессию
 
 function setApiUrl(u){ API_URL = u.trim(); localStorage.setItem('api_url', API_URL); }
 
@@ -6235,11 +6181,25 @@ function apiUrl(params) {
 
 // Сохраняет свежий токен сессии из ответа сервера (приходит только у "полных" загрузок
 // страницы - см. freshSessionToken в doGet()), чтобы следующие запросы шли уже по нему.
+//
+// Роль/имя (06.09) - раньше кэшировались ТОЛЬКО в handleCredentialResponse(), то есть в
+// момент самого Google-попапа. Сессия живёт 48ч и молча продлевается КАЖДОЙ обычной
+// загрузкой без нового попапа - у любого, кто вошёл давно и с тех пор просто открывал
+// дашборд, localStorage.user_role мог оставаться пустым НАВСЕГДА, хотя session_token
+// исправно обновлялся здесь же. Ровно это сломало роутинг files/app.html на мобильную
+// Планировку (files/plan-m.html) - Влад открыл дашборд с телефона, session_token был
+// свежий, а user_role - пустой, и app.html честно откатился на index.html "как раньше".
+// Обе ветки ответа (сервер main_payload И фолбэк на Apps Script doGet) кладут role в тот
+// же D.role (используется по всему файлу, напр. `D.role === 'admin'` ниже) - читаем role
+// здесь же, единожды, на каждой успешной загрузке, а не только при явном входе.
 function saveSessionTokenFromResponse_(data) {
   if (data && data.session_token) {
     SESSION_TOKEN = data.session_token;
     localStorage.setItem('session_token', data.session_token);
   }
+  if (data && data.role) localStorage.setItem('user_role', data.role);
+  var freshName = data && (data.managerName || data.logistName);
+  if (freshName) localStorage.setItem('user_name', freshName);
 }
 
 function clearAuthTokens_() {
@@ -8139,6 +8099,9 @@ function renderMyPageManager(el, current, selectorHtml, d) {
       }).join('')+
     '</div>';
 
+    // Светофор риска (04.09) - карта общая с главной ДЗ, грузится один раз, перерисовка
+    // этой же страницы, когда придёт.
+    ensureDebtRiskMap_(renderMyPage);
     var dFiltered = allDebt.filter(function(c){
       if (mgrDebtBuckets.size && !Array.from(mgrDebtBuckets).some(function(bk){ return debtInBucket_(c.daysOverdue, bk); })) return false;
       return true;
@@ -8156,7 +8119,7 @@ function renderMyPageManager(el, current, selectorHtml, d) {
           var isOpen = mgrDebtOpenRow === c.contragent;
           var contragentEsc = c.contragent.replace(/'/g,"\\'");
           var row = '<tr class="debt-row-toggle" onclick="toggleMgrDebtDetail(\''+contragentEsc+'\')" style="cursor:pointer">'+
-            '<td><span class="muted" style="display:inline-block;width:14px">'+(isOpen?'▾':'▸')+'</span><b>'+c.contragent+'</b>'+byOrgLine+'</td>'+
+            '<td><span class="muted" style="display:inline-block;width:14px">'+(isOpen?'▾':'▸')+'</span>'+debtRiskDotHtml_(c.contragent)+'<b>'+c.contragent+'</b>'+byOrgLine+'</td>'+
             '<td class="num"><b>'+fmt(c.balance)+'</b></td>'+
             '<td class="num '+ageCls(c.daysOverdue)+'">'+c.daysOverdue+'</td>'+
             '<td class="muted">'+(c.status||'—')+'</td>'+
@@ -8292,7 +8255,7 @@ function renderMyPageManager(el, current, selectorHtml, d) {
         '</tr></thead><tbody>'+
           (byCust.length
             ? byCust.map(function(c) {
-                return '<tr><td>'+c.customer+'</td>'+
+                return '<tr><td>'+cpLightHtml_(c.customer)+c.customer+'</td>'+
                   '<td class="muted">'+(c.orgs || '—')+'</td>'+
                   '<td class="num">'+fmt(c.amount)+'</td>'+
                   '<td class="num muted">'+c.count+'</td></tr>';
@@ -8763,7 +8726,7 @@ function renderCommercialHeadReceiptsBlock_(cfg) {
               return '<tr>'+
                 (showDate ? '<td class="muted">'+receiptsShortDate_(t.date)+'</td>' : '')+
                 '<td class="muted">'+(t.manager||'—')+'</td>'+
-                '<td>'+t.customer+'</td>'+
+                '<td>'+cpLightHtml_(t.customer)+t.customer+'</td>'+
                 '<td class="muted">'+(t.orgName || '—')+'</td>'+
                 '<td class="muted">'+(t.docNumber || '—')+'</td>'+
                 '<td class="num">'+fmt(t.amount)+'</td>'+
@@ -9748,6 +9711,7 @@ function applyRoleUI() {
     var mechActiveEl_ = document.querySelector('.page.active');
     var mechActiveId_ = mechActiveEl_ ? mechActiveEl_.id.replace(/^page-/, '') : null;
     if (!mechActiveId_ || mechAllowed_.indexOf(mechActiveId_) < 0) showPage('logistics-plan');
+    applyMenuConfig_();   // кастом меню поверх ролевого фильтра (05.09), см. блок "Кастомизация меню"
     updateViewAsButton_();
     return;
   }
@@ -9777,6 +9741,10 @@ function applyRoleUI() {
     if (isCommercialHeadViewer) allowedPages_.push('commercial-head-salary', 'commercial-head-debt');
     var isManagerViewer_ = previewing ? !!(viewAsEntry && viewAsEntry.type === 'manager') : (D.role === 'manager');
     if (isManagerViewer_ || CRM_MANAGER_SUR_FRONT_.indexOf(curPersonSur) >= 0) allowedPages_.push('crm');
+    // "Проверка контрагента" (05.09, Влад: "менеджерам со старшим") - всем менеджерам, включая
+    // руководителей коммерческих групп (у них та же роль manager); сервер тоже пускает только
+    // admin/manager (requireRole_ на /api/counterparty/*).
+    if (isManagerViewer_) allowedPages_.push('counterparty');
     document.querySelectorAll('.sidebar-nav-item').forEach(function(item) {
       const page = item.getAttribute('data-page');
       item.style.display = allowedPages_.indexOf(page) >= 0 ? '' : 'none';
@@ -9804,6 +9772,7 @@ function applyRoleUI() {
     });
     document.querySelectorAll('.sidebar-nav-section').forEach(function(s){ s.style.display = ''; });
   }
+  applyMenuConfig_();   // кастом меню поверх ролевого фильтра (05.09), см. блок "Кастомизация меню"
   updateViewAsButton_();
 }
 
@@ -11284,6 +11253,67 @@ var VEH_COLS = [
   {key:'plan_pct', label:'% плана',  num:true},
 ];
 
+// Платные дороги (Автодор, 05.09) - карточка на "Технике", тот же канон сортируемой
+// таблицы, что у "Все машины" выше (см. DESIGN_SYSTEM.md раздел 4). Данные грузятся
+// один раз при первом открытии страницы (loadAvtodorSummary_, вызывается из showPage) -
+// не часть main_payload, отдельный нечастый эндпоинт.
+var AVTODOR_COLS = [
+  {key:'gos',        label:'Госномер',  num:false},
+  {key:'model',      label:'Марка',     num:false},
+  {key:'trips',      label:'Проездов',  num:true},
+  {key:'total_paid', label:'Сумма',     num:true},
+];
+function setAvtodorSort(col) {
+  if (avtodorSort.col === col) { avtodorSort.dir *= -1; }
+  else { avtodorSort.col = col; avtodorSort.dir = AVTODOR_COLS.find(function(c){return c.key===col;}).num ? -1 : 1; }
+  renderAvtodorTable();
+}
+function loadAvtodorSummary_() {
+  if (avtodorData_) { renderAvtodorTable(); return; } // уже загружено в этой сессии
+  fetchFromYardApi_('/avtodor_summary', {}).then(function(r) {
+    if (!r.ok) return;
+    avtodorData_ = r.data;
+    renderAvtodorTable();
+  }).catch(function() {});
+}
+function renderAvtodorTable() {
+  if (!avtodorData_) return;
+  var headEl = document.getElementById('avtodor-head'), bodyEl = document.getElementById('avtodor-body');
+  if (!headEl || !bodyEl) return;
+  document.getElementById('avtodor-total-all').textContent = p2Mln(avtodorData_.total_all) + ' ₽';
+  document.getElementById('avtodor-total-month').textContent = p2Mln(avtodorData_.total_month) + ' ₽';
+  document.getElementById('avtodor-month-label').textContent = avtodorData_.month_label || '';
+
+  var col = avtodorSort.col, dir = avtodorSort.dir;
+  var vehicles = avtodorData_.vehicles.slice().sort(function(a, b) {
+    var av = a[col], bv = b[col];
+    if (typeof av === 'number') return (av - bv) * dir;
+    return String(av || '').localeCompare(String(bv || ''), 'ru') * dir;
+  });
+
+  var headHtml = '';
+  AVTODOR_COLS.forEach(function(c) {
+    var active = avtodorSort.col === c.key;
+    var arrow = active ? (avtodorSort.dir === -1 ? ' ▼' : ' ▲') : ' ↕';
+    var arrowOpacity = active ? '1' : '0.3';
+    headHtml += '<th class="sortable' + (c.num ? ' num' : '') + '" onclick="setAvtodorSort(\'' + c.key + '\')">' +
+      c.label + '<span style="font-size:10px;opacity:' + arrowOpacity + '">' + arrow + '</span></th>';
+  });
+  headEl.innerHTML = headHtml;
+
+  // Непривязанные транспондеры - НЕ прячем, показываем приглушённым текстом с пометкой
+  // (принцип "расхождение показывается, не прячется" - раздел 4 DESIGN_SYSTEM.md, та же
+  // логика, что у "нет статуса" в вафле парка).
+  bodyEl.innerHTML = vehicles.map(function(v) {
+    return '<tr' + (v.matched ? '' : ' class="muted"') + '>' +
+      '<td>' + (v.matched ? '<b>' + v.gos + '</b>' : v.gos) + '</td>' +
+      '<td class="muted">' + (v.model || '—') + '</td>' +
+      '<td class="num">' + v.trips + '</td>' +
+      '<td class="num"><b>' + p2Mln(v.total_paid) + ' ₽</b></td>' +
+    '</tr>';
+  }).join('');
+}
+
 function setVehSort(col) {
   if (vehSort.col === col) { vehSort.dir *= -1; }
   else { vehSort.col = col; vehSort.dir = VEH_COLS.find(function(c){return c.key===col;}).num ? -1 : 1; }
@@ -12077,10 +12107,39 @@ var legalLastEgrulStatus_ = null;
 
 // Светофор риска - общие для списка (точка) и карточки (dot+подпись+причины).
 function legalRiskColor_(light) {
-  return light === 'red' ? 'var(--red)' : (light === 'yellow' ? 'var(--amber)' : (light === 'green' ? 'var(--green)' : 'var(--muted)'));
+  return (light === 'red' || light === 'bankrupt') ? 'var(--red)'
+    : (light === 'yellow' ? 'var(--amber)' : (light === 'green' ? 'var(--green)' : 'var(--muted)'));
 }
 function legalRiskLabel_(light) {
-  return light === 'red' ? 'Красный' : (light === 'yellow' ? 'Жёлтый' : 'Зелёный');
+  return light === 'bankrupt' ? 'Банкрот' : (light === 'red' ? 'Красный' : (light === 'yellow' ? 'Жёлтый' : (light === 'green' ? 'Зелёный' : String(light || ''))));
+}
+// Маркер светофора - цветная точка; для банкрота - череп (Влад, 05.09: "вместо красного
+// круга череп ставить банкроты"). Череп - Tabler "skull" инлайн-SVG в красном, не emoji
+// (ГОСТ: emoji в интерфейсе нет; размер/цвет - как у точки). Одна функция на все места:
+// список юрлиц, драйвер, таблицы ДЗ, карточка контрагента.
+// marker - "!" / "!!!" с сервера (risk_marker: банкрот или недоимка >= 1 млн -> "!",
+// недоимка >= 10 млн -> "!!!"; Влад, 05.09: "вместо черепа красный восклицательный знак").
+// Глиф текстом (JetBrains Mono, жирный, красный), размер - от размера точки, чтобы стоять в
+// той же строке. Череп убран.
+function legalRiskMarkHtml_(light, size, style, marker) {
+  style = style || '';
+  if (!marker && light === 'bankrupt') marker = '!';
+  if (marker === '!' || marker === '!!!') {
+    return '<span style="display:inline-block;line-height:1;font-family:\'JetBrains Mono\',ui-monospace,monospace;font-weight:800;font-size:' +
+      Math.round(size * 1.6) + 'px;color:var(--red);vertical-align:middle;letter-spacing:-0.08em;flex:none;' + style + '" aria-label="Внимание">' + marker + '</span>';
+  }
+  return '<span style="display:inline-block;width:' + size + 'px;height:' + size + 'px;border-radius:50%;background:' +
+    legalRiskColor_(light) + ';vertical-align:middle;flex:none;' + style + '"></span>';
+}
+// Текст для title-подсказки над точкой в списке (04.09, Влад: "можно при наведении более
+// подробную информацию") - причины из risk_reasons (JSON-строка из БД), не только цвет.
+function legalRiskTooltip_(le) {
+  var reasons = [];
+  if (le.risk_reasons) { try { reasons = JSON.parse(le.risk_reasons) || []; } catch (e) {} }
+  var head = 'Проверка контрагента: ' + legalRiskLabel_(le.risk_light);
+  if (le.risk_checked_at) head += ' (' + le.risk_checked_at + ')';
+  if (!reasons.length) return head + '\nРисков по официальным реестрам не найдено';
+  return head + '\n' + reasons.map(function(r) { return '— ' + r; }).join('\n');
 }
 function legalPaint_() {
   var body = document.getElementById('legal-body');
@@ -12097,7 +12156,7 @@ function legalPaint_() {
   if (q.length >= 2) {
     var hit = all.filter(function(le) {
       return String(le.name || '').toLowerCase().indexOf(q) >= 0 || String(le.full_name || '').toLowerCase().indexOf(q) >= 0 ||
-        String(le.inn || '').indexOf(q) >= 0;
+        String(le.name_1c || '').toLowerCase().indexOf(q) >= 0 || String(le.inn || '').indexOf(q) >= 0;
     });
     rows = hit.slice(0, 200);
     if (hit.length > 200) note = 'Показаны первые 200 из ' + hit.length + ' — уточните запрос';
@@ -12123,9 +12182,11 @@ function legalPaint_() {
     // Точка светофора в списке (02.09, Влад: "светофор по компаниям", множественное число -
     // видеть все сразу, не только по одной в карточке). Нет проверки - вообще без точки, не
     // серая "неизвестно"-точка (см. правило проекта: цвет только по делу, не для decoration).
+    // При наведении - не только цвет, но и САМИ причины (04.09, Влад: "можно при наведении
+    // более подробную информацию") - обычный title, переносы строк браузер показывает как есть.
     var riskDot = le.risk_light
-      ? ' <span title="Проверка контрагента: ' + legalRiskLabel_(le.risk_light) + '" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' +
-        legalRiskColor_(le.risk_light) + ';vertical-align:middle;margin-left:2px"></span>' : '';
+      ? ' <span title="' + pageEscAttr_(legalRiskTooltip_(le)) + '" style="display:inline-block;vertical-align:middle;margin-left:2px">' +
+        legalRiskMarkHtml_(le.risk_light, 8, '', le.risk_marker) + '</span>' : '';
     return '<tr' + (le.is_deleted ? spravDeletedRowStyle_() : '') + '>' +
       '<td><b>' + pageEsc_(le.name) + '</b>' + ownBadge + riskDot + (le.inn ? ' <span class="muted" style="font-size:11px">ИНН ' + pageEsc_(le.inn) + '</span>' : '') + (le.is_deleted ? ' <span class="muted" style="font-size:11px">(удалено)</span>' : '') + '</td>' +
       '<td class="muted">' + (le.full_name ? pageEsc_(le.full_name) : '—') + '</td>' +
@@ -12142,6 +12203,10 @@ function legalOpenForm_(id) {
   document.getElementById('legal-inn').value = le ? (le.inn || '') : '';
   document.getElementById('legal-name').value = le ? le.name : '';
   document.getElementById('legal-fullname').value = le ? (le.full_name || '') : '';
+  document.getElementById('legal-name-1c').value = le ? (le.name_1c || '') : '';
+  legalRender1cHint_(le);
+  legalLoad1cNames_();
+  legalLoadLinked_(le ? le.id : null);
   document.getElementById('legal-address').value = le ? (le.legal_address || '') : '';
   document.getElementById('legal-kpp').value = le ? (le.kpp || '') : '';
   document.getElementById('legal-ogrn').value = le ? (le.ogrn || '') : '';
@@ -12163,11 +12228,61 @@ function legalOpenForm_(id) {
   document.getElementById('legal-risk-btn').disabled = false;
   var cachedReasons = [];
   if (le && le.risk_reasons) { try { cachedReasons = JSON.parse(le.risk_reasons) || []; } catch (e) {} }
-  legalRenderRiskResult_(le ? le.risk_light : null, cachedReasons, le ? le.risk_checked_at : null);
+  legalRenderRiskResult_(le ? le.risk_light : null, cachedReasons, le ? le.risk_checked_at : null, le ? le.risk_marker : null);
   var bk = document.getElementById('legal-bk'), dr = document.getElementById('legal-drawer');
   bk.classList.add('show');
   setTimeout(function() { dr.classList.add('show'); }, 40);
   setTimeout(function() { document.getElementById('legal-name').focus(); }, 120);
+}
+// Подсказка под полем "Название в 1С": заполнено - связь с дебиторкой есть; пусто у
+// карточки, заведённой вручную - это и есть причина, по которой должник не находится.
+function legalRender1cHint_(le) {
+  var el = document.getElementById('legal-name-1c-hint');
+  if (!el) return;
+  if (!le) { el.textContent = 'Если контрагент есть в 1С - впишите его название оттуда, иначе дебиторка не свяжется с карточкой.'; el.style.color = ''; return; }
+  if (le.name_1c) { el.textContent = 'Связь с данными 1С настроена.'; el.style.color = 'var(--green)'; return; }
+  el.textContent = 'Не заполнено - дебиторка и отчёты 1С не свяжутся с этой карточкой. Начните вводить: в подсказках имена должников без пары.';
+  el.style.color = 'var(--amber)';
+}
+// Список имён из ДЗ без пары - подсказки для поля (admin, один раз за сессию вкладки).
+var legal1cNamesLoaded_ = false;
+function legalLoad1cNames_() {
+  if (legal1cNamesLoaded_ || !D || D.role !== 'admin') return;
+  legal1cNamesLoaded_ = true;
+  fetchFromYardApi_('/debt/unmatched_names', {}).then(function(r) {
+    if (!r.ok || !r.data || !Array.isArray(r.data.names)) return;
+    var dl = document.getElementById('legal-1c-names');
+    if (dl) dl.innerHTML = r.data.names.map(function(n) { return '<option value="' + pageEscAttr_(n) + '"></option>'; }).join('');
+  }).catch(function() {});
+}
+// Сводка "что связано с этой карточкой" по полю "Название в 1С" (05.09, Влад: "давай
+// свяжи"): заказы, поступления, текущий долг - тем же ключом, которым связана дебиторка.
+function legalLoadLinked_(id) {
+  var sec = document.getElementById('legal-linked-section'), grid = document.getElementById('legal-linked-grid'),
+      body = document.getElementById('legal-linked-body');
+  if (!sec || !grid || !body) return;
+  sec.style.display = 'none'; grid.style.display = 'none'; body.innerHTML = '';
+  if (!id || !D || D.role !== 'admin') return;
+  fetchFromYardApi_('/sprav/legal_entity_summary', { id: id }).then(function(r) {
+    if (!r.ok || !r.data || !r.data.linked) return;
+    if (legalEditId_ !== id) return;   // карточку успели переключить, пока шёл запрос
+    var d = r.data, money = pageFr_;
+    function tile(label, value, sub, color) {
+      return '<div style="flex:1 1 150px;min-width:150px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px">' +
+        '<div class="muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.05em">' + label + '</div>' +
+        '<div class="mono" style="font-size:17px;font-weight:600;margin-top:3px' + (color ? ';color:' + color : '') + '">' + value + '</div>' +
+        (sub ? '<div class="muted" style="font-size:11px;margin-top:2px">' + sub + '</div>' : '') + '</div>';
+    }
+    var o = d.orders || {}, rc = d.receipts || {}, db = d.debt || {};
+    body.innerHTML = '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+      tile('Заказов', o.count || 0, o.amount ? ('на ' + money(o.amount)) : 'нет данных') +
+      tile('Прибыль по заказам', o.profit ? money(o.profit) : '—', o.last_date ? ('последний ' + o.last_date) : '') +
+      tile('Поступления', rc.amount ? money(rc.amount) : '—', rc.last_date ? ('последнее ' + rc.last_date) : (rc.count ? '' : 'нет данных')) +
+      tile('Текущий долг', db.balance ? money(db.balance) : '—', db.days_overdue ? (db.days_overdue + ' дн. просрочки') : '',
+           db.balance ? 'var(--amber)' : '') +
+    '</div>';
+    sec.style.display = ''; grid.style.display = '';
+  }).catch(function() {});
 }
 function legalCloseForm_() {
   var bk = document.getElementById('legal-bk'), dr = document.getElementById('legal-drawer');
@@ -12221,6 +12336,7 @@ function legalSave_() {
   var params = {
     id: id, name: name,
     full_name: document.getElementById('legal-fullname').value.trim(),
+    name_1c: document.getElementById('legal-name-1c').value.trim(),
     inn: document.getElementById('legal-inn').value.trim(),
     kpp: document.getElementById('legal-kpp').value.trim(),
     ogrn: document.getElementById('legal-ogrn').value.trim(),
@@ -12245,7 +12361,7 @@ function legalSave_() {
 }
 // Рисует блок результата в карточке - и для уже сохранённого (кэш из БД, открытие
 // карточки), и для только что пришедшего живого ответа (после нажатия кнопки).
-function legalRenderRiskResult_(light, reasons, checkedAt) {
+function legalRenderRiskResult_(light, reasons, checkedAt, marker) {
   var el = document.getElementById('legal-risk-result');
   if (!el) return;
   if (!light) { el.innerHTML = '<div class="muted" style="font-size:12px">Ещё не проверялось</div>'; return; }
@@ -12257,7 +12373,7 @@ function legalRenderRiskResult_(light, reasons, checkedAt) {
   var whenHtml = checkedAt ? '<div class="muted" style="font-size:11px;margin-top:8px">Проверено: ' + pageEsc_(checkedAt) + '</div>' : '';
   el.innerHTML =
     '<div style="display:flex;align-items:center;gap:8px">' +
-      '<span style="width:10px;height:10px;border-radius:50%;background:' + color + ';flex:none"></span>' +
+      legalRiskMarkHtml_(light, 10, '', marker) +
       '<span style="font-size:13px;font-weight:600;color:' + color + '">' + legalRiskLabel_(light) + '</span>' +
     '</div>' + reasonsHtml + whenHtml;
 }
@@ -12274,11 +12390,11 @@ function legalCheckRisk_() {
   postToYardApi_('/sprav/legal_entity_risk_check', { id: legalEditId_, inn: inn }).then(function(r) {
     btn.disabled = false; btn.textContent = 'Проверить контрагента';
     if (!r.ok) { p2Toast('Не удалось проверить: ' + (r.data && r.data.error || 'ошибка сервера'), 'red'); return; }
-    legalRenderRiskResult_(r.data.light, r.data.reasons, r.data.checked_at);
+    legalRenderRiskResult_(r.data.light, r.data.reasons, r.data.checked_at, r.data.marker || null);
     // Обновляем запись в памяти, чтобы точка в списке (legalPaint_) сразу показала новый
     // цвет без полной перезагрузки Справочников.
     var le = (spravLegalEntities_ || []).filter(function(x) { return String(x.id) === String(legalEditId_); })[0];
-    if (le) { le.risk_light = r.data.light; le.risk_reasons = JSON.stringify(r.data.reasons); le.risk_checked_at = r.data.checked_at; }
+    if (le) { le.risk_light = r.data.light; le.risk_marker = r.data.marker || null; le.risk_reasons = JSON.stringify(r.data.reasons); le.risk_checked_at = r.data.checked_at; }
     legalPaint_();
   }).catch(function(e) { btn.disabled = false; btn.textContent = 'Проверить контрагента'; p2Toast('Ошибка сети: ' + e.message, 'red'); });
 }
@@ -12323,7 +12439,10 @@ var ASSET_TYPE_LABELS_ = { trailer: 'Полуприцеп', tractor: 'Тягач
 function assetSpecSummary_(a) {
   if (a.spec) return a.spec;
   if (a.asset_type === 'tractor') {
-    return a.wheel_formula ? 'Формула колёс: ' + a.wheel_formula : '';
+    var tractorParts = [];
+    if (a.wheel_formula) tractorParts.push('Формула колёс: ' + a.wheel_formula);
+    if (a.transponder_id) tractorParts.push('Транспондер ' + a.transponder_id);
+    return tractorParts.join(', ');
   }
   var parts = [];
   if (a.trailer_type) parts.push(a.trailer_type); // сектор - уже готовый шифр (ТКР4, ПР3, борт...), не расшифровываем
@@ -12396,6 +12515,7 @@ function assetOwnerPersonOptions_(selectedId) {
 function assetToggleTypeFields_() {
   var type = document.getElementById('asset-type-select').value;
   document.getElementById('asset-tractor-fields').style.display = type === 'tractor' ? '' : 'none';
+  document.getElementById('asset-transponder-field').style.display = type === 'tractor' ? '' : 'none';
   document.getElementById('asset-trailer-fields').style.display = type === 'trailer' ? '' : 'none';
 }
 function assetToggleExtendable_() {
@@ -12423,6 +12543,7 @@ function assetOpenForm_(id) {
   document.getElementById('asset-curb-weight').value = a ? (a.curb_weight_kg || '') : '';
   document.getElementById('asset-manufacture-year').value = a ? (a.manufacture_year || '') : '';
   document.getElementById('asset-wheel-formula').value = a ? (a.wheel_formula || '') : '';
+  document.getElementById('asset-transponder').value = a ? (a.transponder_id || '') : '';
   document.getElementById('asset-trailer-type').value = a ? (a.trailer_type || '') : '';
   document.getElementById('asset-axle-count').value = a ? (a.axle_count || '') : '';
   document.getElementById('asset-length').value = a ? (a.length_mm || '') : '';
@@ -12476,6 +12597,7 @@ function assetSave_() {
     curb_weight_kg: document.getElementById('asset-curb-weight').value,
     manufacture_year: document.getElementById('asset-manufacture-year').value,
     wheel_formula: document.getElementById('asset-wheel-formula').value.trim(),
+    transponder_id: document.getElementById('asset-transponder').value.trim(),
     trailer_type: document.getElementById('asset-trailer-type').value.trim(),
     axle_count: document.getElementById('asset-axle-count').value,
     length_mm: document.getElementById('asset-length').value,
@@ -13553,7 +13675,7 @@ function renderReceiptsDayTransactions_(day, prefix) {
   if (!bodyEl) return;
   bodyEl.innerHTML = (day.transactions || []).map(function(t) {
     var mgrCls = t.manager === 'Не определён' ? ' class="muted"' : '';
-    return '<tr><td>' + t.customer + '</td>' +
+    return '<tr><td>' + cpLightHtml_(t.customer) + t.customer + '</td>' +
       '<td' + mgrCls + '>' + t.manager + '</td>' +
       '<td class="muted">' + (t.orgName || '—') + '</td>' +
       '<td class="muted">' + (t.docNumber || '—') + '</td>' +
@@ -13610,7 +13732,7 @@ function renderReceiptsWeekTransactions_(week) {
   bodyEl.innerHTML = rows.map(function(t) {
     var mgrCls = t.manager === 'Не определён' ? ' class="muted"' : '';
     return '<tr><td class="muted">' + receiptsShortDate_(t.date) + '</td>' +
-      '<td>' + t.customer + '</td>' +
+      '<td>' + cpLightHtml_(t.customer) + t.customer + '</td>' +
       '<td' + mgrCls + '>' + t.manager + '</td>' +
       '<td class="muted">' + (t.orgName || '—') + '</td>' +
       '<td class="muted">' + (t.docNumber || '—') + '</td>' +
@@ -13820,7 +13942,7 @@ function renderReceiptsCustomers(r) {
   document.getElementById('receipts-customers-body').innerHTML = shown.map(function(c) {
     var mgrCls = c.manager === 'Не определён' ? ' class="muted"' : '';
     var displayAmount = filter ? ((c.orgAmounts && c.orgAmounts[filter]) || 0) : c.amount;
-    return '<tr><td>' + c.customer + '</td>' +
+    return '<tr><td>' + cpLightHtml_(c.customer) + c.customer + '</td>' +
       '<td' + mgrCls + '>' + c.manager + '</td>' +
       '<td class="muted">' + (c.orgs || '—') + '</td>' +
       '<td class="num">' + fmt(displayAmount) + '</td>' +
@@ -16437,6 +16559,8 @@ function renderCommercialHeadDebtPage_() {
     (chDebtBuckets.size ? '<button onclick="clearChDebtBuckets()" style="cursor:pointer;background:none;border:none;color:var(--muted);font-size:11px;padding:6px 4px;text-decoration:underline dotted">сбросить</button>' : '')+
   '</div>';
 
+  // Светофор риска (04.09) - та же карта, что на главной ДЗ и личной странице.
+  ensureDebtRiskMap_(renderCommercialHeadDebtPage_);
   var dFiltered = allDebt.filter(function(c){
     if (chDebtBuckets.size && !Array.from(chDebtBuckets).some(function(bk){ return debtInBucket_(c.daysOverdue, bk); })) return false;
     return true;
@@ -16460,7 +16584,7 @@ function renderCommercialHeadDebtPage_() {
         var isOpen = chDebtOpenRow === c.contragent;
         var contragentEsc = c.contragent.replace(/'/g,"\\'");
         var row = '<tr class="debt-row-toggle" onclick="toggleChDebtDetail(\''+contragentEsc+'\')" style="cursor:pointer">'+
-          '<td><span class="muted" style="display:inline-block;width:14px">'+(isOpen?'▾':'▸')+'</span><b>'+c.contragent+'</b>'+byOrgLine+'</td>'+
+          '<td><span class="muted" style="display:inline-block;width:14px">'+(isOpen?'▾':'▸')+'</span>'+debtRiskDotHtml_(c.contragent)+'<b>'+c.contragent+'</b>'+byOrgLine+'</td>'+
           '<td class="muted">'+(c.manager||'—')+'</td>'+
           '<td class="num"><b>'+fmt(c.balance)+'</b></td>'+
           '<td class="num '+ageCls(c.daysOverdue)+'">'+c.daysOverdue+'</td>'+
@@ -16621,6 +16745,12 @@ function showSalaryTab(tab, month) {
     var panel = document.getElementById('salary-tab-' + t);
     if (panel) panel.style.display = (t === tab) ? '' : 'none';
   });
+  // Общий селектор периода в шапке страницы - только для вкладки "коммерческий отдел"
+  // (05.09, Влад: "не задваивался выбор периода, зачем он два раза"): у машинистов свой
+  // выбор месяца рядом с таблицей, и он работает по ДРУГОМУ источнику (driver_payroll,
+  // месяцы приходят из 1С), общий период на него не влиял вообще.
+  var periodWrap = document.getElementById('period-selector-wrap');
+  if (periodWrap) periodWrap.style.display = (tab === 'machinists') ? 'none' : 'flex';
   if (tab === 'machinists') return loadMachinistSalaryData(month);
 }
 
@@ -16785,8 +16915,22 @@ function renderMachinistSalary() {
           '<button class="crm-filter-chip' + (machinistSalaryFilter_ === 'файмонвиль' ? ' active' : '') + '" onclick="machinistSalarySetFilter_(\'файмонвиль\')">Файмонвиль</button>' +
           '<button class="crm-filter-chip' + (machinistSalaryFilter_ === 'не определено' ? ' active' : '') + '" onclick="machinistSalarySetFilter_(\'не определено\')">Не определено</button>' +
         '</div>' +
-        '<select onchange="loadMachinistSalaryData(this.value)" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12.5px">' + monthOpts + '</select>' +
+        '<div style="display:flex;gap:8px;align-items:center">' +
+          // Выгрузка на печать (05.09) - файл со сводной таблицей и развёрткой по каждому машинисту.
+          '<button type="button" id="machinist-export-btn" onclick="machinistSalaryExport_()" ' +
+            'style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12.5px;cursor:pointer;font-family:inherit">Выгрузить для печати</button>' +
+          '<select onchange="loadMachinistSalaryData(this.value)" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12.5px">' + monthOpts + '</select>' +
+        '</div>' +
       '</div>' +
+      // Незакрытый месяц (06.09): в сводке 1С его ещё нет, строки собраны из рейсов и
+      // штрафов. Выслуга/аванс/прочие удержания приходят только сводкой - молча показать
+      // такую зарплату как окончательную нельзя, предупреждаем явно.
+      (d.partial ? '<div style="padding:0 20px 10px"><div class="alert amber" style="margin:0">' +
+        '<span class="alert-icon">!</span><span class="alert-text">' +
+        '<b>Месяц ещё не закрыт.</b> В отчёте 1С сводки за ' + formatMonthLabel(machinistSalaryMonth_) +
+        ' пока нет - суммы посчитаны по уже загруженным рейсам и штрафам. ' +
+        'Выслуга, аванс и прочие удержания появятся только после закрытия месяца, сейчас они не учтены.' +
+        '</span></div></div>' : '') +
       '<div class="muted" style="font-size:11.5px;padding:0 20px 10px">' +
         'Тип (трал/длинномер) определяем по технике, на которой человек реально работал в этом месяце - НЕ по данным 1С (там все машинисты числятся под одним отделом). ' +
         '«Не определено» - для месяца ещё нет истории назначений на технику. Клик по строке - полный расклад как в отчёте 1С (штрафы и рейсы по машинам).' +
@@ -16797,6 +16941,146 @@ function renderMachinistSalary() {
         '<div class="sec-sub">К начислению всего: ' + Math.round(totalNet).toLocaleString('ru-RU') + ' ₽ · ' + rows.length + ' чел.</div></div>' +
       '<div style="overflow-x:auto"><table class="tbl"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>' +
     '</div>';
+}
+
+// ── Выгрузка страницы на печать (05.09, Влад: "добавь возможность выгрузки файла страницы
+// с подробной информацией развёрткой по водителю для последующей печати"). Скачивается
+// самостоятельный HTML: сводная таблица + по КАЖДОМУ машинисту его рейсы и штрафы, каждый
+// с новой страницы (page-break). Детализация берётся одним запросом на весь месяц
+// (/api/driver_payroll_detail_all), не по одному водителю - иначе 55 запросов подряд.
+var machinistExportBusy_ = false;
+function machinistSalaryExport_() {
+  if (machinistExportBusy_) return;
+  var d = machinistSalaryData_[machinistSalaryMonth_];
+  if (!d) return;
+  var btn = document.getElementById('machinist-export-btn');
+  machinistExportBusy_ = true;
+  if (btn) { btn.disabled = true; btn.textContent = 'Готовлю файл…'; }
+  fetchFromYardApi_('/driver_payroll_detail_all', { month: machinistSalaryMonth_ }).then(function(r) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Выгрузить для печати'; }
+    machinistExportBusy_ = false;
+    if (!r.ok || !r.data || r.data.error) { p2Toast('Не удалось выгрузить: ' + ((r.data && r.data.error) || 'ошибка сервера'), 'red'); return; }
+    var html = machinistBuildPrintHtml_(d, r.data.by_driver || {});
+    var blob = new Blob(['﻿' + html], { type: 'text/html;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'Зарплата машинистов ' + formatMonthLabel(machinistSalaryMonth_) + '.html';
+    document.body.appendChild(a); a.click();
+    setTimeout(function() { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    p2Toast('Файл скачан - откройте и печатайте (Ctrl+P)', 'green');
+  }).catch(function(e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Выгрузить для печати'; }
+    machinistExportBusy_ = false;
+    p2Toast('Ошибка сети: ' + e.message, 'red');
+  });
+}
+function machinistBuildPrintHtml_(d, byDriver) {
+  var esc = function(v) { return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
+  var num = function(v) { return v ? Math.round(v).toLocaleString('ru-RU') : '—'; };
+  // Часы округлять нельзя (11,5 ч превращались в 12) - только рубли.
+  var hrs = function(v) { return v ? String(v).replace('.', ',') : '—'; };
+  var rows = (d.rows || []).filter(function(r) {
+    return machinistSalaryFilter_ === 'all' || r.vehicle_bucket === machinistSalaryFilter_;
+  }).slice().sort(function(a, b) { return (b.net_amount || 0) - (a.net_amount || 0); });
+  var totalNet = rows.reduce(function(s, r) { return s + (r.net_amount || 0); }, 0);
+  var now = new Date();
+  var stamp = String(now.getDate()).padStart(2, '0') + '.' + String(now.getMonth() + 1).padStart(2, '0') + '.' +
+              now.getFullYear() + ' ' + String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+
+  // Сводная таблица - те же колонки, что на экране, но всегда с раскрытыми удержаниями:
+  // на бумаге сворачивать нечего, а для сверки с 1С нужны все слагаемые.
+  var sumHead = ['Машинист', 'Тип', 'Часы', 'Работа по заказам', 'Выслуга', 'Км за МКАД', 'Начисления',
+                 'Аванс/Нал', 'Штрафы', 'Проч. удерж.', 'Удержания', 'Итого', 'НДФЛ', 'К начислению', '%'];
+  var sumBody = rows.map(function(r) {
+    return '<tr><td class="l">' + esc(r.driver_name) + '</td><td class="l dim">' + esc(r.vehicle_bucket) + '</td>' +
+      '<td>' + hrs(r.hours) + '</td><td>' + num(r.work_orders_amount) + '</td><td>' + num(r.seniority_amount) + '</td>' +
+      '<td>' + num(r.mileage_mkad_amount) + '</td><td>' + num(r.accruals_amount) + '</td>' +
+      '<td>' + num(r.advance_amount) + '</td><td>' + num(r.gibdd_fines_amount) + '</td><td>' + num(r.other_deductions_amount) + '</td>' +
+      '<td>' + num(r.deductions_amount) + '</td><td>' + num(r.total_amount) + '</td><td>' + num(r.ndfl_amount) + '</td>' +
+      '<td class="b">' + num(r.net_amount) + '</td><td>' + (r.order_pct != null ? r.order_pct.toFixed(1) + '%' : '—') + '</td></tr>';
+  }).join('');
+
+  var perDriver = rows.map(function(r) {
+    var det = byDriver[r.driver_name] || { trips: [], fines: [] };
+    var trips = det.trips || [], fines = det.fines || [];
+    // Рейсы сгруппированы по машине - как в отчёте 1С и как в карточке на экране.
+    var byVeh = {};
+    trips.forEach(function(t) { (byVeh[t.vehicle_name || '—'] = byVeh[t.vehicle_name || '—'] || []).push(t); });
+    var vehBlocks = Object.keys(byVeh).map(function(veh) {
+      var list = byVeh[veh];
+      var sumNet = list.reduce(function(s, t) { return s + (Number(t.net_amount) || Number(t.amount) || 0); }, 0);
+      var sumOrder = list.reduce(function(s, t) { return s + (Number(t.order_amount) || 0); }, 0);
+      // Процент - доля НАЧИСЛЕННОГО (до НДФЛ) в стоимости заказа: так считается процент в
+      // каждой строке и так же считает экран. До 06.09 итог печати брал в числитель net -
+      // получалось 10.5% против 12.1% на экране при одинаковых строках.
+      var sumGross = list.reduce(function(s, t) { return s + (Number(t.amount) || 0); }, 0);
+      var body = list.map(function(t) {
+        var pct = (Number(t.order_amount) > 0) ? (100 * (Number(t.amount) || 0) / Number(t.order_amount)) : null;
+        return '<tr><td>' + esc(mdShort_(t.trip_date)) + '</td><td>' + esc(mdDocShort_(t.doc_ref)) + '</td>' +
+          '<td class="l">' + esc(t.logist ? String(t.logist).split(' ')[0] : '—') + '</td>' +
+          '<td class="l">' + esc(t.route || '—') + '</td><td class="l">' + esc(t.order_cargo || '—') + '</td>' +
+          '<td>' + num(t.km_mkad) + '</td><td>' + hrs(t.hours) + '</td>' +
+          // ДО 06.09 здесь стояло t.amount (начислено, 17 241), а на экране - net_amount
+          // (15 000, на руки): распечатка противоречила экрану той же строки, и колонка
+          // не сходилась со своим же итогом. Показываем ровно то же, что на экране.
+          '<td>' + num(t.net_amount != null ? t.net_amount : t.amount) + '</td><td>' + num(t.order_amount) + '</td>' +
+          '<td' + (pct != null && pct > 20 ? ' class="hi"' : '') + '>' + (pct != null ? pct.toFixed(1) + '%' : '—') + '</td></tr>';
+      }).join('');
+      return '<div class="veh">' + esc(veh) + ' · рейсов: ' + list.length + '</div>' +
+        '<table class="t"><thead><tr><th>Дата</th><th>Документ</th><th class="l">Логист</th><th class="l">Маршрут</th>' +
+        '<th class="l">Груз</th><th>Км МКАД</th><th>Часы</th><th>К начислению</th><th>Стоимость заказа</th><th>%</th></tr></thead>' +
+        '<tbody>' + body + '<tr class="tot"><td colspan="7">Итого по машине</td><td>' + num(sumNet) + '</td><td>' + num(sumOrder) + '</td>' +
+        '<td' + (sumOrder > 0 && 100 * sumGross / sumOrder > 20 ? ' class="hi"' : '') + '>' +
+        (sumOrder > 0 ? (100 * sumGross / sumOrder).toFixed(1) + '%' : '—') + '</td></tr></tbody></table>';
+    }).join('');
+    var finesBlock = fines.length
+      ? '<div class="veh">Штрафы ГИБДД / удержания</div><table class="t narrow"><thead><tr><th>Период с</th><th>по</th>' +
+        '<th class="l">Документ</th><th>Сумма</th></tr></thead><tbody>' +
+        fines.map(function(f) {
+          return '<tr><td>' + esc(mdShort_(f.period_from)) + '</td><td>' + esc(mdShort_(f.period_to)) + '</td>' +
+            '<td class="l">' + esc(mdDocShort_(f.doc_ref)) + '</td><td>' + num(f.amount) + '</td></tr>';
+        }).join('') + '</tbody></table>'
+      : '<div class="dim" style="margin-top:6px">Штрафов и удержаний нет</div>';
+    return '<section class="drv"><h2>' + esc(r.driver_name) + ' <span class="dim">· ' + esc(r.vehicle_bucket) + '</span></h2>' +
+      '<div class="kv">' +
+        '<span><b>Часы:</b> ' + num(r.hours) + '</span><span><b>Начисления:</b> ' + num(r.accruals_amount) + ' ₽</span>' +
+        '<span><b>Удержания:</b> ' + num(r.deductions_amount) + ' ₽</span><span><b>Итого:</b> ' + num(r.total_amount) + ' ₽</span>' +
+        '<span><b>НДФЛ:</b> ' + num(r.ndfl_amount) + ' ₽</span><span><b>К начислению:</b> ' + num(r.net_amount) + ' ₽</span>' +
+        '<span><b>Процент:</b> ' + (r.order_pct != null ? r.order_pct.toFixed(1) + '%' : '—') + '</span>' +
+      '</div>' + (vehBlocks || '<div class="dim">Рейсов за месяц нет</div>') + finesBlock + '</section>';
+  }).join('');
+
+  return '<!doctype html><html lang="ru"><head><meta charset="utf-8">' +
+    '<title>Зарплата машинистов ' + esc(formatMonthLabel(machinistSalaryMonth_)) + '</title><style>' +
+    '@page{size:A4 landscape;margin:12mm}' +
+    'body{font-family:Arial,Helvetica,sans-serif;font-size:9pt;color:#000;background:#fff;margin:0;padding:14px}' +
+    'h1{font-size:15pt;margin:0 0 2px}h2{font-size:11pt;margin:0 0 6px;border-bottom:1px solid #000;padding-bottom:3px}' +
+    '.dim{color:#555;font-weight:400}.sub{color:#555;font-size:8.5pt;margin-bottom:12px}' +
+    'table{border-collapse:collapse;width:100%;margin:4px 0 10px}' +
+    'th,td{border:1px solid #999;padding:3px 5px;text-align:right;white-space:nowrap}' +
+    'th{background:#eee;font-size:8pt;text-align:right}th.l,td.l{text-align:left;white-space:normal}' +
+    'td.b{font-weight:700}tr.tot td{font-weight:700;background:#f3f3f3}' +
+    '.veh{font-weight:700;font-size:9.5pt;margin-top:8px}table.narrow{width:auto;min-width:60%}' +
+    '.kv{display:flex;flex-wrap:wrap;gap:4px 16px;margin:4px 0 8px;font-size:9pt}' +
+    '.drv{page-break-before:always;break-before:page}' +
+    '.warn{border:1px solid #000;padding:6px 8px;margin:0 0 10px;font-size:9pt;font-weight:700}' +
+    'td.hi{font-weight:700;text-decoration:underline}' +
+    '@media print{.no-print{display:none}}' +
+    '</style></head><body>' +
+    '<h1>Зарплата машинистов — ' + esc(formatMonthLabel(machinistSalaryMonth_)) + '</h1>' +
+    '<div class="sub">Выгружено ' + stamp + ' · ' + rows.length + ' чел. · к начислению всего ' + num(totalNet) + ' ₽' +
+      (machinistSalaryFilter_ !== 'all' ? ' · фильтр: ' + esc(machinistSalaryFilter_) : '') + '</div>' +
+    // На бумаге предупреждение о незакрытом месяце важнее, чем на экране: распечатку
+    // могут отдать человеку как окончательный расчёт.
+    (d.partial ? '<div class="warn">Месяц не закрыт: сводки 1С за этот период ещё нет, суммы посчитаны по загруженным ' +
+      'рейсам и штрафам. Выслуга, аванс и прочие удержания не учтены.</div>' : '') +
+    '<table class="t"><thead><tr>' + sumHead.map(function(h, i) { return '<th' + (i < 2 ? ' class="l"' : '') + '>' + h + '</th>'; }).join('') + '</tr></thead>' +
+    '<tbody>' + sumBody + '</tbody></table>' +
+    perDriver +
+    '<div class="sub" style="margin-top:14px">«К начислению» по рейсу - сумма на руки, после НДФЛ 13%. ' +
+    'Колонка «%» - доля НАЧИСЛЕННОГО (до НДФЛ) в стоимости заказа, то есть затраты компании на машиниста; ' +
+    'поэтому её база больше суммы в колонке «К начислению». Подчёркнуты рейсы, где эта доля выше 20%.</div>' +
+    '</body></html>';
 }
 
 // ── Детализация машиниста - штрафы построчно + рейсы по машинам (2026-09-04, план Фаза 2,
@@ -16888,9 +17172,9 @@ var MD_TRIP_COLS_ = [
   { key: 'cargo', label: 'Груз', num: false },
   { key: 'km_mkad', label: 'Км МКАД', num: true },
   { key: 'hours', label: 'Часы', num: true },
-  { key: 'net_amount', label: 'К начислению', num: true },
+  { key: 'net_amount', label: 'К начислению', num: true, hint: 'Сумма на руки - после удержания НДФЛ 13%' },
   { key: 'order_amount', label: 'Стоимость заказа', num: true },
-  { key: 'pct', label: 'Процент', num: true },
+  { key: 'pct', label: 'Процент', num: true, hint: 'Доля НАЧИСЛЕННОГО (до НДФЛ) в стоимости заказа - это затраты компании на машиниста, поэтому база больше, чем в колонке «К начислению»' },
 ];
 // Первый клик: числа - по убыванию (крупное), текст - А-Я, даты - убывание (свежие
 // сначала) - тот же порядок правил, что в разделе "Сортируемая таблица" ГОСТа.
@@ -16922,7 +17206,7 @@ function mdSortHead_(cols, sort, onclickFn, prefixArg) {
     var active = sort.col === c.key;
     var arrow = active ? (sort.dir === -1 ? '▼' : '▲') : '↕';
     var arrowStyle = active ? '' : 'opacity:.35';
-    return '<th class="sortable' + (c.num ? ' num' : '') + '" onclick="' + onclickFn + '(' + pre + '\'' + c.key + '\')">' +
+    return '<th class="sortable' + (c.num ? ' num' : '') + '"' + (c.hint ? ' title="' + c.hint + '"' : '') + ' onclick="' + onclickFn + '(' + pre + '\'' + c.key + '\')">' +
       c.label + '<span style="font-size:10px;margin-left:4px;' + arrowStyle + '">' + arrow + '</span></th>';
   }).join('');
 }
@@ -17578,6 +17862,22 @@ function debtInBucket_(days, bucket) {
 // отделам не хардкодится). Пусто = все менеджеры. Панель поверх кнопки, закрывается по
 // клику вне неё.
 let debtManagerFilters = new Set();
+// Скрытые линии графика "ДЗ по дням" (05.09, Влад: "по умолчанию включен Бульдог").
+// Хранится СПИСОК СКРЫТЫХ подписей: по умолчанию видны только "Общая ДЗ" и "Бульдог",
+// остальные наши юрлица скрыты - их долг мал и линии сливались в кашу. Переключается
+// кликом по легенде (см. onClick у графика), выбор личный и переживает перерисовку.
+var DEBT_CHART_HIDDEN_KEY_ = 'yard.debt.chartHidden';
+function debtChartHiddenSet_(orgNames) {
+  var raw = null, hidden;
+  try { raw = localStorage.getItem(DEBT_CHART_HIDDEN_KEY_); } catch (e) {}
+  if (raw == null) {
+    hidden = (orgNames || []).filter(function(o) { return o !== 'Бульдог'; });   // первый заход
+  } else {
+    try { hidden = JSON.parse(raw); } catch (e) { hidden = []; }
+  }
+  if (!Array.isArray(hidden)) hidden = [];
+  return hidden;
+}
 function debtMgrToggle(name) {
   if (debtManagerFilters.has(name)) debtManagerFilters.delete(name);
   else debtManagerFilters.add(name);
@@ -17866,8 +18166,9 @@ function buildDebtCard_(c) {
   var commentEsc = (c.comment || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
   return '<div style="padding:20px">' +
-    '<div style="font-size:17px;font-weight:700;margin-bottom:4px">' + c.contragent + '</div>' +
-    '<div class="muted" style="font-size:13px;margin-bottom:16px">' + cleanName(c.manager) + '</div>' +
+    '<div style="font-size:17px;font-weight:700;margin-bottom:4px">' + debtRiskDotHtml_(c.contragent) + c.contragent + '</div>' +
+    '<div class="muted" style="font-size:13px;margin-bottom:8px">' + cleanName(c.manager) + '</div>' +
+    debtRiskBlockHtml_(c.contragent) +
     '<div style="display:flex;gap:24px;margin-bottom:16px">' +
       '<div><div class="muted" style="font-size:11px;text-transform:uppercase">Баланс</div><div style="font-size:20px;font-weight:700;color:var(--amber)">' + fmt(c.balance) + '</div></div>' +
       '<div><div class="muted" style="font-size:11px;text-transform:uppercase">Дней просрочки</div><div style="font-size:20px;font-weight:700">' + c.daysOverdue + '</div></div>' +
@@ -17912,6 +18213,143 @@ async function debtSaveComment(contragent) {
   }
 }
 
+// ── Светофор риска в ДЗ (04.09, Влад: "в инструменте по работе с ДЗ хочу видеть перед
+// названием КА лампочку. Поскольку количество запросов ограничено начнём с всех текущих
+// 0-30 дней") - точка = тот же кэш проверки юрлица, что в Справочниках (legalCheckRisk_),
+// сопоставление должник -> юрлицо делает сервер (/api/debt/risk_lights: точное имя / ИНН
+// в имени / уникальный префикс - в ДЗ ИНН нет вообще). Карта грузится один раз при первом
+// рендере ДЗ и заново после партии - отдельным лёгким запросом, НЕ через главный payload,
+// чтобы не ждать "Обновить данные".
+var debtRiskMap_ = null;        // contragent -> {light, reasons[], checked_at, legal_entity_id, inn}
+var debtRiskLoading_ = false;
+function loadDebtRiskLights_(then) {
+  if (debtRiskLoading_) return;
+  debtRiskLoading_ = true;
+  fetchFromYardApi_('/debt/risk_lights', {}).then(function(r) {
+    debtRiskLoading_ = false;
+    if (!r.ok || !r.data || !r.data.by_contragent) return;
+    debtRiskMap_ = r.data.by_contragent;
+    if (then) then(r.data);
+  }).catch(function() { debtRiskLoading_ = false; });
+}
+// Для страниц, где ДЗ рисуется не renderDebt() (личная страница менеджера, ДЗ
+// руководителя группы): подгрузить карту один раз и перерисовать (Влад, 04.09: "логика
+// должна быть везде... у всех в ДЗ должно это появиться"). Роли без доступа к
+// /debt/risk_lights (сервер пускает admin/manager) - не дёргаем сервер вовсе; при отказе
+// ставим пустую карту, чтобы каждый рендер не повторял запрос.
+function ensureDebtRiskMap_(rerender) {
+  if (debtRiskMap_ !== null || debtRiskLoading_) return;
+  if (!D || (D.role !== 'admin' && D.role !== 'manager')) { debtRiskMap_ = {}; return; }
+  debtRiskLoading_ = true;
+  fetchFromYardApi_('/debt/risk_lights', {}).then(function(r) {
+    debtRiskLoading_ = false;
+    debtRiskMap_ = (r.ok && r.data && r.data.by_contragent) ? r.data.by_contragent : {};
+    if (rerender) rerender();
+  }).catch(function() { debtRiskLoading_ = false; debtRiskMap_ = {}; });
+}
+// Блок для карточки контрагента - цвет + причины целиком, не только tooltip.
+function debtRiskBlockHtml_(contragent) {
+  var m = debtRiskMap_ && debtRiskMap_[contragent];
+  if (!m || !m.light) return '';
+  var color = legalRiskColor_(m.light);
+  var reasons = (m.reasons && m.reasons.length)
+    ? '<ul style="margin:4px 0 0;padding-left:16px;font-size:12px;color:var(--muted)">' +
+      m.reasons.map(function(x) { return '<li>' + pageEsc_(x) + '</li>'; }).join('') + '</ul>'
+    : '<div class="muted" style="font-size:12px;margin-top:2px">Рисков по официальным реестрам не найдено</div>';
+  return '<div style="margin-bottom:16px;padding:10px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px">' +
+    '<div style="display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:' + color + '">' +
+      legalRiskMarkHtml_(m.light, 9, '', m.marker) +
+      'Проверка контрагента: ' + legalRiskLabel_(m.light) +
+      (m.checked_at ? '<span class="muted" style="font-weight:400;font-size:11px;margin-left:auto">' + pageEsc_(m.checked_at) + '</span>' : '') +
+    '</div>' + reasons + '</div>';
+}
+// ── Единая связь "имя контрагента из 1С -> карточка юрлица" (05.09, Влад: "давай свяжи").
+// Одна карта на весь сайт (/api/counterparty/lights: дебиторка + заказы + поступления +
+// история клиентов), поэтому лампочка выглядит и работает одинаково на любой странице.
+// Ключ - имя КАК В 1С, то самое, что теперь хранится в карточке юрлица (name_1c).
+var cpLights_ = null, cpLightsLoading_ = false;
+function cpEnsureLights_(rerender) {
+  if (cpLights_ !== null || cpLightsLoading_) return;
+  if (!D || (D.role !== 'admin' && D.role !== 'manager')) { cpLights_ = {}; return; }
+  cpLightsLoading_ = true;
+  fetchFromYardApi_('/counterparty/lights', {}).then(function(r) {
+    cpLightsLoading_ = false;
+    cpLights_ = (r.ok && r.data && r.data.by_name) ? r.data.by_name : {};
+    if (rerender) try { rerender(); } catch (e) {}
+  }).catch(function() { cpLightsLoading_ = false; cpLights_ = {}; });
+}
+// Лампочка рядом с именем заказчика на любой странице. Пусто, если контрагент не связан
+// с карточкой юрлица или ещё не проверялся - цвет только по делу (ГОСТ).
+function cpLightHtml_(name, size) {
+  var m = cpLights_ && cpLights_[String(name || '').trim()];
+  if (!m || !m.light) return '';
+  var head = 'Проверка контрагента: ' + legalRiskLabel_(m.light) + (m.checked_at ? ' (' + m.checked_at + ')' : '');
+  var body = (m.reasons && m.reasons.length)
+    ? m.reasons.map(function(x) { return '— ' + x; }).join('\n')
+    : 'Рисков по официальным реестрам не найдено';
+  return '<span title="' + pageEscAttr_(head + '\n' + body) + '" style="display:inline-block;vertical-align:middle;margin-right:5px">' +
+    legalRiskMarkHtml_(m.light, size || 7, '', m.marker) + '</span>';
+}
+function debtRiskDotHtml_(contragent) {
+  var m = debtRiskMap_ && debtRiskMap_[contragent];
+  if (!m || !m.light) return '';
+  var head = 'Проверка контрагента: ' + legalRiskLabel_(m.light) + (m.checked_at ? ' (' + m.checked_at + ')' : '');
+  var body = (m.reasons && m.reasons.length)
+    ? m.reasons.map(function(x) { return '— ' + x; }).join('\n')
+    : 'Рисков по официальным реестрам не найдено';
+  return '<span title="' + pageEscAttr_(head + '\n' + body) + '" style="display:inline-block;vertical-align:middle;margin-right:6px">' +
+    legalRiskMarkHtml_(m.light, 8, '', m.marker) + '</span>';
+}
+function debtRiskStatusText_(data) {
+  var n = 0, by = { bankrupt: 0, red: 0, yellow: 0, green: 0 };
+  Object.keys(data.by_contragent || {}).forEach(function(k) {
+    var m = data.by_contragent[k];
+    if (m && m.light) { n++; by[m.light] = (by[m.light] || 0) + 1; }
+  });
+  var base = n ? ('проверено ' + n + ': ' + (by.bankrupt ? by.bankrupt + ' банкротов · ' : '') + by.red + ' красных · ' + by.yellow + ' жёлтых · ' + by.green + ' зелёных')
+               : 'ещё никто не проверен';
+  // Последний прогон (cron 06:10 МСК или ручной) - чтобы было видно, что автомат живой.
+  var lr = data.last_run;
+  if (lr) {
+    var used = (lr.quota || []).reduce(function(s, q) { return s + (q.used || 0); }, 0);
+    var lim = (lr.quota || []).reduce(function(s, q) { return s + (q.limit || 0); }, 0);
+    base += ' · ' + (lr.mode === 'auto' ? 'автопрогон ' : 'прогон ') + lr.finished_at + ': проверено ' + lr.checked +
+      (lr.due_count > lr.checked + lr.failed ? ', в очереди ' + (lr.due_count - lr.checked - lr.failed) : '') +
+      (lr.failed ? ', ошибок ' + lr.failed : '') +
+      (lim ? ', квота ' + used + '/' + lim : '');
+  }
+  return base;
+}
+// Кнопка запускает ТОТ ЖЕ приоритетный прогон, что cron каждое утро (04.09, Влад:
+// "автоматически каждый день... без моего участия") - /api/debt/risk_check_auto, алгоритм
+// приоритетов описан на сервере (debtRiskAutoRun_). Отдельной "партии 0-30" в UI больше
+// нет - один алгоритм на автомат и на руку, чтобы не расходились.
+function debtRunRiskBatch_() {
+  var btn = document.getElementById('debt-risk-batch-btn'), st = document.getElementById('debt-risk-status');
+  if (!btn) return;
+  var label = 'Проверить сейчас';
+  btn.disabled = true; btn.textContent = 'Проверяю…';
+  if (st) st.textContent = 'запросы к Checko идут по одному - до пары минут';
+  postToYardApi_('/debt/risk_check_auto', {}).then(function(r) {
+    btn.disabled = false; btn.textContent = label;
+    if (!r.ok) { p2Toast('Не удалось проверить: ' + (r.data && r.data.error || 'ошибка сервера'), 'red'); return; }
+    var d = r.data;
+    var used = (d.quota || []).reduce(function(s, q) { return s + (q.used || 0); }, 0);
+    var lim = (d.quota || []).reduce(function(s, q) { return s + (q.limit || 0); }, 0);
+    var msg = 'Проверено ' + d.checked + ' (к проверке было ' + d.due + ' из ' + d.candidates + ')' +
+      (d.left_in_queue > 0 ? ', в очереди на завтра: ' + d.left_in_queue : '') +
+      (d.unmatched ? ', без юрлица в справочнике: ' + d.unmatched : '') +
+      (d.failed ? ', ошибок: ' + d.failed : '') +
+      (lim ? '. Квота Checko: ' + used + '/' + lim : '') +
+      (d.stopped_by_quota ? ' - остановлено, квота исчерпана' : '');
+    p2Toast(msg, d.failed ? 'red' : 'green');
+    if (d.by_bucket) console.info('[ДЗ/светофор] проверено по корзинам:', d.by_bucket);
+    loadDebtRiskLights_(function(data) { if (st) st.textContent = debtRiskStatusText_(data); renderDebt(); });
+  }).catch(function(e) {
+    btn.disabled = false; btn.textContent = label;
+    p2Toast('Ошибка сети: ' + e.message, 'red');
+  });
+}
 function renderDebt() {
   if (!D) return;
   const debt = D.debt;
@@ -17924,6 +18362,15 @@ function renderDebt() {
   }
   if (emptyEl) emptyEl.style.display = 'none';
   if (bodyEl) bodyEl.style.display = 'block';
+  // Светофор риска (04.09) - карта точек грузится один раз при первом показе ДЗ (дальше
+  // рендер синхронный из debtRiskMap_); кнопка партии - только admin (сервер тоже требует).
+  var riskTools = document.getElementById('debt-risk-tools');
+  if (riskTools) riskTools.style.display = (D.role === 'admin') ? 'flex' : 'none';
+  if (debtRiskMap_ === null) loadDebtRiskLights_(function(data) {
+    var st = document.getElementById('debt-risk-status');
+    if (st) st.textContent = debtRiskStatusText_(data);
+    renderDebt();
+  });
 
   const ageToggleBtn = document.getElementById('debt-age-toggle-btn');
   if (ageToggleBtn) {
@@ -18136,7 +18583,7 @@ function renderDebt() {
         var up = x.diff > 0;
         var color = up ? 'var(--red)' : 'var(--green)';
         return '<tr>' +
-          '<td><b>' + x.contragent + '</b></td>' +
+          '<td>' + debtRiskDotHtml_(x.contragent) + '<b>' + x.contragent + '</b></td>' +
           '<td class="muted">' + (x.manager ? cleanName(x.manager) : '—') + '</td>' +
           '<td class="num muted">' + fmt(x.yesterday) + '</td>' +
           '<td class="num">' + fmt(x.today) + '</td>' +
@@ -18147,34 +18594,32 @@ function renderDebt() {
     }
   }
 
-  // История - линия по дням (та же логика построения, что и "Выручка по дням" на "Обзоре").
-  // hist уже получен выше (для стрелок тенденций в KPI). Показывает ВСЕ долги без учёта
-  // фильтра "до 600 дней" (Влад, 2026-07-12: "хорошо что график будет показывать реальную
-  // картину с учётом всех долгов") - использует debt.history напрямую, не agg.
-  // Плюс линии по КАЖДОМУ ЮРЛИЦУ группы (Влад, 2026-07-14: "не график по клиентам, а
-  // график линию по долгу каждого нашего юрлица - Бульдог, Стройтранс, Ярд" - уточнение
-  // предыдущего запроса про "линии по контрагентам", там на самом деле имелись в виду
-  // наши 5 юрлиц, не клиенты) - используем разбивку по юрлицам, которая уже есть в каждой
-  // точке истории (hist[].byOrg), отдельный лист по клиентам за 2026-07-12 больше не нужен.
+  // График "ДЗ по дням" (05.09, Влад: "сделай именно так" + скриншот прежнего вида,
+  // "по умолчанию включен Бульдог"). Линии по общей ДЗ и по каждому нашему юрлицу с
+  // легендой снизу - как было; изменилось одно: по умолчанию ВИДНЫ только "Общая ДЗ" и
+  // "Бульдог", остальные юрлица скрыты и включаются кликом по легенде. Набор видимых
+  // запоминается лично (localStorage) - у каждого свой, перерисовка его не сбрасывает.
   const ctx = document.getElementById('chart-debt-history');
   if (ctx && hist.length) {
     if (ctx._chart) ctx._chart.destroy();
     const debtOrgColors = { 'Бульдог':'#378ADD', 'Ярд Империал':'#1D9E75', 'Стройтранс':'#E24B4A', 'Техно Парк':'#8B5CF6', 'Мегакран':'#F472B6', 'Умиат Ярд':'#22D3EE' };
-    const orgNames = {};
-    hist.forEach(function(h) { Object.keys(h.byOrg || {}).forEach(function(o) { orgNames[o] = true; }); });
-    const datasets = [{
+    var orgNames_ = [];
+    hist.forEach(function(h){ Object.keys(h.byOrg || {}).forEach(function(o){ if (orgNames_.indexOf(o) < 0) orgNames_.push(o); }); });
+    // Порядок линий - по величине долга на последний день, чтобы легенда читалась сверху вниз.
+    var lastPoint_ = hist[hist.length-1];
+    orgNames_.sort(function(a, b){ return ((lastPoint_.byOrg||{})[b]||0) - ((lastPoint_.byOrg||{})[a]||0); });
+    var hidden_ = debtChartHiddenSet_(orgNames_);
+    var datasets = [{
       label: 'Общая ДЗ', data: hist.map(function(h){ return h.balance; }),
       borderColor: '#EF9F27', backgroundColor: 'rgba(239,159,39,0.12)', fill: true, tension: 0.25, pointRadius: 2, borderWidth: 2.5,
+      hidden: hidden_.indexOf('Общая ДЗ') >= 0,
     }];
-    // Точки на линиях юрлиц (Влад, 2026-07-17: "в графике по всем нашим фирмам должны быть
-    // точки с информацией как в общей ДЗ") - раньше pointRadius:0 у линий юрлиц, из-за чего
-    // навести курсор и увидеть подсказку было почти невозможно (в отличие от "Общая ДЗ" с
-    // pointRadius:2). mode:'index' ниже - наводишь на день, видишь сразу все юрлица.
-    Object.keys(orgNames).forEach(function(org) {
+    orgNames_.forEach(function(org) {
       datasets.push({
         label: org, data: hist.map(function(h) { return (h.byOrg && h.byOrg[org]) || 0; }),
         borderColor: debtOrgColors[org] || '#94A3B8', backgroundColor: 'transparent',
         fill: false, tension: 0.25, pointRadius: 2, borderWidth: 1.5,
+        hidden: hidden_.indexOf(org) >= 0,
       });
     });
     ctx._chart = new Chart(ctx, {
@@ -18187,7 +18632,20 @@ function renderDebt() {
         responsive:true, maintainAspectRatio:false,
         interaction: { mode: 'index', intersect: false },
         plugins:{
-          legend:{display:true, position:'bottom', labels:{color:chartMuted_(), font:{size:10}, boxWidth:10}},
+          legend:{
+            display:true, position:'bottom',
+            labels:{color:chartMuted_(), font:{size:10}, boxWidth:10},
+            // Клик по легенде - штатное переключение Chart.js плюс запоминание выбора:
+            // иначе следующий рендер (обновление данных, смена вкладки) вернул бы всё назад.
+            onClick: function(e, item, legend) {
+              var ch = legend.chart, i = item.datasetIndex;
+              ch.setDatasetVisibility(i, !ch.isDatasetVisible(i));
+              ch.update();
+              var off = [];
+              ch.data.datasets.forEach(function(ds, idx){ if (!ch.isDatasetVisible(idx)) off.push(ds.label); });
+              try { localStorage.setItem(DEBT_CHART_HIDDEN_KEY_, JSON.stringify(off)); } catch (err) {}
+            }
+          },
           tooltip:{callbacks:{label:function(c){ return ' ' + c.dataset.label + ': ' + fmt(c.raw); }}}
         },
         scales:{
@@ -18288,7 +18746,7 @@ function renderDebt() {
       'style="background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:0 4px" title="Карточка контрагента">📝' +
       (c.comment ? '<span style="color:var(--amber)">●</span>' : '') + '</button>';
     return '<tr class="debt-row-toggle" onclick="toggleDebtDetail(' + i + ')" style="cursor:pointer">' +
-      '<td>' + cardBtn + '<span id="debt-arrow-' + i + '" class="muted" style="display:inline-block;width:14px">▸</span><b>' + c.contragent + '</b>' + byOrgLine + '</td>' +
+      '<td>' + cardBtn + '<span id="debt-arrow-' + i + '" class="muted" style="display:inline-block;width:14px">▸</span>' + debtRiskDotHtml_(c.contragent) + '<b>' + c.contragent + '</b>' + byOrgLine + '</td>' +
       '<td class="muted">' + cleanName(c.manager) + '</td>' +
       '<td class="num"><b>' + fmt(c.balance) + '</b></td>' +
       '<td class="num ' + ageCls(c.daysOverdue) + '">' + c.daysOverdue + '</td>' +
@@ -18319,7 +18777,7 @@ function renderDebt() {
   document.getElementById('debt-guarantees-total').textContent = fmt(guaranteesTotal);
   document.getElementById('debt-guarantees-body').innerHTML = guarantees.map(function(g) {
     return '<tr>' +
-      '<td><b>' + g.contragent + '</b></td>' +
+      '<td>' + debtRiskDotHtml_(g.contragent) + '<b>' + g.contragent + '</b></td>' +
       '<td class="muted">' + cleanName(g.manager) + '</td>' +
       '<td class="num"><b>' + fmt(g.guaranteeDeposit) + '</b></td>' +
     '</tr>';
@@ -18389,7 +18847,521 @@ function initSidebarCollapse_() {
 }
 initSidebarCollapse_();
 
+// ── Кастомизация меню (05.09, Влад: "зажал меню - перешло в режим кастома: передвинуть
+// как канбанчик, скрыть и тому подобное. Только для админа. При входе в просмотрщик
+// сотрудника я могу также настраивать ему, как будет меню у него. У сотрудника
+// кастомизации быть не должно"). Паттерн и физика - ГОСТ раздел 6 ("Долгое нажатие ->
+// режим перестановки" + Drag & Drop), числа буквально. Хранение - на сервере
+// (/api/menu_config, таблица menu_configs), ключ "admin" или "role:фамилия";
+// localStorage - только кэш для мгновенной отрисовки до ответа сервера. Порядок = токены
+// ВСЕХ детей nav (пункты по data-page и разделители "#park"/"#sales"), поэтому пункт
+// можно унести в другой раздел; новые пункты, которых в сохранённом порядке нет, встают
+// в конец - админ их переставит. Кастом накладывается ПОВЕРХ ролевого фильтра
+// applyRoleUI(): он умеет только прятать и переставлять, показать лишнее роли не может.
+var MENU_CFG_LS_ = 'yard.menu.cfg.';
+var menuCfgCache_ = {};        // key -> cfg | null (null = на сервере конфига нет)
+var menuCfgInflight_ = {};
+var menuCustomizing_ = false;
+var menuDefaultOrder_ = null;  // токены в исходном порядке DOM
+var menuSaveTimer_ = null;
+var menuSuppressClick_ = false;
+var menuHold_ = null;          // долгое нажатие: {item, x0, y0, pid, timer}
+var menuDrag_ = null;          // активное перетаскивание
+var menuHintDone_ = false, menuHintTimer_ = null;
+
+function menuPrefersReduced_() { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } }
+function menuSur_(name) { return String(name || '').trim().split(/\s+/)[0].toLowerCase().replace(/ё/g, 'е'); }
+function menuCfgKey_() {
+  if (typeof D === 'undefined' || !D || !D.role) return null;
+  if (D.role === 'admin') return viewAsEntry ? (viewAsEntry.type + ':' + menuSur_(viewAsEntry.name)) : 'admin';
+  return D.role + ':' + menuSur_(D.managerName || D.logistName || D.mechanicName || '');
+}
+function menuNav_() { return document.querySelector('.sidebar-nav'); }
+function menuToken_(el) {
+  if (el.classList.contains('sidebar-nav-item')) return el.getAttribute('data-page');
+  if (el.classList.contains('sidebar-nav-section')) return '#' + (el.getAttribute('data-section') || '');
+  return null;
+}
+function menuChildren_() {
+  var nav = menuNav_();
+  return nav ? [].slice.call(nav.children).filter(function(el) { return !!menuToken_(el); }) : [];
+}
+function menuItems_() { var nav = menuNav_(); return nav ? [].slice.call(nav.querySelectorAll('.sidebar-nav-item')) : []; }
+
+// Применить конфиг к DOM: порядок (пункты + разделители) и скрытые. Вызывается из
+// applyRoleUI() ПОСЛЕ ролевого фильтра - тот уже выставил display по роли, мы только
+// дополнительно прячем. В режиме кастомизации скрытые не прячем, а гасим (.menu-hidden).
+function menuApplyCfg_(cfg) {
+  var nav = menuNav_(); if (!nav) return;
+  if (!menuDefaultOrder_) menuDefaultOrder_ = menuChildren_().map(menuToken_);
+  var order = (cfg && Array.isArray(cfg.order) && cfg.order.length) ? cfg.order : menuDefaultOrder_;
+  var byTok = {}; menuChildren_().forEach(function(el) { byTok[menuToken_(el)] = el; });
+  var placed = {};
+  order.forEach(function(t) { if (byTok[t] && !placed[t]) { nav.appendChild(byTok[t]); placed[t] = true; } });
+  menuDefaultOrder_.forEach(function(t) { if (!placed[t] && byTok[t]) nav.appendChild(byTok[t]); });
+  var doneBar = document.getElementById('menu-done-bar');
+  if (doneBar) nav.appendChild(doneBar);
+  var hidden = (cfg && Array.isArray(cfg.hidden)) ? cfg.hidden : [];
+  var items = menuItems_();
+  // Гвард: спрятать всё нельзя - если не останется ни одного видимого по роли пункта,
+  // скрытие игнорируем целиком (человек не должен остаться с пустым меню).
+  var roleVisible = items.filter(function(it) { return it.style.display !== 'none'; });
+  if (!roleVisible.filter(function(it) { return hidden.indexOf(it.getAttribute('data-page')) < 0; }).length) hidden = [];
+  items.forEach(function(it) {
+    var isHidden = hidden.indexOf(it.getAttribute('data-page')) >= 0;
+    it.classList.toggle('menu-hidden', isHidden);
+    if (isHidden && !menuCustomizing_ && it.style.display !== 'none') it.style.display = 'none';
+  });
+  // Подпись на плашке - чьё меню правим; обновляется и при смене "Смотреть как" прямо в режиме.
+  var lbl = document.getElementById('menu-done-target');
+  if (lbl && menuCustomizing_) lbl.textContent = viewAsEntry ? String(viewAsEntry.name).split(' ')[0] : 'Админ';
+}
+function applyMenuConfig_() {
+  var key = menuCfgKey_(); if (!key) return;
+  var cfg = menuCfgCache_[key];
+  if (cfg === undefined) {
+    try { var raw = localStorage.getItem(MENU_CFG_LS_ + key); if (raw) cfg = JSON.parse(raw); } catch (e) {}
+    if (cfg === undefined) cfg = null;
+    menuCfgFetch_(key);
+  }
+  menuApplyCfg_(cfg);
+  menuHintMaybe_();
+}
+function menuCfgFetch_(key) {
+  if (menuCfgInflight_[key]) return;
+  if (typeof fetchFromYardApi_ !== 'function' || typeof SESSION_TOKEN === 'undefined' || !SESSION_TOKEN) return;
+  menuCfgInflight_[key] = true;
+  // Сотруднику ключ не передаём - сервер сам выводит его из access_users по email сессии.
+  var params = (D && D.role === 'admin') ? { key: key } : {};
+  fetchFromYardApi_('/menu_config', params).then(function(r) {
+    delete menuCfgInflight_[key];
+    if (!r.ok || !r.data) return;
+    var cfg = r.data.config || null;
+    menuCfgCache_[key] = cfg;
+    try { if (cfg) localStorage.setItem(MENU_CFG_LS_ + key, JSON.stringify(cfg)); else localStorage.removeItem(MENU_CFG_LS_ + key); } catch (e) {}
+    if (menuCfgKey_() === key) menuApplyCfg_(cfg);
+  }).catch(function() { delete menuCfgInflight_[key]; });
+}
+function menuCfgFromDom_() {
+  var hidden = menuItems_().filter(function(it) { return it.classList.contains('menu-hidden'); })
+    .map(function(it) { return it.getAttribute('data-page'); });
+  return { v: 1, order: menuChildren_().map(menuToken_), hidden: hidden };
+}
+function menuCfgSave_(immediate) {
+  if (!D || D.role !== 'admin') return;
+  var key = menuCfgKey_(); if (!key) return;
+  var cfg = menuCfgFromDom_();
+  menuCfgCache_[key] = cfg;
+  try { localStorage.setItem(MENU_CFG_LS_ + key, JSON.stringify(cfg)); } catch (e) {}
+  clearTimeout(menuSaveTimer_);
+  var doSave = function() {
+    postToYardApi_('/menu_config', { key: key, config: JSON.stringify(cfg) }).then(function(r) {
+      if (!r.ok) p2Toast('Меню не сохранилось на сервере: ' + (r.data && r.data.error || 'ошибка'), 'red');
+    }).catch(function() { p2Toast('Меню не сохранилось: нет связи с сервером', 'red'); });
+  };
+  if (immediate) doSave(); else menuSaveTimer_ = setTimeout(doSave, 400);
+}
+function menuCfgReset_() {
+  if (!D || D.role !== 'admin') return;
+  var key = menuCfgKey_(); if (!key) return;
+  clearTimeout(menuSaveTimer_);
+  menuCfgCache_[key] = null;
+  try { localStorage.removeItem(MENU_CFG_LS_ + key); } catch (e) {}
+  menuItems_().forEach(function(it) { it.classList.remove('menu-hidden'); });
+  menuApplyCfg_(null);
+  if (menuCustomizing_) menuWiggle_(null);
+  postToYardApi_('/menu_config', { key: key, reset: '1' }).catch(function() {});
+  p2Toast('Меню сброшено к стандартному', 'green');
+}
+
+// ── режим кастомизации ──
+function menuEnterCustomize_() {
+  if (menuCustomizing_ || !D || D.role !== 'admin') return;
+  var sb = document.querySelector('.sidebar'); if (!sb) return;
+  if (sb.classList.contains('collapsed')) toggleSidebarCollapse();   // подписи нужны, чтобы понимать, что двигаешь
+  menuCustomizing_ = true;
+  sb.classList.add('menu-customizing');
+  menuHintDismiss_();
+  applyRoleUI();   // display по роли заново: скрытые кастомом становятся видимыми (гашёными); подпись плашки - там же
+  menuWiggle_(null);
+  if (typeof uiSounds !== 'undefined' && uiSounds.toggle) uiSounds.toggle();
+}
+function menuExitCustomize_() {
+  if (!menuCustomizing_) return;
+  if (menuDrag_) menuDragEnd_(true);
+  menuCustomizing_ = false;
+  menuSuppressClick_ = false;
+  var sb = document.querySelector('.sidebar');
+  if (sb) sb.classList.remove('menu-customizing');
+  menuItems_().forEach(function(it) {
+    it.classList.remove('menu-wiggle');
+    it.style.animationDelay = ''; it.style.animationDuration = ''; it.style.transition = ''; it.style.transform = '';
+  });
+  menuCfgSave_(true);
+  applyRoleUI();
+  if (typeof uiSounds !== 'undefined' && uiSounds.toggle) uiSounds.toggle();
+}
+// Дрожание ±1° всех пунктов, кроме удерживаемого - у каждого свой фазовый сдвиг
+// (duration/delay по индексу, ±15% от базовых ~0.22-0.28s), чтобы не дрожали синхронно.
+function menuWiggle_(exceptEl) {
+  if (!menuCustomizing_ || menuPrefersReduced_()) return;
+  menuItems_().forEach(function(it, i) {
+    if (it === exceptEl || it.classList.contains('menu-placeholder')) { it.classList.remove('menu-wiggle'); return; }
+    it.style.animationDuration = (0.25 * (0.85 + ((i * 7) % 31) / 100)).toFixed(3) + 's';
+    it.style.animationDelay = '-' + ((i * 37) % 250) + 'ms';
+    it.classList.add('menu-wiggle');
+  });
+}
+function menuWiggleStop_() { menuItems_().forEach(function(it) { it.classList.remove('menu-wiggle'); }); }
+function menuToggleHidden_(item) {
+  if (!item) return;
+  var willHide = !item.classList.contains('menu-hidden');
+  if (willHide) {
+    var visible = menuItems_().filter(function(it) { return it.style.display !== 'none' && !it.classList.contains('menu-hidden'); });
+    if (visible.length <= 1) { p2Toast('Хотя бы один пункт должен остаться', 'red'); return; }
+  }
+  item.classList.toggle('menu-hidden', willHide);
+  menuCfgSave_(false);
+  if (typeof uiSounds !== 'undefined' && uiSounds.toggle) uiSounds.toggle();
+}
+// Grip (6 точек 2x3) и "глаз" в каждом пункте - видны только в режиме (CSS).
+function menuDecorateItems_() {
+  menuItems_().forEach(function(it) {
+    if (it.querySelector('.menu-grip')) return;
+    var grip = document.createElement('span'); grip.className = 'menu-grip';
+    grip.innerHTML = '<svg viewBox="0 0 10 14" fill="currentColor"><circle cx="3" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/><circle cx="3" cy="7" r="1.3"/><circle cx="7" cy="7" r="1.3"/><circle cx="3" cy="12" r="1.3"/><circle cx="7" cy="12" r="1.3"/></svg>';
+    var eye = document.createElement('span'); eye.className = 'menu-eye'; eye.title = 'Скрыть / показать пункт';
+    eye.innerHTML = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 10s3-5.3 8-5.3S18 10 18 10s-3 5.3-8 5.3S2 10 2 10z"/><circle cx="10" cy="10" r="2.3"/></svg>';
+    it.appendChild(grip); it.appendChild(eye);
+  });
+}
+// Подсказка первого визита (ГОСТ): на ОДНОМ пункте, гаснет через 5с или при первом входе в режим.
+function menuHintMaybe_() {
+  if (menuHintDone_ || !D || D.role !== 'admin' || viewAsEntry || menuCustomizing_) return;
+  menuHintDone_ = true;
+  try { if (localStorage.getItem('yard.menu.hint') === '1') return; } catch (e) {}
+  var first = document.querySelector('.sidebar-nav .sidebar-nav-item[data-page="main"]'); if (!first) return;
+  var b = document.createElement('div'); b.className = 'menu-hint-badge'; b.id = 'menu-hint-badge';
+  b.textContent = 'Держи здесь ~0,5 сек - настроить меню';
+  first.style.position = 'relative'; first.appendChild(b); first.classList.add('menu-hint-pulse');
+  menuHintTimer_ = setTimeout(menuHintDismiss_, 5000);
+}
+function menuHintDismiss_() {
+  clearTimeout(menuHintTimer_);
+  var b = document.getElementById('menu-hint-badge'); if (b) b.remove();
+  var f = document.querySelector('.sidebar-nav-item.menu-hint-pulse'); if (f) { f.classList.remove('menu-hint-pulse'); f.style.position = ''; }
+  try { localStorage.setItem('yard.menu.hint', '1'); } catch (e) {}
+}
+
+// ── долгое нажатие и перетаскивание (ГОСТ раздел 6) ──
+function menuHoldCancel_() {
+  var h = menuHold_; menuHold_ = null; if (!h) return;
+  clearTimeout(h.timer); h.item.style.transform = ''; h.item.style.transition = '';
+}
+function menuDragStart_(item, e, immediate) {
+  if (menuDrag_) return;
+  menuDrag_ = { item: item, card: null, x0: e.clientX, y0: e.clientY, baseX: 0, baseY: 0, curX: 0, curY: 0, tgtX: 0, tgtY: 0,
+                raf: 0, origNext: item.nextSibling, moved: false, lifted: false, pid: e.pointerId };
+  if (!immediate) {
+    // фаза 1: отклик сразу, подъём - после 5px сдвига
+    item.style.transition = 'transform 100ms cubic-bezier(.25,1,.5,1)';
+    item.style.transform = 'scale(.97)';
+  }
+  try { if (e.pointerId != null && item.setPointerCapture) item.setPointerCapture(e.pointerId); } catch (err) {}
+  if (immediate) menuDragLift_();
+}
+function menuDragLift_() {
+  var d = menuDrag_; if (!d || d.lifted) return;
+  d.item.classList.remove('menu-wiggle');
+  d.item.style.transform = ''; d.item.style.transition = '';
+  var r = d.item.getBoundingClientRect();
+  var card = document.createElement('div');
+  card.className = 'menu-drag-card sidebar-nav-item' + (d.item.classList.contains('menu-hidden') ? ' menu-hidden' : '');
+  card.innerHTML = d.item.innerHTML;
+  card.style.left = r.left + 'px'; card.style.top = r.top + 'px';
+  card.style.width = r.width + 'px'; card.style.height = r.height + 'px';
+  document.body.appendChild(card);
+  d.card = card; d.baseX = r.left; d.baseY = r.top; d.lifted = true;
+  d.item.classList.add('menu-placeholder');
+  menuWiggleStop_();   // дрожание - CSS-анимация transform, перекрыла бы FLIP соседей; на время драга гасим
+  document.body.style.cursor = 'grabbing';
+  if (typeof uiSounds !== 'undefined' && uiSounds.dragGrab) uiSounds.dragGrab();
+  menuDragTick_();
+}
+function menuDragTick_() {
+  var d = menuDrag_; if (!d || !d.lifted) return;
+  if (menuPrefersReduced_()) { d.curX = d.tgtX; d.curY = d.tgtY; }
+  else { d.curX += (d.tgtX - d.curX) * 0.28; d.curY += (d.tgtY - d.curY) * 0.28; }
+  var tilt = Math.max(-7, Math.min(7, (d.tgtX - d.curX) * 0.10));
+  d.card.style.transform = 'translate(' + d.curX + 'px,' + d.curY + 'px) rotate(' + tilt + 'deg) scale(1.03)';
+  d.raf = requestAnimationFrame(menuDragTick_);
+}
+function menuDragMove_(e) {
+  var d = menuDrag_; if (!d) return;
+  if (!d.lifted) {
+    if (Math.abs(e.clientX - d.x0) + Math.abs(e.clientY - d.y0) < 5) return;
+    menuDragLift_();
+  }
+  d.tgtX = e.clientX - d.x0; d.tgtY = e.clientY - d.y0;
+  var nav = menuNav_();
+  var over = document.elementFromPoint(d.baseX + 20, e.clientY);
+  var target = (over && over.closest) ? (over.closest('.sidebar-nav-item') || over.closest('.sidebar-nav-section')) : null;
+  if (!target || target === d.item || !nav.contains(target) || target.classList.contains('menu-drag-card')) return;
+  var tr = target.getBoundingClientRect();
+  var after = e.clientY > tr.top + tr.height / 2;
+  var doneBar = document.getElementById('menu-done-bar');
+  var ref = after ? (target.nextSibling || doneBar) : target;
+  if (ref === d.item || (after && target.nextSibling === d.item)) return;
+  menuFlip_(function() { nav.insertBefore(d.item, ref); });
+  d.moved = true;
+}
+function menuDragEnd_(cancel) {
+  var d = menuDrag_; menuDrag_ = null; if (!d) return;
+  cancelAnimationFrame(d.raf);
+  document.body.style.cursor = '';
+  if (!d.lifted) { d.item.style.transform = ''; d.item.style.transition = ''; return; }
+  var nav = menuNav_();
+  if (cancel && d.moved) menuFlip_(function() { nav.insertBefore(d.item, d.origNext || document.getElementById('menu-done-bar')); });
+  // укладка "первый-последний": карточка летит к плейсхолдеру, overshoot 380ms
+  // (отмена - зеркально, без overshoot, 340ms --ease-drawer)
+  var to = d.item.getBoundingClientRect();
+  var dur = menuPrefersReduced_() ? 0 : (cancel ? 340 : 380);
+  var curve = cancel ? 'cubic-bezier(.32,.72,0,1)' : 'cubic-bezier(.34,1.45,.5,1)';
+  var card = d.card, item = d.item;
+  card.style.transition = 'transform ' + dur + 'ms ' + curve + ', opacity 140ms cubic-bezier(.25,1,.5,1)';
+  card.style.transform = 'translate(' + (to.left - d.baseX) + 'px,' + (to.top - d.baseY) + 'px) rotate(0deg) scale(1)';
+  card.style.opacity = '1';
+  setTimeout(function() {
+    card.remove();
+    item.classList.remove('menu-placeholder');
+    if (menuCustomizing_) menuWiggle_(null);
+  }, dur);
+  if (!cancel && d.moved) {
+    menuCfgSave_(false);
+    if (typeof uiSounds !== 'undefined' && uiSounds.dragDrop) uiSounds.dragDrop();
+  }
+}
+// FLIP соседей - 300ms cubic-bezier(.22,.9,.28,1), снять позиции до/после мутации.
+function menuFlip_(mutate) {
+  var els = menuChildren_();
+  var before = els.map(function(el) { return el.getBoundingClientRect().top; });
+  mutate();
+  if (menuPrefersReduced_()) return;
+  els.forEach(function(el, i) {
+    if (el.classList.contains('menu-placeholder')) return;
+    var dlt = before[i] - el.getBoundingClientRect().top;
+    if (!dlt) return;
+    el.style.transition = 'none'; el.style.transform = 'translateY(' + dlt + 'px)';
+    requestAnimationFrame(function() { el.style.transition = 'transform 300ms cubic-bezier(.22,.9,.28,1)'; el.style.transform = ''; });
+  });
+}
+(function menuInit_() {
+  var nav = menuNav_(); if (!nav) return;
+  menuDecorateItems_();
+  nav.addEventListener('contextmenu', function(e) { if (menuCustomizing_ || menuHold_) e.preventDefault(); });
+  // Клики: в режиме кастомизации пункты не переключают страницы (capture - раньше inline
+  // onclick самого пункта); "глаз" прячет/показывает; клик по пустому месту - выход.
+  nav.addEventListener('click', function(e) {
+    if (menuSuppressClick_) { menuSuppressClick_ = false; e.stopPropagation(); e.preventDefault(); return; }
+    if (!menuCustomizing_) return;
+    if (e.target.closest('#menu-done-bar')) return;
+    e.stopPropagation(); e.preventDefault();
+    var eye = e.target.closest('.menu-eye');
+    if (eye) { menuToggleHidden_(eye.closest('.sidebar-nav-item')); return; }
+    if (!e.target.closest('.sidebar-nav-item') && !e.target.closest('.sidebar-nav-section')) menuExitCustomize_();
+  }, true);
+  nav.addEventListener('pointerdown', function(e) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (typeof D === 'undefined' || !D || D.role !== 'admin') return;   // у сотрудника кастомизации нет
+    if (e.target.closest('.menu-eye') || e.target.closest('#menu-done-bar')) return;
+    var item = e.target.closest('.sidebar-nav-item'); if (!item) return;
+    if (menuCustomizing_) { menuDragStart_(item, e, false); return; }
+    // долгое нажатие: 550мс без сдвига > 6px; отклик scale(.97) - с первой миллисекунды
+    menuHoldCancel_();
+    item.style.transition = 'transform 100ms cubic-bezier(.25,1,.5,1)';
+    item.style.transform = 'scale(.97)';
+    var ptype = e.pointerType, pid = e.pointerId;
+    menuHold_ = { item: item, x0: e.clientX, y0: e.clientY, pid: pid, timer: setTimeout(function() {
+      var h = menuHold_; menuHold_ = null; if (!h) return;
+      h.item.style.transform = ''; h.item.style.transition = '';
+      menuSuppressClick_ = true;   // отпускание после удержания - не клик по пункту
+      menuEnterCustomize_();
+      // удерживаемый пункт поднимаем сразу - можно тащить, не отпуская (ГОСТ, фаза 2)
+      menuDragStart_(h.item, { clientX: h.x0, clientY: h.y0, pointerId: pid, pointerType: ptype }, true);
+    }, 550) };
+  });
+  window.addEventListener('pointermove', function(e) {
+    if (menuHold_ && (Math.abs(e.clientX - menuHold_.x0) > 6 || Math.abs(e.clientY - menuHold_.y0) > 6)) menuHoldCancel_();
+    if (menuDrag_) menuDragMove_(e);
+  }, { passive: true });
+  window.addEventListener('pointerup', function() { if (menuHold_) menuHoldCancel_(); if (menuDrag_) menuDragEnd_(false); });
+  window.addEventListener('pointercancel', function() { if (menuHold_) menuHoldCancel_(); if (menuDrag_) menuDragEnd_(true); });
+  document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Escape') return;
+    if (menuDrag_) { menuDragEnd_(true); e.preventDefault(); }
+    else if (menuCustomizing_) { menuExitCustomize_(); e.preventDefault(); }
+  });
+})();
+
+// ── Проверка контрагента по ИНН (05.09, Влад: "менеджерам со старшим вкладку проверка
+// контрагента: вводят ИНН - и им даётся весь расклад через наш сервис; сохраняется история
+// запросов"). Тот же Checko/светофор, что в Справочниках и ДЗ (сервер:
+// /api/counterparty/check, /api/counterparty/history). Повторная проверка того же ИНН в
+// течение 7 дней отдаётся из кэша (квота 300/день общая), "Обновить данные" - заново.
+var cpInited_ = false, cpBusy_ = false;
+function cpInit_() {
+  var inn = document.getElementById('cp-inn');
+  if (!cpInited_) { cpInited_ = true; if (inn) setTimeout(function() { inn.focus(); }, 80); }
+  var tools = document.getElementById('cp-admin-tools');
+  if (tools) tools.style.display = (D && D.role === 'admin') ? 'flex' : 'none';
+  cpLoadHistory_();
+}
+// Чистка кэша/истории - только admin (сервер тоже проверяет). "cache" - записи остаются,
+// но помечаются негодными для кэша; "history" - удаление, поэтому с подтверждением.
+function cpCacheClear_(mode) {
+  if (!D || D.role !== 'admin') return;
+  var params = { mode: mode };
+  if (mode === 'history') {
+    if (!confirm('Удалить всю историю проверок? Кэш тоже пропадёт - следующие проверки пойдут к Checko заново.')) return;
+    params.confirm = '1';
+  }
+  postToYardApi_('/counterparty/cache_clear', params).then(function(r) {
+    if (!r.ok) { p2Toast('Не удалось: ' + (r.data && r.data.error || 'ошибка сервера'), 'red'); return; }
+    var n = (r.data && r.data.affected) || 0;
+    p2Toast(mode === 'cache'
+      ? ('Кэш сброшен: ' + n + ' - следующая проверка пойдёт к Checko заново')
+      : ('История очищена: удалено записей - ' + n), 'green');
+    if (mode === 'history') { var el = document.getElementById('cp-result'); if (el) el.innerHTML = ''; }
+    cpLoadHistory_();
+  }).catch(function(e) { p2Toast('Ошибка сети: ' + e.message, 'red'); });
+}
+function cpFmtMoney_(v) { return (v == null) ? '—' : Math.round(v).toLocaleString('ru-RU') + ' ₽'; }
+function cpFmtDate_(s) {
+  var m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? (m[3] + '.' + m[2] + '.' + m[1]) : (s || '—');
+}
+function cpCheck_(force) {
+  var innEl = document.getElementById('cp-inn'), st = document.getElementById('cp-status'), btn = document.getElementById('cp-check-btn');
+  if (!innEl || !st || !btn) return;
+  var inn = (innEl.value || '').replace(/\D/g, '');
+  innEl.value = inn;
+  if (inn.length !== 10 && inn.length !== 12) { st.textContent = 'ИНН - 10 или 12 цифр'; st.style.color = 'var(--red)'; return; }
+  if (cpBusy_) return;
+  cpBusy_ = true; btn.disabled = true; btn.textContent = 'Проверяю…'; st.textContent = ''; st.style.color = '';
+  postToYardApi_('/counterparty/check', force ? { inn: inn, force: '1' } : { inn: inn }).then(function(r) {
+    cpBusy_ = false; btn.disabled = false; btn.textContent = 'Проверить';
+    if (!r.ok) { st.textContent = (r.data && r.data.error) || 'Ошибка сервера'; st.style.color = 'var(--red)'; return; }
+    cpRenderResult_(r.data);
+    cpLoadHistory_();
+  }).catch(function(e) {
+    cpBusy_ = false; btn.disabled = false; btn.textContent = 'Проверить';
+    st.textContent = 'Ошибка сети: ' + e.message; st.style.color = 'var(--red)';
+  });
+}
+function cpRenderResult_(d) {
+  var el = document.getElementById('cp-result'); if (!el) return;
+  var c = d.card || {};
+  var color = legalRiskColor_(d.light);
+  var mono = "font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums";
+  var reasons = (d.reasons && d.reasons.length)
+    ? '<ul style="margin:8px 0 0;padding-left:18px;font-size:12.5px;line-height:1.5">' + d.reasons.map(function(x) { return '<li>' + pageEsc_(x) + '</li>'; }).join('') + '</ul>'
+    : '<div class="muted" style="font-size:12.5px;margin-top:6px">Рисков по официальным реестрам не найдено</div>';
+  function row(label, value) {
+    if (value == null || value === '') return '';
+    return '<div style="display:flex;gap:12px;padding:6px 0;border-bottom:1px solid var(--border)">' +
+      '<div class="muted" style="flex:0 0 150px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;padding-top:2px">' + label + '</div>' +
+      '<div style="flex:1;font-size:13px;min-width:0;word-break:break-word">' + value + '</div></div>';
+  }
+  var founders = (c.founders || []).map(function(f) {
+    return pageEsc_(f.name) + (f.share != null ? ' <span class="muted">' + f.share + '%</span>' : '');
+  }).join('<br>');
+  var contacts = (c.phones || []).map(pageEsc_).concat((c.emails || []).map(pageEsc_)).join(' · ');
+  el.innerHTML =
+    '<div style="display:grid;grid-template-columns:minmax(240px,1fr) 2fr;gap:16px;align-items:start">' +
+      '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px">' +
+        '<div style="display:flex;align-items:center;gap:10px">' + legalRiskMarkHtml_(d.light, 14, '', d.marker) +
+          '<div><div style="font-size:17px;font-weight:700;color:' + color + '">' + legalRiskLabel_(d.light) + '</div>' +
+          '<div class="muted" style="font-size:11px">' + (d.from_cache ? 'из кэша, проверка ' : 'проверено ') + pageEsc_(d.checked_at || '') + '</div></div></div>' +
+        reasons +
+        '<div style="margin-top:12px"><button type="button" onclick="cpCheck_(true)" style="background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Обновить данные (новый запрос)</button></div>' +
+      '</div>' +
+      '<div>' +
+        '<div style="font-size:16px;font-weight:700;margin-bottom:2px">' + pageEsc_(c.name_short || ('ИНН ' + d.inn)) + '</div>' +
+        (c.name_full ? '<div class="muted" style="font-size:12px;margin-bottom:8px">' + pageEsc_(c.name_full) + '</div>' : '') +
+        row('ИНН / КПП / ОГРН', '<span style="' + mono + '">' + pageEsc_((c.inn || d.inn) + (c.kpp ? ' / ' + c.kpp : '') + (c.ogrn ? ' / ' + c.ogrn : '')) + '</span>') +
+        row('Статус', pageEsc_(c.status || '')) +
+        row('Зарегистрирована', c.reg_date ? cpFmtDate_(c.reg_date) : '') +
+        row('Адрес', pageEsc_(c.address || '')) +
+        row('Руководитель', c.head_name ? pageEsc_(c.head_name) + (c.head_post ? ' <span class="muted">' + pageEsc_(c.head_post) + '</span>' : '') : '') +
+        row('Учредители', founders) +
+        row('Вид деятельности', pageEsc_(c.okved || '')) +
+        row('Сотрудников', c.employees != null ? c.employees + (c.employees_year ? ' <span class="muted">(' + pageEsc_(c.employees_year) + ')</span>' : '') : '') +
+        row('Уставный капитал', c.capital != null ? cpFmtMoney_(c.capital) : '') +
+        row('Налогов уплачено', c.taxes_paid != null ? cpFmtMoney_(c.taxes_paid) + (c.taxes_year ? ' <span class="muted">(' + pageEsc_(c.taxes_year) + ')</span>' : '') : '') +
+        row('Недоимка', (c.nedoimka != null && c.nedoimka > 0) ? '<span style="color:var(--red);font-weight:600">' + cpFmtMoney_(c.nedoimka) + '</span>' : '') +
+        row('Реестр МСП', pageEsc_(c.msp || '')) +
+        row('Контакты', contacts) +
+        row('Лицензии / дела о банкротстве', (c.licenses || 0) + ' / ' + (c.bankrupt_cases || 0)) +
+      '</div>' +
+    '</div>';
+}
+function cpLoadHistory_() {
+  var body = document.getElementById('cp-history-body'); if (!body) return;
+  fetchFromYardApi_('/counterparty/history', { limit: 50 }).then(function(r) {
+    if (!r.ok || !r.data) { body.innerHTML = '<tr><td colspan="5" class="muted" style="padding:12px">История недоступна</td></tr>'; return; }
+    var items = r.data.items || [];
+    if (!items.length) { body.innerHTML = '<tr><td colspan="5" class="muted" style="padding:12px">Проверок ещё не было</td></tr>'; return; }
+    body.innerHTML = items.map(function(it) {
+      var innEsc = pageEscAttr_(it.inn);
+      return '<tr style="cursor:pointer" onclick="document.getElementById(\'cp-inn\').value=\'' + innEsc + '\';cpCheck_(false)" title="Открыть результат">' +
+        '<td class="muted" style="white-space:nowrap;font-family:\'JetBrains Mono\',ui-monospace,monospace">' + pageEsc_(it.requested_at || '') + '</td>' +
+        '<td style="font-family:\'JetBrains Mono\',ui-monospace,monospace">' + pageEsc_(it.inn) + '</td>' +
+        '<td>' + pageEsc_(it.name_short || '—') + '</td>' +
+        '<td>' + (it.light
+          ? legalRiskMarkHtml_(it.light, 8, 'margin-right:6px', it.marker) + '<span style="font-size:12px;color:' + legalRiskColor_(it.light) + '">' + legalRiskLabel_(it.light) + '</span>'
+          : '<span class="muted">—</span>') +
+          (it.from_cache ? ' <span class="muted" style="font-size:10px">из кэша</span>' : '') + '</td>' +
+        '<td class="muted" style="font-size:12px">' + pageEsc_(it.requested_by || '') + '</td>' +
+      '</tr>';
+    }).join('');
+  }).catch(function() { body.innerHTML = '<tr><td colspan="5" class="muted" style="padding:12px">Ошибка сети</td></tr>'; });
+}
+
 function showPage(id, el) {
+  // «Планировка» с узкого сенсорного экрана - уводим на отдельную мобильную страницу
+  // (files/plan-m.html, план plans/2026-09-05-mobile-planning-page.md), НЕ рендерим здесь
+  // старую сжатую "Мобильную Таблицу" (удалена из файла 06.09) - Влад, 06.09: живьём
+  // с телефона зашёл через обычный браузер (не через app.html/значок приложения), долго
+  // листал старое боковое меню, прежде чем вручную набрать адрес новой страницы: "хочу,
+  // чтобы уже всё работало, не только по ссылке, а вообще просто зашёл и работает". Роутинг
+  // app.html при открытии ЗНАЧКА приложения эту ситуацию уже решает - здесь закрываем ВТОРОЙ
+  // путь входа, через обычный браузер и вкладку "Планировка" внутри уже открытого index.html.
+  // Проверка ДО любой отрисовки страницы - редирект мгновенный, без вспышки старой Таблицы.
+  // Остальные вкладки (Панель и т.д.) не трогаем - тот же телефон, тот же index.html, та же
+  // роль спокойно продолжают открываться как раньше (см. видео - Влад САМ только что смотрел
+  // Панель админа с телефона, эта функциональность нужна и дальше).
+  if (id === 'logistics-plan') {
+    var lpMobile_ = false, lpOptOut_ = false, lpRole_ = '';
+    /* «Телефон» - по СЕНСОРУ, не по ширине (06.09, Васин: раскладушка с развёрнутым экраном
+       шире 680px открыла веб-версию; Сильчев: «версия для компьютера» в браузере тоже
+       обходила порог ширины). Основной ввод - палец (pointer:coarse) И нет hover - это
+       телефон/планшет при любой ширине; узкий экран с coarse - страховка для старых
+       браузеров без hover-медиа. Ноутбук с тачскрином: основной ввод мышь -> не телефон. */
+    try {
+      var mmLP_ = window.matchMedia;
+      lpMobile_ = mmLP_ ? ((mmLP_('(pointer: coarse)').matches && mmLP_('(hover: none)').matches) || (mmLP_('(pointer: coarse)').matches && window.innerWidth <= 680)) : (window.innerWidth <= 680);
+    } catch(e){}
+    /* Исключений НЕТ (Влад, 06.09: «старая версия мобильной планировки - к ней вообще больше
+       не возвращаться»): на сенсорном устройстве «Планировка» всегда = plan-m.html. Старый
+       сжатый вид (#page-logistics-plan.lp-mobile) удалён из этого файла 06.09 целиком -
+       референс, если понадобится, в git-истории (коммиты до 06.09). */
+    lpOptOut_ = false;
+    try { lpRole_ = (typeof D !== 'undefined' && D && D.role) || localStorage.getItem('user_role') || ''; } catch(e){}
+    if (lpMobile_ && !lpOptOut_ && (lpRole_ === 'logist' || lpRole_ === 'manager' || lpRole_ === 'admin')) {
+      location.href = 'plan-m.html';
+      return;
+    }
+  }
   closeMobileSidebar(); // выбрали страницу - меню на телефоне больше не нужно открытым
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.sidebar-nav-item').forEach(b => b.classList.remove('active'));
@@ -18424,9 +19396,16 @@ function showPage(id, el) {
   if (lazyGroup_ && dirtyGroups_[lazyGroup_]) renderGroup_(lazyGroup_);
   if (id === 'dynamics') loadHistoryData();
   if (id === 'clients') loadClientsData();
+  if (id === 'counterparty') cpInit_();
+  // Единая карта связей 1С (05.09) - грузится один раз при первом заходе на любую
+  // страницу, где показан заказчик, и перерисовывает её, когда придёт.
+  if (id === 'clients') cpEnsureLights_(function() { if (typeof renderClientsBody === 'function') renderClientsBody(); });
+  if (id === 'receipts') cpEnsureLights_(function() { if (typeof renderReceipts === 'function') renderReceipts(); });
+  if (id === 'my-page') cpEnsureLights_(function() { if (typeof renderMyPage === 'function') renderMyPage(); });
   if (id === 'crm') loadCrmData();
   if (id === 'global-stats') loadGlobalStatsData();
   if (id === 'order-plan') loadOrderPlanData();
+  if (id === 'vehicles') loadAvtodorSummary_();
   // Карта Leaflet не может инициализироваться, пока страница скрыта (display:none даёт
   // контейнеру нулевой размер - плитки карты не подтягиваются) - инициализируем/пересчитываем
   // размер только при реальном открытии вкладки.
@@ -20377,7 +21356,7 @@ function renderClientsTable_(list, mode) {
         c.label + '<span style="font-size:10px;opacity:' + arrowOpacity + '">' + arrow + '</span></th>';
     }).join('');
     var rows = sorted.map(function(c, i) {
-      return '<tr><td>' + (i+1) + '</td><td>' + c.name + '</td><td>' + (c.manager ? cleanName(c.manager) : '—') + '</td>' +
+      return '<tr><td>' + (i+1) + '</td><td>' + cpLightHtml_(c.name) + c.name + '</td><td>' + (c.manager ? cleanName(c.manager) : '—') + '</td>' +
         '<td class="num">' + c.orders + '</td><td class="num">' + fmt(c.revenue) + '</td>' +
         '<td class="num">' + fmt(c.avg_order_value) + '</td><td>' + fmtDateRu(c.last_order) + '</td>' +
         '<td class="num ' + segBadgeClass_(c.segment) + '">' + c.segment + '</td></tr>';
@@ -20386,7 +21365,7 @@ function renderClientsTable_(list, mode) {
   }
 
   var rows = list.map(function(c, i) {
-    return '<tr><td>' + (i+1) + '</td><td>' + c.name + '</td><td class="num">' + c.orders + '</td>' +
+    return '<tr><td>' + (i+1) + '</td><td>' + cpLightHtml_(c.name) + c.name + '</td><td class="num">' + c.orders + '</td>' +
       '<td class="num">' + fmt(c.revenue) + '</td><td>' + fmtDateRu(c.last_order) + '</td>' +
       '<td class="num amber">' + c.recency_days + ' дн</td></tr>';
   }).join('');
@@ -21535,7 +22514,14 @@ function buildRoster(){
 function personShort(p){ return p.dept ? p.code : p.full.split(" ")[0]; }
 /* Влад, 29.08 (выбор уровня 5): на плитке - ПЕРВЫЕ ТРИ БУКВЫ фамилии, капсом,
    и менеджер, и логист обязательно. Отделы (ОЭ/ОК/ОБ) остаются своим кодом. */
-function three(p){ return p.dept ? p.code : p.full.split(" ")[0].substring(0,3).toUpperCase(); }
+/* НАЙДЕННЫЙ БАГ (06.09, Влад с ноутбука + Сильчев с телефона, один и тот же тост «Доска
+   Планировки не смогла перерисоваться»): рейс БЕЗ менеджера. Мобильная Планировка
+   (files/plan-m.html, решение Влада 05.09: менеджер необязателен, «Не указан» первым) пишет
+   manager_name=NULL - applyServerSegs_ через personByName_(null) кладёт в seg.mg null, а
+   three(null) падал на p.dept и ронял ВЕСЬ renderRowsInner_ (два таких рейса в базе: Кан
+   11:17, Сильчев 12:35 - точное совпадение по времени с жалобами). Пустой человек - это
+   легитимное состояние данных, доска обязана его переживать: рисуем «—», как на мобильной. */
+function three(p){ if (!p) return "—"; return p.dept ? p.code : (p.full || "").split(" ")[0].substring(0,3).toUpperCase() || "—"; }
 
 var PLACES = ["Липецк","Череповец","Подольск","Мытищи","Домодедово","Капотня","Терехово",
   "Крым","Сочи","Владикавказ","СПб","Краснодар","Казань","Пермь","Рязанская обл.","Зеленоград",
@@ -21836,7 +22822,10 @@ function hexA(hex, a){
 }
 function paint(el, seg){
   var mode = STATE.color;
-  if (mode !== "state" && seg.kind === "trip"){
+  /* who может быть null (рейс без менеджера/логиста с мобильной Планировки, 06.09) -
+     в режимах раскраски «Менеджер»/«Логист» такой рейс красим нейтрально, как статус,
+     а не роняем перерисовку на who.id */
+  if (mode !== "state" && seg.kind === "trip" && (mode === "manager" ? seg.mg : seg.lg)){
     var who = mode === "manager" ? seg.mg : seg.lg;
     var c = idColor(who.id);
     el.style.background = hexA(c, .34);
@@ -21870,14 +22859,13 @@ var scaleEl = document.getElementById("lp-scale");
    планшета-без-мыши это правильно определится как touch. Считаем один раз при
    открытии вкладки - тип ввода устройства не меняется посреди работы. На тач-
    устройстве драг/растяжка/перестановка строк ВЫКЛЮЧЕНЫ целиком (см. три
-   pointerdown ниже) - создание и правка идут ТОЛЬКО через шторку/быстрое меню
-   (openCreateDrawer/openCtxMenu_), навигация - обычным пальцевым скроллом
-   .board, который эти же обработчики раньше перехватывали (touch-action:none
-   на .seg/.rowhead - см. правило #page-logistics-plan.is-touch в CSS). */
+   pointerdown ниже). С 06.09 это только страховка: «Планировка» на сенсорном
+   устройстве вообще уводится на plan-m.html до отрисовки (см. showPage), старый
+   сжатый мобильный режим удалён из файла целиком (Влад, 06.09: «к старой версии
+   больше не возвращаться»), гейты оставлены как безвредная защита. */
 var IS_TOUCH_ = (function(){
   try { return matchMedia("(pointer: coarse)").matches; } catch(e){ return false; }
 })();
-if (IS_TOUCH_) pageRoot.classList.add("is-touch");
 
 function visible(v){
   if (STATE.hidden[v.i] && !STATE.showHidden) return false;
@@ -22272,18 +23260,12 @@ function renderRowsInner_(){
         ? '<span class="vp" style="color:' + lpVpColor_(vp) +
           '" title="план по валовой прибыли: факт ' + vp + '% на сегодня, цвет - по прогнозу на конец месяца"><i></i>' + vp + '%</span>'
         : "";
-      /* Влад, 31.08: "достаточно отражать только буквы и цифры госномера без
-         регионов в мобильной версии" - только .lp-mobile, десктоп видит
-         полный номер как раньше (см. lpGosShort_). */
-      var isMobileNow_ = pageRoot.classList.contains("lp-mobile");
-      var gosLabel_ = isMobileNow_ ? lpGosShort_(v.gos) : v.gos;
-      var trailerGosLabel_ = isMobileNow_ ? lpGosShort_(v.trailerGos) : v.trailerGos;
       head.innerHTML =
         '<div class="rh1"><span class="tag ' + tagClass(v.type) + '">' + v.type + '</span>' +
         (v.tractor ? '<span class="tractor">' + v.tractor + '</span>' : '') +
-        '<span class="gos">' + gosLabel_ + '</span>' +
+        '<span class="gos">' + v.gos + '</span>' +
         '<span class="rh-omni-slot" data-gos="' + lpOmniNormPlate_(v.gos) + '"></span>' + '</div>' +
-        '<div class="rh2"><span class="tr' + (!v.trailerGos && !v.trailer ? " nd" : "") + '">' + (trailerGosLabel_ || v.trailer || "без прицепа") + '</span>' +
+        '<div class="rh2"><span class="tr' + (!v.trailerGos && !v.trailer ? " nd" : "") + '">' + (v.trailerGos || v.trailer || "без прицепа") + '</span>' +
         (v.trailer && v.trailerGos ? '<span class="sep">·</span><span class="kind">' + v.trailer + '</span>' : '') +
         '<span class="sep">·</span><span class="drv' + (v.vacant ? " nd" : "") + '">' + drv + '</span>' +
         (rside ? '<span class="rside">' + rside + '</span>' : '') + '</div>';
@@ -22339,345 +23321,11 @@ function renderRowsInner_(){
   rowsEl.innerHTML = "";
   rowsEl.appendChild(frag);
   syncAllBlinks_();   /* точки/бейджи/тег-свечение пересозданы - подхватить общий такт */
-  /* Мобильная шапка (31.08) - ОДНА точка подключения вместо правки 18+ мест,
-     где вызывается renderRows() (drag/create/delete/couple/poll/zoom/фильтр/…) -
-     renderRowsInner_ и так уже единственное место, где STATE.segs/vehicles
-     гарантированно свежие после любого действия, дешёвый ранний возврат внутри
-     lpMSync_ делает вызов почти бесплатным на десктопе. */
-  lpMSync_();
   /* .rh-omni-slot только что пересозданы заново (новый DOM) - заполняем их
      уже накопленным lpOmniByGos_ сразу, не дожидаясь следующего 30с тика
-     lpOmniFetch_ (тот же принцип, что и у lpMSync_ строкой выше). */
+     lpOmniFetch_. */
   lpRenderOmniBadges_();
 }
-
-/* ═══════════ МОБИЛЬНЫЙ РЕЖИМ "Таблица" (31.08, штурм-сессия агентов после
-   живого теста Влада с Каном/Мишей) ═══════════
-   Список карточек (первая версия того же дня, утверждённое превью
-   lp-mobile-preview) убран ЦЕЛИКОМ - Влад: "Список вообще бесполезный
-   интерфейс". Осталась только сжатая ТА ЖЕ десктопная лента (.rowhead/
-   .track/.seg из renderRowsInner_ выше - НЕ отдельный рендер), управление -
-   три строки сверху (дата/поиск/свободно, масштаб+Сегодня, тип парка), см.
-   HTML/CSS. Референс на убранный Список - git-история файла на 31.08.
-   РЕАЛЬНЫЕ ДЕЙСТВИЯ НЕ ДУБЛИРУЮТ ЛОГИКУ - зовут ТЕ ЖЕ функции, что и
-   десктоп: openDrawer/openCreateDrawer/openFleetMenu_/commit - тот же код,
-   та же шторка/меню/сохранение, просто из сжатой раскладки Таблицы. */
-function lpIsMobileViewport_(){ return window.innerWidth <= 680; }
-
-/* Влад, 31.08: "достаточно отражать только буквы и цифры госномера без
-   регионов в мобильной версии" - "О 894 ХМ 797" -> "О 894 ХМ". Регион -
-   последняя группа цифр через пробел, у всего парка компании он и так почти
-   всегда один и тот же (не несёт информации на узком экране). Только
-   мобильная разметка - десктоп читает v.gos напрямую, не через этот хелпер. */
-function lpGosShort_(gos){ return (gos || "").replace(/\s+\d+\s*$/, ""); }
-
-function lpMRenderTopDate_(){
-  var dt = hourToDate_(TODAY_D_ * 24);
-  var wd = WD[dt.getDay()];
-  document.getElementById("lpMWd").textContent = wd.charAt(0).toUpperCase() + wd.slice(1);
-  document.getElementById("lpMDate").textContent = dt.getDate() + " " + MONTH_NAMES[dt.getMonth()].slice(0, 3);
-}
-/* "N свободно" - тот же isFreeNow(), что уже стоит за десктопным чипом
-   "Свободные сейчас" (STATE.filter==='free', см. visible()) - число ЖИВОЕ на
-   любой момент, независимо от того, какой фильтр выбран сейчас. */
-function lpMRenderFreeCount_(){
-  var n = STATE.vehicles.filter(visible).filter(function(v){ return isFreeNow(v.i); }).length;
-  document.getElementById("lpMFreeCount").textContent = n;
-}
-var LP_M_FILTER_LABELS_ = {tral:"Тралы", long:"Длинномеры", razd:"Раздвижки", koryto:"Корыта", rapid:"Рапиды", faymon:"Файмоны", free:"Свободные сейчас"};
-function lpMRenderFilterBadge_(){
-  var badge = document.getElementById("lpMFilterBadge");
-  if (STATE.filter === "all"){ badge.style.display = "none"; }
-  else {
-    badge.style.display = "inline-flex";
-    document.getElementById("lpMFilterBadgeText").textContent = LP_M_FILTER_LABELS_[STATE.filter] || STATE.filter;
-  }
-  /* Чипы "Все/Тралы/Длинномеры" и "Сутки/2дня/3дня/Неделя" - синхронизируем
-     aria-pressed ЗДЕСЬ ЖЕ (не только по своему клику), чтобы отражали
-     STATE.filter/STATE.zoom, даже если они поменялись другим путём (бейдж-
-     сброс, чип "свободно", десктоп той же сессией) - тот же принцип, что
-     syncControlChips() уже делает для десктопных чипов. Два раздельных
-     forEach, не один общий - у зум-кнопок нет data-filter (и наоборот),
-     общий "btn.dataset.filter === STATE.filter" на зум-кнопках всегда false
-     (dataset.filter===undefined) и стирал бы им правильную подсветку. */
-  [].forEach.call(document.querySelectorAll(".lp-m-table-filters .lp-m-tf"), function(btn){
-    btn.setAttribute("aria-pressed", String(btn.dataset.filter === STATE.filter));
-  });
-  [].forEach.call(document.querySelectorAll(".lp-m-zoom .lp-m-tf"), function(btn){
-    btn.setAttribute("aria-pressed", String(btn.dataset.zoom === STATE.zoom));
-  });
-  document.getElementById("lpMChipFree").classList.toggle("active", STATE.filter === "free");
-}
-/* Поиск по госномеру (новое, по итогу штурм-сессии) - НЕ отдельный рендер:
-   фильтрует уже отрисованные .row живой ленты через dim-класс, ничего не
-   запрашивает и не пересчитывает. Совпадение - по НАЧАЛУ госномера без
-   пробелов/региона (та же короткая форма, что уже в .gos - lpGosShort_),
-   регистронезависимо. */
-function lpMSearchFilter_(){
-  var overlay = document.getElementById("lpMSearchOverlay");
-  if (!overlay || !overlay.classList.contains("show")) return;
-  var q = document.getElementById("lpMSearchInput").value.trim().toUpperCase().replace(/\s+/g, "");
-  var firstMatch = null;
-  [].forEach.call(document.querySelectorAll("#page-logistics-plan .row"), function(row){
-    var head = row.querySelector(".rowhead .gos");
-    var gos = head ? head.textContent.toUpperCase().replace(/\s+/g, "") : "";
-    var match = !q || gos.indexOf(q) === 0;
-    row.classList.toggle("lp-m-search-dim", !match);
-    if (match && q && !firstMatch) firstMatch = row;
-  });
-  if (firstMatch) firstMatch.scrollIntoView({block:"center"});
-}
-function lpMOpenSearch_(){
-  document.getElementById("lpMSearchOverlay").classList.add("show");
-  document.getElementById("lpMSearchBtn").setAttribute("aria-pressed", "true");
-  setTimeout(function(){ document.getElementById("lpMSearchInput").focus(); }, 240);
-}
-function lpMCloseSearch_(){
-  document.getElementById("lpMSearchOverlay").classList.remove("show");
-  document.getElementById("lpMSearchBtn").setAttribute("aria-pressed", "false");
-  document.getElementById("lpMSearchInput").value = "";
-  [].forEach.call(document.querySelectorAll("#page-logistics-plan .row.lp-m-search-dim"), function(row){
-    row.classList.remove("lp-m-search-dim");
-  });
-}
-document.getElementById("lpMSearchBtn").onclick = function(){
-  var overlay = document.getElementById("lpMSearchOverlay");
-  if (overlay.classList.contains("show")) lpMCloseSearch_(); else lpMOpenSearch_();
-};
-document.getElementById("lpMSearchClose").onclick = lpMCloseSearch_;
-document.getElementById("lpMSearchInput").addEventListener("input", lpMSearchFilter_);
-
-function lpMSync_(){
-  if (!pageRoot.classList.contains("lp-mobile")) return;
-  lpMRenderTopDate_();
-  lpMRenderFreeCount_();
-  lpMRenderFilterBadge_();
-  lpMSearchFilter_();   /* лента перерисована - живой фильтр поиска нужно применить заново к новым .row */
-}
-
-/* Тап по бейджу фильтра - сброс на "Все", тот же путь, что у десктопного чипа
-   (.controls, delegated-обработчик ниже: STATE.filter = ...; saveSettings();
-   renderRows();) - синхронизируем и десктопные chip'ы (syncControlChips), раз
-   пользователь вернётся на десктоп той же сессией, там должно быть видно то
-   же "Все", а не расхождение. */
-document.getElementById("lpMFilterBadge").onclick = function(){
-  STATE.filter = "all";
-  saveSettings();
-  syncControlChips();
-  renderRows(); renderKpis();
-};
-/* Чипы "Все/Тралы/Длинномеры" - тот же путь, что у десктопного чипа "Парк"
-   (delegated-обработчик .controls ниже: STATE.filter=...; saveSettings();
-   renderRows();). Скоуп ИМЕННО .lp-m-table-filters .lp-m-tf, не общий
-   ".lp-m-tf" - тот же класс используют и зум-кнопки ниже (data-zoom, без
-   data-filter) - общий селектор поймал бы их тоже и стёр STATE.filter в
-   undefined при клике на масштаб. */
-[].forEach.call(document.querySelectorAll(".lp-m-table-filters .lp-m-tf"), function(btn){
-  btn.onclick = function(){
-    STATE.filter = btn.dataset.filter;
-    saveSettings();
-    syncControlChips();
-    renderRows(); renderKpis();
-  };
-});
-/* Чип "свободно" - тот же STATE.filter, значение "free" (уже существует на
-   десктопе как чип "Свободные сейчас", см. visible()) - тап переключает
-   между "free" и "all", тот же путь сохранения/синка, что у чипов типа
-   выше. STATE.filter - одно взаимоисключающее значение, как и на десктопе,
-   комбинировать с "Тралы/Длинномеры" не с чем. */
-document.getElementById("lpMChipFree").onclick = function(){
-  STATE.filter = (STATE.filter === "free") ? "all" : "free";
-  saveSettings();
-  syncControlChips();
-  renderRows(); renderKpis();
-};
-/* Масштаб (Сутки/2дня/3дня/Неделя) - Влад, 31.08 (третий заход): "масштаб
-   пусть будет кнопками сверху как и в десктопной версии" - заменяет убранный
-   пинч-зум (см. комментарий ниже). НЕ дублирует логику десктопного зум-чипа
-   (умный прицел на STATE.lastEdited/scrollLeft, primeTo) - просто
-   РЕТРАНСЛИРУЕТ клик на СКРЫТЫЙ десктопный .chip[data-zoom] через .click(),
-   та же логика срабатывает одна на двоих. */
-[].forEach.call(document.querySelectorAll(".lp-m-zoom .lp-m-tf"), function(btn){
-  btn.onclick = function(){
-    var desktopChip = pageRoot.querySelector('.controls .chip[data-zoom="' + btn.dataset.zoom + '"]');
-    if (desktopChip) desktopChip.click();
-  };
-});
-/* "Сегодня" (штурм-сессия 31.08, заменяет убранную кнопку "Месяц" в шапке) -
-   ретранслирует клик на десктопный #lp-monthToday - тот уже умеет честно
-   центрировать "сейчас" по видимой ширине доски (см. его обработчик ниже),
-   ничего нового не пишем, только жмём чужую кнопку из своей раскладки. */
-document.getElementById("lpMToday").onclick = function(){
-  var desktopBtn = document.getElementById("lp-monthToday");
-  if (desktopBtn) desktopBtn.click();
-};
-
-/* Пинч-зум - БЫЛ (непрерывное масштабирование через --hw, живой тест
-   проходил чисто), но Влад после реальной пробы на телефоне, 31.08, тем же
-   вечером: "масштаб пальцами плохая идея, отключай. Масштаб пусть будет
-   кнопками сверху как и в десктопной версии" - убран целиком, не оставлен
-   выключенным про запас. Замена - .lp-m-zoom выше (см. HTML/CSS и
-   обработчик рядом) - те же 4 дискретных масштаба, что на десктопе (без
-   "Месяц" - см. кнопку "Сегодня" выше), просто ретранслируют клик на
-   СКРЫТЫЙ десктопный чип (.controls .chip[data-zoom]) - вся логика (умный
-   прицел на STATE.lastEdited, primeTo) уже там, не дублируем. Если пинч
-   когда-то понадобится снова - искать в git-истории этот файл на 31.08, не
-   писать заново с нуля. */
-
-/* ===================== ПЕРЕТАСКИВАНИЕ ЗАЯВКИ ДОЛГИМ НАЖАТИЕМ (Влад, 31.08) =====================
-   "при зажатии заявки она могла перемещаться, как на смартфонах когда
-   зажимаешь приложение - супер удобно". НАРОЧНО отдельный, независимый от
-   десктопного мышиного драга канал (тот целиком пропускает touch - см.
-   `if (IS_TOUCH_) return;` в начале его pointerdown, 30.08) - не втискиваем
-   сюда общую систему с её замыканиями (drag/lift()/магнит), поднимаем свою,
-   компактную: долгое нажатие (420ms, тот же порог, что уже у сцепки в
-   Списке) БЕЗ значимого сдвига - это "начинаем тащить"; сдвиг ДО истечения
-   таймера - это обычный скролл пальцем, не жест. Только режим "Таблица" -
-   в "Списке" плиток с точным временем нет, тащить нечего. Магнит-примагничивание
-   к соседям (как у мыши) сюда НЕ перенесено - только шаг в полчаса, тот же,
-   что у обычного создания - первая версия, можно усилить позже. */
-(function(){
-  if (!IS_TOUCH_) return;
-  var LONG_PRESS_MS = 420, MOVE_CANCEL_PX = 8, HOUR_STEP = 0.5, DBLTAP_MS = 300;
-  var pending = null, dragT = null;
-  var lastTapSegId_ = null, lastTapAt_ = 0;
-
-  function clearPending_(){
-    if (pending){
-      if (pending.timer) clearTimeout(pending.timer);
-      pending.el.classList.remove("pressing");
-    }
-    pending = null;
-  }
-  /* Влад, 31.08: "диалоговое окно только при двойном нажатии" - короткий тап
-     (таймер долгого нажатия не успел сработать, драг не поднялся) больше НЕ
-     открывает меню сам по себе (см. отдельный разбор у click-обработчика
-     30.08 чуть выше по файлу - там он теперь явно пропускает Таблицу) -
-     только ВТОРОЙ тап по ТОЙ ЖЕ плитке в пределах DBLTAP_MS, тот же принцип,
-     что уже даёт двойной клик мышью на десктопе. */
-  function handleShortTap_(seg, el, x, y){
-    var now = Date.now();
-    if (lastTapSegId_ === seg.id && now - lastTapAt_ < DBLTAP_MS){
-      lastTapSegId_ = null; lastTapAt_ = 0;
-      openCtxMenu_(seg, x, y);
-    } else {
-      lastTapSegId_ = seg.id; lastTapAt_ = now;
-    }
-  }
-  rowsEl.addEventListener("touchstart", function(e){
-    if (!pageRoot.classList.contains("lp-mode-table") || dragT || e.touches.length !== 1) return;
-    var el = e.target.closest(".seg");
-    if (!el) return;
-    var seg = STATE.segs.find(function(s){ return s.id === el.dataset.id; });
-    if (!seg) return;
-    var t = e.touches[0];
-    pending = {el:el, seg:seg, x0:t.clientX, y0:t.clientY};
-    el.classList.add("pressing");
-    pending.timer = setTimeout(function(){
-      if (!pending) return;
-      var p = pending; pending = null;
-      p.el.classList.remove("pressing");
-      if (navigator.vibrate) navigator.vibrate(10);
-      lpTStartDrag_(p.el, p.seg, p.x0, p.y0);
-    }, LONG_PRESS_MS);
-  }, {passive:true});
-  rowsEl.addEventListener("touchmove", function(e){
-    if (pending){
-      var t = e.touches[0];
-      if (Math.abs(t.clientX - pending.x0) > MOVE_CANCEL_PX || Math.abs(t.clientY - pending.y0) > MOVE_CANCEL_PX) clearPending_();
-      return;   /* до подтверждения - палец волен скроллить, ничего не блокируем */
-    }
-    if (!dragT) return;
-    e.preventDefault();
-    lpTUpdateDrag_(e.touches[0]);
-  }, {passive:false});
-  rowsEl.addEventListener("touchend", function(e){
-    if (dragT){
-      /* Подавляем синтетический click, который браузер шлёт следом за
-         touchend, ДАЖЕ после реального перемещения пальцем - без этого он
-         доходил бы до общего click-обработчика плитки (тот, впрочем, уже
-         сам пропускает Таблицу - см. разбор там - двойная страховка). */
-      e.preventDefault();
-      clearPending_();
-      lpTEndDrag_();
-      return;
-    }
-    if (pending){
-      var seg = pending.seg, el = pending.el;
-      var t = (e.changedTouches && e.changedTouches[0]) || {clientX:0, clientY:0};
-      clearPending_();
-      handleShortTap_(seg, el, t.clientX, t.clientY);
-      return;
-    }
-    clearPending_();
-  }, {passive:false});   /* touchend по умолчанию и так passive:false в браузерах, но явно - надёжнее (e.preventDefault() выше зависит от этого) */
-  rowsEl.addEventListener("touchcancel", function(){
-    clearPending_();
-    if (dragT) lpTAbortDrag_(true);
-  });
-
-  function lpTStartDrag_(el, seg, x0, y0){
-    /* Влад, 31.08: "плитка должна дрожать как в мобильных приложениях и
-       перемещаться с анимацией" - .lp-t-armed (см. CSS, keyframes lpTWiggle,
-       4 коротких колебания и сама останавливается - не бесконечный цикл,
-       раздел 5 ГОСТа запрещает вечные пульсы без именованного исключения)
-       играет РОВНО до первого реального движения пальца - снимается в
-       lpTUpdateDrag_, иначе CSS-анимация трогала бы тот же transform, что и
-       JS ниже (перетаскивание), и они дрались бы за кадр. */
-    el.classList.add("lifted", "lp-t-armed");
-    dragT = {el:el, seg:seg, hw:parseFloat(getComputedStyle(pageRoot).getPropertyValue("--hw")) || ZOOM[STATE.zoom],
-             s0:seg.s, l0:seg.l, v0:seg.v, x0:x0, y0:y0, curDx:0, hoverRow:null, moved:false};
-  }
-  function lpTUpdateDrag_(t){
-    if (!dragT.moved){ dragT.moved = true; dragT.el.classList.remove("lp-t-armed"); }
-    var dx = t.clientX - dragT.x0, dy = t.clientY - dragT.y0;
-    dragT.curDx = dx;
-    dragT.el.style.transform = "translate(" + dx + "px," + dy + "px) scale(1.03)";
-    var row = document.elementFromPoint(t.clientX, t.clientY);
-    row = row && row.closest ? row.closest(".row") : null;
-    if (row !== dragT.hoverRow){
-      if (dragT.hoverRow) dragT.hoverRow.classList.remove("drop");
-      dragT.hoverRow = row;
-      if (row) row.classList.add("drop");
-    }
-  }
-  function lpTSettle_(el){
-    el.classList.remove("lifted", "lp-t-armed");
-    el.style.transition = "transform 150ms var(--ease-out-strong)";
-    el.style.transform = "";
-    setTimeout(function(){ el.style.transition = ""; }, 160);
-  }
-  function lpTEndDrag_(){
-    var d = dragT; dragT = null;
-    if (d.hoverRow) d.hoverRow.classList.remove("drop");
-    lpTSettle_(d.el);
-
-    var newS = Math.round((d.s0 + d.curDx / d.hw) / HOUR_STEP) * HOUR_STEP;
-    newS = Math.max(0, Math.min(HOURS - d.seg.l, newS));
-    var trackEl = d.hoverRow ? d.hoverRow.querySelector(".track") : null;
-    var newV = trackEl ? parseInt(trackEl.dataset.v, 10) : d.v0;
-    if (newS === d.s0 && newV === d.v0) return;   /* не сдвинулось - коммитить нечего */
-
-    var clash = STATE.segs.some(function(s){
-      return s.id !== d.seg.id && s.v === newV && newS < s.s + s.l && s.s < newS + d.seg.l && !lpOverlapAllowed_(d.seg.kind, s.kind);
-    });
-    if (clash){
-      flashBad(d.el); S.reject();
-      toast("Пересечение с другим отрезком - не поставил", null);
-      return;
-    }
-    var before = {s:d.s0, l:d.l0, v:d.v0};
-    d.seg.s = newS; d.seg.v = newV;
-    S.drop();
-    commit(d.seg, before, "Отрезок перенесён");
-    renderRows();   /* commit() не перерисовывает сам на успехе - переезд на другую строку иначе не отразится в DOM */
-  }
-  function lpTAbortDrag_(){
-    var d = dragT; dragT = null;
-    if (d.hoverRow) d.hoverRow.classList.remove("drop");
-    lpTSettle_(d.el);
-  }
-})();
 
 /* дата окончания служебной плашки = правый край отрезка (Влад, 29.08).
    Конец ровно в полночь = «по последний занятый день включительно» (26.08),
@@ -24242,7 +24890,7 @@ function loadSegs(){
    плюс двойной клик как быстрый путь без протяжки (создаёт запись на 4 часа). ---------- */
 var create = null;
 rowsEl.addEventListener("pointerdown", function(e){
-  if (IS_TOUCH_) return;   /* создание протяжкой на тач выключено - см. click ниже, тапом через шторку */
+  if (IS_TOUCH_) return;   /* на тач выключено - см. IS_TOUCH_ */
   if (e.button !== 0) return;   /* только левая - см. разбор у первого pointerdown выше по файлу */
   if (e.target.closest(".seg") || e.target.closest(".rowhead") || e.target.closest(".hide-btn")) return;
   var track = e.target.closest(".track");
@@ -24293,7 +24941,7 @@ window.addEventListener("pointerup", function(){
   openCreateDrawer(c.vi, c.s, c.l);
 });
 rowsEl.addEventListener("dblclick", function(e){
-  if (IS_TOUCH_) return;   /* на тач то же самое делает одиночный тап, см. ниже */
+  if (IS_TOUCH_) return;   /* на тач выключено - см. IS_TOUCH_ */
   /* Влад, 30.08: "сделай, чтобы двойное нажатие на плашку вызывало меню
      редактирования" - раньше двойной клик ИМЕННО по существующей плитке
      ничего не делал (эта ветка просто выходила - двойной клик был только
@@ -24315,46 +24963,6 @@ rowsEl.addEventListener("dblclick", function(e){
   var raw = (e.clientX - tr.left) / hw;
   var snap = snapHour(raw, magnetTargets(vi, null));
   openCreateDrawer(vi, snap !== null ? snap : roundStep(raw), 8);   /* смена по умолчанию - 8 часов */
-});
-
-/* ---------- тач-устройства: тап вместо драга (Влад, 30.08) ----------
-   Драг/растяжка/протяжка/перестановка строк выключены выше целиком - весь ввод
-   на тач идёт через click, который браузер и так генерирует ТОЛЬКО когда касание
-   не превратилось в скролл (та же развилка, что нативная, бесплатно - без
-   собственного порога движения, как у мыши). Тап по плитке - то же маленькое
-   меню (Открыть/Копировать/Удалить), что у мыши при простом клике; тап по
-   пустому месту трека - то же окно создания, что у двойного клика на десктопе,
-   с той же длительностью по умолчанию (8 часов). */
-rowsEl.addEventListener("click", function(e){
-  if (!IS_TOUCH_) return;
-  var el = e.target.closest(".seg");
-  if (el){
-    /* НАЙДЕННЫЙ БАГ (31.08, живой пример - Влад: "при зажатии плитки заказа
-       вылезает диалоговое окно, оно мешает перемещать плитку"). В мобильной
-       "Таблице" тап по плитке теперь запускает долгое нажатие -> драг (см.
-       "ПЕРЕТАСКИВАНИЕ ДОЛГИМ НАЖАТИЕМ" ниже) - а браузер ВСЁ РАВНО генерирует
-       синтетический click в конце касания (это не отменяется происходившим
-       раньше touchmove/touchend, если явно не остановить - см. preventDefault
-       в lpTEndDrag_/lpTAbortDrag_ ниже), и этот ЖЕ обработчик, построенный
-       ещё 30.08 под "тап = меню" (когда драга в Таблице не было), продолжал
-       открывать меню поверх только что передвинутой/перемещаемой плитки.
-       Теперь в Таблице тап по плитке меню НЕ открывает вообще - только
-       двойной тап (см. lpTDblTap_ рядом с драгом - "диалоговое окно только
-       при двойном нажатии", тот же принцип, что уже даёт dblclick мыши). */
-    if (pageRoot.classList.contains("lp-mode-table")) return;
-    var seg = STATE.segs.find(function(s){ return s.id === el.dataset.id; });
-    if (seg) openCtxMenu_(seg, e.clientX, e.clientY);
-    return;
-  }
-  if (e.target.closest(".rowhead") || e.target.closest(".hide-btn")) return;
-  var track = e.target.closest(".track");
-  if (!track) return;
-  var vi = parseInt(track.dataset.v, 10);
-  var hw = ZOOM[STATE.zoom];
-  var tr = track.getBoundingClientRect();
-  var raw = (e.clientX - tr.left) / hw;
-  var snap = snapHour(raw, magnetTargets(vi, null));
-  openCreateDrawer(vi, snap !== null ? snap : roundStep(raw), 8);
 });
 
 /* «Заказчик» в шторках Планировки (Влад, 30.08: "это наименование заказчика...
@@ -25592,20 +26200,6 @@ function setZoomClass_(z){
    недоступны для замера, пока не показан, а сам парк/статусы машин могли измениться
    с прошлого визита - пересобираем начисто. */
 function initLP(){
-  /* Мобильный режим - проверяется один раз за открытие вкладки (тот же приём,
-     что уже есть у IS_TOUCH_ выше) - разворот телефона посреди работы не
-     ожидается для этого сценария, переоткрытие вкладки подхватит новое
-     состояние. */
-  var isMobile_ = lpIsMobileViewport_();
-  pageRoot.classList.toggle("lp-mobile", isMobile_);
-  /* Таблица - единственный мобильный режим с 31.08 (Список убран целиком по
-     итогу штурм-сессии) - .lp-mode-table раньше переключал живой человек
-     через .lp-m-modeswitch (см. git-история), теперь просто всегда включен
-     вместе с .lp-mobile. Оставлен отдельным классом (не слит с .lp-mobile) -
-     под ним всё ещё держится большой пласт CSS/JS (сжатая .rowhead, драг
-     долгим нажатием, wiggle-анимация), переименовывать рискованнее, чем
-     оставить два класса синхронными. */
-  pageRoot.classList.toggle("lp-mode-table", isMobile_);
   /* НАЙДЕННЫЙ БАГ (31.08, живой пример Влада на мобильной "Таблице": "если
      длинномеры сворачиваю - пропадает вообще планировка... эта проблема уже
      была сегодня описана" - та же история, что у Миши днём раньше). Корень:
@@ -25660,19 +26254,8 @@ function initLP(){
   syncControlChips();
   renderAll();
   /* «Сейчас» ставим в правую треть: в Штатке текущий день заполняют задним числом,
-     и если встать вплотную к «сейчас», экран выглядит пустым не по вине ленты.
-     Мобильная Таблица - экран УЗКИЙ (не широкий десктоп), фикс. смещение "-42ч"
-     унесло бы "сейчас" далеко за правый край видимой области - центрируем
-     честно по реальной ширине (тот же приём, что раньше жил в обработчике
-     переключателя Список/Таблица, до того как Список убрали 31.08 и открытие
-     стало сразу Таблицей - без этой ветки телефон при каждом заходе на вкладку
-     открывался бы вне "сейчас", пока пользователь не нажмёт "Сегодня" вручную). */
-  if (isMobile_){
-    var mHw = ZOOM[STATE.zoom], mVisibleHours = board.clientWidth / mHw;
-    board.scrollLeft = Math.max(0, (nowHour() - mVisibleHours / 2) * mHw);
-  } else {
-    board.scrollLeft = Math.max(0, (nowHour() - 42) * ZOOM[STATE.zoom]);
-  }
+     и если встать вплотную к «сейчас», экран выглядит пустым не по вине ленты. */
+  board.scrollLeft = Math.max(0, (nowHour() - 42) * ZOOM[STATE.zoom]);
   updateMonthLabel_();       /* после scrollLeft - ярлык месяца сразу соответствует видимому дню */
   fetchPlanSegs_();          /* свежие записи с сервера сразу при открытии, не ждать до 7 сек поллинга */
   sendPresence_(); fetchPresence_();   /* то же самое для присутствия - не ждать первый тик */

@@ -1127,6 +1127,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
    (общее правило .card:has(table)), плашки .mech-stat - подъём как плитки. */
 .mech-formula{font-size:11px;color:var(--muted);margin-top:4px;font-variant-numeric:tabular-nums;}
 .mech-tier{display:grid;grid-template-columns:7fr 5fr;gap:16px;margin-bottom:16px;}
+.mech-tier--full{grid-template-columns:1fr;}
 .mech-tier2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;}
 @media(max-width:1000px){.mech-tier,.mech-tier2{grid-template-columns:1fr;}}
 .mech-head{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:22px;margin-bottom:12px;}
@@ -9896,11 +9897,12 @@ function mechRows_() {
     var status = v.status;
     if (active) status = active.kind === 'maint' ? 'ТО' : 'Ремонт';
     var endH = active ? active.start_hour + active.length_hours : null;
-    // Срок выхода есть только у записей НОВОГО формата (с причиной - её и срок вводят вместе,
-    // см. mechSubmit_). Старые ремонты логистов - длинные отрезки без причины и без срока,
-    // показывать их конец как «срок» нельзя (проверено на живых данных 08.09: 12 из 13
-    // ремонтов - такие).
-    var hasDeadline = !!(active && active.repair_reason);
+    // Плановый выход = конец отрезка в Планировке (start_hour + length_hours), а не только у
+    // записей с причиной (08.09, поправка Влада: "плановый выход должен быть по концу
+    // протяжки в планировке" - сам отрезок ЕСТЬ план, длина задаётся тем же, кто ставит в
+    // ремонт/ТО, вне зависимости от того, вписана ли причина). Раньше срок показывался только
+    // у записей с repair_reason - лишнее сужение, конец отрезка есть у любой записи.
+    var hasDeadline = !!active;
     var c = (mechFleet_.costs || {})[v.gos] || {}, p = (mechFleet_.costs_prev || {})[v.gos] || {};
     return {
       gos: v.gos, marka: v.marka || '', type: v.type || '', long: !!v.long, status: status,
@@ -9930,7 +9932,6 @@ function mechOverdueRows_(rows) {
   var out = [];
   (mechFleet_.segs || []).forEach(function(s) {
     var endH = s.start_hour + s.length_hours;
-    if (!s.repair_reason) return;                        // старый формат без срока - не судим
     if (endH > nowH || endH < nowH - 72) return;        // ещё идёт или давно закрыт
     var r = byGos[s.vehicle_gos];
     if (!r || r.status === 'В работе' || r.status === 'Ремонт' || r.status === 'ТО') return;
@@ -10075,29 +10076,37 @@ function renderMyPageMechanic_() {
     return '<div class="mech-overdue__row" onclick="mechOpenDrawer_(\'' + mechEsc_(o.gos) + '\')"><span class="mono">' + mechEsc_(o.gos) + '</span> <span>' + mechEsc_(o.marka) + '</span>' +
       '<span class="muted">' + (o.kind === 'maint' ? 'ТО' : 'ремонт') + ' должен был закончиться ' + o.endLabel + ', прошло ' + o.hoursOver + ' ч, машина не в рейсе</span></div>';
   }).join('') + '</div>' : '';
-  html += '<div class="mech-tier"><div class="card" style="min-width:0">' +
+  // «Парк сейчас» (Тралы/Длинномеры две группы) - только для полного вида (сегмент не
+  // ограничен). У ограниченного механика (Самошкин - только длинномеры) вторая группа всегда
+  // «0 из 0», карточка целиком лишняя (08.09, Влад: "это можно убрать совсем") - тогда таблица
+  // ремонта одна занимает весь ярус (класс mech-tier--full).
+  var restrictedSegment_ = !!(mechFleet_ && mechFleet_.segment);
+  html += '<div class="mech-tier' + (restrictedSegment_ ? ' mech-tier--full' : '') + '"><div class="card" style="min-width:0">' +
     '<div class="mech-head"><div class="mech-label"><span class="mech-label__dot"></span>Сейчас в ремонте и на ТО</div>' +
     '<span class="mech-badge ' + (long3 ? 'mech-badge--bad' : 'mech-badge--neutral') + '">' + long3 + ' дольше 3 дней</span></div>' +
     (rep.length ? '<div style="overflow-x:auto"><table class="tbl"><thead><tr>' + mechTh_(MECH_REP_COLS_, mechRepSort_, 'mechSortRep_') + '</tr></thead><tbody>' + repBody + '</tbody></table></div>'
       : '<div class="mech-empty">Все машины на колёсах - в ремонте и на ТО никого нет</div>') +
     overdueHtml +
-    '<div class="mech-foot">Красным - дольше 7 дней, янтарным - дольше 3. «Срок» - плановый выход из ремонта, задаётся при постановке; у старых записей его нет. Клик по строке - карточка машины и действия.</div>' +
+    '<div class="mech-foot">Красным - дольше 7 дней, янтарным - дольше 3. «Срок» - конец отрезка в Планировке. Клик по строке - карточка машины и действия.</div>' +
     '</div>';
 
-  // парк сейчас - две группы
-  var stat = function(cap, key, n, total, cls) {
-    return '<div class="mech-stat mech-stat--' + cls + (mechStatusFilter_ === key ? ' on' : '') + '" onclick="mechSetStatus_(\'' + key + '\')"><div class="mech-stat__cap">' + cap + '</div><div class="mech-stat__num">' + n + '<small>из ' + total + '</small></div></div>';
-  };
-  var grpHtml = '';
-  [['Тралы', function(r) { return !r.long; }], ['Длинномеры', function(r) { return r.long; }]].forEach(function(g) {
-    var gr = rows.filter(g[1]);
-    var c = function(list) { return gr.filter(function(r) { return list.indexOf(r.status) >= 0; }).length; };
-    grpHtml += '<div class="mech-grp"><div class="mech-grp__name">' + g[0] + '<small>' + gr.length + ' тягачей</small></div>' +
-      stat('В работе', 'В работе', c(['В работе']), gr.length, 'work') + stat('Ремонт и ТО', 'Ремонт', c(['Ремонт', 'ТО']), gr.length, 'rep') +
-      stat('Без водителя', 'Без водителя', c(['Без водителя']), gr.length, 'nd') + stat('Без заказа', 'Без заказа', c(['Без заказа']), gr.length, 'no') + '</div>';
-  });
-  html += '<div class="card"><div class="mech-head"><div class="mech-label">Парк сейчас</div><span class="mech-badge mech-badge--neutral">то же, что шапка Планировки</span></div>' + grpHtml +
-    '<div class="mech-foot">Один источник со «Статусом парка» на главной и шапкой Планировки - цифры совпадают один в один. Клик по плашке - фильтр таблицы внизу.</div></div></div>';
+  if (!restrictedSegment_) {
+    // парк сейчас - две группы
+    var stat = function(cap, key, n, total, cls) {
+      return '<div class="mech-stat mech-stat--' + cls + (mechStatusFilter_ === key ? ' on' : '') + '" onclick="mechSetStatus_(\'' + key + '\')"><div class="mech-stat__cap">' + cap + '</div><div class="mech-stat__num">' + n + '<small>из ' + total + '</small></div></div>';
+    };
+    var grpHtml = '';
+    [['Тралы', function(r) { return !r.long; }], ['Длинномеры', function(r) { return r.long; }]].forEach(function(g) {
+      var gr = rows.filter(g[1]);
+      var c = function(list) { return gr.filter(function(r) { return list.indexOf(r.status) >= 0; }).length; };
+      grpHtml += '<div class="mech-grp"><div class="mech-grp__name">' + g[0] + '<small>' + gr.length + ' тягачей</small></div>' +
+        stat('В работе', 'В работе', c(['В работе']), gr.length, 'work') + stat('Ремонт и ТО', 'Ремонт', c(['Ремонт', 'ТО']), gr.length, 'rep') +
+        stat('Без водителя', 'Без водителя', c(['Без водителя']), gr.length, 'nd') + stat('Без заказа', 'Без заказа', c(['Без заказа']), gr.length, 'no') + '</div>';
+    });
+    html += '<div class="card"><div class="mech-head"><div class="mech-label">Парк сейчас</div><span class="mech-badge mech-badge--neutral">то же, что шапка Планировки</span></div>' + grpHtml +
+      '<div class="mech-foot">Один источник со «Статусом парка» на главной и шапкой Планировки - цифры совпадают один в один. Клик по плашке - фильтр таблицы внизу.</div></div>';
+  }
+  html += '</div>';
 
   // ── Ярус 2: простой за месяц + затраты ──
   var dt = function(filterFn, fromH, toH) {
@@ -10125,7 +10134,7 @@ function renderMyPageMechanic_() {
     '<div class="mech-head"><div class="mech-label">Простой в ремонте и на ТО - ' + formatMonthLabel(month).split(' ')[0].toLowerCase() + '</div><span class="mech-badge mech-badge--neutral">машино-дни</span></div>' +
     '<div class="mech-hero"><span class="mech-hero__num">' + total + '</span><span class="mech-hero__unit">машино-дней за ' + dayOfMonth + ' ' + (dayOfMonth === 1 ? 'день' : (dayOfMonth < 5 ? 'дня' : 'дней')) + '</span></div>' +
     '<div class="mech-rows">' + row('Ремонт', sepAll.rep, prevLbl + ' ' + augAll.rep) + row('ТО', sepAll.mnt, prevLbl + ' ' + augAll.mnt) +
-    row('- тралы', sepTr.rep + sepTr.mnt, prevLbl + ' ' + (augTr.rep + augTr.mnt)) + row('- длинномеры', sepLg.rep + sepLg.mnt, prevLbl + ' ' + (augLg.rep + augLg.mnt)) +
+    (restrictedSegment_ ? '' : row('- тралы', sepTr.rep + sepTr.mnt, prevLbl + ' ' + (augTr.rep + augTr.mnt)) + row('- длинномеры', sepLg.rep + sepLg.mnt, prevLbl + ' ' + (augLg.rep + augLg.mnt))) +
     '<div class="mech-row mech-row--total"><span class="mech-row__label">В среднем стоит в день</span><span class="mech-row__leader"></span><span class="mech-row__value">' + perDay + ' маш.</span><span class="mech-row__aux">' + prevLbl + ' ' + perDayPrev + '</span></div></div>' +
     '<div class="mech-foot">Из отрезков Ремонт/ТО в Планировке, по календарному месяцу. Прошлый месяц - для сравнения, целиком.</div></div>';
 
@@ -10136,7 +10145,7 @@ function renderMyPageMechanic_() {
   html += '<div class="card"><div class="mech-head"><div class="mech-label">Затраты по парку - ' + formatMonthLabel(month).split(' ')[0].toLowerCase() + ' (1С)</div><span class="mech-badge mech-badge--neutral">' + withCur + ' из ' + rows.length + ' с отчётом</span></div>' +
     '<div class="mech-hero"><span class="mech-hero__num">' + mechFmtN_(sum(rows, 'partsCur')) + '</span><span class="mech-hero__unit">₽ запчасти</span></div>' +
     '<div class="mech-rows">' + row('Запчасти', mechFr_(sum(rows, 'partsCur')), prevLbl + ' ' + mechFmtN_(sum(rows, 'partsPrev'))) +
-    row('- тралы', mechFr_(sum(trR, 'partsCur')), prevLbl + ' ' + mechFmtN_(sum(trR, 'partsPrev'))) + row('- борта', mechFr_(sum(lgR, 'partsCur')), prevLbl + ' ' + mechFmtN_(sum(lgR, 'partsPrev'))) +
+    (restrictedSegment_ ? '' : row('- тралы', mechFr_(sum(trR, 'partsCur')), prevLbl + ' ' + mechFmtN_(sum(trR, 'partsPrev'))) + row('- борта', mechFr_(sum(lgR, 'partsCur')), prevLbl + ' ' + mechFmtN_(sum(lgR, 'partsPrev')))) +
     row('Топливо', mechFr_(sum(rows, 'fuelCur')), prevLbl + ' ' + mechFmtN_(sum(rows, 'fuelPrev'))) +
     '<div class="mech-row mech-row--total"><span class="mech-row__label">Запчасти на машину с отчётом</span><span class="mech-row__leader"></span><span class="mech-row__value">' + mechFr_(withCur ? sum(rows, 'partsCur') / withCur : 0) + '</span><span class="mech-row__aux">' + prevLbl + ' ' + mechFmtN_(withPrev ? sum(rows, 'partsPrev') / withPrev : 0) + '</span></div></div>' +
     '<div class="mech-foot">Отчёт «Парк» 1С (те же цифры, что колонки «Запчасти»/«Топливо» на странице «Техника»). Месяц неполный: отчёт пришёл по ' + withCur + ' машинам, у остальных проводок ещё нет.</div></div></div>';

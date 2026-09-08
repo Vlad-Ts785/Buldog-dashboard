@@ -6540,10 +6540,12 @@ async function loadMechanicData_() {
   // вместо /fleet_summary - тот же парк с тем же живым статусом (сервер собирает его той же
   // buildFleetSummary_) ПЛЮС отрезки Ремонт/ТО и затраты по машине для личной страницы.
   // D.vehicles остаётся в прежней форме - Планировка (buildVehicles) читает его как раньше.
-  // person - только для admin-предпросмотра "Смотреть как" (08.09, Влад: "Самошкин видит
-  // только длинномеры"): реальная сессия механика сама резолвит своё имя на сервере через
-  // access_users и это ограничение обойти нельзя, person здесь нужен ТОЛЬКО чтобы admin в
-  // "Смотреть как" видел ту же урезанную картину, что видит сам человек, а не полный парк.
+  // Эта функция вызывается ТОЛЬКО при реальном входе механика (localStorage.user_role ===
+  // 'mechanic' в loadData() ниже) - D.role==='admin' тут никогда не бывает, значит person=
+  // всегда null и сервер сам резолвит ограничение по сессии (access_users). Условие оставлено
+  // симметрично mechLoad_ (единственный путь, который реально обслуживает admin-предпросмотр
+  // "Смотреть как" - там до 08.09 person не передавался вообще, из-за чего Влад живьём видел
+  // тралы+борта у Самошкина даже после первого фикса - см. коммент у mechLoad_).
   var mechPreviewName_ = (D && D.role === 'admin' && viewAsEntry) ? viewAsEntry.name : null;
   var r = await fetchFromYardApi_('/mechanic/fleet', mechPreviewName_ ? { person: mechPreviewName_ } : {});
   if (!r.ok || !r.data || r.data.error) {
@@ -9941,7 +9943,15 @@ function mechLoad_(force) {
   if (mechLoading_ && !force) return;
   mechLoading_ = true;
   mechLoadError_ = '';
-  fetchFromYardApi_('/mechanic/fleet', {}).then(function(r) {
+  // 08.09 (позже вечером) - найдено живьём Владом: admin-предпросмотр "Смотреть как ->
+  // Самошкин" всё равно показывал тралы+борта. Причина - person= отправляла ТОЛЬКО
+  // loadMechanicData_() (грузится лишь для РЕАЛЬНОГО входа механика, localStorage.user_role
+  // === 'mechanic' - в admin-сессии этот код вообще не выполняется), а этот, настоящий
+  // источник данных страницы (mechLoad_, дёргается из renderMyPageMechanic_ при !mechFleet_,
+  // в том числе сразу после сброса кэша в setViewAs) - без person вообще. Сервер без person
+  // не может понять, за кого предпросматривает admin, и отдаёт весь парк без ограничения.
+  var mechPreviewName_ = (D && D.role === 'admin' && viewAsEntry) ? viewAsEntry.name : null;
+  fetchFromYardApi_('/mechanic/fleet', mechPreviewName_ ? { person: mechPreviewName_ } : {}).then(function(r) {
     mechLoading_ = false;
     if (!r.ok || !r.data || r.data.error) { mechLoadError_ = (r.data && r.data.error) || 'Сервер не ответил'; renderMyPageMechanic_(); return; }
     mechFleet_ = r.data;
@@ -19986,7 +19996,13 @@ function showPage(id, el) {
   // страницу, где показан заказчик, и перерисовывает её, когда придёт.
   if (id === 'clients') cpEnsureLights_(function() { if (typeof renderClientsBody === 'function') renderClientsBody(); });
   if (id === 'receipts') cpEnsureLights_(function() { if (typeof renderReceipts === 'function') renderReceipts(); });
-  if (id === 'my-page') cpEnsureLights_(function() { if (typeof renderMyPage === 'function') renderMyPage(); });
+  // 08.09: до появления роли механика my-page умел рендериться только renderMyPage() -
+  // с тех пор у механика своя ветка (renderMyPageMechanic_, isMechanicView_), но ЭТОТ вызов
+  // (карта связей 1С, срабатывает при каждом реальном заходе на my-page) звал renderMyPage()
+  // безусловно - механику (и admin-предпросмотру "как механик") подсовывало страницу
+  // менеджера ("Менеджер по продажам", чужой дропдаун сотрудника) вместо его собственной.
+  // Найдено живьём Владом - "Смотреть как -> Самошкин", клик по "Личная страница".
+  if (id === 'my-page') cpEnsureLights_(function() { if (isMechanicView_()) { if (typeof renderMyPageMechanic_ === 'function') renderMyPageMechanic_(); } else if (typeof renderMyPage === 'function') renderMyPage(); });
   if (id === 'crm') loadCrmData();
   if (id === 'global-stats') loadGlobalStatsData();
   if (id === 'order-plan') loadOrderPlanData();

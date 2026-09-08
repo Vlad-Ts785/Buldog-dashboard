@@ -1494,6 +1494,20 @@ main:has(> #page-crm.active){max-width:none;}
 .crm-kpi-dot{width:6px;height:6px;border-radius:50%;background:var(--red);flex:none;}
 @media (max-width:1100px){.crm-kpis{grid-template-columns:repeat(3,1fr);}}
 @media (max-width:720px){.crm-kpis{grid-template-columns:1fr 1fr;}}
+/* Топ менеджеров по сумме закрытых сделок (Влад, 08.09) - та же bullet-грамматика, что у
+   "Топ менеджеров" на главной (renderMgrList), без личной засечки плана - в CRM нет
+   персонального плана по сделкам. Пусто, если ни один менеджер ещё не закрыл сделку в этом
+   месяце (Влад: "места мало" - список короткий, только реально закрывшие, не все с нулями). */
+.crm-leaders{display:none;}
+.crm-leaders.has-data{display:block;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;}
+.crmldr-head{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:500;margin-bottom:10px;}
+.crmldr-row{display:grid;grid-template-columns:120px 1fr 72px;align-items:center;gap:10px;min-height:24px;}
+.crmldr-name{font-size:12.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.crmldr-track{position:relative;height:14px;}
+.crmldr-barwrap{position:absolute;left:0;top:4px;height:6px;width:100%;background:var(--bg4);border-radius:3px;overflow:hidden;}
+.crmldr-bar{height:100%;border-radius:3px;background:var(--green);transition:width .5s ease;}
+.crmldr-val{font-family:'JetBrains Mono',monospace;font-size:12px;text-align:right;font-variant-numeric:tabular-nums;color:var(--text);}
+@media (prefers-reduced-motion:reduce){.crmldr-bar{transition:none;}}
 
 /* ── Канбан (канон mx-, числа буквально) ────────────────────────────────────────── */
 .kb-panel{position:relative;perspective:1400px;}
@@ -4516,6 +4530,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
         </div>
         <div id="crm-view-board">
           <div class="crm-kpis" id="crm-kpis"></div>
+          <div class="crm-leaders" id="crm-leaders"></div>
           <div class="kb-hint">«Отказ» требует причину: при переносе карточки в эту колонку откроется форма - без причины сделка останется на месте.</div>
           <div class="kb-panel"><div class="kb-board" id="kb-board"></div></div>
         </div>
@@ -20620,7 +20635,7 @@ var CRM = (function () {
       if (!rd.ok) { loading.textContent = 'Не удалось загрузить CRM: ' + ((rd.data && rd.data.error) || 'ошибка сервера'); return; }
       S.deals = rd.data.deals || [];
       S.summary = rs.ok ? rs.data : S.summary;
-      renderKpis(); renderBoard();
+      renderKpis(); renderLeaders(); renderBoard();
       loading.style.display = 'none'; body.style.display = '';
       if (S.view === 'chats') loadChats(true);
       refreshBadge();
@@ -20669,7 +20684,7 @@ var CRM = (function () {
     el('kb-board').addEventListener('scroll', closeMenu);
     document.addEventListener('visibilitychange', function () { if (!document.hidden && page.classList.contains('active')) { refreshBadge(); if (S.view === 'chats') loadChats(false); } });
     // Живое время в списке/сводке - обязано тикать (ГОСТ раздел 0 п.6)
-    if (!S.clockTimer) S.clockTimer = setInterval(function () { if (page.classList.contains('active') && !document.hidden) { if (S.view === 'chats') renderList(); renderKpis(); } }, 60000);
+    if (!S.clockTimer) S.clockTimer = setInterval(function () { if (page.classList.contains('active') && !document.hidden) { if (S.view === 'chats') renderList(); renderKpis(); renderLeaders(); } }, 60000);
   }
 
   // ── Сводка ─────────────────────────────────────────────────────────────────────────
@@ -20693,11 +20708,34 @@ var CRM = (function () {
     box.querySelectorAll('.kpi').forEach(function (t) { t.onclick = function () { kpiClick(t.getAttribute('data-kpi')); }; });
     // Слой света пересоздаётся движком initCursorLight_ сам при следующем движении мыши
   }
+  // Топ менеджеров по сумме закрытых сделок (Влад, 08.09: "лидеры успешных сделок - все
+  // видят, кто на какую сумму закрыл") - клон bullet-грамматики renderMgrList (главная
+  // страница), без личной засечки плана (в CRM нет персонального плана по сделкам). Сервер
+  // уже отдаёт только тех, кто реально закрыл хоть что-то, за текущий месяц (leaderRows,
+  // HAVING SUM > 0) - Влад: "места мало", список короткий сам по себе, фронт ничего не режет.
+  // Пусто - карточка схлопывается в display:none (класс has-data), а не показывает нулевые
+  // строки - до первой реальной победы блока просто нет на экране.
+  function renderLeaders() {
+    var box = el('crm-leaders'); if (!box) return;
+    var leaders = (S.summary && S.summary.leaders) || [];
+    if (!leaders.length) { box.classList.remove('has-data'); box.innerHTML = ''; return; }
+    box.classList.add('has-data');
+    var maxVal = leaders.reduce(function (m, l) { return Math.max(m, l.amount || 0); }, 0) || 1;
+    box.innerHTML = '<div class="crmldr-head">Топ менеджеров - сумма закрытых сделок</div>' +
+      leaders.map(function (l) {
+        var surname = String(l.name || '').trim().split(' ').pop();
+        var barW = Math.min(100, (l.amount || 0) / maxVal * 100);
+        return '<div class="crmldr-row" title="' + esc(l.name) + '">' +
+          '<span class="crmldr-name">' + esc(surname) + '</span>' +
+          '<div class="crmldr-track"><div class="crmldr-barwrap"><div class="crmldr-bar" style="width:' + barW.toFixed(1) + '%"></div></div></div>' +
+          '<span class="crmldr-val">' + shortMoney(l.amount) + '</span></div>';
+      }).join('');
+  }
   function plural(n, a, b, c) { n = Math.abs(n) % 100; var n1 = n % 10; if (n > 10 && n < 20) return c; if (n1 > 1 && n1 < 5) return b; if (n1 === 1) return a; return c; }
   function kpiClick(key) {
     if (key === 'waiting') { showView('chats'); setFilter('waiting'); return; }
     S.kpiFilter = S.kpiFilter === key ? null : key;
-    renderKpis(); renderBoard();
+    renderKpis(); renderLeaders(); renderBoard();
     if (S.kpiFilter) toast(key === 'stalled' ? 'Показаны только зависшие сделки' : key === 'missed' ? 'Показаны сделки с недозвоном сегодня' : key === 'won' ? 'Выигранные этого месяца - в шторке сделки, доска показывает открытые' : 'Показаны все открытые сделки', 'amber');
   }
 
@@ -20964,7 +21002,7 @@ var CRM = (function () {
     snd.undo(); vibrate(8);
     post('/crm/deals/stage', { id: mv.id, stage: mv.fromCol }).then(function (r) { if (!r.ok) { d.stage = prevStage; renderBoard(); toast('Не удалось отменить', 'red'); } refreshSummary(); }).catch(function () {});
   }
-  function refreshSummary() { api('/crm/summary').then(function (r) { if (r.ok) { S.summary = r.data; renderKpis(); } }).catch(function () {}); }
+  function refreshSummary() { api('/crm/summary').then(function (r) { if (r.ok) { S.summary = r.data; renderKpis(); renderLeaders(); } }).catch(function () {}); }
 
   // Победа: хореография mxWin (t=0..2200): подсветка → салют → фанфара → перелёт суммы → одометр → тост с Отменить
   function winDeal(d, card, fromCol, fromIndex) {

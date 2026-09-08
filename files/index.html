@@ -20835,14 +20835,42 @@ var CRM = (function () {
       '<button class="kb-col-toggle" data-nav-sound onclick="event.stopPropagation();CRM.toggleColCollapse(\'' + st.key + '\')" title="' + (collapsed ? 'Показать' : 'Скрыть') + ' колонку «' + esc(st.label) + '»">' + ico('chevron') + '</button>' +
       '</header>';
   }
-  // Сводка над доской выравнивается по ФАКТИЧЕСКОЙ ширине канбана (Влад, 08.09: "верхники
-  // должны быть равны ширине колонок, чтобы экран смотрелся целостно") - ширина канбана
-  // плавает (кол-во/ширина колонок, сворачивание), поэтому меряем реальный DOM, не считаем
-  // числами заранее - переживает любое будущее изменение состава колонок само.
+  // Сводка над доской (KPI-плитки + карточка топ-менеджеров) выравнивается по ФАКТИЧЕСКОЙ
+  // ширине канбана (Влад, 08.09: "верхники должны быть равны ширине колонок, чтобы экран
+  // смотрелся целостно"; повторная жалоба 08.09 - расходились на живой странице).
+  //
+  // Корень расхождения: kb-board САМ является overflow-x:auto контейнером (не просто его
+  // обёртка) - если колонки в сумме шире доступного места, board.clientWidth (свой рендер-
+  // размер) остаётся равен ширине родителя, а board.scrollWidth (то, что нужно верхникам)
+  // растёт независимо. ResizeObserver следит только за СОБСТВЕННЫМ боксом элемента - он не
+  // видит изменение scrollWidth, когда контент переполняется/опустошается ВНУТРИ уже
+  // неизменного по размеру board (частая ложная надежда на ResizeObserver для этого класса
+  // задач - здесь не подходит). Второй источник расхождения - гонка с загрузкой шрифтов:
+  // первое измерение (сразу после renderBoard()) может пройти ДО того, как моно-шрифт с
+  // цифрами (JetBrains Mono, табличные цифры) реально применился - системный фолбэк уже
+  // отрисован уже, но чуть уже, и сумма колонок пересчитывается по итоговой более широкой
+  // раскладке уже после первого измерения. Оба источника закрываются разом:
+  // MutationObserver на childList/subtree board (ловит ЛЮБУЮ перестройку колонок - и
+  // renderBoard() сам, и без нужды помнить дёрнуть выравнивание из каждого места, которое
+  // меняет доску) + одноразовая доверка после document.fonts.ready.
+  var kpiAlignObserver_ = null, kpiFontsWatched_ = false;
   function alignKpisToBoard() {
-    var kpis = el('crm-kpis'), board = el('kb-board');
-    if (!kpis || !board) return;
-    requestAnimationFrame(function () { kpis.style.maxWidth = board.scrollWidth ? board.scrollWidth + 'px' : ''; });
+    var board = el('kb-board');
+    if (!board) return;
+    requestAnimationFrame(function () { applyKpiAlignWidth_(board.scrollWidth); });
+    if (!kpiAlignObserver_ && typeof MutationObserver !== 'undefined') {
+      kpiAlignObserver_ = new MutationObserver(function () { applyKpiAlignWidth_(board.scrollWidth); });
+      kpiAlignObserver_.observe(board, { childList: true, subtree: true });
+    }
+    if (!kpiFontsWatched_ && document.fonts && document.fonts.ready) {
+      kpiFontsWatched_ = true;
+      document.fonts.ready.then(function () { applyKpiAlignWidth_(board.scrollWidth); });
+    }
+  }
+  function applyKpiAlignWidth_(w) {
+    var px = w ? w + 'px' : '';
+    var kpis = el('crm-kpis'); if (kpis) kpis.style.maxWidth = px;
+    var leaders = el('crm-leaders'); if (leaders) leaders.style.maxWidth = px;
   }
   function renderBoard() {
     var board = el('kb-board'); if (!board) return;

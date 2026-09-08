@@ -1430,7 +1430,31 @@ main:has(> #page-crm.active){max-width:none;}
 .kb-count{font:500 10.5px/1 var(--font-mono);color:var(--text);background:var(--bg4);padding:3px 6px;border-radius:99px;flex:0 0 auto;font-variant-numeric:tabular-nums;}
 .kb-count.pulse{animation:kbPulse .32s ease;}
 @keyframes kbPulse{0%{transform:scale(1);}45%{transform:scale(1.35);color:var(--green);}100%{transform:scale(1);}}
-.kb-col-sum{margin-left:auto;flex:0 0 auto;font:500 11px/1 var(--font-mono);color:var(--muted);font-variant-numeric:tabular-nums;}
+
+/* Сворачивание колонки (Влад, 08.09: "кнопка скрыть/показать Отказ") - канон Kanban
+   Tool/Jira: узкая полоска вместо полной колонки, состояние в localStorage. */
+.kb-col-toggle{appearance:none;background:transparent;border:0;color:var(--muted);cursor:pointer;padding:2px;margin-left:auto;flex:0 0 auto;
+  display:inline-flex;align-items:center;justify-content:center;border-radius:5px;transition:background-color .12s ease-out,color .12s ease-out;}
+.kb-col-toggle:hover{color:var(--text);background:var(--bg3);}
+.kb-col-toggle svg{width:13px;height:13px;transition:transform .15s var(--ease-out-soft);}
+.kb-col.is-collapsed{flex:0 0 40px;width:40px;cursor:pointer;}
+.kb-col.is-collapsed .kb-col-head{flex-direction:column;height:100%;padding:12px 0 10px;gap:10px;border-bottom:0;}
+.kb-col.is-collapsed .kb-col-toggle{margin-left:0;}
+.kb-col.is-collapsed .kb-col-toggle svg{transform:rotate(180deg);}
+/* Крупная сумма колонки (Влад, 08.09: "как в Битриксе, и чтобы была интерактивной") -
+   собственная строка под шапкой, не мелкая цифра в хедере. Клик - реальное действие
+   (переключает сортировку карточек колонки по сумме), не декорация - поэтому оформлена
+   как кнопка (.chip-подобный hover), не как статичный текст. Hero-цифра ВСЕГДА --text,
+   даже при активной сортировке (раздел 1 ГОСТа - паника только у красного). */
+.kb-col-herowrap{padding:2px 12px 10px;}
+.kb-col-hero{appearance:none;width:100%;text-align:left;background:transparent;border:1px solid transparent;border-radius:8px;
+  padding:4px 6px;cursor:pointer;display:flex;flex-direction:column;gap:1px;
+  transition:background-color .12s ease-out,border-color .12s ease-out;}
+.kb-col-hero:hover{background:var(--bg3);border-color:var(--border);}
+.kb-col-hero.is-sorted{background:var(--bg3);border-color:var(--border-strong);}
+.kb-col-hero-val{font:600 22px/1.15 var(--font-mono);color:var(--text);font-variant-numeric:tabular-nums;}
+.kb-col-hero-sub{font:400 10.5px/1 var(--font-body);color:var(--muted);}
+.kb-col-hero.is-sorted .kb-col-hero-sub{color:var(--text);}
 .kb-list{display:flex;flex-direction:column;gap:8px;padding:10px;overflow-y:auto;flex:1;border-radius:0 0 12px 12px;min-height:90px;
   transition:background-color .6s ease,box-shadow .15s ease-out;scrollbar-width:thin;scrollbar-color:var(--bg4) transparent;}
 .kb-col.kb-drop{border-color:color-mix(in srgb,var(--blue) 45%,transparent);}
@@ -1473,19 +1497,22 @@ main:has(> #page-crm.active){max-width:none;}
   transition:background-color .12s ease-out,border-color .12s ease-out,box-shadow .12s ease-out,opacity .14s cubic-bezier(.25,1,.5,1);}
 .kb-ph{border:1.5px dashed var(--border-strong);border-radius:10px;background:transparent;}
 
-/* Полка терминальных стадий - видна только во время перетаскивания (amoCRM/Pipedrive):
-   доска не расползается вширь колонками "успешно"/"отказ". */
-.kb-shelf{position:fixed;left:50%;bottom:22px;transform:translate(-50%,120%);display:flex;gap:10px;z-index:900;
-  transition:transform .32s var(--ease-drawer);pointer-events:none;}
-.kb-shelf.is-on{transform:translate(-50%,0);pointer-events:auto;}
-.kb-shelf-zone{width:220px;height:64px;box-sizing:border-box;border-radius:12px;display:flex;align-items:center;justify-content:center;gap:9px;
-  background:var(--bg3);border:1px solid var(--border-strong);color:var(--muted);font:500 12.5px/1 var(--font-body);
-  box-shadow:0 2px 6px rgba(0,0,0,.4),0 16px 32px rgba(0,0,0,.5);   /* объект физически над доской */
-  transition:border-color .15s ease-out,background-color .15s ease-out,color .15s ease-out,transform .15s var(--ease-out-soft);}
-.kb-shelf-zone svg{width:15px;height:15px;}
-.kb-shelf-zone.kb-drop{color:var(--text);transform:scale(1.03);}
-.kb-shelf-zone--won.kb-drop{border-color:color-mix(in srgb,var(--green) 55%,transparent);background:color-mix(in srgb,var(--green) 8%,var(--bg3));}
-.kb-shelf-zone--lost.kb-drop{border-color:var(--border-strong);background:var(--bg4);}
+/* Подсказка над доской - короткая, про причину отказа (см. .kb-hint выше в разметке). */
+.kb-hint{font-size:11px;line-height:1.4;color:var(--muted);margin:-4px 0 12px;max-width:74ch;}
+
+/* Терминальные карточки - "Успешна"/"Отказ" теперь ОБЫЧНЫЕ видимые колонки, как в
+   эталонном превью examples/design-reference-kanban.html (mx-won-style/mx-won-check),
+   не полка (Влад, 08.09: "хочу видеть колонку выиграна, как у нас в превью" - полка,
+   добавленная 04.09 по чужому опыту amoCRM/Pipedrive без согласования, не прижилась). */
+.kb-card.kb-won-style{background:color-mix(in srgb,var(--green) 7%,var(--bg3));border-color:color-mix(in srgb,var(--green) 30%,var(--border));}
+.kb-card.kb-won-style .kb-sum{color:var(--green);}
+.kb-won-check{width:16px;height:16px;border-radius:50%;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;color:var(--bg);background:var(--green);}
+.kb-won-check svg{width:11px;height:11px;}
+.kb-card.kb-lost-style{opacity:.72;}
+.kb-card.kb-lost-style .kb-sum{color:var(--muted);}
+.kb-lost-mark{width:16px;height:16px;border-radius:50%;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;color:var(--muted);background:var(--bg4);}
+.kb-lost-mark svg{width:11px;height:11px;}
+.kb-card-loss{font:400 11px/1.35 var(--font-body);color:var(--red);}
 
 /* Салют победы - полноэкранный canvas поверх всего (как у банковской сцены) */
 .crm-celebrate{position:fixed;inset:0;pointer-events:none;z-index:2500;}
@@ -1757,7 +1784,7 @@ main:has(> #page-crm.active){max-width:none;}
 @keyframes cxPanelIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
 
 @media (prefers-reduced-motion: reduce){
-  #page-crm .kb-card,#page-crm .kb-col,#page-crm .kb-list,#page-crm .crm-drawer,#page-crm .crm-scrim,#page-crm .kb-shelf,#page-crm .cx-row,#page-crm .cx-pop{transition:none;}
+  #page-crm .kb-card,#page-crm .kb-col,#page-crm .kb-list,#page-crm .crm-drawer,#page-crm .crm-scrim,#page-crm .cx-row,#page-crm .cx-pop{transition:none;}
   #page-crm .kb-card:hover,#page-crm .crm-kpis .kpi:hover{transform:none;}
   #page-crm .crm-kpis,#page-crm .kb-panel{perspective:none;}
   #page-crm .cx-bubble.is-new,#page-crm .cx-badge,#page-crm .cx-jump,#page-crm .cx-panel.is-enter,#page-crm .kb-count.pulse{animation:none;}
@@ -4392,6 +4419,7 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
         </div>
         <div id="crm-view-board">
           <div class="crm-kpis" id="crm-kpis"></div>
+          <div class="kb-hint">«Отказ» требует причину: при переносе карточки в эту колонку откроется форма - без причины сделка останется на месте.</div>
           <div class="kb-panel"><div class="kb-board" id="kb-board"></div></div>
         </div>
         <div id="crm-view-chats" style="display:none">
@@ -4425,10 +4453,6 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
             <aside class="cx-panel cx-panel--ctx"><div class="cx-scroll"><div class="cx-ctx" id="cx-ctx"><div class="cx-empty"><p>Здесь появятся клиент, заявка и сделка выбранного диалога.</p></div></div></div></aside>
           </div>
         </div>
-      </div>
-      <div class="kb-shelf" id="kb-shelf">
-        <div class="kb-shelf-zone kb-shelf-zone--won" data-stage="won"><span data-ico="won"></span>Сделка успешна</div>
-        <div class="kb-shelf-zone kb-shelf-zone--lost" data-stage="lost"><span data-ico="lost"></span>Отказ</div>
       </div>
       <div class="crm-scrim" id="crm-scrim" onclick="CRM.closeDrawer()"></div>
       <div class="crm-drawer" id="crm-drawer" aria-hidden="true"></div>
@@ -19858,7 +19882,8 @@ var CRM = (function () {
   var S = {
     inited: false, view: 'board', deals: [], summary: null, employees: null,
     me: (function () { try { return localStorage.getItem('crmMyExtension') || null; } catch (e) { return null; } })(),
-    kpiFilter: null,
+    kpiFilter: null, colSort: {}, // {stageKey: 'amount'} - крупная сумма колонки кликабельна (Влад, 08.09: "как в Битриксе")
+    collapsedCols: (function () { try { return JSON.parse(localStorage.getItem('crmCollapsedCols') || '{}'); } catch (e) { return {}; } })(),
     chats: [], chatsLoaded: false, activeKey: null, thread: null, filter: 'all',
     extra: { channel: null, resp: null, stage: null, overdue: false }, search: '',
     pollTimer: null, badgeTimer: null, unread: 0, drawerId: null, drawerDeal: null, lastMove: null,
@@ -20071,7 +20096,8 @@ var CRM = (function () {
   }
   function dealTitle(d) { return d.client_company || d.client_name || fmtPhone(d.client_phone) || 'Клиент Авито'; }
   function cardHtml(d) {
-    var fr = freshness(d);
+    var isWon = d.stage === 'won', isLost = d.stage === 'lost', isTerm = isWon || isLost;
+    var fr = isTerm ? '' : freshness(d); // свежесть/зависание не имеет смысла у закрытой сделки
     var cargo = [];
     if (d.cargo_type) cargo.push('<b>' + esc(d.cargo_type) + '</b>');
     if (d.route_from) cargo.push(esc(d.route_from) + (d.route_to ? ' → ' + esc(d.route_to) : ''));
@@ -20079,48 +20105,105 @@ var CRM = (function () {
     var meta = [];
     if (d.cargo_weight_tons) meta.push(esc(weight(d.cargo_weight_tons)));
     if (d.wanted_date) meta.push(esc(fmtDateRu(d.wanted_date)));
-    if (!meta.length) meta.push(esc(fmtListTime(d.updated_at)));
+    if (!meta.length) meta.push(esc(fmtListTime(isTerm ? d.closed_at || d.updated_at : d.updated_at)));
     var chan = d.source === 'avito' ? 'Авито' : 'Звонок';
     var unread = Number(d.unread_count || 0);
     var resp = d.responsible_name ? '<span class="kb-ava" title="' + esc(d.responsible_name) + '">' + esc(initials(d.responsible_name)) + '</span>' : '<span class="kb-ava is-none" title="Без ответственного">?</span>';
-    return '<article class="kb-card ' + fr + (S.drawerId === d.id ? ' is-open' : '') + '" data-id="' + d.id + '" tabindex="0" title="' + esc(fr === 'kb-stale' ? 'Зависла: без движения дольше ' + stallDays(d.stage) + ' дн.' : fr === 'kb-wait' ? 'Клиент ждёт ответа больше 2 часов' : '') + '">' +
-      '<header class="kb-card-top"><span class="kb-client">' + esc(dealTitle(d)) + '</span><span class="kb-pulse"></span></header>' +
+    // Статус-маркер: пульс свежести у открытых, галочка у выигранных, крестик у отказов
+    // (канон mx-won-check из превью - examples/design-reference-kanban.html).
+    var statusMark = isWon ? '<span class="kb-won-check" title="Сделка успешна">' + ico('check') + '</span>'
+      : isLost ? '<span class="kb-lost-mark" title="Отказ">' + ico('close') + '</span>'
+      : '<span class="kb-pulse"></span>';
+    var lossLine = (isLost && d.loss_reason) ? '<div class="kb-card-loss">' + esc(d.loss_reason) + '</div>' : '';
+    return '<article class="kb-card ' + fr + (isWon ? ' kb-won-style' : '') + (isLost ? ' kb-lost-style' : '') + (S.drawerId === d.id ? ' is-open' : '') + '" data-id="' + d.id + '" tabindex="0" title="' + esc(fr === 'kb-stale' ? 'Зависла: без движения дольше ' + stallDays(d.stage) + ' дн.' : fr === 'kb-wait' ? 'Клиент ждёт ответа больше 2 часов' : '') + '">' +
+      '<header class="kb-card-top"><span class="kb-client">' + esc(dealTitle(d)) + '</span>' + statusMark + '</header>' +
       '<div class="kb-cargo">' + cargoLine + '</div>' +
       '<div class="kb-meta">' + meta.map(function (m) { return '<span class="kb-num">' + m + '</span>'; }).join('<span class="kb-dotsep"></span>') + '<span class="kb-chan">' + chan + '</span></div>' +
+      lossLine +
       '<footer class="kb-card-bot"><span class="kb-sum' + (Number(d.amount) ? '' : ' is-empty') + '">' + (Number(d.amount) ? money(d.amount) : 'без суммы') + '</span>' +
         '<span style="display:flex;align-items:center;gap:8px">' + (unread ? '<span class="kb-unread">' + ico('chat') + '<span class="crm-badge">' + unread + '</span></span>' : '') + resp + '</span></footer>' +
       '</article>';
   }
+  // Все 7 стадий - обычные колонки (Влад, 08.09: "как в превью") - терминальные исключаются
+  // из фильтров сводки ("зависшие"/"недозвоны" - про ОТКРЫТЫЙ пайплайн), но не из доски.
   function boardDeals() {
-    var list = S.deals.filter(function (d) { return d.stage !== 'won' && d.stage !== 'lost'; });
-    if (S.kpiFilter === 'stalled') list = list.filter(function (d) { return freshness(d) === 'kb-stale'; });
-    if (S.kpiFilter === 'missed') list = list.filter(function (d) { return d.source === 'call' && dt(d.updated_at) && sameDay(dt(d.updated_at), new Date()); });
+    var list = S.deals.slice();
+    if (S.kpiFilter === 'stalled') list = list.filter(function (d) { return d.stage === 'won' || d.stage === 'lost' || freshness(d) === 'kb-stale'; });
+    if (S.kpiFilter === 'missed') list = list.filter(function (d) { return d.stage === 'won' || d.stage === 'lost' || (d.source === 'call' && dt(d.updated_at) && sameDay(dt(d.updated_at), new Date())); });
     return list;
+  }
+  // Крупная сумма колонки (Влад, 08.09: "как в Битриксе, и чтобы была интерактивной") -
+  // клик переключает сортировку карточек колонки: по свежести (по умолчанию, как отдаёт
+  // сервер) <-> по убыванию суммы. Не декорация - реальное действие, как у KPI-плиток выше.
+  function colHeroHtml(st, sum, ds) {
+    var active = S.colSort[st.key] === 'amount';
+    return '<button class="kb-col-hero' + (active ? ' is-sorted' : '') + '" data-nav-sound onclick="CRM.toggleColSort(\'' + st.key + '\')" title="' + (active ? 'Сортировка по сумме - нажмите для сортировки по свежести' : 'Нажмите, чтобы отсортировать по сумме') + '" aria-pressed="' + active + '">' +
+      '<span class="kb-col-hero-val">' + (sum ? shortMoney(sum) : '—') + '</span>' +
+      (ds.length ? '<span class="kb-col-hero-sub">' + ds.length + ' ' + plural(ds.length, 'сделка', 'сделки', 'сделок') + (active ? ' · по сумме' : '') + '</span>' : '') +
+      '</button>';
+  }
+  function sortedDealsForStage(key, ds) {
+    ds = ds.slice();
+    if (S.colSort[key] === 'amount') ds.sort(function (a, b) { return Number(b.amount || 0) - Number(a.amount || 0); });
+    return ds;
+  }
+  function toggleColSort(key) {
+    S.colSort[key] = S.colSort[key] === 'amount' ? null : 'amount';
+    renderBoard();
+  }
+  // Сворачивание колонки в узкую полоску (Влад, 08.09: "кнопка скрыть/показать Отказ") -
+  // канон Kanban Tool/Jira, состояние на клиенте (localStorage), переживает перезагрузку.
+  // Любая колонка сворачиваемая (не только "Отказ") - симметрично удобнее, чем частный случай.
+  function toggleColCollapse(key) {
+    S.collapsedCols[key] = !S.collapsedCols[key];
+    try { localStorage.setItem('crmCollapsedCols', JSON.stringify(S.collapsedCols)); } catch (e) {}
+    renderBoard();
+  }
+  function colHeadHtml(st, count, collapsed) {
+    return '<header class="kb-col-head" ' + (collapsed ? 'onclick="CRM.toggleColCollapse(\'' + st.key + '\')" title="Показать «' + esc(st.label) + '»"' : '') + '>' +
+      '<span class="kb-stage-dot" style="--stage:' + st.color + '"></span>' +
+      (collapsed ? '' : '<h4 class="kb-col-title" title="' + esc(st.label) + '">' + esc(st.label) + '</h4>') +
+      '<span class="kb-count" id="kb-cnt-' + st.key + '">' + count + '</span>' +
+      '<button class="kb-col-toggle" data-nav-sound onclick="event.stopPropagation();CRM.toggleColCollapse(\'' + st.key + '\')" title="' + (collapsed ? 'Показать' : 'Скрыть') + ' колонку «' + esc(st.label) + '»">' + ico('chevron') + '</button>' +
+      '</header>';
+  }
+  // Сводка над доской выравнивается по ФАКТИЧЕСКОЙ ширине канбана (Влад, 08.09: "верхники
+  // должны быть равны ширине колонок, чтобы экран смотрелся целостно") - ширина канбана
+  // плавает (кол-во/ширина колонок, сворачивание), поэтому меряем реальный DOM, не считаем
+  // числами заранее - переживает любое будущее изменение состава колонок само.
+  function alignKpisToBoard() {
+    var kpis = el('crm-kpis'), board = el('kb-board');
+    if (!kpis || !board) return;
+    requestAnimationFrame(function () { kpis.style.maxWidth = board.scrollWidth ? board.scrollWidth + 'px' : ''; });
   }
   function renderBoard() {
     var board = el('kb-board'); if (!board) return;
     var deals = boardDeals();
     var html = '';
-    OPEN_STAGES.forEach(function (st) {
-      var ds = deals.filter(function (d) { return d.stage === st.key; });
+    STAGES.forEach(function (st) {
+      var collapsed = !!S.collapsedCols[st.key];
+      var ds = sortedDealsForStage(st.key, deals.filter(function (d) { return d.stage === st.key; }));
       var sum = ds.reduce(function (a, d) { return a + Number(d.amount || 0); }, 0);
-      html += '<section class="kb-col" data-colwrap="' + st.key + '"><header class="kb-col-head"><span class="kb-stage-dot" style="--stage:' + st.color + '"></span>' +
-        '<h4 class="kb-col-title" title="' + esc(st.label) + '">' + esc(st.label) + '</h4><span class="kb-count" id="kb-cnt-' + st.key + '">' + ds.length + '</span>' +
-        '<span class="kb-col-sum" id="kb-sum-' + st.key + '">' + (sum ? shortMoney(sum) : '') + '</span></header>' +
-        '<div class="kb-list" data-col="' + st.key + '">' + (ds.length ? ds.map(cardHtml).join('') : '<div class="kb-empty">' + (st.key === 'new' ? 'Новых заявок нет' : 'Пусто') + '</div>') + '</div></section>';
+      html += '<section class="kb-col' + (collapsed ? ' is-collapsed' : '') + '" data-colwrap="' + st.key + '">' + colHeadHtml(st, ds.length, collapsed) +
+        (collapsed ? '' :
+          '<div class="kb-col-herowrap" id="kb-hero-' + st.key + '">' + colHeroHtml(st, sum, ds) + '</div>' +
+          '<div class="kb-list" data-col="' + st.key + '">' + (ds.length ? ds.map(cardHtml).join('') : '<div class="kb-empty">' + (st.key === 'new' ? 'Новых заявок нет' : 'Пусто') + '</div>') + '</div>') +
+        '</section>';
     });
     board.innerHTML = html;
     board.querySelectorAll('.kb-card').forEach(bindCard);
+    alignKpisToBoard();
   }
   function dealById(id) { return S.deals.find(function (d) { return d.id === id; }) || null; }
   function updateHeaders() {
-    OPEN_STAGES.forEach(function (st) {
+    STAGES.forEach(function (st) {
       var list = el('kb-board').querySelector('.kb-list[data-col="' + st.key + '"]'); if (!list) return;
       var ids = Array.prototype.map.call(list.querySelectorAll(':scope > .kb-card'), function (c) { return Number(c.getAttribute('data-id')); });
-      var cnt = el('kb-cnt-' + st.key), sumEl = el('kb-sum-' + st.key);
+      var cnt = el('kb-cnt-' + st.key), heroWrap = el('kb-hero-' + st.key);
       if (cnt && cnt.textContent !== String(ids.length)) { cnt.textContent = ids.length; cnt.classList.remove('pulse'); void cnt.offsetWidth; cnt.classList.add('pulse'); }
-      var sum = ids.reduce(function (a, id) { var d = dealById(id); return a + (d ? Number(d.amount || 0) : 0); }, 0);
-      if (sumEl) sumEl.textContent = sum ? shortMoney(sum) : '';
+      var ds = ids.map(dealById).filter(Boolean);
+      var sum = ds.reduce(function (a, d) { return a + Number(d.amount || 0); }, 0);
+      if (heroWrap) heroWrap.innerHTML = colHeroHtml(st, sum, ds);
       var empty = list.querySelector('.kb-empty'); if (empty && ids.length) empty.remove();
     });
   }
@@ -20148,8 +20231,7 @@ var CRM = (function () {
       var startX = e.clientX, startY = e.clientY, dragging = false, cancelled = false;
       var placeholder = null, rectAtStart = null, fromCol = null, fromIndex = 0, rafId = null;
       var cur = { x: 0, y: 0 }, target = { x: 0, y: 0 };
-      var board = el('kb-board'), shelf = el('kb-shelf');
-      var overShelf = null;
+      var board = el('kb-board');
       try { card.setPointerCapture(e.pointerId); } catch (x) {} // синтетические события без pointerId - не повод падать
       function physics() {
         cur.x += (target.x - cur.x) * 0.28; cur.y += (target.y - cur.y) * 0.28;
@@ -20170,17 +20252,13 @@ var CRM = (function () {
           card.style.position = 'fixed'; card.style.left = rectAtStart.left + 'px'; card.style.top = rectAtStart.top + 'px'; card.style.width = rectAtStart.width + 'px';
           card.style.margin = '0'; card.style.zIndex = '1000'; card.style.pointerEvents = 'none'; card.style.willChange = 'transform';
           card.classList.add('kb-lifted'); document.body.appendChild(card);
-          shelf.classList.add('is-on');
           snd.lift(); vibrate(8);
           if (reduced()) { card.style.transform = 'translate(0,0) scale(1.03)'; } else physics();
         }
         target.x = dx; target.y = dy;
         if (reduced()) card.style.transform = 'translate(' + dx + 'px,' + dy + 'px) scale(1.03)'; // reduced-motion: позиция напрямую, без rAF
         var under = document.elementFromPoint(ev.clientX, ev.clientY);
-        var zone = under ? under.closest('.kb-shelf-zone') : null;
-        overShelf = zone ? zone.getAttribute('data-stage') : null;
-        shelf.querySelectorAll('.kb-shelf-zone').forEach(function (z) { z.classList.toggle('kb-drop', z === zone); });
-        var list = (!zone && under) ? under.closest('.kb-list') : null;
+        var list = under ? under.closest('.kb-list') : null;
         board.querySelectorAll('.kb-col').forEach(function (c) { c.classList.toggle('kb-drop', !!(list && c.contains(list))); });
         if (list && board.contains(list)) {
           var sib = Array.prototype.slice.call(list.querySelectorAll(':scope > .kb-card')), ref = null;
@@ -20197,7 +20275,6 @@ var CRM = (function () {
         try { card.releasePointerCapture(e.pointerId); } catch (x) {}
         document.removeEventListener('pointermove', onMove); document.removeEventListener('pointerup', onUp); document.removeEventListener('pointercancel', onUp); window.removeEventListener('keydown', onKey);
         if (rafId) cancelAnimationFrame(rafId);
-        shelf.classList.remove('is-on'); shelf.querySelectorAll('.kb-shelf-zone').forEach(function (z) { z.classList.remove('kb-drop'); });
         board.querySelectorAll('.kb-col').forEach(function (c) { c.classList.remove('kb-drop'); });
       }
       function settle(toList) {
@@ -20218,22 +20295,25 @@ var CRM = (function () {
         var id = Number(card.getAttribute('data-id')), d = dealById(id);
         if (!dragging) { openDeal(id); return; }
         var fromList = board.querySelector('.kb-list[data-col="' + fromCol + '"]');
-        if (cancelled || (!overShelf && !placeholder.parentNode)) {
+        if (cancelled || !placeholder.parentNode) {
           // Esc: вернуть на исходное место
           var ref = fromList.querySelectorAll(':scope > .kb-card')[fromIndex] || null;
           if (placeholder.parentNode !== fromList) fromList.insertBefore(placeholder, ref);
           settle(fromList); snd.undo(); return;
         }
-        if (overShelf) {
-          // Полка: вернуть карточку в исходное место визуально, дальше - терминальный переход
-          var ref2 = fromList.querySelectorAll(':scope > .kb-card')[fromIndex] || null;
-          if (placeholder.parentNode !== fromList) fromList.insertBefore(placeholder, ref2);
+        var toList = placeholder.parentNode, toCol = toList.getAttribute('data-col');
+        if (toCol === 'won' || toCol === 'lost') {
+          // Терминальная стадия - карточка визуально возвращается на исходное место
+          // (переход не механический перенос, а действие с последствиями - причина
+          // отказа обязательна, победа играет отдельную сцену); winDeal/askLostReason
+          // сами доводят карточку до нужной колонки через renderBoard().
+          var refT = fromList.querySelectorAll(':scope > .kb-card')[fromIndex] || null;
+          if (placeholder.parentNode !== fromList) fromList.insertBefore(placeholder, refT);
           settle(fromList);
-          if (overShelf === 'won') winDeal(d, card, fromCol, fromIndex);
+          if (toCol === 'won') winDeal(d, card, fromCol, fromIndex);
           else askLostReason(d, fromCol, fromIndex);
           return;
         }
-        var toList = placeholder.parentNode, toCol = toList.getAttribute('data-col');
         settle(toList);
         snd.drop(); vibrate(12);
         if (toCol !== fromCol) {
@@ -20275,7 +20355,7 @@ var CRM = (function () {
     var fromAmount = Number(won.amount || 0), toAmount = fromAmount + Number(d.amount || 0);
     var kpi = el('crm-kpis') ? el('crm-kpis').querySelector('.kpi[data-kpi="won"]') : null;
     var valEl = kpi ? kpi.querySelector('.crm-kpi-val') : null;
-    var zone = el('kb-shelf').querySelector('.kb-shelf-zone--won');
+    var wonCol = el('kb-board') ? el('kb-board').querySelector('.kb-col[data-colwrap="won"]') : null;
     S.lastMove = { id: d.id, fromCol: fromCol, fromIndex: fromIndex, wasWin: true };
     post('/crm/deals/stage', { id: d.id, stage: 'won' }).then(function (r) {
       if (!r.ok) { d.stage = prevStage; renderBoard(); toast('Не удалось закрыть сделку: ' + esc((r.data && r.data.error) || 'ошибка сервера'), 'red'); return; }
@@ -20284,7 +20364,7 @@ var CRM = (function () {
     var rect = card.getBoundingClientRect();
     if (reduced() || document.hidden) { snd.win(); renderBoard(); toast(ico('check') + ' Сделка успешна · <b>' + money(d.amount) + '</b>', 'green', { label: 'Отменить', fn: undoWin }); return; }
     card.style.transition = 'opacity .3s ease'; card.style.opacity = '0.35';
-    zone.classList.add('kb-drop'); setTimeout(function () { zone.classList.remove('kb-drop'); }, 300);
+    if (wonCol) { wonCol.classList.add('kb-win-glow'); setTimeout(function () { wonCol.classList.remove('kb-win-glow'); }, 300); }
     setTimeout(function () { var cv = el('crm-celebrate'); if (cv && typeof bankCelebrate5_ === 'function') bankCelebrate5_(cv, rect.left + rect.width / 2, rect.top + 6, { colors: ['#1D9E75', '#EF9F27', '#e8e6df', '#378ADD'] }); }, 180);
     setTimeout(function () { snd.win(); }, 200); vibrate([20, 40, 20]);
     setTimeout(function () {
@@ -20904,7 +20984,7 @@ var CRM = (function () {
   }
 
   return {
-    init: init, rerender: rerender, showView: showView, openDeal: openDeal, closeDrawer: closeDrawer, setStage: setStage, winFromDrawer: winFromDrawer,
+    init: init, rerender: rerender, showView: showView, openDeal: openDeal, closeDrawer: closeDrawer, setStage: setStage, winFromDrawer: winFromDrawer, toggleColSort: toggleColSort, toggleColCollapse: toggleColCollapse,
     showLostForm: showLostForm, pickLostReason: pickLostReason, confirmLost: function (id) { confirmLost(id, el('dr-lost-reason') ? el('dr-lost-reason').value : ''); },
     saveMain: saveMain, saveBrief: saveBrief, saveContact: saveContact, assign: assign, askWhoAmI: askWhoAmI, setMe: setMe,
     setFilter: setFilter, toggleFilterPop: toggleFilterPop, setExtra: setExtra, resetExtra: resetExtra, closePops: closePops, onSearch: onSearch, clearSearch: clearSearch, resetAll: resetAll,

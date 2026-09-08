@@ -20861,36 +20861,25 @@ var CRM = (function () {
       '</header>';
   }
   // Сводка над доской (KPI-плитки + карточка топ-менеджеров) выравнивается по ФАКТИЧЕСКОЙ
-  // ширине канбана (Влад, 08.09: "верхники должны быть равны ширине колонок, чтобы экран
-  // смотрелся целостно"; повторная жалоба 08.09 - расходились на живой странице).
+  // ширине канбана (Влад, 08.09: "верхники должны быть равны ширине колонок"; повторная
+  // жалоба 08.09 - "ширина разная" - предыдущая версия ЧЕРЕЗ ИЗМЕРЕНИЕ ДОМА (scrollWidth
+  // + ResizeObserver/MutationObserver/fonts.ready) так и осталась ненадёжной - слишком
+  // много источников гонки за один снимок времени, чинить их по одному оказалось бесконечно.
   //
-  // Корень расхождения: kb-board САМ является overflow-x:auto контейнером (не просто его
-  // обёртка) - если колонки в сумме шире доступного места, board.clientWidth (свой рендер-
-  // размер) остаётся равен ширине родителя, а board.scrollWidth (то, что нужно верхникам)
-  // растёт независимо. ResizeObserver следит только за СОБСТВЕННЫМ боксом элемента - он не
-  // видит изменение scrollWidth, когда контент переполняется/опустошается ВНУТРИ уже
-  // неизменного по размеру board (частая ложная надежда на ResizeObserver для этого класса
-  // задач - здесь не подходит). Второй источник расхождения - гонка с загрузкой шрифтов:
-  // первое измерение (сразу после renderBoard()) может пройти ДО того, как моно-шрифт с
-  // цифрами (JetBrains Mono, табличные цифры) реально применился - системный фолбэк уже
-  // отрисован уже, но чуть уже, и сумма колонок пересчитывается по итоговой более широкой
-  // раскладке уже после первого измерения. Оба источника закрываются разом:
-  // MutationObserver на childList/subtree board (ловит ЛЮБУЮ перестройку колонок - и
-  // renderBoard() сам, и без нужды помнить дёрнуть выравнивание из каждого места, которое
-  // меняет доску) + одноразовая доверка после document.fonts.ready.
-  var kpiAlignObserver_ = null, kpiFontsWatched_ = false;
+  // Правильный фикс - НЕ мерить DOM вообще, а СЧИТАТЬ ширину доски арифметически из тех же
+  // констант, что и её собственная CSS-раскладка (.kb-col width:248px/collapsed 40px,
+  // .kb-board gap:10px, padding 2px слева+справа) - детерминированно, без единого кадра
+  // ожидания и без риска поймать плохой момент измерения (шрифт, layout, что угодно ещё).
+  // Держать эти числа синхронно с CSS выше - если поменяется .kb-col/.kb-board, поменять
+  // и здесь (то же обязательство, что у любой другой задублированной константы разметки).
+  var KB_COL_W_ = 248, KB_COL_COLLAPSED_W_ = 40, KB_GAP_ = 10, KB_PAD_X_ = 4;
+  function boardTargetWidth_() {
+    var w = KB_PAD_X_;
+    STAGES.forEach(function (st, i) { w += S.collapsedCols[st.key] ? KB_COL_COLLAPSED_W_ : KB_COL_W_; if (i) w += KB_GAP_; });
+    return w;
+  }
   function alignKpisToBoard() {
-    var board = el('kb-board');
-    if (!board) return;
-    requestAnimationFrame(function () { applyKpiAlignWidth_(board.scrollWidth); });
-    if (!kpiAlignObserver_ && typeof MutationObserver !== 'undefined') {
-      kpiAlignObserver_ = new MutationObserver(function () { applyKpiAlignWidth_(board.scrollWidth); });
-      kpiAlignObserver_.observe(board, { childList: true, subtree: true });
-    }
-    if (!kpiFontsWatched_ && document.fonts && document.fonts.ready) {
-      kpiFontsWatched_ = true;
-      document.fonts.ready.then(function () { applyKpiAlignWidth_(board.scrollWidth); });
-    }
+    applyKpiAlignWidth_(boardTargetWidth_());
   }
   function applyKpiAlignWidth_(w) {
     var px = w ? w + 'px' : '';
@@ -21084,7 +21073,37 @@ var CRM = (function () {
   function refreshSummary() { api('/crm/summary').then(function (r) { if (r.ok) { S.summary = r.data; renderKpis(); renderLeaders(); } }).catch(function () {}); }
 
   // Победа: хореография mxWin (t=0..2200): подсветка → салют → фанфара → перелёт суммы → одометр → тост с Отменить
+  // Обязательные поля для закрытия сделки успешно (Влад 08.09: "чтобы перевести сделку в
+  // успешно обязательно должна быть сумма и заполнена номер строки в 1С") - ОДНА проверка,
+  // используется везде, откуда можно попасть в 'won' (drag-drop, кнопка в drawer, прямой
+  // выбор стадии из выпадашки в чате - setStage()), не разбросана по местам входа.
+  function wonRequirementsMissing_(d) {
+    var missing = [];
+    if (!(Number(d.amount) > 0)) missing.push('сумма');
+    if (!String(d.order_1c_number || '').trim()) missing.push('номер заказа в 1С');
+    return missing.length ? missing : null;
+  }
+  // Поздравление в тосте вместо голой галочки (Влад 08.09: "должна быть короткая надпись
+  // поздравление менеджера" - crm-drawer/toast раньше показывал огромный ico('check') без
+  // размерного класса - в тосте это рендерилось гигантской иконкой, не текстом). Минимум
+  // 10 формулировок вразнобой, тон растёт вместе с уровнем сделки (тот же bankWinLevel_,
+  // что у салюта/фанфары - 1-2: обычная сделка, 3: крупная, 4: миллионник).
+  // ВАЖНО: каждая фраза начинается РОВНО с "{name}, " - иначе фолбэк без имени ниже
+  // (строка без ответственного) не сможет аккуратно вырезать плейсхолдер из середины фразы.
+  var WIN_PHRASES_ = {
+    1: ['{name}, есть! Ещё одна сделка в копилке.', '{name}, чисто сработано - сделка в кармане.', '{name}, готово - клиент доволен, план ближе.', '{name}, ровно как надо - плюс одна закрытая.'],
+    2: ['{name}, отличная сделка! Так держать.', '{name}, хороший результат - клиент в надёжных руках.', '{name}, сильно сработано - заметный вклад в план месяца.', '{name}, красиво - именно такие сделки и нужны.'],
+    3: ['{name}, крупная победа! Такие сделки решают месяц.', '{name}, впечатляюще - серьёзная сумма, серьёзная работа.', '{name}, вот это сделка! Коллеги оценят.', '{name}, мощно - план месяца стал заметно ближе.'],
+    4: ['{name}, это космос! Сделка месяца, без вопросов.', '{name}, невероятно - миллионная сделка закрыта!', '{name}, легенда! Такое не каждый день бывает.', '{name}, вот это да - такую сделку запомнят надолго.'],
+  };
+  function winPhrase_(level, name) {
+    var pool = WIN_PHRASES_[level] || WIN_PHRASES_[1];
+    var text = pool[Math.floor(Math.random() * pool.length)];
+    return name ? text.replace('{name}', name) : text.replace(/^\{name\},\s*/, '').replace(/^./, function (c) { return c.toUpperCase(); });
+  }
   function winDeal(d, card, fromCol, fromIndex) {
+    var missing = wonRequirementsMissing_(d);
+    if (missing) { toast('Нельзя закрыть сделку успешно - не заполнено: ' + esc(missing.join(', ')) + '.', 'amber'); openDeal(d.id); return; }
     var prevStage = d.stage; d.stage = 'won'; d.closed_at = new Date().toISOString();
     var won = S.summary && S.summary.won_month ? S.summary.won_month : { count: 0, amount: 0 };
     var fromAmount = Number(won.amount || 0), toAmount = fromAmount + Number(d.amount || 0);
@@ -21097,9 +21116,11 @@ var CRM = (function () {
       refreshSummaryLater();
     }).catch(function () { d.stage = prevStage; renderBoard(); toast('Нет соединения - сделка не закрыта', 'red'); });
     var rect = card.getBoundingClientRect();
+    var winLevel0 = (typeof bankWinLevel_ === 'function') ? bankWinLevel_(Number(d.amount) || 0) : 1;
+    var winName0 = d.responsible_name ? String(d.responsible_name).trim().split(/\s+/)[0] : '';
     if (reduced() || document.hidden) {
-      if (typeof bankWinFanfare_ === 'function') bankWinFanfare_((typeof bankWinLevel_ === 'function') ? bankWinLevel_(Number(d.amount) || 0) : 1); else snd.win();
-      renderBoard(); toast(ico('check') + ' Сделка успешна · <b>' + money(d.amount) + '</b>', 'green', { label: 'Отменить', fn: undoWin }); return;
+      if (typeof bankWinFanfare_ === 'function') bankWinFanfare_(winLevel0); else snd.win();
+      renderBoard(); toast(esc(winPhrase_(winLevel0, winName0)) + ' <b>' + money(d.amount) + '</b>', 'green', { label: 'Отменить', fn: undoWin }); return;
     }
     card.style.transition = 'opacity .3s ease'; card.style.opacity = '0.35';
     if (wonCol) { wonCol.classList.add('kb-win-glow'); setTimeout(function () { wonCol.classList.remove('kb-win-glow'); }, 300); }
@@ -21109,7 +21130,7 @@ var CRM = (function () {
     // с залпом (win/win2/win3/win4). Влад 08.09: "успешная сделка сопровождается салютом
     // как у нас в приходах больших денег" - раньше здесь был фиксированный один залп вне
     // зависимости от суммы сделки.
-    var winLevel = (typeof bankWinLevel_ === 'function') ? bankWinLevel_(Number(d.amount) || 0) : 1;
+    var winLevel = winLevel0;
     setTimeout(function () {
       var cv = el('crm-celebrate'); if (!cv || typeof bankCelebrate5_ !== 'function') return;
       var cx = rect.left + rect.width / 2, cy = rect.top + 6;
@@ -21139,7 +21160,7 @@ var CRM = (function () {
       };
       if (sumEl && valEl && Number(d.amount) && typeof bankFlySum_ === 'function') bankFlySum_(sumEl, valEl, money(d.amount), after); else after();
     }, 260);
-    setTimeout(function () { toast(ico('check') + ' Сделка успешна · <b>' + money(d.amount) + '</b>', 'green', { label: 'Отменить', fn: undoWin }); }, 600);
+    setTimeout(function () { toast(esc(winPhrase_(winLevel, winName0)) + ' <b>' + money(d.amount) + '</b>', 'green', { label: 'Отменить', fn: undoWin }); }, 600);
   }
   function undoWin() {
     var mv = S.lastMove; if (!mv || !mv.wasWin) return; S.lastMove = null;
@@ -21464,9 +21485,22 @@ var CRM = (function () {
       .catch(function () { toast('Нет соединения', 'red'); setPlayersHtml_(entryId, idlePillHtml_(entryId)); });
   }
 
+  // Прямой выбор стадии (в т.ч. выпадашка в панели чата - CRM_UX.md, единственное место,
+  // где 'won'/'lost' выбираются НЕ через drag-drop/кнопку в drawer) идёт через ТЕ ЖЕ
+  // ворота, что и остальные пути в won/lost - иначе обязательные поля/причина отказа
+  // обходятся тихой сменой значения в <select>.
   function setStage(id, stage) {
     var d = dealById(id); if (!d) return;
     var prev = d.stage; if (prev === stage) return;
+    if (stage === 'won') {
+      var missing = wonRequirementsMissing_(d);
+      if (missing) { toast('Нельзя закрыть сделку успешно - не заполнено: ' + esc(missing.join(', ')) + '.', 'amber'); return; }
+      var card = el('kb-board').querySelector('.kb-card[data-id="' + id + '"]');
+      if (card) { winDeal(d, card, prev, 0); return; }
+      // Карточки нет в DOM (сделка вне текущего фильтра доски) - без хореографии, но с той
+      // же проверкой полей выше, тише не значит без правил.
+    }
+    if (stage === 'lost') { askLostReason(d, prev, 0); return; }
     d.stage = stage; if (stage !== 'won' && stage !== 'lost') { d.closed_at = null; d.loss_reason = null; }
     renderBoard(); snd.drop();
     if (S.drawerDeal && S.drawerDeal.deal.id === id) { S.drawerDeal.deal.stage = stage; renderDrawer(); }
@@ -21476,7 +21510,13 @@ var CRM = (function () {
       refreshSummary();
     }).catch(function () { d.stage = prev; renderBoard(); toast('Нет соединения', 'red'); });
   }
-  function winFromDrawer(id) { var d = dealById(id); if (!d) return; var card = el('kb-board').querySelector('.kb-card[data-id="' + id + '"]'); closeDrawer(); if (card) winDeal(d, card, d.stage, 0); else { setStage(id, 'won'); snd.win(); } }
+  function winFromDrawer(id) {
+    var d = dealById(id); if (!d) return;
+    var missing = wonRequirementsMissing_(d);
+    if (missing) { toast('Нельзя закрыть сделку успешно - не заполнено: ' + esc(missing.join(', ')) + '.', 'amber'); return; } // drawer остаётся открытым - поля тут же, под рукой
+    var card = el('kb-board').querySelector('.kb-card[data-id="' + id + '"]'); closeDrawer();
+    if (card) winDeal(d, card, d.stage, 0); else { setStage(id, 'won'); }
+  }
   function showLostForm(id) { var f = el('dr-lost-form'); if (f) { f.style.display = ''; var i = el('dr-lost-reason'); if (i) i.focus(); } }
   function pickLostReason(btn) { var i = el('dr-lost-reason'); if (i) i.value = btn.textContent; btn.parentNode.querySelectorAll('.crm-chip').forEach(function (b) { b.setAttribute('aria-pressed', b === btn); }); }
   function saveMain(id) { saveDealFields(id, { amount: el('dr-amount') ? el('dr-amount').value : undefined, order_1c_number: el('dr-order') ? el('dr-order').value : undefined }, 'dr-saved-main', function () { renderBoard(); }); }

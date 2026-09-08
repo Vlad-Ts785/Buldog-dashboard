@@ -19897,7 +19897,7 @@ var CRM = (function () {
     extra: { channel: null, resp: null, stage: null, overdue: false }, search: '',
     pollTimer: null, badgeTimer: null, unread: 0, drawerId: null, drawerDeal: null, lastMove: null,
     lostPending: null, pendingLocal: 0, atBottom: true, clockTimer: null,
-    audioEntry: null, audioEl: null, audioUrl: null, audioBtn: null, // текущая проигрываемая запись звонка (playRecording_)
+    audioEntry: null, audioEl: null, audioUrl: null, audioReqSeq_: 0, // текущая проигрываемая запись звонка (playRecording)
   };
 
   // ── Утилиты ─────────────────────────────────────────────────────────────────────────
@@ -20617,6 +20617,7 @@ var CRM = (function () {
   function cssEsc_(s) { return window.CSS && CSS.escape ? CSS.escape(s) : String(s).replace(/["\\]/g, '\\$&'); }
   function stopPlayback_() {
     var prevEntry = S.audioEntry;
+    S.audioReqSeq_++; // инвалидирует ответ ещё летящего запроса (если он был) - см. playRecording
     if (S.audioEl) S.audioEl.pause();
     if (S.audioUrl) { try { URL.revokeObjectURL(S.audioUrl); } catch (e) {} }
     S.audioEl = null; S.audioUrl = null; S.audioEntry = null;
@@ -20632,15 +20633,19 @@ var CRM = (function () {
     }
     stopPlayback_(); // один звук за раз - вторая запись останавливает первую, как в любом плеере
     setPlayBtnState_(entryId, 'loading');
+    // reqId - защита от гонки: клик по ДРУГОЙ кнопке, пока первый запрос ещё летит, не должен
+    // дать устаревшему ответу перезапустить не тот звук поверх уже начатого/остановленного.
+    var reqId = ++S.audioReqSeq_;
     fetch(YARD_API_BASE + '/crm/mango/recording?entry_id=' + encodeURIComponent(entryId), { headers: { 'X-Session-Token': SESSION_TOKEN } })
       .then(function (res) {
-        if (res.status === 202) { toast('Запись ещё готовится в Mango - попробуйте через минуту', 'amber'); setPlayBtnState_(entryId, 'idle'); return null; }
-        if (res.status === 404) { toast('Для этого звонка нет записи', 'amber'); setPlayBtnState_(entryId, 'idle'); return null; }
-        if (!res.ok) { toast('Не удалось загрузить запись', 'red'); setPlayBtnState_(entryId, 'idle'); return null; }
+        if (res.status === 202) { if (reqId === S.audioReqSeq_) { toast('Запись ещё готовится в Mango - попробуйте через минуту', 'amber'); setPlayBtnState_(entryId, 'idle'); } return null; }
+        if (res.status === 404) { if (reqId === S.audioReqSeq_) { toast('Для этого звонка нет записи', 'amber'); setPlayBtnState_(entryId, 'idle'); } return null; }
+        if (!res.ok) { if (reqId === S.audioReqSeq_) { toast('Не удалось загрузить запись', 'red'); setPlayBtnState_(entryId, 'idle'); } return null; }
         return res.blob();
       })
       .then(function (blob) {
         if (!blob) return;
+        if (reqId !== S.audioReqSeq_) { return; } // пользователь уже кликнул что-то другое - этот ответ больше не актуален
         var url = URL.createObjectURL(blob);
         var audio = new Audio(url);
         S.audioEl = audio; S.audioUrl = url; S.audioEntry = entryId;

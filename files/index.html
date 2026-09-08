@@ -1690,6 +1690,14 @@ main:has(> #page-crm.active){max-width:none;}
 .cx-pop-title{font:500 12.5px/1.2 var(--font-body);color:var(--text);display:flex;align-items:center;gap:8px;}
 .cx-pop-preview{font:400 11px/1.3 var(--font-body);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .cx-pop-sep{height:1px;background:var(--border);margin:4px 6px;}
+/* Шаблоны ответов - свои у каждого менеджера (сервер, не localStorage) - Влад 08.09.
+   Кастомный шаблон получает крестик-удаление, общие 4 заготовки (DEFAULT_TEMPLATES) - нет. */
+.cx-pop-item.cx-tpl-row{display:flex;align-items:center;gap:6px;padding-right:6px;}
+.cx-pop-item.cx-tpl-row .cx-pop-item-main{display:grid;row-gap:2px;flex:1;min-width:0;}
+.cx-tpl-del{appearance:none;flex:none;width:20px;height:20px;border-radius:6px;border:0;background:transparent;color:var(--muted);
+  display:inline-flex;align-items:center;justify-content:center;cursor:pointer;opacity:.55;transition:opacity .12s,color .12s,background-color .12s;}
+.cx-tpl-del svg{width:10px;height:10px;}
+.cx-tpl-del:hover{opacity:1;color:var(--red);background:var(--bg4);}
 
 /* ── Чаты: три панели ────────────────────────────────────────────────────────────── */
 .cx{display:grid;grid-template-columns:var(--cx-list-w) minmax(0,1fr) var(--cx-ctx-w);gap:var(--cx-gap);height:calc(100vh - var(--cx-chrome));min-height:480px;}
@@ -20497,6 +20505,7 @@ var CRM = (function () {
     pollTimer: null, badgeTimer: null, unread: 0, drawerId: null, drawerDeal: null, lastMove: null,
     lostPending: null, pendingLocal: 0, atBottom: true, clockTimer: null,
     audioEntry: null, audioEl: null, audioUrl: null, audioReqSeq_: 0, // текущая проигрываемая запись звонка (playRecording)
+    templates: null, // кастомные шаблоны ответов ЭТОГО менеджера (сервер) - null пока не загружены, см. ensureTemplates
   };
 
   // ── Утилиты ─────────────────────────────────────────────────────────────────────────
@@ -20591,6 +20600,7 @@ var CRM = (function () {
       updateMeLabel();
       updatePushButton();
       autoMeForManager();
+      ensureTemplates(); // прогрев - к первому открытию композера список уже готов
     }
     load();
   }
@@ -21631,20 +21641,55 @@ var CRM = (function () {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
     if (e.key === 'Escape') { closePops(); }
   }
-  function templates() { var custom = []; try { custom = JSON.parse(localStorage.getItem('crmTemplates') || '[]'); } catch (e) {} return DEFAULT_TEMPLATES.concat(custom); }
+  // ── Шаблоны ответов - свои у КАЖДОГО менеджера (Влад 08.09: "у каждого менеджера свои
+  // заготовки") - хранятся на сервере по email из сессии (не по self-declared S.me/
+  // добавочному - логин надёжнее), не в localStorage: раньше шаблоны были привязаны к
+  // браузеру/компьютеру, не к человеку - на другом устройстве или у другого сотрудника за
+  // тем же компьютером список был либо пустым, либо чужим. DEFAULT_TEMPLATES (4 общих
+  // заготовки) остаются захардкожены на фронте и одинаковы у всех - их нельзя удалить.
+  function ensureTemplates() {
+    if (S.templates) return Promise.resolve(S.templates);
+    return api('/crm/templates').then(function (r) { S.templates = (r.ok && Array.isArray(r.data.templates)) ? r.data.templates : []; return S.templates; })
+      .catch(function () { S.templates = []; return S.templates; });
+  }
+  function templatesAll() { return DEFAULT_TEMPLATES.concat(S.templates || []); }
+  function saveTemplatesList_(list) {
+    var prev = S.templates;
+    S.templates = list; // оптимистично - список сразу виден в попапе, не ждём ответ сервера
+    renderTemplatesPop_();
+    postBody('/crm/templates', { templates: list }).then(function (r) {
+      if (!r.ok) { S.templates = prev; renderTemplatesPop_(); toast('Не удалось сохранить: ' + esc((r.data && r.data.error) || 'ошибка сервера'), 'red'); }
+    }).catch(function () { S.templates = prev; renderTemplatesPop_(); toast('Нет соединения - изменение не сохранено', 'red'); });
+  }
   function toggleTemplates(force) {
     var pop = el('cx-tpl-pop'); if (pop.classList.contains('open') && !force) { closePops(); return; }
-    pop.innerHTML = templates().map(function (t, i) { return '<div class="cx-pop-item" onclick="CRM.useTemplate(' + i + ')"><span class="cx-pop-title">' + esc(t.title) + '</span><span class="cx-pop-preview">' + esc(t.text) + '</span></div>'; }).join('') +
-      '<div class="cx-pop-sep"></div><div class="cx-pop-item" onclick="CRM.saveTemplate()"><span class="cx-pop-title" style="color:var(--muted)">' + ico('note') + 'Сохранить текст из поля как шаблон</span></div>';
-    pop.classList.add('open');
+    ensureTemplates().then(function () { renderTemplatesPop_(); pop.classList.add('open'); });
   }
-  function useTemplate(i) { var t = templates()[i]; if (!t) return; var inp = el('cx-input'); inp.value = (inp.value === '/' ? '' : inp.value) + t.text; onInput(); closePops(); inp.focus(); }
+  function renderTemplatesPop_() {
+    var pop = el('cx-tpl-pop'); if (!pop) return;
+    var defCount = DEFAULT_TEMPLATES.length;
+    pop.innerHTML = templatesAll().map(function (t, i) {
+      var isCustom = i >= defCount;
+      return '<div class="cx-pop-item' + (isCustom ? ' cx-tpl-row' : '') + '">' +
+        '<span class="' + (isCustom ? 'cx-pop-item-main' : '') + '" style="cursor:pointer;min-width:0" onclick="CRM.useTemplate(' + i + ')"><span class="cx-pop-title">' + esc(t.title) + '</span><span class="cx-pop-preview">' + esc(t.text) + '</span></span>' +
+        (isCustom ? '<button type="button" class="cx-tpl-del" title="Удалить шаблон" onclick="event.stopPropagation();CRM.deleteTemplate(' + (i - defCount) + ')">' + ico('close') + '</button>' : '') +
+        '</div>';
+    }).join('') +
+      '<div class="cx-pop-sep"></div><div class="cx-pop-item" onclick="CRM.saveTemplate()"><span class="cx-pop-title" style="color:var(--muted)">' + ico('note') + 'Сохранить текст из поля как шаблон</span></div>';
+  }
+  function useTemplate(i) { var t = templatesAll()[i]; if (!t) return; var inp = el('cx-input'); inp.value = (inp.value === '/' ? '' : inp.value) + t.text; onInput(); closePops(); inp.focus(); }
   function saveTemplate() {
     var inp = el('cx-input'); var text = (inp.value || '').trim().replace(/^\/$/, ''); if (!text) { toast('Сначала напишите текст в поле - он и станет шаблоном', 'amber'); return; }
-    var custom = []; try { custom = JSON.parse(localStorage.getItem('crmTemplates') || '[]'); } catch (e) {}
-    custom.push({ title: text.slice(0, 32) + (text.length > 32 ? '…' : ''), text: text });
-    try { localStorage.setItem('crmTemplates', JSON.stringify(custom)); } catch (e) {}
-    closePops(); toast('Шаблон сохранён (на этом компьютере)', 'green');
+    ensureTemplates().then(function (custom) {
+      saveTemplatesList_(custom.concat([{ title: text.slice(0, 32) + (text.length > 32 ? '…' : ''), text: text }]));
+      toast('Шаблон сохранён', 'green');
+    });
+  }
+  function deleteTemplate(customIdx) {
+    ensureTemplates().then(function (custom) {
+      var list = custom.slice(); list.splice(customIdx, 1);
+      saveTemplatesList_(list);
+    });
   }
   function send() {
     var t = S.thread, inp = el('cx-input'); if (!t) return;
@@ -21730,7 +21775,7 @@ var CRM = (function () {
     saveMain: saveMain, saveBrief: saveBrief, saveContact: saveContact, assign: assign, askWhoAmI: askWhoAmI, setMe: setMe,
     setFilter: setFilter, toggleFilterPop: toggleFilterPop, setExtra: setExtra, resetExtra: resetExtra, closePops: closePops, onSearch: onSearch, clearSearch: clearSearch, resetAll: resetAll,
     openThread: openThread, closeThreadMobile: closeThreadMobile, toggleRespPop: toggleRespPop, loadOlder: loadOlder, onThreadScroll: onThreadScroll, openLightbox: openLightbox, closeLightbox: closeLightbox,
-    onInput: onInput, onInputKey: onInputKey, toggleTemplates: toggleTemplates, useTemplate: useTemplate, saveTemplate: saveTemplate, send: send, retry: retry,
+    onInput: onInput, onInputKey: onInputKey, toggleTemplates: toggleTemplates, useTemplate: useTemplate, saveTemplate: saveTemplate, deleteTemplate: deleteTemplate, send: send, retry: retry,
     saveCtxBrief: saveCtxBrief, createDealFor: createDealFor, openChatFor: openChatFor, reloadChats: reloadChats, enablePush: enablePush,
     playRecording: playRecording, seekStart: seekStart,
     _state: S,

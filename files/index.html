@@ -1571,8 +1571,17 @@ main:has(> #page-crm.active){max-width:none;}
 .dr-tl-ico.is-good{color:var(--green);}
 .dr-tl-text{color:var(--text);line-height:1.4;overflow-wrap:anywhere;}
 .dr-tl-text.muted{color:var(--muted);}
-.dr-tl-meta{font:400 10.5px/1 var(--font-mono);color:var(--muted);margin-top:3px;font-variant-numeric:tabular-nums;display:flex;gap:8px;}
+.dr-tl-meta{font:400 10.5px/1 var(--font-mono);color:var(--muted);margin-top:3px;font-variant-numeric:tabular-nums;display:flex;gap:8px;align-items:center;}
 .dr-empty{font:400 12px/1.5 var(--font-body);color:var(--muted);}
+/* Прослушать запись звонка (crm-chip уменьшенный, вписан в мета-строку таймлайна/пилюлю
+   звонка чата) - Влад 08.09, plans/2026-09-08-call-recordings.md */
+.crm-play-btn{appearance:none;display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 7px 0 6px;border-radius:9px;
+  border:1px solid var(--border);background:var(--bg3);color:var(--muted);font:500 10px/1 var(--font-mono);cursor:pointer;flex:none;transition:color .12s,border-color .12s;}
+.crm-play-btn svg{width:10px;height:10px;}
+.crm-play-btn:hover{color:var(--text);border-color:var(--border-strong);}
+.crm-play-btn.is-playing{color:var(--blue);border-color:var(--blue);}
+.crm-play-btn.is-loading{opacity:.55;pointer-events:none;}
+.cx-call .crm-play-btn{margin-left:2px;}
 
 /* ── Контекстное меню (своё, канон ГОСТа) + всплывающий список ───────────────────── */
 .crm-menu{position:fixed;z-index:1800;display:none;flex-direction:column;min-width:190px;background:var(--bg3);border:1px solid var(--border-strong);
@@ -19888,6 +19897,7 @@ var CRM = (function () {
     extra: { channel: null, resp: null, stage: null, overdue: false }, search: '',
     pollTimer: null, badgeTimer: null, unread: 0, drawerId: null, drawerDeal: null, lastMove: null,
     lostPending: null, pendingLocal: 0, atBottom: true, clockTimer: null,
+    audioEntry: null, audioEl: null, audioUrl: null, audioBtn: null, // текущая проигрываемая запись звонка (playRecording_)
   };
 
   // ── Утилиты ─────────────────────────────────────────────────────────────────────────
@@ -19950,6 +19960,8 @@ var CRM = (function () {
     stage: '<path d="M3 6h14M3 10h10M3 14h6"/>',
     money: '<circle cx="10" cy="10" r="7"/><path d="M8 12.5c.4.8 1.2 1.2 2.1 1.2 1.3 0 2.1-.7 2.1-1.6 0-2.2-4.2-1.2-4.2-3.4 0-.9.8-1.6 2.1-1.6.9 0 1.6.4 2 1M10 5.5v1.5M10 13.5V15"/>',
     note: '<path d="M5 3.5h7l3 3v10H5z"/><path d="M12 3.5v3h3M7.5 10h5M7.5 13h3"/>',
+    play: '<path d="M6.5 4.5v11l9-5.5z"/>',
+    pause: '<rect x="6" y="4.5" width="3" height="11" rx="0.8"/><rect x="11" y="4.5" width="3" height="11" rx="0.8"/>',
   };
   function ico(name, cls) { return '<svg class="' + (cls || '') + '" ' + A + '>' + (ICO[name] || '') + '</svg>'; }
   function fillIcons(root) { (root || document).querySelectorAll('[data-ico]').forEach(function (n) { n.innerHTML = ico(n.getAttribute('data-ico')); n.style.display = 'inline-flex'; n.style.alignItems = 'center'; }); }
@@ -20470,6 +20482,7 @@ var CRM = (function () {
     if (S.lostPending) { S.lostPending = null; }
     S.drawerId = null;
     el('kb-board').querySelectorAll('.kb-card.is-open').forEach(function (c) { c.classList.remove('is-open'); });
+    stopPlayback_(); // закрыли карточку - кнопка "Пауза" пропала из DOM, звук не должен играть без контроля
   }
   function ensureEmployees() { if (S.employees) return Promise.resolve(S.employees); return api('/crm/employees').then(function (r) { S.employees = r.ok ? (r.data.employees || []) : []; return S.employees; }).catch(function () { S.employees = []; return S.employees; }); }
   function empName(ext) { var e = (S.employees || []).find(function (x) { return String(x.extension) === String(ext); }); return e ? e.name : null; }
@@ -20552,14 +20565,20 @@ var CRM = (function () {
   }
   function timelineHtml(data) {
     var items = [];
-    (data.calls || []).forEach(function (c) { items.push({ at: c.at, type: 'call', ok: c.connected, text: (c.connected ? 'Разговор ' + (c.duration_sec != null ? fmtDur(c.duration_sec) : '') : 'Недозвон' + (c.disconnect_reason ? ' · ' + c.disconnect_reason : '')) + (c.responsible_name ? ' · ' + c.responsible_name : '') }); });
-    (data.messages || []).forEach(function (m) { items.push({ at: m.created_at, type: 'msg', dir: m.direction, msgType: m.msg_type, text: m.text, sender: m.sender_name, att: m.attachments }); });
+    (data.calls || []).forEach(function (c) { items.push({ at: c.at, type: 'call', ok: c.connected, entryId: c.entry_id, hasRec: c.has_recording, text: (c.connected ? 'Разговор ' + (c.duration_sec != null ? fmtDur(c.duration_sec) : '') : 'Недозвон' + (c.disconnect_reason ? ' · ' + c.disconnect_reason : '')) + (c.responsible_name ? ' · ' + c.responsible_name : '') }); });
+    (data.messages || []).forEach(function (m) { items.push({ at: m.created_at, type: 'msg', dir: m.direction, msgType: m.msg_type, text: m.text, sender: m.sender_name, att: m.attachments, entryId: m.mango_entry_id }); });
     if (data.deal && data.deal.created_at) items.push({ at: data.deal.created_at, type: 'ev', text: 'Сделка создана' });
     if (data.deal && data.deal.closed_at) items.push({ at: data.deal.closed_at, type: 'ev', text: data.deal.stage === 'won' ? 'Сделка успешна' : 'Отказ' + (data.deal.loss_reason ? ' · ' + data.deal.loss_reason : '') });
     items.sort(function (a, b) { return new Date(b.at) - new Date(a.at); });
     if (!items.length) return '<div class="dr-empty">Событий пока нет</div>';
     return '<div class="dr-tl">' + items.slice(0, 60).map(function (it) {
       var icon, cls = '', body;
+      // Кнопка "Прослушать" - у прямых Mango-звонков только если has_recording=true (сервер
+      // проверил заранее батчем), у Авито-звонков (сопоставлены с Mango по времени,
+      // correlateAvitoCall_) просто по наличию entry_id - есть ли реально запись, узнаём по
+      // клику (тише для сервера, чем отдельный батч-запрос ради каждого сообщения).
+      var canPlay = (it.type === 'call' && it.hasRec) || (it.type === 'msg' && (it.msgType === 'call' || it.msgType === 'appCall') && it.entryId);
+      var playBtn = canPlay ? playBtnHtml_(it.entryId) : '';
       if (it.type === 'call') { icon = 'phone'; cls = it.ok ? 'is-good' : 'is-bad'; body = '<div class="dr-tl-text">' + esc(it.text) + '</div>'; }
       else if (it.type === 'ev') { icon = 'stage'; body = '<div class="dr-tl-text muted">' + esc(it.text) + '</div>'; }
       else {
@@ -20568,10 +20587,69 @@ var CRM = (function () {
         var txt = it.msgType === 'image' ? 'Фото' : it.msgType === 'system' ? esc(it.text || 'Системное сообщение') : esc(it.text || '');
         body = '<div class="dr-tl-text' + (it.msgType === 'system' ? ' muted' : '') + '"><span style="color:var(--muted)">' + who + ':</span> ' + txt + '</div>';
       }
-      return '<div class="dr-tl-item"><span class="dr-tl-ico ' + cls + '">' + ico(icon) + '</span><div>' + body + '<div class="dr-tl-meta">' + fmtDT(it.at) + '</div></div></div>';
+      return '<div class="dr-tl-item"><span class="dr-tl-ico ' + cls + '">' + ico(icon) + '</span><div>' + body + '<div class="dr-tl-meta">' + fmtDT(it.at) + playBtn + '</div></div></div>';
     }).join('') + (items.length > 60 ? '<div class="dr-empty" style="padding:8px 0">… и ещё ' + (items.length - 60) + '</div>' : '') + '</div>';
   }
   function fmtDur(sec) { var m = Math.floor(sec / 60), s = sec % 60; return m + ':' + pad2(s); }
+
+  // ── Прослушать запись звонка (plans/2026-09-08-call-recordings.md) ────────────────────
+  // Разметка кнопки - entry_id уходит в data-атрибут (не в inline-обработчик - там легко
+  // сломать экранирование на длинных base64-подобных ID из Mango). Состояние при отрисовке
+  // берём из S.audioEntry - если этот же звонок уже играет (например drawer перерисовался,
+  // пока идёт воспроизведение), новая кнопка сразу выглядит "на паузе", а не сбрасывается
+  // визуально в простой "Прослушать" при живом звуке.
+  function playBtnHtml_(entryId) {
+    var playing = S.audioEntry === entryId && S.audioEl && !S.audioEl.paused;
+    return '<button type="button" class="crm-play-btn' + (playing ? ' is-playing' : '') + '" data-entry="' + esc(entryId) + '" onclick="CRM.playRecording(this)">' + ico(playing ? 'pause' : 'play') + (playing ? 'Пауза' : 'Прослушать') + '</button>';
+  }
+  // Обновляем ВСЕ кнопки с этим entry_id в DOM разом (не храним ссылку на конкретный узел -
+  // тот же звонок может быть виден одновременно в треде чата и в карточке сделки, а сама
+  // кнопка теряется при любой перерисовке drawer/треда). Состояния: idle (треугольник) →
+  // loading (тускло, без спиннера - тот же принцип, что у ГОСТа "Отправка: без спиннера,
+  // opacity+текст") → playing (пауза, подсвечена) → снова idle по окончании/ошибке.
+  function setPlayBtnState_(entryId, state) {
+    document.querySelectorAll('.crm-play-btn[data-entry="' + cssEsc_(entryId) + '"]').forEach(function (btn) {
+      btn.classList.toggle('is-loading', state === 'loading');
+      btn.classList.toggle('is-playing', state === 'playing');
+      btn.innerHTML = ico(state === 'playing' ? 'pause' : 'play') + (state === 'loading' ? 'Загрузка…' : state === 'playing' ? 'Пауза' : 'Прослушать');
+    });
+  }
+  function cssEsc_(s) { return window.CSS && CSS.escape ? CSS.escape(s) : String(s).replace(/["\\]/g, '\\$&'); }
+  function stopPlayback_() {
+    var prevEntry = S.audioEntry;
+    if (S.audioEl) S.audioEl.pause();
+    if (S.audioUrl) { try { URL.revokeObjectURL(S.audioUrl); } catch (e) {} }
+    S.audioEl = null; S.audioUrl = null; S.audioEntry = null;
+    if (prevEntry) setPlayBtnState_(prevEntry, 'idle');
+  }
+  function playRecording(btn) {
+    var entryId = btn.getAttribute('data-entry'); if (!entryId) return;
+    if (S.audioEntry === entryId && S.audioEl) {
+      // Тот же звонок - клик переключает паузу/воспроизведение, новый запрос к серверу не нужен.
+      if (S.audioEl.paused) { S.audioEl.play(); setPlayBtnState_(entryId, 'playing'); }
+      else { S.audioEl.pause(); setPlayBtnState_(entryId, 'idle'); }
+      return;
+    }
+    stopPlayback_(); // один звук за раз - вторая запись останавливает первую, как в любом плеере
+    setPlayBtnState_(entryId, 'loading');
+    fetch(YARD_API_BASE + '/crm/mango/recording?entry_id=' + encodeURIComponent(entryId), { headers: { 'X-Session-Token': SESSION_TOKEN } })
+      .then(function (res) {
+        if (res.status === 202) { toast('Запись ещё готовится в Mango - попробуйте через минуту', 'amber'); setPlayBtnState_(entryId, 'idle'); return null; }
+        if (res.status === 404) { toast('Для этого звонка нет записи', 'amber'); setPlayBtnState_(entryId, 'idle'); return null; }
+        if (!res.ok) { toast('Не удалось загрузить запись', 'red'); setPlayBtnState_(entryId, 'idle'); return null; }
+        return res.blob();
+      })
+      .then(function (blob) {
+        if (!blob) return;
+        var url = URL.createObjectURL(blob);
+        var audio = new Audio(url);
+        S.audioEl = audio; S.audioUrl = url; S.audioEntry = entryId;
+        audio.addEventListener('ended', function () { if (S.audioEntry === entryId) { S.audioEl = null; S.audioUrl = null; S.audioEntry = null; setPlayBtnState_(entryId, 'idle'); } try { URL.revokeObjectURL(url); } catch (e) {} });
+        audio.play().catch(function () { toast('Браузер заблокировал автовоспроизведение - нажмите ещё раз', 'amber'); setPlayBtnState_(entryId, 'idle'); });
+        setPlayBtnState_(entryId, 'playing');
+      })
+      .catch(function () { toast('Нет соединения', 'red'); setPlayBtnState_(entryId, 'idle'); });
+  }
 
   function setStage(id, stage) {
     var d = dealById(id); if (!d) return;
@@ -20761,6 +20839,7 @@ var CRM = (function () {
 
   // ── Чаты: тред ─────────────────────────────────────────────────────────────────────
   function openThread(key) {
+    if (S.activeKey !== key) stopPlayback_(); // переключили диалог - старая кнопка "Пауза" уходит с экрана вместе с сообщениями
     S.activeKey = key; el('cx').classList.add('is-thread-open');
     renderList();
     var c = S.chats.find(function (x) { return x.client_key === key; });
@@ -20839,7 +20918,7 @@ var CRM = (function () {
       if (m.id === firstUnreadId) { flush(); out.push('<div class="cx-day cx-day--new">Новые сообщения</div>'); }
       var type = m.msg_type || 'text';
       if (type === 'system') { flush(); out.push('<div class="cx-sys">' + esc(String(m.text || '').replace(/^\[Системное сообщение\]\s*/, '')) + '</div>'); return; }
-      if (type === 'call' || type === 'appCall') { flush(); var missed = /пропущен/i.test(m.text || ''); out.push('<div class="cx-call' + (missed ? ' cx-call--missed' : '') + '">' + ico('phone') + esc(m.text || 'Звонок через Авито') + ' · <b>' + fmtHM(m.created_at) + '</b></div>'); return; }
+      if (type === 'call' || type === 'appCall') { flush(); var missed = /пропущен/i.test(m.text || ''); out.push('<div class="cx-call' + (missed ? ' cx-call--missed' : '') + '">' + ico('phone') + esc(m.text || 'Звонок через Авито') + ' · <b>' + fmtHM(m.created_at) + '</b>' + (m.mango_entry_id ? playBtnHtml_(m.mango_entry_id) : '') + '</div>'); return; }
       var gk = m.direction + '|' + (m.sender_name || '');
       var gap = group && group.lastAt ? (d - group.lastAt) : 0;
       if (!group || gk !== groupKey || gap > 5 * 60000) { flush(); groupKey = gk; group = { html: '<div class="cx-group cx-group--' + m.direction + (m._local ? (m._failed ? ' is-failed' : ' is-pending') : '') + '" data-mid="' + m.id + '">' + (m.direction === 'out' && m.sender_name ? '<div class="cx-sender">' + esc(m.sender_name) + '</div>' : ''), lastAt: d }; }
@@ -20991,6 +21070,7 @@ var CRM = (function () {
     openThread: openThread, closeThreadMobile: closeThreadMobile, toggleRespPop: toggleRespPop, loadOlder: loadOlder, onThreadScroll: onThreadScroll, openLightbox: openLightbox, closeLightbox: closeLightbox,
     onInput: onInput, onInputKey: onInputKey, toggleTemplates: toggleTemplates, useTemplate: useTemplate, saveTemplate: saveTemplate, send: send, retry: retry,
     saveCtxBrief: saveCtxBrief, createDealFor: createDealFor, openChatFor: openChatFor, reloadChats: reloadChats, enablePush: enablePush,
+    playRecording: playRecording,
     _state: S,
   };
 })();

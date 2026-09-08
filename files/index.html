@@ -21064,7 +21064,37 @@ var CRM = (function () {
   function refreshSummary() { api('/crm/summary').then(function (r) { if (r.ok) { S.summary = r.data; renderKpis(); renderLeaders(); } }).catch(function () {}); }
 
   // Победа: хореография mxWin (t=0..2200): подсветка → салют → фанфара → перелёт суммы → одометр → тост с Отменить
+  // Обязательные поля для закрытия сделки успешно (Влад 08.09: "чтобы перевести сделку в
+  // успешно обязательно должна быть сумма и заполнена номер строки в 1С") - ОДНА проверка,
+  // используется везде, откуда можно попасть в 'won' (drag-drop, кнопка в drawer, прямой
+  // выбор стадии из выпадашки в чате - setStage()), не разбросана по местам входа.
+  function wonRequirementsMissing_(d) {
+    var missing = [];
+    if (!(Number(d.amount) > 0)) missing.push('сумма');
+    if (!String(d.order_1c_number || '').trim()) missing.push('номер заказа в 1С');
+    return missing.length ? missing : null;
+  }
+  // Поздравление в тосте вместо голой галочки (Влад 08.09: "должна быть короткая надпись
+  // поздравление менеджера" - crm-drawer/toast раньше показывал огромный ico('check') без
+  // размерного класса - в тосте это рендерилось гигантской иконкой, не текстом). Минимум
+  // 10 формулировок вразнобой, тон растёт вместе с уровнем сделки (тот же bankWinLevel_,
+  // что у салюта/фанфары - 1-2: обычная сделка, 3: крупная, 4: миллионник).
+  // ВАЖНО: каждая фраза начинается РОВНО с "{name}, " - иначе фолбэк без имени ниже
+  // (строка без ответственного) не сможет аккуратно вырезать плейсхолдер из середины фразы.
+  var WIN_PHRASES_ = {
+    1: ['{name}, есть! Ещё одна сделка в копилке.', '{name}, чисто сработано - сделка в кармане.', '{name}, готово - клиент доволен, план ближе.', '{name}, ровно как надо - плюс одна закрытая.'],
+    2: ['{name}, отличная сделка! Так держать.', '{name}, хороший результат - клиент в надёжных руках.', '{name}, сильно сработано - заметный вклад в план месяца.', '{name}, красиво - именно такие сделки и нужны.'],
+    3: ['{name}, крупная победа! Такие сделки решают месяц.', '{name}, впечатляюще - серьёзная сумма, серьёзная работа.', '{name}, вот это сделка! Коллеги оценят.', '{name}, мощно - план месяца стал заметно ближе.'],
+    4: ['{name}, это космос! Сделка месяца, без вопросов.', '{name}, невероятно - миллионная сделка закрыта!', '{name}, легенда! Такое не каждый день бывает.', '{name}, вот это да - такую сделку запомнят надолго.'],
+  };
+  function winPhrase_(level, name) {
+    var pool = WIN_PHRASES_[level] || WIN_PHRASES_[1];
+    var text = pool[Math.floor(Math.random() * pool.length)];
+    return name ? text.replace('{name}', name) : text.replace(/^\{name\},\s*/, '').replace(/^./, function (c) { return c.toUpperCase(); });
+  }
   function winDeal(d, card, fromCol, fromIndex) {
+    var missing = wonRequirementsMissing_(d);
+    if (missing) { toast('Нельзя закрыть сделку успешно - не заполнено: ' + esc(missing.join(', ')) + '.', 'amber'); openDeal(d.id); return; }
     var prevStage = d.stage; d.stage = 'won'; d.closed_at = new Date().toISOString();
     var won = S.summary && S.summary.won_month ? S.summary.won_month : { count: 0, amount: 0 };
     var fromAmount = Number(won.amount || 0), toAmount = fromAmount + Number(d.amount || 0);
@@ -21077,9 +21107,11 @@ var CRM = (function () {
       refreshSummaryLater();
     }).catch(function () { d.stage = prevStage; renderBoard(); toast('Нет соединения - сделка не закрыта', 'red'); });
     var rect = card.getBoundingClientRect();
+    var winLevel0 = (typeof bankWinLevel_ === 'function') ? bankWinLevel_(Number(d.amount) || 0) : 1;
+    var winName0 = d.responsible_name ? String(d.responsible_name).trim().split(/\s+/)[0] : '';
     if (reduced() || document.hidden) {
-      if (typeof bankWinFanfare_ === 'function') bankWinFanfare_((typeof bankWinLevel_ === 'function') ? bankWinLevel_(Number(d.amount) || 0) : 1); else snd.win();
-      renderBoard(); toast(ico('check') + ' Сделка успешна · <b>' + money(d.amount) + '</b>', 'green', { label: 'Отменить', fn: undoWin }); return;
+      if (typeof bankWinFanfare_ === 'function') bankWinFanfare_(winLevel0); else snd.win();
+      renderBoard(); toast(esc(winPhrase_(winLevel0, winName0)) + ' <b>' + money(d.amount) + '</b>', 'green', { label: 'Отменить', fn: undoWin }); return;
     }
     card.style.transition = 'opacity .3s ease'; card.style.opacity = '0.35';
     if (wonCol) { wonCol.classList.add('kb-win-glow'); setTimeout(function () { wonCol.classList.remove('kb-win-glow'); }, 300); }
@@ -21089,7 +21121,7 @@ var CRM = (function () {
     // с залпом (win/win2/win3/win4). Влад 08.09: "успешная сделка сопровождается салютом
     // как у нас в приходах больших денег" - раньше здесь был фиксированный один залп вне
     // зависимости от суммы сделки.
-    var winLevel = (typeof bankWinLevel_ === 'function') ? bankWinLevel_(Number(d.amount) || 0) : 1;
+    var winLevel = winLevel0;
     setTimeout(function () {
       var cv = el('crm-celebrate'); if (!cv || typeof bankCelebrate5_ !== 'function') return;
       var cx = rect.left + rect.width / 2, cy = rect.top + 6;
@@ -21119,7 +21151,7 @@ var CRM = (function () {
       };
       if (sumEl && valEl && Number(d.amount) && typeof bankFlySum_ === 'function') bankFlySum_(sumEl, valEl, money(d.amount), after); else after();
     }, 260);
-    setTimeout(function () { toast(ico('check') + ' Сделка успешна · <b>' + money(d.amount) + '</b>', 'green', { label: 'Отменить', fn: undoWin }); }, 600);
+    setTimeout(function () { toast(esc(winPhrase_(winLevel, winName0)) + ' <b>' + money(d.amount) + '</b>', 'green', { label: 'Отменить', fn: undoWin }); }, 600);
   }
   function undoWin() {
     var mv = S.lastMove; if (!mv || !mv.wasWin) return; S.lastMove = null;
@@ -21444,9 +21476,22 @@ var CRM = (function () {
       .catch(function () { toast('Нет соединения', 'red'); setPlayersHtml_(entryId, idlePillHtml_(entryId)); });
   }
 
+  // Прямой выбор стадии (в т.ч. выпадашка в панели чата - CRM_UX.md, единственное место,
+  // где 'won'/'lost' выбираются НЕ через drag-drop/кнопку в drawer) идёт через ТЕ ЖЕ
+  // ворота, что и остальные пути в won/lost - иначе обязательные поля/причина отказа
+  // обходятся тихой сменой значения в <select>.
   function setStage(id, stage) {
     var d = dealById(id); if (!d) return;
     var prev = d.stage; if (prev === stage) return;
+    if (stage === 'won') {
+      var missing = wonRequirementsMissing_(d);
+      if (missing) { toast('Нельзя закрыть сделку успешно - не заполнено: ' + esc(missing.join(', ')) + '.', 'amber'); return; }
+      var card = el('kb-board').querySelector('.kb-card[data-id="' + id + '"]');
+      if (card) { winDeal(d, card, prev, 0); return; }
+      // Карточки нет в DOM (сделка вне текущего фильтра доски) - без хореографии, но с той
+      // же проверкой полей выше, тише не значит без правил.
+    }
+    if (stage === 'lost') { askLostReason(d, prev, 0); return; }
     d.stage = stage; if (stage !== 'won' && stage !== 'lost') { d.closed_at = null; d.loss_reason = null; }
     renderBoard(); snd.drop();
     if (S.drawerDeal && S.drawerDeal.deal.id === id) { S.drawerDeal.deal.stage = stage; renderDrawer(); }
@@ -21456,7 +21501,13 @@ var CRM = (function () {
       refreshSummary();
     }).catch(function () { d.stage = prev; renderBoard(); toast('Нет соединения', 'red'); });
   }
-  function winFromDrawer(id) { var d = dealById(id); if (!d) return; var card = el('kb-board').querySelector('.kb-card[data-id="' + id + '"]'); closeDrawer(); if (card) winDeal(d, card, d.stage, 0); else { setStage(id, 'won'); snd.win(); } }
+  function winFromDrawer(id) {
+    var d = dealById(id); if (!d) return;
+    var missing = wonRequirementsMissing_(d);
+    if (missing) { toast('Нельзя закрыть сделку успешно - не заполнено: ' + esc(missing.join(', ')) + '.', 'amber'); return; } // drawer остаётся открытым - поля тут же, под рукой
+    var card = el('kb-board').querySelector('.kb-card[data-id="' + id + '"]'); closeDrawer();
+    if (card) winDeal(d, card, d.stage, 0); else { setStage(id, 'won'); }
+  }
   function showLostForm(id) { var f = el('dr-lost-form'); if (f) { f.style.display = ''; var i = el('dr-lost-reason'); if (i) i.focus(); } }
   function pickLostReason(btn) { var i = el('dr-lost-reason'); if (i) i.value = btn.textContent; btn.parentNode.querySelectorAll('.crm-chip').forEach(function (b) { b.setAttribute('aria-pressed', b === btn); }); }
   function saveMain(id) { saveDealFields(id, { amount: el('dr-amount') ? el('dr-amount').value : undefined, order_1c_number: el('dr-order') ? el('dr-order').value : undefined }, 'dr-saved-main', function () { renderBoard(); }); }

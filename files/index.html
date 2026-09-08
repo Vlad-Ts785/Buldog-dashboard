@@ -1430,7 +1430,20 @@ main:has(> #page-crm.active){max-width:none;}
 .kb-count{font:500 10.5px/1 var(--font-mono);color:var(--text);background:var(--bg4);padding:3px 6px;border-radius:99px;flex:0 0 auto;font-variant-numeric:tabular-nums;}
 .kb-count.pulse{animation:kbPulse .32s ease;}
 @keyframes kbPulse{0%{transform:scale(1);}45%{transform:scale(1.35);color:var(--green);}100%{transform:scale(1);}}
-.kb-col-sum{margin-left:auto;flex:0 0 auto;font:500 11px/1 var(--font-mono);color:var(--muted);font-variant-numeric:tabular-nums;}
+/* Крупная сумма колонки (Влад, 08.09: "как в Битриксе, и чтобы была интерактивной") -
+   собственная строка под шапкой, не мелкая цифра в хедере. Клик - реальное действие
+   (переключает сортировку карточек колонки по сумме), не декорация - поэтому оформлена
+   как кнопка (.chip-подобный hover), не как статичный текст. Hero-цифра ВСЕГДА --text,
+   даже при активной сортировке (раздел 1 ГОСТа - паника только у красного). */
+.kb-col-herowrap{padding:2px 12px 10px;}
+.kb-col-hero{appearance:none;width:100%;text-align:left;background:transparent;border:1px solid transparent;border-radius:8px;
+  padding:4px 6px;cursor:pointer;display:flex;flex-direction:column;gap:1px;
+  transition:background-color .12s ease-out,border-color .12s ease-out;}
+.kb-col-hero:hover{background:var(--bg3);border-color:var(--border);}
+.kb-col-hero.is-sorted{background:var(--bg3);border-color:var(--border-strong);}
+.kb-col-hero-val{font:600 22px/1.15 var(--font-mono);color:var(--text);font-variant-numeric:tabular-nums;}
+.kb-col-hero-sub{font:400 10.5px/1 var(--font-body);color:var(--muted);}
+.kb-col-hero.is-sorted .kb-col-hero-sub{color:var(--text);}
 .kb-list{display:flex;flex-direction:column;gap:8px;padding:10px;overflow-y:auto;flex:1;border-radius:0 0 12px 12px;min-height:90px;
   transition:background-color .6s ease,box-shadow .15s ease-out;scrollbar-width:thin;scrollbar-color:var(--bg4) transparent;}
 .kb-col.kb-drop{border-color:color-mix(in srgb,var(--blue) 45%,transparent);}
@@ -19865,7 +19878,7 @@ var CRM = (function () {
   var S = {
     inited: false, view: 'board', deals: [], summary: null, employees: null,
     me: (function () { try { return localStorage.getItem('crmMyExtension') || null; } catch (e) { return null; } })(),
-    kpiFilter: null,
+    kpiFilter: null, colSort: {}, // {stageKey: 'amount'} - крупная сумма колонки кликабельна (Влад, 08.09: "как в Битриксе")
     chats: [], chatsLoaded: false, activeKey: null, thread: null, filter: 'all',
     extra: { channel: null, resp: null, stage: null, overdue: false }, search: '',
     pollTimer: null, badgeTimer: null, unread: 0, drawerId: null, drawerDeal: null, lastMove: null,
@@ -20104,16 +20117,35 @@ var CRM = (function () {
     if (S.kpiFilter === 'missed') list = list.filter(function (d) { return d.source === 'call' && dt(d.updated_at) && sameDay(dt(d.updated_at), new Date()); });
     return list;
   }
+  // Крупная сумма колонки (Влад, 08.09: "как в Битриксе, и чтобы была интерактивной") -
+  // клик переключает сортировку карточек колонки: по свежести (по умолчанию, как отдаёт
+  // сервер) <-> по убыванию суммы. Не декорация - реальное действие, как у KPI-плиток выше.
+  function colHeroHtml(st, sum, ds) {
+    var active = S.colSort[st.key] === 'amount';
+    return '<button class="kb-col-hero' + (active ? ' is-sorted' : '') + '" data-nav-sound onclick="CRM.toggleColSort(\'' + st.key + '\')" title="' + (active ? 'Сортировка по сумме - нажмите для сортировки по свежести' : 'Нажмите, чтобы отсортировать по сумме') + '" aria-pressed="' + active + '">' +
+      '<span class="kb-col-hero-val">' + (sum ? shortMoney(sum) : '—') + '</span>' +
+      (ds.length ? '<span class="kb-col-hero-sub">' + ds.length + ' ' + plural(ds.length, 'сделка', 'сделки', 'сделок') + (active ? ' · по сумме' : '') + '</span>' : '') +
+      '</button>';
+  }
+  function sortedDealsForStage(key, ds) {
+    ds = ds.slice();
+    if (S.colSort[key] === 'amount') ds.sort(function (a, b) { return Number(b.amount || 0) - Number(a.amount || 0); });
+    return ds;
+  }
+  function toggleColSort(key) {
+    S.colSort[key] = S.colSort[key] === 'amount' ? null : 'amount';
+    renderBoard();
+  }
   function renderBoard() {
     var board = el('kb-board'); if (!board) return;
     var deals = boardDeals();
     var html = '';
     OPEN_STAGES.forEach(function (st) {
-      var ds = deals.filter(function (d) { return d.stage === st.key; });
+      var ds = sortedDealsForStage(st.key, deals.filter(function (d) { return d.stage === st.key; }));
       var sum = ds.reduce(function (a, d) { return a + Number(d.amount || 0); }, 0);
       html += '<section class="kb-col" data-colwrap="' + st.key + '"><header class="kb-col-head"><span class="kb-stage-dot" style="--stage:' + st.color + '"></span>' +
-        '<h4 class="kb-col-title" title="' + esc(st.label) + '">' + esc(st.label) + '</h4><span class="kb-count" id="kb-cnt-' + st.key + '">' + ds.length + '</span>' +
-        '<span class="kb-col-sum" id="kb-sum-' + st.key + '">' + (sum ? shortMoney(sum) : '') + '</span></header>' +
+        '<h4 class="kb-col-title" title="' + esc(st.label) + '">' + esc(st.label) + '</h4><span class="kb-count" id="kb-cnt-' + st.key + '">' + ds.length + '</span></header>' +
+        '<div class="kb-col-herowrap" id="kb-hero-' + st.key + '">' + colHeroHtml(st, sum, ds) + '</div>' +
         '<div class="kb-list" data-col="' + st.key + '">' + (ds.length ? ds.map(cardHtml).join('') : '<div class="kb-empty">' + (st.key === 'new' ? 'Новых заявок нет' : 'Пусто') + '</div>') + '</div></section>';
     });
     board.innerHTML = html;
@@ -20124,10 +20156,11 @@ var CRM = (function () {
     OPEN_STAGES.forEach(function (st) {
       var list = el('kb-board').querySelector('.kb-list[data-col="' + st.key + '"]'); if (!list) return;
       var ids = Array.prototype.map.call(list.querySelectorAll(':scope > .kb-card'), function (c) { return Number(c.getAttribute('data-id')); });
-      var cnt = el('kb-cnt-' + st.key), sumEl = el('kb-sum-' + st.key);
+      var cnt = el('kb-cnt-' + st.key), heroWrap = el('kb-hero-' + st.key);
       if (cnt && cnt.textContent !== String(ids.length)) { cnt.textContent = ids.length; cnt.classList.remove('pulse'); void cnt.offsetWidth; cnt.classList.add('pulse'); }
-      var sum = ids.reduce(function (a, id) { var d = dealById(id); return a + (d ? Number(d.amount || 0) : 0); }, 0);
-      if (sumEl) sumEl.textContent = sum ? shortMoney(sum) : '';
+      var ds = ids.map(dealById).filter(Boolean);
+      var sum = ds.reduce(function (a, d) { return a + Number(d.amount || 0); }, 0);
+      if (heroWrap) heroWrap.innerHTML = colHeroHtml(st, sum, ds);
       var empty = list.querySelector('.kb-empty'); if (empty && ids.length) empty.remove();
     });
   }
@@ -20911,7 +20944,7 @@ var CRM = (function () {
   }
 
   return {
-    init: init, rerender: rerender, showView: showView, openDeal: openDeal, closeDrawer: closeDrawer, setStage: setStage, winFromDrawer: winFromDrawer,
+    init: init, rerender: rerender, showView: showView, openDeal: openDeal, closeDrawer: closeDrawer, setStage: setStage, winFromDrawer: winFromDrawer, toggleColSort: toggleColSort,
     showLostForm: showLostForm, pickLostReason: pickLostReason, confirmLost: function (id) { confirmLost(id, el('dr-lost-reason') ? el('dr-lost-reason').value : ''); },
     saveMain: saveMain, saveBrief: saveBrief, saveContact: saveContact, assign: assign, askWhoAmI: askWhoAmI, setMe: setMe,
     setFilter: setFilter, toggleFilterPop: toggleFilterPop, setExtra: setExtra, resetExtra: resetExtra, closePops: closePops, onSearch: onSearch, clearSearch: clearSearch, resetAll: resetAll,

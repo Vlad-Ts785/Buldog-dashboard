@@ -1482,7 +1482,8 @@ main:has(> #page-crm.active){max-width:none;}
 .cx-ibtn svg{width:15px;height:15px;}
 
 /* ── Сводка: плитки .kpi главной, 5 в ряд, сетка = носитель курсорного света ─────── */
-.crm-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:14px;perspective:1400px;position:relative;}
+.crm-summary-row{display:flex;gap:12px;align-items:stretch;margin-bottom:14px;}
+.crm-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;flex:1;min-width:0;perspective:1400px;position:relative;}
 .crm-kpis > *:not(.p2-light){position:relative;z-index:1;}
 .crm-kpis .kpi{cursor:pointer;transition:background-color .12s ease-out,border-color .12s ease-out,transform .12s ease-out;}
 .crm-kpis .kpi:hover{background:var(--bg-hover);border-color:var(--border-strong);transform:translateY(-1px) translateZ(22px);}
@@ -1494,6 +1495,23 @@ main:has(> #page-crm.active){max-width:none;}
 .crm-kpi-dot{width:6px;height:6px;border-radius:50%;background:var(--red);flex:none;}
 @media (max-width:1100px){.crm-kpis{grid-template-columns:repeat(3,1fr);}}
 @media (max-width:720px){.crm-kpis{grid-template-columns:1fr 1fr;}}
+/* «Уловители» - компактные плитки Успешна/Отказ рядом со сводкой KPI, ВСЕГДА на месте,
+   независимо от того, свёрнута ли/видна ли сама колонка в канбане ниже (Влад 08.09: "внизу
+   всё равно должны быть плитки Отказ и Успешно, независимо от видимости колонок, как
+   раньше") - раньше свёрнутая колонка растягивалась на всю высоту доски узкой вертикальной
+   полосой ВНУТРИ самого канбана (см. историю 2.5/2.8) - здесь тот же счётчик, но в сводке,
+   отдельно от прокручиваемого ряда колонок. Клик - разворачивает/сворачивает саму колонку
+   (toggleColCollapse), стрелка отражает состояние тем же классом is-open, что и раскрытая
+   колонка в канбане.*/
+.crm-term-chips{display:flex;flex-direction:column;gap:8px;flex:none;}
+.crm-term-chip{display:flex;align-items:center;gap:8px;flex:1;min-height:0;padding:0 12px;border-radius:var(--radius);
+  border:1px solid var(--border);background:var(--bg2);cursor:pointer;transition:background-color .12s ease-out,border-color .12s ease-out;}
+.crm-term-chip:hover{background:var(--bg-hover);border-color:var(--border-strong);}
+.crm-term-chip .kb-stage-dot{flex:none;}
+.crm-term-chip-val{font:600 19px/1.2 var(--font-mono);font-variant-numeric:tabular-nums;color:var(--text);flex:1;min-width:0;}
+.crm-term-chip-label{font-size:10.5px;color:var(--muted);white-space:nowrap;}
+.crm-term-chip svg{width:13px;height:13px;color:var(--muted);flex:none;transition:transform .15s ease-out;}
+.crm-term-chip.is-open svg{transform:rotate(180deg);}
 /* Топ менеджеров по сумме закрытых сделок (Влад, 08.09) - та же bullet-грамматика, что у
    "Топ менеджеров" на главной (renderMgrList), без личной засечки плана - в CRM нет
    персонального плана по сделкам. Пусто, если ни один менеджер ещё не закрыл сделку в этом
@@ -4537,7 +4555,10 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
           </div>
         </div>
         <div id="crm-view-board">
-          <div class="crm-kpis" id="crm-kpis"></div>
+          <div class="crm-summary-row">
+            <div class="crm-kpis" id="crm-kpis"></div>
+            <div class="crm-term-chips" id="crm-term-chips"></div>
+          </div>
           <div class="crm-leaders" id="crm-leaders"></div>
           <div class="kb-hint">«Отказ» требует причину: при переносе карточки в эту колонку откроется форма - без причины сделка останется на месте.</div>
           <div class="kb-panel"><div class="kb-board" id="kb-board"></div></div>
@@ -20851,38 +20872,37 @@ var CRM = (function () {
       '<button class="kb-col-toggle" data-nav-sound onclick="event.stopPropagation();CRM.toggleColCollapse(\'' + st.key + '\')" title="' + (collapsed ? 'Показать' : 'Скрыть') + ' колонку «' + esc(st.label) + '»">' + ico('chevron') + '</button>' +
       '</header>';
   }
-  // Сводка над доской (KPI-плитки + карточка топ-менеджеров) выравнивается по ФАКТИЧЕСКОЙ
-  // ширине канбана (Влад, 08.09: "верхники должны быть равны ширине колонок"; повторная
-  // жалоба 08.09 - "ширина разная" - предыдущая версия ЧЕРЕЗ ИЗМЕРЕНИЕ ДОМА (scrollWidth
-  // + ResizeObserver/MutationObserver/fonts.ready) так и осталась ненадёжной - слишком
-  // много источников гонки за один снимок времени, чинить их по одному оказалось бесконечно.
+  // Сводка над доской (KPI-плитки + карточка топ-менеджеров) равна ширине канбана (Влад,
+  // 08.09: "верхники должны быть равны ширине колонок") БЕЗ единой строчки JS - #crm-kpis
+  // и .kb-panel (обёртка #kb-board) сиблинги под одним родителем #crm-view-board, оба
+  // блочные без собственной ширины - значит оба и так растягиваются на 100% родителя и
+  // совпадают друг с другом ВСЕГДА, при любом числе/сворачивании колонок.
   //
-  // Правильный фикс - НЕ мерить DOM вообще, а СЧИТАТЬ ширину доски арифметически из тех же
-  // констант, что и её собственная CSS-раскладка (.kb-col width:248px/collapsed 40px,
-  // .kb-board gap:10px, padding 2px слева+справа) - детерминированно, без единого кадра
-  // ожидания и без риска поймать плохой момент измерения (шрифт, layout, что угодно ещё).
-  // Держать эти числа синхронно с CSS выше - если поменяется .kb-col/.kb-board, поменять
-  // и здесь (то же обязательство, что у любой другой задублированной константы разметки).
-  var KB_COL_W_ = 248, KB_COL_COLLAPSED_W_ = 40, KB_GAP_ = 10, KB_PAD_X_ = 4;
-  function boardTargetWidth_() {
-    var w = KB_PAD_X_;
-    STAGES.forEach(function (st, i) { w += S.collapsedCols[st.key] ? KB_COL_COLLAPSED_W_ : KB_COL_W_; if (i) w += KB_GAP_; });
-    return w;
-  }
-  function alignKpisToBoard() {
-    applyKpiAlignWidth_(boardTargetWidth_());
-  }
-  function applyKpiAlignWidth_(w) {
-    var px = w ? w + 'px' : '';
-    var kpis = el('crm-kpis'); if (kpis) kpis.style.maxWidth = px;
-    var leaders = el('crm-leaders'); if (leaders) leaders.style.maxWidth = px;
-  }
+  // Три захода подряд (measure-DOM через scrollWidth+ResizeObserver/MutationObserver/
+  // fonts.ready, потом арифметика по .kb-col/.kb-board константам) чинили НЕСУЩЕСТВУЮЩУЮ
+  // проблему и каждый раз делали хуже - max-width, посчитанный по СУММЕ реальных колонок
+  // (248px открытых + 40px свёрнутых), давал ЧИСЛО МЕНЬШЕ, чем родная ширина .kb-board
+  // (та растягивается на весь доступный родителю простор, а не сжимается по контенту,
+  // overflow-x:auto просто прячет излишек скроллом, не убирает пустое место) - именно
+  // из-за этого верхники становились УЖЕ доски всякий раз, когда сумма видимых колонок не
+  // дотягивала до полной ширины (типичный случай - свёрнуты "Успешна"/"Отказ"). Проверено
+  // живьём в браузере с реальной сессией (не на глаз): без max-width вообще обе ширины
+  // совпадают пиксель в пиксель в любом состоянии сворачивания.
+  // Свёрнутая won/lost НЕ попадает в саму доску вообще (ни строкой, ни узкой полосой) -
+  // счётчик и разворот живут в плитках-«уловителях» рядом со сводкой (renderTermChips)
+  // (Влад 08.09: "внизу всё равно должны быть плитки Отказ и Успешно, независимо от
+  // видимости колонок, как раньше" - раньше свёрнутая колонка растягивалась узкой полосой
+  // НА ВСЮ ВЫСОТУ доски внутри самого канбана, это и не понравилось - "другое расположение").
+  // Остальные (открытые) стадии сворачиваются ПО-СТАРОМУ, узкой полосой внутри доски - этот
+  // фикс касается только терминальных стадий, не всей механики сворачивания разом.
+  var TERMINAL_KEYS_ = ['won', 'lost'];
   function renderBoard() {
     var board = el('kb-board'); if (!board) return;
     var deals = boardDeals();
     var html = '';
     STAGES.forEach(function (st) {
       var collapsed = !!S.collapsedCols[st.key];
+      if (collapsed && TERMINAL_KEYS_.indexOf(st.key) >= 0) return; // ушла в чип рядом с KPI
       var ds = sortedDealsForStage(st.key, deals.filter(function (d) { return d.stage === st.key; }));
       var sum = ds.reduce(function (a, d) { return a + Number(d.amount || 0); }, 0);
       html += '<section class="kb-col' + (collapsed ? ' is-collapsed' : '') + '" data-colwrap="' + st.key + '">' + colHeadHtml(st, ds.length, collapsed) +
@@ -20893,7 +20913,24 @@ var CRM = (function () {
     });
     board.innerHTML = html;
     board.querySelectorAll('.kb-card').forEach(bindCard);
-    alignKpisToBoard();
+    renderTermChips(deals);
+  }
+  // Плитки-«уловители» Успешна/Отказ - всегда на месте рядом со сводкой KPI, независимо от
+  // того, свёрнута ли/показана ли сама колонка ниже. Клик - открывает/закрывает колонку в
+  // канбане (тот же toggleColCollapse, что и у кнопки-стрелки в шапке колонки).
+  function renderTermChips(deals) {
+    var box = el('crm-term-chips'); if (!box) return;
+    deals = deals || boardDeals();
+    box.innerHTML = TERMINAL_KEYS_.map(function (key) {
+      var st = STAGE_BY[key];
+      var count = deals.filter(function (d) { return d.stage === key; }).length;
+      var open = !S.collapsedCols[key];
+      return '<button type="button" class="crm-term-chip' + (open ? ' is-open' : '') + '" data-nav-sound onclick="CRM.toggleColCollapse(\'' + key + '\')" title="' + (open ? 'Скрыть' : 'Показать') + ' колонку «' + esc(st.label) + '»">' +
+        '<span class="kb-stage-dot" style="--stage:' + st.color + '"></span>' +
+        '<span class="crm-term-chip-val">' + count + '</span>' +
+        '<span class="crm-term-chip-label">' + esc(st.short) + '</span>' +
+        ico('chevron') + '</button>';
+    }).join('');
   }
   function dealById(id) { return S.deals.find(function (d) { return d.id === id; }) || null; }
   function heroSumFmt_(n) { var r = Math.round(Number(n) || 0); return r ? money(r) : '—'; }

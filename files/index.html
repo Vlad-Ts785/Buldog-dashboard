@@ -1189,6 +1189,14 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .mech-field em{font-style:normal;color:var(--tint-amber);text-transform:none;letter-spacing:0;margin-left:6px;}
 .mech-input{width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:9px 10px;font-size:13px;font-family:inherit;resize:vertical;}
 .mech-input:focus{outline:none;border-color:var(--blue);}
+/* 08.09 - окно конфликтов "рейс попадает под ремонт" (Влад: "должно вылететь окно
+   уведомить логиста"), тот же amber-предупреждающий стиль, что баннеры дефицита данных
+   по проекту (rgba амбер 7-8%, тонкая рамка). */
+.mech-conflict-note{font-size:12.5px;color:var(--text);line-height:1.5;background:rgba(239,159,39,.08);border:1px solid rgba(239,159,39,.25);border-radius:8px;padding:10px 12px;margin-bottom:10px;}
+.mech-conflict-list{display:flex;flex-direction:column;gap:6px;margin-bottom:12px;max-height:220px;overflow-y:auto;}
+.mech-conflict-row{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:12px;}
+.mech-conflict-row__top{display:flex;justify-content:space-between;gap:10px;margin-bottom:3px;}
+.mech-conflict-row__route{color:var(--text);}
 .mp-stat{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);
   padding:15px 16px 14px;display:flex;flex-direction:column;height:100%;cursor:pointer;
   transition:border-color .12s ease-out,background-color .12s ease-out,transform .12s ease-out;will-change:transform;}
@@ -6498,7 +6506,12 @@ async function loadMechanicData_() {
   // вместо /fleet_summary - тот же парк с тем же живым статусом (сервер собирает его той же
   // buildFleetSummary_) ПЛЮС отрезки Ремонт/ТО и затраты по машине для личной страницы.
   // D.vehicles остаётся в прежней форме - Планировка (buildVehicles) читает его как раньше.
-  var r = await fetchFromYardApi_('/mechanic/fleet', {});
+  // person - только для admin-предпросмотра "Смотреть как" (08.09, Влад: "Самошкин видит
+  // только длинномеры"): реальная сессия механика сама резолвит своё имя на сервере через
+  // access_users и это ограничение обойти нельзя, person здесь нужен ТОЛЬКО чтобы admin в
+  // "Смотреть как" видел ту же урезанную картину, что видит сам человек, а не полный парк.
+  var mechPreviewName_ = (D && D.role === 'admin' && viewAsEntry) ? viewAsEntry.name : null;
+  var r = await fetchFromYardApi_('/mechanic/fleet', mechPreviewName_ ? { person: mechPreviewName_ } : {});
   if (!r.ok || !r.data || r.data.error) {
     throw new Error((r.data && r.data.error) || 'Не удалось загрузить состав парка');
   }
@@ -10123,10 +10136,9 @@ function mechCloseDrawer_() {
   if (dr) dr.classList.remove('show');
 }
 function mechDrawerMode_set(mode) { mechDrawerMode_ = mode; mechRenderDrawer_(); }
-function mechDefaultDeadline_(daysAhead) {
-  var d = new Date(Date.now() + daysAhead * 86400000);
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow' }).format(d); // YYYY-MM-DD
-}
+// pending-действие между "проверили конфликты" и "реально записали" (08.09) - см.
+// mechSubmit_/mechConfirmConflicts_/mechDoSubmit_ ниже.
+var mechPending_ = null;
 function mechRenderDrawer_() {
   var dr = document.getElementById('mech-drawer');
   if (!dr || !mechDrawerGos_) return;
@@ -10156,63 +10168,125 @@ function mechRenderDrawer_() {
       html += '<button class="mech-btn mech-btn--rep" onclick="mechFinishRepair_()">Снять с ремонта - машина готова<small>закроет отрезок «' + r.status + '» в Планировке текущим часом</small></button>' +
               '<button class="mech-btn mech-btn--mnt" onclick="mechDrawerMode_set(\'extend\')">Продлить срок<small>новая дата выхода и почему</small></button>';
     } else {
-      html += '<button class="mech-btn mech-btn--rep" onclick="mechDrawerMode_set(\'repair\')">Поставить в ремонт<small>причина и срок выхода обязательны</small></button>' +
+      html += '<button class="mech-btn mech-btn--rep" onclick="mechDrawerMode_set(\'repair\')">Поставить в ремонт<small>причина и срок в часах обязательны</small></button>' +
               '<button class="mech-btn mech-btn--mnt" onclick="mechDrawerMode_set(\'maint\')">Поставить на ТО<small>по умолчанию сутки, можно изменить</small></button>';
     }
     html += '<button class="mech-btn mech-btn--ghost" onclick="mechCloseDrawer_();showPage(\'logistics-plan\', document.querySelector(\'.sidebar-nav-item[data-page=logistics-plan]\'))">Открыть в Планировке<small>та же машина, та же строка ленты</small></button>';
+  } else if (mechDrawerMode_ === 'confirm' && mechPending_) {
+    // 08.09, Влад: "если перед постановкой на ремонт есть рейсы, которые попадают под
+    // ремонт, должно вылететь окно уведомить логиста, чтобы логист убрал заявки" - это
+    // окно. Список - от сервера (mechSubmit_ уже сходил на /repair_conflicts), не из
+    // локального кэша - на случай, если рейс добавили секунду назад.
+    var conf = mechPending_.conflicts;
+    html += '<div class="mech-drawer__sec">На это время уже стоят рейсы</div>' +
+      '<div class="mech-conflict-note">' + r.gos + ' занята ' + conf.length + ' ' + (conf.length === 1 ? 'рейсом' : 'рейсами') +
+      ' в это окно. Сначала предупреди логиста, чтобы убрал заявки с Планировки - иначе рейс останется висеть на машине, которая в ремонте.</div>' +
+      '<div class="mech-conflict-list">' + conf.map(function(c) {
+        var when = mechFmtDM_(mechHourToDate_(c.start_hour));
+        return '<div class="mech-conflict-row"><div class="mech-conflict-row__top"><span class="mono">' + when + '</span><span class="muted">' + mechEsc_(c.logist_name || 'логист не указан') + '</span></div>' +
+          '<div class="mech-conflict-row__route">' + mechEsc_([c.route_from, c.route_to].filter(Boolean).join(' → ') || c.customer || 'без адреса') + '</div></div>';
+      }).join('') + '</div>' +
+      '<button class="mech-btn mech-btn--primary" id="mech-submit" onclick="mechConfirmConflicts_()">Уведомить логиста и поставить</button>' +
+      '<button class="mech-btn mech-btn--ghost" onclick="mechCancelConfirm_()">Отмена</button>';
   } else {
     var isExtend = mechDrawerMode_ === 'extend';
     var kind = isExtend ? (r.seg ? r.seg.kind : 'repair') : mechDrawerMode_;
     var title = isExtend ? 'Продлить ' + (kind === 'maint' ? 'ТО' : 'ремонт') : (kind === 'maint' ? 'Поставить на ТО' : 'Поставить в ремонт');
-    var defDate = isExtend ? mechDefaultDeadline_(2) : mechDefaultDeadline_(kind === 'maint' ? 1 : 3);
+    // Срок - в ЧАСАХ, не датой (08.09, Влад: "указывать причину и срок ремонта в часах") -
+    // напрямую то поле, что и хранит сама лента (plan_segs.length_hours), без перевода
+    // туда-обратно через календарь.
+    var defHours = isExtend ? 24 : (kind === 'maint' ? 24 : 72);
     html += '<div class="mech-drawer__sec">' + title + '</div>' +
       '<label class="mech-field"><span>' + (isExtend ? 'Почему продлеваем' : 'Причина') + ' <em>обязательно</em></span>' +
       '<textarea class="mech-input" id="mech-reason" rows="3" placeholder="' + (kind === 'maint' ? 'плановое ТО-2, замена масла и фильтров' : 'например: течь ГУР, ждём ремкомплект') + '" oninput="mechFormCheck_()"></textarea></label>' +
-      '<label class="mech-field"><span>' + (isExtend ? 'Новый срок выхода' : 'Примерный срок выхода') + ' <em>обязательно</em></span>' +
-      '<input class="mech-input" type="date" id="mech-deadline" value="' + defDate + '" min="' + mechDefaultDeadline_(0) + '" oninput="mechFormCheck_()"></label>' +
+      '<label class="mech-field"><span>' + (isExtend ? 'На сколько часов продлить' : 'Срок ремонта, часов') + ' <em>обязательно</em></span>' +
+      '<input class="mech-input" type="number" id="mech-hours" value="' + defHours + '" min="1" max="2000" step="1" oninput="mechFormCheck_()"></label>' +
       '<button class="mech-btn mech-btn--primary" id="mech-submit" onclick="mechSubmit_(\'' + kind + '\',' + (isExtend ? 'true' : 'false') + ')">Укажи причину</button>' +
       '<button class="mech-btn mech-btn--ghost" onclick="mechDrawerMode_set(\'view\')">Отмена</button>';
   }
   dr.innerHTML = html;
-  if (mechDrawerMode_ !== 'view') { mechFormCheck_(); var ta = document.getElementById('mech-reason'); if (ta) ta.focus(); }
+  if (mechDrawerMode_ !== 'view' && mechDrawerMode_ !== 'confirm') { mechFormCheck_(); var ta = document.getElementById('mech-reason'); if (ta) ta.focus(); }
 }
 // Кнопка сама называет, чего не хватает (канон ГОСТа), вместо немого disabled.
 function mechFormCheck_() {
   var btn = document.getElementById('mech-submit'); if (!btn) return;
   var reason = (document.getElementById('mech-reason') || {}).value || '';
-  var date = (document.getElementById('mech-deadline') || {}).value || '';
-  var missing = reason.trim().length < 3 ? 'Укажи причину' : (!date ? 'Укажи срок выхода' : '');
+  var hours = parseFloat((document.getElementById('mech-hours') || {}).value);
+  var missing = reason.trim().length < 3 ? 'Укажи причину' : (!(hours > 0) ? 'Укажи срок в часах' : '');
   btn.textContent = missing || (mechDrawerMode_ === 'extend' ? 'Продлить' : (mechDrawerMode_ === 'maint' ? 'Поставить на ТО' : 'Поставить в ремонт'));
   btn.classList.toggle('mech-btn--blocked', !!missing);
 }
 function mechNewId_() { return 'm' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8); }
-function mechDateToHour_(ymd) { return (Date.parse(ymd + 'T18:00:00+03:00') - mechFleet_.epoch0) / 3600000; } // выход к концу смены
+// Шаг 1 - валидация формы + запрос конфликтов у сервера (ИСТОЧНИК ИСТИНЫ - не локальный
+// mechFleet_.segs, тот мог устареть за время, что механик заполнял форму).
 function mechSubmit_(kind, isExtend) {
   var reason = ((document.getElementById('mech-reason') || {}).value || '').trim();
-  var date = (document.getElementById('mech-deadline') || {}).value || '';
+  var hours = parseFloat((document.getElementById('mech-hours') || {}).value);
   if (reason.length < 3) { p2Toast('Без причины ремонт не ставим - напиши, что случилось', 'amber'); return; }
-  if (!date) { p2Toast('Укажи примерный срок выхода из ремонта', 'amber'); return; }
+  if (!(hours > 0)) { p2Toast('Укажи срок ремонта в часах', 'amber'); return; }
   var r = mechRows_().filter(function(x) { return x.gos === mechDrawerGos_; })[0]; if (!r) return;
   var nowH = mechNowHour_();
-  var endH = mechDateToHour_(date);
-  var s, l, id, fullReason;
+  var s, id, fullReason;
   if (isExtend && r.seg) {
     s = r.seg.start_hour; id = r.seg.id;
-    if (endH <= nowH) { p2Toast('Новый срок должен быть позже текущего момента', 'amber'); return; }
-    l = endH - s;
-    fullReason = ((r.seg.repair_reason || '') + ' · продлено до ' + mechFmtDM_(mechHourToDate_(endH)) + ': ' + reason).replace(/^ · /, '').slice(0, 255);
+    fullReason = ((r.seg.repair_reason || '') + ' · продлено на ' + Math.round(hours) + ' ч: ' + reason).replace(/^ · /, '').slice(0, 255);
   } else {
-    s = Math.floor(nowH * 4) / 4; id = mechNewId_();
-    if (endH <= s) endH = s + (kind === 'maint' ? 24 : 72);
-    l = endH - s; fullReason = reason.slice(0, 255);
+    s = Math.floor(nowH * 4) / 4; id = mechNewId_(); fullReason = reason.slice(0, 255);
   }
-  var btn = document.getElementById('mech-submit'); if (btn) { btn.disabled = true; btn.textContent = 'Сохраняю…'; }
-  postToYardApi_('/plan/seg', { id: id, gos: r.gos, kind: kind, s: Math.round(s * 100) / 100, l: Math.round(l * 100) / 100, repair_reason: fullReason }).then(function(res) {
+  var l = isExtend ? ((r.seg.start_hour + r.seg.length_hours - nowH) > 0 ? (r.seg.start_hour + r.seg.length_hours - nowH) + hours : hours) : hours;
+  var btn = document.getElementById('mech-submit'); if (btn) { btn.disabled = true; btn.textContent = 'Проверяю занятость машины…'; }
+  var pending = { kind: kind, isExtend: isExtend, id: id, gos: r.gos, s: s, l: l, reason: fullReason };
+  fetchFromYardApi_('/mechanic/repair_conflicts', { gos: r.gos, s: s, l: l }).then(function(res) {
+    var conflicts = (res.ok && res.data && res.data.conflicts) || [];
+    if (conflicts.length) {
+      mechPending_ = { kind: kind, action: pending, conflicts: conflicts };
+      mechDrawerMode_ = 'confirm';
+      mechRenderDrawer_();
+    } else {
+      mechDoSubmit_(pending);
+    }
+  }).catch(function() {
+    // сеть недоступна - не блокируем работу механика проверкой, которая не может пройти,
+    // просто ставим без проверки (тот же принцип "тихий фолбэк", что везде на дашборде)
+    mechDoSubmit_(pending);
+  });
+}
+function mechCancelConfirm_() {
+  var backTo = mechPending_ && mechPending_.action ? (mechPending_.action.isExtend ? 'extend' : mechPending_.action.kind) : 'view';
+  mechPending_ = null;
+  mechDrawerMode_set(backTo);
+}
+// Шаг 2 (только если были конфликты) - уведомить логистов, потом шаг 3.
+function mechConfirmConflicts_() {
+  if (!mechPending_) return;
+  var pending = mechPending_.action, gos = pending.gos, s = pending.s, l = pending.l;
+  var btn = document.getElementById('mech-submit'); if (btn) { btn.disabled = true; btn.textContent = 'Уведомляю логиста…'; }
+  postToYardApi_('/mechanic/notify_logists', { gos: gos, s: s, l: l }).then(function(res) {
+    var data = res.data || {};
+    if (data.notified && data.notified.length) {
+      p2Toast('Логист уведомлён: ' + data.notified.join(', '), 'green');
+    } else {
+      p2Toast('Не смог отправить уведомление автоматически - предупреди логиста лично, прежде чем ставить в ремонт', 'amber');
+    }
+  }).catch(function() {
+    p2Toast('Не смог отправить уведомление - предупреди логиста лично', 'amber');
+  }).then(function() {
+    mechPending_ = null;
+    mechDoSubmit_(pending);
+  });
+}
+// Шаг 3 - собственно запись отрезка в Планировку (тот же POST /plan/seg, что и у логистов).
+function mechDoSubmit_(pending) {
+  var endH = pending.s + pending.l;
+  postToYardApi_('/plan/seg', { id: pending.id, gos: pending.gos, kind: pending.kind, s: Math.round(pending.s * 100) / 100, l: Math.round(pending.l * 100) / 100, repair_reason: pending.reason }).then(function(res) {
     if (!res.ok) { throw new Error((res.data && res.data.error) || 'сервер отказал'); }
-    p2Toast((isExtend ? 'Срок продлён' : (kind === 'maint' ? 'Поставлена на ТО' : 'Поставлена в ремонт')) + ' - ' + r.gos + ', выход ' + mechFmtDM_(mechHourToDate_(endH)), 'green');
+    p2Toast((pending.isExtend ? 'Срок продлён' : (pending.kind === 'maint' ? 'Поставлена на ТО' : 'Поставлена в ремонт')) + ' - ' + pending.gos + ', выход ' + mechFmtDM_(mechHourToDate_(endH)), 'green');
     mechDrawerMode_ = 'view';
     mechLoad_(true);
-  }).catch(function(e) { p2Toast('Не сохранилось: ' + e.message, 'red'); if (btn) { btn.disabled = false; mechFormCheck_(); } });
+  }).catch(function(e) {
+    p2Toast('Не сохранилось: ' + e.message, 'red');
+    mechDrawerMode_set(pending.isExtend ? 'extend' : pending.kind);
+  });
 }
 function mechFinishRepair_() {
   var r = mechRows_().filter(function(x) { return x.gos === mechDrawerGos_; })[0];

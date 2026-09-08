@@ -1529,7 +1529,7 @@ main:has(> #page-crm.active){max-width:none;}
   transition:background-color .12s ease-out,border-color .12s ease-out;}
 .kb-col-hero:hover{background:var(--bg3);border-color:var(--border);}
 .kb-col-hero.is-sorted{background:var(--bg3);border-color:var(--border-strong);}
-.kb-col-hero-val{font:600 22px/1.15 var(--font-mono);color:var(--text);font-variant-numeric:tabular-nums;}
+.kb-col-hero-val{font:600 22px/1.15 var(--font-mono);color:var(--text);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .kb-col-hero-sub{font:400 10.5px/1 var(--font-body);color:var(--muted);}
 .kb-col-hero.is-sorted .kb-col-hero-sub{color:var(--text);}
 .kb-list{display:flex;flex-direction:column;gap:8px;padding:10px;overflow-y:auto;flex:1;border-radius:0 0 12px 12px;min-height:90px;
@@ -20765,8 +20765,10 @@ var CRM = (function () {
   // сервер) <-> по убыванию суммы. Не декорация - реальное действие, как у KPI-плиток выше.
   function colHeroHtml(st, sum, ds) {
     var active = S.colSort[st.key] === 'amount';
+    // Полная сумма, не сокращённая (Влад, 08.09: "нужно не сокращённые, а полные суммы") -
+    // тот же money(), что и везде на дашборде, не shortMoney().
     return '<button class="kb-col-hero' + (active ? ' is-sorted' : '') + '" data-nav-sound onclick="CRM.toggleColSort(\'' + st.key + '\')" title="' + (active ? 'Сортировка по сумме - нажмите для сортировки по свежести' : 'Нажмите, чтобы отсортировать по сумме') + '" aria-pressed="' + active + '">' +
-      '<span class="kb-col-hero-val">' + (sum ? shortMoney(sum) : '—') + '</span>' +
+      '<span class="kb-col-hero-val">' + heroSumFmt_(sum) + '</span>' +
       (ds.length ? '<span class="kb-col-hero-sub">' + ds.length + ' ' + plural(ds.length, 'сделка', 'сделки', 'сделок') + (active ? ' · по сумме' : '') + '</span>' : '') +
       '</button>';
   }
@@ -20823,7 +20825,14 @@ var CRM = (function () {
     alignKpisToBoard();
   }
   function dealById(id) { return S.deals.find(function (d) { return d.id === id; }) || null; }
-  function updateHeaders() {
+  function heroSumFmt_(n) { var r = Math.round(Number(n) || 0); return r ? money(r) : '—'; }
+  function parseHeroSum_(text) { var digits = String(text || '').replace(/[^\d]/g, ''); return digits ? Number(digits) : 0; }
+  // fromCol/toCol - какие ДВЕ колонки реально поменяли сумму на этом ходе (перенос карточки
+  // между колонками); их суммы проигрываются одометром со звуком тиков, а не тихо
+  // подменяются текстом - Влад 08.09: "любое передвижение карточки из колонки в колонку с
+  // суммой... должно сопровождаться звуком и анимацией цифр, как при переносе в успешные".
+  // Остальные колонки (сумма не изменилась) обновляются как раньше, без анимации.
+  function updateHeaders(fromCol, toCol) {
     STAGES.forEach(function (st) {
       var list = el('kb-board').querySelector('.kb-list[data-col="' + st.key + '"]'); if (!list) return;
       var ids = Array.prototype.map.call(list.querySelectorAll(':scope > .kb-card'), function (c) { return Number(c.getAttribute('data-id')); });
@@ -20831,7 +20840,14 @@ var CRM = (function () {
       if (cnt && cnt.textContent !== String(ids.length)) { cnt.textContent = ids.length; cnt.classList.remove('pulse'); void cnt.offsetWidth; cnt.classList.add('pulse'); }
       var ds = ids.map(dealById).filter(Boolean);
       var sum = ds.reduce(function (a, d) { return a + Number(d.amount || 0); }, 0);
+      var animate = heroWrap && fromCol && toCol && fromCol !== toCol && (st.key === fromCol || st.key === toCol);
+      var prevValEl = animate ? heroWrap.querySelector('.kb-col-hero-val') : null;
+      var fromSum = prevValEl ? parseHeroSum_(prevValEl.textContent) : null;
       if (heroWrap) heroWrap.innerHTML = colHeroHtml(st, sum, ds);
+      if (animate && fromSum !== null && fromSum !== sum && !reduced()) {
+        var valEl = heroWrap.querySelector('.kb-col-hero-val');
+        if (valEl) odometer(valEl, fromSum, sum, 500, heroSumFmt_, snd.winTick);
+      }
       var empty = list.querySelector('.kb-empty'); if (empty && ids.length) empty.remove();
     });
   }
@@ -20946,7 +20962,7 @@ var CRM = (function () {
         snd.drop(); vibrate(12);
         if (toCol !== fromCol) {
           var prev = d.stage; d.stage = toCol; d.updated_at = new Date().toISOString();
-          updateHeaders();
+          updateHeaders(fromCol, toCol);
           S.lastMove = { id: id, fromCol: fromCol, fromIndex: fromIndex };
           post('/crm/deals/stage', { id: id, stage: toCol }).then(function (r) {
             if (!r.ok) { d.stage = prev; renderBoard(); toast('Не удалось сохранить стадию: ' + esc((r.data && r.data.error) || 'ошибка сервера'), 'red'); return; }
@@ -20969,7 +20985,7 @@ var CRM = (function () {
       var after = card.getBoundingClientRect();
       card.style.transition = 'none'; card.style.transform = 'translate(' + (before.left - after.left) + 'px,' + (before.top - after.top) + 'px)'; card.getBoundingClientRect();
       requestAnimationFrame(function () { card.style.transition = reduced() ? 'none' : 'transform 340ms cubic-bezier(.32,.72,0,1)'; card.style.transform = ''; }); // отмена не праздник - без overshoot
-      updateHeaders();
+      updateHeaders(prevStage, mv.fromCol);
     } else renderBoard();
     snd.undo(); vibrate(8);
     post('/crm/deals/stage', { id: mv.id, stage: mv.fromCol }).then(function (r) { if (!r.ok) { d.stage = prevStage; renderBoard(); toast('Не удалось отменить', 'red'); } refreshSummary(); }).catch(function () {});
@@ -20990,11 +21006,38 @@ var CRM = (function () {
       refreshSummaryLater();
     }).catch(function () { d.stage = prevStage; renderBoard(); toast('Нет соединения - сделка не закрыта', 'red'); });
     var rect = card.getBoundingClientRect();
-    if (reduced() || document.hidden) { snd.win(); renderBoard(); toast(ico('check') + ' Сделка успешна · <b>' + money(d.amount) + '</b>', 'green', { label: 'Отменить', fn: undoWin }); return; }
+    if (reduced() || document.hidden) {
+      if (typeof bankWinFanfare_ === 'function') bankWinFanfare_((typeof bankWinLevel_ === 'function') ? bankWinLevel_(Number(d.amount) || 0) : 1); else snd.win();
+      renderBoard(); toast(ico('check') + ' Сделка успешна · <b>' + money(d.amount) + '</b>', 'green', { label: 'Отменить', fn: undoWin }); return;
+    }
     card.style.transition = 'opacity .3s ease'; card.style.opacity = '0.35';
     if (wonCol) { wonCol.classList.add('kb-win-glow'); setTimeout(function () { wonCol.classList.remove('kb-win-glow'); }, 300); }
-    setTimeout(function () { var cv = el('crm-celebrate'); if (cv && typeof bankCelebrate5_ === 'function') bankCelebrate5_(cv, rect.left + rect.width / 2, rect.top + 6, { colors: ['#1D9E75', '#EF9F27', '#e8e6df', '#378ADD'] }); }, 180);
-    setTimeout(function () { snd.win(); }, 200); vibrate([20, 40, 20]);
+    // Салют уровня суммы - ТОТ ЖЕ, что у прихода крупных денег на банковской ленте
+    // (bankWinScene_/bankCelebrate5_, plans/2026-08-XX-bank-sms-live-feed): один залп до
+    // 100т, двойной до 500т, четыре золотых залпа волной от 1 млн - и фанфара растёт вместе
+    // с залпом (win/win2/win3/win4). Влад 08.09: "успешная сделка сопровождается салютом
+    // как у нас в приходах больших денег" - раньше здесь был фиксированный один залп вне
+    // зависимости от суммы сделки.
+    var winLevel = (typeof bankWinLevel_ === 'function') ? bankWinLevel_(Number(d.amount) || 0) : 1;
+    setTimeout(function () {
+      var cv = el('crm-celebrate'); if (!cv || typeof bankCelebrate5_ !== 'function') return;
+      var cx = rect.left + rect.width / 2, cy = rect.top + 6;
+      var BASE = ['#1D9E75', '#EF9F27', (typeof themeVar_ === 'function' ? themeVar_('--text', '#e8e6df') : '#e8e6df'), '#378ADD'];
+      var GOLD = ['#EF9F27', '#EF9F27', 'var(--text)', '#1D9E75'];
+      if (winLevel <= 2) {
+        bankCelebrate5_(cv, cx, cy, { colors: BASE });
+      } else if (winLevel === 3) {
+        bankCelebrate5_(cv, cx, cy, { colors: BASE });
+        setTimeout(function () { bankCelebrate5_(cv, cx - rect.width * 0.35, cy + 4, { colors: BASE, mult: 0.8 }); }, 240);
+      } else {
+        bankCelebrate5_(cv, cx, cy, { colors: GOLD, mult: 1.35 });
+        setTimeout(function () { bankCelebrate5_(cv, cx - rect.width * 0.4, cy + 4, { colors: GOLD, mult: 1.05 }); }, 260);
+        setTimeout(function () { bankCelebrate5_(cv, cx + rect.width * 0.4, cy + 4, { colors: GOLD, mult: 1.05 }); }, 480);
+        setTimeout(function () { bankCelebrate5_(cv, cx, cy - 30, { colors: GOLD, mult: 1.2 }); }, 1240);
+      }
+    }, 180);
+    setTimeout(function () { if (typeof bankWinFanfare_ === 'function') bankWinFanfare_(winLevel); else snd.win(); }, 200);
+    vibrate(winLevel >= 3 ? [20, 40, 20, 40, 20] : [20, 40, 20]);
     setTimeout(function () {
       var sumEl = card.querySelector('.kb-sum');
       var after = function () {

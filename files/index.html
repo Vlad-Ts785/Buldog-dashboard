@@ -4910,7 +4910,7 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
       <div class="card" style="margin-bottom:16px">
         <div class="sec-header">
           <div class="sec-title">Проверка по ИНН</div>
-          <div class="muted" style="font-size:11px">ЕГРЮЛ · Федресурс · ФНС через Checko · повтор за 7 дней - из кэша</div>
+          <div class="muted" style="font-size:11px">ЕГРЮЛ · Федресурс · ФНС · КАД арбитр через Checko · повтор за 7 дней - из кэша</div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
           <input autocomplete="off" id="cp-inn" type="text" inputmode="numeric" maxlength="12" placeholder="ИНН - 10 или 12 цифр"
@@ -20019,6 +20019,20 @@ function cpRenderResult_(d) {
     return pageEsc_(f.name) + (f.share != null ? ' <span class="muted">' + f.share + '%</span>' : '');
   }).join('<br>');
   var contacts = (c.phones || []).map(pageEsc_).concat((c.emails || []).map(pageEsc_)).join(' · ');
+  // Суды/арбитраж (09.09, Влад: "в нашем сервисе не хватает информации по судам, у Checko
+  // это точно есть") - отдельный запрос Checko (/v2/legal-cases, см. сервер), только сводка -
+  // у части контрагентов тысячи дел (МОСИНЖПРОЕКТ - 3093), полный список не показываем.
+  // Чисто информационно, на светофор риска НЕ влияет. Блока нет вовсе, если сервер не смог
+  // получить данные (квота исчерпана) - не показываем "0", чтобы не выглядело как "чисто".
+  var legalCasesVal = '';
+  if (d.legal_cases) {
+    var lc = d.legal_cases, n = lc.count || 0;
+    var word = (function(n2) { n2 = Math.abs(n2) % 100; var n1 = n2 % 10;
+      if (n2 > 10 && n2 < 20) return 'дел'; if (n1 > 1 && n1 < 5) return 'дела'; if (n1 === 1) return 'дело'; return 'дел'; })(n);
+    legalCasesVal = n > 0
+      ? (n + ' ' + word + ' <span class="muted">на сумму ' + cpFmtMoney_(lc.sum) + '</span>')
+      : '<span class="muted">не найдено</span>';
+  }
   el.innerHTML =
     '<div style="display:grid;grid-template-columns:minmax(240px,1fr) 2fr;gap:16px;align-items:start">' +
       '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px">' +
@@ -20045,6 +20059,7 @@ function cpRenderResult_(d) {
         row('Реестр МСП', pageEsc_(c.msp || '')) +
         row('Контакты', contacts) +
         row('Лицензии / дела о банкротстве', (c.licenses || 0) + ' / ' + (c.bankrupt_cases || 0)) +
+        row('Суды (арбитраж)', legalCasesVal) +
       '</div>' +
     '</div>';
 }

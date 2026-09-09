@@ -20072,18 +20072,22 @@ function cpRenderResult_(d) {
   }).join('<br>');
   var contacts = (c.phones || []).map(pageEsc_).concat((c.emails || []).map(pageEsc_)).join(' · ');
   // Суды/арбитраж (09.09, Влад: "в нашем сервисе не хватает информации по судам, у Checko
-  // это точно есть") - отдельный запрос Checko (/v2/legal-cases, см. сервер), только сводка -
-  // у части контрагентов тысячи дел (МОСИНЖПРОЕКТ - 3093), полный список не показываем.
-  // Чисто информационно, на светофор риска НЕ влияет. Блока нет вовсе, если сервер не смог
-  // получить данные (квота исчерпана) - не показываем "0", чтобы не выглядело как "чисто".
+  // это точно есть") - отдельный запрос Checko (/v2/legal-cases?role=defendant, см. сервер),
+  // только сводка - у части контрагентов тысячи дел (МОСИНЖПРОЕКТ - 3104), список не
+  // показываем. Учитываются ТОЛЬКО дела, где контрагент - ОТВЕТЧИК (Влад, 09.09: "не
+  // истец") - фильтрация на стороне Checko, сервер уже отдаёт отфильтрованные count/sum.
+  // Есть дела -> строка красным (это ниже) И d.light уже "red" от сервера (см.
+  // /api/counterparty/check) - кружок/лейбл сверху карточки красные сами по себе, тут
+  // ничего дополнительно включать не нужно. Блока нет вовсе, если сервер не смог получить
+  // данные (квота исчерпана) - не показываем "0", чтобы не выглядело как "чисто".
   var legalCasesVal = '';
   if (d.legal_cases) {
     var lc = d.legal_cases, n = lc.count || 0;
     var word = (function(n2) { n2 = Math.abs(n2) % 100; var n1 = n2 % 10;
       if (n2 > 10 && n2 < 20) return 'дел'; if (n1 > 1 && n1 < 5) return 'дела'; if (n1 === 1) return 'дело'; return 'дел'; })(n);
     legalCasesVal = n > 0
-      ? (n + ' ' + word + ' <span class="muted">на сумму ' + cpFmtMoney_(lc.sum) + '</span>')
-      : '<span class="muted">не найдено</span>';
+      ? ('<span style="color:var(--red);font-weight:600">' + n + ' ' + word + ' на сумму ' + cpFmtMoney_(lc.sum) + '</span>')
+      : '<span class="muted">не найдено (как ответчик)</span>';
   }
   el.innerHTML =
     '<div style="display:grid;grid-template-columns:minmax(240px,1fr) 2fr;gap:16px;align-items:start">' +
@@ -20111,7 +20115,7 @@ function cpRenderResult_(d) {
         row('Реестр МСП', pageEsc_(c.msp || '')) +
         row('Контакты', contacts) +
         row('Лицензии / дела о банкротстве', (c.licenses || 0) + ' / ' + (c.bankrupt_cases || 0)) +
-        row('Суды (арбитраж)', legalCasesVal) +
+        row('Суды (ответчик)', legalCasesVal) +
       '</div>' +
     '</div>';
 }

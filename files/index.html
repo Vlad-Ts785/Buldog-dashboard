@@ -247,6 +247,14 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   background:var(--bg4);border:1px solid rgba(255,255,255,.16);color:var(--text);font-size:10.5px;padding:4px 8px;border-radius:6px;box-shadow:0 6px 16px rgba(0,0,0,.35);}
 .sidebar-nav-item.menu-hint-pulse{animation:menuHintPulse 1.1s ease-in-out 3;}
 @keyframes menuHintPulse{0%,100%{box-shadow:0 0 0 0 rgba(55,138,221,0);}50%{box-shadow:0 0 0 2px rgba(55,138,221,.55);}}
+/* Суды-ответчик выше порога % от выручки (09.09, legalRiskMarkHtml_) - ЕДИНСТВЕННОЕ
+   сознательное исключение из "постоянный пульс запрещён" (раздел 9/"Attention-состояние"
+   DESIGN_SYSTEM.md) - approved Владом 09.09 именно для этого случая: факт о компании
+   (не "живой" процесс), должен цеплять взгляд при каждом открытии ДЗ/Справочников, не
+   один раз. Мягкое кольцо, тот же приём, что lpDayModePulse (30.08) - НЕ бегущая анимация. */
+.risk-dot-pulse{animation:riskDotPulse 2.2s ease-in-out infinite;}
+@keyframes riskDotPulse{0%,100%{box-shadow:0 0 0 0 rgba(226,75,74,.55);}50%{box-shadow:0 0 0 5px rgba(226,75,74,0);}}
+@media(prefers-reduced-motion:reduce){.risk-dot-pulse{animation:none;box-shadow:0 0 0 2px rgba(226,75,74,.5);}}
 @media(prefers-reduced-motion:reduce){
   .sidebar.menu-customizing .sidebar-nav-item.menu-wiggle{animation:none;}
   .sidebar-nav-item.menu-hint-pulse{animation:none;box-shadow:0 0 0 2px rgba(55,138,221,.45);}
@@ -12959,8 +12967,19 @@ function legalRiskLabel_(light) {
 // недоимка >= 10 млн -> "!!!"; Влад, 05.09: "вместо черепа красный восклицательный знак").
 // Глиф текстом (JetBrains Mono, жирный, красный), размер - от размера точки, чтобы стоять в
 // той же строке. Череп убран.
-function legalRiskMarkHtml_(light, size, style, marker) {
+// pulse (09.09, Влад: "красный кружок там где суды мягко пульсировал", затем "суды
+// приоритет над недоимкой по значку") - суды-ответчик сверх порога % от выручки
+// (checkoLegalCasesUnhealthy_ на сервере). Приоритет ВЫШЕ маркера "!"/"!!!" недоимки -
+// раньше маркер-текст полностью перекрывал место точки (см. код ниже), суды с pulse=true
+// теперь рисуются кружком-пульсом ДАЖЕ если marker пришёл с сервера. Единственное
+// сознательное исключение из "постоянный пульс запрещён" (DESIGN_SYSTEM.md, п.9/раздел
+// "Attention-состояние") - approved Владом 09.09, задокументировано там же.
+function legalRiskMarkHtml_(light, size, style, marker, pulse) {
   style = style || '';
+  if (pulse) {
+    return '<span class="risk-dot-pulse" style="display:inline-block;width:' + size + 'px;height:' + size + 'px;border-radius:50%;background:' +
+      legalRiskColor_(light) + ';vertical-align:middle;flex:none;' + style + '" aria-label="Суды: особое внимание"></span>';
+  }
   if (!marker && light === 'bankrupt') marker = '!';
   if (marker === '!' || marker === '!!!') {
     return '<span style="display:inline-block;line-height:1;font-family:\'JetBrains Mono\',ui-monospace,monospace;font-weight:800;font-size:' +
@@ -19065,7 +19084,7 @@ function debtRiskBlockHtml_(contragent) {
     : '<div class="muted" style="font-size:12px;margin-top:2px">Рисков по официальным реестрам не найдено</div>';
   return '<div style="margin-bottom:16px;padding:10px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px">' +
     '<div style="display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:' + color + '">' +
-      legalRiskMarkHtml_(m.light, 9, '', m.marker) +
+      legalRiskMarkHtml_(m.light, 9, '', m.marker, m.pulse) +
       'Проверка контрагента: ' + legalRiskLabel_(m.light) +
       (m.checked_at ? '<span class="muted" style="font-weight:400;font-size:11px;margin-left:auto">' + pageEsc_(m.checked_at) + '</span>' : '') +
     '</div>' + reasons + '</div>';
@@ -19095,7 +19114,7 @@ function cpLightHtml_(name, size) {
     ? m.reasons.map(function(x) { return '— ' + x; }).join('\n')
     : 'Рисков по официальным реестрам не найдено';
   return '<span title="' + pageEscAttr_(head + '\n' + body) + '" style="display:inline-block;vertical-align:middle;margin-right:5px">' +
-    legalRiskMarkHtml_(m.light, size || 7, '', m.marker) + '</span>';
+    legalRiskMarkHtml_(m.light, size || 7, '', m.marker, m.pulse) + '</span>';
 }
 function debtRiskDotHtml_(contragent) {
   var m = debtRiskMap_ && debtRiskMap_[contragent];
@@ -19105,7 +19124,7 @@ function debtRiskDotHtml_(contragent) {
     ? m.reasons.map(function(x) { return '— ' + x; }).join('\n')
     : 'Рисков по официальным реестрам не найдено';
   return '<span title="' + pageEscAttr_(head + '\n' + body) + '" style="display:inline-block;vertical-align:middle;margin-right:6px">' +
-    legalRiskMarkHtml_(m.light, 8, '', m.marker) + '</span>';
+    legalRiskMarkHtml_(m.light, 8, '', m.marker, m.pulse) + '</span>';
 }
 function debtRiskStatusText_(data) {
   var n = 0, by = { bankrupt: 0, red: 0, yellow: 0, green: 0 };
@@ -20087,24 +20106,26 @@ function cpRenderResult_(d) {
   // это точно есть") - отдельный запрос Checko (/v2/legal-cases?role=defendant, см. сервер),
   // только сводка - у части контрагентов тысячи дел (МОСИНЖПРОЕКТ - 3104), список не
   // показываем. Учитываются ТОЛЬКО дела, где контрагент - ОТВЕТЧИК (Влад, 09.09: "не
-  // истец") - фильтрация на стороне Checko, сервер уже отдаёт отфильтрованные count/sum.
-  // Есть дела -> строка красным (это ниже) И d.light уже "red" от сервера (см.
-  // /api/counterparty/check) - кружок/лейбл сверху карточки красные сами по себе, тут
-  // ничего дополнительно включать не нужно. Блока нет вовсе, если сервер не смог получить
-  // данные (квота исчерпана) - не показываем "0", чтобы не выглядело как "чисто".
+  // истец") - фильтрация на стороне Checko. "Особое внимание" (красный текст здесь + d.light
+  // "red"/d.pulse с сервера - кружок сверху карточки пульсирует сам, см. legalRiskMarkHtml_)
+  // - НЕ от самого факта дела (любое дело зажигало 88% ДЗ, см. DEPLOY_LOG 09.09), а от доли
+  // суммы исков в годовой выручке (сервер уже прислал итог в d.pulse). Блока нет вовсе, если
+  // сервер не смог получить данные (квота исчерпана) - не показываем "0", чтобы не выглядело
+  // как "чисто".
   var legalCasesVal = '';
   if (d.legal_cases) {
     var lc = d.legal_cases, n = lc.count || 0;
     var word = (function(n2) { n2 = Math.abs(n2) % 100; var n1 = n2 % 10;
       if (n2 > 10 && n2 < 20) return 'дел'; if (n1 > 1 && n1 < 5) return 'дела'; if (n1 === 1) return 'дело'; return 'дел'; })(n);
-    legalCasesVal = n > 0
-      ? ('<span style="color:var(--red);font-weight:600">' + n + ' ' + word + ' на сумму ' + cpFmtMoney_(lc.sum) + '</span>')
-      : '<span class="muted">не найдено (как ответчик)</span>';
+    var ratioSuffix = (lc.revenue > 0) ? (' <span class="muted">(' + Math.round(lc.sum / lc.revenue * 100) + '% выручки ' + lc.revenueYear + ' г.)</span>') : '';
+    legalCasesVal = n === 0 ? '<span class="muted">не найдено (как ответчик)</span>'
+      : (d.pulse ? '<span style="color:var(--red);font-weight:600">' + n + ' ' + word + ' на сумму ' + cpFmtMoney_(lc.sum) + '</span>' + ratioSuffix
+                 : (n + ' ' + word + ' на сумму ' + cpFmtMoney_(lc.sum) + ratioSuffix));
   }
   el.innerHTML =
     '<div style="display:grid;grid-template-columns:minmax(240px,1fr) 2fr;gap:16px;align-items:start">' +
       '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px">' +
-        '<div style="display:flex;align-items:center;gap:10px">' + legalRiskMarkHtml_(d.light, 14, '', d.marker) +
+        '<div style="display:flex;align-items:center;gap:10px">' + legalRiskMarkHtml_(d.light, 14, '', d.marker, d.pulse) +
           '<div><div style="font-size:17px;font-weight:700;color:' + color + '">' + legalRiskLabel_(d.light) + '</div>' +
           '<div class="muted" style="font-size:11px">' + (d.from_cache ? 'из кэша, проверка ' : 'проверено ') + pageEsc_(d.checked_at || '') + '</div></div></div>' +
         reasons +
@@ -20144,7 +20165,7 @@ function cpLoadHistory_() {
         '<td style="font-family:\'JetBrains Mono\',ui-monospace,monospace">' + pageEsc_(it.inn) + '</td>' +
         '<td>' + pageEsc_(it.name_short || '—') + '</td>' +
         '<td>' + (it.light
-          ? legalRiskMarkHtml_(it.light, 8, 'margin-right:6px', it.marker) + '<span style="font-size:12px;color:' + legalRiskColor_(it.light) + '">' + legalRiskLabel_(it.light) + '</span>'
+          ? legalRiskMarkHtml_(it.light, 8, 'margin-right:6px', it.marker, it.pulse) + '<span style="font-size:12px;color:' + legalRiskColor_(it.light) + '">' + legalRiskLabel_(it.light) + '</span>'
           : '<span class="muted">—</span>') +
           (it.from_cache ? ' <span class="muted" style="font-size:10px">из кэша</span>' : '') + '</td>' +
         '<td class="muted" style="font-size:12px">' + pageEsc_(it.requested_by || '') + '</td>' +

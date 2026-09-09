@@ -1531,6 +1531,37 @@ main:has(> #page-crm.active){max-width:none;}
 .crmldr-barwrap{position:absolute;left:0;top:4px;height:6px;width:100%;background:var(--bg4);border-radius:3px;overflow:hidden;}
 .crmldr-bar{height:100%;border-radius:3px;background:var(--green);transition:width .5s ease;}
 .crmldr-bar.is-blue{background:var(--blue);}
+.crmldr-bar.is-red-bar{background:var(--red);}
+/* ── Аналитика (Фаза 2, 2026-09-09) - DESIGN_SYSTEM.md 2.18 ──────────────────────────── */
+.crman-toolbar{display:flex;gap:8px;margin-bottom:14px;}
+.crman-grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;}
+@media(max-width:900px){.crman-grid2{grid-template-columns:1fr;}}
+.crman-trend{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;}
+.crman-trend-row{display:flex;gap:16px;align-items:flex-end;}
+.crman-trend-cell{display:flex;flex-direction:column;align-items:center;gap:2px;}
+.crman-trend-val{font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;}
+.crman-trend-lbl{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+/* Ростер "взял/продал/отказано" - единственный новый паттерн страницы. Три bar-per-row
+   метрики от общей базы (НЕ сегменты одной суммы) - осознанное исключение "один цвет на
+   серию": цвет здесь несёт семантику (взял=нейтрально, продал=хорошо, отказано=плохо), не
+   визуальный шум. */
+.crman-row{display:grid;grid-template-columns:24px 84px 1fr 1fr 1fr;align-items:center;gap:10px;min-height:26px;padding:4px 0;}
+.crman-row + .crman-row{border-top:1px solid var(--border);}
+.crman-name{font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.crman-seg{display:flex;align-items:center;gap:6px;}
+.crman-segtrack{position:relative;height:6px;flex:1;background:var(--bg4);border-radius:3px;overflow:hidden;}
+.crman-segbar{height:100%;border-radius:3px;transition:width .5s ease;}
+.crman-segbar.is-blue{background:var(--blue);}
+.crman-segbar.is-green{background:var(--green);}
+.crman-segbar.is-red{background:var(--red);}
+.crman-segval{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);min-width:14px;text-align:right;font-variant-numeric:tabular-nums;}
+.crman-reason{grid-column:2/-1;font-size:11px;color:var(--red);margin-top:2px;}
+.crman-legend{display:flex;gap:14px;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);}
+.crman-lg-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px;}
+.crman-lg-dot.is-blue{background:var(--blue);}
+.crman-lg-dot.is-green{background:var(--green);}
+.crman-lg-dot.is-red{background:var(--red);}
+@media(prefers-reduced-motion:reduce){.crman-segbar{transition:none;}}
 .crmldr-val{font-family:'JetBrains Mono',monospace;font-size:12px;text-align:right;font-variant-numeric:tabular-nums;color:var(--text);}
 @media (prefers-reduced-motion:reduce){.crmldr-bar{transition:none;}}
 
@@ -4592,6 +4623,7 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
           <div class="tab-bar">
             <button class="tab-btn active" id="crm-tab-board" onclick="CRM.showView('board')">Канбан</button>
             <button class="tab-btn" id="crm-tab-chats" onclick="CRM.showView('chats')">Чаты<span class="crm-badge is-zero" id="crm-unread-badge"></span></button>
+            <button class="tab-btn" id="crm-tab-analytics" onclick="CRM.showView('analytics')">Аналитика</button>
           </div>
           <div class="crm-top-right">
             <button class="crm-chip" id="crm-me-btn" onclick="CRM.askWhoAmI()" title="Кто вы - чтобы фильтр «Мои» показывал ваши диалоги"><span data-ico="user"></span><span id="crm-me-label">Кто я</span></button>
@@ -4637,6 +4669,26 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
             </section>
             <aside class="cx-panel cx-panel--ctx"><div class="cx-scroll"><div class="cx-ctx" id="cx-ctx"><div class="cx-empty"><p>Здесь появятся клиент, заявка и сделка выбранного диалога.</p></div></div></div></aside>
           </div>
+        </div>
+        <!-- ═══ Аналитика (Фаза 2, plans/2026-09-09-calltouch-crm-analytics.md) - Влад:
+             "вся инфа откуда что, кто взял, кто продал, кто не продал почему". Когортная
+             методология (по created_at сделки, не снапшот доски) - см. /api/crm/analytics.
+             Единственный новый визуальный паттерн - ростер (см. .crman-row ниже), остальное
+             переиспользует mp-status/kpi-grid/crmldr-* без изменений. ═══ -->
+        <div id="crm-view-analytics" style="display:none">
+          <div class="crman-toolbar">
+            <button class="crm-chip" data-nav-sound aria-pressed="true" data-period="this_month" onclick="CRM.setAnalyticsPeriod('this_month')">Этот месяц</button>
+            <button class="crm-chip" data-nav-sound aria-pressed="false" data-period="last_month" onclick="CRM.setAnalyticsPeriod('last_month')">Прошлый месяц</button>
+            <button class="crm-chip" data-nav-sound aria-pressed="false" data-period="90d" onclick="CRM.setAnalyticsPeriod('90d')">90 дней</button>
+          </div>
+          <div id="crm-an-verdict"></div>
+          <div class="kpi-grid" id="crm-an-kpis"></div>
+          <div class="crman-grid2">
+            <div class="crm-leaders" id="crm-an-roster"></div>
+            <div class="crm-leaders" id="crm-an-loss"></div>
+          </div>
+          <div class="crm-leaders" id="crm-an-channels"></div>
+          <div class="crman-trend" id="crm-an-trend"></div>
         </div>
       </div>
       <div class="kb-shelf" id="kb-shelf">
@@ -20698,6 +20750,7 @@ var CRM = (function () {
 
   var S = {
     inited: false, view: 'board', deals: [], summary: null, employees: null, traffic: null,
+    analytics: null, anPeriod: 'this_month',
     me: (function () { try { return localStorage.getItem('crmMyExtension') || null; } catch (e) { return null; } })(),
     kpiFilter: null, colSort: {}, // {stageKey: 'amount'} - крупная сумма колонки кликабельна (Влад, 08.09: "как в Битриксе")
     collapsedCols: (function () { try { return JSON.parse(localStorage.getItem('crmCollapsedCols') || '{}'); } catch (e) { return {}; } })(),
@@ -20872,10 +20925,142 @@ var CRM = (function () {
     S.view = v;
     el('crm-view-board').style.display = v === 'board' ? '' : 'none';
     el('crm-view-chats').style.display = v === 'chats' ? '' : 'none';
+    el('crm-view-analytics').style.display = v === 'analytics' ? '' : 'none';
     el('crm-tab-board').classList.toggle('active', v === 'board');
     el('crm-tab-chats').classList.toggle('active', v === 'chats');
+    el('crm-tab-analytics').classList.toggle('active', v === 'analytics');
     if (v === 'chats') { renderChips(); loadChats(!S.chatsLoaded); startPoll(); firstEnter(); }
     else { stopPoll(); }
+    if (v === 'analytics') loadAnalytics();
+  }
+  // Аналитика (Фаза 2) - своя загрузка, отдельно от load() выше: не нужна при каждом
+  // заходе на Канбан/Чаты (лишний запрос), только когда реально открыли вкладку.
+  function loadAnalytics(period) {
+    period = period || S.anPeriod || 'this_month';
+    S.anPeriod = period;
+    var box = el('crm-view-analytics');
+    box.querySelectorAll('.crman-toolbar .crm-chip').forEach(function (b) { b.setAttribute('aria-pressed', b.getAttribute('data-period') === period); });
+    api('/crm/analytics', { period: period }).then(function (r) {
+      if (!r.ok) { toast('Не удалось загрузить аналитику', 'red'); return; }
+      S.analytics = r.data;
+      renderAnalytics();
+    });
+  }
+  function setAnalyticsPeriod(period) { loadAnalytics(period); }
+
+  // ── Аналитика: рендер (Фаза 2) ───────────────────────────────────────────────────────
+  var CHANNEL_LABELS_ = { call: 'Звонок', avito: 'Авито' };
+  function anDaysFmt_(n) { n = n == null ? null : Number(n); return n == null || isNaN(n) ? '-' : (n < 1 ? Math.round(n * 24) + ' ч' : n.toFixed(1).replace('.', ',') + ' дн'); }
+  function renderAnalytics() {
+    var a = S.analytics; if (!a) return;
+    renderAnVerdict_(a);
+    renderAnKpis_(a);
+    renderAnRoster_(a);
+    renderAnLoss_(a);
+    renderAnChannels_(a);
+    renderAnTrend_(a);
+  }
+  // Вердикт-строка - конверсия периода словами + формула словами под ней (тот же канон,
+  // что у mp-status на других страницах - "формула видна, не только результат").
+  function renderAnVerdict_(a) {
+    var box = el('crm-an-verdict'); if (!box) return;
+    var wr = a.win_rate || {};
+    var cls = 'hold', word = 'ПОКА НЕТ ЗАКРЫТЫХ СДЕЛОК', sub = 'В выбранном периоде ни одна сделка ещё не выиграна и не отказана';
+    if (wr.rate != null) {
+      var pct = Math.round(wr.rate * 100);
+      cls = wr.rate >= 0.4 ? 'good' : wr.rate >= 0.2 ? 'warn' : 'bad';
+      // Формула словами - маленькая выборка (<20 закрытых) показываем дробью, не процентом
+      // (ложная точность на малых числах - предостережение из отчёта маркетолога 09.09).
+      var denom = wr.won + wr.lost;
+      word = denom < 20 ? ('ВЫИГРАНО ' + wr.won + ' ИЗ ' + denom) : ('КОНВЕРСИЯ В УСПЕХ ' + pct + '%');
+      sub = 'Выиграно <b>' + wr.won + '</b> из закрытых <b>' + denom + '</b> (' + wr.won + ' успешных + ' + wr.lost + ' отказов), заведённых в этом периоде';
+    }
+    box.innerHTML = '<div class="mp-status mp-status--' + cls + '">' +
+      '<div class="mp-status__l"><div class="mp-status__word">' + word + '</div><div class="mp-status__sub">' + sub + '</div></div>' +
+      '<div class="mp-status__r"><div class="mp-status__cap">Без ответственного &gt;1 дня</div>' +
+      '<div class="mp-status__lever">' + (a.stale_unassigned || 0) + '</div></div></div>';
+  }
+  function renderAnKpis_(a) {
+    var box = el('crm-an-kpis'); if (!box) return;
+    var funnelByStage = {}; (a.funnel || []).forEach(function (f) { funnelByStage[f.stage] = f.count; });
+    var v = a.velocity || {};
+    function tile(label, val, sub) {
+      return '<div class="kpi"><div class="kpi-label">' + esc(label) + '</div><div class="crm-kpi-val">' + val + '</div><div class="kpi-sub">' + sub + '</div></div>';
+    }
+    var lossTop = (a.loss_reasons || []).filter(function (r) { return r.reason === 'Дорого' || r.reason === 'Нет свободной техники'; })
+      .reduce(function (s, r) { return s + r.count; }, 0);
+    box.innerHTML =
+      tile('Новых заявок', funnelByStage.new || 0, 'заведено в периоде') +
+      tile('В работе', (funnelByStage.in_progress || 0) + (funnelByStage.quote || 0) + (funnelByStage.negotiation || 0) + (funnelByStage.execution || 0), 'на всех промежуточных стадиях') +
+      tile('Средний срок сделки', anDaysFmt_(v.won_avg_days), v.lost_avg_days != null ? 'отказ - ' + anDaysFmt_(v.lost_avg_days) : 'по выигранным') +
+      tile('Дорого / нет техники', lossTop, 'операционные причины отказа') +
+      tile('Без ответственного', a.stale_unassigned || 0, 'открытых заявок дольше суток');
+  }
+  // Ростер "взял/продал/слил" - ЕДИНСТВЕННЫЙ новый визуальный паттерн страницы
+  // (DESIGN_SYSTEM.md 2.18). Менеджеры без движения за период не рисуются вообще.
+  function renderAnRoster_(a) {
+    var box = el('crm-an-roster'); if (!box) return;
+    var roster = a.roster || [];
+    if (!roster.length) { box.classList.remove('has-data'); box.innerHTML = ''; return; }
+    box.classList.add('has-data');
+    var maxVal = roster.reduce(function (m, r) { return Math.max(m, r.taken || 0); }, 0) || 1;
+    box.innerHTML = '<div class="crmldr-head">Кто взял / продал / отказано</div>' +
+      roster.map(function (r) {
+        var surname = String(r.name || '').trim().split(' ').pop();
+        function seg(val, cls) { var w = Math.min(100, (val || 0) / maxVal * 100); return '<div class="crman-seg"><div class="crman-segtrack"><div class="crman-segbar ' + cls + '" style="width:' + w.toFixed(1) + '%"></div></div><span class="crman-segval">' + val + '</span></div>'; }
+        return '<div class="crman-row">' +
+          '<span class="kb-ava" style="background:' + avatarColor_(r.extension) + '" title="' + esc(r.name) + '">' + esc(initials(r.name)) + '</span>' +
+          '<span class="crman-name">' + esc(surname) + '</span>' +
+          seg(r.taken, 'is-blue') + seg(r.won, 'is-green') + seg(r.lost, 'is-red') +
+          (r.top_loss_reason ? '<div class="crman-reason">чаще: «' + esc(r.top_loss_reason) + '»</div>' : '') +
+          '</div>';
+      }).join('') +
+      '<div class="crman-legend"><span class="crman-lg-dot is-blue"></span>Взял <span class="crman-lg-dot is-green"></span>Продал <span class="crman-lg-dot is-red"></span>Отказано</div>';
+  }
+  function renderAnLoss_(a) {
+    var box = el('crm-an-loss'); if (!box) return;
+    var reasons = a.loss_reasons || [];
+    if (!reasons.length) { box.classList.remove('has-data'); box.innerHTML = ''; return; }
+    box.classList.add('has-data');
+    var maxVal = reasons.reduce(function (m, r) { return Math.max(m, r.count || 0); }, 0) || 1;
+    box.innerHTML = '<div class="crmldr-head">Причины отказа</div>' +
+      reasons.map(function (r) {
+        var barW = Math.min(100, (r.count || 0) / maxVal * 100);
+        var label = String(r.reason || '').length > 40 ? String(r.reason).slice(0, 40) + '…' : r.reason;
+        return '<div class="crmldr-row" title="' + esc(r.reason) + '">' +
+          '<span class="crmldr-name">' + esc(label) + '</span>' +
+          '<div class="crmldr-track"><div class="crmldr-barwrap"><div class="crmldr-bar is-red-bar" style="width:' + barW.toFixed(1) + '%"></div></div></div>' +
+          '<span class="crmldr-val">' + r.count + '</span></div>';
+      }).join('');
+  }
+  function renderAnChannels_(a) {
+    var box = el('crm-an-channels'); if (!box) return;
+    var channels = a.channels || [];
+    if (!channels.length) { box.classList.remove('has-data'); box.innerHTML = ''; return; }
+    box.classList.add('has-data');
+    var maxVal = channels.reduce(function (m, c) { return Math.max(m, c.count || 0); }, 0) || 1;
+    box.innerHTML = '<div class="crmldr-head">По каналу</div>' +
+      channels.map(function (c) {
+        var barW = Math.min(100, (c.count || 0) / maxVal * 100);
+        var label = CHANNEL_LABELS_[c.channel] || c.channel;
+        return '<div class="crmldr-row" title="' + esc(label) + ' · ' + shortMoney(c.amount) + '">' +
+          '<span class="crmldr-name">' + esc(label) + '</span>' +
+          '<div class="crmldr-track"><div class="crmldr-barwrap"><div class="crmldr-bar is-blue" style="width:' + barW.toFixed(1) + '%"></div></div></div>' +
+          '<span class="crmldr-val">' + c.count + '</span></div>';
+      }).join('');
+  }
+  // Тренд - текстом, БЕЗ графика (эксперты в один голос: 1-2 спарклайна максимум, а строить
+  // новый chart-компонент ради 6 точек - лишний новый паттерн без согласования с Владом).
+  function renderAnTrend_(a) {
+    var box = el('crm-an-trend'); if (!box) return;
+    var trend = a.trend || [];
+    if (!trend.length) { box.innerHTML = ''; return; }
+    var MONTHS_SHORT_ = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+    box.innerHTML = '<div class="crmldr-head">Заявок по месяцам</div><div class="crman-trend-row">' +
+      trend.map(function (t) {
+        var mm = Number(t.month.split('-')[1]) - 1;
+        return '<div class="crman-trend-cell"><span class="crman-trend-val">' + t.count + '</span><span class="crman-trend-lbl">' + MONTHS_SHORT_[mm] + '</span></div>';
+      }).join('') + '</div>';
   }
   function firstEnter() {
     try {
@@ -22195,6 +22380,7 @@ var CRM = (function () {
     onInput: onInput, onInputKey: onInputKey, toggleTemplates: toggleTemplates, useTemplate: useTemplate, saveTemplate: saveTemplate, deleteTemplate: deleteTemplate, send: send, retry: retry,
     saveCtxBrief: saveCtxBrief, createDealFor: createDealFor, openChatFor: openChatFor, reloadChats: reloadChats, enablePush: enablePush,
     playRecording: playRecording, seekStart: seekStart,
+    setAnalyticsPeriod: setAnalyticsPeriod,
     _state: S,
   };
 })();

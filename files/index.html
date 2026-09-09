@@ -4166,6 +4166,20 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
         <div style="font-size:11px;color:var(--muted);margin-top:4px">PDF/JPG/PNG/WEBP, до 15 МБ</div>
         <div id="asset-doc-error" style="display:none;color:var(--red);font-size:12px;margin-top:6px"></div>
       </div>
+      <!-- История машины (Влад, 09.09: "обязательно история должна по машине, что такого-то
+           числа было переоформление с такой компании на другую"). Смена собственника в форме
+           выше пишется сюда сервером сама; вручную - любое событие датой + текстом. -->
+      <div id="asset-events-section" style="display:none">
+        <div class="asset-form-section" style="margin-bottom:10px">История</div>
+        <div id="asset-events-list" style="margin-bottom:8px"></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input autocomplete="off" id="asset-event-date" type="date" style="background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:12px;outline:none">
+          <input autocomplete="off" id="asset-event-note" type="text" maxlength="300" placeholder="что произошло: переоформлено с … на …, продано, ДТП…" style="flex:1;min-width:0;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:12px;outline:none">
+          <button type="button" onclick="assetEventAdd_()"
+            style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:7px 12px;font-size:12px;cursor:pointer;white-space:nowrap">Добавить</button>
+        </div>
+        <div id="asset-event-error" style="display:none;color:var(--red);font-size:12px;margin-top:6px"></div>
+      </div>
       <div id="asset-error" style="display:none;color:var(--red);font-size:12px;margin-bottom:10px"></div>
       <div style="display:flex;gap:10px;margin-top:6px">
         <button type="button" onclick="assetSave_()" data-nav-sound
@@ -13310,6 +13324,11 @@ function assetOpenForm_(id) {
   document.getElementById('asset-docs-section').style.display = a ? '' : 'none';
   document.getElementById('asset-doc-error').style.display = 'none';
   if (a) assetDocsLoad_(a.id); else document.getElementById('asset-docs-list').innerHTML = '';
+  document.getElementById('asset-events-section').style.display = a ? '' : 'none';
+  document.getElementById('asset-event-error').style.display = 'none';
+  document.getElementById('asset-event-note').value = '';
+  document.getElementById('asset-event-date').value = new Date().toISOString().slice(0, 10);
+  if (a) assetEventsLoad_(a.id); else document.getElementById('asset-events-list').innerHTML = '';
   var bk = document.getElementById('asset-bk'), dr = document.getElementById('asset-drawer');
   bk.classList.add('show');
   setTimeout(function() { dr.classList.add('show'); }, 40);
@@ -13468,6 +13487,72 @@ function assetDocDelete_(id) {
     if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось удалить'; errEl.style.display = ''; return; }
     p2Toast('Файл удалён', 'amber');
     assetDocsLoad_(assetId);
+  }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+
+// ═══ ИСТОРИЯ МАШИНЫ (Влад, 09.09) - события по технике: переоформление собственника
+// (сервер пишет сам при смене юрлица/физлица в карточке), ручные заметки датой. Читается
+// из sprav_asset_events, событие может ссылаться на документ (СТС), по которому установлено.
+var ASSET_EVENT_TYPE_LABELS_ = { owner_change: 'Переоформление', note: '' };
+function assetEventsLoad_(assetId) {
+  var list = document.getElementById('asset-events-list');
+  list.innerHTML = '<div class="muted" style="font-size:12px">Загрузка…</div>';
+  fetchFromYardApi_('/sprav/asset_events', { asset_id: assetId }).then(function(r) {
+    if (assetEditId_ !== assetId) return;
+    if (!r.ok) { list.innerHTML = '<div style="font-size:12px;color:var(--red)">Не удалось загрузить историю</div>'; return; }
+    assetEventsPaint_(r.data.events || []);
+  }).catch(function() {
+    if (assetEditId_ !== assetId) return;
+    list.innerHTML = '<div style="font-size:12px;color:var(--red)">Нет соединения с сервером</div>';
+  });
+}
+function assetEventsPaint_(events) {
+  var list = document.getElementById('asset-events-list');
+  if (!events.length) { list.innerHTML = '<div class="muted" style="font-size:12px">Событий пока нет</div>'; return; }
+  list.innerHTML = events.map(function(e) {
+    var dt = e.event_date ? new Date(e.event_date).toLocaleDateString('ru-RU') : '';
+    var typeLabel = ASSET_EVENT_TYPE_LABELS_[e.event_type];
+    if (typeLabel === undefined) typeLabel = e.event_type || '';
+    var head = typeLabel ? '<b>' + pageEsc_(typeLabel) + '</b>' : '';
+    if (e.from_owner || e.to_owner) {
+      head += (head ? ': ' : '') + pageEsc_(e.from_owner || '(не указан)') + ' → ' + pageEsc_(e.to_owner || '(не указан)');
+    }
+    var row1 = '<div style="display:flex;align-items:baseline;gap:8px">'
+      + '<span class="mono" style="white-space:nowrap;color:var(--muted)">' + pageEsc_(dt) + '</span>'
+      + '<span style="flex:1;min-width:0">' + (head || pageEsc_(e.note || '')) + '</span>'
+      + '<button type="button" onclick="assetEventDelete_(' + Number(e.id) + ')" title="Удалить" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;line-height:1;padding:2px 4px">×</button>'
+      + '</div>';
+    var bits = [];
+    if (head && e.note) bits.push(pageEsc_(e.note));
+    if (e.doc_number) bits.push('СТС № ' + pageEsc_(e.doc_number));
+    var row2 = bits.length ? '<div class="muted" style="font-size:11px;margin-top:2px">' + bits.join(' · ') + '</div>' : '';
+    return '<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">' + row1 + row2 + '</div>';
+  }).join('');
+}
+function assetEventAdd_() {
+  var errEl = document.getElementById('asset-event-error');
+  errEl.style.display = 'none';
+  var assetId = assetEditId_;
+  if (!assetId) return;
+  var date = document.getElementById('asset-event-date').value;
+  var note = document.getElementById('asset-event-note').value.trim();
+  if (!date) { errEl.textContent = 'Укажите дату'; errEl.style.display = ''; return; }
+  if (!note) { errEl.textContent = 'Напишите, что произошло'; errEl.style.display = ''; return; }
+  postToYardApi_('/sprav/asset_event', { asset_id: assetId, event_date: date, note: note }).then(function(r) {
+    if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось сохранить'; errEl.style.display = ''; return; }
+    document.getElementById('asset-event-note').value = '';
+    p2Toast('Событие добавлено', 'green');
+    assetEventsLoad_(assetId);
+  }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+function assetEventDelete_(id) {
+  if (!confirm('Удалить событие из истории?')) return;
+  var assetId = assetEditId_;
+  var errEl = document.getElementById('asset-event-error');
+  postToYardApi_('/sprav/asset_event_delete', { id: id }).then(function(r) {
+    if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось удалить'; errEl.style.display = ''; return; }
+    p2Toast('Событие удалено', 'amber');
+    assetEventsLoad_(assetId);
   }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
 }
 

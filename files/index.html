@@ -3904,6 +3904,21 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
           <input autocomplete="off" id="drv-reg-hire-date" type="date"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark"></div>
       </div>
+      <!-- Статус занятости (09.09, Влад: "справочник должен различать работает/уволен, с
+           датой увольнения" - ОДНА точка правды, откуда логика дашборда узнаёт, действующий
+           сотрудник или нет; см. DESIGN_SYSTEM.md 2.21). Дата увольнения - только при
+           статусе "уволен", как срок прав/медсправки у водителя выше. -->
+      <div style="display:flex;gap:10px;margin-bottom:12px">
+        <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Статус</label>
+          <select id="drv-reg-status" onchange="drvRegToggleFiredDate_()"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none">
+            <option value="active">Работает</option>
+            <option value="fired">Уволен(а)</option>
+          </select></div>
+        <div style="flex:1" id="drv-reg-fired-date-wrap"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Дата увольнения</label>
+          <input autocomplete="off" id="drv-reg-fired-date" type="date"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark"></div>
+      </div>
       <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Адрес по прописке</label>
         <input autocomplete="off" id="drv-reg-address" type="text" maxlength="400" placeholder="необязательно"
           style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
@@ -12479,7 +12494,10 @@ function plansParse_(v) { return parseInt(String(v || '').replace(/\D/g, ''), 10
 function plansBuildRows_(serverPlans) {
   var byKey = {};
   (spravPeople_ || []).forEach(function(p) {
-    if (p.is_deleted || (p.roles || []).indexOf('manager') < 0) return;
+    // employment_status (09.09, справочник - см. drv-reg-status) - уволенный менеджер не
+    // должен всплывать новой строкой плана; если у него УЖЕ стоит план на сервере, эта
+    // строка попадёт в ростер отдельно ниже (serverPlans forEach), не потеряется.
+    if (p.is_deleted || p.employment_status === 'fired' || (p.roles || []).indexOf('manager') < 0) return;
     var key = plansKeyOf_(p.full_name);
     if (!key || byKey[key]) return;
     byKey[key] = { key: key, manager: p.full_name.trim().split(' ')[0], label: p.full_name, role: 'менеджер', plan: 0, fromServer: false };
@@ -12824,7 +12842,8 @@ function drvRegPaint_() {
       ' onchange="drvToggleRowSelect_(\'' + idEsc + '\', this.checked)">';
     return '<tr' + (d.is_deleted ? spravDeletedRowStyle_() : '') + '>' +
       '<td>' + checkbox + '</td>' +
-      '<td><b>' + pageEsc_(d.full_name) + '</b>' + (d.is_deleted ? ' <span class="muted" style="font-size:11px">(удалён)</span>' : '') + '</td>' +
+      '<td><b>' + pageEsc_(d.full_name) + '</b>' + (d.is_deleted ? ' <span class="muted" style="font-size:11px">(удалён)</span>' : '') +
+        (d.employment_status === 'fired' ? ' <span style="font-size:11px;color:var(--red)">· уволен(а)' + (d.fired_date ? ' с ' + fmtDateRu(d.fired_date) : '') + '</span>' : '') + '</td>' +
       '<td>' + spravRolesLabel_(d.roles) + '</td>' +
       '<td class="muted">' + (d.phone ? pageEsc_(d.phone) : '—') + '</td>' +
       '<td>' + (isDriver ? drvDocBadge_(d) : '<span class="muted">—</span>') + '</td>' +
@@ -12841,6 +12860,14 @@ function drvRegToggleDriverFields_() {
   var box = document.getElementById('drv-reg-driver-fields');
   var checked = document.getElementById('drv-reg-role-driver').checked;
   if (box) box.style.display = checked ? '' : 'none';
+}
+// Дата увольнения имеет смысл только при статусе "уволен(а)" - тот же приём, что у
+// полей документов водителя выше (drvRegToggleDriverFields_).
+function drvRegToggleFiredDate_() {
+  var box = document.getElementById('drv-reg-fired-date-wrap');
+  var fired = document.getElementById('drv-reg-status').value === 'fired';
+  if (box) box.style.display = fired ? '' : 'none';
+  if (!fired) document.getElementById('drv-reg-fired-date').value = '';
 }
 
 // expected_updated_at (30.08, аудит - optimistic locking) - запоминаем updated_at ЗАПИСИ,
@@ -12860,6 +12887,9 @@ function drvRegOpenForm_(id) {
   document.getElementById('drv-reg-snils').value = d ? (d.snils || '') : '';
   document.getElementById('drv-reg-birth-date').value = d ? (d.birth_date || '') : '';
   document.getElementById('drv-reg-hire-date').value = d ? (d.hire_date || '') : '';
+  document.getElementById('drv-reg-status').value = d && d.employment_status === 'fired' ? 'fired' : 'active';
+  document.getElementById('drv-reg-fired-date').value = d ? (d.fired_date || '') : '';
+  drvRegToggleFiredDate_();
   document.getElementById('drv-reg-address').value = d ? (d.address || '') : '';
   document.getElementById('drv-reg-role-driver').checked = roles.indexOf('driver') >= 0;
   document.getElementById('drv-reg-role-manager').checked = roles.indexOf('manager') >= 0;
@@ -12905,6 +12935,8 @@ function drvRegSave_() {
     snils: document.getElementById('drv-reg-snils').value.trim(),
     birth_date: document.getElementById('drv-reg-birth-date').value,
     hire_date: document.getElementById('drv-reg-hire-date').value,
+    employment_status: document.getElementById('drv-reg-status').value,
+    fired_date: document.getElementById('drv-reg-fired-date').value,
     address: document.getElementById('drv-reg-address').value.trim(),
     roles: roles.join(','),
     license_number: document.getElementById('drv-reg-license-num').value.trim(),

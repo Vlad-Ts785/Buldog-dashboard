@@ -20806,14 +20806,69 @@ var CRM = (function () {
     'Кан отменил подписку на стриминг. Обойдётся без сериалов.',
     'Прус-Роскошный тихо плачет в логистике. Где-то там, между заявками.',
   ];
-  function showLostQuip_() {
+  function showQuip_(text) {
     var box = el('crm-quip'); if (!box) return;
-    box.textContent = LOGIST_JOKES_[Math.floor(Math.random() * LOGIST_JOKES_.length)];
+    box.textContent = text;
     box.classList.remove('hiding');
     void box.offsetWidth;
     box.classList.add('show');
     clearTimeout(S.quipTimer);
     S.quipTimer = setTimeout(function () { box.classList.add('hiding'); box.classList.remove('show'); }, 4200);
+  }
+  function showLostQuip_() { showQuip_(LOGIST_JOKES_[Math.floor(Math.random() * LOGIST_JOKES_.length)]); }
+  // Подколы про свою же премию при успешной сделке (Влад 09.09: "с юмором, в зависимости
+  // от суммы - диапазоны, что бы не скучно было") - средняя ставка менеджера с суммы сделки
+  // ~1,5% (Влад: "он в среднем 1,5% получают"), тиры считают ПРИМЕРНУЮ премию и шутят про
+  // то, что на неё можно купить - от сушек до коммуналки до отпуска. {c} - подставляется
+  // отформатированной суммой премии (money()).
+  var WON_JOKE_TIERS_ = [
+    { max: 50000, jokes: [
+      '{c} с этой сделки - хватит на сушки и чай для всего отдела. С чего-то надо начинать!',
+      '{c} - это пока на семечки, но лиха беда начало.',
+      'На {c} далеко не уедешь, но на маршрутку до следующей сделки точно хватит.',
+    ] },
+    { max: 150000, jokes: [
+      '{c} - целая шаурма, да ещё и с добавкой.',
+      '{c} - это уже полноценный обед в кафе, не бизнес-ланч из дома.',
+      'На {c} можно сходить в кино и даже попкорн взять.',
+    ] },
+    { max: 350000, jokes: [
+      '{c} - хватит на новые кроссовки. Можно бежать за следующей сделкой в них.',
+      '{c} - это уже поход в ресторан, не забегаловка.',
+      'На {c} можно свозить семью в боулинг и не экономить на еде.',
+    ] },
+    { max: 700000, jokes: [
+      '{c} - уже можно присмотреть что-то более ценное, чем сушки.',
+      '{c} - хватит на хорошую технику или классный подарок себе.',
+      'На {c} можно закрыть месяц подписок и ещё останется на ужин в ресторане.',
+    ] },
+    { max: 1200000, jokes: [
+      '{c} - это уже новый телефон, не восстановленный с Авито.',
+      '{c} - можно обновить гардероб целиком, не только кроссовки.',
+      'На {c} можно свозить семью на выходные куда-нибудь недалеко.',
+    ] },
+    { max: 2000000, jokes: [
+      '{c} - ну хватит оплатить коммуналку на полгода вперёд, красота.',
+      '{c} - можно закрыть ипотечный платёж и выдохнуть.',
+      'На {c} уже можно всерьёз задуматься об отпуске, не о выходных.',
+    ] },
+    { max: 4000000, jokes: [
+      '{c} - целый отпуск, и не в соседнюю область.',
+      '{c} - можно закрыть половину годового платежа по ипотеке одним махом.',
+      'На {c} можно и о новой технике для всей семьи подумать, и об отпуске.',
+    ] },
+    { max: Infinity, jokes: [
+      '{c} - это уже серьёзный разговор про первоначальный взнос.',
+      '{c} - за такую сумму можно и о своей машине подумать всерьёз.',
+      '{c} - вот это сделка месяца в чистом виде, красиво считать такие цифры.',
+    ] },
+  ];
+  function showWonQuip_(amount) {
+    amount = Number(amount) || 0; if (!amount) return;
+    var commission = Math.round(amount * 0.015);
+    var tier = WON_JOKE_TIERS_.find(function (t) { return amount <= t.max; }) || WON_JOKE_TIERS_[WON_JOKE_TIERS_.length - 1];
+    var text = tier.jokes[Math.floor(Math.random() * tier.jokes.length)];
+    showQuip_(text.replace('{c}', money(commission)));
   }
   var DEFAULT_TEMPLATES = [
     { title: 'Приветствие', text: 'Здравствуйте! Подскажите, пожалуйста, что везём (габариты и вес), откуда и куда, и желаемую дату - посчитаю стоимость.' },
@@ -21617,7 +21672,7 @@ var CRM = (function () {
     var winName0 = d.responsible_name ? String(d.responsible_name).trim().split(/\s+/)[0] : '';
     if (reduced() || document.hidden) {
       if (typeof bankWinFanfare_ === 'function') bankWinFanfare_(winLevel0); else snd.win();
-      renderBoard(); toast(esc(winPhrase_(winLevel0, winName0)) + ' <b>' + money(d.amount) + '</b>', 'green', { label: 'Отменить', fn: undoWin }); return;
+      renderBoard(); toast(esc(winPhrase_(winLevel0, winName0)) + ' <b>' + money(d.amount) + '</b>', 'green', { label: 'Отменить', fn: undoWin }); showWonQuip_(d.amount); return;
     }
     card.style.transition = 'opacity .3s ease'; card.style.opacity = '0.35';
     if (wonCol) { wonCol.classList.add('kb-win-glow'); setTimeout(function () { wonCol.classList.remove('kb-win-glow'); }, 300); }
@@ -21657,7 +21712,7 @@ var CRM = (function () {
       };
       if (sumEl && valEl && Number(d.amount) && typeof bankFlySum_ === 'function') bankFlySum_(sumEl, valEl, money(d.amount), after); else after();
     }, 260);
-    setTimeout(function () { toast(esc(winPhrase_(winLevel, winName0)) + ' <b>' + money(d.amount) + '</b>', 'green', { label: 'Отменить', fn: undoWin }); }, 600);
+    setTimeout(function () { toast(esc(winPhrase_(winLevel, winName0)) + ' <b>' + money(d.amount) + '</b>', 'green', { label: 'Отменить', fn: undoWin }); showWonQuip_(d.amount); }, 600);
   }
   function undoWin() {
     var mv = S.lastMove; if (!mv || !mv.wasWin) return; S.lastMove = null;

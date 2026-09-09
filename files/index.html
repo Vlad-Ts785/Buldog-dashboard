@@ -3719,6 +3719,7 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
           <button class="tab-btn" onclick="showDirTab('assets',this)">Материальные средства</button>
           <button class="tab-btn" onclick="showDirTab('fleet',this)">Сцепка</button>
           <button class="tab-btn" onclick="showDirTab('plans',this)">Планы продаж</button>
+          <button class="tab-btn" onclick="showDirTab('playbook',this)">Плейбук продаж</button>
         </div>
 
         <!-- ── Сотрудники (физические лица) ── -->
@@ -3906,6 +3907,26 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
             <div style="font-size:11.5px;color:var(--muted);margin-top:8px">Ключ строки - фамилия (первое слово ФИО в 1С). Лист «Планы_менеджеров» в Google теперь только зеркало, правки там не учитываются.</div>
           </div>
           <div id="plans-error" style="display:none;color:var(--red);font-size:12px;margin-top:10px"></div>
+        </div>
+        <!-- ═══ Плейбук продаж (09.09, plans/2026-09-09-sales-agent-learning-from-
+             history.md, Фаза 1) - Влад: "агент учится на реальных сделках, выбирает
+             успешные действия". v1 - ручной анализ по кнопке (только admin), читает
+             закрытые сделки и обновляет один читаемый документ - НЕ автономный агент,
+             это первый шаг к нему. ═══ -->
+        <div id="dir-tab-playbook" style="display:none">
+          <div style="display:flex;align-items:center;gap:10px;margin:12px 0;flex-wrap:wrap">
+            <div style="font-size:12.5px;color:var(--muted)">ИИ читает сделки, закрытые за последние
+              <select id="playbook-days" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--text);font-size:12.5px">
+                <option value="3">3 дня</option>
+                <option value="7" selected>7 дней</option>
+                <option value="14">14 дней</option>
+                <option value="30">30 дней</option>
+              </select>, и обновляет плейбук ниже.</div>
+            <div style="flex:1"></div>
+            <button class="tab-btn" id="playbook-refresh-btn" onclick="playbookRefresh_()" style="border-color:var(--blue);color:var(--blue)">Обновить плейбук</button>
+          </div>
+          <div id="playbook-meta" style="font-size:11.5px;color:var(--muted);margin-bottom:10px">—</div>
+          <div id="playbook-body" style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);padding:16px;font-size:13px;line-height:1.6">Загрузка…</div>
         </div>
       </div>
     </div>
@@ -12545,7 +12566,7 @@ function renderDirectory() {
 // "Поступления" (showReceiptsTab) - все уже отрисованы после renderDirectory(),
 // переключение вкладки - просто показ/скрытие, без повторного похода на сервер.
 function showDirTab(tab, el) {
-  ['people', 'legal', 'assets', 'fleet', 'plans'].forEach(function(t) {
+  ['people', 'legal', 'assets', 'fleet', 'plans', 'playbook'].forEach(function(t) {
     var panel = document.getElementById('dir-tab-' + t);
     if (panel) panel.style.display = (t === tab) ? '' : 'none';
   });
@@ -12554,6 +12575,66 @@ function showDirTab(tab, el) {
   // "Планы продаж" - свой источник (manager_plans на сервере, не /sprav/state), грузится
   // лениво при первом открытии вкладки, дальше - только при смене месяца.
   if (tab === 'plans' && !plansLoadedOnce_) plansTabLoad_(plansMonth_ || plansCurMonthKey_());
+  if (tab === 'playbook' && !playbookLoadedOnce_) playbookTabLoad_();
+}
+
+// ── Плейбук продаж (09.09, plans/2026-09-09-sales-agent-learning-from-history.md) ──────
+var playbookLoadedOnce_ = false;
+function playbookFormatBody_(text) {
+  var lines = pageEsc_(text).split('\n');
+  var html = '', inList = false;
+  function closeList() { if (inList) { html += '</ul>'; inList = false; } }
+  lines.forEach(function (line) {
+    var h = line.match(/^##\s+(.*)$/);
+    var li = line.match(/^[-•]\s+(.*)$/);
+    if (h) { closeList(); html += '<h4 style="margin:16px 0 6px;font-size:13.5px;color:var(--text)">' + h[1] + '</h4>'; }
+    else if (li) {
+      if (!inList) { html += '<ul style="margin:0 0 8px;padding-left:20px">'; inList = true; }
+      html += '<li style="margin-bottom:4px">' + li[1].replace(/\*\*(.+?)\*\*/g, '<b>$1</b>') + '</li>';
+    } else if (line.trim()) { closeList(); html += '<p style="margin:0 0 8px">' + line.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>') + '</p>'; }
+  });
+  closeList();
+  return html || '<span class="muted">Пусто</span>';
+}
+// server отдаёт "YYYY-MM-DD HH:MM:SS" - fmtDateRu ждёт РОВНО "YYYY-MM-DD" (якорь $ в
+// регулярке), с временем не совпадёт - форматируем дату+время сами, коротко.
+function playbookFmtWhen_(s) {
+  var m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/);
+  return m ? m[3] + '.' + m[2] + '.' + m[1] + ' ' + m[4] + ':' + m[5] : 'только что';
+}
+function playbookRenderMeta_(pb) {
+  var meta = document.getElementById('playbook-meta');
+  meta.textContent = pb && (pb.updated_at || pb.justUpdated)
+    ? 'Обновлено ' + (pb.justUpdated ? 'только что' : playbookFmtWhen_(pb.updated_at)) + ' · разобрано сделок: ' + (pb.deals_analyzed || 0) + (pb.updated_by ? ' · ' + pb.updated_by : '')
+    : 'Плейбук ещё не собирался - нажмите «Обновить плейбук»';
+}
+function playbookTabLoad_() {
+  playbookLoadedOnce_ = true;
+  // Кнопку "Обновить" видит только admin (D.role) - сервер и так проверяет роль
+  // (requireRole_("admin")), но скрываем кнопку заранее, чтобы не показывать
+  // недоступное действие менеджеру/логисту, читающему плейбук.
+  var btn = document.getElementById('playbook-refresh-btn');
+  if (btn) btn.style.display = (typeof D !== 'undefined' && D && D.role === 'admin') ? '' : 'none';
+  fetchFromYardApi_('/crm/playbook', {}).then(function (r) {
+    var box = document.getElementById('playbook-body');
+    if (!r.ok) { box.innerHTML = '<span style="color:var(--red)">Не удалось загрузить: ' + pageEsc_((r.data && r.data.error) || 'ошибка сервера') + '</span>'; return; }
+    var pb = r.data.playbook;
+    playbookRenderMeta_(pb);
+    box.innerHTML = pb && pb.body ? playbookFormatBody_(pb.body) : '<span class="muted">Плейбук ещё не собирался - нажмите «Обновить плейбук», чтобы ИИ разобрал недавно закрытые сделки.</span>';
+  }).catch(function () { document.getElementById('playbook-body').innerHTML = '<span style="color:var(--red)">Нет соединения с сервером</span>'; });
+}
+function playbookRefresh_() {
+  var btn = document.getElementById('playbook-refresh-btn'), box = document.getElementById('playbook-body');
+  var days = document.getElementById('playbook-days').value;
+  btn.disabled = true; btn.textContent = 'Читаю сделки…';
+  postToYardApi_('/crm/playbook/refresh', { days: days }).then(function (r) {
+    btn.disabled = false; btn.textContent = 'Обновить плейбук';
+    if (!r.ok) { p2Toast('Не удалось обновить плейбук: ' + ((r.data && r.data.error) || 'ошибка сервера'), 'red'); return; }
+    if (!r.data.deals_analyzed) { p2Toast(r.data.message || 'Нет данных за этот период', 'amber'); return; }
+    playbookRenderMeta_({ justUpdated: true, deals_analyzed: r.data.deals_analyzed });
+    box.innerHTML = playbookFormatBody_(r.data.body);
+    p2Toast('Плейбук обновлён - разобрано сделок: ' + r.data.deals_analyzed, 'green');
+  }).catch(function () { btn.disabled = false; btn.textContent = 'Обновить плейбук'; p2Toast('Нет соединения с сервером', 'red'); });
 }
 
 // ── Планы продаж (04.09, plans/2026-09-04-sales-plans-tool.md) ──────────────────────────

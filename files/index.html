@@ -639,6 +639,19 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 @media (prefers-reduced-motion: reduce){
   .p2-toast{transition:opacity .2s ease;transform:translate(-50%,0);}
 }
+/* Подкол про логистов при отказе сделки (Влад 09.09) - НЕ p2-toast (тот занят
+   функциональным «Отказ · причина» с Отменить) - отдельный элемент сверху экрана,
+   чисто для настроения, без данных/действий, ничего не блокирует. */
+.crm-quip{
+  position:fixed;left:50%;top:18px;transform:translate(-50%,-12px);opacity:0;
+  background:var(--bg2);border:1px solid var(--border);border-radius:10px;
+  padding:9px 16px;font-size:12.5px;color:var(--muted);z-index:3000;
+  max-width:min(420px,88vw);text-align:center;pointer-events:none;
+  transition:opacity .32s cubic-bezier(.32,.72,0,1),transform .32s cubic-bezier(.32,.72,0,1);
+}
+.crm-quip.show{opacity:1;transform:translate(-50%,0);}
+.crm-quip.hiding{transition-duration:.2s;}
+@media (prefers-reduced-motion: reduce){.crm-quip{transition:opacity .2s ease;transform:translate(-50%,0);}}
 /* строка периода в шапке: "Август 2026 · день 28 из 31 · данные 1С 11:40" */
 .p2-page-period{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;padding-bottom:16px;white-space:nowrap;}
 .p2-page-period b{color:var(--text);font-weight:500;}
@@ -4708,6 +4721,7 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
         <div class="kb-shelf-zone kb-shelf-zone--lost" data-stage="lost"><span data-ico="lost"></span>Отказ</div>
       </div>
       <div class="crm-scrim" id="crm-scrim" onclick="CRM.closeDrawer()"></div>
+      <div class="crm-quip" id="crm-quip"></div>
       <div class="crm-drawer" id="crm-drawer" aria-hidden="true"></div>
       <div class="crm-menu" id="crm-menu"></div>
       <div class="cx-lightbox" id="cx-lightbox" onclick="CRM.closeLightbox()"><img alt=""></div>
@@ -20753,6 +20767,50 @@ var CRM = (function () {
   var OPEN_STAGES = STAGES.slice(0, 5);
   var STAGE_BY = {}; STAGES.forEach(function (s) { STAGE_BY[s.key] = s; });
   var LOSS_REASONS = ['Дорого', 'Нет свободной техники', 'Клиент не отвечает', 'Передумал / отложил', 'Не наш груз', 'Ушёл к конкуренту'];
+  // Подколы про логистов при отказе (Влад, 09.09: "штук 30 юморесок, что бы вылетало
+  // окошко") - чисто для настроения, никак не влияет на данные. Один случайный при
+  // каждом подтверждённом отказе, см. showLostQuip_().
+  var LOGIST_JOKES_ = [
+    'Где-то в этот момент заплакал Николай Махура.',
+    'Миша Кан остался без обеда - опять макароны без масла.',
+    'Сильчев так и не купит новую машину. Ещё один месяц на маршрутке.',
+    'Васин уже собрал сумку в отпуск. Придётся распаковывать.',
+    'Прус-Роскошный снял с витрины кольцо для жены. Может, в следующий раз.',
+    'Кан посмотрел на кота. Кот посмотрел на пустую миску.',
+    'У Махуры сломался телефон. Теперь точно не на новый, а на б/у с Авито.',
+    'Сильчев уже примерял кроссовки. Придётся вернуть на полку.',
+    'Васин переносит поход в кино. Опять дома с чаем.',
+    'Кан отменяет доставку суши. Ужин - дошираком.',
+    'Прус-Роскошный закрыл вкладку с турами в Сочи.',
+    'Махура вздохнул и убрал калькулятор ипотеки обратно в стол.',
+    'Сильчев погладил старую машину по капоту. "Ещё поездим, дружище".',
+    'Кан посчитал, сколько лапши осталось до зарплаты. Хватит.',
+    'Васин отменил заказ пиццы. Опять гречка.',
+    'Прус-Роскошный не купит себе новые часы. Старые ещё тикают.',
+    'Махура закрыл каталог квартир. Ремонт подождёт.',
+    'Сильчев снова идёт пешком - не доехал на такси.',
+    'Кан отложил абонемент в спортзал. Пресс подождёт до премии.',
+    'Васин убрал корзину интернет-магазина. 47 товаров ждут своего часа.',
+    'Прус-Роскошный вздохнул и снял со счёта отпускные - опять не поедет.',
+    'Махура посмотрел на счёт за ЖКХ и на счёт в банке. Не сошлось.',
+    'Сильчев отменил детям поход в парк аттракционов.',
+    'Кан выключил свет на кухне пораньше - экономим.',
+    'Васин снова варит кофе дома, а не берёт в кофейне.',
+    'Прус-Роскошный отменил массаж - спина потерпит.',
+    'Махура опять едет на дачу на автобусе - своя машина всё ещё подождёт.',
+    'Сильчев закрыл вкладку с новым телефоном. Старый ещё жив, наверное.',
+    'Кан отменил подписку на стриминг. Обойдётся без сериалов.',
+    'Прус-Роскошный тихо плачет в логистике. Где-то там, между заявками.',
+  ];
+  function showLostQuip_() {
+    var box = el('crm-quip'); if (!box) return;
+    box.textContent = LOGIST_JOKES_[Math.floor(Math.random() * LOGIST_JOKES_.length)];
+    box.classList.remove('hiding');
+    void box.offsetWidth;
+    box.classList.add('show');
+    clearTimeout(S.quipTimer);
+    S.quipTimer = setTimeout(function () { box.classList.add('hiding'); box.classList.remove('show'); }, 4200);
+  }
   var DEFAULT_TEMPLATES = [
     { title: 'Приветствие', text: 'Здравствуйте! Подскажите, пожалуйста, что везём (габариты и вес), откуда и куда, и желаемую дату - посчитаю стоимость.' },
     { title: 'Запрос габаритов', text: 'Уточните, пожалуйста, длину, ширину, высоту и вес груза - от этого зависит тип техники и цена.' },
@@ -20772,6 +20830,7 @@ var CRM = (function () {
     lostPending: null, pendingLocal: 0, atBottom: true, clockTimer: null,
     audioEntry: null, audioEl: null, audioUrl: null, audioReqSeq_: 0, // текущая проигрываемая запись звонка (playRecording)
     templates: null, // кастомные шаблоны ответов ЭТОГО менеджера (сервер) - null пока не загружены, см. ensureTemplates
+    quipTimer: null, // таймер подкола про логистов при отказе, см. showLostQuip_
   };
 
   // ── Утилиты ─────────────────────────────────────────────────────────────────────────
@@ -21630,6 +21689,7 @@ var CRM = (function () {
     post('/crm/deals/stage', { id: d.id, stage: 'lost', loss_reason: reason }).then(function (r) {
       if (!r.ok) { d.stage = prev; d.loss_reason = null; renderBoard(); toast('Не удалось сохранить отказ: ' + esc((r.data && r.data.error) || 'ошибка сервера'), 'red'); return; }
       toast('Отказ · ' + esc(reason), 'amber', { label: 'Отменить', fn: function () { var mv = S.lastMove; if (!mv || !mv.wasLost) return; S.lastMove = null; d.stage = mv.fromCol; d.loss_reason = null; renderBoard(); snd.undo(); post('/crm/deals/stage', { id: d.id, stage: mv.fromCol }).then(refreshSummary).catch(function () {}); } });
+      showLostQuip_();
       refreshSummary();
     }).catch(function () { d.stage = prev; renderBoard(); toast('Нет соединения - отказ не сохранён', 'red'); });
     S.lostPending = null;

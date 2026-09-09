@@ -21859,6 +21859,19 @@ var CRM = (function () {
       if (S.drawerId !== id) return;
       var rr = r[0];
       if (!rr.ok) { dr.querySelector('.dr-title').textContent = 'Не удалось загрузить: ' + ((rr.data && rr.data.error) || 'ошибка сервера'); return; }
+      // Уже посчитанные расшифровки/суть звонков (09.09) - сервер отдаёт их вместе с
+      // карточкой, подставляем в кэш ДО рендера, чтобы текст был виден сразу, без
+      // повторного клика "Расшифровать" (клик всё равно был бы бесплатным - см.
+      // crm_call_transcripts на сервере, но незачем заставлять кликать заново за уже
+      // готовое). Не трогаем entryId, для которых уже ЕСТЬ клиентское состояние - не
+      // хотим откатить "loading"/только что полученный в этой же сессии результат.
+      Object.keys(rr.data.transcripts || {}).forEach(function (entryId) {
+        if (S.transcripts[entryId]) return;
+        var t = rr.data.transcripts[entryId];
+        S.transcripts[entryId] = t.summary
+          ? { status: 'has_sum', transcript: t.transcript, summary: t.summary, applied: t.applied }
+          : { status: 'has_tr', transcript: t.transcript };
+      });
       S.drawerDeal = rr.data; renderDrawer(opts);
     }).catch(function () { if (S.drawerId === id) dr.querySelector('.dr-title').textContent = 'Нет соединения с сервером'; });
   }

@@ -20615,6 +20615,26 @@ var CRM = (function () {
     for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
     return AVATAR_PALETTE_[h % AVATAR_PALETTE_.length];
   }
+  // Метка источника на карточке (Влад 09.09: "где написано авито, должно быть авито чат
+  // или авито звонок, у каждого источника свой цвет, другие источники тоже подписаны") -
+  // раньше был жёсткий бинарный выбор ("Авито" / "Звонок"), даже когда сделка avito была
+  // заведена звонком в приложении (msg_type appCall), а не сообщением - то же слово
+  // "Авито" на обоих случаях стирало разницу. d.last_msg_type уже приходит с /crm/deals
+  // (последнее сообщение по клиенту) - им и различаем чат/звонок ВНУТРИ источника avito.
+  // Цвета - НЕ пересекаются с 5 семантическими токенами ГОСТа (та же логика, что у
+  // AVATAR_PALETTE_ выше - здесь смысл "какой канал", не оценка) и друг с другом.
+  // Неизвестный source (сейчас в базе только 'avito'/'call', но не хардкодим намертво) -
+  // не молчим под общим словом, подписываем как есть, серым по умолчанию.
+  var SOURCE_LABELS_ = {
+    avito_chat: { label: 'Авито чат', color: '#4FA0AE' },
+    avito_call: { label: 'Авито звонок', color: '#9B6BC7' },
+    call: { label: 'Звонок', color: '#B08A3E' },
+  };
+  function sourceLabel_(d) {
+    var key = d.source === 'avito' ? (d.last_msg_type === 'appCall' ? 'avito_call' : 'avito_chat') : (d.source || 'call');
+    var def = SOURCE_LABELS_[key];
+    return def || { label: key.charAt(0).toUpperCase() + key.slice(1), color: null };
+  }
   function surname3(name) { var p = String(name || '').trim().split(/\s+/).filter(Boolean); if (!p.length) return ''; var sn = p.length > 1 ? p[p.length - 1] : p[0]; return sn.slice(0, 3).toUpperCase(); }
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
   var MONTHS = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
@@ -20849,7 +20869,8 @@ var CRM = (function () {
     if (d.cargo_weight_tons) meta.push(esc(weight(d.cargo_weight_tons)));
     if (d.wanted_date) meta.push(esc(fmtDateRu(d.wanted_date)));
     if (!meta.length) meta.push(esc(fmtListTime(isTerm ? d.closed_at || d.updated_at : d.updated_at)));
-    var chan = d.source === 'avito' ? 'Авито' : 'Звонок';
+    var src = sourceLabel_(d);
+    var chan = '<span class="kb-chan"' + (src.color ? ' style="color:' + src.color + ';border-color:color-mix(in srgb,' + src.color + ' 45%,var(--border))"' : '') + '>' + esc(src.label) + '</span>';
     var unread = Number(d.unread_count || 0);
     var resp = d.responsible_name ? '<span class="kb-ava" style="background:' + avatarColor_(d.responsible_extension || d.responsible_name) + '" title="' + esc(d.responsible_name) + '">' + esc(initials(d.responsible_name)) + '</span>' : '<span class="kb-ava is-none" title="Без ответственного">?</span>';
     // Статус-маркер: пульс свежести у открытых, галочка у выигранных, крестик у отказов
@@ -20861,7 +20882,7 @@ var CRM = (function () {
     return '<article class="kb-card ' + fr + (isWon ? ' kb-won-style' : '') + (isLost ? ' kb-lost-style' : '') + (S.drawerId === d.id ? ' is-open' : '') + '" data-id="' + d.id + '" tabindex="0" title="' + esc(fr === 'kb-stale' ? 'Зависла: без движения дольше ' + stallDays(d.stage) + ' дн.' : fr === 'kb-wait' ? 'Клиент ждёт ответа больше 2 часов' : '') + '">' +
       '<header class="kb-card-top"><span class="kb-client">' + esc(dealTitle(d)) + '</span>' + statusMark + '</header>' +
       '<div class="kb-cargo">' + cargoLine + '</div>' +
-      '<div class="kb-meta">' + meta.map(function (m) { return '<span class="kb-num">' + m + '</span>'; }).join('<span class="kb-dotsep"></span>') + '<span class="kb-chan">' + chan + '</span></div>' +
+      '<div class="kb-meta">' + meta.map(function (m) { return '<span class="kb-num">' + m + '</span>'; }).join('<span class="kb-dotsep"></span>') + chan + '</div>' +
       lossLine +
       '<footer class="kb-card-bot"><span class="kb-sum' + (Number(d.amount) ? '' : ' is-empty') + '">' + (Number(d.amount) ? money(d.amount) : 'без суммы') + '</span>' +
         '<span style="display:flex;align-items:center;gap:8px">' + (unread ? '<span class="kb-unread">' + ico('chat') + '<span class="crm-badge">' + unread + '</span></span>' : '') + resp + '</span></footer>' +
@@ -21344,11 +21365,13 @@ var CRM = (function () {
     var st = STAGE_BY[d.stage] || STAGES[0];
     var phone = fmtPhone(d.client_phone), tel = telHref(d.client_phone), avito = isAvitoKey(d.client_phone);
     var idx = STAGES.findIndex(function (s) { return s.key === d.stage; });
+    var lastMsg = (data.messages || [])[(data.messages || []).length - 1];
+    var srcHead = sourceLabel_({ source: d.source, last_msg_type: lastMsg ? lastMsg.msg_type : null });
     var head = '<div class="crm-drawer-head">' +
       (safeImg(d.avatar_url) ? '<span class="cx-ava cx-ava--lg"><img src="' + esc(safeImg(d.avatar_url)) + '" alt="" loading="lazy"></span>' : '<span class="cx-ava cx-ava--lg">' + esc(initials(dealTitle(d))) + '</span>') +
       '<div style="flex:1;min-width:0"><div class="dr-eyebrow"><span class="kb-stage-dot" style="--stage:' + st.color + '"></span>' + esc(st.label) + (d.loss_reason ? ' · ' + esc(d.loss_reason) : '') + '</div>' +
       '<div class="dr-title">' + esc(dealTitle(d)) + '</div>' +
-      '<div class="dr-sub">' + (phone ? '<a class="mono" href="' + tel + '" style="color:inherit;text-decoration:none">' + esc(phone) + '</a><span class="cx-dotsep"></span>' : '') + (avito ? 'Авито' : 'Звонок') + (data.chats && data.chats[0] && data.chats[0].item_title ? '<span class="cx-dotsep"></span><span title="Объявление">' + esc(data.chats[0].item_title) + '</span>' : '') + '</div></div>' +
+      '<div class="dr-sub">' + (phone ? '<a class="mono" href="' + tel + '" style="color:inherit;text-decoration:none">' + esc(phone) + '</a><span class="cx-dotsep"></span>' : '') + '<span' + (srcHead.color ? ' style="color:' + srcHead.color + '"' : '') + '>' + esc(srcHead.label) + '</span>' + (data.chats && data.chats[0] && data.chats[0].item_title ? '<span class="cx-dotsep"></span><span title="Объявление">' + esc(data.chats[0].item_title) + '</span>' : '') + '</div></div>' +
       '<button class="cx-ibtn" onclick="CRM.closeDrawer()" title="Закрыть (Esc)">' + ico('close') + '</button></div>';
 
     var stages = '<div class="dr-section"><div class="dr-label">Стадия</div><div class="dr-stages">' + OPEN_STAGES.map(function (s, i) {

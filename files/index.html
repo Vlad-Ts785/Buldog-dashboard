@@ -468,6 +468,18 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .dir-rule .dir-rule-x{margin-left:auto;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:7px;padding:3px 8px;font-size:11px;cursor:pointer;white-space:nowrap;}
 .dir-rule .dir-rule-x:hover{border-color:rgba(226,75,74,.4);color:var(--red);}
 .dir-chg-delta{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.dir-note{padding:10px 0;border-top:1px solid var(--border);font-size:12.5px;line-height:1.45;}
+.dir-note:first-child{border-top:none;padding-top:2px;}
+.dir-note .dir-note-txt{white-space:pre-wrap;color:var(--text);}
+.dir-note .dir-note-meta{display:flex;gap:10px;align-items:center;font-size:11px;color:var(--muted);margin-top:4px;font-family:'JetBrains Mono',ui-monospace,monospace;}
+.dir-note .dir-note-dig{margin-top:8px;padding:8px 10px;background:var(--bg3);border-radius:8px;font-size:12px;line-height:1.45;}
+.dir-note .dir-note-dig b{font-weight:600;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
+.dir-mic{display:inline-flex;align-items:center;gap:6px;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:7px 12px;font-size:12.5px;cursor:pointer;transition:background .15s,border-color .15s;}
+.dir-mic:hover{border-color:var(--border-strong);background:var(--bg4);}
+.dir-mic[aria-pressed="true"]{border-color:rgba(226,75,74,.5);background:rgba(226,75,74,.12);}
+.dir-mic svg{width:14px;height:14px;}
+.dir-push{padding:10px 0;border-top:1px solid var(--border);font-size:12.5px;line-height:1.45;}
+.dir-push:first-child{border-top:none;padding-top:2px;}
 .dir-fb .dir-fb-by{font-size:11px;color:var(--muted);font-family:'JetBrains Mono',ui-monospace,monospace;}
 .dir-cmt{width:100%;box-sizing:border-box;margin-top:8px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-size:12.5px;font-family:inherit;resize:vertical;min-height:54px;outline:none;transition:border-color .15s;}
 .dir-cmt:focus{border-color:var(--border-strong);}
@@ -5138,12 +5150,36 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
         <div id="dir-unverified" class="muted" style="display:none;font-size:11.5px;margin-top:8px;line-height:1.45"></div>
         <div id="dir-dates" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px"></div>
       </div>
+      <!-- «Мысли для агента» (10.09, Фаза 1в) - Влад: «окно надиктовки, чисто мысли обо всём
+           одним потоком, которые анализируются и идут в состав обучения». Диктовка - Web Speech
+           API браузера (ru-RU), без внешних сервисов; в Safari/Firefox кнопки нет, остаётся текст.
+           Разбор делает агент в следующем запуске (крон 07:00 или «Пересобрать сейчас»). -->
+      <div class="card" id="dir-notes-card" style="margin-bottom:16px">
+        <div class="sec-header">
+          <div class="sec-title">Мысли для агента</div>
+          <div class="muted" style="font-size:11px" id="dir-notes-hint">одним потоком, без структуры · агент разберёт при следующем запуске и скажет, где не согласен</div>
+        </div>
+        <textarea autocomplete="off" class="dir-cmt" id="dir-note-text" style="margin-top:0;min-height:88px" placeholder="Говори или пиши как думаешь: про людей, клиентов, деньги, что бесит, что хочешь поменять. Ошибки распознавания не страшны."></textarea>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
+          <button type="button" class="dir-mic" id="dir-mic-btn" onclick="dirMicToggle_()" aria-pressed="false" title="Диктовать (распознавание речи браузера)"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="6" height="10" rx="3"/><path d="M4.5 9.5a5.5 5.5 0 0 0 11 0"/><line x1="10" y1="15" x2="10" y2="17.5"/><line x1="7" y1="17.5" x2="13" y2="17.5"/></svg><span id="dir-mic-label">Диктовать</span></button>
+          <button type="button" onclick="dirNoteSend_()" data-nav-sound style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer">Отправить агенту</button>
+          <span id="dir-note-status" class="muted" style="font-size:11.5px"></span>
+        </div>
+        <div id="dir-notes" style="margin-top:14px"></div>
+      </div>
       <div class="card" style="margin-bottom:16px">
         <div class="sec-header">
           <div class="sec-title">Что нужно сделать, чтобы больше зарабатывать</div>
           <div class="muted" style="font-size:11px">по убыванию денег · ответь на каждое - агент учтёт завтра</div>
         </div>
         <div id="dir-actions"></div>
+      </div>
+      <div class="card" id="dir-pushback-card" style="margin-bottom:16px;display:none">
+        <div class="sec-header">
+          <div class="sec-title">Где агент не согласен с тобой</div>
+          <div class="muted" style="font-size:11px">по твоей просьбе он критик, не овца · спорит только с цифрами</div>
+        </div>
+        <div id="dir-pushback"></div>
       </div>
       <div class="card" id="dir-changes-card" style="margin-bottom:16px;display:none">
         <div class="sec-header">
@@ -5186,8 +5222,8 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
       </div>
       <div class="card" id="dir-rules-card" style="margin-bottom:16px;display:none">
         <div class="sec-header">
-          <div class="sec-title">Правила от Влада</div>
-          <div class="muted" style="font-size:11px">дословно из твоих ответов · агент их не меняет · «Забыть» удаляет навсегда</div>
+          <div class="sec-title">Позиция Влада</div>
+          <div class="muted" style="font-size:11px">дословно из твоих ответов, с датой · для агента это весомый вход, но не аксиома · «Забыть» удаляет навсегда</div>
         </div>
         <div id="dir-rules"></div>
       </div>
@@ -20441,7 +20477,7 @@ function cpLoadHistory_() {
 // (/api/director/feedback) и ответы на вопросы агента - единственный «рычаг обучения» v1.
 var dirState_ = { date: null, brief: null, feedback: [], generated_at: '', run_by: '', model: '', missing: [], busy: false, noFeedback: 0 };
 var DIR_MONTHS_RU_ = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
-function dirInit_() { dirLoadBrief_(null); dirLoadList_(); dirLoadMemory_(); dirLoadPromises_(); }
+function dirInit_() { dirLoadBrief_(null); dirLoadList_(); dirLoadMemory_(); dirLoadPromises_(); dirLoadNotes_(); }
 function dirDateRu_(d) {
   if (!d || d.length < 10) return d || '';
   return parseInt(d.slice(8, 10), 10) + ' ' + (DIR_MONTHS_RU_[parseInt(d.slice(5, 7), 10) - 1] || '') + ' ' + d.slice(0, 4);
@@ -20513,6 +20549,7 @@ function dirRender_() {
     hl.innerHTML = '<span class="muted" style="font-size:13px;font-weight:400">Брифа ещё нет - нажми «Пересобрать сейчас», агент соберёт его за 1-2 минуты.</span>';
     meta.textContent = ''; acts.innerHTML = ''; st.innerHTML = '';
     var chCard0 = document.getElementById('dir-changes-card'); if (chCard0) chCard0.style.display = 'none';
+    var pbCard0 = document.getElementById('dir-pushback-card'); if (pbCard0) pbCard0.style.display = 'none';
     var missEl0 = document.getElementById('dir-missing'); if (missEl0) missEl0.style.display = 'none';
     var unvEl0 = document.getElementById('dir-unverified'); if (unvEl0) unvEl0.style.display = 'none';
     if (fuCard) fuCard.style.display = 'none';
@@ -20539,6 +20576,12 @@ function dirRender_() {
     unvEl.textContent = unv.length ? 'Цифры, которых нет в данных напрямую (' + unv.length + '): ' + unv.map(function(u) { return u.text + ' (' + u.where + ')'; }).join('; ') + '. Возможна арифметика агента, но проверь.' : '';
   }
   var chCard = document.getElementById('dir-changes-card'), chBody = document.getElementById('dir-changes');
+  var pbCard = document.getElementById('dir-pushback-card'), pbBody = document.getElementById('dir-pushback');
+  var pushback = b.pushback || [];
+  if (pbCard) pbCard.style.display = pushback.length ? '' : 'none';
+  if (pbBody) pbBody.innerHTML = pushback.map(function(p) {
+    return '<div class="dir-push"><div style="font-weight:600">' + pageEsc_(p.about) + '</div><div class="muted">' + pageEsc_(p.argument) + '</div></div>';
+  }).join('');
   var changes = b.changes || [];
   if (chCard) chCard.style.display = changes.length ? '' : 'none';
   if (chBody) chBody.innerHTML = changes.map(function(c) {
@@ -20648,6 +20691,87 @@ function dirLoadPromises_() {
     }).join('');
   }).catch(function() {});
 }
+// ── Мысли для агента: заметки + диктовка (Web Speech API) ──
+var dirRec_ = null, dirRecOn_ = false, dirRecBase_ = '';
+function dirLoadNotes_() {
+  var box = document.getElementById('dir-notes'), hint = document.getElementById('dir-notes-hint');
+  if (!box) return;
+  fetchFromYardApi_('/director/notes', {}).then(function(r) {
+    var items = (r.ok && r.data && r.data.notes) || [];
+    var pending = (r.ok && r.data && Number(r.data.pending)) || 0;
+    if (hint) hint.textContent = pending ? 'ждут разбора: ' + pending + ' · разберёт при следующем запуске (07:00 или «Пересобрать сейчас»)' : 'одним потоком, без структуры · агент разберёт при следующем запуске и скажет, где не согласен';
+    box.innerHTML = items.map(function(n) {
+      var d = n.digest_json || null;
+      var dig = '';
+      if (d) {
+        var part = function(label, arr) { return (arr && arr.length) ? '<div><b>' + label + '</b> ' + arr.map(pageEsc_).join(' · ') + '</div>' : ''; };
+        dig = '<div class="dir-note-dig">' + part('Взял', d.takeaways) + part('Не согласен', d.disagreements) + part('Уточнить', d.questions) + '</div>';
+      }
+      return '<div class="dir-note"><div class="dir-note-txt">' + pageEsc_(n.text) + '</div>' +
+        '<div class="dir-note-meta"><span>' + pageEsc_(n.created_at || '') + '</span><span>' + (n.processed_date ? 'разобрано ' + pageEsc_(n.processed_date) : 'ждёт разбора') + '</span>' +
+        '<button type="button" class="dir-rule-x" style="margin-left:auto" onclick="dirNoteDelete_(' + Number(n.id) + ')">Удалить</button></div>' + dig + '</div>';
+    }).join('') || '<div class="muted" style="font-size:12px">Пока ни одной мысли. Первая может быть любой: о людях, деньгах, клиентах, о том, что не так.</div>';
+  }).catch(function() {});
+}
+function dirNoteSend_() {
+  var ta = document.getElementById('dir-note-text'), st = document.getElementById('dir-note-status');
+  if (!ta) return;
+  if (dirRecOn_) dirMicToggle_();
+  var text = ta.value.trim();
+  if (text.length < 3) { p2Toast('Заметка пустая', 'amber'); return; }
+  if (st) st.textContent = 'Сохраняю...';
+  fetch(YARD_API_BASE + '/director/note', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Session-Token': SESSION_TOKEN }, body: JSON.stringify({ text: text }) })
+    .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); })
+    .then(function(r) {
+      if (st) st.textContent = '';
+      if (!r.ok || !r.data || !r.data.ok) { p2Toast('Не сохранилось: ' + ((r.data && r.data.error) || 'ошибка сервера'), 'red'); return; }
+      ta.value = ''; dirRecBase_ = '';
+      p2Toast('Записано - агент разберёт при следующем запуске', 'green');
+      dirLoadNotes_();
+    }).catch(function() { if (st) st.textContent = ''; p2Toast('Ошибка сети', 'red'); });
+}
+function dirNoteDelete_(id) {
+  if (!confirm('Удалить эту мысль? Разбор агента по ней тоже пропадёт.')) return;
+  postToYardApi_('/director/note_delete', { id: String(id) }).then(function(r) {
+    if (!r.ok || !r.data || !r.data.ok) { p2Toast('Не удалилось', 'red'); return; }
+    dirLoadNotes_();
+  }).catch(function() { p2Toast('Ошибка сети', 'red'); });
+}
+// Диктовка: распознавание речи браузера (Chrome/Edge/Android Chrome - ru-RU). В браузерах без
+// поддержки кнопка прячется, остаётся обычный ввод. Промежуточный текст пишется в textarea
+// поверх «базы» (то, что было до нажатия), финальный - фиксируется в базу.
+function dirMicToggle_() {
+  var btn = document.getElementById('dir-mic-btn'), lbl = document.getElementById('dir-mic-label'), ta = document.getElementById('dir-note-text');
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { p2Toast('В этом браузере нет распознавания речи - открой в Chrome или напиши текстом', 'amber'); return; }
+  if (dirRecOn_) {
+    try { dirRec_ && dirRec_.stop(); } catch(e) {}
+    dirRecOn_ = false;
+    if (btn) btn.setAttribute('aria-pressed', 'false');
+    if (lbl) lbl.textContent = 'Диктовать';
+    return;
+  }
+  dirRec_ = new SR();
+  dirRec_.lang = 'ru-RU'; dirRec_.continuous = true; dirRec_.interimResults = true;
+  dirRecBase_ = ta ? (ta.value ? ta.value.replace(/\s+$/, '') + ' ' : '') : '';
+  dirRec_.onresult = function(ev) {
+    var fin = '', interim = '';
+    for (var i = 0; i < ev.results.length; i++) { var r = ev.results[i]; if (r.isFinal) fin += r[0].transcript + ' '; else interim += r[0].transcript; }
+    if (ta) ta.value = dirRecBase_ + fin + interim;
+  };
+  dirRec_.onerror = function(ev) {
+    if (ev && ev.error === 'not-allowed') p2Toast('Нет доступа к микрофону - разреши его для сайта', 'red');
+    else if (ev && ev.error !== 'no-speech' && ev.error !== 'aborted') p2Toast('Распознавание прервалось: ' + (ev.error || 'ошибка'), 'amber');
+  };
+  dirRec_.onend = function() {
+    // Chrome сам останавливает сессию через ~минуту тишины - перезапускаем, пока кнопка нажата.
+    if (dirRecOn_) { dirRecBase_ = ta ? (ta.value ? ta.value.replace(/\s+$/, '') + ' ' : '') : ''; try { dirRec_.start(); } catch(e) { dirRecOn_ = false; if (btn) btn.setAttribute('aria-pressed', 'false'); if (lbl) lbl.textContent = 'Диктовать'; } }
+  };
+  try { dirRec_.start(); } catch(e) { p2Toast('Не удалось запустить микрофон', 'red'); return; }
+  dirRecOn_ = true;
+  if (btn) btn.setAttribute('aria-pressed', 'true');
+  if (lbl) lbl.textContent = 'Стоп';
+}
 function dirRun_() {
   if (dirState_.busy) return;
   var btn = document.getElementById('dir-run-btn'), stt = document.getElementById('dir-status');
@@ -20663,6 +20787,7 @@ function dirRun_() {
     dirLoadBrief_(r.data.date_key);
     dirLoadList_();
     dirLoadMemory_();
+    dirLoadNotes_();
   }).catch(function() {
     dirState_.busy = false;
     if (btn) { btn.disabled = false; btn.style.opacity = ''; }

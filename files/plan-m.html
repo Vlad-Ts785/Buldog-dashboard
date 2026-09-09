@@ -413,7 +413,7 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 <div class="scrim" id="scrim"></div>
 <div class="sheet" id="sheet"><div class="grip" id="grip"></div><div class="sh-head" id="shHead"></div><div class="sh-body" id="shBody"></div><div class="sh-foot" id="shFoot"></div></div>
 <div class="ovl" id="ovl"><div class="ovl-head" id="ovlHead"></div><div class="ovl-body" id="ovlBody"></div><div class="ovl-foot" id="ovlFoot" hidden></div></div>
-<div class="demo-tag" id="demoTag" hidden>ДЕМО · v15</div>
+<div class="demo-tag" id="demoTag" hidden>ДЕМО · v16</div>
 <script>
 "use strict";
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -1720,7 +1720,7 @@ function renderConfirmSheet(){
 /* ── Настройки (тема - развилка для Влада, версия) ── */
 /* Меню (кнопка ≡ в шапке, Влад 06.09: «должна быть возможность вернуться в меню дашборда
    из планировки») - навигация наверху, настройки ниже. */
-var PAGE_VERSION_ = "v15 · 09.09";
+var PAGE_VERSION_ = "v16 · 09.09";
 function renderSettingsSheet(){
   var theme = document.documentElement.getAttribute("data-theme") || "dark";
   shHead.innerHTML = shHeadHtml("Меню", (M.me.name || "") + (API.demo ? " · демо" : ""), "");
@@ -1995,23 +1995,51 @@ function renderSkeleton_(){
   for (var i = 0; i < 12; i++){ l.push('<div class="skel-row"><i></i><i></i></div>'); t.push('<div class="skel-track"></div>'); }
   lanes.innerHTML = l.join(""); tracks.innerHTML = t.join("");
 }
+/* Кэш последнего успешного ответа (09.09, Сильчев: индикатор загрузки теперь честный,
+   но сама загрузка на слабой сети всё равно ощущается «зависшей» - каждое открытие
+   страницы начинало с ПУСТОГО скелета и ждало полный живой ответ, сколько бы это ни
+   заняло. То, что планировалось ещё 05.09 (раздел 4.9 плана) и так и не было написано.
+   Теперь последний успешный набор данных лежит в localStorage - при следующем открытии
+   доска рисуется из него МГНОВЕННО (без скелета вообще), а свежий ответ тихо подменяет
+   её в фоне, когда придёт. Кэш - только для живого режима, не демо. */
+var CACHE_KEY_ = "plan_m_cache_v1";
+function saveCache_(data){
+  if (API.demo) return;
+  try { localStorage.setItem(CACHE_KEY_, JSON.stringify({t: Date.now(), data: data})); } catch(e){}
+}
+function loadCache_(){
+  try {
+    var raw = localStorage.getItem(CACHE_KEY_); if (!raw) return null;
+    var parsed = JSON.parse(raw);
+    if (!parsed || !parsed.data || !Array.isArray(parsed.data.vehicles) || !parsed.data.vehicles.length) return null;
+    return parsed;
+  } catch(e){ return null; }
+}
+function renderBoardAfterIngest_(){
+  /* дефолт свёрнутости: группа самого логиста развёрнута (Васин - борта, остальные - тралы) */
+  if (!localStorage.getItem("plan_m_collapsed")){ var mine = /Васин/.test(M.me.name) ? "long" : "tral"; M.collapsed = mine === "tral" ? {long:true} : {tral:true}; }
+  buildRows();
+  var restored = false;
+  try { var sc = sessionStorage.getItem("plan_m_scroll"); if (sc){ var p = sc.split(","); board.scrollLeft = +p[0]; board.scrollTop = +p[1]; restored = true; } } catch(e){}
+  if (!restored) scrollToHour(nowHour(), 0.3, false);
+  renderWindow(true); renderNow(); pinLabels();
+  board.classList.remove("skel");
+}
 var loadStartedAt_ = 0, loadTimer_ = null;
 function startLoadFlow_(){
   loadStartedAt_ = Date.now();
-  setLoadbar_("loading", "Загружаю парк…");
-  if (!M.vehicles.length) renderSkeleton_();
-  clearTimeout(loadTimer_); loadTimer_ = setTimeout(function(){ if ($("loadbar").classList.contains("on") && !$("loadbar").classList.contains("err")) setLoadbar_("loading", "Загружаю парк… медленная сеть"); }, 4000);
+  /* Доска уже на экране (из кэша или предыдущей успешной загрузки) - это тихое фоновое
+     обновление, не первая загрузка: другой текст, без скелета, а сбой не должен закрыть
+     собой уже видимые (пусть и не самые свежие) данные. */
+  var bg = M.vehicles.length > 0;
+  setLoadbar_("loading", bg ? "Обновляю…" : "Загружаю парк…");
+  if (!bg) renderSkeleton_();
+  clearTimeout(loadTimer_); loadTimer_ = setTimeout(function(){ if ($("loadbar").classList.contains("on") && !$("loadbar").classList.contains("err")) setLoadbar_("loading", (bg ? "Обновляю… медленная сеть" : "Загружаю парк… медленная сеть")); }, 4000);
   API.load().then(function(data){
     clearTimeout(loadTimer_); loadAttempt_ = 0;
     ingest(data);
-    board.classList.remove("skel");
-    /* дефолт свёрнутости: группа самого логиста развёрнута (Васин - борта, остальные - тралы) */
-    if (!localStorage.getItem("plan_m_collapsed")){ var mine = /Васин/.test(M.me.name) ? "long" : "tral"; M.collapsed = mine === "tral" ? {long:true} : {tral:true}; }
-    buildRows();
-    var restored = false;
-    try { var sc = sessionStorage.getItem("plan_m_scroll"); if (sc){ var p = sc.split(","); board.scrollLeft = +p[0]; board.scrollTop = +p[1]; restored = true; } } catch(e){}
-    if (!restored) scrollToHour(nowHour(), 0.3, false);
-    renderWindow(true); renderNow(); pinLabels();
+    saveCache_(data);
+    renderBoardAfterIngest_();
     setLoadbar_(null, "");
     if (API.demo) setInterval(function(){ renderNow(); refreshAll(); }, 60000);
     else {
@@ -2028,12 +2056,13 @@ function startLoadFlow_(){
     clearTimeout(loadTimer_);
     var msg = String((err && err.message) || err || "");
     if (!API.demo && /Не авторизован|нужен id_token|Доступ отозван/i.test(msg)){ try { localStorage.removeItem("session_token"); } catch(e){} showLogin_(); return; }
-    board.classList.remove("skel");
+    if (!bg) board.classList.remove("skel");
     if (/abort/i.test(msg) || err && err.name === "AbortError") msg = "сервер не ответил за 20 с";
     /* Один автоповтор через 2,5 с (Влад 06.09: «без сюрпризов, что нет планировки») - разовый
-       обрыв мобильной сети не должен требовать от логиста ничего. Второй сбой - уже кнопка. */
-    if (loadAttempt_ < 1){ loadAttempt_++; setLoadbar_("loading", "Не получилось, повторяю…"); setTimeout(startLoadFlow_, 2500); return; }
-    setLoadbar_("err", "Не удалось загрузить: " + msg);
+       обрыв мобильной сети не должен требовать от логиста ничего. Второй сбой - уже кнопка,
+       но при фоновом обновлении - мягкая, доска остаётся на экране как была. */
+    if (loadAttempt_ < 1){ loadAttempt_++; setLoadbar_("loading", bg ? "Не получилось, обновляю…" : "Не получилось, повторяю…"); setTimeout(startLoadFlow_, 2500); return; }
+    setLoadbar_("err", (bg ? "Не удалось обновить - показаны прошлые данные · " : "Не удалось загрузить: ") + msg);
   });
 }
 function boot(){
@@ -2045,7 +2074,14 @@ function boot(){
   if (IS_DEMO){ API = makeDemoApi(); $("demoTag").hidden = false; startLoadFlow_(); }
   else {
     API = makeLiveApi();
-    if (sessionToken_()) startLoadFlow_(); else showLogin_();
+    if (sessionToken_()){
+      /* Кэш - на экран НЕМЕДЛЕННО, до единого сетевого запроса (см. saveCache_/loadCache_
+         выше). Живая загрузка всё равно запускается следом как обычно - просто теперь
+         стартует не с пустого скелета, а поверх уже видимой (пусть не самой свежей) доски. */
+      var cached = loadCache_();
+      if (cached){ ingest(cached.data); renderBoardAfterIngest_(); }
+      startLoadFlow_();
+    } else showLogin_();
   }
   window.addEventListener("resize", function(){
     var V = LEVELS[M.zoom].hours, cH = hourAtClientX(G.bl + G.laneW + G.trackW / 2);

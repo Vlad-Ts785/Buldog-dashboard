@@ -1771,6 +1771,16 @@ main:has(> #page-crm.active){max-width:none;}
 .crm-player-track::before{content:'';position:absolute;inset:-6px 0;} /* увеличенная зона клика/протяжки, полоска тонкая */
 .crm-player-fill{position:absolute;left:0;top:0;height:100%;border-radius:2px;background:var(--blue);pointer-events:none;}
 .crm-player-time{font:500 9.5px/1 var(--font-mono);color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums;}
+/* Расшифровка звонка (09.09, plans/2026-09-08-smart-call-player-transcript-autofill.md) -
+   кнопка ".crm-tr-btn" переиспользует .crm-play-btn целиком (та же пилюля, что "Прослушать"),
+   текст расшифровки - отдельный блок ПОД строкой меты, не в ней (может быть длинным). */
+.crm-transcript{margin-top:6px;padding:8px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font:400 12px/1.5 var(--font-body);color:var(--text);}
+.crm-transcript:empty{display:none;padding:0;margin:0;border:0;}
+.crm-tr-summary{color:var(--muted);font-style:italic;margin-bottom:6px;}
+.crm-tr-line + .crm-tr-line{margin-top:6px;}
+.crm-tr-line b{color:var(--blue);}
+.crm-tr-applied{display:flex;align-items:center;gap:4px;color:var(--green);font-size:11px;margin-top:6px;}
+.crm-tr-applied svg{width:12px;height:12px;}
 
 /* ── Контекстное меню (своё, канон ГОСТа) + всплывающий список ───────────────────── */
 .crm-menu{position:fixed;z-index:1800;display:none;flex-direction:column;min-width:190px;background:var(--bg3);border:1px solid var(--border-strong);
@@ -3680,6 +3690,7 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
           <button class="tab-btn" onclick="showDirTab('assets',this)">Материальные средства</button>
           <button class="tab-btn" onclick="showDirTab('fleet',this)">Сцепка</button>
           <button class="tab-btn" onclick="showDirTab('plans',this)">Планы продаж</button>
+          <button class="tab-btn" onclick="showDirTab('playbook',this)">Плейбук продаж</button>
         </div>
 
         <!-- ── Сотрудники (физические лица) ── -->
@@ -3867,6 +3878,26 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
             <div style="font-size:11.5px;color:var(--muted);margin-top:8px">Ключ строки - фамилия (первое слово ФИО в 1С). Лист «Планы_менеджеров» в Google теперь только зеркало, правки там не учитываются.</div>
           </div>
           <div id="plans-error" style="display:none;color:var(--red);font-size:12px;margin-top:10px"></div>
+        </div>
+        <!-- ═══ Плейбук продаж (09.09, plans/2026-09-09-sales-agent-learning-from-
+             history.md, Фаза 1) - Влад: "агент учится на реальных сделках, выбирает
+             успешные действия". v1 - ручной анализ по кнопке (только admin), читает
+             закрытые сделки и обновляет один читаемый документ - НЕ автономный агент,
+             это первый шаг к нему. ═══ -->
+        <div id="dir-tab-playbook" style="display:none">
+          <div style="display:flex;align-items:center;gap:10px;margin:12px 0;flex-wrap:wrap">
+            <div style="font-size:12.5px;color:var(--muted)">ИИ читает сделки, закрытые за последние
+              <select id="playbook-days" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--text);font-size:12.5px">
+                <option value="3">3 дня</option>
+                <option value="7" selected>7 дней</option>
+                <option value="14">14 дней</option>
+                <option value="30">30 дней</option>
+              </select>, и обновляет плейбук ниже.</div>
+            <div style="flex:1"></div>
+            <button class="tab-btn" id="playbook-refresh-btn" onclick="playbookRefresh_()" style="border-color:var(--blue);color:var(--blue)">Обновить плейбук</button>
+          </div>
+          <div id="playbook-meta" style="font-size:11.5px;color:var(--muted);margin-bottom:10px">—</div>
+          <div id="playbook-body" style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);padding:16px;font-size:13px;line-height:1.6">Загрузка…</div>
         </div>
       </div>
     </div>
@@ -12448,7 +12479,7 @@ function renderDirectory() {
 // "Поступления" (showReceiptsTab) - все уже отрисованы после renderDirectory(),
 // переключение вкладки - просто показ/скрытие, без повторного похода на сервер.
 function showDirTab(tab, el) {
-  ['people', 'legal', 'assets', 'fleet', 'plans'].forEach(function(t) {
+  ['people', 'legal', 'assets', 'fleet', 'plans', 'playbook'].forEach(function(t) {
     var panel = document.getElementById('dir-tab-' + t);
     if (panel) panel.style.display = (t === tab) ? '' : 'none';
   });
@@ -12457,6 +12488,66 @@ function showDirTab(tab, el) {
   // "Планы продаж" - свой источник (manager_plans на сервере, не /sprav/state), грузится
   // лениво при первом открытии вкладки, дальше - только при смене месяца.
   if (tab === 'plans' && !plansLoadedOnce_) plansTabLoad_(plansMonth_ || plansCurMonthKey_());
+  if (tab === 'playbook' && !playbookLoadedOnce_) playbookTabLoad_();
+}
+
+// ── Плейбук продаж (09.09, plans/2026-09-09-sales-agent-learning-from-history.md) ──────
+var playbookLoadedOnce_ = false;
+function playbookFormatBody_(text) {
+  var lines = pageEsc_(text).split('\n');
+  var html = '', inList = false;
+  function closeList() { if (inList) { html += '</ul>'; inList = false; } }
+  lines.forEach(function (line) {
+    var h = line.match(/^##\s+(.*)$/);
+    var li = line.match(/^[-•]\s+(.*)$/);
+    if (h) { closeList(); html += '<h4 style="margin:16px 0 6px;font-size:13.5px;color:var(--text)">' + h[1] + '</h4>'; }
+    else if (li) {
+      if (!inList) { html += '<ul style="margin:0 0 8px;padding-left:20px">'; inList = true; }
+      html += '<li style="margin-bottom:4px">' + li[1].replace(/\*\*(.+?)\*\*/g, '<b>$1</b>') + '</li>';
+    } else if (line.trim()) { closeList(); html += '<p style="margin:0 0 8px">' + line.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>') + '</p>'; }
+  });
+  closeList();
+  return html || '<span class="muted">Пусто</span>';
+}
+// server отдаёт "YYYY-MM-DD HH:MM:SS" - fmtDateRu ждёт РОВНО "YYYY-MM-DD" (якорь $ в
+// регулярке), с временем не совпадёт - форматируем дату+время сами, коротко.
+function playbookFmtWhen_(s) {
+  var m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/);
+  return m ? m[3] + '.' + m[2] + '.' + m[1] + ' ' + m[4] + ':' + m[5] : 'только что';
+}
+function playbookRenderMeta_(pb) {
+  var meta = document.getElementById('playbook-meta');
+  meta.textContent = pb && (pb.updated_at || pb.justUpdated)
+    ? 'Обновлено ' + (pb.justUpdated ? 'только что' : playbookFmtWhen_(pb.updated_at)) + ' · разобрано сделок: ' + (pb.deals_analyzed || 0) + (pb.updated_by ? ' · ' + pb.updated_by : '')
+    : 'Плейбук ещё не собирался - нажмите «Обновить плейбук»';
+}
+function playbookTabLoad_() {
+  playbookLoadedOnce_ = true;
+  // Кнопку "Обновить" видит только admin (D.role) - сервер и так проверяет роль
+  // (requireRole_("admin")), но скрываем кнопку заранее, чтобы не показывать
+  // недоступное действие менеджеру/логисту, читающему плейбук.
+  var btn = document.getElementById('playbook-refresh-btn');
+  if (btn) btn.style.display = (typeof D !== 'undefined' && D && D.role === 'admin') ? '' : 'none';
+  fetchFromYardApi_('/crm/playbook', {}).then(function (r) {
+    var box = document.getElementById('playbook-body');
+    if (!r.ok) { box.innerHTML = '<span style="color:var(--red)">Не удалось загрузить: ' + pageEsc_((r.data && r.data.error) || 'ошибка сервера') + '</span>'; return; }
+    var pb = r.data.playbook;
+    playbookRenderMeta_(pb);
+    box.innerHTML = pb && pb.body ? playbookFormatBody_(pb.body) : '<span class="muted">Плейбук ещё не собирался - нажмите «Обновить плейбук», чтобы ИИ разобрал недавно закрытые сделки.</span>';
+  }).catch(function () { document.getElementById('playbook-body').innerHTML = '<span style="color:var(--red)">Нет соединения с сервером</span>'; });
+}
+function playbookRefresh_() {
+  var btn = document.getElementById('playbook-refresh-btn'), box = document.getElementById('playbook-body');
+  var days = document.getElementById('playbook-days').value;
+  btn.disabled = true; btn.textContent = 'Читаю сделки…';
+  postToYardApi_('/crm/playbook/refresh', { days: days }).then(function (r) {
+    btn.disabled = false; btn.textContent = 'Обновить плейбук';
+    if (!r.ok) { p2Toast('Не удалось обновить плейбук: ' + ((r.data && r.data.error) || 'ошибка сервера'), 'red'); return; }
+    if (!r.data.deals_analyzed) { p2Toast(r.data.message || 'Нет данных за этот период', 'amber'); return; }
+    playbookRenderMeta_({ justUpdated: true, deals_analyzed: r.data.deals_analyzed });
+    box.innerHTML = playbookFormatBody_(r.data.body);
+    p2Toast('Плейбук обновлён - разобрано сделок: ' + r.data.deals_analyzed, 'green');
+  }).catch(function () { btn.disabled = false; btn.textContent = 'Обновить плейбук'; p2Toast('Нет соединения с сервером', 'red'); });
 }
 
 // ── Планы продаж (04.09, plans/2026-09-04-sales-plans-tool.md) ──────────────────────────
@@ -20943,6 +21034,7 @@ var CRM = (function () {
     audioEntry: null, audioEl: null, audioUrl: null, audioReqSeq_: 0, // текущая проигрываемая запись звонка (playRecording)
     templates: null, // кастомные шаблоны ответов ЭТОГО менеджера (сервер) - null пока не загружены, см. ensureTemplates
     quipTimer: null, // таймер подкола про логистов при отказе, см. showLostQuip_
+    transcripts: {}, // entryId -> {status, transcript, summary, applied}, см. crmTrHtml_
   };
 
   // ── Утилиты ─────────────────────────────────────────────────────────────────────────
@@ -21850,6 +21942,19 @@ var CRM = (function () {
       if (S.drawerId !== id) return;
       var rr = r[0];
       if (!rr.ok) { dr.querySelector('.dr-title').textContent = 'Не удалось загрузить: ' + ((rr.data && rr.data.error) || 'ошибка сервера'); return; }
+      // Уже посчитанные расшифровки/суть звонков (09.09) - сервер отдаёт их вместе с
+      // карточкой, подставляем в кэш ДО рендера, чтобы текст был виден сразу, без
+      // повторного клика "Расшифровать" (клик всё равно был бы бесплатным - см.
+      // crm_call_transcripts на сервере, но незачем заставлять кликать заново за уже
+      // готовое). Не трогаем entryId, для которых уже ЕСТЬ клиентское состояние - не
+      // хотим откатить "loading"/только что полученный в этой же сессии результат.
+      Object.keys(rr.data.transcripts || {}).forEach(function (entryId) {
+        if (S.transcripts[entryId]) return;
+        var t = rr.data.transcripts[entryId];
+        S.transcripts[entryId] = t.summary
+          ? { status: 'has_sum', transcript: t.transcript, summary: t.summary, applied: t.applied }
+          : { status: 'has_tr', transcript: t.transcript };
+      });
       S.drawerDeal = rr.data; renderDrawer(opts);
     }).catch(function () { if (S.drawerId === id) dr.querySelector('.dr-title').textContent = 'Нет соединения с сервером'; });
   }
@@ -21957,8 +22062,9 @@ var CRM = (function () {
     if (opts.lost) { var f = el('dr-lost-reason'); if (f) setTimeout(function () { f.focus(); }, 380); }
   }
   function timelineHtml(data) {
+    var dealId = data.deal && data.deal.id;
     var items = [];
-    (data.calls || []).forEach(function (c) { items.push({ at: c.at, type: 'call', ok: c.connected, entryId: c.entry_id, hasRec: c.has_recording, text: (c.connected ? 'Разговор ' + (c.duration_sec != null ? fmtDur(c.duration_sec) : '') : 'Недозвон' + (c.disconnect_reason ? ' · ' + c.disconnect_reason : '')) + (c.responsible_name ? ' · ' + c.responsible_name : '') }); });
+    (data.calls || []).forEach(function (c) { items.push({ at: c.at, type: 'call', ok: c.connected, entryId: c.entry_id, hasRec: c.has_recording, durationSec: c.duration_sec, text: (c.connected ? 'Разговор ' + (c.duration_sec != null ? fmtDur(c.duration_sec) : '') : 'Недозвон' + (c.disconnect_reason ? ' · ' + c.disconnect_reason : '')) + (c.responsible_name ? ' · ' + c.responsible_name : '') }); });
     (data.messages || []).forEach(function (m) { items.push({ at: m.created_at, type: 'msg', dir: m.direction, msgType: m.msg_type, text: m.text, sender: m.sender_name, att: m.attachments, entryId: m.mango_entry_id }); });
     if (data.deal && data.deal.created_at) items.push({ at: data.deal.created_at, type: 'ev', text: 'Сделка создана' });
     if (data.deal && data.deal.closed_at) items.push({ at: data.deal.closed_at, type: 'ev', text: data.deal.stage === 'won' ? 'Сделка успешна' : 'Отказ' + (data.deal.loss_reason ? ' · ' + data.deal.loss_reason : '') });
@@ -21972,6 +22078,8 @@ var CRM = (function () {
       // клику (тише для сервера, чем отдельный батч-запрос ради каждого сообщения).
       var canPlay = (it.type === 'call' && it.hasRec) || (it.type === 'msg' && (it.msgType === 'call' || it.msgType === 'appCall') && it.entryId);
       var playBtn = canPlay ? playBtnHtml_(it.entryId) : '';
+      var trBtn = canPlay ? trBtnWrapHtml_(it.entryId, dealId, it.type === 'call' ? it.durationSec : null) : '';
+      var trBlock = canPlay ? trBlockWrapHtml_(it.entryId) : '';
       if (it.type === 'call') { icon = 'phone'; cls = it.ok ? 'is-good' : 'is-bad'; body = '<div class="dr-tl-text">' + esc(it.text) + '</div>'; }
       else if (it.type === 'ev') { icon = 'stage'; body = '<div class="dr-tl-text muted">' + esc(it.text) + '</div>'; }
       else {
@@ -21980,7 +22088,7 @@ var CRM = (function () {
         var txt = it.msgType === 'image' ? 'Фото' : it.msgType === 'system' ? esc(it.text || 'Системное сообщение') : esc(it.text || '');
         body = '<div class="dr-tl-text' + (it.msgType === 'system' ? ' muted' : '') + '"><span style="color:var(--muted)">' + who + ':</span> ' + txt + '</div>';
       }
-      return '<div class="dr-tl-item"><span class="dr-tl-ico ' + cls + '">' + ico(icon) + '</span><div>' + body + '<div class="dr-tl-meta">' + fmtDT(it.at) + playBtn + '</div></div></div>';
+      return '<div class="dr-tl-item"><span class="dr-tl-ico ' + cls + '">' + ico(icon) + '</span><div>' + body + '<div class="dr-tl-meta">' + fmtDT(it.at) + playBtn + trBtn + '</div>' + trBlock + '</div></div>';
     }).join('') + (items.length > 60 ? '<div class="dr-empty" style="padding:8px 0">… и ещё ' + (items.length - 60) + '</div>' : '') + '</div>';
   }
   function fmtDur(sec) { var m = Math.floor(sec / 60), s = sec % 60; return m + ':' + pad2(s); }
@@ -22011,6 +22119,90 @@ var CRM = (function () {
       '<span class="crm-player-time">' + fmtDur(Math.floor(cur)) + ' / ' + (dur ? fmtDur(Math.floor(dur)) : '…') + '</span></span>';
   }
   function cssEsc_(s) { return window.CSS && CSS.escape ? CSS.escape(s) : String(s).replace(/["\\]/g, '\\$&'); }
+
+  // ── Расшифровка звонка (09.09) - Nexara (быстро) + суть/бриф через kie.ai (медленно),
+  // две отдельные кнопки/запроса, тот же принцип, что и на сервере (см. server.js). Кэш -
+  // S.transcripts (в памяти вкладки, не переживает перезагрузку страницы - сервер свой кэш
+  // уже держит в crm_call_transcripts, повторный клик после reload просто вернётся мгновенно).
+  // Лимит длительности для расшифровки (09.09, Влад: "ограничим на звонки до 3х минут,
+  // чтобы не сжечь лимиты") - ТОТ ЖЕ порог, что на сервере (CALL_TRANSCRIBE_MAX_SEC в
+  // server.js) - здесь только для того, чтобы не показывать кликабельную кнопку там, где
+  // заведомо откажет (известна длительность - звонки timeline, НЕ Авито-сообщения типа
+  // appCall - для них длительность вперёд неизвестна, сервер всё равно проверит сам).
+  var CALL_TRANSCRIBE_MAX_SEC_ = 180;
+  function crmTrHtml_(entryId, durationSec) {
+    var t = S.transcripts[entryId];
+    var btn = '';
+    var tooLong = durationSec != null && durationSec > CALL_TRANSCRIBE_MAX_SEC_;
+    if (!t && tooLong) btn = '<span class="crm-play-btn" style="opacity:.5" title="Расшифровка отключена для звонков длиннее 3 минут">' + ico('note') + 'Звонок длиннее 3 мин</span>';
+    else if (!t) btn = '<button type="button" class="crm-play-btn" data-nav-sound onclick="CRM.transcribeCall(this)">' + ico('note') + 'Расшифровать</button>';
+    else if (t.status === 'loading_tr') btn = '<span class="crm-play-btn is-loading">' + ico('note') + 'Расшифровка…</span>';
+    else if (t.status === 'has_tr') btn = '<button type="button" class="crm-play-btn" data-nav-sound onclick="CRM.summarizeCall(this)">' + ico('note') + 'Суть звонка</button>';
+    else if (t.status === 'loading_sum') btn = '<span class="crm-play-btn is-loading">' + ico('note') + 'Считаю суть…</span>';
+    var block = '';
+    if (t && t.transcript) {
+      block = (t.summary ? '<div class="crm-tr-summary">' + esc(t.summary) + '</div>' : '') + formatTranscript_(t.transcript) +
+        (t.applied ? '<div class="crm-tr-applied">' + ico('check') + 'Заявка обновлена из разговора</div>' : '');
+    }
+    return { btn: btn, block: block };
+  }
+  // Диаризация (09.09) - сервер отдаёт текст строками "Роль: реплика" (крупный
+  // непрерывный кусок одного говорящего - одна строка, см. server.js). Тут только подсветка
+  // роли жирным - разбор строк, не HTML с сервера (транскрипт остаётся обычным текстом в
+  // БД, безопаснее для кэша/повторного использования). Старые (недиаризованные) кэшированные
+  // расшифровки просто не содержат "Роль:" в начале строки - рендерятся как обычный текст.
+  function formatTranscript_(text) {
+    return esc(text).split('\n').map(function (line) {
+      var m = line.match(/^(Менеджер|Клиент|Неизвестный спикер):\s*(.*)$/);
+      return m ? '<div class="crm-tr-line"><b>' + m[1] + ':</b> ' + m[2] + '</div>' : '<div class="crm-tr-line">' + line + '</div>';
+    }).join('');
+  }
+  function trBtnWrapHtml_(entryId, dealId, durationSec) {
+    return '<span class="crm-tr-btn" data-entry="' + esc(entryId) + '" data-deal="' + (dealId || '') + '" data-duration="' + (durationSec != null ? durationSec : '') + '">' + crmTrHtml_(entryId, durationSec).btn + '</span>';
+  }
+  function trBlockWrapHtml_(entryId) {
+    return '<div class="crm-transcript" data-entry="' + esc(entryId) + '">' + crmTrHtml_(entryId).block + '</div>';
+  }
+  function setTrHtml_(entryId) {
+    var block = crmTrHtml_(entryId).block;
+    document.querySelectorAll('.crm-tr-btn[data-entry="' + cssEsc_(entryId) + '"]').forEach(function (el) {
+      var d = el.getAttribute('data-duration');
+      el.innerHTML = crmTrHtml_(entryId, d ? Number(d) : null).btn;
+    });
+    document.querySelectorAll('.crm-transcript[data-entry="' + cssEsc_(entryId) + '"]').forEach(function (el) { el.innerHTML = block; });
+  }
+  function transcribeCall(btn) {
+    var wrap = btn.closest('.crm-tr-btn'); if (!wrap) return;
+    var entryId = wrap.getAttribute('data-entry'), dealId = wrap.getAttribute('data-deal') || null;
+    S.transcripts[entryId] = { status: 'loading_tr' };
+    setTrHtml_(entryId);
+    post('/crm/mango/transcribe', dealId ? { entry_id: entryId, deal_id: dealId } : { entry_id: entryId }).then(function (r) {
+      if (!r.ok) {
+        var err = r.data && r.data.error;
+        var msg = err === 'call_too_long'
+          ? 'Звонок длиннее 3 минут (' + fmtDur(r.data.duration_sec) + ') - расшифровка отключена, чтобы не сжечь лимит'
+          : 'Не удалось расшифровать: ' + esc(err || 'ошибка сервера');
+        toast(msg, 'red'); delete S.transcripts[entryId]; setTrHtml_(entryId); return;
+      }
+      S.transcripts[entryId] = { status: 'has_tr', transcript: r.data.transcript };
+      setTrHtml_(entryId);
+    }).catch(function () { toast('Нет соединения', 'red'); delete S.transcripts[entryId]; setTrHtml_(entryId); });
+  }
+  function summarizeCall(btn) {
+    var wrap = btn.closest('.crm-tr-btn'); if (!wrap) return;
+    var entryId = wrap.getAttribute('data-entry'), dealId = wrap.getAttribute('data-deal') || null;
+    var t = S.transcripts[entryId]; if (!t) return;
+    t.status = 'loading_sum';
+    setTrHtml_(entryId);
+    post('/crm/mango/call_brief', dealId ? { entry_id: entryId, deal_id: dealId } : { entry_id: entryId }).then(function (r) {
+      if (!r.ok) { toast('Не удалось получить суть: ' + esc((r.data && r.data.error) || 'ошибка сервера'), 'red'); t.status = 'has_tr'; setTrHtml_(entryId); return; }
+      t.status = 'has_sum'; t.summary = r.data.summary; t.applied = r.data.applied;
+      setTrHtml_(entryId);
+      // Бриф применился - перечитать карточку, чтобы поля "Заявка" показали новые значения
+      // (тот же приём, что уже используют saveBrief/applyCargoBriefToDeal_ через reload).
+      if (r.data.applied && dealId && S.drawerId === Number(dealId)) openDeal(Number(dealId));
+    }).catch(function () { toast('Нет соединения', 'red'); t.status = 'has_tr'; setTrHtml_(entryId); });
+  }
   // Полная замена HTML ВСЕХ вхождений плеера этого звонка в DOM разом (не храним ссылку на
   // конкретный узел - тот же звонок может быть виден одновременно в треде чата и в drawer
   // сделки, а сама разметка теряется при любой перерисовке drawer/треда). Используется на
@@ -22583,6 +22775,7 @@ var CRM = (function () {
     onInput: onInput, onInputKey: onInputKey, toggleTemplates: toggleTemplates, useTemplate: useTemplate, saveTemplate: saveTemplate, deleteTemplate: deleteTemplate, send: send, retry: retry,
     saveCtxBrief: saveCtxBrief, createDealFor: createDealFor, openChatFor: openChatFor, reloadChats: reloadChats, enablePush: enablePush,
     playRecording: playRecording, seekStart: seekStart,
+    transcribeCall: transcribeCall, summarizeCall: summarizeCall,
     setAnalyticsPeriod: setAnalyticsPeriod,
     _state: S,
   };

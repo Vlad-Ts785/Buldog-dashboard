@@ -21983,7 +21983,7 @@ var CRM = (function () {
   function timelineHtml(data) {
     var dealId = data.deal && data.deal.id;
     var items = [];
-    (data.calls || []).forEach(function (c) { items.push({ at: c.at, type: 'call', ok: c.connected, entryId: c.entry_id, hasRec: c.has_recording, text: (c.connected ? 'Разговор ' + (c.duration_sec != null ? fmtDur(c.duration_sec) : '') : 'Недозвон' + (c.disconnect_reason ? ' · ' + c.disconnect_reason : '')) + (c.responsible_name ? ' · ' + c.responsible_name : '') }); });
+    (data.calls || []).forEach(function (c) { items.push({ at: c.at, type: 'call', ok: c.connected, entryId: c.entry_id, hasRec: c.has_recording, durationSec: c.duration_sec, text: (c.connected ? 'Разговор ' + (c.duration_sec != null ? fmtDur(c.duration_sec) : '') : 'Недозвон' + (c.disconnect_reason ? ' · ' + c.disconnect_reason : '')) + (c.responsible_name ? ' · ' + c.responsible_name : '') }); });
     (data.messages || []).forEach(function (m) { items.push({ at: m.created_at, type: 'msg', dir: m.direction, msgType: m.msg_type, text: m.text, sender: m.sender_name, att: m.attachments, entryId: m.mango_entry_id }); });
     if (data.deal && data.deal.created_at) items.push({ at: data.deal.created_at, type: 'ev', text: 'Сделка создана' });
     if (data.deal && data.deal.closed_at) items.push({ at: data.deal.closed_at, type: 'ev', text: data.deal.stage === 'won' ? 'Сделка успешна' : 'Отказ' + (data.deal.loss_reason ? ' · ' + data.deal.loss_reason : '') });
@@ -21997,7 +21997,7 @@ var CRM = (function () {
       // клику (тише для сервера, чем отдельный батч-запрос ради каждого сообщения).
       var canPlay = (it.type === 'call' && it.hasRec) || (it.type === 'msg' && (it.msgType === 'call' || it.msgType === 'appCall') && it.entryId);
       var playBtn = canPlay ? playBtnHtml_(it.entryId) : '';
-      var trBtn = canPlay ? trBtnWrapHtml_(it.entryId, dealId) : '';
+      var trBtn = canPlay ? trBtnWrapHtml_(it.entryId, dealId, it.type === 'call' ? it.durationSec : null) : '';
       var trBlock = canPlay ? trBlockWrapHtml_(it.entryId) : '';
       if (it.type === 'call') { icon = 'phone'; cls = it.ok ? 'is-good' : 'is-bad'; body = '<div class="dr-tl-text">' + esc(it.text) + '</div>'; }
       else if (it.type === 'ev') { icon = 'stage'; body = '<div class="dr-tl-text muted">' + esc(it.text) + '</div>'; }
@@ -22043,10 +22043,18 @@ var CRM = (function () {
   // две отдельные кнопки/запроса, тот же принцип, что и на сервере (см. server.js). Кэш -
   // S.transcripts (в памяти вкладки, не переживает перезагрузку страницы - сервер свой кэш
   // уже держит в crm_call_transcripts, повторный клик после reload просто вернётся мгновенно).
-  function crmTrHtml_(entryId) {
+  // Лимит длительности для расшифровки (09.09, Влад: "ограничим на звонки до 3х минут,
+  // чтобы не сжечь лимиты") - ТОТ ЖЕ порог, что на сервере (CALL_TRANSCRIBE_MAX_SEC в
+  // server.js) - здесь только для того, чтобы не показывать кликабельную кнопку там, где
+  // заведомо откажет (известна длительность - звонки timeline, НЕ Авито-сообщения типа
+  // appCall - для них длительность вперёд неизвестна, сервер всё равно проверит сам).
+  var CALL_TRANSCRIBE_MAX_SEC_ = 180;
+  function crmTrHtml_(entryId, durationSec) {
     var t = S.transcripts[entryId];
     var btn = '';
-    if (!t) btn = '<button type="button" class="crm-play-btn" data-nav-sound onclick="CRM.transcribeCall(this)">' + ico('note') + 'Расшифровать</button>';
+    var tooLong = durationSec != null && durationSec > CALL_TRANSCRIBE_MAX_SEC_;
+    if (!t && tooLong) btn = '<span class="crm-play-btn" style="opacity:.5" title="Расшифровка отключена для звонков длиннее 3 минут">' + ico('note') + 'Звонок длиннее 3 мин</span>';
+    else if (!t) btn = '<button type="button" class="crm-play-btn" data-nav-sound onclick="CRM.transcribeCall(this)">' + ico('note') + 'Расшифровать</button>';
     else if (t.status === 'loading_tr') btn = '<span class="crm-play-btn is-loading">' + ico('note') + 'Расшифровка…</span>';
     else if (t.status === 'has_tr') btn = '<button type="button" class="crm-play-btn" data-nav-sound onclick="CRM.summarizeCall(this)">' + ico('note') + 'Суть звонка</button>';
     else if (t.status === 'loading_sum') btn = '<span class="crm-play-btn is-loading">' + ico('note') + 'Считаю суть…</span>';
@@ -22068,16 +22076,19 @@ var CRM = (function () {
       return m ? '<div class="crm-tr-line"><b>' + m[1] + ':</b> ' + m[2] + '</div>' : '<div class="crm-tr-line">' + line + '</div>';
     }).join('');
   }
-  function trBtnWrapHtml_(entryId, dealId) {
-    return '<span class="crm-tr-btn" data-entry="' + esc(entryId) + '" data-deal="' + (dealId || '') + '">' + crmTrHtml_(entryId).btn + '</span>';
+  function trBtnWrapHtml_(entryId, dealId, durationSec) {
+    return '<span class="crm-tr-btn" data-entry="' + esc(entryId) + '" data-deal="' + (dealId || '') + '" data-duration="' + (durationSec != null ? durationSec : '') + '">' + crmTrHtml_(entryId, durationSec).btn + '</span>';
   }
   function trBlockWrapHtml_(entryId) {
     return '<div class="crm-transcript" data-entry="' + esc(entryId) + '">' + crmTrHtml_(entryId).block + '</div>';
   }
   function setTrHtml_(entryId) {
-    var r = crmTrHtml_(entryId);
-    document.querySelectorAll('.crm-tr-btn[data-entry="' + cssEsc_(entryId) + '"]').forEach(function (el) { el.innerHTML = r.btn; });
-    document.querySelectorAll('.crm-transcript[data-entry="' + cssEsc_(entryId) + '"]').forEach(function (el) { el.innerHTML = r.block; });
+    var block = crmTrHtml_(entryId).block;
+    document.querySelectorAll('.crm-tr-btn[data-entry="' + cssEsc_(entryId) + '"]').forEach(function (el) {
+      var d = el.getAttribute('data-duration');
+      el.innerHTML = crmTrHtml_(entryId, d ? Number(d) : null).btn;
+    });
+    document.querySelectorAll('.crm-transcript[data-entry="' + cssEsc_(entryId) + '"]').forEach(function (el) { el.innerHTML = block; });
   }
   function transcribeCall(btn) {
     var wrap = btn.closest('.crm-tr-btn'); if (!wrap) return;
@@ -22085,7 +22096,13 @@ var CRM = (function () {
     S.transcripts[entryId] = { status: 'loading_tr' };
     setTrHtml_(entryId);
     post('/crm/mango/transcribe', dealId ? { entry_id: entryId, deal_id: dealId } : { entry_id: entryId }).then(function (r) {
-      if (!r.ok) { toast('Не удалось расшифровать: ' + esc((r.data && r.data.error) || 'ошибка сервера'), 'red'); delete S.transcripts[entryId]; setTrHtml_(entryId); return; }
+      if (!r.ok) {
+        var err = r.data && r.data.error;
+        var msg = err === 'call_too_long'
+          ? 'Звонок длиннее 3 минут (' + fmtDur(r.data.duration_sec) + ') - расшифровка отключена, чтобы не сжечь лимит'
+          : 'Не удалось расшифровать: ' + esc(err || 'ошибка сервера');
+        toast(msg, 'red'); delete S.transcripts[entryId]; setTrHtml_(entryId); return;
+      }
       S.transcripts[entryId] = { status: 'has_tr', transcript: r.data.transcript };
       setTrHtml_(entryId);
     }).catch(function () { toast('Нет соединения', 'red'); delete S.transcripts[entryId]; setTrHtml_(entryId); });

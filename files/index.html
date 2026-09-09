@@ -21929,9 +21929,13 @@ var CRM = (function () {
       '<div class="dr-field"><label>Сумма, ₽</label><input class="dr-input mono" id="dr-amount" type="number" min="0" step="1000" autocomplete="off" value="' + (Number(d.amount) || '') + '" placeholder="0" onblur="CRM.saveMain(' + d.id + ')"></div>' +
       '<div class="dr-field"><label>Номер заказа 1С</label><input class="dr-input mono" id="dr-order" autocomplete="off" value="' + esc(d.order_1c_number || '') + '" onblur="CRM.saveMain(' + d.id + ')"></div></div></div>';
 
+    // Цвет чипа - тот же avatarColor_(extension), что у кружка с инициалами на плитке
+    // канбана (Влад 09.09: "цвета менеджерам присвой как цвета кружков на плитке") -
+    // узнаётся с одного взгляда, не гадать заново по имени.
+    var respChip = function (e) { return '<button class="crm-chip" aria-pressed="' + (String(e.extension) === String(d.responsible_extension)) + '" onclick="CRM.assign(\'' + esc(d.client_phone) + '\',\'' + esc(e.extension) + '\',' + d.id + ')"><span class="kb-ava" style="background:' + avatarColor_(e.extension) + '">' + esc(initials(e.name)) + '</span>' + esc(e.name) + '</button>'; };
     var resp = '<div class="dr-section"><div class="dr-label">Ответственный</div><div style="display:flex;flex-wrap:wrap;gap:6px">' +
       '<button class="crm-chip" aria-pressed="' + (!d.responsible_extension) + '" onclick="CRM.assign(\'' + esc(d.client_phone) + '\',\'\',' + d.id + ')">Не назначен</button>' +
-      (S.employees || []).map(function (e) { return '<button class="crm-chip" aria-pressed="' + (String(e.extension) === String(d.responsible_extension)) + '" onclick="CRM.assign(\'' + esc(d.client_phone) + '\',\'' + esc(e.extension) + '\',' + d.id + ')">' + esc(e.name) + '</button>'; }).join('') + '</div></div>';
+      (S.employees || []).map(respChip).join('') + '</div></div>';
 
     var brief = '<div class="dr-section"><div class="dr-label">Заявка <span class="dr-saved aux" id="dr-saved-brief"></span></div>' + briefFieldsHtml('dr', d) +
       '<div class="dr-actions"><button class="crm-chip" onclick="CRM.saveBrief(' + d.id + ')">' + ico('check') + 'Сохранить заявку</button></div></div>';
@@ -22364,7 +22368,7 @@ var CRM = (function () {
     ensureEmployees().then(function (emps) {
       var key = S.thread.key;
       pop.innerHTML = (S.me ? '<div class="cx-pop-item" onclick="CRM.assign(\'' + esc(key) + '\',\'' + esc(S.me) + '\')"><span class="cx-pop-title">' + ico('user') + 'Взять себе</span><span class="cx-pop-preview">' + esc(empName(S.me) || '') + '</span></div><div class="cx-pop-sep"></div>' : '') +
-        emps.map(function (e) { return '<div class="cx-pop-item" aria-selected="' + (String(e.extension) === String(S.thread.client.responsible_extension)) + '" onclick="CRM.assign(\'' + esc(key) + '\',\'' + esc(e.extension) + '\')"><span class="cx-pop-title">' + esc(e.name) + '</span></div>'; }).join('') +
+        emps.map(function (e) { return '<div class="cx-pop-item" aria-selected="' + (String(e.extension) === String(S.thread.client.responsible_extension)) + '" onclick="CRM.assign(\'' + esc(key) + '\',\'' + esc(e.extension) + '\')"><span class="cx-pop-title"><span class="kb-ava" style="background:' + avatarColor_(e.extension) + '">' + esc(initials(e.name)) + '</span>' + esc(e.name) + '</span></div>'; }).join('') +
         '<div class="cx-pop-sep"></div><div class="cx-pop-item" onclick="CRM.assign(\'' + esc(key) + '\',\'\')"><span class="cx-pop-title" style="color:var(--muted)">Снять ответственного</span></div>';
       pop.classList.add('open');
     });

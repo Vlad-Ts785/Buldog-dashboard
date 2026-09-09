@@ -1530,6 +1530,7 @@ main:has(> #page-crm.active){max-width:none;}
 .crmldr-track{position:relative;height:14px;}
 .crmldr-barwrap{position:absolute;left:0;top:4px;height:6px;width:100%;background:var(--bg4);border-radius:3px;overflow:hidden;}
 .crmldr-bar{height:100%;border-radius:3px;background:var(--green);transition:width .5s ease;}
+.crmldr-bar.is-blue{background:var(--blue);}
 .crmldr-val{font-family:'JetBrains Mono',monospace;font-size:12px;text-align:right;font-variant-numeric:tabular-nums;color:var(--text);}
 @media (prefers-reduced-motion:reduce){.crmldr-bar{transition:none;}}
 
@@ -4600,6 +4601,7 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
         <div id="crm-view-board">
           <div class="crm-kpis" id="crm-kpis"></div>
           <div class="crm-leaders" id="crm-leaders"></div>
+          <div class="crm-leaders" id="crm-traffic"></div>
           <div class="kb-hint">Перетащите карточку в самый низ экрана - снизу появятся зоны «Сделка успешна» и «Отказ» (либо доведите карточку до нужной колонки). «Отказ» требует причину - без неё сделка останется на месте.</div>
           <div class="kb-panel"><div class="kb-board" id="kb-board"></div></div>
         </div>
@@ -20680,7 +20682,7 @@ var CRM = (function () {
   ];
 
   var S = {
-    inited: false, view: 'board', deals: [], summary: null, employees: null,
+    inited: false, view: 'board', deals: [], summary: null, employees: null, traffic: null,
     me: (function () { try { return localStorage.getItem('crmMyExtension') || null; } catch (e) { return null; } })(),
     kpiFilter: null, colSort: {}, // {stageKey: 'amount'} - крупная сумма колонки кликабельна (Влад, 08.09: "как в Битриксе")
     collapsedCols: (function () { try { return JSON.parse(localStorage.getItem('crmCollapsedCols') || '{}'); } catch (e) { return {}; } })(),
@@ -20836,12 +20838,13 @@ var CRM = (function () {
   function load() {
     var loading = el('crm-loading'), body = el('crm-body');
     if (!S.deals.length) { loading.style.display = ''; loading.textContent = 'Загрузка CRM...'; body.style.display = 'none'; }
-    Promise.all([api('/crm/deals'), api('/crm/summary')]).then(function (r) {
-      var rd = r[0], rs = r[1];
+    Promise.all([api('/crm/deals'), api('/crm/summary'), api('/crm/traffic_sources')]).then(function (r) {
+      var rd = r[0], rs = r[1], rt = r[2];
       if (!rd.ok) { loading.textContent = 'Не удалось загрузить CRM: ' + ((rd.data && rd.data.error) || 'ошибка сервера'); return; }
       S.deals = rd.data.deals || [];
       S.summary = rs.ok ? rs.data : S.summary;
-      renderKpis(); renderLeaders(); renderBoard();
+      S.traffic = rt.ok ? rt.data : S.traffic;
+      renderKpis(); renderLeaders(); renderTraffic(); renderBoard();
       loading.style.display = 'none'; body.style.display = '';
       if (S.view === 'chats') loadChats(true);
       refreshBadge();
@@ -20935,6 +20938,35 @@ var CRM = (function () {
           '<span class="crmldr-name">' + esc(surname) + '</span>' +
           '<div class="crmldr-track"><div class="crmldr-barwrap"><div class="crmldr-bar" style="width:' + barW.toFixed(1) + '%"></div></div></div>' +
           '<span class="crmldr-val">' + shortMoney(l.amount) + '</span></div>';
+      }).join('');
+  }
+  // «Откуда звонят» - трафик сайта arenda-tral.ru через коллтрекинг Calltouch (подключено
+  // 09.09.2026, plans/2026-09-09-calltouch-crm-analytics.md). ТОЛЬКО наш пул номеров -
+  // фильтрация чужих направлений (аренда экскаваторов, yard-imperial.ru) уже сделана на
+  // сервере (calltouch_calls хранит только "наши" звонки). Тот же bar-per-row канон, что у
+  // renderLeaders() выше - переиспользуем .crmldr-* целиком, не изобретаем новый компонент.
+  var TRAFFIC_SOURCE_LABELS_ = {
+    'yandex': 'Яндекс', 'google': 'Google', '(direct)': 'Прямой заход',
+    'yandex_maps': 'Яндекс.Карты', 'vk': 'VK', 'ya.ru': 'Яндекс',
+  };
+  function trafficSourceLabel_(t) {
+    var base = TRAFFIC_SOURCE_LABELS_[t.source] || (t.source ? t.source.charAt(0).toUpperCase() + t.source.slice(1) : 'Неизвестно');
+    return base + (t.medium === 'cpc' ? ' (реклама)' : '');
+  }
+  function renderTraffic() {
+    var box = el('crm-traffic'); if (!box) return;
+    var sources = (S.traffic && S.traffic.sources) || [];
+    if (!sources.length) { box.classList.remove('has-data'); box.innerHTML = ''; return; }
+    box.classList.add('has-data');
+    var maxVal = sources.reduce(function (m, t) { return Math.max(m, t.count || 0); }, 0) || 1;
+    var days = (S.traffic && S.traffic.days) || 30;
+    box.innerHTML = '<div class="crmldr-head">Откуда звонят - сайт arenda-tral.ru, ' + days + ' дн.</div>' +
+      sources.map(function (t) {
+        var barW = Math.min(100, (t.count || 0) / maxVal * 100);
+        return '<div class="crmldr-row" title="' + esc(trafficSourceLabel_(t)) + ' · целевых ' + t.target_count + ' из ' + t.count + '">' +
+          '<span class="crmldr-name">' + esc(trafficSourceLabel_(t)) + '</span>' +
+          '<div class="crmldr-track"><div class="crmldr-barwrap"><div class="crmldr-bar is-blue" style="width:' + barW.toFixed(1) + '%"></div></div></div>' +
+          '<span class="crmldr-val">' + t.count + ' зв.</span></div>';
       }).join('');
   }
   function plural(n, a, b, c) { n = Math.abs(n) % 100; var n1 = n % 10; if (n > 10 && n < 20) return c; if (n1 > 1 && n1 < 5) return b; if (n1 === 1) return a; return c; }

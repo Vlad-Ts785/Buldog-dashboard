@@ -25094,8 +25094,26 @@ function openDrawer(seg){
   var isTrip = seg.kind === "trip";
   var isDriverOff = seg.kind === "driveroff";
   var logistPool = v.long ? LOG_LONG : LOG_TRAL;
-  var mgIdx = isTrip ? Math.max(0, MANAGERS.indexOf(seg.mg)) : 0;
-  var lgIdx = isTrip ? Math.max(0, logistPool.indexOf(seg.lg)) : 0;
+  /* НАЙДЕННЫЙ БАГ (07.09, Влад живьём: "Почему ПРУ если Кан?" - плитка честно
+     показывала Прус-Роскошного (seg.lg), а шторка молча подсвечивала Кана).
+     Причина - тот же класс бага границы месяца, что уже чинили в других местах
+     (project_month_boundary_bug_class): MANAGERS/LOG_TRAL/LOG_LONG строятся из
+     живого ростера ТЕКУЩЕГО месяца (D.orders.by_manager/by_logist) - у человека
+     ещё нет свежих заказов -> он выпадает из списка целиком, хотя рейс в
+     Планировке за ним уже стоит. indexOf(seg.mg/seg.lg) тогда возвращает -1,
+     Math.max(0, -1) клэмпил на 0 - подсвечивался ПЕРВЫЙ в списке, как будто это
+     и есть реальный выбор. Не косметика - "Сохранить" без единого клика реально
+     переписал бы назначение на того первого (см. seg.mg=mgPool[mgIdx] ниже).
+     Фикс - если реально назначенный человек выпал из живого списка, добавляем
+     его ОТДЕЛЬНЫМ пунктом (личный массив ТОЛЬКО для этой шторки, глобальные
+     MANAGERS/LOG_TRAL/LOG_LONG не трогаем) - видно правду, никогда не спутать с
+     первым в списке. */
+  var mgPool = MANAGERS.slice();
+  if (isTrip && seg.mg && MANAGERS.indexOf(seg.mg) < 0) mgPool = [seg.mg].concat(mgPool);
+  var lgPool = logistPool.slice();
+  if (isTrip && seg.lg && logistPool.indexOf(seg.lg) < 0) lgPool = [seg.lg].concat(lgPool);
+  var mgIdx = isTrip ? Math.max(0, mgPool.indexOf(seg.mg)) : 0;
+  var lgIdx = isTrip ? Math.max(0, lgPool.indexOf(seg.lg)) : 0;
   var fromVal = isTrip ? (seg.from || "") : "";
   var toVal = isTrip ? (seg.to || "") : "";
   var customerVal = isTrip ? (seg.customer || "") : "";
@@ -25132,10 +25150,14 @@ function openDrawer(seg){
           '<div id="lp-drCustomer-suggest" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg3);border:1px solid var(--border);border-radius:8px;margin-top:4px;max-height:220px;overflow-y:auto;z-index:10"></div>' +
         '</div></div>' +
         '<div class="cr-field"><span class="grp-label">Менеджер</span><div class="cr-opts" id="lp-drMg">' +
-          MANAGERS.map(function(m, i){ return '<button class="chip cr-opt" data-i="' + i + '" aria-pressed="' + (i === mgIdx) + '">' + personShort(m) + '</button>'; }).join("") +
+          mgPool.map(function(m, i){ return '<button class="chip cr-opt" data-i="' + i + '"' +
+            (MANAGERS.indexOf(m) < 0 ? ' style="border-style:dashed" title="Нет в текущем списке (пока нет свежих заказов) - реально назначен(а) сейчас"' : '') +
+            ' aria-pressed="' + (i === mgIdx) + '">' + personShort(m) + '</button>'; }).join("") +
         '</div></div>' +
         '<div class="cr-field"><span class="grp-label">Логист</span><div class="cr-opts" id="lp-drLg">' +
-          logistPool.map(function(p, i){ return '<button class="chip cr-opt" data-i="' + i + '" aria-pressed="' + (i === lgIdx) + '">' + personShort(p) + '</button>'; }).join("") +
+          lgPool.map(function(p, i){ return '<button class="chip cr-opt" data-i="' + i + '"' +
+            (logistPool.indexOf(p) < 0 ? ' style="border-style:dashed" title="Нет в текущем списке (пока нет свежих заказов) - реально назначен(а) сейчас"' : '') +
+            ' aria-pressed="' + (i === lgIdx) + '">' + personShort(p) + '</button>'; }).join("") +
         '</div></div>' +
         '<div class="cr-field"><span class="grp-label">Откуда</span><input autocomplete="off" class="cr-input" id="lp-drFrom" list="lp-crPlaces" placeholder="можно не указывать" value="' + fromVal + '"></div>' +
         '<div class="cr-field"><span class="grp-label">Куда</span><input autocomplete="off" class="cr-input" id="lp-drTo" list="lp-crPlaces" placeholder="можно не указывать" value="' + toVal + '"></div>' +
@@ -25211,7 +25233,7 @@ function openDrawer(seg){
       seg = liveSeg;
       var before = {s: seg.s, l: seg.l, v: seg.v};
       seg.s = newS; seg.l = newL;
-      if (isTrip){ seg.mg = MANAGERS[mgIdx]; seg.lg = logistPool[lgIdx]; seg.from = fromVal; seg.to = toVal; seg.customer = customerVal; seg.needsData = ndVal; seg.tripMode = TRIP_MODE_OPTS_[tripModeIdx][0]; }
+      if (isTrip){ seg.mg = mgPool[mgIdx]; seg.lg = lgPool[lgIdx]; seg.from = fromVal; seg.to = toVal; seg.customer = customerVal; seg.needsData = ndVal; seg.tripMode = TRIP_MODE_OPTS_[tripModeIdx][0]; }
       if (isDriverOff){ seg.reason = DRIVEROFF_REASONS_[reasonIdx][0]; }
       S.drop();
       /* commit() сам НЕ перерисовывает ленту - у драга/растяжки плитка уже

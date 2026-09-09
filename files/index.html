@@ -255,6 +255,12 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .risk-dot-pulse{animation:riskDotPulse 2.2s ease-in-out infinite;}
 @keyframes riskDotPulse{0%,100%{box-shadow:0 0 0 0 rgba(226,75,74,.55);}50%{box-shadow:0 0 0 5px rgba(226,75,74,0);}}
 @media(prefers-reduced-motion:reduce){.risk-dot-pulse{animation:none;box-shadow:0 0 0 2px rgba(226,75,74,.5);}}
+/* Маркер "!!!" (10.09, Влад: "где три восклицательных знака - тоже красный мигающий") -
+   то же исключение, что у risk-dot-pulse выше, но текст без фоновой заливки под точку,
+   поэтому кольцо box-shadow не подходит - пульсирующее свечение text-shadow, тот же такт. */
+.marker-pulse{animation:markerTextPulse 2.2s ease-in-out infinite;}
+@keyframes markerTextPulse{0%,100%{text-shadow:0 0 0 rgba(226,75,74,0);}50%{text-shadow:0 0 7px rgba(226,75,74,.9);}}
+@media(prefers-reduced-motion:reduce){.marker-pulse{animation:none;text-shadow:0 0 3px rgba(226,75,74,.7);}}
 @media(prefers-reduced-motion:reduce){
   .sidebar.menu-customizing .sidebar-nav-item.menu-wiggle{animation:none;}
   .sidebar-nav-item.menu-hint-pulse{animation:none;box-shadow:0 0 0 2px rgba(55,138,221,.45);}
@@ -13279,7 +13285,13 @@ function legalRiskMarkHtml_(light, size, style, marker, pulse) {
   }
   if (!marker && light === 'bankrupt') marker = '!';
   if (marker === '!' || marker === '!!!') {
-    return '<span style="display:inline-block;line-height:1;font-family:\'JetBrains Mono\',ui-monospace,monospace;font-weight:800;font-size:' +
+    // "!!!" (10.09, Влад: "где три восклицательных знака - тоже красный мигающий") - тот же
+    // сознательный пульс-исключение, что у судов, но текстовый глиф не подходит под
+    // box-shadow-кольцо (нет фоновой заливки под точку) - вместо этого пульсирующее свечение
+    // text-shadow, тот же такт 2.2s. "!" (менее серьёзный - недоимка/банкрот без 25%+ порога)
+    // остаётся статичным - пульс только для максимальной серьёзности.
+    var markerCls = marker === '!!!' ? ' marker-pulse' : '';
+    return '<span class="' + markerCls.trim() + '" style="display:inline-block;line-height:1;font-family:\'JetBrains Mono\',ui-monospace,monospace;font-weight:800;font-size:' +
       Math.round(size * 1.6) + 'px;color:var(--red);vertical-align:middle;letter-spacing:-0.08em;flex:none;' + style + '" aria-label="Внимание">' + marker + '</span>';
   }
   return '<span style="display:inline-block;width:' + size + 'px;height:' + size + 'px;border-radius:50%;background:' +

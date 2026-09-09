@@ -1777,6 +1777,8 @@ main:has(> #page-crm.active){max-width:none;}
 .crm-transcript{margin-top:6px;padding:8px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font:400 12px/1.5 var(--font-body);color:var(--text);}
 .crm-transcript:empty{display:none;padding:0;margin:0;border:0;}
 .crm-tr-summary{color:var(--muted);font-style:italic;margin-bottom:6px;}
+.crm-tr-line + .crm-tr-line{margin-top:6px;}
+.crm-tr-line b{color:var(--blue);}
 .crm-tr-applied{display:flex;align-items:center;gap:4px;color:var(--green);font-size:11px;margin-top:6px;}
 .crm-tr-applied svg{width:12px;height:12px;}
 
@@ -22050,10 +22052,21 @@ var CRM = (function () {
     else if (t.status === 'loading_sum') btn = '<span class="crm-play-btn is-loading">' + ico('note') + 'Считаю суть…</span>';
     var block = '';
     if (t && t.transcript) {
-      block = (t.summary ? '<div class="crm-tr-summary">' + esc(t.summary) + '</div>' : '') + esc(t.transcript) +
+      block = (t.summary ? '<div class="crm-tr-summary">' + esc(t.summary) + '</div>' : '') + formatTranscript_(t.transcript) +
         (t.applied ? '<div class="crm-tr-applied">' + ico('check') + 'Заявка обновлена из разговора</div>' : '');
     }
     return { btn: btn, block: block };
+  }
+  // Диаризация (09.09) - сервер отдаёт текст строками "Роль: реплика" (крупный
+  // непрерывный кусок одного говорящего - одна строка, см. server.js). Тут только подсветка
+  // роли жирным - разбор строк, не HTML с сервера (транскрипт остаётся обычным текстом в
+  // БД, безопаснее для кэша/повторного использования). Старые (недиаризованные) кэшированные
+  // расшифровки просто не содержат "Роль:" в начале строки - рендерятся как обычный текст.
+  function formatTranscript_(text) {
+    return esc(text).split('\n').map(function (line) {
+      var m = line.match(/^(Менеджер|Клиент|Неизвестный спикер):\s*(.*)$/);
+      return m ? '<div class="crm-tr-line"><b>' + m[1] + ':</b> ' + m[2] + '</div>' : '<div class="crm-tr-line">' + line + '</div>';
+    }).join('');
   }
   function trBtnWrapHtml_(entryId, dealId) {
     return '<span class="crm-tr-btn" data-entry="' + esc(entryId) + '" data-deal="' + (dealId || '') + '">' + crmTrHtml_(entryId).btn + '</span>';

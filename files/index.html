@@ -21433,15 +21433,25 @@ var CRM = (function () {
   function ensureEmployees() { if (S.employees) return Promise.resolve(S.employees); return api('/crm/employees').then(function (r) { S.employees = r.ok ? (r.data.employees || []) : []; return S.employees; }).catch(function () { S.employees = []; return S.employees; }); }
   function empName(ext) { var e = (S.employees || []).find(function (x) { return String(x.extension) === String(ext); }); return e ? e.name : null; }
 
+  // Найдено 09.09 (Влад, жалоба Филипчук): поля заявки, в отличие от "Сумма и заказ"/
+  // "Контакт" в этом же дровере (те auto-save по onblur), сохранялись ТОЛЬКО кнопкой
+  // "Сохранить заявку" - менеджер, привыкший к автосохранению у соседних секций, заполнял
+  // груз/маршрут и сразу тащил карточку в другую колонку, не заметив отдельную кнопку -
+  // введённое никогда не уходило на сервер и терялось при следующей перерисовке дровера/
+  // списка. autoSave(id) - тот же приём, что у saveMain/saveContact, теперь и здесь; кнопка
+  // "Сохранить заявку" оставлена (безвредный дубль для тех, кто ей уже пользуется).
   function briefFieldsHtml(prefix, d) {
+    var saveFn = prefix === 'cx' ? 'saveCtxBrief' : 'saveBrief';
+    var saveCall = 'CRM.' + saveFn + '(' + d.id + ')';
+    var onBlur = ' onblur="' + saveCall + '"', onChange = ' onchange="' + saveCall + '"';
     var autoTag = d.brief_source === 'auto' ? '<span class="dr-auto" title="Извлечено автоматически из переписки - проверьте">авто</span>' : '';
     return '<div class="dr-grid2">' +
-      '<div class="dr-field" style="grid-column:1/-1"><label>Груз' + autoTag + '</label><input class="dr-input" id="' + prefix + '-cargo" autocomplete="off" value="' + esc(d.cargo_type || '') + '" placeholder="экскаватор, трубы, контейнер…"></div>' +
-      '<div class="dr-field"><label>Откуда</label><input class="dr-input" id="' + prefix + '-from" autocomplete="off" value="' + esc(d.route_from || '') + '"></div>' +
-      '<div class="dr-field"><label>Куда</label><input class="dr-input" id="' + prefix + '-to" autocomplete="off" value="' + esc(d.route_to || '') + '"></div>' +
-      '<div class="dr-field"><label>Вес, т</label><input class="dr-input mono" id="' + prefix + '-weight" type="number" step="0.1" min="0" autocomplete="off" value="' + esc(d.cargo_weight_tons != null ? d.cargo_weight_tons : '') + '"></div>' +
-      '<div class="dr-field"><label>Дата подачи</label><input class="dr-input mono" id="' + prefix + '-date" type="date" autocomplete="off" value="' + dateInput(d.wanted_date) + '"></div>' +
-      '<div class="dr-field" style="grid-column:1/-1"><label>Техника</label><select class="dr-select" id="' + prefix + '-veh">' +
+      '<div class="dr-field" style="grid-column:1/-1"><label>Груз' + autoTag + '</label><input class="dr-input" id="' + prefix + '-cargo" autocomplete="off" value="' + esc(d.cargo_type || '') + '" placeholder="экскаватор, трубы, контейнер…"' + onBlur + '></div>' +
+      '<div class="dr-field"><label>Откуда</label><input class="dr-input" id="' + prefix + '-from" autocomplete="off" value="' + esc(d.route_from || '') + '"' + onBlur + '></div>' +
+      '<div class="dr-field"><label>Куда</label><input class="dr-input" id="' + prefix + '-to" autocomplete="off" value="' + esc(d.route_to || '') + '"' + onBlur + '></div>' +
+      '<div class="dr-field"><label>Вес, т</label><input class="dr-input mono" id="' + prefix + '-weight" type="number" step="0.1" min="0" autocomplete="off" value="' + esc(d.cargo_weight_tons != null ? d.cargo_weight_tons : '') + '"' + onBlur + '></div>' +
+      '<div class="dr-field"><label>Дата подачи</label><input class="dr-input mono" id="' + prefix + '-date" type="date" autocomplete="off" value="' + dateInput(d.wanted_date) + '"' + onChange + '></div>' +
+      '<div class="dr-field" style="grid-column:1/-1"><label>Техника</label><select class="dr-select" id="' + prefix + '-veh"' + onChange + '>' +
         ['', 'трал', 'длинномер'].map(function (v) { return '<option value="' + v + '"' + ((d.vehicle_hint || '') === v ? ' selected' : '') + '>' + (v || '—') + '</option>'; }).join('') + '</select></div></div>';
   }
   function readBrief(prefix) {

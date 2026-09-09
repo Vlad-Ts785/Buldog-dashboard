@@ -21757,7 +21757,9 @@ var CRM = (function () {
     var inp = el('cx-input'); inp.value = draft; onInput();
     api('/crm/chat', { client_key: key }).then(function (r) {
       if (S.activeKey !== key) return;
-      if (!r.ok) { el('cx-msgs').innerHTML = '<div class="cx-empty"><p>Не удалось загрузить переписку.</p></div>'; return; }
+      // 403 crm_forbidden_deal - клиент ведётся другим менеджером (серверная видимость по
+      // ответственному, 09.09): показываем причину словами сервера, не безликую ошибку.
+      if (!r.ok) { el('cx-msgs').innerHTML = '<div class="cx-empty"><p>' + esc((r.data && r.data.crm_forbidden_deal && r.data.error) || 'Не удалось загрузить переписку.') + '</p></div>'; return; }
       S.thread = r.data; S.thread.key = key;
       renderHead(); renderThread(true); renderCtx();
       if (c && Number(c.unread_count)) markRead(key);

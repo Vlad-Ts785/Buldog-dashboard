@@ -30,9 +30,6 @@
      "генератор коммерческих предложений... текст является настоящим текстом". Работает
      целиком в браузере, без сервера - тот же принцип, что у Leaflet/Chart.js выше. -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<!-- SheetJS - экспорт вкладки "Зарплата" в Excel с живыми формулами
-     (plans/2026-08-24-salary-excel-export.md) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root {
   --bg:#0f0f13;--bg2:#17171d;--bg3:#1e1e26;--bg4:#252530;
@@ -1123,6 +1120,84 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 /* три плашки метрик */
 .mp-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;height:100%;}
 @media(max-width:640px){.mp-stats{grid-template-columns:1fr;height:auto;}}
+
+/* ── Личная страница главного механика (08.09, plans/2026-09-08-chief-mechanic-long-haul-page.md).
+   Те же токены/каноны, что у d5-card/d5-row эталона и .mp-status выше; префикс mech- чтобы не
+   задеть менеджерские .mp-*. Курсорный свет/физика: карточки с таблицами не поднимаются
+   (общее правило .card:has(table)), плашки .mech-stat - подъём как плитки. */
+.mech-formula{font-size:11px;color:var(--muted);margin-top:4px;font-variant-numeric:tabular-nums;}
+.mech-tier{display:grid;grid-template-columns:7fr 5fr;gap:16px;margin-bottom:16px;}
+.mech-tier--full{grid-template-columns:1fr;}
+.mech-tier2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;}
+@media(max-width:1000px){.mech-tier,.mech-tier2{grid-template-columns:1fr;}}
+.mech-head{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:22px;margin-bottom:12px;}
+.mech-label{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:8px;}
+.mech-label__dot{width:6px;height:6px;border-radius:50%;background:var(--red);}
+.mech-badge{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:500;font-variant-numeric:tabular-nums;line-height:1;padding:4px 7px;border-radius:6px;white-space:nowrap;}
+.mech-badge--bad{color:var(--tint-red);background:rgba(226,75,74,.13);}
+.mech-badge--neutral{color:var(--muted);background:var(--bg4);}
+.mech-foot{font-size:11px;color:var(--muted);line-height:1.5;margin-top:12px;}
+.mech-empty{font-size:12.5px;color:var(--muted);text-align:center;padding:18px 0;max-width:34ch;margin:0 auto;line-height:1.5;}
+.mech-grp{display:grid;grid-template-columns:96px repeat(4,1fr);gap:10px;align-items:stretch;margin-bottom:10px;}
+.mech-grp__name{font-size:12.5px;font-weight:600;color:var(--text);align-self:center;}
+.mech-grp__name small{display:block;font-size:11px;color:var(--muted);font-weight:400;font-family:'JetBrains Mono',monospace;}
+.mech-stat{background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:10px 12px;cursor:pointer;transition:border-color .12s ease-out,transform .12s ease-out;}
+.mech-stat:hover{border-color:var(--border-strong);transform:translateY(-1px);}
+.mech-stat.on{border-color:var(--border-strong);background:var(--bg4);}
+.mech-stat__cap{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);display:flex;align-items:center;gap:6px;}
+.mech-stat__cap::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--muted);}
+.mech-stat--work .mech-stat__cap::before{background:var(--green);}.mech-stat--rep .mech-stat__cap::before{background:var(--red);}
+.mech-stat--nd .mech-stat__cap::before{background:var(--amber);}.mech-stat--no .mech-stat__cap::before{background:var(--blue);}
+.mech-stat__num{font-family:'JetBrains Mono',monospace;font-size:25px;font-weight:500;line-height:1.1;margin-top:5px;font-variant-numeric:tabular-nums;}
+.mech-stat__num small{font-size:12px;color:var(--muted);font-weight:400;margin-left:4px;}
+.mech-rows{display:flex;flex-direction:column;}
+.mech-row{display:grid;grid-template-columns:max-content 1fr max-content max-content;align-items:baseline;column-gap:10px;min-height:27px;}
+.mech-row__label{color:var(--muted);white-space:nowrap;}
+.mech-row__leader{border-bottom:1px dotted rgba(var(--ink),.12);transform:translateY(-4px);}
+.mech-row__value{font-family:'JetBrains Mono',monospace;font-size:12.5px;font-weight:500;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;}
+.mech-row__aux{font-family:'JetBrains Mono',monospace;font-size:11.5px;font-variant-numeric:tabular-nums;color:var(--muted);text-align:right;min-width:6ch;white-space:nowrap;}
+.mech-row__aux--bad{color:var(--tint-red);}.mech-row__aux--warn{color:var(--tint-amber);}
+.mech-row--total{border-top:1px solid var(--border);margin-top:6px;padding-top:8px;}
+.mech-row--total .mech-row__label{color:var(--text);}.mech-row--total .mech-row__value{font-weight:600;}
+.mech-hero{display:flex;align-items:baseline;gap:7px;margin-bottom:10px;}
+.mech-hero__num{font-family:'JetBrains Mono',monospace;font-size:31px;font-weight:500;line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums;}
+.mech-hero__unit{font-family:'JetBrains Mono',monospace;font-size:15px;color:var(--muted);}
+.mech-pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap;}
+.mech-pill::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--muted);}
+.mech-pill--work::before{background:var(--green);}.mech-pill--rep::before{background:var(--red);}.mech-pill--mnt::before{background:var(--amber);}
+.mech-pill--nd::before{background:var(--amber);}.mech-pill--no::before{background:var(--blue);}
+.tbl .mono{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.mech-ellip{max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px;}
+.mech-overdue{margin-top:10px;border:1px solid rgba(226,75,74,.38);border-radius:10px;padding:8px 12px;display:flex;flex-direction:column;gap:6px;}
+.mech-overdue__row{display:flex;gap:10px;align-items:baseline;font-size:12.5px;cursor:pointer;flex-wrap:wrap;}
+.mech-tools{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;}
+.mech-select{background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 10px;font-size:12.5px;font-family:inherit;}
+.mech-cnt{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;margin-left:auto;}
+.mech-drawer__x{position:absolute;top:14px;right:14px;background:none;border:1px solid var(--border);color:var(--muted);width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:16px;}
+.mech-drawer__gos{font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:600;letter-spacing:.02em;}
+.mech-drawer__sub{font-size:12.5px;color:var(--muted);margin-top:2px;}
+.mech-drawer__sec{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:16px 0 8px;}
+.mech-btn{display:block;width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:9px;padding:10px 14px;font-size:13px;font-family:inherit;cursor:pointer;text-align:left;margin-bottom:8px;transition:border-color .15s ease,transform .1s ease;}
+.mech-btn:hover{border-color:var(--border-strong);}.mech-btn:active{transform:scale(.985);}
+.mech-btn--rep{border-color:rgba(226,75,74,.35);}.mech-btn--rep:hover{border-color:var(--red);}
+.mech-btn--mnt{border-color:rgba(239,159,39,.35);}.mech-btn--mnt:hover{border-color:var(--amber);}
+.mech-btn--primary{border-color:var(--green);background:rgba(29,158,117,.14);font-weight:600;text-align:center;}
+.mech-btn--blocked{border-color:var(--border);background:var(--bg3);color:var(--muted);font-weight:500;}
+.mech-btn--ghost{color:var(--muted);}
+.mech-btn small{display:block;font-size:11px;color:var(--muted);margin-top:2px;font-weight:400;}
+.mech-field{display:block;margin-bottom:10px;}
+.mech-field span{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px;}
+.mech-field em{font-style:normal;color:var(--tint-amber);text-transform:none;letter-spacing:0;margin-left:6px;}
+.mech-input{width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:9px 10px;font-size:13px;font-family:inherit;resize:vertical;}
+.mech-input:focus{outline:none;border-color:var(--blue);}
+/* 08.09 - окно конфликтов "рейс попадает под ремонт" (Влад: "должно вылететь окно
+   уведомить логиста"), тот же amber-предупреждающий стиль, что баннеры дефицита данных
+   по проекту (rgba амбер 7-8%, тонкая рамка). */
+.mech-conflict-note{font-size:12.5px;color:var(--text);line-height:1.5;background:rgba(239,159,39,.08);border:1px solid rgba(239,159,39,.25);border-radius:8px;padding:10px 12px;margin-bottom:10px;}
+.mech-conflict-list{display:flex;flex-direction:column;gap:6px;margin-bottom:12px;max-height:220px;overflow-y:auto;}
+.mech-conflict-row{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:12px;}
+.mech-conflict-row__top{display:flex;justify-content:space-between;gap:10px;margin-bottom:3px;}
+.mech-conflict-row__route{color:var(--text);}
 .mp-stat{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);
   padding:15px 16px 14px;display:flex;flex-direction:column;height:100%;cursor:pointer;
   transition:border-color .12s ease-out,background-color .12s ease-out,transform .12s ease-out;will-change:transform;}
@@ -1407,10 +1482,17 @@ main:has(> #page-crm.active){max-width:none;}
 .cx-ibtn:disabled{opacity:.45;cursor:default;background:transparent;border-color:transparent;}
 .cx-ibtn svg{width:15px;height:15px;}
 
-/* ── Сводка: плитки .kpi главной, 5 в ряд, сетка = носитель курсорного света ─────── */
-.crm-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:14px;perspective:1400px;position:relative;}
+/* ── Сводка: плитки .kpi главной ─────────────────────────────────────────────────
+   Влад 09.09: "сделать колонки одинаковой ширины, чтобы ширина верхнего блока была равна
+   ширине колонки с заявками" - раньше это была ГИБКАЯ сетка (grid, 1fr на плитку,
+   переключалась на 3/2 плитки в ряд по media query) - при узком экране 2 плитки по 1fr
+   становились ЗАМЕТНО ШИРЕ одной канбан-колонки (та жёстко 248px, сеткой не считается).
+   Теперь плитка = ТА ЖЕ ширина, что у .kb-col (248px), никакой гибкости - при нехватке
+   места ряд плиток скроллится горизонтально сам, той же логикой, что и сама доска
+   (overflow-x:auto), а не пересчитывает ширину каждой плитки под экран. */
+.crm-kpis{display:flex;gap:10px;margin-bottom:14px;perspective:1400px;position:relative;overflow-x:auto;}
 .crm-kpis > *:not(.p2-light){position:relative;z-index:1;}
-.crm-kpis .kpi{cursor:pointer;transition:background-color .12s ease-out,border-color .12s ease-out,transform .12s ease-out;}
+.crm-kpis .kpi{cursor:pointer;flex:0 0 248px;transition:background-color .12s ease-out,border-color .12s ease-out,transform .12s ease-out;}
 .crm-kpis .kpi:hover{background:var(--bg-hover);border-color:var(--border-strong);transform:translateY(-1px) translateZ(22px);}
 .crm-kpis .kpi[aria-pressed="true"]{border-color:var(--border-strong);background:var(--bg3);}
 .crm-kpis .kpi.is-attention{border-color:color-mix(in srgb,var(--red) 45%,var(--border));}
@@ -1418,8 +1500,38 @@ main:has(> #page-crm.active){max-width:none;}
 .crm-kpi-val.is-good{color:var(--green);}   /* терминальное "выиграно" - единственное разрешённое исключение */
 .crm-kpis .kpi-label{display:flex;align-items:center;gap:6px;}
 .crm-kpi-dot{width:6px;height:6px;border-radius:50%;background:var(--red);flex:none;}
-@media (max-width:1100px){.crm-kpis{grid-template-columns:repeat(3,1fr);}}
-@media (max-width:720px){.crm-kpis{grid-template-columns:1fr 1fr;}}
+/* Полка терминальных стадий - живёт ТОЛЬКО во время перетаскивания (канон amoCRM/Pipedrive,
+   вернули 09.09 по прямой просьбе Влада: "тянешь за плитку, внизу вылезают приёмники, так
+   было изначально"). Пробовали убрать 08.09 (полка была ЕДИНСТВЕННЫМ способом закрыть
+   сделку, без обычных видимых колонок - тогда её не находили), потом пробовали заменить
+   постоянными плитками рядом с KPI (тоже не то) - теперь и то, и другое сразу: won/lost -
+   обычные видимые/сворачиваемые колонки КАК ЕСТЬ, а полка - просто более быстрый способ
+   бросить карточку в won/lost, не долистывая канбан до нужной колонки. */
+.kb-shelf{position:fixed;left:50%;bottom:22px;transform:translate(-50%,120%);display:flex;gap:10px;z-index:900;
+  transition:transform .32s var(--ease-drawer);pointer-events:none;}
+.kb-shelf.is-on{transform:translate(-50%,0);pointer-events:auto;}
+.kb-shelf-zone{width:220px;height:64px;box-sizing:border-box;border-radius:12px;display:flex;align-items:center;justify-content:center;gap:9px;
+  background:var(--bg3);border:1px solid var(--border-strong);color:var(--muted);font:500 12.5px/1 var(--font-body);
+  box-shadow:0 2px 6px rgba(0,0,0,.4),0 16px 32px rgba(0,0,0,.5);   /* объект физически над доской */
+  transition:border-color .15s ease-out,background-color .15s ease-out,color .15s ease-out,transform .15s var(--ease-out-soft);}
+.kb-shelf-zone svg{width:15px;height:15px;}
+.kb-shelf-zone.kb-drop{color:var(--text);transform:scale(1.03);}
+.kb-shelf-zone--won.kb-drop{border-color:color-mix(in srgb,var(--green) 55%,transparent);background:color-mix(in srgb,var(--green) 8%,var(--bg3));}
+.kb-shelf-zone--lost.kb-drop{border-color:var(--border-strong);background:var(--bg4);}
+/* Топ менеджеров по сумме закрытых сделок (Влад, 08.09) - та же bullet-грамматика, что у
+   "Топ менеджеров" на главной (renderMgrList), без личной засечки плана - в CRM нет
+   персонального плана по сделкам. Пусто, если ни один менеджер ещё не закрыл сделку в этом
+   месяце (Влад: "места мало" - список короткий, только реально закрывшие, не все с нулями). */
+.crm-leaders{display:none;}
+.crm-leaders.has-data{display:block;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;}
+.crmldr-head{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:500;margin-bottom:10px;}
+.crmldr-row{display:grid;grid-template-columns:120px 1fr 72px;align-items:center;gap:10px;min-height:24px;}
+.crmldr-name{font-size:12.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.crmldr-track{position:relative;height:14px;}
+.crmldr-barwrap{position:absolute;left:0;top:4px;height:6px;width:100%;background:var(--bg4);border-radius:3px;overflow:hidden;}
+.crmldr-bar{height:100%;border-radius:3px;background:var(--green);transition:width .5s ease;}
+.crmldr-val{font-family:'JetBrains Mono',monospace;font-size:12px;text-align:right;font-variant-numeric:tabular-nums;color:var(--text);}
+@media (prefers-reduced-motion:reduce){.crmldr-bar{transition:none;}}
 
 /* ── Канбан (канон mx-, числа буквально) ────────────────────────────────────────── */
 .kb-panel{position:relative;perspective:1400px;}
@@ -1433,7 +1545,31 @@ main:has(> #page-crm.active){max-width:none;}
 .kb-count{font:500 10.5px/1 var(--font-mono);color:var(--text);background:var(--bg4);padding:3px 6px;border-radius:99px;flex:0 0 auto;font-variant-numeric:tabular-nums;}
 .kb-count.pulse{animation:kbPulse .32s ease;}
 @keyframes kbPulse{0%{transform:scale(1);}45%{transform:scale(1.35);color:var(--green);}100%{transform:scale(1);}}
-.kb-col-sum{margin-left:auto;flex:0 0 auto;font:500 11px/1 var(--font-mono);color:var(--muted);font-variant-numeric:tabular-nums;}
+
+/* Сворачивание колонки (Влад, 08.09: "кнопка скрыть/показать Отказ") - канон Kanban
+   Tool/Jira: узкая полоска вместо полной колонки, состояние в localStorage. */
+.kb-col-toggle{appearance:none;background:transparent;border:0;color:var(--muted);cursor:pointer;padding:2px;margin-left:auto;flex:0 0 auto;
+  display:inline-flex;align-items:center;justify-content:center;border-radius:5px;transition:background-color .12s ease-out,color .12s ease-out;}
+.kb-col-toggle:hover{color:var(--text);background:var(--bg3);}
+.kb-col-toggle svg{width:13px;height:13px;transition:transform .15s var(--ease-out-soft);}
+.kb-col.is-collapsed{flex:0 0 40px;width:40px;cursor:pointer;}
+.kb-col.is-collapsed .kb-col-head{flex-direction:column;height:100%;padding:12px 0 10px;gap:10px;border-bottom:0;}
+.kb-col.is-collapsed .kb-col-toggle{margin-left:0;}
+.kb-col.is-collapsed .kb-col-toggle svg{transform:rotate(180deg);}
+/* Крупная сумма колонки (Влад, 08.09: "как в Битриксе, и чтобы была интерактивной") -
+   собственная строка под шапкой, не мелкая цифра в хедере. Клик - реальное действие
+   (переключает сортировку карточек колонки по сумме), не декорация - поэтому оформлена
+   как кнопка (.chip-подобный hover), не как статичный текст. Hero-цифра ВСЕГДА --text,
+   даже при активной сортировке (раздел 1 ГОСТа - паника только у красного). */
+.kb-col-herowrap{padding:2px 12px 10px;}
+.kb-col-hero{appearance:none;width:100%;text-align:left;background:transparent;border:1px solid transparent;border-radius:8px;
+  padding:4px 6px;cursor:pointer;display:flex;flex-direction:column;gap:1px;
+  transition:background-color .12s ease-out,border-color .12s ease-out;}
+.kb-col-hero:hover{background:var(--bg3);border-color:var(--border);}
+.kb-col-hero.is-sorted{background:var(--bg3);border-color:var(--border-strong);}
+.kb-col-hero-val{font:600 22px/1.15 var(--font-mono);color:var(--text);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.kb-col-hero-sub{font:400 10.5px/1 var(--font-body);color:var(--muted);}
+.kb-col-hero.is-sorted .kb-col-hero-sub{color:var(--text);}
 .kb-list{display:flex;flex-direction:column;gap:8px;padding:10px;overflow-y:auto;flex:1;border-radius:0 0 12px 12px;min-height:90px;
   transition:background-color .6s ease,box-shadow .15s ease-out;scrollbar-width:thin;scrollbar-color:var(--bg4) transparent;}
 .kb-col.kb-drop{border-color:color-mix(in srgb,var(--blue) 45%,transparent);}
@@ -1476,19 +1612,22 @@ main:has(> #page-crm.active){max-width:none;}
   transition:background-color .12s ease-out,border-color .12s ease-out,box-shadow .12s ease-out,opacity .14s cubic-bezier(.25,1,.5,1);}
 .kb-ph{border:1.5px dashed var(--border-strong);border-radius:10px;background:transparent;}
 
-/* Полка терминальных стадий - видна только во время перетаскивания (amoCRM/Pipedrive):
-   доска не расползается вширь колонками "успешно"/"отказ". */
-.kb-shelf{position:fixed;left:50%;bottom:22px;transform:translate(-50%,120%);display:flex;gap:10px;z-index:900;
-  transition:transform .32s var(--ease-drawer);pointer-events:none;}
-.kb-shelf.is-on{transform:translate(-50%,0);pointer-events:auto;}
-.kb-shelf-zone{width:220px;height:64px;box-sizing:border-box;border-radius:12px;display:flex;align-items:center;justify-content:center;gap:9px;
-  background:var(--bg3);border:1px solid var(--border-strong);color:var(--muted);font:500 12.5px/1 var(--font-body);
-  box-shadow:0 2px 6px rgba(0,0,0,.4),0 16px 32px rgba(0,0,0,.5);   /* объект физически над доской */
-  transition:border-color .15s ease-out,background-color .15s ease-out,color .15s ease-out,transform .15s var(--ease-out-soft);}
-.kb-shelf-zone svg{width:15px;height:15px;}
-.kb-shelf-zone.kb-drop{color:var(--text);transform:scale(1.03);}
-.kb-shelf-zone--won.kb-drop{border-color:color-mix(in srgb,var(--green) 55%,transparent);background:color-mix(in srgb,var(--green) 8%,var(--bg3));}
-.kb-shelf-zone--lost.kb-drop{border-color:var(--border-strong);background:var(--bg4);}
+/* Подсказка над доской - короткая, про причину отказа (см. .kb-hint выше в разметке). */
+.kb-hint{font-size:11px;line-height:1.4;color:var(--muted);margin:-4px 0 12px;max-width:74ch;}
+
+/* Терминальные карточки - "Успешна"/"Отказ" теперь ОБЫЧНЫЕ видимые колонки, как в
+   эталонном превью examples/design-reference-kanban.html (mx-won-style/mx-won-check),
+   не полка (Влад, 08.09: "хочу видеть колонку выиграна, как у нас в превью" - полка,
+   добавленная 04.09 по чужому опыту amoCRM/Pipedrive без согласования, не прижилась). */
+.kb-card.kb-won-style{background:color-mix(in srgb,var(--green) 7%,var(--bg3));border-color:color-mix(in srgb,var(--green) 30%,var(--border));}
+.kb-card.kb-won-style .kb-sum{color:var(--green);}
+.kb-won-check{width:16px;height:16px;border-radius:50%;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;color:var(--bg);background:var(--green);}
+.kb-won-check svg{width:11px;height:11px;}
+.kb-card.kb-lost-style{opacity:.72;}
+.kb-card.kb-lost-style .kb-sum{color:var(--muted);}
+.kb-lost-mark{width:16px;height:16px;border-radius:50%;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;color:var(--muted);background:var(--bg4);}
+.kb-lost-mark svg{width:11px;height:11px;}
+.kb-card-loss{font:400 11px/1.35 var(--font-body);color:var(--red);}
 
 /* Салют победы - полноэкранный canvas поверх всего (как у банковской сцены) */
 .crm-celebrate{position:fixed;inset:0;pointer-events:none;z-index:2500;}
@@ -1547,8 +1686,28 @@ main:has(> #page-crm.active){max-width:none;}
 .dr-tl-ico.is-good{color:var(--green);}
 .dr-tl-text{color:var(--text);line-height:1.4;overflow-wrap:anywhere;}
 .dr-tl-text.muted{color:var(--muted);}
-.dr-tl-meta{font:400 10.5px/1 var(--font-mono);color:var(--muted);margin-top:3px;font-variant-numeric:tabular-nums;display:flex;gap:8px;}
+.dr-tl-meta{font:400 10.5px/1 var(--font-mono);color:var(--muted);margin-top:3px;font-variant-numeric:tabular-nums;display:flex;gap:8px;align-items:center;}
 .dr-empty{font:400 12px/1.5 var(--font-body);color:var(--muted);}
+/* Прослушать запись звонка - пилюля "Прослушать" (crm-chip уменьшенный) до клика,
+   полноценный плеер с перемоткой после (crm-player.is-full) - вписаны в мета-строку
+   таймлайна/пилюлю звонка чата. Влад 08.09, plans/2026-09-08-call-recordings.md,
+   plans/2026-09-08-smart-call-player-transcript-autofill.md (перемотка - по просьбе Влада,
+   "должно быть окно промотки", как у плеера Mango). */
+.crm-play-btn{appearance:none;display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 7px 0 6px;border-radius:9px;
+  border:1px solid var(--border);background:var(--bg3);color:var(--muted);font:500 10px/1 var(--font-mono);cursor:pointer;flex:none;transition:color .12s,border-color .12s;}
+.crm-play-btn svg{width:10px;height:10px;}
+.crm-play-btn:hover{color:var(--text);border-color:var(--border-strong);}
+.crm-play-btn.is-loading{opacity:.55;pointer-events:none;}
+.cx-call .crm-player{margin-left:2px;}
+.crm-player.is-full{display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 8px 0 3px;border-radius:10px;
+  border:1px solid var(--blue);background:var(--bg3);flex:none;}
+.crm-player-btn{appearance:none;display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;flex:none;
+  border:0;background:transparent;color:var(--blue);cursor:pointer;padding:0;}
+.crm-player-btn svg{width:11px;height:11px;}
+.crm-player-track{position:relative;width:56px;height:4px;border-radius:2px;background:var(--border-strong);cursor:pointer;flex:none;touch-action:none;}
+.crm-player-track::before{content:'';position:absolute;inset:-6px 0;} /* увеличенная зона клика/протяжки, полоска тонкая */
+.crm-player-fill{position:absolute;left:0;top:0;height:100%;border-radius:2px;background:var(--blue);pointer-events:none;}
+.crm-player-time{font:500 9.5px/1 var(--font-mono);color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums;}
 
 /* ── Контекстное меню (своё, канон ГОСТа) + всплывающий список ───────────────────── */
 .crm-menu{position:fixed;z-index:1800;display:none;flex-direction:column;min-width:190px;background:var(--bg3);border:1px solid var(--border-strong);
@@ -1569,6 +1728,14 @@ main:has(> #page-crm.active){max-width:none;}
 .cx-pop-title{font:500 12.5px/1.2 var(--font-body);color:var(--text);display:flex;align-items:center;gap:8px;}
 .cx-pop-preview{font:400 11px/1.3 var(--font-body);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .cx-pop-sep{height:1px;background:var(--border);margin:4px 6px;}
+/* Шаблоны ответов - свои у каждого менеджера (сервер, не localStorage) - Влад 08.09.
+   Кастомный шаблон получает крестик-удаление, общие 4 заготовки (DEFAULT_TEMPLATES) - нет. */
+.cx-pop-item.cx-tpl-row{display:flex;align-items:center;gap:6px;padding-right:6px;}
+.cx-pop-item.cx-tpl-row .cx-pop-item-main{display:grid;row-gap:2px;flex:1;min-width:0;}
+.cx-tpl-del{appearance:none;flex:none;width:20px;height:20px;border-radius:6px;border:0;background:transparent;color:var(--muted);
+  display:inline-flex;align-items:center;justify-content:center;cursor:pointer;opacity:.55;transition:opacity .12s,color .12s,background-color .12s;}
+.cx-tpl-del svg{width:10px;height:10px;}
+.cx-tpl-del:hover{opacity:1;color:var(--red);background:var(--bg4);}
 
 /* ── Чаты: три панели ────────────────────────────────────────────────────────────── */
 .cx{display:grid;grid-template-columns:var(--cx-list-w) minmax(0,1fr) var(--cx-ctx-w);gap:var(--cx-gap);height:calc(100vh - var(--cx-chrome));min-height:480px;}
@@ -1706,7 +1873,19 @@ main:has(> #page-crm.active){max-width:none;}
 
 /* Композер */
 .cx-composer{position:relative;flex:none;padding:10px 16px 10px;border-top:1px solid var(--border);}
-.cx-composer-row{display:grid;grid-template-columns:30px minmax(0,1fr) 36px;gap:8px;align-items:end;}
+/* Шаблоны ответов - видимая подписанная кнопка НАД полем ввода, не скрытая команда "/"
+   (Влад 09.09: "слишком по-программерски, добавь по-человечески, как в других CRM
+   системах" - раньше единственной иконкой-кнопкой без подписи внутри строки ввода и
+   подсказкой "/ - шаблоны" в хинте под ней; "/" по-прежнему работает как скрытый быстрый
+   путь для тех, кто его уже знает, просто больше не единственный способ узнать о шаблонах).
+   crm-chip - тот же компонент, что используют остальные текстовые кнопки-пилюли в CRM. */
+.cx-composer-toolbar{margin-bottom:8px;}
+.cx-tpl-chip{appearance:none;display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:13px;
+  border:1px solid var(--border);background:var(--bg3);color:var(--muted);font:500 12px/1 var(--font-body);cursor:pointer;
+  transition:background-color .12s ease-out,border-color .12s ease-out,color .12s ease-out;}
+.cx-tpl-chip svg{width:13px;height:13px;}
+.cx-tpl-chip:hover{background:var(--bg-hover);border-color:var(--border-strong);color:var(--text);}
+.cx-composer-row{display:grid;grid-template-columns:minmax(0,1fr) 36px;gap:8px;align-items:end;}
 .cx-input{display:block;width:100%;box-sizing:border-box;resize:none;min-height:36px;max-height:110px;padding:8px 12px;border-radius:8px;background:var(--bg3);border:1px solid var(--border);color:var(--text);
   font:400 13px/1.45 var(--font-body);scrollbar-width:thin;transition:border-color .15s var(--ease-out-soft),background-color .15s var(--ease-out-soft);}
 .cx-input::placeholder{color:var(--muted);}
@@ -1720,7 +1899,7 @@ main:has(> #page-crm.active){max-width:none;}
 .cx-send.is-ready:hover{background:var(--bg4);}
 .cx-send:active{transform:scale(.94);}
 .cx-send:disabled{opacity:.45;cursor:default;}
-.cx-composer-hint{margin:6px 0 0 38px;font:400 10.5px/1 var(--font-body);color:var(--muted);}
+.cx-composer-hint{margin:6px 0 0;font:400 10.5px/1 var(--font-body);color:var(--muted);}
 .cx-composer-hint kbd{font-family:var(--font-mono);font-size:10px;color:var(--text);}
 .cx-composer .cx-pop{left:16px;bottom:calc(100% + 6px);}
 
@@ -1874,6 +2053,17 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
    чинили по вертикали). min-width:0 только пока активна вкладка - других страниц
    не касается. */
 .main-wrap:has(main > #page-logistics-plan.active){min-width:0;}
+/* ТОТ ЖЕ класс бага (найден 09.09 на CRM, "реши задачу с размером колонок верхнего блока
+   раз и навсегда") - kb-board (канбан, 7 колонок * 248px = 1800px) шире доступной ширины
+   main почти на любом экране, и точно так же "утекал" вверх по цепочке main -> .main-wrap
+   -> body: вместо внутреннего скролла ТОЛЬКО .kb-board (overflow-x:auto у него уже стоит)
+   скроллилась вся страница целиком, включая сайдбар - слева пропадало меню. Живой замер
+   09.09 (1536px, реальный ноутбучный экран): document.documentElement.scrollWidth=2076 >
+   innerWidth=1536, т.е. hasPageHorizScroll=true - подтверждено, не гипотеза. CRM, в
+   отличие от Планировки, НЕ full-bleed страница (обычные padding/max-width у main ей не
+   мешают, KPI/чаты остаются в читаемой колонке) - снимаем только min-width, не весь набор
+   правил, что у Планировки. */
+main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:0;}
 #page-logistics-plan *{box-sizing:border-box;}#page-logistics-plan.active{
   /* заменяет исходное body{...} прототипа - теперь это .page внутри дашборда, не
      отдельный документ. НЕДОСТАТОЧНО просто "flex:1;min-height:0" и кооперации с
@@ -3988,6 +4178,20 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
         <div style="font-size:11px;color:var(--muted);margin-top:4px">PDF/JPG/PNG/WEBP, до 15 МБ</div>
         <div id="asset-doc-error" style="display:none;color:var(--red);font-size:12px;margin-top:6px"></div>
       </div>
+      <!-- История машины (Влад, 09.09: "обязательно история должна по машине, что такого-то
+           числа было переоформление с такой компании на другую"). Смена собственника в форме
+           выше пишется сюда сервером сама; вручную - любое событие датой + текстом. -->
+      <div id="asset-events-section" style="display:none">
+        <div class="asset-form-section" style="margin-bottom:10px">История</div>
+        <div id="asset-events-list" style="margin-bottom:8px"></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input autocomplete="off" id="asset-event-date" type="date" style="background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:12px;outline:none">
+          <input autocomplete="off" id="asset-event-note" type="text" maxlength="300" placeholder="что произошло: переоформлено с … на …, продано, ДТП…" style="flex:1;min-width:0;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:12px;outline:none">
+          <button type="button" onclick="assetEventAdd_()"
+            style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:7px 12px;font-size:12px;cursor:pointer;white-space:nowrap">Добавить</button>
+        </div>
+        <div id="asset-event-error" style="display:none;color:var(--red);font-size:12px;margin-top:6px"></div>
+      </div>
       <div id="asset-error" style="display:none;color:var(--red);font-size:12px;margin-bottom:10px"></div>
       <div style="display:flex;gap:10px;margin-top:6px">
         <button type="button" onclick="assetSave_()" data-nav-sound
@@ -4265,9 +4469,12 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
     <!-- Детализация машиниста (2026-09-04, Влад: "нужен полный расклад как в отчёте по
          клику на машиниста") - клик по строке в таблице "По машинистам" открывает этот
          попап (openMachinistDetail_), тот же .crm-modal-overlay/.crm-modal, что и выбор
-         раздела выше, но шире - внутри таблица рейсов до 9 колонок. -->
+         раздела выше, но шире - внутри таблица рейсов до 10 колонок (07.09 - добавилась
+         "Оборудование"). Ширина 1280px (04.09) при 10 колонках уже не хватало - таблица
+         резалась горизонтальной прокруткой (Влад: "прокрутка неудобна, сделай ширину
+         на необходимую под текущее количество колонок"), поднята до 1520px. -->
     <div id="machinist-detail-overlay" class="crm-modal-overlay" style="display:none" onmousedown="if(event.target===this)closeMachinistDetail_()">
-      <div class="crm-modal" style="max-width:min(1280px,96vw)" id="machinist-detail-content"></div>
+      <div class="crm-modal" style="max-width:min(1520px,98vw)" id="machinist-detail-content"></div>
     </div>
 
     <!-- ═══ ДЗ (ДЕБИТОРСКАЯ ЗАДОЛЖЕННОСТЬ) ═════════════════════ -->
@@ -4392,6 +4599,8 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
         </div>
         <div id="crm-view-board">
           <div class="crm-kpis" id="crm-kpis"></div>
+          <div class="crm-leaders" id="crm-leaders"></div>
+          <div class="kb-hint">Перетащите карточку в самый низ экрана - снизу появятся зоны «Сделка успешна» и «Отказ» (либо доведите карточку до нужной колонки). «Отказ» требует причину - без неё сделка останется на месте.</div>
           <div class="kb-panel"><div class="kb-board" id="kb-board"></div></div>
         </div>
         <div id="crm-view-chats" style="display:none">
@@ -4414,12 +4623,14 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
               <div class="cx-scroll" id="cx-msgs-scroll" style="display:none" onscroll="CRM.onThreadScroll()"><div class="cx-msgs" id="cx-msgs"></div></div>
               <div class="cx-composer" id="cx-composer" style="display:none">
                 <div class="cx-pop" id="cx-tpl-pop"></div>
+                <div class="cx-composer-toolbar">
+                  <button type="button" class="cx-tpl-chip" id="cx-tpl-btn" onclick="CRM.toggleTemplates()"><span data-ico="template"></span>Шаблоны ответов</button>
+                </div>
                 <div class="cx-composer-row">
-                  <button class="cx-ibtn" id="cx-tpl-btn" title="Шаблоны ответов" onclick="CRM.toggleTemplates()"><span data-ico="template"></span></button>
                   <textarea class="cx-input" id="cx-input" rows="1" autocomplete="off" placeholder="Написать клиенту…" oninput="CRM.onInput()" onkeydown="CRM.onInputKey(event)"></textarea>
                   <button class="cx-send" id="cx-send" onclick="CRM.send()" title="Отправить"><span data-ico="send"></span></button>
                 </div>
-                <div class="cx-composer-hint"><kbd>Enter</kbd> - отправить · <kbd>Shift+Enter</kbd> - перенос строки · <kbd>/</kbd> - шаблоны</div>
+                <div class="cx-composer-hint"><kbd>Enter</kbd> - отправить · <kbd>Shift+Enter</kbd> - перенос строки</div>
               </div>
             </section>
             <aside class="cx-panel cx-panel--ctx"><div class="cx-scroll"><div class="cx-ctx" id="cx-ctx"><div class="cx-empty"><p>Здесь появятся клиент, заявка и сделка выбранного диалога.</p></div></div></div></aside>
@@ -6057,6 +6268,12 @@ window.Clc = {
   <div id="mp-lost-body"><div style="font-size:13px;color:var(--muted)">Загрузка…</div></div>
 </div>
 
+<!-- Шторка машины на личной странице главного механика (08.09,
+     plans/2026-09-08-chief-mechanic-long-haul-page.md): карточка + действия Ремонт/ТО/продлить/
+     снять. Тот же .mp-drawer/.mp-drawer-bk, что у остальных шторок личной страницы. -->
+<div class="mp-drawer-bk" id="mech-drawer-bk" onclick="mechCloseDrawer_()"></div>
+<div class="mp-drawer" id="mech-drawer"></div>
+
 <!-- ═══ КАРТОЧКА МАШИНЫ ════════════════════════════════════ -->
 <div class="vcard-overlay" id="vcard-overlay" onclick="closeVehicleCard()"></div>
 <div class="vcard-panel" id="vcard-panel">
@@ -6386,11 +6603,23 @@ function applyData(patch, opts) {
 // Планировки уже читает из D.vehicles (см. plans/2026-08-30-avtokolonna-head-personal-
 // page.md - тот же формат использовался для роли logist).
 async function loadMechanicData_() {
-  var r = await fetchFromYardApi_('/fleet_summary', {});
+  // 08.09 (plans/2026-09-08-chief-mechanic-long-haul-page.md): один запрос /mechanic/fleet
+  // вместо /fleet_summary - тот же парк с тем же живым статусом (сервер собирает его той же
+  // buildFleetSummary_) ПЛЮС отрезки Ремонт/ТО и затраты по машине для личной страницы.
+  // D.vehicles остаётся в прежней форме - Планировка (buildVehicles) читает его как раньше.
+  // Эта функция вызывается ТОЛЬКО при реальном входе механика (localStorage.user_role ===
+  // 'mechanic' в loadData() ниже) - D.role==='admin' тут никогда не бывает, значит person=
+  // всегда null и сервер сам резолвит ограничение по сессии (access_users). Условие оставлено
+  // симметрично mechLoad_ (единственный путь, который реально обслуживает admin-предпросмотр
+  // "Смотреть как" - там до 08.09 person не передавался вообще, из-за чего Влад живьём видел
+  // тралы+борта у Самошкина даже после первого фикса - см. коммент у mechLoad_).
+  var mechPreviewName_ = (D && D.role === 'admin' && viewAsEntry) ? viewAsEntry.name : null;
+  var r = await fetchFromYardApi_('/mechanic/fleet', mechPreviewName_ ? { person: mechPreviewName_ } : {});
   if (!r.ok || !r.data || r.data.error) {
     throw new Error((r.data && r.data.error) || 'Не удалось загрузить состав парка');
   }
-  var vehicles = Object.values(r.data.vehicles || {}).map(function(v) {
+  mechFleet_ = r.data;
+  var vehicles = (r.data.vehicles || []).map(function(v) {
     return {
       gos: v.gos || '', marka: v.marka || '', type: v.type || '',
       trailer: v.trailerGos || '', driver: v.driver || '', status: v.status || '',
@@ -6988,11 +7217,24 @@ function aiTasksTodayKey_(managerName) {
   var d = new Date();
   return managerName + '::' + d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 }
+// 07.09, план plans/2026-09-07-ai-tasks-server-port.md (Влад: "вся движуха через скрипт
+// идёт, нужно сделать через сервер") - Фаза 1, ТОЛЬКО роль manager: сервер первым, тихий
+// фолбэк на Apps Script (тот же принцип, что везде на дашборде). Logist/commercial_head/
+// ryschanow пока ВСЕГДА идут в Apps Script (Фаза 2, ещё не перенесены) - возвращает null
+// сразу, без похода на сервер, чтобы не тратить лишний запрос впустую.
+function fetchAiTasksFromServer_(managerName, role, force) {
+  if (role !== 'manager') return Promise.resolve(null);
+  return fetchFromYardApi_('/ai_tasks', { person: managerName, force: force ? '1' : undefined }).then(function(r) {
+    return (r.ok && r.data && !r.data.error) ? r.data : null;
+  }).catch(function() { return null; });
+}
 function loadAiTasksIfNeeded_(managerName, role) {
   var key = aiTasksTodayKey_(managerName);
   if (aiTasksCache[key] || aiTasksLoadingKey === key) return;
   aiTasksLoadingKey = key;
-  apiFetchJson({ action: 'generate_ai_tasks', manager: managerName, role: role || 'manager' }).then(function(data) {
+  fetchAiTasksFromServer_(managerName, role, false).then(function(fromServer) {
+    return fromServer || apiFetchJson({ action: 'generate_ai_tasks', manager: managerName, role: role || 'manager' });
+  }).then(function(data) {
     aiTasksLoadingKey = null;
     aiTasksCache[key] = data && data.error ? { error: data.error } : data;
     renderMyPage();
@@ -7014,7 +7256,9 @@ function retryAiTasks_(managerName, role) {
   delete aiTasksCache[key];
   aiTasksLoadingKey = key;
   renderMyPage();
-  apiFetchJson({ action: 'generate_ai_tasks', manager: managerName, role: role || 'manager', force: '1' }).then(function(data) {
+  fetchAiTasksFromServer_(managerName, role, true).then(function(fromServer) {
+    return fromServer || apiFetchJson({ action: 'generate_ai_tasks', manager: managerName, role: role || 'manager', force: '1' });
+  }).then(function(data) {
     aiTasksLoadingKey = null;
     aiTasksCache[key] = data && data.error ? { error: data.error } : data;
     renderMyPage();
@@ -7746,7 +7990,17 @@ function renderAiTasksBlockHtml_(personName, role) {
   if (!aiEntry) {
     aiBody = '<div style="font-size:13px;color:var(--muted);padding:8px 0">Генерируется… обычно 5-15 сек.</div>';
   } else if (aiEntry.error) {
-    aiBody = '<div style="font-size:13px;color:'+PAGE_COL.red+';padding:8px 0">Не удалось сгенерировать: '+aiEntry.error+'</div>'+
+    // 07.09, Влад заметил на скриншотах, что kie.ai (сторонний поставщик ИИ) отдаёт HTTP 500
+    // подряд часами (не единичный сбой, как считалось раньше - см. память
+    // feedback_debug_thoroughly_and_generalize) - "Server exception, please try again later".
+    // Раньше сюда шёл СЫРОЙ текст ошибки (kie.ai HTTP 500: {"error":{...}}) - пугающий JSON
+    // прямо на странице у менеджера, который вообще ни при чём. Показываем спокойное сообщение
+    // для похожих на сбой поставщика ошибок, сырой текст - в title по наведению (для отладки).
+    var aiErrIsProviderDown = /kie\.ai HTTP 5\d\d/.test(aiEntry.error || '');
+    var aiErrShown = aiErrIsProviderDown
+      ? 'ИИ-подсказки временно недоступны - сбой у поставщика ИИ, не у дашборда. Остальные данные считаются как обычно.'
+      : ('Не удалось сгенерировать: ' + aiEntry.error);
+    aiBody = '<div style="font-size:13px;color:'+(aiErrIsProviderDown ? PAGE_COL.amber : PAGE_COL.red)+';padding:8px 0" title="'+aiEntry.error.replace(/"/g,'&quot;')+'">'+aiErrShown+'</div>'+
       '<button onclick="retryAiTasks_(\''+personName.replace(/'/g,"\\'")+'\',\''+roleEsc+'\')" style="margin-top:6px;cursor:pointer;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:12px;color:var(--text)">Повторить</button>';
   } else {
     // Бейдж категории (2026-08-12) - помогает быстро понять баланс задач на день, не только
@@ -9658,6 +9912,513 @@ function isMechanicView_() {
   return !!(D.role === 'mechanic' || (D.role === 'admin' && viewAsEntry && viewAsEntry.type === 'mechanic'));
 }
 
+// ── ЛИЧНАЯ СТРАНИЦА ГЛАВНОГО МЕХАНИКА (08.09, plans/2026-09-08-chief-mechanic-long-haul-page.md) ──
+// Влад: «интерфейс главного механика, где и тралы, и длинномеры... начинать с полной версии,
+// а уже потом решить, кто какие блоки видит». Превью = контракт (артефакт в плане). Данные -
+// ОДИН запрос GET /api/mechanic/fleet (парк с живым статусом из того же buildFleetSummary_,
+// что Статус парка/Планировка; отрезки Ремонт/ТО из plan_segs; затраты по машине из
+// park_reports за текущий и прошлый месяц). Никаких своих расчётов статуса - только тот, что
+// уже считает сервер, иначе цифры разойдутся с шапкой Планировки (Влад сверяет глазами).
+// Действия (Влад, 08.09): поставить в ремонт / на ТО с ОБЯЗАТЕЛЬНОЙ причиной и ОБЯЗАТЕЛЬНЫМ
+// сроком выхода, продлить, снять - всё через тот же POST /api/plan/seg, что и Планировка.
+var mechFleet_ = null;      // последний ответ /api/mechanic/fleet
+var mechLoading_ = false;
+var mechLoadError_ = '';
+var mechSort_ = { col: 'days', dir: -1 };
+var mechRepSort_ = { col: 'days', dir: -1 };
+var mechSegFilter_ = 'all';
+var mechStatusFilter_ = 'all';
+var mechPollTimer_ = null;
+var mechDrawerGos_ = null;
+var mechDrawerMode_ = 'view'; // view | repair | maint | extend
+
+function mechIsLong_(t) { t = String(t || ''); return t === 'Борт' || t.indexOf('Борт') === 0; }
+function mechEsc_(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function mechFmtN_(n) { return Math.round(n || 0).toLocaleString('ru-RU'); }
+function mechFr_(n) { return n ? mechFmtN_(n) + ' ₽' : '—'; }
+function mechHourToDate_(h) { return new Date((mechFleet_ ? mechFleet_.epoch0 : 0) + h * 3600000); }
+function mechFmtDM_(dt) { return dt.toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit' }); }
+function mechShortName_(full) {
+  var p = String(full || '').trim().split(/\s+/);
+  if (!p[0]) return '';
+  return p[0] + (p[1] ? ' ' + p[1][0] + '.' : '') + (p[2] ? p[2][0] + '.' : '');
+}
+// начало календарного месяца "YYYY-MM" в часах эпохи Планировки (полночь по Москве)
+function mechMonthStartHour_(monthKey) {
+  return (Date.parse(monthKey + '-01T00:00:00+03:00') - mechFleet_.epoch0) / 3600000;
+}
+function mechNowHour_() { return (Date.now() - mechFleet_.epoch0) / 3600000; }
+
+// Строки парка для всех блоков страницы: статус - серверный, но «Ремонт» уточняется до «ТО»
+// по активному отрезку kind=maint (fleet_summary их схлопывает, механику разница принципиальна).
+function mechRows_() {
+  if (!mechFleet_) return [];
+  var nowH = mechNowHour_();
+  var segsByGos = {};
+  (mechFleet_.segs || []).forEach(function(s) { (segsByGos[s.vehicle_gos] = segsByGos[s.vehicle_gos] || []).push(s); });
+  return (mechFleet_.vehicles || []).map(function(v) {
+    var my = segsByGos[v.gos] || [];
+    var active = my.filter(function(s) { return s.start_hour <= nowH && nowH < s.start_hour + s.length_hours; })
+      .sort(function(a, b) { return a.start_hour - b.start_hour; })[0] || null;
+    var status = v.status;
+    if (active) status = active.kind === 'maint' ? 'ТО' : 'Ремонт';
+    var endH = active ? active.start_hour + active.length_hours : null;
+    // Плановый выход = конец отрезка в Планировке (start_hour + length_hours), а не только у
+    // записей с причиной (08.09, поправка Влада: "плановый выход должен быть по концу
+    // протяжки в планировке" - сам отрезок ЕСТЬ план, длина задаётся тем же, кто ставит в
+    // ремонт/ТО, вне зависимости от того, вписана ли причина). Раньше срок показывался только
+    // у записей с repair_reason - лишнее сужение, конец отрезка есть у любой записи.
+    var hasDeadline = !!active;
+    var c = (mechFleet_.costs || {})[v.gos] || {}, p = (mechFleet_.costs_prev || {})[v.gos] || {};
+    return {
+      gos: v.gos, marka: v.marka || '', type: v.type || '', long: !!v.long, status: status,
+      driver: mechShortName_(v.driver), trailer: v.trailerGos || '',
+      seg: active,
+      since: active ? mechFmtDM_(mechHourToDate_(active.start_hour)) : '',
+      days: active ? Math.floor((nowH - active.start_hour) / 24) : null,
+      deadline: hasDeadline ? mechFmtDM_(mechHourToDate_(endH)) : '',
+      // просрочка (срок прошёл, машина стоит) считается отдельно - mechOverdueRows_ ниже
+      deadlineSoon: hasDeadline ? (endH - nowH) < 24 : false,
+      reason: active ? (active.repair_reason || '') : '',
+      setBy: active ? mechShortName_(active.created_by_name || active.created_by) : '',
+      setAt: active ? (active.created_at_label || '') : '',
+      partsCur: Math.round(c.parts || 0), fuelCur: Math.round(c.fuel || 0),
+      partsPrev: Math.round(p.parts || 0), fuelPrev: Math.round(p.fuel || 0),
+    };
+  });
+}
+// «Просроченные» ремонты: отрезок ЗАКОНЧИЛСЯ по сроку, а машина по данным ленты не вышла в
+// рейс (следующий отрезок trip не начался) - отдельный список, потому что серверный статус у
+// такой машины уже «Без заказа»/«В работе», а не «Ремонт». Считаем по отрезкам за последние 3 дня.
+function mechOverdueRows_(rows) {
+  if (!mechFleet_) return [];
+  var nowH = mechNowHour_();
+  var byGos = {};
+  rows.forEach(function(r) { byGos[r.gos] = r; });
+  var out = [];
+  (mechFleet_.segs || []).forEach(function(s) {
+    var endH = s.start_hour + s.length_hours;
+    if (endH > nowH || endH < nowH - 72) return;        // ещё идёт или давно закрыт
+    var r = byGos[s.vehicle_gos];
+    if (!r || r.status === 'В работе' || r.status === 'Ремонт' || r.status === 'ТО') return;
+    out.push({ gos: r.gos, marka: r.marka, long: r.long, kind: s.kind, endLabel: mechFmtDM_(mechHourToDate_(endH)), hoursOver: Math.round(nowH - endH), reason: s.repair_reason || '' });
+  });
+  return out;
+}
+
+function mechLoad_(force) {
+  if (mechLoading_ && !force) return;
+  mechLoading_ = true;
+  mechLoadError_ = '';
+  // 08.09 (позже вечером) - найдено живьём Владом: admin-предпросмотр "Смотреть как ->
+  // Самошкин" всё равно показывал тралы+борта. Причина - person= отправляла ТОЛЬКО
+  // loadMechanicData_() (грузится лишь для РЕАЛЬНОГО входа механика, localStorage.user_role
+  // === 'mechanic' - в admin-сессии этот код вообще не выполняется), а этот, настоящий
+  // источник данных страницы (mechLoad_, дёргается из renderMyPageMechanic_ при !mechFleet_,
+  // в том числе сразу после сброса кэша в setViewAs) - без person вообще. Сервер без person
+  // не может понять, за кого предпросматривает admin, и отдаёт весь парк без ограничения.
+  var mechPreviewName_ = (D && D.role === 'admin' && viewAsEntry) ? viewAsEntry.name : null;
+  fetchFromYardApi_('/mechanic/fleet', mechPreviewName_ ? { person: mechPreviewName_ } : {}).then(function(r) {
+    mechLoading_ = false;
+    if (!r.ok || !r.data || r.data.error) { mechLoadError_ = (r.data && r.data.error) || 'Сервер не ответил'; renderMyPageMechanic_(); return; }
+    mechFleet_ = r.data;
+    renderMyPageMechanic_();
+    if (mechDrawerGos_) mechRenderDrawer_();
+  }).catch(function(e) { mechLoading_ = false; mechLoadError_ = e.message; renderMyPageMechanic_(); });
+}
+// Обновление раз в минуту, пока открыта личная страница механика (статусы живые, ставят и
+// логисты в Планировке) - без звука, автоматика чаще минуты по ГОСТу молчит.
+function mechEnsurePoll_() {
+  if (mechPollTimer_) return;
+  mechPollTimer_ = setInterval(function() {
+    var pg = document.getElementById('page-my-page');
+    if (!pg || !pg.classList.contains('active') || !isMechanicView_() || document.hidden) return;
+    mechLoad_(false);
+  }, 60000);
+}
+
+function mechStatusKey_(s) { return s === 'В работе' ? 'work' : s === 'Ремонт' ? 'rep' : s === 'ТО' ? 'mnt' : s === 'Без водителя' ? 'nd' : 'no'; }
+function mechDaysCls_(d) { return d == null ? '' : d > 7 ? 'red' : d > 3 ? 'amber' : ''; }
+function mechSortRows_(rows, s, textCols) {
+  return rows.slice().sort(function(a, b) {
+    var av = a[s.col], bv = b[s.col];
+    if (textCols.indexOf(s.col) >= 0) return String(av || '').localeCompare(String(bv || ''), 'ru') * s.dir;
+    av = av == null ? -Infinity : av; bv = bv == null ? -Infinity : bv;
+    return (av - bv) * s.dir; // канон ГОСТа: (av - bv) * dir, -1 = убывание
+  });
+}
+function mechTh_(cols, s, fn) {
+  return cols.map(function(c) {
+    var on = s.col === c.key;
+    var arrow = on ? (s.dir === -1 ? '▼' : '▲') : '↕';
+    return '<th class="sortable' + (c.num ? ' num' : '') + '" onclick="' + fn + '(\'' + c.key + '\')">' + c.label +
+      '<span style="font-size:10px;margin-left:4px;' + (on ? '' : 'opacity:.35') + '">' + arrow + '</span></th>';
+  }).join('');
+}
+function mechToggleSort_(state, col, textCols) {
+  if (state.col === col) state.dir *= -1; else { state.col = col; state.dir = textCols.indexOf(col) >= 0 ? 1 : -1; }
+}
+var MECH_REP_COLS_ = [
+  { key: 'gos', label: 'Гос' }, { key: 'marka', label: 'Марка' }, { key: 'status', label: 'Что' },
+  { key: 'since', label: 'С какого' }, { key: 'days', label: 'Дней', num: true }, { key: 'deadline', label: 'Срок' },
+  { key: 'reason', label: 'Причина' }, { key: 'setBy', label: 'Кто поставил' },
+];
+var MECH_REP_TEXT_ = ['gos', 'marka', 'status', 'since', 'deadline', 'reason', 'setBy'];
+var MECH_ALL_COLS_ = [
+  { key: 'gos', label: 'Гос' }, { key: 'marka', label: 'Марка' }, { key: 'type', label: 'Тип' }, { key: 'status', label: 'Статус' },
+  { key: 'days', label: 'Дней в ремонте', num: true }, { key: 'driver', label: 'Водитель' }, { key: 'trailer', label: 'Прицеп' },
+  { key: 'partsCur', label: 'Запчасти мес', num: true }, { key: 'fuelCur', label: 'Топливо мес', num: true },
+  { key: 'partsPrev', label: 'Запчасти пр. мес', num: true }, { key: 'fuelPrev', label: 'Топливо пр. мес', num: true },
+];
+var MECH_ALL_TEXT_ = ['gos', 'marka', 'type', 'status', 'driver', 'trailer'];
+function mechSortRep_(col) { mechToggleSort_(mechRepSort_, col, MECH_REP_TEXT_); renderMyPageMechanic_(); }
+function mechSortAll_(col) { mechToggleSort_(mechSort_, col, MECH_ALL_TEXT_); renderMyPageMechanic_(); }
+function mechSetSeg_(v) { mechSegFilter_ = v; renderMyPageMechanic_(); }
+function mechSetStatus_(v) {
+  mechStatusFilter_ = (mechStatusFilter_ === v) ? 'all' : v;
+  renderMyPageMechanic_();
+  var card = document.getElementById('mech-all-card');
+  if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function mechSetStatusSel_(v) { mechStatusFilter_ = v; renderMyPageMechanic_(); }
+
+function renderMyPageMechanic_() {
+  var el = document.getElementById('my-page-content');
+  if (!el) return;
+  var previewing = D.role === 'admin' && !!viewAsEntry;
+  myPageHeaderName_ = previewing ? viewAsEntry.name : (D.mechanicName || 'Механик');
+  myPageHeaderRole_ = 'Главный механик';
+  var myPageEl = document.getElementById('page-my-page');
+  if (myPageEl && myPageEl.classList.contains('active')) {
+    setText('page-title', myPageHeaderName_);
+    setText('page-subtitle', myPageHeaderRole_);
+    var phEl = document.querySelector('.page-header');
+    if (phEl) phEl.style.display = '';
+  }
+  mechEnsurePoll_();
+  if (!mechFleet_) {
+    if (mechLoadError_) {
+      el.innerHTML = '<div class="card"><div style="font-size:13px;color:var(--amber);padding:6px 0">Не удалось загрузить парк: ' + mechEsc_(mechLoadError_) + '</div>' +
+        '<button class="mp-ghostbtn" onclick="mechLoad_(true)">Повторить</button></div>';
+    } else {
+      el.innerHTML = '<div class="card"><div style="font-size:13px;color:var(--muted);padding:6px 0">Загружаю парк…</div></div>';
+      mechLoad_(false);
+    }
+    return;
+  }
+  var rows = mechRows_();
+  var nowH = mechNowHour_();
+  var month = mechFleet_.month, prevMonth = mechFleet_.prev_month;
+  var monthStart = mechMonthStartHour_(month), prevStart = mechMonthStartHour_(prevMonth);
+  var dayOfMonth = Math.max(1, Math.floor((nowH - monthStart) / 24) + 1);
+
+  // ── Вердикт-полоса ──
+  var rep = rows.filter(function(r) { return r.status === 'Ремонт' || r.status === 'ТО'; });
+  var repTral = rep.filter(function(r) { return !r.long; }).length, repLong = rep.filter(function(r) { return r.long; }).length;
+  var long3 = rep.filter(function(r) { return r.days > 3; }).length;
+  var overdue = mechOverdueRows_(rows);
+  var ready = rows.length ? Math.round((rows.length - rep.length) / rows.length * 100) : 0;
+  var share = rows.length ? rep.length / rows.length : 0;
+  var vCls = share >= .2 ? 'bad' : share >= .1 ? 'warn' : 'good';
+  var html = '<div class="mp-status mp-status--' + vCls + '">' +
+    '<div class="mp-status__l"><div class="mp-status__word">В РЕМОНТЕ ' + rep.length + ' ИЗ ' + rows.length + '</div>' +
+    '<div class="mp-status__sub">тралы <b>' + repTral + '</b> · борта <b>' + repLong + '</b> · дольше 3 дней стоят <b>' + long3 + '</b>' +
+    (overdue.length ? ' · <span style="color:var(--tint-red)">просрочен срок выхода у <b style="color:var(--tint-red)">' + overdue.length + '</b></span>' : '') +
+    ' · без водителя <b>' + rows.filter(function(r) { return r.status === 'Без водителя'; }).length + '</b></div></div>' +
+    '<div class="mp-status__r"><div class="mp-status__cap">Готовность парка</div><div class="mp-status__lever">' + ready + '%</div>' +
+    '<div class="mech-formula">(' + rows.length + ' − ' + rep.length + ' в ремонте/ТО) / ' + rows.length + '</div></div></div>';
+
+  // ── Ярус 1: сейчас в ремонте + парк сейчас ──
+  var repSorted = mechSortRows_(rep, mechRepSort_, MECH_REP_TEXT_);
+  var repBody = repSorted.map(function(r) {
+    var dl = r.deadline ? ('<span class="mono' + (r.deadlineSoon ? ' amber' : '') + '">' + r.deadline + '</span>') : '<span class="muted">не задан</span>';
+    return '<tr onclick="mechOpenDrawer_(\'' + mechEsc_(r.gos) + '\')"><td class="mono">' + mechEsc_(r.gos) + '</td><td>' + mechEsc_(r.marka) + (r.long ? ' <span class="muted">борт</span>' : '') + '</td>' +
+      '<td><span class="mech-pill mech-pill--' + mechStatusKey_(r.status) + '">' + r.status + '</span></td><td class="mono muted">' + r.since + '</td>' +
+      '<td class="num ' + mechDaysCls_(r.days) + '">' + r.days + '</td><td>' + dl + '</td>' +
+      '<td class="mech-ellip" title="' + mechEsc_(r.reason) + '">' + (r.reason ? mechEsc_(r.reason) : '<span class="muted">не указана</span>') + '</td>' +
+      '<td class="muted">' + mechEsc_(r.setBy || '—') + '</td></tr>';
+  }).join('');
+  var overdueHtml = overdue.length ? '<div class="mech-overdue">' + overdue.map(function(o) {
+    return '<div class="mech-overdue__row" onclick="mechOpenDrawer_(\'' + mechEsc_(o.gos) + '\')"><span class="mono">' + mechEsc_(o.gos) + '</span> <span>' + mechEsc_(o.marka) + '</span>' +
+      '<span class="muted">' + (o.kind === 'maint' ? 'ТО' : 'ремонт') + ' должен был закончиться ' + o.endLabel + ', прошло ' + o.hoursOver + ' ч, машина не в рейсе</span></div>';
+  }).join('') + '</div>' : '';
+  // «Парк сейчас» (Тралы/Длинномеры две группы) - только для полного вида (сегмент не
+  // ограничен). У ограниченного механика (Самошкин - только длинномеры) вторая группа всегда
+  // «0 из 0», карточка целиком лишняя (08.09, Влад: "это можно убрать совсем") - тогда таблица
+  // ремонта одна занимает весь ярус (класс mech-tier--full).
+  var restrictedSegment_ = !!(mechFleet_ && mechFleet_.segment);
+  html += '<div class="mech-tier' + (restrictedSegment_ ? ' mech-tier--full' : '') + '"><div class="card" style="min-width:0">' +
+    '<div class="mech-head"><div class="mech-label"><span class="mech-label__dot"></span>Сейчас в ремонте и на ТО</div>' +
+    '<span class="mech-badge ' + (long3 ? 'mech-badge--bad' : 'mech-badge--neutral') + '">' + long3 + ' дольше 3 дней</span></div>' +
+    (rep.length ? '<div style="overflow-x:auto"><table class="tbl"><thead><tr>' + mechTh_(MECH_REP_COLS_, mechRepSort_, 'mechSortRep_') + '</tr></thead><tbody>' + repBody + '</tbody></table></div>'
+      : '<div class="mech-empty">Все машины на колёсах - в ремонте и на ТО никого нет</div>') +
+    overdueHtml +
+    '<div class="mech-foot">Красным - дольше 7 дней, янтарным - дольше 3. «Срок» - конец отрезка в Планировке. Клик по строке - карточка машины и действия.</div>' +
+    '</div>';
+
+  if (!restrictedSegment_) {
+    // парк сейчас - две группы
+    var stat = function(cap, key, n, total, cls) {
+      return '<div class="mech-stat mech-stat--' + cls + (mechStatusFilter_ === key ? ' on' : '') + '" onclick="mechSetStatus_(\'' + key + '\')"><div class="mech-stat__cap">' + cap + '</div><div class="mech-stat__num">' + n + '<small>из ' + total + '</small></div></div>';
+    };
+    var grpHtml = '';
+    [['Тралы', function(r) { return !r.long; }], ['Длинномеры', function(r) { return r.long; }]].forEach(function(g) {
+      var gr = rows.filter(g[1]);
+      var c = function(list) { return gr.filter(function(r) { return list.indexOf(r.status) >= 0; }).length; };
+      grpHtml += '<div class="mech-grp"><div class="mech-grp__name">' + g[0] + '<small>' + gr.length + ' тягачей</small></div>' +
+        stat('В работе', 'В работе', c(['В работе']), gr.length, 'work') + stat('Ремонт и ТО', 'Ремонт', c(['Ремонт', 'ТО']), gr.length, 'rep') +
+        stat('Без водителя', 'Без водителя', c(['Без водителя']), gr.length, 'nd') + stat('Без заказа', 'Без заказа', c(['Без заказа']), gr.length, 'no') + '</div>';
+    });
+    html += '<div class="card"><div class="mech-head"><div class="mech-label">Парк сейчас</div><span class="mech-badge mech-badge--neutral">то же, что шапка Планировки</span></div>' + grpHtml +
+      '<div class="mech-foot">Один источник со «Статусом парка» на главной и шапкой Планировки - цифры совпадают один в один. Клик по плашке - фильтр таблицы внизу.</div></div>';
+  }
+  html += '</div>';
+
+  // ── Ярус 2: простой за месяц + затраты ──
+  var dt = function(filterFn, fromH, toH) {
+    var repD = 0, mntD = 0;
+    (mechFleet_.segs || []).forEach(function(s) {
+      var v = rows.filter(function(r) { return r.gos === s.vehicle_gos; })[0];
+      if (!v || !filterFn(v)) return;
+      var a = Math.max(s.start_hour, fromH), b = Math.min(s.start_hour + s.length_hours, toH);
+      if (b <= a) return;
+      if (s.kind === 'repair') repD += (b - a) / 24; else mntD += (b - a) / 24;
+    });
+    return { rep: Math.round(repD), mnt: Math.round(mntD) };
+  };
+  var all = function() { return true; }, tr = function(r) { return !r.long; }, lg = function(r) { return r.long; };
+  var sepAll = dt(all, monthStart, nowH), augAll = dt(all, prevStart, monthStart);
+  var sepTr = dt(tr, monthStart, nowH), sepLg = dt(lg, monthStart, nowH), augTr = dt(tr, prevStart, monthStart), augLg = dt(lg, prevStart, monthStart);
+  var row = function(label, v, aux, auxCls) {
+    return '<div class="mech-row"><span class="mech-row__label">' + label + '</span><span class="mech-row__leader"></span><span class="mech-row__value">' + v + '</span><span class="mech-row__aux ' + (auxCls || '') + '">' + aux + '</span></div>';
+  };
+  var total = sepAll.rep + sepAll.mnt, totalPrev = augAll.rep + augAll.mnt;
+  var prevDays = Math.round((monthStart - prevStart) / 24);
+  var perDay = (total / dayOfMonth).toFixed(1).replace('.', ','), perDayPrev = (totalPrev / prevDays).toFixed(1).replace('.', ',');
+  var prevLbl = formatMonthLabel(prevMonth).split(' ')[0].slice(0, 3).toLowerCase();
+  html += '<div class="mech-tier2"><div class="card">' +
+    '<div class="mech-head"><div class="mech-label">Простой в ремонте и на ТО - ' + formatMonthLabel(month).split(' ')[0].toLowerCase() + '</div><span class="mech-badge mech-badge--neutral">машино-дни</span></div>' +
+    '<div class="mech-hero"><span class="mech-hero__num">' + total + '</span><span class="mech-hero__unit">машино-дней за ' + dayOfMonth + ' ' + (dayOfMonth === 1 ? 'день' : (dayOfMonth < 5 ? 'дня' : 'дней')) + '</span></div>' +
+    '<div class="mech-rows">' + row('Ремонт', sepAll.rep, prevLbl + ' ' + augAll.rep) + row('ТО', sepAll.mnt, prevLbl + ' ' + augAll.mnt) +
+    (restrictedSegment_ ? '' : row('- тралы', sepTr.rep + sepTr.mnt, prevLbl + ' ' + (augTr.rep + augTr.mnt)) + row('- длинномеры', sepLg.rep + sepLg.mnt, prevLbl + ' ' + (augLg.rep + augLg.mnt))) +
+    '<div class="mech-row mech-row--total"><span class="mech-row__label">В среднем стоит в день</span><span class="mech-row__leader"></span><span class="mech-row__value">' + perDay + ' маш.</span><span class="mech-row__aux">' + prevLbl + ' ' + perDayPrev + '</span></div></div>' +
+    '<div class="mech-foot">Из отрезков Ремонт/ТО в Планировке, по календарному месяцу. Прошлый месяц - для сравнения, целиком.</div></div>';
+
+  var sum = function(list, k) { return list.reduce(function(s, r) { return s + (r[k] || 0); }, 0); };
+  var withCur = rows.filter(function(r) { return (mechFleet_.costs || {})[r.gos]; }).length;
+  var withPrev = rows.filter(function(r) { return (mechFleet_.costs_prev || {})[r.gos]; }).length;
+  var trR = rows.filter(tr), lgR = rows.filter(lg);
+  html += '<div class="card"><div class="mech-head"><div class="mech-label">Затраты по парку - ' + formatMonthLabel(month).split(' ')[0].toLowerCase() + ' (1С)</div><span class="mech-badge mech-badge--neutral">' + withCur + ' из ' + rows.length + ' с отчётом</span></div>' +
+    '<div class="mech-hero"><span class="mech-hero__num">' + mechFmtN_(sum(rows, 'partsCur')) + '</span><span class="mech-hero__unit">₽ запчасти</span></div>' +
+    '<div class="mech-rows">' + row('Запчасти', mechFr_(sum(rows, 'partsCur')), prevLbl + ' ' + mechFmtN_(sum(rows, 'partsPrev'))) +
+    (restrictedSegment_ ? '' : row('- тралы', mechFr_(sum(trR, 'partsCur')), prevLbl + ' ' + mechFmtN_(sum(trR, 'partsPrev'))) + row('- борта', mechFr_(sum(lgR, 'partsCur')), prevLbl + ' ' + mechFmtN_(sum(lgR, 'partsPrev')))) +
+    row('Топливо', mechFr_(sum(rows, 'fuelCur')), prevLbl + ' ' + mechFmtN_(sum(rows, 'fuelPrev'))) +
+    '<div class="mech-row mech-row--total"><span class="mech-row__label">Запчасти на машину с отчётом</span><span class="mech-row__leader"></span><span class="mech-row__value">' + mechFr_(withCur ? sum(rows, 'partsCur') / withCur : 0) + '</span><span class="mech-row__aux">' + prevLbl + ' ' + mechFmtN_(withPrev ? sum(rows, 'partsPrev') / withPrev : 0) + '</span></div></div>' +
+    '<div class="mech-foot">Отчёт «Парк» 1С (те же цифры, что колонки «Запчасти»/«Топливо» на странице «Техника»). Месяц неполный: отчёт пришёл по ' + withCur + ' машинам, у остальных проводок ещё нет.</div></div></div>';
+
+  // ── Все машины ──
+  var list = rows.slice();
+  if (mechSegFilter_ === 'long') list = list.filter(lg); else if (mechSegFilter_ === 'tral') list = list.filter(tr);
+  if (mechStatusFilter_ !== 'all') list = list.filter(function(r) { return mechStatusFilter_ === 'Ремонт' ? (r.status === 'Ремонт' || r.status === 'ТО') : r.status === mechStatusFilter_; });
+  list = mechSortRows_(list, mechSort_, MECH_ALL_TEXT_);
+  var body = list.map(function(r) {
+    return '<tr onclick="mechOpenDrawer_(\'' + mechEsc_(r.gos) + '\')"><td class="mono">' + mechEsc_(r.gos) + '</td><td>' + mechEsc_(r.marka) + '</td><td class="muted">' + mechEsc_(r.type) + '</td>' +
+      '<td><span class="mech-pill mech-pill--' + mechStatusKey_(r.status) + '">' + r.status + '</span></td><td class="num ' + mechDaysCls_(r.days) + '">' + (r.days == null ? '<span class="muted">—</span>' : r.days) + '</td>' +
+      '<td>' + (r.driver ? mechEsc_(r.driver) : '<span class="muted">—</span>') + '</td><td class="mono muted">' + (mechEsc_(r.trailer) || '—') + '</td>' +
+      '<td class="num">' + mechFr_(r.partsCur) + '</td><td class="num">' + mechFr_(r.fuelCur) + '</td><td class="num muted">' + mechFr_(r.partsPrev) + '</td><td class="num muted">' + mechFr_(r.fuelPrev) + '</td></tr>';
+  }).join('');
+  var opt = function(v, label, cur) { return '<option value="' + v + '"' + (cur === v ? ' selected' : '') + '>' + label + '</option>'; };
+  html += '<div class="card" id="mech-all-card"><div class="mech-head"><div class="mech-label">Все машины</div></div>' +
+    '<div class="mech-tools"><select class="mech-select" onchange="mechSetSeg_(this.value)">' + opt('all', 'Все машины', mechSegFilter_) + opt('tral', 'Тралы', mechSegFilter_) + opt('long', 'Длинномеры', mechSegFilter_) + '</select>' +
+    '<select class="mech-select" onchange="mechSetStatusSel_(this.value)">' + opt('all', 'Все статусы', mechStatusFilter_) + opt('В работе', 'В работе', mechStatusFilter_) + opt('Ремонт', 'Ремонт и ТО', mechStatusFilter_) + opt('Без водителя', 'Без водителя', mechStatusFilter_) + opt('Без заказа', 'Без заказа', mechStatusFilter_) + '</select>' +
+    '<span class="mech-cnt">' + list.length + ' из ' + rows.length + '</span></div>' +
+    '<div style="overflow-x:auto"><table class="tbl"><thead><tr>' + mechTh_(MECH_ALL_COLS_, mechSort_, 'mechSortAll_') + '</tr></thead><tbody>' + body + '</tbody>' +
+    '<tfoot><tr><td colspan="7">Итого по ' + list.length + ' машинам</td><td class="num">' + mechFr_(sum(list, 'partsCur')) + '</td><td class="num">' + mechFr_(sum(list, 'fuelCur')) + '</td><td class="num">' + mechFr_(sum(list, 'partsPrev')) + '</td><td class="num">' + mechFr_(sum(list, 'fuelPrev')) + '</td></tr></tfoot></table></div>' +
+    '<div class="mech-foot">Сортировка - клик по заголовку (▼ убывание, ▲ возрастание). Запчасти/топливо - из отчёта «Парк» 1С за месяц, «—» = проводок ещё нет.</div></div>';
+
+  el.innerHTML = html;
+}
+
+// ── Шторка машины: карточка + действия ──
+function mechOpenDrawer_(gos) {
+  mechDrawerGos_ = gos; mechDrawerMode_ = 'view';
+  var bk = document.getElementById('mech-drawer-bk'), dr = document.getElementById('mech-drawer');
+  if (!bk || !dr) return;
+  mechRenderDrawer_();
+  bk.classList.add('show');
+  setTimeout(function() { dr.classList.add('show'); }, 40);
+}
+function mechCloseDrawer_() {
+  mechDrawerGos_ = null;
+  var bk = document.getElementById('mech-drawer-bk'), dr = document.getElementById('mech-drawer');
+  if (bk) bk.classList.remove('show');
+  if (dr) dr.classList.remove('show');
+}
+function mechDrawerMode_set(mode) { mechDrawerMode_ = mode; mechRenderDrawer_(); }
+// pending-действие между "проверили конфликты" и "реально записали" (08.09) - см.
+// mechSubmit_/mechConfirmConflicts_/mechDoSubmit_ ниже.
+var mechPending_ = null;
+function mechRenderDrawer_() {
+  var dr = document.getElementById('mech-drawer');
+  if (!dr || !mechDrawerGos_) return;
+  var r = mechRows_().filter(function(x) { return x.gos === mechDrawerGos_; })[0];
+  if (!r) { dr.innerHTML = '<div class="mech-empty">Машина не найдена в парке</div>'; return; }
+  var inRep = r.status === 'Ремонт' || r.status === 'ТО';
+  var rowH = function(label, v, aux, auxCls) {
+    return '<div class="mech-row"><span class="mech-row__label">' + label + '</span><span class="mech-row__leader"></span><span class="mech-row__value">' + v + '</span><span class="mech-row__aux ' + (auxCls || '') + '">' + (aux || '') + '</span></div>';
+  };
+  var prevLbl = formatMonthLabel(mechFleet_.prev_month).split(' ')[0].slice(0, 3).toLowerCase();
+  var html = '<button class="mech-drawer__x" onclick="mechCloseDrawer_()" aria-label="Закрыть">×</button>' +
+    '<div class="mech-drawer__gos">' + mechEsc_(r.gos) + '</div><div class="mech-drawer__sub">' + mechEsc_(r.marka) + ' · ' + mechEsc_(r.type) + (r.long ? ' · длинномер' : ' · трал') + '</div>' +
+    '<div class="mech-rows" style="margin-top:12px">' +
+    rowH('Статус', '<span class="mech-pill mech-pill--' + mechStatusKey_(r.status) + '">' + r.status + '</span>') +
+    (inRep ? rowH('В ремонте с', r.since, r.days + ' дн.', r.days > 7 ? 'mech-row__aux--bad' : '') +
+             rowH('Плановый выход', r.deadline || '<span class="muted">не задан</span>', r.deadlineSoon ? 'скоро' : '', r.deadlineSoon ? 'mech-row__aux--warn' : '') +
+             rowH('Причина', r.reason ? mechEsc_(r.reason) : '<span class="muted">не указана</span>') +
+             rowH('Поставил', mechEsc_(r.setBy || '—'), mechEsc_(r.setAt)) : '') +
+    rowH('Водитель', mechEsc_(r.driver) || '—') + rowH('Прицеп', mechEsc_(r.trailer) || '—') +
+    '<div class="mech-row mech-row--total"><span class="mech-row__label">Запчасти, месяц</span><span class="mech-row__leader"></span><span class="mech-row__value">' + mechFr_(r.partsCur) + '</span><span class="mech-row__aux">' + prevLbl + ' ' + mechFmtN_(r.partsPrev) + '</span></div>' +
+    rowH('Топливо, месяц', mechFr_(r.fuelCur), prevLbl + ' ' + mechFmtN_(r.fuelPrev)) +
+    '</div>';
+
+  if (mechDrawerMode_ === 'view') {
+    html += '<div class="mech-drawer__sec">Действия</div>';
+    if (inRep) {
+      html += '<button class="mech-btn mech-btn--rep" onclick="mechFinishRepair_()">Снять с ремонта - машина готова<small>закроет отрезок «' + r.status + '» в Планировке текущим часом</small></button>' +
+              '<button class="mech-btn mech-btn--mnt" onclick="mechDrawerMode_set(\'extend\')">Продлить срок<small>новая дата выхода и почему</small></button>';
+    } else {
+      html += '<button class="mech-btn mech-btn--rep" onclick="mechDrawerMode_set(\'repair\')">Поставить в ремонт<small>причина и срок в часах обязательны</small></button>' +
+              '<button class="mech-btn mech-btn--mnt" onclick="mechDrawerMode_set(\'maint\')">Поставить на ТО<small>по умолчанию сутки, можно изменить</small></button>';
+    }
+    html += '<button class="mech-btn mech-btn--ghost" onclick="mechCloseDrawer_();showPage(\'logistics-plan\', document.querySelector(\'.sidebar-nav-item[data-page=logistics-plan]\'))">Открыть в Планировке<small>та же машина, та же строка ленты</small></button>';
+  } else if (mechDrawerMode_ === 'confirm' && mechPending_) {
+    // 08.09, Влад: "если перед постановкой на ремонт есть рейсы, которые попадают под
+    // ремонт, должно вылететь окно уведомить логиста, чтобы логист убрал заявки" - это
+    // окно. Список - от сервера (mechSubmit_ уже сходил на /repair_conflicts), не из
+    // локального кэша - на случай, если рейс добавили секунду назад.
+    var conf = mechPending_.conflicts;
+    html += '<div class="mech-drawer__sec">На это время уже стоят рейсы</div>' +
+      '<div class="mech-conflict-note">' + r.gos + ' занята ' + conf.length + ' ' + (conf.length === 1 ? 'рейсом' : 'рейсами') +
+      ' в это окно. Сначала предупреди логиста, чтобы убрал заявки с Планировки - иначе рейс останется висеть на машине, которая в ремонте.</div>' +
+      '<div class="mech-conflict-list">' + conf.map(function(c) {
+        var when = mechFmtDM_(mechHourToDate_(c.start_hour));
+        return '<div class="mech-conflict-row"><div class="mech-conflict-row__top"><span class="mono">' + when + '</span><span class="muted">' + mechEsc_(c.logist_name || 'логист не указан') + '</span></div>' +
+          '<div class="mech-conflict-row__route">' + mechEsc_([c.route_from, c.route_to].filter(Boolean).join(' → ') || c.customer || 'без адреса') + '</div></div>';
+      }).join('') + '</div>' +
+      '<button class="mech-btn mech-btn--primary" id="mech-submit" onclick="mechConfirmConflicts_()">Уведомить логиста и поставить</button>' +
+      '<button class="mech-btn mech-btn--ghost" onclick="mechCancelConfirm_()">Отмена</button>';
+  } else {
+    var isExtend = mechDrawerMode_ === 'extend';
+    var kind = isExtend ? (r.seg ? r.seg.kind : 'repair') : mechDrawerMode_;
+    var title = isExtend ? 'Продлить ' + (kind === 'maint' ? 'ТО' : 'ремонт') : (kind === 'maint' ? 'Поставить на ТО' : 'Поставить в ремонт');
+    // Срок - в ЧАСАХ, не датой (08.09, Влад: "указывать причину и срок ремонта в часах") -
+    // напрямую то поле, что и хранит сама лента (plan_segs.length_hours), без перевода
+    // туда-обратно через календарь.
+    var defHours = isExtend ? 24 : (kind === 'maint' ? 24 : 72);
+    html += '<div class="mech-drawer__sec">' + title + '</div>' +
+      '<label class="mech-field"><span>' + (isExtend ? 'Почему продлеваем' : 'Причина') + ' <em>обязательно</em></span>' +
+      '<textarea class="mech-input" id="mech-reason" rows="3" placeholder="' + (kind === 'maint' ? 'плановое ТО-2, замена масла и фильтров' : 'например: течь ГУР, ждём ремкомплект') + '" oninput="mechFormCheck_()"></textarea></label>' +
+      '<label class="mech-field"><span>' + (isExtend ? 'На сколько часов продлить' : 'Срок ремонта, часов') + ' <em>обязательно</em></span>' +
+      '<input class="mech-input" type="number" id="mech-hours" value="' + defHours + '" min="1" max="2000" step="1" oninput="mechFormCheck_()"></label>' +
+      '<button class="mech-btn mech-btn--primary" id="mech-submit" onclick="mechSubmit_(\'' + kind + '\',' + (isExtend ? 'true' : 'false') + ')">Укажи причину</button>' +
+      '<button class="mech-btn mech-btn--ghost" onclick="mechDrawerMode_set(\'view\')">Отмена</button>';
+  }
+  dr.innerHTML = html;
+  if (mechDrawerMode_ !== 'view' && mechDrawerMode_ !== 'confirm') { mechFormCheck_(); var ta = document.getElementById('mech-reason'); if (ta) ta.focus(); }
+}
+// Кнопка сама называет, чего не хватает (канон ГОСТа), вместо немого disabled.
+function mechFormCheck_() {
+  var btn = document.getElementById('mech-submit'); if (!btn) return;
+  var reason = (document.getElementById('mech-reason') || {}).value || '';
+  var hours = parseFloat((document.getElementById('mech-hours') || {}).value);
+  var missing = reason.trim().length < 3 ? 'Укажи причину' : (!(hours > 0) ? 'Укажи срок в часах' : '');
+  btn.textContent = missing || (mechDrawerMode_ === 'extend' ? 'Продлить' : (mechDrawerMode_ === 'maint' ? 'Поставить на ТО' : 'Поставить в ремонт'));
+  btn.classList.toggle('mech-btn--blocked', !!missing);
+}
+function mechNewId_() { return 'm' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8); }
+// Шаг 1 - валидация формы + запрос конфликтов у сервера (ИСТОЧНИК ИСТИНЫ - не локальный
+// mechFleet_.segs, тот мог устареть за время, что механик заполнял форму).
+function mechSubmit_(kind, isExtend) {
+  var reason = ((document.getElementById('mech-reason') || {}).value || '').trim();
+  var hours = parseFloat((document.getElementById('mech-hours') || {}).value);
+  if (reason.length < 3) { p2Toast('Без причины ремонт не ставим - напиши, что случилось', 'amber'); return; }
+  if (!(hours > 0)) { p2Toast('Укажи срок ремонта в часах', 'amber'); return; }
+  var r = mechRows_().filter(function(x) { return x.gos === mechDrawerGos_; })[0]; if (!r) return;
+  var nowH = mechNowHour_();
+  var s, id, fullReason;
+  if (isExtend && r.seg) {
+    s = r.seg.start_hour; id = r.seg.id;
+    fullReason = ((r.seg.repair_reason || '') + ' · продлено на ' + Math.round(hours) + ' ч: ' + reason).replace(/^ · /, '').slice(0, 255);
+  } else {
+    s = Math.floor(nowH * 4) / 4; id = mechNewId_(); fullReason = reason.slice(0, 255);
+  }
+  var l = isExtend ? ((r.seg.start_hour + r.seg.length_hours - nowH) > 0 ? (r.seg.start_hour + r.seg.length_hours - nowH) + hours : hours) : hours;
+  var btn = document.getElementById('mech-submit'); if (btn) { btn.disabled = true; btn.textContent = 'Проверяю занятость машины…'; }
+  var pending = { kind: kind, isExtend: isExtend, id: id, gos: r.gos, s: s, l: l, reason: fullReason };
+  fetchFromYardApi_('/mechanic/repair_conflicts', { gos: r.gos, s: s, l: l }).then(function(res) {
+    var conflicts = (res.ok && res.data && res.data.conflicts) || [];
+    if (conflicts.length) {
+      mechPending_ = { kind: kind, action: pending, conflicts: conflicts };
+      mechDrawerMode_ = 'confirm';
+      mechRenderDrawer_();
+    } else {
+      mechDoSubmit_(pending);
+    }
+  }).catch(function() {
+    // сеть недоступна - не блокируем работу механика проверкой, которая не может пройти,
+    // просто ставим без проверки (тот же принцип "тихий фолбэк", что везде на дашборде)
+    mechDoSubmit_(pending);
+  });
+}
+function mechCancelConfirm_() {
+  var backTo = mechPending_ && mechPending_.action ? (mechPending_.action.isExtend ? 'extend' : mechPending_.action.kind) : 'view';
+  mechPending_ = null;
+  mechDrawerMode_set(backTo);
+}
+// Шаг 2 (только если были конфликты) - уведомить логистов, потом шаг 3.
+function mechConfirmConflicts_() {
+  if (!mechPending_) return;
+  var pending = mechPending_.action, gos = pending.gos, s = pending.s, l = pending.l;
+  var btn = document.getElementById('mech-submit'); if (btn) { btn.disabled = true; btn.textContent = 'Уведомляю логиста…'; }
+  postToYardApi_('/mechanic/notify_logists', { gos: gos, s: s, l: l }).then(function(res) {
+    var data = res.data || {};
+    if (data.notified && data.notified.length) {
+      p2Toast('Логист уведомлён: ' + data.notified.join(', '), 'green');
+    } else {
+      p2Toast('Не смог отправить уведомление автоматически - предупреди логиста лично, прежде чем ставить в ремонт', 'amber');
+    }
+  }).catch(function() {
+    p2Toast('Не смог отправить уведомление - предупреди логиста лично', 'amber');
+  }).then(function() {
+    mechPending_ = null;
+    mechDoSubmit_(pending);
+  });
+}
+// Шаг 3 - собственно запись отрезка в Планировку (тот же POST /plan/seg, что и у логистов).
+function mechDoSubmit_(pending) {
+  var endH = pending.s + pending.l;
+  postToYardApi_('/plan/seg', { id: pending.id, gos: pending.gos, kind: pending.kind, s: Math.round(pending.s * 100) / 100, l: Math.round(pending.l * 100) / 100, repair_reason: pending.reason }).then(function(res) {
+    if (!res.ok) { throw new Error((res.data && res.data.error) || 'сервер отказал'); }
+    p2Toast((pending.isExtend ? 'Срок продлён' : (pending.kind === 'maint' ? 'Поставлена на ТО' : 'Поставлена в ремонт')) + ' - ' + pending.gos + ', выход ' + mechFmtDM_(mechHourToDate_(endH)), 'green');
+    mechDrawerMode_ = 'view';
+    mechLoad_(true);
+  }).catch(function(e) {
+    p2Toast('Не сохранилось: ' + e.message, 'red');
+    mechDrawerMode_set(pending.isExtend ? 'extend' : pending.kind);
+  });
+}
+function mechFinishRepair_() {
+  var r = mechRows_().filter(function(x) { return x.gos === mechDrawerGos_; })[0];
+  if (!r || !r.seg) return;
+  var nowH = mechNowHour_();
+  var l = Math.max(0.25, nowH - r.seg.start_hour);
+  postToYardApi_('/plan/seg', { id: r.seg.id, gos: r.gos, kind: r.seg.kind, s: Math.round(r.seg.start_hour * 100) / 100, l: Math.round(l * 100) / 100, repair_reason: r.seg.repair_reason || '' }).then(function(res) {
+    if (!res.ok) throw new Error((res.data && res.data.error) || 'сервер отказал');
+    p2Toast(r.gos + ' снята с ' + (r.seg.kind === 'maint' ? 'ТО' : 'ремонта') + ' - в Планировке отрезок закрыт', 'green');
+    mechLoad_(true);
+  }).catch(function(e) { p2Toast('Не сохранилось: ' + e.message, 'red'); });
+}
+
 function render() {
   updateFreshnessDisplays_(); // честно из последнего известного data_age_min, см. Этап 0.1
   checkDataFreshness(); // свежий опрос + плашка "обновление не проходит", см. Этап 0.1/0.3
@@ -9665,9 +10426,11 @@ function render() {
   applyRoleUI();
 
   if (isMechanicView_()) {
-    // applyRoleUI() уже сузил сайдбар и переключил на "Планировку" - здесь рендерить
-    // больше нечего (нет Личной страницы), но и ниже (renderGroup_ по вкладкам) не нужно -
-    // "Планировка" не часть RENDER_GROUPS_, у неё свой showPage-триггер (LP.init()).
+    // 08.09 - у механика теперь ЕСТЬ личная страница (plans/2026-09-08-chief-mechanic-long-haul-
+    // page.md, Влад отменил решение 02.09 "не нужна сейчас"). Своя ветка, не renderMyPage():
+    // у этой роли нет D.orders, данные - mechFleet_ (/api/mechanic/fleet). Ниже (renderGroup_
+    // по вкладкам) по-прежнему не нужно - "Планировка" не часть RENDER_GROUPS_.
+    renderMyPageMechanic_();
     return;
   }
 
@@ -9703,14 +10466,16 @@ function applyRoleUI() {
   // сломался бы, поэтому ветка manager/logist ниже эту роль не подхватывает вообще).
   if (isMechanicView_()) {
     if (sidebarLabel) sidebarLabel.textContent = previewing ? viewAsEntry.name : (D.mechanicName || 'Механик');
-    var mechAllowed_ = ['calculator', 'logistics-plan'];
+    // 08.09: + личная страница (plans/2026-09-08-chief-mechanic-long-haul-page.md), она же
+    // стартовая - механик открывает дашборд и первым делом видит, что стоит и почему.
+    var mechAllowed_ = ['my-page', 'calculator', 'logistics-plan'];
     document.querySelectorAll('.sidebar-nav-item').forEach(function(item) {
       item.style.display = mechAllowed_.indexOf(item.getAttribute('data-page')) >= 0 ? '' : 'none';
     });
     document.querySelectorAll('.sidebar-nav-section').forEach(function(s){ s.style.display = 'none'; });
     var mechActiveEl_ = document.querySelector('.page.active');
     var mechActiveId_ = mechActiveEl_ ? mechActiveEl_.id.replace(/^page-/, '') : null;
-    if (!mechActiveId_ || mechAllowed_.indexOf(mechActiveId_) < 0) showPage('logistics-plan');
+    if (!mechActiveId_ || mechAllowed_.indexOf(mechActiveId_) < 0) showPage('my-page', document.querySelector('.sidebar-nav-item[data-page="my-page"]'));
     applyMenuConfig_();   // кастом меню поверх ролевого фильтра (05.09), см. блок "Кастомизация меню"
     updateViewAsButton_();
     return;
@@ -9871,6 +10636,13 @@ function renderViewAsPanel_() {
 function setViewAs(name, type) {
   viewAsEntry = name ? { name: name, type: type } : null;
   myPagePeriod = null; // сброс "прошлого месяца" - иначе можно унести чужой кэш периода на нового человека
+  // сброс кэша страницы механика (08.09, найдено живьём Владом) - mechFleet_ теперь
+  // персонально-ограничен сервером (?person=/сессия механика, MECHANIC_SEGMENT_BY_SUR_), а
+  // сам объект НИКОГДА не обнулялся при переключении "Смотреть как" - переход на Самошкина
+  // после просмотра кого-то другого (или обычного вида) показывал СТАРЫЙ неограниченный
+  // ответ вместо свежего урезанного до длинномеров. mechLoad_ читает "!mechFleet_" как сигнал
+  // "нужен свежий запрос" - обнуляем здесь, а не гадаем, для кого был последний ответ.
+  mechFleet_ = null; mechLoadError_ = ''; mechDrawerGos_ = null; mechDrawerMode_ = 'view'; mechPending_ = null;
   var panel = document.getElementById('view-as-panel');
   if (panel) panel.style.display = 'none';
   render();
@@ -12566,6 +13338,11 @@ function assetOpenForm_(id) {
   document.getElementById('asset-docs-section').style.display = a ? '' : 'none';
   document.getElementById('asset-doc-error').style.display = 'none';
   if (a) assetDocsLoad_(a.id); else document.getElementById('asset-docs-list').innerHTML = '';
+  document.getElementById('asset-events-section').style.display = a ? '' : 'none';
+  document.getElementById('asset-event-error').style.display = 'none';
+  document.getElementById('asset-event-note').value = '';
+  document.getElementById('asset-event-date').value = new Date().toISOString().slice(0, 10);
+  if (a) assetEventsLoad_(a.id); else document.getElementById('asset-events-list').innerHTML = '';
   var bk = document.getElementById('asset-bk'), dr = document.getElementById('asset-drawer');
   bk.classList.add('show');
   setTimeout(function() { dr.classList.add('show'); }, 40);
@@ -12724,6 +13501,72 @@ function assetDocDelete_(id) {
     if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось удалить'; errEl.style.display = ''; return; }
     p2Toast('Файл удалён', 'amber');
     assetDocsLoad_(assetId);
+  }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+
+// ═══ ИСТОРИЯ МАШИНЫ (Влад, 09.09) - события по технике: переоформление собственника
+// (сервер пишет сам при смене юрлица/физлица в карточке), ручные заметки датой. Читается
+// из sprav_asset_events, событие может ссылаться на документ (СТС), по которому установлено.
+var ASSET_EVENT_TYPE_LABELS_ = { owner_change: 'Переоформление', note: '' };
+function assetEventsLoad_(assetId) {
+  var list = document.getElementById('asset-events-list');
+  list.innerHTML = '<div class="muted" style="font-size:12px">Загрузка…</div>';
+  fetchFromYardApi_('/sprav/asset_events', { asset_id: assetId }).then(function(r) {
+    if (assetEditId_ !== assetId) return;
+    if (!r.ok) { list.innerHTML = '<div style="font-size:12px;color:var(--red)">Не удалось загрузить историю</div>'; return; }
+    assetEventsPaint_(r.data.events || []);
+  }).catch(function() {
+    if (assetEditId_ !== assetId) return;
+    list.innerHTML = '<div style="font-size:12px;color:var(--red)">Нет соединения с сервером</div>';
+  });
+}
+function assetEventsPaint_(events) {
+  var list = document.getElementById('asset-events-list');
+  if (!events.length) { list.innerHTML = '<div class="muted" style="font-size:12px">Событий пока нет</div>'; return; }
+  list.innerHTML = events.map(function(e) {
+    var dt = e.event_date ? new Date(e.event_date).toLocaleDateString('ru-RU') : '';
+    var typeLabel = ASSET_EVENT_TYPE_LABELS_[e.event_type];
+    if (typeLabel === undefined) typeLabel = e.event_type || '';
+    var head = typeLabel ? '<b>' + pageEsc_(typeLabel) + '</b>' : '';
+    if (e.from_owner || e.to_owner) {
+      head += (head ? ': ' : '') + pageEsc_(e.from_owner || '(не указан)') + ' → ' + pageEsc_(e.to_owner || '(не указан)');
+    }
+    var row1 = '<div style="display:flex;align-items:baseline;gap:8px">'
+      + '<span class="mono" style="white-space:nowrap;color:var(--muted)">' + pageEsc_(dt) + '</span>'
+      + '<span style="flex:1;min-width:0">' + (head || pageEsc_(e.note || '')) + '</span>'
+      + '<button type="button" onclick="assetEventDelete_(' + Number(e.id) + ')" title="Удалить" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;line-height:1;padding:2px 4px">×</button>'
+      + '</div>';
+    var bits = [];
+    if (head && e.note) bits.push(pageEsc_(e.note));
+    if (e.doc_number) bits.push('СТС № ' + pageEsc_(e.doc_number));
+    var row2 = bits.length ? '<div class="muted" style="font-size:11px;margin-top:2px">' + bits.join(' · ') + '</div>' : '';
+    return '<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">' + row1 + row2 + '</div>';
+  }).join('');
+}
+function assetEventAdd_() {
+  var errEl = document.getElementById('asset-event-error');
+  errEl.style.display = 'none';
+  var assetId = assetEditId_;
+  if (!assetId) return;
+  var date = document.getElementById('asset-event-date').value;
+  var note = document.getElementById('asset-event-note').value.trim();
+  if (!date) { errEl.textContent = 'Укажите дату'; errEl.style.display = ''; return; }
+  if (!note) { errEl.textContent = 'Напишите, что произошло'; errEl.style.display = ''; return; }
+  postToYardApi_('/sprav/asset_event', { asset_id: assetId, event_date: date, note: note }).then(function(r) {
+    if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось сохранить'; errEl.style.display = ''; return; }
+    document.getElementById('asset-event-note').value = '';
+    p2Toast('Событие добавлено', 'green');
+    assetEventsLoad_(assetId);
+  }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+function assetEventDelete_(id) {
+  if (!confirm('Удалить событие из истории?')) return;
+  var assetId = assetEditId_;
+  var errEl = document.getElementById('asset-event-error');
+  postToYardApi_('/sprav/asset_event_delete', { id: id }).then(function(r) {
+    if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось удалить'; errEl.style.display = ''; return; }
+    p2Toast('Событие удалено', 'amber');
+    assetEventsLoad_(assetId);
   }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
 }
 
@@ -16623,12 +17466,9 @@ function renderCommercialHeadDebtPage_() {
   el.innerHTML = '<div class="card" style="margin-bottom:16px">' + html + '</div>';
 }
 
-// Состав "обычных" (не спецформула) отделов - ОБЩИЙ источник для renderSalesSalary() и
-// buildSalaryWorkbook_() (plans/2026-08-24-salary-excel-export.md), чтобы список членов
-// команды не разъезжался между экраном и Excel-экспортом (тот же класс риска, что уже дважды
-// ловили на TRAL_MANAGERS). Отдел Рыщанова сюда НЕ входит - его members зависит от
-// ALL_LOGISTS, которая считается только внутри renderSalesSalary() (нужен useNewRules), и в
-// экспорт (только коммерческий отдел) он не входит вообще.
+// Состав "обычных" (не спецформула) отделов - используется renderSalesSalary(). Отдел
+// Рыщанова сюда НЕ входит - его members зависит от ALL_LOGISTS, которая считается только
+// внутри renderSalesSalary() (нужен useNewRules).
 var COMMERCIAL_DEPTS = [
   { color:'#1D9E75', bgA:'29,158,117', label:'Отдел Ахтамовой',  head:'ахтамова',  headName:'Ахтамова Лиана',  ownSales:true,  specialHead:false,
     members:['ахтамова','цегельников','гуштюк','дербенцева','шейко'] },
@@ -17580,11 +18420,13 @@ function renderSalesSalary() {
   summaryHtml += '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">';
   summaryHtml += '<div style="font-size:14px;font-weight:600">Фонд оплаты труда - коммерческий отдел</div>';
   summaryHtml += '<div style="display:flex;align-items:center;gap:16px">';
-  // Экспорт в Excel (plans/2026-08-24-salary-excel-export.md) - только коммерческий отдел
-  // (Ахтамова/Гусейнова), только для действующих (useNewRules) периодов - см. проверку внутри
-  // exportSalaryToExcel_.
-  summaryHtml += '<button onclick="exportSalaryToExcel_()" style="background:rgba(29,158,117,.12);border:1px solid rgba(29,158,117,.35);' +
-    'color:#1D9E75;padding:7px 14px;border-radius:7px;font-size:12px;cursor:pointer;white-space:nowrap">📤 Экспорт в Excel</button>';
+  // Выгрузка для печати (07.09, замена Excel-экспорта - Влад: "как сейчас эксель уберу мне
+  // не нравится... нужна выгрузка в том же формате и принципе как сделано у водителей такая
+  // табличка понятная") - тот же паттерн, что "Зарплата - По машинистам"
+  // (machinistBuildPrintHtml_): самостоятельный HTML-файл, Ctrl+P, БЕЗ формул/пересчёта -
+  // просто снимок того, что уже на экране. См. salaryPrintExport_() ниже.
+  summaryHtml += '<button onclick="salaryPrintExport_()" style="background:rgba(29,158,117,.12);border:1px solid rgba(29,158,117,.35);' +
+    'color:#1D9E75;padding:7px 14px;border-radius:7px;font-size:12px;cursor:pointer;white-space:nowrap">🖨️ Выгрузить для печати</button>';
   summaryHtml += '<div style="font-size:22px;font-weight:700;color:#1D9E75">'+fr(totalPayroll)+'</div>';
   summaryHtml += '</div></div>';
   summaryHtml += marginBannerHtml+warningHtml+'</div>';
@@ -17592,174 +18434,68 @@ function renderSalesSalary() {
   el.innerHTML = summaryHtml + html;
 }
 
-// ── ЭКСПОРТ ЗАРПЛАТЫ В EXCEL (plans/2026-08-24-salary-excel-export.md) ──────────────────────
-// Влад, 2026-08-24: "нужна возможность выгружать в эксель данные со страницы зарплата, в
-// екселе должна сохраняться логика и должны быть прописаны формулы". Согласовано: снимок
-// ТЕКУЩЕГО периода (базовые цифры - числа, каждый шаг расчёта - настоящая Excel-формула,
-// ссылающаяся на них), только коммерческий отдел (Ахтамова/Гусейнова, без логистов/Рыщанова/
-// скрытой строки Цуцурина).
-//
-// ПРИНЦИП: эта функция НЕ пересчитывает бизнес-логику самостоятельно - она берёт ГОТОВЫЕ,
-// уже отрендеренные на экране объекты (calcHead/calcMgr, ТЕ ЖЕ вызовы, что использует
-// renderSalesSalary()) и раскладывает их числа по ячейкам + формулы, которые обязаны при
-// пересчёте Excel'ем дать то же число, что уже на экране. Если когда-нибудь бизнес-логика
-// (calcMgr/calcHead/okladByRev/mgrRate) изменится - экспорт автоматически подхватит новые
-// цифры (он вызывает те же функции), но конкретные ФОРМУЛЫ ниже (тарифная сетка оклада,
-// проценты, пороги) захардкожены под правила, действующие на 2026-08-24 - при следующем
-// изменении порогов/ставок нужно синхронно поправить и здесь.
+// ── ВЫГРУЗКА ЗАРПЛАТЫ ДЛЯ ПЕЧАТИ ─────────────────────────────────────────────────────────
+// Влад, 2026-08-24, первая версия - "нужна возможность выгружать в эксель... должны быть
+// прописаны формулы" (Excel с живыми формулами, только коммерческий отдел). 07.09, тот же
+// Влад - "как сейчас эксель убери мне не нравится... нужна выгрузка в том же формате и
+// принципе как сделано у водителей такая табличка понятная" - т.е. канон "Выгрузка для
+// печати" (см. machinistBuildPrintHtml_ на странице "Зарплата - По машинистам"):
+// самостоятельный скачиваемый HTML-файл, Ctrl+P - и, в отличие от Excel-версии, ЭТО НЕ
+// пересчитанная копия бизнес-логики со своими формулами (риск разъехаться с настоящим
+// расчётом - тот же класс, что уже дважды ронял зарплату Сурковой/INTERNAL_CLIENTS, см. план
+// ниже), а ПРОСТОЙ СНИМОК того, что уже отрендерено на экране (#salary-content) - те же
+// карточки отделов, что видит Влад, включая Рыщанова/логистов/скрытую строку Цуцурина (в
+// Excel-версии их не было - там был только коммерческий отдел). Формулы Excel-версии
+// подробно описаны в plans/2026-08-24-salary-excel-export.md - план помечен заменённым.
+function salaryPrintExport_() {
+  var content = document.getElementById('salary-content');
+  if (!content || !content.innerHTML.trim()) { p2Toast('Нет данных для выгрузки', 'amber'); return; }
+  var period = (D && D.orders && D.orders.period) || '';
+  var periodLabel = period ? formatMonthLabel(period) : 'текущий месяц';
+  var now = new Date();
+  var stamp = String(now.getDate()).padStart(2, '0') + '.' + String(now.getMonth() + 1).padStart(2, '0') + '.' +
+              now.getFullYear() + ' ' + String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
 
-function xlCell_(v) {
-  if (typeof v === 'number') return { t: 'n', v: v };
-  return { t: 's', v: String(v == null ? '' : v) };
-}
-// Формула + закэшированное значение. SheetJS МОЛЧА ВЫБРАСЫВАЕТ ячейку-формулу без 'v' при
-// записи файла (проверено на реальной библиотеке 2026-08-24, до фикса файл открывался бы с
-// пустыми ячейками вместо формул) - ровно так работает и настоящий Excel, где у формулы
-// всегда есть последнее вычисленное значение рядом с самой формулой. 'val' - ГОТОВОЕ число
-// из calcMgr/calcHead_ (та же переменная, что уже показана на экране), а не пересчитанное
-// заново - гарантирует, что открытый файл и экран совпадают буква в букву без пересчёта Excel.
-function xlFormula_(f, val) {
-  return { t: 'n', f: f, v: val };
-}
+  // Печатная тема - светлая (концы значения из :root[data-theme="light"] выше по файлу) +
+  // минимальный набор компонентов (.card/.tbl/.kpi), которые реально встречаются внутри
+  // #salary-content (renderCommercialDeptCardHtml_/renderRyschanowDeptCardHtml_ и т.д.) -
+  // на бумаге тёмная тема дашборда не нужна, тот же принцип, что и у machinistBuildPrintHtml_.
+  var html = '<!doctype html><html lang="ru"><head><meta charset="utf-8">' +
+    '<title>Зарплата - Коммерческий отдел ' + mdEsc_(periodLabel) + '</title><style>' +
+    ':root{--bg2:#ffffff;--bg3:#e2e7ed;--border:rgba(15,22,35,0.16);--text:#0f1623;--muted:#4a5568;' +
+    '--ink:15,22,35;--green:#1D9E75;--red:#E24B4A;--amber:#EF9F27;--blue:#378ADD;--purple:#7F77DD;' +
+    '--tint-green:#0a5940;--tint-blue:#164a86;--tint-amber:#6f480d;--tint-purple:#453d8c;--tint-red:#8a2c2b;--tint-orange:#78430c;' +
+    '--radius:12px}' +
+    '@page{size:A4 landscape;margin:12mm}' +
+    'body{font-family:Arial,Helvetica,sans-serif;font-size:12px;color:var(--text);background:#fff;margin:0;padding:14px}' +
+    'h1{font-size:16pt;margin:0 0 2px}.sub{color:var(--muted);font-size:11px;margin-bottom:14px}' +
+    '.card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;page-break-inside:avoid}' +
+    '.kpi{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px}' +
+    '.kpi-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;font-weight:500}' +
+    '.kpi-value{font-size:18px;font-weight:600;color:var(--text)}' +
+    '.kpi-value.green{color:var(--green)}.kpi-value.red{color:var(--red)}.kpi-value.amber{color:var(--amber)}' +
+    '.tbl{width:100%;border-collapse:collapse;font-size:11px;margin-top:6px}' +
+    '.tbl th{text-align:left;padding:6px 8px;color:var(--muted);font-weight:500;font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border);white-space:nowrap}' +
+    '.tbl td{padding:6px 8px;border-bottom:1px solid rgba(var(--ink),.06);color:var(--text)}' +
+    '.tbl tr:last-child td{border-bottom:none}' +
+    '.tbl tfoot td{padding:6px 8px;border-top:2px solid var(--border);color:var(--text);font-size:10.5px;background:var(--bg3)}' +
+    '.tbl .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}' +
+    '.tbl .green{color:var(--tint-green)}.tbl .red{color:var(--tint-red)}.tbl .amber{color:var(--tint-amber)}' +
+    '.tbl .orange{color:var(--tint-orange)}.tbl .blue{color:var(--tint-blue)}.tbl .muted{color:var(--muted);font-size:10px}' +
+    'button{display:none}' + // кнопка "Выгрузить для печати" сама попадает в снимок - на бумаге не нужна
+    '</style></head><body>' +
+    '<h1>Зарплата - Коммерческий отдел</h1>' +
+    '<div class="sub">' + mdEsc_(periodLabel) + ' &middot; выгружено ' + stamp + '</div>' +
+    content.innerHTML +
+    '</body></html>';
 
-// Строит один лист (один отдел) как массив строк ячеек + возвращает объект листа SheetJS.
-// dept - запись из COMMERCIAL_DEPTS. getM/getL/useNewRules - как в renderSalesSalary().
-function buildDeptSheet_(dept, getM, getL, useNewRules) {
-  var rows = [];
-  var HEADERS = ['Сотрудник', 'Оборот (свой+найм)', 'Своя выручка', 'База % своего парка (выручка минус затраты 1С)',
-    'Маржа найма квалиф. (≥23%)', 'Оклад', '% своего парка', '% найма (8%)', 'Премия ≥15М обор.', 'ИТОГО'];
-  rows.push(HEADERS.map(xlCell_));
-
-  // ── Строки команды (без руководителя) ──────────────────────────────────────────────────
-  var memberRowStart = rows.length; // 0-based индекс строки (после заголовка)
-  var memberSurs = dept.members.filter(function(s){ return s !== dept.head; });
-  var memberFundSum = 0; // сумма total_sal команды - копится тут же, чтобы не вызывать calcMgr дважды
-  memberSurs.forEach(function(sur) {
-    var c = calcMgr(sur, true, getM, getL, useNewRules);
-    if (!c || !c.total) return; // нет данных/уволен - как на экране, строку не рисуем
-    memberFundSum += c.total_sal;
-    var r = rows.length; // текущая строка (0-based)
-    var rowNum = r + 1;  // Excel 1-based
-    var rate = mgrRate(sur);
-    rows.push([
-      xlCell_(capName(sur)),
-      xlCell_(c.total),
-      xlCell_(c.ownRev),
-      xlCell_(c.ownProfitBase),
-      xlCell_(c.hiredMargin),
-      xlFormula_('IF(B'+rowNum+'>=10000000,150000,IF(B'+rowNum+'>=8000000,100000,IF(B'+rowNum+'>=5000000,50000,IF(B'+rowNum+'>=2000000,30000,0))))', c.oklad),
-      xlFormula_('ROUND(D'+rowNum+'*'+rate+',0)', c.ownComm),
-      xlFormula_('ROUND(E'+rowNum+'*0.08,0)', c.hiredBonus),
-      xlFormula_('IF(B'+rowNum+'>=15000000,100000,0)', c.bonus15m),
-      xlFormula_('F'+rowNum+'+G'+rowNum+'+H'+rowNum+'+I'+rowNum, c.total_sal),
-    ]);
-  });
-  var memberRowEnd = rows.length - 1; // последняя строка команды (0-based), может быть < memberRowStart если команда пуста
-
-  // ── Личные продажи руководителя (includeOklad:false - как на экране) ──────────────────
-  var headHM = dept.ownSales ? calcMgr(dept.head, false, getM, getL, useNewRules) : null;
-  var headHMRow = null;
-  if (headHM) {
-    var r2 = rows.length, rowNum2 = r2 + 1;
-    var rate2 = mgrRate(dept.head);
-    headHMRow = rowNum2;
-    rows.push([
-      xlCell_(capName(dept.head) + ' - личные продажи'),
-      xlCell_(headHM.total),
-      xlCell_(headHM.ownRev),
-      xlCell_(headHM.ownProfitBase),
-      xlCell_(headHM.hiredMargin),
-      xlCell_(0), // оклад по личным продажам не начисляется (includeOklad:false) - см. calcMgr
-      xlFormula_('ROUND(D'+rowNum2+'*'+rate2+',0)', headHM.ownComm),
-      xlFormula_('ROUND(E'+rowNum2+'*0.08,0)', headHM.hiredBonus),
-      xlFormula_('IF(B'+rowNum2+'>=15000000,100000,0)', headHM.bonus15m),
-      xlFormula_('F'+rowNum2+'+G'+rowNum2+'+H'+rowNum2+'+I'+rowNum2, headHM.total_sal),
-    ]);
-  }
-
-  // ── Команда руководителя (агрегат calcHead - формулы SUM/COUNTIF по диапазону команды) ──
-  var headHC = calcHead_(dept.members, dept.head, useNewRules, getM);
-  var teamRowNum = rows.length + 1;
-  var hasTeam = memberRowEnd >= memberRowStart;
-  var memberRange = hasTeam ? ('B'+(memberRowStart+1)+':B'+(memberRowEnd+1)) : null;
-  var memberRangeD = hasTeam ? ('D'+(memberRowStart+1)+':D'+(memberRowEnd+1)) : null;
-  var memberRangeE = hasTeam ? ('E'+(memberRowStart+1)+':E'+(memberRowEnd+1)) : null;
-  rows.push([
-    xlCell_(capName(dept.head) + ' - команда (0.8% выручки + 2% маржи найма + премия за укомплект.)'),
-    xlCell_(headHC.deptRev),
-    xlCell_(headHC.deptOwnRev),
-    xlCell_(headHC.deptOwnProfitBase),
-    xlCell_(headHC.deptQualMargin),
-    xlCell_(20000), // оклад руководителя - фикс, не зависит от порогов
-    xlFormula_(hasTeam ? 'ROUND(SUM('+memberRangeD+')*0.008,0)' : '0', headHC.pct08),
-    xlFormula_(hasTeam ? 'ROUND(SUM('+memberRangeE+')*0.02,0)' : '0', headHC.margin2),
-    xlFormula_(hasTeam ? 'IF(COUNTIF('+memberRange+',">0")>=4,COUNTIF('+memberRange+',">=2000000")*20000,0)' : '0', headHC.mgrBonus),
-    xlFormula_('F'+teamRowNum+'+G'+teamRowNum+'+H'+teamRowNum+'+I'+teamRowNum, headHC.total),
-  ]);
-
-  // ── Премия за объём отдела (порог 30М, 10т за каждые 10М) ──────────────────────────────
-  var volRowNum = rows.length + 1;
-  var deptRevTotalFormula = 'B'+teamRowNum + (headHMRow ? '+B'+headHMRow : '');
-  var deptRevTotal = headHC.deptRev + (headHM ? headHM.total : 0);
-  var volumeBonus = calcVolumeBonus(deptRevTotal); // та же функция, что и на экране
-  rows.push([
-    xlCell_('Премия за объём отдела (выручка ≥30М, 10т за каждые полных 10М)'),
-    xlFormula_(deptRevTotalFormula, deptRevTotal), // "Оборот" колонка тут = выручка отдела целиком, для наглядности
-    xlCell_(''), xlCell_(''), xlCell_(''),
-    xlCell_(''), xlCell_(''), xlCell_(''), xlCell_(''),
-    xlFormula_('IF(B'+volRowNum+'<30000000,0,INT(B'+volRowNum+'/10000000)*10000)', volumeBonus),
-  ]);
-
-  // ── ИТОГО по отделу ──────────────────────────────────────────────────────────────────
-  var totalRowNum = rows.length + 1;
-  var sumParts = ['J'+teamRowNum, (headHMRow ? 'J'+headHMRow : '0'), 'J'+volRowNum];
-  var deptFund = headHC.total + (headHM ? headHM.total_sal : 0) + volumeBonus + memberFundSum;
-  if (hasTeam) sumParts.push('SUM(J'+(memberRowStart+1)+':J'+(memberRowEnd+1)+')');
-  rows.push([
-    xlCell_('ИТОГО ПО ОТДЕЛУ'), xlCell_(''), xlCell_(''), xlCell_(''), xlCell_(''),
-    xlCell_(''), xlCell_(''), xlCell_(''), xlCell_(''),
-    xlFormula_(sumParts.join('+'), deptFund),
-  ]);
-
-  // Собираем worksheet вручную (не aoa_to_sheet - тому формулы не передать напрямую)
-  var ws = {};
-  var maxCol = 0;
-  rows.forEach(function(rowCells, r) {
-    maxCol = Math.max(maxCol, rowCells.length - 1);
-    rowCells.forEach(function(cellObj, c) {
-      ws[XLSX.utils.encode_cell({ r: r, c: c })] = cellObj;
-    });
-  });
-  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rows.length - 1, c: maxCol } });
-  ws['!cols'] = [{ wch: 42 }, { wch: 16 }, { wch: 14 }, { wch: 20 }, { wch: 18 }, { wch: 11 }, { wch: 12 }, { wch: 12 }, { wch: 13 }, { wch: 13 }];
-  return ws;
-}
-
-function exportSalaryToExcel_() {
-  if (!D || !D.orders) { p2Toast('Нет данных для экспорта', 'amber'); return; }
-  var useNewRules = isNewRulesPeriod(D.orders.period);
-  if (!useNewRules) {
-    p2Toast('Экспорт доступен только для периодов с июля 2026 (действующие правила расчёта). ' +
-      'Формулы в файле написаны под текущие правила - для более старых периодов действовала другая формула.');
-    return;
-  }
-  var allMgrs = D.orders.by_manager || [];
-  var allLogs = D.orders.by_logist || [];
-  var mgrIdx = {}, logIdx = {};
-  allMgrs.forEach(function(m) { mgrIdx[(m.name||'').trim().split(' ')[0].toLowerCase()] = m; });
-  allLogs.forEach(function(l) { logIdx[(l.name||'').trim().split(' ')[0].toLowerCase()] = l; });
-  function getM(sur) { return mgrIdx[sur.toLowerCase()] || null; }
-  function getL(sur) { return logIdx[sur.toLowerCase()] || null; }
-
-  var wb = XLSX.utils.book_new();
-  COMMERCIAL_DEPTS.forEach(function(dept) {
-    var ws = buildDeptSheet_(dept, getM, getL, useNewRules);
-    XLSX.utils.book_append_sheet(wb, ws, dept.headName.split(' ')[0]);
-  });
-
-  var period = D.orders.period || '';
-  var fname = 'Зарплата_' + (period || 'период') + '.xlsx';
-  XLSX.writeFile(wb, fname);
+  var blob = new Blob(['﻿' + html], { type: 'text/html;charset=utf-8' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'Зарплата ' + periodLabel + '.html';
+  document.body.appendChild(a); a.click();
+  setTimeout(function() { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  p2Toast('Файл скачан - откройте и печатайте (Ctrl+P)', 'green');
 }
 
 function renderSalesLog() {
@@ -19406,7 +20142,13 @@ function showPage(id, el) {
   // страницу, где показан заказчик, и перерисовывает её, когда придёт.
   if (id === 'clients') cpEnsureLights_(function() { if (typeof renderClientsBody === 'function') renderClientsBody(); });
   if (id === 'receipts') cpEnsureLights_(function() { if (typeof renderReceipts === 'function') renderReceipts(); });
-  if (id === 'my-page') cpEnsureLights_(function() { if (typeof renderMyPage === 'function') renderMyPage(); });
+  // 08.09: до появления роли механика my-page умел рендериться только renderMyPage() -
+  // с тех пор у механика своя ветка (renderMyPageMechanic_, isMechanicView_), но ЭТОТ вызов
+  // (карта связей 1С, срабатывает при каждом реальном заходе на my-page) звал renderMyPage()
+  // безусловно - механику (и admin-предпросмотру "как механик") подсовывало страницу
+  // менеджера ("Менеджер по продажам", чужой дропдаун сотрудника) вместо его собственной.
+  // Найдено живьём Владом - "Смотреть как -> Самошкин", клик по "Личная страница".
+  if (id === 'my-page') cpEnsureLights_(function() { if (isMechanicView_()) { if (typeof renderMyPageMechanic_ === 'function') renderMyPageMechanic_(); } else if (typeof renderMyPage === 'function') renderMyPage(); });
   if (id === 'crm') loadCrmData();
   if (id === 'global-stats') loadGlobalStatsData();
   if (id === 'order-plan') loadOrderPlanData();
@@ -19940,11 +20682,14 @@ var CRM = (function () {
   var S = {
     inited: false, view: 'board', deals: [], summary: null, employees: null,
     me: (function () { try { return localStorage.getItem('crmMyExtension') || null; } catch (e) { return null; } })(),
-    kpiFilter: null,
+    kpiFilter: null, colSort: {}, // {stageKey: 'amount'} - крупная сумма колонки кликабельна (Влад, 08.09: "как в Битриксе")
+    collapsedCols: (function () { try { return JSON.parse(localStorage.getItem('crmCollapsedCols') || '{}'); } catch (e) { return {}; } })(),
     chats: [], chatsLoaded: false, activeKey: null, thread: null, filter: 'all',
     extra: { channel: null, resp: null, stage: null, overdue: false }, search: '',
     pollTimer: null, badgeTimer: null, unread: 0, drawerId: null, drawerDeal: null, lastMove: null,
     lostPending: null, pendingLocal: 0, atBottom: true, clockTimer: null,
+    audioEntry: null, audioEl: null, audioUrl: null, audioReqSeq_: 0, // текущая проигрываемая запись звонка (playRecording)
+    templates: null, // кастомные шаблоны ответов ЭТОГО менеджера (сервер) - null пока не загружены, см. ensureTemplates
   };
 
   // ── Утилиты ─────────────────────────────────────────────────────────────────────────
@@ -19955,6 +20700,40 @@ var CRM = (function () {
   function fmtPhone(p) { var s = String(p || ''); if (/^7\d{10}$/.test(s)) return '+7 ' + s.slice(1, 4) + ' ' + s.slice(4, 7) + '-' + s.slice(7, 9) + '-' + s.slice(9, 11); return isAvitoKey(s) ? '' : s; }
   function telHref(p) { var d = String(p || '').replace(/\D/g, ''); return d.length >= 10 ? 'tel:+' + d : ''; }
   function initials(name) { var p = String(name || '').trim().split(/\s+/).filter(Boolean); if (!p.length) return '?'; return (p.length === 1 ? p[0][0] : (p[0][0] + p[1][0])).toUpperCase(); }
+  // Персональный цвет кружка-инициалов менеджера (Влад 09.09: "у каждого кружка свой
+  // цвет") - фиксированная палитра, НЕ пересекается с 5 семантическими токенами ГОСТа
+  // (--green/--red/--amber/--blue/--purple уже заняты смыслом "хорошо/плохо/риск/данные/
+  // ответственный" - DESIGN_SYSTEM.md раздел 1, "цвет = смысл, никогда не декорация" -
+  // здесь смысл другой: цвет = личность, не оценка). Детерминированный хэш по добавочному
+  // номеру (стабильнее имени - не меняется при исправлении опечатки в ФИО) - один и тот же
+  // человек всегда получает один и тот же цвет, на любой карточке и после перезагрузки.
+  var AVATAR_PALETTE_ = ['#D97757', '#C2609E', '#6FA8A0', '#B08A3E', '#7A8B99', '#9B6BC7', '#5E6FA3', '#4FA0AE', '#C9A227', '#C77D97'];
+  function avatarColor_(key) {
+    var s = String(key || '');
+    var h = 0;
+    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return AVATAR_PALETTE_[h % AVATAR_PALETTE_.length];
+  }
+  // Метка источника на карточке (Влад 09.09: "где написано авито, должно быть авито чат
+  // или авито звонок, у каждого источника свой цвет, другие источники тоже подписаны") -
+  // раньше был жёсткий бинарный выбор ("Авито" / "Звонок"), даже когда сделка avito была
+  // заведена звонком в приложении (msg_type appCall), а не сообщением - то же слово
+  // "Авито" на обоих случаях стирало разницу. d.last_msg_type уже приходит с /crm/deals
+  // (последнее сообщение по клиенту) - им и различаем чат/звонок ВНУТРИ источника avito.
+  // Цвета - НЕ пересекаются с 5 семантическими токенами ГОСТа (та же логика, что у
+  // AVATAR_PALETTE_ выше - здесь смысл "какой канал", не оценка) и друг с другом.
+  // Неизвестный source (сейчас в базе только 'avito'/'call', но не хардкодим намертво) -
+  // не молчим под общим словом, подписываем как есть, серым по умолчанию.
+  var SOURCE_LABELS_ = {
+    avito_chat: { label: 'Авито чат', color: '#4FA0AE' },
+    avito_call: { label: 'Авито звонок', color: '#9B6BC7' },
+    call: { label: 'Звонок', color: '#B08A3E' },
+  };
+  function sourceLabel_(d) {
+    var key = d.source === 'avito' ? (d.last_msg_type === 'appCall' ? 'avito_call' : 'avito_chat') : (d.source || 'call');
+    var def = SOURCE_LABELS_[key];
+    return def || { label: key.charAt(0).toUpperCase() + key.slice(1), color: null };
+  }
   function surname3(name) { var p = String(name || '').trim().split(/\s+/).filter(Boolean); if (!p.length) return ''; var sn = p.length > 1 ? p[p.length - 1] : p[0]; return sn.slice(0, 3).toUpperCase(); }
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
   var MONTHS = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
@@ -20007,6 +20786,8 @@ var CRM = (function () {
     stage: '<path d="M3 6h14M3 10h10M3 14h6"/>',
     money: '<circle cx="10" cy="10" r="7"/><path d="M8 12.5c.4.8 1.2 1.2 2.1 1.2 1.3 0 2.1-.7 2.1-1.6 0-2.2-4.2-1.2-4.2-3.4 0-.9.8-1.6 2.1-1.6.9 0 1.6.4 2 1M10 5.5v1.5M10 13.5V15"/>',
     note: '<path d="M5 3.5h7l3 3v10H5z"/><path d="M12 3.5v3h3M7.5 10h5M7.5 13h3"/>',
+    play: '<path d="M6.5 4.5v11l9-5.5z"/>',
+    pause: '<rect x="6" y="4.5" width="3" height="11" rx="0.8"/><rect x="11" y="4.5" width="3" height="11" rx="0.8"/>',
   };
   function ico(name, cls) { return '<svg class="' + (cls || '') + '" ' + A + '>' + (ICO[name] || '') + '</svg>'; }
   function fillIcons(root) { (root || document).querySelectorAll('[data-ico]').forEach(function (n) { n.innerHTML = ico(n.getAttribute('data-ico')); n.style.display = 'inline-flex'; n.style.alignItems = 'center'; }); }
@@ -20037,6 +20818,7 @@ var CRM = (function () {
       updateMeLabel();
       updatePushButton();
       autoMeForManager();
+      ensureTemplates(); // прогрев - к первому открытию композера список уже готов
     }
     load();
   }
@@ -20059,7 +20841,7 @@ var CRM = (function () {
       if (!rd.ok) { loading.textContent = 'Не удалось загрузить CRM: ' + ((rd.data && rd.data.error) || 'ошибка сервера'); return; }
       S.deals = rd.data.deals || [];
       S.summary = rs.ok ? rs.data : S.summary;
-      renderKpis(); renderBoard();
+      renderKpis(); renderLeaders(); renderBoard();
       loading.style.display = 'none'; body.style.display = '';
       if (S.view === 'chats') loadChats(true);
       refreshBadge();
@@ -20108,7 +20890,7 @@ var CRM = (function () {
     el('kb-board').addEventListener('scroll', closeMenu);
     document.addEventListener('visibilitychange', function () { if (!document.hidden && page.classList.contains('active')) { refreshBadge(); if (S.view === 'chats') loadChats(false); } });
     // Живое время в списке/сводке - обязано тикать (ГОСТ раздел 0 п.6)
-    if (!S.clockTimer) S.clockTimer = setInterval(function () { if (page.classList.contains('active') && !document.hidden) { if (S.view === 'chats') renderList(); renderKpis(); } }, 60000);
+    if (!S.clockTimer) S.clockTimer = setInterval(function () { if (page.classList.contains('active') && !document.hidden) { if (S.view === 'chats') renderList(); renderKpis(); renderLeaders(); } }, 60000);
   }
 
   // ── Сводка ─────────────────────────────────────────────────────────────────────────
@@ -20132,11 +20914,34 @@ var CRM = (function () {
     box.querySelectorAll('.kpi').forEach(function (t) { t.onclick = function () { kpiClick(t.getAttribute('data-kpi')); }; });
     // Слой света пересоздаётся движком initCursorLight_ сам при следующем движении мыши
   }
+  // Топ менеджеров по сумме закрытых сделок (Влад, 08.09: "лидеры успешных сделок - все
+  // видят, кто на какую сумму закрыл") - клон bullet-грамматики renderMgrList (главная
+  // страница), без личной засечки плана (в CRM нет персонального плана по сделкам). Сервер
+  // уже отдаёт только тех, кто реально закрыл хоть что-то, за текущий месяц (leaderRows,
+  // HAVING SUM > 0) - Влад: "места мало", список короткий сам по себе, фронт ничего не режет.
+  // Пусто - карточка схлопывается в display:none (класс has-data), а не показывает нулевые
+  // строки - до первой реальной победы блока просто нет на экране.
+  function renderLeaders() {
+    var box = el('crm-leaders'); if (!box) return;
+    var leaders = (S.summary && S.summary.leaders) || [];
+    if (!leaders.length) { box.classList.remove('has-data'); box.innerHTML = ''; return; }
+    box.classList.add('has-data');
+    var maxVal = leaders.reduce(function (m, l) { return Math.max(m, l.amount || 0); }, 0) || 1;
+    box.innerHTML = '<div class="crmldr-head">Топ менеджеров - сумма закрытых сделок</div>' +
+      leaders.map(function (l) {
+        var surname = String(l.name || '').trim().split(' ').pop();
+        var barW = Math.min(100, (l.amount || 0) / maxVal * 100);
+        return '<div class="crmldr-row" title="' + esc(l.name) + '">' +
+          '<span class="crmldr-name">' + esc(surname) + '</span>' +
+          '<div class="crmldr-track"><div class="crmldr-barwrap"><div class="crmldr-bar" style="width:' + barW.toFixed(1) + '%"></div></div></div>' +
+          '<span class="crmldr-val">' + shortMoney(l.amount) + '</span></div>';
+      }).join('');
+  }
   function plural(n, a, b, c) { n = Math.abs(n) % 100; var n1 = n % 10; if (n > 10 && n < 20) return c; if (n1 > 1 && n1 < 5) return b; if (n1 === 1) return a; return c; }
   function kpiClick(key) {
     if (key === 'waiting') { showView('chats'); setFilter('waiting'); return; }
     S.kpiFilter = S.kpiFilter === key ? null : key;
-    renderKpis(); renderBoard();
+    renderKpis(); renderLeaders(); renderBoard();
     if (S.kpiFilter) toast(key === 'stalled' ? 'Показаны только зависшие сделки' : key === 'missed' ? 'Показаны сделки с недозвоном сегодня' : key === 'won' ? 'Выигранные этого месяца - в шторке сделки, доска показывает открытые' : 'Показаны все открытые сделки', 'amber');
   }
 
@@ -20153,7 +20958,8 @@ var CRM = (function () {
   }
   function dealTitle(d) { return d.client_company || d.client_name || fmtPhone(d.client_phone) || 'Клиент Авито'; }
   function cardHtml(d) {
-    var fr = freshness(d);
+    var isWon = d.stage === 'won', isLost = d.stage === 'lost', isTerm = isWon || isLost;
+    var fr = isTerm ? '' : freshness(d); // свежесть/зависание не имеет смысла у закрытой сделки
     var cargo = [];
     if (d.cargo_type) cargo.push('<b>' + esc(d.cargo_type) + '</b>');
     if (d.route_from) cargo.push(esc(d.route_from) + (d.route_to ? ' → ' + esc(d.route_to) : ''));
@@ -20161,48 +20967,134 @@ var CRM = (function () {
     var meta = [];
     if (d.cargo_weight_tons) meta.push(esc(weight(d.cargo_weight_tons)));
     if (d.wanted_date) meta.push(esc(fmtDateRu(d.wanted_date)));
-    if (!meta.length) meta.push(esc(fmtListTime(d.updated_at)));
-    var chan = d.source === 'avito' ? 'Авито' : 'Звонок';
+    if (!meta.length) meta.push(esc(fmtListTime(isTerm ? d.closed_at || d.updated_at : d.updated_at)));
+    var src = sourceLabel_(d);
+    var chan = '<span class="kb-chan"' + (src.color ? ' style="color:' + src.color + ';border-color:color-mix(in srgb,' + src.color + ' 45%,var(--border))"' : '') + '>' + esc(src.label) + '</span>';
     var unread = Number(d.unread_count || 0);
-    var resp = d.responsible_name ? '<span class="kb-ava" title="' + esc(d.responsible_name) + '">' + esc(initials(d.responsible_name)) + '</span>' : '<span class="kb-ava is-none" title="Без ответственного">?</span>';
-    return '<article class="kb-card ' + fr + (S.drawerId === d.id ? ' is-open' : '') + '" data-id="' + d.id + '" tabindex="0" title="' + esc(fr === 'kb-stale' ? 'Зависла: без движения дольше ' + stallDays(d.stage) + ' дн.' : fr === 'kb-wait' ? 'Клиент ждёт ответа больше 2 часов' : '') + '">' +
-      '<header class="kb-card-top"><span class="kb-client">' + esc(dealTitle(d)) + '</span><span class="kb-pulse"></span></header>' +
+    var resp = d.responsible_name ? '<span class="kb-ava" style="background:' + avatarColor_(d.responsible_extension || d.responsible_name) + '" title="' + esc(d.responsible_name) + '">' + esc(initials(d.responsible_name)) + '</span>' : '<span class="kb-ava is-none" title="Без ответственного">?</span>';
+    // Статус-маркер: пульс свежести у открытых, галочка у выигранных, крестик у отказов
+    // (канон mx-won-check из превью - examples/design-reference-kanban.html).
+    var statusMark = isWon ? '<span class="kb-won-check" title="Сделка успешна">' + ico('check') + '</span>'
+      : isLost ? '<span class="kb-lost-mark" title="Отказ">' + ico('close') + '</span>'
+      : '<span class="kb-pulse"></span>';
+    var lossLine = (isLost && d.loss_reason) ? '<div class="kb-card-loss">' + esc(d.loss_reason) + '</div>' : '';
+    return '<article class="kb-card ' + fr + (isWon ? ' kb-won-style' : '') + (isLost ? ' kb-lost-style' : '') + (S.drawerId === d.id ? ' is-open' : '') + '" data-id="' + d.id + '" tabindex="0" title="' + esc(fr === 'kb-stale' ? 'Зависла: без движения дольше ' + stallDays(d.stage) + ' дн.' : fr === 'kb-wait' ? 'Клиент ждёт ответа больше 2 часов' : '') + '">' +
+      '<header class="kb-card-top"><span class="kb-client">' + esc(dealTitle(d)) + '</span>' + statusMark + '</header>' +
       '<div class="kb-cargo">' + cargoLine + '</div>' +
-      '<div class="kb-meta">' + meta.map(function (m) { return '<span class="kb-num">' + m + '</span>'; }).join('<span class="kb-dotsep"></span>') + '<span class="kb-chan">' + chan + '</span></div>' +
+      '<div class="kb-meta">' + meta.map(function (m) { return '<span class="kb-num">' + m + '</span>'; }).join('<span class="kb-dotsep"></span>') + chan + '</div>' +
+      lossLine +
       '<footer class="kb-card-bot"><span class="kb-sum' + (Number(d.amount) ? '' : ' is-empty') + '">' + (Number(d.amount) ? money(d.amount) : 'без суммы') + '</span>' +
         '<span style="display:flex;align-items:center;gap:8px">' + (unread ? '<span class="kb-unread">' + ico('chat') + '<span class="crm-badge">' + unread + '</span></span>' : '') + resp + '</span></footer>' +
       '</article>';
   }
+  // Все 7 стадий - обычные колонки (Влад, 08.09: "как в превью") - терминальные исключаются
+  // из фильтров сводки ("зависшие"/"недозвоны" - про ОТКРЫТЫЙ пайплайн), но не из доски.
   function boardDeals() {
-    var list = S.deals.filter(function (d) { return d.stage !== 'won' && d.stage !== 'lost'; });
-    if (S.kpiFilter === 'stalled') list = list.filter(function (d) { return freshness(d) === 'kb-stale'; });
-    if (S.kpiFilter === 'missed') list = list.filter(function (d) { return d.source === 'call' && dt(d.updated_at) && sameDay(dt(d.updated_at), new Date()); });
+    var list = S.deals.slice();
+    if (S.kpiFilter === 'stalled') list = list.filter(function (d) { return d.stage === 'won' || d.stage === 'lost' || freshness(d) === 'kb-stale'; });
+    if (S.kpiFilter === 'missed') list = list.filter(function (d) { return d.stage === 'won' || d.stage === 'lost' || (d.source === 'call' && dt(d.updated_at) && sameDay(dt(d.updated_at), new Date())); });
     return list;
   }
+  // Крупная сумма колонки (Влад, 08.09: "как в Битриксе, и чтобы была интерактивной") -
+  // клик переключает сортировку карточек колонки: по свежести (по умолчанию, как отдаёт
+  // сервер) <-> по убыванию суммы. Не декорация - реальное действие, как у KPI-плиток выше.
+  function colHeroHtml(st, sum, ds) {
+    var active = S.colSort[st.key] === 'amount';
+    // Полная сумма, не сокращённая (Влад, 08.09: "нужно не сокращённые, а полные суммы") -
+    // тот же money(), что и везде на дашборде, не shortMoney().
+    return '<button class="kb-col-hero' + (active ? ' is-sorted' : '') + '" data-nav-sound onclick="CRM.toggleColSort(\'' + st.key + '\')" title="' + (active ? 'Сортировка по сумме - нажмите для сортировки по свежести' : 'Нажмите, чтобы отсортировать по сумме') + '" aria-pressed="' + active + '">' +
+      '<span class="kb-col-hero-val">' + heroSumFmt_(sum) + '</span>' +
+      (ds.length ? '<span class="kb-col-hero-sub">' + ds.length + ' ' + plural(ds.length, 'сделка', 'сделки', 'сделок') + (active ? ' · по сумме' : '') + '</span>' : '') +
+      '</button>';
+  }
+  function sortedDealsForStage(key, ds) {
+    ds = ds.slice();
+    if (S.colSort[key] === 'amount') ds.sort(function (a, b) { return Number(b.amount || 0) - Number(a.amount || 0); });
+    return ds;
+  }
+  function toggleColSort(key) {
+    S.colSort[key] = S.colSort[key] === 'amount' ? null : 'amount';
+    renderBoard();
+  }
+  // Сворачивание колонки в узкую полоску (Влад, 08.09: "кнопка скрыть/показать Отказ") -
+  // канон Kanban Tool/Jira, состояние на клиенте (localStorage), переживает перезагрузку.
+  // Любая колонка сворачиваемая (не только "Отказ") - симметрично удобнее, чем частный случай.
+  function toggleColCollapse(key) {
+    S.collapsedCols[key] = !S.collapsedCols[key];
+    try { localStorage.setItem('crmCollapsedCols', JSON.stringify(S.collapsedCols)); } catch (e) {}
+    renderBoard();
+  }
+  function colHeadHtml(st, count, collapsed) {
+    return '<header class="kb-col-head" ' + (collapsed ? 'onclick="CRM.toggleColCollapse(\'' + st.key + '\')" title="Показать «' + esc(st.label) + '»"' : '') + '>' +
+      '<span class="kb-stage-dot" style="--stage:' + st.color + '"></span>' +
+      (collapsed ? '' : '<h4 class="kb-col-title" title="' + esc(st.label) + '">' + esc(st.label) + '</h4>') +
+      '<span class="kb-count" id="kb-cnt-' + st.key + '">' + count + '</span>' +
+      '<button class="kb-col-toggle" data-nav-sound onclick="event.stopPropagation();CRM.toggleColCollapse(\'' + st.key + '\')" title="' + (collapsed ? 'Показать' : 'Скрыть') + ' колонку «' + esc(st.label) + '»">' + ico('chevron') + '</button>' +
+      '</header>';
+  }
+  // Сводка над доской (KPI-плитки + карточка топ-менеджеров) равна ширине канбана (Влад,
+  // 08.09: "верхники должны быть равны ширине колонок") БЕЗ единой строчки JS - #crm-kpis
+  // и .kb-panel (обёртка #kb-board) сиблинги под одним родителем #crm-view-board, оба
+  // блочные без собственной ширины - значит оба и так растягиваются на 100% родителя и
+  // совпадают друг с другом ВСЕГДА, при любом числе/сворачивании колонок.
+  //
+  // Три захода подряд (measure-DOM через scrollWidth+ResizeObserver/MutationObserver/
+  // fonts.ready, потом арифметика по .kb-col/.kb-board константам) чинили НЕСУЩЕСТВУЮЩУЮ
+  // проблему и каждый раз делали хуже - max-width, посчитанный по СУММЕ реальных колонок
+  // (248px открытых + 40px свёрнутых), давал ЧИСЛО МЕНЬШЕ, чем родная ширина .kb-board
+  // (та растягивается на весь доступный родителю простор, а не сжимается по контенту,
+  // overflow-x:auto просто прячет излишек скроллом, не убирает пустое место) - именно
+  // из-за этого верхники становились УЖЕ доски всякий раз, когда сумма видимых колонок не
+  // дотягивала до полной ширины (типичный случай - свёрнуты "Успешна"/"Отказ"). Проверено
+  // живьём в браузере с реальной сессией (не на глаз): без max-width вообще обе ширины
+  // совпадают пиксель в пиксель в любом состоянии сворачивания.
+  // Плитки-«уловители» рядом со сводкой (09.09, между версиями) - Влад их не принял,
+  // отменено тем же вечером: "сделай как было + колонки которые сворачиваются как сейчас,
+  // только без тех, что на скриншоте". Реальный запрос оказался про ДРУГОЕ - см. kb-shelf
+  // ниже (полка, всплывающая во время перетаскивания). Все стадии, включая won/lost,
+  // сворачиваются одинаково, узкой полосой внутри самой доски (toggleColCollapse) - ничего
+  // не убегает в отдельную область.
   function renderBoard() {
     var board = el('kb-board'); if (!board) return;
     var deals = boardDeals();
     var html = '';
-    OPEN_STAGES.forEach(function (st) {
-      var ds = deals.filter(function (d) { return d.stage === st.key; });
+    STAGES.forEach(function (st) {
+      var collapsed = !!S.collapsedCols[st.key];
+      var ds = sortedDealsForStage(st.key, deals.filter(function (d) { return d.stage === st.key; }));
       var sum = ds.reduce(function (a, d) { return a + Number(d.amount || 0); }, 0);
-      html += '<section class="kb-col" data-colwrap="' + st.key + '"><header class="kb-col-head"><span class="kb-stage-dot" style="--stage:' + st.color + '"></span>' +
-        '<h4 class="kb-col-title" title="' + esc(st.label) + '">' + esc(st.label) + '</h4><span class="kb-count" id="kb-cnt-' + st.key + '">' + ds.length + '</span>' +
-        '<span class="kb-col-sum" id="kb-sum-' + st.key + '">' + (sum ? shortMoney(sum) : '') + '</span></header>' +
-        '<div class="kb-list" data-col="' + st.key + '">' + (ds.length ? ds.map(cardHtml).join('') : '<div class="kb-empty">' + (st.key === 'new' ? 'Новых заявок нет' : 'Пусто') + '</div>') + '</div></section>';
+      html += '<section class="kb-col' + (collapsed ? ' is-collapsed' : '') + '" data-colwrap="' + st.key + '">' + colHeadHtml(st, ds.length, collapsed) +
+        (collapsed ? '' :
+          '<div class="kb-col-herowrap" id="kb-hero-' + st.key + '">' + colHeroHtml(st, sum, ds) + '</div>' +
+          '<div class="kb-list" data-col="' + st.key + '">' + (ds.length ? ds.map(cardHtml).join('') : '<div class="kb-empty">' + (st.key === 'new' ? 'Новых заявок нет' : 'Пусто') + '</div>') + '</div>') +
+        '</section>';
     });
     board.innerHTML = html;
     board.querySelectorAll('.kb-card').forEach(bindCard);
   }
   function dealById(id) { return S.deals.find(function (d) { return d.id === id; }) || null; }
-  function updateHeaders() {
-    OPEN_STAGES.forEach(function (st) {
+  function heroSumFmt_(n) { var r = Math.round(Number(n) || 0); return r ? money(r) : '—'; }
+  function parseHeroSum_(text) { var digits = String(text || '').replace(/[^\d]/g, ''); return digits ? Number(digits) : 0; }
+  // fromCol/toCol - какие ДВЕ колонки реально поменяли сумму на этом ходе (перенос карточки
+  // между колонками); их суммы проигрываются одометром со звуком тиков, а не тихо
+  // подменяются текстом - Влад 08.09: "любое передвижение карточки из колонки в колонку с
+  // суммой... должно сопровождаться звуком и анимацией цифр, как при переносе в успешные".
+  // Остальные колонки (сумма не изменилась) обновляются как раньше, без анимации.
+  function updateHeaders(fromCol, toCol) {
+    STAGES.forEach(function (st) {
       var list = el('kb-board').querySelector('.kb-list[data-col="' + st.key + '"]'); if (!list) return;
       var ids = Array.prototype.map.call(list.querySelectorAll(':scope > .kb-card'), function (c) { return Number(c.getAttribute('data-id')); });
-      var cnt = el('kb-cnt-' + st.key), sumEl = el('kb-sum-' + st.key);
+      var cnt = el('kb-cnt-' + st.key), heroWrap = el('kb-hero-' + st.key);
       if (cnt && cnt.textContent !== String(ids.length)) { cnt.textContent = ids.length; cnt.classList.remove('pulse'); void cnt.offsetWidth; cnt.classList.add('pulse'); }
-      var sum = ids.reduce(function (a, id) { var d = dealById(id); return a + (d ? Number(d.amount || 0) : 0); }, 0);
-      if (sumEl) sumEl.textContent = sum ? shortMoney(sum) : '';
+      var ds = ids.map(dealById).filter(Boolean);
+      var sum = ds.reduce(function (a, d) { return a + Number(d.amount || 0); }, 0);
+      var animate = heroWrap && fromCol && toCol && fromCol !== toCol && (st.key === fromCol || st.key === toCol);
+      var prevValEl = animate ? heroWrap.querySelector('.kb-col-hero-val') : null;
+      var fromSum = prevValEl ? parseHeroSum_(prevValEl.textContent) : null;
+      if (heroWrap) heroWrap.innerHTML = colHeroHtml(st, sum, ds);
+      if (animate && fromSum !== null && fromSum !== sum && !reduced()) {
+        var valEl = heroWrap.querySelector('.kb-col-hero-val');
+        if (valEl) odometer(valEl, fromSum, sum, 500, heroSumFmt_, snd.winTick);
+      }
       var empty = list.querySelector('.kb-empty'); if (empty && ids.length) empty.remove();
     });
   }
@@ -20252,7 +21144,7 @@ var CRM = (function () {
           card.style.position = 'fixed'; card.style.left = rectAtStart.left + 'px'; card.style.top = rectAtStart.top + 'px'; card.style.width = rectAtStart.width + 'px';
           card.style.margin = '0'; card.style.zIndex = '1000'; card.style.pointerEvents = 'none'; card.style.willChange = 'transform';
           card.classList.add('kb-lifted'); document.body.appendChild(card);
-          shelf.classList.add('is-on');
+          shelf.classList.add('is-on'); // полка - быстрый способ бросить в won/lost, не долистывая канбан
           snd.lift(); vibrate(8);
           if (reduced()) { card.style.transform = 'translate(0,0) scale(1.03)'; } else physics();
         }
@@ -20306,21 +21198,26 @@ var CRM = (function () {
           if (placeholder.parentNode !== fromList) fromList.insertBefore(placeholder, ref);
           settle(fromList); snd.undo(); return;
         }
-        if (overShelf) {
-          // Полка: вернуть карточку в исходное место визуально, дальше - терминальный переход
-          var ref2 = fromList.querySelectorAll(':scope > .kb-card')[fromIndex] || null;
-          if (placeholder.parentNode !== fromList) fromList.insertBefore(placeholder, ref2);
+        // Полка ИЛИ прямое попадание в саму колонку won/lost - тот же терминальный переход
+        // (полка удобнее, когда нужная колонка сейчас далеко/свёрнута; прямое попадание в
+        // колонку работает всегда, полка - просто короткий путь). Карточка визуально
+        // возвращается на исходное место (переход не механический перенос, а действие с
+        // последствиями - причина отказа обязательна, победа играет отдельную сцену);
+        // winDeal/askLostReason сами доводят карточку до нужной колонки через renderBoard().
+        var toList = placeholder.parentNode, toCol = overShelf || (toList ? toList.getAttribute('data-col') : null);
+        if (toCol === 'won' || toCol === 'lost') {
+          var refT = fromList.querySelectorAll(':scope > .kb-card')[fromIndex] || null;
+          if (placeholder.parentNode !== fromList) fromList.insertBefore(placeholder, refT);
           settle(fromList);
-          if (overShelf === 'won') winDeal(d, card, fromCol, fromIndex);
+          if (toCol === 'won') winDeal(d, card, fromCol, fromIndex);
           else askLostReason(d, fromCol, fromIndex);
           return;
         }
-        var toList = placeholder.parentNode, toCol = toList.getAttribute('data-col');
         settle(toList);
         snd.drop(); vibrate(12);
         if (toCol !== fromCol) {
           var prev = d.stage; d.stage = toCol; d.updated_at = new Date().toISOString();
-          updateHeaders();
+          updateHeaders(fromCol, toCol);
           S.lastMove = { id: id, fromCol: fromCol, fromIndex: fromIndex };
           post('/crm/deals/stage', { id: id, stage: toCol }).then(function (r) {
             if (!r.ok) { d.stage = prev; renderBoard(); toast('Не удалось сохранить стадию: ' + esc((r.data && r.data.error) || 'ошибка сервера'), 'red'); return; }
@@ -20343,32 +21240,91 @@ var CRM = (function () {
       var after = card.getBoundingClientRect();
       card.style.transition = 'none'; card.style.transform = 'translate(' + (before.left - after.left) + 'px,' + (before.top - after.top) + 'px)'; card.getBoundingClientRect();
       requestAnimationFrame(function () { card.style.transition = reduced() ? 'none' : 'transform 340ms cubic-bezier(.32,.72,0,1)'; card.style.transform = ''; }); // отмена не праздник - без overshoot
-      updateHeaders();
+      updateHeaders(prevStage, mv.fromCol);
     } else renderBoard();
     snd.undo(); vibrate(8);
     post('/crm/deals/stage', { id: mv.id, stage: mv.fromCol }).then(function (r) { if (!r.ok) { d.stage = prevStage; renderBoard(); toast('Не удалось отменить', 'red'); } refreshSummary(); }).catch(function () {});
   }
-  function refreshSummary() { api('/crm/summary').then(function (r) { if (r.ok) { S.summary = r.data; renderKpis(); } }).catch(function () {}); }
+  function refreshSummary() { api('/crm/summary').then(function (r) { if (r.ok) { S.summary = r.data; renderKpis(); renderLeaders(); } }).catch(function () {}); }
 
   // Победа: хореография mxWin (t=0..2200): подсветка → салют → фанфара → перелёт суммы → одометр → тост с Отменить
+  // Обязательные поля для закрытия сделки успешно (Влад 08.09: "чтобы перевести сделку в
+  // успешно обязательно должна быть сумма и заполнена номер строки в 1С") - ОДНА проверка,
+  // используется везде, откуда можно попасть в 'won' (drag-drop, кнопка в drawer, прямой
+  // выбор стадии из выпадашки в чате - setStage()), не разбросана по местам входа.
+  function wonRequirementsMissing_(d) {
+    var missing = [];
+    if (!(Number(d.amount) > 0)) missing.push('сумма');
+    if (!String(d.order_1c_number || '').trim()) missing.push('номер заказа в 1С');
+    return missing.length ? missing : null;
+  }
+  // Поздравление в тосте вместо голой галочки (Влад 08.09: "должна быть короткая надпись
+  // поздравление менеджера" - crm-drawer/toast раньше показывал огромный ico('check') без
+  // размерного класса - в тосте это рендерилось гигантской иконкой, не текстом). Минимум
+  // 10 формулировок вразнобой, тон растёт вместе с уровнем сделки (тот же bankWinLevel_,
+  // что у салюта/фанфары - 1-2: обычная сделка, 3: крупная, 4: миллионник).
+  // ВАЖНО: каждая фраза начинается РОВНО с "{name}, " - иначе фолбэк без имени ниже
+  // (строка без ответственного) не сможет аккуратно вырезать плейсхолдер из середины фразы.
+  var WIN_PHRASES_ = {
+    1: ['{name}, есть! Ещё одна сделка в копилке.', '{name}, чисто сработано - сделка в кармане.', '{name}, готово - клиент доволен, план ближе.', '{name}, ровно как надо - плюс одна закрытая.'],
+    2: ['{name}, отличная сделка! Так держать.', '{name}, хороший результат - клиент в надёжных руках.', '{name}, сильно сработано - заметный вклад в план месяца.', '{name}, красиво - именно такие сделки и нужны.'],
+    3: ['{name}, крупная победа! Такие сделки решают месяц.', '{name}, впечатляюще - серьёзная сумма, серьёзная работа.', '{name}, вот это сделка! Коллеги оценят.', '{name}, мощно - план месяца стал заметно ближе.'],
+    4: ['{name}, это космос! Сделка месяца, без вопросов.', '{name}, невероятно - миллионная сделка закрыта!', '{name}, легенда! Такое не каждый день бывает.', '{name}, вот это да - такую сделку запомнят надолго.'],
+  };
+  function winPhrase_(level, name) {
+    var pool = WIN_PHRASES_[level] || WIN_PHRASES_[1];
+    var text = pool[Math.floor(Math.random() * pool.length)];
+    return name ? text.replace('{name}', name) : text.replace(/^\{name\},\s*/, '').replace(/^./, function (c) { return c.toUpperCase(); });
+  }
   function winDeal(d, card, fromCol, fromIndex) {
+    var missing = wonRequirementsMissing_(d);
+    if (missing) { toast('Нельзя закрыть сделку успешно - не заполнено: ' + esc(missing.join(', ')) + '.', 'amber'); openDeal(d.id); return; }
     var prevStage = d.stage; d.stage = 'won'; d.closed_at = new Date().toISOString();
     var won = S.summary && S.summary.won_month ? S.summary.won_month : { count: 0, amount: 0 };
     var fromAmount = Number(won.amount || 0), toAmount = fromAmount + Number(d.amount || 0);
     var kpi = el('crm-kpis') ? el('crm-kpis').querySelector('.kpi[data-kpi="won"]') : null;
     var valEl = kpi ? kpi.querySelector('.crm-kpi-val') : null;
-    var zone = el('kb-shelf').querySelector('.kb-shelf-zone--won');
+    var wonCol = el('kb-board') ? el('kb-board').querySelector('.kb-col[data-colwrap="won"]') : null;
     S.lastMove = { id: d.id, fromCol: fromCol, fromIndex: fromIndex, wasWin: true };
     post('/crm/deals/stage', { id: d.id, stage: 'won' }).then(function (r) {
       if (!r.ok) { d.stage = prevStage; renderBoard(); toast('Не удалось закрыть сделку: ' + esc((r.data && r.data.error) || 'ошибка сервера'), 'red'); return; }
       refreshSummaryLater();
     }).catch(function () { d.stage = prevStage; renderBoard(); toast('Нет соединения - сделка не закрыта', 'red'); });
     var rect = card.getBoundingClientRect();
-    if (reduced() || document.hidden) { snd.win(); renderBoard(); toast(ico('check') + ' Сделка успешна · <b>' + money(d.amount) + '</b>', 'green', { label: 'Отменить', fn: undoWin }); return; }
+    var winLevel0 = (typeof bankWinLevel_ === 'function') ? bankWinLevel_(Number(d.amount) || 0) : 1;
+    var winName0 = d.responsible_name ? String(d.responsible_name).trim().split(/\s+/)[0] : '';
+    if (reduced() || document.hidden) {
+      if (typeof bankWinFanfare_ === 'function') bankWinFanfare_(winLevel0); else snd.win();
+      renderBoard(); toast(esc(winPhrase_(winLevel0, winName0)) + ' <b>' + money(d.amount) + '</b>', 'green', { label: 'Отменить', fn: undoWin }); return;
+    }
     card.style.transition = 'opacity .3s ease'; card.style.opacity = '0.35';
-    zone.classList.add('kb-drop'); setTimeout(function () { zone.classList.remove('kb-drop'); }, 300);
-    setTimeout(function () { var cv = el('crm-celebrate'); if (cv && typeof bankCelebrate5_ === 'function') bankCelebrate5_(cv, rect.left + rect.width / 2, rect.top + 6, { colors: ['#1D9E75', '#EF9F27', '#e8e6df', '#378ADD'] }); }, 180);
-    setTimeout(function () { snd.win(); }, 200); vibrate([20, 40, 20]);
+    if (wonCol) { wonCol.classList.add('kb-win-glow'); setTimeout(function () { wonCol.classList.remove('kb-win-glow'); }, 300); }
+    // Салют уровня суммы - ТОТ ЖЕ, что у прихода крупных денег на банковской ленте
+    // (bankWinScene_/bankCelebrate5_, plans/2026-08-XX-bank-sms-live-feed): один залп до
+    // 100т, двойной до 500т, четыре золотых залпа волной от 1 млн - и фанфара растёт вместе
+    // с залпом (win/win2/win3/win4). Влад 08.09: "успешная сделка сопровождается салютом
+    // как у нас в приходах больших денег" - раньше здесь был фиксированный один залп вне
+    // зависимости от суммы сделки.
+    var winLevel = winLevel0;
+    setTimeout(function () {
+      var cv = el('crm-celebrate'); if (!cv || typeof bankCelebrate5_ !== 'function') return;
+      var cx = rect.left + rect.width / 2, cy = rect.top + 6;
+      var BASE = ['#1D9E75', '#EF9F27', (typeof themeVar_ === 'function' ? themeVar_('--text', '#e8e6df') : '#e8e6df'), '#378ADD'];
+      var GOLD = ['#EF9F27', '#EF9F27', 'var(--text)', '#1D9E75'];
+      if (winLevel <= 2) {
+        bankCelebrate5_(cv, cx, cy, { colors: BASE });
+      } else if (winLevel === 3) {
+        bankCelebrate5_(cv, cx, cy, { colors: BASE });
+        setTimeout(function () { bankCelebrate5_(cv, cx - rect.width * 0.35, cy + 4, { colors: BASE, mult: 0.8 }); }, 240);
+      } else {
+        bankCelebrate5_(cv, cx, cy, { colors: GOLD, mult: 1.35 });
+        setTimeout(function () { bankCelebrate5_(cv, cx - rect.width * 0.4, cy + 4, { colors: GOLD, mult: 1.05 }); }, 260);
+        setTimeout(function () { bankCelebrate5_(cv, cx + rect.width * 0.4, cy + 4, { colors: GOLD, mult: 1.05 }); }, 480);
+        setTimeout(function () { bankCelebrate5_(cv, cx, cy - 30, { colors: GOLD, mult: 1.2 }); }, 1240);
+      }
+    }, 180);
+    setTimeout(function () { if (typeof bankWinFanfare_ === 'function') bankWinFanfare_(winLevel); else snd.win(); }, 200);
+    vibrate(winLevel >= 3 ? [20, 40, 20, 40, 20] : [20, 40, 20]);
     setTimeout(function () {
       var sumEl = card.querySelector('.kb-sum');
       var after = function () {
@@ -20379,7 +21335,7 @@ var CRM = (function () {
       };
       if (sumEl && valEl && Number(d.amount) && typeof bankFlySum_ === 'function') bankFlySum_(sumEl, valEl, money(d.amount), after); else after();
     }, 260);
-    setTimeout(function () { toast(ico('check') + ' Сделка успешна · <b>' + money(d.amount) + '</b>', 'green', { label: 'Отменить', fn: undoWin }); }, 600);
+    setTimeout(function () { toast(esc(winPhrase_(winLevel, winName0)) + ' <b>' + money(d.amount) + '</b>', 'green', { label: 'Отменить', fn: undoWin }); }, 600);
   }
   function undoWin() {
     var mv = S.lastMove; if (!mv || !mv.wasWin) return; S.lastMove = null;
@@ -20472,6 +21428,7 @@ var CRM = (function () {
     if (S.lostPending) { S.lostPending = null; }
     S.drawerId = null;
     el('kb-board').querySelectorAll('.kb-card.is-open').forEach(function (c) { c.classList.remove('is-open'); });
+    stopPlayback_(); // закрыли карточку - кнопка "Пауза" пропала из DOM, звук не должен играть без контроля
   }
   function ensureEmployees() { if (S.employees) return Promise.resolve(S.employees); return api('/crm/employees').then(function (r) { S.employees = r.ok ? (r.data.employees || []) : []; return S.employees; }).catch(function () { S.employees = []; return S.employees; }); }
   function empName(ext) { var e = (S.employees || []).find(function (x) { return String(x.extension) === String(ext); }); return e ? e.name : null; }
@@ -20507,11 +21464,13 @@ var CRM = (function () {
     var st = STAGE_BY[d.stage] || STAGES[0];
     var phone = fmtPhone(d.client_phone), tel = telHref(d.client_phone), avito = isAvitoKey(d.client_phone);
     var idx = STAGES.findIndex(function (s) { return s.key === d.stage; });
+    var lastMsg = (data.messages || [])[(data.messages || []).length - 1];
+    var srcHead = sourceLabel_({ source: d.source, last_msg_type: lastMsg ? lastMsg.msg_type : null });
     var head = '<div class="crm-drawer-head">' +
       (safeImg(d.avatar_url) ? '<span class="cx-ava cx-ava--lg"><img src="' + esc(safeImg(d.avatar_url)) + '" alt="" loading="lazy"></span>' : '<span class="cx-ava cx-ava--lg">' + esc(initials(dealTitle(d))) + '</span>') +
       '<div style="flex:1;min-width:0"><div class="dr-eyebrow"><span class="kb-stage-dot" style="--stage:' + st.color + '"></span>' + esc(st.label) + (d.loss_reason ? ' · ' + esc(d.loss_reason) : '') + '</div>' +
       '<div class="dr-title">' + esc(dealTitle(d)) + '</div>' +
-      '<div class="dr-sub">' + (phone ? '<a class="mono" href="' + tel + '" style="color:inherit;text-decoration:none">' + esc(phone) + '</a><span class="cx-dotsep"></span>' : '') + (avito ? 'Авито' : 'Звонок') + (data.chats && data.chats[0] && data.chats[0].item_title ? '<span class="cx-dotsep"></span><span title="Объявление">' + esc(data.chats[0].item_title) + '</span>' : '') + '</div></div>' +
+      '<div class="dr-sub">' + (phone ? '<a class="mono" href="' + tel + '" style="color:inherit;text-decoration:none">' + esc(phone) + '</a><span class="cx-dotsep"></span>' : '') + '<span' + (srcHead.color ? ' style="color:' + srcHead.color + '"' : '') + '>' + esc(srcHead.label) + '</span>' + (data.chats && data.chats[0] && data.chats[0].item_title ? '<span class="cx-dotsep"></span><span title="Объявление">' + esc(data.chats[0].item_title) + '</span>' : '') + '</div></div>' +
       '<button class="cx-ibtn" onclick="CRM.closeDrawer()" title="Закрыть (Esc)">' + ico('close') + '</button></div>';
 
     var stages = '<div class="dr-section"><div class="dr-label">Стадия</div><div class="dr-stages">' + OPEN_STAGES.map(function (s, i) {
@@ -20554,14 +21513,20 @@ var CRM = (function () {
   }
   function timelineHtml(data) {
     var items = [];
-    (data.calls || []).forEach(function (c) { items.push({ at: c.at, type: 'call', ok: c.connected, text: (c.connected ? 'Разговор ' + (c.duration_sec != null ? fmtDur(c.duration_sec) : '') : 'Недозвон' + (c.disconnect_reason ? ' · ' + c.disconnect_reason : '')) + (c.responsible_name ? ' · ' + c.responsible_name : '') }); });
-    (data.messages || []).forEach(function (m) { items.push({ at: m.created_at, type: 'msg', dir: m.direction, msgType: m.msg_type, text: m.text, sender: m.sender_name, att: m.attachments }); });
+    (data.calls || []).forEach(function (c) { items.push({ at: c.at, type: 'call', ok: c.connected, entryId: c.entry_id, hasRec: c.has_recording, text: (c.connected ? 'Разговор ' + (c.duration_sec != null ? fmtDur(c.duration_sec) : '') : 'Недозвон' + (c.disconnect_reason ? ' · ' + c.disconnect_reason : '')) + (c.responsible_name ? ' · ' + c.responsible_name : '') }); });
+    (data.messages || []).forEach(function (m) { items.push({ at: m.created_at, type: 'msg', dir: m.direction, msgType: m.msg_type, text: m.text, sender: m.sender_name, att: m.attachments, entryId: m.mango_entry_id }); });
     if (data.deal && data.deal.created_at) items.push({ at: data.deal.created_at, type: 'ev', text: 'Сделка создана' });
     if (data.deal && data.deal.closed_at) items.push({ at: data.deal.closed_at, type: 'ev', text: data.deal.stage === 'won' ? 'Сделка успешна' : 'Отказ' + (data.deal.loss_reason ? ' · ' + data.deal.loss_reason : '') });
     items.sort(function (a, b) { return new Date(b.at) - new Date(a.at); });
     if (!items.length) return '<div class="dr-empty">Событий пока нет</div>';
     return '<div class="dr-tl">' + items.slice(0, 60).map(function (it) {
       var icon, cls = '', body;
+      // Кнопка "Прослушать" - у прямых Mango-звонков только если has_recording=true (сервер
+      // проверил заранее батчем), у Авито-звонков (сопоставлены с Mango по времени,
+      // correlateAvitoCall_) просто по наличию entry_id - есть ли реально запись, узнаём по
+      // клику (тише для сервера, чем отдельный батч-запрос ради каждого сообщения).
+      var canPlay = (it.type === 'call' && it.hasRec) || (it.type === 'msg' && (it.msgType === 'call' || it.msgType === 'appCall') && it.entryId);
+      var playBtn = canPlay ? playBtnHtml_(it.entryId) : '';
       if (it.type === 'call') { icon = 'phone'; cls = it.ok ? 'is-good' : 'is-bad'; body = '<div class="dr-tl-text">' + esc(it.text) + '</div>'; }
       else if (it.type === 'ev') { icon = 'stage'; body = '<div class="dr-tl-text muted">' + esc(it.text) + '</div>'; }
       else {
@@ -20570,14 +21535,149 @@ var CRM = (function () {
         var txt = it.msgType === 'image' ? 'Фото' : it.msgType === 'system' ? esc(it.text || 'Системное сообщение') : esc(it.text || '');
         body = '<div class="dr-tl-text' + (it.msgType === 'system' ? ' muted' : '') + '"><span style="color:var(--muted)">' + who + ':</span> ' + txt + '</div>';
       }
-      return '<div class="dr-tl-item"><span class="dr-tl-ico ' + cls + '">' + ico(icon) + '</span><div>' + body + '<div class="dr-tl-meta">' + fmtDT(it.at) + '</div></div></div>';
+      return '<div class="dr-tl-item"><span class="dr-tl-ico ' + cls + '">' + ico(icon) + '</span><div>' + body + '<div class="dr-tl-meta">' + fmtDT(it.at) + playBtn + '</div></div></div>';
     }).join('') + (items.length > 60 ? '<div class="dr-empty" style="padding:8px 0">… и ещё ' + (items.length - 60) + '</div>' : '') + '</div>';
   }
   function fmtDur(sec) { var m = Math.floor(sec / 60), s = sec % 60; return m + ':' + pad2(s); }
 
+  // ── Прослушать запись звонка (plans/2026-09-08-call-recordings.md,
+  //    plans/2026-09-08-smart-call-player-transcript-autofill.md) ───────────────────────
+  // entry_id уходит в data-атрибут ОБЁРТКИ <span class="crm-player"> (не кнопки - у полного
+  // плеера кнопок/зон внутри несколько, у всех один и тот же звонок). Пока запись не
+  // загружена - просто пилюля "Прослушать"; как только звонок реально играется (в том
+  // числе после перерисовки drawer/треда - проверка S.audioEntry) - полный плеер с шкалой.
+  function playBtnHtml_(entryId) {
+    if (S.audioEntry === entryId && S.audioEl) return playerHtml_(entryId);
+    return '<span class="crm-player" data-entry="' + esc(entryId) + '">' +
+      '<button type="button" class="crm-play-btn" onclick="CRM.playRecording(this)">' + ico('play') + 'Прослушать</button></span>';
+  }
+  // Полная разметка плеера: play/pause + шкала перемотки (клик/протяжка - seekStart) +
+  // время тек./общее. duration может быть ещё неизвестна сразу после старта (метаданные
+  // грузятся асинхронно) - тогда справа "…", шкала обновится сама на loadedmetadata.
+  function playerHtml_(entryId) {
+    var a = S.audioEl;
+    var dur = a && isFinite(a.duration) ? a.duration : 0;
+    var cur = a ? a.currentTime : 0;
+    var pct = dur ? Math.min(100, (cur / dur) * 100) : 0;
+    var playing = a && !a.paused;
+    return '<span class="crm-player is-full" data-entry="' + esc(entryId) + '">' +
+      '<button type="button" class="crm-player-btn" onclick="CRM.playRecording(this)" title="' + (playing ? 'Пауза' : 'Играть') + '">' + ico(playing ? 'pause' : 'play') + '</button>' +
+      '<span class="crm-player-track" onpointerdown="CRM.seekStart(event,this)"><span class="crm-player-fill" style="width:' + pct.toFixed(1) + '%"></span></span>' +
+      '<span class="crm-player-time">' + fmtDur(Math.floor(cur)) + ' / ' + (dur ? fmtDur(Math.floor(dur)) : '…') + '</span></span>';
+  }
+  function cssEsc_(s) { return window.CSS && CSS.escape ? CSS.escape(s) : String(s).replace(/["\\]/g, '\\$&'); }
+  // Полная замена HTML ВСЕХ вхождений плеера этого звонка в DOM разом (не храним ссылку на
+  // конкретный узел - тот же звонок может быть виден одновременно в треде чата и в drawer
+  // сделки, а сама разметка теряется при любой перерисовке drawer/треда). Используется на
+  // переходах idle↔loading↔playing; частое (timeupdate, каждые ~250мс) обновление - через
+  // лёгкий updatePlayerProgress_ ниже, не через это (незачем пересобирать HTML и терять
+  // фокус/обработчики 4 раза в секунду).
+  function idlePillHtml_(entryId) {
+    return '<span class="crm-player" data-entry="' + esc(entryId) + '"><button type="button" class="crm-play-btn" onclick="CRM.playRecording(this)">' + ico('play') + 'Прослушать</button></span>';
+  }
+  function loadingPillHtml_(entryId) {
+    return '<span class="crm-player" data-entry="' + esc(entryId) + '"><button type="button" class="crm-play-btn is-loading" onclick="CRM.playRecording(this)">' + ico('play') + 'Загрузка…</button></span>';
+  }
+  function setPlayersHtml_(entryId, html) {
+    document.querySelectorAll('.crm-player[data-entry="' + cssEsc_(entryId) + '"]').forEach(function (el) { el.outerHTML = html; });
+  }
+  // Без полной пересборки HTML - только шкала + время, дёргается на каждый timeupdate.
+  function updatePlayerProgress_(entryId) {
+    var a = S.audioEl; if (!a) return;
+    var dur = isFinite(a.duration) ? a.duration : 0;
+    var cur = a.currentTime || 0;
+    var pct = dur ? Math.min(100, (cur / dur) * 100) : 0;
+    var timeText = fmtDur(Math.floor(cur)) + ' / ' + (dur ? fmtDur(Math.floor(dur)) : '…');
+    document.querySelectorAll('.crm-player[data-entry="' + cssEsc_(entryId) + '"]').forEach(function (el) {
+      var fill = el.querySelector('.crm-player-fill'); if (fill) fill.style.width = pct.toFixed(1) + '%';
+      var time = el.querySelector('.crm-player-time'); if (time) time.textContent = timeText;
+    });
+  }
+  function refreshPlayerIcons_(entryId, playing) {
+    document.querySelectorAll('.crm-player[data-entry="' + cssEsc_(entryId) + '"] .crm-player-btn').forEach(function (b) { b.innerHTML = ico(playing ? 'pause' : 'play'); b.title = playing ? 'Пауза' : 'Играть'; });
+  }
+  // Перемотка кликом/протяжкой по шкале - Pointer Events (мышь и тач одним кодом). Слушатели
+  // на document, не на самой шкале - протяжка продолжает работать, даже если курсор ушёл за
+  // пределы узкой полоски (обычное поведение любого слайдера/плеера).
+  function seekStart(e, trackEl) {
+    e.preventDefault();
+    var wrapper = trackEl.closest('.crm-player');
+    var entryId = wrapper && wrapper.getAttribute('data-entry');
+    var audio = S.audioEl;
+    if (!entryId || S.audioEntry !== entryId || !audio || !isFinite(audio.duration) || !audio.duration) return;
+    function seekTo(clientX) {
+      var rect = trackEl.getBoundingClientRect();
+      var pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      audio.currentTime = pct * audio.duration;
+      updatePlayerProgress_(entryId);
+    }
+    seekTo(e.clientX);
+    function onMove(ev) { seekTo(ev.clientX); }
+    function onUp() { document.removeEventListener('pointermove', onMove); document.removeEventListener('pointerup', onUp); }
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+  }
+  function stopPlayback_() {
+    var prevEntry = S.audioEntry;
+    S.audioReqSeq_++; // инвалидирует ответ ещё летящего запроса (если он был) - см. playRecording
+    if (S.audioEl) S.audioEl.pause();
+    if (S.audioUrl) { try { URL.revokeObjectURL(S.audioUrl); } catch (e) {} }
+    S.audioEl = null; S.audioUrl = null; S.audioEntry = null;
+    if (prevEntry) setPlayersHtml_(prevEntry, idlePillHtml_(prevEntry));
+  }
+  function playRecording(btn) {
+    var wrapper = btn.closest('.crm-player');
+    var entryId = wrapper && wrapper.getAttribute('data-entry'); if (!entryId) return;
+    if (S.audioEntry === entryId && S.audioEl) {
+      // Тот же звонок - клик переключает паузу/воспроизведение, новый запрос к серверу не нужен.
+      if (S.audioEl.paused) S.audioEl.play(); else S.audioEl.pause();
+      return; // play/pause DOM-события ниже (playRecording не вызывается ими напрямую) обновят иконку сами
+    }
+    stopPlayback_(); // один звук за раз - вторая запись останавливает первую, как в любом плеере
+    setPlayersHtml_(entryId, loadingPillHtml_(entryId));
+    // reqId - защита от гонки: клик по ДРУГОЙ кнопке, пока первый запрос ещё летит, не должен
+    // дать устаревшему ответу перезапустить не тот звук поверх уже начатого/остановленного.
+    var reqId = ++S.audioReqSeq_;
+    fetch(YARD_API_BASE + '/crm/mango/recording?entry_id=' + encodeURIComponent(entryId), { headers: { 'X-Session-Token': SESSION_TOKEN } })
+      .then(function (res) {
+        if (res.status === 202) { if (reqId === S.audioReqSeq_) { toast('Запись ещё готовится в Mango - попробуйте через минуту', 'amber'); setPlayersHtml_(entryId, idlePillHtml_(entryId)); } return null; }
+        if (res.status === 404) { if (reqId === S.audioReqSeq_) { toast('Для этого звонка нет записи', 'amber'); setPlayersHtml_(entryId, idlePillHtml_(entryId)); } return null; }
+        if (!res.ok) { if (reqId === S.audioReqSeq_) { toast('Не удалось загрузить запись', 'red'); setPlayersHtml_(entryId, idlePillHtml_(entryId)); } return null; }
+        return res.blob();
+      })
+      .then(function (blob) {
+        if (!blob) return;
+        if (reqId !== S.audioReqSeq_) { return; } // пользователь уже кликнул что-то другое - этот ответ больше не актуален
+        var url = URL.createObjectURL(blob);
+        var audio = new Audio(url);
+        S.audioEl = audio; S.audioUrl = url; S.audioEntry = entryId;
+        audio.addEventListener('loadedmetadata', function () { updatePlayerProgress_(entryId); });
+        audio.addEventListener('timeupdate', function () { updatePlayerProgress_(entryId); });
+        audio.addEventListener('play', function () { refreshPlayerIcons_(entryId, true); });
+        audio.addEventListener('pause', function () { refreshPlayerIcons_(entryId, false); });
+        audio.addEventListener('ended', function () { if (S.audioEntry === entryId) { S.audioEl = null; S.audioUrl = null; S.audioEntry = null; setPlayersHtml_(entryId, idlePillHtml_(entryId)); } try { URL.revokeObjectURL(url); } catch (e) {} });
+        setPlayersHtml_(entryId, playerHtml_(entryId));
+        audio.play().catch(function () { toast('Браузер заблокировал автовоспроизведение - нажмите ещё раз', 'amber'); setPlayersHtml_(entryId, idlePillHtml_(entryId)); });
+      })
+      .catch(function () { toast('Нет соединения', 'red'); setPlayersHtml_(entryId, idlePillHtml_(entryId)); });
+  }
+
+  // Прямой выбор стадии (в т.ч. выпадашка в панели чата - CRM_UX.md, единственное место,
+  // где 'won'/'lost' выбираются НЕ через drag-drop/кнопку в drawer) идёт через ТЕ ЖЕ
+  // ворота, что и остальные пути в won/lost - иначе обязательные поля/причина отказа
+  // обходятся тихой сменой значения в <select>.
   function setStage(id, stage) {
     var d = dealById(id); if (!d) return;
     var prev = d.stage; if (prev === stage) return;
+    if (stage === 'won') {
+      var missing = wonRequirementsMissing_(d);
+      if (missing) { toast('Нельзя закрыть сделку успешно - не заполнено: ' + esc(missing.join(', ')) + '.', 'amber'); return; }
+      var card = el('kb-board').querySelector('.kb-card[data-id="' + id + '"]');
+      if (card) { winDeal(d, card, prev, 0); return; }
+      // Карточки нет в DOM (сделка вне текущего фильтра доски) - без хореографии, но с той
+      // же проверкой полей выше, тише не значит без правил.
+    }
+    if (stage === 'lost') { askLostReason(d, prev, 0); return; }
     d.stage = stage; if (stage !== 'won' && stage !== 'lost') { d.closed_at = null; d.loss_reason = null; }
     renderBoard(); snd.drop();
     if (S.drawerDeal && S.drawerDeal.deal.id === id) { S.drawerDeal.deal.stage = stage; renderDrawer(); }
@@ -20587,7 +21687,13 @@ var CRM = (function () {
       refreshSummary();
     }).catch(function () { d.stage = prev; renderBoard(); toast('Нет соединения', 'red'); });
   }
-  function winFromDrawer(id) { var d = dealById(id); if (!d) return; var card = el('kb-board').querySelector('.kb-card[data-id="' + id + '"]'); closeDrawer(); if (card) winDeal(d, card, d.stage, 0); else { setStage(id, 'won'); snd.win(); } }
+  function winFromDrawer(id) {
+    var d = dealById(id); if (!d) return;
+    var missing = wonRequirementsMissing_(d);
+    if (missing) { toast('Нельзя закрыть сделку успешно - не заполнено: ' + esc(missing.join(', ')) + '.', 'amber'); return; } // drawer остаётся открытым - поля тут же, под рукой
+    var card = el('kb-board').querySelector('.kb-card[data-id="' + id + '"]'); closeDrawer();
+    if (card) winDeal(d, card, d.stage, 0); else { setStage(id, 'won'); }
+  }
   function showLostForm(id) { var f = el('dr-lost-form'); if (f) { f.style.display = ''; var i = el('dr-lost-reason'); if (i) i.focus(); } }
   function pickLostReason(btn) { var i = el('dr-lost-reason'); if (i) i.value = btn.textContent; btn.parentNode.querySelectorAll('.crm-chip').forEach(function (b) { b.setAttribute('aria-pressed', b === btn); }); }
   function saveMain(id) { saveDealFields(id, { amount: el('dr-amount') ? el('dr-amount').value : undefined, order_1c_number: el('dr-order') ? el('dr-order').value : undefined }, 'dr-saved-main', function () { renderBoard(); }); }
@@ -20763,6 +21869,7 @@ var CRM = (function () {
 
   // ── Чаты: тред ─────────────────────────────────────────────────────────────────────
   function openThread(key) {
+    if (S.activeKey !== key) stopPlayback_(); // переключили диалог - старая кнопка "Пауза" уходит с экрана вместе с сообщениями
     S.activeKey = key; el('cx').classList.add('is-thread-open');
     renderList();
     var c = S.chats.find(function (x) { return x.client_key === key; });
@@ -20772,7 +21879,9 @@ var CRM = (function () {
     var inp = el('cx-input'); inp.value = draft; onInput();
     api('/crm/chat', { client_key: key }).then(function (r) {
       if (S.activeKey !== key) return;
-      if (!r.ok) { el('cx-msgs').innerHTML = '<div class="cx-empty"><p>Не удалось загрузить переписку.</p></div>'; return; }
+      // 403 crm_forbidden_deal - клиент ведётся другим менеджером (серверная видимость по
+      // ответственному, 09.09): показываем причину словами сервера, не безликую ошибку.
+      if (!r.ok) { el('cx-msgs').innerHTML = '<div class="cx-empty"><p>' + esc((r.data && r.data.crm_forbidden_deal && r.data.error) || 'Не удалось загрузить переписку.') + '</p></div>'; return; }
       S.thread = r.data; S.thread.key = key;
       renderHead(); renderThread(true); renderCtx();
       if (c && Number(c.unread_count)) markRead(key);
@@ -20841,7 +21950,7 @@ var CRM = (function () {
       if (m.id === firstUnreadId) { flush(); out.push('<div class="cx-day cx-day--new">Новые сообщения</div>'); }
       var type = m.msg_type || 'text';
       if (type === 'system') { flush(); out.push('<div class="cx-sys">' + esc(String(m.text || '').replace(/^\[Системное сообщение\]\s*/, '')) + '</div>'); return; }
-      if (type === 'call' || type === 'appCall') { flush(); var missed = /пропущен/i.test(m.text || ''); out.push('<div class="cx-call' + (missed ? ' cx-call--missed' : '') + '">' + ico('phone') + esc(m.text || 'Звонок через Авито') + ' · <b>' + fmtHM(m.created_at) + '</b></div>'); return; }
+      if (type === 'call' || type === 'appCall') { flush(); var missed = /пропущен/i.test(m.text || ''); out.push('<div class="cx-call' + (missed ? ' cx-call--missed' : '') + '">' + ico('phone') + esc(m.text || 'Звонок через Авито') + ' · <b>' + fmtHM(m.created_at) + '</b>' + (m.mango_entry_id ? playBtnHtml_(m.mango_entry_id) : '') + '</div>'); return; }
       var gk = m.direction + '|' + (m.sender_name || '');
       var gap = group && group.lastAt ? (d - group.lastAt) : 0;
       if (!group || gk !== groupKey || gap > 5 * 60000) { flush(); groupKey = gk; group = { html: '<div class="cx-group cx-group--' + m.direction + (m._local ? (m._failed ? ' is-failed' : ' is-pending') : '') + '" data-mid="' + m.id + '">' + (m.direction === 'out' && m.sender_name ? '<div class="cx-sender">' + esc(m.sender_name) + '</div>' : ''), lastAt: d }; }
@@ -20892,20 +22001,55 @@ var CRM = (function () {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
     if (e.key === 'Escape') { closePops(); }
   }
-  function templates() { var custom = []; try { custom = JSON.parse(localStorage.getItem('crmTemplates') || '[]'); } catch (e) {} return DEFAULT_TEMPLATES.concat(custom); }
+  // ── Шаблоны ответов - свои у КАЖДОГО менеджера (Влад 08.09: "у каждого менеджера свои
+  // заготовки") - хранятся на сервере по email из сессии (не по self-declared S.me/
+  // добавочному - логин надёжнее), не в localStorage: раньше шаблоны были привязаны к
+  // браузеру/компьютеру, не к человеку - на другом устройстве или у другого сотрудника за
+  // тем же компьютером список был либо пустым, либо чужим. DEFAULT_TEMPLATES (4 общих
+  // заготовки) остаются захардкожены на фронте и одинаковы у всех - их нельзя удалить.
+  function ensureTemplates() {
+    if (S.templates) return Promise.resolve(S.templates);
+    return api('/crm/templates').then(function (r) { S.templates = (r.ok && Array.isArray(r.data.templates)) ? r.data.templates : []; return S.templates; })
+      .catch(function () { S.templates = []; return S.templates; });
+  }
+  function templatesAll() { return DEFAULT_TEMPLATES.concat(S.templates || []); }
+  function saveTemplatesList_(list) {
+    var prev = S.templates;
+    S.templates = list; // оптимистично - список сразу виден в попапе, не ждём ответ сервера
+    renderTemplatesPop_();
+    postBody('/crm/templates', { templates: list }).then(function (r) {
+      if (!r.ok) { S.templates = prev; renderTemplatesPop_(); toast('Не удалось сохранить: ' + esc((r.data && r.data.error) || 'ошибка сервера'), 'red'); }
+    }).catch(function () { S.templates = prev; renderTemplatesPop_(); toast('Нет соединения - изменение не сохранено', 'red'); });
+  }
   function toggleTemplates(force) {
     var pop = el('cx-tpl-pop'); if (pop.classList.contains('open') && !force) { closePops(); return; }
-    pop.innerHTML = templates().map(function (t, i) { return '<div class="cx-pop-item" onclick="CRM.useTemplate(' + i + ')"><span class="cx-pop-title">' + esc(t.title) + '</span><span class="cx-pop-preview">' + esc(t.text) + '</span></div>'; }).join('') +
-      '<div class="cx-pop-sep"></div><div class="cx-pop-item" onclick="CRM.saveTemplate()"><span class="cx-pop-title" style="color:var(--muted)">' + ico('note') + 'Сохранить текст из поля как шаблон</span></div>';
-    pop.classList.add('open');
+    ensureTemplates().then(function () { renderTemplatesPop_(); pop.classList.add('open'); });
   }
-  function useTemplate(i) { var t = templates()[i]; if (!t) return; var inp = el('cx-input'); inp.value = (inp.value === '/' ? '' : inp.value) + t.text; onInput(); closePops(); inp.focus(); }
+  function renderTemplatesPop_() {
+    var pop = el('cx-tpl-pop'); if (!pop) return;
+    var defCount = DEFAULT_TEMPLATES.length;
+    pop.innerHTML = templatesAll().map(function (t, i) {
+      var isCustom = i >= defCount;
+      return '<div class="cx-pop-item' + (isCustom ? ' cx-tpl-row' : '') + '">' +
+        '<span class="' + (isCustom ? 'cx-pop-item-main' : '') + '" style="cursor:pointer;min-width:0" onclick="CRM.useTemplate(' + i + ')"><span class="cx-pop-title">' + esc(t.title) + '</span><span class="cx-pop-preview">' + esc(t.text) + '</span></span>' +
+        (isCustom ? '<button type="button" class="cx-tpl-del" title="Удалить шаблон" onclick="event.stopPropagation();CRM.deleteTemplate(' + (i - defCount) + ')">' + ico('close') + '</button>' : '') +
+        '</div>';
+    }).join('') +
+      '<div class="cx-pop-sep"></div><div class="cx-pop-item" onclick="CRM.saveTemplate()"><span class="cx-pop-title" style="color:var(--muted)">' + ico('note') + 'Сохранить текст из поля как шаблон</span></div>';
+  }
+  function useTemplate(i) { var t = templatesAll()[i]; if (!t) return; var inp = el('cx-input'); inp.value = (inp.value === '/' ? '' : inp.value) + t.text; onInput(); closePops(); inp.focus(); }
   function saveTemplate() {
     var inp = el('cx-input'); var text = (inp.value || '').trim().replace(/^\/$/, ''); if (!text) { toast('Сначала напишите текст в поле - он и станет шаблоном', 'amber'); return; }
-    var custom = []; try { custom = JSON.parse(localStorage.getItem('crmTemplates') || '[]'); } catch (e) {}
-    custom.push({ title: text.slice(0, 32) + (text.length > 32 ? '…' : ''), text: text });
-    try { localStorage.setItem('crmTemplates', JSON.stringify(custom)); } catch (e) {}
-    closePops(); toast('Шаблон сохранён (на этом компьютере)', 'green');
+    ensureTemplates().then(function (custom) {
+      saveTemplatesList_(custom.concat([{ title: text.slice(0, 32) + (text.length > 32 ? '…' : ''), text: text }]));
+      toast('Шаблон сохранён', 'green');
+    });
+  }
+  function deleteTemplate(customIdx) {
+    ensureTemplates().then(function (custom) {
+      var list = custom.slice(); list.splice(customIdx, 1);
+      saveTemplatesList_(list);
+    });
   }
   function send() {
     var t = S.thread, inp = el('cx-input'); if (!t) return;
@@ -20986,13 +22130,14 @@ var CRM = (function () {
   }
 
   return {
-    init: init, rerender: rerender, showView: showView, openDeal: openDeal, closeDrawer: closeDrawer, setStage: setStage, winFromDrawer: winFromDrawer,
+    init: init, rerender: rerender, showView: showView, openDeal: openDeal, closeDrawer: closeDrawer, setStage: setStage, winFromDrawer: winFromDrawer, toggleColSort: toggleColSort, toggleColCollapse: toggleColCollapse,
     showLostForm: showLostForm, pickLostReason: pickLostReason, confirmLost: function (id) { confirmLost(id, el('dr-lost-reason') ? el('dr-lost-reason').value : ''); },
     saveMain: saveMain, saveBrief: saveBrief, saveContact: saveContact, assign: assign, askWhoAmI: askWhoAmI, setMe: setMe,
     setFilter: setFilter, toggleFilterPop: toggleFilterPop, setExtra: setExtra, resetExtra: resetExtra, closePops: closePops, onSearch: onSearch, clearSearch: clearSearch, resetAll: resetAll,
     openThread: openThread, closeThreadMobile: closeThreadMobile, toggleRespPop: toggleRespPop, loadOlder: loadOlder, onThreadScroll: onThreadScroll, openLightbox: openLightbox, closeLightbox: closeLightbox,
-    onInput: onInput, onInputKey: onInputKey, toggleTemplates: toggleTemplates, useTemplate: useTemplate, saveTemplate: saveTemplate, send: send, retry: retry,
+    onInput: onInput, onInputKey: onInputKey, toggleTemplates: toggleTemplates, useTemplate: useTemplate, saveTemplate: saveTemplate, deleteTemplate: deleteTemplate, send: send, retry: retry,
     saveCtxBrief: saveCtxBrief, createDealFor: createDealFor, openChatFor: openChatFor, reloadChats: reloadChats, enablePush: enablePush,
+    playRecording: playRecording, seekStart: seekStart,
     _state: S,
   };
 })();
@@ -24696,7 +25841,8 @@ function applyServerSegs_(rows){
     var vi = byGos[r.vehicle_gos];
     if (vi == null) return;   /* машина выбыла из парка - строку не рисуем, но и не удаляем на сервере */
     var seg = {id:r.id, v:vi, kind:r.kind, s:parseFloat(r.start_hour), l:parseFloat(r.length_hours),
-               needsData: !!Number(r.needs_data), reason: r.reason || ""};
+               needsData: !!Number(r.needs_data), reason: r.reason || "",
+               createdByName: r.created_by_name || "", createdAt: r.created_at_label || ""};
     if (r.kind === "trip"){
       var v = STATE.vehicles[vi];
       seg.mg = personByName_(r.manager_name, MANAGERS);
@@ -25188,6 +26334,14 @@ function openDrawer(seg){
   var infoRows = [["Машина", v.type + " · " + v.gos], ["Тягач", v.tractor],
               ["Прицеп", (v.trailer || "-") + (v.trailerGos ? " · " + v.trailerGos : "")],
               ["Водитель", v.driver || "нет"], ["График", v.schedule || "-"]];
+  /* "Кто поставил" (Влад, 07.09, со скриншотом карточки "Без водителя": "мне нужно
+     в карточке статуса видеть кто его поставил. Ремонт без водителя и т.д.") -
+     createdByName приходит с сервера уже резолвленным email->ФИО (applyServerSegs_).
+     Совсем новая, ещё не сохранённая запись (создаётся прямо сейчас) - поля с
+     сервера ещё нет, показывать нечего, строку не добавляем вовсе (не "—" -
+     честное отсутствие данных, а не будущий факт, который появится после
+     сохранения). */
+  if (seg.createdByName) infoRows.push(["Поставил", seg.createdByName + (seg.createdAt ? " · " + seg.createdAt : "")]);
   var rowsHtml = function(rows){
     return rows.map(function(p){
       return '<div class="dr-row"><span>' + p[0] + '</span><span class="' +

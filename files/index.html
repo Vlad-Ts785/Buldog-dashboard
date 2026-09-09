@@ -460,6 +460,14 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .dir-fb button.on-agree{background:rgba(29,158,117,.15);border-color:rgba(29,158,117,.4);}
 .dir-fb button.on-disagree{background:rgba(226,75,74,.15);border-color:rgba(226,75,74,.4);}
 .dir-fb button.on-done{background:rgba(55,138,221,.15);border-color:rgba(55,138,221,.4);}
+.dir-fb button.on-main{background:rgba(239,159,39,.15);border-color:rgba(239,159,39,.45);}
+.dir-alert{border:1px solid rgba(226,75,74,.45);background:rgba(226,75,74,.06);border-radius:10px;padding:8px 12px;font-size:12px;color:var(--text);margin-top:10px;}
+.dir-rule{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--border);font-size:12.5px;line-height:1.45;}
+.dir-rule:first-child{border-top:none;padding-top:2px;}
+.dir-rule .dir-rule-date{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;color:var(--muted);white-space:nowrap;padding-top:2px;}
+.dir-rule .dir-rule-x{margin-left:auto;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:7px;padding:3px 8px;font-size:11px;cursor:pointer;white-space:nowrap;}
+.dir-rule .dir-rule-x:hover{border-color:rgba(226,75,74,.4);color:var(--red);}
+.dir-chg-delta{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;white-space:nowrap;}
 .dir-fb .dir-fb-by{font-size:11px;color:var(--muted);font-family:'JetBrains Mono',ui-monospace,monospace;}
 .dir-cmt{width:100%;box-sizing:border-box;margin-top:8px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-size:12.5px;font-family:inherit;resize:vertical;min-height:54px;outline:none;transition:border-color .15s;}
 .dir-cmt:focus{border-color:var(--border-strong);}
@@ -5125,6 +5133,9 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
         <div class="muted" style="font-size:11px;margin-top:-6px;margin-bottom:12px">Каждое утро в 07:00 агент читает все показатели и отвечает на вопрос: какие действия нам нужно сделать, чтобы больше зарабатывать. Твои ответы на действия и вопросы - то, на чём он учится.</div>
         <div id="dir-headline" style="font-size:17px;font-weight:500;line-height:1.35;color:var(--text)"></div>
         <div id="dir-meta" class="muted" style="font-size:11.5px;margin-top:8px;font-family:'JetBrains Mono',ui-monospace,monospace"></div>
+        <div id="dir-nofb" class="muted" style="font-size:11.5px;margin-top:4px"></div>
+        <div id="dir-missing" class="dir-alert" style="display:none"></div>
+        <div id="dir-unverified" class="muted" style="display:none;font-size:11.5px;margin-top:8px;line-height:1.45"></div>
         <div id="dir-dates" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px"></div>
       </div>
       <div class="card" style="margin-bottom:16px">
@@ -5133,6 +5144,18 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
           <div class="muted" style="font-size:11px">по убыванию денег · ответь на каждое - агент учтёт завтра</div>
         </div>
         <div id="dir-actions"></div>
+      </div>
+      <div class="card" id="dir-changes-card" style="margin-bottom:16px;display:none">
+        <div class="sec-header">
+          <div class="sec-title">Что изменилось со вчера по данным</div>
+          <div class="muted" style="font-size:11px">считает система по снимкам, не агент</div>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="tbl">
+            <thead><tr><th>Показатель</th><th>Было</th><th>Стало</th><th>Δ</th></tr></thead>
+            <tbody id="dir-changes"></tbody>
+          </table>
+        </div>
       </div>
       <div class="card" style="margin-bottom:16px">
         <div class="sec-header"><div class="sec-title">Состояние показателей</div></div>
@@ -5154,9 +5177,23 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
         </div>
         <div id="dir-questions"></div>
       </div>
+      <div class="card" id="dir-promises-card" style="margin-bottom:16px;display:none">
+        <div class="sec-header">
+          <div class="sec-title">Мои обещания</div>
+          <div class="muted" style="font-size:11px">«Согласен» и «Это главное» без «Сделано» за 14 дней · людям пока ничего не уходит</div>
+        </div>
+        <div id="dir-promises"></div>
+      </div>
+      <div class="card" id="dir-rules-card" style="margin-bottom:16px;display:none">
+        <div class="sec-header">
+          <div class="sec-title">Правила от Влада</div>
+          <div class="muted" style="font-size:11px">дословно из твоих ответов · агент их не меняет · «Забыть» удаляет навсегда</div>
+        </div>
+        <div id="dir-rules"></div>
+      </div>
       <div class="card">
         <div class="sec-header">
-          <div class="sec-title">Что агент понял о бизнесе</div>
+          <div class="sec-title">Гипотезы агента о бизнесе</div>
           <span id="dir-memory-meta" class="muted" style="font-size:11px"></span>
         </div>
         <div id="dir-memory" style="font-size:12.5px;line-height:1.5;white-space:pre-wrap;color:var(--text)"></div>
@@ -20402,9 +20439,9 @@ function cpLoadHistory_() {
 // ИИ-агент, только admin. Бриф на сегодня собирает крон 07:00 МСК; «Пересобрать сейчас» - тот же
 // /api/director/run с force=1 (kie.ai reasoning, ~1-2 мин, nginx-таймаут 150 с). Отзывы Влада
 // (/api/director/feedback) и ответы на вопросы агента - единственный «рычаг обучения» v1.
-var dirState_ = { date: null, brief: null, feedback: [], generated_at: '', run_by: '', model: '', missing: [], busy: false };
+var dirState_ = { date: null, brief: null, feedback: [], generated_at: '', run_by: '', model: '', missing: [], busy: false, noFeedback: 0 };
 var DIR_MONTHS_RU_ = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
-function dirInit_() { dirLoadBrief_(null); dirLoadList_(); dirLoadMemory_(); }
+function dirInit_() { dirLoadBrief_(null); dirLoadList_(); dirLoadMemory_(); dirLoadPromises_(); }
 function dirDateRu_(d) {
   if (!d || d.length < 10) return d || '';
   return parseInt(d.slice(8, 10), 10) + ' ' + (DIR_MONTHS_RU_[parseInt(d.slice(5, 7), 10) - 1] || '') + ' ' + d.slice(0, 4);
@@ -20438,6 +20475,9 @@ function dirLoadList_() {
   if (!box) return;
   fetchFromYardApi_('/director/briefs', {}).then(function(r) {
     var items = (r.ok && r.data && r.data.briefs) || [];
+    dirState_.noFeedback = (r.ok && r.data && Number(r.data.briefs_without_feedback)) || 0;
+    var nofb = document.getElementById('dir-nofb');
+    if (nofb) nofb.textContent = dirState_.noFeedback >= 2 ? 'без твоих ответов: ' + dirState_.noFeedback + ' брифа подряд' : '';
     box.innerHTML = items.map(function(it) {
       return '<button type="button" class="dir-date-chip" data-date="' + pageEscAttr_(it.date_key) + '" onclick="dirLoadBrief_(this.getAttribute(\'data-date\'))" title="' + pageEscAttr_(it.headline || '') + '">' +
         pageEsc_(it.date_key.slice(8, 10) + '.' + it.date_key.slice(5, 7)) + (it.feedback_count ? ' · ' + it.feedback_count : '') + '</button>';
@@ -20455,7 +20495,8 @@ function dirLoadMemory_() {
   if (!el) return;
   fetchFromYardApi_('/director/memory', {}).then(function(r) {
     var m = r.ok && r.data && r.data.memory;
-    if (!m || !m.body) { el.innerHTML = '<span class="muted">Заметок ещё нет - появятся после первого брифа.</span>'; if (meta) meta.textContent = ''; return; }
+    dirRenderRules_((m && m.rules) || []);
+    if (!m || !m.body) { el.innerHTML = '<span class="muted">Гипотез ещё нет - появятся после первого брифа.</span>'; if (meta) meta.textContent = ''; return; }
     el.textContent = m.body;
     if (meta) meta.textContent = 'брифов: ' + (m.briefs_count || 0) + ' · обновлено ' + String(m.updated_at || '').slice(0, 16);
   }).catch(function() {});
@@ -20471,6 +20512,9 @@ function dirRender_() {
     title.textContent = 'Бриф на сегодня';
     hl.innerHTML = '<span class="muted" style="font-size:13px;font-weight:400">Брифа ещё нет - нажми «Пересобрать сейчас», агент соберёт его за 1-2 минуты.</span>';
     meta.textContent = ''; acts.innerHTML = ''; st.innerHTML = '';
+    var chCard0 = document.getElementById('dir-changes-card'); if (chCard0) chCard0.style.display = 'none';
+    var missEl0 = document.getElementById('dir-missing'); if (missEl0) missEl0.style.display = 'none';
+    var unvEl0 = document.getElementById('dir-unverified'); if (unvEl0) unvEl0.style.display = 'none';
     if (fuCard) fuCard.style.display = 'none';
     if (qCard) qCard.style.display = 'none';
     return;
@@ -20482,6 +20526,26 @@ function dirRender_() {
   meta.textContent = 'собрано ' + String(dirState_.generated_at || '').slice(11, 16) + ' · ' + (dirState_.run_by === 'cron' ? 'по расписанию' : 'вручную') +
     (dirState_.model ? ' · ' + dirState_.model : '') +
     (dirState_.missing && dirState_.missing.length ? ' · без данных: ' + dirState_.missing.join(', ') : '');
+  var missEl = document.getElementById('dir-missing');
+  if (missEl) {
+    var miss = dirState_.missing || [];
+    missEl.style.display = miss.length ? '' : 'none';
+    missEl.textContent = miss.length ? 'Агент слеп на: ' + miss.join(', ') + '. Бриф построен без этих данных - выводы по ним не считать.' : '';
+  }
+  var unvEl = document.getElementById('dir-unverified');
+  if (unvEl) {
+    var unv = b.unverified || [];
+    unvEl.style.display = unv.length ? '' : 'none';
+    unvEl.textContent = unv.length ? 'Цифры, которых нет в данных напрямую (' + unv.length + '): ' + unv.map(function(u) { return u.text + ' (' + u.where + ')'; }).join('; ') + '. Возможна арифметика агента, но проверь.' : '';
+  }
+  var chCard = document.getElementById('dir-changes-card'), chBody = document.getElementById('dir-changes');
+  var changes = b.changes || [];
+  if (chCard) chCard.style.display = changes.length ? '' : 'none';
+  if (chBody) chBody.innerHTML = changes.map(function(c) {
+    var f = function(v) { return c.kind === 'rub' ? dirFmtRub_(v) : c.kind === 'pct' ? (Number(v).toLocaleString('ru', { maximumFractionDigits: 1 }) + '%') : String(v); };
+    var d = c.kind === 'rub' ? dirFmtRub_(c.delta) : c.kind === 'pct' ? (Number(c.delta).toLocaleString('ru', { maximumFractionDigits: 1 }) + ' п.п.') : String(c.delta);
+    return '<tr><td>' + pageEsc_(c.label) + '</td><td class="dir-chg-delta muted">' + f(c.before) + '</td><td class="dir-chg-delta">' + f(c.after) + '</td><td class="dir-chg-delta">' + (c.delta > 0 ? '+' : '') + d + '</td></tr>';
+  }).join('');
 
   acts.innerHTML = (b.actions || []).map(function(a, i) {
     var fb = fbByIdx[i];
@@ -20503,6 +20567,7 @@ function dirRender_() {
           '<button type="button"' + cls('agree') + ' onclick="dirFeedback_(' + i + ',\'agree\')" data-nav-sound>Согласен</button>' +
           '<button type="button"' + cls('disagree') + ' onclick="dirFeedback_(' + i + ',\'disagree\')" data-nav-sound>Не согласен</button>' +
           '<button type="button"' + cls('done') + ' onclick="dirFeedback_(' + i + ',\'done\')" data-nav-sound>Сделано</button>' +
+          '<button type="button"' + cls('main') + ' onclick="dirFeedback_(' + i + ',\'main\')" data-nav-sound title="Переставить наверх в голове агента: это важнее его порядка по рублям">Это главное</button>' +
           (fb ? '<span class="dir-fb-by">' + pageEsc_(String(fb.created_at || '').slice(0, 16)) + '</span>' : '') +
         '</div>' +
         '<textarea autocomplete="off" class="dir-cmt" id="dir-cmt-' + i + '" placeholder="Почему не так / что учесть - агент прочтёт это завтра" style="' + (showCmt ? '' : 'display:none') + '">' + pageEsc_(fb && fb.comment || '') + '</textarea>' +
@@ -20548,9 +20613,40 @@ function dirSendFeedback_(idx, verdict, comment) {
     if (!r.ok || !r.data || !r.data.ok) { p2Toast('Не сохранилось: ' + ((r.data && r.data.error) || 'ошибка сервера'), 'red'); return; }
     dirState_.feedback = r.data.feedback || [];
     dirRender_();
-    p2Toast(verdict === 'answer' ? 'Ответ записан - агент прочтёт его в следующем брифе' : 'Отзыв сохранён - агент учтёт его завтра', 'green');
+    p2Toast(verdict === 'answer' ? 'Ответ записан - агент прочтёт его в следующем брифе' : verdict === 'main' ? 'Отмечено как главное - агент поймёт твой порядок' : 'Отзыв сохранён - агент учтёт его завтра', 'green');
     dirLoadList_();
+    dirLoadPromises_();
+    if (verdict === 'disagree' || verdict === 'answer' || verdict === 'main') dirLoadMemory_();
   }).catch(function() { p2Toast('Ошибка сети', 'red'); });
+}
+function dirRenderRules_(rules) {
+  var card = document.getElementById('dir-rules-card'), box = document.getElementById('dir-rules');
+  if (!card || !box) return;
+  card.style.display = rules.length ? '' : 'none';
+  box.innerHTML = rules.map(function(r, i) {
+    return '<div class="dir-rule"><span class="dir-rule-date">' + pageEsc_(String(r.date || '').slice(5).replace('-', '.')) + '</span><span>' + pageEsc_(r.text) + '</span>' +
+      '<button type="button" class="dir-rule-x" onclick="dirForgetRule_(' + i + ')">Забыть</button></div>';
+  }).join('');
+}
+function dirForgetRule_(idx) {
+  if (!confirm('Удалить это правило из памяти агента? Отменить нельзя.')) return;
+  postToYardApi_('/director/rule_forget', { idx: String(idx) }).then(function(r) {
+    if (!r.ok || !r.data || !r.data.ok) { p2Toast('Не удалилось: ' + ((r.data && r.data.error) || 'ошибка сервера'), 'red'); return; }
+    dirRenderRules_(r.data.rules || []);
+    p2Toast('Правило забыто', 'green');
+  }).catch(function() { p2Toast('Ошибка сети', 'red'); });
+}
+function dirLoadPromises_() {
+  var card = document.getElementById('dir-promises-card'), box = document.getElementById('dir-promises');
+  if (!card || !box) return;
+  fetchFromYardApi_('/director/promises', {}).then(function(r) {
+    var items = (r.ok && r.data && r.data.promises) || [];
+    card.style.display = items.length ? '' : 'none';
+    box.innerHTML = items.map(function(p) {
+      return '<div class="dir-fu"><div style="font-weight:600">' + (p.verdict === 'main' ? '<span class="badge amber" style="margin-right:6px">главное</span>' : '') + pageEsc_(p.title) + '</div>' +
+        '<div class="muted">' + pageEsc_(String(p.date_key || '').slice(8, 10) + '.' + String(p.date_key || '').slice(5, 7)) + (p.owner ? ' · ' + pageEsc_(p.owner) : '') + (p.check_metric ? ' · проверка: ' + pageEsc_(p.check_metric) : '') + '</div></div>';
+    }).join('');
+  }).catch(function() {});
 }
 function dirRun_() {
   if (dirState_.busy) return;

@@ -413,7 +413,7 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 <div class="scrim" id="scrim"></div>
 <div class="sheet" id="sheet"><div class="grip" id="grip"></div><div class="sh-head" id="shHead"></div><div class="sh-body" id="shBody"></div><div class="sh-foot" id="shFoot"></div></div>
 <div class="ovl" id="ovl"><div class="ovl-head" id="ovlHead"></div><div class="ovl-body" id="ovlBody"></div><div class="ovl-foot" id="ovlFoot" hidden></div></div>
-<div class="demo-tag" id="demoTag" hidden>ДЕМО · v14</div>
+<div class="demo-tag" id="demoTag" hidden>ДЕМО · v15</div>
 <script>
 "use strict";
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -581,14 +581,28 @@ var GOOGLE_CLIENT_ID_ = "872723319158-cmr4v5v31fk3uv8ass3vvdch7at66n8e.apps.goog
 function sessionToken_(){ try { return localStorage.getItem("session_token") || ""; } catch(e){ return ""; } }
 function setSessionToken_(t){ try { localStorage.setItem("session_token", t); } catch(e){} }
 /* Таймаут 20 с на GET: зависший запрос по плохой мобильной сети раньше оставлял страницу
-   пустой навсегда без единого слова (06.09). Теперь - в catch -> полоса ошибки с «Повторить». */
-function apiGet_(path, params, timeoutMs){
+   пустой навсегда без единого слова (06.09). Теперь - в catch -> полоса ошибки с «Повторить».
+   09.09 (Сильчев: «часто пустой экран, по нескольку раз обновляет - потом грузится») -
+   НАЙДЕННЫЙ БАГ: load() бьёт 5 запросов ЧЕРЕЗ Promise.all - если у fetch() короткий сетевой
+   сбой (смена вышки/секундный обрыв на мобильном - обычное дело, в логах сервера при этом
+   НИЧЕГО не видно, запрос до сервера не доходит вовсе), fetch() РЕЖЕКТИТ, а Promise.all
+   валит ВЕСЬ батч, даже если остальные 4 из 5 прошли бы нормально. Сервер тут ни при чём
+   (см. README - 09.09, диагностика: 0 ошибок 5xx в nginx). Теперь apiGet_ сам ловит именно
+   сетевой сбой (не HTTP-ошибку - та уже резолвится ниже как {ok:false}) и тихо повторяет
+   до 2 раз с короткой паузой, ПРЕЖДЕ чем вернуть отказ - так один моргнувший из пяти запросов
+   не должен больше ронять всю загрузку. */
+function apiGet_(path, params, timeoutMs, _attempt){
   var qs = Object.keys(params || {}).map(function(k){ return params[k] != null ? k + "=" + encodeURIComponent(params[k]) : null; }).filter(Boolean).join("&");
   var ctrl = (typeof AbortController !== "undefined") ? new AbortController() : null;
   var timer = ctrl ? setTimeout(function(){ ctrl.abort(); }, timeoutMs || 20000) : null;
   return fetch(API_BASE_ + path + (qs ? "?" + qs : ""), {headers:{"X-Session-Token": sessionToken_()}, signal: ctrl ? ctrl.signal : undefined})
     .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(d){ return {ok: r.ok && !d.error, status:r.status, data:d}; }); })
-    .finally(function(){ if (timer) clearTimeout(timer); });
+    .finally(function(){ if (timer) clearTimeout(timer); })
+    .catch(function(err){
+      var attempt = _attempt || 0;
+      if (attempt < 2) return new Promise(function(res){ setTimeout(res, 400 * (attempt + 1)); }).then(function(){ return apiGet_(path, params, timeoutMs, attempt + 1); });
+      return {ok:false, status:0, data:{error: (err && err.message) || "нет соединения"}, networkError:true};
+    });
 }
 function apiPost_(path, params){
   var qs = Object.keys(params || {}).map(function(k){ return (params[k] !== undefined && params[k] !== null) ? k + "=" + encodeURIComponent(params[k]) : null; }).filter(Boolean).join("&");
@@ -1700,7 +1714,7 @@ function renderConfirmSheet(){
 /* ── Настройки (тема - развилка для Влада, версия) ── */
 /* Меню (кнопка ≡ в шапке, Влад 06.09: «должна быть возможность вернуться в меню дашборда
    из планировки») - навигация наверху, настройки ниже. */
-var PAGE_VERSION_ = "v14 · 07.09";
+var PAGE_VERSION_ = "v15 · 09.09";
 function renderSettingsSheet(){
   var theme = document.documentElement.getAttribute("data-theme") || "dark";
   shHead.innerHTML = shHeadHtml("Меню", (M.me.name || "") + (API.demo ? " · демо" : ""), "");

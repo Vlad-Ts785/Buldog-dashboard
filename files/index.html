@@ -2036,6 +2036,17 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
    чинили по вертикали). min-width:0 только пока активна вкладка - других страниц
    не касается. */
 .main-wrap:has(main > #page-logistics-plan.active){min-width:0;}
+/* ТОТ ЖЕ класс бага (найден 09.09 на CRM, "реши задачу с размером колонок верхнего блока
+   раз и навсегда") - kb-board (канбан, 7 колонок * 248px = 1800px) шире доступной ширины
+   main почти на любом экране, и точно так же "утекал" вверх по цепочке main -> .main-wrap
+   -> body: вместо внутреннего скролла ТОЛЬКО .kb-board (overflow-x:auto у него уже стоит)
+   скроллилась вся страница целиком, включая сайдбар - слева пропадало меню. Живой замер
+   09.09 (1536px, реальный ноутбучный экран): document.documentElement.scrollWidth=2076 >
+   innerWidth=1536, т.е. hasPageHorizScroll=true - подтверждено, не гипотеза. CRM, в
+   отличие от Планировки, НЕ full-bleed страница (обычные padding/max-width у main ей не
+   мешают, KPI/чаты остаются в читаемой колонке) - снимаем только min-width, не весь набор
+   правил, что у Планировки. */
+main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:0;}
 #page-logistics-plan *{box-sizing:border-box;}#page-logistics-plan.active{
   /* заменяет исходное body{...} прототипа - теперь это .page внутри дашборда, не
      отдельный документ. НЕДОСТАТОЧНО просто "flex:1;min-height:0" и кооперации с
@@ -20584,6 +20595,20 @@ var CRM = (function () {
   function fmtPhone(p) { var s = String(p || ''); if (/^7\d{10}$/.test(s)) return '+7 ' + s.slice(1, 4) + ' ' + s.slice(4, 7) + '-' + s.slice(7, 9) + '-' + s.slice(9, 11); return isAvitoKey(s) ? '' : s; }
   function telHref(p) { var d = String(p || '').replace(/\D/g, ''); return d.length >= 10 ? 'tel:+' + d : ''; }
   function initials(name) { var p = String(name || '').trim().split(/\s+/).filter(Boolean); if (!p.length) return '?'; return (p.length === 1 ? p[0][0] : (p[0][0] + p[1][0])).toUpperCase(); }
+  // Персональный цвет кружка-инициалов менеджера (Влад 09.09: "у каждого кружка свой
+  // цвет") - фиксированная палитра, НЕ пересекается с 5 семантическими токенами ГОСТа
+  // (--green/--red/--amber/--blue/--purple уже заняты смыслом "хорошо/плохо/риск/данные/
+  // ответственный" - DESIGN_SYSTEM.md раздел 1, "цвет = смысл, никогда не декорация" -
+  // здесь смысл другой: цвет = личность, не оценка). Детерминированный хэш по добавочному
+  // номеру (стабильнее имени - не меняется при исправлении опечатки в ФИО) - один и тот же
+  // человек всегда получает один и тот же цвет, на любой карточке и после перезагрузки.
+  var AVATAR_PALETTE_ = ['#D97757', '#C2609E', '#6FA8A0', '#B08A3E', '#7A8B99', '#9B6BC7', '#5E6FA3', '#4FA0AE', '#C9A227', '#C77D97'];
+  function avatarColor_(key) {
+    var s = String(key || '');
+    var h = 0;
+    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return AVATAR_PALETTE_[h % AVATAR_PALETTE_.length];
+  }
   function surname3(name) { var p = String(name || '').trim().split(/\s+/).filter(Boolean); if (!p.length) return ''; var sn = p.length > 1 ? p[p.length - 1] : p[0]; return sn.slice(0, 3).toUpperCase(); }
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
   var MONTHS = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
@@ -20820,7 +20845,7 @@ var CRM = (function () {
     if (!meta.length) meta.push(esc(fmtListTime(isTerm ? d.closed_at || d.updated_at : d.updated_at)));
     var chan = d.source === 'avito' ? 'Авито' : 'Звонок';
     var unread = Number(d.unread_count || 0);
-    var resp = d.responsible_name ? '<span class="kb-ava" title="' + esc(d.responsible_name) + '">' + esc(initials(d.responsible_name)) + '</span>' : '<span class="kb-ava is-none" title="Без ответственного">?</span>';
+    var resp = d.responsible_name ? '<span class="kb-ava" style="background:' + avatarColor_(d.responsible_extension || d.responsible_name) + '" title="' + esc(d.responsible_name) + '">' + esc(initials(d.responsible_name)) + '</span>' : '<span class="kb-ava is-none" title="Без ответственного">?</span>';
     // Статус-маркер: пульс свежести у открытых, галочка у выигранных, крестик у отказов
     // (канон mx-won-check из превью - examples/design-reference-kanban.html).
     var statusMark = isWon ? '<span class="kb-won-check" title="Сделка успешна">' + ico('check') + '</span>'

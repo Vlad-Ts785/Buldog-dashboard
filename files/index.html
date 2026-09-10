@@ -2607,9 +2607,23 @@ function swapAdr(){
     routeAll();
 }
 
+// Керченский мост (материк <-> Крым) закрыт для грузового транспорта (Влад, 10.09).
+// OSRM об этом ограничении не знает и как кратчайший путь всегда поведёт через мост -
+// хардкодим объезд через Мариуполь (реальный сухопутный коридор для фур), вставляя его
+// промежуточной точкой в запрос, если РОВНО одна из двух точек плеча лежит в Крыму.
+// Бокс Крыма: полуостров целиком, включая Керчь у самого моста; восточная граница
+// (36.60) специально не доходит до тамбовской/таманской стороны моста (материк) -
+// у обеих берегов пролива долгота почти совпадает (мост ~19 км), поэтому граница по
+// долготе - единственный надёжный признак "какой это берег".
+var MARIUPOL_VIA_ = { lat: 47.0951, lng: 37.5413 };
+function inCrimea_(p) { return p.lat >= 44.35 && p.lat <= 46.20 && p.lng >= 32.40 && p.lng <= 36.60; }
+function crimeaBridgeDetour_(a, b) { return (inCrimea_(a) !== inCrimea_(b)) ? [a, MARIUPOL_VIA_, b] : null; }
+
 // ===== OSRM ДЛЯ ТРЁХ СЕГМЕНТОВ =====
 async function osrmRoute(c1, c2, callback) {
-    var url = 'https://router.project-osrm.org/route/v1/driving/'+c1.lng+','+c1.lat+';'+c2.lng+','+c2.lat+'?overview=full&geometries=geojson';
+    var pts = crimeaBridgeDetour_(c1, c2) || [c1, c2];
+    var coordStr = pts.map(function(p){ return p.lng+','+p.lat; }).join(';');
+    var url = 'https://router.project-osrm.org/route/v1/driving/'+coordStr+'?overview=full&geometries=geojson';
     try {
         var r = await fetch(url), d = await r.json();
         if (d.code !== 'Ok' || !d.routes || !d.routes[0]) {

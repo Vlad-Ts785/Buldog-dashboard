@@ -3151,7 +3151,10 @@ main:has(> #page-logistics-plan.active){padding:0;max-width:none;min-width:0;}
         </button>
         <div class="p2-act-body">
           <div style="overflow-x:auto"><table class="tbl">
-            <thead><tr><th>Сотрудник</th><th>Роль</th><th class="num">Заходов</th><th>Первый вход</th><th>Последний вход</th></tr></thead>
+            <thead><tr><th>Сотрудник</th><th>Роль</th>
+              <th class="num" title="Заход = рабочая сессия: если человека не было в системе больше 30 минут, следующее действие считается новым заходом. До 10.09.2026 считались только полные загрузки страницы, поэтому старые цифры занижены.">Заходов</th>
+              <th class="num" title="В скольких разных днях человек что-либо делал в системе. Считается с 10.09.2026.">Дней</th>
+              <th>Первый вход</th><th>Последняя активность</th></tr></thead>
             <tbody id="access-log-body"></tbody>
           </table></div>
         </div>
@@ -10810,8 +10813,12 @@ function renderAccessLog() {
     return d.toLocaleString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
   }
   document.getElementById('access-log-body').innerHTML = log.map(function(r) {
+    // Дней в системе (10.09) - на вопрос "заходит ли он каждый день" отвечает честнее
+    // счётчика заходов: вкладка Планировки, открытая на весь день, это один заход.
+    var days = Number(r.days || 0);
     return '<tr><td>'+(r.name||r.email||'—')+'</td><td class="muted">'+(r.role||'—')+'</td>'+
-      '<td class="num"><b>'+(r.count != null ? r.count : (r.visits||0))+'</b></td>'+ // count - контракт Apps Script, visits - имя поля в таблице сервера (04.09, после переезда main_payload)
+      '<td class="num"><b>'+(r.count != null ? r.count : (r.visits||0))+'</b></td>'+
+      '<td class="num">'+(days ? days : '<span class="muted">—</span>')+'</td>'+ // count - контракт Apps Script, visits - имя поля в таблице сервера (04.09, после переезда main_payload)
       '<td class="muted">'+fmtVisit(r.first_visit)+'</td>'+
       '<td class="muted">'+fmtVisit(r.last_visit)+'</td></tr>';
   }).join('');

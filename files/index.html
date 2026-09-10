@@ -26339,6 +26339,11 @@ function segLabel(s){
   if (s.kind === "driveroff"){
     var reasonLbl = driveroffReasonLabel_(s.reason);
     if (reasonLbl) base += " · " + reasonLbl;
+    // Чей был отпуск/выходной/больничный (10.09) - см. разбор у lpFleetPrevDriverName_.
+    // Фамилия одним словом (не всё full_name) - плитка и так тесная.
+    var v = STATE.vehicles[s.v];
+    var prevDriver = v ? lpFleetPrevDriverName_(v.gos, s.s) : null;
+    if (prevDriver) base += " · " + prevDriver.trim().split(" ")[0];
   }
   return base ? base + " · " + untilLabel(s) : "";
 }
@@ -28794,6 +28799,25 @@ function lpFleetOpenOnTractor_(kind, tractorGos, slot){
 function lpFleetPersonName_(id){
   var p = (FLEET_PEOPLE_ || []).filter(function(x){ return String(x.id) === String(id); })[0];
   return p ? p.full_name : String(id);
+}
+/* Кто был водителем ДО протяжки "Без водителя" (10.09, Влад живьём: посадил Гогу
+   на место Муртазалиева - отпуск Муртазалиева корректно обрезался до секунды
+   посадки, но на самой плитке нет и намёка, ЧЕЙ это был отпуск. "Я думаю в таком
+   случае, если водитель поменялся, нужно чтобы на протяжке было написано, кто
+   там был водитель"). Не новое поле ввода (логист ничего не выбирает) - имя
+   вычисляется из уже существующей истории fleet_assignments: последнее закрытие
+   driver-назначения на ЭТОМ тягаче, случившееся ДО (или ровно в) начала этой
+   протяжки. Тот же источник данных, что у vacantBandRanges_/.now, просто другой
+   срез - "кто ушёл", а не "когда открыто сейчас". */
+function lpFleetPrevDriverName_(tractorGos, atHour){
+  var best = null, bestEnd = -Infinity;
+  (FLEET_ASSIGN_ || []).forEach(function(a){
+    if (a.kind !== "driver" || a.tractor_gos !== tractorGos || !a.valid_to) return;
+    var endH = lpFleetDateToHour_(a.valid_to);
+    if (endH == null || endH > atHour + 0.1) return; // закрылось ПОСЛЕ начала протяжки - не он
+    if (endH > bestEnd){ bestEnd = endH; best = a; }
+  });
+  return best ? lpFleetPersonName_(best.resource_key) : null;
 }
 /* Телефон - только для "Копировать данные" (lpCopyText_). /sprav/state для роли
    логист/менеджер отдаёт урезанный набор полей (31.08, см. api/server.js на

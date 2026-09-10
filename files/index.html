@@ -22635,10 +22635,15 @@ var CRM = (function () {
         var up = l.upsell_amount || 0;
         var barW = Math.min(100, (l.amount || 0) / maxVal * 100);
         var upW = Math.min(100 - barW, up / maxVal * 100);
+        // 10.09, вторая правка - Влад: "это должно идти в общий зачёт по сумме" (было -
+        // крупным числом только первая продажа, допродажи мелкой добавкой снизу). Крупное
+        // число теперь ИТОГ (первая продажа + допродажи), мелкая строка снизу - "из них
+        // сколько допродажи", не отдельная надбавка к уже показанному числу.
+        var total = (l.amount || 0) + up;
         var valHtml = up > 0
-          ? '<span class="crmldr-val-main">' + shortMoney(l.amount) + '</span><span class="crmldr-val-upsell">+' + shortMoney(up) + '</span>'
+          ? '<span class="crmldr-val-main">' + shortMoney(total) + '</span><span class="crmldr-val-upsell">из них ' + shortMoney(up) + ' допродажи</span>'
           : shortMoney(l.amount);
-        return '<div class="crmldr-row has-rank' + (i < 3 ? ' is-top' + (i + 1) : '') + '" title="' + esc(l.name) + (up > 0 ? ' - первая продажа ' + money(l.amount) + ', допродажи ' + money(up) : '') + '">' +
+        return '<div class="crmldr-row has-rank' + (i < 3 ? ' is-top' + (i + 1) : '') + '" title="' + esc(l.name) + (up > 0 ? ' - всего ' + money(total) + ', из них ' + money(up) + ' допродажи' : '') + '">' +
           rankBadge(i) +
           '<span class="crmldr-name">' + esc(surname) + '</span>' +
           '<div class="crmldr-track"><div class="crmldr-barwrap"><div class="crmldr-bar" style="width:' + barW.toFixed(1) + '%"></div>' +
@@ -22719,7 +22724,10 @@ var CRM = (function () {
     // Допродажи (10.09, Влад: "должно быть видно и в канбане") - тонкая зелёная строка
     // под суммой, только у won-карточек с реальными допродажами (сервер уже отфильтровал -
     // batch считается только для won+order_1c_number, см. crmBatchUpsells_).
-    var upsellLine = (d.upsell_amount > 0) ? '<div class="kb-card-upsell">+' + shortMoney(d.upsell_amount) + ' допродажи' + (d.upsell_count > 1 ? ' (' + d.upsell_count + ')' : '') + '</div>' : '';
+    // 10.09, вторая правка - Влад: "красиво написано две допродажи + 94 тыс р" (было
+    // "+94 тыс допродажи (2)", число в скобках после слова читалось коряво). Число+слово
+    // впереди, сумма после - тот же plural(), что у счётчика сделок в колонке (22749).
+    var upsellLine = (d.upsell_amount > 0) ? '<div class="kb-card-upsell">' + d.upsell_count + ' ' + plural(d.upsell_count, 'допродажа', 'допродажи', 'допродаж') + ' + ' + shortMoney(d.upsell_amount) + '</div>' : '';
     return '<article class="kb-card ' + fr + (isWon ? ' kb-won-style' : '') + (isLost ? ' kb-lost-style' : '') + (S.drawerId === d.id ? ' is-open' : '') + '" data-id="' + d.id + '" tabindex="0" title="' + esc(fr === 'kb-stale' ? 'Зависла: без движения дольше ' + stallDays(d.stage) + ' дн.' : fr === 'kb-wait' ? 'Клиент ждёт ответа больше 2 часов' : '') + '">' +
       '<header class="kb-card-top"><span class="kb-client">' + esc(dealTitle(d)) + '</span>' + statusMark + '</header>' +
       '<div class="kb-cargo">' + cargoLine + '</div>' +
@@ -22803,7 +22811,13 @@ var CRM = (function () {
     STAGES.forEach(function (st) {
       var collapsed = !!S.collapsedCols[st.key];
       var ds = sortedDealsForStage(st.key, deals.filter(function (d) { return d.stage === st.key; }));
-      var sum = ds.reduce(function (a, d) { return a + Number(d.amount || 0); }, 0);
+      // 10.09, Влад: "где сейчас показывает 129000 должно быть 223000" - итог колонки
+      // теперь идёт в общий зачёт ВМЕСТЕ с допродажами (обе точки пересчёта суммы колонки -
+      // полный рендер и одометр при переносе карточки - должны совпадать, иначе после
+      // перетаскивания цифра "прыгнет" на другое число). upsell_amount приходит только у
+      // won-сделок с order_1c_number - у остальных стадий поля просто нет,
+      // Number(undefined||0)=0 безопасно, они не меняются.
+      var sum = ds.reduce(function (a, d) { return a + Number(d.amount || 0) + Number(d.upsell_amount || 0); }, 0);
       html += '<section class="kb-col' + (collapsed ? ' is-collapsed' : '') + '" data-colwrap="' + st.key + '">' + colHeadHtml(st, ds.length, collapsed) +
         (collapsed ? '' :
           '<div class="kb-col-herowrap" id="kb-hero-' + st.key + '">' + colHeroHtml(st, sum, ds) + '</div>' +
@@ -22828,7 +22842,13 @@ var CRM = (function () {
       var cnt = el('kb-cnt-' + st.key), heroWrap = el('kb-hero-' + st.key);
       if (cnt && cnt.textContent !== String(ids.length)) { cnt.textContent = ids.length; cnt.classList.remove('pulse'); void cnt.offsetWidth; cnt.classList.add('pulse'); }
       var ds = ids.map(dealById).filter(Boolean);
-      var sum = ds.reduce(function (a, d) { return a + Number(d.amount || 0); }, 0);
+      // 10.09, Влад: "где сейчас показывает 129000 должно быть 223000" - итог колонки
+      // теперь идёт в общий зачёт ВМЕСТЕ с допродажами (обе точки пересчёта суммы колонки -
+      // полный рендер и одометр при переносе карточки - должны совпадать, иначе после
+      // перетаскивания цифра "прыгнет" на другое число). upsell_amount приходит только у
+      // won-сделок с order_1c_number - у остальных стадий поля просто нет,
+      // Number(undefined||0)=0 безопасно, они не меняются.
+      var sum = ds.reduce(function (a, d) { return a + Number(d.amount || 0) + Number(d.upsell_amount || 0); }, 0);
       var animate = heroWrap && fromCol && toCol && fromCol !== toCol && (st.key === fromCol || st.key === toCol);
       var prevValEl = animate ? heroWrap.querySelector('.kb-col-hero-val') : null;
       var fromSum = prevValEl ? parseHeroSum_(prevValEl.textContent) : null;

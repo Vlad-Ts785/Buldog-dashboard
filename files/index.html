@@ -20127,10 +20127,34 @@ var menuHintDone_ = false, menuHintTimer_ = null;
 
 function menuPrefersReduced_() { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } }
 function menuSur_(name) { return String(name || '').trim().split(/\s+/)[0].toLowerCase().replace(/ё/g, 'е'); }
+// Групповой ключ меню (10.09, Влад: "если меняю у Филипчук - то автоматом у всех
+// менеджеров, если у Гусейновой - то и у Ахтамовой") - ключ теперь ТИР (роль + особый
+// статус по фамилии), не отдельный человек: вся группа делит один конфиг. Та же
+// классификация, что уже решает allowedPages_ в applyRoleUI() (руководитель отдела
+// логистики/начальник автоколонны/руководитель коммерческой группы - свои тиры, у каждого
+// свой набор пунктов меню, смешивать с обычными менеджерами/логистами нельзя). Хочешь
+// разное меню одному конкретному человеку - этой версией нельзя, осознанный компромисс
+// (Влад попросил ровно обратное - группировку, не индивидуализацию).
+var MENU_TIER_LABEL_ = { admin:'админ', manager:'все менеджеры', commercial_head:'руководители коммерческих групп',
+  logist:'все логисты', logistics_head:'руководитель логистики', column_head:'начальник автоколонны', mechanic:'механики' };
+function menuTierKey_(role, sur) {
+  if (role === 'admin') return 'admin';
+  if (role === 'mechanic') return 'mechanic';
+  if (role === 'logist') {
+    if (sur === 'сильчев' || sur === 'рыщанов') return 'logistics_head'; // см. ryschanowHeadFor_
+    if (COLUMN_HEAD_SUR_FRONT_.indexOf(sur) >= 0) return 'column_head';
+    return 'logist';
+  }
+  if (role === 'manager') {
+    if (COMMERCIAL_HEAD_SUR_FRONT_.indexOf(sur) >= 0) return 'commercial_head';
+    return 'manager';
+  }
+  return role;
+}
 function menuCfgKey_() {
   if (typeof D === 'undefined' || !D || !D.role) return null;
-  if (D.role === 'admin') return viewAsEntry ? (viewAsEntry.type + ':' + menuSur_(viewAsEntry.name)) : 'admin';
-  return D.role + ':' + menuSur_(D.managerName || D.logistName || D.mechanicName || '');
+  if (D.role === 'admin') return viewAsEntry ? menuTierKey_(viewAsEntry.type, menuSur_(viewAsEntry.name)) : 'admin';
+  return menuTierKey_(D.role, menuSur_(D.managerName || D.logistName || D.mechanicName || ''));
 }
 function menuNav_() { return document.querySelector('.sidebar-nav'); }
 function menuToken_(el) {
@@ -20168,9 +20192,15 @@ function menuApplyCfg_(cfg) {
     it.classList.toggle('menu-hidden', isHidden);
     if (isHidden && !menuCustomizing_ && it.style.display !== 'none') it.style.display = 'none';
   });
-  // Подпись на плашке - чьё меню правим; обновляется и при смене "Смотреть как" прямо в режиме.
+  // Подпись на плашке - чьё меню правим; обновляется и при смене "Смотреть как" прямо в
+  // режиме. 10.09 - добавлен тир в скобках (ключ конфига групповой, Влад должен видеть,
+  // что правка Филипчук зацепит всех менеджеров, а не только её).
   var lbl = document.getElementById('menu-done-target');
-  if (lbl && menuCustomizing_) lbl.textContent = viewAsEntry ? String(viewAsEntry.name).split(' ')[0] : 'Админ';
+  if (lbl && menuCustomizing_) {
+    var tierKey_ = menuCfgKey_();
+    var tierLabel_ = MENU_TIER_LABEL_[tierKey_] || tierKey_;
+    lbl.textContent = (viewAsEntry ? String(viewAsEntry.name).split(' ')[0] : 'Админ') + (tierLabel_ && tierKey_ !== 'admin' ? ' · ' + tierLabel_ : '');
+  }
 }
 function applyMenuConfig_() {
   var key = menuCfgKey_(); if (!key) return;

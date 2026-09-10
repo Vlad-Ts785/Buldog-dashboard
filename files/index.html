@@ -3114,6 +3114,10 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
     <div class="sidebar-nav-item" onclick="showPage('counterparty',this)" data-page="counterparty">
       <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2.5l6 2.3v4.7c0 3.6-2.5 6.6-6 8-3.5-1.4-6-4.4-6-8V4.8z"/><path d="M7.3 10l1.9 1.9 3.6-3.8"/></svg></span> Проверка контрагента
     </div>
+        <div class="sidebar-nav-item" onclick="showPage('dept-trals',this)" data-page="dept-trals">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2.5l6 2.3v4.7c0 3.6-2.5 6.6-6 8-3.5-1.4-6-4.4-6-8V4.8z"/><path d="M7.3 10l1.9 1.9 3.6-3.8"/></svg>
+          Отдел Тралы
+        </div>
     <!-- «Поступления» - переехала сюда из шапки меню (Влад, 30.08: «перенеси в раздел
          продажи», слот наверху занят «Справочниками»); сама страница/её JS не менялись,
          id="page-receipts" и весь код внутри - тот же. -->
@@ -4674,6 +4678,14 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
     <div id="page-sales-mgr" class="page">
       <div id="sales-mgr-kpi" style="margin-bottom:12px"></div>
       <div id="sales-mgr-depts"></div>
+    </div>
+
+    <!-- ═══ ОТДЕЛ ТРАЛЫ (для менеджеров и старших, 10.09.2026) ═══
+         Та же картина, что у директора на «Менеджеры - заказы 1С», но только текущий
+         месяц и БЕЗ раскрытия заказов по клику (Влад: «только цифры по прибавке»). -->
+    <div id="page-dept-trals" class="page">
+      <div id="dept-trals-kpi" style="margin-bottom:12px"></div>
+      <div id="dept-trals-depts"></div>
     </div>
 
     <!-- ═══ ЛОГИСТЫ (НАЙМ ТЕХНИКИ) ════════════════════════════ -->
@@ -6784,6 +6796,7 @@ const PAGE_TITLES = {
   crm: 'CRM',
   sales: 'Продажи - обзор',
   'sales-mgr': 'Менеджеры - заказы 1С',
+  'dept-trals': 'Отдел Тралы',
   'sales-log': 'Логисты - найм техники',
   'sales-salary': 'Зарплата', // 2026-09-03 - была "Зарплата - коммерческий отдел", но с
   // вкладкой "По машинистам" страница уже не только про коммерческий отдел
@@ -11054,6 +11067,10 @@ function applyRoleUI() {
     // руководителей коммерческих групп (у них та же роль manager); сервер тоже пускает только
     // admin/manager (requireRole_ на /api/counterparty/*).
     if (isManagerViewer_) allowedPages_.push('counterparty');
+    // «Отдел Тралы» (10.09, Влад: «хочу, чтобы у каждого менеджера и старшего появилась
+    // новая вкладка отдел Тралы») - общая картина продаж отдела, тот же экран, что у
+    // директора, но только текущий месяц и без раскрытия чужих заказов.
+    if (isManagerViewer_) allowedPages_.push('dept-trals');
     document.querySelectorAll('.sidebar-nav-item').forEach(function(item) {
       const page = item.getAttribute('data-page');
       item.style.display = allowedPages_.indexOf(page) >= 0 ? '' : 'none';
@@ -17433,8 +17450,13 @@ function smRow_(label, value, aux, valStyle, isTotal) {
 function smCaps_(text) { return '<div class="sm-caps">' + text + '</div>'; }
 function smBadge_(text, forecastPct) { return '<span class="sm-badge ' + smTone_(forecastPct) + '">' + text + '</span>'; }
 
-function renderSalesMgrGost_() {
-  var o = D.orders, mgrs = o.by_manager || [];
+// opts (10.09): страница «Отдел Тралы» переиспользует этот же рендер на данных, которые
+// приходят менеджеру (D.orders.dept_all), в свои контейнеры и БЕЗ раскрытия заказов.
+function renderSalesMgrGost_(opts) {
+  opts = opts || {};
+  var readOnly = !!opts.readOnly;
+  var top = opts.top || D.summary || {};
+  var o = opts.orders || D.orders, mgrs = o.by_manager || [];
   var idx = {};
   mgrs.forEach(function (m) { idx[String(m.name || '').trim().split(' ')[0].toLowerCase()] = m; });
   function get(sur) { return idx[String(sur).toLowerCase()] || null; }
@@ -17442,9 +17464,9 @@ function renderSalesMgrGost_() {
   function planOf(sur) { return mplans[String(sur).toLowerCase()] || 0; }
   var pace = calcPaceRatio_(o.period);
 
-  var PLAN = (D.summary && D.summary.salesPlan) || 0;
-  var FACT = (D.summary && D.summary.salesFakt) || 0;
-  var FACT_Y = (D.summary && D.summary.salesFaktThruYesterday != null) ? D.summary.salesFaktThruYesterday : FACT;
+  var PLAN = top.salesPlan || 0;
+  var FACT = top.salesFakt || 0;
+  var FACT_Y = (top.salesFaktThruYesterday != null) ? top.salesFaktThruYesterday : FACT;
   var forecast = FACT_Y * pace;
   var factPct = PLAN ? Math.round(FACT / PLAN * 100) : 0;
   var forePct = PLAN ? Math.round(forecast / PLAN * 100) : 0;
@@ -17557,10 +17579,13 @@ function renderSalesMgrGost_() {
       var frc = mPlan ? Math.round(aY * pace / mPlan * 100) : 0;
       var escName = String(m.name || '').replace(/'/g, "\\'");
       // Дельта «сегодня» - единственное место, где ГОСТ разрешает красить текст (раздел 1).
+      // Влад, 10.09: «без возможности смотреть личные заказы какие прибавились, только
+      // цифры по прибавке» - в режиме только-чтение дельта не кликается и списка нет.
+      var dOpen = readOnly ? '' : ' onclick="event.stopPropagation();toggleMgrToday(\'' + escName + '\')" style="cursor:pointer;text-decoration:underline dotted"';
       var dOrd = (m.today_new_orders > 0)
-        ? ' <span class="sm-delta" onclick="event.stopPropagation();toggleMgrToday(\'' + escName + '\')" style="cursor:pointer;text-decoration:underline dotted">+' + m.today_new_orders + '</span>' : '';
+        ? ' <span class="sm-delta"' + dOpen + '>+' + m.today_new_orders + '</span>' : '';
       var dAmt = (m.today_new_amount > 0)
-        ? ' <span class="sm-delta" onclick="event.stopPropagation();toggleMgrToday(\'' + escName + '\')" style="cursor:pointer;text-decoration:underline dotted">+' + smFmt_(m.today_new_amount) + '</span>' : '';
+        ? ' <span class="sm-delta"' + dOpen + '>+' + smFmt_(m.today_new_amount) + '</span>' : '';
       t += '<tr>' +
         '<td><b>' + cleanName(m.name) + '</b>' + (r.isHead ? ' <span style="font-size:10px;color:var(--muted)">рук.</span>' : '') + '</td>' +
         '<td class="num">' + smNum_(String(orders)) + dOrd + '</td>' +
@@ -17573,7 +17598,7 @@ function renderSalesMgrGost_() {
           : '<span class="muted" style="font-size:11px">без плана</span>') + '</td>' +
       '</tr>';
       // Разворот «что добавилось сегодня» - тот же контракт, что в старом виде.
-      if (mgrTodayVisible && mgrTodayKey === m.name) {
+      if (!readOnly && mgrTodayVisible && mgrTodayKey === m.name) {
         var list = m.today_new_list || [];
         t += '<tr id="mgr-today-row"><td colspan="7" style="background:rgba(var(--ink),0.03);padding:10px 14px;border-top:1px dashed var(--border)">' +
           '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">' +
@@ -17627,15 +17652,49 @@ function renderSalesMgrGost_() {
       profit: (tsM && tsM.profit) || 0, orders: (tsM && tsM.orders) || 0 },
     0, 'выручка');
 
-  var page_ = document.getElementById('page-sales-mgr');
+  var pageId = opts.pageId || 'page-sales-mgr';
+  var page_ = document.getElementById(pageId);
   // Спектакль входа - один раз за сессию (ГОСТ раздел 5: повторный визит без него).
   if (page_) page_.classList.toggle('sm-enter-bars', !smEntryPlayed_);
-  document.getElementById('sales-mgr-kpi').innerHTML = h;
-  document.getElementById('sales-mgr-depts').innerHTML = depts + smSwitchHtml_('gost');
+  document.getElementById(opts.kpiEl || 'sales-mgr-kpi').innerHTML = h;
+  document.getElementById(opts.depEl || 'sales-mgr-depts').innerHTML =
+    depts + (readOnly ? '' : smSwitchHtml_('gost'));
 
   smEntryPlayed_ = true;
   // Курсорный свет - обязателен на каждой странице (ГОСТ раздел 7), движок один на проект.
-  if (typeof initCursorLight_ === 'function') initCursorLight_('page-sales-mgr', 'p2-light');
+  if (typeof initCursorLight_ === 'function') initCursorLight_(pageId, 'p2-light');
+}
+
+// ── «Отдел Тралы» - та же картина отдела для менеджеров и старших (10.09.2026) ──────
+// Влад: «хочу, чтобы у каждого менеджера и старшего появилась новая вкладка отдел Тралы
+// и там было это, текущий месяц, только без возможности смотреть личные заказы, какие
+// прибавились - только цифры по прибавке». Колонки полные, включая прибыль найма
+// (решение Влада 10.09). Данные - dept_all/dept_totals из ответа Apps Script: у менеджера
+// by_manager это ТОЛЬКО его строка, общий срез приходит отдельным полем.
+function renderDeptTrals_() {
+  var box = document.getElementById('dept-trals-kpi');
+  if (!box) return;
+  var o = D && D.orders;
+  var rows = (o && (o.dept_all || (D.role === 'admin' ? o.by_manager : null))) || [];
+  if (!rows.length) {
+    box.innerHTML = '<div class="card" style="padding:18px 20px;color:var(--muted);font-size:13px">' +
+      'Данные отдела пока не пришли. Обновите страницу через минуту.</div>';
+    document.getElementById('dept-trals-depts').innerHTML = '';
+    return;
+  }
+  renderSalesMgrGost_({
+    readOnly: true,
+    pageId: 'page-dept-trals',
+    kpiEl: 'dept-trals-kpi',
+    depEl: 'dept-trals-depts',
+    top: D.dept_totals || D.summary || {},
+    orders: {
+      period: o.period,
+      summary: o.dept_summary || o.summary || {},
+      by_manager: rows,
+      managerPlans: o.managerPlans || {},
+    },
+  });
 }
 
 function smSwitchHtml_(cur) {
@@ -21457,6 +21516,7 @@ function showPage(id, el) {
   if (id === 'dynamics') loadHistoryData();
   if (id === 'clients') loadClientsData();
   if (id === 'counterparty') cpInit_();
+  if (id === 'dept-trals') renderDeptTrals_();
   if (id === 'director') dirInit_();
   // Единая карта связей 1С (05.09) - грузится один раз при первом заходе на любую
   // страницу, где показан заказчик, и перерисовывает её, когда придёт.

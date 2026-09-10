@@ -4158,6 +4158,36 @@ function buildManagerView_(orders, managerName, ss, period) {
     },
   };
 
+  // Вкладка «Отдел Тралы» (10.09.2026, Влад: «хочу, чтобы у каждого менеджера и старшего
+  // появилась новая вкладка отдел Тралы и там было это, текущий месяц, только без
+  // возможности смотреть личные заказы какие прибавились - только цифры по прибавке»).
+  // Отдаём общий срез по ВСЕМ менеджерам - ту же картину, что видит директор на странице
+  // «Менеджеры - заказы 1С». Состав колонок полный, включая прибыль найма (решение Влада
+  // 10.09 на превью). Единственное, что вырезаем - today_new_list: это списки конкретных
+  // заказов коллег, менеджеру они не нужны, а цифра прибавки (today_new_orders/amount)
+  // остаётся. Меньше данных в ответе - меньше и риска, и веса.
+  result.orders.dept_all = (orders.by_manager || []).map(function(m) {
+    var copy = {};
+    Object.keys(m).forEach(function(k) { if (k !== 'today_new_list') copy[k] = m[k]; });
+    return copy;
+  });
+  result.orders.managerPlans = orders.managerPlans || {};
+  var oSum_ = orders.summary || {};
+  result.orders.dept_summary = {
+    internal_amount: oSum_.internal_amount || 0,
+    internal_orders: oSum_.internal_orders || 0,
+    internal_plan: oSum_.internal_plan || 0,
+    internal_amount_thru_yesterday: oSum_.internal_amount_thru_yesterday || 0,
+  };
+  // План/факт всей компании - той же функцией, что считает их для директора, чтобы шапка
+  // «Выполнение плана продаж» у менеджера показывала ровно те же цифры.
+  var sfpDept_ = computeSalesFaktPlan_(orders);
+  result.dept_totals = {
+    salesPlan: sfpDept_.salesPlan,
+    salesFakt: sfpDept_.salesFakt,
+    salesFaktThruYesterday: sfpDept_.salesFaktThruYesterday,
+  };
+
   // Компанейский срез своей команды (2026-08-26) - для табличкой группы отдела на личной
   // странице руководителя (renderDeptGroupTableHtml_ на фронтенде, тот же рендер, что
   // страница "По менеджерам") и для ИИ-контекста. Только у Ахтамовой/Гусейновой -

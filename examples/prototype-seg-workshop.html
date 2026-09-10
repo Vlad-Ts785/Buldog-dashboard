@@ -1,0 +1,469 @@
+<title>Мастерская плитки рейса</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Unbounded:wght@500;600&display=swap" rel="stylesheet">
+
+<style>
+/* ============================================================================
+   МАСТЕРСКАЯ ПЛИТКИ РЕЙСА - 5 уровней анатомии по методике канбана.
+   Синтез трёх отчётов агентов (домен / визуал / состояния), 29.08.2026.
+   Одни и те же 10 реальных кейсов повторены в каждом уровне.
+   ============================================================================ */
+:root{
+  --bg:#0f0f13; --bg2:#17171d; --bg3:#1e1e26; --bg4:#252530;
+  --border:rgba(255,255,255,0.08); --border-strong:rgba(255,255,255,0.16);
+  --text:#e8e6df; --muted:#8b8980;
+  --green:#1D9E75; --red:#E24B4A; --amber:#EF9F27; --blue:#378ADD; --purple:#7F77DD;
+  --id-1:#1D9E75; --id-2:#378ADD; --id-3:#EF9F27; --id-4:#7F77DD; --id-5:#E24B4A;
+  --id-6:#2FBF9A; --id-7:#5FA8E8; --id-8:#C9812A; --id-9:#A79BE8; --id-10:#B85C5B;
+  --ease-out-strong:cubic-bezier(0.16,1,0.3,1);
+  --ease-out-soft:cubic-bezier(0.25,1,0.5,1);
+  --ease-in-out:cubic-bezier(0.65,0,0.35,1);
+  --hw:17px; --row-h:52px;
+}
+*{box-sizing:border-box;}
+body{
+  margin:0;background:var(--bg);color:var(--text);
+  font-family:'Golos Text',system-ui,sans-serif;font-size:13px;
+  padding-bottom:80px;
+}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;}
+
+.top{
+  position:sticky;top:0;z-index:40;display:flex;align-items:flex-end;gap:22px;flex-wrap:wrap;
+  padding:18px 26px 14px;background:var(--bg2);border-bottom:1px solid var(--border);
+}
+h1{font-family:'Unbounded',sans-serif;font-weight:600;font-size:19px;margin:0;letter-spacing:-.01em;}
+.sub{font-size:11px;color:var(--muted);margin-top:5px;max-width:720px;line-height:1.5;}
+.spacer{flex:1;}
+.grp{display:flex;gap:6px;align-items:center;}
+.grp-label{font-size:9px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin-right:4px;}
+.chip{
+  appearance:none;border:1px solid var(--border);background:var(--bg3);color:var(--muted);
+  font-family:inherit;font-size:11.5px;font-weight:500;padding:5px 11px;border-radius:8px;cursor:pointer;
+  transition:border-color .15s var(--ease-out-soft),color .15s var(--ease-out-soft),background-color .15s var(--ease-out-soft);
+}
+.chip:hover{color:var(--text);border-color:var(--border-strong);}
+.chip[aria-pressed="true"]{background:var(--bg4);color:var(--text);border-color:var(--border-strong);}
+.chip:focus-visible{outline:2px solid var(--blue);outline-offset:2px;}
+
+/* ---------- секция уровня ---------- */
+.lvl{max-width:1340px;margin:34px auto 0;padding:0 26px;}
+.lvl-head{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:4px;}
+.lvl-num{
+  font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:var(--blue);
+  letter-spacing:.08em;
+}
+.lvl-name{font-family:'Unbounded',sans-serif;font-size:17px;font-weight:600;}
+.lvl-cost{font-size:11px;color:var(--muted);}
+.lvl-desc{font-size:12px;color:var(--muted);line-height:1.55;max-width:900px;margin:6px 0 14px;}
+.lvl-desc b{color:var(--text);font-weight:600;}
+
+.lane-scroll{
+  position:relative;overflow-x:auto;overflow-y:hidden;border:1px solid var(--border);
+  border-radius:12px;background:var(--bg2);scrollbar-width:thin;
+}
+.lane-inner{position:relative;width:calc(var(--hw) * 128);}
+.lane{position:relative;height:var(--row-h);border-bottom:1px solid var(--border);}
+.lane:last-child{border-bottom:none;}
+.lane::before{
+  content:'';position:absolute;inset:0;pointer-events:none;
+  background:repeating-linear-gradient(90deg,rgba(255,255,255,.055) 0 1px,transparent 1px calc(var(--hw)*24));
+}
+.now-line{position:absolute;top:0;bottom:0;width:1px;background:var(--blue);z-index:9;pointer-events:none;
+  box-shadow:0 0 0 1px rgba(55,138,221,.18);}
+.day-lbl{position:absolute;top:2px;font-size:8.5px;color:var(--muted);letter-spacing:.05em;z-index:2;pointer-events:none;}
+.hint{font-size:10.5px;color:var(--muted);margin-top:8px;}
+
+/* ============================================================
+   БАЗА ПЛИТКИ - общее для всех уровней
+   ============================================================ */
+.seg{
+  position:absolute;top:12px;height:28px;border-radius:6px;
+  font-size:10.5px;line-height:1.3;white-space:nowrap;cursor:pointer;user-select:none;
+  left:calc(var(--s) * var(--hw));width:calc(var(--l) * var(--hw));
+  background:var(--fill);color:var(--ink);
+}
+/* hover - световой оверлей, БЕЗ transform (transform ломает sticky-подпись
+   длинных плиток; отступление от "поверхность = подъём" - вопрос Владу №4) */
+.hov{position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+  background:rgba(255,255,255,.10);opacity:0;transition:opacity .12s var(--ease-out-soft);}
+.seg:hover .hov{opacity:1;}
+/* кольцо - один слот, приоритет: конфликт(red) > под данные(amber) > открыта(blue) */
+.ring{position:absolute;inset:-2px;border-radius:8px;pointer-events:none;
+  opacity:0;transition:opacity .15s var(--ease-out-soft);}
+.seg.is-open .ring{opacity:1;box-shadow:0 0 0 1.5px var(--blue);}
+.seg.needs-passport .ring{opacity:1;box-shadow:0 0 0 1.5px var(--amber);}
+.seg.overlap .ring{opacity:1;box-shadow:0 0 0 1.5px var(--red);}
+.seg.needs-passport .dot-warn{
+  position:absolute;top:-3px;left:-3px;width:6px;height:6px;border-radius:50%;
+  background:var(--amber);z-index:3;
+}
+.seg.is-past{opacity:.68;transition:opacity .3s var(--ease-in-out);}
+/* многодневный (выбывает надолго) - лёгкая статичная штриховка */
+.seg.multiday{
+  background-image:repeating-linear-gradient(-45deg,rgba(255,255,255,.045) 0 6px,transparent 6px 14px);
+}
+/* sticky-подпись: inline-flex (не flex!) - иначе растянется на всю плитку и sticky нечего двигать */
+.lbl{
+  position:sticky;left:6px;display:inline-flex;flex-direction:column;justify-content:center;
+  gap:1px;height:100%;max-width:calc(100% - 12px);vertical-align:top;
+}
+.code{font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:600;letter-spacing:.02em;
+  display:flex;align-items:center;gap:4px;}
+.txt{font-size:10.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;}
+.drv{width:5px;height:5px;border-radius:50%;flex:none;}
+.drv.on{background:currentColor;}
+.drv.off{background:transparent;border:1px solid var(--border-strong);}
+
+@media (prefers-reduced-motion: reduce){
+  *{transition-duration:.001ms !important;animation-duration:.001ms !important;}
+}
+
+/* ============================================================
+   УРОВЕНЬ 1 «Кромка»
+   ============================================================ */
+.v1 .seg::before,.v1 .seg::after{
+  content:'';position:absolute;bottom:0;width:5px;height:6px;background:currentColor;opacity:.55;
+  clip-path:polygon(0 0,100% 0,50% 100%);z-index:2;
+}
+.v1 .seg::before{left:0;}
+.v1 .seg::after{right:0;transform:scaleX(-1);}
+.v1 .seg.w-narrow::before,.v1 .seg.w-narrow::after,
+.v1 .seg.w-micro::before,.v1 .seg.w-micro::after{display:none;}
+.v1 .seg.lc-draft{border:1.5px dashed currentColor;}
+.v1 .seg.lc-confirmed,.v1 .seg.lc-transit{border:1.5px solid currentColor;}
+.v1 .seg.lc-unloaded{border:none;}
+.v1 .seg.needs-passport{box-shadow:inset 0 0 0 1.5px var(--amber);}
+
+/* ============================================================
+   УРОВЕНЬ 2 «Капсула»
+   ============================================================ */
+.v2 .lbl{flex-direction:row;align-items:center;gap:6px;left:4px;max-width:calc(100% - 8px);}
+.v2 .chip-id{
+  display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px 0 5px;
+  border-radius:6px;flex:none;background:var(--bg4);
+}
+.v2 .chip-id .code{color:var(--text);}
+.v2 .seg-lc{position:absolute;left:6px;right:6px;bottom:3px;height:2px;border-radius:1px;z-index:2;}
+.v2 .seg-lc.draft{background:repeating-linear-gradient(45deg,currentColor 0 2px,transparent 2px 4px);opacity:.35;}
+.v2 .seg-lc.confirmed{background:currentColor;opacity:.5;}
+.v2 .seg-lc.transit,.v2 .seg-lc.unloaded{background:currentColor;opacity:1;}
+.v2 .seg-lc.unloaded::after{content:'';position:absolute;right:-1px;top:-2px;width:6px;height:6px;
+  border-radius:50%;background:currentColor;}
+.v2 .seg.needs-passport .chip-id{box-shadow:inset 0 0 0 1.5px var(--amber);}
+.v2 .seg.w-micro .chip-id{padding:0;width:8px;justify-content:center;}
+.v2 .seg.w-micro .chip-id .code{display:none;}
+
+/* ============================================================
+   УРОВЕНЬ 3 «Нить»
+   ============================================================ */
+.v3 .thread{
+  position:absolute;top:0;left:0;right:0;height:3px;border-radius:6px 6px 0 0;overflow:hidden;z-index:2;
+}
+.v3 .thread.draft{background:repeating-linear-gradient(45deg,currentColor 0 2px,transparent 2px 5px);opacity:.4;}
+.v3 .thread.confirmed{background:currentColor;opacity:.5;}
+.v3 .thread.unloaded{background:currentColor;opacity:1;}
+.v3 .thread.unloaded::after{content:'';position:absolute;right:0;top:-1px;width:5px;height:5px;
+  border-radius:50%;background:currentColor;}
+.v3 .thread.transit{
+  opacity:1;
+  background:linear-gradient(90deg,currentColor 0,currentColor var(--progress,50%),
+    rgba(255,255,255,.14) var(--progress,50%),rgba(255,255,255,.14) 100%);
+}
+.v3 .edge{position:absolute;bottom:0;width:6px;height:8px;background:currentColor;z-index:2;}
+.v3 .edge.start{left:0;clip-path:polygon(0 0,100% 0,0 100%);}
+.v3 .edge.end{right:0;clip-path:polygon(100% 0,0 0,100% 100%);}
+.v3 .edge.driver-off{opacity:.3;}
+.v3 .lbl{top:3px;height:calc(100% - 3px);}
+.v3 .seg.needs-passport .thread{background:var(--amber);opacity:1;}
+.v3 .seg.w-micro .edge{display:none;}
+
+/* ============================================================
+   УРОВЕНЬ 4 «Ярусы»
+   ============================================================ */
+.v4 .seg{top:10px;height:32px;border-radius:8px;}
+.v4 .lbl{gap:2px;}
+.v4 .row1{display:flex;align-items:center;gap:5px;height:13px;}
+.v4 .row2{display:flex;align-items:center;height:13px;}
+.v4 .ic{width:11px;height:11px;flex:none;}
+.v4 .ic-warn{width:10px;height:10px;flex:none;color:var(--amber);}
+.v4 .ic-drv{width:10px;height:10px;flex:none;opacity:.85;}
+.v4 .prog{position:absolute;left:0;right:0;bottom:0;height:2px;border-radius:0 0 8px 8px;
+  overflow:hidden;background:rgba(139,137,128,.15);z-index:2;}
+.v4 .prog i{display:block;height:100%;width:100%;transform:scaleX(calc(var(--progress,0)/100));
+  transform-origin:left;background:currentColor;}
+.v4 .seg.w-narrow .row2,.v4 .seg.w-micro .row2{display:none;}
+.v4 .seg.w-micro .row1{display:none;}
+
+/* ============================================================
+   УРОВЕНЬ 5 «Бейдж-корпус»
+   ============================================================ */
+.v5 .seg{border-radius:10px;display:flex;align-items:stretch;}
+.v5 .seg-id{
+  position:sticky;left:0;z-index:2;flex:none;width:34px;min-width:34px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  border-radius:10px 0 0 10px;background:var(--idfill);
+}
+.v5 .seg-id .code{font-size:10.5px;font-weight:700;color:var(--text);gap:0;}
+.v5 .seg-body{
+  position:relative;flex:1 1 auto;min-width:0;border-radius:0 10px 10px 0;overflow:hidden;
+  padding:0 8px;display:flex;align-items:center;
+}
+.v5 .seg-body.lc-draft{border:1.5px dashed currentColor;border-left:none;}
+.v5 .seg-body.lc-confirmed,.v5 .seg-body.lc-transit{border:1.5px solid currentColor;border-left:none;}
+.v5 .seg.needs-passport .seg-id{box-shadow:inset 0 0 0 1.5px var(--amber);}
+.v5 .prog{position:absolute;left:0;right:0;bottom:0;height:2px;overflow:hidden;}
+.v5 .prog i{display:block;height:100%;transform:scaleX(calc(var(--progress,0)/100));
+  transform-origin:left;background:currentColor;}
+.v5 .seg.w-micro .seg-id{width:8px;min-width:8px;}
+.v5 .seg.w-micro .seg-id .code,.v5 .seg.w-micro .seg-id .drv{display:none;}
+
+/* ---------- легенда и блок вопросов ---------- */
+.legend{max-width:1340px;margin:14px auto 0;padding:0 26px;display:flex;gap:16px;flex-wrap:wrap;
+  font-size:10.5px;color:var(--muted);align-items:center;}
+.lg{display:flex;align-items:center;gap:6px;}
+.sw{width:16px;height:9px;border-radius:3px;flex:none;}
+.questions{max-width:1340px;margin:40px auto 0;padding:20px 26px;}
+.questions h2{font-family:'Unbounded',sans-serif;font-size:15px;font-weight:600;margin:0 0 12px;}
+.q{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px 18px;
+  margin-bottom:10px;font-size:12px;line-height:1.55;color:var(--muted);}
+.q b{color:var(--text);font-weight:600;}
+.q .mono{color:var(--blue);font-size:11px;}
+</style>
+
+<div class="top">
+  <div>
+    <h1>Плитка рейса - мастерская</h1>
+    <div class="sub">
+      5 уровней анатомии по возрастающей смелости. Одни и те же 10 кейсов в каждом:
+      завершённый · короткий 2,5 ч · медианный 9 ч · «под данные» · в пути (пересекает «сейчас») ·
+      бронь · внутренний отдел · без водителя · конфликт наложения ×2 · многодневный Крым (прокрути трек вправо).
+      Наведи курсор - световой отклик; кликни - кольцо «открыта в шторке».
+    </div>
+  </div>
+  <div class="spacer"></div>
+  <div class="grp">
+    <span class="grp-label">Цвет</span>
+    <button class="chip" data-mode="state" aria-pressed="true">Состояние</button>
+    <button class="chip" data-mode="manager">Менеджер</button>
+  </div>
+</div>
+
+<div class="legend" id="legend"></div>
+<div id="levels"></div>
+
+<div class="questions">
+  <h2>Вопросы на твоё решение (по процедуре ГОСТа, раздел 0 п.2)</h2>
+  <div class="q"><b>1. Логист убран с плитки.</b> Дежурство - в шапке дня, на плитке только менеджер
+    (или код отдела). Доменный разбор: повторять код дежурного 15 раз в строке = баннерная слепота.
+    Логист вернётся на плитку только как исключение - при подмене дежурного.</div>
+  <div class="q"><b>2. Красная рамка конфликта.</b> Правило ГОСТа «одна красная рамка на страницу»
+    писалось для BI-карточек. На ленте конфликтов может быть несколько одновременно - предлагаем
+    трактовать «одна на плитку», иначе второй конфликт невидим.</div>
+  <div class="q"><b>3. Торцы-колышки погрузки/выгрузки</b> (уровни 1 и 3) - новый паттерн, в ГОСТе нет.
+    Это НЕ запрещённый border-left: парные метки двух физических событий, не декоративная полоска.</div>
+  <div class="q"><b>4. Hover плитки таймлайна - без подъёма.</b> Любой transform на плитке в покое
+    ломает sticky-подпись длинных рейсов (проверено в прототипе). Отклик - световой оверлей
+    120 мс. Это осознанное исключение из «поверхность = подъём» для плиток со sticky-содержимым.</div>
+  <div class="q"><b>5. Внутренний отдел (ОЭ/ОК/ОБ).</b> Сейчас отличим только кодом вместо фамилии.
+    Доменный разбор говорит: свой отдел можно подвинуть легче клиента с неустойкой - нужен ли
+    отдельный видимый маркер приоритета, или кода достаточно?</div>
+  <div class="q"><b>Найдено попутно - чиню в прототипе ленты после выбора уровня:</b>
+    растяжка за край не проверяет пересечения (конфликт можно записать уже сегодня);
+    при reduced-motion перетаскивание визуально замирает; box-shadow плитки крутится в transition
+    вопреки ГОСТу; шрифт кода 9.5px - мимо шкалы (надо 9).</div>
+</div>
+
+<script>
+"use strict";
+
+/* ---------- кейсы: одинаковы для всех уровней ---------- */
+/* s/l в часах; now = 46; менеджеры: СО=1 Савиток, ЦВ=2 Цегельников, АЛ=3 Ахтамова,
+   ГА=4 Гусейнова, ГИ=5 Гуштюк, ФЕ=6 Филипчук, РМ=7 Ратников, ОЭ=8 отдел */
+var NOW = 46;
+var CASES = [
+  {s:2,  l:6,   mg:"Ахтамова",  id:3, lc:"unloaded", drv:1, from:"Липецк",     to:"Мытищи",   past:1},
+  {s:10, l:2.5, mg:"Филипчук",  id:6, lc:"confirmed",drv:1, from:"Капотня",    to:"Подольск"},
+  {s:14, l:9,   mg:"Савиток",   id:1, lc:"confirmed",drv:1, from:"Череповец",  to:"Обнинск"},
+  {s:25, l:8,   mg:"Гусейнова", id:4, lc:"confirmed",drv:1, from:"Раменское",  to:"Владикавказ", passport:1},
+  {s:41, l:10,  mg:"Цегельников",id:2,lc:"transit",  drv:1, from:"Казань",     to:"Химки", progress:50},
+  {s:55, l:6,   mg:"Гуштюк",    id:5, lc:"draft",    drv:0, from:"Одинцово",   to:"Сергач"},
+  {s:64, l:7,   mg:"ОЭ",        id:8, lc:"confirmed",drv:1, from:"База",       to:"Строгино", dept:1},
+  {s:74, l:8,   mg:"Ратников",  id:7, lc:"confirmed",drv:0, from:"Брянск",     to:"Терехово"},
+  {s:85, l:6,   mg:"Савиток",   id:1, lc:"confirmed",drv:1, from:"Пермь",      to:"Ростов",   overlap:1},
+  {s:88, l:5,   mg:"Гуштюк",    id:5, lc:"confirmed",drv:1, from:"Казань",     to:"Люберцы",  overlap:1}
+];
+var LONGCASE = {s:8, l:110, mg:"Цегельников", id:2, lc:"transit", drv:1,
+  from:"Москва", to:"Крым", progress:35, multiday:1};
+
+var STATE_FILL = {
+  draft:"rgba(139,137,128,.14)", confirmed:"rgba(29,158,117,.30)",
+  transit:"rgba(29,158,117,.30)", unloaded:"rgba(29,158,117,.30)"
+};
+var STATE_INK = {draft:"#b9b7ae", confirmed:"#8fd9bf", transit:"#8fd9bf", unloaded:"#8fd9bf"};
+var MODE = "state";
+
+function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+function hexA(hex,a){ hex=hex.replace("#","");
+  return "rgba("+parseInt(hex.substr(0,2),16)+","+parseInt(hex.substr(2,2),16)+","+parseInt(hex.substr(4,2),16)+","+a+")"; }
+function fillFor(c){
+  if (MODE==="manager") return hexA(cssVar("--id-"+c.id), .34);
+  return STATE_FILL[c.lc];
+}
+function inkFor(c){
+  if (MODE==="manager") return "#e8e6df";
+  return STATE_INK[c.lc];
+}
+function idFillFor(c){ /* зона идентичности v5 */
+  if (MODE==="manager") return hexA(cssVar("--id-"+c.id), .55);
+  return "var(--bg4)";
+}
+function wClass(l){
+  var px = l*17;
+  if (px<34) return "w-micro";
+  if (px<80) return "w-narrow";
+  if (px<200) return "w-medium";
+  return "w-full";
+}
+
+/* иконки уровня 4 (штриховые, stroke 1.6, viewBox 20) */
+var IC = {
+  draft:'<svg class="ic" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10" cy="10" r="6.5" stroke-dasharray="3 3"/></svg>',
+  confirmed:'<svg class="ic" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="6.5"/><path d="M7 10.2l2 2 3.6-4"/></svg>',
+  transit:'<svg class="ic" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10h12M11 5.5L15.5 10 11 14.5"/></svg>',
+  unloaded:'<svg class="ic" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 10.5l3 3 4.5-6M9.5 13l1 1 5.5-7"/></svg>',
+  warn:'<svg class="ic-warn" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10" cy="10" r="6.5"/><path d="M10 6.8v3.6M10 13.2v.01"/></svg>',
+  drvOn:'<svg class="ic-drv" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10" cy="7" r="3"/><path d="M4.5 16c.8-3 2.9-4.5 5.5-4.5s4.7 1.5 5.5 4.5"/></svg>',
+  drvOff:'<svg class="ic-drv" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-dasharray="2.5 2.5"><circle cx="10" cy="7" r="3"/><path d="M4.5 16c.8-3 2.9-4.5 5.5-4.5s4.7 1.5 5.5 4.5"/></svg>'
+};
+
+var LEVELS = [
+  {v:"v1", num:"УРОВЕНЬ 1", name:"Кромка", cost:"0 новых иконок · sticky не трогаем",
+   desc:"Консервативный апгрейд: те же две строки текста, но <b>без логиста</b>. Добавлены торцы-колышки погрузки/выгрузки, точка-водитель (заполнена = назначен), жизненный цикл рамкой (пунктир = бронь, сплошная = подтверждён, без рамки = завершён). «Под данные» - янтарная внутренняя рамка. <b>Честный минус:</b> «в пути» неотличим от «подтверждён» без текста."},
+  {v:"v2", num:"УРОВЕНЬ 2", name:"Капсула", cost:"0 иконок · одна строка вместо двух",
+   desc:"Идентичность выносится в <b>непрозрачную капсулу</b> - читается одинаково в любом режиме раскраски, не растворяется в заливке. Маршрут - в той же строке. Жизненный цикл - нить 2px снизу: штрих → 50% → 100% → точка-флажок. «Под данные» - янтарная рамка на самой капсуле. <b>Минус:</b> 15 капсул в строке дня = второй визуальный слой."},
+  {v:"v3", num:"УРОВЕНЬ 3", name:"Нить", cost:"0 иконок · статус виден даже без текста",
+   desc:"Вес переносится на <b>верхнюю нить 3px</b>: штрих = бронь, 50% = подтверждён, прогресс-стоп = в пути (виден процент пути!), точка-флажок = выгружен. «Под данные» - вся нить янтарная, самый громкий сигнал из пяти. Торцы + гаснущий правый торец = нет водителя. <b>Минус:</b> больше всего мелких элементов - на плотной доске может рябить."},
+  {v:"v4", num:"УРОВЕНЬ 4", name:"Ярусы", cost:"6 новых иконок · высота 32px",
+   desc:"Плитка выше (32px), два яруса: <b>иконка статуса + код + предупреждение + водитель</b> сверху, маршрут снизу, микро-прогресс полосой 2px. Единственный уровень с полноценными штриховыми иконками жизненного цикла. <b>Минус:</b> самый требовательный к месту, 6 иконок надо утвердить."},
+  {v:"v5", num:"УРОВЕНЬ 5", name:"Бейдж-корпус", cost:"радикальный · зона 34px не сжимается",
+   desc:"Плитка делится на <b>жёсткую зону идентичности</b> (34px: код + точка водителя, «под данные» - рамка на ней) и гибкое тело маршрута. Идентичность и тревога гарантированно не теряются ни на какой ширине - зона просто не участвует в сжатии. <b>Минус:</b> на коротком рейсе 2-3 ч зона съедает почти всю плитку; требует переделки drag-JS."}
+];
+
+function segHTML(v, c){
+  var wcls = wClass(c.l);
+  var cls = "seg "+wcls+" lc-"+c.lc;
+  if (c.past) cls += " is-past";
+  if (c.passport) cls += " needs-passport";
+  if (c.overlap) cls += " overlap";
+  if (c.multiday) cls += " multiday";
+  var style = "--s:"+c.s+";--l:"+c.l+";--fill:"+fillFor(c)+";--ink:"+inkFor(c)+
+    ";color:"+inkFor(c)+";background:"+fillFor(c)+";"+
+    (c.progress ? "--progress:"+c.progress+"%;" : "");
+  var codeTxt = c.mg;
+  var route = c.from+" → "+c.to;
+  var inner = "";
+
+  if (v==="v1"){
+    inner = '<span class="lbl"><span class="code"><span class="drv '+(c.drv?"on":"off")+'"></span>'+codeTxt+
+      '</span><span class="txt">'+route+'</span></span>';
+  }
+  else if (v==="v2"){
+    inner = '<span class="lbl"><span class="chip-id"><span class="drv '+(c.drv?"on":"off")+'"></span>'+
+      '<span class="code">'+codeTxt+'</span></span><span class="txt">'+route+'</span></span>'+
+      '<span class="seg-lc '+c.lc+'"></span>';
+  }
+  else if (v==="v3"){
+    inner = '<span class="thread '+c.lc+'"></span>'+
+      '<span class="edge start"></span><span class="edge end'+(c.drv?"":" driver-off")+'"></span>'+
+      '<span class="lbl"><span class="code">'+codeTxt+'</span><span class="txt">'+route+'</span></span>';
+  }
+  else if (v==="v4"){
+    var lcIcon = IC[c.lc] || IC.confirmed;
+    inner = '<span class="lbl"><span class="row1">'+lcIcon+'<span class="code">'+codeTxt+'</span>'+
+      (c.passport ? IC.warn : "")+(c.drv ? IC.drvOn : IC.drvOff)+'</span>'+
+      '<span class="row2"><span class="txt">'+route+'</span></span></span>'+
+      (c.lc==="transit" ? '<span class="prog"><i></i></span>' : "");
+  }
+  else if (v==="v5"){
+    var short2 = c.dept ? c.mg : c.mg.substring(0,2).toUpperCase();
+    inner = '<span class="seg-id" style="--idfill:'+idFillFor(c)+'">'+
+      '<span class="code">'+short2+'</span><span class="drv '+(c.drv?"on":"off")+'"></span></span>'+
+      '<span class="seg-body lc-'+c.lc+'"><span class="txt">'+route+'</span>'+
+      (c.lc==="transit" ? '<span class="prog"><i></i></span>' : "")+'</span>';
+  }
+  return '<div class="'+cls+'" style="'+style+'" data-mg="'+c.mg+'">'+inner+
+    '<span class="hov"></span><span class="ring"></span>'+
+    (c.passport ? '<span class="dot-warn"></span>' : "")+'</div>';
+}
+
+function laneHTML(v){
+  var out = '<div class="lane">';
+  CASES.forEach(function(c){ out += segHTML(v, c); });
+  out += '<span class="now-line" style="left:calc('+NOW+' * var(--hw))"></span></div>';
+  out += '<div class="lane">'+segHTML(v, LONGCASE)+
+    '<span class="now-line" style="left:calc('+NOW+' * var(--hw))"></span></div>';
+  return out;
+}
+
+function render(){
+  var host = document.getElementById("levels");
+  host.innerHTML = LEVELS.map(function(L){
+    return '<section class="lvl '+L.v+'">'+
+      '<div class="lvl-head"><span class="lvl-num mono">'+L.num+'</span>'+
+      '<span class="lvl-name">'+L.name+'</span><span class="lvl-cost">'+L.cost+'</span></div>'+
+      '<div class="lvl-desc">'+L.desc+'</div>'+
+      '<div class="lane-scroll"><div class="lane-inner">'+
+      '<span class="day-lbl mono" style="left:6px">ДЕНЬ 1</span>'+
+      '<span class="day-lbl mono" style="left:calc(24 * var(--hw) + 6px)">ДЕНЬ 2</span>'+
+      '<span class="day-lbl mono" style="left:calc(48 * var(--hw) + 6px)">ДЕНЬ 3</span>'+
+      '<span class="day-lbl mono" style="left:calc(72 * var(--hw) + 6px)">ДЕНЬ 4</span>'+
+      '<span class="day-lbl mono" style="left:calc(96 * var(--hw) + 6px)">ДЕНЬ 5</span>'+
+      laneHTML(L.v)+
+      '</div></div>'+
+      '<div class="hint">Вторая строка - многодневный рейс в Крым: прокрути трек вправо и смотри, как подпись едет вместе с тобой.</div>'+
+      '</section>';
+  }).join("");
+}
+
+function renderLegend(){
+  var el = document.getElementById("legend");
+  if (MODE === "state"){
+    el.innerHTML = [
+      ["Подтверждён / в рейсе","rgba(29,158,117,.30)"],
+      ["Бронь (пунктир)","rgba(139,137,128,.14)"],
+      ["«Под данные» - янтарь","rgba(239,159,39,.45)"],
+      ["Конфликт - красное кольцо","rgba(226,75,74,.45)"],
+      ["Прошлое - приглушено","rgba(29,158,117,.18)"]
+    ].map(function(p){
+      return '<span class="lg"><span class="sw" style="background:'+p[1]+'"></span>'+p[0]+'</span>';
+    }).join("") + '<span class="lg" style="margin-left:auto">точка у кода: залита = водитель назначен, кольцо = нет</span>';
+  } else {
+    var seen = {};
+    el.innerHTML = CASES.concat([LONGCASE]).filter(function(c){
+      if (seen[c.mg]) return false; seen[c.mg]=1; return true;
+    }).map(function(c){
+      return '<span class="lg"><span class="sw" style="background:'+hexA(cssVar("--id-"+c.id),.34)+'"></span>'+c.mg+'</span>';
+    }).join("");
+  }
+}
+
+document.querySelector(".top").addEventListener("click", function(e){
+  var b = e.target.closest(".chip"); if (!b) return;
+  [].forEach.call(document.querySelectorAll(".top .chip"), function(x){ x.setAttribute("aria-pressed","false"); });
+  b.setAttribute("aria-pressed","true");
+  MODE = b.dataset.mode;
+  render(); renderLegend();
+});
+
+/* клик по плитке = кольцо «открыта в шторке» (один слот, синее) */
+document.getElementById("levels").addEventListener("click", function(e){
+  var seg = e.target.closest(".seg"); if (!seg) return;
+  var was = seg.classList.contains("is-open");
+  [].forEach.call(seg.closest(".lvl").querySelectorAll(".seg.is-open"), function(x){ x.classList.remove("is-open"); });
+  if (!was) seg.classList.add("is-open");
+});
+
+render(); renderLegend();
+</script>

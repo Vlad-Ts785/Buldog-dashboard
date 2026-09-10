@@ -6680,6 +6680,9 @@ async function loadData() {
 function positionLabel(name, type) {
   var sur = (name||'').trim().split(' ')[0].toLowerCase();
   if (type === 'logist') {
+    // 10.09: Рустем (Рыщанов) уволился 01.09 - Сильчев и.о. руководителя отдела логистики
+    // на переходный период (идёт найм постоянного, см. isRyschanowEntry_ выше).
+    if (sur === 'сильчев')  return 'Руководитель отдела логистики (и.о.)';
     if (sur === 'рыщанов') return 'Руководитель отдела логистики';
     if (sur === 'васин')   return 'Логист (длинномеры)';
     // Начальники автоколонн (2026-08-30, Барыльченко) - не логисты-брокеры найма по
@@ -6737,6 +6740,9 @@ function dedupeMyPageEntries_(rawEntries) {
 //   нужно поправить вместе с листом, не забыть.
 var ALWAYS_PREVIEW_ROSTER_ = [
   { name: 'Ратников Максим Михайлович', type: 'manager', sur: 'ратников' },
+  // Рыщанов уволился 01.09.2026 (Сильчев и.о., см. isRyschanowEntry_) - запись оставлена не
+  // убрана специально, чтобы admin мог открыть его страницу для сверки прошлых (до
+  // сентября) периодов; сам он больше не показывается как текущий руководитель нигде.
   { name: 'Рыщанов Рустем', type: 'logist', sur: 'рыщанов' },
   { name: 'Барыльченко Пётр Иванович', type: 'logist', sur: 'барыльченко' },
   { name: 'Алексей Джигирей', type: 'logist', sur: 'алексей' },
@@ -6794,8 +6800,18 @@ function isColumnHeadEntry_(entry) {
 // Рыщанов - руководитель отдела логистики (2026-08-25, см. plans/2026-08-25-ryschanow-
 // personal-page.md), не брокер найма - своя отдельная страница (renderMyPageRyschanow), как
 // у Васина, а не флейвор renderMyPageLogist.
+// 10.09: Рустем (Рыщанов) уволился с 01.09 - Сильчев Максим и.о. на переходный период (идёт
+// найм постоянного старшего логиста, см. память project_hiring_senior_logist). Матчим ОБЕИХ -
+// Сильчева (текущий и.о., реальный вход и предпросмотр) и Рыщанова (только чтобы admin мог
+// открыть его страницу для сверки периодов ДО сентября - он сам больше не входит) - какого
+// именно руководителя показывать в зарплате/шапке решает ryschanowHeadFor_(period) по месяцу,
+// не эта функция. Функции/переменные оставлены "Ryschanow*" по имени (см.
+// plans/2026-09-10-ryschanow-to-silchev-handoff.md) - переименование без функциональной
+// пользы, риск диффа не оправдан для временной роли.
 function isRyschanowEntry_(entry) {
-  return !!entry && entry.type === 'logist' && entry.name.trim().split(' ')[0].toLowerCase() === 'рыщанов';
+  if (!entry || entry.type !== 'logist') return false;
+  var sur = entry.name.trim().split(' ')[0].toLowerCase();
+  return sur === 'сильчев' || sur === 'рыщанов';
 }
 // Ахтамова/Гусейнова - руководители коммерческих групп (2026-08-26, см.
 // plans/2026-08-26-ahtamova-guseinova-personal-pages.md) - своя отдельная страница
@@ -10422,7 +10438,9 @@ function applyRoleUI() {
     // isRyschanowLogistName_ (бэкенд).
     var curPersonName = previewing ? viewAsEntry.name : (D.managerName || D.logistName || '');
     var curPersonSur = curPersonName.trim().split(' ')[0].toLowerCase();
-    var isRyschanowViewer = curPersonSur === 'рыщанов';
+    // 10.09: Рустем уволился 01.09 - Сильчев и.о. (см. isRyschanowEntry_ выше, тот же
+    // приём - матчим обоих, кто фактический руководитель решает ryschanowHeadFor_(period)).
+    var isRyschanowViewer = curPersonSur === 'сильчев' || curPersonSur === 'рыщанов';
     // Ахтамова/Гусейнова (2026-08-26) - те же два пункта, что у Рыщанова, но для руководителей
     // коммерческих групп - см. COMMERCIAL_HEAD_SUR_FRONT_.
     var isCommercialHeadViewer = COMMERCIAL_HEAD_SUR_FRONT_.indexOf(curPersonSur) >= 0;
@@ -16716,6 +16734,19 @@ function calcLogist(sur, getL, useNewRules) {
   };
 }
 
+// 10.09: Рустем (Рыщанов) уволился 01.09 - Сильчев Максим и.о. на переходный период (идёт
+// найм постоянного, см. plans/2026-09-10-ryschanow-to-silchev-handoff.md, память
+// project_hiring_senior_logist). Гвард историчности - август и раньше остаются на Рыщанове
+// (уже выплачено, не переписываем задним числом), сентябрь+ - Сильчев. Тот же приём, что
+// NEW_RULES_FROM/isNewRulesPeriod чуть ниже.
+var SILCHEV_HEAD_FROM_ = '2026-09';
+function isSilchevHeadPeriod_(period) { return (period||'') >= SILCHEV_HEAD_FROM_; }
+function ryschanowHeadFor_(period) {
+  return isSilchevHeadPeriod_(period)
+    ? { sur:'сильчев', name:'Сильчев Максим' }
+    : { sur:'рыщанов', name:'Рыщанов Рустем' };
+}
+
 // Рыщанов: 100к оклад + 50к если ВП своего парка >20М + 50к за каждые след. 5М
 // С июля 2026: + 2% от квалифицирующей маржи найма, которую сгенерировали все логисты
 // С 01.07.2026 (приказ №01/07/26, Гонтюрев А.А., действует до 01.11.2026 - см.
@@ -16757,9 +16788,15 @@ function calcVasin(profitLong) {
 // getL(sur) - поиск логиста по фамилии в by_logist (свой источник у каждого вызывающего -
 // company-wide у renderSalesSalary, тот же список у личной страницы Рыщанова через
 // rySummary.by_logist/D.orders.by_logist). profitLong - ВП длинномеров компании (строка Васина).
-function renderRyschanowDeptCardHtml_(getL, profitLong, grossProfit, qualMarginAllLogists, useNewRules, specialTralsProfit) {
+function renderRyschanowDeptCardHtml_(getL, profitLong, grossProfit, qualMarginAllLogists, useNewRules, specialTralsProfit, period) {
   var fr = pageFr_;
-  var color = '#BA7517', bgA = '186,117,23', headName = 'Рыщанов Рустем';
+  // 10.09: голова отдела резолвится по периоду - август и раньше Рыщанов, сентябрь+
+  // Сильчев (и.о., см. ryschanowHeadFor_ выше). specialTralsProfit (1% ВП спецтралов) -
+  // только у Рыщанова, у Сильчева этой мотивации нет (Влад, 10.09: "убрать мотивацию 1%
+  // от ВП тралов").
+  var head = ryschanowHeadFor_(period);
+  var color = '#BA7517', bgA = '186,117,23', headName = head.name;
+  var effSpecialTrals = head.sur === 'сильчев' ? 0 : specialTralsProfit;
 
   // Логисты консолидированы внутрь карточки только для новых правил (с июля 2026, см.
   // renderSalesSalary) - при useNewRules=false (просмотр архивных периодов до июля) карточка
@@ -16771,13 +16808,17 @@ function renderRyschanowDeptCardHtml_(getL, profitLong, grossProfit, qualMarginA
         logistCalcs.push({ sur:sur, isVasin:true, calc: calcVasin(profitLong) });
       } else {
         var lc = calcLogist(sur, getL, true);
-        if (lc) logistCalcs.push({ sur:sur, isVasin:false, calc:lc });
+        // isHeadSelf (10.09, Влад: "Сильчев пока ведёт заказы - это в зарплату не идёт, но
+        // как счётчик пусть остаётся") - строка руководителя-как-логиста рендерится (заказы/
+        // маржа видны), но её сумма НЕ добавляется в фонд отдела (logistTotal ниже) - он уже
+        // оплачен головной строкой (headRC), два раза за одну активность не платим.
+        if (lc) logistCalcs.push({ sur:sur, isVasin:false, calc:lc, isHeadSelf: sur === head.sur });
       }
     });
   }
-  var logistTotal = logistCalcs.reduce(function(s,lc){ return s + (lc.calc ? lc.calc.total : 0); }, 0);
+  var logistTotal = logistCalcs.reduce(function(s,lc){ return s + (lc.calc && !lc.isHeadSelf ? lc.calc.total : 0); }, 0);
 
-  var headRC = calcRyschanow(grossProfit, qualMarginAllLogists, useNewRules, specialTralsProfit);
+  var headRC = calcRyschanow(grossProfit, qualMarginAllLogists, useNewRules, effSpecialTrals);
   var deptFund = headRC.total + logistTotal;
 
   function tblHead() {
@@ -16857,16 +16898,30 @@ function renderRyschanowDeptCardHtml_(getL, profitLong, grossProfit, qualMarginA
   }
   logistCalcs.forEach(function(lc) {
     var sur = lc.sur, c = lc.calc;
-    html += '<tr>';
+    html += '<tr'+(lc.isHeadSelf ? ' style="opacity:.7"' : '')+'>';
     html += '<td style="padding-left:16px"><b>'+capName(sur)+'</b>';
     html += '<div style="font-size:10px;color:var(--muted);margin-top:2px">'+(lc.isVasin
       ? '2.5% от ВП длинномеров (компания)'
-      : 'Оклад 20т + 500 руб./заявка своя техника + 8% маржи найма (≥23%) + 30т если маржа найма >1М')+'</div></td>';
+      : lc.isHeadSelf
+        ? 'Счётчик - личные заявки не оплачиваются отдельно, зарплата по строке руководителя выше'
+        : 'Оклад 20т + 500 руб./заявка своя техника + 8% маржи найма (≥23%) + 30т если маржа найма >1М')+'</div></td>';
+    var l = !lc.isVasin ? getL(sur) : null;
     if (lc.isVasin) {
       html += '<td class="num muted" colspan="8" style="font-size:11px">ВП длинномеров (компания): '+fr(c.profitLong)+' × 2.5%</td>';
       html += '<td class="num" style="font-weight:600;color:'+color+'">'+fr(c.total)+'</td>';
+    } else if (lc.isHeadSelf) {
+      // Заказы/выручка/маржа - видны как счётчик (10.09, Влад), Оклад/Премии/ИТОГО - "—",
+      // его реальная зарплата целиком в головной строке выше.
+      html += '<td class="num">'+(l && l.amount?fr(l.amount):'—')+'</td>';
+      html += '<td class="num">'+c.ownOrders+' <span style="font-size:10px;color:var(--muted)">заявок</span></td>';
+      html += '<td class="num" style="color:#1D9E75">'+fr(c.qualMargin)+'</td>';
+      html += '<td class="num amber">'+(c.hiredExtraCosts?fr(c.hiredExtraCosts):'—')+'</td>';
+      html += '<td class="num muted" style="border-left:2px solid var(--border)">—</td>';
+      html += '<td class="num muted">—</td>';
+      html += '<td class="num muted">—</td>';
+      html += '<td class="num muted">—</td>';
+      html += '<td class="num muted" style="font-size:11px">не в фонде</td>';
     } else {
-      var l = getL(sur);
       html += '<td class="num">'+(l && l.amount?fr(l.amount):'—')+'</td>';
       html += '<td class="num">'+c.ownOrders+' <span style="font-size:10px;color:var(--muted)">заявок</span></td>';
       html += '<td class="num" style="color:#1D9E75">'+fr(c.qualMargin)+'</td>';
@@ -16878,13 +16933,13 @@ function renderRyschanowDeptCardHtml_(getL, profitLong, grossProfit, qualMarginA
       html += '<td class="num" style="font-weight:600;color:'+color+'">'+fr(c.total)+'</td>';
     }
     html += '</tr>';
-    if (!lc.isVasin && c.bonus1m) {
+    if (!lc.isVasin && !lc.isHeadSelf && c.bonus1m) {
       html += '<tr style="background:rgba(var(--ink),.02)">';
       html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">Премия за маржу найма >1М: '+fr(c.totalMargin)+' (квалиф. + неквалиф.)</td>';
       html += '<td colspan="9" class="num muted" style="font-size:11px">'+fr(c.bonus1m)+'</td>';
       html += '</tr>';
     }
-    if (!lc.isVasin && (c.qualMargin || c.unqualMargin)) {
+    if (!lc.isVasin && !lc.isHeadSelf && (c.qualMargin || c.unqualMargin)) {
       html += '<tr style="background:rgba(var(--ink),.02)">';
       html += '<td style="padding-left:24px;font-size:11px;color:var(--muted)">';
       if (c.qualMargin) html += '<span style="color:#1D9E75;font-weight:500">'+fr(c.qualMargin)+'</span> маржа ≥23% <span style="background:rgba(29,158,117,.15);color:#1D9E75;padding:1px 4px;border-radius:3px;font-size:10px">8%</span>';
@@ -17144,7 +17199,7 @@ function ryschanowSalaryCardHtml_() {
     return sum + (l ? (l.hired_margin_qualified||0) : 0);
   }, 0);
   var specialTrals = rySummary ? (rySummary.special_trals_profit||0) : ((D.summary && D.summary.special_trals_profit) || 0);
-  return renderRyschanowDeptCardHtml_(getL, profitLong, grossProfit, qualMargin, useNewRules, specialTrals).html;
+  return renderRyschanowDeptCardHtml_(getL, profitLong, grossProfit, qualMargin, useNewRules, specialTrals, (D.orders||{}).period).html;
 }
 
 function renderRyschanowSalaryPage_() {
@@ -18135,7 +18190,7 @@ function renderSalesSalary() {
     if (dept.specialHead) {
       var specialTralsProfit = (D.summary||{}).special_trals_profit || 0;
       var profitLong = (D.summary||{}).profit_long || 0;
-      var ryCard = renderRyschanowDeptCardHtml_(getL, profitLong, grossProfit, qualMarginAllLogists, useNewRules, specialTralsProfit);
+      var ryCard = renderRyschanowDeptCardHtml_(getL, profitLong, grossProfit, qualMarginAllLogists, useNewRules, specialTralsProfit, (D.orders||{}).period);
       html += ryCard.html;
       totalPayroll += ryCard.deptFund;
       return;

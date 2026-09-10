@@ -915,6 +915,8 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .clc2-stepper button{background:var(--bg4);border:none;color:var(--text);width:22px;height:22px;border-radius:6px;cursor:pointer;font-size:14px;line-height:1;font-family:inherit;}
 .clc2-stepper .val{font-family:'JetBrains Mono',monospace;font-size:14px;min-width:18px;text-align:center;}
 .clc2-stepper .val.multi{color:var(--blue);}
+.clc2-truck-row{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:8px;}
+.clc2-truck-label{font-size:11.5px;color:var(--muted);}
 .clc2-freq{display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap;min-height:22px;}
 .clc2-freq .l{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;}
 .clc2-freq-chip{background:var(--bg3);border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-size:11.5px;color:var(--text);cursor:pointer;transition:border-color .13s;}
@@ -4912,6 +4914,15 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
             <button type="button" onclick="Clc.loopStep(-1)">−</button><span class="val" id="clc2-loopVal">1</span><button type="button" onclick="Clc.loopStep(1)">+</button>
           </div>
         </div>
+        <!-- Появляется только при loopCount>1 (Влад, 10.09: "3 машины и 6 ходок" - сколько
+             машин делят ходки между собой; смена/порожние база<->точка считаются на каждую
+             машину отдельно, "с грузом" - по общему числу ходок, не зависит от этого поля). -->
+        <div class="clc2-truck-row" id="clc2-truckRow" style="display:none">
+          <span class="clc2-truck-label">Машин на маршруте</span>
+          <div class="clc2-stepper" title="Сколько машин делят эти ходки между собой">
+            <button type="button" onclick="Clc.truckStep(-1)">−</button><span class="val" id="clc2-truckVal">1</span><button type="button" onclick="Clc.truckStep(1)">+</button>
+          </div>
+        </div>
         <!-- ручной км (равноправный путь; чекбокс движка скрыт, управляется peek-кликом) -->
         <div style="display:none"><input autocomplete="off" type="checkbox" id="clc-manualKm" onchange="Clc.toggleManual()"></div>
         <div class="clc2-manual-row" id="clc-manualKmBox" style="display:none">
@@ -5041,6 +5052,7 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
           <!-- скрытый вход движка: рейсов (деприоритизировано 21.08, всегда 1) -->
           <input autocomplete="off" type="number" id="clc-trips" value="1" style="display:none">
           <input autocomplete="off" type="number" id="clc-loopCount" value="1" style="display:none">
+          <input autocomplete="off" type="number" id="clc-truckCount" value="1" style="display:none">
           <div class="clc2-bullet">
             <div class="clc2-bullet-caps"><span id="clc2-bulletL">Масса груза 33 т</span><span id="clc2-bulletR">Предел 59 т</span></div>
             <div class="clc2-bullet-track"><div class="clc2-bullet-fill" id="clc2-bulletFill"></div><div class="clc2-bullet-tick"></div></div>
@@ -5664,17 +5676,27 @@ function calc(){
     var shift=rate.s,kmRate=rate.km,emptyRate=rate.emptyKm||EMPTY_RATE,mskOnly=isMsk,isFar=distMsk>FAR_R;
     if(!mskOnly&&isFar&&!rate.isF)shift=FAR_SHIFT;shift=rn(shift);
     var loopCount=Math.max(1,+document.getElementById('clc-loopCount').value||1);
+    // Влад, 10.09: круговые рейсы может делить между собой НЕСКОЛЬКО машин (пример: 3
+    // машины и 6 ходок = 2 ходки на машину в среднем) - раньше формула всегда считала,
+    // будто все N ходок делает одна машина сама. truckCount не может быть больше
+    // loopCount (машин не может быть больше, чем ходок) - тот же зажим, что у loopCount.
+    var truckCount=Math.max(1,Math.min(loopCount,+document.getElementById('clc-truckCount').value||1));
     // ×2 сверхгабарита (Влад, 28.08, вместо прежнего «Кат. 3 - индивидуально»):
     // применяется к СМЕНЕ и КИЛОМЕТРАЖУ С ГРУЗОМ; порожние пробеги, сопровождение
     // и прикрытие - БЕЗ ×2. Раздвижение корыта (×1.5) осталось только на смене.
     var coefOver=1,coef=1,coefs=[];
     if(vt==='korito'&&document.getElementById('clc-koritoExt').checked){coef*=K_COEF;coefs.push('×1.5 раздвижение');}
     if(over){coefOver=OV_COEF;coefs.push('×2 негабарит >17/4/4.5 - смена и км с грузом');}
+    // База->погрузка и выгрузка->база - КАЖДАЯ машина едет туда и обратно сама (×truckCount),
+    // это не одна и та же ходка, что и "с грузом" (та считается по loopCount, не по truckCount).
     var e1=0,ld=0,e2=0,ldBack=0;
-    if(!mskOnly){e1=rn(a1*emptyRate);ld=rn(a2*kmRate*coefOver);e2=rn(a3*emptyRate);ldBack=rn(a2*emptyRate);}
-    // Круговые рейсы: N раз с грузом между точками, (N-1) раз порожним обратно между ними -
-    // при loopCount=1 loopBackTotal=0 и ldAll=ld, формула не отличается от обычной.
-    var ldAll=ld*loopCount,loopBackTotal=ldBack*(loopCount-1);
+    if(!mskOnly){e1=rn(a1*emptyRate)*truckCount;ld=rn(a2*kmRate*coefOver);e2=rn(a3*emptyRate)*truckCount;ldBack=rn(a2*emptyRate);}
+    // Круговые рейсы: N раз с грузом между точками (не зависит от числа машин - грузов
+    // всё равно N), (N-truckCount) раз порожним обратно между ними - при truckCount=1 это
+    // (N-1), формула не отличается от исходной. Каждая из М машин сама возвращается
+    // порожней между СВОИМИ ходками, но не после последней - отсюда вычитание truckCount,
+    // а не единицы.
+    var ldAll=ld*loopCount,loopBackTotal=ldBack*(loopCount-truckCount);
     var esc=0,escNote='';
     if(neg){
         // категория сопровождения - только по массе (1: до 45 т, 2: до 80 т, 3: от 80 т) -
@@ -5701,16 +5723,21 @@ function calc(){
     // сопровождения выше - прикрытие тоже выезжает заново на каждый цикл).
     var escortCar=0,escortNeed=(wh>3.5||ln>19);
     if(escortNeed)escortCar=rn((21000+60*a2)*loopCount);
-    var sub=rn(shift*coef*coefOver)+e1+ldAll+loopBackTotal+e2+esc+escortCar,total=rn(sub*trips);
+    // Смена - за каждую машину отдельно (Влад, 10.09: "3 машины и 6 ходок" - это 3 смены,
+    // не 1 и не 6). shiftRaw множится тем же truckCount, чтобы разница shiftEff-shiftRaw
+    // (добавка ×2 негабарита на смену, для сегмента легенды) считалась верно на любом
+    // числе машин, а не только при truckCount=1.
+    var shiftEff=rn(shift*coef*coefOver)*truckCount, shiftRaw=rn(shift*coef)*truckCount;
+    var sub=shiftEff+e1+ldAll+loopBackTotal+e2+esc+escortCar,total=rn(sub*trips);
     document.getElementById('clc-totalPrice').textContent=total?total.toLocaleString()+' ₽':'0 ₽';
     // Кокпит 2.0: вывод - через табло (сплит-флэп + стековая полоса + легенда).
     // Тарифная методика менялась только по явным ТЗ Влада 28.08 (прикрытие, ×2).
     Clc._last={
-        total:total, sub:sub, shiftEff:rn(shift*coef*coefOver), shiftRaw:rn(shift*coef), coefOver:coefOver,
+        total:total, sub:sub, shiftEff:shiftEff, shiftRaw:shiftRaw, coefOver:coefOver,
         e1:e1, ldAll:ldAll, loopBackTotal:loopBackTotal, e2:e2, esc:esc, escNote:escNote,
         escortCar:escortCar, escortNeed:escortNeed,
         coef:coef, coefs:coefs, rateName:rate.n||'Трал',
-        a1:a1, a2:a2, a3:a3, loopCount:loopCount,
+        a1:a1, a2:a2, a3:a3, loopCount:loopCount, truckCount:truckCount,
         mskOnly:mskOnly, isFar:isFar, manual:manual, neg:neg, over:over,
         w:w, vt:vt, wid:wh, len:ln, hei:h
     };
@@ -6301,12 +6328,16 @@ function renderBoard_(){
     var led=document.getElementById('clc2-led');
     var pct=function(v){return sum?Math.round(v/sum*100)+'%':'';};
     var html='';
-    html+=ledRow_('clc2-seg-shift','Смена ('+L.rateName+')',(segs[0].v).toLocaleString('ru-RU')+' ₽',pct(segs[0].v));
+    // Влад, 10.09: суффикс "×N машин" - смена и оба порожних плеча база<->точка теперь
+    // считаются на каждую машину отдельно (не одна ходка), иначе рост суммы непонятен
+    // при взгляде на легенду без открытого степпера "Машин на маршруте".
+    var truckSfx=L.truckCount>1?' ×'+L.truckCount+' машин':'';
+    html+=ledRow_('clc2-seg-shift','Смена ('+L.rateName+')'+truckSfx,(segs[0].v).toLocaleString('ru-RU')+' ₽',pct(segs[0].v));
     if(!L.mskOnly){
-        html+=ledRow_('clc2-seg-empty','База → погрузка',L.e1.toLocaleString('ru-RU')+' ₽',pct(L.e1));
+        html+=ledRow_('clc2-seg-empty','База → погрузка'+truckSfx,L.e1.toLocaleString('ru-RU')+' ₽',pct(L.e1));
         html+=ledRow_('clc2-seg-loaded','Погрузка → выгрузка'+(L.coefOver>1?' (×2)':''),L.ldAll.toLocaleString('ru-RU')+' ₽',pct(L.ldAll));
         if(L.loopBackTotal>0)html+=ledRow_('clc2-seg-empty','Порожний между точками',L.loopBackTotal.toLocaleString('ru-RU')+' ₽',pct(L.loopBackTotal));
-        html+=ledRow_('clc2-seg-empty','Выгрузка → база',L.e2.toLocaleString('ru-RU')+' ₽',pct(L.e2));
+        html+=ledRow_('clc2-seg-empty','Выгрузка → база'+truckSfx,L.e2.toLocaleString('ru-RU')+' ₽',pct(L.e2));
     }
     if(coefPart>0)html+=ledRow_('clc2-seg-coef','Смена ×2 (сверхгабарит)',coefPart.toLocaleString('ru-RU')+' ₽','×2');
     html+=ledRow_('clc2-seg-esc','Сопровождение',(L.esc?L.esc.toLocaleString('ru-RU')+' ₽':(L.neg?(L.escNote||'0 ₽'):'0 ₽')),L.esc?pct(L.esc):'');
@@ -6478,7 +6509,27 @@ function loopStep(n){
     if(arc)arc.style.opacity=v>1?1:0;
     var ln=document.getElementById('clc2-loopN');
     if(ln)ln.textContent='×'+v;
+    // Строка "машин на маршруте" (Влад, 10.09) появляется только при v>1 - при одной
+    // ходке делить её между несколькими машинами не имеет смысла. Если ходок стало
+    // меньше, чем уже выбранных машин - зажимаем машины вниз тем же числом.
+    var truckRow=document.getElementById('clc2-truckRow');
+    if(truckRow)truckRow.style.display=v>1?'flex':'none';
+    var truckInp=document.getElementById('clc-truckCount');
+    if(truckInp&&(+truckInp.value||1)>v){
+        truckInp.value=v;
+        var tval=document.getElementById('clc2-truckVal');
+        if(tval)tval.textContent=v;
+    }
     updateRouteViz_();
+    calc();
+}
+function truckStep(n){
+    var loopN=Math.max(1,+document.getElementById('clc-loopCount').value||1);
+    var inp=document.getElementById('clc-truckCount');
+    var v=Math.max(1,Math.min(loopN,(+inp.value||1)+n)); // не больше машин, чем ходок
+    inp.value=v;
+    var val=document.getElementById('clc2-truckVal');
+    if(val)val.textContent=v;
     calc();
 }
 // enableManual (UI ручного км) удалён по слову Влада 28.08 - вместо него чипы-базы.
@@ -6573,7 +6624,7 @@ window.Clc = {
   geoc:geoc, getLoc:getLoc, swapAdr:swapAdr, toggleManual:toggleManual, onWChange:onWChange,
   vhCh:vhCh, fltr:fltr, fltrFocus:fltrFocus, clearTechSearch:clearTechSearch, selTech:selTech,
   saveCalc:saveCalc, delCalc:delCalc, loadH:loadH, genKP:genKP, calc:calc, initPage:initPage,
-  toggleBase:toggleBase, loopStep:loopStep, togglePick:togglePick,
+  toggleBase:toggleBase, loopStep:loopStep, truckStep:truckStep, togglePick:togglePick,
   openHist:openHist, closeHist:closeHist, copyPhrase:copyPhrase,
   autoChipClick:autoChipClick, vhChManual:vhChManual, applyHist:applyHist,
   _last:null

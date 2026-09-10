@@ -5804,13 +5804,15 @@ function calc(){
     // сопровождения выше - прикрытие тоже выезжает заново на каждый цикл).
     var escortCar=0,escortNeed=(wh>3.5||ln>19);
     if(escortNeed)escortCar=rn((21000+60*a2)*loopCount);
-    // Смена - за каждую машину отдельно (Влад, 10.09: "3 машины и 6 ходок" - это 3 смены,
-    // не 1 и не 6). shiftUnit - сумма ЗА ОДНУ машину (без ×2 негабарита), для легенды
-    // "X ₽ × N = Y ₽". shiftRaw множится тем же truckCount, чтобы разница
-    // shiftEff-shiftRaw (добавка ×2 негабарита на смену, для сегмента легенды) считалась
-    // верно на любом числе машин, а не только при truckCount=1.
+    // Смена - за КАЖДУЮ ходку, не за машину (Влад, 10.09, поправка: "даже если одна
+    // машина делает несколько ходок, каждая ходка - это смена" - множитель loopCount
+    // (N), не truckCount (M). truckCount остаётся только у e1/e2/loopBackTotal ниже -
+    // "доставки и возвраты" считаются по машинам, смена - по ходкам, это разные вещи.
+    // shiftUnit - сумма ЗА ОДНУ ходку (без ×2 негабарита), для легенды "X ₽ × N = Y ₽".
+    // shiftRaw множится тем же loopCount, чтобы разница shiftEff-shiftRaw (добавка ×2
+    // негабарита на смену, для сегмента легенды) считалась верно на любом числе ходок.
     var shiftUnit=rn(shift*coef);
-    var shiftEff=rn(shift*coef*coefOver)*truckCount, shiftRaw=shiftUnit*truckCount;
+    var shiftEff=rn(shift*coef*coefOver)*loopCount, shiftRaw=shiftUnit*loopCount;
     var sub=shiftEff+e1+ldAll+loopBackTotal+e2+esc+escortCar,total=rn(sub*trips);
     document.getElementById('clc-totalPrice').textContent=total?total.toLocaleString()+' ₽':'0 ₽';
     // Кокпит 2.0: вывод - через табло (сплит-флэп + стековая полоса + легенда).
@@ -6418,10 +6420,10 @@ function renderBoard_(){
     var led=document.getElementById('clc2-led');
     var pct=function(v){return sum?Math.round(v/sum*100)+'%':'';};
     var html='';
-    // Влад, 10.09: смена и оба порожних плеча база<->точка теперь считаются на каждую
-    // машину отдельно (не одна ходка) - показываем прямо "X ₽ × N = Y ₽" в сумме
-    // (mulSum_), а не намёк текстом "×N машин" рядом с названием строки.
-    html+=ledRow_('clc2-seg-shift','Смена ('+L.rateName+')',mulSum_(L.shiftUnit,L.truckCount,segs[0].v),pct(segs[0].v));
+    // Влад, 10.09: смена - за каждую ходку (loopCount), оба порожних плеча база<->точка -
+    // за каждую машину (truckCount) - разные множители у соседних строк, не опечатка.
+    // Показываем прямо "X ₽ × N = Y ₽" в сумме (mulSum_).
+    html+=ledRow_('clc2-seg-shift','Смена ('+L.rateName+')',mulSum_(L.shiftUnit,L.loopCount,segs[0].v),pct(segs[0].v));
     if(!L.mskOnly){
         html+=ledRow_('clc2-seg-empty','База → погрузка',mulSum_(L.e1Unit,L.truckCount,L.e1),pct(L.e1));
         html+=ledRow_('clc2-seg-loaded','Погрузка → выгрузка'+(L.coefOver>1?' (×2)':''),L.ldAll.toLocaleString('ru-RU')+' ₽',pct(L.ldAll));

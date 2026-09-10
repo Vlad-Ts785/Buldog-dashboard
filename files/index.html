@@ -1599,8 +1599,14 @@ main:has(> #page-crm.active){max-width:none;}
 .crmldr-row{display:grid;grid-template-columns:120px 1fr 72px;align-items:center;gap:10px;min-height:24px;}
 .crmldr-name{font-size:12.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .crmldr-track{position:relative;height:14px;}
-.crmldr-barwrap{position:absolute;left:0;top:4px;height:6px;width:100%;background:var(--bg4);border-radius:3px;overflow:hidden;}
-.crmldr-bar{height:100%;border-radius:3px;background:var(--green);transition:width .5s ease;}
+.crmldr-barwrap{position:absolute;left:0;top:4px;height:6px;width:100%;background:var(--bg4);border-radius:3px;overflow:hidden;display:flex;}
+.crmldr-bar{height:100%;border-radius:3px;background:var(--green);transition:width .5s ease;flex:none;}
+/* Допродажи (10.09) - второй сегмент СРАЗУ ПОСЛЕ первого (flex, не абсолютное
+   позиционирование - проще пересчитывать при смене периода/данных), синий - тот же
+   нейтральный "объём", что "Взял" в ростере Аналитики (2.18), не оценка. */
+.crmldr-bar-upsell{height:100%;border-radius:0 3px 3px 0;background:var(--blue);transition:width .5s ease;flex:none;}
+.crmldr-val-main{display:block;}
+.crmldr-val-upsell{display:block;font-size:9.5px;color:var(--blue);margin-top:1px;}
 .crmldr-bar.is-blue{background:var(--blue);}
 .crmldr-bar.is-red-bar{background:var(--red);}
 /* Топ-3 «Топ менеджеров» (Влад 09.09) - отдельная колонка под значок, только у строк
@@ -1741,6 +1747,7 @@ main:has(> #page-crm.active){max-width:none;}
 .kb-lost-mark{width:16px;height:16px;border-radius:50%;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;color:var(--muted);background:var(--bg4);}
 .kb-lost-mark svg{width:11px;height:11px;}
 .kb-card-loss{font:400 11px/1.35 var(--font-body);color:var(--red);}
+.kb-card-upsell{font:500 11px/1.35 var(--font-body);color:var(--green);}
 
 /* Салют победы - полноэкранный canvas поверх всего (как у банковской сцены) */
 .crm-celebrate{position:fixed;inset:0;pointer-events:none;z-index:2500;}
@@ -22036,7 +22043,12 @@ var CRM = (function () {
     var leaders = (S.summary && S.summary.leaders) || [];
     if (!leaders.length) { box.classList.remove('has-data'); box.innerHTML = ''; return; }
     box.classList.add('has-data');
-    var maxVal = leaders.reduce(function (m, l) { return Math.max(m, l.amount || 0); }, 0) || 1;
+    // 10.09, Влад: "на полоске должно быть видно первая продажа на сколько и сколько
+    // потом с этого клиента получили" - maxVal теперь по ИТОГУ (первая продажа + допродажи),
+    // иначе полоска менеджера с допродажами вылезла бы за край. Сама полоска - два сегмента
+    // подряд (flex, не абсолютное позиционирование): зелёный - первая продажа, синий -
+    // допродажи, тот же цвет, что "Взял" в аналитике (нейтральный объём, не оценка).
+    var maxVal = leaders.reduce(function (m, l) { return Math.max(m, (l.amount || 0) + (l.upsell_amount || 0)); }, 0) || 1;
     // Топ-3 - кубок/медаль (Влад 09.09), place берётся из позиции в уже отсортированном
     // сервером списке (ORDER BY total DESC), не пересчитывается на фронте.
     function rankBadge(i) {
@@ -22048,12 +22060,18 @@ var CRM = (function () {
     box.innerHTML = '<div class="crmldr-head">Топ менеджеров - сумма закрытых сделок</div>' +
       leaders.map(function (l, i) {
         var surname = String(l.name || '').trim().split(' ').pop();
+        var up = l.upsell_amount || 0;
         var barW = Math.min(100, (l.amount || 0) / maxVal * 100);
-        return '<div class="crmldr-row has-rank' + (i < 3 ? ' is-top' + (i + 1) : '') + '" title="' + esc(l.name) + '">' +
+        var upW = Math.min(100 - barW, up / maxVal * 100);
+        var valHtml = up > 0
+          ? '<span class="crmldr-val-main">' + shortMoney(l.amount) + '</span><span class="crmldr-val-upsell">+' + shortMoney(up) + '</span>'
+          : shortMoney(l.amount);
+        return '<div class="crmldr-row has-rank' + (i < 3 ? ' is-top' + (i + 1) : '') + '" title="' + esc(l.name) + (up > 0 ? ' - первая продажа ' + money(l.amount) + ', допродажи ' + money(up) : '') + '">' +
           rankBadge(i) +
           '<span class="crmldr-name">' + esc(surname) + '</span>' +
-          '<div class="crmldr-track"><div class="crmldr-barwrap"><div class="crmldr-bar" style="width:' + barW.toFixed(1) + '%"></div></div></div>' +
-          '<span class="crmldr-val">' + shortMoney(l.amount) + '</span></div>';
+          '<div class="crmldr-track"><div class="crmldr-barwrap"><div class="crmldr-bar" style="width:' + barW.toFixed(1) + '%"></div>' +
+          (up > 0 ? '<div class="crmldr-bar-upsell" style="width:' + upW.toFixed(1) + '%"></div>' : '') + '</div></div>' +
+          '<span class="crmldr-val">' + valHtml + '</span></div>';
       }).join('');
   }
   // «Откуда звонят» - трафик сайта arenda-tral.ru через коллтрекинг Calltouch (подключено
@@ -22126,11 +22144,15 @@ var CRM = (function () {
       : isLost ? '<span class="kb-lost-mark" title="Отказ">' + ico('close') + '</span>'
       : '<span class="kb-pulse"></span>';
     var lossLine = (isLost && d.loss_reason) ? '<div class="kb-card-loss">' + esc(d.loss_reason) + '</div>' : '';
+    // Допродажи (10.09, Влад: "должно быть видно и в канбане") - тонкая зелёная строка
+    // под суммой, только у won-карточек с реальными допродажами (сервер уже отфильтровал -
+    // batch считается только для won+order_1c_number, см. crmBatchUpsells_).
+    var upsellLine = (d.upsell_amount > 0) ? '<div class="kb-card-upsell">+' + shortMoney(d.upsell_amount) + ' допродажи' + (d.upsell_count > 1 ? ' (' + d.upsell_count + ')' : '') + '</div>' : '';
     return '<article class="kb-card ' + fr + (isWon ? ' kb-won-style' : '') + (isLost ? ' kb-lost-style' : '') + (S.drawerId === d.id ? ' is-open' : '') + '" data-id="' + d.id + '" tabindex="0" title="' + esc(fr === 'kb-stale' ? 'Зависла: без движения дольше ' + stallDays(d.stage) + ' дн.' : fr === 'kb-wait' ? 'Клиент ждёт ответа больше 2 часов' : '') + '">' +
       '<header class="kb-card-top"><span class="kb-client">' + esc(dealTitle(d)) + '</span>' + statusMark + '</header>' +
       '<div class="kb-cargo">' + cargoLine + '</div>' +
       '<div class="kb-meta">' + meta.map(function (m) { return '<span class="kb-num">' + m + '</span>'; }).join('<span class="kb-dotsep"></span>') + chan + '</div>' +
-      lossLine +
+      lossLine + upsellLine +
       '<footer class="kb-card-bot"><span class="kb-sum' + (Number(d.amount) ? '' : ' is-empty') + '">' + (Number(d.amount) ? money(d.amount) : 'без суммы') + '</span>' +
         '<span style="display:flex;align-items:center;gap:8px">' + (unread ? '<span class="kb-unread">' + ico('chat') + '<span class="crm-badge">' + unread + '</span></span>' : '') + resp + '</span></footer>' +
       '</article>';

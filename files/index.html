@@ -5777,8 +5777,9 @@ function calc(){
     if(over){coefOver=OV_COEF;coefs.push('×2 негабарит >17/4/4.5 - смена и км с грузом');}
     // База->погрузка и выгрузка->база - КАЖДАЯ машина едет туда и обратно сама (×truckCount),
     // это не одна и та же ходка, что и "с грузом" (та считается по loopCount, не по truckCount).
-    var e1=0,ld=0,e2=0,ldBack=0;
-    if(!mskOnly){e1=rn(a1*emptyRate)*truckCount;ld=rn(a2*kmRate*coefOver);e2=rn(a3*emptyRate)*truckCount;ldBack=rn(a2*emptyRate);}
+    // e1Unit/e2Unit - сумма ЗА ОДНУ машину, для легенды "X ₽ × N = Y ₽" (Влад, 10.09).
+    var e1=0,ld=0,e2=0,ldBack=0,e1Unit=0,e2Unit=0;
+    if(!mskOnly){e1Unit=rn(a1*emptyRate);e1=e1Unit*truckCount;ld=rn(a2*kmRate*coefOver);e2Unit=rn(a3*emptyRate);e2=e2Unit*truckCount;ldBack=rn(a2*emptyRate);}
     // Круговые рейсы: N раз с грузом между точками (не зависит от числа машин - грузов
     // всё равно N), (N-truckCount) раз порожним обратно между ними - при truckCount=1 это
     // (N-1), формула не отличается от исходной. Каждая из М машин сама возвращается
@@ -5812,17 +5813,19 @@ function calc(){
     var escortCar=0,escortNeed=(wh>3.5||ln>19);
     if(escortNeed)escortCar=rn((21000+60*a2)*loopCount);
     // Смена - за каждую машину отдельно (Влад, 10.09: "3 машины и 6 ходок" - это 3 смены,
-    // не 1 и не 6). shiftRaw множится тем же truckCount, чтобы разница shiftEff-shiftRaw
-    // (добавка ×2 негабарита на смену, для сегмента легенды) считалась верно на любом
-    // числе машин, а не только при truckCount=1.
-    var shiftEff=rn(shift*coef*coefOver)*truckCount, shiftRaw=rn(shift*coef)*truckCount;
+    // не 1 и не 6). shiftUnit - сумма ЗА ОДНУ машину (без ×2 негабарита), для легенды
+    // "X ₽ × N = Y ₽". shiftRaw множится тем же truckCount, чтобы разница
+    // shiftEff-shiftRaw (добавка ×2 негабарита на смену, для сегмента легенды) считалась
+    // верно на любом числе машин, а не только при truckCount=1.
+    var shiftUnit=rn(shift*coef);
+    var shiftEff=rn(shift*coef*coefOver)*truckCount, shiftRaw=shiftUnit*truckCount;
     var sub=shiftEff+e1+ldAll+loopBackTotal+e2+esc+escortCar,total=rn(sub*trips);
     document.getElementById('clc-totalPrice').textContent=total?total.toLocaleString()+' ₽':'0 ₽';
     // Кокпит 2.0: вывод - через табло (сплит-флэп + стековая полоса + легенда).
     // Тарифная методика менялась только по явным ТЗ Влада 28.08 (прикрытие, ×2).
     Clc._last={
-        total:total, sub:sub, shiftEff:shiftEff, shiftRaw:shiftRaw, coefOver:coefOver,
-        e1:e1, ldAll:ldAll, loopBackTotal:loopBackTotal, e2:e2, esc:esc, escNote:escNote,
+        total:total, sub:sub, shiftEff:shiftEff, shiftRaw:shiftRaw, shiftUnit:shiftUnit, coefOver:coefOver,
+        e1:e1, e1Unit:e1Unit, ldAll:ldAll, loopBackTotal:loopBackTotal, e2:e2, e2Unit:e2Unit, esc:esc, escNote:escNote,
         escortCar:escortCar, escortNeed:escortNeed,
         coef:coef, coefs:coefs, rateName:rate.n||'Трал',
         a1:a1, a2:a2, a3:a3, loopCount:loopCount, truckCount:truckCount,
@@ -6358,6 +6361,13 @@ function ledRow_(swCls,k,v,aux){
         +'<span class="k">'+k+'</span><span class="lead"></span>'
         +'<span class="v">'+v+'</span><span class="aux">'+(aux||'')+'</span></div>';
 }
+// Влад, 10.09: "пусть делает умножение и показывает сколько получилось по количеству и
+// сумме" - строки, которые множатся на количество машин (смена, оба порожних плеча
+// база<->точка), показывают "unit ₽ × N = total ₽" вместо голого итога, чтобы разбивка
+// была видна сразу в легенде, без открытия степпера "Машин на маршруте".
+function mulSum_(unit,count,total){
+    return count>1?(unit.toLocaleString('ru-RU')+' ₽ × '+count+' = '+total.toLocaleString('ru-RU')+' ₽'):(total.toLocaleString('ru-RU')+' ₽');
+}
 function clcStopReason_(){
     var w=+document.getElementById('clc-weight').value||0;
     var wid=+document.getElementById('clc-wid').value||0;
@@ -6416,16 +6426,15 @@ function renderBoard_(){
     var led=document.getElementById('clc2-led');
     var pct=function(v){return sum?Math.round(v/sum*100)+'%':'';};
     var html='';
-    // Влад, 10.09: суффикс "×N машин" - смена и оба порожних плеча база<->точка теперь
-    // считаются на каждую машину отдельно (не одна ходка), иначе рост суммы непонятен
-    // при взгляде на легенду без открытого степпера "Машин на маршруте".
-    var truckSfx=L.truckCount>1?' ×'+L.truckCount+' машин':'';
-    html+=ledRow_('clc2-seg-shift','Смена ('+L.rateName+')'+truckSfx,(segs[0].v).toLocaleString('ru-RU')+' ₽',pct(segs[0].v));
+    // Влад, 10.09: смена и оба порожних плеча база<->точка теперь считаются на каждую
+    // машину отдельно (не одна ходка) - показываем прямо "X ₽ × N = Y ₽" в сумме
+    // (mulSum_), а не намёк текстом "×N машин" рядом с названием строки.
+    html+=ledRow_('clc2-seg-shift','Смена ('+L.rateName+')',mulSum_(L.shiftUnit,L.truckCount,segs[0].v),pct(segs[0].v));
     if(!L.mskOnly){
-        html+=ledRow_('clc2-seg-empty','База → погрузка'+truckSfx,L.e1.toLocaleString('ru-RU')+' ₽',pct(L.e1));
+        html+=ledRow_('clc2-seg-empty','База → погрузка',mulSum_(L.e1Unit,L.truckCount,L.e1),pct(L.e1));
         html+=ledRow_('clc2-seg-loaded','Погрузка → выгрузка'+(L.coefOver>1?' (×2)':''),L.ldAll.toLocaleString('ru-RU')+' ₽',pct(L.ldAll));
         if(L.loopBackTotal>0)html+=ledRow_('clc2-seg-empty','Порожний между точками',L.loopBackTotal.toLocaleString('ru-RU')+' ₽',pct(L.loopBackTotal));
-        html+=ledRow_('clc2-seg-empty','Выгрузка → база'+truckSfx,L.e2.toLocaleString('ru-RU')+' ₽',pct(L.e2));
+        html+=ledRow_('clc2-seg-empty','Выгрузка → база',mulSum_(L.e2Unit,L.truckCount,L.e2),pct(L.e2));
     }
     if(coefPart>0)html+=ledRow_('clc2-seg-coef','Смена ×2 (сверхгабарит)',coefPart.toLocaleString('ru-RU')+' ₽','×2');
     html+=ledRow_('clc2-seg-esc','Сопровождение',(L.esc?L.esc.toLocaleString('ru-RU')+' ₽':(L.neg?(L.escNote||'0 ₽'):'0 ₽')),L.esc?pct(L.esc):'');

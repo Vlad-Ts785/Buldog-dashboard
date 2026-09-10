@@ -165,9 +165,19 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 .nowline{position:absolute;top:0;bottom:0;width:2px;background:var(--red);pointer-events:none;z-index:5;margin-left:-1px}
 .tracks.pinching + .nowline, .pinching ~ .past{opacity:0}
 
+/* Вакантная полоса (10.09, портировано с десктопа - files/index.html #page-logistics-plan
+   .track-vacant) - фоновая полоса "нет водителя", НЕ настоящая плитка (pointer-events:none,
+   не .seg). z-index явный (не полагаемся на порядок DOM, как на десктопе - здесь полосы и
+   плитки монтируются раздельными циклами в renderWindow, порядок добавления не гарантирован
+   между вызовами). Тот же amber, что и на десктопе (Влад, 10.09: "чёрно-серая полоска, я бы
+   поменял на что-то более красных или оранжевых"). */
+.track-vacant{position:absolute;top:6px;bottom:6px;pointer-events:none;z-index:0;
+  background-image:repeating-linear-gradient(135deg,rgba(239,159,39,.15) 0 10px,rgba(239,159,39,.06) 10px 20px);
+  border-top:1px dashed rgba(239,159,39,.45);border-bottom:1px dashed rgba(239,159,39,.45)}
+
 /* плитка */
 .seg{position:absolute;top:7px;height:34px;border-radius:6px;color:var(--text);font-size:11px;line-height:1.2;
-  background:var(--fill-driveroff);transition:opacity .14s var(--ease-out-soft)}
+  background:var(--fill-driveroff);transition:opacity .14s var(--ease-out-soft);z-index:1}
 .seg::before{content:"";position:absolute;inset:-7px 0;min-width:44px;left:50%;transform:translateX(-50%);width:max(100%,44px)}
 .seg.k-trip{background:var(--fill-trip);color:var(--tint-green)}
 .seg.k-noorder{background:var(--fill-noorder);color:var(--tint-amber)}
@@ -514,6 +524,49 @@ function segShort(s, tier){ /* подпись на плитке по ширин�
   return KIND_LABEL[s.kind];
 }
 function isVacant(v){ return !v.driver; }
+/* Вакантные полосы - зеркало vacantBandRanges_/lpFleetDateToHour_ на десктопе (files/
+   index.html), портировано 10.09 (Влад: "в десктопной версии там где вакант
+   автоматически протягивается линия. Но в мобильной версии этого нет. И поэтому
+   логисты накладывают ещё одну протяжку выходной" - без автополосы логист на телефоне
+   не видел, что машина уже помечена вакантной, и вручную ставил лишний "Без водителя"
+   поверх). НЕСКОЛЬКО диапазонов из ПОЛНОЙ истории M.assignments (не только открытых -
+   /api/fleet/state отдаёт все), а не одного живого флага isVacant(v) - та же причина,
+   что на десктопе: живой флаг "забывает" честный прошлый период, как только на машину
+   посадили водителя. normGos() с обеих сторон (не строгое ===, как на десктопе) -
+   тот же приём, что уже используется в fleetOpenSlot_ выше, чуть надёжнее к разнице
+   форматирования гос.номера между записями. */
+function fleetDateToHour_(s){
+  var m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(s || "");
+  if (!m) return null;
+  return dateToHour_(new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]));
+}
+function vacantBandRanges_(v){
+  var vGos = normGos(v.gos);
+  var covered = (M.assignments || [])
+    .filter(function(a){ return a.kind === "driver" && normGos(a.tractor_gos) === vGos; })
+    .map(function(a){
+      var s = fleetDateToHour_(a.valid_from);
+      if (s == null) return null;
+      var e = a.valid_to ? fleetDateToHour_(a.valid_to) : HOURS;
+      if (e == null) e = HOURS;
+      return [Math.max(0, s), Math.min(HOURS, Math.max(s, e))];
+    })
+    .filter(Boolean)
+    .sort(function(a, b){ return a[0] - b[0]; });
+  var merged = [];
+  covered.forEach(function(iv){
+    var last = merged[merged.length - 1];
+    if (last && iv[0] <= last[1]) last[1] = Math.max(last[1], iv[1]);
+    else merged.push(iv.slice());
+  });
+  var gaps = [], cursor = 0;
+  merged.forEach(function(iv){
+    if (iv[0] > cursor) gaps.push({s: cursor, l: iv[0] - cursor});
+    cursor = Math.max(cursor, iv[1]);
+  });
+  if (cursor < HOURS) gaps.push({s: cursor, l: HOURS - cursor});
+  return gaps.filter(function(g){ return g.l > 0; });
+}
 function isFreeNow(v){ var h = nowHour(); return !isVacant(v) && !M.segs.some(function(s){ return s.v === v.i && s.s <= h && s.s + s.l > h; }); }
 function busyUntil(v){ var h = nowHour(); var cur = M.segs.filter(function(s){ return s.v === v.i && s.s <= h && s.s + s.l > h; }).sort(function(a,b){ return (b.s+b.l)-(a.s+a.l); })[0]; return cur || null; }
 function nextSeg(v){ var h = nowHour(); return M.segs.filter(function(s){ return s.v === v.i && s.s > h; }).sort(function(a,b){ return a.s-b.s; })[0] || null; }
@@ -758,6 +811,11 @@ function buildRows(){
       rh.innerHTML = '<div class="g">' + esc(v.gosShort) + '</div><div class="d' + (isVacant(v) ? ' vac' : '') + '">' + esc(isVacant(v) ? "нет водителя" : v.driverShort) + '</div>';
       lanes.appendChild(rh); headEls[v.i] = rh;
       var tr = document.createElement("div"); tr.className = "track" + (col ? " hid" : ""); tr.dataset.v = v.i; tracks.appendChild(tr); trackEls[v.i] = tr;
+      // Вакантные полосы - посчитаны ЗАРАНЕЕ (не на каждый renderWindow), позиционируются
+      // и монтируются в самом renderWindow вместе с сегментами (см. там) - трек здесь НЕ
+      // full-width (см. win.s/tracks.style.left), полоса должна жить в той же оконной
+      // системе координат, что и .seg, иначе съедет при скролле/зуме.
+      v.vacantBands = vacantBandRanges_(v);
       rows.push({type:"v", v:v, headEl:rh, trackEl:tr, top:0, h:G.rowH, hidden:col});
     });
   });
@@ -811,6 +869,7 @@ function needWindow(force){
   if (ne - ns < 24) ne = Math.min(HOURS, ns + 24);
   win.s = ns; win.e = ne; return true;
 }
+var vacantEls = {}; // "vi-N" -> el, та же windowed-модель, что у segEls
 function renderWindow(force){
   if (!needWindow(force)) return;
   var hw = G.hw;
@@ -826,6 +885,23 @@ function renderWindow(force){
     placeSeg(el, s);
   });
   Object.keys(segEls).forEach(function(id){ if (!keep[id]){ var el = segEls[id]; if (el.parentNode) el.parentNode.removeChild(el); delete segEls[id]; } });
+  // Вакантные полосы - та же windowed-модель, что у .seg выше (см. разбор у v.vacantBands
+  // в buildRows), но БЕЗ пересчёта диапазонов на каждый вызов - только позиция/монтаж.
+  // ДО .seg в DOM (см. цикл выше) не получится гарантировать порядком добавления одного
+  // и того же родителя частями - вместо этого z-index в CSS (.track-vacant ниже .seg).
+  var keepV = {};
+  M.vehicles.forEach(function(v){
+    (v.vacantBands || []).forEach(function(vb, i){
+      if (vb.s >= win.e || vb.s + vb.l <= win.s) return;
+      var key = v.i + "-" + i;
+      keepV[key] = true;
+      var el = vacantEls[key];
+      if (!el){ el = document.createElement("div"); el.className = "track-vacant"; vacantEls[key] = el; }
+      var tr = trackEls[v.i]; if (el.parentNode !== tr && tr) tr.appendChild(el);
+      el.style.left = ((vb.s - win.s) * hw) + "px"; el.style.width = (vb.l * hw) + "px";
+    });
+  });
+  Object.keys(vacantEls).forEach(function(key){ if (!keepV[key]){ var el = vacantEls[key]; if (el.parentNode) el.parentNode.removeChild(el); delete vacantEls[key]; } });
   pinLabels();
 }
 function makeSeg(s){
@@ -1922,8 +1998,13 @@ function applyPollFleet_(rows){
     var pid = byGosDriver[g], name = pid ? ((peopleById[pid] && peopleById[pid].full_name) || v.driver) : "";
     if (name !== v.driver){ v.driver = name; v.driverShort = surnameIO(name); changed = true; }
     var trGos = byGosTrailer[g] || ""; if (trGos !== v.trailerGos){ v.trailerGos = trGos; changed = true; }
+    // Вакантные полосы - пересчитать на каждый живой опрос fleet (10.09), не только при
+    // полном buildRows() - иначе полоса замирает на данных с момента открытия страницы,
+    // пока кто-то не свернёт/развернёт группу (единственный другой вызов buildRows()).
+    v.vacantBands = vacantBandRanges_(v);
   });
   if (changed) rerenderHeads();
+  renderWindow(true); // подхватить свежие v.vacantBands, даже если driver/trailer не менялись
 }
 var lastInteractionAt_ = Date.now(), pollSegsTimer_ = null, pollFleetTimer_ = null;
 document.addEventListener("touchstart", function(){ lastInteractionAt_ = Date.now(); }, {passive:true, capture:true});

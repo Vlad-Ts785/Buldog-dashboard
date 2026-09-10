@@ -420,6 +420,86 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .cost-card-sub{font-size:11px;color:var(--muted);}
 @media (max-width:640px){.cost-cards{grid-template-columns:repeat(2,1fr);}}
 
+
+/* ── «МЕНЕДЖЕРЫ - ЗАКАЗЫ 1С» по ГОСТу (10.09.2026, префикс sm-) ──────────────────
+   Влад одобрил на превью: «в принципе мне нравится, накати». Страница была собрана
+   на инлайн-стилях и цветах-ярлыках (зелёный = Ахтамова, синий = Гусейнова), два
+   цвета вообще вне палитры. Здесь - компоненты ГОСТа: капс-лейбл, bullet-чарт,
+   строка «метрика-значение», моноширинные цифры. Цвет теперь означает только одно -
+   выполнение плана по ПРОГНОЗУ. Старый вид остался целиком (renderSalesMgrLegacy_)
+   и включается ссылкой в подвале страницы - на случай отката. */
+.sm-caps{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);}
+.sm-num{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:var(--text);}
+.sm-hero{font-size:31px;font-weight:700;line-height:1.1;}
+.sm-hero-sm{font-size:25px;font-weight:700;line-height:1.15;}
+.sm-badge{
+  display:inline-flex;align-items:center;font-family:'JetBrains Mono',monospace;
+  font-variant-numeric:tabular-nums;font-size:11px;font-weight:600;padding:2px 7px;border-radius:6px;
+}
+.sm-badge.good{color:var(--green);background:rgba(29,158,117,.16);}
+.sm-badge.warn{color:var(--amber);background:rgba(239,159,39,.16);}
+.sm-badge.bad{color:var(--red);background:rgba(226,75,74,.16);}
+
+/* Bullet-чарт (ГОСТ раздел 4): шкала 0-120% плана, тик плана всегда на 83.3%,
+   трек-пилюля, факт - заливка, прогноз - тот же цвет 30% с зазором 2px.
+   Заливка растёт transform:scaleX внутри overflow:hidden - width анимировать
+   запрещено (ГОСТ раздел 5), а так радиусы не искажаются. */
+.sm-bul{position:relative;display:flex;align-items:center;}
+.sm-bul-track{position:relative;flex:1;display:flex;background:var(--bg4);overflow:hidden;}
+/* Заливка ВИДНА сразу (scaleX(1) - базовое состояние), вход играет анимацией поверх.
+   Раньше она въезжала по классу, который вешал requestAnimationFrame - в фоновой
+   вкладке rAF не тикает, и полосы оставались пустыми: данные не должны зависеть от
+   того, доиграла анимация или нет (поймано на приёмке 10.09). */
+.sm-bul-fill,.sm-bul-ghost{transform-origin:left center;}
+/* Вход играет ТОЛЬКО при первом показе страницы (класс на контейнере), а базовое
+   состояние заливки - «на месте». Иначе в фоновой вкладке анимация с both держит
+   кадр from, и полоса стоит пустой, пока вкладку не откроют: видимость данных не
+   должна зависеть от того, доиграла анимация (поймано на приёмке 10.09). */
+.sm-enter-bars .sm-bul-fill,.sm-enter-bars .sm-bul-ghost{animation:smBar .45s cubic-bezier(0.16,1,0.3,1) both;}
+@keyframes smBar{from{transform:scaleX(0);}to{transform:scaleX(1);}}
+.sm-bul-ghost{opacity:.3;}
+.sm-bul-tick{position:absolute;left:83.3%;top:50%;transform:translate(-50%,-50%);width:2px;height:16px;background:var(--text);border-radius:1px;}
+.sm-bul-tick.sm-tick-sm{height:11px;}
+.sm-scale{position:relative;height:14px;font-size:10.5px;color:var(--muted);margin-top:3px;}
+.sm-scale span{position:absolute;white-space:nowrap;}
+.sm-scale .sm-scale-mid{left:83.3%;transform:translateX(-50%);}
+.sm-scale .sm-scale-end{right:0;}
+
+/* Строка «метрика-значение» (ГОСТ раздел 4, d5-row): label | точечный лидер | value | aux */
+.sm-row{display:grid;grid-template-columns:auto 1fr auto 5.5ch;align-items:baseline;gap:8px;padding:5px 0;}
+.sm-row.no-aux{grid-template-columns:auto 1fr auto;}
+.sm-row-lead{border-bottom:1px dotted rgba(255,255,255,.12);transform:translateY(-3px);}
+.sm-row-label{font-size:12px;color:var(--muted);}
+.sm-row-val{font-size:12.5px;font-weight:500;}
+.sm-row-aux{font-size:11px;text-align:right;color:var(--muted);}
+.sm-row.is-total{border-top:1px solid var(--border);margin-top:4px;padding-top:8px;}
+.sm-row.is-total .sm-row-val{font-weight:600;}
+
+/* Шапка карточки-таблицы отдела: без боковой цветной полоски (ГОСТ раздел 4 -
+   рамка-сигнал бывает только красная и на всю карточку) */
+.sm-dept-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 20px;border-bottom:1px solid var(--border);}
+.sm-dept-sub{font-size:11px;color:var(--muted);margin-top:4px;}
+.sm-dept-tot{font-size:11px;color:var(--muted);}
+.sm-plan-cell{display:flex;align-items:center;gap:8px;min-width:120px;}
+.sm-plan-cell .sm-bul{flex:1;min-width:64px;}
+.sm-plan-pct{min-width:4.5ch;text-align:right;font-size:11px;font-weight:600;color:var(--muted);}
+.sm-delta{font-size:10px;font-weight:600;color:var(--green);}
+
+/* Вход карточек - stagger 80 + i*55 (ГОСТ раздел 5). Играет при первом показе
+   страницы за сессию; повторное переключение вкладок - без спектакля. */
+@keyframes smIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
+.sm-enter{animation:smIn .45s cubic-bezier(0.16,1,0.3,1) both;}
+@media (prefers-reduced-motion: reduce){
+  .sm-enter{animation:none;}
+  .sm-enter-bars .sm-bul-fill,.sm-enter-bars .sm-bul-ghost{animation:none;}
+}
+.sm-viewswitch{margin:10px 0 30px;text-align:right;}
+.sm-viewswitch button{
+  background:none;border:0;padding:4px 2px;font:inherit;font-size:11.5px;color:var(--muted);
+  cursor:pointer;text-decoration:underline dotted;
+}
+.sm-viewswitch button:hover{color:var(--text);}
+
 /* ── ALERTS ─────────────────────────────────────────────── */
 .alert{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:var(--radius-sm);margin-bottom:8px;border:1px solid;}
 .alert.red{background:rgba(226,75,74,.08);border-color:rgba(226,75,74,.2);}
@@ -16868,7 +16948,7 @@ var DEPT_CFG = [
 ];
 var HEAD_FULL = { 'Цуцурин':'Цуцурин Владислав Дмитриевич','Ахтамова':'Ахтамова Лиана Анатольевна','Гусейнова':'Гусейнова Айнур','Рыщанов':'Рыщанов Рустем' };
 
-function renderSalesMgr() {
+function renderSalesMgrLegacy_() {
   if (!D || !D.orders) return;
   var allMgrs = D.orders.by_manager || [];
   if (!allMgrs.length) {
@@ -17213,6 +17293,291 @@ function renderSalesMgr() {
   DEPT_CFG.forEach(function(cfg, i){ if (dStats[i].orders > 0) deptsHtml += deptBlock(cfg, dStats[i]); });
   document.getElementById('sales-mgr-depts').innerHTML = deptsHtml + tsBlock;
 }
+
+// ══ «Менеджеры - заказы 1С» по ГОСТу (10.09.2026) ══════════════════════════════
+// Влад на превью: «в принципе мне нравится, накати... не забудь про подсветку плиток,
+// чтобы всё было живо и тридешно как в ГОСТе, и обязательно сохрани старый вид для
+// возможности отката». Старый рендер целиком остался выше (renderSalesMgrLegacy_),
+// переключатель - в подвале страницы, выбор запоминается в localStorage.
+var SM_VIEW_KEY_ = 'yard.salesMgr.view';       // 'gost' (по умолчанию) | 'legacy'
+var smEntryPlayed_ = false;                     // вход карточек - раз за сессию
+function smView_() {
+  try { return localStorage.getItem(SM_VIEW_KEY_) === 'legacy' ? 'legacy' : 'gost'; }
+  catch (e) { return 'gost'; }
+}
+function smSetView_(v) {
+  try { localStorage.setItem(SM_VIEW_KEY_, v); } catch (e) {}
+  smEntryPlayed_ = false;
+  renderSalesMgr();
+  var pg = document.getElementById('page-sales-mgr');
+  if (pg) pg.scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+function smFmt_(n) { return n ? Math.round(n).toLocaleString('ru-RU') : '—'; }
+function smNum_(txt, cls, style) {
+  return '<span class="sm-num' + (cls ? ' ' + cls : '') + '"' + (style ? ' style="' + style + '"' : '') + '>' + txt + '</span>';
+}
+// Цвет ПО ПРОГНОЗУ, не по факту (ГОСТ раздел 4): в середине месяца факт 50% - норма,
+// а не тревога, поэтому красным светится только тот, кто по темпу не дойдёт.
+function smTone_(forecastPct) { return forecastPct >= 100 ? 'good' : forecastPct >= 90 ? 'warn' : 'bad'; }
+function smToneVar_(forecastPct) {
+  var t = smTone_(forecastPct);
+  return t === 'good' ? 'var(--green)' : t === 'warn' ? 'var(--amber)' : 'var(--red)';
+}
+// Bullet-чарт: шкала 0-120% плана, тик плана на 83.3%, прогноз - бледный хвост.
+function smBullet_(factPct, forecastPct, h, delay) {
+  var tone = smToneVar_(forecastPct);
+  var fw = Math.max(0, Math.min(120, factPct)) / 120 * 100;
+  var pw = Math.max(0, Math.min(120, forecastPct)) / 120 * 100;
+  var ghost = Math.max(0, pw - fw);
+  var d = delay ? ';animation-delay:' + delay + 'ms' : '';
+  return '<div class="sm-bul" style="height:' + (h + 8) + 'px">' +
+    '<div class="sm-bul-track" style="height:' + h + 'px;border-radius:' + (h / 2) + 'px">' +
+      '<div class="sm-bul-fill" style="width:' + fw.toFixed(1) + '%;background:' + tone + d + '"></div>' +
+      (ghost > 0.4
+        ? '<div style="width:2px;flex:none"></div><div class="sm-bul-ghost" style="width:' + (ghost - 0.2).toFixed(1) + '%;background:' + tone + d + '"></div>'
+        : '') +
+    '</div>' +
+    '<div class="sm-bul-tick' + (h <= 6 ? ' sm-tick-sm' : '') + '"></div>' +
+  '</div>';
+}
+function smRow_(label, value, aux, valStyle, isTotal) {
+  return '<div class="sm-row' + (aux == null ? ' no-aux' : '') + (isTotal ? ' is-total' : '') + '">' +
+    '<span class="sm-row-label">' + label + '</span>' +
+    '<span class="sm-row-lead"></span>' +
+    smNum_(value, 'sm-row-val', valStyle) +
+    (aux != null ? '<span class="sm-row-aux sm-num">' + aux + '</span>' : '') +
+  '</div>';
+}
+function smCaps_(text) { return '<div class="sm-caps">' + text + '</div>'; }
+function smBadge_(text, forecastPct) { return '<span class="sm-badge ' + smTone_(forecastPct) + '">' + text + '</span>'; }
+
+function renderSalesMgrGost_() {
+  var o = D.orders, mgrs = o.by_manager || [];
+  var idx = {};
+  mgrs.forEach(function (m) { idx[String(m.name || '').trim().split(' ')[0].toLowerCase()] = m; });
+  function get(sur) { return idx[String(sur).toLowerCase()] || null; }
+  var mplans = o.managerPlans || {};
+  function planOf(sur) { return mplans[String(sur).toLowerCase()] || 0; }
+  var pace = calcPaceRatio_(o.period);
+
+  var PLAN = (D.summary && D.summary.salesPlan) || 0;
+  var FACT = (D.summary && D.summary.salesFakt) || 0;
+  var FACT_Y = (D.summary && D.summary.salesFaktThruYesterday != null) ? D.summary.salesFaktThruYesterday : FACT;
+  var forecast = FACT_Y * pace;
+  var factPct = PLAN ? Math.round(FACT / PLAN * 100) : 0;
+  var forePct = PLAN ? Math.round(forecast / PLAN * 100) : 0;
+
+  var stats = DEPT_CFG.map(function (cfg) {
+    var st = { orders: 0, amount: 0, amountY: 0, payment: 0, profit: 0, plan: 0 };
+    cfg.members.forEach(function (sur) {
+      var m = get(sur); if (!m) return;
+      var isPrus = sur.toLowerCase() === 'прус-роскошный';
+      st.orders += (m.orders || 0) - (isPrus ? (m.internal_orders || 0) : 0);
+      st.amount += (m.amount || 0) - (isPrus ? (m.internal_amount || 0) : 0);
+      st.amountY += (m.amount_thru_yesterday != null ? m.amount_thru_yesterday : (m.amount || 0)) -
+                    (isPrus ? (m.internal_amount_thru_yesterday != null ? m.internal_amount_thru_yesterday : (m.internal_amount || 0)) : 0);
+      st.payment += (m.payment || 0) - (isPrus ? (m.internal_payment || 0) : 0);
+      st.profit += (m.profit || 0);
+      st.plan += planOf(sur);
+    });
+    return st;
+  });
+  var sm = o.summary || {};
+  var intAmt = sm.internal_amount || 0, intOrd = sm.internal_orders || 0, intPlan = sm.internal_plan || 0;
+  var intAmtY = sm.internal_amount_thru_yesterday != null ? sm.internal_amount_thru_yesterday : intAmt;
+
+  // ── Ярус 1: план продаж целиком ──────────────────────────────────────────────
+  var h = '<div class="card" style="padding:18px 20px;margin-bottom:14px">';
+  h += '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px;flex-wrap:wrap">';
+  h += '<div>' + smCaps_('Выполнение плана продаж') +
+       '<div style="margin-top:8px">' + smNum_(smFmt_(FACT) + ' ₽', 'sm-hero') + '</div>' +
+       '<div style="font-size:12px;color:var(--muted);margin-top:4px">из ' + smFmt_(PLAN) + ' ₽ · ' + factPct + '% плана</div>' +
+       '</div>';
+  h += '<div style="text-align:right">' + smBadge_('прогноз ' + forePct + '%', forePct) +
+       '<div style="margin-top:8px">' + smNum_(smFmt_(forecast) + ' ₽', '', 'font-size:17px;font-weight:600') + '</div>' +
+       '<div style="font-size:11px;color:var(--muted);margin-top:2px">к концу месяца при текущем темпе</div></div>';
+  h += '</div>';
+  h += smBullet_(factPct, forePct, 8, 120);
+  h += '<div class="sm-scale"><span>0</span>' +
+       '<span class="sm-scale-mid">план ' + smFmt_(PLAN) + ' ₽</span>' +
+       '<span class="sm-scale-end">120%</span></div>';
+  // Разбивка - строками, а не радугой в одной полосе: в полосе цвет означал фамилию,
+  // а по ГОСТу цвет = смысл (раздел 1).
+  h += '<div style="margin-top:14px;border-top:1px solid var(--border);padding-top:8px">';
+  DEPT_CFG.forEach(function (cfg, i) {
+    if (!stats[i].orders) return;
+    h += smRow_(cfg.name, smFmt_(stats[i].amount), (PLAN ? Math.round(stats[i].amount / PLAN * 100) : 0) + '%');
+  });
+  if (intAmt) h += smRow_('Внутренние перевозки', smFmt_(intAmt), (PLAN ? Math.round(intAmt / PLAN * 100) : 0) + '%');
+  h += smRow_('Итого', smFmt_(FACT), factPct + '%', null, true);
+  h += '</div></div>';
+
+  // ── Ярус 2: плитки отделов ───────────────────────────────────────────────────
+  // .kpi-grid + .kpi - носители perspective, hover-вылета и курсорного света (ГОСТ 4 и 7).
+  var cards = '';
+  var ci = 0;
+  function deptTile(name, st, plan, showProfit) {
+    var fPct = plan ? Math.round(st.amount / plan * 100) : 0;
+    var frc = plan ? Math.round((st.amountY || st.amount) * pace / plan * 100) : 0;
+    var delay = 80 + ci * 55; ci++;
+    var c = '<div class="kpi' + (smEntryPlayed_ ? '' : ' sm-enter') + '" style="padding:18px 20px;animation-delay:' + delay + 'ms">';
+    c += '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">' +
+         smCaps_(name) + (plan ? smBadge_('прогноз ' + frc + '%', frc) : '') + '</div>';
+    c += '<div style="margin-top:10px">' + smNum_(smFmt_(st.amount) + ' ₽', 'sm-hero-sm') + '</div>';
+    if (plan) {
+      c += '<div style="margin-top:10px">' + smBullet_(fPct, frc, 6, delay + 80) + '</div>';
+      c += '<div style="font-size:11px;color:var(--muted)">' + fPct + '% из ' + smFmt_(plan) + ' ₽</div>';
+    }
+    c += '<div style="margin-top:10px">';
+    c += smRow_('Оплачено', smFmt_(st.payment), st.amount ? Math.round(st.payment / st.amount * 100) + '%' : null);
+    if (showProfit) c += smRow_('Прибыль найм', smFmt_(st.profit), null, st.profit < 0 ? 'color:var(--red)' : null);
+    c += smRow_('Заказов', String(st.orders || '—'), null);
+    c += '</div></div>';
+    return c;
+  }
+  DEPT_CFG.forEach(function (cfg, i) { if (stats[i].orders > 0) cards += deptTile(cfg.name, stats[i], stats[i].plan, true); });
+  cards += deptTile('Внутренние перевозки',
+    { amount: intAmt, amountY: intAmtY, payment: 0, profit: 0, orders: intOrd }, intPlan, false);
+  h += '<div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(240px,1fr));margin-bottom:14px;position:relative">' + cards + '</div>';
+
+  // ── Ярус 3: таблицы отделов ──────────────────────────────────────────────────
+  function mgrTable(title, rows, subtitle, st, plan, soloLabel) {
+    var t = '<div class="card" style="padding:0;overflow:hidden;margin-bottom:14px">';
+    t += '<div class="sm-dept-head"><div>' + smCaps_(title) +
+         (subtitle ? '<div class="sm-dept-sub">' + subtitle + '</div>' : '') + '</div>' +
+         '<div style="text-align:right"><div class="sm-dept-tot">' + (soloLabel || 'итого группы') + '</div>' +
+         '<div>' + smNum_(smFmt_(st.amount) + ' ₽', '', 'font-size:17px;font-weight:600') + '</div></div></div>';
+    t += '<div style="overflow-x:auto"><table class="tbl" style="min-width:680px"><thead><tr>' +
+      '<th>Менеджер</th><th class="num">Заказов</th><th class="num">Сумма</th><th class="num">Оплата</th>' +
+      '<th class="num">Прибыль найм</th><th class="num">Найм</th><th style="min-width:132px">План</th>' +
+      '</tr></thead><tbody>';
+    rows.forEach(function (r) {
+      var m = r.m;
+      var isPrus = r.sur && r.sur.toLowerCase() === 'прус-роскошный';
+      if (!m) {
+        var fn = HEAD_FULL[r.sur] || r.sur || '';
+        t += '<tr style="opacity:.5"><td><b>' + fn + '</b> <span style="font-size:10px;color:var(--muted)">рук.</span></td>' +
+          '<td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td>' +
+          '<td class="num muted">—</td><td class="num muted">—</td><td class="muted" style="font-size:11px">—</td></tr>';
+        return;
+      }
+      var orders = (m.orders || 0) - (isPrus ? (m.internal_orders || 0) : 0);
+      var amount = (m.amount || 0) - (isPrus ? (m.internal_amount || 0) : 0);
+      var payment = (m.payment || 0) - (isPrus ? (m.internal_payment || 0) : 0);
+      var aY = (m.amount_thru_yesterday != null ? m.amount_thru_yesterday : (m.amount || 0)) -
+               (isPrus ? (m.internal_amount_thru_yesterday != null ? m.internal_amount_thru_yesterday : (m.internal_amount || 0)) : 0);
+      var mPlan = r.plan || 0;
+      var pct = mPlan ? Math.round(amount / mPlan * 100) : 0;
+      var frc = mPlan ? Math.round(aY * pace / mPlan * 100) : 0;
+      var escName = String(m.name || '').replace(/'/g, "\\'");
+      // Дельта «сегодня» - единственное место, где ГОСТ разрешает красить текст (раздел 1).
+      var dOrd = (m.today_new_orders > 0)
+        ? ' <span class="sm-delta" onclick="event.stopPropagation();toggleMgrToday(\'' + escName + '\')" style="cursor:pointer;text-decoration:underline dotted">+' + m.today_new_orders + '</span>' : '';
+      var dAmt = (m.today_new_amount > 0)
+        ? ' <span class="sm-delta" onclick="event.stopPropagation();toggleMgrToday(\'' + escName + '\')" style="cursor:pointer;text-decoration:underline dotted">+' + smFmt_(m.today_new_amount) + '</span>' : '';
+      t += '<tr>' +
+        '<td><b>' + cleanName(m.name) + '</b>' + (r.isHead ? ' <span style="font-size:10px;color:var(--muted)">рук.</span>' : '') + '</td>' +
+        '<td class="num">' + smNum_(String(orders)) + dOrd + '</td>' +
+        '<td class="num">' + smNum_(smFmt_(amount), '', 'font-weight:600') + dAmt + '</td>' +
+        '<td class="num">' + smNum_(smFmt_(payment)) + '</td>' +
+        '<td class="num">' + smNum_(smFmt_(m.profit || 0), '', (m.profit || 0) < 0 ? 'color:var(--red)' : '') + '</td>' +
+        '<td class="num">' + smNum_(String(m.hired_orders || 0) || '—', '', 'color:var(--muted)') + '</td>' +
+        '<td>' + (mPlan
+          ? '<div class="sm-plan-cell">' + smBullet_(pct, frc, 5, 200) + '<span class="sm-plan-pct sm-num">' + pct + '%</span></div>'
+          : '<span class="muted" style="font-size:11px">без плана</span>') + '</td>' +
+      '</tr>';
+      // Разворот «что добавилось сегодня» - тот же контракт, что в старом виде.
+      if (mgrTodayVisible && mgrTodayKey === m.name) {
+        var list = m.today_new_list || [];
+        t += '<tr id="mgr-today-row"><td colspan="7" style="background:rgba(var(--ink),0.03);padding:10px 14px;border-top:1px dashed var(--border)">' +
+          '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">' +
+            '<div style="font-size:12px;font-weight:600">Что добавилось сегодня</div>' +
+            '<div class="muted" style="font-size:11px">' + list.length + ' ' + (list.length === 1 ? 'заказ' : 'заказов') + ' · ' + smFmt_(m.today_new_amount || 0) + '</div>' +
+          '</div>' +
+          (list.length
+            ? '<table style="width:100%;font-size:12px;border-collapse:collapse">' + list.map(function (x) {
+                return '<tr><td style="padding:2px 10px 2px 0;color:var(--muted)">' + (x.id || '—') + '</td>' +
+                  '<td style="padding:2px 10px 2px 0">' + String(x.customer || '').substring(0, 50) + '</td>' +
+                  '<td class="num" style="padding:2px 0">' + smNum_(smFmt_(x.amount || 0)) + '</td></tr>';
+              }).join('') + '</table>'
+            : '<div class="muted" style="font-size:12px">Нет данных</div>') +
+        '</td></tr>';
+      }
+    });
+    if (plan) {
+      var dPct = Math.round(st.amount / plan * 100);
+      var dFrc = Math.round((st.amountY || st.amount) * pace / plan * 100);
+      t += '<tr style="border-top:1px solid var(--border)">' +
+        '<td style="font-size:12px;color:var(--muted)">Итого отдела</td>' +
+        '<td class="num">' + smNum_(String(st.orders), '', 'font-weight:600') + '</td>' +
+        '<td class="num">' + smNum_(smFmt_(st.amount), '', 'font-weight:600') + '</td>' +
+        '<td class="num">' + smNum_(smFmt_(st.payment), '', 'font-weight:600') + '</td>' +
+        '<td class="num">' + smNum_(smFmt_(st.profit), '', 'font-weight:600' + (st.profit < 0 ? ';color:var(--red)' : '')) + '</td>' +
+        '<td class="num muted">—</td>' +
+        '<td><div class="sm-plan-cell">' + smBullet_(dPct, dFrc, 5, 240) + '<span class="sm-plan-pct sm-num">' + dPct + '%</span></div></td>' +
+      '</tr>';
+    }
+    t += '</tbody></table></div></div>';
+    return t;
+  }
+
+  var depts = '';
+  DEPT_CFG.forEach(function (cfg, i) {
+    if (!stats[i].orders) return;
+    var rows = [];
+    cfg.members.forEach(function (sur) {
+      var m = get(sur);
+      if (!m && sur !== cfg.head) return;
+      rows.push({ m: m, sur: sur, isHead: (sur === cfg.head), plan: planOf(sur) });
+    });
+    var list = cfg.solo ? '' : cfg.members.filter(function (s) { return s !== cfg.head && get(s); }).join(' · ');
+    depts += mgrTable(cfg.name, rows, list, stats[i], stats[i].plan, cfg.solo ? 'выручка' : null);
+  });
+  // Дирекция рисуется ВСЕГДА, даже когда заказов за месяц нет (тогда строка с прочерками) -
+  // так вёл себя старый вид, и редизайн не должен молча убирать блок со страницы.
+  var tsM = get('цуцурин');
+  depts += mgrTable('Дирекция', [{ m: tsM, sur: 'Цуцурин', isHead: false, plan: 0 }], '',
+    { amount: (tsM && tsM.amount) || 0, amountY: (tsM && tsM.amount) || 0, payment: (tsM && tsM.payment) || 0,
+      profit: (tsM && tsM.profit) || 0, orders: (tsM && tsM.orders) || 0 },
+    0, 'выручка');
+
+  var page_ = document.getElementById('page-sales-mgr');
+  // Спектакль входа - один раз за сессию (ГОСТ раздел 5: повторный визит без него).
+  if (page_) page_.classList.toggle('sm-enter-bars', !smEntryPlayed_);
+  document.getElementById('sales-mgr-kpi').innerHTML = h;
+  document.getElementById('sales-mgr-depts').innerHTML = depts + smSwitchHtml_('gost');
+
+  smEntryPlayed_ = true;
+  // Курсорный свет - обязателен на каждой странице (ГОСТ раздел 7), движок один на проект.
+  if (typeof initCursorLight_ === 'function') initCursorLight_('page-sales-mgr', 'p2-light');
+}
+
+function smSwitchHtml_(cur) {
+  return '<div class="sm-viewswitch">' +
+    (cur === 'gost'
+      ? '<button type="button" onclick="smSetView_(\'legacy\')" title="Вернуть страницу к виду до 10.09.2026">Классический вид</button>'
+      : '<button type="button" onclick="smSetView_(\'gost\')" title="Вид по ГОСТу (10.09.2026)">Новый вид</button>') +
+  '</div>';
+}
+
+// Диспетчер: наружу по-прежнему один renderSalesMgr(), внутри - выбор вида.
+function renderSalesMgr() {
+  if (!D || !D.orders) return;
+  if (smView_() === 'legacy') {
+    renderSalesMgrLegacy_();
+    var box = document.getElementById('sales-mgr-depts');
+    if (box) box.insertAdjacentHTML('beforeend', smSwitchHtml_('legacy'));
+    return;
+  }
+  var allMgrs = D.orders.by_manager || [];
+  if (!allMgrs.length) {
+    document.getElementById('sales-mgr-kpi').innerHTML = '<p style="color:var(--muted);padding:16px">Нет данных</p>';
+    document.getElementById('sales-mgr-depts').innerHTML = '';
+    return;
+  }
+  renderSalesMgrGost_();
+}
+
 
 // Формула зарплаты менеджера - общая для вкладки "Зарплата" и личной страницы.
 function okladByRev(rev) {

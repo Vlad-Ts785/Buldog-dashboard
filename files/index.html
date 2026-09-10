@@ -5507,9 +5507,23 @@ function swapAdr(){
     routeAll();
 }
 
+// Керченский мост (материк <-> Крым) закрыт для грузового транспорта (Влад, 10.09).
+// OSRM об этом ограничении не знает и как кратчайший путь всегда поведёт через мост -
+// хардкодим объезд через Мариуполь (реальный сухопутный коридор для фур), вставляя его
+// промежуточной точкой в запрос, если РОВНО одна из двух точек плеча лежит в Крыму.
+// Бокс Крыма: полуостров целиком, включая Керчь у самого моста; восточная граница
+// (36.60) специально не доходит до тамбовской/таманской стороны моста (материк) -
+// у обеих берегов пролива долгота почти совпадает (мост ~19 км), поэтому граница по
+// долготе - единственный надёжный признак "какой это берег".
+var MARIUPOL_VIA_ = { lat: 47.0951, lng: 37.5413 };
+function inCrimea_(p) { return p.lat >= 44.35 && p.lat <= 46.20 && p.lng >= 32.40 && p.lng <= 36.60; }
+function crimeaBridgeDetour_(a, b) { return (inCrimea_(a) !== inCrimea_(b)) ? [a, MARIUPOL_VIA_, b] : null; }
+
 // ===== OSRM ДЛЯ ТРЁХ СЕГМЕНТОВ =====
 async function osrmRoute(c1, c2, callback) {
-    var url = 'https://router.project-osrm.org/route/v1/driving/'+c1.lng+','+c1.lat+';'+c2.lng+','+c2.lat+'?overview=full&geometries=geojson';
+    var pts = crimeaBridgeDetour_(c1, c2) || [c1, c2];
+    var coordStr = pts.map(function(p){ return p.lng+','+p.lat; }).join(';');
+    var url = 'https://router.project-osrm.org/route/v1/driving/'+coordStr+'?overview=full&geometries=geojson';
     try {
         var r = await fetch(url), d = await r.json();
         if (d.code !== 'Ok' || !d.routes || !d.routes[0]) {
@@ -23025,6 +23039,18 @@ var CRM = (function () {
       '<div class="dr-field"><label>Сумма, ₽</label><input class="dr-input mono" id="dr-amount" type="number" min="0" step="1000" autocomplete="off" value="' + (Number(d.amount) || '') + '" placeholder="0" onblur="CRM.saveMain(' + d.id + ')"></div>' +
       '<div class="dr-field"><label>Номер заказа 1С</label><input class="dr-input mono" id="dr-order" autocomplete="off" value="' + esc(d.order_1c_number || '') + '" onblur="CRM.saveMain(' + d.id + ')"></div></div></div>';
 
+    // Допродажи (10.09, Влад: "первая продажа и допродажи, в течение месяца") - ТОЛЬКО
+    // показ (его выбор), не влияет на сумму/зарплату. Видно, только если реально есть
+    // хотя бы один последующий заказ в 1С у того же клиента - пустой блок "0 допродаж"
+    // на КАЖДОЙ сделке был бы шумом, тот же принцип, что у "Заявка обновлена" выше.
+    var ups = data.upsells;
+    var upsells$ = (ups && ups.orders && ups.orders.length) ? '<div class="dr-section"><div class="dr-label">Допродажи за 30 дней</div>' +
+      '<div class="crm-transcript" style="margin-top:0">' +
+      '<p style="margin:0 0 8px"><b>' + ups.orders.length + '</b> ' + (ups.orders.length === 1 ? 'заказ' : ups.orders.length < 5 ? 'заказа' : 'заказов') +
+        ' на <b>' + money(ups.total_amount) + '</b> - тот же клиент (' + esc(ups.customer) + ') после первого заказа ' + fmtDateRu(String(ups.first_order_date).slice(0, 10)) + '</p>' +
+      ups.orders.map(function (o) { return '<div class="crm-tr-line">№' + esc(o.order_number) + ' от ' + fmtDateRu(String(o.date).slice(0, 10)) + ' · ' + money(o.amount) + (o.manager ? ' · ' + esc(o.manager) : '') + '</div>'; }).join('') +
+      '</div></div>' : '';
+
     // Цвет чипа - тот же avatarColor_(extension), что у кружка с инициалами на плитке
     // канбана (Влад 09.09: "цвета менеджерам присвой как цвета кружков на плитке") -
     // узнаётся с одного взгляда, не гадать заново по имени.
@@ -23049,7 +23075,7 @@ var CRM = (function () {
     var timeline = '<div class="dr-section"><div class="dr-label">История <span class="aux">' + ((data.calls || []).length + (data.messages || []).length) + '</span></div>' + timelineHtml(data) + '</div>';
     var other = (data.other_deals || []).length ? '<div class="dr-section"><div class="dr-label">Другие сделки клиента</div>' + data.other_deals.map(function (o) { var os = STAGE_BY[o.stage] || {}; return '<div class="dr-row"><span><span class="kb-stage-dot" style="--stage:' + (os.color || 'var(--muted)') + ';display:inline-block;margin-right:6px"></span>' + esc(os.label || o.stage) + (o.loss_reason ? ' · ' + esc(o.loss_reason) : '') + '</span><span class="mono">' + (Number(o.amount) ? money(o.amount) : '—') + ' · ' + fmtDT(o.created_at) + '</span></div>'; }).join('') + '</div>' : '';
 
-    dr.innerHTML = head + '<div class="crm-drawer-body">' + stages + money$ + brief + resp + contact + actions + timeline + other + '</div>';
+    dr.innerHTML = head + '<div class="crm-drawer-body">' + stages + money$ + upsells$ + brief + resp + contact + actions + timeline + other + '</div>';
     if (opts.lost) { var f = el('dr-lost-reason'); if (f) setTimeout(function () { f.focus(); }, 380); }
   }
   function timelineHtml(data) {

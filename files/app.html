@@ -35,8 +35,12 @@
 // вручную), не через значок приложения - значок нужен со ВТОРОГО открытия и дальше.
 try {
   var role = localStorage.getItem('user_role') || '';
-  var optOut = sessionStorage.getItem('plan_m_optout') === '1'; // «Полная версия дашборда» в «Ещё» на plan-m.html - разовый выбор на сессию, не навсегда
-  var narrowTouch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches && window.innerWidth <= 680; // тот же порог 680px, что lpIsMobileViewport_ в index.html
+  var optOut = false; // исключений нет (Влад, 06.09): старый мобильный вид Планировки больше никому не показываем
+  // «Телефон» - по сенсору, не по ширине (06.09, раскладушка Васина шире 680px и «версия для
+  // компьютера» в браузере Сильчева обходили порог): основной ввод палец И нет hover - телефон/
+  // планшет при любой ширине; узкий экран с coarse - страховка. То же правило в index.html (showPage).
+  var mm = window.matchMedia;
+  var narrowTouch = mm ? ((mm('(pointer: coarse)').matches && mm('(hover: none)').matches) || (mm('(pointer: coarse)').matches && window.innerWidth <= 680)) : (window.innerWidth <= 680);
   if (localStorage.getItem('driver_token')) {
     location.replace('driver.html');
   } else if (!optOut && narrowTouch && (role === 'logist' || role === 'manager' || role === 'admin')) {

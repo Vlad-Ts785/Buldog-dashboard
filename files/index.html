@@ -9640,12 +9640,14 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
   el.innerHTML = html;
 }
 
-// Вкладки нового блока личной страницы Рыщанова (2026-08-25, по образцу myPageLogTab).
-// 2026-08-26 (откат по просьбе Влада): вкладка "Техника" убрана целиком, "Водители"
-// переименована в "Загрузка парка" и стала статичной (без сортировки/фильтров) - см.
-// myPageRyschTab==='fleet_load' ниже. Сортировка/фильтры "Техника"/"Водители" (были нужны
-// только этим двум удалённым вкладкам) убраны вместе с ними.
-let myPageRyschTab = 'fleet_load'; // 'fleet_load' | 'hired' | 'no_waybill_drivers' | 'no_waybill_suppliers' | 'no_waybill_logists'
+// Вкладки нижнего блока личной страницы Сильчева/Рыщанова (2026-08-25, по образцу
+// myPageLogTab). 10.09 - редизайн по канону "Ролевая личная страница"
+// (DESIGN_SYSTEM.md раздел 4, клон renderMyPageCommercialHead_ - "как у старших
+// менеджеров", Влад 10.09): "Загрузка парка" переехала из вкладки в главную рабочую
+// таблицу яруса (см. ryschanowFleetLoadHtml_), "Воронка документов" стала вкладкой
+// (была отдельным блоком над вкладками) - тот же приём, что у Ахтамовой/Гусейнвой
+// ("Воронка документов" тоже вкладка, не блок).
+let myPageRyschTab = 'hired'; // 'hired' | 'no_waybill_drivers' | 'no_waybill_suppliers' | 'no_waybill_logists' | 'docs'
 // Зарплата (2026-08-26, Влад: "Отдельная и единственная, вот это все ты должен был понять с
 // первого раза") - НЕ вкладка здесь, а отдельный пункт в левом меню (см. showPage('ryschanow-
 // salary')/ryschanowSalaryCardHtml_ ниже), чтобы не заходить на личную страницу и не
@@ -9655,10 +9657,91 @@ function setMyPageRyschTab(tab) { myPageRyschTab = tab; renderMyPage(); }
 // на бэкенде - см. calcRyschanow во вкладке "Зарплата", то же слагаемое qualMarginAllLogists).
 var RYSCHANOW_ALL_LOGISTS_SUR_FRONT_ = ['васин','кан','махура','сильчев','прус-роскошный','суркова'];
 
-// Личная страница Рыщанова Рустема - руководителя отдела логистики (2026-08-25, см.
-// plans/2026-08-25-ryschanow-personal-page.md). НЕ брокер найма лично (в отличие от
-// renderMyPageLogist) - каркас похож на страницу Пруса (ИИ-задачи/полоска/зарплата/вкладки),
-// но данные компанейские (все логисты, весь парк), а не по одному человеку.
+// Три плитки руководителя отдела логистики (10.09, редизайн по канону) - клон
+// mpHeadStatsHtml_ (та же функция кормит страницу Ахтамовой/Гусейнвой), метрики свои под
+// логистику - продаж/выручки на человека тут нет, зато есть документы/наём/путевые.
+function ryschanowStatsHtml_(docPct, docComplete, docTotal, hiredMargin, hiredMarginPct, noWaybillTotal) {
+  function cell(tab, color, cap, val, layers, subHtml, pct) {
+    return '<div class="mp-stat" onclick="setMyPageRyschTab(\''+tab+'\');mpScrollToTabs_()" title="Открыть вкладку">'+
+      '<div class="mp-stat__cap"><span class="mp-stat__dot" style="background:'+color+'"></span>'+cap+
+        '<span class="mp-stat__chev">›</span></div>'+
+      '<div class="mp-stat__val">'+val+'</div>'+
+      ((layers && layers.length) ? '<div class="mp-stat__layers">'+layers.map(function(L){
+        return '<div class="mp-stat__week'+(L.live?' mp-stat__week--live':'')+'">'+
+          '<span class="mp-stat__week-cap">'+L.cap+'</span>'+
+          '<span class="mp-stat__week-val"'+(L.style?' style="'+L.style+'"':'')+'>'+(L.raw != null ? L.raw : pageFr_(L.val))+'</span></div>';
+      }).join('')+'</div>' : '')+
+      '<div class="mp-stat__foot"><div class="mp-stat__sub">'+subHtml+'</div>'+
+        '<div class="mp-stat__bar"><div class="mp-stat__fill" style="width:'+pct.toFixed(1)+'%;background:'+color+'"></div></div>'+
+      '</div></div>';
+  }
+  return '<div class="mp-stats mp-cell-stats">'+
+    cell('docs', PAGE_COL.green, 'Документы готово', docPct+'%',
+      [{cap:'готово', raw:String(docComplete)}, {cap:'всего', raw:String(docTotal)}],
+      docTotal>0 ? '<b>'+docComplete+'</b> из '+docTotal+' за месяц' : 'нет данных за месяц', docPct)+
+    cell('hired', PAGE_COL.blue, 'Маржа найма', pageFr_(hiredMargin),
+      [{cap:'маржа', raw:hiredMarginPct+'%'}],
+      hiredMarginPct>0 ? '<b>'+hiredMarginPct+'%</b> от выручки найма' : 'нет найма за месяц', hiredMarginPct)+
+    cell('no_waybill_logists', PAGE_COL.amber, 'Путевые не сданы', String(noWaybillTotal),
+      null,
+      noWaybillTotal>0 ? 'по всем логистам вместе' : 'все путевые сданы ✅', noWaybillTotal>0?100:0)+
+  '</div>';
+}
+
+// "Загрузка парка" - главная рабочая таблица яруса (10.09, редизайн - была отдельной
+// вкладкой, канон "Ролевая личная страница" ставит основную таблицу в ярус, не под вкладки).
+// Логика без изменений (2026-08-26): статично, без сортировки/фильтров, только машины,
+// требующие внимания, порядок по приоритету действия (сначала "Загрузить срочно").
+function ryschanowFleetLoadHtml_(vehicles, paceRatio) {
+  var flIsLive = isLiveMonthKey_((D.orders||{}).period);
+  var flPaceRatio = flIsLive ? paceRatio : 1;
+  var flOrderIdx = { orange: 0, amber: 1, red: 2 };
+  var flRows = [];
+  vehicles.forEach(function(v) {
+    if (!(v.plan > 0)) return;
+    var forecast = (v.profit||0) * flPaceRatio;
+    var forecastPct = forecast / v.plan * 100;
+    var status = driverForecastStatus_(forecastPct);
+    if (status.cls !== 'orange' && status.cls !== 'amber' && status.cls !== 'red') return;
+    if (status.cls === 'red' && forecastPct <= 5) return;
+    flRows.push({ v: v, forecast: forecast, forecastPct: forecastPct, status: status });
+  });
+  flRows.sort(function(a, b) {
+    var g = flOrderIdx[a.status.cls] - flOrderIdx[b.status.cls];
+    return g !== 0 ? g : a.forecastPct - b.forecastPct;
+  });
+  var body;
+  if (!flRows.length) {
+    body = '<div class="mech-empty">Все машины идут по плану ✅</div>';
+  } else {
+    var flBodyRows = flRows.map(function(x) {
+      var v = x.v;
+      return '<tr>'+
+        '<td class="muted" style="font-size:12px">'+(v.gos||'—')+'</td>'+
+        '<td>'+(v.marka||'—')+'</td>'+
+        '<td class="muted">'+(v.driver||'—')+'</td>'+
+        '<td class="num">'+fmtK2(v.plan||0)+'</td>'+
+        '<td class="num">'+fmtK2(v.profit||0)+'</td>'+
+        '<td class="num '+x.status.cls+'"><b>'+fmtK2(x.forecast)+'</b> <span class="muted">('+x.forecastPct.toFixed(0)+'%)</span></td>'+
+        '<td><span class="badge '+x.status.cls+'">'+x.status.label+'</span></td>'+
+      '</tr>';
+    }).join('');
+    body = '<div style="overflow-x:auto"><table class="tbl">'+
+      '<thead><tr><th>Госномер</th><th>Марка</th><th>Водитель</th><th class="num">План</th><th class="num">Факт</th><th class="num">Прогноз</th><th>Оценка</th></tr></thead>'+
+      '<tbody>'+flBodyRows+'</tbody></table></div>';
+  }
+  return '<div class="card mp-cell-salary"><div class="card-title" style="display:flex;justify-content:space-between;align-items:center">'+
+      '<span>Загрузка парка</span><span class="mp-tasks__count">'+flRows.length+' требуют внимания</span></div>'+
+    body + '</div>';
+}
+
+// Личная страница Сильчева (и.о. руководителя отдела логистики, до 01.09 - Рыщанов Рустем,
+// см. plans/2026-09-10-ryschanow-to-silchev-handoff.md) - НЕ брокер найма лично (в отличие
+// от renderMyPageLogist), данные компанейские (все логисты, весь парк), а не по одному
+// человеку. 10.09 - редизайн по канону "Ролевая личная страница" (DESIGN_SYSTEM.md раздел 4),
+// клон renderMyPageCommercialHead_ (та же анатомия: вердикт-полоса -> ярус 5fr/7fr
+// план/плитки/ИИ-задачи/главная таблица -> вкладки снизу), а не "страница Пруса", как было
+// изначально (тот шаблон устарел раньше, чем появился канон).
 // Self-login - D.orders.ryschanow_summary приходит "бесплатно" (buildLogistView_ на бэкенде).
 // Admin-предпросмотр - те же данные уже лежат в D.orders/D.summary/D.vehicles/D.drivers
 // напрямую (admin видит всё), ryschanow_summary для него не нужен.
@@ -9690,28 +9773,40 @@ function renderMyPageRyschanow(el, current, selectorHtml, d) {
   var gpPct = gpPlan > 0 ? (grossProfit / gpPlan * 100) : 0;
   var gpForecast = grossProfit * paceRatio;
   var gpForecastPct = gpPlan > 0 ? (gpForecast / gpPlan * 100) : 0;
-  var gpDayRateHtml = '';
+  // "Сколько нужно в день, чтобы догнать" - тот же приём (рабочий/выходной с весом), что у
+  // руководителя коммерческой группы (renderMyPageCommercialHead_, 10.09 - клонировано для
+  // канона "Ролевая личная страница") - gpDayNums нужен ДВАЖДЫ: как HTML внутрь
+  // planProgressBar и как сырые числа в mpStatusStripHtml_ (рычаг вердикт-полосы).
+  var gpDayRateHtml = '', gpDayNums = null;
   if (gpPlan > 0 && isLiveMonthKey_((D.orders||{}).period)) {
     var gpRemaining = gpPlan - grossProfit;
     if (gpRemaining > 0) {
-      var gpNowD = new Date();
-      var gpDaysInMonth = new Date(gpNowD.getFullYear(), gpNowD.getMonth()+1, 0).getDate();
-      var gpRemDays = Math.max(0, gpDaysInMonth - gpNowD.getDate());
-      if (gpRemDays > 0) {
-        gpDayRateHtml = '<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(var(--ink),.07);font-size:12px;color:var(--muted)">'+
-          'Чтобы выполнить план по ВП, нужно добирать в среднем: <b style="color:var(--text)">'+mln(gpRemaining/gpRemDays)+'</b> в день'+
-          ' <span style="opacity:.7">(осталось '+gpRemDays+' дней)</span>'+
-        '</div>';
+      var gpNowD = new Date(), gpDaysInMonth = new Date(gpNowD.getFullYear(), gpNowD.getMonth()+1, 0).getDate();
+      var gpRW = 0, gpRWk = 0;
+      for (var gd = gpNowD.getDate()+1; gd <= gpDaysInMonth; gd++) {
+        var gDow = new Date(gpNowD.getFullYear(), gpNowD.getMonth(), gd).getDay();
+        if (gDow === 0 || gDow === 6) gpRWk++; else gpRW++;
+      }
+      var gpWR = weekendRatio_(), gpDen = gpRW + gpRWk*gpWR;
+      if (gpDen > 0) {
+        var gpPerWD = gpRemaining/gpDen, gpPerWk = gpPerWD*gpWR;
+        gpDayNums = { perWorkday: gpPerWD, perWeekend: gpPerWk };
+        gpDayRateHtml = '<div class="mp-dashed"><div class="mp-dashed__c">Чтобы догнать</div>'+
+          '<div class="mp-dashed__t">В среднем <b>'+mln(gpPerWD)+'</b> в рабочий день'+
+          (gpRWk>0 ? ' и <b>'+mln(gpPerWk)+'</b> в выходной (объём в выходной ниже)' : '')+
+          ' — осталось '+gpRW+' раб. + '+gpRWk+' вых. дней.</div></div>';
       }
     } else {
-      gpDayRateHtml = '<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(var(--ink),.07);font-size:12px;color:'+COL.green+'">План по валовой прибыли уже выполнен ✅</div>';
+      gpDayRateHtml = '<div class="mp-dashed"><div class="mp-dashed__t" style="color:'+COL.green+'">План по валовой прибыли уже выполнен</div></div>';
     }
   }
 
   // "Воронка документов" (2026-08-25, Влад: "под зарплатой добавь") - тот же company-wide
   // doc_by_decade, что и "Обзор заказов" (sales-doc-decades), тот же формат таблицы (2-строчная
-  // шапка, разбивка "Нет путёвки" на свой парк/наёмный по дням-декадам).
-  var docFunnelBody;
+  // шапка, разбивка "Нет путёвки" на свой парк/наёмный по дням-декадам). 10.09 - переехала из
+  // отдельного блока над вкладками В саму вкладку (канон commercial-head: "Воронка
+  // документов" тоже вкладка, не отдельный блок).
+  var docFunnelBody, docTotal = 0, docComplete = 0;
   if (!docByDecade.length) {
     docFunnelBody = '<div style="font-size:13px;color:var(--muted);padding:8px 0">Нет данных за этот месяц.</div>';
   } else {
@@ -9734,6 +9829,7 @@ function renderMyPageRyschanow(el, current, selectorHtml, d) {
       var nwHired = dec.no_waybill_hired != null ? dec.no_waybill_hired : 0;
       var tot = nwOwn + nwHired + (dec.waybill_not_posted||0) + (dec.posted_no_realiz||0) + (dec.complete||0);
       var okPct = tot > 0 ? Math.round(dec.complete/tot*100) : 0;
+      docTotal += tot; docComplete += (dec.complete||0);
       decHtml += '<tr>'+
         '<td><b>'+dec.label+'</b></td>'+
         '<td class="num red">'+(nwOwn||'—')+'</td>'+
@@ -9747,96 +9843,57 @@ function renderMyPageRyschanow(el, current, selectorHtml, d) {
     decHtml += '</tbody></table>';
     docFunnelBody = '<div style="overflow-x:auto">'+decHtml+'</div>';
   }
+  var docPct = docTotal > 0 ? Math.round(docComplete/docTotal*100) : 0;
 
+  // Наёмная техника - итоги нужны и плитке (ryschanowStatsHtml_), и вкладке - считаем один
+  // раз здесь, а не дважды (как было бы, если оставить внутри if-ветки вкладки).
+  var totalRevenueH = hiredSuppliers.reduce(function(s,x){ return s+(x.revenue||0); }, 0);
+  var totalCostH    = hiredSuppliers.reduce(function(s,x){ return s+(x.cost||0); }, 0);
+  var totalExtraH   = hiredSuppliers.reduce(function(s,x){ return s+(x.extra_costs||0); }, 0);
+  var totalMarginH  = hiredSuppliers.reduce(function(s,x){ return s+(x.margin||0); }, 0);
+  var totalOrdersH  = hiredSuppliers.reduce(function(s,x){ return s+(x.orders||0); }, 0);
+  var totalMarginPctH = totalRevenueH > 0 ? Math.round(totalMarginH/totalRevenueH*100) : 0;
+
+  var noWaybillTotal = noWaybillLogists.reduce(function(s,l){ return s + (l.no_waybill_total||0); }, 0);
+
+  // ── Канон "Ролевая личная страница" (DESIGN_SYSTEM.md раздел 4, клон
+  // renderMyPageCommercialHead_, 10.09) - вердикт-полоса -> ярус 5fr/7fr (план/плитки/ИИ-
+  // задачи/главная таблица) -> вкладки снизу. Расчёт зарплаты НЕ здесь (2026-08-25, Влад:
+  // "убери его с этой страницы") - живёт в отдельной вкладке "Зарплата"
+  // (renderRyschanowDeptCardHtml_), включая самого руководителя и весь отдел.
   var html = selectorHtml;
-  html += renderAiTasksBlockHtml_(current, 'ryschanow');
-  html += planProgressBar('Валовая прибыль своего парка', gpPct, gpForecastPct, grossProfit, gpForecast, gpPlan, gpDayRateHtml);
-  // Расчёт зарплаты убран со страницы (2026-08-25, Влад: "убери его с этой страницы и
-  // перенеси туда, где у меня есть отдельная вкладка Зарплаты") - там уже есть полная
-  // детальная таблица "Отдел Рыщанова" (calcRyschanow), включая его самого и весь отдел -
-  // дублировать здесь не нужно, дальше только оперативные данные отдела.
-  html += block('📋 Воронка документов', docFunnelBody);
-  // 4 маленьких KPI-карточки (Заказов по найму/Маржа найма/Документы/Общая маржинальность,
-  // все "вся компания") убраны целиком (2026-08-26, Влад: "четыре блока маленьких на
-  // скриншоте убери вообще с этой страницы") - дублировали то, что уже видно во вкладке
-  // "Наёмная техника" ниже (итоговая строка таблицы).
+  html += mpStatusStripHtml_(gpPlan, grossProfit, gpForecast, gpDayNums,
+    { leverCap: 'Отделу нужно сегодня', prefix: 'Отдел: ', planTail: true });
 
-  // Единый блок с вкладками (2026-08-26, откат по просьбе Влада: вкладка "Техника" убрана,
-  // "Водители" стала статичной "Загрузка парка" без сортировки/фильтров).
-  html += '<div class="card" style="margin-bottom:16px">';
+  html += '<div class="mp-tier">';
+  if (gpPlan > 0) {
+    html += planProgressBar('Валовая прибыль своего парка', gpPct, gpForecastPct, grossProfit, gpForecast, gpPlan, gpDayRateHtml);
+  } else {
+    html += '<div class="card mp-cell-plan"><div class="card-title">Валовая прибыль своего парка</div>'+
+      '<div style="font-size:13px;color:var(--muted)">Плана на этот месяц в таблице нет</div></div>';
+  }
+  html += ryschanowStatsHtml_(docPct, docComplete, docTotal, totalMarginH, totalMarginPctH, noWaybillTotal);
+  html += renderAiTasksBlockHtml_(current, 'ryschanow');
+  html += ryschanowFleetLoadHtml_(vehicles, paceRatio);
+  html += '</div>';
+
+  // Вкладки снизу (10.09 - "Загрузка парка" переехала в ярус выше, "Воронка документов"
+  // стала вкладкой вместо отдельного блока - см. коммент у myPageRyschTab).
+  html += '<div class="card" id="mp-tabs-card" style="margin-bottom:16px">';
   html += '<div class="tab-bar">'+
-    '<button class="tab-btn'+(myPageRyschTab==='fleet_load'?' active':'')+'" onclick="setMyPageRyschTab(\'fleet_load\')">🚦 Загрузка парка</button>'+
-    '<button class="tab-btn'+(myPageRyschTab==='hired'?' active':'')+'" onclick="setMyPageRyschTab(\'hired\')">🏭 Наёмная техника</button>'+
-    '<button class="tab-btn'+(myPageRyschTab==='no_waybill_drivers'?' active':'')+'" onclick="setMyPageRyschTab(\'no_waybill_drivers\')">📋 Не сданные путевые (свои)</button>'+
-    '<button class="tab-btn'+(myPageRyschTab==='no_waybill_suppliers'?' active':'')+'" onclick="setMyPageRyschTab(\'no_waybill_suppliers\')">📋 Топ поставщиков без путевых</button>'+
-    '<button class="tab-btn'+(myPageRyschTab==='no_waybill_logists'?' active':'')+'" onclick="setMyPageRyschTab(\'no_waybill_logists\')">📋 Топ логистов с несданными путевыми</button>'+
+    '<button class="tab-btn'+(myPageRyschTab==='hired'?' active':'')+'" onclick="setMyPageRyschTab(\'hired\')">Наёмная техника</button>'+
+    '<button class="tab-btn'+(myPageRyschTab==='no_waybill_drivers'?' active':'')+'" onclick="setMyPageRyschTab(\'no_waybill_drivers\')">Не сданные путевые (свои)</button>'+
+    '<button class="tab-btn'+(myPageRyschTab==='no_waybill_suppliers'?' active':'')+'" onclick="setMyPageRyschTab(\'no_waybill_suppliers\')">Топ поставщиков без путевых</button>'+
+    '<button class="tab-btn'+(myPageRyschTab==='no_waybill_logists'?' active':'')+'" onclick="setMyPageRyschTab(\'no_waybill_logists\')">Топ логистов с несданными путевыми</button>'+
+    '<button class="tab-btn'+(myPageRyschTab==='docs'?' active':'')+'" onclick="setMyPageRyschTab(\'docs\')">Воронка документов</button>'+
   '</div>';
 
-  if (myPageRyschTab === 'fleet_load') {
-    // "Загрузка парка" (2026-08-26, заменила "Водители" по просьбе Влада) - статично, без
-    // фильтров/сортировки, только машины, требующие внимания. Прогноз по каждой машине -
-    // тот же приём, что уже на личной странице Васина (vehiclesF выше в файле) и на странице
-    // "Водители" (driverForecastStatus_): forecast = profit * paceRatio текущего месяца.
-    // Машины "Идёт по плану" (>=100%) и "Нет плана" (план не задан) не показываем - страница
-    // только про то, что требует действия. ОДИН общий список (2026-08-26, Влад: "убери эти
-    // нелепые кружки и сделай всё одним списком" - раньше было 3 отдельные таблицы с
-    // заголовками-кружками), статус - колонкой "Оценка" в каждой строке, тем же бейджем
-    // (class="badge"), что уже на странице "Водители". Порядок строк - НЕ по тяжести статуса,
-    // а по приоритету действия (Влад, 2026-08-26): сначала "Загрузить срочно" (обычно пустой
-    // порожняк, самое срочное), потом "Добавить заказов" (можно распланировать заранее), и
-    // только в самом низу "Простой — разобраться" (расследование причины, не разовое
-    // действие); внутри своей группы - худшие (ближе к 0%) первыми.
-    var flIsLive = isLiveMonthKey_((D.orders||{}).period);
-    var flPaceRatio = flIsLive ? paceRatio : 1;
-    var flOrderIdx = { orange: 0, amber: 1, red: 2 };
-    var flRows = [];
-    vehicles.forEach(function(v) {
-      if (!(v.plan > 0)) return; // "Нет плана" - не показываем, действия не требует
-      var forecast = (v.profit||0) * flPaceRatio;
-      var forecastPct = forecast / v.plan * 100;
-      var status = driverForecastStatus_(forecastPct);
-      if (status.cls !== 'orange' && status.cls !== 'amber' && status.cls !== 'red') return; // "Идёт по плану" - пропускаем
-      // "Простой — разобраться" (2026-08-26, Влад: "больше 5% - это правило должно быть") -
-      // машина на нуле/в минусе (прогноз <=5% от плана) значит она либо в глубоком ремонте,
-      // либо вообще без водителя - это НЕ то, что решается заказами/логистикой, отдельная
-      // задача (найм/ремонт), не для этого списка. Показываем только тех в "Простое", кто
-      // УЖЕ что-то зарабатывает (>5%) - там ещё есть, что разгонять заказами.
-      if (status.cls === 'red' && forecastPct <= 5) return;
-      flRows.push({ v: v, forecast: forecast, forecastPct: forecastPct, status: status });
-    });
-    flRows.sort(function(a, b) {
-      var g = flOrderIdx[a.status.cls] - flOrderIdx[b.status.cls];
-      return g !== 0 ? g : a.forecastPct - b.forecastPct;
-    });
-    if (!flRows.length) {
-      html += '<div style="color:var(--green);padding:14px;font-size:13px">Все машины идут по плану ✅</div>';
-    } else {
-      var flBodyRows = flRows.map(function(x) {
-        var v = x.v;
-        return '<tr>'+
-          '<td class="muted" style="font-size:12px">'+(v.gos||'—')+'</td>'+
-          '<td>'+(v.marka||'—')+'</td>'+
-          '<td class="muted">'+(v.driver||'—')+'</td>'+
-          '<td class="num">'+fmtK2(v.plan||0)+'</td>'+
-          '<td class="num">'+fmtK2(v.profit||0)+'</td>'+
-          '<td class="num '+x.status.cls+'"><b>'+fmtK2(x.forecast)+'</b> <span class="muted">('+x.forecastPct.toFixed(0)+'%)</span></td>'+
-          '<td><span class="badge '+x.status.cls+'">'+x.status.label+'</span></td>'+
-        '</tr>';
-      }).join('');
-      html += '<div style="overflow-x:auto"><table class="tbl">'+
-        '<thead><tr><th>Госномер</th><th>Марка</th><th>Водитель</th><th class="num">План</th><th class="num">Факт</th><th class="num">Прогноз</th><th>Оценка</th></tr></thead>'+
-        '<tbody>'+flBodyRows+'</tbody>'+
-      '</table></div>';
-    }
+  if (myPageRyschTab === 'docs') {
+    html += docFunnelBody;
   } else if (myPageRyschTab === 'hired') {
     // "Наёмная техника" - точно как на "Обзоре заказов" (Влад, 2026-08-25) - с колонкой
-    // "Затраты" и визуальной шкалой маржи, та же вёрстка, что уже использует Прус.
-    var totalRevenueH = hiredSuppliers.reduce(function(s,x){ return s+(x.revenue||0); }, 0);
-    var totalCostH    = hiredSuppliers.reduce(function(s,x){ return s+(x.cost||0); }, 0);
-    var totalExtraH   = hiredSuppliers.reduce(function(s,x){ return s+(x.extra_costs||0); }, 0);
-    var totalMarginH  = hiredSuppliers.reduce(function(s,x){ return s+(x.margin||0); }, 0);
-    var totalOrdersH  = hiredSuppliers.reduce(function(s,x){ return s+(x.orders||0); }, 0);
-    var totalMarginPctH = totalRevenueH > 0 ? Math.round(totalMarginH/totalRevenueH*100) : 0;
+    // "Затраты" и визуальной шкалой маржи, та же вёрстка, что уже использует Прус. Итоги
+    // (totalRevenueH и соседи) уже посчитаны выше - нужны и плитке ryschanowStatsHtml_.
     var hireRows = !hiredSuppliers.length
       ? '<tr><td colspan="8" class="muted" style="padding:14px">Нет данных по найму</td></tr>'
       : hiredSuppliers.map(function(sup) {

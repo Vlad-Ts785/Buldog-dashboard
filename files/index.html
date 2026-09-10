@@ -10443,6 +10443,10 @@ var RENDER_GROUPS_ = {
   vehicles: { pages: ['vehicles'],                                     fns: [renderVehiclesTable, renderRepairBlock] },
   directory:{ pages: ['directory'],                                    fns: [renderDirectory] },
   sales:    { pages: ['sales', 'sales-mgr', 'sales-log', 'sales-salary'], fns: [renderSalesTabsForPeriod] },
+  // «Отдел Тралы» (10.09) - своя группа: страница живёт вне периодов («только текущий
+  // месяц») и не входит в sales, но обновляться при приходе свежих данных обязана -
+  // иначе открытая вкладка навсегда застывает на том, что было в момент клика.
+  deptTrals:{ pages: ['dept-trals'],                                   fns: [renderDeptTrals_] },
   myPage:   { pages: ['my-page'],                                      fns: [renderMyPage] },
   debt:     { pages: ['debt'],                                         fns: [renderDebt] },
   receipts: { pages: ['receipts'],                                     fns: [renderReceipts] },
@@ -11006,6 +11010,12 @@ function render() {
     // их. Admin-предпросмотр (viewAsEntry) технически видит полный D, но остальные вкладки тоже
     // не рендерим - они скрыты в сайдбаре (applyRoleUI), рендерить их незачем.
     renderMyPage();
+    // «Отдел Тралы» (10.09): у менеджера render() на этом заканчивался, поэтому открытая
+    // вкладка отдела не обновлялась при приходе свежих данных - человек, кликнувший её
+    // раньше загрузки, оставался с заглушкой навсегда (Влад: «почему-то только у меня
+    // работает, у других не работает»). Рендерим её здесь, если она сейчас открыта.
+    var actDept_ = document.querySelector('.page.active');
+    if (actDept_ && actDept_.id === 'page-dept-trals' && typeof renderDeptTrals_ === 'function') renderDeptTrals_();
     return;
   }
 
@@ -17689,8 +17699,17 @@ function renderDeptTrals_() {
   var o = D && D.orders;
   var rows = (o && (o.dept_all || (D.role === 'admin' ? o.by_manager : null))) || [];
   if (!rows.length) {
-    box.innerHTML = '<div class="card" style="padding:18px 20px;color:var(--muted);font-size:13px">' +
-      'Данные отдела пока не пришли. Обновите страницу через минуту.</div>';
+    // Данных нет ровно в одном случае: вкладка открыта в сессии, начатой ДО того, как
+    // сервер научился отдавать dept_all (10.09) - у человека в памяти старый ответ.
+    // Кнопка перезапрашивает данные, не заставляя искать, что нажать (Влад, 10.09:
+    // «почему-то только у меня работает, у других не работает» - это была ровно та
+    // ситуация: страница у них новая, а данные в памяти ещё старые).
+    box.innerHTML = '<div class="card" style="padding:18px 20px">' +
+      '<div style="font-size:13px;color:var(--muted);margin-bottom:12px">' +
+      'Данные отдела ещё не загружены в этой вкладке.</div>' +
+      '<button type="button" onclick="loadData()" style="background:var(--bg3);border:1px solid var(--border);' +
+      'color:var(--text);border-radius:var(--radius-sm);padding:6px 12px;font-size:12.5px;cursor:pointer;' +
+      'font-family:inherit">Загрузить данные</button></div>';
     document.getElementById('dept-trals-depts').innerHTML = '';
     return;
   }

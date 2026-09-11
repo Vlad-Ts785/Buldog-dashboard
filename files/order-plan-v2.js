@@ -1884,7 +1884,8 @@ function renderForm() {
     '</div></div>' +
 
     '<div class="op2-sect"><div class="op2-t">Что везём</div><div class="op2-grid2">' +
-      '<div class="op2-fld"><label>Груз</label><input id="op2-f-cargo" placeholder="экскаватор JCB 3CX" autocomplete="off" value="' + esc(o ? o.cargo : '') + '"></div>' +
+      '<div class="op2-fld op2-sugg" id="op2-f-cargobox"><label>Груз</label><input id="op2-f-cargo" placeholder="начни вводить: jcb 3, bg 40, морск, быт…" autocomplete="off" value="' + esc(o ? o.cargo : '') + '">' +
+        '<div class="op2-list" id="op2-f-cargolist"></div><span class="op2-hint" id="op2-f-cargo-hint">Подсказки - справочник техники и что уже возили; вес и Д×Ш×В подставятся сами</span></div>' +
       '<div class="op2-fld"><label>Вес, т</label><input id="op2-f-weight" class="op2-mono" inputmode="decimal" placeholder="8" autocomplete="off" value="' + esc(o ? (o.cargo_weight_t || '') : '') + '"></div>' +
       '<div class="op2-fld"><label>Габариты груза</label><input id="op2-f-dims" placeholder="Д × Ш × В" autocomplete="off" value="' + esc(o ? (o.cargo_dims || '') : '') + '"></div>' +
       '<div class="op2-fld"><label>Габарит</label><div class="op2-seg" id="op2-f-gab">' +
@@ -2021,6 +2022,19 @@ function wireForm() {
     tickState();
   });
   $('#op2-f-cust').addEventListener('blur', function () { setTimeout(function () { $('#op2-f-custbox').classList.remove('op2-open'); }, 150); });
+  /* помощник груза: справочник техники + история; выбор заполняет вес, Д×Ш×В, габарит и ставит «проверить» */
+  var cargoT = null;
+  $('#op2-f-cargo').addEventListener('input', function () {
+    tickState();
+    var v = this.value.trim(); clearTimeout(cargoT);
+    if (v.length < 2) { $('#op2-f-cargobox').classList.remove('op2-open'); return; }
+    cargoT = setTimeout(function () { fetchCargo(v); }, 200);
+  });
+  $('#op2-f-cargo').addEventListener('blur', function () { setTimeout(function () { $('#op2-f-cargobox').classList.remove('op2-open'); }, 150); });
+  $('#op2-f-cargolist').addEventListener('mousedown', function (e) {
+    var it = e.target.closest('.op2-it'); if (!it || !it.dataset.name) return;
+    e.preventDefault(); applyCargo(it.dataset);
+  });
 
   /* подсказки адресов из истории заказчика */
   ['from', 'to'].forEach(function (side) {
@@ -2159,6 +2173,46 @@ function saveInn(btn) {
     toast((r.data.existed ? 'Уже в справочнике: ' : 'Сохранено в справочник: ') + '<span class="op2-tick">' + esc(r.data.name || d.name) + '</span> · ИНН ' + esc(d.inn));
     fetchCustomerHistory(fc.value); tickState();
   }).catch(function () { btn.disabled = false; });
+}
+function fetchCargo(q) {
+  apiGet('/orders/cargo', { q: q }).then(function (r) {
+    if (!r || !r.ok || !r.data) return;
+    var items = r.data.items || [], h = '';
+    var cat = items.filter(function (i) { return i.src === 'catalog'; }), his = items.filter(function (i) { return i.src === 'history'; });
+    var row = function (i) {
+      var meta = [i.weight_t ? i.weight_t + ' т' : '', i.dims || ''].filter(Boolean).join(' · ');
+      return '<div class="op2-it" data-name="' + esc(i.name) + '" data-w="' + esc(i.weight_t || '') + '" data-dims="' + esc(i.dims || '') + '" data-l="' + esc(i.length_m || '') + '" data-wd="' + esc(i.width_m || '') + '" data-h="' + esc(i.height_m || '') + '" data-note="' + esc(i.note || '') + '">' +
+        '<span>' + esc(i.name) + (i.category ? ' <span class="op2-dim op2-sm">· ' + esc(i.category) + '</span>' : '') + (i.n ? ' <span class="op2-dim op2-sm">· возили ' + i.n + '×</span>' : '') + '</span><span class="op2-m">' + esc(meta) + '</span></div>';
+    };
+    if (cat.length) h += '<div class="op2-sec">Справочник техники</div>' + cat.map(row).join('');
+    if (his.length) h += '<div class="op2-sec">Уже возили</div>' + his.map(row).join('');
+    if (!h) { $('#op2-f-cargobox').classList.remove('op2-open'); return; }
+    $('#op2-f-cargolist').innerHTML = h;
+    $('#op2-f-cargobox').classList.add('op2-open');
+  }).catch(function () {});
+}
+/* прикидка габарита по транспортным размерам: шире 2,55 м, выше 3,0 м (с площадкой трала > 4 м) или длиннее 12 м - негабарит */
+function guessGabarit(l, w, h) {
+  l = Number(l) || 0; w = Number(w) || 0; h = Number(h) || 0;
+  if (!l && !w && !h) return null;
+  return (w > 2.55 || h > 3.0 || l > 12) ? 'Негабарит' : 'Габарит';
+}
+function applyCargo(d) {
+  var fc = $('#op2-f-cargo'), fw = $('#op2-f-weight'), fd = $('#op2-f-dims'), note = $('#op2-f-note');
+  fc.value = d.name || '';
+  var auto = [];
+  if (d.w && !fw.value.trim()) { fw.value = d.w; auto.push('вес'); }
+  if (d.dims && !fd.value.trim()) { fd.value = d.dims; auto.push('Д×Ш×В'); }
+  var g = guessGabarit(d.l, d.wd, d.h);
+  if (g) { $$('#op2-f-gab .op2-chip').forEach(function (x) { x.classList.toggle('op2-on', x.dataset.gab === g); }); auto.push('габарит'); }
+  if (auto.length) {
+    var tag = 'характеристики груза из справочника - проверить';
+    if (note && note.value.indexOf(tag) < 0) note.value = (note.value.trim() ? note.value.trim() + ' · ' : '') + tag + (d.note ? ' (' + d.note + ')' : '');
+    $('#op2-f-cargo-hint').innerHTML = '<span class="op2-warn">Подставлено из справочника: ' + esc(auto.join(', ')) + ' - проверь</span>' + (d.note ? ' · ' + esc(d.note) : '');
+    S.tickUp();
+  } else { $('#op2-f-cargo-hint').textContent = 'Подставлено: ' + (d.name || ''); }
+  $('#op2-f-cargobox').classList.remove('op2-open');
+  tickState();
 }
 function fetchCustomerHistory(name) {
   if (!name) return;

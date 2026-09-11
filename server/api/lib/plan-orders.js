@@ -772,5 +772,31 @@ module.exports = function (deps) {
     } catch (err) { console.error("orders inn_save:", err); fail(res, 500, String(err.message || err)); }
   });
 
+  // ── Помощник ввода груза (Влад 11.09: «начинаю вводить BG - предлагает Bauer BG 40, jcb 3 - 3CX, морск -
+  // морской контейнер, быт - бытовка; Д×Ш×В и вес - автоматически, но с пометкой проверить»).
+  // Источники: plan_cargo_catalog (Справочники) + история заявок (что уже возили с весом/габаритами).
+  // Поиск: все слова запроса должны встретиться в name|aliases (без регистра, латиница/кириллица через aliases).
+  app.get("/api/orders/cargo", ...gate, async (req, res) => {
+    try {
+      const q = String(req.query.q || "").trim().toLowerCase();
+      if (q.length < 2) return res.json({ items: [] });
+      const words = q.split(/\s+/).filter(Boolean).slice(0, 4);
+      const like = words.map(() => "(LOWER(name) LIKE ? OR LOWER(COALESCE(aliases,'')) LIKE ?)").join(" AND ");
+      const args = []; words.forEach((w) => { args.push("%" + w + "%", "%" + w + "%"); });
+      const [cat] = await pool.query(
+        `SELECT name, aliases, category, length_m, width_m, height_m, weight_t, note FROM plan_cargo_catalog
+          WHERE active = 1 AND ${like} ORDER BY (LOWER(name) LIKE ?) DESC, LENGTH(name) LIMIT 8`, args.concat([q + "%"]));
+      const [hist] = await pool.query(
+        `SELECT cargo, MAX(cargo_weight_t) AS weight_t, MAX(cargo_dims) AS dims, COUNT(*) AS n FROM plan_orders
+          WHERE deleted_at IS NULL AND cargo IS NOT NULL AND LOWER(cargo) LIKE ? GROUP BY cargo ORDER BY n DESC LIMIT 5`, ["%" + q + "%"]);
+      const dims = (r) => (r.length_m && r.width_m && r.height_m) ? [r.length_m, r.width_m, r.height_m].map((x) => String(Number(x)).replace(".", ",")).join(" × ") : null;
+      const items = cat.map((r) => ({ src: "catalog", name: r.name, category: r.category, weight_t: r.weight_t === null ? null : Number(r.weight_t),
+        dims: dims(r), length_m: Number(r.length_m) || null, width_m: Number(r.width_m) || null, height_m: Number(r.height_m) || null, note: r.note }));
+      hist.forEach((h) => { if (!items.some((i) => i.name.toLowerCase() === String(h.cargo).toLowerCase()))
+        items.push({ src: "history", name: h.cargo, n: Number(h.n), weight_t: h.weight_t === null ? null : Number(h.weight_t), dims: h.dims || null }); });
+      res.json({ items });
+    } catch (err) { console.error("orders cargo:", err); fail(res, 500, String(err.message || err)); }
+  });
+
   console.log("plan-orders: эндпоинты /api/orders/* подключены");
 };

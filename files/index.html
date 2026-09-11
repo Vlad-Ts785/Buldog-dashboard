@@ -198,15 +198,87 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .sidebar-collapse-btn svg{width:15px;height:15px;flex-shrink:0;display:block;transition:transform .15s cubic-bezier(0.25,1,0.5,1);}
 .sidebar.collapsed .sidebar-collapse-btn svg{transform:rotate(180deg);}
 .sidebar.collapsed .sidebar-logo-label,
-.sidebar.collapsed .sidebar-logo-text,
 .sidebar.collapsed .sidebar-nav-section-label,
 .sidebar.collapsed .sidebar-nav-section-line,
 .sidebar.collapsed .sidebar-nav-badge,
 .sidebar.collapsed .sidebar-updated,
 .sidebar.collapsed .sidebar-refresh span{display:none;}
-.sidebar.collapsed .sidebar-nav-item{font-size:0;justify-content:center;gap:0;padding:8px 0;}
-.sidebar.collapsed .sidebar-refresh{justify-content:center;padding:7px 0;}
-@media(max-width:900px){ .sidebar-collapse-btn{display:none;} }
+
+/* СВЁРНУТЫЙ ВИД = «рейка» из превью «План задание v2» (Влад, 11.09: «когда
+   сворачиваешь менюшку, должно выглядеть так, как у нас было в превью план задания»).
+   Там это отдельная плавающая карточка на 64px: бренд «ЯРД/HUB» в две строки мелким
+   Unbounded, ниже квадратные кнопки 38x38 с радиусом 9, активная - ступень фона плюс
+   зелёная иконка. Развёрнутый вид не трогаем - он остаётся прежним.
+   --sidebar в этом состоянии 88px = 12 отступ + 64 рейка + 12 отступ (см.
+   toggleSidebarCollapse), поэтому контент не наезжает на карточку. */
+.sidebar.collapsed{
+  width:64px;min-width:64px;
+  top:12px;left:12px;bottom:12px;
+  background:var(--bg2);
+  border:1px solid var(--border);border-radius:12px;
+  overflow:hidden;
+}
+.sidebar.collapsed .sidebar-logo{
+  padding:12px 0 8px;border-bottom:0;
+}
+.sidebar.collapsed .sidebar-logo-row{flex-direction:column;align-items:center;gap:8px;}
+.sidebar.collapsed .sidebar-logo-text{
+  font-size:11px;font-weight:600;line-height:1.1;text-align:center;letter-spacing:0;
+}
+/* «HUB» уходит на вторую строку - в 64px две части бренда рядом не помещаются */
+.sidebar.collapsed .sidebar-logo-text b{display:block;}
+.sidebar.collapsed .sidebar-collapse-btn{width:28px;height:28px;border-radius:8px;}
+.sidebar.collapsed .sidebar-nav{padding:6px 0;display:flex;flex-direction:column;align-items:center;gap:6px;}
+/* Секция в свёрнутом виде - только hairline вместо капс-лейбла: групп в дашборде
+   много, без разделителя иконки читаются одной кашей (в превью пунктов было четыре). */
+.sidebar.collapsed .sidebar-nav-section{
+  flex:none;margin:5px 0;padding:0;height:1px;width:22px;background:var(--border);
+}
+.sidebar.collapsed .sidebar-nav-item{
+  font-size:0;gap:0;padding:0;margin:0;
+  width:38px;height:38px;min-height:38px;flex:none; /* flex:none - иначе колонка сжимает кнопки по высоте */
+  border-radius:9px;
+  justify-content:center;align-items:center;
+}
+.sidebar.collapsed .sidebar-bottom{padding:8px 0 10px;display:flex;flex-direction:column;align-items:center;gap:6px;}
+.sidebar.collapsed .sidebar-refresh{
+  width:38px;height:38px;min-width:38px;flex:none;padding:0;border-radius:9px;
+  justify-content:center;gap:0;margin:0 !important; /* margin-top в разметке задан инлайном */
+}
+.sidebar.collapsed .sidebar-nav::-webkit-scrollbar{width:0;}
+.sidebar.collapsed .sidebar-nav{scrollbar-width:none;}
+@media(max-width:900px){
+  .sidebar-collapse-btn{display:none;}
+  /* На телефоне меню и так выезжает поверх контента, а кнопки сворачивания нет - если
+     состояние «свёрнуто» осталось в localStorage с компьютера, рейка залипала узкой
+     полосой поверх страницы. Здесь она разворачивается обратно в обычное меню. */
+  .sidebar.collapsed{
+    width:220px;min-width:220px;top:0;left:0;bottom:0;
+    border:0;border-right:1px solid var(--border);border-radius:0;
+  }
+  .sidebar.collapsed .sidebar-logo{padding:20px 18px 16px;border-bottom:1px solid var(--border);}
+  .sidebar.collapsed .sidebar-logo-row{flex-direction:row;align-items:flex-start;}
+  .sidebar.collapsed .sidebar-logo-text{font-size:19px;line-height:1.2;text-align:left;}
+  .sidebar.collapsed .sidebar-logo-text b{display:inline;}
+  .sidebar.collapsed .sidebar-logo-label,
+  .sidebar.collapsed .sidebar-nav-section-label,
+  .sidebar.collapsed .sidebar-nav-section-line,
+  .sidebar.collapsed .sidebar-updated,
+  .sidebar.collapsed .sidebar-refresh span{display:block;}
+  .sidebar.collapsed .sidebar-nav{padding:12px 8px;display:block;}
+  .sidebar.collapsed .sidebar-nav-section{
+    height:auto;width:auto;background:none;margin:16px 0 4px;padding:0 12px;display:flex;
+  }
+  .sidebar.collapsed .sidebar-nav-item{
+    font-size:13px;width:auto;height:auto;min-height:0;
+    justify-content:flex-start;gap:11px;padding:8px 10px;margin-bottom:1px;
+  }
+  .sidebar.collapsed .sidebar-bottom{padding:12px 16px;display:block;}
+  .sidebar.collapsed .sidebar-refresh{
+    width:100%;height:auto;min-width:0;padding:7px;border-radius:8px;gap:8px;
+    justify-content:center;margin:6px 0 0 !important;
+  }
+}
 
 /* ── Кастомизация меню (05.09, Влад: "зажал меню - перешло в режим кастома... передвинуть
    как канбанчик, скрыть") - ГОСТ раздел 6 "Долгое нажатие -> режим перестановки", числа
@@ -20676,7 +20748,8 @@ function setSidebarCollapseBtnTitle_(collapsed) {
 }
 function toggleSidebarCollapse() {
   var collapsed = document.querySelector('.sidebar').classList.toggle('collapsed');
-  document.documentElement.style.setProperty('--sidebar', collapsed ? '64px' : '220px');
+  // 88px = 12 + 64 + 12: рейка отступает от краёв экрана, контент - от рейки (11.09).
+  document.documentElement.style.setProperty('--sidebar', collapsed ? '88px' : '220px');
   setSidebarCollapseBtnTitle_(collapsed);
   try { localStorage.setItem(SIDEBAR_COLLAPSE_KEY_, collapsed ? '1' : '0'); } catch (e) {}
 }
@@ -20690,7 +20763,7 @@ function initSidebarCollapse_() {
   try { collapsed = localStorage.getItem(SIDEBAR_COLLAPSE_KEY_) === '1'; } catch (e) {}
   if (collapsed) {
     document.querySelector('.sidebar').classList.add('collapsed');
-    document.documentElement.style.setProperty('--sidebar', '64px');
+    document.documentElement.style.setProperty('--sidebar', '88px'); // как в toggle: 12+64+12
   }
   setSidebarCollapseBtnTitle_(collapsed);
 }
@@ -22682,10 +22755,15 @@ var CRM = (function () {
         var up = l.upsell_amount || 0;
         var barW = Math.min(100, (l.amount || 0) / maxVal * 100);
         var upW = Math.min(100 - barW, up / maxVal * 100);
+        // 10.09, вторая правка - Влад: "это должно идти в общий зачёт по сумме" (было -
+        // крупным числом только первая продажа, допродажи мелкой добавкой снизу). Крупное
+        // число теперь ИТОГ (первая продажа + допродажи), мелкая строка снизу - "из них
+        // сколько допродажи", не отдельная надбавка к уже показанному числу.
+        var total = (l.amount || 0) + up;
         var valHtml = up > 0
-          ? '<span class="crmldr-val-main">' + shortMoney(l.amount) + '</span><span class="crmldr-val-upsell">+' + shortMoney(up) + '</span>'
+          ? '<span class="crmldr-val-main">' + shortMoney(total) + '</span><span class="crmldr-val-upsell">из них ' + shortMoney(up) + ' допродажи</span>'
           : shortMoney(l.amount);
-        return '<div class="crmldr-row has-rank' + (i < 3 ? ' is-top' + (i + 1) : '') + '" title="' + esc(l.name) + (up > 0 ? ' - первая продажа ' + money(l.amount) + ', допродажи ' + money(up) : '') + '">' +
+        return '<div class="crmldr-row has-rank' + (i < 3 ? ' is-top' + (i + 1) : '') + '" title="' + esc(l.name) + (up > 0 ? ' - всего ' + money(total) + ', из них ' + money(up) + ' допродажи' : '') + '">' +
           rankBadge(i) +
           '<span class="crmldr-name">' + esc(surname) + '</span>' +
           '<div class="crmldr-track"><div class="crmldr-barwrap"><div class="crmldr-bar" style="width:' + barW.toFixed(1) + '%"></div>' +
@@ -22766,7 +22844,10 @@ var CRM = (function () {
     // Допродажи (10.09, Влад: "должно быть видно и в канбане") - тонкая зелёная строка
     // под суммой, только у won-карточек с реальными допродажами (сервер уже отфильтровал -
     // batch считается только для won+order_1c_number, см. crmBatchUpsells_).
-    var upsellLine = (d.upsell_amount > 0) ? '<div class="kb-card-upsell">+' + shortMoney(d.upsell_amount) + ' допродажи' + (d.upsell_count > 1 ? ' (' + d.upsell_count + ')' : '') + '</div>' : '';
+    // 10.09, вторая правка - Влад: "красиво написано две допродажи + 94 тыс р" (было
+    // "+94 тыс допродажи (2)", число в скобках после слова читалось коряво). Число+слово
+    // впереди, сумма после - тот же plural(), что у счётчика сделок в колонке (22749).
+    var upsellLine = (d.upsell_amount > 0) ? '<div class="kb-card-upsell">' + d.upsell_count + ' ' + plural(d.upsell_count, 'допродажа', 'допродажи', 'допродаж') + ' + ' + shortMoney(d.upsell_amount) + '</div>' : '';
     return '<article class="kb-card ' + fr + (isWon ? ' kb-won-style' : '') + (isLost ? ' kb-lost-style' : '') + (S.drawerId === d.id ? ' is-open' : '') + '" data-id="' + d.id + '" tabindex="0" title="' + esc(fr === 'kb-stale' ? 'Зависла: без движения дольше ' + stallDays(d.stage) + ' дн.' : fr === 'kb-wait' ? 'Клиент ждёт ответа больше 2 часов' : '') + '">' +
       '<header class="kb-card-top"><span class="kb-client">' + esc(dealTitle(d)) + '</span>' + statusMark + '</header>' +
       '<div class="kb-cargo">' + cargoLine + '</div>' +
@@ -22850,7 +22931,13 @@ var CRM = (function () {
     STAGES.forEach(function (st) {
       var collapsed = !!S.collapsedCols[st.key];
       var ds = sortedDealsForStage(st.key, deals.filter(function (d) { return d.stage === st.key; }));
-      var sum = ds.reduce(function (a, d) { return a + Number(d.amount || 0); }, 0);
+      // 10.09, Влад: "где сейчас показывает 129000 должно быть 223000" - итог колонки
+      // теперь идёт в общий зачёт ВМЕСТЕ с допродажами (обе точки пересчёта суммы колонки -
+      // полный рендер и одометр при переносе карточки - должны совпадать, иначе после
+      // перетаскивания цифра "прыгнет" на другое число). upsell_amount приходит только у
+      // won-сделок с order_1c_number - у остальных стадий поля просто нет,
+      // Number(undefined||0)=0 безопасно, они не меняются.
+      var sum = ds.reduce(function (a, d) { return a + Number(d.amount || 0) + Number(d.upsell_amount || 0); }, 0);
       html += '<section class="kb-col' + (collapsed ? ' is-collapsed' : '') + '" data-colwrap="' + st.key + '">' + colHeadHtml(st, ds.length, collapsed) +
         (collapsed ? '' :
           '<div class="kb-col-herowrap" id="kb-hero-' + st.key + '">' + colHeroHtml(st, sum, ds) + '</div>' +
@@ -22875,7 +22962,13 @@ var CRM = (function () {
       var cnt = el('kb-cnt-' + st.key), heroWrap = el('kb-hero-' + st.key);
       if (cnt && cnt.textContent !== String(ids.length)) { cnt.textContent = ids.length; cnt.classList.remove('pulse'); void cnt.offsetWidth; cnt.classList.add('pulse'); }
       var ds = ids.map(dealById).filter(Boolean);
-      var sum = ds.reduce(function (a, d) { return a + Number(d.amount || 0); }, 0);
+      // 10.09, Влад: "где сейчас показывает 129000 должно быть 223000" - итог колонки
+      // теперь идёт в общий зачёт ВМЕСТЕ с допродажами (обе точки пересчёта суммы колонки -
+      // полный рендер и одометр при переносе карточки - должны совпадать, иначе после
+      // перетаскивания цифра "прыгнет" на другое число). upsell_amount приходит только у
+      // won-сделок с order_1c_number - у остальных стадий поля просто нет,
+      // Number(undefined||0)=0 безопасно, они не меняются.
+      var sum = ds.reduce(function (a, d) { return a + Number(d.amount || 0) + Number(d.upsell_amount || 0); }, 0);
       var animate = heroWrap && fromCol && toCol && fromCol !== toCol && (st.key === fromCol || st.key === toCol);
       var prevValEl = animate ? heroWrap.querySelector('.kb-col-hero-val') : null;
       var fromSum = prevValEl ? parseHeroSum_(prevValEl.textContent) : null;
@@ -23243,15 +23336,19 @@ var CRM = (function () {
   // введённое никогда не уходило на сервер и терялось при следующей перерисовке дровера/
   // списка. autoSave(id) - тот же приём, что у saveMain/saveContact, теперь и здесь; кнопка
   // "Сохранить заявку" оставлена (безвредный дубль для тех, кто ей уже пользуется).
-  function briefFieldsHtml(prefix, d) {
+  function briefFieldsHtml(prefix, d, from1c) {
     var saveFn = prefix === 'cx' ? 'saveCtxBrief' : 'saveBrief';
     var saveCall = 'CRM.' + saveFn + '(' + d.id + ')';
     var onBlur = ' onblur="' + saveCall + '"', onChange = ' onchange="' + saveCall + '"';
     var autoTag = d.brief_source === 'auto' ? '<span class="dr-auto" title="Извлечено автоматически из переписки - проверьте">авто</span>' : '';
+    // 11.09 - тот же "авто"-бейдж (.dr-auto, канон уже есть выше), только для полей,
+    // молча подставленных из 1С (см. renderDrawer) - manager должен видеть, что это ещё
+    // не его собственный ввод, не новый визуальный паттерн.
+    var oneCTag = '<span class="dr-auto" title="Подставлено из 1С по номеру заказа - проверьте">1С</span>';
     return '<div class="dr-grid2">' +
       '<div class="dr-field" style="grid-column:1/-1"><label>Груз' + autoTag + '</label><input class="dr-input" id="' + prefix + '-cargo" autocomplete="off" value="' + esc(d.cargo_type || '') + '" placeholder="экскаватор, трубы, контейнер…"' + onBlur + '></div>' +
-      '<div class="dr-field"><label>Откуда</label><input class="dr-input" id="' + prefix + '-from" autocomplete="off" value="' + esc(d.route_from || '') + '"' + onBlur + '></div>' +
-      '<div class="dr-field"><label>Куда</label><input class="dr-input" id="' + prefix + '-to" autocomplete="off" value="' + esc(d.route_to || '') + '"' + onBlur + '></div>' +
+      '<div class="dr-field"><label>Откуда' + (from1c && from1c.from ? oneCTag : '') + '</label><input class="dr-input" id="' + prefix + '-from" autocomplete="off" value="' + esc(d.route_from || '') + '"' + onBlur + '></div>' +
+      '<div class="dr-field"><label>Куда' + (from1c && from1c.to ? oneCTag : '') + '</label><input class="dr-input" id="' + prefix + '-to" autocomplete="off" value="' + esc(d.route_to || '') + '"' + onBlur + '></div>' +
       '<div class="dr-field"><label>Вес, т</label><input class="dr-input mono" id="' + prefix + '-weight" type="number" step="0.1" min="0" autocomplete="off" value="' + esc(d.cargo_weight_tons != null ? d.cargo_weight_tons : '') + '"' + onBlur + '></div>' +
       '<div class="dr-field"><label>Дата подачи</label><input class="dr-input mono" id="' + prefix + '-date" type="date" autocomplete="off" value="' + dateInput(d.wanted_date) + '"' + onChange + '></div>' +
       '<div class="dr-field" style="grid-column:1/-1"><label>Техника</label><select class="dr-select" id="' + prefix + '-veh"' + onChange + '>' +
@@ -23274,6 +23371,20 @@ var CRM = (function () {
   function renderDrawer(opts) {
     opts = opts || {};
     var data = S.drawerDeal, d = data.deal, dr = el('crm-drawer');
+    // Влад, 11.09: "хочу чтобы в успешных сделках компания и адреса подтягивались из 1С" -
+    // карточки часто заводятся с телефона/Авито без брифа (сделка выиграна, а груз/маршрут/
+    // компания пустые - живой пример на 97 000 ₽). Сервер уже прислал order1c (из
+    // orders_normalized по order_1c_number) - подставляем ТОЛЬКО в пустые поля (COALESCE,
+    // не перезаписываем то, что менеджер уже сам вписал), отдельная копия d для рендера,
+    // не трогаем data.deal - поля остаются реально пустыми в базе, пока менеджер не
+    // тронет инпут (autosave по onblur) или явно не сохранит форму.
+    var o1c = data.order1c;
+    if (o1c) {
+      d = Object.assign({}, d);
+      if (!d.client_company && o1c.customer) d.client_company = o1c.customer;
+      if (!d.route_from && o1c.route_from) d.route_from = o1c.route_from;
+      if (!d.route_to && o1c.route_to) d.route_to = o1c.route_to;
+    }
     var st = STAGE_BY[d.stage] || STAGES[0];
     var phone = fmtPhone(d.client_phone), tel = telHref(d.client_phone), avito = isAvitoKey(d.client_phone);
     var idx = STAGES.findIndex(function (s) { return s.key === d.stage; });
@@ -23321,11 +23432,13 @@ var CRM = (function () {
       '<button class="crm-chip" aria-pressed="' + (!d.responsible_extension) + '" onclick="CRM.assign(\'' + esc(d.client_phone) + '\',\'\',' + d.id + ')">Не назначен</button>' +
       (S.employees || []).map(respChip).join('') + '</div></div>';
 
-    var brief = '<div class="dr-section"><div class="dr-label">Заявка <span class="dr-saved aux" id="dr-saved-brief"></span></div>' + briefFieldsHtml('dr', d) +
+    var from1c = o1c ? { from: !data.deal.route_from && o1c.route_from, to: !data.deal.route_to && o1c.route_to } : null;
+    var brief = '<div class="dr-section"><div class="dr-label">Заявка <span class="dr-saved aux" id="dr-saved-brief"></span></div>' + briefFieldsHtml('dr', d, from1c) +
       '<div class="dr-actions"><button class="crm-chip" onclick="CRM.saveBrief(' + d.id + ')">' + ico('check') + 'Сохранить заявку</button></div></div>';
 
+    var companyFrom1c = o1c && !data.deal.client_company && o1c.customer ? '<span class="dr-auto" title="Подставлено из 1С по номеру заказа - проверьте">1С</span>' : '';
     var contact = '<div class="dr-section"><div class="dr-label">Контакт <span class="dr-saved aux" id="dr-saved-contact"></span></div><div class="dr-grid2">' +
-      '<div class="dr-field"><label>Компания</label><input class="dr-input" id="dr-company" autocomplete="off" value="' + esc(d.client_company || '') + '" onblur="CRM.saveContact(' + d.id + ')"></div>' +
+      '<div class="dr-field"><label>Компания' + companyFrom1c + '</label><input class="dr-input" id="dr-company" autocomplete="off" value="' + esc(d.client_company || '') + '" onblur="CRM.saveContact(' + d.id + ')"></div>' +
       '<div class="dr-field"><label>Имя</label><input class="dr-input" id="dr-name" autocomplete="off" value="' + esc(d.client_name || '') + '" onblur="CRM.saveContact(' + d.id + ')"></div>' +
       '<div class="dr-field" style="grid-column:1/-1"><label>E-mail</label><input class="dr-input" id="dr-email" type="email" autocomplete="off" value="' + esc(d.client_email || '') + '" onblur="CRM.saveContact(' + d.id + ')"></div></div></div>';
 
@@ -25555,6 +25668,30 @@ function buildRoster(){
      buildMyPageRoster_ целиком (Ратников там нужен - реальный менеджер, заказов пока
      физически нет, тот же принцип должен работать и для Планировки). */
   rows = rows.filter(function(r){ return (r.name || "").trim().split(" ")[0].toLowerCase() !== "рыщанов"; });
+  /* НАЙДЕННЫЙ БАГ (11.09, Влад: "Володин в планировке, он уволен давно. Это не первый
+     раз уже" - живой пример: свежий рейс s1-8141d91, создан 11.09 логистом, manager_name
+     "Володин Илья", хотя sprav_people.employment_status='fired'). Источник rows -
+     D.orders.by_manager/roster_managers, построен по ФАКТУ наличия заказов в 1С за
+     период - уволенный сотрудник со старыми заказами там остаётся НАВСЕГДА, это не баг
+     сервера (та же история, что "поле «менеджер» на деньгах ≠ занятость" -
+     feedback_receipts_manager_field_not_employment_proof), а не место для этой проверки.
+     Единая точка правды - sprav_people.employment_status (09.09) - фильтруем здесь, тем
+     же приёмом (сопоставление по фамилии, fail-open если человека нет в справочнике
+     вообще), что уже применяют /api/crm/employees и plansBuildRows_. FLEET_PEOPLE_ - тот
+     же /sprav/state, что эта вкладка и так грузит (fetchFleetData_) - не заводим второй
+     источник. Пуст на самом первом рендере (сеть ещё не ответила) - buildRoster()
+     перевызывается повторно из fetchFleetData_() ниже, как только список придёт. */
+  var firedSurnames_ = {};
+  (FLEET_PEOPLE_ || []).forEach(function(p){
+    if (p && p.employment_status === "fired") {
+      var sur = String(p.full_name || "").trim().split(/\s+/)[0].toLowerCase().replace(/ё/g, "е");
+      if (sur) firedSurnames_[sur] = 1;
+    }
+  });
+  rows = rows.filter(function(r){
+    var sur = (r.name || "").trim().split(/\s+/)[0].toLowerCase().replace(/ё/g, "е");
+    return !firedSurnames_[sur];
+  });
   var mgrs = [], tral = [], long = [], seen = {};
   rows.forEach(function(r){
     var full = (r.name || "").trim();
@@ -28658,7 +28795,14 @@ function fetchFleetData_(){
   return Promise.all([fetchFromYardApi_("/sprav/state", {}), fetchFromYardApi_("/fleet/state", {})])
     .then(function(results){
       var sprav = results[0], fleet = results[1];
-      if (sprav.ok){ FLEET_PEOPLE_ = sprav.data.people || []; FLEET_ASSETS_ = sprav.data.assets || []; }
+      if (sprav.ok){
+        FLEET_PEOPLE_ = sprav.data.people || []; FLEET_ASSETS_ = sprav.data.assets || [];
+        // 11.09 - buildRoster() уже прочитал FLEET_PEOPLE_ при первом вызове (initLP,
+        // синхронно), когда сеть ещё не ответила и он был пуст - перевызываем здесь,
+        // как только реальный список "уволен/работает" наконец пришёл, иначе фильтр
+        // уволенных менеджеров молча не срабатывал бы до перезагрузки страницы.
+        buildRoster();
+      }
       if (fleet.ok){
         FLEET_ASSIGN_ = fleet.data.assignments || [];
         /* Источник истины по "есть водитель/вакант" только что реально стал

@@ -4978,7 +4978,8 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
          Портирован из ЯРД_Калькулятор_v1.3 (yard-calc-v1.7.html) - методика расчёта не
          менялась, см. .business/products/pricing.md и
          plans/2026-08-17-calculator-dashboard-integration.md. Работает офлайн от Google
-         Sheets/Apps Script - только карта (OSM/OSRM/Nominatim, публичные, без ключей). -->
+         Sheets/Apps Script - только карта (OSM/OSRM/Photon, публичные, без ключей;
+         геокодинг - Nominatim до 11.09, потом Photon, см. комментарий у photonAddrParts_). -->
     <div id="page-calculator" class="page clc-page">
       <!-- ═══ КАЛЬКУЛЯТОР 2.0 «Табло рейса» (утверждено на превью 28.08, превью = контракт;
            plans/2026-08-28-calculator-cockpit-redesign.md). Кокпит: маршрутная строка кольцом
@@ -5686,12 +5687,65 @@ function checkAllDone() {
 }
 
 // ===== ГЕО =====
+// Влад, 11.09: заменили Nominatim (публичный, плохое автодополнение - во время
+// диагностики он трижды подряд отдал 503 прямо вживую) на Photon (photon.komoot.io).
+// Тот же принцип "чужой бесплатный сервис без ключей", но Photon специально сделан
+// под автодополнение: терпит опечатки (проверено живьём - "Ленинргадское" всё равно
+// находит "Ленинградское шоссе"), различает одноимённые улицы в разных регионах через
+// lat/lon-привязку. Свой сервер под Photon НЕ поднимаем - VPS слишком мал по памяти
+// (3,8 ГБ, уже был OOM-инцидент 21.08), публичного демо для наших объёмов достаточно.
+// photonBias_ - координаты для приоритета выдачи (иначе "Ленинградское шоссе" может
+// найтись в Тверской области раньше Москвы) - центр текущей карты, если она открыта,
+// иначе база.
+function photonBias_(){ return (map&&map.getCenter)?map.getCenter():BASE; }
+// Photon отдаёт структурированные поля (name/street/housenumber/district/city/state),
+// а не готовую строку, как Nominatim (display_name) - собираем МАССИВ смысловых частей
+// "самое конкретное - первым" (не единую строку через запятую!) - улица+дом сами по
+// себе уже содержат внутреннюю запятую ("Ленинградское шоссе, 71"), и обратный сплит
+// такой строки по запятой её же и ломает на две части. Массив такого не боится.
+function photonAddrParts_(p){
+    p=p||{};
+    var line=[p.street,p.housenumber].filter(Boolean).join(', ');
+    var first=(p.name&&p.name!==p.street)?p.name:(line||p.city||p.district||p.state||p.country||'');
+    var rest=[];
+    if(line&&line!==first)rest.push(line);
+    if(p.district)rest.push(p.district);
+    if(p.city&&p.city!==first)rest.push(p.city);
+    if(p.state&&p.state!==p.city)rest.push(p.state);
+    var seen={};
+    return [first].concat(rest).filter(function(v){if(!v||seen[v])return false;seen[v]=true;return true;});
+}
 function geoc(t){
     clearTimeout(gT);var inp=document.getElementById(t==='load'?'clc-loadAddr':'clc-unloadAddr'),lst=document.getElementById(t==='load'?'clc-loadAc':'clc-unloadAc');
     if(inp.value.length<3){lst.classList.remove('show');return;}
-    gT=setTimeout(async function(){try{var r=await fetch('https://nominatim.openstreetmap.org/search?format=json&q='+encodeURIComponent(inp.value)+'&limit=5&countrycodes=ru');var d=await r.json();lst.innerHTML='';if(!d.length){lst.classList.remove('show');return;}d.forEach(function(p){var el=document.createElement('div');el.className='clc-ac-item';var ps=p.display_name.split(',');el.innerHTML=ps[0]+' <span class="clc-ac-sub">'+ps.slice(1,3).join(',')+'</span>';el.onclick=function(){inp.value=ps[0];lst.classList.remove('show');setP(t,L.latLng(p.lat,p.lon));};lst.appendChild(el);});lst.classList.add('show');}catch(e){}},500);
+    gT=setTimeout(async function(){try{
+        var b=photonBias_();
+        var url='https://photon.komoot.io/api/?q='+encodeURIComponent(inp.value)+'&limit=5&lat='+b.lat+'&lon='+b.lng;
+        var r=await fetch(url);var d=await r.json();
+        lst.innerHTML='';
+        var feats=(d&&d.features)||[];
+        if(!feats.length){lst.classList.remove('show');return;}
+        feats.forEach(function(f){
+            var parts=photonAddrParts_(f.properties);
+            if(!parts[0])return;
+            var main=parts[0],sub=parts.slice(1,3).join(', '),coords=f.geometry.coordinates; // GeoJSON: [lon,lat]
+            var el=document.createElement('div');el.className='clc-ac-item';
+            el.innerHTML=escHtml_(main)+' <span class="clc-ac-sub">'+escHtml_(sub)+'</span>';
+            el.onclick=function(){inp.value=main;lst.classList.remove('show');setP(t,L.latLng(coords[1],coords[0]));};
+            lst.appendChild(el);
+        });
+        lst.classList.add('show');
+    }catch(e){}},500);
 }
-async function revG(p,t){try{var r=await fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat='+p.lat+'&lon='+p.lng+'&accept-language=ru');var d=await r.json();if(d&&d.display_name){var a=d.display_name.split(',').slice(0,3).join(',');document.getElementById(t==='load'?'clc-loadAddr':'clc-unloadAddr').value=a;}}catch(e){}}
+async function revG(p,t){try{
+    var r=await fetch('https://photon.komoot.io/reverse?lat='+p.lat+'&lon='+p.lng);
+    var d=await r.json();
+    var f=d&&d.features&&d.features[0];
+    if(f){
+        var a=photonAddrParts_(f.properties).slice(0,3).join(', ');
+        if(a)document.getElementById(t==='load'?'clc-loadAddr':'clc-unloadAddr').value=a;
+    }
+}catch(e){}}
 function getLoc(t){if(!navigator.geolocation){toast('Геолокация недоступна',1);return;}navigator.geolocation.getCurrentPosition(function(p){setP(t,L.latLng(p.coords.latitude,p.coords.longitude));},function(){toast('Не удалось',1);});}
 // 2026-08-21: был отдельный блок со вкладками+постоянным списком ниже страницы - Влад:
 // "выбирать груз тоже есть место в одном окне". Теперь это встроенный автокомплит рядом с

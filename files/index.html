@@ -25,6 +25,11 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.46.0/dist/tabler-icons.min.css">
 <!-- Leaflet - карта и маршрут для страницы "Калькулятор" (plans/2026-08-17-calculator-dashboard-integration.md) -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<!-- «План задание v2» - своя система заявок (plans/2026-09-10-order-plan-v2-native.md).
+     Стили и модуль вынесены отдельными файлами: index.html и так 3 МБ, а страница
+     самостоятельная - рендерит себя внутрь #page-order-plan и ходит в
+     api.yardhub.ru/api/orders*. Все классы с префиксом op2-. -->
+<link rel="stylesheet" href="order-plan-v2.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <!-- jsPDF - генератор КП настоящим текстом (не HTML-под-видом-.doc), 2026-08-21, Влад:
      "генератор коммерческих предложений... текст является настоящим текстом". Работает
@@ -21710,7 +21715,7 @@ function showPage(id, el) {
   if (id === 'my-page') cpEnsureLights_(function() { if (isMechanicView_()) { if (typeof renderMyPageMechanic_ === 'function') renderMyPageMechanic_(); } else if (typeof renderMyPage === 'function') renderMyPage(); });
   if (id === 'crm') loadCrmData();
   if (id === 'global-stats') loadGlobalStatsData();
-  if (id === 'order-plan') loadOrderPlanData();
+  if (id === 'order-plan' && window.OP2) OP2.open();
   if (id === 'vehicles') loadAvtodorSummary_();
   // Карта Leaflet не может инициализироваться, пока страница скрыта (display:none даёт
   // контейнеру нулевой размер - плитки карты не подтягиваются) - инициализируем/пересчитываем
@@ -24821,7 +24826,7 @@ function applyTheme(name) {
     if (activeId === 'clients') loadClientsData();
     if (activeId === 'crm') loadCrmData();
     if (activeId === 'global-stats') loadGlobalStatsData();
-    if (activeId === 'order-plan') loadOrderPlanData();
+    if (activeId === 'order-plan' && window.OP2) OP2.open();
     if (activeId === 'ryschanow-salary') renderRyschanowSalaryPage_();
     if (activeId === 'commercial-head-salary') renderCommercialHeadSalaryPage_();
     if (activeId === 'commercial-head-debt') renderCommercialHeadDebtPage_();
@@ -29567,6 +29572,10 @@ window.LP = { init: initLP };
 })();
 
 </script>
+<!-- «План задание v2» - объявляет window.OP2, вызывается из showPage(). Без async/defer:
+     модуль читает SESSION_TOKEN/YARD_API_BASE как голые идентификаторы из общей
+     лексической области основного скрипта (память project_window_global_let_const_gotcha). -->
+<script src="order-plan-v2.js"></script>
 <!-- Подключаем после основного скрипта, без async/defer - гарантирует, что initGoogleSignIn()
      уже объявлена к моменту, когда библиотека Google готова и мы её вызываем. -->
 <script src="https://accounts.google.com/gsi/client"></script>

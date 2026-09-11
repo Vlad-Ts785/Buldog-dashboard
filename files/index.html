@@ -26650,6 +26650,12 @@ function segLabel(s){
     var prevDriver = v ? lpFleetPrevDriverName_(v.gos, s.s) : null;
     if (prevDriver) base += " · " + prevDriver.trim().split(" ")[0];
   }
+  // Причина ремонта/ТО (11.09, Влад: "когда кто-то протягивает ремонт, нужно указать
+  // причину, и только потом можно сохранить") - repair_reason уже существовал в базе
+  // и на бэкенде (страница "Главный механик" его читает и умеет продлевать), просто
+  // не было поля ввода в самой Планировке - отсюда 0 заполненных causes из 41 живых
+  // ремонтов на момент фикса.
+  if ((s.kind === "repair" || s.kind === "maint") && s.repairReason) base += " · " + s.repairReason;
   return base ? base + " · " + untilLabel(s) : "";
 }
 /* «Суточный»/«Дальний» режим рейса - РУЧНОЙ выбор при создании заявки (Влад,
@@ -27874,13 +27880,13 @@ function segToWire_(s){
     id: s.id, gos: v.gos, kind: s.kind, s: Math.round(s.s * 100) / 100, l: Math.round(s.l * 100) / 100,
     mg: (s.mg && s.mg.full) || "", lg: (s.lg && s.lg.full) || "",
     from: s.from || "", to: s.to || "", customer: s.customer || "", nd: s.needsData ? 1 : 0, reason: s.reason || "",
-    trip_mode: s.tripMode || ""
+    repair_reason: s.repairReason || "", trip_mode: s.tripMode || ""
   };
 }
 function pushSegToServer_(w){
   return postToYardApi_("/plan/seg", {id:w.id, gos:w.gos, kind:w.kind, s:w.s, l:w.l,
     mg:w.mg, lg:w.lg, from:w.from, to:w.to, customer:w.customer, needs_data:w.nd, reason:w.reason,
-    trip_mode:w.trip_mode})
+    repair_reason:w.repair_reason, trip_mode:w.trip_mode})
     .catch(function(){ return { ok:false }; });
 }
 function saveSegs(){
@@ -27965,7 +27971,7 @@ function applyServerSegs_(rows){
     var vi = byGos[r.vehicle_gos];
     if (vi == null) return;   /* машина выбыла из парка - строку не рисуем, но и не удаляем на сервере */
     var seg = {id:r.id, v:vi, kind:r.kind, s:parseFloat(r.start_hour), l:parseFloat(r.length_hours),
-               needsData: !!Number(r.needs_data), reason: r.reason || "",
+               needsData: !!Number(r.needs_data), reason: r.reason || "", repairReason: r.repair_reason || "",
                createdByName: r.created_by_name || "", createdAt: r.created_at_label || ""};
     if (r.kind === "trip"){
       var v = STATE.vehicles[vi];
@@ -28287,7 +28293,7 @@ function openCreateDrawer(vi, s, l){
      реальный seg.mg/seg.lg, который ПОДСТАВЛЯЛСЯ неверно, а тут при СОЗДАНИИ вообще
      никто ничего не выбирал - "Создать" без единого клика по Менеджеру/Логисту не
      должен молча приписывать рейс кому попало. Заблокировано ниже в .cr-submit. */
-  var kind = "trip", mgIdx = -1, lgIdx = -1, fromVal = "", toVal = "", customerVal = "", ndVal = false, reasonIdx = 0, tripModeIdx = 0;
+  var kind = "trip", mgIdx = -1, lgIdx = -1, fromVal = "", toVal = "", customerVal = "", ndVal = false, reasonIdx = 0, tripModeIdx = 0, repairReasonVal = "";
   /* Даты - тоже редактируемые поля, не текст (Влад, 29.08: "создание события:
      также должна быть возможность выбирать даты") - протяжка/двойной клик на
      ленте задают ПЕРВОНАЧАЛЬНОЕ s/l, но не единственный способ их поставить;
@@ -28297,6 +28303,7 @@ function openCreateDrawer(vi, s, l){
     var isTrip = kind === "trip";
     var logistPool = v.long ? LOG_LONG : LOG_TRAL;
     var isDriverOff = kind === "driveroff";
+    var isRepairLike = kind === "repair" || kind === "maint";
     /* Влад, 30.08 (через параллельный чат): "вместо выходной должно быть без
        водителя. нажимая без водителя, нужно выбрать один из статусов: в
        выходной, отпуск, или приёмка. статус считается как без водителя, а
@@ -28335,6 +28342,14 @@ function openCreateDrawer(vi, s, l){
         '<div class="cr-field"><span class="grp-label">Причина</span><div class="cr-opts" id="lp-crReason">' +
           DRIVEROFF_REASONS_.map(function(p, i){ return '<button class="chip cr-opt" data-i="' + i + '" aria-pressed="' + (i === reasonIdx) + '">' + p[1] + '</button>'; }).join("") +
         '</div></div>'
+        : isRepairLike ?
+        /* Причина ремонта/ТО - обязательное поле (11.09, Влад: "когда кто-то протягивает
+           ремонт, нужно указать причину, и только потом может сохранить"). Свободный
+           текст, не чипы (у ремонта нет закрытого списка, как у "Без водителя") - тот же
+           repair_reason, что уже читает и умеет продлевать страница "Главный механик",
+           просто впервые заполняется отсюда, с момента создания. */
+        '<div class="cr-field"><span class="grp-label">Причина *</span>' +
+          '<input autocomplete="off" class="cr-input" id="lp-crRepairReason" placeholder="что случилось / что делаем" value="' + repairReasonVal.replace(/"/g, "&quot;") + '"></div>'
         : '') +
       '<div class="dr-note">Длину и время можно поправить и прямо на ленте - потянуть за край, как у обычного отрезка.</div>' +
       '<div class="cr-actions"><button class="chip cr-cancel">Отмена</button><button class="chip cr-submit" aria-pressed="true">Создать</button></div>';
@@ -28344,6 +28359,9 @@ function openCreateDrawer(vi, s, l){
     });
     if (isDriverOff){
       [].forEach.call(drawer.querySelector("#lp-crReason").children, function(btn, i){ btn.onclick = function(){ reasonIdx = i; render(); }; });
+    }
+    if (isRepairLike){
+      drawer.querySelector("#lp-crRepairReason").oninput = function(ev){ repairReasonVal = ev.target.value; };
     }
     if (isTrip){
       lpWireCustomerInput_("lp-crCustomer", "lp-crCustomer-suggest", function(v){ customerVal = v; });
@@ -28375,6 +28393,11 @@ function openCreateDrawer(vi, s, l){
       if (kind === "trip" && (mgIdx < 0 || lgIdx < 0)){
         S.reject(); toast("Выберите менеджера и логиста", null); return;
       }
+      // Причина ремонта/ТО - обязательна (11.09, Влад: см. разбор у isRepairLike выше) -
+      // тот же принцип, что у Менеджера/Логиста рейса: без явного значения не сохраняем.
+      if (isRepairLike && !repairReasonVal.trim()){
+        S.reject(); toast(kind === "repair" ? "Укажите причину ремонта" : "Укажите причину ТО", null); return;
+      }
       if (kind === "driveroff") pushDriver(v, s, l, DRIVEROFF_REASONS_[reasonIdx][0]);
       /* from/to НЕ обязательны - логист может ещё не знать точку на момент постановки
          (Влад, 29.08: "возможность создавать заявки без указания адресов должна
@@ -28382,6 +28405,7 @@ function openCreateDrawer(vi, s, l){
          город, которого никто не вводил; оставляем как есть, честно пусто -
          routeLabel_() показывает "не указано" на отображении, не здесь. */
       else if (kind === "trip") push(v, "trip", s, l, {mg:MANAGERS[mgIdx], lg:logistPool[lgIdx], from:fromVal, to:toVal, customer:customerVal, needsData:ndVal, tripMode:TRIP_MODE_OPTS_[tripModeIdx][0]});
+      else if (isRepairLike) push(v, kind, s, l, {repairReason: repairReasonVal.trim()});
       else push(v, kind, s, l);
       STATE.lastEdited = s;
       saveSegs();
@@ -28457,6 +28481,7 @@ function openDrawer(seg){
   var v = STATE.vehicles[seg.v];
   var isTrip = seg.kind === "trip";
   var isDriverOff = seg.kind === "driveroff";
+  var isRepairLike = seg.kind === "repair" || seg.kind === "maint";
   var logistPool = v.long ? LOG_LONG : LOG_TRAL;
   /* НАЙДЕННЫЙ БАГ (07.09, Влад живьём: "Почему ПРУ если Кан?" - плитка честно
      показывала Прус-Роскошного (seg.lg), а шторка молча подсвечивала Кана).
@@ -28483,6 +28508,7 @@ function openDrawer(seg){
   var customerVal = isTrip ? (seg.customer || "") : "";
   var ndVal = !!seg.needsData;
   var reasonIdx = isDriverOff ? Math.max(0, DRIVEROFF_REASONS_.map(function(p){ return p[0]; }).indexOf(seg.reason)) : 0;
+  var repairReasonVal = isRepairLike ? (seg.repairReason || "") : "";
   var tripModeIdx = isTrip ? Math.max(0, TRIP_MODE_OPTS_.map(function(p){ return p[0]; }).indexOf(seg.tripMode || "")) : 0;
   var startVal = hToLocalInputVal_(seg.s), endVal = hToLocalInputVal_(seg.s + seg.l);
 
@@ -28540,6 +28566,10 @@ function openDrawer(seg){
         '<div class="cr-field"><span class="grp-label">Причина</span><div class="cr-opts" id="lp-drReason">' +
           DRIVEROFF_REASONS_.map(function(p, i){ return '<button class="chip cr-opt" data-i="' + i + '" aria-pressed="' + (i === reasonIdx) + '">' + p[1] + '</button>'; }).join("") +
         '</div></div>'
+        : isRepairLike ?
+        rowsHtml([["Состояние", (seg.kind === "repair" ? "Ремонт" : "ТО")]]) +
+        '<div class="cr-field"><span class="grp-label">Причина *</span>' +
+          '<input autocomplete="off" class="cr-input" id="lp-drRepairReason" placeholder="что случилось / что делаем" value="' + repairReasonVal.replace(/"/g, "&quot;") + '"></div>'
         : rowsHtml([["Состояние", segLabel(seg)]])) +
       '<div class="dr-row dr-row-edit"><span>Начало</span><input autocomplete="off" type="datetime-local" class="dr-date-input mono" id="lp-drStart" value="' + startVal + '"></div>' +
       '<div class="dr-row dr-row-edit"><span>Окончание</span><input autocomplete="off" type="datetime-local" class="dr-date-input mono" id="lp-drEnd" value="' + endVal + '"></div>' +
@@ -28571,6 +28601,9 @@ function openDrawer(seg){
     if (isDriverOff){
       [].forEach.call(document.getElementById("lp-drReason").children, function(btn, i){ btn.onclick = function(){ reasonIdx = i; render(); }; });
     }
+    if (isRepairLike){
+      document.getElementById("lp-drRepairReason").oninput = function(ev){ repairReasonVal = ev.target.value; };
+    }
     var startEl = document.getElementById("lp-drStart"), endEl = document.getElementById("lp-drEnd"),
         durEl = document.getElementById("lp-drDurLabel");
     function refreshDurPreview(){
@@ -28600,11 +28633,18 @@ function openDrawer(seg){
         return x.id !== seg.id && x.v === liveSeg.v && newS < x.s + x.l && x.s < newS + newL && !lpOverlapAllowed_(liveSeg.kind, x.kind);
       });
       if (clash){ S.reject(); toast("Пересечение с другим отрезком - не сохранил", null); return; }
+      // Причина ремонта/ТО - обязательна и при редактировании, не только при создании
+      // (11.09, Влад: см. разбор у isRepairLike выше) - иначе "Сохранить" молча стёр бы
+      // уже введённую причину пустым значением, если кто-то её случайно очистил.
+      if (isRepairLike && !repairReasonVal.trim()){
+        S.reject(); toast(seg.kind === "repair" ? "Укажите причину ремонта" : "Укажите причину ТО", null); return;
+      }
       seg = liveSeg;
       var before = {s: seg.s, l: seg.l, v: seg.v};
       seg.s = newS; seg.l = newL;
       if (isTrip){ seg.mg = mgPool[mgIdx]; seg.lg = lgPool[lgIdx]; seg.from = fromVal; seg.to = toVal; seg.customer = customerVal; seg.needsData = ndVal; seg.tripMode = TRIP_MODE_OPTS_[tripModeIdx][0]; }
       if (isDriverOff){ seg.reason = DRIVEROFF_REASONS_[reasonIdx][0]; }
+      if (isRepairLike){ seg.repairReason = repairReasonVal.trim(); }
       S.drop();
       /* commit() сам НЕ перерисовывает ленту - у драга/растяжки плитка уже
          переставлена на новое место инлайн, в момент pointerup, до commit(). Здесь

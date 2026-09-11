@@ -2041,6 +2041,13 @@ function wireForm() {
   });
 
   $$('#op2-d-body input,#op2-d-body select,#op2-d-body textarea').forEach(function (i) { i.addEventListener('input', tickState); });
+  /* Влад 11.09: «сторонние подсказки заполнения заблокировать, только внутренние дашборда» - Chrome/Яндекс
+     игнорируют autocomplete="off" у полей, похожих на адрес/имя/телефон, и рисуют своё меню поверх
+     наших подсказок. Рабочий обход: autocomplete="new-password" + случайное name на каждом рендере. */
+  $$('#op2-d-body input:not([type=date]):not([type=checkbox]),#op2-d-body textarea').forEach(function (i) {
+    i.setAttribute('autocomplete', 'new-password'); i.setAttribute('autocorrect', 'off'); i.setAttribute('spellcheck', 'false');
+    i.setAttribute('name', 'op2-' + Math.random().toString(36).slice(2, 9));
+  });
   if (formOrder && formOrder.customer) fetchCustomerHistory(formOrder.customer);
   tickState();
 }

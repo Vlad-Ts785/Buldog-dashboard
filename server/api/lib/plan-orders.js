@@ -221,7 +221,7 @@ module.exports = function (deps) {
   const EDITABLE = ["service_time", "needs_data", "customer", "customer_entity_id", "executor_entity_id", "customer_contact_name",
     "customer_contact_phone", "equipment_type", "cargo", "cargo_weight_t", "cargo_dims", "gabarit", "rework_terms", "documents", "note",
     "cash", "load_address", "load_lat", "load_lon", "load_confirmed", "load_contact_name", "load_contact_phone", "unload_address",
-    "unload_lat", "unload_lon", "unload_confirmed", "unload_contact_name", "unload_contact_phone", "price", "payment_status", "internal"];
+    "unload_lat", "unload_lon", "unload_confirmed", "unload_contact_name", "unload_contact_phone", "price", "payment_status", "internal", "crm_deal_id"];
   function readFields(req) {
     const f = {};
     const b = req.body || {}; const q = req.query || {};
@@ -235,7 +235,7 @@ module.exports = function (deps) {
     if (get("cargo") !== undefined) f.cargo = str(get("cargo"), 300);
     if (get("note") !== undefined) f.note = str(get("note"), 1000);
     ["load_address", "unload_address"].forEach((k) => { if (get(k) !== undefined) f[k] = str(get(k), 500); });
-    ["cargo_weight_t", "load_lat", "load_lon", "unload_lat", "unload_lon", "price"].forEach((k) => { if (get(k) !== undefined) f[k] = num(get(k)); });
+    ["cargo_weight_t", "load_lat", "load_lon", "unload_lat", "unload_lon", "price", "crm_deal_id"].forEach((k) => { if (get(k) !== undefined) f[k] = num(get(k)); });
     ["needs_data", "cash", "load_confirmed", "unload_confirmed", "internal"].forEach((k) => { if (get(k) !== undefined) f[k] = bool(get(k)); });
     return f;
   }

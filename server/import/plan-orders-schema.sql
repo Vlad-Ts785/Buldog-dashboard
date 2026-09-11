@@ -269,3 +269,8 @@ INSERT INTO sprav_legal_entities (id, name, full_name, short_name, own_sort, is_
 SELECT 'le_internal_base', 'База', 'База (внутренний заказчик - рейсы для базы)', 'БАЗА', 9, 0, 1, 'Внутренний заказчик для заявок логистов (Влад 11.09). Если в 1С есть свой контрагент «База» - заменить на него', 'claude:2026-09-11', 'claude:2026-09-11'
 WHERE NOT EXISTS (SELECT 1 FROM sprav_legal_entities WHERE id='le_internal_base');
 SELECT id, short_name, own_sort, is_own, internal_customer FROM sprav_legal_entities WHERE internal_customer=1 ORDER BY own_sort;
+
+-- 11.09 Влад: «Создать задание» из CRM - связь заявки со сделкой (карточка показывает «сделка №N →»)
+SET @c := (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='plan_orders' AND COLUMN_NAME='crm_deal_id');
+SET @sql := IF(@c=0,'ALTER TABLE plan_orders ADD COLUMN crm_deal_id INT DEFAULT NULL, ADD KEY idx_crm_deal (crm_deal_id)','SELECT 1');
+PREPARE st FROM @sql; EXECUTE st; DEALLOCATE PREPARE st;

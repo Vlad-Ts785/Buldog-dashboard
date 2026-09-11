@@ -23395,6 +23395,27 @@ var CRM = (function () {
     }).catch(function () { toast('Нет соединения - изменения не сохранены', 'red'); });
   }
 
+  // «Создать задание» (11.09): собрать поля сделки (с той же 1С-подстановкой, что в карточке) и
+  // передать в «Задание» - там откроется форма новой заявки с этими полями и ссылкой на сделку.
+  function createTask(id) {
+    var data = S.drawerDeal; if (!data || !data.deal || String(data.deal.id) !== String(id)) { toast('Открой сделку и нажми ещё раз', 'red'); return; }
+    var d = Object.assign({}, data.deal), o1c = data.order1c;
+    if (o1c) { if (!d.client_company && o1c.customer) d.client_company = o1c.customer; if (!d.route_from && o1c.route_from) d.route_from = o1c.route_from; if (!d.route_to && o1c.route_to) d.route_to = o1c.route_to; }
+    var pre = {
+      crm_deal_id: d.id,
+      customer: d.client_company || d.client_name || '',
+      customer_contact_name: d.client_name || '',
+      customer_contact_phone: (d.client_phone && !isAvitoKey(d.client_phone)) ? d.client_phone : '',
+      cargo: d.cargo_type || '', cargo_weight_t: d.cargo_weight_tons || '',
+      load_address: d.route_from || '', unload_address: d.route_to || '',
+      price: Number(d.amount) || '', service_date: d.wanted_date ? String(d.wanted_date).slice(0, 10) : '',
+      note: [d.vehicle_hint ? 'техника: ' + d.vehicle_hint : '', d.order_1c_number ? 'заказ 1С №' + d.order_1c_number : ''].filter(Boolean).join(' · ')
+    };
+    closeDrawer();
+    if (!window.OP2 || !OP2.newFrom) { toast('Страница «Задание» не загрузилась', 'red'); return; }
+    OP2.newFrom(pre);
+    showPage('order-plan', document.querySelector('.sidebar-nav-item[data-page="order-plan"]'));
+  }
   function renderDrawer(opts) {
     opts = opts || {};
     var data = S.drawerDeal, d = data.deal, dr = el('crm-drawer');
@@ -23470,6 +23491,8 @@ var CRM = (function () {
       '<div class="dr-field" style="grid-column:1/-1"><label>E-mail</label><input class="dr-input" id="dr-email" type="email" autocomplete="off" value="' + esc(d.client_email || '') + '" onblur="CRM.saveContact(' + d.id + ')"></div></div></div>';
 
     var actions = '<div class="dr-section"><div class="dr-label">Действия</div><div class="dr-actions">' +
+      // 11.09, Влад: «из CRM кнопка создать задание - перекидывает в Задание с частично заполненными данными»
+      (window.OP2 ? '<button class="crm-chip is-good" data-nav-sound onclick="CRM.createTask(' + d.id + ')" title="Открыть «Задание» с новой заявкой: заказчик, контакт, груз, адреса и сумма - из этой сделки">' + ico('check') + 'Создать задание</button>' : '') +
       (avito ? '<button class="crm-chip" data-nav-sound onclick="CRM.openChatFor(\'' + esc(d.client_phone) + '\')">' + ico('chat') + 'Открыть чат</button>' : '') +
       (tel ? '<a class="crm-chip" href="' + tel + '" data-nav-sound>' + ico('phone') + 'Позвонить</a>' : '') +
       (data.chats && data.chats[0] && safeHref(data.chats[0].item_url) ? '<a class="crm-chip" href="' + esc(safeHref(data.chats[0].item_url)) + '" target="_blank" rel="noopener">' + ico('external') + 'Объявление на Авито</a>' : '') + '</div></div>';
@@ -24186,7 +24209,7 @@ var CRM = (function () {
   }
 
   return {
-    init: init, rerender: rerender, showView: showView, openDeal: openDeal, closeDrawer: closeDrawer, setStage: setStage, winFromDrawer: winFromDrawer, toggleColSort: toggleColSort, toggleColCollapse: toggleColCollapse,
+    init: init, rerender: rerender, showView: showView, openDeal: openDeal, closeDrawer: closeDrawer, setStage: setStage, winFromDrawer: winFromDrawer, createTask: createTask, toggleColSort: toggleColSort, toggleColCollapse: toggleColCollapse,
     showLostForm: showLostForm, pickLostReason: pickLostReason, confirmLost: function (id) { confirmLost(id, el('dr-lost-reason') ? el('dr-lost-reason').value : ''); },
     saveMain: saveMain, saveBrief: saveBrief, saveContact: saveContact, assign: assign, askWhoAmI: askWhoAmI, setMe: setMe,
     setFilter: setFilter, toggleFilterPop: toggleFilterPop, setExtra: setExtra, resetExtra: resetExtra, closePops: closePops, onSearch: onSearch, clearSearch: clearSearch, resetAll: resetAll,

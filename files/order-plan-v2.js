@@ -1690,6 +1690,7 @@ function renderView(o, who) {
       kv('Стоимость', '<span class="op2-mono">' + (num(o.price) ? esc(fmtP(o.price)) : '<span class="op2-dim">не указана</span>') + (o.cash ? ' · наличные' : '') + '</span>') +
       kv('Статус оплаты', val(o.payment_status)) +
       kv('Примечание', o.note ? esc(o.note) : '<span class="op2-dim">—</span>') +
+      (o.crm_deal_id ? kv('CRM', '<a href="#" class="op2-crmlink" data-deal="' + esc(o.crm_deal_id) + '">сделка №' + esc(o.crm_deal_id) + ' →</a>') : '') +
     '</div>' +
     '<div class="op2-sect"><div class="op2-t">История</div><ul class="op2-hist" id="op2-hist-box"><li><span class="op2-dim">загружаем…</span></li></ul></div>';
 
@@ -1702,6 +1703,8 @@ function renderView(o, who) {
 
   /* обработчики тела карточки */
   var body = $('#op2-d-body');
+  var crmLink = $('.op2-crmlink', body);
+  if (crmLink) crmLink.addEventListener('click', function (e) { e.preventDefault(); var id = +this.dataset.deal; closeDrawer(); if (window.CRM && CRM.openDeal) { showPage('crm', document.querySelector('[data-page="crm"]')); setTimeout(function () { CRM.openDeal(id); }, 400); } });
   var put = $('#op2-d-put');
   if (put) put.addEventListener('click', function () { closeDrawer(); var s = $('#op2-log-body .op2-slot[data-oid="' + o.id + '"]'); if (s) openPop(s, o); });
   var take = $('#op2-d-take');
@@ -1791,6 +1794,8 @@ function deleteOrder(o) {
 
 /* ═════════════════════════ ШТОРКА: ФОРМА ═════════════════════════ */
 var formMode = false, formWho = 'mgr', formOrder = null, formRepeat = false;
+var formPrefill = false;  /* форма новой заявки с полями из CRM-сделки (Влад 11.09: кнопка «Создать задание» в CRM) */
+var PREFILL = null;       /* {crm_deal_id, customer, ...} - ждёт, пока страница построится и META придёт */
 function dict(name) { return (META && META.dictionary && META.dictionary[name]) || []; }
 function entities() { return (META && META.own_entities) || []; }
 function internalCustomers() { return (META && (META.internal_customers || META.own_entities)) || []; }
@@ -1802,8 +1807,8 @@ function quickTimes(ds) {
   if (!list.length) return { list: ['07:00', '08:00', '09:00', '10:00'], why: 'на сегодня уже поздно - утро завтра' };
   return { list: list, why: 'ближайшие от ' + hhmm(nowMin()) };
 }
-function openDrawerForm(o, repeat, who) {
-  formMode = true; formRepeat = !!repeat; formWho = who || (isMgr() ? 'mgr' : 'log');
+function openDrawerForm(o, repeat, who, prefill) {
+  formMode = true; formRepeat = !!repeat; formPrefill = !!prefill; formWho = who || (isMgr() ? 'mgr' : 'log');
   formOrder = o || null;
   drawerOrder = o || null;
   openDrawer();
@@ -1814,9 +1819,9 @@ function renderForm() {
   var o = formOrder, repeat = formRepeat, isLog = formWho === 'log';
   var evening = nowMin() >= 18 * 60;
   var defDate = repeat ? addDays(todayStr(), 1) : (o ? o.service_date : (evening ? addDays(DATE, 1) : DATE));
-  var editing = !!(o && !repeat);
+  var editing = !!(o && !repeat && !formPrefill);
 
-  $('#op2-d-title').textContent = repeat ? 'Новая заявка · повтор №' + oNo(o) : (editing ? 'Заявка №' + oNo(o) + ' · редактирование' : (isLog ? 'Новая заявка · логист' : 'Новая заявка'));
+  $('#op2-d-title').textContent = repeat ? 'Новая заявка · повтор №' + oNo(o) : (editing ? 'Заявка №' + oNo(o) + ' · редактирование' : (formPrefill ? 'Новая заявка · из CRM' + (o && o.crm_deal_id ? ' · сделка №' + o.crm_deal_id : '') : (isLog ? 'Новая заявка · логист' : 'Новая заявка')));
   $('#op2-d-sub').textContent = repeat ? 'все поля из №' + oNo(o) + ' · проверь дату и время'
     : humanDate(defDate) + ' · ' + ((ME && ME.name) || '') + (isLog ? ' · внутренняя перевозка или свой заказчик' : '');
 
@@ -2158,8 +2163,9 @@ function saveForm(btn) {
   if (btn.classList.contains('op2-blocked')) { toast('<span class="op2-warn">' + esc(btn.textContent) + '</span>'); return; }
   var warn = btn.classList.contains('op2-warn');
   var payload = collectForm();
-  var editing = !!(formOrder && !formRepeat);
+  var editing = !!(formOrder && !formRepeat && !formPrefill);
   if (editing) payload.id = formOrder.id;
+  if (formPrefill && formOrder && formOrder.crm_deal_id) payload.crm_deal_id = formOrder.crm_deal_id; /* связь с CRM-сделкой */
   btn.disabled = true;
   apiPostJson('/orders/save', payload).then(function (r) {
     btn.disabled = false;
@@ -2339,12 +2345,23 @@ function stopPolling() {
 function open() {
   if (!built) { if (!buildDom()) return; built = true; }
   renderAll();
-  if (!META) loadMeta().then(function () { renderAll(); loadOrders(); });
-  else loadOrders();
+  if (!META) loadMeta().then(function () { renderAll(); loadOrders(); runPrefill(); });
+  else { loadOrders(); runPrefill(); }
   loadCounts();
   loadFree();
   startPolling();
 }
-window.OP2 = { open: open, reload: function () { loadOrders(); }, stop: stopPolling };
+/* Заявка из CRM: CRM.createTask кладёт поля сделки сюда и переключает страницу; форма откроется,
+   как только страница построена и справочники загружены. У админа - экран менеджера. */
+function runPrefill() {
+  if (!PREFILL || !built || !META) return;
+  var pre = PREFILL; PREFILL = null;
+  if (!pre.service_date) pre.service_date = (nowMin() >= 18 * 60) ? addDays(todayStr(), 1) : todayStr(); /* как у пустой формы: после 18:00 - завтра */
+  if (ME && ME.role === 'admin' && VIEW !== 'mgr') { VIEW = 'mgr'; syncSwitch(); renderAll(); }
+  openDrawerForm(pre, false, 'mgr', true);
+  toast('Поля взяты из CRM · сделка №' + esc(pre.crm_deal_id || '?') + ' · проверь дату, время и тип техники');
+}
+window.OP2 = { open: open, reload: function () { loadOrders(); }, stop: stopPolling,
+  newFrom: function (pre) { PREFILL = pre || null; runPrefill(); } };
 
 })();

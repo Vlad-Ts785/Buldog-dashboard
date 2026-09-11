@@ -716,5 +716,61 @@ module.exports = function (deps) {
     } catch (err) { console.error("orders presence list:", err); fail(res, 500, String(err.message || err)); }
   });
 
+  // ── Заказчик по ИНН (Влад 11.09: «при вводе ИНН должен вылететь контрагент с возможностью сохранить
+  // его в справочнике»). Сначала свой справочник, потом DaData (тот же findById/party, что у
+  // /api/sprav/legal_lookup, но доступен менеджеру/логисту - им заводить заказчика прямо из заявки).
+  const DADATA_KEY_ = process.env.DADATA_API_KEY;
+  async function dadataParty(inn) {
+    if (!DADATA_KEY_) return null;
+    const resp = await fetch("https://suggestions.dadata.ru/suggestions/api/4_1/rs/findById/party", {
+      method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Token " + DADATA_KEY_ },
+      body: JSON.stringify({ query: inn }),
+    });
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error("DaData: " + (body.message || resp.status));
+    const hit = (body.suggestions || [])[0]; if (!hit) return null;
+    const d = hit.data || {};
+    return {
+      name: hit.value || null, full_name: (d.name && d.name.full_with_opf) || hit.unrestricted_value || null,
+      inn: d.inn || inn, kpp: d.kpp || null, ogrn: d.ogrn || null,
+      legal_address: (d.address && d.address.unrestricted_value) || null,
+      director_name: (d.management && d.management.name) || null, director_post: (d.management && d.management.post) || null,
+      egrul_status: (d.state && d.state.status) || null,
+    };
+  }
+  app.get("/api/orders/inn", ...gate, async (req, res) => {
+    try {
+      const inn = String(req.query.inn || "").replace(/\D/g, "").slice(0, 12);
+      if (inn.length !== 10 && inn.length !== 12) return fail(res, 400, "ИНН - 10 или 12 цифр");
+      const [rows] = await pool.query(
+        `SELECT id, name, full_name, inn, kpp, ogrn, legal_address, director_name, is_own, risk_light FROM sprav_legal_entities
+          WHERE inn = ? AND deleted_at IS NULL ORDER BY is_own DESC, name LIMIT 1`, [inn]);
+      if (rows.length) return res.json({ found: "sprav", entity: rows[0] });
+      const d = await dadataParty(inn);
+      if (!d) return res.json({ found: false, inn });
+      res.json({ found: "dadata", entity: d });
+    } catch (err) { console.error("orders inn:", err); fail(res, 500, String(err.message || err)); }
+  });
+  // Сохранить найденного по ИНН в справочник (id le_inn_<ИНН>; повторный вызов - вернёт существующего).
+  app.post("/api/orders/inn_save", ...gate, async (req, res) => {
+    try {
+      const inn = String(p(req, "inn") || "").replace(/\D/g, "").slice(0, 12);
+      if (inn.length !== 10 && inn.length !== 12) return fail(res, 400, "ИНН - 10 или 12 цифр");
+      const [ex] = await pool.query(`SELECT id, name FROM sprav_legal_entities WHERE inn = ? AND deleted_at IS NULL LIMIT 1`, [inn]);
+      if (ex.length) return res.json({ ok: true, id: ex[0].id, name: ex[0].name, existed: true });
+      let d = { name: str(p(req, "name"), 150), full_name: str(p(req, "full_name"), 300), kpp: str(p(req, "kpp"), 9), ogrn: str(p(req, "ogrn"), 15),
+        legal_address: str(p(req, "legal_address"), 500), director_name: str(p(req, "director_name"), 200), director_post: str(p(req, "director_post"), 200),
+        egrul_status: str(p(req, "egrul_status"), 30) };
+      if (!d.name) { const dd = await dadataParty(inn); if (!dd) return fail(res, 404, "ИНН не найден"); d = dd; }
+      const id = "le_inn_" + inn;
+      await pool.query(
+        `INSERT INTO sprav_legal_entities (id, name, full_name, name_1c, inn, kpp, ogrn, legal_address, director_name, director_post, egrul_status, is_own, created_by, updated_by)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?) ON DUPLICATE KEY UPDATE updated_by = VALUES(updated_by)`,
+        [id, d.name, d.full_name, d.name, inn, d.kpp, d.ogrn, d.legal_address, d.director_name, d.director_post, d.egrul_status, req.userEmail, req.userEmail]);
+      await pool.query(`INSERT INTO sprav_audit_log (entity_type, entity_id, action, changed_by) VALUES ('legal_entity', ?, 'create', ?)`, [id, req.userEmail]).catch(() => {});
+      res.json({ ok: true, id, name: d.name, existed: false });
+    } catch (err) { console.error("orders inn_save:", err); fail(res, 500, String(err.message || err)); }
+  });
+
   console.log("plan-orders: эндпоинты /api/orders/* подключены");
 };

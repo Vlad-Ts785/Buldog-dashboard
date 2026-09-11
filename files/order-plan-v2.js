@@ -2003,9 +2003,14 @@ function wireForm() {
     var v = this.value.trim();
     clearTimeout(custT);
     if (v.length < 2) { $('#op2-f-custbox').classList.remove('op2-open'); return; }
+    var digits = v.replace(/\D/g, '');
+    /* ИНН (10/12 цифр) - ищем контрагента по ИНН: справочник -> DaData (Влад 11.09) */
+    if (/^\d+$/.test(v) && (digits.length === 10 || digits.length === 12)) { custT = setTimeout(function () { fetchInn(digits); }, 250); return; }
     custT = setTimeout(function () { fetchCustomers(v); }, 250);
   });
   $('#op2-f-custlist').addEventListener('mousedown', function (e) {
+    var sv = e.target.closest('.op2-inn-save');
+    if (sv) { e.preventDefault(); saveInn(sv); return; }
     var it = e.target.closest('.op2-it'); if (!it) return;
     $('#op2-f-cust').value = it.dataset.name || '';
     $('#op2-f-custbox').classList.remove('op2-open');
@@ -2089,6 +2094,36 @@ function fetchCustomers(q) {
     $('#op2-f-custlist').innerHTML = h;
     $('#op2-f-custbox').classList.add('op2-open');
   }).catch(function () {});
+}
+function fetchInn(inn) {
+  apiGet('/orders/inn', { inn: inn }).then(function (r) {
+    if (!r || !r.data) return;
+    var d = r.data, h = '';
+    if (d.error) h = '<div class="op2-sec">По ИНН</div><div class="op2-it" data-name=""><span class="op2-dim">' + esc(d.error) + '</span></div>';
+    else if (d.found === 'sprav') {
+      var e = d.entity;
+      h = '<div class="op2-sec">По ИНН · в справочнике</div><div class="op2-it" data-name="' + esc(e.name) + '" data-eid="' + esc(e.id) + '"><span>' + esc(e.name) + '</span><span class="op2-m">ИНН ' + esc(e.inn) + (e.is_own ? ' · своё' : '') + '</span></div>';
+    } else if (d.found === 'dadata') {
+      var x = d.entity;
+      h = '<div class="op2-sec">По ИНН · найдено в ЕГРЮЛ, в справочнике ещё нет</div>' +
+        '<div class="op2-it" data-name="' + esc(x.name) + '"><span>' + esc(x.name) + '<span class="op2-dim op2-sm"> · ' + esc((x.legal_address || '').slice(0, 60)) + (x.director_name ? ' · ' + esc(x.director_name) : '') + '</span></span><span class="op2-m">ИНН ' + esc(x.inn) + '</span></div>' +
+        '<div class="op2-it op2-inn-row"><button class="op2-ghost op2-inn-save" data-inn="' + esc(x.inn) + '" data-name="' + esc(x.name) + '" data-full="' + esc(x.full_name || '') + '" data-kpp="' + esc(x.kpp || '') + '" data-ogrn="' + esc(x.ogrn || '') + '" data-addr="' + esc(x.legal_address || '') + '" data-dir="' + esc(x.director_name || '') + '" data-post="' + esc(x.director_post || '') + '" data-status="' + esc(x.egrul_status || '') + '">Сохранить в справочник и подставить</button></div>';
+    } else h = '<div class="op2-sec">По ИНН</div><div class="op2-it" data-name=""><span class="op2-dim">ИНН ' + esc(inn) + ' не найден - проверь цифры</span></div>';
+    $('#op2-f-custlist').innerHTML = h;
+    $('#op2-f-custbox').classList.add('op2-open');
+  }).catch(function () {});
+}
+function saveInn(btn) {
+  var d = btn.dataset;
+  btn.disabled = true; btn.textContent = 'Сохраняем…';
+  apiPost('/orders/inn_save', { inn: d.inn, name: d.name, full_name: d.full, kpp: d.kpp, ogrn: d.ogrn, legal_address: d.addr, director_name: d.dir, director_post: d.post, egrul_status: d.status }).then(function (r) {
+    if (!ok_(r)) { btn.disabled = false; btn.textContent = 'Сохранить в справочник и подставить'; return; }
+    var fc = $('#op2-f-cust'); fc.value = r.data.name || d.name; fc.dataset.entityId = r.data.id;
+    $('#op2-f-custbox').classList.remove('op2-open');
+    S.tickUp();
+    toast((r.data.existed ? 'Уже в справочнике: ' : 'Сохранено в справочник: ') + '<span class="op2-tick">' + esc(r.data.name || d.name) + '</span> · ИНН ' + esc(d.inn));
+    fetchCustomerHistory(fc.value); tickState();
+  }).catch(function () { btn.disabled = false; });
 }
 function fetchCustomerHistory(name) {
   if (!name) return;

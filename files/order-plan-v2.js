@@ -219,6 +219,7 @@ function byId(id) { for (var i = 0; i < ORD.length; i++) { if (String(ORD[i].id)
 function execById(o, eid) { var l = o.executors || []; for (var i = 0; i < l.length; i++) { if (String(l[i].id) === String(eid)) return l[i]; } return null; }
 function isMgr() { return VIEW === 'mgr'; }
 function canDone() { return ME && ME.role !== 'manager'; }
+function isAdmin() { return !!(ME && ME.role === 'admin'); } /* удалять заявку может только Влад (11.09) */
 
 /* ───────────────────────── тост (единственный канал) ───────────────────────── */
 var toastT = null;
@@ -1129,7 +1130,7 @@ function mgrRowMenu(o) {
     { label: 'Повторить', fn: function () { openRepeat(o); } },
     { label: 'Отбой', fn: function () { setStatus(o, 'ot'); } },
     { label: 'Копировать данные на пропуск', fn: function () { copyText(passText(o), 'Данные на пропуск скопированы'); } }
-  ];
+  ].concat(isAdmin() ? [{ label: 'Удалить заявку', fn: function () { deleteOrder(o); } }] : []);
 }
 function logRowMenu(o) {
   var items = [];
@@ -1137,6 +1138,7 @@ function logRowMenu(o) {
   items.push({ label: 'Добавить вторую машину', fn: function () { var tr = $('#op2-log-body tr[data-oid="' + o.id + '"]'); openPop(tr || $('#op2-log-body'), o, true); } });
   items.push({ label: 'Все заявки этой машины →', fn: function () { showByVehicle(o); } });
   items.push({ label: 'История', fn: function () { openDrawerView(o, 'log', true); } });
+  if (isAdmin()) items.push({ label: 'Удалить заявку', fn: function () { deleteOrder(o); } });
   return items;
 }
 function showByVehicle(o) {
@@ -1749,7 +1751,7 @@ function onDrawerFoot(e) {
   if (id === 'op2-d-back' && o) { openDrawerView(o, isMgr() ? 'mgr' : 'log'); return; }
   if (id === 'op2-rp-go' && o) { runRepeat(e.target, o); return; }
   if (e.target.classList.contains('op2-del')) {
-    if (formMode && o && o.id) { deleteOrder(o); return; }
+    if (formMode && o && o.id && isAdmin()) { deleteOrder(o); return; }
     closeDrawer();
     return;
   }
@@ -1884,7 +1886,7 @@ function renderForm() {
 
     '<div class="op2-sect"><div class="op2-t">Примечание</div><div class="op2-fld"><textarea id="op2-f-note" rows="3" placeholder="Что логисту важно знать">' + esc(o ? (o.note || '') : '') + '</textarea></div></div>';
 
-  $('#op2-d-foot').innerHTML = '<button class="op2-del">' + (editing ? 'Удалить' : 'Отмена') + '</button>' +
+  $('#op2-d-foot').innerHTML = '<button class="op2-del">' + ((editing && isAdmin()) ? 'Удалить' : 'Отмена') + '</button>' +
     '<span class="op2-dim op2-sm" id="op2-f-state"></span>' +
     '<button class="op2-dbtn op2-primary op2-blocked" id="op2-f-save">Укажи заказчика</button>';
 

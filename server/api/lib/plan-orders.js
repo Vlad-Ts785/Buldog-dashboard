@@ -314,7 +314,8 @@ module.exports = function (deps) {
     await conn.query(`UPDATE plan_orders SET otboy_ack_by = ?, otboy_ack_at = NOW(), updated_by = ? WHERE id = ?`, [who.name, req.userEmail, o.id]);
     return who.name;
   }));
-  app.post("/api/orders/delete", ...gate, (req, res) => simpleUpdate(req, res, "delete", async (conn, o) => {
+  // удалять заявку может только admin (Влад 11.09: «мне единственному право удалять строку»); менеджер/логист - отбой
+  app.post("/api/orders/delete", checkSession, requireRole_("admin"), (req, res) => simpleUpdate(req, res, "delete", async (conn, o) => {
     const [ex] = await conn.query(`SELECT id, seg_id FROM plan_order_executors WHERE order_id = ? AND removed_at IS NULL`, [o.id]);
     for (const e of ex) await removeExecutorRow(conn, e, req.userEmail);
     await conn.query(`UPDATE plan_orders SET deleted_at = NOW(), deleted_by = ?, updated_by = ? WHERE id = ?`, [req.userEmail, req.userEmail, o.id]);

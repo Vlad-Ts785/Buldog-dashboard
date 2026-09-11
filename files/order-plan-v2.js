@@ -25,6 +25,7 @@ function $$(sel, root) { return Array.prototype.slice.call((root || document).qu
 /* Своя экранировка - всё, что приходит от людей (заказчик, груз, адреса, имена),
    уходит в innerHTML только через неё. Общей escHtml_ в index.html нет - те,
    что есть, приватны внутри чужих IIFE. */
+function capFirst(s) { s = String(s || ''); return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; } /* «буровая Liebherr…» -> «Буровая Liebherr…» */
 function esc(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -2296,8 +2297,9 @@ function fetchCargo(q) {
     var cat = items.filter(function (i) { return i.src === 'catalog'; }), his = items.filter(function (i) { return i.src === 'history'; });
     var row = function (i) {
       var sub = (i.category ? esc(i.category) : '') + (i.n ? (i.category ? ' · ' : '') + 'возили ' + i.n + '×' : '');
-      return '<div class="op2-it op2-cargo-it" data-name="' + esc(i.name) + '" data-w="' + esc(i.weight_t || '') + '" data-dims="' + esc(i.dims || '') + '" data-l="' + esc(i.length_m || '') + '" data-wd="' + esc(i.width_m || '') + '" data-h="' + esc(i.height_m || '') + '" data-note="' + esc(i.note || '') + '">' +
-        '<div class="op2-cargo-main"><span class="op2-cargo-name">' + esc(i.name) + '</span>' + (sub ? '<span class="op2-cargo-sub">' + sub + '</span>' : '') + '</div>' +
+      var nameCap = capFirst(i.name);
+      return '<div class="op2-it op2-cargo-it" data-name="' + esc(nameCap) + '" data-w="' + esc(i.weight_t || '') + '" data-dims="' + esc(i.dims || '') + '" data-l="' + esc(i.length_m || '') + '" data-wd="' + esc(i.width_m || '') + '" data-h="' + esc(i.height_m || '') + '" data-note="' + esc(i.note || '') + '">' +
+        '<div class="op2-cargo-main"><span class="op2-cargo-name">' + esc(nameCap) + '</span>' + (sub ? '<span class="op2-cargo-sub">' + sub + '</span>' : '') + '</div>' +
         '<div class="op2-cargo-meta">' + (i.weight_t ? '<span class="op2-cargo-w">' + esc(i.weight_t) + ' т</span>' : '') + (i.dims ? '<span class="op2-cargo-dims">' + esc(i.dims) + '</span>' : '') + '</div></div>';
     };
     if (cat.length) h += '<div class="op2-sec">Справочник техники</div>' + cat.map(row).join('');

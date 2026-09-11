@@ -116,7 +116,24 @@ var S = {
      Единственное исключение из деликатного регистра. */
   otboy: function () { blip(320, 150, .35, .09, 'sawtooth'); blip(640, 300, .18, .03, 'square'); },
   /* новая ПОДТВЕРЖДЁННАЯ заявка у логиста - мажорное арпеджио C5-E5-G5-C6 */
-  newOrder: function () { [[523, 0], [659, 90], [784, 180], [1047, 270]].forEach(function (p) { setTimeout(function () { blip(p[0], p[0] * 1.01, .16, .045); }, p[1]); }); }
+  newOrder: function () { [[523, 0], [659, 90], [784, 180], [1047, 270]].forEach(function (p) { setTimeout(function () { blip(p[0], p[0] * 1.01, .16, .045); }, p[1]); }); },
+  /* «От кого» - раскрытие ряда юрлиц (Влад 11.09: «звук должен соответствовать
+     раскрытию, не просто пик, а как раскрытие гармошки»). Не один тон, а бег коротких
+     нот вверх, ОДНА НА КАЖДЫЙ появляющийся чип, на том же 35мс шаге, что несёт
+     .op2-ent-enter в CSS - ухо и глаз раскрывают меха вместе. triangle, не sine -
+     чуть «язычковый» тембр, без электронной чистоты. Свёртка - тот же бег вниз,
+     втрое короче: спрятать проще, чем достать. */
+  unfold: function (n) {
+    var steps = Math.max(1, Math.min(8, n || 1));
+    for (var i = 0; i < steps; i++) {
+      (function (i) { setTimeout(function () { blip(258 + i * 32, 278 + i * 32, .05, .026, 'triangle'); }, i * 35); })(i);
+    }
+  },
+  fold: function () {
+    for (var i = 0; i < 3; i++) {
+      (function (i) { setTimeout(function () { blip(360 - i * 40, 340 - i * 40, .04, .022, 'triangle'); }, i * 22); })(i);
+    }
+  }
 };
 
 /* ───────────────────────── доступ к API ─────────────────────────
@@ -402,7 +419,7 @@ function buildDom() {
    Элементы с собственным звуком результата (RESULT_SEL) из nav исключены, чтобы
    не было двойного щелчка. */
 var NAV_SEL = '.op2-tab,.op2-chip,.op2-ghost,.op2-dbtn,.op2-slot,.op2-veh,.op2-st-chip,.op2-sugg .op2-it,.op2-free .op2-day,.op2-stpop button,.op2-pop .op2-vi,.op2-copybtn,.op2-take,.op2-dt,.op2-mgr-tbl tbody tr,.op2-log-body tr,.op2-switch button,[data-nav-sound]';
-var RESULT_SEL = '#op2-f-save,#op2-rp-go,#op2-pop-ok,.op2-dok,.op2-unset-ot,.op2-slot.op2-ot,#op2-drv-copy,#op2-drv-max,#op2-d-drv-ok,.op2-dl,.op2-copybtn,.op2-stpop button,.op2-pop .op2-vi[data-act="unset"],#op2-snd,.op2-blocked';
+var RESULT_SEL = '#op2-f-save,#op2-rp-go,#op2-pop-ok,.op2-dok,.op2-unset-ot,.op2-slot.op2-ot,#op2-drv-copy,#op2-drv-max,#op2-d-drv-ok,.op2-dl,.op2-copybtn,.op2-stpop button,.op2-pop .op2-vi[data-act="unset"],#op2-snd,.op2-blocked,#op2-f-ent .op2-chip';
 
 function wire() {
   var root = $('#op2-root');
@@ -1809,6 +1826,40 @@ function quickTimes(ds) {
   if (!list.length) return { list: ['08:00', '09:00', '10:00', '11:00'], why: 'сегодня часов не осталось - это уже утро' };
   return { list: list, why: 'ближайшие от ' + hhmm(nowMin()) };
 }
+/* «От кого» - сворачиваемый ряд (вариант А мозгового штурма, Влад 11.09: «однозначно
+   вариант А»). Свёрнуто видно только выбранное юрлицо + «Ещё · N» - остальные не в
+   DOM вовсе, до клика по «Ещё». Заново собирается и при выборе последнего заказчика
+   (см. loadCustomerHistory ниже - там раньше искали чип по data-ent прямо в разметке,
+   теперь он может быть свёрнут, поэтому там тоже зовём entRowHtml). */
+function entChipHtml(e2, on) {
+  var ready = !!(e2.has_bank && e2.has_stamp);
+  var ttl = [e2.full_name || e2.name, e2.inn ? 'ИНН ' + e2.inn : '', e2.director || '', ready ? 'банк и печать есть' : ((e2.has_bank ? '' : 'нет банка ') + (e2.has_stamp ? '' : 'нет печати'))].filter(Boolean).join(' · ');
+  return '<button class="op2-chip' + (on ? ' op2-on' : '') + '" data-ent="' + esc(e2.id) + '" title="' + esc(ttl) + '"' + (ready ? '' : ' style="opacity:.55"') + '>' + esc(e2.short || e2.name) + (ready ? '' : ' ·') + '</button>';
+}
+function entRowHtml(curId) {
+  var list = entities();
+  var cur = list.filter(function (e2) { return String(e2.id) === String(curId); })[0] || list[0];
+  var restN = Math.max(0, list.length - 1);
+  return (cur ? entChipHtml(cur, true) : '') +
+    (restN ? '<button class="op2-chip" data-ent-more>Ещё <span class="op2-mono" style="color:var(--tint-amber)">' + restN + '</span></button>' : '');
+}
+function collapseEntRow(seg, curId) { seg.innerHTML = entRowHtml(curId); }
+function expandEntRow(seg) {
+  var more = seg.querySelector('[data-ent-more]'); if (!more) return;
+  var curBtn = seg.querySelector('.op2-chip.op2-on');
+  var curId = curBtn ? curBtn.dataset.ent : '';
+  var oldRect = more.getBoundingClientRect();
+  var rest = entities().filter(function (e2) { return String(e2.id) !== String(curId); });
+  more.outerHTML = '<button class="op2-chip op2-ent-close" data-ent-close>×</button>';
+  seg.insertAdjacentHTML('beforeend', rest.map(function (e2) { return entChipHtml(e2, false).replace('class="op2-chip', 'class="op2-chip op2-ent-enter'); }).join(''));
+  var closeBtn = seg.querySelector('.op2-ent-close');
+  var newRect = closeBtn.getBoundingClientRect();
+  closeBtn.style.transform = 'translate(' + (oldRect.left - newRect.left) + 'px,' + (oldRect.top - newRect.top) + 'px)';
+  requestAnimationFrame(function () { closeBtn.style.transform = 'none'; });
+  $$('.op2-ent-enter', seg).forEach(function (c, i) { c.style.animationDelay = (i * 35) + 'ms'; });
+  S.unfold(rest.length);
+}
+
 function openDrawerForm(o, repeat, who, prefill) {
   formMode = true; formRepeat = !!repeat; formPrefill = !!prefill; formWho = who || (isMgr() ? 'mgr' : 'log');
   formOrder = o || null;
@@ -1859,11 +1910,7 @@ function renderForm() {
       '</div><span class="op2-hint" id="op2-f-eq-hint">' + (curEq ? 'Выбрано: ' + esc(curEq) : 'Основные - чипами, остальная техника в «ещё…»') + '</span></div>' +
 
       '<div class="op2-fld op2-full"><label>От кого (исполнитель с нашей стороны)</label><div class="op2-seg" id="op2-f-ent">' +
-        entities().map(function (e2) {
-          var ready = !!(e2.has_bank && e2.has_stamp);
-          var ttl = [e2.full_name || e2.name, e2.inn ? 'ИНН ' + e2.inn : '', e2.director || '', ready ? 'банк и печать есть' : ((e2.has_bank ? '' : 'нет банка ') + (e2.has_stamp ? '' : 'нет печати'))].filter(Boolean).join(' · ');
-          return '<button class="op2-chip' + (String(e2.id) === curEnt ? ' op2-on' : '') + '" data-ent="' + esc(e2.id) + '" title="' + esc(ttl) + '"' + (ready ? '' : ' style="opacity:.55"') + '>' + esc(e2.short || e2.name) + (ready ? '' : ' ·') + '</button>';
-        }).join('') +
+        entRowHtml(curEnt) +
       '</div><span class="op2-hint">Реквизиты, печать и подпись этого юрлица уйдут в договор-заявку. С точкой - в справочнике нет банка или печати</span></div>' +
 
       (isLog ? '<div class="op2-fld op2-full"><label>Кто заказывает</label><div class="op2-seg" id="op2-f-who" style="flex-wrap:wrap">' +
@@ -1973,9 +2020,24 @@ function wireForm() {
     S.nav();
   });
   $('#op2-f-ent').addEventListener('click', function (e) {
-    var b = e.target.closest('.op2-chip'); if (!b) return;
-    $$('.op2-chip', this).forEach(function (x) { x.classList.remove('op2-on'); });
-    b.classList.add('op2-on');
+    var seg = this;
+    // stopPropagation - ОБЯЗАТЕЛЬНО: expandEntRow/collapseEntRow меняют DOM (outerHTML/
+    // innerHTML), из-за чего e.target становится «отвязанным» узлом ДО того, как клик
+    // всплывёт до общего звукового делегата на document - .closest(RESULT_SEL) на
+    // отвязанном узле не находит #op2-f-ent предком и НЕ срабатывает, генерический
+    // S.nav() наложился бы поверх S.unfold()/S.fold() (поймано на живой проверке 11.09 -
+    // звук «гармошки» шёл вместе с обычным щелчком, а не вместо него). Звук здесь и
+    // только здесь - решаем сами, выше не пускаем.
+    e.stopPropagation();
+    if (e.target.closest('[data-ent-more]')) { expandEntRow(seg); return; }
+    if (e.target.closest('[data-ent-close]')) {
+      var cur0 = seg.querySelector('.op2-chip.op2-on');
+      S.fold(); collapseEntRow(seg, cur0 ? cur0.dataset.ent : ''); return;
+    }
+    var pick = e.target.closest('.op2-chip[data-ent]'); if (!pick) return;
+    var wasOpen = seg.querySelectorAll('.op2-chip[data-ent]').length > 1;
+    collapseEntRow(seg, pick.dataset.ent);
+    if (wasOpen) S.fold();
   });
   var gab = $('#op2-f-gab');
   if (gab) gab.addEventListener('click', function (e) {
@@ -2176,13 +2238,15 @@ function fetchCustomerHistory(name) {
     if (c && !$('#op2-f-custcontact').value.trim()) {
       $('#op2-f-custcontact-hint').textContent = 'Из истории: ' + [c.name, fmtPhone(c.phone)].filter(Boolean).join(' · ');
     }
-    /* «как в прошлой заявке этого заказчика» - только если менеджер ещё не выбрал сам */
-    if (d.last_executor_entity_id && !formOrder) {
-      var b = $('#op2-f-ent .op2-chip[data-ent="' + d.last_executor_entity_id + '"]');
-      if (b && !$('#op2-f-ent .op2-chip.op2-on[data-ent="' + d.last_executor_entity_id + '"]')) {
-        $$('#op2-f-ent .op2-chip').forEach(function (x) { x.classList.remove('op2-on'); });
-        b.classList.add('op2-on');
-      }
+    /* «как в прошлой заявке этого заказчика» - только если менеджер ещё не выбрал сам.
+       Ряд «От кого» теперь сворачиваемый (вариант А) - искомое юрлицо может быть НЕ в
+       DOM (спрятано под «Ещё»), поэтому подставляем через collapseEntRow, а не прямым
+       classList - она сама пересобирает ряд с нужным юрлицом видимым. */
+    var entSeg = $('#op2-f-ent');
+    var curOn = entSeg && entSeg.querySelector('.op2-chip.op2-on');
+    if (d.last_executor_entity_id && !formOrder && entSeg &&
+        (!curOn || String(curOn.dataset.ent) !== String(d.last_executor_entity_id))) {
+      collapseEntRow(entSeg, d.last_executor_entity_id);
     }
   }).catch(function () {});
 }

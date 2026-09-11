@@ -155,6 +155,15 @@ function apiPostJson(path, obj) {
 /* Единый разбор ответа: ошибка - всегда тостом, это единственный канал (ГОСТ) */
 function ok_(r, okFn, failMsg) {
   if (r && r.ok && r.data && r.data.error == null) { if (okFn) okFn(r.data); return true; }
+  /* Протухшая сессия (401 needLogin) - на экран входа, как весь дашборд; иначе форма молча
+     рендерилась без чипов (тот же класс бага, что у механика 11.09 - память
+     project_mechanic_login_needlogin_bypass_bug). */
+  if (r && r.data && r.data.needLogin && typeof showLoginScreen === 'function') {
+    stopPolling();
+    try { if (typeof clearAuthTokens_ === 'function') clearAuthTokens_(); } catch (e) {}
+    showLoginScreen(r.data.error || 'Сессия истекла - войдите заново');
+    return false;
+  }
   var msg = (r && r.data && r.data.error) ? r.data.error : (failMsg || 'сервер недоступен');
   S.attention();
   toast('<span class="op2-bad">Не получилось</span> · ' + esc(msg));
@@ -574,7 +583,7 @@ function loadMeta() {
     if (r && r.ok && r.data && !r.data.error) {
       META = r.data;
       if (r.data.me) applyMe(r.data.me);
-    }
+    } else { ok_(r, null, 'справочники не загрузились'); } /* 401 -> экран входа, прочее - тост */
   }).catch(function () {});
 }
 function applyMe(me) {

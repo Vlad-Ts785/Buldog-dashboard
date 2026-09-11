@@ -134,13 +134,13 @@ module.exports = function (deps) {
     const d = {}; rows.forEach((r) => { (d[r.kind] = d[r.kind] || []).push({ value: r.value, primary: !!r.is_primary }); });
     return d;
   }
-  async function ownEntities() {
+  async function ownEntities(internalCustomers) { // internalCustomers=true -> свои юрлица + База (чипы «Кто заказывает» у логиста)
     const [rows] = await pool.query(
-      `SELECT id, name, full_name, short_name, own_sort, inn, kpp, director_name, signer_short, bank_name, bank_account, stamp_file, signature_file
-         FROM sprav_legal_entities WHERE is_own = 1 AND deleted_at IS NULL ORDER BY COALESCE(own_sort, 999), name`);
+      `SELECT id, name, full_name, short_name, own_sort, inn, kpp, director_name, signer_short, bank_name, bank_account, stamp_file, signature_file, is_own, internal_customer
+         FROM sprav_legal_entities WHERE ${internalCustomers ? "internal_customer = 1" : "is_own = 1"} AND deleted_at IS NULL ORDER BY COALESCE(own_sort, 999), name`);
     return rows.map((r) => ({
       id: r.id, name: r.name, short: r.short_name || r.name, full_name: r.full_name || r.name, inn: r.inn, director: r.director_name, signer: r.signer_short,
-      has_bank: !!(r.bank_name && r.bank_account), has_stamp: !!(r.stamp_file && r.signature_file),
+      is_own: !!r.is_own, has_bank: !!(r.bank_name && r.bank_account), has_stamp: !!(r.stamp_file && r.signature_file),
     }));
   }
 
@@ -181,7 +181,7 @@ module.exports = function (deps) {
   });
 
   app.get("/api/orders/meta", ...gate, async (req, res) => {
-    try { res.json({ dictionary: await dictionary(), own_entities: await ownEntities(), me: await me(req) }); }
+    try { res.json({ dictionary: await dictionary(), own_entities: await ownEntities(false), internal_customers: await ownEntities(true), me: await me(req) }); }
     catch (err) { console.error("orders meta:", err); fail(res, 500, String(err.message || err)); }
   });
 

@@ -259,3 +259,13 @@ UPDATE sprav_legal_entities SET short_name='МК',      own_sort=7 WHERE id='le_
 UPDATE sprav_legal_entities SET short_name='УМИАТ',   own_sort=8 WHERE id='le_mtgbnfm50lf11i';
 SELECT short_name, own_sort, name FROM sprav_legal_entities WHERE is_own=1 ORDER BY own_sort;
 SELECT value,is_primary,sort FROM plan_dictionary WHERE kind='equipment' ORDER BY is_primary DESC, sort;
+-- 11.09 Влад: у логистов «Кто заказывает» - те же короткие чипы своих юрлиц + БАЗА.
+-- Флаг internal_customer: кто может быть ВНУТРЕННИМ заказчиком (свои юрлица + База); «От кого» остаётся is_own=1.
+SET @c := (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='sprav_legal_entities' AND COLUMN_NAME='internal_customer');
+SET @sql := IF(@c=0,'ALTER TABLE sprav_legal_entities ADD COLUMN internal_customer TINYINT(1) NOT NULL DEFAULT 0','SELECT 1');
+PREPARE st FROM @sql; EXECUTE st; DEALLOCATE PREPARE st;
+UPDATE sprav_legal_entities SET internal_customer=1 WHERE is_own=1 AND deleted_at IS NULL;
+INSERT INTO sprav_legal_entities (id, name, full_name, short_name, own_sort, is_own, internal_customer, notes, created_by, updated_by)
+SELECT 'le_internal_base', 'База', 'База (внутренний заказчик - рейсы для базы)', 'БАЗА', 9, 0, 1, 'Внутренний заказчик для заявок логистов (Влад 11.09). Если в 1С есть свой контрагент «База» - заменить на него', 'claude:2026-09-11', 'claude:2026-09-11'
+WHERE NOT EXISTS (SELECT 1 FROM sprav_legal_entities WHERE id='le_internal_base');
+SELECT id, short_name, own_sort, is_own, internal_customer FROM sprav_legal_entities WHERE internal_customer=1 ORDER BY own_sort;

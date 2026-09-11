@@ -1769,6 +1769,7 @@ function deleteOrder(o) {
 var formMode = false, formWho = 'mgr', formOrder = null, formRepeat = false;
 function dict(name) { return (META && META.dictionary && META.dictionary[name]) || []; }
 function entities() { return (META && META.own_entities) || []; }
+function internalCustomers() { return (META && (META.internal_customers || META.own_entities)) || []; }
 function quickTimes(ds) {
   var isToday = ds === todayStr();
   if (!isToday) return { list: ['07:00', '08:00', '09:00', '10:00'], why: 'утро' };
@@ -1834,11 +1835,10 @@ function renderForm() {
         }).join('') +
       '</div><span class="op2-hint">Реквизиты, печать и подпись этого юрлица уйдут в договор-заявку. С точкой - в справочнике нет банка или печати</span></div>' +
 
-      (isLog ? '<div class="op2-fld op2-full"><label>Кто заказывает</label><select id="op2-f-who">' +
-        '<option value="">Внешний заказчик - ввести ниже</option>' +
-        '<optgroup label="Внутренние контрагенты (из Справочника юрлиц)">' +
-          entities().map(function (e2) { return '<option value="' + esc(e2.id) + '"' + (o && o.internal && String(o.customer_entity_id) === String(e2.id) ? ' selected' : '') + '>' + esc(e2.name) + '</option>'; }).join('') +
-        '</optgroup></select><span class="op2-hint">Внутренние заказы - те же заказчики, с суммой; список из Справочника, не из кода. В колонке «Мен.» у логистов - код логиста; менеджерам такая заявка не показывается</span></div>' : '') +
+      (isLog ? '<div class="op2-fld op2-full"><label>Кто заказывает</label><div class="op2-seg" id="op2-f-who" style="flex-wrap:wrap">' +
+        '<button class="op2-chip' + (!(o && o.internal) ? ' op2-on' : '') + '" data-who="" data-name="">Внешний заказчик</button>' +
+        internalCustomers().map(function (e2) { return '<button class="op2-chip' + (o && o.internal && String(o.customer_entity_id) === String(e2.id) ? ' op2-on' : '') + '" data-who="' + esc(e2.id) + '" data-name="' + esc(e2.name) + '" title="' + esc(e2.full_name || e2.name) + '">' + esc(e2.short || e2.name) + '</button>'; }).join('') +
+        '</div><span class="op2-hint">Внутренние заказы - с суммой, как обычные; менеджерам не показываются. Список - из Справочника юрлиц</span></div>' : '') +
 
       '<div class="op2-fld op2-sugg" id="op2-f-custbox"><label>Заказчик</label>' +
         '<input id="op2-f-cust" placeholder="Начни вводить - по первым буквам" autocomplete="off" value="' + esc(o ? o.customer : '') + '">' +
@@ -1954,16 +1954,17 @@ function wireForm() {
   });
   var fw = $('#op2-f-who');
   if (fw) {
-    fw.addEventListener('change', function () {
-      S.nav();
+    var applyWho = function (btn) {
       var fc = $('#op2-f-cust');
-      if (this.value) {
-        var name = this.options[this.selectedIndex].text;
-        fc.value = name; fc.readOnly = true;
-      } else if (fc.readOnly) { fc.value = ''; fc.readOnly = false; }
-      tickState();
+      if (btn.dataset.who) { fc.value = btn.dataset.name; fc.readOnly = true; }
+      else if (fc.readOnly) { fc.value = ''; fc.readOnly = false; }
+    };
+    fw.addEventListener('click', function (e) {
+      var b = e.target.closest('.op2-chip'); if (!b) return;
+      $$('#op2-f-who .op2-chip').forEach(function (x) { x.classList.remove('op2-on'); });
+      b.classList.add('op2-on'); applyWho(b); tickState();
     });
-    if (fw.value) { var fc0 = $('#op2-f-cust'); fc0.value = fw.options[fw.selectedIndex].text; fc0.readOnly = true; }
+    var wb0 = $('#op2-f-who .op2-chip.op2-on'); if (wb0 && wb0.dataset.who) applyWho(wb0);
   }
 
   /* подсказки заказчика */
@@ -2124,7 +2125,8 @@ function collectForm() {
     price: num($('#op2-f-price').value) || 0,
     payment_status: $('#op2-f-pay').value
   };
-  if (fw && fw.value) { payload.internal = 1; payload.customer_entity_id = fw.value; }
+  var whoBtn = fw ? $('#op2-f-who .op2-chip.op2-on') : null;
+  if (whoBtn && whoBtn.dataset.who) { payload.internal = 1; payload.customer_entity_id = whoBtn.dataset.who; }
   else if ($('#op2-f-cust').dataset.entityId) { payload.customer_entity_id = $('#op2-f-cust').dataset.entityId; }
   return payload;
 }

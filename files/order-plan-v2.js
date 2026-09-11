@@ -2295,9 +2295,10 @@ function fetchCargo(q) {
     var items = r.data.items || [], h = '';
     var cat = items.filter(function (i) { return i.src === 'catalog'; }), his = items.filter(function (i) { return i.src === 'history'; });
     var row = function (i) {
-      var meta = [i.weight_t ? i.weight_t + ' т' : '', i.dims || ''].filter(Boolean).join(' · ');
-      return '<div class="op2-it" data-name="' + esc(i.name) + '" data-w="' + esc(i.weight_t || '') + '" data-dims="' + esc(i.dims || '') + '" data-l="' + esc(i.length_m || '') + '" data-wd="' + esc(i.width_m || '') + '" data-h="' + esc(i.height_m || '') + '" data-note="' + esc(i.note || '') + '">' +
-        '<span>' + esc(i.name) + (i.category ? ' <span class="op2-dim op2-sm">· ' + esc(i.category) + '</span>' : '') + (i.n ? ' <span class="op2-dim op2-sm">· возили ' + i.n + '×</span>' : '') + '</span><span class="op2-m">' + esc(meta) + '</span></div>';
+      var sub = (i.category ? esc(i.category) : '') + (i.n ? (i.category ? ' · ' : '') + 'возили ' + i.n + '×' : '');
+      return '<div class="op2-it op2-cargo-it" data-name="' + esc(i.name) + '" data-w="' + esc(i.weight_t || '') + '" data-dims="' + esc(i.dims || '') + '" data-l="' + esc(i.length_m || '') + '" data-wd="' + esc(i.width_m || '') + '" data-h="' + esc(i.height_m || '') + '" data-note="' + esc(i.note || '') + '">' +
+        '<div class="op2-cargo-main"><span class="op2-cargo-name">' + esc(i.name) + '</span>' + (sub ? '<span class="op2-cargo-sub">' + sub + '</span>' : '') + '</div>' +
+        '<div class="op2-cargo-meta">' + (i.weight_t ? '<span class="op2-cargo-w">' + esc(i.weight_t) + ' т</span>' : '') + (i.dims ? '<span class="op2-cargo-dims">' + esc(i.dims) + '</span>' : '') + '</div></div>';
     };
     if (cat.length) h += '<div class="op2-sec">Справочник техники</div>' + cat.map(row).join('');
     if (his.length) h += '<div class="op2-sec">Уже возили</div>' + his.map(row).join('');
@@ -2314,10 +2315,14 @@ function guessGabarit(l, w, h) {
 }
 function applyCargo(d) {
   var fc = $('#op2-f-cargo'), fw = $('#op2-f-weight'), fd = $('#op2-f-dims'), note = $('#op2-f-note');
-  fc.value = d.name || '';
+  /* Влад: «выбрал один груз, затем другой - данные от первого не поменялись» - явный повторный выбор
+     из подсказки переписывает вес/габариты, даже если поля уже заполнены прошлым грузом. */
+  var prevName = fc.dataset.cargoName || '';
+  var overwrite = prevName && prevName !== d.name;
+  fc.value = d.name || ''; fc.dataset.cargoName = d.name || '';
   var auto = [];
-  if (d.w && !fw.value.trim()) { fw.value = d.w; auto.push('вес'); }
-  if (d.dims && !fd.value.trim()) { fd.value = d.dims; auto.push('Д×Ш×В'); }
+  if (d.w && (overwrite || !fw.value.trim())) { fw.value = d.w; auto.push('вес'); }
+  if (d.dims && (overwrite || !fd.value.trim())) { fd.value = d.dims; auto.push('Д×Ш×В'); }
   var g = guessGabarit(d.l, d.wd, d.h);
   if (g) { $$('#op2-f-gab .op2-chip').forEach(function (x) { x.classList.toggle('op2-on', x.dataset.gab === g); }); auto.push('габарит'); }
   if (auto.length) {

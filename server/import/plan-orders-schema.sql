@@ -241,3 +241,21 @@ UPDATE sprav_legal_entities SET stamp_file='yard_imperial_stamp.png', signature_
   WHERE id='le_mtgbmfjprq29v0' AND stamp_file IS NULL;
 UPDATE sprav_legal_entities SET stamp_file='tehnopark_stamp.png', signature_file='tehnopark_signature_almashova.png', signer_short='Алмашова М. Н.'
   WHERE id='le_mtgbvjwv2hjya3' AND stamp_file IS NULL;
+-- 11.09 Влад: «тип техники сделай Трал и Длинномер» - чипами только два, остальное в «ещё…»
+INSERT IGNORE INTO plan_dictionary (kind, value, sort, is_primary) VALUES ('equipment','Трал',1,1);
+UPDATE plan_dictionary SET is_primary = IF(value IN ('Трал','Длинномер'),1,0) WHERE kind='equipment';
+UPDATE plan_dictionary SET sort=2 WHERE kind='equipment' AND value='Длинномер';
+-- «От кого» - короткие имена и порядок (Влад 11.09): Бульдог, ЯРД, ТП, КМ, СО, СТ, МК, УМИАТ - поля справочника, не код
+SET @c := (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='sprav_legal_entities' AND COLUMN_NAME='short_name');
+SET @sql := IF(@c=0,'ALTER TABLE sprav_legal_entities ADD COLUMN short_name VARCHAR(30) DEFAULT NULL, ADD COLUMN own_sort INT DEFAULT NULL','SELECT 1');
+PREPARE st FROM @sql; EXECUTE st; DEALLOCATE PREPARE st;
+UPDATE sprav_legal_entities SET short_name='Бульдог', own_sort=1 WHERE id='le_mtgbiyw4gzkq53';
+UPDATE sprav_legal_entities SET short_name='ЯРД',     own_sort=2 WHERE id='le_mtgbmfjprq29v0';
+UPDATE sprav_legal_entities SET short_name='ТП',      own_sort=3 WHERE id='le_mtgbvjwv2hjya3';
+UPDATE sprav_legal_entities SET short_name='КМ',      own_sort=4 WHERE id='le_mtgd92xilswclx';
+UPDATE sprav_legal_entities SET short_name='СО',      own_sort=5 WHERE id='le_mtgbtv1jwg29pn';
+UPDATE sprav_legal_entities SET short_name='СТ',      own_sort=6 WHERE id='le_mtgdavb230fzxz';
+UPDATE sprav_legal_entities SET short_name='МК',      own_sort=7 WHERE id='le_mtgbuqo7dyylxt';
+UPDATE sprav_legal_entities SET short_name='УМИАТ',   own_sort=8 WHERE id='le_mtgbnfm50lf11i';
+SELECT short_name, own_sort, name FROM sprav_legal_entities WHERE is_own=1 ORDER BY own_sort;
+SELECT value,is_primary,sort FROM plan_dictionary WHERE kind='equipment' ORDER BY is_primary DESC, sort;

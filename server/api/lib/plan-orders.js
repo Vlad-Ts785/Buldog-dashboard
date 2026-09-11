@@ -136,10 +136,10 @@ module.exports = function (deps) {
   }
   async function ownEntities() {
     const [rows] = await pool.query(
-      `SELECT id, name, full_name, inn, kpp, director_name, signer_short, bank_name, bank_account, stamp_file, signature_file
-         FROM sprav_legal_entities WHERE is_own = 1 AND deleted_at IS NULL ORDER BY name`);
+      `SELECT id, name, full_name, short_name, own_sort, inn, kpp, director_name, signer_short, bank_name, bank_account, stamp_file, signature_file
+         FROM sprav_legal_entities WHERE is_own = 1 AND deleted_at IS NULL ORDER BY COALESCE(own_sort, 999), name`);
     return rows.map((r) => ({
-      id: r.id, name: r.name, full_name: r.full_name || r.name, inn: r.inn, director: r.director_name, signer: r.signer_short,
+      id: r.id, name: r.name, short: r.short_name || r.name, full_name: r.full_name || r.name, inn: r.inn, director: r.director_name, signer: r.signer_short,
       has_bank: !!(r.bank_name && r.bank_account), has_stamp: !!(r.stamp_file && r.signature_file),
     }));
   }

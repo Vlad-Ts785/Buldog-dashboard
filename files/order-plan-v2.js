@@ -1790,7 +1790,8 @@ function renderForm() {
   var eqPrimary = eq.filter(function (x) { return x.primary; });
   var eqRest = eq.filter(function (x) { return !x.primary; });
   var curEq = o ? (o.equipment_type || '') : (eqPrimary[0] ? eqPrimary[0].value : '');
-  var curGab = o ? (o.gabarit || '') : (dict('gabarit')[0] || '');
+  var gabs = dict('gabarit').map(function (g) { return (g && g.value) || g; }); /* словарь отдаёт {value, primary} */
+  var curGab = o ? (o.gabarit || '') : (gabs[0] || '');
   var curEnt = o && o.executor_entity_id ? String(o.executor_entity_id) : (entities()[0] ? String(entities()[0].id) : '');
 
   function optList(list, cur) {
@@ -1807,7 +1808,7 @@ function renderForm() {
 
       '<div class="op2-fld"><label>Время подачи</label><div class="op2-timerow">' +
         '<button class="op2-stp" data-d="-30">−30</button>' +
-        '<input id="op2-f-time" placeholder="700 → 07:00" autocomplete="off" value="' + esc(o ? oTime(o) : '') + '">' +
+        '<input id="op2-f-time" placeholder="--:--" title="Можно набрать 700 - станет 07:00" autocomplete="off" value="' + esc(o ? oTime(o) : '') + '">' +
         '<button class="op2-stp" data-d="30">+30</button>' +
         '<span class="op2-hint">↑/↓ ±30 мин</span></div><div class="op2-qk" id="op2-f-qk"></div></div>' +
 
@@ -1820,9 +1821,9 @@ function renderForm() {
         entities().map(function (e2) {
           var ready = !!(e2.has_bank && e2.has_stamp);
           var ttl = [e2.full_name || e2.name, e2.inn ? 'ИНН ' + e2.inn : '', e2.director || '', ready ? 'банк и печать есть' : ((e2.has_bank ? '' : 'нет банка ') + (e2.has_stamp ? '' : 'нет печати'))].filter(Boolean).join(' · ');
-          return '<button class="op2-chip' + (String(e2.id) === curEnt ? ' op2-on' : '') + '" data-ent="' + esc(e2.id) + '" title="' + esc(ttl) + '"' + (ready ? '' : ' style="opacity:.55"') + '>' + esc(e2.name) + (ready ? '' : ' ·') + '</button>';
+          return '<button class="op2-chip' + (String(e2.id) === curEnt ? ' op2-on' : '') + '" data-ent="' + esc(e2.id) + '" title="' + esc(ttl) + '"' + (ready ? '' : ' style="opacity:.55"') + '>' + esc(e2.short || e2.name) + (ready ? '' : ' ·') + '</button>';
         }).join('') +
-      '</div><span class="op2-hint">Список - из Справочника юрлиц (свои), не из кода. Реквизиты, директор, печать и подпись этого юрлица попадут в договор-заявку. С точкой - в справочнике нет банка или печати, договор от них не сформируется</span></div>' +
+      '</div><span class="op2-hint">Реквизиты, печать и подпись этого юрлица уйдут в договор-заявку. С точкой - в справочнике нет банка или печати</span></div>' +
 
       (isLog ? '<div class="op2-fld op2-full"><label>Кто заказывает</label><select id="op2-f-who">' +
         '<option value="">Внешний заказчик - ввести ниже</option>' +
@@ -1847,7 +1848,7 @@ function renderForm() {
       '<div class="op2-fld"><label>Вес, т</label><input id="op2-f-weight" class="op2-mono" inputmode="decimal" placeholder="8" autocomplete="off" value="' + esc(o ? (o.cargo_weight_t || '') : '') + '"></div>' +
       '<div class="op2-fld"><label>Габариты груза</label><input id="op2-f-dims" placeholder="Д × Ш × В" autocomplete="off" value="' + esc(o ? (o.cargo_dims || '') : '') + '"></div>' +
       '<div class="op2-fld"><label>Габарит</label><div class="op2-seg" id="op2-f-gab">' +
-        dict('gabarit').map(function (g) { return '<button class="op2-chip' + (g === curGab ? ' op2-on' : '') + '" data-gab="' + esc(g) + '">' + esc(g) + '</button>'; }).join('') +
+        gabs.map(function (g) { return '<button class="op2-chip' + (g === curGab ? ' op2-on' : '') + '" data-gab="' + esc(g) + '">' + esc(g) + '</button>'; }).join('') +
       '</div></div>' +
       '<div class="op2-fld"><label>Документы</label><select id="op2-f-docs"><option value="">—</option>' + optList(dict('documents'), o ? o.documents : '') + '</select></div>' +
       '<div class="op2-fld"><label>Условия переработки</label><select id="op2-f-rework"><option value="">—</option>' + optList(dict('rework'), o ? o.rework_terms : '') + '</select></div>' +

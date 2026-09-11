@@ -253,9 +253,10 @@ function buildDom() {
       /* страховка: старый код страницы (loadOrderPlanData/renderOrderPlan) больше
          не вызывается, но если кто-то дёрнет его из другого чата - не упадёт */
       '<div id="order-plan-content" class="op2-hidden"></div>' +
+      /* 11.09, Влад: «два раза Задание Задание выглядит глупо» - заголовок сверху уже даёт
+         дашборд (page-title = PAGE_TITLES['order-plan']), здесь оставляем только подстрочник. */
       '<div class="op2-page-head">' +
-        '<h2 id="op2-title">Задание</h2>' +
-        '<span class="op2-sub" id="op2-sub"></span>' +
+        '<span class="op2-sub op2-sub-main" id="op2-sub"></span>' +
         '<div class="op2-switch op2-hidden" id="op2-switch" role="tablist">' +
           '<button data-scr="mgr" role="tab">Менеджер · Мои заявки</button>' +
           '<button data-scr="log" role="tab">Логист · Заявки</button>' +
@@ -734,7 +735,6 @@ function renderAll() {
   $('#op2-skel').classList.toggle('op2-hidden', !!ME);
   $('#op2-scr-mgr').classList.toggle('op2-on', !!ME && isMgr());
   $('#op2-scr-log').classList.toggle('op2-on', !!ME && !isMgr());
-  $('#op2-title').textContent = 'Задание'; /* 11.09, Влад: «называется просто Задание» - у обеих ролей */
   if (ME && ME.role === 'admin') syncSwitch();
   $('#op2-mgr-date').value = TO_DATE ? todayStr() : DATE;
   $('#op2-log-date').value = DATE;

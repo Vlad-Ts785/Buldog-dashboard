@@ -1860,6 +1860,49 @@ function expandEntRow(seg) {
   S.unfold(rest.length);
 }
 
+/* «Тип техники» - тот же приём, перенесён по превью 11.09 (Влад: «давай внедряй»).
+   Отличие от «От кого»: тут ВСЕГДА видны оба основных типа (Трал, Длинномер) - это не
+   "текущий выбор", а быстрый доступ к двум самым частым; выбор виден третьим - .op2-on
+   на одном из чипов (основном или раскрытом). При выборе из «Ещё» ряд сворачивается
+   обратно (сам выбор не помещается среди двух постоянных мест) - вместо чипа его
+   показывает текст-подсказка #op2-f-eq-hint, как раньше показывал <select>.
+   seg.dataset.cur хранит текущее значение НЕЗАВИСИМО от того, виден ли его чип прямо
+   сейчас - «×» без выбора обязан вернуть то, что было, а не потерять его.
+   Устаревший тип (в заявке уже стоит, но в справочнике деактивирован - напр. старые
+   градации трала по тоннажу при переходе на 4 позиции 11.09) показывается ОТДЕЛЬНЫМ
+   тусклым чипом рядом с основными, а не молча теряется - тот же приём, что «нет банка»
+   у юрлиц: чип есть, просто помечен как проблемный. */
+function eqChipHtml(x, on, extraCls, gone) {
+  return '<button class="op2-chip' + (on ? ' op2-on' : '') + (extraCls ? ' ' + extraCls : '') + '" data-eq="' + esc(x.value) + '"' +
+    (gone ? ' title="Убрано из справочника - осталось только в этой заявке"' : '') + '>' + esc(x.value) + (gone ? ' ·' : '') + '</button>';
+}
+function eqRowHtml(curVal) {
+  var eq = dict('equipment');
+  var eqPrimary = eq.filter(function (x) { return x.primary; });
+  var eqRest = eq.filter(function (x) { return !x.primary; });
+  var isKnown = eqPrimary.concat(eqRest).some(function (x) { return x.value === curVal; });
+  var html = eqPrimary.map(function (x) { return eqChipHtml(x, x.value === curVal); }).join('');
+  if (curVal && !isKnown) html += eqChipHtml({ value: curVal }, true, 'op2-eq-gone', true);
+  if (eqRest.length) html += '<button class="op2-chip" data-eq-more>Ещё <span class="op2-mono" style="color:var(--tint-amber)">' + eqRest.length + '</span></button>';
+  return html;
+}
+function collapseEqRow(seg, curVal) { seg.dataset.cur = curVal || ''; seg.innerHTML = eqRowHtml(curVal); }
+function expandEqRow(seg) {
+  var more = seg.querySelector('[data-eq-more]'); if (!more) return;
+  var curBtn = seg.querySelector('.op2-chip.op2-on');
+  var curVal = curBtn ? curBtn.dataset.eq : '';
+  var oldRect = more.getBoundingClientRect();
+  var rest = dict('equipment').filter(function (x) { return !x.primary && x.value !== curVal; });
+  more.outerHTML = '<button class="op2-chip op2-ent-close" data-eq-close>×</button>';
+  seg.insertAdjacentHTML('beforeend', rest.map(function (x) { return eqChipHtml(x, false, 'op2-ent-enter'); }).join(''));
+  var closeBtn = seg.querySelector('.op2-ent-close');
+  var newRect = closeBtn.getBoundingClientRect();
+  closeBtn.style.transform = 'translate(' + (oldRect.left - newRect.left) + 'px,' + (oldRect.top - newRect.top) + 'px)';
+  requestAnimationFrame(function () { closeBtn.style.transform = 'none'; });
+  $$('.op2-ent-enter', seg).forEach(function (c, i) { c.style.animationDelay = (i * 35) + 'ms'; });
+  S.unfold(rest.length);
+}
+
 function openDrawerForm(o, repeat, who, prefill) {
   formMode = true; formRepeat = !!repeat; formPrefill = !!prefill; formWho = who || (isMgr() ? 'mgr' : 'log');
   formOrder = o || null;
@@ -1878,10 +1921,8 @@ function renderForm() {
   $('#op2-d-sub').textContent = repeat ? 'все поля из №' + oNo(o) + ' · проверь дату и время'
     : humanDate(defDate) + ' · ' + ((ME && ME.name) || '') + (isLog ? ' · внутренняя перевозка или свой заказчик' : '');
 
-  var eq = dict('equipment');
-  var eqPrimary = eq.filter(function (x) { return x.primary; });
-  var eqRest = eq.filter(function (x) { return !x.primary; });
-  var curEq = o ? (o.equipment_type || '') : (eqPrimary[0] ? eqPrimary[0].value : '');
+  var eqPrimary0 = dict('equipment').filter(function (x) { return x.primary; });
+  var curEq = o ? (o.equipment_type || '') : (eqPrimary0[0] ? eqPrimary0[0].value : '');
   var gabs = dict('gabarit').map(function (g) { return (g && g.value) || g; }); /* словарь отдаёт {value, primary} */
   var curGab = o ? (o.gabarit || '') : (gabs[0] || '');
   var curEnt = o && o.executor_entity_id ? String(o.executor_entity_id) : (entities()[0] ? String(entities()[0].id) : '');
@@ -1904,10 +1945,9 @@ function renderForm() {
         '<button class="op2-stp" data-d="30">+30</button>' +
         '<span class="op2-hint">↑/↓ ±30 мин</span></div><div class="op2-qk" id="op2-f-qk"></div></div>' +
 
-      '<div class="op2-fld op2-full"><label>Тип техники</label><div class="op2-seg" id="op2-f-eq">' +
-        eqPrimary.map(function (x) { return '<button class="op2-chip' + (x.value === curEq ? ' op2-on' : '') + '" data-eq="' + esc(x.value) + '">' + esc(x.value) + '</button>'; }).join('') +
-        (eqRest.length ? '<select id="op2-f-eq-more" style="margin-left:4px"><option value="">ещё…</option>' + optList(eqRest, curEq) + '</select>' : '') +
-      '</div><span class="op2-hint" id="op2-f-eq-hint">' + (curEq ? 'Выбрано: ' + esc(curEq) : 'Основные - чипами, остальная техника в «ещё…»') + '</span></div>' +
+      '<div class="op2-fld op2-full"><label>Тип техники</label><div class="op2-seg" id="op2-f-eq" data-cur="' + esc(curEq) + '">' +
+        eqRowHtml(curEq) +
+      '</div><span class="op2-hint" id="op2-f-eq-hint">' + (curEq && !eqPrimary0.some(function (x) { return x.value === curEq; }) ? 'Выбрано: ' + esc(curEq) : 'Основные - чипами, остальная техника в «Ещё»') + '</span></div>' +
 
       '<div class="op2-fld op2-full"><label>От кого (исполнитель с нашей стороны)</label><div class="op2-seg" id="op2-f-ent">' +
         entRowHtml(curEnt) +
@@ -2006,18 +2046,27 @@ function wireForm() {
     drawQk();
   });
   $('#op2-f-eq').addEventListener('click', function (e) {
-    var b = e.target.closest('.op2-chip'); if (!b) return;
-    $$('.op2-chip', this).forEach(function (x) { x.classList.remove('op2-on'); });
-    b.classList.add('op2-on');
-    var sel = $('#op2-f-eq-more'); if (sel) sel.value = '';
-    $('#op2-f-eq-hint').textContent = 'Выбрано: ' + b.dataset.eq;
-  });
-  var eqMore = $('#op2-f-eq-more');
-  if (eqMore) eqMore.addEventListener('change', function () {
-    if (!this.value) return;
-    $$('#op2-f-eq .op2-chip').forEach(function (x) { x.classList.remove('op2-on'); });
-    $('#op2-f-eq-hint').textContent = 'Выбрано: ' + this.value;
-    S.nav();
+    var seg = this;
+    // stopPropagation - та же причина, что у «От кого» (см. коммент там): смена
+    // разметки внутри отвязывает e.target ДО всплытия к звуковому делегату на
+    // document, генерический S.nav() наложился бы поверх S.unfold()/S.fold().
+    e.stopPropagation();
+    var eqPrimaryNow = dict('equipment').filter(function (x) { return x.primary; });
+    function paintHint(val) {
+      $('#op2-f-eq-hint').textContent = (val && !eqPrimaryNow.some(function (x) { return x.value === val; }))
+        ? 'Выбрано: ' + val : 'Основные - чипами, остальная техника в «Ещё»';
+    }
+    if (e.target.closest('[data-eq-more]')) { expandEqRow(seg); return; }
+    if (e.target.closest('[data-eq-close]')) {
+      S.fold(); collapseEqRow(seg, seg.dataset.cur); paintHint(seg.dataset.cur); return;
+    }
+    var pick = e.target.closest('.op2-chip[data-eq]'); if (!pick) return;
+    // «Развёрнуто» - по наличию «×», а не по числу чипов: устаревший (op2-eq-gone) тип
+    // сам по себе добавляет чип и в свёрнутом виде, так что счёт по длине был бы неверен.
+    var wasOpen = !!seg.querySelector('[data-eq-close]');
+    collapseEqRow(seg, pick.dataset.eq);
+    paintHint(pick.dataset.eq);
+    if (wasOpen) S.fold();
   });
   $('#op2-f-ent').addEventListener('click', function (e) {
     var seg = this;
@@ -2136,10 +2185,14 @@ function tickState() {
   }
 }
 function formEq() {
-  var on = $('#op2-f-eq .op2-chip.op2-on');
-  if (on) return on.dataset.eq;
-  var sel = $('#op2-f-eq-more');
-  return sel && sel.value ? sel.value : '';
+  // ВАЖНО: не искать .op2-chip.op2-on - выбор из «Ещё» сворачивается назад в [Трал]
+  // [Длинномер][Ещё], сам чип выбранного (напр. «Тент») в DOM не остаётся вообще (виден
+  // только текстом в подсказке). seg.dataset.cur - единственный источник истины, который
+  // переживает сворачивание; собирается им же в collapseEqRow. Без этой правки форма
+  // тихо уходила бы на сервер с пустым типом техники при любом выборе не из primary -
+  // поймано на живой проверке 11.09.
+  var seg = $('#op2-f-eq');
+  return seg ? (seg.dataset.cur || '') : '';
 }
 function splitContact(s) {
   s = String(s || '').trim();

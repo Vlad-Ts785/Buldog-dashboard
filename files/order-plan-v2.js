@@ -1124,6 +1124,7 @@ function openRowMenu(x, y, items) {
 function mgrRowMenu(o) {
   return [
     { label: 'Повторить', fn: function () { openDrawerForm(o, true, 'mgr'); } },
+    { label: 'Повторить N раз', fn: function () { openRepeatBulk(o); } },
     { label: 'Повторить на несколько дней', fn: function () { openRepeatN(o); } },
     { label: 'Отбой', fn: function () { setStatus(o, 'ot'); } },
     { label: 'Копировать данные на пропуск', fn: function () { copyText(passText(o), 'Данные на пропуск скопированы'); } }
@@ -1672,6 +1673,7 @@ function renderView(o, who) {
     : '<button class="op2-del" id="op2-d-otboy">Отбой</button>' +
       '<button class="op2-ghost" id="op2-d-contract" title="Разовая договор-заявка заказчику: реквизиты, табличная часть, условия, печать и подпись - из заявки">Договор-заявка ⤓</button>' +
       '<button class="op2-ghost" id="op2-d-repeat">Повторить</button>' +
+      '<button class="op2-ghost" id="op2-d-repeat-bulk">Повторить N раз</button>' +
       '<button class="op2-ghost" id="op2-d-repeat-n">Повторить на несколько дней</button>') +
     '<button class="op2-dbtn op2-primary" id="op2-d-edit">Редактировать</button>';
 
@@ -1744,7 +1746,9 @@ function onDrawerFoot(e) {
   if (id === 'op2-d-done' && o) { setStatus(o, 'done'); closeDrawer(); return; }
   if (id === 'op2-d-contract' && o) { soon('Договор-заявка по №' + oNo(o)); return; }
   if (id === 'op2-d-repeat' && o) { openDrawerForm(o, true, isMgr() ? 'mgr' : 'log'); return; }
+  if (id === 'op2-d-repeat-bulk' && o) { openRepeatBulk(o); return; }
   if (id === 'op2-d-repeat-n' && o) { openRepeatN(o); return; }
+  if (id === 'op2-rb-go' && o) { runRepeatBulk(e.target, o); return; }
   if (id === 'op2-d-edit' && o) { openDrawerForm(o, false, isMgr() ? 'mgr' : 'log'); return; }
   if (id === 'op2-d-back' && o) { openDrawerView(o, isMgr() ? 'mgr' : 'log'); return; }
   if (id === 'op2-rp-go' && o) { runRepeatN(e.target, o); return; }
@@ -2229,6 +2233,122 @@ function runRepeatN(btn, o) {
       esc(good.map(function (x) { return '№' + ((x.r.data.day_no != null) ? x.r.data.day_no : '?') + ' ' + x.l; }).join(', ')) +
       (bad ? ' · <span class="op2-bad">' + bad + ' не создалось</span>' : '') + ' · логисты увидят на своих днях', null, 9000);
     loadOrders(); loadCounts();
+/* ══════════════════════════════ ПОВТОРИТЬ N РАЗ (ОДИН ДЕНЬ, С ИНТЕРВАЛОМ) ══════════════════════════════
+   Влад 11.09: «заказали 7 машин, все одно и то же, интервал подачи каждые 30 минут/час - нужно
+   быстро создать». Все новые заявки - «Не подтверждено» (default сервера), подтверждаются вручную
+   каждая отдельно - здесь ничего специально не проставляем. */
+var RB_INTERVALS = [
+  { m: 0, l: 'Без интервала' }, { m: 15, l: '15 мин' }, { m: 30, l: '30 мин' },
+  { m: 45, l: '45 мин' }, { m: 60, l: '1 час' }, { m: 90, l: '1,5 часа' }
+];
+function genRbTimes(start, interval, count) {
+  var base = tmin(start); if (base >= 1e9) base = nowMin();
+  var arr = []; for (var i = 0; i < count; i++) arr.push(hhmm(base + i * interval));
+  return arr;
+}
+function openRepeatBulk(o) {
+  drawerOrder = o; formMode = false;
+  openDrawer();
+  var interval = 30, count = 3;
+  var start = oTime(o) || hhmm(nowMin() + 30);
+  var times = genRbTimes(start, interval, count);
+  $('#op2-d-title').textContent = 'Повторить №' + oNo(o) + ' несколько раз';
+  $('#op2-d-sub').textContent = (o.customer || '') + ' · ' + (o.equipment_type || '') + ' · ' + dmy(o.service_date || DATE) +
+    ' · ' + (o.load_address || '—') + ' → ' + (o.unload_address || '—');
+  $('#op2-d-body').innerHTML =
+    '<div class="op2-sect"><div class="op2-t">Сколько машин</div><div class="op2-rb-count">' +
+      '<button class="op2-stp" id="op2-rb-cnt-m">−</button><span class="op2-rb-n" id="op2-rb-cnt-n"></span><button class="op2-stp" id="op2-rb-cnt-p">+</button>' +
+      '<div class="op2-qk" id="op2-rb-cnt-presets">' + [3, 5, 7, 10].map(function (n) { return '<button class="op2-chip" data-n="' + n + '">' + n + '</button>'; }).join('') + '</div>' +
+    '</div></div>' +
+    '<div class="op2-sect"><div class="op2-t">Через сколько подавать следующую</div><div class="op2-qk" id="op2-rb-interval">' +
+      RB_INTERVALS.map(function (x) { return '<button class="op2-chip' + (x.m === interval ? ' op2-on' : '') + '" data-m="' + x.m + '">' + x.l + '</button>'; }).join('') +
+    '</div></div>' +
+    '<div class="op2-sect"><div class="op2-t">Первая подача</div><div class="op2-timerow">' +
+      '<button class="op2-stp" data-d="-30" id="op2-rb-start-m">−30</button>' +
+      '<input id="op2-rb-start" value="' + esc(start) + '" placeholder="--:--" autocomplete="off">' +
+      '<button class="op2-stp" data-d="30" id="op2-rb-start-p">+30</button>' +
+      '<span class="op2-hint">задаёт время первой, дальше - по интервалу</span></div></div>' +
+    '<div class="op2-sect"><div class="op2-t">Время каждой заявки <span class="op2-dim op2-sm">- поправь любую вручную, ✕ убирает строку</span></div>' +
+      '<div class="op2-rb-list" id="op2-rb-list"></div></div>';
+  $('#op2-d-foot').innerHTML = '<button class="op2-ghost" id="op2-d-back">← Назад к заявке</button>' +
+    '<span class="op2-dim op2-sm" id="op2-rb-state"></span>' +
+    '<button class="op2-dbtn op2-primary" id="op2-rb-go">Создать заявки</button>';
+
+  function renderList() {
+    $('#op2-rb-cnt-n').textContent = times.length;
+    $('#op2-rb-list').innerHTML = times.map(function (t, i) {
+      return '<div class="op2-rb-row"><span class="op2-rb-no">' + (i + 1) + '</span>' +
+        '<input value="' + esc(t) + '" data-idx="' + i + '" placeholder="--:--" autocomplete="off">' +
+        '<button class="op2-rb-rm" data-idx="' + i + '" title="Убрать эту заявку из списка">✕</button></div>';
+    }).join('');
+    var g = $('#op2-rb-go');
+    g.textContent = 'Создать ' + times.length + ' ' + plural(times.length, 'заявку', 'заявки', 'заявок');
+    g.className = 'op2-dbtn op2-primary' + (times.length ? '' : ' op2-blocked');
+    $('#op2-rb-state').textContent = times.length ? 'все - «Не подтверждено», подтверждаете каждую отдельно' : 'список пуст';
+  }
+  function regen() { times = genRbTimes($('#op2-rb-start').value || start, interval, count); renderList(); }
+  renderList();
+
+  $('#op2-rb-cnt-m').addEventListener('click', function () { if (count > 1) { count--; times = times.slice(0, count); renderList(); } });
+  $('#op2-rb-cnt-p').addEventListener('click', function () {
+    count++; var last = times.length ? times[times.length - 1] : ($('#op2-rb-start').value || start);
+    times.push(hhmm(tmin(last) + interval)); renderList();
+  });
+  $('#op2-rb-cnt-presets').addEventListener('click', function (e) {
+    var b = e.target.closest('.op2-chip'); if (!b) return; count = +b.dataset.n; regen();
+  });
+  $('#op2-rb-interval').addEventListener('click', function (e) {
+    var b = e.target.closest('.op2-chip'); if (!b) return;
+    $$('.op2-chip', this).forEach(function (x) { x.classList.remove('op2-on'); }); b.classList.add('op2-on');
+    interval = +b.dataset.m; regen();
+  });
+  var stEl = $('#op2-rb-start');
+  stEl.addEventListener('blur', function () { this.value = normT(this.value) || start; regen(); });
+  $('#op2-rb-start-m').addEventListener('click', function () { stEl.value = hhmm(tmin(normT(stEl.value) || start) - 30); regen(); });
+  $('#op2-rb-start-p').addEventListener('click', function () { stEl.value = hhmm(tmin(normT(stEl.value) || start) + 30); regen(); });
+  $('#op2-rb-list').addEventListener('click', function (e) {
+    var rm = e.target.closest('.op2-rb-rm'); if (!rm) return;
+    times.splice(+rm.dataset.idx, 1); count = times.length || 1; renderList();
+  });
+  $('#op2-rb-list').addEventListener('change', function (e) {
+    var inp = e.target.closest('input[data-idx]'); if (!inp) return;
+    times[+inp.dataset.idx] = normT(inp.value) || ''; inp.value = times[+inp.dataset.idx];
+  });
+}
+function runRepeatBulk(btn, o) {
+  var times = $$('#op2-rb-list input[data-idx]').map(function (i) { return normT(i.value) || ''; });
+  if (!times.length) { toast('<span class="op2-warn">Список пуст</span>'); return; }
+  var base = {
+    service_date: o.service_date || DATE, needs_data: o.needs_data ? 1 : 0, customer: o.customer,
+    customer_entity_id: o.customer_entity_id || '', executor_entity_id: o.executor_entity_id || '',
+    customer_contact_name: o.customer_contact_name || '', customer_contact_phone: o.customer_contact_phone || '',
+    equipment_type: o.equipment_type, cargo: o.cargo || '', cargo_weight_t: o.cargo_weight_t || '',
+    cargo_dims: o.cargo_dims || '', gabarit: o.gabarit || '', rework_terms: o.rework_terms || '',
+    documents: o.documents || '', note: o.note || '', cash: o.cash ? 1 : 0,
+    load_address: o.load_address || '', load_lat: o.load_lat || '', load_lon: o.load_lon || '',
+    load_contact_name: o.load_contact_name || '', load_contact_phone: o.load_contact_phone || '',
+    unload_address: o.unload_address || '', unload_lat: o.unload_lat || '', unload_lon: o.unload_lon || '',
+    unload_contact_name: o.unload_contact_name || '', unload_contact_phone: o.unload_contact_phone || '',
+    price: num(o.price) || 0, payment_status: o.payment_status || '', internal: o.internal ? 1 : 0
+  };
+  btn.disabled = true;
+  Promise.all(times.map(function (t) {
+    var p = {}; Object.keys(base).forEach(function (k) { p[k] = base[k]; });
+    p.service_time = t;
+    return apiPostJson('/orders/save', p);
+  })).then(function (res) {
+    btn.disabled = false;
+    var good = res.filter(function (r) { return r && r.ok && r.data && !r.data.error; });
+    var bad = res.length - good.length;
+    closeDrawer();
+    if (good.length) S.tickUp();
+    toast('Создано ' + good.length + ' ' + plural(good.length, 'заявка', 'заявки', 'заявок') + ' по образцу №' + esc(oNo(o)) + ': ' +
+      esc(good.map(function (r) { return '№' + ((r.data.day_no != null) ? r.data.day_no : '?') + ' ' + (r.data.order ? (oTime(r.data.order) || 'уточнить') : ''); }).join(', ')) +
+      (bad ? ' · <span class="op2-bad">' + bad + ' не создалось</span>' : '') + ' · все «Не подтверждено» - подтверди каждую', null, 9000);
+    loadOrders(); loadCounts();
+  }).catch(function () { btn.disabled = false; });
+}
+
   }).catch(function () { btn.disabled = false; });
 }
 

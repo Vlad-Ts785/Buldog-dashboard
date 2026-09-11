@@ -1,0 +1,376 @@
+/* ══════════════════════════════════════════════════════════════════════════════
+   «План задание v2» - стили страницы (files/order-plan-v2.js рендерит разметку).
+
+   Перенос 1:1 с утверждённого превью (правило «превью = контракт»,
+   plans/2026-09-10-order-plan-v2-native.md). Все классы с префиксом op2-, чтобы
+   не пересекаться с уже существующими в index.html .chip/.tbl/.veh/.row/.list и
+   прочими общими именами - страница живёт внутри общего документа дашборда.
+
+   Токены (--bg, --text, --green, --tint-*, --border-strong) объявлены в :root
+   index.html. Шрифтовые и easing-токены в index.html объявлены НЕ в :root, а
+   внутри #page-crm / #page-logistics-plan - поэтому объявляем свою копию тут же,
+   в .op2-root (тот же приём, что у CRM).
+
+   Тема тёмная и единственная (ГОСТ, раздел 1) - цвета заданы явно.
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.op2-root{
+  --font-display:'Unbounded','Arial Narrow',sans-serif;
+  --font-body:'Golos Text','Segoe UI',system-ui,sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,monospace;
+  --ease-out-strong:cubic-bezier(.22,.9,.28,1);
+  --ease-out-soft:cubic-bezier(.25,.8,.35,1);
+  --ease-overshoot:cubic-bezier(.34,1.45,.5,1);
+  /* общий такт всех миганий страницы - как на «Планировке» (ГОСТ, запрет №9) */
+  --op2-blink-tact:2400ms;
+  font-family:var(--font-body);
+  font-size:13px;
+  color:var(--text);
+  -webkit-font-smoothing:antialiased;
+}
+.op2-root *{box-sizing:border-box;}
+.op2-root button,.op2-root input,.op2-root select,.op2-root textarea{font-family:inherit;font-size:inherit;color:inherit;}
+.op2-root button{cursor:pointer;}
+.op2-root :focus-visible{outline:2px solid var(--blue);outline-offset:2px;}
+.op2-mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums;}
+.op2-dim{color:var(--muted);}
+.op2-sm{font-size:11px;}
+.op2-nowrap{white-space:nowrap;}
+.op2-hidden{display:none!important;}
+.op2-spacer{flex:1;}
+
+/* ---------- шапка страницы и переключатель экранов (у admin) ---------- */
+.op2-page-head{display:flex;align-items:baseline;gap:14px;padding:2px 0 12px;flex-wrap:wrap;}
+.op2-page-head h2{font-family:var(--font-display);font-weight:600;font-size:19px;margin:0;letter-spacing:-.01em;}
+.op2-page-head .op2-sub{color:var(--muted);font-size:12.5px;}
+.op2-page-head .op2-sub-main{color:var(--text);font-size:14px;font-weight:500;}
+/* лампочки присутствия (только admin) - как в Планировке: код капсом, ярко-красный = действует прямо сейчас */
+.op2-presence{display:flex;gap:4px;margin-left:auto;align-items:center;}
+.op2-presence + .op2-switch{margin-left:10px;}
+.op2-pt{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:6px 8px;line-height:1;}
+.op2-pt.op2-active{color:var(--tint-red);background:rgba(226,75,74,.16);border-color:rgba(226,75,74,.55);font-weight:600;animation:op2PresBlink 1.1s ease-in-out infinite;}
+.op2-pt.op2-none{text-transform:none;letter-spacing:0;font-family:var(--font-body);}
+@keyframes op2PresBlink{0%,100%{opacity:1;}50%{opacity:.55;}}
+.op2-switch{display:flex;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:3px;gap:3px;margin-left:auto;}
+.op2-switch button{background:transparent;border:0;border-radius:8px;padding:7px 13px;color:var(--muted);font-weight:500;font-size:12.5px;transition:background .13s var(--ease-out-soft),color .13s;}
+.op2-switch button.op2-on{background:var(--bg3);color:var(--text);}
+.op2-switch button:hover{color:var(--text);}
+
+.op2-screen{display:none;}
+.op2-screen.op2-on{display:block;}
+
+/* ---------- кнопки ---------- */
+.op2-ghost{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:6px 11px;font-size:12px;color:var(--text);transition:border-color .13s,color .13s;}
+.op2-ghost:hover{border-color:var(--green);color:var(--green);}
+.op2-ghost.op2-red{color:var(--tint-red);}
+.op2-ghost.op2-red:hover{border-color:var(--red);}
+.op2-dbtn{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:7px 13px;font-size:12.5px;font-weight:500;transition:border-color .13s,background .13s,color .13s;}
+.op2-dbtn:hover{border-color:var(--border-strong);background:var(--bg4);}
+.op2-dbtn.op2-primary{background:var(--green);border-color:var(--green);color:#0b1511;}
+.op2-dbtn.op2-primary:hover{background:#25b587;}
+.op2-dbtn.op2-primary.op2-warn{background:var(--amber);border-color:var(--amber);}
+.op2-dbtn.op2-primary.op2-warn:hover{background:#f5ad3d;}
+.op2-dbtn.op2-primary.op2-blocked{background:var(--bg4);border-color:var(--border-strong);color:var(--muted);}
+
+/* ---------- sticky полоса управления ---------- */
+.op2-bar{position:sticky;top:0;z-index:30;background:var(--bg2);border:1px solid var(--border);border-radius:12px;display:flex;align-items:center;gap:8px;padding:0 10px;flex-wrap:wrap;}
+.op2-bar.op2-h48{min-height:48px;}
+.op2-bar.op2-h44{min-height:44px;}
+.op2-tabs{display:flex;gap:2px;flex-wrap:wrap;}
+.op2-tab{background:transparent;border:0;border-radius:8px;padding:6px 10px;color:var(--muted);font-size:12.5px;font-weight:500;transition:background .13s var(--ease-out-soft),color .13s,transform .13s var(--ease-out-soft);}
+.op2-tab:hover{background:var(--bg3);color:var(--text);transform:translateX(1px);}
+.op2-tab.op2-on{background:var(--bg3);color:var(--text);}
+.op2-tab .op2-cnt{font-family:var(--font-mono);font-size:10px;color:var(--muted);margin-left:6px;}
+.op2-tab.op2-on .op2-cnt{color:var(--tint-amber);}
+.op2-chip{background:transparent;border:1px solid var(--border);border-radius:999px;padding:4px 10px;font-size:11.5px;color:var(--muted);transition:border-color .13s,color .13s,background .13s;}
+.op2-chip:hover{border-color:var(--border-strong);color:var(--text);}
+/* 11.09, Влад: «очень непонятно, нажата она или нет» - выбранный чип заливается зелёным,
+   рамка зелёная, текст ярче и жирнее; в нажатом состоянии - вдавленная тень */
+.op2-chip.op2-on{background:rgba(29,158,117,.20);border-color:var(--green);color:var(--text);font-weight:600;box-shadow:inset 0 0 0 1px var(--green);}
+.op2-chip.op2-on:hover{background:rgba(29,158,117,.28);border-color:var(--green);}
+.op2-chip:active{transform:translateY(1px);}
+.op2-chip .op2-n{font-family:var(--font-mono);font-size:10.5px;margin-left:5px;color:var(--tint-amber);}
+.op2-sep{width:1px;height:22px;background:var(--border);margin:0 4px;}
+.op2-search{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:6px 10px;width:220px;color:var(--text);}
+.op2-search::placeholder{color:var(--muted);}
+.op2-dt{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:5px 8px;color:var(--text);font-family:var(--font-mono);font-size:12px;color-scheme:dark;}
+
+/* ---------- вердикт-полоса менеджера (ГОСТ, раздел 4 «Вердикт») ---------- */
+.op2-verdict{position:relative;overflow:hidden;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px 18px;margin:12px 0;display:flex;align-items:center;justify-content:space-between;gap:20px;}
+.op2-verdict::before{content:"";position:absolute;inset:0;background:var(--amber);opacity:.10;pointer-events:none;}
+.op2-verdict.op2-good::before{background:var(--green);}
+.op2-verdict__word{font-family:var(--font-display);font-weight:600;font-size:17px;letter-spacing:.01em;position:relative;}
+.op2-verdict__sub{font-family:var(--font-mono);font-size:11px;color:var(--muted);margin-top:4px;position:relative;}
+.op2-verdict__lever{text-align:right;position:relative;}
+.op2-verdict__lever .op2-k{font-family:var(--font-mono);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);}
+.op2-verdict__lever .op2-v{font-family:var(--font-mono);font-size:25px;font-weight:600;line-height:1.05;font-variant-numeric:tabular-nums;}
+.op2-verdict__lever .op2-f{font-size:11px;color:var(--muted);margin-top:2px;}
+
+/* ---------- свободные машины сегодня/завтра ---------- */
+.op2-free{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 0 12px;}
+.op2-free .op2-day{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:10px 14px;cursor:pointer;}
+.op2-free .op2-day:hover{border-color:var(--border-strong);}
+.op2-free .op2-k{font-family:var(--font-mono);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);}
+.op2-free .op2-row{display:flex;align-items:baseline;gap:14px;margin-top:4px;}
+.op2-free .op2-v{font-family:var(--font-mono);font-size:22px;font-weight:600;line-height:1.05;font-variant-numeric:tabular-nums;}
+.op2-free .op2-v.op2-zero{color:var(--muted);}
+.op2-free .op2-by{font-size:12px;color:var(--muted);}
+.op2-free .op2-by b{color:var(--text);font-weight:500;font-family:var(--font-mono);}
+.op2-free .op2-list{display:none;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);line-height:1.7;}
+.op2-free .op2-day.op2-open .op2-list{display:block;}
+.op2-free .op2-list .op2-gos{font-family:var(--font-mono);color:var(--text);margin-right:8px;}
+.op2-free .op2-note{grid-column:1/-1;font-size:11px;color:var(--muted);margin-top:-4px;}
+@media (max-width:820px){.op2-free{grid-template-columns:1fr;}}
+
+/* ---------- таблицы ---------- */
+.op2-tblwrap{background:var(--bg2);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-top:12px;}
+.op2-tblwrap.op2-x{overflow-x:auto;}
+table.op2-tbl{width:100%;border-collapse:collapse;}
+.op2-tbl th{position:sticky;top:0;z-index:5;background:var(--bg2);text-align:left;padding:8px 10px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap;cursor:pointer;user-select:none;}
+.op2-tbl th .op2-s{opacity:.35;margin-left:4px;font-size:10px;}
+.op2-tbl th.op2-on .op2-s{opacity:1;color:var(--text);}
+.op2-tbl th.op2-num,.op2-tbl td.op2-num{text-align:right;}
+/* № заявки - главный якорь и у менеджера, и у логиста (в Google-листе был крупными цифрами) */
+.op2-tbl td.op2-ono{font-family:var(--font-display);font-size:19px;font-weight:600;letter-spacing:-.01em;color:var(--text);font-variant-numeric:tabular-nums;width:48px;padding-top:4px;padding-bottom:4px;}
+.op2-tbl tr.op2-otboy td.op2-ono{color:var(--muted);text-decoration:line-through;}
+.op2-tbl td{padding:9px 10px;border-bottom:1px solid var(--border);vertical-align:middle;white-space:nowrap;}
+.op2-tbl tr.op2-r36 td{height:36px;}
+.op2-tbl tr.op2-r44 td{height:44px;}
+.op2-tbl tbody tr{transition:background .13s;}
+.op2-tbl tbody tr:hover{background:var(--bg-hover);}
+.op2-tbl tbody tr.op2-open{background:var(--bg3);}
+.op2-tbl tbody tr.op2-otboy{opacity:.68;}
+.op2-tbl tbody tr.op2-otboy .op2-st{color:var(--tint-red);}
+/* отбой, который логист ещё не принял: строка мигает, пока не нажмёт «принять».
+   ГОСТ, запрет №9: мигание привязано к незакрытому состоянию и гаснет само. */
+.op2-tbl tbody tr.op2-otboy.op2-unack{opacity:1;animation:op2OtBlink 1.1s ease-in-out infinite;}
+@keyframes op2OtBlink{0%,100%{background:rgba(226,75,74,.22);}50%{background:rgba(226,75,74,.04);}}
+.op2-tbl tbody tr.op2-new-halo{animation:op2Halo .3s var(--ease-out-soft) 1;}
+@keyframes op2Halo{0%{background:rgba(29,158,117,.16);}100%{background:transparent;}}
+.op2-tbl tbody tr.op2-ch-halo{animation:op2HaloB .3s var(--ease-out-soft) 1;}
+@keyframes op2HaloB{0%{background:rgba(55,138,221,.16);}100%{background:transparent;}}
+.op2-tbl tfoot td{padding:9px 10px;font-size:12px;color:var(--muted);border-top:1px solid var(--border-strong);}
+.op2-tbl tfoot td .op2-mono{color:var(--text);}
+.op2-ell{max-width:260px;overflow:hidden;text-overflow:ellipsis;}
+.op2-route{display:inline-flex;align-items:center;gap:6px;max-width:260px;overflow:hidden;text-overflow:ellipsis;}
+.op2-route .op2-arr{color:var(--muted);}
+.op2-ttype{display:inline-block;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:2px 7px;font-size:11px;color:var(--text);}
+.op2-code{font-family:var(--font-mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;}
+.op2-st-chip{font-family:var(--font-mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;padding:2px 6px;border-radius:5px;background:var(--bg3);color:var(--muted);}
+.op2-st-chip.op2-ok{background:rgba(29,158,117,.15);color:var(--tint-green);}
+.op2-st-chip.op2-nz{background:rgba(239,159,39,.15);color:var(--tint-amber);}
+.op2-st-chip.op2-ot{background:rgba(226,75,74,.15);color:var(--tint-red);}
+.op2-st-chip.op2-done{background:rgba(55,138,221,.15);color:var(--tint-blue);}
+/* быстрый статус у менеджера: клик по чипу - варианты прямо в строке */
+.op2-mgr-tbl .op2-st-chip{cursor:pointer;}
+.op2-mgr-tbl .op2-st-chip:hover{outline:1px solid var(--border-strong);}
+.op2-stpop{position:fixed;z-index:1600;display:none;flex-direction:column;gap:2px;padding:6px;background:var(--bg3);border:1px solid var(--border-strong);border-radius:10px;box-shadow:0 2px 6px rgba(0,0,0,.4),0 16px 32px rgba(0,0,0,.5);}
+.op2-stpop.op2-open{display:flex;}
+.op2-stpop button{display:flex;align-items:center;gap:10px;background:transparent;border:0;border-radius:6px;padding:7px 10px;color:var(--text);font-size:12px;text-align:left;cursor:pointer;min-width:200px;}
+.op2-stpop button:hover{background:var(--bg-hover);}
+.op2-stpop button.op2-cur{opacity:.55;cursor:default;}
+.op2-stpop button .op2-dim{margin-left:auto;}
+/* «под данные» - мигающая точка состояния (ГОСТ, запрет №9, расширение от 30.08) */
+.op2-nd{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber);margin-right:6px;vertical-align:middle;animation:op2NdBlink var(--op2-blink-tact) ease-in-out infinite;}
+@keyframes op2NdBlink{0%,100%{opacity:1;}50%{opacity:.25;}}
+.op2-dot-amber{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber);margin-right:6px;vertical-align:middle;}
+.op2-tel{color:var(--text);}
+.op2-tel:hover{color:var(--green);}
+
+/* ---------- ячейка «Машина» ---------- */
+.op2-slot{display:flex;align-items:center;gap:6px;width:100%;min-height:26px;border:1.5px dashed var(--border-strong);border-radius:10px;background:transparent;padding:0 10px;color:var(--muted);font-size:12px;text-align:left;transition:border-color .13s,color .13s;}
+.op2-slot:hover{border-color:var(--green);color:var(--text);}
+.op2-slot .op2-take{margin-left:auto;font-family:var(--font-mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);}
+.op2-slot.op2-ot{border-style:solid;border-color:var(--red);color:var(--text);}
+.op2-slot.op2-ot:hover{border-color:var(--red);background:rgba(226,75,74,.10);}
+.op2-slot.op2-ot .op2-take{color:var(--tint-red);}
+.op2-otdone{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);}
+.op2-otdone .op2-gos{font-family:var(--font-mono);color:var(--text);text-decoration:line-through;}
+.op2-otdone .op2-unset-ot{margin-left:auto;background:transparent;border:1px solid var(--red);color:var(--tint-red);border-radius:8px;padding:2px 8px;font-size:11px;cursor:pointer;}
+.op2-otdone .op2-unset-ot:hover{background:rgba(226,75,74,.12);}
+.op2-veh{display:flex;flex-direction:column;gap:1px;cursor:pointer;border-radius:8px;padding:2px 6px;margin:-2px -6px;transition:background .13s;touch-action:none;}
+.op2-veh:hover{background:var(--bg4);}
+.op2-veh .op2-gos{font-family:var(--font-mono);font-size:12.5px;font-weight:500;color:var(--text);font-variant-numeric:tabular-nums;}
+.op2-veh .op2-drv{font-size:11px;color:var(--muted);}
+/* водитель подтвердил заявку: логист ставит галочку, у менеджера госномер зелёный */
+.op2-veh .op2-gos.op2-ok,.op2-vehcard .op2-top .op2-gos.op2-ok{color:var(--tint-green);}
+.op2-veh .op2-gos[title]{cursor:help;}
+.op2-veh.op2-multi{gap:3px;}
+.op2-veh.op2-multi .op2-row{display:flex;align-items:baseline;gap:8px;height:18px;}
+.op2-veh.op2-multi .op2-row .op2-gos{font-size:12px;}
+.op2-veh.op2-multi .op2-row .op2-drv{font-size:10.5px;}
+.op2-vehrow{display:flex;align-items:center;gap:8px;}
+.op2-vehrow .op2-veh{flex:1;}
+.op2-dok{flex:none;width:22px;height:22px;border-radius:50%;border:1px solid var(--border-strong);background:transparent;color:var(--muted);font-size:12px;line-height:1;cursor:pointer;transition:border-color .13s,color .13s,background .13s;}
+.op2-dok:hover{border-color:var(--green);color:var(--tint-green);}
+.op2-dok.op2-on{background:rgba(29,158,117,.18);border-color:var(--green);color:var(--tint-green);}
+.op2-hire{font-family:var(--font-mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;padding:2px 6px;border-radius:5px;background:rgba(55,138,221,.15);color:var(--tint-blue);display:inline-block;margin-bottom:2px;}
+.op2-pend{font-size:11px;color:var(--tint-amber);margin-top:3px;}
+.op2-pend b{font-weight:600;}
+
+/* перетаскивание плитки машины: зажать 450 мс -> режим перемещения (ГОСТ, раздел 6) */
+body.op2-moving{cursor:grabbing;user-select:none;}
+body.op2-moving .op2-veh:not(.op2-lift){cursor:grabbing;}
+.op2-veh.op2-lift{opacity:.35;}
+.op2-log-body tr.op2-drop{background:rgba(29,158,117,.14)!important;outline:1px dashed var(--green);outline-offset:-1px;}
+.op2-log-body tr.op2-drop td{color:var(--text);}
+.op2-mvghost{position:fixed;z-index:1700;pointer-events:none;background:var(--bg4);border:1px solid var(--green);border-radius:10px;padding:6px 10px;box-shadow:0 12px 30px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:2px;transform:rotate(-1.5deg);}
+.op2-mvghost .op2-gos{font-family:var(--font-mono);font-size:13px;font-weight:500;font-variant-numeric:tabular-nums;}
+.op2-mvghost .op2-drv{font-size:11px;color:var(--muted);}
+
+/* ---------- поповер пикера машин ---------- */
+.op2-pop{position:fixed;z-index:1600;width:380px;max-height:60vh;display:flex;flex-direction:column;background:var(--bg3);border:1px solid var(--border-strong);border-radius:10px;box-shadow:0 2px 6px rgba(0,0,0,.4),0 16px 32px rgba(0,0,0,.5);opacity:0;transform:scale(.96);transform-origin:top left;pointer-events:none;transition:opacity .15s var(--ease-out-strong),transform .15s var(--ease-out-strong);}
+.op2-pop.op2-open{opacity:1;transform:scale(1);pointer-events:auto;}
+.op2-pop .op2-ph{padding:10px 10px 8px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center;}
+.op2-pop .op2-ph input{flex:1;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:7px 10px;color:var(--text);height:32px;}
+.op2-pop .op2-ph .op2-ctx{font-family:var(--font-mono);font-size:10px;color:var(--muted);white-space:nowrap;}
+.op2-pop .op2-pb{overflow:auto;flex:1;padding:6px 0;}
+.op2-pop .op2-sec{font-family:var(--font-mono);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);padding:8px 12px 4px;display:flex;justify-content:space-between;}
+.op2-pop .op2-sec .op2-ln{flex:1;height:1px;background:var(--border);align-self:center;margin:0 8px;}
+.op2-pop .op2-vi{display:flex;align-items:center;gap:10px;min-height:40px;padding:0 12px;cursor:pointer;transition:background .13s;}
+.op2-pop .op2-vi:hover{background:var(--bg4);}
+.op2-pop .op2-vi.op2-sel{background:var(--bg4);box-shadow:inset 0 0 0 1px var(--green);}
+.op2-pop .op2-vi.op2-off{cursor:default;color:var(--muted);}
+.op2-pop .op2-vi.op2-off:hover{background:transparent;}
+.op2-pop .op2-vi .op2-gos{font-family:var(--font-mono);font-size:13px;font-weight:500;font-variant-numeric:tabular-nums;width:118px;flex:none;}
+.op2-pop .op2-vi.op2-off .op2-gos{color:var(--muted);}
+.op2-pop .op2-vi .op2-ty{font-size:11px;color:var(--muted);width:78px;flex:none;}
+.op2-pop .op2-vi .op2-rt{margin-left:auto;font-size:11px;color:var(--muted);text-align:right;white-space:nowrap;}
+.op2-pop .op2-vi .op2-rt b{color:var(--text);font-weight:500;}
+.op2-pop .op2-vi.op2-act .op2-gos{font-family:var(--font-body);font-weight:500;width:auto;}
+.op2-pop .op2-vi.op2-hired-item{border-top:1px solid var(--border);margin-top:6px;color:var(--text);}
+.op2-pop .op2-vi.op2-hired-item .op2-gos{width:auto;font-family:var(--font-body);font-size:12.5px;font-weight:500;}
+.op2-pop .op2-pf{padding:10px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end;align-items:center;flex-wrap:wrap;}
+.op2-pop .op2-pf .op2-cur{margin-right:auto;font-size:11px;color:var(--muted);}
+.op2-pop .op2-pf .op2-cur b{color:var(--text);font-weight:500;}
+/* второй шаг пикера - наёмник */
+.op2-pop .op2-hstep{padding:10px 12px 4px;display:none;flex-direction:column;gap:8px;overflow:auto;}
+.op2-pop.op2-hired .op2-pb{display:none;}
+.op2-pop.op2-hired .op2-hstep{display:flex;}
+
+/* ---------- поля формы ---------- */
+.op2-fld{display:flex;flex-direction:column;gap:4px;}
+.op2-fld label{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);}
+.op2-fld input,.op2-fld select,.op2-fld textarea{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);min-height:34px;width:100%;}
+.op2-fld input:focus,.op2-fld select:focus,.op2-fld textarea:focus{outline:none;border-color:var(--blue);}
+.op2-fld input[type=date]{color-scheme:dark;}
+.op2-fld .op2-hint{font-size:11px;color:var(--muted);}
+.op2-fld .op2-hint.op2-warn{color:var(--tint-amber);}
+.op2-fld .op2-hint.op2-okc{color:var(--muted);font-family:var(--font-mono);font-size:10.5px;}
+.op2-fld .op2-cb{min-height:0;width:auto;margin-right:6px;}
+.op2-g2{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;}
+.op2-margin{display:flex;justify-content:space-between;align-items:baseline;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;}
+.op2-margin .op2-k{font-size:11px;color:var(--muted);}
+.op2-margin .op2-v{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:13px;}
+.op2-margin .op2-v.op2-pos{color:var(--tint-green);}
+.op2-margin .op2-v.op2-neg{color:var(--tint-red);}
+.op2-cstat{display:flex;gap:4px;flex-wrap:wrap;}
+.op2-cstat .op2-chip{padding:3px 8px;font-size:11px;}
+
+/* ---------- тост (единственный канал обратной связи, ГОСТ раздел 4) ---------- */
+.op2-toast{position:fixed;left:50%;bottom:22px;transform:translate(-50%,14px);opacity:0;z-index:1800;background:var(--bg4);border:1px solid var(--border-strong);border-radius:10px;padding:9px 14px;font-size:12.5px;display:flex;align-items:center;gap:12px;max-width:min(92vw,1100px);transition:opacity .32s ease,transform .32s var(--ease-out-strong);pointer-events:none;}
+.op2-toast.op2-show{opacity:1;transform:translate(-50%,0);pointer-events:auto;}
+.op2-toast .op2-tick{color:var(--tint-green);font-weight:600;}
+.op2-toast .op2-warn{color:var(--tint-amber);font-weight:600;}
+.op2-toast .op2-bad{color:var(--tint-red);font-weight:600;}
+.op2-toast button{background:transparent;border:1px solid var(--border-strong);border-radius:6px;padding:4px 9px;color:var(--text);font-size:12px;white-space:nowrap;flex:none;}
+.op2-toast button:hover{border-color:var(--green);color:var(--green);}
+.op2-toast button:disabled{color:var(--muted);border-color:var(--border);cursor:default;}
+
+/* ---------- шторка 760 (ГОСТ, раздел 4 «Шторка») ---------- */
+.op2-scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity .32s ease;z-index:1500;}
+.op2-scrim.op2-open{opacity:1;pointer-events:auto;}
+.op2-drawer{position:fixed;top:0;right:0;bottom:0;width:760px;max-width:96vw;background:var(--bg3);border-left:1px solid var(--border-strong);transform:translateX(100%);transition:transform .38s var(--ease-overshoot);z-index:1501;display:flex;flex-direction:column;}
+.op2-drawer.op2-open{transform:translateX(0);}
+.op2-drawer .op2-dh{padding:18px 22px 12px;border-bottom:1px solid var(--border);display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;}
+.op2-drawer .op2-dh h3{margin:0;font-family:var(--font-display);font-size:14px;font-weight:600;}
+.op2-drawer .op2-dh .op2-sub{color:var(--muted);font-size:12px;}
+.op2-drawer .op2-dh .op2-x{margin-left:auto;background:var(--bg4);border:1px solid var(--border);border-radius:6px;padding:4px 9px;color:var(--text);font-size:12px;}
+.op2-drawer .op2-dh .op2-x:hover{border-color:var(--green);color:var(--green);}
+.op2-drawer .op2-db{overflow:auto;padding:6px 22px 22px;flex:1;}
+.op2-drawer .op2-df{position:sticky;bottom:0;background:var(--bg3);border-top:1px solid var(--border);padding:12px 22px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.op2-drawer .op2-df .op2-del{margin-right:auto;background:transparent;border:0;color:var(--tint-red);font-size:12px;padding:6px 4px;}
+.op2-drawer .op2-df .op2-del:hover{text-decoration:underline;}
+.op2-cbar{background:var(--bg4);border:1px solid rgba(239,159,39,.35);border-radius:8px;padding:8px 12px;font-size:12px;margin:12px 0 0;display:flex;align-items:center;gap:10px;}
+.op2-cbar b{color:var(--tint-amber);font-weight:600;}
+.op2-cbar button{margin-left:auto;}
+.op2-cbar.op2-pendbar{flex-wrap:wrap;}
+.op2-cbar.op2-pendbar button{margin-left:0;}
+.op2-cbar.op2-pendbar .op2-grow{flex:1 1 100%;}
+.op2-sect{margin-top:18px;}
+.op2-sect .op2-t{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);padding:0 0 8px;border-top:1px solid var(--border);padding-top:12px;}
+.op2-grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px;}
+.op2-full{grid-column:1/-1;}
+@media (max-width:820px){.op2-grid2{grid-template-columns:1fr;}.op2-g2{grid-template-columns:1fr;}}
+.op2-seg{display:flex;gap:4px;align-items:center;flex-wrap:wrap;}
+.op2-seg .op2-chip{padding:5px 11px;}
+.op2-timerow{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
+.op2-timerow input{width:92px;font-family:var(--font-mono);font-size:13px;text-align:center;}
+.op2-stp{background:var(--bg2);border:1px solid var(--border);border-radius:8px;height:34px;width:34px;color:var(--text);flex:none;}
+.op2-stp:hover{border-color:var(--border-strong);}
+.op2-qk{display:flex;gap:4px;margin-top:6px;flex-wrap:wrap;}
+.op2-qk .op2-chip{font-family:var(--font-mono);}
+/* Повторить N раз сегодня (Влад 11.09: N одинаковых машин, интервал 30 мин/час, время каждой поправить сразу) */
+.op2-rb-list{display:flex;flex-direction:column;gap:4px;margin-top:8px;} /* без своего скролла - список растёт во всю шторку (Влад 11.09: «окно длиннее») */
+.op2-rb-row{display:flex;align-items:center;gap:8px;padding:5px 8px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;}
+.op2-rb-row .op2-rb-no{font-family:var(--font-mono);font-size:11px;color:var(--muted);width:22px;flex:none;}
+.op2-rb-row input{width:70px;font-family:var(--font-mono);font-size:13px;text-align:center;background:transparent;border:1px solid var(--border);border-radius:6px;padding:4px 2px;color:var(--text);}
+.op2-rb-row input:focus{border-color:var(--border-strong);}
+.op2-rb-rm{margin-left:auto;flex:none;background:transparent;border:0;color:var(--muted);font-size:16px;line-height:1;width:22px;height:22px;border-radius:50%;cursor:pointer;}
+.op2-rb-rm:hover{background:rgba(226,75,74,.14);color:var(--tint-red);}
+.op2-rb-day{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:8px 0 2px;}
+.op2-rb-row .op2-rb-stp{height:26px;width:34px;font-size:11px;border-radius:6px;}
+.op2-rb-row .op2-rb-rm{margin-left:auto;}
+.op2-rb-count{display:flex;align-items:center;gap:8px;}
+.op2-rb-count .op2-rb-n{font-family:var(--font-mono);font-size:20px;font-weight:600;width:34px;text-align:center;}
+.op2-sugg{position:relative;}
+.op2-sugg .op2-list{position:absolute;left:0;right:0;top:100%;margin-top:4px;background:var(--bg4);border:1px solid var(--border-strong);border-radius:8px;z-index:5;display:none;overflow:hidden;max-height:260px;overflow-y:auto;}
+.op2-sugg.op2-open .op2-list{display:block;}
+.op2-sugg .op2-list .op2-sec{font-family:var(--font-mono);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);padding:7px 10px 3px;}
+.op2-sugg .op2-list .op2-it{padding:7px 10px;cursor:pointer;display:flex;justify-content:space-between;gap:10px;}
+.op2-sugg .op2-list .op2-it:hover{background:var(--bg3);}
+.op2-sugg .op2-list .op2-it .op2-m{font-family:var(--font-mono);font-size:10.5px;color:var(--muted);}
+.op2-kv{display:flex;justify-content:space-between;gap:16px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12.5px;}
+.op2-kv .op2-k{color:var(--muted);flex:none;}
+.op2-kv .op2-v{text-align:right;font-weight:500;min-width:0;overflow-wrap:anywhere;}
+.op2-vehcard{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;margin-top:8px;}
+.op2-vehcard .op2-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.op2-vehcard .op2-top .op2-gos{font-family:var(--font-mono);font-size:15px;font-weight:600;}
+.op2-vehcard .op2-top .op2-by{margin-left:auto;font-size:11px;color:var(--muted);}
+.op2-vehcard .op2-line{font-size:12.5px;display:flex;gap:14px;flex-wrap:wrap;}
+.op2-vehcard .op2-line .op2-k{color:var(--muted);}
+.op2-vehcard .op2-acts{display:flex;gap:8px;margin-top:4px;flex-wrap:wrap;}
+.op2-vehcard .op2-line.op2-docs{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.op2-vehcard .op2-line.op2-docs .op2-k{margin-right:4px;}
+.op2-vehcard .op2-dl{padding:4px 9px;font-size:11.5px;}
+.op2-vehcard .op2-dl.op2-soon{color:var(--muted);border-style:dashed;}
+.op2-hist{list-style:none;margin:0;padding:0;}
+.op2-hist li{display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;}
+.op2-hist li .op2-tm{font-family:var(--font-mono);font-size:10.5px;color:var(--muted);width:110px;flex:none;}
+.op2-hist li .op2-who{color:var(--text);font-weight:500;}
+
+/* ---------- «Задание водителю» - модалка с готовым текстом ---------- */
+.op2-dmod-scrim{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1800;display:none;align-items:center;justify-content:center;padding:20px;}
+.op2-dmod-scrim.op2-open{display:flex;}
+.op2-dmod{width:100%;max-width:600px;background:var(--bg2);border:1px solid var(--border-strong);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.5);overflow:hidden;}
+.op2-dmod .op2-dh{padding:16px 20px 10px;border-bottom:1px solid var(--border);display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;}
+.op2-dmod .op2-dh h3{margin:0;font-family:var(--font-display);font-size:14px;font-weight:600;}
+.op2-dmod pre{margin:0;padding:16px 20px;font-family:var(--font-body);font-size:13.5px;line-height:1.55;color:var(--text);white-space:pre-wrap;max-height:60vh;overflow:auto;}
+.op2-dmod pre b{color:var(--muted);font-weight:600;font-size:11px;letter-spacing:.08em;}
+.op2-dmod .op2-acts{display:flex;gap:8px;padding:12px 20px 16px;border-top:1px solid var(--border);flex-wrap:wrap;align-items:center;}
+.op2-dmod .op2-acts a.op2-ghost,.op2-dmod .op2-acts a.op2-dbtn{text-decoration:none;display:inline-flex;align-items:center;}
+.op2-dmod .op2-acts .op2-hint{margin-left:auto;font-size:11px;color:var(--muted);}
+
+/* ---------- легенда, служебное ---------- */
+.op2-legend{display:flex;gap:14px;flex-wrap:wrap;padding:10px 4px 0;font-size:11px;color:var(--muted);}
+.op2-legend span{display:inline-flex;align-items:center;gap:6px;}
+.op2-copybtn{display:inline-flex;align-items:center;gap:6px;}
+
+/* скелет, пока не пришли me/заявки - страница не должна быть пустой */
+.op2-skel{display:flex;flex-direction:column;gap:10px;padding:4px 0;}
+.op2-skel-line{height:14px;border-radius:6px;background:var(--bg3);}
+.op2-skel-block{height:120px;border-radius:12px;background:var(--bg2);border:1px solid var(--border);}
+
+@media (prefers-reduced-motion:reduce){
+  .op2-root *,.op2-pop,.op2-drawer,.op2-toast,.op2-scrim,.op2-mvghost{animation:none!important;transition:none!important;}
+}

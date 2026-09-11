@@ -661,5 +661,38 @@ module.exports = function (deps) {
     } catch (err) { console.error("by_vehicle:", err); fail(res, 500, String(err.message || err)); }
   });
 
+  // ── «Лампочки»: кто сейчас на странице «Задание» (Влад 11.09: «у меня у единственного должны быть
+  // лампочки кто работает, как в Планировке - логисты, менеджеры, старшие»). Своя таблица, тот же
+  // принцип, что plan_presence: last_seen - вкладка открыта (heartbeat раз в 7 с), last_active - прямо
+  // сейчас что-то делает. Список отдаём ТОЛЬКО admin.
+  pool.query(`CREATE TABLE IF NOT EXISTS plan_orders_presence (
+      user_email VARCHAR(200) NOT NULL PRIMARY KEY, display_name VARCHAR(150) DEFAULT NULL,
+      last_seen DATETIME DEFAULT NULL, last_active DATETIME DEFAULT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)
+    .catch((e) => console.error("plan_orders_presence create:", e.message || e));
+  app.post("/api/orders/presence", ...gate, async (req, res) => {
+    try {
+      const who = await me(req); const active = String(p(req, "active")) === "1";
+      await pool.query(
+        `INSERT INTO plan_orders_presence (user_email, display_name, last_seen, last_active) VALUES (?, ?, NOW(), ${active ? "NOW()" : "NULL"})
+         ON DUPLICATE KEY UPDATE display_name = VALUES(display_name), last_seen = NOW()${active ? ", last_active = NOW()" : ""}`,
+        [req.userEmail, who.name]);
+      res.json({ ok: true });
+    } catch (err) { console.error("orders presence post:", err); fail(res, 500, String(err.message || err)); }
+  });
+  app.get("/api/orders/presence", checkSession, requireRole_("admin"), async (req, res) => {
+    try {
+      const r = await roster();
+      const [rows] = await pool.query(
+        `SELECT user_email, display_name, TIMESTAMPDIFF(SECOND, last_seen, NOW()) AS seen_ago,
+                TIMESTAMPDIFF(SECOND, last_active, NOW()) AS active_ago
+           FROM plan_orders_presence WHERE last_seen > NOW() - INTERVAL 40 SECOND`);
+      res.json({ users: rows.filter((x) => x.user_email !== req.userEmail).map((x) => {
+        const u = r.byEmail[x.user_email] || {};
+        return { email: x.user_email, name: u.name || x.display_name || x.user_email, code: u.code || code3(x.display_name || x.user_email),
+          role: u.role || null, seen_ago: Number(x.seen_ago), active_ago: x.active_ago === null ? null : Number(x.active_ago) };
+      }) });
+    } catch (err) { console.error("orders presence list:", err); fail(res, 500, String(err.message || err)); }
+  });
+
   console.log("plan-orders: эндпоинты /api/orders/* подключены");
 };

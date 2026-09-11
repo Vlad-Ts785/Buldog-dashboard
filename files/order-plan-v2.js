@@ -261,6 +261,7 @@ function buildDom() {
          дашборд (page-title = PAGE_TITLES['order-plan']), здесь оставляем только подстрочник. */
       '<div class="op2-page-head">' +
         '<span class="op2-sub op2-sub-main" id="op2-sub"></span>' +
+        '<div class="op2-presence op2-hidden" id="op2-presence" title="Кто сейчас на странице «Задание»: ярко - действует прямо сейчас"></div>' +
         '<div class="op2-switch op2-hidden" id="op2-switch" role="tablist">' +
           '<button data-scr="mgr" role="tab">Менеджер · Мои заявки</button>' +
           '<button data-scr="log" role="tab">Логист · Заявки</button>' +
@@ -524,6 +525,7 @@ function wire() {
   $('#op2-d-close').addEventListener('click', closeDrawer);
   $('#op2-scrim').addEventListener('click', closeDrawer);
   $('#op2-d-foot').addEventListener('click', onDrawerFoot);
+  ['pointerdown', 'keydown'].forEach(function (ev) { $('#' + ROOT_ID).addEventListener(ev, function () { lastInteract = Date.now(); }, true); });
 
   /* ── «Задание водителю» ── */
   $('#op2-drv-close').addEventListener('click', closeDrv);
@@ -603,9 +605,29 @@ function applyMe(me) {
 function syncSwitch() {
   $$('#op2-switch button').forEach(function (b) { b.classList.toggle('op2-on', b.dataset.scr === VIEW); });
 }
+/* присутствие: heartbeat раз в 7 с (вместе с поллингом), active=1 если что-то делал за последние 7 с */
+var lastInteract = 0;
+function presenceBeat() {
+  if (!ME) return;
+  var active = (Date.now() - lastInteract) < 7000 ? 1 : 0;
+  apiPost('/orders/presence', { active: active }).catch(function () {});
+  if (ME.role === 'admin') {
+    apiGet('/orders/presence', {}).then(function (r) {
+      if (!r || !r.ok || !r.data || !r.data.users) return;
+      var box = $('#op2-presence'); if (!box) return;
+      var users = r.data.users.slice().sort(function (a, b) { return (a.role || '').localeCompare(b.role || '') || a.code.localeCompare(b.code, 'ru'); });
+      box.classList.toggle('op2-hidden', false);
+      box.innerHTML = users.length ? users.map(function (u) {
+        var act = u.active_ago !== null && u.active_ago < 10;
+        return '<span class="op2-pt' + (act ? ' op2-active' : '') + '" title="' + esc(u.name) + (u.role ? ' · ' + esc(u.role) : '') + (act ? ' · действует сейчас' : ' · на странице') + '">' + esc(u.code) + '</span>';
+      }).join('') : '<span class="op2-pt op2-none" title="Сейчас на странице никого, кроме вас">никого</span>';
+    }).catch(function () {});
+  }
+}
 function loadOrders(silent) {
   if (loadingOrders) return Promise.resolve();
   loadingOrders = true;
+  presenceBeat();
   var params = { date: DATE };
   if (TO_DATE) params.to = TO_DATE;
   return apiGet('/orders', params).then(function (r) {

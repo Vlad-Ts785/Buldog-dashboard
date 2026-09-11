@@ -55,8 +55,11 @@ module.exports = function (deps) {
   async function roster() {
     if (Date.now() - rosterCache.at < 120000) return rosterCache;
     const [rows] = await pool.query(`SELECT email, name, role FROM access_users WHERE role IN ('manager','logist','admin')`);
+    // телефон - из справочника людей по полному имени (access_users телефона не хранит); нужен в «Задании водителю»
+    const [phones] = await pool.query(`SELECT full_name, phone FROM sprav_people WHERE deleted_at IS NULL AND phone IS NOT NULL AND phone <> ''`);
+    const phoneByName = {}; phones.forEach((x) => { phoneByName[String(x.full_name).trim().toLowerCase()] = x.phone; });
     const byEmail = {}; const list = [];
-    rows.forEach((r) => { const it = { email: r.email, name: r.name || r.email, role: r.role, code: code3(r.name) }; byEmail[r.email] = it; list.push(it); });
+    rows.forEach((r) => { const it = { email: r.email, name: r.name || r.email, role: r.role, code: code3(r.name), phone: phoneByName[String(r.name || "").trim().toLowerCase()] || null }; byEmail[r.email] = it; list.push(it); });
     rosterCache = { at: Date.now(), byEmail, list };
     return rosterCache;
   }
@@ -484,7 +487,7 @@ module.exports = function (deps) {
       await conn.commit();
       const r = await roster();
       const pack = async (id) => { const o = await loadOrder(pool, id); return serialize(o, await loadExecutors(pool, [id]), (await loadPending(pool, [id]))[0], r.byEmail); };
-      res.json({ ok: true, from: await pack(src.id), to: await pack(dst.id), swapped: !!swappedBack, warn_needs_data: !!(src.needs_data || dst.needs_data) });
+      res.json({ ok: true, from: await pack(src.id), to: await pack(dst.id), swapped: !!swappedBack, swapped_gos: swappedBack ? dstMain[0].vehicle_gos : null, moved_gos: e.vehicle_gos, warn_needs_data: !!(src.needs_data || dst.needs_data) });
     } catch (err) { try { await conn.rollback(); } catch (e) {} console.error("executor_move:", err); fail(res, 500, String(err.message || err)); }
     finally { conn.release(); }
   });

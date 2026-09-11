@@ -785,7 +785,7 @@ module.exports = function (deps) {
       const args = []; words.forEach((w) => { args.push("%" + w + "%", "%" + w + "%"); });
       const [cat] = await pool.query(
         `SELECT name, aliases, category, length_m, width_m, height_m, weight_t, note FROM plan_cargo_catalog
-          WHERE active = 1 AND ${like} ORDER BY (LOWER(name) LIKE ?) DESC, LENGTH(name) LIMIT 8`, args.concat([q + "%"]));
+          WHERE active = 1 AND ${like} ORDER BY (LOWER(name) LIKE ?) DESC, \`rank\`, LENGTH(name) LIMIT 8`, args.concat([q + "%"]));
       const [hist] = await pool.query(
         `SELECT cargo, MAX(cargo_weight_t) AS weight_t, MAX(cargo_dims) AS dims, COUNT(*) AS n FROM plan_orders
           WHERE deleted_at IS NULL AND cargo IS NOT NULL AND LOWER(cargo) LIKE ? GROUP BY cargo ORDER BY n DESC LIMIT 5`, ["%" + q + "%"]);

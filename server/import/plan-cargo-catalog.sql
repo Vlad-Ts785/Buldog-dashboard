@@ -98,3 +98,10 @@ INSERT IGNORE INTO plan_cargo_catalog (name, aliases, category, length_m, width_
 ('арматура в бухтах/прутках', 'арматура', 'металл', 11.70, 2.40, 1.50, 20.0, 'вес по факту'),
 ('ж/б плиты', 'жби|плиты|плита|железобетон', 'жби', 6.00, 2.40, 1.50, 20.0, 'вес по факту, количество'),
 ('опалубка', 'опалубка', 'стройматериалы', 6.00, 2.40, 2.00, 9.0, 'вес по факту');
+
+-- Приоритет в подсказках (Влад: «быт» -> сначала стандартная бытовка): rank меньше - выше; по умолчанию 100
+SET @c := (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='plan_cargo_catalog' AND COLUMN_NAME='rank');
+SET @sql := IF(@c=0,'ALTER TABLE plan_cargo_catalog ADD COLUMN `rank` INT NOT NULL DEFAULT 100','SELECT 1');
+PREPARE st FROM @sql; EXECUTE st; DEALLOCATE PREPARE st;
+UPDATE plan_cargo_catalog SET `rank`=1 WHERE name IN ('бытовка стандартная 6 м','морской контейнер 40 футов','экскаватор-погрузчик JCB 3CX','буровая Bauer BG 40','экскаватор CAT 320','экскаватор Hitachi ZX200');
+UPDATE plan_cargo_catalog SET `rank`=2 WHERE name IN ('морской контейнер 20 футов','экскаватор Komatsu PC200');

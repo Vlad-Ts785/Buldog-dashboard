@@ -2116,9 +2116,35 @@ function fetchInn(inn) {
         '<div class="op2-it" data-name="' + esc(x.name) + '"><span>' + esc(x.name) + '<span class="op2-dim op2-sm"> · ' + esc((x.legal_address || '').slice(0, 60)) + (x.director_name ? ' · ' + esc(x.director_name) : '') + '</span></span><span class="op2-m">ИНН ' + esc(x.inn) + '</span></div>' +
         '<div class="op2-it op2-inn-row"><button class="op2-ghost op2-inn-save" data-inn="' + esc(x.inn) + '" data-name="' + esc(x.name) + '" data-full="' + esc(x.full_name || '') + '" data-kpp="' + esc(x.kpp || '') + '" data-ogrn="' + esc(x.ogrn || '') + '" data-addr="' + esc(x.legal_address || '') + '" data-dir="' + esc(x.director_name || '') + '" data-post="' + esc(x.director_post || '') + '" data-status="' + esc(x.egrul_status || '') + '">Сохранить в справочник и подставить</button></div>';
     } else h = '<div class="op2-sec">По ИНН</div><div class="op2-it" data-name=""><span class="op2-dim">ИНН ' + esc(inn) + ' не найден - проверь цифры</span></div>';
+    if (d.found) h += '<div class="op2-it op2-inn-row" id="op2-inn-risk"><span class="op2-dim op2-sm">проверяем контрагента…</span></div>';
     $('#op2-f-custlist').innerHTML = h;
     $('#op2-f-custbox').classList.add('op2-open');
+    if (d.found) innRisk(inn);
   }).catch(function () {});
+}
+/* Светофор контрагента прямо в подсказке (Влад 11.09: «при вводе ИНН сразу лампочку и кратко справку») -
+   тот же /counterparty/check, что на странице «Проверка контрагента» (admin/manager; логисту 403 - молча). */
+function innRisk(inn) {
+  apiPost('/counterparty/check', { inn: inn }).then(function (r) {
+    var box = $('#op2-inn-risk'); if (!box) return;
+    if (!r || !r.ok || !r.data || r.data.error) { box.innerHTML = '<span class="op2-dim op2-sm">' + (r && r.data && r.data.error ? esc(r.data.error) : 'проверка недоступна') + '</span>'; return; }
+    var d = r.data, c = d.card || {};
+    var col = (d.light === 'red' || d.light === 'bankrupt') ? 'var(--tint-red)' : d.light === 'yellow' ? 'var(--tint-amber)' : d.light === 'green' ? 'var(--tint-green)' : 'var(--muted)';
+    var lbl = d.light === 'bankrupt' ? 'Банкрот' : d.light === 'red' ? 'Красный' : d.light === 'yellow' ? 'Жёлтый' : d.light === 'green' ? 'Зелёный' : 'нет данных';
+    var mln = function (v) { v = Number(v); if (!v) return ''; return v >= 1e9 ? (v / 1e9).toFixed(1).replace('.', ',') + ' млрд ₽' : v >= 1e6 ? Math.round(v / 1e6) + ' млн ₽' : Math.round(v / 1e3) + ' тыс ₽'; };
+    var facts = [];
+    if (c.status) facts.push(c.status);
+    if (c.reg_date) facts.push('с ' + String(c.reg_date).slice(0, 4));
+    if (c.revenue) facts.push('выручка ' + mln(c.revenue) + (c.revenueYear ? ' (' + c.revenueYear + ')' : ''));
+    if (c.employees) facts.push('сотр. ' + c.employees);
+    if (Number(c.nedoimka) > 0) facts.push('недоимка ' + mln(c.nedoimka));
+    var reasons = (d.reasons || []).slice(0, 2);
+    box.innerHTML = '<div style="display:flex;flex-direction:column;gap:3px;min-width:0">' +
+      '<span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + col + ';margin-right:6px;vertical-align:middle' + (d.pulse ? ';box-shadow:0 0 0 3px rgba(226,75,74,.25)' : '') + '"></span><b style="color:' + col + '">' + esc(lbl) + '</b>' + (d.marker ? ' <b style="color:' + col + '">' + esc(d.marker) + '</b>' : '') +
+      (facts.length ? ' <span class="op2-dim op2-sm">· ' + esc(facts.join(' · ')) + '</span>' : '') + '</span>' +
+      (reasons.length ? '<span class="op2-dim op2-sm">' + reasons.map(esc).join(' · ') + '</span>' : '') +
+      (d.from_cache && d.checked_at ? '<span class="op2-dim op2-sm">проверено ' + esc(d.checked_at) + '</span>' : '') + '</div>';
+  }).catch(function () { var box = $('#op2-inn-risk'); if (box) box.innerHTML = '<span class="op2-dim op2-sm">проверка недоступна</span>'; });
 }
 function saveInn(btn) {
   var d = btn.dataset;

@@ -1123,9 +1123,7 @@ function openRowMenu(x, y, items) {
 }
 function mgrRowMenu(o) {
   return [
-    { label: 'Повторить', fn: function () { openDrawerForm(o, true, 'mgr'); } },
-    { label: 'Повторить N раз', fn: function () { openRepeatBulk(o); } },
-    { label: 'Повторить на несколько дней', fn: function () { openRepeatN(o); } },
+    { label: 'Повторить', fn: function () { openRepeat(o); } },
     { label: 'Отбой', fn: function () { setStatus(o, 'ot'); } },
     { label: 'Копировать данные на пропуск', fn: function () { copyText(passText(o), 'Данные на пропуск скопированы'); } }
   ];
@@ -1672,9 +1670,7 @@ function renderView(o, who) {
     ? '<button class="op2-del" id="op2-d-otboy">Отбой по заявке</button>' + (canDone() ? '<button class="op2-ghost" id="op2-d-done">Выполнено</button>' : '')
     : '<button class="op2-del" id="op2-d-otboy">Отбой</button>' +
       '<button class="op2-ghost" id="op2-d-contract" title="Разовая договор-заявка заказчику: реквизиты, табличная часть, условия, печать и подпись - из заявки">Договор-заявка ⤓</button>' +
-      '<button class="op2-ghost" id="op2-d-repeat">Повторить</button>' +
-      '<button class="op2-ghost" id="op2-d-repeat-bulk">Повторить N раз</button>' +
-      '<button class="op2-ghost" id="op2-d-repeat-n">Повторить на несколько дней</button>') +
+      '<button class="op2-ghost" id="op2-d-repeat">Повторить</button>') +
     '<button class="op2-dbtn op2-primary" id="op2-d-edit">Редактировать</button>';
 
   /* обработчики тела карточки */
@@ -1745,13 +1741,10 @@ function onDrawerFoot(e) {
   if (id === 'op2-d-otboy' && o) { setStatus(o, 'ot'); closeDrawer(); return; }
   if (id === 'op2-d-done' && o) { setStatus(o, 'done'); closeDrawer(); return; }
   if (id === 'op2-d-contract' && o) { soon('Договор-заявка по №' + oNo(o)); return; }
-  if (id === 'op2-d-repeat' && o) { openDrawerForm(o, true, isMgr() ? 'mgr' : 'log'); return; }
-  if (id === 'op2-d-repeat-bulk' && o) { openRepeatBulk(o); return; }
-  if (id === 'op2-d-repeat-n' && o) { openRepeatN(o); return; }
-  if (id === 'op2-rb-go' && o) { runRepeatBulk(e.target, o); return; }
+  if (id === 'op2-d-repeat' && o) { openRepeat(o); return; }
   if (id === 'op2-d-edit' && o) { openDrawerForm(o, false, isMgr() ? 'mgr' : 'log'); return; }
   if (id === 'op2-d-back' && o) { openDrawerView(o, isMgr() ? 'mgr' : 'log'); return; }
-  if (id === 'op2-rp-go' && o) { runRepeatN(e.target, o); return; }
+  if (id === 'op2-rp-go' && o) { runRepeat(e.target, o); return; }
   if (e.target.classList.contains('op2-del')) {
     if (formMode && o && o.id) { deleteOrder(o); return; }
     closeDrawer();
@@ -2158,55 +2151,109 @@ function saveForm(btn) {
   }).catch(function () { btn.disabled = false; });
 }
 
-/* ═════════════════════════ ПОВТОРИТЬ НА НЕСКОЛЬКО ДНЕЙ ═════════════════════════ */
-function openRepeatN(o) {
+/* ═════════════════════════ ПОВТОРИТЬ (один экран: дни × количество × время) ═════════════════════════
+   Влад 11.09: «не нужно три меню - одно "Повторить"; кликаешь на дату: один клик = одна заявка на эту
+   дату; кликнул 5 раз на сегодня - 5 заявок на сегодня; 5 раз на всю неделю - по 5 на каждый день.
+   Список - время подачи одинаковое (копия), чип −30/+30, прямо по списку выставляешь время и
+   создаёшь массив». Клик по дню = +1, правый клик = −1; пресеты «Будни»/«Все 7 дней» - то же на
+   каждый день группы. Все созданные - «Не подтверждено» (умолчание сервера), подтверждаются вручную. */
+function dayLabel(d) {
+  if (d === todayStr()) return 'Сегодня ' + dm(d);
+  if (d === addDays(todayStr(), 1)) return 'Завтра ' + dm(d);
+  return WD_SHORT[dObj(d).getDay()] + ' ' + dObj(d).getDate();
+}
+function openRepeat(o) {
   drawerOrder = o; formMode = false;
   openDrawer();
-  var base = o.service_date || DATE;
+  var base = todayStr();                      /* окно - неделя от сегодня, независимо от даты образца */
   var days = [];
-  for (var i = 1; i <= 7; i++) {
+  for (var i = 0; i < 7; i++) {
     var d = addDays(base, i), wd = dObj(d).getDay();
-    days.push({ d: d, l: WD_SHORT[wd] + ' ' + dObj(d).getDate(), wd: (wd !== 0 && wd !== 6) ? 1 : 0 });
+    days.push({ d: d, l: dayLabel(d), wd: (wd !== 0 && wd !== 6) ? 1 : 0 });
   }
-  $('#op2-d-title').textContent = 'Повторить №' + oNo(o) + ' на несколько дней';
-  $('#op2-d-sub').textContent = (o.customer || '') + ' · ' + (o.equipment_type || '') + ' · ' + (oTime(o) || 'время уточнить') +
+  var defTime = oTime(o) || '';
+  var rows = [];                              /* {d, t} - по одной на будущую заявку, порядок = порядок кликов */
+  $('#op2-d-title').textContent = 'Повторить №' + oNo(o);
+  $('#op2-d-sub').textContent = (o.customer || '') + ' · ' + (o.equipment_type || '') + ' · ' + (defTime || 'время уточнить') +
     ' · ' + (o.load_address || '—') + ' → ' + (o.unload_address || '—');
   $('#op2-d-body').innerHTML =
-    '<div class="op2-sect"><div class="op2-t">На какие дни</div><div class="op2-seg" id="op2-rp-days" style="flex-wrap:wrap">' +
-      days.map(function (x) { return '<button class="op2-chip" data-d="' + esc(x.d) + '" data-l="' + esc(x.l) + '" data-wd="' + x.wd + '">' + esc(x.l) + '</button>'; }).join('') +
+    '<div class="op2-sect"><div class="op2-t">На какие дни и сколько</div><div class="op2-seg" id="op2-rp-days" style="flex-wrap:wrap">' +
+      days.map(function (x) { return '<button class="op2-chip" data-d="' + esc(x.d) + '" data-wd="' + x.wd + '">' + esc(x.l) + '</button>'; }).join('') +
     '</div>' +
     '<div class="op2-qk" id="op2-rp-presets"><button class="op2-chip" data-preset="wd">Будни</button><button class="op2-chip" data-preset="all">Все 7 дней</button><button class="op2-chip" data-preset="none">Сбросить</button></div>' +
-    '<span class="op2-hint">Время, тип техники, груз, адреса, контакты, цена - как в №' + esc(oNo(o)) + '. Машину логист ставит на каждый день отдельно; номера заявок - свои внутри каждого дня.</span></div>' +
-    '<div class="op2-sect"><div class="op2-t">Что получится</div><ul class="op2-hist" id="op2-rp-list"><li><span class="op2-dim">выбери дни</span></li></ul></div>';
+    '<span class="op2-hint">Клик по дню - <b>+1 заявка</b> на этот день, правый клик - −1. «Будни» / «Все 7 дней» - +1 на каждый день группы (5 кликов - по 5 на каждый). Заказчик, груз, адреса, цена, юрлицо - как в №' + esc(oNo(o)) + '.</span></div>' +
+    '<div class="op2-sect"><div class="op2-t">Что получится <span class="op2-dim op2-sm">- время у всех как в образце, поправь −30/+30 или впиши</span></div>' +
+      '<div class="op2-rb-list" id="op2-rp-list"></div></div>';
   $('#op2-d-foot').innerHTML = '<button class="op2-ghost" id="op2-d-back">← Назад к заявке</button>' +
     '<span class="op2-dim op2-sm" id="op2-rp-state"></span>' +
     '<button class="op2-dbtn op2-primary op2-blocked" id="op2-rp-go">Создать заявки</button>';
 
-  function refresh() {
-    var sel = $$('#op2-rp-days .op2-chip.op2-on');
-    var b = $('#op2-rp-go');
-    $('#op2-rp-list').innerHTML = sel.length ? sel.map(function (c) {
-      return '<li><span class="op2-tm">' + esc(c.dataset.l) + '</span><span>' + esc(oTime(o) || 'время уточнить') + ' · ' + esc(o.equipment_type || '') + ' · ' + esc(o.customer || '') +
-        (o.cargo ? ' · <span class="op2-dim">' + esc(o.cargo) + '</span>' : '') + '</span></li>';
-    }).join('') : '<li><span class="op2-dim">выбери дни</span></li>';
-    b.className = 'op2-dbtn op2-primary' + (sel.length ? '' : ' op2-blocked');
-    b.textContent = sel.length ? 'Создать ' + sel.length + ' ' + plural(sel.length, 'заявку', 'заявки', 'заявок') : 'Создать заявки';
-    $('#op2-rp-state').textContent = sel.length ? 'логисты увидят каждую на своём дне' : '';
+  function countOf(d) { return rows.filter(function (r) { return r.d === d; }).length; }
+  function renderChips() {
+    $$('#op2-rp-days .op2-chip').forEach(function (c) {
+      var n = countOf(c.dataset.d);
+      c.classList.toggle('op2-on', n > 0);
+      c.innerHTML = esc(dayLabel(c.dataset.d)) + (n ? '<span class="op2-n">×' + n + '</span>' : '');
+    });
   }
-  $('#op2-rp-days').addEventListener('click', function (e) { var c = e.target.closest('.op2-chip'); if (!c) return; c.classList.toggle('op2-on'); refresh(); });
-  $('#op2-rp-presets').addEventListener('click', function (e) {
+  function renderList() {
+    var byDay = {}; rows.forEach(function (r, i) { (byDay[r.d] = byDay[r.d] || []).push(i); });
+    var h = '';
+    days.forEach(function (x) {
+      var idx = byDay[x.d]; if (!idx) return;
+      h += '<div class="op2-rb-day">' + esc(x.l) + ' <span class="op2-dim">· ' + idx.length + ' ' + plural(idx.length, 'заявка', 'заявки', 'заявок') + '</span></div>';
+      idx.forEach(function (i, k) {
+        h += '<div class="op2-rb-row"><span class="op2-rb-no">' + (k + 1) + '</span>' +
+          '<button class="op2-stp op2-rb-stp" data-i="' + i + '" data-d="-30">−30</button>' +
+          '<input value="' + esc(rows[i].t) + '" data-i="' + i + '" placeholder="--:--" autocomplete="off">' +
+          '<button class="op2-stp op2-rb-stp" data-i="' + i + '" data-d="30">+30</button>' +
+          '<button class="op2-rb-rm" data-i="' + i + '" title="Убрать эту заявку из списка">✕</button></div>';
+      });
+    });
+    $('#op2-rp-list').innerHTML = h || '<span class="op2-dim op2-sm">кликни по дню выше - каждая клик добавит заявку</span>';
+    var g = $('#op2-rp-go');
+    g.className = 'op2-dbtn op2-primary' + (rows.length ? '' : ' op2-blocked');
+    g.textContent = rows.length ? 'Создать ' + rows.length + ' ' + plural(rows.length, 'заявку', 'заявки', 'заявок') : 'Создать заявки';
+    $('#op2-rp-state').textContent = rows.length ? 'все - «Не подтверждено», подтверждаешь каждую отдельно' : '';
+  }
+  function render() { renderChips(); renderList(); }
+  function addDay(d) { rows.push({ d: d, t: defTime }); }
+  function removeDay(d) { for (var i = rows.length - 1; i >= 0; i--) if (rows[i].d === d) { rows.splice(i, 1); return; } }
+  function groupDays(p) { return days.filter(function (x) { return p === 'all' || (p === 'wd' && x.wd === 1); }).map(function (x) { return x.d; }); }
+
+  var dayBox = $('#op2-rp-days'), preBox = $('#op2-rp-presets'), list = $('#op2-rp-list');
+  dayBox.addEventListener('click', function (e) { var c = e.target.closest('.op2-chip'); if (!c) return; addDay(c.dataset.d); render(); });
+  dayBox.addEventListener('contextmenu', function (e) { var c = e.target.closest('.op2-chip'); if (!c) return; e.preventDefault(); removeDay(c.dataset.d); render(); S.tickDown(); });
+  preBox.addEventListener('click', function (e) {
     var c = e.target.closest('.op2-chip'); if (!c) return;
     var p = c.dataset.preset;
-    $$('#op2-rp-days .op2-chip').forEach(function (x) { x.classList.toggle('op2-on', p === 'all' || (p === 'wd' && x.dataset.wd === '1')); });
-    refresh();
+    if (p === 'none') { rows = []; render(); return; }
+    groupDays(p).forEach(addDay); render();
   });
-  refresh();
+  preBox.addEventListener('contextmenu', function (e) {
+    var c = e.target.closest('.op2-chip'); if (!c || c.dataset.preset === 'none') return;
+    e.preventDefault(); groupDays(c.dataset.preset).forEach(removeDay); render(); S.tickDown();
+  });
+  list.addEventListener('click', function (e) {
+    var st = e.target.closest('.op2-rb-stp');
+    if (st) { var r = rows[+st.dataset.i]; r.t = hhmm(tmin(r.t || defTime || '08:00') + (+st.dataset.d)); renderList(); return; }
+    var rm = e.target.closest('.op2-rb-rm');
+    if (rm) { rows.splice(+rm.dataset.i, 1); render(); }
+  });
+  list.addEventListener('change', function (e) {
+    var inp = e.target.closest('input[data-i]'); if (!inp) return;
+    rows[+inp.dataset.i].t = normT(inp.value) || ''; inp.value = rows[+inp.dataset.i].t;
+  });
+  render();
+
+  /* runRepeat читает состояние отсюда - одна шторка за раз, замыкание живёт до закрытия */
+  openRepeat._rows = function () { return rows.slice(); };
 }
-function runRepeatN(btn, o) {
-  if (btn.classList.contains('op2-blocked')) { toast('<span class="op2-warn">Выбери хотя бы один день</span>'); return; }
-  var sel = $$('#op2-rp-days .op2-chip.op2-on');
+function runRepeat(btn, o) {
+  var rows = openRepeat._rows ? openRepeat._rows() : [];
+  if (btn.classList.contains('op2-blocked') || !rows.length) { toast('<span class="op2-warn">Кликни по дню - добавь хотя бы одну заявку</span>'); return; }
   var base = {
-    service_time: oTime(o), needs_data: o.needs_data ? 1 : 0, customer: o.customer,
+    needs_data: o.needs_data ? 1 : 0, customer: o.customer,
     customer_entity_id: o.customer_entity_id || '', executor_entity_id: o.executor_entity_id || '',
     customer_contact_name: o.customer_contact_name || '', customer_contact_phone: o.customer_contact_phone || '',
     equipment_type: o.equipment_type, cargo: o.cargo || '', cargo_weight_t: o.cargo_weight_t || '',
@@ -2219,136 +2266,21 @@ function runRepeatN(btn, o) {
     price: num(o.price) || 0, payment_status: o.payment_status || '', internal: o.internal ? 1 : 0
   };
   btn.disabled = true;
-  Promise.all(sel.map(function (c) {
+  Promise.all(rows.map(function (r) {
     var p = {}; Object.keys(base).forEach(function (k) { p[k] = base[k]; });
-    p.service_date = c.dataset.d;
-    return apiPostJson('/orders/save', p).then(function (r) { return { r: r, l: c.dataset.l }; });
+    p.service_date = r.d; p.service_time = r.t || '';
+    return apiPostJson('/orders/save', p).then(function (res) { return { r: res, d: r.d }; });
   })).then(function (res) {
     btn.disabled = false;
     var good = res.filter(function (x) { return x.r && x.r.ok && x.r.data && !x.r.data.error; });
     var bad = res.length - good.length;
+    var perDay = {}; good.forEach(function (x) { perDay[x.d] = (perDay[x.d] || 0) + 1; });
     closeDrawer();
     if (good.length) S.tickUp();
     toast('Создано ' + good.length + ' ' + plural(good.length, 'заявка', 'заявки', 'заявок') + ' по образцу №' + esc(oNo(o)) + ': ' +
-      esc(good.map(function (x) { return '№' + ((x.r.data.day_no != null) ? x.r.data.day_no : '?') + ' ' + x.l; }).join(', ')) +
-      (bad ? ' · <span class="op2-bad">' + bad + ' не создалось</span>' : '') + ' · логисты увидят на своих днях', null, 9000);
-    loadOrders(); loadCounts();
-/* ══════════════════════════════ ПОВТОРИТЬ N РАЗ (ОДИН ДЕНЬ, С ИНТЕРВАЛОМ) ══════════════════════════════
-   Влад 11.09: «заказали 7 машин, все одно и то же, интервал подачи каждые 30 минут/час - нужно
-   быстро создать». Все новые заявки - «Не подтверждено» (default сервера), подтверждаются вручную
-   каждая отдельно - здесь ничего специально не проставляем. */
-var RB_INTERVALS = [
-  { m: 0, l: 'Без интервала' }, { m: 15, l: '15 мин' }, { m: 30, l: '30 мин' },
-  { m: 45, l: '45 мин' }, { m: 60, l: '1 час' }, { m: 90, l: '1,5 часа' }
-];
-function genRbTimes(start, interval, count) {
-  var base = tmin(start); if (base >= 1e9) base = nowMin();
-  var arr = []; for (var i = 0; i < count; i++) arr.push(hhmm(base + i * interval));
-  return arr;
-}
-function openRepeatBulk(o) {
-  drawerOrder = o; formMode = false;
-  openDrawer();
-  var interval = 30, count = 3;
-  var start = oTime(o) || hhmm(nowMin() + 30);
-  var times = genRbTimes(start, interval, count);
-  $('#op2-d-title').textContent = 'Повторить №' + oNo(o) + ' несколько раз';
-  $('#op2-d-sub').textContent = (o.customer || '') + ' · ' + (o.equipment_type || '') + ' · ' + dmy(o.service_date || DATE) +
-    ' · ' + (o.load_address || '—') + ' → ' + (o.unload_address || '—');
-  $('#op2-d-body').innerHTML =
-    '<div class="op2-sect"><div class="op2-t">Сколько машин</div><div class="op2-rb-count">' +
-      '<button class="op2-stp" id="op2-rb-cnt-m">−</button><span class="op2-rb-n" id="op2-rb-cnt-n"></span><button class="op2-stp" id="op2-rb-cnt-p">+</button>' +
-      '<div class="op2-qk" id="op2-rb-cnt-presets">' + [3, 5, 7, 10].map(function (n) { return '<button class="op2-chip" data-n="' + n + '">' + n + '</button>'; }).join('') + '</div>' +
-    '</div></div>' +
-    '<div class="op2-sect"><div class="op2-t">Через сколько подавать следующую</div><div class="op2-qk" id="op2-rb-interval">' +
-      RB_INTERVALS.map(function (x) { return '<button class="op2-chip' + (x.m === interval ? ' op2-on' : '') + '" data-m="' + x.m + '">' + x.l + '</button>'; }).join('') +
-    '</div></div>' +
-    '<div class="op2-sect"><div class="op2-t">Первая подача</div><div class="op2-timerow">' +
-      '<button class="op2-stp" data-d="-30" id="op2-rb-start-m">−30</button>' +
-      '<input id="op2-rb-start" value="' + esc(start) + '" placeholder="--:--" autocomplete="off">' +
-      '<button class="op2-stp" data-d="30" id="op2-rb-start-p">+30</button>' +
-      '<span class="op2-hint">задаёт время первой, дальше - по интервалу</span></div></div>' +
-    '<div class="op2-sect"><div class="op2-t">Время каждой заявки <span class="op2-dim op2-sm">- поправь любую вручную, ✕ убирает строку</span></div>' +
-      '<div class="op2-rb-list" id="op2-rb-list"></div></div>';
-  $('#op2-d-foot').innerHTML = '<button class="op2-ghost" id="op2-d-back">← Назад к заявке</button>' +
-    '<span class="op2-dim op2-sm" id="op2-rb-state"></span>' +
-    '<button class="op2-dbtn op2-primary" id="op2-rb-go">Создать заявки</button>';
-
-  function renderList() {
-    $('#op2-rb-cnt-n').textContent = times.length;
-    $('#op2-rb-list').innerHTML = times.map(function (t, i) {
-      return '<div class="op2-rb-row"><span class="op2-rb-no">' + (i + 1) + '</span>' +
-        '<input value="' + esc(t) + '" data-idx="' + i + '" placeholder="--:--" autocomplete="off">' +
-        '<button class="op2-rb-rm" data-idx="' + i + '" title="Убрать эту заявку из списка">✕</button></div>';
-    }).join('');
-    var g = $('#op2-rb-go');
-    g.textContent = 'Создать ' + times.length + ' ' + plural(times.length, 'заявку', 'заявки', 'заявок');
-    g.className = 'op2-dbtn op2-primary' + (times.length ? '' : ' op2-blocked');
-    $('#op2-rb-state').textContent = times.length ? 'все - «Не подтверждено», подтверждаете каждую отдельно' : 'список пуст';
-  }
-  function regen() { times = genRbTimes($('#op2-rb-start').value || start, interval, count); renderList(); }
-  renderList();
-
-  $('#op2-rb-cnt-m').addEventListener('click', function () { if (count > 1) { count--; times = times.slice(0, count); renderList(); } });
-  $('#op2-rb-cnt-p').addEventListener('click', function () {
-    count++; var last = times.length ? times[times.length - 1] : ($('#op2-rb-start').value || start);
-    times.push(hhmm(tmin(last) + interval)); renderList();
-  });
-  $('#op2-rb-cnt-presets').addEventListener('click', function (e) {
-    var b = e.target.closest('.op2-chip'); if (!b) return; count = +b.dataset.n; regen();
-  });
-  $('#op2-rb-interval').addEventListener('click', function (e) {
-    var b = e.target.closest('.op2-chip'); if (!b) return;
-    $$('.op2-chip', this).forEach(function (x) { x.classList.remove('op2-on'); }); b.classList.add('op2-on');
-    interval = +b.dataset.m; regen();
-  });
-  var stEl = $('#op2-rb-start');
-  stEl.addEventListener('blur', function () { this.value = normT(this.value) || start; regen(); });
-  $('#op2-rb-start-m').addEventListener('click', function () { stEl.value = hhmm(tmin(normT(stEl.value) || start) - 30); regen(); });
-  $('#op2-rb-start-p').addEventListener('click', function () { stEl.value = hhmm(tmin(normT(stEl.value) || start) + 30); regen(); });
-  $('#op2-rb-list').addEventListener('click', function (e) {
-    var rm = e.target.closest('.op2-rb-rm'); if (!rm) return;
-    times.splice(+rm.dataset.idx, 1); count = times.length || 1; renderList();
-  });
-  $('#op2-rb-list').addEventListener('change', function (e) {
-    var inp = e.target.closest('input[data-idx]'); if (!inp) return;
-    times[+inp.dataset.idx] = normT(inp.value) || ''; inp.value = times[+inp.dataset.idx];
-  });
-}
-function runRepeatBulk(btn, o) {
-  var times = $$('#op2-rb-list input[data-idx]').map(function (i) { return normT(i.value) || ''; });
-  if (!times.length) { toast('<span class="op2-warn">Список пуст</span>'); return; }
-  var base = {
-    service_date: o.service_date || DATE, needs_data: o.needs_data ? 1 : 0, customer: o.customer,
-    customer_entity_id: o.customer_entity_id || '', executor_entity_id: o.executor_entity_id || '',
-    customer_contact_name: o.customer_contact_name || '', customer_contact_phone: o.customer_contact_phone || '',
-    equipment_type: o.equipment_type, cargo: o.cargo || '', cargo_weight_t: o.cargo_weight_t || '',
-    cargo_dims: o.cargo_dims || '', gabarit: o.gabarit || '', rework_terms: o.rework_terms || '',
-    documents: o.documents || '', note: o.note || '', cash: o.cash ? 1 : 0,
-    load_address: o.load_address || '', load_lat: o.load_lat || '', load_lon: o.load_lon || '',
-    load_contact_name: o.load_contact_name || '', load_contact_phone: o.load_contact_phone || '',
-    unload_address: o.unload_address || '', unload_lat: o.unload_lat || '', unload_lon: o.unload_lon || '',
-    unload_contact_name: o.unload_contact_name || '', unload_contact_phone: o.unload_contact_phone || '',
-    price: num(o.price) || 0, payment_status: o.payment_status || '', internal: o.internal ? 1 : 0
-  };
-  btn.disabled = true;
-  Promise.all(times.map(function (t) {
-    var p = {}; Object.keys(base).forEach(function (k) { p[k] = base[k]; });
-    p.service_time = t;
-    return apiPostJson('/orders/save', p);
-  })).then(function (res) {
-    btn.disabled = false;
-    var good = res.filter(function (r) { return r && r.ok && r.data && !r.data.error; });
-    var bad = res.length - good.length;
-    closeDrawer();
-    if (good.length) S.tickUp();
-    toast('Создано ' + good.length + ' ' + plural(good.length, 'заявка', 'заявки', 'заявок') + ' по образцу №' + esc(oNo(o)) + ': ' +
-      esc(good.map(function (r) { return '№' + ((r.data.day_no != null) ? r.data.day_no : '?') + ' ' + (r.data.order ? (oTime(r.data.order) || 'уточнить') : ''); }).join(', ')) +
+      esc(Object.keys(perDay).sort().map(function (d) { return dayLabel(d) + ' ×' + perDay[d]; }).join(', ')) +
       (bad ? ' · <span class="op2-bad">' + bad + ' не создалось</span>' : '') + ' · все «Не подтверждено» - подтверди каждую', null, 9000);
     loadOrders(); loadCounts();
-  }).catch(function () { btn.disabled = false; });
-}
-
   }).catch(function () { btn.disabled = false; });
 }
 

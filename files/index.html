@@ -198,15 +198,87 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .sidebar-collapse-btn svg{width:15px;height:15px;flex-shrink:0;display:block;transition:transform .15s cubic-bezier(0.25,1,0.5,1);}
 .sidebar.collapsed .sidebar-collapse-btn svg{transform:rotate(180deg);}
 .sidebar.collapsed .sidebar-logo-label,
-.sidebar.collapsed .sidebar-logo-text,
 .sidebar.collapsed .sidebar-nav-section-label,
 .sidebar.collapsed .sidebar-nav-section-line,
 .sidebar.collapsed .sidebar-nav-badge,
 .sidebar.collapsed .sidebar-updated,
 .sidebar.collapsed .sidebar-refresh span{display:none;}
-.sidebar.collapsed .sidebar-nav-item{font-size:0;justify-content:center;gap:0;padding:8px 0;}
-.sidebar.collapsed .sidebar-refresh{justify-content:center;padding:7px 0;}
-@media(max-width:900px){ .sidebar-collapse-btn{display:none;} }
+
+/* СВЁРНУТЫЙ ВИД = «рейка» из превью «План задание v2» (Влад, 11.09: «когда
+   сворачиваешь менюшку, должно выглядеть так, как у нас было в превью план задания»).
+   Там это отдельная плавающая карточка на 64px: бренд «ЯРД/HUB» в две строки мелким
+   Unbounded, ниже квадратные кнопки 38x38 с радиусом 9, активная - ступень фона плюс
+   зелёная иконка. Развёрнутый вид не трогаем - он остаётся прежним.
+   --sidebar в этом состоянии 88px = 12 отступ + 64 рейка + 12 отступ (см.
+   toggleSidebarCollapse), поэтому контент не наезжает на карточку. */
+.sidebar.collapsed{
+  width:64px;min-width:64px;
+  top:12px;left:12px;bottom:12px;
+  background:var(--bg2);
+  border:1px solid var(--border);border-radius:12px;
+  overflow:hidden;
+}
+.sidebar.collapsed .sidebar-logo{
+  padding:12px 0 8px;border-bottom:0;
+}
+.sidebar.collapsed .sidebar-logo-row{flex-direction:column;align-items:center;gap:8px;}
+.sidebar.collapsed .sidebar-logo-text{
+  font-size:11px;font-weight:600;line-height:1.1;text-align:center;letter-spacing:0;
+}
+/* «HUB» уходит на вторую строку - в 64px две части бренда рядом не помещаются */
+.sidebar.collapsed .sidebar-logo-text b{display:block;}
+.sidebar.collapsed .sidebar-collapse-btn{width:28px;height:28px;border-radius:8px;}
+.sidebar.collapsed .sidebar-nav{padding:6px 0;display:flex;flex-direction:column;align-items:center;gap:6px;}
+/* Секция в свёрнутом виде - только hairline вместо капс-лейбла: групп в дашборде
+   много, без разделителя иконки читаются одной кашей (в превью пунктов было четыре). */
+.sidebar.collapsed .sidebar-nav-section{
+  flex:none;margin:5px 0;padding:0;height:1px;width:22px;background:var(--border);
+}
+.sidebar.collapsed .sidebar-nav-item{
+  font-size:0;gap:0;padding:0;margin:0;
+  width:38px;height:38px;min-height:38px;flex:none; /* flex:none - иначе колонка сжимает кнопки по высоте */
+  border-radius:9px;
+  justify-content:center;align-items:center;
+}
+.sidebar.collapsed .sidebar-bottom{padding:8px 0 10px;display:flex;flex-direction:column;align-items:center;gap:6px;}
+.sidebar.collapsed .sidebar-refresh{
+  width:38px;height:38px;min-width:38px;flex:none;padding:0;border-radius:9px;
+  justify-content:center;gap:0;margin:0 !important; /* margin-top в разметке задан инлайном */
+}
+.sidebar.collapsed .sidebar-nav::-webkit-scrollbar{width:0;}
+.sidebar.collapsed .sidebar-nav{scrollbar-width:none;}
+@media(max-width:900px){
+  .sidebar-collapse-btn{display:none;}
+  /* На телефоне меню и так выезжает поверх контента, а кнопки сворачивания нет - если
+     состояние «свёрнуто» осталось в localStorage с компьютера, рейка залипала узкой
+     полосой поверх страницы. Здесь она разворачивается обратно в обычное меню. */
+  .sidebar.collapsed{
+    width:220px;min-width:220px;top:0;left:0;bottom:0;
+    border:0;border-right:1px solid var(--border);border-radius:0;
+  }
+  .sidebar.collapsed .sidebar-logo{padding:20px 18px 16px;border-bottom:1px solid var(--border);}
+  .sidebar.collapsed .sidebar-logo-row{flex-direction:row;align-items:flex-start;}
+  .sidebar.collapsed .sidebar-logo-text{font-size:19px;line-height:1.2;text-align:left;}
+  .sidebar.collapsed .sidebar-logo-text b{display:inline;}
+  .sidebar.collapsed .sidebar-logo-label,
+  .sidebar.collapsed .sidebar-nav-section-label,
+  .sidebar.collapsed .sidebar-nav-section-line,
+  .sidebar.collapsed .sidebar-updated,
+  .sidebar.collapsed .sidebar-refresh span{display:block;}
+  .sidebar.collapsed .sidebar-nav{padding:12px 8px;display:block;}
+  .sidebar.collapsed .sidebar-nav-section{
+    height:auto;width:auto;background:none;margin:16px 0 4px;padding:0 12px;display:flex;
+  }
+  .sidebar.collapsed .sidebar-nav-item{
+    font-size:13px;width:auto;height:auto;min-height:0;
+    justify-content:flex-start;gap:11px;padding:8px 10px;margin-bottom:1px;
+  }
+  .sidebar.collapsed .sidebar-bottom{padding:12px 16px;display:block;}
+  .sidebar.collapsed .sidebar-refresh{
+    width:100%;height:auto;min-width:0;padding:7px;border-radius:8px;gap:8px;
+    justify-content:center;margin:6px 0 0 !important;
+  }
+}
 
 /* ── Кастомизация меню (05.09, Влад: "зажал меню - перешло в режим кастома... передвинуть
    как канбанчик, скрыть") - ГОСТ раздел 6 "Долгое нажатие -> режим перестановки", числа
@@ -20631,7 +20703,8 @@ function setSidebarCollapseBtnTitle_(collapsed) {
 }
 function toggleSidebarCollapse() {
   var collapsed = document.querySelector('.sidebar').classList.toggle('collapsed');
-  document.documentElement.style.setProperty('--sidebar', collapsed ? '64px' : '220px');
+  // 88px = 12 + 64 + 12: рейка отступает от краёв экрана, контент - от рейки (11.09).
+  document.documentElement.style.setProperty('--sidebar', collapsed ? '88px' : '220px');
   setSidebarCollapseBtnTitle_(collapsed);
   try { localStorage.setItem(SIDEBAR_COLLAPSE_KEY_, collapsed ? '1' : '0'); } catch (e) {}
 }
@@ -20645,7 +20718,7 @@ function initSidebarCollapse_() {
   try { collapsed = localStorage.getItem(SIDEBAR_COLLAPSE_KEY_) === '1'; } catch (e) {}
   if (collapsed) {
     document.querySelector('.sidebar').classList.add('collapsed');
-    document.documentElement.style.setProperty('--sidebar', '64px');
+    document.documentElement.style.setProperty('--sidebar', '88px'); // как в toggle: 12+64+12
   }
   setSidebarCollapseBtnTitle_(collapsed);
 }

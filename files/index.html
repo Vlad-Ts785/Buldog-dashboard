@@ -23289,15 +23289,19 @@ var CRM = (function () {
   // введённое никогда не уходило на сервер и терялось при следующей перерисовке дровера/
   // списка. autoSave(id) - тот же приём, что у saveMain/saveContact, теперь и здесь; кнопка
   // "Сохранить заявку" оставлена (безвредный дубль для тех, кто ей уже пользуется).
-  function briefFieldsHtml(prefix, d) {
+  function briefFieldsHtml(prefix, d, from1c) {
     var saveFn = prefix === 'cx' ? 'saveCtxBrief' : 'saveBrief';
     var saveCall = 'CRM.' + saveFn + '(' + d.id + ')';
     var onBlur = ' onblur="' + saveCall + '"', onChange = ' onchange="' + saveCall + '"';
     var autoTag = d.brief_source === 'auto' ? '<span class="dr-auto" title="Извлечено автоматически из переписки - проверьте">авто</span>' : '';
+    // 11.09 - тот же "авто"-бейдж (.dr-auto, канон уже есть выше), только для полей,
+    // молча подставленных из 1С (см. renderDrawer) - manager должен видеть, что это ещё
+    // не его собственный ввод, не новый визуальный паттерн.
+    var oneCTag = '<span class="dr-auto" title="Подставлено из 1С по номеру заказа - проверьте">1С</span>';
     return '<div class="dr-grid2">' +
       '<div class="dr-field" style="grid-column:1/-1"><label>Груз' + autoTag + '</label><input class="dr-input" id="' + prefix + '-cargo" autocomplete="off" value="' + esc(d.cargo_type || '') + '" placeholder="экскаватор, трубы, контейнер…"' + onBlur + '></div>' +
-      '<div class="dr-field"><label>Откуда</label><input class="dr-input" id="' + prefix + '-from" autocomplete="off" value="' + esc(d.route_from || '') + '"' + onBlur + '></div>' +
-      '<div class="dr-field"><label>Куда</label><input class="dr-input" id="' + prefix + '-to" autocomplete="off" value="' + esc(d.route_to || '') + '"' + onBlur + '></div>' +
+      '<div class="dr-field"><label>Откуда' + (from1c && from1c.from ? oneCTag : '') + '</label><input class="dr-input" id="' + prefix + '-from" autocomplete="off" value="' + esc(d.route_from || '') + '"' + onBlur + '></div>' +
+      '<div class="dr-field"><label>Куда' + (from1c && from1c.to ? oneCTag : '') + '</label><input class="dr-input" id="' + prefix + '-to" autocomplete="off" value="' + esc(d.route_to || '') + '"' + onBlur + '></div>' +
       '<div class="dr-field"><label>Вес, т</label><input class="dr-input mono" id="' + prefix + '-weight" type="number" step="0.1" min="0" autocomplete="off" value="' + esc(d.cargo_weight_tons != null ? d.cargo_weight_tons : '') + '"' + onBlur + '></div>' +
       '<div class="dr-field"><label>Дата подачи</label><input class="dr-input mono" id="' + prefix + '-date" type="date" autocomplete="off" value="' + dateInput(d.wanted_date) + '"' + onChange + '></div>' +
       '<div class="dr-field" style="grid-column:1/-1"><label>Техника</label><select class="dr-select" id="' + prefix + '-veh"' + onChange + '>' +
@@ -23320,6 +23324,20 @@ var CRM = (function () {
   function renderDrawer(opts) {
     opts = opts || {};
     var data = S.drawerDeal, d = data.deal, dr = el('crm-drawer');
+    // Влад, 11.09: "хочу чтобы в успешных сделках компания и адреса подтягивались из 1С" -
+    // карточки часто заводятся с телефона/Авито без брифа (сделка выиграна, а груз/маршрут/
+    // компания пустые - живой пример на 97 000 ₽). Сервер уже прислал order1c (из
+    // orders_normalized по order_1c_number) - подставляем ТОЛЬКО в пустые поля (COALESCE,
+    // не перезаписываем то, что менеджер уже сам вписал), отдельная копия d для рендера,
+    // не трогаем data.deal - поля остаются реально пустыми в базе, пока менеджер не
+    // тронет инпут (autosave по onblur) или явно не сохранит форму.
+    var o1c = data.order1c;
+    if (o1c) {
+      d = Object.assign({}, d);
+      if (!d.client_company && o1c.customer) d.client_company = o1c.customer;
+      if (!d.route_from && o1c.route_from) d.route_from = o1c.route_from;
+      if (!d.route_to && o1c.route_to) d.route_to = o1c.route_to;
+    }
     var st = STAGE_BY[d.stage] || STAGES[0];
     var phone = fmtPhone(d.client_phone), tel = telHref(d.client_phone), avito = isAvitoKey(d.client_phone);
     var idx = STAGES.findIndex(function (s) { return s.key === d.stage; });
@@ -23367,11 +23385,13 @@ var CRM = (function () {
       '<button class="crm-chip" aria-pressed="' + (!d.responsible_extension) + '" onclick="CRM.assign(\'' + esc(d.client_phone) + '\',\'\',' + d.id + ')">Не назначен</button>' +
       (S.employees || []).map(respChip).join('') + '</div></div>';
 
-    var brief = '<div class="dr-section"><div class="dr-label">Заявка <span class="dr-saved aux" id="dr-saved-brief"></span></div>' + briefFieldsHtml('dr', d) +
+    var from1c = o1c ? { from: !data.deal.route_from && o1c.route_from, to: !data.deal.route_to && o1c.route_to } : null;
+    var brief = '<div class="dr-section"><div class="dr-label">Заявка <span class="dr-saved aux" id="dr-saved-brief"></span></div>' + briefFieldsHtml('dr', d, from1c) +
       '<div class="dr-actions"><button class="crm-chip" onclick="CRM.saveBrief(' + d.id + ')">' + ico('check') + 'Сохранить заявку</button></div></div>';
 
+    var companyFrom1c = o1c && !data.deal.client_company && o1c.customer ? '<span class="dr-auto" title="Подставлено из 1С по номеру заказа - проверьте">1С</span>' : '';
     var contact = '<div class="dr-section"><div class="dr-label">Контакт <span class="dr-saved aux" id="dr-saved-contact"></span></div><div class="dr-grid2">' +
-      '<div class="dr-field"><label>Компания</label><input class="dr-input" id="dr-company" autocomplete="off" value="' + esc(d.client_company || '') + '" onblur="CRM.saveContact(' + d.id + ')"></div>' +
+      '<div class="dr-field"><label>Компания' + companyFrom1c + '</label><input class="dr-input" id="dr-company" autocomplete="off" value="' + esc(d.client_company || '') + '" onblur="CRM.saveContact(' + d.id + ')"></div>' +
       '<div class="dr-field"><label>Имя</label><input class="dr-input" id="dr-name" autocomplete="off" value="' + esc(d.client_name || '') + '" onblur="CRM.saveContact(' + d.id + ')"></div>' +
       '<div class="dr-field" style="grid-column:1/-1"><label>E-mail</label><input class="dr-input" id="dr-email" type="email" autocomplete="off" value="' + esc(d.client_email || '') + '" onblur="CRM.saveContact(' + d.id + ')"></div></div></div>';
 

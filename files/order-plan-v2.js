@@ -104,6 +104,9 @@ var S = {
   nav: function () { blip(392, 440, .05, .022); },
   tickUp: function () { blip(880, 1320, .09, .04); },
   tickDown: function () { blip(440, 330, .09, .035); },
+  /* шаг времени −30/+30 (Влад 11.09: «на + звук должен отличаться от −»): короткий, плюс - вверх, минус - вниз */
+  stepUp: function () { blip(440, 560, .05, .03); },
+  stepDown: function () { blip(560, 440, .05, .03); },
   toggle: function () { blip(520, 560, .04, .02); },
   lift: function () { blip(330, 392, .06, .03); },
   drop: function () { blip(392, 300, .08, .035); },
@@ -1911,7 +1914,7 @@ function wireForm() {
     tickState();
   });
   $$('.op2-stp', $('#op2-d-body')).forEach(function (b) {
-    b.addEventListener('click', function () { ft.value = hhmm(tmin(normT(ft.value) || '08:00') + (+this.dataset.d)); tickState(); });
+    b.addEventListener('click', function () { ft.value = hhmm(tmin(normT(ft.value) || '08:00') + (+this.dataset.d)); if (+this.dataset.d > 0) S.stepUp(); else S.stepDown(); tickState(); });
   });
   $('#op2-f-datebox').addEventListener('click', function (e) {
     var b = e.target.closest('.op2-chip'); if (!b) return;
@@ -2236,7 +2239,7 @@ function openRepeat(o) {
   });
   list.addEventListener('click', function (e) {
     var st = e.target.closest('.op2-rb-stp');
-    if (st) { var r = rows[+st.dataset.i]; r.t = hhmm(tmin(r.t || defTime || '08:00') + (+st.dataset.d)); renderList(); return; }
+    if (st) { var r = rows[+st.dataset.i]; r.t = hhmm(tmin(r.t || defTime || '08:00') + (+st.dataset.d)); if (+st.dataset.d > 0) S.stepUp(); else S.stepDown(); renderList(); return; }
     var rm = e.target.closest('.op2-rb-rm');
     if (rm) { rows.splice(+rm.dataset.i, 1); render(); }
   });

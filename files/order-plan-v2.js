@@ -1799,12 +1799,14 @@ var PREFILL = null;       /* {crm_deal_id, customer, ...} - ждёт, пока �
 function dict(name) { return (META && META.dictionary && META.dictionary[name]) || []; }
 function entities() { return (META && META.own_entities) || []; }
 function internalCustomers() { return (META && (META.internal_customers || META.own_entities)) || []; }
+/* Быстрые часы (Влад 11.09): на сегодня - следующие целые часы от «сейчас» (завожу в 19:00 -> 20, 21, 22, 23),
+   на другой день - с 8 утра. Никаких «уже поздно - завтра»: день выбирает человек. */
 function quickTimes(ds) {
   var isToday = ds === todayStr();
-  if (!isToday) return { list: ['07:00', '08:00', '09:00', '10:00'], why: 'утро' };
+  if (!isToday) return { list: ['08:00', '09:00', '10:00', '11:00'], why: 'с утра' };
   var start = Math.ceil((nowMin() + 30) / 60) * 60, list = [];
-  for (var i = 0; i < 4; i++) { var m = start + i * 60; if (m > 21 * 60) break; list.push(hhmm(m)); }
-  if (!list.length) return { list: ['07:00', '08:00', '09:00', '10:00'], why: 'на сегодня уже поздно - утро завтра' };
+  for (var i = 0; i < 4; i++) { var m = start + i * 60; if (m >= 24 * 60) break; list.push(hhmm(m)); }
+  if (!list.length) return { list: ['08:00', '09:00', '10:00', '11:00'], why: 'сегодня часов не осталось - это уже утро' };
   return { list: list, why: 'ближайшие от ' + hhmm(nowMin()) };
 }
 function openDrawerForm(o, repeat, who, prefill) {
@@ -1817,8 +1819,8 @@ function openDrawerForm(o, repeat, who, prefill) {
 }
 function renderForm() {
   var o = formOrder, repeat = formRepeat, isLog = formWho === 'log';
-  var evening = nowMin() >= 18 * 60;
-  var defDate = repeat ? addDays(todayStr(), 1) : (o ? o.service_date : (evening ? addDays(DATE, 1) : DATE));
+  var evening = false; /* Влад 11.09: «если сегодня завожу - сегодня; надо - руками нажму завтра» */
+  var defDate = repeat ? addDays(todayStr(), 1) : (o ? o.service_date : DATE);
   var editing = !!(o && !repeat && !formPrefill);
 
   $('#op2-d-title').textContent = repeat ? 'Новая заявка · повтор №' + oNo(o) : (editing ? 'Заявка №' + oNo(o) + ' · редактирование' : (formPrefill ? 'Новая заявка · из CRM' + (o && o.crm_deal_id ? ' · сделка №' + o.crm_deal_id : '') : (isLog ? 'Новая заявка · логист' : 'Новая заявка')));
@@ -1843,7 +1845,7 @@ function renderForm() {
         '<button class="op2-chip' + (defDate === todayStr() ? ' op2-on' : '') + '" data-d="' + esc(todayStr()) + '">Сегодня ' + esc(dm(todayStr())) + '</button>' +
         '<button class="op2-chip' + (defDate === addDays(todayStr(), 1) ? ' op2-on' : '') + '" data-d="' + esc(addDays(todayStr(), 1)) + '">Завтра ' + esc(dm(addDays(todayStr(), 1))) + '</button>' +
         '<input type="date" class="op2-dt" id="op2-f-date" value="' + esc(defDate) + '" autocomplete="off" style="margin-left:4px">' +
-      '</div>' + (evening && !editing ? '<span class="op2-hint">после 18:00 по умолчанию - завтра</span>' : '') + '</div>' +
+      '</div></div>' +
 
       '<div class="op2-fld"><label>Время подачи</label><div class="op2-timerow">' +
         '<button class="op2-stp" data-d="-30">−30</button>' +
@@ -2424,7 +2426,7 @@ function open() {
 function runPrefill() {
   if (!PREFILL || !built || !META) return;
   var pre = PREFILL; PREFILL = null;
-  if (!pre.service_date) pre.service_date = (nowMin() >= 18 * 60) ? addDays(todayStr(), 1) : todayStr(); /* как у пустой формы: после 18:00 - завтра */
+  if (!pre.service_date) pre.service_date = todayStr(); /* как у пустой формы - сегодня */
   if (ME && ME.role === 'admin' && VIEW !== 'mgr') { VIEW = 'mgr'; syncSwitch(); renderAll(); }
   openDrawerForm(pre, false, 'mgr', true);
   toast('Поля взяты из CRM · сделка №' + esc(pre.crm_deal_id || '?') + ' · проверь дату, время и тип техники');

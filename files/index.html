@@ -7219,6 +7219,22 @@ async function loadMechanicData_() {
   // тралы+борта у Самошкина даже после первого фикса - см. коммент у mechLoad_).
   var mechPreviewName_ = (D && D.role === 'admin' && viewAsEntry) ? viewAsEntry.name : null;
   var r = await fetchFromYardApi_('/mechanic/fleet', mechPreviewName_ ? { person: mechPreviewName_ } : {});
+  // 11.09 (живая жалоба - Самошкин с телефона, "Ошибка: Не авторизован" на весь экран,
+  // "Обнови страницу" не помогает никогда) - эта ветка единственная во всём loadData()
+  // ходит МИМО общей needLogin-логики (см. loadData() ниже: путь Apps Script проверяет
+  // fetched.needLogin и сам ведёт на экран входа, этот путь раньше слепо кидал throw на
+  // ЛЮБУЮ ошибку сервера, включая протухший session_token). checkSession на сервере честно
+  // отдаёт {error:'Не авторизован', needLogin:true} при 401 (api/server.js) - здесь просто
+  // не читали это поле. Копируем ту же реакцию: сброс токенов + экран входа с кнопкой
+  // Google, вместо тупикового баннера. isLoginRedirect_ на throw - чтобы catch() в
+  // loadData() не поверх showLoginScreen() ещё и включил свой баннер (см. там же).
+  if (r.data && r.data.needLogin) {
+    clearAuthTokens_();
+    showLoginScreen(r.data.error);
+    var loginErr = new Error(r.data.error || 'Не авторизован');
+    loginErr.isLoginRedirect_ = true;
+    throw loginErr;
+  }
   if (!r.ok || !r.data || r.data.error) {
     throw new Error((r.data && r.data.error) || 'Не удалось загрузить состав парка');
   }
@@ -7308,6 +7324,11 @@ async function loadData() {
       startBankOpsPolling_();
     }
   } catch(e) {
+    // 11.09 - throw из loadMechanicData_() при протухшем session_token (см. там же,
+    // isLoginRedirect_): showLoginScreen() уже отрисован ВНУТРИ той функции, здесь ничего
+    // сверху показывать не нужно - иначе баннер "Ошибка загрузки" перекрыл бы своими
+    // z-index'ом уже готовый экран входа с кнопкой Google.
+    if (e && e.isLoginRedirect_) return;
     // "Unexpected token '<' ... is not valid JSON" - сервер вернул HTML-страницу вместо
     // данных (обычно скрипт не задеплоен или временно упал), это не про адрес/ключ - раньше
     // блок всегда предлагал "укажи URL", что путало (Влад, 2026-07-04: "не пойму, что он от

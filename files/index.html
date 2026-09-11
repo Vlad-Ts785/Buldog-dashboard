@@ -198,15 +198,87 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .sidebar-collapse-btn svg{width:15px;height:15px;flex-shrink:0;display:block;transition:transform .15s cubic-bezier(0.25,1,0.5,1);}
 .sidebar.collapsed .sidebar-collapse-btn svg{transform:rotate(180deg);}
 .sidebar.collapsed .sidebar-logo-label,
-.sidebar.collapsed .sidebar-logo-text,
 .sidebar.collapsed .sidebar-nav-section-label,
 .sidebar.collapsed .sidebar-nav-section-line,
 .sidebar.collapsed .sidebar-nav-badge,
 .sidebar.collapsed .sidebar-updated,
 .sidebar.collapsed .sidebar-refresh span{display:none;}
-.sidebar.collapsed .sidebar-nav-item{font-size:0;justify-content:center;gap:0;padding:8px 0;}
-.sidebar.collapsed .sidebar-refresh{justify-content:center;padding:7px 0;}
-@media(max-width:900px){ .sidebar-collapse-btn{display:none;} }
+
+/* СВЁРНУТЫЙ ВИД = «рейка» из превью «План задание v2» (Влад, 11.09: «когда
+   сворачиваешь менюшку, должно выглядеть так, как у нас было в превью план задания»).
+   Там это отдельная плавающая карточка на 64px: бренд «ЯРД/HUB» в две строки мелким
+   Unbounded, ниже квадратные кнопки 38x38 с радиусом 9, активная - ступень фона плюс
+   зелёная иконка. Развёрнутый вид не трогаем - он остаётся прежним.
+   --sidebar в этом состоянии 88px = 12 отступ + 64 рейка + 12 отступ (см.
+   toggleSidebarCollapse), поэтому контент не наезжает на карточку. */
+.sidebar.collapsed{
+  width:64px;min-width:64px;
+  top:12px;left:12px;bottom:12px;
+  background:var(--bg2);
+  border:1px solid var(--border);border-radius:12px;
+  overflow:hidden;
+}
+.sidebar.collapsed .sidebar-logo{
+  padding:12px 0 8px;border-bottom:0;
+}
+.sidebar.collapsed .sidebar-logo-row{flex-direction:column;align-items:center;gap:8px;}
+.sidebar.collapsed .sidebar-logo-text{
+  font-size:11px;font-weight:600;line-height:1.1;text-align:center;letter-spacing:0;
+}
+/* «HUB» уходит на вторую строку - в 64px две части бренда рядом не помещаются */
+.sidebar.collapsed .sidebar-logo-text b{display:block;}
+.sidebar.collapsed .sidebar-collapse-btn{width:28px;height:28px;border-radius:8px;}
+.sidebar.collapsed .sidebar-nav{padding:6px 0;display:flex;flex-direction:column;align-items:center;gap:6px;}
+/* Секция в свёрнутом виде - только hairline вместо капс-лейбла: групп в дашборде
+   много, без разделителя иконки читаются одной кашей (в превью пунктов было четыре). */
+.sidebar.collapsed .sidebar-nav-section{
+  flex:none;margin:5px 0;padding:0;height:1px;width:22px;background:var(--border);
+}
+.sidebar.collapsed .sidebar-nav-item{
+  font-size:0;gap:0;padding:0;margin:0;
+  width:38px;height:38px;min-height:38px;flex:none; /* flex:none - иначе колонка сжимает кнопки по высоте */
+  border-radius:9px;
+  justify-content:center;align-items:center;
+}
+.sidebar.collapsed .sidebar-bottom{padding:8px 0 10px;display:flex;flex-direction:column;align-items:center;gap:6px;}
+.sidebar.collapsed .sidebar-refresh{
+  width:38px;height:38px;min-width:38px;flex:none;padding:0;border-radius:9px;
+  justify-content:center;gap:0;margin:0 !important; /* margin-top в разметке задан инлайном */
+}
+.sidebar.collapsed .sidebar-nav::-webkit-scrollbar{width:0;}
+.sidebar.collapsed .sidebar-nav{scrollbar-width:none;}
+@media(max-width:900px){
+  .sidebar-collapse-btn{display:none;}
+  /* На телефоне меню и так выезжает поверх контента, а кнопки сворачивания нет - если
+     состояние «свёрнуто» осталось в localStorage с компьютера, рейка залипала узкой
+     полосой поверх страницы. Здесь она разворачивается обратно в обычное меню. */
+  .sidebar.collapsed{
+    width:220px;min-width:220px;top:0;left:0;bottom:0;
+    border:0;border-right:1px solid var(--border);border-radius:0;
+  }
+  .sidebar.collapsed .sidebar-logo{padding:20px 18px 16px;border-bottom:1px solid var(--border);}
+  .sidebar.collapsed .sidebar-logo-row{flex-direction:row;align-items:flex-start;}
+  .sidebar.collapsed .sidebar-logo-text{font-size:19px;line-height:1.2;text-align:left;}
+  .sidebar.collapsed .sidebar-logo-text b{display:inline;}
+  .sidebar.collapsed .sidebar-logo-label,
+  .sidebar.collapsed .sidebar-nav-section-label,
+  .sidebar.collapsed .sidebar-nav-section-line,
+  .sidebar.collapsed .sidebar-updated,
+  .sidebar.collapsed .sidebar-refresh span{display:block;}
+  .sidebar.collapsed .sidebar-nav{padding:12px 8px;display:block;}
+  .sidebar.collapsed .sidebar-nav-section{
+    height:auto;width:auto;background:none;margin:16px 0 4px;padding:0 12px;display:flex;
+  }
+  .sidebar.collapsed .sidebar-nav-item{
+    font-size:13px;width:auto;height:auto;min-height:0;
+    justify-content:flex-start;gap:11px;padding:8px 10px;margin-bottom:1px;
+  }
+  .sidebar.collapsed .sidebar-bottom{padding:12px 16px;display:block;}
+  .sidebar.collapsed .sidebar-refresh{
+    width:100%;height:auto;min-width:0;padding:7px;border-radius:8px;gap:8px;
+    justify-content:center;margin:6px 0 0 !important;
+  }
+}
 
 /* ── Кастомизация меню (05.09, Влад: "зажал меню - перешло в режим кастома... передвинуть
    как канбанчик, скрыть") - ГОСТ раздел 6 "Долгое нажатие -> режим перестановки", числа
@@ -1471,6 +1543,22 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .mp-ghostbtn{background:var(--bg3);border:1px solid var(--border);color:var(--muted);border-radius:8px;
   padding:6px 12px;font-size:11.5px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:7px;transition:all .13s;}
 .mp-ghostbtn:hover{border-color:var(--blue);color:var(--blue);}
+/* Полноэкранный хаб-выбор раздела (11.09, DESIGN_SYSTEM.md раздел 4, "Полноэкранный
+   хаб-выбор раздела") - канон для любого пункта сайдбара, за которым несколько подразделов.
+   Первое применение - "Зарплата" (был попап .crm-modal, Влад: "категорически не устраивает,
+   в 1С полный экран"). */
+.hub-sec-title{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:12px;}
+.hub-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;}
+.hub-tile{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:20px;cursor:pointer;
+  transition:border-color .12s ease-out,transform .12s ease-out,background-color .12s ease-out;display:flex;flex-direction:column;gap:10px;}
+.hub-tile:hover{border-color:var(--border-strong);background:var(--bg-hover,var(--bg3));transform:translateY(-1px);}
+.hub-tile__icon{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex:none;}
+.hub-tile__icon--a{background:rgba(55,138,221,.14);color:var(--blue);}
+.hub-tile__icon--b{background:rgba(29,158,117,.14);color:var(--green);}
+.hub-tile__name{font-size:14.5px;font-weight:600;color:var(--text);}
+.hub-tile__sub{font-size:12px;color:var(--muted);line-height:1.5;}
+.hub-tile__foot{margin-top:auto;padding-top:10px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);display:flex;align-items:center;justify-content:space-between;}
+.hub-tile__go{color:var(--blue);font-family:var(--font-mono);}
 .mp-tc{display:flex;align-items:center;gap:12px;padding:7px 0;border-bottom:1px solid rgba(var(--ink),.04);}
 .mp-tc:last-child{border-bottom:none;}
 .mp-tc__n{flex:1;min-width:0;}
@@ -3150,7 +3238,7 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
     <div class="sidebar-nav-item" onclick="showPage('sales-log',this)" data-page="sales-log">
       <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 17s5.3-5.1 5.3-8.8A5.3 5.3 0 0 0 4.7 8.2c0 3.7 5.3 8.8 5.3 8.8z"/><circle cx="10" cy="8" r="1.7" fill="currentColor" stroke="none"/></svg></span> По логистам
     </div>
-    <div class="sidebar-nav-item" onclick="openSalaryPicker(this)" data-page="sales-salary">
+    <div class="sidebar-nav-item" onclick="showPage('sales-salary',this)" data-page="sales-salary">
       <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="16" height="9" rx="1.6"/><circle cx="10" cy="10.5" r="2"/></svg></span> Зарплата
     </div>
     <div class="sidebar-nav-item" onclick="showPage('my-page',this)" data-page="my-page">
@@ -4728,32 +4816,39 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
     </div>
 
     <!-- ═══ ЗАРПЛАТА ════════════════════════════════════════════ -->
-    <!-- Выбор раздела - попап (2026-09-03, Влад поправил: "нажал кнопку зарплата на боковой
-         панели открылось окно где только две строчки ... по клику уже уходим на нужный
-         раздел. Такой принцип в 1с") - НЕ вкладки внутри страницы, как было раньше. Клик по
-         "Зарплата" в сайдбаре открывает #salary-picker-overlay (см. openSalaryPicker), клик
-         по строке ведёт в конкретный раздел и закрывает попап. Оба раздела остаются одной
-         страницей (page-sales-salary) с двумя панелями - переключает showSalaryTab (без
-         кнопок таб-бара теперь, только через попап). См. план
-         plans/2026-09-03-machinist-salary-page.md. -->
-    <div id="salary-picker-overlay" class="crm-modal-overlay" style="display:none" onmousedown="if(event.target===this)closeSalaryPicker()">
-      <div class="crm-modal" style="max-width:360px">
-        <div class="crm-modal-header">
-          <div class="crm-modal-title">Зарплата</div>
-          <button class="crm-modal-close" onclick="closeSalaryPicker()">&times;</button>
-        </div>
-        <div class="salary-picker-row" onclick="chooseSalaryTarget_('managers')">
-          <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="7" r="3.2"/><path d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6"/></svg>
-          Зарплата коммерческого отдела
-        </div>
-        <div class="salary-picker-row" onclick="chooseSalaryTarget_('machinists')">
-          <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="15" height="8" rx="1.6"/><circle cx="6.5" cy="14" r="1.6"/><circle cx="13.5" cy="14" r="1.6"/></svg>
-          Зарплата машинистов
+    <!-- Полноэкранный хаб-выбор раздела (11.09, Влад: "категорически не устраивает как
+         выглядит это диалоговое окно... в 1С так устроено - боковое меню, полный экран с
+         выбором подразделов" - попап от 2026-09-03 отменён по итогам живой проверки, канон
+         записан в DESIGN_SYSTEM.md раздел 4, "Полноэкранный хаб-выбор раздела"). Клик по
+         "Зарплата" в сайдбаре - обычный showPage (не попап), хаб #salary-hub - состояние
+         страницы по умолчанию. Клик по плитке - showSalaryHubTarget_(tab), прячет хаб,
+         показывает нужную панель + ссылку "← Все разделы" назад. См. план
+         plans/2026-09-03-machinist-salary-page.md (сама панель) и
+         plans/2026-09-11-salary-fullscreen-hub.md (этот редизайн). -->
+    <div id="page-sales-salary" class="page">
+      <div id="salary-hub">
+        <div class="hub-sec">
+          <div class="hub-sec-title">Разделы</div>
+          <div class="hub-grid">
+            <div class="hub-tile" onclick="chooseSalaryTarget_('managers')">
+              <div class="hub-tile__icon hub-tile__icon--a"><svg width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="7" r="3.2"/><path d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6"/></svg></div>
+              <div class="hub-tile__name">Зарплата коммерческого отдела</div>
+              <div class="hub-tile__sub">Менеджеры, логисты, руководители групп - оклад, бонусы, планы продаж и ВП.</div>
+              <div class="hub-tile__foot"><span>Отдел Тралы · Отдел Сильчева</span><span class="hub-tile__go">Открыть →</span></div>
+            </div>
+            <div class="hub-tile" onclick="chooseSalaryTarget_('machinists')">
+              <div class="hub-tile__icon hub-tile__icon--b"><svg width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="15" height="8" rx="1.6"/><circle cx="6.5" cy="14" r="1.6"/><circle cx="13.5" cy="14" r="1.6"/></svg></div>
+              <div class="hub-tile__name">Зарплата машинистов</div>
+              <div class="hub-tile__sub">Экипажи тралов/длинномеров/файмонвиль - часы, рейсы, выслуга, удержания.</div>
+              <div class="hub-tile__foot"><span>по месяцам 1С</span><span class="hub-tile__go">Открыть →</span></div>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
-    <div id="page-sales-salary" class="page">
-      <div id="salary-tab-managers">
+      <div id="salary-back-link" style="display:none;margin-bottom:14px">
+        <button class="mp-ghostbtn" onclick="showSalaryHub_()">← Все разделы</button>
+      </div>
+      <div id="salary-tab-managers" style="display:none">
         <div id="salary-content"><p style="color:var(--muted);padding:16px">Данные загружаются...</p></div>
       </div>
       <div id="salary-tab-machinists" style="display:none"></div>
@@ -18622,22 +18717,31 @@ function calcVolumeBonus(deptRevTotal) {
   return Math.floor(deptRevTotal / 10000000) * 10000;
 }
 
-// ── Зарплата - попап-выбор раздела (2026-09-03, Влад: "нажал кнопку зарплата ... открылось
-// окно где только две строчки ... по клику уже уходим на нужный раздел. Такой принцип в
-// 1с") - клик по сайдбару открывает попап вместо прямого showPage; выбор строки в попапе
-// закрывает его и уводит на нужную панель внутри page-sales-salary. ──
-function openSalaryPicker(el) {
-  closeMobileSidebar();
-  document.querySelectorAll('.sidebar-nav-item').forEach(function(b) { b.classList.remove('active'); });
-  if (el) el.classList.add('active');
-  document.getElementById('salary-picker-overlay').style.display = 'flex';
-}
-function closeSalaryPicker() {
-  document.getElementById('salary-picker-overlay').style.display = 'none';
+// ── Зарплата - полноэкранный хаб-выбор раздела (11.09, DESIGN_SYSTEM.md раздел 4,
+// "Полноэкранный хаб-выбор раздела" - заменил попап от 2026-09-03: Влад "категорически не
+// устраивает как выглядит это диалоговое окно ... в 1с так устроено - боковое меню, полный
+// экран с выбором подразделов"). Клик по сайдбару - обычный showPage (страница
+// page-sales-salary показывает хаб #salary-hub по умолчанию); клик по плитке хаба -
+// chooseSalaryTarget_(tab) прячет хаб, показывает нужную панель + ссылку "← Все разделы".
+// Повторный клик по пункту сайдбара всегда сбрасывает к хабу - см. showPage(). ──
+function showSalaryHub_() {
+  var hub = document.getElementById('salary-hub');
+  var back = document.getElementById('salary-back-link');
+  var mgr = document.getElementById('salary-tab-managers');
+  var mech = document.getElementById('salary-tab-machinists');
+  if (hub) hub.style.display = '';
+  if (back) back.style.display = 'none';
+  if (mgr) mgr.style.display = 'none';
+  if (mech) mech.style.display = 'none';
+  setText('page-title', 'Зарплата');
+  var periodWrap = document.getElementById('period-selector-wrap');
+  if (periodWrap) periodWrap.style.display = 'none';
 }
 function chooseSalaryTarget_(tab) {
-  closeSalaryPicker();
-  showPage('sales-salary', document.querySelector('[data-page="sales-salary"]'));
+  var hub = document.getElementById('salary-hub');
+  var back = document.getElementById('salary-back-link');
+  if (hub) hub.style.display = 'none';
+  if (back) back.style.display = '';
   showSalaryTab(tab);
   setText('page-title', tab === 'machinists' ? 'Зарплата - машинисты' : 'Зарплата - коммерческий отдел');
 }
@@ -18705,8 +18809,14 @@ function openDriverSalaryFromVehicle_(driverName) {
   })();
   // НЕ через chooseSalaryTarget_ - та вызывает showSalaryTab() без месяца (свой,
   // параллельный fetch с дефолтным месяцем) - здесь нужен ОДИН запрос сразу на
-  // конкретный mk, иначе гонка двух fetch может оставить открытым не тот месяц.
+  // конкретный mk, иначе гонка двух fetch может оставить открытым не тот месяц. Но хаб
+  // (11.09) всё равно нужно спрятать и показать "← Все разделы" - иначе плитки останутся
+  // видны поверх открывшейся вкладки машинистов.
   showPage('sales-salary', document.querySelector('[data-page="sales-salary"]'));
+  var hub = document.getElementById('salary-hub');
+  var back = document.getElementById('salary-back-link');
+  if (hub) hub.style.display = 'none';
+  if (back) back.style.display = '';
   setText('page-title', 'Зарплата - машинисты');
   showSalaryTab('machinists', mk).then(function() {
     openMachinistDetail_(driverName);
@@ -20638,7 +20748,8 @@ function setSidebarCollapseBtnTitle_(collapsed) {
 }
 function toggleSidebarCollapse() {
   var collapsed = document.querySelector('.sidebar').classList.toggle('collapsed');
-  document.documentElement.style.setProperty('--sidebar', collapsed ? '64px' : '220px');
+  // 88px = 12 + 64 + 12: рейка отступает от краёв экрана, контент - от рейки (11.09).
+  document.documentElement.style.setProperty('--sidebar', collapsed ? '88px' : '220px');
   setSidebarCollapseBtnTitle_(collapsed);
   try { localStorage.setItem(SIDEBAR_COLLAPSE_KEY_, collapsed ? '1' : '0'); } catch (e) {}
 }
@@ -20652,7 +20763,7 @@ function initSidebarCollapse_() {
   try { collapsed = localStorage.getItem(SIDEBAR_COLLAPSE_KEY_) === '1'; } catch (e) {}
   if (collapsed) {
     document.querySelector('.sidebar').classList.add('collapsed');
-    document.documentElement.style.setProperty('--sidebar', '64px');
+    document.documentElement.style.setProperty('--sidebar', '88px'); // как в toggle: 12+64+12
   }
   setSidebarCollapseBtnTitle_(collapsed);
 }
@@ -21627,6 +21738,15 @@ function showPage(id, el) {
 
   var rangeWrap = document.getElementById('range-selector-wrap');
   if (rangeWrap) rangeWrap.style.display = RANGE_PAGES.indexOf(id) >= 0 ? 'flex' : 'none';
+
+  // Хаб "Зарплата" (11.09) - каждый заход через сайдбар сбрасывает к хабу (без запомненного
+  // состояния подраздела, см. DESIGN_SYSTEM.md раздел 4 "Полноэкранный хаб-выбор раздела").
+  // ВАЖНО: вызов после блока period-selector-wrap выше - тот включает его для sales-salary
+  // безусловно (PERIOD_PAGES), а showSalaryHub_() должен победить и спрятать его, пока
+  // виден именно хаб, а не подраздел "коммерческий отдел". openDriverSalaryFromVehicle_()
+  // (глубокая ссылка из "Техники") зовёт showPage() ДО показа своей вкладки - тоже сперва
+  // получит хаб отсюда, а затем сама явно спрячет его и покажет нужную панель.
+  if (id === 'sales-salary') showSalaryHub_();
 }
 
 // ── КЛИЕНТЫ (аналитика клиентской базы - plans/2026-07-05-client-analytics-on-dashboard.md) ──
@@ -23216,15 +23336,19 @@ var CRM = (function () {
   // введённое никогда не уходило на сервер и терялось при следующей перерисовке дровера/
   // списка. autoSave(id) - тот же приём, что у saveMain/saveContact, теперь и здесь; кнопка
   // "Сохранить заявку" оставлена (безвредный дубль для тех, кто ей уже пользуется).
-  function briefFieldsHtml(prefix, d) {
+  function briefFieldsHtml(prefix, d, from1c) {
     var saveFn = prefix === 'cx' ? 'saveCtxBrief' : 'saveBrief';
     var saveCall = 'CRM.' + saveFn + '(' + d.id + ')';
     var onBlur = ' onblur="' + saveCall + '"', onChange = ' onchange="' + saveCall + '"';
     var autoTag = d.brief_source === 'auto' ? '<span class="dr-auto" title="Извлечено автоматически из переписки - проверьте">авто</span>' : '';
+    // 11.09 - тот же "авто"-бейдж (.dr-auto, канон уже есть выше), только для полей,
+    // молча подставленных из 1С (см. renderDrawer) - manager должен видеть, что это ещё
+    // не его собственный ввод, не новый визуальный паттерн.
+    var oneCTag = '<span class="dr-auto" title="Подставлено из 1С по номеру заказа - проверьте">1С</span>';
     return '<div class="dr-grid2">' +
       '<div class="dr-field" style="grid-column:1/-1"><label>Груз' + autoTag + '</label><input class="dr-input" id="' + prefix + '-cargo" autocomplete="off" value="' + esc(d.cargo_type || '') + '" placeholder="экскаватор, трубы, контейнер…"' + onBlur + '></div>' +
-      '<div class="dr-field"><label>Откуда</label><input class="dr-input" id="' + prefix + '-from" autocomplete="off" value="' + esc(d.route_from || '') + '"' + onBlur + '></div>' +
-      '<div class="dr-field"><label>Куда</label><input class="dr-input" id="' + prefix + '-to" autocomplete="off" value="' + esc(d.route_to || '') + '"' + onBlur + '></div>' +
+      '<div class="dr-field"><label>Откуда' + (from1c && from1c.from ? oneCTag : '') + '</label><input class="dr-input" id="' + prefix + '-from" autocomplete="off" value="' + esc(d.route_from || '') + '"' + onBlur + '></div>' +
+      '<div class="dr-field"><label>Куда' + (from1c && from1c.to ? oneCTag : '') + '</label><input class="dr-input" id="' + prefix + '-to" autocomplete="off" value="' + esc(d.route_to || '') + '"' + onBlur + '></div>' +
       '<div class="dr-field"><label>Вес, т</label><input class="dr-input mono" id="' + prefix + '-weight" type="number" step="0.1" min="0" autocomplete="off" value="' + esc(d.cargo_weight_tons != null ? d.cargo_weight_tons : '') + '"' + onBlur + '></div>' +
       '<div class="dr-field"><label>Дата подачи</label><input class="dr-input mono" id="' + prefix + '-date" type="date" autocomplete="off" value="' + dateInput(d.wanted_date) + '"' + onChange + '></div>' +
       '<div class="dr-field" style="grid-column:1/-1"><label>Техника</label><select class="dr-select" id="' + prefix + '-veh"' + onChange + '>' +
@@ -23247,6 +23371,20 @@ var CRM = (function () {
   function renderDrawer(opts) {
     opts = opts || {};
     var data = S.drawerDeal, d = data.deal, dr = el('crm-drawer');
+    // Влад, 11.09: "хочу чтобы в успешных сделках компания и адреса подтягивались из 1С" -
+    // карточки часто заводятся с телефона/Авито без брифа (сделка выиграна, а груз/маршрут/
+    // компания пустые - живой пример на 97 000 ₽). Сервер уже прислал order1c (из
+    // orders_normalized по order_1c_number) - подставляем ТОЛЬКО в пустые поля (COALESCE,
+    // не перезаписываем то, что менеджер уже сам вписал), отдельная копия d для рендера,
+    // не трогаем data.deal - поля остаются реально пустыми в базе, пока менеджер не
+    // тронет инпут (autosave по onblur) или явно не сохранит форму.
+    var o1c = data.order1c;
+    if (o1c) {
+      d = Object.assign({}, d);
+      if (!d.client_company && o1c.customer) d.client_company = o1c.customer;
+      if (!d.route_from && o1c.route_from) d.route_from = o1c.route_from;
+      if (!d.route_to && o1c.route_to) d.route_to = o1c.route_to;
+    }
     var st = STAGE_BY[d.stage] || STAGES[0];
     var phone = fmtPhone(d.client_phone), tel = telHref(d.client_phone), avito = isAvitoKey(d.client_phone);
     var idx = STAGES.findIndex(function (s) { return s.key === d.stage; });
@@ -23294,11 +23432,13 @@ var CRM = (function () {
       '<button class="crm-chip" aria-pressed="' + (!d.responsible_extension) + '" onclick="CRM.assign(\'' + esc(d.client_phone) + '\',\'\',' + d.id + ')">Не назначен</button>' +
       (S.employees || []).map(respChip).join('') + '</div></div>';
 
-    var brief = '<div class="dr-section"><div class="dr-label">Заявка <span class="dr-saved aux" id="dr-saved-brief"></span></div>' + briefFieldsHtml('dr', d) +
+    var from1c = o1c ? { from: !data.deal.route_from && o1c.route_from, to: !data.deal.route_to && o1c.route_to } : null;
+    var brief = '<div class="dr-section"><div class="dr-label">Заявка <span class="dr-saved aux" id="dr-saved-brief"></span></div>' + briefFieldsHtml('dr', d, from1c) +
       '<div class="dr-actions"><button class="crm-chip" onclick="CRM.saveBrief(' + d.id + ')">' + ico('check') + 'Сохранить заявку</button></div></div>';
 
+    var companyFrom1c = o1c && !data.deal.client_company && o1c.customer ? '<span class="dr-auto" title="Подставлено из 1С по номеру заказа - проверьте">1С</span>' : '';
     var contact = '<div class="dr-section"><div class="dr-label">Контакт <span class="dr-saved aux" id="dr-saved-contact"></span></div><div class="dr-grid2">' +
-      '<div class="dr-field"><label>Компания</label><input class="dr-input" id="dr-company" autocomplete="off" value="' + esc(d.client_company || '') + '" onblur="CRM.saveContact(' + d.id + ')"></div>' +
+      '<div class="dr-field"><label>Компания' + companyFrom1c + '</label><input class="dr-input" id="dr-company" autocomplete="off" value="' + esc(d.client_company || '') + '" onblur="CRM.saveContact(' + d.id + ')"></div>' +
       '<div class="dr-field"><label>Имя</label><input class="dr-input" id="dr-name" autocomplete="off" value="' + esc(d.client_name || '') + '" onblur="CRM.saveContact(' + d.id + ')"></div>' +
       '<div class="dr-field" style="grid-column:1/-1"><label>E-mail</label><input class="dr-input" id="dr-email" type="email" autocomplete="off" value="' + esc(d.client_email || '') + '" onblur="CRM.saveContact(' + d.id + ')"></div></div></div>';
 
@@ -25528,6 +25668,30 @@ function buildRoster(){
      buildMyPageRoster_ целиком (Ратников там нужен - реальный менеджер, заказов пока
      физически нет, тот же принцип должен работать и для Планировки). */
   rows = rows.filter(function(r){ return (r.name || "").trim().split(" ")[0].toLowerCase() !== "рыщанов"; });
+  /* НАЙДЕННЫЙ БАГ (11.09, Влад: "Володин в планировке, он уволен давно. Это не первый
+     раз уже" - живой пример: свежий рейс s1-8141d91, создан 11.09 логистом, manager_name
+     "Володин Илья", хотя sprav_people.employment_status='fired'). Источник rows -
+     D.orders.by_manager/roster_managers, построен по ФАКТУ наличия заказов в 1С за
+     период - уволенный сотрудник со старыми заказами там остаётся НАВСЕГДА, это не баг
+     сервера (та же история, что "поле «менеджер» на деньгах ≠ занятость" -
+     feedback_receipts_manager_field_not_employment_proof), а не место для этой проверки.
+     Единая точка правды - sprav_people.employment_status (09.09) - фильтруем здесь, тем
+     же приёмом (сопоставление по фамилии, fail-open если человека нет в справочнике
+     вообще), что уже применяют /api/crm/employees и plansBuildRows_. FLEET_PEOPLE_ - тот
+     же /sprav/state, что эта вкладка и так грузит (fetchFleetData_) - не заводим второй
+     источник. Пуст на самом первом рендере (сеть ещё не ответила) - buildRoster()
+     перевызывается повторно из fetchFleetData_() ниже, как только список придёт. */
+  var firedSurnames_ = {};
+  (FLEET_PEOPLE_ || []).forEach(function(p){
+    if (p && p.employment_status === "fired") {
+      var sur = String(p.full_name || "").trim().split(/\s+/)[0].toLowerCase().replace(/ё/g, "е");
+      if (sur) firedSurnames_[sur] = 1;
+    }
+  });
+  rows = rows.filter(function(r){
+    var sur = (r.name || "").trim().split(/\s+/)[0].toLowerCase().replace(/ё/g, "е");
+    return !firedSurnames_[sur];
+  });
   var mgrs = [], tral = [], long = [], seen = {};
   rows.forEach(function(r){
     var full = (r.name || "").trim();
@@ -28631,7 +28795,14 @@ function fetchFleetData_(){
   return Promise.all([fetchFromYardApi_("/sprav/state", {}), fetchFromYardApi_("/fleet/state", {})])
     .then(function(results){
       var sprav = results[0], fleet = results[1];
-      if (sprav.ok){ FLEET_PEOPLE_ = sprav.data.people || []; FLEET_ASSETS_ = sprav.data.assets || []; }
+      if (sprav.ok){
+        FLEET_PEOPLE_ = sprav.data.people || []; FLEET_ASSETS_ = sprav.data.assets || [];
+        // 11.09 - buildRoster() уже прочитал FLEET_PEOPLE_ при первом вызове (initLP,
+        // синхронно), когда сеть ещё не ответила и он был пуст - перевызываем здесь,
+        // как только реальный список "уволен/работает" наконец пришёл, иначе фильтр
+        // уволенных менеджеров молча не срабатывал бы до перезагрузки страницы.
+        buildRoster();
+      }
       if (fleet.ok){
         FLEET_ASSIGN_ = fleet.data.assignments || [];
         /* Источник истины по "есть водитель/вакант" только что реально стал

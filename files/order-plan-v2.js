@@ -2314,11 +2314,20 @@ function runRepeat(btn, o) {
 /* ═════════════════════════ ЖИВОСТЬ ═════════════════════════ */
 function startPolling() {
   stopPolling();
+  /* «Максимально онлайн» (Влад 11.09): раз в 2 с спрашиваем дешёвый штамп версии /orders/tick и
+     перезагружаем таблицу только когда он сменился (чужое действие долетает за ~2 с); heartbeat
+     присутствия и страховочная полная перезагрузка - раз в 7 с. */
+  var beat = 0;
   pollTimer = setInterval(function () {
     if (document.hidden) return;      /* вкладка не видна - не дёргаем сервер */
     if (!isPageActive()) return;      /* ушли на другую страницу дашборда */
-    loadOrders(true);
-  }, 7000);
+    beat++;
+    if (beat % 3 === 0) { loadOrders(true); return; }
+    var params = { date: DATE }; if (TO_DATE) params.to = TO_DATE;
+    apiGet('/orders/tick', params).then(function (r) {
+      if (r && r.ok && r.data && r.data.v !== undefined && r.data.v !== MAX_UPD) loadOrders(true);
+    }).catch(function () {});
+  }, 2000);
   tickTimer = setInterval(function () { if (!document.hidden && isPageActive()) renderUpdated(); }, 1000);
 }
 function stopPolling() {

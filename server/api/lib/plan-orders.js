@@ -144,6 +144,25 @@ module.exports = function (deps) {
     }));
   }
 
+  // Штамп версии среза дат: max(history.id) + max(orders.updated_at) + max(executors.updated_at/removed_at).
+  // Дёшево (три индексных MAX), опрашивается клиентом раз в 2 с - полная перезагрузка только при смене.
+  async function versionStamp(from, to) {
+    const [[h]] = await pool.query(
+      `SELECT MAX(h.id) AS hid, MAX(o.updated_at) AS ou FROM plan_orders o LEFT JOIN plan_orders_history h ON h.order_id = o.id
+        WHERE o.service_date BETWEEN ? AND ?`, [from, to]);
+    const [[e]] = await pool.query(
+      `SELECT MAX(GREATEST(e.updated_at, COALESCE(e.removed_at, e.updated_at))) AS eu
+         FROM plan_order_executors e JOIN plan_orders o ON o.id = e.order_id WHERE o.service_date BETWEEN ? AND ?`, [from, to]);
+    return [h.hid || 0, h.ou ? new Date(h.ou).toISOString() : "", e.eu ? new Date(e.eu).toISOString() : ""].join("|");
+  }
+  app.get("/api/orders/tick", ...gate, async (req, res) => {
+    try {
+      const date = String(req.query.date || ""); const to = String(req.query.to || date);
+      if (!isDate(date) || !isDate(to)) return fail(res, 400, "date обязателен");
+      res.json({ v: await versionStamp(date, to) });
+    } catch (err) { console.error("orders tick:", err); fail(res, 500, String(err.message || err)); }
+  });
+
   // ── GET /api/orders ─────────────────────────────────────────────────────────────────────
   // date=YYYY-MM-DD (+ to=YYYY-MM-DD для недели). Менеджер - свои, не внутренние; логист/админ - все.
   app.get("/api/orders", ...gate, async (req, res) => {
@@ -159,7 +178,10 @@ module.exports = function (deps) {
       const execBy = {}; execs.forEach((e) => { (execBy[e.order_id] = execBy[e.order_id] || []).push(e); });
       const pendBy = {}; pend.forEach((q) => { pendBy[q.order_id] = q; });
       const orders = rows.map((o) => serialize(o, execBy[o.id] || [], pendBy[o.id], r.byEmail));
-      let maxUpdated = ""; rows.forEach((o) => { const u = new Date(o.updated_at).toISOString(); if (u > maxUpdated) maxUpdated = u; });
+      // Штамп версии - по ВСЕМ источникам изменений (заявки + исполнители + история), не только по
+      // plan_orders.updated_at: постановка машины тем же логистом не меняла updated_by -> MySQL не
+      // трогал timestamp -> у остальных таблица не перерисовывалась (Влад 11.09: «максимально онлайн»).
+      const maxUpdated = await versionStamp(date, to);
       res.json({ orders, max_updated: maxUpdated, me: await me(req), roster: r.list.map((x) => ({ name: x.name, code: x.code, role: x.role, email: x.email })) });
     } catch (err) { console.error("orders list:", err); fail(res, 500, String(err.message || err)); }
   });

@@ -5096,7 +5096,9 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
          Портирован из ЯРД_Калькулятор_v1.3 (yard-calc-v1.7.html) - методика расчёта не
          менялась, см. .business/products/pricing.md и
          plans/2026-08-17-calculator-dashboard-integration.md. Работает офлайн от Google
-         Sheets/Apps Script - только карта (OSM/OSRM/Nominatim, публичные, без ключей). -->
+         Sheets/Apps Script - карта (OSM/OSRM, публичные, без ключей); геокодинг -
+         Nominatim до 11.09, затем Photon (тоже публичный), затем DaData - ключ на
+         сервере, см. комментарий у dadataAddrParts_ и api/lib/geocoder.js. -->
     <div id="page-calculator" class="page clc-page">
       <!-- ═══ КАЛЬКУЛЯТОР 2.0 «Табло рейса» (утверждено на превью 28.08, превью = контракт;
            plans/2026-08-28-calculator-cockpit-redesign.md). Кокпит: маршрутная строка кольцом
@@ -5804,12 +5806,66 @@ function checkAllDone() {
 }
 
 // ===== ГЕО =====
+// Влад, 11.09: заменили публичный Photon на DaData - свой ключ уже был (тот же аккаунт,
+// что для поиска контрагента по ИНН в «План задание»), качество/стабильность заметно
+// выше (проверено вживую: правильные литеры дома 71/71Б/71Г, терпит опечатки, всегда
+// по-русски - официальная база ФИАС/ГАР, не краудсорс). Ключ ТОЛЬКО на сервере
+// (DADATA_API_KEY в .env VPS) - иначе он утёк бы в этот публичный статический файл на
+// GitHub Pages, тот же класс риска, что уже был с YARD_API_KEY. Клиент спрашивает
+// /api/geocoder/* на своём сервере, сервер уже сам ходит в DaData (api/lib/geocoder.js).
+// DaData отдаёт готовые структурированные поля (street_with_type/house/city_with_type/
+// region_with_type) - в отличие от Photon, не нужен ни словарь регионов, ни бой с тем,
+// что "улица, дом" сами по себе содержат внутреннюю запятую (см. историю правок 11.09
+// в старой версии этого блока, если понадобится для контекста).
+function dadataAddrParts_(d){
+    d=d||{};
+    var line=[d.street_with_type,d.house].filter(Boolean).join(', ');
+    var first=line||d.settlement_with_type||d.city_with_type||d.region_with_type||'';
+    var rest=[];
+    if(line&&line!==first)rest.push(line);
+    if(d.city_district_with_type)rest.push(d.city_district_with_type);
+    if(d.settlement_with_type&&d.settlement_with_type!==first)rest.push(d.settlement_with_type);
+    if(d.city_with_type&&d.city_with_type!==first)rest.push(d.city_with_type);
+    if(d.region_with_type&&d.region_with_type!==d.city_with_type)rest.push(d.region_with_type);
+    var seen={};
+    return [first].concat(rest).filter(function(v){if(!v||seen[v])return false;seen[v]=true;return true;});
+}
 function geoc(t){
     clearTimeout(gT);var inp=document.getElementById(t==='load'?'clc-loadAddr':'clc-unloadAddr'),lst=document.getElementById(t==='load'?'clc-loadAc':'clc-unloadAc');
     if(inp.value.length<3){lst.classList.remove('show');return;}
-    gT=setTimeout(async function(){try{var r=await fetch('https://nominatim.openstreetmap.org/search?format=json&q='+encodeURIComponent(inp.value)+'&limit=5&countrycodes=ru');var d=await r.json();lst.innerHTML='';if(!d.length){lst.classList.remove('show');return;}d.forEach(function(p){var el=document.createElement('div');el.className='clc-ac-item';var ps=p.display_name.split(',');el.innerHTML=ps[0]+' <span class="clc-ac-sub">'+ps.slice(1,3).join(',')+'</span>';el.onclick=function(){inp.value=ps[0];lst.classList.remove('show');setP(t,L.latLng(p.lat,p.lon));};lst.appendChild(el);});lst.classList.add('show');}catch(e){}},500);
+    gT=setTimeout(async function(){try{
+        var url=YARD_API_BASE+'/geocoder/suggest?q='+encodeURIComponent(inp.value)+'&session_token='+encodeURIComponent(SESSION_TOKEN);
+        var r=await fetch(url);var d=await r.json();
+        lst.innerHTML='';
+        var sug=(d&&d.suggestions)||[];
+        if(!sug.length){lst.classList.remove('show');return;}
+        var seenLabels={};
+        sug.forEach(function(f){
+            if(f.lat==null||f.lon==null)return;
+            var parts=dadataAddrParts_(f);
+            if(!parts[0])return;
+            var main=parts[0],sub=parts.slice(1,3).join(', ');
+            var key=main+'|'+sub;
+            if(seenLabels[key])return;
+            seenLabels[key]=true;
+            var el=document.createElement('div');el.className='clc-ac-item';
+            el.innerHTML=escHtml_(main)+' <span class="clc-ac-sub">'+escHtml_(sub)+'</span>';
+            el.onclick=function(){inp.value=main;lst.classList.remove('show');setP(t,L.latLng(f.lat,f.lon));};
+            lst.appendChild(el);
+        });
+        if(!lst.children.length){lst.classList.remove('show');return;}
+        lst.classList.add('show');
+    }catch(e){}},500);
 }
-async function revG(p,t){try{var r=await fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat='+p.lat+'&lon='+p.lng+'&accept-language=ru');var d=await r.json();if(d&&d.display_name){var a=d.display_name.split(',').slice(0,3).join(',');document.getElementById(t==='load'?'clc-loadAddr':'clc-unloadAddr').value=a;}}catch(e){}}
+async function revG(p,t){try{
+    var url=YARD_API_BASE+'/geocoder/reverse?lat='+p.lat+'&lon='+p.lng+'&session_token='+encodeURIComponent(SESSION_TOKEN);
+    var r=await fetch(url);var d=await r.json();
+    var f=d&&d.result;
+    if(f){
+        var a=dadataAddrParts_(f).slice(0,3).join(', ');
+        if(a)document.getElementById(t==='load'?'clc-loadAddr':'clc-unloadAddr').value=a;
+    }
+}catch(e){}}
 function getLoc(t){if(!navigator.geolocation){toast('Геолокация недоступна',1);return;}navigator.geolocation.getCurrentPosition(function(p){setP(t,L.latLng(p.coords.latitude,p.coords.longitude));},function(){toast('Не удалось',1);});}
 // 2026-08-21: был отдельный блок со вкладками+постоянным списком ниже страницы - Влад:
 // "выбирать груз тоже есть место в одном окне". Теперь это встроенный автокомплит рядом с

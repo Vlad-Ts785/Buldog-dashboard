@@ -25601,6 +25601,30 @@ function buildRoster(){
      buildMyPageRoster_ целиком (Ратников там нужен - реальный менеджер, заказов пока
      физически нет, тот же принцип должен работать и для Планировки). */
   rows = rows.filter(function(r){ return (r.name || "").trim().split(" ")[0].toLowerCase() !== "рыщанов"; });
+  /* НАЙДЕННЫЙ БАГ (11.09, Влад: "Володин в планировке, он уволен давно. Это не первый
+     раз уже" - живой пример: свежий рейс s1-8141d91, создан 11.09 логистом, manager_name
+     "Володин Илья", хотя sprav_people.employment_status='fired'). Источник rows -
+     D.orders.by_manager/roster_managers, построен по ФАКТУ наличия заказов в 1С за
+     период - уволенный сотрудник со старыми заказами там остаётся НАВСЕГДА, это не баг
+     сервера (та же история, что "поле «менеджер» на деньгах ≠ занятость" -
+     feedback_receipts_manager_field_not_employment_proof), а не место для этой проверки.
+     Единая точка правды - sprav_people.employment_status (09.09) - фильтруем здесь, тем
+     же приёмом (сопоставление по фамилии, fail-open если человека нет в справочнике
+     вообще), что уже применяют /api/crm/employees и plansBuildRows_. FLEET_PEOPLE_ - тот
+     же /sprav/state, что эта вкладка и так грузит (fetchFleetData_) - не заводим второй
+     источник. Пуст на самом первом рендере (сеть ещё не ответила) - buildRoster()
+     перевызывается повторно из fetchFleetData_() ниже, как только список придёт. */
+  var firedSurnames_ = {};
+  (FLEET_PEOPLE_ || []).forEach(function(p){
+    if (p && p.employment_status === "fired") {
+      var sur = String(p.full_name || "").trim().split(/\s+/)[0].toLowerCase().replace(/ё/g, "е");
+      if (sur) firedSurnames_[sur] = 1;
+    }
+  });
+  rows = rows.filter(function(r){
+    var sur = (r.name || "").trim().split(/\s+/)[0].toLowerCase().replace(/ё/g, "е");
+    return !firedSurnames_[sur];
+  });
   var mgrs = [], tral = [], long = [], seen = {};
   rows.forEach(function(r){
     var full = (r.name || "").trim();
@@ -28704,7 +28728,14 @@ function fetchFleetData_(){
   return Promise.all([fetchFromYardApi_("/sprav/state", {}), fetchFromYardApi_("/fleet/state", {})])
     .then(function(results){
       var sprav = results[0], fleet = results[1];
-      if (sprav.ok){ FLEET_PEOPLE_ = sprav.data.people || []; FLEET_ASSETS_ = sprav.data.assets || []; }
+      if (sprav.ok){
+        FLEET_PEOPLE_ = sprav.data.people || []; FLEET_ASSETS_ = sprav.data.assets || [];
+        // 11.09 - buildRoster() уже прочитал FLEET_PEOPLE_ при первом вызове (initLP,
+        // синхронно), когда сеть ещё не ответила и он был пуст - перевызываем здесь,
+        // как только реальный список "уволен/работает" наконец пришёл, иначе фильтр
+        // уволенных менеджеров молча не срабатывал бы до перезагрузки страницы.
+        buildRoster();
+      }
       if (fleet.ok){
         FLEET_ASSIGN_ = fleet.data.assignments || [];
         /* Источник истины по "есть водитель/вакант" только что реально стал

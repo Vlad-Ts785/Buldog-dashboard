@@ -1973,7 +1973,7 @@ function renderForm() {
         '<input id="op2-f-cust" placeholder="Начни вводить - по первым буквам" autocomplete="off" value="' + esc(o ? o.customer : '') + '">' +
         '<div class="op2-list" id="op2-f-custlist"></div></div>' +
 
-      '<div class="op2-fld op2-full op2-contact-fld' + (hasContact ? '' : ' op2-collapsed') + '" id="op2-f-custcontact-fld">' +
+      '<div class="op2-fld op2-contact-fld' + (hasContact ? '' : ' op2-collapsed') + '" id="op2-f-custcontact-fld">' +
         '<button type="button" class="op2-add-contact" id="op2-f-custcontact-add"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Контакт заказчика</button>' +
         '<label>Контакт заказчика</label>' +
         '<input id="op2-f-custcontact" placeholder="Имя · телефон" autocomplete="off" value="' + esc(o ? [o.customer_contact_name, o.customer_contact_phone].filter(Boolean).join(' · ') : '') + '">' +
@@ -1981,28 +1981,6 @@ function renderForm() {
 
       '<div class="op2-fld op2-full op2-nd-fld"><label><input type="checkbox" class="op2-cb" id="op2-f-nd-cb"' + (o && o.needs_data ? ' checked' : '') + '>Под данные</label>' +
         '<button type="button" class="op2-info-dot" id="op2-f-nd-info" title="Что это">i</button></div>' +
-    '</div></div>' +
-    '</div>' +
-
-    '<div class="op2-side"><div class="op2-card">' +
-    '<div class="op2-sect"><div class="op2-t">Деньги</div><div class="op2-grid2">' +
-      '<div class="op2-fld"><label>Стоимость, ₽</label><input id="op2-f-price" class="op2-mono" inputmode="numeric" placeholder="38 000" autocomplete="off" value="' + esc(o && num(o.price) ? o.price : '') + '"></div>' +
-      '<div class="op2-fld"><label>Статус оплаты</label><select id="op2-f-pay"><option value="">—</option>' + optList(dict('payment_status'), o ? o.payment_status : '') + '</select></div>' +
-      '<div class="op2-fld op2-full"><label><input type="checkbox" class="op2-cb" id="op2-f-cash"' + (o && o.cash ? ' checked' : '') + '>Наличные</label></div>' +
-    '</div></div>' +
-    '</div></div>' +
-    '</div>' +
-
-    '<div class="op2-sect"><div class="op2-t">Что везём</div><div class="op2-grid2">' +
-      '<div class="op2-fld op2-sugg" id="op2-f-cargobox"><label>Груз</label><input id="op2-f-cargo" placeholder="начни вводить: jcb 3, bg 40, морск, быт…" autocomplete="off" value="' + esc(o ? o.cargo : '') + '">' +
-        '<div class="op2-list" id="op2-f-cargolist"></div><span class="op2-hint" id="op2-f-cargo-hint">Подсказки - справочник техники и что уже возили; вес и Д×Ш×В подставятся сами</span></div>' +
-      '<div class="op2-fld"><label>Вес, т</label><input id="op2-f-weight" class="op2-mono" inputmode="decimal" placeholder="8" autocomplete="off" value="' + esc(o ? (o.cargo_weight_t || '') : '') + '"></div>' +
-      '<div class="op2-fld"><label>Габариты груза</label><input id="op2-f-dims" placeholder="Д × Ш × В" autocomplete="off" value="' + esc(o ? (o.cargo_dims || '') : '') + '"></div>' +
-      '<div class="op2-fld"><label>Габарит</label><div class="op2-seg" id="op2-f-gab">' +
-        gabs.map(function (g) { return '<button class="op2-chip' + (g === curGab ? ' op2-on' : '') + '" data-gab="' + esc(g) + '">' + esc(g) + '</button>'; }).join('') +
-      '</div></div>' +
-      '<div class="op2-fld"><label>Документы</label><select id="op2-f-docs"><option value="">—</option>' + optList(dict('documents'), o ? o.documents : '') + '</select></div>' +
-      '<div class="op2-fld"><label>Условия переработки</label><select id="op2-f-rework"><option value="">—</option>' + optList(dict('rework'), o ? o.rework_terms : '') + '</select></div>' +
     '</div></div>' +
 
     '<div class="op2-sect"><div class="op2-t">Откуда - куда</div><div class="op2-grid2">' +
@@ -2017,6 +1995,30 @@ function renderForm() {
         '<div class="op2-list" id="op2-f-tolist"></div>' +
         '<span class="op2-hint op2-warn" id="op2-f-tohint"></span></div>' +
     '</div></div>' +
+    '</div>' +
+
+    '<div class="op2-side"><div class="op2-card">' +
+    '<div class="op2-sect"><div class="op2-t">Что везём</div></div>' +
+      '<div class="op2-fld op2-sugg" id="op2-f-cargobox"><label>Груз</label><input id="op2-f-cargo" placeholder="начни вводить: jcb 3, bg 40, морск, быт…" autocomplete="off" value="' + esc(o ? o.cargo : '') + '">' +
+        '<div class="op2-list" id="op2-f-cargolist"></div><span class="op2-hint" id="op2-f-cargo-hint">Подсказки - справочник техники и что уже возили; вес и Д×Ш×В подставятся сами</span></div>' +
+      '<div class="op2-grid2">' +
+        '<div class="op2-fld"><label>Вес, т</label><input id="op2-f-weight" class="op2-mono" inputmode="decimal" placeholder="8" autocomplete="off" value="' + esc(o ? (o.cargo_weight_t || '') : '') + '"></div>' +
+        '<div class="op2-fld"><label>Габарит</label><div class="op2-seg" id="op2-f-gab">' +
+          gabs.map(function (g) { return '<button class="op2-chip' + (g === curGab ? ' op2-on' : '') + '" data-gab="' + esc(g) + '">' + esc(g) + '</button>'; }).join('') +
+        '</div></div>' +
+      '</div>' +
+      '<div class="op2-fld"><label>Габариты груза</label><input id="op2-f-dims" placeholder="Д × Ш × В" autocomplete="off" value="' + esc(o ? (o.cargo_dims || '') : '') + '"></div>' +
+      '<div class="op2-fld"><label>Документы</label><select id="op2-f-docs"><option value="">—</option>' + optList(dict('documents'), o ? o.documents : '') + '</select></div>' +
+      '<div class="op2-fld"><label>Условия переработки</label><select id="op2-f-rework"><option value="">—</option>' + optList(dict('rework'), o ? o.rework_terms : '') + '</select></div>' +
+    '</div>' +
+    '<div class="op2-card">' +
+    '<div class="op2-sect"><div class="op2-t">Деньги</div></div>' +
+      '<div class="op2-fld"><label>Стоимость, ₽</label><input id="op2-f-price" class="op2-mono" inputmode="numeric" placeholder="38 000" autocomplete="off" value="' + esc(o && num(o.price) ? o.price : '') + '"></div>' +
+      '<div class="op2-fld"><label>Статус оплаты</label><select id="op2-f-pay"><option value="">—</option>' + optList(dict('payment_status'), o ? o.payment_status : '') + '</select></div>' +
+      '<div class="op2-fld"><label><input type="checkbox" class="op2-cb" id="op2-f-cash"' + (o && o.cash ? ' checked' : '') + '>Наличные</label></div>' +
+    '</div>' +
+    '</div>' +
+    '</div>' +
 
     '<div class="op2-sect"><div class="op2-t">Примечание</div><div class="op2-fld"><textarea id="op2-f-note" rows="3" placeholder="Что логисту важно знать">' + esc(o ? (o.note || '') : '') + '</textarea></div></div>';
 

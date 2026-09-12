@@ -33,6 +33,32 @@ function esc(s) {
 }
 function num(v) { var n = parseFloat(String(v == null ? '' : v).replace(/\s/g, '').replace(',', '.')); return isFinite(n) ? n : 0; }
 function fmtP(n) { n = num(n); return n ? n.toLocaleString('ru-RU').replace(/ /g, ' ') + ' ₽' : ''; }
+/* Денежное поле ввода - ГОСТ раздел 3 (Влад 12.09: «должно быть красиво с
+   разделениями... невозможно внести белиберду со скобками - только цифры»).
+   Живая маска: только цифры, разделение по тысячам пробелом на каждый ввод,
+   курсор остаётся на том же месте среди цифр (не улетает в конец поля).
+   num() уже умеет читать значение с пробелами (.replace(/\s/g,'')) - отдельно
+   очищать перед сохранением/расчётом не нужно, само поле хранит «красивую»
+   строку. Применять к КАЖДОМУ полю суммы по умолчанию - см. DESIGN_SYSTEM.md
+   раздел 3, «Денежное поле ввода» для полного списка/оговорок. */
+function wireMoneyInput_(id) {
+  var el = $('#' + id);
+  if (!el) return;
+  el.addEventListener('input', function () {
+    var start = this.selectionStart;
+    var digitsBefore = this.value.slice(0, start).replace(/\D/g, '').length;
+    var digits = this.value.replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+    var formatted = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    this.value = formatted;
+    var count = 0, pos = formatted.length;
+    for (var i = 0; i < formatted.length; i++) {
+      if (formatted[i] !== ' ') count++;
+      if (count === digitsBefore) { pos = i + 1; break; }
+    }
+    if (digitsBefore === 0) pos = 0;
+    try { this.setSelectionRange(pos, pos); } catch (e) {}
+  });
+}
 function fmtPhone(p) {
   var d = String(p || '').replace(/\D/g, '');
   if (d.length === 11) d = d.slice(1);
@@ -1402,6 +1428,7 @@ function openHiredStep(o) {
     el.className = 'op2-v ' + (m >= 0 ? 'op2-pos' : 'op2-neg');
   }
   $('#op2-h-rate').addEventListener('input', recalc);
+  wireMoneyInput_('op2-h-rate');
   $('#op2-h-co').addEventListener('input', function () { $('#op2-pop-ok').textContent = 'Отдать наёмнику' + (this.value.trim() ? ' · ' + this.value.trim() : ''); });
   $('#op2-h-cs').addEventListener('click', function (e) {
     var c = e.target.closest('.op2-chip'); if (!c) return;
@@ -1866,6 +1893,45 @@ function expandEntRow(seg) {
   S.unfold(rest.length);
 }
 
+/* «Кто заказывает» (только логист) - та же гармошка, что «От кого» выше (Влад
+   12.09: «по тем же принципам, как у нас и другие построенные гармошки»).
+   «Внешний заказчик» - не отдельный контрол, а ПЕРВЫЙ пункт того же единого
+   списка, что и юрлица (id пустая строка), поэтому вся ent-логика (свернуть/
+   развернуть/подсветить активный) работает без изменений что для юрлица, что
+   для «внешнего». */
+function whoOptions_() {
+  return [{ id: '', name: '', label: 'Внешний заказчик' }].concat(internalCustomers().map(function (x) {
+    return { id: String(x.id), name: x.name, label: x.short || x.name, full_name: x.full_name };
+  }));
+}
+function whoChipHtml(x, on) {
+  return '<button class="op2-chip' + (on ? ' op2-on' : '') + '" data-who="' + esc(x.id) + '" data-name="' + esc(x.name) + '"' + (x.full_name ? ' title="' + esc(x.full_name) + '"' : '') + '>' + esc(x.label) + '</button>';
+}
+function whoRowHtml(curWho) {
+  var opts = whoOptions_();
+  var primary = opts.filter(function (x) { return x.label === 'ТП'; })[0] || opts[0];
+  var cur = opts.filter(function (x) { return x.id === String(curWho || ''); })[0] || primary;
+  var restN = Math.max(0, opts.length - 1);
+  return whoChipHtml(cur, true) +
+    (restN ? '<button class="op2-chip" data-who-more>Ещё <span class="op2-mono" style="color:var(--tint-amber)">' + restN + '</span></button>' : '');
+}
+function collapseWhoRow(seg, curWho) { seg.dataset.cur = curWho == null ? '' : curWho; seg.innerHTML = whoRowHtml(curWho); }
+function expandWhoRow(seg) {
+  var more = seg.querySelector('[data-who-more]'); if (!more) return;
+  var curBtn = seg.querySelector('.op2-chip.op2-on');
+  var curId = curBtn ? curBtn.dataset.who : '';
+  var oldRect = more.getBoundingClientRect();
+  var rest = whoOptions_().filter(function (x) { return x.id !== curId; });
+  more.outerHTML = '<button class="op2-chip op2-ent-close" data-who-close>×</button>';
+  seg.insertAdjacentHTML('beforeend', rest.map(function (x) { return whoChipHtml(x, false).replace('class="op2-chip', 'class="op2-chip op2-ent-enter'); }).join(''));
+  var closeBtn2 = seg.querySelector('.op2-ent-close');
+  var newRect2 = closeBtn2.getBoundingClientRect();
+  closeBtn2.style.transform = 'translate(' + (oldRect.left - newRect2.left) + 'px,' + (oldRect.top - newRect2.top) + 'px)';
+  requestAnimationFrame(function () { closeBtn2.style.transform = 'none'; });
+  $$('.op2-ent-enter', seg).forEach(function (c, i) { c.style.animationDelay = (i * 35) + 'ms'; });
+  S.unfold(rest.length);
+}
+
 /* «Тип техники» - тот же приём, перенесён по превью 11.09 (Влад: «давай внедряй»).
    Отличие от «От кого»: тут ВСЕГДА видны оба основных типа (Трал, Длинномер) - это не
    "текущий выбор", а быстрый доступ к двум самым частым; выбор виден третьим - .op2-on
@@ -1934,6 +2000,13 @@ function renderForm() {
   var gabs = dict('gabarit').map(function (g) { return (g && g.value) || g; }); /* словарь отдаёт {value, primary} */
   var curGab = o ? (o.gabarit || '') : (gabs[0] || '');
   var curEnt = o && o.executor_entity_id ? String(o.executor_entity_id) : (entities()[0] ? String(entities()[0].id) : '');
+  /* «Кто заказывает» (только логист) - Влад 12.09: «технопарк - основной внутренний
+     заказчик, пусть будет по умолчанию, все остальные по нажатию гармошки». Дефолт
+     ТОЛЬКО для НОВОЙ заявки (o нет вовсе) - у существующей заявки (правка/повтор/
+     из CRM) всегда показываем то, что реально сохранено, включая явно внешнего
+     заказчика (o.internal ложный при o != null) - не переинтерпретируем задним числом. */
+  var whoPrimary0 = internalCustomers().filter(function (x) { return x.short === 'ТП'; })[0];
+  var curWho = o ? (o.internal ? String(o.customer_entity_id) : '') : (whoPrimary0 ? String(whoPrimary0.id) : '');
 
   function optList(list, cur) {
     return list.map(function (x) { var val = (x && x.value != null) ? x.value : x; return '<option value="' + esc(val) + '"' + (String(cur) === String(val) ? ' selected' : '') + '>' + esc(val) + '</option>'; }).join('');
@@ -1964,9 +2037,8 @@ function renderForm() {
         entRowHtml(curEnt) +
       '</div></div>' +
 
-      (isLog ? '<div class="op2-fld op2-full"><label>Кто заказывает</label><div class="op2-seg" id="op2-f-who" style="flex-wrap:wrap">' +
-        '<button class="op2-chip' + (!(o && o.internal) ? ' op2-on' : '') + '" data-who="" data-name="">Внешний заказчик</button>' +
-        internalCustomers().map(function (e2) { return '<button class="op2-chip' + (o && o.internal && String(o.customer_entity_id) === String(e2.id) ? ' op2-on' : '') + '" data-who="' + esc(e2.id) + '" data-name="' + esc(e2.name) + '" title="' + esc(e2.full_name || e2.name) + '">' + esc(e2.short || e2.name) + '</button>'; }).join('') +
+      (isLog ? '<div class="op2-fld op2-full"><label>Кто заказывает</label><div class="op2-seg" id="op2-f-who" data-cur="' + esc(curWho) + '">' +
+        whoRowHtml(curWho) +
         '</div><span class="op2-hint">Внутренние заказы - с суммой, как обычные; менеджерам не показываются. Список - из Справочника юрлиц</span></div>' : '') +
 
       '<div class="op2-fld op2-sugg" id="op2-f-custbox"><label>Заказчик</label>' +
@@ -2030,6 +2102,7 @@ function renderForm() {
   wireForm();
 }
 function wireForm() {
+  wireMoneyInput_('op2-f-price');
   var ft = $('#op2-f-time');
   function drawQk() {
     var q = quickTimes($('#op2-f-date').value);
@@ -2131,9 +2204,21 @@ function wireForm() {
       else if (fc.readOnly) { fc.value = ''; fc.readOnly = false; }
     };
     fw.addEventListener('click', function (e) {
-      var b = e.target.closest('.op2-chip'); if (!b) return;
-      $$('#op2-f-who .op2-chip').forEach(function (x) { x.classList.remove('op2-on'); });
-      b.classList.add('op2-on'); applyWho(b); tickState();
+      var seg = this;
+      // stopPropagation - та же причина, что у «От кого»/«Тип техники»: outerHTML
+      // отвязывает e.target ДО всплытия к звуковому делегату на document.
+      e.stopPropagation();
+      if (e.target.closest('[data-who-more]')) { expandWhoRow(seg); return; }
+      if (e.target.closest('[data-who-close]')) {
+        var cur0 = seg.querySelector('.op2-chip.op2-on');
+        S.fold(); collapseWhoRow(seg, cur0 ? cur0.dataset.who : ''); return;
+      }
+      var pick = e.target.closest('.op2-chip[data-who]'); if (!pick) return;
+      var wasOpen = seg.querySelectorAll('.op2-chip[data-who]').length > 1;
+      collapseWhoRow(seg, pick.dataset.who);
+      applyWho(seg.querySelector('.op2-chip.op2-on'));
+      tickState();
+      if (wasOpen) S.fold();
     });
     var wb0 = $('#op2-f-who .op2-chip.op2-on'); if (wb0 && wb0.dataset.who) applyWho(wb0);
   }

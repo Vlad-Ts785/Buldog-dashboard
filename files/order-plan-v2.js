@@ -1974,8 +1974,9 @@ function renderForm() {
         '<div class="op2-list" id="op2-f-custlist"></div></div>' +
 
       '<div class="op2-fld op2-contact-fld' + (hasContact ? '' : ' op2-collapsed') + '" id="op2-f-custcontact-fld">' +
+        '<label class="op2-contact-ph">.</label>' +
         '<button type="button" class="op2-add-contact" id="op2-f-custcontact-add"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Контакт заказчика</button>' +
-        '<label>Контакт заказчика</label>' +
+        '<label class="op2-contact-lbl">Контакт заказчика</label>' +
         '<input id="op2-f-custcontact" placeholder="Имя · телефон" autocomplete="off" value="' + esc(o ? [o.customer_contact_name, o.customer_contact_phone].filter(Boolean).join(' · ') : '') + '">' +
         '<span class="op2-hint" id="op2-f-custcontact-hint">Подсказки - контакты этого заказчика по прошлым заявкам</span></div>' +
 
@@ -2001,7 +2002,7 @@ function renderForm() {
     '<div class="op2-sect"><div class="op2-t">Что везём</div></div>' +
       '<div class="op2-fld op2-sugg" id="op2-f-cargobox"><label>Груз</label><input id="op2-f-cargo" placeholder="начни вводить: jcb 3, bg 40, морск, быт…" autocomplete="off" value="' + esc(o ? o.cargo : '') + '">' +
         '<div class="op2-list" id="op2-f-cargolist"></div><span class="op2-hint" id="op2-f-cargo-hint">Подсказки - справочник техники и что уже возили; вес и Д×Ш×В подставятся сами</span></div>' +
-      '<div class="op2-grid2">' +
+      '<div class="op2-grid2" style="grid-template-columns:1fr 1.6fr">' +
         '<div class="op2-fld"><label>Вес, т</label><input id="op2-f-weight" class="op2-mono" inputmode="decimal" placeholder="8" autocomplete="off" value="' + esc(o ? (o.cargo_weight_t || '') : '') + '"></div>' +
         '<div class="op2-fld"><label>Габарит</label><div class="op2-seg" id="op2-f-gab">' +
           gabs.map(function (g) { return '<button class="op2-chip' + (g === curGab ? ' op2-on' : '') + '" data-gab="' + esc(g) + '">' + esc(g) + '</button>'; }).join('') +

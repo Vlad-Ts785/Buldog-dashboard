@@ -336,11 +336,30 @@ module.exports = function (deps) {
       [st, st, st, req.userEmail, o.id]);
     return o.status + " -> " + st;
   }));
+  // Влад 12.09 (вечер): «у логистов должна быть возможность смены логиста» - тот же /take,
+  // теперь с необязательным email: без него - самоназначение (как раньше, обратная
+  // совместимость со всеми существующими вызовами), email="none" - снять назначение (нужно
+  // фронту для undo в тосте), любой другой email из ростера - назначить ИМЕННО этого
+  // логиста/admin (тот же permissive-принцип, что уже был у самоназначения - без
+  // подтверждения владельца, команда маленькая, доверие взаимное).
   app.post("/api/orders/take", ...gate, (req, res) => simpleUpdate(req, res, "take", async (conn, o) => {
     if (req.userRole === "manager") { fail(res, 403, "«беру в работу» - действие логиста"); return false; }
+    const raw = p(req, "email");
+    if (raw === "none") {
+      await conn.query(`UPDATE plan_orders SET taken_by = NULL, taken_by_name = NULL, taken_at = NULL, updated_by = ? WHERE id = ?`, [req.userEmail, o.id]);
+      return (o.taken_by_name || "никто") + " -> никто";
+    }
     const who = await me(req);
-    await conn.query(`UPDATE plan_orders SET taken_by = ?, taken_by_name = ?, taken_at = NOW(), updated_by = ? WHERE id = ?`, [req.userEmail, who.name, req.userEmail, o.id]);
-    return who.name;
+    let target = who;
+    const targetEmail = str(raw, 255);
+    if (targetEmail) {
+      const r = await roster();
+      const t = r.byEmail[targetEmail];
+      if (!t || (t.role !== "logist" && t.role !== "admin")) { fail(res, 400, "логист не найден"); return false; }
+      target = t;
+    }
+    await conn.query(`UPDATE plan_orders SET taken_by = ?, taken_by_name = ?, taken_at = NOW(), updated_by = ? WHERE id = ?`, [target.email, target.name, req.userEmail, o.id]);
+    return (o.taken_by_name || "никто") + " -> " + target.name;
   }));
   app.post("/api/orders/otboy_ack", ...gate, (req, res) => simpleUpdate(req, res, "otboy_ack", async (conn, o) => {
     if (o.status !== "cancelled") { fail(res, 400, "по заявке нет отбоя"); return false; }

@@ -325,18 +325,25 @@ function personColor_(fullName) { return PERSON_COLOR_[personSurname_(fullName)]
    логиста) начинаются №→Мен.→Лог. Фамилия окрашена по человеку, полное имя - в title по
    наведению. Влад 12.09 (третий заход): «уберём вот эти сокращения - Цуц, Кан, Сил - убрать» -
    трёхбуквенный код под фамилией убран, осталась только сама фамилия. */
-function personCell_(fullName, code, title) {
-  if (!fullName && !code) return '<td><span class="op2-dim">—</span></td>';
+function personCell_(fullName, code, title, cellClass) {
+  var cls = cellClass ? ' class="' + cellClass + '"' : '';
+  if (!fullName && !code) return '<td' + cls + '><span class="op2-dim">—</span></td>';
   var sur = personSurname_(fullName) || code;
   var col = personColor_(fullName);
-  return '<td><span class="op2-person"' + (col ? ' style="color:' + col + '"' : '') + ' title="' + esc(title || fullName || '') + '">' + esc(sur) + '</span></td>';
+  return '<td' + cls + '><span class="op2-person"' + (col ? ' style="color:' + col + '"' : '') + ' title="' + esc(title || fullName || '') + '">' + esc(sur) + '</span></td>';
 }
 function mgrCodeCell_(o) {
   var name = o.manager_name || o.created_by_name || o.taken_by_name;
   return personCell_(name, oMgrCode(o), oMgrTitle(o));
 }
-function logCodeCell_(o) {
-  return personCell_(o.taken_by_name, (o.taken_by_code || '').toUpperCase(), o.taken_by_name);
+/* Влад 12.09 (вечер): «у логистов должна быть возможность смены логиста - сначала решили,
+   что наёмник закрывает, потом что тральный логист» - клик по фамилии в «Лог.» открывает
+   пикер из живого ростера (openLogPop) и переназначает заявку. Кликабельно ТОЛЬКО в таблице
+   логиста (clickable=true передаёт только renderLog) - в таблице менеджера это просто текст,
+   как раньше. Сервер (/orders/take) уже разрешал взять чужую заявку без подтверждения - тот
+   же permissive-принцип, новый параметр email лишь позволяет назначить НЕ себя. */
+function logCodeCell_(o, clickable) {
+  return personCell_(o.taken_by_name, (o.taken_by_code || '').toUpperCase(), o.taken_by_name, clickable ? 'op2-logpick' : '');
 }
 function byId(id) { for (var i = 0; i < ORD.length; i++) { if (String(ORD[i].id) === String(id)) return ORD[i]; } return null; }
 function execById(o, eid) { var l = o.executors || []; for (var i = 0; i < l.length; i++) { if (String(l[i].id) === String(eid)) return l[i]; } return null; }
@@ -440,7 +447,8 @@ function buildDom() {
           '<span class="op2-nd"></span><i class="op2-la">мигающая точка</i> перед знаком - «под данные» (данные водителей переданы заказчику на пропуск; заявлены основная и резерв, замена только из них). ' +
           'Машина: <i class="op2-lg">госномер зелёный</i> - водитель подтвердил заявку (наведи - кто и когда отметил); <span class="op2-tag op2-tg-hire">НАЁМ</span>наёмная машина, далее компания-перевозчик; <span class="op2-tag op2-tg-own">СВОЯ</span>своя; <i>осн./рез.</i> - основная/резервная из двух. ' +
           'Маршрут: город жирнее, улица серым, регион - в подсказке при наведении. Груз: наименование, ниже <i class="op2-la">Негабарит</i> / <span class="op2-dim">Габарит</span> и размеры. ' +
-          '<span class="op2-ask">уточнить</span> - поле ещё не заполнено. Клик по строке - карточка, копирование на пропуск и для водителя.' +
+          '<span class="op2-ask">уточнить</span> - поле ещё не заполнено. Клик по строке - карточка, копирование на пропуск и для водителя. ' +
+          '<span class="op2-nd" style="background:var(--green);animation:none"></span>Зелёное мигание строки у логиста - новая заявка, которую ещё никто не взял в работу.' +
         '</p>' +
       '</section>' +
 
@@ -488,7 +496,8 @@ function buildDom() {
           'Машина: <i class="op2-lg">госномер зелёный</i> - водитель подтвердил, <i>✓ в кружке</i> - кнопка подтверждения (зелёная = включена), у менеджера госномер становится зелёным; ' +
           '<span class="op2-tag op2-tg-hire">НАЁМ</span>наёмная машина, далее компания-перевозчик; <span class="op2-tag op2-tg-own">СВОЯ</span>своя; <i>осн./рез.</i> - основная/резервная из двух. ' +
           'Маршрут: город жирнее, улица серым, регион - в подсказке при наведении. Груз: наименование, ниже <i class="op2-la">Негабарит</i> / <span class="op2-dim">Габарит</span> и размеры. ' +
-          'Зажать плитку машины на полсекунды - режим перемещения: перетащи на другую заявку (пусто - перенос, занято - обмен), Esc - отмена. Мен./Лог. - фамилия цветом как в Планировке, наведи - полное имя.' +
+          'Зажать плитку машины на полсекунды - режим перемещения: перетащи на другую заявку (пусто - перенос, занято - обмен), Esc - отмена. Мен./Лог. - фамилия цветом как в Планировке, наведи - полное имя. ' +
+          '<span class="op2-nd" style="background:var(--green);animation:none"></span>Зелёное мигание строки - новая заявка, никто не взял в работу; «✓ Принять» останавливает мигание. Клик по фамилии в «Лог.» - сменить, кто ведёт заявку.' +
         '</p>' +
       '</section>' +
 
@@ -514,6 +523,7 @@ function buildDom() {
 
       '<div class="op2-toast" id="op2-toast"></div>' +
       '<div class="op2-stpop" id="op2-stpop" role="menu"></div>' +
+      '<div class="op2-stpop" id="op2-lgpop" role="menu"></div>' +
 
       /* ── «Задание водителю» ── */
       '<div class="op2-dmod-scrim" id="op2-drv-scrim"><div class="op2-dmod" role="dialog" aria-label="Задание водителю">' +
@@ -538,8 +548,8 @@ function buildDom() {
 /* ГОСТ: ОДНО делегирование со списком-селектором, не обработчик на каждый элемент.
    Элементы с собственным звуком результата (RESULT_SEL) из nav исключены, чтобы
    не было двойного щелчка. */
-var NAV_SEL = '.op2-tab,.op2-chip,.op2-ghost,.op2-dbtn,.op2-slot,.op2-veh,.op2-st-chip,.op2-stc,.op2-sugg .op2-it,.op2-free .op2-day,.op2-stpop button,.op2-pop .op2-vi,.op2-copybtn,.op2-take,.op2-dt,.op2-mgr-tbl tbody tr,.op2-log-body tr,.op2-switch button,[data-nav-sound]';
-var RESULT_SEL = '#op2-f-save,#op2-rp-go,#op2-pop-ok,.op2-dok,.op2-unset-ot,.op2-slot.op2-ot,#op2-drv-copy,#op2-drv-max,#op2-d-drv-ok,.op2-dl,.op2-copybtn,.op2-stpop button,.op2-pop .op2-vi[data-act="unset"],#op2-snd,.op2-blocked,#op2-f-ent .op2-chip';
+var NAV_SEL = '.op2-tab,.op2-chip,.op2-ghost,.op2-dbtn,.op2-slot,.op2-veh,.op2-st-chip,.op2-stc,.op2-logpick,#op2-lgpop button,.op2-sugg .op2-it,.op2-free .op2-day,.op2-stpop button,.op2-pop .op2-vi,.op2-copybtn,.op2-take,.op2-dt,.op2-mgr-tbl tbody tr,.op2-log-body tr,.op2-switch button,[data-nav-sound]';
+var RESULT_SEL = '#op2-f-save,#op2-rp-go,#op2-pop-ok,.op2-dok,.op2-unset-ot,.op2-slot.op2-ot,.op2-slot.op2-new,#op2-lgpop button,#op2-drv-copy,#op2-drv-max,#op2-d-drv-ok,.op2-dl,.op2-copybtn,.op2-stpop button,.op2-pop .op2-vi[data-act="unset"],#op2-snd,.op2-blocked,#op2-f-ent .op2-chip';
 
 function wire() {
   var root = $('#op2-root');
@@ -674,6 +684,16 @@ function wire() {
     var tr = stTr; closeStPop();
     if (!b.classList.contains('op2-cur')) setStatusUi(tr, b.dataset.st);
   });
+  /* ── поповер смены логиста ── */
+  $('#op2-lgpop').addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b || !lgTr) return;
+    var tr = lgTr; closeLogPop();
+    if (b.classList.contains('op2-cur')) return;
+    var o = byId(tr.dataset.oid); if (!o) return;
+    var email = b.dataset.email; if (!email) return;
+    var opt = logistOptions_().filter(function (p) { return p.email === email; })[0];
+    assignLogist_(o, email, opt ? opt.name : email);
+  });
 
   /* ── глобальные: Esc, клик мимо, скролл ── */
   document.addEventListener('keydown', onKeyDown, true);
@@ -715,6 +735,7 @@ function onKeyDown(e) {
   if ($('#op2-row-menu')) { closeRowMenu(); return; }
   if ($('#op2-drv-scrim').classList.contains('op2-open')) { closeDrv(); return; }
   if ($('#op2-stpop').classList.contains('op2-open')) { closeStPop(); return; }
+  if ($('#op2-lgpop').classList.contains('op2-open')) { closeLogPop(); return; }
   if ($('#op2-pop').classList.contains('op2-open')) { closePop(); return; }
   closeDrawer();
 }
@@ -722,6 +743,8 @@ function onDocMouseDown(e) {
   if (!built) return;
   var sp = $('#op2-stpop');
   if (sp && sp.classList.contains('op2-open') && !e.target.closest('#op2-stpop') && !e.target.closest('.op2-st-chip') && !e.target.closest('.op2-stc')) closeStPop();
+  var lgp = $('#op2-lgpop');
+  if (lgp && lgp.classList.contains('op2-open') && !e.target.closest('#op2-lgpop') && !e.target.closest('.op2-logpick')) closeLogPop();
   var pop = $('#op2-pop');
   if (pop && pop.classList.contains('op2-open') && !e.target.closest('#op2-pop') && !e.target.closest('.op2-slot,.op2-veh')) closePop();
   if ($('#op2-row-menu') && !e.target.closest('#op2-row-menu')) closeRowMenu();
@@ -1003,6 +1026,16 @@ var ST_V3_ = {
   done: { key: 'done', g: '<span class="op2-sq"></span>', w: 'Готово' }
 };
 function stKey_(o) { return (ST_V3_[oSt(o)] || ST_V3_.nz).key; }
+/* Влад 12.09 (вечер): «когда новая заявка появляется, тоже должно быть зелёное мигание, и
+   логист должен принять эту заявку» - по аналогии с отбоем (мигает, пока не нажмут
+   «Принять»), но зелёным и БЕЗ ограничения по времени: «прошло 10 минут» не решает задачу -
+   заявку по-прежнему никто не ведёт (ГОСТ, запрет №9 - мигание привязано к состоянию и
+   гаснет само, а не по таймеру). executor_set/hired_set на сервере УЖЕ сами проставляют
+   taken_by, если он пуст - значит «никто не взял» и «нет машины» это одно и то же условие,
+   отдельного счётчика не заводим, «Без машины» и так фильтрует ровно эти строки. */
+function needsAccept_(o) {
+  return oSt(o) !== 'ot' && !o.taken_by_name && !oOwn(o).length && !oHired(o);
+}
 /* «Фамилия Имя» без отчества (полное ФИО - в title) - компромисс варианта «Рейс»: на ширине
    ячейки «Машина» полное ФИО в одну строку не помещается, а фамилию Влад резать не хотел. */
 function fioName_(full) {
@@ -1196,6 +1229,9 @@ function vehCellLog(o) {
       '<span class="op2-drv op2-dim">отбой принят' + (hhmmOf(o.otboy_ack_at) ? ' · ' + esc(hhmmOf(o.otboy_ack_at)) : '') + '</span>' +
       '<span class="op2-src" title="' + esc('Отбой принял логист ' + o.otboy_ack_by) + '">' + esc(fioName_(o.otboy_ack_by)) + '</span>';
   }
+  if (needsAccept_(o)) {
+    return '<button class="op2-slot op2-new" data-oid="' + esc(o.id) + '" data-accept="1" title="Новая заявка · никто не взял в работу · принять">✓ Принять</button>';
+  }
   var h = oHired(o);
   if (h) return '<div class="op2-veh" data-oid="' + esc(o.id) + '">' + hiredLines_(h) + '</div>' + pendHtml(o, 'log');
   if (!vs.length) {
@@ -1245,10 +1281,10 @@ function renderLog() {
   langRu_();
   body.innerHTML = rows.map(function (o) {
     var k = oSt(o);
-    var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' + (o.otboy_ack_by ? '' : ' op2-unack') : '') + (isFresh(o) ? ' op2-new-halo' : '');
+    var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' + (o.otboy_ack_by ? '' : ' op2-unack') : (needsAccept_(o) ? ' op2-new-unack' : '')) + (isFresh(o) ? ' op2-new-halo' : '');
     return '<tr class="' + cls + '" data-oid="' + esc(o.id) + '">' +
       '<td><span class="op2-no">' + esc(oNo(o)) + '</span></td>' +
-      mgrCodeCell_(o) + logCodeCell_(o) +
+      mgrCodeCell_(o) + logCodeCell_(o, true) +
       timeCell(o) + techCell_(o) +
       custCell_(o, isFresh(o) ? '<span class="op2-st-chip op2-ok" style="margin-right:6px">новая</span>' : '') +
       routeCell(o) + cargoCell_(o) +
@@ -1286,6 +1322,44 @@ function openStPop(chip, tr) {
   sp.classList.add('op2-open');
 }
 function closeStPop() { var sp = $('#op2-stpop'); if (sp) sp.classList.remove('op2-open'); stTr = null; }
+
+/* ═════════════════════════ СМЕНА ЛОГИСТА ═════════════════════════ */
+var lgTr = null;
+/* admin числится в access_users отдельной ролью, но по факту тоже водит заявки (см. пример
+   «Цуцурин Владислав Дмитриевич» - admin, но принимает и ведёт заявки как логист) - в список
+   назначения попадают оба, менеджеры - нет (они заявки не ведут). */
+function logistOptions_() {
+  return ROSTER.filter(function (r) { return r.role === 'logist' || r.role === 'admin'; });
+}
+function openLogPop(cell, tr) {
+  lgTr = tr;
+  var o = byId(tr.dataset.oid);
+  var curEmail = o ? (o.taken_by || '') : '';
+  var opts = logistOptions_();
+  var sp = $('#op2-lgpop');
+  sp.innerHTML = opts.length ? opts.map(function (p) {
+    var col = personColor_(p.name);
+    return '<button data-email="' + esc(p.email) + '" class="' + (p.email === curEmail ? 'op2-cur' : '') + '"><span class="op2-person"' +
+      (col ? ' style="color:' + col + '"' : '') + '>' + esc(personSurname_(p.name)) + '</span>' +
+      (p.email === curEmail ? '<span class="op2-dim op2-sm">сейчас</span>' : '') + '</button>';
+  }).join('') : '<button class="op2-cur">в справочнике нет логистов</button>';
+  var r = cell.getBoundingClientRect();
+  sp.style.left = Math.min(r.left, window.innerWidth - 230) + 'px';
+  sp.style.top = (r.bottom + 4) + 'px';
+  sp.classList.add('op2-open');
+}
+function closeLogPop() { var sp = $('#op2-lgpop'); if (sp) sp.classList.remove('op2-open'); lgTr = null; }
+function assignLogist_(o, email, name) {
+  var prevEmail = o.taken_by || '', prevName = o.taken_by_name || '';
+  if (email === prevEmail) return;
+  apiPost('/orders/take', { id: o.id, email: email }).then(function (r) {
+    if (!ok_(r)) return;
+    S.toggle();
+    toast('Заявку №' + esc(oNo(o)) + ' теперь ведёт <span class="op2-tick">' + esc(name) + '</span>' + (prevName ? ' · было: ' + esc(prevName) : ''),
+      function () { apiPost('/orders/take', { id: o.id, email: prevEmail || 'none' }).then(function (r2) { if (ok_(r2)) loadOrders(); }); });
+    loadOrders();
+  });
+}
 function setStatusUi(tr, k) {
   var o = byId(tr.dataset.oid); if (!o) return;
   setStatus(o, k);
@@ -1307,10 +1381,17 @@ function setStatus(o, k) {
 
 /* ═════════════════════════ КЛИКИ В ТАБЛИЦЕ ЛОГИСТА ═════════════════════════ */
 function onLogClick(e) {
+  var lg = e.target.closest('.op2-logpick');
   var dk = e.target.closest('.op2-dok');
   var un = e.target.closest('.op2-unset-ot');
   var slot = e.target.closest('.op2-slot');
   var veh = e.target.closest('.op2-veh');
+
+  if (lg) {
+    var lgTrEl = e.target.closest('tr[data-oid]'); if (!lgTrEl) return;
+    openLogPop(lg, lgTrEl);
+    return;
+  }
 
   if (dk) {
     var od = byId(dk.dataset.oid); if (!od) return;
@@ -1352,17 +1433,19 @@ function onLogClick(e) {
     });
     return;
   }
+  if (slot && slot.dataset.accept) {
+    var oa = byId(slot.dataset.oid); if (!oa) return;
+    apiPost('/orders/take', { id: oa.id }).then(function (r) {
+      if (!ok_(r)) return;
+      S.tickUp();
+      toast('Заявка №' + esc(oNo(oa)) + ' <span class="op2-tick">принята в работу</span>',
+        function () { apiPost('/orders/take', { id: oa.id, email: 'none' }).then(function (r2) { if (ok_(r2)) loadOrders(); }); });
+      loadOrders();
+    });
+    return;
+  }
   if (slot) {
     var o = byId(slot.dataset.oid); if (!o) return;
-    if (e.target.classList.contains('op2-take') && !o.taken_by_name) {
-      apiPost('/orders/take', { id: o.id }).then(function (r) {
-        if (!ok_(r)) return;
-        S.tickUp();
-        toast('Взял в работу заявку №' + esc(oNo(o)) + ' · <span class="op2-tick">видно всем логистам</span>');
-        loadOrders();
-      });
-      return;
-    }
     openPop(slot, o);
     return;
   }
@@ -1404,6 +1487,10 @@ function mgrRowMenu(o) {
 function logRowMenu(o) {
   var items = [];
   if (!o.taken_by_name) items.push({ label: 'Беру в работу', fn: function () { apiPost('/orders/take', { id: o.id }).then(function (r) { if (ok_(r)) { S.tickUp(); toast('Взял в работу заявку №' + esc(oNo(o))); loadOrders(); } }); } });
+  items.push({ label: o.taken_by_name ? 'Сменить логиста' : 'Назначить логиста', fn: function () {
+    var tr = $('#op2-log-body tr[data-oid="' + o.id + '"]'); if (!tr) return;
+    var cell = tr.querySelector('.op2-logpick'); if (cell) openLogPop(cell, tr);
+  } });
   items.push({ label: 'Добавить вторую машину', fn: function () { var tr = $('#op2-log-body tr[data-oid="' + o.id + '"]'); openPop(tr || $('#op2-log-body'), o, true); } });
   items.push({ label: 'Все заявки этой машины →', fn: function () { showByVehicle(o); } });
   items.push({ label: 'История', fn: function () { openDrawerView(o, 'log', true); } });

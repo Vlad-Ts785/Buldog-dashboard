@@ -422,7 +422,7 @@ function buildDom() {
               '<th data-sort="t" class="op2-on">Время<span class="op2-s">▲</span></th>' +
               '<th data-sort="type">Техника<span class="op2-s">↕</span></th>' +
               '<th data-sort="cust">Заказчик<span class="op2-s">↕</span></th>' +
-              '<th>Откуда → куда</th><th>Машина · водитель</th>' +
+              '<th>Откуда → куда</th><th>Груз</th><th>Машина · водитель</th>' +
               '<th data-sort="st">Статус<span class="op2-s">↕</span></th>' +
               '<th class="op2-num" data-sort="price">Стоимость<span class="op2-s">↕</span></th>' +
             '</tr></thead>' +
@@ -468,6 +468,7 @@ function buildDom() {
               '<th>Откуда → куда</th><th>Груз</th><th>Габарит</th>' +
               '<th>Машина</th>' +
               '<th data-sort="st">Статус<span class="op2-s">↕</span></th>' +
+              '<th class="op2-num" data-sort="price">Стоимость<span class="op2-s">↕</span></th>' +
             '</tr></thead>' +
             '<tbody id="op2-log-body" class="op2-log-body"></tbody>' +
           '</table>' +
@@ -980,10 +981,22 @@ function stChip(o) {
   var k = oSt(o);
   return '<span class="op2-st-chip op2-' + k + '">' + esc(ST_LABEL[k]) + '</span>';
 }
+/* Влад 12.09: «Отбой: принят Цуцурин Владислав Дмитриевич - просто Цуцурин ВД» - в ячейках
+   таблицы ФИО водителей/логистов сокращаем до «Фамилия И.О.», полное имя - в title. */
+function fioShort_(full) {
+  var p = String(full || '').trim().split(/\s+/).filter(Boolean);
+  if (!p.length) return '';
+  return p[0] + (p.length > 1 ? ' ' + p.slice(1, 3).map(function (w) { return w.charAt(0).toUpperCase() + '.'; }).join('') : '');
+}
+/* Влад 12.09: «адреса не в два этажа и обрезаются» - Откуда и Куда друг под другом, каждая
+   строка шире прежней (в одну строку двум адресам места не было), полный адрес - в title. */
 function routeCell(o, w) {
   var mw = w ? ' style="max-width:' + w + 'px"' : '';
-  return '<span class="op2-route"><span class="op2-ell"' + mw + '>' + (o.load_address ? esc(o.load_address) : '<span class="op2-dim">уточнить</span>') + '</span>' +
-    '<span class="op2-arr">→</span><span class="op2-ell"' + mw + '>' + (o.unload_address ? esc(o.unload_address) : '<span class="op2-dim">уточнить</span>') + '</span></span>';
+  var a = o.load_address ? esc(o.load_address) : '<span class="op2-dim">уточнить</span>';
+  var b = o.unload_address ? esc(o.unload_address) : '<span class="op2-dim">уточнить</span>';
+  return '<span class="op2-route op2-route2">' +
+    '<span class="op2-rt op2-ell"' + mw + ' title="' + esc(o.load_address || '') + '">' + a + '</span>' +
+    '<span class="op2-rt op2-ell"' + mw + ' title="' + esc(o.unload_address || '') + '"><span class="op2-arr">→</span>' + b + '</span></span>';
 }
 function timeCell(o) {
   var t = oTime(o);
@@ -1008,7 +1021,8 @@ function renderMgr() {
       '<td>' + timeCell(o) + '</td>' +
       '<td>' + (o.equipment_type ? '<span class="op2-ttype">' + esc(o.equipment_type) + '</span>' : '<span class="op2-dim">уточнить</span>') + '</td>' +
       '<td class="op2-ell" title="' + esc(o.customer) + '">' + (WIDE && F.q ? '<span class="op2-code" style="margin-right:6px">' + esc(dm(o.service_date)) + '</span>' : '') + esc(o.customer || '') + '</td>' +
-      '<td>' + routeCell(o, 160) + '</td>' +
+      '<td>' + routeCell(o, 300) + '</td>' +
+      '<td class="op2-dim op2-ell" style="max-width:150px" title="' + esc(o.cargo || '') + '">' + esc(o.cargo || '') + '</td>' +
       '<td>' + mgrVehCell(o) + '</td>' +
       '<td>' + (o.needs_data ? '<span class="op2-nd" title="под данные: данные водителей у заказчика"></span>' : '') + stChip(o) + '</td>' +
       '<td class="op2-num op2-mono">' + (num(o.price) ? esc(fmtP(o.price)) : '<span class="op2-dim">—</span>') + '</td>' +
@@ -1016,7 +1030,7 @@ function renderMgr() {
   }).join('');
   var cash = rows.filter(function (o) { return !!o.cash; }).length;
   var sum = rows.reduce(function (a, o) { return a + num(o.price); }, 0);
-  $('#op2-mgr-foot').innerHTML = '<tr><td colspan="9">' +
+  $('#op2-mgr-foot').innerHTML = '<tr><td colspan="10">' +
     (WIDE && F.q ? 'Поиск за 3 месяца · «' + esc(F.q) + '» · ' : 'Итого за ' + (TO_DATE ? 'неделю' : 'день') + ' · ') +
     rows.length + ' ' + plural(rows.length, 'заявка', 'заявки', 'заявок') + (cash ? ' · ' + cash + ' наличными' : '') +
     '</td><td class="op2-num"><span class="op2-mono">' + esc(fmtP(sum) || '—') + '</span></td></tr>';
@@ -1035,7 +1049,7 @@ function mgrVehCell(o) {
   var h = oHired(o);
   if (h) {
     return '<div class="op2-veh"><span class="op2-hire">Наёмник</span><span class="op2-drv">' + esc(h.carrier_name || 'перевозчик уточняется') +
-      (h.vehicle_gos ? ' · <span class="op2-mono">' + esc(h.vehicle_gos) + '</span>' : '') + (h.driver_name ? ' · ' + esc(h.driver_name) : '') + '</span></div>' + pendHtml(o, 'mgr');
+      (h.vehicle_gos ? ' · <span class="op2-mono">' + esc(h.vehicle_gos) + '</span>' : '') + (h.driver_name ? ' · <span title="' + esc(h.driver_name) + '">' + esc(fioShort_(h.driver_name)) + '</span>' : '') + '</span></div>' + pendHtml(o, 'mgr');
   }
   var vs = oOwn(o);
   if (!vs.length) {
@@ -1046,7 +1060,7 @@ function mgrVehCell(o) {
     var ttl = v.driver_confirmed_at ? ' title="Водитель ' + esc(v.driver_name || '') + ' подтвердил заявку · ' + esc(v.driver_confirmed_by || '') + ' ' + esc(hhmmOf(v.driver_confirmed_at) || '') + '"' : '';
     var roleTxt = (vs.length > 1 && v.role) ? ' · ' + (v.role === 'reserve' ? 'резерв' : 'основная') : '';
     return '<span class="op2-gos' + okc + '"' + ttl + '>' + esc(v.vehicle_gos || '') + '</span>' +
-      '<span class="op2-drv">' + esc(v.driver_name || 'водитель уточняется') + roleTxt + '</span>';
+      '<span class="op2-drv" title="' + esc(v.driver_name || '') + '">' + (esc(fioShort_(v.driver_name)) || 'водитель уточняется') + roleTxt + '</span>';
   }
   var inner = vs.length === 1
     ? '<div class="op2-veh">' + row(vs[0]) + '</div>'
@@ -1096,14 +1110,14 @@ function vehCellLog(o) {
     if (!o.otboy_ack_by) {
       return '<button class="op2-slot op2-ot" data-oid="' + esc(o.id) + '" data-ot="1">Отбой' + (vs0 ? ' · ' + vs0 : '') + '<span class="op2-take">принять</span></button>';
     }
-    return '<div class="op2-otdone">отбой принят · ' + esc(o.otboy_ack_by) + ' ' + esc(hhmmOf(o.otboy_ack_at) || '') +
+    return '<div class="op2-otdone">отбой принят · <span title="' + esc(o.otboy_ack_by) + '">' + esc(fioShort_(o.otboy_ack_by)) + '</span> ' + esc(hhmmOf(o.otboy_ack_at) || '') +
       (vs0 ? ' ' + vs0 + '<button class="op2-unset-ot" data-oid="' + esc(o.id) + '">Снять машину</button>' : '') + '</div>';
   }
   var h = oHired(o);
   if (h) {
     return '<div class="op2-veh" data-oid="' + esc(o.id) + '"><span class="op2-hire">Наёмник</span><span class="op2-drv">' +
       esc(h.carrier_name || 'перевозчик уточняется') + (h.vehicle_gos ? ' · <span class="op2-mono">' + esc(h.vehicle_gos) + '</span>' : '') +
-      (h.driver_name ? ' · ' + esc(h.driver_name) : '') + (h.carrier_status ? ' · ' + esc(h.carrier_status) : '') + '</span></div>' + pendHtml(o, 'log');
+      (h.driver_name ? ' · <span title="' + esc(h.driver_name) + '">' + esc(fioShort_(h.driver_name)) + '</span>' : '') + (h.carrier_status ? ' · ' + esc(h.carrier_status) : '') + '</span></div>' + pendHtml(o, 'log');
   }
   var vs = oOwn(o);
   if (!vs.length) {
@@ -1123,13 +1137,13 @@ function vehCellLog(o) {
     var v = vs[0];
     return '<div class="op2-vehrow"><div class="op2-veh" data-oid="' + esc(o.id) + '" data-eid="' + esc(v.id) + '">' +
       '<span class="op2-gos' + (v.driver_confirmed_at ? ' op2-ok' : '') + '">' + esc(v.vehicle_gos || '') + '</span>' +
-      '<span class="op2-drv">' + esc(v.driver_name || 'водитель уточняется') + (v.driver_confirmed_at ? ' · подтвердил' : '') + '</span>' +
+      '<span class="op2-drv" title="' + esc(v.driver_name || '') + '">' + (esc(fioShort_(v.driver_name)) || 'водитель уточняется') + (v.driver_confirmed_at ? ' · подтвердил' : '') + '</span>' +
       '</div>' + okBtn(v) + '</div>' + pendHtml(o, 'log');
   }
   return '<div class="op2-vehrow"><div class="op2-veh op2-multi" data-oid="' + esc(o.id) + '">' +
     vs.map(function (v) {
       return '<div class="op2-row"><span class="op2-gos' + (v.driver_confirmed_at ? ' op2-ok' : '') + '">' + esc(v.vehicle_gos || '') + '</span>' +
-        '<span class="op2-drv">' + esc(v.driver_name || '') + (v.role ? ' · ' + (v.role === 'reserve' ? 'резерв' : 'основная') : '') + (v.driver_confirmed_at ? ' · подтвердил' : '') + '</span></div>';
+        '<span class="op2-drv" title="' + esc(v.driver_name || '') + '">' + esc(fioShort_(v.driver_name)) + (v.role ? ' · ' + (v.role === 'reserve' ? 'резерв' : 'основная') : '') + (v.driver_confirmed_at ? ' · подтвердил' : '') + '</span></div>';
     }).join('') + '</div><div style="display:flex;flex-direction:column;gap:2px">' + vs.map(okBtn).join('') + '</div></div>' + pendHtml(o, 'log');
 }
 function renderLog() {
@@ -1176,11 +1190,12 @@ function renderLog() {
       '<td>' + timeCell(o) + '</td>' +
       '<td>' + (o.equipment_type ? '<span class="op2-ttype">' + esc(o.equipment_type) + '</span>' : '<span class="op2-dim">уточнить</span>') + '</td>' +
       '<td class="op2-ell" title="' + esc(o.customer) + '">' + (isFresh(o) ? '<span class="op2-st-chip op2-ok" style="margin-right:6px">новая</span>' : '') + esc(o.customer || '') + '</td>' +
-      '<td>' + routeCell(o, 120) + '</td>' +
-      '<td class="op2-dim op2-ell" style="max-width:150px">' + esc(o.cargo || '') + '</td>' +
+      '<td>' + routeCell(o, 280) + '</td>' +
+      '<td class="op2-dim op2-ell" style="max-width:130px" title="' + esc(o.cargo || '') + '">' + esc(o.cargo || '') + '</td>' +
       '<td class="op2-sm">' + (o.gabarit ? '<span style="color:var(--tint-amber)">' + esc(o.gabarit) + '</span>' : '') + '</td>' +
       '<td>' + vehCellLog(o) + '</td>' +
       '<td class="op2-st">' + (o.needs_data ? '<span class="op2-nd" title="под данные"></span>' : '') + stChip(o) + '</td>' +
+      '<td class="op2-num op2-mono">' + (num(o.price) ? esc(fmtP(o.price)) : '<span class="op2-dim">—</span>') + '</td>' +
       '</tr>';
   }).join('');
 }

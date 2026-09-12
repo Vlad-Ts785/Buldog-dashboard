@@ -216,8 +216,11 @@ module.exports = function (deps) {
   });
 
   // ── POST /api/orders/save - создать/изменить заявку ────────────────────────────────────
-  // Обязательно: service_date, equipment_type, customer. Всё остальное - «уточнить». Пустой адрес
-  // НЕ блокирует сохранение (менеджер: «точку пришлют через час»).
+  // Обязательно при СОЗДАНИИ: service_date, equipment_type, customer, price. Всё остальное -
+  // «уточнить». Пустой адрес НЕ блокирует сохранение (менеджер: «точку пришлют через час»).
+  // Цена (Влад 12.09: «создание заявки невозможно, пока не внесут цену - и логисты в своих
+  // заявках, и менеджеры») - без исключения по роли/internal, только на СОЗДАНИИ (правка уже
+  // существующей заявки ценой не блокируется - историю без цены задним числом не трогаем).
   const EDITABLE = ["service_time", "needs_data", "customer", "customer_entity_id", "executor_entity_id", "customer_contact_name",
     "customer_contact_phone", "equipment_type", "cargo", "cargo_weight_t", "cargo_dims", "gabarit", "rework_terms", "documents", "note",
     "cash", "load_address", "load_lat", "load_lon", "load_confirmed", "load_contact_name", "load_contact_phone", "unload_address",
@@ -271,6 +274,7 @@ module.exports = function (deps) {
         if (!isDate(f.service_date)) { conn.release(); return fail(res, 400, "service_date обязателен (YYYY-MM-DD)"); }
         if (!f.equipment_type) { conn.release(); return fail(res, 400, "тип техники обязателен"); }
         if (!f.customer) { conn.release(); return fail(res, 400, "заказчик обязателен"); }
+        if (!f.price) { conn.release(); return fail(res, 400, "цена обязательна"); }
         const isMgr = req.userRole === "manager";
         const internal = isMgr ? 0 : (f.internal || 0);
         const managerEmail = isMgr ? req.userEmail : (internal ? null : (str(p(req, "manager_email"), 255) || null));

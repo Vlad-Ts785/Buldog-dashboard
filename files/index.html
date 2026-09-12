@@ -1981,6 +1981,25 @@ main:has(> #page-crm.active){max-width:none;}
 .dr-saved{font:400 10.5px/1 var(--font-mono);color:var(--green);opacity:0;transition:opacity .2s ease;}
 .dr-saved.on{opacity:1;}
 .dr-auto{font:600 9px/1 var(--font-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--amber);margin-left:6px;}
+/* Расчёт стоимости в заявке (Влад, 12.09, утверждено превью "Расчёт в чате CRM") - не
+   дублирует поля выше (Откуда/Куда/Вес/Техника уже есть), только запрашивает габариты и
+   зовёт тот же /api/calculator/quote, что и калькулятор. */
+.dr-calc-cta{width:100%;background:var(--blue);border:none;color:#fff;border-radius:6px;padding:8px 10px;font:600 12px var(--font-body);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;margin-top:10px;transition:filter .15s;}
+.dr-calc-cta:hover{filter:brightness(1.08);}
+.dr-calc-cta:disabled{opacity:.6;cursor:default;}
+.dr-calc-dims{display:none;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px;margin-top:10px;}
+.dr-calc-dims.show{display:block;}
+.dr-calc-dims .hint{font-size:10.5px;color:var(--muted);margin-bottom:8px;}
+.dr-calc-row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:9px;}
+.dr-calc-result{display:none;flex-direction:column;gap:9px;background:var(--bg3);border:1px solid var(--border-strong);border-radius:8px;padding:11px;margin-top:10px;}
+.dr-calc-result.show{display:flex;}
+.dr-calc-total{display:flex;align-items:baseline;justify-content:space-between;font-size:11px;color:var(--muted);}
+.dr-calc-total b{font-family:var(--font-mono);font-weight:600;font-size:18px;color:var(--green);font-variant-numeric:tabular-nums;}
+.dr-calc-route{font-size:10.5px;color:var(--muted);}
+.dr-calc-route b{color:var(--text);font-weight:500;}
+.dr-calc-legend{display:flex;flex-direction:column;gap:3px;}
+.dr-calc-leg-row{display:flex;justify-content:space-between;gap:8px;font-size:10.5px;color:var(--muted);}
+.dr-calc-leg-row .num{font-family:var(--font-mono);color:var(--text);font-variant-numeric:tabular-nums;}
 /* Таймлайн: звонки + сообщения + события одной лентой */
 .dr-tl{display:flex;flex-direction:column;gap:0;}
 .dr-tl-item{display:grid;grid-template-columns:16px minmax(0,1fr);gap:0 10px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12px;}
@@ -23416,7 +23435,37 @@ var CRM = (function () {
       '<div class="dr-field"><label>Вес, т</label><input class="dr-input mono" id="' + prefix + '-weight" type="number" step="0.1" min="0" autocomplete="off" value="' + esc(d.cargo_weight_tons != null ? d.cargo_weight_tons : '') + '"' + onBlur + '></div>' +
       '<div class="dr-field"><label>Дата подачи</label><input class="dr-input mono" id="' + prefix + '-date" type="date" autocomplete="off" value="' + dateInput(d.wanted_date) + '"' + onChange + '></div>' +
       '<div class="dr-field" style="grid-column:1/-1"><label>Техника</label><select class="dr-select" id="' + prefix + '-veh"' + onChange + '>' +
-        ['', 'трал', 'длинномер'].map(function (v) { return '<option value="' + v + '"' + ((d.vehicle_hint || '') === v ? ' selected' : '') + '>' + (v || '—') + '</option>'; }).join('') + '</select></div></div>';
+        VEH_OPTS_.map(function (o) { return '<option value="' + o.v + '"' + (vehHintNorm_(d.vehicle_hint) === o.v ? ' selected' : '') + '>' + o.l + '</option>'; }).join('') + '</select></div></div>' +
+      calcBlockHtml_(prefix, d.id);
+  }
+  // Влад, 11.09 -> 12.09: список расширен с ['', 'трал', 'длинномер'] до полной техники
+  // калькулятора (иначе кнопке "Посчитать стоимость" ниже не от чего считать для
+  // остальных видов) - value теперь совпадает с vehType в api/lib/calculator-calc.js.
+  // Старые сделки хранят vehicle_hint строчными русскими словами ('трал'/'длинномер') -
+  // vehHintNorm_ переводит их в новую схему, чтобы уже сделанный выбор не сбрасывался.
+  var VEH_OPTS_ = [
+    { v: '', l: '—' }, { v: 'tral', l: 'Трал' }, { v: 'board', l: 'Длинномер' },
+    { v: 'panel', l: 'Панелевоз' }, { v: 'tral_crane', l: 'Трал под кран' },
+    { v: 'korito', l: 'Трал-корыто' }, { v: 'faymon', l: 'Faymonville' },
+  ];
+  function vehHintNorm_(v) { return { 'трал': 'tral', 'длинномер': 'board' }[v] || v || ''; }
+  // Кнопка "Посчитать стоимость" (превью "Расчёт в чате CRM", утверждено 12.09) - НЕ
+  // дублирует поля выше (Груз/Откуда/Куда/Вес/Техника уже в этой же форме), спрашивает
+  // только габариты (их в заявке никогда не было) и зовёт ТОТ ЖЕ /api/calculator/quote,
+  // что и сама вкладка "Калькулятор" - единственный источник формулы, не вторая копия
+  // (явное условие Влада, план 2026-09-12-crm-inchat-calculator.md).
+  function calcBlockHtml_(prefix, dealId) {
+    return '<button class="dr-calc-cta" id="' + prefix + '-calcBtn" onclick="CRM.calcOpenForm(\'' + prefix + '\',' + dealId + ')">' + ico('card') + 'Посчитать стоимость</button>' +
+      '<div class="dr-calc-dims" id="' + prefix + '-calcDims">' +
+      '<div class="hint">Из заявки уже взято: маршрут, вес, техника. Не хватает только габаритов.</div>' +
+      '<div class="dr-calc-row3">' +
+      '<div class="dr-field"><label>Длина, м</label><input class="dr-input mono" id="' + prefix + '-calcLen" type="number" step="0.5" min="0.5" value="6"></div>' +
+      '<div class="dr-field"><label>Ширина, м</label><input class="dr-input mono" id="' + prefix + '-calcWid" type="number" step="0.1" min="0.5" value="2.5"></div>' +
+      '<div class="dr-field"><label>Высота, м</label><input class="dr-input mono" id="' + prefix + '-calcHei" type="number" step="0.1" min="0.5" value="3"></div>' +
+      '</div>' +
+      '<button class="dr-calc-cta" id="' + prefix + '-calcRunBtn" onclick="CRM.calcRun(\'' + prefix + '\',' + dealId + ')">Рассчитать</button>' +
+      '</div>' +
+      '<div class="dr-calc-result" id="' + prefix + '-calcResult"></div>';
   }
   function readBrief(prefix) {
     function v(id) { var n = el(prefix + id); return n ? n.value : ''; }
@@ -23430,6 +23479,85 @@ var CRM = (function () {
       var d = dealById(dealId); if (d) { Object.keys(fields).forEach(function (k) { if (k !== 'id' && k in d) d[k] = fields[k]; }); if ('cargo_type' in fields) d.brief_source = 'manual'; }
       if (onDone) onDone();
     }).catch(function () { toast('Нет соединения - изменения не сохранены', 'red'); });
+  }
+
+  // ── Расчёт стоимости в заявке (Влад, 12.09, план 2026-09-12-crm-inchat-calculator.md) ──
+  // Геокодинг (DaData через свой /api/geocoder/suggest, ключ на сервере - тот же путь,
+  // что уже использует калькулятор) + маршрутизация (OSRM, тот же публичный сервис без
+  // ключей, что и в калькуляторе - дублировать здесь безопасно, это не тарифная формула,
+  // а просто запрос расстояния) + сама цена (/api/calculator/quote - НЕ дублируем, зовём
+  // тот же эндпоинт, что и вкладка "Калькулятор").
+  var CALC_BASE_ = { lat: 55.467403, lng: 37.778261 }; // Домодедово, Промышленная 37 - та же база, что в калькуляторе
+  var CALC_RESULTS_ = {}; // dealId -> {q, fromAddr, toAddr, vehType} - для "Вставить в сообщение"
+  function calcOpenForm(prefix, dealId) {
+    var btn = el(prefix + '-calcBtn'); if (btn) btn.style.display = 'none';
+    var pf = el(prefix + '-calcDims'); if (pf) pf.classList.add('show');
+  }
+  function calcGeocodeOne_(query) {
+    return api('/geocoder/suggest', { q: query }).then(function (r) {
+      var s = (r.ok && r.data && r.data.suggestions) || [];
+      return (s[0] && s[0].lat != null && s[0].lon != null) ? { lat: s[0].lat, lng: s[0].lon } : null;
+    }).catch(function () { return null; });
+  }
+  function calcOsrmKm_(a, b) {
+    var url = 'https://router.project-osrm.org/route/v1/driving/' + a.lng + ',' + a.lat + ';' + b.lng + ',' + b.lat + '?overview=false';
+    return fetch(url).then(function (r) { return r.json(); }).then(function (d) {
+      return (d && d.code === 'Ok' && d.routes && d.routes[0]) ? Math.round(d.routes[0].distance / 1000) : null;
+    }).catch(function () { return null; });
+  }
+  function calcRun(prefix, dealId) {
+    var fromAddr = (el(prefix + '-from') || {}).value || '', toAddr = (el(prefix + '-to') || {}).value || '';
+    var weight = +((el(prefix + '-weight') || {}).value) || 0;
+    var vehType = (el(prefix + '-veh') || {}).value || '';
+    var len = +((el(prefix + '-calcLen') || {}).value) || 0, wid = +((el(prefix + '-calcWid') || {}).value) || 0, hei = +((el(prefix + '-calcHei') || {}).value) || 0;
+    if (!fromAddr || !toAddr) { toast('В заявке не заполнены «Откуда»/«Куда»', 'red'); return; }
+    if (!weight) { toast('В заявке не заполнен вес', 'red'); return; }
+    if (!vehType) { toast('В заявке не выбрана техника', 'red'); return; }
+    if (!len || !wid || !hei) { toast('Заполните габариты', 'red'); return; }
+    var btn = el(prefix + '-calcRunBtn'); if (btn) { btn.disabled = true; btn.textContent = 'Считаю…'; }
+    function fail(msg) { toast(msg, 'red'); if (btn) { btn.disabled = false; btn.textContent = 'Рассчитать'; } }
+    Promise.all([calcGeocodeOne_(fromAddr), calcGeocodeOne_(toAddr)]).then(function (pts) {
+      var loaded = pts[0], unloaded = pts[1];
+      if (!loaded || !unloaded) { fail('Не удалось найти один из адресов на карте - уточните «Откуда»/«Куда» в заявке'); return; }
+      return Promise.all([calcOsrmKm_(CALC_BASE_, loaded), calcOsrmKm_(loaded, unloaded), calcOsrmKm_(unloaded, CALC_BASE_)]).then(function (kms) {
+        if (kms[0] == null || kms[1] == null || kms[2] == null) { fail('Не удалось построить маршрут'); return; }
+        var body = {
+          weight: weight, length: len, width: wid, height: hei, vehType: vehType,
+          cargoType: weight > 20 ? 'negabarit' : '', trips: 1, loopCount: 1, truckCount: 1,
+          manual: false, a1: kms[0], a2: kms[1], a3: kms[2], loaded: loaded, unloaded: unloaded,
+        };
+        return fetch(YARD_API_BASE + '/calculator/quote', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Session-Token': SESSION_TOKEN }, body: JSON.stringify(body),
+        }).then(function (r) { return r.json().then(function (rd) { return { httpOk: r.ok, rd: rd }; }); }).then(function (res) {
+          if (btn) { btn.disabled = false; btn.textContent = 'Рассчитать'; }
+          if (!res.httpOk || !res.rd.ok) { toast((res.rd && res.rd.error) || 'Не удалось посчитать', 'red'); return; }
+          calcRenderResult_(prefix, dealId, res.rd.quote, fromAddr, toAddr, vehType);
+        });
+      });
+    }).catch(function () { fail('Нет соединения с сервером'); });
+  }
+  function calcRenderResult_(prefix, dealId, q, fromAddr, toAddr, vehType) {
+    CALC_RESULTS_[dealId] = { q: q, fromAddr: fromAddr, toAddr: toAddr, vehType: vehType };
+    var pf = el(prefix + '-calcDims'); if (pf) pf.classList.remove('show');
+    var box = el(prefix + '-calcResult'); if (!box) return;
+    var rows = [['Смена (' + q.rateName + ')', q.shiftEff], ['Погрузка → выгрузка', q.ldAll], ['База → погрузка', q.e1], ['Выгрузка → база', q.e2]];
+    if (q.esc) rows.push(['Сопровождение', q.esc]);
+    if (q.escortCar) rows.push(['Машина прикрытия', q.escortCar]);
+    box.innerHTML = '<div class="dr-calc-total"><span>Итого с НДС</span><b>' + money(q.total) + '</b></div>' +
+      '<div class="dr-calc-route">База → погрузка <b>' + q.a1 + ' км</b> · с грузом <b>' + q.a2 + ' км</b> · выгрузка → база <b>' + q.a3 + ' км</b></div>' +
+      '<div class="dr-calc-legend">' + rows.map(function (r) { return '<div class="dr-calc-leg-row"><span>' + esc(r[0]) + '</span><span class="num">' + money(r[1]) + '</span></div>'; }).join('') + '</div>' +
+      '<button class="dr-calc-cta" style="background:var(--green);color:#0f0f13" onclick="CRM.calcInsert(' + dealId + ')">' + ico('check') + 'Вставить в сообщение</button>';
+    box.classList.add('show');
+  }
+  function calcInsert(dealId) {
+    var r = CALC_RESULTS_[dealId]; if (!r) return;
+    var input = el('cx-input');
+    if (!input) { toast('Откройте диалог с клиентом, чтобы вставить фразу в чат', 'amber'); return; }
+    var vehLabel = (VEH_OPTS_.filter(function (o) { return o.v === r.vehType; })[0] || {}).l || r.vehType;
+    input.value = 'Перевозка: ' + r.fromAddr.split(',')[0] + ' - ' + r.toAddr.split(',')[0] + ', ' + vehLabel + ': ' + money(r.q.total) + ' с НДС';
+    input.dispatchEvent(new Event('input', { bubbles: true })); // CRM.onInput() пересчитает автовысоту/кнопку отправки, как при ручном вводе
+    input.focus();
+    toast('Фраза вставлена в поле сообщения', 'green');
   }
 
   // «Создать задание» (11.09): собрать поля сделки (с той же 1С-подстановкой, что в карточке) и
@@ -24253,6 +24381,7 @@ var CRM = (function () {
     openThread: openThread, closeThreadMobile: closeThreadMobile, toggleRespPop: toggleRespPop, loadOlder: loadOlder, onThreadScroll: onThreadScroll, openLightbox: openLightbox, closeLightbox: closeLightbox,
     onInput: onInput, onInputKey: onInputKey, toggleTemplates: toggleTemplates, useTemplate: useTemplate, saveTemplate: saveTemplate, deleteTemplate: deleteTemplate, send: send, retry: retry,
     saveCtxBrief: saveCtxBrief, createDealFor: createDealFor, openChatFor: openChatFor, reloadChats: reloadChats, enablePush: enablePush,
+    calcOpenForm: calcOpenForm, calcRun: calcRun, calcInsert: calcInsert,
     playRecording: playRecording, seekStart: seekStart,
     transcribeCall: transcribeCall, summarizeCall: summarizeCall,
     setAnalyticsPeriod: setAnalyticsPeriod,

@@ -2204,8 +2204,9 @@ function wireForm() {
   /* подсказки адресов из истории заказчика */
   ['from', 'to'].forEach(function (side) {
     var inp = $('#op2-f-' + side);
-    inp.addEventListener('focus', function () { if ($('#op2-f-' + side + 'list').innerHTML) $('#op2-f-' + side + 'box').classList.add('op2-open'); });
+    inp.addEventListener('focus', function () { if ($('#op2-f-' + side + 'list').querySelector('.op2-it')) $('#op2-f-' + side + 'box').classList.add('op2-open'); });
     inp.addEventListener('blur', function () { setTimeout(function () { $('#op2-f-' + side + 'box').classList.remove('op2-open'); }, 150); tickState(); });
+    inp.addEventListener('input', function () { fetchGeoSuggest(side, this.value); });
     $('#op2-f-' + side + 'list').addEventListener('mousedown', function (e) {
       var it = e.target.closest('.op2-it'); if (!it) return;
       inp.value = it.dataset.address || '';
@@ -2399,8 +2400,8 @@ function fetchCustomerHistory(name) {
         '<span>' + esc(a.address) + '</span><span class="op2-m">' + esc(a.n || '') + '</span></div>';
     }).join('');
     var head = addr ? '<div class="op2-sec">Точки этого заказчика</div>' : '';
-    $('#op2-f-fromlist').innerHTML = head + addr;
-    $('#op2-f-tolist').innerHTML = head + addr;
+    listSubSection_('from', 'op2-sub-hist').innerHTML = head + addr;
+    listSubSection_('to', 'op2-sub-hist').innerHTML = head + addr;
     var c = (d.contacts || [])[0];
     if (c && !$('#op2-f-custcontact').value.trim()) {
       $('#op2-f-custcontact-hint').textContent = 'Из истории: ' + [c.name, fmtPhone(c.phone)].filter(Boolean).join(' · ');
@@ -2416,6 +2417,62 @@ function fetchCustomerHistory(name) {
       collapseEntRow(entSeg, d.last_executor_entity_id);
     }
   }).catch(function () {});
+}
+/* список подсказок адреса делится на два независимых подраздела - история заказчика
+   (fetchCustomerHistory выше) и живой геокодинг (fetchGeoSuggest ниже) - каждый пишет
+   только в свой div, не затирая другой при повторном срабатывании. */
+function listSubSection_(side, cls) {
+  var list = $('#op2-f-' + side + 'list');
+  var sub = list.querySelector('.' + cls);
+  if (!sub) { sub = document.createElement('div'); sub.className = cls; list.appendChild(sub); }
+  return sub;
+}
+/* «Адреса» - живой геокодинг DaData (Влад 12.09: подключить то же, что уже работает в
+   Калькуляторе - тот же сервер /api/geocoder/suggest, ключ уже там, ничего нового не
+   заводим). dadataAddrParts_ - дословно тот же разбор полей, что и в files/index.html
+   (Clc.geoc()/dadataAddrParts_), не изобретаем второй раз. */
+function dadataAddrParts_(d) {
+  d = d || {};
+  var line = [d.street_with_type, d.house].filter(Boolean).join(', ');
+  var first = line || d.settlement_with_type || d.city_with_type || d.region_with_type || '';
+  var rest = [];
+  if (line && line !== first) rest.push(line);
+  if (d.city_district_with_type) rest.push(d.city_district_with_type);
+  if (d.settlement_with_type && d.settlement_with_type !== first) rest.push(d.settlement_with_type);
+  if (d.city_with_type && d.city_with_type !== first) rest.push(d.city_with_type);
+  if (d.region_with_type && d.region_with_type !== d.city_with_type) rest.push(d.region_with_type);
+  var seen = {};
+  return [first].concat(rest).filter(function (v) { if (!v || seen[v]) return false; seen[v] = true; return true; });
+}
+var geoSuggestT_ = {};
+function fetchGeoSuggest(side, q) {
+  clearTimeout(geoSuggestT_[side]);
+  var geoSub = listSubSection_(side, 'op2-sub-geo');
+  if (!q || q.trim().length < 3) { geoSub.innerHTML = ''; return; }
+  geoSuggestT_[side] = setTimeout(function () {
+    apiGet('/geocoder/suggest', { q: q.trim() }).then(function (r) {
+      var sug = (r && r.ok && r.data && r.data.suggestions) || [];
+      var seen = {}, html = '';
+      sug.forEach(function (f) {
+        if (f.lat == null || f.lon == null) return;
+        var parts = dadataAddrParts_(f);
+        if (!parts[0]) return;
+        var main = parts[0], sub = parts.slice(1, 3).join(', ');
+        var key = main + '|' + sub;
+        if (seen[key]) return;
+        seen[key] = true;
+        html += '<div class="op2-it" data-address="' + esc(main) + '" data-lat="' + esc(f.lat) + '" data-lon="' + esc(f.lon) + '">' +
+          '<span>' + esc(main) + '</span><span class="op2-m">' + esc(sub) + '</span></div>';
+      });
+      geoSub.innerHTML = html ? '<div class="op2-sec">Адреса</div>' + html : '';
+      /* проверка фокуса - ответ может прийти уже после того, как менеджер кликнул
+         мимо (blur закрывает бокс через 150мс); без неё список открылся бы заново
+         сам по себе поверх уже незнакомого действия */
+      if (html && document.activeElement === $('#op2-f-' + side)) {
+        var box = $('#op2-f-' + side + 'box'); if (box) box.classList.add('op2-open');
+      }
+    }).catch(function () {});
+  }, 400);
 }
 function collectForm() {
   var fc = splitContact($('#op2-f-custcontact').value);

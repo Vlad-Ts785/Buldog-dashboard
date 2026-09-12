@@ -2408,6 +2408,14 @@ function tickState() {
   if (!$('#op2-f-to').value.trim()) miss.push('адрес выгрузки');
   if (!formEq()) miss.push('тип техники');
   if (miss.indexOf('тип техники') >= 0) { b.className = 'op2-dbtn op2-primary op2-blocked'; b.textContent = 'Выбери тип техники'; st.textContent = ''; return; }
+  /* Влад 12.09: «создание заявки невозможно, пока не внесут цену - и логисты в своих заявках,
+     и менеджеры» - жёсткий блок наравне с заказчиком/техникой, без исключения по роли. Только
+     на СОЗДАНИИ (та же граница, что и на сервере) - правку старой заявки без цены не блокируем
+     задним числом, editing вычисляется как в saveForm(). */
+  var creating = !(formOrder && !formRepeat && !formPrefill);
+  if (creating && !num(($('#op2-f-price') || {}).value)) {
+    b.className = 'op2-dbtn op2-primary op2-blocked'; b.textContent = 'Укажи цену'; st.textContent = ''; return;
+  }
   if (miss.length) {
     b.className = 'op2-dbtn op2-primary op2-warn';
     b.textContent = 'Сохранить · есть незаполненные';

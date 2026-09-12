@@ -26,6 +26,10 @@ function $$(sel, root) { return Array.prototype.slice.call((root || document).qu
    уходит в innerHTML только через неё. Общей escHtml_ в index.html нет - те,
    что есть, приватны внутри чужих IIFE. */
 function capFirst(s) { s = String(s || ''); return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; } /* «буровая Liebherr…» -> «Буровая Liebherr…» */
+/* Своя база (Влад 12.09) - кнопка «База» у адреса погрузки/выгрузки, только у логиста.
+   Координаты - точный ответ DaData на этот адрес (проверено вручную 12.09), не пересчитываются. */
+var BASE_ADDRESS_ = 'Московская обл, г Домодедово, мкр Центральный, ул Промышленная, д 37';
+var BASE_LAT_ = '55.4672641', BASE_LON_ = '37.7794222';
 function esc(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -2057,13 +2061,15 @@ function renderForm() {
     '</div></div>' +
 
     '<div class="op2-sect"><div class="op2-t">Откуда - куда</div><div class="op2-grid2">' +
-      '<div class="op2-fld op2-full op2-sugg" id="op2-f-frombox"><label>Адрес погрузки</label>' +
+      '<div class="op2-fld op2-full op2-sugg" id="op2-f-frombox"><label' + (isLog ? ' class="op2-lbl-flex"' : '') + '><span>Адрес погрузки</span>' +
+        (isLog ? '<button type="button" class="op2-addr-base" data-side="from">База</button>' : '') + '</label>' +
         '<input id="op2-f-from" placeholder="Адрес, ссылка на карту или координаты 55.75, 37.62" autocomplete="off" value="' + esc(o ? o.load_address : '') + '">' +
         '<div class="op2-list" id="op2-f-fromlist"></div>' +
         '<span class="op2-hint op2-okc" id="op2-f-fromhint">' + (o && o.load_lat ? esc(o.load_lat + ' · ' + o.load_lon) : '') + '</span></div>' +
       '<div class="op2-fld"><label>Контакт на погрузке</label><input id="op2-f-fromcontact" placeholder="Имя · телефон" autocomplete="off" value="' + esc(o ? [o.load_contact_name, o.load_contact_phone].filter(Boolean).join(' · ') : '') + '"></div>' +
       '<div class="op2-fld"><label>Контакт на выгрузке</label><input id="op2-f-tocontact" placeholder="Имя · телефон" autocomplete="off" value="' + esc(o ? [o.unload_contact_name, o.unload_contact_phone].filter(Boolean).join(' · ') : '') + '"></div>' +
-      '<div class="op2-fld op2-full op2-sugg" id="op2-f-tobox"><label>Адрес выгрузки</label>' +
+      '<div class="op2-fld op2-full op2-sugg" id="op2-f-tobox"><label' + (isLog ? ' class="op2-lbl-flex"' : '') + '><span>Адрес выгрузки</span>' +
+        (isLog ? '<button type="button" class="op2-addr-base" data-side="to">База</button>' : '') + '</label>' +
         '<input id="op2-f-to" placeholder="Адрес, ссылка на карту или координаты" autocomplete="off" value="' + esc(o ? o.unload_address : '') + '">' +
         '<div class="op2-list" id="op2-f-tolist"></div>' +
         '<span class="op2-hint op2-warn" id="op2-f-tohint"></span></div>' +
@@ -2287,6 +2293,14 @@ function wireForm() {
   });
 
   /* подсказки адресов из истории заказчика */
+  function applyAddr_(side, address, lat, lon, hintText) {
+    var inp = $('#op2-f-' + side);
+    inp.value = address || ''; inp.dataset.lat = lat || ''; inp.dataset.lon = lon || '';
+    var hint = $('#op2-f-' + side + 'hint');
+    if (hint) { hint.textContent = lat ? (lat + ' · ' + lon) : (hintText || ''); hint.className = 'op2-hint op2-okc'; }
+    $('#op2-f-' + side + 'box').classList.remove('op2-open');
+    tickState();
+  }
   ['from', 'to'].forEach(function (side) {
     var inp = $('#op2-f-' + side);
     inp.addEventListener('focus', function () { if ($('#op2-f-' + side + 'list').querySelector('.op2-it')) $('#op2-f-' + side + 'box').classList.add('op2-open'); });
@@ -2294,16 +2308,21 @@ function wireForm() {
     inp.addEventListener('input', function () { fetchGeoSuggest(side, this.value); });
     $('#op2-f-' + side + 'list').addEventListener('mousedown', function (e) {
       var it = e.target.closest('.op2-it'); if (!it) return;
-      inp.value = it.dataset.address || '';
-      inp.dataset.lat = it.dataset.lat || '';
-      inp.dataset.lon = it.dataset.lon || '';
+      applyAddr_(side, it.dataset.address, it.dataset.lat, it.dataset.lon, 'из истории заказчика');
       if (it.dataset.cname || it.dataset.cphone) {
         $('#op2-f-' + side + 'contact').value = [it.dataset.cname, it.dataset.cphone].filter(Boolean).join(' · ');
       }
-      var hint = $('#op2-f-' + side + 'hint');
-      if (hint) { hint.textContent = it.dataset.lat ? (it.dataset.lat + ' · ' + it.dataset.lon) : 'из истории заказчика'; hint.className = 'op2-hint op2-okc'; }
-      $('#op2-f-' + side + 'box').classList.remove('op2-open');
-      tickState();
+    });
+  });
+  /* Влад 12.09: «даже просто должна быть где-то кнопка «Адрес погрузки»/«Адрес выгрузки», просто
+     база, чтобы нажал быстро и всё» - «это только логистов» (кнопка и так рисуется только у isLog,
+     см. renderForm). Координаты - точный ответ DaData на этот же адрес, захардкожены, а не считаются
+     заново на каждом клике: адрес базы не «плавает», отдельный сетевой запрос тут не нужен. */
+  $$('.op2-addr-base').forEach(function (btn) {
+    btn.addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      applyAddr_(btn.dataset.side, BASE_ADDRESS_, BASE_LAT_, BASE_LON_);
+      S.tickUp();
     });
   });
 

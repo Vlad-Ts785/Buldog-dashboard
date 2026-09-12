@@ -1981,6 +1981,26 @@ main:has(> #page-crm.active){max-width:none;}
 .dr-saved{font:400 10.5px/1 var(--font-mono);color:var(--green);opacity:0;transition:opacity .2s ease;}
 .dr-saved.on{opacity:1;}
 .dr-auto{font:600 9px/1 var(--font-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--amber);margin-left:6px;}
+/* Расчёт стоимости в заявке (Влад, 12.09, утверждено превью "Расчёт в чате CRM") - не
+   дублирует поля выше (Откуда/Куда/Вес/Техника уже есть), только запрашивает габариты и
+   зовёт тот же /api/calculator/quote, что и калькулятор. */
+.dr-calc-cta{width:100%;background:var(--blue);border:none;color:#fff;border-radius:8px;padding:8px 12px;font:600 12px var(--font-body);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;margin-top:10px;transition:filter .15s;white-space:nowrap;}
+.dr-calc-cta svg{width:14px;height:14px;flex:none;}
+.dr-calc-cta:hover{filter:brightness(1.08);}
+.dr-calc-cta:disabled{opacity:.6;cursor:default;}
+.dr-calc-dims{display:none;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px;margin-top:10px;}
+.dr-calc-dims.show{display:block;}
+.dr-calc-dims .hint{font-size:10.5px;color:var(--muted);margin-bottom:8px;}
+.dr-calc-row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:9px;}
+.dr-calc-result{display:none;flex-direction:column;gap:9px;background:var(--bg3);border:1px solid var(--border-strong);border-radius:8px;padding:11px;margin-top:10px;}
+.dr-calc-result.show{display:flex;}
+.dr-calc-total{display:flex;align-items:baseline;justify-content:space-between;font-size:11px;color:var(--muted);}
+.dr-calc-total b{font-family:var(--font-mono);font-weight:600;font-size:18px;color:var(--green);font-variant-numeric:tabular-nums;}
+.dr-calc-route{font-size:10.5px;color:var(--muted);}
+.dr-calc-route b{color:var(--text);font-weight:500;}
+.dr-calc-legend{display:flex;flex-direction:column;gap:3px;}
+.dr-calc-leg-row{display:flex;justify-content:space-between;gap:8px;font-size:10.5px;color:var(--muted);}
+.dr-calc-leg-row .num{font-family:var(--font-mono);color:var(--text);font-variant-numeric:tabular-nums;}
 /* Таймлайн: звонки + сообщения + события одной лентой */
 .dr-tl{display:flex;flex-direction:column;gap:0;}
 .dr-tl-item{display:grid;grid-template-columns:16px minmax(0,1fr);gap:0 10px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12px;}
@@ -5546,12 +5566,13 @@ var P = {
     t45:{n:'Трал 45-49т',s:50000,km:280,emptyKm:120},
     t50:{n:'Трал 50-59т',s:60000,km:350,emptyKm:120}
 };
-var FAR_LIMIT=200,FAR_SHIFT=30000,K_COEF=1.5,OV_COEF=2,EMPTY_RATE=120;
-// Доплата за негабарит (сопровождение) — прайс ООО БУЛЬДОГ от 12.06.2026
-var ESC_ZONE={sadovoe:12000,mkad:10000,ckad:20000};
-var ESC_FAR_BASE=20000,ESC_FAR_MIN=200;
-var ESC_CAT={1:[55,50,45],2:[100,90,80],3:[110,100,90]}; // ₽/км по полосам [200-500, 501-1000, 1001-2000]
-function escortBand(d){return d<=500?0:d<=1000?1:2;}
+// Влад, 12.09: тарифные константы (смена, ставки за км, сопровождение, сверхгабарит и
+// т.д.) переехали на сервер вместе с самим расчётом (api/lib/calculator-calc.js,
+// /api/calculator/quote) - здесь их больше нет, чтобы не завести вторую копию формулы
+// (и чтобы точные ставки не читались из этого публичного файла одним Ctrl+U). EMPTY_RATE
+// остаётся - нужен только для клиентской "вилки" ДО маршрута (renderBoardPending_,
+// ориентир, не точный расчёт).
+var EMPTY_RATE=120;
 function tralByMass(w){if(w<=20)return P.tral;if(w<=25)return P.t20;if(w<=34)return P.t25;if(w<=44)return P.t35;if(w<=49)return P.t45;if(w<=59)return P.t50;return null;}
 // Влад, 2026-08-17: "выбрали буровую 110т - калькулятор должен сам подобрать категорию
 // Faymonville под вес, а не оставлять что было выбрано раньше". null - вне каталога (>120т),
@@ -5564,11 +5585,8 @@ function syncFaymonCat(){
     else toast('Свыше 120 т - категория и цена индивидуальны, согласуйте с руководителем',1);
 }
 function rn(v){if(!v||v===0)return 0;var s=v<0?-1:1,n=Math.abs(v);if(n<1000)return s*Math.round(n/100)*100;if(n<10000)return s*Math.round(n/500)*500;if(n<100000)return s*Math.round(n/1000)*1000;if(n<1000000)return s*Math.round(n/5000)*5000;return s*Math.round(n/10000)*10000;}
-var MSK_LAT=55.7557,MSK_LON=37.6176,SAD_R=2.8,FAR_R=200;
-function ptDist(la1,lo1,la2,lo2){var R=6371,dp=(la2-la1)*Math.PI/180,dl=(lo2-lo1)*Math.PI/180,a=Math.sin(dp/2)*Math.sin(dp/2)+Math.cos(la1*Math.PI/180)*Math.cos(la2*Math.PI/180)*Math.sin(dl/2)*Math.sin(dl/2);return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));}
-var MKAD_POLY=[[55.891,37.373],[55.882,37.540],[55.888,37.707],[55.871,37.843],[55.815,37.945],[55.733,37.978],[55.653,37.933],[55.611,37.810],[55.572,37.661],[55.573,37.507],[55.604,37.333],[55.664,37.218],[55.735,37.191],[55.810,37.250],[55.862,37.312]];
-function inMkad(lat,lon){var p=MKAD_POLY,n=p.length,ins=false,j=n-1;for(var i=0;i<n;j=i++){if(((p[i][0]>lat)!=(p[j][0]>lat))&&(lon<(p[j][1]-p[i][1])*(lat-p[i][0])/(p[j][0]-p[i][0])+p[i][1]))ins=!ins;}return ins;}
-function mskZone(lat,lon){if(!inMkad(lat,lon))return null;return ptDist(lat,lon,MSK_LAT,MSK_LON)<=SAD_R?'sadovoe':'mkad';}
+// mskZone/ptDist/inMkad/MKAD_POLY (определение зоны Москвы для сопровождения) - тоже
+// переехали на сервер вместе с calc() 12.09, здесь были не нужны больше нигде.
 
 var TECH=[
 {n:"Caterpillar 301.7",g:'excavator',w:1.7,l:4.69,d:2.0,h:2.58,m:"1.7 т"},{n:"Caterpillar 303",g:'excavator',w:3.3,l:4.96,d:2.1,h:2.67,m:"3.3 т"},{n:"Caterpillar 305",g:'excavator',w:5.3,l:5.3,d:2.22,h:2.77,m:"5.3 т"},{n:"Caterpillar 308",g:'excavator',w:8.2,l:5.79,d:2.39,h:2.91,m:"8.2 т"},{n:"Caterpillar 313",g:'excavator',w:13.5,l:9.38,d:2.98,h:3.12,m:"13.5 т"},{n:"Caterpillar 315",g:'excavator',w:15.7,l:9.51,d:3.01,h:3.15,m:"15.7 т"},{n:"Caterpillar 316",g:'excavator',w:16.5,l:9.56,d:3.02,h:3.16,m:"16.5 т"},{n:"Caterpillar 318",g:'excavator',w:18.5,l:9.67,d:3.04,h:3.18,m:"18.5 т"},{n:"Caterpillar 320",g:'excavator',w:22.5,l:9.9,d:3.09,h:3.23,m:"22.5 т"},{n:"Caterpillar 323",g:'excavator',w:25.0,l:10.05,d:3.12,h:3.26,m:"25.0 т"},{n:"Caterpillar 326",g:'excavator',w:27.0,l:10.17,d:3.14,h:3.29,m:"27.0 т"},{n:"Caterpillar 330",g:'excavator',w:30.5,l:10.37,d:3.19,h:3.33,m:"30.5 т"},{n:"Caterpillar 336",g:'excavator',w:37.0,l:10.75,d:3.26,h:3.41,m:"37.0 т"},{n:"Caterpillar 340",g:'excavator',w:40.0,l:10.92,d:3.3,h:3.45,m:"40.0 т"},{n:"Caterpillar 349",g:'excavator',w:47.0,l:11.33,d:3.38,h:3.54,m:"47.0 т"},{n:"Caterpillar 352",g:'excavator',w:52.0,l:11.62,d:3.44,h:3.6,m:"52.0 т"},{n:"Caterpillar 374",g:'excavator',w:73.0,l:12.83,d:3.7,h:3.86,m:"73.0 т"},{n:"Caterpillar 390",g:'excavator',w:90.0,l:13.82,d:3.9,h:4.08,m:"90.0 т"},{n:"Caterpillar 395",g:'excavator',w:95.0,l:14.11,d:3.96,h:4.14,m:"95.0 т"},{n:"Komatsu PC18",g:'excavator',w:1.8,l:4.71,d:2.01,h:2.59,m:"1.8 т"},{n:"Komatsu PC30",g:'excavator',w:3.2,l:4.94,d:2.09,h:2.66,m:"3.2 т"},{n:"Komatsu PC55",g:'excavator',w:5.5,l:5.34,d:2.23,h:2.77,m:"5.5 т"},{n:"Komatsu PC78",g:'excavator',w:8.0,l:5.76,d:2.38,h:2.9,m:"8.0 т"},{n:"Komatsu PC130",g:'excavator',w:13.3,l:9.37,d:2.98,h:3.12,m:"13.3 т"},{n:"Komatsu PC160",g:'excavator',w:16.5,l:9.56,d:3.02,h:3.16,m:"16.5 т"},{n:"Komatsu PC170",g:'excavator',w:17.5,l:9.62,d:3.03,h:3.17,m:"17.5 т"},{n:"Komatsu PC200",g:'excavator',w:20.0,l:9.76,d:3.06,h:3.2,m:"20.0 т"},{n:"Komatsu PC210",g:'excavator',w:21.0,l:9.82,d:3.07,h:3.21,m:"21.0 т"},{n:"Komatsu PC240",g:'excavator',w:24.5,l:10.02,d:3.11,h:3.26,m:"24.5 т"},{n:"Komatsu PC290",g:'excavator',w:29.0,l:10.28,d:3.17,h:3.31,m:"29.0 т"},{n:"Komatsu PC300",g:'excavator',w:31.5,l:10.43,d:3.2,h:3.34,m:"31.5 т"},{n:"Komatsu PC350",g:'excavator',w:34.5,l:10.6,d:3.23,h:3.38,m:"34.5 т"},{n:"Komatsu PC360",g:'excavator',w:36.0,l:10.69,d:3.25,h:3.4,m:"36.0 т"},{n:"Komatsu PC400",g:'excavator',w:42.5,l:11.06,d:3.33,h:3.48,m:"42.5 т"},{n:"Komatsu PC450",g:'excavator',w:45.5,l:11.24,d:3.37,h:3.52,m:"45.5 т"},{n:"Komatsu PC490",g:'excavator',w:49.0,l:11.44,d:3.41,h:3.56,m:"49.0 т"},{n:"Komatsu PC550",g:'excavator',w:54.0,l:11.73,d:3.47,h:3.62,m:"54.0 т"},{n:"Komatsu PC650",g:'excavator',w:65.0,l:12.37,d:3.6,h:3.76,m:"65.0 т"},{n:"Komatsu PC700",g:'excavator',w:70.0,l:12.66,d:3.66,h:3.83,m:"70.0 т"},{n:"Komatsu PC800",g:'excavator',w:80.0,l:13.24,d:3.78,h:3.95,m:"80.0 т"},{n:"Komatsu PC1250",g:'excavator',w:120.0,l:15.56,d:4.26,h:4.45,m:"120.0 т"},{n:"Hitachi ZX17",g:'excavator',w:1.7,l:4.69,d:2.0,h:2.58,m:"1.7 т"},{n:"Hitachi ZX33",g:'excavator',w:3.3,l:4.96,d:2.1,h:2.67,m:"3.3 т"},{n:"Hitachi ZX55",g:'excavator',w:5.5,l:5.34,d:2.23,h:2.77,m:"5.5 т"},{n:"Hitachi ZX85",g:'excavator',w:8.5,l:5.85,d:2.41,h:2.92,m:"8.5 т"},{n:"Hitachi ZX130",g:'excavator',w:13.0,l:9.35,d:2.98,h:3.11,m:"13.0 т"},{n:"Hitachi ZX160",g:'excavator',w:16.0,l:9.53,d:3.01,h:3.15,m:"16.0 т"},{n:"Hitachi ZX200",g:'excavator',w:20.0,l:9.76,d:3.06,h:3.2,m:"20.0 т"},{n:"Hitachi ZX210",g:'excavator',w:21.0,l:9.82,d:3.07,h:3.21,m:"21.0 т"},{n:"Hitachi ZX240",g:'excavator',w:24.0,l:9.99,d:3.11,h:3.25,m:"24.0 т"},{n:"Hitachi ZX300",g:'excavator',w:30.0,l:10.34,d:3.18,h:3.33,m:"30.0 т"},{n:"Hitachi ZX330",g:'excavator',w:33.5,l:10.54,d:3.22,h:3.37,m:"33.5 т"},{n:"Hitachi ZX350",g:'excavator',w:35.5,l:10.66,d:3.25,h:3.39,m:"35.5 т"},{n:"Hitachi ZX470",g:'excavator',w:47.5,l:11.36,d:3.39,h:3.54,m:"47.5 т"},{n:"Hitachi ZX490",g:'excavator',w:49.5,l:11.47,d:3.41,h:3.57,m:"49.5 т"},{n:"Hitachi ZX530",g:'excavator',w:53.0,l:11.67,d:3.46,h:3.61,m:"53.0 т"},{n:"Hitachi ZX670",g:'excavator',w:67.0,l:12.49,d:3.62,h:3.79,m:"67.0 т"},{n:"Hitachi ZX690",g:'excavator',w:68.8,l:12.59,d:3.65,h:3.81,m:"68.8 т"},{n:"Hitachi ZX870",g:'excavator',w:86.0,l:13.59,d:3.85,h:4.03,m:"86.0 т"},{n:"Volvo EC18",g:'excavator',w:1.8,l:4.71,d:2.01,h:2.59,m:"1.8 т"},{n:"Volvo EC55",g:'excavator',w:5.5,l:5.34,d:2.23,h:2.77,m:"5.5 т"},{n:"Volvo EC140",g:'excavator',w:14.0,l:9.41,d:2.99,h:3.12,m:"14.0 т"},{n:"Volvo EC160",g:'excavator',w:16.5,l:9.56,d:3.02,h:3.16,m:"16.5 т"},{n:"Volvo EC200",g:'excavator',w:20.0,l:9.76,d:3.06,h:3.2,m:"20.0 т"},{n:"Volvo EC220",g:'excavator',w:22.0,l:9.88,d:3.08,h:3.23,m:"22.0 т"},{n:"Volvo EC250",g:'excavator',w:25.0,l:10.05,d:3.12,h:3.26,m:"25.0 т"},{n:"Volvo EC300",g:'excavator',w:30.0,l:10.34,d:3.18,h:3.33,m:"30.0 т"},{n:"Volvo EC350",g:'excavator',w:35.0,l:10.63,d:3.24,h:3.39,m:"35.0 т"},{n:"Volvo EC380",g:'excavator',w:38.0,l:10.8,d:3.28,h:3.43,m:"38.0 т"},{n:"Volvo EC480",g:'excavator',w:48.5,l:11.41,d:3.4,h:3.56,m:"48.5 т"},{n:"Volvo EC750",g:'excavator',w:75.0,l:12.95,d:3.72,h:3.89,m:"75.0 т"},{n:"Hyundai R17",g:'excavator',w:1.7,l:4.69,d:2.0,h:2.58,m:"1.7 т"},{n:"Hyundai R55",g:'excavator',w:5.5,l:5.34,d:2.23,h:2.77,m:"5.5 т"},{n:"Hyundai R140",g:'excavator',w:14.0,l:9.41,d:2.99,h:3.12,m:"14.0 т"},{n:"Hyundai R160",g:'excavator',w:16.5,l:9.56,d:3.02,h:3.16,m:"16.5 т"},{n:"Hyundai R180",g:'excavator',w:18.0,l:9.64,d:3.04,h:3.18,m:"18.0 т"},{n:"Hyundai R220",g:'excavator',w:22.0,l:9.88,d:3.08,h:3.23,m:"22.0 т"},{n:"Hyundai R260",g:'excavator',w:26.0,l:10.11,d:3.13,h:3.28,m:"26.0 т"},{n:"Hyundai R300",g:'excavator',w:30.0,l:10.34,d:3.18,h:3.33,m:"30.0 т"},{n:"Hyundai R330",g:'excavator',w:33.0,l:10.51,d:3.22,h:3.36,m:"33.0 т"},{n:"Hyundai R380",g:'excavator',w:38.0,l:10.8,d:3.28,h:3.43,m:"38.0 т"},{n:"Hyundai R480",g:'excavator',w:48.0,l:11.38,d:3.4,h:3.55,m:"48.0 т"},{n:"Hyundai R520",g:'excavator',w:52.0,l:11.62,d:3.44,h:3.6,m:"52.0 т"},{n:"Doosan DX55",g:'excavator',w:5.5,l:5.34,d:2.23,h:2.77,m:"5.5 т"},{n:"Doosan DX140",g:'excavator',w:14.0,l:9.41,d:2.99,h:3.12,m:"14.0 т"},{n:"Doosan DX180",g:'excavator',w:18.0,l:9.64,d:3.04,h:3.18,m:"18.0 т"},{n:"Doosan DX225",g:'excavator',w:22.5,l:9.9,d:3.09,h:3.23,m:"22.5 т"},{n:"Doosan DX255",g:'excavator',w:25.5,l:10.08,d:3.13,h:3.27,m:"25.5 т"},{n:"Doosan DX300",g:'excavator',w:30.0,l:10.34,d:3.18,h:3.33,m:"30.0 т"},{n:"Doosan DX340",g:'excavator',w:34.0,l:10.57,d:3.23,h:3.38,m:"34.0 т"},{n:"Doosan DX380",g:'excavator',w:38.0,l:10.8,d:3.28,h:3.43,m:"38.0 т"},{n:"Doosan DX420",g:'excavator',w:42.0,l:11.04,d:3.32,h:3.48,m:"42.0 т"},{n:"Doosan DX490",g:'excavator',w:49.0,l:11.44,d:3.41,h:3.56,m:"49.0 т"},{n:"Doosan DX530",g:'excavator',w:53.0,l:11.67,d:3.46,h:3.61,m:"53.0 т"},{n:"JCB 8018",g:'excavator',w:1.8,l:4.71,d:2.01,h:2.59,m:"1.8 т"},{n:"JCB 8055",g:'excavator',w:5.5,l:5.34,d:2.23,h:2.77,m:"5.5 т"},{n:"JCB JS130",g:'excavator',w:13.0,l:9.35,d:2.98,h:3.11,m:"13.0 т"},{n:"JCB JS160",g:'excavator',w:16.0,l:9.53,d:3.01,h:3.15,m:"16.0 т"},{n:"JCB JS200",g:'excavator',w:20.0,l:9.76,d:3.06,h:3.2,m:"20.0 т"},{n:"JCB JS220",g:'excavator',w:22.0,l:9.88,d:3.08,h:3.23,m:"22.0 т"},{n:"JCB JS300",g:'excavator',w:30.0,l:10.34,d:3.18,h:3.33,m:"30.0 т"},{n:"JCB JS370",g:'excavator',w:37.0,l:10.75,d:3.26,h:3.41,m:"37.0 т"},{n:"JCB 3CX",g:'excavator',w:8.5,l:5.85,d:2.41,h:2.92,m:"8.5 т"},{n:"JCB 4CX",g:'excavator',w:9.5,l:6.02,d:2.47,h:2.98,m:"9.5 т"},{n:"Liebherr R914",g:'excavator',w:20.0,l:9.76,d:3.06,h:3.2,m:"20.0 т"},{n:"Liebherr R920",g:'excavator',w:22.0,l:9.88,d:3.08,h:3.23,m:"22.0 т"},{n:"Liebherr R924",g:'excavator',w:24.0,l:9.99,d:3.11,h:3.25,m:"24.0 т"},{n:"Liebherr R926",g:'excavator',w:26.0,l:10.11,d:3.13,h:3.28,m:"26.0 т"},{n:"Liebherr R934",g:'excavator',w:32.0,l:10.46,d:3.2,h:3.35,m:"32.0 т"},{n:"Liebherr R938",g:'excavator',w:38.0,l:10.8,d:3.28,h:3.43,m:"38.0 т"},{n:"Liebherr R944",g:'excavator',w:44.0,l:11.15,d:3.35,h:3.5,m:"44.0 т"},{n:"Liebherr R950",g:'excavator',w:50.0,l:11.5,d:3.42,h:3.58,m:"50.0 т"},{n:"Liebherr R954",g:'excavator',w:55.0,l:11.79,d:3.48,h:3.64,m:"55.0 т"},{n:"Liebherr R960",g:'excavator',w:60.0,l:12.08,d:3.54,h:3.7,m:"60.0 т"},{n:"Liebherr R970",g:'excavator',w:70.0,l:12.66,d:3.66,h:3.83,m:"70.0 т"},{n:"Liebherr R976",g:'excavator',w:76.0,l:13.01,d:3.73,h:3.9,m:"76.0 т"},{n:"Sany SY16",g:'excavator',w:1.7,l:4.69,d:2.0,h:2.58,m:"1.7 т"},{n:"Sany SY55",g:'excavator',w:5.4,l:5.32,d:2.22,h:2.77,m:"5.4 т"},{n:"Sany SY135",g:'excavator',w:13.5,l:9.38,d:2.98,h:3.12,m:"13.5 т"},{n:"Sany SY215",g:'excavator',w:21.5,l:9.85,d:3.08,h:3.22,m:"21.5 т"},{n:"Sany SY265",g:'excavator',w:26.5,l:10.14,d:3.14,h:3.28,m:"26.5 т"},{n:"Sany SY305",g:'excavator',w:30.5,l:10.37,d:3.19,h:3.33,m:"30.5 т"},{n:"Sany SY365",g:'excavator',w:36.5,l:10.72,d:3.26,h:3.41,m:"36.5 т"},{n:"Sany SY485",g:'excavator',w:48.5,l:11.41,d:3.4,h:3.56,m:"48.5 т"},{n:"Sany SY500",g:'excavator',w:50.0,l:11.5,d:3.42,h:3.58,m:"50.0 т"},{n:"XCMG XE15",g:'excavator',w:1.6,l:4.67,d:2.0,h:2.58,m:"1.6 т"},{n:"XCMG XE60",g:'excavator',w:6.0,l:5.42,d:2.26,h:2.8,m:"6.0 т"},{n:"XCMG XE135",g:'excavator',w:13.5,l:9.38,d:2.98,h:3.12,m:"13.5 т"},{n:"XCMG XE210",g:'excavator',w:21.0,l:9.82,d:3.07,h:3.21,m:"21.0 т"},{n:"XCMG XE265",g:'excavator',w:26.5,l:10.14,d:3.14,h:3.28,m:"26.5 т"},{n:"XCMG XE335",g:'excavator',w:33.5,l:10.54,d:3.22,h:3.37,m:"33.5 т"},{n:"XCMG XE370",g:'excavator',w:37.0,l:10.75,d:3.26,h:3.41,m:"37.0 т"},{n:"XCMG XE490",g:'excavator',w:49.0,l:11.44,d:3.41,h:3.56,m:"49.0 т"},{n:"XCMG XE700",g:'excavator',w:70.0,l:12.66,d:3.66,h:3.83,m:"70.0 т"},{n:"Kobelco SK17",g:'excavator',w:1.7,l:4.69,d:2.0,h:2.58,m:"1.7 т"},{n:"Kobelco SK75",g:'excavator',w:7.5,l:5.68,d:2.35,h:2.88,m:"7.5 т"},{n:"Kobelco SK140",g:'excavator',w:14.0,l:9.41,d:2.99,h:3.12,m:"14.0 т"},{n:"Kobelco SK210",g:'excavator',w:21.0,l:9.82,d:3.07,h:3.21,m:"21.0 т"},{n:"Kobelco SK260",g:'excavator',w:26.0,l:10.11,d:3.13,h:3.28,m:"26.0 т"},{n:"Kobelco SK350",g:'excavator',w:35.0,l:10.63,d:3.24,h:3.39,m:"35.0 т"},{n:"Kobelco SK500",g:'excavator',w:50.0,l:11.5,d:3.42,h:3.58,m:"50.0 т"},{n:"Case CX130",g:'excavator',w:13.5,l:9.38,d:2.98,h:3.12,m:"13.5 т"},{n:"Case CX210",g:'excavator',w:21.0,l:9.82,d:3.07,h:3.21,m:"21.0 т"},{n:"Case CX250",g:'excavator',w:25.0,l:10.05,d:3.12,h:3.26,m:"25.0 т"},{n:"Case CX300",g:'excavator',w:30.0,l:10.34,d:3.18,h:3.33,m:"30.0 т"},{n:"Case CX370",g:'excavator',w:37.0,l:10.75,d:3.26,h:3.41,m:"37.0 т"},{n:"LiuGong 922",g:'excavator',w:22.0,l:9.88,d:3.08,h:3.23,m:"22.0 т"},{n:"LiuGong 933",g:'excavator',w:33.0,l:10.51,d:3.22,h:3.36,m:"33.0 т"},{n:"LiuGong 950",g:'excavator',w:50.0,l:11.5,d:3.42,h:3.58,m:"50.0 т"},{n:"SDLG E6210",g:'excavator',w:21.0,l:9.82,d:3.07,h:3.21,m:"21.0 т"},{n:"SDLG E6360",g:'excavator',w:36.0,l:10.69,d:3.25,h:3.4,m:"36.0 т"},
@@ -5923,9 +5941,22 @@ function vhCh_display_(){var vt=document.getElementById('clc-vehType').value;var
 // корыто-опции показывает vhCh_display_ внутри onWChange.
 function vhCh(){onWChange();}
 function toggleManual(){document.getElementById('clc-manualKmBox').style.display=document.getElementById('clc-manualKm').checked?'grid':'none';calc();}
+// Влад, 12.09: calc() больше НЕ считает цену сама - шлёт вход на сервер
+// (/api/calculator/quote, тот же эндпоинт, что уже есть у CRM-подсказки, checkSession) и
+// ждёт готовый quote. Единственный источник формулы - api/lib/calculator-calc.js на VPS,
+// не два места сразу: расхождение между этим файлом и первой версией серверного переноса
+// (11.09) уже случалось на практике за одни сутки (truckCount, смена-за-ходку) - см.
+// plans/2026-09-12-crm-inchat-calculator.md, Фаза 1, где это найдено и исправлено.
+// Дебаунс 400мс - поле массы/габаритов шлёт oninput на каждую цифру, бить сервер на
+// каждую нельзя. Сеть недоступна/сервер упал - НЕ тихий откат на клиентский расчёт (тот
+// самый канал, который переезд на сервер должен закрыть, см. план 11.09) - табло
+// показывает ошибку, а не старую или выдуманную цифру. clcQuoteSeq_ - защита от гонки:
+// если за время ожидания пользователь успел поменять ввод ещё раз, устаревший ответ
+// первого запроса просто отбрасывается, а не перезаписывает уже более новый ввод.
+var clcQuoteTimer_=null,clcQuoteSeq_=0;
 function calc(){
     var w=+document.getElementById('clc-weight').value||0,ln=+document.getElementById('clc-len').value||0,wh=+document.getElementById('clc-wid').value||0,h=+document.getElementById('clc-hei').value||0;
-    var neg=document.getElementById('clc-cargoType').value==='negabarit'||w>20,vt=document.getElementById('clc-vehType').value,trips=+document.getElementById('clc-trips').value||1,over=(ln>17||wh>4||h>4.5);
+    var neg=document.getElementById('clc-cargoType').value==='negabarit'||w>20,vt=document.getElementById('clc-vehType').value,trips=+document.getElementById('clc-trips').value||1;
     var manual=document.getElementById('clc-manualKm').checked;
     document.getElementById('clc-escZoneGrp').style.display=(neg&&manual)?'block':'none';
     var a1=manual?(+document.getElementById('clc-mkm1').value||0):d1;
@@ -5938,98 +5969,49 @@ function calc(){
     LK.a1=a1;LK.a2=a2;LK.a3=a3;
     if(!(manual||loadedOk)){
         document.getElementById('clc-totalPrice').textContent='—';
-        renderBoardPending_(w,vt); // табло: вилка по массе/технике или заглушки (кокпит 2.0)
+        renderBoardPending_(w,vt); // табло: вилка по массе/технике или заглушки (кокпит 2.0) - остаётся клиентской прикидкой, не точным расчётом, маршрута ещё нет
         return;
     }
-    var autoZone=null,isMsk=false;
-    if(lc&&uc){
-        var zl=mskZone(lc.lat,lc.lng),zu=mskZone(uc.lat,uc.lng);
-        isMsk=!!(zl&&zu);
-        if(isMsk)autoZone=(zl==='sadovoe'||zu==='sadovoe')?'sadovoe':'mkad';
-    }
-    var distMsk=uc?ptDist(uc.lat,uc.lng,MSK_LAT,MSK_LON):a2;
-    var rate=null;
-    if(vt==='board')rate=P.board;
-    else if(vt==='panel')rate=P.panel;
-    else if(vt==='tral_crane')rate=P.tral_c;
-    else if(vt==='tral'){var tb=tralByMass(w);if(!tb){toast('Для >59 т нужен Faymonville',1);return;}rate={n:'Трал '+w+' т',s:tb.s,km:tb.km,emptyKm:tb.emptyKm};}
-    else if(vt==='korito'){var kb=tralByMass(w);if(!kb){toast('Корыто >59 т — нужен Faymonville',1);return;}var razd=document.getElementById('clc-koritoType').value==='razd';rate={n:'Корыто'+(razd?' раздвижное':''),s:Math.max(kb.s,razd?40000:30000),km:kb.km,emptyKm:kb.emptyKm,korito:true};}
-    else if(vt==='faymon'){var cat=document.getElementById('clc-faymonCat').value,pr=cat==='60-75'?1500:cat==='75-100'?1700:2000;rate={n:'Faymonville '+cat+' т',s:rn(w*pr),km:cat==='60-75'?500:cat==='75-100'?700:1000,emptyKm:200,isF:true};}
-    if(!rate)return;
-    var shift=rate.s,kmRate=rate.km,emptyRate=rate.emptyKm||EMPTY_RATE,mskOnly=isMsk,isFar=distMsk>FAR_R;
-    if(!mskOnly&&isFar&&!rate.isF)shift=FAR_SHIFT;shift=rn(shift);
     var loopCount=Math.max(1,+document.getElementById('clc-loopCount').value||1);
-    // Влад, 10.09: круговые рейсы может делить между собой НЕСКОЛЬКО машин (пример: 3
-    // машины и 6 ходок = 2 ходки на машину в среднем) - раньше формула всегда считала,
-    // будто все N ходок делает одна машина сама. truckCount не может быть больше
-    // loopCount (машин не может быть больше, чем ходок) - тот же зажим, что у loopCount.
     var truckCount=Math.max(1,Math.min(loopCount,+document.getElementById('clc-truckCount').value||1));
-    // ×2 сверхгабарита (Влад, 28.08, вместо прежнего «Кат. 3 - индивидуально»):
-    // применяется к СМЕНЕ и КИЛОМЕТРАЖУ С ГРУЗОМ; порожние пробеги, сопровождение
-    // и прикрытие - БЕЗ ×2. Раздвижение корыта (×1.5) осталось только на смене.
-    var coefOver=1,coef=1,coefs=[];
-    if(vt==='korito'&&document.getElementById('clc-koritoExt').checked){coef*=K_COEF;coefs.push('×1.5 раздвижение');}
-    if(over){coefOver=OV_COEF;coefs.push('×2 негабарит >17/4/4.5 - смена и км с грузом');}
-    // База->погрузка и выгрузка->база - КАЖДАЯ машина едет туда и обратно сама (×truckCount),
-    // это не одна и та же ходка, что и "с грузом" (та считается по loopCount, не по truckCount).
-    // e1Unit/e2Unit - сумма ЗА ОДНУ машину, для легенды "X ₽ × N = Y ₽" (Влад, 10.09).
-    var e1=0,ld=0,e2=0,ldBack=0,e1Unit=0,e2Unit=0;
-    if(!mskOnly){e1Unit=rn(a1*emptyRate);e1=e1Unit*truckCount;ld=rn(a2*kmRate*coefOver);e2Unit=rn(a3*emptyRate);e2=e2Unit*truckCount;ldBack=rn(a2*emptyRate);}
-    // Круговые рейсы: N раз с грузом между точками (не зависит от числа машин - грузов
-    // всё равно N), (N-truckCount) раз порожним обратно между ними - при truckCount=1 это
-    // (N-1), формула не отличается от исходной. Каждая из М машин сама возвращается
-    // порожней между СВОИМИ ходками, но не после последней - отсюда вычитание truckCount,
-    // а не единицы.
-    var ldAll=ld*loopCount,loopBackTotal=ldBack*(loopCount-truckCount);
-    var esc=0,escNote='';
-    if(neg){
-        // категория сопровождения - только по массе (1: до 45 т, 2: до 80 т, 3: от 80 т) -
-        // геометрический сверхгабарит на неё не влияет, он обрабатывается коэффициентом ×2
-        // выше. Кат.3 получила свою тарифную сетку 29.08 (Влад, прайс: 200-500 км - 110,
-        // 501-1000 км - 100, 1001-2000 км - 90 ₽/км) - раньше требовала ручного
-        // согласования с руководителем, теперь считается автоматически как кат.1/2.
-        var zone=manual?document.getElementById('clc-escZone').value:(autoZone||(isFar?'far':'ckad')),ecat=(w<=45?1:w<=80?2:3);
-        if(zone==='sadovoe'){esc=ESC_ZONE.sadovoe;escNote='Садовое';}
-        else if(zone==='mkad'){esc=ESC_ZONE.mkad;escNote='МКАД';}
-        else if(zone==='ckad'){esc=ESC_ZONE.ckad;escNote='МО до ЦКАД';}
-        else{var er=ESC_CAT[ecat][escortBand(a2)];esc=ESC_FAR_BASE+rn(a2*er);escNote='Кат.'+ecat+' · 20 000 + '+a2+' км × '+er+' ₽';}
-        // Влад, 29.08: сопровождение едет с грузом КАЖДУЮ ходку кругового рейса, не одну
-        // на весь заказ - при loopCount=2 машина сопровождения физически выезжает дважды.
-        // Раньше esc был плоским (не зависел от loopCount) - расхождение поймано на живом
-        // расчёте (49 000 ₽ не менялись между ×1 и ×2). Метод - тот же raw-multiply без
-        // повторного rn(), что и у ldAll (round базовую сумму один раз, множить как есть).
-        if(loopCount>1){esc=esc*loopCount;escNote+=' ×'+loopCount;}
-    }
-    // Машина прикрытия (Влад, 28.08, по законодательству о крупногабаритных перевозках):
-    // обязательна при ширине груза > 3,5 м или длине > 19 м (автопоезд длиннее ~24 м).
-    // Стоимость: 21 000 ₽ смена + 60 ₽/км, едет плечо с грузом каждую ходку - ВСЯ формула
-    // (не только км-часть) умножается на loopCount (Влад, 29.08: та же логика, что и у
-    // сопровождения выше - прикрытие тоже выезжает заново на каждый цикл).
-    var escortCar=0,escortNeed=(wh>3.5||ln>19);
-    if(escortNeed)escortCar=rn((21000+60*a2)*loopCount);
-    // Смена - за КАЖДУЮ ходку, не за машину (Влад, 10.09, поправка: "даже если одна
-    // машина делает несколько ходок, каждая ходка - это смена" - множитель loopCount
-    // (N), не truckCount (M). truckCount остаётся только у e1/e2/loopBackTotal ниже -
-    // "доставки и возвраты" считаются по машинам, смена - по ходкам, это разные вещи.
-    // shiftUnit - сумма ЗА ОДНУ ходку (без ×2 негабарита), для легенды "X ₽ × N = Y ₽".
-    // shiftRaw множится тем же loopCount, чтобы разница shiftEff-shiftRaw (добавка ×2
-    // негабарита на смену, для сегмента легенды) считалась верно на любом числе ходок.
-    var shiftUnit=rn(shift*coef);
-    var shiftEff=rn(shift*coef*coefOver)*loopCount, shiftRaw=shiftUnit*loopCount;
-    var sub=shiftEff+e1+ldAll+loopBackTotal+e2+esc+escortCar,total=rn(sub*trips);
-    document.getElementById('clc-totalPrice').textContent=total?total.toLocaleString()+' ₽':'0 ₽';
-    // Кокпит 2.0: вывод - через табло (сплит-флэп + стековая полоса + легенда).
-    // Тарифная методика менялась только по явным ТЗ Влада 28.08 (прикрытие, ×2).
-    Clc._last={
-        total:total, sub:sub, shiftEff:shiftEff, shiftRaw:shiftRaw, shiftUnit:shiftUnit, coefOver:coefOver,
-        e1:e1, e1Unit:e1Unit, ldAll:ldAll, loopBackTotal:loopBackTotal, e2:e2, e2Unit:e2Unit, esc:esc, escNote:escNote,
-        escortCar:escortCar, escortNeed:escortNeed,
-        coef:coef, coefs:coefs, rateName:rate.n||'Трал',
-        a1:a1, a2:a2, a3:a3, loopCount:loopCount, truckCount:truckCount,
-        mskOnly:mskOnly, isFar:isFar, manual:manual, neg:neg, over:over,
-        w:w, vt:vt, wid:wh, len:ln, hei:h
+    var body={
+        weight:w, length:ln, width:wh, height:h,
+        cargoType:document.getElementById('clc-cargoType').value, vehType:vt,
+        faymonCat:document.getElementById('clc-faymonCat').value,
+        koritoType:document.getElementById('clc-koritoType').value,
+        koritoExt:document.getElementById('clc-koritoExt').checked,
+        trips:trips, loopCount:loopCount, truckCount:truckCount,
+        manual:manual, a1:a1, a2:a2, a3:a3,
+        escZone:document.getElementById('clc-escZone').value,
+        loaded:lc, unloaded:uc
     };
-    renderBoard_();
+    var mySeq=++clcQuoteSeq_;
+    clearTimeout(clcQuoteTimer_);
+    clcQuoteTimer_=setTimeout(function(){
+        var url=YARD_API_BASE+'/calculator/quote?session_token='+encodeURIComponent(SESSION_TOKEN);
+        fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+        .then(function(r){return r.json().then(function(d){return {httpOk:r.ok,d:d};});})
+        .then(function(res){
+            if(mySeq!==clcQuoteSeq_)return; // пришёл более новый запрос - этот ответ устарел
+            if(!res.httpOk||!res.d.ok){
+                document.getElementById('clc-totalPrice').textContent='ошибка';
+                toast(res.d&&res.d.error?res.d.error:'Не удалось посчитать - попробуйте ещё раз',1);
+                return;
+            }
+            var q=res.d.quote;
+            document.getElementById('clc-totalPrice').textContent=q.total?q.total.toLocaleString()+' ₽':'0 ₽';
+            // Кокпит 2.0: вывод - через табло (сплит-флэп + стековая полоса + легенда).
+            // Формат объекта - 1-в-1 то, что раньше собирала сама calc() - renderBoard_()
+            // не тронут вообще.
+            Clc._last=q;
+            renderBoard_();
+        })
+        .catch(function(){
+            if(mySeq!==clcQuoteSeq_)return;
+            document.getElementById('clc-totalPrice').textContent='нет сети';
+            toast('Нет соединения с сервером - расчёт недоступен',1);
+        });
+    },400);
 }
 // Сохраняет локально (мгновенно, как раньше) И отправляет на сервер (Влад, 2026-08-17: "должен
 // сохранять на сервер расчёты сделанные менеджером и расчёты именно менеджера кто сделал
@@ -6930,6 +6912,11 @@ window.Clc = {
   toggleBase:toggleBase, loopStep:loopStep, truckStep:truckStep, togglePick:togglePick,
   openHist:openHist, closeHist:closeHist, copyPhrase:copyPhrase,
   autoChipClick:autoChipClick, vhChManual:vhChManual, applyHist:applyHist,
+  // addrParts - разбор ответа DaData на "главное/подробности" (Влад, 12.09: то же
+  // подключение, что в форме "Задание" - переиспользуем ОДИН разбор, а не пишем второй
+  // (order-plan-v2.js держит свою копию, т.к. это отдельный файл; здесь, в том же
+  // index.html, у CRM-модуля есть доступ к этому же Clc - копия не нужна).
+  addrParts:dadataAddrParts_,
   _last:null
 };
 
@@ -22792,6 +22779,12 @@ var CRM = (function () {
     document.addEventListener('click', function (e) {
       if (!e.target.closest('.crm-menu')) closeMenu();
       if (!e.target.closest('.cx-pop') && !e.target.closest('[data-pop-anchor]')) closePops();
+      // Живой поиск адреса (addrSuggest) - клик мимо поля И мимо списка закрывает список
+      // (тот же класс бага, что уже чинили в Калькуляторе 11.09 - "визуальный баг").
+      document.querySelectorAll('.clc-ac-list.show').forEach(function (lst) {
+        var inp = lst.previousElementSibling;
+        if (inp && e.target !== inp && !lst.contains(e.target)) lst.classList.remove('show');
+      });
     });
     window.addEventListener('keydown', function (e) {
       if (!page.classList.contains('active')) return;
@@ -23449,12 +23442,83 @@ var CRM = (function () {
     var oneCTag = '<span class="dr-auto" title="Подставлено из 1С по номеру заказа - проверьте">1С</span>';
     return '<div class="dr-grid2">' +
       '<div class="dr-field" style="grid-column:1/-1"><label>Груз' + autoTag + '</label><input class="dr-input" id="' + prefix + '-cargo" autocomplete="off" value="' + esc(d.cargo_type || '') + '" placeholder="экскаватор, трубы, контейнер…"' + onBlur + '></div>' +
-      '<div class="dr-field"><label>Откуда' + (from1c && from1c.from ? oneCTag : '') + '</label><input class="dr-input" id="' + prefix + '-from" autocomplete="off" value="' + esc(d.route_from || '') + '"' + onBlur + '></div>' +
-      '<div class="dr-field"><label>Куда' + (from1c && from1c.to ? oneCTag : '') + '</label><input class="dr-input" id="' + prefix + '-to" autocomplete="off" value="' + esc(d.route_to || '') + '"' + onBlur + '></div>' +
+      '<div class="dr-field"><label>Откуда' + (from1c && from1c.from ? oneCTag : '') + '</label><div class="clc-ac-wrap"><input class="dr-input" id="' + prefix + '-from" autocomplete="off" value="' + esc(d.route_from || '') + '" oninput="CRM.addrSuggest(\'' + prefix + '\',\'from\',' + d.id + ')"' + onBlur + '><div class="clc-ac-list" id="' + prefix + '-fromAc"></div></div></div>' +
+      '<div class="dr-field"><label>Куда' + (from1c && from1c.to ? oneCTag : '') + '</label><div class="clc-ac-wrap"><input class="dr-input" id="' + prefix + '-to" autocomplete="off" value="' + esc(d.route_to || '') + '" oninput="CRM.addrSuggest(\'' + prefix + '\',\'to\',' + d.id + ')"' + onBlur + '><div class="clc-ac-list" id="' + prefix + '-toAc"></div></div></div>' +
       '<div class="dr-field"><label>Вес, т</label><input class="dr-input mono" id="' + prefix + '-weight" type="number" step="0.1" min="0" autocomplete="off" value="' + esc(d.cargo_weight_tons != null ? d.cargo_weight_tons : '') + '"' + onBlur + '></div>' +
       '<div class="dr-field"><label>Дата подачи</label><input class="dr-input mono" id="' + prefix + '-date" type="date" autocomplete="off" value="' + dateInput(d.wanted_date) + '"' + onChange + '></div>' +
       '<div class="dr-field" style="grid-column:1/-1"><label>Техника</label><select class="dr-select" id="' + prefix + '-veh"' + onChange + '>' +
-        ['', 'трал', 'длинномер'].map(function (v) { return '<option value="' + v + '"' + ((d.vehicle_hint || '') === v ? ' selected' : '') + '>' + (v || '—') + '</option>'; }).join('') + '</select></div></div>';
+        VEH_OPTS_.map(function (o) { return '<option value="' + o.v + '"' + (vehHintNorm_(d.vehicle_hint) === o.v ? ' selected' : '') + '>' + o.l + '</option>'; }).join('') + '</select></div></div>' +
+      calcBlockHtml_(prefix, d.id);
+  }
+  // Влад, 11.09 -> 12.09: список расширен с ['', 'трал', 'длинномер'] до полной техники
+  // калькулятора (иначе кнопке "Посчитать стоимость" ниже не от чего считать для
+  // остальных видов) - value теперь совпадает с vehType в api/lib/calculator-calc.js.
+  // Старые сделки хранят vehicle_hint строчными русскими словами ('трал'/'длинномер') -
+  // vehHintNorm_ переводит их в новую схему, чтобы уже сделанный выбор не сбрасывался.
+  var VEH_OPTS_ = [
+    { v: '', l: '—' }, { v: 'tral', l: 'Трал' }, { v: 'board', l: 'Длинномер' },
+    { v: 'panel', l: 'Панелевоз' }, { v: 'tral_crane', l: 'Трал под кран' },
+    { v: 'korito', l: 'Трал-корыто' }, { v: 'faymon', l: 'Faymonville' },
+  ];
+  function vehHintNorm_(v) { return { 'трал': 'tral', 'длинномер': 'board' }[v] || v || ''; }
+  // Живой поиск адреса в полях Откуда/Куда заявки (Влад, 12.09: "здесь он должен быть
+  // подключен", как в Калькуляторе и в форме «Задание») - тот же /api/geocoder/suggest,
+  // тот же визуальный паттерн .clc-ac-list/.clc-ac-item, что у калькулятора (CSS уже
+  // общий, ничего нового не заводим), разбор ответа - Clc.addrParts (см. window.Clc =
+  // {...} выше), не вторая копия dadataAddrParts_.
+  var addrSuggestT_ = {};
+  function addrSuggest(prefix, side, dealId) {
+    var key = prefix + side;
+    var inp = el(prefix + '-' + side), lst = el(prefix + '-' + side + 'Ac');
+    if (!inp || !lst) return;
+    clearTimeout(addrSuggestT_[key]);
+    if (inp.value.trim().length < 3) { lst.classList.remove('show'); return; }
+    addrSuggestT_[key] = setTimeout(function () {
+      api('/geocoder/suggest', { q: inp.value.trim() }).then(function (r) {
+        var sug = (r.ok && r.data && r.data.suggestions) || [];
+        lst.innerHTML = '';
+        var seen = {};
+        sug.forEach(function (f) {
+          if (f.lat == null || f.lon == null) return;
+          var parts = (window.Clc && Clc.addrParts) ? Clc.addrParts(f) : [f.value];
+          if (!parts[0]) return;
+          var main = parts[0], sub = parts.slice(1, 3).join(', ');
+          var itemKey = main + '|' + sub;
+          if (seen[itemKey]) return;
+          seen[itemKey] = true;
+          var item = document.createElement('div');
+          item.className = 'clc-ac-item';
+          item.innerHTML = esc(main) + ' <span class="clc-ac-sub">' + esc(sub) + '</span>';
+          item.onmousedown = function (e) { e.preventDefault(); }; // не терять фокус до клика (как в clc-techList)
+          item.onclick = function () {
+            inp.value = main;
+            lst.classList.remove('show');
+            (prefix === 'cx' ? saveCtxBrief : saveBrief)(dealId);
+          };
+          lst.appendChild(item);
+        });
+        if (!lst.children.length) { lst.classList.remove('show'); return; }
+        lst.classList.add('show');
+      }).catch(function () {});
+    }, 400);
+  }
+  // Кнопка "Посчитать стоимость" (превью "Расчёт в чате CRM", утверждено 12.09) - НЕ
+  // дублирует поля выше (Груз/Откуда/Куда/Вес/Техника уже в этой же форме), спрашивает
+  // только габариты (их в заявке никогда не было) и зовёт ТОТ ЖЕ /api/calculator/quote,
+  // что и сама вкладка "Калькулятор" - единственный источник формулы, не вторая копия
+  // (явное условие Влада, план 2026-09-12-crm-inchat-calculator.md).
+  function calcBlockHtml_(prefix, dealId) {
+    return '<button class="dr-calc-cta" id="' + prefix + '-calcBtn" onclick="CRM.calcOpenForm(\'' + prefix + '\',' + dealId + ')">' + ico('card') + 'Посчитать стоимость</button>' +
+      '<div class="dr-calc-dims" id="' + prefix + '-calcDims">' +
+      '<div class="hint">Из заявки уже взято: маршрут, вес, техника. Не хватает только габаритов.</div>' +
+      '<div class="dr-calc-row3">' +
+      '<div class="dr-field"><label>Длина, м</label><input class="dr-input mono" id="' + prefix + '-calcLen" type="number" step="0.5" min="0.5" value="6"></div>' +
+      '<div class="dr-field"><label>Ширина, м</label><input class="dr-input mono" id="' + prefix + '-calcWid" type="number" step="0.1" min="0.5" value="2.5"></div>' +
+      '<div class="dr-field"><label>Высота, м</label><input class="dr-input mono" id="' + prefix + '-calcHei" type="number" step="0.1" min="0.5" value="3"></div>' +
+      '</div>' +
+      '<button class="dr-calc-cta" id="' + prefix + '-calcRunBtn" onclick="CRM.calcRun(\'' + prefix + '\',' + dealId + ')">Рассчитать</button>' +
+      '</div>' +
+      '<div class="dr-calc-result" id="' + prefix + '-calcResult"></div>';
   }
   function readBrief(prefix) {
     function v(id) { var n = el(prefix + id); return n ? n.value : ''; }
@@ -23468,6 +23532,85 @@ var CRM = (function () {
       var d = dealById(dealId); if (d) { Object.keys(fields).forEach(function (k) { if (k !== 'id' && k in d) d[k] = fields[k]; }); if ('cargo_type' in fields) d.brief_source = 'manual'; }
       if (onDone) onDone();
     }).catch(function () { toast('Нет соединения - изменения не сохранены', 'red'); });
+  }
+
+  // ── Расчёт стоимости в заявке (Влад, 12.09, план 2026-09-12-crm-inchat-calculator.md) ──
+  // Геокодинг (DaData через свой /api/geocoder/suggest, ключ на сервере - тот же путь,
+  // что уже использует калькулятор) + маршрутизация (OSRM, тот же публичный сервис без
+  // ключей, что и в калькуляторе - дублировать здесь безопасно, это не тарифная формула,
+  // а просто запрос расстояния) + сама цена (/api/calculator/quote - НЕ дублируем, зовём
+  // тот же эндпоинт, что и вкладка "Калькулятор").
+  var CALC_BASE_ = { lat: 55.467403, lng: 37.778261 }; // Домодедово, Промышленная 37 - та же база, что в калькуляторе
+  var CALC_RESULTS_ = {}; // dealId -> {q, fromAddr, toAddr, vehType} - для "Вставить в сообщение"
+  function calcOpenForm(prefix, dealId) {
+    var btn = el(prefix + '-calcBtn'); if (btn) btn.style.display = 'none';
+    var pf = el(prefix + '-calcDims'); if (pf) pf.classList.add('show');
+  }
+  function calcGeocodeOne_(query) {
+    return api('/geocoder/suggest', { q: query }).then(function (r) {
+      var s = (r.ok && r.data && r.data.suggestions) || [];
+      return (s[0] && s[0].lat != null && s[0].lon != null) ? { lat: s[0].lat, lng: s[0].lon } : null;
+    }).catch(function () { return null; });
+  }
+  function calcOsrmKm_(a, b) {
+    var url = 'https://router.project-osrm.org/route/v1/driving/' + a.lng + ',' + a.lat + ';' + b.lng + ',' + b.lat + '?overview=false';
+    return fetch(url).then(function (r) { return r.json(); }).then(function (d) {
+      return (d && d.code === 'Ok' && d.routes && d.routes[0]) ? Math.round(d.routes[0].distance / 1000) : null;
+    }).catch(function () { return null; });
+  }
+  function calcRun(prefix, dealId) {
+    var fromAddr = (el(prefix + '-from') || {}).value || '', toAddr = (el(prefix + '-to') || {}).value || '';
+    var weight = +((el(prefix + '-weight') || {}).value) || 0;
+    var vehType = (el(prefix + '-veh') || {}).value || '';
+    var len = +((el(prefix + '-calcLen') || {}).value) || 0, wid = +((el(prefix + '-calcWid') || {}).value) || 0, hei = +((el(prefix + '-calcHei') || {}).value) || 0;
+    if (!fromAddr || !toAddr) { toast('В заявке не заполнены «Откуда»/«Куда»', 'red'); return; }
+    if (!weight) { toast('В заявке не заполнен вес', 'red'); return; }
+    if (!vehType) { toast('В заявке не выбрана техника', 'red'); return; }
+    if (!len || !wid || !hei) { toast('Заполните габариты', 'red'); return; }
+    var btn = el(prefix + '-calcRunBtn'); if (btn) { btn.disabled = true; btn.textContent = 'Считаю…'; }
+    function fail(msg) { toast(msg, 'red'); if (btn) { btn.disabled = false; btn.textContent = 'Рассчитать'; } }
+    Promise.all([calcGeocodeOne_(fromAddr), calcGeocodeOne_(toAddr)]).then(function (pts) {
+      var loaded = pts[0], unloaded = pts[1];
+      if (!loaded || !unloaded) { fail('Не удалось найти один из адресов на карте - уточните «Откуда»/«Куда» в заявке'); return; }
+      return Promise.all([calcOsrmKm_(CALC_BASE_, loaded), calcOsrmKm_(loaded, unloaded), calcOsrmKm_(unloaded, CALC_BASE_)]).then(function (kms) {
+        if (kms[0] == null || kms[1] == null || kms[2] == null) { fail('Не удалось построить маршрут'); return; }
+        var body = {
+          weight: weight, length: len, width: wid, height: hei, vehType: vehType,
+          cargoType: weight > 20 ? 'negabarit' : '', trips: 1, loopCount: 1, truckCount: 1,
+          manual: false, a1: kms[0], a2: kms[1], a3: kms[2], loaded: loaded, unloaded: unloaded,
+        };
+        return fetch(YARD_API_BASE + '/calculator/quote', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Session-Token': SESSION_TOKEN }, body: JSON.stringify(body),
+        }).then(function (r) { return r.json().then(function (rd) { return { httpOk: r.ok, rd: rd }; }); }).then(function (res) {
+          if (btn) { btn.disabled = false; btn.textContent = 'Рассчитать'; }
+          if (!res.httpOk || !res.rd.ok) { toast((res.rd && res.rd.error) || 'Не удалось посчитать', 'red'); return; }
+          calcRenderResult_(prefix, dealId, res.rd.quote, fromAddr, toAddr, vehType);
+        });
+      });
+    }).catch(function () { fail('Нет соединения с сервером'); });
+  }
+  function calcRenderResult_(prefix, dealId, q, fromAddr, toAddr, vehType) {
+    CALC_RESULTS_[dealId] = { q: q, fromAddr: fromAddr, toAddr: toAddr, vehType: vehType };
+    var pf = el(prefix + '-calcDims'); if (pf) pf.classList.remove('show');
+    var box = el(prefix + '-calcResult'); if (!box) return;
+    var rows = [['Смена (' + q.rateName + ')', q.shiftEff], ['Погрузка → выгрузка', q.ldAll], ['База → погрузка', q.e1], ['Выгрузка → база', q.e2]];
+    if (q.esc) rows.push(['Сопровождение', q.esc]);
+    if (q.escortCar) rows.push(['Машина прикрытия', q.escortCar]);
+    box.innerHTML = '<div class="dr-calc-total"><span>Итого с НДС</span><b>' + money(q.total) + '</b></div>' +
+      '<div class="dr-calc-route">База → погрузка <b>' + q.a1 + ' км</b> · с грузом <b>' + q.a2 + ' км</b> · выгрузка → база <b>' + q.a3 + ' км</b></div>' +
+      '<div class="dr-calc-legend">' + rows.map(function (r) { return '<div class="dr-calc-leg-row"><span>' + esc(r[0]) + '</span><span class="num">' + money(r[1]) + '</span></div>'; }).join('') + '</div>' +
+      '<button class="dr-calc-cta" style="background:var(--green);color:#0f0f13" onclick="CRM.calcInsert(' + dealId + ')">' + ico('check') + 'Вставить в сообщение</button>';
+    box.classList.add('show');
+  }
+  function calcInsert(dealId) {
+    var r = CALC_RESULTS_[dealId]; if (!r) return;
+    var input = el('cx-input');
+    if (!input) { toast('Откройте диалог с клиентом, чтобы вставить фразу в чат', 'amber'); return; }
+    var vehLabel = (VEH_OPTS_.filter(function (o) { return o.v === r.vehType; })[0] || {}).l || r.vehType;
+    input.value = 'Перевозка: ' + r.fromAddr.split(',')[0] + ' - ' + r.toAddr.split(',')[0] + ', ' + vehLabel + ': ' + money(r.q.total) + ' с НДС';
+    input.dispatchEvent(new Event('input', { bubbles: true })); // CRM.onInput() пересчитает автовысоту/кнопку отправки, как при ручном вводе
+    input.focus();
+    toast('Фраза вставлена в поле сообщения', 'green');
   }
 
   // «Создать задание» (11.09): собрать поля сделки (с той же 1С-подстановкой, что в карточке) и
@@ -24291,6 +24434,7 @@ var CRM = (function () {
     openThread: openThread, closeThreadMobile: closeThreadMobile, toggleRespPop: toggleRespPop, loadOlder: loadOlder, onThreadScroll: onThreadScroll, openLightbox: openLightbox, closeLightbox: closeLightbox,
     onInput: onInput, onInputKey: onInputKey, toggleTemplates: toggleTemplates, useTemplate: useTemplate, saveTemplate: saveTemplate, deleteTemplate: deleteTemplate, send: send, retry: retry,
     saveCtxBrief: saveCtxBrief, createDealFor: createDealFor, openChatFor: openChatFor, reloadChats: reloadChats, enablePush: enablePush,
+    calcOpenForm: calcOpenForm, calcRun: calcRun, calcInsert: calcInsert, addrSuggest: addrSuggest,
     playRecording: playRecording, seekStart: seekStart,
     transcribeCall: transcribeCall, summarizeCall: summarizeCall,
     setAnalyticsPeriod: setAnalyticsPeriod,

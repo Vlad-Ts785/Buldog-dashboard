@@ -33,6 +33,32 @@ function esc(s) {
 }
 function num(v) { var n = parseFloat(String(v == null ? '' : v).replace(/\s/g, '').replace(',', '.')); return isFinite(n) ? n : 0; }
 function fmtP(n) { n = num(n); return n ? n.toLocaleString('ru-RU').replace(/ /g, ' ') + ' ₽' : ''; }
+/* Денежное поле ввода - ГОСТ раздел 3 (Влад 12.09: «должно быть красиво с
+   разделениями... невозможно внести белиберду со скобками - только цифры»).
+   Живая маска: только цифры, разделение по тысячам пробелом на каждый ввод,
+   курсор остаётся на том же месте среди цифр (не улетает в конец поля).
+   num() уже умеет читать значение с пробелами (.replace(/\s/g,'')) - отдельно
+   очищать перед сохранением/расчётом не нужно, само поле хранит «красивую»
+   строку. Применять к КАЖДОМУ полю суммы по умолчанию - см. DESIGN_SYSTEM.md
+   раздел 3, «Денежное поле ввода» для полного списка/оговорок. */
+function wireMoneyInput_(id) {
+  var el = $('#' + id);
+  if (!el) return;
+  el.addEventListener('input', function () {
+    var start = this.selectionStart;
+    var digitsBefore = this.value.slice(0, start).replace(/\D/g, '').length;
+    var digits = this.value.replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+    var formatted = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    this.value = formatted;
+    var count = 0, pos = formatted.length;
+    for (var i = 0; i < formatted.length; i++) {
+      if (formatted[i] !== ' ') count++;
+      if (count === digitsBefore) { pos = i + 1; break; }
+    }
+    if (digitsBefore === 0) pos = 0;
+    try { this.setSelectionRange(pos, pos); } catch (e) {}
+  });
+}
 function fmtPhone(p) {
   var d = String(p || '').replace(/\D/g, '');
   if (d.length === 11) d = d.slice(1);
@@ -596,6 +622,11 @@ function onDocMouseDown(e) {
   var pop = $('#op2-pop');
   if (pop && pop.classList.contains('op2-open') && !e.target.closest('#op2-pop') && !e.target.closest('.op2-slot,.op2-veh')) closePop();
   if ($('#op2-row-menu') && !e.target.closest('#op2-row-menu')) closeRowMenu();
+  /* «Под данные» - попап подсказки (перенос редизайна 12.09) */
+  if ($('.op2-info-dot.op2-open') && !e.target.closest('.op2-info-dot') && !e.target.closest('.op2-info-pop')) {
+    $$('.op2-info-pop').forEach(function (p) { p.remove(); });
+    $$('.op2-info-dot').forEach(function (d) { d.classList.remove('op2-open'); });
+  }
 }
 function isPageActive() {
   var p = document.getElementById(ROOT_ID);
@@ -1397,6 +1428,7 @@ function openHiredStep(o) {
     el.className = 'op2-v ' + (m >= 0 ? 'op2-pos' : 'op2-neg');
   }
   $('#op2-h-rate').addEventListener('input', recalc);
+  wireMoneyInput_('op2-h-rate');
   $('#op2-h-co').addEventListener('input', function () { $('#op2-pop-ok').textContent = 'Отдать наёмнику' + (this.value.trim() ? ' · ' + this.value.trim() : ''); });
   $('#op2-h-cs').addEventListener('click', function (e) {
     var c = e.target.closest('.op2-chip'); if (!c) return;
@@ -1861,12 +1893,53 @@ function expandEntRow(seg) {
   S.unfold(rest.length);
 }
 
+/* «Кто заказывает» (только логист) - та же гармошка, что «От кого» выше (Влад
+   12.09: «по тем же принципам, как у нас и другие построенные гармошки»).
+   «Внешний заказчик» - не отдельный контрол, а ПЕРВЫЙ пункт того же единого
+   списка, что и юрлица (id пустая строка), поэтому вся ent-логика (свернуть/
+   развернуть/подсветить активный) работает без изменений что для юрлица, что
+   для «внешнего». */
+function whoOptions_() {
+  return [{ id: '', name: '', label: 'Внешний заказчик' }].concat(internalCustomers().map(function (x) {
+    return { id: String(x.id), name: x.name, label: x.short || x.name, full_name: x.full_name };
+  }));
+}
+function whoChipHtml(x, on) {
+  return '<button class="op2-chip' + (on ? ' op2-on' : '') + '" data-who="' + esc(x.id) + '" data-name="' + esc(x.name) + '"' + (x.full_name ? ' title="' + esc(x.full_name) + '"' : '') + '>' + esc(x.label) + '</button>';
+}
+function whoRowHtml(curWho) {
+  var opts = whoOptions_();
+  var primary = opts.filter(function (x) { return x.label === 'ТП'; })[0] || opts[0];
+  var cur = opts.filter(function (x) { return x.id === String(curWho || ''); })[0] || primary;
+  var restN = Math.max(0, opts.length - 1);
+  return whoChipHtml(cur, true) +
+    (restN ? '<button class="op2-chip" data-who-more>Ещё <span class="op2-mono" style="color:var(--tint-amber)">' + restN + '</span></button>' : '');
+}
+function collapseWhoRow(seg, curWho) { seg.dataset.cur = curWho == null ? '' : curWho; seg.innerHTML = whoRowHtml(curWho); }
+function expandWhoRow(seg) {
+  var more = seg.querySelector('[data-who-more]'); if (!more) return;
+  var curBtn = seg.querySelector('.op2-chip.op2-on');
+  var curId = curBtn ? curBtn.dataset.who : '';
+  var oldRect = more.getBoundingClientRect();
+  var rest = whoOptions_().filter(function (x) { return x.id !== curId; });
+  more.outerHTML = '<button class="op2-chip op2-ent-close" data-who-close>×</button>';
+  seg.insertAdjacentHTML('beforeend', rest.map(function (x) { return whoChipHtml(x, false).replace('class="op2-chip', 'class="op2-chip op2-ent-enter'); }).join(''));
+  var closeBtn2 = seg.querySelector('.op2-ent-close');
+  var newRect2 = closeBtn2.getBoundingClientRect();
+  closeBtn2.style.transform = 'translate(' + (oldRect.left - newRect2.left) + 'px,' + (oldRect.top - newRect2.top) + 'px)';
+  requestAnimationFrame(function () { closeBtn2.style.transform = 'none'; });
+  $$('.op2-ent-enter', seg).forEach(function (c, i) { c.style.animationDelay = (i * 35) + 'ms'; });
+  S.unfold(rest.length);
+}
+
 /* «Тип техники» - тот же приём, перенесён по превью 11.09 (Влад: «давай внедряй»).
    Отличие от «От кого»: тут ВСЕГДА видны оба основных типа (Трал, Длинномер) - это не
    "текущий выбор", а быстрый доступ к двум самым частым; выбор виден третьим - .op2-on
    на одном из чипов (основном или раскрытом). При выборе из «Ещё» ряд сворачивается
-   обратно (сам выбор не помещается среди двух постоянных мест) - вместо чипа его
-   показывает текст-подсказка #op2-f-eq-hint, как раньше показывал <select>.
+   обратно (сам выбор не помещается среди двух постоянных мест) - сам чип уходит в
+   начало ряда подсвеченным (см. eqRowHtml ниже); отдельный текст-подсказка убран
+   12.09 при переносе редизайна (Влад 11.09: «оставь подсказку только по данные») -
+   чипа достаточно, дублировать текстом незачем.
    seg.dataset.cur хранит текущее значение НЕЗАВИСИМО от того, виден ли его чип прямо
    сейчас - «×» без выбора обязан вернуть то, что было, а не потерять его.
    Устаревший тип (в заявке уже стоит, но в справочнике деактивирован - напр. старые
@@ -1927,17 +2000,27 @@ function renderForm() {
   var gabs = dict('gabarit').map(function (g) { return (g && g.value) || g; }); /* словарь отдаёт {value, primary} */
   var curGab = o ? (o.gabarit || '') : (gabs[0] || '');
   var curEnt = o && o.executor_entity_id ? String(o.executor_entity_id) : (entities()[0] ? String(entities()[0].id) : '');
+  /* «Кто заказывает» (только логист) - Влад 12.09: «технопарк - основной внутренний
+     заказчик, пусть будет по умолчанию, все остальные по нажатию гармошки». Дефолт
+     ТОЛЬКО для НОВОЙ заявки (o нет вовсе) - у существующей заявки (правка/повтор/
+     из CRM) всегда показываем то, что реально сохранено, включая явно внешнего
+     заказчика (o.internal ложный при o != null) - не переинтерпретируем задним числом. */
+  var whoPrimary0 = internalCustomers().filter(function (x) { return x.short === 'ТП'; })[0];
+  var curWho = o ? (o.internal ? String(o.customer_entity_id) : '') : (whoPrimary0 ? String(whoPrimary0.id) : '');
 
   function optList(list, cur) {
     return list.map(function (x) { var val = (x && x.value != null) ? x.value : x; return '<option value="' + esc(val) + '"' + (String(cur) === String(val) ? ' selected' : '') + '>' + esc(val) + '</option>'; }).join('');
   }
 
+  var hasContact = !!(o && (o.customer_contact_name || o.customer_contact_phone));
   $('#op2-d-body').innerHTML =
+    '<div class="op2-cols"><div class="op2-main">' +
     '<div class="op2-sect"><div class="op2-t">Когда и для кого</div><div class="op2-grid2">' +
       '<div class="op2-fld"><label>Дата подачи</label><div class="op2-seg" id="op2-f-datebox">' +
         '<button class="op2-chip' + (defDate === todayStr() ? ' op2-on' : '') + '" data-d="' + esc(todayStr()) + '">Сегодня ' + esc(dm(todayStr())) + '</button>' +
         '<button class="op2-chip' + (defDate === addDays(todayStr(), 1) ? ' op2-on' : '') + '" data-d="' + esc(addDays(todayStr(), 1)) + '">Завтра ' + esc(dm(addDays(todayStr(), 1))) + '</button>' +
-        '<input type="date" class="op2-dt" id="op2-f-date" value="' + esc(defDate) + '" autocomplete="off" style="margin-left:4px">' +
+        '<span class="op2-datewrap"><button type="button" class="op2-calbtn" id="op2-f-calbtn" title="Выбрать другую дату"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></button>' +
+        '<input type="date" class="op2-dt op2-dt-hidden" id="op2-f-date" value="' + esc(defDate) + '" autocomplete="off" tabindex="-1"></span>' +
       '</div></div>' +
 
       '<div class="op2-fld"><label>Время подачи</label><div class="op2-timerow">' +
@@ -1948,39 +2031,29 @@ function renderForm() {
 
       '<div class="op2-fld op2-full"><label>Тип техники</label><div class="op2-seg" id="op2-f-eq" data-cur="' + esc(curEq) + '">' +
         eqRowHtml(curEq) +
-      '</div><span class="op2-hint" id="op2-f-eq-hint">' + (curEq && !eqPrimary0.some(function (x) { return x.value === curEq; }) ? 'Выбрано: ' + esc(curEq) : 'Основные - чипами, остальная техника в «Ещё»') + '</span></div>' +
+      '</div></div>' +
 
       '<div class="op2-fld op2-full"><label>От кого (исполнитель с нашей стороны)</label><div class="op2-seg" id="op2-f-ent">' +
         entRowHtml(curEnt) +
-      '</div><span class="op2-hint">Реквизиты, печать и подпись этого юрлица уйдут в договор-заявку. С точкой - в справочнике нет банка или печати</span></div>' +
+      '</div></div>' +
 
-      (isLog ? '<div class="op2-fld op2-full"><label>Кто заказывает</label><div class="op2-seg" id="op2-f-who" style="flex-wrap:wrap">' +
-        '<button class="op2-chip' + (!(o && o.internal) ? ' op2-on' : '') + '" data-who="" data-name="">Внешний заказчик</button>' +
-        internalCustomers().map(function (e2) { return '<button class="op2-chip' + (o && o.internal && String(o.customer_entity_id) === String(e2.id) ? ' op2-on' : '') + '" data-who="' + esc(e2.id) + '" data-name="' + esc(e2.name) + '" title="' + esc(e2.full_name || e2.name) + '">' + esc(e2.short || e2.name) + '</button>'; }).join('') +
+      (isLog ? '<div class="op2-fld op2-full"><label>Кто заказывает</label><div class="op2-seg" id="op2-f-who" data-cur="' + esc(curWho) + '">' +
+        whoRowHtml(curWho) +
         '</div><span class="op2-hint">Внутренние заказы - с суммой, как обычные; менеджерам не показываются. Список - из Справочника юрлиц</span></div>' : '') +
 
       '<div class="op2-fld op2-sugg" id="op2-f-custbox"><label>Заказчик</label>' +
         '<input id="op2-f-cust" placeholder="Начни вводить - по первым буквам" autocomplete="off" value="' + esc(o ? o.customer : '') + '">' +
         '<div class="op2-list" id="op2-f-custlist"></div></div>' +
 
-      '<div class="op2-fld op2-full"><label>Контакт заказчика</label>' +
+      '<div class="op2-fld op2-contact-fld' + (hasContact ? '' : ' op2-collapsed') + '" id="op2-f-custcontact-fld">' +
+        '<label class="op2-contact-ph">.</label>' +
+        '<button type="button" class="op2-add-contact" id="op2-f-custcontact-add"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Контакт заказчика</button>' +
+        '<label class="op2-contact-lbl">Контакт заказчика</label>' +
         '<input id="op2-f-custcontact" placeholder="Имя · телефон" autocomplete="off" value="' + esc(o ? [o.customer_contact_name, o.customer_contact_phone].filter(Boolean).join(' · ') : '') + '">' +
         '<span class="op2-hint" id="op2-f-custcontact-hint">Подсказки - контакты этого заказчика по прошлым заявкам</span></div>' +
 
-      '<div class="op2-fld op2-full"><label><input type="checkbox" class="op2-cb" id="op2-f-nd-cb"' + (o && o.needs_data ? ' checked' : '') + '>Под данные</label>' +
-        '<span class="op2-hint">Заказчику нужны данные водителя заранее (пропускной режим). После планирования машину и водителя не меняют без согласования - логист заявит основную и резервную, данные обоих уйдут заказчику.</span></div>' +
-    '</div></div>' +
-
-    '<div class="op2-sect"><div class="op2-t">Что везём</div><div class="op2-grid2">' +
-      '<div class="op2-fld op2-sugg" id="op2-f-cargobox"><label>Груз</label><input id="op2-f-cargo" placeholder="начни вводить: jcb 3, bg 40, морск, быт…" autocomplete="off" value="' + esc(o ? o.cargo : '') + '">' +
-        '<div class="op2-list" id="op2-f-cargolist"></div><span class="op2-hint" id="op2-f-cargo-hint">Подсказки - справочник техники и что уже возили; вес и Д×Ш×В подставятся сами</span></div>' +
-      '<div class="op2-fld"><label>Вес, т</label><input id="op2-f-weight" class="op2-mono" inputmode="decimal" placeholder="8" autocomplete="off" value="' + esc(o ? (o.cargo_weight_t || '') : '') + '"></div>' +
-      '<div class="op2-fld"><label>Габариты груза</label><input id="op2-f-dims" placeholder="Д × Ш × В" autocomplete="off" value="' + esc(o ? (o.cargo_dims || '') : '') + '"></div>' +
-      '<div class="op2-fld"><label>Габарит</label><div class="op2-seg" id="op2-f-gab">' +
-        gabs.map(function (g) { return '<button class="op2-chip' + (g === curGab ? ' op2-on' : '') + '" data-gab="' + esc(g) + '">' + esc(g) + '</button>'; }).join('') +
-      '</div></div>' +
-      '<div class="op2-fld"><label>Документы</label><select id="op2-f-docs"><option value="">—</option>' + optList(dict('documents'), o ? o.documents : '') + '</select></div>' +
-      '<div class="op2-fld"><label>Условия переработки</label><select id="op2-f-rework"><option value="">—</option>' + optList(dict('rework'), o ? o.rework_terms : '') + '</select></div>' +
+      '<div class="op2-fld op2-full op2-nd-fld"><label><input type="checkbox" class="op2-cb" id="op2-f-nd-cb"' + (o && o.needs_data ? ' checked' : '') + '>Под данные</label>' +
+        '<button type="button" class="op2-info-dot" id="op2-f-nd-info" title="Что это">i</button></div>' +
     '</div></div>' +
 
     '<div class="op2-sect"><div class="op2-t">Откуда - куда</div><div class="op2-grid2">' +
@@ -1995,12 +2068,30 @@ function renderForm() {
         '<div class="op2-list" id="op2-f-tolist"></div>' +
         '<span class="op2-hint op2-warn" id="op2-f-tohint"></span></div>' +
     '</div></div>' +
+    '</div>' +
 
-    '<div class="op2-sect"><div class="op2-t">Деньги</div><div class="op2-grid2">' +
+    '<div class="op2-side"><div class="op2-card">' +
+    '<div class="op2-sect"><div class="op2-t">Что везём</div></div>' +
+      '<div class="op2-fld op2-sugg" id="op2-f-cargobox"><label>Груз</label><input id="op2-f-cargo" placeholder="начни вводить: jcb 3, bg 40, морск, быт…" autocomplete="off" value="' + esc(o ? o.cargo : '') + '">' +
+        '<div class="op2-list" id="op2-f-cargolist"></div><span class="op2-hint" id="op2-f-cargo-hint">Подсказки - справочник техники и что уже возили; вес и Д×Ш×В подставятся сами</span></div>' +
+      '<div class="op2-grid2" style="grid-template-columns:1fr 1.6fr">' +
+        '<div class="op2-fld"><label>Вес, т</label><input id="op2-f-weight" class="op2-mono" inputmode="decimal" placeholder="8" autocomplete="off" value="' + esc(o ? (o.cargo_weight_t || '') : '') + '"></div>' +
+        '<div class="op2-fld"><label>Габарит</label><div class="op2-seg" id="op2-f-gab">' +
+          gabs.map(function (g) { return '<button class="op2-chip' + (g === curGab ? ' op2-on' : '') + '" data-gab="' + esc(g) + '">' + esc(g) + '</button>'; }).join('') +
+        '</div></div>' +
+      '</div>' +
+      '<div class="op2-fld"><label>Габариты груза</label><input id="op2-f-dims" placeholder="Д × Ш × В" autocomplete="off" value="' + esc(o ? (o.cargo_dims || '') : '') + '"></div>' +
+      '<div class="op2-fld"><label>Документы</label><select id="op2-f-docs"><option value="">—</option>' + optList(dict('documents'), o ? o.documents : '') + '</select></div>' +
+      '<div class="op2-fld"><label>Условия переработки</label><select id="op2-f-rework"><option value="">—</option>' + optList(dict('rework'), o ? o.rework_terms : '') + '</select></div>' +
+    '</div>' +
+    '<div class="op2-card">' +
+    '<div class="op2-sect"><div class="op2-t">Деньги</div></div>' +
       '<div class="op2-fld"><label>Стоимость, ₽</label><input id="op2-f-price" class="op2-mono" inputmode="numeric" placeholder="38 000" autocomplete="off" value="' + esc(o && num(o.price) ? o.price : '') + '"></div>' +
       '<div class="op2-fld"><label>Статус оплаты</label><select id="op2-f-pay"><option value="">—</option>' + optList(dict('payment_status'), o ? o.payment_status : '') + '</select></div>' +
-      '<div class="op2-fld op2-full"><label><input type="checkbox" class="op2-cb" id="op2-f-cash"' + (o && o.cash ? ' checked' : '') + '>Наличные</label></div>' +
-    '</div></div>' +
+      '<div class="op2-fld"><label><input type="checkbox" class="op2-cb" id="op2-f-cash"' + (o && o.cash ? ' checked' : '') + '>Наличные</label></div>' +
+    '</div>' +
+    '</div>' +
+    '</div>' +
 
     '<div class="op2-sect"><div class="op2-t">Примечание</div><div class="op2-fld"><textarea id="op2-f-note" rows="3" placeholder="Что логисту важно знать">' + esc(o ? (o.note || '') : '') + '</textarea></div></div>';
 
@@ -2011,6 +2102,7 @@ function renderForm() {
   wireForm();
 }
 function wireForm() {
+  wireMoneyInput_('op2-f-price');
   var ft = $('#op2-f-time');
   function drawQk() {
     var q = quickTimes($('#op2-f-date').value);
@@ -2036,15 +2128,29 @@ function wireForm() {
   $$('.op2-stp', $('#op2-d-body')).forEach(function (b) {
     b.addEventListener('click', function () { ft.value = hhmm(tmin(normT(ft.value) || '08:00') + (+this.dataset.d)); if (+this.dataset.d > 0) S.stepUp(); else S.stepDown(); tickState(); });
   });
+  var calBtn = $('#op2-f-calbtn'), dateNative = $('#op2-f-date');
   $('#op2-f-datebox').addEventListener('click', function (e) {
     var b = e.target.closest('.op2-chip'); if (!b) return;
     $$('.op2-chip', this).forEach(function (x) { x.classList.remove('op2-on'); });
     b.classList.add('op2-on');
-    $('#op2-f-date').value = b.dataset.d;
+    dateNative.value = b.dataset.d;
+    calBtn.classList.remove('op2-on'); calBtn.title = 'Выбрать другую дату';
     drawQk();
   });
-  $('#op2-f-date').addEventListener('change', function () {
+  /* иконка-календарь вместо всегда видимого <input type=date> (Влад 11.09, перенос
+     редизайна 12.09) - сам input остаётся в DOM (скрыт визуально), showPicker() его
+     открывает; выбор даты вне Сегодня/Завтра виден по подсветке кнопки и её title,
+     как в утверждённом превью - отдельного текстового поля под датой нет */
+  calBtn.addEventListener('click', function () {
+    S.nav();
+    if (dateNative.showPicker) { try { dateNative.showPicker(); return; } catch (e) {} }
+    dateNative.focus(); dateNative.click();
+  });
+  dateNative.addEventListener('change', function () {
     $$('#op2-f-datebox .op2-chip').forEach(function (x) { x.classList.toggle('op2-on', x.dataset.d === this.value); }, this);
+    var isPreset = !!$('#op2-f-datebox .op2-chip.op2-on');
+    calBtn.classList.toggle('op2-on', !isPreset);
+    calBtn.title = isPreset ? 'Выбрать другую дату' : humanDate(this.value);
     drawQk();
   });
   $('#op2-f-eq').addEventListener('click', function (e) {
@@ -2053,21 +2159,15 @@ function wireForm() {
     // разметки внутри отвязывает e.target ДО всплытия к звуковому делегату на
     // document, генерический S.nav() наложился бы поверх S.unfold()/S.fold().
     e.stopPropagation();
-    var eqPrimaryNow = dict('equipment').filter(function (x) { return x.primary; });
-    function paintHint(val) {
-      $('#op2-f-eq-hint').textContent = (val && !eqPrimaryNow.some(function (x) { return x.value === val; }))
-        ? 'Выбрано: ' + val : 'Основные - чипами, остальная техника в «Ещё»';
-    }
     if (e.target.closest('[data-eq-more]')) { expandEqRow(seg); return; }
     if (e.target.closest('[data-eq-close]')) {
-      S.fold(); collapseEqRow(seg, seg.dataset.cur); paintHint(seg.dataset.cur); return;
+      S.fold(); collapseEqRow(seg, seg.dataset.cur); return;
     }
     var pick = e.target.closest('.op2-chip[data-eq]'); if (!pick) return;
     // «Развёрнуто» - по наличию «×», а не по числу чипов: устаревший (op2-eq-gone) тип
     // сам по себе добавляет чип и в свёрнутом виде, так что счёт по длине был бы неверен.
     var wasOpen = !!seg.querySelector('[data-eq-close]');
     collapseEqRow(seg, pick.dataset.eq);
-    paintHint(pick.dataset.eq);
     if (wasOpen) S.fold();
   });
   $('#op2-f-ent').addEventListener('click', function (e) {
@@ -2104,12 +2204,50 @@ function wireForm() {
       else if (fc.readOnly) { fc.value = ''; fc.readOnly = false; }
     };
     fw.addEventListener('click', function (e) {
-      var b = e.target.closest('.op2-chip'); if (!b) return;
-      $$('#op2-f-who .op2-chip').forEach(function (x) { x.classList.remove('op2-on'); });
-      b.classList.add('op2-on'); applyWho(b); tickState();
+      var seg = this;
+      // stopPropagation - та же причина, что у «От кого»/«Тип техники»: outerHTML
+      // отвязывает e.target ДО всплытия к звуковому делегату на document.
+      e.stopPropagation();
+      if (e.target.closest('[data-who-more]')) { expandWhoRow(seg); return; }
+      if (e.target.closest('[data-who-close]')) {
+        var cur0 = seg.querySelector('.op2-chip.op2-on');
+        S.fold(); collapseWhoRow(seg, cur0 ? cur0.dataset.who : ''); return;
+      }
+      var pick = e.target.closest('.op2-chip[data-who]'); if (!pick) return;
+      var wasOpen = seg.querySelectorAll('.op2-chip[data-who]').length > 1;
+      collapseWhoRow(seg, pick.dataset.who);
+      applyWho(seg.querySelector('.op2-chip.op2-on'));
+      tickState();
+      if (wasOpen) S.fold();
     });
     var wb0 = $('#op2-f-who .op2-chip.op2-on'); if (wb0 && wb0.dataset.who) applyWho(wb0);
   }
+
+  /* «Под данные» - единственная оставшаяся подсказка спрятана за точку (i), перенос
+     редизайна 12.09 (Влад 11.09: «оставь подсказку только по данные») */
+  var ndInfo = $('#op2-f-nd-info');
+  ndInfo.addEventListener('click', function (e) {
+    e.stopPropagation();
+    var already = this.classList.contains('op2-open');
+    $$('.op2-info-pop').forEach(function (p) { p.remove(); });
+    $$('.op2-info-dot').forEach(function (d) { d.classList.remove('op2-open'); });
+    if (already) return;
+    this.classList.add('op2-open');
+    var pop = document.createElement('div'); pop.className = 'op2-info-pop';
+    pop.textContent = 'Заказчику нужны данные водителя заранее (пропускной режим). После планирования машину и водителя не меняют без согласования - логист заявит основную и резервную, данные обоих уйдут заказчику.';
+    this.closest('.op2-nd-fld').appendChild(pop);
+    requestAnimationFrame(function () { pop.classList.add('op2-open'); });
+  });
+
+  /* «Контакт заказчика» - скрыт за кнопкой, пока не нажали (Влад 11.09: «почти никто
+     не вводит») - поле остаётся в DOM (collectForm читает его безусловно), кнопка
+     только снимает класс op2-collapsed */
+  var addContactBtn = $('#op2-f-custcontact-add');
+  if (addContactBtn) addContactBtn.addEventListener('click', function () {
+    S.nav();
+    $('#op2-f-custcontact-fld').classList.remove('op2-collapsed');
+    $('#op2-f-custcontact').focus();
+  });
 
   /* подсказки заказчика */
   var custT = null;
@@ -2151,8 +2289,9 @@ function wireForm() {
   /* подсказки адресов из истории заказчика */
   ['from', 'to'].forEach(function (side) {
     var inp = $('#op2-f-' + side);
-    inp.addEventListener('focus', function () { if ($('#op2-f-' + side + 'list').innerHTML) $('#op2-f-' + side + 'box').classList.add('op2-open'); });
+    inp.addEventListener('focus', function () { if ($('#op2-f-' + side + 'list').querySelector('.op2-it')) $('#op2-f-' + side + 'box').classList.add('op2-open'); });
     inp.addEventListener('blur', function () { setTimeout(function () { $('#op2-f-' + side + 'box').classList.remove('op2-open'); }, 150); tickState(); });
+    inp.addEventListener('input', function () { fetchGeoSuggest(side, this.value); });
     $('#op2-f-' + side + 'list').addEventListener('mousedown', function (e) {
       var it = e.target.closest('.op2-it'); if (!it) return;
       inp.value = it.dataset.address || '';
@@ -2366,8 +2505,8 @@ function fetchCustomerHistory(name) {
         '<span>' + esc(a.address) + '</span><span class="op2-m">' + esc(a.n || '') + '</span></div>';
     }).join('');
     var head = addr ? '<div class="op2-sec">Точки этого заказчика</div>' : '';
-    $('#op2-f-fromlist').innerHTML = head + addr;
-    $('#op2-f-tolist').innerHTML = head + addr;
+    listSubSection_('from', 'op2-sub-hist').innerHTML = head + addr;
+    listSubSection_('to', 'op2-sub-hist').innerHTML = head + addr;
     var c = (d.contacts || [])[0];
     if (c && !$('#op2-f-custcontact').value.trim()) {
       $('#op2-f-custcontact-hint').textContent = 'Из истории: ' + [c.name, fmtPhone(c.phone)].filter(Boolean).join(' · ');
@@ -2383,6 +2522,68 @@ function fetchCustomerHistory(name) {
       collapseEntRow(entSeg, d.last_executor_entity_id);
     }
   }).catch(function () {});
+}
+/* список подсказок адреса делится на два независимых подраздела - история заказчика
+   (fetchCustomerHistory выше) и живой геокодинг (fetchGeoSuggest ниже) - каждый пишет
+   только в свой div, не затирая другой при повторном срабатывании. */
+function listSubSection_(side, cls) {
+  var list = $('#op2-f-' + side + 'list');
+  var sub = list.querySelector('.' + cls);
+  if (!sub) { sub = document.createElement('div'); sub.className = cls; list.appendChild(sub); }
+  return sub;
+}
+/* «Адреса» - живой геокодинг DaData (Влад 12.09: подключить то же, что уже работает в
+   Калькуляторе - тот же сервер /api/geocoder/suggest, ключ уже там, ничего нового не
+   заводим). dadataAddrParts_ - дословно тот же разбор полей, что и в files/index.html
+   (Clc.geoc()/dadataAddrParts_), не изобретаем второй раз. */
+function dadataAddrParts_(d) {
+  d = d || {};
+  var line = [d.street_with_type, d.house].filter(Boolean).join(', ');
+  var first = line || d.settlement_with_type || d.city_with_type || d.region_with_type || '';
+  var rest = [];
+  if (line && line !== first) rest.push(line);
+  if (d.city_district_with_type) rest.push(d.city_district_with_type);
+  if (d.settlement_with_type && d.settlement_with_type !== first) rest.push(d.settlement_with_type);
+  if (d.city_with_type && d.city_with_type !== first) rest.push(d.city_with_type);
+  if (d.region_with_type && d.region_with_type !== d.city_with_type) rest.push(d.region_with_type);
+  var seen = {};
+  return [first].concat(rest).filter(function (v) { if (!v || seen[v]) return false; seen[v] = true; return true; });
+}
+var geoSuggestT_ = {};
+function fetchGeoSuggest(side, q) {
+  clearTimeout(geoSuggestT_[side]);
+  var geoSub = listSubSection_(side, 'op2-sub-geo');
+  if (!q || q.trim().length < 3) { geoSub.innerHTML = ''; return; }
+  geoSuggestT_[side] = setTimeout(function () {
+    apiGet('/geocoder/suggest', { q: q.trim() }).then(function (r) {
+      var sug = (r && r.ok && r.data && r.data.suggestions) || [];
+      var seen = {}, html = '';
+      sug.forEach(function (f) {
+        if (f.lat == null || f.lon == null) return;
+        var parts = dadataAddrParts_(f);
+        if (!parts[0]) return;
+        var main = parts[0], sub = parts.slice(1, 3).join(', ');
+        var key = main + '|' + sub;
+        if (seen[key]) return;
+        seen[key] = true;
+        /* Влад 12.09: «улица Гагарина есть и в Новгороде, и в Великом Новгороде» -
+           для логистики город/населённый пункт ОБЯЗАН остаться в сохранённом адресе,
+           не только в серой строке подсказки. main (первая часть dadataAddrParts_)
+           часто ТОЛЬКО улица+дом - в поле кладём f.value целиком (полный
+           отформатированный адрес DaData, город уже внутри), main/sub - только
+           для вида самой подсказки в списке. */
+        html += '<div class="op2-it" data-address="' + esc(f.value || main) + '" data-lat="' + esc(f.lat) + '" data-lon="' + esc(f.lon) + '">' +
+          '<span>' + esc(main) + '</span><span class="op2-m">' + esc(sub) + '</span></div>';
+      });
+      geoSub.innerHTML = html ? '<div class="op2-sec">Адреса</div>' + html : '';
+      /* проверка фокуса - ответ может прийти уже после того, как менеджер кликнул
+         мимо (blur закрывает бокс через 150мс); без неё список открылся бы заново
+         сам по себе поверх уже незнакомого действия */
+      if (html && document.activeElement === $('#op2-f-' + side)) {
+        var box = $('#op2-f-' + side + 'box'); if (box) box.classList.add('op2-open');
+      }
+    }).catch(function () {});
+  }, 400);
 }
 function collectForm() {
   var fc = splitContact($('#op2-f-custcontact').value);

@@ -997,6 +997,28 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .tbl tr.clickable{cursor:pointer;}
 .tbl tr.clickable:hover td{background:var(--bg3);}
 
+/* ── Динамика: разворот строки по дням (Влад, 12.09) ───────────────────────────── */
+/* Только transform/opacity в анимации (ГОСТ разд.5) - высоту НЕ анимируем, строка
+   появляется/пропадает через display, максимум содержимого - статичный overflow. */
+.dyn-chevron{display:inline-block;width:10px;color:var(--muted);transition:transform .15s var(--ease-out-soft,ease);margin-right:5px;font-size:9px;}
+.dyn-row.open .dyn-chevron{transform:rotate(90deg);}
+.dyn-detail-row{display:none;}
+.dyn-detail-row.open{display:table-row;}
+.dyn-detail-row td{padding:0 !important;border-bottom:1px solid var(--border);}
+.dyn-detail-inner{padding:10px 14px 14px 26px;background:var(--bg);max-height:280px;overflow-y:auto;
+  animation:dynDetailIn .15s var(--ease-out-soft,ease);}
+@keyframes dynDetailIn{from{opacity:0}to{opacity:1}}
+@media (prefers-reduced-motion: reduce){
+  .dyn-chevron{transition:none;}
+  .dyn-detail-inner{animation:none;}
+}
+.dyn-day-line{display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:11.5px;}
+.dyn-day-line:last-child{border-bottom:none;}
+.dyn-day-date{color:var(--muted);font-variant-numeric:tabular-nums;flex:none;}
+.dyn-day-status{display:flex;align-items:center;gap:10px;}
+.dyn-day-src{font-size:9.5px;color:var(--muted);letter-spacing:.03em;width:44px;text-align:right;}
+.dyn-day-empty{padding:10px 0;color:var(--muted);font-size:11.5px;}
+
 /* ── PERIOD BUTTONS ─────────────────────────────────────── */
 .period-btn{padding:5px 13px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:12px;cursor:pointer;transition:all .15s;}
 .period-btn:hover{border-color:var(--green);color:var(--text);}
@@ -16602,8 +16624,10 @@ function ensureHistData() {
     var oldRows = results[0].history || [];
     var newRows = results[1].history || [];
     var covered = {};
-    newRows.forEach(function(r) { covered[r.gos + '|' + r.date] = true; });
-    histData = newRows.concat(oldRows.filter(function(r) { return !covered[r.gos + '|' + r.date]; }));
+    newRows.forEach(function(r) { r._src = 'server'; covered[r.gos + '|' + r.date] = true; });
+    var oldFallback = oldRows.filter(function(r) { return !covered[r.gos + '|' + r.date]; });
+    oldFallback.forEach(function(r) { r._src = 'staff'; });
+    histData = newRows.concat(oldFallback);
     return histData;
   });
 }
@@ -16655,10 +16679,15 @@ function renderDynamics() {
   }
 
   // Агрегируем raw данные по машинам → _dynRows
+  // v.days - карта дата->статус, только для подсчёта итогов (как раньше). v.dayList -
+  // отдельный массив {date, status, src}, нужен только для разворота строки по клику
+  // (Влад, 12.09: "я могу зайти в любой день и посмотреть статус этой машины") - в счётчиках
+  // не участвует, чтобы не трогать уже проверенную логику подсчёта выше.
   var vmap = {};
   filtered.forEach(function(r) {
-    if (!vmap[r.gos]) vmap[r.gos] = { gos: r.gos, type: r.type, days: {} };
+    if (!vmap[r.gos]) vmap[r.gos] = { gos: r.gos, type: r.type, days: {}, dayList: [] };
     vmap[r.gos].days[r.date] = r.status;
+    vmap[r.gos].dayList.push({ date: r.date, status: r.status, src: r._src || 'staff' });
     if (!vmap[r.gos].type && r.type) vmap[r.gos].type = r.type;
   });
   _dynRows = Object.keys(vmap).map(function(gos) {
@@ -16671,7 +16700,7 @@ function renderDynamics() {
       else if (s.indexOf('водителя') !== -1) noDriver++;
       else work++;
     });
-    return { gos: gos, type: v.type || '', marka: markaMap[gos] || '', work: work, repair: repair, noOrder: noOrder, noDriver: noDriver, total: Object.keys(v.days).length };
+    return { gos: gos, type: v.type || '', marka: markaMap[gos] || '', work: work, repair: repair, noOrder: noOrder, noDriver: noDriver, total: Object.keys(v.days).length, dayList: v.dayList };
   });
 
   // Заполняем dropdown типами (только первый раз)
@@ -16691,6 +16720,9 @@ function renderDynamics() {
 var dynSort   = { col: 'repair', dir: -1 };
 var dynFilter = { type: 'all', search: '' };
 var _dynRows  = [];
+var _dynVisibleRows = []; // текущая (отфильтрованная+отсортированная) страница строк -
+                           // нужна toggleDynDay_ по индексу, чтобы не тащить весь dayList в DOM
+var _dynOpenIdx = -1;      // индекс развёрнутой строки (одна за раз, как в превью)
 
 function setDynTypeFilter(type) { dynFilter.type = type; renderStatusTable(); }
 function setDynSearch(val) { dynFilter.search = val.trim().toLowerCase(); renderStatusTable(); }
@@ -16725,6 +16757,8 @@ function renderStatusTable() {
     if (typeof av === 'string') return dynSort.dir * av.localeCompare(bv);
     return dynSort.dir * (av - bv);
   });
+  _dynVisibleRows = visible;
+  _dynOpenIdx = -1; // список пересобран (фильтр/сортировка/поиск) - индексы больше не те же
 
   // Заголовки с сортировкой
   function th(col, label, color) {
@@ -16749,19 +16783,24 @@ function renderStatusTable() {
     th('noDriver', 'Без водителя', 'var(--tint-amber)') +
     th('total',    'Итого дней',   '');
 
-  // Строки
+  // Строки. Каждая - кликабельна (Влад, 12.09: "зайти в любой день и посмотреть статус
+  // этой машины") - разворачивает скрытую строку-деталь с историей по дням, без нового
+  // запроса к серверу (dayList уже посчитан в renderDynamics из тех же данных).
   var tbody = '';
-  visible.forEach(function(r) {
+  visible.forEach(function(r, i) {
     var repCls = r.repair >= 7 ? ' style="color:var(--tint-red);font-weight:600"' : '';
-    tbody += '<tr>' +
+    tbody += '<tr class="clickable dyn-row" onclick="toggleDynDay_(' + i + ')">' +
       '<td class="muted">' + (r.type  || '—') + '</td>' +
-      '<td><b>' + r.gos + '</b></td>' +
+      '<td><span class="dyn-chevron">▸</span><b>' + pageEsc_(r.gos) + '</b></td>' +
       '<td class="muted" style="font-size:11px">' + (r.marka || '—') + '</td>' +
       '<td class="num green">'  + (r.work     || '—') + '</td>' +
       '<td class="num"' + repCls + '>' + (r.repair   || '—') + '</td>' +
       '<td class="num amber">'  + (r.noOrder  || '—') + '</td>' +
       '<td class="num amber">'  + (r.noDriver || '—') + '</td>' +
-      '<td class="num muted">'  + r.total + '</td></tr>';
+      '<td class="num muted">'  + r.total + '</td></tr>' +
+      '<tr class="dyn-detail-row" id="dyn-detail-' + i + '"><td colspan="8">' +
+        '<div class="dyn-detail-inner"></div>' +
+      '</td></tr>';
   });
   document.getElementById('hist-status-body').innerHTML = tbody;
 
@@ -16778,6 +16817,60 @@ function renderStatusTable() {
 
   loading.style.display = 'none';
   wrap.style.display = '';
+}
+
+// Разворот строки "Динамики" - карточка машины по дням (Влад, 12.09). Один клик - один
+// открытый разворот (как в превью), второй клик по той же строке закрывает. Рендерим
+// содержимое ленивую, при первом открытии - до этого в DOM пустой контейнер.
+function dynStatusClass_(status) {
+  // Те же 3 бакета, что уже красят колонки таблицы (В работе/Ремонт/Без заказа+Без
+  // водителя) - переиспользуем существующий канон-бейдж (.badge.green/.red/.amber,
+  // раздел 4), не изобретаем новый компонент.
+  var s = (status || '').toLowerCase();
+  if (s.indexOf('работе') !== -1) return 'green';
+  if (s.indexOf('ремонт') !== -1) return 'red';
+  return 'amber'; // без заказа / без водителя / нет водителя
+}
+function renderDynDayList_(row) {
+  if (!row.dayList || !row.dayList.length) return '<div class="dyn-day-empty">Нет данных по дням</div>';
+  var sorted = row.dayList.slice().sort(function(a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
+  return sorted.map(function(d) {
+    var cls = dynStatusClass_(d.status);
+    var srcLabel = d.src === 'server' ? 'сервер' : 'Штатка';
+    return '<div class="dyn-day-line">' +
+      '<span class="dyn-day-date">' + fmtDateRu(d.date) + '</span>' +
+      '<span class="dyn-day-status">' +
+        '<span class="badge ' + cls + '">' + pageEsc_(d.status || '—') + '</span>' +
+        '<span class="dyn-day-src">' + srcLabel + '</span>' +
+      '</span></div>';
+  }).join('');
+}
+function toggleDynDay_(i) {
+  var prevIdx = _dynOpenIdx;
+  if (prevIdx >= 0 && prevIdx !== i) {
+    var prevDetail = document.getElementById('dyn-detail-' + prevIdx);
+    var prevRow = prevDetail ? prevDetail.previousElementSibling : null;
+    if (prevDetail) prevDetail.classList.remove('open');
+    if (prevRow) prevRow.classList.remove('open');
+  }
+  var detail = document.getElementById('dyn-detail-' + i);
+  var row = detail ? detail.previousElementSibling : null;
+  if (!detail || !row) return;
+  var opening = _dynOpenIdx !== i;
+  if (opening) {
+    var inner = detail.querySelector('.dyn-detail-inner');
+    if (inner && !inner.dataset.filled) {
+      inner.innerHTML = renderDynDayList_(_dynVisibleRows[i]);
+      inner.dataset.filled = '1';
+    }
+    detail.classList.add('open');
+    row.classList.add('open');
+    _dynOpenIdx = i;
+  } else {
+    detail.classList.remove('open');
+    row.classList.remove('open');
+    _dynOpenIdx = -1;
+  }
 }
 
 var histChartTrend = null;

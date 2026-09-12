@@ -516,6 +516,11 @@ module.exports = function (deps) {
   });
 
   // Наёмник - поля прямо на исполнителе (одна запись kind=hired на заявку; повторный вызов - правка).
+  // «под данные»: если у заявки УЖЕ есть наёмник и меняется КОМПАНИЯ (не техдетали вроде госномера/
+  // водителя/ставки у той же компании) - тот же принцип, что у своей машины (вне заявленных -> запрос
+  // менеджеру, plan_order_change_requests), не тихая правка. Влад 12.09 (живой тест): «была под
+  // данные, но я смог изменить название компании-партнёра без согласования с менеджером» - этой
+  // проверки не было вообще, чинится здесь.
   app.post("/api/orders/hired_set", ...gate, async (req, res) => {
     const conn = await pool.getConnection();
     try {
@@ -523,6 +528,7 @@ module.exports = function (deps) {
       const orderId = Number(p(req, "order_id")); const o = await loadOrder(conn, orderId); if (!o) return fail(res, 404, "заявка не найдена");
       if (o.status === "cancelled") return fail(res, 409, "по заявке отбой");
       const who = await me(req);
+      const force = bool(p(req, "force"));
       const f = {
         carrier_id: str(p(req, "carrier_id"), 64), carrier_name: str(p(req, "carrier_name"), 200), carrier_contact: str(p(req, "carrier_contact"), 200),
         vehicle_gos: str(p(req, "gos"), 32), trailer_gos: str(p(req, "trailer_gos"), 32), driver_name: str(p(req, "driver_name"), 150), driver_phone: str(p(req, "driver_phone"), 64),
@@ -531,7 +537,17 @@ module.exports = function (deps) {
       };
       if (!f.carrier_name) return fail(res, 400, "перевозчик обязателен");
       await conn.beginTransaction();
-      const [ex] = await conn.query(`SELECT id FROM plan_order_executors WHERE order_id = ? AND kind = 'hired' AND removed_at IS NULL`, [orderId]);
+      const [ex] = await conn.query(`SELECT id, carrier_name FROM plan_order_executors WHERE order_id = ? AND kind = 'hired' AND removed_at IS NULL`, [orderId]);
+      const prevName = ex.length ? String(ex[0].carrier_name || "").trim() : "";
+      const changingCarrier = prevName && prevName.toLowerCase() !== f.carrier_name.toLowerCase();
+      if (o.needs_data && changingCarrier && !force) { // другая компания на «под данные» - без спроса нельзя
+        await conn.query(`UPDATE plan_order_change_requests SET status = 'cancelled' WHERE order_id = ? AND status = 'pending'`, [orderId]);
+        const [ins] = await conn.query(
+          `INSERT INTO plan_order_change_requests (order_id, type, from_carrier_name, to_carrier_name, to_carrier_id, requested_by, requested_by_name, comment)
+           VALUES (?,'replace_carrier',?,?,?,?,?,?)`, [orderId, prevName, f.carrier_name, f.carrier_id, who.email, who.name, f.comment]);
+        await history(conn, orderId, "change_request", null, prevName + " -> " + f.carrier_name + " (ждёт менеджера)", who.email);
+        await conn.commit(); return respondOrder(res, orderId, { pending: true, request_id: ins.insertId });
+      }
       if (ex.length) {
         await conn.query(`UPDATE plan_order_executors SET carrier_id=?, carrier_name=?, carrier_contact=?, vehicle_gos=?, trailer_gos=?, driver_name=?, driver_phone=?, purchase_rate=?, settlement=?, carrier_status=?, comment=?, updated_by=? WHERE id = ?`,
           [f.carrier_id, f.carrier_name, f.carrier_contact, f.vehicle_gos, f.trailer_gos, f.driver_name, f.driver_phone, f.purchase_rate, f.settlement, f.carrier_status, f.comment, who.email, ex[0].id]);
@@ -543,7 +559,7 @@ module.exports = function (deps) {
       if (!o.taken_by) await conn.query(`UPDATE plan_orders SET taken_by = ?, taken_by_name = ?, taken_at = NOW() WHERE id = ?`, [who.email, who.name, orderId]);
       await conn.query(`UPDATE plan_orders SET updated_by = ? WHERE id = ?`, [who.email, orderId]);
       await history(conn, orderId, "hired_set", null, f.carrier_name + " · " + (f.carrier_status || ""), who.email);
-      await conn.commit(); return respondOrder(res, orderId);
+      await conn.commit(); return respondOrder(res, orderId, { outside_declared: !!(o.needs_data && force && changingCarrier) });
     } catch (err) { try { await conn.rollback(); } catch (e) {} console.error("hired_set:", err); fail(res, 500, String(err.message || err)); }
     finally { conn.release(); }
   });
@@ -561,14 +577,20 @@ module.exports = function (deps) {
       const who = await me(req);
       await conn.beginTransaction();
       if (action === "approve") {
-        const execs = (await loadExecutors(conn, [o.id])).filter((e) => e.kind === "own" && e.role === "main");
-        for (const e of execs) await removeExecutorRow(conn, e, who.email);
-        await createOwnExecutor(conn, o, q.to_gos, "main", who, null);
+        if (q.type === "replace_carrier") { // наёмник - меняем компанию НА исполнителе, машину не трогаем
+          const [hex] = await conn.query(`SELECT id FROM plan_order_executors WHERE order_id = ? AND kind = 'hired' AND removed_at IS NULL`, [o.id]);
+          if (hex.length) await conn.query(`UPDATE plan_order_executors SET carrier_name = ?, carrier_id = ?, updated_by = ? WHERE id = ?`, [q.to_carrier_name, q.to_carrier_id, who.email, hex[0].id]);
+        } else {
+          const execs = (await loadExecutors(conn, [o.id])).filter((e) => e.kind === "own" && e.role === "main");
+          for (const e of execs) await removeExecutorRow(conn, e, who.email);
+          await createOwnExecutor(conn, o, q.to_gos, "main", who, null);
+        }
         await conn.query(`UPDATE plan_orders SET needs_data_sent_at = NULL, updated_by = ? WHERE id = ?`, [who.email, o.id]); // данные на пропуск надо отправить заново
       }
       await conn.query(`UPDATE plan_order_change_requests SET status = ?, resolved_by = ?, resolved_by_name = ?, resolved_at = NOW() WHERE id = ?`,
         [action === "approve" ? "approved" : "rejected", who.email, who.name, rid]);
-      await history(conn, o.id, "change_request_" + action, null, q.from_gos + " -> " + q.to_gos, who.email);
+      await history(conn, o.id, "change_request_" + action, null,
+        (q.type === "replace_carrier" ? q.from_carrier_name + " -> " + q.to_carrier_name : q.from_gos + " -> " + q.to_gos), who.email);
       await conn.commit(); return respondOrder(res, o.id);
     } catch (err) { try { await conn.rollback(); } catch (e) {} console.error("change_request_resolve:", err); fail(res, 500, String(err.message || err)); }
     finally { conn.release(); }
@@ -641,6 +663,23 @@ module.exports = function (deps) {
         `SELECT id, name, inn, is_own, risk_light FROM sprav_legal_entities WHERE deleted_at IS NULL AND name LIKE ? ORDER BY is_own DESC, name LIMIT 12`, [like]);
       res.json({ mine: mine.map((m) => ({ name: m.customer, n: Number(m.n), entity_id: m.entity_id })), all });
     } catch (err) { console.error("orders customers:", err); fail(res, 500, String(err.message || err)); }
+  });
+  // Подсказки для «Компания-перевозчик» у наёмника (Влад 12.09: «тоже должен быть справочник
+  // юридических лиц» - раньше было голое текстовое поле). Своя история наёмок (частота) +
+  // весь справочник юрлиц, как у «Заказчика» - тот же принцип, отдельный эндпоинт, т.к. «мои
+  // за 30 дней» у customers - это per-менеджер выборка из plan_orders, а тут - per-перевозчик
+  // выборка из plan_order_executors, разные группировки.
+  app.get("/api/orders/carriers", ...gate, async (req, res) => {
+    try {
+      const q = String(req.query.q || "").trim(); if (q.length < 2) return res.json({ history: [], all: [] });
+      const like = q + "%";
+      const [history] = await pool.query(
+        `SELECT carrier_name, MAX(carrier_id) AS carrier_id, COUNT(*) AS n FROM plan_order_executors
+          WHERE kind = 'hired' AND removed_at IS NULL AND carrier_name LIKE ? GROUP BY carrier_name ORDER BY n DESC LIMIT 6`, [like]);
+      const [all] = await pool.query(
+        `SELECT id, name, inn, risk_light FROM sprav_legal_entities WHERE deleted_at IS NULL AND name LIKE ? ORDER BY name LIMIT 12`, [like]);
+      res.json({ history: history.map((h) => ({ name: h.carrier_name, entity_id: h.carrier_id, n: Number(h.n) })), all });
+    } catch (err) { console.error("orders carriers:", err); fail(res, 500, String(err.message || err)); }
   });
   // Контакты и точки этого заказчика по прошлым заявкам (по частоте) - до карты.
   app.get("/api/orders/customer_history", ...gate, async (req, res) => {

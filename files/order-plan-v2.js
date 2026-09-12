@@ -943,7 +943,7 @@ function mgrVehCell(o) {
   var h = oHired(o);
   if (h) {
     return '<div class="op2-veh"><span class="op2-hire">Наёмник</span><span class="op2-drv">' + esc(h.carrier_name || 'перевозчик уточняется') +
-      (h.vehicle_gos ? ' · <span class="op2-mono">' + esc(h.vehicle_gos) + '</span>' : '') + (h.driver_name ? ' · ' + esc(h.driver_name) : '') + '</span></div>';
+      (h.vehicle_gos ? ' · <span class="op2-mono">' + esc(h.vehicle_gos) + '</span>' : '') + (h.driver_name ? ' · ' + esc(h.driver_name) : '') + '</span></div>' + pendHtml(o, 'mgr');
   }
   var vs = oOwn(o);
   if (!vs.length) {
@@ -961,14 +961,23 @@ function mgrVehCell(o) {
     : '<div class="op2-veh op2-multi">' + vs.map(function (v) { return '<div class="op2-row">' + row(v) + '</div>'; }).join('') + '</div>';
   return inner + pendHtml(o, 'mgr');
 }
+/* «замена машины» (type=replace_vehicle, from_gos/to_gos) и «замена перевозчика»
+   (type=replace_carrier, from_carrier_name/to_carrier_name) - один и тот же
+   plan_order_change_requests, один общий разбор from/to, чтобы не дублировать
+   ветвление в каждом месте, где показывается или разрешается запрос. */
+function pendFromTo_(p) {
+  if (p.type === 'replace_carrier') return { from: p.from_carrier_name || '', to: p.to_carrier_name || '', extra: '', cls: '' };
+  return { from: p.from_gos || '', to: p.to_gos || '', extra: p.to_driver_name || '', cls: 'op2-mono' };
+}
 function pendHtml(o, who) {
   var p = o.pending_request;
   if (!p) return '';
+  var ft = pendFromTo_(p);
   if (who === 'mgr') {
-    return '<div class="op2-pend">логист предлагает замену → <span class="op2-mono">' + esc(p.to_gos || '') + '</span> · <b>ждёт вашего подтверждения</b></div>';
+    return '<div class="op2-pend">логист предлагает замену → <span class="' + ft.cls + '">' + esc(ft.to) + '</span> · <b>ждёт вашего подтверждения</b></div>';
   }
-  return '<div class="op2-pend" title="Замена вне заявленных на заявке под данные: ждёт, пока менеджер согласует с заказчиком">замена → <span class="op2-mono">' +
-    esc(p.to_gos || '') + '</span>' + (p.to_driver_name ? ' · ' + esc(p.to_driver_name) : '') + ' · <b>ждёт менеджера</b></div>';
+  return '<div class="op2-pend" title="Замена вне заявленных на заявке под данные: ждёт, пока менеджер согласует с заказчиком">замена → <span class="' +
+    ft.cls + '">' + esc(ft.to) + '</span>' + (ft.extra ? ' · ' + esc(ft.extra) : '') + ' · <b>ждёт менеджера</b></div>';
 }
 
 /* ── таблица логиста ── */
@@ -1002,7 +1011,7 @@ function vehCellLog(o) {
   if (h) {
     return '<div class="op2-veh" data-oid="' + esc(o.id) + '"><span class="op2-hire">Наёмник</span><span class="op2-drv">' +
       esc(h.carrier_name || 'перевозчик уточняется') + (h.vehicle_gos ? ' · <span class="op2-mono">' + esc(h.vehicle_gos) + '</span>' : '') +
-      (h.driver_name ? ' · ' + esc(h.driver_name) : '') + (h.carrier_status ? ' · ' + esc(h.carrier_status) : '') + '</span></div>';
+      (h.driver_name ? ' · ' + esc(h.driver_name) : '') + (h.carrier_status ? ' · ' + esc(h.carrier_status) : '') + '</span></div>' + pendHtml(o, 'log');
   }
   var vs = oOwn(o);
   if (!vs.length) {
@@ -1421,7 +1430,10 @@ function openHiredStep(o) {
   var h = oHired(o) || {};
   var statuses = ['договариваюсь', 'подтвердил', 'выехал', 'отказался'];
   $('#op2-hstep').innerHTML =
-    '<div class="op2-fld"><label>Компания-перевозчик</label><input id="op2-h-co" autocomplete="off" placeholder="Название перевозчика" value="' + esc(h.carrier_name || '') + '"><span class="op2-hint">Из справочника перевозчиков</span></div>' +
+    '<div class="op2-fld op2-sugg" id="op2-h-cobox"><label>Компания-перевозчик</label>' +
+      '<input id="op2-h-co" autocomplete="off" placeholder="Начни вводить - по первым буквам" value="' + esc(h.carrier_name || '') + '" data-entity-id="' + esc(h.carrier_id || '') + '">' +
+      '<div class="op2-list" id="op2-h-colist"></div>' +
+      '<span class="op2-hint">Справочник юрлиц + кого уже возили</span></div>' +
     '<div class="op2-g2">' +
       '<div class="op2-fld"><label>Контакт у перевозчика</label><input id="op2-h-contact" autocomplete="off" placeholder="Имя · телефон" value="' + esc(h.carrier_contact || '') + '"></div>' +
       '<div class="op2-fld"><label>Статус перевозчика</label><div class="op2-cstat" id="op2-h-cs">' +
@@ -1448,7 +1460,26 @@ function openHiredStep(o) {
   }
   $('#op2-h-rate').addEventListener('input', recalc);
   wireMoneyInput_('op2-h-rate');
-  $('#op2-h-co').addEventListener('input', function () { $('#op2-pop-ok').textContent = 'Отдать наёмнику' + (this.value.trim() ? ' · ' + this.value.trim() : ''); });
+  /* Влад 12.09: «партнёру наёмной техники тоже должен быть справочник юридических лиц» -
+     тот же принцип подсказок, что у «Заказчика» (fetchCustomers), отдельный источник
+     (история наёмок + sprav_legal_entities, а не заказчики). Ручной ввод сбрасывает
+     entity-привязку - если менеджер сам допечатал название, это уже не выбор из списка. */
+  var coT = null;
+  $('#op2-h-co').addEventListener('input', function () {
+    $('#op2-pop-ok').textContent = 'Отдать наёмнику' + (this.value.trim() ? ' · ' + this.value.trim() : '');
+    this.dataset.entityId = '';
+    var v = this.value.trim(); clearTimeout(coT);
+    if (v.length < 2) { $('#op2-h-cobox').classList.remove('op2-open'); return; }
+    coT = setTimeout(function () { fetchCarriers(v); }, 250);
+  });
+  $('#op2-h-co').addEventListener('blur', function () { setTimeout(function () { $('#op2-h-cobox').classList.remove('op2-open'); }, 150); });
+  $('#op2-h-colist').addEventListener('mousedown', function (e) {
+    var it = e.target.closest('.op2-it'); if (!it) return;
+    var inp = $('#op2-h-co');
+    inp.value = it.dataset.name || ''; inp.dataset.entityId = it.dataset.eid || '';
+    $('#op2-pop-ok').textContent = 'Отдать наёмнику' + (it.dataset.name ? ' · ' + it.dataset.name : '');
+    $('#op2-h-cobox').classList.remove('op2-open');
+  });
   $('#op2-h-cs').addEventListener('click', function (e) {
     var c = e.target.closest('.op2-chip'); if (!c) return;
     $$('.op2-chip', this).forEach(function (x) { x.classList.remove('op2-on'); });
@@ -1462,6 +1493,7 @@ function saveHired(o) {
   var cs = $('#op2-h-cs .op2-chip.op2-on');
   apiPost('/orders/hired_set', {
     order_id: o.id,
+    carrier_id: $('#op2-h-co').dataset.entityId || '',
     carrier_name: co,
     carrier_contact: $('#op2-h-contact').value.trim(),
     gos: $('#op2-h-gos').value.trim(),
@@ -1474,7 +1506,19 @@ function saveHired(o) {
     comment: $('#op2-h-comment').value.trim()
   }).then(function (r) {
     if (!ok_(r)) return;
-    closePop(); S.tickUp();
+    closePop();
+    /* Влад 12.09 (живой тест): «была под данные, но я смог изменить название компании-партнёра
+       без согласования с менеджером» - смена перевозчика на «под данные» заявке теперь идёт
+       тем же путём, что и замена своей машины вне заявленных: не применяется тихо, а ждёт
+       менеджера. Компания на исполнителе остаётся прежней, пока не подтвердят. */
+    if (r.data && r.data.pending) {
+      S.attention();
+      toast('Запрос на замену перевозчика: <span class="op2-warn">' + esc(co) + '</span> · заявка №' + esc(oNo(o)) +
+        ' под данные · <b>менеджер согласует с заказчиком</b>', null, 9000);
+      loadOrders();
+      return;
+    }
+    S.tickUp();
     toast('Отдано наёмнику <span class="op2-tick">' + esc(co) + '</span> · заявка №' + esc(oNo(o)) + ' · госномер и водителя допиши, когда подтвердят');
     loadOrders();
   });
@@ -1726,13 +1770,14 @@ function renderView(o, who) {
     '<span class="op2-hint op2-dim" style="align-self:center;margin-left:6px">один клик · логисты видят сразу</span></div></div>' : '';
 
   var p = o.pending_request;
+  var pft = p ? pendFromTo_(p) : null;
   var pendBar = p ? '<div class="op2-cbar op2-pendbar"><div class="op2-grow"><b>' +
-    (isLog ? 'Ждёт менеджера · замена' : 'Логист ' + esc(p.requested_by_name || '') + ' предлагает замену') + '</b> · <span class="op2-mono">' + esc(p.from_gos || '') + '</span> → <span class="op2-mono">' + esc(p.to_gos || '') + '</span>' +
-    (p.to_driver_name ? ' ' + esc(p.to_driver_name) : '') + (p.requested_at ? ' · ' + esc(p.requested_at) : '') +
+    (isLog ? 'Ждёт менеджера · замена' : 'Логист ' + esc(p.requested_by_name || '') + ' предлагает замену') + '</b> · <span class="' + pft.cls + '">' + esc(pft.from) + '</span> → <span class="' + pft.cls + '">' + esc(pft.to) + '</span>' +
+    (pft.extra ? ' ' + esc(pft.extra) : '') + (p.requested_at ? ' · ' + esc(p.requested_at) : '') +
     ' · заявка под данные: данные на пропуск изменятся, нужно согласие заказчика</div>' +
-    (isLog ? '<span class="op2-dim op2-sm">до ответа менеджера едет ' + esc(p.from_gos || '') + ' · позвони, если срочно</span>'
+    (isLog ? '<span class="op2-dim op2-sm">до ответа менеджера едет ' + esc(pft.from) + ' · позвони, если срочно</span>'
       : '<button class="op2-dbtn op2-primary" id="op2-d-approve">Подтвердить · заказчик согласен</button>' +
-        '<button class="op2-ghost op2-red" id="op2-d-reject">Отклонить · едет ' + esc(p.from_gos || '') + '</button>') +
+        '<button class="op2-ghost op2-red" id="op2-d-reject">Отклонить · едет ' + esc(pft.from) + '</button>') +
     '</div>' : '';
 
   function kv(k2, v2) { return '<div class="op2-kv"><span class="op2-k">' + esc(k2) + '</span><span class="op2-v">' + v2 + '</span></div>'; }
@@ -1817,15 +1862,16 @@ function renderView(o, who) {
 }
 function resolveRequest(o, action, who) {
   var p = o.pending_request; if (!p) return;
+  var ft = pendFromTo_(p);
   apiPost('/orders/change_request_resolve', { id: p.id, action: action }).then(function (r) {
     if (!ok_(r)) return;
     if (action === 'approve') {
       S.tickUp();
-      toast('Замена подтверждена: <span class="op2-tick">' + esc(p.to_gos || '') + (p.to_driver_name ? ' · ' + esc(p.to_driver_name) : '') + '</span> на №' + esc(oNo(o)) +
+      toast('Замена подтверждена: <span class="op2-tick">' + esc(ft.to) + (ft.extra ? ' · ' + esc(ft.extra) : '') + '</span> на №' + esc(oNo(o)) +
         ' · логисту ушло · <b>отправь заказчику новые данные на пропуск</b>', null, 9000);
     } else {
       S.tickDown();
-      toast('Замена отклонена · на №' + esc(oNo(o)) + ' едет ' + esc(p.from_gos || '') + ' · логисту ушло');
+      toast('Замена отклонена · на №' + esc(oNo(o)) + ' едет ' + esc(ft.from) + ' · логисту ушло');
     }
     loadOrders();
     apiGet('/orders/one', { id: o.id }).then(function (r2) { if (r2 && r2.data && r2.data.order) { drawerOrder = r2.data.order; renderView(drawerOrder, who); } });
@@ -2405,6 +2451,25 @@ function fetchCustomers(q) {
     h += '<div class="op2-it" data-name="' + esc(q) + '"><span>Новый: «' + esc(q) + '»</span><span class="op2-m">как ввели</span></div>';
     $('#op2-f-custlist').innerHTML = h;
     $('#op2-f-custbox').classList.add('op2-open');
+  }).catch(function () {});
+}
+/* Влад 12.09: «партнёру наёмной техники тоже должен быть справочник юридических лиц» - тот же
+   принцип, что и у «Заказчика» (fetchCustomers выше), только своя история (кого уже возили,
+   plan_order_executors) вместо «моих заказов». */
+function fetchCarriers(q) {
+  apiGet('/orders/carriers', { q: q }).then(function (r) {
+    if (!r || !r.ok || !r.data || r.data.error) return;
+    var hist = r.data.history || [], all = r.data.all || [];
+    var h = '';
+    if (hist.length) h += '<div class="op2-sec">Уже возили</div>' + hist.slice(0, 6).map(function (c) {
+      return '<div class="op2-it" data-name="' + esc(c.name) + '"' + (c.entity_id ? ' data-eid="' + esc(c.entity_id) + '"' : '') + '><span>' + esc(c.name) + '</span><span class="op2-m">' + esc(c.n || '') + '×</span></div>';
+    }).join('');
+    if (all.length) h += '<div class="op2-sec">Справочник юрлиц</div>' + all.slice(0, 10).map(function (c) {
+      return '<div class="op2-it" data-name="' + esc(c.name) + '" data-eid="' + esc(c.id) + '"><span>' + esc(c.name) + '</span><span class="op2-m">' + esc(c.inn || '') + '</span></div>';
+    }).join('');
+    h += '<div class="op2-it" data-name="' + esc(q) + '"><span>Новый: «' + esc(q) + '»</span><span class="op2-m">как ввели</span></div>';
+    $('#op2-h-colist').innerHTML = h;
+    $('#op2-h-cobox').classList.add('op2-open');
   }).catch(function () {});
 }
 function fetchInn(inn) {

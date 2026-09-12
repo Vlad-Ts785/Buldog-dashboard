@@ -21,11 +21,47 @@
 var ROOT_ID = 'page-order-plan';
 function $(sel, root) { return (root || document).querySelector(sel); }
 function $$(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+/* Влад 11.09: «сторонние подсказки заполнения заблокировать, только внутренние дашборда» -
+   Chrome/Яндекс игнорируют autocomplete="off" у полей, похожих на адрес/имя/телефон, и рисуют
+   своё меню (со своей историей автозаполнения) поверх наших подсказок. Рабочий обход:
+   autocomplete="new-password" + случайное name. 12.09 (живой тест, скриншот сторонней
+   выпадашки над поиском машины в поповере «Поставить»): раньше это применялось ТОЛЬКО к
+   #op2-d-body (шторка) - «все формы для заполнения должны быть заблокированы», вызывается
+   теперь на каждом месте, где что-то рендерится: buildDom (статический каркас - тулбарные
+   поиски, поиск в поповере), wireForm (шторка), openHiredStep (наёмник), renderList повтора. */
+function blockForeignAutofill_(root) {
+  $$('input:not([type=date]):not([type=checkbox]),textarea', root).forEach(function (i) {
+    i.setAttribute('autocomplete', 'new-password'); i.setAttribute('autocorrect', 'off'); i.setAttribute('spellcheck', 'false');
+    i.setAttribute('name', 'op2-' + Math.random().toString(36).slice(2, 9));
+  });
+}
 
 /* Своя экранировка - всё, что приходит от людей (заказчик, груз, адреса, имена),
    уходит в innerHTML только через неё. Общей escHtml_ в index.html нет - те,
    что есть, приватны внутри чужих IIFE. */
 function capFirst(s) { s = String(s || ''); return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; } /* «буровая Liebherr…» -> «Буровая Liebherr…» */
+/* Своя база (Влад 12.09) - кнопка «База» у адреса погрузки/выгрузки, только у логиста.
+   Координаты - точный ответ DaData на этот адрес (проверено вручную 12.09), не пересчитываются. */
+var BASE_ADDRESS_ = 'Московская обл, г Домодедово, мкр Центральный, ул Промышленная, д 37';
+var BASE_LAT_ = '55.4672641', BASE_LON_ = '37.7794222';
+/* Та же ставка, что уже используется в Калькуляторе для выделения НДС из цены КП
+   (files/index.html, genKP(), VAT_RATE=0.22) - один и тот же процент по всему дашборду. */
+var VAT_RATE_ = 0.22;
+/* Влад 12.09: «маржа ниже 23% - красным». Порог один на обе ветки (с/без НДС у поставщика). */
+var MARGIN_RED_BELOW_ = 23;
+/* Общая формула маржи наёмника - и попап «Отдать наёмнику» (openHiredStep/recalc), и
+   карточка заявки (renderView) должны считать ОДИНАКОВО, иначе одна и та же запись
+   показывает разные цифры в двух местах (тот же класс ошибки, что в orders-calc: общую
+   формулу держать в одном месте, не дублировать). Влад 12.09: «представить, что и заказчик
+   как будто бы без НДС, и поставщик без НДС» - цену менеджера мы ВСЕГДА выставляем с НДС;
+   если поставщик НДС не начисляет, эту сумму нельзя принять к вычету, поэтому маржу считаем
+   от цены-нетто (цена/(1+ставка НДС)), а не от полной цены. С НДС у поставщика - НДС
+   сокращается с обеих сторон одинаково, поправка не нужна. */
+function hiredMargin_(price, rate, withVat) {
+  var base = withVat ? price : price / (1 + VAT_RATE_);
+  var m = base - rate;
+  return { amount: m, pct: Math.round(m / base * 100) };
+}
 function esc(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -33,6 +69,32 @@ function esc(s) {
 }
 function num(v) { var n = parseFloat(String(v == null ? '' : v).replace(/\s/g, '').replace(',', '.')); return isFinite(n) ? n : 0; }
 function fmtP(n) { n = num(n); return n ? n.toLocaleString('ru-RU').replace(/ /g, ' ') + ' ₽' : ''; }
+/* Денежное поле ввода - ГОСТ раздел 3 (Влад 12.09: «должно быть красиво с
+   разделениями... невозможно внести белиберду со скобками - только цифры»).
+   Живая маска: только цифры, разделение по тысячам пробелом на каждый ввод,
+   курсор остаётся на том же месте среди цифр (не улетает в конец поля).
+   num() уже умеет читать значение с пробелами (.replace(/\s/g,'')) - отдельно
+   очищать перед сохранением/расчётом не нужно, само поле хранит «красивую»
+   строку. Применять к КАЖДОМУ полю суммы по умолчанию - см. DESIGN_SYSTEM.md
+   раздел 3, «Денежное поле ввода» для полного списка/оговорок. */
+function wireMoneyInput_(id) {
+  var el = $('#' + id);
+  if (!el) return;
+  el.addEventListener('input', function () {
+    var start = this.selectionStart;
+    var digitsBefore = this.value.slice(0, start).replace(/\D/g, '').length;
+    var digits = this.value.replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+    var formatted = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    this.value = formatted;
+    var count = 0, pos = formatted.length;
+    for (var i = 0; i < formatted.length; i++) {
+      if (formatted[i] !== ' ') count++;
+      if (count === digitsBefore) { pos = i + 1; break; }
+    }
+    if (digitsBefore === 0) pos = 0;
+    try { this.setSelectionRange(pos, pos); } catch (e) {}
+  });
+}
 function fmtPhone(p) {
   var d = String(p || '').replace(/\D/g, '');
   if (d.length === 11) d = d.slice(1);
@@ -233,6 +295,17 @@ function oMgrTitle(o) {
   if (o.internal) return 'внутренний заказ, создал логист ' + (o.taken_by_name || o.manager_name || '');
   return o.manager_name || o.manager_code || '';
 }
+/* Влад 12.09: «колонку "Менеджер и логист" сразу после нумерации... номер заказа, потом
+   менеджер, потом логист... вся индикация: кто создал заявку, кто принял заявку» - те же
+   op2-code, что и раньше, просто вынесены в свои колонки (было только «Мен.» у логиста,
+   ближе к «Машина», и никакой колонки логиста у менеджера вообще). Обе таблицы (менеджера
+   и логиста) - одинаковый порядок и вид ячеек. */
+function mgrCodeCell_(o) {
+  return '<td><span class="op2-code" title="' + esc(oMgrTitle(o)) + '"' + (o.internal ? ' style="color:var(--tint-blue)"' : '') + '>' + esc(oMgrCode(o)) + '</span></td>';
+}
+function logCodeCell_(o) {
+  return '<td>' + (o.taken_by_name ? '<span class="op2-code" title="' + esc(o.taken_by_name) + '">' + esc((o.taken_by_code || '').toUpperCase()) + '</span>' : '<span class="op2-dim">—</span>') + '</td>';
+}
 function byId(id) { for (var i = 0; i < ORD.length; i++) { if (String(ORD[i].id) === String(id)) return ORD[i]; } return null; }
 function execById(o, eid) { var l = o.executors || []; for (var i = 0; i < l.length; i++) { if (String(l[i].id) === String(eid)) return l[i]; } return null; }
 function isMgr() { return VIEW === 'mgr'; }
@@ -311,7 +384,10 @@ function buildDom() {
         '<div class="op2-tblwrap op2-x">' +
           '<table class="op2-tbl op2-mgr-tbl" id="op2-mgr-tbl">' +
             '<thead><tr>' +
-              '<th>№</th><th data-sort="t" class="op2-on">Время<span class="op2-s">▲</span></th>' +
+              '<th>№</th>' +
+              '<th data-sort="mgr">Мен.<span class="op2-s">↕</span></th>' +
+              '<th data-sort="log">Лог.<span class="op2-s">↕</span></th>' +
+              '<th data-sort="t" class="op2-on">Время<span class="op2-s">▲</span></th>' +
               '<th data-sort="type">Техника<span class="op2-s">↕</span></th>' +
               '<th data-sort="cust">Заказчик<span class="op2-s">↕</span></th>' +
               '<th>Откуда → куда</th><th>Машина · водитель</th>' +
@@ -352,11 +428,12 @@ function buildDom() {
           '<table class="op2-tbl" id="op2-log-tbl">' +
             '<thead id="op2-log-head"><tr>' +
               '<th class="op2-on" data-sort="n" title="По умолчанию - по номеру заявки">№<span class="op2-s">▲</span></th>' +
+              '<th data-sort="mgr">Мен.<span class="op2-s">↕</span></th>' +
+              '<th data-sort="log">Лог.<span class="op2-s">↕</span></th>' +
               '<th data-sort="t">Время<span class="op2-s">↕</span></th>' +
               '<th data-sort="cust">Заказчик<span class="op2-s">↕</span></th>' +
               '<th data-sort="type">Техника<span class="op2-s">↕</span></th>' +
               '<th>Груз</th><th>Откуда → куда</th><th>Габарит</th>' +
-              '<th data-sort="mgr">Мен.<span class="op2-s">↕</span></th>' +
               '<th>Машина</th>' +
               '<th data-sort="st">Статус<span class="op2-s">↕</span></th>' +
             '</tr></thead>' +
@@ -370,7 +447,7 @@ function buildDom() {
           '<span>Отбой: строка мигает, пока логист не нажмёт «принять»; машину на отбой поставить нельзя; если стояла - «Снять машину»</span>' +
           '<span><button class="op2-dok op2-on" style="pointer-events:none">✓</button> водитель подтвердил заявку (ставит логист) - у менеджера госномер зелёный</span>' +
           '<span>Зажать плитку машины на полсекунды - режим перемещения: перетащи на другую заявку (пусто - перенос, занято - обмен), Esc - отмена</span>' +
-          '<span>Менеджер - три буквы фамилии, как в Планировке</span>' +
+          '<span>Мен./Лог. - три буквы фамилии, как в Планировке; Лог. - кто принял заявку в работу, наведи - полное имя</span>' +
         '</div>' +
       '</section>' +
 
@@ -411,6 +488,7 @@ function buildDom() {
         '</div>' +
       '</div></div>' +
     '</div>';
+  blockForeignAutofill_(page); /* статический каркас - тулбарные поиски, поиск в поповере «Поставить» */
   wire();
   return true;
 }
@@ -559,7 +637,17 @@ function wire() {
   /* ── глобальные: Esc, клик мимо, скролл ── */
   document.addEventListener('keydown', onKeyDown, true);
   document.addEventListener('mousedown', onDocMouseDown, true);
-  window.addEventListener('scroll', function () { if ($('#op2-pop') && $('#op2-pop').classList.contains('op2-open')) closePop(); }, true);
+  /* Влад 12.09 (живой тест): «прокручиваю колесиком вниз - список закрывается» - скролл не
+     всплывает, поэтому ловим его на capture-фазе с window; но так же ловился и скролл СПИСКА
+     машин ВНУТРИ самого поповера (у #op2-pop-body своя прокрутка) - каждое движение колеса
+     по списку закрывало его же. Закрываем только если событие пришло НЕ изнутри поповера
+     (значит скроллится страница за ним, а не сам список). */
+  window.addEventListener('scroll', function (e) {
+    var pop = $('#op2-pop');
+    if (!pop || !pop.classList.contains('op2-open')) return;
+    if (e.target && e.target.nodeType === 1 && pop.contains(e.target)) return;
+    closePop();
+  }, true);
   document.addEventListener('pointermove', onPointerMove);
   document.addEventListener('pointerup', onPointerUp);
   document.addEventListener('pointercancel', function () { clearTimeout(mv.timer); mv.timer = null; if (mv.active) endMove(); });
@@ -851,6 +939,7 @@ function sortRows(rows) {
     else if (k === 'cust') { va = String(a.customer || '').toLowerCase(); vb = String(b.customer || '').toLowerCase(); }
     else if (k === 'type') { va = String(a.equipment_type || '').toLowerCase(); vb = String(b.equipment_type || '').toLowerCase(); }
     else if (k === 'mgr') { va = oMgrCode(a); vb = oMgrCode(b); }
+    else if (k === 'log') { va = (a.taken_by_code || '').toUpperCase(); vb = (b.taken_by_code || '').toUpperCase(); }
     else { va = ''; vb = ''; }
     return (va > vb ? 1 : va < vb ? -1 : 0) * d || (num(oNo(a)) - num(oNo(b)));
   });
@@ -883,6 +972,7 @@ function renderMgr() {
     var cls = 'op2-r36' + (k === 'ot' ? ' op2-otboy' : '');
     return '<tr class="' + cls + '" data-oid="' + esc(o.id) + '">' +
       '<td class="op2-ono">' + esc(oNo(o)) + '</td>' +
+      mgrCodeCell_(o) + logCodeCell_(o) +
       '<td>' + timeCell(o) + '</td>' +
       '<td>' + (o.equipment_type ? '<span class="op2-ttype">' + esc(o.equipment_type) + '</span>' : '<span class="op2-dim">уточнить</span>') + '</td>' +
       '<td class="op2-ell" title="' + esc(o.customer) + '">' + (WIDE && F.q ? '<span class="op2-code" style="margin-right:6px">' + esc(dm(o.service_date)) + '</span>' : '') + esc(o.customer || '') + '</td>' +
@@ -894,20 +984,30 @@ function renderMgr() {
   }).join('');
   var cash = rows.filter(function (o) { return !!o.cash; }).length;
   var sum = rows.reduce(function (a, o) { return a + num(o.price); }, 0);
-  $('#op2-mgr-foot').innerHTML = '<tr><td colspan="7">' +
+  $('#op2-mgr-foot').innerHTML = '<tr><td colspan="9">' +
     (WIDE && F.q ? 'Поиск за 3 месяца · «' + esc(F.q) + '» · ' : 'Итого за ' + (TO_DATE ? 'неделю' : 'день') + ' · ') +
     rows.length + ' ' + plural(rows.length, 'заявка', 'заявки', 'заявок') + (cash ? ' · ' + cash + ' наличными' : '') +
     '</td><td class="op2-num"><span class="op2-mono">' + esc(fmtP(sum) || '—') + '</span></td></tr>';
+}
+/* Влад 12.09: «не нужно так длинно писать полное имя - нужно сокращённо, Цуц/Кан/Мах, как
+   уже есть у логистов». Полное имя - в title (навести мышью), не в самой строке. Раньше
+   (см. историю) висело бейджем прямо в ячейке «Машина» - Влад 12.09, второй заход: «отметка
+   логиста должна быть не где-то сейчас это сделал, а колонка» - переехало в mgrCodeCell_/
+   logCodeCell_ (своя колонка «Лог.» в обеих таблицах), тут остался только голый тег для
+   карточки/поповера, где своя обёртка нужна по месту. */
+function takenByHtml_(o, verb, wrapClass) {
+  if (!o.taken_by_name) return '';
+  return '<span' + (wrapClass ? ' class="' + wrapClass + '"' : '') + ' title="' + esc(o.taken_by_name) + '">' + esc(verb) + ' ' + esc((o.taken_by_code || o.taken_by_name).toUpperCase()) + '</span>';
 }
 function mgrVehCell(o) {
   var h = oHired(o);
   if (h) {
     return '<div class="op2-veh"><span class="op2-hire">Наёмник</span><span class="op2-drv">' + esc(h.carrier_name || 'перевозчик уточняется') +
-      (h.vehicle_gos ? ' · <span class="op2-mono">' + esc(h.vehicle_gos) + '</span>' : '') + (h.driver_name ? ' · ' + esc(h.driver_name) : '') + '</span></div>';
+      (h.vehicle_gos ? ' · <span class="op2-mono">' + esc(h.vehicle_gos) + '</span>' : '') + (h.driver_name ? ' · ' + esc(h.driver_name) : '') + '</span></div>' + pendHtml(o, 'mgr');
   }
   var vs = oOwn(o);
   if (!vs.length) {
-    return '<span class="op2-dim">машину ещё не поставили' + (o.taken_by_name ? ' · <b style="font-weight:500;color:var(--text)">принял ' + esc(o.taken_by_name) + '</b>' : '') + '</span>';
+    return '<span class="op2-dim">машину ещё не поставили</span>';
   }
   function row(v) {
     var okc = v.driver_confirmed_at ? ' op2-ok' : '';
@@ -921,14 +1021,23 @@ function mgrVehCell(o) {
     : '<div class="op2-veh op2-multi">' + vs.map(function (v) { return '<div class="op2-row">' + row(v) + '</div>'; }).join('') + '</div>';
   return inner + pendHtml(o, 'mgr');
 }
+/* «замена машины» (type=replace_vehicle, from_gos/to_gos) и «замена перевозчика»
+   (type=replace_carrier, from_carrier_name/to_carrier_name) - один и тот же
+   plan_order_change_requests, один общий разбор from/to, чтобы не дублировать
+   ветвление в каждом месте, где показывается или разрешается запрос. */
+function pendFromTo_(p) {
+  if (p.type === 'replace_carrier') return { from: p.from_carrier_name || '', to: p.to_carrier_name || '', extra: '', cls: '' };
+  return { from: p.from_gos || '', to: p.to_gos || '', extra: p.to_driver_name || '', cls: 'op2-mono' };
+}
 function pendHtml(o, who) {
   var p = o.pending_request;
   if (!p) return '';
+  var ft = pendFromTo_(p);
   if (who === 'mgr') {
-    return '<div class="op2-pend">логист предлагает замену → <span class="op2-mono">' + esc(p.to_gos || '') + '</span> · <b>ждёт вашего подтверждения</b></div>';
+    return '<div class="op2-pend">логист предлагает замену → <span class="' + ft.cls + '">' + esc(ft.to) + '</span> · <b>ждёт вашего подтверждения</b></div>';
   }
-  return '<div class="op2-pend" title="Замена вне заявленных на заявке под данные: ждёт, пока менеджер согласует с заказчиком">замена → <span class="op2-mono">' +
-    esc(p.to_gos || '') + '</span>' + (p.to_driver_name ? ' · ' + esc(p.to_driver_name) : '') + ' · <b>ждёт менеджера</b></div>';
+  return '<div class="op2-pend" title="Замена вне заявленных на заявке под данные: ждёт, пока менеджер согласует с заказчиком">замена → <span class="' +
+    ft.cls + '">' + esc(ft.to) + '</span>' + (ft.extra ? ' · ' + esc(ft.extra) : '') + ' · <b>ждёт менеджера</b></div>';
 }
 
 /* ── таблица логиста ── */
@@ -962,14 +1071,15 @@ function vehCellLog(o) {
   if (h) {
     return '<div class="op2-veh" data-oid="' + esc(o.id) + '"><span class="op2-hire">Наёмник</span><span class="op2-drv">' +
       esc(h.carrier_name || 'перевозчик уточняется') + (h.vehicle_gos ? ' · <span class="op2-mono">' + esc(h.vehicle_gos) + '</span>' : '') +
-      (h.driver_name ? ' · ' + esc(h.driver_name) : '') + (h.carrier_status ? ' · ' + esc(h.carrier_status) : '') + '</span></div>';
+      (h.driver_name ? ' · ' + esc(h.driver_name) : '') + (h.carrier_status ? ' · ' + esc(h.carrier_status) : '') + '</span></div>' + pendHtml(o, 'log');
   }
   var vs = oOwn(o);
   if (!vs.length) {
     var t = oTime(o);
     var amber = (t && tmin(t) - nowMin() < 120 && tmin(t) >= nowMin() && DATE === todayStr()) ? '<span class="op2-dot-amber" title="до подачи меньше 2 ч"></span>' : '';
-    var take = o.taken_by_name ? '<span class="op2-take">взял ' + esc(String(o.taken_by_code || o.taken_by_name).toUpperCase()) + '</span>' : '<span class="op2-take">беру</span>';
-    return '<button class="op2-slot" data-oid="' + esc(o.id) + '">' + amber + 'Поставить' + take + '</button>';
+    /* «взял ЦУЦ»/«беру» переехало в отдельную колонку «Лог.» (Влад 12.09: «не где-то сейчас
+       это сделал, а колонка») - кнопка больше не дублирует то же самое своим текстом. */
+    return '<button class="op2-slot" data-oid="' + esc(o.id) + '">' + amber + 'Поставить</button>';
   }
   function okBtn(v) {
     var on = !!v.driver_confirmed_at;
@@ -1003,7 +1113,12 @@ function renderLog() {
   $('#op2-c-new').textContent = nw;
 
   var rows = sortRows(ORD.slice()).filter(function (o) {
-    if (isFresh(o)) return true;   /* новая заявка показывается всегда, даже вне фильтра */
+    /* Влад 12.09 (живой тест): «фильтр должен фильтровать, но почему-то не фильтрует» -
+       раньше новая заявка (isFresh) показывалась ВСЕГДА, в обход любого фильтра (типа
+       техники, поиска, «Без машины», «Под данные») - две тестовые заявки разных типов обе
+       остались видны при фильтре «Трал». Свежесть теперь не обходит фильтры - она только
+       подсвечивает строку (op2-new-halo ниже) и считается отдельным счётчиком «Новые»
+       (F.newOnly ниже даёт целенаправленно посмотреть все новые через один клик). */
     if (F.type !== 'all' && segOf(o.equipment_type) !== F.type) return false;
     if (F.mine && MY_SEG && segOf(o.equipment_type) !== MY_SEG && !(!oOwn(o).length && !oHired(o))) return false;
     if (F.nocar && (oOwn(o).length || oHired(o) || oSt(o) === 'ot')) return false;
@@ -1025,13 +1140,13 @@ function renderLog() {
     var h = vs.length > 1 ? ' style="height:' + (44 + 18 * (vs.length - 1)) + 'px"' : '';
     return '<tr class="' + cls + '" data-oid="' + esc(o.id) + '"' + h + '>' +
       '<td class="op2-ono">' + esc(oNo(o)) + '</td>' +
+      mgrCodeCell_(o) + logCodeCell_(o) +
       '<td>' + timeCell(o) + '</td>' +
       '<td class="op2-ell" title="' + esc(o.customer) + '">' + (isFresh(o) ? '<span class="op2-st-chip op2-ok" style="margin-right:6px">новая</span>' : '') + esc(o.customer || '') + '</td>' +
       '<td>' + (o.equipment_type ? '<span class="op2-ttype">' + esc(o.equipment_type) + '</span>' : '<span class="op2-dim">уточнить</span>') + '</td>' +
       '<td class="op2-dim op2-ell" style="max-width:150px">' + esc(o.cargo || '') + '</td>' +
       '<td>' + routeCell(o, 120) + '</td>' +
       '<td class="op2-sm">' + (o.gabarit ? '<span style="color:var(--tint-amber)">' + esc(o.gabarit) + '</span>' : '') + '</td>' +
-      '<td><span class="op2-code" title="' + esc(oMgrTitle(o)) + '"' + (o.internal ? ' style="color:var(--tint-blue)"' : '') + '>' + esc(oMgrCode(o)) + '</span></td>' +
       '<td>' + vehCellLog(o) + '</td>' +
       '<td class="op2-st">' + (o.needs_data ? '<span class="op2-nd" title="под данные"></span>' : '') + stChip(o) + '</td>' +
       '</tr>';
@@ -1209,7 +1324,7 @@ function openPop(anchor, o, forceAdd) {
   var vs = oOwn(o);
   $('#op2-pop-cur').innerHTML = vs.length
     ? 'Сейчас: <b>' + esc(vs.map(function (v) { return v.vehicle_gos; }).join(', ')) + '</b>'
-    : 'Сейчас: <b>без машины</b>' + (o.taken_by_name ? ' · взял ' + esc(o.taken_by_name) : '');
+    : 'Сейчас: <b>без машины</b>' + (o.taken_by_name ? ' · ' + takenByHtml_(o, 'взял', '') : '');
   var ok = $('#op2-pop-ok');
   ok.className = 'op2-dbtn op2-primary op2-blocked';
   ok.textContent = vs.length && !popAdd ? 'Выбери замену или «Снять»' : 'Выбери машину';
@@ -1321,7 +1436,9 @@ function onPopBodyClick(e) {
 }
 function onPopOk() {
   var o = popOrder; if (!o) return;
-  if (this.classList.contains('op2-blocked')) { toast('<span class="op2-warn">Сначала выбери машину</span> из списка или «Наёмник»'); return; }
+  /* Текст тоста = текст самой кнопки - у неё уже осмысленная причина блокировки (своя машина
+     не выбрана / у наёмника не хватает компании или ставки закупки, см. updateHiredBtn_). */
+  if (this.classList.contains('op2-blocked')) { toast('<span class="op2-warn">' + esc(this.textContent) + '</span>'); return; }
   if ($('#op2-pop').classList.contains('op2-hired')) { saveHired(o); return; }
   var gos = this.dataset.gos;
   var declared = this.dataset.declared === '1';
@@ -1376,7 +1493,10 @@ function openHiredStep(o) {
   var h = oHired(o) || {};
   var statuses = ['договариваюсь', 'подтвердил', 'выехал', 'отказался'];
   $('#op2-hstep').innerHTML =
-    '<div class="op2-fld"><label>Компания-перевозчик</label><input id="op2-h-co" autocomplete="off" placeholder="Название перевозчика" value="' + esc(h.carrier_name || '') + '"><span class="op2-hint">Из справочника перевозчиков</span></div>' +
+    '<div class="op2-fld op2-sugg" id="op2-h-cobox"><label>Компания-перевозчик</label>' +
+      '<input id="op2-h-co" autocomplete="off" placeholder="Начни вводить - по первым буквам" value="' + esc(h.carrier_name || '') + '" data-entity-id="' + esc(h.carrier_id || '') + '">' +
+      '<div class="op2-list" id="op2-h-colist"></div>' +
+      '<span class="op2-hint">Справочник юрлиц + кого уже возили</span></div>' +
     '<div class="op2-g2">' +
       '<div class="op2-fld"><label>Контакт у перевозчика</label><input id="op2-h-contact" autocomplete="off" placeholder="Имя · телефон" value="' + esc(h.carrier_contact || '') + '"></div>' +
       '<div class="op2-fld"><label>Статус перевозчика</label><div class="op2-cstat" id="op2-h-cs">' +
@@ -1387,35 +1507,92 @@ function openHiredStep(o) {
       '<div class="op2-fld"><label>Водитель</label><input id="op2-h-drv" autocomplete="off" placeholder="Фамилия Имя Отчество" value="' + esc(h.driver_name || '') + '"></div>' +
       '<div class="op2-fld"><label>Телефон водителя</label><input id="op2-h-phone" class="op2-mono" autocomplete="off" placeholder="+7" value="' + esc(h.driver_phone || '') + '"></div>' +
       '<div class="op2-fld"><label>Ставка закупки, ₽</label><input id="op2-h-rate" class="op2-mono" inputmode="numeric" autocomplete="off" value="' + esc(h.purchase_rate || '') + '"></div>' +
-      '<div class="op2-fld"><label>Расчёт</label><input id="op2-h-settle" autocomplete="off" placeholder="Б/н с НДС · наличные · отсрочка" value="' + esc(h.settlement || '') + '"></div>' +
+      /* Влад 12.09: «непонятно назначение этого окна [Расчёт] - вместо него две кнопки:
+         с НДС или без НДС - относятся к экрану ввода стоимости поставщика, от них зависит
+         маржа». Поле «Расчёт» было чистым текстом без единого места вывода (write-only,
+         никогда не показывалось обратно) - заменено явным переключателем, значение которого
+         реально на что-то влияет (см. recalc). Хранится в той же колонке settlement, теперь
+         каноническим значением «с ндс»/«без ндс», а не произвольным текстом. */
+      '<div class="op2-fld"><label>НДС у поставщика</label><div class="op2-cstat" id="op2-h-vat">' +
+        '<button class="op2-chip' + (h.settlement === 'без ндс' ? '' : ' op2-on') + '" data-vat="1">С НДС</button>' +
+        '<button class="op2-chip' + (h.settlement === 'без ндс' ? ' op2-on' : '') + '" data-vat="0">Без НДС</button>' +
+      '</div></div>' +
     '</div>' +
     '<div class="op2-margin"><span class="op2-k">Цена менеджера ' + esc(fmtP(o.price) || 'не указана') + ' · маржа</span><span class="op2-v" id="op2-h-margin">—</span></div>' +
     '<div class="op2-fld"><label>Комментарий</label><input id="op2-h-comment" autocomplete="off" placeholder="Что важно знать по перевозчику" value="' + esc(h.comment || '') + '"></div>';
-  var ok = $('#op2-pop-ok');
-  ok.className = 'op2-dbtn op2-primary';
-  ok.textContent = 'Отдать наёмнику';
+  blockForeignAutofill_($('#op2-hstep'));
+  /* Влад 12.09: «отдать наёмнику невозможно без указания цены» - та же логика, что у цены
+     заявки при создании (tickState), только тут своя кнопка «Отдать наёмнику», не общий
+     op2-f-save. «Нужен расчёт маржи в процентах сразу» - % от цены менеджера рядом с суммой,
+     не просто разница в рублях. Обе проверки (компания/ставка) - в одной функции, вызывается
+     из обоих полей, чтобы кнопка не «зависала» с текстом от предыдущего поля. */
+  function updateHiredBtn_() {
+    var ok = $('#op2-pop-ok');
+    var co = $('#op2-h-co').value.trim();
+    var rate = num($('#op2-h-rate').value);
+    if (!co) { ok.className = 'op2-dbtn op2-primary op2-blocked'; ok.textContent = 'Впиши компанию-перевозчика'; return; }
+    if (!rate) { ok.className = 'op2-dbtn op2-primary op2-blocked'; ok.textContent = 'Укажи ставку закупки'; return; }
+    ok.className = 'op2-dbtn op2-primary'; ok.textContent = 'Отдать наёмнику · ' + co;
+  }
+  /* Порог 23% - красный ниже него независимо от режима (даже положительная, но низкая
+     маржа - это красный, не только убыток). Формула - hiredMargin_ выше. */
   function recalc() {
-    var m = num(o.price) - num($('#op2-h-rate').value);
-    var el = $('#op2-h-margin');
-    if (!num(o.price)) { el.textContent = '—'; el.className = 'op2-v'; return; }
-    el.textContent = (m >= 0 ? '+' : '−') + fmtP(Math.abs(m));
-    el.className = 'op2-v ' + (m >= 0 ? 'op2-pos' : 'op2-neg');
+    var price = num(o.price), el = $('#op2-h-margin');
+    if (!price) { el.textContent = '—'; el.className = 'op2-v'; return; }
+    var vatBtn = $('#op2-h-vat .op2-chip.op2-on');
+    var withVat = !vatBtn || vatBtn.dataset.vat !== '0';
+    var r = hiredMargin_(price, num($('#op2-h-rate').value), withVat);
+    el.textContent = (r.amount >= 0 ? '+' : '−') + fmtP(Math.abs(r.amount)) + ' · ' + (r.amount >= 0 ? '+' : '−') + Math.abs(r.pct) + '%';
+    el.className = 'op2-v ' + (r.pct >= MARGIN_RED_BELOW_ ? 'op2-pos' : 'op2-neg');
+    updateHiredBtn_();
   }
   $('#op2-h-rate').addEventListener('input', recalc);
-  $('#op2-h-co').addEventListener('input', function () { $('#op2-pop-ok').textContent = 'Отдать наёмнику' + (this.value.trim() ? ' · ' + this.value.trim() : ''); });
+  wireMoneyInput_('op2-h-rate');
+  $('#op2-h-vat').addEventListener('click', function (e) {
+    var c = e.target.closest('.op2-chip'); if (!c) return;
+    $$('.op2-chip', this).forEach(function (x) { x.classList.remove('op2-on'); });
+    c.classList.add('op2-on');
+    recalc();
+  });
+  /* Влад 12.09: «партнёру наёмной техники тоже должен быть справочник юридических лиц» -
+     тот же принцип подсказок, что у «Заказчика» (fetchCustomers), отдельный источник
+     (история наёмок + sprav_legal_entities, а не заказчики). Ручной ввод сбрасывает
+     entity-привязку - если менеджер сам допечатал название, это уже не выбор из списка. */
+  var coT = null;
+  $('#op2-h-co').addEventListener('input', function () {
+    updateHiredBtn_();
+    this.dataset.entityId = '';
+    var v = this.value.trim(); clearTimeout(coT);
+    if (v.length < 2) { $('#op2-h-cobox').classList.remove('op2-open'); return; }
+    coT = setTimeout(function () { fetchCarriers(v); }, 250);
+  });
+  $('#op2-h-co').addEventListener('blur', function () { setTimeout(function () { $('#op2-h-cobox').classList.remove('op2-open'); }, 150); });
+  $('#op2-h-colist').addEventListener('mousedown', function (e) {
+    var it = e.target.closest('.op2-it'); if (!it) return;
+    var inp = $('#op2-h-co');
+    inp.value = it.dataset.name || ''; inp.dataset.entityId = it.dataset.eid || '';
+    updateHiredBtn_();
+    $('#op2-h-cobox').classList.remove('op2-open');
+  });
   $('#op2-h-cs').addEventListener('click', function (e) {
     var c = e.target.closest('.op2-chip'); if (!c) return;
     $$('.op2-chip', this).forEach(function (x) { x.classList.remove('op2-on'); });
     c.classList.add('op2-on');
   });
   recalc();
+  updateHiredBtn_();
 }
 function saveHired(o) {
   var co = $('#op2-h-co').value.trim();
   if (!co) { toast('<span class="op2-warn">Впиши компанию-перевозчика</span> · остальное можно потом'); return; }
+  /* Влад 12.09: «отдать наёмнику невозможно без указания цены» - кнопка уже блокируется
+     через updateHiredBtn_ (onPopOk не пропустит клик дальше), эта проверка - подстраховка
+     на случай прямого вызова saveHired мимо кнопки. */
+  if (!num($('#op2-h-rate').value)) { toast('<span class="op2-warn">Укажи ставку закупки</span> · без неё маржа не считается'); return; }
   var cs = $('#op2-h-cs .op2-chip.op2-on');
   apiPost('/orders/hired_set', {
     order_id: o.id,
+    carrier_id: $('#op2-h-co').dataset.entityId || '',
     carrier_name: co,
     carrier_contact: $('#op2-h-contact').value.trim(),
     gos: $('#op2-h-gos').value.trim(),
@@ -1423,12 +1600,26 @@ function saveHired(o) {
     driver_name: $('#op2-h-drv').value.trim(),
     driver_phone: $('#op2-h-phone').value.trim(),
     purchase_rate: String(num($('#op2-h-rate').value) || ''),
-    settlement: $('#op2-h-settle').value.trim(),
+    /* «Расчёт» (свободный текст, никогда не показывался обратно) заменён явным
+       переключателем НДС - та же колонка settlement, теперь каноническое значение. */
+    settlement: (($('#op2-h-vat .op2-chip.op2-on') || {}).dataset || {}).vat === '0' ? 'без ндс' : 'с ндс',
     carrier_status: cs ? cs.dataset.cs : '',
     comment: $('#op2-h-comment').value.trim()
   }).then(function (r) {
     if (!ok_(r)) return;
-    closePop(); S.tickUp();
+    closePop();
+    /* Влад 12.09 (живой тест): «была под данные, но я смог изменить название компании-партнёра
+       без согласования с менеджером» - смена перевозчика на «под данные» заявке теперь идёт
+       тем же путём, что и замена своей машины вне заявленных: не применяется тихо, а ждёт
+       менеджера. Компания на исполнителе остаётся прежней, пока не подтвердят. */
+    if (r.data && r.data.pending) {
+      S.attention();
+      toast('Запрос на замену перевозчика: <span class="op2-warn">' + esc(co) + '</span> · заявка №' + esc(oNo(o)) +
+        ' под данные · <b>менеджер согласует с заказчиком</b>', null, 9000);
+      loadOrders();
+      return;
+    }
+    S.tickUp();
     toast('Отдано наёмнику <span class="op2-tick">' + esc(co) + '</span> · заявка №' + esc(oNo(o)) + ' · госномер и водителя допиши, когда подтвердят');
     loadOrders();
   });
@@ -1631,14 +1822,16 @@ function renderView(o, who) {
 
   var vehHtml;
   if (h) {
-    var marg = num(o.price) - num(h.purchase_rate);
+    /* Та же формула, что и в попапе «Отдать наёмнику» (hiredMargin_) - НДС-поправка и
+       порог 23% красным должны совпадать здесь и там, это одна и та же запись. */
+    var hm = (num(o.price) && num(h.purchase_rate)) ? hiredMargin_(num(o.price), num(h.purchase_rate), h.settlement !== 'без ндс') : null;
     vehHtml = '<div class="op2-vehcard"><div class="op2-top"><span class="op2-hire">Наёмник</span><span class="op2-gos">' + esc(h.vehicle_gos || 'госномер уточняется') + '</span>' +
-      (o.taken_by_name ? '<span class="op2-by">взял ' + esc(o.taken_by_name) + '</span>' : '') + '</div>' +
+      takenByHtml_(o, 'взял', 'op2-by') + '</div>' +
       '<div class="op2-line"><span><span class="op2-k">Компания</span> ' + esc(h.carrier_name || 'уточнить') + '</span>' +
       '<span><span class="op2-k">Водитель</span> ' + esc(h.driver_name || 'уточнить') + '</span>' +
       '<span><span class="op2-k">Статус перевозчика</span> ' + esc(h.carrier_status || 'уточнить') + '</span></div>' +
-      '<div class="op2-line"><span><span class="op2-k">Закупка</span> <span class="op2-mono">' + esc(fmtP(h.purchase_rate) || '—') + '</span></span>' +
-      (num(o.price) && num(h.purchase_rate) ? '<span><span class="op2-k">Маржа</span> <span class="op2-mono" style="color:var(--' + (marg >= 0 ? 'tint-green' : 'tint-red') + ')">' + (marg >= 0 ? '+' : '−') + esc(fmtP(Math.abs(marg))) + '</span></span>' : '') + '</div>' +
+      '<div class="op2-line"><span><span class="op2-k">Закупка</span> <span class="op2-mono">' + esc(fmtP(h.purchase_rate) || '—') + (h.settlement === 'без ндс' ? ' · без НДС' : '') + '</span></span>' +
+      (hm ? '<span><span class="op2-k">Маржа</span> <span class="op2-mono" style="color:var(--' + (hm.pct >= MARGIN_RED_BELOW_ ? 'tint-green' : 'tint-red') + ')">' + (hm.amount >= 0 ? '+' : '−') + esc(fmtP(Math.abs(hm.amount))) + ' · ' + (hm.amount >= 0 ? '+' : '−') + Math.abs(hm.pct) + '%</span></span>' : '') + '</div>' +
       '<div class="op2-acts"><button class="op2-ghost op2-copybtn" data-copy="pass">Копировать данные на пропуск</button>' +
       '<button class="op2-dbtn op2-primary" id="op2-d-drv">Задание водителю</button></div></div>';
   } else if (v) {
@@ -1648,7 +1841,7 @@ function renderView(o, who) {
     vehHtml = '<div class="op2-vehcard"><div class="op2-top">' +
       '<span class="op2-gos' + (v.driver_confirmed_at ? ' op2-ok' : '') + '">' + esc(v.vehicle_gos || '') + '</span>' +
       (o.equipment_type ? '<span class="op2-ttype">' + esc(o.equipment_type) + '</span>' : '') +
-      '<span class="op2-by">' + okTxt + '</span></div>' +
+      '<span class="op2-by">' + okTxt + (o.taken_by_name ? ' · ' + takenByHtml_(o, 'взял', '') : '') + '</span></div>' +
       '<div class="op2-line"><span><span class="op2-k">Водитель</span> ' + esc(v.driver_name || 'уточнить') + '</span>' +
       '<span><span class="op2-k">Телефон</span> ' + (v.driver_phone ? '<a class="op2-tel op2-mono" href="tel:' + esc(String(v.driver_phone).replace(/[^\d+]/g, '')) + '">' + esc(fmtPhone(v.driver_phone)) + '</a>' : '<span class="op2-dim">уточнить</span>') + '</span>' +
       '<span><span class="op2-k">Прицеп</span> <span class="op2-mono">' + esc(v.trailer_gos || '—') + '</span></span></div>' +
@@ -1670,7 +1863,7 @@ function renderView(o, who) {
       '<span class="op2-dim">' + (o.otboy_ack_by ? 'логист принял · ' + esc(o.otboy_ack_by) : 'логист ещё не принял') + '</span></div>' +
       '<div class="op2-line op2-dim">Машину на отбой поставить нельзя</div></div>';
   } else {
-    vehHtml = '<div class="op2-vehcard"><div class="op2-top"><span class="op2-dim">Машину ещё не поставили' + (o.taken_by_name ? ' · принял ' + esc(o.taken_by_name) : '') + '</span></div>' +
+    vehHtml = '<div class="op2-vehcard"><div class="op2-top"><span class="op2-dim">Машину ещё не поставили' + (o.taken_by_name ? ' · ' + takenByHtml_(o, 'принял', '') : '') + '</span></div>' +
       (isLog ? '<div class="op2-acts"><button class="op2-dbtn op2-primary" id="op2-d-put">Поставить машину</button>' +
         (o.taken_by_name ? '' : '<button class="op2-ghost" id="op2-d-take">Беру в работу</button>') + '</div>' : '') + '</div>';
   }
@@ -1680,13 +1873,14 @@ function renderView(o, who) {
     '<span class="op2-hint op2-dim" style="align-self:center;margin-left:6px">один клик · логисты видят сразу</span></div></div>' : '';
 
   var p = o.pending_request;
+  var pft = p ? pendFromTo_(p) : null;
   var pendBar = p ? '<div class="op2-cbar op2-pendbar"><div class="op2-grow"><b>' +
-    (isLog ? 'Ждёт менеджера · замена' : 'Логист ' + esc(p.requested_by_name || '') + ' предлагает замену') + '</b> · <span class="op2-mono">' + esc(p.from_gos || '') + '</span> → <span class="op2-mono">' + esc(p.to_gos || '') + '</span>' +
-    (p.to_driver_name ? ' ' + esc(p.to_driver_name) : '') + (p.requested_at ? ' · ' + esc(p.requested_at) : '') +
+    (isLog ? 'Ждёт менеджера · замена' : 'Логист ' + esc(p.requested_by_name || '') + ' предлагает замену') + '</b> · <span class="' + pft.cls + '">' + esc(pft.from) + '</span> → <span class="' + pft.cls + '">' + esc(pft.to) + '</span>' +
+    (pft.extra ? ' ' + esc(pft.extra) : '') + (p.requested_at ? ' · ' + esc(p.requested_at) : '') +
     ' · заявка под данные: данные на пропуск изменятся, нужно согласие заказчика</div>' +
-    (isLog ? '<span class="op2-dim op2-sm">до ответа менеджера едет ' + esc(p.from_gos || '') + ' · позвони, если срочно</span>'
+    (isLog ? '<span class="op2-dim op2-sm">до ответа менеджера едет ' + esc(pft.from) + ' · позвони, если срочно</span>'
       : '<button class="op2-dbtn op2-primary" id="op2-d-approve">Подтвердить · заказчик согласен</button>' +
-        '<button class="op2-ghost op2-red" id="op2-d-reject">Отклонить · едет ' + esc(p.from_gos || '') + '</button>') +
+        '<button class="op2-ghost op2-red" id="op2-d-reject">Отклонить · едет ' + esc(pft.from) + '</button>') +
     '</div>' : '';
 
   function kv(k2, v2) { return '<div class="op2-kv"><span class="op2-k">' + esc(k2) + '</span><span class="op2-v">' + v2 + '</span></div>'; }
@@ -1771,15 +1965,16 @@ function renderView(o, who) {
 }
 function resolveRequest(o, action, who) {
   var p = o.pending_request; if (!p) return;
+  var ft = pendFromTo_(p);
   apiPost('/orders/change_request_resolve', { id: p.id, action: action }).then(function (r) {
     if (!ok_(r)) return;
     if (action === 'approve') {
       S.tickUp();
-      toast('Замена подтверждена: <span class="op2-tick">' + esc(p.to_gos || '') + (p.to_driver_name ? ' · ' + esc(p.to_driver_name) : '') + '</span> на №' + esc(oNo(o)) +
+      toast('Замена подтверждена: <span class="op2-tick">' + esc(ft.to) + (ft.extra ? ' · ' + esc(ft.extra) : '') + '</span> на №' + esc(oNo(o)) +
         ' · логисту ушло · <b>отправь заказчику новые данные на пропуск</b>', null, 9000);
     } else {
       S.tickDown();
-      toast('Замена отклонена · на №' + esc(oNo(o)) + ' едет ' + esc(p.from_gos || '') + ' · логисту ушло');
+      toast('Замена отклонена · на №' + esc(oNo(o)) + ' едет ' + esc(ft.from) + ' · логисту ушло');
     }
     loadOrders();
     apiGet('/orders/one', { id: o.id }).then(function (r2) { if (r2 && r2.data && r2.data.order) { drawerOrder = r2.data.order; renderView(drawerOrder, who); } });
@@ -1866,6 +2061,45 @@ function expandEntRow(seg) {
   S.unfold(rest.length);
 }
 
+/* «Кто заказывает» (только логист) - та же гармошка, что «От кого» выше (Влад
+   12.09: «по тем же принципам, как у нас и другие построенные гармошки»).
+   «Внешний заказчик» - не отдельный контрол, а ПЕРВЫЙ пункт того же единого
+   списка, что и юрлица (id пустая строка), поэтому вся ent-логика (свернуть/
+   развернуть/подсветить активный) работает без изменений что для юрлица, что
+   для «внешнего». */
+function whoOptions_() {
+  return [{ id: '', name: '', label: 'Внешний заказчик' }].concat(internalCustomers().map(function (x) {
+    return { id: String(x.id), name: x.name, label: x.short || x.name, full_name: x.full_name };
+  }));
+}
+function whoChipHtml(x, on) {
+  return '<button class="op2-chip' + (on ? ' op2-on' : '') + '" data-who="' + esc(x.id) + '" data-name="' + esc(x.name) + '"' + (x.full_name ? ' title="' + esc(x.full_name) + '"' : '') + '>' + esc(x.label) + '</button>';
+}
+function whoRowHtml(curWho) {
+  var opts = whoOptions_();
+  var primary = opts.filter(function (x) { return x.label === 'ТП'; })[0] || opts[0];
+  var cur = opts.filter(function (x) { return x.id === String(curWho || ''); })[0] || primary;
+  var restN = Math.max(0, opts.length - 1);
+  return whoChipHtml(cur, true) +
+    (restN ? '<button class="op2-chip" data-who-more>Ещё <span class="op2-mono" style="color:var(--tint-amber)">' + restN + '</span></button>' : '');
+}
+function collapseWhoRow(seg, curWho) { seg.dataset.cur = curWho == null ? '' : curWho; seg.innerHTML = whoRowHtml(curWho); }
+function expandWhoRow(seg) {
+  var more = seg.querySelector('[data-who-more]'); if (!more) return;
+  var curBtn = seg.querySelector('.op2-chip.op2-on');
+  var curId = curBtn ? curBtn.dataset.who : '';
+  var oldRect = more.getBoundingClientRect();
+  var rest = whoOptions_().filter(function (x) { return x.id !== curId; });
+  more.outerHTML = '<button class="op2-chip op2-ent-close" data-who-close>×</button>';
+  seg.insertAdjacentHTML('beforeend', rest.map(function (x) { return whoChipHtml(x, false).replace('class="op2-chip', 'class="op2-chip op2-ent-enter'); }).join(''));
+  var closeBtn2 = seg.querySelector('.op2-ent-close');
+  var newRect2 = closeBtn2.getBoundingClientRect();
+  closeBtn2.style.transform = 'translate(' + (oldRect.left - newRect2.left) + 'px,' + (oldRect.top - newRect2.top) + 'px)';
+  requestAnimationFrame(function () { closeBtn2.style.transform = 'none'; });
+  $$('.op2-ent-enter', seg).forEach(function (c, i) { c.style.animationDelay = (i * 35) + 'ms'; });
+  S.unfold(rest.length);
+}
+
 /* «Тип техники» - тот же приём, перенесён по превью 11.09 (Влад: «давай внедряй»).
    Отличие от «От кого»: тут ВСЕГДА видны оба основных типа (Трал, Длинномер) - это не
    "текущий выбор", а быстрый доступ к двум самым частым; выбор виден третьим - .op2-on
@@ -1934,6 +2168,13 @@ function renderForm() {
   var gabs = dict('gabarit').map(function (g) { return (g && g.value) || g; }); /* словарь отдаёт {value, primary} */
   var curGab = o ? (o.gabarit || '') : (gabs[0] || '');
   var curEnt = o && o.executor_entity_id ? String(o.executor_entity_id) : (entities()[0] ? String(entities()[0].id) : '');
+  /* «Кто заказывает» (только логист) - Влад 12.09: «технопарк - основной внутренний
+     заказчик, пусть будет по умолчанию, все остальные по нажатию гармошки». Дефолт
+     ТОЛЬКО для НОВОЙ заявки (o нет вовсе) - у существующей заявки (правка/повтор/
+     из CRM) всегда показываем то, что реально сохранено, включая явно внешнего
+     заказчика (o.internal ложный при o != null) - не переинтерпретируем задним числом. */
+  var whoPrimary0 = internalCustomers().filter(function (x) { return x.short === 'ТП'; })[0];
+  var curWho = o ? (o.internal ? String(o.customer_entity_id) : '') : (whoPrimary0 ? String(whoPrimary0.id) : '');
 
   function optList(list, cur) {
     return list.map(function (x) { var val = (x && x.value != null) ? x.value : x; return '<option value="' + esc(val) + '"' + (String(cur) === String(val) ? ' selected' : '') + '>' + esc(val) + '</option>'; }).join('');
@@ -1964,9 +2205,8 @@ function renderForm() {
         entRowHtml(curEnt) +
       '</div></div>' +
 
-      (isLog ? '<div class="op2-fld op2-full"><label>Кто заказывает</label><div class="op2-seg" id="op2-f-who" style="flex-wrap:wrap">' +
-        '<button class="op2-chip' + (!(o && o.internal) ? ' op2-on' : '') + '" data-who="" data-name="">Внешний заказчик</button>' +
-        internalCustomers().map(function (e2) { return '<button class="op2-chip' + (o && o.internal && String(o.customer_entity_id) === String(e2.id) ? ' op2-on' : '') + '" data-who="' + esc(e2.id) + '" data-name="' + esc(e2.name) + '" title="' + esc(e2.full_name || e2.name) + '">' + esc(e2.short || e2.name) + '</button>'; }).join('') +
+      (isLog ? '<div class="op2-fld op2-full"><label>Кто заказывает</label><div class="op2-seg" id="op2-f-who" data-cur="' + esc(curWho) + '">' +
+        whoRowHtml(curWho) +
         '</div><span class="op2-hint">Внутренние заказы - с суммой, как обычные; менеджерам не показываются. Список - из Справочника юрлиц</span></div>' : '') +
 
       '<div class="op2-fld op2-sugg" id="op2-f-custbox"><label>Заказчик</label>' +
@@ -1985,13 +2225,15 @@ function renderForm() {
     '</div></div>' +
 
     '<div class="op2-sect"><div class="op2-t">Откуда - куда</div><div class="op2-grid2">' +
-      '<div class="op2-fld op2-full op2-sugg" id="op2-f-frombox"><label>Адрес погрузки</label>' +
+      '<div class="op2-fld op2-full op2-sugg" id="op2-f-frombox"><label' + (isLog ? ' class="op2-lbl-flex"' : '') + '><span>Адрес погрузки</span>' +
+        (isLog ? '<button type="button" class="op2-addr-base" data-side="from">База</button>' : '') + '</label>' +
         '<input id="op2-f-from" placeholder="Адрес, ссылка на карту или координаты 55.75, 37.62" autocomplete="off" value="' + esc(o ? o.load_address : '') + '">' +
         '<div class="op2-list" id="op2-f-fromlist"></div>' +
         '<span class="op2-hint op2-okc" id="op2-f-fromhint">' + (o && o.load_lat ? esc(o.load_lat + ' · ' + o.load_lon) : '') + '</span></div>' +
       '<div class="op2-fld"><label>Контакт на погрузке</label><input id="op2-f-fromcontact" placeholder="Имя · телефон" autocomplete="off" value="' + esc(o ? [o.load_contact_name, o.load_contact_phone].filter(Boolean).join(' · ') : '') + '"></div>' +
       '<div class="op2-fld"><label>Контакт на выгрузке</label><input id="op2-f-tocontact" placeholder="Имя · телефон" autocomplete="off" value="' + esc(o ? [o.unload_contact_name, o.unload_contact_phone].filter(Boolean).join(' · ') : '') + '"></div>' +
-      '<div class="op2-fld op2-full op2-sugg" id="op2-f-tobox"><label>Адрес выгрузки</label>' +
+      '<div class="op2-fld op2-full op2-sugg" id="op2-f-tobox"><label' + (isLog ? ' class="op2-lbl-flex"' : '') + '><span>Адрес выгрузки</span>' +
+        (isLog ? '<button type="button" class="op2-addr-base" data-side="to">База</button>' : '') + '</label>' +
         '<input id="op2-f-to" placeholder="Адрес, ссылка на карту или координаты" autocomplete="off" value="' + esc(o ? o.unload_address : '') + '">' +
         '<div class="op2-list" id="op2-f-tolist"></div>' +
         '<span class="op2-hint op2-warn" id="op2-f-tohint"></span></div>' +
@@ -2030,6 +2272,7 @@ function renderForm() {
   wireForm();
 }
 function wireForm() {
+  wireMoneyInput_('op2-f-price');
   var ft = $('#op2-f-time');
   function drawQk() {
     var q = quickTimes($('#op2-f-date').value);
@@ -2131,9 +2374,21 @@ function wireForm() {
       else if (fc.readOnly) { fc.value = ''; fc.readOnly = false; }
     };
     fw.addEventListener('click', function (e) {
-      var b = e.target.closest('.op2-chip'); if (!b) return;
-      $$('#op2-f-who .op2-chip').forEach(function (x) { x.classList.remove('op2-on'); });
-      b.classList.add('op2-on'); applyWho(b); tickState();
+      var seg = this;
+      // stopPropagation - та же причина, что у «От кого»/«Тип техники»: outerHTML
+      // отвязывает e.target ДО всплытия к звуковому делегату на document.
+      e.stopPropagation();
+      if (e.target.closest('[data-who-more]')) { expandWhoRow(seg); return; }
+      if (e.target.closest('[data-who-close]')) {
+        var cur0 = seg.querySelector('.op2-chip.op2-on');
+        S.fold(); collapseWhoRow(seg, cur0 ? cur0.dataset.who : ''); return;
+      }
+      var pick = e.target.closest('.op2-chip[data-who]'); if (!pick) return;
+      var wasOpen = seg.querySelectorAll('.op2-chip[data-who]').length > 1;
+      collapseWhoRow(seg, pick.dataset.who);
+      applyWho(seg.querySelector('.op2-chip.op2-on'));
+      tickState();
+      if (wasOpen) S.fold();
     });
     var wb0 = $('#op2-f-who .op2-chip.op2-on'); if (wb0 && wb0.dataset.who) applyWho(wb0);
   }
@@ -2202,6 +2457,14 @@ function wireForm() {
   });
 
   /* подсказки адресов из истории заказчика */
+  function applyAddr_(side, address, lat, lon, hintText) {
+    var inp = $('#op2-f-' + side);
+    inp.value = address || ''; inp.dataset.lat = lat || ''; inp.dataset.lon = lon || '';
+    var hint = $('#op2-f-' + side + 'hint');
+    if (hint) { hint.textContent = lat ? (lat + ' · ' + lon) : (hintText || ''); hint.className = 'op2-hint op2-okc'; }
+    $('#op2-f-' + side + 'box').classList.remove('op2-open');
+    tickState();
+  }
   ['from', 'to'].forEach(function (side) {
     var inp = $('#op2-f-' + side);
     inp.addEventListener('focus', function () { if ($('#op2-f-' + side + 'list').querySelector('.op2-it')) $('#op2-f-' + side + 'box').classList.add('op2-open'); });
@@ -2209,27 +2472,26 @@ function wireForm() {
     inp.addEventListener('input', function () { fetchGeoSuggest(side, this.value); });
     $('#op2-f-' + side + 'list').addEventListener('mousedown', function (e) {
       var it = e.target.closest('.op2-it'); if (!it) return;
-      inp.value = it.dataset.address || '';
-      inp.dataset.lat = it.dataset.lat || '';
-      inp.dataset.lon = it.dataset.lon || '';
+      applyAddr_(side, it.dataset.address, it.dataset.lat, it.dataset.lon, 'из истории заказчика');
       if (it.dataset.cname || it.dataset.cphone) {
         $('#op2-f-' + side + 'contact').value = [it.dataset.cname, it.dataset.cphone].filter(Boolean).join(' · ');
       }
-      var hint = $('#op2-f-' + side + 'hint');
-      if (hint) { hint.textContent = it.dataset.lat ? (it.dataset.lat + ' · ' + it.dataset.lon) : 'из истории заказчика'; hint.className = 'op2-hint op2-okc'; }
-      $('#op2-f-' + side + 'box').classList.remove('op2-open');
-      tickState();
+    });
+  });
+  /* Влад 12.09: «даже просто должна быть где-то кнопка «Адрес погрузки»/«Адрес выгрузки», просто
+     база, чтобы нажал быстро и всё» - «это только логистов» (кнопка и так рисуется только у isLog,
+     см. renderForm). Координаты - точный ответ DaData на этот же адрес, захардкожены, а не считаются
+     заново на каждом клике: адрес базы не «плавает», отдельный сетевой запрос тут не нужен. */
+  $$('.op2-addr-base').forEach(function (btn) {
+    btn.addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      applyAddr_(btn.dataset.side, BASE_ADDRESS_, BASE_LAT_, BASE_LON_);
+      S.tickUp();
     });
   });
 
   $$('#op2-d-body input,#op2-d-body select,#op2-d-body textarea').forEach(function (i) { i.addEventListener('input', tickState); });
-  /* Влад 11.09: «сторонние подсказки заполнения заблокировать, только внутренние дашборда» - Chrome/Яндекс
-     игнорируют autocomplete="off" у полей, похожих на адрес/имя/телефон, и рисуют своё меню поверх
-     наших подсказок. Рабочий обход: autocomplete="new-password" + случайное name на каждом рендере. */
-  $$('#op2-d-body input:not([type=date]):not([type=checkbox]),#op2-d-body textarea').forEach(function (i) {
-    i.setAttribute('autocomplete', 'new-password'); i.setAttribute('autocorrect', 'off'); i.setAttribute('spellcheck', 'false');
-    i.setAttribute('name', 'op2-' + Math.random().toString(36).slice(2, 9));
-  });
+  blockForeignAutofill_($('#op2-d-body'));
   if (formOrder && formOrder.customer) fetchCustomerHistory(formOrder.customer);
   tickState();
 }
@@ -2243,6 +2505,14 @@ function tickState() {
   if (!$('#op2-f-to').value.trim()) miss.push('адрес выгрузки');
   if (!formEq()) miss.push('тип техники');
   if (miss.indexOf('тип техники') >= 0) { b.className = 'op2-dbtn op2-primary op2-blocked'; b.textContent = 'Выбери тип техники'; st.textContent = ''; return; }
+  /* Влад 12.09: «создание заявки невозможно, пока не внесут цену - и логисты в своих заявках,
+     и менеджеры» - жёсткий блок наравне с заказчиком/техникой, без исключения по роли. Только
+     на СОЗДАНИИ (та же граница, что и на сервере) - правку старой заявки без цены не блокируем
+     задним числом, editing вычисляется как в saveForm(). */
+  var creating = !(formOrder && !formRepeat && !formPrefill);
+  if (creating && !num(($('#op2-f-price') || {}).value)) {
+    b.className = 'op2-dbtn op2-primary op2-blocked'; b.textContent = 'Укажи цену'; st.textContent = ''; return;
+  }
   if (miss.length) {
     b.className = 'op2-dbtn op2-primary op2-warn';
     b.textContent = 'Сохранить · есть незаполненные';
@@ -2286,6 +2556,26 @@ function fetchCustomers(q) {
     h += '<div class="op2-it" data-name="' + esc(q) + '"><span>Новый: «' + esc(q) + '»</span><span class="op2-m">как ввели</span></div>';
     $('#op2-f-custlist').innerHTML = h;
     $('#op2-f-custbox').classList.add('op2-open');
+  }).catch(function () {});
+}
+/* Влад 12.09: «партнёру наёмной техники тоже должен быть справочник юридических лиц» - тот же
+   принцип, что и у «Заказчика» (fetchCustomers выше), только своя история вместо «моих
+   заказов» - «кого уже возили В ЭТОМ МЕСЯЦЕ» (второй заход, сервер сам режет по service_date
+   текущего календарного месяца), не всё время. */
+function fetchCarriers(q) {
+  apiGet('/orders/carriers', { q: q }).then(function (r) {
+    if (!r || !r.ok || !r.data || r.data.error) return;
+    var hist = r.data.history || [], all = r.data.all || [];
+    var h = '';
+    if (hist.length) h += '<div class="op2-sec">Уже возили в этом месяце</div>' + hist.slice(0, 6).map(function (c) {
+      return '<div class="op2-it" data-name="' + esc(c.name) + '"' + (c.entity_id ? ' data-eid="' + esc(c.entity_id) + '"' : '') + '><span>' + esc(c.name) + '</span><span class="op2-m">' + esc(c.n || '') + '×</span></div>';
+    }).join('');
+    if (all.length) h += '<div class="op2-sec">Справочник юрлиц</div>' + all.slice(0, 10).map(function (c) {
+      return '<div class="op2-it" data-name="' + esc(c.name) + '" data-eid="' + esc(c.id) + '"><span>' + esc(c.name) + '</span><span class="op2-m">' + esc(c.inn || '') + '</span></div>';
+    }).join('');
+    h += '<div class="op2-it" data-name="' + esc(q) + '"><span>Новый: «' + esc(q) + '»</span><span class="op2-m">как ввели</span></div>';
+    $('#op2-h-colist').innerHTML = h;
+    $('#op2-h-cobox').classList.add('op2-open');
   }).catch(function () {});
 }
 function fetchInn(inn) {
@@ -2345,10 +2635,17 @@ function saveInn(btn) {
   }).catch(function () { btn.disabled = false; });
 }
 function fetchCargo(q) {
-  apiGet('/orders/cargo', { q: q }).then(function (r) {
+  /* справочник техники экскаваторного отдела (Влад 12.09) - СТРОГО в форме логиста, менеджерам не нужен
+     и не должен даже запрашиваться (сервер сам это перепроверяет ролью, тут просто не дёргаем зря). */
+  var isLogForm = formWho === 'log';
+  var reqs = [apiGet('/orders/cargo', { q: q })];
+  if (isLogForm) reqs.push(apiGet('/orders/fleet', { q: q }).catch(function () { return null; }));
+  Promise.all(reqs).then(function (results) {
+    var r = results[0];
     if (!r || !r.ok || !r.data) return;
     var items = r.data.items || [], h = '';
     var cat = items.filter(function (i) { return i.src === 'catalog'; }), his = items.filter(function (i) { return i.src === 'history'; });
+    var fleet = (isLogForm && results[1] && results[1].ok && results[1].data) ? (results[1].data.items || []) : [];
     var row = function (i) {
       var sub = (i.category ? esc(i.category) : '') + (i.n ? (i.category ? ' · ' : '') + 'возили ' + i.n + '×' : '');
       var nameCap = capFirst(i.name);
@@ -2356,6 +2653,16 @@ function fetchCargo(q) {
         '<div class="op2-cargo-main"><span class="op2-cargo-name">' + esc(nameCap) + '</span>' + (sub ? '<span class="op2-cargo-sub">' + sub + '</span>' : '') + '</div>' +
         '<div class="op2-cargo-meta">' + (i.weight_t ? '<span class="op2-cargo-w">' + esc(i.weight_t) + ' т</span>' : '') + (i.dims ? '<span class="op2-cargo-dims">' + esc(i.dims) + '</span>' : '') + '</div></div>';
     };
+    var rowFleet = function (i) {
+      var nameCap = capFirst(i.name);
+      var sub = (i.category ? esc(i.category) : '') + (i.gos ? ' · г/н ' + esc(i.gos) : '');
+      /* у своей техники нет веса/габаритов груза - применяем без пометки «проверить» (applyCargo не найдёт
+         d.w/d.dims/габарит и промолчит), только модель + госномер подставляются в «Груз». */
+      return '<div class="op2-it op2-cargo-it" data-name="' + esc(nameCap) + '" data-gos="' + esc(i.gos || '') + '">' +
+        '<div class="op2-cargo-main"><span class="op2-cargo-name">' + esc(nameCap) + '</span>' + (sub ? '<span class="op2-cargo-sub">' + sub + '</span>' : '') + '</div>' +
+        '<div class="op2-cargo-meta">' + (i.gos ? '<span class="op2-cargo-dims">' + esc(i.gos) + '</span>' : '') + '</div></div>';
+    };
+    if (fleet.length) h += '<div class="op2-sec">Наша техника (гос.номер)</div>' + fleet.map(rowFleet).join('');
     if (cat.length) h += '<div class="op2-sec">Справочник техники</div>' + cat.map(row).join('');
     if (his.length) h += '<div class="op2-sec">Уже возили</div>' + his.map(row).join('');
     if (!h) { $('#op2-f-cargobox').classList.remove('op2-open'); return; }
@@ -2374,8 +2681,11 @@ function applyCargo(d) {
   /* Влад: «выбрал один груз, затем другой - данные от первого не поменялись» - явный повторный выбор
      из подсказки переписывает вес/габариты, даже если поля уже заполнены прошлым грузом. */
   var prevName = fc.dataset.cargoName || '';
-  var overwrite = prevName && prevName !== d.name;
-  fc.value = d.name || ''; fc.dataset.cargoName = d.name || '';
+  /* техника из справочника экскаваторов (d.gos) - у неё нет веса/габаритов груза, в «Груз» идёт
+     модель + госномер, без пометки «проверить» (auto ниже останется пустым сам по себе). */
+  var displayName = (d.name || '') + (d.gos ? ' · г/н ' + d.gos : '');
+  var overwrite = prevName && prevName !== displayName;
+  fc.value = displayName; fc.dataset.cargoName = displayName;
   var auto = [];
   if (d.w && (overwrite || !fw.value.trim())) { fw.value = d.w; auto.push('вес'); }
   if (d.dims && (overwrite || !fd.value.trim())) { fd.value = d.dims; auto.push('Д×Ш×В'); }
@@ -2386,7 +2696,7 @@ function applyCargo(d) {
     if (note && note.value.indexOf(tag) < 0) note.value = (note.value.trim() ? note.value.trim() + ' · ' : '') + tag + (d.note ? ' (' + d.note + ')' : '');
     $('#op2-f-cargo-hint').innerHTML = '<span class="op2-warn">Подставлено из справочника: ' + esc(auto.join(', ')) + ' - проверь</span>' + (d.note ? ' · ' + esc(d.note) : '');
     S.tickUp();
-  } else { $('#op2-f-cargo-hint').textContent = 'Подставлено: ' + (d.name || ''); }
+  } else { $('#op2-f-cargo-hint').textContent = 'Подставлено: ' + (displayName || ''); }
   $('#op2-f-cargobox').classList.remove('op2-open');
   tickState();
 }
@@ -2608,6 +2918,7 @@ function openRepeat(o) {
       });
     });
     $('#op2-rp-list').innerHTML = h || '<span class="op2-dim op2-sm">кликни по дню выше - каждая клик добавит заявку</span>';
+    blockForeignAutofill_($('#op2-rp-list'));
     var g = $('#op2-rp-go');
     g.className = 'op2-dbtn op2-primary' + (rows.length ? '' : ' op2-blocked');
     g.textContent = rows.length ? 'Создать ' + rows.length + ' ' + plural(rows.length, 'заявку', 'заявки', 'заявок') : 'Создать заявки';

@@ -274,3 +274,12 @@ SELECT id, short_name, own_sort, is_own, internal_customer FROM sprav_legal_enti
 SET @c := (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='plan_orders' AND COLUMN_NAME='crm_deal_id');
 SET @sql := IF(@c=0,'ALTER TABLE plan_orders ADD COLUMN crm_deal_id INT DEFAULT NULL, ADD KEY idx_crm_deal (crm_deal_id)','SELECT 1');
 PREPARE st FROM @sql; EXECUTE st; DEALLOCATE PREPARE st;
+
+-- 12.09 Влад (живой тест): «была под данные, но я смог изменить название компании-партнёра
+-- без согласования с менеджером» - у наёмника не было той же защиты, что у своей машины
+-- (замена вне заявленных на «под данные» -> запрос менеджеру, plan_order_change_requests).
+-- Тот же принцип, та же таблица - type='replace_carrier' переиспользует её с именем перевозчика
+-- вместо госномера (from_gos/to_gos - для type='replace_vehicle'; эти два поля - для carrier).
+SET @c := (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='plan_order_change_requests' AND COLUMN_NAME='from_carrier_name');
+SET @sql := IF(@c=0,'ALTER TABLE plan_order_change_requests ADD COLUMN from_carrier_name VARCHAR(200) DEFAULT NULL, ADD COLUMN to_carrier_name VARCHAR(200) DEFAULT NULL, ADD COLUMN to_carrier_id VARCHAR(64) DEFAULT NULL','SELECT 1');
+PREPARE st FROM @sql; EXECUTE st; DEALLOCATE PREPARE st;

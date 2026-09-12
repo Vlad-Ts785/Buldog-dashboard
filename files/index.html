@@ -997,6 +997,28 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .tbl tr.clickable{cursor:pointer;}
 .tbl tr.clickable:hover td{background:var(--bg3);}
 
+/* ── Динамика: разворот строки по дням (Влад, 12.09) ───────────────────────────── */
+/* Только transform/opacity в анимации (ГОСТ разд.5) - высоту НЕ анимируем, строка
+   появляется/пропадает через display, максимум содержимого - статичный overflow. */
+.dyn-chevron{display:inline-block;width:10px;color:var(--muted);transition:transform .15s var(--ease-out-soft,ease);margin-right:5px;font-size:9px;}
+.dyn-row.open .dyn-chevron{transform:rotate(90deg);}
+.dyn-detail-row{display:none;}
+.dyn-detail-row.open{display:table-row;}
+.dyn-detail-row td{padding:0 !important;border-bottom:1px solid var(--border);}
+.dyn-detail-inner{padding:10px 14px 14px 26px;background:var(--bg);max-height:280px;overflow-y:auto;
+  animation:dynDetailIn .15s var(--ease-out-soft,ease);}
+@keyframes dynDetailIn{from{opacity:0}to{opacity:1}}
+@media (prefers-reduced-motion: reduce){
+  .dyn-chevron{transition:none;}
+  .dyn-detail-inner{animation:none;}
+}
+.dyn-day-line{display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:11.5px;}
+.dyn-day-line:last-child{border-bottom:none;}
+.dyn-day-date{color:var(--muted);font-variant-numeric:tabular-nums;flex:none;}
+.dyn-day-status{display:flex;align-items:center;gap:10px;}
+.dyn-day-src{font-size:9.5px;color:var(--muted);letter-spacing:.03em;width:44px;text-align:right;}
+.dyn-day-empty{padding:10px 0;color:var(--muted);font-size:11.5px;}
+
 /* ── PERIOD BUTTONS ─────────────────────────────────────── */
 .period-btn{padding:5px 13px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:12px;cursor:pointer;transition:all .15s;}
 .period-btn:hover{border-color:var(--green);color:var(--text);}
@@ -4000,6 +4022,7 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
           <button class="tab-btn" onclick="showDirTab('fleet',this)">Сцепка</button>
           <button class="tab-btn" onclick="showDirTab('plans',this)">Планы продаж</button>
           <button class="tab-btn" onclick="showDirTab('playbook',this)">Плейбук продаж</button>
+          <button class="tab-btn" onclick="showDirTab('check',this)">Проверка техники</button>
         </div>
 
         <!-- ── Сотрудники (физические лица) ── -->
@@ -4207,6 +4230,27 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
           </div>
           <div id="playbook-meta" style="font-size:11.5px;color:var(--muted);margin-bottom:10px">—</div>
           <div id="playbook-body" style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);padding:16px;font-size:13px;line-height:1.6">Загрузка…</div>
+        </div>
+
+        <!-- ── Проверка техники (12.09, Влад живьём: М 844 ЕА 797 в Планировке - с
+             водителем, на "Технике" за произвольный период - "Без водителя". "В
+             справочнике нужно создать инструмент проверки логики... собирает
+             информацию по машине... показывает где нестыковки") - раскладывает по ОДНОМУ
+             гос.номеру данные из живых источников VPS (Справочники/Планировка/живой
+             статус) РЯДОМ со Штаткой (Google-лист, единственный источник "Техники" за
+             произвольный период - у неё нет исторической версионности, см.
+             plans/2026-09-12-vehicle-consistency-checker.md) - и подсвечивает явные
+             расхождения. Не чинит корень (та миграция - отдельная задача), только
+             диагностирует. -->
+        <div id="dir-tab-check" style="display:none">
+          <div style="display:flex;gap:10px;align-items:flex-end;margin:12px 0;flex-wrap:wrap">
+            <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Гос.номер тягача</label>
+              <input autocomplete="off" id="vc-gos" type="text" list="vc-gos-list" placeholder="М 844 ЕА 797"
+                style="width:220px;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none">
+              <datalist id="vc-gos-list"></datalist></div>
+            <button class="tab-btn" onclick="vehicleCheckRun_()" style="border-color:var(--blue);color:var(--blue)">Проверить</button>
+          </div>
+          <div id="vc-result"></div>
         </div>
       </div>
     </div>
@@ -13143,7 +13187,7 @@ function renderDirectory() {
 // "Поступления" (showReceiptsTab) - все уже отрисованы после renderDirectory(),
 // переключение вкладки - просто показ/скрытие, без повторного похода на сервер.
 function showDirTab(tab, el) {
-  ['people', 'legal', 'assets', 'fleet', 'plans', 'playbook'].forEach(function(t) {
+  ['people', 'legal', 'assets', 'fleet', 'plans', 'playbook', 'check'].forEach(function(t) {
     var panel = document.getElementById('dir-tab-' + t);
     if (panel) panel.style.display = (t === tab) ? '' : 'none';
   });
@@ -13153,6 +13197,111 @@ function showDirTab(tab, el) {
   // лениво при первом открытии вкладки, дальше - только при смене месяца.
   if (tab === 'plans' && !plansLoadedOnce_) plansTabLoad_(plansMonth_ || plansCurMonthKey_());
   if (tab === 'playbook' && !playbookLoadedOnce_) playbookTabLoad_();
+  if (tab === 'check') vehicleCheckFillGosList_();
+}
+
+// ── Проверка техники (12.09) - см. разбор у dir-tab-check выше и plans/2026-09-12-
+// vehicle-consistency-checker.md. Список гос.номеров для автодополнения - из уже
+// загруженных spravAssets_ (та же вкладка "Материальные средства"), только тягачи.
+function vehicleCheckFillGosList_() {
+  var list = document.getElementById('vc-gos-list');
+  if (!list || !spravAssets_) return;
+  list.innerHTML = spravAssets_.filter(function(a){ return a.asset_type === 'tractor' && !a.is_deleted; })
+    .map(function(a){ return '<option value="' + pageEsc_(a.id) + '">'; }).join('');
+}
+// fmtDateRu() требует СТРОГО "YYYY-MM-DD" без времени (см. её комментарий) - тут время
+// важно (посадка водителя, окончание записи), поэтому свой короткий форматтер, не
+// натягиваем чужую функцию на непредусмотренный ей формат.
+function vehicleCheckFmtDateTime_(s) {
+  if (!s) return null;
+  var d = new Date(s);
+  if (isNaN(d.getTime())) return String(s);
+  var p2 = function(n){ return (n < 10 ? '0' : '') + n; };
+  return d.getDate() + ' ' + RU_MONTHS_GENITIVE[d.getMonth()] + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
+}
+// .dr-row/.dr-note (канон Планировки) привязаны стилями к #page-logistics-plan - здесь
+// (Справочники) отрендерились бы совсем без оформления. Свой инлайн-вариант в том же
+// визуальном языке, что уже использует форма Справочников (asset-*, см. рядом).
+function vehicleCheckRow_(label, value) {
+  return '<div style="display:flex;justify-content:space-between;gap:14px;padding:8px 0;' +
+    'border-bottom:1px solid var(--border);font-size:12.5px"><span style="color:var(--muted)">' +
+    label + '</span><span style="text-align:right">' + (value || '<span style="color:var(--muted)">—</span>') + '</span></div>';
+}
+function vehicleCheckNote_(html, color) {
+  return '<div style="margin:12px 0;padding:10px 12px;border-radius:8px;border:1px solid ' +
+    (color || 'var(--border)') + ';font-size:12px;color:' + (color || 'var(--muted)') + ';line-height:1.5">' + html + '</div>';
+}
+// Штатка отдаёт дату посадки/статус НЕ в структурированном виде, годами не менялась под
+// эту задачу - берём как есть, полями driver/status (те же имена, что уже строит
+// deriveDriversFromVehicles/aggregateFinHistoryForRange для "Техники").
+function vehicleCheckFindStaffRow_(rows, gos) {
+  var norm = String(gos || '').replace(/[^A-Za-zА-Яа-я0-9]/g, '').toUpperCase();
+  return (rows || []).filter(function(v){ return String(v.gos || '').replace(/[^A-Za-zА-Яа-я0-9]/g, '').toUpperCase() === norm; })[0] || null;
+}
+async function vehicleCheckRun_() {
+  var gos = document.getElementById('vc-gos').value.trim();
+  var out = document.getElementById('vc-result');
+  if (!gos) { out.innerHTML = vehicleCheckNote_('Введите гос.номер'); return; }
+  out.innerHTML = vehicleCheckNote_('Проверяю…');
+  var today = new Date();
+  var todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+  try {
+    var [vcRes, staffRes] = await Promise.all([
+      fetchFromYardApi_('/vehicle_check', { gos: gos }),
+      apiFetchJson({ action: 'vehicles_period', from: todayStr, to: todayStr }).catch(function(){ return null; })
+    ]);
+    if (!vcRes.ok) { out.innerHTML = vehicleCheckNote_((vcRes.data && vcRes.data.error) || 'Ошибка сервера'); return; }
+    var vc = vcRes.data;
+    var staffRow = staffRes ? vehicleCheckFindStaffRow_(staffRes.vehicles, gos) : null;
+
+    // Расхождения - простое сравнение "живой водитель/статус (VPS) vs Штатка" - оба
+    // значения рядом, без домысливания, кто из них прав (это решает человек).
+    var mismatches = [];
+    var liveDriverName = vc.fleet_live.driver ? vc.fleet_live.driver.name : null;
+    var staffDriverName = staffRow ? (staffRow.driver || null) : null;
+    if ((liveDriverName || staffDriverName) && (liveDriverName || '').trim().split(' ')[0] !== (staffDriverName || '').trim().split(' ')[0]) {
+      mismatches.push('Водитель: Планировка/живая сцепка - <b>' + (liveDriverName || 'нет') + '</b>, Штатка (Техника) - <b>' + (staffDriverName || 'нет') + '</b>');
+    }
+    if (staffRow && staffRow.status && vc.live_status && staffRow.status.indexOf(vc.live_status) < 0 && vc.live_status.indexOf(staffRow.status) < 0) {
+      mismatches.push('Статус: живой (VPS) - <b>' + vc.live_status + '</b>, Штатка (Техника) - <b>' + staffRow.status + '</b>');
+    }
+
+    var html = '';
+    if (mismatches.length) {
+      html += vehicleCheckNote_('<b>Расхождения найдены:</b><br>' + mismatches.join('<br>'), 'var(--red)');
+    } else {
+      html += vehicleCheckNote_('Расхождений не найдено (по проверенным полям).', 'var(--green)');
+    }
+    html += '<div class="asset-form-section">Справочники (sprav_assets)</div>';
+    html += vc.sprav ? (
+      vehicleCheckRow_('Тип', vc.sprav.asset_type === 'tractor' ? 'Тягач' : vc.sprav.asset_type) +
+      vehicleCheckRow_('Марка', [vc.sprav.manufacturer, vc.sprav.name].filter(Boolean).join(' ')) +
+      vehicleCheckRow_('Отдел', vc.sprav.department) +
+      vehicleCheckRow_('Изменено', vc.sprav.updated_at + (vc.sprav.updated_by ? ' · ' + vc.sprav.updated_by : ''))
+    ) : vehicleCheckNote_('Нет в Справочниках');
+
+    html += '<div class="asset-form-section">Планировка - живая сцепка (fleet_assignments)</div>';
+    html += vehicleCheckRow_('Водитель', liveDriverName ? (liveDriverName + ' · с ' + vehicleCheckFmtDateTime_(vc.fleet_live.driver.since) + ' · посадил ' + vc.fleet_live.driver.coupled_by) : null);
+    html += vehicleCheckRow_('Прицеп', vc.fleet_live.trailer ? (vc.fleet_live.trailer.label + ' · с ' + vehicleCheckFmtDateTime_(vc.fleet_live.trailer.since)) : null);
+    html += vehicleCheckRow_('Живой статус', vc.live_status);
+    html += vehicleCheckRow_('Текущая запись Планировки', vc.plan_now.length ? vc.plan_now.map(function(p){
+      return (p.kind === 'trip' ? 'Рейс' + (p.customer ? ' · ' + p.customer : '') + (p.route ? ' · ' + p.route : '') :
+              p.kind === 'repair' ? 'Ремонт' + (p.repair_reason ? ' · ' + p.repair_reason : '') :
+              p.kind === 'maint' ? 'ТО' + (p.repair_reason ? ' · ' + p.repair_reason : '') :
+              p.kind === 'driveroff' ? 'Без водителя' + (p.reason ? ' · ' + p.reason : '') : p.kind) +
+        ' · до ' + vehicleCheckFmtDateTime_(hourToDate_(p.until_hour).toISOString());
+    }).join('; ') : 'Нет активной записи сейчас');
+
+    html += '<div class="asset-form-section">Штатка (источник "Техники" за произвольный период, сегодня)</div>';
+    html += staffRow ? (
+      vehicleCheckRow_('Водитель', staffRow.driver) +
+      vehicleCheckRow_('Статус', staffRow.status)
+    ) : vehicleCheckNote_('Не нашлась в Штатке по этому гос.номеру');
+
+    out.innerHTML = html;
+  } catch (e) {
+    out.innerHTML = vehicleCheckNote_('Ошибка: ' + e.message);
+  }
 }
 
 // ── Плейбук продаж (09.09, plans/2026-09-09-sales-agent-learning-from-history.md) ──────
@@ -16495,8 +16644,10 @@ function ensureHistData() {
     var oldRows = results[0].history || [];
     var newRows = results[1].history || [];
     var covered = {};
-    newRows.forEach(function(r) { covered[r.gos + '|' + r.date] = true; });
-    histData = newRows.concat(oldRows.filter(function(r) { return !covered[r.gos + '|' + r.date]; }));
+    newRows.forEach(function(r) { r._src = 'server'; covered[r.gos + '|' + r.date] = true; });
+    var oldFallback = oldRows.filter(function(r) { return !covered[r.gos + '|' + r.date]; });
+    oldFallback.forEach(function(r) { r._src = 'staff'; });
+    histData = newRows.concat(oldFallback);
     return histData;
   });
 }
@@ -16548,10 +16699,15 @@ function renderDynamics() {
   }
 
   // Агрегируем raw данные по машинам → _dynRows
+  // v.days - карта дата->статус, только для подсчёта итогов (как раньше). v.dayList -
+  // отдельный массив {date, status, src}, нужен только для разворота строки по клику
+  // (Влад, 12.09: "я могу зайти в любой день и посмотреть статус этой машины") - в счётчиках
+  // не участвует, чтобы не трогать уже проверенную логику подсчёта выше.
   var vmap = {};
   filtered.forEach(function(r) {
-    if (!vmap[r.gos]) vmap[r.gos] = { gos: r.gos, type: r.type, days: {} };
+    if (!vmap[r.gos]) vmap[r.gos] = { gos: r.gos, type: r.type, days: {}, dayList: [] };
     vmap[r.gos].days[r.date] = r.status;
+    vmap[r.gos].dayList.push({ date: r.date, status: r.status, src: r._src || 'staff' });
     if (!vmap[r.gos].type && r.type) vmap[r.gos].type = r.type;
   });
   _dynRows = Object.keys(vmap).map(function(gos) {
@@ -16564,7 +16720,7 @@ function renderDynamics() {
       else if (s.indexOf('водителя') !== -1) noDriver++;
       else work++;
     });
-    return { gos: gos, type: v.type || '', marka: markaMap[gos] || '', work: work, repair: repair, noOrder: noOrder, noDriver: noDriver, total: Object.keys(v.days).length };
+    return { gos: gos, type: v.type || '', marka: markaMap[gos] || '', work: work, repair: repair, noOrder: noOrder, noDriver: noDriver, total: Object.keys(v.days).length, dayList: v.dayList };
   });
 
   // Заполняем dropdown типами (только первый раз)
@@ -16584,6 +16740,9 @@ function renderDynamics() {
 var dynSort   = { col: 'repair', dir: -1 };
 var dynFilter = { type: 'all', search: '' };
 var _dynRows  = [];
+var _dynVisibleRows = []; // текущая (отфильтрованная+отсортированная) страница строк -
+                           // нужна toggleDynDay_ по индексу, чтобы не тащить весь dayList в DOM
+var _dynOpenIdx = -1;      // индекс развёрнутой строки (одна за раз, как в превью)
 
 function setDynTypeFilter(type) { dynFilter.type = type; renderStatusTable(); }
 function setDynSearch(val) { dynFilter.search = val.trim().toLowerCase(); renderStatusTable(); }
@@ -16618,6 +16777,8 @@ function renderStatusTable() {
     if (typeof av === 'string') return dynSort.dir * av.localeCompare(bv);
     return dynSort.dir * (av - bv);
   });
+  _dynVisibleRows = visible;
+  _dynOpenIdx = -1; // список пересобран (фильтр/сортировка/поиск) - индексы больше не те же
 
   // Заголовки с сортировкой
   function th(col, label, color) {
@@ -16642,19 +16803,24 @@ function renderStatusTable() {
     th('noDriver', 'Без водителя', 'var(--tint-amber)') +
     th('total',    'Итого дней',   '');
 
-  // Строки
+  // Строки. Каждая - кликабельна (Влад, 12.09: "зайти в любой день и посмотреть статус
+  // этой машины") - разворачивает скрытую строку-деталь с историей по дням, без нового
+  // запроса к серверу (dayList уже посчитан в renderDynamics из тех же данных).
   var tbody = '';
-  visible.forEach(function(r) {
+  visible.forEach(function(r, i) {
     var repCls = r.repair >= 7 ? ' style="color:var(--tint-red);font-weight:600"' : '';
-    tbody += '<tr>' +
+    tbody += '<tr class="clickable dyn-row" onclick="toggleDynDay_(' + i + ')">' +
       '<td class="muted">' + (r.type  || '—') + '</td>' +
-      '<td><b>' + r.gos + '</b></td>' +
+      '<td><span class="dyn-chevron">▸</span><b>' + pageEsc_(r.gos) + '</b></td>' +
       '<td class="muted" style="font-size:11px">' + (r.marka || '—') + '</td>' +
       '<td class="num green">'  + (r.work     || '—') + '</td>' +
       '<td class="num"' + repCls + '>' + (r.repair   || '—') + '</td>' +
       '<td class="num amber">'  + (r.noOrder  || '—') + '</td>' +
       '<td class="num amber">'  + (r.noDriver || '—') + '</td>' +
-      '<td class="num muted">'  + r.total + '</td></tr>';
+      '<td class="num muted">'  + r.total + '</td></tr>' +
+      '<tr class="dyn-detail-row" id="dyn-detail-' + i + '"><td colspan="8">' +
+        '<div class="dyn-detail-inner"></div>' +
+      '</td></tr>';
   });
   document.getElementById('hist-status-body').innerHTML = tbody;
 
@@ -16671,6 +16837,60 @@ function renderStatusTable() {
 
   loading.style.display = 'none';
   wrap.style.display = '';
+}
+
+// Разворот строки "Динамики" - карточка машины по дням (Влад, 12.09). Один клик - один
+// открытый разворот (как в превью), второй клик по той же строке закрывает. Рендерим
+// содержимое ленивую, при первом открытии - до этого в DOM пустой контейнер.
+function dynStatusClass_(status) {
+  // Те же 3 бакета, что уже красят колонки таблицы (В работе/Ремонт/Без заказа+Без
+  // водителя) - переиспользуем существующий канон-бейдж (.badge.green/.red/.amber,
+  // раздел 4), не изобретаем новый компонент.
+  var s = (status || '').toLowerCase();
+  if (s.indexOf('работе') !== -1) return 'green';
+  if (s.indexOf('ремонт') !== -1) return 'red';
+  return 'amber'; // без заказа / без водителя / нет водителя
+}
+function renderDynDayList_(row) {
+  if (!row.dayList || !row.dayList.length) return '<div class="dyn-day-empty">Нет данных по дням</div>';
+  var sorted = row.dayList.slice().sort(function(a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
+  return sorted.map(function(d) {
+    var cls = dynStatusClass_(d.status);
+    var srcLabel = d.src === 'server' ? 'сервер' : 'Штатка';
+    return '<div class="dyn-day-line">' +
+      '<span class="dyn-day-date">' + fmtDateRu(d.date) + '</span>' +
+      '<span class="dyn-day-status">' +
+        '<span class="badge ' + cls + '">' + pageEsc_(d.status || '—') + '</span>' +
+        '<span class="dyn-day-src">' + srcLabel + '</span>' +
+      '</span></div>';
+  }).join('');
+}
+function toggleDynDay_(i) {
+  var prevIdx = _dynOpenIdx;
+  if (prevIdx >= 0 && prevIdx !== i) {
+    var prevDetail = document.getElementById('dyn-detail-' + prevIdx);
+    var prevRow = prevDetail ? prevDetail.previousElementSibling : null;
+    if (prevDetail) prevDetail.classList.remove('open');
+    if (prevRow) prevRow.classList.remove('open');
+  }
+  var detail = document.getElementById('dyn-detail-' + i);
+  var row = detail ? detail.previousElementSibling : null;
+  if (!detail || !row) return;
+  var opening = _dynOpenIdx !== i;
+  if (opening) {
+    var inner = detail.querySelector('.dyn-detail-inner');
+    if (inner && !inner.dataset.filled) {
+      inner.innerHTML = renderDynDayList_(_dynVisibleRows[i]);
+      inner.dataset.filled = '1';
+    }
+    detail.classList.add('open');
+    row.classList.add('open');
+    _dynOpenIdx = i;
+  } else {
+    detail.classList.remove('open');
+    row.classList.remove('open');
+    _dynOpenIdx = -1;
+  }
 }
 
 var histChartTrend = null;

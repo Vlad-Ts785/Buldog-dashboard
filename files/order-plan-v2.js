@@ -21,6 +21,20 @@
 var ROOT_ID = 'page-order-plan';
 function $(sel, root) { return (root || document).querySelector(sel); }
 function $$(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+/* Влад 11.09: «сторонние подсказки заполнения заблокировать, только внутренние дашборда» -
+   Chrome/Яндекс игнорируют autocomplete="off" у полей, похожих на адрес/имя/телефон, и рисуют
+   своё меню (со своей историей автозаполнения) поверх наших подсказок. Рабочий обход:
+   autocomplete="new-password" + случайное name. 12.09 (живой тест, скриншот сторонней
+   выпадашки над поиском машины в поповере «Поставить»): раньше это применялось ТОЛЬКО к
+   #op2-d-body (шторка) - «все формы для заполнения должны быть заблокированы», вызывается
+   теперь на каждом месте, где что-то рендерится: buildDom (статический каркас - тулбарные
+   поиски, поиск в поповере), wireForm (шторка), openHiredStep (наёмник), renderList повтора. */
+function blockForeignAutofill_(root) {
+  $$('input:not([type=date]):not([type=checkbox]),textarea', root).forEach(function (i) {
+    i.setAttribute('autocomplete', 'new-password'); i.setAttribute('autocorrect', 'off'); i.setAttribute('spellcheck', 'false');
+    i.setAttribute('name', 'op2-' + Math.random().toString(36).slice(2, 9));
+  });
+}
 
 /* Своя экранировка - всё, что приходит от людей (заказчик, груз, адреса, имена),
    уходит в innerHTML только через неё. Общей escHtml_ в index.html нет - те,
@@ -441,6 +455,7 @@ function buildDom() {
         '</div>' +
       '</div></div>' +
     '</div>';
+  blockForeignAutofill_(page); /* статический каркас - тулбарные поиски, поиск в поповере «Поставить» */
   wire();
   return true;
 }
@@ -939,15 +954,30 @@ function renderMgr() {
     rows.length + ' ' + plural(rows.length, 'заявка', 'заявки', 'заявок') + (cash ? ' · ' + cash + ' наличными' : '') +
     '</td><td class="op2-num"><span class="op2-mono">' + esc(fmtP(sum) || '—') + '</span></td></tr>';
 }
+/* Влад 12.09: «не нужно так длинно писать полное имя - нужно сокращённо, Цуц/Кан/Мах, как
+   уже есть у логистов» + «логисты тоже должны видеть, какой логист работает с заявкой» - код
+   (taken_by_code, тот же code3 - «три буквы фамилии, как в Планировке», что и manager_code)
+   виден ВСЕГДА, не только пока машина не поставлена, и в таблице менеджера, и в таблице
+   логиста, и в карточке. Полное имя осталось в title (навести мышью), а не в самой строке.
+   takenByHtml_ - голый тег (своя обёртка/класс вызывающего места, или '' - без класса вовсе);
+   takenByBadge_ - готовый бейдж с пробелом впереди для табличных ячеек. */
+function takenByHtml_(o, verb, wrapClass) {
+  if (!o.taken_by_name) return '';
+  return '<span' + (wrapClass ? ' class="' + wrapClass + '"' : '') + ' title="' + esc(o.taken_by_name) + '">' + esc(verb) + ' ' + esc((o.taken_by_code || o.taken_by_name).toUpperCase()) + '</span>';
+}
+function takenByBadge_(o) {
+  var h = takenByHtml_(o, 'взял', 'op2-takenby');
+  return h ? ' ' + h : '';
+}
 function mgrVehCell(o) {
   var h = oHired(o);
   if (h) {
     return '<div class="op2-veh"><span class="op2-hire">Наёмник</span><span class="op2-drv">' + esc(h.carrier_name || 'перевозчик уточняется') +
-      (h.vehicle_gos ? ' · <span class="op2-mono">' + esc(h.vehicle_gos) + '</span>' : '') + (h.driver_name ? ' · ' + esc(h.driver_name) : '') + '</span></div>' + pendHtml(o, 'mgr');
+      (h.vehicle_gos ? ' · <span class="op2-mono">' + esc(h.vehicle_gos) + '</span>' : '') + (h.driver_name ? ' · ' + esc(h.driver_name) : '') + '</span></div>' + takenByBadge_(o) + pendHtml(o, 'mgr');
   }
   var vs = oOwn(o);
   if (!vs.length) {
-    return '<span class="op2-dim">машину ещё не поставили' + (o.taken_by_name ? ' · <b style="font-weight:500;color:var(--text)">принял ' + esc(o.taken_by_name) + '</b>' : '') + '</span>';
+    return '<span class="op2-dim">машину ещё не поставили</span>' + takenByBadge_(o);
   }
   function row(v) {
     var okc = v.driver_confirmed_at ? ' op2-ok' : '';
@@ -959,7 +989,7 @@ function mgrVehCell(o) {
   var inner = vs.length === 1
     ? '<div class="op2-veh">' + row(vs[0]) + '</div>'
     : '<div class="op2-veh op2-multi">' + vs.map(function (v) { return '<div class="op2-row">' + row(v) + '</div>'; }).join('') + '</div>';
-  return inner + pendHtml(o, 'mgr');
+  return inner + takenByBadge_(o) + pendHtml(o, 'mgr');
 }
 /* «замена машины» (type=replace_vehicle, from_gos/to_gos) и «замена перевозчика»
    (type=replace_carrier, from_carrier_name/to_carrier_name) - один и тот же
@@ -1011,7 +1041,7 @@ function vehCellLog(o) {
   if (h) {
     return '<div class="op2-veh" data-oid="' + esc(o.id) + '"><span class="op2-hire">Наёмник</span><span class="op2-drv">' +
       esc(h.carrier_name || 'перевозчик уточняется') + (h.vehicle_gos ? ' · <span class="op2-mono">' + esc(h.vehicle_gos) + '</span>' : '') +
-      (h.driver_name ? ' · ' + esc(h.driver_name) : '') + (h.carrier_status ? ' · ' + esc(h.carrier_status) : '') + '</span></div>' + pendHtml(o, 'log');
+      (h.driver_name ? ' · ' + esc(h.driver_name) : '') + (h.carrier_status ? ' · ' + esc(h.carrier_status) : '') + '</span></div>' + takenByBadge_(o) + pendHtml(o, 'log');
   }
   var vs = oOwn(o);
   if (!vs.length) {
@@ -1031,13 +1061,13 @@ function vehCellLog(o) {
     return '<div class="op2-vehrow"><div class="op2-veh" data-oid="' + esc(o.id) + '" data-eid="' + esc(v.id) + '">' +
       '<span class="op2-gos' + (v.driver_confirmed_at ? ' op2-ok' : '') + '">' + esc(v.vehicle_gos || '') + '</span>' +
       '<span class="op2-drv">' + esc(v.driver_name || 'водитель уточняется') + (v.driver_confirmed_at ? ' · подтвердил' : '') + '</span>' +
-      '</div>' + okBtn(v) + '</div>' + pendHtml(o, 'log');
+      '</div>' + okBtn(v) + '</div>' + takenByBadge_(o) + pendHtml(o, 'log');
   }
   return '<div class="op2-vehrow"><div class="op2-veh op2-multi" data-oid="' + esc(o.id) + '">' +
     vs.map(function (v) {
       return '<div class="op2-row"><span class="op2-gos' + (v.driver_confirmed_at ? ' op2-ok' : '') + '">' + esc(v.vehicle_gos || '') + '</span>' +
         '<span class="op2-drv">' + esc(v.driver_name || '') + (v.role ? ' · ' + (v.role === 'reserve' ? 'резерв' : 'основная') : '') + (v.driver_confirmed_at ? ' · подтвердил' : '') + '</span></div>';
-    }).join('') + '</div><div style="display:flex;flex-direction:column;gap:2px">' + vs.map(okBtn).join('') + '</div></div>' + pendHtml(o, 'log');
+    }).join('') + '</div><div style="display:flex;flex-direction:column;gap:2px">' + vs.map(okBtn).join('') + '</div></div>' + takenByBadge_(o) + pendHtml(o, 'log');
 }
 function renderLog() {
   var body = $('#op2-log-body'); if (!body) return;
@@ -1263,7 +1293,7 @@ function openPop(anchor, o, forceAdd) {
   var vs = oOwn(o);
   $('#op2-pop-cur').innerHTML = vs.length
     ? 'Сейчас: <b>' + esc(vs.map(function (v) { return v.vehicle_gos; }).join(', ')) + '</b>'
-    : 'Сейчас: <b>без машины</b>' + (o.taken_by_name ? ' · взял ' + esc(o.taken_by_name) : '');
+    : 'Сейчас: <b>без машины</b>' + (o.taken_by_name ? ' · ' + takenByHtml_(o, 'взял', '') : '');
   var ok = $('#op2-pop-ok');
   ok.className = 'op2-dbtn op2-primary op2-blocked';
   ok.textContent = vs.length && !popAdd ? 'Выбери замену или «Снять»' : 'Выбери машину';
@@ -1448,6 +1478,7 @@ function openHiredStep(o) {
     '</div>' +
     '<div class="op2-margin"><span class="op2-k">Цена менеджера ' + esc(fmtP(o.price) || 'не указана') + ' · маржа</span><span class="op2-v" id="op2-h-margin">—</span></div>' +
     '<div class="op2-fld"><label>Комментарий</label><input id="op2-h-comment" autocomplete="off" placeholder="Что важно знать по перевозчику" value="' + esc(h.comment || '') + '"></div>';
+  blockForeignAutofill_($('#op2-hstep'));
   var ok = $('#op2-pop-ok');
   ok.className = 'op2-dbtn op2-primary';
   ok.textContent = 'Отдать наёмнику';
@@ -1723,7 +1754,7 @@ function renderView(o, who) {
   if (h) {
     var marg = num(o.price) - num(h.purchase_rate);
     vehHtml = '<div class="op2-vehcard"><div class="op2-top"><span class="op2-hire">Наёмник</span><span class="op2-gos">' + esc(h.vehicle_gos || 'госномер уточняется') + '</span>' +
-      (o.taken_by_name ? '<span class="op2-by">взял ' + esc(o.taken_by_name) + '</span>' : '') + '</div>' +
+      takenByHtml_(o, 'взял', 'op2-by') + '</div>' +
       '<div class="op2-line"><span><span class="op2-k">Компания</span> ' + esc(h.carrier_name || 'уточнить') + '</span>' +
       '<span><span class="op2-k">Водитель</span> ' + esc(h.driver_name || 'уточнить') + '</span>' +
       '<span><span class="op2-k">Статус перевозчика</span> ' + esc(h.carrier_status || 'уточнить') + '</span></div>' +
@@ -1738,7 +1769,7 @@ function renderView(o, who) {
     vehHtml = '<div class="op2-vehcard"><div class="op2-top">' +
       '<span class="op2-gos' + (v.driver_confirmed_at ? ' op2-ok' : '') + '">' + esc(v.vehicle_gos || '') + '</span>' +
       (o.equipment_type ? '<span class="op2-ttype">' + esc(o.equipment_type) + '</span>' : '') +
-      '<span class="op2-by">' + okTxt + '</span></div>' +
+      '<span class="op2-by">' + okTxt + (o.taken_by_name ? ' · ' + takenByHtml_(o, 'взял', '') : '') + '</span></div>' +
       '<div class="op2-line"><span><span class="op2-k">Водитель</span> ' + esc(v.driver_name || 'уточнить') + '</span>' +
       '<span><span class="op2-k">Телефон</span> ' + (v.driver_phone ? '<a class="op2-tel op2-mono" href="tel:' + esc(String(v.driver_phone).replace(/[^\d+]/g, '')) + '">' + esc(fmtPhone(v.driver_phone)) + '</a>' : '<span class="op2-dim">уточнить</span>') + '</span>' +
       '<span><span class="op2-k">Прицеп</span> <span class="op2-mono">' + esc(v.trailer_gos || '—') + '</span></span></div>' +
@@ -1760,7 +1791,7 @@ function renderView(o, who) {
       '<span class="op2-dim">' + (o.otboy_ack_by ? 'логист принял · ' + esc(o.otboy_ack_by) : 'логист ещё не принял') + '</span></div>' +
       '<div class="op2-line op2-dim">Машину на отбой поставить нельзя</div></div>';
   } else {
-    vehHtml = '<div class="op2-vehcard"><div class="op2-top"><span class="op2-dim">Машину ещё не поставили' + (o.taken_by_name ? ' · принял ' + esc(o.taken_by_name) : '') + '</span></div>' +
+    vehHtml = '<div class="op2-vehcard"><div class="op2-top"><span class="op2-dim">Машину ещё не поставили' + (o.taken_by_name ? ' · ' + takenByHtml_(o, 'принял', '') : '') + '</span></div>' +
       (isLog ? '<div class="op2-acts"><button class="op2-dbtn op2-primary" id="op2-d-put">Поставить машину</button>' +
         (o.taken_by_name ? '' : '<button class="op2-ghost" id="op2-d-take">Беру в работу</button>') + '</div>' : '') + '</div>';
   }
@@ -2388,13 +2419,7 @@ function wireForm() {
   });
 
   $$('#op2-d-body input,#op2-d-body select,#op2-d-body textarea').forEach(function (i) { i.addEventListener('input', tickState); });
-  /* Влад 11.09: «сторонние подсказки заполнения заблокировать, только внутренние дашборда» - Chrome/Яндекс
-     игнорируют autocomplete="off" у полей, похожих на адрес/имя/телефон, и рисуют своё меню поверх
-     наших подсказок. Рабочий обход: autocomplete="new-password" + случайное name на каждом рендере. */
-  $$('#op2-d-body input:not([type=date]):not([type=checkbox]),#op2-d-body textarea').forEach(function (i) {
-    i.setAttribute('autocomplete', 'new-password'); i.setAttribute('autocorrect', 'off'); i.setAttribute('spellcheck', 'false');
-    i.setAttribute('name', 'op2-' + Math.random().toString(36).slice(2, 9));
-  });
+  blockForeignAutofill_($('#op2-d-body'));
   if (formOrder && formOrder.customer) fetchCustomerHistory(formOrder.customer);
   tickState();
 }
@@ -2462,14 +2487,15 @@ function fetchCustomers(q) {
   }).catch(function () {});
 }
 /* Влад 12.09: «партнёру наёмной техники тоже должен быть справочник юридических лиц» - тот же
-   принцип, что и у «Заказчика» (fetchCustomers выше), только своя история (кого уже возили,
-   plan_order_executors) вместо «моих заказов». */
+   принцип, что и у «Заказчика» (fetchCustomers выше), только своя история вместо «моих
+   заказов» - «кого уже возили В ЭТОМ МЕСЯЦЕ» (второй заход, сервер сам режет по service_date
+   текущего календарного месяца), не всё время. */
 function fetchCarriers(q) {
   apiGet('/orders/carriers', { q: q }).then(function (r) {
     if (!r || !r.ok || !r.data || r.data.error) return;
     var hist = r.data.history || [], all = r.data.all || [];
     var h = '';
-    if (hist.length) h += '<div class="op2-sec">Уже возили</div>' + hist.slice(0, 6).map(function (c) {
+    if (hist.length) h += '<div class="op2-sec">Уже возили в этом месяце</div>' + hist.slice(0, 6).map(function (c) {
       return '<div class="op2-it" data-name="' + esc(c.name) + '"' + (c.entity_id ? ' data-eid="' + esc(c.entity_id) + '"' : '') + '><span>' + esc(c.name) + '</span><span class="op2-m">' + esc(c.n || '') + '×</span></div>';
     }).join('');
     if (all.length) h += '<div class="op2-sec">Справочник юрлиц</div>' + all.slice(0, 10).map(function (c) {
@@ -2820,6 +2846,7 @@ function openRepeat(o) {
       });
     });
     $('#op2-rp-list').innerHTML = h || '<span class="op2-dim op2-sm">кликни по дню выше - каждая клик добавит заявку</span>';
+    blockForeignAutofill_($('#op2-rp-list'));
     var g = $('#op2-rp-go');
     g.className = 'op2-dbtn op2-primary' + (rows.length ? '' : ' op2-blocked');
     g.textContent = rows.length ? 'Создать ' + rows.length + ' ' + plural(rows.length, 'заявку', 'заявки', 'заявок') : 'Создать заявки';

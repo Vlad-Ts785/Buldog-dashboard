@@ -44,6 +44,24 @@ function capFirst(s) { s = String(s || ''); return s ? s.charAt(0).toUpperCase()
    Координаты - точный ответ DaData на этот адрес (проверено вручную 12.09), не пересчитываются. */
 var BASE_ADDRESS_ = 'Московская обл, г Домодедово, мкр Центральный, ул Промышленная, д 37';
 var BASE_LAT_ = '55.4672641', BASE_LON_ = '37.7794222';
+/* Та же ставка, что уже используется в Калькуляторе для выделения НДС из цены КП
+   (files/index.html, genKP(), VAT_RATE=0.22) - один и тот же процент по всему дашборду. */
+var VAT_RATE_ = 0.22;
+/* Влад 12.09: «маржа ниже 23% - красным». Порог один на обе ветки (с/без НДС у поставщика). */
+var MARGIN_RED_BELOW_ = 23;
+/* Общая формула маржи наёмника - и попап «Отдать наёмнику» (openHiredStep/recalc), и
+   карточка заявки (renderView) должны считать ОДИНАКОВО, иначе одна и та же запись
+   показывает разные цифры в двух местах (тот же класс ошибки, что в orders-calc: общую
+   формулу держать в одном месте, не дублировать). Влад 12.09: «представить, что и заказчик
+   как будто бы без НДС, и поставщик без НДС» - цену менеджера мы ВСЕГДА выставляем с НДС;
+   если поставщик НДС не начисляет, эту сумму нельзя принять к вычету, поэтому маржу считаем
+   от цены-нетто (цена/(1+ставка НДС)), а не от полной цены. С НДС у поставщика - НДС
+   сокращается с обеих сторон одинаково, поправка не нужна. */
+function hiredMargin_(price, rate, withVat) {
+  var base = withVat ? price : price / (1 + VAT_RATE_);
+  var m = base - rate;
+  return { amount: m, pct: Math.round(m / base * 100) };
+}
 function esc(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -277,6 +295,17 @@ function oMgrTitle(o) {
   if (o.internal) return 'внутренний заказ, создал логист ' + (o.taken_by_name || o.manager_name || '');
   return o.manager_name || o.manager_code || '';
 }
+/* Влад 12.09: «колонку "Менеджер и логист" сразу после нумерации... номер заказа, потом
+   менеджер, потом логист... вся индикация: кто создал заявку, кто принял заявку» - те же
+   op2-code, что и раньше, просто вынесены в свои колонки (было только «Мен.» у логиста,
+   ближе к «Машина», и никакой колонки логиста у менеджера вообще). Обе таблицы (менеджера
+   и логиста) - одинаковый порядок и вид ячеек. */
+function mgrCodeCell_(o) {
+  return '<td><span class="op2-code" title="' + esc(oMgrTitle(o)) + '"' + (o.internal ? ' style="color:var(--tint-blue)"' : '') + '>' + esc(oMgrCode(o)) + '</span></td>';
+}
+function logCodeCell_(o) {
+  return '<td>' + (o.taken_by_name ? '<span class="op2-code" title="' + esc(o.taken_by_name) + '">' + esc((o.taken_by_code || '').toUpperCase()) + '</span>' : '<span class="op2-dim">—</span>') + '</td>';
+}
 function byId(id) { for (var i = 0; i < ORD.length; i++) { if (String(ORD[i].id) === String(id)) return ORD[i]; } return null; }
 function execById(o, eid) { var l = o.executors || []; for (var i = 0; i < l.length; i++) { if (String(l[i].id) === String(eid)) return l[i]; } return null; }
 function isMgr() { return VIEW === 'mgr'; }
@@ -355,7 +384,10 @@ function buildDom() {
         '<div class="op2-tblwrap op2-x">' +
           '<table class="op2-tbl op2-mgr-tbl" id="op2-mgr-tbl">' +
             '<thead><tr>' +
-              '<th>№</th><th data-sort="t" class="op2-on">Время<span class="op2-s">▲</span></th>' +
+              '<th>№</th>' +
+              '<th data-sort="mgr">Мен.<span class="op2-s">↕</span></th>' +
+              '<th data-sort="log">Лог.<span class="op2-s">↕</span></th>' +
+              '<th data-sort="t" class="op2-on">Время<span class="op2-s">▲</span></th>' +
               '<th data-sort="type">Техника<span class="op2-s">↕</span></th>' +
               '<th data-sort="cust">Заказчик<span class="op2-s">↕</span></th>' +
               '<th>Откуда → куда</th><th>Машина · водитель</th>' +
@@ -396,11 +428,12 @@ function buildDom() {
           '<table class="op2-tbl" id="op2-log-tbl">' +
             '<thead id="op2-log-head"><tr>' +
               '<th class="op2-on" data-sort="n" title="По умолчанию - по номеру заявки">№<span class="op2-s">▲</span></th>' +
+              '<th data-sort="mgr">Мен.<span class="op2-s">↕</span></th>' +
+              '<th data-sort="log">Лог.<span class="op2-s">↕</span></th>' +
               '<th data-sort="t">Время<span class="op2-s">↕</span></th>' +
               '<th data-sort="cust">Заказчик<span class="op2-s">↕</span></th>' +
               '<th data-sort="type">Техника<span class="op2-s">↕</span></th>' +
               '<th>Груз</th><th>Откуда → куда</th><th>Габарит</th>' +
-              '<th data-sort="mgr">Мен.<span class="op2-s">↕</span></th>' +
               '<th>Машина</th>' +
               '<th data-sort="st">Статус<span class="op2-s">↕</span></th>' +
             '</tr></thead>' +
@@ -414,7 +447,7 @@ function buildDom() {
           '<span>Отбой: строка мигает, пока логист не нажмёт «принять»; машину на отбой поставить нельзя; если стояла - «Снять машину»</span>' +
           '<span><button class="op2-dok op2-on" style="pointer-events:none">✓</button> водитель подтвердил заявку (ставит логист) - у менеджера госномер зелёный</span>' +
           '<span>Зажать плитку машины на полсекунды - режим перемещения: перетащи на другую заявку (пусто - перенос, занято - обмен), Esc - отмена</span>' +
-          '<span>Менеджер - три буквы фамилии, как в Планировке</span>' +
+          '<span>Мен./Лог. - три буквы фамилии, как в Планировке; Лог. - кто принял заявку в работу, наведи - полное имя</span>' +
         '</div>' +
       '</section>' +
 
@@ -906,6 +939,7 @@ function sortRows(rows) {
     else if (k === 'cust') { va = String(a.customer || '').toLowerCase(); vb = String(b.customer || '').toLowerCase(); }
     else if (k === 'type') { va = String(a.equipment_type || '').toLowerCase(); vb = String(b.equipment_type || '').toLowerCase(); }
     else if (k === 'mgr') { va = oMgrCode(a); vb = oMgrCode(b); }
+    else if (k === 'log') { va = (a.taken_by_code || '').toUpperCase(); vb = (b.taken_by_code || '').toUpperCase(); }
     else { va = ''; vb = ''; }
     return (va > vb ? 1 : va < vb ? -1 : 0) * d || (num(oNo(a)) - num(oNo(b)));
   });
@@ -938,6 +972,7 @@ function renderMgr() {
     var cls = 'op2-r36' + (k === 'ot' ? ' op2-otboy' : '');
     return '<tr class="' + cls + '" data-oid="' + esc(o.id) + '">' +
       '<td class="op2-ono">' + esc(oNo(o)) + '</td>' +
+      mgrCodeCell_(o) + logCodeCell_(o) +
       '<td>' + timeCell(o) + '</td>' +
       '<td>' + (o.equipment_type ? '<span class="op2-ttype">' + esc(o.equipment_type) + '</span>' : '<span class="op2-dim">уточнить</span>') + '</td>' +
       '<td class="op2-ell" title="' + esc(o.customer) + '">' + (WIDE && F.q ? '<span class="op2-code" style="margin-right:6px">' + esc(dm(o.service_date)) + '</span>' : '') + esc(o.customer || '') + '</td>' +
@@ -949,35 +984,30 @@ function renderMgr() {
   }).join('');
   var cash = rows.filter(function (o) { return !!o.cash; }).length;
   var sum = rows.reduce(function (a, o) { return a + num(o.price); }, 0);
-  $('#op2-mgr-foot').innerHTML = '<tr><td colspan="7">' +
+  $('#op2-mgr-foot').innerHTML = '<tr><td colspan="9">' +
     (WIDE && F.q ? 'Поиск за 3 месяца · «' + esc(F.q) + '» · ' : 'Итого за ' + (TO_DATE ? 'неделю' : 'день') + ' · ') +
     rows.length + ' ' + plural(rows.length, 'заявка', 'заявки', 'заявок') + (cash ? ' · ' + cash + ' наличными' : '') +
     '</td><td class="op2-num"><span class="op2-mono">' + esc(fmtP(sum) || '—') + '</span></td></tr>';
 }
 /* Влад 12.09: «не нужно так длинно писать полное имя - нужно сокращённо, Цуц/Кан/Мах, как
-   уже есть у логистов» + «логисты тоже должны видеть, какой логист работает с заявкой» - код
-   (taken_by_code, тот же code3 - «три буквы фамилии, как в Планировке», что и manager_code)
-   виден ВСЕГДА, не только пока машина не поставлена, и в таблице менеджера, и в таблице
-   логиста, и в карточке. Полное имя осталось в title (навести мышью), а не в самой строке.
-   takenByHtml_ - голый тег (своя обёртка/класс вызывающего места, или '' - без класса вовсе);
-   takenByBadge_ - готовый бейдж с пробелом впереди для табличных ячеек. */
+   уже есть у логистов». Полное имя - в title (навести мышью), не в самой строке. Раньше
+   (см. историю) висело бейджем прямо в ячейке «Машина» - Влад 12.09, второй заход: «отметка
+   логиста должна быть не где-то сейчас это сделал, а колонка» - переехало в mgrCodeCell_/
+   logCodeCell_ (своя колонка «Лог.» в обеих таблицах), тут остался только голый тег для
+   карточки/поповера, где своя обёртка нужна по месту. */
 function takenByHtml_(o, verb, wrapClass) {
   if (!o.taken_by_name) return '';
   return '<span' + (wrapClass ? ' class="' + wrapClass + '"' : '') + ' title="' + esc(o.taken_by_name) + '">' + esc(verb) + ' ' + esc((o.taken_by_code || o.taken_by_name).toUpperCase()) + '</span>';
-}
-function takenByBadge_(o) {
-  var h = takenByHtml_(o, 'взял', 'op2-takenby');
-  return h ? ' ' + h : '';
 }
 function mgrVehCell(o) {
   var h = oHired(o);
   if (h) {
     return '<div class="op2-veh"><span class="op2-hire">Наёмник</span><span class="op2-drv">' + esc(h.carrier_name || 'перевозчик уточняется') +
-      (h.vehicle_gos ? ' · <span class="op2-mono">' + esc(h.vehicle_gos) + '</span>' : '') + (h.driver_name ? ' · ' + esc(h.driver_name) : '') + '</span></div>' + takenByBadge_(o) + pendHtml(o, 'mgr');
+      (h.vehicle_gos ? ' · <span class="op2-mono">' + esc(h.vehicle_gos) + '</span>' : '') + (h.driver_name ? ' · ' + esc(h.driver_name) : '') + '</span></div>' + pendHtml(o, 'mgr');
   }
   var vs = oOwn(o);
   if (!vs.length) {
-    return '<span class="op2-dim">машину ещё не поставили</span>' + takenByBadge_(o);
+    return '<span class="op2-dim">машину ещё не поставили</span>';
   }
   function row(v) {
     var okc = v.driver_confirmed_at ? ' op2-ok' : '';
@@ -989,7 +1019,7 @@ function mgrVehCell(o) {
   var inner = vs.length === 1
     ? '<div class="op2-veh">' + row(vs[0]) + '</div>'
     : '<div class="op2-veh op2-multi">' + vs.map(function (v) { return '<div class="op2-row">' + row(v) + '</div>'; }).join('') + '</div>';
-  return inner + takenByBadge_(o) + pendHtml(o, 'mgr');
+  return inner + pendHtml(o, 'mgr');
 }
 /* «замена машины» (type=replace_vehicle, from_gos/to_gos) и «замена перевозчика»
    (type=replace_carrier, from_carrier_name/to_carrier_name) - один и тот же
@@ -1041,14 +1071,15 @@ function vehCellLog(o) {
   if (h) {
     return '<div class="op2-veh" data-oid="' + esc(o.id) + '"><span class="op2-hire">Наёмник</span><span class="op2-drv">' +
       esc(h.carrier_name || 'перевозчик уточняется') + (h.vehicle_gos ? ' · <span class="op2-mono">' + esc(h.vehicle_gos) + '</span>' : '') +
-      (h.driver_name ? ' · ' + esc(h.driver_name) : '') + (h.carrier_status ? ' · ' + esc(h.carrier_status) : '') + '</span></div>' + takenByBadge_(o) + pendHtml(o, 'log');
+      (h.driver_name ? ' · ' + esc(h.driver_name) : '') + (h.carrier_status ? ' · ' + esc(h.carrier_status) : '') + '</span></div>' + pendHtml(o, 'log');
   }
   var vs = oOwn(o);
   if (!vs.length) {
     var t = oTime(o);
     var amber = (t && tmin(t) - nowMin() < 120 && tmin(t) >= nowMin() && DATE === todayStr()) ? '<span class="op2-dot-amber" title="до подачи меньше 2 ч"></span>' : '';
-    var take = o.taken_by_name ? '<span class="op2-take">взял ' + esc(String(o.taken_by_code || o.taken_by_name).toUpperCase()) + '</span>' : '<span class="op2-take">беру</span>';
-    return '<button class="op2-slot" data-oid="' + esc(o.id) + '">' + amber + 'Поставить' + take + '</button>';
+    /* «взял ЦУЦ»/«беру» переехало в отдельную колонку «Лог.» (Влад 12.09: «не где-то сейчас
+       это сделал, а колонка») - кнопка больше не дублирует то же самое своим текстом. */
+    return '<button class="op2-slot" data-oid="' + esc(o.id) + '">' + amber + 'Поставить</button>';
   }
   function okBtn(v) {
     var on = !!v.driver_confirmed_at;
@@ -1061,13 +1092,13 @@ function vehCellLog(o) {
     return '<div class="op2-vehrow"><div class="op2-veh" data-oid="' + esc(o.id) + '" data-eid="' + esc(v.id) + '">' +
       '<span class="op2-gos' + (v.driver_confirmed_at ? ' op2-ok' : '') + '">' + esc(v.vehicle_gos || '') + '</span>' +
       '<span class="op2-drv">' + esc(v.driver_name || 'водитель уточняется') + (v.driver_confirmed_at ? ' · подтвердил' : '') + '</span>' +
-      '</div>' + okBtn(v) + '</div>' + takenByBadge_(o) + pendHtml(o, 'log');
+      '</div>' + okBtn(v) + '</div>' + pendHtml(o, 'log');
   }
   return '<div class="op2-vehrow"><div class="op2-veh op2-multi" data-oid="' + esc(o.id) + '">' +
     vs.map(function (v) {
       return '<div class="op2-row"><span class="op2-gos' + (v.driver_confirmed_at ? ' op2-ok' : '') + '">' + esc(v.vehicle_gos || '') + '</span>' +
         '<span class="op2-drv">' + esc(v.driver_name || '') + (v.role ? ' · ' + (v.role === 'reserve' ? 'резерв' : 'основная') : '') + (v.driver_confirmed_at ? ' · подтвердил' : '') + '</span></div>';
-    }).join('') + '</div><div style="display:flex;flex-direction:column;gap:2px">' + vs.map(okBtn).join('') + '</div></div>' + takenByBadge_(o) + pendHtml(o, 'log');
+    }).join('') + '</div><div style="display:flex;flex-direction:column;gap:2px">' + vs.map(okBtn).join('') + '</div></div>' + pendHtml(o, 'log');
 }
 function renderLog() {
   var body = $('#op2-log-body'); if (!body) return;
@@ -1109,13 +1140,13 @@ function renderLog() {
     var h = vs.length > 1 ? ' style="height:' + (44 + 18 * (vs.length - 1)) + 'px"' : '';
     return '<tr class="' + cls + '" data-oid="' + esc(o.id) + '"' + h + '>' +
       '<td class="op2-ono">' + esc(oNo(o)) + '</td>' +
+      mgrCodeCell_(o) + logCodeCell_(o) +
       '<td>' + timeCell(o) + '</td>' +
       '<td class="op2-ell" title="' + esc(o.customer) + '">' + (isFresh(o) ? '<span class="op2-st-chip op2-ok" style="margin-right:6px">новая</span>' : '') + esc(o.customer || '') + '</td>' +
       '<td>' + (o.equipment_type ? '<span class="op2-ttype">' + esc(o.equipment_type) + '</span>' : '<span class="op2-dim">уточнить</span>') + '</td>' +
       '<td class="op2-dim op2-ell" style="max-width:150px">' + esc(o.cargo || '') + '</td>' +
       '<td>' + routeCell(o, 120) + '</td>' +
       '<td class="op2-sm">' + (o.gabarit ? '<span style="color:var(--tint-amber)">' + esc(o.gabarit) + '</span>' : '') + '</td>' +
-      '<td><span class="op2-code" title="' + esc(oMgrTitle(o)) + '"' + (o.internal ? ' style="color:var(--tint-blue)"' : '') + '>' + esc(oMgrCode(o)) + '</span></td>' +
       '<td>' + vehCellLog(o) + '</td>' +
       '<td class="op2-st">' + (o.needs_data ? '<span class="op2-nd" title="под данные"></span>' : '') + stChip(o) + '</td>' +
       '</tr>';
@@ -1405,7 +1436,9 @@ function onPopBodyClick(e) {
 }
 function onPopOk() {
   var o = popOrder; if (!o) return;
-  if (this.classList.contains('op2-blocked')) { toast('<span class="op2-warn">Сначала выбери машину</span> из списка или «Наёмник»'); return; }
+  /* Текст тоста = текст самой кнопки - у неё уже осмысленная причина блокировки (своя машина
+     не выбрана / у наёмника не хватает компании или ставки закупки, см. updateHiredBtn_). */
+  if (this.classList.contains('op2-blocked')) { toast('<span class="op2-warn">' + esc(this.textContent) + '</span>'); return; }
   if ($('#op2-pop').classList.contains('op2-hired')) { saveHired(o); return; }
   var gos = this.dataset.gos;
   var declared = this.dataset.declared === '1';
@@ -1474,30 +1507,60 @@ function openHiredStep(o) {
       '<div class="op2-fld"><label>Водитель</label><input id="op2-h-drv" autocomplete="off" placeholder="Фамилия Имя Отчество" value="' + esc(h.driver_name || '') + '"></div>' +
       '<div class="op2-fld"><label>Телефон водителя</label><input id="op2-h-phone" class="op2-mono" autocomplete="off" placeholder="+7" value="' + esc(h.driver_phone || '') + '"></div>' +
       '<div class="op2-fld"><label>Ставка закупки, ₽</label><input id="op2-h-rate" class="op2-mono" inputmode="numeric" autocomplete="off" value="' + esc(h.purchase_rate || '') + '"></div>' +
-      '<div class="op2-fld"><label>Расчёт</label><input id="op2-h-settle" autocomplete="off" placeholder="Б/н с НДС · наличные · отсрочка" value="' + esc(h.settlement || '') + '"></div>' +
+      /* Влад 12.09: «непонятно назначение этого окна [Расчёт] - вместо него две кнопки:
+         с НДС или без НДС - относятся к экрану ввода стоимости поставщика, от них зависит
+         маржа». Поле «Расчёт» было чистым текстом без единого места вывода (write-only,
+         никогда не показывалось обратно) - заменено явным переключателем, значение которого
+         реально на что-то влияет (см. recalc). Хранится в той же колонке settlement, теперь
+         каноническим значением «с ндс»/«без ндс», а не произвольным текстом. */
+      '<div class="op2-fld"><label>НДС у поставщика</label><div class="op2-cstat" id="op2-h-vat">' +
+        '<button class="op2-chip' + (h.settlement === 'без ндс' ? '' : ' op2-on') + '" data-vat="1">С НДС</button>' +
+        '<button class="op2-chip' + (h.settlement === 'без ндс' ? ' op2-on' : '') + '" data-vat="0">Без НДС</button>' +
+      '</div></div>' +
     '</div>' +
     '<div class="op2-margin"><span class="op2-k">Цена менеджера ' + esc(fmtP(o.price) || 'не указана') + ' · маржа</span><span class="op2-v" id="op2-h-margin">—</span></div>' +
     '<div class="op2-fld"><label>Комментарий</label><input id="op2-h-comment" autocomplete="off" placeholder="Что важно знать по перевозчику" value="' + esc(h.comment || '') + '"></div>';
   blockForeignAutofill_($('#op2-hstep'));
-  var ok = $('#op2-pop-ok');
-  ok.className = 'op2-dbtn op2-primary';
-  ok.textContent = 'Отдать наёмнику';
+  /* Влад 12.09: «отдать наёмнику невозможно без указания цены» - та же логика, что у цены
+     заявки при создании (tickState), только тут своя кнопка «Отдать наёмнику», не общий
+     op2-f-save. «Нужен расчёт маржи в процентах сразу» - % от цены менеджера рядом с суммой,
+     не просто разница в рублях. Обе проверки (компания/ставка) - в одной функции, вызывается
+     из обоих полей, чтобы кнопка не «зависала» с текстом от предыдущего поля. */
+  function updateHiredBtn_() {
+    var ok = $('#op2-pop-ok');
+    var co = $('#op2-h-co').value.trim();
+    var rate = num($('#op2-h-rate').value);
+    if (!co) { ok.className = 'op2-dbtn op2-primary op2-blocked'; ok.textContent = 'Впиши компанию-перевозчика'; return; }
+    if (!rate) { ok.className = 'op2-dbtn op2-primary op2-blocked'; ok.textContent = 'Укажи ставку закупки'; return; }
+    ok.className = 'op2-dbtn op2-primary'; ok.textContent = 'Отдать наёмнику · ' + co;
+  }
+  /* Порог 23% - красный ниже него независимо от режима (даже положительная, но низкая
+     маржа - это красный, не только убыток). Формула - hiredMargin_ выше. */
   function recalc() {
-    var m = num(o.price) - num($('#op2-h-rate').value);
-    var el = $('#op2-h-margin');
-    if (!num(o.price)) { el.textContent = '—'; el.className = 'op2-v'; return; }
-    el.textContent = (m >= 0 ? '+' : '−') + fmtP(Math.abs(m));
-    el.className = 'op2-v ' + (m >= 0 ? 'op2-pos' : 'op2-neg');
+    var price = num(o.price), el = $('#op2-h-margin');
+    if (!price) { el.textContent = '—'; el.className = 'op2-v'; return; }
+    var vatBtn = $('#op2-h-vat .op2-chip.op2-on');
+    var withVat = !vatBtn || vatBtn.dataset.vat !== '0';
+    var r = hiredMargin_(price, num($('#op2-h-rate').value), withVat);
+    el.textContent = (r.amount >= 0 ? '+' : '−') + fmtP(Math.abs(r.amount)) + ' · ' + (r.amount >= 0 ? '+' : '−') + Math.abs(r.pct) + '%';
+    el.className = 'op2-v ' + (r.pct >= MARGIN_RED_BELOW_ ? 'op2-pos' : 'op2-neg');
+    updateHiredBtn_();
   }
   $('#op2-h-rate').addEventListener('input', recalc);
   wireMoneyInput_('op2-h-rate');
+  $('#op2-h-vat').addEventListener('click', function (e) {
+    var c = e.target.closest('.op2-chip'); if (!c) return;
+    $$('.op2-chip', this).forEach(function (x) { x.classList.remove('op2-on'); });
+    c.classList.add('op2-on');
+    recalc();
+  });
   /* Влад 12.09: «партнёру наёмной техники тоже должен быть справочник юридических лиц» -
      тот же принцип подсказок, что у «Заказчика» (fetchCustomers), отдельный источник
      (история наёмок + sprav_legal_entities, а не заказчики). Ручной ввод сбрасывает
      entity-привязку - если менеджер сам допечатал название, это уже не выбор из списка. */
   var coT = null;
   $('#op2-h-co').addEventListener('input', function () {
-    $('#op2-pop-ok').textContent = 'Отдать наёмнику' + (this.value.trim() ? ' · ' + this.value.trim() : '');
+    updateHiredBtn_();
     this.dataset.entityId = '';
     var v = this.value.trim(); clearTimeout(coT);
     if (v.length < 2) { $('#op2-h-cobox').classList.remove('op2-open'); return; }
@@ -1508,7 +1571,7 @@ function openHiredStep(o) {
     var it = e.target.closest('.op2-it'); if (!it) return;
     var inp = $('#op2-h-co');
     inp.value = it.dataset.name || ''; inp.dataset.entityId = it.dataset.eid || '';
-    $('#op2-pop-ok').textContent = 'Отдать наёмнику' + (it.dataset.name ? ' · ' + it.dataset.name : '');
+    updateHiredBtn_();
     $('#op2-h-cobox').classList.remove('op2-open');
   });
   $('#op2-h-cs').addEventListener('click', function (e) {
@@ -1517,10 +1580,15 @@ function openHiredStep(o) {
     c.classList.add('op2-on');
   });
   recalc();
+  updateHiredBtn_();
 }
 function saveHired(o) {
   var co = $('#op2-h-co').value.trim();
   if (!co) { toast('<span class="op2-warn">Впиши компанию-перевозчика</span> · остальное можно потом'); return; }
+  /* Влад 12.09: «отдать наёмнику невозможно без указания цены» - кнопка уже блокируется
+     через updateHiredBtn_ (onPopOk не пропустит клик дальше), эта проверка - подстраховка
+     на случай прямого вызова saveHired мимо кнопки. */
+  if (!num($('#op2-h-rate').value)) { toast('<span class="op2-warn">Укажи ставку закупки</span> · без неё маржа не считается'); return; }
   var cs = $('#op2-h-cs .op2-chip.op2-on');
   apiPost('/orders/hired_set', {
     order_id: o.id,
@@ -1532,7 +1600,9 @@ function saveHired(o) {
     driver_name: $('#op2-h-drv').value.trim(),
     driver_phone: $('#op2-h-phone').value.trim(),
     purchase_rate: String(num($('#op2-h-rate').value) || ''),
-    settlement: $('#op2-h-settle').value.trim(),
+    /* «Расчёт» (свободный текст, никогда не показывался обратно) заменён явным
+       переключателем НДС - та же колонка settlement, теперь каноническое значение. */
+    settlement: (($('#op2-h-vat .op2-chip.op2-on') || {}).dataset || {}).vat === '0' ? 'без ндс' : 'с ндс',
     carrier_status: cs ? cs.dataset.cs : '',
     comment: $('#op2-h-comment').value.trim()
   }).then(function (r) {
@@ -1752,14 +1822,16 @@ function renderView(o, who) {
 
   var vehHtml;
   if (h) {
-    var marg = num(o.price) - num(h.purchase_rate);
+    /* Та же формула, что и в попапе «Отдать наёмнику» (hiredMargin_) - НДС-поправка и
+       порог 23% красным должны совпадать здесь и там, это одна и та же запись. */
+    var hm = (num(o.price) && num(h.purchase_rate)) ? hiredMargin_(num(o.price), num(h.purchase_rate), h.settlement !== 'без ндс') : null;
     vehHtml = '<div class="op2-vehcard"><div class="op2-top"><span class="op2-hire">Наёмник</span><span class="op2-gos">' + esc(h.vehicle_gos || 'госномер уточняется') + '</span>' +
       takenByHtml_(o, 'взял', 'op2-by') + '</div>' +
       '<div class="op2-line"><span><span class="op2-k">Компания</span> ' + esc(h.carrier_name || 'уточнить') + '</span>' +
       '<span><span class="op2-k">Водитель</span> ' + esc(h.driver_name || 'уточнить') + '</span>' +
       '<span><span class="op2-k">Статус перевозчика</span> ' + esc(h.carrier_status || 'уточнить') + '</span></div>' +
-      '<div class="op2-line"><span><span class="op2-k">Закупка</span> <span class="op2-mono">' + esc(fmtP(h.purchase_rate) || '—') + '</span></span>' +
-      (num(o.price) && num(h.purchase_rate) ? '<span><span class="op2-k">Маржа</span> <span class="op2-mono" style="color:var(--' + (marg >= 0 ? 'tint-green' : 'tint-red') + ')">' + (marg >= 0 ? '+' : '−') + esc(fmtP(Math.abs(marg))) + '</span></span>' : '') + '</div>' +
+      '<div class="op2-line"><span><span class="op2-k">Закупка</span> <span class="op2-mono">' + esc(fmtP(h.purchase_rate) || '—') + (h.settlement === 'без ндс' ? ' · без НДС' : '') + '</span></span>' +
+      (hm ? '<span><span class="op2-k">Маржа</span> <span class="op2-mono" style="color:var(--' + (hm.pct >= MARGIN_RED_BELOW_ ? 'tint-green' : 'tint-red') + ')">' + (hm.amount >= 0 ? '+' : '−') + esc(fmtP(Math.abs(hm.amount))) + ' · ' + (hm.amount >= 0 ? '+' : '−') + Math.abs(hm.pct) + '%</span></span>' : '') + '</div>' +
       '<div class="op2-acts"><button class="op2-ghost op2-copybtn" data-copy="pass">Копировать данные на пропуск</button>' +
       '<button class="op2-dbtn op2-primary" id="op2-d-drv">Задание водителю</button></div></div>';
   } else if (v) {

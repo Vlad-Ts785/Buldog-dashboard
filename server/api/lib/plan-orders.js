@@ -540,6 +540,9 @@ module.exports = function (deps) {
         comment: str(p(req, "comment"), 500), found_by: req.userRole === "manager" ? "manager" : "logist",
       };
       if (!f.carrier_name) return fail(res, 400, "перевозчик обязателен");
+      // Влад 12.09: «отдать наёмнику невозможно без указания цены» - ставка закупки
+      // обязательна, без исключения (та же логика, что цена заявки при создании).
+      if (!f.purchase_rate) return fail(res, 400, "ставка закупки обязательна");
       await conn.beginTransaction();
       const [ex] = await conn.query(`SELECT id, carrier_name FROM plan_order_executors WHERE order_id = ? AND kind = 'hired' AND removed_at IS NULL`, [orderId]);
       const prevName = ex.length ? String(ex[0].carrier_name || "").trim() : "";

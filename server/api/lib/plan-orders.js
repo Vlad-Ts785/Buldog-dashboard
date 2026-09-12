@@ -798,5 +798,23 @@ module.exports = function (deps) {
     } catch (err) { console.error("orders cargo:", err); fail(res, 500, String(err.message || err)); }
   });
 
+  // ── Справочник техники отдела экскаваторов (Влад 12.09: «только в форме заявки логиста должен быть
+  // справочник техники нашей... логисты заводят технику по госномеру, и она подгружается из справочника;
+  // но этот справочник нигде, кроме логистов, не нужен»). СТРОГО admin+logist - НЕ manager (проверка на
+  // сервере, не только скрытие на фронте). Ищет и по модели, и по госномеру (без пробелов, без регистра).
+  app.get("/api/orders/fleet", checkSession, requireRole_("admin", "logist"), async (req, res) => {
+    try {
+      const q = String(req.query.q || "").trim().toLowerCase();
+      if (q.length < 2) return res.json({ items: [] });
+      const qNoSpace = q.replace(/\s+/g, "");
+      const [rows] = await pool.query(
+        `SELECT model, gos_number, category FROM plan_fleet_excavators
+          WHERE active = 1 AND (LOWER(model) LIKE ? OR LOWER(REPLACE(gos_number, ' ', '')) LIKE ?)
+          ORDER BY (LOWER(REPLACE(gos_number, ' ', '')) LIKE ?) DESC, model LIMIT 8`,
+        ["%" + q + "%", "%" + qNoSpace + "%", qNoSpace + "%"]);
+      res.json({ items: rows.map((r) => ({ src: "fleet", name: r.model, gos: r.gos_number, category: r.category })) });
+    } catch (err) { console.error("orders fleet:", err); fail(res, 500, String(err.message || err)); }
+  });
+
   console.log("plan-orders: эндпоинты /api/orders/* подключены");
 };

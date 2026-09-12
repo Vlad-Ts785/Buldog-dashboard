@@ -2291,10 +2291,17 @@ function saveInn(btn) {
   }).catch(function () { btn.disabled = false; });
 }
 function fetchCargo(q) {
-  apiGet('/orders/cargo', { q: q }).then(function (r) {
+  /* справочник техники экскаваторного отдела (Влад 12.09) - СТРОГО в форме логиста, менеджерам не нужен
+     и не должен даже запрашиваться (сервер сам это перепроверяет ролью, тут просто не дёргаем зря). */
+  var isLogForm = formWho === 'log';
+  var reqs = [apiGet('/orders/cargo', { q: q })];
+  if (isLogForm) reqs.push(apiGet('/orders/fleet', { q: q }).catch(function () { return null; }));
+  Promise.all(reqs).then(function (results) {
+    var r = results[0];
     if (!r || !r.ok || !r.data) return;
     var items = r.data.items || [], h = '';
     var cat = items.filter(function (i) { return i.src === 'catalog'; }), his = items.filter(function (i) { return i.src === 'history'; });
+    var fleet = (isLogForm && results[1] && results[1].ok && results[1].data) ? (results[1].data.items || []) : [];
     var row = function (i) {
       var sub = (i.category ? esc(i.category) : '') + (i.n ? (i.category ? ' · ' : '') + 'возили ' + i.n + '×' : '');
       var nameCap = capFirst(i.name);
@@ -2302,6 +2309,16 @@ function fetchCargo(q) {
         '<div class="op2-cargo-main"><span class="op2-cargo-name">' + esc(nameCap) + '</span>' + (sub ? '<span class="op2-cargo-sub">' + sub + '</span>' : '') + '</div>' +
         '<div class="op2-cargo-meta">' + (i.weight_t ? '<span class="op2-cargo-w">' + esc(i.weight_t) + ' т</span>' : '') + (i.dims ? '<span class="op2-cargo-dims">' + esc(i.dims) + '</span>' : '') + '</div></div>';
     };
+    var rowFleet = function (i) {
+      var nameCap = capFirst(i.name);
+      var sub = (i.category ? esc(i.category) : '') + (i.gos ? ' · г/н ' + esc(i.gos) : '');
+      /* у своей техники нет веса/габаритов груза - применяем без пометки «проверить» (applyCargo не найдёт
+         d.w/d.dims/габарит и промолчит), только модель + госномер подставляются в «Груз». */
+      return '<div class="op2-it op2-cargo-it" data-name="' + esc(nameCap) + '" data-gos="' + esc(i.gos || '') + '">' +
+        '<div class="op2-cargo-main"><span class="op2-cargo-name">' + esc(nameCap) + '</span>' + (sub ? '<span class="op2-cargo-sub">' + sub + '</span>' : '') + '</div>' +
+        '<div class="op2-cargo-meta">' + (i.gos ? '<span class="op2-cargo-dims">' + esc(i.gos) + '</span>' : '') + '</div></div>';
+    };
+    if (fleet.length) h += '<div class="op2-sec">Наша техника (гос.номер)</div>' + fleet.map(rowFleet).join('');
     if (cat.length) h += '<div class="op2-sec">Справочник техники</div>' + cat.map(row).join('');
     if (his.length) h += '<div class="op2-sec">Уже возили</div>' + his.map(row).join('');
     if (!h) { $('#op2-f-cargobox').classList.remove('op2-open'); return; }
@@ -2320,8 +2337,11 @@ function applyCargo(d) {
   /* Влад: «выбрал один груз, затем другой - данные от первого не поменялись» - явный повторный выбор
      из подсказки переписывает вес/габариты, даже если поля уже заполнены прошлым грузом. */
   var prevName = fc.dataset.cargoName || '';
-  var overwrite = prevName && prevName !== d.name;
-  fc.value = d.name || ''; fc.dataset.cargoName = d.name || '';
+  /* техника из справочника экскаваторов (d.gos) - у неё нет веса/габаритов груза, в «Груз» идёт
+     модель + госномер, без пометки «проверить» (auto ниже останется пустым сам по себе). */
+  var displayName = (d.name || '') + (d.gos ? ' · г/н ' + d.gos : '');
+  var overwrite = prevName && prevName !== displayName;
+  fc.value = displayName; fc.dataset.cargoName = displayName;
   var auto = [];
   if (d.w && (overwrite || !fw.value.trim())) { fw.value = d.w; auto.push('вес'); }
   if (d.dims && (overwrite || !fd.value.trim())) { fd.value = d.dims; auto.push('Д×Ш×В'); }
@@ -2332,7 +2352,7 @@ function applyCargo(d) {
     if (note && note.value.indexOf(tag) < 0) note.value = (note.value.trim() ? note.value.trim() + ' · ' : '') + tag + (d.note ? ' (' + d.note + ')' : '');
     $('#op2-f-cargo-hint').innerHTML = '<span class="op2-warn">Подставлено из справочника: ' + esc(auto.join(', ')) + ' - проверь</span>' + (d.note ? ' · ' + esc(d.note) : '');
     S.tickUp();
-  } else { $('#op2-f-cargo-hint').textContent = 'Подставлено: ' + (d.name || ''); }
+  } else { $('#op2-f-cargo-hint').textContent = 'Подставлено: ' + (displayName || ''); }
   $('#op2-f-cargobox').classList.remove('op2-open');
   tickState();
 }

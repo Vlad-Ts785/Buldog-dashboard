@@ -287,13 +287,21 @@ function oOwn(o) { return (o.executors || []).filter(function (e) { return e.kin
 function oHired(o) { return (o.executors || []).filter(function (e) { return e.kind === 'hired'; })[0] || null; }
 function oNo(o) { return o.day_no != null ? o.day_no : (o.id || ''); }
 function oTime(o) { return shortTime(o.service_time); }
+/* Влад 12.09: «почему нет заполнения в колонке Менеджер? Тот, кто создаёт заявку, тот и
+   менеджер, получается - везде должно быть проставлено... старший руководитель видит все
+   заявки, эта колонка нужна, чтобы увидеть, кто какие заявки создал» - раньше пусто, если
+   явного менеджера нет (не только у internal=1, у ЛЮБОЙ заявки без manager_email). Порядок:
+   реальный менеджер -> кто создал (created_by) -> кто принял (taken_by, старый запасной
+   вариант). «Внутренний заказ» остаётся в title отдельной пометкой, а не в самом коде. */
 function oMgrCode(o) {
-  if (o.internal) return (o.taken_by_code || o.manager_code || '').toUpperCase();
-  return (o.manager_code || '').toUpperCase();
+  if (o.manager_code) return o.manager_code.toUpperCase();
+  return (o.created_by_code || o.taken_by_code || '').toUpperCase();
 }
 function oMgrTitle(o) {
-  if (o.internal) return 'внутренний заказ, создал логист ' + (o.taken_by_name || o.manager_name || '');
-  return o.manager_name || o.manager_code || '';
+  if (o.manager_name) return o.manager_name;
+  var creator = o.created_by_name || o.taken_by_name || '';
+  if (o.internal) return 'внутренний заказ, создал логист ' + creator;
+  return creator ? ('создал ' + creator) : (o.manager_code || '');
 }
 /* Влад 12.09: одобрен вариант «Цветная фамилия» из превью (person_columns_variants,
    https://claude.ai/code/artifact/5f2e5dc5-dae7-4834-8fbd-3367725d4530) - «эти цвета мне
@@ -324,7 +332,7 @@ function personCell_(fullName, code, title) {
   return '<td><span class="op2-person"' + (col ? ' style="color:' + col + '"' : '') + ' title="' + esc(title || fullName || '') + '">' + esc(sur) + '</span></td>';
 }
 function mgrCodeCell_(o) {
-  var name = o.internal ? (o.taken_by_name || o.manager_name) : o.manager_name;
+  var name = o.manager_name || o.created_by_name || o.taken_by_name;
   return personCell_(name, oMgrCode(o), oMgrTitle(o));
 }
 function logCodeCell_(o) {

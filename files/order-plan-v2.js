@@ -314,15 +314,14 @@ function personSurname_(fullName) { return String(fullName || '').trim().split(/
 function personColor_(fullName) { return PERSON_COLOR_[personSurname_(fullName)] || null; }
 /* «колонку "Менеджер и логист" сразу после нумерации... номер заказа, потом менеджер, потом
    логист... вся индикация: кто создал заявку, кто принял заявку» - обе таблицы (менеджера и
-   логиста) начинаются №→Мен.→Лог. Фамилия окрашена по человеку, трёхбуквенный код - мелко
-   под ней (кто уже привык ориентироваться по коду - он никуда не делся), полное имя - в
-   title по наведению. */
+   логиста) начинаются №→Мен.→Лог. Фамилия окрашена по человеку, полное имя - в title по
+   наведению. Влад 12.09 (третий заход): «уберём вот эти сокращения - Цуц, Кан, Сил - убрать» -
+   трёхбуквенный код под фамилией убран, осталась только сама фамилия. */
 function personCell_(fullName, code, title) {
   if (!fullName && !code) return '<td><span class="op2-dim">—</span></td>';
   var sur = personSurname_(fullName) || code;
   var col = personColor_(fullName);
-  return '<td><span class="op2-person"' + (col ? ' style="color:' + col + '"' : '') + ' title="' + esc(title || fullName || '') + '">' + esc(sur) +
-    '</span>' + (code ? '<span class="op2-person-code">' + esc(code) + '</span>' : '') + '</td>';
+  return '<td><span class="op2-person"' + (col ? ' style="color:' + col + '"' : '') + ' title="' + esc(title || fullName || '') + '">' + esc(sur) + '</span></td>';
 }
 function mgrCodeCell_(o) {
   var name = o.internal ? (o.taken_by_name || o.manager_name) : o.manager_name;
@@ -456,9 +455,9 @@ function buildDom() {
               '<th data-sort="mgr">Мен.<span class="op2-s">↕</span></th>' +
               '<th data-sort="log">Лог.<span class="op2-s">↕</span></th>' +
               '<th data-sort="t">Время<span class="op2-s">↕</span></th>' +
-              '<th data-sort="cust">Заказчик<span class="op2-s">↕</span></th>' +
               '<th data-sort="type">Техника<span class="op2-s">↕</span></th>' +
-              '<th>Груз</th><th>Откуда → куда</th><th>Габарит</th>' +
+              '<th data-sort="cust">Заказчик<span class="op2-s">↕</span></th>' +
+              '<th>Откуда → куда</th><th>Груз</th><th>Габарит</th>' +
               '<th>Машина</th>' +
               '<th data-sort="st">Статус<span class="op2-s">↕</span></th>' +
             '</tr></thead>' +
@@ -1167,10 +1166,10 @@ function renderLog() {
       '<td class="op2-ono">' + esc(oNo(o)) + '</td>' +
       mgrCodeCell_(o) + logCodeCell_(o) +
       '<td>' + timeCell(o) + '</td>' +
-      '<td class="op2-ell" title="' + esc(o.customer) + '">' + (isFresh(o) ? '<span class="op2-st-chip op2-ok" style="margin-right:6px">новая</span>' : '') + esc(o.customer || '') + '</td>' +
       '<td>' + (o.equipment_type ? '<span class="op2-ttype">' + esc(o.equipment_type) + '</span>' : '<span class="op2-dim">уточнить</span>') + '</td>' +
-      '<td class="op2-dim op2-ell" style="max-width:150px">' + esc(o.cargo || '') + '</td>' +
+      '<td class="op2-ell" title="' + esc(o.customer) + '">' + (isFresh(o) ? '<span class="op2-st-chip op2-ok" style="margin-right:6px">новая</span>' : '') + esc(o.customer || '') + '</td>' +
       '<td>' + routeCell(o, 120) + '</td>' +
+      '<td class="op2-dim op2-ell" style="max-width:150px">' + esc(o.cargo || '') + '</td>' +
       '<td class="op2-sm">' + (o.gabarit ? '<span style="color:var(--tint-amber)">' + esc(o.gabarit) + '</span>' : '') + '</td>' +
       '<td>' + vehCellLog(o) + '</td>' +
       '<td class="op2-st">' + (o.needs_data ? '<span class="op2-nd" title="под данные"></span>' : '') + stChip(o) + '</td>' +

@@ -102,6 +102,14 @@ module.exports = function (deps) {
     const mgr = rosterMap[o.manager_email];
     out.manager_code = mgr ? mgr.code : (o.manager_name ? code3(o.manager_name) : null);
     out.taken_by_code = o.taken_by_name ? code3(o.taken_by_name) : null;
+    // Влад 12.09: «почему нет заполнения в колонке Менеджер? Тот, кто создаёт заявку, тот и
+    // менеджер... старший руководитель видит все заявки, эта колонка нужна, чтобы увидеть,
+    // кто какие заявки создал» - раньше пусто, если manager_email не проставлен (например,
+    // заявку создал логист/admin без явного выбора менеджера, а internal=0). created_by
+    // (email) на plan_orders был всегда, просто не резолвился в имя/код для клиента.
+    const creator = rosterMap[o.created_by];
+    out.created_by_name = creator ? creator.name : null;
+    out.created_by_code = creator ? creator.code : null;
     out.executors = execs.map((e) => Object.assign({}, e, {
       purchase_rate: e.purchase_rate === null ? null : Number(e.purchase_rate),
       driver_confirmed_at: e.driver_confirmed_at ? new Date(e.driver_confirmed_at).toISOString() : null,

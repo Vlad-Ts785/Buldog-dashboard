@@ -287,24 +287,56 @@ function oOwn(o) { return (o.executors || []).filter(function (e) { return e.kin
 function oHired(o) { return (o.executors || []).filter(function (e) { return e.kind === 'hired'; })[0] || null; }
 function oNo(o) { return o.day_no != null ? o.day_no : (o.id || ''); }
 function oTime(o) { return shortTime(o.service_time); }
+/* Влад 12.09: «почему нет заполнения в колонке Менеджер? Тот, кто создаёт заявку, тот и
+   менеджер, получается - везде должно быть проставлено... старший руководитель видит все
+   заявки, эта колонка нужна, чтобы увидеть, кто какие заявки создал» - раньше пусто, если
+   явного менеджера нет (не только у internal=1, у ЛЮБОЙ заявки без manager_email). Порядок:
+   реальный менеджер -> кто создал (created_by) -> кто принял (taken_by, старый запасной
+   вариант). «Внутренний заказ» остаётся в title отдельной пометкой, а не в самом коде. */
 function oMgrCode(o) {
-  if (o.internal) return (o.taken_by_code || o.manager_code || '').toUpperCase();
-  return (o.manager_code || '').toUpperCase();
+  if (o.manager_code) return o.manager_code.toUpperCase();
+  return (o.created_by_code || o.taken_by_code || '').toUpperCase();
 }
 function oMgrTitle(o) {
-  if (o.internal) return 'внутренний заказ, создал логист ' + (o.taken_by_name || o.manager_name || '');
-  return o.manager_name || o.manager_code || '';
+  if (o.manager_name) return o.manager_name;
+  var creator = o.created_by_name || o.taken_by_name || '';
+  if (o.internal) return 'внутренний заказ, создал логист ' + creator;
+  return creator ? ('создал ' + creator) : (o.manager_code || '');
 }
-/* Влад 12.09: «колонку "Менеджер и логист" сразу после нумерации... номер заказа, потом
-   менеджер, потом логист... вся индикация: кто создал заявку, кто принял заявку» - те же
-   op2-code, что и раньше, просто вынесены в свои колонки (было только «Мен.» у логиста,
-   ближе к «Машина», и никакой колонки логиста у менеджера вообще). Обе таблицы (менеджера
-   и логиста) - одинаковый порядок и вид ячеек. */
+/* Влад 12.09: одобрен вариант «Цветная фамилия» из превью (person_columns_variants,
+   https://claude.ai/code/artifact/5f2e5dc5-dae7-4834-8fbd-3367725d4530) - «эти цвета мне
+   тоже нравятся, надо их добавить в палитру». 15 оттенков подобраны в стороне от
+   семантических цветов дашборда (зелёный=подтверждено, красный=отбой, жёлтый=скоро подача,
+   синий=наёмник/внутренний заказ), по одному на каждого менеджера и логиста (снимок людей -
+   CLAUDE.md «Люди», 11.09). «Пусть цвет в Задании соответствует цвету в Планировке» -
+   ПОКА реализовано только здесь (Планировка - отдельный файл, files/index.html, в этот
+   проход не входила); палитра-константа переносима туда один в один, когда дойдёт очередь -
+   не хардкодим её ВТОРОЙ раз с нуля, тот же объект. */
+var PERSON_COLOR_ = {
+  'Ахтамова': '#dda288', 'Гуляева': '#ddd488', 'Гусейнова': '#ccdd88', 'Гуштюк': '#b2dd88',
+  'Котельников': '#99dd88', 'Ратников': '#88dd91', 'Савиток': '#88dd9d', 'Филипчук': '#88dddd',
+  'Цегельников': '#889ddd', 'Васин': '#8d88dd', 'Кан': '#a688dd', 'Махура': '#b288dd',
+  'Прус-Роскошный': '#cc88dd', 'Сильчев': '#dd88d4', 'Цуцурин': '#dd88bb'
+};
+function personSurname_(fullName) { return String(fullName || '').trim().split(/\s+/)[0] || ''; }
+function personColor_(fullName) { return PERSON_COLOR_[personSurname_(fullName)] || null; }
+/* «колонку "Менеджер и логист" сразу после нумерации... номер заказа, потом менеджер, потом
+   логист... вся индикация: кто создал заявку, кто принял заявку» - обе таблицы (менеджера и
+   логиста) начинаются №→Мен.→Лог. Фамилия окрашена по человеку, полное имя - в title по
+   наведению. Влад 12.09 (третий заход): «уберём вот эти сокращения - Цуц, Кан, Сил - убрать» -
+   трёхбуквенный код под фамилией убран, осталась только сама фамилия. */
+function personCell_(fullName, code, title) {
+  if (!fullName && !code) return '<td><span class="op2-dim">—</span></td>';
+  var sur = personSurname_(fullName) || code;
+  var col = personColor_(fullName);
+  return '<td><span class="op2-person"' + (col ? ' style="color:' + col + '"' : '') + ' title="' + esc(title || fullName || '') + '">' + esc(sur) + '</span></td>';
+}
 function mgrCodeCell_(o) {
-  return '<td><span class="op2-code" title="' + esc(oMgrTitle(o)) + '"' + (o.internal ? ' style="color:var(--tint-blue)"' : '') + '>' + esc(oMgrCode(o)) + '</span></td>';
+  var name = o.manager_name || o.created_by_name || o.taken_by_name;
+  return personCell_(name, oMgrCode(o), oMgrTitle(o));
 }
 function logCodeCell_(o) {
-  return '<td>' + (o.taken_by_name ? '<span class="op2-code" title="' + esc(o.taken_by_name) + '">' + esc((o.taken_by_code || '').toUpperCase()) + '</span>' : '<span class="op2-dim">—</span>') + '</td>';
+  return personCell_(o.taken_by_name, (o.taken_by_code || '').toUpperCase(), o.taken_by_name);
 }
 function byId(id) { for (var i = 0; i < ORD.length; i++) { if (String(ORD[i].id) === String(id)) return ORD[i]; } return null; }
 function execById(o, eid) { var l = o.executors || []; for (var i = 0; i < l.length; i++) { if (String(l[i].id) === String(eid)) return l[i]; } return null; }
@@ -382,7 +414,11 @@ function buildDom() {
         '</div>' +
         '<div class="op2-free" id="op2-free"></div>' +
         '<div class="op2-tblwrap op2-x">' +
+          /* Вариант «Рейс» (превью 12.09, утверждён Владом: «точно так же, как в превью»):
+             table-layout:fixed + colgroup из превью (сумма 1180 = ноутбук с меню), шире -
+             колонки растут пропорционально, горизонтального скролла нет. */
           '<table class="op2-tbl op2-mgr-tbl" id="op2-mgr-tbl">' +
+            '<colgroup><col style="width:46px"><col style="width:96px"><col style="width:86px"><col style="width:64px"><col style="width:88px"><col style="width:138px"><col style="width:208px"><col style="width:150px"><col style="width:164px"><col style="width:60px"><col style="width:80px"></colgroup>' +
             '<thead><tr>' +
               '<th>№</th>' +
               '<th data-sort="mgr">Мен.<span class="op2-s">↕</span></th>' +
@@ -390,20 +426,22 @@ function buildDom() {
               '<th data-sort="t" class="op2-on">Время<span class="op2-s">▲</span></th>' +
               '<th data-sort="type">Техника<span class="op2-s">↕</span></th>' +
               '<th data-sort="cust">Заказчик<span class="op2-s">↕</span></th>' +
-              '<th>Откуда → куда</th><th>Машина · водитель</th>' +
-              '<th data-sort="st">Статус<span class="op2-s">↕</span></th>' +
-              '<th class="op2-num" data-sort="price">Стоимость<span class="op2-s">↕</span></th>' +
+              '<th>Откуда → куда</th><th>Груз</th><th>Машина · водитель</th>' +
+              '<th class="op2-c" data-sort="st">Статус<span class="op2-s">↕</span></th>' +
+              '<th class="op2-num" data-sort="price" title="Стоимость">Стоим.<span class="op2-s">↕</span></th>' +
             '</tr></thead>' +
             '<tbody id="op2-mgr-body"></tbody>' +
             '<tfoot id="op2-mgr-foot"></tfoot>' +
           '</table>' +
         '</div>' +
-        '<div class="op2-legend">' +
-          '<span><span class="op2-nd"></span>под данные - данные водителей переданы заказчику (пропуск); заявлены основная и резерв, замена только из них</span>' +
-          '<span><span class="op2-dim">уточнить</span> - поле ещё не заполнено</span>' +
-          '<span>зелёный госномер - водитель подтвердил заявку; наведи - кто и когда отметил</span>' +
-          '<span>Клик по строке - карточка, копирование на пропуск и для водителя</span>' +
-        '</div>' +
+        '<p class="op2-legend">' +
+          'Полоска слева у строки - цвет статуса. Статус: <i class="op2-lg">✓ Подтв.</i> подтверждено · <i class="op2-la">◐ Не подтв.</i> ждёт подтверждения · ' +
+          '<i class="op2-lr">✕ Отбой</i> (№ зачёркнут) · <i class="op2-lb">■ Готово</i> выполнено · клик по статусу - сменить. ' +
+          '<span class="op2-nd"></span><i class="op2-la">мигающая точка</i> перед знаком - «под данные» (данные водителей переданы заказчику на пропуск; заявлены основная и резерв, замена только из них). ' +
+          'Машина: <i class="op2-lg">госномер зелёный</i> - водитель подтвердил заявку (наведи - кто и когда отметил); <span class="op2-tag op2-tg-hire">НАЁМ</span>наёмная машина, далее компания-перевозчик; <span class="op2-tag op2-tg-own">СВОЯ</span>своя; <i>осн./рез.</i> - основная/резервная из двух. ' +
+          'Маршрут: город жирнее, улица серым, регион - в подсказке при наведении. Груз: наименование, ниже <i class="op2-la">Негабарит</i> / <span class="op2-dim">Габарит</span> и размеры. ' +
+          '<span class="op2-ask">уточнить</span> - поле ещё не заполнено. Клик по строке - карточка, копирование на пропуск и для водителя.' +
+        '</p>' +
       '</section>' +
 
       /* ── экран логиста ── */
@@ -426,29 +464,32 @@ function buildDom() {
         '</div>' +
         '<div class="op2-tblwrap op2-x">' +
           '<table class="op2-tbl" id="op2-log-tbl">' +
+            '<colgroup><col style="width:46px"><col style="width:96px"><col style="width:86px"><col style="width:64px"><col style="width:88px"><col style="width:138px"><col style="width:208px"><col style="width:150px"><col style="width:164px"><col style="width:60px"><col style="width:80px"></colgroup>' +
             '<thead id="op2-log-head"><tr>' +
               '<th class="op2-on" data-sort="n" title="По умолчанию - по номеру заявки">№<span class="op2-s">▲</span></th>' +
               '<th data-sort="mgr">Мен.<span class="op2-s">↕</span></th>' +
               '<th data-sort="log">Лог.<span class="op2-s">↕</span></th>' +
               '<th data-sort="t">Время<span class="op2-s">↕</span></th>' +
-              '<th data-sort="cust">Заказчик<span class="op2-s">↕</span></th>' +
               '<th data-sort="type">Техника<span class="op2-s">↕</span></th>' +
-              '<th>Груз</th><th>Откуда → куда</th><th>Габарит</th>' +
+              '<th data-sort="cust">Заказчик<span class="op2-s">↕</span></th>' +
+              '<th>Откуда → куда</th><th>Груз</th>' +
               '<th>Машина</th>' +
-              '<th data-sort="st">Статус<span class="op2-s">↕</span></th>' +
+              '<th class="op2-c" data-sort="st">Статус<span class="op2-s">↕</span></th>' +
+              '<th class="op2-num" data-sort="price" title="Стоимость">Стоим.<span class="op2-s">↕</span></th>' +
             '</tr></thead>' +
             '<tbody id="op2-log-body" class="op2-log-body"></tbody>' +
+            '<tfoot id="op2-log-foot"></tfoot>' +
           '</table>' +
         '</div>' +
-        '<div class="op2-legend">' +
-          '<span><span class="op2-dot-amber"></span>до подачи меньше 2 ч и машины нет</span>' +
-          '<span><span class="op2-nd"></span>под данные: замена только из заявленных (основная + резерв), вне списка - подтверждение и новый пропуск</span>' +
-          '<span><span class="op2-hire">Наёмник</span>компания · госномер · водитель</span>' +
-          '<span>Отбой: строка мигает, пока логист не нажмёт «принять»; машину на отбой поставить нельзя; если стояла - «Снять машину»</span>' +
-          '<span><button class="op2-dok op2-on" style="pointer-events:none">✓</button> водитель подтвердил заявку (ставит логист) - у менеджера госномер зелёный</span>' +
-          '<span>Зажать плитку машины на полсекунды - режим перемещения: перетащи на другую заявку (пусто - перенос, занято - обмен), Esc - отмена</span>' +
-          '<span>Мен./Лог. - три буквы фамилии, как в Планировке; Лог. - кто принял заявку в работу, наведи - полное имя</span>' +
-        '</div>' +
+        '<p class="op2-legend">' +
+          'Полоска слева у строки - цвет статуса. Статус: <i class="op2-lg">✓ Подтв.</i> водитель подтвердил · <i class="op2-la">◐ Не подтв.</i> ждёт подтверждения · ' +
+          '<i class="op2-lr">✕ Отбой</i> (мигание всей строки - отбой ещё не принят логистом, № зачёркнут; машину на отбой поставить нельзя, если стояла - «Снять») · <i class="op2-lb">■ Готово</i> выполнено · ' +
+          '<span class="op2-nd"></span><i class="op2-la">мигающая точка</i> перед знаком - «под данные» (замена только из заявленных: основная + резерв, вне списка - подтверждение менеджера и новый пропуск); та же точка на кнопке «Поставить» - до подачи меньше 2 ч. ' +
+          'Машина: <i class="op2-lg">госномер зелёный</i> - водитель подтвердил, <i>✓ в кружке</i> - кнопка подтверждения (зелёная = включена), у менеджера госномер становится зелёным; ' +
+          '<span class="op2-tag op2-tg-hire">НАЁМ</span>наёмная машина, далее компания-перевозчик; <span class="op2-tag op2-tg-own">СВОЯ</span>своя; <i>осн./рез.</i> - основная/резервная из двух. ' +
+          'Маршрут: город жирнее, улица серым, регион - в подсказке при наведении. Груз: наименование, ниже <i class="op2-la">Негабарит</i> / <span class="op2-dim">Габарит</span> и размеры. ' +
+          'Зажать плитку машины на полсекунды - режим перемещения: перетащи на другую заявку (пусто - перенос, занято - обмен), Esc - отмена. Мен./Лог. - фамилия цветом как в Планировке, наведи - полное имя.' +
+        '</p>' +
       '</section>' +
 
       /* ── поповер пикера машин ── */
@@ -497,7 +538,7 @@ function buildDom() {
 /* ГОСТ: ОДНО делегирование со списком-селектором, не обработчик на каждый элемент.
    Элементы с собственным звуком результата (RESULT_SEL) из nav исключены, чтобы
    не было двойного щелчка. */
-var NAV_SEL = '.op2-tab,.op2-chip,.op2-ghost,.op2-dbtn,.op2-slot,.op2-veh,.op2-st-chip,.op2-sugg .op2-it,.op2-free .op2-day,.op2-stpop button,.op2-pop .op2-vi,.op2-copybtn,.op2-take,.op2-dt,.op2-mgr-tbl tbody tr,.op2-log-body tr,.op2-switch button,[data-nav-sound]';
+var NAV_SEL = '.op2-tab,.op2-chip,.op2-ghost,.op2-dbtn,.op2-slot,.op2-veh,.op2-st-chip,.op2-stc,.op2-sugg .op2-it,.op2-free .op2-day,.op2-stpop button,.op2-pop .op2-vi,.op2-copybtn,.op2-take,.op2-dt,.op2-mgr-tbl tbody tr,.op2-log-body tr,.op2-switch button,[data-nav-sound]';
 var RESULT_SEL = '#op2-f-save,#op2-rp-go,#op2-pop-ok,.op2-dok,.op2-unset-ot,.op2-slot.op2-ot,#op2-drv-copy,#op2-drv-max,#op2-d-drv-ok,.op2-dl,.op2-copybtn,.op2-stpop button,.op2-pop .op2-vi[data-act="unset"],#op2-snd,.op2-blocked,#op2-f-ent .op2-chip';
 
 function wire() {
@@ -581,7 +622,7 @@ function wire() {
   /* ── таблица менеджера ── */
   $('#op2-mgr-body').addEventListener('click', function (e) {
     var tr = e.target.closest('tr[data-oid]'); if (!tr) return;
-    var ch = e.target.closest('.op2-st-chip');
+    var ch = e.target.closest('.op2-stc');
     if (ch) { openStPop(ch, tr); return; }
     var o = byId(tr.dataset.oid); if (!o) return;
     $$('#op2-mgr-body tr.op2-open').forEach(function (r) { r.classList.remove('op2-open'); });
@@ -680,7 +721,7 @@ function onKeyDown(e) {
 function onDocMouseDown(e) {
   if (!built) return;
   var sp = $('#op2-stpop');
-  if (sp && sp.classList.contains('op2-open') && !e.target.closest('#op2-stpop') && !e.target.closest('.op2-st-chip')) closeStPop();
+  if (sp && sp.classList.contains('op2-open') && !e.target.closest('#op2-stpop') && !e.target.closest('.op2-st-chip') && !e.target.closest('.op2-stc')) closeStPop();
   var pop = $('#op2-pop');
   if (pop && pop.classList.contains('op2-open') && !e.target.closest('#op2-pop') && !e.target.closest('.op2-slot,.op2-veh')) closePop();
   if ($('#op2-row-menu') && !e.target.closest('#op2-row-menu')) closeRowMenu();
@@ -948,14 +989,113 @@ function stChip(o) {
   var k = oSt(o);
   return '<span class="op2-st-chip op2-' + k + '">' + esc(ST_LABEL[k]) + '</span>';
 }
-function routeCell(o, w) {
-  var mw = w ? ' style="max-width:' + w + 'px"' : '';
-  return '<span class="op2-route"><span class="op2-ell"' + mw + '>' + (o.load_address ? esc(o.load_address) : '<span class="op2-dim">уточнить</span>') + '</span>' +
-    '<span class="op2-arr">→</span><span class="op2-ell"' + mw + '>' + (o.unload_address ? esc(o.unload_address) : '<span class="op2-dim">уточнить</span>') + '</span></span>';
+
+/* ═══════════ ячейки таблиц - вариант «Рейс» (превью 12.09, вариант 3, утверждён Владом:
+   «точно так же, как в превью, по всем правилам, которые там созданы») ═══════════
+   Правила Влада: фильтруемые колонки (№, Мен., Лог., Время, Техника, Заказчик, Статус,
+   Стоимость) - ровно один вид данных; нефильтруемые (Откуда→куда, Груз+габарит, Машина) -
+   в 2-3 строки, каждая ячейка - три уровня: главное / уточнение / источник. Статус - знак +
+   короткое слово одним цветом и полоска 3px слева у строки. ФИО - «Фамилия Имя», полное в title. */
+var ST_V3_ = {
+  ok:   { key: 'ok',   g: '✓', w: 'Подтв.' },
+  nz:   { key: 'wait', g: '◐', w: 'Не подтв.' },
+  ot:   { key: 'off',  g: '✕', w: 'Отбой' },
+  done: { key: 'done', g: '<span class="op2-sq"></span>', w: 'Готово' }
+};
+function stKey_(o) { return (ST_V3_[oSt(o)] || ST_V3_.nz).key; }
+/* «Фамилия Имя» без отчества (полное ФИО - в title) - компромисс варианта «Рейс»: на ширине
+   ячейки «Машина» полное ФИО в одну строку не помещается, а фамилию Влад резать не хотел. */
+function fioName_(full) {
+  var p = String(full || '').trim().split(/\s+/).filter(Boolean);
+  return p.slice(0, 2).join(' ');
+}
+/* мягкие переносы в капс-словах длиннее 8 букв («СТРОЙМЕХАНИЗАЦИЯ»): Chrome сам капс по
+   дефису не переносит, без этого слово рвётся посреди без дефиса. Вход уже экранирован esc(). */
+function shyCaps_(escaped) {
+  return String(escaped || '').replace(/[А-ЯЁA-Z]{9,}/g, function (w) { return w.replace(/(.{6})(?=.)/g, function (m, c) { return c + '\u00AD'; }); });
+}
+/* адрес -> город жирным, улица/дом серым; регион (обл, край, р-н) - только в title ячейки */
+var ADDR_CITY_RE_ = /^(г|город|пгт|рп|п|с|д|х|село|пос[её]лок|деревня|станица|аул|ст)\.?\s+[А-ЯЁA-Za-zа-яё]/i;
+function addrParts_(addr) {
+  var t = String(addr || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+  if (!t.length) return null;
+  var i = -1;
+  for (var k = 0; k < t.length; k++) { if (ADDR_CITY_RE_.test(t[k])) { i = k; break; } }
+  var city = i >= 0 ? t[i] : t[0];
+  var rest = (i >= 0 ? t.slice(i + 1) : t.slice(1)).map(function (s) { return s.replace(/^(д|дом)\.?\s+(?=\d)/i, ''); });
+  return { city: city, rest: rest.join(', ') };
+}
+function rtLine_(addr, arrow) {
+  var p = addrParts_(addr);
+  var ar = arrow ? '<span class="op2-arr">→</span>' : '';
+  if (!p) return '<span class="op2-rt">' + ar + '<span class="op2-ask">уточнить</span></span>';
+  return '<span class="op2-rt">' + ar + '<b>' + esc(p.city) + '</b>' + (p.rest ? ' <span class="op2-rs">' + esc(p.rest) + '</span>' : '') + '</span>';
+}
+function routeCell(o) {
+  return '<td title="Откуда: ' + esc(o.load_address || 'уточнить') + '\nКуда: ' + esc(o.unload_address || 'уточнить') + '">' +
+    rtLine_(o.load_address, false) + rtLine_(o.unload_address, true) + '</td>';
+}
+/* груз: наименование (2 строки, хвост в ellipsis), ниже Негабарит/Габарит + размеры и вес mono */
+function cargoCell_(o) {
+  var name = String(o.cargo || '').trim();
+  var gab = String(o.gabarit || '').trim();
+  var dims = [o.cargo_dims, o.cargo_weight_t ? o.cargo_weight_t + ' т' : ''].filter(Boolean).join(' · ');
+  var neg = /негабарит/i.test(gab);
+  var sub = (gab ? '<span class="' + (neg ? 'op2-neg' : 'op2-gb') + '">' + esc(gab) + '</span>' : '') + (dims ? (gab ? ' ' : '') + '<span class="op2-dm">' + esc(dims) + '</span>' : '');
+  return '<td title="' + esc([name || 'уточнить', gab, dims].filter(Boolean).join(' · ')) + '">' +
+    '<span class="op2-cg">' + (name ? esc(name) : '<span class="op2-ask">уточнить</span>') + '</span>' +
+    (sub ? '<span class="op2-gab">' + sub + '</span>' : '') + '</td>';
 }
 function timeCell(o) {
   var t = oTime(o);
-  return t ? '<span class="op2-mono">' + esc(t) + '</span>' : '<span class="op2-dim">уточнить</span>';
+  return '<td>' + (t ? '<span class="op2-time">' + esc(t) + '</span>' : '<span class="op2-time op2-ask" title="Время подачи уточняется">уточнить</span>') + '</td>';
+}
+function techCell_(o) {
+  return '<td class="op2-tech">' + (o.equipment_type ? esc(o.equipment_type) : '<span class="op2-ask">уточнить</span>') + '</td>';
+}
+function custCell_(o, prefix) {
+  return '<td class="op2-cust" title="' + esc(o.customer || '') + '">' + (prefix || '') + shyCaps_(esc(o.customer || '')) + '</td>';
+}
+function priceCell_(o) {
+  return '<td class="op2-num">' + (num(o.price) ? '<span class="op2-money">' + esc(fmtP(o.price).replace(/\s*₽$/, '')) + '</span>' : '<span class="op2-dim">—</span>') + '</td>';
+}
+/* статус: знак + слово одним цветом, точка «под данные» перед знаком; у менеджера клик - сменить */
+function stCell_(o) {
+  var k = oSt(o), m = ST_V3_[k] || ST_V3_.nz;
+  var why = '';
+  if (k === 'ot') why = o.otboy_ack_by ? 'принят логистом' : 'ещё не принят логистом';
+  else if (k === 'nz') why = (!oOwn(o).length && !oHired(o)) ? 'машина не поставлена' : (oHired(o) ? 'ждёт подтверждения перевозчика' : 'ждёт подтверждения');
+  var ttl = [ST_LABEL[k], why, o.needs_data ? 'под данные' : ''].filter(Boolean).join(' · ');
+  return '<td class="op2-stc"><span class="op2-st op2-' + m.key + '" title="' + esc(ttl) + '"><span class="op2-g">' +
+    (o.needs_data ? '<span class="op2-nd"></span>' : '') + m.g + '</span><span class="op2-w">' + m.w + '</span></span></td>';
+}
+function plate_(gos, cls, ttl) {
+  return '<span class="op2-plate' + (cls ? ' ' + cls : '') + '"' + (ttl ? ' title="' + esc(ttl) + '"' : '') + '>' + esc(gos || '') + '</span>';
+}
+/* своя машина: госномер (+✓-кнопка у логиста) / водитель «Фамилия Имя» (+ осн./рез. из двух) */
+function ownLines_(o, v, multi, withBtn) {
+  var ok = !!v.driver_confirmed_at;
+  var ttl = ok ? 'Водитель ' + (v.driver_name || '') + ' подтвердил заявку · ' + (v.driver_confirmed_by || '') + ' ' + (hhmmOf(v.driver_confirmed_at) || '') : '';
+  var btn = withBtn ? '<button class="op2-dok' + (ok ? ' op2-on' : '') + '" data-oid="' + esc(o.id) + '" data-eid="' + esc(v.id) + '" title="' +
+    (ok ? 'Водитель подтвердил · клик - снять подтверждение' : 'Водитель подтвердил заявку? клик - отметить') + '">✓</button>' : '';
+  var role = multi && v.role ? '<span class="op2-tag op2-tg-role">' + (v.role === 'reserve' ? 'рез.' : 'осн.') + '</span>' : '';
+  var roleTtl = multi && v.role ? (v.role === 'reserve' ? ' · резервная машина' : ' · основная машина') : '';
+  return '<span class="op2-ln">' + plate_(v.vehicle_gos, ok ? 'op2-ok' : '', ttl) + btn + '</span>' +
+    '<span class="op2-drv' + (v.driver_name ? '' : ' op2-dim') + '" title="' + esc((v.driver_name || '') + roleTtl) + '">' + (esc(fioName_(v.driver_name)) || 'водитель уточняется') + role + '</span>';
+}
+/* наёмник: госномер (зелёный, если перевозчик подтвердил) / водитель / НАЁМ + компания */
+function hiredLines_(h) {
+  var okH = /подтвердил/i.test(h.carrier_status || '');
+  var out = '';
+  if (h.vehicle_gos) out += '<span class="op2-ln">' + plate_(h.vehicle_gos, okH ? 'op2-ok' : '', okH ? 'Перевозчик подтвердил' : '') + '</span>';
+  if (h.driver_name) out += '<span class="op2-drv" title="' + esc(h.driver_name) + '">' + esc(fioName_(h.driver_name)) + '</span>';
+  var miss = [];
+  if (!h.vehicle_gos) miss.push('госномер');
+  if (!h.driver_name) miss.push('водитель');
+  if (miss.length) out += '<span class="op2-drv op2-dim" title="Перевозчик ещё не сообщил">' + miss.join(' и ') + ' —</span>';
+  out += '<span class="op2-src" title="' + esc('Наёмная машина · ' + (h.carrier_name || 'перевозчик уточняется') + (h.carrier_status ? ' · ' + h.carrier_status : '')) + '">' +
+    '<span class="op2-tag op2-tg-hire">НАЁМ</span>' + esc(h.carrier_name || 'перевозчик уточняется') + (h.carrier_status && !okH ? ' · ' + esc(h.carrier_status) : '') + '</span>';
+  return out;
 }
 
 /* ── таблица менеджера ── */
@@ -967,19 +1107,18 @@ function renderMgr() {
     rows = rows.filter(function (o) { return String(o.customer || '').toLowerCase().indexOf(q) >= 0; });
   }
   rows = sortRows(rows);
+  langRu_();
   body.innerHTML = rows.map(function (o) {
     var k = oSt(o);
-    var cls = 'op2-r36' + (k === 'ot' ? ' op2-otboy' : '');
+    var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' : '');
     return '<tr class="' + cls + '" data-oid="' + esc(o.id) + '">' +
-      '<td class="op2-ono">' + esc(oNo(o)) + '</td>' +
+      '<td><span class="op2-no">' + esc(oNo(o)) + '</span></td>' +
       mgrCodeCell_(o) + logCodeCell_(o) +
-      '<td>' + timeCell(o) + '</td>' +
-      '<td>' + (o.equipment_type ? '<span class="op2-ttype">' + esc(o.equipment_type) + '</span>' : '<span class="op2-dim">уточнить</span>') + '</td>' +
-      '<td class="op2-ell" title="' + esc(o.customer) + '">' + (WIDE && F.q ? '<span class="op2-code" style="margin-right:6px">' + esc(dm(o.service_date)) + '</span>' : '') + esc(o.customer || '') + '</td>' +
-      '<td>' + routeCell(o, 160) + '</td>' +
+      timeCell(o) + techCell_(o) +
+      custCell_(o, WIDE && F.q ? '<span class="op2-code" style="margin-right:6px">' + esc(dm(o.service_date)) + '</span>' : '') +
+      routeCell(o) + cargoCell_(o) +
       '<td>' + mgrVehCell(o) + '</td>' +
-      '<td>' + (o.needs_data ? '<span class="op2-nd" title="под данные: данные водителей у заказчика"></span>' : '') + stChip(o) + '</td>' +
-      '<td class="op2-num op2-mono">' + (num(o.price) ? esc(fmtP(o.price)) : '<span class="op2-dim">—</span>') + '</td>' +
+      stCell_(o) + priceCell_(o) +
       '</tr>';
   }).join('');
   var cash = rows.filter(function (o) { return !!o.cash; }).length;
@@ -987,8 +1126,10 @@ function renderMgr() {
   $('#op2-mgr-foot').innerHTML = '<tr><td colspan="9">' +
     (WIDE && F.q ? 'Поиск за 3 месяца · «' + esc(F.q) + '» · ' : 'Итого за ' + (TO_DATE ? 'неделю' : 'день') + ' · ') +
     rows.length + ' ' + plural(rows.length, 'заявка', 'заявки', 'заявок') + (cash ? ' · ' + cash + ' наличными' : '') +
-    '</td><td class="op2-num"><span class="op2-mono">' + esc(fmtP(sum) || '—') + '</span></td></tr>';
+    '</td><td colspan="2" class="op2-num">' + esc(fmtP(sum) || '—') + '</td></tr>';
 }
+/* lang="ru" на корне страницы - для hyphens:auto в колонке «Заказчик» (перенос по дефису) */
+function langRu_() { var rt = $('#op2-root'); if (rt && rt.getAttribute('lang') !== 'ru') rt.setAttribute('lang', 'ru'); }
 /* Влад 12.09: «не нужно так длинно писать полное имя - нужно сокращённо, Цуц/Кан/Мах, как
    уже есть у логистов». Полное имя - в title (навести мышью), не в самой строке. Раньше
    (см. историю) висело бейджем прямо в ячейке «Машина» - Влад 12.09, второй заход: «отметка
@@ -1001,25 +1142,11 @@ function takenByHtml_(o, verb, wrapClass) {
 }
 function mgrVehCell(o) {
   var h = oHired(o);
-  if (h) {
-    return '<div class="op2-veh"><span class="op2-hire">Наёмник</span><span class="op2-drv">' + esc(h.carrier_name || 'перевозчик уточняется') +
-      (h.vehicle_gos ? ' · <span class="op2-mono">' + esc(h.vehicle_gos) + '</span>' : '') + (h.driver_name ? ' · ' + esc(h.driver_name) : '') + '</span></div>' + pendHtml(o, 'mgr');
-  }
+  if (h) return '<div class="op2-veh">' + hiredLines_(h) + '</div>' + pendHtml(o, 'mgr');
   var vs = oOwn(o);
-  if (!vs.length) {
-    return '<span class="op2-dim">машину ещё не поставили</span>';
-  }
-  function row(v) {
-    var okc = v.driver_confirmed_at ? ' op2-ok' : '';
-    var ttl = v.driver_confirmed_at ? ' title="Водитель ' + esc(v.driver_name || '') + ' подтвердил заявку · ' + esc(v.driver_confirmed_by || '') + ' ' + esc(hhmmOf(v.driver_confirmed_at) || '') + '"' : '';
-    var roleTxt = (vs.length > 1 && v.role) ? ' · ' + (v.role === 'reserve' ? 'резерв' : 'основная') : '';
-    return '<span class="op2-gos' + okc + '"' + ttl + '>' + esc(v.vehicle_gos || '') + '</span>' +
-      '<span class="op2-drv">' + esc(v.driver_name || 'водитель уточняется') + roleTxt + '</span>';
-  }
-  var inner = vs.length === 1
-    ? '<div class="op2-veh">' + row(vs[0]) + '</div>'
-    : '<div class="op2-veh op2-multi">' + vs.map(function (v) { return '<div class="op2-row">' + row(v) + '</div>'; }).join('') + '</div>';
-  return inner + pendHtml(o, 'mgr');
+  if (!vs.length) return '<span class="op2-drv op2-dim">машину ещё не поставили</span>';
+  return '<div class="op2-veh">' + vs.map(function (v) { return ownLines_(o, v, vs.length > 1, false); }).join('') +
+    (vs.length === 1 ? '<span class="op2-src"><span class="op2-tag op2-tg-own">СВОЯ</span></span>' : '') + '</div>' + pendHtml(o, 'mgr');
 }
 /* «замена машины» (type=replace_vehicle, from_gos/to_gos) и «замена перевозчика»
    (type=replace_carrier, from_carrier_name/to_carrier_name) - один и тот же
@@ -1033,11 +1160,11 @@ function pendHtml(o, who) {
   var p = o.pending_request;
   if (!p) return '';
   var ft = pendFromTo_(p);
+  var to = '<span class="' + (ft.cls ? 'op2-plate' : '') + '">' + esc(ft.to) + '</span>' + (ft.extra ? ' · ' + esc(ft.extra) : '');
   if (who === 'mgr') {
-    return '<div class="op2-pend">логист предлагает замену → <span class="' + ft.cls + '">' + esc(ft.to) + '</span> · <b>ждёт вашего подтверждения</b></div>';
+    return '<span class="op2-sub" title="' + esc('Логист предлагает замену: ' + ft.to + ' · ждёт вашего подтверждения') + '"><span class="op2-arr">→</span> ' + to + ' · замена, подтвердите</span>';
   }
-  return '<div class="op2-pend" title="Замена вне заявленных на заявке под данные: ждёт, пока менеджер согласует с заказчиком">замена → <span class="' +
-    ft.cls + '">' + esc(ft.to) + '</span>' + (ft.extra ? ' · ' + esc(ft.extra) : '') + ' · <b>ждёт менеджера</b></div>';
+  return '<span class="op2-sub" title="Замена вне заявленных на заявке под данные: ждёт, пока менеджер согласует с заказчиком"><span class="op2-arr">→</span> ' + to + ' · ждёт менеджера</span>';
 }
 
 /* ── таблица логиста ── */
@@ -1058,47 +1185,29 @@ function renderTypeChips() {
 }
 function nowMin() { var d = new Date(); return d.getHours() * 60 + d.getMinutes(); }
 function vehCellLog(o) {
-  var k = oSt(o);
+  var k = oSt(o), vs = oOwn(o);
   if (k === 'ot') {
-    var vs0 = oOwn(o).map(function (v) { return '<span class="op2-gos">' + esc(v.vehicle_gos || '') + '</span>'; }).join(' ');
+    var g0 = vs.map(function (v) { return v.vehicle_gos || ''; }).filter(Boolean).join(' + ');
     if (!o.otboy_ack_by) {
-      return '<button class="op2-slot op2-ot" data-oid="' + esc(o.id) + '" data-ot="1">Отбой' + (vs0 ? ' · ' + vs0 : '') + '<span class="op2-take">принять</span></button>';
+      return (g0 ? '<span class="op2-ln">' + plate_(g0, 'op2-off', 'Отбой по машине ' + g0 + ' · ещё не принят') + '</span>' : '') +
+        '<button class="op2-slot op2-ot" data-oid="' + esc(o.id) + '" data-ot="1" title="' + esc('Отбой' + (g0 ? ' · ' + g0 : '') + ' · принять') + '">✕ Принять отбой</button>';
     }
-    return '<div class="op2-otdone">отбой принят · ' + esc(o.otboy_ack_by) + ' ' + esc(hhmmOf(o.otboy_ack_at) || '') +
-      (vs0 ? ' ' + vs0 + '<button class="op2-unset-ot" data-oid="' + esc(o.id) + '">Снять машину</button>' : '') + '</div>';
+    return (g0 ? '<span class="op2-ln">' + plate_(g0, 'op2-was', 'Была машина ' + g0) + '<button class="op2-unset-ot op2-mini" data-oid="' + esc(o.id) + '" title="Снять машину">Снять</button></span>' : '') +
+      '<span class="op2-drv op2-dim">отбой принят' + (hhmmOf(o.otboy_ack_at) ? ' · ' + esc(hhmmOf(o.otboy_ack_at)) : '') + '</span>' +
+      '<span class="op2-src" title="' + esc('Отбой принял логист ' + o.otboy_ack_by) + '">' + esc(fioName_(o.otboy_ack_by)) + '</span>';
   }
   var h = oHired(o);
-  if (h) {
-    return '<div class="op2-veh" data-oid="' + esc(o.id) + '"><span class="op2-hire">Наёмник</span><span class="op2-drv">' +
-      esc(h.carrier_name || 'перевозчик уточняется') + (h.vehicle_gos ? ' · <span class="op2-mono">' + esc(h.vehicle_gos) + '</span>' : '') +
-      (h.driver_name ? ' · ' + esc(h.driver_name) : '') + (h.carrier_status ? ' · ' + esc(h.carrier_status) : '') + '</span></div>' + pendHtml(o, 'log');
-  }
-  var vs = oOwn(o);
+  if (h) return '<div class="op2-veh" data-oid="' + esc(o.id) + '">' + hiredLines_(h) + '</div>' + pendHtml(o, 'log');
   if (!vs.length) {
     var t = oTime(o);
-    var amber = (t && tmin(t) - nowMin() < 120 && tmin(t) >= nowMin() && DATE === todayStr()) ? '<span class="op2-dot-amber" title="до подачи меньше 2 ч"></span>' : '';
+    var amber = (t && tmin(t) - nowMin() < 120 && tmin(t) >= nowMin() && DATE === todayStr()) ? '<span class="op2-nd" title="до подачи меньше 2 ч"></span>' : '';
     /* «взял ЦУЦ»/«беру» переехало в отдельную колонку «Лог.» (Влад 12.09: «не где-то сейчас
        это сделал, а колонка») - кнопка больше не дублирует то же самое своим текстом. */
-    return '<button class="op2-slot" data-oid="' + esc(o.id) + '">' + amber + 'Поставить</button>';
+    return '<button class="op2-slot" data-oid="' + esc(o.id) + '" title="Поставить машину' + (amber ? ' · до подачи меньше 2 часов' : '') + '">' + amber + 'Поставить</button>';
   }
-  function okBtn(v) {
-    var on = !!v.driver_confirmed_at;
-    var ttl = on ? 'Водитель ' + (v.driver_name || '') + ' подтвердил · ' + (v.driver_confirmed_by || '') + ' ' + (hhmmOf(v.driver_confirmed_at) || '') + ' · клик - снять'
-      : 'Водитель подтвердил заявку? клик - отметить';
-    return '<button class="op2-dok' + (on ? ' op2-on' : '') + '" data-oid="' + esc(o.id) + '" data-eid="' + esc(v.id) + '" title="' + esc(ttl) + '">✓</button>';
-  }
-  if (vs.length === 1) {
-    var v = vs[0];
-    return '<div class="op2-vehrow"><div class="op2-veh" data-oid="' + esc(o.id) + '" data-eid="' + esc(v.id) + '">' +
-      '<span class="op2-gos' + (v.driver_confirmed_at ? ' op2-ok' : '') + '">' + esc(v.vehicle_gos || '') + '</span>' +
-      '<span class="op2-drv">' + esc(v.driver_name || 'водитель уточняется') + (v.driver_confirmed_at ? ' · подтвердил' : '') + '</span>' +
-      '</div>' + okBtn(v) + '</div>' + pendHtml(o, 'log');
-  }
-  return '<div class="op2-vehrow"><div class="op2-veh op2-multi" data-oid="' + esc(o.id) + '">' +
-    vs.map(function (v) {
-      return '<div class="op2-row"><span class="op2-gos' + (v.driver_confirmed_at ? ' op2-ok' : '') + '">' + esc(v.vehicle_gos || '') + '</span>' +
-        '<span class="op2-drv">' + esc(v.driver_name || '') + (v.role ? ' · ' + (v.role === 'reserve' ? 'резерв' : 'основная') : '') + (v.driver_confirmed_at ? ' · подтвердил' : '') + '</span></div>';
-    }).join('') + '</div><div style="display:flex;flex-direction:column;gap:2px">' + vs.map(okBtn).join('') + '</div></div>' + pendHtml(o, 'log');
+  return '<div class="op2-veh" data-oid="' + esc(o.id) + '"' + (vs.length === 1 ? ' data-eid="' + esc(vs[0].id) + '"' : '') + '>' +
+    vs.map(function (v) { return ownLines_(o, v, vs.length > 1, true); }).join('') +
+    (vs.length === 1 ? '<span class="op2-src"><span class="op2-tag op2-tg-own">СВОЯ</span></span>' : '') + '</div>' + pendHtml(o, 'log');
 }
 function renderLog() {
   var body = $('#op2-log-body'); if (!body) return;
@@ -1133,24 +1242,24 @@ function renderLog() {
     return true;
   });
 
+  langRu_();
   body.innerHTML = rows.map(function (o) {
     var k = oSt(o);
-    var vs = oOwn(o);
-    var cls = 'op2-r44' + (k === 'ot' ? ' op2-otboy' + (o.otboy_ack_by ? '' : ' op2-unack') : '') + (isFresh(o) ? ' op2-new-halo' : '');
-    var h = vs.length > 1 ? ' style="height:' + (44 + 18 * (vs.length - 1)) + 'px"' : '';
-    return '<tr class="' + cls + '" data-oid="' + esc(o.id) + '"' + h + '>' +
-      '<td class="op2-ono">' + esc(oNo(o)) + '</td>' +
+    var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' + (o.otboy_ack_by ? '' : ' op2-unack') : '') + (isFresh(o) ? ' op2-new-halo' : '');
+    return '<tr class="' + cls + '" data-oid="' + esc(o.id) + '">' +
+      '<td><span class="op2-no">' + esc(oNo(o)) + '</span></td>' +
       mgrCodeCell_(o) + logCodeCell_(o) +
-      '<td>' + timeCell(o) + '</td>' +
-      '<td class="op2-ell" title="' + esc(o.customer) + '">' + (isFresh(o) ? '<span class="op2-st-chip op2-ok" style="margin-right:6px">новая</span>' : '') + esc(o.customer || '') + '</td>' +
-      '<td>' + (o.equipment_type ? '<span class="op2-ttype">' + esc(o.equipment_type) + '</span>' : '<span class="op2-dim">уточнить</span>') + '</td>' +
-      '<td class="op2-dim op2-ell" style="max-width:150px">' + esc(o.cargo || '') + '</td>' +
-      '<td>' + routeCell(o, 120) + '</td>' +
-      '<td class="op2-sm">' + (o.gabarit ? '<span style="color:var(--tint-amber)">' + esc(o.gabarit) + '</span>' : '') + '</td>' +
+      timeCell(o) + techCell_(o) +
+      custCell_(o, isFresh(o) ? '<span class="op2-st-chip op2-ok" style="margin-right:6px">новая</span>' : '') +
+      routeCell(o) + cargoCell_(o) +
       '<td>' + vehCellLog(o) + '</td>' +
-      '<td class="op2-st">' + (o.needs_data ? '<span class="op2-nd" title="под данные"></span>' : '') + stChip(o) + '</td>' +
+      stCell_(o) + priceCell_(o) +
       '</tr>';
   }).join('');
+  var cash = rows.filter(function (o) { return !!o.cash; }).length;
+  var sum = rows.reduce(function (a, o) { return a + num(o.price); }, 0);
+  $('#op2-log-foot').innerHTML = '<tr><td colspan="9">Итого за день · ' + rows.length + ' ' + plural(rows.length, 'заявка', 'заявки', 'заявок') +
+    (cash ? ' · ' + cash + ' наличными' : '') + '</td><td colspan="2" class="op2-num">' + esc(fmtP(sum) || '—') + '</td></tr>';
 }
 /* «новая» - создана за последние 10 минут и ещё не разобрана */
 function isFresh(o) {
@@ -1631,6 +1740,7 @@ function saveHired(o) {
 var mv = { timer: null, o: null, src: null, ghost: null, active: false, sx: 0, sy: 0, suppress: false };
 function onVehPointerDown(e) {
   var veh = e.target.closest('.op2-veh'); if (!veh || e.button !== 0) return;
+  if (e.target.closest('button')) return; /* ✓ подтверждения водителя стоит внутри плитки (вариант «Рейс») */
   var o = byId(veh.dataset.oid);
   if (!o || !oOwn(o).length || oSt(o) === 'ot') return;
   mv.sx = e.clientX; mv.sy = e.clientY; mv.o = o; mv.src = veh;

@@ -25,6 +25,7 @@ function $$(sel, root) { return Array.prototype.slice.call((root || document).qu
 /* Своя экранировка - всё, что приходит от людей (заказчик, груз, адреса, имена),
    уходит в innerHTML только через неё. Общей escHtml_ в index.html нет - те,
    что есть, приватны внутри чужих IIFE. */
+function capFirst(s) { s = String(s || ''); return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; } /* «буровая Liebherr…» -> «Буровая Liebherr…» */
 function esc(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -595,6 +596,11 @@ function onDocMouseDown(e) {
   var pop = $('#op2-pop');
   if (pop && pop.classList.contains('op2-open') && !e.target.closest('#op2-pop') && !e.target.closest('.op2-slot,.op2-veh')) closePop();
   if ($('#op2-row-menu') && !e.target.closest('#op2-row-menu')) closeRowMenu();
+  /* «Под данные» - попап подсказки (перенос редизайна 12.09) */
+  if ($('.op2-info-dot.op2-open') && !e.target.closest('.op2-info-dot') && !e.target.closest('.op2-info-pop')) {
+    $$('.op2-info-pop').forEach(function (p) { p.remove(); });
+    $$('.op2-info-dot').forEach(function (d) { d.classList.remove('op2-open'); });
+  }
 }
 function isPageActive() {
   var p = document.getElementById(ROOT_ID);
@@ -1864,8 +1870,10 @@ function expandEntRow(seg) {
    Отличие от «От кого»: тут ВСЕГДА видны оба основных типа (Трал, Длинномер) - это не
    "текущий выбор", а быстрый доступ к двум самым частым; выбор виден третьим - .op2-on
    на одном из чипов (основном или раскрытом). При выборе из «Ещё» ряд сворачивается
-   обратно (сам выбор не помещается среди двух постоянных мест) - вместо чипа его
-   показывает текст-подсказка #op2-f-eq-hint, как раньше показывал <select>.
+   обратно (сам выбор не помещается среди двух постоянных мест) - сам чип уходит в
+   начало ряда подсвеченным (см. eqRowHtml ниже); отдельный текст-подсказка убран
+   12.09 при переносе редизайна (Влад 11.09: «оставь подсказку только по данные») -
+   чипа достаточно, дублировать текстом незачем.
    seg.dataset.cur хранит текущее значение НЕЗАВИСИМО от того, виден ли его чип прямо
    сейчас - «×» без выбора обязан вернуть то, что было, а не потерять его.
    Устаревший тип (в заявке уже стоит, но в справочнике деактивирован - напр. старые
@@ -1931,12 +1939,15 @@ function renderForm() {
     return list.map(function (x) { var val = (x && x.value != null) ? x.value : x; return '<option value="' + esc(val) + '"' + (String(cur) === String(val) ? ' selected' : '') + '>' + esc(val) + '</option>'; }).join('');
   }
 
+  var hasContact = !!(o && (o.customer_contact_name || o.customer_contact_phone));
   $('#op2-d-body').innerHTML =
+    '<div class="op2-cols"><div class="op2-main">' +
     '<div class="op2-sect"><div class="op2-t">Когда и для кого</div><div class="op2-grid2">' +
       '<div class="op2-fld"><label>Дата подачи</label><div class="op2-seg" id="op2-f-datebox">' +
         '<button class="op2-chip' + (defDate === todayStr() ? ' op2-on' : '') + '" data-d="' + esc(todayStr()) + '">Сегодня ' + esc(dm(todayStr())) + '</button>' +
         '<button class="op2-chip' + (defDate === addDays(todayStr(), 1) ? ' op2-on' : '') + '" data-d="' + esc(addDays(todayStr(), 1)) + '">Завтра ' + esc(dm(addDays(todayStr(), 1))) + '</button>' +
-        '<input type="date" class="op2-dt" id="op2-f-date" value="' + esc(defDate) + '" autocomplete="off" style="margin-left:4px">' +
+        '<span class="op2-datewrap"><button type="button" class="op2-calbtn" id="op2-f-calbtn" title="Выбрать другую дату"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></button>' +
+        '<input type="date" class="op2-dt op2-dt-hidden" id="op2-f-date" value="' + esc(defDate) + '" autocomplete="off" tabindex="-1"></span>' +
       '</div></div>' +
 
       '<div class="op2-fld"><label>Время подачи</label><div class="op2-timerow">' +
@@ -1947,11 +1958,11 @@ function renderForm() {
 
       '<div class="op2-fld op2-full"><label>Тип техники</label><div class="op2-seg" id="op2-f-eq" data-cur="' + esc(curEq) + '">' +
         eqRowHtml(curEq) +
-      '</div><span class="op2-hint" id="op2-f-eq-hint">' + (curEq && !eqPrimary0.some(function (x) { return x.value === curEq; }) ? 'Выбрано: ' + esc(curEq) : 'Основные - чипами, остальная техника в «Ещё»') + '</span></div>' +
+      '</div></div>' +
 
       '<div class="op2-fld op2-full"><label>От кого (исполнитель с нашей стороны)</label><div class="op2-seg" id="op2-f-ent">' +
         entRowHtml(curEnt) +
-      '</div><span class="op2-hint">Реквизиты, печать и подпись этого юрлица уйдут в договор-заявку. С точкой - в справочнике нет банка или печати</span></div>' +
+      '</div></div>' +
 
       (isLog ? '<div class="op2-fld op2-full"><label>Кто заказывает</label><div class="op2-seg" id="op2-f-who" style="flex-wrap:wrap">' +
         '<button class="op2-chip' + (!(o && o.internal) ? ' op2-on' : '') + '" data-who="" data-name="">Внешний заказчик</button>' +
@@ -1962,24 +1973,14 @@ function renderForm() {
         '<input id="op2-f-cust" placeholder="Начни вводить - по первым буквам" autocomplete="off" value="' + esc(o ? o.customer : '') + '">' +
         '<div class="op2-list" id="op2-f-custlist"></div></div>' +
 
-      '<div class="op2-fld op2-full"><label>Контакт заказчика</label>' +
+      '<div class="op2-fld op2-contact-fld' + (hasContact ? '' : ' op2-collapsed') + '" id="op2-f-custcontact-fld">' +
+        '<button type="button" class="op2-add-contact" id="op2-f-custcontact-add"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Контакт заказчика</button>' +
+        '<label>Контакт заказчика</label>' +
         '<input id="op2-f-custcontact" placeholder="Имя · телефон" autocomplete="off" value="' + esc(o ? [o.customer_contact_name, o.customer_contact_phone].filter(Boolean).join(' · ') : '') + '">' +
         '<span class="op2-hint" id="op2-f-custcontact-hint">Подсказки - контакты этого заказчика по прошлым заявкам</span></div>' +
 
-      '<div class="op2-fld op2-full"><label><input type="checkbox" class="op2-cb" id="op2-f-nd-cb"' + (o && o.needs_data ? ' checked' : '') + '>Под данные</label>' +
-        '<span class="op2-hint">Заказчику нужны данные водителя заранее (пропускной режим). После планирования машину и водителя не меняют без согласования - логист заявит основную и резервную, данные обоих уйдут заказчику.</span></div>' +
-    '</div></div>' +
-
-    '<div class="op2-sect"><div class="op2-t">Что везём</div><div class="op2-grid2">' +
-      '<div class="op2-fld op2-sugg" id="op2-f-cargobox"><label>Груз</label><input id="op2-f-cargo" placeholder="начни вводить: jcb 3, bg 40, морск, быт…" autocomplete="off" value="' + esc(o ? o.cargo : '') + '">' +
-        '<div class="op2-list" id="op2-f-cargolist"></div><span class="op2-hint" id="op2-f-cargo-hint">Подсказки - справочник техники и что уже возили; вес и Д×Ш×В подставятся сами</span></div>' +
-      '<div class="op2-fld"><label>Вес, т</label><input id="op2-f-weight" class="op2-mono" inputmode="decimal" placeholder="8" autocomplete="off" value="' + esc(o ? (o.cargo_weight_t || '') : '') + '"></div>' +
-      '<div class="op2-fld"><label>Габариты груза</label><input id="op2-f-dims" placeholder="Д × Ш × В" autocomplete="off" value="' + esc(o ? (o.cargo_dims || '') : '') + '"></div>' +
-      '<div class="op2-fld"><label>Габарит</label><div class="op2-seg" id="op2-f-gab">' +
-        gabs.map(function (g) { return '<button class="op2-chip' + (g === curGab ? ' op2-on' : '') + '" data-gab="' + esc(g) + '">' + esc(g) + '</button>'; }).join('') +
-      '</div></div>' +
-      '<div class="op2-fld"><label>Документы</label><select id="op2-f-docs"><option value="">—</option>' + optList(dict('documents'), o ? o.documents : '') + '</select></div>' +
-      '<div class="op2-fld"><label>Условия переработки</label><select id="op2-f-rework"><option value="">—</option>' + optList(dict('rework'), o ? o.rework_terms : '') + '</select></div>' +
+      '<div class="op2-fld op2-full op2-nd-fld"><label><input type="checkbox" class="op2-cb" id="op2-f-nd-cb"' + (o && o.needs_data ? ' checked' : '') + '>Под данные</label>' +
+        '<button type="button" class="op2-info-dot" id="op2-f-nd-info" title="Что это">i</button></div>' +
     '</div></div>' +
 
     '<div class="op2-sect"><div class="op2-t">Откуда - куда</div><div class="op2-grid2">' +
@@ -1994,12 +1995,30 @@ function renderForm() {
         '<div class="op2-list" id="op2-f-tolist"></div>' +
         '<span class="op2-hint op2-warn" id="op2-f-tohint"></span></div>' +
     '</div></div>' +
+    '</div>' +
 
-    '<div class="op2-sect"><div class="op2-t">Деньги</div><div class="op2-grid2">' +
+    '<div class="op2-side"><div class="op2-card">' +
+    '<div class="op2-sect"><div class="op2-t">Что везём</div></div>' +
+      '<div class="op2-fld op2-sugg" id="op2-f-cargobox"><label>Груз</label><input id="op2-f-cargo" placeholder="начни вводить: jcb 3, bg 40, морск, быт…" autocomplete="off" value="' + esc(o ? o.cargo : '') + '">' +
+        '<div class="op2-list" id="op2-f-cargolist"></div><span class="op2-hint" id="op2-f-cargo-hint">Подсказки - справочник техники и что уже возили; вес и Д×Ш×В подставятся сами</span></div>' +
+      '<div class="op2-grid2">' +
+        '<div class="op2-fld"><label>Вес, т</label><input id="op2-f-weight" class="op2-mono" inputmode="decimal" placeholder="8" autocomplete="off" value="' + esc(o ? (o.cargo_weight_t || '') : '') + '"></div>' +
+        '<div class="op2-fld"><label>Габарит</label><div class="op2-seg" id="op2-f-gab">' +
+          gabs.map(function (g) { return '<button class="op2-chip' + (g === curGab ? ' op2-on' : '') + '" data-gab="' + esc(g) + '">' + esc(g) + '</button>'; }).join('') +
+        '</div></div>' +
+      '</div>' +
+      '<div class="op2-fld"><label>Габариты груза</label><input id="op2-f-dims" placeholder="Д × Ш × В" autocomplete="off" value="' + esc(o ? (o.cargo_dims || '') : '') + '"></div>' +
+      '<div class="op2-fld"><label>Документы</label><select id="op2-f-docs"><option value="">—</option>' + optList(dict('documents'), o ? o.documents : '') + '</select></div>' +
+      '<div class="op2-fld"><label>Условия переработки</label><select id="op2-f-rework"><option value="">—</option>' + optList(dict('rework'), o ? o.rework_terms : '') + '</select></div>' +
+    '</div>' +
+    '<div class="op2-card">' +
+    '<div class="op2-sect"><div class="op2-t">Деньги</div></div>' +
       '<div class="op2-fld"><label>Стоимость, ₽</label><input id="op2-f-price" class="op2-mono" inputmode="numeric" placeholder="38 000" autocomplete="off" value="' + esc(o && num(o.price) ? o.price : '') + '"></div>' +
       '<div class="op2-fld"><label>Статус оплаты</label><select id="op2-f-pay"><option value="">—</option>' + optList(dict('payment_status'), o ? o.payment_status : '') + '</select></div>' +
-      '<div class="op2-fld op2-full"><label><input type="checkbox" class="op2-cb" id="op2-f-cash"' + (o && o.cash ? ' checked' : '') + '>Наличные</label></div>' +
-    '</div></div>' +
+      '<div class="op2-fld"><label><input type="checkbox" class="op2-cb" id="op2-f-cash"' + (o && o.cash ? ' checked' : '') + '>Наличные</label></div>' +
+    '</div>' +
+    '</div>' +
+    '</div>' +
 
     '<div class="op2-sect"><div class="op2-t">Примечание</div><div class="op2-fld"><textarea id="op2-f-note" rows="3" placeholder="Что логисту важно знать">' + esc(o ? (o.note || '') : '') + '</textarea></div></div>';
 
@@ -2035,15 +2054,29 @@ function wireForm() {
   $$('.op2-stp', $('#op2-d-body')).forEach(function (b) {
     b.addEventListener('click', function () { ft.value = hhmm(tmin(normT(ft.value) || '08:00') + (+this.dataset.d)); if (+this.dataset.d > 0) S.stepUp(); else S.stepDown(); tickState(); });
   });
+  var calBtn = $('#op2-f-calbtn'), dateNative = $('#op2-f-date');
   $('#op2-f-datebox').addEventListener('click', function (e) {
     var b = e.target.closest('.op2-chip'); if (!b) return;
     $$('.op2-chip', this).forEach(function (x) { x.classList.remove('op2-on'); });
     b.classList.add('op2-on');
-    $('#op2-f-date').value = b.dataset.d;
+    dateNative.value = b.dataset.d;
+    calBtn.classList.remove('op2-on'); calBtn.title = 'Выбрать другую дату';
     drawQk();
   });
-  $('#op2-f-date').addEventListener('change', function () {
+  /* иконка-календарь вместо всегда видимого <input type=date> (Влад 11.09, перенос
+     редизайна 12.09) - сам input остаётся в DOM (скрыт визуально), showPicker() его
+     открывает; выбор даты вне Сегодня/Завтра виден по подсветке кнопки и её title,
+     как в утверждённом превью - отдельного текстового поля под датой нет */
+  calBtn.addEventListener('click', function () {
+    S.nav();
+    if (dateNative.showPicker) { try { dateNative.showPicker(); return; } catch (e) {} }
+    dateNative.focus(); dateNative.click();
+  });
+  dateNative.addEventListener('change', function () {
     $$('#op2-f-datebox .op2-chip').forEach(function (x) { x.classList.toggle('op2-on', x.dataset.d === this.value); }, this);
+    var isPreset = !!$('#op2-f-datebox .op2-chip.op2-on');
+    calBtn.classList.toggle('op2-on', !isPreset);
+    calBtn.title = isPreset ? 'Выбрать другую дату' : humanDate(this.value);
     drawQk();
   });
   $('#op2-f-eq').addEventListener('click', function (e) {
@@ -2052,21 +2085,15 @@ function wireForm() {
     // разметки внутри отвязывает e.target ДО всплытия к звуковому делегату на
     // document, генерический S.nav() наложился бы поверх S.unfold()/S.fold().
     e.stopPropagation();
-    var eqPrimaryNow = dict('equipment').filter(function (x) { return x.primary; });
-    function paintHint(val) {
-      $('#op2-f-eq-hint').textContent = (val && !eqPrimaryNow.some(function (x) { return x.value === val; }))
-        ? 'Выбрано: ' + val : 'Основные - чипами, остальная техника в «Ещё»';
-    }
     if (e.target.closest('[data-eq-more]')) { expandEqRow(seg); return; }
     if (e.target.closest('[data-eq-close]')) {
-      S.fold(); collapseEqRow(seg, seg.dataset.cur); paintHint(seg.dataset.cur); return;
+      S.fold(); collapseEqRow(seg, seg.dataset.cur); return;
     }
     var pick = e.target.closest('.op2-chip[data-eq]'); if (!pick) return;
     // «Развёрнуто» - по наличию «×», а не по числу чипов: устаревший (op2-eq-gone) тип
     // сам по себе добавляет чип и в свёрнутом виде, так что счёт по длине был бы неверен.
     var wasOpen = !!seg.querySelector('[data-eq-close]');
     collapseEqRow(seg, pick.dataset.eq);
-    paintHint(pick.dataset.eq);
     if (wasOpen) S.fold();
   });
   $('#op2-f-ent').addEventListener('click', function (e) {
@@ -2109,6 +2136,32 @@ function wireForm() {
     });
     var wb0 = $('#op2-f-who .op2-chip.op2-on'); if (wb0 && wb0.dataset.who) applyWho(wb0);
   }
+
+  /* «Под данные» - единственная оставшаяся подсказка спрятана за точку (i), перенос
+     редизайна 12.09 (Влад 11.09: «оставь подсказку только по данные») */
+  var ndInfo = $('#op2-f-nd-info');
+  ndInfo.addEventListener('click', function (e) {
+    e.stopPropagation();
+    var already = this.classList.contains('op2-open');
+    $$('.op2-info-pop').forEach(function (p) { p.remove(); });
+    $$('.op2-info-dot').forEach(function (d) { d.classList.remove('op2-open'); });
+    if (already) return;
+    this.classList.add('op2-open');
+    var pop = document.createElement('div'); pop.className = 'op2-info-pop';
+    pop.textContent = 'Заказчику нужны данные водителя заранее (пропускной режим). После планирования машину и водителя не меняют без согласования - логист заявит основную и резервную, данные обоих уйдут заказчику.';
+    this.closest('.op2-nd-fld').appendChild(pop);
+    requestAnimationFrame(function () { pop.classList.add('op2-open'); });
+  });
+
+  /* «Контакт заказчика» - скрыт за кнопкой, пока не нажали (Влад 11.09: «почти никто
+     не вводит») - поле остаётся в DOM (collectForm читает его безусловно), кнопка
+     только снимает класс op2-collapsed */
+  var addContactBtn = $('#op2-f-custcontact-add');
+  if (addContactBtn) addContactBtn.addEventListener('click', function () {
+    S.nav();
+    $('#op2-f-custcontact-fld').classList.remove('op2-collapsed');
+    $('#op2-f-custcontact').focus();
+  });
 
   /* подсказки заказчика */
   var custT = null;
@@ -2296,8 +2349,9 @@ function fetchCargo(q) {
     var cat = items.filter(function (i) { return i.src === 'catalog'; }), his = items.filter(function (i) { return i.src === 'history'; });
     var row = function (i) {
       var sub = (i.category ? esc(i.category) : '') + (i.n ? (i.category ? ' · ' : '') + 'возили ' + i.n + '×' : '');
-      return '<div class="op2-it op2-cargo-it" data-name="' + esc(i.name) + '" data-w="' + esc(i.weight_t || '') + '" data-dims="' + esc(i.dims || '') + '" data-l="' + esc(i.length_m || '') + '" data-wd="' + esc(i.width_m || '') + '" data-h="' + esc(i.height_m || '') + '" data-note="' + esc(i.note || '') + '">' +
-        '<div class="op2-cargo-main"><span class="op2-cargo-name">' + esc(i.name) + '</span>' + (sub ? '<span class="op2-cargo-sub">' + sub + '</span>' : '') + '</div>' +
+      var nameCap = capFirst(i.name);
+      return '<div class="op2-it op2-cargo-it" data-name="' + esc(nameCap) + '" data-w="' + esc(i.weight_t || '') + '" data-dims="' + esc(i.dims || '') + '" data-l="' + esc(i.length_m || '') + '" data-wd="' + esc(i.width_m || '') + '" data-h="' + esc(i.height_m || '') + '" data-note="' + esc(i.note || '') + '">' +
+        '<div class="op2-cargo-main"><span class="op2-cargo-name">' + esc(nameCap) + '</span>' + (sub ? '<span class="op2-cargo-sub">' + sub + '</span>' : '') + '</div>' +
         '<div class="op2-cargo-meta">' + (i.weight_t ? '<span class="op2-cargo-w">' + esc(i.weight_t) + ' т</span>' : '') + (i.dims ? '<span class="op2-cargo-dims">' + esc(i.dims) + '</span>' : '') + '</div></div>';
     };
     if (cat.length) h += '<div class="op2-sec">Справочник техники</div>' + cat.map(row).join('');

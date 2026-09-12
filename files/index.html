@@ -6912,6 +6912,11 @@ window.Clc = {
   toggleBase:toggleBase, loopStep:loopStep, truckStep:truckStep, togglePick:togglePick,
   openHist:openHist, closeHist:closeHist, copyPhrase:copyPhrase,
   autoChipClick:autoChipClick, vhChManual:vhChManual, applyHist:applyHist,
+  // addrParts - разбор ответа DaData на "главное/подробности" (Влад, 12.09: то же
+  // подключение, что в форме "Задание" - переиспользуем ОДИН разбор, а не пишем второй
+  // (order-plan-v2.js держит свою копию, т.к. это отдельный файл; здесь, в том же
+  // index.html, у CRM-модуля есть доступ к этому же Clc - копия не нужна).
+  addrParts:dadataAddrParts_,
   _last:null
 };
 
@@ -22774,6 +22779,12 @@ var CRM = (function () {
     document.addEventListener('click', function (e) {
       if (!e.target.closest('.crm-menu')) closeMenu();
       if (!e.target.closest('.cx-pop') && !e.target.closest('[data-pop-anchor]')) closePops();
+      // Живой поиск адреса (addrSuggest) - клик мимо поля И мимо списка закрывает список
+      // (тот же класс бага, что уже чинили в Калькуляторе 11.09 - "визуальный баг").
+      document.querySelectorAll('.clc-ac-list.show').forEach(function (lst) {
+        var inp = lst.previousElementSibling;
+        if (inp && e.target !== inp && !lst.contains(e.target)) lst.classList.remove('show');
+      });
     });
     window.addEventListener('keydown', function (e) {
       if (!page.classList.contains('active')) return;
@@ -23431,8 +23442,8 @@ var CRM = (function () {
     var oneCTag = '<span class="dr-auto" title="Подставлено из 1С по номеру заказа - проверьте">1С</span>';
     return '<div class="dr-grid2">' +
       '<div class="dr-field" style="grid-column:1/-1"><label>Груз' + autoTag + '</label><input class="dr-input" id="' + prefix + '-cargo" autocomplete="off" value="' + esc(d.cargo_type || '') + '" placeholder="экскаватор, трубы, контейнер…"' + onBlur + '></div>' +
-      '<div class="dr-field"><label>Откуда' + (from1c && from1c.from ? oneCTag : '') + '</label><input class="dr-input" id="' + prefix + '-from" autocomplete="off" value="' + esc(d.route_from || '') + '"' + onBlur + '></div>' +
-      '<div class="dr-field"><label>Куда' + (from1c && from1c.to ? oneCTag : '') + '</label><input class="dr-input" id="' + prefix + '-to" autocomplete="off" value="' + esc(d.route_to || '') + '"' + onBlur + '></div>' +
+      '<div class="dr-field"><label>Откуда' + (from1c && from1c.from ? oneCTag : '') + '</label><div class="clc-ac-wrap"><input class="dr-input" id="' + prefix + '-from" autocomplete="off" value="' + esc(d.route_from || '') + '" oninput="CRM.addrSuggest(\'' + prefix + '\',\'from\',' + d.id + ')"' + onBlur + '><div class="clc-ac-list" id="' + prefix + '-fromAc"></div></div></div>' +
+      '<div class="dr-field"><label>Куда' + (from1c && from1c.to ? oneCTag : '') + '</label><div class="clc-ac-wrap"><input class="dr-input" id="' + prefix + '-to" autocomplete="off" value="' + esc(d.route_to || '') + '" oninput="CRM.addrSuggest(\'' + prefix + '\',\'to\',' + d.id + ')"' + onBlur + '><div class="clc-ac-list" id="' + prefix + '-toAc"></div></div></div>' +
       '<div class="dr-field"><label>Вес, т</label><input class="dr-input mono" id="' + prefix + '-weight" type="number" step="0.1" min="0" autocomplete="off" value="' + esc(d.cargo_weight_tons != null ? d.cargo_weight_tons : '') + '"' + onBlur + '></div>' +
       '<div class="dr-field"><label>Дата подачи</label><input class="dr-input mono" id="' + prefix + '-date" type="date" autocomplete="off" value="' + dateInput(d.wanted_date) + '"' + onChange + '></div>' +
       '<div class="dr-field" style="grid-column:1/-1"><label>Техника</label><select class="dr-select" id="' + prefix + '-veh"' + onChange + '>' +
@@ -23450,6 +23461,47 @@ var CRM = (function () {
     { v: 'korito', l: 'Трал-корыто' }, { v: 'faymon', l: 'Faymonville' },
   ];
   function vehHintNorm_(v) { return { 'трал': 'tral', 'длинномер': 'board' }[v] || v || ''; }
+  // Живой поиск адреса в полях Откуда/Куда заявки (Влад, 12.09: "здесь он должен быть
+  // подключен", как в Калькуляторе и в форме «Задание») - тот же /api/geocoder/suggest,
+  // тот же визуальный паттерн .clc-ac-list/.clc-ac-item, что у калькулятора (CSS уже
+  // общий, ничего нового не заводим), разбор ответа - Clc.addrParts (см. window.Clc =
+  // {...} выше), не вторая копия dadataAddrParts_.
+  var addrSuggestT_ = {};
+  function addrSuggest(prefix, side, dealId) {
+    var key = prefix + side;
+    var inp = el(prefix + '-' + side), lst = el(prefix + '-' + side + 'Ac');
+    if (!inp || !lst) return;
+    clearTimeout(addrSuggestT_[key]);
+    if (inp.value.trim().length < 3) { lst.classList.remove('show'); return; }
+    addrSuggestT_[key] = setTimeout(function () {
+      api('/geocoder/suggest', { q: inp.value.trim() }).then(function (r) {
+        var sug = (r.ok && r.data && r.data.suggestions) || [];
+        lst.innerHTML = '';
+        var seen = {};
+        sug.forEach(function (f) {
+          if (f.lat == null || f.lon == null) return;
+          var parts = (window.Clc && Clc.addrParts) ? Clc.addrParts(f) : [f.value];
+          if (!parts[0]) return;
+          var main = parts[0], sub = parts.slice(1, 3).join(', ');
+          var itemKey = main + '|' + sub;
+          if (seen[itemKey]) return;
+          seen[itemKey] = true;
+          var item = document.createElement('div');
+          item.className = 'clc-ac-item';
+          item.innerHTML = esc(main) + ' <span class="clc-ac-sub">' + esc(sub) + '</span>';
+          item.onmousedown = function (e) { e.preventDefault(); }; // не терять фокус до клика (как в clc-techList)
+          item.onclick = function () {
+            inp.value = main;
+            lst.classList.remove('show');
+            (prefix === 'cx' ? saveCtxBrief : saveBrief)(dealId);
+          };
+          lst.appendChild(item);
+        });
+        if (!lst.children.length) { lst.classList.remove('show'); return; }
+        lst.classList.add('show');
+      }).catch(function () {});
+    }, 400);
+  }
   // Кнопка "Посчитать стоимость" (превью "Расчёт в чате CRM", утверждено 12.09) - НЕ
   // дублирует поля выше (Груз/Откуда/Куда/Вес/Техника уже в этой же форме), спрашивает
   // только габариты (их в заявке никогда не было) и зовёт ТОТ ЖЕ /api/calculator/quote,
@@ -24382,7 +24434,7 @@ var CRM = (function () {
     openThread: openThread, closeThreadMobile: closeThreadMobile, toggleRespPop: toggleRespPop, loadOlder: loadOlder, onThreadScroll: onThreadScroll, openLightbox: openLightbox, closeLightbox: closeLightbox,
     onInput: onInput, onInputKey: onInputKey, toggleTemplates: toggleTemplates, useTemplate: useTemplate, saveTemplate: saveTemplate, deleteTemplate: deleteTemplate, send: send, retry: retry,
     saveCtxBrief: saveCtxBrief, createDealFor: createDealFor, openChatFor: openChatFor, reloadChats: reloadChats, enablePush: enablePush,
-    calcOpenForm: calcOpenForm, calcRun: calcRun, calcInsert: calcInsert,
+    calcOpenForm: calcOpenForm, calcRun: calcRun, calcInsert: calcInsert, addrSuggest: addrSuggest,
     playRecording: playRecording, seekStart: seekStart,
     transcribeCall: transcribeCall, summarizeCall: summarizeCall,
     setAnalyticsPeriod: setAnalyticsPeriod,

@@ -295,16 +295,41 @@ function oMgrTitle(o) {
   if (o.internal) return 'внутренний заказ, создал логист ' + (o.taken_by_name || o.manager_name || '');
   return o.manager_name || o.manager_code || '';
 }
-/* Влад 12.09: «колонку "Менеджер и логист" сразу после нумерации... номер заказа, потом
-   менеджер, потом логист... вся индикация: кто создал заявку, кто принял заявку» - те же
-   op2-code, что и раньше, просто вынесены в свои колонки (было только «Мен.» у логиста,
-   ближе к «Машина», и никакой колонки логиста у менеджера вообще). Обе таблицы (менеджера
-   и логиста) - одинаковый порядок и вид ячеек. */
+/* Влад 12.09: одобрен вариант «Цветная фамилия» из превью (person_columns_variants,
+   https://claude.ai/code/artifact/5f2e5dc5-dae7-4834-8fbd-3367725d4530) - «эти цвета мне
+   тоже нравятся, надо их добавить в палитру». 15 оттенков подобраны в стороне от
+   семантических цветов дашборда (зелёный=подтверждено, красный=отбой, жёлтый=скоро подача,
+   синий=наёмник/внутренний заказ), по одному на каждого менеджера и логиста (снимок людей -
+   CLAUDE.md «Люди», 11.09). «Пусть цвет в Задании соответствует цвету в Планировке» -
+   ПОКА реализовано только здесь (Планировка - отдельный файл, files/index.html, в этот
+   проход не входила); палитра-константа переносима туда один в один, когда дойдёт очередь -
+   не хардкодим её ВТОРОЙ раз с нуля, тот же объект. */
+var PERSON_COLOR_ = {
+  'Ахтамова': '#dda288', 'Гуляева': '#ddd488', 'Гусейнова': '#ccdd88', 'Гуштюк': '#b2dd88',
+  'Котельников': '#99dd88', 'Ратников': '#88dd91', 'Савиток': '#88dd9d', 'Филипчук': '#88dddd',
+  'Цегельников': '#889ddd', 'Васин': '#8d88dd', 'Кан': '#a688dd', 'Махура': '#b288dd',
+  'Прус-Роскошный': '#cc88dd', 'Сильчев': '#dd88d4', 'Цуцурин': '#dd88bb'
+};
+function personSurname_(fullName) { return String(fullName || '').trim().split(/\s+/)[0] || ''; }
+function personColor_(fullName) { return PERSON_COLOR_[personSurname_(fullName)] || null; }
+/* «колонку "Менеджер и логист" сразу после нумерации... номер заказа, потом менеджер, потом
+   логист... вся индикация: кто создал заявку, кто принял заявку» - обе таблицы (менеджера и
+   логиста) начинаются №→Мен.→Лог. Фамилия окрашена по человеку, трёхбуквенный код - мелко
+   под ней (кто уже привык ориентироваться по коду - он никуда не делся), полное имя - в
+   title по наведению. */
+function personCell_(fullName, code, title) {
+  if (!fullName && !code) return '<td><span class="op2-dim">—</span></td>';
+  var sur = personSurname_(fullName) || code;
+  var col = personColor_(fullName);
+  return '<td><span class="op2-person"' + (col ? ' style="color:' + col + '"' : '') + ' title="' + esc(title || fullName || '') + '">' + esc(sur) +
+    '</span>' + (code ? '<span class="op2-person-code">' + esc(code) + '</span>' : '') + '</td>';
+}
 function mgrCodeCell_(o) {
-  return '<td><span class="op2-code" title="' + esc(oMgrTitle(o)) + '"' + (o.internal ? ' style="color:var(--tint-blue)"' : '') + '>' + esc(oMgrCode(o)) + '</span></td>';
+  var name = o.internal ? (o.taken_by_name || o.manager_name) : o.manager_name;
+  return personCell_(name, oMgrCode(o), oMgrTitle(o));
 }
 function logCodeCell_(o) {
-  return '<td>' + (o.taken_by_name ? '<span class="op2-code" title="' + esc(o.taken_by_name) + '">' + esc((o.taken_by_code || '').toUpperCase()) + '</span>' : '<span class="op2-dim">—</span>') + '</td>';
+  return personCell_(o.taken_by_name, (o.taken_by_code || '').toUpperCase(), o.taken_by_name);
 }
 function byId(id) { for (var i = 0; i < ORD.length; i++) { if (String(ORD[i].id) === String(id)) return ORD[i]; } return null; }
 function execById(o, eid) { var l = o.executors || []; for (var i = 0; i < l.length; i++) { if (String(l[i].id) === String(eid)) return l[i]; } return null; }

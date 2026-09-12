@@ -2461,7 +2461,13 @@ function fetchGeoSuggest(side, q) {
         var key = main + '|' + sub;
         if (seen[key]) return;
         seen[key] = true;
-        html += '<div class="op2-it" data-address="' + esc(main) + '" data-lat="' + esc(f.lat) + '" data-lon="' + esc(f.lon) + '">' +
+        /* Влад 12.09: «улица Гагарина есть и в Новгороде, и в Великом Новгороде» -
+           для логистики город/населённый пункт ОБЯЗАН остаться в сохранённом адресе,
+           не только в серой строке подсказки. main (первая часть dadataAddrParts_)
+           часто ТОЛЬКО улица+дом - в поле кладём f.value целиком (полный
+           отформатированный адрес DaData, город уже внутри), main/sub - только
+           для вида самой подсказки в списке. */
+        html += '<div class="op2-it" data-address="' + esc(f.value || main) + '" data-lat="' + esc(f.lat) + '" data-lon="' + esc(f.lon) + '">' +
           '<span>' + esc(main) + '</span><span class="op2-m">' + esc(sub) + '</span></div>';
       });
       geoSub.innerHTML = html ? '<div class="op2-sec">Адреса</div>' + html : '';

@@ -589,7 +589,17 @@ function wire() {
   /* ── глобальные: Esc, клик мимо, скролл ── */
   document.addEventListener('keydown', onKeyDown, true);
   document.addEventListener('mousedown', onDocMouseDown, true);
-  window.addEventListener('scroll', function () { if ($('#op2-pop') && $('#op2-pop').classList.contains('op2-open')) closePop(); }, true);
+  /* Влад 12.09 (живой тест): «прокручиваю колесиком вниз - список закрывается» - скролл не
+     всплывает, поэтому ловим его на capture-фазе с window; но так же ловился и скролл СПИСКА
+     машин ВНУТРИ самого поповера (у #op2-pop-body своя прокрутка) - каждое движение колеса
+     по списку закрывало его же. Закрываем только если событие пришло НЕ изнутри поповера
+     (значит скроллится страница за ним, а не сам список). */
+  window.addEventListener('scroll', function (e) {
+    var pop = $('#op2-pop');
+    if (!pop || !pop.classList.contains('op2-open')) return;
+    if (e.target && e.target.nodeType === 1 && pop.contains(e.target)) return;
+    closePop();
+  }, true);
   document.addEventListener('pointermove', onPointerMove);
   document.addEventListener('pointerup', onPointerUp);
   document.addEventListener('pointercancel', function () { clearTimeout(mv.timer); mv.timer = null; if (mv.active) endMove(); });
@@ -1033,7 +1043,12 @@ function renderLog() {
   $('#op2-c-new').textContent = nw;
 
   var rows = sortRows(ORD.slice()).filter(function (o) {
-    if (isFresh(o)) return true;   /* новая заявка показывается всегда, даже вне фильтра */
+    /* Влад 12.09 (живой тест): «фильтр должен фильтровать, но почему-то не фильтрует» -
+       раньше новая заявка (isFresh) показывалась ВСЕГДА, в обход любого фильтра (типа
+       техники, поиска, «Без машины», «Под данные») - две тестовые заявки разных типов обе
+       остались видны при фильтре «Трал». Свежесть теперь не обходит фильтры - она только
+       подсвечивает строку (op2-new-halo ниже) и считается отдельным счётчиком «Новые»
+       (F.newOnly ниже даёт целенаправленно посмотреть все новые через один клик). */
     if (F.type !== 'all' && segOf(o.equipment_type) !== F.type) return false;
     if (F.mine && MY_SEG && segOf(o.equipment_type) !== MY_SEG && !(!oOwn(o).length && !oHired(o))) return false;
     if (F.nocar && (oOwn(o).length || oHired(o) || oSt(o) === 'ot')) return false;

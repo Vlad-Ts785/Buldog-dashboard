@@ -2001,6 +2001,16 @@ main:has(> #page-crm.active){max-width:none;}
 .dr-calc-legend{display:flex;flex-direction:column;gap:3px;}
 .dr-calc-leg-row{display:flex;justify-content:space-between;gap:8px;font-size:10.5px;color:var(--muted);}
 .dr-calc-leg-row .num{font-family:var(--font-mono);color:var(--text);font-variant-numeric:tabular-nums;}
+/* Влад, 12.09: правка адреса/веса/техники/габаритов ПОСЛЕ расчёта не должна тихо оставлять
+   на экране устаревшую цену - .is-stale гасит цифры и меняет "Вставить в сообщение" на
+   "Пересчитать" (см. calcMarkStale в CRM-модуле). Обе кнопки в разметке всегда, переключаются
+   этим классом - подменять innerHTML не нужно. */
+.dr-calc-result.is-stale .dr-calc-total,.dr-calc-result.is-stale .dr-calc-route,.dr-calc-result.is-stale .dr-calc-legend{opacity:.35;}
+.dr-calc-stale-note{display:none;align-items:center;gap:6px;font-size:10.5px;color:var(--amber);}
+.dr-calc-stale-note svg{width:13px;height:13px;flex:none;}
+.dr-calc-result.is-stale .dr-calc-stale-note{display:flex;}
+.dr-calc-result.is-stale .dr-calc-insert-btn{display:none;}
+.dr-calc-result:not(.is-stale) .dr-calc-recalc-btn{display:none;}
 /* Таймлайн: звонки + сообщения + события одной лентой */
 .dr-tl{display:flex;flex-direction:column;gap:0;}
 .dr-tl-item{display:grid;grid-template-columns:16px minmax(0,1fr);gap:0 10px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12px;}
@@ -5858,14 +5868,24 @@ function dadataAddrParts_(d){
     var seen={};
     return [first].concat(rest).filter(function(v){if(!v||seen[v])return false;seen[v]=true;return true;});
 }
+// Влад, 12.09: "беру координату с Яндекса... должно быть выпадающее окно" - то же
+// поведение, что завели для CRM (addrSuggest) - если всё поле целиком похоже на пару
+// "широта, долгота" (так копируют точку с Яндекс-/Google-карт), шлём не текстовый
+// /geocoder/suggest, а обратный /geocoder/reverse и показываем найденный адрес в том же
+// списке.
+var COORD_RE_=/^\s*(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$/;
 function geoc(t){
     clearTimeout(gT);var inp=document.getElementById(t==='load'?'clc-loadAddr':'clc-unloadAddr'),lst=document.getElementById(t==='load'?'clc-loadAc':'clc-unloadAc');
-    if(inp.value.length<3){lst.classList.remove('show');return;}
+    var val=inp.value.trim();
+    if(val.length<3){lst.classList.remove('show');return;}
+    var coord=val.match(COORD_RE_);
     gT=setTimeout(async function(){try{
-        var url=YARD_API_BASE+'/geocoder/suggest?q='+encodeURIComponent(inp.value)+'&session_token='+encodeURIComponent(SESSION_TOKEN);
+        var url=coord
+            ?YARD_API_BASE+'/geocoder/reverse?lat='+encodeURIComponent(coord[1])+'&lon='+encodeURIComponent(coord[2])+'&session_token='+encodeURIComponent(SESSION_TOKEN)
+            :YARD_API_BASE+'/geocoder/suggest?q='+encodeURIComponent(val)+'&session_token='+encodeURIComponent(SESSION_TOKEN);
         var r=await fetch(url);var d=await r.json();
         lst.innerHTML='';
-        var sug=(d&&d.suggestions)||[];
+        var sug=coord?(d&&d.result?[d.result]:[]):((d&&d.suggestions)||[]);
         if(!sug.length){lst.classList.remove('show');return;}
         var seenLabels={};
         sug.forEach(function(f){
@@ -23435,6 +23455,12 @@ var CRM = (function () {
     var saveFn = prefix === 'cx' ? 'saveCtxBrief' : 'saveBrief';
     var saveCall = 'CRM.' + saveFn + '(' + d.id + ')';
     var onBlur = ' onblur="' + saveCall + '"', onChange = ' onchange="' + saveCall + '"';
+    // Влад, 12.09: после расчёта стоимости правка любого поля, от которого зависит цена
+    // (адреса/вес/техника), должна пометить уже показанный результат неактуальным - см.
+    // calcMarkStale ниже. "Груз" (свободный текст) и "Дата подачи" в саму формулу не
+    // входят (computeQuote() их не принимает) - на них это не вешаем.
+    var staleCall = 'CRM.calcMarkStale(\'' + prefix + '\')';
+    var onBlurStale = ' onblur="' + saveCall + ';' + staleCall + '"', onChangeStale = ' onchange="' + saveCall + ';' + staleCall + '"';
     var autoTag = d.brief_source === 'auto' ? '<span class="dr-auto" title="Извлечено автоматически из переписки - проверьте">авто</span>' : '';
     // 11.09 - тот же "авто"-бейдж (.dr-auto, канон уже есть выше), только для полей,
     // молча подставленных из 1С (см. renderDrawer) - manager должен видеть, что это ещё
@@ -23442,11 +23468,11 @@ var CRM = (function () {
     var oneCTag = '<span class="dr-auto" title="Подставлено из 1С по номеру заказа - проверьте">1С</span>';
     return '<div class="dr-grid2">' +
       '<div class="dr-field" style="grid-column:1/-1"><label>Груз' + autoTag + '</label><input class="dr-input" id="' + prefix + '-cargo" autocomplete="off" value="' + esc(d.cargo_type || '') + '" placeholder="экскаватор, трубы, контейнер…"' + onBlur + '></div>' +
-      '<div class="dr-field"><label>Откуда' + (from1c && from1c.from ? oneCTag : '') + '</label><div class="clc-ac-wrap"><input class="dr-input" id="' + prefix + '-from" autocomplete="off" value="' + esc(d.route_from || '') + '" oninput="CRM.addrSuggest(\'' + prefix + '\',\'from\',' + d.id + ')"' + onBlur + '><div class="clc-ac-list" id="' + prefix + '-fromAc"></div></div></div>' +
-      '<div class="dr-field"><label>Куда' + (from1c && from1c.to ? oneCTag : '') + '</label><div class="clc-ac-wrap"><input class="dr-input" id="' + prefix + '-to" autocomplete="off" value="' + esc(d.route_to || '') + '" oninput="CRM.addrSuggest(\'' + prefix + '\',\'to\',' + d.id + ')"' + onBlur + '><div class="clc-ac-list" id="' + prefix + '-toAc"></div></div></div>' +
-      '<div class="dr-field"><label>Вес, т</label><input class="dr-input mono" id="' + prefix + '-weight" type="number" step="0.1" min="0" autocomplete="off" value="' + esc(d.cargo_weight_tons != null ? d.cargo_weight_tons : '') + '"' + onBlur + '></div>' +
+      '<div class="dr-field"><label>Откуда' + (from1c && from1c.from ? oneCTag : '') + '</label><div class="clc-ac-wrap"><input class="dr-input" id="' + prefix + '-from" autocomplete="off" value="' + esc(d.route_from || '') + '" oninput="CRM.addrSuggest(\'' + prefix + '\',\'from\',' + d.id + ')"' + onBlurStale + '><div class="clc-ac-list" id="' + prefix + '-fromAc"></div></div></div>' +
+      '<div class="dr-field"><label>Куда' + (from1c && from1c.to ? oneCTag : '') + '</label><div class="clc-ac-wrap"><input class="dr-input" id="' + prefix + '-to" autocomplete="off" value="' + esc(d.route_to || '') + '" oninput="CRM.addrSuggest(\'' + prefix + '\',\'to\',' + d.id + ')"' + onBlurStale + '><div class="clc-ac-list" id="' + prefix + '-toAc"></div></div></div>' +
+      '<div class="dr-field"><label>Вес, т</label><input class="dr-input mono" id="' + prefix + '-weight" type="number" step="0.1" min="0" autocomplete="off" value="' + esc(d.cargo_weight_tons != null ? d.cargo_weight_tons : '') + '"' + onBlurStale + '></div>' +
       '<div class="dr-field"><label>Дата подачи</label><input class="dr-input mono" id="' + prefix + '-date" type="date" autocomplete="off" value="' + dateInput(d.wanted_date) + '"' + onChange + '></div>' +
-      '<div class="dr-field" style="grid-column:1/-1"><label>Техника</label><select class="dr-select" id="' + prefix + '-veh"' + onChange + '>' +
+      '<div class="dr-field" style="grid-column:1/-1"><label>Техника</label><select class="dr-select" id="' + prefix + '-veh"' + onChangeStale + '>' +
         VEH_OPTS_.map(function (o) { return '<option value="' + o.v + '"' + (vehHintNorm_(d.vehicle_hint) === o.v ? ' selected' : '') + '>' + o.l + '</option>'; }).join('') + '</select></div></div>' +
       calcBlockHtml_(prefix, d.id);
   }
@@ -23467,15 +23493,29 @@ var CRM = (function () {
   // общий, ничего нового не заводим), разбор ответа - Clc.addrParts (см. window.Clc =
   // {...} выше), не вторая копия dadataAddrParts_.
   var addrSuggestT_ = {};
+  // Влад, 12.09: "беру координату с Яндекса... должно быть выпадающее окно, ближайшее
+  // место, привязанное к этой координате" - если всё поле целиком похоже на пару
+  // "широта, долгота" (именно так Яндекс- и Google-карты отдают координату по копированию
+  // точки), шлём не текстовый /geocoder/suggest, а обратный /geocoder/reverse (тот же
+  // эндпоинт, что уже использует Calculator.revG() при клике по карте) - и показываем
+  // единственный найденный адрес в ТОМ ЖЕ выпадающем списке, тем же кликом выбирается.
+  var COORD_RE_ = /^\s*(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$/;
   function addrSuggest(prefix, side, dealId) {
     var key = prefix + side;
     var inp = el(prefix + '-' + side), lst = el(prefix + '-' + side + 'Ac');
     if (!inp || !lst) return;
     clearTimeout(addrSuggestT_[key]);
-    if (inp.value.trim().length < 3) { lst.classList.remove('show'); return; }
+    var val = inp.value.trim();
+    if (val.length < 3) { lst.classList.remove('show'); return; }
+    var coord = val.match(COORD_RE_);
     addrSuggestT_[key] = setTimeout(function () {
-      api('/geocoder/suggest', { q: inp.value.trim() }).then(function (r) {
-        var sug = (r.ok && r.data && r.data.suggestions) || [];
+      var req = coord
+        ? api('/geocoder/reverse', { lat: coord[1], lon: coord[2] }).then(function (r) {
+            var f = r.ok && r.data && r.data.result;
+            return f ? [f] : [];
+          })
+        : api('/geocoder/suggest', { q: val }).then(function (r) { return (r.ok && r.data && r.data.suggestions) || []; });
+      req.then(function (sug) {
         lst.innerHTML = '';
         var seen = {};
         sug.forEach(function (f) {
@@ -23494,6 +23534,7 @@ var CRM = (function () {
             inp.value = main;
             lst.classList.remove('show');
             (prefix === 'cx' ? saveCtxBrief : saveBrief)(dealId);
+            calcMarkStale(prefix); // выбор адреса из подсказки - тоже смена цены, см. calcMarkStale
           };
           lst.appendChild(item);
         });
@@ -23508,13 +23549,14 @@ var CRM = (function () {
   // что и сама вкладка "Калькулятор" - единственный источник формулы, не вторая копия
   // (явное условие Влада, план 2026-09-12-crm-inchat-calculator.md).
   function calcBlockHtml_(prefix, dealId) {
+    var staleAttr = ' oninput="CRM.calcMarkStale(\'' + prefix + '\')"'; // правка габаритов при пересчёте (см. calcMarkStale)
     return '<button class="dr-calc-cta" id="' + prefix + '-calcBtn" onclick="CRM.calcOpenForm(\'' + prefix + '\',' + dealId + ')">' + ico('card') + 'Посчитать стоимость</button>' +
       '<div class="dr-calc-dims" id="' + prefix + '-calcDims">' +
       '<div class="hint">Из заявки уже взято: маршрут, вес, техника. Не хватает только габаритов.</div>' +
       '<div class="dr-calc-row3">' +
-      '<div class="dr-field"><label>Длина, м</label><input class="dr-input mono" id="' + prefix + '-calcLen" type="number" step="0.5" min="0.5" value="6"></div>' +
-      '<div class="dr-field"><label>Ширина, м</label><input class="dr-input mono" id="' + prefix + '-calcWid" type="number" step="0.1" min="0.5" value="2.5"></div>' +
-      '<div class="dr-field"><label>Высота, м</label><input class="dr-input mono" id="' + prefix + '-calcHei" type="number" step="0.1" min="0.5" value="3"></div>' +
+      '<div class="dr-field"><label>Длина, м</label><input class="dr-input mono" id="' + prefix + '-calcLen" type="number" step="0.5" min="0.5" value="6"' + staleAttr + '></div>' +
+      '<div class="dr-field"><label>Ширина, м</label><input class="dr-input mono" id="' + prefix + '-calcWid" type="number" step="0.1" min="0.5" value="2.5"' + staleAttr + '></div>' +
+      '<div class="dr-field"><label>Высота, м</label><input class="dr-input mono" id="' + prefix + '-calcHei" type="number" step="0.1" min="0.5" value="3"' + staleAttr + '></div>' +
       '</div>' +
       '<button class="dr-calc-cta" id="' + prefix + '-calcRunBtn" onclick="CRM.calcRun(\'' + prefix + '\',' + dealId + ')">Рассчитать</button>' +
       '</div>' +
@@ -23545,6 +23587,16 @@ var CRM = (function () {
   function calcOpenForm(prefix, dealId) {
     var btn = el(prefix + '-calcBtn'); if (btn) btn.style.display = 'none';
     var pf = el(prefix + '-calcDims'); if (pf) pf.classList.add('show');
+    calcMarkStale(prefix); // «Пересчитать» на уже показанном результате открывает ту же форму заново
+  }
+  // Влад, 12.09: правка адреса/веса/техники/габаритов ПОСЛЕ того, как стоимость уже
+  // посчитана и показана, не должна тихо оставлять на экране устаревшую цену - помечаем
+  // результат неактуальным (гасим цифры, меняем "Вставить в сообщение" на "Пересчитать" -
+  // см. CSS .dr-calc-result.is-stale) до следующего успешного calcRun(). Ничего не делает,
+  // если результата ещё не было (box без класса show) - безопасно вызывать из любого поля.
+  function calcMarkStale(prefix) {
+    var box = el(prefix + '-calcResult');
+    if (box && box.classList.contains('show')) box.classList.add('is-stale');
   }
   function calcGeocodeOne_(query) {
     return api('/geocoder/suggest', { q: query }).then(function (r) {
@@ -23599,7 +23651,14 @@ var CRM = (function () {
     box.innerHTML = '<div class="dr-calc-total"><span>Итого с НДС</span><b>' + money(q.total) + '</b></div>' +
       '<div class="dr-calc-route">База → погрузка <b>' + q.a1 + ' км</b> · с грузом <b>' + q.a2 + ' км</b> · выгрузка → база <b>' + q.a3 + ' км</b></div>' +
       '<div class="dr-calc-legend">' + rows.map(function (r) { return '<div class="dr-calc-leg-row"><span>' + esc(r[0]) + '</span><span class="num">' + money(r[1]) + '</span></div>'; }).join('') + '</div>' +
-      '<button class="dr-calc-cta" style="background:var(--green);color:#0f0f13" onclick="CRM.calcInsert(' + dealId + ')">' + ico('check') + 'Вставить в сообщение</button>';
+      // Влад, 12.09: если после этого расчёта поменяют адрес/вес/технику/габариты - эта
+      // цена устареет. Обе кнопки в разметке сразу, переключаются классом .is-stale на
+      // самом .dr-calc-result (см. calcMarkStale и CSS ниже) - подменять innerHTML не
+      // нужно, только показать другую кнопку и погасить цифры.
+      '<div class="dr-calc-stale-note">' + ico('undo') + 'Данные изменились - стоимость устарела</div>' +
+      '<button class="dr-calc-cta dr-calc-insert-btn" style="background:var(--green);color:#0f0f13" onclick="CRM.calcInsert(' + dealId + ')">' + ico('check') + 'Вставить в сообщение</button>' +
+      '<button class="dr-calc-cta dr-calc-recalc-btn" style="background:var(--amber);color:#0f0f13" onclick="CRM.calcOpenForm(\'' + prefix + '\',' + dealId + ')">' + ico('undo') + 'Пересчитать</button>';
+    box.classList.remove('is-stale');
     box.classList.add('show');
   }
   function calcInsert(dealId) {
@@ -24434,7 +24493,7 @@ var CRM = (function () {
     openThread: openThread, closeThreadMobile: closeThreadMobile, toggleRespPop: toggleRespPop, loadOlder: loadOlder, onThreadScroll: onThreadScroll, openLightbox: openLightbox, closeLightbox: closeLightbox,
     onInput: onInput, onInputKey: onInputKey, toggleTemplates: toggleTemplates, useTemplate: useTemplate, saveTemplate: saveTemplate, deleteTemplate: deleteTemplate, send: send, retry: retry,
     saveCtxBrief: saveCtxBrief, createDealFor: createDealFor, openChatFor: openChatFor, reloadChats: reloadChats, enablePush: enablePush,
-    calcOpenForm: calcOpenForm, calcRun: calcRun, calcInsert: calcInsert, addrSuggest: addrSuggest,
+    calcOpenForm: calcOpenForm, calcRun: calcRun, calcInsert: calcInsert, addrSuggest: addrSuggest, calcMarkStale: calcMarkStale,
     playRecording: playRecording, seekStart: seekStart,
     transcribeCall: transcribeCall, summarizeCall: summarizeCall,
     setAnalyticsPeriod: setAnalyticsPeriod,

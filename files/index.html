@@ -23822,7 +23822,12 @@ var CRM = (function () {
     var box = el(prefix + '-calcResult');
     if (box && box.classList.contains('show')) box.classList.add('is-stale');
   }
+  // Влад, 12.09: если в поле так и остались "широта, долгота" (менеджер вставил
+  // координату и не кликнул по подсказке addrSuggest) - координата и есть точка, гонять
+  // её через геокодер незачем и только повод ошибиться; парсим сразу, без сети.
   function calcGeocodeOne_(query) {
+    var coord = query.trim().match(COORD_RE_);
+    if (coord) return Promise.resolve({ lat: +coord[1], lng: +coord[2] });
     return api('/geocoder/suggest', { q: query }).then(function (r) {
       var s = (r.ok && r.data && r.data.suggestions) || [];
       return (s[0] && s[0].lat != null && s[0].lon != null) ? { lat: s[0].lat, lng: s[0].lon } : null;

@@ -4326,7 +4326,7 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
         <input autocomplete="off" id="drv-reg-name" type="text" maxlength="150" placeholder="Фамилия Имя Отчество"
           style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
       <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Телефон</label>
-        <input autocomplete="off" id="drv-reg-phone" type="text" maxlength="64" placeholder="+7 900 000-00-00"
+        <input autocomplete="off" inputmode="tel" id="drv-reg-phone" type="text" maxlength="16" placeholder="+7-900-000-00-00"
           style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
       <!-- ИНН/СНИЛС/дата рождения/дата приёма/адрес (30.08, аудит Справочников - были в
            базе с импорта 1С, но не в форме: правка карточки без этих полей стирала бы их
@@ -13968,6 +13968,62 @@ function drvRegToggleFiredDate_() {
   if (!fired) document.getElementById('drv-reg-fired-date').value = '';
 }
 
+// Обход сторонних подсказок автозаполнения браузера (13.09, Влад: "опять вылетают эти
+// подсказки Яндекс-браузера... мы уже блокировали на других полях, в других разделах") -
+// тот же приём, что уже есть в «Задании» (files/order-plan-v2.js, blockForeignAutofill_,
+// заведён там 11-12.09) - простой autocomplete="off" Chrome/Яндекс игнорируют на полях,
+// похожих на имя/адрес/телефон, и рисуют своё меню со своей историей поверх. Тот же файл
+// не может переиспользовать функцию оттуда напрямую - order-plan-v2.js завёрнут в
+// отдельный IIFE, ничего не отдаёт в window, кроме OP2 - здесь та же логика заново, под
+// формы Справочников. Вызывать при КАЖДОМ открытии дровера (атрибуты, не листенер -
+// повторный вызов безвреден), как и в оригинале.
+function drvBlockForeignAutofill_(root) {
+  if (!root) return;
+  root.querySelectorAll('input:not([type=date]):not([type=checkbox]),textarea').forEach(function(i) {
+    i.setAttribute('autocomplete', 'new-password');
+    i.setAttribute('autocorrect', 'off');
+    i.setAttribute('spellcheck', 'false');
+    i.setAttribute('name', 'sprav-' + Math.random().toString(36).slice(2, 9));
+  });
+}
+
+// Маска телефона (13.09, Влад: "приведи все мобильные номера в такой вид... сделай, чтобы
+// по-другому нельзя было ввести") - единый формат +7-XXX-XXX-XX-XX, только тире. Тот же
+// приём, что денежное поле (ГОСТ 2.32, wireMoneyInput_ в order-plan-v2.js) - живое
+// форматирование на каждый input, курсор не улетает в конец. Вызывать ОДИН РАЗ на
+// document-ready (не при каждом открытии дровера - иначе слушатель задублируется).
+function drvPhoneMask_(id) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener('input', function() {
+    var start = this.selectionStart;
+    var rawBefore = this.value.slice(0, start).replace(/\D/g, '');
+    if (rawBefore.charAt(0) === '7' || rawBefore.charAt(0) === '8') rawBefore = rawBefore.slice(1);
+    var digitsBefore = rawBefore.length;
+    var digits = this.value.replace(/\D/g, '');
+    if (digits.charAt(0) === '7' || digits.charAt(0) === '8') digits = digits.slice(1);
+    digits = digits.slice(0, 10);
+    if (!digits.length) { this.value = ''; return; }
+    var groups = [digits.slice(0, 3)];
+    if (digits.length > 3) groups.push(digits.slice(3, 6));
+    if (digits.length > 6) groups.push(digits.slice(6, 8));
+    if (digits.length > 8) groups.push(digits.slice(8, 10));
+    var numPart = groups.join('-');
+    this.value = '+7-' + numPart;
+    var count = 0, pos = numPart.length;
+    for (var i = 0; i < numPart.length; i++) {
+      if (numPart[i] !== '-') count++;
+      if (count === digitsBefore) { pos = i + 1; break; }
+    }
+    if (digitsBefore === 0) pos = 0;
+    try { this.setSelectionRange(3 + pos, 3 + pos); } catch (e) {}
+  });
+  // Фокус на пустом поле сразу подставляет обязательный префикс - правило "по-другому
+  // нельзя ввести" видно с первого символа, не только после первой набранной цифры.
+  el.addEventListener('focus', function() { if (!this.value) this.value = '+7-'; });
+  el.addEventListener('blur', function() { if (this.value === '+7-') this.value = ''; });
+}
+
 // expected_updated_at (30.08, аудит - optimistic locking) - запоминаем updated_at ЗАПИСИ,
 // которую видит пользователь, отдельно от её полей формы. drvRegSave_ отправит его назад -
 // сервер сверит перед записью и откажет (409), если кто-то другой успел сохранить раньше.
@@ -14010,6 +14066,7 @@ function drvRegOpenForm_(id) {
   document.getElementById('drv-reg-error').style.display = 'none';
   document.getElementById('drv-reg-del-btn').style.display = d ? '' : 'none';
   var bk = document.getElementById('drv-reg-bk'), dr = document.getElementById('drv-reg-drawer');
+  drvBlockForeignAutofill_(dr);
   bk.classList.add('show');
   setTimeout(function() { dr.classList.add('show'); }, 40);
   setTimeout(function() { document.getElementById('drv-reg-name').focus(); }, 120);
@@ -14322,6 +14379,7 @@ function legalOpenForm_(id) {
   if (le && le.risk_reasons) { try { cachedReasons = JSON.parse(le.risk_reasons) || []; } catch (e) {} }
   legalRenderRiskResult_(le ? le.risk_light : null, cachedReasons, le ? le.risk_checked_at : null, le ? le.risk_marker : null);
   var bk = document.getElementById('legal-bk'), dr = document.getElementById('legal-drawer');
+  drvBlockForeignAutofill_(dr);
   bk.classList.add('show');
   setTimeout(function() { dr.classList.add('show'); }, 40);
   setTimeout(function() { document.getElementById('legal-name').focus(); }, 120);
@@ -14664,6 +14722,7 @@ function assetOpenForm_(id) {
   document.getElementById('asset-event-date').value = new Date().toISOString().slice(0, 10);
   if (a) assetEventsLoad_(a.id); else document.getElementById('asset-events-list').innerHTML = '';
   var bk = document.getElementById('asset-bk'), dr = document.getElementById('asset-drawer');
+  drvBlockForeignAutofill_(dr);
   bk.classList.add('show');
   setTimeout(function() { dr.classList.add('show'); }, 40);
   setTimeout(function() { (idInput.disabled ? document.getElementById('asset-manufacturer') : idInput).focus(); }, 120);
@@ -14900,6 +14959,7 @@ function drvCardOpen_(driverId) {
   drvCardDriverId_ = driverId;
   drvCardPaint_();
   var bk = document.getElementById('drv-card-bk'), dr = document.getElementById('drv-card-drawer');
+  drvBlockForeignAutofill_(dr);
   bk.classList.add('show');
   setTimeout(function() { dr.classList.add('show'); }, 40);
 }
@@ -26453,6 +26513,9 @@ initCursorLight_('page-directory', 'dir-light');
 // плитками не появлялся, найдено при приёмке хаба «Справочники» 13.09 (тот же ГОСТ,
 // раздел 7 - обязателен, не опция).
 initCursorLight_('page-sales-salary', 'p2-light');
+// Маска телефона (13.09) - один раз на весь документ, не при каждом открытии дровера
+// (drvRegOpenForm_ вызывается на каждый клик по строке - слушатель задублировался бы).
+drvPhoneMask_('drv-reg-phone');
 </script>
 <!-- ═══ ПЛАНИРОВКА - логика вкладки, перенесена из examples/prototype-logistics-board.html
      (plans/2026-08-29-logistics-planning-board.md). Отдельный <script>, не влит в общий -

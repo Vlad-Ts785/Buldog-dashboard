@@ -44,6 +44,11 @@ function capFirst(s) { s = String(s || ''); return s ? s.charAt(0).toUpperCase()
    Координаты - точный ответ DaData на этот адрес (проверено вручную 12.09), не пересчитываются. */
 var BASE_ADDRESS_ = 'Московская обл, г Домодедово, мкр Центральный, ул Промышленная, д 37';
 var BASE_LAT_ = '55.4672641', BASE_LON_ = '37.7794222';
+/* «По месту» (Влад 13.09) - тот же чип-приём, что «База», но для МЕНЕДЖЕРА: у логиста
+   адрес известный и не «плавает» (координаты есть и захардкожены), у менеджера это
+   противоположный случай - точного адреса нет вообще, работа идёт «по месту» у заказчика,
+   поэтому координаты намеренно НЕ проставляются (applyAddr_ с пустыми lat/lon). */
+var BYMESTO_TEXT_ = 'Работа по месту';
 /* Та же ставка, что уже используется в Калькуляторе для выделения НДС из цены КП
    (files/index.html, genKP(), VAT_RATE=0.22) - один и тот же процент по всему дашборду. */
 var VAT_RATE_ = 0.22;
@@ -713,6 +718,7 @@ function wire() {
 
   /* ── таблица менеджера ── */
   $('#op2-mgr-body').addEventListener('click', function (e) {
+    if (e.target.closest('.op2-maplink')) return; /* значок «Я» открывает ссылку сам, дровер не нужен */
     var tr = e.target.closest('tr[data-oid]'); if (!tr) return;
     var ch = e.target.closest('.op2-stc');
     if (ch) { openStPop(ch, tr); return; }
@@ -1162,9 +1168,12 @@ var ADDR_CITY_RE_ = /^(г|город|пгт|рп|п|с|д|х|село|пос[е�
    включая саму ссылку - не то, что нужно глазу при сканировании таблицы. Правило теперь
    срабатывает РАНЬШЕ обычной разбивки по запятой, только когда в адресе есть ссылка на
    карту: остальной текст (до и после ссылки, если он есть) - «город» (ярко), сама ссылка -
-   «rest» (серым, тем же классом op2-rs, что уже красит улицу/дом). Если своего текста нет -
-   ссылка идёт в «город» и остаётся яркой. Обычные адреса без ссылки - без изменений, та же
-   разбивка по запятой, что и раньше. */
+   отдельное поле link (не текст в ячейке). Обычные адреса без ссылки - без изменений, та же
+   разбивка по запятой, что и раньше.
+   Влад 13.09 (день, второй заход): «чисто эстетически» - вместо усечённого сырого URL серым
+   текстом («…whatshere%5Bzoom%5D=15&what…», нечитаемо и некликабельно) - компактный значок
+   «Я» (буква Яндекса) красным, кликабельный, открывает ссылку в новой вкладке. Полный текст
+   адреса остаётся в title ячейки (routeCell) - ничего не потеряно, просто не в самой строке. */
 function addrParts_(addr) {
   var s = String(addr || '');
   var linkM = s.match(YANDEX_LINK_RE_);
@@ -1172,7 +1181,7 @@ function addrParts_(addr) {
     var link = linkM[0];
     var own = (s.slice(0, linkM.index) + ' ' + s.slice(linkM.index + link.length))
       .replace(/\s{2,}/g, ' ').replace(/^[\s,;.\-]+|[\s,;.\-]+$/g, '').trim();
-    return own ? { city: own, rest: link } : { city: link, rest: '' };
+    return { city: own, rest: '', link: link };
   }
   var t = String(addr || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
   if (!t.length) return null;
@@ -1180,13 +1189,14 @@ function addrParts_(addr) {
   for (var k = 0; k < t.length; k++) { if (ADDR_CITY_RE_.test(t[k])) { i = k; break; } }
   var city = i >= 0 ? t[i] : t[0];
   var rest = (i >= 0 ? t.slice(i + 1) : t.slice(1)).map(function (s) { return s.replace(/^(д|дом)\.?\s+(?=\d)/i, ''); });
-  return { city: city, rest: rest.join(', ') };
+  return { city: city, rest: rest.join(', '), link: null };
 }
 function rtLine_(addr, arrow) {
   var p = addrParts_(addr);
   var ar = arrow ? '<span class="op2-arr">→</span>' : '';
   if (!p) return '<span class="op2-rt">' + ar + '<span class="op2-ask">уточнить</span></span>';
-  return '<span class="op2-rt">' + ar + '<b>' + esc(p.city) + '</b>' + (p.rest ? ' <span class="op2-rs">' + esc(p.rest) + '</span>' : '') + '</span>';
+  var badge = p.link ? ' <a class="op2-maplink" href="' + esc(p.link) + '" target="_blank" rel="noopener" title="Открыть на Яндекс.Картах">Я</a>' : '';
+  return '<span class="op2-rt">' + ar + (p.city ? '<b>' + esc(p.city) + '</b>' : '') + badge + (p.rest ? ' <span class="op2-rs">' + esc(p.rest) + '</span>' : '') + '</span>';
 }
 function routeCell(o) {
   return '<td title="Откуда: ' + esc(o.load_address || 'уточнить') + '\nКуда: ' + esc(o.unload_address || 'уточнить') + '">' +
@@ -1538,6 +1548,7 @@ function setStatus(o, k) {
 
 /* ═════════════════════════ КЛИКИ В ТАБЛИЦЕ ЛОГИСТА ═════════════════════════ */
 function onLogClick(e) {
+  if (e.target.closest('.op2-maplink')) return; /* значок «Я» открывает ссылку сам, дровер не нужен */
   var lg = e.target.closest('.op2-logpick');
   var dk = e.target.closest('.op2-dok');
   var un = e.target.closest('.op2-unset-ot');
@@ -2663,15 +2674,17 @@ function renderForm() {
     '</div></div>' +
 
     '<div class="op2-sect"><div class="op2-t">Откуда - куда</div><div class="op2-grid2">' +
-      '<div class="op2-fld op2-full op2-sugg" id="op2-f-frombox"><label' + (isLog ? ' class="op2-lbl-flex"' : '') + '><span>Адрес погрузки</span>' +
-        (isLog ? '<button type="button" class="op2-addr-base" data-side="from">База</button>' : '') + '</label>' +
+      '<div class="op2-fld op2-full op2-sugg" id="op2-f-frombox"><label class="op2-lbl-flex"><span>Адрес погрузки</span>' +
+        (isLog ? '<button type="button" class="op2-addr-base" data-side="from" data-kind="base">База</button>'
+               : '<button type="button" class="op2-addr-base" data-side="from" data-kind="bymesto">По месту</button>') + '</label>' +
         '<input id="op2-f-from" placeholder="Адрес, ссылка на карту или координаты 55.75, 37.62" autocomplete="off" value="' + esc(o ? o.load_address : '') + '">' +
         '<div class="op2-list" id="op2-f-fromlist"></div>' +
         '<span class="op2-hint op2-okc" id="op2-f-fromhint">' + (o && o.load_lat ? esc(o.load_lat + ' · ' + o.load_lon) : '') + '</span></div>' +
       '<div class="op2-fld"><label>Контакт на погрузке</label><input id="op2-f-fromcontact" placeholder="Имя · телефон" autocomplete="off" value="' + esc(o ? [o.load_contact_name, o.load_contact_phone].filter(Boolean).join(' · ') : '') + '"></div>' +
       '<div class="op2-fld"><label>Контакт на выгрузке</label><input id="op2-f-tocontact" placeholder="Имя · телефон" autocomplete="off" value="' + esc(o ? [o.unload_contact_name, o.unload_contact_phone].filter(Boolean).join(' · ') : '') + '"></div>' +
-      '<div class="op2-fld op2-full op2-sugg" id="op2-f-tobox"><label' + (isLog ? ' class="op2-lbl-flex"' : '') + '><span>Адрес выгрузки</span>' +
-        (isLog ? '<button type="button" class="op2-addr-base" data-side="to">База</button>' : '') + '</label>' +
+      '<div class="op2-fld op2-full op2-sugg" id="op2-f-tobox"><label class="op2-lbl-flex"><span>Адрес выгрузки</span>' +
+        (isLog ? '<button type="button" class="op2-addr-base" data-side="to" data-kind="base">База</button>'
+               : '<button type="button" class="op2-addr-base" data-side="to" data-kind="bymesto">По месту</button>') + '</label>' +
         '<input id="op2-f-to" placeholder="Адрес, ссылка на карту или координаты" autocomplete="off" value="' + esc(o ? o.unload_address : '') + '">' +
         '<div class="op2-list" id="op2-f-tolist"></div>' +
         '<span class="op2-hint op2-warn" id="op2-f-tohint"></span></div>' +
@@ -2919,11 +2932,13 @@ function wireForm() {
   /* Влад 12.09: «даже просто должна быть где-то кнопка «Адрес погрузки»/«Адрес выгрузки», просто
      база, чтобы нажал быстро и всё» - «это только логистов» (кнопка и так рисуется только у isLog,
      см. renderForm). Координаты - точный ответ DaData на этот же адрес, захардкожены, а не считаются
-     заново на каждом клике: адрес базы не «плавает», отдельный сетевой запрос тут не нужен. */
+     заново на каждом клике: адрес базы не «плавает», отдельный сетевой запрос тут не нужен.
+     13.09: тот же чип у менеджера - «По месту» (data-kind), без координат (BYMESTO_TEXT_). */
   $$('.op2-addr-base').forEach(function (btn) {
     btn.addEventListener('mousedown', function (e) {
       e.preventDefault();
-      applyAddr_(btn.dataset.side, BASE_ADDRESS_, BASE_LAT_, BASE_LON_);
+      if (btn.dataset.kind === 'bymesto') applyAddr_(btn.dataset.side, BYMESTO_TEXT_, '', '', 'без точки на карте');
+      else applyAddr_(btn.dataset.side, BASE_ADDRESS_, BASE_LAT_, BASE_LON_);
       S.tickUp();
     });
   });

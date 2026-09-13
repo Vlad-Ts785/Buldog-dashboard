@@ -718,7 +718,7 @@ function wire() {
 
   /* ── таблица менеджера ── */
   $('#op2-mgr-body').addEventListener('click', function (e) {
-    if (e.target.closest('.op2-maplink')) return; /* значок «Я» открывает ссылку сам, дровер не нужен */
+    if (e.target.closest('.op2-maplink')) return; /* ссылка на карту открывает себя сама, дровер не нужен */
     var tr = e.target.closest('tr[data-oid]'); if (!tr) return;
     var ch = e.target.closest('.op2-stc');
     if (ch) { openStPop(ch, tr); return; }
@@ -1171,9 +1171,10 @@ var ADDR_CITY_RE_ = /^(г|город|пгт|рп|п|с|д|х|село|пос[е�
    отдельное поле link (не текст в ячейке). Обычные адреса без ссылки - без изменений, та же
    разбивка по запятой, что и раньше.
    Влад 13.09 (день, второй заход): «чисто эстетически» - вместо усечённого сырого URL серым
-   текстом («…whatshere%5Bzoom%5D=15&what…», нечитаемо и некликабельно) - компактный значок
-   «Я» (буква Яндекса) красным, кликабельный, открывает ссылку в новой вкладке. Полный текст
-   адреса остаётся в title ячейки (routeCell) - ничего не потеряно, просто не в самой строке. */
+   текстом («…whatshere%5Bzoom%5D=15&what…», нечитаемо и некликабельно) - подпись «Ссылка на
+   координату Yandex» (серым, «Y» красным, «andex» жирным белым - как название места),
+   кликабельная, открывает ссылку в новой вкладке. Полный текст адреса остаётся в title ячейки
+   (routeCell) - ничего не потеряно, просто не в самой строке. */
 function addrParts_(addr) {
   var s = String(addr || '');
   var linkM = s.match(YANDEX_LINK_RE_);
@@ -1195,7 +1196,7 @@ function rtLine_(addr, arrow) {
   var p = addrParts_(addr);
   var ar = arrow ? '<span class="op2-arr">→</span>' : '';
   if (!p) return '<span class="op2-rt">' + ar + '<span class="op2-ask">уточнить</span></span>';
-  var badge = p.link ? ' <a class="op2-maplink" href="' + esc(p.link) + '" target="_blank" rel="noopener" title="Открыть на Яндекс.Картах">Я</a>' : '';
+  var badge = p.link ? ' <a class="op2-maplink" href="' + esc(p.link) + '" target="_blank" rel="noopener" title="Открыть на Яндекс.Картах">Ссылка на координату <span class="op2-maplink-y">Y</span><b>andex</b></a>' : '';
   return '<span class="op2-rt">' + ar + (p.city ? '<b>' + esc(p.city) + '</b>' : '') + badge + (p.rest ? ' <span class="op2-rs">' + esc(p.rest) + '</span>' : '') + '</span>';
 }
 function routeCell(o) {
@@ -1548,7 +1549,7 @@ function setStatus(o, k) {
 
 /* ═════════════════════════ КЛИКИ В ТАБЛИЦЕ ЛОГИСТА ═════════════════════════ */
 function onLogClick(e) {
-  if (e.target.closest('.op2-maplink')) return; /* значок «Я» открывает ссылку сам, дровер не нужен */
+  if (e.target.closest('.op2-maplink')) return; /* ссылка на карту открывает себя сама, дровер не нужен */
   var lg = e.target.closest('.op2-logpick');
   var dk = e.target.closest('.op2-dok');
   var un = e.target.closest('.op2-unset-ot');

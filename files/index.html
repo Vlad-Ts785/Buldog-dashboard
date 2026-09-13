@@ -8841,7 +8841,7 @@ function mpToggleTask_(personName, idx) {
   renderMyPage();
 }
 
-function renderMyPageManager(el, current, selectorHtml, d) {
+async function renderMyPageManager(el, current, selectorHtml, d) {
   if (!d) { el.innerHTML = selectorHtml + '<p style="color:var(--muted);padding:16px">Нет данных за этот месяц.</p>'; return; }
 
   var COL = PAGE_COL, mln = pageMln_, block = pageBlock_;
@@ -8912,7 +8912,19 @@ function renderMyPageManager(el, current, selectorHtml, d) {
   function getL(sur){ return logIdx[sur.toLowerCase()] || null; }
   var sur = current.trim().split(' ')[0];
   var useNewRules = isNewRulesPeriod(D.orders.period);
-  var sal = calcMgr(sur, true, getM, getL, useNewRules);
+  // Захвачено ЗДЕСЬ, до await ниже - renderMyPage() подменяет D.orders на выбранный период
+  // и возвращает обратно в своём finally СРАЗУ после этого вызова (не дожидаясь завершения
+  // async-функции), поэтому чтение D.orders.problem_orders дальше по функции (после await)
+  // ловило бы уже восстановленный текущий период, а не выбранный - найдено при переносе
+  // зарплаты на сервер (13.09), см. myProblems ниже.
+  var problemOrdersSnapshot_ = D.orders.problem_orders || [];
+  var sal;
+  try {
+    sal = await fetchSalaryCompute_('calcMgr', { sur: sur, includeOklad: true, m: getM(sur), l: getL(sur), useNewRules: useNewRules });
+  } catch (e) {
+    el.innerHTML = selectorHtml + '<p style="color:var(--red);padding:16px">Не удалось загрузить расчёт зарплаты - ' + e.message + '</p>';
+    return;
+  }
 
   var fr = pageFr_; // локальный алиас - остальной код функции уже вызывает fr(...) по имени
   // Рекомендация до следующей ступени оклада (2026-08-12, Влад: "хочу рекомендацию до
@@ -8951,7 +8963,9 @@ function renderMyPageManager(el, current, selectorHtml, d) {
     var lForecastRow = scaleRowForForecast_(getL(sur), effectiveRatio);
     function getMForecast_(s) { return s.toLowerCase()===sur.toLowerCase() ? mForecastRow : getM(s); }
     function getLForecast_(s) { return s.toLowerCase()===sur.toLowerCase() ? lForecastRow : getL(s); }
-    salForecast = calcMgr(sur, true, getMForecast_, getLForecast_, useNewRules);
+    try {
+      salForecast = await fetchSalaryCompute_('calcMgr', { sur: sur, includeOklad: true, m: getMForecast_(sur), l: getLForecast_(sur), useNewRules: useNewRules });
+    } catch (e) { salForecast = null; }
   }
   // Разбивка по тем же трём компонентам, что и факт (2026-08-12, Влад: "2% от 9.4 млн это
   // 188000, оклад 100000, итого 288000, ну никак не 361000" - без разбивки цифра выглядела
@@ -9191,7 +9205,7 @@ function renderMyPageManager(el, current, selectorHtml, d) {
     // "гораздо информативнее... зачем изобретать, если уже всё есть, и там и тут должно
     // быть от одного источника"). Бэкенд уже фильтрует problem_orders на этого менеджера
     // для роли manager - фильтр тут же нужен на случай admin-предпросмотра (там company-wide).
-    var myProblems = ((D.orders && D.orders.problem_orders) || []).filter(function(p){
+    var myProblems = problemOrdersSnapshot_.filter(function(p){
       return String(p.mgr||'').trim().split(' ')[0].toLowerCase() === sur.toLowerCase();
     });
     var pFiltered = myProblems.filter(function(p){
@@ -9775,7 +9789,7 @@ function renderCommercialHeadReceiptsBlock_(cfg) {
 // aggregateOrdersRows. Нет данных за месяц (d==null) - НЕ обрываем рендер целиком: переключатель
 // "Общие сделки" и блок зарплаты не зависят от d, должны работать и без личных сделок в этом
 // месяце (например у нового человека).
-function renderMyPageLogist(el, current, selectorHtml, d) {
+async function renderMyPageLogist(el, current, selectorHtml, d) {
   d = d || {};
   var COL = PAGE_COL, mln = pageMln_, fr = pageFr_, block = pageBlock_;
   function kpiCard(icon, label, value, sub, color) {
@@ -9792,9 +9806,23 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
   var logIdx = {};
   allLogs.forEach(function(l){ logIdx[(l.name||'').trim().split(' ')[0].toLowerCase()] = l; });
   function getL(s) { return logIdx[s.toLowerCase()] || null; }
-  var useNewRules = isNewRulesPeriod((D.orders||{}).period);
+  // Снимки ДО await ниже - renderMyPage() возвращает D.orders к реальному периоду в своём
+  // finally сразу после вызова этой (теперь асинхронной) функции, не дожидаясь её завершения -
+  // без снимков места дальше по функции (после await) читали бы уже восстановленный текущий
+  // период вместо выбранного (найдено при переносе зарплаты на сервер, 13.09).
+  var orderPeriod_ = (D.orders||{}).period;
+  var ownProfitTralPrevMonth_ = (D.orders && D.orders.own_profit_tral_prev_month != null) ? D.orders.own_profit_tral_prev_month : null;
+  var hiredSuppliersSnapshot_ = (D.orders && D.orders.by_hired_supplier) || [];
+  var hiredDealsSnapshot_ = (D.orders && D.orders.all_hired_deals) || [];
+  var useNewRules = isNewRulesPeriod(orderPeriod_);
   var lRow = getL(sur);
-  var salary = calcLogist(sur, getL, useNewRules);
+  var salary;
+  try {
+    salary = await fetchSalaryCompute_('calcLogist', { sur: sur, l: lRow, useNewRules: useNewRules });
+  } catch (e) {
+    el.innerHTML = selectorHtml + '<p style="color:var(--red);padding:16px">Не удалось загрузить расчёт зарплаты - ' + e.message + '</p>';
+    return;
+  }
 
   // Own-tral логисты (Сильчев/Кан/Махура, 2026-08-13, Влад: "по своей технике тралы у них упор
   // идёт от своего парка") - вместо "Маржа найма к премии >1М" на полоске показываем "ВП
@@ -9802,7 +9830,7 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
   // метрики - Влад выбрал сравнение с прошлым месяцем, см. план). Формула ЗП (calcLogist ниже)
   // НЕ меняется ни для кого - это ТОЛЬКО про то, какой показатель выводится на полоске.
   var isOwnTral = isOwnTralLogistSur_(sur);
-  var paceRatio = calcPaceRatio_((D.orders||{}).period);
+  var paceRatio = calcPaceRatio_(orderPeriod_);
   var barLabel, barTargetLabel, marginForBonus, MARGIN_BONUS_THRESHOLD, marginPct, marginForecast, marginForecastPct, marginDayRateHtml = '';
 
   if (isOwnTral) {
@@ -9815,10 +9843,10 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
     // loadOwnTralPrevIfNeeded_ выше) - пока не пришло, полоска использует 0 как временную базу
     // (не вводит в заблуждение - явно помечено "Загрузка..." в рекомендации ниже).
     var otKey = current + '::' + (myPagePeriod || 'current');
-    var ownTralPrevEntry = (D.orders && D.orders.own_profit_tral_prev_month != null)
-      ? { value: D.orders.own_profit_tral_prev_month }
+    var ownTralPrevEntry = (ownProfitTralPrevMonth_ != null)
+      ? { value: ownProfitTralPrevMonth_ }
       : ownTralPrevCache[otKey];
-    if (!ownTralPrevEntry && (D.orders && D.orders.own_profit_tral_prev_month == null)) {
+    if (!ownTralPrevEntry && ownProfitTralPrevMonth_ == null) {
       loadOwnTralPrevIfNeeded_(current, myPagePeriod);
     }
     // Пока цифра не пришла - явно помечаем подпись "загрузкой", а не просто дублируем текущий
@@ -9839,7 +9867,7 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
       marginDayRateHtml = '<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(var(--ink),.07);font-size:12px;color:var(--muted)">Нет данных ВП тралов за прошлый месяц для сравнения.</div>';
     } else if (ownTralFact >= ownTralPrev) {
       marginDayRateHtml = '<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(var(--ink),.07);font-size:12px;color:'+COL.green+'">Прошлый месяц уже превзойдён ✅</div>';
-    } else if (isLiveMonthKey_((D.orders||{}).period)) {
+    } else if (isLiveMonthKey_(orderPeriod_)) {
       var otRemaining = ownTralPrev - ownTralFact;
       var otNowD = new Date();
       var otDaysInMonth = new Date(otNowD.getFullYear(), otNowD.getMonth()+1, 0).getDate();
@@ -9869,7 +9897,7 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
 
     // Рекомендация "сколько добирать в день" - без деления на будни/выходные (в отличие от
     // менеджера) - для маржи найма нет обоснованной эмпирики такой сезонности, как у продаж.
-    if (isLiveMonthKey_((D.orders||{}).period)) {
+    if (isLiveMonthKey_(orderPeriod_)) {
       var remainingMargin = MARGIN_BONUS_THRESHOLD - marginForBonus;
       if (remainingMargin > 0) {
         var nowD = new Date();
@@ -9892,8 +9920,8 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
   // полном admin-ответе, и в урезанной роли logist (getLogistView_ отдаёт их явно - "видит
   // абсолютно всю ситуацию по направлению", но не остальную компанию).
   var isCompany = myPageLogistScope === 'company';
-  var suppliers = (isCompany ? ((D.orders && D.orders.by_hired_supplier) || []) : (d.by_supplier || [])).slice();
-  var deals = (isCompany ? ((D.orders && D.orders.all_hired_deals) || []) : (d.deals || [])).slice();
+  var suppliers = (isCompany ? hiredSuppliersSnapshot_ : (d.by_supplier || [])).slice();
+  var deals = (isCompany ? hiredDealsSnapshot_ : (d.deals || [])).slice();
   var scopeSuffix = isCompany ? ' · вся компания' : ' · мои сделки';
 
   var totalRevenue = suppliers.reduce(function(s,x){ return s+(x.revenue||0); }, 0);
@@ -9933,7 +9961,10 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
     if (!myPagePeriod && paceRatio > 1.001) {
       var lForecastRow = scaleRowForForecast_(getL(sur), paceRatio);
       function getLForecast_(s) { return s.toLowerCase()===sur.toLowerCase() ? lForecastRow : getL(s); }
-      var salaryForecast = calcLogist(sur, getLForecast_, useNewRules);
+      var salaryForecast;
+      try {
+        salaryForecast = await fetchSalaryCompute_('calcLogist', { sur: sur, l: getLForecast_(sur), useNewRules: useNewRules });
+      } catch (e) { salaryForecast = null; }
       if (salaryForecast && Math.abs(salaryForecast.total - salary.total) > 100) {
         // Оклад - ПЕРВАЯ строка (была пропущена изначально - разбивка не сходилась с итогом на
         // 20 000 ₽, ровно на сумму оклада: он не входит в scaleRowForForecast_, так как это
@@ -10438,7 +10469,7 @@ function renderMyPageRyschanow(el, current, selectorHtml, d) {
 // D.summary (те же данные, что видит весь остальной дашборд) - ноль лишних запросов на
 // текущий месяц; на прошлый месяц D.vehicles донагружается в setMyPagePeriod через уже
 // существующий action=vehicles_period, только когда выбран именно Васин.
-function renderMyPageVasin(el, current, selectorHtml) {
+async function renderMyPageVasin(el, current, selectorHtml) {
   var COL = { red:'#E24B4A', amber:'#EF9F27', green:'#1D9E75', blue:'#378ADD' };
   function mln(n) { var x=Math.abs(n||0); var sg=(n||0)<0?'-':''; return x>=1000000 ? sg+(x/1000000).toFixed(1)+' млн ₽' : sg+Math.round(x).toLocaleString('ru-RU')+' ₽'; }
   function fr(n) { return n ? Math.round(n).toLocaleString('ru-RU')+' ₽' : '—'; }
@@ -10506,8 +10537,20 @@ function renderMyPageVasin(el, current, selectorHtml) {
   var funTotal = (funnel.no_waybill||0)+(funnel.not_posted||0)+(funnel.no_realiz||0)+(funnel.complete||0);
   var driversNoWaybill = d.driver_no_waybill || [];
   var deals = d.deals || [];
+  // Снимок ДО await ниже - renderMyPage() возвращает D.orders к реальному периоду в своём
+  // finally сразу после вызова этой (теперь асинхронной) функции, не дожидаясь её завершения -
+  // без снимка calcPaceRatio_ дальше по функции читал бы уже восстановленный текущий период.
+  var orderPeriod_ = (D.orders||{}).period;
 
-  var salary = (s.profit_long != null) ? calcVasin(s.profit_long) : null;
+  var salary = null;
+  if (s.profit_long != null) {
+    try {
+      salary = await fetchSalaryCompute_('calcVasin', { profitLong: s.profit_long });
+    } catch (e) {
+      el.innerHTML = selectorHtml + '<p style="color:var(--red);padding:16px">Не удалось загрузить расчёт зарплаты - ' + e.message + '</p>';
+      return;
+    }
+  }
 
   // Выполнение плана ВП (длинномеры) - Влад, 2026-08-11: "прогноз по плану, по выполнению
   // плана валовой прибыли". Факт/план - суммой по ТОЙ ЖЕ таблице машин, что ниже на странице
@@ -10517,7 +10560,7 @@ function renderMyPageVasin(el, current, selectorHtml) {
   var vehFact = vehicles.reduce(function(a,v){ return a+(v.profit||0); }, 0);
   var vehPlan = vehicles.reduce(function(a,v){ return a+(v.plan||0); }, 0);
   var vehPlanPct = vehPlan > 0 ? vehFact/vehPlan*100 : 0;
-  var paceRatio = calcPaceRatio_((D.orders||{}).period);
+  var paceRatio = calcPaceRatio_(orderPeriod_);
   var vehForecast = vehFact * paceRatio;
   var vehForecastPct = vehPlan > 0 ? vehForecast/vehPlan*100 : 0;
 
@@ -22180,6 +22223,26 @@ function postToYardApi_(path, params) {
     method: 'POST',
     headers: { 'X-Session-Token': SESSION_TOKEN },
   }).then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); });
+}
+
+// Расчёт зарплаты - формула переехала на сервер (аудит безопасности 13.09,
+// plans/2026-09-13-salary-formula-server-port.md) - раньше проценты/пороги зарплаты
+// конкретных сотрудников лежали открытым текстом в этом файле. Клиент собирает уже
+// готовые сырые цифры (m/l - те же объекты из D.orders.by_manager/by_logist, что и
+// раньше) и получает обратно готовую разбивку, саму формулу не видит.
+// Бросает исключение при сетевой/серверной ошибке (не путать с легитимным null от
+// сервера - "нет такого человека", это возвращается как есть).
+function fetchSalaryCompute_(fn, args) {
+  var body = Object.assign({ fn: fn }, args);
+  return fetch(YARD_API_BASE + '/salary/compute', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Session-Token': SESSION_TOKEN },
+    body: JSON.stringify(body),
+  }).then(function(r) { return r.json().then(function(d) { return { httpOk: r.ok, d: d }; }); })
+    .then(function(res) {
+      if (!res.httpOk || !res.d.ok) throw new Error(res.d && res.d.error ? res.d.error : 'Не удалось получить расчёт зарплаты');
+      return res.d.result;
+    });
 }
 
 // ── НАВИГАЦИЯ (живые координаты техники с Omnicomm Online, опрос раз в 30 сек на сервере -

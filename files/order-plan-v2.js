@@ -332,9 +332,14 @@ function personCell_(fullName, code, title, cellClass) {
   var col = personColor_(fullName);
   return '<td' + cls + '><span class="op2-person"' + (col ? ' style="color:' + col + '"' : '') + ' title="' + esc(title || fullName || '') + '">' + esc(sur) + '</span></td>';
 }
-function mgrCodeCell_(o) {
+/* Влад 13.09: «мне нужна здесь возможность менять менеджеров - как логисты меняют
+   логистов, но менеджеров меняю только я» - клик по «Мен.» кликабелен ТОЛЬКО у admin (на
+   ОБОИХ экранах - и «Логист», и «Менеджер», admin переключается между ними), у
+   менеджера/логиста - как раньше, просто текст. В отличие от смены логиста (разрешено
+   любому логисту) сервер тоже режет это requireRole_("admin"), не общий permissive gate. */
+function mgrCodeCell_(o, clickable) {
   var name = o.manager_name || o.created_by_name || o.taken_by_name;
-  return personCell_(name, oMgrCode(o), oMgrTitle(o));
+  return personCell_(name, oMgrCode(o), oMgrTitle(o), clickable ? 'op2-mgrpick' : '');
 }
 /* Влад 12.09 (вечер): «у логистов должна быть возможность смены логиста - сначала решили,
    что наёмник закрывает, потом что тральный логист» - клик по фамилии в «Лог.» открывает
@@ -524,6 +529,7 @@ function buildDom() {
       '<div class="op2-toast" id="op2-toast"></div>' +
       '<div class="op2-stpop" id="op2-stpop" role="menu"></div>' +
       '<div class="op2-stpop" id="op2-lgpop" role="menu"></div>' +
+      '<div class="op2-stpop" id="op2-mgrpop" role="menu"></div>' +
 
       /* ── «Задание водителю» ── */
       '<div class="op2-dmod-scrim" id="op2-drv-scrim"><div class="op2-dmod" role="dialog" aria-label="Задание водителю">' +
@@ -548,8 +554,8 @@ function buildDom() {
 /* ГОСТ: ОДНО делегирование со списком-селектором, не обработчик на каждый элемент.
    Элементы с собственным звуком результата (RESULT_SEL) из nav исключены, чтобы
    не было двойного щелчка. */
-var NAV_SEL = '.op2-tab,.op2-chip,.op2-ghost,.op2-dbtn,.op2-slot,.op2-veh,.op2-st-chip,.op2-stc,.op2-logpick,#op2-lgpop button,.op2-sugg .op2-it,.op2-free .op2-day,.op2-stpop button,.op2-pop .op2-vi,.op2-copybtn,.op2-take,.op2-dt,.op2-mgr-tbl tbody tr,.op2-log-body tr,.op2-switch button,[data-nav-sound]';
-var RESULT_SEL = '#op2-f-save,#op2-rp-go,#op2-pop-ok,.op2-dok,.op2-unset-ot,.op2-slot.op2-ot,.op2-slot.op2-new,#op2-lgpop button,#op2-drv-copy,#op2-drv-max,#op2-d-drv-ok,.op2-dl,.op2-copybtn,.op2-stpop button,.op2-pop .op2-vi[data-act="unset"],#op2-snd,.op2-blocked,#op2-f-ent .op2-chip';
+var NAV_SEL = '.op2-tab,.op2-chip,.op2-ghost,.op2-dbtn,.op2-slot,.op2-veh,.op2-st-chip,.op2-stc,.op2-logpick,#op2-lgpop button,.op2-mgrpick,#op2-mgrpop button,.op2-sugg .op2-it,.op2-free .op2-day,.op2-stpop button,.op2-pop .op2-vi,.op2-copybtn,.op2-take,.op2-dt,.op2-mgr-tbl tbody tr,.op2-log-body tr,.op2-switch button,[data-nav-sound]';
+var RESULT_SEL = '#op2-f-save,#op2-rp-go,#op2-pop-ok,.op2-dok,.op2-unset-ot,.op2-slot.op2-ot,.op2-slot.op2-new,#op2-lgpop button,#op2-mgrpop button,#op2-drv-copy,#op2-drv-max,#op2-d-drv-ok,.op2-dl,.op2-copybtn,.op2-stpop button,.op2-pop .op2-vi[data-act="unset"],#op2-snd,.op2-blocked,#op2-f-ent .op2-chip';
 
 function wire() {
   var root = $('#op2-root');
@@ -634,6 +640,8 @@ function wire() {
     var tr = e.target.closest('tr[data-oid]'); if (!tr) return;
     var ch = e.target.closest('.op2-stc');
     if (ch) { openStPop(ch, tr); return; }
+    var mg = e.target.closest('.op2-mgrpick');
+    if (mg) { openMgrPop(mg, tr); return; }
     var o = byId(tr.dataset.oid); if (!o) return;
     $$('#op2-mgr-body tr.op2-open').forEach(function (r) { r.classList.remove('op2-open'); });
     tr.classList.add('op2-open');
@@ -694,6 +702,16 @@ function wire() {
     var opt = logistOptions_().filter(function (p) { return p.email === email; })[0];
     assignLogist_(o, email, opt ? opt.name : email);
   });
+  /* ── поповер смены менеджера (только admin - серверу тоже requireRole_("admin")) ── */
+  $('#op2-mgrpop').addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b || !mgTr) return;
+    var tr = mgTr; closeMgrPop();
+    if (b.classList.contains('op2-cur')) return;
+    var o = byId(tr.dataset.oid); if (!o) return;
+    var email = b.dataset.email; if (!email) return;
+    var opt = managerOptions_().filter(function (p) { return p.email === email; })[0];
+    assignManager_(o, email, opt ? opt.name : email);
+  });
 
   /* ── глобальные: Esc, клик мимо, скролл ── */
   document.addEventListener('keydown', onKeyDown, true);
@@ -736,6 +754,7 @@ function onKeyDown(e) {
   if ($('#op2-drv-scrim').classList.contains('op2-open')) { closeDrv(); return; }
   if ($('#op2-stpop').classList.contains('op2-open')) { closeStPop(); return; }
   if ($('#op2-lgpop').classList.contains('op2-open')) { closeLogPop(); return; }
+  if ($('#op2-mgrpop').classList.contains('op2-open')) { closeMgrPop(); return; }
   if ($('#op2-pop').classList.contains('op2-open')) { closePop(); return; }
   closeDrawer();
 }
@@ -745,6 +764,8 @@ function onDocMouseDown(e) {
   if (sp && sp.classList.contains('op2-open') && !e.target.closest('#op2-stpop') && !e.target.closest('.op2-st-chip') && !e.target.closest('.op2-stc')) closeStPop();
   var lgp = $('#op2-lgpop');
   if (lgp && lgp.classList.contains('op2-open') && !e.target.closest('#op2-lgpop') && !e.target.closest('.op2-logpick')) closeLogPop();
+  var mgp = $('#op2-mgrpop');
+  if (mgp && mgp.classList.contains('op2-open') && !e.target.closest('#op2-mgrpop') && !e.target.closest('.op2-mgrpick')) closeMgrPop();
   var pop = $('#op2-pop');
   if (pop && pop.classList.contains('op2-open') && !e.target.closest('#op2-pop') && !e.target.closest('.op2-slot,.op2-veh')) closePop();
   if ($('#op2-row-menu') && !e.target.closest('#op2-row-menu')) closeRowMenu();
@@ -774,7 +795,16 @@ function applyMe(me) {
   if (first) {
     VIEW = (me.role === 'manager') ? 'mgr' : 'log';
     $('#op2-switch').classList.toggle('op2-hidden', me.role !== 'admin');
-    if (me.role === 'admin') syncSwitch();
+    if (me.role === 'admin') {
+      syncSwitch();
+      /* Влад 13.09: «менеджеров меняю только я» - подсказка добавляется в рантайме именно
+         потому, что легенда - общая статичная разметка на все роли; строку показываем
+         только когда роль уже известна как admin, чтобы не путать менеджера/логиста
+         функцией, которая им недоступна. */
+      $$('.op2-legend').forEach(function (p) {
+        if (!p.querySelector('.op2-mgrpick-hint')) p.insertAdjacentHTML('beforeend', ' <span class="op2-mgrpick-hint op2-dim">Клик по фамилии в «Мен.» - сменить менеджера (только у вас).</span>');
+      });
+    }
   }
 }
 function syncSwitch() {
@@ -1146,7 +1176,7 @@ function renderMgr() {
     var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' : '');
     return '<tr class="' + cls + '" data-oid="' + esc(o.id) + '">' +
       '<td><span class="op2-no">' + esc(oNo(o)) + '</span></td>' +
-      mgrCodeCell_(o) + logCodeCell_(o) +
+      mgrCodeCell_(o, isAdmin()) + logCodeCell_(o) +
       timeCell(o) + techCell_(o) +
       custCell_(o, WIDE && F.q ? '<span class="op2-code" style="margin-right:6px">' + esc(dm(o.service_date)) + '</span>' : '') +
       routeCell(o) + cargoCell_(o) +
@@ -1284,7 +1314,7 @@ function renderLog() {
     var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' + (o.otboy_ack_by ? '' : ' op2-unack') : (needsAccept_(o) ? ' op2-new-unack' : '')) + (isFresh(o) ? ' op2-new-halo' : '');
     return '<tr class="' + cls + '" data-oid="' + esc(o.id) + '">' +
       '<td><span class="op2-no">' + esc(oNo(o)) + '</span></td>' +
-      mgrCodeCell_(o) + logCodeCell_(o, true) +
+      mgrCodeCell_(o, isAdmin()) + logCodeCell_(o, true) +
       timeCell(o) + techCell_(o) +
       custCell_(o, isFresh(o) ? '<span class="op2-st-chip op2-ok" style="margin-right:6px">новая</span>' : '') +
       routeCell(o) + cargoCell_(o) +
@@ -1349,6 +1379,39 @@ function openLogPop(cell, tr) {
   sp.classList.add('op2-open');
 }
 function closeLogPop() { var sp = $('#op2-lgpop'); if (sp) sp.classList.remove('op2-open'); lgTr = null; }
+
+/* ═════════════════════════ СМЕНА МЕНЕДЖЕРА (только admin) ═════════════════════════ */
+var mgTr = null;
+function managerOptions_() { return ROSTER.filter(function (r) { return r.role === 'manager'; }); }
+function openMgrPop(cell, tr) {
+  mgTr = tr;
+  var o = byId(tr.dataset.oid);
+  var curEmail = o ? (o.manager_email || '') : '';
+  var opts = managerOptions_();
+  var sp = $('#op2-mgrpop');
+  sp.innerHTML = opts.length ? opts.map(function (p) {
+    var col = personColor_(p.name);
+    return '<button data-email="' + esc(p.email) + '" class="' + (p.email === curEmail ? 'op2-cur' : '') + '"><span class="op2-person"' +
+      (col ? ' style="color:' + col + '"' : '') + '>' + esc(personSurname_(p.name)) + '</span>' +
+      (p.email === curEmail ? '<span class="op2-dim op2-sm">сейчас</span>' : '') + '</button>';
+  }).join('') : '<button class="op2-cur">в справочнике нет менеджеров</button>';
+  var r = cell.getBoundingClientRect();
+  sp.style.left = Math.min(r.left, window.innerWidth - 230) + 'px';
+  sp.style.top = (r.bottom + 4) + 'px';
+  sp.classList.add('op2-open');
+}
+function closeMgrPop() { var sp = $('#op2-mgrpop'); if (sp) sp.classList.remove('op2-open'); mgTr = null; }
+function assignManager_(o, email, name) {
+  var prevEmail = o.manager_email || '', prevName = o.manager_name || '';
+  if (email === prevEmail) return;
+  apiPost('/orders/set_manager', { id: o.id, email: email }).then(function (r) {
+    if (!ok_(r)) return;
+    S.toggle();
+    toast('Заявку №' + esc(oNo(o)) + ' теперь ведёт менеджер <span class="op2-tick">' + esc(name) + '</span>' + (prevName ? ' · было: ' + esc(prevName) : ''),
+      function () { apiPost('/orders/set_manager', { id: o.id, email: prevEmail || 'none' }).then(function (r2) { if (ok_(r2)) loadOrders(); }); });
+    loadOrders();
+  });
+}
 function assignLogist_(o, email, name) {
   var prevEmail = o.taken_by || '', prevName = o.taken_by_name || '';
   if (email === prevEmail) return;
@@ -1390,6 +1453,12 @@ function onLogClick(e) {
   if (lg) {
     var lgTrEl = e.target.closest('tr[data-oid]'); if (!lgTrEl) return;
     openLogPop(lg, lgTrEl);
+    return;
+  }
+  var mg = e.target.closest('.op2-mgrpick');
+  if (mg) {
+    var mgTrEl = e.target.closest('tr[data-oid]'); if (!mgTrEl) return;
+    openMgrPop(mg, mgTrEl);
     return;
   }
 
@@ -1477,12 +1546,19 @@ function openRowMenu(x, y, items) {
     if (it && it.fn) { S.nav(); it.fn(); }
   });
 }
+function mgrChangerItem_(o, table) {
+  if (!isAdmin()) return [];
+  return [{ label: o.manager_name ? 'Сменить менеджера' : 'Назначить менеджера', fn: function () {
+    var tr = $('#' + table + ' tr[data-oid="' + o.id + '"]'); if (!tr) return;
+    var cell = tr.querySelector('.op2-mgrpick'); if (cell) openMgrPop(cell, tr);
+  } }];
+}
 function mgrRowMenu(o) {
   return [
     { label: 'Повторить', fn: function () { openRepeat(o); } },
     { label: 'Отбой', fn: function () { setStatus(o, 'ot'); } },
     { label: 'Копировать данные на пропуск', fn: function () { copyText(passText(o), 'Данные на пропуск скопированы'); } }
-  ].concat(isAdmin() ? [{ label: 'Удалить заявку', fn: function () { deleteOrder(o); } }] : []);
+  ].concat(mgrChangerItem_(o, 'op2-mgr-body')).concat(isAdmin() ? [{ label: 'Удалить заявку', fn: function () { deleteOrder(o); } }] : []);
 }
 function logRowMenu(o) {
   var items = [];
@@ -1491,6 +1567,7 @@ function logRowMenu(o) {
     var tr = $('#op2-log-body tr[data-oid="' + o.id + '"]'); if (!tr) return;
     var cell = tr.querySelector('.op2-logpick'); if (cell) openLogPop(cell, tr);
   } });
+  items = items.concat(mgrChangerItem_(o, 'op2-log-body'));
   items.push({ label: 'Добавить вторую машину', fn: function () { var tr = $('#op2-log-body tr[data-oid="' + o.id + '"]'); openPop(tr || $('#op2-log-body'), o, true); } });
   items.push({ label: 'Все заявки этой машины →', fn: function () { showByVehicle(o); } });
   items.push({ label: 'История', fn: function () { openDrawerView(o, 'log', true); } });

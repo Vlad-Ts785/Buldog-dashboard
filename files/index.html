@@ -28564,8 +28564,18 @@ function renderPresence_(){
   LOG_TRAL.concat(LOG_LONG).forEach(function(p){
     if (seen[p.full]) return; seen[p.full] = 1; roster.push(p);
   });
+  /* НАЙДЕННЫЙ БАГ (13.09, Влад: "Махура сейчас работает, почему лампочка не
+     горит" - живой пример: display_name с сервера "Махура Николай Генадьевич",
+     ростер (p.full, из orders/manager_supply) - "Махура Николай Геннадьевич",
+     разница в одну букву в листе "Доступ" ломала строгое сравнение ===
+     навсегда, независимо от того, сколько человек реально сидит на доске.
+     Источники имени независимы (лист "Доступ" правится руками, ростер - из
+     заказов) и НИКОГДА не гарантированно совпадают буква в букву - тот же
+     класс, что уже чинили в buildRoster() (уволенные) и в меню (menuSur_).
+     Сравниваем по фамилии (первое слово, ё->е), не по полному ФИО. */
   el.innerHTML = roster.map(function(p){
-    var row = presenceList_.find(function(u){ return u.display_name === p.full; });
+    var pSur = menuSur_(p.full);
+    var row = presenceList_.find(function(u){ return menuSur_(u.display_name) === pSur; });
     var online = !!row && row.seen_ago <= 20;
     var active = !!row && row.active_ago != null && row.active_ago <= 12;
     var cls = "pres-tile" + (online ? " online" : "") + (active ? " active" : "");

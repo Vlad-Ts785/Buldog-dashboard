@@ -5225,6 +5225,68 @@ function doGet(e) {
   }
   // ── конец временного экспорта ──────────────────────────────────────────────────────────────
 
+  // ── ВРЕМЕННО (13.09, сбор сканов паспорта/ВУ водителей с Google Диска - тот же приём,
+  // что импорт СТС 30.08, см. plans/2026-08-30-sts-document-import.md). УБРАТЬ вместе с
+  // probe_drive_folder/get_drive_file, как только импорт завершён и проверен (правило
+  // репо №3) - НЕ постоянный мост, в отличие от access_list/export_debt_status выше.
+  if (e && e.parameter && e.parameter.action === 'probe_drive_folder') {
+    var pdfKey = e.parameter.key || '';
+    var pdfExpected = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY') || '';
+    if (!pdfExpected || pdfKey !== pdfExpected) {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var pdfFolderId = e.parameter.folder_id || '';
+    if (!pdfFolderId) {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'folder_id обязателен' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    try {
+      var pdfFolder = DriveApp.getFolderById(pdfFolderId);
+      var pdfOut = { folder_name: pdfFolder.getName(), files: [], subfolders: [] };
+      var pdfFiles = pdfFolder.getFiles();
+      while (pdfFiles.hasNext()) {
+        var pf = pdfFiles.next();
+        pdfOut.files.push({ id: pf.getId(), name: pf.getName(), mimeType: pf.getMimeType(), size: pf.getSize() });
+      }
+      var pdfSubs = pdfFolder.getFolders();
+      while (pdfSubs.hasNext()) {
+        var psf = pdfSubs.next();
+        var subEntry = { id: psf.getId(), name: psf.getName(), files: [] };
+        var subFiles = psf.getFiles();
+        while (subFiles.hasNext()) {
+          var sf = subFiles.next();
+          subEntry.files.push({ id: sf.getId(), name: sf.getName(), mimeType: sf.getMimeType(), size: sf.getSize() });
+        }
+        pdfOut.subfolders.push(subEntry);
+      }
+      return ContentService.createTextOutput(JSON.stringify(pdfOut)).setMimeType(ContentService.MimeType.JSON);
+    } catch (pdfErr) {
+      return ContentService.createTextOutput(JSON.stringify({ error: String(pdfErr) })).setMimeType(ContentService.MimeType.JSON);
+    }
+  }
+  if (e && e.parameter && e.parameter.action === 'get_drive_file') {
+    var gdfKey = e.parameter.key || '';
+    var gdfExpected = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY') || '';
+    if (!gdfExpected || gdfKey !== gdfExpected) {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var gdfFileId = e.parameter.file_id || '';
+    if (!gdfFileId) {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'file_id обязателен' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    try {
+      var gdfFile = DriveApp.getFileById(gdfFileId);
+      var gdfBlob = gdfFile.getBlob();
+      return ContentService.createTextOutput(JSON.stringify({
+        name: gdfFile.getName(),
+        mimeType: gdfBlob.getContentType(),
+        base64: Utilities.base64Encode(gdfBlob.getBytes()),
+      })).setMimeType(ContentService.MimeType.JSON);
+    } catch (gdfErr) {
+      return ContentService.createTextOutput(JSON.stringify({ error: String(gdfErr) })).setMimeType(ContentService.MimeType.JSON);
+    }
+  }
+  // ── конец временного пробника Диска ────────────────────────────────────────────────────────
+
   // Вход через Google - без валидного токена и email в листе "Доступ" данных не отдаём.
   // Сначала пробуем свой токен сессии (живёт до 48ч, см. issueSessionToken_) - только если
   // его нет или он истёк, идём проверять Google id_token (тот живёт ~1 час, это уже требует

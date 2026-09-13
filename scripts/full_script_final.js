@@ -5268,9 +5268,12 @@ function doGet(e) {
     // под любым менеджером" - то же самое &manager=, что уже работает для
     // my-page/receipts, см. mlcManager/gatManager выше).
     if (action === 'order_plan') {
-      var opPerson = (access.role === 'manager' || access.role === 'logist')
-        ? access.name
-        : (e.parameter.manager || access.name);
+      // ФИКС аудита безопасности 13.09: раньше "не manager/logist -> admin" по умолчанию -
+      // явная проверка на admin, любая другая роль (опечатка в листе "Доступ", будущая
+      // роль вроде mechanic) теперь видит ТОЛЬКО свои заказы, не чужие по &manager=.
+      var opPerson = access.role === 'admin'
+        ? (e.parameter.manager || access.name)
+        : access.name;
       // scope=hot/rest - двухфазная загрузка (Влад, 2026-08-18): вчера/сегодня/
       // завтра отдаём отдельным быстрым запросом, остальной месяц - вторым, в
       // фоне на фронтенде. Без scope (или scope=all) - как раньше, весь месяц
@@ -5311,9 +5314,10 @@ function doGet(e) {
           .createTextOutput(JSON.stringify({ error: 'Создание заявок доступно менеджерам, логисты назначают транспорт на уже созданные заявки' }))
           .setMimeType(ContentService.MimeType.JSON);
       }
-      var opcPerson = access.role === 'manager'
-        ? access.name
-        : (e.parameter.manager || access.name);
+      // ФИКС аудита безопасности 13.09: явная проверка на admin (см. order_plan выше).
+      var opcPerson = access.role === 'admin'
+        ? (e.parameter.manager || access.name)
+        : access.name;
       return ContentService
         .createTextOutput(JSON.stringify(createOrderPlanEntry_(opcPerson, e.parameter)))
         .setMimeType(ContentService.MimeType.JSON);
@@ -5329,9 +5333,10 @@ function doGet(e) {
           .createTextOutput(JSON.stringify({ error: 'Редактирование заявок доступно менеджерам' }))
           .setMimeType(ContentService.MimeType.JSON);
       }
-      var opuPerson = access.role === 'manager'
-        ? access.name
-        : (e.parameter.manager || access.name);
+      // ФИКС аудита безопасности 13.09: явная проверка на admin (см. order_plan выше).
+      var opuPerson = access.role === 'admin'
+        ? (e.parameter.manager || access.name)
+        : access.name;
       return ContentService
         .createTextOutput(JSON.stringify(updateOrderPlanEntry_(opuPerson, e.parameter)))
         .setMimeType(ContentService.MimeType.JSON);
@@ -5345,9 +5350,10 @@ function doGet(e) {
           .createTextOutput(JSON.stringify({ error: 'Смена статуса доступна менеджерам' }))
           .setMimeType(ContentService.MimeType.JSON);
       }
-      var opsPerson = access.role === 'manager'
-        ? access.name
-        : (e.parameter.manager || access.name);
+      // ФИКС аудита безопасности 13.09: явная проверка на admin (см. order_plan выше).
+      var opsPerson = access.role === 'admin'
+        ? (e.parameter.manager || access.name)
+        : access.name;
       return ContentService
         .createTextOutput(JSON.stringify(updateOrderPlanStatus_(opsPerson, e.parameter)))
         .setMimeType(ContentService.MimeType.JSON);

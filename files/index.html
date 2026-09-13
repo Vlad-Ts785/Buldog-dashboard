@@ -18485,13 +18485,19 @@ function renderSalesMgrGost_(opts) {
     var list = cfg.solo ? '' : cfg.members.filter(function (s) { return s !== cfg.head && get(s); }).join(' · ');
     depts += mgrTable(cfg.name, rows, list, stats[i], stats[i].plan, cfg.solo ? 'выручка' : null);
   });
-  // Дирекция рисуется ВСЕГДА, даже когда заказов за месяц нет (тогда строка с прочерками) -
-  // так вёл себя старый вид, и редизайн не должен молча убирать блок со страницы.
-  var tsM = get('цуцурин');
-  depts += mgrTable('Дирекция', [{ m: tsM, sur: 'Цуцурин', isHead: false, plan: 0 }], '',
-    { amount: (tsM && tsM.amount) || 0, amountY: (tsM && tsM.amount) || 0, payment: (tsM && tsM.payment) || 0,
-      profit: (tsM && tsM.profit) || 0, orders: (tsM && tsM.orders) || 0 },
-    0, 'выручка');
+  // Дирекция рисуется ВСЕГДА на admin-странице "По менеджерам", даже когда заказов за
+  // месяц нет (тогда строка с прочерками) - так вёл себя старый вид, и редизайн не должен
+  // молча убирать блок со страницы. НО эта же функция рендерит и "Отдел Тралы" - копию
+  // страницы для самих сотрудников (readOnly:true, см. renderDeptTrals_ ниже) - там
+  // личные цифры Цуцурина сотрудникам видны быть не должны (Влад, 13.09: "у всех
+  // сотрудников не должно видеть блок дирекция. Они видеть не должны").
+  if (!readOnly) {
+    var tsM = get('цуцурин');
+    depts += mgrTable('Дирекция', [{ m: tsM, sur: 'Цуцурин', isHead: false, plan: 0 }], '',
+      { amount: (tsM && tsM.amount) || 0, amountY: (tsM && tsM.amount) || 0, payment: (tsM && tsM.payment) || 0,
+        profit: (tsM && tsM.profit) || 0, orders: (tsM && tsM.orders) || 0 },
+      0, 'выручка');
+  }
 
   var pageId = opts.pageId || 'page-sales-mgr';
   var page_ = document.getElementById(pageId);

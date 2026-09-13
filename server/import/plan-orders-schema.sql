@@ -241,3 +241,45 @@ UPDATE sprav_legal_entities SET stamp_file='yard_imperial_stamp.png', signature_
   WHERE id='le_mtgbmfjprq29v0' AND stamp_file IS NULL;
 UPDATE sprav_legal_entities SET stamp_file='tehnopark_stamp.png', signature_file='tehnopark_signature_almashova.png', signer_short='Алмашова М. Н.'
   WHERE id='le_mtgbvjwv2hjya3' AND stamp_file IS NULL;
+-- 11.09 Влад: «тип техники сделай Трал и Длинномер» - чипами только два, остальное в «ещё…»
+INSERT IGNORE INTO plan_dictionary (kind, value, sort, is_primary) VALUES ('equipment','Трал',1,1);
+UPDATE plan_dictionary SET is_primary = IF(value IN ('Трал','Длинномер'),1,0) WHERE kind='equipment';
+UPDATE plan_dictionary SET sort=2 WHERE kind='equipment' AND value='Длинномер';
+-- «От кого» - короткие имена и порядок (Влад 11.09): Бульдог, ЯРД, ТП, КМ, СО, СТ, МК, УМИАТ - поля справочника, не код
+SET @c := (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='sprav_legal_entities' AND COLUMN_NAME='short_name');
+SET @sql := IF(@c=0,'ALTER TABLE sprav_legal_entities ADD COLUMN short_name VARCHAR(30) DEFAULT NULL, ADD COLUMN own_sort INT DEFAULT NULL','SELECT 1');
+PREPARE st FROM @sql; EXECUTE st; DEALLOCATE PREPARE st;
+UPDATE sprav_legal_entities SET short_name='Бульдог', own_sort=1 WHERE id='le_mtgbiyw4gzkq53';
+UPDATE sprav_legal_entities SET short_name='ЯРД',     own_sort=2 WHERE id='le_mtgbmfjprq29v0';
+UPDATE sprav_legal_entities SET short_name='ТП',      own_sort=3 WHERE id='le_mtgbvjwv2hjya3';
+UPDATE sprav_legal_entities SET short_name='КМ',      own_sort=4 WHERE id='le_mtgd92xilswclx';
+UPDATE sprav_legal_entities SET short_name='СО',      own_sort=5 WHERE id='le_mtgbtv1jwg29pn';
+UPDATE sprav_legal_entities SET short_name='СТ',      own_sort=6 WHERE id='le_mtgdavb230fzxz';
+UPDATE sprav_legal_entities SET short_name='МК',      own_sort=7 WHERE id='le_mtgbuqo7dyylxt';
+UPDATE sprav_legal_entities SET short_name='УМИАТ',   own_sort=8 WHERE id='le_mtgbnfm50lf11i';
+SELECT short_name, own_sort, name FROM sprav_legal_entities WHERE is_own=1 ORDER BY own_sort;
+SELECT value,is_primary,sort FROM plan_dictionary WHERE kind='equipment' ORDER BY is_primary DESC, sort;
+-- 11.09 Влад: у логистов «Кто заказывает» - те же короткие чипы своих юрлиц + БАЗА.
+-- Флаг internal_customer: кто может быть ВНУТРЕННИМ заказчиком (свои юрлица + База); «От кого» остаётся is_own=1.
+SET @c := (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='sprav_legal_entities' AND COLUMN_NAME='internal_customer');
+SET @sql := IF(@c=0,'ALTER TABLE sprav_legal_entities ADD COLUMN internal_customer TINYINT(1) NOT NULL DEFAULT 0','SELECT 1');
+PREPARE st FROM @sql; EXECUTE st; DEALLOCATE PREPARE st;
+UPDATE sprav_legal_entities SET internal_customer=1 WHERE is_own=1 AND deleted_at IS NULL;
+INSERT INTO sprav_legal_entities (id, name, full_name, short_name, own_sort, is_own, internal_customer, notes, created_by, updated_by)
+SELECT 'le_internal_base', 'База', 'База (внутренний заказчик - рейсы для базы)', 'БАЗА', 9, 0, 1, 'Внутренний заказчик для заявок логистов (Влад 11.09). Если в 1С есть свой контрагент «База» - заменить на него', 'claude:2026-09-11', 'claude:2026-09-11'
+WHERE NOT EXISTS (SELECT 1 FROM sprav_legal_entities WHERE id='le_internal_base');
+SELECT id, short_name, own_sort, is_own, internal_customer FROM sprav_legal_entities WHERE internal_customer=1 ORDER BY own_sort;
+
+-- 11.09 Влад: «Создать задание» из CRM - связь заявки со сделкой (карточка показывает «сделка №N →»)
+SET @c := (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='plan_orders' AND COLUMN_NAME='crm_deal_id');
+SET @sql := IF(@c=0,'ALTER TABLE plan_orders ADD COLUMN crm_deal_id INT DEFAULT NULL, ADD KEY idx_crm_deal (crm_deal_id)','SELECT 1');
+PREPARE st FROM @sql; EXECUTE st; DEALLOCATE PREPARE st;
+
+-- 12.09 Влад (живой тест): «была под данные, но я смог изменить название компании-партнёра
+-- без согласования с менеджером» - у наёмника не было той же защиты, что у своей машины
+-- (замена вне заявленных на «под данные» -> запрос менеджеру, plan_order_change_requests).
+-- Тот же принцип, та же таблица - type='replace_carrier' переиспользует её с именем перевозчика
+-- вместо госномера (from_gos/to_gos - для type='replace_vehicle'; эти два поля - для carrier).
+SET @c := (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='plan_order_change_requests' AND COLUMN_NAME='from_carrier_name');
+SET @sql := IF(@c=0,'ALTER TABLE plan_order_change_requests ADD COLUMN from_carrier_name VARCHAR(200) DEFAULT NULL, ADD COLUMN to_carrier_name VARCHAR(200) DEFAULT NULL, ADD COLUMN to_carrier_id VARCHAR(64) DEFAULT NULL','SELECT 1');
+PREPARE st FROM @sql; EXECUTE st; DEALLOCATE PREPARE st;

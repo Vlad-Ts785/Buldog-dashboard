@@ -102,6 +102,14 @@ module.exports = function (deps) {
     const mgr = rosterMap[o.manager_email];
     out.manager_code = mgr ? mgr.code : (o.manager_name ? code3(o.manager_name) : null);
     out.taken_by_code = o.taken_by_name ? code3(o.taken_by_name) : null;
+    // Влад 12.09: «почему нет заполнения в колонке Менеджер? Тот, кто создаёт заявку, тот и
+    // менеджер... старший руководитель видит все заявки, эта колонка нужна, чтобы увидеть,
+    // кто какие заявки создал» - раньше пусто, если manager_email не проставлен (например,
+    // заявку создал логист/admin без явного выбора менеджера, а internal=0). created_by
+    // (email) на plan_orders был всегда, просто не резолвился в имя/код для клиента.
+    const creator = rosterMap[o.created_by];
+    out.created_by_name = creator ? creator.name : null;
+    out.created_by_code = creator ? creator.code : null;
     out.executors = execs.map((e) => Object.assign({}, e, {
       purchase_rate: e.purchase_rate === null ? null : Number(e.purchase_rate),
       driver_confirmed_at: e.driver_confirmed_at ? new Date(e.driver_confirmed_at).toISOString() : null,
@@ -134,15 +142,34 @@ module.exports = function (deps) {
     const d = {}; rows.forEach((r) => { (d[r.kind] = d[r.kind] || []).push({ value: r.value, primary: !!r.is_primary }); });
     return d;
   }
-  async function ownEntities() {
+  async function ownEntities(internalCustomers) { // internalCustomers=true -> свои юрлица + База (чипы «Кто заказывает» у логиста)
     const [rows] = await pool.query(
-      `SELECT id, name, full_name, inn, kpp, director_name, signer_short, bank_name, bank_account, stamp_file, signature_file
-         FROM sprav_legal_entities WHERE is_own = 1 AND deleted_at IS NULL ORDER BY name`);
+      `SELECT id, name, full_name, short_name, own_sort, inn, kpp, director_name, signer_short, bank_name, bank_account, stamp_file, signature_file, is_own, internal_customer
+         FROM sprav_legal_entities WHERE ${internalCustomers ? "internal_customer = 1" : "is_own = 1"} AND deleted_at IS NULL ORDER BY COALESCE(own_sort, 999), name`);
     return rows.map((r) => ({
-      id: r.id, name: r.name, full_name: r.full_name || r.name, inn: r.inn, director: r.director_name, signer: r.signer_short,
-      has_bank: !!(r.bank_name && r.bank_account), has_stamp: !!(r.stamp_file && r.signature_file),
+      id: r.id, name: r.name, short: r.short_name || r.name, full_name: r.full_name || r.name, inn: r.inn, director: r.director_name, signer: r.signer_short,
+      is_own: !!r.is_own, has_bank: !!(r.bank_name && r.bank_account), has_stamp: !!(r.stamp_file && r.signature_file),
     }));
   }
+
+  // Штамп версии среза дат: max(history.id) + max(orders.updated_at) + max(executors.updated_at/removed_at).
+  // Дёшево (три индексных MAX), опрашивается клиентом раз в 2 с - полная перезагрузка только при смене.
+  async function versionStamp(from, to) {
+    const [[h]] = await pool.query(
+      `SELECT MAX(h.id) AS hid, MAX(o.updated_at) AS ou FROM plan_orders o LEFT JOIN plan_orders_history h ON h.order_id = o.id
+        WHERE o.service_date BETWEEN ? AND ?`, [from, to]);
+    const [[e]] = await pool.query(
+      `SELECT MAX(GREATEST(e.updated_at, COALESCE(e.removed_at, e.updated_at))) AS eu
+         FROM plan_order_executors e JOIN plan_orders o ON o.id = e.order_id WHERE o.service_date BETWEEN ? AND ?`, [from, to]);
+    return [h.hid || 0, h.ou ? new Date(h.ou).toISOString() : "", e.eu ? new Date(e.eu).toISOString() : ""].join("|");
+  }
+  app.get("/api/orders/tick", ...gate, async (req, res) => {
+    try {
+      const date = String(req.query.date || ""); const to = String(req.query.to || date);
+      if (!isDate(date) || !isDate(to)) return fail(res, 400, "date обязателен");
+      res.json({ v: await versionStamp(date, to) });
+    } catch (err) { console.error("orders tick:", err); fail(res, 500, String(err.message || err)); }
+  });
 
   // ── GET /api/orders ─────────────────────────────────────────────────────────────────────
   // date=YYYY-MM-DD (+ to=YYYY-MM-DD для недели). Менеджер - свои, не внутренние; логист/админ - все.
@@ -159,7 +186,10 @@ module.exports = function (deps) {
       const execBy = {}; execs.forEach((e) => { (execBy[e.order_id] = execBy[e.order_id] || []).push(e); });
       const pendBy = {}; pend.forEach((q) => { pendBy[q.order_id] = q; });
       const orders = rows.map((o) => serialize(o, execBy[o.id] || [], pendBy[o.id], r.byEmail));
-      let maxUpdated = ""; rows.forEach((o) => { const u = new Date(o.updated_at).toISOString(); if (u > maxUpdated) maxUpdated = u; });
+      // Штамп версии - по ВСЕМ источникам изменений (заявки + исполнители + история), не только по
+      // plan_orders.updated_at: постановка машины тем же логистом не меняла updated_by -> MySQL не
+      // трогал timestamp -> у остальных таблица не перерисовывалась (Влад 11.09: «максимально онлайн»).
+      const maxUpdated = await versionStamp(date, to);
       res.json({ orders, max_updated: maxUpdated, me: await me(req), roster: r.list.map((x) => ({ name: x.name, code: x.code, role: x.role, email: x.email })) });
     } catch (err) { console.error("orders list:", err); fail(res, 500, String(err.message || err)); }
   });
@@ -181,7 +211,7 @@ module.exports = function (deps) {
   });
 
   app.get("/api/orders/meta", ...gate, async (req, res) => {
-    try { res.json({ dictionary: await dictionary(), own_entities: await ownEntities(), me: await me(req) }); }
+    try { res.json({ dictionary: await dictionary(), own_entities: await ownEntities(false), internal_customers: await ownEntities(true), me: await me(req) }); }
     catch (err) { console.error("orders meta:", err); fail(res, 500, String(err.message || err)); }
   });
 
@@ -194,12 +224,15 @@ module.exports = function (deps) {
   });
 
   // ── POST /api/orders/save - создать/изменить заявку ────────────────────────────────────
-  // Обязательно: service_date, equipment_type, customer. Всё остальное - «уточнить». Пустой адрес
-  // НЕ блокирует сохранение (менеджер: «точку пришлют через час»).
+  // Обязательно при СОЗДАНИИ: service_date, equipment_type, customer, price. Всё остальное -
+  // «уточнить». Пустой адрес НЕ блокирует сохранение (менеджер: «точку пришлют через час»).
+  // Цена (Влад 12.09: «создание заявки невозможно, пока не внесут цену - и логисты в своих
+  // заявках, и менеджеры») - без исключения по роли/internal, только на СОЗДАНИИ (правка уже
+  // существующей заявки ценой не блокируется - историю без цены задним числом не трогаем).
   const EDITABLE = ["service_time", "needs_data", "customer", "customer_entity_id", "executor_entity_id", "customer_contact_name",
     "customer_contact_phone", "equipment_type", "cargo", "cargo_weight_t", "cargo_dims", "gabarit", "rework_terms", "documents", "note",
     "cash", "load_address", "load_lat", "load_lon", "load_confirmed", "load_contact_name", "load_contact_phone", "unload_address",
-    "unload_lat", "unload_lon", "unload_confirmed", "unload_contact_name", "unload_contact_phone", "price", "payment_status", "internal"];
+    "unload_lat", "unload_lon", "unload_confirmed", "unload_contact_name", "unload_contact_phone", "price", "payment_status", "internal", "crm_deal_id"];
   function readFields(req) {
     const f = {};
     const b = req.body || {}; const q = req.query || {};
@@ -213,7 +246,7 @@ module.exports = function (deps) {
     if (get("cargo") !== undefined) f.cargo = str(get("cargo"), 300);
     if (get("note") !== undefined) f.note = str(get("note"), 1000);
     ["load_address", "unload_address"].forEach((k) => { if (get(k) !== undefined) f[k] = str(get(k), 500); });
-    ["cargo_weight_t", "load_lat", "load_lon", "unload_lat", "unload_lon", "price"].forEach((k) => { if (get(k) !== undefined) f[k] = num(get(k)); });
+    ["cargo_weight_t", "load_lat", "load_lon", "unload_lat", "unload_lon", "price", "crm_deal_id"].forEach((k) => { if (get(k) !== undefined) f[k] = num(get(k)); });
     ["needs_data", "cash", "load_confirmed", "unload_confirmed", "internal"].forEach((k) => { if (get(k) !== undefined) f[k] = bool(get(k)); });
     return f;
   }
@@ -249,6 +282,7 @@ module.exports = function (deps) {
         if (!isDate(f.service_date)) { conn.release(); return fail(res, 400, "service_date обязателен (YYYY-MM-DD)"); }
         if (!f.equipment_type) { conn.release(); return fail(res, 400, "тип техники обязателен"); }
         if (!f.customer) { conn.release(); return fail(res, 400, "заказчик обязателен"); }
+        if (!f.price) { conn.release(); return fail(res, 400, "цена обязательна"); }
         const isMgr = req.userRole === "manager";
         const internal = isMgr ? 0 : (f.internal || 0);
         const managerEmail = isMgr ? req.userEmail : (internal ? null : (str(p(req, "manager_email"), 255) || null));
@@ -302,11 +336,50 @@ module.exports = function (deps) {
       [st, st, st, req.userEmail, o.id]);
     return o.status + " -> " + st;
   }));
+  // Влад 12.09 (вечер): «у логистов должна быть возможность смены логиста» - тот же /take,
+  // теперь с необязательным email: без него - самоназначение (как раньше, обратная
+  // совместимость со всеми существующими вызовами), email="none" - снять назначение (нужно
+  // фронту для undo в тосте), любой другой email из ростера - назначить ИМЕННО этого
+  // логиста/admin (тот же permissive-принцип, что уже был у самоназначения - без
+  // подтверждения владельца, команда маленькая, доверие взаимное).
   app.post("/api/orders/take", ...gate, (req, res) => simpleUpdate(req, res, "take", async (conn, o) => {
     if (req.userRole === "manager") { fail(res, 403, "«беру в работу» - действие логиста"); return false; }
+    const raw = p(req, "email");
+    if (raw === "none") {
+      await conn.query(`UPDATE plan_orders SET taken_by = NULL, taken_by_name = NULL, taken_at = NULL, updated_by = ? WHERE id = ?`, [req.userEmail, o.id]);
+      return (o.taken_by_name || "никто") + " -> никто";
+    }
     const who = await me(req);
-    await conn.query(`UPDATE plan_orders SET taken_by = ?, taken_by_name = ?, taken_at = NOW(), updated_by = ? WHERE id = ?`, [req.userEmail, who.name, req.userEmail, o.id]);
-    return who.name;
+    let target = who;
+    const targetEmail = str(raw, 255);
+    if (targetEmail) {
+      const r = await roster();
+      const t = r.byEmail[targetEmail];
+      if (!t || (t.role !== "logist" && t.role !== "admin")) { fail(res, 400, "логист не найден"); return false; }
+      target = t;
+    }
+    await conn.query(`UPDATE plan_orders SET taken_by = ?, taken_by_name = ?, taken_at = NOW(), updated_by = ? WHERE id = ?`, [target.email, target.name, req.userEmail, o.id]);
+    return (o.taken_by_name || "никто") + " -> " + target.name;
+  }));
+  // Влад 13.09: «мне нужна здесь возможность менять менеджеров - как логисты меняют
+  // логистов, но менеджеров - только я». В отличие от /orders/take (любой логист может
+  // взять чужую заявку без подтверждения) - здесь requireRole_("admin"), а не общий gate:
+  // менеджеру/логисту эта кнопка вообще не должна быть доступна с сервера, не только
+  // спрятана на фронтенде. email="none" - вернуть к «без менеджера» (заявка станет
+  // внутренней/по создателю, как было до первого назначения) - нужно фронту для undo.
+  app.post("/api/orders/set_manager", checkSession, requireRole_("admin"), (req, res) => simpleUpdate(req, res, "set_manager", async (conn, o) => {
+    const raw = p(req, "email");
+    if (raw === "none") {
+      await conn.query(`UPDATE plan_orders SET manager_email = NULL, manager_name = NULL, updated_by = ? WHERE id = ?`, [req.userEmail, o.id]);
+      return (o.manager_name || "никто") + " -> никто";
+    }
+    const email = str(raw, 255);
+    if (!email) { fail(res, 400, "email обязателен"); return false; }
+    const r = await roster();
+    const t = r.byEmail[email];
+    if (!t || t.role !== "manager") { fail(res, 400, "менеджер не найден"); return false; }
+    await conn.query(`UPDATE plan_orders SET manager_email = ?, manager_name = ?, updated_by = ? WHERE id = ?`, [t.email, t.name, req.userEmail, o.id]);
+    return (o.manager_name || "никто") + " -> " + t.name;
   }));
   app.post("/api/orders/otboy_ack", ...gate, (req, res) => simpleUpdate(req, res, "otboy_ack", async (conn, o) => {
     if (o.status !== "cancelled") { fail(res, 400, "по заявке нет отбоя"); return false; }
@@ -314,7 +387,8 @@ module.exports = function (deps) {
     await conn.query(`UPDATE plan_orders SET otboy_ack_by = ?, otboy_ack_at = NOW(), updated_by = ? WHERE id = ?`, [who.name, req.userEmail, o.id]);
     return who.name;
   }));
-  app.post("/api/orders/delete", ...gate, (req, res) => simpleUpdate(req, res, "delete", async (conn, o) => {
+  // удалять заявку может только admin (Влад 11.09: «мне единственному право удалять строку»); менеджер/логист - отбой
+  app.post("/api/orders/delete", checkSession, requireRole_("admin"), (req, res) => simpleUpdate(req, res, "delete", async (conn, o) => {
     const [ex] = await conn.query(`SELECT id, seg_id FROM plan_order_executors WHERE order_id = ? AND removed_at IS NULL`, [o.id]);
     for (const e of ex) await removeExecutorRow(conn, e, req.userEmail);
     await conn.query(`UPDATE plan_orders SET deleted_at = NOW(), deleted_by = ?, updated_by = ? WHERE id = ?`, [req.userEmail, req.userEmail, o.id]);
@@ -493,6 +567,11 @@ module.exports = function (deps) {
   });
 
   // Наёмник - поля прямо на исполнителе (одна запись kind=hired на заявку; повторный вызов - правка).
+  // «под данные»: если у заявки УЖЕ есть наёмник и меняется КОМПАНИЯ (не техдетали вроде госномера/
+  // водителя/ставки у той же компании) - тот же принцип, что у своей машины (вне заявленных -> запрос
+  // менеджеру, plan_order_change_requests), не тихая правка. Влад 12.09 (живой тест): «была под
+  // данные, но я смог изменить название компании-партнёра без согласования с менеджером» - этой
+  // проверки не было вообще, чинится здесь.
   app.post("/api/orders/hired_set", ...gate, async (req, res) => {
     const conn = await pool.getConnection();
     try {
@@ -500,6 +579,7 @@ module.exports = function (deps) {
       const orderId = Number(p(req, "order_id")); const o = await loadOrder(conn, orderId); if (!o) return fail(res, 404, "заявка не найдена");
       if (o.status === "cancelled") return fail(res, 409, "по заявке отбой");
       const who = await me(req);
+      const force = bool(p(req, "force"));
       const f = {
         carrier_id: str(p(req, "carrier_id"), 64), carrier_name: str(p(req, "carrier_name"), 200), carrier_contact: str(p(req, "carrier_contact"), 200),
         vehicle_gos: str(p(req, "gos"), 32), trailer_gos: str(p(req, "trailer_gos"), 32), driver_name: str(p(req, "driver_name"), 150), driver_phone: str(p(req, "driver_phone"), 64),
@@ -507,8 +587,21 @@ module.exports = function (deps) {
         comment: str(p(req, "comment"), 500), found_by: req.userRole === "manager" ? "manager" : "logist",
       };
       if (!f.carrier_name) return fail(res, 400, "перевозчик обязателен");
+      // Влад 12.09: «отдать наёмнику невозможно без указания цены» - ставка закупки
+      // обязательна, без исключения (та же логика, что цена заявки при создании).
+      if (!f.purchase_rate) return fail(res, 400, "ставка закупки обязательна");
       await conn.beginTransaction();
-      const [ex] = await conn.query(`SELECT id FROM plan_order_executors WHERE order_id = ? AND kind = 'hired' AND removed_at IS NULL`, [orderId]);
+      const [ex] = await conn.query(`SELECT id, carrier_name FROM plan_order_executors WHERE order_id = ? AND kind = 'hired' AND removed_at IS NULL`, [orderId]);
+      const prevName = ex.length ? String(ex[0].carrier_name || "").trim() : "";
+      const changingCarrier = prevName && prevName.toLowerCase() !== f.carrier_name.toLowerCase();
+      if (o.needs_data && changingCarrier && !force) { // другая компания на «под данные» - без спроса нельзя
+        await conn.query(`UPDATE plan_order_change_requests SET status = 'cancelled' WHERE order_id = ? AND status = 'pending'`, [orderId]);
+        const [ins] = await conn.query(
+          `INSERT INTO plan_order_change_requests (order_id, type, from_carrier_name, to_carrier_name, to_carrier_id, requested_by, requested_by_name, comment)
+           VALUES (?,'replace_carrier',?,?,?,?,?,?)`, [orderId, prevName, f.carrier_name, f.carrier_id, who.email, who.name, f.comment]);
+        await history(conn, orderId, "change_request", null, prevName + " -> " + f.carrier_name + " (ждёт менеджера)", who.email);
+        await conn.commit(); return respondOrder(res, orderId, { pending: true, request_id: ins.insertId });
+      }
       if (ex.length) {
         await conn.query(`UPDATE plan_order_executors SET carrier_id=?, carrier_name=?, carrier_contact=?, vehicle_gos=?, trailer_gos=?, driver_name=?, driver_phone=?, purchase_rate=?, settlement=?, carrier_status=?, comment=?, updated_by=? WHERE id = ?`,
           [f.carrier_id, f.carrier_name, f.carrier_contact, f.vehicle_gos, f.trailer_gos, f.driver_name, f.driver_phone, f.purchase_rate, f.settlement, f.carrier_status, f.comment, who.email, ex[0].id]);
@@ -520,7 +613,7 @@ module.exports = function (deps) {
       if (!o.taken_by) await conn.query(`UPDATE plan_orders SET taken_by = ?, taken_by_name = ?, taken_at = NOW() WHERE id = ?`, [who.email, who.name, orderId]);
       await conn.query(`UPDATE plan_orders SET updated_by = ? WHERE id = ?`, [who.email, orderId]);
       await history(conn, orderId, "hired_set", null, f.carrier_name + " · " + (f.carrier_status || ""), who.email);
-      await conn.commit(); return respondOrder(res, orderId);
+      await conn.commit(); return respondOrder(res, orderId, { outside_declared: !!(o.needs_data && force && changingCarrier) });
     } catch (err) { try { await conn.rollback(); } catch (e) {} console.error("hired_set:", err); fail(res, 500, String(err.message || err)); }
     finally { conn.release(); }
   });
@@ -538,14 +631,20 @@ module.exports = function (deps) {
       const who = await me(req);
       await conn.beginTransaction();
       if (action === "approve") {
-        const execs = (await loadExecutors(conn, [o.id])).filter((e) => e.kind === "own" && e.role === "main");
-        for (const e of execs) await removeExecutorRow(conn, e, who.email);
-        await createOwnExecutor(conn, o, q.to_gos, "main", who, null);
+        if (q.type === "replace_carrier") { // наёмник - меняем компанию НА исполнителе, машину не трогаем
+          const [hex] = await conn.query(`SELECT id FROM plan_order_executors WHERE order_id = ? AND kind = 'hired' AND removed_at IS NULL`, [o.id]);
+          if (hex.length) await conn.query(`UPDATE plan_order_executors SET carrier_name = ?, carrier_id = ?, updated_by = ? WHERE id = ?`, [q.to_carrier_name, q.to_carrier_id, who.email, hex[0].id]);
+        } else {
+          const execs = (await loadExecutors(conn, [o.id])).filter((e) => e.kind === "own" && e.role === "main");
+          for (const e of execs) await removeExecutorRow(conn, e, who.email);
+          await createOwnExecutor(conn, o, q.to_gos, "main", who, null);
+        }
         await conn.query(`UPDATE plan_orders SET needs_data_sent_at = NULL, updated_by = ? WHERE id = ?`, [who.email, o.id]); // данные на пропуск надо отправить заново
       }
       await conn.query(`UPDATE plan_order_change_requests SET status = ?, resolved_by = ?, resolved_by_name = ?, resolved_at = NOW() WHERE id = ?`,
         [action === "approve" ? "approved" : "rejected", who.email, who.name, rid]);
-      await history(conn, o.id, "change_request_" + action, null, q.from_gos + " -> " + q.to_gos, who.email);
+      await history(conn, o.id, "change_request_" + action, null,
+        (q.type === "replace_carrier" ? q.from_carrier_name + " -> " + q.to_carrier_name : q.from_gos + " -> " + q.to_gos), who.email);
       await conn.commit(); return respondOrder(res, o.id);
     } catch (err) { try { await conn.rollback(); } catch (e) {} console.error("change_request_resolve:", err); fail(res, 500, String(err.message || err)); }
     finally { conn.release(); }
@@ -619,6 +718,29 @@ module.exports = function (deps) {
       res.json({ mine: mine.map((m) => ({ name: m.customer, n: Number(m.n), entity_id: m.entity_id })), all });
     } catch (err) { console.error("orders customers:", err); fail(res, 500, String(err.message || err)); }
   });
+  // Подсказки для «Компания-перевозчик» у наёмника (Влад 12.09: «тоже должен быть справочник
+  // юридических лиц» - раньше было голое текстовое поле). Своя история наёмок + весь справочник
+  // юрлиц, как у «Заказчика» - тот же принцип, отдельный эндпоинт, т.к. «мои за 30 дней» у
+  // customers - это per-менеджер выборка из plan_orders, а тут - per-перевозчик выборка из
+  // plan_order_executors, разные группировки. История - Влад 12.09 (второй заход): «подсказки
+  // тех поставщиков, с кем мы уже В ЭТОМ МЕСЯЦЕ работаем» - JOIN на plan_orders.service_date
+  // в границах текущего календарного месяца, не всё время (was: без временн0го окна вообще).
+  app.get("/api/orders/carriers", ...gate, async (req, res) => {
+    try {
+      const q = String(req.query.q || "").trim(); if (q.length < 2) return res.json({ history: [], all: [] });
+      const like = q + "%";
+      const [history] = await pool.query(
+        `SELECT e.carrier_name AS carrier_name, MAX(e.carrier_id) AS carrier_id, COUNT(*) AS n
+           FROM plan_order_executors e JOIN plan_orders o ON o.id = e.order_id
+          WHERE e.kind = 'hired' AND e.removed_at IS NULL AND e.carrier_name LIKE ?
+            AND o.service_date >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+            AND o.service_date < DATE_FORMAT(CURDATE() + INTERVAL 1 MONTH, '%Y-%m-01')
+          GROUP BY e.carrier_name ORDER BY n DESC LIMIT 6`, [like]);
+      const [all] = await pool.query(
+        `SELECT id, name, inn, risk_light FROM sprav_legal_entities WHERE deleted_at IS NULL AND name LIKE ? ORDER BY name LIMIT 12`, [like]);
+      res.json({ history: history.map((h) => ({ name: h.carrier_name, entity_id: h.carrier_id, n: Number(h.n) })), all });
+    } catch (err) { console.error("orders carriers:", err); fail(res, 500, String(err.message || err)); }
+  });
   // Контакты и точки этого заказчика по прошлым заявкам (по частоте) - до карты.
   app.get("/api/orders/customer_history", ...gate, async (req, res) => {
     try {
@@ -658,6 +780,139 @@ module.exports = function (deps) {
           WHERE e.removed_at IS NULL AND o.deleted_at IS NULL AND e.vehicle_gos = ? AND o.service_date >= CURDATE() ORDER BY o.service_date, o.service_time`, [gos]);
       res.json({ orders: rows.map((x) => Object.assign(x, { service_date: fmtDate(x.service_date), service_time: fmtTime(x.service_time) })) });
     } catch (err) { console.error("by_vehicle:", err); fail(res, 500, String(err.message || err)); }
+  });
+
+  // ── «Лампочки»: кто сейчас на странице «Задание» (Влад 11.09: «у меня у единственного должны быть
+  // лампочки кто работает, как в Планировке - логисты, менеджеры, старшие»). Своя таблица, тот же
+  // принцип, что plan_presence: last_seen - вкладка открыта (heartbeat раз в 7 с), last_active - прямо
+  // сейчас что-то делает. Список отдаём ТОЛЬКО admin.
+  pool.query(`CREATE TABLE IF NOT EXISTS plan_orders_presence (
+      user_email VARCHAR(200) NOT NULL PRIMARY KEY, display_name VARCHAR(150) DEFAULT NULL,
+      last_seen DATETIME DEFAULT NULL, last_active DATETIME DEFAULT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)
+    .catch((e) => console.error("plan_orders_presence create:", e.message || e));
+  app.post("/api/orders/presence", ...gate, async (req, res) => {
+    try {
+      const who = await me(req); const active = String(p(req, "active")) === "1";
+      await pool.query(
+        `INSERT INTO plan_orders_presence (user_email, display_name, last_seen, last_active) VALUES (?, ?, NOW(), ${active ? "NOW()" : "NULL"})
+         ON DUPLICATE KEY UPDATE display_name = VALUES(display_name), last_seen = NOW()${active ? ", last_active = NOW()" : ""}`,
+        [req.userEmail, who.name]);
+      res.json({ ok: true });
+    } catch (err) { console.error("orders presence post:", err); fail(res, 500, String(err.message || err)); }
+  });
+  app.get("/api/orders/presence", checkSession, requireRole_("admin"), async (req, res) => {
+    try {
+      const r = await roster();
+      const [rows] = await pool.query(
+        `SELECT user_email, display_name, TIMESTAMPDIFF(SECOND, last_seen, NOW()) AS seen_ago,
+                TIMESTAMPDIFF(SECOND, last_active, NOW()) AS active_ago
+           FROM plan_orders_presence WHERE last_seen > NOW() - INTERVAL 40 SECOND`);
+      res.json({ users: rows.filter((x) => x.user_email !== req.userEmail).map((x) => {
+        const u = r.byEmail[x.user_email] || {};
+        return { email: x.user_email, name: u.name || x.display_name || x.user_email, code: u.code || code3(x.display_name || x.user_email),
+          role: u.role || null, seen_ago: Number(x.seen_ago), active_ago: x.active_ago === null ? null : Number(x.active_ago) };
+      }) });
+    } catch (err) { console.error("orders presence list:", err); fail(res, 500, String(err.message || err)); }
+  });
+
+  // ── Заказчик по ИНН (Влад 11.09: «при вводе ИНН должен вылететь контрагент с возможностью сохранить
+  // его в справочнике»). Сначала свой справочник, потом DaData (тот же findById/party, что у
+  // /api/sprav/legal_lookup, но доступен менеджеру/логисту - им заводить заказчика прямо из заявки).
+  const DADATA_KEY_ = process.env.DADATA_API_KEY;
+  async function dadataParty(inn) {
+    if (!DADATA_KEY_) return null;
+    const resp = await fetch("https://suggestions.dadata.ru/suggestions/api/4_1/rs/findById/party", {
+      method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Token " + DADATA_KEY_ },
+      body: JSON.stringify({ query: inn }),
+    });
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error("DaData: " + (body.message || resp.status));
+    const hit = (body.suggestions || [])[0]; if (!hit) return null;
+    const d = hit.data || {};
+    return {
+      name: hit.value || null, full_name: (d.name && d.name.full_with_opf) || hit.unrestricted_value || null,
+      inn: d.inn || inn, kpp: d.kpp || null, ogrn: d.ogrn || null,
+      legal_address: (d.address && d.address.unrestricted_value) || null,
+      director_name: (d.management && d.management.name) || null, director_post: (d.management && d.management.post) || null,
+      egrul_status: (d.state && d.state.status) || null,
+    };
+  }
+  app.get("/api/orders/inn", ...gate, async (req, res) => {
+    try {
+      const inn = String(req.query.inn || "").replace(/\D/g, "").slice(0, 12);
+      if (inn.length !== 10 && inn.length !== 12) return fail(res, 400, "ИНН - 10 или 12 цифр");
+      const [rows] = await pool.query(
+        `SELECT id, name, full_name, inn, kpp, ogrn, legal_address, director_name, is_own, risk_light FROM sprav_legal_entities
+          WHERE inn = ? AND deleted_at IS NULL ORDER BY is_own DESC, name LIMIT 1`, [inn]);
+      if (rows.length) return res.json({ found: "sprav", entity: rows[0] });
+      const d = await dadataParty(inn);
+      if (!d) return res.json({ found: false, inn });
+      res.json({ found: "dadata", entity: d });
+    } catch (err) { console.error("orders inn:", err); fail(res, 500, String(err.message || err)); }
+  });
+  // Сохранить найденного по ИНН в справочник (id le_inn_<ИНН>; повторный вызов - вернёт существующего).
+  app.post("/api/orders/inn_save", ...gate, async (req, res) => {
+    try {
+      const inn = String(p(req, "inn") || "").replace(/\D/g, "").slice(0, 12);
+      if (inn.length !== 10 && inn.length !== 12) return fail(res, 400, "ИНН - 10 или 12 цифр");
+      const [ex] = await pool.query(`SELECT id, name FROM sprav_legal_entities WHERE inn = ? AND deleted_at IS NULL LIMIT 1`, [inn]);
+      if (ex.length) return res.json({ ok: true, id: ex[0].id, name: ex[0].name, existed: true });
+      let d = { name: str(p(req, "name"), 150), full_name: str(p(req, "full_name"), 300), kpp: str(p(req, "kpp"), 9), ogrn: str(p(req, "ogrn"), 15),
+        legal_address: str(p(req, "legal_address"), 500), director_name: str(p(req, "director_name"), 200), director_post: str(p(req, "director_post"), 200),
+        egrul_status: str(p(req, "egrul_status"), 30) };
+      if (!d.name) { const dd = await dadataParty(inn); if (!dd) return fail(res, 404, "ИНН не найден"); d = dd; }
+      const id = "le_inn_" + inn;
+      await pool.query(
+        `INSERT INTO sprav_legal_entities (id, name, full_name, name_1c, inn, kpp, ogrn, legal_address, director_name, director_post, egrul_status, is_own, created_by, updated_by)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?) ON DUPLICATE KEY UPDATE updated_by = VALUES(updated_by)`,
+        [id, d.name, d.full_name, d.name, inn, d.kpp, d.ogrn, d.legal_address, d.director_name, d.director_post, d.egrul_status, req.userEmail, req.userEmail]);
+      await pool.query(`INSERT INTO sprav_audit_log (entity_type, entity_id, action, changed_by) VALUES ('legal_entity', ?, 'create', ?)`, [id, req.userEmail]).catch(() => {});
+      res.json({ ok: true, id, name: d.name, existed: false });
+    } catch (err) { console.error("orders inn_save:", err); fail(res, 500, String(err.message || err)); }
+  });
+
+  // ── Помощник ввода груза (Влад 11.09: «начинаю вводить BG - предлагает Bauer BG 40, jcb 3 - 3CX, морск -
+  // морской контейнер, быт - бытовка; Д×Ш×В и вес - автоматически, но с пометкой проверить»).
+  // Источники: plan_cargo_catalog (Справочники) + история заявок (что уже возили с весом/габаритами).
+  // Поиск: все слова запроса должны встретиться в name|aliases (без регистра, латиница/кириллица через aliases).
+  app.get("/api/orders/cargo", ...gate, async (req, res) => {
+    try {
+      const q = String(req.query.q || "").trim().toLowerCase();
+      if (q.length < 2) return res.json({ items: [] });
+      const words = q.split(/\s+/).filter(Boolean).slice(0, 4);
+      const like = words.map(() => "(LOWER(name) LIKE ? OR LOWER(COALESCE(aliases,'')) LIKE ?)").join(" AND ");
+      const args = []; words.forEach((w) => { args.push("%" + w + "%", "%" + w + "%"); });
+      const [cat] = await pool.query(
+        `SELECT name, aliases, category, length_m, width_m, height_m, weight_t, note FROM plan_cargo_catalog
+          WHERE active = 1 AND ${like} ORDER BY (LOWER(name) LIKE ?) DESC, \`rank\`, LENGTH(name) LIMIT 8`, args.concat([q + "%"]));
+      const [hist] = await pool.query(
+        `SELECT cargo, MAX(cargo_weight_t) AS weight_t, MAX(cargo_dims) AS dims, COUNT(*) AS n FROM plan_orders
+          WHERE deleted_at IS NULL AND cargo IS NOT NULL AND LOWER(cargo) LIKE ? GROUP BY cargo ORDER BY n DESC LIMIT 5`, ["%" + q + "%"]);
+      const dims = (r) => (r.length_m && r.width_m && r.height_m) ? [r.length_m, r.width_m, r.height_m].map((x) => String(Number(x)).replace(".", ",")).join(" × ") : null;
+      const items = cat.map((r) => ({ src: "catalog", name: r.name, category: r.category, weight_t: r.weight_t === null ? null : Number(r.weight_t),
+        dims: dims(r), length_m: Number(r.length_m) || null, width_m: Number(r.width_m) || null, height_m: Number(r.height_m) || null, note: r.note }));
+      hist.forEach((h) => { if (!items.some((i) => i.name.toLowerCase() === String(h.cargo).toLowerCase()))
+        items.push({ src: "history", name: h.cargo, n: Number(h.n), weight_t: h.weight_t === null ? null : Number(h.weight_t), dims: h.dims || null }); });
+      res.json({ items });
+    } catch (err) { console.error("orders cargo:", err); fail(res, 500, String(err.message || err)); }
+  });
+
+  // ── Справочник техники отдела экскаваторов (Влад 12.09: «только в форме заявки логиста должен быть
+  // справочник техники нашей... логисты заводят технику по госномеру, и она подгружается из справочника;
+  // но этот справочник нигде, кроме логистов, не нужен»). СТРОГО admin+logist - НЕ manager (проверка на
+  // сервере, не только скрытие на фронте). Ищет и по модели, и по госномеру (без пробелов, без регистра).
+  app.get("/api/orders/fleet", checkSession, requireRole_("admin", "logist"), async (req, res) => {
+    try {
+      const q = String(req.query.q || "").trim().toLowerCase();
+      if (q.length < 2) return res.json({ items: [] });
+      const qNoSpace = q.replace(/\s+/g, "");
+      const [rows] = await pool.query(
+        `SELECT model, gos_number, category FROM plan_fleet_excavators
+          WHERE active = 1 AND (LOWER(model) LIKE ? OR LOWER(REPLACE(gos_number, ' ', '')) LIKE ?)
+          ORDER BY (LOWER(REPLACE(gos_number, ' ', '')) LIKE ?) DESC, model LIMIT 8`,
+        ["%" + q + "%", "%" + qNoSpace + "%", qNoSpace + "%"]);
+      res.json({ items: rows.map((r) => ({ src: "fleet", name: r.model, gos: r.gos_number, category: r.category })) });
+    } catch (err) { console.error("orders fleet:", err); fail(res, 500, String(err.message || err)); }
   });
 
   console.log("plan-orders: эндпоинты /api/orders/* подключены");

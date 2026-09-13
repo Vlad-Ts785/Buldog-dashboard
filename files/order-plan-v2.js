@@ -235,6 +235,15 @@ function apiPostJson(path, obj) {
     body: JSON.stringify(obj || {})
   }).then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); });
 }
+/* Журнал живых сложностей (Влад 13.09: «где вводит и не вводится, где нажимает и не
+   нажимает - собрать массив для эргономиста»). ЭТО НЕ analytics-заход (тот уже есть,
+   checkSession/access_days) - только СМЫСЛОВЫЕ моменты трения: заблокированный клик,
+   неудачное сохранение, пустой поиск, размер экрана раз на страницу. Тихо, без тоста -
+   если сам пинг не прошёл, молчим, не мешаем реальному действию пользователя. Пилотный
+   участок - только «Задание» (order-plan-v2), не весь дашборд сразу. */
+function logUiEvent_(eventType, target, detail) {
+  try { apiPostJson('/ui_event', { page: 'order-plan-v2', event_type: eventType, target: target || '', detail: String(detail == null ? '' : detail).slice(0, 200) }).catch(function () {}); } catch (e) {}
+}
 /* Единый разбор ответа: ошибка - всегда тостом, это единственный канал (ГОСТ) */
 function ok_(r, okFn, failMsg) {
   if (r && r.ok && r.data && r.data.error == null) { if (okFn) okFn(r.data); return true; }
@@ -381,7 +390,26 @@ function toast(html, undoFn, ms) {
 function hideToast() { var t = toastEl(); if (t) t.classList.remove('op2-show'); }
 function soon(what) { S.attention(); toast('<span class="op2-warn">' + esc(what) + '</span> · формируется в следующей версии'); }
 /* документы (СТС, паспорт) - хранилище справочников подключается следующим этапом */
-function soonDoc(what) { S.attention(); toast('<span class="op2-warn">' + esc(what) + '</span> · следующая версия: сканы подтянем из Справочников'); }
+function soonDoc(what) { S.attention(); toast('<span class="op2-warn">' + esc(what) + '</span> · сканов паспортов в системе пока нет вообще; СНИЛС/права/медсправка есть в Справочниках, но пока только у admin - решение по личным данным ждёт Влада'); }
+/* Влад 13.09 (за полночь): «СТС тягача и прицепа уже есть в базе - почему бы не
+   реализовать» - действительно есть (sprav_asset_documents, doc_type='sts'), тот же
+   эндпоинт, что уже скачивает СТС по ПКМ в Планировке (lpDownloadSts_, files/index.html) -
+   клонируем 1:1 (feedback_clone_existing_visual_pattern), без единой правки на сервере.
+   sprav_assets.id = госномер как есть, с пробелами - тягач и прицеп одним и тем же кодом,
+   asset_id = v.vehicle_gos / v.trailer_gos. Доступно всем трём ролям (admin/manager/logist) -
+   /api/sprav/asset_documents и .../asset_document_file уже открыты им всем на чтение (см.
+   комментарий у самого роута на сервере, 31.08: "Планировка открыта логисту/менеджеру"). */
+function downloadSts_(assetId, label) {
+  if (!assetId) { toast('<span class="op2-warn">' + esc(label) + '</span> · ' + (label.indexOf('прицеп') >= 0 ? 'прицеп не сцеплен' : 'госномер неизвестен')); return; }
+  apiGet('/sprav/asset_documents', { asset_id: assetId }).then(function (r) {
+    if (!r || !r.ok) { toast('Не удалось получить документы'); return; }
+    var docs = (r.data && r.data.documents) || [];
+    var sts = docs.filter(function (d) { return d.doc_type === 'sts'; })[0];
+    if (!sts) { toast('СТС не загружен для ' + esc(assetId) + ' · загрузить можно в Справочниках'); return; }
+    var href = apiBase() + '/sprav/asset_document_file?session_token=' + encodeURIComponent(apiToken()) + '&id=' + encodeURIComponent(sts.id);
+    window.open(href, '_blank');
+  }).catch(function () { toast('Ошибка сети - не удалось получить СТС'); });
+}
 
 /* ═════════════════════════ РАЗМЕТКА ═════════════════════════ */
 function buildDom() {
@@ -547,6 +575,7 @@ function buildDom() {
     '</div>';
   blockForeignAutofill_(page); /* статический каркас - тулбарные поиски, поиск в поповере «Поставить» */
   wire();
+  logUiEvent_('viewport', '', window.innerWidth + 'x' + window.innerHeight); /* раз на страницу, не на каждый дровер */
   return true;
 }
 
@@ -2158,7 +2187,9 @@ function loadHistoryInto(o) {
     box.innerHTML = h.length ? h.map(function (x) {
       var label = HIST_ACTION_LABEL_[x.action] || x.action || '';
       var detail = humanizeHistoryDetail_(x.action, x.detail);
-      return '<li><span class="op2-tm">' + esc(humanAt_(x.at)) + '</span><span><span class="op2-who">' + esc(x.by || '') + '</span> ' + esc(label) + (detail ? ' · ' + esc(detail) : '') + '</span></li>';
+      /* Влад 13.09: «просто делай: имя, фамилия и всё» - без отчества, тем же приёмом
+         (fioName_), что уже сокращает ФИО водителя в колонке «Машина»; полное ФИО - в title. */
+      return '<li><span class="op2-tm">' + esc(humanAt_(x.at)) + '</span><span><span class="op2-who" title="' + esc(x.by || '') + '">' + esc(fioName_(x.by)) + '</span> ' + esc(label) + (detail ? ' · ' + esc(detail) : '') + '</span></li>';
     }).join('') : '<li><span class="op2-dim">записей пока нет</span></li>';
   }).catch(function () {});
 }
@@ -2199,10 +2230,10 @@ function renderView(o, who) {
       (o.needs_data ? '<div class="op2-line"><span class="op2-nd"></span><span class="op2-k">Под данные</span> данные обоих водителей у заказчика · замена только из заявленных, вне списка - новый пропуск' +
         (o.needs_data_sent_at ? ' · отправлено ' + esc(o.needs_data_sent_at) : '') + '</div>' : '') +
       '<div class="op2-line op2-docs"><span class="op2-k">Документы</span>' +
-        '<button class="op2-ghost op2-dl op2-soon" data-doc="СТС тягача ' + esc(v.vehicle_gos || '') + '">СТС тягача ⤓</button>' +
-        '<button class="op2-ghost op2-dl op2-soon" data-doc="СТС прицепа ' + esc(v.trailer_gos || '') + '">СТС прицепа ⤓</button>' +
+        '<button class="op2-ghost op2-dl" id="op2-sts-tractor" title="Скачать СТС тягача">СТС тягача ⤓</button>' +
+        '<button class="op2-ghost op2-dl' + (v.trailer_gos ? '' : ' op2-soon') + '" id="op2-sts-trailer" title="' + (v.trailer_gos ? 'Скачать СТС прицепа' : 'Прицеп не сцеплен') + '">СТС прицепа ⤓</button>' +
         '<button class="op2-ghost op2-dl op2-soon" data-doc="Паспорт ' + esc(v.driver_name || '') + '">Паспорт водителя ⤓</button>' +
-        '<button class="op2-ghost op2-dl op2-soon" data-doc="Паспортные данные текстом">Паспортные данные текстом</button>' +
+        '<button class="op2-ghost op2-dl op2-soon" data-doc="Данные водителя текстом">Данные водителя текстом</button>' +
       '</div>' +
       '<div class="op2-acts"><button class="op2-ghost op2-copybtn" data-copy="pass">Копировать данные на пропуск</button>' +
       '<button class="op2-dbtn op2-primary" id="op2-d-drv">Задание водителю</button>' +
@@ -2308,8 +2339,13 @@ function renderView(o, who) {
       setTimeout(function () { b.textContent = label; }, 1600);
     });
   });
-  /* СТС и паспорта - хранилище справочников подключим следующим этапом */
-  $$('.op2-dl', body).forEach(function (b) {
+  var stsT = $('#op2-sts-tractor', body);
+  if (stsT) stsT.addEventListener('click', function () { downloadSts_(v.vehicle_gos, 'СТС тягача'); });
+  var stsP = $('#op2-sts-trailer', body);
+  if (stsP) stsP.addEventListener('click', function () { downloadSts_(v.trailer_gos, 'СТС прицепа'); });
+  /* паспорт/личные данные водителя - см. комментарий у soonDoc: сканов паспортов нет
+     вообще, СНИЛС/права/медсправка есть, но пока только у admin (ПДн, /api/sprav/state) */
+  $$('.op2-dl[data-doc]', body).forEach(function (b) {
     b.addEventListener('click', function () { soonDoc(b.dataset.doc); });
   });
 }
@@ -3022,7 +3058,7 @@ function fetchCargo(q) {
     if (fleet.length) h += '<div class="op2-sec">Наша техника (гос.номер)</div>' + fleet.map(rowFleet).join('');
     if (cat.length) h += '<div class="op2-sec">Справочник техники</div>' + cat.map(row).join('');
     if (his.length) h += '<div class="op2-sec">Уже возили</div>' + his.map(row).join('');
-    if (!h) { $('#op2-f-cargobox').classList.remove('op2-open'); return; }
+    if (!h) { $('#op2-f-cargobox').classList.remove('op2-open'); logUiEvent_('empty_search', 'cargo', q); return; }
     $('#op2-f-cargolist').innerHTML = h;
     $('#op2-f-cargobox').classList.add('op2-open');
   }).catch(function () {});
@@ -3138,6 +3174,7 @@ function fetchGeoSuggest(side, q) {
           '<span>' + esc(main) + '</span><span class="op2-m">' + esc(sub) + '</span></div>';
       });
       geoSub.innerHTML = html ? '<div class="op2-sec">Адреса</div>' + html : '';
+      if (!html) logUiEvent_('empty_search', 'geocoder_' + side, q);
       /* проверка фокуса - ответ может прийти уже после того, как менеджер кликнул
          мимо (blur закрывает бокс через 150мс); без неё список открылся бы заново
          сам по себе поверх уже незнакомого действия */
@@ -3277,7 +3314,7 @@ function collectForm() {
   return payload;
 }
 function saveForm(btn) {
-  if (btn.classList.contains('op2-blocked')) { toast('<span class="op2-warn">' + esc(btn.textContent) + '</span>'); return; }
+  if (btn.classList.contains('op2-blocked')) { logUiEvent_('blocked_click', 'save', btn.textContent); toast('<span class="op2-warn">' + esc(btn.textContent) + '</span>'); return; }
   var warn = btn.classList.contains('op2-warn');
   var payload = collectForm();
   var editing = !!(formOrder && !formRepeat && !formPrefill);
@@ -3286,7 +3323,7 @@ function saveForm(btn) {
   btn.disabled = true;
   apiPostJson('/orders/save', payload).then(function (r) {
     btn.disabled = false;
-    if (!ok_(r)) return;
+    if (!ok_(r)) { logUiEvent_('save_error', 'orders/save', (r && r.data && r.data.error) || 'сервер недоступен'); return; }
     var d = r.data;
     formMode = false;
     closeDrawer();
@@ -3298,7 +3335,7 @@ function saveForm(btn) {
       (editing ? '' : (payload.internal ? '' : (formWho === 'log' ? ' · менеджер увидит у себя' : ' · логисты видят сразу'))));
     if (payload.service_date !== DATE && !TO_DATE) { DATE = payload.service_date; renderAll(); }
     loadOrders(); loadCounts(); loadFree();
-  }).catch(function () { btn.disabled = false; });
+  }).catch(function () { btn.disabled = false; logUiEvent_('save_error', 'orders/save', 'сеть'); });
 }
 
 /* ═════════════════════════ ПОВТОРИТЬ (один экран: дни × количество × время) ═════════════════════════

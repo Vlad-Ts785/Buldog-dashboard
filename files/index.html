@@ -25634,6 +25634,21 @@ function toggleUiSound() {
    <head> уже выставил атрибут из localStorage до первой отрисовки (анти-FOUC) -
    здесь только логика переключения и синхронизация лейбла кнопки.
    При logout НЕ чистится - тема принадлежит устройству, не сессии. */
+// Журнал живых сложностей (Влад 13.09: «собрать массив для эргономиста - где вводит и
+// не вводится, где нажимает и не нажимает»; затем в том же разговоре - «Планировка тоже
+// должно работать, это два основных инструмента работы с сотрудником»). Тот же
+// ui_events/POST /api/ui_event, что уже стоит на «Задании» (order-plan-v2.js,
+// logUiEvent_ там - 3-аргументная версия с зашитым page). Здесь, в общем files/
+// index.html, page САМ параметр - этот файл хостит много разных страниц, не только
+// Планировку. Тихо, без тоста - не мешает реальному действию при сбое отправки.
+// См. память project_ui_events_friction_tracking - свериться с накопленными данными
+// ПЕРЕД доработкой уже инструментированного экрана.
+function logUiEvent_(page, eventType, target, detail) {
+  try {
+    if (typeof SESSION_TOKEN === 'undefined' || !SESSION_TOKEN) return;
+    fetch(YARD_API_BASE + '/ui_event', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Session-Token': SESSION_TOKEN }, body: JSON.stringify({ page: page, event_type: eventType, target: target || '', detail: String(detail == null ? '' : detail).slice(0, 200) }) }).catch(function(){});
+  } catch(e){}
+}
 // Учёт темы по пользователю (Влад 13.09: «понять какой % сотрудников на светлой -
 // если 50 на 50, всерьёз проработать светлый режим»). Только СЧЁТ на сервере
 // (theme_prefs, отдельная таблица) - само применение темы остаётся полностью
@@ -28728,14 +28743,14 @@ function saveSegs(){
     var w = JSON.parse(current[id]);
     pushSegToServer_(w).then(function(r){
       if (r && r.ok){ segsSnapshot_[id] = current[id]; delete dirtySegIds_[id]; }
-      else toast("Не сохранилось на сервер - запись пока только у вас", null);
+      else { logUiEvent_("logistics-plan", "save_error", "seg_save", ""); toast("Не сохранилось на сервер - запись пока только у вас", null); }
     });
   });
   Object.keys(segsSnapshot_).forEach(function(id){
     if (current[id]) return;
     postToYardApi_("/plan/seg_delete", {id:id}).then(function(r){
       if (r && r.ok) delete segsSnapshot_[id];
-      else toast("Удаление не дошло до сервера - повторится автоматически", null);
+      else { logUiEvent_("logistics-plan", "save_error", "seg_delete", ""); toast("Удаление не дошло до сервера - повторится автоматически", null); }
     }).catch(function(){});
   });
 }
@@ -29086,7 +29101,7 @@ function lpWireCustomerInput_(inputId, boxId, setVal){
     var matches = orderPlanCustomerList_().filter(function(n){
       return n.toLowerCase().indexOf(val) === 0;
     }).slice(0, 15);
-    if (!matches.length){ box.style.display = "none"; box.innerHTML = ""; return; }
+    if (!matches.length){ box.style.display = "none"; box.innerHTML = ""; if (val.length >= 3) logUiEvent_("logistics-plan", "empty_search", "customer", val); return; }
     box.innerHTML = matches.map(function(n){
       return '<div style="padding:7px 10px;cursor:pointer;font-size:13px;color:var(--text)">' + n.replace(/</g, "&lt;") + "</div>";
     }).join("");
@@ -29205,20 +29220,20 @@ function openCreateDrawer(vi, s, l){
     drawer.querySelector(".cr-cancel").onclick = closeDrawer;
     drawer.querySelector(".cr-submit").onclick = function(){
       var ns = localInputValToH_(crStartEl.value), ne = localInputValToH_(crEndEl.value);
-      if (ns == null || ne == null){ toast("Некорректная дата", null); return; }
-      if (ne <= ns){ toast("Окончание должно быть позже начала", null); return; }
+      if (ns == null || ne == null){ logUiEvent_("logistics-plan", "blocked_click", "lp_create", "Некорректная дата"); toast("Некорректная дата", null); return; }
+      if (ne <= ns){ logUiEvent_("logistics-plan", "blocked_click", "lp_create", "Окончание раньше начала"); toast("Окончание должно быть позже начала", null); return; }
       s = ns; l = ne - ns;
       var clash = STATE.segs.some(function(x){ return x.v === vi && s < x.s + x.l && x.s < s + l && !lpOverlapAllowed_(kind, x.kind); });
-      if (clash){ S.reject(); toast("Пересечение с другим отрезком - не создал", null); return; }
+      if (clash){ S.reject(); logUiEvent_("logistics-plan", "blocked_click", "lp_create", "Пересечение с другим отрезком"); toast("Пересечение с другим отрезком - не создал", null); return; }
       // Менеджер/Логист - ОБЯЗАТЕЛЬНЫЙ явный выбор у рейса (см. разбор у mgIdx/lgIdx
       // выше) - без него "Создать" молча приписал бы рейс первому в списке.
       if (kind === "trip" && (mgIdx < 0 || lgIdx < 0)){
-        S.reject(); toast("Выберите менеджера и логиста", null); return;
+        S.reject(); logUiEvent_("logistics-plan", "blocked_click", "lp_create", "Не выбран менеджер/логист"); toast("Выберите менеджера и логиста", null); return;
       }
       // Причина ремонта/ТО - обязательна (11.09, Влад: см. разбор у isRepairLike выше) -
       // тот же принцип, что у Менеджера/Логиста рейса: без явного значения не сохраняем.
       if (isRepairLike && !repairReasonVal.trim()){
-        S.reject(); toast(kind === "repair" ? "Укажите причину ремонта" : "Укажите причину ТО", null); return;
+        S.reject(); logUiEvent_("logistics-plan", "blocked_click", "lp_create", kind === "repair" ? "Не указана причина ремонта" : "Не указана причина ТО"); toast(kind === "repair" ? "Укажите причину ремонта" : "Укажите причину ТО", null); return;
       }
       if (kind === "driveroff") pushDriver(v, s, l, DRIVEROFF_REASONS_[reasonIdx][0]);
       /* from/to НЕ обязательны - логист может ещё не знать точку на момент постановки
@@ -29437,8 +29452,8 @@ function openDrawer(seg){
 
     document.getElementById("lp-drSave").onclick = function(){
       var newS = localInputValToH_(startEl.value), newE = localInputValToH_(endEl.value);
-      if (newS == null || newE == null){ toast("Некорректная дата", null); return; }
-      if (newE <= newS){ toast("Окончание должно быть позже начала", null); return; }
+      if (newS == null || newE == null){ logUiEvent_("logistics-plan", "blocked_click", "lp_edit", "Некорректная дата"); toast("Некорректная дата", null); return; }
+      if (newE <= newS){ logUiEvent_("logistics-plan", "blocked_click", "lp_edit", "Окончание раньше начала"); toast("Окончание должно быть позже начала", null); return; }
       var newL = newE - newS;
       /* x.id !== seg.id, НЕ x !== seg (было) - шторка может простоять открытой
          дольше 7 секунд (человек вручную набирает даты), а поллинг синка за это
@@ -29454,12 +29469,12 @@ function openDrawer(seg){
       var clash = STATE.segs.some(function(x){
         return x.id !== seg.id && x.v === liveSeg.v && newS < x.s + x.l && x.s < newS + newL && !lpOverlapAllowed_(liveSeg.kind, x.kind);
       });
-      if (clash){ S.reject(); toast("Пересечение с другим отрезком - не сохранил", null); return; }
+      if (clash){ S.reject(); logUiEvent_("logistics-plan", "blocked_click", "lp_edit", "Пересечение с другим отрезком"); toast("Пересечение с другим отрезком - не сохранил", null); return; }
       // Причина ремонта/ТО - обязательна и при редактировании, не только при создании
       // (11.09, Влад: см. разбор у isRepairLike выше) - иначе "Сохранить" молча стёр бы
       // уже введённую причину пустым значением, если кто-то её случайно очистил.
       if (isRepairLike && !repairReasonVal.trim()){
-        S.reject(); toast(seg.kind === "repair" ? "Укажите причину ремонта" : "Укажите причину ТО", null); return;
+        S.reject(); logUiEvent_("logistics-plan", "blocked_click", "lp_edit", seg.kind === "repair" ? "Не указана причина ремонта" : "Не указана причина ТО"); toast(seg.kind === "repair" ? "Укажите причину ремонта" : "Укажите причину ТО", null); return;
       }
       seg = liveSeg;
       var before = {s: seg.s, l: seg.l, v: seg.v};
@@ -30411,7 +30426,11 @@ function setZoomClass_(z){
    страницы целиком: .page скрыт display:none до первого клика, размеры ленты
    недоступны для замера, пока не показан, а сам парк/статусы машин могли измениться
    с прошлого визита - пересобираем начисто. */
+var lpViewportLogged_ = false; /* раз на реальную загрузку страницы - initLP() сам
+  перевызывается на каждый заход на вкладку (см. разбор STATE.collapsed чуть ниже),
+  без этого флага viewport писался бы на каждое переключение вкладки, а не раз. */
 function initLP(){
+  if (!lpViewportLogged_) { lpViewportLogged_ = true; logUiEvent_("logistics-plan", "viewport", "", window.innerWidth + "x" + window.innerHeight); }
   /* НАЙДЕННЫЙ БАГ (31.08, живой пример Влада на мобильной "Таблице": "если
      длинномеры сворачиваю - пропадает вообще планировка... эта проблема уже
      была сегодня описана" - та же история, что у Миши днём раньше). Корень:

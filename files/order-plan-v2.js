@@ -2094,13 +2094,71 @@ function openDrawerView(o, who, withHistory) {
   }).catch(function () {});
   if (withHistory) loadHistoryInto(o);
 }
+/* Влад 13.09 (ночь): «история должна писаться человеческим языком, как и даты и время» -
+   сервер отдаёт сырые action/detail/ISO-дату (`/orders/history`, лог для отладки, менять там
+   формат под UI не стали - тот же JSON читает и будущий отчёт по истории заявки), человеческий
+   вид - целиком на клиенте. Дата/время - ТЕМ ЖЕ приёмом, что и везде в этом файле (dm/todayStr/
+   addDays - чистая работа со строкой 'YYYY-MM-DD' и hhmmOf - регэксп по HH:MM в самой строке,
+   без new Date().getHours() - тот же принцип, что уже проверен на отбое/подтверждении водителя
+   и ни разу не разъехался с реальным временем на живых заявках). */
+var HIST_ACTION_LABEL_ = {
+  create: 'создал заявку', update: 'изменил заявку', status: 'сменил статус',
+  take: 'назначил логиста', set_manager: 'назначил менеджера', otboy_ack: 'принял отбой',
+  delete: 'удалил заявку', executor_role: 'сменил роль машины', change_request: 'предложил замену',
+  executor_set: 'поставил машину', executor_remove: 'снял машину', executor_move: 'перенёс машину',
+  hired_set: 'оформил наёмника', change_request_approve: 'согласовал замену',
+  change_request_reject: 'отклонил замену', needs_data_sent: 'отправил данные на пропуск'
+};
+/* detail этих действий дословно повторяет то, что уже сказано в label/по автору - не дублируем */
+var HIST_SUPPRESS_DETAIL_ = { otboy_ack: 1, delete: 1, needs_data_sent: 1 };
+var HIST_FIELD_LABEL_ = {
+  service_date: 'дата', service_time: 'время', needs_data: 'под данные', customer: 'заказчик',
+  customer_entity_id: 'юрлицо заказчика', executor_entity_id: 'юрлицо-исполнитель',
+  customer_contact_name: 'контакт заказчика', customer_contact_phone: 'телефон заказчика',
+  equipment_type: 'тип техники', cargo: 'груз', cargo_weight_t: 'вес груза', cargo_dims: 'габариты груза',
+  gabarit: 'габарит', rework_terms: 'условия переработки', documents: 'документы', note: 'примечание',
+  cash: 'наличные', load_address: 'адрес погрузки', load_lat: 'координаты погрузки', load_lon: 'координаты погрузки',
+  load_confirmed: 'адрес погрузки подтверждён', load_contact_name: 'контакт на погрузке', load_contact_phone: 'телефон на погрузке',
+  unload_address: 'адрес выгрузки', unload_lat: 'координаты выгрузки', unload_lon: 'координаты выгрузки',
+  unload_confirmed: 'адрес выгрузки подтверждён', unload_contact_name: 'контакт на выгрузке', unload_contact_phone: 'телефон на выгрузке',
+  price: 'цена', payment_status: 'статус оплаты', internal: 'внутренний заказ', crm_deal_id: 'сделка CRM'
+};
+function humanizeHistoryDetail_(action, detail) {
+  detail = String(detail || '');
+  if (!detail || HIST_SUPPRESS_DETAIL_[action]) return '';
+  if (action === 'update') {
+    var seen = {};
+    var fields = detail.split(',').map(function (k) { return HIST_FIELD_LABEL_[k.trim()] || k.trim(); })
+      .filter(function (f) { if (!f || seen[f]) return false; seen[f] = true; return true; });
+    return fields.join(', ');
+  }
+  if (action === 'status') {
+    var m = detail.match(/^(\w+)\s*->\s*(\w+)$/);
+    if (m) return (ST_LABEL[ST_UI[m[1]]] || m[1]) + ' → ' + (ST_LABEL[ST_UI[m[2]]] || m[2]);
+  }
+  if (action === 'executor_set') detail = detail.replace(/\bmain\b/, 'основная').replace(/\breserve\b/, 'резерв');
+  return detail.replace(/\s*->\s*/g, ' → ');
+}
+/* «сегодня, 14:12» / «вчера, 09:34» / «13 сентября, 09:34» - дата определяется сравнением
+   строк 'YYYY-MM-DD' (см. комментарий выше про приём без new Date().getHours()) */
+function humanAt_(iso) {
+  if (!iso) return '';
+  var s = String(iso);
+  var d = s.slice(0, 10);
+  var hm = hhmmOf(s);
+  var t = todayStr(), y = addDays(t, -1);
+  var label = d === t ? 'сегодня' : (d === y ? 'вчера' : humanDate(d));
+  return label + (hm ? ', ' + hm : '');
+}
 function loadHistoryInto(o) {
   apiGet('/orders/history', { id: o.id }).then(function (r) {
     if (!r || !r.ok || !r.data || r.data.error) return;
     var box = $('#op2-hist-box'); if (!box) return;
     var h = r.data.history || [];
     box.innerHTML = h.length ? h.map(function (x) {
-      return '<li><span class="op2-tm">' + esc(x.at || '') + '</span><span><span class="op2-who">' + esc(x.by || '') + '</span> ' + esc(x.action || '') + (x.detail ? ' · ' + esc(x.detail) : '') + '</span></li>';
+      var label = HIST_ACTION_LABEL_[x.action] || x.action || '';
+      var detail = humanizeHistoryDetail_(x.action, x.detail);
+      return '<li><span class="op2-tm">' + esc(humanAt_(x.at)) + '</span><span><span class="op2-who">' + esc(x.by || '') + '</span> ' + esc(label) + (detail ? ' · ' + esc(detail) : '') + '</span></li>';
     }).join('') : '<li><span class="op2-dim">записей пока нет</span></li>';
   }).catch(function () {});
 }

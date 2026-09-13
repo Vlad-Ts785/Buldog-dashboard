@@ -235,6 +235,15 @@ function apiPostJson(path, obj) {
     body: JSON.stringify(obj || {})
   }).then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); });
 }
+/* Журнал живых сложностей (Влад 13.09: «где вводит и не вводится, где нажимает и не
+   нажимает - собрать массив для эргономиста»). ЭТО НЕ analytics-заход (тот уже есть,
+   checkSession/access_days) - только СМЫСЛОВЫЕ моменты трения: заблокированный клик,
+   неудачное сохранение, пустой поиск, размер экрана раз на страницу. Тихо, без тоста -
+   если сам пинг не прошёл, молчим, не мешаем реальному действию пользователя. Пилотный
+   участок - только «Задание» (order-plan-v2), не весь дашборд сразу. */
+function logUiEvent_(eventType, target, detail) {
+  try { apiPostJson('/ui_event', { page: 'order-plan-v2', event_type: eventType, target: target || '', detail: String(detail == null ? '' : detail).slice(0, 200) }).catch(function () {}); } catch (e) {}
+}
 /* Единый разбор ответа: ошибка - всегда тостом, это единственный канал (ГОСТ) */
 function ok_(r, okFn, failMsg) {
   if (r && r.ok && r.data && r.data.error == null) { if (okFn) okFn(r.data); return true; }
@@ -566,6 +575,7 @@ function buildDom() {
     '</div>';
   blockForeignAutofill_(page); /* статический каркас - тулбарные поиски, поиск в поповере «Поставить» */
   wire();
+  logUiEvent_('viewport', '', window.innerWidth + 'x' + window.innerHeight); /* раз на страницу, не на каждый дровер */
   return true;
 }
 
@@ -3048,7 +3058,7 @@ function fetchCargo(q) {
     if (fleet.length) h += '<div class="op2-sec">Наша техника (гос.номер)</div>' + fleet.map(rowFleet).join('');
     if (cat.length) h += '<div class="op2-sec">Справочник техники</div>' + cat.map(row).join('');
     if (his.length) h += '<div class="op2-sec">Уже возили</div>' + his.map(row).join('');
-    if (!h) { $('#op2-f-cargobox').classList.remove('op2-open'); return; }
+    if (!h) { $('#op2-f-cargobox').classList.remove('op2-open'); logUiEvent_('empty_search', 'cargo', q); return; }
     $('#op2-f-cargolist').innerHTML = h;
     $('#op2-f-cargobox').classList.add('op2-open');
   }).catch(function () {});
@@ -3164,6 +3174,7 @@ function fetchGeoSuggest(side, q) {
           '<span>' + esc(main) + '</span><span class="op2-m">' + esc(sub) + '</span></div>';
       });
       geoSub.innerHTML = html ? '<div class="op2-sec">Адреса</div>' + html : '';
+      if (!html) logUiEvent_('empty_search', 'geocoder_' + side, q);
       /* проверка фокуса - ответ может прийти уже после того, как менеджер кликнул
          мимо (blur закрывает бокс через 150мс); без неё список открылся бы заново
          сам по себе поверх уже незнакомого действия */
@@ -3303,7 +3314,7 @@ function collectForm() {
   return payload;
 }
 function saveForm(btn) {
-  if (btn.classList.contains('op2-blocked')) { toast('<span class="op2-warn">' + esc(btn.textContent) + '</span>'); return; }
+  if (btn.classList.contains('op2-blocked')) { logUiEvent_('blocked_click', 'save', btn.textContent); toast('<span class="op2-warn">' + esc(btn.textContent) + '</span>'); return; }
   var warn = btn.classList.contains('op2-warn');
   var payload = collectForm();
   var editing = !!(formOrder && !formRepeat && !formPrefill);
@@ -3312,7 +3323,7 @@ function saveForm(btn) {
   btn.disabled = true;
   apiPostJson('/orders/save', payload).then(function (r) {
     btn.disabled = false;
-    if (!ok_(r)) return;
+    if (!ok_(r)) { logUiEvent_('save_error', 'orders/save', (r && r.data && r.data.error) || 'сервер недоступен'); return; }
     var d = r.data;
     formMode = false;
     closeDrawer();
@@ -3324,7 +3335,7 @@ function saveForm(btn) {
       (editing ? '' : (payload.internal ? '' : (formWho === 'log' ? ' · менеджер увидит у себя' : ' · логисты видят сразу'))));
     if (payload.service_date !== DATE && !TO_DATE) { DATE = payload.service_date; renderAll(); }
     loadOrders(); loadCounts(); loadFree();
-  }).catch(function () { btn.disabled = false; });
+  }).catch(function () { btn.disabled = false; logUiEvent_('save_error', 'orders/save', 'сеть'); });
 }
 
 /* ═════════════════════════ ПОВТОРИТЬ (один экран: дни × количество × время) ═════════════════════════

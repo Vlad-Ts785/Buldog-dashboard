@@ -390,7 +390,6 @@ function toast(html, undoFn, ms) {
 function hideToast() { var t = toastEl(); if (t) t.classList.remove('op2-show'); }
 function soon(what) { S.attention(); toast('<span class="op2-warn">' + esc(what) + '</span> · формируется в следующей версии'); }
 /* документы (СТС, паспорт) - хранилище справочников подключается следующим этапом */
-function soonDoc(what) { S.attention(); toast('<span class="op2-warn">' + esc(what) + '</span> · сканов паспортов в системе пока нет вообще; СНИЛС/права/медсправка есть в Справочниках, но пока только у admin - решение по личным данным ждёт Влада'); }
 /* Влад 13.09 (за полночь): «СТС тягача и прицепа уже есть в базе - почему бы не
    реализовать» - действительно есть (sprav_asset_documents, doc_type='sts'), тот же
    эндпоинт, что уже скачивает СТС по ПКМ в Планировке (lpDownloadSts_, files/index.html) -
@@ -409,6 +408,54 @@ function downloadSts_(assetId, label) {
     var href = apiBase() + '/sprav/asset_document_file?session_token=' + encodeURIComponent(apiToken()) + '&id=' + encodeURIComponent(sts.id);
     window.open(href, '_blank');
   }).catch(function () { toast('Ошибка сети - не удалось получить СТС'); });
+}
+/* Влад 13.09 (утро): «сильно обновил справочники - в плане документов, в плане паспортных
+   данных» - сканы паспорта/прав того же образца, что СТС (sprav_people_documents, тот же
+   принцип - открыт admin/manager/logist/mechanic). doc_type: 'passport' | 'license'.
+   personId = driver_person_id исполнителя (sprav_people.id, уже приходит в каждом executor -
+   createOwnExecutor кладёт его при постановке машины). «Не у всех водителей пока есть» -
+   не хардкодим, кого показывать: нет скана - понятное сообщение, а не тихая заглушка. */
+function downloadPersonDoc_(personId, docType, label) {
+  if (!personId) { toast('<span class="op2-warn">' + esc(label) + '</span> · водитель не сопоставлен со справочником людей'); return; }
+  apiGet('/sprav/person_documents', { person_id: personId }).then(function (r) {
+    if (!r || !r.ok) { toast('Не удалось получить документы'); return; }
+    var docs = (r.data && r.data.documents) || [];
+    var doc = docs.filter(function (d) { return d.doc_type === docType; })[0];
+    if (!doc) { toast(esc(label) + ' не загружен(а) для этого водителя · загрузить можно в Справочниках'); return; }
+    var href = apiBase() + '/sprav/person_document_file?session_token=' + encodeURIComponent(apiToken()) + '&id=' + encodeURIComponent(doc.id);
+    window.open(href, '_blank');
+  }).catch(function () { toast('Ошибка сети - не удалось получить документ'); });
+}
+/* «Паспортные данные»/«Права» текстом - копирует в буфер, тот же визуальный приём, что у
+   [data-copy] (кнопка на 1.6с показывает «Скопировано ✓»), только с сетевым запросом перед
+   копированием - узкий /sprav/person_pass_text (НЕ /sprav/state - там ПДн только у admin,
+   см. комментарий на сервере), тот же принцип открытости, что уже у сканов. */
+function copyPersonText_(personId, kind, btn) {
+  if (!personId) { toast('<span class="op2-warn">Данные водителя</span> · водитель не сопоставлен со справочником людей'); return; }
+  var label = btn.textContent;
+  apiGet('/sprav/person_pass_text', { person_id: personId }).then(function (r) {
+    if (!r || !r.ok || !r.data || !r.data.person) { toast('Нет данных по этому водителю в Справочниках'); return; }
+    var p = r.data.person;
+    var text = kind === 'passport' ? formatPassportText_(p) : formatLicenseText_(p);
+    if (!text) { toast((kind === 'passport' ? 'Паспортные данные' : 'Данные прав') + ' не заполнены для ' + esc(p.full_name || 'этого водителя') + ' · заполнить можно в Справочниках'); return; }
+    copyText(text);
+    btn.textContent = 'Скопировано ✓';
+    setTimeout(function () { btn.textContent = label; }, 1600);
+  }).catch(function () { toast('Ошибка сети - не удалось получить данные'); });
+}
+function formatPassportText_(p) {
+  if (!p.passport_series && !p.passport_number) return null;
+  var L = [p.full_name || ''];
+  L.push('Паспорт: ' + [p.passport_series, p.passport_number].filter(Boolean).join(' '));
+  if (p.passport_issued_by) L.push('Выдан: ' + p.passport_issued_by + (p.passport_issued_at ? ' ' + dmy(p.passport_issued_at) : ''));
+  if (p.passport_department_code) L.push('Код подразделения: ' + p.passport_department_code);
+  return L.filter(Boolean).join('\n');
+}
+function formatLicenseText_(p) {
+  if (!p.license_number) return null;
+  var L = [p.full_name || '', 'Водительское удостоверение: ' + p.license_number];
+  if (p.license_expiry) L.push('Действительно до: ' + dmy(p.license_expiry));
+  return L.filter(Boolean).join('\n');
 }
 
 /* ═════════════════════════ РАЗМЕТКА ═════════════════════════ */
@@ -2232,8 +2279,10 @@ function renderView(o, who) {
       '<div class="op2-line op2-docs"><span class="op2-k">Документы</span>' +
         '<button class="op2-ghost op2-dl" id="op2-sts-tractor" title="Скачать СТС тягача">СТС тягача ⤓</button>' +
         '<button class="op2-ghost op2-dl' + (v.trailer_gos ? '' : ' op2-soon') + '" id="op2-sts-trailer" title="' + (v.trailer_gos ? 'Скачать СТС прицепа' : 'Прицеп не сцеплен') + '">СТС прицепа ⤓</button>' +
-        '<button class="op2-ghost op2-dl op2-soon" data-doc="Паспорт ' + esc(v.driver_name || '') + '">Паспорт водителя ⤓</button>' +
-        '<button class="op2-ghost op2-dl op2-soon" data-doc="Данные водителя текстом">Данные водителя текстом</button>' +
+        '<button class="op2-ghost op2-dl" id="op2-doc-passport" title="Скачать скан паспорта">Паспорт водителя ⤓</button>' +
+        '<button class="op2-ghost op2-dl" id="op2-doc-license" title="Скачать скан водительского удостоверения">Права водителя ⤓</button>' +
+        '<button class="op2-ghost op2-copybtn" id="op2-doc-passport-text" title="Скопировать паспортные данные">Паспортные данные текстом</button>' +
+        '<button class="op2-ghost op2-copybtn" id="op2-doc-license-text" title="Скопировать данные прав">Права текстом</button>' +
       '</div>' +
       '<div class="op2-acts"><button class="op2-ghost op2-copybtn" data-copy="pass">Копировать данные на пропуск</button>' +
       '<button class="op2-dbtn op2-primary" id="op2-d-drv">Задание водителю</button>' +
@@ -2343,11 +2392,14 @@ function renderView(o, who) {
   if (stsT) stsT.addEventListener('click', function () { downloadSts_(v.vehicle_gos, 'СТС тягача'); });
   var stsP = $('#op2-sts-trailer', body);
   if (stsP) stsP.addEventListener('click', function () { downloadSts_(v.trailer_gos, 'СТС прицепа'); });
-  /* паспорт/личные данные водителя - см. комментарий у soonDoc: сканов паспортов нет
-     вообще, СНИЛС/права/медсправка есть, но пока только у admin (ПДн, /api/sprav/state) */
-  $$('.op2-dl[data-doc]', body).forEach(function (b) {
-    b.addEventListener('click', function () { soonDoc(b.dataset.doc); });
-  });
+  var docPass = $('#op2-doc-passport', body);
+  if (docPass) docPass.addEventListener('click', function () { downloadPersonDoc_(v.driver_person_id, 'passport', 'Паспорт водителя'); });
+  var docLic = $('#op2-doc-license', body);
+  if (docLic) docLic.addEventListener('click', function () { downloadPersonDoc_(v.driver_person_id, 'license', 'Права водителя'); });
+  var docPassTxt = $('#op2-doc-passport-text', body);
+  if (docPassTxt) docPassTxt.addEventListener('click', function () { copyPersonText_(v.driver_person_id, 'passport', docPassTxt); });
+  var docLicTxt = $('#op2-doc-license-text', body);
+  if (docLicTxt) docLicTxt.addEventListener('click', function () { copyPersonText_(v.driver_person_id, 'license', docLicTxt); });
 }
 function resolveRequest(o, action, who) {
   var p = o.pending_request; if (!p) return;

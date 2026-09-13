@@ -102,6 +102,14 @@ module.exports = function (deps) {
     const mgr = rosterMap[o.manager_email];
     out.manager_code = mgr ? mgr.code : (o.manager_name ? code3(o.manager_name) : null);
     out.taken_by_code = o.taken_by_name ? code3(o.taken_by_name) : null;
+    // Влад 12.09: «почему нет заполнения в колонке Менеджер? Тот, кто создаёт заявку, тот и
+    // менеджер... старший руководитель видит все заявки, эта колонка нужна, чтобы увидеть,
+    // кто какие заявки создал» - раньше пусто, если manager_email не проставлен (например,
+    // заявку создал логист/admin без явного выбора менеджера, а internal=0). created_by
+    // (email) на plan_orders был всегда, просто не резолвился в имя/код для клиента.
+    const creator = rosterMap[o.created_by];
+    out.created_by_name = creator ? creator.name : null;
+    out.created_by_code = creator ? creator.code : null;
     out.executors = execs.map((e) => Object.assign({}, e, {
       purchase_rate: e.purchase_rate === null ? null : Number(e.purchase_rate),
       driver_confirmed_at: e.driver_confirmed_at ? new Date(e.driver_confirmed_at).toISOString() : null,
@@ -328,11 +336,30 @@ module.exports = function (deps) {
       [st, st, st, req.userEmail, o.id]);
     return o.status + " -> " + st;
   }));
+  // Влад 12.09 (вечер): «у логистов должна быть возможность смены логиста» - тот же /take,
+  // теперь с необязательным email: без него - самоназначение (как раньше, обратная
+  // совместимость со всеми существующими вызовами), email="none" - снять назначение (нужно
+  // фронту для undo в тосте), любой другой email из ростера - назначить ИМЕННО этого
+  // логиста/admin (тот же permissive-принцип, что уже был у самоназначения - без
+  // подтверждения владельца, команда маленькая, доверие взаимное).
   app.post("/api/orders/take", ...gate, (req, res) => simpleUpdate(req, res, "take", async (conn, o) => {
     if (req.userRole === "manager") { fail(res, 403, "«беру в работу» - действие логиста"); return false; }
+    const raw = p(req, "email");
+    if (raw === "none") {
+      await conn.query(`UPDATE plan_orders SET taken_by = NULL, taken_by_name = NULL, taken_at = NULL, updated_by = ? WHERE id = ?`, [req.userEmail, o.id]);
+      return (o.taken_by_name || "никто") + " -> никто";
+    }
     const who = await me(req);
-    await conn.query(`UPDATE plan_orders SET taken_by = ?, taken_by_name = ?, taken_at = NOW(), updated_by = ? WHERE id = ?`, [req.userEmail, who.name, req.userEmail, o.id]);
-    return who.name;
+    let target = who;
+    const targetEmail = str(raw, 255);
+    if (targetEmail) {
+      const r = await roster();
+      const t = r.byEmail[targetEmail];
+      if (!t || (t.role !== "logist" && t.role !== "admin")) { fail(res, 400, "логист не найден"); return false; }
+      target = t;
+    }
+    await conn.query(`UPDATE plan_orders SET taken_by = ?, taken_by_name = ?, taken_at = NOW(), updated_by = ? WHERE id = ?`, [target.email, target.name, req.userEmail, o.id]);
+    return (o.taken_by_name || "никто") + " -> " + target.name;
   }));
   app.post("/api/orders/otboy_ack", ...gate, (req, res) => simpleUpdate(req, res, "otboy_ack", async (conn, o) => {
     if (o.status !== "cancelled") { fail(res, 400, "по заявке нет отбоя"); return false; }
@@ -540,6 +567,9 @@ module.exports = function (deps) {
         comment: str(p(req, "comment"), 500), found_by: req.userRole === "manager" ? "manager" : "logist",
       };
       if (!f.carrier_name) return fail(res, 400, "перевозчик обязателен");
+      // Влад 12.09: «отдать наёмнику невозможно без указания цены» - ставка закупки
+      // обязательна, без исключения (та же логика, что цена заявки при создании).
+      if (!f.purchase_rate) return fail(res, 400, "ставка закупки обязательна");
       await conn.beginTransaction();
       const [ex] = await conn.query(`SELECT id, carrier_name FROM plan_order_executors WHERE order_id = ? AND kind = 'hired' AND removed_at IS NULL`, [orderId]);
       const prevName = ex.length ? String(ex[0].carrier_name || "").trim() : "";
@@ -669,17 +699,23 @@ module.exports = function (deps) {
     } catch (err) { console.error("orders customers:", err); fail(res, 500, String(err.message || err)); }
   });
   // Подсказки для «Компания-перевозчик» у наёмника (Влад 12.09: «тоже должен быть справочник
-  // юридических лиц» - раньше было голое текстовое поле). Своя история наёмок (частота) +
-  // весь справочник юрлиц, как у «Заказчика» - тот же принцип, отдельный эндпоинт, т.к. «мои
-  // за 30 дней» у customers - это per-менеджер выборка из plan_orders, а тут - per-перевозчик
-  // выборка из plan_order_executors, разные группировки.
+  // юридических лиц» - раньше было голое текстовое поле). Своя история наёмок + весь справочник
+  // юрлиц, как у «Заказчика» - тот же принцип, отдельный эндпоинт, т.к. «мои за 30 дней» у
+  // customers - это per-менеджер выборка из plan_orders, а тут - per-перевозчик выборка из
+  // plan_order_executors, разные группировки. История - Влад 12.09 (второй заход): «подсказки
+  // тех поставщиков, с кем мы уже В ЭТОМ МЕСЯЦЕ работаем» - JOIN на plan_orders.service_date
+  // в границах текущего календарного месяца, не всё время (was: без временн0го окна вообще).
   app.get("/api/orders/carriers", ...gate, async (req, res) => {
     try {
       const q = String(req.query.q || "").trim(); if (q.length < 2) return res.json({ history: [], all: [] });
       const like = q + "%";
       const [history] = await pool.query(
-        `SELECT carrier_name, MAX(carrier_id) AS carrier_id, COUNT(*) AS n FROM plan_order_executors
-          WHERE kind = 'hired' AND removed_at IS NULL AND carrier_name LIKE ? GROUP BY carrier_name ORDER BY n DESC LIMIT 6`, [like]);
+        `SELECT e.carrier_name AS carrier_name, MAX(e.carrier_id) AS carrier_id, COUNT(*) AS n
+           FROM plan_order_executors e JOIN plan_orders o ON o.id = e.order_id
+          WHERE e.kind = 'hired' AND e.removed_at IS NULL AND e.carrier_name LIKE ?
+            AND o.service_date >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+            AND o.service_date < DATE_FORMAT(CURDATE() + INTERVAL 1 MONTH, '%Y-%m-01')
+          GROUP BY e.carrier_name ORDER BY n DESC LIMIT 6`, [like]);
       const [all] = await pool.query(
         `SELECT id, name, inn, risk_light FROM sprav_legal_entities WHERE deleted_at IS NULL AND name LIKE ? ORDER BY name LIMIT 12`, [like]);
       res.json({ history: history.map((h) => ({ name: h.carrier_name, entity_id: h.carrier_id, n: Number(h.n) })), all });

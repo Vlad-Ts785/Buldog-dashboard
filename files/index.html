@@ -25060,10 +25060,22 @@ function toggleUiSound() {
    <head> уже выставил атрибут из localStorage до первой отрисовки (анти-FOUC) -
    здесь только логика переключения и синхронизация лейбла кнопки.
    При logout НЕ чистится - тема принадлежит устройству, не сессии. */
+// Учёт темы по пользователю (Влад 13.09: «понять какой % сотрудников на светлой -
+// если 50 на 50, всерьёз проработать светлый режим»). Только СЧЁТ на сервере
+// (theme_prefs, отдельная таблица) - само применение темы остаётся полностью
+// локальным (localStorage), это решение 29.08 не меняется. Тихо, без тоста/лога -
+// это телеметрия, не действие пользователя.
+function pingTheme_(name) {
+  try {
+    if (typeof SESSION_TOKEN === 'undefined' || !SESSION_TOKEN) return;
+    fetch(YARD_API_BASE + '/theme_ping', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Session-Token': SESSION_TOKEN }, body: JSON.stringify({ theme: name === 'light' ? 'light' : 'dark' }) }).catch(function(){});
+  } catch(e){}
+}
 function applyTheme(name) {
   if (name === 'light') document.documentElement.setAttribute('data-theme', 'light');
   else document.documentElement.removeAttribute('data-theme');
   try { localStorage.setItem('yardhub_theme', name === 'light' ? 'light' : 'dark'); } catch(e){}
+  pingTheme_(name);
   var label = document.getElementById('theme-btn-label');
   if (label) label.textContent = 'Тема: ' + (name === 'light' ? 'светлая' : 'тёмная');
   // Инвалидация запечённых цветов (Chart.js датасеты, инлайн-стили в шаблонах) -
@@ -25112,6 +25124,9 @@ function toggleTheme() {
   if (label && document.documentElement.getAttribute('data-theme') === 'light') {
     label.textContent = 'Тема: светлая';
   }
+  // пинг на КАЖДУЮ загрузку страницы, не только на переключение - иначе те, кто
+  // тему никогда не трогал, вообще не попадут в счёт (см. pingTheme_ выше)
+  pingTheme_(document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark');
 })();
 (function initUiSound_() {
   var label = document.getElementById('sound-btn-label');

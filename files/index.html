@@ -1667,6 +1667,17 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   font-weight:600;margin:18px 0 10px;padding-top:14px;border-top:1px solid var(--border);}
 .asset-form-section:first-of-type{margin-top:0;padding-top:0;border-top:none;}
 @media(max-width:820px){.asset-form-grid{grid-template-columns:1fr;}}
+/* Чип «Статус»/«Роли» карточки сотрудника (13.09, вариант A мозгового штурма про
+   drv-reg-drawer, одобрен Владом - "мне нравится первый вариант"). Визуальные токены -
+   как .crm-chip (не скоуп страницы, дашборд-уровня, как сам .mp-drawer), но выбранное
+   состояние - зелёным (не нейтральным bg4, как у CRM-фильтров) - здесь чип это ЗНАЧЕНИЕ
+   поля (как в «Задании»), не переключатель фильтра. aria-pressed как состояние. */
+.drv-chip{appearance:none;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:var(--bg3);color:var(--muted);
+  font-family:inherit;font-size:12.5px;font-weight:500;line-height:1;padding:7px 12px;border-radius:8px;cursor:pointer;white-space:nowrap;
+  transition:border-color .15s var(--ease-out-soft),color .15s var(--ease-out-soft),background-color .15s var(--ease-out-soft);}
+.drv-chip:hover{color:var(--text);border-color:var(--border-strong);}
+.drv-chip[aria-pressed="true"]{background:var(--bg4);color:var(--green);border-color:var(--green);}
+.drv-chip:focus-visible{outline:2px solid var(--blue);outline-offset:1px;}
 /* Вкладка "Сцепка" (30.08, Влад - вариант "список-таблица" из трёх превью) - чипы
    тягач/прицеп/водитель кликабельны, открывают fleet-picker; строка истории
    раскрывается под строкой тягача. */
@@ -4317,105 +4328,116 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
     <div id="fleet-picker" class="fleet-picker"></div>
 
     <!-- Форма добавления/правки сотрудника - тот же drawer-канон, что "Пропавшие клиенты"
-         (.mp-drawer/.mp-drawer-bk, дашборд-уровня, не завязан на конкретную страницу). -->
+         (.mp-drawer/.mp-drawer-bk, дашборд-уровня, не завязан на конкретную страницу).
+         13.09 - разложена на подписанные секции + сетка asset-form-grid (как у «Юрлица»/
+         «Актива» по соседству) + чипы вместо select/чекбоксов для Статуса/Ролей - вариант
+         A мозгового штурма, Влад: «мне нравится первый вариант». Поля/id/поведение те же,
+         что были - меняется только раскладка (см. DESIGN_SYSTEM.md 2.35). -->
     <div class="mp-drawer-bk" id="drv-reg-bk" onclick="drvRegCloseForm_()"></div>
-    <div class="mp-drawer mp-drawer-float" id="drv-reg-drawer">
+    <div class="mp-drawer mp-drawer-float mp-drawer-wide" id="drv-reg-drawer">
      <div class="mp-drawer-float-body">
       <h3 id="drv-reg-drawer-title">Добавить сотрудника</h3>
-      <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">ФИО *</label>
-        <input autocomplete="off" id="drv-reg-name" type="text" maxlength="150" placeholder="Фамилия Имя Отчество"
-          style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
-      <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Телефон</label>
-        <input autocomplete="off" id="drv-reg-phone" type="text" maxlength="64" placeholder="+7 900 000-00-00"
-          style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
-      <!-- ИНН/СНИЛС/дата рождения/дата приёма/адрес (30.08, аудит Справочников - были в
-           базе с импорта 1С, но не в форме: правка карточки без этих полей стирала бы их
-           на сервере, если бы не COALESCE-страховка; теперь поля видны и редактируемы). -->
-      <div style="display:flex;gap:10px;margin-bottom:12px">
-        <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">ИНН</label>
-          <input autocomplete="off" id="drv-reg-inn" type="text" maxlength="12" placeholder="12 цифр"
+
+      <div class="asset-form-section">Личные данные</div>
+      <div class="asset-form-grid">
+        <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">ФИО *</label>
+          <input autocomplete="off" id="drv-reg-name" type="text" maxlength="150" placeholder="Фамилия Имя Отчество"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
-        <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">СНИЛС</label>
-          <input autocomplete="off" id="drv-reg-snils" type="text" maxlength="14" placeholder="000-000-000 00"
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Телефон</label>
+          <input autocomplete="off" id="drv-reg-phone" type="text" maxlength="64" placeholder="+7 900 000-00-00"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
-      </div>
-      <div style="display:flex;gap:10px;margin-bottom:12px">
-        <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Дата рождения</label>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Дата рождения</label>
           <input autocomplete="off" id="drv-reg-birth-date" type="date"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark"></div>
-        <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Дата приёма</label>
-          <input autocomplete="off" id="drv-reg-hire-date" type="date"
-            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark"></div>
+        <!-- ИНН/СНИЛС (30.08, аудит Справочников - были в базе с импорта 1С, но не в форме:
+             правка карточки без этих полей стирала бы их на сервере, если бы не COALESCE-
+             страховка; теперь поля видны и редактируемы) - ВСЕГДА видны, не только у
+             водителей, поэтому в общей секции, не в водительском блоке ниже. -->
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">ИНН</label>
+          <input autocomplete="off" id="drv-reg-inn" type="text" maxlength="12" placeholder="12 цифр"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">СНИЛС</label>
+          <input autocomplete="off" id="drv-reg-snils" type="text" maxlength="14" placeholder="000-000-000 00"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Адрес по прописке</label>
+          <input autocomplete="off" id="drv-reg-address" type="text" maxlength="400" placeholder="необязательно"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
       </div>
+
       <!-- Статус занятости (09.09, Влад: "справочник должен различать работает/уволен, с
            датой увольнения" - ОДНА точка правды, откуда логика дашборда узнаёт, действующий
            сотрудник или нет; см. DESIGN_SYSTEM.md 2.21). Дата увольнения - только при
-           статусе "уволен", как срок прав/медсправки у водителя выше. -->
-      <div style="display:flex;gap:10px;margin-bottom:12px">
-        <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Статус</label>
-          <select id="drv-reg-status" onchange="drvRegToggleFiredDate_()"
-            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none">
-            <option value="active">Работает</option>
-            <option value="fired">Уволен(а)</option>
-          </select></div>
-        <div style="flex:1" id="drv-reg-fired-date-wrap"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Дата увольнения</label>
-          <input autocomplete="off" id="drv-reg-fired-date" type="date"
+           статусе "уволен", как срок прав/медсправки у водителя ниже. Роли (Влад, 30.08:
+           "от физических лиц пойдут: водитель, менеджер, механик") - многие-ко-многим,
+           один человек может совмещать роли - чипы, не чекбоксы (13.09, вариант A). -->
+      <div class="asset-form-section">Работа</div>
+      <div class="asset-form-grid">
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Дата приёма</label>
+          <input autocomplete="off" id="drv-reg-hire-date" type="date"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark"></div>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Статус</label>
+          <div id="drv-reg-status-chips" style="display:flex;gap:8px;flex-wrap:wrap;padding-top:1px">
+            <button type="button" class="drv-chip" data-group="status" data-value="active" aria-pressed="true" onclick="drvRegChipClick_(this)">Работает</button>
+            <button type="button" class="drv-chip" data-group="status" data-value="fired" aria-pressed="false" onclick="drvRegChipClick_(this)">Уволен(а)</button>
+          </div></div>
+        <div class="asset-form-full" id="drv-reg-fired-date-wrap"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Дата увольнения</label>
+          <input autocomplete="off" id="drv-reg-fired-date" type="date"
+            style="width:100%;max-width:340px;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark"></div>
+        <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:6px">Роли</label>
+          <div id="drv-reg-role-chips" style="display:flex;gap:8px;flex-wrap:wrap">
+            <button type="button" class="drv-chip" data-group="role" data-value="driver" aria-pressed="false" onclick="drvRegChipClick_(this)">Водитель</button>
+            <button type="button" class="drv-chip" data-group="role" data-value="manager" aria-pressed="false" onclick="drvRegChipClick_(this)">Менеджер</button>
+            <button type="button" class="drv-chip" data-group="role" data-value="mechanic" aria-pressed="false" onclick="drvRegChipClick_(this)">Механик</button>
+            <button type="button" class="drv-chip" data-group="role" data-value="logist" aria-pressed="false" onclick="drvRegChipClick_(this)">Логист</button>
+          </div></div>
       </div>
-      <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Адрес по прописке</label>
-        <input autocomplete="off" id="drv-reg-address" type="text" maxlength="400" placeholder="необязательно"
-          style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
-      <!-- Роли (Влад, 30.08: "от физических лиц пойдут: водитель, менеджер, механик") -
-           многие-ко-многим, один человек может совмещать роли. -->
-      <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:6px">Роли</label>
-        <div style="display:flex;gap:16px;flex-wrap:wrap">
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text)"><input autocomplete="off" type="checkbox" id="drv-reg-role-driver" onchange="drvRegToggleDriverFields_()"> Водитель</label>
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text)"><input autocomplete="off" type="checkbox" id="drv-reg-role-manager"> Менеджер</label>
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text)"><input autocomplete="off" type="checkbox" id="drv-reg-role-mechanic"> Механик</label>
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text)"><input autocomplete="off" type="checkbox" id="drv-reg-role-logist"> Логист</label>
-        </div>
-      </div>
-      <!-- Документы - показываются только при роли "водитель" (Влад, 30.08, по мотивам
-           1С:ТЛ - "система отслеживает сроки действия удостоверений... справок"). -->
+
+      <!-- Документы водителя - показываются только при роли "водитель" (Влад, 30.08, по
+           мотивам 1С:ТЛ - "система отслеживает сроки действия удостоверений... справок";
+           паспорт - 13.09, по аналогии с ВУ). -->
       <div id="drv-reg-driver-fields" style="display:none">
-        <div style="display:flex;gap:10px;margin-bottom:12px">
-          <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">№ водит. удостоверения</label>
+        <div class="asset-form-section">Права и медицина</div>
+        <div class="asset-form-grid">
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">№ водит. удостоверения</label>
             <input autocomplete="off" id="drv-reg-license-num" type="text" maxlength="32" placeholder="77 АБ 123456"
               style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
-          <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Права до</label>
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Права до</label>
             <input autocomplete="off" id="drv-reg-license-exp" type="date"
               style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark"></div>
-        </div>
-        <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Медсправка до</label>
-          <input autocomplete="off" id="drv-reg-medical-exp" type="date"
-            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark"></div>
-        <!-- Паспорт (13.09, Влад: "прикрепить к справочнику каждому водителю" сканы с Диска +
-             паспортные данные). Серия/номер отдельными полями (как в самом бланке паспорта) -
-             удобнее для сверки, склеиваются при необходимости на бэкенде/экспорте. -->
-        <div style="font-size:12px;color:var(--muted);margin:14px 0 8px;padding-top:10px;border-top:1px solid var(--border)">Паспорт</div>
-        <div style="display:flex;gap:10px;margin-bottom:12px">
-          <div style="flex:0 0 70px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Серия</label>
-            <input autocomplete="off" id="drv-reg-passport-series" type="text" maxlength="4" placeholder="4510"
-              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
-          <div style="flex:0 0 100px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Номер</label>
-            <input autocomplete="off" id="drv-reg-passport-number" type="text" maxlength="6" placeholder="123456"
-              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
-          <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Дата выдачи</label>
-            <input autocomplete="off" id="drv-reg-passport-issued-at" type="date"
+          <div class="asset-form-full" style="max-width:340px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Медсправка до</label>
+            <input autocomplete="off" id="drv-reg-medical-exp" type="date"
               style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark"></div>
         </div>
-        <div style="display:flex;gap:10px;margin-bottom:12px">
-          <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Кем выдан</label>
+
+        <!-- Паспорт (13.09, Влад: "прикрепить к справочнику каждому водителю" сканы с Диска +
+             паспортные данные). Серия/номер отдельными полями (как в самом бланке паспорта) -
+             удобнее для сверки, склеиваются при необходимости на бэкенде/экспорте. Внутренние
+             flex-ряды - как были, просто каждый теперь одна ячейка широкой сетки. -->
+        <div class="asset-form-section">Паспорт</div>
+        <div class="asset-form-grid">
+          <div class="asset-form-full" style="display:flex;gap:10px">
+            <div style="flex:0 0 70px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Серия</label>
+              <input autocomplete="off" id="drv-reg-passport-series" type="text" maxlength="4" placeholder="4510"
+                style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+            <div style="flex:0 0 100px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Номер</label>
+              <input autocomplete="off" id="drv-reg-passport-number" type="text" maxlength="6" placeholder="123456"
+                style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+            <div style="flex:1;max-width:220px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Дата выдачи</label>
+              <input autocomplete="off" id="drv-reg-passport-issued-at" type="date"
+                style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark"></div>
+          </div>
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Кем выдан</label>
             <input autocomplete="off" id="drv-reg-passport-issued-by" type="text" maxlength="300" placeholder="ОТДЕЛОМ УФМС РОССИИ ПО ... В ..."
               style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
-          <div style="flex:0 0 110px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Код подразд.</label>
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Код подразд.</label>
             <input autocomplete="off" id="drv-reg-passport-dept-code" type="text" maxlength="10" placeholder="770-001"
-              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+              style="width:100%;max-width:180px;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
         </div>
+
         <!-- Сканы паспорта/ВУ - только у уже сохранённой записи (нужен person_id, к которому
              прикреплять файл), тот же паттерн, что документы техники (СТС, 30.08). -->
-        <div id="drv-doc-section" style="display:none;margin-bottom:12px">
-          <div style="font-size:12px;color:var(--muted);margin-bottom:8px;padding-top:10px;border-top:1px solid var(--border)">Сканы документов</div>
+        <div id="drv-doc-section" style="display:none">
+          <div class="asset-form-section">Сканы документов</div>
           <div id="drv-doc-list" style="margin-bottom:8px"></div>
           <div style="display:flex;gap:8px;align-items:center">
             <select id="drv-doc-type" style="background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 8px;color:var(--text);font-size:12px">
@@ -4431,7 +4453,8 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
           <div id="drv-doc-error" style="display:none;color:var(--red);font-size:12px;margin-top:6px"></div>
         </div>
       </div>
-      <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Заметка</label>
+
+      <div style="margin:18px 0 12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Заметка</label>
         <input autocomplete="off" id="drv-reg-notes" type="text" maxlength="300" placeholder="необязательно"
           style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
       <div id="drv-reg-error" style="display:none;color:var(--red);font-size:12px;margin-bottom:10px"></div>
@@ -13954,16 +13977,37 @@ function drvRegPaint_() {
 
 // Поле "Документы" в форме имеет смысл только у роли "водитель" - показываем/прячем при
 // переключении галочки, не заставляем листать пустые поля тех, кто не водитель.
+// Чипы «Статус»/«Роли» (13.09, вариант A мозгового штурма - см. DESIGN_SYSTEM.md 2.35):
+// aria-pressed как состояние, без скрытых input. Статус - одиночный выбор (эксклюзивно
+// внутри своей группы), Роли - любое сочетание (обычный toggle одного чипа).
+function drvRegChipClick_(el) {
+  var group = el.getAttribute('data-group');
+  if (group === 'status') {
+    [].forEach.call(el.parentNode.querySelectorAll('.drv-chip'), function(x) { x.setAttribute('aria-pressed', 'false'); });
+    el.setAttribute('aria-pressed', 'true');
+    drvRegToggleFiredDate_();
+  } else {
+    el.setAttribute('aria-pressed', el.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
+    if (el.getAttribute('data-value') === 'driver') drvRegToggleDriverFields_();
+  }
+}
+function drvRegStatusValue_() {
+  var on = document.querySelector('#drv-reg-status-chips .drv-chip[aria-pressed="true"]');
+  return on ? on.getAttribute('data-value') : 'active';
+}
+function drvRegRoles_() {
+  return [].map.call(document.querySelectorAll('#drv-reg-role-chips .drv-chip[aria-pressed="true"]'), function(x) { return x.getAttribute('data-value'); });
+}
 function drvRegToggleDriverFields_() {
   var box = document.getElementById('drv-reg-driver-fields');
-  var checked = document.getElementById('drv-reg-role-driver').checked;
+  var checked = drvRegRoles_().indexOf('driver') >= 0;
   if (box) box.style.display = checked ? '' : 'none';
 }
 // Дата увольнения имеет смысл только при статусе "уволен(а)" - тот же приём, что у
 // полей документов водителя выше (drvRegToggleDriverFields_).
 function drvRegToggleFiredDate_() {
   var box = document.getElementById('drv-reg-fired-date-wrap');
-  var fired = document.getElementById('drv-reg-status').value === 'fired';
+  var fired = drvRegStatusValue_() === 'fired';
   if (box) box.style.display = fired ? '' : 'none';
   if (!fired) document.getElementById('drv-reg-fired-date').value = '';
 }
@@ -13985,14 +14029,16 @@ function drvRegOpenForm_(id) {
   document.getElementById('drv-reg-snils').value = d ? (d.snils || '') : '';
   document.getElementById('drv-reg-birth-date').value = d ? (d.birth_date || '') : '';
   document.getElementById('drv-reg-hire-date').value = d ? (d.hire_date || '') : '';
-  document.getElementById('drv-reg-status').value = d && d.employment_status === 'fired' ? 'fired' : 'active';
+  var statusVal = d && d.employment_status === 'fired' ? 'fired' : 'active';
+  [].forEach.call(document.querySelectorAll('#drv-reg-status-chips .drv-chip'), function(x) {
+    x.setAttribute('aria-pressed', x.getAttribute('data-value') === statusVal ? 'true' : 'false');
+  });
   document.getElementById('drv-reg-fired-date').value = d ? (d.fired_date || '') : '';
   drvRegToggleFiredDate_();
   document.getElementById('drv-reg-address').value = d ? (d.address || '') : '';
-  document.getElementById('drv-reg-role-driver').checked = roles.indexOf('driver') >= 0;
-  document.getElementById('drv-reg-role-manager').checked = roles.indexOf('manager') >= 0;
-  document.getElementById('drv-reg-role-mechanic').checked = roles.indexOf('mechanic') >= 0;
-  document.getElementById('drv-reg-role-logist').checked = roles.indexOf('logist') >= 0;
+  [].forEach.call(document.querySelectorAll('#drv-reg-role-chips .drv-chip'), function(x) {
+    x.setAttribute('aria-pressed', roles.indexOf(x.getAttribute('data-value')) >= 0 ? 'true' : 'false');
+  });
   drvRegToggleDriverFields_();
   document.getElementById('drv-reg-license-num').value = d ? (d.license_number || '') : '';
   document.getElementById('drv-reg-license-exp').value = d ? (d.license_expiry || '') : '';
@@ -14029,11 +14075,7 @@ function drvRegSave_() {
   errEl.style.display = 'none';
   var name = document.getElementById('drv-reg-name').value.trim();
   if (!name) { errEl.textContent = 'ФИО обязательно'; errEl.style.display = ''; return; }
-  var roles = [];
-  if (document.getElementById('drv-reg-role-driver').checked) roles.push('driver');
-  if (document.getElementById('drv-reg-role-manager').checked) roles.push('manager');
-  if (document.getElementById('drv-reg-role-mechanic').checked) roles.push('mechanic');
-  if (document.getElementById('drv-reg-role-logist').checked) roles.push('logist');
+  var roles = drvRegRoles_();
   var id = fleetDriversEditId_ || fleetGenId_('p_');
   var params = {
     id: id, name: name,
@@ -14042,7 +14084,7 @@ function drvRegSave_() {
     snils: document.getElementById('drv-reg-snils').value.trim(),
     birth_date: document.getElementById('drv-reg-birth-date').value,
     hire_date: document.getElementById('drv-reg-hire-date').value,
-    employment_status: document.getElementById('drv-reg-status').value,
+    employment_status: drvRegStatusValue_(),
     fired_date: document.getElementById('drv-reg-fired-date').value,
     address: document.getElementById('drv-reg-address').value.trim(),
     roles: roles.join(','),

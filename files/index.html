@@ -1644,6 +1644,17 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   transition:transform .38s cubic-bezier(.34,1.4,.5,1);}
 .mp-drawer.show{transform:translateX(0);}
 @media(prefers-reduced-motion:reduce){.mp-drawer{transition:none;}}
+/* «Плавающая скруглённая шторка» (ГОСТ разд.3, канон 12.09, `.op2-drawer` в «Задании») -
+   точечная миграция конкретных форм по мере работы с ними (Влад: "буду обнаруживать и
+   просить"), НЕ всех mp-drawer разом - модификатор, не правка базового класса. Меняется
+   только рамка (отступ 16px от краёв + скругление + тень), слот/слайд/backdrop те же. */
+.mp-drawer.mp-drawer-float{top:16px;right:16px;bottom:16px;border:1px solid var(--border-strong);
+  border-radius:16px;box-shadow:0 2px 6px rgba(0,0,0,.35),0 20px 50px rgba(0,0,0,.35);
+  overflow:hidden;padding:0;display:flex;flex-direction:column;transform:translateX(calc(100% + 24px));}
+/* Специфичность .mp-drawer.show (2 класса) равна .mp-drawer.mp-drawer-float (2 класса) -
+   кто ниже по файлу, тот и победил бы; нужен явный приоритет для открытого состояния. */
+.mp-drawer.mp-drawer-float.show{transform:translateX(0);}
+.mp-drawer-float-body{padding:22px;overflow-y:auto;flex:1;min-height:0;}
 .mp-drawer h3{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px;font-weight:600;}
 /* Широкий вариант дровера (30.08, Влад: "чтобы карточка техники была в два раза шире...
    поработал эргономист") - модификатор поверх .mp-drawer, НЕ замена базового класса, чтобы
@@ -4308,7 +4319,8 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
     <!-- Форма добавления/правки сотрудника - тот же drawer-канон, что "Пропавшие клиенты"
          (.mp-drawer/.mp-drawer-bk, дашборд-уровня, не завязан на конкретную страницу). -->
     <div class="mp-drawer-bk" id="drv-reg-bk" onclick="drvRegCloseForm_()"></div>
-    <div class="mp-drawer" id="drv-reg-drawer">
+    <div class="mp-drawer mp-drawer-float" id="drv-reg-drawer">
+     <div class="mp-drawer-float-body">
       <h3 id="drv-reg-drawer-title">Добавить сотрудника</h3>
       <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">ФИО *</label>
         <input autocomplete="off" id="drv-reg-name" type="text" maxlength="150" placeholder="Фамилия Имя Отчество"
@@ -4431,6 +4443,7 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
       </div>
       <button type="button" id="drv-reg-del-btn" onclick="drvRegDelete_()" data-nav-sound style="display:none;margin-top:10px;width:100%;
         background:transparent;border:1px solid rgba(226,75,74,.4);color:var(--red);border-radius:8px;padding:9px;font-size:13px;cursor:pointer">Удалить сотрудника</button>
+     </div>
     </div>
 
     <!-- «Карточка сцепки» (Влад, 30.08: «сочетание водителя, полуприцепа, тягача даёт в
@@ -13910,17 +13923,22 @@ function drvRegPaint_() {
     var open = isDriver ? fleetOpenAssignment_('driver', d.id) : null;
     var tractorCell = !isDriver ? '<span class="muted">—</span>'
       : (open ? '<span class="mono">' + pageEsc_(open.tractor_gos) + '</span>' : '<span class="muted">не сцеплен</span>');
+    // Строка кликабельна целиком (13.09, Влад: "окно с данными вылетало по нажатию на
+    // строчку") - открывает ту же форму правки, что раньше требовала отдельной кнопки
+    // "Править" (убрана как дублирующая - строка сама теперь эта кнопка, тот же приём,
+    // что debt-row-toggle). "Карточка" - другое действие (карточка для отправки), не
+    // дублирует правку - останавливает всплытие, как и чекбокс, иначе клик по ней
+    // сначала открыл бы карточку, а затем (по всплытию) ещё и форму правки поверх.
     var actions = d.is_deleted
-      ? '<button onclick="drvRegRestore_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);' +
+      ? '<button onclick="event.stopPropagation();drvRegRestore_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);' +
         'color:var(--green);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Восстановить</button>'
-      : (isDriver ? '<button onclick="drvCardOpen_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);' +
-        'color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;margin-right:6px">Карточка</button>' : '') +
-        '<button onclick="drvRegOpenForm_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);' +
-        'color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Править</button>';
+      : (isDriver ? '<button onclick="event.stopPropagation();drvCardOpen_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);' +
+        'color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Карточка</button>' : '<span class="muted">—</span>');
     var checkbox = d.is_deleted ? '' :
-      '<input type="checkbox" data-pid="' + pageEsc_(d.id) + '"' + (drvSelected_[d.id] ? ' checked' : '') +
+      '<input type="checkbox" data-pid="' + pageEsc_(d.id) + '" onclick="event.stopPropagation()"' + (drvSelected_[d.id] ? ' checked' : '') +
       ' onchange="drvToggleRowSelect_(\'' + idEsc + '\', this.checked)">';
-    return '<tr' + (d.is_deleted ? spravDeletedRowStyle_() : '') + '>' +
+    var rowClick = d.is_deleted ? '' : ' onclick="drvRegOpenForm_(\'' + idEsc + '\')" style="cursor:pointer"';
+    return '<tr' + rowClick + (d.is_deleted ? spravDeletedRowStyle_() : '') + '>' +
       '<td>' + checkbox + '</td>' +
       '<td><b>' + pageEsc_(d.full_name) + '</b>' + (d.is_deleted ? ' <span class="muted" style="font-size:11px">(удалён)</span>' : '') +
         (d.employment_status === 'fired' ? ' <span style="font-size:11px;color:var(--red)">· уволен(а)' + (d.fired_date ? ' с ' + fmtDateRu(d.fired_date) : '') + '</span>' : '') + '</td>' +

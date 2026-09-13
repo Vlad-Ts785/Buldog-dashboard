@@ -18390,9 +18390,13 @@ function renderSalesMgrGost_(opts) {
          (subtitle ? '<div class="sm-dept-sub">' + subtitle + '</div>' : '') + '</div>' +
          '<div style="text-align:right"><div class="sm-dept-tot">' + (soloLabel || 'итого группы') + '</div>' +
          '<div>' + smNum_(smFmt_(st.amount) + ' ₽', '', 'font-size:17px;font-weight:600') + '</div></div></div>';
-    t += '<div style="overflow-x:auto"><table class="tbl" style="min-width:680px"><thead><tr>' +
-      '<th>Менеджер</th><th class="num">Заказов</th><th class="num">Сумма</th><th class="num">Оплата</th>' +
-      '<th class="num">Прибыль найм</th><th class="num">Найм</th><th style="min-width:132px">План</th>' +
+    // "План" ₽ - до 13.09 виден был только столбец с bullet-баром/процентом справа, сама
+    // цифра плана нигде не отображалась (Влад: "только сейчас обратил внимание что не
+    // видно планов по менеджерам... перед суммой можно поставить"). mPlan/plan уже
+    // считались (для pct/frc ниже) - просто раньше не рендерились как число.
+    t += '<div style="overflow-x:auto"><table class="tbl" style="min-width:760px"><thead><tr>' +
+      '<th>Менеджер</th><th class="num">Заказов</th><th class="num">План</th><th class="num">Сумма</th><th class="num">Оплата</th>' +
+      '<th class="num">Прибыль найм</th><th class="num">Найм</th><th style="min-width:132px">% плана</th>' +
       '</tr></thead><tbody>';
     rows.forEach(function (r) {
       var m = r.m;
@@ -18400,7 +18404,7 @@ function renderSalesMgrGost_(opts) {
       if (!m) {
         var fn = HEAD_FULL[r.sur] || r.sur || '';
         t += '<tr style="opacity:.5"><td><b>' + fn + '</b> <span style="font-size:10px;color:var(--muted)">рук.</span></td>' +
-          '<td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td>' +
+          '<td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td>' +
           '<td class="num muted">—</td><td class="num muted">—</td><td class="muted" style="font-size:11px">—</td></tr>';
         return;
       }
@@ -18424,6 +18428,7 @@ function renderSalesMgrGost_(opts) {
       t += '<tr>' +
         '<td><b>' + cleanName(m.name) + '</b>' + (r.isHead ? ' <span style="font-size:10px;color:var(--muted)">рук.</span>' : '') + '</td>' +
         '<td class="num">' + smNum_(String(orders)) + dOrd + '</td>' +
+        '<td class="num">' + (mPlan ? smNum_(smFmt_(mPlan), '', 'color:var(--muted)') : '<span class="muted" style="font-size:11px">—</span>') + '</td>' +
         '<td class="num">' + smNum_(smFmt_(amount), '', 'font-weight:600') + dAmt + '</td>' +
         '<td class="num">' + smNum_(smFmt_(payment)) + '</td>' +
         '<td class="num">' + smNum_(smFmt_(m.profit || 0), '', (m.profit || 0) < 0 ? 'color:var(--red)' : '') + '</td>' +
@@ -18435,7 +18440,7 @@ function renderSalesMgrGost_(opts) {
       // Разворот «что добавилось сегодня» - тот же контракт, что в старом виде.
       if (!readOnly && mgrTodayVisible && mgrTodayKey === m.name) {
         var list = m.today_new_list || [];
-        t += '<tr id="mgr-today-row"><td colspan="7" style="background:rgba(var(--ink),0.03);padding:10px 14px;border-top:1px dashed var(--border)">' +
+        t += '<tr id="mgr-today-row"><td colspan="8" style="background:rgba(var(--ink),0.03);padding:10px 14px;border-top:1px dashed var(--border)">' +
           '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">' +
             '<div style="font-size:12px;font-weight:600">Что добавилось сегодня</div>' +
             '<div class="muted" style="font-size:11px">' + list.length + ' ' + (list.length === 1 ? 'заказ' : 'заказов') + ' · ' + smFmt_(m.today_new_amount || 0) + '</div>' +
@@ -18456,6 +18461,7 @@ function renderSalesMgrGost_(opts) {
       t += '<tr style="border-top:1px solid var(--border)">' +
         '<td style="font-size:12px;color:var(--muted)">Итого отдела</td>' +
         '<td class="num">' + smNum_(String(st.orders), '', 'font-weight:600') + '</td>' +
+        '<td class="num">' + smNum_(smFmt_(plan), '', 'font-weight:600;color:var(--muted)') + '</td>' +
         '<td class="num">' + smNum_(smFmt_(st.amount), '', 'font-weight:600') + '</td>' +
         '<td class="num">' + smNum_(smFmt_(st.payment), '', 'font-weight:600') + '</td>' +
         '<td class="num">' + smNum_(smFmt_(st.profit), '', 'font-weight:600' + (st.profit < 0 ? ';color:var(--red)' : '')) + '</td>' +

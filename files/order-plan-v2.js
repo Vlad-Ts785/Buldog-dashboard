@@ -2665,7 +2665,7 @@ function wireForm() {
   ['from', 'to'].forEach(function (side) {
     var inp = $('#op2-f-' + side);
     inp.addEventListener('focus', function () { if ($('#op2-f-' + side + 'list').querySelector('.op2-it')) $('#op2-f-' + side + 'box').classList.add('op2-open'); });
-    inp.addEventListener('blur', function () { setTimeout(function () { $('#op2-f-' + side + 'box').classList.remove('op2-open'); }, 150); tickState(); });
+    inp.addEventListener('blur', function () { setTimeout(function () { $('#op2-f-' + side + 'box').classList.remove('op2-open'); }, 150); tickState(); tryParseAddrPaste_(side); });
     inp.addEventListener('input', function () { fetchGeoSuggest(side, this.value); });
     $('#op2-f-' + side + 'list').addEventListener('mousedown', function (e) {
       var it = e.target.closest('.op2-it'); if (!it) return;
@@ -2690,6 +2690,13 @@ function wireForm() {
   $$('#op2-d-body input,#op2-d-body select,#op2-d-body textarea').forEach(function (i) { i.addEventListener('input', tickState); });
   blockForeignAutofill_($('#op2-d-body'));
   if (formOrder && formOrder.customer) fetchCustomerHistory(formOrder.customer);
+  /* открыли СУЩЕСТВУЮЩУЮ заявку, у которой в адресе ссылка/координаты, а lat/lon ещё нет
+     (заявки, заведённые до этой правки, перенос из старого «Задания») - разбираем сразу,
+     не дожидаясь клика в поле и потери фокуса. */
+  if (formOrder) {
+    if (formOrder.load_address && !formOrder.load_lat) tryParseAddrPaste_('from');
+    if (formOrder.unload_address && !formOrder.unload_lat) tryParseAddrPaste_('to');
+  }
   tickState();
 }
 function tickState() {
@@ -2986,6 +2993,77 @@ function fetchGeoSuggest(side, q) {
       }
     }).catch(function () {});
   }, 400);
+}
+/* ── адрес со ссылкой на карту (Влад 13.09, живой перенос заявок из старого «Задания»):
+   «очень много менеджеров адреса ставят в виде ссылки» - и это НЕ мусор для очистки, а
+   рабочий инструмент («25 въездов - указываем, куда именно заехать», населённые пункты
+   без нормальных адресов, а сама ссылка потом уходит В ЗАДАНИЕ ВОДИТЕЛЮ - он жмёт и
+   прокладывает маршрут). Поэтому ТЕКСТ АДРЕСА НЕ ТРОГАЕМ ВООБЩЕ - ни разу не переписываем
+   и не подчищаем то, что ввёл менеджер, ссылка остаётся в нём как есть и так же уходит
+   водителю. Единственное, чего не хватало: у системы уже год как есть колонки
+   load_lat/load_lon (для карты, будущих задач по расстоянию), но они не заполнялись, если
+   координаты пришли не через клик по подсказке DaData, а спрятаны в тексте/ссылке. Эта
+   функция молча ДОЧИТЫВАЕТ их оттуда в фоне (по потере фокуса поля - не на каждую букву,
+   не мешаем живым подсказкам DaData) и кладёт в dataset.lat/lon, как будто их выбрали из
+   подсказки - collectForm() ниже саму работу с ними уже делает, менять не пришлось.
+   Источники: (1) явная пара чисел «широта, долгота» - тот же порядок, что «скопировать
+   координаты» даёт в любой карте; (2) параметры ДЛИННОЙ ссылки Яндекс.Карт (ll=/pt=/
+   whatshere[point]=) - порядок ОБРАТНЫЙ, долгота,широта; (3) КОРОТКАЯ ссылка
+   (yandex.ru/navi/-/xxx) без координат в самом URL - её разворачивает сервер
+   (/geocoder/resolve_link, только домены яндекса, только читает адрес, не публикует и не
+   пишет никуда). Если распознать не получилось - молча ничего не меняем, статус-кво. */
+var YANDEX_LINK_RE_ = /https?:\/\/(?:[a-z0-9-]+\.)?ya(?:ndex)?\.[a-z.]+\/(?:maps|navi)[^\s,)"'<>]*/i;
+var RE_LL_PT_ = /[?&](?:ll|pt)=([\-\d.]+)(?:%2C|,)([\-\d.]+)/i;
+var RE_WHATSHERE_ = /whatshere(?:%5B|\[)point(?:%5D|\])=([\-\d.]+)(?:%2C|,)([\-\d.]+)/i;
+function coordParamsFromLink_(link) {
+  var m = link.match(RE_WHATSHERE_) || link.match(RE_LL_PT_);
+  return m ? { lon: m[1], lat: m[2] } : null; /* ссылка Яндекса - долгота,широта */
+}
+var BARE_COORD_RE_ = /(-?\d{1,3}\.\d{2,8})\s*[,;]\s*(-?\d{1,3}\.\d{2,8})/;
+function coordsInBounds_(lat, lon) {
+  lat = parseFloat(lat); lon = parseFloat(lon);
+  return isFinite(lat) && isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
+}
+/* только НАХОДИТ координаты - ничего не удаляет и не переписывает в исходном тексте */
+function findAddrCoords_(text) {
+  var s = String(text || '');
+  var linkM = s.match(YANDEX_LINK_RE_);
+  var link = linkM ? linkM[0] : '';
+  if (link) {
+    var params = coordParamsFromLink_(link);
+    if (params && coordsInBounds_(params.lat, params.lon)) return { lat: params.lat, lon: params.lon };
+  }
+  var bare = s.match(BARE_COORD_RE_);
+  if (bare && coordsInBounds_(bare[1], bare[2])) return { lat: bare[1], lon: bare[2] };
+  if (link) return { needsResolve: true, link: link }; /* короткая ссылка - разворачиваем на сервере */
+  return null;
+}
+function addrHint_(side, text, cls) {
+  var hint = $('#op2-f-' + side + 'hint');
+  if (hint) { hint.textContent = text; hint.className = 'op2-hint' + (cls ? ' ' + cls : ''); }
+}
+/* только координаты в dataset - адрес в самом поле НЕ ТРОГАЕМ */
+function applyFoundCoords_(side, lat, lon) {
+  var inp = $('#op2-f-' + side);
+  inp.dataset.lat = lat; inp.dataset.lon = lon;
+  addrHint_(side, lat + ' · ' + lon + ' · по ссылке в адресе', 'op2-okc');
+  tickState();
+}
+function tryParseAddrPaste_(side) {
+  var inp = $('#op2-f-' + side);
+  if (inp.dataset.lat) return; /* координаты уже есть (выбрано из подсказки/уже разобрано) - не трогаем повторно */
+  var found = findAddrCoords_(inp.value);
+  if (!found) return;
+  if (found.needsResolve) {
+    apiGet('/geocoder/resolve_link', { url: found.link }).then(function (r) {
+      if (inp.dataset.lat) return; /* пока ждали ответ, координаты уже появились другим путём */
+      var finalUrl = r && r.ok && r.data && r.data.url;
+      var params = finalUrl ? coordParamsFromLink_(finalUrl) : null;
+      if (params && coordsInBounds_(params.lat, params.lon)) applyFoundCoords_(side, params.lat, params.lon);
+    }).catch(function () {});
+    return;
+  }
+  applyFoundCoords_(side, found.lat, found.lon);
 }
 function collectForm() {
   var fc = splitContact($('#op2-f-custcontact').value);

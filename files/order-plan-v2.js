@@ -2177,7 +2177,9 @@ function loadHistoryInto(o) {
     box.innerHTML = h.length ? h.map(function (x) {
       var label = HIST_ACTION_LABEL_[x.action] || x.action || '';
       var detail = humanizeHistoryDetail_(x.action, x.detail);
-      return '<li><span class="op2-tm">' + esc(humanAt_(x.at)) + '</span><span><span class="op2-who">' + esc(x.by || '') + '</span> ' + esc(label) + (detail ? ' · ' + esc(detail) : '') + '</span></li>';
+      /* Влад 13.09: «просто делай: имя, фамилия и всё» - без отчества, тем же приёмом
+         (fioName_), что уже сокращает ФИО водителя в колонке «Машина»; полное ФИО - в title. */
+      return '<li><span class="op2-tm">' + esc(humanAt_(x.at)) + '</span><span><span class="op2-who" title="' + esc(x.by || '') + '">' + esc(fioName_(x.by)) + '</span> ' + esc(label) + (detail ? ' · ' + esc(detail) : '') + '</span></li>';
     }).join('') : '<li><span class="op2-dim">записей пока нет</span></li>';
   }).catch(function () {});
 }

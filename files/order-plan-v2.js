@@ -1192,12 +1192,25 @@ function addrParts_(addr) {
   var rest = (i >= 0 ? t.slice(i + 1) : t.slice(1)).map(function (s) { return s.replace(/^(д|дом)\.?\s+(?=\d)/i, ''); });
   return { city: city, rest: rest.join(', '), link: null };
 }
+function mapLinkBadge_(link) {
+  return ' <a class="op2-maplink" href="' + esc(link) + '" target="_blank" rel="noopener" title="Открыть на Яндекс.Картах">Ссылка на <span class="op2-maplink-y">Y</span><b>andex</b></a>';
+}
 function rtLine_(addr, arrow) {
   var p = addrParts_(addr);
   var ar = arrow ? '<span class="op2-arr">→</span>' : '';
   if (!p) return '<span class="op2-rt">' + ar + '<span class="op2-ask">уточнить</span></span>';
-  var badge = p.link ? ' <a class="op2-maplink" href="' + esc(p.link) + '" target="_blank" rel="noopener" title="Открыть на Яндекс.Картах">Ссылка на <span class="op2-maplink-y">Y</span><b>andex</b></a>' : '';
+  var badge = p.link ? mapLinkBadge_(p.link) : '';
   return '<span class="op2-rt">' + ar + (p.city ? '<b>' + esc(p.city) + '</b>' : '') + badge + (p.rest ? ' <span class="op2-rs">' + esc(p.rest) + '</span>' : '') + '</span>';
+}
+/* 14.09, Влад показал скриншот дровера заявки - «Погрузка»/«Выгрузка» там раньше отдавали
+   голый esc(addr) (полная ссылка текстом, в 2-3 строки), в отличие от таблицы, где уже есть
+   значок «Ссылка на Yandex». Тот же приём здесь - только когда есть ссылка; обычный адрес
+   без ссылки НЕ трогаем (feedback_dont_rewrite_manager_free_text), esc(addr) как было. */
+function addrValHtml_(addr) {
+  if (!addr) return '<span class="op2-dim">уточнить</span>';
+  var p = addrParts_(addr);
+  if (!p || !p.link) return esc(addr);
+  return (p.city ? esc(p.city) : '') + mapLinkBadge_(p.link);
 }
 function routeCell(o) {
   return '<td title="Откуда: ' + esc(o.load_address || 'уточнить') + '\nКуда: ' + esc(o.unload_address || 'уточнить') + '">' +
@@ -2338,9 +2351,9 @@ function renderView(o, who) {
       kv('Груз', val([o.cargo, o.cargo_weight_t ? o.cargo_weight_t + ' т' : ''].filter(Boolean).join(', '))) +
       (o.cargo_dims ? kv('Габариты груза', val(o.cargo_dims)) : '') +
       kv('Габарит', val(o.gabarit)) +
-      kv('Погрузка', val(o.load_address) + (o.load_lat && o.load_lon ? ' <span class="op2-sm op2-dim op2-mono">· ' + esc(o.load_lat) + ' · ' + esc(o.load_lon) + '</span>' : (o.load_address && (o.load_confirmed === 0 || o.load_confirmed === false) ? ' <span class="op2-sm" style="color:var(--tint-amber)">· адрес не подтверждён</span>' : ''))) +
+      kv('Погрузка', addrValHtml_(o.load_address) + (o.load_lat && o.load_lon ? ' <span class="op2-sm op2-dim op2-mono">· ' + esc(o.load_lat) + ' · ' + esc(o.load_lon) + '</span>' : (o.load_address && (o.load_confirmed === 0 || o.load_confirmed === false) ? ' <span class="op2-sm" style="color:var(--tint-amber)">· адрес не подтверждён</span>' : ''))) +
       kv('Контакт на погрузке', val([o.load_contact_name, fmtPhone(o.load_contact_phone)].filter(Boolean).join(' · '))) +
-      kv('Выгрузка', val(o.unload_address) + (o.unload_lat && o.unload_lon ? ' <span class="op2-sm op2-dim op2-mono">· ' + esc(o.unload_lat) + ' · ' + esc(o.unload_lon) + '</span>' : '')) +
+      kv('Выгрузка', addrValHtml_(o.unload_address) + (o.unload_lat && o.unload_lon ? ' <span class="op2-sm op2-dim op2-mono">· ' + esc(o.unload_lat) + ' · ' + esc(o.unload_lon) + '</span>' : '')) +
       kv('Контакт на выгрузке', val([o.unload_contact_name, fmtPhone(o.unload_contact_phone)].filter(Boolean).join(' · '))) +
       kv('Контакт заказчика', val([o.customer_contact_name, fmtPhone(o.customer_contact_phone)].filter(Boolean).join(' · '))) +
       kv('Документы', val(o.documents)) +

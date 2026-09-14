@@ -19571,6 +19571,62 @@ function crpUpdateSummaryCard_() {
   var card = document.getElementById('crp-plan-card');
   if (!card) return;
   card.innerHTML = crpSummaryCardInner_();
+  crpWireAddForm_();
+}
+// Денежная маска (канон ГОСТа, раздел 4) на поле суммы формы "добавить клиента вручную" -
+// та же crpWireMoneyInput_, что уже у полей таблицы. Карточка "Мой план" целиком
+// пересобирается через innerHTML на каждый рендер - обработчик приходится вешать заново
+// каждый раз (те же узлы DOM больше не существуют), это дёшево и безопасно (не копится).
+function crpWireAddForm_() {
+  var amt = document.getElementById('crp-add-amount');
+  if (amt) crpWireMoneyInput_(amt, function() {});
+}
+// Все известные названия контрагентов дашборда (не только зона этой руководительницы) -
+// для автокомплита "добавить клиента вручную" ниже. Тот же источник и тот же принцип, что
+// уже одобрен Владом для контрагента в "Задании" (orderPlanCustomerList_, 2026-08-18:
+// "список компаний должен быть из 1С... но свободный ввод нового заказчика остаётся
+// возможным") - не изобретаю новый список, использую уже загруженный D.debt.by_customer.
+function crpAllContragentNames_() {
+  var names = {};
+  ((D && D.debt && D.debt.by_customer) || []).forEach(function(c) { if (c.contragent) names[c.contragent] = true; });
+  return Object.keys(names).sort(function(a, b) { return a.localeCompare(b, 'ru'); });
+}
+// Свой автокомплит "начинается с" вместо нативного <datalist> (тот же приём/причина, что
+// orderPlanCustomerInput_ - Chrome ищет совпадение где угодно в строке, не строго с начала).
+function crpAddNameInput_() {
+  var val = document.getElementById('crp-add-name').value.trim().toLowerCase();
+  var box = document.getElementById('crp-add-suggest');
+  if (!box) return;
+  if (!val) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  var matches = crpAllContragentNames_().filter(function(n) { return n.toLowerCase().indexOf(val) === 0; }).slice(0, 15);
+  if (!matches.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  box.innerHTML = matches.map(function(n) {
+    var esc = n.replace(/</g, '&lt;');
+    var escAttr = n.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    return '<div onmousedown="crpPickAddName_(\'' + escAttr + '\')" style="padding:7px 10px;cursor:pointer;font-size:13px;color:var(--text)" onmouseover="this.style.background=\'var(--bg4)\'" onmouseout="this.style.background=\'\'">' + esc + '</div>';
+  }).join('');
+  box.style.display = 'block';
+}
+function crpPickAddName_(name) {
+  document.getElementById('crp-add-name').value = name;
+  document.getElementById('crp-add-suggest').style.display = 'none';
+  document.getElementById('crp-add-amount').focus();
+}
+// Влад, 14.09: "хочу добавить блок с клиентами, которые не должны, но оплатят - окно где
+// можно выбрать контрагента и вписать сумму" - контрагент необязательно из таблицы
+// должников (баланс может быть 0 или его вообще нет в ДЗ - предоплата/новый клиент).
+function crpAddManual_() {
+  var nameEl = document.getElementById('crp-add-name');
+  var amtEl = document.getElementById('crp-add-amount');
+  var name = nameEl.value.trim();
+  if (!name) { p2ToastErr('Впишите название контрагента'); nameEl.focus(); return; }
+  var amt = +String(amtEl.value).replace(/\s/g, '') || 0;
+  if (!amt) { p2ToastErr('Впишите сумму'); amtEl.focus(); return; }
+  crpAmounts_[name] = (crpAmounts_[name] || 0) + amt; // уже был в плане (например, из таблицы) - суммируем, не затираем
+  nameEl.value = ''; amtEl.value = '';
+  document.getElementById('crp-add-suggest').style.display = 'none';
+  var cfg = currentCommercialHeadCfg_();
+  if (cfg) crpRenderInner_(cfg); // полная перерисовка - если контрагент есть и в таблице должников, её строка тоже обновится
 }
 function crpSummaryCardInner_() {
   var picked = Object.keys(crpAmounts_).filter(function(c) { return crpAmounts_[c] > 0; });
@@ -19589,10 +19645,20 @@ function crpSummaryCardInner_() {
     // Влад, 14.09: "кнопка отправить план должна быть большой и видной" - сплошная заливка
     // --green (семантика раздела 1 ГОСТа: деньги/план), не просто обводка как обычный tab-btn.
     : '<button onclick="crpSubmit_()" style="' + crpBigBtnCss_ + (picked.length ? ';background:var(--green);color:#0b2019' : ';background:var(--bg3);color:var(--muted);cursor:default') + '" ' + (picked.length ? '' : 'disabled') + '>Отправить план' + (picked.length ? ' · ' + picked.length + (picked.length === 1 ? ' контрагент' : ' контрагентов') : '') + '</button>';
+  // «Клиент, который не должен, но оплатит» (14.09) - свободный выбор/ввод контрагента +
+  // сумма, не завязано на таблицу должников ниже.
+  var addFormHtml = '<div style="position:relative;display:flex;gap:8px;margin:12px 0;flex-wrap:wrap">'
+    + '<div style="position:relative;flex:1;min-width:220px">'
+    + '<input id="crp-add-name" oninput="crpAddNameInput_()" onblur="setTimeout(function(){var b=document.getElementById(\'crp-add-suggest\');if(b)b.style.display=\'none\';},150)" ' + (deadlinePassed ? 'disabled' : '') + ' placeholder="+ Добавить клиента - контрагент" autocomplete="off" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);padding:8px 10px;font-size:12.5px">'
+    + '<div id="crp-add-suggest" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:5;background:var(--bg3);border:1px solid var(--border-strong);border-radius:8px;margin-top:3px;max-height:220px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.4)"></div>'
+    + '</div>'
+    + '<input id="crp-add-amount" ' + (deadlinePassed ? 'disabled' : '') + ' inputmode="numeric" autocomplete="off" placeholder="Сумма" style="width:130px;text-align:right;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-family:\'JetBrains Mono\',monospace;padding:8px 9px;font-size:12.5px">'
+    + '<button onclick="crpAddManual_()" ' + (deadlinePassed ? 'disabled' : '') + ' style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:8px 16px;font-size:12.5px;cursor:pointer;white-space:nowrap">Добавить</button>'
+    + '</div>';
   return '<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:10px">'
     + '<div><div style="font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Мой план на эту неделю</div>'
     + '<div style="font-family:\'JetBrains Mono\',monospace;font-size:25px;font-weight:500">' + crpFmtInt_(total) + ' <span style="font-size:15px;color:var(--muted)">₽</span></div></div>'
-    + btnHtml + '</div>' + rowsHtml;
+    + btnHtml + '</div>' + rowsHtml + addFormHtml;
 }
 
 function crpRenderInner_(cfg) {
@@ -19680,6 +19746,7 @@ function crpRenderInner_(cfg) {
   [].forEach.call(el.querySelectorAll('.crp-input'), function(inp) {
     crpWireMoneyInput_(inp, function(val) { crpAmounts_[inp.dataset.c] = val; crpUpdateSummaryCard_(); });
   });
+  crpWireAddForm_();
 }
 
 function crpSubmit_() {

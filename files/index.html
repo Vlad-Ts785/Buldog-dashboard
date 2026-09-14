@@ -19464,6 +19464,8 @@ function renderCommercialHeadDebtPage_() {
 // (прямой browser->сервер, БЕЗ Apps Script - см. находку в плане фичи).
 var crpWeek_ = null;          // 'YYYY-MM-DD' понедельника недели, которую сейчас смотрим
 var crpAmounts_ = {};         // contragent -> введённая сумма (число); наличие ключа с value>0 = контрагент "в плане"
+var crpFacts_ = {};           // contragent -> реальные поступления за эту неделю (receipts_raw, НЕ снижение баланса ДЗ - Влад, 14.09)
+var crpCarryover_ = {};       // contragent -> {prev_planned, prev_fact} - помечены как перенесённые с прошлой недели (не оплатили)
 var crpLoaded_ = false;       // уже запрашивали план недели с сервера в этой сессии
 var crpShowOld_ = false;      // показывать долги старше 90 дней (скрыты по умолчанию)
 var crpShowBankrupt_ = false; // показывать банкротов (скрыты по умолчанию)
@@ -19542,9 +19544,21 @@ function renderCommercialHeadReceiptsPlanPage_() {
     crpLoaded_ = true; // до ответа сервера - не дублировать запрос повторным заходом на вкладку
     el.innerHTML = '<p style="color:var(--muted);padding:16px">Загрузка плана…</p>';
     fetchFromYardApi_('/receipts_plan', { week: crpWeek_, head: crpHeadKey_() }).then(function(r) {
-      var items = (r.ok && r.data && !r.data.error) ? (r.data.items || []) : [];
-      crpAmounts_ = {};
-      items.forEach(function(it) { crpAmounts_[it.contragent] = it.planned_amount; });
+      var data = (r.ok && r.data && !r.data.error) ? r.data : null;
+      var items = data ? (data.items || []) : [];
+      crpAmounts_ = {}; crpFacts_ = {}; crpCarryover_ = {};
+      items.forEach(function(it) { crpAmounts_[it.contragent] = it.planned_amount; crpFacts_[it.contragent] = it.fact_amount || 0; });
+      // Перенос недоплаченных с прошлой недели (14.09, Влад: "по тем, кто не оплатил хотя
+      // планировали, чтобы они были сразу же отмечены на следующую неделю") - сервер
+      // предлагает carryover ТОЛЬКО когда эта неделя ещё пуста (не перезаписываем начатый
+      // план); подставляем сразу в план с пометкой "перенесено", руководитель видит и
+      // может поправить/убрать перед отправкой - само по себе на сервер ничего не пишет.
+      if (!items.length && data && data.carryover && data.carryover.length) {
+        data.carryover.forEach(function(c) {
+          crpAmounts_[c.contragent] = c.suggested_amount;
+          crpCarryover_[c.contragent] = { prev_planned: c.prev_planned, prev_fact: c.prev_fact };
+        });
+      }
       crpRenderInner_(cfg);
     }).catch(function() { crpRenderInner_(cfg); });
     return;
@@ -19631,12 +19645,23 @@ function crpAddManual_() {
 function crpSummaryCardInner_() {
   var picked = Object.keys(crpAmounts_).filter(function(c) { return crpAmounts_[c] > 0; });
   var total = picked.reduce(function(s, c) { return s + crpAmounts_[c]; }, 0);
+  var totalFact = picked.reduce(function(s, c) { return s + (crpFacts_[c] || 0); }, 0);
   var rowsHtml = !picked.length
     ? '<div class="muted" style="font-size:12.5px;padding:14px 2px">Впишите сумму рядом с контрагентом ниже, чтобы добавить его в план</div>'
     : '<div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0">' + picked.map(function(c) {
         var esc = c.replace(/'/g, "\\'");
-        return '<span style="display:inline-flex;align-items:center;gap:6px;background:var(--bg3);border:1px solid var(--border);border-radius:20px;padding:5px 6px 5px 12px;font-size:12px">'
-          + c + ' · <b style="font-family:\'JetBrains Mono\',monospace">' + crpFmtInt_(crpAmounts_[c]) + ' ₽</b>'
+        var fact = crpFacts_[c] || 0;
+        var covered = fact >= crpAmounts_[c];
+        // Факт - ТОЛЬКО реальные поступления за эту неделю (Влад, 14.09: "план перекрывают
+        // только фактические поступления"), не снижение баланса ДЗ. Есть у контрагента,
+        // только если план уже был сохранён на сервере в этом сеансе просмотра.
+        var factHtml = crpFacts_.hasOwnProperty(c)
+          ? ' <span style="color:' + (covered ? 'var(--tint-green)' : 'var(--tint-amber)') + '">· факт ' + crpFmtInt_(fact) + ' ₽' + (covered ? ' ✓' : '') + '</span>'
+          : '';
+        var co = crpCarryover_[c];
+        var coHtml = co ? ' <span class="muted" title="Не оплатили на прошлой неделе (план '+crpFmtInt_(co.prev_planned)+' ₽ · факт '+crpFmtInt_(co.prev_fact)+' ₽)" style="font-size:10.5px">· перенесено</span>' : '';
+        return '<span style="display:inline-flex;align-items:center;gap:6px;background:var(--bg3);border:1px solid ' + (co ? 'var(--amber)' : 'var(--border)') + ';border-radius:20px;padding:5px 6px 5px 12px;font-size:12px">'
+          + c + ' · <b style="font-family:\'JetBrains Mono\',monospace">' + crpFmtInt_(crpAmounts_[c]) + ' ₽</b>' + factHtml + coHtml
           + '<button onclick="crpClear_(\'' + esc + '\')" title="Убрать из плана" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:0 4px">✕</button></span>';
       }).join('') + '</div>';
   var deadlinePassed = crpDeadlineMs_(crpWeek_) < Date.now();
@@ -19655,9 +19680,16 @@ function crpSummaryCardInner_() {
     + '<input id="crp-add-amount" ' + (deadlinePassed ? 'disabled' : '') + ' inputmode="numeric" autocomplete="off" placeholder="Сумма" style="width:130px;text-align:right;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-family:\'JetBrains Mono\',monospace;padding:8px 9px;font-size:12.5px">'
     + '<button onclick="crpAddManual_()" ' + (deadlinePassed ? 'disabled' : '') + ' style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:8px 16px;font-size:12.5px;cursor:pointer;white-space:nowrap">Добавить</button>'
     + '</div>';
+  // Факт под планом (14.09, Влад: "нужен ещё и факт") - только реальные поступления недели,
+  // видно сразу насколько план уже перекрыт. Показываем только когда есть с чем сравнивать
+  // (хотя бы один контрагент уже имеет сохранённый факт), иначе "факт 0" в самом начале
+  // недели читался бы как тревога, а не как "рано ещё".
+  var factSub = picked.some(function(c) { return crpFacts_.hasOwnProperty(c); })
+    ? '<div style="font-size:12px;color:var(--muted);margin-top:2px">факт <b style="color:' + (totalFact >= total ? 'var(--tint-green)' : 'var(--text)') + ';font-family:\'JetBrains Mono\',monospace">' + crpFmtInt_(totalFact) + ' ₽</b>' + (total ? ' · ' + Math.round(totalFact / total * 100) + '%' : '') + '</div>'
+    : '';
   return '<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:10px">'
     + '<div><div style="font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Мой план на эту неделю</div>'
-    + '<div style="font-family:\'JetBrains Mono\',monospace;font-size:25px;font-weight:500">' + crpFmtInt_(total) + ' <span style="font-size:15px;color:var(--muted)">₽</span></div></div>'
+    + '<div style="font-family:\'JetBrains Mono\',monospace;font-size:25px;font-weight:500">' + crpFmtInt_(total) + ' <span style="font-size:15px;color:var(--muted)">₽</span></div>' + factSub + '</div>'
     + btnHtml + '</div>' + rowsHtml + addFormHtml;
 }
 
@@ -19789,6 +19821,7 @@ function rpsRenderInner_(week) {
   var deadlinePassed = new Date(rpsData_.deadline_at).getTime() < Date.now();
   var submittedCount = heads.filter(function(c) { return rpsData_.heads[c.head.toLowerCase()] && rpsData_.heads[c.head.toLowerCase()].submitted; }).length;
   var totalAll = heads.reduce(function(s, c) { var h = rpsData_.heads[c.head.toLowerCase()]; return s + (h ? h.total : 0); }, 0);
+  var totalFactAll = heads.reduce(function(s, c) { var h = rpsData_.heads[c.head.toLowerCase()]; return s + (h ? (h.total_fact || 0) : 0); }, 0);
   var weekEnd = new Date(week + 'T00:00:00+03:00'); weekEnd.setDate(weekEnd.getDate() + 6);
   var weekEndStr = weekEnd.getFullYear() + '-' + String(weekEnd.getMonth() + 1).padStart(2, '0') + '-' + String(weekEnd.getDate()).padStart(2, '0');
 
@@ -19799,8 +19832,9 @@ function rpsRenderInner_(week) {
     + '<div class="mp-status__l"><div class="mp-status__word">' + statusWord + '</div>'
     + '<div class="mp-status__sub">Неделя <b>' + fmtDateRu(week) + ' – ' + fmtDateRu(weekEndStr) + '</b>'
     + (deadlinePassed ? ' · дедлайн прошёл' : ' · дедлайн вторник 15:00') + '</div></div>'
-    + '<div class="mp-status__r"><div class="mp-status__cap">Запланировано всего</div>'
-    + '<div class="mp-status__lever">' + crpFmtInt_(totalAll) + ' ₽</div></div></div>';
+    + '<div class="mp-status__r"><div class="mp-status__cap">План · факт</div>'
+    + '<div class="mp-status__lever">' + crpFmtInt_(totalAll) + ' ₽</div>'
+    + '<div style="font-size:12px;color:' + (totalFactAll >= totalAll ? 'var(--tint-green)' : 'var(--muted)') + ';margin-top:3px;font-family:\'JetBrains Mono\',monospace">' + crpFmtInt_(totalFactAll) + ' ₽' + (totalAll ? ' · ' + Math.round(totalFactAll / totalAll * 100) + '%' : '') + '</div></div></div>';
 
   html += '<div class="card" style="max-width:760px">'
     + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
@@ -19809,12 +19843,15 @@ function rpsRenderInner_(week) {
 
   heads.forEach(function(c) {
     var key = c.head.toLowerCase();
-    var h = rpsData_.heads[key] || { items: [], total: 0, submitted: false };
+    var h = rpsData_.heads[key] || { items: [], total: 0, total_fact: 0, submitted: false };
     var open = rpsOpen_ === key;
+    var factLine = h.submitted
+      ? '<div class="muted" style="font-size:10.5px;text-align:right">факт ' + crpFmtInt_(h.total_fact || 0) + ' ₽' + (h.total ? ' · ' + Math.round((h.total_fact || 0) / h.total * 100) + '%' : '') + '</div>'
+      : '';
     html += '<div onclick="rpsToggle_(\'' + key + '\')" style="cursor:pointer;display:grid;grid-template-columns:14px 1fr max-content max-content;align-items:center;column-gap:14px;padding:12px 4px;border-bottom:1px solid var(--border)">'
       + '<span class="muted" style="font-size:10px;transition:transform .15s;display:inline-block;transform:rotate(' + (open ? '90' : '0') + 'deg)">▸</span>'
       + '<div>' + c.name + '</div>'
-      + '<div style="font-family:\'JetBrains Mono\',monospace">' + (h.submitted ? crpFmtInt_(h.total) + ' ₽' : '<span class="muted">— план не начат</span>') + '</div>'
+      + '<div>' + (h.submitted ? '<div style="font-family:\'JetBrains Mono\',monospace;text-align:right">' + crpFmtInt_(h.total) + ' ₽</div>' + factLine : '<span class="muted">— план не начат</span>') + '</div>'
       + '<span class="badge ' + (h.submitted ? 'green' : deadlinePassed ? 'red' : 'amber') + '">' + (h.submitted ? 'Подала' : deadlinePassed ? 'Не подала' : 'До дедлайна') + '</span>'
       + '</div>';
     if (open) {
@@ -19822,14 +19859,16 @@ function rpsRenderInner_(week) {
         !h.items.length
           ? '<div class="muted" style="font-size:12px;padding:6px 0">Пока ничего не выбрано в плане.</div>'
           : h.items.map(function(it) {
+              var fact = it.fact_amount || 0, covered = fact >= it.planned_amount;
               return '<div style="display:flex;justify-content:space-between;padding:5px 0;font-size:12.5px"><span>' + it.contragent
                 + '<span class="muted" style="font-size:10.5px;display:block">' + (it.manager || '—') + '</span></span>'
-                + '<b style="font-family:\'JetBrains Mono\',monospace">' + crpFmtInt_(it.planned_amount) + ' ₽</b></div>';
+                + '<span style="text-align:right"><b style="font-family:\'JetBrains Mono\',monospace">' + crpFmtInt_(it.planned_amount) + ' ₽</b>'
+                + '<span style="display:block;font-size:10.5px;color:' + (covered ? 'var(--tint-green)' : 'var(--muted)') + '">факт ' + crpFmtInt_(fact) + ' ₽' + (covered ? ' ✓' : '') + '</span></span></div>';
             }).join('')
       ) + '</div>';
     }
   });
-  html += '<div class="muted" style="font-size:11.5px;padding:12px 2px 2px">План vs факт по каждому контрагенту - после закрытия недели (снижение баланса ДЗ), отдельная задача.</div>';
+  html += '<div class="muted" style="font-size:11.5px;padding:12px 2px 2px">Факт - реальные поступления недели (не снижение баланса ДЗ). Кто не доплатил - автоматически появится в плане следующей недели.</div>';
   html += '</div>';
 
   el.innerHTML = html;

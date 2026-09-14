@@ -463,6 +463,289 @@ function formatLicenseText_(p) {
   return L.filter(Boolean).join('\n');
 }
 
+/* ═══════════════════ ДОГОВОР-ЗАЯВКА (PDF, 15.09) ═══════════════════
+   Влад 14.09: «пора нам сделать так, чтобы можно было скачать договор в PDF.
+   Печать подпись у тебя есть, шаблон тоже есть» - см. plans/2026-09-14-
+   contract-pdf-generation.md. Генератор ПОЛНОСТЬЮ в браузере (jsPDF, тот же
+   приём, что genKP() в index.html для КП) - VPS для этого ничего не ставит
+   (LibreOffice/docx-библиотека там просто нет, специально проверено перед
+   тем, как выбрать этот путь). Текст особых условий 1-10 и структура шапки/
+   табличной части - 1-в-1 из подписанного образца Влада (dogovor-zayavka-
+   template-2026-08-26.docx), править только по его прямой просьбе. */
+
+/* Сумма прописью (рубли/копейки, с верным родом и склонением) - в проекте
+   такого хелпера раньше не было, писать заново для этой одной задачи. */
+var RUR_ONES_M_ = ['', 'один', 'два', 'три', 'четыре', 'пять', 'шесть', 'семь', 'восемь', 'девять'];
+var RUR_ONES_F_ = ['', 'одна', 'две', 'три', 'четыре', 'пять', 'шесть', 'семь', 'восемь', 'девять'];
+var RUR_TEENS_ = ['десять', 'одиннадцать', 'двенадцать', 'тринадцать', 'четырнадцать', 'пятнадцать', 'шестнадцать', 'семнадцать', 'восемнадцать', 'девятнадцать'];
+var RUR_TENS_ = ['', '', 'двадцать', 'тридцать', 'сорок', 'пятьдесят', 'шестьдесят', 'семьдесят', 'восемьдесят', 'девяносто'];
+var RUR_HUNDREDS_ = ['', 'сто', 'двести', 'триста', 'четыреста', 'пятьсот', 'шестьсот', 'семьсот', 'восемьсот', 'девятьсот'];
+function rurPluralForm_(n, forms) { // forms = [1 шт., 2-4 шт., 5+ шт.]
+  var n100 = n % 100, n10 = n % 10;
+  if (n100 >= 11 && n100 <= 14) return forms[2];
+  if (n10 === 1) return forms[0];
+  if (n10 >= 2 && n10 <= 4) return forms[1];
+  return forms[2];
+}
+function rurTriplet_(n, feminine) {
+  var out = [];
+  var h = Math.floor(n / 100), rest = n % 100;
+  if (h) out.push(RUR_HUNDREDS_[h]);
+  if (rest >= 10 && rest <= 19) { out.push(RUR_TEENS_[rest - 10]); }
+  else {
+    var t = Math.floor(rest / 10), o = rest % 10;
+    if (t) out.push(RUR_TENS_[t]);
+    if (o) out.push((feminine ? RUR_ONES_F_ : RUR_ONES_M_)[o]);
+  }
+  return out;
+}
+function rurWords_(amount) {
+  amount = Math.round(num(amount) * 100) / 100;
+  var rub = Math.floor(amount), kop = Math.round((amount - rub) * 100);
+  var scales = [
+    { div: 1000000000, forms: ['миллиард', 'миллиарда', 'миллиардов'], f: false },
+    { div: 1000000, forms: ['миллион', 'миллиона', 'миллионов'], f: false },
+    { div: 1000, forms: ['тысяча', 'тысячи', 'тысяч'], f: true }
+  ];
+  var n = rub, words = [];
+  scales.forEach(function (s) {
+    var part = Math.floor(n / s.div); n = n % s.div;
+    if (part) { words = words.concat(rurTriplet_(part, s.f)); words.push(rurPluralForm_(part, s.forms)); }
+  });
+  words = words.concat(rurTriplet_(n, false));
+  if (!words.length) words.push('ноль');
+  words.push(rurPluralForm_(rub, ['рубль', 'рубля', 'рублей']));
+  words.push(kop ? (String(kop).length < 2 ? '0' + kop : String(kop)) : 'ноль'); /* «рублей ноль копеек», как в образце Влада - не «00» */
+  words.push(rurPluralForm_(kop, ['копейка', 'копейки', 'копеек']));
+  return capFirst(words.join(' ').replace(/\s+/g, ' ').trim());
+}
+
+/* Особые условия 1-10 - фиксированный юридический текст, 1-в-1 из образца
+   Влада (dogovor-zayavka-template-2026-08-26.docx). Меняется только по его
+   явной просьбе, не по данным заявки. */
+var CONTRACT_SPECIAL_TERMS_ = [
+  'В целях оперативного взаимодействия СТОРОНЫ признают возможность использования в ходе исполнения настоящей договор-заявки копий документов с печатями, отправленных по электронной почте, и соглашаются, что указанные документы имеют юридическую силу. При этом документ, отправленный по электронной почте, должен с достоверностью свидетельствовать о том, что он исходит от СТОРОНЫ договора.',
+  'ЗАКАЗЧИК, в независимости от того является он грузоотправителем или грузополучателем, обязан своими силами (или силами своего контрагента) осуществить загрузку/выгрузку груза в/из транспортное/го средство/а и его крепление, предоставить всю необходимую документацию и информацию о грузе, а также обеспечить соответствие количества груза, загружаемого в автомобиль, количеству груза, указанному в товаросопроводительных документах, внешнее состояние упаковки, соответствие веса фактически загружаемого груза весу, указанному в товаросопроводительных документах, крепление и размещение груза в грузовом отсеке, необходимое для сохранной перевозки, и с целью недопущения превышения нормативных весовых параметров. ЗАКАЗЧИК обязуется обеспечить возможность присутствия водителя при погрузке груза.',
+  'ИСПОЛНИТЕЛЬ обязан организовать доставку груза в пункт назначения и выдачу его грузополучателю, указанному в товаросопроводительных документах, о чем должны быть получены соответствующие отметки в товаросопроводительных документах.',
+  'ЗАКАЗЧИК обязан обеспечить проведение процедуры погрузки/разгрузки транспортных средств в течение 2 (двух) часов на каждую процедуру. За начало отсчета берется время, указанное в условиях («Дата и время загрузки» и «Согласованный срок доставки груза (дата и время прибытия)»). За сверхнормативный простой транспортного средства под загрузкой\\разгрузкой ЗАКАЗЧИК оплачивает ИСПОЛНИТЕЛЮ штраф в размере 2000 руб. за каждый начатый час простоя. Если погрузка/разгрузка задерживается более, чем на сутки, ЗАКАЗЧИК оплачивает ИСПОЛНИТЕЛЮ штраф в размере 20 000 руб. за каждые сутки простоя.',
+  'Непредоставление груза со стороны ЗАКАЗЧИКА/грузоотправителя в течение 24 часов с момента постановки транспортного средства под погрузку (согласно дате, указанной в заявке на организацию перевозки грузов) может быть приравнено ИСПОЛНИТЕЛЕМ к срыву погрузки и оплачивается ЗАКАЗЧИКОМ ИСПОЛНИТЕЛЮ в размере согласно п.6 настоящей заявки на организацию перевозки грузов.',
+  'СТОРОНЫ несут ответственность за срыв перевозки по подтвержденной заявке на организацию перевозки грузов:\n- за отказ от перевозки менее, чем за сутки до времени подачи автотранспортного средства на место загрузки (согласно дате, указанной в заявке на организацию перевозки грузов), ИСПОЛНИТЕЛЬ уплачивает ЗАКАЗЧИКУ штраф в размере 20% от стоимости перевозки;\n- за отказ от перевозки менее, чем за сутки до времени подачи автотранспортного средства на место загрузки (согласно дате, указанной в заявке на организацию перевозки грузов), ЗАКАЗЧИК уплачивает ИСПОЛНИТЕЛЮ штраф в размере 20% от стоимости перевозки.',
+  'Превышение фактических габаритов грузов (если размеры груза превышают размеры заказанного транспорта), указанных в заявке на организацию перевозки грузов, ИСПОЛНИТЕЛЬ может приравнять к срыву погрузки и потребовать возмещения расходов. В этом случае ЗАКАЗЧИК обязуется возместить расходы в размере 20% от стоимости перевозки. При превышении фактических габаритов грузов, указанных в заявке на организацию перевозки грузов при перевозке сборной машиной, ИСПОЛНИТЕЛЬ может изменить провозной тариф, при этом ЗАКАЗЧИК обязуется возместить дополнительно понесенные расходы ИСПОЛНИТЕЛЯ.',
+  'ЗАКАЗЧИК оплачивает ИСПОЛНИТЕЛЮ перевозку, а также штрафные санкции на основании счетов в размере и порядке, согласованными и указанными в настоящей договор-заявке на организацию перевозки грузов.',
+  'ЗАКАЗЧИК обязан также возмещать ИСПОЛНИТЕЛЮ дополнительные согласованные расходы, понесенные последним в процессе выполнения настоящей заявки на основании выставленных счетов.',
+  'Любые споры, которые могут возникнуть в связи с настоящим договором, подлежат рассмотрению по месту нахождения Исполнителя. Каждая Сторона обязана рассматривать заявленную претензию другой Стороны и уведомить заявителя об удовлетворении или обоснованном отклонении претензии в течение 5 (пяти) календарных дней со дня ее поступления в почтовое отделение другой Стороны по адресу местонахождения.'
+];
+
+/* Картинка (печать/подпись) как dataURL для doc.addImage - apiGet() парсит
+   JSON, для бинарных файлов нужен свой fetch. Тот же заголовок авторизации,
+   что у apiGet/apiPost. */
+function fetchImageDataUrl_(url) {
+  return fetch(url, { headers: { 'X-Session-Token': apiToken() } }).then(function (res) {
+    if (!res.ok) throw new Error('http ' + res.status);
+    return res.blob();
+  }).then(function (blob) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () { resolve(reader.result); };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  });
+}
+/* Один документ юрлица/человека по doc_type - используется и для печати
+   (legal_entity), и для подписи (person) ниже, разница только в эндпоинтах. */
+function fetchEntityStampDataUrl_(entityId) {
+  return apiGet('/sprav/legal_entity_documents', { legal_entity_id: entityId }).then(function (r) {
+    var doc = r && r.ok && ((r.data && r.data.documents) || []).filter(function (d) { return d.doc_type === 'stamp'; })[0];
+    if (!doc) return null;
+    return fetchImageDataUrl_(apiBase() + '/sprav/legal_entity_document_file?session_token=' + encodeURIComponent(apiToken()) + '&id=' + encodeURIComponent(doc.id));
+  }).catch(function () { return null; });
+}
+function fetchPersonSignatureDataUrl_(personId) {
+  if (!personId) return Promise.resolve(null);
+  return apiGet('/sprav/person_documents', { person_id: personId }).then(function (r) {
+    var doc = r && r.ok && ((r.data && r.data.documents) || []).filter(function (d) { return d.doc_type === 'signature'; })[0];
+    if (!doc) return null;
+    return fetchImageDataUrl_(apiBase() + '/sprav/person_document_file?session_token=' + encodeURIComponent(apiToken()) + '&id=' + encodeURIComponent(doc.id));
+  }).catch(function () { return null; });
+}
+/* Адрес для документа - тот же текст, что менеджер/логист ввели, но без
+   сырой ссылки Яндекс.Карт внутри (feedback_dont_rewrite_manager_free_text -
+   это только для ЭТОГО сгенерированного файла, в саму заявку текст не
+   переписывается). Пусто - «уточняется», как в образце. */
+function contractAddrText_(addr) {
+  var s = String(addr || '').replace(YANDEX_LINK_RE_, '').replace(/\s{2,}/g, ' ').trim();
+  return s || 'уточняется';
+}
+/* Простое родительное склонение типа техники для фразы «Транспортные услуги
+   <типа> по маршруту» (масштаб проекта - Трал/Длинномер/Раздвижка и т.п.,
+   все мужского рода на согласную - добавление «а» работает для всех
+   известных типов; не общий алгоритм русского склонения). */
+function contractEqGenitive_(eq) {
+  var s = String(eq || '').trim();
+  if (!s) return 'техники';
+  var low = s.toLowerCase();
+  return /[а-яё]$/i.test(low) && !/[аеёиоуыэюя]$/i.test(low) ? low + 'а' : low;
+}
+function genContractPdf(o) {
+  if (typeof window.jspdf === 'undefined' || !window.jspdf.jsPDF) { toast('Библиотека PDF не загрузилась - обновите страницу'); return; }
+  var ent = null;
+  (META && META.own_entities || []).forEach(function (e2) { if (String(e2.id) === String(o.executor_entity_id)) ent = e2; });
+  if (!ent) { toast('<span class="op2-warn">Договор-заявка</span> · у заявки не указан исполнитель («Исполнитель (от кого)»)'); return; }
+  if (!ent.has_bank || !ent.has_stamp) { toast('<span class="op2-warn">Договор-заявка</span> · у «' + esc(ent.short || ent.name) + '» не хватает реквизитов/печати в Справочниках - дозаполни там'); return; }
+  toast('Формируем договор-заявку…');
+  Promise.all([
+    fetchEntityStampDataUrl_(ent.id),
+    fetchPersonSignatureDataUrl_(ent.signer_person_id)
+  ]).then(function (imgs) {
+    try { drawContractPdf_(o, ent, imgs[0], imgs[1]); }
+    catch (e) { toast('Не удалось собрать PDF: ' + (e && e.message || e)); }
+  }).catch(function () { toast('Ошибка сети - не удалось получить печать/подпись'); });
+}
+function drawContractPdf_(o, ent, stampUrl, signUrl) {
+  var doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4' });
+  if (typeof ensureKpFonts_ === 'function') ensureKpFonts_(doc);
+  var FONT = (function () { try { doc.setFont('PTSans'); return 'PTSans'; } catch (e) { return 'helvetica'; } })();
+  var M = 15, W = 210, CW = W - M * 2, y = M;
+  function setF(bold, size) { doc.setFont(FONT, bold ? 'bold' : 'normal'); doc.setFontSize(size); }
+  function text(s, x, yy, opt) { doc.text(String(s == null ? '' : s), x, yy, opt || {}); }
+  function wrapped(s, x, yy, maxW, lh) {
+    var lines = doc.splitTextToSize(String(s == null ? '' : s), maxW);
+    lines.forEach(function (l, i) { text(l, x, yy + i * lh); });
+    return yy + lines.length * lh;
+  }
+  function ensureSpace(need) { if (y + need > 282) { doc.addPage(); y = M; } }
+  function hr(yy) { doc.setDrawColor(120); doc.setLineWidth(.15); doc.line(M, yy, M + CW, yy); }
+
+  var priceNoVat = num(o.price) ? o.price / 1.22 : 0;
+  var vat = num(o.price) ? o.price - priceNoVat : 0;
+  var mainExec = oOwn(o).filter(function (e) { return e.role === 'main'; })[0] || oOwn(o)[0] || (o.executors || [])[0];
+  /* НЕ esc() здесь и ниже по функции - это не innerHTML, а текст jsPDF (doc.text/
+     splitTextToSize рисуют буквы векторами), esc() экранирует HTML-спецсимволы
+     (&/</>/"/') и они попали бы в документ буквально как "&amp;" и т.п. */
+  var vehicleLine = mainExec && mainExec.vehicle_gos
+    ? [mainExec.vehicle_gos, mainExec.trailer_gos].filter(Boolean).join(' + ') + (mainExec.driver_name ? ', водитель ' + mainExec.driver_name : '')
+    : 'уточняется';
+
+  setF(true, 12);
+  y = wrapped('"Разовая договор-заявка на организацию внутрироссийской автоперевозки грузов"', M, y + 4, CW, 5) + 2;
+  setF(true, 10);
+  text('№ ' + oNo(o) + '    от ' + dmy(o.service_date), M, y); y += 7;
+
+  /* ИСПОЛНИТЕЛЬ / ЗАКАЗЧИК - две колонки */
+  var colW = CW / 2 - 3;
+  var execLines = [
+    ent.full_name || ent.name,
+    'Юридический адрес: ' + (ent.legal_address || ''),
+    'ИНН: ' + (ent.inn || '') + '  КПП: ' + (ent.kpp || ''),
+    'ОГРН: ' + (ent.ogrn || ''),
+    'р/с: ' + (ent.bank_account || ''),
+    'в банке ' + (ent.bank_name || ''),
+    'к/с: ' + (ent.bank_corr_account || ''),
+    'БИК: ' + (ent.bank_bik || '')
+  ];
+  var custLines = [
+    o.customer || 'уточняется',
+    'Юридический адрес: ',
+    'ИНН:   КПП: ',
+    'ОГРН: ',
+    'р/с: ',
+    'в банке ',
+    'к/с: ',
+    'БИК: '
+  ];
+  ensureSpace(10 + execLines.length * 4.6);
+  setF(true, 9); text('ИСПОЛНИТЕЛЬ:', M, y); text('ЗАКАЗЧИК:', M + colW + 6, y); y += 4.6;
+  setF(false, 8.5);
+  var yBoth = y;
+  execLines.forEach(function (l, i) { wrapped(l, M, yBoth + i * 4.6, colW, 4.6); });
+  custLines.forEach(function (l, i) { wrapped(l, M + colW + 6, yBoth + i * 4.6, colW, 4.6); });
+  y = yBoth + execLines.length * 4.6 + 4;
+
+  /* Табличная часть */
+  ensureSpace(24);
+  hr(y); y += 4;
+  setF(true, 8.5);
+  var svcTitle = 'Транспортные услуги ' + contractEqGenitive_(o.equipment_type) + ' по маршруту: ' + contractAddrText_(o.load_address) + ' - ' + contractAddrText_(o.unload_address) + '. Груз: ' + (o.cargo || 'не указан') + ' от ' + dmy(o.service_date);
+  var svcW = CW - 90;
+  var svcEndY = wrapped(svcTitle, M, y, svcW, 4);
+  setF(false, 8.5);
+  text('1 шт.', M + svcW + 4, y);
+  text(fmtP(o.price) || '—', M + svcW + 30, y, { align: 'right' });
+  y = Math.max(svcEndY, y + 4) + 4;
+  hr(y); y += 5;
+  setF(true, 8.5);
+  text('ИТОГО:', M + svcW - 10, y, { align: 'right' }); text(fmtP(o.price) || '—', M + CW, y, { align: 'right' }); y += 4.5;
+  text('В т.ч. НДС (22%):', M + svcW - 10, y, { align: 'right' }); text(fmtP(Math.round(vat)) || '—', M + CW, y, { align: 'right' }); y += 4.5;
+  text('Всего к оплате:', M + svcW - 10, y, { align: 'right' }); text(fmtP(o.price) || '—', M + CW, y, { align: 'right' }); y += 6;
+  setF(false, 8);
+  y = wrapped('Всего наименований 1, на сумму ' + (fmtP(o.price) || '—') + '.', M, y, CW, 4) + 1;
+  setF(true, 8);
+  y = wrapped(num(o.price) ? rurWords_(o.price) : 'сумма не указана', M, y, CW, 4) + 5;
+
+  /* Условия перевозки */
+  ensureSpace(10);
+  setF(false, 8.5);
+  y = wrapped('Настоящим СТОРОНЫ согласовывают следующие условия по организации автоперевозки габаритных/негабаритных грузов во внутрироссийском сообщении:', M, y, CW, 4) + 3;
+  var condRows = [
+    ['Дата и время загрузки', dmy(o.service_date) + ' ' + (o.service_time ? String(o.service_time).slice(0, 5) : '')],
+    ['Тип и параметры подвижного состава', (o.equipment_type || 'уточняется') + (o.gabarit ? ', ' + o.gabarit : '')],
+    ['Наименование, габариты и масса груза', [o.cargo, o.cargo_dims, o.cargo_weight_t ? o.cargo_weight_t + ' т' : ''].filter(Boolean).join(', ') || 'уточняется'],
+    ['Точный адрес погрузки', contractAddrText_(o.load_address)],
+    ['Ответственные на погрузке', [o.load_contact_name, fmtPhone(o.load_contact_phone)].filter(Boolean).join(' · ') || 'уточняется'],
+    ['Точный адрес выгрузки', contractAddrText_(o.unload_address)],
+    ['Ответственные на выгрузке', [o.unload_contact_name, fmtPhone(o.unload_contact_phone)].filter(Boolean).join(' · ') || 'уточняется'],
+    ['Согласованный срок доставки', dmy(o.service_date)],
+    ['Автопоезд и водитель', vehicleLine],
+    ['Стоимость и условия оплаты', (fmtP(o.price) || 'уточняется') + (o.cash ? ', наличные' : '') + (o.payment_status ? ', ' + o.payment_status : '')],
+    ['Дополнительные условия', o.note || '—']
+  ];
+  var labelW = 55, valW = CW - labelW - 4;
+  condRows.forEach(function (row) {
+    setF(true, 8); var h1 = doc.splitTextToSize(row[0], labelW).length;
+    setF(false, 8); var h2 = doc.splitTextToSize(row[1], valW).length;
+    var rh = Math.max(h1, h2) * 4 + 2;
+    ensureSpace(rh);
+    setF(true, 8); wrapped(row[0], M, y, labelW, 4);
+    setF(false, 8); wrapped(row[1], M + labelW + 4, y, valW, 4);
+    y += rh; hr(y - 1);
+  });
+  y += 3;
+
+  /* Особые условия */
+  ensureSpace(10);
+  setF(true, 9); text('Особые условия:', M, y); y += 5;
+  setF(false, 7.8);
+  CONTRACT_SPECIAL_TERMS_.forEach(function (term, i) {
+    var lines = doc.splitTextToSize(term, CW - 6);
+    ensureSpace(lines.length * 3.6 + 2);
+    text((i + 1) + '.', M, y);
+    lines.forEach(function (l, li) { text(l, M + 6, y + li * 3.6); });
+    y += lines.length * 3.6 + 1.5;
+  });
+  y += 4;
+
+  /* Подписи */
+  ensureSpace(38);
+  setF(true, 8.5);
+  text('ИСПОЛНИТЕЛЬ:', M, y); text('ЗАКАЗЧИК:', M + colW + 6, y); y += 5;
+  setF(false, 8);
+  text((ent.director_post || 'Генеральный директор'), M, y);
+  text('_______________', M + colW + 6, y);
+  y += 1;
+  if (stampUrl) { try { doc.addImage(stampUrl, 'PNG', M + 30, y - 3, 26, 26); } catch (e) {} }
+  if (signUrl) { try { doc.addImage(signUrl, 'PNG', M + 44, y + 2, 30, 16); } catch (e) {} }
+  y += 20;
+  setF(false, 8);
+  text(ent.director || '', M, y);
+  text('М.п.', M, y + 5);
+  text('м.п.', M + colW + 6, y + 5);
+
+  var fileDate = dmy(o.service_date).replace(/\./g, '-');
+  doc.save('Договор-заявка №' + oNo(o) + ' от ' + fileDate + '.pdf');
+  toast('<span class="op2-tick">Договор-заявка сформирована</span>');
+}
+
 /* ═════════════════════════ РАЗМЕТКА ═════════════════════════ */
 function buildDom() {
   var page = document.getElementById(ROOT_ID);
@@ -2451,7 +2734,7 @@ function onDrawerFoot(e) {
   if (id === 'op2-f-save') { saveForm(e.target); return; }
   if (id === 'op2-d-otboy' && o) { setStatus(o, 'ot'); closeDrawer(); return; }
   if (id === 'op2-d-done' && o) { setStatus(o, 'done'); closeDrawer(); return; }
-  if (id === 'op2-d-contract' && o) { soon('Договор-заявка по №' + oNo(o)); return; }
+  if (id === 'op2-d-contract' && o) { genContractPdf(o); return; }
   if (id === 'op2-d-repeat' && o) { openRepeat(o); return; }
   if (id === 'op2-d-edit' && o) { openDrawerForm(o, false, isMgr() ? 'mgr' : 'log'); return; }
   if (id === 'op2-d-back' && o) { openDrawerView(o, isMgr() ? 'mgr' : 'log'); return; }

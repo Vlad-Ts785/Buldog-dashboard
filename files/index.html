@@ -1505,6 +1505,49 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .mp-dashed__t{font-size:12px;color:var(--text);line-height:1.5;}
 .mp-dashed__t b{font-family:'JetBrains Mono',monospace;font-weight:600;}
 
+/* bullet-чарт «план/факт недели» - канон одобрен дизайн-штурмом 14.09 («План поступлений»,
+   examples/... варианты «Пульс»/«Пульс-лента») - шкала 0-120% плана, тик на 83.3% = 100%
+   плана. Проще .mp-dual (там ещё месячный прогноз со штриховкой) - здесь только факт недели,
+   без прогноза. Используется и в личной ленте руководителя (crpSummaryCardInner_), и в
+   сводке директора (rpsRenderInner_) - см. mpBulletHtml_. */
+.mp-bullet{position:relative;height:16px;}
+.mp-bullet__track{position:absolute;left:0;right:0;top:4px;height:8px;border-radius:4px;background:var(--bg4);}
+.mp-bullet__fill{position:absolute;left:0;top:4px;height:8px;border-radius:4px;transition:width .3s ease;}
+.mp-bullet__tick{position:absolute;top:0;left:83.3%;width:2px;height:16px;border-radius:1px;background:rgba(var(--ink),.55);}
+.mp-bullet--mini{height:12px;}
+.mp-bullet--mini .mp-bullet__track,.mp-bullet--mini .mp-bullet__fill{top:3px;height:6px;}
+.mp-bullet--mini .mp-bullet__tick{height:12px;}
+
+/* «Пульс-лента» - личная страница руководителя группы, план поступлений (14.09, штурм
+   дизайн-агентов, вариант D «Пульс-лента», одобрен Владом с правками: значок копирования
+   ИНН вместо имени + фамилия менеджера в строке). Контрагент - строка-grid, тот же приём,
+   что и обычная сортируемая таблица (ГОСТ раздел 4). */
+.crp-ribbon{display:flex;flex-direction:column;gap:1px;background:var(--border);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;}
+.crp-row{background:var(--bg2);display:grid;grid-template-columns:minmax(170px,1.6fr) minmax(160px,2fr) 128px 36px;align-items:center;gap:16px;padding:11px 16px;}
+.crp-row:hover{background:var(--bg3);}
+.crp-row__title{font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.crp-row__sub{font-size:11px;color:var(--muted);margin-top:2px;display:flex;align-items:center;gap:5px;flex-wrap:wrap;font-family:'JetBrains Mono',monospace;}
+.crp-copy-btn{flex:none;width:18px;height:18px;border-radius:6px;border:none;background:none;color:var(--muted);display:inline-flex;align-items:center;justify-content:center;padding:0;cursor:pointer;transition:background-color .12s,color .12s;}
+.crp-copy-btn:hover{background:var(--bg4);color:var(--tint-blue);}
+.crp-tag-carry{display:inline-flex;align-items:center;gap:4px;font-family:'Golos Text',sans-serif;font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:6px;background:rgba(55,138,221,.14);color:var(--tint-blue);white-space:nowrap;}
+.crp-tag-carry svg{width:10px;height:10px;}
+.crp-row__cap{display:flex;justify-content:space-between;gap:8px;font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace;margin-bottom:4px;}
+.crp-status{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:4px 9px;border-radius:8px;background:var(--bg4);color:var(--muted);white-space:nowrap;justify-self:start;}
+.crp-status--partial{color:var(--tint-amber);background:rgba(239,159,39,.13);}
+.crp-status--done{color:var(--tint-green);background:rgba(29,158,117,.14);}
+.crp-status--over{color:var(--purple);background:rgba(127,119,221,.16);}
+.crp-row__action{display:flex;align-items:center;justify-content:center;}
+.crp-icon-btn{width:28px;height:28px;border-radius:8px;border:none;background:none;color:var(--muted);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background-color .12s,color .12s;}
+.crp-icon-btn:hover{background:var(--bg4);color:var(--tint-red);}
+.crp-lock{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--muted);opacity:.75;}
+@media(max-width:760px){
+  .crp-row{grid-template-columns:1fr 30px;grid-template-areas:"name action" "bullet bullet" "status status";row-gap:8px;}
+  .crp-row>div:first-child{grid-area:name;}
+  .crp-row>div:nth-child(2){grid-area:bullet;}
+  .crp-status{grid-area:status;}
+  .crp-row__action{grid-area:action;}
+}
+
 /* задачи */
 .mp-tasks__count{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:.04em;}
 /* Кнопка «Заново» - СВОЙ класс, не mp-task__btn: иначе делит селектор с кнопками
@@ -19747,43 +19790,133 @@ function crpAddManual_() {
   var cfg = currentCommercialHeadCfg_();
   if (cfg) crpRenderInner_(cfg); // полная перерисовка - если контрагент есть и в таблице должников, её строка тоже обновится
 }
+// bullet-чарт «план/факт недели» (канон .mp-bullet выше) - используется и в этой карточке,
+// и в сводке директора (rpsRenderInner_). mini=true - уменьшенная версия для строк ленты.
+function mpBulletHtml_(plan, fact, mini) {
+  var pct = plan > 0 ? (fact / plan * 100) : 0;
+  var fillPct = Math.min(Math.max(pct, 0), 120) / 120 * 100;
+  var color = pct >= 100 ? 'var(--green)' : (pct > 0 ? 'var(--amber)' : 'var(--bg4)');
+  return '<div class="mp-bullet' + (mini ? ' mp-bullet--mini' : '') + '" title="Факт ' + crpFmtInt_(fact) + ' ₽ из плана ' + crpFmtInt_(plan) + ' ₽ (тик - 100% плана)">'
+    + '<div class="mp-bullet__track"></div>'
+    + '<div class="mp-bullet__fill" style="width:' + fillPct + '%;background:' + color + '"></div>'
+    + '<div class="mp-bullet__tick"></div></div>';
+}
+// Статус контрагента план/факт (те же пороги, что в дизайн-штурме 14.09).
+function crpRowStatus_(plan, fact) {
+  if (plan <= 0 || !fact) return { cls: 'wait', label: 'Ждём' };
+  var pct = fact / plan * 100;
+  if (pct < 98) return { cls: 'partial', label: 'Частично' };
+  if (pct < 105) return { cls: 'done', label: 'Оплачено' };
+  return { cls: 'over', label: 'Перевыполнено' };
+}
+// Короткое имя для копирования, если ИНН ещё не определён светофором риска (debtRiskMap_) -
+// без юр.формы и пометок в скобках, чтобы поиск в 1С не спотыкался о лишний текст.
+function crpShortName_(name) {
+  return String(name).replace(/\([^)]*\)/g, '').replace(/\b(ООО|АО|ПАО|ОАО|ЗАО|ИП)\.?/gi, '').replace(/!+/g, '').replace(/\s{2,}/g, ' ').trim();
+}
+function crpCopyFallback_(text) {
+  var ta = document.createElement('textarea');
+  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); } catch (e) {}
+  document.body.removeChild(ta);
+}
+// Значок копирования в ленте "Мой план" (14.09, Влад: "сделать иконку, чтобы можно было
+// скопировать быстро в 1с, в поиск забить... пишется должно не название компании, а ИНН") -
+// копирует ИНН, когда он определён (debtRiskMap_ - светофор риска, единственный источник
+// ИНН на сайте, т.к. в самой ДЗ ИНН нет вообще), иначе короткое название как запасной вариант.
+function crpCopyInn_(text) {
+  function done() { p2Toast('Скопировано: ' + text, 'green'); }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(function() { crpCopyFallback_(text); done(); });
+  } else { crpCopyFallback_(text); done(); }
+}
+// Одна строка "Пульс-ленты" - контрагент уже в плане (crpAmounts_[c]>0). Порядок в подписи
+// (Влад, 14.09): название → ИНН → значок копирования → фамилия менеджера.
+function crpRowHtml_(c) {
+  var plan = crpAmounts_[c], fact = crpFacts_[c] || 0;
+  var st = crpRowStatus_(plan, fact);
+  var locked = !!crpLockedContragents_[c];
+  var co = crpCarryover_[c];
+  var debtRow = ((D.debt && D.debt.by_customer) || []).filter(function(x) { return x.contragent === c; })[0];
+  var manager = debtRow ? debtRow.manager : null;
+  var riskInfo = debtRiskMap_ && debtRiskMap_[c];
+  var inn = riskInfo && riskInfo.inn;
+  var copyVal = inn || crpShortName_(c);
+  var copyTitle = inn ? 'Скопировать ИНН — для поиска в 1С' : 'Скопировать короткое имя — для поиска в 1С';
+  var escCopy = String(copyVal).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  var escClear = c.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  var subParts = [];
+  if (inn) subParts.push('ИНН ' + inn);
+  subParts.push('<button class="crp-copy-btn" onclick="crpCopyInn_(\'' + escCopy + '\')" title="' + copyTitle + '"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg></button>');
+  if (manager) subParts.push(rpsShortName_(manager));
+  if (co) subParts.push('<span class="crp-tag-carry" title="Не заплатил на прошлой неделе (план ' + crpFmtInt_(co.prev_planned) + ' ₽ · факт ' + crpFmtInt_(co.prev_fact) + ' ₽)"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>перенос</span>');
+  var actionHtml = locked
+    ? '<span class="crp-lock" title="Уже отправлено — убрать нельзя"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span>'
+    : '<button class="crp-icon-btn" onclick="crpClear_(\'' + escClear + '\')" title="Убрать из плана"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>';
+  return '<div class="crp-row">'
+    + '<div><div class="crp-row__title">' + debtRiskDotHtml_(c) + c + '</div><div class="crp-row__sub">' + subParts.join(' ') + '</div></div>'
+    + '<div><div class="crp-row__cap"><span>план ' + crpFmtInt_(plan) + ' ₽</span>' + (crpFacts_.hasOwnProperty(c) ? '<span>факт ' + crpFmtInt_(fact) + ' ₽</span>' : '') + '</div>' + mpBulletHtml_(plan, fact, true) + '</div>'
+    + '<span class="crp-status crp-status--' + st.cls + '">' + st.label + '</span>'
+    + '<div class="crp-row__action">' + actionHtml + '</div>'
+    + '</div>';
+}
+function crpPluralContractor_(n) {
+  var mod10 = n % 10, mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 14) return 'контрагентов';
+  if (mod10 === 1) return 'контрагент';
+  if (mod10 >= 2 && mod10 <= 4) return 'контрагента';
+  return 'контрагентов';
+}
+// «Пульс-лента» (14.09, штурм дизайн-агентов - examples/... вариант D, одобрен Владом:
+// "это самый лучший вариант" + правки - значок копирования ИНН, фамилия менеджера, порядок
+// название→ИНН→значок→фамилия). Заменяет прежний вариант с чипами-таблетками (тот
+// блокировал ввод чекбоксом - живой баг 14.09, см. память feedback_verify_before_claiming_done).
 function crpSummaryCardInner_() {
   var picked = Object.keys(crpAmounts_).filter(function(c) { return crpAmounts_[c] > 0; });
   var total = picked.reduce(function(s, c) { return s + crpAmounts_[c]; }, 0);
   var totalFact = picked.reduce(function(s, c) { return s + (crpFacts_[c] || 0); }, 0);
-  var rowsHtml = !picked.length
-    ? '<div class="muted" style="font-size:12.5px;padding:14px 2px">Впишите сумму рядом с контрагентом ниже, чтобы добавить его в план</div>'
-    : '<div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0">' + picked.map(function(c) {
-        var esc = c.replace(/'/g, "\\'");
-        var fact = crpFacts_[c] || 0;
-        var covered = fact >= crpAmounts_[c];
-        // Факт - ТОЛЬКО реальные поступления за эту неделю (Влад, 14.09: "план перекрывают
-        // только фактические поступления"), не снижение баланса ДЗ. Есть у контрагента,
-        // только если план уже был сохранён на сервере в этом сеансе просмотра.
-        var factHtml = crpFacts_.hasOwnProperty(c)
-          ? ' <span style="color:' + (covered ? 'var(--tint-green)' : 'var(--tint-amber)') + '">· факт ' + crpFmtInt_(fact) + ' ₽' + (covered ? ' ✓' : '') + '</span>'
-          : '';
-        var co = crpCarryover_[c];
-        var coHtml = co ? ' <span class="muted" title="Не оплатили на прошлой неделе (план '+crpFmtInt_(co.prev_planned)+' ₽ · факт '+crpFmtInt_(co.prev_fact)+' ₽)" style="font-size:10.5px">· перенесено</span>' : '';
-        // Влад, 14.09: "после того как план отправили, удалять из него ничего нельзя" -
-        // у уже отправленных контрагентов вместо ✕ - замок (некликабельный, только подсказка).
-        var locked = crpLockedContragents_[c];
-        // Замок - инлайн-SVG, штриховая, currentColor (ГОСТ, запрет №2 - никаких emoji в UI).
-        var removeHtml = locked
-          ? '<span title="Уже отправлено - убрать нельзя" style="color:var(--muted);display:inline-flex;padding:0 4px"><svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="9" width="10" height="8" rx="1.5"/><path d="M7 9V6a3 3 0 0 1 6 0v3"/></svg></span>'
-          : '<button onclick="crpClear_(\'' + esc + '\')" title="Убрать из плана" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:0 4px">✕</button>';
-        return '<span style="display:inline-flex;align-items:center;gap:6px;background:var(--bg3);border:1px solid ' + (co ? 'var(--amber)' : 'var(--border)') + ';border-radius:20px;padding:5px 6px 5px 12px;font-size:12px">'
-          + c + ' · <b style="font-family:\'JetBrains Mono\',monospace">' + crpFmtInt_(crpAmounts_[c]) + ' ₽</b>' + factHtml + coHtml + removeHtml + '</span>';
-      }).join('') + '</div>';
+  var haveFact = picked.some(function(c) { return crpFacts_.hasOwnProperty(c); });
+  var pct = total > 0 ? Math.round(totalFact / total * 100) : 0;
   var deadlinePassed = crpDeadlineMs_(crpWeek_) < Date.now();
+
+  var counts = { wait: 0, partial: 0, done: 0, over: 0, carry: 0 };
+  picked.forEach(function(c) {
+    counts[crpRowStatus_(crpAmounts_[c], crpFacts_[c] || 0).cls]++;
+    if (crpCarryover_[c]) counts.carry++;
+  });
+  var legendHtml = !picked.length ? '' : '<div style="display:flex;gap:16px;flex-wrap:wrap;padding:10px 2px;font-size:11.5px;color:var(--muted)">'
+    + '<span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--muted);margin-right:6px"></span>Ждём <b style="color:var(--text);font-family:\'JetBrains Mono\',monospace">' + counts.wait + '</b></span>'
+    + '<span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);margin-right:6px"></span>Оплачено <b style="color:var(--text);font-family:\'JetBrains Mono\',monospace">' + counts.done + '</b></span>'
+    + '<span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--purple);margin-right:6px"></span>Перевыполнено <b style="color:var(--text);font-family:\'JetBrains Mono\',monospace">' + counts.over + '</b></span>'
+    + (counts.carry ? '<span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--amber);margin-right:6px"></span>Перенос с прошлой недели <b style="color:var(--text);font-family:\'JetBrains Mono\',monospace">' + counts.carry + '</b></span>' : '')
+    + '</div>';
+
+  var deadlineDate = new Date(crpDeadlineMs_(crpWeek_));
+  var deadlineStr = deadlineDate.getFullYear() + '-' + String(deadlineDate.getMonth() + 1).padStart(2, '0') + '-' + String(deadlineDate.getDate()).padStart(2, '0');
   var btnHtml = deadlinePassed
     ? '<button disabled style="' + crpBigBtnCss_ + ';background:var(--bg3);color:var(--muted);border:1px solid var(--border);cursor:default">Дедлайн прошёл (вторник 15:00)</button>'
     // Влад, 14.09: "кнопка отправить план должна быть большой и видной" - сплошная заливка
     // --green (семантика раздела 1 ГОСТа: деньги/план), не просто обводка как обычный tab-btn.
-    : '<button onclick="crpSubmit_()" style="' + crpBigBtnCss_ + (picked.length ? ';background:var(--green);color:#0b2019' : ';background:var(--bg3);color:var(--muted);cursor:default') + '" ' + (picked.length ? '' : 'disabled') + '>Отправить план' + (picked.length ? ' · ' + picked.length + (picked.length === 1 ? ' контрагент' : ' контрагентов') : '') + '</button>';
+    : '<button onclick="crpSubmit_()" style="' + crpBigBtnCss_ + (picked.length ? ';background:var(--green);color:#0b2019' : ';background:var(--bg3);color:var(--muted);cursor:default') + '" ' + (picked.length ? '' : 'disabled') + '>Отправить план' + (picked.length ? ' · ' + picked.length + ' ' + crpPluralContractor_(picked.length) : '') + '</button>';
+  var metaHtml = '<div style="display:flex;flex-direction:column;gap:6px;margin-top:10px;font-size:12px;color:var(--muted)">'
+    + '<div>Осталось собрать <b style="color:var(--text);font-family:\'JetBrains Mono\',monospace">' + crpFmtInt_(Math.max(total - totalFact, 0)) + ' ₽</b></div>'
+    + '<div' + (deadlinePassed ? ' style="color:var(--tint-red)"' : '') + '>Дедлайн: вторник, ' + fmtDateRu(deadlineStr) + ', 15:00</div>'
+    + '</div>';
+
+  var heroHtml = '<div style="display:flex;align-items:stretch;gap:24px;flex-wrap:wrap">'
+    + '<div style="flex:1 1 340px;min-width:280px">'
+    + '<div style="font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">План на неделю</div>'
+    + '<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:10px">'
+    + '<span style="font-family:\'JetBrains Mono\',monospace;font-size:28px;font-weight:600">' + crpFmtInt_(total) + ' ₽</span>'
+    + (haveFact ? '<span style="color:var(--muted)">/</span><span style="font-size:13px;color:var(--muted)">факт <b style="color:var(--text);font-family:\'JetBrains Mono\',monospace">' + crpFmtInt_(totalFact) + ' ₽</b></span><span style="font-family:\'JetBrains Mono\',monospace;font-weight:700;font-size:13px;padding:3px 8px;border-radius:8px;background:' + (pct >= 100 ? 'rgba(29,158,117,.15)' : 'rgba(239,159,39,.16)') + ';color:' + (pct >= 100 ? 'var(--tint-green)' : 'var(--tint-amber)') + '">' + pct + '%</span>' : '')
+    + '</div>' + mpBulletHtml_(total, totalFact) + '</div>'
+    + '<div style="flex:0 0 260px;display:flex;flex-direction:column;justify-content:center">' + btnHtml + metaHtml + '</div>'
+    + '</div>';
+
   // «Клиент, который не должен, но оплатит» (14.09) - свободный выбор/ввод контрагента +
   // сумма, не завязано на таблицу должников ниже.
-  var addFormHtml = '<div style="position:relative;display:flex;gap:8px;margin:12px 0;flex-wrap:wrap">'
+  var addFormHtml = '<div style="position:relative;display:flex;gap:8px;margin:4px 0 12px;flex-wrap:wrap">'
     + '<div style="position:relative;flex:1;min-width:220px">'
     + '<input id="crp-add-name" oninput="crpAddNameInput_()" onblur="setTimeout(function(){var b=document.getElementById(\'crp-add-suggest\');if(b)b.style.display=\'none\';},150)" ' + (deadlinePassed ? 'disabled' : '') + ' placeholder="+ Добавить клиента - контрагент" autocomplete="off" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);padding:8px 10px;font-size:12.5px">'
     + '<div id="crp-add-suggest" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:5;background:var(--bg3);border:1px solid var(--border-strong);border-radius:8px;margin-top:3px;max-height:220px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.4)"></div>'
@@ -19791,22 +19924,25 @@ function crpSummaryCardInner_() {
     + '<input id="crp-add-amount" ' + (deadlinePassed ? 'disabled' : '') + ' inputmode="numeric" autocomplete="off" placeholder="Сумма" style="width:130px;text-align:right;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);font-family:\'JetBrains Mono\',monospace;padding:8px 9px;font-size:12.5px">'
     + '<button onclick="crpAddManual_()" ' + (deadlinePassed ? 'disabled' : '') + ' style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:8px 16px;font-size:12.5px;cursor:pointer;white-space:nowrap">Добавить</button>'
     + '</div>';
-  // Факт под планом (14.09, Влад: "нужен ещё и факт") - только реальные поступления недели,
-  // видно сразу насколько план уже перекрыт. Показываем только когда есть с чем сравнивать
-  // (хотя бы один контрагент уже имеет сохранённый факт), иначе "факт 0" в самом начале
-  // недели читался бы как тревога, а не как "рано ещё".
-  var factSub = picked.some(function(c) { return crpFacts_.hasOwnProperty(c); })
-    ? '<div style="font-size:12px;color:var(--muted);margin-top:2px">факт <b style="color:' + (totalFact >= total ? 'var(--tint-green)' : 'var(--text)') + ';font-family:\'JetBrains Mono\',monospace">' + crpFmtInt_(totalFact) + ' ₽</b>' + (total ? ' · ' + Math.round(totalFact / total * 100) + '%' : '') + '</div>'
-    : '';
-  return '<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:10px">'
-    + '<div><div style="font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Мой план на эту неделю</div>'
-    + '<div style="font-family:\'JetBrains Mono\',monospace;font-size:25px;font-weight:500">' + crpFmtInt_(total) + ' <span style="font-size:15px;color:var(--muted)">₽</span></div>' + factSub + '</div>'
-    + btnHtml + '</div>' + rowsHtml + addFormHtml;
+
+  var ribbonHtml = !picked.length
+    ? '<div class="muted" style="font-size:12.5px;padding:14px 2px">Впишите сумму рядом с контрагентом ниже, чтобы добавить его в план</div>'
+    : '<div class="crp-ribbon">' + picked.map(crpRowHtml_).join('') + '</div>';
+
+  return heroHtml + legendHtml
+    + '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin:14px 0 8px">'
+    + '<div style="font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text)">Контрагенты в плане<span style="font-family:\'JetBrains Mono\',monospace;color:var(--muted);font-weight:500;text-transform:none;letter-spacing:0;margin-left:6px">' + picked.length + '</span></div>'
+    + '</div>'
+    + addFormHtml + ribbonHtml;
 }
 
 function crpRenderInner_(cfg) {
   var el = document.getElementById('commercial-head-receipts-plan-content');
   if (!el || !D) return;
+  // ИНН для значка копирования в "Пульс-ленте" (crpRowHtml_) - тот же кэш светофора риска,
+  // что уже грузится для ДЗ руководителя группы (единственный источник ИНН на сайте, см.
+  // debtRiskMap_ выше - в самой ДЗ ИНН нет вообще). Перерисовываем, когда карта подъедет.
+  if (debtRiskMap_ === null) ensureDebtRiskMap_(function() { var c2 = currentCommercialHeadCfg_(); if (c2) crpRenderInner_(c2); });
   var fmt = pageFr_;
   var teamSurLower = cfg.members.map(function(s) { return s.toLowerCase(); });
   var allDebt = ((D.debt && D.debt.by_customer) || []).filter(function(c) {
@@ -19938,6 +20074,13 @@ function rpsShortName_(name) {
   if (p.length === 1) return p[0];
   return p[0] + ' ' + p.slice(1).map(function(w) { return w[0].toUpperCase() + '.'; }).join('');
 }
+// «Пульс» - сводка директора, план поступлений (14.09, штурм дизайн-агентов - examples/...
+// вариант A «Пульс», одобрен Владом изначально). Заменяет промежуточный вариант с таблицей
+// (тот тоже был одобрен 14.09, но чуть раньше, до штурма - "мне это не нравится, как
+// сейчас" про ту же страницу и стало поводом для штурма). Ярусы: KPI-плитки (.kpi-grid,
+// уже используются на "Панели") -> карточки по руководителям -> список контрагентов
+// открывшегося руководителя с мини bullet-чартом (canon .mp-bullet). Клик по строке/карточке
+// руководителя - тот же принцип "Разворот строки по клику" (ГОСТ раздел 4), что уже был.
 function rpsRenderInner_(week) {
   var el = document.getElementById('receipts-plan-summary-content');
   if (!el) return;
@@ -19950,6 +20093,10 @@ function rpsRenderInner_(week) {
   var totalFactAll = heads.reduce(function(s, c) { var h = rpsData_.heads[c.head.toLowerCase()]; return s + (h ? (h.total_fact || 0) : 0); }, 0);
   var weekEnd = new Date(week + 'T00:00:00+03:00'); weekEnd.setDate(weekEnd.getDate() + 6);
   var weekEndStr = weekEnd.getFullYear() + '-' + String(weekEnd.getMonth() + 1).padStart(2, '0') + '-' + String(weekEnd.getDate()).padStart(2, '0');
+  var pctAll = totalAll > 0 ? Math.round(totalFactAll / totalAll * 100) : 0;
+  var allItems = [];
+  heads.forEach(function(c) { var h = rpsData_.heads[c.head.toLowerCase()]; if (h && h.items) allItems = allItems.concat(h.items); });
+  var paidCount = allItems.filter(function(it) { return (it.fact_amount || 0) >= it.planned_amount; }).length;
 
   var statusTone = submittedCount === heads.length ? 'good' : deadlinePassed ? 'bad' : 'warn';
   var statusWord = submittedCount === heads.length ? 'ВСЕ ПОДАЛИ' : submittedCount + ' ИЗ ' + heads.length + ' ПОДАЛИ';
@@ -19960,57 +20107,82 @@ function rpsRenderInner_(week) {
     + (deadlinePassed ? ' · дедлайн прошёл' : ' · дедлайн вторник 15:00') + '</div></div>'
     + '<div class="mp-status__r"><div class="mp-status__cap">План · факт</div>'
     + '<div class="mp-status__lever">' + crpFmtInt_(totalAll) + ' ₽</div>'
-    + '<div style="font-size:12px;color:' + (totalFactAll >= totalAll ? 'var(--tint-green)' : 'var(--muted)') + ';margin-top:3px;font-family:\'JetBrains Mono\',monospace">' + crpFmtInt_(totalFactAll) + ' ₽' + (totalAll ? ' · ' + Math.round(totalFactAll / totalAll * 100) + '%' : '') + '</div></div></div>';
+    + '<div style="font-size:12px;color:' + (totalFactAll >= totalAll ? 'var(--tint-green)' : 'var(--muted)') + ';margin-top:3px;font-family:\'JetBrains Mono\',monospace">' + crpFmtInt_(totalFactAll) + ' ₽' + (totalAll ? ' · ' + pctAll + '%' : '') + '</div></div></div>';
 
-  html += '<div class="card" style="max-width:760px">'
-    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
-    + '<div style="font-size:14px;font-weight:600">По руководителям</div>'
-    + '<span class="badge blue">клик по строке — контрагенты</span></div>';
+  // Ярус 1 - сводка по компании (те же .kpi/.kpi-grid, что и остальной дашборд).
+  html += '<div class="kpi-grid">'
+    + '<div class="kpi"><div class="card-title">Запланировано</div>'
+    + '<div style="font-family:\'JetBrains Mono\',monospace;font-size:24px;font-weight:600;margin:6px 0 10px">' + crpFmtInt_(totalAll) + ' ₽</div>'
+    + heads.map(function(c) {
+        var h = rpsData_.heads[c.head.toLowerCase()];
+        return '<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-top:1px solid var(--border)">'
+          + '<span class="muted">' + c.name + '</span>'
+          + (h && h.submitted ? '<b style="font-family:\'JetBrains Mono\',monospace">' + crpFmtInt_(h.total) + ' ₽</b>' : '<span class="muted">не подан</span>') + '</div>';
+      }).join('') + '</div>'
+    + '<div class="kpi"><div class="card-title">Факт недели</div>'
+    + '<div style="font-family:\'JetBrains Mono\',monospace;font-size:24px;font-weight:600;margin:6px 0 10px">' + crpFmtInt_(totalFactAll) + ' ₽</div>'
+    + mpBulletHtml_(totalAll, totalFactAll) + '<div class="muted" style="font-size:11.5px;margin-top:8px">Осталось собрать <b style="color:var(--text);font-family:\'JetBrains Mono\',monospace">' + crpFmtInt_(Math.max(totalAll - totalFactAll, 0)) + ' ₽</b></div></div>'
+    + '<div class="kpi"><div class="card-title">Выполнение</div>'
+    + '<div style="font-family:\'JetBrains Mono\',monospace;font-size:24px;font-weight:600;margin:6px 0 10px">' + pctAll + '%</div>'
+    + '<div class="muted" style="font-size:11.5px">Собирать будут до <b style="color:var(--text)">' + fmtDateRu(weekEndStr) + '</b></div>'
+    + '<div class="muted" style="font-size:11.5px;margin-top:4px">Контрагентов оплатило: <b style="color:var(--text);font-family:\'JetBrains Mono\',monospace">' + paidCount + '</b> из ' + allItems.length + '</div></div>'
+    + '<div class="kpi"><div class="card-title">Кто подал план</div>'
+    + '<div style="font-family:\'JetBrains Mono\',monospace;font-size:24px;font-weight:600;margin:6px 0 10px;color:' + (submittedCount === heads.length ? 'var(--text)' : 'var(--muted)') + '">' + submittedCount + ' / ' + heads.length + '</div>'
+    + heads.map(function(c) {
+        var h = rpsData_.heads[c.head.toLowerCase()];
+        var submitted = h && h.submitted;
+        return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:4px 0">'
+          + '<span style="font-size:12px">' + c.name + '</span>'
+          + '<span class="badge ' + (submitted ? 'green' : deadlinePassed ? 'red' : 'amber') + '">' + (submitted ? 'Подала' : deadlinePassed ? 'Не подала' : 'До дедлайна') + '</span></div>';
+      }).join('') + '</div>'
+    + '</div>';
 
-  heads.forEach(function(c) {
+  // Ярус 2 - карточка по каждому руководителю, клик разворачивает ярус 3 ниже.
+  html += '<div class="grid-2" style="margin-bottom:16px">' + heads.map(function(c) {
     var key = c.head.toLowerCase();
     var h = rpsData_.heads[key] || { items: [], total: 0, total_fact: 0, submitted: false };
-    var open = rpsOpen_ === key;
-    var factLine = h.submitted
-      ? '<div class="muted" style="font-size:10.5px;text-align:right">факт ' + crpFmtInt_(h.total_fact || 0) + ' ₽' + (h.total ? ' · ' + Math.round((h.total_fact || 0) / h.total * 100) + '%' : '') + '</div>'
-      : '';
-    html += '<div onclick="rpsToggle_(\'' + key + '\')" style="cursor:pointer;display:grid;grid-template-columns:14px 1fr max-content max-content;align-items:center;column-gap:14px;padding:12px 4px;border-bottom:1px solid var(--border)">'
-      + '<span class="muted" style="font-size:10px;transition:transform .15s;display:inline-block;transform:rotate(' + (open ? '90' : '0') + 'deg)">▸</span>'
-      + '<div>' + c.name + '</div>'
-      + '<div>' + (h.submitted ? '<div style="font-family:\'JetBrains Mono\',monospace;text-align:right">' + crpFmtInt_(h.total) + ' ₽</div>' + factLine : '<span class="muted">— план не начат</span>') + '</div>'
-      + '<span class="badge ' + (h.submitted ? 'green' : deadlinePassed ? 'red' : 'amber') + '">' + (h.submitted ? 'Подала' : deadlinePassed ? 'Не подала' : 'До дедлайна') + '</span>'
-      + '</div>';
-    if (open) {
-      // Влад, 14.09: "сделай по-человечески - табличка, колонка контрагент, колонка
-      // менеджер (инициалы), колонка план, колонка факт, и суммы колонок" - было стопкой
-      // div'ов (не читалось на 31 строке), теперь обычная таблица, тот же канон, что "Мои
-      // должники"/остальные таблицы дашборда, с итоговой строкой.
-      html += '<div style="padding:2px 4px 14px 28px;border-bottom:1px solid var(--border)">' + (
-        !h.items.length
-          ? '<div class="muted" style="font-size:12px;padding:6px 0">Пока ничего не выбрано в плане.</div>'
-          : '<div style="overflow-x:auto"><table class="tbl"><thead><tr>'
-            + '<th>Контрагент</th><th>Менеджер</th><th class="num">План</th><th class="num">Факт</th>'
-            + '</tr></thead><tbody>' + h.items.map(function(it) {
-              var fact = it.fact_amount || 0, covered = fact >= it.planned_amount;
-              return '<tr>'
-                + '<td>' + it.contragent + '</td>'
-                + '<td class="muted">' + rpsShortName_(it.manager) + '</td>'
-                + '<td class="num"><b>' + crpFmtInt_(it.planned_amount) + ' ₽</b></td>'
-                + '<td class="num" style="color:' + (covered ? 'var(--tint-green)' : 'var(--muted)') + '">' + crpFmtInt_(fact) + ' ₽' + (covered ? ' ✓' : '') + '</td>'
-                + '</tr>';
-            }).join('') + '</tbody>'
-            + '<tfoot><tr style="border-top:2px solid var(--border);font-weight:600">'
-            + '<td colspan="2">Итого</td>'
-            + '<td class="num">' + crpFmtInt_(h.total) + ' ₽</td>'
-            + '<td class="num" style="color:' + ((h.total_fact || 0) >= h.total ? 'var(--tint-green)' : 'var(--text)') + '">' + crpFmtInt_(h.total_fact || 0) + ' ₽</td>'
-            + '</tr></tfoot></table></div>'
-      ) + '</div>';
+    if (!h.submitted) {
+      return '<div class="card" style="border-style:dashed">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
+        + '<div style="font-size:14px;font-weight:600">' + c.name + '</div>'
+        + '<span class="badge ' + (deadlinePassed ? 'red' : 'amber') + '">' + (deadlinePassed ? 'Не подала' : 'До дедлайна') + '</span></div>'
+        + '<div class="muted" style="font-size:12.5px">План на неделю ещё не подан — контрагенты и суммы появятся здесь после отправки.</div></div>';
     }
-  });
-  html += '<div class="muted" style="font-size:11.5px;padding:12px 2px 2px">Факт - реальные поступления недели (не снижение баланса ДЗ). Кто не доплатил - автоматически появится в плане следующей недели.</div>';
-  html += '</div>';
+    var pctH = h.total > 0 ? Math.round((h.total_fact || 0) / h.total * 100) : 0;
+    return '<div class="card" onclick="rpsToggle_(\'' + key + '\')" style="cursor:pointer">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
+      + '<div style="font-size:14px;font-weight:600">' + c.name + '</div>'
+      + '<span class="badge blue">' + h.items.length + ' контрагент' + (h.items.length === 1 ? '' : h.items.length < 5 ? 'а' : 'ов') + ' · ' + (rpsOpen_ === key ? 'свернуть' : 'открыть') + '</span></div>'
+      + '<div style="font-family:\'JetBrains Mono\',monospace;font-size:22px;font-weight:600;margin-bottom:8px">' + crpFmtInt_(h.total) + ' ₽</div>'
+      + mpBulletHtml_(h.total, h.total_fact || 0)
+      + '<div class="muted" style="font-size:11.5px;margin-top:6px">факт <b style="color:' + (pctH >= 100 ? 'var(--tint-green)' : 'var(--text)') + ';font-family:\'JetBrains Mono\',monospace">' + crpFmtInt_(h.total_fact || 0) + ' ₽</b> · ' + pctH + '%</div>'
+      + (rpsOpen_ === key ? rpsContragentListHtml_(h) : '')
+      + '</div>';
+  }).join('') + '</div>';
+
+  html += '<div class="muted" style="font-size:11.5px;padding:2px">Факт - реальные поступления недели (не снижение баланса ДЗ). Кто не доплатил - автоматически появится в плане следующей недели. После отправки строки нельзя удалить или изменить сумму - руководитель может только добавлять новых контрагентов.</div>';
 
   el.innerHTML = html;
+}
+// Ярус 3 - развёрнутый список контрагентов открытого руководителя (мини bullet-чарт на
+// строку, тот же приём, что variant A "Пульс" - см. .va-list в дизайн-штурме). Раньше здесь
+// была таблица (тоже одобрена Владом, но до штурма) - штурм её заменил этим видом; итоги
+// колонок (Влад просил "суммы колонок") сохранены отдельной строкой внизу списка.
+function rpsContragentListHtml_(h) {
+  if (!h.items.length) return '<div class="muted" style="font-size:12px;padding:10px 2px 0">Пока ничего не выбрано в плане.</div>';
+  var rows = h.items.map(function(it) {
+    var fact = it.fact_amount || 0, covered = fact >= it.planned_amount;
+    return '<div style="display:grid;grid-template-columns:1.3fr 1fr 1.3fr;gap:14px;align-items:center;padding:10px 0;border-top:1px solid var(--border)">'
+      + '<div><div style="font-size:13px;font-weight:500">' + it.contragent + '</div><div class="muted" style="font-size:11px">менеджер ' + rpsShortName_(it.manager) + '</div></div>'
+      + mpBulletHtml_(it.planned_amount, fact, true)
+      + '<span class="badge ' + (covered ? 'green' : 'amber') + '" style="justify-self:end">' + (covered ? 'оплачено' : 'ожидаем оплату') + '</span>'
+      + '</div>';
+  }).join('');
+  return '<div style="margin-top:12px;padding-top:2px;border-top:1px solid var(--border-strong)" onclick="event.stopPropagation()">' + rows
+    + '<div style="display:flex;justify-content:space-between;font-size:11.5px;padding-top:10px;margin-top:2px;border-top:2px solid var(--border);font-weight:600">'
+    + '<span>Итого · ' + h.items.length + '</span>'
+    + '<span style="font-family:\'JetBrains Mono\',monospace">' + crpFmtInt_(h.total) + ' ₽ / <span style="color:' + ((h.total_fact || 0) >= h.total ? 'var(--tint-green)' : 'var(--text)') + '">' + crpFmtInt_(h.total_fact || 0) + ' ₽</span></span>'
+    + '</div></div>';
 }
 
 // Состав "обычных" (не спецформула) отделов - используется renderSalesSalary(). Отдел

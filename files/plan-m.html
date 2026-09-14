@@ -457,7 +457,7 @@ function fmtDur(l){ if (l % 24 === 0 && l >= 24) return (l / 24) + " " + plural(
 function plural(n, a, b, c){ n = Math.abs(n) % 100; var n1 = n % 10; if (n > 10 && n < 20) return c; if (n1 > 1 && n1 < 5) return b; if (n1 === 1) return a; return c; }
 function dayStartOf(h){ return Math.floor(h / 24) * 24; }
 function gosShort(g){ return (g || "").replace(/\s+\d+\s*$/, ""); }
-function three(name){ return (name || "").split(" ")[0].substring(0, 3).toUpperCase(); }
+function three(name){ if (LP_DEPT_CODE_[name]) return LP_DEPT_CODE_[name]; return (name || "").split(" ")[0].substring(0, 3).toUpperCase(); }
 function shortName(full){ return (full || "").trim().split(" ").slice(0, 2).join(" "); }
 function surnameIO(full){ var p = (full || "").trim().split(/\s+/); if (!p.length) return ""; var s = p[0]; if (p[1]) s += " " + p[1][0] + "."; if (p[2]) s += p[2][0] + "."; return s; }
 function untilLabel(s){
@@ -674,6 +674,22 @@ function apiPost_(path, params){
     .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(d){ return {ok: r.ok && !d.error, status:r.status, data:d}; }); });
 }
 function isRyschanowName_(n){ return /рыщанов/i.test(n || ""); }
+/* НАЙДЕННЫЙ БАГ (14.09, Влад: скриншот у Махуры в "Новая заявка" - в пикере "Менеджер"
+   уволенные Дербенцева/Поплутина/Володин, и нет "ОЭ") - при переносе Планировки на телефон
+   (05-06.09) этот пикер строился из ord.roster_managers/by_manager "как есть", БЕЗ фильтра
+   уволенных (десктоп получил его позже, 11.09, см. files/index.html:26160 "Володин в
+   планировке, он уволен давно") и без псевдо-менеджеров отделов (DEPTS_ в index.html) -
+   системный пробел мобильной страницы, не что-то у конкретного Махуры (список менеджеров
+   общий для всех логистов). FIRED_SURNAMES_ заполняется в load() из ТОГО ЖЕ /sprav/state,
+   что страница и так грузит - без лишнего запроса. */
+var FIRED_SURNAMES_ = {};
+function lpmSurname_(name){ return String(name || "").trim().split(/\s+/)[0].toLowerCase().replace(/ё/g, "е"); }
+function isFiredName_(name){ return !!FIRED_SURNAMES_[lpmSurname_(name)]; }
+/* Псевдо-менеджеры внутренних отделов (тот же канон DEPTS_, что в index.html:26113-26121) -
+   не люди, не приходят с сервером в ord.roster_managers, добавляются на фронте так же, как
+   на десктопе. */
+var LP_DEPTS_ = ["Отдел экскаваторов", "Отдел кранов", "Отдел буровых", "База"];
+var LP_DEPT_CODE_ = {"Отдел экскаваторов":"ОЭ", "Отдел кранов":"ОК", "Отдел буровых":"ОБ", "База":"БАЗА"};
 /* Слот текущего occupant'а (kind,gos) - копия принципа lpFleetOpenOnTractor_ на десктопе:
    coupling/uncoupling ВСЕГДА метится в реальный открытый слот, не жёсткий 1 - иначе посадка
    нового мимо старого на слоте 2/3 оставляет обоих открытыми одновременно. */
@@ -725,9 +741,20 @@ function makeLiveApi(){
           var assignments = (fleetR.ok && fleetR.data.assignments) || [];
           var openByPerson = {}, openByTrailer = {};
           assignments.forEach(function(a){ if (a.valid_to) return; if (a.kind === "driver") openByPerson[a.resource_key] = a.tractor_gos; else if (a.kind === "trailer") openByTrailer[a.resource_key] = a.tractor_gos; });
+          var allPeople_ = (spravR.ok && spravR.data.people) || [];
+          /* Уволенные (14.09) - тот же приём, что в index.html buildRoster(): сопоставление по
+             фамилии, fail-open если человека нет в справочнике вообще. Используется ниже в
+             loadProfile() для managers/logists - тот же порядок вызова (load() -> .then() ->
+             loadProfile()), значит FIRED_SURNAMES_ уже заполнен к моменту фильтрации. */
+          allPeople_.forEach(function(p){
+            if (p && p.employment_status === "fired") {
+              var sur = lpmSurname_(p.full_name);
+              if (sur) FIRED_SURNAMES_[sur] = 1;
+            }
+          });
           /* phone - для «Скопировать данные для пропуска» (тот же срез, что 31.08 открыли
              логисту в /api/sprav/state ради кнопки копирования на десктопе) */
-          var people = ((spravR.ok && spravR.data.people) || []).filter(function(p){ return (p.roles || []).indexOf("driver") >= 0; }).map(function(p){ return {id:p.id, full_name:p.full_name, phone:p.phone || "", on:openByPerson[p.id] || ""}; });
+          var people = allPeople_.filter(function(p){ return (p.roles || []).indexOf("driver") >= 0; }).map(function(p){ return {id:p.id, full_name:p.full_name, phone:p.phone || "", on:openByPerson[p.id] || ""}; });
           var trailers = ((spravR.ok && spravR.data.assets) || []).filter(function(a){ return a.asset_type === "trailer"; }).map(function(a){ return {id:a.id, name:(a.name && a.name !== a.id) ? a.name : "", type:a.trailer_type || a.spec || "", on:openByTrailer[a.id] || ""}; });
           var vehicles = (mp.vehicles || []).map(function(v){ return {gos:v.gos, marka:v.marka, type:v.type, driver:v.driver || "", trailerGos:v.trailer || ""}; });
           /* Личный порядок машин (Влад, 02.09 на десктопе - "железно сохраняться у каждого
@@ -754,8 +781,8 @@ function makeLiveApi(){
            реальным логистом рейса (комментарий index.html:20449-20463) - убираем точечно
            из списка выбора, как и на десктопе. */
         return {name:name, role:mp.role || "",
-          managers:(ord.roster_managers || ord.by_manager || []).map(function(p){ return p.name; }),
-          logists:(ord.roster_logists || ord.by_logist || []).map(function(p){ return p.name; }).filter(function(n){ return !isRyschanowName_(n); })};
+          managers:(ord.roster_managers || ord.by_manager || []).map(function(p){ return p.name; }).filter(function(n){ return !isFiredName_(n); }).concat(LP_DEPTS_),
+          logists:(ord.roster_logists || ord.by_logist || []).map(function(p){ return p.name; }).filter(function(n){ return !isRyschanowName_(n) && !isFiredName_(n); })};
       }).catch(function(){ return null; });
     },
     saveSeg: function(w){ return apiPost_("/plan/seg", w).then(function(r){ if (!r.ok) throw new Error((r.data && r.data.error) || "Ошибка сохранения"); return {ok:true}; }); },
@@ -1515,7 +1542,7 @@ function renderSegSheet(){
   shFoot.innerHTML = (isDraft ? '<button class="btn primary" id="fPut" data-bad="' + (bad ? 1 : 0) + '"' + (!M.online ? ' disabled' : '') + '>' + esc(putLabel) + '</button>'
     : '<button class="btn ghost" id="fCancelSeg" style="color:var(--tint-red)">Отбой</button><button class="btn primary" id="fSave" data-bad="' + (bad ? 1 : 0) + '"' + (!changed || !M.online ? ' disabled' : '') + '>' + esc(!M.online ? "Нет связи" : bad ? "Пересекается: " + segLabel(bad).slice(0, 26) : "Сохранить") + '</button>');
 }
-function mgChipLabel(full){ var p = (full || "").trim().split(/\s+/); return (p[1] ? p[1] + " " : "") + three(full); }
+function mgChipLabel(full){ if (LP_DEPT_CODE_[full]) return LP_DEPT_CODE_[full]; var p = (full || "").trim().split(/\s+/); return (p[1] ? p[1] + " " : "") + three(full); }
 function agoLabel(h){ var m = Math.round((nowHour() - h) * 60); if (m < 1) return "только что"; if (m < 60) return m + " мин назад"; if (m < 24*60) return Math.round(m/60) + " ч назад"; return fmtDay(h) + " " + fmtTime(h); }
 shBody.addEventListener("click", function(e){
   if (sheetKind === "seg") segSheetClick(e);

@@ -1172,9 +1172,9 @@ var ADDR_CITY_RE_ = /^(г|город|пгт|рп|п|с|д|х|село|пос[е�
    разбивка по запятой, что и раньше.
    Влад 13.09 (день, второй заход): «чисто эстетически» - вместо усечённого сырого URL серым
    текстом («…whatshere%5Bzoom%5D=15&what…», нечитаемо и некликабельно) - подпись «Ссылка на
-   координату Yandex» (серым, «Y» красным, «andex» жирным белым - как название места),
-   кликабельная, открывает ссылку в новой вкладке. Полный текст адреса остаётся в title ячейки
-   (routeCell) - ничего не потеряно, просто не в самой строке. */
+   Yandex» (серым, «Y» красным, «andex» жирным белым - как название места), кликабельная,
+   открывает ссылку в новой вкладке. Полный текст адреса остаётся в title ячейки (routeCell) -
+   ничего не потеряно, просто не в самой строке. */
 function addrParts_(addr) {
   var s = String(addr || '');
   var linkM = s.match(YANDEX_LINK_RE_);
@@ -1196,7 +1196,7 @@ function rtLine_(addr, arrow) {
   var p = addrParts_(addr);
   var ar = arrow ? '<span class="op2-arr">→</span>' : '';
   if (!p) return '<span class="op2-rt">' + ar + '<span class="op2-ask">уточнить</span></span>';
-  var badge = p.link ? ' <a class="op2-maplink" href="' + esc(p.link) + '" target="_blank" rel="noopener" title="Открыть на Яндекс.Картах">Ссылка на координату <span class="op2-maplink-y">Y</span><b>andex</b></a>' : '';
+  var badge = p.link ? ' <a class="op2-maplink" href="' + esc(p.link) + '" target="_blank" rel="noopener" title="Открыть на Яндекс.Картах">Ссылка на <span class="op2-maplink-y">Y</span><b>andex</b></a>' : '';
   return '<span class="op2-rt">' + ar + (p.city ? '<b>' + esc(p.city) + '</b>' : '') + badge + (p.rest ? ' <span class="op2-rs">' + esc(p.rest) + '</span>' : '') + '</span>';
 }
 function routeCell(o) {

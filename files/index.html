@@ -29937,6 +29937,20 @@ rowsEl.addEventListener("dblclick", function(e){
    редактирования шторки) - подсказки вешаются через DOM API, не строкой в
    innerHTML с onclick= (как у orderPlanCustomerInput_) - меньше экранирования,
    тот же стиль, что у остальных полей этой шторки (fromVal/toVal через .oninput). */
+/* «Ссылка на Yandex» - Влад 14.09, показал скриншот шторки Планировки («Откуда»/«Куда» -
+   голая ссылка текстом на 2 строки) рядом со скриншотом «Задания» (там уже кликабельный
+   значок, order-plan-v2.css, тот же файл подключен и на этой странице): «там тоже было бы
+   неплохо сделать оттуда прям кликабельные ссылки как у нас в задании». Поля «Откуда»/«Куда»
+   тут - живые <input>, разметку внутрь значения не вставить (не то что <td> в таблице
+   «Задания») - значок рисуем ПОД полем, обновляем на каждый ввод (см. вызовы ниже),
+   исчезает/появляется по факту наличия ссылки. Тот же regex, что YANDEX_LINK_RE_ в
+   order-plan-v2.js (независимая копия - тот файл в своей IIFE, функцию не отдаёт наружу). */
+var LP_YANDEX_LINK_RE_ = /https?:\/\/(?:[a-z0-9-]+\.)?ya(?:ndex)?\.[a-z.]+\/(?:maps|navi)[^\s)"'<>]*/i;
+function lpAddrLinkHtml_(addr){
+  var m = String(addr || "").match(LP_YANDEX_LINK_RE_);
+  if (!m) return "";
+  return '<a class="op2-maplink" href="' + m[0].replace(/"/g, "&quot;") + '" target="_blank" rel="noopener" title="Открыть на Яндекс.Картах" style="display:inline-block;margin-top:4px;font-size:12px">Ссылка на <span class="op2-maplink-y">Y</span><b>andex</b></a>';
+}
 function lpWireCustomerInput_(inputId, boxId, setVal){
   var input = document.getElementById(inputId), box = document.getElementById(boxId);
   if (!input || !box) return;
@@ -30013,8 +30027,8 @@ function openCreateDrawer(vi, s, l){
         '<div class="cr-field"><span class="grp-label">Логист</span><div class="cr-opts" id="lp-crLg">' +
           logistPool.map(function(p, i){ return '<button class="chip cr-opt" data-i="' + i + '" aria-pressed="' + (i === lgIdx) + '">' + personShort(p) + '</button>'; }).join("") +
         '</div></div>' +
-        '<div class="cr-field"><span class="grp-label">Откуда</span><input autocomplete="off" class="cr-input" id="lp-crFrom" list="lp-crPlaces" placeholder="можно не указывать" value="' + fromVal + '"></div>' +
-        '<div class="cr-field"><span class="grp-label">Куда</span><input autocomplete="off" class="cr-input" id="lp-crTo" list="lp-crPlaces" placeholder="можно не указывать" value="' + toVal + '"></div>' +
+        '<div class="cr-field"><span class="grp-label">Откуда</span><input autocomplete="off" class="cr-input" id="lp-crFrom" list="lp-crPlaces" placeholder="можно не указывать" value="' + fromVal + '"><span id="lp-crFromLink">' + lpAddrLinkHtml_(fromVal) + '</span></div>' +
+        '<div class="cr-field"><span class="grp-label">Куда</span><input autocomplete="off" class="cr-input" id="lp-crTo" list="lp-crPlaces" placeholder="можно не указывать" value="' + toVal + '"><span id="lp-crToLink">' + lpAddrLinkHtml_(toVal) + '</span></div>' +
         '<datalist id="lp-crPlaces">' + PLACES.map(function(p){ return "<option value=\"" + p + "\">"; }).join("") + '</datalist>' +
         '<div class="cr-field"><span class="grp-label">Режим</span><div class="cr-opts" id="lp-crMode">' +
           TRIP_MODE_OPTS_.map(function(p, i){ return '<button class="chip cr-opt" data-i="' + i + '" aria-pressed="' + (i === tripModeIdx) + '">' + p[1] + '</button>'; }).join("") +
@@ -30049,8 +30063,8 @@ function openCreateDrawer(vi, s, l){
       lpWireCustomerInput_("lp-crCustomer", "lp-crCustomer-suggest", function(v){ customerVal = v; });
       [].forEach.call(drawer.querySelector("#lp-crMg").children, function(btn, i){ btn.onclick = function(){ mgIdx = i; render(); }; });
       [].forEach.call(drawer.querySelector("#lp-crLg").children, function(btn, i){ btn.onclick = function(){ lgIdx = i; render(); }; });
-      drawer.querySelector("#lp-crFrom").oninput = function(ev){ fromVal = ev.target.value; };
-      drawer.querySelector("#lp-crTo").oninput = function(ev){ toVal = ev.target.value; };
+      drawer.querySelector("#lp-crFrom").oninput = function(ev){ fromVal = ev.target.value; drawer.querySelector("#lp-crFromLink").innerHTML = lpAddrLinkHtml_(fromVal); };
+      drawer.querySelector("#lp-crTo").oninput = function(ev){ toVal = ev.target.value; drawer.querySelector("#lp-crToLink").innerHTML = lpAddrLinkHtml_(toVal); };
       [].forEach.call(drawer.querySelector("#lp-crMode").children, function(btn, i){ btn.onclick = function(){ tripModeIdx = i; render(); }; });
       drawer.querySelector("#lp-crNd").onclick = function(){ ndVal = !ndVal; render(); };
     }
@@ -30237,8 +30251,8 @@ function openDrawer(seg){
            тут нужна видимая строка, а не only-hover. */
         ((MANAGERS.indexOf(seg.mg) < 0 || logistPool.indexOf(seg.lg) < 0) ?
           '<div class="dr-note">Пунктирная рамка - человек назначен на этот рейс, но выпал из списка (нет свежих заказов в этом месяце). Это его реальное текущее назначение, не ошибка.</div>' : '') +
-        '<div class="cr-field"><span class="grp-label">Откуда</span><input autocomplete="off" class="cr-input" id="lp-drFrom" list="lp-crPlaces" placeholder="можно не указывать" value="' + fromVal + '"></div>' +
-        '<div class="cr-field"><span class="grp-label">Куда</span><input autocomplete="off" class="cr-input" id="lp-drTo" list="lp-crPlaces" placeholder="можно не указывать" value="' + toVal + '"></div>' +
+        '<div class="cr-field"><span class="grp-label">Откуда</span><input autocomplete="off" class="cr-input" id="lp-drFrom" list="lp-crPlaces" placeholder="можно не указывать" value="' + fromVal + '"><span id="lp-drFromLink">' + lpAddrLinkHtml_(fromVal) + '</span></div>' +
+        '<div class="cr-field"><span class="grp-label">Куда</span><input autocomplete="off" class="cr-input" id="lp-drTo" list="lp-crPlaces" placeholder="можно не указывать" value="' + toVal + '"><span id="lp-drToLink">' + lpAddrLinkHtml_(toVal) + '</span></div>' +
         '<datalist id="lp-crPlaces">' + PLACES.map(function(p){ return "<option value=\"" + p + "\">"; }).join("") + '</datalist>' +
         '<div class="cr-field"><span class="grp-label">Режим</span><div class="cr-opts" id="lp-drMode">' +
           TRIP_MODE_OPTS_.map(function(p, i){ return '<button class="chip cr-opt" data-i="' + i + '" aria-pressed="' + (i === tripModeIdx) + '">' + p[1] + '</button>'; }).join("") +
@@ -30275,8 +30289,8 @@ function openDrawer(seg){
       lpWireCustomerInput_("lp-drCustomer", "lp-drCustomer-suggest", function(v){ customerVal = v; });
       [].forEach.call(document.getElementById("lp-drMg").children, function(btn, i){ btn.onclick = function(){ mgIdx = i; render(); }; });
       [].forEach.call(document.getElementById("lp-drLg").children, function(btn, i){ btn.onclick = function(){ lgIdx = i; render(); }; });
-      document.getElementById("lp-drFrom").oninput = function(ev){ fromVal = ev.target.value; };
-      document.getElementById("lp-drTo").oninput = function(ev){ toVal = ev.target.value; };
+      document.getElementById("lp-drFrom").oninput = function(ev){ fromVal = ev.target.value; document.getElementById("lp-drFromLink").innerHTML = lpAddrLinkHtml_(fromVal); };
+      document.getElementById("lp-drTo").oninput = function(ev){ toVal = ev.target.value; document.getElementById("lp-drToLink").innerHTML = lpAddrLinkHtml_(toVal); };
       [].forEach.call(document.getElementById("lp-drMode").children, function(btn, i){ btn.onclick = function(){ tripModeIdx = i; render(); }; });
       document.getElementById("lp-drNd").onclick = function(){ ndVal = !ndVal; render(); };
     }

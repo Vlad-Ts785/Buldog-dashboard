@@ -1,0 +1,639 @@
+<title>План поступлений</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&family=Unbounded:wght@500;600&display=swap" rel="stylesheet">
+
+<style>
+/* ===== Токены ГОСТа (DESIGN_SYSTEM.md, раздел 1) — скопированы буквально, не изобретены ===== */
+:root{
+  --bg:#0f0f13; --bg2:#17171d; --bg3:#1e1e26; --bg4:#252530;
+  --border:rgba(255,255,255,0.08); --border-strong:rgba(255,255,255,0.16);
+  --text:#e8e6df; --muted:#8b8980;
+  --green:#1D9E75; --red:#E24B4A; --amber:#EF9F27; --blue:#378ADD; --purple:#7F77DD;
+  --tint-green:#4fd4a3; --tint-blue:#7db9ee; --tint-amber:#f5be6a; --tint-purple:#c1bcf0; --tint-red:#f07b7a; --tint-orange:#e0954a;
+  --radius:12px;
+  --font-ui:'Golos Text',system-ui,sans-serif;
+  --font-num:'JetBrains Mono',ui-monospace,Consolas,monospace;
+  --font-display:'Unbounded',var(--font-ui);
+  --ease-out-strong:cubic-bezier(0.16,1,0.3,1);
+  --ease-out-soft:cubic-bezier(0.25,1,0.5,1);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);font-size:13px;line-height:1.45;-webkit-font-smoothing:antialiased}
+
+.wrap{max-width:1480px;margin:0 auto;padding:22px 24px 120px}
+
+/* ===== Служебная плашка превью (не часть живого дашборда) ===== */
+.pv-note{font-size:11.5px;color:var(--muted);line-height:1.55;max-width:104ch;margin:0 0 16px;
+  background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 14px}
+.pv-note b{color:var(--text)}
+
+/* ===== Переключатель персоны (только для превью — в живом коде это ролевая маршрутизация) ===== */
+.pv-persona{display:flex;gap:8px;margin-bottom:18px}
+.pv-pbtn{background:var(--bg3);border:1px solid var(--border);color:var(--muted);border-radius:8px;
+  padding:7px 14px;font-size:12px;font-family:var(--font-ui);cursor:pointer;transition:border-color .15s ease,color .15s ease}
+.pv-pbtn:hover{border-color:var(--border-strong);color:var(--text)}
+.pv-pbtn[aria-pressed="true"]{border-color:var(--green);color:var(--text);background:rgba(29,158,117,.10)}
+
+/* ===== Общая шапка страницы ===== */
+.page-head{margin-bottom:14px}
+.page-title{font-family:var(--font-display);font-size:25px;font-weight:600;letter-spacing:.01em;color:var(--text)}
+.page-sub{font-size:13px;color:var(--muted);margin-top:4px}
+.page-period{font-family:var(--font-num);font-size:11.5px;color:var(--muted);margin-top:6px;font-variant-numeric:tabular-nums}
+.page-period b{color:var(--text);font-weight:500}
+
+/* ===== Вердикт-полоса .mp-status (скопирована буквально из files/index.html, + расширена __formula) ===== */
+.mp-status{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);
+  padding:16px 22px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;
+  gap:20px;position:relative;overflow:hidden;flex-wrap:wrap;
+  transition:border-color .12s ease-out,transform .12s ease-out}
+.mp-status:hover{border-color:var(--border-strong);transform:translateY(-1px)}
+.mp-status::before{content:'';position:absolute;inset:0;opacity:.1;pointer-events:none}
+.mp-status--bad::before{background:var(--red)}
+.mp-status--good::before{background:var(--green)}
+.mp-status--warn::before{background:var(--amber)}
+.mp-status--hold::before{background:var(--blue)}
+.mp-status__l{position:relative;z-index:1;min-width:0}
+.mp-status__word{font-family:var(--font-display);font-weight:600;font-size:clamp(18px,2.3vw,27px);
+  letter-spacing:.01em;line-height:1.1;color:var(--text);white-space:nowrap}
+.mp-status__sub{font-size:12px;color:var(--muted);margin-top:5px;font-variant-numeric:tabular-nums}
+.mp-status__sub b{color:var(--text);font-family:var(--font-num);font-weight:500}
+.mp-status__r{position:relative;z-index:1;text-align:right;flex:none}
+.mp-status__cap{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em}
+.mp-status__lever{font-family:var(--font-num);font-size:19px;font-weight:700;color:var(--text);
+  font-variant-numeric:tabular-nums;margin-top:3px}
+.mp-status__formula{font-size:10.5px;color:var(--muted);margin-top:3px;font-variant-numeric:tabular-nums}
+@media(max-width:640px){.mp-status__r{text-align:left}}
+
+/* ===== Ярус — .mp-tier 5fr/7fr, буквально из files/index.html ===== */
+.mp-tier{display:grid;grid-template-columns:5fr 7fr;gap:16px;margin-bottom:20px;position:relative}
+.mp-cell-plan{grid-column:1}
+.mp-cell-stats{grid-column:2;min-width:0}
+@media(max-width:1000px){.mp-tier{grid-template-columns:1fr}.mp-cell-plan,.mp-cell-stats{grid-column:1}}
+
+/* курсорный свет (раздел 7 — обязателен на каждой странице, живёт внутри сетки плиток) */
+.mp-light{position:absolute;inset:0;z-index:0;pointer-events:none;opacity:0;transition:opacity .25s ease}
+.mp-light.on{opacity:1}
+.mp-tier>*{position:relative;z-index:1}
+
+/* ===== Карточка (анатомия d5-card, examples/design-reference-panel.html) ===== */
+.d5-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;
+  padding:18px 20px;display:flex;flex-direction:column;gap:13px;min-width:0;position:relative;
+  transition:border-color .15s ease,background-color .15s ease,transform .12s ease-out}
+.d5-card--surface:hover{border-color:var(--border-strong);background:#191920;transform:translateY(-1px)}
+.d5-card--table:hover{transform:none;border-color:var(--border-strong)} /* карточка с таблицей не поднимается — запрет №17 */
+.d5-head{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:22px}
+.d5-label{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:8px}
+.d5-badge{font-family:var(--font-num);font-size:11px;font-weight:500;font-variant-numeric:tabular-nums;
+  line-height:1;padding:4px 7px;border-radius:6px;white-space:nowrap}
+.d5-badge--neutral{color:var(--muted);background:var(--bg4)}
+.d5-badge--good{color:#2fbe93;background:rgba(29,158,117,.13)}
+/* статус-бейдж должника — буквально badge-канон files/index.html (раздел «Компоненты»/ДЗ) */
+.badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:500;white-space:nowrap}
+.badge.green{background:rgba(29,158,117,.15);color:var(--tint-green)}
+.badge.red{background:rgba(226,75,74,.15);color:var(--tint-red)}
+.badge.amber{background:rgba(239,159,39,.15);color:var(--tint-amber)}
+.badge.orange{background:rgba(186,117,23,.18);color:var(--tint-orange)}
+.badge.blue{background:rgba(55,138,221,.15);color:var(--tint-blue)}
+.d5-value{display:flex;align-items:baseline;gap:7px;white-space:nowrap}
+.d5-value__num{font-family:var(--font-num);font-weight:500;font-size:31px;line-height:1;
+  letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--text)}
+.d5-value__unit{font-family:var(--font-num);font-size:17px;color:var(--muted)}
+.d5-rows{display:flex;flex-direction:column}
+.d5-row{display:grid;grid-template-columns:1fr max-content max-content;align-items:baseline;column-gap:10px;min-height:30px;
+  border-bottom:1px solid var(--border)}
+.d5-row:last-child{border-bottom:none}
+.d5-row__label{color:var(--text);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.d5-row__sub{color:var(--muted);font-size:10.5px;display:block;margin-top:1px}
+.d5-row__value{font-family:var(--font-num);font-size:12.5px;font-weight:500;font-variant-numeric:tabular-nums;color:var(--text);text-align:right;white-space:nowrap}
+.d5-row__aux{font-family:var(--font-num);font-size:11px;font-variant-numeric:tabular-nums;color:var(--muted);text-align:right;min-width:5ch;white-space:nowrap}
+.d5-row__rm{background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;padding:2px 4px;border-radius:5px}
+.d5-row__rm:hover{color:var(--red);background:rgba(226,75,74,.1)}
+.d5-empty{font-size:12.5px;color:var(--muted);text-align:center;padding:22px 8px;line-height:1.6}
+
+/* ===== Кнопки ===== */
+.d5-btn{background:var(--bg3);border:1px solid var(--border);color:var(--text);
+  border-radius:8px;padding:9px 14px;font-size:12.5px;font-family:var(--font-ui);cursor:pointer;font-weight:500;
+  transition:border-color .15s ease,color .15s ease,background-color .15s ease;width:100%;text-align:center}
+.d5-btn--primary{border-color:rgba(29,158,117,.4);color:#2fbe93;background:rgba(29,158,117,.08)}
+.d5-btn--primary:hover{border-color:var(--green);background:rgba(29,158,117,.15)}
+.d5-btn:disabled{opacity:.45;cursor:default}
+.tglchip{background:var(--bg3);border:1px solid var(--border);color:var(--muted);border-radius:20px;
+  padding:5px 12px;font-size:11.5px;font-family:var(--font-ui);cursor:pointer;white-space:nowrap;
+  transition:border-color .15s ease,color .15s ease}
+.tglchip:hover{border-color:var(--border-strong);color:var(--text)}
+.tglchip[aria-pressed="true"]{border-color:var(--blue);color:var(--tint-blue);background:rgba(55,138,221,.1)}
+.tbl-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:2px}
+.tbl-controls select{background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;
+  padding:6px 10px;font-size:11.5px;font-family:var(--font-ui)}
+
+/* ===== Таблица должников (канон «Сортируемая таблица») ===== */
+.plan-tbl-wrap{overflow-x:auto}
+.plan-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.plan-tbl th{text-align:left;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--muted);padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap;user-select:none}
+.plan-tbl th.sortable{cursor:pointer}
+.plan-tbl th.sortable:hover{color:var(--text)}
+.plan-tbl th span{opacity:.4;margin-left:3px;font-size:10px}
+.plan-tbl th.active span{opacity:1;color:var(--green)}
+.plan-tbl td{padding:9px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+.plan-tbl tr:hover td{background:var(--bg3)}
+.plan-tbl tr.is-checked td{background:rgba(29,158,117,.05)}
+.plan-tbl tr.is-hidden{display:none}
+.pt-num{font-family:var(--font-num);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.pt-name{color:var(--text);font-weight:500}
+.pt-org{color:var(--muted);font-size:10.5px;margin-top:2px}
+.pt-mgr{color:var(--muted)}
+.pt-days{font-family:var(--font-num);font-variant-numeric:tabular-nums}
+.pt-days--cur{color:var(--tint-green)}
+.pt-days--short{color:var(--tint-amber)}
+.pt-days--mid{color:var(--tint-orange)}
+.pt-days--old{color:var(--tint-red)}
+.pt-check{width:20px;text-align:center}
+.pt-check input{width:16px;height:16px;accent-color:var(--green);cursor:pointer}
+.pt-input-wrap{position:relative;min-width:130px}
+.pt-input{width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text);
+  font-family:var(--font-num);font-size:12.5px;padding:6px 9px;text-align:right;font-variant-numeric:tabular-nums}
+.pt-input:disabled{opacity:.4;background:transparent;border-color:transparent}
+.pt-input:focus{outline:none;border-color:var(--border-strong);background:var(--bg4)}
+.pt-warn{font-size:10px;color:var(--tint-amber);margin-top:3px;text-align:right}
+.plan-tbl-foot{font-size:11px;color:var(--muted);padding:10px 2px 0;line-height:1.6}
+
+/* ===== Тост (раздел 4 — единственный канал уведомлений) ===== */
+.toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,14px);opacity:0;pointer-events:none;
+  background:var(--bg4);border:1px solid var(--border-strong);border-radius:10px;padding:11px 16px;
+  display:flex;align-items:center;gap:12px;font-size:12.5px;color:var(--text);z-index:200;
+  box-shadow:0 8px 28px rgba(0,0,0,.45);transition:opacity .32s var(--ease-out-soft),transform .32s var(--ease-out-soft)}
+.toast.show{opacity:1;transform:translate(-50%,0);pointer-events:auto}
+.toast__dot{width:6px;height:6px;border-radius:50%;flex:none;background:var(--green)}
+.toast.is-red .toast__dot{background:var(--red)}
+.toast button{background:none;border:none;color:var(--tint-blue);font-size:12px;cursor:pointer;font-family:var(--font-ui)}
+
+/* ===== Мобильная липкая мини-плашка плана — НОВЫЙ паттерн, ждёт «да» Влада ===== */
+.pv-mobile-bar{display:none}
+@media(max-width:680px){
+  .pv-mobile-bar{display:flex;position:fixed;left:12px;right:12px;bottom:12px;z-index:60;
+    background:var(--bg4);border:1px solid var(--border-strong);border-radius:12px;padding:10px 14px;
+    align-items:center;justify-content:space-between;gap:10px;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+  .pv-mobile-bar__l{font-size:11.5px;color:var(--muted)}
+  .pv-mobile-bar__l b{color:var(--text);font-family:var(--font-num);font-variant-numeric:tabular-nums}
+  .pv-mobile-bar button{background:rgba(29,158,117,.15);border:1px solid var(--green);color:#2fbe93;
+    border-radius:8px;padding:7px 12px;font-size:12px;font-family:var(--font-ui);font-weight:500}
+}
+
+/* ===== Директорская сводка ===== */
+.dir-row{display:grid;grid-template-columns:14px 1fr max-content max-content;align-items:center;column-gap:14px;
+  padding:12px 4px;border-bottom:1px solid var(--border)}
+.dir-row.clickable{cursor:pointer;transition:background-color .12s ease-out}
+.dir-row.clickable:hover{background:var(--bg3)}
+.dir-row:last-of-type{border-bottom:none}
+.dir-row.is-open{border-bottom-color:transparent}
+.dir-chev{color:var(--muted);font-size:10px;transition:transform .15s var(--ease-out-soft);transform:rotate(0deg)}
+.dir-row.is-open .dir-chev{transform:rotate(90deg);color:var(--text)}
+.dir-name{color:var(--text);font-size:13px}
+.dir-name a{color:inherit;text-decoration:none;border-bottom:1px dotted var(--border-strong)}
+.dir-name a:hover{color:var(--tint-blue);border-color:var(--tint-blue)}
+.dir-sum{font-family:var(--font-num);font-variant-numeric:tabular-nums;text-align:right}
+.dir-sum--empty{color:var(--muted)}
+/* развёртка по клику — канон «Разворот строки по клику», раздел 4 ГОСТа: без анимации высоты, только opacity */
+.dir-detail{display:none;padding:2px 4px 14px 28px;border-bottom:1px solid var(--border)}
+.dir-detail.show{display:block;animation:dirFadeIn .15s var(--ease-out-soft)}
+.dir-detail:last-child{border-bottom:none}
+@keyframes dirFadeIn{from{opacity:0}to{opacity:1}}
+.dir-detail .d5-row{grid-template-columns:1fr max-content;min-height:26px}
+.dir-detail-empty{font-size:12px;color:var(--muted);padding:6px 0}
+
+/* ===== Открытые вопросы / новые паттерны — служебный блок превью ===== */
+.pv-open{margin-top:26px;border:1px solid rgba(239,159,39,.28);background:rgba(239,159,39,.05);
+  border-radius:12px;padding:16px 20px}
+.pv-open h4{font-size:12px;color:var(--tint-amber);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px}
+.pv-open h4:not(:first-child){margin-top:16px}
+.pv-open ol,.pv-open ul{padding-left:18px;color:var(--muted);font-size:12px;line-height:1.75}
+.pv-open li b{color:var(--text);font-weight:500}
+
+.section-title{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);
+  margin:28px 0 10px}
+
+@media(prefers-reduced-motion:reduce){
+  .mp-status,.d5-card,.toast{transition:none}
+  .mp-light{display:none}
+}
+</style>
+
+<div class="wrap">
+
+  <p class="pv-note">
+    <b>Превью, не рабочая страница.</b> Синтез UX-спеки агента-эргономиста и дата-спеки
+    агента-аналитика (методика ГОСТа, раздел 0 п.3 DESIGN_SYSTEM.md). Компании-должники —
+    вымышленные (мок-данные), имена руководителей/менеджеров — реальные, из
+    <code>company/org-structure.md</code> и CLAUDE.md. Открытые вопросы и новые паттерны,
+    ждущие «да» Влада, — блоком внизу превью.
+  </p>
+
+  <div class="pv-persona">
+    <button class="pv-pbtn" id="pvBtnHead" aria-pressed="true" onclick="pvSetPersona('head')">Ахтамова — руководитель группы</button>
+    <button class="pv-pbtn" id="pvBtnDir" aria-pressed="false" onclick="pvSetPersona('dir')">Влад — директор, сводка</button>
+  </div>
+
+  <!-- ===================== ВИД РУКОВОДИТЕЛЯ ===================== -->
+  <div id="pvHead">
+
+    <div class="page-head">
+      <div class="page-title">План поступлений</div>
+      <div class="page-sub">Ахтамова Лиана Анатольевна · руководитель группы продаж</div>
+      <div class="page-period">Неделя <b>14–20 сентября</b> · дедлайн каждый понедельник <b>23:59</b></div>
+    </div>
+
+    <div class="mp-status mp-status--warn" id="mpStatus">
+      <div class="mp-status__l">
+        <div class="mp-status__word" id="mpWord">ЧЕРНОВИК</div>
+        <div class="mp-status__sub" id="mpSub">выбрано <b>3</b> из <b>5</b> показанных должников зоны</div>
+      </div>
+      <div class="mp-status__r">
+        <div class="mp-status__cap">Запланировано на неделю</div>
+        <div class="mp-status__lever" id="mpLever">2 660 000 ₽</div>
+        <div class="mp-status__formula" id="mpFormula">3 контрагента · 66% от общего долга 0–90 дн. зоны</div>
+      </div>
+    </div>
+
+    <div class="mp-tier" id="mpTier">
+      <div class="mp-light" id="mpLight"></div>
+
+      <!-- левая, узкая — карточка плана (mp-cell-plan, буквально анатомия «Ролевой страницы») -->
+      <div class="mp-cell-plan">
+        <div class="d5-card d5-card--surface">
+          <div class="d5-head">
+            <h3 class="d5-label">Мой план на эту неделю</h3>
+            <span class="d5-badge d5-badge--good" id="planCountBadge">3 контрагента</span>
+          </div>
+          <div class="d5-value"><span class="d5-value__num" id="planTotal">2 660 000</span><span class="d5-value__unit">₽</span></div>
+          <div class="d5-rows" id="planRows"><!-- заполняется JS --></div>
+          <div class="d5-empty" id="planEmpty" hidden>Отметьте контрагентов справа, чтобы добавить их в план</div>
+          <button class="d5-btn d5-btn--primary" id="submitBtn" onclick="pvSubmitPlan()">Отправить план</button>
+        </div>
+      </div>
+
+      <!-- правая, широкая — таблица должников зоны (mp-cell-stats) -->
+      <div class="mp-cell-stats">
+        <div class="d5-card d5-card--table">
+          <div class="d5-head">
+            <h3 class="d5-label">Мои должники</h3>
+            <select id="mgrFilter" onchange="pvRender()">
+              <option value="">Все менеджеры</option>
+              <option value="Ахтамова">Ахтамова</option>
+              <option value="Цегельников">Цегельников</option>
+              <option value="Гуштюк">Гуштюк</option>
+            </select>
+          </div>
+          <div class="tbl-controls">
+            <button class="tglchip" id="chipOld" aria-pressed="false" onclick="pvToggle('old')">Показать долги старше 90 дней (1)</button>
+            <button class="tglchip" id="chipBankrupt" aria-pressed="false" onclick="pvToggle('bankrupt')">Показать банкротов (1)</button>
+          </div>
+          <div class="plan-tbl-wrap">
+            <table class="plan-tbl" id="planTbl">
+              <thead>
+                <tr>
+                  <th class="pt-check"></th>
+                  <th class="sortable" data-col="name" onclick="pvSort('name')">Контрагент<span>↕</span></th>
+                  <th class="sortable" data-col="mgr" onclick="pvSort('mgr')">Менеджер<span>↕</span></th>
+                  <th class="sortable" data-col="balance" onclick="pvSort('balance')">Баланс<span>↕</span></th>
+                  <th class="sortable active" data-col="days" onclick="pvSort('days')">Дней просрочки<span>▲</span></th>
+                  <th>Статус</th>
+                  <th>План на неделю</th>
+                </tr>
+              </thead>
+              <tbody id="planTbody"><!-- заполняется JS --></tbody>
+            </table>
+          </div>
+          <div class="plan-tbl-foot" id="tblFoot"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title">Как это увидит Влад</div>
+    <div class="d5-card d5-card--surface">
+      <div class="dir-row">
+        <span class="dir-chev" style="visibility:hidden">▸</span>
+        <div class="dir-name"><a href="#" onclick="pvSetPersona('dir');return false">Ахтамова Л. А.</a></div>
+        <div class="dir-sum">2 660 000 ₽</div>
+        <span class="d5-badge d5-badge--good">Подала</span>
+      </div>
+      <div class="dir-row">
+        <span class="dir-chev" style="visibility:hidden">▸</span>
+        <div class="dir-name">Гусейнова А.</div>
+        <div class="dir-sum dir-sum--empty">— ещё не начала</div>
+        <span class="d5-badge d5-badge--neutral">До дедлайна: сегодня, 23:59</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== ВИД ДИРЕКТОРА ===================== -->
+  <div id="pvDir" hidden>
+    <div class="page-head">
+      <div class="page-title">План поступлений</div>
+      <div class="page-sub">Сводка по руководителям · директор</div>
+      <div class="page-period">Неделя <b>14–20 сентября</b> · дедлайн каждый понедельник <b>23:59</b></div>
+    </div>
+
+    <div class="mp-status mp-status--warn">
+      <div class="mp-status__l">
+        <div class="mp-status__word">1 ИЗ 2 ПОДАЛА</div>
+        <div class="mp-status__sub">Гусейнова — дедлайн сегодня в <b>23:59</b>, план пока пуст</div>
+      </div>
+      <div class="mp-status__r">
+        <div class="mp-status__cap">Запланировано всего</div>
+        <div class="mp-status__lever">2 660 000 ₽</div>
+        <div class="mp-status__formula">только по Ахтамовой — Гусейнова ещё не подала</div>
+      </div>
+    </div>
+
+    <div class="d5-card d5-card--surface" style="max-width:720px">
+      <div class="d5-head">
+        <h3 class="d5-label">По руководителям</h3>
+        <span class="d5-badge d5-badge--neutral">клик по строке — развёртка по контрагентам</span>
+      </div>
+      <div class="dir-row clickable" id="dirRow-akh" onclick="pvDirToggle('akh')">
+        <span class="dir-chev">▸</span>
+        <div class="dir-name">Ахтамова Л. А.</div>
+        <div class="dir-sum">2 660 000 ₽</div>
+        <span class="d5-badge d5-badge--good">Подала</span>
+      </div>
+      <div class="dir-detail" id="dirDetail-akh"></div>
+
+      <div class="dir-row clickable" id="dirRow-gus" onclick="pvDirToggle('gus')">
+        <span class="dir-chev">▸</span>
+        <div class="dir-name">Гусейнова А.</div>
+        <div class="dir-sum dir-sum--empty">— план не начат</div>
+        <span class="d5-badge d5-badge--neutral">До дедлайна сегодня</span>
+      </div>
+      <div class="dir-detail" id="dirDetail-gus"></div>
+
+      <div class="d5-empty" style="text-align:left;padding:14px 2px 2px">
+        План vs факт по каждому контрагенту появится после закрытия недели — снижение баланса ДЗ
+        за неделю (детальный расчёт вне этого превью, см. открытые вопросы внизу).
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== ОТКРЫТЫЕ ВОПРОСЫ / НОВЫЕ ПАТТЕРНЫ ===================== -->
+  <div class="pv-open">
+    <h4>Новые паттерны — ждут «да» Влада перед переносом в код (раздел 0 п.2 ГОСТа)</h4>
+    <ul>
+      <li><b>Чекбокс + денежное поле внутри строки сортируемой таблицы.</b> Каждый ингредиент canonичен по отдельности (сортируемая таблица, денежное поле), но такой комбинации в проекте ещё не было.</li>
+      <li><b>Мобильная липкая мини-плашка «мой план» внизу экрана</b> — сводка + кнопка отправки поверх контента при скролле длинного списка должников.</li>
+    </ul>
+    <h4>Открытые вопросы — до переноса в код (не блокируют это превью)</h4>
+    <ol>
+      <li>Точное время дедлайна «понедельник» для блокировки правок и списка «не подал».</li>
+      <li>Ратников (с 13.08 без группы/руководителя) — кто планирует сбор с его должников?</li>
+      <li>Должники уволенных менеджеров (Дербенцева, Шейко, Володин, Коньшина, Поплутина) — кто ведёт план по ним?</li>
+      <li>План по контрагенту — один инпут на всю сумму (как в этом превью) или разбивка по юрлицам, раз ДЗ принципиально не сводит их между собой при расчёте баланса?</li>
+      <li>Метрика «факта» (снижение баланса ДЗ за неделю) не отличает реальную оплату от нового долга, перекрывшего платёж, — риск для v1, решение о более точном источнике (атрибуция «Поступлений» к контрагенту) — отдельно.</li>
+      <li>Обязан ли руководитель покрыть долю своей ДЗ, или форма добровольна по числу строк.</li>
+      <li>Права директора — только просмотр сводки, или можно править план за руководителя.</li>
+    </ol>
+  </div>
+
+  <div class="pv-mobile-bar" id="mobileBar">
+    <div class="pv-mobile-bar__l">Выбрано <b id="mbCount">3</b> · <b id="mbSum">2 660 000 ₽</b></div>
+    <button onclick="pvSubmitPlan()">Отправить</button>
+  </div>
+
+  <div class="toast" id="toast"><span class="toast__dot"></span><span id="toastText"></span><button id="toastBtn" hidden>Повторить</button></div>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ===== мок-данные зоны Ахтамовой (вымышленные контрагенты) ===== */
+  var ROWS = [
+    {id:'c1', name:'СтройТранс Логистика ООО', mgr:'Цегельников', balance:1240000, days:12, bucket:'cur', status:'В графике', badge:'blue', checked:true, plan:600000, orgs:null},
+    {id:'c2', name:'МонтажКомплект ООО', mgr:'Ахтамова', balance:860000, days:28, bucket:'cur', status:'Должник', badge:'amber', checked:true, plan:860000, orgs:null},
+    {id:'c3', name:'ГлавПуть-Инвест ООО', mgr:'Гуштюк', balance:455000, days:41, bucket:'short', status:'Претензия', badge:'orange', checked:false, plan:0, orgs:[['Бульдог',300000],['Ярд Империал',155000]]},
+    {id:'c4', name:'Промресурс Юг ООО', mgr:'Цегельников', balance:2100000, days:52, bucket:'short', status:'Должник', badge:'amber', checked:true, plan:1200000, orgs:null},
+    {id:'c5', name:'ТрансКарго Сервис ООО', mgr:'Ахтамова', balance:318000, days:77, bucket:'mid', status:'Суд', badge:'red', checked:false, plan:0, orgs:null},
+    {id:'c6', name:'СибАгроСнаб ООО', mgr:'Гуштюк', balance:640000, days:95, bucket:'old', status:'Исполнительный лист', badge:'red', checked:false, plan:0, orgs:null},
+    {id:'c8', name:'РегионКран ООО', mgr:'Цегельников', balance:275000, days:33, bucket:'short', status:'Банкрот', badge:'red', checked:false, plan:0, orgs:null, bankrupt:true}
+  ];
+  var DEAD_HIDDEN_COUNT = 1; /* c7, 610 дней — мёртвый долг, скрыт всегда, как на вкладке «ДЗ», без переключателя в этом превью */
+
+  var STATE = { sortCol:'days', sortDir:1, showOld:false, showBankrupt:false, mgr:'' };
+
+  function fmt(n){ return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g,' '); }
+  function dayClass(d){ if(d<=30) return 'pt-days--cur'; if(d<=60) return 'pt-days--short'; if(d<=90) return 'pt-days--mid'; return 'pt-days--old'; }
+
+  function visible(r){
+    if (STATE.mgr && r.mgr !== STATE.mgr) return false;
+    if (r.bankrupt && !STATE.showBankrupt) return false;
+    if (r.bucket === 'old' && !STATE.showOld) return false;
+    return true;
+  }
+
+  function sortedRows(){
+    var vis = ROWS.filter(visible);
+    var col = STATE.sortCol, dir = STATE.sortDir;
+    vis.sort(function(a,b){
+      var av = a[col], bv = b[col];
+      if (typeof av === 'string') return av.localeCompare(bv, 'ru') * dir;
+      return (av - bv) * dir;
+    });
+    return vis;
+  }
+
+  function pvSort(col){
+    if (STATE.sortCol === col){ STATE.sortDir *= -1; }
+    else { STATE.sortCol = col; STATE.sortDir = (col === 'name' || col === 'mgr') ? 1 : -1; }
+    pvRender();
+  }
+
+  function pvToggle(which){
+    if (which === 'old'){ STATE.showOld = !STATE.showOld; document.getElementById('chipOld').setAttribute('aria-pressed', String(STATE.showOld)); }
+    if (which === 'bankrupt'){ STATE.showBankrupt = !STATE.showBankrupt; document.getElementById('chipBankrupt').setAttribute('aria-pressed', String(STATE.showBankrupt)); }
+    pvRender();
+  }
+
+  function wireMoneyInput_(el){
+    el.addEventListener('input', function(){
+      var start = this.selectionStart;
+      var digitsBefore = this.value.slice(0, start).replace(/\D/g,'').length;
+      var digits = this.value.replace(/\D/g,'').replace(/^0+(?=\d)/,'');
+      var formatted = digits.replace(/\B(?=(\d{3})+(?!\d))/g,' ');
+      this.value = formatted;
+      var count = 0, pos = formatted.length;
+      for (var i=0;i<formatted.length;i++){ if (formatted[i] !== ' ') count++; if (count === digitsBefore){ pos = i+1; break; } }
+      if (digitsBefore === 0) pos = 0;
+      try{ this.setSelectionRange(pos,pos); }catch(e){}
+      var id = this.dataset.id;
+      var row = ROWS.filter(function(r){return r.id===id})[0];
+      if (row){ row.plan = +digits || 0; pvRenderPlan(); pvCheckWarn(this, row); }
+    });
+  }
+
+  function pvCheckWarn(el, row){
+    var warn = el.parentNode.querySelector('.pt-warn');
+    if (row.plan > row.balance){
+      if (!warn){ warn = document.createElement('div'); warn.className='pt-warn'; el.parentNode.appendChild(warn); }
+      warn.textContent = 'больше остатка на ' + fmt(row.plan - row.balance) + ' ₽';
+    } else if (warn){ warn.remove(); }
+  }
+
+  function pvRenderTable(){
+    var tbody = document.getElementById('planTbody');
+    var rows = sortedRows();
+    tbody.innerHTML = rows.map(function(r){
+      var orgLine = r.orgs ? '<div class="pt-org">' + r.orgs.map(function(o){return o[0]+' '+fmt(o[1]);}).join(' · ') + '</div>' : '';
+      return '<tr class="'+(r.checked?'is-checked':'')+'" data-id="'+r.id+'">'
+        + '<td class="pt-check"><input type="checkbox" '+(r.checked?'checked':'')+' onchange="pvCheck(\''+r.id+'\',this.checked)"></td>'
+        + '<td class="pt-name">'+r.name+orgLine+'</td>'
+        + '<td class="pt-mgr">'+r.mgr+'</td>'
+        + '<td class="pt-num">'+fmt(r.balance)+' ₽</td>'
+        + '<td class="pt-days '+dayClass(r.days)+'">'+r.days+'</td>'
+        + '<td><span class="badge '+r.badge+'">'+r.status+'</span></td>'
+        + '<td><div class="pt-input-wrap"><input class="pt-input" data-id="'+r.id+'" '+(r.checked?'':'disabled')
+        + ' inputmode="numeric" autocomplete="off" placeholder="Сколько получите" value="'+(r.checked && r.plan ? fmt(r.plan) : '')+'"></div></td>'
+        + '</tr>';
+    }).join('');
+    [].forEach.call(tbody.querySelectorAll('.pt-input'), function(el){ wireMoneyInput_(el); });
+    var hidden = ROWS.length - rows.length;
+    document.getElementById('tblFoot').textContent = 'Показано ' + rows.length + ' из ' + ROWS.length + ' видимых должников'
+      + (hidden ? ' (ещё ' + hidden + ' скрыто фильтрами)' : '') + ' · не показан ' + DEAD_HIDDEN_COUNT
+      + ' мёртвый долг (600+ дней), как на вкладке «ДЗ».';
+    document.querySelectorAll('.plan-tbl th.sortable').forEach(function(th){
+      var active = th.dataset.col === STATE.sortCol;
+      th.classList.toggle('active', active);
+      th.querySelector('span').textContent = active ? (STATE.sortDir === 1 ? '▲' : '▼') : '↕';
+    });
+  }
+
+  function pvCheck(id, checked){
+    var row = ROWS.filter(function(r){return r.id===id})[0];
+    row.checked = checked;
+    if (!checked) row.plan = 0;
+    pvRender();
+  }
+
+  function pvRenderPlan(){
+    var picked = ROWS.filter(function(r){ return r.checked; });
+    var total = picked.reduce(function(s,r){ return s + (r.plan||0); }, 0);
+    var zoneBasis = ROWS.filter(function(r){ return r.bucket !== 'old' && !r.bankrupt; })
+      .reduce(function(s,r){ return s + r.balance; }, 0);
+    var pct = zoneBasis ? Math.round(total / zoneBasis * 100) : 0;
+
+    document.getElementById('planTotal').textContent = fmt(total);
+    document.getElementById('planCountBadge').textContent = picked.length + (picked.length===1?' контрагент':' контрагента');
+    document.getElementById('planEmpty').hidden = picked.length > 0;
+    document.getElementById('submitBtn').disabled = picked.length === 0;
+
+    var rowsHtml = picked.map(function(r){
+      return '<div class="d5-row"><span class="d5-row__label">'+r.name
+        + '<span class="d5-row__sub">'+r.mgr+' · '+r.days+' дн.</span></span>'
+        + '<span class="d5-row__value">'+fmt(r.plan||0)+' ₽</span>'
+        + '<button class="d5-row__rm" title="Убрать из плана" onclick="pvCheck(\''+r.id+'\',false)">✕</button></div>';
+    }).join('');
+    document.getElementById('planRows').innerHTML = rowsHtml;
+
+    var word = picked.length===0 ? 'ПЛАН НЕ НАЧАТ' : 'ЧЕРНОВИК';
+    var tone = picked.length===0 ? 'hold' : 'warn';
+    document.getElementById('mpWord').textContent = word;
+    document.getElementById('mpStatus').className = 'mp-status mp-status--' + tone;
+    document.getElementById('mpSub').innerHTML = 'выбрано <b>'+picked.length+'</b> из <b>'+ROWS.filter(visible).length+'</b> показанных должников зоны';
+    document.getElementById('mpLever').textContent = fmt(total) + ' ₽';
+    document.getElementById('mpFormula').textContent = picked.length + (picked.length===1?' контрагент':' контрагента') + ' · ' + pct + '% от общего долга 0–90 дн. зоны';
+
+    document.getElementById('mbCount').textContent = picked.length;
+    document.getElementById('mbSum').textContent = fmt(total) + ' ₽';
+  }
+
+  function pvRender(){ pvRenderTable(); pvRenderPlan(); }
+
+  window.pvSort = pvSort;
+  window.pvToggle = pvToggle;
+  window.pvCheck = pvCheck;
+  window.pvRender = pvRender;
+
+  /* ===== переключатель персоны (только для превью) ===== */
+  window.pvSetPersona = function(who){
+    document.getElementById('pvHead').hidden = who !== 'head';
+    document.getElementById('pvDir').hidden = who !== 'dir';
+    document.getElementById('pvBtnHead').setAttribute('aria-pressed', String(who==='head'));
+    document.getElementById('pvBtnDir').setAttribute('aria-pressed', String(who==='dir'));
+    document.getElementById('mobileBar').style.display = who === 'head' ? '' : 'none';
+  };
+
+  document.getElementById('mgrFilter').addEventListener('change', function(){ STATE.mgr = this.value; pvRender(); });
+
+  /* ===== развёртка «По руководителям» — канон «Разворот строки по клику» (раздел 4 ГОСТа):
+     открыт максимум один разворот одновременно, содержимое рендерится лениво при первом
+     открытии, высота не анимируется — только opacity ===== */
+  function pvDirFill(who){
+    var el = document.getElementById('dirDetail-' + who);
+    if (who === 'akh'){
+      var picked = ROWS.filter(function(r){ return r.checked; });
+      el.innerHTML = picked.length
+        ? '<div class="d5-rows">' + picked.map(function(r){
+            return '<div class="d5-row"><span class="d5-row__label">'+r.name
+              + '<span class="d5-row__sub">'+r.mgr+' · '+r.days+' дн. просрочки</span></span>'
+              + '<span class="d5-row__value">'+fmt(r.plan||0)+' ₽</span></div>';
+          }).join('') + '</div>'
+        : '<div class="dir-detail-empty">Пока ничего не выбрано в плане.</div>';
+    } else {
+      el.innerHTML = '<div class="dir-detail-empty">Гусейнова план ещё не начала — дедлайн сегодня в 23:59, развёртка появится после первой отметки контрагента.</div>';
+    }
+  }
+  window.pvDirToggle = function(who){
+    ['akh','gus'].forEach(function(w){
+      var row = document.getElementById('dirRow-' + w), detail = document.getElementById('dirDetail-' + w);
+      var openNow = (w === who) ? !detail.classList.contains('show') : false;
+      /* содержимое дешёвое — перерисовываем при каждом открытии, чтобы правки плана (см. вид руководителя) сразу были видны здесь */
+      if (openNow) pvDirFill(w);
+      detail.classList.toggle('show', openNow);
+      row.classList.toggle('is-open', openNow);
+      row.querySelector('.dir-chev').textContent = openNow ? '▾' : '▸';
+    });
+  };
+
+  /* ===== тост — единственный канал уведомлений (раздел 4 ГОСТа) ===== */
+  var toastT = 0;
+  window.pvToast = function(text, isRed){
+    var el = document.getElementById('toast');
+    document.getElementById('toastText').textContent = text;
+    el.classList.toggle('is-red', !!isRed);
+    el.classList.add('show');
+    clearTimeout(toastT);
+    toastT = setTimeout(function(){ el.classList.remove('show'); }, 5000);
+  };
+
+  window.pvSubmitPlan = function(){
+    var picked = ROWS.filter(function(r){ return r.checked; });
+    if (!picked.length) return;
+    var total = picked.reduce(function(s,r){ return s+(r.plan||0); }, 0);
+    pvToast('План отправлен · ' + picked.length + ' должников · ' + fmt(total) + ' ₽');
+  };
+
+  /* ===== курсорный свет под плитками (раздел 7 — обязателен на каждой странице) ===== */
+  (function initCursorLight(){
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    var grid = document.getElementById('mpTier'), layer = document.getElementById('mpLight');
+    if (!grid || !layer) return;
+    var lx = 0, ly = 0, tx = 0, ty = 0, active = false, raf = null;
+    grid.addEventListener('mousemove', function(e){
+      var r = grid.getBoundingClientRect();
+      if (!r.width || !r.height) return;
+      tx = ((e.clientX - r.left) / r.width) * 100;
+      ty = ((e.clientY - r.top) / r.height) * 100;
+      if (!active){ active = true; layer.classList.add('on'); tick(); }
+    });
+    grid.addEventListener('mouseleave', function(){ active = false; layer.classList.remove('on'); if (raf) cancelAnimationFrame(raf); raf = null; });
+    function tick(){
+      if (document.hidden){ raf = requestAnimationFrame(tick); return; }
+      lx += (tx - lx) * 0.12; ly += (ty - ly) * 0.12;
+      layer.style.background = 'radial-gradient(600px circle at ' + lx + '% ' + ly + '%, rgba(55,138,221,.07), transparent 70%)';
+      if (active) raf = requestAnimationFrame(tick);
+    }
+  })();
+
+  pvRender();
+})();
+</script>

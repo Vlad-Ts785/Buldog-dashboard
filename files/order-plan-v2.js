@@ -44,6 +44,11 @@ function capFirst(s) { s = String(s || ''); return s ? s.charAt(0).toUpperCase()
    Координаты - точный ответ DaData на этот адрес (проверено вручную 12.09), не пересчитываются. */
 var BASE_ADDRESS_ = 'Московская обл, г Домодедово, мкр Центральный, ул Промышленная, д 37';
 var BASE_LAT_ = '55.4672641', BASE_LON_ = '37.7794222';
+/* «По месту» (Влад 13.09) - тот же чип-приём, что «База», но для МЕНЕДЖЕРА: у логиста
+   адрес известный и не «плавает» (координаты есть и захардкожены), у менеджера это
+   противоположный случай - точного адреса нет вообще, работа идёт «по месту» у заказчика,
+   поэтому координаты намеренно НЕ проставляются (applyAddr_ с пустыми lat/lon). */
+var BYMESTO_TEXT_ = 'Работа по месту';
 /* Та же ставка, что уже используется в Калькуляторе для выделения НДС из цены КП
    (files/index.html, genKP(), VAT_RATE=0.22) - один и тот же процент по всему дашборду. */
 var VAT_RATE_ = 0.22;
@@ -235,6 +240,15 @@ function apiPostJson(path, obj) {
     body: JSON.stringify(obj || {})
   }).then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); });
 }
+/* Журнал живых сложностей (Влад 13.09: «где вводит и не вводится, где нажимает и не
+   нажимает - собрать массив для эргономиста»). ЭТО НЕ analytics-заход (тот уже есть,
+   checkSession/access_days) - только СМЫСЛОВЫЕ моменты трения: заблокированный клик,
+   неудачное сохранение, пустой поиск, размер экрана раз на страницу. Тихо, без тоста -
+   если сам пинг не прошёл, молчим, не мешаем реальному действию пользователя. Пилотный
+   участок - только «Задание» (order-plan-v2), не весь дашборд сразу. */
+function logUiEvent_(eventType, target, detail) {
+  try { apiPostJson('/ui_event', { page: 'order-plan-v2', event_type: eventType, target: target || '', detail: String(detail == null ? '' : detail).slice(0, 200) }).catch(function () {}); } catch (e) {}
+}
 /* Единый разбор ответа: ошибка - всегда тостом, это единственный канал (ГОСТ) */
 function ok_(r, okFn, failMsg) {
   if (r && r.ok && r.data && r.data.error == null) { if (okFn) okFn(r.data); return true; }
@@ -332,9 +346,14 @@ function personCell_(fullName, code, title, cellClass) {
   var col = personColor_(fullName);
   return '<td' + cls + '><span class="op2-person"' + (col ? ' style="color:' + col + '"' : '') + ' title="' + esc(title || fullName || '') + '">' + esc(sur) + '</span></td>';
 }
-function mgrCodeCell_(o) {
+/* Влад 13.09: «мне нужна здесь возможность менять менеджеров - как логисты меняют
+   логистов, но менеджеров меняю только я» - клик по «Мен.» кликабелен ТОЛЬКО у admin (на
+   ОБОИХ экранах - и «Логист», и «Менеджер», admin переключается между ними), у
+   менеджера/логиста - как раньше, просто текст. В отличие от смены логиста (разрешено
+   любому логисту) сервер тоже режет это requireRole_("admin"), не общий permissive gate. */
+function mgrCodeCell_(o, clickable) {
   var name = o.manager_name || o.created_by_name || o.taken_by_name;
-  return personCell_(name, oMgrCode(o), oMgrTitle(o));
+  return personCell_(name, oMgrCode(o), oMgrTitle(o), clickable ? 'op2-mgrpick' : '');
 }
 /* Влад 12.09 (вечер): «у логистов должна быть возможность смены логиста - сначала решили,
    что наёмник закрывает, потом что тральный логист» - клик по фамилии в «Лог.» открывает
@@ -376,7 +395,73 @@ function toast(html, undoFn, ms) {
 function hideToast() { var t = toastEl(); if (t) t.classList.remove('op2-show'); }
 function soon(what) { S.attention(); toast('<span class="op2-warn">' + esc(what) + '</span> · формируется в следующей версии'); }
 /* документы (СТС, паспорт) - хранилище справочников подключается следующим этапом */
-function soonDoc(what) { S.attention(); toast('<span class="op2-warn">' + esc(what) + '</span> · следующая версия: сканы подтянем из Справочников'); }
+/* Влад 13.09 (за полночь): «СТС тягача и прицепа уже есть в базе - почему бы не
+   реализовать» - действительно есть (sprav_asset_documents, doc_type='sts'), тот же
+   эндпоинт, что уже скачивает СТС по ПКМ в Планировке (lpDownloadSts_, files/index.html) -
+   клонируем 1:1 (feedback_clone_existing_visual_pattern), без единой правки на сервере.
+   sprav_assets.id = госномер как есть, с пробелами - тягач и прицеп одним и тем же кодом,
+   asset_id = v.vehicle_gos / v.trailer_gos. Доступно всем трём ролям (admin/manager/logist) -
+   /api/sprav/asset_documents и .../asset_document_file уже открыты им всем на чтение (см.
+   комментарий у самого роута на сервере, 31.08: "Планировка открыта логисту/менеджеру"). */
+function downloadSts_(assetId, label) {
+  if (!assetId) { toast('<span class="op2-warn">' + esc(label) + '</span> · ' + (label.indexOf('прицеп') >= 0 ? 'прицеп не сцеплен' : 'госномер неизвестен')); return; }
+  apiGet('/sprav/asset_documents', { asset_id: assetId }).then(function (r) {
+    if (!r || !r.ok) { toast('Не удалось получить документы'); return; }
+    var docs = (r.data && r.data.documents) || [];
+    var sts = docs.filter(function (d) { return d.doc_type === 'sts'; })[0];
+    if (!sts) { toast('СТС не загружен для ' + esc(assetId) + ' · загрузить можно в Справочниках'); return; }
+    var href = apiBase() + '/sprav/asset_document_file?session_token=' + encodeURIComponent(apiToken()) + '&id=' + encodeURIComponent(sts.id);
+    window.open(href, '_blank');
+  }).catch(function () { toast('Ошибка сети - не удалось получить СТС'); });
+}
+/* Влад 13.09 (утро): «сильно обновил справочники - в плане документов, в плане паспортных
+   данных» - сканы паспорта/прав того же образца, что СТС (sprav_people_documents, тот же
+   принцип - открыт admin/manager/logist/mechanic). doc_type: 'passport' | 'license'.
+   personId = driver_person_id исполнителя (sprav_people.id, уже приходит в каждом executor -
+   createOwnExecutor кладёт его при постановке машины). «Не у всех водителей пока есть» -
+   не хардкодим, кого показывать: нет скана - понятное сообщение, а не тихая заглушка. */
+function downloadPersonDoc_(personId, docType, label) {
+  if (!personId) { toast('<span class="op2-warn">' + esc(label) + '</span> · водитель не сопоставлен со справочником людей'); return; }
+  apiGet('/sprav/person_documents', { person_id: personId }).then(function (r) {
+    if (!r || !r.ok) { toast('Не удалось получить документы'); return; }
+    var docs = (r.data && r.data.documents) || [];
+    var doc = docs.filter(function (d) { return d.doc_type === docType; })[0];
+    if (!doc) { toast(esc(label) + ' не загружен(а) для этого водителя · загрузить можно в Справочниках'); return; }
+    var href = apiBase() + '/sprav/person_document_file?session_token=' + encodeURIComponent(apiToken()) + '&id=' + encodeURIComponent(doc.id);
+    window.open(href, '_blank');
+  }).catch(function () { toast('Ошибка сети - не удалось получить документ'); });
+}
+/* «Паспортные данные»/«Права» текстом - копирует в буфер, тот же визуальный приём, что у
+   [data-copy] (кнопка на 1.6с показывает «Скопировано ✓»), только с сетевым запросом перед
+   копированием - узкий /sprav/person_pass_text (НЕ /sprav/state - там ПДн только у admin,
+   см. комментарий на сервере), тот же принцип открытости, что уже у сканов. */
+function copyPersonText_(personId, kind, btn) {
+  if (!personId) { toast('<span class="op2-warn">Данные водителя</span> · водитель не сопоставлен со справочником людей'); return; }
+  var label = btn.textContent;
+  apiGet('/sprav/person_pass_text', { person_id: personId }).then(function (r) {
+    if (!r || !r.ok || !r.data || !r.data.person) { toast('Нет данных по этому водителю в Справочниках'); return; }
+    var p = r.data.person;
+    var text = kind === 'passport' ? formatPassportText_(p) : formatLicenseText_(p);
+    if (!text) { toast((kind === 'passport' ? 'Паспортные данные' : 'Данные прав') + ' не заполнены для ' + esc(p.full_name || 'этого водителя') + ' · заполнить можно в Справочниках'); return; }
+    copyText(text);
+    btn.textContent = 'Скопировано ✓';
+    setTimeout(function () { btn.textContent = label; }, 1600);
+  }).catch(function () { toast('Ошибка сети - не удалось получить данные'); });
+}
+function formatPassportText_(p) {
+  if (!p.passport_series && !p.passport_number) return null;
+  var L = [p.full_name || ''];
+  L.push('Паспорт: ' + [p.passport_series, p.passport_number].filter(Boolean).join(' '));
+  if (p.passport_issued_by) L.push('Выдан: ' + p.passport_issued_by + (p.passport_issued_at ? ' ' + dmy(p.passport_issued_at) : ''));
+  if (p.passport_department_code) L.push('Код подразделения: ' + p.passport_department_code);
+  return L.filter(Boolean).join('\n');
+}
+function formatLicenseText_(p) {
+  if (!p.license_number) return null;
+  var L = [p.full_name || '', 'Водительское удостоверение: ' + p.license_number];
+  if (p.license_expiry) L.push('Действительно до: ' + dmy(p.license_expiry));
+  return L.filter(Boolean).join('\n');
+}
 
 /* ═════════════════════════ РАЗМЕТКА ═════════════════════════ */
 function buildDom() {
@@ -524,6 +609,7 @@ function buildDom() {
       '<div class="op2-toast" id="op2-toast"></div>' +
       '<div class="op2-stpop" id="op2-stpop" role="menu"></div>' +
       '<div class="op2-stpop" id="op2-lgpop" role="menu"></div>' +
+      '<div class="op2-stpop" id="op2-mgrpop" role="menu"></div>' +
 
       /* ── «Задание водителю» ── */
       '<div class="op2-dmod-scrim" id="op2-drv-scrim"><div class="op2-dmod" role="dialog" aria-label="Задание водителю">' +
@@ -541,6 +627,7 @@ function buildDom() {
     '</div>';
   blockForeignAutofill_(page); /* статический каркас - тулбарные поиски, поиск в поповере «Поставить» */
   wire();
+  logUiEvent_('viewport', '', window.innerWidth + 'x' + window.innerHeight); /* раз на страницу, не на каждый дровер */
   return true;
 }
 
@@ -548,8 +635,8 @@ function buildDom() {
 /* ГОСТ: ОДНО делегирование со списком-селектором, не обработчик на каждый элемент.
    Элементы с собственным звуком результата (RESULT_SEL) из nav исключены, чтобы
    не было двойного щелчка. */
-var NAV_SEL = '.op2-tab,.op2-chip,.op2-ghost,.op2-dbtn,.op2-slot,.op2-veh,.op2-st-chip,.op2-stc,.op2-logpick,#op2-lgpop button,.op2-sugg .op2-it,.op2-free .op2-day,.op2-stpop button,.op2-pop .op2-vi,.op2-copybtn,.op2-take,.op2-dt,.op2-mgr-tbl tbody tr,.op2-log-body tr,.op2-switch button,[data-nav-sound]';
-var RESULT_SEL = '#op2-f-save,#op2-rp-go,#op2-pop-ok,.op2-dok,.op2-unset-ot,.op2-slot.op2-ot,.op2-slot.op2-new,#op2-lgpop button,#op2-drv-copy,#op2-drv-max,#op2-d-drv-ok,.op2-dl,.op2-copybtn,.op2-stpop button,.op2-pop .op2-vi[data-act="unset"],#op2-snd,.op2-blocked,#op2-f-ent .op2-chip';
+var NAV_SEL = '.op2-tab,.op2-chip,.op2-ghost,.op2-dbtn,.op2-slot,.op2-veh,.op2-st-chip,.op2-stc,.op2-logpick,#op2-lgpop button,.op2-mgrpick,#op2-mgrpop button,.op2-sugg .op2-it,.op2-free .op2-day,.op2-stpop button,.op2-pop .op2-vi,.op2-copybtn,.op2-take,.op2-dt,.op2-mgr-tbl tbody tr,.op2-log-body tr,.op2-switch button,[data-nav-sound]';
+var RESULT_SEL = '#op2-f-save,#op2-rp-go,#op2-pop-ok,.op2-dok,.op2-unset-ot,.op2-slot.op2-ot,.op2-slot.op2-new,#op2-lgpop button,#op2-mgrpop button,#op2-drv-copy,#op2-drv-max,#op2-d-drv-ok,.op2-dl,.op2-copybtn,.op2-stpop button,.op2-pop .op2-vi[data-act="unset"],#op2-snd,.op2-blocked,#op2-f-ent .op2-chip';
 
 function wire() {
   var root = $('#op2-root');
@@ -631,9 +718,12 @@ function wire() {
 
   /* ── таблица менеджера ── */
   $('#op2-mgr-body').addEventListener('click', function (e) {
+    if (e.target.closest('.op2-maplink')) return; /* ссылка на карту открывает себя сама, дровер не нужен */
     var tr = e.target.closest('tr[data-oid]'); if (!tr) return;
     var ch = e.target.closest('.op2-stc');
     if (ch) { openStPop(ch, tr); return; }
+    var mg = e.target.closest('.op2-mgrpick');
+    if (mg) { openMgrPop(mg, tr); return; }
     var o = byId(tr.dataset.oid); if (!o) return;
     $$('#op2-mgr-body tr.op2-open').forEach(function (r) { r.classList.remove('op2-open'); });
     tr.classList.add('op2-open');
@@ -694,6 +784,16 @@ function wire() {
     var opt = logistOptions_().filter(function (p) { return p.email === email; })[0];
     assignLogist_(o, email, opt ? opt.name : email);
   });
+  /* ── поповер смены менеджера (только admin - серверу тоже requireRole_("admin")) ── */
+  $('#op2-mgrpop').addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b || !mgTr) return;
+    var tr = mgTr; closeMgrPop();
+    if (b.classList.contains('op2-cur')) return;
+    var o = byId(tr.dataset.oid); if (!o) return;
+    var email = b.dataset.email; if (!email) return;
+    var opt = managerOptions_().filter(function (p) { return p.email === email; })[0];
+    assignManager_(o, email, opt ? opt.name : email);
+  });
 
   /* ── глобальные: Esc, клик мимо, скролл ── */
   document.addEventListener('keydown', onKeyDown, true);
@@ -736,6 +836,7 @@ function onKeyDown(e) {
   if ($('#op2-drv-scrim').classList.contains('op2-open')) { closeDrv(); return; }
   if ($('#op2-stpop').classList.contains('op2-open')) { closeStPop(); return; }
   if ($('#op2-lgpop').classList.contains('op2-open')) { closeLogPop(); return; }
+  if ($('#op2-mgrpop').classList.contains('op2-open')) { closeMgrPop(); return; }
   if ($('#op2-pop').classList.contains('op2-open')) { closePop(); return; }
   closeDrawer();
 }
@@ -745,6 +846,8 @@ function onDocMouseDown(e) {
   if (sp && sp.classList.contains('op2-open') && !e.target.closest('#op2-stpop') && !e.target.closest('.op2-st-chip') && !e.target.closest('.op2-stc')) closeStPop();
   var lgp = $('#op2-lgpop');
   if (lgp && lgp.classList.contains('op2-open') && !e.target.closest('#op2-lgpop') && !e.target.closest('.op2-logpick')) closeLogPop();
+  var mgp = $('#op2-mgrpop');
+  if (mgp && mgp.classList.contains('op2-open') && !e.target.closest('#op2-mgrpop') && !e.target.closest('.op2-mgrpick')) closeMgrPop();
   var pop = $('#op2-pop');
   if (pop && pop.classList.contains('op2-open') && !e.target.closest('#op2-pop') && !e.target.closest('.op2-slot,.op2-veh')) closePop();
   if ($('#op2-row-menu') && !e.target.closest('#op2-row-menu')) closeRowMenu();
@@ -774,7 +877,16 @@ function applyMe(me) {
   if (first) {
     VIEW = (me.role === 'manager') ? 'mgr' : 'log';
     $('#op2-switch').classList.toggle('op2-hidden', me.role !== 'admin');
-    if (me.role === 'admin') syncSwitch();
+    if (me.role === 'admin') {
+      syncSwitch();
+      /* Влад 13.09: «менеджеров меняю только я» - подсказка добавляется в рантайме именно
+         потому, что легенда - общая статичная разметка на все роли; строку показываем
+         только когда роль уже известна как admin, чтобы не путать менеджера/логиста
+         функцией, которая им недоступна. */
+      $$('.op2-legend').forEach(function (p) {
+        if (!p.querySelector('.op2-mgrpick-hint')) p.insertAdjacentHTML('beforeend', ' <span class="op2-mgrpick-hint op2-dim">Клик по фамилии в «Мен.» - сменить менеджера (только у вас).</span>');
+      });
+    }
   }
 }
 function syncSwitch() {
@@ -1049,20 +1161,43 @@ function shyCaps_(escaped) {
 }
 /* адрес -> город жирным, улица/дом серым; регион (обл, край, р-н) - только в title ячейки */
 var ADDR_CITY_RE_ = /^(г|город|пгт|рп|п|с|д|х|село|пос[её]лок|деревня|станица|аул|ст)\.?\s+[А-ЯЁA-Za-zа-яё]/i;
+/* Влад 13.09 (ночь): «хочу, чтобы ссылки были закрашены серым, если перед ними что-то есть
+   («Михнево» ярко, ссылка серым); если в адресе ТОЛЬКО ссылка - она сама яркая». Раньше на
+   адресах-со-ссылкой без запятых (частый случай - см. feedback_dont_rewrite_manager_free_text)
+   вся строка целиком уходила в «город» (запятой разбить не на что) и красилась ярко,
+   включая саму ссылку - не то, что нужно глазу при сканировании таблицы. Правило теперь
+   срабатывает РАНЬШЕ обычной разбивки по запятой, только когда в адресе есть ссылка на
+   карту: остальной текст (до и после ссылки, если он есть) - «город» (ярко), сама ссылка -
+   отдельное поле link (не текст в ячейке). Обычные адреса без ссылки - без изменений, та же
+   разбивка по запятой, что и раньше.
+   Влад 13.09 (день, второй заход): «чисто эстетически» - вместо усечённого сырого URL серым
+   текстом («…whatshere%5Bzoom%5D=15&what…», нечитаемо и некликабельно) - подпись «Ссылка на
+   Yandex» (серым, «Y» красным, «andex» жирным белым - как название места), кликабельная,
+   открывает ссылку в новой вкладке. Полный текст адреса остаётся в title ячейки (routeCell) -
+   ничего не потеряно, просто не в самой строке. */
 function addrParts_(addr) {
+  var s = String(addr || '');
+  var linkM = s.match(YANDEX_LINK_RE_);
+  if (linkM) {
+    var link = linkM[0];
+    var own = (s.slice(0, linkM.index) + ' ' + s.slice(linkM.index + link.length))
+      .replace(/\s{2,}/g, ' ').replace(/^[\s,;.\-]+|[\s,;.\-]+$/g, '').trim();
+    return { city: own, rest: '', link: link };
+  }
   var t = String(addr || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
   if (!t.length) return null;
   var i = -1;
   for (var k = 0; k < t.length; k++) { if (ADDR_CITY_RE_.test(t[k])) { i = k; break; } }
   var city = i >= 0 ? t[i] : t[0];
   var rest = (i >= 0 ? t.slice(i + 1) : t.slice(1)).map(function (s) { return s.replace(/^(д|дом)\.?\s+(?=\d)/i, ''); });
-  return { city: city, rest: rest.join(', ') };
+  return { city: city, rest: rest.join(', '), link: null };
 }
 function rtLine_(addr, arrow) {
   var p = addrParts_(addr);
   var ar = arrow ? '<span class="op2-arr">→</span>' : '';
   if (!p) return '<span class="op2-rt">' + ar + '<span class="op2-ask">уточнить</span></span>';
-  return '<span class="op2-rt">' + ar + '<b>' + esc(p.city) + '</b>' + (p.rest ? ' <span class="op2-rs">' + esc(p.rest) + '</span>' : '') + '</span>';
+  var badge = p.link ? ' <a class="op2-maplink" href="' + esc(p.link) + '" target="_blank" rel="noopener" title="Открыть на Яндекс.Картах">Ссылка на <span class="op2-maplink-y">Y</span><b>andex</b></a>' : '';
+  return '<span class="op2-rt">' + ar + (p.city ? '<b>' + esc(p.city) + '</b>' : '') + badge + (p.rest ? ' <span class="op2-rs">' + esc(p.rest) + '</span>' : '') + '</span>';
 }
 function routeCell(o) {
   return '<td title="Откуда: ' + esc(o.load_address || 'уточнить') + '\nКуда: ' + esc(o.unload_address || 'уточнить') + '">' +
@@ -1146,7 +1281,7 @@ function renderMgr() {
     var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' : '');
     return '<tr class="' + cls + '" data-oid="' + esc(o.id) + '">' +
       '<td><span class="op2-no">' + esc(oNo(o)) + '</span></td>' +
-      mgrCodeCell_(o) + logCodeCell_(o) +
+      mgrCodeCell_(o, isAdmin()) + logCodeCell_(o) +
       timeCell(o) + techCell_(o) +
       custCell_(o, WIDE && F.q ? '<span class="op2-code" style="margin-right:6px">' + esc(dm(o.service_date)) + '</span>' : '') +
       routeCell(o) + cargoCell_(o) +
@@ -1284,7 +1419,7 @@ function renderLog() {
     var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' + (o.otboy_ack_by ? '' : ' op2-unack') : (needsAccept_(o) ? ' op2-new-unack' : '')) + (isFresh(o) ? ' op2-new-halo' : '');
     return '<tr class="' + cls + '" data-oid="' + esc(o.id) + '">' +
       '<td><span class="op2-no">' + esc(oNo(o)) + '</span></td>' +
-      mgrCodeCell_(o) + logCodeCell_(o, true) +
+      mgrCodeCell_(o, isAdmin()) + logCodeCell_(o, true) +
       timeCell(o) + techCell_(o) +
       custCell_(o, isFresh(o) ? '<span class="op2-st-chip op2-ok" style="margin-right:6px">новая</span>' : '') +
       routeCell(o) + cargoCell_(o) +
@@ -1349,6 +1484,39 @@ function openLogPop(cell, tr) {
   sp.classList.add('op2-open');
 }
 function closeLogPop() { var sp = $('#op2-lgpop'); if (sp) sp.classList.remove('op2-open'); lgTr = null; }
+
+/* ═════════════════════════ СМЕНА МЕНЕДЖЕРА (только admin) ═════════════════════════ */
+var mgTr = null;
+function managerOptions_() { return ROSTER.filter(function (r) { return r.role === 'manager'; }); }
+function openMgrPop(cell, tr) {
+  mgTr = tr;
+  var o = byId(tr.dataset.oid);
+  var curEmail = o ? (o.manager_email || '') : '';
+  var opts = managerOptions_();
+  var sp = $('#op2-mgrpop');
+  sp.innerHTML = opts.length ? opts.map(function (p) {
+    var col = personColor_(p.name);
+    return '<button data-email="' + esc(p.email) + '" class="' + (p.email === curEmail ? 'op2-cur' : '') + '"><span class="op2-person"' +
+      (col ? ' style="color:' + col + '"' : '') + '>' + esc(personSurname_(p.name)) + '</span>' +
+      (p.email === curEmail ? '<span class="op2-dim op2-sm">сейчас</span>' : '') + '</button>';
+  }).join('') : '<button class="op2-cur">в справочнике нет менеджеров</button>';
+  var r = cell.getBoundingClientRect();
+  sp.style.left = Math.min(r.left, window.innerWidth - 230) + 'px';
+  sp.style.top = (r.bottom + 4) + 'px';
+  sp.classList.add('op2-open');
+}
+function closeMgrPop() { var sp = $('#op2-mgrpop'); if (sp) sp.classList.remove('op2-open'); mgTr = null; }
+function assignManager_(o, email, name) {
+  var prevEmail = o.manager_email || '', prevName = o.manager_name || '';
+  if (email === prevEmail) return;
+  apiPost('/orders/set_manager', { id: o.id, email: email }).then(function (r) {
+    if (!ok_(r)) return;
+    S.toggle();
+    toast('Заявку №' + esc(oNo(o)) + ' теперь ведёт менеджер <span class="op2-tick">' + esc(name) + '</span>' + (prevName ? ' · было: ' + esc(prevName) : ''),
+      function () { apiPost('/orders/set_manager', { id: o.id, email: prevEmail || 'none' }).then(function (r2) { if (ok_(r2)) loadOrders(); }); });
+    loadOrders();
+  });
+}
 function assignLogist_(o, email, name) {
   var prevEmail = o.taken_by || '', prevName = o.taken_by_name || '';
   if (email === prevEmail) return;
@@ -1381,6 +1549,7 @@ function setStatus(o, k) {
 
 /* ═════════════════════════ КЛИКИ В ТАБЛИЦЕ ЛОГИСТА ═════════════════════════ */
 function onLogClick(e) {
+  if (e.target.closest('.op2-maplink')) return; /* ссылка на карту открывает себя сама, дровер не нужен */
   var lg = e.target.closest('.op2-logpick');
   var dk = e.target.closest('.op2-dok');
   var un = e.target.closest('.op2-unset-ot');
@@ -1390,6 +1559,12 @@ function onLogClick(e) {
   if (lg) {
     var lgTrEl = e.target.closest('tr[data-oid]'); if (!lgTrEl) return;
     openLogPop(lg, lgTrEl);
+    return;
+  }
+  var mg = e.target.closest('.op2-mgrpick');
+  if (mg) {
+    var mgTrEl = e.target.closest('tr[data-oid]'); if (!mgTrEl) return;
+    openMgrPop(mg, mgTrEl);
     return;
   }
 
@@ -1477,12 +1652,19 @@ function openRowMenu(x, y, items) {
     if (it && it.fn) { S.nav(); it.fn(); }
   });
 }
+function mgrChangerItem_(o, table) {
+  if (!isAdmin()) return [];
+  return [{ label: o.manager_name ? 'Сменить менеджера' : 'Назначить менеджера', fn: function () {
+    var tr = $('#' + table + ' tr[data-oid="' + o.id + '"]'); if (!tr) return;
+    var cell = tr.querySelector('.op2-mgrpick'); if (cell) openMgrPop(cell, tr);
+  } }];
+}
 function mgrRowMenu(o) {
   return [
     { label: 'Повторить', fn: function () { openRepeat(o); } },
     { label: 'Отбой', fn: function () { setStatus(o, 'ot'); } },
     { label: 'Копировать данные на пропуск', fn: function () { copyText(passText(o), 'Данные на пропуск скопированы'); } }
-  ].concat(isAdmin() ? [{ label: 'Удалить заявку', fn: function () { deleteOrder(o); } }] : []);
+  ].concat(mgrChangerItem_(o, 'op2-mgr-body')).concat(isAdmin() ? [{ label: 'Удалить заявку', fn: function () { deleteOrder(o); } }] : []);
 }
 function logRowMenu(o) {
   var items = [];
@@ -1491,6 +1673,7 @@ function logRowMenu(o) {
     var tr = $('#op2-log-body tr[data-oid="' + o.id + '"]'); if (!tr) return;
     var cell = tr.querySelector('.op2-logpick'); if (cell) openLogPop(cell, tr);
   } });
+  items = items.concat(mgrChangerItem_(o, 'op2-log-body'));
   items.push({ label: 'Добавить вторую машину', fn: function () { var tr = $('#op2-log-body tr[data-oid="' + o.id + '"]'); openPop(tr || $('#op2-log-body'), o, true); } });
   items.push({ label: 'Все заявки этой машины →', fn: function () { showByVehicle(o); } });
   items.push({ label: 'История', fn: function () { openDrawerView(o, 'log', true); } });
@@ -1999,13 +2182,73 @@ function openDrawerView(o, who, withHistory) {
   }).catch(function () {});
   if (withHistory) loadHistoryInto(o);
 }
+/* Влад 13.09 (ночь): «история должна писаться человеческим языком, как и даты и время» -
+   сервер отдаёт сырые action/detail/ISO-дату (`/orders/history`, лог для отладки, менять там
+   формат под UI не стали - тот же JSON читает и будущий отчёт по истории заявки), человеческий
+   вид - целиком на клиенте. Дата/время - ТЕМ ЖЕ приёмом, что и везде в этом файле (dm/todayStr/
+   addDays - чистая работа со строкой 'YYYY-MM-DD' и hhmmOf - регэксп по HH:MM в самой строке,
+   без new Date().getHours() - тот же принцип, что уже проверен на отбое/подтверждении водителя
+   и ни разу не разъехался с реальным временем на живых заявках). */
+var HIST_ACTION_LABEL_ = {
+  create: 'создал заявку', update: 'изменил заявку', status: 'сменил статус',
+  take: 'назначил логиста', set_manager: 'назначил менеджера', otboy_ack: 'принял отбой',
+  delete: 'удалил заявку', executor_role: 'сменил роль машины', change_request: 'предложил замену',
+  executor_set: 'поставил машину', executor_remove: 'снял машину', executor_move: 'перенёс машину',
+  hired_set: 'оформил наёмника', change_request_approve: 'согласовал замену',
+  change_request_reject: 'отклонил замену', needs_data_sent: 'отправил данные на пропуск'
+};
+/* detail этих действий дословно повторяет то, что уже сказано в label/по автору - не дублируем */
+var HIST_SUPPRESS_DETAIL_ = { otboy_ack: 1, delete: 1, needs_data_sent: 1 };
+var HIST_FIELD_LABEL_ = {
+  service_date: 'дата', service_time: 'время', needs_data: 'под данные', customer: 'заказчик',
+  customer_entity_id: 'юрлицо заказчика', executor_entity_id: 'юрлицо-исполнитель',
+  customer_contact_name: 'контакт заказчика', customer_contact_phone: 'телефон заказчика',
+  equipment_type: 'тип техники', cargo: 'груз', cargo_weight_t: 'вес груза', cargo_dims: 'габариты груза',
+  gabarit: 'габарит', rework_terms: 'условия переработки', documents: 'документы', note: 'примечание',
+  cash: 'наличные', load_address: 'адрес погрузки', load_lat: 'координаты погрузки', load_lon: 'координаты погрузки',
+  load_confirmed: 'адрес погрузки подтверждён', load_contact_name: 'контакт на погрузке', load_contact_phone: 'телефон на погрузке',
+  unload_address: 'адрес выгрузки', unload_lat: 'координаты выгрузки', unload_lon: 'координаты выгрузки',
+  unload_confirmed: 'адрес выгрузки подтверждён', unload_contact_name: 'контакт на выгрузке', unload_contact_phone: 'телефон на выгрузке',
+  price: 'цена', payment_status: 'статус оплаты', internal: 'внутренний заказ', crm_deal_id: 'сделка CRM'
+};
+function humanizeHistoryDetail_(action, detail) {
+  detail = String(detail || '');
+  if (!detail || HIST_SUPPRESS_DETAIL_[action]) return '';
+  if (action === 'update') {
+    var seen = {};
+    var fields = detail.split(',').map(function (k) { return HIST_FIELD_LABEL_[k.trim()] || k.trim(); })
+      .filter(function (f) { if (!f || seen[f]) return false; seen[f] = true; return true; });
+    return fields.join(', ');
+  }
+  if (action === 'status') {
+    var m = detail.match(/^(\w+)\s*->\s*(\w+)$/);
+    if (m) return (ST_LABEL[ST_UI[m[1]]] || m[1]) + ' → ' + (ST_LABEL[ST_UI[m[2]]] || m[2]);
+  }
+  if (action === 'executor_set') detail = detail.replace(/\bmain\b/, 'основная').replace(/\breserve\b/, 'резерв');
+  return detail.replace(/\s*->\s*/g, ' → ');
+}
+/* «сегодня, 14:12» / «вчера, 09:34» / «13 сентября, 09:34» - дата определяется сравнением
+   строк 'YYYY-MM-DD' (см. комментарий выше про приём без new Date().getHours()) */
+function humanAt_(iso) {
+  if (!iso) return '';
+  var s = String(iso);
+  var d = s.slice(0, 10);
+  var hm = hhmmOf(s);
+  var t = todayStr(), y = addDays(t, -1);
+  var label = d === t ? 'сегодня' : (d === y ? 'вчера' : humanDate(d));
+  return label + (hm ? ', ' + hm : '');
+}
 function loadHistoryInto(o) {
   apiGet('/orders/history', { id: o.id }).then(function (r) {
     if (!r || !r.ok || !r.data || r.data.error) return;
     var box = $('#op2-hist-box'); if (!box) return;
     var h = r.data.history || [];
     box.innerHTML = h.length ? h.map(function (x) {
-      return '<li><span class="op2-tm">' + esc(x.at || '') + '</span><span><span class="op2-who">' + esc(x.by || '') + '</span> ' + esc(x.action || '') + (x.detail ? ' · ' + esc(x.detail) : '') + '</span></li>';
+      var label = HIST_ACTION_LABEL_[x.action] || x.action || '';
+      var detail = humanizeHistoryDetail_(x.action, x.detail);
+      /* Влад 13.09: «просто делай: имя, фамилия и всё» - без отчества, тем же приёмом
+         (fioName_), что уже сокращает ФИО водителя в колонке «Машина»; полное ФИО - в title. */
+      return '<li><span class="op2-tm">' + esc(humanAt_(x.at)) + '</span><span><span class="op2-who" title="' + esc(x.by || '') + '">' + esc(fioName_(x.by)) + '</span> ' + esc(label) + (detail ? ' · ' + esc(detail) : '') + '</span></li>';
     }).join('') : '<li><span class="op2-dim">записей пока нет</span></li>';
   }).catch(function () {});
 }
@@ -2046,10 +2289,12 @@ function renderView(o, who) {
       (o.needs_data ? '<div class="op2-line"><span class="op2-nd"></span><span class="op2-k">Под данные</span> данные обоих водителей у заказчика · замена только из заявленных, вне списка - новый пропуск' +
         (o.needs_data_sent_at ? ' · отправлено ' + esc(o.needs_data_sent_at) : '') + '</div>' : '') +
       '<div class="op2-line op2-docs"><span class="op2-k">Документы</span>' +
-        '<button class="op2-ghost op2-dl op2-soon" data-doc="СТС тягача ' + esc(v.vehicle_gos || '') + '">СТС тягача ⤓</button>' +
-        '<button class="op2-ghost op2-dl op2-soon" data-doc="СТС прицепа ' + esc(v.trailer_gos || '') + '">СТС прицепа ⤓</button>' +
-        '<button class="op2-ghost op2-dl op2-soon" data-doc="Паспорт ' + esc(v.driver_name || '') + '">Паспорт водителя ⤓</button>' +
-        '<button class="op2-ghost op2-dl op2-soon" data-doc="Паспортные данные текстом">Паспортные данные текстом</button>' +
+        '<button class="op2-ghost op2-dl" id="op2-sts-tractor" title="Скачать СТС тягача">СТС тягача ⤓</button>' +
+        '<button class="op2-ghost op2-dl' + (v.trailer_gos ? '' : ' op2-soon') + '" id="op2-sts-trailer" title="' + (v.trailer_gos ? 'Скачать СТС прицепа' : 'Прицеп не сцеплен') + '">СТС прицепа ⤓</button>' +
+        '<button class="op2-ghost op2-dl" id="op2-doc-passport" title="Скачать скан паспорта">Паспорт водителя ⤓</button>' +
+        '<button class="op2-ghost op2-dl" id="op2-doc-license" title="Скачать скан водительского удостоверения">Права водителя ⤓</button>' +
+        '<button class="op2-ghost op2-copybtn" id="op2-doc-passport-text" title="Скопировать паспортные данные">Паспортные данные текстом</button>' +
+        '<button class="op2-ghost op2-copybtn" id="op2-doc-license-text" title="Скопировать данные прав">Права текстом</button>' +
       '</div>' +
       '<div class="op2-acts"><button class="op2-ghost op2-copybtn" data-copy="pass">Копировать данные на пропуск</button>' +
       '<button class="op2-dbtn op2-primary" id="op2-d-drv">Задание водителю</button>' +
@@ -2155,10 +2400,18 @@ function renderView(o, who) {
       setTimeout(function () { b.textContent = label; }, 1600);
     });
   });
-  /* СТС и паспорта - хранилище справочников подключим следующим этапом */
-  $$('.op2-dl', body).forEach(function (b) {
-    b.addEventListener('click', function () { soonDoc(b.dataset.doc); });
-  });
+  var stsT = $('#op2-sts-tractor', body);
+  if (stsT) stsT.addEventListener('click', function () { downloadSts_(v.vehicle_gos, 'СТС тягача'); });
+  var stsP = $('#op2-sts-trailer', body);
+  if (stsP) stsP.addEventListener('click', function () { downloadSts_(v.trailer_gos, 'СТС прицепа'); });
+  var docPass = $('#op2-doc-passport', body);
+  if (docPass) docPass.addEventListener('click', function () { downloadPersonDoc_(v.driver_person_id, 'passport', 'Паспорт водителя'); });
+  var docLic = $('#op2-doc-license', body);
+  if (docLic) docLic.addEventListener('click', function () { downloadPersonDoc_(v.driver_person_id, 'license', 'Права водителя'); });
+  var docPassTxt = $('#op2-doc-passport-text', body);
+  if (docPassTxt) docPassTxt.addEventListener('click', function () { copyPersonText_(v.driver_person_id, 'passport', docPassTxt); });
+  var docLicTxt = $('#op2-doc-license-text', body);
+  if (docLicTxt) docLicTxt.addEventListener('click', function () { copyPersonText_(v.driver_person_id, 'license', docLicTxt); });
 }
 function resolveRequest(o, action, who) {
   var p = o.pending_request; if (!p) return;
@@ -2422,15 +2675,17 @@ function renderForm() {
     '</div></div>' +
 
     '<div class="op2-sect"><div class="op2-t">Откуда - куда</div><div class="op2-grid2">' +
-      '<div class="op2-fld op2-full op2-sugg" id="op2-f-frombox"><label' + (isLog ? ' class="op2-lbl-flex"' : '') + '><span>Адрес погрузки</span>' +
-        (isLog ? '<button type="button" class="op2-addr-base" data-side="from">База</button>' : '') + '</label>' +
+      '<div class="op2-fld op2-full op2-sugg" id="op2-f-frombox"><label class="op2-lbl-flex"><span>Адрес погрузки</span>' +
+        (isLog ? '<button type="button" class="op2-addr-base" data-side="from" data-kind="base">База</button>'
+               : '<button type="button" class="op2-addr-base" data-side="from" data-kind="bymesto">По месту</button>') + '</label>' +
         '<input id="op2-f-from" placeholder="Адрес, ссылка на карту или координаты 55.75, 37.62" autocomplete="off" value="' + esc(o ? o.load_address : '') + '">' +
         '<div class="op2-list" id="op2-f-fromlist"></div>' +
         '<span class="op2-hint op2-okc" id="op2-f-fromhint">' + (o && o.load_lat ? esc(o.load_lat + ' · ' + o.load_lon) : '') + '</span></div>' +
       '<div class="op2-fld"><label>Контакт на погрузке</label><input id="op2-f-fromcontact" placeholder="Имя · телефон" autocomplete="off" value="' + esc(o ? [o.load_contact_name, o.load_contact_phone].filter(Boolean).join(' · ') : '') + '"></div>' +
       '<div class="op2-fld"><label>Контакт на выгрузке</label><input id="op2-f-tocontact" placeholder="Имя · телефон" autocomplete="off" value="' + esc(o ? [o.unload_contact_name, o.unload_contact_phone].filter(Boolean).join(' · ') : '') + '"></div>' +
-      '<div class="op2-fld op2-full op2-sugg" id="op2-f-tobox"><label' + (isLog ? ' class="op2-lbl-flex"' : '') + '><span>Адрес выгрузки</span>' +
-        (isLog ? '<button type="button" class="op2-addr-base" data-side="to">База</button>' : '') + '</label>' +
+      '<div class="op2-fld op2-full op2-sugg" id="op2-f-tobox"><label class="op2-lbl-flex"><span>Адрес выгрузки</span>' +
+        (isLog ? '<button type="button" class="op2-addr-base" data-side="to" data-kind="base">База</button>'
+               : '<button type="button" class="op2-addr-base" data-side="to" data-kind="bymesto">По месту</button>') + '</label>' +
         '<input id="op2-f-to" placeholder="Адрес, ссылка на карту или координаты" autocomplete="off" value="' + esc(o ? o.unload_address : '') + '">' +
         '<div class="op2-list" id="op2-f-tolist"></div>' +
         '<span class="op2-hint op2-warn" id="op2-f-tohint"></span></div>' +
@@ -2665,7 +2920,7 @@ function wireForm() {
   ['from', 'to'].forEach(function (side) {
     var inp = $('#op2-f-' + side);
     inp.addEventListener('focus', function () { if ($('#op2-f-' + side + 'list').querySelector('.op2-it')) $('#op2-f-' + side + 'box').classList.add('op2-open'); });
-    inp.addEventListener('blur', function () { setTimeout(function () { $('#op2-f-' + side + 'box').classList.remove('op2-open'); }, 150); tickState(); });
+    inp.addEventListener('blur', function () { setTimeout(function () { $('#op2-f-' + side + 'box').classList.remove('op2-open'); }, 150); tickState(); tryParseAddrPaste_(side); });
     inp.addEventListener('input', function () { fetchGeoSuggest(side, this.value); });
     $('#op2-f-' + side + 'list').addEventListener('mousedown', function (e) {
       var it = e.target.closest('.op2-it'); if (!it) return;
@@ -2678,11 +2933,13 @@ function wireForm() {
   /* Влад 12.09: «даже просто должна быть где-то кнопка «Адрес погрузки»/«Адрес выгрузки», просто
      база, чтобы нажал быстро и всё» - «это только логистов» (кнопка и так рисуется только у isLog,
      см. renderForm). Координаты - точный ответ DaData на этот же адрес, захардкожены, а не считаются
-     заново на каждом клике: адрес базы не «плавает», отдельный сетевой запрос тут не нужен. */
+     заново на каждом клике: адрес базы не «плавает», отдельный сетевой запрос тут не нужен.
+     13.09: тот же чип у менеджера - «По месту» (data-kind), без координат (BYMESTO_TEXT_). */
   $$('.op2-addr-base').forEach(function (btn) {
     btn.addEventListener('mousedown', function (e) {
       e.preventDefault();
-      applyAddr_(btn.dataset.side, BASE_ADDRESS_, BASE_LAT_, BASE_LON_);
+      if (btn.dataset.kind === 'bymesto') applyAddr_(btn.dataset.side, BYMESTO_TEXT_, '', '', 'без точки на карте');
+      else applyAddr_(btn.dataset.side, BASE_ADDRESS_, BASE_LAT_, BASE_LON_);
       S.tickUp();
     });
   });
@@ -2690,6 +2947,13 @@ function wireForm() {
   $$('#op2-d-body input,#op2-d-body select,#op2-d-body textarea').forEach(function (i) { i.addEventListener('input', tickState); });
   blockForeignAutofill_($('#op2-d-body'));
   if (formOrder && formOrder.customer) fetchCustomerHistory(formOrder.customer);
+  /* открыли СУЩЕСТВУЮЩУЮ заявку, у которой в адресе ссылка/координаты, а lat/lon ещё нет
+     (заявки, заведённые до этой правки, перенос из старого «Задания») - разбираем сразу,
+     не дожидаясь клика в поле и потери фокуса. */
+  if (formOrder) {
+    if (formOrder.load_address && !formOrder.load_lat) tryParseAddrPaste_('from');
+    if (formOrder.unload_address && !formOrder.unload_lat) tryParseAddrPaste_('to');
+  }
   tickState();
 }
 function tickState() {
@@ -2862,7 +3126,7 @@ function fetchCargo(q) {
     if (fleet.length) h += '<div class="op2-sec">Наша техника (гос.номер)</div>' + fleet.map(rowFleet).join('');
     if (cat.length) h += '<div class="op2-sec">Справочник техники</div>' + cat.map(row).join('');
     if (his.length) h += '<div class="op2-sec">Уже возили</div>' + his.map(row).join('');
-    if (!h) { $('#op2-f-cargobox').classList.remove('op2-open'); return; }
+    if (!h) { $('#op2-f-cargobox').classList.remove('op2-open'); logUiEvent_('empty_search', 'cargo', q); return; }
     $('#op2-f-cargolist').innerHTML = h;
     $('#op2-f-cargobox').classList.add('op2-open');
   }).catch(function () {});
@@ -2978,6 +3242,7 @@ function fetchGeoSuggest(side, q) {
           '<span>' + esc(main) + '</span><span class="op2-m">' + esc(sub) + '</span></div>';
       });
       geoSub.innerHTML = html ? '<div class="op2-sec">Адреса</div>' + html : '';
+      if (!html) logUiEvent_('empty_search', 'geocoder_' + side, q);
       /* проверка фокуса - ответ может прийти уже после того, как менеджер кликнул
          мимо (blur закрывает бокс через 150мс); без неё список открылся бы заново
          сам по себе поверх уже незнакомого действия */
@@ -2986,6 +3251,92 @@ function fetchGeoSuggest(side, q) {
       }
     }).catch(function () {});
   }, 400);
+}
+/* ── адрес со ссылкой на карту (Влад 13.09, живой перенос заявок из старого «Задания»):
+   «очень много менеджеров адреса ставят в виде ссылки» - и это НЕ мусор для очистки, а
+   рабочий инструмент («25 въездов - указываем, куда именно заехать», населённые пункты
+   без нормальных адресов, а сама ссылка потом уходит В ЗАДАНИЕ ВОДИТЕЛЮ - он жмёт и
+   прокладывает маршрут). Поэтому ТЕКСТ АДРЕСА НЕ ТРОГАЕМ ВООБЩЕ - ни разу не переписываем
+   и не подчищаем то, что ввёл менеджер, ссылка остаётся в нём как есть и так же уходит
+   водителю. Единственное, чего не хватало: у системы уже год как есть колонки
+   load_lat/load_lon (для карты, будущих задач по расстоянию), но они не заполнялись, если
+   координаты пришли не через клик по подсказке DaData, а спрятаны в тексте/ссылке. Эта
+   функция молча ДОЧИТЫВАЕТ их оттуда в фоне (по потере фокуса поля - не на каждую букву,
+   не мешаем живым подсказкам DaData) и кладёт в dataset.lat/lon, как будто их выбрали из
+   подсказки - collectForm() ниже саму работу с ними уже делает, менять не пришлось.
+   Источники: (1) явная пара чисел «широта, долгота» - тот же порядок, что «скопировать
+   координаты» даёт в любой карте; (2) параметры ДЛИННОЙ ссылки Яндекс.Карт (ll=/pt=/
+   whatshere[point]=) - порядок ОБРАТНЫЙ, долгота,широта; (3) КОРОТКАЯ ссылка
+   (yandex.ru/navi/-/xxx) без координат в самом URL - её разворачивает сервер
+   (/geocoder/resolve_link, только домены яндекса, только читает адрес, не публикует и не
+   пишет никуда). Если распознать не получилось - молча ничего не меняем, статус-кво. */
+/* Влад 13.09 (ночь, живая находка): «можно уехать в Ашхабад» - реальная заявка №5
+   (Михнево, whatshere%5Bpoint%5D=37.955857,55.164453 - Яндекс тут не кодирует запятую как
+   %2C, кладёт её как есть) обрезалась ЭТИМ regex'ом ровно НА запятой (запятая была в
+   исключённых символах, чтобы отделять ссылку от продолжения фразы за пределами URL) -
+   вторая координата отваливалась вместе с остатком строки, whatshere-разбор ниже не
+   находил вторую цифру и проваливался в «голую пару чисел» (BARE_COORD_RE_) по ВСЕМУ
+   тексту, а та по человеческой конвенции читает первую цифру как широту - тогда как внутри
+   ссылки Яндекса порядок обратный (долгота,широта). Широта и долгота менялись местами -
+   37.95/55.16 (Подмосковье) превращались в лежащую в Туркменистане пару. Запятую из
+   исключений убрали - ссылка с любым числом координатных запятых внутри ловится целиком
+   до первого пробела/кавычки/скобки. */
+var YANDEX_LINK_RE_ = /https?:\/\/(?:[a-z0-9-]+\.)?ya(?:ndex)?\.[a-z.]+\/(?:maps|navi)[^\s)"'<>]*/i;
+var RE_LL_PT_ = /[?&](?:ll|pt)=([\-\d.]+)(?:%2C|,)([\-\d.]+)/i;
+var RE_WHATSHERE_ = /whatshere(?:%5B|\[)point(?:%5D|\])=([\-\d.]+)(?:%2C|,)([\-\d.]+)/i;
+function coordParamsFromLink_(link) {
+  var m = link.match(RE_WHATSHERE_) || link.match(RE_LL_PT_);
+  return m ? { lon: m[1], lat: m[2] } : null; /* ссылка Яндекса - долгота,широта */
+}
+var BARE_COORD_RE_ = /(-?\d{1,3}\.\d{2,8})\s*[,;]\s*(-?\d{1,3}\.\d{2,8})/;
+function coordsInBounds_(lat, lon) {
+  lat = parseFloat(lat); lon = parseFloat(lon);
+  return isFinite(lat) && isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
+}
+/* только НАХОДИТ координаты - ничего не удаляет и не переписывает в исходном тексте */
+function findAddrCoords_(text) {
+  var s = String(text || '');
+  var linkM = s.match(YANDEX_LINK_RE_);
+  var link = linkM ? linkM[0] : '';
+  if (link) {
+    var params = coordParamsFromLink_(link);
+    if (params && coordsInBounds_(params.lat, params.lon)) return { lat: params.lat, lon: params.lon };
+  }
+  /* «голая пара чисел» ищем ТОЛЬКО вне самой ссылки - иначе случайно найдённая пара внутри
+     нераспознанного URL (порядок долгота,широта) читается как широта,долгота человека и
+     переворачивает координаты (см. комментарий у YANDEX_LINK_RE_ выше). */
+  var rest = link ? (s.slice(0, linkM.index) + s.slice(linkM.index + link.length)) : s;
+  var bare = rest.match(BARE_COORD_RE_);
+  if (bare && coordsInBounds_(bare[1], bare[2])) return { lat: bare[1], lon: bare[2] };
+  if (link) return { needsResolve: true, link: link }; /* короткая ссылка - разворачиваем на сервере */
+  return null;
+}
+function addrHint_(side, text, cls) {
+  var hint = $('#op2-f-' + side + 'hint');
+  if (hint) { hint.textContent = text; hint.className = 'op2-hint' + (cls ? ' ' + cls : ''); }
+}
+/* только координаты в dataset - адрес в самом поле НЕ ТРОГАЕМ */
+function applyFoundCoords_(side, lat, lon) {
+  var inp = $('#op2-f-' + side);
+  inp.dataset.lat = lat; inp.dataset.lon = lon;
+  addrHint_(side, lat + ' · ' + lon + ' · по ссылке в адресе', 'op2-okc');
+  tickState();
+}
+function tryParseAddrPaste_(side) {
+  var inp = $('#op2-f-' + side);
+  if (inp.dataset.lat) return; /* координаты уже есть (выбрано из подсказки/уже разобрано) - не трогаем повторно */
+  var found = findAddrCoords_(inp.value);
+  if (!found) return;
+  if (found.needsResolve) {
+    apiGet('/geocoder/resolve_link', { url: found.link }).then(function (r) {
+      if (inp.dataset.lat) return; /* пока ждали ответ, координаты уже появились другим путём */
+      var finalUrl = r && r.ok && r.data && r.data.url;
+      var params = finalUrl ? coordParamsFromLink_(finalUrl) : null;
+      if (params && coordsInBounds_(params.lat, params.lon)) applyFoundCoords_(side, params.lat, params.lon);
+    }).catch(function () {});
+    return;
+  }
+  applyFoundCoords_(side, found.lat, found.lon);
 }
 function collectForm() {
   var fc = splitContact($('#op2-f-custcontact').value);
@@ -3031,7 +3382,7 @@ function collectForm() {
   return payload;
 }
 function saveForm(btn) {
-  if (btn.classList.contains('op2-blocked')) { toast('<span class="op2-warn">' + esc(btn.textContent) + '</span>'); return; }
+  if (btn.classList.contains('op2-blocked')) { logUiEvent_('blocked_click', 'save', btn.textContent); toast('<span class="op2-warn">' + esc(btn.textContent) + '</span>'); return; }
   var warn = btn.classList.contains('op2-warn');
   var payload = collectForm();
   var editing = !!(formOrder && !formRepeat && !formPrefill);
@@ -3040,7 +3391,7 @@ function saveForm(btn) {
   btn.disabled = true;
   apiPostJson('/orders/save', payload).then(function (r) {
     btn.disabled = false;
-    if (!ok_(r)) return;
+    if (!ok_(r)) { logUiEvent_('save_error', 'orders/save', (r && r.data && r.data.error) || 'сервер недоступен'); return; }
     var d = r.data;
     formMode = false;
     closeDrawer();
@@ -3052,7 +3403,7 @@ function saveForm(btn) {
       (editing ? '' : (payload.internal ? '' : (formWho === 'log' ? ' · менеджер увидит у себя' : ' · логисты видят сразу'))));
     if (payload.service_date !== DATE && !TO_DATE) { DATE = payload.service_date; renderAll(); }
     loadOrders(); loadCounts(); loadFree();
-  }).catch(function () { btn.disabled = false; });
+  }).catch(function () { btn.disabled = false; logUiEvent_('save_error', 'orders/save', 'сеть'); });
 }
 
 /* ═════════════════════════ ПОВТОРИТЬ (один экран: дни × количество × время) ═════════════════════════

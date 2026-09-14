@@ -633,6 +633,17 @@ var API_BASE_ = "https://api.yardhub.ru/api";
 var GOOGLE_CLIENT_ID_ = "872723319158-cmr4v5v31fk3uv8ass3vvdch7at66n8e.apps.googleusercontent.com"; // публичный OAuth client id, не секрет (тот же, что в index.html/server.js)
 function sessionToken_(){ try { return localStorage.getItem("session_token") || ""; } catch(e){ return ""; } }
 function setSessionToken_(t){ try { localStorage.setItem("session_token", t); } catch(e){} }
+// Журнал живых сложностей (Влад 13.09: «Планировка - тоже должно работать, это два
+// основных инструмента работы с сотрудником»; мобильная - это и есть то, чем логисты
+// реально пользуются в поле, см. память project_mobile_planning_page). Тот же
+// ui_events/POST /api/ui_event, что на «Задании» и десктопной Планировке - свой
+// маленький клиент здесь, потому что у этой страницы своя пара API_BASE_/sessionToken_().
+function logUiEvent_(eventType, target, detail){
+  try {
+    var t = sessionToken_(); if (!t) return;
+    fetch(API_BASE_ + "/ui_event", { method:"POST", headers:{"Content-Type":"application/json","X-Session-Token":t}, body: JSON.stringify({ page:"plan-m", event_type:eventType, target: target || "", detail: String(detail == null ? "" : detail).slice(0, 200) }) }).catch(function(){});
+  } catch(e){}
+}
 /* Таймаут 20 с на GET: зависший запрос по плохой мобильной сети раньше оставлял страницу
    пустой навсегда без единого слова (06.09). Теперь - в catch -> полоса ошибки с «Повторить».
    09.09 (Сильчев: «часто пустой экран, по нескольку раз обновляет - потом грузится») -
@@ -1065,6 +1076,7 @@ function saveSeg(s){
     if (r && r.ok){ M.snap[s.id] = JSON.stringify(w); delete M.dirty[s.id]; return r; }
     throw new Error((r && r.error) || "Не сохранилось");
   }).catch(function(err){
+    logUiEvent_("save_error", "seg_save", String(err.message || err));
     toast("Не сохранилось", String(err.message || err), function(){ saveSeg(s); }, {err:true, btn:"Повторить", ms:8000});
     return {ok:false};
   });
@@ -1112,6 +1124,7 @@ function magnet(s, l, v, exceptId){
 }
 function rejectToast(blocker, seg, tryAfter){
   var v = M.vehicles[seg.v];
+  logUiEvent_("blocked_click", "seg_overlap", segLabel(blocker));
   toast("Пересекается: " + segLabel(blocker), v ? v.gosShort : "", tryAfter ? function(){ tryAfter(blocker.s + blocker.l); } : null, {err:true, btn:"Поставить после", ms:7000});
 }
 
@@ -1234,7 +1247,7 @@ function dropDraft(){ if (!M.draft) return; if (M.sel === "draft") deselect(); M
 var ghostEl = null, slotEl = null, dragRaf = 0;
 function startDrag(segEl, t){
   var seg = segById(segEl.dataset.id); if (!seg) return;
-  if (!M.online){ vib([30,30]); toast("Нет связи - изменения недоступны", null, null, {err:true}); return; }
+  if (!M.online){ vib([30,30]); logUiEvent_("blocked_click", "offline", "startDrag"); toast("Нет связи - изменения недоступны", null, null, {err:true}); return; }
   st = "DRAGGING"; vib(12);
   var r = segEl.getBoundingClientRect();
   ghostEl = segEl.cloneNode(true); removeHandles(ghostEl); ghostEl.classList.remove("sel","pressing","src"); ghostEl.classList.add("dragghost"); if (!REDUCED) ghostEl.classList.add("lift");
@@ -1306,7 +1319,7 @@ function endDrag(aborted){
 var rszRaf = 0;
 function startResize(segEl, side, t, isDraftStretch){
   var seg = segById(segEl.dataset.id); if (!seg) return;
-  if (!M.online && seg.id !== "draft"){ vib([30,30]); toast("Нет связи - изменения недоступны", null, null, {err:true}); return; }
+  if (!M.online && seg.id !== "draft"){ vib([30,30]); logUiEvent_("blocked_click", "offline", "startResize"); toast("Нет связи - изменения недоступны", null, null, {err:true}); return; }
   st = "RESIZING"; if (!isDraftStretch) vib(12);
   rsz = {seg:seg, side:side, s0:seg.s, l0:seg.l, x0:t.clientX, lx:t.clientX, locked:false, bad:false, stretch:!!isDraftStretch};
   attachMove(); rszRaf = requestAnimationFrame(rszLoop);
@@ -1569,7 +1582,7 @@ function segSheetClick(e){
 }
 function putDraft(){
   if (!M.draft) return;
-  if (!M.online){ vib([30,30]); toast("Нет связи - заявка не сохранится", null, null, {err:true}); return; }
+  if (!M.online){ vib([30,30]); logUiEvent_("blocked_click", "offline", "putDraft"); toast("Нет связи - заявка не сохранится", null, null, {err:true}); return; }
   var d = M.draft; formApplyToSeg();
   var bad = overlaps(d.v, d.s, d.l, "draft", d.kind);
   if (bad){ vib(30); rejectToast(bad, d, function(after){ form.s = clamp(after, 0, HOURS - form.l); formApplyToSeg(); renderSegSheet(); }); return; }
@@ -1586,7 +1599,7 @@ function putDraft(){
 function deleteSegQuiet(id){ var s = segById(id); if (!s) return; M.segs.splice(M.segs.indexOf(s), 1); if (M.sel === id) deselect(); refreshSeg(id); layoutRows(); API.deleteSeg(id, ""); }
 function saveForm(){
   var s = segById(form.id); if (!s) return;
-  if (!M.online){ vib([30,30]); toast("Нет связи - не сохранится", null, null, {err:true}); return; }
+  if (!M.online){ vib([30,30]); logUiEvent_("blocked_click", "offline", "saveForm"); toast("Нет связи - не сохранится", null, null, {err:true}); return; }
   var bad0 = overlaps(form.v, form.s, form.l, form.id, form.kind); if (bad0){ vib(30); rejectToast(bad0, form, null); return; }
   var before = {kind:s.kind, v:s.v, s:s.s, l:s.l, customer:s.customer, from:s.from, to:s.to, mg:s.mg, needsData:s.needsData, tripMode:s.tripMode, reason:s.reason};
   formApplyToSeg(); s.updatedBy = M.me.name; s.updatedAt = nowHour(); closeSheet();
@@ -1743,7 +1756,7 @@ function syncVDraft(){ if (!M.draft) return; M.draft.s = vsheet.s; M.draft.l = v
 shFoot.addEventListener("click", function(e){
   var b = e.target.closest("button"); if (!b || sheetKind !== "vehicle") return;
   if (b.id === "vBack"){ dropDraft(); vsheet.step = 1; renderVehicleSheet(); }
-  else if (b.id === "vPut"){ if (!M.online){ vib([30,30]); toast("Нет связи - не сохранится", null, null, {err:true}); return; } var v = vsheet.v; var s = {id:newSegId(), v:v.i, kind:vsheet.kind, s:vsheet.s, l:vsheet.l, reason:vsheet.reason, needsData:false, mg:"", lg:M.me.name, from:"", to:"", customer:"", tripMode:"", updatedBy:M.me.name, updatedAt:nowHour()}; dropDraft(); M.segs.push(s); closeSheet(); refreshSeg(s.id); layoutRows(); var saved2 = saveSeg(s); vib([8,40,8]); toast("Поставлено: " + segLabel(s), v.gosShort, function(){ saved2.then(function(){ deleteSegQuiet(s.id); }); }); }
+  else if (b.id === "vPut"){ if (!M.online){ vib([30,30]); logUiEvent_("blocked_click", "offline", "vPut"); toast("Нет связи - не сохранится", null, null, {err:true}); return; } var v = vsheet.v; var s = {id:newSegId(), v:v.i, kind:vsheet.kind, s:vsheet.s, l:vsheet.l, reason:vsheet.reason, needsData:false, mg:"", lg:M.me.name, from:"", to:"", customer:"", tripMode:"", updatedBy:M.me.name, updatedAt:nowHour()}; dropDraft(); M.segs.push(s); closeSheet(); refreshSeg(s.id); layoutRows(); var saved2 = saveSeg(s); vib([8,40,8]); toast("Поставлено: " + segLabel(s), v.gosShort, function(){ saved2.then(function(){ deleteSegQuiet(s.id); }); }); }
 });
 function peopleItems(v){
   var items = [], free = [], other = [];
@@ -2183,6 +2196,7 @@ function boot(){
   else {
     API = makeLiveApi();
     if (sessionToken_()){
+      logUiEvent_("viewport", "", window.innerWidth + "x" + window.innerHeight);
       /* Кэш - на экран НЕМЕДЛЕННО, до единого сетевого запроса (см. saveCache_/loadCache_
          выше). Живая загрузка всё равно запускается следом как обычно - просто теперь
          стартует не с пустого скелета, а поверх уже видимой (пусть не самой свежей) доски. */

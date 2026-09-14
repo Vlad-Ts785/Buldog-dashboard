@@ -361,6 +361,26 @@ module.exports = function (deps) {
     await conn.query(`UPDATE plan_orders SET taken_by = ?, taken_by_name = ?, taken_at = NOW(), updated_by = ? WHERE id = ?`, [target.email, target.name, req.userEmail, o.id]);
     return (o.taken_by_name || "никто") + " -> " + target.name;
   }));
+  // Влад 13.09: «мне нужна здесь возможность менять менеджеров - как логисты меняют
+  // логистов, но менеджеров - только я». В отличие от /orders/take (любой логист может
+  // взять чужую заявку без подтверждения) - здесь requireRole_("admin"), а не общий gate:
+  // менеджеру/логисту эта кнопка вообще не должна быть доступна с сервера, не только
+  // спрятана на фронтенде. email="none" - вернуть к «без менеджера» (заявка станет
+  // внутренней/по создателю, как было до первого назначения) - нужно фронту для undo.
+  app.post("/api/orders/set_manager", checkSession, requireRole_("admin"), (req, res) => simpleUpdate(req, res, "set_manager", async (conn, o) => {
+    const raw = p(req, "email");
+    if (raw === "none") {
+      await conn.query(`UPDATE plan_orders SET manager_email = NULL, manager_name = NULL, updated_by = ? WHERE id = ?`, [req.userEmail, o.id]);
+      return (o.manager_name || "никто") + " -> никто";
+    }
+    const email = str(raw, 255);
+    if (!email) { fail(res, 400, "email обязателен"); return false; }
+    const r = await roster();
+    const t = r.byEmail[email];
+    if (!t || t.role !== "manager") { fail(res, 400, "менеджер не найден"); return false; }
+    await conn.query(`UPDATE plan_orders SET manager_email = ?, manager_name = ?, updated_by = ? WHERE id = ?`, [t.email, t.name, req.userEmail, o.id]);
+    return (o.manager_name || "никто") + " -> " + t.name;
+  }));
   app.post("/api/orders/otboy_ack", ...gate, (req, res) => simpleUpdate(req, res, "otboy_ack", async (conn, o) => {
     if (o.status !== "cancelled") { fail(res, 400, "по заявке нет отбоя"); return false; }
     const who = await me(req);

@@ -1592,6 +1592,9 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .hub-tile__icon{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex:none;}
 .hub-tile__icon--a{background:rgba(55,138,221,.14);color:var(--blue);}
 .hub-tile__icon--b{background:rgba(29,158,117,.14);color:var(--green);}
+.hub-tile__icon--c{background:rgba(127,119,221,.14);color:var(--purple);}
+.hub-tile__icon--d{background:rgba(239,159,39,.14);color:var(--amber);}
+.hub-tile__icon--e{background:rgba(226,75,74,.14);color:var(--red);}
 .hub-tile__name{font-size:14.5px;font-weight:600;color:var(--text);}
 .hub-tile__sub{font-size:12px;color:var(--muted);line-height:1.5;}
 .hub-tile__foot{margin-top:auto;padding-top:10px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);display:flex;align-items:center;justify-content:space-between;}
@@ -1641,6 +1644,17 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   transition:transform .38s cubic-bezier(.34,1.4,.5,1);}
 .mp-drawer.show{transform:translateX(0);}
 @media(prefers-reduced-motion:reduce){.mp-drawer{transition:none;}}
+/* «Плавающая скруглённая шторка» (ГОСТ разд.3, канон 12.09, `.op2-drawer` в «Задании») -
+   точечная миграция конкретных форм по мере работы с ними (Влад: "буду обнаруживать и
+   просить"), НЕ всех mp-drawer разом - модификатор, не правка базового класса. Меняется
+   только рамка (отступ 16px от краёв + скругление + тень), слот/слайд/backdrop те же. */
+.mp-drawer.mp-drawer-float{top:16px;right:16px;bottom:16px;border:1px solid var(--border-strong);
+  border-radius:16px;box-shadow:0 2px 6px rgba(0,0,0,.35),0 20px 50px rgba(0,0,0,.35);
+  overflow:hidden;padding:0;display:flex;flex-direction:column;transform:translateX(calc(100% + 24px));}
+/* Специфичность .mp-drawer.show (2 класса) равна .mp-drawer.mp-drawer-float (2 класса) -
+   кто ниже по файлу, тот и победил бы; нужен явный приоритет для открытого состояния. */
+.mp-drawer.mp-drawer-float.show{transform:translateX(0);}
+.mp-drawer-float-body{padding:22px;overflow-y:auto;flex:1;min-height:0;}
 .mp-drawer h3{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px;font-weight:600;}
 /* Широкий вариант дровера (30.08, Влад: "чтобы карточка техники была в два раза шире...
    поработал эргономист") - модификатор поверх .mp-drawer, НЕ замена базового класса, чтобы
@@ -1653,6 +1667,17 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   font-weight:600;margin:18px 0 10px;padding-top:14px;border-top:1px solid var(--border);}
 .asset-form-section:first-of-type{margin-top:0;padding-top:0;border-top:none;}
 @media(max-width:820px){.asset-form-grid{grid-template-columns:1fr;}}
+/* Чип «Статус»/«Роли» карточки сотрудника (13.09, вариант A мозгового штурма про
+   drv-reg-drawer, одобрен Владом - "мне нравится первый вариант"). Визуальные токены -
+   как .crm-chip (не скоуп страницы, дашборд-уровня, как сам .mp-drawer), но выбранное
+   состояние - зелёным (не нейтральным bg4, как у CRM-фильтров) - здесь чип это ЗНАЧЕНИЕ
+   поля (как в «Задании»), не переключатель фильтра. aria-pressed как состояние. */
+.drv-chip{appearance:none;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:var(--bg3);color:var(--muted);
+  font-family:inherit;font-size:12.5px;font-weight:500;line-height:1;padding:7px 12px;border-radius:8px;cursor:pointer;white-space:nowrap;
+  transition:border-color .15s var(--ease-out-soft),color .15s var(--ease-out-soft),background-color .15s var(--ease-out-soft);}
+.drv-chip:hover{color:var(--text);border-color:var(--border-strong);}
+.drv-chip[aria-pressed="true"]{background:var(--bg4);color:var(--green);border-color:var(--green);}
+.drv-chip:focus-visible{outline:2px solid var(--blue);outline-offset:1px;}
 /* Вкладка "Сцепка" (30.08, Влад - вариант "список-таблица" из трёх превью) - чипы
    тягач/прицеп/водитель кликабельны, открывают fleet-picker; строка истории
    раскрывается под строкой тягача. */
@@ -4014,17 +4039,61 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
          "Водители" того же дня - три вкладки одного справочного раздела, тот же tab-bar
          canon, что "Поступления" (showReceiptsTab). ═══ -->
     <div id="page-directory" class="page">
-      <div class="card">
-        <div class="sec-header" id="dir-tab-bar" style="gap:6px">
-          <button class="tab-btn active" onclick="showDirTab('people',this)">Сотрудники</button>
-          <button class="tab-btn" onclick="showDirTab('legal',this)">Юридические лица</button>
-          <button class="tab-btn" onclick="showDirTab('assets',this)">Материальные средства</button>
-          <button class="tab-btn" onclick="showDirTab('fleet',this)">Сцепка</button>
-          <button class="tab-btn" onclick="showDirTab('plans',this)">Планы продаж</button>
-          <button class="tab-btn" onclick="showDirTab('playbook',this)">Плейбук продаж</button>
-          <button class="tab-btn" onclick="showDirTab('check',this)">Проверка техники</button>
+      <!-- Полноэкранный хаб-выбор раздела (13.09, тот же канон, что "Зарплата" 11.09 -
+           DESIGN_SYSTEM.md раздел 4). Заменил tab-bar - Влад: "нажимаю Справочники, и там
+           вылетает уже плитки с нужными мне справочниками". Клик по сайдбару - обычный
+           showPage (сбрасывает к хабу, см. showPage()); клик по плитке - chooseSpravTarget_(tab)
+           прячет хаб, показывает нужную панель + "← Все разделы". -->
+      <div id="sprav-hub">
+        <div class="hub-sec-title">Разделы</div>
+        <div class="hub-grid">
+          <div class="hub-tile" onclick="chooseSpravTarget_('people')">
+            <div class="hub-tile__icon hub-tile__icon--a"><svg width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="7" r="3.2"/><path d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6"/></svg></div>
+            <div class="hub-tile__name">Сотрудники</div>
+            <div class="hub-tile__sub">Водители, менеджеры, механики, логисты - роли, документы, статус занятости.</div>
+            <div class="hub-tile__foot"><span>физлица</span><span class="hub-tile__go">Открыть →</span></div>
+          </div>
+          <div class="hub-tile" onclick="chooseSpravTarget_('legal')">
+            <div class="hub-tile__icon hub-tile__icon--c"><svg width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="14" height="9" rx="1.2"/><path d="M7 8V5.5A1.5 1.5 0 0 1 8.5 4h3A1.5 1.5 0 0 1 13 5.5V8"/></svg></div>
+            <div class="hub-tile__name">Юридические лица</div>
+            <div class="hub-tile__sub">Организации на балансе - реквизиты, банк, проверка контрагента.</div>
+            <div class="hub-tile__foot"><span>ООО, ИП</span><span class="hub-tile__go">Открыть →</span></div>
+          </div>
+          <div class="hub-tile" onclick="chooseSpravTarget_('assets')">
+            <div class="hub-tile__icon hub-tile__icon--b"><svg width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="6.5" width="11" height="7.5" rx="1"/><path d="M12.5 9h3l2 2.5v2.5h-5z"/><circle cx="5" cy="15" r="1.6"/><circle cx="14.5" cy="15" r="1.6"/></svg></div>
+            <div class="hub-tile__name">Материальные средства</div>
+            <div class="hub-tile__sub">Тягачи, прицепы, спецтехника - характеристики, СТС, история переоформлений.</div>
+            <div class="hub-tile__foot"><span>тралы, длинномеры</span><span class="hub-tile__go">Открыть →</span></div>
+          </div>
+          <div class="hub-tile" onclick="chooseSpravTarget_('fleet')">
+            <div class="hub-tile__icon hub-tile__icon--d"><svg width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="7" height="7" rx="2"/><rect x="11" y="7" width="7" height="7" rx="2"/><path d="M9 10.5h2"/></svg></div>
+            <div class="hub-tile__name">Сцепка</div>
+            <div class="hub-tile__sub">Кто на чём сейчас - водитель + тягач + прицеп в одной карточке.</div>
+            <div class="hub-tile__foot"><span>живое состояние</span><span class="hub-tile__go">Открыть →</span></div>
+          </div>
+          <div class="hub-tile" onclick="chooseSpravTarget_('plans')">
+            <div class="hub-tile__icon hub-tile__icon--a"><svg width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="7"/><circle cx="10" cy="10" r="3.4"/><circle cx="10" cy="10" r=".6" fill="currentColor"/></svg></div>
+            <div class="hub-tile__name">Планы продаж</div>
+            <div class="hub-tile__sub">Месячный план по каждому менеджеру + «Внутренние» и «Рыщанов ВП».</div>
+            <div class="hub-tile__foot"><span>по месяцам</span><span class="hub-tile__go">Открыть →</span></div>
+          </div>
+          <div class="hub-tile" onclick="chooseSpravTarget_('playbook')">
+            <div class="hub-tile__icon hub-tile__icon--c"><svg width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5A1.5 1.5 0 0 1 4.5 3H10v14H4.5A1.5 1.5 0 0 1 3 15.5z"/><path d="M17 4.5A1.5 1.5 0 0 0 15.5 3H10v14h5.5a1.5 1.5 0 0 0 1.5-1.5z"/></svg></div>
+            <div class="hub-tile__name">Плейбук продаж</div>
+            <div class="hub-tile__sub">Скрипты и подсказки для менеджеров - что говорить на каждом этапе сделки.</div>
+            <div class="hub-tile__foot"><span>обучение</span><span class="hub-tile__go">Открыть →</span></div>
+          </div>
+          <div class="hub-tile" onclick="chooseSpravTarget_('check')">
+            <div class="hub-tile__icon hub-tile__icon--e"><svg width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3 4 5.5v4c0 4 2.7 6.6 6 7.5 3.3-.9 6-3.5 6-7.5v-4z"/><path d="M7.5 10 9.3 11.8 12.7 8"/></svg></div>
+            <div class="hub-tile__name">Проверка техники</div>
+            <div class="hub-tile__sub">Сверка одного госномера по всем источникам - Штатка, сцепка, заказы, ГИС.</div>
+            <div class="hub-tile__foot"><span>по запросу</span><span class="hub-tile__go">Открыть →</span></div>
+          </div>
         </div>
+      </div>
+      <button id="sprav-back-link" class="mp-ghostbtn" onclick="showSpravHub_()" style="display:none;margin-bottom:14px">← Все разделы</button>
 
+      <div class="card" id="sprav-panels-card" style="display:none">
         <!-- ── Сотрудники (физические лица) ── -->
         <div id="dir-tab-people">
           <!-- Сводка (30.08, аудит - эргономист: "директор видит масштаб проблемы за
@@ -4259,79 +4328,136 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
     <div id="fleet-picker" class="fleet-picker"></div>
 
     <!-- Форма добавления/правки сотрудника - тот же drawer-канон, что "Пропавшие клиенты"
-         (.mp-drawer/.mp-drawer-bk, дашборд-уровня, не завязан на конкретную страницу). -->
+         (.mp-drawer/.mp-drawer-bk, дашборд-уровня, не завязан на конкретную страницу).
+         13.09 - разложена на подписанные секции + сетка asset-form-grid (как у «Юрлица»/
+         «Актива» по соседству) + чипы вместо select/чекбоксов для Статуса/Ролей - вариант
+         A мозгового штурма, Влад: «мне нравится первый вариант». Поля/id/поведение те же,
+         что были - меняется только раскладка (см. DESIGN_SYSTEM.md 2.35). -->
     <div class="mp-drawer-bk" id="drv-reg-bk" onclick="drvRegCloseForm_()"></div>
-    <div class="mp-drawer" id="drv-reg-drawer">
+    <div class="mp-drawer mp-drawer-float mp-drawer-wide" id="drv-reg-drawer">
+     <div class="mp-drawer-float-body">
       <h3 id="drv-reg-drawer-title">Добавить сотрудника</h3>
-      <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">ФИО *</label>
-        <input autocomplete="off" id="drv-reg-name" type="text" maxlength="150" placeholder="Фамилия Имя Отчество"
-          style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
-      <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Телефон</label>
-        <input autocomplete="off" id="drv-reg-phone" type="text" maxlength="64" placeholder="+7 900 000-00-00"
-          style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
-      <!-- ИНН/СНИЛС/дата рождения/дата приёма/адрес (30.08, аудит Справочников - были в
-           базе с импорта 1С, но не в форме: правка карточки без этих полей стирала бы их
-           на сервере, если бы не COALESCE-страховка; теперь поля видны и редактируемы). -->
-      <div style="display:flex;gap:10px;margin-bottom:12px">
-        <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">ИНН</label>
-          <input autocomplete="off" id="drv-reg-inn" type="text" maxlength="12" placeholder="12 цифр"
+      <div class="asset-form-section">Личные данные</div>
+      <div class="asset-form-grid">
+        <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">ФИО *</label>
+          <input autocomplete="off" id="drv-reg-name" type="text" maxlength="150" placeholder="Фамилия Имя Отчество"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
-        <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">СНИЛС</label>
-          <input autocomplete="off" id="drv-reg-snils" type="text" maxlength="14" placeholder="000-000-000 00"
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Телефон</label>
+          <input autocomplete="off" inputmode="tel" id="drv-reg-phone" type="text" maxlength="16" placeholder="+7-900-000-00-00"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
-      </div>
-      <div style="display:flex;gap:10px;margin-bottom:12px">
-        <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Дата рождения</label>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Дата рождения</label>
           <input autocomplete="off" id="drv-reg-birth-date" type="date"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark"></div>
-        <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Дата приёма</label>
-          <input autocomplete="off" id="drv-reg-hire-date" type="date"
-            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark"></div>
+        <!-- ИНН/СНИЛС (30.08, аудит Справочников - были в базе с импорта 1С, но не в форме:
+             правка карточки без этих полей стирала бы их на сервере, если бы не COALESCE-
+             страховка; теперь поля видны и редактируемы) - ВСЕГДА видны, не только у
+             водителей, поэтому в общей секции, не в водительском блоке ниже. -->
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">ИНН</label>
+          <input autocomplete="off" id="drv-reg-inn" type="text" maxlength="12" placeholder="12 цифр"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">СНИЛС</label>
+          <input autocomplete="off" id="drv-reg-snils" type="text" maxlength="14" placeholder="000-000-000 00"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Адрес по прописке</label>
+          <input autocomplete="off" id="drv-reg-address" type="text" maxlength="400" placeholder="необязательно"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
       </div>
+
       <!-- Статус занятости (09.09, Влад: "справочник должен различать работает/уволен, с
            датой увольнения" - ОДНА точка правды, откуда логика дашборда узнаёт, действующий
            сотрудник или нет; см. DESIGN_SYSTEM.md 2.21). Дата увольнения - только при
-           статусе "уволен", как срок прав/медсправки у водителя выше. -->
-      <div style="display:flex;gap:10px;margin-bottom:12px">
-        <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Статус</label>
-          <select id="drv-reg-status" onchange="drvRegToggleFiredDate_()"
-            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none">
-            <option value="active">Работает</option>
-            <option value="fired">Уволен(а)</option>
-          </select></div>
-        <div style="flex:1" id="drv-reg-fired-date-wrap"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Дата увольнения</label>
-          <input autocomplete="off" id="drv-reg-fired-date" type="date"
+           статусе "уволен", как срок прав/медсправки у водителя ниже. Роли (Влад, 30.08:
+           "от физических лиц пойдут: водитель, менеджер, механик") - многие-ко-многим,
+           один человек может совмещать роли - чипы, не чекбоксы (13.09, вариант A). -->
+      <div class="asset-form-section">Работа</div>
+      <div class="asset-form-grid">
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Дата приёма</label>
+          <input autocomplete="off" id="drv-reg-hire-date" type="date"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark"></div>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Статус</label>
+          <div id="drv-reg-status-chips" style="display:flex;gap:8px;flex-wrap:wrap;padding-top:1px">
+            <button type="button" class="drv-chip" data-group="status" data-value="active" aria-pressed="true" onclick="drvRegChipClick_(this)">Работает</button>
+            <button type="button" class="drv-chip" data-group="status" data-value="fired" aria-pressed="false" onclick="drvRegChipClick_(this)">Уволен(а)</button>
+          </div></div>
+        <div class="asset-form-full" id="drv-reg-fired-date-wrap"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Дата увольнения</label>
+          <input autocomplete="off" id="drv-reg-fired-date" type="date"
+            style="width:100%;max-width:340px;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark"></div>
+        <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:6px">Роли</label>
+          <div id="drv-reg-role-chips" style="display:flex;gap:8px;flex-wrap:wrap">
+            <button type="button" class="drv-chip" data-group="role" data-value="driver" aria-pressed="false" onclick="drvRegChipClick_(this)">Водитель</button>
+            <button type="button" class="drv-chip" data-group="role" data-value="manager" aria-pressed="false" onclick="drvRegChipClick_(this)">Менеджер</button>
+            <button type="button" class="drv-chip" data-group="role" data-value="mechanic" aria-pressed="false" onclick="drvRegChipClick_(this)">Механик</button>
+            <button type="button" class="drv-chip" data-group="role" data-value="logist" aria-pressed="false" onclick="drvRegChipClick_(this)">Логист</button>
+          </div></div>
       </div>
-      <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Адрес по прописке</label>
-        <input autocomplete="off" id="drv-reg-address" type="text" maxlength="400" placeholder="необязательно"
-          style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
-      <!-- Роли (Влад, 30.08: "от физических лиц пойдут: водитель, менеджер, механик") -
-           многие-ко-многим, один человек может совмещать роли. -->
-      <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:6px">Роли</label>
-        <div style="display:flex;gap:16px;flex-wrap:wrap">
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text)"><input autocomplete="off" type="checkbox" id="drv-reg-role-driver" onchange="drvRegToggleDriverFields_()"> Водитель</label>
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text)"><input autocomplete="off" type="checkbox" id="drv-reg-role-manager"> Менеджер</label>
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text)"><input autocomplete="off" type="checkbox" id="drv-reg-role-mechanic"> Механик</label>
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text)"><input autocomplete="off" type="checkbox" id="drv-reg-role-logist"> Логист</label>
-        </div>
-      </div>
-      <!-- Документы - показываются только при роли "водитель" (Влад, 30.08, по мотивам
-           1С:ТЛ - "система отслеживает сроки действия удостоверений... справок"). -->
+
+      <!-- Документы водителя (права/медсправка) - показываются только при роли "водитель"
+           (Влад, 30.08, по мотивам 1С:ТЛ - "система отслеживает сроки действия
+           удостоверений... справок"). Паспорт - НЕ здесь (13.09, Влад тем же днём позже:
+           "паспортные данные должны быть у ВСЕХ сотрудников, не только у водителей, у
+           менеджеров тоже, я сейчас это не вижу") - вынесен в свою секцию ниже, ВНЕ этого
+           блока, видную для любой роли. -->
       <div id="drv-reg-driver-fields" style="display:none">
-        <div style="display:flex;gap:10px;margin-bottom:12px">
-          <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">№ водит. удостоверения</label>
+        <div class="asset-form-section">Права и медицина</div>
+        <div class="asset-form-grid">
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">№ водит. удостоверения</label>
             <input autocomplete="off" id="drv-reg-license-num" type="text" maxlength="32" placeholder="77 АБ 123456"
               style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
-          <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Права до</label>
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Права до</label>
             <input autocomplete="off" id="drv-reg-license-exp" type="date"
               style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark"></div>
+          <div class="asset-form-full" style="max-width:340px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Медсправка до</label>
+            <input autocomplete="off" id="drv-reg-medical-exp" type="date"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark"></div>
         </div>
-        <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Медсправка до</label>
-          <input autocomplete="off" id="drv-reg-medical-exp" type="date"
-            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark"></div>
       </div>
-      <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Заметка</label>
+
+      <!-- Паспорт (13.09, Влад: "прикрепить к справочнику каждому водителю" сканы с Диска +
+           паспортные данные" -> позже тем же днём: "у ВСЕХ сотрудников, не только у
+           водителей") - секция ВСЕГДА видна, вне drv-reg-driver-fields выше. Серия/номер
+           отдельными полями (как в самом бланке паспорта) - удобнее для сверки. -->
+      <div class="asset-form-section">Паспорт</div>
+      <div class="asset-form-grid">
+        <div class="asset-form-full" style="display:flex;gap:10px">
+          <div style="flex:0 0 70px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Серия</label>
+            <input autocomplete="off" id="drv-reg-passport-series" type="text" maxlength="4" placeholder="4510"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+          <div style="flex:0 0 100px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Номер</label>
+            <input autocomplete="off" id="drv-reg-passport-number" type="text" maxlength="6" placeholder="123456"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+          <div style="flex:1;max-width:220px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Дата выдачи</label>
+            <input autocomplete="off" id="drv-reg-passport-issued-at" type="date"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark"></div>
+        </div>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Кем выдан</label>
+          <input autocomplete="off" id="drv-reg-passport-issued-by" type="text" maxlength="300" placeholder="ОТДЕЛОМ УФМС РОССИИ ПО ... В ..."
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Код подразд.</label>
+          <input autocomplete="off" id="drv-reg-passport-dept-code" type="text" maxlength="10" placeholder="770-001"
+            style="width:100%;max-width:180px;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+      </div>
+
+      <!-- Сканы паспорта/ВУ - только у уже сохранённой записи (нужен person_id, к которому
+           прикреплять файл), тот же паттерн, что документы техники (СТС, 30.08). ВСЕГДА
+           видна (та же правка 13.09, что и секция «Паспорт» выше). -->
+      <div id="drv-doc-section" style="display:none">
+        <div class="asset-form-section">Сканы документов</div>
+        <div id="drv-doc-list" style="margin-bottom:8px"></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="drv-doc-type" style="background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 8px;color:var(--text);font-size:12px">
+            <option value="passport">Паспорт</option>
+            <option value="license">Вод. удостоверение</option>
+            <option value="other">Другое</option>
+          </select>
+          <input autocomplete="off" id="drv-doc-file" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" style="flex:1;min-width:0;font-size:12px;color:var(--muted)">
+          <button type="button" onclick="drvDocUpload_()"
+            style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:7px 12px;font-size:12px;cursor:pointer;white-space:nowrap">Загрузить</button>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">PDF/JPG/PNG/WEBP, до 15 МБ</div>
+        <div id="drv-doc-error" style="display:none;color:var(--red);font-size:12px;margin-top:6px"></div>
+      </div>
+
+      <div style="margin:18px 0 12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Заметка</label>
         <input autocomplete="off" id="drv-reg-notes" type="text" maxlength="300" placeholder="необязательно"
           style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
       <div id="drv-reg-error" style="display:none;color:var(--red);font-size:12px;margin-bottom:10px"></div>
@@ -4343,6 +4469,7 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
       </div>
       <button type="button" id="drv-reg-del-btn" onclick="drvRegDelete_()" data-nav-sound style="display:none;margin-top:10px;width:100%;
         background:transparent;border:1px solid rgba(226,75,74,.4);color:var(--red);border-radius:8px;padding:9px;font-size:13px;cursor:pointer">Удалить сотрудника</button>
+     </div>
     </div>
 
     <!-- «Карточка сцепки» (Влад, 30.08: «сочетание водителя, полуприцепа, тягача даёт в
@@ -8641,7 +8768,11 @@ function mpScrollToTabs_() {
 // координаты в ПИКСЕЛЯХ ОТ ВЬЮПОРТА (слой fixed - см. пояснение в CSS .p2-light).
 // rAF самоостанавливается в покое, чтобы не крутить видеокарту впустую.
 var cursorLightInited_ = {};
-var LIGHT_GRID_SEL_ = '.kpi-grid,.mp-tier,.mp-stats,.p2-tier3-grid,.grid-2,.crm-kpis,.kb-board';
+// .hub-grid добавлен 13.09 (Справочники, хаб-выбор раздела) - тем же движком заодно
+// чинится готовый пробел «Зарплаты» (11.09): там плитки хаба тоже .hub-grid, но
+// initCursorLight_ для page-sales-salary раньше не вызывался вовсе, свет не появлялся -
+// см. вызов ниже рядом с page-directory.
+var LIGHT_GRID_SEL_ = '.kpi-grid,.mp-tier,.mp-stats,.p2-tier3-grid,.grid-2,.crm-kpis,.kb-board,.hub-grid';
 function initCursorLight_(pageId, lightClass) {
   if (cursorLightInited_[pageId]) return;
   var page = document.getElementById(pageId);
@@ -8841,7 +8972,7 @@ function mpToggleTask_(personName, idx) {
   renderMyPage();
 }
 
-function renderMyPageManager(el, current, selectorHtml, d) {
+async function renderMyPageManager(el, current, selectorHtml, d) {
   if (!d) { el.innerHTML = selectorHtml + '<p style="color:var(--muted);padding:16px">Нет данных за этот месяц.</p>'; return; }
 
   var COL = PAGE_COL, mln = pageMln_, block = pageBlock_;
@@ -8912,7 +9043,19 @@ function renderMyPageManager(el, current, selectorHtml, d) {
   function getL(sur){ return logIdx[sur.toLowerCase()] || null; }
   var sur = current.trim().split(' ')[0];
   var useNewRules = isNewRulesPeriod(D.orders.period);
-  var sal = calcMgr(sur, true, getM, getL, useNewRules);
+  // Захвачено ЗДЕСЬ, до await ниже - renderMyPage() подменяет D.orders на выбранный период
+  // и возвращает обратно в своём finally СРАЗУ после этого вызова (не дожидаясь завершения
+  // async-функции), поэтому чтение D.orders.problem_orders дальше по функции (после await)
+  // ловило бы уже восстановленный текущий период, а не выбранный - найдено при переносе
+  // зарплаты на сервер (13.09), см. myProblems ниже.
+  var problemOrdersSnapshot_ = D.orders.problem_orders || [];
+  var sal;
+  try {
+    sal = await fetchSalaryCompute_('calcMgr', { sur: sur, includeOklad: true, m: getM(sur), l: getL(sur), useNewRules: useNewRules });
+  } catch (e) {
+    el.innerHTML = selectorHtml + '<p style="color:var(--red);padding:16px">Не удалось загрузить расчёт зарплаты - ' + e.message + '</p>';
+    return;
+  }
 
   var fr = pageFr_; // локальный алиас - остальной код функции уже вызывает fr(...) по имени
   // Рекомендация до следующей ступени оклада (2026-08-12, Влад: "хочу рекомендацию до
@@ -8951,7 +9094,9 @@ function renderMyPageManager(el, current, selectorHtml, d) {
     var lForecastRow = scaleRowForForecast_(getL(sur), effectiveRatio);
     function getMForecast_(s) { return s.toLowerCase()===sur.toLowerCase() ? mForecastRow : getM(s); }
     function getLForecast_(s) { return s.toLowerCase()===sur.toLowerCase() ? lForecastRow : getL(s); }
-    salForecast = calcMgr(sur, true, getMForecast_, getLForecast_, useNewRules);
+    try {
+      salForecast = await fetchSalaryCompute_('calcMgr', { sur: sur, includeOklad: true, m: getMForecast_(sur), l: getLForecast_(sur), useNewRules: useNewRules });
+    } catch (e) { salForecast = null; }
   }
   // Разбивка по тем же трём компонентам, что и факт (2026-08-12, Влад: "2% от 9.4 млн это
   // 188000, оклад 100000, итого 288000, ну никак не 361000" - без разбивки цифра выглядела
@@ -9191,7 +9336,7 @@ function renderMyPageManager(el, current, selectorHtml, d) {
     // "гораздо информативнее... зачем изобретать, если уже всё есть, и там и тут должно
     // быть от одного источника"). Бэкенд уже фильтрует problem_orders на этого менеджера
     // для роли manager - фильтр тут же нужен на случай admin-предпросмотра (там company-wide).
-    var myProblems = ((D.orders && D.orders.problem_orders) || []).filter(function(p){
+    var myProblems = problemOrdersSnapshot_.filter(function(p){
       return String(p.mgr||'').trim().split(' ')[0].toLowerCase() === sur.toLowerCase();
     });
     var pFiltered = myProblems.filter(function(p){
@@ -9775,7 +9920,7 @@ function renderCommercialHeadReceiptsBlock_(cfg) {
 // aggregateOrdersRows. Нет данных за месяц (d==null) - НЕ обрываем рендер целиком: переключатель
 // "Общие сделки" и блок зарплаты не зависят от d, должны работать и без личных сделок в этом
 // месяце (например у нового человека).
-function renderMyPageLogist(el, current, selectorHtml, d) {
+async function renderMyPageLogist(el, current, selectorHtml, d) {
   d = d || {};
   var COL = PAGE_COL, mln = pageMln_, fr = pageFr_, block = pageBlock_;
   function kpiCard(icon, label, value, sub, color) {
@@ -9792,9 +9937,23 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
   var logIdx = {};
   allLogs.forEach(function(l){ logIdx[(l.name||'').trim().split(' ')[0].toLowerCase()] = l; });
   function getL(s) { return logIdx[s.toLowerCase()] || null; }
-  var useNewRules = isNewRulesPeriod((D.orders||{}).period);
+  // Снимки ДО await ниже - renderMyPage() возвращает D.orders к реальному периоду в своём
+  // finally сразу после вызова этой (теперь асинхронной) функции, не дожидаясь её завершения -
+  // без снимков места дальше по функции (после await) читали бы уже восстановленный текущий
+  // период вместо выбранного (найдено при переносе зарплаты на сервер, 13.09).
+  var orderPeriod_ = (D.orders||{}).period;
+  var ownProfitTralPrevMonth_ = (D.orders && D.orders.own_profit_tral_prev_month != null) ? D.orders.own_profit_tral_prev_month : null;
+  var hiredSuppliersSnapshot_ = (D.orders && D.orders.by_hired_supplier) || [];
+  var hiredDealsSnapshot_ = (D.orders && D.orders.all_hired_deals) || [];
+  var useNewRules = isNewRulesPeriod(orderPeriod_);
   var lRow = getL(sur);
-  var salary = calcLogist(sur, getL, useNewRules);
+  var salary;
+  try {
+    salary = await fetchSalaryCompute_('calcLogist', { sur: sur, l: lRow, useNewRules: useNewRules });
+  } catch (e) {
+    el.innerHTML = selectorHtml + '<p style="color:var(--red);padding:16px">Не удалось загрузить расчёт зарплаты - ' + e.message + '</p>';
+    return;
+  }
 
   // Own-tral логисты (Сильчев/Кан/Махура, 2026-08-13, Влад: "по своей технике тралы у них упор
   // идёт от своего парка") - вместо "Маржа найма к премии >1М" на полоске показываем "ВП
@@ -9802,7 +9961,7 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
   // метрики - Влад выбрал сравнение с прошлым месяцем, см. план). Формула ЗП (calcLogist ниже)
   // НЕ меняется ни для кого - это ТОЛЬКО про то, какой показатель выводится на полоске.
   var isOwnTral = isOwnTralLogistSur_(sur);
-  var paceRatio = calcPaceRatio_((D.orders||{}).period);
+  var paceRatio = calcPaceRatio_(orderPeriod_);
   var barLabel, barTargetLabel, marginForBonus, MARGIN_BONUS_THRESHOLD, marginPct, marginForecast, marginForecastPct, marginDayRateHtml = '';
 
   if (isOwnTral) {
@@ -9815,10 +9974,10 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
     // loadOwnTralPrevIfNeeded_ выше) - пока не пришло, полоска использует 0 как временную базу
     // (не вводит в заблуждение - явно помечено "Загрузка..." в рекомендации ниже).
     var otKey = current + '::' + (myPagePeriod || 'current');
-    var ownTralPrevEntry = (D.orders && D.orders.own_profit_tral_prev_month != null)
-      ? { value: D.orders.own_profit_tral_prev_month }
+    var ownTralPrevEntry = (ownProfitTralPrevMonth_ != null)
+      ? { value: ownProfitTralPrevMonth_ }
       : ownTralPrevCache[otKey];
-    if (!ownTralPrevEntry && (D.orders && D.orders.own_profit_tral_prev_month == null)) {
+    if (!ownTralPrevEntry && ownProfitTralPrevMonth_ == null) {
       loadOwnTralPrevIfNeeded_(current, myPagePeriod);
     }
     // Пока цифра не пришла - явно помечаем подпись "загрузкой", а не просто дублируем текущий
@@ -9839,7 +9998,7 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
       marginDayRateHtml = '<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(var(--ink),.07);font-size:12px;color:var(--muted)">Нет данных ВП тралов за прошлый месяц для сравнения.</div>';
     } else if (ownTralFact >= ownTralPrev) {
       marginDayRateHtml = '<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(var(--ink),.07);font-size:12px;color:'+COL.green+'">Прошлый месяц уже превзойдён ✅</div>';
-    } else if (isLiveMonthKey_((D.orders||{}).period)) {
+    } else if (isLiveMonthKey_(orderPeriod_)) {
       var otRemaining = ownTralPrev - ownTralFact;
       var otNowD = new Date();
       var otDaysInMonth = new Date(otNowD.getFullYear(), otNowD.getMonth()+1, 0).getDate();
@@ -9869,7 +10028,7 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
 
     // Рекомендация "сколько добирать в день" - без деления на будни/выходные (в отличие от
     // менеджера) - для маржи найма нет обоснованной эмпирики такой сезонности, как у продаж.
-    if (isLiveMonthKey_((D.orders||{}).period)) {
+    if (isLiveMonthKey_(orderPeriod_)) {
       var remainingMargin = MARGIN_BONUS_THRESHOLD - marginForBonus;
       if (remainingMargin > 0) {
         var nowD = new Date();
@@ -9892,8 +10051,8 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
   // полном admin-ответе, и в урезанной роли logist (getLogistView_ отдаёт их явно - "видит
   // абсолютно всю ситуацию по направлению", но не остальную компанию).
   var isCompany = myPageLogistScope === 'company';
-  var suppliers = (isCompany ? ((D.orders && D.orders.by_hired_supplier) || []) : (d.by_supplier || [])).slice();
-  var deals = (isCompany ? ((D.orders && D.orders.all_hired_deals) || []) : (d.deals || [])).slice();
+  var suppliers = (isCompany ? hiredSuppliersSnapshot_ : (d.by_supplier || [])).slice();
+  var deals = (isCompany ? hiredDealsSnapshot_ : (d.deals || [])).slice();
   var scopeSuffix = isCompany ? ' · вся компания' : ' · мои сделки';
 
   var totalRevenue = suppliers.reduce(function(s,x){ return s+(x.revenue||0); }, 0);
@@ -9933,7 +10092,10 @@ function renderMyPageLogist(el, current, selectorHtml, d) {
     if (!myPagePeriod && paceRatio > 1.001) {
       var lForecastRow = scaleRowForForecast_(getL(sur), paceRatio);
       function getLForecast_(s) { return s.toLowerCase()===sur.toLowerCase() ? lForecastRow : getL(s); }
-      var salaryForecast = calcLogist(sur, getLForecast_, useNewRules);
+      var salaryForecast;
+      try {
+        salaryForecast = await fetchSalaryCompute_('calcLogist', { sur: sur, l: getLForecast_(sur), useNewRules: useNewRules });
+      } catch (e) { salaryForecast = null; }
       if (salaryForecast && Math.abs(salaryForecast.total - salary.total) > 100) {
         // Оклад - ПЕРВАЯ строка (была пропущена изначально - разбивка не сходилась с итогом на
         // 20 000 ₽, ровно на сумму оклада: он не входит в scaleRowForForecast_, так как это
@@ -10438,7 +10600,7 @@ function renderMyPageRyschanow(el, current, selectorHtml, d) {
 // D.summary (те же данные, что видит весь остальной дашборд) - ноль лишних запросов на
 // текущий месяц; на прошлый месяц D.vehicles донагружается в setMyPagePeriod через уже
 // существующий action=vehicles_period, только когда выбран именно Васин.
-function renderMyPageVasin(el, current, selectorHtml) {
+async function renderMyPageVasin(el, current, selectorHtml) {
   var COL = { red:'#E24B4A', amber:'#EF9F27', green:'#1D9E75', blue:'#378ADD' };
   function mln(n) { var x=Math.abs(n||0); var sg=(n||0)<0?'-':''; return x>=1000000 ? sg+(x/1000000).toFixed(1)+' млн ₽' : sg+Math.round(x).toLocaleString('ru-RU')+' ₽'; }
   function fr(n) { return n ? Math.round(n).toLocaleString('ru-RU')+' ₽' : '—'; }
@@ -10506,8 +10668,20 @@ function renderMyPageVasin(el, current, selectorHtml) {
   var funTotal = (funnel.no_waybill||0)+(funnel.not_posted||0)+(funnel.no_realiz||0)+(funnel.complete||0);
   var driversNoWaybill = d.driver_no_waybill || [];
   var deals = d.deals || [];
+  // Снимок ДО await ниже - renderMyPage() возвращает D.orders к реальному периоду в своём
+  // finally сразу после вызова этой (теперь асинхронной) функции, не дожидаясь её завершения -
+  // без снимка calcPaceRatio_ дальше по функции читал бы уже восстановленный текущий период.
+  var orderPeriod_ = (D.orders||{}).period;
 
-  var salary = (s.profit_long != null) ? calcVasin(s.profit_long) : null;
+  var salary = null;
+  if (s.profit_long != null) {
+    try {
+      salary = await fetchSalaryCompute_('calcVasin', { profitLong: s.profit_long });
+    } catch (e) {
+      el.innerHTML = selectorHtml + '<p style="color:var(--red);padding:16px">Не удалось загрузить расчёт зарплаты - ' + e.message + '</p>';
+      return;
+    }
+  }
 
   // Выполнение плана ВП (длинномеры) - Влад, 2026-08-11: "прогноз по плану, по выполнению
   // плана валовой прибыли". Факт/план - суммой по ТОЙ ЖЕ таблице машин, что ниже на странице
@@ -10517,7 +10691,7 @@ function renderMyPageVasin(el, current, selectorHtml) {
   var vehFact = vehicles.reduce(function(a,v){ return a+(v.profit||0); }, 0);
   var vehPlan = vehicles.reduce(function(a,v){ return a+(v.plan||0); }, 0);
   var vehPlanPct = vehPlan > 0 ? vehFact/vehPlan*100 : 0;
-  var paceRatio = calcPaceRatio_((D.orders||{}).period);
+  var paceRatio = calcPaceRatio_(orderPeriod_);
   var vehForecast = vehFact * paceRatio;
   var vehForecastPct = vehPlan > 0 ? vehForecast/vehPlan*100 : 0;
 
@@ -13211,6 +13385,36 @@ function showDirTab(tab, el) {
   if (tab === 'check') vehicleCheckFillGosList_();
 }
 
+// ── «Справочники» - полноэкранный хаб-выбор раздела (13.09, тот же канон, что «Зарплата»
+// 11.09 - DESIGN_SYSTEM.md раздел 4). Влад: «нажимаю Справочники, и там вылетает уже
+// плитки с нужными мне справочниками». Клик по сайдбару - обычный showPage (страница
+// page-directory показывает хаб #sprav-hub по умолчанию, см. showPage()); клик по плитке -
+// chooseSpravTarget_(tab) прячет хаб, показывает нужную панель (переиспользует showDirTab)
+// + ссылку «← Все разделы».
+var SPRAV_HUB_LABELS_ = {
+  people: 'Сотрудники', legal: 'Юридические лица', assets: 'Материальные средства',
+  fleet: 'Сцепка', plans: 'Планы продаж', playbook: 'Плейбук продаж', check: 'Проверка техники',
+};
+function showSpravHub_() {
+  var hub = document.getElementById('sprav-hub');
+  var back = document.getElementById('sprav-back-link');
+  var card = document.getElementById('sprav-panels-card');
+  if (hub) hub.style.display = '';
+  if (back) back.style.display = 'none';
+  if (card) card.style.display = 'none';
+  setText('page-title', 'Справочники');
+}
+function chooseSpravTarget_(tab) {
+  var hub = document.getElementById('sprav-hub');
+  var back = document.getElementById('sprav-back-link');
+  var card = document.getElementById('sprav-panels-card');
+  if (hub) hub.style.display = 'none';
+  if (back) back.style.display = '';
+  if (card) card.style.display = '';
+  showDirTab(tab, null);
+  setText('page-title', 'Справочники - ' + (SPRAV_HUB_LABELS_[tab] || tab));
+}
+
 // ── Проверка техники (12.09) - см. разбор у dir-tab-check выше и plans/2026-09-12-
 // vehicle-consistency-checker.md. Список гос.номеров для автодополнения - из уже
 // загруженных spravAssets_ (та же вкладка "Материальные средства"), только тягачи.
@@ -13745,17 +13949,22 @@ function drvRegPaint_() {
     var open = isDriver ? fleetOpenAssignment_('driver', d.id) : null;
     var tractorCell = !isDriver ? '<span class="muted">—</span>'
       : (open ? '<span class="mono">' + pageEsc_(open.tractor_gos) + '</span>' : '<span class="muted">не сцеплен</span>');
+    // Строка кликабельна целиком (13.09, Влад: "окно с данными вылетало по нажатию на
+    // строчку") - открывает ту же форму правки, что раньше требовала отдельной кнопки
+    // "Править" (убрана как дублирующая - строка сама теперь эта кнопка, тот же приём,
+    // что debt-row-toggle). "Карточка" - другое действие (карточка для отправки), не
+    // дублирует правку - останавливает всплытие, как и чекбокс, иначе клик по ней
+    // сначала открыл бы карточку, а затем (по всплытию) ещё и форму правки поверх.
     var actions = d.is_deleted
-      ? '<button onclick="drvRegRestore_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);' +
+      ? '<button onclick="event.stopPropagation();drvRegRestore_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);' +
         'color:var(--green);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Восстановить</button>'
-      : (isDriver ? '<button onclick="drvCardOpen_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);' +
-        'color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;margin-right:6px">Карточка</button>' : '') +
-        '<button onclick="drvRegOpenForm_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);' +
-        'color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Править</button>';
+      : (isDriver ? '<button onclick="event.stopPropagation();drvCardOpen_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);' +
+        'color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Карточка</button>' : '<span class="muted">—</span>');
     var checkbox = d.is_deleted ? '' :
-      '<input type="checkbox" data-pid="' + pageEsc_(d.id) + '"' + (drvSelected_[d.id] ? ' checked' : '') +
+      '<input type="checkbox" data-pid="' + pageEsc_(d.id) + '" onclick="event.stopPropagation()"' + (drvSelected_[d.id] ? ' checked' : '') +
       ' onchange="drvToggleRowSelect_(\'' + idEsc + '\', this.checked)">';
-    return '<tr' + (d.is_deleted ? spravDeletedRowStyle_() : '') + '>' +
+    var rowClick = d.is_deleted ? '' : ' onclick="drvRegOpenForm_(\'' + idEsc + '\')" style="cursor:pointer"';
+    return '<tr' + rowClick + (d.is_deleted ? spravDeletedRowStyle_() : '') + '>' +
       '<td>' + checkbox + '</td>' +
       '<td><b>' + pageEsc_(d.full_name) + '</b>' + (d.is_deleted ? ' <span class="muted" style="font-size:11px">(удалён)</span>' : '') +
         (d.employment_status === 'fired' ? ' <span style="font-size:11px;color:var(--red)">· уволен(а)' + (d.fired_date ? ' с ' + fmtDateRu(d.fired_date) : '') + '</span>' : '') + '</td>' +
@@ -13771,18 +13980,95 @@ function drvRegPaint_() {
 
 // Поле "Документы" в форме имеет смысл только у роли "водитель" - показываем/прячем при
 // переключении галочки, не заставляем листать пустые поля тех, кто не водитель.
+// Чипы «Статус»/«Роли» (13.09, вариант A мозгового штурма - см. DESIGN_SYSTEM.md 2.35):
+// aria-pressed как состояние, без скрытых input. Статус - одиночный выбор (эксклюзивно
+// внутри своей группы), Роли - любое сочетание (обычный toggle одного чипа).
+function drvRegChipClick_(el) {
+  var group = el.getAttribute('data-group');
+  if (group === 'status') {
+    [].forEach.call(el.parentNode.querySelectorAll('.drv-chip'), function(x) { x.setAttribute('aria-pressed', 'false'); });
+    el.setAttribute('aria-pressed', 'true');
+    drvRegToggleFiredDate_();
+  } else {
+    el.setAttribute('aria-pressed', el.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
+    if (el.getAttribute('data-value') === 'driver') drvRegToggleDriverFields_();
+  }
+}
+function drvRegStatusValue_() {
+  var on = document.querySelector('#drv-reg-status-chips .drv-chip[aria-pressed="true"]');
+  return on ? on.getAttribute('data-value') : 'active';
+}
+function drvRegRoles_() {
+  return [].map.call(document.querySelectorAll('#drv-reg-role-chips .drv-chip[aria-pressed="true"]'), function(x) { return x.getAttribute('data-value'); });
+}
 function drvRegToggleDriverFields_() {
   var box = document.getElementById('drv-reg-driver-fields');
-  var checked = document.getElementById('drv-reg-role-driver').checked;
+  var checked = drvRegRoles_().indexOf('driver') >= 0;
   if (box) box.style.display = checked ? '' : 'none';
 }
 // Дата увольнения имеет смысл только при статусе "уволен(а)" - тот же приём, что у
 // полей документов водителя выше (drvRegToggleDriverFields_).
 function drvRegToggleFiredDate_() {
   var box = document.getElementById('drv-reg-fired-date-wrap');
-  var fired = document.getElementById('drv-reg-status').value === 'fired';
+  var fired = drvRegStatusValue_() === 'fired';
   if (box) box.style.display = fired ? '' : 'none';
   if (!fired) document.getElementById('drv-reg-fired-date').value = '';
+}
+
+// Обход сторонних подсказок автозаполнения браузера (13.09, Влад: "опять вылетают эти
+// подсказки Яндекс-браузера... мы уже блокировали на других полях, в других разделах") -
+// тот же приём, что уже есть в «Задании» (files/order-plan-v2.js, blockForeignAutofill_,
+// заведён там 11-12.09) - простой autocomplete="off" Chrome/Яндекс игнорируют на полях,
+// похожих на имя/адрес/телефон, и рисуют своё меню со своей историей поверх. Тот же файл
+// не может переиспользовать функцию оттуда напрямую - order-plan-v2.js завёрнут в
+// отдельный IIFE, ничего не отдаёт в window, кроме OP2 - здесь та же логика заново, под
+// формы Справочников. Вызывать при КАЖДОМ открытии дровера (атрибуты, не листенер -
+// повторный вызов безвреден), как и в оригинале.
+function drvBlockForeignAutofill_(root) {
+  if (!root) return;
+  root.querySelectorAll('input:not([type=date]):not([type=checkbox]),textarea').forEach(function(i) {
+    i.setAttribute('autocomplete', 'new-password');
+    i.setAttribute('autocorrect', 'off');
+    i.setAttribute('spellcheck', 'false');
+    i.setAttribute('name', 'sprav-' + Math.random().toString(36).slice(2, 9));
+  });
+}
+
+// Маска телефона (13.09, Влад: "приведи все мобильные номера в такой вид... сделай, чтобы
+// по-другому нельзя было ввести") - единый формат +7-XXX-XXX-XX-XX, только тире. Тот же
+// приём, что денежное поле (ГОСТ 2.32, wireMoneyInput_ в order-plan-v2.js) - живое
+// форматирование на каждый input, курсор не улетает в конец. Вызывать ОДИН РАЗ на
+// document-ready (не при каждом открытии дровера - иначе слушатель задублируется).
+function drvPhoneMask_(id) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener('input', function() {
+    var start = this.selectionStart;
+    var rawBefore = this.value.slice(0, start).replace(/\D/g, '');
+    if (rawBefore.charAt(0) === '7' || rawBefore.charAt(0) === '8') rawBefore = rawBefore.slice(1);
+    var digitsBefore = rawBefore.length;
+    var digits = this.value.replace(/\D/g, '');
+    if (digits.charAt(0) === '7' || digits.charAt(0) === '8') digits = digits.slice(1);
+    digits = digits.slice(0, 10);
+    if (!digits.length) { this.value = ''; return; }
+    var groups = [digits.slice(0, 3)];
+    if (digits.length > 3) groups.push(digits.slice(3, 6));
+    if (digits.length > 6) groups.push(digits.slice(6, 8));
+    if (digits.length > 8) groups.push(digits.slice(8, 10));
+    var numPart = groups.join('-');
+    this.value = '+7-' + numPart;
+    var count = 0, pos = numPart.length;
+    for (var i = 0; i < numPart.length; i++) {
+      if (numPart[i] !== '-') count++;
+      if (count === digitsBefore) { pos = i + 1; break; }
+    }
+    if (digitsBefore === 0) pos = 0;
+    try { this.setSelectionRange(3 + pos, 3 + pos); } catch (e) {}
+  });
+  // Фокус на пустом поле сразу подставляет обязательный префикс - правило "по-другому
+  // нельзя ввести" видно с первого символа, не только после первой набранной цифры.
+  el.addEventListener('focus', function() { if (!this.value) this.value = '+7-'; });
+  el.addEventListener('blur', function() { if (this.value === '+7-') this.value = ''; });
 }
 
 // expected_updated_at (30.08, аудит - optimistic locking) - запоминаем updated_at ЗАПИСИ,
@@ -13802,22 +14088,34 @@ function drvRegOpenForm_(id) {
   document.getElementById('drv-reg-snils').value = d ? (d.snils || '') : '';
   document.getElementById('drv-reg-birth-date').value = d ? (d.birth_date || '') : '';
   document.getElementById('drv-reg-hire-date').value = d ? (d.hire_date || '') : '';
-  document.getElementById('drv-reg-status').value = d && d.employment_status === 'fired' ? 'fired' : 'active';
+  var statusVal = d && d.employment_status === 'fired' ? 'fired' : 'active';
+  [].forEach.call(document.querySelectorAll('#drv-reg-status-chips .drv-chip'), function(x) {
+    x.setAttribute('aria-pressed', x.getAttribute('data-value') === statusVal ? 'true' : 'false');
+  });
   document.getElementById('drv-reg-fired-date').value = d ? (d.fired_date || '') : '';
   drvRegToggleFiredDate_();
   document.getElementById('drv-reg-address').value = d ? (d.address || '') : '';
-  document.getElementById('drv-reg-role-driver').checked = roles.indexOf('driver') >= 0;
-  document.getElementById('drv-reg-role-manager').checked = roles.indexOf('manager') >= 0;
-  document.getElementById('drv-reg-role-mechanic').checked = roles.indexOf('mechanic') >= 0;
-  document.getElementById('drv-reg-role-logist').checked = roles.indexOf('logist') >= 0;
+  [].forEach.call(document.querySelectorAll('#drv-reg-role-chips .drv-chip'), function(x) {
+    x.setAttribute('aria-pressed', roles.indexOf(x.getAttribute('data-value')) >= 0 ? 'true' : 'false');
+  });
   drvRegToggleDriverFields_();
   document.getElementById('drv-reg-license-num').value = d ? (d.license_number || '') : '';
   document.getElementById('drv-reg-license-exp').value = d ? (d.license_expiry || '') : '';
   document.getElementById('drv-reg-medical-exp').value = d ? (d.medical_expiry || '') : '';
+  document.getElementById('drv-reg-passport-series').value = d ? (d.passport_series || '') : '';
+  document.getElementById('drv-reg-passport-number').value = d ? (d.passport_number || '') : '';
+  document.getElementById('drv-reg-passport-issued-by').value = d ? (d.passport_issued_by || '') : '';
+  document.getElementById('drv-reg-passport-issued-at').value = d ? (d.passport_issued_at || '') : '';
+  document.getElementById('drv-reg-passport-dept-code').value = d ? (d.passport_department_code || '') : '';
+  // Сканы - только у уже сохранённой записи (нужен person_id), тот же приём, что asset-docs.
+  document.getElementById('drv-doc-section').style.display = d ? '' : 'none';
+  document.getElementById('drv-doc-error').style.display = 'none';
+  if (d) drvDocsLoad_(d.id); else document.getElementById('drv-doc-list').innerHTML = '';
   document.getElementById('drv-reg-notes').value = d ? (d.notes || '') : '';
   document.getElementById('drv-reg-error').style.display = 'none';
   document.getElementById('drv-reg-del-btn').style.display = d ? '' : 'none';
   var bk = document.getElementById('drv-reg-bk'), dr = document.getElementById('drv-reg-drawer');
+  drvBlockForeignAutofill_(dr);
   bk.classList.add('show');
   setTimeout(function() { dr.classList.add('show'); }, 40);
   setTimeout(function() { document.getElementById('drv-reg-name').focus(); }, 120);
@@ -13837,11 +14135,7 @@ function drvRegSave_() {
   errEl.style.display = 'none';
   var name = document.getElementById('drv-reg-name').value.trim();
   if (!name) { errEl.textContent = 'ФИО обязательно'; errEl.style.display = ''; return; }
-  var roles = [];
-  if (document.getElementById('drv-reg-role-driver').checked) roles.push('driver');
-  if (document.getElementById('drv-reg-role-manager').checked) roles.push('manager');
-  if (document.getElementById('drv-reg-role-mechanic').checked) roles.push('mechanic');
-  if (document.getElementById('drv-reg-role-logist').checked) roles.push('logist');
+  var roles = drvRegRoles_();
   var id = fleetDriversEditId_ || fleetGenId_('p_');
   var params = {
     id: id, name: name,
@@ -13850,13 +14144,18 @@ function drvRegSave_() {
     snils: document.getElementById('drv-reg-snils').value.trim(),
     birth_date: document.getElementById('drv-reg-birth-date').value,
     hire_date: document.getElementById('drv-reg-hire-date').value,
-    employment_status: document.getElementById('drv-reg-status').value,
+    employment_status: drvRegStatusValue_(),
     fired_date: document.getElementById('drv-reg-fired-date').value,
     address: document.getElementById('drv-reg-address').value.trim(),
     roles: roles.join(','),
     license_number: document.getElementById('drv-reg-license-num').value.trim(),
     license_expiry: document.getElementById('drv-reg-license-exp').value,
     medical_expiry: document.getElementById('drv-reg-medical-exp').value,
+    passport_series: document.getElementById('drv-reg-passport-series').value.trim(),
+    passport_number: document.getElementById('drv-reg-passport-number').value.trim(),
+    passport_issued_by: document.getElementById('drv-reg-passport-issued-by').value.trim(),
+    passport_issued_at: document.getElementById('drv-reg-passport-issued-at').value,
+    passport_department_code: document.getElementById('drv-reg-passport-dept-code').value.trim(),
     notes: document.getElementById('drv-reg-notes').value.trim(),
   };
   if (fleetDriversEditId_ && drvRegEditSnapshot_) params.expected_updated_at = drvRegEditSnapshot_;
@@ -13872,6 +14171,75 @@ function drvRegSave_() {
     p2Toast(fleetDriversEditId_ ? 'Изменения сохранены' : 'Сотрудник добавлен', 'green');
     drvRegCloseForm_();
     renderDirectory();
+  }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+
+// ═══ СКАНЫ ДОКУМЕНТОВ СОТРУДНИКА (паспорт/ВУ) - 13.09, Влад: "прикрепить к справочнику
+// каждому водителю" сканы с Google Диска. Файлы на диске сервера, не в MySQL - список
+// тянем при каждом открытии карточки существующей записи (см. drvRegOpenForm_), не
+// кэшируем на клиенте. 1-в-1 копия документов техники (СТС, assetDocs*) выше. ═══
+var DRV_DOC_TYPE_LABELS_ = { passport: 'Паспорт', license: 'Вод. удостоверение', other: 'Другое' };
+function drvDocFmtBytes_(n) {
+  n = Number(n) || 0;
+  return n >= 1024 * 1024 ? (n / (1024 * 1024)).toFixed(1).replace('.', ',') + ' МБ'
+    : Math.max(1, Math.round(n / 1024)) + ' КБ';
+}
+function drvDocsLoad_(personId) {
+  var list = document.getElementById('drv-doc-list');
+  list.innerHTML = '<div class="muted" style="font-size:12px">Загрузка…</div>';
+  fetchFromYardApi_('/sprav/person_documents', { person_id: personId }).then(function(r) {
+    // Карточку могли закрыть/переоткрыть на другую запись, пока шёл запрос.
+    if (fleetDriversEditId_ !== personId) return;
+    if (!r.ok) { list.innerHTML = '<div style="font-size:12px;color:var(--red)">Не удалось загрузить список</div>'; return; }
+    drvDocsPaint_(r.data.documents || []);
+  }).catch(function() {
+    if (fleetDriversEditId_ !== personId) return;
+    list.innerHTML = '<div style="font-size:12px;color:var(--red)">Нет соединения с сервером</div>';
+  });
+}
+function drvDocsPaint_(docs) {
+  var list = document.getElementById('drv-doc-list');
+  if (!docs.length) { list.innerHTML = '<div class="muted" style="font-size:12px">Сканов пока нет</div>'; return; }
+  list.innerHTML = docs.map(function(d) {
+    var typeLabel = DRV_DOC_TYPE_LABELS_[d.doc_type] || d.doc_type || '';
+    var dt = d.uploaded_at ? new Date(d.uploaded_at).toLocaleDateString('ru-RU') : '';
+    var href = YARD_API_BASE + '/sprav/person_document_file?session_token=' + encodeURIComponent(SESSION_TOKEN) + '&id=' + encodeURIComponent(d.id);
+    return '<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;display:flex;align-items:center;gap:8px">'
+      + '<a href="' + pageEscAttr_(href) + '" target="_blank" rel="noopener" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);text-decoration:none" title="' + pageEsc_(d.original_name || '') + '">' + pageEsc_(d.original_name || 'файл') + '</a>'
+      + '<span class="muted" style="white-space:nowrap">' + pageEsc_(typeLabel) + (typeLabel ? ' · ' : '') + drvDocFmtBytes_(d.size_bytes) + ' · ' + pageEsc_(dt) + '</span>'
+      + '<button type="button" onclick="drvDocDelete_(\'' + pageEscAttr_(d.id) + '\')" title="Удалить" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;line-height:1;padding:2px 4px">×</button>'
+      + '</div>';
+  }).join('');
+}
+function drvDocUpload_() {
+  var errEl = document.getElementById('drv-doc-error');
+  errEl.style.display = 'none';
+  var personId = fleetDriversEditId_;
+  if (!personId) return;
+  var fileInput = document.getElementById('drv-doc-file');
+  var file = fileInput.files && fileInput.files[0];
+  if (!file) { errEl.textContent = 'Выберите файл'; errEl.style.display = ''; return; }
+  var docType = document.getElementById('drv-doc-type').value;
+  var fd = new FormData();
+  fd.append('file', file);
+  var qs = 'person_id=' + encodeURIComponent(personId) + '&doc_type=' + encodeURIComponent(docType);
+  fetch(YARD_API_BASE + '/sprav/person_document_upload?' + qs, { method: 'POST', headers: { 'X-Session-Token': SESSION_TOKEN }, body: fd })
+    .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); })
+    .then(function(r) {
+      if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось загрузить файл'; errEl.style.display = ''; return; }
+      fileInput.value = '';
+      p2Toast('Файл загружен', 'green');
+      drvDocsLoad_(personId);
+    }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+function drvDocDelete_(id) {
+  if (!confirm('Удалить файл?')) return;
+  var personId = fleetDriversEditId_;
+  var errEl = document.getElementById('drv-doc-error');
+  postToYardApi_('/sprav/person_document_delete', { id: id }).then(function(r) {
+    if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось удалить'; errEl.style.display = ''; return; }
+    p2Toast('Файл удалён', 'amber');
+    drvDocsLoad_(personId);
   }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
 }
 
@@ -14056,6 +14424,7 @@ function legalOpenForm_(id) {
   if (le && le.risk_reasons) { try { cachedReasons = JSON.parse(le.risk_reasons) || []; } catch (e) {} }
   legalRenderRiskResult_(le ? le.risk_light : null, cachedReasons, le ? le.risk_checked_at : null, le ? le.risk_marker : null);
   var bk = document.getElementById('legal-bk'), dr = document.getElementById('legal-drawer');
+  drvBlockForeignAutofill_(dr);
   bk.classList.add('show');
   setTimeout(function() { dr.classList.add('show'); }, 40);
   setTimeout(function() { document.getElementById('legal-name').focus(); }, 120);
@@ -14398,6 +14767,7 @@ function assetOpenForm_(id) {
   document.getElementById('asset-event-date').value = new Date().toISOString().slice(0, 10);
   if (a) assetEventsLoad_(a.id); else document.getElementById('asset-events-list').innerHTML = '';
   var bk = document.getElementById('asset-bk'), dr = document.getElementById('asset-drawer');
+  drvBlockForeignAutofill_(dr);
   bk.classList.add('show');
   setTimeout(function() { dr.classList.add('show'); }, 40);
   setTimeout(function() { (idInput.disabled ? document.getElementById('asset-manufacturer') : idInput).focus(); }, 120);
@@ -14634,6 +15004,7 @@ function drvCardOpen_(driverId) {
   drvCardDriverId_ = driverId;
   drvCardPaint_();
   var bk = document.getElementById('drv-card-bk'), dr = document.getElementById('drv-card-drawer');
+  drvBlockForeignAutofill_(dr);
   bk.classList.add('show');
   setTimeout(function() { dr.classList.add('show'); }, 40);
 }
@@ -18019,9 +18390,13 @@ function renderSalesMgrGost_(opts) {
          (subtitle ? '<div class="sm-dept-sub">' + subtitle + '</div>' : '') + '</div>' +
          '<div style="text-align:right"><div class="sm-dept-tot">' + (soloLabel || 'итого группы') + '</div>' +
          '<div>' + smNum_(smFmt_(st.amount) + ' ₽', '', 'font-size:17px;font-weight:600') + '</div></div></div>';
-    t += '<div style="overflow-x:auto"><table class="tbl" style="min-width:680px"><thead><tr>' +
-      '<th>Менеджер</th><th class="num">Заказов</th><th class="num">Сумма</th><th class="num">Оплата</th>' +
-      '<th class="num">Прибыль найм</th><th class="num">Найм</th><th style="min-width:132px">План</th>' +
+    // "План" ₽ - до 13.09 виден был только столбец с bullet-баром/процентом справа, сама
+    // цифра плана нигде не отображалась (Влад: "только сейчас обратил внимание что не
+    // видно планов по менеджерам... перед суммой можно поставить"). mPlan/plan уже
+    // считались (для pct/frc ниже) - просто раньше не рендерились как число.
+    t += '<div style="overflow-x:auto"><table class="tbl" style="min-width:760px"><thead><tr>' +
+      '<th>Менеджер</th><th class="num">Заказов</th><th class="num">План</th><th class="num">Сумма</th><th class="num">Оплата</th>' +
+      '<th class="num">Прибыль найм</th><th class="num">Найм</th><th style="min-width:132px">% плана</th>' +
       '</tr></thead><tbody>';
     rows.forEach(function (r) {
       var m = r.m;
@@ -18029,7 +18404,7 @@ function renderSalesMgrGost_(opts) {
       if (!m) {
         var fn = HEAD_FULL[r.sur] || r.sur || '';
         t += '<tr style="opacity:.5"><td><b>' + fn + '</b> <span style="font-size:10px;color:var(--muted)">рук.</span></td>' +
-          '<td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td>' +
+          '<td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td>' +
           '<td class="num muted">—</td><td class="num muted">—</td><td class="muted" style="font-size:11px">—</td></tr>';
         return;
       }
@@ -18053,6 +18428,7 @@ function renderSalesMgrGost_(opts) {
       t += '<tr>' +
         '<td><b>' + cleanName(m.name) + '</b>' + (r.isHead ? ' <span style="font-size:10px;color:var(--muted)">рук.</span>' : '') + '</td>' +
         '<td class="num">' + smNum_(String(orders)) + dOrd + '</td>' +
+        '<td class="num">' + (mPlan ? smNum_(smFmt_(mPlan), '', 'color:var(--muted)') : '<span class="muted" style="font-size:11px">—</span>') + '</td>' +
         '<td class="num">' + smNum_(smFmt_(amount), '', 'font-weight:600') + dAmt + '</td>' +
         '<td class="num">' + smNum_(smFmt_(payment)) + '</td>' +
         '<td class="num">' + smNum_(smFmt_(m.profit || 0), '', (m.profit || 0) < 0 ? 'color:var(--red)' : '') + '</td>' +
@@ -18064,7 +18440,7 @@ function renderSalesMgrGost_(opts) {
       // Разворот «что добавилось сегодня» - тот же контракт, что в старом виде.
       if (!readOnly && mgrTodayVisible && mgrTodayKey === m.name) {
         var list = m.today_new_list || [];
-        t += '<tr id="mgr-today-row"><td colspan="7" style="background:rgba(var(--ink),0.03);padding:10px 14px;border-top:1px dashed var(--border)">' +
+        t += '<tr id="mgr-today-row"><td colspan="8" style="background:rgba(var(--ink),0.03);padding:10px 14px;border-top:1px dashed var(--border)">' +
           '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">' +
             '<div style="font-size:12px;font-weight:600">Что добавилось сегодня</div>' +
             '<div class="muted" style="font-size:11px">' + list.length + ' ' + (list.length === 1 ? 'заказ' : 'заказов') + ' · ' + smFmt_(m.today_new_amount || 0) + '</div>' +
@@ -18085,6 +18461,7 @@ function renderSalesMgrGost_(opts) {
       t += '<tr style="border-top:1px solid var(--border)">' +
         '<td style="font-size:12px;color:var(--muted)">Итого отдела</td>' +
         '<td class="num">' + smNum_(String(st.orders), '', 'font-weight:600') + '</td>' +
+        '<td class="num">' + smNum_(smFmt_(plan), '', 'font-weight:600;color:var(--muted)') + '</td>' +
         '<td class="num">' + smNum_(smFmt_(st.amount), '', 'font-weight:600') + '</td>' +
         '<td class="num">' + smNum_(smFmt_(st.payment), '', 'font-weight:600') + '</td>' +
         '<td class="num">' + smNum_(smFmt_(st.profit), '', 'font-weight:600' + (st.profit < 0 ? ';color:var(--red)' : '')) + '</td>' +
@@ -18108,13 +18485,19 @@ function renderSalesMgrGost_(opts) {
     var list = cfg.solo ? '' : cfg.members.filter(function (s) { return s !== cfg.head && get(s); }).join(' · ');
     depts += mgrTable(cfg.name, rows, list, stats[i], stats[i].plan, cfg.solo ? 'выручка' : null);
   });
-  // Дирекция рисуется ВСЕГДА, даже когда заказов за месяц нет (тогда строка с прочерками) -
-  // так вёл себя старый вид, и редизайн не должен молча убирать блок со страницы.
-  var tsM = get('цуцурин');
-  depts += mgrTable('Дирекция', [{ m: tsM, sur: 'Цуцурин', isHead: false, plan: 0 }], '',
-    { amount: (tsM && tsM.amount) || 0, amountY: (tsM && tsM.amount) || 0, payment: (tsM && tsM.payment) || 0,
-      profit: (tsM && tsM.profit) || 0, orders: (tsM && tsM.orders) || 0 },
-    0, 'выручка');
+  // Дирекция рисуется ВСЕГДА на admin-странице "По менеджерам", даже когда заказов за
+  // месяц нет (тогда строка с прочерками) - так вёл себя старый вид, и редизайн не должен
+  // молча убирать блок со страницы. НО эта же функция рендерит и "Отдел Тралы" - копию
+  // страницы для самих сотрудников (readOnly:true, см. renderDeptTrals_ ниже) - там
+  // личные цифры Цуцурина сотрудникам видны быть не должны (Влад, 13.09: "у всех
+  // сотрудников не должно видеть блок дирекция. Они видеть не должны").
+  if (!readOnly) {
+    var tsM = get('цуцурин');
+    depts += mgrTable('Дирекция', [{ m: tsM, sur: 'Цуцурин', isHead: false, plan: 0 }], '',
+      { amount: (tsM && tsM.amount) || 0, amountY: (tsM && tsM.amount) || 0, payment: (tsM && tsM.payment) || 0,
+        profit: (tsM && tsM.profit) || 0, orders: (tsM && tsM.orders) || 0 },
+      0, 'выручка');
+  }
 
   var pageId = opts.pageId || 'page-sales-mgr';
   var page_ = document.getElementById(pageId);
@@ -22087,6 +22470,9 @@ function showPage(id, el) {
   // (глубокая ссылка из "Техники") зовёт showPage() ДО показа своей вкладки - тоже сперва
   // получит хаб отсюда, а затем сама явно спрячет его и покажет нужную панель.
   if (id === 'sales-salary') showSalaryHub_();
+  // Хаб «Справочники» (13.09) - тот же приём, что «Зарплата» выше: каждый заход через
+  // сайдбар сбрасывает к хабу, без запомненного состояния подраздела.
+  if (id === 'directory') showSpravHub_();
 }
 
 // ── КЛИЕНТЫ (аналитика клиентской базы - plans/2026-07-05-client-analytics-on-dashboard.md) ──
@@ -22180,6 +22566,26 @@ function postToYardApi_(path, params) {
     method: 'POST',
     headers: { 'X-Session-Token': SESSION_TOKEN },
   }).then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); });
+}
+
+// Расчёт зарплаты - формула переехала на сервер (аудит безопасности 13.09,
+// plans/2026-09-13-salary-formula-server-port.md) - раньше проценты/пороги зарплаты
+// конкретных сотрудников лежали открытым текстом в этом файле. Клиент собирает уже
+// готовые сырые цифры (m/l - те же объекты из D.orders.by_manager/by_logist, что и
+// раньше) и получает обратно готовую разбивку, саму формулу не видит.
+// Бросает исключение при сетевой/серверной ошибке (не путать с легитимным null от
+// сервера - "нет такого человека", это возвращается как есть).
+function fetchSalaryCompute_(fn, args) {
+  var body = Object.assign({ fn: fn }, args);
+  return fetch(YARD_API_BASE + '/salary/compute', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Session-Token': SESSION_TOKEN },
+    body: JSON.stringify(body),
+  }).then(function(r) { return r.json().then(function(d) { return { httpOk: r.ok, d: d }; }); })
+    .then(function(res) {
+      if (!res.httpOk || !res.d.ok) throw new Error(res.d && res.d.error ? res.d.error : 'Не удалось получить расчёт зарплаты');
+      return res.d.result;
+    });
 }
 
 // ── НАВИГАЦИЯ (живые координаты техники с Omnicomm Online, опрос раз в 30 сек на сервере -
@@ -25363,10 +25769,37 @@ function toggleUiSound() {
    <head> уже выставил атрибут из localStorage до первой отрисовки (анти-FOUC) -
    здесь только логика переключения и синхронизация лейбла кнопки.
    При logout НЕ чистится - тема принадлежит устройству, не сессии. */
+// Журнал живых сложностей (Влад 13.09: «собрать массив для эргономиста - где вводит и
+// не вводится, где нажимает и не нажимает»; затем в том же разговоре - «Планировка тоже
+// должно работать, это два основных инструмента работы с сотрудником»). Тот же
+// ui_events/POST /api/ui_event, что уже стоит на «Задании» (order-plan-v2.js,
+// logUiEvent_ там - 3-аргументная версия с зашитым page). Здесь, в общем files/
+// index.html, page САМ параметр - этот файл хостит много разных страниц, не только
+// Планировку. Тихо, без тоста - не мешает реальному действию при сбое отправки.
+// См. память project_ui_events_friction_tracking - свериться с накопленными данными
+// ПЕРЕД доработкой уже инструментированного экрана.
+function logUiEvent_(page, eventType, target, detail) {
+  try {
+    if (typeof SESSION_TOKEN === 'undefined' || !SESSION_TOKEN) return;
+    fetch(YARD_API_BASE + '/ui_event', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Session-Token': SESSION_TOKEN }, body: JSON.stringify({ page: page, event_type: eventType, target: target || '', detail: String(detail == null ? '' : detail).slice(0, 200) }) }).catch(function(){});
+  } catch(e){}
+}
+// Учёт темы по пользователю (Влад 13.09: «понять какой % сотрудников на светлой -
+// если 50 на 50, всерьёз проработать светлый режим»). Только СЧЁТ на сервере
+// (theme_prefs, отдельная таблица) - само применение темы остаётся полностью
+// локальным (localStorage), это решение 29.08 не меняется. Тихо, без тоста/лога -
+// это телеметрия, не действие пользователя.
+function pingTheme_(name) {
+  try {
+    if (typeof SESSION_TOKEN === 'undefined' || !SESSION_TOKEN) return;
+    fetch(YARD_API_BASE + '/theme_ping', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Session-Token': SESSION_TOKEN }, body: JSON.stringify({ theme: name === 'light' ? 'light' : 'dark' }) }).catch(function(){});
+  } catch(e){}
+}
 function applyTheme(name) {
   if (name === 'light') document.documentElement.setAttribute('data-theme', 'light');
   else document.documentElement.removeAttribute('data-theme');
   try { localStorage.setItem('yardhub_theme', name === 'light' ? 'light' : 'dark'); } catch(e){}
+  pingTheme_(name);
   var label = document.getElementById('theme-btn-label');
   if (label) label.textContent = 'Тема: ' + (name === 'light' ? 'светлая' : 'тёмная');
   // Инвалидация запечённых цветов (Chart.js датасеты, инлайн-стили в шаблонах) -
@@ -25415,6 +25848,9 @@ function toggleTheme() {
   if (label && document.documentElement.getAttribute('data-theme') === 'light') {
     label.textContent = 'Тема: светлая';
   }
+  // пинг на КАЖДУЮ загрузку страницы, не только на переключение - иначе те, кто
+  // тему никогда не трогал, вообще не попадут в счёт (см. pingTheme_ выше)
+  pingTheme_(document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark');
 })();
 (function initUiSound_() {
   var label = document.getElementById('sound-btn-label');
@@ -26130,6 +26566,13 @@ initCursorLight_('page-main', 'p2-light');
 // Справочники (30.08, аудит - эргономист: свету раньше было негде жить на этой странице,
 // не было ни одной плиточной сетки; KPI-плитки над таблицей "Сотрудники" дали её).
 initCursorLight_('page-directory', 'dir-light');
+// Хаб «Зарплата» (11.09) тоже .hub-grid, но этот вызов раньше отсутствовал - свет под
+// плитками не появлялся, найдено при приёмке хаба «Справочники» 13.09 (тот же ГОСТ,
+// раздел 7 - обязателен, не опция).
+initCursorLight_('page-sales-salary', 'p2-light');
+// Маска телефона (13.09) - один раз на весь документ, не при каждом открытии дровера
+// (drvRegOpenForm_ вызывается на каждый клик по строке - слушатель задублировался бы).
+drvPhoneMask_('drv-reg-phone');
 </script>
 <!-- ═══ ПЛАНИРОВКА - логика вкладки, перенесена из examples/prototype-logistics-board.html
      (plans/2026-08-29-logistics-planning-board.md). Отдельный <script>, не влит в общий -
@@ -28438,14 +28881,14 @@ function saveSegs(){
     var w = JSON.parse(current[id]);
     pushSegToServer_(w).then(function(r){
       if (r && r.ok){ segsSnapshot_[id] = current[id]; delete dirtySegIds_[id]; }
-      else toast("Не сохранилось на сервер - запись пока только у вас", null);
+      else { logUiEvent_("logistics-plan", "save_error", "seg_save", ""); toast("Не сохранилось на сервер - запись пока только у вас", null); }
     });
   });
   Object.keys(segsSnapshot_).forEach(function(id){
     if (current[id]) return;
     postToYardApi_("/plan/seg_delete", {id:id}).then(function(r){
       if (r && r.ok) delete segsSnapshot_[id];
-      else toast("Удаление не дошло до сервера - повторится автоматически", null);
+      else { logUiEvent_("logistics-plan", "save_error", "seg_delete", ""); toast("Удаление не дошло до сервера - повторится автоматически", null); }
     }).catch(function(){});
   });
 }
@@ -28796,7 +29239,7 @@ function lpWireCustomerInput_(inputId, boxId, setVal){
     var matches = orderPlanCustomerList_().filter(function(n){
       return n.toLowerCase().indexOf(val) === 0;
     }).slice(0, 15);
-    if (!matches.length){ box.style.display = "none"; box.innerHTML = ""; return; }
+    if (!matches.length){ box.style.display = "none"; box.innerHTML = ""; if (val.length >= 3) logUiEvent_("logistics-plan", "empty_search", "customer", val); return; }
     box.innerHTML = matches.map(function(n){
       return '<div style="padding:7px 10px;cursor:pointer;font-size:13px;color:var(--text)">' + n.replace(/</g, "&lt;") + "</div>";
     }).join("");
@@ -28915,20 +29358,20 @@ function openCreateDrawer(vi, s, l){
     drawer.querySelector(".cr-cancel").onclick = closeDrawer;
     drawer.querySelector(".cr-submit").onclick = function(){
       var ns = localInputValToH_(crStartEl.value), ne = localInputValToH_(crEndEl.value);
-      if (ns == null || ne == null){ toast("Некорректная дата", null); return; }
-      if (ne <= ns){ toast("Окончание должно быть позже начала", null); return; }
+      if (ns == null || ne == null){ logUiEvent_("logistics-plan", "blocked_click", "lp_create", "Некорректная дата"); toast("Некорректная дата", null); return; }
+      if (ne <= ns){ logUiEvent_("logistics-plan", "blocked_click", "lp_create", "Окончание раньше начала"); toast("Окончание должно быть позже начала", null); return; }
       s = ns; l = ne - ns;
       var clash = STATE.segs.some(function(x){ return x.v === vi && s < x.s + x.l && x.s < s + l && !lpOverlapAllowed_(kind, x.kind); });
-      if (clash){ S.reject(); toast("Пересечение с другим отрезком - не создал", null); return; }
+      if (clash){ S.reject(); logUiEvent_("logistics-plan", "blocked_click", "lp_create", "Пересечение с другим отрезком"); toast("Пересечение с другим отрезком - не создал", null); return; }
       // Менеджер/Логист - ОБЯЗАТЕЛЬНЫЙ явный выбор у рейса (см. разбор у mgIdx/lgIdx
       // выше) - без него "Создать" молча приписал бы рейс первому в списке.
       if (kind === "trip" && (mgIdx < 0 || lgIdx < 0)){
-        S.reject(); toast("Выберите менеджера и логиста", null); return;
+        S.reject(); logUiEvent_("logistics-plan", "blocked_click", "lp_create", "Не выбран менеджер/логист"); toast("Выберите менеджера и логиста", null); return;
       }
       // Причина ремонта/ТО - обязательна (11.09, Влад: см. разбор у isRepairLike выше) -
       // тот же принцип, что у Менеджера/Логиста рейса: без явного значения не сохраняем.
       if (isRepairLike && !repairReasonVal.trim()){
-        S.reject(); toast(kind === "repair" ? "Укажите причину ремонта" : "Укажите причину ТО", null); return;
+        S.reject(); logUiEvent_("logistics-plan", "blocked_click", "lp_create", kind === "repair" ? "Не указана причина ремонта" : "Не указана причина ТО"); toast(kind === "repair" ? "Укажите причину ремонта" : "Укажите причину ТО", null); return;
       }
       if (kind === "driveroff") pushDriver(v, s, l, DRIVEROFF_REASONS_[reasonIdx][0]);
       /* from/to НЕ обязательны - логист может ещё не знать точку на момент постановки
@@ -29147,8 +29590,8 @@ function openDrawer(seg){
 
     document.getElementById("lp-drSave").onclick = function(){
       var newS = localInputValToH_(startEl.value), newE = localInputValToH_(endEl.value);
-      if (newS == null || newE == null){ toast("Некорректная дата", null); return; }
-      if (newE <= newS){ toast("Окончание должно быть позже начала", null); return; }
+      if (newS == null || newE == null){ logUiEvent_("logistics-plan", "blocked_click", "lp_edit", "Некорректная дата"); toast("Некорректная дата", null); return; }
+      if (newE <= newS){ logUiEvent_("logistics-plan", "blocked_click", "lp_edit", "Окончание раньше начала"); toast("Окончание должно быть позже начала", null); return; }
       var newL = newE - newS;
       /* x.id !== seg.id, НЕ x !== seg (было) - шторка может простоять открытой
          дольше 7 секунд (человек вручную набирает даты), а поллинг синка за это
@@ -29164,12 +29607,12 @@ function openDrawer(seg){
       var clash = STATE.segs.some(function(x){
         return x.id !== seg.id && x.v === liveSeg.v && newS < x.s + x.l && x.s < newS + newL && !lpOverlapAllowed_(liveSeg.kind, x.kind);
       });
-      if (clash){ S.reject(); toast("Пересечение с другим отрезком - не сохранил", null); return; }
+      if (clash){ S.reject(); logUiEvent_("logistics-plan", "blocked_click", "lp_edit", "Пересечение с другим отрезком"); toast("Пересечение с другим отрезком - не сохранил", null); return; }
       // Причина ремонта/ТО - обязательна и при редактировании, не только при создании
       // (11.09, Влад: см. разбор у isRepairLike выше) - иначе "Сохранить" молча стёр бы
       // уже введённую причину пустым значением, если кто-то её случайно очистил.
       if (isRepairLike && !repairReasonVal.trim()){
-        S.reject(); toast(seg.kind === "repair" ? "Укажите причину ремонта" : "Укажите причину ТО", null); return;
+        S.reject(); logUiEvent_("logistics-plan", "blocked_click", "lp_edit", seg.kind === "repair" ? "Не указана причина ремонта" : "Не указана причина ТО"); toast(seg.kind === "repair" ? "Укажите причину ремонта" : "Укажите причину ТО", null); return;
       }
       seg = liveSeg;
       var before = {s: seg.s, l: seg.l, v: seg.v};
@@ -30121,7 +30564,11 @@ function setZoomClass_(z){
    страницы целиком: .page скрыт display:none до первого клика, размеры ленты
    недоступны для замера, пока не показан, а сам парк/статусы машин могли измениться
    с прошлого визита - пересобираем начисто. */
+var lpViewportLogged_ = false; /* раз на реальную загрузку страницы - initLP() сам
+  перевызывается на каждый заход на вкладку (см. разбор STATE.collapsed чуть ниже),
+  без этого флага viewport писался бы на каждое переключение вкладки, а не раз. */
 function initLP(){
+  if (!lpViewportLogged_) { lpViewportLogged_ = true; logUiEvent_("logistics-plan", "viewport", "", window.innerWidth + "x" + window.innerHeight); }
   /* НАЙДЕННЫЙ БАГ (31.08, живой пример Влада на мобильной "Таблице": "если
      длинномеры сворачиваю - пропадает вообще планировка... эта проблема уже
      была сегодня описана" - та же история, что у Миши днём раньше). Корень:

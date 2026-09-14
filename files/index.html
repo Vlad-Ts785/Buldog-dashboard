@@ -4454,6 +4454,7 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
           <select id="drv-doc-type" style="background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 8px;color:var(--text);font-size:12px">
             <option value="passport">Паспорт</option>
             <option value="license">Вод. удостоверение</option>
+            <option value="rent">Договор аренды (техники)</option>
             <option value="other">Другое</option>
           </select>
           <input autocomplete="off" id="drv-doc-file" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" style="flex:1;min-width:0;font-size:12px;color:var(--muted)">
@@ -4585,6 +4586,28 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
         <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Корреспондентский счёт</label>
           <input autocomplete="off" id="legal-bank-corr" type="text" inputmode="numeric" maxlength="20"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+      </div>
+      <!-- Документы юрлица (14.09, Влад: "нужен договор аренды между Бульдогом и другим
+           нашим юрлицом/контрагентом" - клиент периодически проверяет основание, по
+           которому Бульдог даёт технику: собственность ИЛИ аренда). Один договор на
+           юрлицо-контрагента, а не на каждую его машину отдельно - реальный договор
+           обычно покрывает сразу несколько единиц техники. Доступно только для уже
+           существующей записи, тот же паттерн, что "Документы техники"/"Сканы документов"
+           у сотрудника. -->
+      <div id="legal-docs-section" style="display:none">
+        <div class="asset-form-section" style="margin-bottom:10px">Документы (договор аренды и т.п.)</div>
+        <div id="legal-docs-list" style="margin-bottom:8px"></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="legal-doc-type" style="background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 8px;color:var(--text);font-size:12px">
+            <option value="rent">Договор аренды</option>
+            <option value="other">Другое</option>
+          </select>
+          <input autocomplete="off" id="legal-doc-file" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" style="flex:1;min-width:0;font-size:12px;color:var(--muted)">
+          <button type="button" onclick="legalDocUpload_()"
+            style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:7px 12px;font-size:12px;cursor:pointer;white-space:nowrap">Загрузить</button>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">PDF/JPG/PNG/WEBP, до 15 МБ</div>
+        <div id="legal-doc-error" style="display:none;color:var(--red);font-size:12px;margin-top:6px"></div>
       </div>
       <div class="asset-form-section">Административное</div>
       <div class="asset-form-grid">
@@ -14249,7 +14272,7 @@ function drvRegSave_() {
 // каждому водителю" сканы с Google Диска. Файлы на диске сервера, не в MySQL - список
 // тянем при каждом открытии карточки существующей записи (см. drvRegOpenForm_), не
 // кэшируем на клиенте. 1-в-1 копия документов техники (СТС, assetDocs*) выше. ═══
-var DRV_DOC_TYPE_LABELS_ = { passport: 'Паспорт', license: 'Вод. удостоверение', other: 'Другое' };
+var DRV_DOC_TYPE_LABELS_ = { passport: 'Паспорт', license: 'Вод. удостоверение', rent: 'Договор аренды (техники)', other: 'Другое' };
 function drvDocFmtBytes_(n) {
   n = Number(n) || 0;
   return n >= 1024 * 1024 ? (n / (1024 * 1024)).toFixed(1).replace('.', ',') + ' МБ'
@@ -14486,6 +14509,9 @@ function legalOpenForm_(id) {
   document.getElementById('legal-is-own').checked = le ? !!le.is_own : false;
   document.getElementById('legal-notes').value = le ? (le.notes || '') : '';
   document.getElementById('legal-error').style.display = 'none';
+  document.getElementById('legal-doc-error').style.display = 'none';
+  document.getElementById('legal-docs-section').style.display = le ? '' : 'none';
+  if (le) legalDocsLoad_(le.id); else document.getElementById('legal-docs-list').innerHTML = '';
   document.getElementById('legal-del-btn').style.display = le ? '' : 'none';
   // Светофор - показать уже сохранённый результат, если проверяли раньше; у новой записи
   // (le===null) кнопка есть, но проверить нечего, пока не сохранили - см. legalCheckRisk_.
@@ -14996,6 +15022,70 @@ function assetDocDelete_(id) {
     if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось удалить'; errEl.style.display = ''; return; }
     p2Toast('Файл удалён', 'amber');
     assetDocsLoad_(assetId);
+  }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+
+// ═══ ДОКУМЕНТЫ ЮРЛИЦА (14.09, Влад: "договор аренды между Бульдогом и юрлицом-владельцем
+// техники") - точная копия документов техники выше (assetDocs*), только endpoint
+// legal_entity_document_* и id-переменная legalEditId_ вместо assetEditId_. Один договор
+// на юрлицо-контрагента покрывает сразу все его машины - бот MAX ищет здесь же
+// (см. /аренда, DEPLOY_LOG 14.09), не по каждой машине отдельно. ═══
+var LEGAL_DOC_TYPE_LABELS_ = { rent: 'Договор аренды', other: 'Другое' };
+function legalDocsLoad_(legalId) {
+  var list = document.getElementById('legal-docs-list');
+  list.innerHTML = '<div class="muted" style="font-size:12px">Загрузка…</div>';
+  fetchFromYardApi_('/sprav/legal_entity_documents', { legal_entity_id: legalId }).then(function(r) {
+    if (legalEditId_ !== legalId) return; // карточку успели переключить, пока шёл запрос
+    if (!r.ok) { list.innerHTML = '<div style="font-size:12px;color:var(--red)">Не удалось загрузить список</div>'; return; }
+    legalDocsPaint_(r.data.documents || []);
+  }).catch(function() {
+    if (legalEditId_ !== legalId) return;
+    list.innerHTML = '<div style="font-size:12px;color:var(--red)">Нет соединения с сервером</div>';
+  });
+}
+function legalDocsPaint_(docs) {
+  var list = document.getElementById('legal-docs-list');
+  if (!docs.length) { list.innerHTML = '<div class="muted" style="font-size:12px">Документов пока нет</div>'; return; }
+  list.innerHTML = docs.map(function(d) {
+    var typeLabel = LEGAL_DOC_TYPE_LABELS_[d.doc_type] || d.doc_type || '';
+    var dt = d.uploaded_at ? new Date(d.uploaded_at).toLocaleDateString('ru-RU') : '';
+    var href = YARD_API_BASE + '/sprav/legal_entity_document_file?session_token=' + encodeURIComponent(SESSION_TOKEN) + '&id=' + encodeURIComponent(d.id);
+    return '<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;display:flex;align-items:center;gap:8px">'
+      + '<a href="' + pageEscAttr_(href) + '" target="_blank" rel="noopener" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);text-decoration:none" title="' + pageEsc_(d.original_name || '') + '">' + pageEsc_(d.original_name || 'файл') + '</a>'
+      + '<span class="muted" style="white-space:nowrap">' + pageEsc_(typeLabel) + (typeLabel ? ' · ' : '') + assetDocFmtBytes_(d.size_bytes) + ' · ' + pageEsc_(dt) + '</span>'
+      + '<button type="button" onclick="legalDocDelete_(\'' + pageEscAttr_(d.id) + '\')" title="Удалить" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;line-height:1;padding:2px 4px">×</button>'
+      + '</div>';
+  }).join('');
+}
+function legalDocUpload_() {
+  var errEl = document.getElementById('legal-doc-error');
+  errEl.style.display = 'none';
+  var legalId = legalEditId_;
+  if (!legalId) return;
+  var fileInput = document.getElementById('legal-doc-file');
+  var file = fileInput.files && fileInput.files[0];
+  if (!file) { errEl.textContent = 'Выберите файл'; errEl.style.display = ''; return; }
+  var docType = document.getElementById('legal-doc-type').value;
+  var fd = new FormData();
+  fd.append('file', file);
+  var qs = 'legal_entity_id=' + encodeURIComponent(legalId) + '&doc_type=' + encodeURIComponent(docType);
+  fetch(YARD_API_BASE + '/sprav/legal_entity_document_upload?' + qs, { method: 'POST', headers: { 'X-Session-Token': SESSION_TOKEN }, body: fd })
+    .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); })
+    .then(function(r) {
+      if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось загрузить файл'; errEl.style.display = ''; return; }
+      fileInput.value = '';
+      p2Toast('Файл загружен', 'green');
+      legalDocsLoad_(legalId);
+    }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+function legalDocDelete_(id) {
+  if (!confirm('Удалить файл?')) return;
+  var legalId = legalEditId_;
+  var errEl = document.getElementById('legal-doc-error');
+  postToYardApi_('/sprav/legal_entity_document_delete', { id: id }).then(function(r) {
+    if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось удалить'; errEl.style.display = ''; return; }
+    p2Toast('Файл удалён', 'amber');
+    legalDocsLoad_(legalId);
   }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
 }
 

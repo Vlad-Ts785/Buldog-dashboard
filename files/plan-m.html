@@ -514,8 +514,9 @@ function segById(id){ if (id === "draft") return M.draft; for (var i = 0; i < M.
 function segsOf(vi){ return M.segs.filter(function(s){ return s.v === vi; }); }
 function segLabel(s){
   if (s.kind === "trip") return (s.customer ? s.customer + " · " : "") + (s.from || "не указано") + " → " + (s.to || "не указано");
-  var base = KIND_LABEL[s.kind] || "";
-  if (s.kind === "driveroff" && reasonLabel(s.reason)) base += " · " + reasonLabel(s.reason);
+  // Влад, 17.09 (тот же фикс, что на десктопе): подстатус ЗАМЕНЯЕТ "Без водителя", не
+  // дописывается к ней - segShort() ниже уже делал так, здесь просто выравниваем.
+  var base = (s.kind === "driveroff" && reasonLabel(s.reason)) ? reasonLabel(s.reason) : (KIND_LABEL[s.kind] || "");
   return base + " · " + untilLabel(s);
 }
 function segShort(s, tier){ /* подпись на плитке по ширине: small = только "куда"/тип, mid/big = + заказчик */
@@ -1725,7 +1726,7 @@ function renderVehicleSheet(){
     h.push('<div class="list-row" data-a="newtrip"><span>Новый рейс на эту машину</span><svg class="go"><use href="#i-right"/></svg></div>');
     shBody.innerHTML = h.join(""); shFoot.innerHTML = "";
   } else {
-    var lbl = vsheet.kind === "driveroff" ? "Без водителя · " + reasonLabel(vsheet.reason) : KIND_LABEL[vsheet.kind];
+    var lbl = vsheet.kind === "driveroff" ? (reasonLabel(vsheet.reason) || "Без водителя") : KIND_LABEL[vsheet.kind];
     h.push('<div class="frow"><div class="k">Статус</div><div class="v">' + esc(lbl) + '</div></div>');
     h.push('<div class="f-label">С какого момента</div><div class="chips" id="vFrom"><button class="chip" data-s="now" aria-pressed="' + (vsheet.fromNow !== false) + '">Сейчас</button><button class="chip" data-s="morning" aria-pressed="' + (vsheet.fromNow === false && vsheet.s === dayStartOf(nowHour()) + 32) + '">Завтра 08:00</button><button class="chip" data-s="mon" aria-pressed="' + (vsheet.fromNow === false && vsheet.s === nextMonday()) + '">Понедельник 08:00</button></div>');
     var durs = vsheet.kind === "driveroff" ? [["1 день",24],["2 дня",48],["Неделя",168],["2 недели",336]] : [["До утра", dayStartOf(vsheet.s) + 32 - vsheet.s],["1 день",24],["3 дня",72],["Неделя",168]];

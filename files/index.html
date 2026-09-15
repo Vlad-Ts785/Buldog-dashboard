@@ -3089,22 +3089,11 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
     rgba(239,159,39,.4) 0 10px, rgba(239,159,39,.4) 10px 20px,
     transparent 20px 30px, transparent 30px 40px);
 }
-/* НАЙДЕННЫЙ БАГ (Влад, 31.08, живой пример - "613" и "790" выглядят по-разному
-   с "023", хотя все три - одна и та же полосатость): подпись .seg-overlap-txt
-   была НЕ sticky, обычный inline-текст у левого края бейджа. Если диапазон
-   пересечения растянут на несколько дней, а видна только ЧАСТЬ этого
-   диапазона (обычный сценарий зума "2 дня"/"неделя") - текст, привязанный к
-   ЛЕВОМУ КРАЮ бейджа, мог оказаться за пределами экрана, пока сама штриховка
-   (background-image, тянется по всей ширине бейджа) продолжает закрывать
-   весь видимый просвет - визуально "полоска без подписи". Тот же приём, что
-   уже держит .seg-label читаемым на длинных плитках - position:sticky,
-   тот же отступ на ширину замороженной колонки (var(--lane-w)). */
-#page-logistics-plan .seg-overlap-txt{
-  position:sticky;left:calc(var(--lane-w) + 8px);z-index:1;
-  display:inline-block;max-width:calc(100% - 16px);
-  padding:0 8px;white-space:nowrap;overflow:hidden;
-  text-overflow:ellipsis;color:var(--text);
-}
+/* .seg-overlap-txt (31.08-17.09, история решения) - удалён 17.09: текст пересечения
+   переехал в сам segTxt (см. makeSeg), .seg-overlap-badge теперь чисто декоративная
+   штриховка без собственного текста - два конкурирующих sticky-текста на одной
+   плитке (эта тема и .seg-label) убраны насовсем, не гоняемся за очередным местом,
+   где один из них может "уехать" за экран. */
 /* прогресс активного рейса - 2px снизу, #page-logistics-plan transform:scaleX (не width) */
 #page-logistics-plan .seg-prog{
   /* Скрыт по просьбе Влада, 29.08: "пока вообще прогресс убери, не нужен он
@@ -28949,8 +28938,12 @@ function segLabel(s){
   var base = s.kind === "repair" ? "Ремонт" : s.kind === "maint" ? "ТО" :
              s.kind === "noorder" ? "Без заказа" : s.kind === "driveroff" ? "Без водителя" : "";
   if (s.kind === "driveroff"){
+    // Влад, 17.09: "должно быть написано не без водителя, а выбранный статус" -
+    // подстатус ЗАМЕНЯЕТ базовую подпись, не дописывается к ней ("Без водителя ·
+    // Тахограф" читается как два статуса сразу). "Без водителя" остаётся только
+    // честным фолбэком, если по какой-то причине reason пуст.
     var reasonLbl = driveroffReasonLabel_(s.reason);
-    if (reasonLbl) base += " · " + reasonLbl;
+    if (reasonLbl) base = reasonLbl;
     // Чей был отпуск/выходной/больничный (10.09) - см. разбор у lpFleetPrevDriverName_.
     // Фамилия одним словом (не всё full_name) - плитка и так тесная.
     var v = STATE.vehicles[s.v];
@@ -29181,26 +29174,28 @@ function makeSeg(s){
     head = '<span class="seg-id"><b>' + three(s.mg) + '</b><i>' + three(s.lg) + '</i>' +
       '<span class="seg-drv ' + (v && v.vacant ? "off" : "on") + '"></span></span>';
   }
-  /* Влад, 31.08 (пятый заход): текст пересечения живёт ТОЛЬКО внутри бейджа
-     (.seg-overlap-badge ниже), сам плиточный .seg-label гасится целиком, когда
-     есть бейдж - иначе его собственный sticky-label мог бы уехать ПОД бейдж
-     при скролле и воспроизвести ту же коллизию текста заново, просто уровнем
-     глубже (тот класс бага, что уже чинили четвёртым заходом). "Ремонт до X"
-     отдельно вне бейджа НЕ показываем - тот же принцип огрубления, что и у
-     самого диапазона выше: один бейдж на плитку содержит всю нужную
-     информацию сам, не размазываем её по плитке. */
+  /* НАЙДЕННЫЙ БАГ (17.09, Влад живьём: "почему не работает протяжка в этом моменте,
+     где граница статуса на статусе" - живой пример, ПР-5 С 702 КН 797, ремонт
+     04.09-15.09 (11 дней), пересекается с "без водителя" только 04.09-08.09 (4 дня).
+     Старая версия (31.08) гасила .seg-label ЦЕЛИКОМ на ВСЮ плитку, если пересечение
+     есть хоть где-то внутри неё - оставшиеся 7 дней ремонта визуально выглядели
+     пустым местом (протяжка там и не должна работать, плитка занята - просто не
+     видно, что это по-прежнему ремонт). Раньше текст пересечения жил ТОЛЬКО внутри
+     .seg-overlap-badge (свой sticky, left:calc(var(--lane-w)+8px), тот же отступ,
+     что у .seg-label) - именно из-за двух конкурирующих sticky-текстов на одной
+     плитке text и гасили один из них целиком. Вместо гашения - переносим текст
+     пересечения В сам segTxt (единственный sticky-текст на плитке, виден на ВСЮ
+     длину сегмента, не только на подсвеченном участке), а .seg-overlap-badge
+     оставляем ЧИСТО декоративной штриховкой без своего текста - конкурирующих
+     sticky-элементов больше нет, коллизии в принципе не может быть. */
   var segTxt = segLabel(s);
-  if (overlapRange || (s.kind === "driveroff" && lpOverlappingSegsOfKind_(s, "repair").length)){
-    segTxt = "";
-  }
+  if (overlapRange && overlapRange.driveroffSegs.length) segTxt += " · " + overlapRange.driveroffSegs.map(segLabel).join(" · ");
+  if (s.kind === "driveroff" && lpOverlappingSegsOfKind_(s, "repair").length) segTxt = "";
   var badgeHtml = "";
   if (overlapRange){
-    var badgeTxt = segLabel(s);
-    if (overlapRange.driveroffSegs.length) badgeTxt += " · " + overlapRange.driveroffSegs.map(segLabel).join(" · ");
     var leftPct = (overlapRange.s - s.s) / s.l * 100;
     var widthPct = overlapRange.l / s.l * 100;
-    badgeHtml = '<span class="seg-overlap-badge" style="left:' + leftPct + '%;width:' + widthPct + '%" title="Ремонт идёт одновременно с отсутствием водителя (вакансия или заявка «Без водителя»)">' +
-      '<span class="seg-overlap-txt">' + badgeTxt + '</span></span>';
+    badgeHtml = '<span class="seg-overlap-badge" style="left:' + leftPct + '%;width:' + widthPct + '%" title="Ремонт идёт одновременно с отсутствием водителя (вакансия или заявка «Без водителя»)"></span>';
   }
   el.innerHTML = '<span class="seg-label">' + head +
     '<span class="seg-txt">' + segTxt + "</span>" +
@@ -31512,14 +31507,29 @@ function lpFleetPersonName_(id){
    протяжки. Тот же источник данных, что у vacantBandRanges_/.now, просто другой
    срез - "кто ушёл", а не "когда открыто сейчас". */
 function lpFleetPrevDriverName_(tractorGos, atHour){
+  // НАЙДЕННЫЙ БАГ (17.09, Влад живьём: "причём тут Войткун?" - О 894 ХМ 797. Войткун
+  // сдал машину 09.09, в тот же день её принял Межевич и до сих пор на ней - не снят,
+  // слот ОТКРЫТ. Старая версия искала максимум ТОЛЬКО среди ЗАКРЫТЫХ слотов - Межевича
+  // не видела вообще (у него нет valid_to) и на любой протяжке "без водителя" молча
+  // тянула Войткуна, хотя тот две недели как не при делах). Ищем среди ВСЕХ слотов
+  // (открытых и закрытых) той же машины - кандидат годится только если после него
+  // никто НЕ вступал в слот (ни закрытый, ни всё ещё открытый).
+  var all = (FLEET_ASSIGN_ || []).filter(function(a){ return a.kind === "driver" && a.tractor_gos === tractorGos; });
   var best = null, bestEnd = -Infinity;
-  (FLEET_ASSIGN_ || []).forEach(function(a){
-    if (a.kind !== "driver" || a.tractor_gos !== tractorGos || !a.valid_to) return;
+  all.forEach(function(a){
+    if (!a.valid_to) return; // кандидат в "предыдущие" обязан быть закрыт
     var endH = lpFleetDateToHour_(a.valid_to);
     if (endH == null || endH > atHour + 0.1) return; // закрылось ПОСЛЕ начала протяжки - не он
     if (endH > bestEnd){ bestEnd = endH; best = a; }
   });
-  return best ? lpFleetPersonName_(best.resource_key) : null;
+  if (!best) return null;
+  var supersededByAnother = all.some(function(a){
+    if (a.id === best.id) return false;
+    var startH = lpFleetDateToHour_(a.valid_from);
+    return startH != null && startH > bestEnd - 0.1 && startH <= atHour + 0.1;
+  });
+  if (supersededByAnother) return null; // после него уже сидел кто-то другой - он больше не "предыдущий"
+  return lpFleetPersonName_(best.resource_key);
 }
 /* Телефон - только для "Копировать данные" (lpCopyText_). /sprav/state для роли
    логист/менеджер отдаёт урезанный набор полей (31.08, см. api/server.js на

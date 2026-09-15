@@ -144,11 +144,27 @@ module.exports = function (deps) {
   }
   async function ownEntities(internalCustomers) { // internalCustomers=true -> свои юрлица + База (чипы «Кто заказывает» у логиста)
     const [rows] = await pool.query(
-      `SELECT id, name, full_name, short_name, own_sort, inn, kpp, director_name, signer_short, bank_name, bank_account, stamp_file, signature_file, is_own, internal_customer
+      `SELECT id, name, full_name, short_name, own_sort, inn, kpp, ogrn, legal_address, director_name, director_post, signer_short, bank_name, bank_account, bank_bik, bank_corr_account, stamp_file, signature_file, is_own, internal_customer
          FROM sprav_legal_entities WHERE ${internalCustomers ? "internal_customer = 1" : "is_own = 1"} AND deleted_at IS NULL ORDER BY COALESCE(own_sort, 999), name`);
+    // 15.09, Влад: «Договор-заявка» из «Задания» - для печати документа нужны полные
+    // реквизиты (не только id/name, как раньше хватало для чипов) + person_id подписанта
+    // (чтобы забрать его подпись из sprav_people_documents). У sprav_legal_entities нет
+    // прямой FK на sprav_people - director_name/signer_short только текст. Сопоставляем
+    // по первым двум словам ФИО (тот же приём, что rosterKey_/shortName2_ в
+    // applyRosterFallback_ выше по этому же файлу) - "своих" юрлиц мало (Бульдог/
+    // Технопарк/...), лишний SELECT id+full_name по всей sprav_people - не проблема
+    // производительности здесь (не в горячем цикле, только на /orders/meta).
+    const [people] = await pool.query("SELECT id, full_name FROM sprav_people WHERE deleted_at IS NULL");
+    const nameKey = (s) => String(s || "").trim().split(/\s+/).slice(0, 2).join(" ").toLowerCase();
+    const personIdByKey = {};
+    people.forEach((p) => { const k = nameKey(p.full_name); if (k && !personIdByKey[k]) personIdByKey[k] = p.id; });
     return rows.map((r) => ({
-      id: r.id, name: r.name, short: r.short_name || r.name, full_name: r.full_name || r.name, inn: r.inn, director: r.director_name, signer: r.signer_short,
+      id: r.id, name: r.name, short: r.short_name || r.name, full_name: r.full_name || r.name,
+      inn: r.inn, kpp: r.kpp, ogrn: r.ogrn, legal_address: r.legal_address,
+      director: r.director_name, director_post: r.director_post, signer: r.signer_short,
+      bank_name: r.bank_name, bank_account: r.bank_account, bank_bik: r.bank_bik, bank_corr_account: r.bank_corr_account,
       is_own: !!r.is_own, has_bank: !!(r.bank_name && r.bank_account), has_stamp: !!(r.stamp_file && r.signature_file),
+      signer_person_id: personIdByKey[nameKey(r.signer_short)] || personIdByKey[nameKey(r.director_name)] || null,
     }));
   }
 

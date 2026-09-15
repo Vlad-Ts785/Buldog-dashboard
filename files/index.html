@@ -5290,6 +5290,15 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
               <div class="hub-tile__sub">Кто из руководителей подал план на неделю и сколько ждёт от кого.</div>
               <div class="hub-tile__foot"><span>по неделям</span><span class="hub-tile__go">Открыть →</span></div>
             </div>
+            <!-- «Суды» (15.09, Влад: "есть клиенты которые в судах - хотелось бы в одном окне
+                 смотреть по всем ним статусы"). Только admin - показ/скрытие в applyRoleUI.
+                 План - plans/2026-09-15-court-cases-debt-tab.md. -->
+            <div class="hub-tile" id="debt-hub-tile-court" onclick="chooseDebtTarget_('court')">
+              <div class="hub-tile__icon hub-tile__icon--d"><svg width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3.2v13"/><path d="M6.2 16.8h7.6"/><path d="M3 7.2h14"/><path d="M5.6 7.2 3.4 11.6h4.4z"/><path d="M14.4 7.2 12.2 11.6h4.4z"/></svg></div>
+              <div class="hub-tile__name">Суды</div>
+              <div class="hub-tile__sub">Наши иски к должникам: на какой стадии дело, сколько взыскиваем, ссылка на карточку КАД.</div>
+              <div class="hub-tile__foot"><span id="debt-hub-court-fact">по активным делам</span><span class="hub-tile__go">Открыть →</span></div>
+            </div>
           </div>
         </div>
       </div>
@@ -5298,6 +5307,49 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
       </div>
       <div id="debt-tab-plan" style="display:none">
         <div id="receipts-plan-summary-content"><p style="color:var(--muted);padding:16px">Данные загружаются...</p></div>
+      </div>
+      <!-- «Суды» (15.09) - наши иски к должникам. Источник - Checko (/v2/legal-cases,
+           role=plaintiff по ИНН наших юрлиц), сервер /api/court/*. Прямой парсинг
+           kad.arbitr.ru невозможен (капча ПравоТеха), поэтому номер дела - ссылка на
+           карточку КАД, а не наша копия её содержимого. -->
+      <div id="debt-tab-court" style="display:none">
+        <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap">
+          <span id="court-sync-status" class="muted" style="font-size:11px;margin-right:auto"></span>
+          <select id="court-filter-entity" onchange="renderCourtCases_()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:6px 10px;font-size:12px;cursor:pointer"></select>
+          <select id="court-filter-status" onchange="renderCourtCases_()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:6px 10px;font-size:12px;cursor:pointer"></select>
+          <button id="court-closed-toggle-btn" onclick="toggleCourtClosed_()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:6px 12px;font-size:12px;cursor:pointer">Показать завершённые</button>
+          <button id="court-sync-btn" onclick="courtSyncNow_()" data-nav-sound style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:6px 12px;font-size:12px;cursor:pointer" title="Тот же прогон, что автоматически каждое утро в 05:40 МСК">Обновить</button>
+        </div>
+        <div class="kpi-grid" id="court-kpi" style="grid-template-columns:repeat(3,1fr)">
+          <div class="kpi" id="court-kpi-active"></div>
+          <div class="kpi" id="court-kpi-linked"></div>
+          <div class="kpi" id="court-kpi-bankrupt"></div>
+        </div>
+        <div class="card" id="court-events-card" style="margin-top:16px;display:none">
+          <div class="sec-header">
+            <div class="sec-title">Что изменилось</div>
+            <div class="sec-sub" id="court-events-sub"></div>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="tbl">
+              <thead><tr><th>Когда</th><th>Дело</th><th>Ответчик</th><th>Что произошло</th></tr></thead>
+              <tbody id="court-events-body"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card" style="margin-top:16px;margin-bottom:16px">
+          <div class="sec-header">
+            <div class="sec-title">Дела</div>
+            <div class="sec-sub" id="court-cases-sub"></div>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="tbl">
+              <thead><tr id="court-thead-row"></tr></thead>
+              <tbody id="court-cases-body"></tbody>
+            </table>
+          </div>
+          <div id="court-cases-empty" class="muted" style="display:none;padding:14px 4px;font-size:12px"></div>
+        </div>
       </div>
       <div id="debt-tab-dz" style="display:none">
       <div id="debt-empty" style="display:none;color:var(--muted);padding:16px">
@@ -22234,24 +22286,310 @@ function showDebtHub_() {
   var back = document.getElementById('debt-back-link');
   var dz = document.getElementById('debt-tab-dz');
   var plan = document.getElementById('debt-tab-plan');
+  var court = document.getElementById('debt-tab-court');
   if (hub) hub.style.display = '';
   if (back) back.style.display = 'none';
   if (dz) dz.style.display = 'none';
   if (plan) plan.style.display = 'none';
+  if (court) court.style.display = 'none';
   setText('page-title', 'Дебиторка');
+  // Плитка «Суды» - только admin. Проверяем РОЛЬ ЯВНО в самом блоке, а не полагаемся на то,
+  // что страница целиком закрыта: ровно на этом допущении 13.09 «Дирекция» протекла в
+  // урезанную копию страницы отдела (память project_dept_trals_direkcia_leak_bug).
+  var courtTile = document.getElementById('debt-hub-tile-court');
+  if (courtTile) courtTile.style.display = (D && D.role === 'admin') ? '' : 'none';
+  courtFillHubFact_();   // подвал плитки «Суды» - живое число активных дел, не выдуманная подпись
 }
 function chooseDebtTarget_(tab) {
   var hub = document.getElementById('debt-hub');
   var back = document.getElementById('debt-back-link');
   var dz = document.getElementById('debt-tab-dz');
   var plan = document.getElementById('debt-tab-plan');
+  var court = document.getElementById('debt-tab-court');
   if (hub) hub.style.display = 'none';
   if (back) back.style.display = '';
   if (dz) dz.style.display = (tab === 'dz') ? '' : 'none';
   if (plan) plan.style.display = (tab === 'plan') ? '' : 'none';
-  setText('page-title', tab === 'plan' ? 'Дебиторка - план поступлений' : 'Дебиторка - задолженность');
+  if (court) court.style.display = (tab === 'court') ? '' : 'none';
+  setText('page-title', tab === 'plan' ? 'Дебиторка - план поступлений'
+    : tab === 'court' ? 'Дебиторка - суды' : 'Дебиторка - задолженность');
   if (tab === 'dz') renderDebt();
   if (tab === 'plan') renderReceiptsPlanSummaryPage_();
+  if (tab === 'court') loadCourtCases_();
+}
+
+// ══ «Суды» - наши иски к должникам (15.09.2026, plans/2026-09-15-court-cases-debt-tab.md) ══
+// Данные - /api/court/* (сервер тянет их из Checko раз в сутки, 05:40 МСК). Номер дела -
+// ССЫЛКА на карточку КАД, а не наша копия: сам kad.arbitr.ru закрыт капчей, содержимое
+// карточки (заседания, документы) мы не получаем - только стадию, сумму и стороны.
+var courtData_ = null, courtEvents_ = null, courtLoading_ = false;
+var courtShowClosed_ = false;   // по умолчанию видны только идущие дела
+var courtMarks_ = null;         // contragent (имя из 1С) -> {count, sum} для значка в таблице ДЗ
+var courtSort_ = { col: 'claim_sum', dir: -1 };
+// Своё экранирование, а не общий escHtml_: та функция объявлена в другом месте файла, и
+// проверять её видимость из этого скоупа дороже, чем три строки здесь (ловушка window.D vs
+// bare D в этом же файле уже стоила отладки).
+function courtEsc_(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+var COURT_COLS = [
+  { key: 'opponent_name', label: 'Ответчик' },
+  { key: 'debt_balance', label: 'Долг в ДЗ', num: true },
+  { key: 'claim_sum', label: 'Сумма иска', num: true },
+  { key: 'outcome_text', label: 'Стадия' },
+  { key: 'court', label: 'Суд' },
+  { key: 'case_number', label: 'Дело' },
+  { key: 'case_date', label: 'Дата' },
+  { key: 'our_name', label: 'Истец (наше юрлицо)' }
+];
+// Десятичный знак - запятая (ГОСТ, раздел 2). Легаси fmtM() в этом файле пишет точку,
+// поэтому здесь своя функция, а не вызов чужой.
+function courtMoney_(n) {
+  n = Number(n) || 0;
+  if (Math.abs(n) >= 1000000) return (n / 1000000).toFixed(Math.abs(n) >= 10000000 ? 1 : 2).replace('.', ',') + ' млн ₽';
+  return Math.round(n).toLocaleString('ru-RU') + ' ₽';
+}
+function courtDateRu_(s) {
+  if (!s) return '—';
+  var p = String(s).slice(0, 10).split('-');
+  return p.length === 3 ? (p[2] + '.' + p[1] + '.' + p[0]) : s;
+}
+// Цвет стадии по СМЫСЛУ (ГОСТ, раздел 1): «без движения» - суд ждёт документы ОТ НАС, это
+// единственная стадия, требующая действия сегодня -> янтарный. Банкротство ответчика и отказ -
+// потеря денег -> красный. Иск удовлетворён -> зелёный. Обычный ход процесса - нейтральный
+// синий, а не зелёный: «дело просто идёт» это не хорошая новость, это отсутствие новости.
+function courtStageInfo_(c) {
+  var t = String(c.outcome_text || '').toLowerCase();
+  if (t.indexOf('без движения') >= 0) return { cls: 'amber', text: c.outcome_text };
+  if (t.indexOf('банкрот') >= 0) return { cls: 'red', text: c.outcome_text };
+  if (t.indexOf('удовлетвор') >= 0) return { cls: 'green', text: c.outcome_text };
+  if (t.indexOf('отказ') >= 0 || t.indexOf('отклон') >= 0) return { cls: 'red', text: c.outcome_text };
+  if (!c.is_active) return { cls: '', text: c.outcome_text || 'завершено' };
+  return { cls: 'blue', text: c.outcome_text || 'идёт' };
+}
+function loadCourtCases_(force) {
+  if (courtLoading_) return;
+  if (courtData_ && !force) { renderCourtCases_(); return; }
+  courtLoading_ = true;
+  setText('court-sync-status', 'Загрузка дел...');
+  Promise.all([
+    fetchFromYardApi_('/court/cases', {}),
+    fetchFromYardApi_('/court/events', { days: 30 })
+  ]).then(function(res) {
+    courtLoading_ = false;
+    if (!res[0].ok || !res[0].data || !res[0].data.cases) {
+      setText('court-sync-status', (res[0].data && res[0].data.error) ? ('Ошибка: ' + res[0].data.error) : 'Не удалось загрузить дела');
+      return;
+    }
+    courtData_ = res[0].data;
+    courtEvents_ = (res[1].ok && res[1].data && res[1].data.events) ? res[1].data.events : [];
+    courtBuildFilters_();
+    renderCourtCases_();
+  }).catch(function(e) {
+    courtLoading_ = false;
+    setText('court-sync-status', 'Нет соединения с сервером: ' + e.message);
+  });
+}
+// Категориальные фильтры - только <select> над таблицей и только для колонок с малым числом
+// значений (ГОСТ, раздел 4: «Сортируемая таблица»). Ряд текстовых инпутов под заголовком -
+// запрещённый паттерн.
+function courtBuildFilters_() {
+  if (!courtData_) return;
+  var ents = {}, stages = {};
+  courtData_.cases.forEach(function(c) {
+    if (c.our_name) ents[c.our_name] = 1;
+    if (c.outcome_text) stages[c.outcome_text] = 1;
+  });
+  var entSel = document.getElementById('court-filter-entity');
+  var stSel = document.getElementById('court-filter-status');
+  if (entSel) {
+    var prevE = entSel.value;
+    entSel.innerHTML = '<option value="">Все юрлица</option>' + Object.keys(ents).sort().map(function(n) {
+      return '<option value="' + courtEsc_(n) + '">' + courtEsc_(n) + '</option>';
+    }).join('');
+    if (prevE) entSel.value = prevE;
+  }
+  if (stSel) {
+    var prevS = stSel.value;
+    stSel.innerHTML = '<option value="">Все стадии</option>' + Object.keys(stages).sort().map(function(n) {
+      return '<option value="' + courtEsc_(n) + '">' + courtEsc_(n) + '</option>';
+    }).join('');
+    if (prevS) stSel.value = prevS;
+  }
+}
+function setCourtSort_(col) {
+  if (courtSort_.col === col) { courtSort_.dir *= -1; }
+  else {
+    courtSort_.col = col;
+    // Числовые и дата - первый клик по убыванию (крупное/свежее сверху), текст - А-Я.
+    courtSort_.dir = (col === 'claim_sum' || col === 'debt_balance' || col === 'case_date') ? -1 : 1;
+  }
+  renderCourtCases_();
+}
+function toggleCourtClosed_() {
+  courtShowClosed_ = !courtShowClosed_;
+  var b = document.getElementById('court-closed-toggle-btn');
+  if (b) b.textContent = courtShowClosed_ ? 'Только идущие дела' : 'Показать завершённые';
+  renderCourtCases_();
+}
+function renderCourtCases_() {
+  if (!courtData_) return;
+  var s = courtData_.summary || {};
+  var all = courtData_.cases || [];
+  // Сводка. Банкротства ОТДЕЛЬНОЙ карточкой и НЕ входят в «сумму исков»: в банкротном деле
+  // СуммИск - размер всего банкротства (требования всех кредиторов), а не наше требование.
+  // 15.09: 13 активных банкротств дали бы 1,32 млрд из 1,35 млрд и превратили бы цифру
+  // «сколько мы взыскиваем» в фикцию.
+  var activeClaims = all.filter(function(c) { return c.is_active && c.case_type !== 'Б'; });
+  var activeBankr = all.filter(function(c) { return c.is_active && c.case_type === 'Б'; });
+  var claimsSum = activeClaims.reduce(function(a, c) { return a + (c.claim_sum || 0); }, 0);
+  var bankrSum = activeBankr.reduce(function(a, c) { return a + (c.claim_sum || 0); }, 0);
+  setHTML('court-kpi-active',
+    '<div class="kpi-label">Идут иски о взыскании</div>' +
+    '<div class="kpi-value">' + activeClaims.length + '</div>' +
+    '<div class="muted" style="font-size:11.5px;margin-top:6px">на ' + courtMoney_(claimsSum) + '</div>');
+  setHTML('court-kpi-linked',
+    '<div class="kpi-label">Из них должники по ДЗ</div>' +
+    '<div class="kpi-value">' + (s.linked_count || 0) + '</div>' +
+    '<div class="muted" style="font-size:11.5px;margin-top:6px">долг по 1С: ' + courtMoney_(s.linked_debt || 0) + '</div>');
+  setHTML('court-kpi-bankrupt',
+    '<div class="kpi-label">Банкротства ответчиков</div>' +
+    '<div class="kpi-value">' + activeBankr.length + '</div>' +
+    '<div class="muted" style="font-size:11.5px;margin-top:6px">' + courtMoney_(bankrSum) + ' - размер дел целиком, не наше требование</div>');
+
+  var run = courtData_.last_run;
+  setText('court-sync-status', run
+    ? ('Обновлено ' + courtDateRu_(run.finished_at) + ' ' + String(run.finished_at || '').slice(11) +
+       ' · дел в базе: ' + (s.total || 0) + ' · запросов к Checko: ' + (run.requests || 0))
+    : 'Синхронизация ещё не запускалась');
+  courtRenderEvents_();
+
+  // Фильтры + сортировка. Одно состояние на заголовки и тело (ГОСТ): dir=-1 -> ▼ (убывание),
+  // знак стоит ПЕРЕД разностью.
+  var entVal = (document.getElementById('court-filter-entity') || {}).value || '';
+  var stVal = (document.getElementById('court-filter-status') || {}).value || '';
+  var rows = all.filter(function(c) {
+    if (!courtShowClosed_ && !c.is_active) return false;
+    if (entVal && c.our_name !== entVal) return false;
+    if (stVal && c.outcome_text !== stVal) return false;
+    return true;
+  }).map(function(c) {
+    var o = Object.create(c);
+    o.debt_balance = c.debt ? c.debt.balance : 0;
+    return o;
+  });
+  rows.sort(function(a, b) {
+    var av = a[courtSort_.col], bv = b[courtSort_.col];
+    if (typeof av === 'number' || typeof bv === 'number') return ((av || 0) - (bv || 0)) * courtSort_.dir;
+    return String(av || '').localeCompare(String(bv || ''), 'ru') * courtSort_.dir;
+  });
+  var theadRow = document.getElementById('court-thead-row');
+  if (theadRow) {
+    theadRow.innerHTML = COURT_COLS.map(function(c) {
+      var active = courtSort_.col === c.key;
+      var arrow = active ? (courtSort_.dir === -1 ? ' ▼' : ' ▲') : ' ↕';
+      return '<th class="sortable' + (c.num ? ' num' : '') + '" onclick="setCourtSort_(\'' + c.key + '\')">' +
+        c.label + '<span style="font-size:10px;opacity:' + (active ? '1' : '0.3') + '">' + arrow + '</span></th>';
+    }).join('');
+  }
+  setText('court-cases-sub', rows.length + (courtShowClosed_ ? ' дел (со всеми завершёнными)' : ' идущих дел'));
+  var emptyEl = document.getElementById('court-cases-empty');
+  if (emptyEl) {
+    emptyEl.style.display = rows.length ? 'none' : 'block';
+    emptyEl.textContent = all.length ? 'Под выбранные условия не попало ни одного дела.' : 'Дел пока нет - нажмите «Обновить», чтобы опросить источник.';
+  }
+  document.getElementById('court-cases-body').innerHTML = rows.map(function(c) {
+    var stage = courtStageInfo_(c);
+    var risk = c.risk ? legalRiskMarkHtml_(c.risk.light, 8, 'margin-right:6px', c.risk.marker) : '';
+    var debtCell = c.debt
+      ? '<b>' + courtMoney_(c.debt.balance) + '</b>' + (c.debt.manager ? '<div class="muted" style="font-size:9.5px">' + courtEsc_(cleanName(c.debt.manager)) + '</div>' : '')
+      : '<span class="muted">—</span>';
+    var bankrTag = c.case_type === 'Б' ? ' <span class="badge red" style="font-size:9px">банкротство</span>' : '';
+    return '<tr>' +
+      '<td>' + risk + '<b>' + courtEsc_(c.opponent_name || '—') + '</b>' +
+        (c.debt ? '<div class="muted" style="font-size:9.5px">в ДЗ: ' + courtEsc_(c.debt.contragent) + '</div>' : '') + '</td>' +
+      '<td class="num">' + debtCell + '</td>' +
+      '<td class="num">' + (c.claim_sum ? courtMoney_(c.claim_sum) : '<span class="muted">не указана</span>') + '</td>' +
+      '<td><span class="badge ' + stage.cls + '">' + courtEsc_(stage.text || '—') + '</span></td>' +
+      '<td class="muted" style="font-size:11px">' + courtEsc_(c.court || '—') + '</td>' +
+      '<td><a href="' + courtEsc_(c.kad_url || '#') + '" target="_blank" rel="noopener noreferrer" style="color:var(--blue);text-decoration:none">' +
+        courtEsc_(c.case_number || '—') + '</a>' + bankrTag + '</td>' +
+      '<td class="muted" style="font-size:11px">' + courtDateRu_(c.case_date) + '</td>' +
+      '<td class="muted" style="font-size:11px">' + courtEsc_(c.our_name || '—') + '</td>' +
+    '</tr>';
+  }).join('');
+}
+function courtRenderEvents_() {
+  var card = document.getElementById('court-events-card');
+  if (!card) return;
+  var evs = courtEvents_ || [];
+  if (!evs.length) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  setText('court-events-sub', 'за 30 дней: ' + evs.length);
+  var WORD = { 'new': 'подан новый иск', outcome: 'смена стадии', closed: 'дело завершено', sum: 'изменилась сумма иска' };
+  document.getElementById('court-events-body').innerHTML = evs.map(function(e) {
+    var what = WORD[e.event_type] || e.event_type;
+    var detail = (e.event_type === 'sum')
+      ? (courtMoney_(e.old_value) + ' → ' + courtMoney_(e.new_value))
+      : (e.old_value ? (courtEsc_(e.old_value) + ' → ' + courtEsc_(e.new_value || '')) : courtEsc_(e.new_value || ''));
+    return '<tr>' +
+      '<td class="muted" style="font-size:11px">' + courtDateRu_(e.created_at) + '</td>' +
+      '<td><a href="' + courtEsc_(e.kad_url || '#') + '" target="_blank" rel="noopener noreferrer" style="color:var(--blue);text-decoration:none">' + courtEsc_(e.case_number) + '</a></td>' +
+      '<td>' + courtEsc_(e.opponent_name || '—') + '</td>' +
+      '<td>' + courtEsc_(what) + ': <span class="muted">' + detail + '</span></td>' +
+    '</tr>';
+  }).join('');
+}
+function courtSyncNow_() {
+  var btn = document.getElementById('court-sync-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Обновляю...'; }
+  postToYardApi_('/court/sync_now', {}).then(function(r) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Обновить'; }
+    if (!r.ok || !r.data || !r.data.ok) { p2Toast('Не удалось обновить: ' + ((r.data && r.data.error) || 'ошибка сервера'), 'red'); return; }
+    var d = r.data;
+    p2Toast('Готово: ' + d.cases_seen + ' дел, новых ' + d.cases_new + ', изменений ' + d.events +
+      (d.stopped_by_quota ? ' (остановлено: дневная квота Checko)' : ''), d.stopped_by_quota ? 'amber' : 'green');
+    courtMarks_ = null;
+    loadCourtCases_(true);
+  }).catch(function(e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Обновить'; }
+    p2Toast('Ошибка сети: ' + e.message, 'red');
+  });
+}
+// Подвал плитки «Суды» в хабе - живая цифра (ГОСТ, раздел 4: в подвале плитки реальный факт
+// по разделу, не выдуманная подпись). Лёгкий запрос, без списка дел.
+function courtFillHubFact_() {
+  var el = document.getElementById('debt-hub-court-fact');
+  if (!el || !D || D.role !== 'admin') return;
+  fetchFromYardApi_('/court/summary', {}).then(function(r) {
+    if (!r.ok || !r.data) return;
+    var n = r.data.claims_count || 0, b = r.data.bankrupt_count || 0;
+    var word = (n % 10 === 1 && n % 100 !== 11) ? 'иск' : ((n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20)) ? 'иска' : 'исков');
+    el.textContent = n + ' ' + word + ' идёт' + (b ? (' · ' + b + ' банкротств') : '');
+  }).catch(function() {});
+}
+// Значок у должника в таблице ДЗ: по нему прямо сейчас идёт наш иск. Только admin - и потому
+// что эндпоинт закрыт ролью, и потому что вкладка «Суды» ему же и видна.
+function ensureCourtMarks_(cb) {
+  if (courtMarks_ !== null) { if (cb) cb(); return; }
+  if (!D || D.role !== 'admin') { courtMarks_ = {}; if (cb) cb(); return; }
+  courtMarks_ = {};   // ставим сразу, чтобы параллельные рендеры не дёрнули запрос второй раз
+  fetchFromYardApi_('/court/debt_marks', {}).then(function(r) {
+    courtMarks_ = (r.ok && r.data && r.data.by_contragent) ? r.data.by_contragent : {};
+    if (cb) cb();
+  }).catch(function() { if (cb) cb(); });
+}
+function courtMarkHtml_(contragent) {
+  var m = courtMarks_ && courtMarks_[contragent];
+  if (!m) return '';
+  var title = 'Идёт наш иск: ' + m.count + ' ' + (m.count === 1 ? 'дело' : (m.count < 5 ? 'дела' : 'дел')) +
+    (m.sum ? (' на ' + courtMoney_(m.sum)) : '') + '. Открыть вкладку «Суды»';
+  return '<span onclick="event.stopPropagation();chooseDebtTarget_(\'court\')" title="' + courtEsc_(title) + '" ' +
+    'style="display:inline-block;vertical-align:-1px;margin-right:5px;cursor:pointer;color:var(--amber)">' +
+    '<svg width="11" height="11" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M10 3.2v13"/><path d="M6.2 16.8h7.6"/><path d="M3 7.2h14"/><path d="M5.6 7.2 3.4 11.6h4.4z"/><path d="M14.4 7.2 12.2 11.6h4.4z"/></svg></span>';
 }
 
 function renderDebt() {
@@ -22275,6 +22613,9 @@ function renderDebt() {
     if (st) st.textContent = debtRiskStatusText_(data);
     renderDebt();
   });
+  // Значок «идёт наш иск» у должника (15.09) - той же ленивой схемой, что светофор выше:
+  // один лёгкий запрос при первом показе ДЗ, дальше рендер синхронный из courtMarks_.
+  if (courtMarks_ === null) ensureCourtMarks_(function() { renderDebt(); });
 
   const ageToggleBtn = document.getElementById('debt-age-toggle-btn');
   if (ageToggleBtn) {
@@ -22650,7 +22991,7 @@ function renderDebt() {
       'style="background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:0 4px" title="Карточка контрагента">📝' +
       (c.comment ? '<span style="color:var(--amber)">●</span>' : '') + '</button>';
     return '<tr class="debt-row-toggle" onclick="toggleDebtDetail(' + i + ')" style="cursor:pointer">' +
-      '<td>' + cardBtn + '<span id="debt-arrow-' + i + '" class="muted" style="display:inline-block;width:14px">▸</span>' + debtRiskDotHtml_(c.contragent) + '<b>' + c.contragent + '</b>' + byOrgLine + '</td>' +
+      '<td>' + cardBtn + '<span id="debt-arrow-' + i + '" class="muted" style="display:inline-block;width:14px">▸</span>' + debtRiskDotHtml_(c.contragent) + courtMarkHtml_(c.contragent) + '<b>' + c.contragent + '</b>' + byOrgLine + '</td>' +
       '<td class="muted">' + cleanName(c.manager) + '</td>' +
       '<td class="num"><b>' + fmt(c.balance) + '</b></td>' +
       '<td class="num ' + ageCls(c.daysOverdue) + '">' + c.daysOverdue + '</td>' +

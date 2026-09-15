@@ -7710,9 +7710,11 @@ function positionLabel(name, type) {
     if (sur === 'сильчев')  return 'Руководитель отдела логистики (и.о.)';
     if (sur === 'рыщанов') return 'Руководитель отдела логистики';
     if (sur === 'васин')   return 'Логист (длинномеры)';
-    // Начальники автоколонн (2026-08-30, Барыльченко) - не логисты-брокеры найма по
-    // должности, хоть и заведены с ролью logist в "Доступ" - см. COLUMN_HEAD_SUR_FRONT_.
+    // Начальники автоколонн (2026-08-30, Барыльченко; 15.09 - Дьячков, тралы) - не
+    // логисты-брокеры найма по должности, хоть и заведены с ролью logist в "Доступ" -
+    // см. COLUMN_HEAD_SUR_FRONT_.
     if (sur === 'барыльченко') return 'Начальник автоколонны (длинномеры)';
+    if (sur === 'дьячков') return 'Начальник автоколонны (тралы)';
     return 'Логист';
   }
   return (sur === 'ахтамова' || sur === 'гусейнова') ? 'Руководитель отдела продаж' : 'Менеджер по продажам';
@@ -7768,6 +7770,10 @@ var ALWAYS_PREVIEW_ROSTER_ = [
   // сентября) периодов; сам он больше не показывается как текущий руководитель нигде.
   { name: 'Рыщанов Рустем', type: 'logist', sur: 'рыщанов' },
   { name: 'Барыльченко Пётр Иванович', type: 'logist', sur: 'барыльченко' },
+  // Дьячков (15.09) - начальник автоколонны ТРАЛОВ, тот же повод, что у Барыльченко
+  // выше (не брокер найма, в 1С НИКОГДА не будет своей строки mgr_l="Дьячков") - см.
+  // plans/2026-09-15-dyachkov-tral-page-and-driver-salary-by-fleet.md.
+  { name: 'Дьячков Павел Викторович', type: 'logist', sur: 'дьячков' },
 ];
 // Единая точка сборки ростера дропдауна (2026-08-21) - раньше concat+dedupe дублировался в
 // трёх местах (myPageCurrentEntry_/renderMyPage/viewAsRoster_), из-за чего правка вроде этой
@@ -7815,7 +7821,7 @@ function isVasinEntry_(entry) {
 // длинномеров, см. plans/2026-08-30-avtokolonna-head-personal-page.md) - Влад: "интерфейс
 // как у Васина... расчёт ЗП такой же как у Васина" - та же renderMyPageVasin, зеркало
 // isColumnHeadName_ на бэкенде. Расширяемый список (не только Барыльченко в будущем).
-var COLUMN_HEAD_SUR_FRONT_ = ['барыльченко'];
+var COLUMN_HEAD_SUR_FRONT_ = ['барыльченко', 'дьячков'];
 function isColumnHeadEntry_(entry) {
   return !!entry && entry.type === 'logist' && COLUMN_HEAD_SUR_FRONT_.indexOf(entry.name.trim().split(' ')[0].toLowerCase()) >= 0;
 }
@@ -10710,20 +10716,36 @@ async function renderMyPageVasin(el, current, selectorHtml) {
     return h;
   }
 
+  // 15.09 - Дьячков (начальник автоколонны ТРАЛОВ, plans/2026-09-15-dyachkov-tral-page-
+  // and-driver-salary-by-fleet.md) делит эту же страницу с Васиным/Барыльченко, но по
+  // своему сегменту - сегмент решается ПО ФАМИЛИИ current (зеркало VPS COLUMN_HEAD_FLEET_),
+  // работает одинаково что при реальном входе (D.role==='logist'), что в admin-дропдауне
+  // ниже - оба варианта строят `d` заново на каждый рендер, общий признак проще держать
+  // в одном месте, чем гадать по наличию бандла.
+  var isTralSeg = current.trim().split(' ')[0].toLowerCase() === 'дьячков';
+  var segNom = isTralSeg ? 'тралы' : 'длинномеры';     // "(тралы)"/"(длинномеры)"
+  var segGen = isTralSeg ? 'тралов' : 'длинномеров';   // "ВП тралов"
+  var segDat = isTralSeg ? 'тралам' : 'длинномерам';   // "по тралам"
+
   var d;
   if (D.role === 'logist') {
-    d = (D.orders && D.orders.long_haul) || null;
+    d = (D.orders && (isTralSeg ? D.orders.tral_haul : D.orders.long_haul)) || null;
     if (!d) { el.innerHTML = selectorHtml + '<p style="color:var(--muted);padding:16px">Нет данных за этот месяц.</p>'; return; }
   } else {
     var os = (D.orders && D.orders.summary) || {};
     d = {
       vehicles: (D.vehicles || [])
-        .filter(function(v){ return v.type === 'Борт' || (v.type||'').indexOf('Борт') === 0; })
+        .filter(function(v){ var isBort = v.type === 'Борт' || (v.type||'').indexOf('Борт') === 0; return isTralSeg ? !isBort : isBort; })
         .sort(function(a,b){ return (b.profit||0) - (a.profit||0); }),
-      funnel: (D.orders && D.orders.long_funnel) || { no_waybill:0, not_posted:0, no_realiz:0, complete:0 },
-      driver_no_waybill: (D.orders && D.orders.by_driver_no_waybill_long) || [],
-      deals: (D.orders && D.orders.all_long_deals) || [],
-      summary: {
+      funnel: (D.orders && (isTralSeg ? D.orders.tral_funnel : D.orders.long_funnel)) || { no_waybill:0, not_posted:0, no_realiz:0, complete:0 },
+      driver_no_waybill: (D.orders && (isTralSeg ? D.orders.by_driver_no_waybill_tral : D.orders.by_driver_no_waybill_long)) || [],
+      deals: (D.orders && (isTralSeg ? D.orders.all_tral_deals : D.orders.all_long_deals)) || [],
+      summary: isTralSeg ? {
+        long_orders: os.tral_orders||0, long_amount: os.tral_amount||0,
+        own_long_orders: os.own_tral_orders||0, own_long_amount: os.own_tral_amount||0,
+        hired_long_orders: os.hired_tral_orders||0, hired_profit_long: os.hired_profit_tral||0,
+        profit_long: (D.summary && typeof D.summary.profit_tral === 'number') ? D.summary.profit_tral : null,
+      } : {
         long_orders: os.long_orders||0, long_amount: os.long_amount||0,
         own_long_orders: os.own_long_orders||0, own_long_amount: os.own_long_amount||0,
         hired_long_orders: os.hired_long_orders||0, hired_profit_long: os.hired_profit_long||0,
@@ -10743,8 +10765,13 @@ async function renderMyPageVasin(el, current, selectorHtml) {
   // без снимка calcPaceRatio_ дальше по функции читал бы уже восстановленный текущий период.
   var orderPeriod_ = (D.orders||{}).period;
 
+  // 15.09 - формула calcVasin (2.5% от ВП длинномеров) НЕ считается для тралов (Влад:
+  // "без блока расчёт зарплаты на личной странице [Дьячкова]" - будущая система мотивации
+  // для тралов ещё не решена). Для isTralSeg даже не пытаемся - сервер и так вернул бы
+  // 403 (VASIN_FORMULA_SUR_ на VPS не включает "дьячков" намеренно), но незачем показывать
+  // это как ошибку - блок просто не строится.
   var salary = null;
-  if (s.profit_long != null) {
+  if (!isTralSeg && s.profit_long != null) {
     try {
       salary = await fetchSalaryCompute_('calcVasin', { profitLong: s.profit_long });
     } catch (e) {
@@ -10810,7 +10837,7 @@ async function renderMyPageVasin(el, current, selectorHtml) {
   var html = selectorHtml;
 
   if (vehPlan > 0) {
-    html += planProgressBar('Выполнение плана ВП (длинномеры)', vehPlanPct, vehForecastPct, vehFact, vehForecast, vehPlan);
+    html += planProgressBar('Выполнение плана ВП ('+segNom+')', vehPlanPct, vehForecastPct, vehFact, vehForecast, vehPlan);
   }
 
   // KPI-шапка: заказы/выручка/ВП/документы - ТОЛЬКО собственный парк (Влад, 2026-08-11:
@@ -10819,25 +10846,28 @@ async function renderMyPageVasin(el, current, selectorHtml) {
   html += '<div class="kpi-grid" style="margin-bottom:18px">';
   html += kpiCard('🚚', 'Заказов (свой парк)', String(s.own_long_orders||0), vehicles.length+' машин в работе', COL.blue);
   html += kpiCard('💰', 'Выручка (свой парк)', mln(s.own_long_amount||0), vehicles.length ? 'в среднем '+mln((s.own_long_amount||0)/vehicles.length)+' на машину' : '', COL.green);
-  html += kpiCard('📈', 'ВП длинномеров (компания)', s.profit_long!=null ? mln(s.profit_long) : '—', 'база зарплаты (2.5%)', COL.green);
+  html += kpiCard('📈', 'ВП '+segGen+' (компания)', s.profit_long!=null ? mln(s.profit_long) : '—', isTralSeg ? '' : 'база зарплаты (2.5%)', COL.green);
   html += kpiCard('📋', 'Документы', funnel.complete+' из '+funTotal, funTotal>0 ? Math.round(funnel.complete/funTotal*100)+'% готово' : 'Нет заказов в воронке', COL.blue);
   html += '</div>';
 
   // Расчёт зарплаты - calcVasin (2.5% от ВП длинномеров компании), сразу после KPI-блоков
   // (Влад, 2026-08-12: "расчёт зарплаты сразу после 4 блоков с информацией" - общий принцип
-  // для всех личных страниц, не в самом низу, как было раньше).
-  var salaryBody;
-  if (!salary) {
-    salaryBody = '<div style="font-size:13px;color:var(--muted)">Нет данных для расчёта за этот период.</div>';
-  } else {
-    salaryBody = '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(var(--ink),.04)">'+
-      '<span style="font-size:13px;color:var(--muted)">2.5% от ВП длинномеров компании ('+mln(salary.profitLong)+')</span>'+
-      '<span style="font-size:13px;font-weight:600">'+fr(salary.bonus)+'</span></div>'+
-      '<div style="display:flex;justify-content:space-between;padding-top:10px;margin-top:4px;border-top:1px solid var(--border)">'+
-      '<span style="font-size:14px;font-weight:700">Итого</span>'+
-      '<span style="font-size:16px;font-weight:700;color:'+COL.green+'">'+fr(salary.total)+'</span></div>';
+  // для всех личных страниц, не в самом низу, как было раньше). 15.09 - блока целиком НЕТ
+  // для тралов (см. isTralSeg выше, salary там всегда null не по ошибке, а по замыслу).
+  if (!isTralSeg) {
+    var salaryBody;
+    if (!salary) {
+      salaryBody = '<div style="font-size:13px;color:var(--muted)">Нет данных для расчёта за этот период.</div>';
+    } else {
+      salaryBody = '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(var(--ink),.04)">'+
+        '<span style="font-size:13px;color:var(--muted)">2.5% от ВП '+segGen+' компании ('+mln(salary.profitLong)+')</span>'+
+        '<span style="font-size:13px;font-weight:600">'+fr(salary.bonus)+'</span></div>'+
+        '<div style="display:flex;justify-content:space-between;padding-top:10px;margin-top:4px;border-top:1px solid var(--border)">'+
+        '<span style="font-size:14px;font-weight:700">Итого</span>'+
+        '<span style="font-size:16px;font-weight:700;color:'+COL.green+'">'+fr(salary.total)+'</span></div>';
+    }
+    html += block('Расчёт зарплаты', salaryBody);
   }
-  html += block('Расчёт зарплаты', salaryBody);
 
   // Задачи на сегодня - между 4 KPI-блоками и таблицей машин (Влад, 2026-08-11)
   if (tasks.length) {
@@ -10851,7 +10881,7 @@ async function renderMyPageVasin(el, current, selectorHtml) {
   // 1. ВП по каждой машине - те же колонки, что вкладка "Техника" + прогноз/статус, как на
   // "Водителях" (план/факт/%/прогноз к концу месяца/оценка-действие)
   var vehRows = !vehiclesF.length
-    ? '<tr><td colspan="9" class="muted" style="padding:14px">Нет машин-длинномеров за этот период</td></tr>'
+    ? '<tr><td colspan="9" class="muted" style="padding:14px">Нет машин-'+(isTralSeg?'тралов':'длинномеров')+' за этот период</td></tr>'
     : vehiclesF.map(function(x) {
         var v = x.v;
         var planPct = v.plan > 0 ? v.profit / v.plan * 100 : null;
@@ -10890,7 +10920,7 @@ async function renderMyPageVasin(el, current, selectorHtml) {
     '<span style="color:#BA7517">Нет реализации: <b>'+(funnel.no_realiz||0)+'</b></span>'+
     '<span style="color:'+COL.green+'">Готово: <b>'+(funnel.complete||0)+'</b></span>'+
   '</div>';
-  html += block('📋 Воронка путевых листов (длинномеры)', funnelHtml);
+  html += block('📋 Воронка путевых листов ('+segNom+')', funnelHtml);
 
   // 3. Не сдали путевые листы - по водителям, тот же стиль, что "Обзор заказов"
   var noWbRows = !driversNoWaybill.length
@@ -10906,15 +10936,16 @@ async function renderMyPageVasin(el, current, selectorHtml) {
           '<td class="num '+pctCls+'">'+pct+'%</td>'+
         '</tr>';
       }).join('');
-  html += block('☎️ Не сдали путевые листы (водители, длинномеры)',
+  html += block('☎️ Не сдали путевые листы (водители, '+segNom+')',
     '<div style="overflow-x:auto"><table class="tbl">'+
-      '<thead><tr><th>#</th><th>Водитель</th><th class="num">Не сдано</th><th class="num">Заказов (длинномеры)</th><th class="num">% несдачи</th></tr></thead>'+
+      '<thead><tr><th>#</th><th>Водитель</th><th class="num">Не сдано</th><th class="num">Заказов ('+segNom+')</th><th class="num">% несдачи</th></tr></thead>'+
       '<tbody>'+noWbRows+'</tbody>'+
     '</table></div>');
 
-  // 4. Сделки собственного парка по длинномерам - Влад, 2026-08-11: "убрать информацию по
+  // 4. Сделки собственного парка по сегменту - Влад, 2026-08-11: "убрать информацию по
   // наёмной технике, у Василия только собственный парк" - наёмные сделки отфильтрованы
-  // (all_long_deals с бэкенда содержит и то, и то - фильтр только на этой странице).
+  // (all_long_deals/all_tral_deals с бэкенда содержат и то, и то - фильтр только на этой
+  // странице).
   var ownDeals = deals.filter(function(dl){ return !dl.is_hired; });
   var dealsShown = ownDeals.slice(0, 40);
   var dealRows = !dealsShown.length
@@ -10928,11 +10959,59 @@ async function renderMyPageVasin(el, current, selectorHtml) {
           '<td class="num green">'+fmtK2(dl.profit||0)+'</td>'+
         '</tr>';
       }).join('');
-  html += block('🤝 Сделки собственного парка (длинномеры)'+(ownDeals.length>dealsShown.length ? ' <span style="font-size:11px;color:var(--muted);font-weight:400">(показаны последние '+dealsShown.length+' из '+ownDeals.length+')</span>' : ''),
+  html += block('🤝 Сделки собственного парка ('+segNom+')'+(ownDeals.length>dealsShown.length ? ' <span style="font-size:11px;color:var(--muted);font-weight:400">(показаны последние '+dealsShown.length+' из '+ownDeals.length+')</span>' : ''),
     '<div style="overflow-x:auto"><table class="tbl">'+
       '<thead><tr><th>Дата</th><th>Заказчик</th><th>Менеджер</th><th class="num">Сумма</th><th class="num">Прибыль</th></tr></thead>'+
       '<tbody>'+dealRows+'</tbody>'+
     '</table></div>');
+
+  // 5. "Зарплата машинистов" по своему сегменту (15.09, Влад: "добавить блок зарплата
+  // машинистов, у Дьячкова только тральщики, у Барыльченко только длинномерщики" -
+  // plans/2026-09-15-dyachkov-tral-page-and-driver-salary-by-fleet.md). Реальный вход
+  // (D.role==='logist') бьёт в /api/my_driver_payroll - сервер САМ решает сегмент по
+  // сессии, ничего не передаём с клиента (HR-данные). Admin-предпросмотр ("Смотреть как")
+  // не имеет сессии Дьячкова/Барыльченко - этот эндпоинт его отфильтрует (400, "используйте
+  // /api/driver_payroll") - вместо этого зовём admin-эндпоинт (видит вообще всех) и
+  // фильтруем ТУТ ЖЕ, на клиенте, по нужному vehicle_bucket - тот же результат, что у
+  // реального Дьячкова/Барыльченко увидел бы, просто другой путь получения (admin и так
+  // вправе видеть все зарплаты, фильтрация тут - только чтобы предпросмотр совпадал 1:1
+  // с тем, что видит сам сотрудник).
+  var wantBucket = isTralSeg ? 'трал' : 'длинномер';
+  var payroll = null, payrollErr = null;
+  try {
+    if (D.role === 'admin') {
+      var rp = await fetchFromYardApi_('/driver_payroll', {});
+      if (rp.ok && rp.data && !rp.data.error) {
+        payroll = { rows: (rp.data.rows || []).filter(function(r){ return r.vehicle_bucket === wantBucket; }), partial: rp.data.partial };
+      } else { payrollErr = (rp.data && rp.data.error) || 'ошибка сервера'; }
+    } else {
+      var rp2 = await fetchFromYardApi_('/my_driver_payroll', {});
+      if (rp2.ok && rp2.data && !rp2.data.error) payroll = { rows: rp2.data.rows || [], partial: rp2.data.partial };
+      else payrollErr = (rp2.data && rp2.data.error) || 'ошибка сервера';
+    }
+  } catch (e) { payrollErr = e.message; }
+
+  if (payroll) {
+    var payRows = !payroll.rows.length
+      ? '<tr><td colspan="6" class="muted" style="padding:14px">Нет данных за этот месяц</td></tr>'
+      : payroll.rows.slice().sort(function(a,b){ return (b.net_amount||0) - (a.net_amount||0); }).map(function(r) {
+          return '<tr>'+
+            '<td><b>'+r.driver_name+'</b></td>'+
+            '<td class="num muted">'+(r.hours||0)+'</td>'+
+            '<td class="num">'+fmtK2(r.accruals_amount||0)+'</td>'+
+            '<td class="num'+((r.deductions_amount||0)<0?' red':'')+'">'+fmtK2(r.deductions_amount||0)+'</td>'+
+            '<td class="num muted">'+fmtK2(r.ndfl_amount||0)+'</td>'+
+            '<td class="num green"><b>'+fmtK2(r.net_amount||0)+'</b></td>'+
+          '</tr>';
+        }).join('');
+    html += block('👷 Зарплата машинистов ('+segNom+')'+(payroll.partial ? ' <span style="font-size:11px;color:'+COL.amber+';font-weight:400">месяц не закрыт - частичные данные</span>' : ''),
+      '<div style="overflow-x:auto"><table class="tbl">'+
+        '<thead><tr><th>Машинист</th><th class="num">Часы</th><th class="num">Начисления</th><th class="num">Удержания</th><th class="num">НДФЛ</th><th class="num">К начислению</th></tr></thead>'+
+        '<tbody>'+payRows+'</tbody>'+
+      '</table></div>');
+  } else if (payrollErr) {
+    html += block('👷 Зарплата машинистов ('+segNom+')', '<div style="font-size:13px;color:var(--muted)">Не удалось загрузить - '+payrollErr+'</div>');
+  }
 
   el.innerHTML = html;
 }

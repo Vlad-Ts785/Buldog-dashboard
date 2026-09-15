@@ -373,6 +373,11 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 
 /* ── KPI GRID ──────────────────────────────────────────── */
 .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;}
+/* «Суды» (15.09) - три карточки вместо четырёх. Задано правилом, а НЕ инлайн-стилем:
+   инлайн перебивал бы медиазапрос @media(max-width:900px) ниже, и на узком экране сетка
+   осталась бы в три колонки, вылезая за экран (поймано на приёмке превью). */
+#court-kpi{grid-template-columns:repeat(3,1fr);}
+@media(max-width:900px){#court-kpi{grid-template-columns:1fr;}}
 .kpi{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;}
 .kpi-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;font-weight:500;}
 .kpi-value{font-size:22px;font-weight:600;color:var(--text);line-height:1.2;}
@@ -5311,12 +5316,17 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
       <div id="debt-tab-court" style="display:none">
         <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap">
           <span id="court-sync-status" class="muted" style="font-size:11px;margin-right:auto"></span>
+          <select id="court-filter-type" onchange="renderCourtCases_()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:6px 10px;font-size:12px;cursor:pointer">
+            <option value="">Все типы дел</option>
+            <option value="claims">Иски о взыскании</option>
+            <option value="bankrupt">Банкротства</option>
+          </select>
           <select id="court-filter-entity" onchange="renderCourtCases_()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:6px 10px;font-size:12px;cursor:pointer"></select>
           <select id="court-filter-status" onchange="renderCourtCases_()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:6px 10px;font-size:12px;cursor:pointer"></select>
           <button id="court-closed-toggle-btn" onclick="toggleCourtClosed_()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:6px 12px;font-size:12px;cursor:pointer">Показать завершённые</button>
           <button id="court-sync-btn" onclick="courtSyncNow_()" data-nav-sound style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:6px 12px;font-size:12px;cursor:pointer" title="Тот же прогон, что автоматически каждое утро в 05:40 МСК">Обновить</button>
         </div>
-        <div class="kpi-grid" id="court-kpi" style="grid-template-columns:repeat(3,1fr)">
+        <div class="kpi-grid" id="court-kpi">
           <div class="kpi" id="court-kpi-active"></div>
           <div class="kpi" id="court-kpi-linked"></div>
           <div class="kpi" id="court-kpi-bankrupt"></div>
@@ -22321,7 +22331,10 @@ function chooseDebtTarget_(tab) {
 var courtData_ = null, courtEvents_ = null, courtLoading_ = false;
 var courtShowClosed_ = false;   // по умолчанию видны только идущие дела
 var courtMarks_ = null;         // contragent (имя из 1С) -> {count, sum} для значка в таблице ДЗ
-var courtSort_ = { col: 'claim_sum', dir: -1 };
+// По умолчанию сортируем по ДАТЕ, а не по сумме иска: в банкротных делах СуммИск - размер
+// всего банкротства (миллиарды), и при сортировке по деньгам они навсегда занимают весь
+// экран, отодвигая наши обычные взыскания вниз. Свежее сверху - то, что реально движется.
+var courtSort_ = { col: 'case_date', dir: -1 };
 // Своё экранирование, а не общий escHtml_: та функция объявлена в другом месте файла, и
 // проверять её видимость из этого скоупа дороже, чем три строки здесь (ловушка window.D vs
 // bare D в этом же файле уже стоила отладки).
@@ -22330,22 +22343,62 @@ function courtEsc_(s) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
   });
 }
+// Ключи сортировки - ИМЕННО ТЕ значения, что стоят в ячейках (opponent_disp/our_disp -
+// нормализованные имена, не сырой капс из ЕГРЮЛ). Иначе таблица сортируется по одному, а
+// показывает другое: порядок под стрелкой перестаёт быть монотонным, и это ровно тот класс
+// бага, из-за которого ГОСТ требует численную приёмку сортировки (раздел 4). Поймано здесь
+// же, на приёмке превью.
 var COURT_COLS = [
-  { key: 'opponent_name', label: 'Ответчик' },
+  { key: 'opponent_disp', label: 'Ответчик' },
   { key: 'debt_balance', label: 'Долг в ДЗ', num: true },
   { key: 'claim_sum', label: 'Сумма иска', num: true },
-  { key: 'outcome_text', label: 'Стадия' },
+  { key: 'stage_disp', label: 'Стадия' },
   { key: 'court', label: 'Суд' },
   { key: 'case_number', label: 'Дело' },
   { key: 'case_date', label: 'Дата' },
-  { key: 'our_name', label: 'Истец (наше юрлицо)' }
+  { key: 'our_disp', label: 'Истец (наше юрлицо)' }
 ];
 // Десятичный знак - запятая (ГОСТ, раздел 2). Легаси fmtM() в этом файле пишет точку,
 // поэтому здесь своя функция, а не вызов чужой.
 function courtMoney_(n) {
   n = Number(n) || 0;
-  if (Math.abs(n) >= 1000000) return (n / 1000000).toFixed(Math.abs(n) >= 10000000 ? 1 : 2).replace('.', ',') + ' млн ₽';
+  var a = Math.abs(n);
+  if (a >= 1000000000) return (n / 1000000000).toFixed(2).replace('.', ',') + ' млрд ₽';
+  if (a >= 1000000) return (n / 1000000).toFixed(a >= 10000000 ? 1 : 2).replace('.', ',') + ' млн ₽';
   return Math.round(n).toLocaleString('ru-RU') + ' ₽';
+}
+// 1С и ЕГРЮЛ отдают контрагентов капсом целиком («ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ
+// "ИНТЕРЛИЗИНГ"»). В таблице такая строка занимает три строки и кричит. Разворачиваем ОПФ в
+// аббревиатуру и снимаем капс со слов длиннее 4 букв (аббревиатуры вроде КДСП, РСК, ЮУСК
+// остаются как есть). Границы слова через явный класс букв, НЕ \b - в JS он с кириллицей не
+// работает (память project_js_word_boundary_cyrillic_gotcha).
+function courtShortName_(s) {
+  var t = String(s == null ? '' : s)
+    // «ОТВЕТСТВЕННОСТЬ» без «Ю» - не опечатка здесь, а реальное написание в ЕГРЮЛ у части
+    // контрагентов (живой пример: «ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬ МОНТЕГРО»).
+    .replace(/ОБЩЕСТВО\s+С\s+ОГРАНИЧЕННОЙ\s+ОТВЕТСТВЕННОСТЬ(?:Ю)?/gi, 'ООО')
+    .replace(/ПУБЛИЧНОЕ\s+АКЦИОНЕРНОЕ\s+ОБЩЕСТВО/gi, 'ПАО')
+    .replace(/ЗАКРЫТОЕ\s+АКЦИОНЕРНОЕ\s+ОБЩЕСТВО/gi, 'ЗАО')
+    .replace(/АКЦИОНЕРНОЕ\s+ОБЩЕСТВО/gi, 'АО')
+    .replace(/ИНДИВИДУАЛЬНЫЙ\s+ПРЕДПРИНИМАТЕЛЬ/gi, 'ИП');
+  // Повтор ОПФ - не наша ошибка нормализации, а реальность ЕГРЮЛ: у части компаний
+  // организационно-правовая форма продублирована внутри самого названия
+  // («ООО "ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬ МОНТЕГРО"» -> «ООО "ООО Монтегро"»).
+  t = t.replace(/^(ООО|АО|ПАО|ЗАО|ИП)\s+"?\s*\1\s+/i, '$1 "');
+  // Слово берём вместе с дефисными частями, иначе «ЮЖНО-УРАЛЬСКАЯ» превращается в
+  // «ЮЖНО-Уральская»: первая часть коротка сама по себе и под порог аббревиатуры не попадает.
+  // Порог считаем по сумме букв слова: КДСП/ЦДС/ЯРД/ДиМ остаются как есть.
+  return t.replace(/[А-ЯЁA-Z]{2,}(?:-[А-ЯЁA-Z]{2,})*/g, function(w) {
+    if (w.replace(/-/g, '').length < 5) return w;
+    return w.split('-').map(function(p) { return p.charAt(0) + p.slice(1).toLowerCase(); }).join('-');
+  });
+}
+function courtCasesWord_(n) {
+  var t = Math.abs(n) % 100, o = t % 10;
+  if (t > 10 && t < 20) return 'дел';
+  if (o > 1 && o < 5) return 'дела';
+  if (o === 1) return 'дело';
+  return 'дел';
 }
 function courtDateRu_(s) {
   if (!s) return '—';
@@ -22356,14 +22409,18 @@ function courtDateRu_(s) {
 // единственная стадия, требующая действия сегодня -> янтарный. Банкротство ответчика и отказ -
 // потеря денег -> красный. Иск удовлетворён -> зелёный. Обычный ход процесса - нейтральный
 // синий, а не зелёный: «дело просто идёт» это не хорошая новость, это отсутствие новости.
+// Короткая подпись в бейдже + полный текст в title: «Должник признан банкротом» в колонке
+// шириной в пилюлю разворачивается в три строки и ломает ритм таблицы.
 function courtStageInfo_(c) {
+  var full = c.outcome_text || (c.is_active ? 'идёт' : 'завершено');
   var t = String(c.outcome_text || '').toLowerCase();
-  if (t.indexOf('без движения') >= 0) return { cls: 'amber', text: c.outcome_text };
-  if (t.indexOf('банкрот') >= 0) return { cls: 'red', text: c.outcome_text };
-  if (t.indexOf('удовлетвор') >= 0) return { cls: 'green', text: c.outcome_text };
-  if (t.indexOf('отказ') >= 0 || t.indexOf('отклон') >= 0) return { cls: 'red', text: c.outcome_text };
-  if (!c.is_active) return { cls: '', text: c.outcome_text || 'завершено' };
-  return { cls: 'blue', text: c.outcome_text || 'идёт' };
+  if (t.indexOf('без движения') >= 0) return { cls: 'amber', text: 'Без движения', full: full };
+  if (t.indexOf('банкрот') >= 0) return { cls: 'red', text: 'Банкротство', full: full };
+  if (t.indexOf('удовлетвор') >= 0) return { cls: 'green', text: 'Удовлетворён', full: full };
+  if (t.indexOf('отказ') >= 0 || t.indexOf('отклон') >= 0) return { cls: 'red', text: 'Отказано', full: full };
+  if (t.indexOf('рассматривается') >= 0) return { cls: 'blue', text: 'Рассматривается', full: full };
+  if (!c.is_active) return { cls: '', text: full, full: full };
+  return { cls: 'blue', text: full, full: full };
 }
 function loadCourtCases_(force) {
   if (courtLoading_) return;
@@ -22466,14 +22523,21 @@ function renderCourtCases_() {
   // знак стоит ПЕРЕД разностью.
   var entVal = (document.getElementById('court-filter-entity') || {}).value || '';
   var stVal = (document.getElementById('court-filter-status') || {}).value || '';
+  var typeVal = (document.getElementById('court-filter-type') || {}).value || '';
   var rows = all.filter(function(c) {
     if (!courtShowClosed_ && !c.is_active) return false;
     if (entVal && c.our_name !== entVal) return false;
     if (stVal && c.outcome_text !== stVal) return false;
+    if (typeVal === 'claims' && c.case_type === 'Б') return false;
+    if (typeVal === 'bankrupt' && c.case_type !== 'Б') return false;
     return true;
   }).map(function(c) {
     var o = Object.create(c);
     o.debt_balance = c.debt ? c.debt.balance : 0;
+    o.opponent_disp = courtShortName_(c.opponent_name) || '—';
+    o.our_disp = courtShortName_(c.our_name) || '—';
+    o.stage = courtStageInfo_(c);
+    o.stage_disp = o.stage.text || '';
     return o;
   });
   rows.sort(function(a, b) {
@@ -22490,30 +22554,34 @@ function renderCourtCases_() {
         c.label + '<span style="font-size:10px;opacity:' + (active ? '1' : '0.3') + '">' + arrow + '</span></th>';
     }).join('');
   }
-  setText('court-cases-sub', rows.length + (courtShowClosed_ ? ' дел (со всеми завершёнными)' : ' идущих дел'));
+  setText('court-cases-sub', rows.length + ' ' + courtCasesWord_(rows.length) + (courtShowClosed_ ? ' (включая завершённые)' : ' идёт сейчас'));
   var emptyEl = document.getElementById('court-cases-empty');
   if (emptyEl) {
     emptyEl.style.display = rows.length ? 'none' : 'block';
     emptyEl.textContent = all.length ? 'Под выбранные условия не попало ни одного дела.' : 'Дел пока нет - нажмите «Обновить», чтобы опросить источник.';
   }
   document.getElementById('court-cases-body').innerHTML = rows.map(function(c) {
-    var stage = courtStageInfo_(c);
+    var stage = c.stage;
     var risk = c.risk ? legalRiskMarkHtml_(c.risk.light, 8, 'margin-right:6px', c.risk.marker) : '';
     var debtCell = c.debt
-      ? '<b>' + courtMoney_(c.debt.balance) + '</b>' + (c.debt.manager ? '<div class="muted" style="font-size:9.5px">' + courtEsc_(cleanName(c.debt.manager)) + '</div>' : '')
+      ? '<b style="font-family:JetBrains Mono,monospace;font-size:11.5px">' + courtMoney_(c.debt.balance) + '</b>' + (c.debt.manager ? '<div class="muted" style="font-size:9.5px">' + courtEsc_(cleanName(c.debt.manager)) + '</div>' : '')
       : '<span class="muted">—</span>';
-    var bankrTag = c.case_type === 'Б' ? ' <span class="badge red" style="font-size:9px">банкротство</span>' : '';
-    return '<tr>' +
-      '<td>' + risk + '<b>' + courtEsc_(c.opponent_name || '—') + '</b>' +
+    // Тип «банкротное дело» показываем, только если стадия сама об этом не сказала - иначе в
+    // строке два одинаковых красных слова подряд.
+    var bankrTag = (c.case_type === 'Б' && stage.text !== 'Банкротство')
+      ? '<div style="margin-top:3px"><span class="badge red" style="font-size:9px">банкротство</span></div>' : '';
+    return '<tr' + (c.is_active ? '' : ' style="opacity:.62"') + '>' +
+      '<td>' + risk + '<b>' + courtEsc_(c.opponent_disp) + '</b>' +
         (c.debt ? '<div class="muted" style="font-size:9.5px">в ДЗ: ' + courtEsc_(c.debt.contragent) + '</div>' : '') + '</td>' +
       '<td class="num">' + debtCell + '</td>' +
-      '<td class="num">' + (c.claim_sum ? courtMoney_(c.claim_sum) : '<span class="muted">не указана</span>') + '</td>' +
-      '<td><span class="badge ' + stage.cls + '">' + courtEsc_(stage.text || '—') + '</span></td>' +
+      '<td class="num" style="white-space:nowrap;font-family:JetBrains Mono,monospace;font-size:11.5px">' + (c.claim_sum ? courtMoney_(c.claim_sum) : '<span class="muted" style="font-family:inherit">не указана</span>') + '</td>' +
+      '<td><span class="badge ' + stage.cls + '" style="white-space:nowrap" title="' + courtEsc_(stage.full) + '">' + courtEsc_(stage.text || '—') + '</span></td>' +
       '<td class="muted" style="font-size:11px">' + courtEsc_(c.court || '—') + '</td>' +
-      '<td><a href="' + courtEsc_(c.kad_url || '#') + '" target="_blank" rel="noopener noreferrer" style="color:var(--blue);text-decoration:none">' +
-        courtEsc_(c.case_number || '—') + '</a>' + bankrTag + '</td>' +
-      '<td class="muted" style="font-size:11px">' + courtDateRu_(c.case_date) + '</td>' +
-      '<td class="muted" style="font-size:11px">' + courtEsc_(c.our_name || '—') + '</td>' +
+      '<td><a href="' + courtEsc_(c.kad_url || '#') + '" target="_blank" rel="noopener noreferrer" ' +
+        'style="color:var(--blue);text-decoration:none;white-space:nowrap;font-family:\'JetBrains Mono\',monospace;font-size:11.5px" ' +
+        'title="Открыть карточку дела в Картотеке арбитражных дел">' + courtEsc_(c.case_number || '—') + '</a>' + bankrTag + '</td>' +
+      '<td class="muted" style="font-size:11px;white-space:nowrap;font-variant-numeric:tabular-nums">' + courtDateRu_(c.case_date) + '</td>' +
+      '<td class="muted" style="font-size:11px">' + courtEsc_(c.our_disp) + '</td>' +
     '</tr>';
   }).join('');
 }
@@ -22531,9 +22599,9 @@ function courtRenderEvents_() {
       ? (courtMoney_(e.old_value) + ' → ' + courtMoney_(e.new_value))
       : (e.old_value ? (courtEsc_(e.old_value) + ' → ' + courtEsc_(e.new_value || '')) : courtEsc_(e.new_value || ''));
     return '<tr>' +
-      '<td class="muted" style="font-size:11px">' + courtDateRu_(e.created_at) + '</td>' +
-      '<td><a href="' + courtEsc_(e.kad_url || '#') + '" target="_blank" rel="noopener noreferrer" style="color:var(--blue);text-decoration:none">' + courtEsc_(e.case_number) + '</a></td>' +
-      '<td>' + courtEsc_(e.opponent_name || '—') + '</td>' +
+      '<td class="muted" style="font-size:11px;white-space:nowrap;font-variant-numeric:tabular-nums">' + courtDateRu_(e.created_at) + '</td>' +
+      '<td><a href="' + courtEsc_(e.kad_url || '#') + '" target="_blank" rel="noopener noreferrer" style="color:var(--blue);text-decoration:none;white-space:nowrap;font-family:\'JetBrains Mono\',monospace;font-size:11.5px">' + courtEsc_(e.case_number) + '</a></td>' +
+      '<td>' + courtEsc_(courtShortName_(e.opponent_name) || '—') + '</td>' +
       '<td>' + courtEsc_(what) + ': <span class="muted">' + detail + '</span></td>' +
     '</tr>';
   }).join('');

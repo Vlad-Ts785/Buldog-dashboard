@@ -3387,7 +3387,9 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
   transition:background .13s var(--dv-soft),border-color .13s var(--dv-soft),transform .13s var(--dv-soft);}
 .dv-btn:hover{background:var(--bg4);border-color:var(--border-strong);}
 .dv-btn:active{transform:translateY(1px);}
-.dv-btn[disabled]{opacity:.42;cursor:default;}
+/* pointer-events:none у неактивной кнопки - чтобы клик по ней долетал до страницы и попадал в журнал (blocked_click): на сам disabled-элемент браузер событий не шлёт вовсе. Вид не меняется - курсор тут и так default. */
+
+.dv-btn[disabled]{opacity:.42;cursor:default;pointer-events:none;}
 .dv-btn[disabled]:hover{background:var(--bg3);}
 
 /* ── Плитки KPI (значения - mono/tabular, ГОСТ раздел 2) ────────────────────── */
@@ -18186,6 +18188,51 @@ var dvState_ = {
   q: '', type: '', st: {}, sortK: 'rev', sortDir: -1,
   car: null, lastCar: null, period: 'all', month: null, listScrollY: 0
 };
+
+/* ── Журнал живых сложностей на «Динамике» (Влад 15.09, принимая превью: «что-то будем
+   корректировать уже в процессе эксплуатации» - значит правки должны опираться на
+   данные, а не на воспоминания). Тот же ui_events/POST /api/ui_event, что на «Задании»
+   и Планировке, но здесь события идут через общую очередь (см. logUiEvent_ выше):
+   страница тяжёлая, запрос на каждый чих недопустим.
+   ЧТО НЕ ПИШЕМ: суммы, ФИО водителей, связку госномер-водитель. Госномер сам по себе -
+   инвентарный номер техники, без него журнал бесполезен. Поисковый запрос пишем как
+   набран: это собственный ввод Влада, ради него всё и затевалось (видно, что он ищет
+   «в325», а поиск требует «В 325 МХ 797»). */
+var dvViewportLogged_ = false;   // ширина окна - раз на реальную загрузку, не на каждый возврат
+var dvCarOpenAt_ = 0;            // когда открыли паспорт - для «сколько на нём пробыл»
+var dvCloseHow_ = 'back';        // чем закрыли: back | esc | switch | nav
+var dvSearchTimer_ = null, dvLastEmptyQ_ = '';
+function dvLog_(type, target, detail) { try { logUiEvent_('dynamics', type, target, detail); } catch (e) {} }
+function dvLogCarOpen_(gos, how) { dvCarOpenAt_ = Date.now(); dvLog_('passport_open', gos, how || ''); }
+function dvLogCarClose_(how) {
+  var sec = dvCarOpenAt_ ? Math.round((Date.now() - dvCarOpenAt_) / 1000) : -1;
+  dvCarOpenAt_ = 0;
+  dvLog_('passport_close', dvState_.car || '', (sec >= 0 ? sec : '?') + 'с·' + (how || 'back'));
+}
+/* Уход со страницы ЦЕЛИКОМ (закрыл вкладку, обновил, ушёл по ссылке): dvBackToList_ при
+   этом не зовётся, и время на паспорте потерялось бы - а «сколько пробыл» ради него всё и
+   меряется. Слушатель объявлен ЗДЕСЬ, выше по файлу, чем общий flushUiEvents_ на pagehide:
+   порядок регистрации = порядок вызова, значит запись успевает лечь в очередь ДО отправки
+   пачки. Переключение вкладки (visibilitychange) сюда сознательно не входит - человек
+   вернётся, паспорт всё ещё открыт, это не закрытие. */
+window.addEventListener('pagehide', function() { if (dvState_.car) dvLogCarClose_('unload'); });
+window.addEventListener('pageshow', function(e) { if (e.persisted && dvState_.car) dvCarOpenAt_ = Date.now(); });
+/* Поиск пишем не на каждую букву, а когда набор ОСТАНОВИЛСЯ и в списке пусто - иначе
+   один «В 325 МХ 797» дал бы дюжину записей вместо одной осмысленной. */
+function dvQueueSearchLog_() {
+  if (dvSearchTimer_) clearTimeout(dvSearchTimer_);
+  dvSearchTimer_ = setTimeout(function() {
+    dvSearchTimer_ = null;
+    try {
+      if (!dvData_) return;              // данных ещё нет - пустой список тут не про поиск
+      var q = dvState_.q.trim();
+      if (!q || dvVisible_().length) { dvLastEmptyQ_ = ''; return; }
+      if (q === dvLastEmptyQ_) return;
+      dvLastEmptyQ_ = q;
+      dvLog_('empty_search', 'gos', q);
+    } catch (e) {}
+  }, 900);
+}
 var DV_NUM_KEYS = { work: 1, repair: 1, no_order: 1, no_driver: 1, rev: 1, vp: 1 };
 
 function dvEl_(id) { return document.getElementById(id); }
@@ -18288,6 +18335,9 @@ function loadHistoryData() {
   // источник (D), не история статусов, поэтому рисуем её независимо от того, дошли
   // ли данные ленты.
   try { renderDrivers(); } catch (e) {}
+  // С какого экрана Влад реально смотрит (флаг - иначе писалось бы на каждый возврат
+  // на вкладку; тот же приём, что lpViewportLogged_ на Планировке).
+  if (!dvViewportLogged_) { dvViewportLogged_ = true; dvLog_('viewport', '', window.innerWidth + 'x' + window.innerHeight); }
   if (dvData_ && dvLoadedPeriod_ === histPeriod) { dvRenderAll_(); return; }
   dvLoad_();
 }
@@ -18311,6 +18361,9 @@ function dvLoad_() {
     dvRenderAll_();
   };
   var goFallback = function() {
+    // Уход на резервный источник - прямой сигнал «сервера не было». Пишем ДО попытки:
+    // она сама может не дойти, а знать о падении сервера всё равно надо.
+    dvLog_('fallback', 'vehicle_timeline', dvServerErr_ || 'нет ответа');
     return ensureHistData()
       .then(function(rows) { finish(dvBuildFromRows_(rows, rng), false, 'fallback'); })
       .catch(function() { dvBusy_ = false; if (btn) btn.disabled = false; dvFail_(); });
@@ -18347,6 +18400,7 @@ function dvNarrowToData_(ds) {
 }
 
 function dvFail_() {
+  dvLog_('load_error', 'vehicle_timeline', dvServerErr_ || 'молчат оба источника');
   dvSetSync_('данные недоступны', true);
   var rows = dvEl_('dv-rows');
   if (rows) rows.innerHTML = '<div class="dv-nores"><div class="dv-nores__t">История по дням недоступна</div>' +
@@ -18358,12 +18412,16 @@ function dvFail_() {
 }
 
 function dvRefresh_() {
+  // Ручное «Обновить данные» - сигнал недоверия к цифрам на экране («а вдруг там старое?»).
+  // Если этой записи много - объяснение свежести на странице не работает, а не сервер.
+  dvLog_('refresh', '', '');
   dvData_ = null; dvLoadedPeriod_ = null;
   if (typeof uiSounds !== 'undefined' && uiSounds.refresh) uiSounds.refresh();
   dvLoad_();
 }
 
 function setHistPeriod(months, btn) {
+  dvLog_('period', String(months), months ? months + ' мес' : 'всё');
   histPeriod = months;
   // Сбрасываем только кнопки периода внутри «Динамики»
   var page = dvPage_();
@@ -18771,13 +18829,14 @@ function dvBind_() {
   if (dvBound_) return;
   dvBound_ = true;
 
-  dvEl_('dv-q').addEventListener('input', function() { dvState_.q = this.value; dvRender_(); });
-  dvEl_('dv-type').addEventListener('change', function() { dvState_.type = this.value; dvRender_(); });
+  dvEl_('dv-q').addEventListener('input', function() { dvState_.q = this.value; dvRender_(); dvQueueSearchLog_(); });
+  dvEl_('dv-type').addEventListener('change', function() { dvState_.type = this.value; dvRender_(); dvLog_('filter', 'type', this.value || '(все типы)'); });
   document.querySelectorAll('#page-dynamics .dv-chip[data-st]').forEach(function(ch) {
     ch.addEventListener('click', function() {
       var s = ch.getAttribute('data-st');
       dvState_.st[s] = !dvState_.st[s];
       ch.classList.toggle('on', !!dvState_.st[s]);
+      dvLog_('filter', 'chip:' + s, dvState_.st[s] ? 'вкл' : 'выкл');
       dvRender_();
     });
   });
@@ -18786,6 +18845,7 @@ function dvBind_() {
     dvEl_('dv-q').value = ''; dvEl_('dv-type').value = '';
     document.querySelectorAll('#page-dynamics .dv-chip[data-st]').forEach(function(c) { c.classList.remove('on'); });
     if (typeof uiSounds !== 'undefined') uiSounds.toggle();
+    dvLog_('filter', 'reset', '');
     dvRender_();
   });
   dvEl_('dv-thead').addEventListener('click', function(e) {
@@ -18794,12 +18854,48 @@ function dvBind_() {
     if (dvState_.sortK === k) dvState_.sortDir = -dvState_.sortDir;
     else { dvState_.sortK = k; dvState_.sortDir = DV_NUM_KEYS[k] ? -1 : 1; }  // числовые - сначала по убыванию
     if (typeof uiSounds !== 'undefined') uiSounds.navClick();
+    dvLog_('sort', k, dvState_.sortDir > 0 ? 'по возрастанию' : 'по убыванию');
     dvRender_();
   });
+  // Только делегирование: на 5500 клеток ленты не вешается НИ ОДНОГО обработчика и в
+  // разметку клетки не добавляется ни одного атрибута - день вычисляется позицией
+  // клетки среди соседей и только в момент клика.
   dvEl_('dv-rows').addEventListener('click', function(e) {
-    var row = e.target.closest('.dv-vrow'); if (!row) return;
-    dvOpenCar_(row.getAttribute('data-gos'));
+    var row = e.target.closest ? e.target.closest('.dv-vrow') : null;
+    if (!row) { dvLog_('dead_click', 'nores', dvState_.q || '(без поиска)'); return; }
+    var cell = e.target.closest('.dv-day');
+    if (cell && cell.classList.contains('dv-day--nodata') && cell.parentNode) {
+      var ix = Array.prototype.indexOf.call(cell.parentNode.children, cell);
+      dvLog_('dead_click', 'day_nodata', (dvDays_[ix] || '?') + ' ' + row.getAttribute('data-gos'));
+    }
+    dvOpenCar_(row.getAttribute('data-gos'), 'row');
   });
+  // Полоса парка выглядит интерактивной (подсветка колонки, HUD), но по клику не делает
+  // ничего - это и есть «нажал, а не сработало». День берём из уже посчитанного индекса
+  // подсветки, ничего дополнительно не меряем.
+  dvEl_('dv-band').addEventListener('click', function(e) {
+    var i = dvHlIx_;
+    if (i < 0) {                                        // клик без предшествующего наведения
+      var lane = dvEl_('dv-bandlane'), r = lane.getBoundingClientRect();
+      if (r.width) i = Math.floor((e.clientX - r.left) / (dvGeom_.cw + dvGeom_.gp));
+    }
+    dvLog_('dead_click', 'band', (i >= 0 && dvDays_[i]) ? dvDays_[i] : '');
+  });
+  // Клик по НЕактивной кнопке: на сам disabled-элемент браузер событий не шлёт и они не
+  // всплывают, поэтому ловим клик страницей и сверяем точку с прямоугольниками неактивных
+  // кнопок (их тут максимум две - «Сбросить» и «Обновить данные»), см. .dv-btn[disabled].
+  dvPage_().addEventListener('click', function(e) {
+    if (!e.clientX && !e.clientY) return;                 // клик с клавиатуры - координат нет
+    var btns = dvPage_().querySelectorAll('.dv-btn[disabled]');
+    for (var i = 0; i < btns.length; i++) {
+      var r = btns[i].getBoundingClientRect();
+      if (!r.width) continue;
+      if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
+        dvLog_('blocked_click', btns[i].id || 'dv-btn', (btns[i].textContent || '').trim());
+        break;
+      }
+    }
+  }, true);
 
   // ── подсветка колонки насквозь + HUD ──
   var inner = dvEl_('dv-inner'), scroller = dvEl_('dv-scroller');
@@ -18828,7 +18924,9 @@ function dvBind_() {
     var b = e.target.closest('.pm-v'); if (!b) return;
     var gos = b.getAttribute('data-gos');
     if (gos === dvState_.car) return;
+    dvLogCarClose_('switch');
     dvState_.car = gos; dvState_.lastCar = gos; dvState_.month = null;
+    dvLogCarOpen_(gos, 'list');
     dvRenderPassport_(true);
   });
   dvEl_('pm-period-chips').addEventListener('click', function(e) {
@@ -18836,6 +18934,7 @@ function dvBind_() {
     var id = b.getAttribute('data-p');
     if (id === dvState_.period) return;
     dvState_.period = id;
+    dvLog_('pm_period', id, '');
     dvRenderPeriodChips_();
     dvRenderPassport_(false);
   });
@@ -18844,6 +18943,7 @@ function dvBind_() {
     var v = dvByGos_(dvState_.car); if (!v) return;
     var prev = (dvState_.month && v.months[dvState_.month]) ? v.months[dvState_.month].profit : 0;
     dvState_.month = b.getAttribute('data-m');
+    dvLog_('pm_month', dvState_.month, '');
     var now = v.months[dvState_.month].profit;
     if (!document.hidden && typeof uiSounds !== 'undefined') (now >= prev ? uiSounds.moneyTick : uiSounds.debtTick)();
     var p = dvPeriodDef_(), m = dvMetrics_(v, p);
@@ -18856,6 +18956,13 @@ function dvBind_() {
     dvShowPop_(c.getAttribute('data-k'), dvByGos_(dvState_.car), e.clientX, e.clientY);
   });
   dvEl_('pm-cal').addEventListener('pointerleave', dvHidePop_);
+  // Календарь раскрывает день только по наведению. Клик по клетке ничего не делает -
+  // ровно тот случай «нажал, а не сработало», который просили ловить.
+  dvEl_('pm-cal').addEventListener('click', function(e) {
+    var c = e.target.closest ? e.target.closest('.pm-cell') : null;
+    if (!c) return;
+    dvLog_('dead_click', c.classList.contains('pm-cell--i') ? 'cal_day' : 'cal_empty', c.getAttribute('data-k') || '');
+  });
 
   // Клавиши работают только пока открыт паспорт на активной странице «Динамика»
   document.addEventListener('keydown', function(e) {
@@ -18864,7 +18971,7 @@ function dvBind_() {
     if (!page || !page.classList.contains('active')) return;
     var tag = (e.target && e.target.tagName) || '';
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
-    if (e.key === 'Escape') { dvBackToList_(); if (typeof uiSounds !== 'undefined') uiSounds.navClick(); return; }
+    if (e.key === 'Escape') { dvCloseHow_ = 'esc'; dvBackToList_(); if (typeof uiSounds !== 'undefined') uiSounds.navClick(); return; }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       var arr = dvVisible_(), ix = -1;
       for (var i = 0; i < arr.length; i++) if (arr[i].gos === dvState_.car) { ix = i; break; }
@@ -18872,7 +18979,9 @@ function dvBind_() {
       var ni = e.key === 'ArrowDown' ? ix + 1 : ix - 1;
       if (ni < 0 || ni >= arr.length) return;
       e.preventDefault();
+      dvLogCarClose_('switch');
       dvState_.car = arr[ni].gos; dvState_.lastCar = dvState_.car; dvState_.month = null;
+      dvLogCarOpen_(dvState_.car, 'arrow');
       if (typeof uiSounds !== 'undefined') uiSounds.navClick();
       dvRenderPassport_(true);
     }
@@ -19394,10 +19503,11 @@ function dvRenderPassport_(swap) {
 }
 
 /* ═══════════════════════ переключение экранов ═══════════════════════ */
-function dvOpenCar_(gos) {
+function dvOpenCar_(gos, how) {
   if (!dvByGos_(gos)) return;
   dvState_.listScrollY = window.pageYOffset || document.documentElement.scrollTop || 0;
   dvState_.car = gos; dvState_.lastCar = gos; dvState_.month = null;
+  dvLogCarOpen_(gos, how || 'row');
   dvHideHl_();
   dvEl_('dyn-scr-list').hidden = true;
   var car = dvEl_('dyn-scr-car'); car.hidden = false;
@@ -19411,6 +19521,9 @@ function dvBackToList_(silent) {
   var list = dvEl_('dyn-scr-list'), car = dvEl_('dyn-scr-car');
   if (!list || !car) return;
   var wasOpen = !!dvState_.car;
+  // Сколько пробыл на паспорте: короткий возврат - признак «не нашёл, чего искал».
+  if (wasOpen) dvLogCarClose_(silent ? 'nav' : dvCloseHow_);
+  dvCloseHow_ = 'back';
   dvState_.car = null;
   dvHidePop_();
   car.hidden = true; list.hidden = false;
@@ -29541,12 +29654,52 @@ function toggleUiSound() {
 // Планировку. Тихо, без тоста - не мешает реальному действию при сбое отправки.
 // См. память project_ui_events_friction_tracking - свериться с накопленными данными
 // ПЕРЕД доработкой уже инструментированного экрана.
+// 15.09 («Динамика»): события КОПЯТСЯ в очереди и уходят ПАЧКОЙ - раз в
+// UI_LOG_FLUSH_MS и на уходе со страницы. Повод: лента парка - до 5500 клеток, запрос
+// на каждый клик там недопустим. Это журнал эргономики, не бухгалтерия: очередь
+// ограничена, при переполнении хвост молча теряется, ошибка отправки нигде не
+// всплывает и НИЧЕГО не ломает. Сервер принимает и пачку, и старую одиночную форму.
+var uiLogQueue_ = [];
+var uiLogTimer_ = null;
+var UI_LOG_FLUSH_MS = 4000;
+var UI_LOG_MAX_QUEUE = 120;   // потолок очереди - защита от лавины
+var UI_LOG_MAX_BATCH = 40;    // столько строк уходит одним запросом (на сервере лимит 50)
 function logUiEvent_(page, eventType, target, detail) {
   try {
     if (typeof SESSION_TOKEN === 'undefined' || !SESSION_TOKEN) return;
-    fetch(YARD_API_BASE + '/ui_event', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Session-Token': SESSION_TOKEN }, body: JSON.stringify({ page: page, event_type: eventType, target: target || '', detail: String(detail == null ? '' : detail).slice(0, 200) }) }).catch(function(){});
+    if (!page || !eventType) return;
+    if (uiLogQueue_.length >= UI_LOG_MAX_QUEUE) return;
+    uiLogQueue_.push({
+      page: String(page),
+      event_type: String(eventType),
+      target: String(target == null ? '' : target).slice(0, 120),
+      detail: String(detail == null ? '' : detail).slice(0, 200)
+    });
+    if (!uiLogTimer_) uiLogTimer_ = setTimeout(function(){ uiLogTimer_ = null; flushUiEvents_(false); }, UI_LOG_FLUSH_MS);
   } catch(e){}
 }
+function flushUiEvents_(onUnload) {
+  try {
+    if (uiLogTimer_) { clearTimeout(uiLogTimer_); uiLogTimer_ = null; }
+    if (!uiLogQueue_.length) return;
+    if (typeof SESSION_TOKEN === 'undefined' || !SESSION_TOKEN) { uiLogQueue_.length = 0; return; }
+    while (uiLogQueue_.length) {
+      var body = JSON.stringify({ events: uiLogQueue_.splice(0, UI_LOG_MAX_BATCH) });
+      if (onUnload) {
+        // Обычный fetch() обрывается, когда страница уходит; sendBeacon переживает уход.
+        // Заголовки он не умеет - токен идёт параметром, ровно как у flushSegsOnUnload_
+        // в Планировке (checkSession читает session_token и из query).
+        if (!navigator.sendBeacon) return;   // дослать нечем - теряем, это допустимо
+        navigator.sendBeacon(YARD_API_BASE + '/ui_event?session_token=' + encodeURIComponent(SESSION_TOKEN),
+                             new Blob([body], { type: 'application/json' }));
+      } else {
+        fetch(YARD_API_BASE + '/ui_event', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Session-Token': SESSION_TOKEN }, body: body }).catch(function(){});
+      }
+    }
+  } catch(e){}
+}
+document.addEventListener('visibilitychange', function(){ if (document.hidden) flushUiEvents_(true); });
+window.addEventListener('pagehide', function(){ flushUiEvents_(true); });
 // Учёт темы по пользователю (Влад 13.09: «понять какой % сотрудников на светлой -
 // если 50 на 50, всерьёз проработать светлый режим»). Только СЧЁТ на сервере
 // (theme_prefs, отдельная таблица) - само применение темы остаётся полностью

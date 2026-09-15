@@ -604,8 +604,21 @@ function genContractPdf(o) {
 }
 function drawContractPdf_(o, ent, stampUrl, signUrl) {
   var doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4' });
-  if (typeof ensureKpFonts_ === 'function') ensureKpFonts_(doc);
-  var FONT = (function () { try { doc.setFont('PTSans'); return 'PTSans'; } catch (e) { return 'helvetica'; } })();
+  /* ensureKpFonts_ - НЕ глобальная функция, а приватный хелпер внутри IIFE Калькулятора
+     (index.html), отдаётся наружу через window.Clc (см. коммент у window.Clc в index.html).
+     Раньше здесь стоял вызов "голого" ensureKpFonts_ - typeof всегда был не 'function',
+     шрифт молча не подключался, и jsPDF откатывался на Helvetica: кириллица печаталась
+     побитово (каждый символ - младший байт своего юникода), в PDF выходила абракадабра.
+     Поймано 15.09 по PDF Влада - раньше эта ошибка НЕ была замечена, потому что
+     верификация проверяла размер файла/отсутствие исключений, а не сам текст. */
+  if (window.Clc && typeof window.Clc.ensureKpFonts_ === 'function') window.Clc.ensureKpFonts_(doc);
+  /* doc.setFont() у jsPDF НЕ бросает исключение на незарегистрированном имени шрифта -
+     молча откатывается на Times (проверено живьём 15.09, это и была причина абракадабры
+     выше). Поэтому проверяем по факту наличия 'PTSans' в doc.getFontList(), а не ловим
+     несуществующее исключение - иначе эта же поломка повторится тихо в будущем. */
+  var hasPtSans = !!(doc.getFontList() || {}).PTSans;
+  var FONT = hasPtSans ? 'PTSans' : 'helvetica';
+  if (!hasPtSans) toast('<span class="op2-warn">Договор-заявка</span> · не удалось подключить кириллический шрифт, текст может исказиться - обновите страницу и повторите');
   var M = 15, W = 210, CW = W - M * 2, y = M;
   function setF(bold, size) { doc.setFont(FONT, bold ? 'bold' : 'normal'); doc.setFontSize(size); }
   function text(s, x, yy, opt) { doc.text(String(s == null ? '' : s), x, yy, opt || {}); }

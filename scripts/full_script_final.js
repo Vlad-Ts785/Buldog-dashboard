@@ -4158,6 +4158,36 @@ function buildManagerView_(orders, managerName, ss, period) {
     },
   };
 
+  // Вкладка «Отдел Тралы» (10.09.2026, Влад: «хочу, чтобы у каждого менеджера и старшего
+  // появилась новая вкладка отдел Тралы и там было это, текущий месяц, только без
+  // возможности смотреть личные заказы какие прибавились - только цифры по прибавке»).
+  // Отдаём общий срез по ВСЕМ менеджерам - ту же картину, что видит директор на странице
+  // «Менеджеры - заказы 1С». Состав колонок полный, включая прибыль найма (решение Влада
+  // 10.09 на превью). Единственное, что вырезаем - today_new_list: это списки конкретных
+  // заказов коллег, менеджеру они не нужны, а цифра прибавки (today_new_orders/amount)
+  // остаётся. Меньше данных в ответе - меньше и риска, и веса.
+  result.orders.dept_all = (orders.by_manager || []).map(function(m) {
+    var copy = {};
+    Object.keys(m).forEach(function(k) { if (k !== 'today_new_list') copy[k] = m[k]; });
+    return copy;
+  });
+  result.orders.managerPlans = orders.managerPlans || {};
+  var oSum_ = orders.summary || {};
+  result.orders.dept_summary = {
+    internal_amount: oSum_.internal_amount || 0,
+    internal_orders: oSum_.internal_orders || 0,
+    internal_plan: oSum_.internal_plan || 0,
+    internal_amount_thru_yesterday: oSum_.internal_amount_thru_yesterday || 0,
+  };
+  // План/факт всей компании - той же функцией, что считает их для директора, чтобы шапка
+  // «Выполнение плана продаж» у менеджера показывала ровно те же цифры.
+  var sfpDept_ = computeSalesFaktPlan_(orders);
+  result.dept_totals = {
+    salesPlan: sfpDept_.salesPlan,
+    salesFakt: sfpDept_.salesFakt,
+    salesFaktThruYesterday: sfpDept_.salesFaktThruYesterday,
+  };
+
   // Компанейский срез своей команды (2026-08-26) - для табличкой группы отдела на личной
   // странице руководителя (renderDeptGroupTableHtml_ на фронтенде, тот же рендер, что
   // страница "По менеджерам") и для ИИ-контекста. Только у Ахтамовой/Гусейновой -
@@ -5238,9 +5268,12 @@ function doGet(e) {
     // под любым менеджером" - то же самое &manager=, что уже работает для
     // my-page/receipts, см. mlcManager/gatManager выше).
     if (action === 'order_plan') {
-      var opPerson = (access.role === 'manager' || access.role === 'logist')
-        ? access.name
-        : (e.parameter.manager || access.name);
+      // ФИКС аудита безопасности 13.09: раньше "не manager/logist -> admin" по умолчанию -
+      // явная проверка на admin, любая другая роль (опечатка в листе "Доступ", будущая
+      // роль вроде mechanic) теперь видит ТОЛЬКО свои заказы, не чужие по &manager=.
+      var opPerson = access.role === 'admin'
+        ? (e.parameter.manager || access.name)
+        : access.name;
       // scope=hot/rest - двухфазная загрузка (Влад, 2026-08-18): вчера/сегодня/
       // завтра отдаём отдельным быстрым запросом, остальной месяц - вторым, в
       // фоне на фронтенде. Без scope (или scope=all) - как раньше, весь месяц
@@ -5281,9 +5314,10 @@ function doGet(e) {
           .createTextOutput(JSON.stringify({ error: 'Создание заявок доступно менеджерам, логисты назначают транспорт на уже созданные заявки' }))
           .setMimeType(ContentService.MimeType.JSON);
       }
-      var opcPerson = access.role === 'manager'
-        ? access.name
-        : (e.parameter.manager || access.name);
+      // ФИКС аудита безопасности 13.09: явная проверка на admin (см. order_plan выше).
+      var opcPerson = access.role === 'admin'
+        ? (e.parameter.manager || access.name)
+        : access.name;
       return ContentService
         .createTextOutput(JSON.stringify(createOrderPlanEntry_(opcPerson, e.parameter)))
         .setMimeType(ContentService.MimeType.JSON);
@@ -5299,9 +5333,10 @@ function doGet(e) {
           .createTextOutput(JSON.stringify({ error: 'Редактирование заявок доступно менеджерам' }))
           .setMimeType(ContentService.MimeType.JSON);
       }
-      var opuPerson = access.role === 'manager'
-        ? access.name
-        : (e.parameter.manager || access.name);
+      // ФИКС аудита безопасности 13.09: явная проверка на admin (см. order_plan выше).
+      var opuPerson = access.role === 'admin'
+        ? (e.parameter.manager || access.name)
+        : access.name;
       return ContentService
         .createTextOutput(JSON.stringify(updateOrderPlanEntry_(opuPerson, e.parameter)))
         .setMimeType(ContentService.MimeType.JSON);
@@ -5315,9 +5350,10 @@ function doGet(e) {
           .createTextOutput(JSON.stringify({ error: 'Смена статуса доступна менеджерам' }))
           .setMimeType(ContentService.MimeType.JSON);
       }
-      var opsPerson = access.role === 'manager'
-        ? access.name
-        : (e.parameter.manager || access.name);
+      // ФИКС аудита безопасности 13.09: явная проверка на admin (см. order_plan выше).
+      var opsPerson = access.role === 'admin'
+        ? (e.parameter.manager || access.name)
+        : access.name;
       return ContentService
         .createTextOutput(JSON.stringify(updateOrderPlanStatus_(opsPerson, e.parameter)))
         .setMimeType(ContentService.MimeType.JSON);

@@ -10875,6 +10875,10 @@ async function renderMyPageVasin(el, current, selectorHtml) {
   var segNom = isTralSeg ? 'тралы' : 'длинномеры';     // "(тралы)"/"(длинномеры)"
   var segGen = isTralSeg ? 'тралов' : 'длинномеров';   // "ВП тралов"
   var segDat = isTralSeg ? 'тралам' : 'длинномерам';   // "по тралам"
+  // Начальник автоколонны (Барыльченко/Дьячков) vs Васин - та же страница, но 15.09 Влад
+  // попросил убрать блок "Сделки собственного парка" ТОЛЬКО у начальников автоколонны
+  // ("Барыльченко и Дьячкову убери сделки они им не нужны"), у Васина блок остаётся.
+  var isColumnHead = COLUMN_HEAD_SUR_FRONT_.indexOf(current.trim().split(' ')[0].toLowerCase()) >= 0;
 
   var d;
   if (D.role === 'logist') {
@@ -11094,25 +11098,28 @@ async function renderMyPageVasin(el, current, selectorHtml) {
   // 4. Сделки собственного парка по сегменту - Влад, 2026-08-11: "убрать информацию по
   // наёмной технике, у Василия только собственный парк" - наёмные сделки отфильтрованы
   // (all_long_deals/all_tral_deals с бэкенда содержат и то, и то - фильтр только на этой
-  // странице).
-  var ownDeals = deals.filter(function(dl){ return !dl.is_hired; });
-  var dealsShown = ownDeals.slice(0, 40);
-  var dealRows = !dealsShown.length
-    ? '<tr><td colspan="5" class="muted" style="padding:14px">Сделок в этом месяце нет</td></tr>'
-    : dealsShown.map(function(dl) {
-        return '<tr>'+
-          '<td class="muted" style="font-size:12px">'+(dl.date||'—')+'</td>'+
-          '<td>'+(dl.customer||'—')+'</td>'+
-          '<td class="muted">'+((dl.manager||'').split(' ')[0] || '—')+'</td>'+
-          '<td class="num">'+fmtK2(dl.amount||0)+'</td>'+
-          '<td class="num green">'+fmtK2(dl.profit||0)+'</td>'+
-        '</tr>';
-      }).join('');
-  html += block('🤝 Сделки собственного парка ('+segNom+')'+(ownDeals.length>dealsShown.length ? ' <span style="font-size:11px;color:var(--muted);font-weight:400">(показаны последние '+dealsShown.length+' из '+ownDeals.length+')</span>' : ''),
-    '<div style="overflow-x:auto"><table class="tbl">'+
-      '<thead><tr><th>Дата</th><th>Заказчик</th><th>Менеджер</th><th class="num">Сумма</th><th class="num">Прибыль</th></tr></thead>'+
-      '<tbody>'+dealRows+'</tbody>'+
-    '</table></div>');
+  // странице). 15.09 - у начальников автоколонны (Барыльченко/Дьячков) блока целиком нет
+  // ("им не нужны"), у Васина остаётся без изменений.
+  if (!isColumnHead) {
+    var ownDeals = deals.filter(function(dl){ return !dl.is_hired; });
+    var dealsShown = ownDeals.slice(0, 40);
+    var dealRows = !dealsShown.length
+      ? '<tr><td colspan="5" class="muted" style="padding:14px">Сделок в этом месяце нет</td></tr>'
+      : dealsShown.map(function(dl) {
+          return '<tr>'+
+            '<td class="muted" style="font-size:12px">'+(dl.date||'—')+'</td>'+
+            '<td>'+(dl.customer||'—')+'</td>'+
+            '<td class="muted">'+((dl.manager||'').split(' ')[0] || '—')+'</td>'+
+            '<td class="num">'+fmtK2(dl.amount||0)+'</td>'+
+            '<td class="num green">'+fmtK2(dl.profit||0)+'</td>'+
+          '</tr>';
+        }).join('');
+    html += block('🤝 Сделки собственного парка ('+segNom+')'+(ownDeals.length>dealsShown.length ? ' <span style="font-size:11px;color:var(--muted);font-weight:400">(показаны последние '+dealsShown.length+' из '+ownDeals.length+')</span>' : ''),
+      '<div style="overflow-x:auto"><table class="tbl">'+
+        '<thead><tr><th>Дата</th><th>Заказчик</th><th>Менеджер</th><th class="num">Сумма</th><th class="num">Прибыль</th></tr></thead>'+
+        '<tbody>'+dealRows+'</tbody>'+
+      '</table></div>');
+  }
 
   // "Зарплата машинистов" (был блок здесь до 15.09) переехала в отдельный пункт меню -
   // см. renderColumnHeadPayrollPage_/plans/2026-09-15-column-head-payroll-menu-page.md

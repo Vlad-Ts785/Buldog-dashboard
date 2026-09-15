@@ -6783,6 +6783,70 @@ function syncVehiclePlansToServer_() {
   });
 }
 
+// Мост исторических статусов машин (Фаза 1 плана 2026-09-15 "Динамика: лента жизни машины").
+// Снимок cron'а на сервере (vehicle_status_daily) ведётся только с 30.08.2026 - 16 дней из
+// ста, а в листе "История_финансов" статусы лежат с ~23.06. Влад решил 15.09 перелить эту
+// историю на сервер, чтобы лента была ОДНОГО сорта, а не "часть с сервера, часть из Apps
+// Script". Тот же приём, что syncVehicleTypesToServer_/syncVehiclePlansToServer_ выше:
+// узкая карта (дата, госномер, статус), не весь лист.
+//
+// Разовая по смыслу операция, но функция идемпотентна (сервер делает
+// INSERT ... ON DUPLICATE KEY UPDATE) - перезапуск ничего не портит.
+//
+// Границы, которые держит СЕРВЕР (здесь фильтр продублирован только чтобы не гонять лишние
+// килобайты): даты с 30.08 не принимаются вообще - там источник истины снимок Планировки
+// (plan_segs), он точнее Штатки; строки со src='plan_segs' не перезаписываются никогда;
+// пустой/неизвестный статус НЕ пишется (а не "считаем работой").
+var SHTATKA_HISTORY_MAX_DATE = '2026-08-29'; // не трогать дни снимка cron'а (с 30.08)
+
+function syncVehicleStatusHistoryToServer_() {
+  var props = PropertiesService.getScriptProperties();
+  var apiKey = props.getProperty('YARD_WRITE_KEY') || props.getProperty('YARD_API_KEY');
+  if (!apiKey) throw new Error('YARD_WRITE_KEY не задан в Script Properties');
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var history = getVehicleHistory(ss);
+  var rows = [];
+  for (var i = 0; i < history.length; i++) {
+    var h = history[i];
+    if (!h.date || h.date > SHTATKA_HISTORY_MAX_DATE) continue;
+    if (!h.gos || !String(h.status || '').trim()) continue;
+    rows.push({ date: h.date, gos: h.gos, status: h.status });
+  }
+  if (!rows.length) return { sent: 0, accepted: 0, skipped: 0 };
+
+  var BATCH = 1000;
+  var totals = { sent: 0, accepted: 0, skipped: 0, errors: [] };
+  for (var from = 0; from < rows.length; from += BATCH) {
+    var chunk = rows.slice(from, from + BATCH);
+    var resp = UrlFetchApp.fetch('https://api.yardhub.ru/api/vehicle_status_history/import', {
+      method: 'post', contentType: 'application/json',
+      headers: { 'X-Api-Key': apiKey },
+      payload: JSON.stringify({ rows: chunk, src: 'shtatka' }),
+      muteHttpExceptions: true,
+    });
+    totals.sent += chunk.length;
+    if (resp.getResponseCode() !== 200) {
+      totals.errors.push('HTTP ' + resp.getResponseCode() + ': ' + resp.getContentText().slice(0, 200));
+      continue;
+    }
+    var data;
+    try { data = JSON.parse(resp.getContentText()); } catch (parseErr) {
+      totals.errors.push('не JSON: ' + resp.getContentText().slice(0, 200));
+      continue;
+    }
+    if (data.error) { totals.errors.push(String(data.error)); continue; }
+    totals.accepted += data.accepted || 0;
+    if (data.skipped) {
+      totals.skipped += (data.skipped.future || 0) + (data.skipped.badDate || 0) +
+        (data.skipped.badGos || 0) + (data.skipped.unknownStatus || 0);
+    }
+  }
+  Logger.log('syncVehicleStatusHistoryToServer_: отправлено ' + totals.sent +
+    ', принято ' + totals.accepted + ', отсеяно ' + totals.skipped +
+    (totals.errors.length ? ', ошибок ' + totals.errors.length + ': ' + totals.errors.join(' | ') : ''));
+  return totals;
+}
+
 // Деньги (revenue/fot/fuel/parts/fines/tolls/profit/margin/тралы-длинномеры/спецтралы) - с
 // сервера первым делом (план 2026-09-01, Влад: "сервер и алгоритмы должны жить на сервере").
 // Тихий null при любой проблеме - вызывающий откатывается на Нормализованные_данные ровно

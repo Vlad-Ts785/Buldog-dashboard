@@ -3432,6 +3432,16 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
     <div class="sidebar-nav-item" onclick="showPage('commercial-head-debt',this)" data-page="commercial-head-debt" style="display:none">
       <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2.5h10v15l-2.5-1.6L10 17.5l-2.5-1.6L5 17.5z"/><line x1="7.5" y1="6.5" x2="12.5" y2="6.5"/><line x1="7.5" y1="9.5" x2="12.5" y2="9.5"/><line x1="7.5" y1="12.5" x2="10.5" y2="12.5"/></svg></span> Дебиторка
     </div>
+    <!-- «Зарплата машинистов» - отдельный пункт меню для начальника автоколонны
+         (Барыльченко/Дьячков, 15.09, Влад: "выведи в отдельное меню сбоку, сделай интерфейс
+         так же как у меня, только без стоимости заявок и %"). Тот же принцип видимости, что
+         у Рыщанова/руководителей коммерческих групп выше - скрыт по умолчанию, показывается
+         только applyRoleUI() самому начальнику автоколонны или admin-предпросмотру "как он".
+         См. renderColumnHeadPayrollPage_/openColumnHeadPayrollDetail_,
+         plans/2026-09-15-column-head-payroll-menu-page.md. -->
+    <div class="sidebar-nav-item" onclick="showPage('column-head-payroll',this)" data-page="column-head-payroll" style="display:none">
+      <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="15" height="8" rx="1.6"/><circle cx="6.5" cy="14" r="1.6"/><circle cx="13.5" cy="14" r="1.6"/></svg></span> Зарплата машинистов
+    </div>
     <div class="sidebar-nav-item" onclick="showPage('clients',this)" data-page="clients">
       <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="8" height="14" rx="1.2"/><path d="M12 8h3.2a.8.8 0 0 1 .8.8V17H12"/><line x1="6.6" y1="6.5" x2="9.4" y2="6.5"/><line x1="6.6" y1="9.5" x2="9.4" y2="9.5"/><line x1="6.6" y1="12.5" x2="9.4" y2="12.5"/><line x1="4" y1="17" x2="16" y2="17"/></svg></span> Клиенты
     </div>
@@ -5485,6 +5495,18 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
       </div>
     </div>
 
+    <!-- ═══ ЗАРПЛАТА МАШИНИСТОВ (начальник автоколонны, отдельный пункт меню, 15.09) ═══
+         Тот же интерфейс, что у admin "Зарплата -> По машинистам" (renderMachinistSalary),
+         но отфильтровано строго по своему сегменту (Дьячков - трал+файмонвиль, Барыльченко -
+         длинномер) и БЕЗ колонок "Стоимость заказа"/"Процент" (Влад: "без стоимости заявок и
+         %" - коммерческая цена заказа не для начальника автоколонны). Детализация по клику
+         переиспользует ОБЩИЙ overlay #machinist-detail-overlay (см. ниже) через флаг
+         mdHideCommercial_. См. renderColumnHeadPayrollPage_/openColumnHeadPayrollDetail_,
+         plans/2026-09-15-column-head-payroll-menu-page.md. -->
+    <div id="page-column-head-payroll" class="page">
+      <div id="column-head-payroll-content"><p style="color:var(--muted);padding:16px">Данные загружаются...</p></div>
+    </div>
+
     <!-- ═══ ПЛАН ЗАДАНИЯ (только чтение из таблицы планировки) ═══ -->
     <div id="page-order-plan" class="page">
       <div id="order-plan-content"><p style="color:var(--muted);padding:16px">Данные загружаются...</p></div>
@@ -7385,6 +7407,7 @@ const PAGE_TITLES = {
   'ryschanow-salary': 'Зарплата',
   'commercial-head-salary': 'Зарплата',
   'commercial-head-debt': 'Дебиторка',
+  'column-head-payroll': 'Зарплата машинистов',
   'order-plan': 'Задание',
   calculator: 'Калькулятор стоимости перевозки',
   debt: 'Дебиторка',
@@ -11091,53 +11114,9 @@ async function renderMyPageVasin(el, current, selectorHtml) {
       '<tbody>'+dealRows+'</tbody>'+
     '</table></div>');
 
-  // 5. "Зарплата машинистов" по своему сегменту (15.09, Влад: "добавить блок зарплата
-  // машинистов, у Дьячкова только тральщики, у Барыльченко только длинномерщики" -
-  // plans/2026-09-15-dyachkov-tral-page-and-driver-salary-by-fleet.md). Реальный вход
-  // (D.role==='logist') бьёт в /api/my_driver_payroll - сервер САМ решает сегмент по
-  // сессии, ничего не передаём с клиента (HR-данные). Admin-предпросмотр ("Смотреть как")
-  // не имеет сессии Дьячкова/Барыльченко - этот эндпоинт его отфильтрует (400, "используйте
-  // /api/driver_payroll") - вместо этого зовём admin-эндпоинт (видит вообще всех) и
-  // фильтруем ТУТ ЖЕ, на клиенте, по нужному vehicle_bucket - тот же результат, что у
-  // реального Дьячкова/Барыльченко увидел бы, просто другой путь получения (admin и так
-  // вправе видеть все зарплаты, фильтрация тут - только чтобы предпросмотр совпадал 1:1
-  // с тем, что видит сам сотрудник).
-  var wantBucket = isTralSeg ? 'трал' : 'длинномер';
-  var payroll = null, payrollErr = null;
-  try {
-    if (D.role === 'admin') {
-      var rp = await fetchFromYardApi_('/driver_payroll', {});
-      if (rp.ok && rp.data && !rp.data.error) {
-        payroll = { rows: (rp.data.rows || []).filter(function(r){ return r.vehicle_bucket === wantBucket; }), partial: rp.data.partial };
-      } else { payrollErr = (rp.data && rp.data.error) || 'ошибка сервера'; }
-    } else {
-      var rp2 = await fetchFromYardApi_('/my_driver_payroll', {});
-      if (rp2.ok && rp2.data && !rp2.data.error) payroll = { rows: rp2.data.rows || [], partial: rp2.data.partial };
-      else payrollErr = (rp2.data && rp2.data.error) || 'ошибка сервера';
-    }
-  } catch (e) { payrollErr = e.message; }
-
-  if (payroll) {
-    var payRows = !payroll.rows.length
-      ? '<tr><td colspan="6" class="muted" style="padding:14px">Нет данных за этот месяц</td></tr>'
-      : payroll.rows.slice().sort(function(a,b){ return (b.net_amount||0) - (a.net_amount||0); }).map(function(r) {
-          return '<tr>'+
-            '<td><b>'+r.driver_name+'</b></td>'+
-            '<td class="num muted">'+(r.hours||0)+'</td>'+
-            '<td class="num">'+fmtK2(r.accruals_amount||0)+'</td>'+
-            '<td class="num'+((r.deductions_amount||0)<0?' red':'')+'">'+fmtK2(r.deductions_amount||0)+'</td>'+
-            '<td class="num muted">'+fmtK2(r.ndfl_amount||0)+'</td>'+
-            '<td class="num green"><b>'+fmtK2(r.net_amount||0)+'</b></td>'+
-          '</tr>';
-        }).join('');
-    html += block('👷 Зарплата машинистов ('+segNom+')'+(payroll.partial ? ' <span style="font-size:11px;color:'+COL.amber+';font-weight:400">месяц не закрыт - частичные данные</span>' : ''),
-      '<div style="overflow-x:auto"><table class="tbl">'+
-        '<thead><tr><th>Машинист</th><th class="num">Часы</th><th class="num">Начисления</th><th class="num">Удержания</th><th class="num">НДФЛ</th><th class="num">К начислению</th></tr></thead>'+
-        '<tbody>'+payRows+'</tbody>'+
-      '</table></div>');
-  } else if (payrollErr) {
-    html += block('👷 Зарплата машинистов ('+segNom+')', '<div style="font-size:13px;color:var(--muted)">Не удалось загрузить - '+payrollErr+'</div>');
-  }
+  // "Зарплата машинистов" (был блок здесь до 15.09) переехала в отдельный пункт меню -
+  // см. renderColumnHeadPayrollPage_/plans/2026-09-15-column-head-payroll-menu-page.md
+  // (Влад: "выведи в отдельное меню сбоку").
 
   el.innerHTML = html;
 }
@@ -11798,6 +11777,9 @@ function applyRoleUI() {
     if (!isColumnHeadViewer) allowedPages_.push('order-plan');
     if (isRyschanowViewer) allowedPages_.push('ryschanow-salary');
     if (isCommercialHeadViewer) allowedPages_.push('commercial-head-salary', 'commercial-head-debt');
+    // «Зарплата машинистов» (15.09) - отдельный пункт меню, тот же принцип, что у Рыщанова/
+    // руководителей коммерческих групп выше.
+    if (isColumnHeadViewer) allowedPages_.push('column-head-payroll');
     var isManagerViewer_ = previewing ? !!(viewAsEntry && viewAsEntry.type === 'manager') : (D.role === 'manager');
     if (isManagerViewer_ || CRM_MANAGER_SUR_FRONT_.indexOf(curPersonSur) >= 0) allowedPages_.push('crm');
     // "Проверка контрагента" (05.09, Влад: "менеджерам со старшим") - всем менеджерам, включая
@@ -11829,7 +11811,7 @@ function applyRoleUI() {
     // обычной админ-панели - там уже есть "Зарплата"/"ДЗ" по всем сотрудникам сразу. Без этого
     // условия они лезли поверх со своим style="display:none" из HTML (2026-08-27, Влад: "на
     // моей странице 3 раза зарплата").
-    var personalOnlyPages = ['ryschanow-salary', 'commercial-head-salary', 'commercial-head-debt'];
+    var personalOnlyPages = ['ryschanow-salary', 'commercial-head-salary', 'commercial-head-debt', 'column-head-payroll'];
     document.querySelectorAll('.sidebar-nav-item').forEach(function(item) {
       item.style.display = personalOnlyPages.indexOf(item.getAttribute('data-page')) >= 0 ? 'none' : '';
     });
@@ -20810,12 +20792,18 @@ function machinistBuildPrintHtml_(d, byDriver) {
 // выше) - #machinist-detail-overlay в HTML. ──
 var machinistDetailDriver_ = null; // ФИО текущего открытого машиниста - защита от гонки,
                                     // если успели открыть другого, пока грузился первый
+// 15.09 - модалка теперь открывается ещё и со страницы "Зарплата машинистов" начальника
+// автоколонны (openColumnHeadPayrollDetail_ ниже), где "Стоимость заказа"/"Процент" нужно
+// скрыть (Влад: "без стоимости заявок и %"). Один общий флаг, а не дублирование модалки -
+// mdRenderVeh_/renderMachinistDetail_ читают его при каждой перерисовке.
+var mdHideCommercial_ = false;
 
 function openMachinistDetail_(driverName) {
   var overlay = document.getElementById('machinist-detail-overlay');
   var box = document.getElementById('machinist-detail-content');
   if (!overlay || !box) return;
   machinistDetailDriver_ = driverName;
+  mdHideCommercial_ = false;
   overlay.style.display = 'flex';
   box.innerHTML = '<div class="crm-modal-header"><div class="crm-modal-title">' + driverName + '</div>' +
     '<button class="crm-modal-close" onclick="closeMachinistDetail_()">&times;</button></div>' +
@@ -20827,6 +20815,37 @@ function openMachinistDetail_(driverName) {
   fetchFromYardApi_('/driver_payroll_detail', { month: machinistSalaryMonth_, driver: driverName }).then(function(r) {
     if (!r.ok || !r.data || r.data.error) throw new Error((r.data && r.data.error) || 'Ошибка загрузки');
     if (machinistDetailDriver_ !== driverName) return; // пока грузилось, открыли другого/закрыли
+    renderMachinistDetail_(driverName, summaryRow, r.data);
+  }).catch(function(e) {
+    if (machinistDetailDriver_ !== driverName) return;
+    box.innerHTML = '<div class="crm-modal-header"><div class="crm-modal-title">' + driverName + '</div>' +
+      '<button class="crm-modal-close" onclick="closeMachinistDetail_()">&times;</button></div>' +
+      '<p style="color:var(--muted);padding:16px 0">Не удалось загрузить: ' + (e.message || e) + '</p>';
+  });
+}
+// 15.09 - тот же попап, для страницы "Зарплата машинистов" начальника автоколонны
+// (mdHideCommercial_=true - см. выше). Self-login бьёт в СКОУПНУТЫЙ /my_driver_payroll_detail
+// (сервер и так не отдаёт order_amount и проверяет, что машинист - свой), admin-предпросмотр
+// - в обычный /driver_payroll_detail (admin и так вправе видеть всё, две колонки прячет
+// только интерфейс - для параметра предпросмотра 1:1 с тем, что видит сам сотрудник).
+function openColumnHeadPayrollDetail_(driverName) {
+  var overlay = document.getElementById('machinist-detail-overlay');
+  var box = document.getElementById('machinist-detail-content');
+  if (!overlay || !box) return;
+  machinistDetailDriver_ = driverName;
+  mdHideCommercial_ = true;
+  overlay.style.display = 'flex';
+  box.innerHTML = '<div class="crm-modal-header"><div class="crm-modal-title">' + driverName + '</div>' +
+    '<button class="crm-modal-close" onclick="closeMachinistDetail_()">&times;</button></div>' +
+    '<p style="color:var(--muted);padding:16px 0">Загрузка...</p>';
+
+  var d = chPayrollData_[chPayrollMonth_];
+  var summaryRow = (d && d.rows || []).filter(function(r) { return r.driver_name === driverName; })[0] || null;
+  var endpoint = (D.role === 'admin') ? '/driver_payroll_detail' : '/my_driver_payroll_detail';
+
+  fetchFromYardApi_(endpoint, { month: chPayrollMonth_, driver: driverName }).then(function(r) {
+    if (!r.ok || !r.data || r.data.error) throw new Error((r.data && r.data.error) || 'Ошибка загрузки');
+    if (machinistDetailDriver_ !== driverName) return;
     renderMachinistDetail_(driverName, summaryRow, r.data);
   }).catch(function(e) {
     if (machinistDetailDriver_ !== driverName) return;
@@ -20976,7 +20995,12 @@ function mdRenderVeh_(vi) {
   if (!wrap || !machinistDetailData_) return;
   var v = machinistDetailData_.detail.vehicles[vi];
   var sort = machinistDetailVehSort_[vi];
-  var rows = mdSortRows_(v.trips, MD_TRIP_COLS_, sort);
+  // 15.09 - "Стоимость заказа"/"Процент" скрыты для страницы начальника автоколонны
+  // (mdHideCommercial_, см. openColumnHeadPayrollDetail_ выше) - коммерческая цена заказа
+  // не для этой роли. Колонки фильтруются ДО сортировки/рендера, а не CSS-скрытием, чтобы
+  // заголовок/клик-сортировка тоже не предлагали убранные колонки.
+  var cols = mdHideCommercial_ ? MD_TRIP_COLS_.filter(function(c) { return c.key !== 'order_amount' && c.key !== 'pct'; }) : MD_TRIP_COLS_;
+  var rows = mdSortRows_(v.trips, cols, sort);
   var netSubtotal = v.trips.reduce(function(s, t) { return s + (t.net_amount || 0); }, 0);
   var orderSubtotal = v.trips.reduce(function(s, t) { return s + (t.order_amount || 0); }, 0);
   // "Средний процент" (Влад, "нужна общая стоимость заказов и средний процент, низу") -
@@ -20994,17 +21018,20 @@ function mdRenderVeh_(vi) {
       '<td class="num">' + (t.km_mkad ? Math.round(t.km_mkad).toLocaleString('ru-RU') : '—') + '</td>' +
       '<td class="num">' + (t.hours || '—') + '</td>' +
       '<td class="num" style="font-weight:600">' + mdFr_(t.net_amount) + '</td>' +
-      '<td class="num" style="color:var(--muted)">' + (t.order_amount != null ? mdFr_(t.order_amount) : '—') + '</td>' +
-      '<td class="num" style="color:' + mdPctColor_(pct) + '">' + (pct != null ? pct.toFixed(1) + '%' : '—') + '</td></tr>';
+      (mdHideCommercial_ ? '' :
+        '<td class="num" style="color:var(--muted)">' + (t.order_amount != null ? mdFr_(t.order_amount) : '—') + '</td>' +
+        '<td class="num" style="color:' + mdPctColor_(pct) + '">' + (pct != null ? pct.toFixed(1) + '%' : '—') + '</td>') +
+      '</tr>';
   }).join('');
   wrap.innerHTML =
     '<div style="overflow-x:auto"><table class="tbl"><thead><tr>' +
-      mdSortHead_(MD_TRIP_COLS_, sort, 'mdSortVeh_', vi) +
+      mdSortHead_(cols, sort, 'mdSortVeh_', vi) +
     '</tr></thead><tbody>' + body + '</tbody>' +
     '<tfoot><tr><td colspan="8" style="font-weight:600">Итого по машине</td>' +
     '<td class="num" style="font-weight:600">' + mdFr_(netSubtotal) + '</td>' +
-    '<td class="num" style="font-weight:600;color:var(--muted)">' + mdFr_(orderSubtotal) + '</td>' +
-    '<td class="num" style="font-weight:600;color:' + mdPctColor_(avgPct) + '">' + (avgPct != null ? avgPct.toFixed(1) + '%' : '—') + '</td>' +
+    (mdHideCommercial_ ? '' :
+      '<td class="num" style="font-weight:600;color:var(--muted)">' + mdFr_(orderSubtotal) + '</td>' +
+      '<td class="num" style="font-weight:600;color:' + mdPctColor_(avgPct) + '">' + (avgPct != null ? avgPct.toFixed(1) + '%' : '—') + '</td>') +
     '</tr></tfoot>' +
     '</table></div>';
 }
@@ -21034,7 +21061,11 @@ function renderMachinistDetail_(driverName, summaryRow, detail) {
     // (сумма зарплаты/сумма стоимости заказов), но по ВСЕМ машинам сразу, не по одной.
     var totalOrderAmt = allTrips.reduce(function(s, t) { return s + (t.order_amount || 0); }, 0);
     var totalTripAmt = allTrips.reduce(function(s, t) { return s + (t.amount || 0); }, 0);
-    var overallPct = totalOrderAmt > 0 ? (totalTripAmt / totalOrderAmt * 100) : null;
+    // 15.09 - без "Процент" для страницы начальника автоколонны (mdHideCommercial_) -
+    // самостоятельный вход и так не получает order_amount с сервера (см.
+    // /api/my_driver_payroll_detail), но admin-предпросмотр бьёт в полный
+    // /driver_payroll_detail - флаг гасит вывод и в этой ветке, для параметра 1:1.
+    var overallPct = (!mdHideCommercial_ && totalOrderAmt > 0) ? (totalTripAmt / totalOrderAmt * 100) : null;
     var items = [
       ['Начисления', summaryRow.accruals_amount, ''],
       ['Заказов', tripsTotal, '', 'count'],
@@ -21077,6 +21108,173 @@ function renderMachinistDetail_(driverName, summaryRow, detail) {
 
   mdRenderFines_();
   (detail.vehicles || []).forEach(function(v, vi) { mdRenderVeh_(vi); });
+}
+
+// ── "Зарплата машинистов" - отдельный пункт меню начальника автоколонны (15.09,
+// plans/2026-09-15-column-head-payroll-menu-page.md, Влад: "выведи в отдельное меню сбоку,
+// сделай интерфейс так же как у меня, только без стоимости заявок и %"). Тот же экран, что
+// у admin "Зарплата -> По машинистам" выше (renderMachinistSalary), но данные СТРОГО по
+// своему сегменту и без колонки "Процент" (коммерческая цена заказа - не для начальника
+// автоколонны). Своё, НЕЗАВИСИМОЕ состояние (chPayroll*) - не переиспользует
+// machinistSalary*-переменные admin-страницы, иначе предпросмотр "Смотреть как" и обычная
+// admin-страница путали бы друг другу кэш/месяц/сортировку. ──
+var chPayrollData_ = {};      // {monthKey: {rows, available_months, partial}}
+var chPayrollMonth_ = null;
+var chPayrollFilter_ = 'all'; // all/трал/длинномер/файмонвиль (какие есть в своём сегменте)
+var chPayrollSort_ = { col: 'net_amount', dir: -1 };
+var chPayrollDeductionsExpanded_ = false;
+
+// ФИО текущего начальника автоколонны - self-login (D.logistName) или admin-предпросмотр
+// (viewAsEntry.name), тот же приём, что currentCommercialHeadCfg_/ryschanowSalaryCardHtml_.
+function columnHeadCurrentName_() {
+  var previewing = D && D.role === 'admin' && typeof viewAsEntry !== 'undefined' && viewAsEntry;
+  return previewing ? viewAsEntry.name : ((D && D.logistName) || '');
+}
+// Бакеты по сегменту (15.09, Влад: "Файмонвилисты тоже у Дьячкова") - зеркало
+// columnHeadBucketsFor_ в VPS api/server.js, держать синхронно при следующей правке сегментов.
+function chPayrollBuckets_() {
+  var sur = columnHeadCurrentName_().trim().split(' ')[0].toLowerCase();
+  return sur === 'дьячков' ? ['трал', 'файмонвиль'] : ['длинномер'];
+}
+
+function loadColumnHeadPayrollData_(month) {
+  var el = document.getElementById('column-head-payroll-content');
+  if (!el) return Promise.resolve();
+  var mk = month || chPayrollMonth_;
+  if (mk && chPayrollData_[mk]) { chPayrollMonth_ = mk; renderColumnHeadPayrollPage_(); return Promise.resolve(); }
+  el.innerHTML = '<p style="color:var(--muted);padding:16px">Данные загружаются...</p>';
+  var buckets = chPayrollBuckets_();
+  // Admin-предпросмотр ("Смотреть как") не имеет сессии начальника автоколонны -
+  // /api/my_driver_payroll вернёт 400 (см. server.js). Вместо этого зовём admin-эндпоинт
+  // (видит вообще всех) и фильтруем ЗДЕСЬ ЖЕ по своим бакетам - тот же результат, что видел
+  // бы сам сотрудник (тот же приём, что уже был в снесённом блоке renderMyPageVasin).
+  var req = (D.role === 'admin')
+    ? fetchFromYardApi_('/driver_payroll', mk ? { month: mk } : {})
+    : fetchFromYardApi_('/my_driver_payroll', mk ? { month: mk } : {});
+  return req.then(function(r) {
+    if (!r.ok || !r.data || r.data.error) throw new Error((r.data && r.data.error) || 'Ошибка загрузки');
+    var rows = (r.data.rows || []).filter(function(row) { return buckets.indexOf(row.vehicle_bucket) >= 0; });
+    var d = { month: r.data.month, rows: rows, available_months: r.data.available_months, partial: r.data.partial };
+    chPayrollData_[d.month] = d;
+    chPayrollMonth_ = d.month;
+    renderColumnHeadPayrollPage_();
+  }).catch(function(e) {
+    el.innerHTML = '<p style="color:var(--muted);padding:16px">Не удалось загрузить: ' + (e.message || e) + '</p>';
+  });
+}
+
+function chPayrollSetFilter_(f) {
+  chPayrollFilter_ = f;
+  renderColumnHeadPayrollPage_();
+}
+function chPayrollSortClick_(col) {
+  if (chPayrollSort_.col === col) {
+    chPayrollSort_.dir *= -1;
+  } else {
+    chPayrollSort_ = { col: col, dir: col === 'driver_name' ? 1 : -1 };
+  }
+  renderColumnHeadPayrollPage_();
+}
+function chPayrollToggleDeductions_() {
+  chPayrollDeductionsExpanded_ = !chPayrollDeductionsExpanded_;
+  renderColumnHeadPayrollPage_();
+}
+
+function renderColumnHeadPayrollPage_() {
+  var el = document.getElementById('column-head-payroll-content');
+  if (!el) return;
+  var d = chPayrollData_[chPayrollMonth_];
+  if (!d) return;
+
+  var rows = (d.rows || []).filter(function(r) {
+    return chPayrollFilter_ === 'all' || r.vehicle_bucket === chPayrollFilter_;
+  });
+  var sort = chPayrollSort_;
+  rows = rows.slice().sort(function(a, b) {
+    var av = a[sort.col], bv = b[sort.col];
+    if (sort.col === 'driver_name') return String(av).localeCompare(String(bv)) * sort.dir;
+    return ((av || 0) - (bv || 0)) * sort.dir;
+  });
+
+  var totalNet = rows.reduce(function(s, r) { return s + (r.net_amount || 0); }, 0);
+  var monthOpts = (d.available_months || [chPayrollMonth_]).map(function(mk) {
+    return '<option value="' + mk + '"' + (mk === chPayrollMonth_ ? ' selected' : '') + '>' + formatMonthLabel(mk) + '</option>';
+  }).join('');
+
+  // Без "Процент" (Влад: "без стоимости заявок и %" - коммерческая цена заказа не для
+  // начальника автоколонны) - единственное отличие от MACHINIST_SALARY_COLS_ у admin.
+  var cols = MACHINIST_SALARY_COLS_.filter(function(c) {
+    return c.key !== 'order_pct' && (chPayrollDeductionsExpanded_ || MACHINIST_SALARY_DEDUCTION_COLS_.indexOf(c.key) === -1);
+  });
+
+  var head = cols.map(function(c) {
+    var arrow = sort.col === c.key ? (sort.dir === -1 ? '▼' : '▲') : '↕';
+    var arrowStyle = sort.col === c.key ? '' : 'opacity:.35';
+    var toggle = '';
+    if (c.key === 'deductions_amount') {
+      toggle = '<span onclick="event.stopPropagation();chPayrollToggleDeductions_()" ' +
+        'title="' + (chPayrollDeductionsExpanded_ ? 'Свернуть Аванс/Штрафы/Проч.' : 'Показать Аванс/Штрафы/Проч. отдельно') + '" ' +
+        'style="cursor:pointer;margin-right:5px;display:inline-block;transition:transform .15s;transform:rotate(' +
+        (chPayrollDeductionsExpanded_ ? '90' : '0') + 'deg)">▸</span>';
+    }
+    return '<th class="sortable' + (c.num ? ' num' : '') + '" onclick="chPayrollSortClick_(\'' + c.key + '\')">' +
+      toggle + c.label + '<span style="font-size:10px;margin-left:4px;' + arrowStyle + '">' + arrow + '</span></th>';
+  }).join('');
+
+  var body = rows.map(function(r) {
+    var cells = cols.map(function(c) {
+      if (c.key === 'driver_name') {
+        var badgeColor = r.vehicle_bucket === 'трал' ? 'var(--green)' : r.vehicle_bucket === 'длинномер' ? 'var(--blue)' : r.vehicle_bucket === 'файмонвиль' ? 'var(--purple)' : 'var(--muted)';
+        return '<td>' + r.driver_name + ' <span style="font-size:10.5px;color:' + badgeColor + '">· ' + r.vehicle_bucket + '</span></td>';
+      }
+      var v = r[c.key] || 0;
+      var isDeduction = ['advance_amount', 'gibdd_fines_amount', 'other_deductions_amount', 'deductions_amount', 'ndfl_amount'].indexOf(c.key) >= 0;
+      var color = isDeduction && v ? 'var(--red)' : '';
+      return '<td class="num" style="' + (color ? 'color:' + color : '') + '">' + (v ? Math.round(v).toLocaleString('ru-RU') : '—') + '</td>';
+    }).join('');
+    var safeName = String(r.driver_name).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    return '<tr class="clickable" onclick="openColumnHeadPayrollDetail_(\'' + safeName + '\')" style="cursor:pointer">' + cells + '</tr>';
+  }).join('') || '<tr><td colspan="' + cols.length + '" class="muted">Нет данных за выбранный месяц/фильтр</td></tr>';
+
+  // Фильтр-чипы - только если в своём сегменте больше одного бакета (у Дьячкова - трал +
+  // файмонвиль, у Барыльченко бакет один, "длинномер" - фильтровать нечего).
+  var buckets = chPayrollBuckets_();
+  var chipsHtml = '';
+  if (buckets.length > 1) {
+    chipsHtml = '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+      '<button class="crm-filter-chip' + (chPayrollFilter_ === 'all' ? ' active' : '') + '" onclick="chPayrollSetFilter_(\'all\')">Все (' + (d.rows || []).length + ')</button>' +
+      buckets.map(function(b) {
+        var cnt = (d.rows || []).filter(function(r){ return r.vehicle_bucket === b; }).length;
+        var label = b === 'трал' ? 'Тралы' : b === 'длинномер' ? 'Длинномеры' : 'Файмонвиль';
+        return '<button class="crm-filter-chip' + (chPayrollFilter_ === b ? ' active' : '') + '" onclick="chPayrollSetFilter_(\'' + b + '\')">' + label + ' (' + cnt + ')</button>';
+      }).join('') +
+    '</div>';
+  }
+
+  el.innerHTML =
+    '<div class="card" style="margin-bottom:16px">' +
+      '<div class="sec-header" style="justify-content:space-between;flex-wrap:wrap;gap:10px">' +
+        chipsHtml +
+        '<div style="display:flex;gap:8px;align-items:center;margin-left:auto">' +
+          '<select onchange="loadColumnHeadPayrollData_(this.value)" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12.5px">' + monthOpts + '</select>' +
+        '</div>' +
+      '</div>' +
+      (d.partial ? '<div style="padding:0 20px 10px"><div class="alert amber" style="margin:0">' +
+        '<span class="alert-icon">!</span><span class="alert-text">' +
+        '<b>Месяц ещё не закрыт.</b> В отчёте 1С сводки за ' + formatMonthLabel(chPayrollMonth_) +
+        ' пока нет - суммы посчитаны по уже загруженным рейсам и штрафам. ' +
+        'Выслуга, аванс и прочие удержания появятся только после закрытия месяца, сейчас они не учтены.' +
+        '</span></div></div>' : '') +
+      '<div class="muted" style="font-size:11.5px;padding:0 20px 10px">' +
+        'Тип (' + buckets.join('/') + ') определяем по технике, на которой человек реально работал в этом месяце. ' +
+        'Клик по строке - полный расклад (штрафы и рейсы по машинам).' +
+      '</div>' +
+    '</div>' +
+    '<div class="card">' +
+      '<div class="sec-header"><div class="sec-title">Начисления машинистам</div>' +
+        '<div class="sec-sub">К начислению всего: ' + Math.round(totalNet).toLocaleString('ru-RU') + ' ₽ · ' + rows.length + ' чел.</div></div>' +
+      '<div style="overflow-x:auto"><table class="tbl"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>' +
+    '</div>';
 }
 
 function renderSalesSalary() {
@@ -23447,6 +23645,7 @@ function showPage(id, el) {
   if (id === 'navigation' && window.NAV) NAV.init();
   if (id === 'ryschanow-salary') renderRyschanowSalaryPage_();
   if (id === 'commercial-head-salary') renderCommercialHeadSalaryPage_();
+  if (id === 'column-head-payroll') loadColumnHeadPayrollData_();
 
   var wrap = document.getElementById('period-selector-wrap');
   if (wrap) {

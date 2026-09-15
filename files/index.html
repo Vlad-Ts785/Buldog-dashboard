@@ -18336,8 +18336,13 @@ function loadHistoryData() {
   // ли данные ленты.
   try { renderDrivers(); } catch (e) {}
   // С какого экрана Влад реально смотрит (флаг - иначе писалось бы на каждый возврат
-  // на вкладку; тот же приём, что lpViewportLogged_ на Планировке).
-  if (!dvViewportLogged_) { dvViewportLogged_ = true; dvLog_('viewport', '', window.innerWidth + 'x' + window.innerHeight); }
+  // на вкладку; тот же приём, что lpViewportLogged_ на Планировке). Нулевой размер не
+  // пишем и флаг не ставим: страница могла отрисоваться в скрытом окне (известная ловушка
+  // проекта - у скрытой панели геометрия 0), «0x0» в журнале - мусор, а не наблюдение.
+  if (!dvViewportLogged_ && window.innerWidth > 0) {
+    dvViewportLogged_ = true;
+    dvLog_('viewport', '', window.innerWidth + 'x' + window.innerHeight);
+  }
   if (dvData_ && dvLoadedPeriod_ === histPeriod) { dvRenderAll_(); return; }
   dvLoad_();
 }
@@ -29664,6 +29669,13 @@ var uiLogTimer_ = null;
 var UI_LOG_FLUSH_MS = 4000;
 var UI_LOG_MAX_QUEUE = 120;   // потолок очереди - защита от лавины
 var UI_LOG_MAX_BATCH = 40;    // столько строк уходит одним запросом (на сервере лимит 50)
+// fetch с keepalive переживает выгрузку страницы ТАК ЖЕ, как sendBeacon, но умеет
+// заголовки - значит токен уходит в X-Session-Token, а не в URL. Это принципиально:
+// параметр в URL оседает в /var/log/nginx/access.log, и любой, у кого есть доступ к
+// логам или их бэкапу, получает действующую сессию. Проверка один раз при загрузке.
+var uiLogKeepalive_ = (function() {
+  try { return 'keepalive' in new Request('', { method: 'POST' }); } catch (e) { return false; }
+})();
 function logUiEvent_(page, eventType, target, detail) {
   try {
     if (typeof SESSION_TOKEN === 'undefined' || !SESSION_TOKEN) return;
@@ -29684,17 +29696,21 @@ function flushUiEvents_(onUnload) {
     if (!uiLogQueue_.length) return;
     if (typeof SESSION_TOKEN === 'undefined' || !SESSION_TOKEN) { uiLogQueue_.length = 0; return; }
     while (uiLogQueue_.length) {
-      var body = JSON.stringify({ events: uiLogQueue_.splice(0, UI_LOG_MAX_BATCH) });
-      if (onUnload) {
-        // Обычный fetch() обрывается, когда страница уходит; sendBeacon переживает уход.
-        // Заголовки он не умеет - токен идёт параметром, ровно как у flushSegsOnUnload_
-        // в Планировке (checkSession читает session_token и из query).
-        if (!navigator.sendBeacon) return;   // дослать нечем - теряем, это допустимо
-        navigator.sendBeacon(YARD_API_BASE + '/ui_event?session_token=' + encodeURIComponent(SESSION_TOKEN),
-                             new Blob([body], { type: 'application/json' }));
-      } else {
-        fetch(YARD_API_BASE + '/ui_event', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Session-Token': SESSION_TOKEN }, body: body }).catch(function(){});
+      var batch = uiLogQueue_.splice(0, UI_LOG_MAX_BATCH);
+      var url = YARD_API_BASE + '/ui_event';           // БЕЗ параметров: в URL токена быть не должно
+      if (!onUnload) {
+        fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Session-Token': SESSION_TOKEN }, body: JSON.stringify({ events: batch }) }).catch(function(){});
+      } else if (uiLogKeepalive_) {
+        // Обычный fetch() обрывается, когда страница уходит. keepalive - не обрывается, и,
+        // в отличие от sendBeacon, умеет заголовки: токен уходит в X-Session-Token.
+        fetch(url, { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json', 'X-Session-Token': SESSION_TOKEN }, body: JSON.stringify({ events: batch }) }).catch(function(){});
+      } else if (navigator.sendBeacon) {
+        // Запасной путь для браузеров без keepalive. sendBeacon заголовков не умеет,
+        // поэтому токен кладём В ТЕЛО (сервер читает его там, см. checkSession) - но
+        // НИКОГДА в URL: параметр запроса попадает в access.log и утекает вместе с ним.
+        navigator.sendBeacon(url, new Blob([JSON.stringify({ session_token: SESSION_TOKEN, events: batch })], { type: 'application/json' }));
       }
+      // Нет ни того, ни другого - хвост теряем молча, это допустимо (журнал эргономики).
     }
   } catch(e){}
 }

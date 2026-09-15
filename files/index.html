@@ -373,11 +373,15 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 
 /* ── KPI GRID ──────────────────────────────────────────── */
 .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;}
-/* «Суды» (15.09) - три карточки вместо четырёх. Задано правилом, а НЕ инлайн-стилем:
-   инлайн перебивал бы медиазапрос @media(max-width:900px) ниже, и на узком экране сетка
-   осталась бы в три колонки, вылезая за экран (поймано на приёмке превью). */
-#court-kpi{grid-template-columns:repeat(3,1fr);}
-@media(max-width:900px){#court-kpi{grid-template-columns:1fr;}}
+/* «Суды» (15.09) - разворот строки с производствами у приставов. Высота ограничена и НЕ
+   анимируется (ГОСТ раздел 4, «Разворот строки»): у крупного должника производств бывает
+   под сотню (живой пример - 84 штуки), и без потолка одна строка растягивает таблицу на
+   несколько экранов, а соседние дела уезжают из поля зрения. */
+.court-detail-inner{max-height:320px;overflow-y:auto;}
+/* «Суды» (15.09) - карточек ровно четыре, поэтому сетка стандартная .kpi-grid со своими
+   медиазапросами, отдельного правила для #court-kpi нет СОЗНАТЕЛЬНО: первая версия задавала
+   колонки инлайн-стилем, и он перебивал @media(max-width:900px) ниже - на узком экране сетка
+   вылезала за экран (поймано на приёмке превью). */
 .kpi{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;}
 .kpi-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;font-weight:500;}
 .kpi-value{font-size:22px;font-weight:600;color:var(--text);line-height:1.2;}
@@ -5336,6 +5340,7 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
           <div class="kpi" id="court-kpi-active"></div>
           <div class="kpi" id="court-kpi-linked"></div>
           <div class="kpi" id="court-kpi-bankrupt"></div>
+          <div class="kpi" id="court-kpi-enf"></div>
         </div>
         <div class="card" id="court-events-card" style="margin-top:16px;display:none">
           <div class="sec-header">
@@ -22337,6 +22342,8 @@ function chooseDebtTarget_(tab) {
 var courtData_ = null, courtEvents_ = null, courtLoading_ = false;
 var courtShowClosed_ = false;   // по умолчанию видны только идущие дела
 var courtMarks_ = null;         // contragent (имя из 1С) -> {count, sum} для значка в таблице ДЗ
+var courtRows_ = [];            // строки ТЕКУЩЕГО рендера - индексы разворота валидны только для него
+var courtOpenDetail_ = null;    // индекс открытой строки-детали (аккордеон: открыта максимум одна)
 // По умолчанию сортируем по ДАТЕ, а не по сумме иска: в банкротных делах СуммИск - размер
 // всего банкротства (миллиарды), и при сортировке по деньгам они навсегда занимают весь
 // экран, отодвигая наши обычные взыскания вниз. Свежее сверху - то, что реально движется.
@@ -22358,6 +22365,7 @@ var COURT_COLS = [
   { key: 'opponent_disp', label: 'Ответчик' },
   { key: 'debt_balance', label: 'Долг в ДЗ', num: true },
   { key: 'claim_sum', label: 'Сумма иска', num: true },
+  { key: 'enf_left', label: 'У приставов', num: true },
   { key: 'stage_disp', label: 'Стадия' },
   { key: 'court', label: 'Суд' },
   { key: 'case_number', label: 'Дело' },
@@ -22482,8 +22490,13 @@ function setCourtSort_(col) {
   if (courtSort_.col === col) { courtSort_.dir *= -1; }
   else {
     courtSort_.col = col;
-    // Числовые и дата - первый клик по убыванию (крупное/свежее сверху), текст - А-Я.
-    courtSort_.dir = (col === 'claim_sum' || col === 'debt_balance' || col === 'case_date') ? -1 : 1;
+    // Числовые и дата - первый клик по УБЫВАНИЮ (крупное/свежее сверху), текст - А-Я (ГОСТ,
+    // раздел 4). Признак берём из самого описания колонки, а не из списка имён: перечисление
+    // вида (col === 'claim_sum' || col === 'debt_balance' || ...) уже подвело - новая колонка
+    // «У приставов» в него не попала и открывалась с копеечных сумм сверху.
+    var meta = null;
+    for (var k = 0; k < COURT_COLS.length; k++) if (COURT_COLS[k].key === col) meta = COURT_COLS[k];
+    courtSort_.dir = (meta && meta.num) || col === 'case_date' ? -1 : 1;
   }
   renderCourtCases_();
 }
@@ -22517,6 +22530,14 @@ function renderCourtCases_() {
     '<div class="kpi-label">Банкротства ответчиков</div>' +
     '<div class="kpi-value">' + activeBankr.length + '</div>' +
     '<div class="muted" style="font-size:11.5px;margin-top:6px">' + courtMoney_(bankrSum) + ' - размер дел целиком, не наше требование</div>');
+  // Приставы: ФССП отдаёт производства должника ЦЕЛИКОМ, по ВСЕМ его взыскателям - кто
+  // взыскатель, в данных не сказано вообще. Подпись говорит это прямо: цифра работает как
+  // «сколько с него уже требуют другие» (очередь кредиторов), а не как наши взыскания.
+  setHTML('court-kpi-enf',
+    '<div class="kpi-label">У приставов по этим должникам</div>' +
+    '<div class="kpi-value">' + courtMoney_(s.enf_sum_left || 0) + '</div>' +
+    '<div class="muted" style="font-size:11.5px;margin-top:6px">' + (s.enf_count || 0) + ' производств у ' + (s.enf_debtors || 0) +
+    ' из них - по всем взыскателям, не только по нашим</div>');
 
   var run = courtData_.last_run;
   setText('court-sync-status', run
@@ -22540,6 +22561,7 @@ function renderCourtCases_() {
   }).map(function(c) {
     var o = Object.create(c);
     o.debt_balance = c.debt ? c.debt.balance : 0;
+    o.enf_left = c.enf ? (c.enf.sum_left || 0) : 0;
     o.opponent_disp = courtShortName_(c.opponent_name) || '—';
     o.our_disp = courtShortName_(c.our_name) || '—';
     o.stage = courtStageInfo_(c);
@@ -22566,7 +22588,9 @@ function renderCourtCases_() {
     emptyEl.style.display = rows.length ? 'none' : 'block';
     emptyEl.textContent = all.length ? 'Под выбранные условия не попало ни одного дела.' : 'Дел пока нет - нажмите «Обновить», чтобы опросить источник.';
   }
-  document.getElementById('court-cases-body').innerHTML = rows.map(function(c) {
+  courtRows_ = rows;       // для ленивого разворота строки - индексы валидны только для этого рендера
+  courtOpenDetail_ = null;
+  document.getElementById('court-cases-body').innerHTML = rows.map(function(c, i) {
     var stage = c.stage;
     var risk = c.risk ? legalRiskMarkHtml_(c.risk.light, 8, 'margin-right:6px', c.risk.marker) : '';
     var debtCell = c.debt
@@ -22576,11 +22600,24 @@ function renderCourtCases_() {
     // строке два одинаковых красных слова подряд.
     var bankrTag = (c.case_type === 'Б' && stage.text !== 'Банкротство')
       ? '<div style="margin-top:3px"><span class="badge red" style="font-size:9px">банкротство</span></div>' : '';
-    return '<tr' + (c.is_active ? '' : ' style="opacity:.62"') + '>' +
-      '<td>' + risk + '<b>' + courtEsc_(c.opponent_disp) + '</b>' +
+    var hasEnf = !!(c.enf && c.enf.count);
+    // Разворачивается только строка, внутри которой реально что-то есть (производства у
+    // приставов). Строка без деталей не кликабельна - шеврон, который ничего не открывает,
+    // хуже его отсутствия.
+    var chevron = hasEnf
+      ? '<span id="court-chev-' + i + '" class="muted" style="display:inline-block;width:12px">▸</span>'
+      : '<span style="display:inline-block;width:12px"></span>';
+    var enfCell = hasEnf
+      ? '<b style="font-family:JetBrains Mono,monospace;font-size:11.5px">' + courtMoney_(c.enf.sum_left) + '</b>' +
+        '<div class="muted" style="font-size:9.5px">' + c.enf.count + ' ' + (c.enf.count === 1 ? 'производство' : (c.enf.count < 5 ? 'производства' : 'производств')) + '</div>'
+      : '<span class="muted">' + (c.enf && c.enf.checked_at ? 'нет' : '—') + '</span>';
+    return '<tr' + (hasEnf ? ' class="clickable" onclick="courtToggleDetail_(' + i + ')" style="cursor:pointer' + (c.is_active ? '' : ';opacity:.62') + '"'
+                           : (c.is_active ? '' : ' style="opacity:.62"')) + '>' +
+      '<td>' + chevron + risk + '<b>' + courtEsc_(c.opponent_disp) + '</b>' +
         (c.debt ? '<div class="muted" style="font-size:9.5px">в ДЗ: ' + courtEsc_(c.debt.contragent) + '</div>' : '') + '</td>' +
       '<td class="num">' + debtCell + '</td>' +
       '<td class="num" style="white-space:nowrap;font-family:JetBrains Mono,monospace;font-size:11.5px">' + (c.claim_sum ? courtMoney_(c.claim_sum) : '<span class="muted" style="font-family:inherit">не указана</span>') + '</td>' +
+      '<td class="num">' + enfCell + '</td>' +
       '<td><span class="badge ' + stage.cls + '" style="white-space:nowrap" title="' + courtEsc_(stage.full) + '">' + courtEsc_(stage.text || '—') + '</span></td>' +
       '<td class="muted" style="font-size:11px">' + courtEsc_(c.court || '—') + '</td>' +
       '<td><a href="' + courtEsc_(c.kad_url || '#') + '" target="_blank" rel="noopener noreferrer" ' +
@@ -22588,8 +22625,64 @@ function renderCourtCases_() {
         'title="Открыть карточку дела в Картотеке арбитражных дел">' + courtEsc_(c.case_number || '—') + '</a>' + bankrTag + '</td>' +
       '<td class="muted" style="font-size:11px;white-space:nowrap;font-variant-numeric:tabular-nums">' + courtDateRu_(c.case_date) + '</td>' +
       '<td class="muted" style="font-size:11px">' + courtEsc_(c.our_disp) + '</td>' +
+    '</tr>' +
+    (hasEnf ? '<tr id="court-detail-' + i + '" style="display:none"><td colspan="' + COURT_COLS.length + '" style="padding:0 0 12px 30px"><div class="court-detail-inner"></div></td></tr>' : '');
+  }).join('');
+}
+// Разворот строки по клику - канон ГОСТа (раздел 4, «Разворот строки»): аккордеон (открыта
+// максимум одна), высота НЕ анимируется (display none/table-row), содержимое рисуется лениво
+// при первом открытии и остаётся в DOM, индексы живут ровно один рендер таблицы.
+function courtToggleDetail_(i) {
+  var row = document.getElementById('court-detail-' + i);
+  if (!row) return;
+  var chev = document.getElementById('court-chev-' + i);
+  var isOpen = row.style.display !== 'none';
+  if (courtOpenDetail_ !== null && courtOpenDetail_ !== i) {
+    var prevRow = document.getElementById('court-detail-' + courtOpenDetail_);
+    var prevChev = document.getElementById('court-chev-' + courtOpenDetail_);
+    if (prevRow) prevRow.style.display = 'none';
+    if (prevChev) prevChev.textContent = '▸';
+  }
+  if (isOpen) {
+    row.style.display = 'none';
+    if (chev) chev.textContent = '▸';
+    courtOpenDetail_ = null;
+    return;
+  }
+  var inner = row.querySelector('.court-detail-inner');
+  if (inner && !inner.dataset.filled) {
+    inner.innerHTML = courtEnfDetailHtml_(courtRows_[i]);
+    inner.dataset.filled = '1';
+  }
+  row.style.display = 'table-row';
+  if (chev) chev.textContent = '▾';
+  courtOpenDetail_ = i;
+}
+// Производства ФССП по должнику. Подпись про «всех взыскателей» обязательна и стоит ПЕРВОЙ:
+// взыскателя ФССП не отдаёт вовсе, и без этой строки таблица читается как «вот сколько
+// приставы взыскивают в нашу пользу», хотя это сумма требований всех кредиторов должника.
+function courtEnfDetailHtml_(c) {
+  if (!c || !c.enf || !c.enf.items || !c.enf.items.length) {
+    return '<div class="muted" style="font-size:11.5px">Производств у приставов не найдено.</div>';
+  }
+  var head = '<div class="muted" style="font-size:10.5px;margin:2px 0 8px">Исполнительные производства должника - по ВСЕМ взыскателям, не только по нашим искам' +
+    (c.enf.checked_at ? ' · проверено ' + courtDateRu_(c.enf.checked_at) : '') + '</div>';
+  var rows = c.enf.items.map(function(e) {
+    var doc = [e.doc_type, e.doc_number].filter(Boolean).join(' ') + (e.doc_date ? (' от ' + courtDateRu_(e.doc_date)) : '');
+    return '<tr>' +
+      '<td style="font-family:JetBrains Mono,monospace;font-size:11px;white-space:nowrap">' + courtEsc_(e.ip_number) + '</td>' +
+      '<td class="muted" style="font-size:11px;white-space:nowrap;font-variant-numeric:tabular-nums">' + courtDateRu_(e.ip_date) + '</td>' +
+      '<td class="muted" style="font-size:11px">' + courtEsc_(doc || '—') + '</td>' +
+      '<td class="muted" style="font-size:11px">' + courtEsc_(e.subject || '—') + '</td>' +
+      '<td class="muted" style="font-size:11px">' + courtEsc_(e.bailiff || '—') + '</td>' +
+      '<td class="num" style="font-family:JetBrains Mono,monospace;font-size:11px;white-space:nowrap">' + (e.sum_debt != null ? courtMoney_(e.sum_debt) : '—') + '</td>' +
+      '<td class="num" style="font-family:JetBrains Mono,monospace;font-size:11px;white-space:nowrap"><b>' + (e.sum_left != null ? courtMoney_(e.sum_left) : '—') + '</b></td>' +
     '</tr>';
   }).join('');
+  return head + '<div style="overflow-x:auto"><table class="tbl" style="margin:0">' +
+    '<thead><tr><th>Производство</th><th>Возбуждено</th><th>Документ</th><th>Предмет</th><th>Пристав</th>' +
+    '<th class="num">Сумма долга</th><th class="num">Остаток</th></tr></thead>' +
+    '<tbody>' + rows + '</tbody></table></div>';
 }
 function courtRenderEvents_() {
   var card = document.getElementById('court-events-card');

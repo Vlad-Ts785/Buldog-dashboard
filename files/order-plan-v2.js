@@ -667,13 +667,21 @@ function drawContractPdf_(o, ent, stampUrl, signUrl) {
     'к/с: ',
     'БИК: '
   ];
-  ensureSpace(10 + execLines.length * 4.6);
+  /* Юридический адрес часто длиннее colW и переносится в 2-3 строки (splitTextToSize
+     внутри wrapped()) - раньше следующие поля рисовались по фиксированному шагу i*4.6
+     на строку массива, не глядя на реальный перенос, и наезжали на "хвост" длинного
+     адреса (поймано Владом визуально на реальном юрлице). Считаем реальную высоту
+     каждой колонки ДО отрисовки (для ensureSpace), а рисуем - собственным бегущим y
+     на каждую колонку, а не общим индексом массива. */
+  var execTotalLines = execLines.reduce(function (n, l) { return n + doc.splitTextToSize(l, colW).length; }, 0);
+  var custTotalLines = custLines.reduce(function (n, l) { return n + doc.splitTextToSize(l, colW).length; }, 0);
+  ensureSpace(10 + Math.max(execTotalLines, custTotalLines) * 4.6);
   setF(true, 9); text('ИСПОЛНИТЕЛЬ:', M, y); text('ЗАКАЗЧИК:', M + colW + 6, y); y += 4.6;
   setF(false, 8.5);
-  var yBoth = y;
-  execLines.forEach(function (l, i) { wrapped(l, M, yBoth + i * 4.6, colW, 4.6); });
-  custLines.forEach(function (l, i) { wrapped(l, M + colW + 6, yBoth + i * 4.6, colW, 4.6); });
-  y = yBoth + execLines.length * 4.6 + 4;
+  var yExec = y, yCust = y;
+  execLines.forEach(function (l) { yExec = wrapped(l, M, yExec, colW, 4.6); });
+  custLines.forEach(function (l) { yCust = wrapped(l, M + colW + 6, yCust, colW, 4.6); });
+  y = Math.max(yExec, yCust) + 4;
 
   /* Табличная часть */
   ensureSpace(24);

@@ -11927,6 +11927,15 @@ function applyRoleUI() {
     if (!isColumnHeadViewer) allowedPages_.push('order-plan');
     if (isRyschanowViewer) allowedPages_.push('ryschanow-salary');
     if (isCommercialHeadViewer) allowedPages_.push('commercial-head-salary', 'commercial-head-debt');
+    // «Суды» (15.09, Влад: «открой тоже Лиане и Айнур») - руководителям коммерческих групп.
+    // Технически это страница `debt`, но им в ней открыт ТОЛЬКО раздел «Суды» (плитки «ДЗ» и
+    // «План поступлений» - admin-овские, у них есть свои: commercial-head-debt и план на
+    // неделю), поэтому и пункт меню для них подписан «Суды», а не «Дебиторка».
+    if (isCommercialHeadViewer) {
+      allowedPages_.push('debt');
+      var debtNavItem_ = document.querySelector('.sidebar-nav-item[data-page="debt"]');
+      if (debtNavItem_ && debtNavItem_.lastChild && debtNavItem_.lastChild.nodeType === 3) debtNavItem_.lastChild.nodeValue = ' Суды';
+    }
     // «Зарплата машинистов» (15.09) - отдельный пункт меню, тот же принцип, что у Рыщанова/
     // руководителей коммерческих групп выше.
     if (isColumnHeadViewer) allowedPages_.push('column-head-payroll');
@@ -22331,15 +22340,36 @@ function showDebtHub_() {
   if (dz) dz.style.display = 'none';
   if (plan) plan.style.display = 'none';
   if (court) court.style.display = 'none';
-  setText('page-title', 'Дебиторка');
-  // Плитка «Суды» - только admin. Проверяем РОЛЬ ЯВНО в самом блоке, а не полагаемся на то,
-  // что страница целиком закрыта: ровно на этом допущении 13.09 «Дирекция» протекла в
-  // урезанную копию страницы отдела (память project_dept_trals_direkcia_leak_bug).
+  // Состав хаба зависит от того, КТО смотрит, и каждая плитка проверяется ЯВНО: admin видит
+  // все три раздела, руководитель коммерческой группы (Ахтамова/Гусейнова, 15.09) - только
+  // «Суды». Полагаться на то, что страница целиком закрыта, нельзя - ровно на этом допущении
+  // 13.09 «Дирекция» протекла в урезанную копию страницы отдела
+  // (память project_dept_trals_direkcia_leak_bug).
+  var isAdmin_ = !!(D && D.role === 'admin');
   var courtTile = document.getElementById('debt-hub-tile-court');
-  if (courtTile) courtTile.style.display = (D && D.role === 'admin') ? '' : 'none';
+  if (courtTile) courtTile.style.display = courtCanView_() ? '' : 'none';
+  var hubTiles_ = document.querySelectorAll('#debt-hub .hub-tile');
+  for (var t = 0; t < hubTiles_.length; t++) {
+    if (hubTiles_[t].id !== 'debt-hub-tile-court') hubTiles_[t].style.display = isAdmin_ ? '' : 'none';
+  }
+  setText('page-title', isAdmin_ ? 'Дебиторка' : 'Суды');
   courtFillHubFact_();   // подвал плитки «Суды» - живое число активных дел, не выдуманная подпись
 }
+// Кто видит суды на клиенте. Право решает СЕРВЕР (courtCanView_ в api/lib/court-cases.js);
+// здесь - только чтобы не показывать человеку то, что ему всё равно откажут. Фамилии берём
+// из уже существующего COMMERCIAL_HEAD_SUR_FRONT_, второго списка не заводим.
+function courtCanView_() {
+  if (!D) return false;
+  if (D.role === 'admin') return true;
+  var sur = String(D.managerName || D.logistName || '').trim().split(' ')[0].toLowerCase();
+  return !!sur && COMMERCIAL_HEAD_SUR_FRONT_.indexOf(sur) >= 0;
+}
 function chooseDebtTarget_(tab) {
+  // Гвард на случай прямой ссылки/старой вкладки: не-admin в этой странице открывает только
+  // «Суды». Сервер ему данных ДЗ и плана всё равно не отдаст, но и предлагать пустой экран
+  // незачем.
+  if (tab !== 'court' && !(D && D.role === 'admin')) tab = 'court';
+  if (tab === 'court' && !courtCanView_()) { showDebtHub_(); return; }
   var hub = document.getElementById('debt-hub');
   var back = document.getElementById('debt-back-link');
   var dz = document.getElementById('debt-tab-dz');
@@ -22351,7 +22381,15 @@ function chooseDebtTarget_(tab) {
   if (plan) plan.style.display = (tab === 'plan') ? '' : 'none';
   if (court) court.style.display = (tab === 'court') ? '' : 'none';
   setText('page-title', tab === 'plan' ? 'Дебиторка - план поступлений'
-    : tab === 'court' ? 'Дебиторка - суды' : 'Дебиторка - задолженность');
+    : tab === 'court' ? ((D && D.role === 'admin') ? 'Дебиторка - суды' : 'Суды')
+    : 'Дебиторка - задолженность');
+  // Возврат «← Все разделы» имеет смысл, только когда разделов правда несколько.
+  var backLink_ = document.getElementById('debt-back-link');
+  if (backLink_ && !(D && D.role === 'admin')) backLink_.style.display = 'none';
+  // Кнопка «Обновить» тратит общую дневную квоту Checko - запуск прогона оставлен admin
+  // (сервер тоже отвечает 403 на /api/court/sync_now всем остальным).
+  var syncBtn_ = document.getElementById('court-sync-btn');
+  if (syncBtn_) syncBtn_.style.display = (D && D.role === 'admin') ? '' : 'none';
   if (tab === 'dz') renderDebt();
   if (tab === 'plan') renderReceiptsPlanSummaryPage_();
   if (tab === 'court') loadCourtCases_();
@@ -22747,7 +22785,7 @@ function courtSyncNow_() {
 // по разделу, не выдуманная подпись). Лёгкий запрос, без списка дел.
 function courtFillHubFact_() {
   var el = document.getElementById('debt-hub-court-fact');
-  if (!el || !D || D.role !== 'admin') return;
+  if (!el || !courtCanView_()) return;
   fetchFromYardApi_('/court/summary', {}).then(function(r) {
     if (!r.ok || !r.data) return;
     var n = r.data.claims_count || 0, b = r.data.bankrupt_count || 0;

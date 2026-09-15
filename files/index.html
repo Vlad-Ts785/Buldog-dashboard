@@ -5848,7 +5848,12 @@ main:has(> #page-dynamics.active){min-width:0;}
           </select>
           <select id="court-filter-entity" onchange="renderCourtCases_()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:6px 10px;font-size:12px;cursor:pointer"></select>
           <select id="court-filter-status" onchange="renderCourtCases_()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:6px 10px;font-size:12px;cursor:pointer"></select>
-          <button id="court-closed-toggle-btn" onclick="toggleCourtClosed_()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:6px 12px;font-size:12px;cursor:pointer">Показать завершённые</button>
+          <select id="court-filter-stage" onchange="renderCourtCases_()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:6px 10px;font-size:12px;cursor:pointer">
+            <option value="work">В работе: суд идёт или деньги не пришли</option>
+            <option value="active">Только идущие суды</option>
+            <option value="recover">Только «выиграно, деньги не пришли»</option>
+            <option value="all">Все дела, включая архив</option>
+          </select>
           <button id="court-sync-btn" onclick="courtSyncNow_()" data-nav-sound style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:6px 12px;font-size:12px;cursor:pointer" title="Тот же прогон, что автоматически каждое утро в 05:40 МСК">Обновить</button>
         </div>
         <div class="kpi-grid" id="court-kpi">
@@ -24081,7 +24086,24 @@ function chooseDebtTarget_(tab) {
 // ССЫЛКА на карточку КАД, а не наша копия: сам kad.arbitr.ru закрыт капчей, содержимое
 // карточки (заседания, документы) мы не получаем - только стадию, сумму и стороны.
 var courtData_ = null, courtEvents_ = null, courtLoading_ = false;
-var courtShowClosed_ = false;   // по умолчанию видны только идущие дела
+// Стадия дела ГЛАЗАМИ ВЗЫСКАНИЯ, а не суда (15.09, Влад искал выигранное дело и не нашёл:
+// «по этим ничего не нашёл 9723162761»). Первая версия делила дела на «идёт / завершено» -
+// и выигранный суд, по которому деньги так и не пришли, проваливался в архив к трёмстам
+// делам десятилетней давности. А это ровно та стадия, где ещё можно получить деньги:
+// на 15.09 таких дел 13, долг по ним в 1С - 11,3 млн ₽.
+//   active  - суд идёт;
+//   recover - выиграли, но должник ещё должен по 1С (или у него висят непогашенные
+//             производства у приставов) - деньги не получены, работа не закончена;
+//   archive - всё остальное завершённое.
+function courtStage_(c) {
+  if (c.is_active) return 'active';
+  var t = String(c.outcome_text || '').toLowerCase();
+  var won = t.indexOf('удовлетвор') >= 0 && t.indexOf('отказ') < 0;
+  if (!won) return 'archive';
+  var debtLeft = !!(c.debt && c.debt.balance > 0);
+  var enfLeft = !!(c.enf && c.enf.count && c.enf.sum_left > 0);
+  return (debtLeft || enfLeft) ? 'recover' : 'archive';
+}
 var courtMarks_ = null;         // contragent (имя из 1С) -> {count, sum} для значка в таблице ДЗ
 var courtRows_ = [];            // строки ТЕКУЩЕГО рендера - индексы разворота валидны только для него
 var courtOpenDetail_ = null;    // индекс открытой строки-детали (аккордеон: открыта максимум одна)
@@ -24145,7 +24167,12 @@ function courtShortName_(s) {
   // Порог считаем по сумме букв слова: КДСП/ЦДС/ЯРД/ДиМ остаются как есть.
   return t.replace(/[А-ЯЁA-Z]{2,}(?:-[А-ЯЁA-Z]{2,})*/g, function(w) {
     if (w.replace(/-/g, '').length < 5) return w;
-    return w.split('-').map(function(p) { return p.charAt(0) + p.slice(1).toLowerCase(); }).join('-');
+    // Часть из 2-3 букв внутри составного названия - аббревиатура, её регистр не трогаем:
+    // «БГ-СТРОЙТЕХНОЛОГИЯ» должно стать «БГ-Стройтехнология», а не «Бг-Стройтехнология»
+    // (поймано Владом на живом деле А40-92723/2024).
+    return w.split('-').map(function(p) {
+      return p.length <= 3 ? p : (p.charAt(0) + p.slice(1).toLowerCase());
+    }).join('-');
   });
 }
 function courtCasesWord_(n) {
@@ -24169,6 +24196,13 @@ function courtDateRu_(s) {
 function courtStageInfo_(c) {
   var full = c.outcome_text || (c.is_active ? 'идёт' : 'завершено');
   var t = String(c.outcome_text || '').toLowerCase();
+  // «Выиграно, но денег нет» - янтарный, а НЕ зелёный: зелёная пилюля «Требования
+  // удовлетворены» на деле, где долг по 1С всё ещё висит, читается как «всё хорошо» и
+  // ровно поэтому такие дела выпадали из внимания.
+  if (courtStage_(c) === 'recover') {
+    return { cls: 'amber', text: 'Ждём денег',
+      full: full + (c.debt ? ('; долг по 1С ' + courtMoney_(c.debt.balance) + ' ещё не закрыт') : '; у должника висят производства у приставов') };
+  }
   if (t.indexOf('без движения') >= 0) return { cls: 'amber', text: 'Без движения', full: full };
   if (t.indexOf('банкрот') >= 0) return { cls: 'red', text: 'Банкротство', full: full };
   if (t.indexOf('удовлетвор') >= 0) return { cls: 'green', text: 'Удовлетворён', full: full };
@@ -24241,12 +24275,6 @@ function setCourtSort_(col) {
   }
   renderCourtCases_();
 }
-function toggleCourtClosed_() {
-  courtShowClosed_ = !courtShowClosed_;
-  var b = document.getElementById('court-closed-toggle-btn');
-  if (b) b.textContent = courtShowClosed_ ? 'Только идущие дела' : 'Показать завершённые';
-  renderCourtCases_();
-}
 function renderCourtCases_() {
   if (!courtData_) return;
   var s = courtData_.summary || {};
@@ -24262,11 +24290,23 @@ function renderCourtCases_() {
   setHTML('court-kpi-active',
     '<div class="kpi-label">Идут иски о взыскании</div>' +
     '<div class="kpi-value">' + activeClaims.length + '</div>' +
-    '<div class="muted" style="font-size:11.5px;margin-top:6px">на ' + courtMoney_(claimsSum) + '</div>');
+    '<div class="muted" style="font-size:11.5px;margin-top:6px">на ' + courtMoney_(claimsSum) +
+    (s.linked_count ? (' · ' + s.linked_count + ' - наши должники по ДЗ') : '') + '</div>');
+  // Главная карточка для взыскания (15.09): суд выигран, а деньги не пришли - долг по 1С
+  // всё ещё висит. Раньше на этом месте было «из них должники по ДЗ» (часть строки выше).
+  var recover = all.filter(function(c) { return courtStage_(c) === 'recover'; });
+  var recoverDebt = recover.reduce(function(a, c) { return a + ((c.debt && c.debt.balance) || 0); }, 0);
+  // Два признака в одном счётчике разделяем подписью: долг по 1С - наш собственный учёт,
+  // признак точный; открытое производство у приставов - признак косвенный (оно может быть
+  // и по чужому взыскателю, ФССП взыскателя не раскрывает).
+  var recoverWithDebt = recover.filter(function(c) { return c.debt && c.debt.balance > 0; }).length;
+  var recoverOnlyEnf = recover.length - recoverWithDebt;
   setHTML('court-kpi-linked',
-    '<div class="kpi-label">Из них должники по ДЗ</div>' +
-    '<div class="kpi-value">' + (s.linked_count || 0) + '</div>' +
-    '<div class="muted" style="font-size:11.5px;margin-top:6px">долг по 1С: ' + courtMoney_(s.linked_debt || 0) + '</div>');
+    '<div class="kpi-label">Выиграно, деньги не пришли</div>' +
+    '<div class="kpi-value">' + recover.length + '</div>' +
+    '<div class="muted" style="font-size:11.5px;margin-top:6px">' +
+    (recoverWithDebt ? (recoverWithDebt + ' с долгом по 1С на ' + courtMoney_(recoverDebt)) : 'долг по 1С закрыт') +
+    (recoverOnlyEnf ? (' · ещё ' + recoverOnlyEnf + ' - по открытым производствам') : '') + '</div>');
   setHTML('court-kpi-bankrupt',
     '<div class="kpi-label">Банкротства ответчиков</div>' +
     '<div class="kpi-value">' + activeBankr.length + '</div>' +
@@ -24292,8 +24332,12 @@ function renderCourtCases_() {
   var entVal = (document.getElementById('court-filter-entity') || {}).value || '';
   var stVal = (document.getElementById('court-filter-status') || {}).value || '';
   var typeVal = (document.getElementById('court-filter-type') || {}).value || '';
+  var stageVal = (document.getElementById('court-filter-stage') || {}).value || 'work';
   var rows = all.filter(function(c) {
-    if (!courtShowClosed_ && !c.is_active) return false;
+    var st = courtStage_(c);
+    if (stageVal === 'work' && st === 'archive') return false;
+    if (stageVal === 'active' && st !== 'active') return false;
+    if (stageVal === 'recover' && st !== 'recover') return false;
     if (entVal && c.our_name !== entVal) return false;
     if (stVal && c.outcome_text !== stVal) return false;
     if (typeVal === 'claims' && c.case_type === 'Б') return false;
@@ -24323,7 +24367,8 @@ function renderCourtCases_() {
         c.label + '<span style="font-size:10px;opacity:' + (active ? '1' : '0.3') + '">' + arrow + '</span></th>';
     }).join('');
   }
-  setText('court-cases-sub', rows.length + ' ' + courtCasesWord_(rows.length) + (courtShowClosed_ ? ' (включая завершённые)' : ' идёт сейчас'));
+  var STAGE_SUB_ = { work: ' в работе', active: ' идёт сейчас', recover: ' ждут денег', all: ' за всё время' };
+  setText('court-cases-sub', rows.length + ' ' + courtCasesWord_(rows.length) + (STAGE_SUB_[stageVal] || ''));
   var emptyEl = document.getElementById('court-cases-empty');
   if (emptyEl) {
     emptyEl.style.display = rows.length ? 'none' : 'block';

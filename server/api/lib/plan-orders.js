@@ -5,7 +5,13 @@
 // Принципы (все - решения Влада 10-11.09, подробности в плане):
 //   - заявка = plan_orders, исполнители = plan_order_executors (список), свой парк -> отрезок plan_segs
 //     с order_id (передняя половина уже работающей Планировки, не третья система);
-//   - менеджер видит СВОИ заявки, логист/админ - все; внутренние заявки логиста менеджерам не видны;
+//   - ЧТЕНИЕ (15.09, Влад: «менеджеры хотят видеть все заказы - на время перехода уступаю»):
+//     менеджер видит ВСЕ заявки (не только свои), логист/админ - тоже все; внутренние заявки
+//     логиста менеджерам по-прежнему не видны. Клиент (order-plan-v2.js, MGR_ALL) сверху даёт
+//     кнопку «Все менеджеры»/«Только мои» - это уже просто фильтр СТРОК на уже полученном списке;
+//   - ПРАВКА заявки (save/status/take/change_request_resolve и т.п.) - по-прежнему только СВОЯ
+//     для менеджера (canEdit), это отдельная, более строгая проверка от canSee (видимость) -
+//     см. комментарии у обеих функций. «Видеть» ≠ «менять чужое».
 //   - «предупреждать, не запрещать»: занятую машину ставить можно; ЗАПРЕТ только на отбой;
 //   - «под данные»: замена вне заявленных - запрос-подтверждение (менеджер согласует с заказчиком);
 //   - никаких списков сущностей в коде: юрлица, люди, машины, словари - из справочников.
@@ -85,7 +91,18 @@ module.exports = function (deps) {
       `SELECT * FROM plan_order_change_requests WHERE order_id IN (?) AND status = 'pending'`, [orderIds]);
     return rows;
   }
+  // ЧТЕНИЕ (GET /orders/one, /orders/history) - менеджер видит любую не внутреннюю заявку
+  // (15.09, см. комментарий в шапке файла). Логист/админ - как и раньше, всё.
   function canSee(req, o) {
+    if (req.userRole === "manager") return !o.internal;
+    return true;
+  }
+  // ПРАВКА (save/status/take/otboy/delete/change_request_resolve) - менеджеру доступна
+  // ТОЛЬКО своя заявка, даже теперь, когда canSee() выше пускает смотреть на все.
+  // Раньше это была одна и та же проверка (owner === viewer) - разделено 15.09, когда
+  // видимость расширили, а право менять чужое - осознанно нет (Влад просил только
+  // «видеть», не «менять чужое»).
+  function canEdit(req, o) {
     if (req.userRole === "manager") return !o.internal && o.manager_email === req.userEmail;
     return true;
   }
@@ -188,14 +205,17 @@ module.exports = function (deps) {
   });
 
   // ── GET /api/orders ─────────────────────────────────────────────────────────────────────
-  // date=YYYY-MM-DD (+ to=YYYY-MM-DD для недели). Менеджер - свои, не внутренние; логист/админ - все.
+  // date=YYYY-MM-DD (+ to=YYYY-MM-DD для недели). 15.09 (Влад): менеджер - ВСЕ заявки (было -
+  // только свои), кроме внутренних логиста; логист/админ - как и раньше, всё. Клиент сам
+  // умеет отфильтровать до «только своих» кнопкой (MGR_ALL в order-plan-v2.js) - это уже не
+  // вопрос видимости на сервере, а удобство поверх уже полученного списка.
   app.get("/api/orders", ...gate, async (req, res) => {
     try {
       const date = String(req.query.date || ""); const to = String(req.query.to || date);
       if (!isDate(date) || !isDate(to)) return fail(res, 400, "date обязателен (YYYY-MM-DD)");
       const r = await roster();
       const where = ["deleted_at IS NULL", "service_date BETWEEN ? AND ?"]; const args = [date, to];
-      if (req.userRole === "manager") { where.push("manager_email = ?", "internal = 0"); args.push(req.userEmail); }
+      if (req.userRole === "manager") { where.push("internal = 0"); }
       const [rows] = await pool.query(`SELECT * FROM plan_orders WHERE ${where.join(" AND ")} ORDER BY service_date, day_no`, args);
       const ids = rows.map((o) => o.id);
       const execs = await loadExecutors(pool, ids); const pend = await loadPending(pool, ids);
@@ -210,13 +230,14 @@ module.exports = function (deps) {
     } catch (err) { console.error("orders list:", err); fail(res, 500, String(err.message || err)); }
   });
 
-  // Счётчики по дням для вкладок (вчера..+7): всего / без машины - по видимости роли.
+  // Счётчики по дням для вкладок (вчера..+7): всего / без машины - по видимости роли
+  // (15.09 - у менеджера теперь та же видимость, что у /api/orders выше, см. комментарий там).
   app.get("/api/orders/counts", ...gate, async (req, res) => {
     try {
       const from = String(req.query.from || ""), to = String(req.query.to || "");
       if (!isDate(from) || !isDate(to)) return fail(res, 400, "from/to обязательны");
       const where = ["o.deleted_at IS NULL", "o.service_date BETWEEN ? AND ?"]; const args = [from, to];
-      if (req.userRole === "manager") { where.push("o.manager_email = ?", "o.internal = 0"); args.push(req.userEmail); }
+      if (req.userRole === "manager") { where.push("o.internal = 0"); }
       const [rows] = await pool.query(
         `SELECT o.service_date, COUNT(*) AS total,
                 SUM(o.status = 'cancelled') AS cancelled,
@@ -271,7 +292,7 @@ module.exports = function (deps) {
     try {
       const f = readFields(req); const id = Number(p(req, "id")) || 0; const who = await me(req);
       if (id) {
-        const o = await loadOrder(conn, id); if (!o || !canSee(req, o)) { conn.release(); return fail(res, 404, "заявка не найдена"); }
+        const o = await loadOrder(conn, id); if (!o || !canEdit(req, o)) { conn.release(); return fail(res, 404, "заявка не найдена"); }
         if (f.service_date && !isDate(f.service_date)) { conn.release(); return fail(res, 400, "service_date: YYYY-MM-DD"); }
         const keys = Object.keys(f).filter((k) => EDITABLE.indexOf(k) >= 0 || k === "service_date");
         if (!keys.length) { conn.release(); return res.json({ ok: true, id }); }
@@ -331,7 +352,7 @@ module.exports = function (deps) {
     const conn = await pool.getConnection();
     try {
       const id = Number(p(req, "id")); const o = await loadOrder(conn, id);
-      if (!o || !canSee(req, o)) { return fail(res, 404, "заявка не найдена"); }
+      if (!o || !canEdit(req, o)) { return fail(res, 404, "заявка не найдена"); }
       await conn.beginTransaction();
       const detail = await fn(conn, o);
       if (detail === false) { await conn.rollback(); return; }
@@ -642,7 +663,7 @@ module.exports = function (deps) {
       if (["approve", "reject"].indexOf(action) < 0) return fail(res, 400, "action: approve|reject");
       const [rows] = await conn.query(`SELECT * FROM plan_order_change_requests WHERE id = ? AND status = 'pending'`, [rid]);
       if (!rows.length) return fail(res, 404, "запрос не найден или уже решён");
-      const q = rows[0]; const o = await loadOrder(conn, q.order_id); if (!o || !canSee(req, o)) return fail(res, 404, "заявка не найдена");
+      const q = rows[0]; const o = await loadOrder(conn, q.order_id); if (!o || !canEdit(req, o)) return fail(res, 404, "заявка не найдена");
       if (req.userRole === "logist" && action === "approve") return fail(res, 403, "подтверждает менеджер (согласовав с заказчиком)");
       const who = await me(req);
       await conn.beginTransaction();

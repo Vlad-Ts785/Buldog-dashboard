@@ -7536,6 +7536,16 @@ const PAGE_TITLES = {
 
 let API_URL = localStorage.getItem('api_url') || API_URL_DEFAULT;
 let D = null;
+// Deep-link на конкретную страницу (15.09, plan-m.html - пункт меню «Планировки» ведёт сюда
+// напрямую, не всегда на «Панель») - #page=<id> (ХЭШ, не query-string - локальный dev-сервер
+// `serve` 301-редиректит /index.html?... на / и молча теряет query, хэш этого редиректа не
+// касается вообще, см. project_deploy_check_yardhub_gotcha) разбирается один раз при первой
+// отрисовке после логина и «съедается» (deepLinkPage_ = null), чтобы дальнейшие render()
+// (обновление данных) не дёргали пользователя обратно на этот пункт, если он сам уже ушёл на
+// другую страницу. Открывается только если applyRoleUI() уже разрешил эту страницу текущей
+// роли - см. проверку по display в render().
+let deepLinkPage_ = null;
+try { deepLinkPage_ = new URLSearchParams(location.hash.replace(/^#/, '')).get('page') || null; } catch (e) {}
 let vehSort = {col:'profit', dir:-1};
 let avtodorSort = {col:'total_paid', dir:-1};
 let avtodorData_ = null; // кэш /api/avtodor_summary - страница "Техника" открывается часто, грузим один раз за сессию
@@ -11816,6 +11826,18 @@ function render() {
   checkDataFreshness(); // свежий опрос + плашка "обновление не проходит", см. Этап 0.1/0.3
   updatePagePeriod_(); // "Август 2026 · день N из M · данные 1С HH:MM" в шапке
   applyRoleUI();
+
+  // Deep-link ?page=<id> (15.09, из меню plan-m.html) - применяем ОДИН раз, после того как
+  // applyRoleUI() уже расставил display на пунктах сайдбара по роли; если запрошенная
+  // страница этой роли не видна (display:none) - молча игнорируем, остаёмся там, куда
+  // applyRoleUI() уже направил (my-page/main).
+  if (deepLinkPage_) {
+    var dlId_ = deepLinkPage_; deepLinkPage_ = null;
+    try {
+      var dlEl_ = document.querySelector('.sidebar-nav-item[data-page="' + dlId_ + '"]');
+      if (dlEl_ && dlEl_.style.display !== 'none') showPage(dlId_, dlEl_);
+    } catch (e) {}
+  }
 
   if (isMechanicView_()) {
     // 08.09 - у механика теперь ЕСТЬ личная страница (plans/2026-09-08-chief-mechanic-long-haul-

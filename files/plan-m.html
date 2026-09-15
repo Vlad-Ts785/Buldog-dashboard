@@ -234,6 +234,24 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 
 /* ── Листы (bottom sheet) ── */
 .scrim{position:fixed;inset:0;background:var(--scrim);z-index:90;opacity:0;pointer-events:none;transition:opacity .2s ease}
+/* Панель «Меню» - слева, тем же переходом (transform + кривая), что боковое меню на
+   остальных страницах дашборда (index.html .sidebar) - Влад 15.09: «нужен из планировки
+   такой же переход, как во всех страницах у нас», прежнее полноэкранное окно снизу
+   мешало. Дашборд - крупная строка сверху, отдельно от настроек (тема/группы/версия),
+   не одним списком вперемешку. */
+.navdrawer{position:fixed;top:0;left:0;bottom:0;width:82vw;max-width:300px;z-index:97;
+  background:var(--bg2);border-right:1px solid var(--border-strong);
+  transform:translateX(-100%);transition:transform .25s cubic-bezier(.4,0,.2,1);
+  display:flex;flex-direction:column;padding-top:var(--safe-t);box-shadow:0 0 32px rgba(0,0,0,.4)}
+.navdrawer.open{transform:translateX(0)}
+.navdrawer-body{flex:1 1 auto;min-height:0;overflow:auto;padding:16px 14px calc(var(--safe-b) + 16px)}
+.navdrawer-primary{display:flex;align-items:center;gap:12px;min-height:64px;padding:0 8px;
+  border-radius:10px;font-size:17px;font-weight:700;color:var(--text)}
+.navdrawer-primary:active{background:var(--bg3)}
+.navdrawer-primary svg{width:24px;height:24px;color:var(--green);flex:none}
+.navdrawer-primary .sub{display:block;font-size:12px;color:var(--muted);font-weight:500;margin-top:2px}
+.navdrawer-primary .go{margin-left:auto;color:var(--muted);flex:none}
+.navdrawer-hr{height:1px;background:var(--border);margin:12px 4px}
 .scrim.on{opacity:1;pointer-events:auto}
 /* Высота листа меняется ПО ДЕТЕНТУ (52% / 92%), а не сдвигом одного высокого листа вниз -
    иначе подвал с «Поставить» в полулисте уезжает за нижний край экрана (Влад, живая проба
@@ -369,6 +387,7 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
   <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></symbol>
   <symbol id="i-wifi-off" viewBox="0 0 24 24"><path d="M3 3l18 18M8.5 16.5a5 5 0 0 1 7 0M5 12.5a10 10 0 0 1 4-2.5M12 7a14 14 0 0 1 10 4"/><circle cx="12" cy="20" r="1"/></symbol>
   <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/></symbol>
 </svg>
 <div class="state" id="loginState" hidden>
   <h1>TS HUB · Планировка</h1>
@@ -411,9 +430,10 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 <div class="hud" id="hud"></div>
 <div class="toast" id="toast"><div class="t" id="toastT"></div><button id="toastBtn" hidden>Отменить</button></div>
 <div class="scrim" id="scrim"></div>
+<div class="navdrawer" id="navdrawer"><div class="navdrawer-body" id="navdrawerBody"></div></div>
 <div class="sheet" id="sheet"><div class="grip" id="grip"></div><div class="sh-head" id="shHead"></div><div class="sh-body" id="shBody"></div><div class="sh-foot" id="shFoot"></div></div>
 <div class="ovl" id="ovl"><div class="ovl-head" id="ovlHead"></div><div class="ovl-body" id="ovlBody"></div><div class="ovl-foot" id="ovlFoot" hidden></div></div>
-<div class="demo-tag" id="demoTag" hidden>ДЕМО · v16</div>
+<div class="demo-tag" id="demoTag" hidden>ДЕМО · v17</div>
 <script>
 "use strict";
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -1324,16 +1344,30 @@ function closeSheet(viaBack, explicit){
   if (!viaBack) histPop();
   if (snap) toast("Заявка убрана", M.vehicles[snap.v].gosShort + " · " + fmtDay(snap.s) + " " + fmtTime(snap.s), function(){ createDraft(snap.v, snap.s, snap.l, snap.kind, snap); openSegSheet("draft"); }, {btn:"Вернуть", ms:6000});
 }
+var navdrawer = $("navdrawer"), navdrawerOpen_ = false;
+function openDrawer_(){
+  if (navdrawerOpen_) return;
+  navdrawerOpen_ = true;
+  renderDrawer_();
+  navdrawer.classList.add("open"); scrim.classList.add("on");
+  if (hist.depth < 1) histPush();
+}
+function closeDrawer_(viaBack){
+  if (!navdrawerOpen_) return;
+  navdrawerOpen_ = false;
+  navdrawer.classList.remove("open"); scrim.classList.remove("on");
+  if (!viaBack) histPop();
+}
 window.addEventListener("popstate", function(){
   if (hist.ignore > 0){
     hist.ignore--;
-    if (hist.pendingPush){ hist.pendingPush = false; if (sheetState !== "closed" || ovlState){ history.pushState({d:hist.depth + 1}, ""); hist.depth++; } }
+    if (hist.pendingPush){ hist.pendingPush = false; if (sheetState !== "closed" || ovlState || navdrawerOpen_){ history.pushState({d:hist.depth + 1}, ""); hist.depth++; } }
     return;
   }
   hist.depth = Math.max(0, hist.depth - 1);
-  if (ovlState) closeOvl(true); else if (sheetState !== "closed") closeSheet(true);
+  if (navdrawerOpen_) closeDrawer_(true); else if (ovlState) closeOvl(true); else if (sheetState !== "closed") closeSheet(true);
 });
-scrim.addEventListener("click", function(){ if (sheetKind === "seg" && sheetData.id === "draft") setDetent("half"); else closeSheet(); });
+scrim.addEventListener("click", function(){ if (navdrawerOpen_) closeDrawer_(); else if (sheetKind === "seg" && sheetData.id === "draft") setDetent("half"); else closeSheet(); });
 /* grip: свайп вниз закрывает, тап - переключает детент */
 (function(){
   var y0 = 0, moved = false, onHead = false;
@@ -1349,7 +1383,7 @@ scrim.addEventListener("click", function(){ if (sheetKind === "seg" && sheetData
   });
   $("grip").addEventListener("click", function(){ if (!("ontouchstart" in window)) setDetent(sheetState === "full" ? "half" : "full"); });
 })();
-function renderSheet(){ if (sheetKind === "seg") renderSegSheet(); else if (sheetKind === "vehicle") renderVehicleSheet(); else if (sheetKind === "more") renderMoreSheet(); else if (sheetKind === "confirm") renderConfirmSheet(); else if (sheetKind === "settings") renderSettingsSheet(); }
+function renderSheet(){ if (sheetKind === "seg") renderSegSheet(); else if (sheetKind === "vehicle") renderVehicleSheet(); else if (sheetKind === "more") renderMoreSheet(); else if (sheetKind === "confirm") renderConfirmSheet(); }
 function renderSheetIfDraft(){ if (sheetKind === "seg" && sheetState !== "closed") renderSegSheet(); }
 function shHeadHtml(title, sub, right){ return '<button class="hbtn" id="shCancel">Отмена</button><div class="ttl">' + esc(title) + (sub ? "<small>" + esc(sub) + "</small>" : "") + '</div>' + (right || ""); }
 shHead.addEventListener("click", function(e){ if (e.target.closest("#shCancel")) closeSheet(false, true); });
@@ -1432,7 +1466,6 @@ shBody.addEventListener("click", function(e){
   if (sheetKind === "seg") segSheetClick(e);
   else if (sheetKind === "vehicle") vehicleSheetClick(e);
   else if (sheetKind === "more") moreSheetClick(e);
-  else if (sheetKind === "settings") settingsClick(e);
 });
 shFoot.addEventListener("click", function(e){
   var b = e.target.closest("button"); if (!b) return;
@@ -1720,35 +1753,36 @@ function renderConfirmSheet(){
 /* ── Настройки (тема - развилка для Влада, версия) ── */
 /* Меню (кнопка ≡ в шапке, Влад 06.09: «должна быть возможность вернуться в меню дашборда
    из планировки») - навигация наверху, настройки ниже. */
-var PAGE_VERSION_ = "v16 · 09.09";
-function renderSettingsSheet(){
+var PAGE_VERSION_ = "v17 · 15.09";
+/* «Меню» - панель слева (не settings-sheet), см. openDrawer_/closeDrawer_ выше. Дашборд -
+   отдельная крупная строка сверху (единственный настоящий ПЕРЕХОД, тот же принцип, что
+   index.html .sidebar-nav-item), остальное - секция настроек под тонкой чертой, визуально
+   не перепутать с навигацией. */
+function renderDrawer_(){
   var theme = document.documentElement.getAttribute("data-theme") || "dark";
-  shHead.innerHTML = shHeadHtml("Меню", (M.me.name || "") + (API.demo ? " · демо" : ""), "");
-  shBody.innerHTML =
-    '<div class="list-row" data-a="dash"><span>Дашборд<span class="sub">Панель, личная страница, остальные разделы</span></span><svg class="go"><use href="#i-right"/></svg></div>' +
+  var body = $("navdrawerBody");
+  body.innerHTML =
+    '<div class="f-label">' + esc(M.me.name || "Меню") + (API.demo ? " · демо" : "") + '</div>' +
+    '<button class="navdrawer-primary" data-a="dash"><svg><use href="#i-grid"/></svg><span>Дашборд<span class="sub">Панель, личная страница, остальные разделы</span></span><svg class="go"><use href="#i-right"/></svg></button>' +
+    '<div class="navdrawer-hr"></div>' +
     '<div class="list-row" data-a="reload"><span>Обновить данные</span></div>' +
     '<div class="f-label">Тема</div><div class="seg4" id="sTheme"><button data-t="dark" aria-pressed="' + (theme === "dark") + '">Тёмная</button><button data-t="light" aria-pressed="' + (theme === "light") + '">Светлая</button><button data-t="auto" aria-pressed="' + (theme === "auto") + '">Как в телефоне</button></div>' +
     '<div class="info">Светлая - проверить на солнце. Это отступление от ГОСТа, решает Влад.</div>' +
     '<div class="f-label">Группы</div><div class="list-row" data-a="expand"><span>Развернуть все</span></div>' +
     '<div class="f-label">Версия</div><div class="frow"><div class="k">Страница</div><div class="v mono">plan-m · ' + PAGE_VERSION_ + '</div></div>' +
     '<div class="list-row muted" data-a="logout"><span>Выйти</span></div>';
-  shFoot.innerHTML = "";
 }
-function settingsClick(e){
+$("navdrawerBody").addEventListener("click", function(e){
   var b = e.target.closest("button, .list-row"); if (!b) return;
-  if (b.parentNode && b.parentNode.id === "sTheme"){ setTheme(b.dataset.t); renderSettingsSheet(); return; }
-  if (b.dataset.a === "expand"){ M.collapsed = {}; try { localStorage.setItem("plan_m_collapsed", "{}"); } catch(e2){} buildRows(); renderWindow(true); closeSheet(); }
+  if (b.parentNode && b.parentNode.id === "sTheme"){ setTheme(b.dataset.t); renderDrawer_(); return; }
+  if (b.dataset.a === "expand"){ M.collapsed = {}; try { localStorage.setItem("plan_m_collapsed", "{}"); } catch(e2){} buildRows(); renderWindow(true); closeDrawer_(); return; }
   if (b.dataset.a === "reload"){ location.reload(); return; }
-  /* sessionStorage, не localStorage - это разовый выбор "сейчас нужен весь дашборд"
-     (например, задача с компьютера-подобной раскладкой), не отказ от мобильной страницы
-     навсегда. app.html/index.html читают этот флаг тем же ключом; в новой вкладке/после
-     перезапуска TWA логист снова попадёт на plan-m.html. */
   /* «Дашборд» - index.html открывается на Панели; тап по «Планировка» там снова ведёт сюда.
-     Пункта «Планировка на сайте» больше нет (Влад 06.09: «старая версия мобильной
-     планировки - к ней вообще больше не возвращаться»). */
+     Пункта «Планировка на сайте» нет (Влад 06.09: «старая версия мобильной планировки -
+     к ней вообще больше не возвращаться»). */
   if (b.dataset.a === "dash"){ location.href = "index.html"; return; }
   if (b.dataset.a === "logout"){ try { ["session_token","id_token","user_role","user_name"].forEach(function(k){ localStorage.removeItem(k); }); } catch(e4){} location.href = "index.html"; }
-}
+});
 function setTheme(t){
   try { localStorage.setItem("plan_m_theme", t); } catch(e){}
   var eff = t === "auto" ? (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark") : t;
@@ -1836,8 +1870,8 @@ $("btnPlus").addEventListener("click", function(){
   var s0 = snapH(Math.max(nowHour(), viewStartH() + 1), 0.5);
   openPicker({title:"Машина", items:vehicleItems(s0, 8), onPick:function(val){ var vv = M.vehicles.filter(function(x){ return x.gos === val; })[0]; if (!vv) return; deselect(); createDraft(vv.i, s0, 8, "trip"); if (vv.long ? M.collapsed.long : M.collapsed.tral) toggleGroup(vv.long ? "long" : "tral"); scrollRowToTop(vv.i, false); openSegSheet("draft"); }});
 });
-document.querySelector(".corner").addEventListener("click", function(){ openSheet("settings", {}, "full"); });
-$("btnMenu").addEventListener("click", function(){ openSheet("settings", {}, "full"); });
+document.querySelector(".corner").addEventListener("click", openDrawer_);
+$("btnMenu").addEventListener("click", openDrawer_);
 
 /* ═══════════════════════════════════════════════════════════════════════════
    8. Загрузка и запуск

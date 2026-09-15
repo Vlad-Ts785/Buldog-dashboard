@@ -9,8 +9,10 @@
    Ничего из справочников (юрлица, типы техники, люди) в коде не перечисляется -
    всё приходит из /orders/meta и /orders (правило «логика через справочники»).
 
-   Экран выбирается по РОЛИ: manager - «Мои заявки», logist - «Заявки»,
-   admin получает переключатель обоих.
+   Экран выбирается по РОЛИ: manager - «Заявки», logist - «Заявки»,
+   admin получает переключатель обоих. Влад 15.09: менеджер по умолчанию видит ВСЕ
+   заявки (было - только свои), кнопка «Все менеджеры»/«Только мои» - переключатель
+   на время перехода (см. MGR_ALL, plan-orders.js).
 
    Стили - files/order-plan-v2.css (все классы с префиксом op2-).
    ══════════════════════════════════════════════════════════════════════════════ */
@@ -291,6 +293,13 @@ var firstLoadDone = false;
 var prevSnap = {};          /* id -> {st, upd} для звуков на входящие изменения */
 var MY_SEG = '';
 var loadingOrders = false;
+/* Влад 15.09: «менеджеры хотят видеть все заказы, не только свои - пока на время
+   перехода уступаю» + кнопка показать/скрыть. Сервер теперь отдаёт менеджеру ВСЕ
+   не внутренние заявки (было - только свои, см. plan-orders.js); этот флаг - чисто
+   клиентский фильтр СТРОК уже загруженного списка, по умолчанию «все» (уступка), с
+   сохранением выбора - как soundOn выше. */
+var MGR_ALL = true;
+try { MGR_ALL = localStorage.getItem('op2_mgr_all') !== 'off'; } catch (e) {}
 
 var F = { type: 'all', nocar: false, nd: false, newOnly: false, mine: false, q: '' };
 var SORT = { key: 'n', dir: 1 };
@@ -782,7 +791,7 @@ function buildDom() {
         '<span class="op2-sub op2-sub-main" id="op2-sub"></span>' +
         '<div class="op2-presence op2-hidden" id="op2-presence" title="Кто сейчас на странице «Задание»: ярко - действует прямо сейчас"></div>' +
         '<div class="op2-switch op2-hidden" id="op2-switch" role="tablist">' +
-          '<button data-scr="mgr" role="tab">Менеджер · Мои заявки</button>' +
+          '<button data-scr="mgr" role="tab">Менеджер · Заявки</button>' +
           '<button data-scr="log" role="tab">Логист · Заявки</button>' +
         '</div>' +
         '<button class="op2-chip op2-snd" id="op2-snd"></button>' +
@@ -801,6 +810,7 @@ function buildDom() {
           '<input type="date" class="op2-dt" id="op2-mgr-date" autocomplete="off" aria-label="Другой день">' +
           '<div class="op2-sep"></div>' +
           '<input class="op2-search" id="op2-mgr-search" placeholder="Заказчик за 3 месяца, напр. ДиМ" autocomplete="off">' +
+          '<button class="op2-chip" id="op2-mgr-all" title="Заявки всех менеджеров или только свои">Все менеджеры</button>' +
           '<span class="op2-spacer"></span>' +
           '<button class="op2-dbtn op2-primary" id="op2-mgr-new">Новая заявка</button>' +
         '</div>' +
@@ -1008,6 +1018,13 @@ function wire() {
     clearTimeout(mgrSearchT);
     mgrSearchT = setTimeout(function () { F.q = v; if (v.length >= 2) loadWideSearch(v); else { WIDE = null; renderMgr(); } }, 350);
   });
+  syncMgrAllBtn_();
+  $('#op2-mgr-all').addEventListener('click', function () {
+    MGR_ALL = !MGR_ALL;
+    try { localStorage.setItem('op2_mgr_all', MGR_ALL ? 'on' : 'off'); } catch (e) {}
+    syncMgrAllBtn_();
+    renderVerdict(); renderMgr();
+  });
 
   /* ── сортировка таблиц ── */
   $('#op2-log-head').addEventListener('click', function (e) { sortClick(e, this, renderLog); });
@@ -1124,6 +1141,13 @@ function syncSndBtn() {
   b.textContent = 'Звук: ' + (soundOn ? 'вкл' : 'выкл');
   b.classList.toggle('op2-on', soundOn);
 }
+/* «Все менеджеры» (по умолчанию, зелёный - уступка Влада 15.09) / «Только мои» (клик) -
+   чисто клиентский фильтр строк, см. MGR_ALL и renderMgr(). */
+function syncMgrAllBtn_() {
+  var b = $('#op2-mgr-all'); if (!b) return;
+  b.textContent = MGR_ALL ? 'Все менеджеры' : 'Только мои';
+  b.classList.toggle('op2-on', MGR_ALL);
+}
 function sortClick(e, head, rerender) {
   var th = e.target.closest('th[data-sort]'); if (!th) return;
   if (SORT.key === th.dataset.sort) SORT.dir = -SORT.dir; else { SORT.key = th.dataset.sort; SORT.dir = 1; }
@@ -1181,6 +1205,9 @@ function applyMe(me) {
   if (first) {
     VIEW = (me.role === 'manager') ? 'mgr' : 'log';
     $('#op2-switch').classList.toggle('op2-hidden', me.role !== 'admin');
+    /* «Только мои» осмысленна только для самого менеджера - у admin (даже когда он
+       переключился на экран «Менеджер») нет своих заявок для сравнения. */
+    var allBtn = $('#op2-mgr-all'); if (allBtn) allBtn.classList.toggle('op2-hidden', me.role !== 'manager');
     if (me.role === 'admin') {
       syncSwitch();
       /* Влад 13.09: «менеджеров меняю только я» - подсказка добавляется в рантайме именно
@@ -1364,7 +1391,9 @@ function renderAll() {
 
 /* ── вердикт менеджера ── */
 function renderVerdict() {
-  var rows = ORD;
+  /* Тот же фильтр MGR_ALL, что и в renderMgr() - иначе баннер «N заявок на сегодня»
+     разъезжался бы с таблицей ниже при переключении на «Только мои» (15.09). */
+  var rows = (!MGR_ALL && ME) ? ORD.filter(function (o) { return o.manager_email === ME.email; }) : ORD;
   var total = rows.length;
   var withCar = rows.filter(function (o) { return oSt(o) !== 'ot' && (oOwn(o).length || oHired(o)); }).length;
   var noCar = rows.filter(function (o) { return oSt(o) !== 'ot' && !oOwn(o).length && !oHired(o); }).length;
@@ -1591,6 +1620,7 @@ function renderMgr() {
     var q = F.q.toLowerCase();
     rows = rows.filter(function (o) { return String(o.customer || '').toLowerCase().indexOf(q) >= 0; });
   }
+  if (!MGR_ALL && ME) rows = rows.filter(function (o) { return o.manager_email === ME.email; });
   rows = sortRows(rows);
   langRu_();
   body.innerHTML = rows.map(function (o) {

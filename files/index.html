@@ -23921,6 +23921,12 @@ function debtDeadAndStatus_(customers) {
 function buildDebtDocsHtml_(c, currentMonthStart) {
   var showDocOrg = true;
   var sumDocDebt = 0, sumDocCovered = 0, sumNonTral = 0;
+  // Даты незакрытых "старых" документов (2026-09-16, Влад: "нужна какая-то индикация значок
+  // что не закрыты документы за прошлый и ранее месяц") - собираем ЗДЕСЬ же, тем же условием
+  // isOldUnclosed ниже, а не пересчитываем отдельно в renderDebt() - одна точка правды,
+  // значок в свёрнутой строке таблицы и подсветка в развёрнутом списке документов не могут
+  // разойтись. См. debtDocFlagHtml_ ниже и его использование в renderDebt().
+  var oldUnclosedDates = [];
   var docsHtml = (c.unpaidDocs && c.unpaidDocs.length)
     ? c.unpaidDocs.map(function(d) {
         // Не закрытый документом заказ ("Таблица заказов" - ещё не оформлен как
@@ -23928,6 +23934,7 @@ function buildDebtDocsHtml_(c, currentMonthStart) {
         // 2026-07-11): "вижу, что заказ в прошлом месяце даже не закрыт... нужно
         // обратить внимание в первую очередь - закрыть, а уже потом получить деньги".
         var isOldUnclosed = d.desc && d.desc.indexOf('Таблица заказов') === 0 && d.date < currentMonthStart;
+        if (isOldUnclosed) oldUnclosedDates.push(d.date);
         var covered = d.covered || 0;
         // Документ менеджера с несколькими отделами (Ратников), не нашедшийся в таблице
         // заказов - уже НЕ входит в balance/byOrgBalance на бэкенде (см. parseDebtRawRows_,
@@ -23992,7 +23999,23 @@ function buildDebtDocsHtml_(c, currentMonthStart) {
         'Итого по документам: ' + fmt(sumDocDebt) + ' · ' + coverageLabel + nonTralLine +
         ' · Открыто по факту: <b>' + fmt(sumDocDebt - sumDocCovered) + '</b></div>'
     : '';
-  return { docsHtml: docsHtml, reconcileLine: reconcileLine };
+  return { docsHtml: docsHtml, reconcileLine: reconcileLine, oldUnclosedDates: oldUnclosedDates };
+}
+
+// Значок "документы не закрыты за прошлый/более ранний месяц" (2026-09-16, Влад, превью
+// согласовано) - у свёрнутой строки "Должники", рядом с именем контрагента. Жёлтый - один
+// месяц, красный - два и больше (чем дольше висит незакрытым, тем острее). Подсказка при
+// наведении - конкретные месяцы, тем же приёмом, что title у колонок "Зарплаты машинистов".
+function debtDocFlagHtml_(dates) {
+  if (!dates || !dates.length) return '';
+  var months = {};
+  dates.forEach(function(d) { months[String(d).slice(0, 7)] = true; });
+  var monthKeys = Object.keys(months).sort();
+  if (!monthKeys.length) return '';
+  var color = monthKeys.length >= 2 ? 'var(--red)' : 'var(--amber)';
+  var title = 'Документы не закрыты: ' + monthKeys.map(formatMonthLabel).join(', ');
+  return ' <span title="' + title.replace(/"/g, '&quot;') + '" style="display:inline-flex;vertical-align:middle;margin-left:4px;color:' + color + '">' +
+    '<svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2.5h8l3 3v12h-11z"/><path d="M13 2.5v3h3"/><path d="M7 11h6M7 14h4"/></svg></span>';
 }
 
 // ── КАРТОЧКА КОНТРАГЕНТА (ДЗ) ─────────────────────────────────
@@ -25135,7 +25158,7 @@ function renderDebt() {
       'style="background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:0 4px" title="Карточка контрагента">📝' +
       (c.comment ? '<span style="color:var(--amber)">●</span>' : '') + '</button>';
     return '<tr class="debt-row-toggle" onclick="toggleDebtDetail(' + i + ')" style="cursor:pointer">' +
-      '<td>' + cardBtn + '<span id="debt-arrow-' + i + '" class="muted" style="display:inline-block;width:14px">▸</span>' + debtRiskDotHtml_(c.contragent) + courtMarkHtml_(c.contragent) + '<b>' + c.contragent + '</b>' + byOrgLine + '</td>' +
+      '<td>' + cardBtn + '<span id="debt-arrow-' + i + '" class="muted" style="display:inline-block;width:14px">▸</span>' + debtRiskDotHtml_(c.contragent) + courtMarkHtml_(c.contragent) + '<b>' + c.contragent + '</b>' + debtDocFlagHtml_(docs.oldUnclosedDates) + byOrgLine + '</td>' +
       '<td class="muted">' + cleanName(c.manager) + '</td>' +
       '<td class="num"><b>' + fmt(c.balance) + '</b></td>' +
       '<td class="num ' + ageCls(c.daysOverdue) + '">' + c.daysOverdue + '</td>' +

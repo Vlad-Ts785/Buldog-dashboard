@@ -5953,6 +5953,9 @@ main:has(> #page-dynamics.active){min-width:0;}
           <button id="debt-bankrupt-toggle-btn" onclick="toggleDebtBankruptFilter()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:6px 12px;font-size:12px;cursor:pointer">
             Показать банкротов
           </button>
+          <button id="debt-old-unclosed-toggle-btn" onclick="toggleDebtOldUnclosedFilter()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:6px 12px;font-size:12px;cursor:pointer">
+            Только с незакрытыми документами
+          </button>
         </div>
         <div class="kpi-grid" id="debt-kpi">
           <div class="kpi" id="debt-kpi-total"></div>
@@ -23690,6 +23693,23 @@ function toggleDebtBankruptFilter() {
   renderDebt();
 }
 
+// "Только с незакрытыми документами" (2026-09-16, Влад: "кнопочка, которая сразу
+// отфильтрует всех должников, у кого не закрыт хотя бы один документ за прошлый месяц и
+// ниже") - тот же предикат, что уже красит документ в развёрнутом списке (buildDebtDocsHtml_)
+// и рисует значок у имени в свёрнутой строке (debtDocFlagHtml_, добавлено тем же днём) -
+// debtIsOldUnclosedDoc_ ниже единственное место, где живёт это условие.
+function debtIsOldUnclosedDoc_(d, currentMonthStart) {
+  return !!(d.desc && d.desc.indexOf('Таблица заказов') === 0 && d.date < currentMonthStart);
+}
+function debtHasOldUnclosed_(c, currentMonthStart) {
+  return (c.unpaidDocs || []).some(function(d) { return debtIsOldUnclosedDoc_(d, currentMonthStart); });
+}
+let debtOnlyOldUnclosed = false; // false = по умолчанию, фильтр выключен
+function toggleDebtOldUnclosedFilter() {
+  debtOnlyOldUnclosed = !debtOnlyOldUnclosed;
+  renderDebt();
+}
+
 // Фильтр по клику на корзину просрочки в KPI (Влад, 2026-07-14: "хочу фильтр на этот
 // диапазон, можно по нажатию в блоке"). Повторный клик по активной корзине снимает фильтр.
 // 'dead' (Влад, 2026-07-16: "в блок просрочка добавь мёртвая - это от 600 дней и больше")
@@ -23933,7 +23953,7 @@ function buildDebtDocsHtml_(c, currentMonthStart) {
         // "Реализация") из прошлого месяца или раньше - ярко подсвечиваем (Влад,
         // 2026-07-11): "вижу, что заказ в прошлом месяце даже не закрыт... нужно
         // обратить внимание в первую очередь - закрыть, а уже потом получить деньги".
-        var isOldUnclosed = d.desc && d.desc.indexOf('Таблица заказов') === 0 && d.date < currentMonthStart;
+        var isOldUnclosed = debtIsOldUnclosedDoc_(d, currentMonthStart);
         if (isOldUnclosed) oldUnclosedDates.push(d.date);
         var covered = d.covered || 0;
         // Документ менеджера с несколькими отделами (Ратников), не нашедшийся в таблице
@@ -24798,6 +24818,11 @@ function renderDebt() {
     bankruptToggleBtn.style.background = debtHideBankrupt ? 'var(--bg3)' : 'var(--red)';
     bankruptToggleBtn.style.color = debtHideBankrupt ? 'var(--text)' : '#fff';
   }
+  const oldUnclosedToggleBtn = document.getElementById('debt-old-unclosed-toggle-btn');
+  if (oldUnclosedToggleBtn) {
+    oldUnclosedToggleBtn.style.background = debtOnlyOldUnclosed ? 'var(--amber)' : 'var(--bg3)';
+    oldUnclosedToggleBtn.style.color = debtOnlyOldUnclosed ? '#000' : 'var(--text)';
+  }
   // Банкроты (Влад, 2026-07-16: "чтобы не показывало банкротов вообще нигде") - фильтруются
   // ПЕРВЫМИ, до фильтра возраста, т.к. должны быть скрыты из ВСЕГО (в отличие от 600-дневного
   // фильтра, который не трогает график истории - банкроты исключены и из него, но уже на
@@ -25089,6 +25114,11 @@ function renderDebt() {
       : debtManagerFilters.size === 1 ? cleanName(Array.from(debtManagerFilters)[0]) + ' ▾'
       : 'Менеджеров: ' + debtManagerFilters.size + ' ▾';
   }
+  // Начало текущего месяца - нужно и для фильтра "Таблица заказов" ниже, и для подсветки
+  // старых незакрытых документов в строках (используется по всей функции, поэтому считаем
+  // один раз здесь, до цепочки фильтров, а не только перед .map(), как было).
+  var todayForHighlight = new Date();
+  var currentMonthStart = todayForHighlight.getFullYear() + '-' + String(todayForHighlight.getMonth()+1).padStart(2,'0') + '-01';
   var customersFiltered = debtManagerFilters.size
     ? ageFiltered.filter(function(c){ return debtManagerFilters.has(c.manager); })
     : ageFiltered;
@@ -25099,6 +25129,13 @@ function renderDebt() {
   }
   if (debtStatusFilter) {
     customersFiltered = customersFiltered.filter(function(c){ return (c.status || '(без статуса)') === debtStatusFilter; });
+  }
+  // "Только с незакрытыми документами" (2026-09-16, Влад: "кнопочка, которая сразу
+  // отфильтрует всех должников, у кого не закрыт хотя бы один документ за прошлый месяц и
+  // ниже") - тот же предикат, что уже красит документ в развёрнутом списке и рисует значок
+  // у имени (debtIsOldUnclosedDoc_/debtHasOldUnclosed_ ниже) - одна точка правды.
+  if (debtOnlyOldUnclosed) {
+    customersFiltered = customersFiltered.filter(function(c){ return debtHasOldUnclosed_(c, currentMonthStart); });
   }
   // dir = -1 -> по убыванию (стрелка ▼), dir = +1 -> по возрастанию (▲). Знак стоит
   // ПЕРЕД разностью, а не после: (bv-av) уже само по себе убывание, и умножение на -1
@@ -25122,12 +25159,9 @@ function renderDebt() {
 
   // Возраст долга - светофор по дням с даты старейшего неоплаченного документа.
   function ageCls(days) { return days > 90 ? 'red' : days > 60 ? 'amber' : days > 30 ? 'amber' : 'green'; }
-  // Начало текущего месяца - для подсветки "Таблица заказов" за прошлые месяцы (Влад,
-  // 2026-07-11): "Таблица заказов" = заказ ещё не закрыт документом (не оформлен как
-  // "Реализация"). Если такой заказ уже из прошлого месяца - это сигнал в первую очередь
-  // закрыть документ, а потом уже гнаться за оплатой.
-  var todayForHighlight = new Date();
-  var currentMonthStart = todayForHighlight.getFullYear() + '-' + String(todayForHighlight.getMonth()+1).padStart(2,'0') + '-01';
+  // currentMonthStart - см. объявление выше, перед цепочкой фильтров ("Таблица заказов" из
+  // прошлого месяца или раньше - Влад, 2026-07-11 - не закрыта как "Реализация", сигнал
+  // закрыть документ в первую очередь, потом уже гнаться за оплатой).
   document.getElementById('debt-customers-body').innerHTML = customersFiltered.map(function(c, i) {
     // Разбивка по юрлицам группы - показываем всегда, для каждого контрагента, даже если
     // юрлицо только одно (Влад, 2026-07-10: "не только смешанные долги, но и везде -

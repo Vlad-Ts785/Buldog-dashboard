@@ -20469,11 +20469,13 @@ function renderSalesMgrLegacy_() {
     var mIntThru = isPrus ? (m.internal_amount_thru_yesterday != null ? m.internal_amount_thru_yesterday : (m.internal_amount||0)) : 0;
     var amountForPace = mAmountThru - mIntThru;
     var hTag = isHead ? ' <span style="font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(29,158,117,.15);color:#1D9E75">рук.</span>' : '';
-    // Динамика "сегодня vs вчера" (Влад, 2026-07-17: "то же самое по менеджерам в количестве
-    // заказов... по нажатию показать какие именно заказы; также по выручке") - клик
-    // открывает drill-down со списком заказов, добавленных сегодня (см. toggleMgrToday).
+    // "Рейсы за вчера" (Влад, 2026-07-17, переработано 2026-09-16) - клик открывает
+    // drill-down со списком заказов по дате ПЕРЕВОЗКИ = вчера (НачалоРаб), не по дате
+    // внесения в 1С - см. plans/2026-09-16-yesterday-trips-block.md (там же разбор, почему
+    // старая версия "добавилось сегодня" по дате создания документа путала). Имена
+    // JS-переменных/toggleMgrToday не переименованы - только источник и подпись данных.
     var escName = String(m.name||'').replace(/'/g,"\\'");
-    var todayOrders = m.today_new_orders || 0, todayAmount = m.today_new_amount || 0;
+    var todayOrders = m.yesterday_orders || 0, todayAmount = m.yesterday_amount || 0;
     var ordersBadge = todayOrders > 0
       ? ' <span onclick="event.stopPropagation();toggleMgrToday(\''+escName+'\')" style="font-size:10px;color:var(--green);cursor:pointer;text-decoration:underline dotted;white-space:nowrap">▲+'+todayOrders+'</span>'
       : '';
@@ -20494,10 +20496,10 @@ function renderSalesMgrLegacy_() {
     // на странице он всегда один, т.к. открыт максимум один менеджер сразу.
     var todayRow = '';
     if (mgrTodayVisible && mgrTodayKey === m.name) {
-      var todayList = m.today_new_list || [];
+      var todayList = m.yesterday_list || [];
       todayRow = '<tr id="mgr-today-row"><td colspan="6" style="background:rgba(var(--ink),0.03);padding:10px 14px;border-top:1px dashed var(--border)">' +
         '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">' +
-          '<div style="font-size:12px;font-weight:600">Что добавилось сегодня</div>' +
+          '<div style="font-size:12px;font-weight:600">Рейсы за вчера</div>' +
           '<div class="muted" style="font-size:11px">'+todayList.length+' '+(todayList.length===1?'заказ':'заказов')+' · '+fmtN(todayAmount)+'</div>' +
         '</div>' +
         (todayList.length
@@ -20505,6 +20507,7 @@ function renderSalesMgrLegacy_() {
               todayList.map(function(o) {
                 return '<tr><td style="padding:2px 10px 2px 0;color:var(--muted)">'+(o.id||'—')+'</td>' +
                   '<td style="padding:2px 10px 2px 0">'+(o.customer||'').substring(0,50)+'</td>' +
+                  '<td style="padding:2px 10px 2px 0;color:var(--muted)">'+(o.cargo||'—').substring(0,40)+'</td>' +
                   '<td class="num" style="padding:2px 0">'+fmtN(o.amount||0)+'</td></tr>';
               }).join('') +
             '</table>'
@@ -20780,14 +20783,20 @@ function renderSalesMgrGost_(opts) {
       var pct = mPlan ? Math.round(amount / mPlan * 100) : 0;
       var frc = mPlan ? Math.round(aY * pace / mPlan * 100) : 0;
       var escName = String(m.name || '').replace(/'/g, "\\'");
-      // Дельта «сегодня» - единственное место, где ГОСТ разрешает красить текст (раздел 1).
+      // Дельта «вчера» (было «сегодня» до 2026-09-16, см. yesterday_orders/amount ниже) -
+      // единственное место, где ГОСТ разрешает красить текст (раздел 1).
       // Влад, 10.09: «без возможности смотреть личные заказы какие прибавились, только
       // цифры по прибавке» - в режиме только-чтение дельта не кликается и списка нет.
       var dOpen = readOnly ? '' : ' onclick="event.stopPropagation();toggleMgrToday(\'' + escName + '\')" style="cursor:pointer;text-decoration:underline dotted"';
-      var dOrd = (m.today_new_orders > 0)
-        ? ' <span class="sm-delta"' + dOpen + '>+' + m.today_new_orders + '</span>' : '';
-      var dAmt = (m.today_new_amount > 0)
-        ? ' <span class="sm-delta"' + dOpen + '>+' + smFmt_(m.today_new_amount) + '</span>' : '';
+      var dOrd = (m.yesterday_orders > 0)
+        ? ' <span class="sm-delta"' + dOpen + '>+' + m.yesterday_orders + '</span>' : '';
+      var dAmt = (m.yesterday_amount > 0)
+        ? ' <span class="sm-delta"' + dOpen + '>+' + smFmt_(m.yesterday_amount) + '</span>' : '';
+      // Подсказка с прогнозом при наведении на полоску ЛИЧНОГО плана (16.09, Влад: "при
+      // наведении на полоску с выполнением должно всплывать подсказка какой прогноз
+      // выполнения") - только у отдельного менеджера в таблице, не у плиток отделов сверху
+      // и не у строки "Итого отдела" - см. plans/2026-09-16-yesterday-trips-block.md.
+      var planTitle = mPlan ? ' title="Прогноз к концу месяца: ' + smFmt_(Math.round(aY * pace)) + ' ₽ (' + frc + '%)"' : '';
       t += '<tr>' +
         '<td><b>' + cleanName(m.name) + '</b>' + (r.isHead ? ' <span style="font-size:10px;color:var(--muted)">рук.</span>' : '') + '</td>' +
         '<td class="num">' + smNum_(String(orders)) + dOrd + '</td>' +
@@ -20797,21 +20806,23 @@ function renderSalesMgrGost_(opts) {
         '<td class="num">' + smNum_(smFmt_(m.profit || 0), '', (m.profit || 0) < 0 ? 'color:var(--red)' : '') + '</td>' +
         '<td class="num">' + smNum_(String(m.hired_orders || 0) || '—', '', 'color:var(--muted)') + '</td>' +
         '<td>' + (mPlan
-          ? '<div class="sm-plan-cell">' + smBullet_(pct, frc, 5, 200) + '<span class="sm-plan-pct sm-num">' + pct + '%</span></div>'
+          ? '<div class="sm-plan-cell"' + planTitle + '>' + smBullet_(pct, frc, 5, 200) + '<span class="sm-plan-pct sm-num">' + pct + '%</span></div>'
           : '<span class="muted" style="font-size:11px">без плана</span>') + '</td>' +
       '</tr>';
-      // Разворот «что добавилось сегодня» - тот же контракт, что в старом виде.
+      // Разворот «рейсы за вчера» - тот же контракт, что в старом виде, только по дате
+      // перевозки, не по дате внесения в 1С (2026-09-16, см. yesterday_list).
       if (!readOnly && mgrTodayVisible && mgrTodayKey === m.name) {
-        var list = m.today_new_list || [];
+        var list = m.yesterday_list || [];
         t += '<tr id="mgr-today-row"><td colspan="8" style="background:rgba(var(--ink),0.03);padding:10px 14px;border-top:1px dashed var(--border)">' +
           '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">' +
-            '<div style="font-size:12px;font-weight:600">Что добавилось сегодня</div>' +
-            '<div class="muted" style="font-size:11px">' + list.length + ' ' + (list.length === 1 ? 'заказ' : 'заказов') + ' · ' + smFmt_(m.today_new_amount || 0) + '</div>' +
+            '<div style="font-size:12px;font-weight:600">Рейсы за вчера</div>' +
+            '<div class="muted" style="font-size:11px">' + list.length + ' ' + (list.length === 1 ? 'заказ' : 'заказов') + ' · ' + smFmt_(m.yesterday_amount || 0) + '</div>' +
           '</div>' +
           (list.length
             ? '<table style="width:100%;font-size:12px;border-collapse:collapse">' + list.map(function (x) {
                 return '<tr><td style="padding:2px 10px 2px 0;color:var(--muted)">' + (x.id || '—') + '</td>' +
                   '<td style="padding:2px 10px 2px 0">' + String(x.customer || '').substring(0, 50) + '</td>' +
+                  '<td style="padding:2px 10px 2px 0;color:var(--muted)">' + String(x.cargo || '—').substring(0, 40) + '</td>' +
                   '<td class="num" style="padding:2px 0">' + smNum_(smFmt_(x.amount || 0)) + '</td></tr>';
               }).join('') + '</table>'
             : '<div class="muted" style="font-size:12px">Нет данных</div>') +

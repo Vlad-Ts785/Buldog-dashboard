@@ -8224,15 +8224,31 @@ function clearAuthTokens_() {
 // нестабильность на стороне Google, не на нашей стороне). Раньше единственный неудачный ответ
 // сразу показывал пользователю "Unexpected token '<'..." - теперь тихо повторяем ещё пару раз
 // с небольшой паузой, прежде чем сдаться и показать ошибку.
+//
+// Таймаут на попытку (2026-09-16, живая жалоба - Савиток дома, "висит на логотипе и всё",
+// обновление страницы не помогает) - у fetch() тут не было НИКАКОГО собственного таймаута,
+// только браузерный дефолт (может быть больше минуты на нестабильной домашней сети/впн) -
+// это касается manager/logist на самом первом входе (loadData() идёт в Apps Script,
+// единственный путь для этих ролей, см. там же), человек просто вечно смотрит на загрузочный
+// логотип без единой подсказки, что происходит. AbortController обрывает КАЖДУЮ попытку
+// через FETCH_TIMEOUT_MS - дальше идёт обычный повтор, как раньше, просто теперь ограничен
+// по времени, а не бесконечен.
+var FETCH_TIMEOUT_MS = 15000;
 async function fetchJsonWithRetry_(url, attempts) {
   attempts = attempts || 3;
   var lastErr;
   for (var i = 0; i < attempts; i++) {
+    var controller = new AbortController();
+    var timer = setTimeout(function() { controller.abort(); }, FETCH_TIMEOUT_MS);
     try {
-      var res = await fetch(url);
+      var res = await fetch(url, { signal: controller.signal });
+      clearTimeout(timer);
       return await res.json();
     } catch (e) {
-      lastErr = e;
+      clearTimeout(timer);
+      lastErr = (e && e.name === 'AbortError')
+        ? new Error('Сервер входа не отвечает - проверьте интернет-соединение (или отключите VPN, если он включён)')
+        : e;
       if (i < attempts - 1) await new Promise(function(r) { setTimeout(r, 700 + i * 500); });
     }
   }

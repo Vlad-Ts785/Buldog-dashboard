@@ -4163,12 +4163,13 @@ function buildManagerView_(orders, managerName, ss, period) {
   // возможности смотреть личные заказы какие прибавились - только цифры по прибавке»).
   // Отдаём общий срез по ВСЕМ менеджерам - ту же картину, что видит директор на странице
   // «Менеджеры - заказы 1С». Состав колонок полный, включая прибыль найма (решение Влада
-  // 10.09 на превью). Единственное, что вырезаем - today_new_list: это списки конкретных
-  // заказов коллег, менеджеру они не нужны, а цифра прибавки (today_new_orders/amount)
+  // 10.09 на превью). Единственное, что вырезаем - yesterday_list (переименовано 16.09 из
+  // today_new_list, см. plans/2026-09-16-yesterday-trips-block.md): это списки конкретных
+  // заказов коллег, менеджеру они не нужны, а цифра прибавки (yesterday_orders/amount)
   // остаётся. Меньше данных в ответе - меньше и риска, и веса.
   result.orders.dept_all = (orders.by_manager || []).map(function(m) {
     var copy = {};
-    Object.keys(m).forEach(function(k) { if (k !== 'today_new_list') copy[k] = m[k]; });
+    Object.keys(m).forEach(function(k) { if (k !== 'yesterday_list') copy[k] = m[k]; });
     return copy;
   });
   result.orders.managerPlans = orders.managerPlans || {};
@@ -11681,7 +11682,7 @@ function aggregateOrdersRows(rows) {
           internal_orders:0, internal_amount:0, internal_amount_thru_yesterday:0, internal_payment:0,
           own_amount:0, own_profit:0, hired_margin_total:0, hired_margin_qualified:0, hired_margin_unqualified:0,
           hired_extra_costs:0,
-          today_new_orders:0, today_new_amount:0, today_new_list:[] };
+          yesterday_orders:0, yesterday_amount:0, yesterday_list:[] };
       }
       const m = managerMap[mgrSales];
       m.orders++;
@@ -11696,11 +11697,16 @@ function aggregateOrdersRows(rows) {
         m.internal_orders++; m.internal_amount += amount; m.internal_payment += payment;
         if (isThruYesterday) m.internal_amount_thru_yesterday += amount;
       }
-      // Заказы, добавленные сегодня (Влад, 2026-07-17) - для стрелки динамики и drill-down.
-      if (dateVal(row, 'date_c') === todayStr) {
-        m.today_new_orders++;
-        m.today_new_amount += amount;
-        m.today_new_list.push({ id: str(row,'id'), customer: str(row,'customer'), amount: amount });
+      // Рейсы за вчера - по дате ПЕРЕВОЗКИ (dateStr = date_s = "НачалоРаб"), не по дате
+      // создания документа в 1С (2026-09-16, Влад после живого разбора путаницы с
+      // Ахтамовой/Цегельниковым: "не важно, когда внесли - есть дата НачалоРаб, на неё
+      // ориентироваться"). Было "Заказы, добавленные сегодня" (2026-07-17) - фильтр по
+      // dateVal(row,'date_c')===todayStr (дата СОЗДАНИЯ строки), другая метрика - см.
+      // plans/2026-09-16-yesterday-trips-block.md.
+      if (dateStr === yesterdayStr) {
+        m.yesterday_orders++;
+        m.yesterday_amount += amount;
+        m.yesterday_list.push({ id: str(row,'id'), customer: str(row,'customer'), cargo: str(row,'cargo'), amount: amount });
       }
       if (isHired) {
         m.hired_orders++; m.hired_cost += hiredCost; m.hired_margin_total += profit;

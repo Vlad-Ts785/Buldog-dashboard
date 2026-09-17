@@ -5953,6 +5953,9 @@ main:has(> #page-dynamics.active){min-width:0;}
           <button id="debt-bankrupt-toggle-btn" onclick="toggleDebtBankruptFilter()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:6px 12px;font-size:12px;cursor:pointer">
             Показать банкротов
           </button>
+          <button id="debt-old-unclosed-toggle-btn" onclick="toggleDebtOldUnclosedFilter()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:6px 12px;font-size:12px;cursor:pointer">
+            Только с незакрытыми документами
+          </button>
         </div>
         <div class="kpi-grid" id="debt-kpi">
           <div class="kpi" id="debt-kpi-total"></div>
@@ -8224,15 +8227,31 @@ function clearAuthTokens_() {
 // нестабильность на стороне Google, не на нашей стороне). Раньше единственный неудачный ответ
 // сразу показывал пользователю "Unexpected token '<'..." - теперь тихо повторяем ещё пару раз
 // с небольшой паузой, прежде чем сдаться и показать ошибку.
+//
+// Таймаут на попытку (2026-09-16, живая жалоба - Савиток дома, "висит на логотипе и всё",
+// обновление страницы не помогает) - у fetch() тут не было НИКАКОГО собственного таймаута,
+// только браузерный дефолт (может быть больше минуты на нестабильной домашней сети/впн) -
+// это касается manager/logist на самом первом входе (loadData() идёт в Apps Script,
+// единственный путь для этих ролей, см. там же), человек просто вечно смотрит на загрузочный
+// логотип без единой подсказки, что происходит. AbortController обрывает КАЖДУЮ попытку
+// через FETCH_TIMEOUT_MS - дальше идёт обычный повтор, как раньше, просто теперь ограничен
+// по времени, а не бесконечен.
+var FETCH_TIMEOUT_MS = 15000;
 async function fetchJsonWithRetry_(url, attempts) {
   attempts = attempts || 3;
   var lastErr;
   for (var i = 0; i < attempts; i++) {
+    var controller = new AbortController();
+    var timer = setTimeout(function() { controller.abort(); }, FETCH_TIMEOUT_MS);
     try {
-      var res = await fetch(url);
+      var res = await fetch(url, { signal: controller.signal });
+      clearTimeout(timer);
       return await res.json();
     } catch (e) {
-      lastErr = e;
+      clearTimeout(timer);
+      lastErr = (e && e.name === 'AbortError')
+        ? new Error('Сервер входа не отвечает - проверьте интернет-соединение (или отключите VPN, если он включён)')
+        : e;
       if (i < attempts - 1) await new Promise(function(r) { setTimeout(r, 700 + i * 500); });
     }
   }
@@ -20453,11 +20472,13 @@ function renderSalesMgrLegacy_() {
     var mIntThru = isPrus ? (m.internal_amount_thru_yesterday != null ? m.internal_amount_thru_yesterday : (m.internal_amount||0)) : 0;
     var amountForPace = mAmountThru - mIntThru;
     var hTag = isHead ? ' <span style="font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(29,158,117,.15);color:#1D9E75">рук.</span>' : '';
-    // Динамика "сегодня vs вчера" (Влад, 2026-07-17: "то же самое по менеджерам в количестве
-    // заказов... по нажатию показать какие именно заказы; также по выручке") - клик
-    // открывает drill-down со списком заказов, добавленных сегодня (см. toggleMgrToday).
+    // "Рейсы за вчера" (Влад, 2026-07-17, переработано 2026-09-16) - клик открывает
+    // drill-down со списком заказов по дате ПЕРЕВОЗКИ = вчера (НачалоРаб), не по дате
+    // внесения в 1С - см. plans/2026-09-16-yesterday-trips-block.md (там же разбор, почему
+    // старая версия "добавилось сегодня" по дате создания документа путала). Имена
+    // JS-переменных/toggleMgrToday не переименованы - только источник и подпись данных.
     var escName = String(m.name||'').replace(/'/g,"\\'");
-    var todayOrders = m.today_new_orders || 0, todayAmount = m.today_new_amount || 0;
+    var todayOrders = m.yesterday_orders || 0, todayAmount = m.yesterday_amount || 0;
     var ordersBadge = todayOrders > 0
       ? ' <span onclick="event.stopPropagation();toggleMgrToday(\''+escName+'\')" style="font-size:10px;color:var(--green);cursor:pointer;text-decoration:underline dotted;white-space:nowrap">▲+'+todayOrders+'</span>'
       : '';
@@ -20478,10 +20499,10 @@ function renderSalesMgrLegacy_() {
     // на странице он всегда один, т.к. открыт максимум один менеджер сразу.
     var todayRow = '';
     if (mgrTodayVisible && mgrTodayKey === m.name) {
-      var todayList = m.today_new_list || [];
+      var todayList = m.yesterday_list || [];
       todayRow = '<tr id="mgr-today-row"><td colspan="6" style="background:rgba(var(--ink),0.03);padding:10px 14px;border-top:1px dashed var(--border)">' +
         '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">' +
-          '<div style="font-size:12px;font-weight:600">Что добавилось сегодня</div>' +
+          '<div style="font-size:12px;font-weight:600">Рейсы за вчера</div>' +
           '<div class="muted" style="font-size:11px">'+todayList.length+' '+(todayList.length===1?'заказ':'заказов')+' · '+fmtN(todayAmount)+'</div>' +
         '</div>' +
         (todayList.length
@@ -20489,6 +20510,7 @@ function renderSalesMgrLegacy_() {
               todayList.map(function(o) {
                 return '<tr><td style="padding:2px 10px 2px 0;color:var(--muted)">'+(o.id||'—')+'</td>' +
                   '<td style="padding:2px 10px 2px 0">'+(o.customer||'').substring(0,50)+'</td>' +
+                  '<td style="padding:2px 10px 2px 0;color:var(--muted)">'+(o.cargo||'—').substring(0,40)+'</td>' +
                   '<td class="num" style="padding:2px 0">'+fmtN(o.amount||0)+'</td></tr>';
               }).join('') +
             '</table>'
@@ -20764,14 +20786,20 @@ function renderSalesMgrGost_(opts) {
       var pct = mPlan ? Math.round(amount / mPlan * 100) : 0;
       var frc = mPlan ? Math.round(aY * pace / mPlan * 100) : 0;
       var escName = String(m.name || '').replace(/'/g, "\\'");
-      // Дельта «сегодня» - единственное место, где ГОСТ разрешает красить текст (раздел 1).
+      // Дельта «вчера» (было «сегодня» до 2026-09-16, см. yesterday_orders/amount ниже) -
+      // единственное место, где ГОСТ разрешает красить текст (раздел 1).
       // Влад, 10.09: «без возможности смотреть личные заказы какие прибавились, только
       // цифры по прибавке» - в режиме только-чтение дельта не кликается и списка нет.
       var dOpen = readOnly ? '' : ' onclick="event.stopPropagation();toggleMgrToday(\'' + escName + '\')" style="cursor:pointer;text-decoration:underline dotted"';
-      var dOrd = (m.today_new_orders > 0)
-        ? ' <span class="sm-delta"' + dOpen + '>+' + m.today_new_orders + '</span>' : '';
-      var dAmt = (m.today_new_amount > 0)
-        ? ' <span class="sm-delta"' + dOpen + '>+' + smFmt_(m.today_new_amount) + '</span>' : '';
+      var dOrd = (m.yesterday_orders > 0)
+        ? ' <span class="sm-delta"' + dOpen + '>+' + m.yesterday_orders + '</span>' : '';
+      var dAmt = (m.yesterday_amount > 0)
+        ? ' <span class="sm-delta"' + dOpen + '>+' + smFmt_(m.yesterday_amount) + '</span>' : '';
+      // Подсказка с прогнозом при наведении на полоску ЛИЧНОГО плана (16.09, Влад: "при
+      // наведении на полоску с выполнением должно всплывать подсказка какой прогноз
+      // выполнения") - только у отдельного менеджера в таблице, не у плиток отделов сверху
+      // и не у строки "Итого отдела" - см. plans/2026-09-16-yesterday-trips-block.md.
+      var planTitle = mPlan ? ' title="Прогноз к концу месяца: ' + smFmt_(Math.round(aY * pace)) + ' ₽ (' + frc + '%)"' : '';
       t += '<tr>' +
         '<td><b>' + cleanName(m.name) + '</b>' + (r.isHead ? ' <span style="font-size:10px;color:var(--muted)">рук.</span>' : '') + '</td>' +
         '<td class="num">' + smNum_(String(orders)) + dOrd + '</td>' +
@@ -20781,21 +20809,23 @@ function renderSalesMgrGost_(opts) {
         '<td class="num">' + smNum_(smFmt_(m.profit || 0), '', (m.profit || 0) < 0 ? 'color:var(--red)' : '') + '</td>' +
         '<td class="num">' + smNum_(String(m.hired_orders || 0) || '—', '', 'color:var(--muted)') + '</td>' +
         '<td>' + (mPlan
-          ? '<div class="sm-plan-cell">' + smBullet_(pct, frc, 5, 200) + '<span class="sm-plan-pct sm-num">' + pct + '%</span></div>'
+          ? '<div class="sm-plan-cell"' + planTitle + '>' + smBullet_(pct, frc, 5, 200) + '<span class="sm-plan-pct sm-num">' + pct + '%</span></div>'
           : '<span class="muted" style="font-size:11px">без плана</span>') + '</td>' +
       '</tr>';
-      // Разворот «что добавилось сегодня» - тот же контракт, что в старом виде.
+      // Разворот «рейсы за вчера» - тот же контракт, что в старом виде, только по дате
+      // перевозки, не по дате внесения в 1С (2026-09-16, см. yesterday_list).
       if (!readOnly && mgrTodayVisible && mgrTodayKey === m.name) {
-        var list = m.today_new_list || [];
+        var list = m.yesterday_list || [];
         t += '<tr id="mgr-today-row"><td colspan="8" style="background:rgba(var(--ink),0.03);padding:10px 14px;border-top:1px dashed var(--border)">' +
           '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">' +
-            '<div style="font-size:12px;font-weight:600">Что добавилось сегодня</div>' +
-            '<div class="muted" style="font-size:11px">' + list.length + ' ' + (list.length === 1 ? 'заказ' : 'заказов') + ' · ' + smFmt_(m.today_new_amount || 0) + '</div>' +
+            '<div style="font-size:12px;font-weight:600">Рейсы за вчера</div>' +
+            '<div class="muted" style="font-size:11px">' + list.length + ' ' + (list.length === 1 ? 'заказ' : 'заказов') + ' · ' + smFmt_(m.yesterday_amount || 0) + '</div>' +
           '</div>' +
           (list.length
             ? '<table style="width:100%;font-size:12px;border-collapse:collapse">' + list.map(function (x) {
                 return '<tr><td style="padding:2px 10px 2px 0;color:var(--muted)">' + (x.id || '—') + '</td>' +
                   '<td style="padding:2px 10px 2px 0">' + String(x.customer || '').substring(0, 50) + '</td>' +
+                  '<td style="padding:2px 10px 2px 0;color:var(--muted)">' + String(x.cargo || '—').substring(0, 40) + '</td>' +
                   '<td class="num" style="padding:2px 0">' + smNum_(smFmt_(x.amount || 0)) + '</td></tr>';
               }).join('') + '</table>'
             : '<div class="muted" style="font-size:12px">Нет данных</div>') +
@@ -23663,6 +23693,23 @@ function toggleDebtBankruptFilter() {
   renderDebt();
 }
 
+// "Только с незакрытыми документами" (2026-09-16, Влад: "кнопочка, которая сразу
+// отфильтрует всех должников, у кого не закрыт хотя бы один документ за прошлый месяц и
+// ниже") - тот же предикат, что уже красит документ в развёрнутом списке (buildDebtDocsHtml_)
+// и рисует значок у имени в свёрнутой строке (debtDocFlagHtml_, добавлено тем же днём) -
+// debtIsOldUnclosedDoc_ ниже единственное место, где живёт это условие.
+function debtIsOldUnclosedDoc_(d, currentMonthStart) {
+  return !!(d.desc && d.desc.indexOf('Таблица заказов') === 0 && d.date < currentMonthStart);
+}
+function debtHasOldUnclosed_(c, currentMonthStart) {
+  return (c.unpaidDocs || []).some(function(d) { return debtIsOldUnclosedDoc_(d, currentMonthStart); });
+}
+let debtOnlyOldUnclosed = false; // false = по умолчанию, фильтр выключен
+function toggleDebtOldUnclosedFilter() {
+  debtOnlyOldUnclosed = !debtOnlyOldUnclosed;
+  renderDebt();
+}
+
 // Фильтр по клику на корзину просрочки в KPI (Влад, 2026-07-14: "хочу фильтр на этот
 // диапазон, можно по нажатию в блоке"). Повторный клик по активной корзине снимает фильтр.
 // 'dead' (Влад, 2026-07-16: "в блок просрочка добавь мёртвая - это от 600 дней и больше")
@@ -23894,13 +23941,20 @@ function debtDeadAndStatus_(customers) {
 function buildDebtDocsHtml_(c, currentMonthStart) {
   var showDocOrg = true;
   var sumDocDebt = 0, sumDocCovered = 0, sumNonTral = 0;
+  // Даты незакрытых "старых" документов (2026-09-16, Влад: "нужна какая-то индикация значок
+  // что не закрыты документы за прошлый и ранее месяц") - собираем ЗДЕСЬ же, тем же условием
+  // isOldUnclosed ниже, а не пересчитываем отдельно в renderDebt() - одна точка правды,
+  // значок в свёрнутой строке таблицы и подсветка в развёрнутом списке документов не могут
+  // разойтись. См. debtDocFlagHtml_ ниже и его использование в renderDebt().
+  var oldUnclosedDates = [];
   var docsHtml = (c.unpaidDocs && c.unpaidDocs.length)
     ? c.unpaidDocs.map(function(d) {
         // Не закрытый документом заказ ("Таблица заказов" - ещё не оформлен как
         // "Реализация") из прошлого месяца или раньше - ярко подсвечиваем (Влад,
         // 2026-07-11): "вижу, что заказ в прошлом месяце даже не закрыт... нужно
         // обратить внимание в первую очередь - закрыть, а уже потом получить деньги".
-        var isOldUnclosed = d.desc && d.desc.indexOf('Таблица заказов') === 0 && d.date < currentMonthStart;
+        var isOldUnclosed = debtIsOldUnclosedDoc_(d, currentMonthStart);
+        if (isOldUnclosed) oldUnclosedDates.push(d.date);
         var covered = d.covered || 0;
         // Документ менеджера с несколькими отделами (Ратников), не нашедшийся в таблице
         // заказов - уже НЕ входит в balance/byOrgBalance на бэкенде (см. parseDebtRawRows_,
@@ -23965,7 +24019,23 @@ function buildDebtDocsHtml_(c, currentMonthStart) {
         'Итого по документам: ' + fmt(sumDocDebt) + ' · ' + coverageLabel + nonTralLine +
         ' · Открыто по факту: <b>' + fmt(sumDocDebt - sumDocCovered) + '</b></div>'
     : '';
-  return { docsHtml: docsHtml, reconcileLine: reconcileLine };
+  return { docsHtml: docsHtml, reconcileLine: reconcileLine, oldUnclosedDates: oldUnclosedDates };
+}
+
+// Значок "документы не закрыты за прошлый/более ранний месяц" (2026-09-16, Влад, превью
+// согласовано) - у свёрнутой строки "Должники", рядом с именем контрагента. Жёлтый - один
+// месяц, красный - два и больше (чем дольше висит незакрытым, тем острее). Подсказка при
+// наведении - конкретные месяцы, тем же приёмом, что title у колонок "Зарплаты машинистов".
+function debtDocFlagHtml_(dates) {
+  if (!dates || !dates.length) return '';
+  var months = {};
+  dates.forEach(function(d) { months[String(d).slice(0, 7)] = true; });
+  var monthKeys = Object.keys(months).sort();
+  if (!monthKeys.length) return '';
+  var color = monthKeys.length >= 2 ? 'var(--red)' : 'var(--amber)';
+  var title = 'Документы не закрыты: ' + monthKeys.map(formatMonthLabel).join(', ');
+  return ' <span title="' + title.replace(/"/g, '&quot;') + '" style="display:inline-flex;vertical-align:middle;margin-left:4px;color:' + color + '">' +
+    '<svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2.5h8l3 3v12h-11z"/><path d="M13 2.5v3h3"/><path d="M7 11h6M7 14h4"/></svg></span>';
 }
 
 // ── КАРТОЧКА КОНТРАГЕНТА (ДЗ) ─────────────────────────────────
@@ -24748,6 +24818,11 @@ function renderDebt() {
     bankruptToggleBtn.style.background = debtHideBankrupt ? 'var(--bg3)' : 'var(--red)';
     bankruptToggleBtn.style.color = debtHideBankrupt ? 'var(--text)' : '#fff';
   }
+  const oldUnclosedToggleBtn = document.getElementById('debt-old-unclosed-toggle-btn');
+  if (oldUnclosedToggleBtn) {
+    oldUnclosedToggleBtn.style.background = debtOnlyOldUnclosed ? 'var(--amber)' : 'var(--bg3)';
+    oldUnclosedToggleBtn.style.color = debtOnlyOldUnclosed ? '#000' : 'var(--text)';
+  }
   // Банкроты (Влад, 2026-07-16: "чтобы не показывало банкротов вообще нигде") - фильтруются
   // ПЕРВЫМИ, до фильтра возраста, т.к. должны быть скрыты из ВСЕГО (в отличие от 600-дневного
   // фильтра, который не трогает график истории - банкроты исключены и из него, но уже на
@@ -25039,6 +25114,11 @@ function renderDebt() {
       : debtManagerFilters.size === 1 ? cleanName(Array.from(debtManagerFilters)[0]) + ' ▾'
       : 'Менеджеров: ' + debtManagerFilters.size + ' ▾';
   }
+  // Начало текущего месяца - нужно и для фильтра "Таблица заказов" ниже, и для подсветки
+  // старых незакрытых документов в строках (используется по всей функции, поэтому считаем
+  // один раз здесь, до цепочки фильтров, а не только перед .map(), как было).
+  var todayForHighlight = new Date();
+  var currentMonthStart = todayForHighlight.getFullYear() + '-' + String(todayForHighlight.getMonth()+1).padStart(2,'0') + '-01';
   var customersFiltered = debtManagerFilters.size
     ? ageFiltered.filter(function(c){ return debtManagerFilters.has(c.manager); })
     : ageFiltered;
@@ -25049,6 +25129,13 @@ function renderDebt() {
   }
   if (debtStatusFilter) {
     customersFiltered = customersFiltered.filter(function(c){ return (c.status || '(без статуса)') === debtStatusFilter; });
+  }
+  // "Только с незакрытыми документами" (2026-09-16, Влад: "кнопочка, которая сразу
+  // отфильтрует всех должников, у кого не закрыт хотя бы один документ за прошлый месяц и
+  // ниже") - тот же предикат, что уже красит документ в развёрнутом списке и рисует значок
+  // у имени (debtIsOldUnclosedDoc_/debtHasOldUnclosed_ ниже) - одна точка правды.
+  if (debtOnlyOldUnclosed) {
+    customersFiltered = customersFiltered.filter(function(c){ return debtHasOldUnclosed_(c, currentMonthStart); });
   }
   // dir = -1 -> по убыванию (стрелка ▼), dir = +1 -> по возрастанию (▲). Знак стоит
   // ПЕРЕД разностью, а не после: (bv-av) уже само по себе убывание, и умножение на -1
@@ -25072,12 +25159,9 @@ function renderDebt() {
 
   // Возраст долга - светофор по дням с даты старейшего неоплаченного документа.
   function ageCls(days) { return days > 90 ? 'red' : days > 60 ? 'amber' : days > 30 ? 'amber' : 'green'; }
-  // Начало текущего месяца - для подсветки "Таблица заказов" за прошлые месяцы (Влад,
-  // 2026-07-11): "Таблица заказов" = заказ ещё не закрыт документом (не оформлен как
-  // "Реализация"). Если такой заказ уже из прошлого месяца - это сигнал в первую очередь
-  // закрыть документ, а потом уже гнаться за оплатой.
-  var todayForHighlight = new Date();
-  var currentMonthStart = todayForHighlight.getFullYear() + '-' + String(todayForHighlight.getMonth()+1).padStart(2,'0') + '-01';
+  // currentMonthStart - см. объявление выше, перед цепочкой фильтров ("Таблица заказов" из
+  // прошлого месяца или раньше - Влад, 2026-07-11 - не закрыта как "Реализация", сигнал
+  // закрыть документ в первую очередь, потом уже гнаться за оплатой).
   document.getElementById('debt-customers-body').innerHTML = customersFiltered.map(function(c, i) {
     // Разбивка по юрлицам группы - показываем всегда, для каждого контрагента, даже если
     // юрлицо только одно (Влад, 2026-07-10: "не только смешанные долги, но и везде -
@@ -25108,7 +25192,7 @@ function renderDebt() {
       'style="background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:0 4px" title="Карточка контрагента">📝' +
       (c.comment ? '<span style="color:var(--amber)">●</span>' : '') + '</button>';
     return '<tr class="debt-row-toggle" onclick="toggleDebtDetail(' + i + ')" style="cursor:pointer">' +
-      '<td>' + cardBtn + '<span id="debt-arrow-' + i + '" class="muted" style="display:inline-block;width:14px">▸</span>' + debtRiskDotHtml_(c.contragent) + courtMarkHtml_(c.contragent) + '<b>' + c.contragent + '</b>' + byOrgLine + '</td>' +
+      '<td>' + cardBtn + '<span id="debt-arrow-' + i + '" class="muted" style="display:inline-block;width:14px">▸</span>' + debtRiskDotHtml_(c.contragent) + courtMarkHtml_(c.contragent) + '<b>' + c.contragent + '</b>' + debtDocFlagHtml_(docs.oldUnclosedDates) + byOrgLine + '</td>' +
       '<td class="muted">' + cleanName(c.manager) + '</td>' +
       '<td class="num"><b>' + fmt(c.balance) + '</b></td>' +
       '<td class="num ' + ageCls(c.daysOverdue) + '">' + c.daysOverdue + '</td>' +

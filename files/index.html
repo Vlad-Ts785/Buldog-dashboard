@@ -33788,7 +33788,49 @@ historyScrim_.onclick = closeHistoryDrawer_;
    машине в меню ПКМ") - когда передана машина, лента фильтруется на сервере
    по её госномеру (?gos=), заголовок называет её явно; без аргумента - вся
    доска целиком, как раньше (кнопка у лампочек присутствия). */
+/* Отмена действия из истории (17.09, Влад: "чисто админская функция делать отмену
+   действий в истории... всё должно вернуться в то же состояние, что и было до смены
+   статуса") - кнопка "Отменить" только у событий, где сервер уже посчитал undoable=true
+   (ТОЛЬКО самое последнее действие над записью/слотом - см. разбор в
+   plans/2026-09-17-history-undo-admin.md) и только для роли admin. lpHistEvents_ хранит
+   последний ответ сервера - индекс в атрибуте кнопки, не тащим весь объект в DOM. */
+var lpHistEvents_ = [];
+var lpHistScopedV_ = null;
+function lpHistUndoLabel_(ev){
+  switch (ev.type){
+    case "fleet_uncouple": return ev.kind === "driver" ? "Вернуть водителя" : "Вернуть прицеп";
+    case "seg_delete": return "Восстановить запись";
+    default: return "Отменить";
+  }
+}
+function lpHistUndo_(i){
+  var ev = lpHistEvents_[i];
+  if (!ev) return;
+  showConfirmDialog_(
+    "Отменить действие «" + lpHistLine_(ev) + "»? Состояние вернётся к тому, что было до него.",
+    function(ok){
+      if (!ok) return;
+      var params = ev.type === "fleet_uncouple" ? { type: ev.type, id: ev.id } : { type: ev.type, hist_id: ev.hist_id };
+      postToYardApi_("/plan/activity/undo", params).then(function(r){
+        if (!r.ok || !r.data || !r.data.ok){
+          toast("Не удалось отменить", (r.data && r.data.error) || "попробуйте обновить историю и повторить", null, {err: true});
+          return;
+        }
+        toast("Действие отменено", null);
+        /* Те же функции, что уже применяются для живого пересчёта после любой
+           фактической правки состояния - fetchPlanSegs_ (поллинг plan_segs, сама
+           дозывает renderRows/renderKpis) и fetchFleetData_ (сцепки/расцепки,
+           тот же прямой вызов, что у fleetDoCouple_/fleetDoUncouple_/initLP) -
+           не изобретаем третий способ обновить экран. */
+        fetchPlanSegs_(); fetchFleetData_();
+        openHistoryDrawer_(lpHistScopedV_);
+      }).catch(function(){ toast("Ошибка сети", "не удалось отменить действие", null, {err: true}); });
+    },
+    "Отмена действия"
+  );
+}
 function openHistoryDrawer_(v){
+  lpHistScopedV_ = v || null;
   var scoped = v && v.gos;
   historyDrawer_.innerHTML =
     '<div class="dh"><div class="dh-txt"><div class="dr-eyebrow">Планировка</div><div class="dr-title">История' + (scoped ? " · " + pageEsc_(v.gos) : " действий") + '</div></div>' +
@@ -33805,14 +33847,19 @@ function openHistoryDrawer_(v){
     if (!r.ok || !r.data || !Array.isArray(r.data.events)){
       body.textContent = "Не удалось загрузить историю - попробуйте ещё раз."; return;
     }
+    lpHistEvents_ = r.data.events;
     if (!r.data.events.length){ body.textContent = "Пока пусто - действий ещё не было."; return; }
-    body.innerHTML = r.data.events.map(function(ev){
+    var isAdmin = STATE.role === "admin";
+    body.innerHTML = r.data.events.map(function(ev, i){
       /* Отбой - красным (Влад, 02.09: "в истории также это подсвечивается
          красным цветом") - единственный тип события с акцентным цветом,
          остальные нейтральные. */
       var isCancel = ev.type === "seg_cancel";
+      var undoBtn = (isAdmin && ev.undoable)
+        ? '<button class="chip" style="margin-top:6px;padding:2px 10px;font-size:11px" onclick="lpHistUndo_(' + i + ')">' + lpHistUndoLabel_(ev) + '</button>'
+        : "";
       return '<div class="dr-row" style="display:block"><div style="color:var(--muted);font-size:10.5px;margin-bottom:2px" class="mono">' +
-        lpHistTime_(ev.at) + ' · ' + (ev.by || "—") + '</div><div' + (isCancel ? ' style="color:var(--red);font-weight:600"' : '') + '>' + lpHistLine_(ev) + '</div></div>';
+        lpHistTime_(ev.at) + ' · ' + (ev.by || "—") + '</div><div' + (isCancel ? ' style="color:var(--red);font-weight:600"' : '') + '>' + lpHistLine_(ev) + '</div>' + undoBtn + '</div>';
     }).join("");
   }).catch(function(){
     var body = document.getElementById("lp-histBody");

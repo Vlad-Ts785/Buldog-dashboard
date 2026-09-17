@@ -33856,11 +33856,20 @@ function openHistoryDrawer_(v){
          остальные нейтральные. */
       var isCancel = ev.type === "seg_cancel";
       var undoBtn = (isAdmin && ev.undoable)
-        ? '<button class="chip" style="margin-top:6px;padding:2px 10px;font-size:11px" onclick="lpHistUndo_(' + i + ')">' + lpHistUndoLabel_(ev) + '</button>'
+        ? '<button class="chip lp-hist-undo" style="margin-top:6px;padding:2px 10px;font-size:11px" data-i="' + i + '">' + lpHistUndoLabel_(ev) + '</button>'
         : "";
       return '<div class="dr-row" style="display:block"><div style="color:var(--muted);font-size:10.5px;margin-bottom:2px" class="mono">' +
         lpHistTime_(ev.at) + ' · ' + (ev.by || "—") + '</div><div' + (isCancel ? ' style="color:var(--red);font-weight:600"' : '') + '>' + lpHistLine_(ev) + '</div>' + undoBtn + '</div>';
     }).join("");
+    // Инлайновый onclick="..." искал бы функцию в ГЛОБАЛЬНОЙ области - весь этот код
+    // живёт внутри своего IIFE (окна LP), наружу торчит только window.LP (см. шапку
+    // файла) - lpHistUndo_ оттуда не видна, кнопка молча ничего не делала (Влад, 17.09:
+    // "кнопка появилась, но не нажимается"). Тот же приём, что у ВСЕХ остальных кнопок
+    // этого модуля (.cr-type/.cr-opt и т.д.) - querySelectorAll + прямое присваивание
+    // .onclick после innerHTML, не строка в разметке.
+    [].forEach.call(body.querySelectorAll(".lp-hist-undo"), function(btn){
+      btn.onclick = function(){ lpHistUndo_(parseInt(btn.dataset.i, 10)); };
+    });
   }).catch(function(){
     var body = document.getElementById("lp-histBody");
     if (body) body.textContent = "Ошибка сети - попробуйте ещё раз.";

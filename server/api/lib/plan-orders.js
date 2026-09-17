@@ -24,6 +24,12 @@ const crypto = require("crypto");
 
 module.exports = function (deps) {
   const { app, pool, checkSession, requireRole_, normalizeGosServer_, buildFleetSummary_, FLEET_EPOCH0_MS_ } = deps;
+  // Руководители коммерческих групп (Ахтамова/Гусейнова) - ТОТ ЖЕ единственный
+  // COMMERCIAL_HEAD_TEAMS_ из server.js, что уже используют «Суды»/CRM/План поступлений
+  // (см. require("./lib/plan-orders.js") в server.js) - вторую копию списка не заводим.
+  // Дефолт {} - на случай локального теста без этого deps-поля, не боевой путь.
+  const commercialHeadTeams_ = deps.commercialHeadTeams || {};
+  function surOf_(name) { return String(name || "").trim().split(/\s+/)[0].toLowerCase(); }
   const ROLES = ["admin", "manager", "logist"];
   const gate = [checkSession, requireRole_(...ROLES)];
   const STATUSES = ["unconfirmed", "confirmed", "cancelled", "done"];
@@ -47,6 +53,24 @@ module.exports = function (deps) {
   function hoursFromEpoch(dateStr, timeStr) { // часы от эпохи Планировки (контракт plan_segs)
     const t = timeStr || "08:00";
     return (new Date(dateStr + "T" + t + ":00+03:00").getTime() - FLEET_EPOCH0_MS_) / 3600000;
+  }
+  // segOf_ - клон КЛИЕНТСКОГО segOf() (order-plan-v2.js): первое слово типа техники,
+  // строчными - "Трал 20-25 т"/"Трал-корыто"/"Трал под кран" все сводятся к "трал".
+  function segOf_(type) { return String(type || "").trim().toLowerCase().split(/[\s,/]+/)[0] || ""; }
+  // 17.09, Влад: «уже начали обходить запрет на сохранение заявки вводом в цену 1 рубль -
+  // у нас заказ минимально на трал и длинномер стоит 25000 рублей». Найдено 4 реальных
+  // заявки (id 76-79) с price=1 - "цена обязательна" (ниже) требует только ЛЮБОЕ truthy
+  // значение, 1 рубль его тривиально обходит. minPriceError_ - отдельная, более строгая
+  // проверка ПОРОГА (не просто "заполнено"). Срабатывает только на ПОЛОЖИТЕЛЬНОЙ цене ниже
+  // порога - 0/пусто (ещё не знаем цену) не трогаем, это отдельный, уже решённый случай
+  // (см. комментарий у "цена обязательна" - история без цены задним числом не блокируется).
+  const MIN_PRICE_BY_SEG_ = { "трал": 25000, "длинномер": 25000 };
+  function minPriceError_(equipmentType, price) {
+    if (!(price > 0)) return null;
+    const seg = segOf_(equipmentType);
+    const min = MIN_PRICE_BY_SEG_[seg];
+    if (min && price < min) return "Минимальная стоимость (" + seg + ") - " + min + " ₽";
+    return null;
   }
   function dayWindow(dateStr) { const s = hoursFromEpoch(dateStr, "00:00"); return [s, s + 24]; }
   function code3(fullName) { // АХТ / САВ / СИЛ - как на плитках Планировки
@@ -91,20 +115,51 @@ module.exports = function (deps) {
       `SELECT * FROM plan_order_change_requests WHERE order_id IN (?) AND status = 'pending'`, [orderIds]);
     return rows;
   }
-  // ЧТЕНИЕ (GET /orders/one, /orders/history) - менеджер видит любую не внутреннюю заявку
-  // (15.09, см. комментарий в шапке файла). Логист/админ - как и раньше, всё.
-  function canSee(req, o) {
-    if (req.userRole === "manager") return !o.internal;
-    return true;
+  // ЧТЕНИЕ ПОДРОБНОСТЕЙ (GET /orders/one, /orders/history - открытие заявки в шторке) -
+  // 17.09, Влад уточнил после 15.09: «проваливаться в заказ, смотреть информацию,
+  // редактировать - менеджеры могут только по своим заказам, подсматривать во внутренности
+  // заказа других менеджеров они не могут. Руководители могут смотреть подробности свои и
+  // своих сотрудников». Список (`GET /orders`, обзор дня) остался общим (см. комментарий в
+  // шапке файла) - это разные вещи: строка таблицы vs открытая карточка. Своя заявка - для
+  // ЛЮБОГО менеджера; заявка СВОЕЙ команды - только для руководителя группы
+  // (COMMERCIAL_HEAD_TEAMS_, тот же список, что уже используют «Суды»/CRM/План поступлений -
+  // единственный источник, здесь НЕ дублируется, приходит через deps.commercialHeadTeams).
+  // canSeeOrderCore_ - синхронное ядро с уже посчитанной командой вызывающего (чтобы список
+  // ниже не бил в async me() на каждую строку, а вызывал me() ровно один раз на весь запрос).
+  function canSeeOrderCore_(o, callerTeam) {
+    return !!(callerTeam && o.manager_name && callerTeam.indexOf(surOf_(o.manager_name)) >= 0);
   }
-  // ПРАВКА (save/status/take/otboy/delete/change_request_resolve) - менеджеру доступна
-  // ТОЛЬКО своя заявка, даже теперь, когда canSee() выше пускает смотреть на все.
-  // Раньше это была одна и та же проверка (owner === viewer) - разделено 15.09, когда
-  // видимость расширили, а право менять чужое - осознанно нет (Влад просил только
-  // «видеть», не «менять чужое»).
+  async function canSee(req, o) {
+    if (req.userRole !== "manager") return true;
+    if (o.internal) return false;
+    if (o.manager_email === req.userEmail) return true;
+    const who = await me(req);
+    return canSeeOrderCore_(o, commercialHeadTeams_[surOf_(who.name)] || null);
+  }
+  // ПРАВКА (save/status/take/otboy/delete/change_request_resolve) - Влад просил
+  // «руководители... смотреть», не «менять чужое» - осталась строго owner-only, БЕЗ
+  // распространения на команду руководителя (в отличие от canSee выше).
   function canEdit(req, o) {
     if (req.userRole === "manager") return !o.internal && o.manager_email === req.userEmail;
     return true;
+  }
+  // Список (`GET /orders`) остаётся общим для всех менеджеров (обзор дня, 15.09), но
+  // чужая строка не должна нести контакты/примечания/документы/коммерцию наёмника -
+  // именно это Влад назвал «внутренностями» 17.09. Оставляем ровно то, что таблица и так
+  // уже показывает всем (маршрут, груз, машина/водитель, статус, цена) - см. renderMgr()/
+  // routeCell/cargoCell_/mgrVehCell в order-plan-v2.js, откуда взят этот список полей.
+  const PRIVATE_ORDER_FIELDS_ = ["customer_contact_name", "customer_contact_phone",
+    "load_contact_name", "load_contact_phone", "unload_contact_name", "unload_contact_phone",
+    "note", "documents", "rework_terms", "crm_deal_id"];
+  const PRIVATE_EXECUTOR_FIELDS_ = ["purchase_rate", "carrier_contact", "carrier_id", "comment", "found_by", "driver_phone"];
+  function redactForeignOrder_(out) {
+    PRIVATE_ORDER_FIELDS_.forEach((k) => { out[k] = null; });
+    out.executors = (out.executors || []).map((e) => {
+      const e2 = Object.assign({}, e);
+      PRIVATE_EXECUTOR_FIELDS_.forEach((k) => { e2[k] = null; });
+      return e2;
+    });
+    return out;
   }
   function fmtTime(t) { return t ? String(t).slice(0, 5) : null; }
   function fmtDate(d) { // mysql DATE -> 'YYYY-MM-DD' (драйвер может отдать Date)
@@ -209,6 +264,11 @@ module.exports = function (deps) {
   // только свои), кроме внутренних логиста; логист/админ - как и раньше, всё. Клиент сам
   // умеет отфильтровать до «только своих» кнопкой (MGR_ALL в order-plan-v2.js) - это уже не
   // вопрос видимости на сервере, а удобство поверх уже полученного списка.
+  // 17.09: чужая строка для менеджера идёт через redactForeignOrder_ - список остался общим
+  // (обзор дня), но без контактов/примечаний/документов/коммерции наёмника - это Влад назвал
+  // «внутренностями» и просил закрыть отдельно от списка. Своя команда руководителя группы
+  // (canSeeOrderCore_/COMMERCIAL_HEAD_TEAMS_) НЕ редактируется - её подробности и так
+  // разрешено открывать (`/orders/one` пропустит), редактировать список смысла нет.
   app.get("/api/orders", ...gate, async (req, res) => {
     try {
       const date = String(req.query.date || ""); const to = String(req.query.to || date);
@@ -221,7 +281,20 @@ module.exports = function (deps) {
       const execs = await loadExecutors(pool, ids); const pend = await loadPending(pool, ids);
       const execBy = {}; execs.forEach((e) => { (execBy[e.order_id] = execBy[e.order_id] || []).push(e); });
       const pendBy = {}; pend.forEach((q) => { pendBy[q.order_id] = q; });
-      const orders = rows.map((o) => serialize(o, execBy[o.id] || [], pendBy[o.id], r.byEmail));
+      const isMgrView = req.userRole === "manager";
+      // Команда вызывающего считается ОДИН раз на весь запрос (не по разу на строку) - см.
+      // комментарий у canSeeOrderCore_ выше.
+      const callerTeam = isMgrView ? (commercialHeadTeams_[surOf_((await me(req)).name)] || null) : null;
+      const orders = rows.map((o) => {
+        const out = serialize(o, execBy[o.id] || [], pendBy[o.id], r.byEmail);
+        const own = o.manager_email === req.userEmail;
+        const visible = !isMgrView || own || canSeeOrderCore_(o, callerTeam);
+        // can_view_details - клиент (order-plan-v2.js) решает по этому полю, пускать ли
+        // клик в шторку, а не заново считает команду руководителя (единственный источник
+        // COMMERCIAL_HEAD_TEAMS_ остаётся на сервере, клиенту знать её незачем).
+        out.can_view_details = visible;
+        return (isMgrView && !visible) ? redactForeignOrder_(out) : out;
+      });
       // Штамп версии - по ВСЕМ источникам изменений (заявки + исполнители + история), не только по
       // plan_orders.updated_at: постановка машины тем же логистом не меняла updated_by -> MySQL не
       // трогал timestamp -> у остальных таблица не перерисовывалась (Влад 11.09: «максимально онлайн»).
@@ -254,7 +327,7 @@ module.exports = function (deps) {
 
   app.get("/api/orders/one", ...gate, async (req, res) => {
     try {
-      const o = await loadOrder(pool, Number(req.query.id)); if (!o || !canSee(req, o)) return fail(res, 404, "заявка не найдена");
+      const o = await loadOrder(pool, Number(req.query.id)); if (!o || !(await canSee(req, o))) return fail(res, 404, "заявка не найдена");
       const r = await roster(); const execs = await loadExecutors(pool, [o.id]); const pend = await loadPending(pool, [o.id]);
       res.json({ order: serialize(o, execs, pend[0], r.byEmail) });
     } catch (err) { console.error("orders one:", err); fail(res, 500, String(err.message || err)); }
@@ -294,6 +367,12 @@ module.exports = function (deps) {
       if (id) {
         const o = await loadOrder(conn, id); if (!o || !canEdit(req, o)) { conn.release(); return fail(res, 404, "заявка не найдена"); }
         if (f.service_date && !isDate(f.service_date)) { conn.release(); return fail(res, 400, "service_date: YYYY-MM-DD"); }
+        {
+          const effType = f.equipment_type !== undefined ? f.equipment_type : o.equipment_type;
+          const effPrice = f.price !== undefined ? f.price : Number(o.price);
+          const priceErr = minPriceError_(effType, effPrice);
+          if (priceErr) { conn.release(); return fail(res, 400, priceErr); }
+        }
         const keys = Object.keys(f).filter((k) => EDITABLE.indexOf(k) >= 0 || k === "service_date");
         if (!keys.length) { conn.release(); return res.json({ ok: true, id }); }
         await conn.beginTransaction();
@@ -320,6 +399,7 @@ module.exports = function (deps) {
         if (!f.equipment_type) { conn.release(); return fail(res, 400, "тип техники обязателен"); }
         if (!f.customer) { conn.release(); return fail(res, 400, "заказчик обязателен"); }
         if (!f.price) { conn.release(); return fail(res, 400, "цена обязательна"); }
+        { const priceErr = minPriceError_(f.equipment_type, f.price); if (priceErr) { conn.release(); return fail(res, 400, priceErr); } }
         const isMgr = req.userRole === "manager";
         const internal = isMgr ? 0 : (f.internal || 0);
         const managerEmail = isMgr ? req.userEmail : (internal ? null : (str(p(req, "manager_email"), 255) || null));
@@ -800,7 +880,7 @@ module.exports = function (deps) {
   });
   app.get("/api/orders/history", ...gate, async (req, res) => {
     try {
-      const id = Number(req.query.id); const o = await loadOrder(pool, id); if (!o || !canSee(req, o)) return fail(res, 404, "заявка не найдена");
+      const id = Number(req.query.id); const o = await loadOrder(pool, id); if (!o || !(await canSee(req, o))) return fail(res, 404, "заявка не найдена");
       const r = await roster();
       const [h] = await pool.query(`SELECT action, detail, changed_by, changed_at FROM plan_orders_history WHERE order_id = ? ORDER BY changed_at DESC, id DESC LIMIT 100`, [id]);
       const [cr] = await pool.query(`SELECT * FROM plan_order_change_requests WHERE order_id = ? ORDER BY requested_at DESC`, [id]);

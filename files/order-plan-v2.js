@@ -145,6 +145,9 @@ function plural(n, one, few, many) { var m10 = n % 10, m100 = n % 100; if (m10 =
    перечисляем - берём первое слово из того, что реально пришло с сервера. */
 function segOf(type) { return String(type || '').trim().toLowerCase().split(/[\s,\/]+/)[0] || ''; }
 function capit(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+/* Влад 17.09: минимальная стоимость трала/длинномера - зеркало серверной MIN_PRICE_BY_SEG_
+   (plan-orders.js) для мгновенной подсказки в форме, сервер - настоящая граница. */
+var MIN_PRICE_BY_SEG_ = { 'трал': 25000, 'длинномер': 25000 };
 
 /* ───────────────────────── звук (ГОСТ, раздел 8) ─────────────────────────
    Деликатный регистр 200-660 Гц + «кабинный» confirm 880->1320 как в plan-m.
@@ -1046,6 +1049,18 @@ function wire() {
     var mg = e.target.closest('.op2-mgrpick');
     if (mg) { openMgrPop(mg, tr); return; }
     var o = byId(tr.dataset.oid); if (!o) return;
+    /* 17.09, Влад: строка видна всем менеджерам (обзор дня), но провалиться в чужую заявку -
+       нельзя («подсматривать во внутренности заказа других менеджеров они не могут»,
+       кроме руководителей группы - им можно по своим сотрудникам). can_view_details
+       считает сервер (там же, где COMMERCIAL_HEAD_TEAMS_ - список команд, клиенту эти
+       группы не нужны и не переданы) - НЕ дублируем эту логику здесь, просто читаем флаг.
+       Сервер и так не отдал бы контакты/примечания/документы неразрешённой заявки
+       (redactForeignOrder_) и не пустил бы на /orders/one - это ЕЩЁ и явный, понятный
+       отказ в интерфейсе, а не молчаливо пустая шторка. */
+    if (o.can_view_details === false) {
+      toast('<span class="op2-warn">Подробности этой заявки видит только её менеджер</span>');
+      return;
+    }
     $$('#op2-mgr-body tr.op2-open').forEach(function (r) { r.classList.remove('op2-open'); });
     tr.classList.add('op2-open');
     openDrawerView(o, 'mgr');
@@ -3320,6 +3335,21 @@ function tickState() {
   var creating = !(formOrder && !formRepeat && !formPrefill);
   if (creating && !num(($('#op2-f-price') || {}).value)) {
     b.className = 'op2-dbtn op2-primary op2-blocked'; b.textContent = 'Укажи цену'; st.textContent = ''; return;
+  }
+  /* 17.09, Влад: «уже начали обходить запрет вводом в цену 1 рубль - трал и длинномер
+     минимум 25000». Сервер - источник истины (minPriceError_ в plan-orders.js), это -
+     только чтобы не гонять на сервер заведомо отклоняемое значение. Проверяем ЛЮБУЮ
+     положительную цену ниже порога (0/пусто - «ещё не знаем», не трогаем), и на
+     создании, и на правке - то же самое решение, что и на сервере. */
+  var priceNow = num(($('#op2-f-price') || {}).value);
+  if (priceNow > 0) {
+    var minSeg = MIN_PRICE_BY_SEG_[segOf(formEq())];
+    if (minSeg && priceNow < minSeg) {
+      b.className = 'op2-dbtn op2-primary op2-blocked';
+      b.textContent = 'Мин. ' + minSeg.toLocaleString('ru-RU') + ' ₽';
+      st.textContent = 'Для «' + esc(formEq()) + '» цена не может быть ниже ' + minSeg.toLocaleString('ru-RU') + ' ₽';
+      return;
+    }
   }
   if (miss.length) {
     b.className = 'op2-dbtn op2-primary op2-warn';

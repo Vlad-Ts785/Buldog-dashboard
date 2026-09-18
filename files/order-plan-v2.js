@@ -316,7 +316,7 @@ var loadingOrders = false;
 var MGR_ALL = true;
 try { MGR_ALL = localStorage.getItem('op2_mgr_all') !== 'off'; } catch (e) {}
 
-var F = { type: 'all', nocar: false, nd: false, newOnly: false, mine: false, q: '' };
+var F = { type: 'all', nocar: false, nd: false, newOnly: false, mine: false, q: '', mgrEmail: '' };
 var SORT = { key: 'n', dir: 1 };
 
 /* ───────────────────────── доступ к полям заявки ───────────────────────── */
@@ -875,21 +875,38 @@ function buildDom() {
 
       /* ── экран логиста ── */
       '<section class="op2-screen" id="op2-scr-log">' +
+        /* Два ряда (19.09, Влад: «давай два ряда») - дата отдельной строкой сверху, тот же
+           «Картограф», что у менеджера (см. DESIGN_SYSTEM.md), фильтры - строкой ниже.
+           Раньше был один ряд с ◀ день ▶ + <input type=date> - убран целиком, у логиста в
+           баре и без даты уже был плотнее набор фильтров, чем у менеджера (тип техники +
+           три чипа-статуса), поэтому неделя целиком сюда не помещалась в один ряд с ними -
+           см. превью https://claude.ai/artifact/2PPTfhGxHt49UL1HWbegEx. */
+        '<div class="op2-bar-group">' +
         '<div class="op2-bar op2-h44">' +
-          '<button class="op2-tab" id="op2-log-prev" aria-label="Предыдущий день">◀</button>' +
-          '<button class="op2-tab op2-on" id="op2-log-day"></button>' +
-          '<button class="op2-tab" id="op2-log-next" aria-label="Следующий день">▶</button>' +
-          '<input type="date" class="op2-dt" id="op2-log-date" autocomplete="off" aria-label="Другой день">' +
+          '<button class="op2-weeknav" id="op2-logwk-prev" type="button" title="Предыдущая неделя" aria-label="Предыдущая неделя"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>' +
+          '<div class="op2-weekrow" id="op2-log-tabs"></div>' +
+          '<button class="op2-weeknav" id="op2-logwk-next" type="button" title="Следующая неделя" aria-label="Следующая неделя"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>' +
+          '<button class="op2-chip op2-todaypill" id="op2-logwk-today" type="button" hidden>Сегодня</button>' +
+          '<span class="op2-datewrap"><button type="button" class="op2-calbtn" id="op2-logwk-calbtn" aria-label="Выбрать другую дату" title="Выбрать другую дату"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></button>' +
+            '<input type="date" class="op2-dt op2-dt-hidden" id="op2-logwk-date" autocomplete="off" tabindex="-1" aria-label="Другой день"></span>' +
           '<div class="op2-sep"></div>' +
+          '<input class="op2-search" id="op2-log-search" placeholder="Заказчик или 3 цифры номера" autocomplete="off">' +
+          '<span class="op2-spacer"></span>' +
+          '<button class="op2-dbtn op2-primary" id="op2-log-new" title="Внутренняя перевозка, для базы, ОЭ/ОКР/ОБР">Новая заявка</button>' +
+        '</div>' +
+        '<div class="op2-bar op2-h44">' +
           '<div id="op2-log-types"></div>' +
+          '<div class="op2-sep"></div>' +
+          /* фильтр «Менеджеры» - гармошка (19.09), тот же приём, что «От кого»/«Тип техники»
+             в форме заявки (entRowHtml/expandEntRow/collapseEntRow ниже), применённый к
+             фильтру списка. Список - managerOptions_() (живой ROSTER), см. renderMgrFilterChips. */
+          '<div class="op2-seg" id="op2-log-mgr"></div>' +
           '<div class="op2-sep"></div>' +
           '<button class="op2-chip" id="op2-f-nocar">Без машины<span class="op2-n" id="op2-c-nocar">0</span></button>' +
           '<button class="op2-chip" id="op2-f-nd">Под данные<span class="op2-n" id="op2-c-nd">0</span></button>' +
           '<button class="op2-chip" id="op2-f-new">Новые<span class="op2-n" id="op2-c-new">0</span></button>' +
           '<button class="op2-chip op2-hidden" id="op2-f-mine"></button>' +
-          '<span class="op2-spacer"></span>' +
-          '<input class="op2-search" id="op2-log-search" placeholder="Заказчик или 3 цифры номера" autocomplete="off">' +
-          '<button class="op2-dbtn op2-primary" id="op2-log-new" title="Внутренняя перевозка, для базы, ОЭ/ОКР/ОБР">Новая заявка</button>' +
+        '</div>' +
         '</div>' +
         '<div class="op2-tblwrap op2-x">' +
           '<table class="op2-tbl" id="op2-log-tbl">' +
@@ -1035,9 +1052,31 @@ function wire() {
     F.q = ''; $('#op2-mgr-search').value = '';
     renderAll(); loadOrders(); loadFree(); loadCounts();
   });
-  $('#op2-log-date').addEventListener('change', function () { if (!this.value) return; DATE = this.value; TO_DATE = ''; renderAll(); loadOrders(); });
-  $('#op2-log-prev').addEventListener('click', function () { DATE = addDays(DATE, -1); TO_DATE = ''; renderAll(); loadOrders(); });
-  $('#op2-log-next').addEventListener('click', function () { DATE = addDays(DATE, 1); TO_DATE = ''; renderAll(); loadOrders(); });
+  /* ── даты логиста, тот же «Картограф», что у менеджера выше (19.09) - TABS_WK/DATE
+     общие на всю страницу, поэтому listCounts/renderTabs переиспользуются как есть,
+     только своя пара обработчиков на свои id (оба экрана одновременно в DOM). */
+  $('#op2-log-tabs').addEventListener('click', function (e) {
+    var b = e.target.closest('.op2-wchip'); if (!b) return;
+    DATE = b.dataset.d; TO_DATE = '';
+    renderAll(); loadOrders();
+  });
+  $('#op2-logwk-prev').addEventListener('click', function () { TABS_WK = addDays(TABS_WK, -7); S.stepDown(); renderTabs(); loadCounts(); });
+  $('#op2-logwk-next').addEventListener('click', function () { TABS_WK = addDays(TABS_WK, 7); S.stepUp(); renderTabs(); loadCounts(); });
+  $('#op2-logwk-today').addEventListener('click', function () {
+    TABS_WK = mondayOf_(todayStr()); DATE = todayStr(); TO_DATE = '';
+    S.toggle(); renderAll(); loadOrders(); loadCounts();
+  });
+  $('#op2-logwk-calbtn').addEventListener('click', function () {
+    S.nav();
+    var el = $('#op2-logwk-date');
+    if (el.showPicker) { try { el.showPicker(); return; } catch (e) {} }
+    el.focus(); el.click();
+  });
+  $('#op2-logwk-date').addEventListener('change', function () {
+    if (!this.value) return;
+    DATE = this.value; TO_DATE = ''; TABS_WK = mondayOf_(this.value);
+    renderAll(); loadOrders(); loadCounts();
+  });
 
   /* ── фильтры логиста ── */
   $('#op2-log-types').addEventListener('click', function (e) {
@@ -1047,6 +1086,25 @@ function wire() {
   });
   [['op2-f-nocar', 'nocar'], ['op2-f-nd', 'nd'], ['op2-f-new', 'newOnly'], ['op2-f-mine', 'mine']].forEach(function (p) {
     $('#' + p[0]).addEventListener('click', function () { this.classList.toggle('op2-on'); F[p[1]] = this.classList.contains('op2-on'); renderLog(); });
+  });
+  /* «Менеджеры» - гармошка в тулбаре (19.09). stopPropagation ОБЯЗАТЕЛЬНО - тот же
+     повод, что у «От кого» ниже (expandMgrFilterRow/collapseMgrFilterRow меняют DOM
+     через outerHTML/innerHTML, e.target «отвязывается» до всплытия к делегату S.nav()
+     на document; звук здесь решаем сами, через S.unfold/S.fold). */
+  $('#op2-log-mgr').addEventListener('click', function (e) {
+    var seg = this;
+    e.stopPropagation();
+    if (e.target.closest('[data-mgrf-more]')) { expandMgrFilterRow(seg); return; }
+    if (e.target.closest('[data-mgrf-close]')) {
+      var cur0 = seg.querySelector('.op2-chip.op2-on');
+      S.fold(); collapseMgrFilterRow(seg, cur0 ? cur0.dataset.mgrEmail : ''); return;
+    }
+    var pick = e.target.closest('.op2-chip[data-mgr-email]'); if (!pick) return;
+    var wasOpen = seg.querySelectorAll('.op2-chip[data-mgr-email]').length > 1;
+    F.mgrEmail = pick.dataset.mgrEmail || '';
+    collapseMgrFilterRow(seg, F.mgrEmail);
+    if (wasOpen) S.fold();
+    renderLog();
   });
   var logSearchT = null;
   $('#op2-log-search').addEventListener('input', function () {
@@ -1428,9 +1486,13 @@ function weekDays_() {
   return arr;
 }
 function renderTabs() {
-  var box = $('#op2-mgr-tabs'); if (!box) return;
+  /* 19.09 - тот же «Картограф», теперь на ОБОИХ экранах (мен./лог., оба в DOM
+     одновременно, viewи переключает только CSS) - рендерим один и тот же days[] в
+     каждый существующий контейнер, а не дублируем вычисление недели. */
+  var boxes = [$('#op2-mgr-tabs'), $('#op2-log-tabs')].filter(Boolean);
+  if (!boxes.length) return;
   var days = weekDays_();
-  box.innerHTML = days.map(function (t) {
+  var html = days.map(function (t) {
     var sel = !TO_DATE && t.d === DATE;
     var cls = ['op2-wchip'];
     if (t.isToday) cls.push('op2-wchip-today');
@@ -1443,9 +1505,11 @@ function renderTabs() {
            (t.isToday ? ' aria-current="date"' : '') + ' title="' + esc(capit(weekdayFull(t.d)) + ', ' + humanDate(t.d)) + '">' +
            '<span class="op2-wchip-label">' + esc(label) + '</span>' + cnt + '</button>';
   }).join('');
-  box.title = 'Неделя: ' + formatWeekRange_(days[0].d, days[6].d);
+  var titleStr = 'Неделя: ' + formatWeekRange_(days[0].d, days[6].d);
+  boxes.forEach(function (box) { box.innerHTML = html; box.title = titleStr; });
   var todayInView = days.some(function (t) { return t.isToday; });
-  var pill = $('#op2-wk-today'); if (pill) pill.hidden = todayInView;
+  var pillMgr = $('#op2-wk-today'); if (pillMgr) pillMgr.hidden = todayInView;
+  var pillLog = $('#op2-logwk-today'); if (pillLog) pillLog.hidden = todayInView;
 }
 function renderUpdated() {
   var el = $('#op2-sub'); if (!el) return;
@@ -1462,8 +1526,7 @@ function renderAll() {
   $('#op2-scr-log').classList.toggle('op2-on', !!ME && !isMgr());
   if (ME && ME.role === 'admin') syncSwitch();
   $('#op2-mgr-date').value = TO_DATE ? todayStr() : DATE;
-  $('#op2-log-date').value = DATE;
-  $('#op2-log-day').textContent = dm(DATE);
+  $('#op2-logwk-date').value = TO_DATE ? todayStr() : DATE;
   renderUpdated();
   renderTabs();
   if (isMgr()) { renderVerdict(); renderFree(); renderMgr(); }
@@ -1797,6 +1860,7 @@ function renderTypeChips() {
   if (F.type !== 'all' && segs.indexOf(F.type) < 0) F.type = 'all';
   box.innerHTML = '<button class="op2-chip' + (F.type === 'all' ? ' op2-on' : '') + '" data-t="all">Все</button>' +
     segs.map(function (s) { return '<button class="op2-chip' + (F.type === s ? ' op2-on' : '') + '" data-t="' + esc(s) + '">' + esc(capit(s)) + '</button>'; }).join('');
+  renderMgrFilterChips();
   var mine = $('#op2-f-mine');
   mine.classList.toggle('op2-hidden', !MY_SEG);
   if (MY_SEG) {
@@ -1857,6 +1921,7 @@ function renderLog() {
     if (F.nocar && (oOwn(o).length || oHired(o) || oSt(o) === 'ot')) return false;
     if (F.nd && !o.needs_data) return false;
     if (F.newOnly && !isFresh(o)) return false;
+    if (F.mgrEmail && (o.manager_email || '') !== F.mgrEmail) return false;
     if (F.q) {
       var q = F.q.toLowerCase(), qd = q.replace(/\s/g, '');
       var inCust = String(o.customer || '').toLowerCase().indexOf(q) >= 0;
@@ -3052,6 +3117,59 @@ function expandEntRow(seg) {
   requestAnimationFrame(function () { closeBtn.style.transform = 'none'; });
   $$('.op2-ent-enter', seg).forEach(function (c, i) { c.style.animationDelay = (i * 35) + 'ms'; });
   S.unfold(rest.length);
+}
+
+/* Фильтр «Менеджеры» в тулбаре логиста (19.09, Влад: «сделаем кнопку гармошку
+   менеджеры, по нажатию раскрывается список со всеми менеджерами и можно
+   отфильтроваться по ним») - та же гармошка, что «От кого» выше, впервые применённая
+   к фильтру СПИСКА (тулбар), а не к полю ФОРМЫ - механика (свернуть/раскрыть/FLIP/
+   каскад 35мс/S.unfold/S.fold) один в один, отличается только источник данных и то,
+   что выбор фильтрует уже загруженные ORD (renderLog), а не пишет поле заявки.
+   Список - managerOptions_() (живой ROSTER), НЕ хардкод (feedback_spravochniki_not_
+   hardcode) - обновится сам при найме/увольнении менеджера. Цвет точки - тот же
+   personColor_/personSurname_, что уже красит колонку «Мен.» и Планировку (12.09) -
+   вторая палитра для того же самого не заводится. */
+function mgrFilterOptions_() { return [{ email: '', name: 'Все менеджеры' }].concat(managerOptions_()); }
+function mgrFilterChipHtml(p, on) {
+  var col = p.email ? personColor_(p.name) : null;
+  var dot = col ? '<span class="op2-mgr-dot" style="background:' + col + '"></span>' : '';
+  var label = p.email ? personSurname_(p.name) : p.name;
+  return '<button class="op2-chip' + (on ? ' op2-on' : '') + '" data-mgr-email="' + esc(p.email) + '" title="' + esc(p.name) + '">' + dot + esc(label) + '</button>';
+}
+function mgrFilterRowHtml(curEmail) {
+  var list = mgrFilterOptions_();
+  var cur = list.filter(function (p) { return p.email === (curEmail || ''); })[0] || list[0];
+  var restN = Math.max(0, list.length - 1);
+  return mgrFilterChipHtml(cur, true) +
+    (restN ? '<button class="op2-chip" data-mgrf-more>Ещё <span class="op2-mono" style="color:var(--tint-amber)">' + restN + '</span></button>' : '');
+}
+function collapseMgrFilterRow(seg, curEmail) { seg.innerHTML = mgrFilterRowHtml(curEmail); }
+function expandMgrFilterRow(seg) {
+  var more = seg.querySelector('[data-mgrf-more]'); if (!more) return;
+  var curBtn = seg.querySelector('.op2-chip.op2-on');
+  var curEmail = curBtn ? curBtn.dataset.mgrEmail : '';
+  var oldRect = more.getBoundingClientRect();
+  var rest = mgrFilterOptions_().filter(function (p) { return p.email !== curEmail; });
+  more.outerHTML = '<button class="op2-chip op2-ent-close" data-mgrf-close>×</button>';
+  seg.insertAdjacentHTML('beforeend', rest.map(function (p) { return mgrFilterChipHtml(p, false).replace('class="op2-chip', 'class="op2-chip op2-ent-enter'); }).join(''));
+  var closeBtn = seg.querySelector('.op2-ent-close');
+  var newRect = closeBtn.getBoundingClientRect();
+  closeBtn.style.transform = 'translate(' + (oldRect.left - newRect.left) + 'px,' + (oldRect.top - newRect.top) + 'px)';
+  requestAnimationFrame(function () { closeBtn.style.transform = 'none'; });
+  $$('.op2-ent-enter', seg).forEach(function (c, i) { c.style.animationDelay = (i * 35) + 'ms'; });
+  S.unfold(rest.length);
+}
+/* вызывается из renderTypeChips() при каждом обновлении данных логиста - НЕ
+   пересобирать DOM, если ростер не поменялся, иначе раскрытая гармошка захлопывалась
+   бы сама каждые несколько секунд на живом опросе (poll), даже если логист её
+   специально держит открытой, выбирая менеджера. */
+var mgrFilterChipsBuiltFor_ = -1;
+function renderMgrFilterChips() {
+  var seg = $('#op2-log-mgr'); if (!seg) return;
+  var opts = managerOptions_();
+  if (seg.children.length && mgrFilterChipsBuiltFor_ === opts.length) return;
+  mgrFilterChipsBuiltFor_ = opts.length;
+  collapseMgrFilterRow(seg, F.mgrEmail);
 }
 
 /* «Кто заказывает» (только логист) - та же гармошка, что «От кого» выше (Влад

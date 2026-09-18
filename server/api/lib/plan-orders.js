@@ -190,6 +190,26 @@ module.exports = function (deps) {
     return out;
   }
 
+  // 18.09, «Перенести»: transferred_to_id/transferred_from_id - голые ID (см. serialize()
+  // выше, копирует ВСЕ колонки строки как есть). Клиенту для подписи «→ перенесена на
+  // 25.09 · №14» нужна дата/номер СВЯЗАННОЙ заявки, а её может не быть в уже загруженном
+  // диапазоне дат (перенос за пределы текущей недели) - поэтому дату/номер резолвим здесь,
+  // а не полагаемся на то, что клиент когда-нибудь сам догадается. НЕ трогаем note
+  // ([[feedback_dont_rewrite_manager_free_text]]) - подпись строится из этих двух полей на
+  // клиенте, не хранится текстом нигде.
+  async function attachTransferInfo_(pool, orders) {
+    const ids = new Set();
+    orders.forEach((o) => { if (o.transferred_to_id) ids.add(o.transferred_to_id); if (o.transferred_from_id) ids.add(o.transferred_from_id); });
+    if (!ids.size) return orders;
+    const [rows] = await pool.query(`SELECT id, service_date, day_no FROM plan_orders WHERE id IN (?)`, [Array.from(ids)]);
+    const byId = {}; rows.forEach((r) => { byId[r.id] = { id: r.id, service_date: fmtDate(r.service_date), day_no: r.day_no }; });
+    orders.forEach((o) => {
+      if (o.transferred_to_id) o.transferred_to = byId[o.transferred_to_id] || null;
+      if (o.transferred_from_id) o.transferred_from = byId[o.transferred_from_id] || null;
+    });
+    return orders;
+  }
+
   // Текущий водитель/прицеп тягача - из fleet_assignments (любой открытый slot, самый свежий),
   // имя/телефон - sprav_people. Тот же принцип, что buildFleetSummary_ (без slot=1).
   async function crewFor(conn, gos) {
@@ -295,6 +315,7 @@ module.exports = function (deps) {
         out.can_view_details = visible;
         return (isMgrView && !visible) ? redactForeignOrder_(out) : out;
       });
+      await attachTransferInfo_(pool, orders);
       // Штамп версии - по ВСЕМ источникам изменений (заявки + исполнители + история), не только по
       // plan_orders.updated_at: постановка машины тем же логистом не меняла updated_by -> MySQL не
       // трогал timestamp -> у остальных таблица не перерисовывалась (Влад 11.09: «максимально онлайн»).
@@ -329,7 +350,9 @@ module.exports = function (deps) {
     try {
       const o = await loadOrder(pool, Number(req.query.id)); if (!o || !(await canSee(req, o))) return fail(res, 404, "заявка не найдена");
       const r = await roster(); const execs = await loadExecutors(pool, [o.id]); const pend = await loadPending(pool, [o.id]);
-      res.json({ order: serialize(o, execs, pend[0], r.byEmail) });
+      const order = serialize(o, execs, pend[0], r.byEmail);
+      await attachTransferInfo_(pool, [order]);
+      res.json({ order });
     } catch (err) { console.error("orders one:", err); fail(res, 500, String(err.message || err)); }
   });
 
@@ -453,6 +476,64 @@ module.exports = function (deps) {
       // всё равно проскочит (новое поле, схему сузили) - страховка даёт понятное
       // сообщение вместо сырого текста драйвера; подробности - в console.error выше.
       if (err && err.code === "ER_DATA_TOO_LONG") { fail(res, 400, "Слишком длинное значение в одном из полей - сократите текст"); return; }
+      fail(res, 500, String(err.message || err));
+    }
+    finally { conn.release(); }
+  });
+
+  // ── POST /api/orders/transfer - перенос на другую дату ─────────────────────────────────
+  // 17-18.09, Влад (после инцидента с ручной сменой даты - см. комментарий у canSee/EDITABLE
+  // выше и запись 18.09 в README): «дату поменять невозможно... перенос - новая заявка».
+  // Превью одобрено 18.09 («надо сделать как в превью»). Одним действием: старой заявке -
+  // отбой (тот же status='cancelled', что и у ручного «Отбой» в контекстном меню - логист
+  // по-прежнему должен принять отбой, otboy_ack сбрасывается так же) + связь на новую;
+  // новая заявка - копия ВСЕХ полей EDITABLE (тот же менеджер, тот же груз/адреса/цена -
+  // это ТА ЖЕ перевозка, просто на другой день, в отличие от «Повторить», которое
+  // сознательно не переносит crm_deal_id) со своим day_no (не залезает в нумерацию другого
+  // дня) + связь на старую. Исполнителей (машина/водитель) новая заявка НЕ наследует -
+  // как и «Повторить», день другой - назначение отдельное решение логиста.
+  app.post("/api/orders/transfer", ...gate, async (req, res) => {
+    const conn = await pool.getConnection();
+    try {
+      const id = Number(p(req, "id"));
+      const newDate = String(p(req, "new_date") || "");
+      if (!isDate(newDate)) { conn.release(); return fail(res, 400, "new_date: YYYY-MM-DD"); }
+      const o = await loadOrder(conn, id);
+      if (!o || !canEdit(req, o)) { conn.release(); return fail(res, 404, "заявка не найдена"); }
+      if (newDate === fmtDate(o.service_date)) { conn.release(); return fail(res, 400, "Новая дата совпадает с текущей - переносить некуда"); }
+      if (o.status === "cancelled") { conn.release(); return fail(res, 400, "Заявка уже в отбое"); }
+      if (o.status === "done") { conn.release(); return fail(res, 400, "Заявка уже выполнена - переносить нечего"); }
+      await conn.beginTransaction();
+      let newId = null;
+      for (let attempt = 0; attempt < 3 && !newId; attempt++) {
+        const [[mx]] = await conn.query(`SELECT COALESCE(MAX(day_no),0)+1 AS n FROM plan_orders WHERE service_date = ? FOR UPDATE`, [newDate]);
+        try {
+          const cols = ["service_date", "day_no", "status", "manager_email", "manager_name", "created_role", "internal",
+            "created_by", "updated_by", "transferred_from_id"];
+          const vals = [newDate, mx.n, "unconfirmed", o.manager_email, o.manager_name, req.userRole, o.internal,
+            req.userEmail, req.userEmail, id];
+          EDITABLE.forEach((k) => { if (k !== "internal" && o[k] !== null && o[k] !== undefined) { cols.push(k); vals.push(o[k]); } });
+          const [ins] = await conn.query(`INSERT INTO plan_orders (${cols.join(",")}) VALUES (${cols.map(() => "?").join(",")})`, vals);
+          newId = ins.insertId;
+        } catch (e) { if (e.code !== "ER_DUP_ENTRY") throw e; }
+      }
+      if (!newId) throw new Error("не удалось выдать номер дня");
+      // otboy_ack сбрасывается точно так же, как в обычном /orders/status - логист видит
+      // мигающую строку и должен принять отбой заново, перенос не в обход этого правила.
+      await conn.query(`UPDATE plan_orders SET status='cancelled', otboy_ack_by=NULL, otboy_ack_at=NULL,
+        transferred_to_id=?, updated_by=? WHERE id=?`, [newId, req.userEmail, id]);
+      await history(conn, id, "transfer_out", o, newDate + "|" + newId, req.userEmail);
+      await history(conn, newId, "transfer_in", null, fmtDate(o.service_date) + "|" + id, req.userEmail);
+      await conn.commit();
+      const r = await roster();
+      const [o1, o2] = await Promise.all([loadOrder(pool, id), loadOrder(pool, newId)]);
+      const oldOrder = serialize(o1, await loadExecutors(pool, [id]), (await loadPending(pool, [id]))[0], r.byEmail);
+      const newOrder = serialize(o2, [], null, r.byEmail);
+      await attachTransferInfo_(pool, [oldOrder, newOrder]);
+      res.json({ ok: true, old_order: oldOrder, new_order: newOrder });
+    } catch (err) {
+      try { await conn.rollback(); } catch (e) {}
+      console.error("orders transfer:", err);
       fail(res, 500, String(err.message || err));
     }
     finally { conn.release(); }

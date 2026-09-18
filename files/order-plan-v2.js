@@ -927,6 +927,7 @@ function buildDom() {
       '<div class="op2-stpop" id="op2-stpop" role="menu"></div>' +
       '<div class="op2-stpop" id="op2-lgpop" role="menu"></div>' +
       '<div class="op2-stpop" id="op2-mgrpop" role="menu"></div>' +
+      '<div class="op2-stpop op2-datepop" id="op2-transferpop" role="menu"></div>' +
 
       /* ── «Задание водителю» ── */
       '<div class="op2-dmod-scrim" id="op2-drv-scrim"><div class="op2-dmod" role="dialog" aria-label="Задание водителю">' +
@@ -1043,6 +1044,7 @@ function wire() {
   /* ── таблица менеджера ── */
   $('#op2-mgr-body').addEventListener('click', function (e) {
     if (e.target.closest('.op2-maplink')) return; /* ссылка на карту открывает себя сама, дровер не нужен */
+    var jb = e.target.closest('[data-jump]'); if (jb) { jumpToDate_(jb.dataset.jump); return; } /* «→ перенесена на...» - переход к новой заявке, не открытие дровера */
     var tr = e.target.closest('tr[data-oid]'); if (!tr) return;
     var ch = e.target.closest('.op2-stc');
     if (ch) { openStPop(ch, tr); return; }
@@ -1070,7 +1072,7 @@ function wire() {
     e.preventDefault();
     var tr = e.target.closest('tr[data-oid]'); if (!tr) return;
     var o = byId(tr.dataset.oid); if (!o) return;
-    openRowMenu(e.clientX, e.clientY, mgrRowMenu(o));
+    openRowMenu(e.clientX, e.clientY, mgrRowMenu(o, e.clientX, e.clientY));
   });
 
   /* ── таблица логиста ── */
@@ -1130,6 +1132,11 @@ function wire() {
     var opt = managerOptions_().filter(function (p) { return p.email === email; })[0];
     assignManager_(o, email, opt ? opt.name : email);
   });
+  /* ── поповер «Перенести» (18.09) ── */
+  $('#op2-transferpop').addEventListener('click', function (e) {
+    var b = e.target.closest('.op2-chip[data-d]'); if (!b || !transferOrderCtx_) return;
+    doTransfer_(transferOrderCtx_, b.dataset.d);
+  });
 
   /* ── глобальные: Esc, клик мимо, скролл ── */
   document.addEventListener('keydown', onKeyDown, true);
@@ -1180,6 +1187,7 @@ function onKeyDown(e) {
   if ($('#op2-stpop').classList.contains('op2-open')) { closeStPop(); return; }
   if ($('#op2-lgpop').classList.contains('op2-open')) { closeLogPop(); return; }
   if ($('#op2-mgrpop').classList.contains('op2-open')) { closeMgrPop(); return; }
+  if ($('#op2-transferpop').classList.contains('op2-open')) { closeTransferPop_(); return; }
   if ($('#op2-pop').classList.contains('op2-open')) { closePop(); return; }
   closeDrawer();
 }
@@ -1191,6 +1199,8 @@ function onDocMouseDown(e) {
   if (lgp && lgp.classList.contains('op2-open') && !e.target.closest('#op2-lgpop') && !e.target.closest('.op2-logpick')) closeLogPop();
   var mgp = $('#op2-mgrpop');
   if (mgp && mgp.classList.contains('op2-open') && !e.target.closest('#op2-mgrpop') && !e.target.closest('.op2-mgrpick')) closeMgrPop();
+  var tfp = $('#op2-transferpop');
+  if (tfp && tfp.classList.contains('op2-open') && !e.target.closest('#op2-transferpop')) closeTransferPop_();
   var pop = $('#op2-pop');
   if (pop && pop.classList.contains('op2-open') && !e.target.closest('#op2-pop') && !e.target.closest('.op2-slot,.op2-veh')) closePop();
   if ($('#op2-row-menu') && !e.target.closest('#op2-row-menu')) closeRowMenu();
@@ -1293,6 +1303,15 @@ function loadCounts() {
     (r.data.counts || []).forEach(function (c) { COUNTS[c.date] = c; });
     renderTabs();
   }).catch(function () {});
+}
+/* 18.09, «Перенести» - клик по подписи «→ перенесена на .../← перенос с ...» (см.
+   transferSubHtml_) переключает вид на дату связанной заявки - тот же приём, что уже есть
+   у клика по дню в шапке (DATE=.../TO_DATE=''/renderAll/loadOrders/loadFree). */
+function jumpToDate_(dateStr) {
+  if (!dateStr) return;
+  S.nav();
+  DATE = dateStr; TO_DATE = '';
+  renderAll(); loadOrders(); loadFree();
 }
 function loadFree() {
   var t = todayStr();
@@ -1579,6 +1598,14 @@ function timeCell(o) {
   var t = oTime(o);
   return '<td>' + (t ? '<span class="op2-time">' + esc(t) + '</span>' : '<span class="op2-time op2-ask" title="Время подачи уточняется">уточнить</span>') + '</td>';
 }
+/* общая для обеих таблиц (Влад 18.09: «всё новое должно подсвечиваться неделю») - см.
+   isNewWeek_(). Отдельно от isFresh()/«новая»-чипа в renderLog() - тот гаснет за 10 минут
+   и служебный (сигнал логисту), этот - просто метка возраста на всю неделю. */
+function noCell_(o) {
+  return '<td><span class="op2-no">' + esc(oNo(o)) + '</span>' +
+    (isNewWeek_(o) ? '<span class="op2-tag op2-tg-new" title="Заявка создана ' + esc(humanDate(String(o.created_at || '').slice(0, 10))) + ' - метка сойдёт через неделю">новое</span>' : '') +
+    '</td>';
+}
 function techCell_(o) {
   return '<td class="op2-tech">' + (o.equipment_type ? esc(o.equipment_type) : '<span class="op2-ask">уточнить</span>') + '</td>';
 }
@@ -1642,12 +1669,12 @@ function renderMgr() {
     var k = oSt(o);
     var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' : '');
     return '<tr class="' + cls + '" data-oid="' + esc(o.id) + '">' +
-      '<td><span class="op2-no">' + esc(oNo(o)) + '</span></td>' +
+      noCell_(o) +
       mgrCodeCell_(o, isAdmin()) + logCodeCell_(o) +
       timeCell(o) + techCell_(o) +
       custCell_(o, WIDE && F.q ? '<span class="op2-code" style="margin-right:6px">' + esc(dm(o.service_date)) + '</span>' : '') +
       routeCell(o) + cargoCell_(o) +
-      '<td>' + mgrVehCell(o) + '</td>' +
+      '<td>' + mgrVehCell(o) + transferSubHtml_(o) + '</td>' +
       stCell_(o) + priceCell_(o) +
       '</tr>';
   }).join('');
@@ -1685,6 +1712,22 @@ function mgrVehCell(o) {
 function pendFromTo_(p) {
   if (p.type === 'replace_carrier') return { from: p.from_carrier_name || '', to: p.to_carrier_name || '', extra: '', cls: '' };
   return { from: p.from_gos || '', to: p.to_gos || '', extra: p.to_driver_name || '', cls: 'op2-mono' };
+}
+/* 18.09, «Перенести» - подпись в колонке «Машина·водитель» (тот же приём, что pendHtml
+   ниже - .op2-sub блок под основным содержимым ячейки). Кликабельна - переход к связанной
+   заявке, даже если она на другой день (jumpToOrder_ сам переключит DATE/TO_DATE). Дата/
+   номер связанной заявки уже разрешены сервером (attachTransferInfo_) - клиент не гадает,
+   есть она в текущей загрузке или нет. */
+function transferSubHtml_(o) {
+  if (o.transferred_to) {
+    var t = o.transferred_to;
+    return '<button type="button" class="op2-sub op2-transfer op2-transfer-out" data-jump="' + esc(t.service_date) + '" title="Перейти к новой заявке"><span class="op2-arr">→</span>перенесена на ' + esc(dm(t.service_date)) + ' · №' + esc(t.day_no) + '</button>';
+  }
+  if (o.transferred_from) {
+    var f = o.transferred_from;
+    return '<span class="op2-sub op2-transfer-in"><span class="op2-arr">←</span>перенос с №' + esc(f.day_no) + ' (' + esc(dm(f.service_date)) + ')</span>';
+  }
+  return '';
 }
 function pendHtml(o, who) {
   var p = o.pending_request;
@@ -1780,12 +1823,12 @@ function renderLog() {
     var k = oSt(o);
     var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' + (o.otboy_ack_by ? '' : ' op2-unack') : (needsAccept_(o) ? ' op2-new-unack' : '')) + (isFresh(o) ? ' op2-new-halo' : '');
     return '<tr class="' + cls + '" data-oid="' + esc(o.id) + '">' +
-      '<td><span class="op2-no">' + esc(oNo(o)) + '</span></td>' +
+      noCell_(o) +
       mgrCodeCell_(o, isAdmin()) + logCodeCell_(o, true) +
       timeCell(o) + techCell_(o) +
       custCell_(o, isFresh(o) ? '<span class="op2-st-chip op2-ok" style="margin-right:6px">новая</span>' : '') +
       routeCell(o) + cargoCell_(o) +
-      '<td>' + vehCellLog(o) + '</td>' +
+      '<td>' + vehCellLog(o) + transferSubHtml_(o) + '</td>' +
       stCell_(o) + priceCell_(o) +
       '</tr>';
   }).join('');
@@ -1801,6 +1844,22 @@ function isFresh(o) {
   if (!isFinite(t)) return false;
   return (Date.now() - t) < 10 * 60 * 1000 && !oOwn(o).length && !oHired(o);
 }
+/* 18.09, Влад (по мотивам превью «Перенести»): «мне понравилось что что-то новое
+   подсвечивается. Вот всё новое должно подсвечиваться неделю, а потом приходить в обычный
+   режим». В отличие от isFresh() выше (10 минут, гаснет при постановке машины - служебный
+   сигнал логисту «разбери меня») - это ПРОСТО метка возраста заявки, не зависит от статуса/
+   машины, статичный бейдж без анимации (см. .op2-tag.op2-tg-new в CSS). */
+var NEW_TAG_MS_ = 7 * 24 * 60 * 60 * 1000;
+function isNewWeek_(o) {
+  if (!o.created_at) return false;
+  var t = Date.parse(String(o.created_at).replace(' ', 'T'));
+  return isFinite(t) && (Date.now() - t) < NEW_TAG_MS_;
+}
+/* 18.09, «Перенести» - те же условия, что сервер сам проверит (POST /orders/transfer),
+   продублировано на клиенте только чтобы не показывать пункт меню, который заведомо
+   откажет. Отбойную/выполненную заявку переносить нечего - для отбоя это отдельно уже
+   «новая заявка», для выполненной - поздно менять план. */
+function canTransfer_(o) { return oSt(o) !== 'ot' && o.status !== 'done'; }
 
 /* ═════════════════════════ СТАТУС В ОДИН КЛИК ═════════════════════════ */
 var stTr = null;
@@ -1890,6 +1949,51 @@ function assignLogist_(o, email, name) {
     loadOrders();
   });
 }
+/* ═════════════════════════ ПЕРЕНЕСТИ (18.09, превью одобрено Владом) ═════════════════════════
+   Отбой старой заявке + новая заявка на выбранную дату, одним запросом (POST /orders/transfer,
+   сервер атомарно и отбой ставит, и новую создаёт со своим day_no - см. комментарий там же).
+   Поповер - тот же .op2-stpop каркас и тот же набор пресетов (Сегодня/Завтра/календарь), что
+   уже утверждён в форме заявки (op2-f-datebox) - не изобретаем второй виджет даты. */
+var transferOrderCtx_ = null;
+function openTransferPop_(o, x, y) {
+  transferOrderCtx_ = o;
+  var tomorrow = addDays(todayStr(), 1), dayAfter = addDays(todayStr(), 2);
+  var sp = $('#op2-transferpop');
+  sp.innerHTML =
+    '<div class="op2-dp-title">Перенести №' + esc(oNo(o)) + ' на</div>' +
+    '<div class="op2-dp-row">' +
+      '<button class="op2-chip" data-d="' + esc(tomorrow) + '">Завтра, ' + esc(dm(tomorrow)) + '</button>' +
+      '<button class="op2-chip" data-d="' + esc(dayAfter) + '">Послезавтра, ' + esc(dm(dayAfter)) + '</button>' +
+      '<span class="op2-datewrap"><button type="button" class="op2-calbtn" id="op2-transfer-calbtn" title="Выбрать другую дату"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></button>' +
+      '<input type="date" class="op2-dt op2-dt-hidden" id="op2-transfer-datenative" autocomplete="off" tabindex="-1"></span>' +
+    '</div>';
+  sp.style.left = Math.min(x, window.innerWidth - 260) + 'px';
+  sp.style.top = Math.min(y, window.innerHeight - 90) + 'px';
+  sp.classList.add('op2-open');
+  var calBtn = $('#op2-transfer-calbtn'), dateNative = $('#op2-transfer-datenative');
+  calBtn.addEventListener('click', function () {
+    S.nav();
+    if (dateNative.showPicker) { try { dateNative.showPicker(); return; } catch (e) {} }
+    dateNative.focus(); dateNative.click();
+  });
+  dateNative.addEventListener('change', function () { if (this.value) doTransfer_(o, this.value); });
+}
+function closeTransferPop_() { var sp = $('#op2-transferpop'); if (sp) sp.classList.remove('op2-open'); transferOrderCtx_ = null; }
+function doTransfer_(o, newDate) {
+  closeTransferPop_();
+  apiPost('/orders/transfer', { id: o.id, new_date: newDate }).then(function (r) {
+    if (!ok_(r)) return;
+    S.tickUp();
+    var no = r.data.new_order.day_no;
+    toast('Заявка №' + esc(oNo(o)) + ' <span class="op2-bad">отбой</span> · перенесена на ' + esc(dm(newDate)) + ', новая №' + esc(no));
+    /* Влад в превью видел результат СРАЗУ на том же экране (отбой старой строки + новая
+       ниже) - в отличие от saveForm() (создание с нуля - смотреть посл создания больше не
+       на что), здесь есть на что посмотреть ИМЕННО на текущей дате. Не прыгаем на новую
+       дату автоматически - подпись «→ перенесена...» на строке кликабельна (jumpToDate_),
+       если захочется посмотреть новую заявку. */
+    renderAll(); loadOrders(); loadCounts(); loadFree();
+  });
+}
 function setStatusUi(tr, k) {
   var o = byId(tr.dataset.oid); if (!o) return;
   setStatus(o, k);
@@ -1912,6 +2016,7 @@ function setStatus(o, k) {
 /* ═════════════════════════ КЛИКИ В ТАБЛИЦЕ ЛОГИСТА ═════════════════════════ */
 function onLogClick(e) {
   if (e.target.closest('.op2-maplink')) return; /* ссылка на карту открывает себя сама, дровер не нужен */
+  var jb = e.target.closest('[data-jump]'); if (jb) { jumpToDate_(jb.dataset.jump); return; }
   var lg = e.target.closest('.op2-logpick');
   var dk = e.target.closest('.op2-dok');
   var un = e.target.closest('.op2-unset-ot');
@@ -2021,12 +2126,18 @@ function mgrChangerItem_(o, table) {
     var cell = tr.querySelector('.op2-mgrpick'); if (cell) openMgrPop(cell, tr);
   } }];
 }
-function mgrRowMenu(o) {
+function mgrRowMenu(o, x, y) {
+  /* 18.09, «Перенести» - превью одобрено Владом («надо сделать как в превью»). Только для
+     заявок, которые ещё реально можно перенести (не отбой, не выполнена) - те же условия,
+     что сервер сам перепроверит (canTransfer_), но скрываем пункт заранее, а не даём нажать
+     и получить отказ. */
+  var transferItem = canTransfer_(o) ? [{ label: 'Перенести', fn: function () { openTransferPop_(o, x, y); } }] : [];
   return [
-    { label: 'Повторить', fn: function () { openRepeat(o); } },
+    { label: 'Повторить', fn: function () { openRepeat(o); } }
+  ].concat(transferItem).concat([
     { label: 'Отбой', fn: function () { setStatus(o, 'ot'); } },
     { label: 'Копировать данные на пропуск', fn: function () { copyText(passText(o), 'Данные на пропуск скопированы'); } }
-  ].concat(mgrChangerItem_(o, 'op2-mgr-body')).concat(isAdmin() ? [{ label: 'Удалить заявку', fn: function () { deleteOrder(o); } }] : []);
+  ]).concat(mgrChangerItem_(o, 'op2-mgr-body')).concat(isAdmin() ? [{ label: 'Удалить заявку', fn: function () { deleteOrder(o); } }] : []);
 }
 function logRowMenu(o) {
   var items = [];
@@ -2557,7 +2668,8 @@ var HIST_ACTION_LABEL_ = {
   delete: 'удалил заявку', executor_role: 'сменил роль машины', change_request: 'предложил замену',
   executor_set: 'поставил машину', executor_remove: 'снял машину', executor_move: 'перенёс машину',
   hired_set: 'оформил наёмника', change_request_approve: 'согласовал замену',
-  change_request_reject: 'отклонил замену', needs_data_sent: 'отправил данные на пропуск'
+  change_request_reject: 'отклонил замену', needs_data_sent: 'отправил данные на пропуск',
+  transfer_out: 'перенёс на другую дату', transfer_in: 'создана переносом'
 };
 /* detail этих действий дословно повторяет то, что уже сказано в label/по автору - не дублируем */
 var HIST_SUPPRESS_DETAIL_ = { otboy_ack: 1, delete: 1, needs_data_sent: 1 };
@@ -2587,6 +2699,16 @@ function humanizeHistoryDetail_(action, detail) {
     if (m) return (ST_LABEL[ST_UI[m[1]]] || m[1]) + ' → ' + (ST_LABEL[ST_UI[m[2]]] || m[2]);
   }
   if (action === 'executor_set') detail = detail.replace(/\bmain\b/, 'основная').replace(/\breserve\b/, 'резерв');
+  /* transfer_out/transfer_in - detail хранит "YYYY-MM-DD|order_id" (см. POST /orders/transfer,
+     plan-orders.js) - не дата+номер дня, потому что история пишется ДО того, как известен
+     day_no новой заявки в некоторых путях; id достаточно, а красивый номер уже виден в
+     самой строке заявки (transferSubHtml_) - тут просто дата в привычном формате. */
+  if (action === 'transfer_out' || action === 'transfer_in') {
+    // label уже говорит "перенёс НА другую дату"/"создана переносом" - тут не повторяем
+    // предлог у transfer_out (было бы "...на другую дату · на 25.09"), только у transfer_in
+    // добавляем "с", т.к. там label сам по себе направление не называет.
+    var tp = detail.split('|'); if (tp.length === 2) return (action === 'transfer_in' ? 'с ' : '') + dm(tp[0]) + ' · №' + tp[1];
+  }
   return detail.replace(/\s*->\s*/g, ' → ');
 }
 /* «сегодня, 14:12» / «вчера, 09:34» / «13 сентября, 09:34» - дата определяется сравнением

@@ -2996,12 +2996,22 @@ function renderForm() {
   $('#op2-d-body').innerHTML =
     '<div class="op2-cols"><div class="op2-main">' +
     '<div class="op2-sect"><div class="op2-t">Когда и для кого</div><div class="op2-grid2">' +
-      '<div class="op2-fld"><label>Дата подачи</label><div class="op2-seg" id="op2-f-datebox">' +
-        '<button class="op2-chip' + (defDate === todayStr() ? ' op2-on' : '') + '" data-d="' + esc(todayStr()) + '">Сегодня ' + esc(dm(todayStr())) + '</button>' +
-        '<button class="op2-chip' + (defDate === addDays(todayStr(), 1) ? ' op2-on' : '') + '" data-d="' + esc(addDays(todayStr(), 1)) + '">Завтра ' + esc(dm(addDays(todayStr(), 1))) + '</button>' +
-        '<span class="op2-datewrap"><button type="button" class="op2-calbtn" id="op2-f-calbtn" title="Выбрать другую дату"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></button>' +
-        '<input type="date" class="op2-dt op2-dt-hidden" id="op2-f-date" value="' + esc(defDate) + '" autocomplete="off" tabindex="-1"></span>' +
-      '</div></div>' +
+      /* 18.09, Влад (после реального случая - заявку перекидывали между днями правкой
+         даты, номер уехал с 11 на 8 и потом на 19): «дату поменять невозможно. Если
+         заявка создана - она уже в плане. Если подтверждена - отбой. Перенос - новая
+         заявка. Номерация не может выскочить из одного дня в другой». Дата закрыта
+         ТОЛЬКО у уже существующей заявки в режиме правки - у новой/повтора/копии из
+         CRM дата по-прежнему свободно выбирается (это ещё не «уже в плане»). */
+      (editing
+        ? '<div class="op2-fld"><label>Дата подачи</label><div class="op2-locked" title="Дату нельзя менять после создания заявки - поставьте отбой и создайте новую заявку на нужный день">' +
+            esc(humanDate(defDate)) + ' <span class="op2-lock-ic">🔒</span></div>' +
+            '<input type="hidden" id="op2-f-date" value="' + esc(defDate) + '"></div>'
+        : '<div class="op2-fld"><label>Дата подачи</label><div class="op2-seg" id="op2-f-datebox">' +
+            '<button class="op2-chip' + (defDate === todayStr() ? ' op2-on' : '') + '" data-d="' + esc(todayStr()) + '">Сегодня ' + esc(dm(todayStr())) + '</button>' +
+            '<button class="op2-chip' + (defDate === addDays(todayStr(), 1) ? ' op2-on' : '') + '" data-d="' + esc(addDays(todayStr(), 1)) + '">Завтра ' + esc(dm(addDays(todayStr(), 1))) + '</button>' +
+            '<span class="op2-datewrap"><button type="button" class="op2-calbtn" id="op2-f-calbtn" title="Выбрать другую дату"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></button>' +
+            '<input type="date" class="op2-dt op2-dt-hidden" id="op2-f-date" value="' + esc(defDate) + '" autocomplete="off" tabindex="-1"></span>' +
+          '</div></div>') +
 
       '<div class="op2-fld"><label>Время подачи</label><div class="op2-timerow">' +
         '<button class="op2-stp" data-d="-30">−30</button>' +
@@ -3113,30 +3123,35 @@ function wireForm() {
     b.addEventListener('click', function () { ft.value = hhmm(tmin(normT(ft.value) || '08:00') + (+this.dataset.d)); if (+this.dataset.d > 0) S.stepUp(); else S.stepDown(); tickState(); });
   });
   var calBtn = $('#op2-f-calbtn'), dateNative = $('#op2-f-date');
-  $('#op2-f-datebox').addEventListener('click', function (e) {
-    var b = e.target.closest('.op2-chip'); if (!b) return;
-    $$('.op2-chip', this).forEach(function (x) { x.classList.remove('op2-on'); });
-    b.classList.add('op2-on');
-    dateNative.value = b.dataset.d;
-    calBtn.classList.remove('op2-on'); calBtn.title = 'Выбрать другую дату';
-    drawQk();
-  });
-  /* иконка-календарь вместо всегда видимого <input type=date> (Влад 11.09, перенос
-     редизайна 12.09) - сам input остаётся в DOM (скрыт визуально), showPicker() его
-     открывает; выбор даты вне Сегодня/Завтра виден по подсветке кнопки и её title,
-     как в утверждённом превью - отдельного текстового поля под датой нет */
-  calBtn.addEventListener('click', function () {
-    S.nav();
-    if (dateNative.showPicker) { try { dateNative.showPicker(); return; } catch (e) {} }
-    dateNative.focus(); dateNative.click();
-  });
-  dateNative.addEventListener('change', function () {
-    $$('#op2-f-datebox .op2-chip').forEach(function (x) { x.classList.toggle('op2-on', x.dataset.d === this.value); }, this);
-    var isPreset = !!$('#op2-f-datebox .op2-chip.op2-on');
-    calBtn.classList.toggle('op2-on', !isPreset);
-    calBtn.title = isPreset ? 'Выбрать другую дату' : humanDate(this.value);
-    drawQk();
-  });
+  /* 18.09: у существующей заявки (editing) дата теперь #op2-locked, не #op2-f-datebox -
+     calBtn/datebox в DOM нет, вешать обработчики некуда (и незачем - hidden #op2-f-date
+     всё равно держит значение для collectForm()/drawQk()). */
+  if (calBtn) {
+    $('#op2-f-datebox').addEventListener('click', function (e) {
+      var b = e.target.closest('.op2-chip'); if (!b) return;
+      $$('.op2-chip', this).forEach(function (x) { x.classList.remove('op2-on'); });
+      b.classList.add('op2-on');
+      dateNative.value = b.dataset.d;
+      calBtn.classList.remove('op2-on'); calBtn.title = 'Выбрать другую дату';
+      drawQk();
+    });
+    /* иконка-календарь вместо всегда видимого <input type=date> (Влад 11.09, перенос
+       редизайна 12.09) - сам input остаётся в DOM (скрыт визуально), showPicker() его
+       открывает; выбор даты вне Сегодня/Завтра виден по подсветке кнопки и её title,
+       как в утверждённом превью - отдельного текстового поля под датой нет */
+    calBtn.addEventListener('click', function () {
+      S.nav();
+      if (dateNative.showPicker) { try { dateNative.showPicker(); return; } catch (e) {} }
+      dateNative.focus(); dateNative.click();
+    });
+    dateNative.addEventListener('change', function () {
+      $$('#op2-f-datebox .op2-chip').forEach(function (x) { x.classList.toggle('op2-on', x.dataset.d === this.value); }, this);
+      var isPreset = !!$('#op2-f-datebox .op2-chip.op2-on');
+      calBtn.classList.toggle('op2-on', !isPreset);
+      calBtn.title = isPreset ? 'Выбрать другую дату' : humanDate(this.value);
+      drawQk();
+    });
+  }
   $('#op2-f-eq').addEventListener('click', function (e) {
     var seg = this;
     // stopPropagation - та же причина, что у «От кого» (см. коммент там): смена

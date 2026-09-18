@@ -367,28 +367,38 @@ module.exports = function (deps) {
       if (id) {
         const o = await loadOrder(conn, id); if (!o || !canEdit(req, o)) { conn.release(); return fail(res, 404, "заявка не найдена"); }
         if (f.service_date && !isDate(f.service_date)) { conn.release(); return fail(res, 400, "service_date: YYYY-MM-DD"); }
+        // 18.09, Влад (реальный случай - заявку правкой даты перекинули между днями,
+        // номер уехал с 11 на 8, потом на 19): «дату поменять невозможно. Если заявка
+        // создана - она уже в плане. Если подтверждена - отбой. Перенос - новая
+        // заявка. Номерация не может выскочить из одного дня в другой». day_no -
+        // сквозной номер ВНУТРИ дня (MAX+1 при вставке) - смена service_date у
+        // СУЩЕСТВУЮЩЕЙ заявки вырывает номер из старого дня и выдаёт новый в чужом,
+        // при откате обратно старый номер уже не восстановить (кто-то мог его занять).
+        // Клиент (order-plan-v2.js) прячет дату в правке заявки - здесь настоящая
+        // граница, а не просто UX.
+        if (f.service_date && f.service_date !== fmtDate(o.service_date)) {
+          conn.release();
+          return fail(res, 400, "Дату заявки менять нельзя - поставьте отбой и создайте новую заявку на нужный день");
+        }
         {
           const effType = f.equipment_type !== undefined ? f.equipment_type : o.equipment_type;
           const effPrice = f.price !== undefined ? f.price : Number(o.price);
           const priceErr = minPriceError_(effType, effPrice);
           if (priceErr) { conn.release(); return fail(res, 400, priceErr); }
         }
-        const keys = Object.keys(f).filter((k) => EDITABLE.indexOf(k) >= 0 || k === "service_date");
+        // service_date НЕ в EDITABLE и особый случай выше убран (18.09) - день заявки
+        // менять нельзя вообще, только время внутри уже назначенного дня.
+        const keys = Object.keys(f).filter((k) => EDITABLE.indexOf(k) >= 0);
         if (!keys.length) { conn.release(); return res.json({ ok: true, id }); }
         await conn.beginTransaction();
         await history(conn, id, "update", o, keys.join(","), req.userEmail);
-        let dayNoSql = "";
         const args = keys.map((k) => f[k]);
-        if (f.service_date && f.service_date !== fmtDate(o.service_date)) { // перенос на другой день - новый номер в том дне
-          const [[mx]] = await conn.query(`SELECT COALESCE(MAX(day_no),0)+1 AS n FROM plan_orders WHERE service_date = ? FOR UPDATE`, [f.service_date]);
-          dayNoSql = ", day_no = ?"; args.push(mx.n);
-        }
         args.push(req.userEmail, id);
-        await conn.query(`UPDATE plan_orders SET ${keys.map((k) => k + " = ?").join(", ")}${dayNoSql}, updated_by = ? WHERE id = ?`, args);
-        if (f.service_date && f.service_date !== fmtDate(o.service_date) || f.service_time !== undefined && f.service_time !== fmtTime(o.service_time)) {
-          // время/дата изменились - подвинуть отрезки своего парка на ленте (логисту - уведомление «подвинут рейс»)
+        await conn.query(`UPDATE plan_orders SET ${keys.map((k) => k + " = ?").join(", ")}, updated_by = ? WHERE id = ?`, args);
+        if (f.service_time !== undefined && f.service_time !== fmtTime(o.service_time)) {
+          // время изменилось - подвинуть отрезки своего парка на ленте (логисту - уведомление «подвинут рейс»)
           const [ex] = await conn.query(`SELECT seg_id FROM plan_order_executors WHERE order_id = ? AND removed_at IS NULL AND seg_id IS NOT NULL`, [id]);
-          const nd = f.service_date || fmtDate(o.service_date); const nt = f.service_time !== undefined ? f.service_time : fmtTime(o.service_time);
+          const nd = fmtDate(o.service_date); const nt = f.service_time;
           for (const e of ex) await conn.query(`UPDATE plan_segs SET start_hour = ?, updated_by = ? WHERE id = ?`, [hoursFromEpoch(nd, nt), req.userEmail, e.seg_id]);
         }
         await conn.commit();

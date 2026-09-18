@@ -343,15 +343,26 @@ module.exports = function (deps) {
     "customer_contact_phone", "equipment_type", "cargo", "cargo_weight_t", "cargo_dims", "gabarit", "rework_terms", "documents", "note",
     "cash", "load_address", "load_lat", "load_lon", "load_confirmed", "load_contact_name", "load_contact_phone", "unload_address",
     "unload_lat", "unload_lon", "unload_confirmed", "unload_contact_name", "unload_contact_phone", "price", "payment_status", "internal", "crm_deal_id"];
+  // 18.09, реальный сбой у Цегельникова: "Data too long for column 'cargo_dims'".
+  // Раньше ВСЕ поля этой группы обрезались к одной цифре (200), не глядя на настоящую
+  // ширину колонки в БД - cargo_dims (varchar(100)) и ещё 6 полей были ýже 200, просто
+  // cargo_dims первым словил достаточно длинный ввод (это свободный текст, остальные -
+  // обычно короткие значения из справочника, потому и не падали раньше, хотя тот же
+  // класс несовпадения был и у них). Ширина - СВЕРЕНА с `SHOW FULL COLUMNS FROM
+  // plan_orders` 18.09, держать в паре с миграцией схемы, если колонку когда-то расширят.
+  const FIELD_MAXLEN_ = {
+    customer_entity_id: 64, executor_entity_id: 64, equipment_type: 60,
+    customer_contact_name: 200, customer_contact_phone: 200,
+    cargo_dims: 100, gabarit: 20, rework_terms: 150, documents: 100, payment_status: 50,
+    load_contact_name: 200, load_contact_phone: 200, unload_contact_name: 200, unload_contact_phone: 200,
+  };
   function readFields(req) {
     const f = {};
     const b = req.body || {}; const q = req.query || {};
     const get = (k) => (b[k] !== undefined ? b[k] : q[k]);
     if (get("service_date") !== undefined) f.service_date = String(get("service_date"));
     if (get("service_time") !== undefined) f.service_time = normTime(get("service_time"));
-    ["customer", "customer_entity_id", "executor_entity_id", "customer_contact_name", "customer_contact_phone", "equipment_type",
-      "cargo_dims", "gabarit", "rework_terms", "documents", "payment_status", "load_contact_name", "load_contact_phone",
-      "unload_contact_name", "unload_contact_phone"].forEach((k) => { if (get(k) !== undefined) f[k] = str(get(k), 200); });
+    Object.keys(FIELD_MAXLEN_).forEach((k) => { if (get(k) !== undefined) f[k] = str(get(k), FIELD_MAXLEN_[k]); });
     if (get("customer") !== undefined) f.customer = str(get("customer"), 255);
     if (get("cargo") !== undefined) f.cargo = str(get("cargo"), 300);
     if (get("note") !== undefined) f.note = str(get("note"), 1000);
@@ -433,7 +444,17 @@ module.exports = function (deps) {
         const r = await roster(); const o2 = await loadOrder(pool, orderId);
         res.json({ ok: true, id: orderId, day_no: o2.day_no, order: serialize(o2, [], null, r.byEmail) });
       }
-    } catch (err) { try { await conn.rollback(); } catch (e) {} console.error("orders save:", err); fail(res, 500, String(err.message || err)); }
+    } catch (err) {
+      try { await conn.rollback(); } catch (e) {}
+      console.error("orders save:", err);
+      // 18.09: сырая ошибка MySQL ("Data too long for column 'cargo_dims'...") уходила
+      // прямо в интерфейс - непонятно пользователю и раскрывает имена колонок наружу.
+      // FIELD_MAXLEN_ выше должен закрыть это по всем известным полям, но если где-то
+      // всё равно проскочит (новое поле, схему сузили) - страховка даёт понятное
+      // сообщение вместо сырого текста драйвера; подробности - в console.error выше.
+      if (err && err.code === "ER_DATA_TOO_LONG") { fail(res, 400, "Слишком длинное значение в одном из полей - сократите текст"); return; }
+      fail(res, 500, String(err.message || err));
+    }
     finally { conn.release(); }
   });
 

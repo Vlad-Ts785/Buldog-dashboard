@@ -3074,7 +3074,11 @@ function renderForm() {
           gabs.map(function (g) { return '<button class="op2-chip' + (g === curGab ? ' op2-on' : '') + '" data-gab="' + esc(g) + '">' + esc(g) + '</button>'; }).join('') +
         '</div></div>' +
       '</div>' +
-      '<div class="op2-fld"><label>Габариты груза</label><input id="op2-f-dims" placeholder="Д × Ш × В" autocomplete="off" value="' + esc(o ? (o.cargo_dims || '') : '') + '"></div>' +
+      /* maxlength=100 - ровно ширина cargo_dims в БД (18.09: длинный вставленный текст
+         в это поле уронил сохранение ошибкой MySQL "Data too long", см. FIELD_MAXLEN_
+         в plan-orders.js - там же настоящая граница, здесь только не даём напечатать
+         больше, чем всё равно можно сохранить). */
+      '<div class="op2-fld"><label>Габариты груза</label><input id="op2-f-dims" placeholder="Д × Ш × В" maxlength="100" autocomplete="off" value="' + esc(o ? (o.cargo_dims || '') : '') + '"></div>' +
       '<div class="op2-fld"><label>Документы</label><select id="op2-f-docs"><option value="">—</option>' + optList(dict('documents'), o ? o.documents : '') + '</select></div>' +
       '<div class="op2-fld"><label>Условия переработки</label><select id="op2-f-rework"><option value="">—</option>' + optList(dict('rework'), o ? o.rework_terms : '') + '</select></div>' +
     '</div>' +

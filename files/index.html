@@ -3099,6 +3099,45 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
   50%{opacity:.35;box-shadow:0 0 0 2px var(--bg2),0 0 2px 0 rgba(226,75,74,.3);}
 }
 @media(prefers-reduced-motion:reduce){#page-logistics-plan .seg-nd{animation:none;opacity:.85;}}
+/* Флажок-заметка (18.09, превью-вариант 1, утверждён Владом) - противоположный
+   угол от .seg-nd (та же логика, что развела .seg-nd и .seg-drv по разным углам
+   раньше - не спорят за один угол на узкой плитке). Видим при наведении, пока
+   заметки нет; когда заметка поставлена - виден всегда (иначе как узнать, что
+   она есть, не наводя курсор на каждую плитку по очереди). */
+#page-logistics-plan .lp-flag-btn{
+  position:absolute;top:-4px;right:-4px;width:15px;height:15px;border-radius:50%;
+  background:var(--bg2);box-shadow:inset 0 0 0 1px var(--border-strong);
+  display:flex;align-items:center;justify-content:center;cursor:pointer;
+  color:var(--muted);opacity:0;transition:opacity .12s var(--ease-out-soft);z-index:3;
+}
+#page-logistics-plan .seg:hover .lp-flag-btn{opacity:1;}
+#page-logistics-plan .lp-flag-btn svg{width:9px;height:9px;pointer-events:none;}
+#page-logistics-plan .lp-flag-btn.on{
+  opacity:1;background:rgba(239,159,39,.22);color:var(--amber);
+  box-shadow:inset 0 0 0 1px rgba(239,159,39,.5);
+}
+@media(prefers-reduced-motion:reduce){#page-logistics-plan .lp-flag-btn{transition:none;}}
+/* Одно плавающее поле на всю доску (не по одному на плитку) - см. разметку в
+   files/index.html рядом с #lp-confirmBox. position:fixed - позиция считается
+   через getBoundingClientRect() значка в момент клика (lpOpenFlagPop_), поэтому
+   не зависит от скролла/overflow родителей плитки. */
+#page-logistics-plan .lp-flagpop{
+  position:fixed;z-index:970;display:none;align-items:center;gap:4px;
+  background:var(--bg3);border:1px solid var(--border-strong);border-radius:8px;
+  padding:5px;box-shadow:0 8px 20px rgba(0,0,0,.4);
+}
+#page-logistics-plan .lp-flagpop.open{display:flex;}
+#page-logistics-plan .lp-flagpop input{
+  width:200px;background:var(--bg);border:1px solid var(--border);border-radius:5px;
+  color:var(--text);font-family:inherit;font-size:12px;padding:5px 8px;outline:none;
+}
+#page-logistics-plan .lp-flagpop input:focus{border-color:var(--amber);}
+#page-logistics-plan .lp-flagpop-clear{
+  flex:none;width:22px;height:22px;border-radius:5px;border:none;background:transparent;
+  color:var(--muted);cursor:pointer;display:flex;align-items:center;justify-content:center;
+}
+#page-logistics-plan .lp-flagpop-clear:hover{background:var(--bg4);color:var(--text);}
+#page-logistics-plan .lp-flagpop-clear svg{width:12px;height:12px;}
 /* «Суточный режим» (Влад, 30.08: "давай визуализируем... три варианта", выбран
    вариант «значок», подпись 30.08 второй заход - "вместо 24 часов слово
    суточный") - тихий вариант, специально: если суточных рейсов на ленте
@@ -4600,6 +4639,17 @@ main:has(> #page-dynamics.active){min-width:0;}
     <button class="dbtn" id="lp-confirmCancel">Отмена</button>
     <button class="dbtn primary" id="lp-confirmOk">Ок</button>
   </div>
+</div>
+
+<!-- Флажок-заметка (18.09) - одно переиспользуемое плавающее поле на всю доску,
+     не по одному на плитку (тот же приём, что у .hud/.confirm-box - позиционируется
+     через JS по getBoundingClientRect() значка в момент клика, живёт ВНЕ скролла
+     .board, поэтому не подвержена overflow/клипу соседних контейнеров). -->
+<div class="lp-flagpop" id="lp-flagPop">
+  <input autocomplete="off" type="text" id="lp-flagInput" placeholder="Что не забыть?" maxlength="300">
+  <button class="lp-flagpop-clear" id="lp-flagClear" title="Убрать заметку" hidden>
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 5l10 10M15 5L5 15"/></svg>
+  </button>
 </div>
 
 </div>
@@ -31875,6 +31925,22 @@ function makeSeg(s){
     badgeHtml = '<span class="seg-overlap-badge" style="left:' + leftPct + '%;width:' + widthPct + '%" title="Ремонт идёт одновременно с отсутствием водителя (вакансия или заявка «Без водителя»)">' +
       '<span class="seg-overlap-txt">' + badgeTxt + '</span></span>';
   }
+  /* Флажок-заметка (18.09, Влад: "логист просит через ЛКМ ставить какой-то флажок
+     на протяжку, чтобы ему лично было понятно, что есть заметка-памятка" - вариант 1
+     из превью, утверждён). ЛИЧНАЯ - LP_MY_NOTES_ содержит только заметки ТЕКУЩЕГО
+     пользователя (см. lpFetchMyNotes_ ниже), чужие заметки на этой же плитке сюда
+     не попадают вообще - каждый видит только своё. Кликабельная зона - только сам
+     значок (см. bail out в pointerdown-обработчике драга выше и делегированный
+     click ниже), не вся плитка - клик по остальной части по-прежнему открывает
+     шторку, как раньше. */
+  var myNote = LP_MY_NOTES_[s.id] || "";
+  var flagHtml = '<span class="lp-flag-btn' + (myNote ? " on" : "") + '" data-id="' + s.id + '" title="' +
+    (myNote ? "Заметка: " + pageEsc_(myNote) : "Поставить заметку") + '">' +
+    '<svg viewBox="0 0 20 20" fill="' + (myNote ? "currentColor" : "none") + '" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+    (myNote
+      ? '<path d="M5 3v14a1 1 0 1 0 2 0v-4.2c1.3-.7 2.7-.9 4-.4 1.8.7 3.6.2 5-1V4c-1.4 1.2-3.2 1.7-5 1-1.3-.5-2.7-.3-4 .4V3a1 1 0 0 0-2 0Z"/>'
+      : '<path d="M5 17V4"/><path d="M5 4c0-.6 2-1.6 4.5-1.6S14 4 14 4v6.4c0 .6-2 1.6-4.5 1.6S5 10.4 5 10.4"/>') +
+    "</svg></span>";
   el.innerHTML = '<span class="seg-label">' + head +
     '<span class="seg-txt">' + segTxt + "</span>" +
     (s.needsData ? '<span class="seg-nd" title="Под данные - документы для пропуска ещё не собраны"></span>' : "") +
@@ -31884,7 +31950,7 @@ function makeSeg(s){
     (s.kind === "trip" && s.tripMode ? '<span class="seg-daymode" title="' + tripModeLabel_(s.tripMode) + ' - указано вручную при создании">' + tripModeLabel_(s.tripMode).toLowerCase() + '</span>' : "") +
     "</span>" +
     (active ? '<span class="seg-prog"><i></i></span>' : "") +
-    badgeHtml +
+    badgeHtml + flagHtml +
     '<span class="hov"></span><span class="ring"></span>' +
     '<span class="hnd l"></span><span class="hnd r"></span>';
   paint(el, s);
@@ -32497,6 +32563,11 @@ rowsEl.addEventListener("pointerdown", function(e){
   if (e.button !== 0) return;   /* только левая - см. разбор у первого pointerdown выше по файлу */
   var el = e.target.closest(".seg");
   if (!el) return;
+  /* Флажок-заметка (18.09) - своя маленькая кликабельная зона в углу плитки, НЕ
+     должна запускать драг/перенос (и тем более открывать шторку на pointerup ниже,
+     см. openDrawer(seg)) - тот же приём, что у .hide-btn/.rh-omni выше по файлу
+     (bail out ДО setPointerCapture, а не просто отличать "не было драга"). */
+  if (e.target.closest(".lp-flag-btn")) return;
   markActive_();   /* захватил плитку - живой признак присутствия, не ждать saveSegs() в конце жеста */
   var seg = STATE.segs.find(function(s){ return s.id === el.dataset.id; });
   if (!seg) return;
@@ -33969,6 +34040,80 @@ function openCtxMenu_(seg, x, y){
    scripts/DEPLOY_LOG.md); до неё ПКМ на .rowhead - единственное на доске место,
    где "эта конкретная машина" уже однозначно адресуема одним кликом. */
 var FLEET_PEOPLE_ = [], FLEET_ASSETS_ = [], FLEET_ASSIGN_ = [];
+/* Личные заметки-флажки (18.09) - см. разбор у флажка в makeSeg выше и у
+   plan_seg_notes на сервере. ЛИЧНЫЕ - сервер уже отдаёт только заметки текущего
+   пользователя (WHERE user_email=?), фронту не нужно самому ничего фильтровать. */
+var LP_MY_NOTES_ = {};
+function lpFetchMyNotes_(){
+  fetchFromYardApi_("/plan/seg_notes", {}).then(function(r){
+    if (!r.ok || !r.data || !r.data.notes) return;
+    LP_MY_NOTES_ = r.data.notes;
+    renderRows();   /* значки должны показать актуальное состояние сразу, не ждать следующего чужого триггера */
+  }).catch(function(){});
+}
+/* Сохранение/снятие одной заметки - пустая (после trim) строка снимает флажок
+   (см. серверную логику). Обновляем LP_MY_NOTES_ и перерисовываем ТОЛЬКО после
+   подтверждения сервера - оптимистично красить значок раньше не стали (заметка -
+   не срочное действие, лишняя секунда ожидания не мешает, а честнее не врать
+   про состояние, которое ещё не подтверждено). */
+function lpSaveNote_(segId, text, cb){
+  postToYardApi_("/plan/seg_note", { seg_id: segId, note: text }).then(function(r){
+    if (!r.ok || !r.data || !r.data.ok){ if (cb) cb(false); return; }
+    if (r.data.note) LP_MY_NOTES_[segId] = r.data.note; else delete LP_MY_NOTES_[segId];
+    renderRows();
+    if (cb) cb(true);
+  }).catch(function(){ if (cb) cb(false); });
+}
+/* Плавающее поле ввода заметки - открывается по клику на значок (delegated click
+   ниже, тот же приём, что у остальных кнопок этого модуля - см. разбор про IIFE
+   и window.LP у "Отменить" в панели Истории, 17.09: инлайновый onclick="..." в
+   разметке искал бы функцию СНАРУЖИ IIFE, где её нет). Позиция - через
+   getBoundingClientRect() значка в момент клика (та же идея, что у showBadge/hud),
+   не CSS-якорь - popover живёт вне скролла .board. */
+var lpFlagPop_ = document.getElementById("lp-flagPop");
+var lpFlagInput_ = document.getElementById("lp-flagInput");
+var lpFlagClear_ = document.getElementById("lp-flagClear");
+var lpFlagOpenSegId_ = null;
+function lpCloseFlagPop_(){
+  lpFlagPop_.classList.remove("open");
+  lpFlagOpenSegId_ = null;
+}
+function lpOpenFlagPop_(btn){
+  var segId = btn.dataset.id;
+  lpFlagOpenSegId_ = segId;
+  var r = btn.getBoundingClientRect();
+  var left = Math.min(Math.max(8, r.left - 90), window.innerWidth - 236);
+  lpFlagPop_.style.left = left + "px";
+  lpFlagPop_.style.top = (r.bottom + 6) + "px";
+  lpFlagInput_.value = LP_MY_NOTES_[segId] || "";
+  lpFlagClear_.hidden = !LP_MY_NOTES_[segId];
+  lpFlagPop_.classList.add("open");
+  lpFlagInput_.focus();
+}
+rowsEl.addEventListener("click", function(e){
+  var btn = e.target.closest(".lp-flag-btn");
+  if (!btn) return;
+  e.stopPropagation();
+  if (lpFlagPop_.classList.contains("open") && lpFlagOpenSegId_ === btn.dataset.id){ lpCloseFlagPop_(); return; }
+  lpOpenFlagPop_(btn);
+});
+lpFlagInput_.addEventListener("keydown", function(e){
+  if (e.key === "Enter"){
+    if (!lpFlagOpenSegId_) return;
+    lpSaveNote_(lpFlagOpenSegId_, lpFlagInput_.value, function(ok){ if (ok) lpCloseFlagPop_(); });
+  } else if (e.key === "Escape"){
+    lpCloseFlagPop_();
+  }
+});
+lpFlagClear_.addEventListener("click", function(){
+  if (!lpFlagOpenSegId_) return;
+  lpSaveNote_(lpFlagOpenSegId_, "", function(ok){ if (ok) lpCloseFlagPop_(); });
+});
+document.addEventListener("click", function(e){
+  if (!lpFlagPop_.classList.contains("open")) return;
+  if (e.target.closest(".lp-flagpop") || e.target.closest(".lp-flag-btn")) return;
+  lpCloseFlagPop_();
+});
 function fetchFleetData_(){
   /* Та же защита от лишних запросов, что у fetchPlanSegs_ (не спрашивать сервер,
      пока вкладка Планировки скрыта/не активна) - актуально теперь, когда эта
@@ -34778,6 +34923,7 @@ function initLP(){
   sendPresence_(); fetchPresence_();   /* то же самое для присутствия - не ждать первый тик */
   fetchFleetData_();         /* ростер водителей/прицепов + текущая сцепка - для ПКМ-меню на .rowhead */
   lpOmniFetch_();            /* координаты Omnicomm сразу при открытии, не ждать до 30 сек поллинга */
+  lpFetchMyNotes_();         /* личные заметки-флажки - см. разбор у LP_MY_NOTES_ выше */
 }
 window.LP = { init: initLP };
 

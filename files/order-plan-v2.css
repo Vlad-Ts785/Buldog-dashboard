@@ -76,12 +76,47 @@
 .op2-bar{position:sticky;top:0;z-index:30;background:var(--bg2);border:1px solid var(--border);border-radius:12px;display:flex;align-items:center;gap:8px;padding:0 10px;flex-wrap:wrap;}
 .op2-bar.op2-h48{min-height:48px;}
 .op2-bar.op2-h44{min-height:44px;}
-.op2-tabs{display:flex;gap:2px;flex-wrap:wrap;}
+/* два ряда тулбара логиста (19.09, «Картограф» + фильтры на своей строке) - каждый
+   .op2-bar сам по себе тоже sticky top:0, поэтому оба ряда независимо ЛЕЗЛИ БЫ друг на
+   друга при скролле (у sticky нет автоматического стекинга по соседям). Группа - один
+   sticky-контекст на оба ряда, дети внутри уже просто static и идут друг под другом. */
+.op2-bar-group{position:sticky;top:0;z-index:30;display:flex;flex-direction:column;gap:8px;}
+.op2-bar-group .op2-bar{position:static;}
 .op2-tab{background:transparent;border:0;border-radius:8px;padding:6px 10px;color:var(--muted);font-size:12.5px;font-weight:500;transition:background .13s var(--ease-out-soft),color .13s,transform .13s var(--ease-out-soft);}
 .op2-tab:hover{background:var(--bg3);color:var(--text);transform:translateX(1px);}
 .op2-tab.op2-on{background:var(--bg3);color:var(--text);}
-.op2-tab .op2-cnt{font-family:var(--font-mono);font-size:10px;color:var(--muted);margin-left:6px;}
-.op2-tab.op2-on .op2-cnt{color:var(--tint-amber);}
+
+/* ---------- лента дат «Картограф» (18.09, заменила Вчера/Сегодня/Завтра/Пн/Вт/Неделя +
+   всегда видимый календарь; канон - DESIGN_SYSTEM.md «Лента дат «Картограф»») ---------- */
+.op2-weeknav{width:30px;height:30px;border-radius:8px;background:var(--bg3);border:1px solid var(--border);color:var(--muted);display:flex;align-items:center;justify-content:center;flex:none;transition:border-color .13s,color .13s,background .13s;}
+.op2-weeknav:hover{border-color:var(--border-strong);color:var(--text);background:var(--bg4);}
+.op2-weeknav:active{transform:translateY(1px);}
+.op2-weeknav svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}
+.op2-weekrow{display:flex;align-items:center;gap:4px;flex:none;}
+/* плоский чип дня - высота вровень со стрелками/гормошкой (30px), день+число одной
+   надписью, счётчик мелкой цифрой следом (тот же приём, что у .op2-tab .op2-cnt раньше) */
+.op2-wchip{
+  display:flex;align-items:center;gap:4px;height:30px;padding:0 8px;flex:none;
+  border-radius:8px;background:var(--bg3);border:1px solid var(--border);
+  font-size:12px;font-weight:500;color:var(--text);white-space:nowrap;
+  transition:background .13s var(--ease-out-soft),border-color .13s var(--ease-out-soft),transform .13s var(--ease-out-soft);
+}
+.op2-wchip:hover{border-color:var(--border-strong);background:var(--bg4);transform:translateY(-1px);}
+.op2-wchip:active{transform:translateY(0);}
+.op2-wchip-cnt{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:10.5px;color:var(--muted);}
+.op2-wchip-cnt-empty{color:var(--border-strong);}
+/* якорь «сегодня» - акцентная обводка и жирный текст, даже если не выбран */
+.op2-wchip-today{border-color:var(--green);font-weight:700;}
+.op2-wchip-today .op2-wchip-cnt{color:var(--tint-green);}
+/* выбранный день - заливка, как у существующего .op2-chip.op2-on */
+.op2-wchip.op2-on{background:rgba(29,158,117,.20);border-color:var(--green);box-shadow:inset 0 0 0 1px var(--green);font-weight:600;}
+.op2-wchip.op2-on .op2-wchip-cnt{color:var(--tint-amber);}
+/* выходные - читаются красным, как на любом календаре (Влад 18.09); --tint-red, НЕ базовый
+   --red - тот занят под «требует внимания» (отбой/долг/штрафы, раздел 1 ГОСТа), обычная
+   суббота не должна выглядеть как тревога рядом с реальными тревожными карточками дашборда.
+   Снимается, если день выбран (зелёная заливка важнее) или это сегодня (якорь важнее). */
+.op2-wchip-weekend:not(.op2-on):not(.op2-wchip-today) .op2-wchip-label{color:var(--tint-red);}
+.op2-todaypill{flex:none;}
 .op2-chip{background:transparent;border:1px solid var(--border);border-radius:999px;padding:4px 10px;font-size:11.5px;color:var(--muted);transition:border-color .13s,color .13s,background .13s;}
 .op2-chip:hover{border-color:var(--border-strong);color:var(--text);}
 /* 11.09, Влад: «очень непонятно, нажата она или нет» - выбранный чип заливается зелёным,
@@ -222,6 +257,21 @@ table.op2-tbl{width:100%;table-layout:fixed;border-collapse:separate;border-spac
 .op2-sub{display:block;line-height:16px;font-size:12px;color:var(--tint-amber);}
 .op2-sub .op2-plate{font-size:12px;color:var(--tint-amber);}
 .op2-sub .op2-arr{color:var(--muted);}
+/* 18.09, «Перенести» - подпись под госномером/статусом на обеих строках (клон .op2-sub,
+   свой цвет: у старой заявки - "ушла" (красноватый оттенок ГОСТа), у новой - "пришла"
+   (зелёный) - тот же принцип цвета, что op2-tg-hire/op2-plate.op2-ok уже используют для
+   "откуда/куда" в других местах этого файла, не новый акцент). Кликабельная - переход к
+   связанной заявке (jumpToOrder_). */
+.op2-sub.op2-transfer{cursor:pointer;background:none;border:0;padding:0;font:inherit;text-align:left;display:block;}
+.op2-sub.op2-transfer:hover{text-decoration:underline;}
+.op2-sub.op2-transfer-out{color:var(--tint-red);}
+.op2-sub.op2-transfer-in{color:var(--tint-green);}
+/* «новое» - см. isNewWeek_() в JS, статичный бейдж (НЕ анимация - будет висеть на многих
+   строках одновременно всю неделю, мигание такой плотности било бы по глазам сильнее, чем
+   помогало) рядом с номером заявки, пока не пройдёт 7 дней с создания. Та же приглушённая
+   заливка своим hue, что уже даёт .op2-tag.op2-tg-hire/op2-tg-own - не новый визуальный
+   акцент, просто ещё один цвет тега в уже утверждённой ГОСТом семье. */
+.op2-tag.op2-tg-new{color:var(--tint-green);background:rgba(29,158,117,.16);margin-left:5px;vertical-align:2px;}
 /* плитка машины: клик - пикер, зажать - перемещение (ГОСТ, раздел 6) */
 .op2-veh{display:block;cursor:pointer;border-radius:8px;padding:2px 6px;margin:-2px -6px;transition:background .13s;touch-action:none;}
 .op2-veh:hover{background:var(--bg4);}
@@ -274,6 +324,12 @@ table.op2-tbl{width:100%;table-layout:fixed;border-collapse:separate;border-spac
 .op2-stpop button.op2-cur{opacity:.55;cursor:default;}
 .op2-stpop button .op2-dim{margin-left:auto;}
 /* «под данные» - мигающая точка состояния (ГОСТ, запрет №9, расширение от 30.08) */
+/* 18.09, «Перенести» - поповер выбора даты, ТОТ ЖЕ .op2-stpop каркас и та же вёрстка
+   кнопок в столбик, что у смены статуса/логиста/менеджера (openStPop/openMgrPop/
+   openLogPop) - никаких своих чипов/рядов, только заголовок сверху. Первый заход
+   изобрёл отдельный op2-dp-row с чипами - Влад сверил с одобренным превью и справедливо
+   заметил расхождение, править обратно на то же самое, чем поповер выглядел бы «как все». */
+.op2-dp-title{font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--muted);text-transform:uppercase;padding:6px 10px 4px;white-space:nowrap;}
 .op2-nd{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber);margin-right:6px;vertical-align:middle;animation:op2NdBlink var(--op2-blink-tact) ease-in-out infinite;}
 @keyframes op2NdBlink{0%,100%{opacity:1;}50%{opacity:.25;}}
 .op2-dot-amber{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber);margin-right:6px;vertical-align:middle;}
@@ -339,6 +395,11 @@ body.op2-moving .op2-veh:not(.op2-lift){cursor:grabbing;}
 .op2-fld .op2-hint{font-size:11px;color:var(--muted);}
 .op2-fld .op2-hint.op2-warn{color:var(--tint-amber);}
 .op2-fld .op2-hint.op2-okc{color:var(--muted);font-family:var(--font-mono);font-size:10.5px;}
+/* 18.09: дата существующей заявки - заблокирована (см. renderForm, editing), тот же
+   box-shape что и .op2-fld input, но explicit "неактивно" - штриховая рамка, курсор
+   not-allowed, приглушённый текст. */
+.op2-locked{background:var(--bg2);border:1px dashed var(--border);border-radius:8px;padding:8px 10px;min-height:34px;display:flex;align-items:center;gap:6px;color:var(--muted);cursor:not-allowed;box-sizing:border-box;}
+.op2-lock-ic{font-size:11px;opacity:.7;}
 .op2-fld .op2-cb{min-height:0;width:auto;margin-right:6px;}
 .op2-g2{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;}
 .op2-margin{display:flex;justify-content:space-between;align-items:baseline;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;}
@@ -390,6 +451,11 @@ body.op2-moving .op2-veh:not(.op2-lift){cursor:grabbing;}
 @media (max-width:820px){.op2-grid2{grid-template-columns:1fr;}.op2-g2{grid-template-columns:1fr;}.op2-cols{grid-template-columns:1fr;}}
 .op2-seg{display:flex;gap:4px;align-items:center;flex-wrap:wrap;}
 .op2-seg .op2-chip{padding:5px 11px;}
+/* «Менеджеры» в тулбаре логиста (19.09) переиспользует .op2-seg (та же гармошка, что
+   «От кого»/«Тип техники» выше), но в тулбаре чипы должны быть той же высоты, что
+   соседние .op2-chip - паддинг формы (5px 11px) чуть крупнее под drawer. */
+.op2-bar .op2-seg .op2-chip{padding:4px 10px;}
+.op2-mgr-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:1px;}
 .op2-timerow{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
 .op2-timerow input{width:92px;font-family:var(--font-mono);font-size:13px;text-align:center;}
 .op2-stp{background:var(--bg2);border:1px solid var(--border);border-radius:8px;height:34px;width:34px;color:var(--text);flex:none;}

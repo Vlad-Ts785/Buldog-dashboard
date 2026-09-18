@@ -417,7 +417,7 @@ function toast(html, undoFn, ms) {
   return t;
 }
 function hideToast() { var t = toastEl(); if (t) t.classList.remove('op2-show'); }
-function soon(what) { S.attention(); toast('<span class="op2-warn">' + esc(what) + '</span> · формируется в следующей версии'); }
+function soon(what) { S.attention(); logUiEvent_('blocked_click', 'soon', what); toast('<span class="op2-warn">' + esc(what) + '</span> · формируется в следующей версии'); }
 /* документы (СТС, паспорт) - хранилище справочников подключается следующим этапом */
 /* Влад 13.09 (за полночь): «СТС тягача и прицепа уже есть в базе - почему бы не
    реализовать» - действительно есть (sprav_asset_documents, doc_type='sts'), тот же
@@ -428,7 +428,7 @@ function soon(what) { S.attention(); toast('<span class="op2-warn">' + esc(what)
    /api/sprav/asset_documents и .../asset_document_file уже открыты им всем на чтение (см.
    комментарий у самого роута на сервере, 31.08: "Планировка открыта логисту/менеджеру"). */
 function downloadSts_(assetId, label) {
-  if (!assetId) { toast('<span class="op2-warn">' + esc(label) + '</span> · ' + (label.indexOf('прицеп') >= 0 ? 'прицеп не сцеплен' : 'госномер неизвестен')); return; }
+  if (!assetId) { logUiEvent_('blocked_click', 'sts', label + ': ' + (label.indexOf('прицеп') >= 0 ? 'прицеп не сцеплен' : 'госномер неизвестен')); toast('<span class="op2-warn">' + esc(label) + '</span> · ' + (label.indexOf('прицеп') >= 0 ? 'прицеп не сцеплен' : 'госномер неизвестен')); return; }
   apiGet('/sprav/asset_documents', { asset_id: assetId }).then(function (r) {
     if (!r || !r.ok) { toast('Не удалось получить документы'); return; }
     var docs = (r.data && r.data.documents) || [];
@@ -436,7 +436,7 @@ function downloadSts_(assetId, label) {
     if (!sts) { toast('СТС не загружен для ' + esc(assetId) + ' · загрузить можно в Справочниках'); return; }
     var href = apiBase() + '/sprav/asset_document_file?session_token=' + encodeURIComponent(apiToken()) + '&id=' + encodeURIComponent(sts.id);
     window.open(href, '_blank');
-  }).catch(function () { toast('Ошибка сети - не удалось получить СТС'); });
+  }).catch(function () { logUiEvent_('save_error', 'sts_fetch', 'сеть'); toast('Ошибка сети - не удалось получить СТС'); });
 }
 /* Влад 13.09 (утро): «сильно обновил справочники - в плане документов, в плане паспортных
    данных» - сканы паспорта/прав того же образца, что СТС (sprav_people_documents, тот же
@@ -445,7 +445,7 @@ function downloadSts_(assetId, label) {
    createOwnExecutor кладёт его при постановке машины). «Не у всех водителей пока есть» -
    не хардкодим, кого показывать: нет скана - понятное сообщение, а не тихая заглушка. */
 function downloadPersonDoc_(personId, docType, label) {
-  if (!personId) { toast('<span class="op2-warn">' + esc(label) + '</span> · водитель не сопоставлен со справочником людей'); return; }
+  if (!personId) { logUiEvent_('blocked_click', 'person_doc', label + ': не сопоставлен со справочником'); toast('<span class="op2-warn">' + esc(label) + '</span> · водитель не сопоставлен со справочником людей'); return; }
   apiGet('/sprav/person_documents', { person_id: personId }).then(function (r) {
     if (!r || !r.ok) { toast('Не удалось получить документы'); return; }
     var docs = (r.data && r.data.documents) || [];
@@ -453,14 +453,14 @@ function downloadPersonDoc_(personId, docType, label) {
     if (!doc) { toast(esc(label) + ' не загружен(а) для этого водителя · загрузить можно в Справочниках'); return; }
     var href = apiBase() + '/sprav/person_document_file?session_token=' + encodeURIComponent(apiToken()) + '&id=' + encodeURIComponent(doc.id);
     window.open(href, '_blank');
-  }).catch(function () { toast('Ошибка сети - не удалось получить документ'); });
+  }).catch(function () { logUiEvent_('save_error', 'person_doc_fetch', 'сеть'); toast('Ошибка сети - не удалось получить документ'); });
 }
 /* «Паспортные данные»/«Права» текстом - копирует в буфер, тот же визуальный приём, что у
    [data-copy] (кнопка на 1.6с показывает «Скопировано ✓»), только с сетевым запросом перед
    копированием - узкий /sprav/person_pass_text (НЕ /sprav/state - там ПДн только у admin,
    см. комментарий на сервере), тот же принцип открытости, что уже у сканов. */
 function copyPersonText_(personId, kind, btn) {
-  if (!personId) { toast('<span class="op2-warn">Данные водителя</span> · водитель не сопоставлен со справочником людей'); return; }
+  if (!personId) { logUiEvent_('blocked_click', 'person_pass_text', 'не сопоставлен со справочником'); toast('<span class="op2-warn">Данные водителя</span> · водитель не сопоставлен со справочником людей'); return; }
   var label = btn.textContent;
   apiGet('/sprav/person_pass_text', { person_id: personId }).then(function (r) {
     if (!r || !r.ok || !r.data || !r.data.person) { toast('Нет данных по этому водителю в Справочниках'); return; }
@@ -470,7 +470,7 @@ function copyPersonText_(personId, kind, btn) {
     copyText(text);
     btn.textContent = 'Скопировано ✓';
     setTimeout(function () { btn.textContent = label; }, 1600);
-  }).catch(function () { toast('Ошибка сети - не удалось получить данные'); });
+  }).catch(function () { logUiEvent_('save_error', 'person_pass_text_fetch', 'сеть'); toast('Ошибка сети - не удалось получить данные'); });
 }
 function formatPassportText_(p) {
   if (!p.passport_series && !p.passport_number) return null;
@@ -612,19 +612,19 @@ function contractEqGenitive_(eq) {
   return /[а-яё]$/i.test(low) && !/[аеёиоуыэюя]$/i.test(low) ? low + 'а' : low;
 }
 function genContractPdf(o) {
-  if (typeof window.jspdf === 'undefined' || !window.jspdf.jsPDF) { toast('Библиотека PDF не загрузилась - обновите страницу'); return; }
+  if (typeof window.jspdf === 'undefined' || !window.jspdf.jsPDF) { logUiEvent_('save_error', 'contract_pdf', 'библиотека не загрузилась'); toast('Библиотека PDF не загрузилась - обновите страницу'); return; }
   var ent = null;
   (META && META.own_entities || []).forEach(function (e2) { if (String(e2.id) === String(o.executor_entity_id)) ent = e2; });
-  if (!ent) { toast('<span class="op2-warn">Договор-заявка</span> · у заявки не указан исполнитель («Исполнитель (от кого)»)'); return; }
-  if (!ent.has_bank || !ent.has_stamp) { toast('<span class="op2-warn">Договор-заявка</span> · у «' + esc(ent.short || ent.name) + '» не хватает реквизитов/печати в Справочниках - дозаполни там'); return; }
+  if (!ent) { logUiEvent_('blocked_click', 'contract', 'нет исполнителя'); toast('<span class="op2-warn">Договор-заявка</span> · у заявки не указан исполнитель («Исполнитель (от кого)»)'); return; }
+  if (!ent.has_bank || !ent.has_stamp) { logUiEvent_('blocked_click', 'contract', 'нет реквизитов/печати: ' + (ent.short || ent.name)); toast('<span class="op2-warn">Договор-заявка</span> · у «' + esc(ent.short || ent.name) + '» не хватает реквизитов/печати в Справочниках - дозаполни там'); return; }
   toast('Формируем договор-заявку…');
   Promise.all([
     fetchEntityStampDataUrl_(ent.id),
     fetchPersonSignatureDataUrl_(ent.signer_person_id)
   ]).then(function (imgs) {
     try { drawContractPdf_(o, ent, imgs[0], imgs[1]); }
-    catch (e) { toast('Не удалось собрать PDF: ' + (e && e.message || e)); }
-  }).catch(function () { toast('Ошибка сети - не удалось получить печать/подпись'); });
+    catch (e) { logUiEvent_('save_error', 'contract_pdf', String((e && e.message) || e).slice(0, 100)); toast('Не удалось собрать PDF: ' + (e && e.message || e)); }
+  }).catch(function () { logUiEvent_('save_error', 'contract_stamp_fetch', 'сеть'); toast('Ошибка сети - не удалось получить печать/подпись'); });
 }
 function drawContractPdf_(o, ent, stampUrl, signUrl) {
   var doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4' });
@@ -642,7 +642,7 @@ function drawContractPdf_(o, ent, stampUrl, signUrl) {
      несуществующее исключение - иначе эта же поломка повторится тихо в будущем. */
   var hasPtSans = !!(doc.getFontList() || {}).PTSans;
   var FONT = hasPtSans ? 'PTSans' : 'helvetica';
-  if (!hasPtSans) toast('<span class="op2-warn">Договор-заявка</span> · не удалось подключить кириллический шрифт, текст может исказиться - обновите страницу и повторите');
+  if (!hasPtSans) { logUiEvent_('save_error', 'contract_pdf', 'шрифт'); toast('<span class="op2-warn">Договор-заявка</span> · не удалось подключить кириллический шрифт, текст может исказиться - обновите страницу и повторите'); }
   var M = 15, W = 210, CW = W - M * 2, y = M;
   function setF(bold, size) { doc.setFont(FONT, bold ? 'bold' : 'normal'); doc.setFontSize(size); }
   function text(s, x, yy, opt) { doc.text(String(s == null ? '' : s), x, yy, opt || {}); }
@@ -1158,6 +1158,7 @@ function wire() {
        (redactForeignOrder_) и не пустил бы на /orders/one - это ЕЩЁ и явный, понятный
        отказ в интерфейсе, а не молчаливо пустая шторка. */
     if (o.can_view_details === false) {
+      logUiEvent_('blocked_click', 'order_details_denied', '');
       toast('<span class="op2-warn">Подробности этой заявки видит только её менеджер</span>');
       return;
     }
@@ -2279,7 +2280,7 @@ function logRowMenu(o) {
 }
 function showByVehicle(o) {
   var v = oOwn(o)[0];
-  if (!v || !v.vehicle_gos) { toast('<span class="op2-warn">На заявке нет своей машины</span>'); return; }
+  if (!v || !v.vehicle_gos) { logUiEvent_('blocked_click', 'by_vehicle', 'нет своей машины'); toast('<span class="op2-warn">На заявке нет своей машины</span>'); return; }
   apiGet('/orders/by_vehicle', { gos: v.vehicle_gos }).then(function (r) {
     if (!ok_(r)) return;
     var list = (r.data.orders || r.data.list || []);
@@ -2414,7 +2415,7 @@ function onPopOk() {
   var o = popOrder; if (!o) return;
   /* Текст тоста = текст самой кнопки - у неё уже осмысленная причина блокировки (своя машина
      не выбрана / у наёмника не хватает компании или ставки закупки, см. updateHiredBtn_). */
-  if (this.classList.contains('op2-blocked')) { toast('<span class="op2-warn">' + esc(this.textContent) + '</span>'); return; }
+  if (this.classList.contains('op2-blocked')) { logUiEvent_('blocked_click', 'assign_vehicle', this.textContent); toast('<span class="op2-warn">' + esc(this.textContent) + '</span>'); return; }
   if ($('#op2-pop').classList.contains('op2-hired')) { saveHired(o); return; }
   var gos = this.dataset.gos;
   var declared = this.dataset.declared === '1';
@@ -2560,11 +2561,11 @@ function openHiredStep(o) {
 }
 function saveHired(o) {
   var co = $('#op2-h-co').value.trim();
-  if (!co) { toast('<span class="op2-warn">Впиши компанию-перевозчика</span> · остальное можно потом'); return; }
+  if (!co) { logUiEvent_('blocked_click', 'hired_save', 'нет компании'); toast('<span class="op2-warn">Впиши компанию-перевозчика</span> · остальное можно потом'); return; }
   /* Влад 12.09: «отдать наёмнику невозможно без указания цены» - кнопка уже блокируется
      через updateHiredBtn_ (onPopOk не пропустит клик дальше), эта проверка - подстраховка
      на случай прямого вызова saveHired мимо кнопки. */
-  if (!num($('#op2-h-rate').value)) { toast('<span class="op2-warn">Укажи ставку закупки</span> · без неё маржа не считается'); return; }
+  if (!num($('#op2-h-rate').value)) { logUiEvent_('blocked_click', 'hired_save', 'нет ставки закупки'); toast('<span class="op2-warn">Укажи ставку закупки</span> · без неё маржа не считается'); return; }
   var cs = $('#op2-h-cs .op2-chip.op2-on');
   apiPost('/orders/hired_set', {
     order_id: o.id,
@@ -4202,7 +4203,7 @@ function openRepeat(o) {
 }
 function runRepeat(btn, o) {
   var rows = openRepeat._rows ? openRepeat._rows() : [];
-  if (btn.classList.contains('op2-blocked') || !rows.length) { toast('<span class="op2-warn">Кликни по дню - добавь хотя бы одну заявку</span>'); return; }
+  if (btn.classList.contains('op2-blocked') || !rows.length) { logUiEvent_('blocked_click', 'repeat_days', 'дни не выбраны'); toast('<span class="op2-warn">Кликни по дню - добавь хотя бы одну заявку</span>'); return; }
   var base = {
     needs_data: o.needs_data ? 1 : 0, customer: o.customer,
     customer_entity_id: o.customer_entity_id || '', executor_entity_id: o.executor_entity_id || '',

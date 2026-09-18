@@ -3347,7 +3347,7 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
 #page-logistics-plan .ctxmenu-item .fc-sub{color:var(--muted);font-size:10.5px;}#page-logistics-plan .cr-types{display:flex;gap:6px;flex-wrap:wrap;margin:16px 0;}#page-logistics-plan .cr-field{margin-bottom:12px;}#page-logistics-plan .cr-field .grp-label{display:block;margin-bottom:6px;}#page-logistics-plan .cr-opts{display:flex;gap:6px;flex-wrap:wrap;}#page-logistics-plan .cr-input{
   width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);
   font-family:inherit;font-size:12px;padding:7px 10px;
-}#page-logistics-plan .cr-input:focus-visible{outline:2px solid var(--blue);outline-offset:1px;}#page-logistics-plan .cr-actions{display:flex;gap:8px;margin-top:18px;}
+}#page-logistics-plan .cr-input:focus-visible{outline:2px solid var(--blue);outline-offset:1px;}#page-logistics-plan .cr-input.lp-input-invalid{border-color:var(--red);transition:border-color .15s;}#page-logistics-plan .cr-actions{display:flex;gap:8px;margin-top:18px;}
 /* Галочка «под данные» (Влад, 30.08) - отдельный акцентный чип, не в общем ряду
    .cr-opts: это не выбор ИЗ вариантов, а отдельный переключатель "да/нет" на
    всю запись, визуально явно выделен янтарным (тот же токен, что «свечение
@@ -33346,13 +33346,21 @@ function lpAddrLinkHtml_(addr){
 function lpWireCustomerInput_(inputId, boxId, setVal){
   var input = document.getElementById(inputId), box = document.getElementById(boxId);
   if (!input || !box) return;
+  var logT; /* лог "пустой поиск" - по паузе в наборе, не по каждой клавише (иначе один длинный
+    ввод даёт десятки строк в ui_events и искажает анализ трения, см. разбор 18.09) */
   function refresh(){
     var val = input.value.trim().toLowerCase();
-    if (!val){ box.style.display = "none"; box.innerHTML = ""; return; }
+    if (!val){ box.style.display = "none"; box.innerHTML = ""; clearTimeout(logT); return; }
     var matches = orderPlanCustomerList_().filter(function(n){
       return n.toLowerCase().indexOf(val) === 0;
     }).slice(0, 15);
-    if (!matches.length){ box.style.display = "none"; box.innerHTML = ""; if (val.length >= 3) logUiEvent_("logistics-plan", "empty_search", "customer", val); return; }
+    if (!matches.length){
+      box.style.display = "none"; box.innerHTML = "";
+      clearTimeout(logT);
+      if (val.length >= 3) logT = setTimeout(function(){ logUiEvent_("logistics-plan", "empty_search", "customer", val); }, 600);
+      return;
+    }
+    clearTimeout(logT);
     box.innerHTML = matches.map(function(n){
       return '<div style="padding:7px 10px;cursor:pointer;font-size:13px;color:var(--text)">' + n.replace(/</g, "&lt;") + "</div>";
     }).join("");
@@ -33366,6 +33374,17 @@ function lpWireCustomerInput_(inputId, boxId, setVal){
   input.oninput = function(){ setVal(input.value); refresh(); };
   input.onfocus = refresh;
   input.onblur = function(){ setTimeout(function(){ box.style.display = "none"; }, 150); };
+}
+
+/* Отказ сохранить (причина ремонта/ТО, менеджер/логист и т.п.) - фокус+кратковременная
+   красная рамка ровно на поле, которого не хватает, а не только тост наверху экрана.
+   Найдено 18.09 разбором ui_events - двое логистов в разные дни жали "Создать" по 5-8
+   раз подряд после одного и того же отказа, не понимая, куда действовать. */
+function lpFlashInvalid_(el){
+  if (!el) return;
+  el.focus();
+  el.classList.add("lp-input-invalid");
+  setTimeout(function(){ el.classList.remove("lp-input-invalid"); }, 1200);
 }
 
 /* ---------- шторка ---------- */
@@ -33489,7 +33508,7 @@ function openCreateDrawer(vi, s, l){
       // Причина ремонта/ТО - обязательна (11.09, Влад: см. разбор у isRepairLike выше) -
       // тот же принцип, что у Менеджера/Логиста рейса: без явного значения не сохраняем.
       if (isRepairLike && !repairReasonVal.trim()){
-        S.reject(); logUiEvent_("logistics-plan", "blocked_click", "lp_create", kind === "repair" ? "Не указана причина ремонта" : "Не указана причина ТО"); toast(kind === "repair" ? "Укажите причину ремонта" : "Укажите причину ТО", null); return;
+        S.reject(); logUiEvent_("logistics-plan", "blocked_click", "lp_create", kind === "repair" ? "Не указана причина ремонта" : "Не указана причина ТО"); toast(kind === "repair" ? "Укажите причину ремонта" : "Укажите причину ТО", null); lpFlashInvalid_(document.getElementById("lp-crRepairReason")); return;
       }
       if (kind === "driveroff") pushDriver(v, s, l, DRIVEROFF_REASONS_[reasonIdx][0]);
       /* from/to НЕ обязательны - логист может ещё не знать точку на момент постановки
@@ -33749,7 +33768,7 @@ function openDrawer(seg){
       // (11.09, Влад: см. разбор у isRepairLike выше) - иначе "Сохранить" молча стёр бы
       // уже введённую причину пустым значением, если кто-то её случайно очистил.
       if (isRepairLike && !repairReasonVal.trim()){
-        S.reject(); logUiEvent_("logistics-plan", "blocked_click", "lp_edit", seg.kind === "repair" ? "Не указана причина ремонта" : "Не указана причина ТО"); toast(seg.kind === "repair" ? "Укажите причину ремонта" : "Укажите причину ТО", null); return;
+        S.reject(); logUiEvent_("logistics-plan", "blocked_click", "lp_edit", seg.kind === "repair" ? "Не указана причина ремонта" : "Не указана причина ТО"); toast(seg.kind === "repair" ? "Укажите причину ремонта" : "Укажите причину ТО", null); lpFlashInvalid_(document.getElementById("lp-drRepairReason")); return;
       }
       // Причина "без водителя" - обязательна тем же приёмом (18.09, см. разбор у
       // reasonIdx выше) - без явного выбора "Сохранить" молча записал бы "Выходной"

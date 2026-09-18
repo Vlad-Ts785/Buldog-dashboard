@@ -140,6 +140,14 @@ function dm(ds) { var d = dObj(ds); return pad2(d.getDate()) + '.' + pad2(d.getM
 function dmy(ds) { var d = dObj(ds); return pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1) + '.' + d.getFullYear(); }
 function humanDate(ds) { var d = dObj(ds); return d.getDate() + ' ' + MONTH_GEN[d.getMonth()]; }
 function weekdayFull(ds) { return WD_FULL[dObj(ds).getDay()]; }
+/* понедельник недели, которой принадлежит ds - лента дат «Картограф» листает недели этим
+   шагом; getDay() 0=Вс..6=Сб, отсюда (day+6)%7 - смещение до понедельника той же недели */
+function mondayOf_(ds) { var day = dObj(ds).getDay(); return addDays(ds, -((day + 6) % 7)); }
+function formatWeekRange_(d1, d2) {
+  var a = dObj(d1), b = dObj(d2);
+  if (a.getMonth() === b.getMonth()) return a.getDate() + '-' + b.getDate() + ' ' + MONTH_GEN[a.getMonth()];
+  return a.getDate() + ' ' + MONTH_GEN[a.getMonth()] + ' - ' + b.getDate() + ' ' + MONTH_GEN[b.getMonth()];
+}
 function plural(n, one, few, many) { var m10 = n % 10, m100 = n % 100; if (m10 === 1 && m100 !== 11) return one; if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few; return many; }
 /* «Трал до 20 т» -> «трал»: сегмент техники для фильтров логиста. Ничего не
    перечисляем - берём первое слово из того, что реально пришло с сервера. */
@@ -284,7 +292,11 @@ var ME = null;              /* {email,name,role,code} */
 var META = null;            /* {dictionary, own_entities} */
 var VIEW = 'log';           /* 'mgr' | 'log' - какой экран показываем */
 var DATE = todayStr();
-var TO_DATE = '';           /* непусто - режим «Неделя» */
+var TO_DATE = '';           /* непусто - режим «Неделя» (кнопка убрана 18.09, механизм жив,
+                                просто больше никогда не включается из интерфейса) */
+var TABS_WK = mondayOf_(DATE); /* понедельник недели, которую сейчас показывает лента дат
+                                   («Картограф», 18.09) - НЕЗАВИСИМО от DATE: перелистывание
+                                   недель не меняет выбранный день, пока не кликнули по чипу */
 var ORD = [];
 var ROSTER = [];
 var COUNTS = {};
@@ -809,8 +821,15 @@ function buildDom() {
       /* ── экран менеджера ── */
       '<section class="op2-screen" id="op2-scr-mgr">' +
         '<div class="op2-bar op2-h48">' +
-          '<div class="op2-tabs" id="op2-mgr-tabs"></div>' +
-          '<input type="date" class="op2-dt" id="op2-mgr-date" autocomplete="off" aria-label="Другой день">' +
+          /* «Картограф» (18.09) - неделя целиком одной строкой вместо Вчера/Сегодня/
+             Завтра/Пн/Вт/Неделя+всегда видимый календарь; см. DESIGN_SYSTEM.md
+             раздел «Лента дат «Картограф»» (там же - вся история решений). */
+          '<button class="op2-weeknav" id="op2-wk-prev" type="button" title="Предыдущая неделя" aria-label="Предыдущая неделя"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>' +
+          '<div class="op2-weekrow" id="op2-mgr-tabs"></div>' +
+          '<button class="op2-weeknav" id="op2-wk-next" type="button" title="Следующая неделя" aria-label="Следующая неделя"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>' +
+          '<button class="op2-chip op2-todaypill" id="op2-wk-today" type="button" hidden>Сегодня</button>' +
+          '<span class="op2-datewrap"><button type="button" class="op2-calbtn" id="op2-mgr-calbtn" aria-label="Выбрать другую дату" title="Выбрать другую дату"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></button>' +
+            '<input type="date" class="op2-dt op2-dt-hidden" id="op2-mgr-date" autocomplete="off" tabindex="-1" aria-label="Другой день"></span>' +
           '<div class="op2-sep"></div>' +
           '<input class="op2-search" id="op2-mgr-search" placeholder="Заказчик за 3 месяца, напр. ДиМ" autocomplete="off">' +
           '<button class="op2-chip" id="op2-mgr-all" title="Заявки всех менеджеров или только свои">Все менеджеры</button>' +
@@ -953,8 +972,10 @@ function buildDom() {
 /* ГОСТ: ОДНО делегирование со списком-селектором, не обработчик на каждый элемент.
    Элементы с собственным звуком результата (RESULT_SEL) из nav исключены, чтобы
    не было двойного щелчка. */
-var NAV_SEL = '.op2-tab,.op2-chip,.op2-ghost,.op2-dbtn,.op2-slot,.op2-veh,.op2-st-chip,.op2-stc,.op2-logpick,#op2-lgpop button,.op2-mgrpick,#op2-mgrpop button,.op2-sugg .op2-it,.op2-free .op2-day,.op2-stpop button,.op2-pop .op2-vi,.op2-copybtn,.op2-take,.op2-dt,.op2-mgr-tbl tbody tr,.op2-log-body tr,.op2-switch button,[data-nav-sound]';
-var RESULT_SEL = '#op2-f-save,#op2-rp-go,#op2-pop-ok,.op2-dok,.op2-unset-ot,.op2-slot.op2-ot,.op2-slot.op2-new,#op2-lgpop button,#op2-mgrpop button,#op2-drv-copy,#op2-drv-max,#op2-d-drv-ok,.op2-dl,.op2-copybtn,.op2-stpop button,.op2-pop .op2-vi[data-act="unset"],#op2-snd,.op2-blocked,#op2-f-ent .op2-chip';
+var NAV_SEL = '.op2-tab,.op2-wchip,.op2-chip,.op2-ghost,.op2-dbtn,.op2-slot,.op2-veh,.op2-st-chip,.op2-stc,.op2-logpick,#op2-lgpop button,.op2-mgrpick,#op2-mgrpop button,.op2-sugg .op2-it,.op2-free .op2-day,.op2-stpop button,.op2-pop .op2-vi,.op2-copybtn,.op2-take,.op2-dt,.op2-mgr-tbl tbody tr,.op2-log-body tr,.op2-switch button,[data-nav-sound]';
+/* #op2-wk-today - «Сегодня» гасит нав-звук из делегирования (op2-chip уже в NAV_SEL) и
+   играет свой S.toggle() в собственном обработчике, тот же приём, что у #op2-snd ниже. */
+var RESULT_SEL = '#op2-f-save,#op2-rp-go,#op2-pop-ok,.op2-dok,.op2-unset-ot,.op2-slot.op2-ot,.op2-slot.op2-new,#op2-lgpop button,#op2-mgrpop button,#op2-drv-copy,#op2-drv-max,#op2-d-drv-ok,.op2-dl,.op2-copybtn,.op2-stpop button,.op2-pop .op2-vi[data-act="unset"],#op2-snd,.op2-blocked,#op2-f-ent .op2-chip,#op2-wk-today';
 
 function wire() {
   var root = $('#op2-root');
@@ -986,15 +1007,34 @@ function wire() {
     loadOrders();
   });
 
-  /* ── даты ── */
+  /* ── даты («Картограф», 18.09) ── */
   $('#op2-mgr-tabs').addEventListener('click', function (e) {
-    var b = e.target.closest('.op2-tab'); if (!b) return;
-    if (b.dataset.week === '1') { TO_DATE = addDays(todayStr(), 6); DATE = todayStr(); }
-    else { DATE = b.dataset.d; TO_DATE = ''; }
+    var b = e.target.closest('.op2-wchip'); if (!b) return;
+    DATE = b.dataset.d; TO_DATE = '';
     F.q = ''; $('#op2-mgr-search').value = '';
     renderAll(); loadOrders(); loadFree();
   });
-  $('#op2-mgr-date').addEventListener('change', function () { if (!this.value) return; DATE = this.value; TO_DATE = ''; renderAll(); loadOrders(); });
+  $('#op2-wk-prev').addEventListener('click', function () { TABS_WK = addDays(TABS_WK, -7); S.stepDown(); renderTabs(); loadCounts(); });
+  $('#op2-wk-next').addEventListener('click', function () { TABS_WK = addDays(TABS_WK, 7); S.stepUp(); renderTabs(); loadCounts(); });
+  $('#op2-wk-today').addEventListener('click', function () {
+    TABS_WK = mondayOf_(todayStr()); DATE = todayStr(); TO_DATE = '';
+    F.q = ''; $('#op2-mgr-search').value = '';
+    S.toggle(); renderAll(); loadOrders(); loadFree(); loadCounts();
+  });
+  /* иконка-календарь вместо всегда видимого <input type=date> (тот же приём, что в форме
+     заявки, op2-f-calbtn) - открывает системный пикер для дня вне текущей ленты недели */
+  $('#op2-mgr-calbtn').addEventListener('click', function () {
+    S.nav();
+    var el = $('#op2-mgr-date');
+    if (el.showPicker) { try { el.showPicker(); return; } catch (e) {} }
+    el.focus(); el.click();
+  });
+  $('#op2-mgr-date').addEventListener('change', function () {
+    if (!this.value) return;
+    DATE = this.value; TO_DATE = ''; TABS_WK = mondayOf_(this.value);
+    F.q = ''; $('#op2-mgr-search').value = '';
+    renderAll(); loadOrders(); loadFree(); loadCounts();
+  });
   $('#op2-log-date').addEventListener('change', function () { if (!this.value) return; DATE = this.value; TO_DATE = ''; renderAll(); loadOrders(); });
   $('#op2-log-prev').addEventListener('click', function () { DATE = addDays(DATE, -1); TO_DATE = ''; renderAll(); loadOrders(); });
   $('#op2-log-next').addEventListener('click', function () { DATE = addDays(DATE, 1); TO_DATE = ''; renderAll(); loadOrders(); });
@@ -1294,10 +1334,16 @@ function loadOrders(silent) {
     else renderUpdated();
   }).catch(function () { loadingOrders = false; });
 }
+/* быстрое перелистывание недель («Картограф», 18.09) может выпустить несколько запросов
+   подряд - без счётчика более старый ответ, вернувшийся позже, тихо перезаписал бы COUNTS
+   не той неделей, которую видно сейчас; countsSeq_ гарантирует, что применяется только
+   самый последний запрошенный диапазон. */
+var countsSeq_ = 0;
 function loadCounts() {
-  var tabs = dayTabs();
-  var from = tabs[0].d, to = tabs[tabs.length - 2].d;
+  var from = TABS_WK, to = addDays(TABS_WK, 6);
+  var seq = ++countsSeq_;
   return apiGet('/orders/counts', { from: from, to: to }).then(function (r) {
+    if (seq !== countsSeq_) return;
     if (!r || !r.ok || !r.data || r.data.error) return;
     COUNTS = {};
     (r.data.counts || []).forEach(function (c) { COUNTS[c.date] = c; });
@@ -1310,8 +1356,8 @@ function loadCounts() {
 function jumpToDate_(dateStr) {
   if (!dateStr) return;
   S.nav();
-  DATE = dateStr; TO_DATE = '';
-  renderAll(); loadOrders(); loadFree();
+  DATE = dateStr; TO_DATE = ''; TABS_WK = mondayOf_(dateStr);
+  renderAll(); loadOrders(); loadFree(); loadCounts();
 }
 function loadFree() {
   var t = todayStr();
@@ -1370,35 +1416,36 @@ function soundsForDiff() {
 }
 
 /* ═════════════════════════ РЕНДЕР ═════════════════════════ */
-function dayTabs() {
-  var t = todayStr();
-  var arr = [
-    { d: addDays(t, -1), l: 'Вчера' },
-    { d: t, l: 'Сегодня ' + dm(t) },
-    { d: addDays(t, 1), l: 'Завтра' }
-  ];
-  /* дальше - ближайшие будни (выходные логистам как вкладки не нужны, в превью
-     после «Завтра» стояли сразу Пн и Вт); в любой день доступны через календарь */
-  var i = 2, added = 0;
-  while (added < 2 && i < 10) {
-    var d = addDays(t, i), wd = dObj(d).getDay();
-    if (wd !== 0 && wd !== 6) { arr.push({ d: d, l: WD_SHORT[wd] + ' ' + dObj(d).getDate() }); added++; }
-    i++;
+/* «Картограф» (18.09): неделя TABS_WK..+6 целиком, вместо Вчера/Сегодня/Завтра/Пн/Вт/
+   Неделя. Пн..Вс - тот же порядок, что и везде в файле (mondayOf_/addDays), но подпись и
+   индекс дня недели берём через WD_SHORT[getDay()] (0=Вс..6=Сб, как в остальном коде). */
+function weekDays_() {
+  var t = todayStr(), arr = [];
+  for (var i = 0; i < 7; i++) {
+    var d = addDays(TABS_WK, i), wd = dObj(d).getDay();
+    arr.push({ d: d, wd: wd, isToday: d === t, isWeekend: (wd === 0 || wd === 6) });
   }
-  arr.push({ d: '', l: 'Неделя', week: true });
   return arr;
 }
 function renderTabs() {
   var box = $('#op2-mgr-tabs'); if (!box) return;
-  box.innerHTML = dayTabs().map(function (t) {
-    var on = t.week ? !!TO_DATE : (!TO_DATE && t.d === DATE);
-    var c = COUNTS[t.d];
-    var cnt = '';
-    if (c && c.total) {
-      cnt = '<span class="op2-cnt">' + c.total + (c.nocar ? ' · ' + c.nocar + ' без машины' : '') + '</span>';
-    }
-    return '<button class="op2-tab' + (on ? ' op2-on' : '') + '" data-d="' + esc(t.d) + '"' + (t.week ? ' data-week="1"' : '') + '>' + esc(t.l) + cnt + '</button>';
+  var days = weekDays_();
+  box.innerHTML = days.map(function (t) {
+    var sel = !TO_DATE && t.d === DATE;
+    var cls = ['op2-wchip'];
+    if (t.isToday) cls.push('op2-wchip-today');
+    if (sel) cls.push('op2-on');
+    if (t.isWeekend) cls.push('op2-wchip-weekend');
+    var c = COUNTS[t.d], cnt = '';
+    if (c) cnt = c.total ? '<span class="op2-wchip-cnt">' + c.total + '</span>' : '<span class="op2-wchip-cnt op2-wchip-cnt-empty">—</span>';
+    var label = t.isToday ? 'Сегодня' : (WD_SHORT[t.wd] + ' ' + dObj(t.d).getDate());
+    return '<button type="button" class="' + cls.join(' ') + '" data-d="' + esc(t.d) + '" aria-pressed="' + sel + '"' +
+           (t.isToday ? ' aria-current="date"' : '') + ' title="' + esc(capit(weekdayFull(t.d)) + ', ' + humanDate(t.d)) + '">' +
+           '<span class="op2-wchip-label">' + esc(label) + '</span>' + cnt + '</button>';
   }).join('');
+  box.title = 'Неделя: ' + formatWeekRange_(days[0].d, days[6].d);
+  var todayInView = days.some(function (t) { return t.isToday; });
+  var pill = $('#op2-wk-today'); if (pill) pill.hidden = todayInView;
 }
 function renderUpdated() {
   var el = $('#op2-sub'); if (!el) return;
@@ -3931,7 +3978,7 @@ function saveForm(btn) {
       (payload.internal ? ' · <span class="op2-tick">внутренний заказчик</span>' + (payload.price ? ' · ' + esc(fmtP(payload.price)) : ' · <span class="op2-warn">без суммы</span>') + ' · в списке менеджеров не появится' : '') +
       (warn ? ' · <span class="op2-warn">незаполненные поля</span>' : '') +
       (editing ? '' : (payload.internal ? '' : (formWho === 'log' ? ' · менеджер увидит у себя' : ' · логисты видят сразу'))));
-    if (payload.service_date !== DATE && !TO_DATE) { DATE = payload.service_date; renderAll(); }
+    if (payload.service_date !== DATE && !TO_DATE) { DATE = payload.service_date; TABS_WK = mondayOf_(DATE); renderAll(); }
     loadOrders(); loadCounts(); loadFree();
   }).catch(function () { btn.disabled = false; logUiEvent_('save_error', 'orders/save', 'сеть'); });
 }

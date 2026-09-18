@@ -927,7 +927,7 @@ function buildDom() {
       '<div class="op2-stpop" id="op2-stpop" role="menu"></div>' +
       '<div class="op2-stpop" id="op2-lgpop" role="menu"></div>' +
       '<div class="op2-stpop" id="op2-mgrpop" role="menu"></div>' +
-      '<div class="op2-stpop op2-datepop" id="op2-transferpop" role="menu"></div>' +
+      '<div class="op2-stpop" id="op2-transferpop" role="menu"></div>' +
 
       /* ── «Задание водителю» ── */
       '<div class="op2-dmod-scrim" id="op2-drv-scrim"><div class="op2-dmod" role="dialog" aria-label="Задание водителю">' +
@@ -1134,7 +1134,7 @@ function wire() {
   });
   /* ── поповер «Перенести» (18.09) ── */
   $('#op2-transferpop').addEventListener('click', function (e) {
-    var b = e.target.closest('.op2-chip[data-d]'); if (!b || !transferOrderCtx_) return;
+    var b = e.target.closest('button[data-d]'); if (!b || !transferOrderCtx_) return;
     doTransfer_(transferOrderCtx_, b.dataset.d);
   });
 
@@ -1598,12 +1598,12 @@ function timeCell(o) {
   var t = oTime(o);
   return '<td>' + (t ? '<span class="op2-time">' + esc(t) + '</span>' : '<span class="op2-time op2-ask" title="Время подачи уточняется">уточнить</span>') + '</td>';
 }
-/* общая для обеих таблиц (Влад 18.09: «всё новое должно подсвечиваться неделю») - см.
-   isNewWeek_(). Отдельно от isFresh()/«новая»-чипа в renderLog() - тот гаснет за 10 минут
-   и служебный (сигнал логисту), этот - просто метка возраста на всю неделю. */
+/* общая для обеих таблиц (Влад 18.09: «всё новое должно подсвечиваться») - см.
+   isRecentlyCreated_(). Отдельно от isFresh()/«новая»-чипа в renderLog() - тот гаснет за
+   10 минут и служебный (сигнал логисту), этот - просто метка недавнего создания. */
 function noCell_(o) {
   return '<td><span class="op2-no">' + esc(oNo(o)) + '</span>' +
-    (isNewWeek_(o) ? '<span class="op2-tag op2-tg-new" title="Заявка создана ' + esc(humanDate(String(o.created_at || '').slice(0, 10))) + ' - метка сойдёт через неделю">новое</span>' : '') +
+    (isRecentlyCreated_(o) ? '<span class="op2-tag op2-tg-new" title="Заявка только что создана">новое</span>' : '') +
     '</td>';
 }
 function techCell_(o) {
@@ -1844,16 +1844,23 @@ function isFresh(o) {
   if (!isFinite(t)) return false;
   return (Date.now() - t) < 10 * 60 * 1000 && !oOwn(o).length && !oHired(o);
 }
-/* 18.09, Влад (по мотивам превью «Перенести»): «мне понравилось что что-то новое
-   подсвечивается. Вот всё новое должно подсвечиваться неделю, а потом приходить в обычный
-   режим». В отличие от isFresh() выше (10 минут, гаснет при постановке машины - служебный
-   сигнал логисту «разбери меня») - это ПРОСТО метка возраста заявки, не зависит от статуса/
-   машины, статичный бейдж без анимации (см. .op2-tag.op2-tg-new в CSS). */
-var NEW_TAG_MS_ = 7 * 24 * 60 * 60 * 1000;
-function isNewWeek_(o) {
+/* 18.09, Влад: «мне понравилось что что-то новое подсвечивается. Вот всё новое должно
+   подсвечиваться неделю, а потом приходить в обычный режим». В отличие от isFresh() выше
+   (10 минут, гаснет при постановке машины - служебный сигнал логисту «разбери меня») - это
+   ПРОСТО метка возраста заявки, не зависит от статуса/машины, статичный бейдж без анимации
+   (см. .op2-tag.op2-tg-new в CSS).
+   ИСПРАВЛЕНО в тот же день - «неделя» на реальных данных оказалась бесполезной меткой, а
+   не полезной: в этом бизнесе заявку заводят за часы-день до самой перевозки (короткий
+   цикл), проверка на живой базе 18.09 показала 56 из 56 активных заявок младше 7 дней -
+   бейдж висел ВЕЗДЕ ("получилась какая-то херня", Влад). Порог сокращён до 3 часов -
+   на тех же данных это ~30% активных заявок, уже реально отличает только что заведённое
+   от остального дня, а не красит всю таблицу целиком. Если и это окажется много/мало -
+   менять только TAG_RECENT_MS_ ниже, больше никакой логики трогать не нужно. */
+var TAG_RECENT_MS_ = 3 * 60 * 60 * 1000;
+function isRecentlyCreated_(o) {
   if (!o.created_at) return false;
   var t = Date.parse(String(o.created_at).replace(' ', 'T'));
-  return isFinite(t) && (Date.now() - t) < NEW_TAG_MS_;
+  return isFinite(t) && (Date.now() - t) < TAG_RECENT_MS_;
 }
 /* 18.09, «Перенести» - те же условия, что сервер сам проверит (POST /orders/transfer),
    продублировано на клиенте только чтобы не показывать пункт меню, который заведомо
@@ -1952,23 +1959,27 @@ function assignLogist_(o, email, name) {
 /* ═════════════════════════ ПЕРЕНЕСТИ (18.09, превью одобрено Владом) ═════════════════════════
    Отбой старой заявке + новая заявка на выбранную дату, одним запросом (POST /orders/transfer,
    сервер атомарно и отбой ставит, и новую создаёт со своим day_no - см. комментарий там же).
-   Поповер - тот же .op2-stpop каркас и тот же набор пресетов (Сегодня/Завтра/календарь), что
-   уже утверждён в форме заявки (op2-f-datebox) - не изобретаем второй виджет даты. */
+   ИСПРАВЛЕНО в тот же день - Влад сверил живьём с одобренным превью («ожидание/реальность,
+   много отклонений от задуманного») и оказался прав: первый заход изобрёл СВОЙ горизонтальный
+   ряд чипов + голую иконку-календарь без подписи вместо третьего пресета и подписанной
+   «Другая дата» из превью. Теперь - ровно те же пункты, что были одобрены, и та же вёрстка,
+   что у ВСЕХ остальных поповеров этого файла (openStPop/openMgrPop/openLogPop) - простой
+   список кнопок `.op2-stpop button` в столбик, без отдельного `.op2-dp-row`/чипов - третий
+   такой же поповер не должен был выглядеть иначе просто потому, что делался последним. */
 var transferOrderCtx_ = null;
 function openTransferPop_(o, x, y) {
   transferOrderCtx_ = o;
-  var tomorrow = addDays(todayStr(), 1), dayAfter = addDays(todayStr(), 2);
+  var tomorrow = addDays(todayStr(), 1), dayAfter = addDays(todayStr(), 2), soon = addDays(todayStr(), 3);
   var sp = $('#op2-transferpop');
   sp.innerHTML =
     '<div class="op2-dp-title">Перенести №' + esc(oNo(o)) + ' на</div>' +
-    '<div class="op2-dp-row">' +
-      '<button class="op2-chip" data-d="' + esc(tomorrow) + '">Завтра, ' + esc(dm(tomorrow)) + '</button>' +
-      '<button class="op2-chip" data-d="' + esc(dayAfter) + '">Послезавтра, ' + esc(dm(dayAfter)) + '</button>' +
-      '<span class="op2-datewrap"><button type="button" class="op2-calbtn" id="op2-transfer-calbtn" title="Выбрать другую дату"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></button>' +
-      '<input type="date" class="op2-dt op2-dt-hidden" id="op2-transfer-datenative" autocomplete="off" tabindex="-1"></span>' +
-    '</div>';
+    '<button data-d="' + esc(tomorrow) + '">Завтра, ' + esc(dm(tomorrow)) + '</button>' +
+    '<button data-d="' + esc(dayAfter) + '">Послезавтра, ' + esc(dm(dayAfter)) + '</button>' +
+    '<button data-d="' + esc(soon) + '">' + esc(WD_SHORT[dObj(soon).getDay()]) + ', ' + esc(dm(soon)) + '</button>' +
+    '<button type="button" id="op2-transfer-calbtn"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Другая дата</button>' +
+    '<input type="date" class="op2-dt op2-dt-hidden" id="op2-transfer-datenative" autocomplete="off" tabindex="-1" style="position:absolute;opacity:0;pointer-events:none;">';
   sp.style.left = Math.min(x, window.innerWidth - 260) + 'px';
-  sp.style.top = Math.min(y, window.innerHeight - 90) + 'px';
+  sp.style.top = Math.min(y, window.innerHeight - 220) + 'px';
   sp.classList.add('op2-open');
   var calBtn = $('#op2-transfer-calbtn'), dateNative = $('#op2-transfer-datenative');
   calBtn.addEventListener('click', function () {

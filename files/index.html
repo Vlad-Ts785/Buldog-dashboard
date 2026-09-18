@@ -33519,7 +33519,17 @@ function openDrawer(seg){
   var toVal = isTrip ? (seg.to || "") : "";
   var customerVal = isTrip ? (seg.customer || "") : "";
   var ndVal = !!seg.needsData;
-  var reasonIdx = isDriverOff ? Math.max(0, DRIVEROFF_REASONS_.map(function(p){ return p[0]; }).indexOf(seg.reason)) : 0;
+  /* НАЙДЕННЫЙ БАГ (18.09, Влад живьём: "показалось, что при выборе Переоформление
+     кидает обратно на статус Выходной" - тот же класс, что уже описан ЗДЕСЬ ЖЕ
+     выше про mgIdx/lgIdx: Math.max(0, indexOf(...)) клэмпит "не найдено" (-1) на 0 -
+     любая запись с пустой/незнакомой причиной (старые записи до 30.08, когда
+     подстатусов ещё не было) тихо ПОКАЗЫВАЛА "Выходной" выбранным, хотя реальная
+     причина не задана вовсе. Не косметика - как и у mg/lg: "Сохранить" без единого
+     клика по чипам реально переписал бы reason на "dayoff". Фикс - НЕ клэмпим,
+     -1 = ничего не выбрано (ни один чип не подсвечен), проверка на сохранение
+     ниже (рядом с isRepairLike) требует явного выбора, прежде чем разрешить
+     сохранение - тот же принцип, что уже применён к причине ремонта/ТО. */
+  var reasonIdx = isDriverOff ? DRIVEROFF_REASONS_.map(function(p){ return p[0]; }).indexOf(seg.reason) : 0;
   var repairReasonVal = isRepairLike ? (seg.repairReason || "") : "";
   var tripModeIdx = isTrip ? Math.max(0, TRIP_MODE_OPTS_.map(function(p){ return p[0]; }).indexOf(seg.tripMode || "")) : 0;
   var startVal = hToLocalInputVal_(seg.s), endVal = hToLocalInputVal_(seg.s + seg.l);
@@ -33659,6 +33669,12 @@ function openDrawer(seg){
       // уже введённую причину пустым значением, если кто-то её случайно очистил.
       if (isRepairLike && !repairReasonVal.trim()){
         S.reject(); logUiEvent_("logistics-plan", "blocked_click", "lp_edit", seg.kind === "repair" ? "Не указана причина ремонта" : "Не указана причина ТО"); toast(seg.kind === "repair" ? "Укажите причину ремонта" : "Укажите причину ТО", null); return;
+      }
+      // Причина "без водителя" - обязательна тем же приёмом (18.09, см. разбор у
+      // reasonIdx выше) - без явного выбора "Сохранить" молча записал бы "Выходной"
+      // на запись, у которой причина на самом деле не определена.
+      if (isDriverOff && reasonIdx < 0){
+        S.reject(); logUiEvent_("logistics-plan", "blocked_click", "lp_edit", "Не указана причина без водителя"); toast("Укажите причину", null); return;
       }
       seg = liveSeg;
       var before = {s: seg.s, l: seg.l, v: seg.v};

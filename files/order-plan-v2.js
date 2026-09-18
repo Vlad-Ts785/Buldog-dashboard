@@ -1598,13 +1598,14 @@ function timeCell(o) {
   var t = oTime(o);
   return '<td>' + (t ? '<span class="op2-time">' + esc(t) + '</span>' : '<span class="op2-time op2-ask" title="Время подачи уточняется">уточнить</span>') + '</td>';
 }
-/* общая для обеих таблиц (Влад 18.09: «всё новое должно подсвечиваться») - см.
-   isRecentlyCreated_(). Отдельно от isFresh()/«новая»-чипа в renderLog() - тот гаснет за
-   10 минут и служебный (сигнал логисту), этот - просто метка недавнего создания. */
+/* 18.09: тут раньше была метка «новое» по created_at заявки - Влад поправил: имелась в
+   виду НОВАЯ ФУНКЦИЯ («Перенести»), не новая ЗАЯВКА. Правильное место - NEW_FEATURE_
+   бейдж на самом пункте меню (см. mgrRowMenu/openRowMenu ниже), не здесь. Убрано целиком -
+   см. project_order_plan_v2_native.md, запись 18.09, «с бейджем новое ты вообще не туда
+   ушёл» - для истории, чтобы не повторить ту же ошибку на будущих запросах «подсветить
+   новое». */
 function noCell_(o) {
-  return '<td><span class="op2-no">' + esc(oNo(o)) + '</span>' +
-    (isRecentlyCreated_(o) ? '<span class="op2-tag op2-tg-new" title="Заявка только что создана">новое</span>' : '') +
-    '</td>';
+  return '<td><span class="op2-no">' + esc(oNo(o)) + '</span></td>';
 }
 function techCell_(o) {
   return '<td class="op2-tech">' + (o.equipment_type ? esc(o.equipment_type) : '<span class="op2-ask">уточнить</span>') + '</td>';
@@ -1844,23 +1845,18 @@ function isFresh(o) {
   if (!isFinite(t)) return false;
   return (Date.now() - t) < 10 * 60 * 1000 && !oOwn(o).length && !oHired(o);
 }
-/* 18.09, Влад: «мне понравилось что что-то новое подсвечивается. Вот всё новое должно
-   подсвечиваться неделю, а потом приходить в обычный режим». В отличие от isFresh() выше
-   (10 минут, гаснет при постановке машины - служебный сигнал логисту «разбери меня») - это
-   ПРОСТО метка возраста заявки, не зависит от статуса/машины, статичный бейдж без анимации
-   (см. .op2-tag.op2-tg-new в CSS).
-   ИСПРАВЛЕНО в тот же день - «неделя» на реальных данных оказалась бесполезной меткой, а
-   не полезной: в этом бизнесе заявку заводят за часы-день до самой перевозки (короткий
-   цикл), проверка на живой базе 18.09 показала 56 из 56 активных заявок младше 7 дней -
-   бейдж висел ВЕЗДЕ ("получилась какая-то херня", Влад). Порог сокращён до 3 часов -
-   на тех же данных это ~30% активных заявок, уже реально отличает только что заведённое
-   от остального дня, а не красит всю таблицу целиком. Если и это окажется много/мало -
-   менять только TAG_RECENT_MS_ ниже, больше никакой логики трогать не нужно. */
-var TAG_RECENT_MS_ = 3 * 60 * 60 * 1000;
-function isRecentlyCreated_(o) {
-  if (!o.created_at) return false;
-  var t = Date.parse(String(o.created_at).replace(' ', 'T'));
-  return isFinite(t) && (Date.now() - t) < TAG_RECENT_MS_;
+/* 18.09, Влад (уточнение после первой, неверной попытки - см. коммент у noCell_ выше):
+   «новое имелось в виду - новая ФУНКЦИЯ типа Перенести. Чтобы менеджерам было легче её
+   освоить, какое-то время новая функция должна быть отмечена». Это бейдж на ПУНКТЕ МЕНЮ
+   (см. NEW_FEATURE_BADGE_/mgrRowMenu ниже), не на заявках - привязан к дате ВЫХОДА самой
+   функции в коде, не к данным пользователя. Одна запись на функцию, добавлять новую
+   строку сюда при следующем «новом», не трогая остальное. */
+var NEW_FEATURE_DAYS_ = 7;
+var NEW_FEATURE_BADGE_ = { transfer: '2026-09-18' };
+function isFeatureNew_(key) {
+  var shipped = NEW_FEATURE_BADGE_[key]; if (!shipped) return false;
+  var t = Date.parse(shipped + 'T00:00:00');
+  return isFinite(t) && (Date.now() - t) < NEW_FEATURE_DAYS_ * 24 * 60 * 60 * 1000;
 }
 /* 18.09, «Перенести» - те же условия, что сервер сам проверит (POST /orders/transfer),
    продублировано на клиенте только чтобы не показывать пункт меню, который заведомо
@@ -2119,7 +2115,10 @@ function openRowMenu(x, y, items) {
   var m = document.createElement('div');
   m.className = 'op2-stpop op2-open';
   m.id = 'op2-row-menu';
-  m.innerHTML = items.map(function (it, i) { return '<button data-i="' + i + '">' + esc(it.label) + '</button>'; }).join('');
+  /* it.badge - необязательный текстовый бейдж (сейчас только «новое» у свежих функций,
+     см. NEW_FEATURE_BADGE_/isFeatureNew_) - фиксированный текст из кода, не пользовательский
+     ввод, но экранируем всё равно по общему правилу «весь текст в innerHTML - через esc()». */
+  m.innerHTML = items.map(function (it, i) { return '<button data-i="' + i + '">' + esc(it.label) + (it.badge ? '<span class="op2-tag op2-tg-new">' + esc(it.badge) + '</span>' : '') + '</button>'; }).join('');
   $('#op2-root').appendChild(m);
   m.style.left = Math.min(x, window.innerWidth - 240) + 'px';
   m.style.top = Math.min(y, window.innerHeight - (items.length * 34 + 24)) + 'px';
@@ -2141,8 +2140,10 @@ function mgrRowMenu(o, x, y) {
   /* 18.09, «Перенести» - превью одобрено Владом («надо сделать как в превью»). Только для
      заявок, которые ещё реально можно перенести (не отбой, не выполнена) - те же условия,
      что сервер сам перепроверит (canTransfer_), но скрываем пункт заранее, а не даём нажать
-     и получить отказ. */
-  var transferItem = canTransfer_(o) ? [{ label: 'Перенести', fn: function () { openTransferPop_(o, x, y); } }] : [];
+     и получить отказ. Бейдж «новое» - неделю с даты выхода функции (isFeatureNew_), чтобы
+     менеджеры быстрее заметили и освоили - НЕ про саму заявку (см. историю правки у
+     noCell_/NEW_FEATURE_BADGE_ выше, с первого раза перепутал одно с другим). */
+  var transferItem = canTransfer_(o) ? [{ label: 'Перенести', badge: isFeatureNew_('transfer') ? 'новое' : null, fn: function () { openTransferPop_(o, x, y); } }] : [];
   return [
     { label: 'Повторить', fn: function () { openRepeat(o); } }
   ].concat(transferItem).concat([

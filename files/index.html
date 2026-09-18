@@ -19750,7 +19750,13 @@ function renderCommercialHeadReceiptsPlanPage_() {
       crpAmounts_ = {}; crpFacts_ = {}; crpCarryover_ = {}; crpLockedContragents_ = {};
       // Уже отправленные строки - заморожены (см. crpLockedContragents_ выше), carryover
       // ниже - ЕЩЁ НЕ отправлен, остаётся редактируемым до первой реальной отправки.
-      items.forEach(function(it) { crpAmounts_[it.contragent] = it.planned_amount; crpFacts_[it.contragent] = it.fact_amount || 0; crpLockedContragents_[it.contragent] = true; });
+      items.forEach(function(it) {
+        crpAmounts_[it.contragent] = it.planned_amount; crpFacts_[it.contragent] = it.fact_amount || 0; crpLockedContragents_[it.contragent] = true;
+        // 18.09 - бейдж "перенос" теперь переживает перезагрузку страницы (сервер вернул
+        // carried_over из сохранённой строки) - деталей "план/факт прошлой недели" тут уже
+        // нет (это разовая подсказка при самом переносе), crpRowHtml_ покажет общий текст.
+        if (it.carried_over) crpCarryover_[it.contragent] = { prev_planned: null, prev_fact: null };
+      });
       // Перенос недоплаченных с прошлой недели (14.09, Влад: "по тем, кто не оплатил хотя
       // планировали, чтобы они были сразу же отмечены на следующую неделю") - сервер
       // предлагает carryover ТОЛЬКО когда эта неделя ещё пуста (не перезаписываем начатый
@@ -19907,7 +19913,15 @@ function crpRowHtml_(c) {
   if (inn) subParts.push('ИНН ' + inn);
   subParts.push('<button class="crp-copy-btn" onclick="crpCopyInn_(\'' + escCopy + '\')" title="' + copyTitle + '"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg></button>');
   if (manager) subParts.push(rpsShortName_(manager));
-  if (co) subParts.push('<span class="crp-tag-carry" title="Не заплатил на прошлой неделе (план ' + crpFmtInt_(co.prev_planned) + ' ₽ · факт ' + crpFmtInt_(co.prev_fact) + ' ₽)"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>перенос</span>');
+  if (co) {
+    // co.prev_planned/prev_fact есть только сразу при принятии предложения переноса (в
+    // рамках одной загрузки страницы); после перезагрузки carried_over приходит с сервера
+    // без этой детали (18.09) - показываем общую подсказку вместо "план null ₽".
+    var coTitle = co.prev_planned != null
+      ? ('Не заплатил на прошлой неделе (план ' + crpFmtInt_(co.prev_planned) + ' ₽ · факт ' + crpFmtInt_(co.prev_fact) + ' ₽)')
+      : 'Перенесено с прошлой недели (не доплатили, хотя планировали)';
+    subParts.push('<span class="crp-tag-carry" title="' + coTitle + '"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>перенос</span>');
+  }
   var actionHtml = locked
     ? '<span class="crp-lock" title="Уже отправлено — убрать нельзя"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span>'
     : '<button class="crp-icon-btn" onclick="crpClear_(\'' + escClear + '\')" title="Убрать из плана"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>';
@@ -20089,7 +20103,10 @@ function crpRenderInner_(cfg) {
 function crpSubmit_() {
   var items = Object.keys(crpAmounts_).filter(function(c) { return crpAmounts_[c] > 0; }).map(function(c) {
     var row = ((D.debt && D.debt.by_customer) || []).filter(function(x) { return x.contragent === c; })[0];
-    return { contragent: c, manager: row ? row.manager : null, planned_amount: crpAmounts_[c], balance_at_planning: row ? row.balance : null };
+    // carried_over (18.09, фундамент для анализа точности прогнозов) - сервер сам
+    // замораживает этот признак для уже существующих строк (см. api/server.js), это поле
+    // реально используется только при ПЕРВОМ сохранении новой строки-переноса.
+    return { contragent: c, manager: row ? row.manager : null, planned_amount: crpAmounts_[c], balance_at_planning: row ? row.balance : null, carried_over: !!crpCarryover_[c] };
   });
   postToYardApiWithBody_('/receipts_plan/set', { week: crpWeek_, head: crpHeadKey_(), items: items }).then(function(r) {
     if (!r.ok || !r.data || r.data.error) throw new Error((r.data && r.data.error) || 'ошибка сервера');

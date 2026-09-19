@@ -7,11 +7,15 @@
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="icon-192.png">
-<meta name="theme-color" content="#1D9E75">
+<meta name="theme-color" content="#0f0f13">
 <!-- Ранний синхронный скрипт темы - ДО <style> и тяжёлых библиотек, иначе при светлой
      теме страница мигает тёмным на долю секунды (FOUC). Тёмная = отсутствие атрибута,
-     это дефолт (plans/2026-08-29-light-theme-toggle.md). -->
-<script>try{if(localStorage.getItem('yardhub_theme')==='light')document.documentElement.setAttribute('data-theme','light')}catch(e){}</script>
+     это дефолт (plans/2026-08-29-light-theme-toggle.md).
+     19.09: цвет статус-бара (theme-color) синхронизирован с orders-m.html/plan-m.html
+     (#0f0f13 тёмная / #eef1f5 светлая, тот же фон --bg) - раньше здесь был брендовый
+     зелёный #1D9E75, из-за чего статус-бар на телефоне зелёной полосой выделялся на
+     фоне тёмного приложения при переходах между "Заданием" и остальными страницами. -->
+<script>try{if(localStorage.getItem('yardhub_theme')==='light'){document.documentElement.setAttribute('data-theme','light');document.querySelector('meta[name="theme-color"]').setAttribute('content','#eef1f5');}}catch(e){}</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <!-- Unbounded - display-шрифт бренда "ЯРД HUB" в сайдбаре (DESIGN_SYSTEM.md, раздел 2:
      Unbounded ТОЛЬКО для брендовых/display-мест, не внутри карточек). Остальная
@@ -347,6 +351,12 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .main-wrap{
   margin-left:var(--sidebar);flex:1;
   display:flex;flex-direction:column;min-height:100vh;
+  /* 19.09: flex-элемент без min-width:0 не сжимается ниже min-content своего содержимого -
+     на "Отделе Тралы" .kpi-grid (repeat(auto-fit,minmax(240px,1fr))) требовал минимум 2×240px
+     и раздвигал ВСЮ страницу шире экрана на телефоне вместо того, чтобы схлопнуться в одну
+     колонку, как задумано auto-fit. Проверено живьём на 375px - без этой строки два тайла
+     стояли в ряд и обрезались краем экрана, с ней - встают в столбик. */
+  min-width:0;
 }
 .page-header{
   padding:24px 28px 0;
@@ -1037,10 +1047,87 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
      .page-header никто не сталкивал при добавлении мобильного меню. Отступ слева -
      на мобильном, десктопа не касается (там кнопки нет вовсе, display:none). */
   .page-header{padding-left:64px;}
+  /* НОВОЕ ПРАВИЛО (Влад, 20.09, скриншот "Личная страница") - DESIGN_SYSTEM.md раздел
+     "Ролевая личная страница"/"Мобильная шапка": полный блок заголовок+должность+
+     строка даты - sticky и на мобильном занимал до половины экрана, постоянно съедая
+     видимую область при скролле. На мобильном оставляем ТОЛЬКО заголовок (ФИО на
+     личной странице / название страницы - #page-title), должность и строку даты/
+     свежести (#page-subtitle/.p2-page-period) скрываем целиком. Десктоп не трогаем. */
+  .page-header-sub,.p2-page-period{display:none;}
+  /* НАЙДЕННЫЙ БАГ (Влад, 20.09, скриншот): после сокращения шапки до одной строки
+     нижняя граница-разделитель (border-bottom) стала выше нижнего края гамбургера
+     (кнопка - position:fixed, top:14px, высота 38px = нижний край на 52px, НЕ зависит
+     от паддингов шапки) - разделитель резал кнопку пополам. Проверялось только на
+     длинном ФИО в две строки (случайно хватало высоты) - на коротком ФИО в одну
+     строку (Гуштюк Ирина) баг стал виден. Паддинги подобраны так, чтобы даже одна
+     строка заголовка давала >=52px общей высоты с запасом. */
+  .page-header{padding-top:20px;}
+  .page-header-title{padding-bottom:20px;}
   .kpi-grid{grid-template-columns:1fr 1fr;}
   .grid-2,.grid-3,.grid-65{grid-template-columns:1fr;}
   .fleet-grid{grid-template-columns:1fr;}
   main{padding:16px;}
+  /* НАЙДЕННЫЙ БАГ (Влад, 19.09, скриншот "Личная страница"): .tab-bar (Топ заказчиков/
+     Дебиторская задолженность/Воронка документов/Поступления) - display:flex без
+     overflow-x, 4 длинных подписи требуют 465px при доступных ~340px на карточке -
+     весь body уезжал вбок (проверено: bodyScrollWidth 502 против 375 экрана). Класс
+     общий (CRM и другие вкладки тоже им пользуются), поэтому чиним на уровне класса -
+     скролл вбок пальцем вместо переноса строк, привычный паттерн для таб-баров в
+     мобильных приложениях. */
+  .tab-bar{overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+  .tab-bar::-webkit-scrollbar{display:none;}
+  .tab-btn{flex:none;}
+  /* 19.09: правило white-space:normal для .p2-page-period (строка "день N из M") здесь
+     стояло - 20.09 стало мёртвым кодом: сама строка теперь скрыта целиком, см. правило
+     "Мобильная шапка" выше. */
+}
+
+/* ── МОБИЛЬНЫЙ СКИН ГАМБУРГЕР-МЕНЮ (19.09, Влад: «зашли по гамбургеру с Личной
+   страницы - меню выглядит десктопным сайдбаром, а не как в Задании/Планировке»).
+   Пункты меню НЕ дублируются - те же .sidebar-nav-item, что и на десктопе
+   (applyRoleUI()/applyMenuConfig_() уже один раз отфильтровали и упорядочили их),
+   здесь только визуальная тема поверх них на узком экране - тот же язык, что
+   .nd-head/.nd-item/.nd-sec в orders-m.html/plan-m.html (компактный список,
+   зелёная подсветка активного пункта вместо серой ступени фона). Компаунд-селекторы
+   с .collapsed дублируются - на мобильном кнопки сворачивания нет (см. выше), но
+   класс мог "прилипнуть" из localStorage от десктопной сессии в том же браузере. */
+@media(max-width:900px){
+  .sidebar-logo,.sidebar.collapsed .sidebar-logo{padding:0;border-bottom:1px solid var(--border);}
+  .sidebar-logo-row{height:52px;padding:0 14px;align-items:center;}
+  .sidebar-logo-label,.sidebar.collapsed .sidebar-logo-label{
+    display:block;font-size:15px;font-weight:700;letter-spacing:0;
+    text-transform:none;color:var(--text);margin-bottom:0;
+  }
+  .sidebar-logo-text{display:none;}
+
+  .sidebar-nav{padding:6px 8px;}
+  .sidebar-nav-section,.sidebar.collapsed .sidebar-nav-section{margin:12px 0 4px;padding:0 8px;}
+  .sidebar-nav-section-label{font-size:10.5px;opacity:1;}
+  .sidebar-nav-section-line{display:none;}
+  .sidebar-nav-item,.sidebar.collapsed .sidebar-nav-item{
+    height:44px;min-height:44px;padding:0 8px;border-radius:8px;
+    font-size:14px;font-weight:600;color:var(--text);gap:10px;
+  }
+  .sidebar-nav-item:hover{background:var(--bg3);transform:none;}
+  .sidebar-nav-item.active{background:rgba(29,158,117,.14);color:#2fbe93;}
+  .sidebar-nav-item.active .sidebar-nav-icon{color:#2fbe93;}
+  .sidebar-nav-icon,.sidebar-nav-icon svg{width:18px;height:18px;}
+
+  .sidebar-bottom,.sidebar.collapsed .sidebar-bottom{
+    padding:8px 8px calc(8px + env(safe-area-inset-bottom,0px));
+  }
+  .sidebar-bottom::before{
+    content:"Общее";display:block;font-size:10.5px;font-weight:700;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--muted);padding:4px 8px 8px;
+  }
+  .sidebar-updated{padding:0 8px;margin-bottom:2px;}
+  .sidebar-refresh,.sidebar.collapsed .sidebar-refresh{
+    width:100%;height:40px;min-width:0;padding:0 8px;margin-top:2px!important;
+    border:0;background:transparent;border-radius:8px;
+    font-size:14px;font-weight:600;color:var(--text);justify-content:flex-start;gap:10px;
+  }
+  .sidebar-refresh:hover{border-color:transparent;background:var(--bg3);color:var(--text);}
+  .sidebar-refresh svg{width:18px;height:18px;color:var(--muted);}
 }
 
 /* ── КАЛЬКУЛЯТОР 2.0 «Табло рейса» (plans/2026-08-28-calculator-cockpit-redesign.md) ──
@@ -1361,6 +1448,23 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .mp-status__lever{font-family:'JetBrains Mono',monospace;font-size:19px;font-weight:700;color:var(--text);
   font-variant-numeric:tabular-nums;margin-top:3px;}
 @media(max-width:640px){.mp-status__r{text-align:left;}}
+/* НАЙДЕННЫЙ БАГ (Влад, 20.09, скриншот "Личная страница"): .mp-status__word
+   (вердикт-полоса "ИДЁШЬ С ОПЕРЕЖЕНИЕМ X,X ДНЯ"/"ОТСТАВАНИЕ X,X ДНЯ" и т.п.) -
+   white-space:nowrap при clamp(18px,2.3vw,27px) - на узком экране 2.3vw упирается в
+   нижнюю границу 18px, длинная фраза Unbounded капсом в это не влезает, а
+   .mp-status{overflow:hidden} тихо обрезает хвост ("ДНЯ" пропадало). Первая попытка
+   фикса стояла ВЫШЕ по файлу (в общем мобильном @media-блоке с .tab-bar) - не сработала,
+   т.к. это безусловное правило .mp-status__word (см. выше) идёт ПОЗЖЕ в каскаде и при
+   равной специфичности перебивает медиа-версию независимо от ширины экрана; медиа-
+   переопределение должно стоять ПОСЛЕ базового правила, не до него. На мобильном
+   разрешаем перенос и чуть уменьшаем шрифт; text-wrap:pretty - страховка от
+   "сиротского" последнего слова в одну строку (Влад: "буква/знак одиноко на следующей
+   строке" - тот же класс бага, что и в .mp-status__sub, см. pageFr_ выше). */
+@media(max-width:640px){
+  .mp-status__word{white-space:normal;font-size:17px;text-wrap:pretty;}
+  .mp-status{padding:14px 18px;}
+  .mp-status__sub{text-wrap:pretty;}
+}
 
 /* ярус: строки ОБЩИЕ для обеих колонок - высоты совпадают гарантированно */
 .mp-tier{display:grid;grid-template-columns:5fr 7fr;grid-auto-rows:min-content;gap:16px;margin-bottom:16px;}
@@ -1562,6 +1666,9 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   padding:3px 9px;font-size:10.5px;cursor:pointer;font-family:inherit;flex:none;opacity:0;white-space:nowrap;
   transition:opacity .13s ease,border-color .13s ease,color .13s ease;}
 .mp-task:hover .mp-task__btn{opacity:1;}
+/* На тач-устройстве :hover не существует - кнопка "Выполнено" оставалась невидимой и
+   нетапабельной (opacity:0 из базового правила) до первого случайного клика. */
+@media(hover:none){.mp-task__btn{opacity:1;}}
 .mp-task__btn:hover{border-color:var(--green);color:var(--green);}
 /* штамп стоит В ПОТОКЕ вместо категории - absolute наезжал на кнопку (Влад, 29.08) */
 .mp-task__stamp{font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.18em;white-space:nowrap;flex:none;
@@ -1663,6 +1770,16 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .mp-tm__nums{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--muted);white-space:nowrap;
   font-variant-numeric:tabular-nums;flex:none;}
 .mp-tm__nums b{color:var(--text);font-weight:600;}
+/* НАЙДЕННЫЙ БАГ (аудит 20.09, «Моя группа» на странице Ахтамовой/Гусейновой): имя
+   сотрудника (nowrap+ellipsis, но БЕЗ min-width:0 - ellipsis мёртвый код без него) и
+   числа (nowrap, flex:none) вместе не влезали в узкую карточку на мобильном - тот же
+   класс бага, что у .mp-status__word/.tab-bar, просто во вложенном flex-ряду, который
+   не накрывает общий .main-wrap{min-width:0}. */
+@media(max-width:640px){
+  .mp-tm__top{flex-wrap:wrap;}
+  .mp-tm__name{min-width:0;flex:1 1 auto;}
+  .mp-tm__nums{white-space:normal;}
+}
 .mp-tm__track{height:8px;border-radius:4px;background:var(--bg4);position:relative;overflow:hidden;}
 .mp-tm__fill{position:absolute;left:0;top:0;bottom:0;border-radius:4px;}
 .mp-tm__fc{position:absolute;top:0;bottom:0;}
@@ -3099,6 +3216,45 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
   50%{opacity:.35;box-shadow:0 0 0 2px var(--bg2),0 0 2px 0 rgba(226,75,74,.3);}
 }
 @media(prefers-reduced-motion:reduce){#page-logistics-plan .seg-nd{animation:none;opacity:.85;}}
+/* Флажок-заметка (18.09, превью-вариант 1, утверждён Владом) - противоположный
+   угол от .seg-nd (та же логика, что развела .seg-nd и .seg-drv по разным углам
+   раньше - не спорят за один угол на узкой плитке). Видим при наведении, пока
+   заметки нет; когда заметка поставлена - виден всегда (иначе как узнать, что
+   она есть, не наводя курсор на каждую плитку по очереди). */
+#page-logistics-plan .lp-flag-btn{
+  position:absolute;top:-4px;right:-4px;width:15px;height:15px;border-radius:50%;
+  background:var(--bg2);box-shadow:inset 0 0 0 1px var(--border-strong);
+  display:flex;align-items:center;justify-content:center;cursor:pointer;
+  color:var(--muted);opacity:0;transition:opacity .12s var(--ease-out-soft);z-index:3;
+}
+#page-logistics-plan .seg:hover .lp-flag-btn{opacity:1;}
+#page-logistics-plan .lp-flag-btn svg{width:9px;height:9px;pointer-events:none;}
+#page-logistics-plan .lp-flag-btn.on{
+  opacity:1;background:rgba(239,159,39,.22);color:var(--amber);
+  box-shadow:inset 0 0 0 1px rgba(239,159,39,.5);
+}
+@media(prefers-reduced-motion:reduce){#page-logistics-plan .lp-flag-btn{transition:none;}}
+/* Одно плавающее поле на всю доску (не по одному на плитку) - см. разметку в
+   files/index.html рядом с #lp-confirmBox. position:fixed - позиция считается
+   через getBoundingClientRect() значка в момент клика (lpOpenFlagPop_), поэтому
+   не зависит от скролла/overflow родителей плитки. */
+#page-logistics-plan .lp-flagpop{
+  position:fixed;z-index:970;display:none;align-items:center;gap:4px;
+  background:var(--bg3);border:1px solid var(--border-strong);border-radius:8px;
+  padding:5px;box-shadow:0 8px 20px rgba(0,0,0,.4);
+}
+#page-logistics-plan .lp-flagpop.open{display:flex;}
+#page-logistics-plan .lp-flagpop input{
+  width:200px;background:var(--bg);border:1px solid var(--border);border-radius:5px;
+  color:var(--text);font-family:inherit;font-size:12px;padding:5px 8px;outline:none;
+}
+#page-logistics-plan .lp-flagpop input:focus{border-color:var(--amber);}
+#page-logistics-plan .lp-flagpop-clear{
+  flex:none;width:22px;height:22px;border-radius:5px;border:none;background:transparent;
+  color:var(--muted);cursor:pointer;display:flex;align-items:center;justify-content:center;
+}
+#page-logistics-plan .lp-flagpop-clear:hover{background:var(--bg4);color:var(--text);}
+#page-logistics-plan .lp-flagpop-clear svg{width:12px;height:12px;}
 /* «Суточный режим» (Влад, 30.08: "давай визуализируем... три варианта", выбран
    вариант «значок», подпись 30.08 второй заход - "вместо 24 часов слово
    суточный") - тихий вариант, специально: если суточных рейсов на ленте
@@ -3170,11 +3326,13 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
     rgba(239,159,39,.4) 0 10px, rgba(239,159,39,.4) 10px 20px,
     transparent 20px 30px, transparent 30px 40px);
 }
-/* .seg-overlap-txt (31.08-17.09, история решения) - удалён 17.09: текст пересечения
-   переехал в сам segTxt (см. makeSeg), .seg-overlap-badge теперь чисто декоративная
-   штриховка без собственного текста - два конкурирующих sticky-текста на одной
-   плитке (эта тема и .seg-label) убраны насовсем, не гоняемся за очередным местом,
-   где один из них может "уехать" за экран. */
+/* .seg-overlap-txt (31.08-18.09, история решения) - удалён окончательно 18.09:
+   текст пересечения живёт в segTxt (см. makeSeg), .seg-overlap-badge - чисто
+   декоративная штриховка. Второй заход по этому решению (был кратко откачен,
+   17.09) - живой пример 18.09 (см. makeSeg) подтвердил, что старая схема
+   ломалась не только на длинных плитках (31.08), но и на КОРОТКИХ пересечениях
+   (доли секунды/пикселя) - конкурирующих sticky-текстов на одной плитке больше
+   нет архитектурно, обоим классам бага (длинный/короткий) взяться неоткуда. */
 /* прогресс активного рейса - 2px снизу, #page-logistics-plan transform:scaleX (не width) */
 #page-logistics-plan .seg-prog{
   /* Скрыт по просьбе Влада, 29.08: "пока вообще прогресс убери, не нужен он
@@ -3306,7 +3464,7 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
 #page-logistics-plan .ctxmenu-item .fc-sub{color:var(--muted);font-size:10.5px;}#page-logistics-plan .cr-types{display:flex;gap:6px;flex-wrap:wrap;margin:16px 0;}#page-logistics-plan .cr-field{margin-bottom:12px;}#page-logistics-plan .cr-field .grp-label{display:block;margin-bottom:6px;}#page-logistics-plan .cr-opts{display:flex;gap:6px;flex-wrap:wrap;}#page-logistics-plan .cr-input{
   width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);
   font-family:inherit;font-size:12px;padding:7px 10px;
-}#page-logistics-plan .cr-input:focus-visible{outline:2px solid var(--blue);outline-offset:1px;}#page-logistics-plan .cr-actions{display:flex;gap:8px;margin-top:18px;}
+}#page-logistics-plan .cr-input:focus-visible{outline:2px solid var(--blue);outline-offset:1px;}#page-logistics-plan .cr-input.lp-input-invalid{border-color:var(--red);transition:border-color .15s;}#page-logistics-plan .cr-actions{display:flex;gap:8px;margin-top:18px;}
 /* Галочка «под данные» (Влад, 30.08) - отдельный акцентный чип, не в общем ряду
    .cr-opts: это не выбор ИЗ вариантов, а отдельный переключатель "да/нет" на
    всю запись, визуально явно выделен янтарным (тот же токен, что «свечение
@@ -3426,7 +3584,9 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
   transition:background .13s var(--dv-soft),border-color .13s var(--dv-soft),transform .13s var(--dv-soft);}
 .dv-btn:hover{background:var(--bg4);border-color:var(--border-strong);}
 .dv-btn:active{transform:translateY(1px);}
-.dv-btn[disabled]{opacity:.42;cursor:default;}
+/* pointer-events:none у неактивной кнопки - чтобы клик по ней долетал до страницы и попадал в журнал (blocked_click): на сам disabled-элемент браузер событий не шлёт вовсе. Вид не меняется - курсор тут и так default. */
+
+.dv-btn[disabled]{opacity:.42;cursor:default;pointer-events:none;}
 .dv-btn[disabled]:hover{background:var(--bg3);}
 
 /* ── Плитки KPI (значения - mono/tabular, ГОСТ раздел 2) ────────────────────── */
@@ -4587,6 +4747,17 @@ main:has(> #page-dynamics.active){min-width:0;}
     <button class="dbtn" id="lp-confirmCancel">Отмена</button>
     <button class="dbtn primary" id="lp-confirmOk">Ок</button>
   </div>
+</div>
+
+<!-- Флажок-заметка (18.09) - одно переиспользуемое плавающее поле на всю доску,
+     не по одному на плитку (тот же приём, что у .hud/.confirm-box - позиционируется
+     через JS по getBoundingClientRect() значка в момент клика, живёт ВНЕ скролла
+     .board, поэтому не подвержена overflow/клипу соседних контейнеров). -->
+<div class="lp-flagpop" id="lp-flagPop">
+  <input autocomplete="off" type="text" id="lp-flagInput" placeholder="Что не забыть?" maxlength="300">
+  <button class="lp-flagpop-clear" id="lp-flagClear" title="Убрать заметку" hidden>
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 5l10 10M15 5L5 15"/></svg>
+  </button>
 </div>
 
 </div>
@@ -5939,6 +6110,9 @@ main:has(> #page-dynamics.active){min-width:0;}
           </button>
           <button id="debt-bankrupt-toggle-btn" onclick="toggleDebtBankruptFilter()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:6px 12px;font-size:12px;cursor:pointer">
             Показать банкротов
+          </button>
+          <button id="debt-old-unclosed-toggle-btn" onclick="toggleDebtOldUnclosedFilter()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:6px 12px;font-size:12px;cursor:pointer">
+            Только с незакрытыми документами
           </button>
         </div>
         <div class="kpi-grid" id="debt-kpi">
@@ -8203,6 +8377,7 @@ function clearAuthTokens_() {
   localStorage.removeItem('session_token');
   localStorage.removeItem('user_role');
   localStorage.removeItem('user_name');
+  localStorage.removeItem('view_as');
 }
 
 // Google Apps Script иногда временно отдаёт HTML-страницу (или пустой ответ) вместо JSON,
@@ -8211,15 +8386,31 @@ function clearAuthTokens_() {
 // нестабильность на стороне Google, не на нашей стороне). Раньше единственный неудачный ответ
 // сразу показывал пользователю "Unexpected token '<'..." - теперь тихо повторяем ещё пару раз
 // с небольшой паузой, прежде чем сдаться и показать ошибку.
+//
+// Таймаут на попытку (2026-09-16, живая жалоба - Савиток дома, "висит на логотипе и всё",
+// обновление страницы не помогает) - у fetch() тут не было НИКАКОГО собственного таймаута,
+// только браузерный дефолт (может быть больше минуты на нестабильной домашней сети/впн) -
+// это касается manager/logist на самом первом входе (loadData() идёт в Apps Script,
+// единственный путь для этих ролей, см. там же), человек просто вечно смотрит на загрузочный
+// логотип без единой подсказки, что происходит. AbortController обрывает КАЖДУЮ попытку
+// через FETCH_TIMEOUT_MS - дальше идёт обычный повтор, как раньше, просто теперь ограничен
+// по времени, а не бесконечен.
+var FETCH_TIMEOUT_MS = 15000;
 async function fetchJsonWithRetry_(url, attempts) {
   attempts = attempts || 3;
   var lastErr;
   for (var i = 0; i < attempts; i++) {
+    var controller = new AbortController();
+    var timer = setTimeout(function() { controller.abort(); }, FETCH_TIMEOUT_MS);
     try {
-      var res = await fetch(url);
+      var res = await fetch(url, { signal: controller.signal });
+      clearTimeout(timer);
       return await res.json();
     } catch (e) {
-      lastErr = e;
+      clearTimeout(timer);
+      lastErr = (e && e.name === 'AbortError')
+        ? new Error('Сервер входа не отвечает - проверьте интернет-соединение (или отключите VPN, если он включён)')
+        : e;
       if (i < attempts - 1) await new Promise(function(r) { setTimeout(r, 700 + i * 500); });
     }
   }
@@ -9137,7 +9328,8 @@ function setMyPageMgrProblemsFilter(f) { myPageMgrProblemsFilter = f; renderMyPa
 var PAGE_COL = { red:'#E24B4A', amber:'#EF9F27', green:'#1D9E75', blue:'#378ADD' };
 // Десятичный знак - ЗАПЯТАЯ (ГОСТ раздел 2). В легаси была точка («5.0 млн»),
 // поймано при переносе кабины смены 29.08 - правится тут, для всей личной страницы.
-function pageMln_(n) { var x=Math.abs(n||0); var sg=(n||0)<0?'-':''; return x>=1000000 ? sg+(x/1000000).toFixed(1).replace('.',',')+' млн ₽' : sg+Math.round(x).toLocaleString('ru-RU')+' ₽'; }
+//   перед "млн"/"₽" - тот же фикс сироты-символа, что в pageFr_ выше (20.09).
+function pageMln_(n) { var x=Math.abs(n||0); var sg=(n||0)<0?'-':''; return x>=1000000 ? sg+(x/1000000).toFixed(1).replace('.',',')+' млн ₽' : sg+Math.round(x).toLocaleString('ru-RU')+' ₽'; }
 // Экранирование для строк, приходящих из 1С (имена контрагентов и т.п.). Внутри
 // калькулятора свой escHtml_ живёт в IIFE и снаружи недоступен - здесь глобальный.
 function pageEsc_(s) {
@@ -9156,7 +9348,12 @@ function pageEscAttr_(s) {
   var jsSafe = String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
   return pageEsc_(jsSafe);
 }
-function pageFr_(n) { return n ? Math.round(n).toLocaleString('ru-RU')+' ₽' : '—'; }
+// НАЙДЕННЫЙ БАГ (Влад, 20.09, скриншот "Личная страница"): обычный пробел перед "₽"
+// давал браузеру право перенести знак валюты одиноко на новую строку при недостатке
+// ширины (узкие карточки на мобильном) - "...хватило бы 3 935 378" и "₽" сиротой ниже.
+//   (неразрывный пробел) держит число и "₽" вместе. Функция общая на весь
+// дашборд - фикс в одном месте чинит эту категорию бага везде, не только на этой странице.
+function pageFr_(n) { return n ? Math.round(n).toLocaleString('ru-RU')+' ₽' : '—'; }
 function pageBlock_(title, bodyHtml) {
   return '<div class="card" style="margin-bottom:14px;padding:16px 18px">'+
     '<div style="font-size:14px;font-weight:600;margin-bottom:8px">'+title+'</div>'+bodyHtml+'</div>';
@@ -9283,7 +9480,7 @@ function mpSalShareHtml_(parts, totalSal) {
 function mpSalRow_(swColor, label, val, detail, pct) {
   // Честный ноль: pageFr_(0) даёт «—», а прочерк читается как «расчёт не пришёл»,
   // хотя оклад 0 при обороте ниже первой ступени - нормальное значение.
-  var valTxt = (val ? pageFr_(val) : '0 ₽');
+  var valTxt = (val ? pageFr_(val) : '0 ₽');
   return '<div class="mp-srow">'+
     '<div class="mp-srow__top">'+
       '<span class="mp-srow__k"><span class="mp-srow__sw" style="background:'+swColor+'"></span>'+label+'</span>'+
@@ -10108,7 +10305,7 @@ async function renderMyPageManager(el, current, selectorHtml, d) {
       mpSalShareHtml_(parts, totalSal) +
       srows +
       '<div class="mp-total"><span class="mp-total__k">Итого на сегодня</span>'+
-        '<span class="mp-total__v">'+(totalSal ? pageFr_(totalSal) : '0 ₽')+'</span></div>' +
+        '<span class="mp-total__v">'+(totalSal ? pageFr_(totalSal) : '0 ₽')+'</span></div>' +
       (salForecastTotal ? mpSalForecastBarHtml_(totalSal, salForecastTotal) : '');
   }
 
@@ -11537,8 +11734,9 @@ function renderMyPageRyschanow(el, current, selectorHtml, d) {
 // существующий action=vehicles_period, только когда выбран именно Васин.
 async function renderMyPageVasin(el, current, selectorHtml) {
   var COL = { red:'#E24B4A', amber:'#EF9F27', green:'#1D9E75', blue:'#378ADD' };
-  function mln(n) { var x=Math.abs(n||0); var sg=(n||0)<0?'-':''; return x>=1000000 ? sg+(x/1000000).toFixed(1)+' млн ₽' : sg+Math.round(x).toLocaleString('ru-RU')+' ₽'; }
-  function fr(n) { return n ? Math.round(n).toLocaleString('ru-RU')+' ₽' : '—'; }
+  //   перед "млн"/"₽" - тот же фикс сироты-символа, что в pageFr_/pageMln_ (20.09).
+  function mln(n) { var x=Math.abs(n||0); var sg=(n||0)<0?'-':''; return x>=1000000 ? sg+(x/1000000).toFixed(1)+' млн ₽' : sg+Math.round(x).toLocaleString('ru-RU')+' ₽'; }
+  function fr(n) { return n ? Math.round(n).toLocaleString('ru-RU')+' ₽' : '—'; }
   function block(title, bodyHtml) {
     return '<div class="card" style="margin-bottom:14px;padding:16px 18px">'+
       '<div style="font-size:14px;font-weight:600;margin-bottom:8px">'+title+'</div>'+bodyHtml+'</div>';
@@ -12400,7 +12598,22 @@ function mechFinishRepair_() {
   }).catch(function(e) { p2Toast('Не сохранилось: ' + e.message, 'red'); });
 }
 
+// Восстановление "Смотреть как" после перехода обратно с orders-m.html/plan-m.html (19.09) -
+// один раз за загрузку страницы, см. комментарий у setViewAs(). Не после КАЖДОГО render() -
+// иначе admin, явно нажавший "Обычный вид" (setViewAs(null,null) уже стёр localStorage,
+// но render() внутри той же функции вызовется ДО следующей загрузки страницы) не смог бы
+// выйти из вьювера на текущей вкладке.
+let viewAsRestorePending_ = true;
 function render() {
+  if (viewAsRestorePending_) {
+    viewAsRestorePending_ = false;
+    if (D && D.role === 'admin' && !viewAsEntry) {
+      try {
+        var savedViewAs_ = JSON.parse(localStorage.getItem('view_as') || 'null');
+        if (savedViewAs_ && savedViewAs_.name && savedViewAs_.type) viewAsEntry = savedViewAs_;
+      } catch (e) {}
+    }
+  }
   updateFreshnessDisplays_(); // честно из последнего известного data_age_min, см. Этап 0.1
   checkDataFreshness(); // свежий опрос + плашка "обновление не проходит", см. Этап 0.1/0.3
   updatePagePeriod_(); // "Август 2026 · день N из M · данные 1С HH:MM" в шапке
@@ -12527,7 +12740,10 @@ function applyRoleUI() {
     // «Отдел Тралы» (10.09, Влад: «хочу, чтобы у каждого менеджера и старшего появилась
     // новая вкладка отдел Тралы») - общая картина продаж отдела, тот же экран, что у
     // директора, но только текущий месяц и без раскрытия чужих заказов.
-    if (isManagerViewer_) allowedPages_.push('dept-trals');
+    // 20.09, Влад: "скрыть для менеджеров, оставить только Лиане и Айнур" - сузили с ВСЕХ
+    // менеджеров до тех же двух руководителей коммерческих групп, что и «Суды»/«Зарплата»
+    // выше (isCommercialHeadViewer = Ахтамова/Гусейнова, см. COMMERCIAL_HEAD_SUR_FRONT_).
+    if (isCommercialHeadViewer) allowedPages_.push('dept-trals');
     document.querySelectorAll('.sidebar-nav-item').forEach(function(item) {
       const page = item.getAttribute('data-page');
       item.style.display = allowedPages_.indexOf(page) >= 0 ? '' : 'none';
@@ -12666,6 +12882,14 @@ function renderViewAsPanel_() {
 
 function setViewAs(name, type) {
   viewAsEntry = name ? { name: name, type: type } : null;
+  // Сохраняем в localStorage (19.09, Влад: "захожу во вьювер на телефоне, перехожу в
+  // Задание - там уже вижу СЕБЯ, а не Савиток") - viewAsEntry раньше жил только в этой
+  // JS-переменной, при переходе на orders-m.html/plan-m.html (отдельные HTML-файлы)
+  // терялся мгновенно. orders-m.html/plan-m.html читают этот же ключ при загрузке.
+  try {
+    if (viewAsEntry) localStorage.setItem('view_as', JSON.stringify(viewAsEntry));
+    else localStorage.removeItem('view_as');
+  } catch (e) {}
   myPagePeriod = null; // сброс "прошлого месяца" - иначе можно унести чужой кэш периода на нового человека
   // сброс кэша страницы механика (08.09, найдено живьём Владом) - mechFleet_ теперь
   // персонально-ограничен сервером (?person=/сессия механика, MECHANIC_SEGMENT_BY_SUR_), а
@@ -18258,6 +18482,51 @@ var dvState_ = {
   q: '', type: '', st: {}, sortK: 'rev', sortDir: -1,
   car: null, lastCar: null, period: 'all', month: null, listScrollY: 0
 };
+
+/* ── Журнал живых сложностей на «Динамике» (Влад 15.09, принимая превью: «что-то будем
+   корректировать уже в процессе эксплуатации» - значит правки должны опираться на
+   данные, а не на воспоминания). Тот же ui_events/POST /api/ui_event, что на «Задании»
+   и Планировке, но здесь события идут через общую очередь (см. logUiEvent_ выше):
+   страница тяжёлая, запрос на каждый чих недопустим.
+   ЧТО НЕ ПИШЕМ: суммы, ФИО водителей, связку госномер-водитель. Госномер сам по себе -
+   инвентарный номер техники, без него журнал бесполезен. Поисковый запрос пишем как
+   набран: это собственный ввод Влада, ради него всё и затевалось (видно, что он ищет
+   «в325», а поиск требует «В 325 МХ 797»). */
+var dvViewportLogged_ = false;   // ширина окна - раз на реальную загрузку, не на каждый возврат
+var dvCarOpenAt_ = 0;            // когда открыли паспорт - для «сколько на нём пробыл»
+var dvCloseHow_ = 'back';        // чем закрыли: back | esc | switch | nav
+var dvSearchTimer_ = null, dvLastEmptyQ_ = '';
+function dvLog_(type, target, detail) { try { logUiEvent_('dynamics', type, target, detail); } catch (e) {} }
+function dvLogCarOpen_(gos, how) { dvCarOpenAt_ = Date.now(); dvLog_('passport_open', gos, how || ''); }
+function dvLogCarClose_(how) {
+  var sec = dvCarOpenAt_ ? Math.round((Date.now() - dvCarOpenAt_) / 1000) : -1;
+  dvCarOpenAt_ = 0;
+  dvLog_('passport_close', dvState_.car || '', (sec >= 0 ? sec : '?') + 'с·' + (how || 'back'));
+}
+/* Уход со страницы ЦЕЛИКОМ (закрыл вкладку, обновил, ушёл по ссылке): dvBackToList_ при
+   этом не зовётся, и время на паспорте потерялось бы - а «сколько пробыл» ради него всё и
+   меряется. Слушатель объявлен ЗДЕСЬ, выше по файлу, чем общий flushUiEvents_ на pagehide:
+   порядок регистрации = порядок вызова, значит запись успевает лечь в очередь ДО отправки
+   пачки. Переключение вкладки (visibilitychange) сюда сознательно не входит - человек
+   вернётся, паспорт всё ещё открыт, это не закрытие. */
+window.addEventListener('pagehide', function() { if (dvState_.car) dvLogCarClose_('unload'); });
+window.addEventListener('pageshow', function(e) { if (e.persisted && dvState_.car) dvCarOpenAt_ = Date.now(); });
+/* Поиск пишем не на каждую букву, а когда набор ОСТАНОВИЛСЯ и в списке пусто - иначе
+   один «В 325 МХ 797» дал бы дюжину записей вместо одной осмысленной. */
+function dvQueueSearchLog_() {
+  if (dvSearchTimer_) clearTimeout(dvSearchTimer_);
+  dvSearchTimer_ = setTimeout(function() {
+    dvSearchTimer_ = null;
+    try {
+      if (!dvData_) return;              // данных ещё нет - пустой список тут не про поиск
+      var q = dvState_.q.trim();
+      if (!q || dvVisible_().length) { dvLastEmptyQ_ = ''; return; }
+      if (q === dvLastEmptyQ_) return;
+      dvLastEmptyQ_ = q;
+      dvLog_('empty_search', 'gos', q);
+    } catch (e) {}
+  }, 900);
+}
 var DV_NUM_KEYS = { work: 1, repair: 1, no_order: 1, no_driver: 1, rev: 1, vp: 1 };
 
 function dvEl_(id) { return document.getElementById(id); }
@@ -18360,6 +18629,14 @@ function loadHistoryData() {
   // источник (D), не история статусов, поэтому рисуем её независимо от того, дошли
   // ли данные ленты.
   try { renderDrivers(); } catch (e) {}
+  // С какого экрана Влад реально смотрит (флаг - иначе писалось бы на каждый возврат
+  // на вкладку; тот же приём, что lpViewportLogged_ на Планировке). Нулевой размер не
+  // пишем и флаг не ставим: страница могла отрисоваться в скрытом окне (известная ловушка
+  // проекта - у скрытой панели геометрия 0), «0x0» в журнале - мусор, а не наблюдение.
+  if (!dvViewportLogged_ && window.innerWidth > 0) {
+    dvViewportLogged_ = true;
+    dvLog_('viewport', '', window.innerWidth + 'x' + window.innerHeight);
+  }
   if (dvData_ && dvLoadedPeriod_ === histPeriod) { dvRenderAll_(); return; }
   dvLoad_();
 }
@@ -18383,6 +18660,9 @@ function dvLoad_() {
     dvRenderAll_();
   };
   var goFallback = function() {
+    // Уход на резервный источник - прямой сигнал «сервера не было». Пишем ДО попытки:
+    // она сама может не дойти, а знать о падении сервера всё равно надо.
+    dvLog_('fallback', 'vehicle_timeline', dvServerErr_ || 'нет ответа');
     return ensureHistData()
       .then(function(rows) { finish(dvBuildFromRows_(rows, rng), false, 'fallback'); })
       .catch(function() { dvBusy_ = false; if (btn) btn.disabled = false; dvFail_(); });
@@ -18419,6 +18699,7 @@ function dvNarrowToData_(ds) {
 }
 
 function dvFail_() {
+  dvLog_('load_error', 'vehicle_timeline', dvServerErr_ || 'молчат оба источника');
   dvSetSync_('данные недоступны', true);
   var rows = dvEl_('dv-rows');
   if (rows) rows.innerHTML = '<div class="dv-nores"><div class="dv-nores__t">История по дням недоступна</div>' +
@@ -18430,12 +18711,16 @@ function dvFail_() {
 }
 
 function dvRefresh_() {
+  // Ручное «Обновить данные» - сигнал недоверия к цифрам на экране («а вдруг там старое?»).
+  // Если этой записи много - объяснение свежести на странице не работает, а не сервер.
+  dvLog_('refresh', '', '');
   dvData_ = null; dvLoadedPeriod_ = null;
   if (typeof uiSounds !== 'undefined' && uiSounds.refresh) uiSounds.refresh();
   dvLoad_();
 }
 
 function setHistPeriod(months, btn) {
+  dvLog_('period', String(months), months ? months + ' мес' : 'всё');
   histPeriod = months;
   // Сбрасываем только кнопки периода внутри «Динамики»
   var page = dvPage_();
@@ -18843,13 +19128,14 @@ function dvBind_() {
   if (dvBound_) return;
   dvBound_ = true;
 
-  dvEl_('dv-q').addEventListener('input', function() { dvState_.q = this.value; dvRender_(); });
-  dvEl_('dv-type').addEventListener('change', function() { dvState_.type = this.value; dvRender_(); });
+  dvEl_('dv-q').addEventListener('input', function() { dvState_.q = this.value; dvRender_(); dvQueueSearchLog_(); });
+  dvEl_('dv-type').addEventListener('change', function() { dvState_.type = this.value; dvRender_(); dvLog_('filter', 'type', this.value || '(все типы)'); });
   document.querySelectorAll('#page-dynamics .dv-chip[data-st]').forEach(function(ch) {
     ch.addEventListener('click', function() {
       var s = ch.getAttribute('data-st');
       dvState_.st[s] = !dvState_.st[s];
       ch.classList.toggle('on', !!dvState_.st[s]);
+      dvLog_('filter', 'chip:' + s, dvState_.st[s] ? 'вкл' : 'выкл');
       dvRender_();
     });
   });
@@ -18858,6 +19144,7 @@ function dvBind_() {
     dvEl_('dv-q').value = ''; dvEl_('dv-type').value = '';
     document.querySelectorAll('#page-dynamics .dv-chip[data-st]').forEach(function(c) { c.classList.remove('on'); });
     if (typeof uiSounds !== 'undefined') uiSounds.toggle();
+    dvLog_('filter', 'reset', '');
     dvRender_();
   });
   dvEl_('dv-thead').addEventListener('click', function(e) {
@@ -18866,12 +19153,48 @@ function dvBind_() {
     if (dvState_.sortK === k) dvState_.sortDir = -dvState_.sortDir;
     else { dvState_.sortK = k; dvState_.sortDir = DV_NUM_KEYS[k] ? -1 : 1; }  // числовые - сначала по убыванию
     if (typeof uiSounds !== 'undefined') uiSounds.navClick();
+    dvLog_('sort', k, dvState_.sortDir > 0 ? 'по возрастанию' : 'по убыванию');
     dvRender_();
   });
+  // Только делегирование: на 5500 клеток ленты не вешается НИ ОДНОГО обработчика и в
+  // разметку клетки не добавляется ни одного атрибута - день вычисляется позицией
+  // клетки среди соседей и только в момент клика.
   dvEl_('dv-rows').addEventListener('click', function(e) {
-    var row = e.target.closest('.dv-vrow'); if (!row) return;
-    dvOpenCar_(row.getAttribute('data-gos'));
+    var row = e.target.closest ? e.target.closest('.dv-vrow') : null;
+    if (!row) { dvLog_('dead_click', 'nores', dvState_.q || '(без поиска)'); return; }
+    var cell = e.target.closest('.dv-day');
+    if (cell && cell.classList.contains('dv-day--nodata') && cell.parentNode) {
+      var ix = Array.prototype.indexOf.call(cell.parentNode.children, cell);
+      dvLog_('dead_click', 'day_nodata', (dvDays_[ix] || '?') + ' ' + row.getAttribute('data-gos'));
+    }
+    dvOpenCar_(row.getAttribute('data-gos'), 'row');
   });
+  // Полоса парка выглядит интерактивной (подсветка колонки, HUD), но по клику не делает
+  // ничего - это и есть «нажал, а не сработало». День берём из уже посчитанного индекса
+  // подсветки, ничего дополнительно не меряем.
+  dvEl_('dv-band').addEventListener('click', function(e) {
+    var i = dvHlIx_;
+    if (i < 0) {                                        // клик без предшествующего наведения
+      var lane = dvEl_('dv-bandlane'), r = lane.getBoundingClientRect();
+      if (r.width) i = Math.floor((e.clientX - r.left) / (dvGeom_.cw + dvGeom_.gp));
+    }
+    dvLog_('dead_click', 'band', (i >= 0 && dvDays_[i]) ? dvDays_[i] : '');
+  });
+  // Клик по НЕактивной кнопке: на сам disabled-элемент браузер событий не шлёт и они не
+  // всплывают, поэтому ловим клик страницей и сверяем точку с прямоугольниками неактивных
+  // кнопок (их тут максимум две - «Сбросить» и «Обновить данные»), см. .dv-btn[disabled].
+  dvPage_().addEventListener('click', function(e) {
+    if (!e.clientX && !e.clientY) return;                 // клик с клавиатуры - координат нет
+    var btns = dvPage_().querySelectorAll('.dv-btn[disabled]');
+    for (var i = 0; i < btns.length; i++) {
+      var r = btns[i].getBoundingClientRect();
+      if (!r.width) continue;
+      if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
+        dvLog_('blocked_click', btns[i].id || 'dv-btn', (btns[i].textContent || '').trim());
+        break;
+      }
+    }
+  }, true);
 
   // ── подсветка колонки насквозь + HUD ──
   var inner = dvEl_('dv-inner'), scroller = dvEl_('dv-scroller');
@@ -18900,7 +19223,9 @@ function dvBind_() {
     var b = e.target.closest('.pm-v'); if (!b) return;
     var gos = b.getAttribute('data-gos');
     if (gos === dvState_.car) return;
+    dvLogCarClose_('switch');
     dvState_.car = gos; dvState_.lastCar = gos; dvState_.month = null;
+    dvLogCarOpen_(gos, 'list');
     dvRenderPassport_(true);
   });
   dvEl_('pm-period-chips').addEventListener('click', function(e) {
@@ -18908,6 +19233,7 @@ function dvBind_() {
     var id = b.getAttribute('data-p');
     if (id === dvState_.period) return;
     dvState_.period = id;
+    dvLog_('pm_period', id, '');
     dvRenderPeriodChips_();
     dvRenderPassport_(false);
   });
@@ -18916,6 +19242,7 @@ function dvBind_() {
     var v = dvByGos_(dvState_.car); if (!v) return;
     var prev = (dvState_.month && v.months[dvState_.month]) ? v.months[dvState_.month].profit : 0;
     dvState_.month = b.getAttribute('data-m');
+    dvLog_('pm_month', dvState_.month, '');
     var now = v.months[dvState_.month].profit;
     if (!document.hidden && typeof uiSounds !== 'undefined') (now >= prev ? uiSounds.moneyTick : uiSounds.debtTick)();
     var p = dvPeriodDef_(), m = dvMetrics_(v, p);
@@ -18928,6 +19255,13 @@ function dvBind_() {
     dvShowPop_(c.getAttribute('data-k'), dvByGos_(dvState_.car), e.clientX, e.clientY);
   });
   dvEl_('pm-cal').addEventListener('pointerleave', dvHidePop_);
+  // Календарь раскрывает день только по наведению. Клик по клетке ничего не делает -
+  // ровно тот случай «нажал, а не сработало», который просили ловить.
+  dvEl_('pm-cal').addEventListener('click', function(e) {
+    var c = e.target.closest ? e.target.closest('.pm-cell') : null;
+    if (!c) return;
+    dvLog_('dead_click', c.classList.contains('pm-cell--i') ? 'cal_day' : 'cal_empty', c.getAttribute('data-k') || '');
+  });
 
   // Клавиши работают только пока открыт паспорт на активной странице «Динамика»
   document.addEventListener('keydown', function(e) {
@@ -18936,7 +19270,7 @@ function dvBind_() {
     if (!page || !page.classList.contains('active')) return;
     var tag = (e.target && e.target.tagName) || '';
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
-    if (e.key === 'Escape') { dvBackToList_(); if (typeof uiSounds !== 'undefined') uiSounds.navClick(); return; }
+    if (e.key === 'Escape') { dvCloseHow_ = 'esc'; dvBackToList_(); if (typeof uiSounds !== 'undefined') uiSounds.navClick(); return; }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       var arr = dvVisible_(), ix = -1;
       for (var i = 0; i < arr.length; i++) if (arr[i].gos === dvState_.car) { ix = i; break; }
@@ -18944,7 +19278,9 @@ function dvBind_() {
       var ni = e.key === 'ArrowDown' ? ix + 1 : ix - 1;
       if (ni < 0 || ni >= arr.length) return;
       e.preventDefault();
+      dvLogCarClose_('switch');
       dvState_.car = arr[ni].gos; dvState_.lastCar = dvState_.car; dvState_.month = null;
+      dvLogCarOpen_(dvState_.car, 'arrow');
       if (typeof uiSounds !== 'undefined') uiSounds.navClick();
       dvRenderPassport_(true);
     }
@@ -19466,10 +19802,11 @@ function dvRenderPassport_(swap) {
 }
 
 /* ═══════════════════════ переключение экранов ═══════════════════════ */
-function dvOpenCar_(gos) {
+function dvOpenCar_(gos, how) {
   if (!dvByGos_(gos)) return;
   dvState_.listScrollY = window.pageYOffset || document.documentElement.scrollTop || 0;
   dvState_.car = gos; dvState_.lastCar = gos; dvState_.month = null;
+  dvLogCarOpen_(gos, how || 'row');
   dvHideHl_();
   dvEl_('dyn-scr-list').hidden = true;
   var car = dvEl_('dyn-scr-car'); car.hidden = false;
@@ -19483,6 +19820,9 @@ function dvBackToList_(silent) {
   var list = dvEl_('dyn-scr-list'), car = dvEl_('dyn-scr-car');
   if (!list || !car) return;
   var wasOpen = !!dvState_.car;
+  // Сколько пробыл на паспорте: короткий возврат - признак «не нашёл, чего искал».
+  if (wasOpen) dvLogCarClose_(silent ? 'nav' : dvCloseHow_);
+  dvCloseHow_ = 'back';
   dvState_.car = null;
   dvHidePop_();
   car.hidden = true; list.hidden = false;
@@ -20357,11 +20697,13 @@ function renderSalesMgrLegacy_() {
     var mIntThru = isPrus ? (m.internal_amount_thru_yesterday != null ? m.internal_amount_thru_yesterday : (m.internal_amount||0)) : 0;
     var amountForPace = mAmountThru - mIntThru;
     var hTag = isHead ? ' <span style="font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(29,158,117,.15);color:#1D9E75">рук.</span>' : '';
-    // Динамика "сегодня vs вчера" (Влад, 2026-07-17: "то же самое по менеджерам в количестве
-    // заказов... по нажатию показать какие именно заказы; также по выручке") - клик
-    // открывает drill-down со списком заказов, добавленных сегодня (см. toggleMgrToday).
+    // "Рейсы за вчера" (Влад, 2026-07-17, переработано 2026-09-16) - клик открывает
+    // drill-down со списком заказов по дате ПЕРЕВОЗКИ = вчера (НачалоРаб), не по дате
+    // внесения в 1С - см. plans/2026-09-16-yesterday-trips-block.md (там же разбор, почему
+    // старая версия "добавилось сегодня" по дате создания документа путала). Имена
+    // JS-переменных/toggleMgrToday не переименованы - только источник и подпись данных.
     var escName = String(m.name||'').replace(/'/g,"\\'");
-    var todayOrders = m.today_new_orders || 0, todayAmount = m.today_new_amount || 0;
+    var todayOrders = m.yesterday_orders || 0, todayAmount = m.yesterday_amount || 0;
     var ordersBadge = todayOrders > 0
       ? ' <span onclick="event.stopPropagation();toggleMgrToday(\''+escName+'\')" style="font-size:10px;color:var(--green);cursor:pointer;text-decoration:underline dotted;white-space:nowrap">▲+'+todayOrders+'</span>'
       : '';
@@ -20382,10 +20724,10 @@ function renderSalesMgrLegacy_() {
     // на странице он всегда один, т.к. открыт максимум один менеджер сразу.
     var todayRow = '';
     if (mgrTodayVisible && mgrTodayKey === m.name) {
-      var todayList = m.today_new_list || [];
+      var todayList = m.yesterday_list || [];
       todayRow = '<tr id="mgr-today-row"><td colspan="6" style="background:rgba(var(--ink),0.03);padding:10px 14px;border-top:1px dashed var(--border)">' +
         '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">' +
-          '<div style="font-size:12px;font-weight:600">Что добавилось сегодня</div>' +
+          '<div style="font-size:12px;font-weight:600">Рейсы за вчера</div>' +
           '<div class="muted" style="font-size:11px">'+todayList.length+' '+(todayList.length===1?'заказ':'заказов')+' · '+fmtN(todayAmount)+'</div>' +
         '</div>' +
         (todayList.length
@@ -20393,6 +20735,7 @@ function renderSalesMgrLegacy_() {
               todayList.map(function(o) {
                 return '<tr><td style="padding:2px 10px 2px 0;color:var(--muted)">'+(o.id||'—')+'</td>' +
                   '<td style="padding:2px 10px 2px 0">'+(o.customer||'').substring(0,50)+'</td>' +
+                  '<td style="padding:2px 10px 2px 0;color:var(--muted)">'+(o.cargo||'—').substring(0,40)+'</td>' +
                   '<td class="num" style="padding:2px 0">'+fmtN(o.amount||0)+'</td></tr>';
               }).join('') +
             '</table>'
@@ -20668,14 +21011,20 @@ function renderSalesMgrGost_(opts) {
       var pct = mPlan ? Math.round(amount / mPlan * 100) : 0;
       var frc = mPlan ? Math.round(aY * pace / mPlan * 100) : 0;
       var escName = String(m.name || '').replace(/'/g, "\\'");
-      // Дельта «сегодня» - единственное место, где ГОСТ разрешает красить текст (раздел 1).
+      // Дельта «вчера» (было «сегодня» до 2026-09-16, см. yesterday_orders/amount ниже) -
+      // единственное место, где ГОСТ разрешает красить текст (раздел 1).
       // Влад, 10.09: «без возможности смотреть личные заказы какие прибавились, только
       // цифры по прибавке» - в режиме только-чтение дельта не кликается и списка нет.
       var dOpen = readOnly ? '' : ' onclick="event.stopPropagation();toggleMgrToday(\'' + escName + '\')" style="cursor:pointer;text-decoration:underline dotted"';
-      var dOrd = (m.today_new_orders > 0)
-        ? ' <span class="sm-delta"' + dOpen + '>+' + m.today_new_orders + '</span>' : '';
-      var dAmt = (m.today_new_amount > 0)
-        ? ' <span class="sm-delta"' + dOpen + '>+' + smFmt_(m.today_new_amount) + '</span>' : '';
+      var dOrd = (m.yesterday_orders > 0)
+        ? ' <span class="sm-delta"' + dOpen + '>+' + m.yesterday_orders + '</span>' : '';
+      var dAmt = (m.yesterday_amount > 0)
+        ? ' <span class="sm-delta"' + dOpen + '>+' + smFmt_(m.yesterday_amount) + '</span>' : '';
+      // Подсказка с прогнозом при наведении на полоску ЛИЧНОГО плана (16.09, Влад: "при
+      // наведении на полоску с выполнением должно всплывать подсказка какой прогноз
+      // выполнения") - только у отдельного менеджера в таблице, не у плиток отделов сверху
+      // и не у строки "Итого отдела" - см. plans/2026-09-16-yesterday-trips-block.md.
+      var planTitle = mPlan ? ' title="Прогноз к концу месяца: ' + smFmt_(Math.round(aY * pace)) + ' ₽ (' + frc + '%)"' : '';
       t += '<tr>' +
         '<td><b>' + cleanName(m.name) + '</b>' + (r.isHead ? ' <span style="font-size:10px;color:var(--muted)">рук.</span>' : '') + '</td>' +
         '<td class="num">' + smNum_(String(orders)) + dOrd + '</td>' +
@@ -20685,21 +21034,23 @@ function renderSalesMgrGost_(opts) {
         '<td class="num">' + smNum_(smFmt_(m.profit || 0), '', (m.profit || 0) < 0 ? 'color:var(--red)' : '') + '</td>' +
         '<td class="num">' + smNum_(String(m.hired_orders || 0) || '—', '', 'color:var(--muted)') + '</td>' +
         '<td>' + (mPlan
-          ? '<div class="sm-plan-cell">' + smBullet_(pct, frc, 5, 200) + '<span class="sm-plan-pct sm-num">' + pct + '%</span></div>'
+          ? '<div class="sm-plan-cell"' + planTitle + '>' + smBullet_(pct, frc, 5, 200) + '<span class="sm-plan-pct sm-num">' + pct + '%</span></div>'
           : '<span class="muted" style="font-size:11px">без плана</span>') + '</td>' +
       '</tr>';
-      // Разворот «что добавилось сегодня» - тот же контракт, что в старом виде.
+      // Разворот «рейсы за вчера» - тот же контракт, что в старом виде, только по дате
+      // перевозки, не по дате внесения в 1С (2026-09-16, см. yesterday_list).
       if (!readOnly && mgrTodayVisible && mgrTodayKey === m.name) {
-        var list = m.today_new_list || [];
+        var list = m.yesterday_list || [];
         t += '<tr id="mgr-today-row"><td colspan="8" style="background:rgba(var(--ink),0.03);padding:10px 14px;border-top:1px dashed var(--border)">' +
           '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">' +
-            '<div style="font-size:12px;font-weight:600">Что добавилось сегодня</div>' +
-            '<div class="muted" style="font-size:11px">' + list.length + ' ' + (list.length === 1 ? 'заказ' : 'заказов') + ' · ' + smFmt_(m.today_new_amount || 0) + '</div>' +
+            '<div style="font-size:12px;font-weight:600">Рейсы за вчера</div>' +
+            '<div class="muted" style="font-size:11px">' + list.length + ' ' + (list.length === 1 ? 'заказ' : 'заказов') + ' · ' + smFmt_(m.yesterday_amount || 0) + '</div>' +
           '</div>' +
           (list.length
             ? '<table style="width:100%;font-size:12px;border-collapse:collapse">' + list.map(function (x) {
                 return '<tr><td style="padding:2px 10px 2px 0;color:var(--muted)">' + (x.id || '—') + '</td>' +
                   '<td style="padding:2px 10px 2px 0">' + String(x.customer || '').substring(0, 50) + '</td>' +
+                  '<td style="padding:2px 10px 2px 0;color:var(--muted)">' + String(x.cargo || '—').substring(0, 40) + '</td>' +
                   '<td class="num" style="padding:2px 0">' + smNum_(smFmt_(x.amount || 0)) + '</td></tr>';
               }).join('') + '</table>'
             : '<div class="muted" style="font-size:12px">Нет данных</div>') +
@@ -21736,7 +22087,13 @@ function renderCommercialHeadReceiptsPlanPage_() {
       crpAmounts_ = {}; crpFacts_ = {}; crpCarryover_ = {}; crpLockedContragents_ = {};
       // Уже отправленные строки - заморожены (см. crpLockedContragents_ выше), carryover
       // ниже - ЕЩЁ НЕ отправлен, остаётся редактируемым до первой реальной отправки.
-      items.forEach(function(it) { crpAmounts_[it.contragent] = it.planned_amount; crpFacts_[it.contragent] = it.fact_amount || 0; crpLockedContragents_[it.contragent] = true; });
+      items.forEach(function(it) {
+        crpAmounts_[it.contragent] = it.planned_amount; crpFacts_[it.contragent] = it.fact_amount || 0; crpLockedContragents_[it.contragent] = true;
+        // 18.09 - бейдж "перенос" теперь переживает перезагрузку страницы (сервер вернул
+        // carried_over из сохранённой строки) - деталей "план/факт прошлой недели" тут уже
+        // нет (это разовая подсказка при самом переносе), crpRowHtml_ покажет общий текст.
+        if (it.carried_over) crpCarryover_[it.contragent] = { prev_planned: null, prev_fact: null };
+      });
       // Перенос недоплаченных с прошлой недели (14.09, Влад: "по тем, кто не оплатил хотя
       // планировали, чтобы они были сразу же отмечены на следующую неделю") - сервер
       // предлагает carryover ТОЛЬКО когда эта неделя ещё пуста (не перезаписываем начатый
@@ -21893,7 +22250,15 @@ function crpRowHtml_(c) {
   if (inn) subParts.push('ИНН ' + inn);
   subParts.push('<button class="crp-copy-btn" onclick="crpCopyInn_(\'' + escCopy + '\')" title="' + copyTitle + '"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg></button>');
   if (manager) subParts.push(rpsShortName_(manager));
-  if (co) subParts.push('<span class="crp-tag-carry" title="Не заплатил на прошлой неделе (план ' + crpFmtInt_(co.prev_planned) + ' ₽ · факт ' + crpFmtInt_(co.prev_fact) + ' ₽)"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>перенос</span>');
+  if (co) {
+    // co.prev_planned/prev_fact есть только сразу при принятии предложения переноса (в
+    // рамках одной загрузки страницы); после перезагрузки carried_over приходит с сервера
+    // без этой детали (18.09) - показываем общую подсказку вместо "план null ₽".
+    var coTitle = co.prev_planned != null
+      ? ('Не заплатил на прошлой неделе (план ' + crpFmtInt_(co.prev_planned) + ' ₽ · факт ' + crpFmtInt_(co.prev_fact) + ' ₽)')
+      : 'Перенесено с прошлой недели (не доплатили, хотя планировали)';
+    subParts.push('<span class="crp-tag-carry" title="' + coTitle + '"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>перенос</span>');
+  }
   var actionHtml = locked
     ? '<span class="crp-lock" title="Уже отправлено — убрать нельзя"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span>'
     : '<button class="crp-icon-btn" onclick="crpClear_(\'' + escClear + '\')" title="Убрать из плана"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>';
@@ -22075,7 +22440,10 @@ function crpRenderInner_(cfg) {
 function crpSubmit_() {
   var items = Object.keys(crpAmounts_).filter(function(c) { return crpAmounts_[c] > 0; }).map(function(c) {
     var row = ((D.debt && D.debt.by_customer) || []).filter(function(x) { return x.contragent === c; })[0];
-    return { contragent: c, manager: row ? row.manager : null, planned_amount: crpAmounts_[c], balance_at_planning: row ? row.balance : null };
+    // carried_over (18.09, фундамент для анализа точности прогнозов) - сервер сам
+    // замораживает этот признак для уже существующих строк (см. api/server.js), это поле
+    // реально используется только при ПЕРВОМ сохранении новой строки-переноса.
+    return { contragent: c, manager: row ? row.manager : null, planned_amount: crpAmounts_[c], balance_at_planning: row ? row.balance : null, carried_over: !!crpCarryover_[c] };
   });
   postToYardApiWithBody_('/receipts_plan/set', { week: crpWeek_, head: crpHeadKey_(), items: items }).then(function(r) {
     if (!r.ok || !r.data || r.data.error) throw new Error((r.data && r.data.error) || 'ошибка сервера');
@@ -23567,6 +23935,23 @@ function toggleDebtBankruptFilter() {
   renderDebt();
 }
 
+// "Только с незакрытыми документами" (2026-09-16, Влад: "кнопочка, которая сразу
+// отфильтрует всех должников, у кого не закрыт хотя бы один документ за прошлый месяц и
+// ниже") - тот же предикат, что уже красит документ в развёрнутом списке (buildDebtDocsHtml_)
+// и рисует значок у имени в свёрнутой строке (debtDocFlagHtml_, добавлено тем же днём) -
+// debtIsOldUnclosedDoc_ ниже единственное место, где живёт это условие.
+function debtIsOldUnclosedDoc_(d, currentMonthStart) {
+  return !!(d.desc && d.desc.indexOf('Таблица заказов') === 0 && d.date < currentMonthStart);
+}
+function debtHasOldUnclosed_(c, currentMonthStart) {
+  return (c.unpaidDocs || []).some(function(d) { return debtIsOldUnclosedDoc_(d, currentMonthStart); });
+}
+let debtOnlyOldUnclosed = false; // false = по умолчанию, фильтр выключен
+function toggleDebtOldUnclosedFilter() {
+  debtOnlyOldUnclosed = !debtOnlyOldUnclosed;
+  renderDebt();
+}
+
 // Фильтр по клику на корзину просрочки в KPI (Влад, 2026-07-14: "хочу фильтр на этот
 // диапазон, можно по нажатию в блоке"). Повторный клик по активной корзине снимает фильтр.
 // 'dead' (Влад, 2026-07-16: "в блок просрочка добавь мёртвая - это от 600 дней и больше")
@@ -23798,13 +24183,20 @@ function debtDeadAndStatus_(customers) {
 function buildDebtDocsHtml_(c, currentMonthStart) {
   var showDocOrg = true;
   var sumDocDebt = 0, sumDocCovered = 0, sumNonTral = 0;
+  // Даты незакрытых "старых" документов (2026-09-16, Влад: "нужна какая-то индикация значок
+  // что не закрыты документы за прошлый и ранее месяц") - собираем ЗДЕСЬ же, тем же условием
+  // isOldUnclosed ниже, а не пересчитываем отдельно в renderDebt() - одна точка правды,
+  // значок в свёрнутой строке таблицы и подсветка в развёрнутом списке документов не могут
+  // разойтись. См. debtDocFlagHtml_ ниже и его использование в renderDebt().
+  var oldUnclosedDates = [];
   var docsHtml = (c.unpaidDocs && c.unpaidDocs.length)
     ? c.unpaidDocs.map(function(d) {
         // Не закрытый документом заказ ("Таблица заказов" - ещё не оформлен как
         // "Реализация") из прошлого месяца или раньше - ярко подсвечиваем (Влад,
         // 2026-07-11): "вижу, что заказ в прошлом месяце даже не закрыт... нужно
         // обратить внимание в первую очередь - закрыть, а уже потом получить деньги".
-        var isOldUnclosed = d.desc && d.desc.indexOf('Таблица заказов') === 0 && d.date < currentMonthStart;
+        var isOldUnclosed = debtIsOldUnclosedDoc_(d, currentMonthStart);
+        if (isOldUnclosed) oldUnclosedDates.push(d.date);
         var covered = d.covered || 0;
         // Документ менеджера с несколькими отделами (Ратников), не нашедшийся в таблице
         // заказов - уже НЕ входит в balance/byOrgBalance на бэкенде (см. parseDebtRawRows_,
@@ -23869,7 +24261,23 @@ function buildDebtDocsHtml_(c, currentMonthStart) {
         'Итого по документам: ' + fmt(sumDocDebt) + ' · ' + coverageLabel + nonTralLine +
         ' · Открыто по факту: <b>' + fmt(sumDocDebt - sumDocCovered) + '</b></div>'
     : '';
-  return { docsHtml: docsHtml, reconcileLine: reconcileLine };
+  return { docsHtml: docsHtml, reconcileLine: reconcileLine, oldUnclosedDates: oldUnclosedDates };
+}
+
+// Значок "документы не закрыты за прошлый/более ранний месяц" (2026-09-16, Влад, превью
+// согласовано) - у свёрнутой строки "Должники", рядом с именем контрагента. Жёлтый - один
+// месяц, красный - два и больше (чем дольше висит незакрытым, тем острее). Подсказка при
+// наведении - конкретные месяцы, тем же приёмом, что title у колонок "Зарплаты машинистов".
+function debtDocFlagHtml_(dates) {
+  if (!dates || !dates.length) return '';
+  var months = {};
+  dates.forEach(function(d) { months[String(d).slice(0, 7)] = true; });
+  var monthKeys = Object.keys(months).sort();
+  if (!monthKeys.length) return '';
+  var color = monthKeys.length >= 2 ? 'var(--red)' : 'var(--amber)';
+  var title = 'Документы не закрыты: ' + monthKeys.map(formatMonthLabel).join(', ');
+  return ' <span title="' + title.replace(/"/g, '&quot;') + '" style="display:inline-flex;vertical-align:middle;margin-left:4px;color:' + color + '">' +
+    '<svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2.5h8l3 3v12h-11z"/><path d="M13 2.5v3h3"/><path d="M7 11h6M7 14h4"/></svg></span>';
 }
 
 // ── КАРТОЧКА КОНТРАГЕНТА (ДЗ) ─────────────────────────────────
@@ -24652,6 +25060,11 @@ function renderDebt() {
     bankruptToggleBtn.style.background = debtHideBankrupt ? 'var(--bg3)' : 'var(--red)';
     bankruptToggleBtn.style.color = debtHideBankrupt ? 'var(--text)' : '#fff';
   }
+  const oldUnclosedToggleBtn = document.getElementById('debt-old-unclosed-toggle-btn');
+  if (oldUnclosedToggleBtn) {
+    oldUnclosedToggleBtn.style.background = debtOnlyOldUnclosed ? 'var(--amber)' : 'var(--bg3)';
+    oldUnclosedToggleBtn.style.color = debtOnlyOldUnclosed ? '#000' : 'var(--text)';
+  }
   // Банкроты (Влад, 2026-07-16: "чтобы не показывало банкротов вообще нигде") - фильтруются
   // ПЕРВЫМИ, до фильтра возраста, т.к. должны быть скрыты из ВСЕГО (в отличие от 600-дневного
   // фильтра, который не трогает график истории - банкроты исключены и из него, но уже на
@@ -24943,6 +25356,11 @@ function renderDebt() {
       : debtManagerFilters.size === 1 ? cleanName(Array.from(debtManagerFilters)[0]) + ' ▾'
       : 'Менеджеров: ' + debtManagerFilters.size + ' ▾';
   }
+  // Начало текущего месяца - нужно и для фильтра "Таблица заказов" ниже, и для подсветки
+  // старых незакрытых документов в строках (используется по всей функции, поэтому считаем
+  // один раз здесь, до цепочки фильтров, а не только перед .map(), как было).
+  var todayForHighlight = new Date();
+  var currentMonthStart = todayForHighlight.getFullYear() + '-' + String(todayForHighlight.getMonth()+1).padStart(2,'0') + '-01';
   var customersFiltered = debtManagerFilters.size
     ? ageFiltered.filter(function(c){ return debtManagerFilters.has(c.manager); })
     : ageFiltered;
@@ -24953,6 +25371,13 @@ function renderDebt() {
   }
   if (debtStatusFilter) {
     customersFiltered = customersFiltered.filter(function(c){ return (c.status || '(без статуса)') === debtStatusFilter; });
+  }
+  // "Только с незакрытыми документами" (2026-09-16, Влад: "кнопочка, которая сразу
+  // отфильтрует всех должников, у кого не закрыт хотя бы один документ за прошлый месяц и
+  // ниже") - тот же предикат, что уже красит документ в развёрнутом списке и рисует значок
+  // у имени (debtIsOldUnclosedDoc_/debtHasOldUnclosed_ ниже) - одна точка правды.
+  if (debtOnlyOldUnclosed) {
+    customersFiltered = customersFiltered.filter(function(c){ return debtHasOldUnclosed_(c, currentMonthStart); });
   }
   // dir = -1 -> по убыванию (стрелка ▼), dir = +1 -> по возрастанию (▲). Знак стоит
   // ПЕРЕД разностью, а не после: (bv-av) уже само по себе убывание, и умножение на -1
@@ -24976,12 +25401,9 @@ function renderDebt() {
 
   // Возраст долга - светофор по дням с даты старейшего неоплаченного документа.
   function ageCls(days) { return days > 90 ? 'red' : days > 60 ? 'amber' : days > 30 ? 'amber' : 'green'; }
-  // Начало текущего месяца - для подсветки "Таблица заказов" за прошлые месяцы (Влад,
-  // 2026-07-11): "Таблица заказов" = заказ ещё не закрыт документом (не оформлен как
-  // "Реализация"). Если такой заказ уже из прошлого месяца - это сигнал в первую очередь
-  // закрыть документ, а потом уже гнаться за оплатой.
-  var todayForHighlight = new Date();
-  var currentMonthStart = todayForHighlight.getFullYear() + '-' + String(todayForHighlight.getMonth()+1).padStart(2,'0') + '-01';
+  // currentMonthStart - см. объявление выше, перед цепочкой фильтров ("Таблица заказов" из
+  // прошлого месяца или раньше - Влад, 2026-07-11 - не закрыта как "Реализация", сигнал
+  // закрыть документ в первую очередь, потом уже гнаться за оплатой).
   document.getElementById('debt-customers-body').innerHTML = customersFiltered.map(function(c, i) {
     // Разбивка по юрлицам группы - показываем всегда, для каждого контрагента, даже если
     // юрлицо только одно (Влад, 2026-07-10: "не только смешанные долги, но и везде -
@@ -25012,7 +25434,7 @@ function renderDebt() {
       'style="background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:0 4px" title="Карточка контрагента">📝' +
       (c.comment ? '<span style="color:var(--amber)">●</span>' : '') + '</button>';
     return '<tr class="debt-row-toggle" onclick="toggleDebtDetail(' + i + ')" style="cursor:pointer">' +
-      '<td>' + cardBtn + '<span id="debt-arrow-' + i + '" class="muted" style="display:inline-block;width:14px">▸</span>' + debtRiskDotHtml_(c.contragent) + courtMarkHtml_(c.contragent) + '<b>' + c.contragent + '</b>' + byOrgLine + '</td>' +
+      '<td>' + cardBtn + '<span id="debt-arrow-' + i + '" class="muted" style="display:inline-block;width:14px">▸</span>' + debtRiskDotHtml_(c.contragent) + courtMarkHtml_(c.contragent) + '<b>' + c.contragent + '</b>' + debtDocFlagHtml_(docs.oldUnclosedDates) + byOrgLine + '</td>' +
       '<td class="muted">' + cleanName(c.manager) + '</td>' +
       '<td class="num"><b>' + fmt(c.balance) + '</b></td>' +
       '<td class="num ' + ageCls(c.daysOverdue) + '">' + c.daysOverdue + '</td>' +
@@ -25070,12 +25492,18 @@ const RANGE_PAGES = ['vehicles'];
 // без единой кнопки, чтобы вернуть его). Кнопка/overlay - фиксированные элементы
 // вне .sidebar/.page-header, видны только на мобильном (см. @media в <style>).
 function toggleMobileSidebar() {
-  document.querySelector('.sidebar').classList.toggle('open');
-  document.getElementById('sidebar-overlay').classList.toggle('open');
+  var open = document.querySelector('.sidebar').classList.toggle('open');
+  document.getElementById('sidebar-overlay').classList.toggle('open', open);
+  // Влад, 19.09: гамбургер (fixed, top:14px/left:14px, z-index выше .sidebar) рисовался
+  // ПРЯМО ПОВЕРХ "ЯРД HUB" в шапке открытой панели - .sidebar-logo сидит в тех же
+  // координатах. Пока панель открыта, сама кнопка не нужна (закрыть - тап по затемнению
+  // или по пункту меню), поэтому прячем её на время, а не сталкиваем координаты.
+  document.getElementById('mobile-menu-btn').style.visibility = open ? 'hidden' : '';
 }
 function closeMobileSidebar() {
   document.querySelector('.sidebar').classList.remove('open');
   document.getElementById('sidebar-overlay').classList.remove('open');
+  document.getElementById('mobile-menu-btn').style.visibility = '';
 }
 
 // Сворачивание сайдбара НА ДЕСКТОПЕ (Влад, 29.08: "боковое меню на самой системе,
@@ -26006,6 +26434,21 @@ function showPage(id, el) {
     try { lpRole_ = (typeof D !== 'undefined' && D && D.role) || localStorage.getItem('user_role') || ''; } catch(e){}
     if (lpMobile_ && !lpOptOut_ && (lpRole_ === 'logist' || lpRole_ === 'manager' || lpRole_ === 'admin')) {
       location.href = 'plan-m.html';
+      return;
+    }
+  }
+  // «Задание» с узкого сенсорного экрана - тот же приём, что у «Планировки» выше (19.09,
+  // files/orders-m.html, вариант «Лента», утверждён Владом). Закрывает ту же «вторую дверь» -
+  // прямой заход в браузере/по ссылке на #page=order-plan, минуя plan-m.html.
+  if (id === 'order-plan') {
+    var opMobile_ = false, opRole_ = '';
+    try {
+      var mmOP_ = window.matchMedia;
+      opMobile_ = mmOP_ ? ((mmOP_('(pointer: coarse)').matches && mmOP_('(hover: none)').matches) || (mmOP_('(pointer: coarse)').matches && window.innerWidth <= 680)) : (window.innerWidth <= 680);
+    } catch(e){}
+    try { opRole_ = (typeof D !== 'undefined' && D && D.role) || localStorage.getItem('user_role') || ''; } catch(e){}
+    if (opMobile_ && (opRole_ === 'logist' || opRole_ === 'manager' || opRole_ === 'admin')) {
+      location.href = 'orders-m.html';
       return;
     }
   }
@@ -29539,12 +29982,63 @@ function toggleUiSound() {
 // Планировку. Тихо, без тоста - не мешает реальному действию при сбое отправки.
 // См. память project_ui_events_friction_tracking - свериться с накопленными данными
 // ПЕРЕД доработкой уже инструментированного экрана.
+// 15.09 («Динамика»): события КОПЯТСЯ в очереди и уходят ПАЧКОЙ - раз в
+// UI_LOG_FLUSH_MS и на уходе со страницы. Повод: лента парка - до 5500 клеток, запрос
+// на каждый клик там недопустим. Это журнал эргономики, не бухгалтерия: очередь
+// ограничена, при переполнении хвост молча теряется, ошибка отправки нигде не
+// всплывает и НИЧЕГО не ломает. Сервер принимает и пачку, и старую одиночную форму.
+var uiLogQueue_ = [];
+var uiLogTimer_ = null;
+var UI_LOG_FLUSH_MS = 4000;
+var UI_LOG_MAX_QUEUE = 120;   // потолок очереди - защита от лавины
+var UI_LOG_MAX_BATCH = 40;    // столько строк уходит одним запросом (на сервере лимит 50)
+// fetch с keepalive переживает выгрузку страницы ТАК ЖЕ, как sendBeacon, но умеет
+// заголовки - значит токен уходит в X-Session-Token, а не в URL. Это принципиально:
+// параметр в URL оседает в /var/log/nginx/access.log, и любой, у кого есть доступ к
+// логам или их бэкапу, получает действующую сессию. Проверка один раз при загрузке.
+var uiLogKeepalive_ = (function() {
+  try { return 'keepalive' in new Request('', { method: 'POST' }); } catch (e) { return false; }
+})();
 function logUiEvent_(page, eventType, target, detail) {
   try {
     if (typeof SESSION_TOKEN === 'undefined' || !SESSION_TOKEN) return;
-    fetch(YARD_API_BASE + '/ui_event', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Session-Token': SESSION_TOKEN }, body: JSON.stringify({ page: page, event_type: eventType, target: target || '', detail: String(detail == null ? '' : detail).slice(0, 200) }) }).catch(function(){});
+    if (!page || !eventType) return;
+    if (uiLogQueue_.length >= UI_LOG_MAX_QUEUE) return;
+    uiLogQueue_.push({
+      page: String(page),
+      event_type: String(eventType),
+      target: String(target == null ? '' : target).slice(0, 120),
+      detail: String(detail == null ? '' : detail).slice(0, 200)
+    });
+    if (!uiLogTimer_) uiLogTimer_ = setTimeout(function(){ uiLogTimer_ = null; flushUiEvents_(false); }, UI_LOG_FLUSH_MS);
   } catch(e){}
 }
+function flushUiEvents_(onUnload) {
+  try {
+    if (uiLogTimer_) { clearTimeout(uiLogTimer_); uiLogTimer_ = null; }
+    if (!uiLogQueue_.length) return;
+    if (typeof SESSION_TOKEN === 'undefined' || !SESSION_TOKEN) { uiLogQueue_.length = 0; return; }
+    while (uiLogQueue_.length) {
+      var batch = uiLogQueue_.splice(0, UI_LOG_MAX_BATCH);
+      var url = YARD_API_BASE + '/ui_event';           // БЕЗ параметров: в URL токена быть не должно
+      if (!onUnload) {
+        fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Session-Token': SESSION_TOKEN }, body: JSON.stringify({ events: batch }) }).catch(function(){});
+      } else if (uiLogKeepalive_) {
+        // Обычный fetch() обрывается, когда страница уходит. keepalive - не обрывается, и,
+        // в отличие от sendBeacon, умеет заголовки: токен уходит в X-Session-Token.
+        fetch(url, { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json', 'X-Session-Token': SESSION_TOKEN }, body: JSON.stringify({ events: batch }) }).catch(function(){});
+      } else if (navigator.sendBeacon) {
+        // Запасной путь для браузеров без keepalive. sendBeacon заголовков не умеет,
+        // поэтому токен кладём В ТЕЛО (сервер читает его там, см. checkSession) - но
+        // НИКОГДА в URL: параметр запроса попадает в access.log и утекает вместе с ним.
+        navigator.sendBeacon(url, new Blob([JSON.stringify({ session_token: SESSION_TOKEN, events: batch })], { type: 'application/json' }));
+      }
+      // Нет ни того, ни другого - хвост теряем молча, это допустимо (журнал эргономики).
+    }
+  } catch(e){}
+}
+document.addEventListener('visibilitychange', function(){ if (document.hidden) flushUiEvents_(true); });
+window.addEventListener('pagehide', function(){ flushUiEvents_(true); });
 // Учёт темы по пользователю (Влад 13.09: «понять какой % сотрудников на светлой -
 // если 50 на 50, всерьёз проработать светлый режим»). Только СЧЁТ на сервере
 // (theme_prefs, отдельная таблица) - само применение темы остаётся полностью
@@ -29560,6 +30054,8 @@ function applyTheme(name) {
   if (name === 'light') document.documentElement.setAttribute('data-theme', 'light');
   else document.documentElement.removeAttribute('data-theme');
   try { localStorage.setItem('yardhub_theme', name === 'light' ? 'light' : 'dark'); } catch(e){}
+  var themeColorMeta_ = document.querySelector('meta[name="theme-color"]');
+  if (themeColorMeta_) themeColorMeta_.setAttribute('content', name === 'light' ? '#eef1f5' : '#0f0f13');
   pingTheme_(name);
   var label = document.getElementById('theme-btn-label');
   if (label) label.textContent = 'Тема: ' + (name === 'light' ? 'светлая' : 'тёмная');
@@ -30529,7 +31025,6 @@ var ICON_CHECK = '<svg ' + SVG_ATTR + '><path d="M4 10.5l4 4 8-8"/></svg>';
    планировке 31-е число должно быть небольшой кнопкой в сентябрь... лента
    реально продолжается"), поэтому DAYS считает эпоху + ЕЩЁ ОДИН месяц вперёд -
    всегда есть куда идти, независимо от того, какое сегодня число. */
-var NOW0_ = new Date();
 /* НАЙДЕННЫЙ БАГ (Влад, 01.09, живой пример: "заявки в октябрь уехали...
    августа теперь нету" - весь август молча съехал на месяц вперёд ровно в
    полночь смены месяца). Корень: epoch = "1-е число ТЕКУЩЕГО календарного
@@ -30583,8 +31078,21 @@ function dateToHour_(dt){ return (dt.getTime() - EPOCH0_.getTime()) / 3600000; }
    dateToHour_ - тот же путь, что и everywhere else, единообразно). Раньше тут
    был хардкод d===28 (день 29.08 на момент переноса) - 1 сентября подсветка
    осталась бы на дне 29 августа, тот же класс бага, что уже чинили у YEAR/MONTH
-   самих. */
-var TODAY_D_ = Math.floor(dateToHour_(NOW0_) / 24);
+   самих.
+   НАЙДЕННЫЙ БАГ (17.09, Влад живьём: "почему без заказа показывает 1, если я
+   вижу минимум два" - живой пример, М 800 АЕ 797. Раньше TODAY_D_ был var,
+   вычисленный ОДИН РАЗ от NOW0_=new Date() в момент загрузки страницы - если
+   вкладка простояла открытой через полночь (обычное дело - "Данные 1С: 1 ч
+   назад" в сайдбаре означает как раз это), TODAY_D_ молча продолжал указывать
+   на ВЧЕРА. renderKpis() берёт dayStart/dayEnd ИЗ TODAY_D_, а kpiCountsAt_
+   проверяет "hadTrip" (был ли рейс СЕГОДНЯ) именно по этому окну - рейс
+   М800, закончившийся ровно в полночь (00:00 сегодня = граница вчера/сегодня),
+   попадал в СТУХШЕЕ окно "вчера" и засчитывался как "hadTrip", машина уходила
+   в "Свободны", а не в "Без заказа", хотя реально на неё ничего не запланировано
+   ни на сейчас, ни на остаток сегодняшнего дня. nowHour() ниже уже был живым
+   (new Date() при каждом вызове) - TODAY_D_ теперь считается так же, той же
+   формулой, просто не кэшируется. */
+function TODAY_D_(){ return Math.floor(nowHour() / 24); }
 var WD = ["вс","пн","вт","ср","чт","пт","сб"];
 // "2 дня" (31.08, Влад: "хочу попробовать создать кнопку на масштаб 2 дня") - px/час
 // подобран интерполяцией существующей кривой (day:46 -> 3d:17 -> week:8 -> month:2.4
@@ -31104,7 +31612,7 @@ function renderScale(){
     var dt = new Date(YEAR, MONTH, d + 1);          /* new Date сама переносит день/месяц/год на границе */
     var isNextMonth = d >= DAYS_EPOCH_MONTH_;
     var w = dt.getDay(), cls = "day" + ((w === 0 || w === 6) ? " weekend" : "") +
-      (d === TODAY_D_ ? " today" : "") + (isNextMonth ? " day-next-month" : "");
+      (d === TODAY_D_() ? " today" : "") + (isNextMonth ? " day-next-month" : "");
     var hrs = "";
     /* Влад, 31.08, со слов логистов: "на масштабе 3 дня тоже нужна шкала
        времени, новых вертикальных линий не нужно, время нарезать по текущей
@@ -31535,7 +32043,22 @@ function vacantBandRanges_(v){
     cursor = Math.max(cursor, iv[1]);
   });
   if (cursor < HOURS) gaps.push({s: cursor, l: HOURS - cursor});
-  return gaps.filter(function(g){ return g.l > 0; });
+  /* НАЙДЕННЫЙ БАГ (18.09, Влад живьём: "на 800-ой полоске как-то артефакт в
+     протяжке" - М 800 АЕ 797, обрывок "Р" вместо "Ремонт трала · до 19.09").
+     Корень - обычная пересадка водителя (Пантелеев снят 12:05:39, Титаев
+     посажен 12:05:54, разрыв 15 СЕКУНД между двумя кликами логиста) считалась
+     полноценной "вакантной полосой" - фильтр ниже отбрасывал только g.l===0,
+     а 15 секунд формально больше нуля. Эта микроскопическая полоса
+     накладывалась на суточный ремонт того же дня - lpRepairOverlapRange_ (см.
+     makeSeg) получал пересечение шириной в доли пикселя, и sticky-текст
+     бейджа "Ремонт трала · до 19.09" пытался прилипнуть внутри контейнера
+     той же ширины - отсюда обрывок вместо подписи. Обычная пересадка водителя
+     в два клика - НЕ реальная вакансия ни на секунду, порог отсекает шум
+     самой природы двух последовательных кликов человека (реальный разрыв,
+     который логист имел в виду ставя статус "без водителя" вручную, всегда
+     на порядки длиннее). */
+  var MIN_GAP_H_ = 3 / 60; // 3 минуты - меньше явно шум сценария "снял/посадил в два клика", не реальная вакансия
+  return gaps.filter(function(g){ return g.l > MIN_GAP_H_; });
 }
 /* «Единственный момент, когда два статуса могут накладываться» (Влад, 30.08) -
    ремонт поверх вакантной полосы полосатый. Проверяем ПЕРЕСЕЧЕНИЕ по времени
@@ -31611,20 +32134,22 @@ function makeSeg(s){
     head = '<span class="seg-id"><b>' + three(s.mg) + '</b><i>' + three(s.lg) + '</i>' +
       '<span class="seg-drv ' + (v && v.vacant ? "off" : "on") + '"></span></span>';
   }
-  /* НАЙДЕННЫЙ БАГ (17.09, Влад живьём: "почему не работает протяжка в этом моменте,
-     где граница статуса на статусе" - живой пример, ПР-5 С 702 КН 797, ремонт
-     04.09-15.09 (11 дней), пересекается с "без водителя" только 04.09-08.09 (4 дня).
-     Старая версия (31.08) гасила .seg-label ЦЕЛИКОМ на ВСЮ плитку, если пересечение
-     есть хоть где-то внутри неё - оставшиеся 7 дней ремонта визуально выглядели
-     пустым местом (протяжка там и не должна работать, плитка занята - просто не
-     видно, что это по-прежнему ремонт). Раньше текст пересечения жил ТОЛЬКО внутри
-     .seg-overlap-badge (свой sticky, left:calc(var(--lane-w)+8px), тот же отступ,
-     что у .seg-label) - именно из-за двух конкурирующих sticky-текстов на одной
-     плитке text и гасили один из них целиком. Вместо гашения - переносим текст
-     пересечения В сам segTxt (единственный sticky-текст на плитке, виден на ВСЮ
-     длину сегмента, не только на подсвеченном участке), а .seg-overlap-badge
-     оставляем ЧИСТО декоративной штриховкой без своего текста - конкурирующих
-     sticky-элементов больше нет, коллизии в принципе не может быть. */
+  /* НАЙДЕННЫЙ БАГ, второй заход (18.09, Влад живьём: "на 800-ой полоске как-то
+     артефакт в протяжке" - обрывок "Р" вместо "Ремонт трала · до 19.09"). Живой
+     пример - пересечение шириной 15 СЕКУНД (обычная пересадка водителя в два
+     клика, см. разбор у MIN_GAP_H_ в vacantBandRanges_ выше) делало
+     .seg-overlap-badge шириной в доли пикселя - sticky-текст внутри такого
+     микроскопического контейнера рендерился обрывком, а не текстом. Порог в
+     vacantBandRanges_ убирает САМ источник таких микро-пересечений, но
+     архитектурно бейдж всё ещё уязвим к ЛЮБОМУ узкому пересечению (короткий
+     ремонт поверх короткого "без водителя" тоже возможен и легитимен) - чиним
+     класс целиком, не только этот конкретный случай.
+     17.08 здесь стоял старый приём (текст пересечения ТОЛЬКО в бейдже, .seg-label
+     гасился целиком) - решал коллизию двух конкурирующих sticky-текстов, но ценой
+     ровно этой хрупкости. Вместо два sticky-текста и гасить один - текст
+     пересечения теперь живёт В segTxt (единственный sticky-текст на плитке,
+     не зависит от ширины бейджа вообще), .seg-overlap-badge - чисто
+     декоративная штриховка без своего текста, конкурировать нечему. */
   var segTxt = segLabel(s);
   if (overlapRange && overlapRange.driveroffSegs.length) segTxt += " · " + overlapRange.driveroffSegs.map(segLabel).join(" · ");
   if (s.kind === "driveroff" && lpOverlappingSegsOfKind_(s, "repair").length) segTxt = "";
@@ -31634,6 +32159,22 @@ function makeSeg(s){
     var widthPct = overlapRange.l / s.l * 100;
     badgeHtml = '<span class="seg-overlap-badge" style="left:' + leftPct + '%;width:' + widthPct + '%" title="Ремонт идёт одновременно с отсутствием водителя (вакансия или заявка «Без водителя»)"></span>';
   }
+  /* Флажок-заметка (18.09, Влад: "логист просит через ЛКМ ставить какой-то флажок
+     на протяжку, чтобы ему лично было понятно, что есть заметка-памятка" - вариант 1
+     из превью, утверждён). ЛИЧНАЯ - LP_MY_NOTES_ содержит только заметки ТЕКУЩЕГО
+     пользователя (см. lpFetchMyNotes_ ниже), чужие заметки на этой же плитке сюда
+     не попадают вообще - каждый видит только своё. Кликабельная зона - только сам
+     значок (см. bail out в pointerdown-обработчике драга выше и делегированный
+     click ниже), не вся плитка - клик по остальной части по-прежнему открывает
+     шторку, как раньше. */
+  var myNote = LP_MY_NOTES_[s.id] || "";
+  var flagHtml = '<span class="lp-flag-btn' + (myNote ? " on" : "") + '" data-id="' + s.id + '" title="' +
+    (myNote ? "Заметка: " + pageEsc_(myNote) : "Поставить заметку") + '">' +
+    '<svg viewBox="0 0 20 20" fill="' + (myNote ? "currentColor" : "none") + '" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+    (myNote
+      ? '<path d="M5 3v14a1 1 0 1 0 2 0v-4.2c1.3-.7 2.7-.9 4-.4 1.8.7 3.6.2 5-1V4c-1.4 1.2-3.2 1.7-5 1-1.3-.5-2.7-.3-4 .4V3a1 1 0 0 0-2 0Z"/>'
+      : '<path d="M5 17V4"/><path d="M5 4c0-.6 2-1.6 4.5-1.6S14 4 14 4v6.4c0 .6-2 1.6-4.5 1.6S5 10.4 5 10.4"/>') +
+    "</svg></span>";
   el.innerHTML = '<span class="seg-label">' + head +
     '<span class="seg-txt">' + segTxt + "</span>" +
     (s.needsData ? '<span class="seg-nd" title="Под данные - документы для пропуска ещё не собраны"></span>' : "") +
@@ -31643,7 +32184,7 @@ function makeSeg(s){
     (s.kind === "trip" && s.tripMode ? '<span class="seg-daymode" title="' + tripModeLabel_(s.tripMode) + ' - указано вручную при создании">' + tripModeLabel_(s.tripMode).toLowerCase() + '</span>' : "") +
     "</span>" +
     (active ? '<span class="seg-prog"><i></i></span>' : "") +
-    badgeHtml +
+    badgeHtml + flagHtml +
     '<span class="hov"></span><span class="ring"></span>' +
     '<span class="hnd l"></span><span class="hnd r"></span>';
   paint(el, s);
@@ -31703,7 +32244,7 @@ function renderKpis(){
   // и к счётчикам шапки, чтобы они не расходились с тем, что реально на экране.
   var h = nowHour();
   var scope = STATE.vehicles.filter(visible);
-  var dayStart = TODAY_D_ * 24, dayEnd = dayStart + 24;
+  var dayStart = TODAY_D_() * 24, dayEnd = dayStart + 24;
   var todayC = kpiCountsAt_(scope, h, dayStart, dayEnd);
   var yestC  = kpiCountsAt_(scope, h - 24, dayStart - 24, dayEnd - 24);
   var tomC   = kpiCountsAt_(scope, h + 24, dayStart + 24, dayEnd + 24);
@@ -32256,6 +32797,11 @@ rowsEl.addEventListener("pointerdown", function(e){
   if (e.button !== 0) return;   /* только левая - см. разбор у первого pointerdown выше по файлу */
   var el = e.target.closest(".seg");
   if (!el) return;
+  /* Флажок-заметка (18.09) - своя маленькая кликабельная зона в углу плитки, НЕ
+     должна запускать драг/перенос (и тем более открывать шторку на pointerup ниже,
+     см. openDrawer(seg)) - тот же приём, что у .hide-btn/.rh-omni выше по файлу
+     (bail out ДО setPointerCapture, а не просто отличать "не было драга"). */
+  if (e.target.closest(".lp-flag-btn")) return;
   markActive_();   /* захватил плитку - живой признак присутствия, не ждать saveSegs() в конце жеста */
   var seg = STATE.segs.find(function(s){ return s.id === el.dataset.id; });
   if (!seg) return;
@@ -33024,13 +33570,21 @@ function lpAddrLinkHtml_(addr){
 function lpWireCustomerInput_(inputId, boxId, setVal){
   var input = document.getElementById(inputId), box = document.getElementById(boxId);
   if (!input || !box) return;
+  var logT; /* лог "пустой поиск" - по паузе в наборе, не по каждой клавише (иначе один длинный
+    ввод даёт десятки строк в ui_events и искажает анализ трения, см. разбор 18.09) */
   function refresh(){
     var val = input.value.trim().toLowerCase();
-    if (!val){ box.style.display = "none"; box.innerHTML = ""; return; }
+    if (!val){ box.style.display = "none"; box.innerHTML = ""; clearTimeout(logT); return; }
     var matches = orderPlanCustomerList_().filter(function(n){
       return n.toLowerCase().indexOf(val) === 0;
     }).slice(0, 15);
-    if (!matches.length){ box.style.display = "none"; box.innerHTML = ""; if (val.length >= 3) logUiEvent_("logistics-plan", "empty_search", "customer", val); return; }
+    if (!matches.length){
+      box.style.display = "none"; box.innerHTML = "";
+      clearTimeout(logT);
+      if (val.length >= 3) logT = setTimeout(function(){ logUiEvent_("logistics-plan", "empty_search", "customer", val); }, 600);
+      return;
+    }
+    clearTimeout(logT);
     box.innerHTML = matches.map(function(n){
       return '<div style="padding:7px 10px;cursor:pointer;font-size:13px;color:var(--text)">' + n.replace(/</g, "&lt;") + "</div>";
     }).join("");
@@ -33044,6 +33598,17 @@ function lpWireCustomerInput_(inputId, boxId, setVal){
   input.oninput = function(){ setVal(input.value); refresh(); };
   input.onfocus = refresh;
   input.onblur = function(){ setTimeout(function(){ box.style.display = "none"; }, 150); };
+}
+
+/* Отказ сохранить (причина ремонта/ТО, менеджер/логист и т.п.) - фокус+кратковременная
+   красная рамка ровно на поле, которого не хватает, а не только тост наверху экрана.
+   Найдено 18.09 разбором ui_events - двое логистов в разные дни жали "Создать" по 5-8
+   раз подряд после одного и того же отказа, не понимая, куда действовать. */
+function lpFlashInvalid_(el){
+  if (!el) return;
+  el.focus();
+  el.classList.add("lp-input-invalid");
+  setTimeout(function(){ el.classList.remove("lp-input-invalid"); }, 1200);
 }
 
 /* ---------- шторка ---------- */
@@ -33167,7 +33732,7 @@ function openCreateDrawer(vi, s, l){
       // Причина ремонта/ТО - обязательна (11.09, Влад: см. разбор у isRepairLike выше) -
       // тот же принцип, что у Менеджера/Логиста рейса: без явного значения не сохраняем.
       if (isRepairLike && !repairReasonVal.trim()){
-        S.reject(); logUiEvent_("logistics-plan", "blocked_click", "lp_create", kind === "repair" ? "Не указана причина ремонта" : "Не указана причина ТО"); toast(kind === "repair" ? "Укажите причину ремонта" : "Укажите причину ТО", null); return;
+        S.reject(); logUiEvent_("logistics-plan", "blocked_click", "lp_create", kind === "repair" ? "Не указана причина ремонта" : "Не указана причина ТО"); toast(kind === "repair" ? "Укажите причину ремонта" : "Укажите причину ТО", null); lpFlashInvalid_(document.getElementById("lp-crRepairReason")); return;
       }
       if (kind === "driveroff") pushDriver(v, s, l, DRIVEROFF_REASONS_[reasonIdx][0]);
       /* from/to НЕ обязательны - логист может ещё не знать точку на момент постановки
@@ -33278,7 +33843,17 @@ function openDrawer(seg){
   var toVal = isTrip ? (seg.to || "") : "";
   var customerVal = isTrip ? (seg.customer || "") : "";
   var ndVal = !!seg.needsData;
-  var reasonIdx = isDriverOff ? Math.max(0, DRIVEROFF_REASONS_.map(function(p){ return p[0]; }).indexOf(seg.reason)) : 0;
+  /* НАЙДЕННЫЙ БАГ (18.09, Влад живьём: "показалось, что при выборе Переоформление
+     кидает обратно на статус Выходной" - тот же класс, что уже описан ЗДЕСЬ ЖЕ
+     выше про mgIdx/lgIdx: Math.max(0, indexOf(...)) клэмпит "не найдено" (-1) на 0 -
+     любая запись с пустой/незнакомой причиной (старые записи до 30.08, когда
+     подстатусов ещё не было) тихо ПОКАЗЫВАЛА "Выходной" выбранным, хотя реальная
+     причина не задана вовсе. Не косметика - как и у mg/lg: "Сохранить" без единого
+     клика по чипам реально переписал бы reason на "dayoff". Фикс - НЕ клэмпим,
+     -1 = ничего не выбрано (ни один чип не подсвечен), проверка на сохранение
+     ниже (рядом с isRepairLike) требует явного выбора, прежде чем разрешить
+     сохранение - тот же принцип, что уже применён к причине ремонта/ТО. */
+  var reasonIdx = isDriverOff ? DRIVEROFF_REASONS_.map(function(p){ return p[0]; }).indexOf(seg.reason) : 0;
   var repairReasonVal = isRepairLike ? (seg.repairReason || "") : "";
   var tripModeIdx = isTrip ? Math.max(0, TRIP_MODE_OPTS_.map(function(p){ return p[0]; }).indexOf(seg.tripMode || "")) : 0;
   var startVal = hToLocalInputVal_(seg.s), endVal = hToLocalInputVal_(seg.s + seg.l);
@@ -33417,7 +33992,13 @@ function openDrawer(seg){
       // (11.09, Влад: см. разбор у isRepairLike выше) - иначе "Сохранить" молча стёр бы
       // уже введённую причину пустым значением, если кто-то её случайно очистил.
       if (isRepairLike && !repairReasonVal.trim()){
-        S.reject(); logUiEvent_("logistics-plan", "blocked_click", "lp_edit", seg.kind === "repair" ? "Не указана причина ремонта" : "Не указана причина ТО"); toast(seg.kind === "repair" ? "Укажите причину ремонта" : "Укажите причину ТО", null); return;
+        S.reject(); logUiEvent_("logistics-plan", "blocked_click", "lp_edit", seg.kind === "repair" ? "Не указана причина ремонта" : "Не указана причина ТО"); toast(seg.kind === "repair" ? "Укажите причину ремонта" : "Укажите причину ТО", null); lpFlashInvalid_(document.getElementById("lp-drRepairReason")); return;
+      }
+      // Причина "без водителя" - обязательна тем же приёмом (18.09, см. разбор у
+      // reasonIdx выше) - без явного выбора "Сохранить" молча записал бы "Выходной"
+      // на запись, у которой причина на самом деле не определена.
+      if (isDriverOff && reasonIdx < 0){
+        S.reject(); logUiEvent_("logistics-plan", "blocked_click", "lp_edit", "Не указана причина без водителя"); toast("Укажите причину", null); return;
       }
       seg = liveSeg;
       var before = {s: seg.s, l: seg.l, v: seg.v};
@@ -33547,7 +34128,49 @@ historyScrim_.onclick = closeHistoryDrawer_;
    машине в меню ПКМ") - когда передана машина, лента фильтруется на сервере
    по её госномеру (?gos=), заголовок называет её явно; без аргумента - вся
    доска целиком, как раньше (кнопка у лампочек присутствия). */
+/* Отмена действия из истории (17.09, Влад: "чисто админская функция делать отмену
+   действий в истории... всё должно вернуться в то же состояние, что и было до смены
+   статуса") - кнопка "Отменить" только у событий, где сервер уже посчитал undoable=true
+   (ТОЛЬКО самое последнее действие над записью/слотом - см. разбор в
+   plans/2026-09-17-history-undo-admin.md) и только для роли admin. lpHistEvents_ хранит
+   последний ответ сервера - индекс в атрибуте кнопки, не тащим весь объект в DOM. */
+var lpHistEvents_ = [];
+var lpHistScopedV_ = null;
+function lpHistUndoLabel_(ev){
+  switch (ev.type){
+    case "fleet_uncouple": return ev.kind === "driver" ? "Вернуть водителя" : "Вернуть прицеп";
+    case "seg_delete": return "Восстановить запись";
+    default: return "Отменить";
+  }
+}
+function lpHistUndo_(i){
+  var ev = lpHistEvents_[i];
+  if (!ev) return;
+  showConfirmDialog_(
+    "Отменить действие «" + lpHistLine_(ev) + "»? Состояние вернётся к тому, что было до него.",
+    function(ok){
+      if (!ok) return;
+      var params = ev.type === "fleet_uncouple" ? { type: ev.type, id: ev.id } : { type: ev.type, hist_id: ev.hist_id };
+      postToYardApi_("/plan/activity/undo", params).then(function(r){
+        if (!r.ok || !r.data || !r.data.ok){
+          toast("Не удалось отменить", (r.data && r.data.error) || "попробуйте обновить историю и повторить", null, {err: true});
+          return;
+        }
+        toast("Действие отменено", null);
+        /* Те же функции, что уже применяются для живого пересчёта после любой
+           фактической правки состояния - fetchPlanSegs_ (поллинг plan_segs, сама
+           дозывает renderRows/renderKpis) и fetchFleetData_ (сцепки/расцепки,
+           тот же прямой вызов, что у fleetDoCouple_/fleetDoUncouple_/initLP) -
+           не изобретаем третий способ обновить экран. */
+        fetchPlanSegs_(); fetchFleetData_();
+        openHistoryDrawer_(lpHistScopedV_);
+      }).catch(function(){ toast("Ошибка сети", "не удалось отменить действие", null, {err: true}); });
+    },
+    "Отмена действия"
+  );
+}
 function openHistoryDrawer_(v){
+  lpHistScopedV_ = v || null;
   var scoped = v && v.gos;
   historyDrawer_.innerHTML =
     '<div class="dh"><div class="dh-txt"><div class="dr-eyebrow">Планировка</div><div class="dr-title">История' + (scoped ? " · " + pageEsc_(v.gos) : " действий") + '</div></div>' +
@@ -33564,15 +34187,29 @@ function openHistoryDrawer_(v){
     if (!r.ok || !r.data || !Array.isArray(r.data.events)){
       body.textContent = "Не удалось загрузить историю - попробуйте ещё раз."; return;
     }
+    lpHistEvents_ = r.data.events;
     if (!r.data.events.length){ body.textContent = "Пока пусто - действий ещё не было."; return; }
-    body.innerHTML = r.data.events.map(function(ev){
+    var isAdmin = STATE.role === "admin";
+    body.innerHTML = r.data.events.map(function(ev, i){
       /* Отбой - красным (Влад, 02.09: "в истории также это подсвечивается
          красным цветом") - единственный тип события с акцентным цветом,
          остальные нейтральные. */
       var isCancel = ev.type === "seg_cancel";
+      var undoBtn = (isAdmin && ev.undoable)
+        ? '<button class="chip lp-hist-undo" style="margin-top:6px;padding:2px 10px;font-size:11px" data-i="' + i + '">' + lpHistUndoLabel_(ev) + '</button>'
+        : "";
       return '<div class="dr-row" style="display:block"><div style="color:var(--muted);font-size:10.5px;margin-bottom:2px" class="mono">' +
-        lpHistTime_(ev.at) + ' · ' + (ev.by || "—") + '</div><div' + (isCancel ? ' style="color:var(--red);font-weight:600"' : '') + '>' + lpHistLine_(ev) + '</div></div>';
+        lpHistTime_(ev.at) + ' · ' + (ev.by || "—") + '</div><div' + (isCancel ? ' style="color:var(--red);font-weight:600"' : '') + '>' + lpHistLine_(ev) + '</div>' + undoBtn + '</div>';
     }).join("");
+    // Инлайновый onclick="..." искал бы функцию в ГЛОБАЛЬНОЙ области - весь этот код
+    // живёт внутри своего IIFE (окна LP), наружу торчит только window.LP (см. шапку
+    // файла) - lpHistUndo_ оттуда не видна, кнопка молча ничего не делала (Влад, 17.09:
+    // "кнопка появилась, но не нажимается"). Тот же приём, что у ВСЕХ остальных кнопок
+    // этого модуля (.cr-type/.cr-opt и т.д.) - querySelectorAll + прямое присваивание
+    // .onclick после innerHTML, не строка в разметке.
+    [].forEach.call(body.querySelectorAll(".lp-hist-undo"), function(btn){
+      btn.onclick = function(){ lpHistUndo_(parseInt(btn.dataset.i, 10)); };
+    });
   }).catch(function(){
     var body = document.getElementById("lp-histBody");
     if (body) body.textContent = "Ошибка сети - попробуйте ещё раз.";
@@ -33656,6 +34293,80 @@ function openCtxMenu_(seg, x, y){
    scripts/DEPLOY_LOG.md); до неё ПКМ на .rowhead - единственное на доске место,
    где "эта конкретная машина" уже однозначно адресуема одним кликом. */
 var FLEET_PEOPLE_ = [], FLEET_ASSETS_ = [], FLEET_ASSIGN_ = [];
+/* Личные заметки-флажки (18.09) - см. разбор у флажка в makeSeg выше и у
+   plan_seg_notes на сервере. ЛИЧНЫЕ - сервер уже отдаёт только заметки текущего
+   пользователя (WHERE user_email=?), фронту не нужно самому ничего фильтровать. */
+var LP_MY_NOTES_ = {};
+function lpFetchMyNotes_(){
+  fetchFromYardApi_("/plan/seg_notes", {}).then(function(r){
+    if (!r.ok || !r.data || !r.data.notes) return;
+    LP_MY_NOTES_ = r.data.notes;
+    renderRows();   /* значки должны показать актуальное состояние сразу, не ждать следующего чужого триггера */
+  }).catch(function(){});
+}
+/* Сохранение/снятие одной заметки - пустая (после trim) строка снимает флажок
+   (см. серверную логику). Обновляем LP_MY_NOTES_ и перерисовываем ТОЛЬКО после
+   подтверждения сервера - оптимистично красить значок раньше не стали (заметка -
+   не срочное действие, лишняя секунда ожидания не мешает, а честнее не врать
+   про состояние, которое ещё не подтверждено). */
+function lpSaveNote_(segId, text, cb){
+  postToYardApi_("/plan/seg_note", { seg_id: segId, note: text }).then(function(r){
+    if (!r.ok || !r.data || !r.data.ok){ if (cb) cb(false); return; }
+    if (r.data.note) LP_MY_NOTES_[segId] = r.data.note; else delete LP_MY_NOTES_[segId];
+    renderRows();
+    if (cb) cb(true);
+  }).catch(function(){ if (cb) cb(false); });
+}
+/* Плавающее поле ввода заметки - открывается по клику на значок (delegated click
+   ниже, тот же приём, что у остальных кнопок этого модуля - см. разбор про IIFE
+   и window.LP у "Отменить" в панели Истории, 17.09: инлайновый onclick="..." в
+   разметке искал бы функцию СНАРУЖИ IIFE, где её нет). Позиция - через
+   getBoundingClientRect() значка в момент клика (та же идея, что у showBadge/hud),
+   не CSS-якорь - popover живёт вне скролла .board. */
+var lpFlagPop_ = document.getElementById("lp-flagPop");
+var lpFlagInput_ = document.getElementById("lp-flagInput");
+var lpFlagClear_ = document.getElementById("lp-flagClear");
+var lpFlagOpenSegId_ = null;
+function lpCloseFlagPop_(){
+  lpFlagPop_.classList.remove("open");
+  lpFlagOpenSegId_ = null;
+}
+function lpOpenFlagPop_(btn){
+  var segId = btn.dataset.id;
+  lpFlagOpenSegId_ = segId;
+  var r = btn.getBoundingClientRect();
+  var left = Math.min(Math.max(8, r.left - 90), window.innerWidth - 236);
+  lpFlagPop_.style.left = left + "px";
+  lpFlagPop_.style.top = (r.bottom + 6) + "px";
+  lpFlagInput_.value = LP_MY_NOTES_[segId] || "";
+  lpFlagClear_.hidden = !LP_MY_NOTES_[segId];
+  lpFlagPop_.classList.add("open");
+  lpFlagInput_.focus();
+}
+rowsEl.addEventListener("click", function(e){
+  var btn = e.target.closest(".lp-flag-btn");
+  if (!btn) return;
+  e.stopPropagation();
+  if (lpFlagPop_.classList.contains("open") && lpFlagOpenSegId_ === btn.dataset.id){ lpCloseFlagPop_(); return; }
+  lpOpenFlagPop_(btn);
+});
+lpFlagInput_.addEventListener("keydown", function(e){
+  if (e.key === "Enter"){
+    if (!lpFlagOpenSegId_) return;
+    lpSaveNote_(lpFlagOpenSegId_, lpFlagInput_.value, function(ok){ if (ok) lpCloseFlagPop_(); });
+  } else if (e.key === "Escape"){
+    lpCloseFlagPop_();
+  }
+});
+lpFlagClear_.addEventListener("click", function(){
+  if (!lpFlagOpenSegId_) return;
+  lpSaveNote_(lpFlagOpenSegId_, "", function(ok){ if (ok) lpCloseFlagPop_(); });
+});
+document.addEventListener("click", function(e){
+  if (!lpFlagPop_.classList.contains("open")) return;
+  if (e.target.closest(".lp-flagpop") || e.target.closest(".lp-flag-btn")) return;
+  lpCloseFlagPop_();
+});
 function fetchFleetData_(){
   /* Та же защита от лишних запросов, что у fetchPlanSegs_ (не спрашивать сервер,
      пока вкладка Планировки скрыта/не активна) - актуально теперь, когда эта
@@ -33944,29 +34655,29 @@ function lpFleetPersonName_(id){
    протяжки. Тот же источник данных, что у vacantBandRanges_/.now, просто другой
    срез - "кто ушёл", а не "когда открыто сейчас". */
 function lpFleetPrevDriverName_(tractorGos, atHour){
-  // НАЙДЕННЫЙ БАГ (17.09, Влад живьём: "причём тут Войткун?" - О 894 ХМ 797. Войткун
-  // сдал машину 09.09, в тот же день её принял Межевич и до сих пор на ней - не снят,
-  // слот ОТКРЫТ. Старая версия искала максимум ТОЛЬКО среди ЗАКРЫТЫХ слотов - Межевича
-  // не видела вообще (у него нет valid_to) и на любой протяжке "без водителя" молча
-  // тянула Войткуна, хотя тот две недели как не при делах). Ищем среди ВСЕХ слотов
-  // (открытых и закрытых) той же машины - кандидат годится только если после него
-  // никто НЕ вступал в слот (ни закрытый, ни всё ещё открытый).
+  // НАЙДЕННЫЙ БАГ, второй заход (18.09, Влад живьём: "почему в полоске Пантелеев
+  // написано?" - В 276 ЕТ 797, текущий водитель Вафин с 31.08, а протяжка "Выходной"
+  // на 19.09 показывала Пантелеева, хотя тот не при делах уже три недели). Вчерашний
+  // фикс (17.09, разбор с Войткуном) сравнивал ВРЕМЯ ЗАКРЫТИЯ кандидата с ВРЕМЕНЕМ
+  // НАЧАЛА следующего - а в данных разового "посева" из Штатки (30.08) у этой машины
+  // Вафин формально НАЧАЛСЯ (00:20:53) чуть РАНЬШЕ, чем технически ЗАКРЫЛАСЬ старая
+  // запись Пантелеева (00:33:12) - тот же класс нестыковки, что у Войткуна, просто
+  // с другого края. Сравнение по "конец одного vs начало другого" в принципе хрупкое
+  // на нечистых исторических данных - переписано проще и надёжнее: среди ВСЕХ слотов
+  // (открытых и закрытых), что УЖЕ начались к этому моменту, берём самый ПОЗДНИЙ по
+  // ДАТЕ НАЧАЛА (valid_from - она осмысленно монотонна даже в нечистых данных, в
+  // отличие от пары "начало одного/конец другого"). Если этот самый свежий всё ещё
+  // открыт - вакансии для протяжки нет вообще, предыдущего не показываем. Если закрыт -
+  // это и есть честный "предыдущий".
   var all = (FLEET_ASSIGN_ || []).filter(function(a){ return a.kind === "driver" && a.tractor_gos === tractorGos; });
-  var best = null, bestEnd = -Infinity;
+  var latest = null, latestStart = -Infinity;
   all.forEach(function(a){
-    if (!a.valid_to) return; // кандидат в "предыдущие" обязан быть закрыт
-    var endH = lpFleetDateToHour_(a.valid_to);
-    if (endH == null || endH > atHour + 0.1) return; // закрылось ПОСЛЕ начала протяжки - не он
-    if (endH > bestEnd){ bestEnd = endH; best = a; }
-  });
-  if (!best) return null;
-  var supersededByAnother = all.some(function(a){
-    if (a.id === best.id) return false;
     var startH = lpFleetDateToHour_(a.valid_from);
-    return startH != null && startH > bestEnd - 0.1 && startH <= atHour + 0.1;
+    if (startH == null || startH > atHour + 0.1) return; // начался ПОСЛЕ протяжки - ещё не в счёт
+    if (startH > latestStart){ latestStart = startH; latest = a; }
   });
-  if (supersededByAnother) return null; // после него уже сидел кто-то другой - он больше не "предыдущий"
-  return lpFleetPersonName_(best.resource_key);
+  if (!latest || !latest.valid_to) return null; // самый свежий к этому моменту всё ещё открыт - вакансии нет
+  return lpFleetPersonName_(latest.resource_key);
 }
 /* Телефон - только для "Копировать данные" (lpCopyText_). /sprav/state для роли
    логист/менеджер отдаёт урезанный набор полей (31.08, см. api/server.js на
@@ -34465,6 +35176,7 @@ function initLP(){
   sendPresence_(); fetchPresence_();   /* то же самое для присутствия - не ждать первый тик */
   fetchFleetData_();         /* ростер водителей/прицепов + текущая сцепка - для ПКМ-меню на .rowhead */
   lpOmniFetch_();            /* координаты Omnicomm сразу при открытии, не ждать до 30 сек поллинга */
+  lpFetchMyNotes_();         /* личные заметки-флажки - см. разбор у LP_MY_NOTES_ выше */
 }
 window.LP = { init: initLP };
 

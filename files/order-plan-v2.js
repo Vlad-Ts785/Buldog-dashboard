@@ -140,11 +140,22 @@ function dm(ds) { var d = dObj(ds); return pad2(d.getDate()) + '.' + pad2(d.getM
 function dmy(ds) { var d = dObj(ds); return pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1) + '.' + d.getFullYear(); }
 function humanDate(ds) { var d = dObj(ds); return d.getDate() + ' ' + MONTH_GEN[d.getMonth()]; }
 function weekdayFull(ds) { return WD_FULL[dObj(ds).getDay()]; }
+/* понедельник недели, которой принадлежит ds - лента дат «Картограф» листает недели этим
+   шагом; getDay() 0=Вс..6=Сб, отсюда (day+6)%7 - смещение до понедельника той же недели */
+function mondayOf_(ds) { var day = dObj(ds).getDay(); return addDays(ds, -((day + 6) % 7)); }
+function formatWeekRange_(d1, d2) {
+  var a = dObj(d1), b = dObj(d2);
+  if (a.getMonth() === b.getMonth()) return a.getDate() + '-' + b.getDate() + ' ' + MONTH_GEN[a.getMonth()];
+  return a.getDate() + ' ' + MONTH_GEN[a.getMonth()] + ' - ' + b.getDate() + ' ' + MONTH_GEN[b.getMonth()];
+}
 function plural(n, one, few, many) { var m10 = n % 10, m100 = n % 100; if (m10 === 1 && m100 !== 11) return one; if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few; return many; }
 /* «Трал до 20 т» -> «трал»: сегмент техники для фильтров логиста. Ничего не
    перечисляем - берём первое слово из того, что реально пришло с сервера. */
 function segOf(type) { return String(type || '').trim().toLowerCase().split(/[\s,\/]+/)[0] || ''; }
 function capit(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+/* Влад 17.09: минимальная стоимость трала/длинномера - зеркало серверной MIN_PRICE_BY_SEG_
+   (plan-orders.js) для мгновенной подсказки в форме, сервер - настоящая граница. */
+var MIN_PRICE_BY_SEG_ = { 'трал': 25000, 'длинномер': 25000 };
 
 /* ───────────────────────── звук (ГОСТ, раздел 8) ─────────────────────────
    Деликатный регистр 200-660 Гц + «кабинный» confirm 880->1320 как в plan-m.
@@ -281,7 +292,11 @@ var ME = null;              /* {email,name,role,code} */
 var META = null;            /* {dictionary, own_entities} */
 var VIEW = 'log';           /* 'mgr' | 'log' - какой экран показываем */
 var DATE = todayStr();
-var TO_DATE = '';           /* непусто - режим «Неделя» */
+var TO_DATE = '';           /* непусто - режим «Неделя» (кнопка убрана 18.09, механизм жив,
+                                просто больше никогда не включается из интерфейса) */
+var TABS_WK = mondayOf_(DATE); /* понедельник недели, которую сейчас показывает лента дат
+                                   («Картограф», 18.09) - НЕЗАВИСИМО от DATE: перелистывание
+                                   недель не меняет выбранный день, пока не кликнули по чипу */
 var ORD = [];
 var ROSTER = [];
 var COUNTS = {};
@@ -301,7 +316,7 @@ var loadingOrders = false;
 var MGR_ALL = true;
 try { MGR_ALL = localStorage.getItem('op2_mgr_all') !== 'off'; } catch (e) {}
 
-var F = { type: 'all', nocar: false, nd: false, newOnly: false, mine: false, q: '' };
+var F = { type: 'all', nocar: false, nd: false, newOnly: false, mine: false, q: '', mgrEmail: '' };
 var SORT = { key: 'n', dir: 1 };
 
 /* ───────────────────────── доступ к полям заявки ───────────────────────── */
@@ -402,7 +417,7 @@ function toast(html, undoFn, ms) {
   return t;
 }
 function hideToast() { var t = toastEl(); if (t) t.classList.remove('op2-show'); }
-function soon(what) { S.attention(); toast('<span class="op2-warn">' + esc(what) + '</span> · формируется в следующей версии'); }
+function soon(what) { S.attention(); logUiEvent_('blocked_click', 'soon', what); toast('<span class="op2-warn">' + esc(what) + '</span> · формируется в следующей версии'); }
 /* документы (СТС, паспорт) - хранилище справочников подключается следующим этапом */
 /* Влад 13.09 (за полночь): «СТС тягача и прицепа уже есть в базе - почему бы не
    реализовать» - действительно есть (sprav_asset_documents, doc_type='sts'), тот же
@@ -413,7 +428,7 @@ function soon(what) { S.attention(); toast('<span class="op2-warn">' + esc(what)
    /api/sprav/asset_documents и .../asset_document_file уже открыты им всем на чтение (см.
    комментарий у самого роута на сервере, 31.08: "Планировка открыта логисту/менеджеру"). */
 function downloadSts_(assetId, label) {
-  if (!assetId) { toast('<span class="op2-warn">' + esc(label) + '</span> · ' + (label.indexOf('прицеп') >= 0 ? 'прицеп не сцеплен' : 'госномер неизвестен')); return; }
+  if (!assetId) { logUiEvent_('blocked_click', 'sts', label + ': ' + (label.indexOf('прицеп') >= 0 ? 'прицеп не сцеплен' : 'госномер неизвестен')); toast('<span class="op2-warn">' + esc(label) + '</span> · ' + (label.indexOf('прицеп') >= 0 ? 'прицеп не сцеплен' : 'госномер неизвестен')); return; }
   apiGet('/sprav/asset_documents', { asset_id: assetId }).then(function (r) {
     if (!r || !r.ok) { toast('Не удалось получить документы'); return; }
     var docs = (r.data && r.data.documents) || [];
@@ -421,7 +436,7 @@ function downloadSts_(assetId, label) {
     if (!sts) { toast('СТС не загружен для ' + esc(assetId) + ' · загрузить можно в Справочниках'); return; }
     var href = apiBase() + '/sprav/asset_document_file?session_token=' + encodeURIComponent(apiToken()) + '&id=' + encodeURIComponent(sts.id);
     window.open(href, '_blank');
-  }).catch(function () { toast('Ошибка сети - не удалось получить СТС'); });
+  }).catch(function () { logUiEvent_('save_error', 'sts_fetch', 'сеть'); toast('Ошибка сети - не удалось получить СТС'); });
 }
 /* Влад 13.09 (утро): «сильно обновил справочники - в плане документов, в плане паспортных
    данных» - сканы паспорта/прав того же образца, что СТС (sprav_people_documents, тот же
@@ -430,7 +445,7 @@ function downloadSts_(assetId, label) {
    createOwnExecutor кладёт его при постановке машины). «Не у всех водителей пока есть» -
    не хардкодим, кого показывать: нет скана - понятное сообщение, а не тихая заглушка. */
 function downloadPersonDoc_(personId, docType, label) {
-  if (!personId) { toast('<span class="op2-warn">' + esc(label) + '</span> · водитель не сопоставлен со справочником людей'); return; }
+  if (!personId) { logUiEvent_('blocked_click', 'person_doc', label + ': не сопоставлен со справочником'); toast('<span class="op2-warn">' + esc(label) + '</span> · водитель не сопоставлен со справочником людей'); return; }
   apiGet('/sprav/person_documents', { person_id: personId }).then(function (r) {
     if (!r || !r.ok) { toast('Не удалось получить документы'); return; }
     var docs = (r.data && r.data.documents) || [];
@@ -438,14 +453,14 @@ function downloadPersonDoc_(personId, docType, label) {
     if (!doc) { toast(esc(label) + ' не загружен(а) для этого водителя · загрузить можно в Справочниках'); return; }
     var href = apiBase() + '/sprav/person_document_file?session_token=' + encodeURIComponent(apiToken()) + '&id=' + encodeURIComponent(doc.id);
     window.open(href, '_blank');
-  }).catch(function () { toast('Ошибка сети - не удалось получить документ'); });
+  }).catch(function () { logUiEvent_('save_error', 'person_doc_fetch', 'сеть'); toast('Ошибка сети - не удалось получить документ'); });
 }
 /* «Паспортные данные»/«Права» текстом - копирует в буфер, тот же визуальный приём, что у
    [data-copy] (кнопка на 1.6с показывает «Скопировано ✓»), только с сетевым запросом перед
    копированием - узкий /sprav/person_pass_text (НЕ /sprav/state - там ПДн только у admin,
    см. комментарий на сервере), тот же принцип открытости, что уже у сканов. */
 function copyPersonText_(personId, kind, btn) {
-  if (!personId) { toast('<span class="op2-warn">Данные водителя</span> · водитель не сопоставлен со справочником людей'); return; }
+  if (!personId) { logUiEvent_('blocked_click', 'person_pass_text', 'не сопоставлен со справочником'); toast('<span class="op2-warn">Данные водителя</span> · водитель не сопоставлен со справочником людей'); return; }
   var label = btn.textContent;
   apiGet('/sprav/person_pass_text', { person_id: personId }).then(function (r) {
     if (!r || !r.ok || !r.data || !r.data.person) { toast('Нет данных по этому водителю в Справочниках'); return; }
@@ -455,7 +470,7 @@ function copyPersonText_(personId, kind, btn) {
     copyText(text);
     btn.textContent = 'Скопировано ✓';
     setTimeout(function () { btn.textContent = label; }, 1600);
-  }).catch(function () { toast('Ошибка сети - не удалось получить данные'); });
+  }).catch(function () { logUiEvent_('save_error', 'person_pass_text_fetch', 'сеть'); toast('Ошибка сети - не удалось получить данные'); });
 }
 function formatPassportText_(p) {
   if (!p.passport_series && !p.passport_number) return null;
@@ -597,19 +612,19 @@ function contractEqGenitive_(eq) {
   return /[а-яё]$/i.test(low) && !/[аеёиоуыэюя]$/i.test(low) ? low + 'а' : low;
 }
 function genContractPdf(o) {
-  if (typeof window.jspdf === 'undefined' || !window.jspdf.jsPDF) { toast('Библиотека PDF не загрузилась - обновите страницу'); return; }
+  if (typeof window.jspdf === 'undefined' || !window.jspdf.jsPDF) { logUiEvent_('save_error', 'contract_pdf', 'библиотека не загрузилась'); toast('Библиотека PDF не загрузилась - обновите страницу'); return; }
   var ent = null;
   (META && META.own_entities || []).forEach(function (e2) { if (String(e2.id) === String(o.executor_entity_id)) ent = e2; });
-  if (!ent) { toast('<span class="op2-warn">Договор-заявка</span> · у заявки не указан исполнитель («Исполнитель (от кого)»)'); return; }
-  if (!ent.has_bank || !ent.has_stamp) { toast('<span class="op2-warn">Договор-заявка</span> · у «' + esc(ent.short || ent.name) + '» не хватает реквизитов/печати в Справочниках - дозаполни там'); return; }
+  if (!ent) { logUiEvent_('blocked_click', 'contract', 'нет исполнителя'); toast('<span class="op2-warn">Договор-заявка</span> · у заявки не указан исполнитель («Исполнитель (от кого)»)'); return; }
+  if (!ent.has_bank || !ent.has_stamp) { logUiEvent_('blocked_click', 'contract', 'нет реквизитов/печати: ' + (ent.short || ent.name)); toast('<span class="op2-warn">Договор-заявка</span> · у «' + esc(ent.short || ent.name) + '» не хватает реквизитов/печати в Справочниках - дозаполни там'); return; }
   toast('Формируем договор-заявку…');
   Promise.all([
     fetchEntityStampDataUrl_(ent.id),
     fetchPersonSignatureDataUrl_(ent.signer_person_id)
   ]).then(function (imgs) {
     try { drawContractPdf_(o, ent, imgs[0], imgs[1]); }
-    catch (e) { toast('Не удалось собрать PDF: ' + (e && e.message || e)); }
-  }).catch(function () { toast('Ошибка сети - не удалось получить печать/подпись'); });
+    catch (e) { logUiEvent_('save_error', 'contract_pdf', String((e && e.message) || e).slice(0, 100)); toast('Не удалось собрать PDF: ' + (e && e.message || e)); }
+  }).catch(function () { logUiEvent_('save_error', 'contract_stamp_fetch', 'сеть'); toast('Ошибка сети - не удалось получить печать/подпись'); });
 }
 function drawContractPdf_(o, ent, stampUrl, signUrl) {
   var doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4' });
@@ -627,7 +642,7 @@ function drawContractPdf_(o, ent, stampUrl, signUrl) {
      несуществующее исключение - иначе эта же поломка повторится тихо в будущем. */
   var hasPtSans = !!(doc.getFontList() || {}).PTSans;
   var FONT = hasPtSans ? 'PTSans' : 'helvetica';
-  if (!hasPtSans) toast('<span class="op2-warn">Договор-заявка</span> · не удалось подключить кириллический шрифт, текст может исказиться - обновите страницу и повторите');
+  if (!hasPtSans) { logUiEvent_('save_error', 'contract_pdf', 'шрифт'); toast('<span class="op2-warn">Договор-заявка</span> · не удалось подключить кириллический шрифт, текст может исказиться - обновите страницу и повторите'); }
   var M = 15, W = 210, CW = W - M * 2, y = M;
   function setF(bold, size) { doc.setFont(FONT, bold ? 'bold' : 'normal'); doc.setFontSize(size); }
   function text(s, x, yy, opt) { doc.text(String(s == null ? '' : s), x, yy, opt || {}); }
@@ -806,8 +821,15 @@ function buildDom() {
       /* ── экран менеджера ── */
       '<section class="op2-screen" id="op2-scr-mgr">' +
         '<div class="op2-bar op2-h48">' +
-          '<div class="op2-tabs" id="op2-mgr-tabs"></div>' +
-          '<input type="date" class="op2-dt" id="op2-mgr-date" autocomplete="off" aria-label="Другой день">' +
+          /* «Картограф» (18.09) - неделя целиком одной строкой вместо Вчера/Сегодня/
+             Завтра/Пн/Вт/Неделя+всегда видимый календарь; см. DESIGN_SYSTEM.md
+             раздел «Лента дат «Картограф»» (там же - вся история решений). */
+          '<button class="op2-weeknav" id="op2-wk-prev" type="button" title="Предыдущая неделя" aria-label="Предыдущая неделя"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>' +
+          '<div class="op2-weekrow" id="op2-mgr-tabs"></div>' +
+          '<button class="op2-weeknav" id="op2-wk-next" type="button" title="Следующая неделя" aria-label="Следующая неделя"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>' +
+          '<button class="op2-chip op2-todaypill" id="op2-wk-today" type="button" hidden>Сегодня</button>' +
+          '<span class="op2-datewrap"><button type="button" class="op2-calbtn" id="op2-mgr-calbtn" aria-label="Выбрать другую дату" title="Выбрать другую дату"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></button>' +
+            '<input type="date" class="op2-dt op2-dt-hidden" id="op2-mgr-date" autocomplete="off" tabindex="-1" aria-label="Другой день"></span>' +
           '<div class="op2-sep"></div>' +
           '<input class="op2-search" id="op2-mgr-search" placeholder="Заказчик за 3 месяца, напр. ДиМ" autocomplete="off">' +
           '<button class="op2-chip" id="op2-mgr-all" title="Заявки всех менеджеров или только свои">Все менеджеры</button>' +
@@ -853,21 +875,38 @@ function buildDom() {
 
       /* ── экран логиста ── */
       '<section class="op2-screen" id="op2-scr-log">' +
+        /* Два ряда (19.09, Влад: «давай два ряда») - дата отдельной строкой сверху, тот же
+           «Картограф», что у менеджера (см. DESIGN_SYSTEM.md), фильтры - строкой ниже.
+           Раньше был один ряд с ◀ день ▶ + <input type=date> - убран целиком, у логиста в
+           баре и без даты уже был плотнее набор фильтров, чем у менеджера (тип техники +
+           три чипа-статуса), поэтому неделя целиком сюда не помещалась в один ряд с ними -
+           см. превью https://claude.ai/artifact/2PPTfhGxHt49UL1HWbegEx. */
+        '<div class="op2-bar-group">' +
         '<div class="op2-bar op2-h44">' +
-          '<button class="op2-tab" id="op2-log-prev" aria-label="Предыдущий день">◀</button>' +
-          '<button class="op2-tab op2-on" id="op2-log-day"></button>' +
-          '<button class="op2-tab" id="op2-log-next" aria-label="Следующий день">▶</button>' +
-          '<input type="date" class="op2-dt" id="op2-log-date" autocomplete="off" aria-label="Другой день">' +
+          '<button class="op2-weeknav" id="op2-logwk-prev" type="button" title="Предыдущая неделя" aria-label="Предыдущая неделя"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>' +
+          '<div class="op2-weekrow" id="op2-log-tabs"></div>' +
+          '<button class="op2-weeknav" id="op2-logwk-next" type="button" title="Следующая неделя" aria-label="Следующая неделя"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>' +
+          '<button class="op2-chip op2-todaypill" id="op2-logwk-today" type="button" hidden>Сегодня</button>' +
+          '<span class="op2-datewrap"><button type="button" class="op2-calbtn" id="op2-logwk-calbtn" aria-label="Выбрать другую дату" title="Выбрать другую дату"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></button>' +
+            '<input type="date" class="op2-dt op2-dt-hidden" id="op2-logwk-date" autocomplete="off" tabindex="-1" aria-label="Другой день"></span>' +
           '<div class="op2-sep"></div>' +
+          '<input class="op2-search" id="op2-log-search" placeholder="Заказчик или 3 цифры номера" autocomplete="off">' +
+          '<span class="op2-spacer"></span>' +
+          '<button class="op2-dbtn op2-primary" id="op2-log-new" title="Внутренняя перевозка, для базы, ОЭ/ОКР/ОБР">Новая заявка</button>' +
+        '</div>' +
+        '<div class="op2-bar op2-h44">' +
           '<div id="op2-log-types"></div>' +
+          '<div class="op2-sep"></div>' +
+          /* фильтр «Менеджеры» - гармошка (19.09), тот же приём, что «От кого»/«Тип техники»
+             в форме заявки (entRowHtml/expandEntRow/collapseEntRow ниже), применённый к
+             фильтру списка. Список - managerOptions_() (живой ROSTER), см. renderMgrFilterChips. */
+          '<div class="op2-seg" id="op2-log-mgr"></div>' +
           '<div class="op2-sep"></div>' +
           '<button class="op2-chip" id="op2-f-nocar">Без машины<span class="op2-n" id="op2-c-nocar">0</span></button>' +
           '<button class="op2-chip" id="op2-f-nd">Под данные<span class="op2-n" id="op2-c-nd">0</span></button>' +
           '<button class="op2-chip" id="op2-f-new">Новые<span class="op2-n" id="op2-c-new">0</span></button>' +
           '<button class="op2-chip op2-hidden" id="op2-f-mine"></button>' +
-          '<span class="op2-spacer"></span>' +
-          '<input class="op2-search" id="op2-log-search" placeholder="Заказчик или 3 цифры номера" autocomplete="off">' +
-          '<button class="op2-dbtn op2-primary" id="op2-log-new" title="Внутренняя перевозка, для базы, ОЭ/ОКР/ОБР">Новая заявка</button>' +
+        '</div>' +
         '</div>' +
         '<div class="op2-tblwrap op2-x">' +
           '<table class="op2-tbl" id="op2-log-tbl">' +
@@ -924,6 +963,7 @@ function buildDom() {
       '<div class="op2-stpop" id="op2-stpop" role="menu"></div>' +
       '<div class="op2-stpop" id="op2-lgpop" role="menu"></div>' +
       '<div class="op2-stpop" id="op2-mgrpop" role="menu"></div>' +
+      '<div class="op2-stpop" id="op2-transferpop" role="menu"></div>' +
 
       /* ── «Задание водителю» ── */
       '<div class="op2-dmod-scrim" id="op2-drv-scrim"><div class="op2-dmod" role="dialog" aria-label="Задание водителю">' +
@@ -949,8 +989,10 @@ function buildDom() {
 /* ГОСТ: ОДНО делегирование со списком-селектором, не обработчик на каждый элемент.
    Элементы с собственным звуком результата (RESULT_SEL) из nav исключены, чтобы
    не было двойного щелчка. */
-var NAV_SEL = '.op2-tab,.op2-chip,.op2-ghost,.op2-dbtn,.op2-slot,.op2-veh,.op2-st-chip,.op2-stc,.op2-logpick,#op2-lgpop button,.op2-mgrpick,#op2-mgrpop button,.op2-sugg .op2-it,.op2-free .op2-day,.op2-stpop button,.op2-pop .op2-vi,.op2-copybtn,.op2-take,.op2-dt,.op2-mgr-tbl tbody tr,.op2-log-body tr,.op2-switch button,[data-nav-sound]';
-var RESULT_SEL = '#op2-f-save,#op2-rp-go,#op2-pop-ok,.op2-dok,.op2-unset-ot,.op2-slot.op2-ot,.op2-slot.op2-new,#op2-lgpop button,#op2-mgrpop button,#op2-drv-copy,#op2-drv-max,#op2-d-drv-ok,.op2-dl,.op2-copybtn,.op2-stpop button,.op2-pop .op2-vi[data-act="unset"],#op2-snd,.op2-blocked,#op2-f-ent .op2-chip';
+var NAV_SEL = '.op2-tab,.op2-wchip,.op2-chip,.op2-ghost,.op2-dbtn,.op2-slot,.op2-veh,.op2-st-chip,.op2-stc,.op2-logpick,#op2-lgpop button,.op2-mgrpick,#op2-mgrpop button,.op2-sugg .op2-it,.op2-free .op2-day,.op2-stpop button,.op2-pop .op2-vi,.op2-copybtn,.op2-take,.op2-dt,.op2-mgr-tbl tbody tr,.op2-log-body tr,.op2-switch button,[data-nav-sound]';
+/* #op2-wk-today - «Сегодня» гасит нав-звук из делегирования (op2-chip уже в NAV_SEL) и
+   играет свой S.toggle() в собственном обработчике, тот же приём, что у #op2-snd ниже. */
+var RESULT_SEL = '#op2-f-save,#op2-rp-go,#op2-pop-ok,.op2-dok,.op2-unset-ot,.op2-slot.op2-ot,.op2-slot.op2-new,#op2-lgpop button,#op2-mgrpop button,#op2-drv-copy,#op2-drv-max,#op2-d-drv-ok,.op2-dl,.op2-copybtn,.op2-stpop button,.op2-pop .op2-vi[data-act="unset"],#op2-snd,.op2-blocked,#op2-f-ent .op2-chip,#op2-wk-today';
 
 function wire() {
   var root = $('#op2-root');
@@ -982,18 +1024,59 @@ function wire() {
     loadOrders();
   });
 
-  /* ── даты ── */
+  /* ── даты («Картограф», 18.09) ── */
   $('#op2-mgr-tabs').addEventListener('click', function (e) {
-    var b = e.target.closest('.op2-tab'); if (!b) return;
-    if (b.dataset.week === '1') { TO_DATE = addDays(todayStr(), 6); DATE = todayStr(); }
-    else { DATE = b.dataset.d; TO_DATE = ''; }
+    var b = e.target.closest('.op2-wchip'); if (!b) return;
+    DATE = b.dataset.d; TO_DATE = '';
     F.q = ''; $('#op2-mgr-search').value = '';
     renderAll(); loadOrders(); loadFree();
   });
-  $('#op2-mgr-date').addEventListener('change', function () { if (!this.value) return; DATE = this.value; TO_DATE = ''; renderAll(); loadOrders(); });
-  $('#op2-log-date').addEventListener('change', function () { if (!this.value) return; DATE = this.value; TO_DATE = ''; renderAll(); loadOrders(); });
-  $('#op2-log-prev').addEventListener('click', function () { DATE = addDays(DATE, -1); TO_DATE = ''; renderAll(); loadOrders(); });
-  $('#op2-log-next').addEventListener('click', function () { DATE = addDays(DATE, 1); TO_DATE = ''; renderAll(); loadOrders(); });
+  $('#op2-wk-prev').addEventListener('click', function () { TABS_WK = addDays(TABS_WK, -7); S.stepDown(); renderTabs(); loadCounts(); });
+  $('#op2-wk-next').addEventListener('click', function () { TABS_WK = addDays(TABS_WK, 7); S.stepUp(); renderTabs(); loadCounts(); });
+  $('#op2-wk-today').addEventListener('click', function () {
+    TABS_WK = mondayOf_(todayStr()); DATE = todayStr(); TO_DATE = '';
+    F.q = ''; $('#op2-mgr-search').value = '';
+    S.toggle(); renderAll(); loadOrders(); loadFree(); loadCounts();
+  });
+  /* иконка-календарь вместо всегда видимого <input type=date> (тот же приём, что в форме
+     заявки, op2-f-calbtn) - открывает системный пикер для дня вне текущей ленты недели */
+  $('#op2-mgr-calbtn').addEventListener('click', function () {
+    S.nav();
+    var el = $('#op2-mgr-date');
+    if (el.showPicker) { try { el.showPicker(); return; } catch (e) {} }
+    el.focus(); el.click();
+  });
+  $('#op2-mgr-date').addEventListener('change', function () {
+    if (!this.value) return;
+    DATE = this.value; TO_DATE = ''; TABS_WK = mondayOf_(this.value);
+    F.q = ''; $('#op2-mgr-search').value = '';
+    renderAll(); loadOrders(); loadFree(); loadCounts();
+  });
+  /* ── даты логиста, тот же «Картограф», что у менеджера выше (19.09) - TABS_WK/DATE
+     общие на всю страницу, поэтому listCounts/renderTabs переиспользуются как есть,
+     только своя пара обработчиков на свои id (оба экрана одновременно в DOM). */
+  $('#op2-log-tabs').addEventListener('click', function (e) {
+    var b = e.target.closest('.op2-wchip'); if (!b) return;
+    DATE = b.dataset.d; TO_DATE = '';
+    renderAll(); loadOrders();
+  });
+  $('#op2-logwk-prev').addEventListener('click', function () { TABS_WK = addDays(TABS_WK, -7); S.stepDown(); renderTabs(); loadCounts(); });
+  $('#op2-logwk-next').addEventListener('click', function () { TABS_WK = addDays(TABS_WK, 7); S.stepUp(); renderTabs(); loadCounts(); });
+  $('#op2-logwk-today').addEventListener('click', function () {
+    TABS_WK = mondayOf_(todayStr()); DATE = todayStr(); TO_DATE = '';
+    S.toggle(); renderAll(); loadOrders(); loadCounts();
+  });
+  $('#op2-logwk-calbtn').addEventListener('click', function () {
+    S.nav();
+    var el = $('#op2-logwk-date');
+    if (el.showPicker) { try { el.showPicker(); return; } catch (e) {} }
+    el.focus(); el.click();
+  });
+  $('#op2-logwk-date').addEventListener('change', function () {
+    if (!this.value) return;
+    DATE = this.value; TO_DATE = ''; TABS_WK = mondayOf_(this.value);
+    renderAll(); loadOrders(); loadCounts();
+  });
 
   /* ── фильтры логиста ── */
   $('#op2-log-types').addEventListener('click', function (e) {
@@ -1003,6 +1086,25 @@ function wire() {
   });
   [['op2-f-nocar', 'nocar'], ['op2-f-nd', 'nd'], ['op2-f-new', 'newOnly'], ['op2-f-mine', 'mine']].forEach(function (p) {
     $('#' + p[0]).addEventListener('click', function () { this.classList.toggle('op2-on'); F[p[1]] = this.classList.contains('op2-on'); renderLog(); });
+  });
+  /* «Менеджеры» - гармошка в тулбаре (19.09). stopPropagation ОБЯЗАТЕЛЬНО - тот же
+     повод, что у «От кого» ниже (expandMgrFilterRow/collapseMgrFilterRow меняют DOM
+     через outerHTML/innerHTML, e.target «отвязывается» до всплытия к делегату S.nav()
+     на document; звук здесь решаем сами, через S.unfold/S.fold). */
+  $('#op2-log-mgr').addEventListener('click', function (e) {
+    var seg = this;
+    e.stopPropagation();
+    if (e.target.closest('[data-mgrf-more]')) { expandMgrFilterRow(seg); return; }
+    if (e.target.closest('[data-mgrf-close]')) {
+      var cur0 = seg.querySelector('.op2-chip.op2-on');
+      S.fold(); collapseMgrFilterRow(seg, cur0 ? cur0.dataset.mgrEmail : ''); return;
+    }
+    var pick = e.target.closest('.op2-chip[data-mgr-email]'); if (!pick) return;
+    var wasOpen = seg.querySelectorAll('.op2-chip[data-mgr-email]').length > 1;
+    F.mgrEmail = pick.dataset.mgrEmail || '';
+    collapseMgrFilterRow(seg, F.mgrEmail);
+    if (wasOpen) S.fold();
+    renderLog();
   });
   var logSearchT = null;
   $('#op2-log-search').addEventListener('input', function () {
@@ -1040,12 +1142,26 @@ function wire() {
   /* ── таблица менеджера ── */
   $('#op2-mgr-body').addEventListener('click', function (e) {
     if (e.target.closest('.op2-maplink')) return; /* ссылка на карту открывает себя сама, дровер не нужен */
+    var jb = e.target.closest('[data-jump]'); if (jb) { jumpToDate_(jb.dataset.jump); return; } /* «→ перенесена на...» - переход к новой заявке, не открытие дровера */
     var tr = e.target.closest('tr[data-oid]'); if (!tr) return;
     var ch = e.target.closest('.op2-stc');
     if (ch) { openStPop(ch, tr); return; }
     var mg = e.target.closest('.op2-mgrpick');
     if (mg) { openMgrPop(mg, tr); return; }
     var o = byId(tr.dataset.oid); if (!o) return;
+    /* 17.09, Влад: строка видна всем менеджерам (обзор дня), но провалиться в чужую заявку -
+       нельзя («подсматривать во внутренности заказа других менеджеров они не могут»,
+       кроме руководителей группы - им можно по своим сотрудникам). can_view_details
+       считает сервер (там же, где COMMERCIAL_HEAD_TEAMS_ - список команд, клиенту эти
+       группы не нужны и не переданы) - НЕ дублируем эту логику здесь, просто читаем флаг.
+       Сервер и так не отдал бы контакты/примечания/документы неразрешённой заявки
+       (redactForeignOrder_) и не пустил бы на /orders/one - это ЕЩЁ и явный, понятный
+       отказ в интерфейсе, а не молчаливо пустая шторка. */
+    if (o.can_view_details === false) {
+      logUiEvent_('blocked_click', 'order_details_denied', '');
+      toast('<span class="op2-warn">Подробности этой заявки видит только её менеджер</span>');
+      return;
+    }
     $$('#op2-mgr-body tr.op2-open').forEach(function (r) { r.classList.remove('op2-open'); });
     tr.classList.add('op2-open');
     openDrawerView(o, 'mgr');
@@ -1055,7 +1171,7 @@ function wire() {
     e.preventDefault();
     var tr = e.target.closest('tr[data-oid]'); if (!tr) return;
     var o = byId(tr.dataset.oid); if (!o) return;
-    openRowMenu(e.clientX, e.clientY, mgrRowMenu(o));
+    openRowMenu(e.clientX, e.clientY, mgrRowMenu(o, e.clientX, e.clientY));
   });
 
   /* ── таблица логиста ── */
@@ -1115,6 +1231,11 @@ function wire() {
     var opt = managerOptions_().filter(function (p) { return p.email === email; })[0];
     assignManager_(o, email, opt ? opt.name : email);
   });
+  /* ── поповер «Перенести» (18.09) ── */
+  $('#op2-transferpop').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-d]'); if (!b || !transferOrderCtx_) return;
+    doTransfer_(transferOrderCtx_, b.dataset.d);
+  });
 
   /* ── глобальные: Esc, клик мимо, скролл ── */
   document.addEventListener('keydown', onKeyDown, true);
@@ -1165,6 +1286,7 @@ function onKeyDown(e) {
   if ($('#op2-stpop').classList.contains('op2-open')) { closeStPop(); return; }
   if ($('#op2-lgpop').classList.contains('op2-open')) { closeLogPop(); return; }
   if ($('#op2-mgrpop').classList.contains('op2-open')) { closeMgrPop(); return; }
+  if ($('#op2-transferpop').classList.contains('op2-open')) { closeTransferPop_(); return; }
   if ($('#op2-pop').classList.contains('op2-open')) { closePop(); return; }
   closeDrawer();
 }
@@ -1176,6 +1298,8 @@ function onDocMouseDown(e) {
   if (lgp && lgp.classList.contains('op2-open') && !e.target.closest('#op2-lgpop') && !e.target.closest('.op2-logpick')) closeLogPop();
   var mgp = $('#op2-mgrpop');
   if (mgp && mgp.classList.contains('op2-open') && !e.target.closest('#op2-mgrpop') && !e.target.closest('.op2-mgrpick')) closeMgrPop();
+  var tfp = $('#op2-transferpop');
+  if (tfp && tfp.classList.contains('op2-open') && !e.target.closest('#op2-transferpop')) closeTransferPop_();
   var pop = $('#op2-pop');
   if (pop && pop.classList.contains('op2-open') && !e.target.closest('#op2-pop') && !e.target.closest('.op2-slot,.op2-veh')) closePop();
   if ($('#op2-row-menu') && !e.target.closest('#op2-row-menu')) closeRowMenu();
@@ -1269,15 +1393,30 @@ function loadOrders(silent) {
     else renderUpdated();
   }).catch(function () { loadingOrders = false; });
 }
+/* быстрое перелистывание недель («Картограф», 18.09) может выпустить несколько запросов
+   подряд - без счётчика более старый ответ, вернувшийся позже, тихо перезаписал бы COUNTS
+   не той неделей, которую видно сейчас; countsSeq_ гарантирует, что применяется только
+   самый последний запрошенный диапазон. */
+var countsSeq_ = 0;
 function loadCounts() {
-  var tabs = dayTabs();
-  var from = tabs[0].d, to = tabs[tabs.length - 2].d;
+  var from = TABS_WK, to = addDays(TABS_WK, 6);
+  var seq = ++countsSeq_;
   return apiGet('/orders/counts', { from: from, to: to }).then(function (r) {
+    if (seq !== countsSeq_) return;
     if (!r || !r.ok || !r.data || r.data.error) return;
     COUNTS = {};
     (r.data.counts || []).forEach(function (c) { COUNTS[c.date] = c; });
     renderTabs();
   }).catch(function () {});
+}
+/* 18.09, «Перенести» - клик по подписи «→ перенесена на .../← перенос с ...» (см.
+   transferSubHtml_) переключает вид на дату связанной заявки - тот же приём, что уже есть
+   у клика по дню в шапке (DATE=.../TO_DATE=''/renderAll/loadOrders/loadFree). */
+function jumpToDate_(dateStr) {
+  if (!dateStr) return;
+  S.nav();
+  DATE = dateStr; TO_DATE = ''; TABS_WK = mondayOf_(dateStr);
+  renderAll(); loadOrders(); loadFree(); loadCounts();
 }
 function loadFree() {
   var t = todayStr();
@@ -1336,35 +1475,42 @@ function soundsForDiff() {
 }
 
 /* ═════════════════════════ РЕНДЕР ═════════════════════════ */
-function dayTabs() {
-  var t = todayStr();
-  var arr = [
-    { d: addDays(t, -1), l: 'Вчера' },
-    { d: t, l: 'Сегодня ' + dm(t) },
-    { d: addDays(t, 1), l: 'Завтра' }
-  ];
-  /* дальше - ближайшие будни (выходные логистам как вкладки не нужны, в превью
-     после «Завтра» стояли сразу Пн и Вт); в любой день доступны через календарь */
-  var i = 2, added = 0;
-  while (added < 2 && i < 10) {
-    var d = addDays(t, i), wd = dObj(d).getDay();
-    if (wd !== 0 && wd !== 6) { arr.push({ d: d, l: WD_SHORT[wd] + ' ' + dObj(d).getDate() }); added++; }
-    i++;
+/* «Картограф» (18.09): неделя TABS_WK..+6 целиком, вместо Вчера/Сегодня/Завтра/Пн/Вт/
+   Неделя. Пн..Вс - тот же порядок, что и везде в файле (mondayOf_/addDays), но подпись и
+   индекс дня недели берём через WD_SHORT[getDay()] (0=Вс..6=Сб, как в остальном коде). */
+function weekDays_() {
+  var t = todayStr(), arr = [];
+  for (var i = 0; i < 7; i++) {
+    var d = addDays(TABS_WK, i), wd = dObj(d).getDay();
+    arr.push({ d: d, wd: wd, isToday: d === t, isWeekend: (wd === 0 || wd === 6) });
   }
-  arr.push({ d: '', l: 'Неделя', week: true });
   return arr;
 }
 function renderTabs() {
-  var box = $('#op2-mgr-tabs'); if (!box) return;
-  box.innerHTML = dayTabs().map(function (t) {
-    var on = t.week ? !!TO_DATE : (!TO_DATE && t.d === DATE);
-    var c = COUNTS[t.d];
-    var cnt = '';
-    if (c && c.total) {
-      cnt = '<span class="op2-cnt">' + c.total + (c.nocar ? ' · ' + c.nocar + ' без машины' : '') + '</span>';
-    }
-    return '<button class="op2-tab' + (on ? ' op2-on' : '') + '" data-d="' + esc(t.d) + '"' + (t.week ? ' data-week="1"' : '') + '>' + esc(t.l) + cnt + '</button>';
+  /* 19.09 - тот же «Картограф», теперь на ОБОИХ экранах (мен./лог., оба в DOM
+     одновременно, viewи переключает только CSS) - рендерим один и тот же days[] в
+     каждый существующий контейнер, а не дублируем вычисление недели. */
+  var boxes = [$('#op2-mgr-tabs'), $('#op2-log-tabs')].filter(Boolean);
+  if (!boxes.length) return;
+  var days = weekDays_();
+  var html = days.map(function (t) {
+    var sel = !TO_DATE && t.d === DATE;
+    var cls = ['op2-wchip'];
+    if (t.isToday) cls.push('op2-wchip-today');
+    if (sel) cls.push('op2-on');
+    if (t.isWeekend) cls.push('op2-wchip-weekend');
+    var c = COUNTS[t.d], cnt = '';
+    if (c) cnt = c.total ? '<span class="op2-wchip-cnt">' + c.total + '</span>' : '<span class="op2-wchip-cnt op2-wchip-cnt-empty">—</span>';
+    var label = t.isToday ? 'Сегодня' : (WD_SHORT[t.wd] + ' ' + dObj(t.d).getDate());
+    return '<button type="button" class="' + cls.join(' ') + '" data-d="' + esc(t.d) + '" aria-pressed="' + sel + '"' +
+           (t.isToday ? ' aria-current="date"' : '') + ' title="' + esc(capit(weekdayFull(t.d)) + ', ' + humanDate(t.d)) + '">' +
+           '<span class="op2-wchip-label">' + esc(label) + '</span>' + cnt + '</button>';
   }).join('');
+  var titleStr = 'Неделя: ' + formatWeekRange_(days[0].d, days[6].d);
+  boxes.forEach(function (box) { box.innerHTML = html; box.title = titleStr; });
+  var todayInView = days.some(function (t) { return t.isToday; });
+  var pillMgr = $('#op2-wk-today'); if (pillMgr) pillMgr.hidden = todayInView;
+  var pillLog = $('#op2-logwk-today'); if (pillLog) pillLog.hidden = todayInView;
 }
 function renderUpdated() {
   var el = $('#op2-sub'); if (!el) return;
@@ -1381,8 +1527,7 @@ function renderAll() {
   $('#op2-scr-log').classList.toggle('op2-on', !!ME && !isMgr());
   if (ME && ME.role === 'admin') syncSwitch();
   $('#op2-mgr-date').value = TO_DATE ? todayStr() : DATE;
-  $('#op2-log-date').value = DATE;
-  $('#op2-log-day').textContent = dm(DATE);
+  $('#op2-logwk-date').value = TO_DATE ? todayStr() : DATE;
   renderUpdated();
   renderTabs();
   if (isMgr()) { renderVerdict(); renderFree(); renderMgr(); }
@@ -1564,6 +1709,15 @@ function timeCell(o) {
   var t = oTime(o);
   return '<td>' + (t ? '<span class="op2-time">' + esc(t) + '</span>' : '<span class="op2-time op2-ask" title="Время подачи уточняется">уточнить</span>') + '</td>';
 }
+/* 18.09: тут раньше была метка «новое» по created_at заявки - Влад поправил: имелась в
+   виду НОВАЯ ФУНКЦИЯ («Перенести»), не новая ЗАЯВКА. Правильное место - NEW_FEATURE_
+   бейдж на самом пункте меню (см. mgrRowMenu/openRowMenu ниже), не здесь. Убрано целиком -
+   см. project_order_plan_v2_native.md, запись 18.09, «с бейджем новое ты вообще не туда
+   ушёл» - для истории, чтобы не повторить ту же ошибку на будущих запросах «подсветить
+   новое». */
+function noCell_(o) {
+  return '<td><span class="op2-no">' + esc(oNo(o)) + '</span></td>';
+}
 function techCell_(o) {
   return '<td class="op2-tech">' + (o.equipment_type ? esc(o.equipment_type) : '<span class="op2-ask">уточнить</span>') + '</td>';
 }
@@ -1627,12 +1781,12 @@ function renderMgr() {
     var k = oSt(o);
     var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' : '');
     return '<tr class="' + cls + '" data-oid="' + esc(o.id) + '">' +
-      '<td><span class="op2-no">' + esc(oNo(o)) + '</span></td>' +
+      noCell_(o) +
       mgrCodeCell_(o, isAdmin()) + logCodeCell_(o) +
       timeCell(o) + techCell_(o) +
       custCell_(o, WIDE && F.q ? '<span class="op2-code" style="margin-right:6px">' + esc(dm(o.service_date)) + '</span>' : '') +
       routeCell(o) + cargoCell_(o) +
-      '<td>' + mgrVehCell(o) + '</td>' +
+      '<td>' + mgrVehCell(o) + transferSubHtml_(o) + '</td>' +
       stCell_(o) + priceCell_(o) +
       '</tr>';
   }).join('');
@@ -1671,6 +1825,22 @@ function pendFromTo_(p) {
   if (p.type === 'replace_carrier') return { from: p.from_carrier_name || '', to: p.to_carrier_name || '', extra: '', cls: '' };
   return { from: p.from_gos || '', to: p.to_gos || '', extra: p.to_driver_name || '', cls: 'op2-mono' };
 }
+/* 18.09, «Перенести» - подпись в колонке «Машина·водитель» (тот же приём, что pendHtml
+   ниже - .op2-sub блок под основным содержимым ячейки). Кликабельна - переход к связанной
+   заявке, даже если она на другой день (jumpToOrder_ сам переключит DATE/TO_DATE). Дата/
+   номер связанной заявки уже разрешены сервером (attachTransferInfo_) - клиент не гадает,
+   есть она в текущей загрузке или нет. */
+function transferSubHtml_(o) {
+  if (o.transferred_to) {
+    var t = o.transferred_to;
+    return '<button type="button" class="op2-sub op2-transfer op2-transfer-out" data-jump="' + esc(t.service_date) + '" title="Перейти к новой заявке"><span class="op2-arr">→</span>перенесена на ' + esc(dm(t.service_date)) + ' · №' + esc(t.day_no) + '</button>';
+  }
+  if (o.transferred_from) {
+    var f = o.transferred_from;
+    return '<span class="op2-sub op2-transfer-in"><span class="op2-arr">←</span>перенос с №' + esc(f.day_no) + ' (' + esc(dm(f.service_date)) + ')</span>';
+  }
+  return '';
+}
 function pendHtml(o, who) {
   var p = o.pending_request;
   if (!p) return '';
@@ -1691,6 +1861,7 @@ function renderTypeChips() {
   if (F.type !== 'all' && segs.indexOf(F.type) < 0) F.type = 'all';
   box.innerHTML = '<button class="op2-chip' + (F.type === 'all' ? ' op2-on' : '') + '" data-t="all">Все</button>' +
     segs.map(function (s) { return '<button class="op2-chip' + (F.type === s ? ' op2-on' : '') + '" data-t="' + esc(s) + '">' + esc(capit(s)) + '</button>'; }).join('');
+  renderMgrFilterChips();
   var mine = $('#op2-f-mine');
   mine.classList.toggle('op2-hidden', !MY_SEG);
   if (MY_SEG) {
@@ -1751,6 +1922,7 @@ function renderLog() {
     if (F.nocar && (oOwn(o).length || oHired(o) || oSt(o) === 'ot')) return false;
     if (F.nd && !o.needs_data) return false;
     if (F.newOnly && !isFresh(o)) return false;
+    if (F.mgrEmail && (o.manager_email || '') !== F.mgrEmail) return false;
     if (F.q) {
       var q = F.q.toLowerCase(), qd = q.replace(/\s/g, '');
       var inCust = String(o.customer || '').toLowerCase().indexOf(q) >= 0;
@@ -1765,12 +1937,12 @@ function renderLog() {
     var k = oSt(o);
     var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' + (o.otboy_ack_by ? '' : ' op2-unack') : (needsAccept_(o) ? ' op2-new-unack' : '')) + (isFresh(o) ? ' op2-new-halo' : '');
     return '<tr class="' + cls + '" data-oid="' + esc(o.id) + '">' +
-      '<td><span class="op2-no">' + esc(oNo(o)) + '</span></td>' +
+      noCell_(o) +
       mgrCodeCell_(o, isAdmin()) + logCodeCell_(o, true) +
       timeCell(o) + techCell_(o) +
       custCell_(o, isFresh(o) ? '<span class="op2-st-chip op2-ok" style="margin-right:6px">новая</span>' : '') +
       routeCell(o) + cargoCell_(o) +
-      '<td>' + vehCellLog(o) + '</td>' +
+      '<td>' + vehCellLog(o) + transferSubHtml_(o) + '</td>' +
       stCell_(o) + priceCell_(o) +
       '</tr>';
   }).join('');
@@ -1786,6 +1958,24 @@ function isFresh(o) {
   if (!isFinite(t)) return false;
   return (Date.now() - t) < 10 * 60 * 1000 && !oOwn(o).length && !oHired(o);
 }
+/* 18.09, Влад (уточнение после первой, неверной попытки - см. коммент у noCell_ выше):
+   «новое имелось в виду - новая ФУНКЦИЯ типа Перенести. Чтобы менеджерам было легче её
+   освоить, какое-то время новая функция должна быть отмечена». Это бейдж на ПУНКТЕ МЕНЮ
+   (см. NEW_FEATURE_BADGE_/mgrRowMenu ниже), не на заявках - привязан к дате ВЫХОДА самой
+   функции в коде, не к данным пользователя. Одна запись на функцию, добавлять новую
+   строку сюда при следующем «новом», не трогая остальное. */
+var NEW_FEATURE_DAYS_ = 7;
+var NEW_FEATURE_BADGE_ = { transfer: '2026-09-18' };
+function isFeatureNew_(key) {
+  var shipped = NEW_FEATURE_BADGE_[key]; if (!shipped) return false;
+  var t = Date.parse(shipped + 'T00:00:00');
+  return isFinite(t) && (Date.now() - t) < NEW_FEATURE_DAYS_ * 24 * 60 * 60 * 1000;
+}
+/* 18.09, «Перенести» - те же условия, что сервер сам проверит (POST /orders/transfer),
+   продублировано на клиенте только чтобы не показывать пункт меню, который заведомо
+   откажет. Отбойную/выполненную заявку переносить нечего - для отбоя это отдельно уже
+   «новая заявка», для выполненной - поздно менять план. */
+function canTransfer_(o) { return oSt(o) !== 'ot' && o.status !== 'done'; }
 
 /* ═════════════════════════ СТАТУС В ОДИН КЛИК ═════════════════════════ */
 var stTr = null;
@@ -1875,6 +2065,55 @@ function assignLogist_(o, email, name) {
     loadOrders();
   });
 }
+/* ═════════════════════════ ПЕРЕНЕСТИ (18.09, превью одобрено Владом) ═════════════════════════
+   Отбой старой заявке + новая заявка на выбранную дату, одним запросом (POST /orders/transfer,
+   сервер атомарно и отбой ставит, и новую создаёт со своим day_no - см. комментарий там же).
+   ИСПРАВЛЕНО в тот же день - Влад сверил живьём с одобренным превью («ожидание/реальность,
+   много отклонений от задуманного») и оказался прав: первый заход изобрёл СВОЙ горизонтальный
+   ряд чипов + голую иконку-календарь без подписи вместо третьего пресета и подписанной
+   «Другая дата» из превью. Теперь - ровно те же пункты, что были одобрены, и та же вёрстка,
+   что у ВСЕХ остальных поповеров этого файла (openStPop/openMgrPop/openLogPop) - простой
+   список кнопок `.op2-stpop button` в столбик, без отдельного `.op2-dp-row`/чипов - третий
+   такой же поповер не должен был выглядеть иначе просто потому, что делался последним. */
+var transferOrderCtx_ = null;
+function openTransferPop_(o, x, y) {
+  transferOrderCtx_ = o;
+  var tomorrow = addDays(todayStr(), 1), dayAfter = addDays(todayStr(), 2), soon = addDays(todayStr(), 3);
+  var sp = $('#op2-transferpop');
+  sp.innerHTML =
+    '<div class="op2-dp-title">Перенести №' + esc(oNo(o)) + ' на</div>' +
+    '<button data-d="' + esc(tomorrow) + '">Завтра, ' + esc(dm(tomorrow)) + '</button>' +
+    '<button data-d="' + esc(dayAfter) + '">Послезавтра, ' + esc(dm(dayAfter)) + '</button>' +
+    '<button data-d="' + esc(soon) + '">' + esc(WD_SHORT[dObj(soon).getDay()]) + ', ' + esc(dm(soon)) + '</button>' +
+    '<button type="button" id="op2-transfer-calbtn"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Другая дата</button>' +
+    '<input type="date" class="op2-dt op2-dt-hidden" id="op2-transfer-datenative" autocomplete="off" tabindex="-1" style="position:absolute;opacity:0;pointer-events:none;">';
+  sp.style.left = Math.min(x, window.innerWidth - 260) + 'px';
+  sp.style.top = Math.min(y, window.innerHeight - 220) + 'px';
+  sp.classList.add('op2-open');
+  var calBtn = $('#op2-transfer-calbtn'), dateNative = $('#op2-transfer-datenative');
+  calBtn.addEventListener('click', function () {
+    S.nav();
+    if (dateNative.showPicker) { try { dateNative.showPicker(); return; } catch (e) {} }
+    dateNative.focus(); dateNative.click();
+  });
+  dateNative.addEventListener('change', function () { if (this.value) doTransfer_(o, this.value); });
+}
+function closeTransferPop_() { var sp = $('#op2-transferpop'); if (sp) sp.classList.remove('op2-open'); transferOrderCtx_ = null; }
+function doTransfer_(o, newDate) {
+  closeTransferPop_();
+  apiPost('/orders/transfer', { id: o.id, new_date: newDate }).then(function (r) {
+    if (!ok_(r)) return;
+    S.tickUp();
+    var no = r.data.new_order.day_no;
+    toast('Заявка №' + esc(oNo(o)) + ' <span class="op2-bad">отбой</span> · перенесена на ' + esc(dm(newDate)) + ', новая №' + esc(no));
+    /* Влад в превью видел результат СРАЗУ на том же экране (отбой старой строки + новая
+       ниже) - в отличие от saveForm() (создание с нуля - смотреть посл создания больше не
+       на что), здесь есть на что посмотреть ИМЕННО на текущей дате. Не прыгаем на новую
+       дату автоматически - подпись «→ перенесена...» на строке кликабельна (jumpToDate_),
+       если захочется посмотреть новую заявку. */
+    renderAll(); loadOrders(); loadCounts(); loadFree();
+  });
+}
 function setStatusUi(tr, k) {
   var o = byId(tr.dataset.oid); if (!o) return;
   setStatus(o, k);
@@ -1897,6 +2136,7 @@ function setStatus(o, k) {
 /* ═════════════════════════ КЛИКИ В ТАБЛИЦЕ ЛОГИСТА ═════════════════════════ */
 function onLogClick(e) {
   if (e.target.closest('.op2-maplink')) return; /* ссылка на карту открывает себя сама, дровер не нужен */
+  var jb = e.target.closest('[data-jump]'); if (jb) { jumpToDate_(jb.dataset.jump); return; }
   var lg = e.target.closest('.op2-logpick');
   var dk = e.target.closest('.op2-dok');
   var un = e.target.closest('.op2-unset-ot');
@@ -1988,7 +2228,10 @@ function openRowMenu(x, y, items) {
   var m = document.createElement('div');
   m.className = 'op2-stpop op2-open';
   m.id = 'op2-row-menu';
-  m.innerHTML = items.map(function (it, i) { return '<button data-i="' + i + '">' + esc(it.label) + '</button>'; }).join('');
+  /* it.badge - необязательный текстовый бейдж (сейчас только «новое» у свежих функций,
+     см. NEW_FEATURE_BADGE_/isFeatureNew_) - фиксированный текст из кода, не пользовательский
+     ввод, но экранируем всё равно по общему правилу «весь текст в innerHTML - через esc()». */
+  m.innerHTML = items.map(function (it, i) { return '<button data-i="' + i + '">' + esc(it.label) + (it.badge ? '<span class="op2-tag op2-tg-new">' + esc(it.badge) + '</span>' : '') + '</button>'; }).join('');
   $('#op2-root').appendChild(m);
   m.style.left = Math.min(x, window.innerWidth - 240) + 'px';
   m.style.top = Math.min(y, window.innerHeight - (items.length * 34 + 24)) + 'px';
@@ -2006,12 +2249,20 @@ function mgrChangerItem_(o, table) {
     var cell = tr.querySelector('.op2-mgrpick'); if (cell) openMgrPop(cell, tr);
   } }];
 }
-function mgrRowMenu(o) {
+function mgrRowMenu(o, x, y) {
+  /* 18.09, «Перенести» - превью одобрено Владом («надо сделать как в превью»). Только для
+     заявок, которые ещё реально можно перенести (не отбой, не выполнена) - те же условия,
+     что сервер сам перепроверит (canTransfer_), но скрываем пункт заранее, а не даём нажать
+     и получить отказ. Бейдж «новое» - неделю с даты выхода функции (isFeatureNew_), чтобы
+     менеджеры быстрее заметили и освоили - НЕ про саму заявку (см. историю правки у
+     noCell_/NEW_FEATURE_BADGE_ выше, с первого раза перепутал одно с другим). */
+  var transferItem = canTransfer_(o) ? [{ label: 'Перенести', badge: isFeatureNew_('transfer') ? 'новое' : null, fn: function () { openTransferPop_(o, x, y); } }] : [];
   return [
-    { label: 'Повторить', fn: function () { openRepeat(o); } },
+    { label: 'Повторить', fn: function () { openRepeat(o); } }
+  ].concat(transferItem).concat([
     { label: 'Отбой', fn: function () { setStatus(o, 'ot'); } },
     { label: 'Копировать данные на пропуск', fn: function () { copyText(passText(o), 'Данные на пропуск скопированы'); } }
-  ].concat(mgrChangerItem_(o, 'op2-mgr-body')).concat(isAdmin() ? [{ label: 'Удалить заявку', fn: function () { deleteOrder(o); } }] : []);
+  ]).concat(mgrChangerItem_(o, 'op2-mgr-body')).concat(isAdmin() ? [{ label: 'Удалить заявку', fn: function () { deleteOrder(o); } }] : []);
 }
 function logRowMenu(o) {
   var items = [];
@@ -2029,7 +2280,7 @@ function logRowMenu(o) {
 }
 function showByVehicle(o) {
   var v = oOwn(o)[0];
-  if (!v || !v.vehicle_gos) { toast('<span class="op2-warn">На заявке нет своей машины</span>'); return; }
+  if (!v || !v.vehicle_gos) { logUiEvent_('blocked_click', 'by_vehicle', 'нет своей машины'); toast('<span class="op2-warn">На заявке нет своей машины</span>'); return; }
   apiGet('/orders/by_vehicle', { gos: v.vehicle_gos }).then(function (r) {
     if (!ok_(r)) return;
     var list = (r.data.orders || r.data.list || []);
@@ -2164,7 +2415,7 @@ function onPopOk() {
   var o = popOrder; if (!o) return;
   /* Текст тоста = текст самой кнопки - у неё уже осмысленная причина блокировки (своя машина
      не выбрана / у наёмника не хватает компании или ставки закупки, см. updateHiredBtn_). */
-  if (this.classList.contains('op2-blocked')) { toast('<span class="op2-warn">' + esc(this.textContent) + '</span>'); return; }
+  if (this.classList.contains('op2-blocked')) { logUiEvent_('blocked_click', 'assign_vehicle', this.textContent); toast('<span class="op2-warn">' + esc(this.textContent) + '</span>'); return; }
   if ($('#op2-pop').classList.contains('op2-hired')) { saveHired(o); return; }
   var gos = this.dataset.gos;
   var declared = this.dataset.declared === '1';
@@ -2310,11 +2561,11 @@ function openHiredStep(o) {
 }
 function saveHired(o) {
   var co = $('#op2-h-co').value.trim();
-  if (!co) { toast('<span class="op2-warn">Впиши компанию-перевозчика</span> · остальное можно потом'); return; }
+  if (!co) { logUiEvent_('blocked_click', 'hired_save', 'нет компании'); toast('<span class="op2-warn">Впиши компанию-перевозчика</span> · остальное можно потом'); return; }
   /* Влад 12.09: «отдать наёмнику невозможно без указания цены» - кнопка уже блокируется
      через updateHiredBtn_ (onPopOk не пропустит клик дальше), эта проверка - подстраховка
      на случай прямого вызова saveHired мимо кнопки. */
-  if (!num($('#op2-h-rate').value)) { toast('<span class="op2-warn">Укажи ставку закупки</span> · без неё маржа не считается'); return; }
+  if (!num($('#op2-h-rate').value)) { logUiEvent_('blocked_click', 'hired_save', 'нет ставки закупки'); toast('<span class="op2-warn">Укажи ставку закупки</span> · без неё маржа не считается'); return; }
   var cs = $('#op2-h-cs .op2-chip.op2-on');
   apiPost('/orders/hired_set', {
     order_id: o.id,
@@ -2542,7 +2793,8 @@ var HIST_ACTION_LABEL_ = {
   delete: 'удалил заявку', executor_role: 'сменил роль машины', change_request: 'предложил замену',
   executor_set: 'поставил машину', executor_remove: 'снял машину', executor_move: 'перенёс машину',
   hired_set: 'оформил наёмника', change_request_approve: 'согласовал замену',
-  change_request_reject: 'отклонил замену', needs_data_sent: 'отправил данные на пропуск'
+  change_request_reject: 'отклонил замену', needs_data_sent: 'отправил данные на пропуск',
+  transfer_out: 'перенёс на другую дату', transfer_in: 'создана переносом'
 };
 /* detail этих действий дословно повторяет то, что уже сказано в label/по автору - не дублируем */
 var HIST_SUPPRESS_DETAIL_ = { otboy_ack: 1, delete: 1, needs_data_sent: 1 };
@@ -2572,6 +2824,16 @@ function humanizeHistoryDetail_(action, detail) {
     if (m) return (ST_LABEL[ST_UI[m[1]]] || m[1]) + ' → ' + (ST_LABEL[ST_UI[m[2]]] || m[2]);
   }
   if (action === 'executor_set') detail = detail.replace(/\bmain\b/, 'основная').replace(/\breserve\b/, 'резерв');
+  /* transfer_out/transfer_in - detail хранит "YYYY-MM-DD|order_id" (см. POST /orders/transfer,
+     plan-orders.js) - не дата+номер дня, потому что история пишется ДО того, как известен
+     day_no новой заявки в некоторых путях; id достаточно, а красивый номер уже виден в
+     самой строке заявки (transferSubHtml_) - тут просто дата в привычном формате. */
+  if (action === 'transfer_out' || action === 'transfer_in') {
+    // label уже говорит "перенёс НА другую дату"/"создана переносом" - тут не повторяем
+    // предлог у transfer_out (было бы "...на другую дату · на 25.09"), только у transfer_in
+    // добавляем "с", т.к. там label сам по себе направление не называет.
+    var tp = detail.split('|'); if (tp.length === 2) return (action === 'transfer_in' ? 'с ' : '') + dm(tp[0]) + ' · №' + tp[1];
+  }
   return detail.replace(/\s*->\s*/g, ' → ');
 }
 /* «сегодня, 14:12» / «вчера, 09:34» / «13 сентября, 09:34» - дата определяется сравнением
@@ -2858,6 +3120,59 @@ function expandEntRow(seg) {
   S.unfold(rest.length);
 }
 
+/* Фильтр «Менеджеры» в тулбаре логиста (19.09, Влад: «сделаем кнопку гармошку
+   менеджеры, по нажатию раскрывается список со всеми менеджерами и можно
+   отфильтроваться по ним») - та же гармошка, что «От кого» выше, впервые применённая
+   к фильтру СПИСКА (тулбар), а не к полю ФОРМЫ - механика (свернуть/раскрыть/FLIP/
+   каскад 35мс/S.unfold/S.fold) один в один, отличается только источник данных и то,
+   что выбор фильтрует уже загруженные ORD (renderLog), а не пишет поле заявки.
+   Список - managerOptions_() (живой ROSTER), НЕ хардкод (feedback_spravochniki_not_
+   hardcode) - обновится сам при найме/увольнении менеджера. Цвет точки - тот же
+   personColor_/personSurname_, что уже красит колонку «Мен.» и Планировку (12.09) -
+   вторая палитра для того же самого не заводится. */
+function mgrFilterOptions_() { return [{ email: '', name: 'Все менеджеры' }].concat(managerOptions_()); }
+function mgrFilterChipHtml(p, on) {
+  var col = p.email ? personColor_(p.name) : null;
+  var dot = col ? '<span class="op2-mgr-dot" style="background:' + col + '"></span>' : '';
+  var label = p.email ? personSurname_(p.name) : p.name;
+  return '<button class="op2-chip' + (on ? ' op2-on' : '') + '" data-mgr-email="' + esc(p.email) + '" title="' + esc(p.name) + '">' + dot + esc(label) + '</button>';
+}
+function mgrFilterRowHtml(curEmail) {
+  var list = mgrFilterOptions_();
+  var cur = list.filter(function (p) { return p.email === (curEmail || ''); })[0] || list[0];
+  var restN = Math.max(0, list.length - 1);
+  return mgrFilterChipHtml(cur, true) +
+    (restN ? '<button class="op2-chip" data-mgrf-more>Ещё <span class="op2-mono" style="color:var(--tint-amber)">' + restN + '</span></button>' : '');
+}
+function collapseMgrFilterRow(seg, curEmail) { seg.innerHTML = mgrFilterRowHtml(curEmail); }
+function expandMgrFilterRow(seg) {
+  var more = seg.querySelector('[data-mgrf-more]'); if (!more) return;
+  var curBtn = seg.querySelector('.op2-chip.op2-on');
+  var curEmail = curBtn ? curBtn.dataset.mgrEmail : '';
+  var oldRect = more.getBoundingClientRect();
+  var rest = mgrFilterOptions_().filter(function (p) { return p.email !== curEmail; });
+  more.outerHTML = '<button class="op2-chip op2-ent-close" data-mgrf-close>×</button>';
+  seg.insertAdjacentHTML('beforeend', rest.map(function (p) { return mgrFilterChipHtml(p, false).replace('class="op2-chip', 'class="op2-chip op2-ent-enter'); }).join(''));
+  var closeBtn = seg.querySelector('.op2-ent-close');
+  var newRect = closeBtn.getBoundingClientRect();
+  closeBtn.style.transform = 'translate(' + (oldRect.left - newRect.left) + 'px,' + (oldRect.top - newRect.top) + 'px)';
+  requestAnimationFrame(function () { closeBtn.style.transform = 'none'; });
+  $$('.op2-ent-enter', seg).forEach(function (c, i) { c.style.animationDelay = (i * 35) + 'ms'; });
+  S.unfold(rest.length);
+}
+/* вызывается из renderTypeChips() при каждом обновлении данных логиста - НЕ
+   пересобирать DOM, если ростер не поменялся, иначе раскрытая гармошка захлопывалась
+   бы сама каждые несколько секунд на живом опросе (poll), даже если логист её
+   специально держит открытой, выбирая менеджера. */
+var mgrFilterChipsBuiltFor_ = -1;
+function renderMgrFilterChips() {
+  var seg = $('#op2-log-mgr'); if (!seg) return;
+  var opts = managerOptions_();
+  if (seg.children.length && mgrFilterChipsBuiltFor_ === opts.length) return;
+  mgrFilterChipsBuiltFor_ = opts.length;
+  collapseMgrFilterRow(seg, F.mgrEmail);
+}
+
 /* «Кто заказывает» (только логист) - та же гармошка, что «От кого» выше (Влад
    12.09: «по тем же принципам, как у нас и другие построенные гармошки»).
    «Внешний заказчик» - не отдельный контрол, а ПЕРВЫЙ пункт того же единого
@@ -2981,12 +3296,22 @@ function renderForm() {
   $('#op2-d-body').innerHTML =
     '<div class="op2-cols"><div class="op2-main">' +
     '<div class="op2-sect"><div class="op2-t">Когда и для кого</div><div class="op2-grid2">' +
-      '<div class="op2-fld"><label>Дата подачи</label><div class="op2-seg" id="op2-f-datebox">' +
-        '<button class="op2-chip' + (defDate === todayStr() ? ' op2-on' : '') + '" data-d="' + esc(todayStr()) + '">Сегодня ' + esc(dm(todayStr())) + '</button>' +
-        '<button class="op2-chip' + (defDate === addDays(todayStr(), 1) ? ' op2-on' : '') + '" data-d="' + esc(addDays(todayStr(), 1)) + '">Завтра ' + esc(dm(addDays(todayStr(), 1))) + '</button>' +
-        '<span class="op2-datewrap"><button type="button" class="op2-calbtn" id="op2-f-calbtn" title="Выбрать другую дату"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></button>' +
-        '<input type="date" class="op2-dt op2-dt-hidden" id="op2-f-date" value="' + esc(defDate) + '" autocomplete="off" tabindex="-1"></span>' +
-      '</div></div>' +
+      /* 18.09, Влад (после реального случая - заявку перекидывали между днями правкой
+         даты, номер уехал с 11 на 8 и потом на 19): «дату поменять невозможно. Если
+         заявка создана - она уже в плане. Если подтверждена - отбой. Перенос - новая
+         заявка. Номерация не может выскочить из одного дня в другой». Дата закрыта
+         ТОЛЬКО у уже существующей заявки в режиме правки - у новой/повтора/копии из
+         CRM дата по-прежнему свободно выбирается (это ещё не «уже в плане»). */
+      (editing
+        ? '<div class="op2-fld"><label>Дата подачи</label><div class="op2-locked" title="Дату нельзя менять после создания заявки - поставьте отбой и создайте новую заявку на нужный день">' +
+            esc(humanDate(defDate)) + ' <span class="op2-lock-ic">🔒</span></div>' +
+            '<input type="hidden" id="op2-f-date" value="' + esc(defDate) + '"></div>'
+        : '<div class="op2-fld"><label>Дата подачи</label><div class="op2-seg" id="op2-f-datebox">' +
+            '<button class="op2-chip' + (defDate === todayStr() ? ' op2-on' : '') + '" data-d="' + esc(todayStr()) + '">Сегодня ' + esc(dm(todayStr())) + '</button>' +
+            '<button class="op2-chip' + (defDate === addDays(todayStr(), 1) ? ' op2-on' : '') + '" data-d="' + esc(addDays(todayStr(), 1)) + '">Завтра ' + esc(dm(addDays(todayStr(), 1))) + '</button>' +
+            '<span class="op2-datewrap"><button type="button" class="op2-calbtn" id="op2-f-calbtn" title="Выбрать другую дату"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></button>' +
+            '<input type="date" class="op2-dt op2-dt-hidden" id="op2-f-date" value="' + esc(defDate) + '" autocomplete="off" tabindex="-1"></span>' +
+          '</div></div>') +
 
       '<div class="op2-fld"><label>Время подачи</label><div class="op2-timerow">' +
         '<button class="op2-stp" data-d="-30">−30</button>' +
@@ -3049,7 +3374,11 @@ function renderForm() {
           gabs.map(function (g) { return '<button class="op2-chip' + (g === curGab ? ' op2-on' : '') + '" data-gab="' + esc(g) + '">' + esc(g) + '</button>'; }).join('') +
         '</div></div>' +
       '</div>' +
-      '<div class="op2-fld"><label>Габариты груза</label><input id="op2-f-dims" placeholder="Д × Ш × В" autocomplete="off" value="' + esc(o ? (o.cargo_dims || '') : '') + '"></div>' +
+      /* maxlength=100 - ровно ширина cargo_dims в БД (18.09: длинный вставленный текст
+         в это поле уронил сохранение ошибкой MySQL "Data too long", см. FIELD_MAXLEN_
+         в plan-orders.js - там же настоящая граница, здесь только не даём напечатать
+         больше, чем всё равно можно сохранить). */
+      '<div class="op2-fld"><label>Габариты груза</label><input id="op2-f-dims" placeholder="Д × Ш × В" maxlength="100" autocomplete="off" value="' + esc(o ? (o.cargo_dims || '') : '') + '"></div>' +
       '<div class="op2-fld"><label>Документы</label><select id="op2-f-docs"><option value="">—</option>' + optList(dict('documents'), o ? o.documents : '') + '</select></div>' +
       '<div class="op2-fld"><label>Условия переработки</label><select id="op2-f-rework"><option value="">—</option>' + optList(dict('rework'), o ? o.rework_terms : '') + '</select></div>' +
     '</div>' +
@@ -3098,30 +3427,35 @@ function wireForm() {
     b.addEventListener('click', function () { ft.value = hhmm(tmin(normT(ft.value) || '08:00') + (+this.dataset.d)); if (+this.dataset.d > 0) S.stepUp(); else S.stepDown(); tickState(); });
   });
   var calBtn = $('#op2-f-calbtn'), dateNative = $('#op2-f-date');
-  $('#op2-f-datebox').addEventListener('click', function (e) {
-    var b = e.target.closest('.op2-chip'); if (!b) return;
-    $$('.op2-chip', this).forEach(function (x) { x.classList.remove('op2-on'); });
-    b.classList.add('op2-on');
-    dateNative.value = b.dataset.d;
-    calBtn.classList.remove('op2-on'); calBtn.title = 'Выбрать другую дату';
-    drawQk();
-  });
-  /* иконка-календарь вместо всегда видимого <input type=date> (Влад 11.09, перенос
-     редизайна 12.09) - сам input остаётся в DOM (скрыт визуально), showPicker() его
-     открывает; выбор даты вне Сегодня/Завтра виден по подсветке кнопки и её title,
-     как в утверждённом превью - отдельного текстового поля под датой нет */
-  calBtn.addEventListener('click', function () {
-    S.nav();
-    if (dateNative.showPicker) { try { dateNative.showPicker(); return; } catch (e) {} }
-    dateNative.focus(); dateNative.click();
-  });
-  dateNative.addEventListener('change', function () {
-    $$('#op2-f-datebox .op2-chip').forEach(function (x) { x.classList.toggle('op2-on', x.dataset.d === this.value); }, this);
-    var isPreset = !!$('#op2-f-datebox .op2-chip.op2-on');
-    calBtn.classList.toggle('op2-on', !isPreset);
-    calBtn.title = isPreset ? 'Выбрать другую дату' : humanDate(this.value);
-    drawQk();
-  });
+  /* 18.09: у существующей заявки (editing) дата теперь #op2-locked, не #op2-f-datebox -
+     calBtn/datebox в DOM нет, вешать обработчики некуда (и незачем - hidden #op2-f-date
+     всё равно держит значение для collectForm()/drawQk()). */
+  if (calBtn) {
+    $('#op2-f-datebox').addEventListener('click', function (e) {
+      var b = e.target.closest('.op2-chip'); if (!b) return;
+      $$('.op2-chip', this).forEach(function (x) { x.classList.remove('op2-on'); });
+      b.classList.add('op2-on');
+      dateNative.value = b.dataset.d;
+      calBtn.classList.remove('op2-on'); calBtn.title = 'Выбрать другую дату';
+      drawQk();
+    });
+    /* иконка-календарь вместо всегда видимого <input type=date> (Влад 11.09, перенос
+       редизайна 12.09) - сам input остаётся в DOM (скрыт визуально), showPicker() его
+       открывает; выбор даты вне Сегодня/Завтра виден по подсветке кнопки и её title,
+       как в утверждённом превью - отдельного текстового поля под датой нет */
+    calBtn.addEventListener('click', function () {
+      S.nav();
+      if (dateNative.showPicker) { try { dateNative.showPicker(); return; } catch (e) {} }
+      dateNative.focus(); dateNative.click();
+    });
+    dateNative.addEventListener('change', function () {
+      $$('#op2-f-datebox .op2-chip').forEach(function (x) { x.classList.toggle('op2-on', x.dataset.d === this.value); }, this);
+      var isPreset = !!$('#op2-f-datebox .op2-chip.op2-on');
+      calBtn.classList.toggle('op2-on', !isPreset);
+      calBtn.title = isPreset ? 'Выбрать другую дату' : humanDate(this.value);
+      drawQk();
+    });
+  }
   $('#op2-f-eq').addEventListener('click', function (e) {
     var seg = this;
     // stopPropagation - та же причина, что у «От кого» (см. коммент там): смена
@@ -3320,6 +3654,21 @@ function tickState() {
   var creating = !(formOrder && !formRepeat && !formPrefill);
   if (creating && !num(($('#op2-f-price') || {}).value)) {
     b.className = 'op2-dbtn op2-primary op2-blocked'; b.textContent = 'Укажи цену'; st.textContent = ''; return;
+  }
+  /* 17.09, Влад: «уже начали обходить запрет вводом в цену 1 рубль - трал и длинномер
+     минимум 25000». Сервер - источник истины (minPriceError_ в plan-orders.js), это -
+     только чтобы не гонять на сервер заведомо отклоняемое значение. Проверяем ЛЮБУЮ
+     положительную цену ниже порога (0/пусто - «ещё не знаем», не трогаем), и на
+     создании, и на правке - то же самое решение, что и на сервере. */
+  var priceNow = num(($('#op2-f-price') || {}).value);
+  if (priceNow > 0) {
+    var minSeg = MIN_PRICE_BY_SEG_[segOf(formEq())];
+    if (minSeg && priceNow < minSeg) {
+      b.className = 'op2-dbtn op2-primary op2-blocked';
+      b.textContent = 'Мин. ' + minSeg.toLocaleString('ru-RU') + ' ₽';
+      st.textContent = 'Для «' + esc(formEq()) + '» цена не может быть ниже ' + minSeg.toLocaleString('ru-RU') + ' ₽';
+      return;
+    }
   }
   if (miss.length) {
     b.className = 'op2-dbtn op2-primary op2-warn';
@@ -3748,7 +4097,7 @@ function saveForm(btn) {
       (payload.internal ? ' · <span class="op2-tick">внутренний заказчик</span>' + (payload.price ? ' · ' + esc(fmtP(payload.price)) : ' · <span class="op2-warn">без суммы</span>') + ' · в списке менеджеров не появится' : '') +
       (warn ? ' · <span class="op2-warn">незаполненные поля</span>' : '') +
       (editing ? '' : (payload.internal ? '' : (formWho === 'log' ? ' · менеджер увидит у себя' : ' · логисты видят сразу'))));
-    if (payload.service_date !== DATE && !TO_DATE) { DATE = payload.service_date; renderAll(); }
+    if (payload.service_date !== DATE && !TO_DATE) { DATE = payload.service_date; TABS_WK = mondayOf_(DATE); renderAll(); }
     loadOrders(); loadCounts(); loadFree();
   }).catch(function () { btn.disabled = false; logUiEvent_('save_error', 'orders/save', 'сеть'); });
 }
@@ -3854,7 +4203,7 @@ function openRepeat(o) {
 }
 function runRepeat(btn, o) {
   var rows = openRepeat._rows ? openRepeat._rows() : [];
-  if (btn.classList.contains('op2-blocked') || !rows.length) { toast('<span class="op2-warn">Кликни по дню - добавь хотя бы одну заявку</span>'); return; }
+  if (btn.classList.contains('op2-blocked') || !rows.length) { logUiEvent_('blocked_click', 'repeat_days', 'дни не выбраны'); toast('<span class="op2-warn">Кликни по дню - добавь хотя бы одну заявку</span>'); return; }
   var base = {
     needs_data: o.needs_data ? 1 : 0, customer: o.customer,
     customer_entity_id: o.customer_entity_id || '', executor_entity_id: o.executor_entity_id || '',

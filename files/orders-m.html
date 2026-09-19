@@ -68,19 +68,30 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7;stroke
 .hdate svg{width:14px;height:14px;color:var(--muted)}
 .today{height:36px;min-width:0;padding:0 12px;border-radius:18px;background:rgba(29,158,117,.13);color:#2fbe93;font-size:13px;font-weight:600}
 
-/* row2: лента недели «Картограф» (ГОСТ 1347-1416) - чип 44px, скролл/свайп, без стрелок */
+/* row2: карусель дат «Маяк» - утверждено Владом 19.09 на превью (артефакт
+   claude.ai/artifact/CJ29KgstWjQQza63LE9ucs), заменяет фиксированную неделю «Картограф»
+   выше (та остаётся каноном для десктопа/логиста-таблицы - здесь только «Задание» с
+   телефона). Непрерывная лента, крутится пальцем с инерцией и снапом на день, вместо
+   заливки - статичное свечение по центру + текст выбранного дня зеленеет. */
 .hdr-row2{padding:6px 8px 8px;gap:6px;height:auto;align-items:stretch}
-.wk{flex:1 1 auto;min-width:0;display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
-.wk::-webkit-scrollbar{display:none}
-.wchip{flex:1 1 0;min-width:0;height:44px;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:8px;
-  background:var(--bg3);font-size:12px;font-weight:600;color:var(--text);line-height:1.15;padding:0 2px;border:1.5px solid transparent}
-.wchip .cnt{font-family:var(--font-num);font-variant-numeric:tabular-nums;font-size:10px;color:var(--muted);margin-top:1px}
-.wchip.weekend{color:var(--tint-red)}
-.wchip.weekend .cnt{color:var(--tint-red);opacity:.75}
-.wchip.today{border-color:var(--green)}
-.wchip[aria-pressed="true"]{background:var(--green);color:#08150f}
-.wchip[aria-pressed="true"] .cnt{color:#0c2018}
-.mgrseg{flex:none;display:flex;height:44px;background:var(--bg3);border-radius:8px;padding:2px;gap:2px}
+.carousel-wrap{position:relative;flex:1 1 auto;min-width:0;height:56px;overflow:hidden;touch-action:pan-y}
+.carousel-wrap.dragging{cursor:grabbing}
+.carousel-wrap .fade-l,.carousel-wrap .fade-r{position:absolute;top:0;bottom:0;width:22px;z-index:5;pointer-events:none}
+.carousel-wrap .fade-l{left:0;background:linear-gradient(90deg,var(--bg),transparent)}
+.carousel-wrap .fade-r{right:0;background:linear-gradient(270deg,var(--bg),transparent)}
+.beacon-glow{position:absolute;left:50%;top:50%;width:72px;height:72px;margin:-36px 0 0 -36px;border-radius:50%;z-index:1;pointer-events:none;
+  background:radial-gradient(circle,rgba(29,158,117,.26) 0%,rgba(29,158,117,.09) 55%,transparent 75%)}
+.dstrip{position:absolute;top:0;left:50%;height:56px;will-change:transform}
+.dchip{position:absolute;top:0;width:52px;height:52px;border-radius:10px;background:var(--bg3);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+  font-size:12px;font-weight:600;color:var(--text);line-height:1.15;user-select:none;z-index:3}
+.dchip .cnt{font-family:var(--font-num);font-variant-numeric:tabular-nums;font-size:10px;color:var(--muted);margin-top:1px}
+.dchip.weekend{color:var(--tint-red)}
+.dchip.weekend .cnt{color:var(--tint-red);opacity:.75}
+.dchip.today{box-shadow:inset 0 0 0 1.5px var(--green)}
+.dchip.sel{background:var(--bg4);color:#2fbe93}
+.dchip.sel .cnt{color:#2fbe93}
+.mgrseg{flex:none;display:flex;height:44px;align-self:center;background:var(--bg3);border-radius:8px;padding:2px;gap:2px}
 .mgrseg button{padding:0 10px;border-radius:6px;font-size:12px;font-weight:700;color:var(--muted)}
 .mgrseg button[aria-pressed="true"]{background:var(--bg4);color:var(--text)}
 
@@ -309,7 +320,12 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7;stroke
       <button class="hbtn icon" id="btnPlus" aria-label="Новая заявка"><svg><use href="#i-plus"/></svg></button>
     </div>
     <div class="hdr-row hdr-row2">
-      <div class="wk" id="wk"></div>
+      <div class="carousel-wrap" id="dcWrap">
+        <div class="fade-l"></div>
+        <div class="fade-r"></div>
+        <div class="beacon-glow"></div>
+        <div class="dstrip" id="dcStrip"></div>
+      </div>
       <div class="mgrseg" id="mgrSeg" hidden>
         <button aria-pressed="true" data-v="mine">Мои</button>
         <button aria-pressed="false" data-v="all">Все</button>
@@ -359,7 +375,6 @@ function fmtDateLong(d){ return pad2(d.getDate())+'.'+pad2(d.getMonth()+1)+'.'+d
 function iso(d){ return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
 function fromIso(s){ var p=String(s).split('-'); return new Date(+p[0],+p[1]-1,+p[2]); }
 function addDays(d,n){ var x=new Date(d); x.setDate(x.getDate()+n); return x; }
-function mondayOf(d){ var x=new Date(d); var wd=(x.getDay()+6)%7; return addDays(x,-wd); }
 var WD=['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
 function fmtPrice(n){ if(n==null) return '—'; var s=String(Math.round(n)); var out=''; for(var i=0;i<s.length;i++){ if(i>0 && (s.length-i)%3===0) out+=' '; out+=s[i]; } return out+' ₽'; }
 function isSameDay(a,b){ return a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate(); }
@@ -410,7 +425,6 @@ var ME = {name:'', role:'', email:''};
 var ROLE = 'log'; // фактический ROLE для рендера - вычисляется из роли сессии, см. applyRole_()
 var TODAY = new Date();
 var SELECTED_DATE = new Date(TODAY);
-var WEEK_MONDAY = mondayOf(TODAY);
 var MGR_ALL = false;
 var SEARCH_Q = '';
 var LOG_TYPE_FILTER = 'all';
@@ -490,11 +504,13 @@ function loadMeta(){
   });
 }
 function loadCounts(){
-  var from=iso(WEEK_MONDAY), to=iso(addDays(WEEK_MONDAY,6));
+  // Окно = всё, что построено в карусели (DC_BACK/DC_FWD) - один запрос покрывает и
+  // «Перейти к дню» (28 дней, подмножество), и саму ленту целиком.
+  var from=iso(addDays(TODAY,-DC_BACK)), to=iso(addDays(TODAY,DC_FWD));
   return apiGet_('/orders/counts', {from:from, to:to}).then(function(r){
     if(!r.ok) return;
     COUNTS={}; (r.data.counts||[]).forEach(function(c){ COUNTS[c.date]=c; });
-    renderWeek();
+    renderCarouselCounts();
   });
 }
 function loadOrders(){
@@ -531,25 +547,150 @@ function fmtHeaderDate(d){
   var wd = WD[(d.getDay()+6)%7];
   return '<span class="wd">'+wd+',</span>'+fmtDate(d)+' <svg><use href="#i-chev"/></svg>';
 }
-function renderWeek(){
-  var wk=$('wk');
-  wk.innerHTML='';
-  for(var i=0;i<7;i++){
-    var d=addDays(WEEK_MONDAY,i);
-    var dISO=iso(d);
-    var c=COUNTS[dISO];
-    var isToday=isSameDay(d,TODAY);
-    var isSel=isSameDay(d,SELECTED_DATE);
-    var weekend = i>=5;
-    var b=document.createElement('button');
-    b.className='wchip'+(weekend?' weekend':'')+(isToday?' today':'');
-    b.setAttribute('aria-pressed', isSel?'true':'false');
-    b.innerHTML = WD[i]+' '+d.getDate()+'<span class="cnt">'+(c?c.total:'—')+'</span>';
-    b.addEventListener('click', function(dd){ return function(){ vib(4); SELECTED_DATE=dd; WEEK_MONDAY=mondayOf(dd); renderWeek(); startLoad_(); }; }(d));
-    wk.appendChild(b);
+
+/* ---- карусель дат «Маяк» (утверждено 19.09, превью CJ29KgstWjQQza63LE9ucs) ----
+   Непрерывная лента вместо 7 фиксированных чипов - крутится пальцем с инерцией, снап на
+   ближайший день, щелчок «Стекло» (высокий тихий тик) на каждый пройденный день. Окно дат
+   строится ОДИН раз при загрузке (шире, чем нужно для повседневной работы, чтобы обычный
+   свайп никогда не упирался в край) - «Перейти к дню» (шапка, кнопка даты) по-прежнему
+   рядом для мгновенного прыжка на любую дату, карусель для навигации день-в-день. */
+var DC_BACK = 21, DC_FWD = 45;       // окно дат: TODAY-21 .. TODAY+45
+var DC_CHIP_W = 52, DC_GAP = 10, DC_STEP = DC_CHIP_W + DC_GAP;
+var DAYS = [];                        // [{date, iso, wd, weekend, isToday}]
+var dcChipEls = [];
+var dcIdx = 0;                        // непрерывный индекс (дробный во время жеста)
+var dcLastTicked = 0;
+var dcDragging=false, dcStartX=0, dcStartIdx=0, dcLastX=0, dcLastT=0, dcVel=0, dcRaf=null;
+var AC_ = null;
+function dcBlip(f1,f2,dur,vol){
+  try{
+    AC_ = AC_ || new (window.AudioContext||window.webkitAudioContext)();
+    var o=AC_.createOscillator(), g=AC_.createGain();
+    o.type='sine';
+    o.frequency.setValueAtTime(f1, AC_.currentTime);
+    o.frequency.exponentialRampToValueAtTime(f2, AC_.currentTime+dur);
+    g.gain.setValueAtTime(vol, AC_.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, AC_.currentTime+dur);
+    o.connect(g); g.connect(AC_.destination); o.start(); o.stop(AC_.currentTime+dur);
+  }catch(e){}
+}
+function dcTickFwd(){ dcBlip(720,760,.035,.02); }
+function dcTickBwd(){ dcBlip(760,720,.035,.02); }
+
+function buildDateCarousel(){
+  DAYS = [];
+  for(var i=-DC_BACK;i<=DC_FWD;i++){
+    var d=addDays(TODAY,i);
+    DAYS.push({ date:d, iso:iso(d), wd:WD[(d.getDay()+6)%7], weekend:(d.getDay()===0||d.getDay()===6), isToday:i===0 });
   }
+  var strip=$('dcStrip');
+  strip.innerHTML=''; dcChipEls=[];
+  DAYS.forEach(function(day,i){
+    var el=document.createElement('div');
+    el.className='dchip'+(day.weekend?' weekend':'')+(day.isToday?' today':'');
+    el.style.left=(i*DC_STEP)+'px';
+    el.innerHTML=day.wd+' '+day.date.getDate()+'<span class="cnt">—</span>';
+    el.addEventListener('click', function(){ dcTravelTo(i); });
+    strip.appendChild(el);
+    dcChipEls.push(el);
+  });
+  strip.style.width=(DAYS.length*DC_STEP-DC_GAP)+'px';
+  var startOffset = Math.round((SELECTED_DATE-TODAY)/86400000);
+  dcIdx = Math.max(0, Math.min(DAYS.length-1, startOffset+DC_BACK));
+  dcLastTicked = Math.round(dcIdx);
+  dcApplyTransform();
+  dcOnSettled(DAYS[Math.round(dcIdx)]);
+  var wrap=$('dcWrap');
+  wrap.addEventListener('pointerdown', dcOnDown);
+  wrap.addEventListener('pointermove', dcOnMove);
+  wrap.addEventListener('pointerup', dcOnUp);
+  wrap.addEventListener('pointercancel', dcOnUp);
+}
+function renderCarouselCounts(){
+  dcChipEls.forEach(function(el,i){
+    var c=COUNTS[DAYS[i].iso];
+    var cnt=el.querySelector('.cnt'); if(cnt) cnt.textContent = c?c.total:'—';
+  });
+}
+function dcApplyTransform(){
+  var centerFromOrigin = dcIdx*DC_STEP + DC_CHIP_W/2;
+  $('dcStrip').style.transform = 'translateX(' + (-centerFromOrigin) + 'px)';
+  dcChipEls.forEach(function(el,i){
+    var dist = Math.abs(i-dcIdx);
+    el.style.transform = 'scale(' + Math.max(0.66,1-dist*0.12) + ')';
+    el.style.opacity = Math.max(0.32,1-dist*0.26);
+  });
+}
+function dcOnSettled(day){
+  dcChipEls.forEach(function(el,i){ el.classList.toggle('sel', i===Math.round(dcIdx)); });
+  SELECTED_DATE = day.date;
   $('btnDate').innerHTML = fmtHeaderDate(SELECTED_DATE);
-  $('btnToday').hidden = isSameDay(SELECTED_DATE,TODAY);
+  $('btnToday').hidden = day.isToday;
+  startLoad_();
+}
+function dcMaybeTick(){
+  var nearest=Math.round(dcIdx);
+  if(nearest===dcLastTicked) return;
+  var dir = nearest>dcLastTicked?1:-1, steps=Math.abs(nearest-dcLastTicked);
+  for(var s=1;s<=steps;s++){ (function(s){ setTimeout(function(){ (dir>0?dcTickFwd:dcTickBwd)(); }, (s-1)*16); })(s); }
+  vib(4);
+  dcLastTicked=nearest;
+}
+function dcOnDown(e){
+  dcDragging=true; $('dcWrap').classList.add('dragging');
+  cancelAnimationFrame(dcRaf);
+  dcStartX=e.clientX; dcLastX=e.clientX; dcLastT=performance.now();
+  dcStartIdx=dcIdx; dcVel=0;
+  try{ $('dcWrap').setPointerCapture(e.pointerId); }catch(err){}
+}
+function dcOnMove(e){
+  if(!dcDragging) return;
+  var now=performance.now();
+  var dt=Math.max(8, now-dcLastT);
+  var instVel=Math.max(-2.2,Math.min(2.2,(e.clientX-dcLastX)/dt));
+  dcVel = 0.7*dcVel + 0.3*instVel;
+  dcLastX=e.clientX; dcLastT=now;
+  dcIdx = Math.max(0, Math.min(DAYS.length-1, dcStartIdx - (e.clientX-dcStartX)/DC_STEP));
+  dcApplyTransform(); dcMaybeTick();
+}
+function dcOnUp(){
+  if(!dcDragging) return;
+  dcDragging=false; $('dcWrap').classList.remove('dragging');
+  dcInertia(-(dcVel*16)/DC_STEP);
+}
+function dcInertia(v){
+  function step(){
+    v*=0.93; dcIdx=Math.max(0,Math.min(DAYS.length-1, dcIdx+v));
+    dcApplyTransform(); dcMaybeTick();
+    if(Math.abs(v)>0.001 && dcIdx>0 && dcIdx<DAYS.length-1) dcRaf=requestAnimationFrame(step);
+    else dcSnap();
+  }
+  if(Math.abs(v)<0.02){ dcSnap(); return; }
+  dcRaf=requestAnimationFrame(step);
+}
+function dcSnap(){
+  var target=Math.max(0,Math.min(DAYS.length-1,Math.round(dcIdx)));
+  dcTravelTo(target);
+}
+function dcTravelTo(target){
+  var from=dcIdx, start=performance.now(), dur=(Math.abs(target-from)<1.2)?180:260;
+  cancelAnimationFrame(dcRaf);
+  function step(){
+    var t=Math.min(1,(performance.now()-start)/dur);
+    dcIdx = from + (target-from)*(1-Math.pow(1-t,3));
+    dcApplyTransform(); dcMaybeTick();
+    if(t<1) dcRaf=requestAnimationFrame(step);
+    else { dcIdx=target; dcApplyTransform(); dcOnSettled(DAYS[target]); }
+  }
+  dcRaf=requestAnimationFrame(step);
+}
+/* Переход на конкретную дату извне (сегодня, «Перейти к дню», после сохранения/переноса
+   заявки) - если дата вне построенного окна (редкий перенос далеко вперёд), карусель просто
+   останавливается у ближайшего края, но SELECTED_DATE и список заявок - настоящие. */
+function goToDate(d){
+  var offset = Math.round((d-TODAY)/86400000);
+  var target = Math.max(0, Math.min(DAYS.length-1, offset+DC_BACK));
+  dcTravelTo(target);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -728,7 +869,7 @@ document.addEventListener('click', function(e){
    8. Шапка: кнопки
    ══════════════════════════════════════════════════════════════════════════ */
 $('btnMenu').addEventListener('click', function(){ openDrawer(); });
-$('btnToday').addEventListener('click', function(){ vib(4); SELECTED_DATE=new Date(TODAY); WEEK_MONDAY=mondayOf(TODAY); renderWeek(); startLoad_(); });
+$('btnToday').addEventListener('click', function(){ vib(4); goToDate(new Date(TODAY)); });
 $('btnPlus').addEventListener('click', function(){ vib(4); loadMeta().then(function(){ openSheet('new', {}, 'full'); }); });
 $('btnSearch').addEventListener('click', function(){ openSheet('search', {}, 'half'); });
 $('btnDate').addEventListener('click', function(){ openOvl('datejump'); });
@@ -1206,8 +1347,7 @@ function renderNewSheet(head,body,foot){
       var savedId = r.data.id;
       toast(editing?('Заявка №'+o.day_no+' сохранена'):('Заявка №'+r.data.day_no+' создана'));
       var savedDate = fromIso(payload.service_date || o.service_date);
-      SELECTED_DATE=savedDate; WEEK_MONDAY=mondayOf(savedDate);
-      closeSheet(); renderWeek(); startLoad_();
+      closeSheet(); goToDate(savedDate);
     });
   });
 }
@@ -1412,7 +1552,7 @@ function renderDateJumpOvl(ovl){
   ovl.querySelectorAll('.jump-row').forEach(function(row){
     row.addEventListener('click', function(){
       var i=+row.getAttribute('data-i'); var d=addDays(TODAY,i-3);
-      SELECTED_DATE=d; WEEK_MONDAY=mondayOf(d); vib(4); closeOvl(); renderWeek(); startLoad_(); loadCounts();
+      vib(4); closeOvl(); goToDate(d);
     });
   });
 }
@@ -1579,11 +1719,10 @@ window.addEventListener('offline', function(){ $('netbar').classList.add('on'); 
 window.addEventListener('online', function(){ $('netbar').classList.remove('on'); toast('Связь восстановлена'); startLoad_(); });
 
 function boot_(){
-  renderWeek();
+  buildDateCarousel();
   logUiEvent_('viewport', '', window.innerWidth+'x'+window.innerHeight);
   loadMeta();
   loadCounts();
-  startLoad_();
   startPolling_();
 }
 function boot(){

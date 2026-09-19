@@ -250,6 +250,17 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7;stroke
 .timebox{display:flex;align-items:center;gap:10px;padding:10px 0}
 .timebox button{width:44px;height:44px;border-radius:8px;background:var(--bg3);font-size:18px;font-weight:700}
 .timebox .t{flex:1 1 auto;text-align:center;font-family:var(--font-num);font-size:28px;font-weight:700}
+/* «Повторить заявку» (20.09, Влад: "тот же принцип, что в десктопной - несколько раз
+   нажал на дату - несколько заявок") - счётчик ×N на чипе дня (клик = +1, копится) и
+   компактный ряд для каждой будущей заявки в списке ниже (.timebox выше слишком крупный
+   для повтора N раз подряд). */
+.chip .n{font-family:var(--font-num);font-size:12px;font-weight:700;opacity:.75}
+.rep-day{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:14px 0 6px}
+.rep-row{display:flex;align-items:center;gap:8px;min-height:44px;border-bottom:1px solid var(--border)}
+.rep-row .no{flex:none;width:18px;color:var(--muted);font-size:12px;font-weight:700;font-family:var(--font-num)}
+.rep-row .t{flex:1 1 auto;text-align:center;font-family:var(--font-num);font-size:15px;font-weight:700}
+.rep-row button{flex:none;width:34px;height:34px;border-radius:8px;background:var(--bg3);font-size:13px;font-weight:700;color:var(--text)}
+.rep-row .rm{color:var(--tint-red);font-size:15px}
 .kv{display:grid;grid-template-columns:100px 1fr;gap:4px 10px;font-size:13px;padding:6px 0;border-bottom:1px solid var(--border)}
 .kv .k{color:var(--muted)}
 .kv .v{color:var(--text);font-weight:600}
@@ -415,6 +426,7 @@ function iso(d){ return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getD
 function fromIso(s){ var p=String(s).split('-'); return new Date(+p[0],+p[1]-1,+p[2]); }
 function addDays(d,n){ var x=new Date(d); x.setDate(x.getDate()+n); return x; }
 var WD=['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+function plural(n,a,b,c){ n=Math.abs(n)%100; var n1=n%10; if(n>10&&n<20) return c; if(n1>1&&n1<5) return b; if(n1===1) return a; return c; }
 function fmtPrice(n){ if(n==null) return '—'; var s=String(Math.round(n)); var out=''; for(var i=0;i<s.length;i++){ if(i>0 && (s.length-i)%3===0) out+=' '; out+=s[i]; } return out+' ₽'; }
 function isSameDay(a,b){ return a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate(); }
 var PALETTE=['#4fd4a3','#f5be6a','#7f9cf5','#f07b7a','#c792ea','#6ec6ff','#ffd166','#84dcc6','#e08fd8','#9fd356','#ff9f7a','#7bd3ea','#c9a4ff','#f4a6c1','#a0d8b3'];
@@ -1250,35 +1262,119 @@ function renderRelogSheet(head,body,foot){
 }
 
 /* ---- «Повторить» ---- */
+/* «Повторить заявку» (20.09, Влад: "тот же принцип, что в десктопной - несколько раз
+   нажал на дату - несколько заявок появилось, выбор времени тоже") - 1:1 логика с
+   openRepeat()/runRepeat() в order-plan-v2.js: клик по дню = +1 заявка НА ЭТОТ день
+   (копится, чип показывает счётчик ×N), под чипами - список будущих заявок по дням,
+   время у каждой своё (по умолчанию - как в образце), регулируется −30/+30. Убрать
+   лишнюю заявку - крестик у её строки (десктопный правый клик на чипе недоступен на
+   тач-экране, отдельный жест для этого не заводим - список и так под рукой).
+   Presets «Будни»/«Все 7 дней» - те же +1 на каждый день группы, «Сбросить» - очистка. */
+function repDayLabel_(d,i){
+  if(i===0) return 'Сегодня '+fmtDate(d);
+  if(i===1) return 'Завтра '+fmtDate(d);
+  return WD[(d.getDay()+6)%7]+' '+d.getDate();
+}
+function repStepTime_(t,delta){
+  var p=(t||'08:00').split(':'); var mins=((+p[0])*60+(+p[1])+delta); mins=((mins%1440)+1440)%1440;
+  return pad2(Math.floor(mins/60))+':'+pad2(mins%60);
+}
 function renderRepeatSheet(head,body,foot){
   var o=sheetData;
   head.innerHTML = shHeadHtml('Повторить заявку', '№'+o.day_no+' · '+o.customer);
   $('shCancel').addEventListener('click', function(){ closeSheet(); });
   var days=[]; for(var i=0;i<7;i++) days.push(addDays(new Date(),i));
-  var sel={};
-  body.innerHTML = '<div class="f-label">Дни</div><div class="chips" id="repDays">' + days.map(function(d,i){
-    return '<button class="chip" data-i="'+i+'">'+WD[(d.getDay()+6)%7]+' '+d.getDate()+'</button>';
-  }).join('') + '</div><div class="info" id="repInfo">Выберите один или несколько дней</div>';
-  body.querySelectorAll('#repDays .chip').forEach(function(c){
-    c.addEventListener('click', function(){ var i=+c.getAttribute('data-i'); sel[i]=!sel[i]; c.setAttribute('aria-pressed', sel[i]?'true':'false'); vib(4);
-      var n=Object.keys(sel).filter(function(k){return sel[k];}).length;
-      $('repInfo').textContent = n ? ('Будет создано заявок: '+n) : 'Выберите один или несколько дней';
+  var defTime = o.service_time||'';
+  var rows=[]; // {di, t} - по одной на будущую заявку, di = индекс в days
+  function countOf(di){ return rows.filter(function(r){return r.di===di;}).length; }
+  function addDay(di){ rows.push({di:di, t:defTime}); }
+  function groupDays(p){ var arr=[]; days.forEach(function(d,i){ var wd=d.getDay(); if(p==='all'||(p==='wd'&&wd!==0&&wd!==6)) arr.push(i); }); return arr; }
+  function renderChips(){
+    body.querySelectorAll('#repDays .chip').forEach(function(c){
+      var i=+c.getAttribute('data-i'); var n=countOf(i);
+      c.setAttribute('aria-pressed', n>0?'true':'false');
+      c.innerHTML = esc(repDayLabel_(days[i],i)) + (n ? (' <span class="n">×'+n+'</span>') : '');
     });
+  }
+  function renderList(){
+    var byDay={}; rows.forEach(function(r,idx){ (byDay[r.di]=byDay[r.di]||[]).push(idx); });
+    var h='';
+    days.forEach(function(d,i){
+      var idx=byDay[i]; if(!idx) return;
+      h+='<div class="rep-day">'+esc(repDayLabel_(d,i))+' · '+idx.length+' '+plural(idx.length,'заявка','заявки','заявок')+'</div>';
+      idx.forEach(function(ri,k){
+        h+='<div class="rep-row"><span class="no">'+(k+1)+'</span>'+
+          '<button data-ri="'+ri+'" data-dm="-30">−30</button>'+
+          '<span class="t">'+esc(rows[ri].t||'--:--')+'</span>'+
+          '<button data-ri="'+ri+'" data-dm="30">+30</button>'+
+          '<button class="rm" data-ri="'+ri+'" data-rm="1" aria-label="Убрать">✕</button></div>';
+      });
+    });
+    $('repList').innerHTML = h;
+    var btn=$('btnRepGo');
+    btn.disabled = !rows.length;
+    btn.textContent = rows.length ? ('Создать '+rows.length+' '+plural(rows.length,'заявку','заявки','заявок')) : 'Создать заявки';
+    $('repInfo').textContent = rows.length ? 'Все - «Не подтверждено», подтверди каждую отдельно' : 'Клик по дню - +1 заявка на этот день';
+  }
+  function render(){ renderChips(); renderList(); }
+
+  body.innerHTML = '<div class="f-label">На какие дни и сколько</div>'+
+    '<div class="chips" id="repDays">' + days.map(function(d,i){
+      return '<button class="chip" data-i="'+i+'">'+esc(repDayLabel_(d,i))+'</button>';
+    }).join('') + '</div>'+
+    '<div class="chips" id="repPresets" style="margin-top:8px">'+
+      '<button class="chip" data-preset="wd">Будни</button>'+
+      '<button class="chip" data-preset="all">Все 7 дней</button>'+
+      '<button class="chip" data-preset="none">Сбросить</button>'+
+    '</div>'+
+    '<div class="info" id="repInfo">Клик по дню - +1 заявка на этот день</div>'+
+    '<div id="repList" style="margin-top:6px"></div>';
+
+  var dayBox=$('repDays'), preBox=$('repPresets'), list=$('repList');
+  dayBox.addEventListener('click', function(e){ var c=e.target.closest('.chip'); if(!c) return; addDay(+c.getAttribute('data-i')); vib(4); render(); });
+  preBox.addEventListener('click', function(e){
+    var c=e.target.closest('.chip'); if(!c) return;
+    var p=c.getAttribute('data-preset');
+    if(p==='none'){ rows=[]; render(); return; }
+    groupDays(p).forEach(addDay); vib(4); render();
   });
-  foot.innerHTML='<button class="btn primary wide" id="btnRepGo">Создать заявки</button>';
+  list.addEventListener('click', function(e){
+    var b=e.target.closest('button[data-ri]'); if(!b) return;
+    var ri=+b.getAttribute('data-ri');
+    if(b.getAttribute('data-rm')){ rows.splice(ri,1); vib(4); render(); return; }
+    rows[ri].t = repStepTime_(rows[ri].t||defTime, +b.getAttribute('data-dm'));
+    vib(4); renderList();
+  });
+  render();
+
+  foot.innerHTML='<button class="btn primary wide" id="btnRepGo" disabled>Создать заявки</button>';
   $('btnRepGo').addEventListener('click', function(){
-    var keys=Object.keys(sel).filter(function(k){return sel[k];});
-    if(!keys.length){ toast('Выберите хотя бы один день'); return; }
+    if(!rows.length){ toast('Кликни по дню - добавь хотя бы одну заявку'); return; }
     var btn=$('btnRepGo'); btn.disabled=true; btn.textContent='Создаю…';
-    Promise.all(keys.map(function(k){
-      var d=days[+k];
-      return apiPost_('/orders/save', { service_date:iso(d), service_time:o.service_time||'', equipment_type:o.equipment_type,
-        customer:o.customer, load_address:(o.from[0]||'')+(o.from[1]?(', '+o.from[1]):''), unload_address:(o.to[0]||'')+(o.to[1]?(', '+o.to[1]):''),
-        cargo:o.cargo||'', price:o.price||0 });
-    })).then(function(results){
-      var okCount = results.filter(function(r){return r.ok;}).length;
+    // Полный набор полей образца - тот же base, что и в openRepeat()/runRepeat()
+    // (order-plan-v2.js) - не только адрес/цена/тип, но и контакты, координаты,
+    // габариты, документы, переработка, внутренний заказчик и т.д.
+    var base = {
+      needs_data:o.needs_data?1:0, customer:o.customer, customer_entity_id:o.customer_entity_id||'',
+      executor_entity_id:o.executor_entity_id||'', customer_contact_name:o.customer_contact_name||'', customer_contact_phone:o.customer_contact_phone||'',
+      equipment_type:o.equipment_type, cargo:o.cargo||'', cargo_weight_t:o.cargo_weight_t||'', cargo_dims:o.cargo_dims||'',
+      gabarit:o.gabarit||'', rework_terms:o.rework_terms||'', documents:o.documents||'', note:o.note||'', cash:o.cash?1:0,
+      load_address:o.load_address||'', load_lat:o.load_lat||'', load_lon:o.load_lon||'', load_contact_name:o.load_contact_name||'', load_contact_phone:o.load_contact_phone||'',
+      unload_address:o.unload_address||'', unload_lat:o.unload_lat||'', unload_lon:o.unload_lon||'', unload_contact_name:o.unload_contact_name||'', unload_contact_phone:o.unload_contact_phone||'',
+      price:o.price||0, payment_status:o.payment_status||'', internal:o.internal?1:0
+    };
+    Promise.all(rows.map(function(r){
+      var p={}; Object.keys(base).forEach(function(k){ p[k]=base[k]; });
+      p.service_date=iso(days[r.di]); p.service_time=r.t||'';
+      return apiPost_('/orders/save', p).then(function(res){ return {r:res, di:r.di}; });
+    })).then(function(res){
+      btn.disabled=false;
+      var good=res.filter(function(x){ return x.r && x.r.ok; });
+      var bad=res.length-good.length;
+      var perDay={}; good.forEach(function(x){ perDay[x.di]=(perDay[x.di]||0)+1; });
       vib([8,40,8]);
-      toast('Создано заявок: '+okCount+(okCount<keys.length?(' из '+keys.length):''));
+      toast('Создано '+good.length+' '+plural(good.length,'заявка','заявки','заявок')+
+        (bad ? (' · '+bad+' не создалось') : '') + ' · все «Не подтверждено»');
       closeSheet(); loadCounts();
     });
   });

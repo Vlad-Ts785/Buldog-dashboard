@@ -1448,6 +1448,23 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .mp-status__lever{font-family:'JetBrains Mono',monospace;font-size:19px;font-weight:700;color:var(--text);
   font-variant-numeric:tabular-nums;margin-top:3px;}
 @media(max-width:640px){.mp-status__r{text-align:left;}}
+/* НАЙДЕННЫЙ БАГ (Влад, 20.09, скриншот "Личная страница"): .mp-status__word
+   (вердикт-полоса "ИДЁШЬ С ОПЕРЕЖЕНИЕМ X,X ДНЯ"/"ОТСТАВАНИЕ X,X ДНЯ" и т.п.) -
+   white-space:nowrap при clamp(18px,2.3vw,27px) - на узком экране 2.3vw упирается в
+   нижнюю границу 18px, длинная фраза Unbounded капсом в это не влезает, а
+   .mp-status{overflow:hidden} тихо обрезает хвост ("ДНЯ" пропадало). Первая попытка
+   фикса стояла ВЫШЕ по файлу (в общем мобильном @media-блоке с .tab-bar) - не сработала,
+   т.к. это безусловное правило .mp-status__word (см. выше) идёт ПОЗЖЕ в каскаде и при
+   равной специфичности перебивает медиа-версию независимо от ширины экрана; медиа-
+   переопределение должно стоять ПОСЛЕ базового правила, не до него. На мобильном
+   разрешаем перенос и чуть уменьшаем шрифт; text-wrap:pretty - страховка от
+   "сиротского" последнего слова в одну строку (Влад: "буква/знак одиноко на следующей
+   строке" - тот же класс бага, что и в .mp-status__sub, см. pageFr_ выше). */
+@media(max-width:640px){
+  .mp-status__word{white-space:normal;font-size:17px;text-wrap:pretty;}
+  .mp-status{padding:14px 18px;}
+  .mp-status__sub{text-wrap:pretty;}
+}
 
 /* ярус: строки ОБЩИЕ для обеих колонок - высоты совпадают гарантированно */
 .mp-tier{display:grid;grid-template-columns:5fr 7fr;grid-auto-rows:min-content;gap:16px;margin-bottom:16px;}
@@ -1753,6 +1770,16 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .mp-tm__nums{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--muted);white-space:nowrap;
   font-variant-numeric:tabular-nums;flex:none;}
 .mp-tm__nums b{color:var(--text);font-weight:600;}
+/* НАЙДЕННЫЙ БАГ (аудит 20.09, «Моя группа» на странице Ахтамовой/Гусейновой): имя
+   сотрудника (nowrap+ellipsis, но БЕЗ min-width:0 - ellipsis мёртвый код без него) и
+   числа (nowrap, flex:none) вместе не влезали в узкую карточку на мобильном - тот же
+   класс бага, что у .mp-status__word/.tab-bar, просто во вложенном flex-ряду, который
+   не накрывает общий .main-wrap{min-width:0}. */
+@media(max-width:640px){
+  .mp-tm__top{flex-wrap:wrap;}
+  .mp-tm__name{min-width:0;flex:1 1 auto;}
+  .mp-tm__nums{white-space:normal;}
+}
 .mp-tm__track{height:8px;border-radius:4px;background:var(--bg4);position:relative;overflow:hidden;}
 .mp-tm__fill{position:absolute;left:0;top:0;bottom:0;border-radius:4px;}
 .mp-tm__fc{position:absolute;top:0;bottom:0;}
@@ -9281,7 +9308,8 @@ function setMyPageMgrProblemsFilter(f) { myPageMgrProblemsFilter = f; renderMyPa
 var PAGE_COL = { red:'#E24B4A', amber:'#EF9F27', green:'#1D9E75', blue:'#378ADD' };
 // Десятичный знак - ЗАПЯТАЯ (ГОСТ раздел 2). В легаси была точка («5.0 млн»),
 // поймано при переносе кабины смены 29.08 - правится тут, для всей личной страницы.
-function pageMln_(n) { var x=Math.abs(n||0); var sg=(n||0)<0?'-':''; return x>=1000000 ? sg+(x/1000000).toFixed(1).replace('.',',')+' млн ₽' : sg+Math.round(x).toLocaleString('ru-RU')+' ₽'; }
+//   перед "млн"/"₽" - тот же фикс сироты-символа, что в pageFr_ выше (20.09).
+function pageMln_(n) { var x=Math.abs(n||0); var sg=(n||0)<0?'-':''; return x>=1000000 ? sg+(x/1000000).toFixed(1).replace('.',',')+' млн ₽' : sg+Math.round(x).toLocaleString('ru-RU')+' ₽'; }
 // Экранирование для строк, приходящих из 1С (имена контрагентов и т.п.). Внутри
 // калькулятора свой escHtml_ живёт в IIFE и снаружи недоступен - здесь глобальный.
 function pageEsc_(s) {
@@ -9300,7 +9328,12 @@ function pageEscAttr_(s) {
   var jsSafe = String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
   return pageEsc_(jsSafe);
 }
-function pageFr_(n) { return n ? Math.round(n).toLocaleString('ru-RU')+' ₽' : '—'; }
+// НАЙДЕННЫЙ БАГ (Влад, 20.09, скриншот "Личная страница"): обычный пробел перед "₽"
+// давал браузеру право перенести знак валюты одиноко на новую строку при недостатке
+// ширины (узкие карточки на мобильном) - "...хватило бы 3 935 378" и "₽" сиротой ниже.
+//   (неразрывный пробел) держит число и "₽" вместе. Функция общая на весь
+// дашборд - фикс в одном месте чинит эту категорию бага везде, не только на этой странице.
+function pageFr_(n) { return n ? Math.round(n).toLocaleString('ru-RU')+' ₽' : '—'; }
 function pageBlock_(title, bodyHtml) {
   return '<div class="card" style="margin-bottom:14px;padding:16px 18px">'+
     '<div style="font-size:14px;font-weight:600;margin-bottom:8px">'+title+'</div>'+bodyHtml+'</div>';
@@ -9427,7 +9460,7 @@ function mpSalShareHtml_(parts, totalSal) {
 function mpSalRow_(swColor, label, val, detail, pct) {
   // Честный ноль: pageFr_(0) даёт «—», а прочерк читается как «расчёт не пришёл»,
   // хотя оклад 0 при обороте ниже первой ступени - нормальное значение.
-  var valTxt = (val ? pageFr_(val) : '0 ₽');
+  var valTxt = (val ? pageFr_(val) : '0 ₽');
   return '<div class="mp-srow">'+
     '<div class="mp-srow__top">'+
       '<span class="mp-srow__k"><span class="mp-srow__sw" style="background:'+swColor+'"></span>'+label+'</span>'+
@@ -10252,7 +10285,7 @@ async function renderMyPageManager(el, current, selectorHtml, d) {
       mpSalShareHtml_(parts, totalSal) +
       srows +
       '<div class="mp-total"><span class="mp-total__k">Итого на сегодня</span>'+
-        '<span class="mp-total__v">'+(totalSal ? pageFr_(totalSal) : '0 ₽')+'</span></div>' +
+        '<span class="mp-total__v">'+(totalSal ? pageFr_(totalSal) : '0 ₽')+'</span></div>' +
       (salForecastTotal ? mpSalForecastBarHtml_(totalSal, salForecastTotal) : '');
   }
 
@@ -11681,8 +11714,9 @@ function renderMyPageRyschanow(el, current, selectorHtml, d) {
 // существующий action=vehicles_period, только когда выбран именно Васин.
 async function renderMyPageVasin(el, current, selectorHtml) {
   var COL = { red:'#E24B4A', amber:'#EF9F27', green:'#1D9E75', blue:'#378ADD' };
-  function mln(n) { var x=Math.abs(n||0); var sg=(n||0)<0?'-':''; return x>=1000000 ? sg+(x/1000000).toFixed(1)+' млн ₽' : sg+Math.round(x).toLocaleString('ru-RU')+' ₽'; }
-  function fr(n) { return n ? Math.round(n).toLocaleString('ru-RU')+' ₽' : '—'; }
+  //   перед "млн"/"₽" - тот же фикс сироты-символа, что в pageFr_/pageMln_ (20.09).
+  function mln(n) { var x=Math.abs(n||0); var sg=(n||0)<0?'-':''; return x>=1000000 ? sg+(x/1000000).toFixed(1)+' млн ₽' : sg+Math.round(x).toLocaleString('ru-RU')+' ₽'; }
+  function fr(n) { return n ? Math.round(n).toLocaleString('ru-RU')+' ₽' : '—'; }
   function block(title, bodyHtml) {
     return '<div class="card" style="margin-bottom:14px;padding:16px 18px">'+
       '<div style="font-size:14px;font-weight:600;margin-bottom:8px">'+title+'</div>'+bodyHtml+'</div>';

@@ -1345,9 +1345,15 @@ function renderRepeatSheet(head,body,foot){
     rows[ri].t = repStepTime_(rows[ri].t||defTime, +b.getAttribute('data-dm'));
     vib(4); renderList();
   });
+  /* Кнопка подвала должна существовать в DOM ДО первого render() - renderList() внутри
+     него сразу обращается к #btnRepGo (disabled/textContent). Раньше foot.innerHTML
+     ставился ПОСЛЕ render() - на самом первом рендере $('btnRepGo') был null,
+     "btn.disabled=..." падал с TypeError, и код после (сама вставка кнопки в foot,
+     навешивание клика) не выполнялся вообще - лист оставался без кнопки подтверждения
+     на каждое открытие (Влад 20.09: «кнопка где-то непонятно где»). */
+  foot.innerHTML='<button class="btn primary wide" id="btnRepGo" disabled>Создать заявки</button>';
   render();
 
-  foot.innerHTML='<button class="btn primary wide" id="btnRepGo" disabled>Создать заявки</button>';
   $('btnRepGo').addEventListener('click', function(){
     if(!rows.length){ toast('Кликни по дню - добавь хотя бы одну заявку'); return; }
     var btn=$('btnRepGo'); btn.disabled=true; btn.textContent='Создаю…';

@@ -558,7 +558,14 @@ function loadCounts(){
   // Окно = всё, что построено в карусели (DC_BACK/DC_FWD) - один запрос покрывает и
   // «Перейти к дню» (28 дней, подмножество), и саму ленту целиком.
   var from=iso(addDays(TODAY,-DC_BACK)), to=iso(addDays(TODAY,DC_FWD));
-  return apiGet_('/orders/counts', {from:from, to:to}).then(function(r){
+  var params={from:from, to:to};
+  /* Влад 20.09: «сотрудник видит 24 заказа, должен видеть количество СВОИХ» - список под
+     лентой уже фильтруется под «Мои» (MGR_ALL=false, дефолт менеджера), а сама лента
+     показывала общий тотал по дню на всех сразу - цифры расходились. mine=1 - только для
+     настоящего менеджера с MGR_ALL=false (у admin/логиста персональной выборки нет, они и
+     так видят общий список без переключателя). */
+  if(ROLE==='mgr' && !MGR_ALL) params.mine=1;
+  return apiGet_('/orders/counts', params).then(function(r){
     if(!r.ok) return;
     COUNTS={}; (r.data.counts||[]).forEach(function(c){ COUNTS[c.date]=c; });
     renderCarouselCounts();
@@ -572,6 +579,13 @@ function loadOrders(){
     rebuildRoster_(r.data.roster);
     applyRole_();
     render();
+    /* Лента дат читает ROLE/MGR_ALL, чтобы решить, слать ли ?mine=1 (см. loadCounts()) -
+       ROLE становится известна только ЗДЕСЬ, после applyRole_(). Раньше boot_() звал
+       loadCounts() сразу и параллельно с этим запросом - на самом первом открытии ROLE
+       ещё была на значении по умолчанию 'log', и лента у менеджера первые секунды
+       показывала общий тотал по дню вместо своего (Влад 20.09: «видит 24 заказа вместо
+       своих»), пока не подоспеет следующий тик поллинга. */
+    loadCounts();
   });
 }
 
@@ -968,6 +982,7 @@ $('mgrSeg').addEventListener('click', function(e){
   MGR_ALL = b.getAttribute('data-v')==='all'; vib(4);
   $('mgrSeg').querySelectorAll('button').forEach(function(x){ x.setAttribute('aria-pressed', x===b?'true':'false'); });
   render();
+  loadCounts(); // лента дат должна тут же переключиться между «свои»/«общий» тотал
 });
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -2213,7 +2228,9 @@ function boot_(){
   buildDateCarousel();
   logUiEvent_('viewport', '', window.innerWidth+'x'+window.innerHeight);
   loadMeta();
-  loadCounts();
+  // loadCounts() больше не зовётся тут напрямую - buildDateCarousel() уже запускает
+  // startLoad_()->loadOrders(), которая сама вызовет loadCounts() правильно
+  // проскоупленным (ROLE к этому моменту уже известна, см. комментарий в loadOrders()).
   startPolling_();
 }
 function boot(){

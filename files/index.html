@@ -8260,6 +8260,7 @@ function clearAuthTokens_() {
   localStorage.removeItem('session_token');
   localStorage.removeItem('user_role');
   localStorage.removeItem('user_name');
+  localStorage.removeItem('view_as');
 }
 
 // Google Apps Script иногда временно отдаёт HTML-страницу (или пустой ответ) вместо JSON,
@@ -12453,7 +12454,22 @@ function mechFinishRepair_() {
   }).catch(function(e) { p2Toast('Не сохранилось: ' + e.message, 'red'); });
 }
 
+// Восстановление "Смотреть как" после перехода обратно с orders-m.html/plan-m.html (19.09) -
+// один раз за загрузку страницы, см. комментарий у setViewAs(). Не после КАЖДОГО render() -
+// иначе admin, явно нажавший "Обычный вид" (setViewAs(null,null) уже стёр localStorage,
+// но render() внутри той же функции вызовется ДО следующей загрузки страницы) не смог бы
+// выйти из вьювера на текущей вкладке.
+let viewAsRestorePending_ = true;
 function render() {
+  if (viewAsRestorePending_) {
+    viewAsRestorePending_ = false;
+    if (D && D.role === 'admin' && !viewAsEntry) {
+      try {
+        var savedViewAs_ = JSON.parse(localStorage.getItem('view_as') || 'null');
+        if (savedViewAs_ && savedViewAs_.name && savedViewAs_.type) viewAsEntry = savedViewAs_;
+      } catch (e) {}
+    }
+  }
   updateFreshnessDisplays_(); // честно из последнего известного data_age_min, см. Этап 0.1
   checkDataFreshness(); // свежий опрос + плашка "обновление не проходит", см. Этап 0.1/0.3
   updatePagePeriod_(); // "Август 2026 · день N из M · данные 1С HH:MM" в шапке
@@ -12706,6 +12722,14 @@ function renderViewAsPanel_() {
 
 function setViewAs(name, type) {
   viewAsEntry = name ? { name: name, type: type } : null;
+  // Сохраняем в localStorage (19.09, Влад: "захожу во вьювер на телефоне, перехожу в
+  // Задание - там уже вижу СЕБЯ, а не Савиток") - viewAsEntry раньше жил только в этой
+  // JS-переменной, при переходе на orders-m.html/plan-m.html (отдельные HTML-файлы)
+  // терялся мгновенно. orders-m.html/plan-m.html читают этот же ключ при загрузке.
+  try {
+    if (viewAsEntry) localStorage.setItem('view_as', JSON.stringify(viewAsEntry));
+    else localStorage.removeItem('view_as');
+  } catch (e) {}
   myPagePeriod = null; // сброс "прошлого месяца" - иначе можно унести чужой кэш периода на нового человека
   // сброс кэша страницы механика (08.09, найдено живьём Владом) - mechFleet_ теперь
   // персонально-ограничен сервером (?person=/сессия механика, MECHANIC_SEGMENT_BY_SUR_), а

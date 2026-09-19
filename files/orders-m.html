@@ -310,10 +310,6 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7;stroke
     </div>
     <div class="hdr-row hdr-row2">
       <div class="wk" id="wk"></div>
-      <div class="mgrseg" id="adminRoleSeg" hidden>
-        <button aria-pressed="false" data-r="log">Лог</button>
-        <button aria-pressed="false" data-r="mgr">Мен</button>
-      </div>
       <div class="mgrseg" id="mgrSeg" hidden>
         <button aria-pressed="true" data-v="mine">Мои</button>
         <button aria-pressed="false" data-v="all">Все</button>
@@ -411,7 +407,7 @@ function apiPost_(path, params){
    ══════════════════════════════════════════════════════════════════════════ */
 var IS_DEMO = /(^|\?|&)demo=1(&|$)/.test(location.search) || location.protocol === "file:";
 var ME = {name:'', role:'', email:''};
-var ROLE = 'log'; // фактический ROLE для рендера - у admin переключается вручную, у остальных = роли сессии
+var ROLE = 'log'; // фактический ROLE для рендера - вычисляется из роли сессии, см. applyRole_()
 var TODAY = new Date();
 var SELECTED_DATE = new Date(TODAY);
 var WEEK_MONDAY = mondayOf(TODAY);
@@ -516,26 +512,17 @@ function loadOrders(){
    4. Роль (admin переключает вручную, как #op2-switch на десктопе; менеджер/логист - фиксирована сессией)
    ══════════════════════════════════════════════════════════════════════════ */
 function applyRole_(){
-  if(ME.role==='manager') ROLE='mgr';
-  else if(ME.role!=='admin') ROLE='log';
-  // admin оставляет текущий выбор ROLE как есть - переключатель «Лог/Мен» всегда виден в шапке
-  var adminSeg=$('adminRoleSeg');
-  adminSeg.hidden = ME.role!=='admin';
-  if(ME.role==='admin') adminSeg.querySelectorAll('button').forEach(function(b){ b.setAttribute('aria-pressed', b.getAttribute('data-r')===ROLE?'true':'false'); });
+  // Экран выбирается ролью сессии, без ручного переключателя (Влад 19.09: «давай лучше
+  // просматривать экран, исходя из роли... неважно видеть тот же интерфейс, который видят
+  // сотрудники»). У admin своей роли заявок нет - по умолчанию видит экран менеджера.
+  if(ME.role==='logist') ROLE='log';
+  else ROLE='mgr';
   // «Мои/Все» - только у настоящего менеджера (десктоп: #op2-mgr-all скрыт для admin, «у него
-  // нет своих заявок для сравнения»). У admin в режиме «Мен.» показываем ВСЕ заявки всегда -
-  // иначе список пуст (ни одна заявка не создана от его email) и это выглядит как баг.
+  // нет своих заявок для сравнения»). У admin показываем ВСЕ заявки всегда - иначе список
+  // пуст (ни одна заявка не создана от его email) и выглядит как баг.
   $('mgrSeg').hidden = ME.role!=='manager';
-  if(ME.role==='admin' && ROLE==='mgr') MGR_ALL=true;
+  if(ME.role==='admin') MGR_ALL=true;
 }
-$('adminRoleSeg').addEventListener('click', function(e){
-  var b=e.target.closest('button'); if(!b) return;
-  var r=b.getAttribute('data-r'); if(r===ROLE) return;
-  ROLE=r; vib(4);
-  if(ROLE==='mgr') MGR_ALL=true;
-  $('adminRoleSeg').querySelectorAll('button').forEach(function(x){ x.setAttribute('aria-pressed', x===b?'true':'false'); });
-  render();
-});
 
 /* ══════════════════════════════════════════════════════════════════════════
    5. ШАПКА: ДАТА, НЕДЕЛЯ
@@ -1269,7 +1256,7 @@ function renderHiredSheet(head,body,foot){
   });
 }
 
-/* ---- настройки (тема-заглушка, версия, выход; переключатель роли admin - в шапке, #adminRoleSeg) ---- */
+/* ---- настройки (тема-заглушка, версия, выход) ---- */
 var PAGE_VERSION_ = "v1 · 19.09";
 function renderSettingsSheet(head,body,foot){
   head.innerHTML = shHeadHtml('Настройки');

@@ -310,6 +310,10 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7;stroke
     </div>
     <div class="hdr-row hdr-row2">
       <div class="wk" id="wk"></div>
+      <div class="mgrseg" id="adminRoleSeg" hidden>
+        <button aria-pressed="false" data-r="log">Лог</button>
+        <button aria-pressed="false" data-r="mgr">Мен</button>
+      </div>
       <div class="mgrseg" id="mgrSeg" hidden>
         <button aria-pressed="true" data-v="mine">Мои</button>
         <button aria-pressed="false" data-v="all">Все</button>
@@ -514,9 +518,24 @@ function loadOrders(){
 function applyRole_(){
   if(ME.role==='manager') ROLE='mgr';
   else if(ME.role!=='admin') ROLE='log';
-  // admin оставляет текущий выбор ROLE как есть (переключатель в «Ещё» настроек)
-  $('mgrSeg').hidden = ROLE!=='mgr';
+  // admin оставляет текущий выбор ROLE как есть - переключатель «Лог/Мен» всегда виден в шапке
+  var adminSeg=$('adminRoleSeg');
+  adminSeg.hidden = ME.role!=='admin';
+  if(ME.role==='admin') adminSeg.querySelectorAll('button').forEach(function(b){ b.setAttribute('aria-pressed', b.getAttribute('data-r')===ROLE?'true':'false'); });
+  // «Мои/Все» - только у настоящего менеджера (десктоп: #op2-mgr-all скрыт для admin, «у него
+  // нет своих заявок для сравнения»). У admin в режиме «Мен.» показываем ВСЕ заявки всегда -
+  // иначе список пуст (ни одна заявка не создана от его email) и это выглядит как баг.
+  $('mgrSeg').hidden = ME.role!=='manager';
+  if(ME.role==='admin' && ROLE==='mgr') MGR_ALL=true;
 }
+$('adminRoleSeg').addEventListener('click', function(e){
+  var b=e.target.closest('button'); if(!b) return;
+  var r=b.getAttribute('data-r'); if(r===ROLE) return;
+  ROLE=r; vib(4);
+  if(ROLE==='mgr') MGR_ALL=true;
+  $('adminRoleSeg').querySelectorAll('button').forEach(function(x){ x.setAttribute('aria-pressed', x===b?'true':'false'); });
+  render();
+});
 
 /* ══════════════════════════════════════════════════════════════════════════
    5. ШАПКА: ДАТА, НЕДЕЛЯ
@@ -1250,23 +1269,18 @@ function renderHiredSheet(head,body,foot){
   });
 }
 
-/* ---- настройки (тема-заглушка, версия, выход; для admin - переключатель роли отображения) ---- */
+/* ---- настройки (тема-заглушка, версия, выход; переключатель роли admin - в шапке, #adminRoleSeg) ---- */
 var PAGE_VERSION_ = "v1 · 19.09";
 function renderSettingsSheet(head,body,foot){
   head.innerHTML = shHeadHtml('Настройки');
   $('shCancel').addEventListener('click', function(){ closeSheet(); });
-  var roleSwitchHtml = ME.role==='admin' ?
-    '<div class="f-label">Экран</div><div class="seg3" id="sRole"><button data-r="mgr" aria-pressed="'+(ROLE==='mgr')+'">Менеджер</button><button data-r="log" aria-pressed="'+(ROLE==='log')+'">Логист</button></div>' : '';
   body.innerHTML =
-    roleSwitchHtml +
     '<div class="list-row" id="sRefresh">Обновить данные<span class="go"><svg><use href="#i-chev"/></svg></span></div>' +
     '<div class="f-label">Тема</div><div class="seg3"><button aria-pressed="true">Тёмная</button><button aria-pressed="false">Светлая</button><button aria-pressed="false">Как в телефоне</button></div>' +
     '<div class="info">Светлая - отступление от ГОСТа, пока не включена.</div>' +
     '<div class="f-label">Версия</div><div class="frow"><div class="k">Страница</div><div class="v mono">orders-m · '+PAGE_VERSION_+'</div></div>' +
     '<div class="list-row muted" id="sLogout">Выйти</div>';
   foot.innerHTML='';
-  var sRole=$('sRole');
-  if(sRole) sRole.addEventListener('click', function(e){ var b=e.target.closest('button'); if(!b) return; ROLE=b.getAttribute('data-r'); applyRole_(); closeSheet(); render(); });
   $('sRefresh').addEventListener('click', function(){ closeSheet(); loadCounts(); startLoad_(); toast('Данные обновлены'); });
   $('sLogout').addEventListener('click', function(){
     try{ ["session_token","id_token","user_role","user_name"].forEach(function(k){ localStorage.removeItem(k); }); }catch(e){}
@@ -1501,7 +1515,7 @@ function render(){
   renderVerdict();
   renderLogFilters();
   renderList();
-  $('mgrSeg').hidden = ROLE!=='mgr';
+  $('mgrSeg').hidden = ME.role!=='manager';
 }
 
 function syncVvh(){

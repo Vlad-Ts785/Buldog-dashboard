@@ -8622,6 +8622,26 @@ function buildMyPageRoster_(byManager, byLogist) {
     (byManager || []).map(function(m){ return {name:m.name, type:'manager'}; })
       .concat((byLogist || []).map(function(l){ return {name:l.name, type:'logist'}; }))
   );
+  // 20.09, Влад (скриншот "Смотреть как" - Володин/Дербенцева в списке, оба давно уволены):
+  // тот же класс бага, что чинили 11.09 в Планировке (buildRoster()) - byManager/byLogist
+  // построены по ФАКТУ заказов в 1С, уволенный со старыми заказами остаётся навсегда. Эта
+  // функция - единая точка сборки (см. комментарий выше), но саму фильтрацию по
+  // sprav_people.employment_status тогда сюда не занесли - только в Планировку. Тот же
+  // приём: FLEET_PEOPLE_ (тот же /sprav/state, не второй источник), сопоставление по
+  // фамилии, fail-open если человека нет в справочнике. Фильтруем ДО подмешивания
+  // ALWAYS_PREVIEW_ROSTER_ ниже - Рыщанов там намеренно остаётся уволенным, но выбираемым
+  // (см. комментарий у ALWAYS_PREVIEW_ROSTER_), этот блок его трогать не должен.
+  var firedSurnames_ = {};
+  (FLEET_PEOPLE_ || []).forEach(function(p){
+    if (p && p.employment_status === 'fired') {
+      var sur = String(p.full_name || '').trim().split(/\s+/)[0].toLowerCase().replace(/ё/g, 'е');
+      if (sur) firedSurnames_[sur] = 1;
+    }
+  });
+  entries = entries.filter(function(en){
+    var sur = en.name.trim().split(/\s+/)[0].toLowerCase().replace(/ё/g, 'е');
+    return !firedSurnames_[sur];
+  });
   ALWAYS_PREVIEW_ROSTER_.forEach(function(ap) {
     var hasReal = entries.some(function(en){ return en.name.trim().split(' ')[0].toLowerCase() === ap.sur; });
     if (!hasReal) entries.push({ name: ap.name, type: ap.type });
@@ -12600,6 +12620,19 @@ function toggleViewAsPanel(ev) {
     loadMechanicsRoster_().then(function() {
       if (panel.style.display === 'block') renderViewAsPanel_();
     });
+  }
+  // 20.09, тот же приём для FLEET_PEOPLE_ (нужен buildMyPageRoster_ для фильтра уволенных,
+  // см. комментарий там) - эта панель открывается с ЛЮБОЙ страницы, не только с Планировки/
+  // Справочников, которые обычно его и грузят (fetchFleetData_/initLP), поэтому на первый
+  // заход сюда он может быть ещё пуст. Не второй источник - пишем в ту же переменную, просто
+  // независимый триггер загрузки для этого конкретного входа. length===0 как "ещё не
+  // грузили" - в бою sprav_people никогда не бывает пустым, поэтому не нужен отдельный
+  // null-флаг, как у mechanicsRosterCache_.
+  if (!FLEET_PEOPLE_.length) {
+    fetchFromYardApi_('/sprav/state', {}).then(function(r){
+      if (r.ok && r.data && r.data.people) FLEET_PEOPLE_ = r.data.people;
+      if (panel.style.display === 'block') renderViewAsPanel_();
+    }).catch(function(){});
   }
 }
 

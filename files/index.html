@@ -7,11 +7,15 @@
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="icon-192.png">
-<meta name="theme-color" content="#1D9E75">
+<meta name="theme-color" content="#0f0f13">
 <!-- Ранний синхронный скрипт темы - ДО <style> и тяжёлых библиотек, иначе при светлой
      теме страница мигает тёмным на долю секунды (FOUC). Тёмная = отсутствие атрибута,
-     это дефолт (plans/2026-08-29-light-theme-toggle.md). -->
-<script>try{if(localStorage.getItem('yardhub_theme')==='light')document.documentElement.setAttribute('data-theme','light')}catch(e){}</script>
+     это дефолт (plans/2026-08-29-light-theme-toggle.md).
+     19.09: цвет статус-бара (theme-color) синхронизирован с orders-m.html/plan-m.html
+     (#0f0f13 тёмная / #eef1f5 светлая, тот же фон --bg) - раньше здесь был брендовый
+     зелёный #1D9E75, из-за чего статус-бар на телефоне зелёной полосой выделялся на
+     фоне тёмного приложения при переходах между "Заданием" и остальными страницами. -->
+<script>try{if(localStorage.getItem('yardhub_theme')==='light'){document.documentElement.setAttribute('data-theme','light');document.querySelector('meta[name="theme-color"]').setAttribute('content','#eef1f5');}}catch(e){}</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <!-- Unbounded - display-шрифт бренда "ЯРД HUB" в сайдбаре (DESIGN_SYSTEM.md, раздел 2:
      Unbounded ТОЛЬКО для брендовых/display-мест, не внутри карточек). Остальная
@@ -1047,11 +1051,69 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   .grid-2,.grid-3,.grid-65{grid-template-columns:1fr;}
   .fleet-grid{grid-template-columns:1fr;}
   main{padding:16px;}
+  /* НАЙДЕННЫЙ БАГ (Влад, 19.09, скриншот "Личная страница"): .tab-bar (Топ заказчиков/
+     Дебиторская задолженность/Воронка документов/Поступления) - display:flex без
+     overflow-x, 4 длинных подписи требуют 465px при доступных ~340px на карточке -
+     весь body уезжал вбок (проверено: bodyScrollWidth 502 против 375 экрана). Класс
+     общий (CRM и другие вкладки тоже им пользуются), поэтому чиним на уровне класса -
+     скролл вбок пальцем вместо переноса строк, привычный паттерн для таб-баров в
+     мобильных приложениях. */
+  .tab-bar{overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+  .tab-bar::-webkit-scrollbar{display:none;}
+  .tab-btn{flex:none;}
   /* 19.09: строка "СБ 19.09 · ЧЧ:ММ · Месяц год · день N из M" - белая:nowrap, на узком
      экране (тем более со сдвигом padding-left:64px под гамбургер выше) не влезала и
      обрезалась краем экрана вместе со всей страницей. Разрешаем перенос - строка короче
      одной "шапочной" строки почти никогда не бывает, второй строкой не мешает. */
   .p2-page-period{white-space:normal;}
+}
+
+/* ── МОБИЛЬНЫЙ СКИН ГАМБУРГЕР-МЕНЮ (19.09, Влад: «зашли по гамбургеру с Личной
+   страницы - меню выглядит десктопным сайдбаром, а не как в Задании/Планировке»).
+   Пункты меню НЕ дублируются - те же .sidebar-nav-item, что и на десктопе
+   (applyRoleUI()/applyMenuConfig_() уже один раз отфильтровали и упорядочили их),
+   здесь только визуальная тема поверх них на узком экране - тот же язык, что
+   .nd-head/.nd-item/.nd-sec в orders-m.html/plan-m.html (компактный список,
+   зелёная подсветка активного пункта вместо серой ступени фона). Компаунд-селекторы
+   с .collapsed дублируются - на мобильном кнопки сворачивания нет (см. выше), но
+   класс мог "прилипнуть" из localStorage от десктопной сессии в том же браузере. */
+@media(max-width:900px){
+  .sidebar-logo,.sidebar.collapsed .sidebar-logo{padding:0;border-bottom:1px solid var(--border);}
+  .sidebar-logo-row{height:52px;padding:0 14px;align-items:center;}
+  .sidebar-logo-label,.sidebar.collapsed .sidebar-logo-label{
+    display:block;font-size:15px;font-weight:700;letter-spacing:0;
+    text-transform:none;color:var(--text);margin-bottom:0;
+  }
+  .sidebar-logo-text{display:none;}
+
+  .sidebar-nav{padding:6px 8px;}
+  .sidebar-nav-section,.sidebar.collapsed .sidebar-nav-section{margin:12px 0 4px;padding:0 8px;}
+  .sidebar-nav-section-label{font-size:10.5px;opacity:1;}
+  .sidebar-nav-section-line{display:none;}
+  .sidebar-nav-item,.sidebar.collapsed .sidebar-nav-item{
+    height:44px;min-height:44px;padding:0 8px;border-radius:8px;
+    font-size:14px;font-weight:600;color:var(--text);gap:10px;
+  }
+  .sidebar-nav-item:hover{background:var(--bg3);transform:none;}
+  .sidebar-nav-item.active{background:rgba(29,158,117,.14);color:#2fbe93;}
+  .sidebar-nav-item.active .sidebar-nav-icon{color:#2fbe93;}
+  .sidebar-nav-icon,.sidebar-nav-icon svg{width:18px;height:18px;}
+
+  .sidebar-bottom,.sidebar.collapsed .sidebar-bottom{
+    padding:8px 8px calc(8px + env(safe-area-inset-bottom,0px));
+  }
+  .sidebar-bottom::before{
+    content:"Общее";display:block;font-size:10.5px;font-weight:700;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--muted);padding:4px 8px 8px;
+  }
+  .sidebar-updated{padding:0 8px;margin-bottom:2px;}
+  .sidebar-refresh,.sidebar.collapsed .sidebar-refresh{
+    width:100%;height:40px;min-width:0;padding:0 8px;margin-top:2px!important;
+    border:0;background:transparent;border-radius:8px;
+    font-size:14px;font-weight:600;color:var(--text);justify-content:flex-start;gap:10px;
+  }
+  .sidebar-refresh:hover{border-color:transparent;background:var(--bg3);color:var(--text);}
+  .sidebar-refresh svg{width:18px;height:18px;color:var(--muted);}
 }
 
 /* ── КАЛЬКУЛЯТОР 2.0 «Табло рейса» (plans/2026-08-28-calculator-cockpit-redesign.md) ──
@@ -29908,6 +29970,8 @@ function applyTheme(name) {
   if (name === 'light') document.documentElement.setAttribute('data-theme', 'light');
   else document.documentElement.removeAttribute('data-theme');
   try { localStorage.setItem('yardhub_theme', name === 'light' ? 'light' : 'dark'); } catch(e){}
+  var themeColorMeta_ = document.querySelector('meta[name="theme-color"]');
+  if (themeColorMeta_) themeColorMeta_.setAttribute('content', name === 'light' ? '#eef1f5' : '#0f0f13');
   pingTheme_(name);
   var label = document.getElementById('theme-btn-label');
   if (label) label.textContent = 'Тема: ' + (name === 'light' ? 'светлая' : 'тёмная');

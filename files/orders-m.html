@@ -510,7 +510,7 @@ function normalizeOrder(o){
   var execs = o.executors||[];
   var main = execs.filter(function(e){return e.role==='main';})[0]||null;
   var reserve = execs.filter(function(e){return e.role==='reserve';})[0]||null;
-  var vehicle = main ? { gos:main.vehicle_gos, driver:main.driver_name, own:main.kind==='own', company:main.carrier_name, confirmed:!!main.driver_confirmed_at, executor_id:main.id } : null;
+  var vehicle = main ? { gos:main.vehicle_gos, driver:main.driver_name, phone:main.driver_phone, trailer:main.trailer_gos, own:main.kind==='own', company:main.carrier_name, confirmed:!!main.driver_confirmed_at, confirmedBy:main.driver_confirmed_by, confirmedAt:main.driver_confirmed_at, executor_id:main.id } : null;
   var pend = (o.pending_request && o.pending_request.status==='pending') ? o.pending_request : null;
   var createdMs = o.created_at ? new Date(o.created_at).getTime() : 0;
   return Object.assign({}, o, {
@@ -936,7 +936,10 @@ document.addEventListener('click', function(e){
     var o2=findOrder(card.getAttribute('data-id'));
     if(!o2) return;
     if(card.getAttribute('data-canview')==='0'){ toast('Подробности этой заявки видит только её менеджер'); return; }
-    openSheet('view', o2, 'half');
+    /* Логисту нужны детали (груз, адреса, телефон водителя) сразу, не за жестом «потянуть
+       вверх» - Влад 20.09: «должно быть больше информации по заявке». Менеджер работает
+       больше со статусом/списком - для него полный лист по-прежнему за свайпом. */
+    openSheet('view', o2, ROLE==='log' ? 'full' : 'half');
   }
 });
 
@@ -1051,6 +1054,18 @@ function renderViewSheet(head,body,foot){
   html += '<div class="f-label">Машина · водитель</div>';
   html += '<div class="frow"><div class="k">Статус</div><div class="v">'+(o.vehicle?(esc(o.vehicle.gos)+' · '+esc(o.vehicle.driver||'—')):'машину ещё не поставили')+'</div></div>';
   if(o.vehicle && o.vehicle.own){
+    /* «Больше информации по заявке» + «Водитель подтвердил» (Влад 20.09, скриншот -
+       у логиста было слишком мало данных и не было того, что есть на десктопе):
+       телефон/прицеп - те же поля, что desktop-карточка машины (v.driver_phone/
+       v.trailer_gos), «Водитель подтвердил» - тот же принцип, что desktop op2-d-drv-ok
+       (isLog-only кнопка, informational-строка видна всем) + /orders/executor_confirm,
+       эндпоинт сервер сам отклоняет для роли manager («отметку ставит логист»). */
+    if(o.vehicle.phone) html += '<div class="frow"><div class="k">Телефон</div><a class="v" href="tel:'+esc(String(o.vehicle.phone).replace(/[^\d+]/g,''))+'" style="color:var(--blue)">'+esc(o.vehicle.phone)+'</a></div>';
+    if(o.vehicle.trailer) html += '<div class="frow"><div class="k">Прицеп</div><div class="v mono">'+esc(o.vehicle.trailer)+'</div></div>';
+    html += '<div class="info"'+(o.vehicle.confirmed?' style="color:var(--tint-green)"':'')+'>'+(o.vehicle.confirmed ?
+      ('Водитель подтвердил'+(o.vehicle.confirmedBy?(' · '+esc(o.vehicle.confirmedBy)):'')+(o.vehicle.confirmedAt?(' · '+new Date(o.vehicle.confirmedAt).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})):'')) :
+      'Водитель ещё не подтвердил')+'</div>';
+    if(ROLE==='log') html += '<button class="btn ghost wide" style="margin:8px 0" id="btnDrvConfirm">'+(o.vehicle.confirmed?'Снять подтверждение водителя':'Водитель подтвердил')+'</button>';
     html += '<button class="btn ghost wide" style="margin:8px 0" id="btnCopyPass"><svg><use href="#i-copy"/></svg> Скопировать данные на пропуск</button>';
   }
   if(o.needs_data && o.nd_main){
@@ -1089,6 +1104,17 @@ function renderViewSheet(head,body,foot){
 
   var btnCopy=$('btnCopyPass');
   if(btnCopy) btnCopy.addEventListener('click', function(){ copyText_(passText_(o), btnCopy, '<svg><use href="#i-copy"/></svg> Скопировано ✓'); });
+  var btnDrvConfirm=$('btnDrvConfirm');
+  if(btnDrvConfirm) btnDrvConfirm.addEventListener('click', function(){
+    var was = !!o.vehicle.confirmed;
+    vib(was?30:[8,40,8]);
+    apiPost_('/orders/executor_confirm', {executor_id:o.vehicle.executor_id, on: was?0:1}).then(function(r){
+      if(!r.ok) return apiErrToast_(r);
+      sheetData = replaceOrder(r.data.order);
+      toast(was?'Подтверждение снято':'Водитель подтвердил');
+      render(); renderSheet();
+    });
+  });
   var btnDrv=$('btnDrvTask');
   if(btnDrv) btnDrv.addEventListener('click', function(){
     copyText_(driverTaskText_(o)).then(function(){
@@ -1104,15 +1130,26 @@ function renderViewSheet(head,body,foot){
 }
 function renderViewFoot(foot,o){
   var html='';
-  if(ROLE==='mgr'){
+  /* Самообслуживание - заявка без реального менеджера, логист ведёт её от начала до конца
+     (Влад 20.09: «исключение - когда логист ведёт внутренние заказы сам как менеджер и
+     логист»). Тогда нужны ОБЕ роли сразу - сегмент статуса менеджера (Не подтв/Подтв/
+     Отбой) ПЛЮС обычная кнопка логиста (принять/поставить машину/выполнено), не одно
+     вместо другого. o.manager_name - сырое поле сервера, не показное o.manager (см.
+     комментарий в renderMoreSheet). */
+  var selfManaged = ROLE==='log' && !o.manager_name;
+  var mainLabel = !o.taken_by ? '✓ Принять' : (!o.vehicle ? 'Поставить машину' : (o.status==='done' ? 'Выполнено ✓' : 'Выполнено'));
+  if(ROLE==='mgr' || selfManaged){
     html += '<div style="display:flex;flex-direction:column;gap:8px;width:100%">';
     html += '<div class="seg3" id="statSeg">' +
       '<button aria-pressed="'+(o.status==='unconfirmed')+'" data-s="unconfirmed">Не подтв.</button>' +
       '<button aria-pressed="'+(o.status==='confirmed')+'" data-s="confirmed">Подтв.</button>' +
-      '<button aria-pressed="'+(o.status==='cancelled')+'" data-s="cancelled">Отбой</button></div>' +
-      '<button class="btn ghost wide" id="btnMore">Ещё</button></div>';
+      '<button aria-pressed="'+(o.status==='cancelled')+'" data-s="cancelled">Отбой</button></div>';
+    html += selfManaged
+      ? ('<div style="display:flex;gap:8px"><button class="btn ghost" id="btnMore" style="flex:0 0 44px;min-width:44px;padding:0">Ещё</button>' +
+         '<button class="btn primary wide" id="btnMain"'+(o.status==='done'?' disabled':'')+'>'+mainLabel+'</button></div>')
+      : '<button class="btn ghost wide" id="btnMore">Ещё</button>';
+    html += '</div>';
   } else {
-    var mainLabel = !o.taken_by ? '✓ Принять' : (!o.vehicle ? 'Поставить машину' : (o.status==='done' ? 'Выполнено ✓' : 'Выполнено'));
     html += '<button class="btn ghost" id="btnMore" style="flex:0 0 44px;min-width:44px;padding:0">Ещё</button>';
     html += '<button class="btn primary wide" id="btnMain"'+(o.status==='done'?' disabled':'')+'>'+mainLabel+'</button>';
   }
@@ -1146,17 +1183,27 @@ function renderMoreSheet(head,body,foot){
   var o=sheetData;
   head.innerHTML = shHeadHtml('Ещё · №'+o.day_no);
   $('shCancel').addEventListener('click', function(){ closeSheet(); });
-  var rows = ROLE==='mgr' ? [
-    ['repeat','Повторить',false],
-    ['transfer','Перенести', (o.status!=='cancelled'&&o.status!=='done')],
-    ['contract','Договор-заявка ⤓',false],
-    ['edit','Редактировать',false]
-  ] : [
-    ['cancel','Отбой по заявке',false],
-    ['rmveh','Снять машину',false],
-    ['relog','Переназначить логиста',false],
-    ['edit','Редактировать',false]
-  ];
+  /* «Отбой» - функция менеджера, не логиста (Влад 20.09: «отбой и подтверждение заявки -
+     это функция менеджера»). Исключение - заявки БЕЗ реального менеджера (o.manager_name
+     пусто - логист завёл её сам как «внутреннюю»/самообслуживание, см. /orders/save на
+     сервере: у логиста без явного manager_email заявка остаётся без менеджера) - там
+     логист и есть единственный, кто может её отменить, то есть выступает и логистом, и
+     менеджером сразу. Сравнивать нужно СЫРОЕ o.manager_name, не отображаемое o.manager -
+     normalizeOrder() всегда подставляет туда «внутр.»/«—» вместо пустой строки для показа
+     в карточке, оно никогда не бывает falsy. */
+  var selfManaged = ROLE==='log' && !o.manager_name;
+  var rows = [];
+  if(ROLE==='mgr' || selfManaged){
+    rows.push(['repeat','Повторить',false]);
+    rows.push(['transfer','Перенести', (o.status!=='cancelled'&&o.status!=='done')]);
+    rows.push(['contract','Договор-заявка ⤓',false]);
+  }
+  if(ROLE==='log'){
+    rows.push(['rmveh','Снять машину',false]);
+    rows.push(['relog','Переназначить логиста',false]);
+    if(selfManaged) rows.push(['cancel','Отбой по заявке',false]);
+  }
+  rows.push(['edit','Редактировать',false]);
   body.innerHTML = rows.map(function(r){
     var badge = (r[0]==='transfer' && r[2]) ? '<span class="badge-new">новое</span>' : '';
     var cls = r[0]==='cancel' ? 'list-row danger' : 'list-row';

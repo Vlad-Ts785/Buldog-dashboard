@@ -197,6 +197,7 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7;stroke
 .btn:active{transform:scale(.98)}
 .btn.primary{flex:1 1 auto;background:var(--green);color:#0f0f13}
 .btn.primary:disabled{opacity:.45}
+.btn.primary[data-blocked="1"]{opacity:.45}
 .btn.primary[data-bad="1"]{background:var(--bg3);color:var(--tint-red);border:2px solid var(--red);font-size:14px}
 .btn.ghost{background:var(--bg3);border:2px solid var(--border-strong);color:var(--text)}
 .btn.danger{background:var(--red);color:#fff}
@@ -217,6 +218,15 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7;stroke
 .frow.tap:active{background:var(--bg3);margin:0 -14px;padding-left:14px;padding-right:14px}
 .frow input,.frow textarea{width:100%;font-size:16px;font-weight:600;text-align:right}
 .frow textarea{text-align:left;resize:none}
+/* подсказки заказчика/адресов (19.09) - 1:1 логика с десктопным order-plan-v2.js
+   (fetchCustomers/fetchGeoSuggest/fetchCustomerHistory), простой блок под полем вместо
+   плавающего дропдауна - надёжнее на телефоне с клавиатурой. */
+.sugg{background:var(--bg3);border-radius:10px;margin:-2px 0 10px;overflow:hidden}
+.sugg-sec{padding:7px 12px 5px;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.sugg-it{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 12px;border-top:1px solid var(--border);font-size:14px}
+.sugg-it:first-child{border-top:none}
+.sugg-it:active{background:var(--bg4)}
+.sugg-it .m{flex:none;color:var(--muted);font-size:12px}
 .info{display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border-radius:8px;background:var(--bg3);font-size:13px;color:var(--muted);margin-top:10px}
 .info.warn{background:rgba(239,159,39,.12);color:var(--amber)}
 .info.err{background:rgba(226,75,74,.12);color:var(--tint-red)}
@@ -623,6 +633,16 @@ function dcBlip(f1,f2,dur,vol,type){
 function dcTickFwd(){ dcBlip(300,260,.035,.03,'square'); }
 function dcTickBwd(){ dcBlip(260,300,.035,.03,'square'); }
 
+/* Звуки формы «Новая заявка» (19.09) - те же частоты/семантика, что desktop order-plan-v2.js
+   S.nav/S.stepUp/S.stepDown/S.toggle/S.attention (см. комментарий у S там: nav - любой
+   клик-переход/выбор, stepUp/stepDown - шаг времени ±30, toggle - переключил состояние без
+   оценки, attention - блокирующая ошибка). Общий AudioContext/движок с каруселью дат. */
+function sNav(){ dcUnlockAudio_(); dcBlip(392,440,.05,.022); }
+function sStepUp(){ dcUnlockAudio_(); dcBlip(440,560,.05,.03); }
+function sStepDown(){ dcUnlockAudio_(); dcBlip(560,440,.05,.03); }
+function sToggle(){ dcUnlockAudio_(); dcBlip(520,560,.04,.02); }
+function sAttention(){ dcUnlockAudio_(); dcBlip(220,180,.12,.06,'triangle'); }
+
 function buildDateCarousel(){
   DAYS = [];
   for(var i=-DC_BACK;i<=DC_FWD;i++){
@@ -920,7 +940,7 @@ document.addEventListener('click', function(e){
    ══════════════════════════════════════════════════════════════════════════ */
 $('btnMenu').addEventListener('click', function(){ openDrawer(); });
 $('btnToday').addEventListener('click', function(){ dcUnlockAudio_(); vib(4); goToDate(new Date(TODAY)); });
-$('btnPlus').addEventListener('click', function(){ vib(4); loadMeta().then(function(){ openSheet('new', {}, 'full'); }); });
+$('btnPlus').addEventListener('click', function(){ sNav(); vib(4); loadMeta().then(function(){ openSheet('new', {}, 'full'); }); });
 $('btnSearch').addEventListener('click', function(){ openSheet('search', {}, 'half'); });
 $('btnDate').addEventListener('click', function(){ openOvl('datejump'); });
 $('mgrSeg').addEventListener('click', function(e){
@@ -1257,10 +1277,18 @@ function renderNewSheet(head,body,foot){
   var html='';
   html += '<div class="f-label">Дата'+(editing?' - заблокирована':'')+'</div>';
   if(!editing){
-    html += '<div class="chips"><button class="chip" data-datepreset="0" aria-pressed="'+isSameDay(d,new Date())+'">Сегодня '+fmtDate(new Date())+'</button>' +
-      '<button class="chip" data-datepreset="1" aria-pressed="false">Завтра '+fmtDate(addDays(new Date(),1))+'</button>' +
+    /* Дата по умолчанию = SELECTED_DATE (там, где остановилась карусель дат «Маяк»), не
+       всегда «сегодня» - draft.service_date уже так и заводится (см. F выше). Здесь чинится
+       только ВИДИМОСТЬ: раньше «Завтра» никогда не подсвечивался как выбранный (aria-pressed
+       был захардкожен в false), а если карусель стояла НЕ на сегодня/завтра, вообще ни один
+       чип не показывал, какая дата реально выбрана - на вид казалось, что дата «не
+       подхватилась», хотя внутри всё было верно. */
+    var isToday_=isSameDay(d,new Date()), isTomorrow_=isSameDay(d,addDays(new Date(),1));
+    html += '<div class="chips"><button class="chip" data-datepreset="0" aria-pressed="'+isToday_+'">Сегодня '+fmtDate(new Date())+'</button>' +
+      '<button class="chip" data-datepreset="1" aria-pressed="'+isTomorrow_+'">Завтра '+fmtDate(addDays(new Date(),1))+'</button>' +
+      (!isToday_&&!isTomorrow_ ? '<button class="chip" id="fDateOther" aria-pressed="true">'+fmtDate(d)+'</button>' : '') +
       '<button class="chip icon" id="fCalBtn" aria-label="Другая дата"><svg><use href="#i-cal2"/></svg></button>' +
-      '<input type="date" id="fDateNative" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none" tabindex="-1" autocomplete="off"></div>';
+      '<input type="date" id="fDateNative" value="'+esc(F.service_date)+'" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none" tabindex="-1" autocomplete="off"></div>';
   } else {
     html += '<div class="frow"><div class="k">Дата</div><div class="v" style="display:inline-flex;align-items:center;gap:6px">'+fmtDateLong(d)+' <svg width="14" height="14"><use href="#i-lock"/></svg></div></div>';
   }
@@ -1275,11 +1303,14 @@ function renderNewSheet(head,body,foot){
   }
 
   html += '<div class="f-label">Заказчик</div><div class="frow"><input id="fCust" placeholder="Начните вводить" value="'+esc(F.customer||'')+'"></div>';
+  html += '<div class="sugg" id="fCustSugg" hidden></div>';
   html += '<div class="sw" id="fNd" aria-pressed="'+(!!F.needs_data)+'"><span>Под данные</span><span class="knob"></span></div>';
 
   html += '<div class="f-label">Откуда — куда</div>';
   html += '<div class="frow"><div class="k">Откуда</div><input id="fFrom" placeholder="'+(ROLE==='log'?'База':'По месту')+'" value="'+esc((F.from&&F.from[0])||'')+(F.from&&F.from[1]?(', '+esc(F.from[1])):'')+'"></div>';
+  html += '<div class="sugg" id="fFromSugg" hidden></div>';
   html += '<div class="frow"><div class="k">Куда</div><input id="fTo" placeholder="Адрес" value="'+esc((F.to&&F.to[0])||'')+(F.to&&F.to[1]?(', '+esc(F.to[1])):'')+'"></div>';
+  html += '<div class="sugg" id="fToSugg" hidden></div>';
 
   html += '<div class="f-label">Что везём</div>';
   html += '<div class="frow"><div class="k">Груз</div><input id="fCargo" placeholder="напр. экскаватор" value="'+esc(F.cargo||'')+'"></div>';
@@ -1299,24 +1330,44 @@ function renderNewSheet(head,body,foot){
   body.innerHTML=html;
   var draft = Object.assign({}, F);
 
-  function bindChip(sel, cb){ body.querySelectorAll(sel).forEach(function(el){ el.addEventListener('click', function(){ cb(el); tick(); }); }); }
+  function bindChip(sel, cb){ body.querySelectorAll(sel).forEach(function(el){ el.addEventListener('click', function(){ cb(el); sToggle(); tick(); }); }); }
   bindChip('#fType button', function(el){ body.querySelectorAll('#fType button').forEach(function(x){x.setAttribute('aria-pressed','false');}); el.setAttribute('aria-pressed','true'); draft.equipment_type=el.getAttribute('data-t'); vib(4); });
   bindChip('#fGab button', function(el){ body.querySelectorAll('#fGab button').forEach(function(x){x.setAttribute('aria-pressed','false');}); el.setAttribute('aria-pressed','true'); draft.gabarit=el.getAttribute('data-g'); vib(4); });
   bindChip('#fQuick .qk', function(el){ draft.service_time=el.getAttribute('data-t'); $('fTimeVal').textContent=draft.service_time; vib(4); });
   var fUnclear=$('fUnclear');
-  if(fUnclear) fUnclear.addEventListener('click', function(){ draft.service_time=null; $('fTimeVal').textContent='--:--'; vib(4); tick(); });
+  if(fUnclear) fUnclear.addEventListener('click', function(){ draft.service_time=null; $('fTimeVal').textContent='--:--'; sNav(); vib(4); tick(); });
   $('fTimeMinus').addEventListener('click', function(){ shiftTime(-30); });
   $('fTimePlus').addEventListener('click', function(){ shiftTime(30); });
   function shiftTime(m){
     var t=draft.service_time||'08:00'; var p=t.split(':'); var mins=(+p[0])*60+(+p[1])+m; mins=((mins%1440)+1440)%1440;
-    draft.service_time=pad2(Math.floor(mins/60))+':'+pad2(mins%60); $('fTimeVal').textContent=draft.service_time; vib(4); tick();
+    draft.service_time=pad2(Math.floor(mins/60))+':'+pad2(mins%60); $('fTimeVal').textContent=draft.service_time;
+    if(m>0) sStepUp(); else sStepDown();
+    vib(4); tick();
   }
   if(!editing){
-    body.querySelectorAll('[data-datepreset]').forEach(function(el){
-      el.addEventListener('click', function(){ body.querySelectorAll('[data-datepreset]').forEach(function(x){x.setAttribute('aria-pressed','false');}); el.setAttribute('aria-pressed','true');
-        draft.service_date = iso(addDays(new Date(), +el.getAttribute('data-datepreset'))); vib(4); });
-    });
     var fCalBtn=$('fCalBtn'), fDateNative=$('fDateNative');
+    /* «Другая дата» (fDateOther) - живёт вне [data-datepreset], создаётся/убирается сама,
+       когда выбранная дата не совпадает ни с сегодня, ни с завтра. */
+    function syncDateChips_(iso_){
+      var nd=fromIso(iso_), t_=isSameDay(nd,new Date()), tm_=isSameDay(nd,addDays(new Date(),1));
+      var d0=body.querySelector('[data-datepreset="0"]'), d1=body.querySelector('[data-datepreset="1"]');
+      if(d0) d0.setAttribute('aria-pressed', t_?'true':'false');
+      if(d1) d1.setAttribute('aria-pressed', tm_?'true':'false');
+      var other=$('fDateOther');
+      if(!t_&&!tm_){
+        if(!other){
+          other=document.createElement('button'); other.className='chip'; other.id='fDateOther';
+          other.addEventListener('click', function(){ fCalBtn.click(); });
+          fCalBtn.insertAdjacentElement('beforebegin', other);
+        }
+        other.textContent=fmtDate(nd); other.setAttribute('aria-pressed','true');
+      } else if(other){ other.remove(); }
+    }
+    body.querySelectorAll('[data-datepreset]').forEach(function(el){
+      el.addEventListener('click', function(){
+        draft.service_date = iso(addDays(new Date(), +el.getAttribute('data-datepreset')));
+        syncDateChips_(draft.service_date); vib(4); });
+    });
     fCalBtn.addEventListener('click', function(){
       vib(4);
       if(fDateNative.showPicker){ try{ fDateNative.showPicker(); return; }catch(e){} }
@@ -1325,18 +1376,18 @@ function renderNewSheet(head,body,foot){
     fDateNative.addEventListener('change', function(){
       if(!fDateNative.value) return;
       draft.service_date = fDateNative.value;
-      body.querySelectorAll('[data-datepreset]').forEach(function(x){x.setAttribute('aria-pressed','false');});
+      syncDateChips_(draft.service_date);
       tick();
     });
   }
   var whoWrap=$('fWho');
   if(whoWrap) whoWrap.addEventListener('click', function(e){ var b=e.target.closest('button'); if(!b) return; whoWrap.querySelectorAll('button').forEach(function(x){x.setAttribute('aria-pressed','false');}); b.setAttribute('aria-pressed','true');
     var w=b.getAttribute('data-w'); draft.internal_customer = w||null;
-    if(draft.internal_customer){ draft.customer_entity_id=w; draft.customer=b.getAttribute('data-name'); $('fCust').value=draft.customer; }
-    else { draft.customer_entity_id=null; }
-    vib(4); tick(); });
-  $('fNd').addEventListener('click', function(){ draft.needs_data=!draft.needs_data; this.setAttribute('aria-pressed', draft.needs_data?'true':'false'); vib(4); });
-  $('fCash').addEventListener('click', function(){ draft.cash=!draft.cash; this.setAttribute('aria-pressed', draft.cash?'true':'false'); vib(4); });
+    if(draft.internal_customer){ draft.customer_entity_id=w; draft.customer_is_internal=true; draft.customer=b.getAttribute('data-name'); $('fCust').value=draft.customer; $('fCust').readOnly=true; }
+    else { draft.customer_entity_id=null; draft.customer_is_internal=false; $('fCust').readOnly=false; }
+    sToggle(); vib(4); tick(); });
+  $('fNd').addEventListener('click', function(){ draft.needs_data=!draft.needs_data; this.setAttribute('aria-pressed', draft.needs_data?'true':'false'); sToggle(); vib(4); });
+  $('fCash').addEventListener('click', function(){ draft.cash=!draft.cash; this.setAttribute('aria-pressed', draft.cash?'true':'false'); sToggle(); vib(4); });
   ['fCust','fFrom','fTo','fCargo','fWeight','fDims','fDocs','fRework','fPay','fNote'].forEach(function(id){
     var el=$(id); if(!el) return;
     el.addEventListener('input', function(){
@@ -1356,6 +1407,108 @@ function renderNewSheet(head,body,foot){
   var fPrice=$('fPrice');
   fPrice.addEventListener('input', function(){ var v=fPrice.value.replace(/[^\d]/g,''); draft.price=v?+v:null; tick(); });
 
+  /* ── подсказки заказчика/адресов (19.09) - 1:1 логика с десктопным order-plan-v2.js:
+     fetchCustomers/fetchGeoSuggest/fetchCustomerHistory, те же эндпоинты, тот же порядок
+     секций. Раньше поля были голыми <input> без единого обращения к серверу - "не
+     подтягиваются" было буквально так, подсказок не существовало вообще. */
+  var custSuggT_=null;
+  $('fCust').addEventListener('input', function(){
+    if(!this.readOnly){ draft.customer_entity_id=null; draft.customer_is_internal=false; }
+    var v=this.value.trim(); clearTimeout(custSuggT_);
+    if(v.length<2){ $('fCustSugg').hidden=true; return; }
+    custSuggT_=setTimeout(function(){ fetchCustSugg_(v); }, 250);
+  });
+  $('fCust').addEventListener('blur', function(){ setTimeout(function(){ $('fCustSugg').hidden=true; }, 150); });
+  function fetchCustSugg_(q){
+    apiGet_('/orders/customers', {q:q}).then(function(r){
+      if(!r.ok) return;
+      var mine=r.data.mine||[], all=r.data.all||[], h='';
+      if(mine.length) h+='<div class="sugg-sec">Мои за 30 дней</div>'+mine.slice(0,6).map(function(c){
+        return '<div class="sugg-it" data-name="'+esc(c.name)+'"'+(c.entity_id?' data-eid="'+esc(c.entity_id)+'"':'')+'><span>'+esc(c.name)+'</span><span class="m">'+esc(c.n||'')+'</span></div>';
+      }).join('');
+      if(all.length) h+='<div class="sugg-sec">Все контрагенты</div>'+all.slice(0,10).map(function(c){
+        return '<div class="sugg-it" data-name="'+esc(c.name)+'" data-eid="'+esc(c.id)+'"><span>'+esc(c.name)+'</span><span class="m">'+esc(c.inn||(c.is_own?'своё':''))+'</span></div>';
+      }).join('');
+      h += '<div class="sugg-it" data-name="'+esc(q)+'"><span>Новый: «'+esc(q)+'»</span><span class="m">как ввели</span></div>';
+      $('fCustSugg').innerHTML=h; $('fCustSugg').hidden=false;
+    }).catch(function(){});
+  }
+  $('fCustSugg').addEventListener('mousedown', function(e){
+    var it=e.target.closest('.sugg-it'); if(!it) return;
+    e.preventDefault();
+    var name=it.getAttribute('data-name')||'';
+    $('fCust').value=name; draft.customer=name;
+    draft.customer_entity_id=it.getAttribute('data-eid')||null; draft.customer_is_internal=false;
+    $('fCustSugg').hidden=true;
+    fetchAddrHistory_(name);
+    tick();
+  });
+
+  var addrHistHtml_={from:'',to:''}, addrGeoHtml_={from:'',to:''}, addrSuggT_={from:null,to:null};
+  function renderAddrSugg_(side){
+    var box=$(side==='from'?'fFromSugg':'fToSugg');
+    var html=addrHistHtml_[side]+addrGeoHtml_[side];
+    box.innerHTML=html; box.hidden=!html;
+  }
+  function dadataAddrParts_(d){
+    d=d||{};
+    var line=[d.street_with_type,d.house].filter(Boolean).join(', ');
+    var first=line||d.settlement_with_type||d.city_with_type||d.region_with_type||'';
+    var rest=[];
+    if(line && line!==first) rest.push(line);
+    if(d.city_district_with_type) rest.push(d.city_district_with_type);
+    if(d.settlement_with_type && d.settlement_with_type!==first) rest.push(d.settlement_with_type);
+    if(d.city_with_type && d.city_with_type!==first) rest.push(d.city_with_type);
+    if(d.region_with_type && d.region_with_type!==d.city_with_type) rest.push(d.region_with_type);
+    var seen={};
+    return [first].concat(rest).filter(function(v){ if(!v||seen[v]) return false; seen[v]=true; return true; });
+  }
+  function fetchAddrGeo_(side,q){
+    clearTimeout(addrSuggT_[side]);
+    if(!q || q.trim().length<3){ addrGeoHtml_[side]=''; renderAddrSugg_(side); return; }
+    addrSuggT_[side]=setTimeout(function(){
+      apiGet_('/geocoder/suggest', {q:q.trim()}).then(function(r){
+        if(!r.ok) return;
+        var sug=r.data.suggestions||[], seen={}, h='';
+        sug.forEach(function(f){
+          if(f.lat==null || f.lon==null) return;
+          var parts=dadataAddrParts_(f); if(!parts[0]) return;
+          var main=parts[0], sub=parts.slice(1,3).join(', '), key=main+'|'+sub;
+          if(seen[key]) return; seen[key]=true;
+          h += '<div class="sugg-it" data-address="'+esc(f.value||main)+'" data-lat="'+esc(f.lat)+'" data-lon="'+esc(f.lon)+'"><span>'+esc(main)+'</span><span class="m">'+esc(sub)+'</span></div>';
+        });
+        addrGeoHtml_[side] = h ? '<div class="sugg-sec">Адреса</div>'+h : '';
+        renderAddrSugg_(side);
+      }).catch(function(){});
+    }, 400);
+  }
+  function fetchAddrHistory_(name){
+    if(!name) return;
+    apiGet_('/orders/customer_history', {customer:name}).then(function(r){
+      if(!r.ok) return;
+      var items=(r.data.addresses||[]).slice(0,8);
+      var h = items.length ? '<div class="sugg-sec">Точки этого заказчика</div>'+items.map(function(a){
+        return '<div class="sugg-it" data-address="'+esc(a.address)+'" data-lat="'+esc(a.lat||'')+'" data-lon="'+esc(a.lon||'')+'"><span>'+esc(a.address)+'</span><span class="m">'+esc(a.n||'')+'×</span></div>';
+      }).join('') : '';
+      addrHistHtml_.from=h; addrHistHtml_.to=h;
+      renderAddrSugg_('from'); renderAddrSugg_('to');
+    }).catch(function(){});
+  }
+  ['from','to'].forEach(function(side){
+    var inputId=side==='from'?'fFrom':'fTo', boxId=side==='from'?'fFromSugg':'fToSugg';
+    $(inputId).addEventListener('input', function(){ fetchAddrGeo_(side, this.value); });
+    $(inputId).addEventListener('focus', function(){ renderAddrSugg_(side); });
+    $(inputId).addEventListener('blur', function(){ setTimeout(function(){ $(boxId).hidden=true; }, 150); });
+    $(boxId).addEventListener('mousedown', function(e){
+      var it=e.target.closest('.sugg-it'); if(!it) return;
+      e.preventDefault();
+      var addr=it.getAttribute('data-address')||'';
+      $(inputId).value=addr;
+      if(side==='from') draft.from_raw=addr; else draft.to_raw=addr;
+      $(boxId).hidden=true; tick();
+    });
+  });
+
   function currentReasonAndBtn(){
     var MIN=25000;
     if(!draft.customer){ return {t:'Укажи заказчика', bad:false, dis:true}; }
@@ -1370,7 +1523,12 @@ function renderNewSheet(head,body,foot){
   function tick(){
     var st=currentReasonAndBtn();
     var b=$('fSaveBtn');
-    b.textContent=st.t; b.disabled=st.dis; b.removeAttribute('data-bad');
+    /* Кнопка остаётся кликабельной даже в заблокированном состоянии (не native disabled) -
+       иначе браузер вообще не шлёт click на disabled-кнопку, и вибрация «ткнул, но не
+       заполнено» никогда бы не сработала (Влад 19.09). Визуально дизейбл имитирует
+       [data-blocked="1"] в CSS. */
+    b.textContent=st.t; b.removeAttribute('data-bad');
+    if(st.dis) b.setAttribute('data-blocked','1'); else b.removeAttribute('data-blocked');
     if(st.bad) b.setAttribute('data-bad','1');
     b.style.background = st.warn ? 'var(--amber)' : '';
     b.style.color = st.warn ? '#1b1408' : '';
@@ -1378,7 +1536,8 @@ function renderNewSheet(head,body,foot){
   foot.innerHTML = '<button class="btn primary wide" id="fSaveBtn"></button>';
   tick();
   $('fSaveBtn').addEventListener('click', function(){
-    var st=currentReasonAndBtn(); if(st.dis) return;
+    var st=currentReasonAndBtn();
+    if(st.dis){ vib([12,30,12]); toast(st.t); return; }
     var btn=$('fSaveBtn'); btn.disabled=true; btn.textContent='Сохраняю…';
     var payload = {
       service_time: draft.service_time||'', equipment_type:draft.equipment_type, customer:draft.customer,
@@ -1388,7 +1547,12 @@ function renderNewSheet(head,body,foot){
       documents:draft.documents||'', rework_terms:draft.rework||'', price:draft.price||'', payment_status:draft.payment_status||'',
       cash:draft.cash?1:0, note:draft.note||'', needs_data:draft.needs_data?1:0
     };
-    if(draft.customer_entity_id){ payload.customer_entity_id=draft.customer_entity_id; payload.internal=1; }
+    /* internal=1 - ТОЛЬКО когда юрлицо выбрано через «Кто заказывает» (fWho, внутренний
+       заказчик группы) - не когда entity_id просто пришёл из подсказки обычного заказчика
+       (desktop: op2-f-who ветка отдельно от op2-f-cust.dataset.entityId, см.
+       collectForm()). Раньше оба случая молча метились internal=1 - до подсказок заказчика
+       это было незаметно, поскольку entity_id вообще неоткуда было взять кроме fWho. */
+    if(draft.customer_entity_id){ payload.customer_entity_id=draft.customer_entity_id; if(draft.customer_is_internal) payload.internal=1; }
     if(editing){ payload.id=o.id; }
     else { payload.service_date=draft.service_date; }
     apiPost_('/orders/save', payload).then(function(r){

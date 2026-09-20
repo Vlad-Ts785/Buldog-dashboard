@@ -391,6 +391,7 @@ function logCodeCell_(o, clickable) {
 function byId(id) { for (var i = 0; i < ORD.length; i++) { if (String(ORD[i].id) === String(id)) return ORD[i]; } return null; }
 function execById(o, eid) { var l = o.executors || []; for (var i = 0; i < l.length; i++) { if (String(l[i].id) === String(eid)) return l[i]; } return null; }
 function isMgr() { return VIEW === 'mgr'; }
+function isAnalyticsView_() { return VIEW === 'analytics'; }
 function canDone() { return ME && ME.role !== 'manager'; }
 function isAdmin() { return !!(ME && ME.role === 'admin'); } /* удалять заявку может только Влад (11.09) */
 
@@ -808,6 +809,7 @@ function buildDom() {
         '<div class="op2-switch op2-hidden" id="op2-switch" role="tablist">' +
           '<button data-scr="mgr" role="tab">Менеджер · Заявки</button>' +
           '<button data-scr="log" role="tab">Логист · Заявки</button>' +
+          '<button data-scr="analytics" role="tab">Аналитика</button>' +
         '</div>' +
         '<button class="op2-chip op2-snd" id="op2-snd"></button>' +
       '</div>' +
@@ -939,6 +941,41 @@ function buildDom() {
         '</p>' +
       '</section>' +
 
+      /* ── экран «Аналитика» (только admin) - plans/2026-09-20-order-plan-analytics-history.md,
+         перенос 1:1 утверждённого превью https://claude.ai/artifact/MpTDTn3hicChW41mASoFKg
+         («превью = контракт»), теперь на живых данных с сервера вместо иллюстративных чисел. ── */
+      '<section class="op2-screen" id="op2-scr-analytics">' +
+        '<div class="an-section">' +
+          '<div class="an-section-head">' +
+            '<span class="an-section-title">Заявки по типу техники</span>' +
+            '<span class="an-section-sub">вчера · сегодня · завтра · тип без заявок за все три дня не показан</span>' +
+          '</div>' +
+          '<div class="an-kpi-grid" id="op2-an-type-grid"></div>' +
+        '</div>' +
+        '<div class="an-section">' +
+          '<div class="an-section-head">' +
+            '<span class="an-section-title">Стоимость заявок</span>' +
+            '<span class="an-section-sub">крупная сумма - подтверждённые; ниже - не подтверждено и отбой тем же днём</span>' +
+          '</div>' +
+          '<div class="an-money-grid" id="op2-an-money-grid"></div>' +
+        '</div>' +
+        '<div class="an-section">' +
+          '<div class="an-section-head">' +
+            '<span class="an-section-title">По менеджерам</span>' +
+            '<span class="an-section-sub" id="op2-an-mgr-period">подтверждённые заявки</span>' +
+          '</div>' +
+          '<div class="an-mgr-grid">' +
+            '<div class="an-card"><div class="card-title-an">Тралы</div><div class="p2-bars" id="op2-an-bars-tral"></div></div>' +
+            '<div class="an-card"><div class="card-title-an">Длинномеры</div><div class="p2-bars" id="op2-an-bars-long"></div></div>' +
+            '<div class="an-card">' +
+              '<div class="card-title-an">Топ по сумме подтверждённых</div>' +
+              '<div class="p2-money-head" id="op2-an-money-head"></div>' +
+              '<div class="p2-money-list" id="op2-an-bars-money"></div>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+      '</section>' +
+
       /* ── поповер пикера машин ── */
       '<div class="op2-pop" id="op2-pop" role="dialog" aria-label="Поставить машину">' +
         '<div class="op2-ph"><input id="op2-pop-search" placeholder="3 цифры номера или фамилия" autocomplete="off"><span class="op2-ctx" id="op2-pop-ctx"></span></div>' +
@@ -1021,7 +1058,7 @@ function wire() {
     VIEW = b.dataset.scr;
     closePop(); closeDrawer();
     renderAll();
-    loadOrders();
+    if (isAnalyticsView_()) loadAnalytics(); else loadOrders();
   });
 
   /* ── даты («Картограф», 18.09) ── */
@@ -1409,6 +1446,109 @@ function loadCounts() {
     renderTabs();
   }).catch(function () {});
 }
+/* ═════════════════════════ АНАЛИТИКА (admin) ═════════════════════════
+   plans/2026-09-20-order-plan-analytics-history.md - живые данные с сервера
+   (/api/orders/analytics), без единой новой таблицы. Диапазон - вчера/сегодня/завтра,
+   считает клиент (тот же приём, что уже даёт TABS_WK/loadCounts выше), сервер отдаёт
+   ровно эти три даты по порядку (days[0]=вчера, days[1]=сегодня, days[2]=завтра). */
+var ANALYTICS = null;
+var analyticsSeq_ = 0;
+function loadAnalytics() {
+  var from = addDays(todayStr(), -1), to = addDays(todayStr(), 1);
+  var seq = ++analyticsSeq_;
+  return apiGet('/orders/analytics', { from: from, to: to }).then(function (r) {
+    if (seq !== analyticsSeq_) return;
+    if (!ok_(r, function (d) { ANALYTICS = d; }, 'аналитика не загрузилась')) return;
+    renderAnalytics();
+  }).catch(function () {});
+}
+/* 21.09, Влад: «в денежных блоках хочу видеть полные цифры, а не сокращённые» -
+   было "0,96 млн ₽" (округление до сотых миллиона теряло реальные рубли), стало полное
+   целое число рублей с разрядами - тот же формат, что уже везде в проекте (`fmtP()`
+   выше, калькулятор в index.html), но БЕЗ прятанья нуля (`fmtP` возвращает '' на 0 -
+   там это пустое поле формы, здесь 0 ₽ - осмысленное значение "заявок не было"). */
+function fmtRub_(v) { return Math.round(Number(v) || 0).toLocaleString('ru-RU') + ' ₽'; }
+function renderBars_(id, rows) {
+  var box = $('#' + id); if (!box) return;
+  if (!rows.length) { box.innerHTML = '<p class="op2-dim op2-sm">Подтверждённых заявок за месяц нет.</p>'; return; }
+  var max = Math.max.apply(null, rows.map(function (r) { return r.count; })) || 1;
+  box.innerHTML = rows.map(function (r) {
+    return '<div class="p2-bar-row">' +
+      '<span class="p2-bar-label">' + esc(r.manager) + '</span>' +
+      '<div class="p2-bar-track"><div class="p2-bar-fill" style="width:' + (r.count / max * 100).toFixed(1) + '%"></div></div>' +
+      '<span class="p2-bar-val">' + r.count + '</span>' +
+    '</div>';
+  }).join('');
+}
+function renderAnalytics() {
+  if (!ANALYTICS) return;
+  var days = ANALYTICS.days || [];
+  var DAY_LABEL = ['вчера', 'сегодня', 'завтра'];
+
+  /* ── по типу техники - плитка на каждый тип, скрыт тип с 0 за все три дня (Влад 20.09:
+     «нету тенда - не показывай, чтобы глаза лишний раз не отвлекались») ── */
+  var types = {};
+  days.forEach(function (d, i) {
+    Object.keys(d.by_type || {}).forEach(function (t) {
+      types[t] = types[t] || [0, 0, 0];
+      types[t][i] = d.by_type[t];
+    });
+  });
+  var typeNames = Object.keys(types).filter(function (t) { return types[t][0] + types[t][1] + types[t][2] > 0; });
+  $('#op2-an-type-grid').innerHTML = typeNames.map(function (t) {
+    var v = types[t];
+    return '<div class="an-kpi">' +
+      '<div class="an-kpi-label">' + esc(t) + '</div>' +
+      '<div class="an-kpi-trio"><span class="an-kpi-ghost">' + v[0] + '</span><span class="an-kpi-val">' + v[1] + '</span><span class="an-kpi-ghost">' + v[2] + '</span></div>' +
+      '<div class="an-kpi-daylabels"><span>вчера</span><span class="today">сегодня</span><span>завтра</span></div>' +
+    '</div>';
+  }).join('') || '<p class="op2-dim op2-sm">Заявок нет ни на один из трёх дней.</p>';
+
+  /* ── стоимость: подтверждено (крупно) + не подтверждено/отбой (разбивка) ── */
+  $('#op2-an-money-grid').innerHTML = days.map(function (d, i) {
+    var st = d.by_status || {};
+    var conf = st.confirmed || { count: 0, sum: 0 };
+    var unc = st.unconfirmed || { count: 0, sum: 0 };
+    var canc = st.cancelled || { count: 0, sum: 0 };
+    return '<div class="an-money">' +
+      '<div class="an-money-label">' + DAY_LABEL[i] + '</div>' +
+      '<div class="an-money-val">' + fmtRub_(conf.sum) + '</div>' +
+      '<div class="an-money-sub">' + conf.count + ' ' + plural(conf.count, 'подтверждённая', 'подтверждённые', 'подтверждённых') + ' из ' + d.total + '</div>' +
+      '<div class="an-money-break">' +
+        '<div class="row"><span class="k amber">Не подтверждено</span><span class="v">' + fmtRub_(unc.sum) + ' · ' + unc.count + '</span></div>' +
+        '<div class="row"><span class="k red">Отбой</span><span class="v">' + fmtRub_(canc.sum) + ' · ' + canc.count + '</span></div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  /* ── по менеджерам: тралы/длинномеры (счётчик, месяц) + топ по сумме (день) ── */
+  var byMgr = ANALYTICS.by_manager || { tral: [], long: [] };
+  $('#op2-an-mgr-period').textContent = 'подтверждённые заявки, ' + monthLabel_(ANALYTICS.month_from);
+  renderBars_('op2-an-bars-tral', byMgr.tral || []);
+  renderBars_('op2-an-bars-long', byMgr.long || []);
+
+  var head = $('#op2-an-money-head');
+  head.innerHTML = '<span></span>' + DAY_LABEL.map(function (l, i) { return '<span' + (i === 1 ? ' class="today"' : '') + '>' + l + '</span>'; }).join('');
+  var money = (ANALYTICS.by_manager_money || []).slice().sort(function (a, b) { return (b[days[1] && days[1].date] || 0) - (a[days[1] && days[1].date] || 0); });
+  var moneyBox = $('#op2-an-bars-money');
+  if (!money.length) { moneyBox.innerHTML = '<p class="op2-dim op2-sm">Подтверждённых заявок за эти дни нет.</p>'; }
+  else {
+    moneyBox.innerHTML = money.map(function (r) {
+      return '<div class="p2-money-row">' +
+        '<span class="p2-money-name">' + esc(r.manager) + '</span>' +
+        days.map(function (d, i) { return '<span class="' + (i === 1 ? 'val' : 'ghost') + '">' + fmtRub_(r[d.date] || 0) + '</span>'; }).join('') +
+      '</div>';
+    }).join('');
+  }
+
+  try { if (typeof initCursorLight_ === 'function') initCursorLight_(ROOT_ID, 'p2-light'); } catch (e) {}
+}
+function monthLabel_(ymd) { // "2026-09-01" -> "сентябрь 2026"
+  var MONTHS = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
+  var m = String(ymd || '').match(/^(\d{4})-(\d{2})-/);
+  if (!m) return '';
+  return MONTHS[Number(m[2]) - 1] + ' ' + m[1];
+}
 /* 18.09, «Перенести» - клик по подписи «→ перенесена на .../← перенос с ...» (см.
    transferSubHtml_) переключает вид на дату связанной заявки - тот же приём, что уже есть
    у клика по дню в шапке (DATE=.../TO_DATE=''/renderAll/loadOrders/loadFree). */
@@ -1524,13 +1664,15 @@ function renderAll() {
   if (!built) return;
   $('#op2-skel').classList.toggle('op2-hidden', !!ME);
   $('#op2-scr-mgr').classList.toggle('op2-on', !!ME && isMgr());
-  $('#op2-scr-log').classList.toggle('op2-on', !!ME && !isMgr());
+  $('#op2-scr-log').classList.toggle('op2-on', !!ME && VIEW === 'log');
+  $('#op2-scr-analytics').classList.toggle('op2-on', !!ME && isAnalyticsView_());
   if (ME && ME.role === 'admin') syncSwitch();
   $('#op2-mgr-date').value = TO_DATE ? todayStr() : DATE;
   $('#op2-logwk-date').value = TO_DATE ? todayStr() : DATE;
   renderUpdated();
   renderTabs();
-  if (isMgr()) { renderVerdict(); renderFree(); renderMgr(); }
+  if (isAnalyticsView_()) { /* своя загрузка/рендер - loadAnalytics()/renderAnalytics() */ }
+  else if (isMgr()) { renderVerdict(); renderFree(); renderMgr(); }
   else { renderTypeChips(); renderLog(); }
 }
 
@@ -4253,6 +4395,7 @@ function startPolling() {
   pollTimer = setInterval(function () {
     if (document.hidden) return;      /* вкладка не видна - не дёргаем сервер */
     if (!isPageActive()) return;      /* ушли на другую страницу дашборда */
+    if (isAnalyticsView_()) return;   /* на «Аналитике» живой таблицы нет - нечего обновлять */
     beat++;
     if (beat % 3 === 0) { loadOrders(true); return; }
     var params = { date: DATE }; if (TO_DATE) params.to = TO_DATE;

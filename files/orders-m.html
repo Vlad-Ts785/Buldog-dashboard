@@ -139,19 +139,32 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7;stroke
 .c-st.st-cancelled{color:var(--tint-red)}
 .c-st.st-done{color:#7fb8ef}
 .c-nd{width:6px;height:6px;border-radius:50%;background:var(--tint-amber);animation:blink 1.4s ease-in-out infinite}
-.c-r2{display:flex;gap:8px;font-size:12.5px;color:var(--muted);margin-bottom:6px;align-items:baseline}
-.c-r2 .eq{flex:none;font-weight:600;color:var(--text)}
-.c-r2 .route{flex:1 1 auto;min-width:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.c-r2{display:flex;gap:8px;font-size:12.5px;color:var(--muted);margin-bottom:6px;align-items:flex-start}
+.c-r2 .eqcol{flex:none;display:flex;flex-direction:column;gap:3px;align-items:flex-start;padding-top:1px}
+.c-r2 .eq{font-weight:600;color:var(--text);line-height:1.2}
+.c-r2 .route{flex:1 1 auto;min-width:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;padding-top:1px}
 .c-r2 .route b{color:var(--text);font-weight:700}
 .c-r2 .arr{color:var(--muted)}
-.c-r3{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px}
-.c-r3 .gos{font-family:var(--font-num);font-weight:700}
-.c-r3 .drv{color:var(--text)}
-.c-r3 .tag{font-size:10px;font-weight:700;padding:2px 6px;border-radius:5px;letter-spacing:.03em}
-.c-r3 .tag.own{background:rgba(29,158,117,.18);color:#2fbe93}
-.c-r3 .tag.hired{background:rgba(239,159,39,.18);color:var(--tint-amber)}
-.c-r3 .empty{color:var(--muted);font-style:normal}
-.c-r3 .sp{flex:1 1 auto}
+/* бейдж менеджера (Влад 20.09: «нужно, чтобы была видна фамилия менеджера») - фамилия из
+   sprav/roster, первые 3 буквы, цвет закреплён за человеком - тот же PERSON_COLOR, что уже
+   красит точки в фильтре «Все менеджеры» у логиста. Превью-выбор из трёх вариантов
+   размещения (в шапке / у машины / под техникой) - утверждено «В» (под техникой). */
+.mgr{display:inline-flex;align-items:center;justify-content:center;font-family:var(--font-num);font-size:10px;font-weight:700;letter-spacing:.02em;width:28px;height:18px;border-radius:5px;flex:none}
+/* c-r3 (машина·водитель) - ДВЕ колонки, не flex-wrap (Влад 20.09: «кнопка снять бегает
+   из стороны в сторону, иконка своя тоже» - раньше весь ряд переносился одним блоком, и
+   кнопка/бейдж оказывались в разных местах карточка от карточки в зависимости от длины
+   госномера+ФИО водителя). .veh-info - переменная длина, обрезается многоточием, НЕ
+   переносится; .veh-actions - тег СВОЯ/НАЁМ + кнопка, фиксированная колонка справа,
+   всегда в одном и том же месте. */
+.c-r3{display:flex;align-items:center;gap:8px;font-size:13px}
+.veh-info{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.veh-info .gos{font-family:var(--font-num);font-weight:700}
+.veh-info .drv{color:var(--text)}
+.veh-info .empty{color:var(--muted);font-style:normal}
+.veh-actions{flex:none;display:flex;align-items:center;gap:6px}
+.veh-actions .tag{font-size:10px;font-weight:700;padding:2px 6px;border-radius:5px;letter-spacing:.03em}
+.veh-actions .tag.own{background:rgba(29,158,117,.18);color:#2fbe93}
+.veh-actions .tag.hired{background:rgba(239,159,39,.18);color:var(--tint-amber)}
 .c-btn{height:32px;padding:0 12px;border-radius:16px;font-size:12px;font-weight:700}
 .c-btn.accept{background:rgba(29,158,117,.18);color:#2fbe93;border:1.5px solid var(--green)}
 .c-btn.put{background:none;border:1.5px dashed var(--border-strong);color:var(--text)}
@@ -886,31 +899,46 @@ function renderLogFilters(){
     ml.appendChild(b);
   });
 }
+/* Фамилия + имя, без отчества (Влад 20.09: «не обязательно в мобильном приложении
+   отражать отчество... достаточно фамилии и имени, чтобы было сэкономлено место») -
+   только на карточке списка (тесно), в самой заявке при открытии - полное ФИО как было. */
+function shortName_(s){ var p=String(s||'').trim().split(/\s+/); return p.slice(0,2).join(' '); }
+/* Бейдж менеджера (Влад 20.09: «нужно, чтобы была видна на заявке фамилия менеджера») -
+   первые 3 буквы фамилии, цвет закреплён за человеком - тот же PERSON_COLOR, что уже
+   красит точки в фильтре «Все менеджеры». Сырое o.manager_name (не показное o.manager,
+   которое normalizeOrder() подменяет на «внутр.»/«—» для карточки) - для внутренних/
+   самообслуживаемых заявок без реального менеджера бейдж просто не рисуется. */
+function mgrBadge_(o){
+  if(!o.manager_name) return '';
+  var color = PERSON_COLOR[o.manager_name] || '#8b8980';
+  return '<span class="mgr" style="background:'+color+'26;color:'+color+'">'+esc(String(o.manager_name).trim().slice(0,3).toUpperCase())+'</span>';
+}
 function vehLineHtml(o){
+  var info, actions='';
   if(o.status==='cancelled'){
+    var g = o.vehicle ? o.vehicle.gos : '—';
     if(!o.cancel_ack){
-      var g = o.vehicle ? o.vehicle.gos : '—';
-      return '<span class="gos strike">'+esc(g)+'</span><span class="empty">отбой не принят</span>'+(ROLE==='log'?'<span class="sp"></span><button class="c-btn ackoff" data-act="ack" data-id="'+o.id+'">✕ Принять отбой</button>':'');
+      info = '<span class="gos strike">'+esc(g)+'</span> <span class="empty">отбой не принят</span>';
+      if(ROLE==='log') actions = '<button class="c-btn ackoff" data-act="ack" data-id="'+o.id+'">✕ Принять отбой</button>';
+    } else {
+      info = '<span class="gos strike">'+esc(g)+'</span> <span class="empty">отбой принят</span>';
+      if(o.vehicle && ROLE==='log') actions = '<button class="c-btn rm" data-act="rm" data-id="'+o.id+'">Снять</button>';
     }
-    var g2 = o.vehicle ? o.vehicle.gos : '—';
-    return '<span class="gos strike">'+esc(g2)+'</span><span class="empty">отбой принят</span>'+(o.vehicle && ROLE==='log' ? '<span class="sp"></span><button class="c-btn rm" data-act="rm" data-id="'+o.id+'">Снять</button>' : '');
-  }
-  if(!o.vehicle){
+  } else if(!o.vehicle){
+    info = '<span class="empty">машину ещё не поставили</span>';
     if(ROLE==='log'){
-      if(!o.taken_by){
-        return '<span class="empty">машину ещё не поставили</span><span class="sp"></span><button class="c-btn accept" data-act="take" data-id="'+o.id+'">✓ Принять</button>';
-      }
-      return '<span class="empty">машину ещё не поставили</span><span class="sp"></span><button class="c-btn put" data-act="put" data-id="'+o.id+'">Поставить</button>';
+      actions = !o.taken_by
+        ? '<button class="c-btn accept" data-act="take" data-id="'+o.id+'">✓ Принять</button>'
+        : '<button class="c-btn put" data-act="put" data-id="'+o.id+'">Поставить</button>';
     }
-    return '<span class="empty">машину ещё не поставили</span>';
+  } else {
+    var v=o.vehicle;
+    info = '<span class="gos">'+esc(v.gos)+'</span> <span class="drv">'+esc(shortName_(v.driver)||'—')+'</span>'+
+      (!v.own && v.company ? ' <span class="empty">'+esc(v.company)+'</span>' : '');
+    actions = v.own ? '<span class="tag own">СВОЯ</span>' : '<span class="tag hired">НАЁМ</span>';
+    if(ROLE==='log' && o.status!=='done') actions += '<button class="c-btn rm" data-act="rm" data-id="'+o.id+'">Снять</button>';
   }
-  var v=o.vehicle;
-  var tag = v.own ? '<span class="tag own">СВОЯ</span>' : '<span class="tag hired">НАЁМ</span>'+(v.company?(' <span class="empty">'+esc(v.company)+'</span>'):'');
-  var html = '<span class="gos">'+esc(v.gos)+'</span><span class="drv">'+esc(v.driver||'—')+'</span>'+tag;
-  if(ROLE==='log' && o.status!=='done'){
-    html += '<span class="sp"></span><button class="c-btn rm" data-act="rm" data-id="'+o.id+'">Снять</button>';
-  }
-  return html;
+  return '<span class="veh-info">'+info+'</span>'+(actions?('<span class="veh-actions">'+actions+'</span>'):'');
 }
 function pendHtml(o){
   if(!o.pending) return '';
@@ -937,7 +965,7 @@ function cardHtml(o){
   var newBadge = o.created_new ? '<span class="badge-new">новое</span>' : '';
   return '<div class="card st-'+o.status+blink+'" data-id="'+o.id+'" data-canview="'+(canView?'1':'0')+'">' +
     '<div class="c-r1">'+noHtml+'<span class="c-time mono">'+(o.service_time||'уточнить')+'</span><span class="c-cust">'+esc(o.customer)+newBadge+'</span>'+st+'</div>' +
-    '<div class="c-r2"><span class="eq">'+esc(o.equipment_type||'')+'</span><span class="route">'+route+'</span></div>' +
+    '<div class="c-r2"><span class="eqcol"><span class="eq">'+esc(o.equipment_type||'')+'</span>'+mgrBadge_(o)+'</span><span class="route">'+route+'</span></div>' +
     '<div class="c-r3">'+vehLineHtml(o)+'</div>' +
     transfer + pendHtml(o) +
   '</div>';

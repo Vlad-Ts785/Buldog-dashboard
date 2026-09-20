@@ -1462,7 +1462,12 @@ function loadAnalytics() {
     renderAnalytics();
   }).catch(function () {});
 }
-function fmtM_(v) { return (Number(v) / 1e6).toFixed(2).replace('.', ','); }
+/* 21.09, Влад: «в денежных блоках хочу видеть полные цифры, а не сокращённые» -
+   было "0,96 млн ₽" (округление до сотых миллиона теряло реальные рубли), стало полное
+   целое число рублей с разрядами - тот же формат, что уже везде в проекте (`fmtP()`
+   выше, калькулятор в index.html), но БЕЗ прятанья нуля (`fmtP` возвращает '' на 0 -
+   там это пустое поле формы, здесь 0 ₽ - осмысленное значение "заявок не было"). */
+function fmtRub_(v) { return Math.round(Number(v) || 0).toLocaleString('ru-RU') + ' ₽'; }
 function renderBars_(id, rows) {
   var box = $('#' + id); if (!box) return;
   if (!rows.length) { box.innerHTML = '<p class="op2-dim op2-sm">Подтверждённых заявок за месяц нет.</p>'; return; }
@@ -1507,11 +1512,11 @@ function renderAnalytics() {
     var canc = st.cancelled || { count: 0, sum: 0 };
     return '<div class="an-money">' +
       '<div class="an-money-label">' + DAY_LABEL[i] + '</div>' +
-      '<div class="an-money-val">' + fmtM_(conf.sum) + ' млн ₽</div>' +
+      '<div class="an-money-val">' + fmtRub_(conf.sum) + '</div>' +
       '<div class="an-money-sub">' + conf.count + ' ' + plural(conf.count, 'подтверждённая', 'подтверждённые', 'подтверждённых') + ' из ' + d.total + '</div>' +
       '<div class="an-money-break">' +
-        '<div class="row"><span class="k amber">Не подтверждено</span><span class="v">' + fmtM_(unc.sum) + ' млн ₽ · ' + unc.count + '</span></div>' +
-        '<div class="row"><span class="k red">Отбой</span><span class="v">' + fmtM_(canc.sum) + ' млн ₽ · ' + canc.count + '</span></div>' +
+        '<div class="row"><span class="k amber">Не подтверждено</span><span class="v">' + fmtRub_(unc.sum) + ' · ' + unc.count + '</span></div>' +
+        '<div class="row"><span class="k red">Отбой</span><span class="v">' + fmtRub_(canc.sum) + ' · ' + canc.count + '</span></div>' +
       '</div>' +
     '</div>';
   }).join('');
@@ -1531,7 +1536,7 @@ function renderAnalytics() {
     moneyBox.innerHTML = money.map(function (r) {
       return '<div class="p2-money-row">' +
         '<span class="p2-money-name">' + esc(r.manager) + '</span>' +
-        days.map(function (d, i) { return '<span class="' + (i === 1 ? 'val' : 'ghost') + '">' + fmtM_(r[d.date] || 0) + '</span>'; }).join('') +
+        days.map(function (d, i) { return '<span class="' + (i === 1 ? 'val' : 'ghost') + '">' + fmtRub_(r[d.date] || 0) + '</span>'; }).join('') +
       '</div>';
     }).join('');
   }

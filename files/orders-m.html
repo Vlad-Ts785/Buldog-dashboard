@@ -211,6 +211,13 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7;stroke
 .chip{height:44px;padding:0 14px;border-radius:22px;background:var(--bg3);border:1px solid var(--border-strong);font-size:14px;font-weight:600;
   display:inline-flex;align-items:center;gap:6px;color:var(--text)}
 .chip[aria-pressed="true"]{background:rgba(29,158,117,.16);border-color:var(--green);color:#2fbe93}
+/* Гармошка «Ещё N» (desktop op2-ent-enter/op2-ent-close, 1:1 - те же тайминги/easing) -
+   Влад 20.09: «тип техники»/«от кого» на телефоне показывали ВСЕ варианты плоским
+   списком, на десктопе - только основные + «Ещё N», раскрывающееся по тапу. */
+.chip .n{font-family:var(--font-num);color:var(--amber)}
+.chip.chip-enter{animation:chipPop .22s cubic-bezier(.34,1.45,.5,1) both}
+@keyframes chipPop{from{opacity:0;transform:translateY(3px) scale(.88)}to{opacity:1;transform:none}}
+.chip.chip-close{transition:transform .3s cubic-bezier(.22,.9,.28,1)}
 .frow{display:flex;align-items:center;gap:10px;min-height:52px;padding:6px 0;border-bottom:1px solid var(--border);transition:border-color .15s}
 .frow .k{flex:none;width:92px;color:var(--muted);font-size:13px;font-weight:600}
 /* «Откуда»/«Куда» как кнопка (fFromBase/fToBase) - тап по самому лейблу подставляет База/
@@ -682,6 +689,20 @@ function sStepUp(){ dcUnlockAudio_(); dcBlip(440,560,.05,.03); }
 function sStepDown(){ dcUnlockAudio_(); dcBlip(560,440,.05,.03); }
 function sToggle(){ dcUnlockAudio_(); dcBlip(520,560,.04,.02); }
 function sAttention(){ dcUnlockAudio_(); dcBlip(220,180,.12,.06,'triangle'); }
+/* Гармошка «Ещё N» (desktop S.unfold/S.fold, order-plan-v2.js) - «звук должен
+   соответствовать раскрытию, не просто пик, а как раскрытие гармошки»: бег коротких нот
+   вверх, ОДНА НА КАЖДЫЙ появляющийся чип (тот же шаг 35мс, что несёт .chip-enter в CSS -
+   ухо и глаз раскрывают меха вместе), triangle - не sine, «язычковый» тембр. Свёртка -
+   бег вниз, втрое короче. Портировано дословно, не изобретено заново. */
+function sUnfold(n){
+  dcUnlockAudio_();
+  var steps=Math.max(1,Math.min(8,n||1));
+  for(var i=0;i<steps;i++){ (function(i){ setTimeout(function(){ dcBlip(258+i*32,278+i*32,.05,.026,'triangle'); }, i*35); })(i); }
+}
+function sFold(){
+  dcUnlockAudio_();
+  for(var i=0;i<3;i++){ (function(i){ setTimeout(function(){ dcBlip(360-i*40,340-i*40,.04,.022,'triangle'); }, i*22); })(i); }
+}
 
 function buildDateCarousel(){
   DAYS = [];
@@ -1462,7 +1483,9 @@ function renderNewSheet(head,body,foot){
   $('shCancel').addEventListener('click', function(){ closeSheet(); });
 
   var d=fromIso(F.service_date);
-  var EQUIP = (META && META.dictionary && META.dictionary.equipment && META.dictionary.equipment.length) ? META.dictionary.equipment.map(function(x){return x.value;}) : ['Трал','Длинномер'];
+  /* primary сохраняется (не .map(x=>x.value), как раньше) - нужен для гармошки «Ещё N»
+     ниже, тот же флаг is_primary из словаря, что и у desktop eqRowHtml(). */
+  var EQUIP = (META && META.dictionary && META.dictionary.equipment && META.dictionary.equipment.length) ? META.dictionary.equipment : [{value:'Трал',primary:true},{value:'Длинномер',primary:true}];
   var GABS = (META && META.dictionary && META.dictionary.gabarit && META.dictionary.gabarit.length) ? META.dictionary.gabarit.map(function(x){return x.value;}) : ['Габарит','Негабарит'];
   /* «Документы»/«Переработка» - те же словари, что у desktop <select> (op2-f-docs/
      op2-f-rework, dict('documents')/dict('rework')) - были голым текстовым полем без
@@ -1503,12 +1526,31 @@ function renderNewSheet(head,body,foot){
   html += '<div class="f-label">Время подачи</div><div class="timebox"><button id="fTimeMinus">−30</button><div class="t mono" id="fTimeVal">'+(F.service_time||'--:--')+'</div><button id="fTimePlus">+30</button></div>';
   html += '<div class="chips" id="fQuick">'+['06:00','08:00','10:00','13:00'].map(function(t){return '<button class="chip qk" data-t="'+t+'">'+t+'</button>';}).join('')+'<button class="chip" id="fUnclear">Уточнить</button></div>';
 
-  html += '<div class="f-label">Тип техники</div><div class="chips" id="fType">'+EQUIP.map(function(t){ return '<button class="chip" data-t="'+esc(t)+'" aria-pressed="'+(F.equipment_type===t)+'">'+esc(t)+'</button>'; }).join('')+'</div>';
+  /* «Тип техники»/«От кого» - гармошка «Ещё N» 1:1 с desktop eqRowHtml()/entRowHtml()
+     (Влад 20.09: «такой же принцип, как в десктопе»). Тип техники: показываем ТОЛЬКО
+     primary-варианты словаря (Трал/Длинномер) + «Ещё N» на остальные - если текущий
+     выбор уже редкий (не primary), он спрятан за «Ещё» до раскрытия, тот же нюанс, что
+     и на desktop (счётчик считает ВСЕ non-primary, не «оставшиеся кроме текущего»).
+     «От кого» иначе - там нет понятия primary, свёрнуто видно ТЕКУЩИЙ выбор + «Ещё N»
+     (N = все остальные юрлица кроме текущего). */
+  function eqChipHtml_(t,on){ return '<button class="chip" data-t="'+esc(t.value)+'" aria-pressed="'+(!!on)+'">'+esc(t.value)+'</button>'; }
+  function eqRowHtml_(curVal){
+    var primary=EQUIP.filter(function(x){return x.primary;}), rest=EQUIP.filter(function(x){return !x.primary;});
+    var html=primary.map(function(x){return eqChipHtml_(x, x.value===curVal);}).join('');
+    if(rest.length) html+='<button class="chip" data-more>Ещё <span class="n">'+rest.length+'</span></button>';
+    return html;
+  }
+  function entChipHtml_(e,on){ return '<button class="chip" data-ent="'+esc(e.id)+'" aria-pressed="'+(!!on)+'">'+esc(e.short_name||e.name)+'</button>'; }
+  function entRowHtml_(curId){
+    var cur=ownEntities.filter(function(e){return String(e.id)===String(curId);})[0]||ownEntities[0];
+    var restN=Math.max(0, ownEntities.length-1);
+    return (cur?entChipHtml_(cur,true):'') + (restN?'<button class="chip" data-more>Ещё <span class="n">'+restN+'</span></button>':'');
+  }
+
+  html += '<div class="f-label">Тип техники</div><div class="chips" id="fType">'+eqRowHtml_(F.equipment_type)+'</div>';
 
   if(ownEntities.length>1){
-    html += '<div class="f-label">От кого (наше юрлицо)</div><div class="chips" id="fEnt">'+ownEntities.map(function(e){
-      return '<button class="chip" data-ent="'+esc(e.id)+'" aria-pressed="'+(String(F.executor_entity_id)===String(e.id))+'">'+esc(e.short_name||e.name)+'</button>';
-    }).join('')+'</div>';
+    html += '<div class="f-label">От кого (наше юрлицо)</div><div class="chips" id="fEnt">'+entRowHtml_(F.executor_entity_id)+'</div>';
   }
 
   if(ROLE==='log'){
@@ -1555,12 +1597,54 @@ function renderNewSheet(head,body,foot){
   if(draft.rework==='—') draft.rework='';
 
   function bindChip(sel, cb){ body.querySelectorAll(sel).forEach(function(el){ el.addEventListener('click', function(){ cb(el); sToggle(); tick(); }); }); }
-  bindChip('#fType button', function(el){ body.querySelectorAll('#fType button').forEach(function(x){x.setAttribute('aria-pressed','false');}); el.setAttribute('aria-pressed','true'); draft.equipment_type=el.getAttribute('data-t'); vib(4); });
   bindChip('#fGab button', function(el){ body.querySelectorAll('#fGab button').forEach(function(x){x.setAttribute('aria-pressed','false');}); el.setAttribute('aria-pressed','true'); draft.gabarit=el.getAttribute('data-g'); vib(4); });
   bindChip('#fDocs button', function(el){ body.querySelectorAll('#fDocs button').forEach(function(x){x.setAttribute('aria-pressed','false');}); el.setAttribute('aria-pressed','true'); draft.documents=el.getAttribute('data-d'); vib(4); });
   bindChip('#fRework button', function(el){ body.querySelectorAll('#fRework button').forEach(function(x){x.setAttribute('aria-pressed','false');}); el.setAttribute('aria-pressed','true'); draft.rework=el.getAttribute('data-r'); vib(4); });
-  bindChip('#fEnt button', function(el){ body.querySelectorAll('#fEnt button').forEach(function(x){x.setAttribute('aria-pressed','false');}); el.setAttribute('aria-pressed','true'); draft.executor_entity_id=el.getAttribute('data-ent'); vib(4); });
   bindChip('#fPay button', function(el){ body.querySelectorAll('#fPay button').forEach(function(x){x.setAttribute('aria-pressed','false');}); el.setAttribute('aria-pressed','true'); draft.payment_status=el.getAttribute('data-p'); vib(4); });
+
+  /* Гармошка «Ещё N» (desktop expandEqRow/collapseEqRow/expandEntRow/collapseEntRow,
+     1:1 включая FLIP-переход «Ещё»→«×» и каскад появления чипов 35мс). Один и тот же
+     механизм для «Тип техники» и «От кого» - отличаются только источник данных и то,
+     что кладётся в draft. */
+  function expandChips_(seg, restItems, chipHtmlFn){
+    var more=seg.querySelector('[data-more]'); if(!more) return;
+    vib(4);
+    var oldRect=more.getBoundingClientRect();
+    more.outerHTML='<button type="button" class="chip chip-close" data-close>×</button>';
+    seg.insertAdjacentHTML('beforeend', restItems.map(function(it){ return chipHtmlFn(it,false).replace('class="chip','class="chip chip-enter'); }).join(''));
+    var closeBtn=seg.querySelector('.chip-close');
+    var newRect=closeBtn.getBoundingClientRect();
+    closeBtn.style.transform='translate('+(oldRect.left-newRect.left)+'px,'+(oldRect.top-newRect.top)+'px)';
+    requestAnimationFrame(function(){ closeBtn.style.transform='none'; });
+    seg.querySelectorAll('.chip-enter').forEach(function(c,i){ c.style.animationDelay=(i*35)+'ms'; });
+    sUnfold(restItems.length);
+  }
+  var fType=$('fType');
+  fType.addEventListener('click', function(e){
+    e.stopPropagation();
+    var seg=this;
+    if(e.target.closest('[data-more]')){ expandChips_(seg, EQUIP.filter(function(x){return !x.primary && x.value!==draft.equipment_type;}), eqChipHtml_); return; }
+    if(e.target.closest('[data-close]')){ vib(4); sFold(); seg.innerHTML=eqRowHtml_(draft.equipment_type); return; }
+    var pick=e.target.closest('.chip[data-t]'); if(!pick) return;
+    var wasOpen=!!seg.querySelector('[data-close]');
+    draft.equipment_type=pick.getAttribute('data-t');
+    seg.innerHTML=eqRowHtml_(draft.equipment_type);
+    vib(4); if(wasOpen) sFold();
+    tick();
+  });
+  var fEnt=$('fEnt');
+  if(fEnt) fEnt.addEventListener('click', function(e){
+    e.stopPropagation();
+    var seg=this;
+    if(e.target.closest('[data-more]')){ expandChips_(seg, ownEntities.filter(function(x){return String(x.id)!==String(draft.executor_entity_id);}), entChipHtml_); return; }
+    if(e.target.closest('[data-close]')){ vib(4); sFold(); seg.innerHTML=entRowHtml_(draft.executor_entity_id); return; }
+    var pick=e.target.closest('.chip[data-ent]'); if(!pick) return;
+    var wasOpen=seg.querySelectorAll('.chip[data-ent]').length>1;
+    draft.executor_entity_id=pick.getAttribute('data-ent');
+    seg.innerHTML=entRowHtml_(draft.executor_entity_id);
+    vib(4); if(wasOpen) sFold();
+    tick();
+  });
   var fFromBase=$('fFromBase'), fToBase=$('fToBase');
   /* «База»/«По месту» (desktop op2-addr-base) - реальный адрес/координаты базы, не
      выдуманные (BASE_ADDRESS_/BASE_LAT_/BASE_LON_ в order-plan-v2.js), «По месту» -

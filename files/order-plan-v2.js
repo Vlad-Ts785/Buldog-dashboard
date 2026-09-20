@@ -1768,6 +1768,12 @@ function stKey_(o) { return (ST_V3_[oSt(o)] || ST_V3_.nz).key; }
 function needsAccept_(o) {
   return oSt(o) !== 'ot' && !o.taken_by_name && !oOwn(o).length && !oHired(o);
 }
+/* 21.09, Влад: «созданная, но не подтверждённая заявка - просто кнопка «Принять» без
+   мигания; созданная И подтверждённая без ответственного - должна мигать, как сейчас».
+   Кнопка (needsAccept_ выше) остаётся на ОБОИХ статусах - принять всё равно нужно,
+   мигает - только «подтверждено» (oSt==='ok'), потому что там уже реальная, оплаченная
+   заказчиком работа ждёт логиста, а не просто черновик, который могут ещё отменить. */
+function needsAcceptBlink_(o) { return needsAccept_(o) && oSt(o) === 'ok'; }
 /* «Фамилия Имя» без отчества (полное ФИО - в title) - компромисс варианта «Рейс»: на ширине
    ячейки «Машина» полное ФИО в одну строку не помещается, а фамилию Влад резать не хотел. */
 function fioName_(full) {
@@ -2083,7 +2089,7 @@ function renderLog() {
   langRu_();
   body.innerHTML = rows.map(function (o) {
     var k = oSt(o);
-    var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' + (o.otboy_ack_by ? '' : ' op2-unack') : (needsAccept_(o) ? ' op2-new-unack' : '')) + (isFresh(o) ? ' op2-new-halo' : '');
+    var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' + (o.otboy_ack_by ? '' : ' op2-unack') : (needsAcceptBlink_(o) ? ' op2-new-unack' : '')) + (isFresh(o) ? ' op2-new-halo' : '');
     return '<tr class="' + cls + '" data-oid="' + esc(o.id) + '">' +
       noCell_(o) +
       mgrCodeCell_(o, isAdmin()) + logCodeCell_(o, true) +

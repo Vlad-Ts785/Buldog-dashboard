@@ -2017,8 +2017,14 @@ function vehCellLog(o) {
   if (k === 'ot') {
     var g0 = vs.map(function (v) { return v.vehicle_gos || ''; }).filter(Boolean).join(' + ');
     if (!o.otboy_ack_by) {
+      /* 20.09, Влад: "можно кнопку сделать - принять отбой и снять машину" - сервер уже
+         снимает машину автоматически вместе с принятием отбоя (см. otboy_ack), кнопка
+         теперь называет оба действия, если машина реально стоит (g0), иначе снимать нечего.
+         Колонка «Машина» узкая (164px, colgroup выше) - полная фраза "Принять отбой и снять
+         машину" не влезает в однострочную кнопку высотой 26px (перенос сломал бы высоту
+         строки таблицы), поэтому в самой кнопке - короткая форма, полная - в title. */
       return (g0 ? '<span class="op2-ln">' + plate_(g0, 'op2-off', 'Отбой по машине ' + g0 + ' · ещё не принят') + '</span>' : '') +
-        '<button class="op2-slot op2-ot" data-oid="' + esc(o.id) + '" data-ot="1" title="' + esc('Отбой' + (g0 ? ' · ' + g0 : '') + ' · принять') + '">✕ Принять отбой</button>';
+        '<button class="op2-slot op2-ot" data-oid="' + esc(o.id) + '" data-ot="1" title="' + esc('Отбой' + (g0 ? ' · ' + g0 : '') + ' · принять, машина снимется автоматически') + '">✕ ' + (g0 ? 'Отбой + снять' : 'Принять отбой') + '</button>';
     }
     return (g0 ? '<span class="op2-ln">' + plate_(g0, 'op2-was', 'Была машина ' + g0) + '<button class="op2-unset-ot op2-mini" data-oid="' + esc(o.id) + '" title="Снять машину">Снять</button></span>' : '') +
       '<span class="op2-drv op2-dim">отбой принят' + (hhmmOf(o.otboy_ack_at) ? ' · ' + esc(hhmmOf(o.otboy_ack_at)) : '') + '</span>' +

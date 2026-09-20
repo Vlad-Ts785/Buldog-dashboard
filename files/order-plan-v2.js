@@ -2186,10 +2186,17 @@ function onLogClick(e) {
   }
   if (slot && slot.dataset.ot) {
     var oo = byId(slot.dataset.oid); if (!oo) return;
+    /* 20.09, Влад: «как только логист нажал "Принять отбой", сразу же из Планировки
+       пропадает эта машина» - сервер теперь сам снимает исполнителя и удаляет отрезок с
+       ленты (см. otboy_ack на сервере), вручную жать «Снять» больше не нужно - старое
+       предупреждение "ещё стоит на этой заявке - сними машину" было ПРАВДОЙ на момент
+       клика (oOwn(oo) читает состояние ДО ответа сервера), но вводило в заблуждение,
+       раз сервер эту работу уже сделал сам за то же самое действие. */
+    var hadVeh = oOwn(oo).length ? oOwn(oo)[0].vehicle_gos : null;
     apiPost('/orders/otboy_ack', { id: oo.id }).then(function (r) {
       if (!ok_(r)) return;
       S.tickUp();
-      if (oOwn(oo).length) toast('Отбой по №' + esc(oNo(oo)) + ' принят · <span class="op2-warn">' + esc(oOwn(oo)[0].vehicle_gos || '') + ' ещё стоит на этой заявке</span> - сними машину', null, 7000);
+      if (hadVeh) toast('Отбой по №' + esc(oNo(oo)) + ' принят <span class="op2-tick">✓</span> · ' + esc(hadVeh) + ' автоматически снята с ленты');
       else toast('Отбой по №' + esc(oNo(oo)) + ' принят <span class="op2-tick">✓</span> · менеджер видит, что логист в курсе');
       loadOrders();
     });

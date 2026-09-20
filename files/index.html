@@ -3305,6 +3305,35 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
 }
 #page-logistics-plan .lp-flagpop-clear:hover{background:var(--bg4);color:var(--text);}
 #page-logistics-plan .lp-flagpop-clear svg{width:12px;height:12px;}
+/* Подсказка по наведению (20.09, Влад: "окошко-подсказка с подробностями заявки" - превью
+   из трёх вариантов расположения/уровня данных, утверждён вариант Б + примечание - разделы
+   Груз/Маршрут/Деньги/Примечание). Тот же каркас, что у .lp-flagpop (одна переиспользуемая
+   карточка на всю доску, position:fixed, координаты - JS по getBoundingClientRect() плитки
+   в lpOpenOrderTip_) - но pointer-events:none, как у .time-hud: это подсказка для чтения,
+   не интерактивная форма, никогда не должна перехватывать клик у того, что под ней. */
+#page-logistics-plan .lp-ordertip{
+  position:fixed;z-index:970;display:none;width:270px;
+  background:var(--bg3);border:1px solid var(--border-strong);border-radius:10px;
+  box-shadow:0 10px 28px rgba(0,0,0,.5);padding:12px 14px;pointer-events:none;
+  font-family:'Golos Text',system-ui,sans-serif;
+}
+#page-logistics-plan .lp-ordertip.open{display:block;}
+#page-logistics-plan .lp-ordertip .ot-title{font-size:12.5px;font-weight:700;color:var(--text);margin-bottom:2px;}
+#page-logistics-plan .lp-ordertip .ot-sub{font-size:10px;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+#page-logistics-plan .lp-ordertip .ot-tag{display:inline-block;font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;letter-spacing:.02em;white-space:nowrap;}
+#page-logistics-plan .lp-ordertip .ot-tag.warn{background:rgba(226,75,74,.16);color:var(--tint-red);}
+#page-logistics-plan .lp-ordertip .ot-tag.ok{background:rgba(29,158,117,.18);color:var(--tint-green);}
+#page-logistics-plan .lp-ordertip .ot-tag.off{background:rgba(226,75,74,.22);color:var(--tint-red);font-weight:800;}
+#page-logistics-plan .lp-ordertip .ot-sect{font-size:9px;text-transform:uppercase;letter-spacing:.06em;color:var(--tint-amber);margin:9px 0 4px;font-weight:700;}
+#page-logistics-plan .lp-ordertip .ot-sect:first-of-type{margin-top:2px;}
+#page-logistics-plan .lp-ordertip .ot-row{display:flex;justify-content:space-between;gap:14px;font-size:11px;padding:3px 0;}
+#page-logistics-plan .lp-ordertip .ot-row .k{color:var(--muted);flex:none;}
+#page-logistics-plan .lp-ordertip .ot-row .v{color:var(--text);text-align:right;font-weight:500;overflow-wrap:anywhere;}
+#page-logistics-plan .lp-ordertip .ot-price{font-family:'JetBrains Mono',monospace;font-weight:700;color:var(--tint-amber);}
+#page-logistics-plan .lp-ordertip .ot-note{
+  margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:10.5px;
+  color:var(--text);line-height:1.5;white-space:pre-line;max-height:140px;overflow-y:auto;
+}
 /* «Суточный режим» (Влад, 30.08: "давай визуализируем... три варианта", выбран
    вариант «значок», подпись 30.08 второй заход - "вместо 24 часов слово
    суточный") - тихий вариант, специально: если суточных рейсов на ленте
@@ -4818,6 +4847,14 @@ main:has(> #page-dynamics.active){min-width:0;}
     <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 5l10 10M15 5L5 15"/></svg>
   </button>
 </div>
+
+<!-- Подсказка по наведению (20.09, Влад: "окошко-подсказка с подробностями заявки" -
+     превью из трёх вариантов, утверждён вариант Б + примечание). Тот же приём, что у
+     .lp-flagpop - одна переиспользуемая карточка на всю доску, позиционируется через JS
+     по getBoundingClientRect() плитки (см. lpOpenOrderTip_), живёт ВНЕ скролла .board.
+     Только для рейсов с привязанной заявкой из "Задания" (s.orderId != null) - у рейсов
+     без заявки подсказывать нечего сверх того, что уже на самой плитке. -->
+<div class="lp-ordertip" id="lp-orderTip"></div>
 
 </div>
 
@@ -33345,6 +33382,21 @@ function applyServerSegs_(rows){
          заведённых НЕ из "Задания" (старый способ создания рейса прямо в Планировке
          всё ещё есть) - тогда бейджа просто нет. */
       seg.orderDayNo = r.order_day_no != null ? r.order_day_no : null;
+      /* Подробности заявки для подсказки по наведению (20.09, Влад: "окошко-подсказка с
+         более подробной информацией" - превью, утверждён вариант Б + примечание). Та же
+         логика read-only, что у orderDayNo - только для чтения, ничего не шлём обратно.
+         price/cargo_weight_t - DECIMAL-колонки, mysql2 отдаёт их СТРОКОЙ (см. память
+         project_plan_segs_fleet_state_shared_contract про ту же ловушку у другого поля) -
+         parseFloat здесь, не в момент вывода. */
+      seg.orderStatus = r.order_status || null;
+      seg.orderEquipmentType = r.order_equipment_type || null;
+      seg.orderCargo = r.order_cargo || null;
+      seg.orderCargoWeight = r.order_cargo_weight_t != null ? parseFloat(r.order_cargo_weight_t) : null;
+      seg.orderLoadAddress = r.order_load_address || null;
+      seg.orderUnloadAddress = r.order_unload_address || null;
+      seg.orderPrice = r.order_price != null ? parseFloat(r.order_price) : null;
+      seg.orderPaymentStatus = r.order_payment_status || null;
+      seg.orderNote = r.order_note || null;
     }
     segs.push(seg);
     seenIds[r.id] = true;
@@ -34220,7 +34272,7 @@ var lpHistScopedV_ = null;
 function lpHistUndoLabel_(ev){
   switch (ev.type){
     case "fleet_uncouple": return ev.kind === "driver" ? "Вернуть водителя" : "Вернуть прицеп";
-    case "seg_delete": return "Восстановить запись";
+    case "seg_delete": case "seg_cancel": return "Восстановить запись";
     default: return "Отменить";
   }
 }
@@ -34448,6 +34500,94 @@ document.addEventListener("click", function(e){
   if (e.target.closest(".lp-flagpop") || e.target.closest(".lp-flag-btn")) return;
   lpCloseFlagPop_();
 });
+
+/* ═══ Подсказка по наведению (20.09, Влад: "хочу окошко-подсказку с более подробной
+   информацией по заказу, по наведению мышки" - превью из трёх вариантов расположения
+   и уровня данных, утверждён вариант Б + примечание). Только для рейсов с привязанной
+   заявкой из "Задания" (s.orderId != null через orderDayNo/orderPrice и т.п. - см.
+   applyServerSegs_) - у рейсов, заведённых напрямую в Планировке без "Задания", этих
+   полей просто нет, подсказывать нечего сверх самой плитки. ═══ */
+var lpOrderTip_ = document.getElementById("lp-orderTip");
+var lpTipTimer_ = null, lpTipOpenId_ = null;
+var LP_ORDER_STATUS_TAG_ = {
+  unconfirmed: {cls: "warn", label: "не подтверждена"},
+  confirmed:   {cls: "ok",   label: "подтверждена"},
+  cancelled:   {cls: "off",  label: "отбой"},
+  done:        {cls: "ok",   label: "выполнена"},
+};
+function otRow_(k, v){
+  return '<div class="ot-row"><span class="k">' + pageEsc_(k) + '</span><span class="v">' + (v || "—") + '</span></div>';
+}
+/* Влад, 20.09, со скриншотом живой заявки: "информация в виде ссылки не несёт
+   никакой полезной нагрузки в данном окне... ссылки можно обрезать" - менеджеры
+   иногда вставляют в поле адреса Яндекс-ссылку с координатами (навигатор/карта)
+   прямо рядом с текстом адреса - в самой заявке это полезно (клик открыл бы
+   карту), но в ЭТОЙ подсказке-для-чтения ссылка только растягивает карточку и
+   ничего не даёт глазами. Вырезаем ТОЛЬКО в подсказке, не трогаем исходные
+   данные заявки (в "Задании" ссылка остаётся кликабельной как была). */
+function otStripLinks_(s){
+  if (!s) return s;
+  return s.replace(/https?:\/\/\S+/g, "").replace(/\s{2,}/g, " ").trim();
+}
+function lpOrderTipHtml_(s){
+  var st = LP_ORDER_STATUS_TAG_[s.orderStatus] || null;
+  var loadAddr = otStripLinks_(s.orderLoadAddress || s.from);
+  var unloadAddr = otStripLinks_(s.orderUnloadAddress || s.to);
+  var h = '<div class="ot-title">' + (s.orderDayNo != null ? "№" + s.orderDayNo + " · " : "") + pageEsc_(s.customer || "—") + '</div>';
+  h += '<div class="ot-sub">' + pageEsc_(hm(s.s)) + (st ? ' · <span class="ot-tag ' + st.cls + '">' + pageEsc_(st.label) + '</span>' : "") + '</div>';
+  h += '<div class="ot-sect">Груз</div>';
+  h += otRow_("Тип техники", s.orderEquipmentType ? pageEsc_(s.orderEquipmentType) : null);
+  h += otRow_("Груз", s.orderCargo ? pageEsc_(s.orderCargo) : null);
+  h += otRow_("Вес", s.orderCargoWeight != null ? s.orderCargoWeight + " т" : null);
+  h += '<div class="ot-sect">Маршрут</div>';
+  h += otRow_("Погрузка", loadAddr ? pageEsc_(loadAddr) : null);
+  h += otRow_("Выгрузка", unloadAddr ? pageEsc_(unloadAddr) : null);
+  h += '<div class="ot-sect">Деньги</div>';
+  h += otRow_("Цена", s.orderPrice != null ? '<span class="ot-price">' + Math.round(s.orderPrice).toLocaleString("ru-RU") + " ₽</span>" : null);
+  h += otRow_("Оплата", s.orderPaymentStatus ? pageEsc_(s.orderPaymentStatus) : null);
+  if (s.orderNote) h += '<div class="ot-sect">Примечание</div><div class="ot-note">' + pageEsc_(s.orderNote) + '</div>';
+  return h;
+}
+function lpCloseOrderTip_(){
+  lpOrderTip_.classList.remove("open");
+  lpTipOpenId_ = null;
+}
+function lpOpenOrderTip_(el, s){
+  lpTipOpenId_ = s.id;
+  lpOrderTip_.innerHTML = lpOrderTipHtml_(s);
+  lpOrderTip_.classList.add("open");
+  var r = el.getBoundingClientRect();
+  var w = lpOrderTip_.offsetWidth || 270;
+  /* Сбоку от плитки (Влад в превью выбрал вариант Б, "карточка сбоку от плитки") -
+     по умолчанию справа, но у самого правого края экрана уходили бы за видимую область
+     (озвученный минус варианта в самом превью) - разворачиваем налево, если не влезает. */
+  var left = r.right + 10;
+  if (left + w > window.innerWidth - 8) left = r.left - w - 10;
+  if (left < 8) left = 8;
+  var top = Math.min(r.top, window.innerHeight - (lpOrderTip_.offsetHeight || 200) - 8);
+  if (top < 8) top = 8;
+  lpOrderTip_.style.left = left + "px";
+  lpOrderTip_.style.top = top + "px";
+}
+rowsEl.addEventListener("mouseover", function(e){
+  var el = e.target.closest(".seg[data-kind='trip']");
+  if (!el || el.contains(e.relatedTarget)) return;
+  if (drag || create || arr) return;   /* идёт захват плитки - подсказке сейчас не место */
+  var seg = STATE.segs.find(function(s){ return s.id === el.dataset.id; });
+  if (!seg || seg.orderDayNo == null) return;
+  if (lpTipTimer_) clearTimeout(lpTipTimer_);
+  lpTipTimer_ = setTimeout(function(){ lpOpenOrderTip_(el, seg); }, 260);
+});
+rowsEl.addEventListener("mouseout", function(e){
+  var el = e.target.closest(".seg[data-kind='trip']");
+  if (!el || el.contains(e.relatedTarget)) return;
+  if (lpTipTimer_){ clearTimeout(lpTipTimer_); lpTipTimer_ = null; }
+  lpCloseOrderTip_();
+});
+/* Скролл/зум ленты - координаты подсказки были посчитаны для старой позиции плитки,
+   закрываем сразу, а не тащим устаревший прямоугольник за собой (тот же приём, что у
+   HUD при завершении драга). */
+board.addEventListener("scroll", function(){ if (lpTipOpenId_) lpCloseOrderTip_(); }, {passive: true});
 function fetchFleetData_(){
   /* Та же защита от лишних запросов, что у fetchPlanSegs_ (не спрашивать сервер,
      пока вкладка Планировки скрыта/не активна) - актуально теперь, когда эта

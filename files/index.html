@@ -34518,8 +34518,21 @@ var LP_ORDER_STATUS_TAG_ = {
 function otRow_(k, v){
   return '<div class="ot-row"><span class="k">' + pageEsc_(k) + '</span><span class="v">' + (v || "—") + '</span></div>';
 }
+/* Влад, 20.09, со скриншотом живой заявки: "информация в виде ссылки не несёт
+   никакой полезной нагрузки в данном окне... ссылки можно обрезать" - менеджеры
+   иногда вставляют в поле адреса Яндекс-ссылку с координатами (навигатор/карта)
+   прямо рядом с текстом адреса - в самой заявке это полезно (клик открыл бы
+   карту), но в ЭТОЙ подсказке-для-чтения ссылка только растягивает карточку и
+   ничего не даёт глазами. Вырезаем ТОЛЬКО в подсказке, не трогаем исходные
+   данные заявки (в "Задании" ссылка остаётся кликабельной как была). */
+function otStripLinks_(s){
+  if (!s) return s;
+  return s.replace(/https?:\/\/\S+/g, "").replace(/\s{2,}/g, " ").trim();
+}
 function lpOrderTipHtml_(s){
   var st = LP_ORDER_STATUS_TAG_[s.orderStatus] || null;
+  var loadAddr = otStripLinks_(s.orderLoadAddress || s.from);
+  var unloadAddr = otStripLinks_(s.orderUnloadAddress || s.to);
   var h = '<div class="ot-title">' + (s.orderDayNo != null ? "№" + s.orderDayNo + " · " : "") + pageEsc_(s.customer || "—") + '</div>';
   h += '<div class="ot-sub">' + pageEsc_(hm(s.s)) + (st ? ' · <span class="ot-tag ' + st.cls + '">' + pageEsc_(st.label) + '</span>' : "") + '</div>';
   h += '<div class="ot-sect">Груз</div>';
@@ -34527,8 +34540,8 @@ function lpOrderTipHtml_(s){
   h += otRow_("Груз", s.orderCargo ? pageEsc_(s.orderCargo) : null);
   h += otRow_("Вес", s.orderCargoWeight != null ? s.orderCargoWeight + " т" : null);
   h += '<div class="ot-sect">Маршрут</div>';
-  h += otRow_("Погрузка", (s.orderLoadAddress || s.from) ? pageEsc_(s.orderLoadAddress || s.from) : null);
-  h += otRow_("Выгрузка", (s.orderUnloadAddress || s.to) ? pageEsc_(s.orderUnloadAddress || s.to) : null);
+  h += otRow_("Погрузка", loadAddr ? pageEsc_(loadAddr) : null);
+  h += otRow_("Выгрузка", unloadAddr ? pageEsc_(unloadAddr) : null);
   h += '<div class="ot-sect">Деньги</div>';
   h += otRow_("Цена", s.orderPrice != null ? '<span class="ot-price">' + Math.round(s.orderPrice).toLocaleString("ru-RU") + " ₽</span>" : null);
   h += otRow_("Оплата", s.orderPaymentStatus ? pageEsc_(s.orderPaymentStatus) : null);

@@ -3192,6 +3192,22 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
 }#page-logistics-plan .seg-id i{font-weight:500;color:var(--muted);}/* точка водителя: залита = назначен на машину, #page-logistics-plan кольцо = вакансия */
 .seg-drv{position:absolute;top:-2px;right:-2px;width:6px;height:6px;border-radius:50%;}#page-logistics-plan .seg-drv.on{display:none;}/* норму не отмечаем - только отсутствие */
 .seg-drv.off{background:var(--bg2);border:1.5px solid var(--red);}
+/* Номер заявки из «Задания» (19.09, Влад: "номер заявки из задания, чтобы у нас
+   на полоске отображался" - превью из трёх вариантов расположения, утверждён
+   вариант 2 "отдельный жёлтый бейдж рядом", затем превью из трёх размеров того
+   же варианта, утверждён "самый крупный"). Тот же золочёный язык, что у
+   .seg-daymode ("суточный"/"дальний"), но живёт ВНУТРИ .seg-label как обычный
+   inline-flex ребёнок (flex:none), а не position:absolute - .seg-label уже
+   flex+gap+align-items:center, поэтому бейдж сам встраивается в ряд с
+   .seg-id/.seg-txt и центрируется по высоте плитки без изменения фиксированной
+   высоты .seg (32px, структурный размер всей доски) - в отличие от изолированного
+   превью, где высоту тайла специально растили под каждый размер значка для
+   демонстрации. Только для rejs (kind==="trip") с номером - см. makeSeg. */
+.seg-order-badge{
+  flex:none;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:800;
+  letter-spacing:.02em;color:#1a1204;background:var(--amber);border-radius:6px;
+  padding:2px 9px;white-space:nowrap;
+}
 /* «Под данные» (Влад, 30.08: «когда машина планируется под пропуск... нужна
    галочка... визуально отражаться... с маленькой мигающей красной лампочкой»,
    вариант B из превью, утверждён) - мигающая точка в ПРОТИВОПОЛОЖНОМ углу от
@@ -3348,6 +3364,12 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
 }#page-logistics-plan .hnd{position:absolute;top:0;bottom:0;width:6px;cursor:ew-resize;z-index:2;}#page-logistics-plan .hnd.l{left:0;}#page-logistics-plan .hnd.r{right:0;}/* Зумы - стандарт Влада 29.08: «неделя» = только МЕН/ЛОГ (бейдж, #page-logistics-plan без маршрута), #page-logistics-plan «месяц» = только ЛОГист, #page-logistics-plan всё - первыми тремя буквами. Служебные плашки (без
    бейджа) на обоих зумах остаются чистым цветом. */
 #page-logistics-plan.z-week .seg .seg-txt{display:none;}#page-logistics-plan.z-week .seg-label{margin-left:2px;}#page-logistics-plan.z-month .seg{height:16px;top:18px;border-radius:3px;font-size:0;}#page-logistics-plan.z-month .seg .seg-txt{display:none;}#page-logistics-plan.z-month .seg-label{margin-left:1px;}
+/* Номер заявки - только на обычном зуме («всё»/3 дня): на неделе стандарт уже
+   «только бейдж МЕН/ЛОГ», на месяце плитка ужимается до 16px и не переживёт
+   бейдж 13px - прячем оба, как и route-текст выше, вместо того чтобы городить
+   отдельный уменьшенный вариант значка ради двух зумов, где номер и так не
+   читаем полезно. */
+#page-logistics-plan.z-week .seg-order-badge,#page-logistics-plan.z-month .seg-order-badge{display:none;}
 /* У статусных отрезков (ремонт/ТО/без заказа/без водителя) нет бейджа МЕН/ЛОГ -
    единственная опознавательная надпись у них - именно этот текст. Скрытие текста
    на зумах неделя/месяц было рассчитано на РЕЙСЫ (бейдж остаётся опознавательным
@@ -32142,10 +32164,12 @@ function makeSeg(s){
      маршрут - один sticky-ряд, едут по скроллу вместе. Вакансию водителя машины
      отмечает красная точка на бейдже (норму не отмечаем - только отсутствие). */
   var head = "";
+  var orderBadgeHtml = "";
   if (s.kind === "trip"){
     var v = STATE.vehicles[s.v];
     head = '<span class="seg-id"><b>' + three(s.mg) + '</b><i>' + three(s.lg) + '</i>' +
       '<span class="seg-drv ' + (v && v.vacant ? "off" : "on") + '"></span></span>';
+    if (s.orderDayNo != null) orderBadgeHtml = '<span class="seg-order-badge">№' + s.orderDayNo + '</span>';
   }
   /* НАЙДЕННЫЙ БАГ, второй заход (18.09, Влад живьём: "на 800-ой полоске как-то
      артефакт в протяжке" - обрывок "Р" вместо "Ремонт трала · до 19.09"). Живой
@@ -32188,7 +32212,7 @@ function makeSeg(s){
       ? '<path d="M5 3v14a1 1 0 1 0 2 0v-4.2c1.3-.7 2.7-.9 4-.4 1.8.7 3.6.2 5-1V4c-1.4 1.2-3.2 1.7-5 1-1.3-.5-2.7-.3-4 .4V3a1 1 0 0 0-2 0Z"/>'
       : '<path d="M5 17V4"/><path d="M5 4c0-.6 2-1.6 4.5-1.6S14 4 14 4v6.4c0 .6-2 1.6-4.5 1.6S5 10.4 5 10.4"/>') +
     "</svg></span>";
-  el.innerHTML = '<span class="seg-label">' + head +
+  el.innerHTML = '<span class="seg-label">' + head + orderBadgeHtml +
     '<span class="seg-txt">' + segTxt + "</span>" +
     (s.needsData ? '<span class="seg-nd" title="Под данные - документы для пропуска ещё не собраны"></span>' : "") +
     /* один и тот же "золочёный" значок для обоих режимов (Влад, 30.08: "добавь
@@ -33277,6 +33301,13 @@ function applyServerSegs_(rows){
       seg.lg = personByName_(r.logist_name, (v && v.long) ? LOG_LONG : LOG_TRAL);
       seg.from = r.route_from || ""; seg.to = r.route_to || ""; seg.customer = r.customer || "";
       seg.tripMode = r.trip_mode || "";
+      /* Номер заявки из "Задания" (20.09, Влад: превью - вариант 2, крупный размер,
+         утверждён, "всё должно быть у нас в планировке так"). Read-only здесь - заявку
+         создаёт/нумерует "Задание", Планировка только показывает; сознательно НЕ несём
+         это поле через segToWire_ (нечего слать обратно на сервер). null для рейсов,
+         заведённых НЕ из "Задания" (старый способ создания рейса прямо в Планировке
+         всё ещё есть) - тогда бейджа просто нет. */
+      seg.orderDayNo = r.order_day_no != null ? r.order_day_no : null;
     }
     segs.push(seg);
     seenIds[r.id] = true;

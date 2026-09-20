@@ -2412,12 +2412,22 @@ function mgrRowMenu(o, x, y) {
      менеджеры быстрее заметили и освоили - НЕ про саму заявку (см. историю правки у
      noCell_/NEW_FEATURE_BADGE_ выше, с первого раза перепутал одно с другим). */
   var transferItem = canTransfer_(o) ? [{ label: 'Перенести', badge: isFeatureNew_('transfer') ? 'новое' : null, fn: function () { openTransferPop_(o, x, y); } }] : [];
+  /* 21.09, найдено при разборе жалобы «менеджеры копируют без телефона водителя»:
+     список показывает ВСЕ заявки всех менеджеров (15.09, «менеджеры видят все заказы»),
+     но право копировать «внутренности» (телефон водителя - PRIVATE_EXECUTOR_FIELDS_ на
+     сервере) остаётся owner/team-lead-only (17.09). Раньше пункт меню предлагался на
+     ЛЮБОЙ строке без разбора - клик по чужой заявке молча копировал текст с уже
+     вычищенным сервером телефоном, никакого предупреждения не было. Теперь пункт
+     скрыт там, где o.can_view_details === false (сервер уже посчитал видимость по
+     тем же правилам, что и сам показ подробностей заявки) - копировать НЕПОЛНЫЕ
+     данные на пропуск нельзя вообще, а не молча получать их такими. */
+  var canCopyPass = o.can_view_details !== false;
   return [
     { label: 'Повторить', fn: function () { openRepeat(o); } }
   ].concat(transferItem).concat([
-    { label: 'Отбой', fn: function () { setStatus(o, 'ot'); } },
-    { label: 'Копировать данные на пропуск', fn: function () { copyText(passText(o), 'Данные на пропуск скопированы'); } }
-  ]).concat(mgrChangerItem_(o, 'op2-mgr-body')).concat(isAdmin() ? [{ label: 'Удалить заявку', fn: function () { deleteOrder(o); } }] : []);
+    { label: 'Отбой', fn: function () { setStatus(o, 'ot'); } }
+  ]).concat(canCopyPass ? [{ label: 'Копировать данные на пропуск', fn: function () { copyText(passText(o), 'Данные на пропуск скопированы'); } }] : [])
+    .concat(mgrChangerItem_(o, 'op2-mgr-body')).concat(isAdmin() ? [{ label: 'Удалить заявку', fn: function () { deleteOrder(o); } }] : []);
 }
 function logRowMenu(o) {
   var items = [];
@@ -2868,7 +2878,14 @@ function passText(o) {
   var L = [];
   L.push('Заявка №' + oNo(o) + ', ' + dm(o.service_date) + ', подача ' + (oTime(o) || 'уточнить'));
   L.push('Тягач: ' + (v.vehicle_gos || 'уточнить') + (v.trailer_gos ? ', п/п ' + v.trailer_gos : ''));
-  L.push('Водитель: ' + (v.driver_name || 'уточнить') + (v.driver_phone ? ', ' + fmtPhone(v.driver_phone) : ''));
+  /* 21.09, Влад: «менеджеры копируют без телефона водителя, потом ищут в старых
+     сообщениях» - раньше при пустом v.driver_phone телефон просто МОЛЧА пропадал из
+     текста (никакого следа, что он вообще ожидался) - человек на другом конце читал
+     готовый на вид текст и не подозревал, что чего-то не хватает. Теперь пустой
+     телефон - явная пометка "уточняется", как и у остальных полей этой функции
+     ("уточнить" у тягача/даты) - несовпадение видно сразу в момент копирования, а не
+     когда кто-то потом спросит номер. */
+  L.push('Водитель: ' + (v.driver_name || 'уточнить') + ', ' + (v.driver_phone ? fmtPhone(v.driver_phone) : 'телефон уточняется'));
   return L.join('\n');
 }
 function copyText(txt, okMsg) {

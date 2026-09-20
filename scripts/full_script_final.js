@@ -4163,12 +4163,13 @@ function buildManagerView_(orders, managerName, ss, period) {
   // возможности смотреть личные заказы какие прибавились - только цифры по прибавке»).
   // Отдаём общий срез по ВСЕМ менеджерам - ту же картину, что видит директор на странице
   // «Менеджеры - заказы 1С». Состав колонок полный, включая прибыль найма (решение Влада
-  // 10.09 на превью). Единственное, что вырезаем - today_new_list: это списки конкретных
-  // заказов коллег, менеджеру они не нужны, а цифра прибавки (today_new_orders/amount)
+  // 10.09 на превью). Единственное, что вырезаем - yesterday_list (переименовано 16.09 из
+  // today_new_list, см. plans/2026-09-16-yesterday-trips-block.md): это списки конкретных
+  // заказов коллег, менеджеру они не нужны, а цифра прибавки (yesterday_orders/amount)
   // остаётся. Меньше данных в ответе - меньше и риска, и веса.
   result.orders.dept_all = (orders.by_manager || []).map(function(m) {
     var copy = {};
-    Object.keys(m).forEach(function(k) { if (k !== 'today_new_list') copy[k] = m[k]; });
+    Object.keys(m).forEach(function(k) { if (k !== 'yesterday_list') copy[k] = m[k]; });
     return copy;
   });
   result.orders.managerPlans = orders.managerPlans || {};
@@ -5268,9 +5269,12 @@ function doGet(e) {
     // под любым менеджером" - то же самое &manager=, что уже работает для
     // my-page/receipts, см. mlcManager/gatManager выше).
     if (action === 'order_plan') {
-      var opPerson = (access.role === 'manager' || access.role === 'logist')
-        ? access.name
-        : (e.parameter.manager || access.name);
+      // ФИКС аудита безопасности 13.09: раньше "не manager/logist -> admin" по умолчанию -
+      // явная проверка на admin, любая другая роль (опечатка в листе "Доступ", будущая
+      // роль вроде mechanic) теперь видит ТОЛЬКО свои заказы, не чужие по &manager=.
+      var opPerson = access.role === 'admin'
+        ? (e.parameter.manager || access.name)
+        : access.name;
       // scope=hot/rest - двухфазная загрузка (Влад, 2026-08-18): вчера/сегодня/
       // завтра отдаём отдельным быстрым запросом, остальной месяц - вторым, в
       // фоне на фронтенде. Без scope (или scope=all) - как раньше, весь месяц
@@ -5311,9 +5315,10 @@ function doGet(e) {
           .createTextOutput(JSON.stringify({ error: 'Создание заявок доступно менеджерам, логисты назначают транспорт на уже созданные заявки' }))
           .setMimeType(ContentService.MimeType.JSON);
       }
-      var opcPerson = access.role === 'manager'
-        ? access.name
-        : (e.parameter.manager || access.name);
+      // ФИКС аудита безопасности 13.09: явная проверка на admin (см. order_plan выше).
+      var opcPerson = access.role === 'admin'
+        ? (e.parameter.manager || access.name)
+        : access.name;
       return ContentService
         .createTextOutput(JSON.stringify(createOrderPlanEntry_(opcPerson, e.parameter)))
         .setMimeType(ContentService.MimeType.JSON);
@@ -5329,9 +5334,10 @@ function doGet(e) {
           .createTextOutput(JSON.stringify({ error: 'Редактирование заявок доступно менеджерам' }))
           .setMimeType(ContentService.MimeType.JSON);
       }
-      var opuPerson = access.role === 'manager'
-        ? access.name
-        : (e.parameter.manager || access.name);
+      // ФИКС аудита безопасности 13.09: явная проверка на admin (см. order_plan выше).
+      var opuPerson = access.role === 'admin'
+        ? (e.parameter.manager || access.name)
+        : access.name;
       return ContentService
         .createTextOutput(JSON.stringify(updateOrderPlanEntry_(opuPerson, e.parameter)))
         .setMimeType(ContentService.MimeType.JSON);
@@ -5345,9 +5351,10 @@ function doGet(e) {
           .createTextOutput(JSON.stringify({ error: 'Смена статуса доступна менеджерам' }))
           .setMimeType(ContentService.MimeType.JSON);
       }
-      var opsPerson = access.role === 'manager'
-        ? access.name
-        : (e.parameter.manager || access.name);
+      // ФИКС аудита безопасности 13.09: явная проверка на admin (см. order_plan выше).
+      var opsPerson = access.role === 'admin'
+        ? (e.parameter.manager || access.name)
+        : access.name;
       return ContentService
         .createTextOutput(JSON.stringify(updateOrderPlanStatus_(opsPerson, e.parameter)))
         .setMimeType(ContentService.MimeType.JSON);
@@ -6775,6 +6782,70 @@ function syncVehiclePlansToServer_() {
     payload: JSON.stringify({ vehicles: vehicles }),
     muteHttpExceptions: true,
   });
+}
+
+// Мост исторических статусов машин (Фаза 1 плана 2026-09-15 "Динамика: лента жизни машины").
+// Снимок cron'а на сервере (vehicle_status_daily) ведётся только с 30.08.2026 - 16 дней из
+// ста, а в листе "История_финансов" статусы лежат с ~23.06. Влад решил 15.09 перелить эту
+// историю на сервер, чтобы лента была ОДНОГО сорта, а не "часть с сервера, часть из Apps
+// Script". Тот же приём, что syncVehicleTypesToServer_/syncVehiclePlansToServer_ выше:
+// узкая карта (дата, госномер, статус), не весь лист.
+//
+// Разовая по смыслу операция, но функция идемпотентна (сервер делает
+// INSERT ... ON DUPLICATE KEY UPDATE) - перезапуск ничего не портит.
+//
+// Границы, которые держит СЕРВЕР (здесь фильтр продублирован только чтобы не гонять лишние
+// килобайты): даты с 30.08 не принимаются вообще - там источник истины снимок Планировки
+// (plan_segs), он точнее Штатки; строки со src='plan_segs' не перезаписываются никогда;
+// пустой/неизвестный статус НЕ пишется (а не "считаем работой").
+var SHTATKA_HISTORY_MAX_DATE = '2026-08-29'; // не трогать дни снимка cron'а (с 30.08)
+
+function syncVehicleStatusHistoryToServer_() {
+  var props = PropertiesService.getScriptProperties();
+  var apiKey = props.getProperty('YARD_WRITE_KEY') || props.getProperty('YARD_API_KEY');
+  if (!apiKey) throw new Error('YARD_WRITE_KEY не задан в Script Properties');
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var history = getVehicleHistory(ss);
+  var rows = [];
+  for (var i = 0; i < history.length; i++) {
+    var h = history[i];
+    if (!h.date || h.date > SHTATKA_HISTORY_MAX_DATE) continue;
+    if (!h.gos || !String(h.status || '').trim()) continue;
+    rows.push({ date: h.date, gos: h.gos, status: h.status });
+  }
+  if (!rows.length) return { sent: 0, accepted: 0, skipped: 0 };
+
+  var BATCH = 1000;
+  var totals = { sent: 0, accepted: 0, skipped: 0, errors: [] };
+  for (var from = 0; from < rows.length; from += BATCH) {
+    var chunk = rows.slice(from, from + BATCH);
+    var resp = UrlFetchApp.fetch('https://api.yardhub.ru/api/vehicle_status_history/import', {
+      method: 'post', contentType: 'application/json',
+      headers: { 'X-Api-Key': apiKey },
+      payload: JSON.stringify({ rows: chunk, src: 'shtatka' }),
+      muteHttpExceptions: true,
+    });
+    totals.sent += chunk.length;
+    if (resp.getResponseCode() !== 200) {
+      totals.errors.push('HTTP ' + resp.getResponseCode() + ': ' + resp.getContentText().slice(0, 200));
+      continue;
+    }
+    var data;
+    try { data = JSON.parse(resp.getContentText()); } catch (parseErr) {
+      totals.errors.push('не JSON: ' + resp.getContentText().slice(0, 200));
+      continue;
+    }
+    if (data.error) { totals.errors.push(String(data.error)); continue; }
+    totals.accepted += data.accepted || 0;
+    if (data.skipped) {
+      totals.skipped += (data.skipped.future || 0) + (data.skipped.badDate || 0) +
+        (data.skipped.badGos || 0) + (data.skipped.unknownStatus || 0);
+    }
+  }
+  Logger.log('syncVehicleStatusHistoryToServer_: отправлено ' + totals.sent +
+    ', принято ' + totals.accepted + ', отсеяно ' + totals.skipped +
+    (totals.errors.length ? ', ошибок ' + totals.errors.length + ': ' + totals.errors.join(' | ') : ''));
+  return totals;
 }
 
 // Деньги (revenue/fot/fuel/parts/fines/tolls/profit/margin/тралы-длинномеры/спецтралы) - с
@@ -11611,7 +11682,7 @@ function aggregateOrdersRows(rows) {
           internal_orders:0, internal_amount:0, internal_amount_thru_yesterday:0, internal_payment:0,
           own_amount:0, own_profit:0, hired_margin_total:0, hired_margin_qualified:0, hired_margin_unqualified:0,
           hired_extra_costs:0,
-          today_new_orders:0, today_new_amount:0, today_new_list:[] };
+          yesterday_orders:0, yesterday_amount:0, yesterday_list:[] };
       }
       const m = managerMap[mgrSales];
       m.orders++;
@@ -11626,11 +11697,16 @@ function aggregateOrdersRows(rows) {
         m.internal_orders++; m.internal_amount += amount; m.internal_payment += payment;
         if (isThruYesterday) m.internal_amount_thru_yesterday += amount;
       }
-      // Заказы, добавленные сегодня (Влад, 2026-07-17) - для стрелки динамики и drill-down.
-      if (dateVal(row, 'date_c') === todayStr) {
-        m.today_new_orders++;
-        m.today_new_amount += amount;
-        m.today_new_list.push({ id: str(row,'id'), customer: str(row,'customer'), amount: amount });
+      // Рейсы за вчера - по дате ПЕРЕВОЗКИ (dateStr = date_s = "НачалоРаб"), не по дате
+      // создания документа в 1С (2026-09-16, Влад после живого разбора путаницы с
+      // Ахтамовой/Цегельниковым: "не важно, когда внесли - есть дата НачалоРаб, на неё
+      // ориентироваться"). Было "Заказы, добавленные сегодня" (2026-07-17) - фильтр по
+      // dateVal(row,'date_c')===todayStr (дата СОЗДАНИЯ строки), другая метрика - см.
+      // plans/2026-09-16-yesterday-trips-block.md.
+      if (dateStr === yesterdayStr) {
+        m.yesterday_orders++;
+        m.yesterday_amount += amount;
+        m.yesterday_list.push({ id: str(row,'id'), customer: str(row,'customer'), cargo: str(row,'cargo'), amount: amount });
       }
       if (isHired) {
         m.hired_orders++; m.hired_cost += hiredCost; m.hired_margin_total += profit;

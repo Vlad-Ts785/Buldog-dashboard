@@ -398,7 +398,15 @@ function byId(id) { for (var i = 0; i < ORD.length; i++) { if (String(ORD[i].id)
 function execById(o, eid) { var l = o.executors || []; for (var i = 0; i < l.length; i++) { if (String(l[i].id) === String(eid)) return l[i]; } return null; }
 function isMgr() { return VIEW === 'mgr'; }
 function isAnalyticsView_() { return VIEW === 'analytics'; }
-function canDone() { return ME && ME.role !== 'manager'; }
+/* 21.09, Влад: "Миша от балды ставит эти статусы сейчас готов. Рано его вводить...
+   убери пока этот статус" - живой аудит истории показал 6 заявок, переведённых в
+   done логистом Каном за один день без явного смысла (откачены обратно в confirmed
+   отдельным скриптом). Временно отключено - canDone() единственная точка входа для
+   кнопки «Выполнено» (#op2-d-done, см. ниже), больше нигде "done" не выставляется.
+   Сервер (api/lib/plan-orders.js) блокирует то же самое независимо - не только
+   спрятанная кнопка. Включить обратно - вернуть исходное тело функции:
+   `return ME && ME.role !== 'manager';` */
+function canDone() { return false; }
 function isAdmin() { return !!(ME && ME.role === 'admin'); } /* удалять заявку может только Влад (11.09) */
 /* 21.09 - смена менеджера: admin - везде; руководитель группы (MY_TEAM непустой) - только
    на заявках, которые ему и так уже видны (can_view_details - тот же флаг, что 17.09

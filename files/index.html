@@ -12900,6 +12900,18 @@ function applyRoleUI() {
       item.style.display = personalOnlyPages.indexOf(item.getAttribute('data-page')) >= 0 ? 'none' : '';
     });
     document.querySelectorAll('.sidebar-nav-section').forEach(function(s){ s.style.display = ''; });
+    // 21.09, НАЙДЕННЫЙ БАГ (Влад: "перешёл в своё меню - нет вкладки ДЗ, куда делась?"):
+    // relabel "Дебиторка"->"Суды" выше (см. isCommercialHeadViewer) меняет DOM НАПРЯМУЮ и
+    // необратимо. Раньше он был сломан (lastChild - не текстовый узел, починено 20.09) -
+    // эта ветка никогда не видела последствий. Как только relabel заработал по-настоящему,
+    // обнажился парный баг: ничто не возвращало подпись назад при выходе из предпросмотра
+    // руководителя коммерческой группы - "Суды" оставалась висеть и на обычной админ-
+    // панели, хотя для admin это полноценная "Дебиторка" (ДЗ + План поступлений + Суды
+    // тремя плитками, см. showDebtHub_). Сбрасываем сюда, а не только в isCommercialHeadViewer
+    // выше - эта ветка (plain admin) единственная, где пункт РЕАЛЬНО виден с чужой подписью;
+    // в manager/logist-предпросмотре НЕ руководителя группы пункт и так display:none.
+    var debtLabel_ = document.querySelector('.sidebar-nav-item[data-page="debt"] .sidebar-nav-label');
+    if (debtLabel_) debtLabel_.textContent = ' Дебиторка';
   }
   applyMenuConfig_();   // кастом меню поверх ролевого фильтра (05.09), см. блок "Кастомизация меню"
   updateViewAsButton_();

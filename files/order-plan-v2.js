@@ -299,6 +299,12 @@ var TABS_WK = mondayOf_(DATE); /* понедельник недели, кото�
                                    недель не меняет выбранный день, пока не кликнули по чипу */
 var ORD = [];
 var ROSTER = [];
+/* 21.09, Влад: «Лиане и Айнур нужны похожие права [что у admin] - только они могут
+   редактировать менеджера и только из своих команд». Сервер отдаёт эту команду ТОЛЬКО
+   самому руководителю (см. myTeamManagers_ в api/lib/plan-orders.js - "клиенту эти
+   группы не нужны и не переданы" по-прежнему верно для ВСЕХ, кроме самого руководителя
+   своей же команды) - null для всех остальных ролей/менеджеров. */
+var MY_TEAM = null;
 var COUNTS = {};
 var FREE = null;
 var MAX_UPD = '';
@@ -394,6 +400,16 @@ function isMgr() { return VIEW === 'mgr'; }
 function isAnalyticsView_() { return VIEW === 'analytics'; }
 function canDone() { return ME && ME.role !== 'manager'; }
 function isAdmin() { return !!(ME && ME.role === 'admin'); } /* удалять заявку может только Влад (11.09) */
+/* 21.09 - смена менеджера: admin - везде; руководитель группы (MY_TEAM непустой) - только
+   на заявках, которые ему и так уже видны (can_view_details - тот же флаг, что 17.09
+   решает "провалиться в шторку можно/нельзя", здесь - то же самое правило, другое
+   действие). o может отсутствовать (пустая строка меню без контекста) - тогда просто
+   факт «есть команда», сервер всё равно перепроверит по конкретной заявке. */
+function canChangeManager_(o) {
+  if (isAdmin()) return true;
+  if (!MY_TEAM || !MY_TEAM.length) return false;
+  return !o || o.can_view_details !== false;
+}
 
 /* ───────────────────────── тост (единственный канал) ───────────────────────── */
 var toastT = null;
@@ -1356,6 +1372,11 @@ function loadMeta() {
   return apiGet('/orders/meta', {}).then(function (r) {
     if (r && r.ok && r.data && !r.data.error) {
       META = r.data;
+      /* MY_TEAM ДО applyMe() - см. тот же приём и то же обоснование в loadOrders() ниже;
+         loadMeta() на холодном старте срабатывает РАНЬШЕ первого loadOrders(), поэтому
+         подсказка руководителю группы должна знать о команде уже здесь, а не только
+         после первого /orders. */
+      MY_TEAM = r.data.my_team || null;
       if (r.data.me) applyMe(r.data.me);
     } else { ok_(r, null, 'справочники не загрузились'); } /* 401 -> экран входа, прочее - тост */
   }).catch(function () {});
@@ -1369,14 +1390,19 @@ function applyMe(me) {
     /* «Только мои» осмысленна только для самого менеджера - у admin (даже когда он
        переключился на экран «Менеджер») нет своих заявок для сравнения. */
     var allBtn = $('#op2-mgr-all'); if (allBtn) allBtn.classList.toggle('op2-hidden', me.role !== 'manager');
-    if (me.role === 'admin') {
-      syncSwitch();
-      /* Влад 13.09: «менеджеров меняю только я» - подсказка добавляется в рантайме именно
-         потому, что легенда - общая статичная разметка на все роли; строку показываем
-         только когда роль уже известна как admin, чтобы не путать менеджера/логиста
-         функцией, которая им недоступна. */
+    if (me.role === 'admin') syncSwitch();
+    /* Влад 13.09: «менеджеров меняю только я» - подсказка добавляется в рантайме именно
+       потому, что легенда - общая статичная разметка на все роли; строку показываем
+       только когда роль уже известна (admin - сразу, руководитель группы - как только
+       узнали MY_TEAM), чтобы не путать рядового менеджера/логиста функцией, которая им
+       недоступна. 21.09 - руководители групп (MY_TEAM) получили ту же функцию, текст
+       подсказки теперь зависит от роли: у admin - «у вас», у руководителя - «в вашей
+       команде» (буквально его ограничение, не общий текст под копирку). */
+    var mgrHint = me.role === 'admin' ? 'сменить менеджера (только у вас)'
+      : (MY_TEAM && MY_TEAM.length) ? 'сменить менеджера (только в вашей команде)' : null;
+    if (mgrHint) {
       $$('.op2-legend').forEach(function (p) {
-        if (!p.querySelector('.op2-mgrpick-hint')) p.insertAdjacentHTML('beforeend', ' <span class="op2-mgrpick-hint op2-dim">Клик по фамилии в «Мен.» - сменить менеджера (только у вас).</span>');
+        if (!p.querySelector('.op2-mgrpick-hint')) p.insertAdjacentHTML('beforeend', ' <span class="op2-mgrpick-hint op2-dim">Клик по фамилии в «Мен.» - ' + esc(mgrHint) + '.</span>');
       });
     }
   }
@@ -1416,6 +1442,11 @@ function loadOrders(silent) {
       return;
     }
     var d = r.data;
+    /* MY_TEAM ДО applyMe() - подсказка в легенде ("только у вас"/"только в вашей команде")
+       решается внутри applyMe() по факту наличия команды, ей нужно уже актуальное значение
+       на самом первом вызове, а не то, что осталось с прошлой загрузки (на первом заходе -
+       null по умолчанию). */
+    MY_TEAM = d.my_team || null;
     if (d.me) applyMe(d.me);
     if (d.roster) ROSTER = d.roster;
     var changed = (d.max_updated || '') !== MAX_UPD || !firstLoadDone;
@@ -1930,7 +1961,7 @@ function renderMgr() {
     var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' : '');
     return '<tr class="' + cls + '" data-oid="' + esc(o.id) + '">' +
       noCell_(o) +
-      mgrCodeCell_(o, isAdmin()) + logCodeCell_(o) +
+      mgrCodeCell_(o, canChangeManager_(o)) + logCodeCell_(o) +
       timeCell(o) + techCell_(o) +
       custCell_(o, WIDE && F.q ? '<span class="op2-code" style="margin-right:6px">' + esc(dm(o.service_date)) + '</span>' : '') +
       routeCell(o) + cargoCell_(o) +
@@ -2092,7 +2123,7 @@ function renderLog() {
     var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' + (o.otboy_ack_by ? '' : ' op2-unack') : (needsAcceptBlink_(o) ? ' op2-new-unack' : '')) + (isFresh(o) ? ' op2-new-halo' : '');
     return '<tr class="' + cls + '" data-oid="' + esc(o.id) + '">' +
       noCell_(o) +
-      mgrCodeCell_(o, isAdmin()) + logCodeCell_(o, true) +
+      mgrCodeCell_(o, canChangeManager_(o)) + logCodeCell_(o, true) +
       timeCell(o) + techCell_(o) +
       custCell_(o, isFresh(o) ? '<span class="op2-st-chip op2-ok" style="margin-right:6px">новая</span>' : '') +
       routeCell(o) + cargoCell_(o) +
@@ -2178,7 +2209,15 @@ function closeLogPop() { var sp = $('#op2-lgpop'); if (sp) sp.classList.remove('
 
 /* ═════════════════════════ СМЕНА МЕНЕДЖЕРА (только admin) ═════════════════════════ */
 var mgTr = null;
-function managerOptions_() { return ROSTER.filter(function (r) { return r.role === 'manager'; }); }
+function managerOptions_() {
+  var all = ROSTER.filter(function (r) { return r.role === 'manager'; });
+  /* руководитель группы видит в пикере ТОЛЬКО свою команду (MY_TEAM с сервера) - назначить
+     кого-то извне сервер бы всё равно отклонил (можно назначать только менеджера своей
+     команды), но показывать в списке заведомо недоступный выбор - вводить в заблуждение. */
+  if (isAdmin() || !MY_TEAM) return all;
+  var allowed = {}; MY_TEAM.forEach(function (m) { allowed[m.email] = true; });
+  return all.filter(function (r) { return allowed[r.email]; });
+}
 function openMgrPop(cell, tr) {
   mgTr = tr;
   var o = byId(tr.dataset.oid);
@@ -2430,7 +2469,7 @@ function openRowMenu(x, y, items) {
   });
 }
 function mgrChangerItem_(o, table) {
-  if (!isAdmin()) return [];
+  if (!canChangeManager_(o)) return [];
   return [{ label: o.manager_name ? 'Сменить менеджера' : 'Назначить менеджера', fn: function () {
     var tr = $('#' + table + ' tr[data-oid="' + o.id + '"]'); if (!tr) return;
     var cell = tr.querySelector('.op2-mgrpick'); if (cell) openMgrPop(cell, tr);

@@ -299,9 +299,14 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .sidebar-nav-item .menu-grip svg{width:8px;height:12px;display:block;}
 .sidebar-nav-item .menu-eye{display:none;margin-left:4px;width:18px;height:18px;flex:none;border:1px solid var(--border);border-radius:5px;background:var(--bg2);color:var(--muted);align-items:center;justify-content:center;cursor:pointer;}
 .sidebar-nav-item .menu-eye svg{width:11px;height:11px;display:block;}
-/* В режиме подписи не переносим - длинные ("Глобальная статистика") режутся многоточием,
-   иначе с grip+глазом строка становилась двухэтажной. */
-.sidebar.menu-customizing .sidebar-nav-item{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;gap:8px;padding-right:6px;}
+/* 20.09, Влад (скриншот - длинная подпись "Операционный директор" не даёт скрыть пункт,
+   глаза не видно): text-overflow:ellipsis НА САМОМ .sidebar-nav-item не умеет "ужать
+   только текст" - контейнер просто обрезал grip/eye overflow:hidden вместе с текстом,
+   как только суммарная ширина (иконка+текст+grip+eye) переставала помещаться. Подпись
+   теперь свой span .sidebar-nav-label (см. menuDecorateItems_) - ужимается и многоточится
+   он один, grip/eye фиксированного размера и остаются видны/кликабельны всегда. */
+.sidebar.menu-customizing .sidebar-nav-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.sidebar.menu-customizing .sidebar-nav-item{gap:8px;padding-right:6px;}
 .sidebar.menu-customizing .sidebar-nav-item{cursor:grab;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:none;outline:1px dashed rgba(255,255,255,.16);outline-offset:-1px;}
 .sidebar.menu-customizing .sidebar-nav-item:hover{transform:none;background:var(--bg3);}
 .sidebar.menu-customizing .sidebar-nav-item .menu-grip{display:block;}
@@ -12726,7 +12731,13 @@ function applyRoleUI() {
     if (isCommercialHeadViewer) {
       allowedPages_.push('debt');
       var debtNavItem_ = document.querySelector('.sidebar-nav-item[data-page="debt"]');
-      if (debtNavItem_ && debtNavItem_.lastChild && debtNavItem_.lastChild.nodeType === 3) debtNavItem_.lastChild.nodeValue = ' Суды';
+      // 20.09, НАЙДЕННЫЙ БАГ: со дня появления grip/eye (menuDecorateItems_, до этого кода)
+      // lastChild пункта - EL.menu-eye, не текст, поэтому проверка nodeType===3 ниже молча
+      // никогда не срабатывала - Ахтамова/Гусейнова весь год видели "Дебиторка", не "Суды".
+      // Теперь подпись - свой span .sidebar-nav-label (см. menuDecorateItems_), целимся в него.
+      var debtLabel_ = debtNavItem_ && debtNavItem_.querySelector('.sidebar-nav-label');
+      if (debtLabel_) debtLabel_.textContent = ' Суды';
+      else if (debtNavItem_ && debtNavItem_.lastChild && debtNavItem_.lastChild.nodeType === 3) debtNavItem_.lastChild.nodeValue = ' Суды';
     }
     // «Зарплата машинистов» (15.09) - отдельный пункт меню, тот же принцип, что у Рыщанова/
     // руководителей коммерческих групп выше.
@@ -25753,6 +25764,18 @@ function menuToggleHidden_(item) {
 function menuDecorateItems_() {
   menuItems_().forEach(function(it) {
     if (it.querySelector('.menu-grip')) return;
+    // 20.09 - подпись пункта была голым текстовым узлом; заворачиваем в свой span
+    // (.sidebar-nav-label, CSS выше) ДО добавления grip/eye - иначе длинная подпись
+    // выталкивает их за край строки, и overflow:hidden контейнера обрезает иконки
+    // вместе с текстом (живой баг, Влад: "Операционный директор" - глаза не видно).
+    // Попутно чинит "Суды" (см. applyRoleUI) - тот код тоже полагался на "последний
+    // ребёнок - текстовый узел", что уже год как неверно ИМЕННО из-за grip/eye ниже.
+    var labelNode = it.lastChild;
+    if (labelNode && labelNode.nodeType === 3) {
+      var label = document.createElement('span'); label.className = 'sidebar-nav-label';
+      label.textContent = labelNode.nodeValue;
+      it.replaceChild(label, labelNode);
+    }
     var grip = document.createElement('span'); grip.className = 'menu-grip';
     grip.innerHTML = '<svg viewBox="0 0 10 14" fill="currentColor"><circle cx="3" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/><circle cx="3" cy="7" r="1.3"/><circle cx="7" cy="7" r="1.3"/><circle cx="3" cy="12" r="1.3"/><circle cx="7" cy="12" r="1.3"/></svg>';
     var eye = document.createElement('span'); eye.className = 'menu-eye'; eye.title = 'Скрыть / показать пункт';

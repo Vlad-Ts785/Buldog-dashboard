@@ -299,6 +299,12 @@ var TABS_WK = mondayOf_(DATE); /* понедельник недели, кото�
                                    недель не меняет выбранный день, пока не кликнули по чипу */
 var ORD = [];
 var ROSTER = [];
+/* 21.09, Влад: «Лиане и Айнур нужны похожие права [что у admin] - только они могут
+   редактировать менеджера и только из своих команд». Сервер отдаёт эту команду ТОЛЬКО
+   самому руководителю (см. myTeamManagers_ в api/lib/plan-orders.js - "клиенту эти
+   группы не нужны и не переданы" по-прежнему верно для ВСЕХ, кроме самого руководителя
+   своей же команды) - null для всех остальных ролей/менеджеров. */
+var MY_TEAM = null;
 var COUNTS = {};
 var FREE = null;
 var MAX_UPD = '';
@@ -402,6 +408,16 @@ function isAnalyticsView_() { return VIEW === 'analytics'; }
    `return ME && ME.role !== 'manager';` */
 function canDone() { return false; }
 function isAdmin() { return !!(ME && ME.role === 'admin'); } /* удалять заявку может только Влад (11.09) */
+/* 21.09 - смена менеджера: admin - везде; руководитель группы (MY_TEAM непустой) - только
+   на заявках, которые ему и так уже видны (can_view_details - тот же флаг, что 17.09
+   решает "провалиться в шторку можно/нельзя", здесь - то же самое правило, другое
+   действие). o может отсутствовать (пустая строка меню без контекста) - тогда просто
+   факт «есть команда», сервер всё равно перепроверит по конкретной заявке. */
+function canChangeManager_(o) {
+  if (isAdmin()) return true;
+  if (!MY_TEAM || !MY_TEAM.length) return false;
+  return !o || o.can_view_details !== false;
+}
 
 /* ───────────────────────── тост (единственный канал) ───────────────────────── */
 var toastT = null;
@@ -1364,6 +1380,11 @@ function loadMeta() {
   return apiGet('/orders/meta', {}).then(function (r) {
     if (r && r.ok && r.data && !r.data.error) {
       META = r.data;
+      /* MY_TEAM ДО applyMe() - см. тот же приём и то же обоснование в loadOrders() ниже;
+         loadMeta() на холодном старте срабатывает РАНЬШЕ первого loadOrders(), поэтому
+         подсказка руководителю группы должна знать о команде уже здесь, а не только
+         после первого /orders. */
+      MY_TEAM = r.data.my_team || null;
       if (r.data.me) applyMe(r.data.me);
     } else { ok_(r, null, 'справочники не загрузились'); } /* 401 -> экран входа, прочее - тост */
   }).catch(function () {});
@@ -1377,14 +1398,19 @@ function applyMe(me) {
     /* «Только мои» осмысленна только для самого менеджера - у admin (даже когда он
        переключился на экран «Менеджер») нет своих заявок для сравнения. */
     var allBtn = $('#op2-mgr-all'); if (allBtn) allBtn.classList.toggle('op2-hidden', me.role !== 'manager');
-    if (me.role === 'admin') {
-      syncSwitch();
-      /* Влад 13.09: «менеджеров меняю только я» - подсказка добавляется в рантайме именно
-         потому, что легенда - общая статичная разметка на все роли; строку показываем
-         только когда роль уже известна как admin, чтобы не путать менеджера/логиста
-         функцией, которая им недоступна. */
+    if (me.role === 'admin') syncSwitch();
+    /* Влад 13.09: «менеджеров меняю только я» - подсказка добавляется в рантайме именно
+       потому, что легенда - общая статичная разметка на все роли; строку показываем
+       только когда роль уже известна (admin - сразу, руководитель группы - как только
+       узнали MY_TEAM), чтобы не путать рядового менеджера/логиста функцией, которая им
+       недоступна. 21.09 - руководители групп (MY_TEAM) получили ту же функцию, текст
+       подсказки теперь зависит от роли: у admin - «у вас», у руководителя - «в вашей
+       команде» (буквально его ограничение, не общий текст под копирку). */
+    var mgrHint = me.role === 'admin' ? 'сменить менеджера (только у вас)'
+      : (MY_TEAM && MY_TEAM.length) ? 'сменить менеджера (только в вашей команде)' : null;
+    if (mgrHint) {
       $$('.op2-legend').forEach(function (p) {
-        if (!p.querySelector('.op2-mgrpick-hint')) p.insertAdjacentHTML('beforeend', ' <span class="op2-mgrpick-hint op2-dim">Клик по фамилии в «Мен.» - сменить менеджера (только у вас).</span>');
+        if (!p.querySelector('.op2-mgrpick-hint')) p.insertAdjacentHTML('beforeend', ' <span class="op2-mgrpick-hint op2-dim">Клик по фамилии в «Мен.» - ' + esc(mgrHint) + '.</span>');
       });
     }
   }
@@ -1424,6 +1450,11 @@ function loadOrders(silent) {
       return;
     }
     var d = r.data;
+    /* MY_TEAM ДО applyMe() - подсказка в легенде ("только у вас"/"только в вашей команде")
+       решается внутри applyMe() по факту наличия команды, ей нужно уже актуальное значение
+       на самом первом вызове, а не то, что осталось с прошлой загрузки (на первом заходе -
+       null по умолчанию). */
+    MY_TEAM = d.my_team || null;
     if (d.me) applyMe(d.me);
     if (d.roster) ROSTER = d.roster;
     var changed = (d.max_updated || '') !== MAX_UPD || !firstLoadDone;
@@ -1938,7 +1969,7 @@ function renderMgr() {
     var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' : '');
     return '<tr class="' + cls + '" data-oid="' + esc(o.id) + '">' +
       noCell_(o) +
-      mgrCodeCell_(o, isAdmin()) + logCodeCell_(o) +
+      mgrCodeCell_(o, canChangeManager_(o)) + logCodeCell_(o) +
       timeCell(o) + techCell_(o) +
       custCell_(o, WIDE && F.q ? '<span class="op2-code" style="margin-right:6px">' + esc(dm(o.service_date)) + '</span>' : '') +
       routeCell(o) + cargoCell_(o) +
@@ -2100,7 +2131,7 @@ function renderLog() {
     var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' + (o.otboy_ack_by ? '' : ' op2-unack') : (needsAcceptBlink_(o) ? ' op2-new-unack' : '')) + (isFresh(o) ? ' op2-new-halo' : '');
     return '<tr class="' + cls + '" data-oid="' + esc(o.id) + '">' +
       noCell_(o) +
-      mgrCodeCell_(o, isAdmin()) + logCodeCell_(o, true) +
+      mgrCodeCell_(o, canChangeManager_(o)) + logCodeCell_(o, true) +
       timeCell(o) + techCell_(o) +
       custCell_(o, isFresh(o) ? '<span class="op2-st-chip op2-ok" style="margin-right:6px">новая</span>' : '') +
       routeCell(o) + cargoCell_(o) +
@@ -2186,7 +2217,15 @@ function closeLogPop() { var sp = $('#op2-lgpop'); if (sp) sp.classList.remove('
 
 /* ═════════════════════════ СМЕНА МЕНЕДЖЕРА (только admin) ═════════════════════════ */
 var mgTr = null;
-function managerOptions_() { return ROSTER.filter(function (r) { return r.role === 'manager'; }); }
+function managerOptions_() {
+  var all = ROSTER.filter(function (r) { return r.role === 'manager'; });
+  /* руководитель группы видит в пикере ТОЛЬКО свою команду (MY_TEAM с сервера) - назначить
+     кого-то извне сервер бы всё равно отклонил (можно назначать только менеджера своей
+     команды), но показывать в списке заведомо недоступный выбор - вводить в заблуждение. */
+  if (isAdmin() || !MY_TEAM) return all;
+  var allowed = {}; MY_TEAM.forEach(function (m) { allowed[m.email] = true; });
+  return all.filter(function (r) { return allowed[r.email]; });
+}
 function openMgrPop(cell, tr) {
   mgTr = tr;
   var o = byId(tr.dataset.oid);
@@ -2438,7 +2477,7 @@ function openRowMenu(x, y, items) {
   });
 }
 function mgrChangerItem_(o, table) {
-  if (!isAdmin()) return [];
+  if (!canChangeManager_(o)) return [];
   return [{ label: o.manager_name ? 'Сменить менеджера' : 'Назначить менеджера', fn: function () {
     var tr = $('#' + table + ' tr[data-oid="' + o.id + '"]'); if (!tr) return;
     var cell = tr.querySelector('.op2-mgrpick'); if (cell) openMgrPop(cell, tr);
@@ -3424,6 +3463,70 @@ function expandWhoRow(seg) {
   S.unfold(rest.length);
 }
 
+/* 21.09, Влад: «когда выбираешь длинномер, должен появляться рядом выбор Коники, если
+   выбирает - в план задание уходит в технике Длинномер с кониками» + следом «у Faymonville
+   8 осей и раздвижение в ширину» + «у трала длинные аппарели» - превью
+   https://claude.ai/artifact/MRsjazcRwwjsx4yTonNR5q одобрено («запускай в жизнь»).
+   МОДИФИКАТОРЫ - не отдельные типы техники в справочнике (plan_dictionary их не знает и
+   не должен - это не новый тип, а комплектация уже существующего), а ЧИСТО клиентская
+   надстройка: набор дописывается к строке типа через " с " + фраза(-ы) в творительном
+   падеже, само итоговое значение - обычная строка в equipment_type (сервер как принимал
+   любой текст до 60 символов, так и принимает, без изменений). segOf_/segOf() (и на
+   клиенте, и на сервере) берут только ПЕРВОЕ слово - "Длинномер с кониками" сегментируется
+   в "длинномер" точно так же, как голый "Длинномер", вся остальная логика (мин. цена,
+   Аналитика, фильтры) не замечает разницы. */
+var EQ_MODIFIERS_ = {
+  'Трал': [{ key: 'apron', label: 'Длинные аппарели', phrase: 'длинными аппарелями' }],
+  'Длинномер': [{ key: 'koniki', label: 'Коники', phrase: 'кониками' }],
+  'Faymonville (60+ т)': [
+    { key: 'axles', label: '8 осей', phrase: '8 осями' },
+    { key: 'widen', label: 'Раздвижение в ширину', phrase: 'раздвижением в ширину' }
+  ]
+};
+// "8 осей" + "раздвижение в ширину" - НЕ взаимоисключающие (разные свойства одной машины,
+// подтверждено Владом явно) - обе фразы через "и", не радио-выбор одного варианта.
+function eqCombine_(base, keys) {
+  var defs = EQ_MODIFIERS_[base] || [];
+  var phrases = defs.filter(function (d) { return keys.indexOf(d.key) >= 0; }).map(function (d) { return d.phrase; });
+  return phrases.length ? base + ' с ' + phrases.join(' и ') : base;
+}
+// Обратный разбор - нужен при ОТКРЫТИИ уже сохранённой заявки (o.equipment_type уже может
+// быть готовой строкой "Длинномер с кониками"): перебор всех комбинаций (максимум 4 на тип
+// у Faymonville, у остальных 2) - находим {base, mods}, чтобы чип типа подсветился
+// верно, а модификаторы встали в те же положения, что были сохранены. Не найдено ни одной
+// комбинации (старый формат/незнакомое значение) - возвращаем как есть без модификаторов,
+// как раньше.
+function eqParse_(val) {
+  var s = String(val || '');
+  var bases = Object.keys(EQ_MODIFIERS_);
+  for (var bi = 0; bi < bases.length; bi++) {
+    var base = bases[bi], defs = EQ_MODIFIERS_[base], n = defs.length;
+    for (var mask = 0; mask < (1 << n); mask++) {
+      var keys = [];
+      for (var i = 0; i < n; i++) { if (mask & (1 << i)) keys.push(defs[i].key); }
+      if (eqCombine_(base, keys) === s) return { base: base, mods: keys };
+    }
+  }
+  return { base: s, mods: [] };
+}
+function eqModsChipsHtml_(base, activeKeys) {
+  var defs = EQ_MODIFIERS_[base];
+  if (!defs) return '';
+  return defs.map(function (d) {
+    return '<button class="op2-chip op2-mod' + (activeKeys.indexOf(d.key) >= 0 ? ' op2-on' : '') + '" data-mod="' + esc(d.key) + '">' + esc(d.label) + '</button>';
+  }).join('');
+}
+// Перерисовывает строку модификаторов ПОД типом техники - вызывается и при смене типа
+// (сбрасывает выбор, т.к. набор модификаторов у другого типа другой), и при клике по
+// самому модификатору (base не меняется, activeKeys - новый набор).
+function renderEqMods_(base, activeKeys) {
+  var box = $('#op2-f-eq-mods'); if (!box) return;
+  var html = eqModsChipsHtml_(base, activeKeys);
+  box.innerHTML = html;
+  box.hidden = !html;
+  box.dataset.mods = activeKeys.join(',');
+}
+
 /* «Тип техники» - тот же приём, перенесён по превью 11.09 (Влад: «давай внедряй»).
    Отличие от «От кого»: тут ВСЕГДА видны оба основных типа (Трал, Длинномер) - это не
    "текущий выбор", а быстрый доступ к двум самым частым; выбор виден третьим - .op2-on
@@ -3452,7 +3555,16 @@ function eqRowHtml(curVal) {
   if (eqRest.length) html += '<button class="op2-chip" data-eq-more>Ещё <span class="op2-mono" style="color:var(--tint-amber)">' + eqRest.length + '</span></button>';
   return html;
 }
-function collapseEqRow(seg, curVal) { seg.dataset.cur = curVal || ''; seg.innerHTML = eqRowHtml(curVal); }
+function collapseEqRow(seg, curVal) {
+  seg.dataset.cur = curVal || '';
+  seg.innerHTML = eqRowHtml(curVal);
+  /* смена типа - модификаторы сбрасываются (набор у другого типа другой, "8 осей" на
+     трале бессмысленны) - тот же выбор, что уже показан и одобрен в превью. Вызывается и
+     при ПЕРВОМ построении формы (renderForm ниже сам явно кладёт сохранённые mods сразу
+     после), и при живом клике по чипу типа - в этом случае второй вызов не будет, только
+     первый (со сбросом), это и нужно. */
+  renderEqMods_(curVal || '', []);
+}
 function expandEqRow(seg) {
   var more = seg.querySelector('[data-eq-more]'); if (!more) return;
   var curBtn = seg.querySelector('.op2-chip.op2-on');
@@ -3488,7 +3600,13 @@ function renderForm() {
     : humanDate(defDate) + ' · ' + ((ME && ME.name) || '') + (isLog ? ' · внутренняя перевозка или свой заказчик' : '');
 
   var eqPrimary0 = dict('equipment').filter(function (x) { return x.primary; });
-  var curEq = o ? (o.equipment_type || '') : (eqPrimary0[0] ? eqPrimary0[0].value : '');
+  /* заявка на редактировании/повторе может уже нести "Длинномер с кониками" целиком -
+     разбираем на {base, mods}, чтобы чип типа подсветился ПРАВИЛЬНО (сверка идёт по
+     голому значению справочника - "Длинномер", не по составной строке), а модификаторы
+     встали в те же положения, что были сохранены. Новая заявка - без mods, как раньше. */
+  var eqParsed0 = eqParse_(o ? (o.equipment_type || '') : '');
+  var curEq = o ? eqParsed0.base : (eqPrimary0[0] ? eqPrimary0[0].value : '');
+  var curEqMods = o ? eqParsed0.mods : [];
   var gabs = dict('gabarit').map(function (g) { return (g && g.value) || g; }); /* словарь отдаёт {value, primary} */
   var curGab = o ? (o.gabarit || '') : (gabs[0] || '');
   var curEnt = o && o.executor_entity_id ? String(o.executor_entity_id) : (entities()[0] ? String(entities()[0].id) : '');
@@ -3533,6 +3651,8 @@ function renderForm() {
 
       '<div class="op2-fld op2-full"><label>Тип техники</label><div class="op2-seg" id="op2-f-eq" data-cur="' + esc(curEq) + '">' +
         eqRowHtml(curEq) +
+      '</div><div class="op2-mods" id="op2-f-eq-mods" data-mods="' + esc(curEqMods.join(',')) + '"' + (EQ_MODIFIERS_[curEq] ? '' : ' hidden') + '>' +
+        eqModsChipsHtml_(curEq, curEqMods) +
       '</div></div>' +
 
       '<div class="op2-fld op2-full"><label>От кого (исполнитель с нашей стороны)</label><div class="op2-seg" id="op2-f-ent">' +
@@ -3684,6 +3804,20 @@ function wireForm() {
     var wasOpen = !!seg.querySelector('[data-eq-close]');
     collapseEqRow(seg, pick.dataset.eq);
     if (wasOpen) S.fold();
+  });
+  var eqModsBox = $('#op2-f-eq-mods');
+  if (eqModsBox) eqModsBox.addEventListener('click', function (e) {
+    // та же причина stopPropagation, что у #op2-f-eq чуть выше - renderEqMods_ меняет
+    // innerHTML, отвязывая e.target до всплытия к общему звуковому делегату.
+    e.stopPropagation();
+    var b = e.target.closest('.op2-chip[data-mod]'); if (!b) return;
+    var seg = $('#op2-f-eq');
+    var base = seg ? (seg.dataset.cur || '') : '';
+    var mods = (this.dataset.mods || '').split(',').filter(Boolean);
+    var key = b.dataset.mod, idx = mods.indexOf(key);
+    if (idx >= 0) mods.splice(idx, 1); else mods.push(key); // независимые галочки, не радио - Влад подтвердил на превью
+    S.nav();
+    renderEqMods_(base, mods);
   });
   $('#op2-f-ent').addEventListener('click', function (e) {
     var seg = this;
@@ -3900,7 +4034,13 @@ function formEq() {
   // тихо уходила бы на сервер с пустым типом техники при любом выборе не из primary -
   // поймано на живой проверке 11.09.
   var seg = $('#op2-f-eq');
-  return seg ? (seg.dataset.cur || '') : '';
+  var base = seg ? (seg.dataset.cur || '') : '';
+  // 21.09 - модификаторы («Коники»/«8 осей»/«Длинные аппарели» и т.п., #op2-f-eq-mods)
+  // дописываются к базовому типу здесь же, одним источником истины для сохранения -
+  // см. eqCombine_/EQ_MODIFIERS_ выше.
+  var modsBox = $('#op2-f-eq-mods');
+  var mods = modsBox ? (modsBox.dataset.mods || '').split(',').filter(Boolean) : [];
+  return eqCombine_(base, mods);
 }
 function splitContact(s) {
   s = String(s || '').trim();

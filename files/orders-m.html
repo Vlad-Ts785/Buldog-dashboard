@@ -2197,28 +2197,31 @@ var PAGES_ = [
   {page:"director", label:"Операционный директор", icon:"i-pg-director"},
   {page:"global-stats", label:"Глобальная статистика", icon:"i-pg-global-stats"},
   {page:"directory", label:"Справочники", icon:"i-pg-directory"},
-  {page:"vehicles", label:"Техника", icon:"i-pg-vehicles", section:"Парк"},
-  {page:"logistics-plan", label:"Планировка", icon:"i-pg-logistics-plan", section:"Парк"},
-  {page:"dynamics", label:"Динамика", icon:"i-pg-dynamics", section:"Парк"},
-  {page:"navigation", label:"Навигация", icon:"i-pg-navigation", section:"Парк"},
-  {page:"crm", label:"CRM", icon:"i-pg-crm", section:"Продажи"},
-  {page:"counterparty", label:"Проверка контрагента", icon:"i-pg-counterparty", section:"Продажи"},
-  {page:"dept-trals", label:"Отдел Тралы", icon:"i-pg-people", section:"Продажи"},
-  {page:"receipts", label:"Поступления", icon:"i-pg-receipts", section:"Продажи"},
-  {page:"sales", label:"Обзор заказов", icon:"i-pg-sales", section:"Продажи"},
-  {page:"sales-mgr", label:"По менеджерам", icon:"i-pg-people", section:"Продажи"},
-  {page:"sales-log", label:"По логистам", icon:"i-pg-sales-log", section:"Продажи"},
-  {page:"sales-salary", label:"Зарплата", icon:"i-pg-salary", section:"Продажи"},
-  {page:"my-page", label:"Личная страница", icon:"i-pg-my-page", section:"Продажи"},
-  {page:"order-plan", label:"Задание", icon:"i-pg-order-plan", section:"Продажи"},
-  {page:"calculator", label:"Калькулятор", icon:"i-pg-calculator", section:"Продажи"},
-  {page:"ryschanow-salary", label:"Зарплата", icon:"i-pg-salary", section:"Продажи"},
-  {page:"commercial-head-salary", label:"Зарплата", icon:"i-pg-salary", section:"Продажи"},
-  {page:"commercial-head-debt", label:"Дебиторка", icon:"i-pg-debt", section:"Продажи"},
-  {page:"column-head-payroll", label:"Зарплата машинистов", icon:"i-pg-column-payroll", section:"Продажи"},
-  {page:"clients", label:"Клиенты", icon:"i-pg-clients", section:"Продажи"},
-  {page:"debt", label:"Дебиторка", icon:"i-pg-debt", section:"Продажи"}
+  {page:"vehicles", label:"Техника", icon:"i-pg-vehicles", section:"park"},
+  {page:"logistics-plan", label:"Планировка", icon:"i-pg-logistics-plan", section:"park"},
+  {page:"dynamics", label:"Динамика", icon:"i-pg-dynamics", section:"park"},
+  {page:"navigation", label:"Навигация", icon:"i-pg-navigation", section:"park"},
+  {page:"crm", label:"CRM", icon:"i-pg-crm", section:"sales"},
+  {page:"counterparty", label:"Проверка контрагента", icon:"i-pg-counterparty", section:"sales"},
+  {page:"dept-trals", label:"Отдел Тралы", icon:"i-pg-people", section:"sales"},
+  {page:"receipts", label:"Поступления", icon:"i-pg-receipts", section:"sales"},
+  {page:"sales", label:"Обзор заказов", icon:"i-pg-sales", section:"sales"},
+  {page:"sales-mgr", label:"По менеджерам", icon:"i-pg-people", section:"sales"},
+  {page:"sales-log", label:"По логистам", icon:"i-pg-sales-log", section:"sales"},
+  {page:"sales-salary", label:"Зарплата", icon:"i-pg-salary", section:"sales"},
+  {page:"my-page", label:"Личная страница", icon:"i-pg-my-page", section:"sales"},
+  {page:"order-plan", label:"Задание", icon:"i-pg-order-plan", section:"sales"},
+  {page:"calculator", label:"Калькулятор", icon:"i-pg-calculator", section:"sales"},
+  {page:"ryschanow-salary", label:"Зарплата", icon:"i-pg-salary", section:"sales"},
+  {page:"commercial-head-salary", label:"Зарплата", icon:"i-pg-salary", section:"sales"},
+  {page:"commercial-head-debt", label:"Дебиторка", icon:"i-pg-debt", section:"sales"},
+  {page:"column-head-payroll", label:"Зарплата машинистов", icon:"i-pg-column-payroll", section:"sales"},
+  {page:"clients", label:"Клиенты", icon:"i-pg-clients", section:"sales"},
+  {page:"debt", label:"Дебиторка", icon:"i-pg-debt", section:"sales"}
 ];
+// Ключи и подписи - 1:1 с data-section/.sidebar-nav-section-label в index.html
+// (park="Парк", sales="Продажи") - те же два раздела, больше в дашборде нет.
+var SECTION_LABELS_ = {park:"Парк", sales:"Продажи"};
 var NAV_COLUMN_HEAD_SUR_ = ["барыльченко", "дьячков"];
 var NAV_COMMERCIAL_HEAD_SUR_ = ["ахтамова", "гусейнова"];
 // Кого сейчас реально показываем - настоящую сессию (ME) или того, кого admin выбрал через
@@ -2257,21 +2260,43 @@ function menuTierKey_(role, sur){
   }
   return role;
 }
+// 21.09, Влад: "разное меню... порядок должен быть как в десктопе, расположение не
+// хардкод а алгоритм" - на десктопе (menuApplyCfg_ в index.html) заголовки разделов
+// (#park/#sales) - ТАКИЕ ЖЕ перетаскиваемые токены в cfg.order, как и сами пункты, их
+// позиция в сохранённом порядке решает, где рисуется заголовок. Прошлая версия здесь
+// ФИЛЬТРОВАЛА '#'-токены (t.charAt(0)!=='#') - пункты переставлялись правильно, но
+// заголовки перерисовывались заново по статичному полю section КАЖДОГО пункта, и если
+// кастомизация перемешала пункты из разных секций (например Задание перетащили под
+// Планировку, в "Парк"), получались дублирующиеся ПАРК/ПРОДАЖИ/ПАРК/ПРОДАЖИ - ровно то,
+// что увидел Влад. Теперь строим тот же смешанный список токенов (страница ИЛИ
+// '#section'), что и десктоп, и применяем cfg.order к НЕМУ, а не только к пунктам.
+function defaultMenuTokens_(allowed){
+  var lastSection = null, tokens = [];
+  PAGES_.forEach(function(p){
+    if (allowed.indexOf(p.page) < 0) return;
+    if (p.section !== lastSection){ lastSection = p.section; if (p.section) tokens.push('#' + p.section); }
+    tokens.push(p.page);
+  });
+  return tokens;
+}
 function applyMenuCustomization_(allowed, tierKey){
+  var defaultTokens = defaultMenuTokens_(allowed);
   var cfg = null;
   try { var raw = localStorage.getItem(MENU_CFG_LS_ + tierKey); if (raw) cfg = JSON.parse(raw); } catch(e){}
-  if (!cfg) return allowed;
-  var result = allowed.slice();
-  if (Array.isArray(cfg.order) && cfg.order.length){
-    result = [];
-    cfg.order.forEach(function(t){ if (t.charAt(0) !== '#' && allowed.indexOf(t) >= 0 && result.indexOf(t) < 0) result.push(t); });
-    allowed.forEach(function(t){ if (result.indexOf(t) < 0) result.push(t); });
-  }
+  if (!cfg) return defaultTokens;
+  var order = (Array.isArray(cfg.order) && cfg.order.length) ? cfg.order : defaultTokens;
+  var isValid = function(t){ return t.charAt(0) === '#' ? true : allowed.indexOf(t) >= 0; };
+  var result = [], placed = {};
+  order.forEach(function(t){ if (isValid(t) && !placed[t]){ result.push(t); placed[t] = true; } });
+  defaultTokens.forEach(function(t){ if (!placed[t]){ result.push(t); placed[t] = true; } });
   if (Array.isArray(cfg.hidden) && cfg.hidden.length){
-    // Тот же гвард, что в index.html menuApplyCfg_ - если скрыть абсолютно всё, скрытие
+    // Тот же гвард, что в index.html menuApplyCfg_ - скрыть абсолютно все ПУНКТЫ нельзя
+    // (разделители '#' в счёт не идут, у них нет своего "скрыт"), тогда скрытие
     // игнорируем целиком, человек не должен остаться с пустым меню.
-    var afterHide = result.filter(function(t){ return cfg.hidden.indexOf(t) < 0; });
-    if (afterHide.length) result = afterHide;
+    var pagesLeft = result.filter(function(t){ return t.charAt(0) !== '#'; });
+    if (pagesLeft.filter(function(t){ return cfg.hidden.indexOf(t) < 0; }).length){
+      result = result.filter(function(t){ return t.charAt(0) === '#' || cfg.hidden.indexOf(t) < 0; });
+    }
   }
   return result;
 }
@@ -2305,16 +2330,21 @@ function openDrawer(){
   navdrawerOpen_=true;
   var d=$('navdrawer');
   var eff = effectiveIdentity_();
-  var allowed = navAllowedPages_(); // уже в правильном порядке (кастомизация), см. выше
+  var tokens = navAllowedPages_(); // уже в правильном порядке (кастомизация), см. выше
   var byId_ = {}; PAGES_.forEach(function(p){ byId_[p.page] = p; });
-  var sectioned = allowed.length > 8, lastSection = null;
+  // Заголовки разделов - ТОЛЬКО у admin, 1:1 с index.html applyRoleUI() (там
+  // .sidebar-nav-section скрывается целиком для manager/logist/mechanic/вьювера).
+  var showSections = eff.role === 'admin';
   var html='<div class="nd-head">'+esc(eff.name||'TS HUB')+'</div><div class="nd-body">';
   if (eff.viewingAs) {
     html += '<div class="nd-item" data-nav="__exit-viewas" style="color:var(--red,#e24b4a)">✕ Обычный вид (админ)</div>';
   }
-  allowed.forEach(function(id){
-    var p = byId_[id]; if (!p) return;
-    if (sectioned && p.section && p.section !== lastSection){ lastSection = p.section; html += '<div class="nd-sec">'+esc(p.section)+'</div>'; }
+  var pendingSection = null;
+  tokens.forEach(function(t){
+    if (t.charAt(0) === '#'){ pendingSection = t.slice(1); return; }
+    var p = byId_[t]; if (!p) return;
+    if (showSections && pendingSection){ html += '<div class="nd-sec">'+esc(SECTION_LABELS_[pendingSection] || pendingSection)+'</div>'; }
+    pendingSection = null;
     html+='<div class="nd-item'+(p.page==='order-plan'?' on':'')+'" data-nav="'+p.page+'"><svg><use href="#'+p.icon+'"/></svg><span>'+esc(p.label)+'</span></div>';
   });
   html+='<div class="nd-sec">Общее</div><div class="nd-item" data-nav="settings"><svg><use href="#i-settings"/></svg><span>Настройки</span></div>';

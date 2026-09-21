@@ -28881,20 +28881,24 @@ var CRM = (function () {
     if (!items.length) return '<div class="dr-empty">Событий пока нет</div>';
     return '<div class="dr-tl">' + items.slice(0, 60).map(function (it) {
       var icon, cls = '', body;
+      // 21.09 - голосовые сообщения Авито (msgType='voice') тоже проигрываются - voice_id
+      // лежит в attachments (та же форма, что читает attach() в чате), префикс 'voice:'
+      // в id различает источник для playRecording (см. чат-тред renderThread выше).
+      var voiceId = it.msgType === 'voice' && it.att ? (function () { try { var a = typeof it.att === 'string' ? JSON.parse(it.att) : it.att; return a && a.voice && a.voice.voice_id; } catch (e) { return null; } })() : null;
       // Кнопка "Прослушать" - у прямых Mango-звонков только если has_recording=true (сервер
       // проверил заранее батчем), у Авито-звонков (сопоставлены с Mango по времени,
       // correlateAvitoCall_) просто по наличию entry_id - есть ли реально запись, узнаём по
       // клику (тише для сервера, чем отдельный батч-запрос ради каждого сообщения).
       var canPlay = (it.type === 'call' && it.hasRec) || (it.type === 'msg' && (it.msgType === 'call' || it.msgType === 'appCall') && it.entryId);
-      var playBtn = canPlay ? playBtnHtml_(it.entryId) : '';
+      var playBtn = canPlay ? playBtnHtml_(it.entryId) : (voiceId ? playBtnHtml_('voice:' + voiceId) : '');
       var trBtn = canPlay ? trBtnWrapHtml_(it.entryId, dealId, it.type === 'call' ? it.durationSec : null) : '';
       var trBlock = canPlay ? trBlockWrapHtml_(it.entryId) : '';
       if (it.type === 'call') { icon = 'phone'; cls = it.ok ? 'is-good' : 'is-bad'; body = '<div class="dr-tl-text">' + esc(it.text) + '</div>'; }
       else if (it.type === 'ev') { icon = 'stage'; body = '<div class="dr-tl-text muted">' + esc(it.text) + '</div>'; }
       else {
-        icon = it.msgType === 'image' ? 'image' : (it.msgType === 'call' || it.msgType === 'appCall') ? 'call_in' : 'chat';
+        icon = it.msgType === 'image' ? 'image' : it.msgType === 'voice' ? 'voice' : (it.msgType === 'call' || it.msgType === 'appCall') ? 'call_in' : 'chat';
         var who = it.dir === 'out' ? (it.sender ? esc(it.sender) : 'Мы') : 'Клиент';
-        var txt = it.msgType === 'image' ? 'Фото' : it.msgType === 'system' ? esc(it.text || 'Системное сообщение') : esc(it.text || '');
+        var txt = it.msgType === 'image' ? 'Фото' : it.msgType === 'voice' ? (voiceId ? '' : 'Голосовое сообщение') : it.msgType === 'system' ? esc(it.text || 'Системное сообщение') : esc(it.text || '');
         body = '<div class="dr-tl-text' + (it.msgType === 'system' ? ' muted' : '') + '"><span style="color:var(--muted)">' + who + ':</span> ' + txt + '</div>';
       }
       return '<div class="dr-tl-item"><span class="dr-tl-ico ' + cls + '">' + ico(icon) + '</span><div>' + body + '<div class="dr-tl-meta">' + fmtDT(it.at) + playBtn + trBtn + '</div>' + trBlock + '</div></div>';
@@ -29084,10 +29088,16 @@ var CRM = (function () {
     // reqId - защита от гонки: клик по ДРУГОЙ кнопке, пока первый запрос ещё летит, не должен
     // дать устаревшему ответу перезапустить не тот звук поверх уже начатого/остановленного.
     var reqId = ++S.audioReqSeq_;
-    fetch(YARD_API_BASE + '/crm/mango/recording?entry_id=' + encodeURIComponent(entryId), { headers: { 'X-Session-Token': SESSION_TOKEN } })
+    // 21.09 - тот же плеер теперь играет и голосовые Авито (не только записи звонков Mango) -
+    // префикс 'voice:' в data-entry различает источник, сама разметка/логика общая целиком.
+    var isVoiceMsg = entryId.indexOf('voice:') === 0;
+    var recUrl = isVoiceMsg
+      ? YARD_API_BASE + '/crm/avito/voice?voice_id=' + encodeURIComponent(entryId.slice(6))
+      : YARD_API_BASE + '/crm/mango/recording?entry_id=' + encodeURIComponent(entryId);
+    fetch(recUrl, { headers: { 'X-Session-Token': SESSION_TOKEN } })
       .then(function (res) {
         if (res.status === 202) { if (reqId === S.audioReqSeq_) { toast('Запись ещё готовится в Mango - попробуйте через минуту', 'amber'); setPlayersHtml_(entryId, idlePillHtml_(entryId)); } return null; }
-        if (res.status === 404) { if (reqId === S.audioReqSeq_) { toast('Для этого звонка нет записи', 'amber'); setPlayersHtml_(entryId, idlePillHtml_(entryId)); } return null; }
+        if (res.status === 404) { if (reqId === S.audioReqSeq_) { toast(isVoiceMsg ? 'Не удалось найти голосовое сообщение' : 'Для этого звонка нет записи', 'amber'); setPlayersHtml_(entryId, idlePillHtml_(entryId)); } return null; }
         if (!res.ok) { if (reqId === S.audioReqSeq_) { toast('Не удалось загрузить запись', 'red'); setPlayersHtml_(entryId, idlePillHtml_(entryId)); } return null; }
         return res.blob();
       })
@@ -29403,7 +29413,8 @@ var CRM = (function () {
       group.lastAt = d;
       var img = type === 'image' ? imgUrl(m) : null;
       if (img && img.thumb) group.html += '<div class="cx-bubble cx-bubble--img' + (m._new ? ' is-new' : '') + '"><img src="' + esc(img.thumb) + '" alt="Фото" loading="lazy" onclick="CRM.openLightbox(\'' + esc(img.full || img.thumb) + '\')"></div>';
-      else if (type === 'voice') group.html += '<div class="cx-bubble' + (m._new ? ' is-new' : '') + '" style="color:var(--muted)">' + ico('voice') + ' Голосовое сообщение (прослушать в Авито)</div>';
+      else if (type === 'voice') { var va = attach(m), vid = va && va.voice && va.voice.voice_id;
+        group.html += '<div class="cx-bubble' + (m._new ? ' is-new' : '') + '">' + (vid ? playBtnHtml_('voice:' + vid) : '<span style="color:var(--muted)">' + ico('voice') + ' Голосовое сообщение</span>') + '</div>'; }
       else group.html += '<div class="cx-bubble' + (m._new ? ' is-new' : '') + '">' + (msgText(m) || '<span style="color:var(--muted)">' + esc(type === 'image' ? 'Фото' : type === 'link' ? 'Ссылка' : 'Сообщение') + '</span>') + '</div>';
       m._new = false;
       var meta = '<div class="cx-meta">';

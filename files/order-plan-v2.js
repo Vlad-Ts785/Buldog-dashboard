@@ -67,7 +67,9 @@ var MARGIN_RED_BELOW_ = 23;
 function hiredMargin_(price, rate, withVat) {
   var base = withVat ? price : price / (1 + VAT_RATE_);
   var m = base - rate;
-  return { amount: m, pct: Math.round(m / base * 100) };
+  /* 21.09: сумма - до рубля. При ставке без НДС base = цена/1.22 даёт дробь, и все три
+     места вывода (попап, карточка, строка таблицы) показывали «5 229,508 ₽». */
+  return { amount: Math.round(m), pct: Math.round(m / base * 100) };
 }
 function esc(s) {
   return String(s == null ? '' : s)
@@ -1922,7 +1924,26 @@ function custCell_(o, prefix) {
   return '<td class="op2-cust" title="' + esc(o.customer || '') + '">' + (prefix || '') + shyCaps_(esc(o.customer || '')) + '</td>';
 }
 function priceCell_(o) {
-  return '<td class="op2-num">' + (num(o.price) ? '<span class="op2-money">' + esc(fmtP(o.price).replace(/\s*₽$/, '')) + '</span>' : '<span class="op2-dim">—</span>') + '</td>';
+  return '<td class="op2-num">' + (num(o.price) ? '<span class="op2-money">' + esc(fmtP(o.price).replace(/\s*₽$/, '')) + '</span>' + hiredMarginCell_(o) : '<span class="op2-dim">—</span>') + '</td>';
+}
+/* Влад 21.09: «на заявке должно быть видно процент маржинальности, рядом с ценой» - у
+   наёмной заявки процент второй строкой под ценой в той же ячейке (превью, вариант A).
+   Формула и порог 23% - те же hiredMargin_/MARGIN_RED_BELOW_, что в попапе «Отдать
+   наёмнику» и в карточке заявки: одна запись - одна цифра во всех трёх местах. Своя
+   машина / нет ставки закупки - пусто, ячейка как была. Расшифровка (закупка, НДС, маржа
+   в рублях) - в title по наведению, в строке только процент. */
+function hiredMarginCell_(o) {
+  var h = oHired(o);
+  if (!h || !num(o.price) || !num(h.purchase_rate)) return '';
+  var noVat = h.settlement === 'без ндс';
+  var hm = hiredMargin_(num(o.price), num(h.purchase_rate), !noVat);
+  var sign = hm.amount >= 0 ? '+' : '−';
+  var ttl = 'Наёмник · закупка ' + fmtP(h.purchase_rate) + (noVat ? ' без НДС' : ' с НДС') +
+    ' · маржа ' + sign + fmtP(Math.abs(hm.amount)) + ' · ' + sign + Math.abs(hm.pct) + '%' +
+    (noVat ? ' от цены-нетто ' + fmtP(Math.round(num(o.price) / (1 + VAT_RATE_))) : ' от цены') +
+    (hm.pct < MARGIN_RED_BELOW_ ? ' · ниже порога ' + MARGIN_RED_BELOW_ + '%' : '');
+  /* в строке - только «20%» (как в превью), минус лишь при убытке; знаки с плюсом - в title */
+  return '<span class="op2-mrg ' + (hm.pct >= MARGIN_RED_BELOW_ ? 'op2-good' : 'op2-bad') + '" title="' + esc(ttl) + '">' + (hm.amount < 0 ? '−' : '') + Math.abs(hm.pct) + '%</span>';
 }
 /* статус: знак + слово одним цветом, точка «под данные» перед знаком; у менеджера клик - сменить */
 function stCell_(o) {

@@ -3455,6 +3455,70 @@ function expandWhoRow(seg) {
   S.unfold(rest.length);
 }
 
+/* 21.09, Влад: «когда выбираешь длинномер, должен появляться рядом выбор Коники, если
+   выбирает - в план задание уходит в технике Длинномер с кониками» + следом «у Faymonville
+   8 осей и раздвижение в ширину» + «у трала длинные аппарели» - превью
+   https://claude.ai/artifact/MRsjazcRwwjsx4yTonNR5q одобрено («запускай в жизнь»).
+   МОДИФИКАТОРЫ - не отдельные типы техники в справочнике (plan_dictionary их не знает и
+   не должен - это не новый тип, а комплектация уже существующего), а ЧИСТО клиентская
+   надстройка: набор дописывается к строке типа через " с " + фраза(-ы) в творительном
+   падеже, само итоговое значение - обычная строка в equipment_type (сервер как принимал
+   любой текст до 60 символов, так и принимает, без изменений). segOf_/segOf() (и на
+   клиенте, и на сервере) берут только ПЕРВОЕ слово - "Длинномер с кониками" сегментируется
+   в "длинномер" точно так же, как голый "Длинномер", вся остальная логика (мин. цена,
+   Аналитика, фильтры) не замечает разницы. */
+var EQ_MODIFIERS_ = {
+  'Трал': [{ key: 'apron', label: 'Длинные аппарели', phrase: 'длинными аппарелями' }],
+  'Длинномер': [{ key: 'koniki', label: 'Коники', phrase: 'кониками' }],
+  'Faymonville (60+ т)': [
+    { key: 'axles', label: '8 осей', phrase: '8 осями' },
+    { key: 'widen', label: 'Раздвижение в ширину', phrase: 'раздвижением в ширину' }
+  ]
+};
+// "8 осей" + "раздвижение в ширину" - НЕ взаимоисключающие (разные свойства одной машины,
+// подтверждено Владом явно) - обе фразы через "и", не радио-выбор одного варианта.
+function eqCombine_(base, keys) {
+  var defs = EQ_MODIFIERS_[base] || [];
+  var phrases = defs.filter(function (d) { return keys.indexOf(d.key) >= 0; }).map(function (d) { return d.phrase; });
+  return phrases.length ? base + ' с ' + phrases.join(' и ') : base;
+}
+// Обратный разбор - нужен при ОТКРЫТИИ уже сохранённой заявки (o.equipment_type уже может
+// быть готовой строкой "Длинномер с кониками"): перебор всех комбинаций (максимум 4 на тип
+// у Faymonville, у остальных 2) - находим {base, mods}, чтобы чип типа подсветился
+// верно, а модификаторы встали в те же положения, что были сохранены. Не найдено ни одной
+// комбинации (старый формат/незнакомое значение) - возвращаем как есть без модификаторов,
+// как раньше.
+function eqParse_(val) {
+  var s = String(val || '');
+  var bases = Object.keys(EQ_MODIFIERS_);
+  for (var bi = 0; bi < bases.length; bi++) {
+    var base = bases[bi], defs = EQ_MODIFIERS_[base], n = defs.length;
+    for (var mask = 0; mask < (1 << n); mask++) {
+      var keys = [];
+      for (var i = 0; i < n; i++) { if (mask & (1 << i)) keys.push(defs[i].key); }
+      if (eqCombine_(base, keys) === s) return { base: base, mods: keys };
+    }
+  }
+  return { base: s, mods: [] };
+}
+function eqModsChipsHtml_(base, activeKeys) {
+  var defs = EQ_MODIFIERS_[base];
+  if (!defs) return '';
+  return defs.map(function (d) {
+    return '<button class="op2-chip op2-mod' + (activeKeys.indexOf(d.key) >= 0 ? ' op2-on' : '') + '" data-mod="' + esc(d.key) + '">' + esc(d.label) + '</button>';
+  }).join('');
+}
+// Перерисовывает строку модификаторов ПОД типом техники - вызывается и при смене типа
+// (сбрасывает выбор, т.к. набор модификаторов у другого типа другой), и при клике по
+// самому модификатору (base не меняется, activeKeys - новый набор).
+function renderEqMods_(base, activeKeys) {
+  var box = $('#op2-f-eq-mods'); if (!box) return;
+  var html = eqModsChipsHtml_(base, activeKeys);
+  box.innerHTML = html;
+  box.hidden = !html;
+  box.dataset.mods = activeKeys.join(',');
+}
+
 /* «Тип техники» - тот же приём, перенесён по превью 11.09 (Влад: «давай внедряй»).
    Отличие от «От кого»: тут ВСЕГДА видны оба основных типа (Трал, Длинномер) - это не
    "текущий выбор", а быстрый доступ к двум самым частым; выбор виден третьим - .op2-on
@@ -3483,7 +3547,16 @@ function eqRowHtml(curVal) {
   if (eqRest.length) html += '<button class="op2-chip" data-eq-more>Ещё <span class="op2-mono" style="color:var(--tint-amber)">' + eqRest.length + '</span></button>';
   return html;
 }
-function collapseEqRow(seg, curVal) { seg.dataset.cur = curVal || ''; seg.innerHTML = eqRowHtml(curVal); }
+function collapseEqRow(seg, curVal) {
+  seg.dataset.cur = curVal || '';
+  seg.innerHTML = eqRowHtml(curVal);
+  /* смена типа - модификаторы сбрасываются (набор у другого типа другой, "8 осей" на
+     трале бессмысленны) - тот же выбор, что уже показан и одобрен в превью. Вызывается и
+     при ПЕРВОМ построении формы (renderForm ниже сам явно кладёт сохранённые mods сразу
+     после), и при живом клике по чипу типа - в этом случае второй вызов не будет, только
+     первый (со сбросом), это и нужно. */
+  renderEqMods_(curVal || '', []);
+}
 function expandEqRow(seg) {
   var more = seg.querySelector('[data-eq-more]'); if (!more) return;
   var curBtn = seg.querySelector('.op2-chip.op2-on');
@@ -3519,7 +3592,13 @@ function renderForm() {
     : humanDate(defDate) + ' · ' + ((ME && ME.name) || '') + (isLog ? ' · внутренняя перевозка или свой заказчик' : '');
 
   var eqPrimary0 = dict('equipment').filter(function (x) { return x.primary; });
-  var curEq = o ? (o.equipment_type || '') : (eqPrimary0[0] ? eqPrimary0[0].value : '');
+  /* заявка на редактировании/повторе может уже нести "Длинномер с кониками" целиком -
+     разбираем на {base, mods}, чтобы чип типа подсветился ПРАВИЛЬНО (сверка идёт по
+     голому значению справочника - "Длинномер", не по составной строке), а модификаторы
+     встали в те же положения, что были сохранены. Новая заявка - без mods, как раньше. */
+  var eqParsed0 = eqParse_(o ? (o.equipment_type || '') : '');
+  var curEq = o ? eqParsed0.base : (eqPrimary0[0] ? eqPrimary0[0].value : '');
+  var curEqMods = o ? eqParsed0.mods : [];
   var gabs = dict('gabarit').map(function (g) { return (g && g.value) || g; }); /* словарь отдаёт {value, primary} */
   var curGab = o ? (o.gabarit || '') : (gabs[0] || '');
   var curEnt = o && o.executor_entity_id ? String(o.executor_entity_id) : (entities()[0] ? String(entities()[0].id) : '');
@@ -3564,6 +3643,8 @@ function renderForm() {
 
       '<div class="op2-fld op2-full"><label>Тип техники</label><div class="op2-seg" id="op2-f-eq" data-cur="' + esc(curEq) + '">' +
         eqRowHtml(curEq) +
+      '</div><div class="op2-mods" id="op2-f-eq-mods" data-mods="' + esc(curEqMods.join(',')) + '"' + (EQ_MODIFIERS_[curEq] ? '' : ' hidden') + '>' +
+        eqModsChipsHtml_(curEq, curEqMods) +
       '</div></div>' +
 
       '<div class="op2-fld op2-full"><label>От кого (исполнитель с нашей стороны)</label><div class="op2-seg" id="op2-f-ent">' +
@@ -3715,6 +3796,20 @@ function wireForm() {
     var wasOpen = !!seg.querySelector('[data-eq-close]');
     collapseEqRow(seg, pick.dataset.eq);
     if (wasOpen) S.fold();
+  });
+  var eqModsBox = $('#op2-f-eq-mods');
+  if (eqModsBox) eqModsBox.addEventListener('click', function (e) {
+    // та же причина stopPropagation, что у #op2-f-eq чуть выше - renderEqMods_ меняет
+    // innerHTML, отвязывая e.target до всплытия к общему звуковому делегату.
+    e.stopPropagation();
+    var b = e.target.closest('.op2-chip[data-mod]'); if (!b) return;
+    var seg = $('#op2-f-eq');
+    var base = seg ? (seg.dataset.cur || '') : '';
+    var mods = (this.dataset.mods || '').split(',').filter(Boolean);
+    var key = b.dataset.mod, idx = mods.indexOf(key);
+    if (idx >= 0) mods.splice(idx, 1); else mods.push(key); // независимые галочки, не радио - Влад подтвердил на превью
+    S.nav();
+    renderEqMods_(base, mods);
   });
   $('#op2-f-ent').addEventListener('click', function (e) {
     var seg = this;
@@ -3931,7 +4026,13 @@ function formEq() {
   // тихо уходила бы на сервер с пустым типом техники при любом выборе не из primary -
   // поймано на живой проверке 11.09.
   var seg = $('#op2-f-eq');
-  return seg ? (seg.dataset.cur || '') : '';
+  var base = seg ? (seg.dataset.cur || '') : '';
+  // 21.09 - модификаторы («Коники»/«8 осей»/«Длинные аппарели» и т.п., #op2-f-eq-mods)
+  // дописываются к базовому типу здесь же, одним источником истины для сохранения -
+  // см. eqCombine_/EQ_MODIFIERS_ выше.
+  var modsBox = $('#op2-f-eq-mods');
+  var mods = modsBox ? (modsBox.dataset.mods || '').split(',').filter(Boolean) : [];
+  return eqCombine_(base, mods);
 }
 function splitContact(s) {
   s = String(s || '').trim();

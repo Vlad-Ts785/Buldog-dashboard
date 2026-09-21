@@ -391,6 +391,7 @@ function logCodeCell_(o, clickable) {
 function byId(id) { for (var i = 0; i < ORD.length; i++) { if (String(ORD[i].id) === String(id)) return ORD[i]; } return null; }
 function execById(o, eid) { var l = o.executors || []; for (var i = 0; i < l.length; i++) { if (String(l[i].id) === String(eid)) return l[i]; } return null; }
 function isMgr() { return VIEW === 'mgr'; }
+function isAnalyticsView_() { return VIEW === 'analytics'; }
 function canDone() { return ME && ME.role !== 'manager'; }
 function isAdmin() { return !!(ME && ME.role === 'admin'); } /* удалять заявку может только Влад (11.09) */
 
@@ -808,6 +809,7 @@ function buildDom() {
         '<div class="op2-switch op2-hidden" id="op2-switch" role="tablist">' +
           '<button data-scr="mgr" role="tab">Менеджер · Заявки</button>' +
           '<button data-scr="log" role="tab">Логист · Заявки</button>' +
+          '<button data-scr="analytics" role="tab">Аналитика</button>' +
         '</div>' +
         '<button class="op2-chip op2-snd" id="op2-snd"></button>' +
       '</div>' +
@@ -939,6 +941,41 @@ function buildDom() {
         '</p>' +
       '</section>' +
 
+      /* ── экран «Аналитика» (только admin) - plans/2026-09-20-order-plan-analytics-history.md,
+         перенос 1:1 утверждённого превью https://claude.ai/artifact/MpTDTn3hicChW41mASoFKg
+         («превью = контракт»), теперь на живых данных с сервера вместо иллюстративных чисел. ── */
+      '<section class="op2-screen" id="op2-scr-analytics">' +
+        '<div class="an-section">' +
+          '<div class="an-section-head">' +
+            '<span class="an-section-title">Заявки по типу техники</span>' +
+            '<span class="an-section-sub">вчера · сегодня · завтра · тип без заявок за все три дня не показан</span>' +
+          '</div>' +
+          '<div class="an-kpi-grid" id="op2-an-type-grid"></div>' +
+        '</div>' +
+        '<div class="an-section">' +
+          '<div class="an-section-head">' +
+            '<span class="an-section-title">Стоимость заявок</span>' +
+            '<span class="an-section-sub">крупная сумма - подтверждённые; ниже - не подтверждено и отбой тем же днём</span>' +
+          '</div>' +
+          '<div class="an-money-grid" id="op2-an-money-grid"></div>' +
+        '</div>' +
+        '<div class="an-section">' +
+          '<div class="an-section-head">' +
+            '<span class="an-section-title">По менеджерам</span>' +
+            '<span class="an-section-sub" id="op2-an-mgr-period">подтверждённые заявки</span>' +
+          '</div>' +
+          '<div class="an-mgr-grid">' +
+            '<div class="an-card"><div class="card-title-an">Тралы</div><div class="p2-bars" id="op2-an-bars-tral"></div></div>' +
+            '<div class="an-card"><div class="card-title-an">Длинномеры</div><div class="p2-bars" id="op2-an-bars-long"></div></div>' +
+            '<div class="an-card">' +
+              '<div class="card-title-an">Топ по сумме подтверждённых</div>' +
+              '<div class="p2-money-head" id="op2-an-money-head"></div>' +
+              '<div class="p2-money-list" id="op2-an-bars-money"></div>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+      '</section>' +
+
       /* ── поповер пикера машин ── */
       '<div class="op2-pop" id="op2-pop" role="dialog" aria-label="Поставить машину">' +
         '<div class="op2-ph"><input id="op2-pop-search" placeholder="3 цифры номера или фамилия" autocomplete="off"><span class="op2-ctx" id="op2-pop-ctx"></span></div>' +
@@ -1021,7 +1058,7 @@ function wire() {
     VIEW = b.dataset.scr;
     closePop(); closeDrawer();
     renderAll();
-    loadOrders();
+    if (isAnalyticsView_()) loadAnalytics(); else loadOrders();
   });
 
   /* ── даты («Картограф», 18.09) ── */
@@ -1409,6 +1446,109 @@ function loadCounts() {
     renderTabs();
   }).catch(function () {});
 }
+/* ═════════════════════════ АНАЛИТИКА (admin) ═════════════════════════
+   plans/2026-09-20-order-plan-analytics-history.md - живые данные с сервера
+   (/api/orders/analytics), без единой новой таблицы. Диапазон - вчера/сегодня/завтра,
+   считает клиент (тот же приём, что уже даёт TABS_WK/loadCounts выше), сервер отдаёт
+   ровно эти три даты по порядку (days[0]=вчера, days[1]=сегодня, days[2]=завтра). */
+var ANALYTICS = null;
+var analyticsSeq_ = 0;
+function loadAnalytics() {
+  var from = addDays(todayStr(), -1), to = addDays(todayStr(), 1);
+  var seq = ++analyticsSeq_;
+  return apiGet('/orders/analytics', { from: from, to: to }).then(function (r) {
+    if (seq !== analyticsSeq_) return;
+    if (!ok_(r, function (d) { ANALYTICS = d; }, 'аналитика не загрузилась')) return;
+    renderAnalytics();
+  }).catch(function () {});
+}
+/* 21.09, Влад: «в денежных блоках хочу видеть полные цифры, а не сокращённые» -
+   было "0,96 млн ₽" (округление до сотых миллиона теряло реальные рубли), стало полное
+   целое число рублей с разрядами - тот же формат, что уже везде в проекте (`fmtP()`
+   выше, калькулятор в index.html), но БЕЗ прятанья нуля (`fmtP` возвращает '' на 0 -
+   там это пустое поле формы, здесь 0 ₽ - осмысленное значение "заявок не было"). */
+function fmtRub_(v) { return Math.round(Number(v) || 0).toLocaleString('ru-RU') + ' ₽'; }
+function renderBars_(id, rows) {
+  var box = $('#' + id); if (!box) return;
+  if (!rows.length) { box.innerHTML = '<p class="op2-dim op2-sm">Подтверждённых заявок за месяц нет.</p>'; return; }
+  var max = Math.max.apply(null, rows.map(function (r) { return r.count; })) || 1;
+  box.innerHTML = rows.map(function (r) {
+    return '<div class="p2-bar-row">' +
+      '<span class="p2-bar-label">' + esc(r.manager) + '</span>' +
+      '<div class="p2-bar-track"><div class="p2-bar-fill" style="width:' + (r.count / max * 100).toFixed(1) + '%"></div></div>' +
+      '<span class="p2-bar-val">' + r.count + '</span>' +
+    '</div>';
+  }).join('');
+}
+function renderAnalytics() {
+  if (!ANALYTICS) return;
+  var days = ANALYTICS.days || [];
+  var DAY_LABEL = ['вчера', 'сегодня', 'завтра'];
+
+  /* ── по типу техники - плитка на каждый тип, скрыт тип с 0 за все три дня (Влад 20.09:
+     «нету тенда - не показывай, чтобы глаза лишний раз не отвлекались») ── */
+  var types = {};
+  days.forEach(function (d, i) {
+    Object.keys(d.by_type || {}).forEach(function (t) {
+      types[t] = types[t] || [0, 0, 0];
+      types[t][i] = d.by_type[t];
+    });
+  });
+  var typeNames = Object.keys(types).filter(function (t) { return types[t][0] + types[t][1] + types[t][2] > 0; });
+  $('#op2-an-type-grid').innerHTML = typeNames.map(function (t) {
+    var v = types[t];
+    return '<div class="an-kpi">' +
+      '<div class="an-kpi-label">' + esc(t) + '</div>' +
+      '<div class="an-kpi-trio"><span class="an-kpi-ghost">' + v[0] + '</span><span class="an-kpi-val">' + v[1] + '</span><span class="an-kpi-ghost">' + v[2] + '</span></div>' +
+      '<div class="an-kpi-daylabels"><span>вчера</span><span class="today">сегодня</span><span>завтра</span></div>' +
+    '</div>';
+  }).join('') || '<p class="op2-dim op2-sm">Заявок нет ни на один из трёх дней.</p>';
+
+  /* ── стоимость: подтверждено (крупно) + не подтверждено/отбой (разбивка) ── */
+  $('#op2-an-money-grid').innerHTML = days.map(function (d, i) {
+    var st = d.by_status || {};
+    var conf = st.confirmed || { count: 0, sum: 0 };
+    var unc = st.unconfirmed || { count: 0, sum: 0 };
+    var canc = st.cancelled || { count: 0, sum: 0 };
+    return '<div class="an-money">' +
+      '<div class="an-money-label">' + DAY_LABEL[i] + '</div>' +
+      '<div class="an-money-val">' + fmtRub_(conf.sum) + '</div>' +
+      '<div class="an-money-sub">' + conf.count + ' ' + plural(conf.count, 'подтверждённая', 'подтверждённые', 'подтверждённых') + ' из ' + d.total + '</div>' +
+      '<div class="an-money-break">' +
+        '<div class="row"><span class="k amber">Не подтверждено</span><span class="v">' + fmtRub_(unc.sum) + ' · ' + unc.count + '</span></div>' +
+        '<div class="row"><span class="k red">Отбой</span><span class="v">' + fmtRub_(canc.sum) + ' · ' + canc.count + '</span></div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  /* ── по менеджерам: тралы/длинномеры (счётчик, месяц) + топ по сумме (день) ── */
+  var byMgr = ANALYTICS.by_manager || { tral: [], long: [] };
+  $('#op2-an-mgr-period').textContent = 'подтверждённые заявки, ' + monthLabel_(ANALYTICS.month_from);
+  renderBars_('op2-an-bars-tral', byMgr.tral || []);
+  renderBars_('op2-an-bars-long', byMgr.long || []);
+
+  var head = $('#op2-an-money-head');
+  head.innerHTML = '<span></span>' + DAY_LABEL.map(function (l, i) { return '<span' + (i === 1 ? ' class="today"' : '') + '>' + l + '</span>'; }).join('');
+  var money = (ANALYTICS.by_manager_money || []).slice().sort(function (a, b) { return (b[days[1] && days[1].date] || 0) - (a[days[1] && days[1].date] || 0); });
+  var moneyBox = $('#op2-an-bars-money');
+  if (!money.length) { moneyBox.innerHTML = '<p class="op2-dim op2-sm">Подтверждённых заявок за эти дни нет.</p>'; }
+  else {
+    moneyBox.innerHTML = money.map(function (r) {
+      return '<div class="p2-money-row">' +
+        '<span class="p2-money-name">' + esc(r.manager) + '</span>' +
+        days.map(function (d, i) { return '<span class="' + (i === 1 ? 'val' : 'ghost') + '">' + fmtRub_(r[d.date] || 0) + '</span>'; }).join('') +
+      '</div>';
+    }).join('');
+  }
+
+  try { if (typeof initCursorLight_ === 'function') initCursorLight_(ROOT_ID, 'p2-light'); } catch (e) {}
+}
+function monthLabel_(ymd) { // "2026-09-01" -> "сентябрь 2026"
+  var MONTHS = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
+  var m = String(ymd || '').match(/^(\d{4})-(\d{2})-/);
+  if (!m) return '';
+  return MONTHS[Number(m[2]) - 1] + ' ' + m[1];
+}
 /* 18.09, «Перенести» - клик по подписи «→ перенесена на .../← перенос с ...» (см.
    transferSubHtml_) переключает вид на дату связанной заявки - тот же приём, что уже есть
    у клика по дню в шапке (DATE=.../TO_DATE=''/renderAll/loadOrders/loadFree). */
@@ -1524,13 +1664,15 @@ function renderAll() {
   if (!built) return;
   $('#op2-skel').classList.toggle('op2-hidden', !!ME);
   $('#op2-scr-mgr').classList.toggle('op2-on', !!ME && isMgr());
-  $('#op2-scr-log').classList.toggle('op2-on', !!ME && !isMgr());
+  $('#op2-scr-log').classList.toggle('op2-on', !!ME && VIEW === 'log');
+  $('#op2-scr-analytics').classList.toggle('op2-on', !!ME && isAnalyticsView_());
   if (ME && ME.role === 'admin') syncSwitch();
   $('#op2-mgr-date').value = TO_DATE ? todayStr() : DATE;
   $('#op2-logwk-date').value = TO_DATE ? todayStr() : DATE;
   renderUpdated();
   renderTabs();
-  if (isMgr()) { renderVerdict(); renderFree(); renderMgr(); }
+  if (isAnalyticsView_()) { /* своя загрузка/рендер - loadAnalytics()/renderAnalytics() */ }
+  else if (isMgr()) { renderVerdict(); renderFree(); renderMgr(); }
   else { renderTypeChips(); renderLog(); }
 }
 
@@ -1626,6 +1768,12 @@ function stKey_(o) { return (ST_V3_[oSt(o)] || ST_V3_.nz).key; }
 function needsAccept_(o) {
   return oSt(o) !== 'ot' && !o.taken_by_name && !oOwn(o).length && !oHired(o);
 }
+/* 21.09, Влад: «созданная, но не подтверждённая заявка - просто кнопка «Принять» без
+   мигания; созданная И подтверждённая без ответственного - должна мигать, как сейчас».
+   Кнопка (needsAccept_ выше) остаётся на ОБОИХ статусах - принять всё равно нужно,
+   мигает - только «подтверждено» (oSt==='ok'), потому что там уже реальная, оплаченная
+   заказчиком работа ждёт логиста, а не просто черновик, который могут ещё отменить. */
+function needsAcceptBlink_(o) { return needsAccept_(o) && oSt(o) === 'ok'; }
 /* «Фамилия Имя» без отчества (полное ФИО - в title) - компромисс варианта «Рейс»: на ширине
    ячейки «Машина» полное ФИО в одну строку не помещается, а фамилию Влад резать не хотел. */
 function fioName_(full) {
@@ -1875,8 +2023,14 @@ function vehCellLog(o) {
   if (k === 'ot') {
     var g0 = vs.map(function (v) { return v.vehicle_gos || ''; }).filter(Boolean).join(' + ');
     if (!o.otboy_ack_by) {
+      /* 20.09, Влад: "можно кнопку сделать - принять отбой и снять машину" - сервер уже
+         снимает машину автоматически вместе с принятием отбоя (см. otboy_ack), кнопка
+         теперь называет оба действия, если машина реально стоит (g0), иначе снимать нечего.
+         Колонка «Машина» узкая (164px, colgroup выше) - полная фраза "Принять отбой и снять
+         машину" не влезает в однострочную кнопку высотой 26px (перенос сломал бы высоту
+         строки таблицы), поэтому в самой кнопке - короткая форма, полная - в title. */
       return (g0 ? '<span class="op2-ln">' + plate_(g0, 'op2-off', 'Отбой по машине ' + g0 + ' · ещё не принят') + '</span>' : '') +
-        '<button class="op2-slot op2-ot" data-oid="' + esc(o.id) + '" data-ot="1" title="' + esc('Отбой' + (g0 ? ' · ' + g0 : '') + ' · принять') + '">✕ Принять отбой</button>';
+        '<button class="op2-slot op2-ot" data-oid="' + esc(o.id) + '" data-ot="1" title="' + esc('Отбой' + (g0 ? ' · ' + g0 : '') + ' · принять, машина снимется автоматически') + '">✕ ' + (g0 ? 'Отбой + снять' : 'Принять отбой') + '</button>';
     }
     return (g0 ? '<span class="op2-ln">' + plate_(g0, 'op2-was', 'Была машина ' + g0) + '<button class="op2-unset-ot op2-mini" data-oid="' + esc(o.id) + '" title="Снять машину">Снять</button></span>' : '') +
       '<span class="op2-drv op2-dim">отбой принят' + (hhmmOf(o.otboy_ack_at) ? ' · ' + esc(hhmmOf(o.otboy_ack_at)) : '') + '</span>' +
@@ -1935,7 +2089,7 @@ function renderLog() {
   langRu_();
   body.innerHTML = rows.map(function (o) {
     var k = oSt(o);
-    var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' + (o.otboy_ack_by ? '' : ' op2-unack') : (needsAccept_(o) ? ' op2-new-unack' : '')) + (isFresh(o) ? ' op2-new-halo' : '');
+    var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' + (o.otboy_ack_by ? '' : ' op2-unack') : (needsAcceptBlink_(o) ? ' op2-new-unack' : '')) + (isFresh(o) ? ' op2-new-halo' : '');
     return '<tr class="' + cls + '" data-oid="' + esc(o.id) + '">' +
       noCell_(o) +
       mgrCodeCell_(o, isAdmin()) + logCodeCell_(o, true) +
@@ -2118,9 +2272,35 @@ function setStatusUi(tr, k) {
   var o = byId(tr.dataset.oid); if (!o) return;
   setStatus(o, k);
 }
+/* 21.09, Влад: «перевод заявки из не подтверждённой в подтверждённую - только при
+   условии что заполнено время, адреса, груз и контакты на погрузке или контакт
+   заказчика». Клон серверной confirmReadinessError_ (api/lib/plan-orders.js) - те же
+   поля, тот же текст ошибки. Сервер - источник истины (эту же проверку не обойти прямым
+   запросом), здесь - только чтобы не ждать неудачный round-trip: подсветить нехватку
+   сразу по клику, тостом, без похода на сервер. */
+function confirmReadinessError_(o) {
+  var missing = [];
+  if (!o.service_time) missing.push('время подачи');
+  if (!o.load_address) missing.push('адрес погрузки');
+  if (!o.unload_address) missing.push('адрес выгрузки');
+  if (!o.cargo) missing.push('груз');
+  var hasLoadContact = !!(o.load_contact_name || o.load_contact_phone);
+  var hasCustomerContact = !!(o.customer_contact_name || o.customer_contact_phone);
+  if (!hasLoadContact && !hasCustomerContact) missing.push('контакт на погрузке или контакт заказчика');
+  if (!missing.length) return null;
+  return 'Нельзя подтвердить - не заполнено: ' + missing.join(', ');
+}
 function setStatus(o, k) {
   var prev = oSt(o);
   if (prev === k) return;
+  if (k === 'ok') {
+    var err = confirmReadinessError_(o);
+    /* S.attention() - тот же звук, что уже отмечает неудачные действия в этом файле
+       (см. ok_()); S.reject здесь НЕ существует (это звук из ДРУГОГО объекта S в
+       files/index.html/Планировке - разные файлы, разные наборы звуков, спутал при
+       первой правке, поймано харнессом: TypeError обрывал setStatus() ДО toast()). */
+    if (err) { S.attention(); toast('<span class="op2-warn">' + esc(err) + '</span>'); return; }
+  }
   apiPost('/orders/status', { id: o.id, status: ST_API[k] }).then(function (r) {
     if (!ok_(r)) return;
     o.status = ST_API[k];
@@ -2186,10 +2366,17 @@ function onLogClick(e) {
   }
   if (slot && slot.dataset.ot) {
     var oo = byId(slot.dataset.oid); if (!oo) return;
+    /* 20.09, Влад: «как только логист нажал "Принять отбой", сразу же из Планировки
+       пропадает эта машина» - сервер теперь сам снимает исполнителя и удаляет отрезок с
+       ленты (см. otboy_ack на сервере), вручную жать «Снять» больше не нужно - старое
+       предупреждение "ещё стоит на этой заявке - сними машину" было ПРАВДОЙ на момент
+       клика (oOwn(oo) читает состояние ДО ответа сервера), но вводило в заблуждение,
+       раз сервер эту работу уже сделал сам за то же самое действие. */
+    var hadVeh = oOwn(oo).length ? oOwn(oo)[0].vehicle_gos : null;
     apiPost('/orders/otboy_ack', { id: oo.id }).then(function (r) {
       if (!ok_(r)) return;
       S.tickUp();
-      if (oOwn(oo).length) toast('Отбой по №' + esc(oNo(oo)) + ' принят · <span class="op2-warn">' + esc(oOwn(oo)[0].vehicle_gos || '') + ' ещё стоит на этой заявке</span> - сними машину', null, 7000);
+      if (hadVeh) toast('Отбой по №' + esc(oNo(oo)) + ' принят <span class="op2-tick">✓</span> · ' + esc(hadVeh) + ' автоматически снята с ленты');
       else toast('Отбой по №' + esc(oNo(oo)) + ' принят <span class="op2-tick">✓</span> · менеджер видит, что логист в курсе');
       loadOrders();
     });
@@ -2257,12 +2444,22 @@ function mgrRowMenu(o, x, y) {
      менеджеры быстрее заметили и освоили - НЕ про саму заявку (см. историю правки у
      noCell_/NEW_FEATURE_BADGE_ выше, с первого раза перепутал одно с другим). */
   var transferItem = canTransfer_(o) ? [{ label: 'Перенести', badge: isFeatureNew_('transfer') ? 'новое' : null, fn: function () { openTransferPop_(o, x, y); } }] : [];
+  /* 21.09, найдено при разборе жалобы «менеджеры копируют без телефона водителя»:
+     список показывает ВСЕ заявки всех менеджеров (15.09, «менеджеры видят все заказы»),
+     но право копировать «внутренности» (телефон водителя - PRIVATE_EXECUTOR_FIELDS_ на
+     сервере) остаётся owner/team-lead-only (17.09). Раньше пункт меню предлагался на
+     ЛЮБОЙ строке без разбора - клик по чужой заявке молча копировал текст с уже
+     вычищенным сервером телефоном, никакого предупреждения не было. Теперь пункт
+     скрыт там, где o.can_view_details === false (сервер уже посчитал видимость по
+     тем же правилам, что и сам показ подробностей заявки) - копировать НЕПОЛНЫЕ
+     данные на пропуск нельзя вообще, а не молча получать их такими. */
+  var canCopyPass = o.can_view_details !== false;
   return [
     { label: 'Повторить', fn: function () { openRepeat(o); } }
   ].concat(transferItem).concat([
-    { label: 'Отбой', fn: function () { setStatus(o, 'ot'); } },
-    { label: 'Копировать данные на пропуск', fn: function () { copyText(passText(o), 'Данные на пропуск скопированы'); } }
-  ]).concat(mgrChangerItem_(o, 'op2-mgr-body')).concat(isAdmin() ? [{ label: 'Удалить заявку', fn: function () { deleteOrder(o); } }] : []);
+    { label: 'Отбой', fn: function () { setStatus(o, 'ot'); } }
+  ]).concat(canCopyPass ? [{ label: 'Копировать данные на пропуск', fn: function () { copyText(passText(o), 'Данные на пропуск скопированы'); } }] : [])
+    .concat(mgrChangerItem_(o, 'op2-mgr-body')).concat(isAdmin() ? [{ label: 'Удалить заявку', fn: function () { deleteOrder(o); } }] : []);
 }
 function logRowMenu(o) {
   var items = [];
@@ -2713,7 +2910,14 @@ function passText(o) {
   var L = [];
   L.push('Заявка №' + oNo(o) + ', ' + dm(o.service_date) + ', подача ' + (oTime(o) || 'уточнить'));
   L.push('Тягач: ' + (v.vehicle_gos || 'уточнить') + (v.trailer_gos ? ', п/п ' + v.trailer_gos : ''));
-  L.push('Водитель: ' + (v.driver_name || 'уточнить') + (v.driver_phone ? ', ' + fmtPhone(v.driver_phone) : ''));
+  /* 21.09, Влад: «менеджеры копируют без телефона водителя, потом ищут в старых
+     сообщениях» - раньше при пустом v.driver_phone телефон просто МОЛЧА пропадал из
+     текста (никакого следа, что он вообще ожидался) - человек на другом конце читал
+     готовый на вид текст и не подозревал, что чего-то не хватает. Теперь пустой
+     телефон - явная пометка "уточняется", как и у остальных полей этой функции
+     ("уточнить" у тягача/даты) - несовпадение видно сразу в момент копирования, а не
+     когда кто-то потом спросит номер. */
+  L.push('Водитель: ' + (v.driver_name || 'уточнить') + ', ' + (v.driver_phone ? fmtPhone(v.driver_phone) : 'телефон уточняется'));
   return L.join('\n');
 }
 function copyText(txt, okMsg) {
@@ -4246,6 +4450,7 @@ function startPolling() {
   pollTimer = setInterval(function () {
     if (document.hidden) return;      /* вкладка не видна - не дёргаем сервер */
     if (!isPageActive()) return;      /* ушли на другую страницу дашборда */
+    if (isAnalyticsView_()) return;   /* на «Аналитике» живой таблицы нет - нечего обновлять */
     beat++;
     if (beat % 3 === 0) { loadOrders(true); return; }
     var params = { date: DATE }; if (TO_DATE) params.to = TO_DATE;

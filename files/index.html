@@ -21268,7 +21268,13 @@ function renderDeptTrals_() {
   var box = document.getElementById('dept-trals-kpi');
   if (!box) return;
   var o = D && D.orders;
-  var rows = (o && (o.dept_all || (D.role === 'admin' ? o.by_manager : null))) || [];
+  // 21.09, защитная правка (не живой баг - проверено, что o.by_manager сегодня строится
+  // сервером как тот же полный по-компании срез, что и o.dept_all, так что фолбэк ниже
+  // сейчас совпадает по содержимому): isEffectiveAdmin_(), не сырой D.role - у этой
+  // конкретной страницы уже был инцидент утечки admin-данных в предпросмотр
+  // (project_dept_trals_direkcia_leak_bug, 13.09), если однажды by_manager/dept_all
+  // разойдутся по смыслу, сырая проверка тихо потекла бы снова.
+  var rows = (o && (o.dept_all || (isEffectiveAdmin_() ? o.by_manager : null))) || [];
   if (!rows.length) {
     // Данных нет ровно в одном случае: вкладка открыта в сессии, начатой ДО того, как
     // сервер научился отдавать dept_all (10.09) - у человека в памяти старый ответ.
@@ -27557,20 +27563,35 @@ var CRM = (function () {
       if (typeof initCursorLight_ === 'function') initCursorLight_('page-crm', 'p2-light');
       updateMeLabel();
       updatePushButton();
-      autoMeForManager();
       ensureTemplates(); // прогрев - к первому открытию композера список уже готов
     }
+    // 21.09 - вынесен ИЗ блока "один раз за загрузку страницы" выше: раньше, если CRM
+    // открывали хоть раз ДО входа в "Смотреть как" (например, обычный админ-просмотр),
+    // S.inited навсегда становился true и autoMeForManager() больше никогда не перезвал бы -
+    // "Кто я" не подхватывал(бы) личность менеджера при последующем предпросмотре.
+    // ensureEmployees() внутри кэширован - повторный вызов на каждое открытие вкладки дёшев.
+    autoMeForManager();
     load();
   }
   // Менеджер под своим логином - это и есть "я": подбираем сотрудника по фамилии из
   // D.managerName ("Фамилия Имя ...") и убираем выбор (чужую фамилию ему выбирать нечего).
+  // 21.09, НАЙДЕННЫЙ БАГ (аудит после жалобы Влада "вижу свои экраны" на другой странице,
+  // тот же класс): раньше срабатывало ТОЛЬКО при D.role==='manager' - никогда во время
+  // admin-предпросмотра ("Смотреть как <менеджер>"), потому что D.role там остаётся
+  // 'admin'. "Кто я" оставался свободно переключаемым, а "Мои"/"Взять себе" использовали
+  // чей попало S.me/localStorage.crmMyExtension (что осталось от предыдущего просмотра или
+  // от самого Влада), а не личность просматриваемого менеджера. Тот же приём, что уже
+  // применён в остальных персональных страницах (previewing ? viewAsEntry.name : ...).
   function autoMeForManager() {
-    if (typeof D === 'undefined' || !D || D.role !== 'manager' || !D.managerName) return;
-    var sur = String(D.managerName).trim().split(/\s+/)[0].toLowerCase();
+    var previewingManager_ = typeof D !== 'undefined' && D && D.role === 'admin' && typeof viewAsEntry !== 'undefined' && viewAsEntry && viewAsEntry.type === 'manager';
+    var isRealManager_ = typeof D !== 'undefined' && D && D.role === 'manager' && D.managerName;
+    if (!previewingManager_ && !isRealManager_) return;
+    var name_ = previewingManager_ ? viewAsEntry.name : D.managerName;
+    var sur = String(name_).trim().split(/\s+/)[0].toLowerCase();
     ensureEmployees().then(function (emps) {
       var hit = emps.find(function (e) { return String(e.name || '').toLowerCase().split(/\s+/).indexOf(sur) >= 0; });
       if (hit) { S.me = String(hit.extension); try { localStorage.setItem('crmMyExtension', S.me); } catch (e) {} updateMeLabel(); }
-      var btn = el('crm-me-btn'); if (btn) { btn.disabled = true; btn.title = 'Вы вошли под своим аккаунтом'; }
+      var btn = el('crm-me-btn'); if (btn) { btn.disabled = true; btn.title = previewingManager_ ? 'Предпросмотр: ' + viewAsEntry.name : 'Вы вошли под своим аккаунтом'; }
     });
   }
   function load() {

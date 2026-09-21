@@ -8958,6 +8958,16 @@ function buildMyPageRoster_(byManager, byLogist) {
 // "Смотреть как сотрудник" в подвале сайдбара, иначе null. Только для D.role==='admin' - у
 // реальных manager/logist кнопки нет (applyRoleUI прячет весь сайдбар, кроме своих 3 пунктов).
 let viewAsEntry = null;
+// 21.09, Влад: "если захожу в сотрудника - должен видеть 100% что видит он". D.role остаётся
+// 'admin' ВЕСЬ ПРЕДПРОСМОТР (viewAsEntry - клиентская надстройка, не смена роли) - код,
+// который решает, КАКОЙ КОНТЕНТ показать (а не какая ВОЗМОЖНОСТЬ доступна самому Владу),
+// должен спрашивать ЭТУ функцию, а не сырой D.role==='admin' напрямую, иначе админский вид
+// протекает сквозь предпросмотр (живой пример - "Дебиторка/План поступлений" показывала
+// сводку по обеим руководительницам вместо личного экрана одной). Для настоящих
+// admin-only ВОЗМОЖНОСТЕЙ (кнопка "Смотреть как сотрудник", кнопки синка, которые тратят
+// чужую квоту) сырой D.role==='admin' по-прежнему верен - те должны работать и во время
+// предпросмотра, эта функция НЕ для них.
+function isEffectiveAdmin_() { return !!(D && D.role === 'admin' && !viewAsEntry); }
 
 // Кто сейчас выбран на личной странице - вынесено отдельно (2026-08-11), т.к. и
 // renderMyPage(), и setMyPagePeriod() (для роутинга Васина на свой источник данных, см. ниже)
@@ -13031,6 +13041,20 @@ function setViewAs(name, type) {
   if (!viewAsEntry) {
     var mainNav = document.querySelector('.sidebar-nav-item[data-page="main"]');
     showPage('main', mainNav);
+  } else {
+    // 21.09, НАЙДЕННЫЙ БАГ (Влад: "вижу свои экраны" - на "Дебиторка/План поступлений" как
+    // admin переключился на "Смотреть как Гусейнова", страница осталась прежней - сводка ПО
+    // ОБЕИМ руководительницам, admin-only, а не то, что видит сама Гусейнова). Тот же класс,
+    // что уже точечно чинили дважды для отдельных кэшей (14.09 crpLoaded_/crpAmounts_, 19.09
+    // localStorage) - render() при previewing перерисовывает ТОЛЬКО #page-my-page (см.
+    // комментарий в render()), а КАКАЯ страница физически ВИДНА (.page.active) не трогает
+    // вообще - если до переключения был открыт admin-only экран, он просто продолжает
+    // висеть на экране как есть. Вместо очередного точечного патча - системный фикс: при
+    // входе или смене цели предпросмотра ВСЕГДА возвращаемся на "Личную страницу" (то же
+    // место, куда попадает настоящий вход manager/logist/mechanic) - независимо от того,
+    // какая страница была открыта ДО переключения, её больше не унести через "Смотреть как".
+    var myPageNav_ = document.querySelector('.sidebar-nav-item[data-page="my-page"]');
+    showPage('my-page', myPageNav_);
   }
 }
 document.addEventListener('click', function(ev) {
@@ -24630,8 +24654,10 @@ function showDebtHub_() {
   // все три раздела, руководитель коммерческой группы (Ахтамова/Гусейнова, 15.09) - только
   // «Суды». Полагаться на то, что страница целиком закрыта, нельзя - ровно на этом допущении
   // 13.09 «Дирекция» протекла в урезанную копию страницы отдела
-  // (память project_dept_trals_direkcia_leak_bug).
-  var isAdmin_ = !!(D && D.role === 'admin');
+  // (память project_dept_trals_direkcia_leak_bug). 21.09 - isEffectiveAdmin_(), не сырой
+  // D.role: во время предпросмотра D.role остаётся 'admin', сырая проверка показывала
+  // Владу-как-Гусейновой все три раздела вместо её одного (см. isEffectiveAdmin_).
+  var isAdmin_ = isEffectiveAdmin_();
   var courtTile = document.getElementById('debt-hub-tile-court');
   if (courtTile) courtTile.style.display = courtCanView_() ? '' : 'none';
   var hubTiles_ = document.querySelectorAll('#debt-hub .hub-tile');
@@ -24646,15 +24672,22 @@ function showDebtHub_() {
 // из уже существующего COMMERCIAL_HEAD_SUR_FRONT_, второго списка не заводим.
 function courtCanView_() {
   if (!D) return false;
-  if (D.role === 'admin') return true;
-  var sur = String(D.managerName || D.logistName || '').trim().split(' ')[0].toLowerCase();
+  if (isEffectiveAdmin_()) return true;
+  // 21.09 - имя берём из viewAsEntry при предпросмотре (тот же приём, что curPersonName в
+  // applyRoleUI): D.managerName/logistName у РЕАЛЬНОГО admin-аккаунта пусты, раньше сырой
+  // D.role==='admin' выше просто возвращал true для ЛЮБОГО предпросмотра, не только
+  // руководителей коммерческих групп - случайно верно для Ахтамовой/Гусейновой, но неверно
+  // покажи Владу, например, обычного менеджера.
+  var name_ = viewAsEntry ? viewAsEntry.name : (D.managerName || D.logistName || '');
+  var sur = String(name_ || '').trim().split(' ')[0].toLowerCase();
   return !!sur && COMMERCIAL_HEAD_SUR_FRONT_.indexOf(sur) >= 0;
 }
 function chooseDebtTarget_(tab) {
   // Гвард на случай прямой ссылки/старой вкладки: не-admin в этой странице открывает только
   // «Суды». Сервер ему данных ДЗ и плана всё равно не отдаст, но и предлагать пустой экран
-  // незачем.
-  if (tab !== 'court' && !(D && D.role === 'admin')) tab = 'court';
+  // незачем. 21.09 - isEffectiveAdmin_(): во время предпросмотра сырой D.role==='admin' пускал
+  // на "ДЗ"/"План поступлений" (admin-only сводки), которые сама Гусейнова никогда не видит.
+  if (tab !== 'court' && !isEffectiveAdmin_()) tab = 'court';
   if (tab === 'court' && !courtCanView_()) { showDebtHub_(); return; }
   var hub = document.getElementById('debt-hub');
   var back = document.getElementById('debt-back-link');
@@ -24667,13 +24700,18 @@ function chooseDebtTarget_(tab) {
   if (plan) plan.style.display = (tab === 'plan') ? '' : 'none';
   if (court) court.style.display = (tab === 'court') ? '' : 'none';
   setText('page-title', tab === 'plan' ? 'Дебиторка - план поступлений'
-    : tab === 'court' ? ((D && D.role === 'admin') ? 'Дебиторка - суды' : 'Суды')
+    : tab === 'court' ? (isEffectiveAdmin_() ? 'Дебиторка - суды' : 'Суды')
     : 'Дебиторка - задолженность');
-  // Возврат «← Все разделы» имеет смысл, только когда разделов правда несколько.
+  // Возврат «← Все разделы» имеет смысл, только когда разделов правда несколько - у
+  // предпросмотра руководителя коммерческой группы раздел всегда один (21.09, isEffectiveAdmin_).
   var backLink_ = document.getElementById('debt-back-link');
-  if (backLink_ && !(D && D.role === 'admin')) backLink_.style.display = 'none';
+  if (backLink_ && !isEffectiveAdmin_()) backLink_.style.display = 'none';
   // Кнопка «Обновить» тратит общую дневную квоту Checko - запуск прогона оставлен admin
-  // (сервер тоже отвечает 403 на /api/court/sync_now всем остальным).
+  // (сервер тоже отвечает 403 на /api/court/sync_now всем остальным). 21.09 - НАМЕРЕННО сырой
+  // D.role, не isEffectiveAdmin_(): это реальная возможность настоящего admin-аккаунта Влада
+  // (сервер проверяет ЕГО сессию, не личность просматриваемого сотрудника), а не часть того,
+  // что видит предпросматриваемый человек - должна оставаться доступной и во время
+  // предпросмотра, как и сама кнопка "Смотреть как сотрудник".
   var syncBtn_ = document.getElementById('court-sync-btn');
   if (syncBtn_) syncBtn_.style.display = (D && D.role === 'admin') ? '' : 'none';
   if (tab === 'dz') renderDebt();

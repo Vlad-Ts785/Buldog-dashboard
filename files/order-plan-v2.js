@@ -2272,9 +2272,35 @@ function setStatusUi(tr, k) {
   var o = byId(tr.dataset.oid); if (!o) return;
   setStatus(o, k);
 }
+/* 21.09, Влад: «перевод заявки из не подтверждённой в подтверждённую - только при
+   условии что заполнено время, адреса, груз и контакты на погрузке или контакт
+   заказчика». Клон серверной confirmReadinessError_ (api/lib/plan-orders.js) - те же
+   поля, тот же текст ошибки. Сервер - источник истины (эту же проверку не обойти прямым
+   запросом), здесь - только чтобы не ждать неудачный round-trip: подсветить нехватку
+   сразу по клику, тостом, без похода на сервер. */
+function confirmReadinessError_(o) {
+  var missing = [];
+  if (!o.service_time) missing.push('время подачи');
+  if (!o.load_address) missing.push('адрес погрузки');
+  if (!o.unload_address) missing.push('адрес выгрузки');
+  if (!o.cargo) missing.push('груз');
+  var hasLoadContact = !!(o.load_contact_name || o.load_contact_phone);
+  var hasCustomerContact = !!(o.customer_contact_name || o.customer_contact_phone);
+  if (!hasLoadContact && !hasCustomerContact) missing.push('контакт на погрузке или контакт заказчика');
+  if (!missing.length) return null;
+  return 'Нельзя подтвердить - не заполнено: ' + missing.join(', ');
+}
 function setStatus(o, k) {
   var prev = oSt(o);
   if (prev === k) return;
+  if (k === 'ok') {
+    var err = confirmReadinessError_(o);
+    /* S.attention() - тот же звук, что уже отмечает неудачные действия в этом файле
+       (см. ok_()); S.reject здесь НЕ существует (это звук из ДРУГОГО объекта S в
+       files/index.html/Планировке - разные файлы, разные наборы звуков, спутал при
+       первой правке, поймано харнессом: TypeError обрывал setStatus() ДО toast()). */
+    if (err) { S.attention(); toast('<span class="op2-warn">' + esc(err) + '</span>'); return; }
+  }
   apiPost('/orders/status', { id: o.id, status: ST_API[k] }).then(function (r) {
     if (!ok_(r)) return;
     o.status = ST_API[k];

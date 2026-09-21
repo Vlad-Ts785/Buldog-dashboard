@@ -6140,7 +6140,7 @@ main:has(> #page-dynamics.active){min-width:0;}
         </div>
       </div>
       <div id="debt-back-link" style="display:none;margin-bottom:14px">
-        <button class="mp-ghostbtn" onclick="showDebtHub_()">← Все разделы</button>
+        <button class="mp-ghostbtn" onclick="debtBackToHub_()">← Все разделы</button>
       </div>
       <div id="debt-tab-plan" style="display:none">
         <div id="receipts-plan-summary-content"><p style="color:var(--muted);padding:16px">Данные загружаются...</p></div>
@@ -6435,6 +6435,15 @@ main:has(> #page-dynamics.active){min-width:0;}
               <div class="hub-tile__name">План поступлений</div>
               <div class="hub-tile__sub">Впишите, с кого и сколько ждёте оплату на этой неделе.</div>
               <div class="hub-tile__foot"><span>дедлайн - вторник 15:00</span><span class="hub-tile__go">Открыть →</span></div>
+            </div>
+            <!-- «Суды» (21.09, Влад: "суды должны быть в дебиторке у всех, не отдельным
+                 пунктом меню") - та же страница/раздел, что у admin (#page-debt), просто
+                 плитка-вход здесь, внутри ИХ хаба - см. chDebtOpenCourt_() в JS. -->
+            <div class="hub-tile" id="ch-debt-hub-tile-court" onclick="chDebtOpenCourt_()">
+              <div class="hub-tile__icon hub-tile__icon--d"><svg width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3.2v13"/><path d="M6.2 16.8h7.6"/><path d="M3 7.2h14"/><path d="M5.6 7.2 3.4 11.6h4.4z"/><path d="M14.4 7.2 12.2 11.6h4.4z"/></svg></div>
+              <div class="hub-tile__name">Суды</div>
+              <div class="hub-tile__sub">Наши иски к должникам: на какой стадии дело, сколько взыскиваем, ссылка на карточку КАД.</div>
+              <div class="hub-tile__foot"><span id="ch-debt-hub-court-fact">по активным делам</span><span class="hub-tile__go">Открыть →</span></div>
             </div>
           </div>
         </div>
@@ -12844,20 +12853,16 @@ function applyRoleUI() {
     if (isRyschanowViewer) allowedPages_.push('ryschanow-salary');
     if (isCommercialHeadViewer) allowedPages_.push('commercial-head-salary', 'commercial-head-debt');
     // «Суды» (15.09, Влад: «открой тоже Лиане и Айнур») - руководителям коммерческих групп.
-    // Технически это страница `debt`, но им в ней открыт ТОЛЬКО раздел «Суды» (плитки «ДЗ» и
-    // «План поступлений» - admin-овские, у них есть свои: commercial-head-debt и план на
-    // неделю), поэтому и пункт меню для них подписан «Суды», а не «Дебиторка».
-    if (isCommercialHeadViewer) {
-      allowedPages_.push('debt');
-      var debtNavItem_ = document.querySelector('.sidebar-nav-item[data-page="debt"]');
-      // 20.09, НАЙДЕННЫЙ БАГ: со дня появления grip/eye (menuDecorateItems_, до этого кода)
-      // lastChild пункта - EL.menu-eye, не текст, поэтому проверка nodeType===3 ниже молча
-      // никогда не срабатывала - Ахтамова/Гусейнова весь год видели "Дебиторка", не "Суды".
-      // Теперь подпись - свой span .sidebar-nav-label (см. menuDecorateItems_), целимся в него.
-      var debtLabel_ = debtNavItem_ && debtNavItem_.querySelector('.sidebar-nav-label');
-      if (debtLabel_) debtLabel_.textContent = ' Суды';
-      else if (debtNavItem_ && debtNavItem_.lastChild && debtNavItem_.lastChild.nodeType === 3) debtNavItem_.lastChild.nodeValue = ' Суды';
-    }
+    // Технически это раздел страницы `debt` (та же, что у admin), но им в ней доступен ТОЛЬКО
+    // "Суды" (плитки «ДЗ» и «План поступлений» - admin-овские, у них есть свои:
+    // commercial-head-debt и план на неделю). 21.09, Влад ("суды должны быть в дебиторке у
+    // всех, а не отдельным пунктом"): раньше вместо отдельной плитки пункт меню `debt`
+    // ПЕРЕИМЕНОВЫВАЛСЯ в "Суды" (relabel DOM напрямую - хрупко, дважды ловили баги подряд,
+    // см. project_flex_ellipsis_trailing_icons_clipped_gotcha) - теперь пункт `debt` просто
+    // ПРЯЧЕТСЯ у них (остаётся в allowedPages_ для гварда навигации ниже - "Суды" технически
+    // и есть эта страница, просто без своего пункта меню), а плитка "Суды" внутри ИХ хаба
+    // "Дебиторка" (#ch-debt-hub) ведёт туда напрямую - см. chDebtOpenCourt_().
+    if (isCommercialHeadViewer) allowedPages_.push('debt');
     // «Зарплата машинистов» (15.09) - отдельный пункт меню, тот же принцип, что у Рыщанова/
     // руководителей коммерческих групп выше.
     if (isColumnHeadViewer) allowedPages_.push('column-head-payroll');
@@ -12878,6 +12883,13 @@ function applyRoleUI() {
       const page = item.getAttribute('data-page');
       item.style.display = allowedPages_.indexOf(page) >= 0 ? '' : 'none';
     });
+    // 21.09 - `debt` остаётся в allowedPages_ выше (нужен гварду навигации ниже, "Суды"
+    // технически и есть эта страница), но у руководителей коммерческих групп своего пункта
+    // меню быть не должно - "Суды" теперь плитка внутри их "Дебиторка" (commercial-head-debt).
+    if (isCommercialHeadViewer) {
+      var debtNavItem_ = document.querySelector('.sidebar-nav-item[data-page="debt"]');
+      if (debtNavItem_) debtNavItem_.style.display = 'none';
+    }
     document.querySelectorAll('.sidebar-nav-section').forEach(function(s){ s.style.display = 'none'; });
     // Переключаем страницу ТОЛЬКО если текущая активная не разрешена этой роли (Этап 1) -
     // раньше showPage('my-page') вызывался безусловно при КАЖДОМ render(), значит тихое
@@ -12900,18 +12912,6 @@ function applyRoleUI() {
       item.style.display = personalOnlyPages.indexOf(item.getAttribute('data-page')) >= 0 ? 'none' : '';
     });
     document.querySelectorAll('.sidebar-nav-section').forEach(function(s){ s.style.display = ''; });
-    // 21.09, НАЙДЕННЫЙ БАГ (Влад: "перешёл в своё меню - нет вкладки ДЗ, куда делась?"):
-    // relabel "Дебиторка"->"Суды" выше (см. isCommercialHeadViewer) меняет DOM НАПРЯМУЮ и
-    // необратимо. Раньше он был сломан (lastChild - не текстовый узел, починено 20.09) -
-    // эта ветка никогда не видела последствий. Как только relabel заработал по-настоящему,
-    // обнажился парный баг: ничто не возвращало подпись назад при выходе из предпросмотра
-    // руководителя коммерческой группы - "Суды" оставалась висеть и на обычной админ-
-    // панели, хотя для admin это полноценная "Дебиторка" (ДЗ + План поступлений + Суды
-    // тремя плитками, см. showDebtHub_). Сбрасываем сюда, а не только в isCommercialHeadViewer
-    // выше - эта ветка (plain admin) единственная, где пункт РЕАЛЬНО виден с чужой подписью;
-    // в manager/logist-предпросмотре НЕ руководителя группы пункт и так display:none.
-    var debtLabel_ = document.querySelector('.sidebar-nav-item[data-page="debt"] .sidebar-nav-label');
-    if (debtLabel_) debtLabel_.textContent = ' Дебиторка';
   }
   applyMenuConfig_();   // кастом меню поверх ролевого фильтра (05.09), см. блок "Кастомизация меню"
   updateViewAsButton_();
@@ -22025,7 +22025,12 @@ function showCommercialHeadDebtHub_() {
   if (back) back.style.display = 'none';
   if (dz) dz.style.display = 'none';
   if (plan) plan.style.display = 'none';
+  // «Суды» (21.09) - третья плитка этого хаба, тот же приём, что у admin-хаба debt-hub
+  // (courtCanView_ уже верен для этого тира - COMMERCIAL_HEAD_SUR_FRONT_).
+  var courtTile = document.getElementById('ch-debt-hub-tile-court');
+  if (courtTile) courtTile.style.display = courtCanView_() ? '' : 'none';
   setText('page-title', 'Дебиторка');
+  courtFillHubFact_();   // подвал плитки «Суды» - живое число активных дел (см. функцию ниже)
 }
 function chooseCommercialHeadDebtTarget_(tab) {
   var hub = document.getElementById('ch-debt-hub');
@@ -24700,6 +24705,21 @@ function courtCanView_() {
   var sur = String(name_ || '').trim().split(' ')[0].toLowerCase();
   return !!sur && COMMERCIAL_HEAD_SUR_FRONT_.indexOf(sur) >= 0;
 }
+// «Суды» (21.09, Влад: "суды должны быть в дебиторке у всех, не отдельным пунктом меню") -
+// плитка в хабе руководителя коммерческой группы (#ch-debt-hub) ведёт СЮДА, в общий раздел
+// "Суды" на странице `debt` (та же, что у admin) - не дублирует рендер отдельной копией.
+function chDebtOpenCourt_() {
+  showPage('debt');
+  chooseDebtTarget_('court');
+}
+// Возврат «← Все разделы» с раздела "Суды" - в РАЗНЫЕ хабы для admin и руководителя
+// коммерческой группы (её плитка "Суды" открывается из ЕЁ хаба commercial-head-debt, не из
+// admin-хаба debt-hub, см. chDebtOpenCourt_ выше) - showPage сам переключит активную страницу
+// и подсветку пункта меню.
+function debtBackToHub_() {
+  if (isEffectiveAdmin_()) { showDebtHub_(); return; }
+  showPage('commercial-head-debt', document.querySelector('.sidebar-nav-item[data-page="commercial-head-debt"]'));
+}
 function chooseDebtTarget_(tab) {
   // Гвард на случай прямой ссылки/старой вкладки: не-admin в этой странице открывает только
   // «Суды». Сервер ему данных ДЗ и плана всё равно не отдаст, но и предлагать пустой экран
@@ -24720,10 +24740,10 @@ function chooseDebtTarget_(tab) {
   setText('page-title', tab === 'plan' ? 'Дебиторка - план поступлений'
     : tab === 'court' ? (isEffectiveAdmin_() ? 'Дебиторка - суды' : 'Суды')
     : 'Дебиторка - задолженность');
-  // Возврат «← Все разделы» имеет смысл, только когда разделов правда несколько - у
-  // предпросмотра руководителя коммерческой группы раздел всегда один (21.09, isEffectiveAdmin_).
-  var backLink_ = document.getElementById('debt-back-link');
-  if (backLink_ && !isEffectiveAdmin_()) backLink_.style.display = 'none';
+  // 21.09 - раньше «← Все разделы» пряталась у не-admin (единственный раздел был "Суды" в
+  // ЭТОМ ЖЕ хабе - возвращаться было некуда). Теперь "Суды" - плитка ВНУТРИ ИХ ХАБА
+  // "Дебиторка" (commercial-head-debt) - back теперь имеет смысл всегда, просто ведёт в
+  // разные хабы (debtBackToHub_ ниже решает, в какой именно).
   // Кнопка «Обновить» тратит общую дневную квоту Checko - запуск прогона оставлен admin
   // (сервер тоже отвечает 403 на /api/court/sync_now всем остальным). 21.09 - НАМЕРЕННО сырой
   // D.role, не isEffectiveAdmin_(): это реальная возможность настоящего admin-аккаунта Влада
@@ -25166,13 +25186,19 @@ function courtSyncNow_() {
 // Подвал плитки «Суды» в хабе - живая цифра (ГОСТ, раздел 4: в подвале плитки реальный факт
 // по разделу, не выдуманная подпись). Лёгкий запрос, без списка дел.
 function courtFillHubFact_() {
+  // 21.09 - два возможных подвала: admin-хаб (debt-hub-court-fact) и хаб руководителя
+  // коммерческой группы (ch-debt-hub-court-fact, новая плитка "Суды") - заполняем оба, какие
+  // реально есть на странице (второй id просто не найдётся вне #page-commercial-head-debt).
   var el = document.getElementById('debt-hub-court-fact');
-  if (!el || !courtCanView_()) return;
+  var el2 = document.getElementById('ch-debt-hub-court-fact');
+  if ((!el && !el2) || !courtCanView_()) return;
   fetchFromYardApi_('/court/summary', {}).then(function(r) {
     if (!r.ok || !r.data) return;
     var n = r.data.claims_count || 0, b = r.data.bankrupt_count || 0;
     var word = (n % 10 === 1 && n % 100 !== 11) ? 'иск' : ((n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20)) ? 'иска' : 'исков');
-    el.textContent = n + ' ' + word + ' идёт' + (b ? (' · ' + b + ' банкротств') : '');
+    var text = n + ' ' + word + ' идёт' + (b ? (' · ' + b + ' банкротств') : '');
+    if (el) el.textContent = text;
+    if (el2) el2.textContent = text;
   }).catch(function() {});
 }
 // Значок у должника в таблице ДЗ: по нему прямо сейчас идёт наш иск. Только admin - и потому

@@ -290,6 +290,15 @@ var ST_ORDER = { ok: 0, nz: 1, done: 2, ot: 3 };
 var built = false;
 var ME = null;              /* {email,name,role,code} */
 var META = null;            /* {dictionary, own_entities} */
+/* 21.09, Влад: «где машина сейчас» на строке заявки - тот же значок .rh-omni, что уже
+   работает в Планировке (files/index.html, Omnicomm-телематика, plans/2026-08-31-omnicomm-
+   telematics-integration.md), только с окном видимости service_time…+8ч (в Планировке он
+   виден всегда). Планировка и «Задание» - РАЗНЫЕ IIFE (см. комментарии в этом же файле про
+   ensureKpFonts_/drvBlockForeignAutofill_ - тот же класс границы областей видимости), общей
+   функции нет - здесь своя копия, тем же приёмом. place ("ближайший населённый пункт")
+   больше НЕ считается на клиенте нигде - перенесено на сервер (api/lib/omni-geo.js,
+   21.09) именно чтобы ЭТОТ файл не тащил свой список городов, сервер отдаёт готовое поле. */
+var OMNI_BY_GOS_ = {};
 var VIEW = 'log';           /* 'mgr' | 'log' - какой экран показываем */
 var DATE = todayStr();
 var TO_DATE = '';           /* непусто - режим «Неделя» (кнопка убрана 18.09, механизм жив,
@@ -309,7 +318,7 @@ var COUNTS = {};
 var FREE = null;
 var MAX_UPD = '';
 var lastOkAt = 0;
-var pollTimer = null, tickTimer = null;
+var pollTimer = null, tickTimer = null, omniTimer = null;
 var firstLoadDone = false;
 var prevSnap = {};          /* id -> {st, upd} для звуков на входящие изменения */
 var MY_SEG = '';
@@ -1203,6 +1212,7 @@ function wire() {
   /* ── таблица менеджера ── */
   $('#op2-mgr-body').addEventListener('click', function (e) {
     if (e.target.closest('.op2-maplink')) return; /* ссылка на карту открывает себя сама, дровер не нужен */
+    var omniB = e.target.closest('.rh-omni'); if (omniB) { onOmniBadgeClick_(omniB); return; } /* «где машина» - переход на «Навигацию», дровер не нужен */
     var jb = e.target.closest('[data-jump]'); if (jb) { jumpToDate_(jb.dataset.jump); return; } /* «→ перенесена на...» - переход к новой заявке, не открытие дровера */
     var tr = e.target.closest('tr[data-oid]'); if (!tr) return;
     var ch = e.target.closest('.op2-stc');
@@ -1927,6 +1937,70 @@ function stCell_(o) {
 function plate_(gos, cls, ttl) {
   return '<span class="op2-plate' + (cls ? ' ' + cls : '') + '"' + (ttl ? ' title="' + esc(ttl) + '"' : '') + '>' + esc(gos || '') + '</span>';
 }
+/* Клон lpOmniNormPlate_ (files/index.html) - та же нормализация, чтобы сопоставить
+   vehicle_gos заявки с gosNumber из /omnicomm/locations независимо от пробелов/регистра. */
+function omniNormPlate_(s) { return String(s || '').toUpperCase().replace(/[^А-ЯЁ0-9]/g, ''); }
+/* «Активна» - service_time заявки уже наступило и не прошло больше 8 часов. Настоящая
+   Date-арифметика (не строковое сравнение дат) - окно САМО корректно переходит через
+   полночь (заявка на 17:00 активна до 01:00 СЛЕДУЮЩИХ суток), без ручной работы с
+   границей дня (см. class бага project_month_boundary_bug_class в памяти проекта - тут
+   не наступает, потому что считаем в мс, а не режем строки). Опирается на локальные часы
+   браузера - весь дашборд используется из Москвы, дополнительный перевод часовых поясов
+   не нужен (не тот случай, что write-сторона сервера в CLAUDE.md, "Время: UTC на сервере,
+   МСК на экране" - там сервер писал UTC цифры под видом московских, здесь чистое
+   клиентское сравнение "сейчас" с "сейчас+заявка", один и тот же часовой пояс с обеих
+   сторон). */
+function orderNavActive_(o) {
+  var t = oTime(o);
+  var m = t && t.match(/^(\d{1,2}):(\d{2})/);
+  if (!m || !o.service_date) return false;
+  var dp = o.service_date.split('-');
+  var start = new Date(+dp[0], +dp[1] - 1, +dp[2], +m[1], +m[2], 0, 0).getTime();
+  var now = Date.now();
+  return now >= start && now <= start + 8 * 3600000;
+}
+/* Бейдж - байт-в-байт та же разметка/классы, что .rh-omni в Планировке (files/index.html,
+   lpOmniBadgeHtml_) - CSS склонирован в order-plan-v2.css под #page-order-plan (см. проверку
+   на глобальную коллизию классов между превью и продом, project_preview_css_class_global_
+   collision_gotcha в памяти - здесь то же самое сделано аккуратно, класс СВОЙ файл, но
+   заскоуплен под свою страницу). place уже посчитан сервером (api/lib/omni-geo.js). */
+function omniBadgeHtml_(o, gos) {
+  if (!gos || !orderNavActive_(o)) return '';
+  var v = OMNI_BY_GOS_[omniNormPlate_(gos)];
+  if (!v || v.stale || !v.place) return '';
+  var cls = (v.ignition && v.speed > 3) ? 'live' : v.ignition ? 'idle' : 'off';
+  var title = (cls === 'live' ? 'В движении, ' + Math.round(v.speed) + ' км/ч'
+    : cls === 'idle' ? 'Стоит, зажигание включено' : 'Двигатель заглушён') + ' - открыть на карте «Навигация»';
+  return '<span class="rh-omni ' + cls + '" data-omni-id="' + esc(v.omnicommId) + '" title="' + esc(title) + '"><i></i><b>' + esc(v.place) + '</b></span>';
+}
+/* Общий хвост колонки «Машина» для ОДНОЙ своей машины - раньше был одинаковый литерал в
+   mgrVehCell() и vehCellLog() (два места держали одну и ту же строку) - вынесено сюда,
+   чтобы значок появился сразу в обоих экранах одной правкой, а не в двух местах. */
+function ownSrcTagHtml_(o, vs) {
+  if (vs.length !== 1) return '';
+  return '<span class="op2-src"><span class="op2-tag op2-tg-own">СВОЯ</span>' + omniBadgeHtml_(o, vs[0].vehicle_gos) + '</span>';
+}
+function omniFetch_() {
+  if (document.hidden || !isPageActive()) return;
+  apiGet('/omnicomm/locations', {}).then(function (r) {
+    if (!r || !r.ok || !r.data || !Array.isArray(r.data.vehicles)) return;
+    var byGos = {};
+    r.data.vehicles.forEach(function (v) { if (v.gosNumber) byGos[omniNormPlate_(v.gosNumber)] = v; });
+    OMNI_BY_GOS_ = byGos;
+    renderAll();
+  }).catch(function () {});
+}
+/* Клик по бейджу - тот же переход, что уже есть в Планировке (files/index.html, тот же
+   комментарий "отличная идея - при нажатии перекидывает на страницу навигации", Влад
+   01.09): открывает вкладку «Навигация» и центрует карту на этой машине. showPage/window.NAV -
+   ГЛОБАЛЬНЫЕ (та же причина, по которой inline onclick="showPage(...)" на пункте меню вообще
+   работает) - эта, отдельная, IIFE видит их через window, как apiGet() уже видит
+   fetchFromYardApi_ тем же приёмом. */
+function onOmniBadgeClick_(badge) {
+  var omniId = badge.dataset.omniId; if (!omniId) return;
+  if (typeof showPage === 'function') showPage('navigation', document.querySelector('.sidebar-nav-item[data-page="navigation"]'));
+  if (window.NAV) { NAV.select(omniId); setTimeout(function () { NAV.select(omniId); }, 700); }
+}
 /* своя машина: госномер (+✓-кнопка у логиста) / водитель «Фамилия Имя» (+ осн./рез. из двух) */
 function ownLines_(o, v, multi, withBtn) {
   var ok = !!v.driver_confirmed_at;
@@ -2002,7 +2076,7 @@ function mgrVehCell(o) {
   var vs = oOwn(o);
   if (!vs.length) return '<span class="op2-drv op2-dim">машину ещё не поставили</span>';
   return '<div class="op2-veh">' + vs.map(function (v) { return ownLines_(o, v, vs.length > 1, false); }).join('') +
-    (vs.length === 1 ? '<span class="op2-src"><span class="op2-tag op2-tg-own">СВОЯ</span></span>' : '') + '</div>' + pendHtml(o, 'mgr');
+    ownSrcTagHtml_(o, vs) + '</div>' + pendHtml(o, 'mgr');
 }
 /* «замена машины» (type=replace_vehicle, from_gos/to_gos) и «замена перевозчика»
    (type=replace_carrier, from_carrier_name/to_carrier_name) - один и тот же
@@ -2089,7 +2163,7 @@ function vehCellLog(o) {
   }
   return '<div class="op2-veh" data-oid="' + esc(o.id) + '"' + (vs.length === 1 ? ' data-eid="' + esc(vs[0].id) + '"' : '') + '>' +
     vs.map(function (v) { return ownLines_(o, v, vs.length > 1, true); }).join('') +
-    (vs.length === 1 ? '<span class="op2-src"><span class="op2-tag op2-tg-own">СВОЯ</span></span>' : '') + '</div>' + pendHtml(o, 'log');
+    ownSrcTagHtml_(o, vs) + '</div>' + pendHtml(o, 'log');
 }
 function renderLog() {
   var body = $('#op2-log-body'); if (!body) return;
@@ -2361,6 +2435,7 @@ function setStatus(o, k) {
 /* ═════════════════════════ КЛИКИ В ТАБЛИЦЕ ЛОГИСТА ═════════════════════════ */
 function onLogClick(e) {
   if (e.target.closest('.op2-maplink')) return; /* ссылка на карту открывает себя сама, дровер не нужен */
+  var omniB = e.target.closest('.rh-omni'); if (omniB) { onOmniBadgeClick_(omniB); return; } /* «где машина» - переход на «Навигацию», дровер не нужен */
   var jb = e.target.closest('[data-jump]'); if (jb) { jumpToDate_(jb.dataset.jump); return; }
   var lg = e.target.closest('.op2-logpick');
   var dk = e.target.closest('.op2-dok');
@@ -4605,10 +4680,15 @@ function startPolling() {
     }).catch(function () {});
   }, 2000);
   tickTimer = setInterval(function () { if (!document.hidden && isPageActive()) renderUpdated(); }, 1000);
+  /* Omnicomm - тот же интервал 30с, что и у поллера в Планировке (lpOmniFetch_) - чаще
+     спрашивать нечего, сервер сам опрашивает Omnicomm не быстрее. */
+  omniFetch_();
+  omniTimer = setInterval(omniFetch_, 30000);
 }
 function stopPolling() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+  if (omniTimer) { clearInterval(omniTimer); omniTimer = null; }
 }
 
 /* ═════════════════════════ ВХОД ═════════════════════════ */

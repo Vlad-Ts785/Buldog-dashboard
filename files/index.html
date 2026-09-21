@@ -7,6 +7,12 @@
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="icon-192.png">
+<!-- 20.09, Влад: "давай на iPhone" (Путь A - "Добавить на экран Домой" в Safari, TWA -
+     андроид-only). Без этих двух тегов после установки иконка открывалась бы в обычной
+     вкладке Safari с адресной строкой, а не полноэкранным "приложением" - у
+     orders-m.html/plan-m.html они уже были, здесь не хватало. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#0f0f13">
 <!-- Ранний синхронный скрипт темы - ДО <style> и тяжёлых библиотек, иначе при светлой
      теме страница мигает тёмным на долю секунды (FOUC). Тёмная = отсутствие атрибута,
@@ -3197,6 +3203,50 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
 }#page-logistics-plan .seg-id i{font-weight:500;color:var(--muted);}/* точка водителя: залита = назначен на машину, #page-logistics-plan кольцо = вакансия */
 .seg-drv{position:absolute;top:-2px;right:-2px;width:6px;height:6px;border-radius:50%;}#page-logistics-plan .seg-drv.on{display:none;}/* норму не отмечаем - только отсутствие */
 .seg-drv.off{background:var(--bg2);border:1.5px solid var(--red);}
+/* Номер заявки из «Задания» (19.09, Влад: "номер заявки из задания, чтобы у нас
+   на полоске отображался" - превью из трёх вариантов расположения, утверждён
+   вариант 2 "отдельный жёлтый бейдж рядом", затем превью из трёх размеров того
+   же варианта - утверждён "самый крупный", деплой 20.09, живьём "цифры слишком
+   большие" - откат на маленький размер того же превью, деплой тем же днём.
+   20.09, третий заход тем же днём: маленький размер решил проблему заметности,
+   но не проблему места - бейдж внутри .seg-label по-прежнему отъедал ширину у
+   текста заказчика/маршрута на узких плитках ("не видно там названия
+   заказчика"). Показано новое превью из трёх вариантов расположения (перед
+   плиткой / уголком на плитке / третьей строкой в бейдже МЕН/ЛОГ) - утверждён
+   "перед плиткой".
+   Теперь bейдж - ребёнок САМОГО .seg (не .seg-label), position:absolute,
+   right:100% - использует .seg как containing block (у .seg уже есть свой
+   position:absolute, это не новая ловушка sticky - в отличие от overflow/
+   will-change, о которых предупреждает коммент у .seg выше, добавление
+   position:absolute РЕБЁНКУ .seg ничего не ломает). Отвязан от .seg-label -
+   значит НЕ делит ширину с текстом маршрута ни на пиксель, но и НЕ sticky
+   (в отличие от самого бейдж-корпуса МЕН/ЛОГ) - едет строго с левым краем
+   плитки, при долгой прокрутке многодневной ленты может уехать за экран
+   вместе с началом рейса. Это озвученный и принятый компромисс варианта
+   (см. превью), не забытый край.
+   НАЙДЕНО при тесте на изолированной копии (20.09, до деплоя): при двух
+   рейсах почти впритык (без обычного зазора) бейдж ВТОРОГО рейса может
+   геометрически залезть на плитку ПЕРВОГО - т.к. это ребёнок .seg второго
+   элемента, а не что-то внутри первого, при наведении/клике на зону
+   перекрытия браузер попадёт именно в бейдж (он выше по document order),
+   а не в плитку под ним - клик открыл бы не тот рейс. pointer-events:none
+   - бейдж чисто декоративный (как .seg-nd/.seg-daymode), клики не нужны
+   ему самому, но обязаны проходить насквозь к тому, что реально под ним.
+   НАЙДЕНО живьём (20.09, Влад со скриншотом - "как на превью, маленькая
+   аккуратная плиточка", на бою получился крупный блок): height:100% тянул
+   бейдж на всю высоту плитки (32px) - в превью бейдж был обычным флекс-
+   ребёнком строки, размер брал по своему контенту (маленькая таблетка), а
+   родительский flex+align-items:center центрировал уже готовую таблетку.
+   Здесь бейдж - НЕ флекс-ребёнок (он вне .seg-label), поэтому "взять
+   размер по контенту и центрировать" нужно делать вручную: top:50% +
+   transform:translateY(-50%) вместо top:0+height:100%. */
+.seg-order-badge{
+  position:absolute;top:50%;right:100%;margin-right:5px;
+  transform:translateY(-50%);pointer-events:none;
+  font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;
+  letter-spacing:.02em;color:#1a1204;background:var(--amber);border-radius:4px;
+  padding:1px 5px;white-space:nowrap;
+}
 /* «Под данные» (Влад, 30.08: «когда машина планируется под пропуск... нужна
    галочка... визуально отражаться... с маленькой мигающей красной лампочкой»,
    вариант B из превью, утверждён) - мигающая точка в ПРОТИВОПОЛОЖНОМ углу от
@@ -3260,6 +3310,35 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
 }
 #page-logistics-plan .lp-flagpop-clear:hover{background:var(--bg4);color:var(--text);}
 #page-logistics-plan .lp-flagpop-clear svg{width:12px;height:12px;}
+/* Подсказка по наведению (20.09, Влад: "окошко-подсказка с подробностями заявки" - превью
+   из трёх вариантов расположения/уровня данных, утверждён вариант Б + примечание - разделы
+   Груз/Маршрут/Деньги/Примечание). Тот же каркас, что у .lp-flagpop (одна переиспользуемая
+   карточка на всю доску, position:fixed, координаты - JS по getBoundingClientRect() плитки
+   в lpOpenOrderTip_) - но pointer-events:none, как у .time-hud: это подсказка для чтения,
+   не интерактивная форма, никогда не должна перехватывать клик у того, что под ней. */
+#page-logistics-plan .lp-ordertip{
+  position:fixed;z-index:970;display:none;width:270px;
+  background:var(--bg3);border:1px solid var(--border-strong);border-radius:10px;
+  box-shadow:0 10px 28px rgba(0,0,0,.5);padding:12px 14px;pointer-events:none;
+  font-family:'Golos Text',system-ui,sans-serif;
+}
+#page-logistics-plan .lp-ordertip.open{display:block;}
+#page-logistics-plan .lp-ordertip .ot-title{font-size:12.5px;font-weight:700;color:var(--text);margin-bottom:2px;}
+#page-logistics-plan .lp-ordertip .ot-sub{font-size:10px;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+#page-logistics-plan .lp-ordertip .ot-tag{display:inline-block;font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;letter-spacing:.02em;white-space:nowrap;}
+#page-logistics-plan .lp-ordertip .ot-tag.warn{background:rgba(226,75,74,.16);color:var(--tint-red);}
+#page-logistics-plan .lp-ordertip .ot-tag.ok{background:rgba(29,158,117,.18);color:var(--tint-green);}
+#page-logistics-plan .lp-ordertip .ot-tag.off{background:rgba(226,75,74,.22);color:var(--tint-red);font-weight:800;}
+#page-logistics-plan .lp-ordertip .ot-sect{font-size:9px;text-transform:uppercase;letter-spacing:.06em;color:var(--tint-amber);margin:9px 0 4px;font-weight:700;}
+#page-logistics-plan .lp-ordertip .ot-sect:first-of-type{margin-top:2px;}
+#page-logistics-plan .lp-ordertip .ot-row{display:flex;justify-content:space-between;gap:14px;font-size:11px;padding:3px 0;}
+#page-logistics-plan .lp-ordertip .ot-row .k{color:var(--muted);flex:none;}
+#page-logistics-plan .lp-ordertip .ot-row .v{color:var(--text);text-align:right;font-weight:500;overflow-wrap:anywhere;}
+#page-logistics-plan .lp-ordertip .ot-price{font-family:'JetBrains Mono',monospace;font-weight:700;color:var(--tint-amber);}
+#page-logistics-plan .lp-ordertip .ot-note{
+  margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:10.5px;
+  color:var(--text);line-height:1.5;white-space:pre-line;max-height:140px;overflow-y:auto;
+}
 /* «Суточный режим» (Влад, 30.08: "давай визуализируем... три варианта", выбран
    вариант «значок», подпись 30.08 второй заход - "вместо 24 часов слово
    суточный") - тихий вариант, специально: если суточных рейсов на ленте
@@ -3353,6 +3432,15 @@ main:has(> #page-crm.active), .main-wrap:has(main > #page-crm.active){min-width:
 }#page-logistics-plan .hnd{position:absolute;top:0;bottom:0;width:6px;cursor:ew-resize;z-index:2;}#page-logistics-plan .hnd.l{left:0;}#page-logistics-plan .hnd.r{right:0;}/* Зумы - стандарт Влада 29.08: «неделя» = только МЕН/ЛОГ (бейдж, #page-logistics-plan без маршрута), #page-logistics-plan «месяц» = только ЛОГист, #page-logistics-plan всё - первыми тремя буквами. Служебные плашки (без
    бейджа) на обоих зумах остаются чистым цветом. */
 #page-logistics-plan.z-week .seg .seg-txt{display:none;}#page-logistics-plan.z-week .seg-label{margin-left:2px;}#page-logistics-plan.z-month .seg{height:16px;top:18px;border-radius:3px;font-size:0;}#page-logistics-plan.z-month .seg .seg-txt{display:none;}#page-logistics-plan.z-month .seg-label{margin-left:1px;}
+/* Номер заявки - только на обычном зуме («всё»/3 дня): на неделе стандарт уже
+   «только бейдж МЕН/ЛОГ», на месяце плитка ужимается до 16px, а .seg-id там и
+   так теряет буквы менеджера (.z-month .seg-id b{display:none}) - номер заявки
+   на этих двух зумах не читаем полезно независимо от размера самого значка.
+   Отдельная причина теперь, когда бейдж живёт ПЕРЕД плиткой (right:100%, не
+   внутри .seg-label): на плотной зумленной ленте плитки часто стоят почти
+   впритык друг к другу - бейдж мог бы налезать на соседнюю плитку слева.
+   Прячем вместе с route-текстом выше. */
+#page-logistics-plan.z-week .seg-order-badge,#page-logistics-plan.z-month .seg-order-badge{display:none;}
 /* У статусных отрезков (ремонт/ТО/без заказа/без водителя) нет бейджа МЕН/ЛОГ -
    единственная опознавательная надпись у них - именно этот текст. Скрытие текста
    на зумах неделя/месяц было рассчитано на РЕЙСЫ (бейдж остаётся опознавательным
@@ -4764,6 +4852,14 @@ main:has(> #page-dynamics.active){min-width:0;}
     <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 5l10 10M15 5L5 15"/></svg>
   </button>
 </div>
+
+<!-- Подсказка по наведению (20.09, Влад: "окошко-подсказка с подробностями заявки" -
+     превью из трёх вариантов, утверждён вариант Б + примечание). Тот же приём, что у
+     .lp-flagpop - одна переиспользуемая карточка на всю доску, позиционируется через JS
+     по getBoundingClientRect() плитки (см. lpOpenOrderTip_), живёт ВНЕ скролла .board.
+     Только для рейсов с привязанной заявкой из "Задания" (s.orderId != null) - у рейсов
+     без заявки подсказывать нечего сверх того, что уже на самой плитке. -->
+<div class="lp-ordertip" id="lp-orderTip"></div>
 
 </div>
 
@@ -8224,6 +8320,19 @@ window.Clc = {
 </div>
 
 <script>
+// СРОЧНЫЙ ПРОДАКШЕН-ФИКС (20.09, Влад - "Ошибка: FLEET_PEOPLE_ is not defined" на весь
+// экран при заходе; отдельно - не нажималась кнопка "Смотреть как сотрудник"). Причина -
+// гонка параллельных сессий: коммит "уволенные сотрудники в пикере" добавил обращение к
+// FLEET_PEOPLE_ в buildMyPageRoster_/toggleViewAsPanel (ЭТОТ <script>-блок, с этой строки),
+// но сама переменная `var FLEET_PEOPLE_ = [], FLEET_ASSETS_ = [], FLEET_ASSIGN_ = []`
+// объявлена в ДРУГОМ, более позднем и физически ОТДЕЛЬНОМ <script>-теге (логика
+// "Планировки", ~34к строк ниже, не влита в общий - см. комментарий там). Каждый classical
+// <script>-тег выполняется в документном порядке; переменная из более позднего тега ещё не
+// существует, когда код из ЭТОГО тега её читает - `(FLEET_PEOPLE_ || [])` не спасает,
+// ReferenceError бросается на самом обращении к имени, до оператора `||`. Объявляем здесь
+// тоже (var - безопасно переобъявить, не конфликтует с объявлением в блоке Планировки;
+// то же имя на `window`, обе части кода читают/пишут одну и ту же переменную).
+var FLEET_PEOPLE_ = [], FLEET_ASSETS_ = [], FLEET_ASSIGN_ = [];
 const API_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbxWi4wJWsSeHdgwrsC-d__EOrncLnkhDr6PgXohoPafY2Y2VtBPq_mGi9qd7mH-vzA00w/exec';
 
 // "Гусейнова" отсутствовала в списке - Топ менеджеров молча не показывал её (нашёл при
@@ -9909,7 +10018,7 @@ var cursorLightInited_ = {};
 // чинится готовый пробел «Зарплаты» (11.09): там плитки хаба тоже .hub-grid, но
 // initCursorLight_ для page-sales-salary раньше не вызывался вовсе, свет не появлялся -
 // см. вызов ниже рядом с page-directory.
-var LIGHT_GRID_SEL_ = '.kpi-grid,.mp-tier,.mp-stats,.p2-tier3-grid,.grid-2,.crm-kpis,.kb-board,.hub-grid,.pm-tiles';
+var LIGHT_GRID_SEL_ = '.kpi-grid,.mp-tier,.mp-stats,.p2-tier3-grid,.grid-2,.crm-kpis,.kb-board,.hub-grid,.pm-tiles,.an-kpi-grid,.an-money-grid';
 function initCursorLight_(pageId, lightClass) {
   if (cursorLightInited_[pageId]) return;
   var page = document.getElementById(pageId);
@@ -32152,10 +32261,12 @@ function makeSeg(s){
      маршрут - один sticky-ряд, едут по скроллу вместе. Вакансию водителя машины
      отмечает красная точка на бейдже (норму не отмечаем - только отсутствие). */
   var head = "";
+  var orderBadgeHtml = "";
   if (s.kind === "trip"){
     var v = STATE.vehicles[s.v];
     head = '<span class="seg-id"><b>' + three(s.mg) + '</b><i>' + three(s.lg) + '</i>' +
       '<span class="seg-drv ' + (v && v.vacant ? "off" : "on") + '"></span></span>';
+    if (s.orderDayNo != null) orderBadgeHtml = '<span class="seg-order-badge">№' + s.orderDayNo + '</span>';
   }
   /* НАЙДЕННЫЙ БАГ, второй заход (18.09, Влад живьём: "на 800-ой полоске как-то
      артефакт в протяжке" - обрывок "Р" вместо "Ремонт трала · до 19.09"). Живой
@@ -32198,7 +32309,7 @@ function makeSeg(s){
       ? '<path d="M5 3v14a1 1 0 1 0 2 0v-4.2c1.3-.7 2.7-.9 4-.4 1.8.7 3.6.2 5-1V4c-1.4 1.2-3.2 1.7-5 1-1.3-.5-2.7-.3-4 .4V3a1 1 0 0 0-2 0Z"/>'
       : '<path d="M5 17V4"/><path d="M5 4c0-.6 2-1.6 4.5-1.6S14 4 14 4v6.4c0 .6-2 1.6-4.5 1.6S5 10.4 5 10.4"/>') +
     "</svg></span>";
-  el.innerHTML = '<span class="seg-label">' + head +
+  el.innerHTML = orderBadgeHtml + '<span class="seg-label">' + head +
     '<span class="seg-txt">' + segTxt + "</span>" +
     (s.needsData ? '<span class="seg-nd" title="Под данные - документы для пропуска ещё не собраны"></span>' : "") +
     /* один и тот же "золочёный" значок для обоих режимов (Влад, 30.08: "добавь
@@ -33105,6 +33216,20 @@ window.addEventListener("pointerup", function(e){
   });
 
   if (clash){ flashBad(el); S.reject(); toast("Пересечение с другим отрезком - не поставил", null); }
+  else if (before.v !== seg.v && seg.orderDayNo != null){
+    /* 21.09, Влад: разобрали, что перенос заявки из "Задания" на другую машину прямо
+       здесь НЕ обновляет исполнителя в "Задании" (plan_order_executors остаётся со
+       старой машиной/водителем - POST /api/plan/seg трогает только plan_segs, два
+       независимых места хранения одного факта). Подтвердил вариант "заблокировать" -
+       перенос на другую машину для заявок с номером (orderDayNo - тот же признак,
+       что уже красит бейдж №N на плитке) отменяется целиком, машину такой заявки
+       можно сменить только через "Задание". Откат - тот же приём, что у "Отмены" в
+       диалоге "под данные" чуть ниже (полный renderRows(), не ручной DOM). */
+    S.reject();
+    seg.s = before.s; seg.v = before.v;
+    renderRows();
+    toast('<span class="op2-warn">Машину этой заявки меняйте в «Задании»</span> - перенос заявки на другую машину в Планировке заблокирован', null);
+  }
   else if (before.s !== seg.s || before.v !== seg.v){
     S.drop();
     /* «Под данные» (Влад, 30.08) - перенос НА ДРУГУЮ МАШИНУ конкретно (не
@@ -33287,6 +33412,28 @@ function applyServerSegs_(rows){
       seg.lg = personByName_(r.logist_name, (v && v.long) ? LOG_LONG : LOG_TRAL);
       seg.from = r.route_from || ""; seg.to = r.route_to || ""; seg.customer = r.customer || "";
       seg.tripMode = r.trip_mode || "";
+      /* Номер заявки из "Задания" (20.09, Влад: превью - вариант 2, крупный размер,
+         утверждён, "всё должно быть у нас в планировке так"). Read-only здесь - заявку
+         создаёт/нумерует "Задание", Планировка только показывает; сознательно НЕ несём
+         это поле через segToWire_ (нечего слать обратно на сервер). null для рейсов,
+         заведённых НЕ из "Задания" (старый способ создания рейса прямо в Планировке
+         всё ещё есть) - тогда бейджа просто нет. */
+      seg.orderDayNo = r.order_day_no != null ? r.order_day_no : null;
+      /* Подробности заявки для подсказки по наведению (20.09, Влад: "окошко-подсказка с
+         более подробной информацией" - превью, утверждён вариант Б + примечание). Та же
+         логика read-only, что у orderDayNo - только для чтения, ничего не шлём обратно.
+         price/cargo_weight_t - DECIMAL-колонки, mysql2 отдаёт их СТРОКОЙ (см. память
+         project_plan_segs_fleet_state_shared_contract про ту же ловушку у другого поля) -
+         parseFloat здесь, не в момент вывода. */
+      seg.orderStatus = r.order_status || null;
+      seg.orderEquipmentType = r.order_equipment_type || null;
+      seg.orderCargo = r.order_cargo || null;
+      seg.orderCargoWeight = r.order_cargo_weight_t != null ? parseFloat(r.order_cargo_weight_t) : null;
+      seg.orderLoadAddress = r.order_load_address || null;
+      seg.orderUnloadAddress = r.order_unload_address || null;
+      seg.orderPrice = r.order_price != null ? parseFloat(r.order_price) : null;
+      seg.orderPaymentStatus = r.order_payment_status || null;
+      seg.orderNote = r.order_note || null;
     }
     segs.push(seg);
     seenIds[r.id] = true;
@@ -34162,7 +34309,7 @@ var lpHistScopedV_ = null;
 function lpHistUndoLabel_(ev){
   switch (ev.type){
     case "fleet_uncouple": return ev.kind === "driver" ? "Вернуть водителя" : "Вернуть прицеп";
-    case "seg_delete": return "Восстановить запись";
+    case "seg_delete": case "seg_cancel": return "Восстановить запись";
     default: return "Отменить";
   }
 }
@@ -34390,6 +34537,94 @@ document.addEventListener("click", function(e){
   if (e.target.closest(".lp-flagpop") || e.target.closest(".lp-flag-btn")) return;
   lpCloseFlagPop_();
 });
+
+/* ═══ Подсказка по наведению (20.09, Влад: "хочу окошко-подсказку с более подробной
+   информацией по заказу, по наведению мышки" - превью из трёх вариантов расположения
+   и уровня данных, утверждён вариант Б + примечание). Только для рейсов с привязанной
+   заявкой из "Задания" (s.orderId != null через orderDayNo/orderPrice и т.п. - см.
+   applyServerSegs_) - у рейсов, заведённых напрямую в Планировке без "Задания", этих
+   полей просто нет, подсказывать нечего сверх самой плитки. ═══ */
+var lpOrderTip_ = document.getElementById("lp-orderTip");
+var lpTipTimer_ = null, lpTipOpenId_ = null;
+var LP_ORDER_STATUS_TAG_ = {
+  unconfirmed: {cls: "warn", label: "не подтверждена"},
+  confirmed:   {cls: "ok",   label: "подтверждена"},
+  cancelled:   {cls: "off",  label: "отбой"},
+  done:        {cls: "ok",   label: "выполнена"},
+};
+function otRow_(k, v){
+  return '<div class="ot-row"><span class="k">' + pageEsc_(k) + '</span><span class="v">' + (v || "—") + '</span></div>';
+}
+/* Влад, 20.09, со скриншотом живой заявки: "информация в виде ссылки не несёт
+   никакой полезной нагрузки в данном окне... ссылки можно обрезать" - менеджеры
+   иногда вставляют в поле адреса Яндекс-ссылку с координатами (навигатор/карта)
+   прямо рядом с текстом адреса - в самой заявке это полезно (клик открыл бы
+   карту), но в ЭТОЙ подсказке-для-чтения ссылка только растягивает карточку и
+   ничего не даёт глазами. Вырезаем ТОЛЬКО в подсказке, не трогаем исходные
+   данные заявки (в "Задании" ссылка остаётся кликабельной как была). */
+function otStripLinks_(s){
+  if (!s) return s;
+  return s.replace(/https?:\/\/\S+/g, "").replace(/\s{2,}/g, " ").trim();
+}
+function lpOrderTipHtml_(s){
+  var st = LP_ORDER_STATUS_TAG_[s.orderStatus] || null;
+  var loadAddr = otStripLinks_(s.orderLoadAddress || s.from);
+  var unloadAddr = otStripLinks_(s.orderUnloadAddress || s.to);
+  var h = '<div class="ot-title">' + (s.orderDayNo != null ? "№" + s.orderDayNo + " · " : "") + pageEsc_(s.customer || "—") + '</div>';
+  h += '<div class="ot-sub">' + pageEsc_(hm(s.s)) + (st ? ' · <span class="ot-tag ' + st.cls + '">' + pageEsc_(st.label) + '</span>' : "") + '</div>';
+  h += '<div class="ot-sect">Груз</div>';
+  h += otRow_("Тип техники", s.orderEquipmentType ? pageEsc_(s.orderEquipmentType) : null);
+  h += otRow_("Груз", s.orderCargo ? pageEsc_(s.orderCargo) : null);
+  h += otRow_("Вес", s.orderCargoWeight != null ? s.orderCargoWeight + " т" : null);
+  h += '<div class="ot-sect">Маршрут</div>';
+  h += otRow_("Погрузка", loadAddr ? pageEsc_(loadAddr) : null);
+  h += otRow_("Выгрузка", unloadAddr ? pageEsc_(unloadAddr) : null);
+  h += '<div class="ot-sect">Деньги</div>';
+  h += otRow_("Цена", s.orderPrice != null ? '<span class="ot-price">' + Math.round(s.orderPrice).toLocaleString("ru-RU") + " ₽</span>" : null);
+  h += otRow_("Оплата", s.orderPaymentStatus ? pageEsc_(s.orderPaymentStatus) : null);
+  if (s.orderNote) h += '<div class="ot-sect">Примечание</div><div class="ot-note">' + pageEsc_(s.orderNote) + '</div>';
+  return h;
+}
+function lpCloseOrderTip_(){
+  lpOrderTip_.classList.remove("open");
+  lpTipOpenId_ = null;
+}
+function lpOpenOrderTip_(el, s){
+  lpTipOpenId_ = s.id;
+  lpOrderTip_.innerHTML = lpOrderTipHtml_(s);
+  lpOrderTip_.classList.add("open");
+  var r = el.getBoundingClientRect();
+  var w = lpOrderTip_.offsetWidth || 270;
+  /* Сбоку от плитки (Влад в превью выбрал вариант Б, "карточка сбоку от плитки") -
+     по умолчанию справа, но у самого правого края экрана уходили бы за видимую область
+     (озвученный минус варианта в самом превью) - разворачиваем налево, если не влезает. */
+  var left = r.right + 10;
+  if (left + w > window.innerWidth - 8) left = r.left - w - 10;
+  if (left < 8) left = 8;
+  var top = Math.min(r.top, window.innerHeight - (lpOrderTip_.offsetHeight || 200) - 8);
+  if (top < 8) top = 8;
+  lpOrderTip_.style.left = left + "px";
+  lpOrderTip_.style.top = top + "px";
+}
+rowsEl.addEventListener("mouseover", function(e){
+  var el = e.target.closest(".seg[data-kind='trip']");
+  if (!el || el.contains(e.relatedTarget)) return;
+  if (drag || create || arr) return;   /* идёт захват плитки - подсказке сейчас не место */
+  var seg = STATE.segs.find(function(s){ return s.id === el.dataset.id; });
+  if (!seg || seg.orderDayNo == null) return;
+  if (lpTipTimer_) clearTimeout(lpTipTimer_);
+  lpTipTimer_ = setTimeout(function(){ lpOpenOrderTip_(el, seg); }, 260);
+});
+rowsEl.addEventListener("mouseout", function(e){
+  var el = e.target.closest(".seg[data-kind='trip']");
+  if (!el || el.contains(e.relatedTarget)) return;
+  if (lpTipTimer_){ clearTimeout(lpTipTimer_); lpTipTimer_ = null; }
+  lpCloseOrderTip_();
+});
+/* Скролл/зум ленты - координаты подсказки были посчитаны для старой позиции плитки,
+   закрываем сразу, а не тащим устаревший прямоугольник за собой (тот же приём, что у
+   HUD при завершении драга). */
+board.addEventListener("scroll", function(){ if (lpTipOpenId_) lpCloseOrderTip_(); }, {passive: true});
 function fetchFleetData_(){
   /* Та же защита от лишних запросов, что у fetchPlanSegs_ (не спрашивать сервер,
      пока вкладка Планировки скрыта/не активна) - актуально теперь, когда эта

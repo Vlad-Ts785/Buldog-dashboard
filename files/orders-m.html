@@ -14,6 +14,10 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@500;600;700&family=JetBrains+Mono:wght@500;600;700&family=Unbounded:wght@500;600&display=swap" rel="stylesheet">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<!-- Ранний синхронный скрипт темы, ДО <style> - тот же приём, что index.html (21.09,
+     общая переменная 'yardhub_theme'), иначе страница на долю секунды мигает тёмным
+     даже при сохранённой светлой теме (FOUC). -->
+<script>try{if(localStorage.getItem('yardhub_theme')==='light'){document.documentElement.setAttribute('data-theme','light');document.querySelector('meta[name="theme-color"]').setAttribute('content','#eef1f5');}}catch(e){}</script>
 <style>
 /* ── «Задание» с телефона, вариант «Лента» - утверждён Владом 19.09.2026, перенесён 1:1
    (правило «превью = контракт»). Источник: превью zm_variant_a.html (артефакт
@@ -36,6 +40,16 @@
   --ease-drawer:cubic-bezier(.32,.72,0,1);
   --safe-b:env(safe-area-inset-bottom,0px); --safe-t:env(safe-area-inset-top,0px);
   --hdr-row:44px;
+}
+/* Светлая тема (21.09) - та же палитра, что уже утверждена и живёт в index.html
+   (plans/2026-08-29-light-theme-toggle.md, "утверждено вживую через 3 варианта в чате"),
+   один в один по значениям токенов - не отдельный, местный вариант. */
+html[data-theme="light"]{
+  --bg:#eef1f5; --bg2:#ffffff; --bg3:#e2e7ed; --bg4:#d3dae2;
+  --border:rgba(15,22,35,0.16); --border-strong:rgba(15,22,35,0.30);
+  --text:#0f1623; --muted:#4a5568;
+  --tint-green:#0a5940; --tint-amber:#6f480d; --tint-red:#8a2c2b;
+  --scrim:rgba(15,22,35,.45);
 }
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{height:100%;background:var(--bg)}
@@ -1987,19 +2001,37 @@ function renderHiredSheet(head,body,foot){
   });
 }
 
-/* ---- настройки (тема-заглушка, версия, выход) ---- */
-var PAGE_VERSION_ = "v1 · 19.09";
+/* ---- настройки (тема, версия, выход) ---- */
+var PAGE_VERSION_ = "v2 · 21.09";
+// 21.09, Влад: "своя настройка темы и она не работает, хотя есть общая" - раньше это была
+// декоративная заглушка (3 кнопки без обработчика, всегда "Тёмная"). Общая тема живёт в
+// index.html (localStorage 'yardhub_theme', тот же ключ - см. applyTheme() там) - здесь
+// та же переменная, чтобы "один раз установил - применилось везде" было правдой буквально,
+// а не по ощущению. "Как в телефоне" убрана - в index.html её никогда не было, оставляем
+// только бинарный выбор, чтобы все три мобильные страницы вели себя одинаково.
+function orderMTheme_(){ return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'; }
+function setOrderMTheme_(t){
+  if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+  else document.documentElement.removeAttribute('data-theme');
+  try { localStorage.setItem('yardhub_theme', t); } catch(e){}
+  var tc = document.querySelector('meta[name="theme-color"]');
+  if (tc) tc.setAttribute('content', t === 'light' ? '#eef1f5' : '#0f0f13');
+}
 function renderSettingsSheet(head,body,foot){
   head.innerHTML = shHeadHtml('Настройки');
   $('shCancel').addEventListener('click', function(){ closeSheet(); });
+  var theme = orderMTheme_();
   body.innerHTML =
     '<div class="list-row" id="sRefresh">Обновить данные<span class="go"><svg><use href="#i-chev"/></svg></span></div>' +
-    '<div class="f-label">Тема</div><div class="seg3"><button aria-pressed="true">Тёмная</button><button aria-pressed="false">Светлая</button><button aria-pressed="false">Как в телефоне</button></div>' +
-    '<div class="info">Светлая - отступление от ГОСТа, пока не включена.</div>' +
+    '<div class="f-label">Тема</div><div class="seg3" id="sTheme"><button data-t="dark" aria-pressed="'+(theme==='dark')+'">Тёмная</button><button data-t="light" aria-pressed="'+(theme==='light')+'">Светлая</button></div>' +
     '<div class="f-label">Версия</div><div class="frow"><div class="k">Страница</div><div class="v mono">orders-m · '+PAGE_VERSION_+'</div></div>' +
     '<div class="list-row muted" id="sLogout">Выйти</div>';
   foot.innerHTML='';
   $('sRefresh').addEventListener('click', function(){ closeSheet(); loadCounts(); startLoad_(); toast('Данные обновлены'); });
+  $('sTheme').addEventListener('click', function(e){
+    var b = e.target.closest('button[data-t]'); if(!b) return;
+    setOrderMTheme_(b.getAttribute('data-t')); vib(4); renderSettingsSheet(head,body,foot);
+  });
   $('sLogout').addEventListener('click', function(){
     try{ ["session_token","id_token","user_role","user_name"].forEach(function(k){ localStorage.removeItem(k); }); }catch(e){}
     location.href='index.html';

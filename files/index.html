@@ -305,9 +305,14 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .sidebar-nav-item .menu-grip svg{width:8px;height:12px;display:block;}
 .sidebar-nav-item .menu-eye{display:none;margin-left:4px;width:18px;height:18px;flex:none;border:1px solid var(--border);border-radius:5px;background:var(--bg2);color:var(--muted);align-items:center;justify-content:center;cursor:pointer;}
 .sidebar-nav-item .menu-eye svg{width:11px;height:11px;display:block;}
-/* В режиме подписи не переносим - длинные ("Глобальная статистика") режутся многоточием,
-   иначе с grip+глазом строка становилась двухэтажной. */
-.sidebar.menu-customizing .sidebar-nav-item{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;gap:8px;padding-right:6px;}
+/* 20.09, Влад (скриншот - длинная подпись "Операционный директор" не даёт скрыть пункт,
+   глаза не видно): text-overflow:ellipsis НА САМОМ .sidebar-nav-item не умеет "ужать
+   только текст" - контейнер просто обрезал grip/eye overflow:hidden вместе с текстом,
+   как только суммарная ширина (иконка+текст+grip+eye) переставала помещаться. Подпись
+   теперь свой span .sidebar-nav-label (см. menuDecorateItems_) - ужимается и многоточится
+   он один, grip/eye фиксированного размера и остаются видны/кликабельны всегда. */
+.sidebar.menu-customizing .sidebar-nav-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.sidebar.menu-customizing .sidebar-nav-item{gap:8px;padding-right:6px;}
 .sidebar.menu-customizing .sidebar-nav-item{cursor:grab;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:none;outline:1px dashed rgba(255,255,255,.16);outline-offset:-1px;}
 .sidebar.menu-customizing .sidebar-nav-item:hover{transform:none;background:var(--bg3);}
 .sidebar.menu-customizing .sidebar-nav-item .menu-grip{display:block;}
@@ -8953,6 +8958,16 @@ function buildMyPageRoster_(byManager, byLogist) {
 // "Смотреть как сотрудник" в подвале сайдбара, иначе null. Только для D.role==='admin' - у
 // реальных manager/logist кнопки нет (applyRoleUI прячет весь сайдбар, кроме своих 3 пунктов).
 let viewAsEntry = null;
+// 21.09, Влад: "если захожу в сотрудника - должен видеть 100% что видит он". D.role остаётся
+// 'admin' ВЕСЬ ПРЕДПРОСМОТР (viewAsEntry - клиентская надстройка, не смена роли) - код,
+// который решает, КАКОЙ КОНТЕНТ показать (а не какая ВОЗМОЖНОСТЬ доступна самому Владу),
+// должен спрашивать ЭТУ функцию, а не сырой D.role==='admin' напрямую, иначе админский вид
+// протекает сквозь предпросмотр (живой пример - "Дебиторка/План поступлений" показывала
+// сводку по обеим руководительницам вместо личного экрана одной). Для настоящих
+// admin-only ВОЗМОЖНОСТЕЙ (кнопка "Смотреть как сотрудник", кнопки синка, которые тратят
+// чужую квоту) сырой D.role==='admin' по-прежнему верен - те должны работать и во время
+// предпросмотра, эта функция НЕ для них.
+function isEffectiveAdmin_() { return !!(D && D.role === 'admin' && !viewAsEntry); }
 
 // Кто сейчас выбран на личной странице - вынесено отдельно (2026-08-11), т.к. и
 // renderMyPage(), и setMyPagePeriod() (для роутинга Васина на свой источник данных, см. ниже)
@@ -12835,7 +12850,13 @@ function applyRoleUI() {
     if (isCommercialHeadViewer) {
       allowedPages_.push('debt');
       var debtNavItem_ = document.querySelector('.sidebar-nav-item[data-page="debt"]');
-      if (debtNavItem_ && debtNavItem_.lastChild && debtNavItem_.lastChild.nodeType === 3) debtNavItem_.lastChild.nodeValue = ' Суды';
+      // 20.09, НАЙДЕННЫЙ БАГ: со дня появления grip/eye (menuDecorateItems_, до этого кода)
+      // lastChild пункта - EL.menu-eye, не текст, поэтому проверка nodeType===3 ниже молча
+      // никогда не срабатывала - Ахтамова/Гусейнова весь год видели "Дебиторка", не "Суды".
+      // Теперь подпись - свой span .sidebar-nav-label (см. menuDecorateItems_), целимся в него.
+      var debtLabel_ = debtNavItem_ && debtNavItem_.querySelector('.sidebar-nav-label');
+      if (debtLabel_) debtLabel_.textContent = ' Суды';
+      else if (debtNavItem_ && debtNavItem_.lastChild && debtNavItem_.lastChild.nodeType === 3) debtNavItem_.lastChild.nodeValue = ' Суды';
     }
     // «Зарплата машинистов» (15.09) - отдельный пункт меню, тот же принцип, что у Рыщанова/
     // руководителей коммерческих групп выше.
@@ -12879,6 +12900,18 @@ function applyRoleUI() {
       item.style.display = personalOnlyPages.indexOf(item.getAttribute('data-page')) >= 0 ? 'none' : '';
     });
     document.querySelectorAll('.sidebar-nav-section').forEach(function(s){ s.style.display = ''; });
+    // 21.09, НАЙДЕННЫЙ БАГ (Влад: "перешёл в своё меню - нет вкладки ДЗ, куда делась?"):
+    // relabel "Дебиторка"->"Суды" выше (см. isCommercialHeadViewer) меняет DOM НАПРЯМУЮ и
+    // необратимо. Раньше он был сломан (lastChild - не текстовый узел, починено 20.09) -
+    // эта ветка никогда не видела последствий. Как только relabel заработал по-настоящему,
+    // обнажился парный баг: ничто не возвращало подпись назад при выходе из предпросмотра
+    // руководителя коммерческой группы - "Суды" оставалась висеть и на обычной админ-
+    // панели, хотя для admin это полноценная "Дебиторка" (ДЗ + План поступлений + Суды
+    // тремя плитками, см. showDebtHub_). Сбрасываем сюда, а не только в isCommercialHeadViewer
+    // выше - эта ветка (plain admin) единственная, где пункт РЕАЛЬНО виден с чужой подписью;
+    // в manager/logist-предпросмотре НЕ руководителя группы пункт и так display:none.
+    var debtLabel_ = document.querySelector('.sidebar-nav-item[data-page="debt"] .sidebar-nav-label');
+    if (debtLabel_) debtLabel_.textContent = ' Дебиторка';
   }
   applyMenuConfig_();   // кастом меню поверх ролевого фильтра (05.09), см. блок "Кастомизация меню"
   updateViewAsButton_();
@@ -13020,6 +13053,20 @@ function setViewAs(name, type) {
   if (!viewAsEntry) {
     var mainNav = document.querySelector('.sidebar-nav-item[data-page="main"]');
     showPage('main', mainNav);
+  } else {
+    // 21.09, НАЙДЕННЫЙ БАГ (Влад: "вижу свои экраны" - на "Дебиторка/План поступлений" как
+    // admin переключился на "Смотреть как Гусейнова", страница осталась прежней - сводка ПО
+    // ОБЕИМ руководительницам, admin-only, а не то, что видит сама Гусейнова). Тот же класс,
+    // что уже точечно чинили дважды для отдельных кэшей (14.09 crpLoaded_/crpAmounts_, 19.09
+    // localStorage) - render() при previewing перерисовывает ТОЛЬКО #page-my-page (см.
+    // комментарий в render()), а КАКАЯ страница физически ВИДНА (.page.active) не трогает
+    // вообще - если до переключения был открыт admin-only экран, он просто продолжает
+    // висеть на экране как есть. Вместо очередного точечного патча - системный фикс: при
+    // входе или смене цели предпросмотра ВСЕГДА возвращаемся на "Личную страницу" (то же
+    // место, куда попадает настоящий вход manager/logist/mechanic) - независимо от того,
+    // какая страница была открыта ДО переключения, её больше не унести через "Смотреть как".
+    var myPageNav_ = document.querySelector('.sidebar-nav-item[data-page="my-page"]');
+    showPage('my-page', myPageNav_);
   }
 }
 document.addEventListener('click', function(ev) {
@@ -21233,7 +21280,13 @@ function renderDeptTrals_() {
   var box = document.getElementById('dept-trals-kpi');
   if (!box) return;
   var o = D && D.orders;
-  var rows = (o && (o.dept_all || (D.role === 'admin' ? o.by_manager : null))) || [];
+  // 21.09, защитная правка (не живой баг - проверено, что o.by_manager сегодня строится
+  // сервером как тот же полный по-компании срез, что и o.dept_all, так что фолбэк ниже
+  // сейчас совпадает по содержимому): isEffectiveAdmin_(), не сырой D.role - у этой
+  // конкретной страницы уже был инцидент утечки admin-данных в предпросмотр
+  // (project_dept_trals_direkcia_leak_bug, 13.09), если однажды by_manager/dept_all
+  // разойдутся по смыслу, сырая проверка тихо потекла бы снова.
+  var rows = (o && (o.dept_all || (isEffectiveAdmin_() ? o.by_manager : null))) || [];
   if (!rows.length) {
     // Данных нет ровно в одном случае: вкладка открыта в сессии, начатой ДО того, как
     // сервер научился отдавать dept_all (10.09) - у человека в памяти старый ответ.
@@ -24619,8 +24672,10 @@ function showDebtHub_() {
   // все три раздела, руководитель коммерческой группы (Ахтамова/Гусейнова, 15.09) - только
   // «Суды». Полагаться на то, что страница целиком закрыта, нельзя - ровно на этом допущении
   // 13.09 «Дирекция» протекла в урезанную копию страницы отдела
-  // (память project_dept_trals_direkcia_leak_bug).
-  var isAdmin_ = !!(D && D.role === 'admin');
+  // (память project_dept_trals_direkcia_leak_bug). 21.09 - isEffectiveAdmin_(), не сырой
+  // D.role: во время предпросмотра D.role остаётся 'admin', сырая проверка показывала
+  // Владу-как-Гусейновой все три раздела вместо её одного (см. isEffectiveAdmin_).
+  var isAdmin_ = isEffectiveAdmin_();
   var courtTile = document.getElementById('debt-hub-tile-court');
   if (courtTile) courtTile.style.display = courtCanView_() ? '' : 'none';
   var hubTiles_ = document.querySelectorAll('#debt-hub .hub-tile');
@@ -24635,15 +24690,22 @@ function showDebtHub_() {
 // из уже существующего COMMERCIAL_HEAD_SUR_FRONT_, второго списка не заводим.
 function courtCanView_() {
   if (!D) return false;
-  if (D.role === 'admin') return true;
-  var sur = String(D.managerName || D.logistName || '').trim().split(' ')[0].toLowerCase();
+  if (isEffectiveAdmin_()) return true;
+  // 21.09 - имя берём из viewAsEntry при предпросмотре (тот же приём, что curPersonName в
+  // applyRoleUI): D.managerName/logistName у РЕАЛЬНОГО admin-аккаунта пусты, раньше сырой
+  // D.role==='admin' выше просто возвращал true для ЛЮБОГО предпросмотра, не только
+  // руководителей коммерческих групп - случайно верно для Ахтамовой/Гусейновой, но неверно
+  // покажи Владу, например, обычного менеджера.
+  var name_ = viewAsEntry ? viewAsEntry.name : (D.managerName || D.logistName || '');
+  var sur = String(name_ || '').trim().split(' ')[0].toLowerCase();
   return !!sur && COMMERCIAL_HEAD_SUR_FRONT_.indexOf(sur) >= 0;
 }
 function chooseDebtTarget_(tab) {
   // Гвард на случай прямой ссылки/старой вкладки: не-admin в этой странице открывает только
   // «Суды». Сервер ему данных ДЗ и плана всё равно не отдаст, но и предлагать пустой экран
-  // незачем.
-  if (tab !== 'court' && !(D && D.role === 'admin')) tab = 'court';
+  // незачем. 21.09 - isEffectiveAdmin_(): во время предпросмотра сырой D.role==='admin' пускал
+  // на "ДЗ"/"План поступлений" (admin-only сводки), которые сама Гусейнова никогда не видит.
+  if (tab !== 'court' && !isEffectiveAdmin_()) tab = 'court';
   if (tab === 'court' && !courtCanView_()) { showDebtHub_(); return; }
   var hub = document.getElementById('debt-hub');
   var back = document.getElementById('debt-back-link');
@@ -24656,13 +24718,18 @@ function chooseDebtTarget_(tab) {
   if (plan) plan.style.display = (tab === 'plan') ? '' : 'none';
   if (court) court.style.display = (tab === 'court') ? '' : 'none';
   setText('page-title', tab === 'plan' ? 'Дебиторка - план поступлений'
-    : tab === 'court' ? ((D && D.role === 'admin') ? 'Дебиторка - суды' : 'Суды')
+    : tab === 'court' ? (isEffectiveAdmin_() ? 'Дебиторка - суды' : 'Суды')
     : 'Дебиторка - задолженность');
-  // Возврат «← Все разделы» имеет смысл, только когда разделов правда несколько.
+  // Возврат «← Все разделы» имеет смысл, только когда разделов правда несколько - у
+  // предпросмотра руководителя коммерческой группы раздел всегда один (21.09, isEffectiveAdmin_).
   var backLink_ = document.getElementById('debt-back-link');
-  if (backLink_ && !(D && D.role === 'admin')) backLink_.style.display = 'none';
+  if (backLink_ && !isEffectiveAdmin_()) backLink_.style.display = 'none';
   // Кнопка «Обновить» тратит общую дневную квоту Checko - запуск прогона оставлен admin
-  // (сервер тоже отвечает 403 на /api/court/sync_now всем остальным).
+  // (сервер тоже отвечает 403 на /api/court/sync_now всем остальным). 21.09 - НАМЕРЕННО сырой
+  // D.role, не isEffectiveAdmin_(): это реальная возможность настоящего admin-аккаунта Влада
+  // (сервер проверяет ЕГО сессию, не личность просматриваемого сотрудника), а не часть того,
+  // что видит предпросматриваемый человек - должна оставаться доступной и во время
+  // предпросмотра, как и сама кнопка "Смотреть как сотрудник".
   var syncBtn_ = document.getElementById('court-sync-btn');
   if (syncBtn_) syncBtn_.style.display = (D && D.role === 'admin') ? '' : 'none';
   if (tab === 'dz') renderDebt();
@@ -25862,6 +25929,18 @@ function menuToggleHidden_(item) {
 function menuDecorateItems_() {
   menuItems_().forEach(function(it) {
     if (it.querySelector('.menu-grip')) return;
+    // 20.09 - подпись пункта была голым текстовым узлом; заворачиваем в свой span
+    // (.sidebar-nav-label, CSS выше) ДО добавления grip/eye - иначе длинная подпись
+    // выталкивает их за край строки, и overflow:hidden контейнера обрезает иконки
+    // вместе с текстом (живой баг, Влад: "Операционный директор" - глаза не видно).
+    // Попутно чинит "Суды" (см. applyRoleUI) - тот код тоже полагался на "последний
+    // ребёнок - текстовый узел", что уже год как неверно ИМЕННО из-за grip/eye ниже.
+    var labelNode = it.lastChild;
+    if (labelNode && labelNode.nodeType === 3) {
+      var label = document.createElement('span'); label.className = 'sidebar-nav-label';
+      label.textContent = labelNode.nodeValue;
+      it.replaceChild(label, labelNode);
+    }
     var grip = document.createElement('span'); grip.className = 'menu-grip';
     grip.innerHTML = '<svg viewBox="0 0 10 14" fill="currentColor"><circle cx="3" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/><circle cx="3" cy="7" r="1.3"/><circle cx="7" cy="7" r="1.3"/><circle cx="3" cy="12" r="1.3"/><circle cx="7" cy="12" r="1.3"/></svg>';
     var eye = document.createElement('span'); eye.className = 'menu-eye'; eye.title = 'Скрыть / показать пункт';
@@ -27496,20 +27575,35 @@ var CRM = (function () {
       if (typeof initCursorLight_ === 'function') initCursorLight_('page-crm', 'p2-light');
       updateMeLabel();
       updatePushButton();
-      autoMeForManager();
       ensureTemplates(); // прогрев - к первому открытию композера список уже готов
     }
+    // 21.09 - вынесен ИЗ блока "один раз за загрузку страницы" выше: раньше, если CRM
+    // открывали хоть раз ДО входа в "Смотреть как" (например, обычный админ-просмотр),
+    // S.inited навсегда становился true и autoMeForManager() больше никогда не перезвал бы -
+    // "Кто я" не подхватывал(бы) личность менеджера при последующем предпросмотре.
+    // ensureEmployees() внутри кэширован - повторный вызов на каждое открытие вкладки дёшев.
+    autoMeForManager();
     load();
   }
   // Менеджер под своим логином - это и есть "я": подбираем сотрудника по фамилии из
   // D.managerName ("Фамилия Имя ...") и убираем выбор (чужую фамилию ему выбирать нечего).
+  // 21.09, НАЙДЕННЫЙ БАГ (аудит после жалобы Влада "вижу свои экраны" на другой странице,
+  // тот же класс): раньше срабатывало ТОЛЬКО при D.role==='manager' - никогда во время
+  // admin-предпросмотра ("Смотреть как <менеджер>"), потому что D.role там остаётся
+  // 'admin'. "Кто я" оставался свободно переключаемым, а "Мои"/"Взять себе" использовали
+  // чей попало S.me/localStorage.crmMyExtension (что осталось от предыдущего просмотра или
+  // от самого Влада), а не личность просматриваемого менеджера. Тот же приём, что уже
+  // применён в остальных персональных страницах (previewing ? viewAsEntry.name : ...).
   function autoMeForManager() {
-    if (typeof D === 'undefined' || !D || D.role !== 'manager' || !D.managerName) return;
-    var sur = String(D.managerName).trim().split(/\s+/)[0].toLowerCase();
+    var previewingManager_ = typeof D !== 'undefined' && D && D.role === 'admin' && typeof viewAsEntry !== 'undefined' && viewAsEntry && viewAsEntry.type === 'manager';
+    var isRealManager_ = typeof D !== 'undefined' && D && D.role === 'manager' && D.managerName;
+    if (!previewingManager_ && !isRealManager_) return;
+    var name_ = previewingManager_ ? viewAsEntry.name : D.managerName;
+    var sur = String(name_).trim().split(/\s+/)[0].toLowerCase();
     ensureEmployees().then(function (emps) {
       var hit = emps.find(function (e) { return String(e.name || '').toLowerCase().split(/\s+/).indexOf(sur) >= 0; });
       if (hit) { S.me = String(hit.extension); try { localStorage.setItem('crmMyExtension', S.me); } catch (e) {} updateMeLabel(); }
-      var btn = el('crm-me-btn'); if (btn) { btn.disabled = true; btn.title = 'Вы вошли под своим аккаунтом'; }
+      var btn = el('crm-me-btn'); if (btn) { btn.disabled = true; btn.title = previewingManager_ ? 'Предпросмотр: ' + viewAsEntry.name : 'Вы вошли под своим аккаунтом'; }
     });
   }
   function load() {
@@ -33193,6 +33287,20 @@ window.addEventListener("pointerup", function(e){
   });
 
   if (clash){ flashBad(el); S.reject(); toast("Пересечение с другим отрезком - не поставил", null); }
+  else if (before.v !== seg.v && seg.orderDayNo != null){
+    /* 21.09, Влад: разобрали, что перенос заявки из "Задания" на другую машину прямо
+       здесь НЕ обновляет исполнителя в "Задании" (plan_order_executors остаётся со
+       старой машиной/водителем - POST /api/plan/seg трогает только plan_segs, два
+       независимых места хранения одного факта). Подтвердил вариант "заблокировать" -
+       перенос на другую машину для заявок с номером (orderDayNo - тот же признак,
+       что уже красит бейдж №N на плитке) отменяется целиком, машину такой заявки
+       можно сменить только через "Задание". Откат - тот же приём, что у "Отмены" в
+       диалоге "под данные" чуть ниже (полный renderRows(), не ручной DOM). */
+    S.reject();
+    seg.s = before.s; seg.v = before.v;
+    renderRows();
+    toast('<span class="op2-warn">Машину этой заявки меняйте в «Задании»</span> - перенос заявки на другую машину в Планировке заблокирован', null);
+  }
   else if (before.s !== seg.s || before.v !== seg.v){
     S.drop();
     /* «Под данные» (Влад, 30.08) - перенос НА ДРУГУЮ МАШИНУ конкретно (не

@@ -1768,6 +1768,12 @@ function stKey_(o) { return (ST_V3_[oSt(o)] || ST_V3_.nz).key; }
 function needsAccept_(o) {
   return oSt(o) !== 'ot' && !o.taken_by_name && !oOwn(o).length && !oHired(o);
 }
+/* 21.09, Влад: «созданная, но не подтверждённая заявка - просто кнопка «Принять» без
+   мигания; созданная И подтверждённая без ответственного - должна мигать, как сейчас».
+   Кнопка (needsAccept_ выше) остаётся на ОБОИХ статусах - принять всё равно нужно,
+   мигает - только «подтверждено» (oSt==='ok'), потому что там уже реальная, оплаченная
+   заказчиком работа ждёт логиста, а не просто черновик, который могут ещё отменить. */
+function needsAcceptBlink_(o) { return needsAccept_(o) && oSt(o) === 'ok'; }
 /* «Фамилия Имя» без отчества (полное ФИО - в title) - компромисс варианта «Рейс»: на ширине
    ячейки «Машина» полное ФИО в одну строку не помещается, а фамилию Влад резать не хотел. */
 function fioName_(full) {
@@ -2083,7 +2089,7 @@ function renderLog() {
   langRu_();
   body.innerHTML = rows.map(function (o) {
     var k = oSt(o);
-    var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' + (o.otboy_ack_by ? '' : ' op2-unack') : (needsAccept_(o) ? ' op2-new-unack' : '')) + (isFresh(o) ? ' op2-new-halo' : '');
+    var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' + (o.otboy_ack_by ? '' : ' op2-unack') : (needsAcceptBlink_(o) ? ' op2-new-unack' : '')) + (isFresh(o) ? ' op2-new-halo' : '');
     return '<tr class="' + cls + '" data-oid="' + esc(o.id) + '">' +
       noCell_(o) +
       mgrCodeCell_(o, isAdmin()) + logCodeCell_(o, true) +
@@ -2266,9 +2272,35 @@ function setStatusUi(tr, k) {
   var o = byId(tr.dataset.oid); if (!o) return;
   setStatus(o, k);
 }
+/* 21.09, Влад: «перевод заявки из не подтверждённой в подтверждённую - только при
+   условии что заполнено время, адреса, груз и контакты на погрузке или контакт
+   заказчика». Клон серверной confirmReadinessError_ (api/lib/plan-orders.js) - те же
+   поля, тот же текст ошибки. Сервер - источник истины (эту же проверку не обойти прямым
+   запросом), здесь - только чтобы не ждать неудачный round-trip: подсветить нехватку
+   сразу по клику, тостом, без похода на сервер. */
+function confirmReadinessError_(o) {
+  var missing = [];
+  if (!o.service_time) missing.push('время подачи');
+  if (!o.load_address) missing.push('адрес погрузки');
+  if (!o.unload_address) missing.push('адрес выгрузки');
+  if (!o.cargo) missing.push('груз');
+  var hasLoadContact = !!(o.load_contact_name || o.load_contact_phone);
+  var hasCustomerContact = !!(o.customer_contact_name || o.customer_contact_phone);
+  if (!hasLoadContact && !hasCustomerContact) missing.push('контакт на погрузке или контакт заказчика');
+  if (!missing.length) return null;
+  return 'Нельзя подтвердить - не заполнено: ' + missing.join(', ');
+}
 function setStatus(o, k) {
   var prev = oSt(o);
   if (prev === k) return;
+  if (k === 'ok') {
+    var err = confirmReadinessError_(o);
+    /* S.attention() - тот же звук, что уже отмечает неудачные действия в этом файле
+       (см. ok_()); S.reject здесь НЕ существует (это звук из ДРУГОГО объекта S в
+       files/index.html/Планировке - разные файлы, разные наборы звуков, спутал при
+       первой правке, поймано харнессом: TypeError обрывал setStatus() ДО toast()). */
+    if (err) { S.attention(); toast('<span class="op2-warn">' + esc(err) + '</span>'); return; }
+  }
   apiPost('/orders/status', { id: o.id, status: ST_API[k] }).then(function (r) {
     if (!ok_(r)) return;
     o.status = ST_API[k];
@@ -2412,12 +2444,22 @@ function mgrRowMenu(o, x, y) {
      менеджеры быстрее заметили и освоили - НЕ про саму заявку (см. историю правки у
      noCell_/NEW_FEATURE_BADGE_ выше, с первого раза перепутал одно с другим). */
   var transferItem = canTransfer_(o) ? [{ label: 'Перенести', badge: isFeatureNew_('transfer') ? 'новое' : null, fn: function () { openTransferPop_(o, x, y); } }] : [];
+  /* 21.09, найдено при разборе жалобы «менеджеры копируют без телефона водителя»:
+     список показывает ВСЕ заявки всех менеджеров (15.09, «менеджеры видят все заказы»),
+     но право копировать «внутренности» (телефон водителя - PRIVATE_EXECUTOR_FIELDS_ на
+     сервере) остаётся owner/team-lead-only (17.09). Раньше пункт меню предлагался на
+     ЛЮБОЙ строке без разбора - клик по чужой заявке молча копировал текст с уже
+     вычищенным сервером телефоном, никакого предупреждения не было. Теперь пункт
+     скрыт там, где o.can_view_details === false (сервер уже посчитал видимость по
+     тем же правилам, что и сам показ подробностей заявки) - копировать НЕПОЛНЫЕ
+     данные на пропуск нельзя вообще, а не молча получать их такими. */
+  var canCopyPass = o.can_view_details !== false;
   return [
     { label: 'Повторить', fn: function () { openRepeat(o); } }
   ].concat(transferItem).concat([
-    { label: 'Отбой', fn: function () { setStatus(o, 'ot'); } },
-    { label: 'Копировать данные на пропуск', fn: function () { copyText(passText(o), 'Данные на пропуск скопированы'); } }
-  ]).concat(mgrChangerItem_(o, 'op2-mgr-body')).concat(isAdmin() ? [{ label: 'Удалить заявку', fn: function () { deleteOrder(o); } }] : []);
+    { label: 'Отбой', fn: function () { setStatus(o, 'ot'); } }
+  ]).concat(canCopyPass ? [{ label: 'Копировать данные на пропуск', fn: function () { copyText(passText(o), 'Данные на пропуск скопированы'); } }] : [])
+    .concat(mgrChangerItem_(o, 'op2-mgr-body')).concat(isAdmin() ? [{ label: 'Удалить заявку', fn: function () { deleteOrder(o); } }] : []);
 }
 function logRowMenu(o) {
   var items = [];
@@ -2868,7 +2910,14 @@ function passText(o) {
   var L = [];
   L.push('Заявка №' + oNo(o) + ', ' + dm(o.service_date) + ', подача ' + (oTime(o) || 'уточнить'));
   L.push('Тягач: ' + (v.vehicle_gos || 'уточнить') + (v.trailer_gos ? ', п/п ' + v.trailer_gos : ''));
-  L.push('Водитель: ' + (v.driver_name || 'уточнить') + (v.driver_phone ? ', ' + fmtPhone(v.driver_phone) : ''));
+  /* 21.09, Влад: «менеджеры копируют без телефона водителя, потом ищут в старых
+     сообщениях» - раньше при пустом v.driver_phone телефон просто МОЛЧА пропадал из
+     текста (никакого следа, что он вообще ожидался) - человек на другом конце читал
+     готовый на вид текст и не подозревал, что чего-то не хватает. Теперь пустой
+     телефон - явная пометка "уточняется", как и у остальных полей этой функции
+     ("уточнить" у тягача/даты) - несовпадение видно сразу в момент копирования, а не
+     когда кто-то потом спросит номер. */
+  L.push('Водитель: ' + (v.driver_name || 'уточнить') + ', ' + (v.driver_phone ? fmtPhone(v.driver_phone) : 'телефон уточняется'));
   return L.join('\n');
 }
 function copyText(txt, okMsg) {

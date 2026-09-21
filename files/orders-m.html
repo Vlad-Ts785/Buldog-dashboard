@@ -14,6 +14,10 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@500;600;700&family=JetBrains+Mono:wght@500;600;700&family=Unbounded:wght@500;600&display=swap" rel="stylesheet">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<!-- Ранний синхронный скрипт темы, ДО <style> - тот же приём, что index.html (21.09,
+     общая переменная 'yardhub_theme'), иначе страница на долю секунды мигает тёмным
+     даже при сохранённой светлой теме (FOUC). -->
+<script>try{if(localStorage.getItem('yardhub_theme')==='light'){document.documentElement.setAttribute('data-theme','light');document.querySelector('meta[name="theme-color"]').setAttribute('content','#eef1f5');}}catch(e){}</script>
 <style>
 /* ── «Задание» с телефона, вариант «Лента» - утверждён Владом 19.09.2026, перенесён 1:1
    (правило «превью = контракт»). Источник: превью zm_variant_a.html (артефакт
@@ -36,6 +40,16 @@
   --ease-drawer:cubic-bezier(.32,.72,0,1);
   --safe-b:env(safe-area-inset-bottom,0px); --safe-t:env(safe-area-inset-top,0px);
   --hdr-row:44px;
+}
+/* Светлая тема (21.09) - та же палитра, что уже утверждена и живёт в index.html
+   (plans/2026-08-29-light-theme-toggle.md, "утверждено вживую через 3 варианта в чате"),
+   один в один по значениям токенов - не отдельный, местный вариант. */
+html[data-theme="light"]{
+  --bg:#eef1f5; --bg2:#ffffff; --bg3:#e2e7ed; --bg4:#d3dae2;
+  --border:rgba(15,22,35,0.16); --border-strong:rgba(15,22,35,0.30);
+  --text:#0f1623; --muted:#4a5568;
+  --tint-green:#0a5940; --tint-amber:#6f480d; --tint-red:#8a2c2b;
+  --scrim:rgba(15,22,35,.45);
 }
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{height:100%;background:var(--bg)}
@@ -1987,19 +2001,37 @@ function renderHiredSheet(head,body,foot){
   });
 }
 
-/* ---- настройки (тема-заглушка, версия, выход) ---- */
-var PAGE_VERSION_ = "v1 · 19.09";
+/* ---- настройки (тема, версия, выход) ---- */
+var PAGE_VERSION_ = "v2 · 21.09";
+// 21.09, Влад: "своя настройка темы и она не работает, хотя есть общая" - раньше это была
+// декоративная заглушка (3 кнопки без обработчика, всегда "Тёмная"). Общая тема живёт в
+// index.html (localStorage 'yardhub_theme', тот же ключ - см. applyTheme() там) - здесь
+// та же переменная, чтобы "один раз установил - применилось везде" было правдой буквально,
+// а не по ощущению. "Как в телефоне" убрана - в index.html её никогда не было, оставляем
+// только бинарный выбор, чтобы все три мобильные страницы вели себя одинаково.
+function orderMTheme_(){ return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'; }
+function setOrderMTheme_(t){
+  if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+  else document.documentElement.removeAttribute('data-theme');
+  try { localStorage.setItem('yardhub_theme', t); } catch(e){}
+  var tc = document.querySelector('meta[name="theme-color"]');
+  if (tc) tc.setAttribute('content', t === 'light' ? '#eef1f5' : '#0f0f13');
+}
 function renderSettingsSheet(head,body,foot){
   head.innerHTML = shHeadHtml('Настройки');
   $('shCancel').addEventListener('click', function(){ closeSheet(); });
+  var theme = orderMTheme_();
   body.innerHTML =
     '<div class="list-row" id="sRefresh">Обновить данные<span class="go"><svg><use href="#i-chev"/></svg></span></div>' +
-    '<div class="f-label">Тема</div><div class="seg3"><button aria-pressed="true">Тёмная</button><button aria-pressed="false">Светлая</button><button aria-pressed="false">Как в телефоне</button></div>' +
-    '<div class="info">Светлая - отступление от ГОСТа, пока не включена.</div>' +
+    '<div class="f-label">Тема</div><div class="seg3" id="sTheme"><button data-t="dark" aria-pressed="'+(theme==='dark')+'">Тёмная</button><button data-t="light" aria-pressed="'+(theme==='light')+'">Светлая</button></div>' +
     '<div class="f-label">Версия</div><div class="frow"><div class="k">Страница</div><div class="v mono">orders-m · '+PAGE_VERSION_+'</div></div>' +
     '<div class="list-row muted" id="sLogout">Выйти</div>';
   foot.innerHTML='';
   $('sRefresh').addEventListener('click', function(){ closeSheet(); loadCounts(); startLoad_(); toast('Данные обновлены'); });
+  $('sTheme').addEventListener('click', function(e){
+    var b = e.target.closest('button[data-t]'); if(!b) return;
+    setOrderMTheme_(b.getAttribute('data-t')); vib(4); renderSettingsSheet(head,body,foot);
+  });
   $('sLogout').addEventListener('click', function(){
     try{ ["session_token","id_token","user_role","user_name"].forEach(function(k){ localStorage.removeItem(k); }); }catch(e){}
     location.href='index.html';
@@ -2165,28 +2197,31 @@ var PAGES_ = [
   {page:"director", label:"Операционный директор", icon:"i-pg-director"},
   {page:"global-stats", label:"Глобальная статистика", icon:"i-pg-global-stats"},
   {page:"directory", label:"Справочники", icon:"i-pg-directory"},
-  {page:"vehicles", label:"Техника", icon:"i-pg-vehicles", section:"Парк"},
-  {page:"logistics-plan", label:"Планировка", icon:"i-pg-logistics-plan", section:"Парк"},
-  {page:"dynamics", label:"Динамика", icon:"i-pg-dynamics", section:"Парк"},
-  {page:"navigation", label:"Навигация", icon:"i-pg-navigation", section:"Парк"},
-  {page:"crm", label:"CRM", icon:"i-pg-crm", section:"Продажи"},
-  {page:"counterparty", label:"Проверка контрагента", icon:"i-pg-counterparty", section:"Продажи"},
-  {page:"dept-trals", label:"Отдел Тралы", icon:"i-pg-people", section:"Продажи"},
-  {page:"receipts", label:"Поступления", icon:"i-pg-receipts", section:"Продажи"},
-  {page:"sales", label:"Обзор заказов", icon:"i-pg-sales", section:"Продажи"},
-  {page:"sales-mgr", label:"По менеджерам", icon:"i-pg-people", section:"Продажи"},
-  {page:"sales-log", label:"По логистам", icon:"i-pg-sales-log", section:"Продажи"},
-  {page:"sales-salary", label:"Зарплата", icon:"i-pg-salary", section:"Продажи"},
-  {page:"my-page", label:"Личная страница", icon:"i-pg-my-page", section:"Продажи"},
-  {page:"order-plan", label:"Задание", icon:"i-pg-order-plan", section:"Продажи"},
-  {page:"calculator", label:"Калькулятор", icon:"i-pg-calculator", section:"Продажи"},
-  {page:"ryschanow-salary", label:"Зарплата", icon:"i-pg-salary", section:"Продажи"},
-  {page:"commercial-head-salary", label:"Зарплата", icon:"i-pg-salary", section:"Продажи"},
-  {page:"commercial-head-debt", label:"Дебиторка", icon:"i-pg-debt", section:"Продажи"},
-  {page:"column-head-payroll", label:"Зарплата машинистов", icon:"i-pg-column-payroll", section:"Продажи"},
-  {page:"clients", label:"Клиенты", icon:"i-pg-clients", section:"Продажи"},
-  {page:"debt", label:"Дебиторка", icon:"i-pg-debt", section:"Продажи"}
+  {page:"vehicles", label:"Техника", icon:"i-pg-vehicles", section:"park"},
+  {page:"logistics-plan", label:"Планировка", icon:"i-pg-logistics-plan", section:"park"},
+  {page:"dynamics", label:"Динамика", icon:"i-pg-dynamics", section:"park"},
+  {page:"navigation", label:"Навигация", icon:"i-pg-navigation", section:"park"},
+  {page:"crm", label:"CRM", icon:"i-pg-crm", section:"sales"},
+  {page:"counterparty", label:"Проверка контрагента", icon:"i-pg-counterparty", section:"sales"},
+  {page:"dept-trals", label:"Отдел Тралы", icon:"i-pg-people", section:"sales"},
+  {page:"receipts", label:"Поступления", icon:"i-pg-receipts", section:"sales"},
+  {page:"sales", label:"Обзор заказов", icon:"i-pg-sales", section:"sales"},
+  {page:"sales-mgr", label:"По менеджерам", icon:"i-pg-people", section:"sales"},
+  {page:"sales-log", label:"По логистам", icon:"i-pg-sales-log", section:"sales"},
+  {page:"sales-salary", label:"Зарплата", icon:"i-pg-salary", section:"sales"},
+  {page:"my-page", label:"Личная страница", icon:"i-pg-my-page", section:"sales"},
+  {page:"order-plan", label:"Задание", icon:"i-pg-order-plan", section:"sales"},
+  {page:"calculator", label:"Калькулятор", icon:"i-pg-calculator", section:"sales"},
+  {page:"ryschanow-salary", label:"Зарплата", icon:"i-pg-salary", section:"sales"},
+  {page:"commercial-head-salary", label:"Зарплата", icon:"i-pg-salary", section:"sales"},
+  {page:"commercial-head-debt", label:"Дебиторка", icon:"i-pg-debt", section:"sales"},
+  {page:"column-head-payroll", label:"Зарплата машинистов", icon:"i-pg-column-payroll", section:"sales"},
+  {page:"clients", label:"Клиенты", icon:"i-pg-clients", section:"sales"},
+  {page:"debt", label:"Дебиторка", icon:"i-pg-debt", section:"sales"}
 ];
+// Ключи и подписи - 1:1 с data-section/.sidebar-nav-section-label в index.html
+// (park="Парк", sales="Продажи") - те же два раздела, больше в дашборде нет.
+var SECTION_LABELS_ = {park:"Парк", sales:"Продажи"};
 var NAV_COLUMN_HEAD_SUR_ = ["барыльченко", "дьячков"];
 var NAV_COMMERCIAL_HEAD_SUR_ = ["ахтамова", "гусейнова"];
 // Кого сейчас реально показываем - настоящую сессию (ME) или того, кого admin выбрал через
@@ -2225,21 +2260,43 @@ function menuTierKey_(role, sur){
   }
   return role;
 }
+// 21.09, Влад: "разное меню... порядок должен быть как в десктопе, расположение не
+// хардкод а алгоритм" - на десктопе (menuApplyCfg_ в index.html) заголовки разделов
+// (#park/#sales) - ТАКИЕ ЖЕ перетаскиваемые токены в cfg.order, как и сами пункты, их
+// позиция в сохранённом порядке решает, где рисуется заголовок. Прошлая версия здесь
+// ФИЛЬТРОВАЛА '#'-токены (t.charAt(0)!=='#') - пункты переставлялись правильно, но
+// заголовки перерисовывались заново по статичному полю section КАЖДОГО пункта, и если
+// кастомизация перемешала пункты из разных секций (например Задание перетащили под
+// Планировку, в "Парк"), получались дублирующиеся ПАРК/ПРОДАЖИ/ПАРК/ПРОДАЖИ - ровно то,
+// что увидел Влад. Теперь строим тот же смешанный список токенов (страница ИЛИ
+// '#section'), что и десктоп, и применяем cfg.order к НЕМУ, а не только к пунктам.
+function defaultMenuTokens_(allowed){
+  var lastSection = null, tokens = [];
+  PAGES_.forEach(function(p){
+    if (allowed.indexOf(p.page) < 0) return;
+    if (p.section !== lastSection){ lastSection = p.section; if (p.section) tokens.push('#' + p.section); }
+    tokens.push(p.page);
+  });
+  return tokens;
+}
 function applyMenuCustomization_(allowed, tierKey){
+  var defaultTokens = defaultMenuTokens_(allowed);
   var cfg = null;
   try { var raw = localStorage.getItem(MENU_CFG_LS_ + tierKey); if (raw) cfg = JSON.parse(raw); } catch(e){}
-  if (!cfg) return allowed;
-  var result = allowed.slice();
-  if (Array.isArray(cfg.order) && cfg.order.length){
-    result = [];
-    cfg.order.forEach(function(t){ if (t.charAt(0) !== '#' && allowed.indexOf(t) >= 0 && result.indexOf(t) < 0) result.push(t); });
-    allowed.forEach(function(t){ if (result.indexOf(t) < 0) result.push(t); });
-  }
+  if (!cfg) return defaultTokens;
+  var order = (Array.isArray(cfg.order) && cfg.order.length) ? cfg.order : defaultTokens;
+  var isValid = function(t){ return t.charAt(0) === '#' ? true : allowed.indexOf(t) >= 0; };
+  var result = [], placed = {};
+  order.forEach(function(t){ if (isValid(t) && !placed[t]){ result.push(t); placed[t] = true; } });
+  defaultTokens.forEach(function(t){ if (!placed[t]){ result.push(t); placed[t] = true; } });
   if (Array.isArray(cfg.hidden) && cfg.hidden.length){
-    // Тот же гвард, что в index.html menuApplyCfg_ - если скрыть абсолютно всё, скрытие
+    // Тот же гвард, что в index.html menuApplyCfg_ - скрыть абсолютно все ПУНКТЫ нельзя
+    // (разделители '#' в счёт не идут, у них нет своего "скрыт"), тогда скрытие
     // игнорируем целиком, человек не должен остаться с пустым меню.
-    var afterHide = result.filter(function(t){ return cfg.hidden.indexOf(t) < 0; });
-    if (afterHide.length) result = afterHide;
+    var pagesLeft = result.filter(function(t){ return t.charAt(0) !== '#'; });
+    if (pagesLeft.filter(function(t){ return cfg.hidden.indexOf(t) < 0; }).length){
+      result = result.filter(function(t){ return t.charAt(0) === '#' || cfg.hidden.indexOf(t) < 0; });
+    }
   }
   return result;
 }
@@ -2273,16 +2330,21 @@ function openDrawer(){
   navdrawerOpen_=true;
   var d=$('navdrawer');
   var eff = effectiveIdentity_();
-  var allowed = navAllowedPages_(); // уже в правильном порядке (кастомизация), см. выше
+  var tokens = navAllowedPages_(); // уже в правильном порядке (кастомизация), см. выше
   var byId_ = {}; PAGES_.forEach(function(p){ byId_[p.page] = p; });
-  var sectioned = allowed.length > 8, lastSection = null;
+  // Заголовки разделов - ТОЛЬКО у admin, 1:1 с index.html applyRoleUI() (там
+  // .sidebar-nav-section скрывается целиком для manager/logist/mechanic/вьювера).
+  var showSections = eff.role === 'admin';
   var html='<div class="nd-head">'+esc(eff.name||'TS HUB')+'</div><div class="nd-body">';
   if (eff.viewingAs) {
     html += '<div class="nd-item" data-nav="__exit-viewas" style="color:var(--red,#e24b4a)">✕ Обычный вид (админ)</div>';
   }
-  allowed.forEach(function(id){
-    var p = byId_[id]; if (!p) return;
-    if (sectioned && p.section && p.section !== lastSection){ lastSection = p.section; html += '<div class="nd-sec">'+esc(p.section)+'</div>'; }
+  var pendingSection = null;
+  tokens.forEach(function(t){
+    if (t.charAt(0) === '#'){ pendingSection = t.slice(1); return; }
+    var p = byId_[t]; if (!p) return;
+    if (showSections && pendingSection){ html += '<div class="nd-sec">'+esc(SECTION_LABELS_[pendingSection] || pendingSection)+'</div>'; }
+    pendingSection = null;
     html+='<div class="nd-item'+(p.page==='order-plan'?' on':'')+'" data-nav="'+p.page+'"><svg><use href="#'+p.icon+'"/></svg><span>'+esc(p.label)+'</span></div>';
   });
   html+='<div class="nd-sec">Общее</div><div class="nd-item" data-nav="settings"><svg><use href="#i-settings"/></svg><span>Настройки</span></div>';

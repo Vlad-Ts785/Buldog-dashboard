@@ -4154,6 +4154,14 @@ main:has(> #page-dynamics.active){min-width:0;}
     <div class="sidebar-nav-item" onclick="showPage('column-head-payroll',this)" data-page="column-head-payroll" style="display:none">
       <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="15" height="8" rx="1.6"/><circle cx="6.5" cy="14" r="1.6"/><circle cx="13.5" cy="14" r="1.6"/></svg></span> Зарплата машинистов
     </div>
+    <!-- «ГПБ Комплект» - быстрые ответы по ставкам (21.09.2026,
+         plans/2026-09-21-gpb-quick-price-response.md). Тот же принцип видимости, что у
+         Рыщанова/руководителей коммерческих групп выше, но по email, не по фамилии/роли -
+         реальные переговорные цены с ключевым клиентом, видит только Влад лично
+         (applyRoleUI() сверяет D.email, не просто role==='admin' - см. коммент там же). -->
+    <div class="sidebar-nav-item" onclick="showPage('gpbq',this)" data-page="gpbq" style="display:none">
+      <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10l5-6 4 4 5-6"/><path d="M13 2h4v4"/><rect x="3" y="12" width="14" height="5.5" rx="1.4"/></svg></span> ГПБ Комплект
+    </div>
     <div class="sidebar-nav-item" onclick="showPage('clients',this)" data-page="clients">
       <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="8" height="14" rx="1.2"/><path d="M12 8h3.2a.8.8 0 0 1 .8.8V17H12"/><line x1="6.6" y1="6.5" x2="9.4" y2="6.5"/><line x1="6.6" y1="9.5" x2="9.4" y2="9.5"/><line x1="6.6" y1="12.5" x2="9.4" y2="12.5"/><line x1="4" y1="17" x2="16" y2="17"/></svg></span> Клиенты
     </div>
@@ -6714,6 +6722,15 @@ main:has(> #page-dynamics.active){min-width:0;}
       </div>
     </div>
 
+    <!-- ═══ ГПБ КОМПЛЕКТ - БЫСТРЫЕ ОТВЕТЫ ПО СТАВКАМ ═════════════════
+         21.09.2026, plans/2026-09-21-gpb-quick-price-response.md. Видит только Влад (email-
+         проверка в applyRoleUI() и на сервере, НЕ просто role==='admin' - см. комментарии
+         там же и в /api/client_rates). Данные - GET /api/client_rates?client=gpb, движок в
+         window.Gpbq (namespace .gpbq-*), рендерится в #gpbq-content при первом открытии. -->
+    <div id="page-gpbq" class="page">
+      <div id="gpbq-content"><p style="color:var(--muted);padding:16px">Данные загружаются...</p></div>
+    </div>
+
     <!-- ═══ КЛИЕНТЫ ══════════════════════════════════════════════ -->
     <!-- «Проверка контрагента» (05.09, Влад: "менеджерам со старшим вкладку... вводят ИНН и им
          даётся весь расклад через наш сервис; сохраняется история запросов") - тот же Checko и
@@ -8308,6 +8325,170 @@ window.Clc = {
 
 </script>
 
+<!-- ═══ ГПБ КОМПЛЕКТ - движок (21.09.2026, plans/2026-09-21-gpb-quick-price-response.md) ═══
+     Данные - GET /api/client_rates?client=gpb (доступ проверен и на сервере, и здесь только
+     по видимости вкладки - см. applyRoleUI()). Поиск по тексту, БЕЗ геометрии/интерполяции -
+     сознательно (см. план, "Что НЕ делаем в v1"): честно показываем то, что реально было, не
+     считаем "примерно" для новых направлений. -->
+<script>
+(function(){
+
+var _rates = null;      // сырые строки с сервера, загружаются один раз
+var _loaded = false;
+
+function esc_(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];
+}); }
+
+function fmtPrice_(n){ return (Number(n)||0).toLocaleString('ru-RU') + ' ₽'; }
+
+function median_(arr){
+  var a = arr.slice().sort(function(x,y){return x-y;});
+  var mid = Math.floor(a.length/2);
+  return a.length % 2 ? a[mid] : Math.round((a[mid-1]+a[mid])/2);
+}
+
+function shell_(){
+  var models = Array.from(new Set((_rates||[]).map(function(r){return r.model;}).filter(Boolean))).sort();
+  var opts = models.map(function(m){ return '<option value="'+esc_(m)+'">'+esc_(m)+'</option>'; }).join('');
+  document.getElementById('gpbq-content').innerHTML =
+    '<div class="card" style="margin-bottom:16px">' +
+      '<div class="sec-header">' +
+        '<div class="sec-title">Быстрый ответ по ставке ГПБ Комплект</div>' +
+        '<div class="muted" style="font-size:11px">поиск по реальным прошлым рейсам - без округления/интерполяции, честно "не найдено", если похожего не было</div>' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">' +
+        '<select id="gpbq-model" style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-size:14px;outline:none;min-width:160px">' +
+          '<option value="">Вся техника…</option>' + opts +
+        '</select>' +
+        '<input autocomplete="off" id="gpbq-dir" type="text" placeholder="направление, например: Лесосибирск, или Забайкальск - Рязань"' +
+          ' onkeydown="if(event.key===\'Enter\'){event.preventDefault();Gpbq.search();}"' +
+          ' style="flex:1;min-width:220px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-size:14px;outline:none">' +
+        '<button type="button" onclick="Gpbq.search()" data-nav-sound' +
+          ' style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer">Найти похожие</button>' +
+      '</div>' +
+      '<label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:12px;color:var(--muted);cursor:pointer">' +
+        '<input type="checkbox" id="gpbq-short-toggle" onchange="Gpbq.search()"> показать и короткое плечо (Маньчжурия ↔ Забайкальск/граница - растаможка, на порядок дешевле)' +
+      '</label>' +
+    '</div>' +
+    '<div id="gpbq-results"></div>';
+}
+
+function matchRow_(r, model, tokens, includeShort){
+  if (model && r.model !== model) return false;
+  if (!includeShort && r.leg_type === 'short') return false;
+  if (r.leg_type === 'other') return false;
+  if (!tokens.length) return true;
+  var hay = ((r.origin||'') + ' ' + (r.destination||'')).toLowerCase();
+  return tokens.every(function(t){ return hay.indexOf(t) >= 0; });
+}
+
+function search(){
+  var model = document.getElementById('gpbq-model').value;
+  var dirRaw = document.getElementById('gpbq-dir').value.trim().toLowerCase();
+  var includeShort = document.getElementById('gpbq-short-toggle').checked;
+  var tokens = dirRaw.split(/[\s,–—-]+/).filter(function(t){ return t.length > 2; });
+
+  var found = (_rates||[]).filter(function(r){ return matchRow_(r, model, tokens, includeShort); });
+  found.sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); });
+
+  var out = document.getElementById('gpbq-results');
+  if (!found.length){
+    out.innerHTML = '<div class="card"><div class="muted">Похожих рейсов не найдено. Считать вручную через Калькулятор или уточнить у Влада - не выдумываем цифру.</div></div>';
+    return;
+  }
+
+  var fullRows = found.filter(function(r){ return r.leg_type !== 'short'; });
+  var prices = fullRows.map(function(r){ return r.price; }).filter(function(p){ return p > 0; });
+  var vatSet = Array.from(new Set(found.map(function(r){ return r.vat_note || 'не указано'; })));
+  var confidenceNote = '';
+  if (prices.length && prices.length < 3) {
+    confidenceNote = '<div class="muted" style="margin-top:6px;color:var(--red)">Мало данных (' + prices.length + ' ' + (prices.length===1?'рейс':'рейса') + ') - не усредняем вслепую, смотрите сами строки ниже.</div>';
+  }
+  var vatNote = vatSet.length > 1
+    ? '<div class="muted" style="margin-top:4px;color:var(--red)">В выборке разные пометки НДС (' + vatSet.map(esc_).join(', ') + ') - не смешивайте в одну цифру молча.</div>'
+    : '';
+
+  var statsHtml = '';
+  if (prices.length) {
+    statsHtml =
+      '<div style="display:flex;gap:24px;flex-wrap:wrap;margin:10px 0">' +
+        '<div><div class="muted" style="font-size:11px">Мин</div><div style="font-size:18px;font-weight:700">' + fmtPrice_(Math.min.apply(null, prices)) + '</div></div>' +
+        '<div><div class="muted" style="font-size:11px">Медиана</div><div style="font-size:18px;font-weight:700;color:var(--green)">' + fmtPrice_(median_(prices)) + '</div></div>' +
+        '<div><div class="muted" style="font-size:11px">Макс</div><div style="font-size:18px;font-weight:700">' + fmtPrice_(Math.max.apply(null, prices)) + '</div></div>' +
+        '<div><div class="muted" style="font-size:11px">Найдено рейсов</div><div style="font-size:18px;font-weight:700">' + prices.length + '</div></div>' +
+      '</div>' + confidenceNote + vatNote;
+  }
+
+  var rowsHtml = found.map(function(r){
+    var legBadge = r.leg_type === 'short'
+      ? '<span style="color:var(--muted);font-size:11px">короткое плечо</span>'
+      : (r.leg_type === 'full_domestic' ? '<span style="color:var(--muted);font-size:11px">нестандартный</span>' : '');
+    return '<tr>' +
+      '<td>' + esc_(r.date||'') + '</td>' +
+      '<td>' + esc_(r.model||'-') + '</td>' +
+      '<td>' + esc_(r.origin||'') + ' → ' + esc_(r.destination||'') + ' ' + legBadge + '</td>' +
+      '<td style="font-weight:600">' + fmtPrice_(r.price) + '</td>' +
+      '<td class="muted" style="font-size:12px">' + esc_(r.vat_note||'') + '</td>' +
+      '<td class="muted" style="font-size:12px">' + (r.source === '1c' ? '1С' : 'почта') + (r.n > 1 ? ' (' + r.n + ' стр.)' : '') + '</td>' +
+    '</tr>';
+  }).join('');
+
+  var draftBtn = prices.length
+    ? '<button type="button" onclick="Gpbq.copyDraft()" data-nav-sound style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer;margin-top:10px">Скопировать черновик ответа</button>'
+    : '';
+
+  out.innerHTML =
+    '<div class="card">' + statsHtml +
+      '<div style="overflow-x:auto">' +
+        '<table class="tbl"><thead><tr><th>Дата</th><th>Техника</th><th>Маршрут</th><th>Цена</th><th>НДС</th><th>Источник</th></tr></thead>' +
+        '<tbody>' + rowsHtml + '</tbody></table>' +
+      '</div>' + draftBtn +
+    '</div>';
+
+  Gpbq._lastSearch = { model: model, dir: document.getElementById('gpbq-dir').value.trim(), prices: prices, count: prices.length, lastDate: fullRows[0] && fullRows[0].date };
+}
+
+function copyDraft(){
+  var s = Gpbq._lastSearch;
+  if (!s || !s.count) return;
+  var med = median_(s.prices);
+  var text = 'По маршруту ' + (s.dir || '(уточнить)') +
+    (s.model ? ' для ' + s.model : '') +
+    ' ориентировочная ставка ' + fmtPrice_(med) +
+    ' (по данным ' + s.count + ' ' + (s.count===1?'предыдущего рейса':'предыдущих рейсов') +
+    (s.lastDate ? ', последний - ' + s.lastDate : '') + ').' +
+    ' Это цена основного плеча от границы/Забайкальска - если техника ещё в Маньчжурии, отдельно прибавьте растаможку (короткое плечо).' +
+    ' Точную цену подтвердим после уточнения деталей.';
+  navigator.clipboard.writeText(text).then(function(){
+    if (typeof toast === 'function') toast('Черновик скопирован', 0);
+  }).catch(function(){
+    if (typeof toast === 'function') toast('Не удалось скопировать - выделите текст вручную', 1);
+  });
+}
+
+async function initPage(){
+  if (_loaded) return; // как Clc.initPage() - инициализация один раз за сессию страницы
+  document.getElementById('gpbq-content').innerHTML = '<p style="color:var(--muted);padding:16px">Загрузка ставок…</p>';
+  try {
+    var url = YARD_API_BASE + '/client_rates?client=gpb&session_token=' + encodeURIComponent(SESSION_TOKEN);
+    var res = await fetch(url);
+    var data = await res.json();
+    if (!res.ok) throw new Error(data && data.error ? data.error : 'Ошибка сервера');
+    _rates = data.rates || [];
+    _loaded = true;
+    shell_();
+  } catch (e) {
+    document.getElementById('gpbq-content').innerHTML =
+      '<div class="card"><div style="color:var(--red)">Не удалось загрузить ставки: ' + esc_(e.message || e) + '</div></div>';
+  }
+}
+
+window.Gpbq = { initPage: initPage, search: search, copyDraft: copyDraft, _lastSearch: null };
+
+})();
+</script>
+
 <!-- Drawer «Пропавшие клиенты» личной страницы (превью 29.08): тяжёлый ленивый
      запрос уходит только по явному открытию, а не по клику в общем ряду вкладок. -->
 <div class="mp-drawer-bk" id="mp-lost-bk" onclick="mpCloseLostDrawer_()"></div>
@@ -8388,6 +8569,7 @@ const PAGE_TITLES = {
   'column-head-payroll': 'Зарплата машинистов',
   'order-plan': 'Задание',
   calculator: 'Калькулятор стоимости перевозки',
+  gpbq: 'ГПБ Комплект - быстрые ответы по ставкам',
   debt: 'Дебиторка',
 };
 
@@ -12923,6 +13105,12 @@ function applyRoleUI() {
       item.style.display = personalOnlyPages.indexOf(item.getAttribute('data-page')) >= 0 ? 'none' : '';
     });
     document.querySelectorAll('.sidebar-nav-section').forEach(function(s){ s.style.display = ''; });
+    // «ГПБ Комплект» (21.09.2026) - НЕ personalOnlyPages выше (та ветка для показа при
+    // "Смотреть как сотрудник"), сверяем реальный email вошедшего с /api/main_payload -
+    // единственный admin-аккаунт сегодня и есть Влад, но проверяем явно по email, не по
+    // role==='admin', чтобы не открыть цены ГПБ молча, если появится второй admin.
+    var gpbqNavItem_ = document.querySelector('.sidebar-nav-item[data-page="gpbq"]');
+    if (gpbqNavItem_) gpbqNavItem_.style.display = (D && D.email === 'dlinnomertral@gmail.com') ? '' : 'none';
   }
   applyMenuConfig_();   // кастом меню поверх ролевого фильтра (05.09), см. блок "Кастомизация меню"
   updateViewAsButton_();
@@ -26766,6 +26954,7 @@ function showPage(id, el) {
   // контейнеру нулевой размер - плитки карты не подтягиваются) - инициализируем/пересчитываем
   // размер только при реальном открытии вкладки.
   if (id === 'calculator' && window.Clc) Clc.initPage();
+  if (id === 'gpbq' && window.Gpbq) Gpbq.initPage();
   if (id === 'logistics-plan' && window.LP) LP.init();
   if (id === 'navigation' && window.NAV) NAV.init();
   if (id === 'ryschanow-salary') renderRyschanowSalaryPage_();

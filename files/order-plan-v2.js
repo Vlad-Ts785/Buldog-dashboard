@@ -154,6 +154,16 @@ function plural(n, one, few, many) { var m10 = n % 10, m100 = n % 100; if (m10 =
 /* «Трал до 20 т» -> «трал»: сегмент техники для фильтров логиста. Ничего не
    перечисляем - берём первое слово из того, что реально пришло с сервера. */
 function segOf(type) { return String(type || '').trim().toLowerCase().split(/[\s,\/]+/)[0] || ''; }
+/* 22.09, Влад: «Любая модификация» (третий базовый тип - менеджеру всё равно, трал или
+   длинномер закроет заявку, решает логист при постановке своей машины - сервер сам
+   доопределяет тип, см. resolveEquipmentTypeIfUndetermined_ в plan-orders.js) - пока не
+   доопределилась, заявка должна быть видна в ОБОИХ фильтрах логиста (Трал и Длинномер), не
+   пропадать ни из одного. Единственное место, где segOf() используется как ЖЁСТКИЙ фильтр
+   видимости (F.type/F.mine в renderLog) - не трогает сортировку/цену/остальные места. */
+function segMatchesFilter_(equipmentType, filterSeg) {
+  var s = segOf(equipmentType);
+  return s === filterSeg || s === segOf('Любая модификация');
+}
 function capit(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 /* Влад 17.09: минимальная стоимость трала/длинномера - зеркало серверной MIN_PRICE_BY_SEG_
    (plan-orders.js) для мгновенной подсказки в форме, сервер - настоящая граница. */
@@ -2877,8 +2887,8 @@ function renderLog() {
        остались видны при фильтре «Трал». Свежесть теперь не обходит фильтры - она только
        подсвечивает строку (op2-new-halo ниже) и считается отдельным счётчиком «Новые»
        (F.newOnly ниже даёт целенаправленно посмотреть все новые через один клик). */
-    if (F.type !== 'all' && segOf(o.equipment_type) !== F.type) return false;
-    if (F.mine && MY_SEG && segOf(o.equipment_type) !== MY_SEG && !(!oOwn(o).length && !oHired(o))) return false;
+    if (F.type !== 'all' && !segMatchesFilter_(o.equipment_type, F.type)) return false;
+    if (F.mine && MY_SEG && !segMatchesFilter_(o.equipment_type, MY_SEG) && !(!oOwn(o).length && !oHired(o))) return false;
     if (F.nocar && (oOwn(o).length || oHired(o) || oSt(o) === 'ot')) return false;
     if (F.nd && !o.needs_data) return false;
     if (F.newOnly && !isFresh(o)) return false;

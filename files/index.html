@@ -2018,6 +2018,7 @@ main:has(> #page-crm.active){max-width:none;}
 .dr-calc-result.show{display:flex;}
 .dr-calc-total{display:flex;align-items:baseline;justify-content:space-between;font-size:11px;color:var(--muted);}
 .dr-calc-total b{font-family:var(--font-mono);font-weight:600;font-size:18px;color:var(--green);font-variant-numeric:tabular-nums;}
+.dr-calc-mode{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.02em;}
 .dr-calc-route{font-size:10.5px;color:var(--muted);}
 .dr-calc-route b{color:var(--text);font-weight:500;}
 .dr-calc-legend{display:flex;flex-direction:column;gap:3px;}
@@ -6652,7 +6653,11 @@ function renderBoard_(){
     clcSetSub_('округлено до 5 000 · '+L.a2+' км с грузом'
         +(L.loopCount>1?' · '+L.loopCount+' ходки':'')
         +(L.manual?' · ручной км':'')
-        +(L.mskOnly?' · Москва, только смена':''));
+        +(L.mskOnly?' · Москва, только смена':'')
+        // Влад, 22.09: "в калькуляторе где-то должно быть отражение, как считалось" -
+        // режим mkad/base от сервера (computeQuoteAuto, plans/2026-09-22-mkad-based-
+        // local-pricing.md) виден ВСЕГДА, не только когда он необычный.
+        +(L.mode==='mkad'?' · от МКАД':L.mode==='base'?' · от базы':''));
     clcButtons_(true);
     // дельта против прошлого расчёта (нейтральная - рост цены не «плохо»)
     if(clcPrevTotal_!=null&&clcPrevTotal_!==L.total){
@@ -23889,11 +23894,21 @@ var CRM = (function () {
     CALC_RESULTS_[dealId] = { q: q, fromAddr: fromAddr, toAddr: toAddr, vehType: vehType };
     var pf = el(prefix + '-calcDims'); if (pf) pf.classList.remove('show');
     var box = el(prefix + '-calcResult'); if (!box) return;
-    var rows = [['Смена (' + q.rateName + ')', q.shiftEff], ['Погрузка → выгрузка', q.ldAll], ['База → погрузка', q.e1], ['Выгрузка → база', q.e2]];
+    // Влад, 22.09 (plans/2026-09-22-mkad-based-local-pricing.md): режим mkad/base от
+    // сервера (computeQuoteAuto) - подписи плеч разные ("от базы" vs "от МКАД"), сам
+    // режим виден всегда, не только когда он необычный - "чтобы было понимание".
+    var isMkad = q.mode === 'mkad';
+    var e1Label = isMkad ? 'До МКАД (погрузка)' : 'База → погрузка';
+    var e2Label = isMkad ? 'До МКАД (выгрузка)' : 'Выгрузка → база';
+    var rows = [['Смена (' + q.rateName + ')', q.shiftEff], ['Погрузка → выгрузка', q.ldAll], [e1Label, q.e1], [e2Label, q.e2]];
     if (q.esc) rows.push(['Сопровождение', q.esc]);
     if (q.escortCar) rows.push(['Машина прикрытия', q.escortCar]);
+    var routeLine = isMkad
+      ? 'От МКАД до погрузки <b>' + q.a1 + ' км</b> · с грузом (без учёта пробега внутри МКАД) <b>' + q.a2 + ' км</b> · от выгрузки до МКАД <b>' + q.a3 + ' км</b>'
+      : 'База → погрузка <b>' + q.a1 + ' км</b> · с грузом <b>' + q.a2 + ' км</b> · выгрузка → база <b>' + q.a3 + ' км</b>';
     box.innerHTML = '<div class="dr-calc-total"><span>Итого с НДС</span><b>' + money(q.total) + '</b></div>' +
-      '<div class="dr-calc-route">База → погрузка <b>' + q.a1 + ' км</b> · с грузом <b>' + q.a2 + ' км</b> · выгрузка → база <b>' + q.a3 + ' км</b></div>' +
+      '<div class="dr-calc-mode">Режим расчёта: ' + (isMkad ? 'от МКАД (локальный рейс)' : 'от базы') + '</div>' +
+      '<div class="dr-calc-route">' + routeLine + '</div>' +
       '<div class="dr-calc-legend">' + rows.map(function (r) { return '<div class="dr-calc-leg-row"><span>' + esc(r[0]) + '</span><span class="num">' + money(r[1]) + '</span></div>'; }).join('') + '</div>' +
       // Влад, 12.09: если после этого расчёта поменяют адрес/вес/технику/габариты - эта
       // цена устареет. Обе кнопки в разметке сразу, переключаются классом .is-stale на

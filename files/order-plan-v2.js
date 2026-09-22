@@ -2781,15 +2781,39 @@ function onOmniBadgeClick_(badge) {
   if (typeof showPage === 'function') showPage('navigation', document.querySelector('.sidebar-nav-item[data-page="navigation"]'));
   if (window.NAV) { NAV.select(omniId); setTimeout(function () { NAV.select(omniId); }, 700); }
 }
-/* своя машина: госномер (+✓-кнопка у логиста) / водитель «Фамилия Имя» (+ осн./рез. из двух) */
+/* своя машина: госномер (+✓-кнопка у логиста, или автостатус бота) / водитель «Фамилия Имя»
+   (+ осн./рез. из двух). driver_bot_status - пилот «Длинномеры» (22.09, задание через бота
+   «Логист длинномеры»): 'none' у всех, кто вне пилота - тогда рисуем РОВНО как раньше
+   (ручная ✓-кнопка, driver_confirmed_at). Как только по строке пришёл автостатус - кнопка
+   пропадает (статус больше не ручной), госномер красится по 4 состояниям: без класса
+   (белый, не отправлено) / op2-bot-sent (жёлтый) / op2-bot-accepted (зелёный) /
+   op2-bot-declined (красный, с причиной в подсказке). */
 function ownLines_(o, v, multi, withBtn) {
-  var ok = !!v.driver_confirmed_at;
-  var ttl = ok ? 'Водитель ' + (v.driver_name || '') + ' подтвердил заявку · ' + (v.driver_confirmed_by || '') + ' ' + (hhmmOf(v.driver_confirmed_at) || '') : '';
-  var btn = withBtn ? '<button class="op2-dok' + (ok ? ' op2-on' : '') + '" data-oid="' + esc(o.id) + '" data-eid="' + esc(v.id) + '" title="' +
-    (ok ? 'Водитель подтвердил · клик - снять подтверждение' : 'Водитель подтвердил заявку? клик - отметить') + '">✓</button>' : '';
+  var botSt = v.driver_bot_status;
+  var pilot = botSt && botSt !== 'none';
+  var cls = '', ttl = '', btn = '';
+  if (pilot) {
+    if (botSt === 'accepted') {
+      cls = 'op2-bot-accepted';
+      ttl = 'Водитель ' + (v.driver_name || '') + ' принял задание в MAX' + (v.driver_bot_responded_at ? ' · ' + hhmmOf(v.driver_bot_responded_at) : '');
+    } else if (botSt === 'declined') {
+      cls = 'op2-bot-declined';
+      ttl = 'Водитель ' + (v.driver_name || '') + ' отказался: ' + (v.driver_bot_decline_reason || 'причина не указана') +
+        (v.driver_bot_responded_at ? ' · ' + hhmmOf(v.driver_bot_responded_at) : '');
+    } else { // 'sent'
+      cls = 'op2-bot-sent';
+      ttl = 'Задание отправлено водителю в MAX' + (v.driver_bot_sent_at ? ' · ' + hhmmOf(v.driver_bot_sent_at) : '') + ' · ждём ответ';
+    }
+  } else {
+    var ok = !!v.driver_confirmed_at;
+    cls = ok ? 'op2-ok' : '';
+    ttl = ok ? 'Водитель ' + (v.driver_name || '') + ' подтвердил заявку · ' + (v.driver_confirmed_by || '') + ' ' + (hhmmOf(v.driver_confirmed_at) || '') : '';
+    btn = withBtn ? '<button class="op2-dok' + (ok ? ' op2-on' : '') + '" data-oid="' + esc(o.id) + '" data-eid="' + esc(v.id) + '" title="' +
+      (ok ? 'Водитель подтвердил · клик - снять подтверждение' : 'Водитель подтвердил заявку? клик - отметить') + '">✓</button>' : '';
+  }
   var role = multi && v.role ? '<span class="op2-tag op2-tg-role">' + (v.role === 'reserve' ? 'рез.' : 'осн.') + '</span>' : '';
   var roleTtl = multi && v.role ? (v.role === 'reserve' ? ' · резервная машина' : ' · основная машина') : '';
-  return '<span class="op2-ln">' + plate_(v.vehicle_gos, ok ? 'op2-ok' : '', ttl) + btn + '</span>' +
+  return '<span class="op2-ln">' + plate_(v.vehicle_gos, cls, ttl) + btn + '</span>' +
     '<span class="op2-drv' + (v.driver_name ? '' : ' op2-dim') + '" title="' + esc((v.driver_name || '') + roleTtl) + '">' + (esc(fioName_(v.driver_name)) || 'водитель уточняется') + role + '</span>';
 }
 /* наёмник: госномер (зелёный, если перевозчик подтвердил) / водитель / НАЁМ + компания */

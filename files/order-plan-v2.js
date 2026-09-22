@@ -67,7 +67,9 @@ var MARGIN_RED_BELOW_ = 23;
 function hiredMargin_(price, rate, withVat) {
   var base = withVat ? price : price / (1 + VAT_RATE_);
   var m = base - rate;
-  return { amount: m, pct: Math.round(m / base * 100) };
+  /* 21.09: сумма - до рубля. При ставке без НДС base = цена/1.22 даёт дробь, и все три
+     места вывода (попап, карточка, строка таблицы) показывали «5 229,508 ₽». */
+  return { amount: Math.round(m), pct: Math.round(m / base * 100) };
 }
 function esc(s) {
   return String(s == null ? '' : s)
@@ -290,6 +292,15 @@ var ST_ORDER = { ok: 0, nz: 1, done: 2, ot: 3 };
 var built = false;
 var ME = null;              /* {email,name,role,code} */
 var META = null;            /* {dictionary, own_entities} */
+/* 21.09, Влад: «где машина сейчас» на строке заявки - тот же значок .rh-omni, что уже
+   работает в Планировке (files/index.html, Omnicomm-телематика, plans/2026-08-31-omnicomm-
+   telematics-integration.md), только с окном видимости service_time…+8ч (в Планировке он
+   виден всегда). Планировка и «Задание» - РАЗНЫЕ IIFE (см. комментарии в этом же файле про
+   ensureKpFonts_/drvBlockForeignAutofill_ - тот же класс границы областей видимости), общей
+   функции нет - здесь своя копия, тем же приёмом. place ("ближайший населённый пункт")
+   больше НЕ считается на клиенте нигде - перенесено на сервер (api/lib/omni-geo.js,
+   21.09) именно чтобы ЭТОТ файл не тащил свой список городов, сервер отдаёт готовое поле. */
+var OMNI_BY_GOS_ = {};
 var VIEW = 'log';           /* 'mgr' | 'log' - какой экран показываем */
 var DATE = todayStr();
 var TO_DATE = '';           /* непусто - режим «Неделя» (кнопка убрана 18.09, механизм жив,
@@ -309,7 +320,7 @@ var COUNTS = {};
 var FREE = null;
 var MAX_UPD = '';
 var lastOkAt = 0;
-var pollTimer = null, tickTimer = null;
+var pollTimer = null, tickTimer = null, omniTimer = null;
 var firstLoadDone = false;
 var prevSnap = {};          /* id -> {st, upd} для звуков на входящие изменения */
 var MY_SEG = '';
@@ -398,7 +409,15 @@ function byId(id) { for (var i = 0; i < ORD.length; i++) { if (String(ORD[i].id)
 function execById(o, eid) { var l = o.executors || []; for (var i = 0; i < l.length; i++) { if (String(l[i].id) === String(eid)) return l[i]; } return null; }
 function isMgr() { return VIEW === 'mgr'; }
 function isAnalyticsView_() { return VIEW === 'analytics'; }
-function canDone() { return ME && ME.role !== 'manager'; }
+/* 21.09, Влад: "Миша от балды ставит эти статусы сейчас готов. Рано его вводить...
+   убери пока этот статус" - живой аудит истории показал 6 заявок, переведённых в
+   done логистом Каном за один день без явного смысла (откачены обратно в confirmed
+   отдельным скриптом). Временно отключено - canDone() единственная точка входа для
+   кнопки «Выполнено» (#op2-d-done, см. ниже), больше нигде "done" не выставляется.
+   Сервер (api/lib/plan-orders.js) блокирует то же самое независимо - не только
+   спрятанная кнопка. Включить обратно - вернуть исходное тело функции:
+   `return ME && ME.role !== 'manager';` */
+function canDone() { return false; }
 function isAdmin() { return !!(ME && ME.role === 'admin'); } /* удалять заявку может только Влад (11.09) */
 /* 21.09 - смена менеджера: admin - везде; руководитель группы (MY_TEAM непустой) - только
    на заявках, которые ему и так уже видны (can_view_details - тот же флаг, что 17.09
@@ -1784,6 +1803,7 @@ function wire() {
   /* ── таблица менеджера ── */
   $('#op2-mgr-body').addEventListener('click', function (e) {
     if (e.target.closest('.op2-maplink')) return; /* ссылка на карту открывает себя сама, дровер не нужен */
+    var omniB = e.target.closest('.rh-omni'); if (omniB) { onOmniBadgeClick_(omniB); return; } /* «где машина» - переход на «Навигацию», дровер не нужен */
     var jb = e.target.closest('[data-jump]'); if (jb) { jumpToDate_(jb.dataset.jump); return; } /* «→ перенесена на...» - переход к новой заявке, не открытие дровера */
     var tr = e.target.closest('tr[data-oid]'); if (!tr) return;
     var ch = e.target.closest('.op2-stc');
@@ -2493,7 +2513,26 @@ function custCell_(o, prefix) {
   return '<td class="op2-cust" title="' + esc(o.customer || '') + '">' + (prefix || '') + shyCaps_(esc(o.customer || '')) + '</td>';
 }
 function priceCell_(o) {
-  return '<td class="op2-num">' + (num(o.price) ? '<span class="op2-money">' + esc(fmtP(o.price).replace(/\s*₽$/, '')) + '</span>' : '<span class="op2-dim">—</span>') + '</td>';
+  return '<td class="op2-num">' + (num(o.price) ? '<span class="op2-money">' + esc(fmtP(o.price).replace(/\s*₽$/, '')) + '</span>' + hiredMarginCell_(o) : '<span class="op2-dim">—</span>') + '</td>';
+}
+/* Влад 21.09: «на заявке должно быть видно процент маржинальности, рядом с ценой» - у
+   наёмной заявки процент второй строкой под ценой в той же ячейке (превью, вариант A).
+   Формула и порог 23% - те же hiredMargin_/MARGIN_RED_BELOW_, что в попапе «Отдать
+   наёмнику» и в карточке заявки: одна запись - одна цифра во всех трёх местах. Своя
+   машина / нет ставки закупки - пусто, ячейка как была. Расшифровка (закупка, НДС, маржа
+   в рублях) - в title по наведению, в строке только процент. */
+function hiredMarginCell_(o) {
+  var h = oHired(o);
+  if (!h || !num(o.price) || !num(h.purchase_rate)) return '';
+  var noVat = h.settlement === 'без ндс';
+  var hm = hiredMargin_(num(o.price), num(h.purchase_rate), !noVat);
+  var sign = hm.amount >= 0 ? '+' : '−';
+  var ttl = 'Наёмник · закупка ' + fmtP(h.purchase_rate) + (noVat ? ' без НДС' : ' с НДС') +
+    ' · маржа ' + sign + fmtP(Math.abs(hm.amount)) + ' · ' + sign + Math.abs(hm.pct) + '%' +
+    (noVat ? ' от цены-нетто ' + fmtP(Math.round(num(o.price) / (1 + VAT_RATE_))) : ' от цены') +
+    (hm.pct < MARGIN_RED_BELOW_ ? ' · ниже порога ' + MARGIN_RED_BELOW_ + '%' : '');
+  /* в строке - только «20%» (как в превью), минус лишь при убытке; знаки с плюсом - в title */
+  return '<span class="op2-mrg ' + (hm.pct >= MARGIN_RED_BELOW_ ? 'op2-good' : 'op2-bad') + '" title="' + esc(ttl) + '">' + (hm.amount < 0 ? '−' : '') + Math.abs(hm.pct) + '%</span>';
 }
 /* статус: знак + слово одним цветом, точка «под данные» перед знаком; у менеджера клик - сменить */
 function stCell_(o) {
@@ -2507,6 +2546,70 @@ function stCell_(o) {
 }
 function plate_(gos, cls, ttl) {
   return '<span class="op2-plate' + (cls ? ' ' + cls : '') + '"' + (ttl ? ' title="' + esc(ttl) + '"' : '') + '>' + esc(gos || '') + '</span>';
+}
+/* Клон lpOmniNormPlate_ (files/index.html) - та же нормализация, чтобы сопоставить
+   vehicle_gos заявки с gosNumber из /omnicomm/locations независимо от пробелов/регистра. */
+function omniNormPlate_(s) { return String(s || '').toUpperCase().replace(/[^А-ЯЁ0-9]/g, ''); }
+/* «Активна» - service_time заявки уже наступило и не прошло больше 8 часов. Настоящая
+   Date-арифметика (не строковое сравнение дат) - окно САМО корректно переходит через
+   полночь (заявка на 17:00 активна до 01:00 СЛЕДУЮЩИХ суток), без ручной работы с
+   границей дня (см. class бага project_month_boundary_bug_class в памяти проекта - тут
+   не наступает, потому что считаем в мс, а не режем строки). Опирается на локальные часы
+   браузера - весь дашборд используется из Москвы, дополнительный перевод часовых поясов
+   не нужен (не тот случай, что write-сторона сервера в CLAUDE.md, "Время: UTC на сервере,
+   МСК на экране" - там сервер писал UTC цифры под видом московских, здесь чистое
+   клиентское сравнение "сейчас" с "сейчас+заявка", один и тот же часовой пояс с обеих
+   сторон). */
+function orderNavActive_(o) {
+  var t = oTime(o);
+  var m = t && t.match(/^(\d{1,2}):(\d{2})/);
+  if (!m || !o.service_date) return false;
+  var dp = o.service_date.split('-');
+  var start = new Date(+dp[0], +dp[1] - 1, +dp[2], +m[1], +m[2], 0, 0).getTime();
+  var now = Date.now();
+  return now >= start && now <= start + 8 * 3600000;
+}
+/* Бейдж - байт-в-байт та же разметка/классы, что .rh-omni в Планировке (files/index.html,
+   lpOmniBadgeHtml_) - CSS склонирован в order-plan-v2.css под #page-order-plan (см. проверку
+   на глобальную коллизию классов между превью и продом, project_preview_css_class_global_
+   collision_gotcha в памяти - здесь то же самое сделано аккуратно, класс СВОЙ файл, но
+   заскоуплен под свою страницу). place уже посчитан сервером (api/lib/omni-geo.js). */
+function omniBadgeHtml_(o, gos) {
+  if (!gos || !orderNavActive_(o)) return '';
+  var v = OMNI_BY_GOS_[omniNormPlate_(gos)];
+  if (!v || v.stale || !v.place) return '';
+  var cls = (v.ignition && v.speed > 3) ? 'live' : v.ignition ? 'idle' : 'off';
+  var title = (cls === 'live' ? 'В движении, ' + Math.round(v.speed) + ' км/ч'
+    : cls === 'idle' ? 'Стоит, зажигание включено' : 'Двигатель заглушён') + ' - открыть на карте «Навигация»';
+  return '<span class="rh-omni ' + cls + '" data-omni-id="' + esc(v.omnicommId) + '" title="' + esc(title) + '"><i></i><b>' + esc(v.place) + '</b></span>';
+}
+/* Общий хвост колонки «Машина» для ОДНОЙ своей машины - раньше был одинаковый литерал в
+   mgrVehCell() и vehCellLog() (два места держали одну и ту же строку) - вынесено сюда,
+   чтобы значок появился сразу в обоих экранах одной правкой, а не в двух местах. */
+function ownSrcTagHtml_(o, vs) {
+  if (vs.length !== 1) return '';
+  return '<span class="op2-src"><span class="op2-tag op2-tg-own">СВОЯ</span>' + omniBadgeHtml_(o, vs[0].vehicle_gos) + '</span>';
+}
+function omniFetch_() {
+  if (document.hidden || !isPageActive()) return;
+  apiGet('/omnicomm/locations', {}).then(function (r) {
+    if (!r || !r.ok || !r.data || !Array.isArray(r.data.vehicles)) return;
+    var byGos = {};
+    r.data.vehicles.forEach(function (v) { if (v.gosNumber) byGos[omniNormPlate_(v.gosNumber)] = v; });
+    OMNI_BY_GOS_ = byGos;
+    renderAll();
+  }).catch(function () {});
+}
+/* Клик по бейджу - тот же переход, что уже есть в Планировке (files/index.html, тот же
+   комментарий "отличная идея - при нажатии перекидывает на страницу навигации", Влад
+   01.09): открывает вкладку «Навигация» и центрует карту на этой машине. showPage/window.NAV -
+   ГЛОБАЛЬНЫЕ (та же причина, по которой inline onclick="showPage(...)" на пункте меню вообще
+   работает) - эта, отдельная, IIFE видит их через window, как apiGet() уже видит
+   fetchFromYardApi_ тем же приёмом. */
+function onOmniBadgeClick_(badge) {
+  var omniId = badge.dataset.omniId; if (!omniId) return;
+  if (typeof showPage === 'function') showPage('navigation', document.querySelector('.sidebar-nav-item[data-page="navigation"]'));
+  if (window.NAV) { NAV.select(omniId); setTimeout(function () { NAV.select(omniId); }, 700); }
 }
 /* своя машина: госномер (+✓-кнопка у логиста) / водитель «Фамилия Имя» (+ осн./рез. из двух) */
 function ownLines_(o, v, multi, withBtn) {
@@ -2583,7 +2686,7 @@ function mgrVehCell(o) {
   var vs = oOwn(o);
   if (!vs.length) return '<span class="op2-drv op2-dim">машину ещё не поставили</span>';
   return '<div class="op2-veh">' + vs.map(function (v) { return ownLines_(o, v, vs.length > 1, false); }).join('') +
-    (vs.length === 1 ? '<span class="op2-src"><span class="op2-tag op2-tg-own">СВОЯ</span></span>' : '') + '</div>' + pendHtml(o, 'mgr');
+    ownSrcTagHtml_(o, vs) + '</div>' + pendHtml(o, 'mgr');
 }
 /* «замена машины» (type=replace_vehicle, from_gos/to_gos) и «замена перевозчика»
    (type=replace_carrier, from_carrier_name/to_carrier_name) - один и тот же
@@ -2670,7 +2773,7 @@ function vehCellLog(o) {
   }
   return '<div class="op2-veh" data-oid="' + esc(o.id) + '"' + (vs.length === 1 ? ' data-eid="' + esc(vs[0].id) + '"' : '') + '>' +
     vs.map(function (v) { return ownLines_(o, v, vs.length > 1, true); }).join('') +
-    (vs.length === 1 ? '<span class="op2-src"><span class="op2-tag op2-tg-own">СВОЯ</span></span>' : '') + '</div>' + pendHtml(o, 'log');
+    ownSrcTagHtml_(o, vs) + '</div>' + pendHtml(o, 'log');
 }
 function renderLog() {
   var body = $('#op2-log-body'); if (!body) return;
@@ -2901,20 +3004,18 @@ function setStatusUi(tr, k) {
   setStatus(o, k);
 }
 /* 21.09, Влад: «перевод заявки из не подтверждённой в подтверждённую - только при
-   условии что заполнено время, адреса, груз и контакты на погрузке или контакт
-   заказчика». Клон серверной confirmReadinessError_ (api/lib/plan-orders.js) - те же
-   поля, тот же текст ошибки. Сервер - источник истины (эту же проверку не обойти прямым
-   запросом), здесь - только чтобы не ждать неудачный round-trip: подсветить нехватку
-   сразу по клику, тостом, без похода на сервер. */
+   условии что заполнено время, адреса и груз» (требование контактов снято тем же днём -
+   было изначально, но мешало живой работе, контакты добираются уже после подтверждения).
+   Клон серверной confirmReadinessError_ (api/lib/plan-orders.js) - те же поля, тот же
+   текст ошибки. Сервер - источник истины (эту же проверку не обойти прямым запросом),
+   здесь - только чтобы не ждать неудачный round-trip: подсветить нехватку сразу по
+   клику, тостом, без похода на сервер. */
 function confirmReadinessError_(o) {
   var missing = [];
   if (!o.service_time) missing.push('время подачи');
   if (!o.load_address) missing.push('адрес погрузки');
   if (!o.unload_address) missing.push('адрес выгрузки');
   if (!o.cargo) missing.push('груз');
-  var hasLoadContact = !!(o.load_contact_name || o.load_contact_phone);
-  var hasCustomerContact = !!(o.customer_contact_name || o.customer_contact_phone);
-  if (!hasLoadContact && !hasCustomerContact) missing.push('контакт на погрузке или контакт заказчика');
   if (!missing.length) return null;
   return 'Нельзя подтвердить - не заполнено: ' + missing.join(', ');
 }
@@ -2944,6 +3045,7 @@ function setStatus(o, k) {
 /* ═════════════════════════ КЛИКИ В ТАБЛИЦЕ ЛОГИСТА ═════════════════════════ */
 function onLogClick(e) {
   if (e.target.closest('.op2-maplink')) return; /* ссылка на карту открывает себя сама, дровер не нужен */
+  var omniB = e.target.closest('.rh-omni'); if (omniB) { onOmniBadgeClick_(omniB); return; } /* «где машина» - переход на «Навигацию», дровер не нужен */
   var jb = e.target.closest('[data-jump]'); if (jb) { jumpToDate_(jb.dataset.jump); return; }
   var lg = e.target.closest('.op2-logpick');
   var dk = e.target.closest('.op2-dok');
@@ -4046,6 +4148,70 @@ function expandWhoRow(seg) {
   S.unfold(rest.length);
 }
 
+/* 21.09, Влад: «когда выбираешь длинномер, должен появляться рядом выбор Коники, если
+   выбирает - в план задание уходит в технике Длинномер с кониками» + следом «у Faymonville
+   8 осей и раздвижение в ширину» + «у трала длинные аппарели» - превью
+   https://claude.ai/artifact/MRsjazcRwwjsx4yTonNR5q одобрено («запускай в жизнь»).
+   МОДИФИКАТОРЫ - не отдельные типы техники в справочнике (plan_dictionary их не знает и
+   не должен - это не новый тип, а комплектация уже существующего), а ЧИСТО клиентская
+   надстройка: набор дописывается к строке типа через " с " + фраза(-ы) в творительном
+   падеже, само итоговое значение - обычная строка в equipment_type (сервер как принимал
+   любой текст до 60 символов, так и принимает, без изменений). segOf_/segOf() (и на
+   клиенте, и на сервере) берут только ПЕРВОЕ слово - "Длинномер с кониками" сегментируется
+   в "длинномер" точно так же, как голый "Длинномер", вся остальная логика (мин. цена,
+   Аналитика, фильтры) не замечает разницы. */
+var EQ_MODIFIERS_ = {
+  'Трал': [{ key: 'apron', label: 'Длинные аппарели', phrase: 'длинными аппарелями' }],
+  'Длинномер': [{ key: 'koniki', label: 'Коники', phrase: 'кониками' }],
+  'Faymonville (60+ т)': [
+    { key: 'axles', label: '8 осей', phrase: '8 осями' },
+    { key: 'widen', label: 'Раздвижение в ширину', phrase: 'раздвижением в ширину' }
+  ]
+};
+// "8 осей" + "раздвижение в ширину" - НЕ взаимоисключающие (разные свойства одной машины,
+// подтверждено Владом явно) - обе фразы через "и", не радио-выбор одного варианта.
+function eqCombine_(base, keys) {
+  var defs = EQ_MODIFIERS_[base] || [];
+  var phrases = defs.filter(function (d) { return keys.indexOf(d.key) >= 0; }).map(function (d) { return d.phrase; });
+  return phrases.length ? base + ' с ' + phrases.join(' и ') : base;
+}
+// Обратный разбор - нужен при ОТКРЫТИИ уже сохранённой заявки (o.equipment_type уже может
+// быть готовой строкой "Длинномер с кониками"): перебор всех комбинаций (максимум 4 на тип
+// у Faymonville, у остальных 2) - находим {base, mods}, чтобы чип типа подсветился
+// верно, а модификаторы встали в те же положения, что были сохранены. Не найдено ни одной
+// комбинации (старый формат/незнакомое значение) - возвращаем как есть без модификаторов,
+// как раньше.
+function eqParse_(val) {
+  var s = String(val || '');
+  var bases = Object.keys(EQ_MODIFIERS_);
+  for (var bi = 0; bi < bases.length; bi++) {
+    var base = bases[bi], defs = EQ_MODIFIERS_[base], n = defs.length;
+    for (var mask = 0; mask < (1 << n); mask++) {
+      var keys = [];
+      for (var i = 0; i < n; i++) { if (mask & (1 << i)) keys.push(defs[i].key); }
+      if (eqCombine_(base, keys) === s) return { base: base, mods: keys };
+    }
+  }
+  return { base: s, mods: [] };
+}
+function eqModsChipsHtml_(base, activeKeys) {
+  var defs = EQ_MODIFIERS_[base];
+  if (!defs) return '';
+  return defs.map(function (d) {
+    return '<button class="op2-chip op2-mod' + (activeKeys.indexOf(d.key) >= 0 ? ' op2-on' : '') + '" data-mod="' + esc(d.key) + '">' + esc(d.label) + '</button>';
+  }).join('');
+}
+// Перерисовывает строку модификаторов ПОД типом техники - вызывается и при смене типа
+// (сбрасывает выбор, т.к. набор модификаторов у другого типа другой), и при клике по
+// самому модификатору (base не меняется, activeKeys - новый набор).
+function renderEqMods_(base, activeKeys) {
+  var box = $('#op2-f-eq-mods'); if (!box) return;
+  var html = eqModsChipsHtml_(base, activeKeys);
+  box.innerHTML = html;
+  box.hidden = !html;
+  box.dataset.mods = activeKeys.join(',');
+}
+
 /* «Тип техники» - тот же приём, перенесён по превью 11.09 (Влад: «давай внедряй»).
    Отличие от «От кого»: тут ВСЕГДА видны оба основных типа (Трал, Длинномер) - это не
    "текущий выбор", а быстрый доступ к двум самым частым; выбор виден третьим - .op2-on
@@ -4074,7 +4240,16 @@ function eqRowHtml(curVal) {
   if (eqRest.length) html += '<button class="op2-chip" data-eq-more>Ещё <span class="op2-mono" style="color:var(--tint-amber)">' + eqRest.length + '</span></button>';
   return html;
 }
-function collapseEqRow(seg, curVal) { seg.dataset.cur = curVal || ''; seg.innerHTML = eqRowHtml(curVal); }
+function collapseEqRow(seg, curVal) {
+  seg.dataset.cur = curVal || '';
+  seg.innerHTML = eqRowHtml(curVal);
+  /* смена типа - модификаторы сбрасываются (набор у другого типа другой, "8 осей" на
+     трале бессмысленны) - тот же выбор, что уже показан и одобрен в превью. Вызывается и
+     при ПЕРВОМ построении формы (renderForm ниже сам явно кладёт сохранённые mods сразу
+     после), и при живом клике по чипу типа - в этом случае второй вызов не будет, только
+     первый (со сбросом), это и нужно. */
+  renderEqMods_(curVal || '', []);
+}
 function expandEqRow(seg) {
   var more = seg.querySelector('[data-eq-more]'); if (!more) return;
   var curBtn = seg.querySelector('.op2-chip.op2-on');
@@ -4110,7 +4285,13 @@ function renderForm() {
     : humanDate(defDate) + ' · ' + ((ME && ME.name) || '') + (isLog ? ' · внутренняя перевозка или свой заказчик' : '');
 
   var eqPrimary0 = dict('equipment').filter(function (x) { return x.primary; });
-  var curEq = o ? (o.equipment_type || '') : (eqPrimary0[0] ? eqPrimary0[0].value : '');
+  /* заявка на редактировании/повторе может уже нести "Длинномер с кониками" целиком -
+     разбираем на {base, mods}, чтобы чип типа подсветился ПРАВИЛЬНО (сверка идёт по
+     голому значению справочника - "Длинномер", не по составной строке), а модификаторы
+     встали в те же положения, что были сохранены. Новая заявка - без mods, как раньше. */
+  var eqParsed0 = eqParse_(o ? (o.equipment_type || '') : '');
+  var curEq = o ? eqParsed0.base : (eqPrimary0[0] ? eqPrimary0[0].value : '');
+  var curEqMods = o ? eqParsed0.mods : [];
   var gabs = dict('gabarit').map(function (g) { return (g && g.value) || g; }); /* словарь отдаёт {value, primary} */
   var curGab = o ? (o.gabarit || '') : (gabs[0] || '');
   var curEnt = o && o.executor_entity_id ? String(o.executor_entity_id) : (entities()[0] ? String(entities()[0].id) : '');
@@ -4155,6 +4336,8 @@ function renderForm() {
 
       '<div class="op2-fld op2-full"><label>Тип техники</label><div class="op2-seg" id="op2-f-eq" data-cur="' + esc(curEq) + '">' +
         eqRowHtml(curEq) +
+      '</div><div class="op2-mods" id="op2-f-eq-mods" data-mods="' + esc(curEqMods.join(',')) + '"' + (EQ_MODIFIERS_[curEq] ? '' : ' hidden') + '>' +
+        eqModsChipsHtml_(curEq, curEqMods) +
       '</div></div>' +
 
       '<div class="op2-fld op2-full"><label>От кого (исполнитель с нашей стороны)</label><div class="op2-seg" id="op2-f-ent">' +
@@ -4306,6 +4489,20 @@ function wireForm() {
     var wasOpen = !!seg.querySelector('[data-eq-close]');
     collapseEqRow(seg, pick.dataset.eq);
     if (wasOpen) S.fold();
+  });
+  var eqModsBox = $('#op2-f-eq-mods');
+  if (eqModsBox) eqModsBox.addEventListener('click', function (e) {
+    // та же причина stopPropagation, что у #op2-f-eq чуть выше - renderEqMods_ меняет
+    // innerHTML, отвязывая e.target до всплытия к общему звуковому делегату.
+    e.stopPropagation();
+    var b = e.target.closest('.op2-chip[data-mod]'); if (!b) return;
+    var seg = $('#op2-f-eq');
+    var base = seg ? (seg.dataset.cur || '') : '';
+    var mods = (this.dataset.mods || '').split(',').filter(Boolean);
+    var key = b.dataset.mod, idx = mods.indexOf(key);
+    if (idx >= 0) mods.splice(idx, 1); else mods.push(key); // независимые галочки, не радио - Влад подтвердил на превью
+    S.nav();
+    renderEqMods_(base, mods);
   });
   $('#op2-f-ent').addEventListener('click', function (e) {
     var seg = this;
@@ -4522,7 +4719,13 @@ function formEq() {
   // тихо уходила бы на сервер с пустым типом техники при любом выборе не из primary -
   // поймано на живой проверке 11.09.
   var seg = $('#op2-f-eq');
-  return seg ? (seg.dataset.cur || '') : '';
+  var base = seg ? (seg.dataset.cur || '') : '';
+  // 21.09 - модификаторы («Коники»/«8 осей»/«Длинные аппарели» и т.п., #op2-f-eq-mods)
+  // дописываются к базовому типу здесь же, одним источником истины для сохранения -
+  // см. eqCombine_/EQ_MODIFIERS_ выше.
+  var modsBox = $('#op2-f-eq-mods');
+  var mods = modsBox ? (modsBox.dataset.mods || '').split(',').filter(Boolean) : [];
+  return eqCombine_(base, mods);
 }
 function splitContact(s) {
   s = String(s || '').trim();
@@ -5089,10 +5292,15 @@ function startPolling() {
     }).catch(function () {});
   }, 2000);
   tickTimer = setInterval(function () { if (!document.hidden && isPageActive()) renderUpdated(); }, 1000);
+  /* Omnicomm - тот же интервал 30с, что и у поллера в Планировке (lpOmniFetch_) - чаще
+     спрашивать нечего, сервер сам опрашивает Omnicomm не быстрее. */
+  omniFetch_();
+  omniTimer = setInterval(omniFetch_, 30000);
 }
 function stopPolling() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+  if (omniTimer) { clearInterval(omniTimer); omniTimer = null; }
 }
 
 /* ═════════════════════════ ВХОД ═════════════════════════ */

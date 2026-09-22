@@ -479,7 +479,12 @@ function show(id){ ['s-loading','s-welcome','s-revoked','s-main'].forEach(functi
 function fmtDT(h){ var d=new Date(EPOCH0+Number(h)*3600000); var p=function(n){ return (n<10?'0':'')+n; }; return p(d.getDate())+'.'+p(d.getMonth()+1)+', '+p(d.getHours())+':'+p(d.getMinutes()); }
 function fmtD(h){ var d=new Date(EPOCH0+Number(h)*3600000); var p=function(n){ return (n<10?'0':'')+n; }; return p(d.getDate())+'.'+p(d.getMonth()+1); }
 function fmtLen(h){ h=Number(h); if(h>=48) return Math.round(h/24)+' дн'; if(h>=24) return '1 сут'; return Math.round(h)+' ч'; }
-function fmtT(iso){ if(!iso) return ''; var d=new Date(iso.replace(' ','T')); var p=function(n){ return (n<10?'0':'')+n; }; return p(d.getHours())+':'+p(d.getMinutes()); }
+// Сервер отдаёт stage_updated_at/at как "YYYY-MM-DD HH:MM:SS" - честный UTC БЕЗ пометки
+// часового пояса (21.09, см. CLAUDE.md "Время: UTC на сервере, МСК на экране"). Раньше здесь
+// не хватало 'Z' - new Date() без пометки часового пояса трактует строку как УЖЕ местное
+// время телефона, то есть UTC показывался как московское время - на 3 часа меньше реального
+// (подтверждённый баг, водитель видел неверное время прохождения этапов рейса).
+function fmtT(iso){ if(!iso) return ''; var d=new Date(iso.replace(' ','T')+'Z'); var p=function(n){ return (n<10?'0':'')+n; }; return p(d.getHours())+':'+p(d.getMinutes()); }
 function stageIdx(key){ for(var i=0;i<STAGES.length;i++) if(STAGES[i].key===key) return i; return -1; }
 function stageName(key){ var i=stageIdx(key); return i<0?'Не начат':STAGES[i].name; }
 function renderNet(){

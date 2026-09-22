@@ -5,7 +5,13 @@
 // Принципы (все - решения Влада 10-11.09, подробности в плане):
 //   - заявка = plan_orders, исполнители = plan_order_executors (список), свой парк -> отрезок plan_segs
 //     с order_id (передняя половина уже работающей Планировки, не третья система);
-//   - менеджер видит СВОИ заявки, логист/админ - все; внутренние заявки логиста менеджерам не видны;
+//   - ЧТЕНИЕ (15.09, Влад: «менеджеры хотят видеть все заказы - на время перехода уступаю»):
+//     менеджер видит ВСЕ заявки (не только свои), логист/админ - тоже все; внутренние заявки
+//     логиста менеджерам по-прежнему не видны. Клиент (order-plan-v2.js, MGR_ALL) сверху даёт
+//     кнопку «Все менеджеры»/«Только мои» - это уже просто фильтр СТРОК на уже полученном списке;
+//   - ПРАВКА заявки (save/status/take/change_request_resolve и т.п.) - по-прежнему только СВОЯ
+//     для менеджера (canEdit), это отдельная, более строгая проверка от canSee (видимость) -
+//     см. комментарии у обеих функций. «Видеть» ≠ «менять чужое».
 //   - «предупреждать, не запрещать»: занятую машину ставить можно; ЗАПРЕТ только на отбой;
 //   - «под данные»: замена вне заявленных - запрос-подтверждение (менеджер согласует с заказчиком);
 //   - никаких списков сущностей в коде: юрлица, люди, машины, словари - из справочников.
@@ -18,6 +24,12 @@ const crypto = require("crypto");
 
 module.exports = function (deps) {
   const { app, pool, checkSession, requireRole_, normalizeGosServer_, buildFleetSummary_, FLEET_EPOCH0_MS_ } = deps;
+  // Руководители коммерческих групп (Ахтамова/Гусейнова) - ТОТ ЖЕ единственный
+  // COMMERCIAL_HEAD_TEAMS_ из server.js, что уже используют «Суды»/CRM/План поступлений
+  // (см. require("./lib/plan-orders.js") в server.js) - вторую копию списка не заводим.
+  // Дефолт {} - на случай локального теста без этого deps-поля, не боевой путь.
+  const commercialHeadTeams_ = deps.commercialHeadTeams || {};
+  function surOf_(name) { return String(name || "").trim().split(/\s+/)[0].toLowerCase(); }
   const ROLES = ["admin", "manager", "logist"];
   const gate = [checkSession, requireRole_(...ROLES)];
   const STATUSES = ["unconfirmed", "confirmed", "cancelled", "done"];
@@ -41,6 +53,24 @@ module.exports = function (deps) {
   function hoursFromEpoch(dateStr, timeStr) { // часы от эпохи Планировки (контракт plan_segs)
     const t = timeStr || "08:00";
     return (new Date(dateStr + "T" + t + ":00+03:00").getTime() - FLEET_EPOCH0_MS_) / 3600000;
+  }
+  // segOf_ - клон КЛИЕНТСКОГО segOf() (order-plan-v2.js): первое слово типа техники,
+  // строчными - "Трал 20-25 т"/"Трал-корыто"/"Трал под кран" все сводятся к "трал".
+  function segOf_(type) { return String(type || "").trim().toLowerCase().split(/[\s,/]+/)[0] || ""; }
+  // 17.09, Влад: «уже начали обходить запрет на сохранение заявки вводом в цену 1 рубль -
+  // у нас заказ минимально на трал и длинномер стоит 25000 рублей». Найдено 4 реальных
+  // заявки (id 76-79) с price=1 - "цена обязательна" (ниже) требует только ЛЮБОЕ truthy
+  // значение, 1 рубль его тривиально обходит. minPriceError_ - отдельная, более строгая
+  // проверка ПОРОГА (не просто "заполнено"). Срабатывает только на ПОЛОЖИТЕЛЬНОЙ цене ниже
+  // порога - 0/пусто (ещё не знаем цену) не трогаем, это отдельный, уже решённый случай
+  // (см. комментарий у "цена обязательна" - история без цены задним числом не блокируется).
+  const MIN_PRICE_BY_SEG_ = { "трал": 25000, "длинномер": 25000 };
+  function minPriceError_(equipmentType, price) {
+    if (!(price > 0)) return null;
+    const seg = segOf_(equipmentType);
+    const min = MIN_PRICE_BY_SEG_[seg];
+    if (min && price < min) return "Минимальная стоимость (" + seg + ") - " + min + " ₽";
+    return null;
   }
   function dayWindow(dateStr) { const s = hoursFromEpoch(dateStr, "00:00"); return [s, s + 24]; }
   function code3(fullName) { // АХТ / САВ / СИЛ - как на плитках Планировки
@@ -85,9 +115,51 @@ module.exports = function (deps) {
       `SELECT * FROM plan_order_change_requests WHERE order_id IN (?) AND status = 'pending'`, [orderIds]);
     return rows;
   }
-  function canSee(req, o) {
+  // ЧТЕНИЕ ПОДРОБНОСТЕЙ (GET /orders/one, /orders/history - открытие заявки в шторке) -
+  // 17.09, Влад уточнил после 15.09: «проваливаться в заказ, смотреть информацию,
+  // редактировать - менеджеры могут только по своим заказам, подсматривать во внутренности
+  // заказа других менеджеров они не могут. Руководители могут смотреть подробности свои и
+  // своих сотрудников». Список (`GET /orders`, обзор дня) остался общим (см. комментарий в
+  // шапке файла) - это разные вещи: строка таблицы vs открытая карточка. Своя заявка - для
+  // ЛЮБОГО менеджера; заявка СВОЕЙ команды - только для руководителя группы
+  // (COMMERCIAL_HEAD_TEAMS_, тот же список, что уже используют «Суды»/CRM/План поступлений -
+  // единственный источник, здесь НЕ дублируется, приходит через deps.commercialHeadTeams).
+  // canSeeOrderCore_ - синхронное ядро с уже посчитанной командой вызывающего (чтобы список
+  // ниже не бил в async me() на каждую строку, а вызывал me() ровно один раз на весь запрос).
+  function canSeeOrderCore_(o, callerTeam) {
+    return !!(callerTeam && o.manager_name && callerTeam.indexOf(surOf_(o.manager_name)) >= 0);
+  }
+  async function canSee(req, o) {
+    if (req.userRole !== "manager") return true;
+    if (o.internal) return false;
+    if (o.manager_email === req.userEmail) return true;
+    const who = await me(req);
+    return canSeeOrderCore_(o, commercialHeadTeams_[surOf_(who.name)] || null);
+  }
+  // ПРАВКА (save/status/take/otboy/delete/change_request_resolve) - Влад просил
+  // «руководители... смотреть», не «менять чужое» - осталась строго owner-only, БЕЗ
+  // распространения на команду руководителя (в отличие от canSee выше).
+  function canEdit(req, o) {
     if (req.userRole === "manager") return !o.internal && o.manager_email === req.userEmail;
     return true;
+  }
+  // Список (`GET /orders`) остаётся общим для всех менеджеров (обзор дня, 15.09), но
+  // чужая строка не должна нести контакты/примечания/документы/коммерцию наёмника -
+  // именно это Влад назвал «внутренностями» 17.09. Оставляем ровно то, что таблица и так
+  // уже показывает всем (маршрут, груз, машина/водитель, статус, цена) - см. renderMgr()/
+  // routeCell/cargoCell_/mgrVehCell в order-plan-v2.js, откуда взят этот список полей.
+  const PRIVATE_ORDER_FIELDS_ = ["customer_contact_name", "customer_contact_phone",
+    "load_contact_name", "load_contact_phone", "unload_contact_name", "unload_contact_phone",
+    "note", "documents", "rework_terms", "crm_deal_id"];
+  const PRIVATE_EXECUTOR_FIELDS_ = ["purchase_rate", "carrier_contact", "carrier_id", "comment", "found_by", "driver_phone"];
+  function redactForeignOrder_(out) {
+    PRIVATE_ORDER_FIELDS_.forEach((k) => { out[k] = null; });
+    out.executors = (out.executors || []).map((e) => {
+      const e2 = Object.assign({}, e);
+      PRIVATE_EXECUTOR_FIELDS_.forEach((k) => { e2[k] = null; });
+      return e2;
+    });
+    return out;
   }
   function fmtTime(t) { return t ? String(t).slice(0, 5) : null; }
   function fmtDate(d) { // mysql DATE -> 'YYYY-MM-DD' (драйвер может отдать Date)
@@ -118,6 +190,26 @@ module.exports = function (deps) {
     return out;
   }
 
+  // 18.09, «Перенести»: transferred_to_id/transferred_from_id - голые ID (см. serialize()
+  // выше, копирует ВСЕ колонки строки как есть). Клиенту для подписи «→ перенесена на
+  // 25.09 · №14» нужна дата/номер СВЯЗАННОЙ заявки, а её может не быть в уже загруженном
+  // диапазоне дат (перенос за пределы текущей недели) - поэтому дату/номер резолвим здесь,
+  // а не полагаемся на то, что клиент когда-нибудь сам догадается. НЕ трогаем note
+  // ([[feedback_dont_rewrite_manager_free_text]]) - подпись строится из этих двух полей на
+  // клиенте, не хранится текстом нигде.
+  async function attachTransferInfo_(pool, orders) {
+    const ids = new Set();
+    orders.forEach((o) => { if (o.transferred_to_id) ids.add(o.transferred_to_id); if (o.transferred_from_id) ids.add(o.transferred_from_id); });
+    if (!ids.size) return orders;
+    const [rows] = await pool.query(`SELECT id, service_date, day_no FROM plan_orders WHERE id IN (?)`, [Array.from(ids)]);
+    const byId = {}; rows.forEach((r) => { byId[r.id] = { id: r.id, service_date: fmtDate(r.service_date), day_no: r.day_no }; });
+    orders.forEach((o) => {
+      if (o.transferred_to_id) o.transferred_to = byId[o.transferred_to_id] || null;
+      if (o.transferred_from_id) o.transferred_from = byId[o.transferred_from_id] || null;
+    });
+    return orders;
+  }
+
   // Текущий водитель/прицеп тягача - из fleet_assignments (любой открытый slot, самый свежий),
   // имя/телефон - sprav_people. Тот же принцип, что buildFleetSummary_ (без slot=1).
   async function crewFor(conn, gos) {
@@ -144,11 +236,27 @@ module.exports = function (deps) {
   }
   async function ownEntities(internalCustomers) { // internalCustomers=true -> свои юрлица + База (чипы «Кто заказывает» у логиста)
     const [rows] = await pool.query(
-      `SELECT id, name, full_name, short_name, own_sort, inn, kpp, director_name, signer_short, bank_name, bank_account, stamp_file, signature_file, is_own, internal_customer
+      `SELECT id, name, full_name, short_name, own_sort, inn, kpp, ogrn, legal_address, director_name, director_post, signer_short, bank_name, bank_account, bank_bik, bank_corr_account, stamp_file, signature_file, is_own, internal_customer
          FROM sprav_legal_entities WHERE ${internalCustomers ? "internal_customer = 1" : "is_own = 1"} AND deleted_at IS NULL ORDER BY COALESCE(own_sort, 999), name`);
+    // 15.09, Влад: «Договор-заявка» из «Задания» - для печати документа нужны полные
+    // реквизиты (не только id/name, как раньше хватало для чипов) + person_id подписанта
+    // (чтобы забрать его подпись из sprav_people_documents). У sprav_legal_entities нет
+    // прямой FK на sprav_people - director_name/signer_short только текст. Сопоставляем
+    // по первым двум словам ФИО (тот же приём, что rosterKey_/shortName2_ в
+    // applyRosterFallback_ выше по этому же файлу) - "своих" юрлиц мало (Бульдог/
+    // Технопарк/...), лишний SELECT id+full_name по всей sprav_people - не проблема
+    // производительности здесь (не в горячем цикле, только на /orders/meta).
+    const [people] = await pool.query("SELECT id, full_name FROM sprav_people WHERE deleted_at IS NULL");
+    const nameKey = (s) => String(s || "").trim().split(/\s+/).slice(0, 2).join(" ").toLowerCase();
+    const personIdByKey = {};
+    people.forEach((p) => { const k = nameKey(p.full_name); if (k && !personIdByKey[k]) personIdByKey[k] = p.id; });
     return rows.map((r) => ({
-      id: r.id, name: r.name, short: r.short_name || r.name, full_name: r.full_name || r.name, inn: r.inn, director: r.director_name, signer: r.signer_short,
+      id: r.id, name: r.name, short: r.short_name || r.name, full_name: r.full_name || r.name,
+      inn: r.inn, kpp: r.kpp, ogrn: r.ogrn, legal_address: r.legal_address,
+      director: r.director_name, director_post: r.director_post, signer: r.signer_short,
+      bank_name: r.bank_name, bank_account: r.bank_account, bank_bik: r.bank_bik, bank_corr_account: r.bank_corr_account,
       is_own: !!r.is_own, has_bank: !!(r.bank_name && r.bank_account), has_stamp: !!(r.stamp_file && r.signature_file),
+      signer_person_id: personIdByKey[nameKey(r.signer_short)] || personIdByKey[nameKey(r.director_name)] || null,
     }));
   }
 
@@ -172,20 +280,42 @@ module.exports = function (deps) {
   });
 
   // ── GET /api/orders ─────────────────────────────────────────────────────────────────────
-  // date=YYYY-MM-DD (+ to=YYYY-MM-DD для недели). Менеджер - свои, не внутренние; логист/админ - все.
+  // date=YYYY-MM-DD (+ to=YYYY-MM-DD для недели). 15.09 (Влад): менеджер - ВСЕ заявки (было -
+  // только свои), кроме внутренних логиста; логист/админ - как и раньше, всё. Клиент сам
+  // умеет отфильтровать до «только своих» кнопкой (MGR_ALL в order-plan-v2.js) - это уже не
+  // вопрос видимости на сервере, а удобство поверх уже полученного списка.
+  // 17.09: чужая строка для менеджера идёт через redactForeignOrder_ - список остался общим
+  // (обзор дня), но без контактов/примечаний/документов/коммерции наёмника - это Влад назвал
+  // «внутренностями» и просил закрыть отдельно от списка. Своя команда руководителя группы
+  // (canSeeOrderCore_/COMMERCIAL_HEAD_TEAMS_) НЕ редактируется - её подробности и так
+  // разрешено открывать (`/orders/one` пропустит), редактировать список смысла нет.
   app.get("/api/orders", ...gate, async (req, res) => {
     try {
       const date = String(req.query.date || ""); const to = String(req.query.to || date);
       if (!isDate(date) || !isDate(to)) return fail(res, 400, "date обязателен (YYYY-MM-DD)");
       const r = await roster();
       const where = ["deleted_at IS NULL", "service_date BETWEEN ? AND ?"]; const args = [date, to];
-      if (req.userRole === "manager") { where.push("manager_email = ?", "internal = 0"); args.push(req.userEmail); }
+      if (req.userRole === "manager") { where.push("internal = 0"); }
       const [rows] = await pool.query(`SELECT * FROM plan_orders WHERE ${where.join(" AND ")} ORDER BY service_date, day_no`, args);
       const ids = rows.map((o) => o.id);
       const execs = await loadExecutors(pool, ids); const pend = await loadPending(pool, ids);
       const execBy = {}; execs.forEach((e) => { (execBy[e.order_id] = execBy[e.order_id] || []).push(e); });
       const pendBy = {}; pend.forEach((q) => { pendBy[q.order_id] = q; });
-      const orders = rows.map((o) => serialize(o, execBy[o.id] || [], pendBy[o.id], r.byEmail));
+      const isMgrView = req.userRole === "manager";
+      // Команда вызывающего считается ОДИН раз на весь запрос (не по разу на строку) - см.
+      // комментарий у canSeeOrderCore_ выше.
+      const callerTeam = isMgrView ? (commercialHeadTeams_[surOf_((await me(req)).name)] || null) : null;
+      const orders = rows.map((o) => {
+        const out = serialize(o, execBy[o.id] || [], pendBy[o.id], r.byEmail);
+        const own = o.manager_email === req.userEmail;
+        const visible = !isMgrView || own || canSeeOrderCore_(o, callerTeam);
+        // can_view_details - клиент (order-plan-v2.js) решает по этому полю, пускать ли
+        // клик в шторку, а не заново считает команду руководителя (единственный источник
+        // COMMERCIAL_HEAD_TEAMS_ остаётся на сервере, клиенту знать её незачем).
+        out.can_view_details = visible;
+        return (isMgrView && !visible) ? redactForeignOrder_(out) : out;
+      });
+      await attachTransferInfo_(pool, orders);
       // Штамп версии - по ВСЕМ источникам изменений (заявки + исполнители + история), не только по
       // plan_orders.updated_at: постановка машины тем же логистом не меняла updated_by -> MySQL не
       // трогал timestamp -> у остальных таблица не перерисовывалась (Влад 11.09: «максимально онлайн»).
@@ -194,13 +324,14 @@ module.exports = function (deps) {
     } catch (err) { console.error("orders list:", err); fail(res, 500, String(err.message || err)); }
   });
 
-  // Счётчики по дням для вкладок (вчера..+7): всего / без машины - по видимости роли.
+  // Счётчики по дням для вкладок (вчера..+7): всего / без машины - по видимости роли
+  // (15.09 - у менеджера теперь та же видимость, что у /api/orders выше, см. комментарий там).
   app.get("/api/orders/counts", ...gate, async (req, res) => {
     try {
       const from = String(req.query.from || ""), to = String(req.query.to || "");
       if (!isDate(from) || !isDate(to)) return fail(res, 400, "from/to обязательны");
       const where = ["o.deleted_at IS NULL", "o.service_date BETWEEN ? AND ?"]; const args = [from, to];
-      if (req.userRole === "manager") { where.push("o.manager_email = ?", "o.internal = 0"); args.push(req.userEmail); }
+      if (req.userRole === "manager") { where.push("o.internal = 0"); }
       const [rows] = await pool.query(
         `SELECT o.service_date, COUNT(*) AS total,
                 SUM(o.status = 'cancelled') AS cancelled,
@@ -217,9 +348,11 @@ module.exports = function (deps) {
 
   app.get("/api/orders/one", ...gate, async (req, res) => {
     try {
-      const o = await loadOrder(pool, Number(req.query.id)); if (!o || !canSee(req, o)) return fail(res, 404, "заявка не найдена");
+      const o = await loadOrder(pool, Number(req.query.id)); if (!o || !(await canSee(req, o))) return fail(res, 404, "заявка не найдена");
       const r = await roster(); const execs = await loadExecutors(pool, [o.id]); const pend = await loadPending(pool, [o.id]);
-      res.json({ order: serialize(o, execs, pend[0], r.byEmail) });
+      const order = serialize(o, execs, pend[0], r.byEmail);
+      await attachTransferInfo_(pool, [order]);
+      res.json({ order });
     } catch (err) { console.error("orders one:", err); fail(res, 500, String(err.message || err)); }
   });
 
@@ -233,15 +366,26 @@ module.exports = function (deps) {
     "customer_contact_phone", "equipment_type", "cargo", "cargo_weight_t", "cargo_dims", "gabarit", "rework_terms", "documents", "note",
     "cash", "load_address", "load_lat", "load_lon", "load_confirmed", "load_contact_name", "load_contact_phone", "unload_address",
     "unload_lat", "unload_lon", "unload_confirmed", "unload_contact_name", "unload_contact_phone", "price", "payment_status", "internal", "crm_deal_id"];
+  // 18.09, реальный сбой у Цегельникова: "Data too long for column 'cargo_dims'".
+  // Раньше ВСЕ поля этой группы обрезались к одной цифре (200), не глядя на настоящую
+  // ширину колонки в БД - cargo_dims (varchar(100)) и ещё 6 полей были ýже 200, просто
+  // cargo_dims первым словил достаточно длинный ввод (это свободный текст, остальные -
+  // обычно короткие значения из справочника, потому и не падали раньше, хотя тот же
+  // класс несовпадения был и у них). Ширина - СВЕРЕНА с `SHOW FULL COLUMNS FROM
+  // plan_orders` 18.09, держать в паре с миграцией схемы, если колонку когда-то расширят.
+  const FIELD_MAXLEN_ = {
+    customer_entity_id: 64, executor_entity_id: 64, equipment_type: 60,
+    customer_contact_name: 200, customer_contact_phone: 200,
+    cargo_dims: 100, gabarit: 20, rework_terms: 150, documents: 100, payment_status: 50,
+    load_contact_name: 200, load_contact_phone: 200, unload_contact_name: 200, unload_contact_phone: 200,
+  };
   function readFields(req) {
     const f = {};
     const b = req.body || {}; const q = req.query || {};
     const get = (k) => (b[k] !== undefined ? b[k] : q[k]);
     if (get("service_date") !== undefined) f.service_date = String(get("service_date"));
     if (get("service_time") !== undefined) f.service_time = normTime(get("service_time"));
-    ["customer", "customer_entity_id", "executor_entity_id", "customer_contact_name", "customer_contact_phone", "equipment_type",
-      "cargo_dims", "gabarit", "rework_terms", "documents", "payment_status", "load_contact_name", "load_contact_phone",
-      "unload_contact_name", "unload_contact_phone"].forEach((k) => { if (get(k) !== undefined) f[k] = str(get(k), 200); });
+    Object.keys(FIELD_MAXLEN_).forEach((k) => { if (get(k) !== undefined) f[k] = str(get(k), FIELD_MAXLEN_[k]); });
     if (get("customer") !== undefined) f.customer = str(get("customer"), 255);
     if (get("cargo") !== undefined) f.cargo = str(get("cargo"), 300);
     if (get("note") !== undefined) f.note = str(get("note"), 1000);
@@ -255,24 +399,40 @@ module.exports = function (deps) {
     try {
       const f = readFields(req); const id = Number(p(req, "id")) || 0; const who = await me(req);
       if (id) {
-        const o = await loadOrder(conn, id); if (!o || !canSee(req, o)) { conn.release(); return fail(res, 404, "заявка не найдена"); }
+        const o = await loadOrder(conn, id); if (!o || !canEdit(req, o)) { conn.release(); return fail(res, 404, "заявка не найдена"); }
         if (f.service_date && !isDate(f.service_date)) { conn.release(); return fail(res, 400, "service_date: YYYY-MM-DD"); }
-        const keys = Object.keys(f).filter((k) => EDITABLE.indexOf(k) >= 0 || k === "service_date");
+        // 18.09, Влад (реальный случай - заявку правкой даты перекинули между днями,
+        // номер уехал с 11 на 8, потом на 19): «дату поменять невозможно. Если заявка
+        // создана - она уже в плане. Если подтверждена - отбой. Перенос - новая
+        // заявка. Номерация не может выскочить из одного дня в другой». day_no -
+        // сквозной номер ВНУТРИ дня (MAX+1 при вставке) - смена service_date у
+        // СУЩЕСТВУЮЩЕЙ заявки вырывает номер из старого дня и выдаёт новый в чужом,
+        // при откате обратно старый номер уже не восстановить (кто-то мог его занять).
+        // Клиент (order-plan-v2.js) прячет дату в правке заявки - здесь настоящая
+        // граница, а не просто UX.
+        if (f.service_date && f.service_date !== fmtDate(o.service_date)) {
+          conn.release();
+          return fail(res, 400, "Дату заявки менять нельзя - поставьте отбой и создайте новую заявку на нужный день");
+        }
+        {
+          const effType = f.equipment_type !== undefined ? f.equipment_type : o.equipment_type;
+          const effPrice = f.price !== undefined ? f.price : Number(o.price);
+          const priceErr = minPriceError_(effType, effPrice);
+          if (priceErr) { conn.release(); return fail(res, 400, priceErr); }
+        }
+        // service_date НЕ в EDITABLE и особый случай выше убран (18.09) - день заявки
+        // менять нельзя вообще, только время внутри уже назначенного дня.
+        const keys = Object.keys(f).filter((k) => EDITABLE.indexOf(k) >= 0);
         if (!keys.length) { conn.release(); return res.json({ ok: true, id }); }
         await conn.beginTransaction();
         await history(conn, id, "update", o, keys.join(","), req.userEmail);
-        let dayNoSql = "";
         const args = keys.map((k) => f[k]);
-        if (f.service_date && f.service_date !== fmtDate(o.service_date)) { // перенос на другой день - новый номер в том дне
-          const [[mx]] = await conn.query(`SELECT COALESCE(MAX(day_no),0)+1 AS n FROM plan_orders WHERE service_date = ? FOR UPDATE`, [f.service_date]);
-          dayNoSql = ", day_no = ?"; args.push(mx.n);
-        }
         args.push(req.userEmail, id);
-        await conn.query(`UPDATE plan_orders SET ${keys.map((k) => k + " = ?").join(", ")}${dayNoSql}, updated_by = ? WHERE id = ?`, args);
-        if (f.service_date && f.service_date !== fmtDate(o.service_date) || f.service_time !== undefined && f.service_time !== fmtTime(o.service_time)) {
-          // время/дата изменились - подвинуть отрезки своего парка на ленте (логисту - уведомление «подвинут рейс»)
+        await conn.query(`UPDATE plan_orders SET ${keys.map((k) => k + " = ?").join(", ")}, updated_by = ? WHERE id = ?`, args);
+        if (f.service_time !== undefined && f.service_time !== fmtTime(o.service_time)) {
+          // время изменилось - подвинуть отрезки своего парка на ленте (логисту - уведомление «подвинут рейс»)
           const [ex] = await conn.query(`SELECT seg_id FROM plan_order_executors WHERE order_id = ? AND removed_at IS NULL AND seg_id IS NOT NULL`, [id]);
-          const nd = f.service_date || fmtDate(o.service_date); const nt = f.service_time !== undefined ? f.service_time : fmtTime(o.service_time);
+          const nd = fmtDate(o.service_date); const nt = f.service_time;
           for (const e of ex) await conn.query(`UPDATE plan_segs SET start_hour = ?, updated_by = ? WHERE id = ?`, [hoursFromEpoch(nd, nt), req.userEmail, e.seg_id]);
         }
         await conn.commit();
@@ -283,6 +443,7 @@ module.exports = function (deps) {
         if (!f.equipment_type) { conn.release(); return fail(res, 400, "тип техники обязателен"); }
         if (!f.customer) { conn.release(); return fail(res, 400, "заказчик обязателен"); }
         if (!f.price) { conn.release(); return fail(res, 400, "цена обязательна"); }
+        { const priceErr = minPriceError_(f.equipment_type, f.price); if (priceErr) { conn.release(); return fail(res, 400, priceErr); } }
         const isMgr = req.userRole === "manager";
         const internal = isMgr ? 0 : (f.internal || 0);
         const managerEmail = isMgr ? req.userEmail : (internal ? null : (str(p(req, "manager_email"), 255) || null));
@@ -306,7 +467,75 @@ module.exports = function (deps) {
         const r = await roster(); const o2 = await loadOrder(pool, orderId);
         res.json({ ok: true, id: orderId, day_no: o2.day_no, order: serialize(o2, [], null, r.byEmail) });
       }
-    } catch (err) { try { await conn.rollback(); } catch (e) {} console.error("orders save:", err); fail(res, 500, String(err.message || err)); }
+    } catch (err) {
+      try { await conn.rollback(); } catch (e) {}
+      console.error("orders save:", err);
+      // 18.09: сырая ошибка MySQL ("Data too long for column 'cargo_dims'...") уходила
+      // прямо в интерфейс - непонятно пользователю и раскрывает имена колонок наружу.
+      // FIELD_MAXLEN_ выше должен закрыть это по всем известным полям, но если где-то
+      // всё равно проскочит (новое поле, схему сузили) - страховка даёт понятное
+      // сообщение вместо сырого текста драйвера; подробности - в console.error выше.
+      if (err && err.code === "ER_DATA_TOO_LONG") { fail(res, 400, "Слишком длинное значение в одном из полей - сократите текст"); return; }
+      fail(res, 500, String(err.message || err));
+    }
+    finally { conn.release(); }
+  });
+
+  // ── POST /api/orders/transfer - перенос на другую дату ─────────────────────────────────
+  // 17-18.09, Влад (после инцидента с ручной сменой даты - см. комментарий у canSee/EDITABLE
+  // выше и запись 18.09 в README): «дату поменять невозможно... перенос - новая заявка».
+  // Превью одобрено 18.09 («надо сделать как в превью»). Одним действием: старой заявке -
+  // отбой (тот же status='cancelled', что и у ручного «Отбой» в контекстном меню - логист
+  // по-прежнему должен принять отбой, otboy_ack сбрасывается так же) + связь на новую;
+  // новая заявка - копия ВСЕХ полей EDITABLE (тот же менеджер, тот же груз/адреса/цена -
+  // это ТА ЖЕ перевозка, просто на другой день, в отличие от «Повторить», которое
+  // сознательно не переносит crm_deal_id) со своим day_no (не залезает в нумерацию другого
+  // дня) + связь на старую. Исполнителей (машина/водитель) новая заявка НЕ наследует -
+  // как и «Повторить», день другой - назначение отдельное решение логиста.
+  app.post("/api/orders/transfer", ...gate, async (req, res) => {
+    const conn = await pool.getConnection();
+    try {
+      const id = Number(p(req, "id"));
+      const newDate = String(p(req, "new_date") || "");
+      if (!isDate(newDate)) { conn.release(); return fail(res, 400, "new_date: YYYY-MM-DD"); }
+      const o = await loadOrder(conn, id);
+      if (!o || !canEdit(req, o)) { conn.release(); return fail(res, 404, "заявка не найдена"); }
+      if (newDate === fmtDate(o.service_date)) { conn.release(); return fail(res, 400, "Новая дата совпадает с текущей - переносить некуда"); }
+      if (o.status === "cancelled") { conn.release(); return fail(res, 400, "Заявка уже в отбое"); }
+      if (o.status === "done") { conn.release(); return fail(res, 400, "Заявка уже выполнена - переносить нечего"); }
+      await conn.beginTransaction();
+      let newId = null;
+      for (let attempt = 0; attempt < 3 && !newId; attempt++) {
+        const [[mx]] = await conn.query(`SELECT COALESCE(MAX(day_no),0)+1 AS n FROM plan_orders WHERE service_date = ? FOR UPDATE`, [newDate]);
+        try {
+          const cols = ["service_date", "day_no", "status", "manager_email", "manager_name", "created_role", "internal",
+            "created_by", "updated_by", "transferred_from_id"];
+          const vals = [newDate, mx.n, "unconfirmed", o.manager_email, o.manager_name, req.userRole, o.internal,
+            req.userEmail, req.userEmail, id];
+          EDITABLE.forEach((k) => { if (k !== "internal" && o[k] !== null && o[k] !== undefined) { cols.push(k); vals.push(o[k]); } });
+          const [ins] = await conn.query(`INSERT INTO plan_orders (${cols.join(",")}) VALUES (${cols.map(() => "?").join(",")})`, vals);
+          newId = ins.insertId;
+        } catch (e) { if (e.code !== "ER_DUP_ENTRY") throw e; }
+      }
+      if (!newId) throw new Error("не удалось выдать номер дня");
+      // otboy_ack сбрасывается точно так же, как в обычном /orders/status - логист видит
+      // мигающую строку и должен принять отбой заново, перенос не в обход этого правила.
+      await conn.query(`UPDATE plan_orders SET status='cancelled', otboy_ack_by=NULL, otboy_ack_at=NULL,
+        transferred_to_id=?, updated_by=? WHERE id=?`, [newId, req.userEmail, id]);
+      await history(conn, id, "transfer_out", o, newDate + "|" + newId, req.userEmail);
+      await history(conn, newId, "transfer_in", null, fmtDate(o.service_date) + "|" + id, req.userEmail);
+      await conn.commit();
+      const r = await roster();
+      const [o1, o2] = await Promise.all([loadOrder(pool, id), loadOrder(pool, newId)]);
+      const oldOrder = serialize(o1, await loadExecutors(pool, [id]), (await loadPending(pool, [id]))[0], r.byEmail);
+      const newOrder = serialize(o2, [], null, r.byEmail);
+      await attachTransferInfo_(pool, [oldOrder, newOrder]);
+      res.json({ ok: true, old_order: oldOrder, new_order: newOrder });
+    } catch (err) {
+      try { await conn.rollback(); } catch (e) {}
+      console.error("orders transfer:", err);
+      fail(res, 500, String(err.message || err));
+    }
     finally { conn.release(); }
   });
 
@@ -315,7 +544,7 @@ module.exports = function (deps) {
     const conn = await pool.getConnection();
     try {
       const id = Number(p(req, "id")); const o = await loadOrder(conn, id);
-      if (!o || !canSee(req, o)) { return fail(res, 404, "заявка не найдена"); }
+      if (!o || !canEdit(req, o)) { return fail(res, 404, "заявка не найдена"); }
       await conn.beginTransaction();
       const detail = await fn(conn, o);
       if (detail === false) { await conn.rollback(); return; }
@@ -336,11 +565,50 @@ module.exports = function (deps) {
       [st, st, st, req.userEmail, o.id]);
     return o.status + " -> " + st;
   }));
+  // Влад 12.09 (вечер): «у логистов должна быть возможность смены логиста» - тот же /take,
+  // теперь с необязательным email: без него - самоназначение (как раньше, обратная
+  // совместимость со всеми существующими вызовами), email="none" - снять назначение (нужно
+  // фронту для undo в тосте), любой другой email из ростера - назначить ИМЕННО этого
+  // логиста/admin (тот же permissive-принцип, что уже был у самоназначения - без
+  // подтверждения владельца, команда маленькая, доверие взаимное).
   app.post("/api/orders/take", ...gate, (req, res) => simpleUpdate(req, res, "take", async (conn, o) => {
     if (req.userRole === "manager") { fail(res, 403, "«беру в работу» - действие логиста"); return false; }
+    const raw = p(req, "email");
+    if (raw === "none") {
+      await conn.query(`UPDATE plan_orders SET taken_by = NULL, taken_by_name = NULL, taken_at = NULL, updated_by = ? WHERE id = ?`, [req.userEmail, o.id]);
+      return (o.taken_by_name || "никто") + " -> никто";
+    }
     const who = await me(req);
-    await conn.query(`UPDATE plan_orders SET taken_by = ?, taken_by_name = ?, taken_at = NOW(), updated_by = ? WHERE id = ?`, [req.userEmail, who.name, req.userEmail, o.id]);
-    return who.name;
+    let target = who;
+    const targetEmail = str(raw, 255);
+    if (targetEmail) {
+      const r = await roster();
+      const t = r.byEmail[targetEmail];
+      if (!t || (t.role !== "logist" && t.role !== "admin")) { fail(res, 400, "логист не найден"); return false; }
+      target = t;
+    }
+    await conn.query(`UPDATE plan_orders SET taken_by = ?, taken_by_name = ?, taken_at = NOW(), updated_by = ? WHERE id = ?`, [target.email, target.name, req.userEmail, o.id]);
+    return (o.taken_by_name || "никто") + " -> " + target.name;
+  }));
+  // Влад 13.09: «мне нужна здесь возможность менять менеджеров - как логисты меняют
+  // логистов, но менеджеров - только я». В отличие от /orders/take (любой логист может
+  // взять чужую заявку без подтверждения) - здесь requireRole_("admin"), а не общий gate:
+  // менеджеру/логисту эта кнопка вообще не должна быть доступна с сервера, не только
+  // спрятана на фронтенде. email="none" - вернуть к «без менеджера» (заявка станет
+  // внутренней/по создателю, как было до первого назначения) - нужно фронту для undo.
+  app.post("/api/orders/set_manager", checkSession, requireRole_("admin"), (req, res) => simpleUpdate(req, res, "set_manager", async (conn, o) => {
+    const raw = p(req, "email");
+    if (raw === "none") {
+      await conn.query(`UPDATE plan_orders SET manager_email = NULL, manager_name = NULL, updated_by = ? WHERE id = ?`, [req.userEmail, o.id]);
+      return (o.manager_name || "никто") + " -> никто";
+    }
+    const email = str(raw, 255);
+    if (!email) { fail(res, 400, "email обязателен"); return false; }
+    const r = await roster();
+    const t = r.byEmail[email];
+    if (!t || t.role !== "manager") { fail(res, 400, "менеджер не найден"); return false; }
+    await conn.query(`UPDATE plan_orders SET manager_email = ?, manager_name = ?, updated_by = ? WHERE id = ?`, [t.email, t.name, req.userEmail, o.id]);
+    return (o.manager_name || "никто") + " -> " + t.name;
   }));
   app.post("/api/orders/otboy_ack", ...gate, (req, res) => simpleUpdate(req, res, "otboy_ack", async (conn, o) => {
     if (o.status !== "cancelled") { fail(res, 400, "по заявке нет отбоя"); return false; }
@@ -587,7 +855,7 @@ module.exports = function (deps) {
       if (["approve", "reject"].indexOf(action) < 0) return fail(res, 400, "action: approve|reject");
       const [rows] = await conn.query(`SELECT * FROM plan_order_change_requests WHERE id = ? AND status = 'pending'`, [rid]);
       if (!rows.length) return fail(res, 404, "запрос не найден или уже решён");
-      const q = rows[0]; const o = await loadOrder(conn, q.order_id); if (!o || !canSee(req, o)) return fail(res, 404, "заявка не найдена");
+      const q = rows[0]; const o = await loadOrder(conn, q.order_id); if (!o || !canEdit(req, o)) return fail(res, 404, "заявка не найдена");
       if (req.userRole === "logist" && action === "approve") return fail(res, 403, "подтверждает менеджер (согласовав с заказчиком)");
       const who = await me(req);
       await conn.beginTransaction();
@@ -724,7 +992,7 @@ module.exports = function (deps) {
   });
   app.get("/api/orders/history", ...gate, async (req, res) => {
     try {
-      const id = Number(req.query.id); const o = await loadOrder(pool, id); if (!o || !canSee(req, o)) return fail(res, 404, "заявка не найдена");
+      const id = Number(req.query.id); const o = await loadOrder(pool, id); if (!o || !(await canSee(req, o))) return fail(res, 404, "заявка не найдена");
       const r = await roster();
       const [h] = await pool.query(`SELECT action, detail, changed_by, changed_at FROM plan_orders_history WHERE order_id = ? ORDER BY changed_at DESC, id DESC LIMIT 100`, [id]);
       const [cr] = await pool.query(`SELECT * FROM plan_order_change_requests WHERE order_id = ? ORDER BY requested_at DESC`, [id]);

@@ -15,6 +15,11 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@500;600;700&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<!-- Ранний синхронный скрипт темы, ДО <style> - тот же приём, что index.html/orders-m.html
+     (21.09, общая переменная 'yardhub_theme' вместо местной 'plan_m_theme'). Раньше тема
+     применялась только внутри boot() (после загрузки данных) - страница реально мигала
+     тёмным перед светлой при каждом заходе, не только "в теории" FOUC. -->
+<script>try{if(localStorage.getItem('yardhub_theme')==='light'){document.documentElement.setAttribute('data-theme','light');document.querySelector('meta[name="theme-color"]').setAttribute('content','#eef1f5');}}catch(e){}</script>
 <style>
 /* ── Мобильная Планировка (plans/2026-09-05-mobile-planning-page.md). Отдельная лёгкая
    страница для логиста в поле. Токены - DESIGN_SYSTEM.md раздел 1, без нового hex.
@@ -40,12 +45,17 @@
   --lane-w:84px; --row-h:48px; --ghead-h:36px; --scale-h:40px; --hdr-row:44px;
   --hw:11.5px; /* px/час, пересчитывается от ширины трека */
 }
+/* 21.09: палитра синхронизирована с index.html/orders-m.html (общий 'yardhub_theme') -
+   раньше здесь был свой, местный вариант (чуть теплее), одна из причин, почему светлая
+   тема выглядела по-разному на разных страницах. --past-dim - только здесь (дневной
+   таймлайн Планировки), у него нет аналога в index.html, подобран тем же приёмом
+   (притемнение по базовому "ink"-тону этой темы). */
 html[data-theme="light"]{
-  --bg:#f4f3ef; --bg2:#ffffff; --bg3:#ecebe6; --bg4:#e2e1db;
-  --border:rgba(20,26,38,0.10); --border-strong:rgba(20,26,38,0.20);
-  --text:#1b1f27; --muted:#6b6a63;
-  --tint-green:#0f6a4c; --tint-amber:#8a5a12; --tint-red:#a23b3a;
-  --past-dim:rgba(20,26,38,.07); --scrim:rgba(20,26,38,.45);
+  --bg:#eef1f5; --bg2:#ffffff; --bg3:#e2e7ed; --bg4:#d3dae2;
+  --border:rgba(15,22,35,0.16); --border-strong:rgba(15,22,35,0.30);
+  --text:#0f1623; --muted:#4a5568;
+  --tint-green:#0a5940; --tint-amber:#6f480d; --tint-red:#8a2c2b;
+  --past-dim:rgba(15,22,35,.07); --scrim:rgba(15,22,35,.45);
 }
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{height:100%;overflow:hidden;overscroll-behavior:none;background:var(--bg)}
@@ -244,6 +254,29 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 
 /* ── Листы (bottom sheet) ── */
 .scrim{position:fixed;inset:0;background:var(--scrim);z-index:90;opacity:0;pointer-events:none;transition:opacity .2s ease}
+/* Панель «Меню» - слева, тем же переходом (transform + кривая) и тем же СОДЕРЖИМЫМ, что
+   боковое меню на остальных страницах дашборда (index.html .sidebar) - Влад 15.09: «нужен
+   из планировки такой же переход, как во всех страницах у нас... в планировке обычный
+   бутерброд нажимаешь и переходишь на другую страницу дашборда» (поправка к первой версии -
+   та собирала переход и настройки в одно окно, это было НЕ то). Здесь только список реальных
+   страниц дашборда (отфильтрован по роли, как настоящий сайдбар) - настройки переехали в
+   отдельный лист по тапу на угол шапки («ЧАСЫ»), см. renderSettingsSheet. */
+/* 21.09: значения выровнены 1:1 с .navdrawer/.nd-* в orders-m.html (общий визуальный
+   язык компактного дровера - Влад: "несколько разных боковых меню"), имена классов не
+   трогаем (менять пришлось бы JS во всех местах, риска не стоит - визуально теперь
+   неотличимо от "Задания"). */
+.navdrawer{position:fixed;inset:0 30% 0 0;z-index:97;background:var(--bg2);
+  transform:translateX(-100%);transition:transform .25s var(--ease-drawer);
+  display:flex;flex-direction:column;box-shadow:2px 0 20px rgba(0,0,0,.4)}
+.navdrawer.open{transform:translateX(0)}
+.navdrawer-head{flex:none;height:52px;display:flex;align-items:center;padding:0 14px;font-weight:700;font-size:15px;border-bottom:1px solid var(--border)}
+.navdrawer-body{flex:1 1 auto;min-height:0;overflow:auto;padding:6px 8px calc(8px + var(--safe-b))}
+.navdrawer-section{padding:12px 8px 4px;font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.navdrawer-item{display:flex;align-items:center;gap:10px;height:44px;padding:0 8px;border-radius:8px;font-size:14px;font-weight:600;color:var(--text)}
+.navdrawer-item:active{background:var(--bg3)}
+.navdrawer-item svg{width:18px;height:18px;color:var(--muted);flex:none}
+.navdrawer-item.active{background:rgba(29,158,117,.14);color:#2fbe93;font-weight:600}
+.navdrawer-item.active svg{color:#2fbe93}
 .scrim.on{opacity:1;pointer-events:auto}
 /* Высота листа меняется ПО ДЕТЕНТУ (52% / 92%), а не сдвигом одного высокого листа вниз -
    иначе подвал с «Поставить» в полулисте уезжает за нижний край экрана (Влад, живая проба
@@ -368,6 +401,7 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 00-.2-1.6l2-1.6-2-3.4-2.4.6a7 7 0 00-2.8-1.6L13 2h-4l-.6 2.4a7 7 0 00-2.8 1.6l-2.4-.6-2 3.4 2 1.6A7 7 0 003 12a7 7 0 00.2 1.6l-2 1.6 2 3.4 2.4-.6a7 7 0 002.8 1.6L9 22h4l.6-2.4a7 7 0 002.8-1.6l2.4.6 2-3.4-2-1.6c.13-.5.2-1 .2-1.6z"/></symbol>
   <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
@@ -379,6 +413,31 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
   <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></symbol>
   <symbol id="i-wifi-off" viewBox="0 0 24 24"><path d="M3 3l18 18M8.5 16.5a5 5 0 0 1 7 0M5 12.5a10 10 0 0 1 4-2.5M12 7a14 14 0 0 1 10 4"/><circle cx="12" cy="20" r="1"/></symbol>
   <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/></symbol>
+  <!-- Пункты меню «Планировки» (15.09) - иконки 1:1 скопированы с index.html .sidebar-nav-item
+       (viewBox 0 0 20 20, stroke 1.6), см. feedback_clone_existing_visual_pattern. -->
+  <symbol id="i-pg-main" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="6" height="6" rx="1.4"/><rect x="11" y="3" width="6" height="6" rx="1.4"/><rect x="3" y="11" width="6" height="6" rx="1.4"/><rect x="11" y="11" width="6" height="6" rx="1.4"/></symbol>
+  <symbol id="i-pg-director" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="7.2"/><polygon points="12.8,7.2 11.2,11.2 7.2,12.8 8.8,8.8"/><line x1="10" y1="2.8" x2="10" y2="4.2"/><line x1="10" y1="15.8" x2="10" y2="17.2"/></symbol>
+  <symbol id="i-pg-global-stats" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="7"/><ellipse cx="10" cy="10" rx="3" ry="7"/><line x1="3" y1="10" x2="17" y2="10"/></symbol>
+  <symbol id="i-pg-directory" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="14" height="14" rx="1.6"/><line x1="3" y1="8" x2="17" y2="8"/><line x1="7" y1="11.3" x2="13" y2="11.3"/><line x1="7" y1="14.3" x2="13" y2="14.3"/></symbol>
+  <symbol id="i-pg-settings" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="2.6"/><path d="M10 3.3v1.8M10 14.9v1.8M16.7 10h-1.8M5.1 10H3.3M14.7 5.3l-1.3 1.3M6.6 13.4l-1.3 1.3M14.7 14.7l-1.3-1.3M6.6 6.6L5.3 5.3"/></symbol>
+  <symbol id="i-pg-vehicles" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="9" height="6" rx="1"/><path d="M11 10h3l3 3v1h-6z"/><circle cx="6" cy="15.3" r="1.5"/><circle cx="14.3" cy="15.3" r="1.5"/></symbol>
+  <symbol id="i-pg-logistics-plan" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="16" height="14" rx="1.4"/><line x1="2" y1="8" x2="18" y2="8"/><line x1="6" y1="11.3" x2="12" y2="11.3"/><line x1="6" y1="14.3" x2="15" y2="14.3"/></symbol>
+  <symbol id="i-pg-dynamics" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="3,14 8,9 11,12 17,5"/><polyline points="12,5 17,5 17,10"/></symbol>
+  <symbol id="i-pg-navigation" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2c-3 0-5.5 2.4-5.5 5.6C4.5 11.8 10 18 10 18s5.5-6.2 5.5-10.4C15.5 4.4 13 2 10 2z"/><circle cx="10" cy="7.6" r="2"/></symbol>
+  <symbol id="i-pg-crm" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="4" height="14" rx="1"/><rect x="8" y="3" width="4" height="9" rx="1"/><rect x="13" y="3" width="4" height="11" rx="1"/></symbol>
+  <symbol id="i-pg-counterparty" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2.5l6 2.3v4.7c0 3.6-2.5 6.6-6 8-3.5-1.4-6-4.4-6-8V4.8z"/><path d="M7.3 10l1.9 1.9 3.6-3.8"/></symbol>
+  <symbol id="i-pg-people" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="7" r="3.2"/><path d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6"/></symbol>
+  <symbol id="i-pg-receipts" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="15" height="10" rx="2"/><path d="M2.5 9.2h15"/><circle cx="14" cy="12.6" r="1.1" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-pg-sales" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3l7 4v6l-7 4-7-4V7z"/><path d="M3 7l7 4 7-4M10 11v6"/></symbol>
+  <symbol id="i-pg-sales-log" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 17s5.3-5.1 5.3-8.8A5.3 5.3 0 0 0 4.7 8.2c0 3.7 5.3 8.8 5.3 8.8z"/><circle cx="10" cy="8" r="1.7" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-pg-salary" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="16" height="9" rx="1.6"/><circle cx="10" cy="10.5" r="2"/></symbol>
+  <symbol id="i-pg-my-page" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="15" height="12" rx="2"/><circle cx="7" cy="9.6" r="1.7"/><line x1="11" y1="8.6" x2="15" y2="8.6"/><line x1="11" y1="11" x2="15" y2="11"/><line x1="4.6" y1="13.5" x2="9.5" y2="13.5"/></symbol>
+  <symbol id="i-pg-order-plan" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="12" height="14" rx="2"/><rect x="7" y="2.3" width="6" height="3" rx="1"/><line x1="7" y1="9" x2="13" y2="9"/><line x1="7" y1="12" x2="13" y2="12"/><line x1="7" y1="15" x2="11" y2="15"/></symbol>
+  <symbol id="i-pg-calculator" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2.3" width="12" height="15.4" rx="2"/><rect x="6.2" y="4.3" width="7.6" height="3.2" rx="0.7"/><circle cx="7" cy="11" r="0.9" fill="currentColor" stroke="none"/><circle cx="10" cy="11" r="0.9" fill="currentColor" stroke="none"/><circle cx="13" cy="11" r="0.9" fill="currentColor" stroke="none"/><circle cx="7" cy="14.3" r="0.9" fill="currentColor" stroke="none"/><circle cx="10" cy="14.3" r="0.9" fill="currentColor" stroke="none"/><circle cx="13" cy="14.3" r="0.9" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-pg-debt" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2.5h10v15l-2.5-1.6L10 17.5l-2.5-1.6L5 17.5z"/><line x1="7.5" y1="6.5" x2="12.5" y2="6.5"/><line x1="7.5" y1="9.5" x2="12.5" y2="9.5"/><line x1="7.5" y1="12.5" x2="10.5" y2="12.5"/></symbol>
+  <symbol id="i-pg-column-payroll" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="15" height="8" rx="1.6"/><circle cx="6.5" cy="14" r="1.6"/><circle cx="13.5" cy="14" r="1.6"/></symbol>
+  <symbol id="i-pg-clients" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="8" height="14" rx="1.2"/><path d="M12 8h3.2a.8.8 0 0 1 .8.8V17H12"/><line x1="6.6" y1="6.5" x2="9.4" y2="6.5"/><line x1="6.6" y1="9.5" x2="9.4" y2="9.5"/><line x1="6.6" y1="12.5" x2="9.4" y2="12.5"/><line x1="4" y1="17" x2="16" y2="17"/></symbol>
 </svg>
 <div class="state" id="loginState" hidden>
   <h1>TS HUB · Планировка</h1>
@@ -421,9 +480,10 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke
 <div class="hud" id="hud"></div>
 <div class="toast" id="toast"><div class="t" id="toastT"></div><button id="toastBtn" hidden>Отменить</button></div>
 <div class="scrim" id="scrim"></div>
+<div class="navdrawer" id="navdrawer"><div class="navdrawer-head" id="navdrawerHead"></div><div class="navdrawer-body" id="navdrawerBody"></div></div>
 <div class="sheet" id="sheet"><div class="grip" id="grip"></div><div class="sh-head" id="shHead"></div><div class="sh-body" id="shBody"></div><div class="sh-foot" id="shFoot"></div></div>
 <div class="ovl" id="ovl"><div class="ovl-head" id="ovlHead"></div><div class="ovl-body" id="ovlBody"></div><div class="ovl-foot" id="ovlFoot" hidden></div></div>
-<div class="demo-tag" id="demoTag" hidden>ДЕМО · v16</div>
+<div class="demo-tag" id="demoTag" hidden>ДЕМО · v17</div>
 <script>
 "use strict";
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -457,7 +517,7 @@ function fmtDur(l){ if (l % 24 === 0 && l >= 24) return (l / 24) + " " + plural(
 function plural(n, a, b, c){ n = Math.abs(n) % 100; var n1 = n % 10; if (n > 10 && n < 20) return c; if (n1 > 1 && n1 < 5) return b; if (n1 === 1) return a; return c; }
 function dayStartOf(h){ return Math.floor(h / 24) * 24; }
 function gosShort(g){ return (g || "").replace(/\s+\d+\s*$/, ""); }
-function three(name){ return (name || "").split(" ")[0].substring(0, 3).toUpperCase(); }
+function three(name){ if (LP_DEPT_CODE_[name]) return LP_DEPT_CODE_[name]; return (name || "").split(" ")[0].substring(0, 3).toUpperCase(); }
 function shortName(full){ return (full || "").trim().split(" ").slice(0, 2).join(" "); }
 function surnameIO(full){ var p = (full || "").trim().split(/\s+/); if (!p.length) return ""; var s = p[0]; if (p[1]) s += " " + p[1][0] + "."; if (p[2]) s += p[2][0] + "."; return s; }
 function untilLabel(s){
@@ -485,7 +545,11 @@ function wallToHour(str){
   if (!m) return null;
   return dateToHour_(new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]));
 }
-var DRIVEROFF_REASONS = [["dayoff","Выходной"],["vacation","Отпуск"],["sick","Больничный"],["intake","Приёмка"]];
+var DRIVEROFF_REASONS = [["dayoff","Выходной"],["vacation","Отпуск"],["sick","Больничный"],["intake","Приёмка"],
+  // Влад, 15.09: те же 3 новых кода, что в index.html DRIVEROFF_REASONS_ - коды ОБЩИЕ
+  // (seg.reason - одни и те же данные на сервере для десктопа и телефона), держать
+  // в синхроне при следующей правке этого списка (project_orders_calc_vps_sync_gotcha).
+  ["tachograph","Тахограф"],["nopass","Без пропуска"],["reissue","Переоформление"]];
 function reasonLabel(code){ var f = DRIVEROFF_REASONS.filter(function(p){ return p[0] === code; })[0]; return f ? f[1] : ""; }
 var KIND_LABEL = {trip:"Рейс", repair:"Ремонт", maint:"ТО", noorder:"Без заказа", driveroff:"Без водителя"};
 var PLACES = ["Липецк","Череповец","Подольск","Мытищи","Домодедово","Капотня","Терехово","Крым","Сочи","Владикавказ","СПб","Краснодар","Казань","Пермь","Рязанская обл.","Зеленоград","Ногинск","Одинцово","Люберцы","Химки","Красногорск","Брянск","Обнинск","Солнцево","Апрелевка","Ховрино","Строгино","Раменское","Балашиха","Сергач","Ростов","Воронеж"];
@@ -510,9 +574,17 @@ function segById(id){ if (id === "draft") return M.draft; for (var i = 0; i < M.
 function segsOf(vi){ return M.segs.filter(function(s){ return s.v === vi; }); }
 function segLabel(s){
   if (s.kind === "trip") return (s.customer ? s.customer + " · " : "") + (s.from || "не указано") + " → " + (s.to || "не указано");
-  var base = KIND_LABEL[s.kind] || "";
-  if (s.kind === "driveroff" && reasonLabel(s.reason)) base += " · " + reasonLabel(s.reason);
+  // Влад, 17.09 (тот же фикс, что на десктопе): подстатус ЗАМЕНЯЕТ "Без водителя", не
+  // дописывается к ней - segShort() ниже уже делал так, здесь просто выравниваем.
+  var base = (s.kind === "driveroff" && reasonLabel(s.reason)) ? reasonLabel(s.reason) : (KIND_LABEL[s.kind] || "");
+  if (repairStatusShort(s)) base += " · " + repairStatusShort(s);
   return base + " · " + untilLabel(s);
+}
+/* Статус механика из MAX (22.09) - тот же формат, что lpRepairStatusShort_ на десктопе. */
+function repairStatusShort(s){
+  if (!s || !s.repairStatus || (s.kind !== "repair" && s.kind !== "maint")) return "";
+  var who = s.repairStatusBy ? String(s.repairStatusBy).trim().split(" ")[0] : "";
+  return (s.repairStatus === "done" ? "готово" : "в работе") + (who ? " (" + who + ")" : "");
 }
 function segShort(s, tier){ /* подпись на плитке по ширине: small = только "куда"/тип, mid/big = + заказчик */
   if (s.kind === "trip"){
@@ -521,6 +593,7 @@ function segShort(s, tier){ /* подпись на плитке по ширин�
     return to;
   }
   if (s.kind === "driveroff") return reasonLabel(s.reason) || "Без водителя";
+  if (tier !== "small" && repairStatusShort(s)) return KIND_LABEL[s.kind] + " · " + repairStatusShort(s);
   return KIND_LABEL[s.kind];
 }
 function isVacant(v){ return !v.driver; }
@@ -633,6 +706,17 @@ var API_BASE_ = "https://api.yardhub.ru/api";
 var GOOGLE_CLIENT_ID_ = "872723319158-cmr4v5v31fk3uv8ass3vvdch7at66n8e.apps.googleusercontent.com"; // публичный OAuth client id, не секрет (тот же, что в index.html/server.js)
 function sessionToken_(){ try { return localStorage.getItem("session_token") || ""; } catch(e){ return ""; } }
 function setSessionToken_(t){ try { localStorage.setItem("session_token", t); } catch(e){} }
+// Журнал живых сложностей (Влад 13.09: «Планировка - тоже должно работать, это два
+// основных инструмента работы с сотрудником»; мобильная - это и есть то, чем логисты
+// реально пользуются в поле, см. память project_mobile_planning_page). Тот же
+// ui_events/POST /api/ui_event, что на «Задании» и десктопной Планировке - свой
+// маленький клиент здесь, потому что у этой страницы своя пара API_BASE_/sessionToken_().
+function logUiEvent_(eventType, target, detail){
+  try {
+    var t = sessionToken_(); if (!t) return;
+    fetch(API_BASE_ + "/ui_event", { method:"POST", headers:{"Content-Type":"application/json","X-Session-Token":t}, body: JSON.stringify({ page:"plan-m", event_type:eventType, target: target || "", detail: String(detail == null ? "" : detail).slice(0, 200) }) }).catch(function(){});
+  } catch(e){}
+}
 /* Таймаут 20 с на GET: зависший запрос по плохой мобильной сети раньше оставлял страницу
    пустой навсегда без единого слова (06.09). Теперь - в catch -> полоса ошибки с «Повторить».
    09.09 (Сильчев: «часто пустой экран, по нескольку раз обновляет - потом грузится») -
@@ -663,6 +747,22 @@ function apiPost_(path, params){
     .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(d){ return {ok: r.ok && !d.error, status:r.status, data:d}; }); });
 }
 function isRyschanowName_(n){ return /рыщанов/i.test(n || ""); }
+/* НАЙДЕННЫЙ БАГ (14.09, Влад: скриншот у Махуры в "Новая заявка" - в пикере "Менеджер"
+   уволенные Дербенцева/Поплутина/Володин, и нет "ОЭ") - при переносе Планировки на телефон
+   (05-06.09) этот пикер строился из ord.roster_managers/by_manager "как есть", БЕЗ фильтра
+   уволенных (десктоп получил его позже, 11.09, см. files/index.html:26160 "Володин в
+   планировке, он уволен давно") и без псевдо-менеджеров отделов (DEPTS_ в index.html) -
+   системный пробел мобильной страницы, не что-то у конкретного Махуры (список менеджеров
+   общий для всех логистов). FIRED_SURNAMES_ заполняется в load() из ТОГО ЖЕ /sprav/state,
+   что страница и так грузит - без лишнего запроса. */
+var FIRED_SURNAMES_ = {};
+function lpmSurname_(name){ return String(name || "").trim().split(/\s+/)[0].toLowerCase().replace(/ё/g, "е"); }
+function isFiredName_(name){ return !!FIRED_SURNAMES_[lpmSurname_(name)]; }
+/* Псевдо-менеджеры внутренних отделов (тот же канон DEPTS_, что в index.html:26113-26121) -
+   не люди, не приходят с сервером в ord.roster_managers, добавляются на фронте так же, как
+   на десктопе. */
+var LP_DEPTS_ = ["Отдел экскаваторов", "Отдел кранов", "Отдел буровых", "База"];
+var LP_DEPT_CODE_ = {"Отдел экскаваторов":"ОЭ", "Отдел кранов":"ОК", "Отдел буровых":"ОБ", "База":"БАЗА"};
 /* Слот текущего occupant'а (kind,gos) - копия принципа lpFleetOpenOnTractor_ на десктопе:
    coupling/uncoupling ВСЕГДА метится в реальный открытый слот, не жёсткий 1 - иначе посадка
    нового мимо старого на слоте 2/3 оставляет обоих открытыми одновременно. */
@@ -714,9 +814,20 @@ function makeLiveApi(){
           var assignments = (fleetR.ok && fleetR.data.assignments) || [];
           var openByPerson = {}, openByTrailer = {};
           assignments.forEach(function(a){ if (a.valid_to) return; if (a.kind === "driver") openByPerson[a.resource_key] = a.tractor_gos; else if (a.kind === "trailer") openByTrailer[a.resource_key] = a.tractor_gos; });
+          var allPeople_ = (spravR.ok && spravR.data.people) || [];
+          /* Уволенные (14.09) - тот же приём, что в index.html buildRoster(): сопоставление по
+             фамилии, fail-open если человека нет в справочнике вообще. Используется ниже в
+             loadProfile() для managers/logists - тот же порядок вызова (load() -> .then() ->
+             loadProfile()), значит FIRED_SURNAMES_ уже заполнен к моменту фильтрации. */
+          allPeople_.forEach(function(p){
+            if (p && p.employment_status === "fired") {
+              var sur = lpmSurname_(p.full_name);
+              if (sur) FIRED_SURNAMES_[sur] = 1;
+            }
+          });
           /* phone - для «Скопировать данные для пропуска» (тот же срез, что 31.08 открыли
              логисту в /api/sprav/state ради кнопки копирования на десктопе) */
-          var people = ((spravR.ok && spravR.data.people) || []).filter(function(p){ return (p.roles || []).indexOf("driver") >= 0; }).map(function(p){ return {id:p.id, full_name:p.full_name, phone:p.phone || "", on:openByPerson[p.id] || ""}; });
+          var people = allPeople_.filter(function(p){ return (p.roles || []).indexOf("driver") >= 0; }).map(function(p){ return {id:p.id, full_name:p.full_name, phone:p.phone || "", on:openByPerson[p.id] || ""}; });
           var trailers = ((spravR.ok && spravR.data.assets) || []).filter(function(a){ return a.asset_type === "trailer"; }).map(function(a){ return {id:a.id, name:(a.name && a.name !== a.id) ? a.name : "", type:a.trailer_type || a.spec || "", on:openByTrailer[a.id] || ""}; });
           var vehicles = (mp.vehicles || []).map(function(v){ return {gos:v.gos, marka:v.marka, type:v.type, driver:v.driver || "", trailerGos:v.trailer || ""}; });
           /* Личный порядок машин (Влад, 02.09 на десктопе - "железно сохраняться у каждого
@@ -743,8 +854,8 @@ function makeLiveApi(){
            реальным логистом рейса (комментарий index.html:20449-20463) - убираем точечно
            из списка выбора, как и на десктопе. */
         return {name:name, role:mp.role || "",
-          managers:(ord.roster_managers || ord.by_manager || []).map(function(p){ return p.name; }),
-          logists:(ord.roster_logists || ord.by_logist || []).map(function(p){ return p.name; }).filter(function(n){ return !isRyschanowName_(n); })};
+          managers:(ord.roster_managers || ord.by_manager || []).map(function(p){ return p.name; }).filter(function(n){ return !isFiredName_(n); }).concat(LP_DEPTS_),
+          logists:(ord.roster_logists || ord.by_logist || []).map(function(p){ return p.name; }).filter(function(n){ return !isRyschanowName_(n) && !isFiredName_(n); })};
       }).catch(function(){ return null; });
     },
     saveSeg: function(w){ return apiPost_("/plan/seg", w).then(function(r){ if (!r.ok) throw new Error((r.data && r.data.error) || "Ошибка сохранения"); return {ok:true}; }); },
@@ -1038,6 +1149,7 @@ function saveSeg(s){
     if (r && r.ok){ M.snap[s.id] = JSON.stringify(w); delete M.dirty[s.id]; return r; }
     throw new Error((r && r.error) || "Не сохранилось");
   }).catch(function(err){
+    logUiEvent_("save_error", "seg_save", String(err.message || err));
     toast("Не сохранилось", String(err.message || err), function(){ saveSeg(s); }, {err:true, btn:"Повторить", ms:8000});
     return {ok:false};
   });
@@ -1085,6 +1197,7 @@ function magnet(s, l, v, exceptId){
 }
 function rejectToast(blocker, seg, tryAfter){
   var v = M.vehicles[seg.v];
+  logUiEvent_("blocked_click", "seg_overlap", segLabel(blocker));
   toast("Пересекается: " + segLabel(blocker), v ? v.gosShort : "", tryAfter ? function(){ tryAfter(blocker.s + blocker.l); } : null, {err:true, btn:"Поставить после", ms:7000});
 }
 
@@ -1207,7 +1320,7 @@ function dropDraft(){ if (!M.draft) return; if (M.sel === "draft") deselect(); M
 var ghostEl = null, slotEl = null, dragRaf = 0;
 function startDrag(segEl, t){
   var seg = segById(segEl.dataset.id); if (!seg) return;
-  if (!M.online){ vib([30,30]); toast("Нет связи - изменения недоступны", null, null, {err:true}); return; }
+  if (!M.online){ vib([30,30]); logUiEvent_("blocked_click", "offline", "startDrag"); toast("Нет связи - изменения недоступны", null, null, {err:true}); return; }
   st = "DRAGGING"; vib(12);
   var r = segEl.getBoundingClientRect();
   ghostEl = segEl.cloneNode(true); removeHandles(ghostEl); ghostEl.classList.remove("sel","pressing","src"); ghostEl.classList.add("dragghost"); if (!REDUCED) ghostEl.classList.add("lift");
@@ -1279,7 +1392,7 @@ function endDrag(aborted){
 var rszRaf = 0;
 function startResize(segEl, side, t, isDraftStretch){
   var seg = segById(segEl.dataset.id); if (!seg) return;
-  if (!M.online && seg.id !== "draft"){ vib([30,30]); toast("Нет связи - изменения недоступны", null, null, {err:true}); return; }
+  if (!M.online && seg.id !== "draft"){ vib([30,30]); logUiEvent_("blocked_click", "offline", "startResize"); toast("Нет связи - изменения недоступны", null, null, {err:true}); return; }
   st = "RESIZING"; if (!isDraftStretch) vib(12);
   rsz = {seg:seg, side:side, s0:seg.s, l0:seg.l, x0:t.clientX, lx:t.clientX, locked:false, bad:false, stretch:!!isDraftStretch};
   attachMove(); rszRaf = requestAnimationFrame(rszLoop);
@@ -1400,16 +1513,30 @@ function closeSheet(viaBack, explicit){
   if (!viaBack) histPop();
   if (snap) toast("Заявка убрана", M.vehicles[snap.v].gosShort + " · " + fmtDay(snap.s) + " " + fmtTime(snap.s), function(){ createDraft(snap.v, snap.s, snap.l, snap.kind, snap); openSegSheet("draft"); }, {btn:"Вернуть", ms:6000});
 }
+var navdrawer = $("navdrawer"), navdrawerOpen_ = false;
+function openDrawer_(){
+  if (navdrawerOpen_) return;
+  navdrawerOpen_ = true;
+  renderDrawer_();
+  navdrawer.classList.add("open"); scrim.classList.add("on");
+  if (hist.depth < 1) histPush();
+}
+function closeDrawer_(viaBack){
+  if (!navdrawerOpen_) return;
+  navdrawerOpen_ = false;
+  navdrawer.classList.remove("open"); scrim.classList.remove("on");
+  if (!viaBack) histPop();
+}
 window.addEventListener("popstate", function(){
   if (hist.ignore > 0){
     hist.ignore--;
-    if (hist.pendingPush){ hist.pendingPush = false; if (sheetState !== "closed" || ovlState){ history.pushState({d:hist.depth + 1}, ""); hist.depth++; } }
+    if (hist.pendingPush){ hist.pendingPush = false; if (sheetState !== "closed" || ovlState || navdrawerOpen_){ history.pushState({d:hist.depth + 1}, ""); hist.depth++; } }
     return;
   }
   hist.depth = Math.max(0, hist.depth - 1);
-  if (ovlState) closeOvl(true); else if (sheetState !== "closed") closeSheet(true);
+  if (navdrawerOpen_) closeDrawer_(true); else if (ovlState) closeOvl(true); else if (sheetState !== "closed") closeSheet(true);
 });
-scrim.addEventListener("click", function(){ if (sheetKind === "seg" && sheetData.id === "draft") setDetent("half"); else closeSheet(); });
+scrim.addEventListener("click", function(){ if (navdrawerOpen_) closeDrawer_(); else if (sheetKind === "seg" && sheetData.id === "draft") setDetent("half"); else closeSheet(); });
 /* grip: свайп вниз закрывает, тап - переключает детент */
 (function(){
   var y0 = 0, moved = false, onHead = false;
@@ -1502,7 +1629,7 @@ function renderSegSheet(){
   shFoot.innerHTML = (isDraft ? '<button class="btn primary" id="fPut" data-bad="' + (bad ? 1 : 0) + '"' + (!M.online ? ' disabled' : '') + '>' + esc(putLabel) + '</button>'
     : '<button class="btn ghost" id="fCancelSeg" style="color:var(--tint-red)">Отбой</button><button class="btn primary" id="fSave" data-bad="' + (bad ? 1 : 0) + '"' + (!changed || !M.online ? ' disabled' : '') + '>' + esc(!M.online ? "Нет связи" : bad ? "Пересекается: " + segLabel(bad).slice(0, 26) : "Сохранить") + '</button>');
 }
-function mgChipLabel(full){ var p = (full || "").trim().split(/\s+/); return (p[1] ? p[1] + " " : "") + three(full); }
+function mgChipLabel(full){ if (LP_DEPT_CODE_[full]) return LP_DEPT_CODE_[full]; var p = (full || "").trim().split(/\s+/); return (p[1] ? p[1] + " " : "") + three(full); }
 function agoLabel(h){ var m = Math.round((nowHour() - h) * 60); if (m < 1) return "только что"; if (m < 60) return m + " мин назад"; if (m < 24*60) return Math.round(m/60) + " ч назад"; return fmtDay(h) + " " + fmtTime(h); }
 shBody.addEventListener("click", function(e){
   if (sheetKind === "seg") segSheetClick(e);
@@ -1542,7 +1669,7 @@ function segSheetClick(e){
 }
 function putDraft(){
   if (!M.draft) return;
-  if (!M.online){ vib([30,30]); toast("Нет связи - заявка не сохранится", null, null, {err:true}); return; }
+  if (!M.online){ vib([30,30]); logUiEvent_("blocked_click", "offline", "putDraft"); toast("Нет связи - заявка не сохранится", null, null, {err:true}); return; }
   var d = M.draft; formApplyToSeg();
   var bad = overlaps(d.v, d.s, d.l, "draft", d.kind);
   if (bad){ vib(30); rejectToast(bad, d, function(after){ form.s = clamp(after, 0, HOURS - form.l); formApplyToSeg(); renderSegSheet(); }); return; }
@@ -1559,7 +1686,7 @@ function putDraft(){
 function deleteSegQuiet(id){ var s = segById(id); if (!s) return; M.segs.splice(M.segs.indexOf(s), 1); if (M.sel === id) deselect(); refreshSeg(id); layoutRows(); API.deleteSeg(id, ""); }
 function saveForm(){
   var s = segById(form.id); if (!s) return;
-  if (!M.online){ vib([30,30]); toast("Нет связи - не сохранится", null, null, {err:true}); return; }
+  if (!M.online){ vib([30,30]); logUiEvent_("blocked_click", "offline", "saveForm"); toast("Нет связи - не сохранится", null, null, {err:true}); return; }
   var bad0 = overlaps(form.v, form.s, form.l, form.id, form.kind); if (bad0){ vib(30); rejectToast(bad0, form, null); return; }
   var before = {kind:s.kind, v:s.v, s:s.s, l:s.l, customer:s.customer, from:s.from, to:s.to, mg:s.mg, needsData:s.needsData, tripMode:s.tripMode, reason:s.reason};
   formApplyToSeg(); s.updatedBy = M.me.name; s.updatedAt = nowHour(); closeSheet();
@@ -1681,7 +1808,7 @@ function renderVehicleSheet(){
     h.push('<div class="list-row" data-a="newtrip"><span>Новый рейс на эту машину</span><svg class="go"><use href="#i-right"/></svg></div>');
     shBody.innerHTML = h.join(""); shFoot.innerHTML = "";
   } else {
-    var lbl = vsheet.kind === "driveroff" ? "Без водителя · " + reasonLabel(vsheet.reason) : KIND_LABEL[vsheet.kind];
+    var lbl = vsheet.kind === "driveroff" ? (reasonLabel(vsheet.reason) || "Без водителя") : KIND_LABEL[vsheet.kind];
     h.push('<div class="frow"><div class="k">Статус</div><div class="v">' + esc(lbl) + '</div></div>');
     h.push('<div class="f-label">С какого момента</div><div class="chips" id="vFrom"><button class="chip" data-s="now" aria-pressed="' + (vsheet.fromNow !== false) + '">Сейчас</button><button class="chip" data-s="morning" aria-pressed="' + (vsheet.fromNow === false && vsheet.s === dayStartOf(nowHour()) + 32) + '">Завтра 08:00</button><button class="chip" data-s="mon" aria-pressed="' + (vsheet.fromNow === false && vsheet.s === nextMonday()) + '">Понедельник 08:00</button></div>');
     var durs = vsheet.kind === "driveroff" ? [["1 день",24],["2 дня",48],["Неделя",168],["2 недели",336]] : [["До утра", dayStartOf(vsheet.s) + 32 - vsheet.s],["1 день",24],["3 дня",72],["Неделя",168]];
@@ -1716,7 +1843,7 @@ function syncVDraft(){ if (!M.draft) return; M.draft.s = vsheet.s; M.draft.l = v
 shFoot.addEventListener("click", function(e){
   var b = e.target.closest("button"); if (!b || sheetKind !== "vehicle") return;
   if (b.id === "vBack"){ dropDraft(); vsheet.step = 1; renderVehicleSheet(); }
-  else if (b.id === "vPut"){ if (!M.online){ vib([30,30]); toast("Нет связи - не сохранится", null, null, {err:true}); return; } var v = vsheet.v; var s = {id:newSegId(), v:v.i, kind:vsheet.kind, s:vsheet.s, l:vsheet.l, reason:vsheet.reason, needsData:false, mg:"", lg:M.me.name, from:"", to:"", customer:"", tripMode:"", updatedBy:M.me.name, updatedAt:nowHour()}; dropDraft(); M.segs.push(s); closeSheet(); refreshSeg(s.id); layoutRows(); var saved2 = saveSeg(s); vib([8,40,8]); toast("Поставлено: " + segLabel(s), v.gosShort, function(){ saved2.then(function(){ deleteSegQuiet(s.id); }); }); }
+  else if (b.id === "vPut"){ if (!M.online){ vib([30,30]); logUiEvent_("blocked_click", "offline", "vPut"); toast("Нет связи - не сохранится", null, null, {err:true}); return; } var v = vsheet.v; var s = {id:newSegId(), v:v.i, kind:vsheet.kind, s:vsheet.s, l:vsheet.l, reason:vsheet.reason, needsData:false, mg:"", lg:M.me.name, from:"", to:"", customer:"", tripMode:"", updatedBy:M.me.name, updatedAt:nowHour()}; dropDraft(); M.segs.push(s); closeSheet(); refreshSeg(s.id); layoutRows(); var saved2 = saveSeg(s); vib([8,40,8]); toast("Поставлено: " + segLabel(s), v.gosShort, function(){ saved2.then(function(){ deleteSegQuiet(s.id); }); }); }
 });
 function peopleItems(v){
   var items = [], free = [], other = [];
@@ -1793,18 +1920,194 @@ function renderConfirmSheet(){
   shBody.innerHTML = '<p style="color:var(--muted);font-size:15px;padding:4px 0 12px">' + esc(sheetData.text) + '</p>';
   shFoot.innerHTML = '<button class="btn ghost" id="cfNo" style="flex:1">Отмена</button><button class="btn danger" id="cfYes" style="flex:1">' + esc(sheetData.yesLabel) + '</button>';
 }
-/* ── Настройки (тема - развилка для Влада, версия) ── */
-/* Меню (кнопка ≡ в шапке, Влад 06.09: «должна быть возможность вернуться в меню дашборда
-   из планировки») - навигация наверху, настройки ниже. */
-var PAGE_VERSION_ = "v16 · 09.09";
+var PAGE_VERSION_ = "v18 · 15.09";
+/* «Меню» (кнопка ≡ в шапке) - настоящий список страниц дашборда, 1:1 с index.html .sidebar-
+   nav-item (id/label/icon/секция скопированы оттуда, см. feedback_clone_existing_visual_pattern),
+   отфильтрован ПО РОЛИ той же логикой, что applyRoleUI() в index.html (allowedPages_) - см.
+   navAllowedPages_ ниже. Влад 15.09, поправка к первой версии: «я хочу что бы этого вообще
+   не было... переход между страницыми был как с других страницы, т.е. в планировке обычный
+   бутерброд нажимаешь и переходишь на другую страницу дашборда» - никакой отдельной кнопки
+   «Дашборд», никаких настроек в этом же списке. Настройки - отдельный лист по тапу на угол
+   шапки, см. renderSettingsSheet ниже. */
+var PAGES_ = [
+  {page:"main", label:"Панель", icon:"i-pg-main"},
+  {page:"director", label:"Операционный директор", icon:"i-pg-director"},
+  {page:"global-stats", label:"Глобальная статистика", icon:"i-pg-global-stats"},
+  {page:"directory", label:"Справочники", icon:"i-pg-directory"},
+  {page:"settings", label:"Настройки", icon:"i-pg-settings"},
+  {page:"vehicles", label:"Техника", icon:"i-pg-vehicles", section:"park"},
+  {page:"logistics-plan", label:"Планировка", icon:"i-pg-logistics-plan", section:"park"},
+  {page:"dynamics", label:"Динамика", icon:"i-pg-dynamics", section:"park"},
+  {page:"navigation", label:"Навигация", icon:"i-pg-navigation", section:"park"},
+  {page:"crm", label:"CRM", icon:"i-pg-crm", section:"sales"},
+  {page:"counterparty", label:"Проверка контрагента", icon:"i-pg-counterparty", section:"sales"},
+  {page:"dept-trals", label:"Отдел Тралы", icon:"i-pg-people", section:"sales"},
+  {page:"receipts", label:"Поступления", icon:"i-pg-receipts", section:"sales"},
+  {page:"sales", label:"Обзор заказов", icon:"i-pg-sales", section:"sales"},
+  {page:"sales-mgr", label:"По менеджерам", icon:"i-pg-people", section:"sales"},
+  {page:"sales-log", label:"По логистам", icon:"i-pg-sales-log", section:"sales"},
+  {page:"sales-salary", label:"Зарплата", icon:"i-pg-salary", section:"sales"},
+  {page:"my-page", label:"Личная страница", icon:"i-pg-my-page", section:"sales"},
+  {page:"order-plan", label:"Задание", icon:"i-pg-order-plan", section:"sales"},
+  {page:"calculator", label:"Калькулятор", icon:"i-pg-calculator", section:"sales"},
+  {page:"ryschanow-salary", label:"Зарплата", icon:"i-pg-salary", section:"sales"},
+  {page:"commercial-head-salary", label:"Зарплата", icon:"i-pg-salary", section:"sales"},
+  {page:"commercial-head-debt", label:"Дебиторка", icon:"i-pg-debt", section:"sales"},
+  {page:"column-head-payroll", label:"Зарплата машинистов", icon:"i-pg-column-payroll", section:"sales"},
+  {page:"clients", label:"Клиенты", icon:"i-pg-clients", section:"sales"},
+  {page:"debt", label:"Дебиторка", icon:"i-pg-debt", section:"sales"}
+];
+// Ключи и подписи - 1:1 с data-section/.sidebar-nav-section-label в index.html
+// (park="Парк", sales="Продажи") - те же два раздела, больше в дашборде нет.
+var SECTION_LABELS_ = {park:"Парк", sales:"Продажи"};
+/* Те же списки фамилий, что COLUMN_HEAD_SUR_FRONT_/COMMERCIAL_HEAD_SUR_FRONT_ в index.html -
+   если там заведут нового человека, тут тоже нужно поправить (класс бага
+   project_orders_calc_vps_sync_gotcha - синхронизировать копии вручную). */
+var NAV_COLUMN_HEAD_SUR_ = ["барыльченко", "дьячков"];
+var NAV_COMMERCIAL_HEAD_SUR_ = ["ахтамова", "гусейнова"];
+// Вьювер "Смотреть как сотрудник" (19.09) - тот же localStorage-флаг, что пишет index.html
+// (setViewAs()), читаем свежим каждый раз, не кэшируем (admin мог переключить в другой
+// вкладке). Планировка - общая доска, но список ЭТОГО меню всё равно должен показывать
+// именно того сотрудника, кого выбрал admin, а не самого admin - тот же принцип, что уже
+// сделан в index.html/orders-m.html.
+function effectiveIdentity_(){
+  if (M.me.role === 'admin'){
+    try {
+      var va = JSON.parse(localStorage.getItem('view_as') || 'null');
+      if (va && va.name && va.type) return {name: va.name, role: va.type, viewingAs: true};
+    } catch(e){}
+  }
+  return {name: M.me.name, role: M.me.role, viewingAs: false};
+}
+// Групповой ("тир") ключ и кэш кастомизации меню - ТОТ ЖЕ localStorage, что пишет index.html
+// (menuTierKey_/MENU_CFG_LS_/applyMenuConfig_ там же, 19.09: у Влада на компьютере порядок
+// пунктов и "Планировка"/скрытые отличались от "сырого" списка по роли, который тут строился
+// раньше). Сервер не дёргаем - кэш уже кладёт index.html при заходе на этом устройстве.
+var MENU_CFG_LS_ = "yard.menu.cfg.";
+function menuTierKey_(role, sur){
+  if (role === "admin") return "admin";
+  if (role === "mechanic") return "mechanic";
+  if (role === "logist"){
+    if (sur === "сильчев" || sur === "рыщанов") return "logistics_head";
+    if (NAV_COLUMN_HEAD_SUR_.indexOf(sur) >= 0) return "column_head";
+    return "logist";
+  }
+  if (role === "manager"){
+    if (NAV_COMMERCIAL_HEAD_SUR_.indexOf(sur) >= 0) return "commercial_head";
+    return "manager";
+  }
+  return role;
+}
+// 21.09, Влад: "разное меню... порядок должен быть как в десктопе, расположение не
+// хардкод а алгоритм" - на десктопе (menuApplyCfg_ в index.html) заголовки разделов
+// (#park/#sales) - ТАКИЕ ЖЕ перетаскиваемые токены в cfg.order, как и сами пункты, их
+// позиция в сохранённом порядке решает, где рисуется заголовок. Прошлая версия здесь
+// ФИЛЬТРОВАЛА '#'-токены (t.charAt(0)!=='#') - пункты переставлялись правильно, но
+// заголовки перерисовывались заново по статичному полю section КАЖДОГО пункта, и если
+// кастомизация перемешала пункты из разных секций (например Задание перетащили под
+// Планировку, в "Парк"), получались дублирующиеся ПАРК/ПРОДАЖИ/ПАРК/ПРОДАЖИ - ровно то,
+// что увидел Влад. Теперь строим тот же смешанный список токенов (страница ИЛИ
+// '#section'), что и десктоп, и применяем cfg.order к НЕМУ, а не только к пунктам.
+function defaultMenuTokens_(allowed){
+  var lastSection = null, tokens = [];
+  PAGES_.forEach(function(p){
+    if (allowed.indexOf(p.page) < 0) return;
+    if (p.section !== lastSection){ lastSection = p.section; if (p.section) tokens.push("#" + p.section); }
+    tokens.push(p.page);
+  });
+  return tokens;
+}
+function applyMenuCustomization_(allowed, tierKey){
+  var defaultTokens = defaultMenuTokens_(allowed);
+  var cfg = null;
+  try { var raw = localStorage.getItem(MENU_CFG_LS_ + tierKey); if (raw) cfg = JSON.parse(raw); } catch(e){}
+  if (!cfg) return defaultTokens;
+  var order = (Array.isArray(cfg.order) && cfg.order.length) ? cfg.order : defaultTokens;
+  var isValid = function(t){ return t.charAt(0) === "#" ? true : allowed.indexOf(t) >= 0; };
+  var result = [], placed = {};
+  order.forEach(function(t){ if (isValid(t) && !placed[t]){ result.push(t); placed[t] = true; } });
+  defaultTokens.forEach(function(t){ if (!placed[t]){ result.push(t); placed[t] = true; } });
+  if (Array.isArray(cfg.hidden) && cfg.hidden.length){
+    // Тот же гвард, что в index.html menuApplyCfg_ - скрыть абсолютно все ПУНКТЫ нельзя
+    // (разделители '#' в счёт не идут, у них нет своего "скрыт"), тогда скрытие
+    // игнорируем целиком, человек не должен остаться с пустым меню.
+    var pagesLeft = result.filter(function(t){ return t.charAt(0) !== "#"; });
+    if (pagesLeft.filter(function(t){ return cfg.hidden.indexOf(t) < 0; }).length){
+      result = result.filter(function(t){ return t.charAt(0) === "#" || cfg.hidden.indexOf(t) < 0; });
+    }
+  }
+  return result;
+}
+function navAllowedPages_(){
+  var eff = effectiveIdentity_();
+  var sur = (eff.name || "").trim().split(/\s+/)[0].toLowerCase();
+  var allowed;
+  if (eff.role === "admin"){
+    var personalOnly = ["ryschanow-salary", "commercial-head-salary", "commercial-head-debt", "column-head-payroll"];
+    allowed = PAGES_.map(function(p){ return p.page; }).filter(function(id){ return personalOnly.indexOf(id) < 0; });
+  } else {
+    var isRyschanow = sur === "сильчев" || sur === "рыщанов";
+    var isCommercialHead = NAV_COMMERCIAL_HEAD_SUR_.indexOf(sur) >= 0;
+    var isColumnHead = NAV_COLUMN_HEAD_SUR_.indexOf(sur) >= 0;
+    allowed = ["my-page", "calculator", "logistics-plan"];
+    if (!isColumnHead) allowed.push("order-plan");
+    if (isRyschanow) allowed.push("ryschanow-salary");
+    if (isCommercialHead) allowed.push("commercial-head-salary", "commercial-head-debt");
+    if (isColumnHead) allowed.push("column-head-payroll");
+    if (eff.role === "manager") allowed.push("crm", "counterparty");
+    // 20.09, Влад: "скрыть Отдел Тралы для менеджеров, оставить только Лиане и Айнур" -
+    // те же isCommercialHead (Ахтамова/Гусейнова), что commercial-head-salary/-debt выше.
+    if (isCommercialHead) allowed.push("dept-trals");
+  }
+  return applyMenuCustomization_(allowed, menuTierKey_(eff.role, sur));
+}
+function renderDrawer_(){
+  var head = $("navdrawerHead"), body = $("navdrawerBody"), eff = effectiveIdentity_(), tokens = navAllowedPages_();
+  var byId_ = {}; PAGES_.forEach(function(p){ byId_[p.page] = p; });
+  // Заголовки разделов - ТОЛЬКО у admin, 1:1 с index.html applyRoleUI() (там
+  // .sidebar-nav-section скрывается целиком для manager/logist/mechanic/вьювера - см.
+  // applyRoleUI). Без этого гварда короткий список не-admin роли, где несколько
+  // пунктов идут из разных секций подряд (my-page/calculator - "sales", logistics-plan -
+  // "park"), показал бы те же дублирующиеся заголовки, что и был баг.
+  var showSections = eff.role === "admin";
+  var out = [], pendingSection = null;
+  if (eff.viewingAs) out.push('<div class="navdrawer-item" data-nav="__exit-viewas" style="color:var(--red)">✕ Обычный вид (админ)</div>');
+  tokens.forEach(function(t){
+    if (t.charAt(0) === "#"){ pendingSection = t.slice(1); return; }
+    var p = byId_[t]; if (!p) return;
+    if (showSections && pendingSection){ out.push('<div class="navdrawer-section">' + esc(SECTION_LABELS_[pendingSection] || pendingSection) + '</div>'); }
+    pendingSection = null;
+    out.push('<div class="navdrawer-item' + (p.page === "logistics-plan" ? ' active' : '') + '" data-nav="' + p.page + '"><svg><use href="#' + p.icon + '"/></svg><span>' + esc(p.label) + '</span></div>');
+  });
+  // 21.09, Влад: "одно место где всё настраивается" - «Настройки» продублированы сюда
+  // (тот же лист, что и по тапу на угол шапки «ЧАСЫ» - тот тап никуда не делся, это
+  // просто ещё один, более очевидный путь к тому же самому, как в "Задании").
+  out.push('<div class="navdrawer-section">Общее</div><div class="navdrawer-item" data-nav="__settings"><svg><use href="#i-settings"/></svg><span>Настройки</span></div>');
+  head.textContent = (eff.name || "Меню") + (API.demo ? " · демо" : "");
+  body.innerHTML = out.join("");
+}
+$("navdrawerBody").addEventListener("click", function(e){
+  var b = e.target.closest("[data-nav]"); if (!b) return;
+  var id = b.dataset.nav;
+  if (id === "logistics-plan"){ closeDrawer_(); return; } // уже здесь
+  if (id === "__settings"){ closeDrawer_(); openSheet("settings", {}, "full"); return; }
+  if (id === "__exit-viewas"){ try{ localStorage.removeItem("view_as"); }catch(e){} location.href = "index.html"; return; }
+  // 19.09: у «Задания» появилась своя мобильная страница (files/orders-m.html, вариант
+  // «Лента») - переход туда напрямую, минуя десктопный index.html (который бы всё равно
+  // тут же редиректнул тач-пользователя на неё же, см. showPage('order-plan') ниже).
+  if (id === "order-plan"){ location.href = "orders-m.html"; return; }
+  location.href = "index.html#page=" + id;
+});
+/* ── Настройки (тема, версия, выход) - отдельный лист, тап на угол шапки («ЧАСЫ») ИЛИ
+   пункт «Настройки» в самом меню (21.09, добавлен для единообразия с orders-m.html -
+   решение 15.09 "не смешивать со списком страниц" не отменяется, тап на угол остаётся,
+   пункт в меню - ДОПОЛНИТЕЛЬНЫЙ вход тем же путём, кто не знает про угол). ── */
 function renderSettingsSheet(){
-  var theme = document.documentElement.getAttribute("data-theme") || "dark";
-  shHead.innerHTML = shHeadHtml("Меню", (M.me.name || "") + (API.demo ? " · демо" : ""), "");
+  var theme = document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+  shHead.innerHTML = shHeadHtml("Ещё");
   shBody.innerHTML =
-    '<div class="list-row" data-a="dash"><span>Дашборд<span class="sub">Панель, личная страница, остальные разделы</span></span><svg class="go"><use href="#i-right"/></svg></div>' +
     '<div class="list-row" data-a="reload"><span>Обновить данные</span></div>' +
-    '<div class="f-label">Тема</div><div class="seg4" id="sTheme"><button data-t="dark" aria-pressed="' + (theme === "dark") + '">Тёмная</button><button data-t="light" aria-pressed="' + (theme === "light") + '">Светлая</button><button data-t="auto" aria-pressed="' + (theme === "auto") + '">Как в телефоне</button></div>' +
-    '<div class="info">Светлая - проверить на солнце. Это отступление от ГОСТа, решает Влад.</div>' +
+    '<div class="f-label">Тема</div><div class="seg4" id="sTheme"><button data-t="dark" aria-pressed="' + (theme === "dark") + '">Тёмная</button><button data-t="light" aria-pressed="' + (theme === "light") + '">Светлая</button></div>' +
     '<div class="f-label">Группы</div><div class="list-row" data-a="expand"><span>Развернуть все</span></div>' +
     '<div class="f-label">Версия</div><div class="frow"><div class="k">Страница</div><div class="v mono">plan-m · ' + PAGE_VERSION_ + '</div></div>' +
     '<div class="list-row muted" data-a="logout"><span>Выйти</span></div>';
@@ -1813,24 +2116,20 @@ function renderSettingsSheet(){
 function settingsClick(e){
   var b = e.target.closest("button, .list-row"); if (!b) return;
   if (b.parentNode && b.parentNode.id === "sTheme"){ setTheme(b.dataset.t); renderSettingsSheet(); return; }
-  if (b.dataset.a === "expand"){ M.collapsed = {}; try { localStorage.setItem("plan_m_collapsed", "{}"); } catch(e2){} buildRows(); renderWindow(true); closeSheet(); }
+  if (b.dataset.a === "expand"){ M.collapsed = {}; try { localStorage.setItem("plan_m_collapsed", "{}"); } catch(e2){} buildRows(); renderWindow(true); closeSheet(); return; }
   if (b.dataset.a === "reload"){ location.reload(); return; }
-  /* sessionStorage, не localStorage - это разовый выбор "сейчас нужен весь дашборд"
-     (например, задача с компьютера-подобной раскладкой), не отказ от мобильной страницы
-     навсегда. app.html/index.html читают этот флаг тем же ключом; в новой вкладке/после
-     перезапуска TWA логист снова попадёт на plan-m.html. */
-  /* «Дашборд» - index.html открывается на Панели; тап по «Планировка» там снова ведёт сюда.
-     Пункта «Планировка на сайте» больше нет (Влад 06.09: «старая версия мобильной
-     планировки - к ней вообще больше не возвращаться»). */
-  if (b.dataset.a === "dash"){ location.href = "index.html"; return; }
   if (b.dataset.a === "logout"){ try { ["session_token","id_token","user_role","user_name"].forEach(function(k){ localStorage.removeItem(k); }); } catch(e4){} location.href = "index.html"; }
 }
+// 21.09: общий ключ 'yardhub_theme' вместо местного 'plan_m_theme' (тот же, что index.html/
+// orders-m.html) - "один раз установил - применилось везде" в буквальном смысле. Режим
+// "Как в телефоне" (auto) убран - его не было ни в index.html, ни в orders-m.html, только
+// бинарный выбор одинаково на всех трёх страницах.
 function setTheme(t){
-  try { localStorage.setItem("plan_m_theme", t); } catch(e){}
-  var eff = t === "auto" ? (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark") : t;
-  document.documentElement.setAttribute("data-theme", t === "auto" ? "auto" : eff);
-  if (t === "auto") document.documentElement.setAttribute("data-theme", eff), document.documentElement.dataset.themePref = "auto";
-  document.querySelector('meta[name="theme-color"]').setAttribute("content", eff === "light" ? "#f4f3ef" : "#0f0f13");
+  var eff = t === "light" ? "light" : "dark";
+  try { localStorage.setItem("yardhub_theme", eff); } catch(e){}
+  if (eff === "light") document.documentElement.setAttribute("data-theme", "light");
+  else document.documentElement.removeAttribute("data-theme");
+  document.querySelector('meta[name="theme-color"]').setAttribute("content", eff === "light" ? "#eef1f5" : "#0f0f13");
 }
 
 /* ── Полноэкранный оверлей: пикер / поиск / дата ── */
@@ -1913,7 +2212,7 @@ $("btnPlus").addEventListener("click", function(){
   openPicker({title:"Машина", items:vehicleItems(s0, 8), onPick:function(val){ var vv = M.vehicles.filter(function(x){ return x.gos === val; })[0]; if (!vv) return; deselect(); createDraft(vv.i, s0, 8, "trip"); if (vv.long ? M.collapsed.long : M.collapsed.tral) toggleGroup(vv.long ? "long" : "tral"); scrollRowToTop(vv.i, false); openSegSheet("draft"); }});
 });
 document.querySelector(".corner").addEventListener("click", function(){ openSheet("settings", {}, "full"); });
-$("btnMenu").addEventListener("click", function(){ openSheet("settings", {}, "full"); });
+$("btnMenu").addEventListener("click", openDrawer_);
 
 /* ═══════════════════════════════════════════════════════════════════════════
    8. Загрузка и запуск
@@ -1926,7 +2225,9 @@ function wireRowToSeg_(r, gosIndex){
   if (vi == null) return null; // машина выбыла из парка (department и т.п.) - не рисуем, но и не трогаем на сервере
   var seg = {id:r.id, v:vi, kind:r.kind, s:parseFloat(r.start_hour), l:parseFloat(r.length_hours),
     needsData: !!Number(r.needs_data), reason:r.reason || "", updatedBy:r.updated_by || "",
-    updatedAt: r.updated_at ? wallToHour(r.updated_at) : null};
+    updatedAt: r.updated_at ? wallToHour(r.updated_at) : null,
+    /* статус механика из бота MAX (22.09, кнопки «Взял / Готово») - read-only, как на десктопе */
+    repairStatus: r.repair_status || "", repairStatusBy: r.repair_status_by || ""};
   if (r.kind === "trip"){ seg.mg = r.manager_name || ""; seg.lg = r.logist_name || ""; seg.from = r.route_from || ""; seg.to = r.route_to || ""; seg.customer = r.customer || ""; seg.tripMode = r.trip_mode || ""; }
   else seg.lg = r.logist_name || "";
   return seg;
@@ -2149,13 +2450,22 @@ function startLoadFlow_(){
 function boot(){
   try { M.collapsed = JSON.parse(localStorage.getItem("plan_m_collapsed") || "{}") || {}; } catch(e){ M.collapsed = {}; }
   try { var z = localStorage.getItem("plan_m_zoom"); if (z != null) M.zoom = clamp(+z, 0, 3); } catch(e){}
-  try { var th = localStorage.getItem("plan_m_theme"); if (th) setTheme(th); } catch(e){}
+  // Тема уже применена в <head> (ранний синхронный скрипт, 'yardhub_theme') - здесь только
+  // разовый перенос старого местного ключа тем, кто успел включить светлую тему ДО 21.09.
+  try {
+    if (!localStorage.getItem("yardhub_theme")) {
+      var oldTh = localStorage.getItem("plan_m_theme");
+      if (oldTh === "light") setTheme("light");
+      localStorage.removeItem("plan_m_theme");
+    }
+  } catch(e){}
   buildZoomSeg($("zoomseg")); buildZoomSeg($("zoomsegL"));
   cacheGeom(); setHw(hwFor(M.zoom));
-  if (IS_DEMO){ API = makeDemoApi(); $("demoTag").hidden = false; startLoadFlow_(); }
+  if (IS_DEMO){ API = makeDemoApi(); $("demoTag").hidden = false; $("demoTag").textContent = "ДЕМО · " + PAGE_VERSION_; startLoadFlow_(); }
   else {
     API = makeLiveApi();
     if (sessionToken_()){
+      logUiEvent_("viewport", "", window.innerWidth + "x" + window.innerHeight);
       /* Кэш - на экран НЕМЕДЛЕННО, до единого сетевого запроса (см. saveCache_/loadCache_
          выше). Живая загрузка всё равно запускается следом как обычно - просто теперь
          стартует не с пустого скелета, а поверх уже видимой (пусть не самой свежей) доски. */

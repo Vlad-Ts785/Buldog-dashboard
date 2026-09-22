@@ -17036,19 +17036,26 @@ function partnersEntityPaint_() {
   if (!body) return;
   var showDeleted = document.getElementById('partners-entity-show-deleted').checked;
   var entities = (partnersLegalEntities_ || []).filter(function(le) { return showDeleted || !le.is_deleted; })
-    .map(function(le) { return { kind: 'entity', id: le.id, name: le.name, contact: le.inn ? ('ИНН ' + le.inn) : '—', is_deleted: le.is_deleted }; });
+    .map(function(le) { return { kind: 'entity', id: le.id, name: le.name, contact: le.inn ? ('ИНН ' + le.inn) : '—', is_deleted: le.is_deleted, risk: le }; });
   var owners = (partnersPeople_ || []).filter(function(p) { return (p.roles || []).indexOf('partner_owner') >= 0 && (showDeleted || !p.is_deleted); })
-    .map(function(p) { return { kind: 'person', id: p.id, name: p.full_name, contact: p.phone || '—', is_deleted: p.is_deleted }; });
+    .map(function(p) { return { kind: 'person', id: p.id, name: p.full_name, contact: p.phone || '—', is_deleted: p.is_deleted, risk: null }; });
   var rows = entities.concat(owners).sort(function(a, b) { return (a.name || '').localeCompare(b.name || '', 'ru'); });
   if (!rows.length) { body.innerHTML = '<tr><td colspan="4" class="muted" style="padding:14px">Партнёров пока нет — добавьте первого</td></tr>'; return; }
   body.innerHTML = rows.map(function(row) {
     var idEsc = pageEscAttr_(row.id);
     var typeLabel = row.kind === 'entity' ? 'Юрлицо' : 'Физлицо';
+    // Светофор Checko (22.09, Влад: "прогони партнёров через Чеко") - тот же
+    // legalRiskMarkHtml_/legalRiskTooltip_, что уже рисует точку на вкладке «Юридические
+    // лица» - не новый компонент. Точки нет вовсе, если ещё не проверяли (не серая
+    // "неизвестно"-точка - см. правило проекта про цвет только по делу).
+    var riskDot = (row.risk && row.risk.risk_light)
+      ? ' <span title="' + pageEscAttr_(legalRiskTooltip_(row.risk)) + '" style="display:inline-block;vertical-align:middle;margin-left:2px">' +
+        legalRiskMarkHtml_(row.risk.risk_light, 8, '', row.risk.risk_marker) + '</span>' : '';
     var actions = row.is_deleted
       ? '<button onclick="partnersEntityRestore_(\'' + row.kind + '\',\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);color:var(--green);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Восстановить</button>'
       : '<button onclick="partnersEntityOpenForm_(\'' + row.kind + '\',\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Править</button>';
     return '<tr' + (row.is_deleted ? spravDeletedRowStyle_() : '') + '>' +
-      '<td><b>' + pageEsc_(row.name) + '</b>' + (row.is_deleted ? ' <span class="muted" style="font-size:11px">(удалено)</span>' : '') + '</td>' +
+      '<td><b>' + pageEsc_(row.name) + '</b>' + riskDot + (row.is_deleted ? ' <span class="muted" style="font-size:11px">(удалено)</span>' : '') + '</td>' +
       '<td class="muted">' + typeLabel + '</td>' +
       '<td class="muted">' + pageEsc_(row.contact) + '</td>' +
       '<td class="num">' + actions + '</td>' +

@@ -683,7 +683,7 @@ function rurWords_(amount) {
    paymentTermText_(режим из конструктора). Ссылки «п. N» внутри текста - на нумерацию ЭТОГО
    массива (позиция + 1), при вставке/удалении пункта перепроверять ВСЕ ссылки. */
 var CONTRACT_SPECIAL_TERMS_ = [
-  /* 1 */ 'СТОРОНЫ признают юридическую силу документов и сообщений (включая настоящую договор-заявку, счета, акты/УПД, акты о простое, уведомления, претензии, фото- и видеоматериалы), направленных по электронной почте, через операторов электронного документооборота, а также в мессенджерах - с адресов электронной почты и номеров телефонов, с которых или на которые СТОРОНЫ фактически ведут переписку по настоящей перевозке (п. 2 ст. 160, п. 2 ст. 434 ГК РФ). Такой документ считается исходящим от СТОРОНЫ, если не доказано иное, и полученным в день доставки адресату. Транспортная накладная, заказ (заявка) и иные перевозочные документы могут оформляться в электронной форме (ст. 8 Устава автомобильного транспорта, Федеральный закон от 08.11.2007 № 259-ФЗ, далее - УАТ). Настоящая договор-заявка сформирована информационной системой ИСПОЛНИТЕЛЯ; идентификатор документа, номер редакции и дата/время формирования указаны в нижней части документа, каждая сформированная редакция сохраняется ИСПОЛНИТЕЛЕМ.',
+  /* 1 */ 'СТОРОНЫ признают юридическую силу документов и сообщений (включая настоящую договор-заявку, счета, акты/УПД, акты о простое, уведомления, претензии, фото- и видеоматериалы), направленных по электронной почте, через операторов электронного документооборота, а также в мессенджерах - с адресов электронной почты и номеров телефонов, с которых или на которые СТОРОНЫ фактически ведут переписку по настоящей перевозке (п. 2 ст. 160, п. 2 ст. 434 ГК РФ). Такой документ считается исходящим от СТОРОНЫ, если не доказано иное, и полученным в день доставки адресату. Для целей настоящего пункта СТОРОНЫ определяют следующие контакты для переписки по настоящей перевозке: со стороны ИСПОЛНИТЕЛЯ - {CORR_EXEC}; со стороны ЗАКАЗЧИКА - {CORR_CUST}. Использование СТОРОНАМИ иных каналов связи не исключает применения настоящего пункта, если по обстоятельствам дела очевидно, что сообщение исходит от СТОРОНЫ. Транспортная накладная, заказ (заявка) и иные перевозочные документы могут оформляться в электронной форме (ст. 8 Устава автомобильного транспорта, Федеральный закон от 08.11.2007 № 259-ФЗ, далее - УАТ). Настоящая договор-заявка сформирована информационной системой ИСПОЛНИТЕЛЯ; идентификатор документа, номер редакции и дата/время формирования указаны в нижней части документа, каждая сформированная редакция сохраняется ИСПОЛНИТЕЛЕМ.',
   /* 2 */ 'Настоящая договор-заявка содержит согласованные условия конкретной перевозки и является предложением (офертой) ИСПОЛНИТЕЛЯ заключить договор перевозки груза на этих условиях (ст. 435 ГК РФ). Акцептом - полным и безоговорочным принятием всех условий (п. 3 ст. 438 ГК РФ) - признаётся совершение ЗАКАЗЧИКОМ либо привлечённым им лицом любого из действий: (а) оплата (полная или частичная) стоимости перевозки; (б) письменное подтверждение принятия условий по каналам п. 1, в том числе сообщением в мессенджере; (в) фактическое допущение транспортного средства ИСПОЛНИТЕЛЯ к погрузке; (г) подписание уполномоченным представителем ЗАКАЗЧИКА, грузоотправителя или грузополучателя транспортной накладной, акта либо иного перевозочного документа по данной перевозке. Совершение любого из этих действий подтверждает ознакомление ЗАКАЗЧИКА со всеми условиями и согласие с ними независимо от наличия его подписи на документе. Транспортная накладная по данной перевозке подтверждает заключение договора перевозки на условиях настоящей договор-заявки (ст. 8 УАТ); при расхождении между транспортной накладной и настоящей договор-заявкой в части стоимости, порядка оплаты, простоя, ответственности и иных коммерческих условий применяется настоящая договор-заявка.',
   /* 3 */ 'ЗАКАЗЧИК заключает настоящую договор-заявку от своего имени независимо от того, является ли он грузоотправителем, грузополучателем, владельцем груза либо действует в интересах третьего лица. ЗАКАЗЧИК гарантирует наличие у него полномочий на согласование условий перевозки данного груза, обеспечивает исполнение грузоотправителем и грузополучателем условий настоящей договор-заявки (в том числе в части погрузки, выгрузки, крепления, документов, условий оплаты и права удержания груза по п. 13) и отвечает перед ИСПОЛНИТЕЛЕМ за их действия и бездействие как за свои собственные (ст. 403 ГК РФ). Все платежи, предусмотренные настоящей договор-заявкой, уплачивает ЗАКАЗЧИК независимо от того, кем из указанных лиц допущено нарушение.',
   /* 4 */ 'Наименование, масса, габариты (Д×Ш×В) и иные характеристики груза, адреса, контактные лица и время подачи, указанные в разделе «РЕЙС», сообщены ЗАКАЗЧИКОМ и именуются исходными характеристиками. ЗАКАЗЧИК подтверждает их достоверность и полноту (ст. 12 УАТ) и обязан до подачи транспортного средства сообщить об особенностях груза, влияющих на безопасность перевозки: положение центра тяжести, выступающие и подвижные части (стрела, ковш, отвал, кабина), незакреплённые элементы, течи технических жидкостей, повреждения, необходимость особых условий. Стоимость перевозки, тип транспортного средства, маршрут, разрешительные документы, а также необходимость и объём сопровождения (машин прикрытия) определены ИСПОЛНИТЕЛЕМ исходя из исходных характеристик. Сопровождение включено в стоимость перевозки, если оно указано в настоящей договор-заявке; сопровождение и иные мероприятия, потребность в которых возникла из-за несоответствия исходных характеристик (п. 10) либо дополнительных требований ЗАКАЗЧИКА, оплачиваются дополнительно (п. 11).',
@@ -830,11 +830,30 @@ function paymentTermText_(mode, days) {
   }
   return 'Стоимость перевозки указана в разделе «Оплата» и рассчитана для исходных характеристик груза. Порядок оплаты: ' + m + ' Обязательство по оплате считается исполненным в момент зачисления денежных средств на расчётный счёт ИСПОЛНИТЕЛЯ (при наличном расчёте - в момент передачи денежных средств представителю ИСПОЛНИТЕЛЯ под документ о получении). Штрафы, простой и дополнительные расходы оплачиваются в течение 3 (трёх) рабочих дней с даты получения счёта по каналам п. 1. За просрочку любого платежа ЗАКАЗЧИК уплачивает ИСПОЛНИТЕЛЮ пени в размере 0,1% от неоплаченной суммы за каждый день просрочки.';
 }
-/* Итоговый массив пунктов для PDF/снимка: маркеры заменяются на динамический текст. */
-function contractTerms_(idleRates, mode, days) {
+/* Контакты для переписки по договору (Особые условия п.1) - Влад 22.09: «юристы говорят,
+   что было бы неплохо, чтобы в самом договоре были контакты, с которых ведётся переписка».
+   Старый текст п.1 давал только общую формулировку («с адресов... с которых или на которые
+   СТОРОНЫ фактически ведут переписку») без конкретных значений - юридически слабее явно
+   зафиксированного канала. Заказчика вводит менеджер в конструкторе (email и/или телефон/
+   мессенджер, хотя бы одно обязательно); исполнителя - email менеджера, который реально
+   ведёт эту сделку (o.manager_email уже есть в заявке, спрашивать его отдельно не нужно -
+   переписка и так идёт с этого адреса). */
+function correspondenceContactText_(email, phone) {
+  var parts = [];
+  if (email) parts.push('адрес электронной почты ' + email);
+  if (phone) parts.push('номер ' + phone);
+  return parts.length ? parts.join(', ') : 'уточняется дополнительно';
+}
+/* Итоговый массив пунктов для PDF/снимка: маркеры заменяются на динамический текст.
+   corr - { execEmail, custEmail, custPhone } (собирается в genContractPdf/reopenContractPdf_). */
+function contractTerms_(idleRates, mode, days, corr) {
+  corr = corr || {};
+  var execText = correspondenceContactText_(corr.execEmail, null);
+  var custText = correspondenceContactText_(corr.custEmail, corr.custPhone);
   return CONTRACT_SPECIAL_TERMS_.map(function (t) {
     if (t === '{IDLE}') return idleTermText_(idleRates);
     if (t === '{PAYMENT}') return paymentTermText_(mode, days);
+    if (t.indexOf('{CORR_EXEC}') >= 0 || t.indexOf('{CORR_CUST}') >= 0) return t.replace('{CORR_EXEC}', execText).replace('{CORR_CUST}', custText);
     return t;
   });
 }
@@ -901,7 +920,14 @@ function openContractConstructor_(o, ent, idle, onConfirm) {
     time: o.delivery_time ? String(o.delivery_time).slice(0, 5) : '',
     mode: CONTRACT_PAY_MODES_[o.payment_mode] ? o.payment_mode : 'prepay',
     days: (num(o.payment_days) >= 1 && num(o.payment_days) <= 7) ? num(o.payment_days) : 3,
-    sel: function () { return { delivery_date: st.date, delivery_time: st.time, payment_mode: st.mode, payment_days: st.mode === 'postpay_docs' ? st.days : null }; }
+    corrEmail: o.correspondence_email || '',
+    corrPhone: o.correspondence_phone || '',
+    sel: function () {
+      return {
+        delivery_date: st.date, delivery_time: st.time, payment_mode: st.mode, payment_days: st.mode === 'postpay_docs' ? st.days : null,
+        correspondence_email: st.corrEmail.trim() || null, correspondence_phone: st.corrPhone.trim() || null
+      };
+    }
   };
   ccState_ = st;
   $('#op2-cc-sub').textContent = 'Груз, адреса, контакты, машина, реквизиты и ставка простоя уже взяты из заявки и справочника. Здесь - только то, что выбирается на каждый рейс.';
@@ -927,13 +953,22 @@ function openContractConstructor_(o, ent, idle, onConfirm) {
         '<div class="op2-hint" id="op2-cc-dlhint"></div>' +
       '</div></div>' +
     '<div class="op2-cc-sec"><div class="op2-cc-k"><span class="op2-n">02</span><span class="op2-t">Условия оплаты</span></div><div class="op2-cc-opts" id="op2-cc-opts">' + opts + '</div></div>' +
+    '<div class="op2-cc-sec"><div class="op2-cc-k"><span class="op2-n">03</span><span class="op2-t">Контакты для переписки по договору</span><span class="op2-auto">со стороны Исполнителя - ' + esc(o.manager_email || 'уточняется') + '</span></div>' +
+      '<div class="op2-cc-dl">' +
+        '<div class="op2-fld"><label for="op2-cc-corr-email">Email заказчика</label><input id="op2-cc-corr-email" type="email" placeholder="ivanov@company.ru" value="' + esc(st.corrEmail) + '"></div>' +
+        '<div class="op2-fld"><label for="op2-cc-corr-phone">Телефон / мессенджер заказчика</label><input id="op2-cc-corr-phone" type="text" placeholder="+7 900 000-00-00" value="' + esc(st.corrPhone) + '"></div>' +
+        '<div class="op2-hint" id="op2-cc-corrhint"></div>' +
+      '</div></div>' +
     '<div class="op2-cc-pv"><div class="op2-k">Так будет в договоре</div>' +
       '<div class="op2-cc-pvr"><span class="op2-l">РЕЙС</span><span id="op2-cc-pv-dl"></span></div>' +
       '<div class="op2-cc-pvr"><span class="op2-l">п. 7 простой</span><span><b>' + CONTRACT_IDLE_OP_HOURS_ + ' ч</b> на погрузку + <b>' + CONTRACT_IDLE_OP_HOURS_ + ' ч</b> на выгрузку, далее <span class="op2-mono">' + esc(fmtP(hourly)) + '</span>/час, свыше суток <span class="op2-mono">' + esc(fmtP(dayRate)) + '</span>/сутки' + (idle.rateName ? ' <span class="op2-dim">· ставка: ' + esc(idle.rateName) + '</span>' : '') + '</span></div>' +
       '<div class="op2-cc-pvr"><span class="op2-l">п. 12 оплата</span><span id="op2-cc-pv-pay"></span></div>' +
+      '<div class="op2-cc-pvr"><span class="op2-l">п. 1 контакты</span><span id="op2-cc-pv-corr"></span></div>' +
     '</div>';
   $('#op2-cc-date').addEventListener('input', function () { st.date = this.value; ccUpdate_(); });
   $('#op2-cc-time').addEventListener('input', function () { st.time = this.value; ccUpdate_(); });
+  $('#op2-cc-corr-email').addEventListener('input', function () { st.corrEmail = this.value; ccUpdate_(); });
+  $('#op2-cc-corr-phone').addEventListener('input', function () { st.corrPhone = this.value; ccUpdate_(); });
   $('#op2-cc-opts').addEventListener('click', function (e) {
     var stepBtn = e.target.closest('[data-step]');
     if (stepBtn) { e.stopPropagation(); st.days = Math.min(7, Math.max(1, st.days + (+stepBtn.dataset.step))); ccUpdate_(); return; }
@@ -965,7 +1000,15 @@ function ccUpdate_() {
   $('#op2-cc-pv-dl').innerHTML = ok ? 'Согласованный срок доставки: <b><span class="op2-mono">' + esc(dmy(st.date)) + ' ' + esc(st.time) + '</span></b>' : '<span class="op2-dim">срок доставки не выбран</span>';
   $('#op2-cc-pv-pay').innerHTML = '<b>' + esc(fmtP(o.price) || 'сумма не указана') + '</b>' + (o.cash ? ', наличные' : '') + ', ' + esc(payModeShort_(st.mode, st.days)) +
     (st.mode === 'prepay' ? '; подача - после зачисления оплаты' : st.mode === 'postpay_docs' ? '; пени 0,1% в день' : st.mode === 'on_loading' ? '; далее простой по п. 7, право не приступать к погрузке (п. 13)' : '; далее простой по п. 7, удержание груза (п. 13)');
-  st.valid = ok && !bad;
+  var corrEmail = st.corrEmail.trim(), corrPhone = st.corrPhone.trim();
+  var corrOk = !!(corrEmail || corrPhone);
+  var emailBad = !!(corrEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(corrEmail));
+  var corrHint = $('#op2-cc-corrhint');
+  corrHint.classList.toggle('op2-warn', !corrOk || emailBad);
+  corrHint.textContent = emailBad ? 'Проверь формат email.' : (corrOk ? 'Попадает в п. 1 (юридическая сила переписки) - явным текстом, с чьего адреса/номера идёт переписка по этому договору.' : 'Укажи email или телефон/мессенджер заказчика - без этого договор не формируется.');
+  var corrPreview = correspondenceContactText_(corrEmail || null, corrPhone || null);
+  $('#op2-cc-pv-corr').innerHTML = corrOk ? esc(corrPreview.charAt(0).toUpperCase() + corrPreview.slice(1)) : '<span class="op2-dim">контакт не указан</span>';
+  st.valid = ok && !bad && corrOk && !emailBad;
   $('#op2-cc-ok').disabled = !st.valid;
 }
 /* Снимок всего, что попало в PDF, - уходит в contract_versions на сервере (п.1 и п.14
@@ -983,6 +1026,7 @@ function contractSnapshot_(o, ent, custEnt, idle, sel, terms) {
     vehicle: { vehicle_gos: mainExec.vehicle_gos, trailer_gos: mainExec.trailer_gos, driver_name: mainExec.driver_name },
     price: num(o.price) || 0, cash: !!o.cash, note: o.note || '',
     delivery_date: sel.delivery_date, delivery_time: sel.delivery_time, payment_mode: sel.payment_mode, payment_days: sel.payment_days,
+    correspondence_email: sel.correspondence_email, correspondence_phone: sel.correspondence_phone, manager_email: o.manager_email || '',
     idle: { hourly: Math.round(idle.hourly), day_rate: Math.round(idle.dayRate), rate_name: idle.rateName || '', op_hours: CONTRACT_IDLE_OP_HOURS_, day_hours: CONTRACT_IDLE_DAY_HOURS_ },
     terms: terms
   };
@@ -1024,12 +1068,13 @@ function genContractPdf(o) {
     if (custEnt.enriched_fields && custEnt.enriched_fields.length) toast('<span class="op2-tick">Реквизиты заказчика дозаполнены из ЕГРЮЛ</span> · записаны в справочник');
     if (custEnt.egrul_status && custEnt.egrul_status !== 'ACTIVE') toast('<span class="op2-warn">Заказчик в ЕГРЮЛ: ' + esc(custEnt.egrul_status) + '</span> · проверь контрагента перед отправкой договора', null, 9000);
     openContractConstructor_(o, ent, idle, function (sel) {
-      var terms = contractTerms_(idle, sel.payment_mode, sel.payment_days);
+      var corr = { execEmail: o.manager_email || '', custEmail: sel.correspondence_email, custPhone: sel.correspondence_phone };
+      var terms = contractTerms_(idle, sel.payment_mode, sel.payment_days, corr);
       var snapshot = contractSnapshot_(o, ent, custEnt, idle, sel, terms);
       toast('Сохраняем редакцию договора…');
       /* Сначала редакция на сервере (номер редакции, время формирования, автор), потом PDF -
          в подвале документа печатается то, что реально записано, а не предположение. */
-      apiPostJson('/orders/contract_version', { order_id: o.id, snapshot: snapshot, delivery_date: sel.delivery_date, delivery_time: sel.delivery_time, payment_mode: sel.payment_mode, payment_days: sel.payment_days }).then(function (r) {
+      apiPostJson('/orders/contract_version', { order_id: o.id, snapshot: snapshot, delivery_date: sel.delivery_date, delivery_time: sel.delivery_time, payment_mode: sel.payment_mode, payment_days: sel.payment_days, correspondence_email: sel.correspondence_email, correspondence_phone: sel.correspondence_phone }).then(function (r) {
         if (!ok_(r)) { logUiEvent_('save_error', 'contract_version', (r && r.data && r.data.error) || 'сервер недоступен'); return; }
         var meta = r.data;
         o.delivery_date = sel.delivery_date; o.delivery_time = sel.delivery_time; o.payment_mode = sel.payment_mode; o.payment_days = sel.payment_days;
@@ -1159,6 +1204,10 @@ function drawContractPdf_(o, ent, stampUrl, signUrl, idleRates, custEnt, sel, me
     'к/с: ' + (ent.bank_corr_account || ''),
     'БИК: ' + (ent.bank_bik || '')
   ];
+  /* Контакт для переписки по договору (Влад 22.09, п.1 «Особых условий») - печатается ещё
+     раз прямо в шапке сторон, не только в тексте условий: юристу и заказчику должно быть
+     видно сразу, с какого адреса/номера идёт официальная переписка по ЭТОЙ сделке. */
+  if (o.manager_email) execLines.push('Контакт для переписки: ' + o.manager_email);
   /* Реквизиты заказчика - только реально заполненные поля (Влад 21.09: пустых «БИК: » быть
      не должно). */
   var custLines = [custEnt.full_name || custEnt.name || o.customer || 'уточняется'];
@@ -1173,6 +1222,9 @@ function drawContractPdf_(o, ent, stampUrl, signUrl, idleRates, custEnt, sel, me
     if (custEnt.bank_name) custLines.push('в банке ' + custEnt.bank_name);
     if (custEnt.bank_corr_account) custLines.push('к/с: ' + custEnt.bank_corr_account);
     if (custEnt.bank_bik) custLines.push('БИК: ' + custEnt.bank_bik);
+  }
+  if (sel && (sel.correspondence_email || sel.correspondence_phone)) {
+    custLines.push('Контакт для переписки: ' + [sel.correspondence_email, sel.correspondence_phone].filter(Boolean).join(' · '));
   }
   var PBOX_PAD = 3, PBOX_HEAD = 5.6, PBOX_LH = 4.0;
   var innerW = colW - PBOX_PAD * 2;
@@ -1468,10 +1520,10 @@ function reopenContractPdf_(o) {
       load_address: snap.load_address, load_contact_name: snap.load_contact_name, load_contact_phone: snap.load_contact_phone,
       unload_address: snap.unload_address, unload_contact_name: snap.unload_contact_name, unload_contact_phone: snap.unload_contact_phone,
       price: snap.price, cash: snap.cash, note: snap.note, customer: snap.customer && snap.customer.full_name,
-      delivery_date: snap.delivery_date, delivery_time: snap.delivery_time,
+      delivery_date: snap.delivery_date, delivery_time: snap.delivery_time, manager_email: snap.manager_email || '',
       executors: [{ vehicle_gos: snap.vehicle && snap.vehicle.vehicle_gos, trailer_gos: snap.vehicle && snap.vehicle.trailer_gos, driver_name: snap.vehicle && snap.vehicle.driver_name }]
     };
-    var sel = { delivery_date: snap.delivery_date, delivery_time: snap.delivery_time, payment_mode: snap.payment_mode, payment_days: snap.payment_days };
+    var sel = { delivery_date: snap.delivery_date, delivery_time: snap.delivery_time, payment_mode: snap.payment_mode, payment_days: snap.payment_days, correspondence_email: snap.correspondence_email, correspondence_phone: snap.correspondence_phone };
     var idle = snap.idle ? { hourly: snap.idle.hourly, dayRate: snap.idle.day_rate, rateName: snap.idle.rate_name } : { hourly: 0, dayRate: 0 };
     Promise.all([fetchEntityStampDataUrl_(entLookup.id), fetchPersonSignatureDataUrl_(entLookup.signer_person_id)]).then(function (imgs) {
       try { drawContractPdf_(fakeO, snap.executor, imgs[0], imgs[1], idle, snap.customer, sel, meta, snap.terms); }

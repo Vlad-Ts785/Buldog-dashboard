@@ -4965,6 +4965,13 @@ function tickState() {
      на СОЗДАНИИ (та же граница, что и на сервере) - правку старой заявки без цены не блокируем
      задним числом, editing вычисляется как в saveForm(). */
   var creating = !(formOrder && !formRepeat && !formPrefill);
+  /* 22.09, Влад: «заблокируй возможность создавать заявку не указав массу груза» - тот же
+     жёсткий блок и та же граница «только на создании», что уже есть у цены (12.09) и типа
+     техники выше - сервер (plan-orders.js) отклоняет создание без cargo_weight_t независимо
+     от этой проверки, это лишь чтобы не гонять заведомо отклоняемый запрос. */
+  if (creating && !num(($('#op2-f-weight') || {}).value)) {
+    b.className = 'op2-dbtn op2-primary op2-blocked'; b.textContent = 'Укажи массу груза'; st.textContent = ''; return;
+  }
   if (creating && !num(($('#op2-f-price') || {}).value)) {
     b.className = 'op2-dbtn op2-primary op2-blocked'; b.textContent = 'Укажи цену'; st.textContent = ''; return;
   }

@@ -2664,7 +2664,25 @@ function custCell_(o, prefix) {
   return '<td class="op2-cust" title="' + esc(o.customer || '') + '">' + (prefix || '') + shyCaps_(esc(o.customer || '')) + '</td>';
 }
 function priceCell_(o) {
-  return '<td class="op2-num">' + (num(o.price) ? '<span class="op2-money">' + esc(fmtP(o.price).replace(/\s*₽$/, '')) + '</span>' + hiredMarginCell_(o) : '<span class="op2-dim">—</span>') + '</td>';
+  return '<td class="op2-num">' + (num(o.price) ? '<span class="op2-money' + priceLightClass_(o) + '"' + priceLightTitle_(o) + '>' + esc(fmtP(o.price).replace(/\s*₽$/, '')) + '</span>' + hiredMarginCell_(o) : '<span class="op2-dim">—</span>') + '</td>';
+}
+/* Светофор факт/прайс (Влад, 22.09.2026, plans/2026-09-22-order-price-traffic-light.md) -
+   пока ТОЛЬКО admin ("вижу только я, менеджера и логиста не видно"). computed_price -
+   авторасчёт той же формулой, что вкладка «Калькулятор» (computeQuoteAuto на сервере,
+   кэшируется на заявке - не считаем на каждый показ страницы) - сервер уже вырезает это
+   поле для не-admin, isAdmin() здесь - вторая, клиентская подстраховка, не единственная. */
+function priceLightClass_(o) {
+  if (!isAdmin() || o.computed_price == null || !num(o.price)) return '';
+  var ratio = num(o.price) / num(o.computed_price);
+  if (ratio >= 1) return ' op2-price-good';
+  if (ratio >= 0.9) return ' op2-price-warn';
+  return ' op2-price-bad';
+}
+function priceLightTitle_(o) {
+  if (!isAdmin() || o.computed_price == null) return '';
+  var pct = Math.round((num(o.price) / num(o.computed_price) - 1) * 100);
+  var modeRu = o.computed_mode === 'mkad' ? 'от МКАД' : 'от базы';
+  return ' title="Авторасчёт (' + modeRu + '): ' + esc(fmtP(o.computed_price)) + ' · факт ' + (pct >= 0 ? '+' : '') + pct + '%"';
 }
 /* Влад 21.09: «на заявке должно быть видно процент маржинальности, рядом с ценой» - у
    наёмной заявки процент второй строкой под ценой в той же ячейке (превью, вариант A).

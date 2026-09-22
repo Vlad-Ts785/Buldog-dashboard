@@ -752,8 +752,10 @@ function contractVehType_(equipmentType) {
    ехать в Питер»). Внутренняя модель цены (смена 7 ч местного рейса до 100 км = 2 погрузка +
    2 выгрузка + 3 дорога) в договор НЕ выносится - клиент видит только то, что зависит от
    него; порог «100 км» живёт в калькуляторе, не в тексте. Час простоя = БАЗОВАЯ ставка смены
-   по тоннажу / 7 (не от цены рейса o.price - та может включать доплаты/скидку), почасово до
-   конца первых суток, дальше - по 16 ч за каждые начатые сутки. */
+   по тоннажу / 8 (Влад 22.09: «дели на 8», было / 7; не от цены рейса o.price - та может
+   включать доплаты/скидку), почасово до конца первых суток, дальше - по 16 ч за каждые
+   начатые сутки. */
+var CONTRACT_IDLE_SHIFT_HOURS_ = 8;
 var CONTRACT_IDLE_OP_HOURS_ = 2;
 var CONTRACT_IDLE_DAY_HOURS_ = 16;
 function fetchIdleRates_(o) {
@@ -763,7 +765,10 @@ function fetchIdleRates_(o) {
   if (!w) return Promise.resolve({ error: 'не указан вес груза' });
   return apiGet('/calculator/shift_rate', { vehType: vt, weight: w }).then(function (r) {
     if (!r || !r.ok || !r.data || !r.data.ok) return { error: (r && r.data && r.data.error) || 'не удалось посчитать ставку простоя' };
-    var hourly = r.data.shift / 7;
+    /* Час округляем до рубля ДО умножения на 16 - иначе в договоре «3 571 ₽/час» и
+       «57 143 ₽/сутки», а заказчик перемножит и получит 57 136 (Влад 22.09) - цифры в
+       одном документе обязаны сходиться при проверке на калькуляторе. */
+    var hourly = Math.round(r.data.shift / CONTRACT_IDLE_SHIFT_HOURS_);
     return { hourly: hourly, dayRate: hourly * CONTRACT_IDLE_DAY_HOURS_, rateName: r.data.rateName };
   }).catch(function () { return { error: 'сеть - не удалось получить ставку простоя' }; });
 }
@@ -997,6 +1002,11 @@ function genContractPdf(o) {
     var idle = results[2], custEnt = results[3];
     if (!idle || idle.error) { logUiEvent_('blocked_click', 'contract', 'не считается простой: ' + (idle && idle.error)); toast('<span class="op2-warn">Конструктор договора</span> · не удалось посчитать штраф за простой - ' + esc((idle && idle.error) || 'неизвестная ошибка')); return; }
     if (!custEnt) { logUiEvent_('blocked_click', 'contract', 'не найдена карточка заказчика'); toast('<span class="op2-warn">Конструктор договора</span> · не удалось прочитать карточку заказчика из справочника'); return; }
+    /* Сервер (/orders/customer_entity) дозаполняет пустые реквизиты заказчика из ЕГРЮЛ по ИНН
+       и пишет их в справочник (Влад 22.09) - менеджеру просто сообщаем, что это произошло;
+       статус ЕГРЮЛ не ACTIVE (ликвидация/банкротство) - предупреждаем, но не блокируем. */
+    if (custEnt.enriched_fields && custEnt.enriched_fields.length) toast('<span class="op2-tick">Реквизиты заказчика дозаполнены из ЕГРЮЛ</span> · записаны в справочник');
+    if (custEnt.egrul_status && custEnt.egrul_status !== 'ACTIVE') toast('<span class="op2-warn">Заказчик в ЕГРЮЛ: ' + esc(custEnt.egrul_status) + '</span> · проверь контрагента перед отправкой договора', null, 9000);
     openContractConstructor_(o, ent, idle, function (sel) {
       var terms = contractTerms_(idle, sel.payment_mode, sel.payment_days);
       var snapshot = contractSnapshot_(o, ent, custEnt, idle, sel, terms);

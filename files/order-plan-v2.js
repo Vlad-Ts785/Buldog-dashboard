@@ -160,9 +160,15 @@ function segOf(type) { return String(type || '').trim().toLowerCase().split(/[\s
    доопределилась, заявка должна быть видна в ОБОИХ фильтрах логиста (Трал и Длинномер), не
    пропадать ни из одного. Единственное место, где segOf() используется как ЖЁСТКИЙ фильтр
    видимости (F.type/F.mine в renderLog) - не трогает сортировку/цену/остальные места. */
+/* Мост ТОЛЬКО между Трал/Длинномер (Влад описал именно эту пару - "разница только в них",
+   решает логист при постановке машины) - НЕ протекает в Faymonville/Тент/Машина прикрытия
+   (те не взаимозаменяемы с обычным тралом на глаз логиста, отдельная техника). */
+var EQ_UNDETERMINED_SEG_ = 'любая';
+var TRAL_LONG_SEGS_ = { 'трал': true, 'длинномер': true };
 function segMatchesFilter_(equipmentType, filterSeg) {
   var s = segOf(equipmentType);
-  return s === filterSeg || s === segOf('Любая модификация');
+  if (s === filterSeg) return true;
+  return s === EQ_UNDETERMINED_SEG_ && !!TRAL_LONG_SEGS_[filterSeg];
 }
 function capit(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 /* Влад 17.09: минимальная стоимость трала/длинномера - зеркало серверной MIN_PRICE_BY_SEG_

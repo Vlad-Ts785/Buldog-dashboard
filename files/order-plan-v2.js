@@ -2813,11 +2813,24 @@ function renderMgr() {
       '</tr>';
   }).join('');
   var cash = rows.filter(function (o) { return !!o.cash; }).length;
-  var sum = rows.reduce(function (a, o) { return a + num(o.price); }, 0);
-  $('#op2-mgr-foot').innerHTML = '<tr><td colspan="9">' +
+  /* Влад 22.09: «внизу должны быть три цифры - зелёным подтверждённых, жёлтым не
+     подтверждённых, красным отбой, и у меня, и у всех менеджеров» - было одно суммарное
+     число. done сейчас отключён (canDone()===false, 21.09) и на практике не встречается,
+     но на всякий случай не теряется - считается как подтверждённое, чтобы три цифры в
+     сумме всегда били с реальным итогом по строкам (ГОСТ, «цифры бьются везде»). */
+  var sumByKey = { ok: 0, nz: 0, ot: 0 };
+  rows.forEach(function (o) {
+    var k = oSt(o);
+    sumByKey[k === 'ot' ? 'ot' : k === 'nz' ? 'nz' : 'ok'] += num(o.price);
+  });
+  $('#op2-mgr-foot').innerHTML = '<tr><td colspan="7">' +
     (WIDE && F.q ? 'Поиск за 3 месяца · «' + esc(F.q) + '» · ' : 'Итого за ' + (TO_DATE ? 'неделю' : 'день') + ' · ') +
     rows.length + ' ' + plural(rows.length, 'заявка', 'заявки', 'заявок') + (cash ? ' · ' + cash + ' наличными' : '') +
-    '</td><td colspan="2" class="op2-num">' + esc(fmtP(sum) || '—') + '</td></tr>';
+    '</td><td colspan="4" class="op2-num op2-mfoot">' +
+      '<span class="op2-mfoot-n op2-mfoot-ok" title="Подтверждено">' + esc(fmtP(sumByKey.ok) || '—') + '</span>' +
+      '<span class="op2-mfoot-n op2-mfoot-nz" title="Не подтверждено">' + esc(fmtP(sumByKey.nz) || '—') + '</span>' +
+      '<span class="op2-mfoot-n op2-mfoot-ot" title="Отбой">' + esc(fmtP(sumByKey.ot) || '—') + '</span>' +
+    '</td></tr>';
 }
 /* lang="ru" на корне страницы - для hyphens:auto в колонке «Заказчик» (перенос по дефису) */
 function langRu_() { var rt = $('#op2-root'); if (rt && rt.getAttribute('lang') !== 'ru') rt.setAttribute('lang', 'ru'); }

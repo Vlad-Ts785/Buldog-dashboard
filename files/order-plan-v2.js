@@ -4384,14 +4384,15 @@ function expandWhoRow(seg) {
    клиенте, и на сервере) берут только ПЕРВОЕ слово - "Длинномер с кониками" сегментируется
    в "длинномер" точно так же, как голый "Длинномер", вся остальная логика (мин. цена,
    Аналитика, фильтры) не замечает разницы. */
+var EQ_FAYMON_ = 'Faymonville (60+ т)';
 var EQ_MODIFIERS_ = {
   'Трал': [{ key: 'apron', label: 'Длинные аппарели', phrase: 'длинными аппарелями' }],
-  'Длинномер': [{ key: 'koniki', label: 'Коники', phrase: 'кониками' }],
-  'Faymonville (60+ т)': [
-    { key: 'axles', label: '8 осей', phrase: '8 осями' },
-    { key: 'widen', label: 'Раздвижение в ширину', phrase: 'раздвижением в ширину' }
-  ]
+  'Длинномер': [{ key: 'koniki', label: 'Коники', phrase: 'кониками' }]
 };
+EQ_MODIFIERS_[EQ_FAYMON_] = [
+  { key: 'axles', label: '8 осей', phrase: '8 осями' },
+  { key: 'widen', label: 'Раздвижение в ширину', phrase: 'раздвижением в ширину' }
+];
 // "8 осей" + "раздвижение в ширину" - НЕ взаимоисключающие (разные свойства одной машины,
 // подтверждено Владом явно) - обе фразы через "и", не радио-выбор одного варианта.
 function eqCombine_(base, keys) {
@@ -4842,6 +4843,22 @@ function wireForm() {
   $('#op2-f-cargolist').addEventListener('mousedown', function (e) {
     var it = e.target.closest('.op2-it'); if (!it || !it.dataset.name) return;
     e.preventDefault(); applyCargo(it.dataset);
+  });
+
+  /* Влад 22.09: «если масса больше 60 т - автоматом должен ставиться Faymonville, других
+     тралов на такую массу нет». Порог w>59 - НЕ новое число, тот же самый порог, что уже
+     проверен в Калькуляторе (autoPickVeh_, files/index.html) - переиспользуем, не
+     изобретаем параллельное правило. Односторонне: форсирует переключение ТОЛЬКО вверх на
+     Faymonville при превышении 60 т (физика - других тралов нет), но НЕ откатывает Faymonville
+     назад при весе ≤60 т - лёгкий груз Faymonville возить МОЖЕТ, это осталось бы чьим-то
+     осознанным выбором, а не ошибкой, которую нужно тихо исправлять. */
+  $('#op2-f-weight').addEventListener('input', function () {
+    var w = num(this.value);
+    var seg = $('#op2-f-eq');
+    if (w > 59 && seg && seg.dataset.cur !== EQ_FAYMON_) {
+      collapseEqRow(seg, EQ_FAYMON_);
+      toast('Масса ' + w + ' т - тип техники переключён на <b>' + esc(EQ_FAYMON_) + '</b>');
+    }
   });
 
   /* подсказки адресов из истории заказчика */

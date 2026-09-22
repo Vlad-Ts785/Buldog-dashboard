@@ -4459,9 +4459,18 @@ function eqRowHtml(curVal) {
   var eq = dict('equipment');
   var eqPrimary = eq.filter(function (x) { return x.primary; });
   var eqRest = eq.filter(function (x) { return !x.primary; });
-  var isKnown = eqPrimary.concat(eqRest).some(function (x) { return x.value === curVal; });
+  var isPrimary = eqPrimary.some(function (x) { return x.value === curVal; });
+  var isKnown = isPrimary || eqRest.some(function (x) { return x.value === curVal; });
   var html = eqPrimary.map(function (x) { return eqChipHtml(x, x.value === curVal); }).join('');
-  if (curVal && !isKnown) html += eqChipHtml({ value: curVal }, true, 'op2-eq-gone', true);
+  /* 22.09, баг найден при автопереключении на Faymonville по весу (EQ_FAYMON_ ниже): текст
+     комментария выше («сам чип уходит в начало ряда подсвеченным») ОПИСЫВАЛ это поведение,
+     но код проверял только !isKnown - выбор ЛЮБОГО известного не-основного типа (Faymonville,
+     Тент, Панелевоз...) из «Ещё» схлопывался БЕЗ подсветки ни одного чипа - выглядело так,
+     будто тип не выбран, хотя data-cur был верным и сохранение работало. Раньше это было
+     видно только при ручном выборе из «Ещё» или при открытии уже сохранённой такой заявки на
+     правку - воспроизвёл на живой заявке (см. DEPLOY_LOG). Теперь показываем чип и для
+     известного не-основного значения (без стиля «убрано из справочника» - он не убран). */
+  if (curVal && !isPrimary) html += eqChipHtml({ value: curVal }, true, isKnown ? '' : 'op2-eq-gone', !isKnown);
   if (eqRest.length) html += '<button class="op2-chip" data-eq-more>Ещё <span class="op2-mono" style="color:var(--tint-amber)">' + eqRest.length + '</span></button>';
   return html;
 }

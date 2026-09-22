@@ -4938,6 +4938,18 @@ main:has(> #page-dynamics.active){min-width:0;}
             <div class="hub-tile__sub">Сверка одного госномера по всем источникам - Штатка, сцепка, заказы, ГИС.</div>
             <div class="hub-tile__foot"><span>по запросу</span><span class="hub-tile__go">Открыть →</span></div>
           </div>
+          <!-- Партнёры (22.09, plans/2026-09-22-partners-directory.md, Влад: "инструмент для
+               логистов" - заведение наёмных контрагентов/техники/водителей). Мост в те же
+               Справочники (sprav_legal_entities/sprav_assets/sprav_people с явными флагами
+               is_partner_supplier/fleet_scope='partner'/роли partner_driver|partner_owner),
+               НЕ отдельная система - см. план. Видна admin+logist (id="partners-hub-tile",
+               скрывается для остальных ролей в applyRoleUI). -->
+          <div class="hub-tile" id="partners-hub-tile" onclick="chooseSpravTarget_('partners')">
+            <div class="hub-tile__icon hub-tile__icon--d"><svg width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="10" r="5"/><circle cx="13" cy="10" r="5"/></svg></div>
+            <div class="hub-tile__name">Партнёры</div>
+            <div class="hub-tile__sub">Наёмная техника - контрагенты-поставщики, их машины, их водители, документы.</div>
+            <div class="hub-tile__foot"><span>наём, не свой парк</span><span class="hub-tile__go">Открыть →</span></div>
+          </div>
         </div>
       </div>
       <button id="sprav-back-link" class="mp-ghostbtn" onclick="showSpravHub_()" style="display:none;margin-bottom:14px">← Все разделы</button>
@@ -5169,6 +5181,65 @@ main:has(> #page-dynamics.active){min-width:0;}
             <button class="tab-btn" onclick="vehicleCheckRun_()" style="border-color:var(--blue);color:var(--blue)">Проверить</button>
           </div>
           <div id="vc-result"></div>
+        </div>
+
+        <!-- ── Партнёры (22.09, plans/2026-09-22-partners-directory.md, Влад: "инструмент
+             для логистов" - наёмная техника) - реестр контрагентов-поставщиков, их машин и
+             водителей, МОСТ в те же Справочники (не хардкод, не отдельная система) - см.
+             /api/sprav/partner_entity|person|asset на сервере. Три под-вкладки внутри ОДНОЙ
+             плитки хаба - тот же tab-bar canon, что "Поступления"/"Клиенты" (showReceiptsTab/
+             showCustTab), не новый паттерн. -->
+        <div id="dir-tab-partners" style="display:none">
+          <div class="tab-bar" id="partners-tab-bar">
+            <button class="tab-btn active" onclick="showPartnersTab_('entity',this)">Контрагенты</button>
+            <button class="tab-btn" onclick="showPartnersTab_('asset',this)">Техника</button>
+            <button class="tab-btn" onclick="showPartnersTab_('person',this)">Водители</button>
+          </div>
+          <div id="partners-loading" style="color:var(--muted);padding:20px 0;font-size:13px">Загрузка…</div>
+          <div id="partners-wrap" style="display:none">
+            <div id="partners-tab-entity">
+              <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:12px 0">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:var(--muted);margin-right:auto">
+                  <input autocomplete="off" type="checkbox" id="partners-entity-show-deleted" onchange="partnersEntityPaint_()"> Показать удалённых</label>
+                <button onclick="partnersEntityOpenForm_('entity', null)" data-nav-sound
+                  style="background:var(--green);color:#fff;border:none;border-radius:7px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer">+ Добавить партнёра</button>
+              </div>
+              <div style="overflow-x:auto">
+                <table class="tbl">
+                  <thead><tr><th>Название</th><th>Тип</th><th>Контакт</th><th class="num">Действия</th></tr></thead>
+                  <tbody id="partners-entity-body"></tbody>
+                </table>
+              </div>
+            </div>
+            <div id="partners-tab-asset" style="display:none">
+              <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:12px 0">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:var(--muted);margin-right:auto">
+                  <input autocomplete="off" type="checkbox" id="partners-asset-show-deleted" onchange="partnersAssetPaint_()"> Показать удалённых</label>
+                <button onclick="partnersAssetOpenForm_(null)" data-nav-sound
+                  style="background:var(--green);color:#fff;border:none;border-radius:7px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer">+ Добавить технику</button>
+              </div>
+              <div style="overflow-x:auto">
+                <table class="tbl">
+                  <thead><tr><th>Госномер</th><th>Тип</th><th>Марка/модель</th><th>Партнёр</th><th class="num">Действия</th></tr></thead>
+                  <tbody id="partners-asset-body"></tbody>
+                </table>
+              </div>
+            </div>
+            <div id="partners-tab-person" style="display:none">
+              <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:12px 0">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:var(--muted);margin-right:auto">
+                  <input autocomplete="off" type="checkbox" id="partners-person-show-deleted" onchange="partnersPersonPaint_()"> Показать удалённых</label>
+                <button onclick="partnersPersonOpenForm_(null)" data-nav-sound
+                  style="background:var(--green);color:#fff;border:none;border-radius:7px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer">+ Добавить водителя</button>
+              </div>
+              <div style="overflow-x:auto">
+                <table class="tbl">
+                  <thead><tr><th>ФИО</th><th>Телефон</th><th>Партнёр</th><th class="num">Действия</th></tr></thead>
+                  <tbody id="partners-person-body"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -5664,6 +5735,250 @@ main:has(> #page-dynamics.active){min-width:0;}
       </div>
       <button type="button" id="asset-del-btn" onclick="assetDelete_()" data-nav-sound style="display:none;margin-top:10px;width:100%;
         background:transparent;border:1px solid rgba(226,75,74,.4);color:var(--red);border-radius:8px;padding:9px;font-size:13px;cursor:pointer">Удалить</button>
+    </div>
+
+    <!-- ═══ ПАРТНЁРЫ (22.09, plans/2026-09-22-partners-directory.md) - три drawer-формы,
+         тот же канон .mp-drawer/.mp-drawer-wide + asset-form-section/asset-form-grid, что у
+         остальных трёх реестров Справочников выше - не новый паттерн. ═══ -->
+    <!-- Контрагент - юрлицо ИЛИ физлицо-владелец, переключатель типа (чипы, как "Роли" у
+         сотрудника). Тип виден только при создании - у существующей записи заблокирован
+         (это разные таблицы/эндпоинты, менять тип задним числом означало бы удалить одну
+         запись и завести другую - не делаем скрытым переключением). -->
+    <div class="mp-drawer-bk" id="partner-entity-bk" onclick="partnersEntityCloseForm_()"></div>
+    <div class="mp-drawer mp-drawer-wide" id="partner-entity-drawer">
+      <h3 id="partner-entity-drawer-title">Добавить партнёра</h3>
+      <div class="asset-form-section">Тип партнёра</div>
+      <div class="asset-form-grid" id="partner-entity-type-chips-wrap">
+        <div class="asset-form-full">
+          <div id="partner-entity-type-chips" style="display:flex;gap:8px;flex-wrap:wrap">
+            <button type="button" class="drv-chip" data-value="entity" aria-pressed="true" onclick="partnersEntityTypeSet_('entity')">Юрлицо (ООО, ИП)</button>
+            <button type="button" class="drv-chip" data-value="person" aria-pressed="false" onclick="partnersEntityTypeSet_('person')">Физлицо (частник)</button>
+          </div>
+        </div>
+      </div>
+      <div id="partner-entity-company-fields">
+        <div class="asset-form-section">Реквизиты</div>
+        <div class="asset-form-grid">
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Название *</label>
+            <input autocomplete="off" id="partner-entity-name" type="text" maxlength="150" placeholder="ООО «Перевозчик»"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Полное название</label>
+            <input autocomplete="off" id="partner-entity-fullname" type="text" maxlength="300"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">ИНН</label>
+            <input autocomplete="off" id="partner-entity-inn" type="text" inputmode="numeric" maxlength="12"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">КПП</label>
+            <input autocomplete="off" id="partner-entity-kpp" type="text" maxlength="9"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">ОГРН</label>
+            <input autocomplete="off" id="partner-entity-ogrn" type="text" maxlength="15"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+          <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Юридический адрес</label>
+            <input autocomplete="off" id="partner-entity-address" type="text" maxlength="500"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Директор (ФИО)</label>
+            <input autocomplete="off" id="partner-entity-director-name" type="text" maxlength="200"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Должность</label>
+            <input autocomplete="off" id="partner-entity-director-post" type="text" maxlength="200"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        </div>
+      </div>
+      <div id="partner-entity-person-fields" style="display:none">
+        <div class="asset-form-section">Данные владельца</div>
+        <div class="asset-form-grid">
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">ФИО *</label>
+            <input autocomplete="off" id="partner-owner-name" type="text" maxlength="150"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Телефон</label>
+            <input autocomplete="off" id="partner-owner-phone" type="text" maxlength="64" placeholder="+7…"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">ИНН (если есть, ИП/самозанятый)</label>
+            <input autocomplete="off" id="partner-owner-inn" type="text" inputmode="numeric" maxlength="12"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+          <div style="display:flex;align-items:flex-end">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text);padding-bottom:8px">
+              <input autocomplete="off" type="checkbox" id="partner-owner-also-driver"> Сам за рулём (тоже водитель)</label></div>
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Паспорт: серия</label>
+            <input autocomplete="off" id="partner-owner-passport-series" type="text" maxlength="4"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Номер</label>
+            <input autocomplete="off" id="partner-owner-passport-number" type="text" maxlength="6"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+          <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Кем выдан</label>
+            <input autocomplete="off" id="partner-owner-passport-issued-by" type="text" maxlength="300"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Дата выдачи</label>
+            <input autocomplete="off" id="partner-owner-passport-issued-at" type="date"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark"></div>
+        </div>
+      </div>
+      <div id="partner-entity-docs-section" style="display:none">
+        <div class="asset-form-section" style="margin-bottom:10px">Документы (договор найма и т.п.)</div>
+        <div id="partner-entity-docs-list" style="margin-bottom:8px"></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="partner-entity-doc-type" style="background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 8px;color:var(--text);font-size:12px">
+            <option value="hire_agreement">Договор найма</option>
+            <option value="rent">Договор аренды</option>
+            <option value="passport">Паспорт</option>
+            <option value="other">Другое</option>
+          </select>
+          <input autocomplete="off" id="partner-entity-doc-file" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" style="flex:1;min-width:0;font-size:12px;color:var(--muted)">
+          <button type="button" onclick="partnerDocUpload_(partnersEntityDocKind_(), partnersEntityEditId_, 'partner-entity')"
+            style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:7px 12px;font-size:12px;cursor:pointer;white-space:nowrap">Загрузить</button>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">PDF/JPG/PNG/WEBP, до 15 МБ</div>
+        <div id="partner-entity-doc-error" style="display:none;color:var(--red);font-size:12px;margin-top:6px"></div>
+      </div>
+      <div class="asset-form-section">Административное</div>
+      <div class="asset-form-grid">
+        <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Заметка</label>
+          <input autocomplete="off" id="partner-entity-notes" type="text" maxlength="300" placeholder="необязательно"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+      </div>
+      <div id="partner-entity-error" style="display:none;color:var(--red);font-size:12px;margin-bottom:10px"></div>
+      <div style="display:flex;gap:10px;margin-top:6px">
+        <button type="button" onclick="partnersEntitySave_()" data-nav-sound
+          style="flex:1;background:var(--green);color:#fff;border:none;border-radius:8px;padding:10px;font-size:14px;font-weight:600;cursor:pointer">Сохранить</button>
+        <button type="button" onclick="partnersEntityCloseForm_()"
+          style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px 16px;font-size:14px;cursor:pointer">Отмена</button>
+      </div>
+      <button type="button" id="partner-entity-del-btn" onclick="partnersEntityDelete_()" data-nav-sound style="display:none;margin-top:10px;width:100%;
+        background:transparent;border:1px solid rgba(226,75,74,.4);color:var(--red);border-radius:8px;padding:9px;font-size:13px;cursor:pointer">Удалить партнёра</button>
+    </div>
+
+    <!-- Техника партнёра - госномер, минимум характеристик, привязка к владельцу (юрлицо
+         ИЛИ физлицо из уже заведённых партнёров - тот же select-приём, что owner_person_id/
+         legal_entity_id у обычной техники, просто список сужен до партнёрских записей). -->
+    <div class="mp-drawer-bk" id="partner-asset-bk" onclick="partnersAssetCloseForm_()"></div>
+    <div class="mp-drawer mp-drawer-wide" id="partner-asset-drawer">
+      <h3 id="partner-asset-drawer-title">Добавить технику партнёра</h3>
+      <div class="asset-form-section">Идентификация</div>
+      <div class="asset-form-grid">
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Госномер *</label>
+          <input autocomplete="off" id="partner-asset-id" type="text" maxlength="20" placeholder="М 844 ЕА 797"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Тип</label>
+          <select id="partner-asset-type" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none">
+            <option value="trailer">Полуприцеп</option>
+            <option value="tractor">Тягач</option>
+          </select></div>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Марка/модель</label>
+          <input autocomplete="off" id="partner-asset-manufacturer" type="text" maxlength="100"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">VIN</label>
+          <input autocomplete="off" id="partner-asset-vin" type="text" maxlength="17"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+        <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Название/характеристики</label>
+          <input autocomplete="off" id="partner-asset-name" type="text" maxlength="150" placeholder="например: Трал Faymonville, 4 оси"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Партнёр-владелец</label>
+          <select id="partner-asset-owner" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></select></div>
+      </div>
+      <div id="partner-asset-docs-section" style="display:none">
+        <div class="asset-form-section" style="margin-bottom:10px">Документы (СТС и т.п.)</div>
+        <div id="partner-asset-docs-list" style="margin-bottom:8px"></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="partner-asset-doc-type" style="background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 8px;color:var(--text);font-size:12px">
+            <option value="sts">СТС</option>
+            <option value="hire_agreement">Договор найма</option>
+            <option value="other">Другое</option>
+          </select>
+          <input autocomplete="off" id="partner-asset-doc-file" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" style="flex:1;min-width:0;font-size:12px;color:var(--muted)">
+          <button type="button" onclick="partnerDocUpload_('asset', partnersAssetEditId_, 'partner-asset')"
+            style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:7px 12px;font-size:12px;cursor:pointer;white-space:nowrap">Загрузить</button>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">PDF/JPG/PNG/WEBP, до 15 МБ</div>
+        <div id="partner-asset-doc-error" style="display:none;color:var(--red);font-size:12px;margin-top:6px"></div>
+      </div>
+      <div class="asset-form-section">Административное</div>
+      <div class="asset-form-grid">
+        <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Заметка</label>
+          <input autocomplete="off" id="partner-asset-notes" type="text" maxlength="300" placeholder="необязательно"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+      </div>
+      <div id="partner-asset-error" style="display:none;color:var(--red);font-size:12px;margin-bottom:10px"></div>
+      <div style="display:flex;gap:10px;margin-top:6px">
+        <button type="button" onclick="partnersAssetSave_()" data-nav-sound
+          style="flex:1;background:var(--green);color:#fff;border:none;border-radius:8px;padding:10px;font-size:14px;font-weight:600;cursor:pointer">Сохранить</button>
+        <button type="button" onclick="partnersAssetCloseForm_()"
+          style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px 16px;font-size:14px;cursor:pointer">Отмена</button>
+      </div>
+      <button type="button" id="partner-asset-del-btn" onclick="partnersAssetDelete_()" data-nav-sound style="display:none;margin-top:10px;width:100%;
+        background:transparent;border:1px solid rgba(226,75,74,.4);color:var(--red);border-radius:8px;padding:9px;font-size:13px;cursor:pointer">Удалить технику</button>
+    </div>
+
+    <!-- Водитель партнёра - привязан к партнёру-ЮРЛИЦУ (partner_entity_id); физлицо-
+         владелец без юрлица, который сам за рулём, заводится через чекбокс "Сам за рулём"
+         в форме партнёра выше, отдельной записи водителя не требует (см. план, «Что НЕ
+         делаем в v1» - водитель≠владелец только через юрлицо). -->
+    <div class="mp-drawer-bk" id="partner-person-bk" onclick="partnersPersonCloseForm_()"></div>
+    <div class="mp-drawer mp-drawer-wide" id="partner-person-drawer">
+      <h3 id="partner-person-drawer-title">Добавить водителя партнёра</h3>
+      <div class="asset-form-section">Личные данные</div>
+      <div class="asset-form-grid">
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">ФИО *</label>
+          <input autocomplete="off" id="partner-person-name" type="text" maxlength="150"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Телефон</label>
+          <input autocomplete="off" id="partner-person-phone" type="text" maxlength="64" placeholder="+7…"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+        <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Работает на партнёра (юрлицо)</label>
+          <select id="partner-person-entity" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></select></div>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">ИНН (если есть)</label>
+          <input autocomplete="off" id="partner-person-inn" type="text" inputmode="numeric" maxlength="12"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Вод. удостоверение №</label>
+          <input autocomplete="off" id="partner-person-license-num" type="text" maxlength="32"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Права действительны до</label>
+          <input autocomplete="off" id="partner-person-license-exp" type="date"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark"></div>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Паспорт: серия</label>
+          <input autocomplete="off" id="partner-person-passport-series" type="text" maxlength="4"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Номер</label>
+          <input autocomplete="off" id="partner-person-passport-number" type="text" maxlength="6"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+        <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Кем выдан</label>
+          <input autocomplete="off" id="partner-person-passport-issued-by" type="text" maxlength="300"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Дата выдачи</label>
+          <input autocomplete="off" id="partner-person-passport-issued-at" type="date"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark"></div>
+      </div>
+      <div id="partner-person-docs-section" style="display:none">
+        <div class="asset-form-section" style="margin-bottom:10px">Документы (паспорт, права)</div>
+        <div id="partner-person-docs-list" style="margin-bottom:8px"></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="partner-person-doc-type" style="background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 8px;color:var(--text);font-size:12px">
+            <option value="passport">Паспорт</option>
+            <option value="license">Вод. удостоверение</option>
+            <option value="other">Другое</option>
+          </select>
+          <input autocomplete="off" id="partner-person-doc-file" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" style="flex:1;min-width:0;font-size:12px;color:var(--muted)">
+          <button type="button" onclick="partnerDocUpload_('person', partnersPersonEditId_, 'partner-person')"
+            style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:7px 12px;font-size:12px;cursor:pointer;white-space:nowrap">Загрузить</button>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">PDF/JPG/PNG/WEBP, до 15 МБ</div>
+        <div id="partner-person-doc-error" style="display:none;color:var(--red);font-size:12px;margin-top:6px"></div>
+      </div>
+      <div class="asset-form-section">Административное</div>
+      <div class="asset-form-grid">
+        <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Заметка</label>
+          <input autocomplete="off" id="partner-person-notes" type="text" maxlength="300" placeholder="необязательно"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+      </div>
+      <div id="partner-person-error" style="display:none;color:var(--red);font-size:12px;margin-bottom:10px"></div>
+      <div style="display:flex;gap:10px;margin-top:6px">
+        <button type="button" onclick="partnersPersonSave_()" data-nav-sound
+          style="flex:1;background:var(--green);color:#fff;border:none;border-radius:8px;padding:10px;font-size:14px;font-weight:600;cursor:pointer">Сохранить</button>
+        <button type="button" onclick="partnersPersonCloseForm_()"
+          style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px 16px;font-size:14px;cursor:pointer">Отмена</button>
+      </div>
+      <button type="button" id="partner-person-del-btn" onclick="partnersPersonDelete_()" data-nav-sound style="display:none;margin-top:10px;width:100%;
+        background:transparent;border:1px solid rgba(226,75,74,.4);color:var(--red);border-radius:8px;padding:9px;font-size:13px;cursor:pointer">Удалить водителя</button>
     </div>
 
     <!-- ═══ ДИНАМИКА ════════════════════════════════════════════ -->
@@ -13108,6 +13423,12 @@ function applyRoleUI() {
     if (isColumnHeadViewer) allowedPages_.push('column-head-payroll');
     var isManagerViewer_ = previewing ? !!(viewAsEntry && viewAsEntry.type === 'manager') : (D.role === 'manager');
     if (isManagerViewer_ || CRM_MANAGER_SUR_FRONT_.indexOf(curPersonSur) >= 0) allowedPages_.push('crm');
+    // «Партнёры» (22.09, plans/2026-09-22-partners-directory.md) - логист получает доступ к
+    // разделу «Справочники», но внутри хаба видит ТОЛЬКО плитку «Партнёры» (см.
+    // showSpravHub_ - там же скрываются остальные 7 плиток для этой роли). Не manager -
+    // Влад подтвердил «admin + logist», не шире.
+    var isLogistViewer_ = previewing ? !!(viewAsEntry && viewAsEntry.type === 'logist') : (D.role === 'logist');
+    if (isLogistViewer_) allowedPages_.push('directory');
     // "Проверка контрагента" (05.09, Влад: "менеджерам со старшим") - всем менеджерам, включая
     // руководителей коммерческих групп (у них та же роль manager); сервер тоже пускает только
     // admin/manager (requireRole_ на /api/counterparty/*).
@@ -15013,7 +15334,7 @@ function renderDirectory() {
 // "Поступления" (showReceiptsTab) - все уже отрисованы после renderDirectory(),
 // переключение вкладки - просто показ/скрытие, без повторного похода на сервер.
 function showDirTab(tab, el) {
-  ['people', 'legal', 'assets', 'fleet', 'plans', 'playbook', 'check'].forEach(function(t) {
+  ['people', 'legal', 'assets', 'fleet', 'plans', 'playbook', 'check', 'partners'].forEach(function(t) {
     var panel = document.getElementById('dir-tab-' + t);
     if (panel) panel.style.display = (t === tab) ? '' : 'none';
   });
@@ -15024,6 +15345,9 @@ function showDirTab(tab, el) {
   if (tab === 'plans' && !plansLoadedOnce_) plansTabLoad_(plansMonth_ || plansCurMonthKey_());
   if (tab === 'playbook' && !playbookLoadedOnce_) playbookTabLoad_();
   if (tab === 'check') vehicleCheckFillGosList_();
+  // «Партнёры» (22.09) - свой источник (/sprav/state?scope=partner), не тот срез, что уже
+  // тянет renderDirectory() для остальных вкладок - грузится лениво при первом открытии.
+  if (tab === 'partners' && !partnersLoadedOnce_) partnersLoad_();
 }
 
 // ── «Справочники» - полноэкранный хаб-выбор раздела (13.09, тот же канон, что «Зарплата»
@@ -15035,6 +15359,7 @@ function showDirTab(tab, el) {
 var SPRAV_HUB_LABELS_ = {
   people: 'Сотрудники', legal: 'Юридические лица', assets: 'Материальные средства',
   fleet: 'Сцепка', plans: 'Планы продаж', playbook: 'Плейбук продаж', check: 'Проверка техники',
+  partners: 'Партнёры',
 };
 function showSpravHub_() {
   var hub = document.getElementById('sprav-hub');
@@ -15044,6 +15369,15 @@ function showSpravHub_() {
   if (back) back.style.display = 'none';
   if (card) card.style.display = 'none';
   setText('page-title', 'Справочники');
+  // Логист (22.09, вкладка «Партнёры», см. applyRoleUI - только эта роль получает pushed
+  // 'directory' в allowedPages_) видит в этом хабе ТОЛЬКО плитку «Партнёры» - свой парк/
+  // сотрудники/юрлица ему тут не нужны и не положены (Влад: «admin + logist», не шире).
+  var previewingLogist_ = !!(D && D.role === 'admin' && typeof viewAsEntry !== 'undefined' && viewAsEntry && viewAsEntry.type === 'logist');
+  var logistOnly_ = !!(D && D.role === 'logist') || previewingLogist_;
+  document.querySelectorAll('#sprav-hub .hub-tile').forEach(function(t) {
+    if (t.id === 'partners-hub-tile') return;
+    t.style.display = logistOnly_ ? 'none' : '';
+  });
 }
 function chooseSpravTarget_(tab) {
   var hub = document.getElementById('sprav-hub');
@@ -16514,7 +16848,7 @@ function assetRestore_(id) {
 // добавить сами эти файлы СДСКи в базу". Файлы лежат на диске сервера, не в MySQL -
 // список тянем при каждом открытии карточки существующей записи (см. assetOpenForm_),
 // не кэшируем на клиенте. ═══
-var ASSET_DOC_TYPE_LABELS_ = { sts: 'СТС', rent: 'Договор аренды', other: 'Другое' };
+var ASSET_DOC_TYPE_LABELS_ = { sts: 'СТС', rent: 'Договор аренды', hire_agreement: 'Договор найма', other: 'Другое' };
 function assetDocFmtBytes_(n) {
   n = Number(n) || 0;
   return n >= 1024 * 1024 ? (n / (1024 * 1024)).toFixed(1).replace('.', ',') + ' МБ'
@@ -16598,7 +16932,7 @@ function assetDocDelete_(id) {
 // stamp - уже встречается в данных (загружено до появления этого UI, см. reference_
 // buldog_stamp_signature_contract_template) - подпись добавлена, чтобы не показывать сырой
 // ключ вместо названия.
-var LEGAL_DOC_TYPE_LABELS_ = { rent: 'Договор аренды', stamp: 'Печать/подпись', other: 'Другое' };
+var LEGAL_DOC_TYPE_LABELS_ = { rent: 'Договор аренды', stamp: 'Печать/подпись', hire_agreement: 'Договор найма', other: 'Другое' };
 function legalDocsLoad_(legalId) {
   var list = document.getElementById('legal-docs-list');
   list.innerHTML = '<div class="muted" style="font-size:12px">Загрузка…</div>';
@@ -16654,6 +16988,500 @@ function legalDocDelete_(id) {
     if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось удалить'; errEl.style.display = ''; return; }
     p2Toast('Файл удалён', 'amber');
     legalDocsLoad_(legalId);
+  }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+
+// ═══ ПАРТНЁРЫ (22.09, plans/2026-09-22-partners-directory.md) - реестр наёмных
+// контрагентов/техники/водителей, мост в те же Справочники (не хардкод). Три под-реестра
+// внутри одной вкладки хаба - тот же CRUD-канон Paint_/OpenForm_/Save_, что у Сотрудники/
+// Юрлица/Материальные средства выше, просто на узких /sprav/partner_* маршрутах и с
+// отдельным срезом данных (scope=partner - НЕ пересекается с обычным spravPeople_/
+// spravLegalEntities_/spravAssets_, те теперь всегда исключают партнёров). ═══
+var partnersLegalEntities_ = null, partnersPeople_ = null, partnersAssets_ = null, partnersLoadedOnce_ = false;
+function showPartnersTab_(tab, el) {
+  ['entity', 'asset', 'person'].forEach(function(t) {
+    var panel = document.getElementById('partners-tab-' + t);
+    if (panel) panel.style.display = (t === tab) ? '' : 'none';
+  });
+  document.querySelectorAll('#partners-tab-bar .tab-btn').forEach(function(b) { b.classList.remove('active'); });
+  if (el) el.classList.add('active');
+}
+function partnersLoad_() {
+  partnersLoadedOnce_ = true;
+  var loadingEl = document.getElementById('partners-loading');
+  var wrapEl = document.getElementById('partners-wrap');
+  if (loadingEl) { loadingEl.style.display = ''; loadingEl.textContent = 'Загрузка…'; }
+  if (wrapEl) wrapEl.style.display = 'none';
+  fetchFromYardApi_('/sprav/state', { scope: 'partner' }).then(function(r) {
+    if (!r.ok) { if (loadingEl) loadingEl.textContent = 'Ошибка загрузки: ' + (r.data && r.data.error || 'неизвестная'); return; }
+    partnersLegalEntities_ = r.data.legal_entities || [];
+    partnersPeople_ = r.data.people || [];
+    partnersAssets_ = r.data.assets || [];
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (wrapEl) wrapEl.style.display = '';
+    partnersEntityPaint_();
+    partnersAssetPaint_();
+    partnersPersonPaint_();
+  }).catch(function(e) { if (loadingEl) loadingEl.textContent = 'Ошибка сети: ' + e.message; });
+}
+function partnersOwnerLabel_(legalEntityId, ownerPersonId) {
+  if (legalEntityId) { var le = (partnersLegalEntities_ || []).filter(function(x) { return String(x.id) === String(legalEntityId); })[0]; return le ? le.name : legalEntityId; }
+  if (ownerPersonId) { var p = (partnersPeople_ || []).filter(function(x) { return String(x.id) === String(ownerPersonId); })[0]; return p ? p.full_name : ownerPersonId; }
+  return '—';
+}
+
+// ── Контрагенты (юрлицо ИЛИ физлицо-владелец в одной таблице) ──
+function partnersEntityPaint_() {
+  var body = document.getElementById('partners-entity-body');
+  if (!body) return;
+  var showDeleted = document.getElementById('partners-entity-show-deleted').checked;
+  var entities = (partnersLegalEntities_ || []).filter(function(le) { return showDeleted || !le.is_deleted; })
+    .map(function(le) { return { kind: 'entity', id: le.id, name: le.name, contact: le.inn ? ('ИНН ' + le.inn) : '—', is_deleted: le.is_deleted }; });
+  var owners = (partnersPeople_ || []).filter(function(p) { return (p.roles || []).indexOf('partner_owner') >= 0 && (showDeleted || !p.is_deleted); })
+    .map(function(p) { return { kind: 'person', id: p.id, name: p.full_name, contact: p.phone || '—', is_deleted: p.is_deleted }; });
+  var rows = entities.concat(owners).sort(function(a, b) { return (a.name || '').localeCompare(b.name || '', 'ru'); });
+  if (!rows.length) { body.innerHTML = '<tr><td colspan="4" class="muted" style="padding:14px">Партнёров пока нет — добавьте первого</td></tr>'; return; }
+  body.innerHTML = rows.map(function(row) {
+    var idEsc = pageEscAttr_(row.id);
+    var typeLabel = row.kind === 'entity' ? 'Юрлицо' : 'Физлицо';
+    var actions = row.is_deleted
+      ? '<button onclick="partnersEntityRestore_(\'' + row.kind + '\',\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);color:var(--green);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Восстановить</button>'
+      : '<button onclick="partnersEntityOpenForm_(\'' + row.kind + '\',\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Править</button>';
+    return '<tr' + (row.is_deleted ? spravDeletedRowStyle_() : '') + '>' +
+      '<td><b>' + pageEsc_(row.name) + '</b>' + (row.is_deleted ? ' <span class="muted" style="font-size:11px">(удалено)</span>' : '') + '</td>' +
+      '<td class="muted">' + typeLabel + '</td>' +
+      '<td class="muted">' + pageEsc_(row.contact) + '</td>' +
+      '<td class="num">' + actions + '</td>' +
+    '</tr>';
+  }).join('');
+}
+var partnersEntityEditKind_ = null, partnersEntityEditId_ = null, partnersEntityEditSnapshot_ = null;
+function partnersEntityTypeSet_(type) {
+  document.querySelectorAll('#partner-entity-type-chips .drv-chip').forEach(function(x) {
+    x.setAttribute('aria-pressed', x.getAttribute('data-value') === type ? 'true' : 'false');
+  });
+  document.getElementById('partner-entity-company-fields').style.display = type === 'entity' ? '' : 'none';
+  document.getElementById('partner-entity-person-fields').style.display = type === 'person' ? '' : 'none';
+}
+function partnersEntityTypeGet_() {
+  var on = document.querySelector('#partner-entity-type-chips .drv-chip[aria-pressed="true"]');
+  return on ? on.getAttribute('data-value') : 'entity';
+}
+function partnersEntityDocKind_() { return partnersEntityEditKind_ === 'person' ? 'person' : 'legal_entity'; }
+function partnersEntityOpenForm_(kind, id) {
+  partnersEntityEditKind_ = id ? kind : null;  // тип свободен к выбору только для новой записи
+  partnersEntityEditId_ = id || null;
+  var rec = null;
+  if (id && kind === 'entity') rec = (partnersLegalEntities_ || []).filter(function(x) { return String(x.id) === String(id); })[0];
+  if (id && kind === 'person') rec = (partnersPeople_ || []).filter(function(x) { return String(x.id) === String(id); })[0];
+  partnersEntityEditSnapshot_ = rec ? rec.updated_at : null;
+  document.getElementById('partner-entity-drawer-title').textContent = rec ? 'Править партнёра' : 'Добавить партнёра';
+  document.getElementById('partner-entity-type-chips-wrap').style.display = rec ? 'none' : '';
+  partnersEntityTypeSet_(kind === 'person' ? 'person' : 'entity');
+  document.getElementById('partner-entity-name').value = (kind === 'entity' && rec) ? rec.name : '';
+  document.getElementById('partner-entity-fullname').value = (kind === 'entity' && rec) ? (rec.full_name || '') : '';
+  document.getElementById('partner-entity-inn').value = (kind === 'entity' && rec) ? (rec.inn || '') : '';
+  document.getElementById('partner-entity-kpp').value = (kind === 'entity' && rec) ? (rec.kpp || '') : '';
+  document.getElementById('partner-entity-ogrn').value = (kind === 'entity' && rec) ? (rec.ogrn || '') : '';
+  document.getElementById('partner-entity-address').value = (kind === 'entity' && rec) ? (rec.legal_address || '') : '';
+  document.getElementById('partner-entity-director-name').value = (kind === 'entity' && rec) ? (rec.director_name || '') : '';
+  document.getElementById('partner-entity-director-post').value = (kind === 'entity' && rec) ? (rec.director_post || '') : '';
+  document.getElementById('partner-owner-name').value = (kind === 'person' && rec) ? rec.full_name : '';
+  document.getElementById('partner-owner-phone').value = (kind === 'person' && rec) ? (rec.phone || '') : '';
+  document.getElementById('partner-owner-inn').value = (kind === 'person' && rec) ? (rec.inn || '') : '';
+  document.getElementById('partner-owner-passport-series').value = (kind === 'person' && rec) ? (rec.passport_series || '') : '';
+  document.getElementById('partner-owner-passport-number').value = (kind === 'person' && rec) ? (rec.passport_number || '') : '';
+  document.getElementById('partner-owner-passport-issued-by').value = (kind === 'person' && rec) ? (rec.passport_issued_by || '') : '';
+  document.getElementById('partner-owner-passport-issued-at').value = (kind === 'person' && rec) ? (rec.passport_issued_at || '') : '';
+  document.getElementById('partner-owner-also-driver').checked = (kind === 'person' && rec) ? ((rec.roles || []).indexOf('partner_driver') >= 0) : false;
+  document.getElementById('partner-entity-notes').value = rec ? (rec.notes || '') : '';
+  document.getElementById('partner-entity-error').style.display = 'none';
+  document.getElementById('partner-entity-doc-error').style.display = 'none';
+  document.getElementById('partner-entity-docs-section').style.display = rec ? '' : 'none';
+  if (rec) partnerDocsLoad_(kind === 'person' ? 'person' : 'legal_entity', id, 'partner-entity'); else document.getElementById('partner-entity-docs-list').innerHTML = '';
+  document.getElementById('partner-entity-del-btn').style.display = rec ? '' : 'none';
+  var bk = document.getElementById('partner-entity-bk'), dr = document.getElementById('partner-entity-drawer');
+  drvBlockForeignAutofill_(dr);
+  bk.classList.add('show');
+  setTimeout(function() { dr.classList.add('show'); }, 40);
+  setTimeout(function() { document.getElementById((kind === 'person') ? 'partner-owner-name' : 'partner-entity-name').focus(); }, 120);
+}
+function partnersEntityCloseForm_() {
+  var bk = document.getElementById('partner-entity-bk'), dr = document.getElementById('partner-entity-drawer');
+  if (bk) bk.classList.remove('show');
+  if (dr) dr.classList.remove('show');
+}
+function partnersEntitySave_() {
+  var errEl = document.getElementById('partner-entity-error');
+  errEl.style.display = 'none';
+  var type = partnersEntityEditId_ ? partnersEntityEditKind_ : partnersEntityTypeGet_();
+  if (type === 'entity') {
+    var name = document.getElementById('partner-entity-name').value.trim();
+    if (!name) { errEl.textContent = 'Название обязательно'; errEl.style.display = ''; return; }
+    var id = partnersEntityEditId_ || fleetGenId_('le_');
+    var params = {
+      id: id, name: name,
+      full_name: document.getElementById('partner-entity-fullname').value.trim(),
+      inn: document.getElementById('partner-entity-inn').value.trim(),
+      kpp: document.getElementById('partner-entity-kpp').value.trim(),
+      ogrn: document.getElementById('partner-entity-ogrn').value.trim(),
+      legal_address: document.getElementById('partner-entity-address').value.trim(),
+      director_name: document.getElementById('partner-entity-director-name').value.trim(),
+      director_post: document.getElementById('partner-entity-director-post').value.trim(),
+      notes: document.getElementById('partner-entity-notes').value.trim(),
+    };
+    if (partnersEntityEditId_ && partnersEntityEditSnapshot_) params.expected_updated_at = partnersEntityEditSnapshot_;
+    postToYardApi_('/sprav/partner_entity', params).then(function(r) {
+      if (!r.ok) { errEl.textContent = 'Не удалось сохранить: ' + (r.data && r.data.error || 'ошибка сервера'); errEl.style.display = ''; return; }
+      p2Toast(partnersEntityEditId_ ? 'Изменения сохранены' : 'Партнёр добавлен', 'green');
+      partnersEntityCloseForm_();
+      partnersLoad_();
+    }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+  } else {
+    var pname = document.getElementById('partner-owner-name').value.trim();
+    if (!pname) { errEl.textContent = 'ФИО обязательно'; errEl.style.display = ''; return; }
+    var pid = partnersEntityEditId_ || fleetGenId_('p_');
+    var roles = ['partner_owner'];
+    if (document.getElementById('partner-owner-also-driver').checked) roles.push('partner_driver');
+    var pparams = {
+      id: pid, name: pname, roles: roles.join(','),
+      phone: document.getElementById('partner-owner-phone').value.trim(),
+      inn: document.getElementById('partner-owner-inn').value.trim(),
+      passport_series: document.getElementById('partner-owner-passport-series').value.trim(),
+      passport_number: document.getElementById('partner-owner-passport-number').value.trim(),
+      passport_issued_by: document.getElementById('partner-owner-passport-issued-by').value.trim(),
+      passport_issued_at: document.getElementById('partner-owner-passport-issued-at').value,
+      notes: document.getElementById('partner-entity-notes').value.trim(),
+    };
+    if (partnersEntityEditId_ && partnersEntityEditSnapshot_) pparams.expected_updated_at = partnersEntityEditSnapshot_;
+    postToYardApi_('/sprav/partner_person', pparams).then(function(r) {
+      if (!r.ok) { errEl.textContent = 'Не удалось сохранить: ' + (r.data && r.data.error || 'ошибка сервера'); errEl.style.display = ''; return; }
+      p2Toast(partnersEntityEditId_ ? 'Изменения сохранены' : 'Партнёр добавлен', 'green');
+      partnersEntityCloseForm_();
+      partnersLoad_();
+    }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+  }
+}
+function partnersEntityDelete_() {
+  if (!partnersEntityEditId_) return;
+  var kind = partnersEntityEditKind_;
+  if (!confirm('Удалить партнёра? Запись переедет в архив - её можно будет восстановить через "Показать удалённых".')) return;
+  var errEl = document.getElementById('partner-entity-error');
+  var path = kind === 'person' ? '/sprav/partner_person_delete' : '/sprav/partner_entity_delete';
+  postToYardApi_(path, { id: partnersEntityEditId_ }).then(function(r) {
+    if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось удалить'; errEl.style.display = ''; return; }
+    p2Toast('Перемещено в архив', 'amber');
+    partnersEntityCloseForm_();
+    partnersLoad_();
+  }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+function partnersEntityRestore_(kind, id) {
+  var path = kind === 'person' ? '/sprav/partner_person_restore' : '/sprav/partner_entity_restore';
+  postToYardApi_(path, { id: id }).then(function(r) {
+    if (!r.ok) { p2ToastErr((r.data && r.data.error) || 'Не удалось восстановить'); return; }
+    p2Toast('Восстановлено', 'green');
+    partnersLoad_();
+  }).catch(function(e) { p2ToastErr('Ошибка сети: ' + e.message); });
+}
+
+// ── Техника партнёра ──
+function partnersAssetPaint_() {
+  var body = document.getElementById('partners-asset-body');
+  if (!body) return;
+  var showDeleted = document.getElementById('partners-asset-show-deleted').checked;
+  var rows = (partnersAssets_ || []).filter(function(a) { return showDeleted || !a.is_deleted; });
+  if (!rows.length) { body.innerHTML = '<tr><td colspan="5" class="muted" style="padding:14px">Техники партнёров пока нет</td></tr>'; return; }
+  body.innerHTML = rows.map(function(a) {
+    var idEsc = pageEscAttr_(a.id);
+    var owner = partnersOwnerLabel_(a.legal_entity_id, a.owner_person_id);
+    var actions = a.is_deleted
+      ? '<button onclick="partnersAssetRestore_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);color:var(--green);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Восстановить</button>'
+      : '<button onclick="partnersAssetOpenForm_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Править</button>';
+    return '<tr' + (a.is_deleted ? spravDeletedRowStyle_() : '') + '>' +
+      '<td><b>' + pageEsc_(a.id) + '</b>' + (a.is_deleted ? ' <span class="muted" style="font-size:11px">(удалено)</span>' : '') + '</td>' +
+      '<td class="muted">' + (ASSET_TYPE_LABELS_[a.asset_type] || a.asset_type) + '</td>' +
+      '<td class="muted">' + (a.name ? pageEsc_(a.name) : '—') + '</td>' +
+      '<td class="muted">' + pageEsc_(owner) + '</td>' +
+      '<td class="num">' + actions + '</td>' +
+    '</tr>';
+  }).join('');
+}
+function partnersOwnerOptions_(selectedType, selectedId) {
+  var html = '<option value="">— не указано —</option>';
+  (partnersLegalEntities_ || []).forEach(function(le) {
+    if (le.is_deleted && !(selectedType === 'entity' && String(le.id) === String(selectedId))) return;
+    var v = 'entity:' + le.id;
+    html += '<option value="' + pageEscAttr_(v) + '"' + (selectedType === 'entity' && String(le.id) === String(selectedId) ? ' selected' : '') + '>' + pageEsc_(le.name) + ' (юрлицо)</option>';
+  });
+  (partnersPeople_ || []).forEach(function(p) {
+    if ((p.roles || []).indexOf('partner_owner') < 0) return;
+    if (p.is_deleted && !(selectedType === 'person' && String(p.id) === String(selectedId))) return;
+    var v = 'person:' + p.id;
+    html += '<option value="' + pageEscAttr_(v) + '"' + (selectedType === 'person' && String(p.id) === String(selectedId) ? ' selected' : '') + '>' + pageEsc_(p.full_name) + ' (физлицо)</option>';
+  });
+  return html;
+}
+function partnersEntityOnlyOptions_(selectedId) {
+  var list = (partnersLegalEntities_ || []).filter(function(le) { return !le.is_deleted || String(le.id) === String(selectedId); });
+  return '<option value="">— без юрлица (частник) —</option>' + list.map(function(le) {
+    return '<option value="' + pageEsc_(le.id) + '"' + (String(le.id) === String(selectedId) ? ' selected' : '') + '>' + pageEsc_(le.name) + '</option>';
+  }).join('');
+}
+var partnersAssetEditId_ = null, partnersAssetEditSnapshot_ = null;
+function partnersAssetOpenForm_(id) {
+  partnersAssetEditId_ = id || null;
+  var a = id ? (partnersAssets_ || []).filter(function(x) { return String(x.id) === String(id); })[0] : null;
+  partnersAssetEditSnapshot_ = a ? a.updated_at : null;
+  document.getElementById('partner-asset-drawer-title').textContent = a ? 'Править технику партнёра' : 'Добавить технику партнёра';
+  var idInput = document.getElementById('partner-asset-id');
+  idInput.value = a ? a.id : '';
+  idInput.disabled = !!a;
+  document.getElementById('partner-asset-type').value = a ? a.asset_type : 'trailer';
+  document.getElementById('partner-asset-manufacturer').value = a ? (a.manufacturer || '') : '';
+  document.getElementById('partner-asset-vin').value = a ? (a.vin || '') : '';
+  document.getElementById('partner-asset-name').value = a ? (a.name || '') : '';
+  var ownerType = a && a.legal_entity_id ? 'entity' : (a && a.owner_person_id ? 'person' : '');
+  var ownerId = a ? (a.legal_entity_id || a.owner_person_id || '') : '';
+  document.getElementById('partner-asset-owner').innerHTML = partnersOwnerOptions_(ownerType, ownerId);
+  document.getElementById('partner-asset-notes').value = a ? (a.notes || '') : '';
+  document.getElementById('partner-asset-error').style.display = 'none';
+  document.getElementById('partner-asset-doc-error').style.display = 'none';
+  document.getElementById('partner-asset-docs-section').style.display = a ? '' : 'none';
+  if (a) partnerDocsLoad_('asset', a.id, 'partner-asset'); else document.getElementById('partner-asset-docs-list').innerHTML = '';
+  document.getElementById('partner-asset-del-btn').style.display = a ? '' : 'none';
+  var bk = document.getElementById('partner-asset-bk'), dr = document.getElementById('partner-asset-drawer');
+  drvBlockForeignAutofill_(dr);
+  bk.classList.add('show');
+  setTimeout(function() { dr.classList.add('show'); }, 40);
+  setTimeout(function() { (idInput.disabled ? document.getElementById('partner-asset-manufacturer') : idInput).focus(); }, 120);
+}
+function partnersAssetCloseForm_() {
+  var bk = document.getElementById('partner-asset-bk'), dr = document.getElementById('partner-asset-drawer');
+  if (bk) bk.classList.remove('show');
+  if (dr) dr.classList.remove('show');
+}
+function partnersAssetSave_() {
+  var errEl = document.getElementById('partner-asset-error');
+  errEl.style.display = 'none';
+  var id = partnersAssetEditId_ || document.getElementById('partner-asset-id').value.trim();
+  if (!id) { errEl.textContent = 'Госномер обязателен'; errEl.style.display = ''; return; }
+  var ownerVal = document.getElementById('partner-asset-owner').value;
+  var ownerParts = ownerVal ? ownerVal.split(':') : ['', ''];
+  var params = {
+    id: id, asset_type: document.getElementById('partner-asset-type').value,
+    manufacturer: document.getElementById('partner-asset-manufacturer').value.trim(),
+    vin: document.getElementById('partner-asset-vin').value.trim(),
+    name: document.getElementById('partner-asset-name').value.trim(),
+    legal_entity_id: ownerParts[0] === 'entity' ? ownerParts[1] : '',
+    owner_person_id: ownerParts[0] === 'person' ? ownerParts[1] : '',
+    notes: document.getElementById('partner-asset-notes').value.trim(),
+  };
+  if (partnersAssetEditId_ && partnersAssetEditSnapshot_) params.expected_updated_at = partnersAssetEditSnapshot_;
+  postToYardApi_('/sprav/partner_asset', params).then(function(r) {
+    if (!r.ok) { errEl.textContent = 'Не удалось сохранить: ' + (r.data && r.data.error || 'ошибка сервера'); errEl.style.display = ''; return; }
+    p2Toast(partnersAssetEditId_ ? 'Изменения сохранены' : 'Техника добавлена', 'green');
+    partnersAssetCloseForm_();
+    partnersLoad_();
+  }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+function partnersAssetDelete_() {
+  if (!partnersAssetEditId_) return;
+  if (!confirm('Удалить технику партнёра? Запись переедет в архив.')) return;
+  var errEl = document.getElementById('partner-asset-error');
+  postToYardApi_('/sprav/partner_asset_delete', { id: partnersAssetEditId_ }).then(function(r) {
+    if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось удалить'; errEl.style.display = ''; return; }
+    p2Toast('Перемещено в архив', 'amber');
+    partnersAssetCloseForm_();
+    partnersLoad_();
+  }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+function partnersAssetRestore_(id) {
+  postToYardApi_('/sprav/partner_asset_restore', { id: id }).then(function(r) {
+    if (!r.ok) { p2ToastErr((r.data && r.data.error) || 'Не удалось восстановить'); return; }
+    p2Toast('Восстановлено', 'green');
+    partnersLoad_();
+  }).catch(function(e) { p2ToastErr('Ошибка сети: ' + e.message); });
+}
+
+// ── Водители партнёра ──
+function partnersPersonPaint_() {
+  var body = document.getElementById('partners-person-body');
+  if (!body) return;
+  var showDeleted = document.getElementById('partners-person-show-deleted').checked;
+  var rows = (partnersPeople_ || []).filter(function(p) { return (p.roles || []).indexOf('partner_driver') >= 0 && (showDeleted || !p.is_deleted); });
+  if (!rows.length) { body.innerHTML = '<tr><td colspan="4" class="muted" style="padding:14px">Водителей партнёров пока нет</td></tr>'; return; }
+  body.innerHTML = rows.map(function(p) {
+    var idEsc = pageEscAttr_(p.id);
+    var owner = partnersOwnerLabel_(p.partner_entity_id, null);
+    var actions = p.is_deleted
+      ? '<button onclick="partnersPersonRestore_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);color:var(--green);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Восстановить</button>'
+      : '<button onclick="partnersPersonOpenForm_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Править</button>';
+    return '<tr' + (p.is_deleted ? spravDeletedRowStyle_() : '') + '>' +
+      '<td><b>' + pageEsc_(p.full_name) + '</b>' + (p.is_deleted ? ' <span class="muted" style="font-size:11px">(удалено)</span>' : '') + '</td>' +
+      '<td class="muted">' + (p.phone ? pageEsc_(p.phone) : '—') + '</td>' +
+      '<td class="muted">' + pageEsc_(owner) + '</td>' +
+      '<td class="num">' + actions + '</td>' +
+    '</tr>';
+  }).join('');
+}
+var partnersPersonEditId_ = null, partnersPersonEditSnapshot_ = null;
+function partnersPersonOpenForm_(id) {
+  partnersPersonEditId_ = id || null;
+  var p = id ? (partnersPeople_ || []).filter(function(x) { return String(x.id) === String(id); })[0] : null;
+  partnersPersonEditSnapshot_ = p ? p.updated_at : null;
+  document.getElementById('partner-person-drawer-title').textContent = p ? 'Править водителя партнёра' : 'Добавить водителя партнёра';
+  document.getElementById('partner-person-name').value = p ? p.full_name : '';
+  document.getElementById('partner-person-phone').value = p ? (p.phone || '') : '';
+  document.getElementById('partner-person-entity').innerHTML = partnersEntityOnlyOptions_(p ? (p.partner_entity_id || '') : '');
+  document.getElementById('partner-person-inn').value = p ? (p.inn || '') : '';
+  document.getElementById('partner-person-license-num').value = p ? (p.license_number || '') : '';
+  document.getElementById('partner-person-license-exp').value = p ? (p.license_expiry || '') : '';
+  document.getElementById('partner-person-passport-series').value = p ? (p.passport_series || '') : '';
+  document.getElementById('partner-person-passport-number').value = p ? (p.passport_number || '') : '';
+  document.getElementById('partner-person-passport-issued-by').value = p ? (p.passport_issued_by || '') : '';
+  document.getElementById('partner-person-passport-issued-at').value = p ? (p.passport_issued_at || '') : '';
+  document.getElementById('partner-person-notes').value = p ? (p.notes || '') : '';
+  document.getElementById('partner-person-error').style.display = 'none';
+  document.getElementById('partner-person-doc-error').style.display = 'none';
+  document.getElementById('partner-person-docs-section').style.display = p ? '' : 'none';
+  if (p) partnerDocsLoad_('person', p.id, 'partner-person'); else document.getElementById('partner-person-docs-list').innerHTML = '';
+  document.getElementById('partner-person-del-btn').style.display = p ? '' : 'none';
+  var bk = document.getElementById('partner-person-bk'), dr = document.getElementById('partner-person-drawer');
+  drvBlockForeignAutofill_(dr);
+  bk.classList.add('show');
+  setTimeout(function() { dr.classList.add('show'); }, 40);
+  setTimeout(function() { document.getElementById('partner-person-name').focus(); }, 120);
+}
+function partnersPersonCloseForm_() {
+  var bk = document.getElementById('partner-person-bk'), dr = document.getElementById('partner-person-drawer');
+  if (bk) bk.classList.remove('show');
+  if (dr) dr.classList.remove('show');
+}
+function partnersPersonSave_() {
+  var errEl = document.getElementById('partner-person-error');
+  errEl.style.display = 'none';
+  var name = document.getElementById('partner-person-name').value.trim();
+  if (!name) { errEl.textContent = 'ФИО обязательно'; errEl.style.display = ''; return; }
+  var id = partnersPersonEditId_ || fleetGenId_('p_');
+  // Тот же человек мог уже получить роль partner_owner через вкладку "Контрагенты" (сам за
+  // рулём своей машины) - сохранение отсюда должно её СОХРАНИТЬ, не затереть (сервер
+  // перезаписывает роли целиком по списку из params.roles, тот же принцип, что у обычного
+  // /sprav/person - см. drvRegSave_).
+  var existing = partnersPersonEditId_ ? (partnersPeople_ || []).filter(function(x) { return String(x.id) === String(partnersPersonEditId_); })[0] : null;
+  var roles = (existing && (existing.roles || []).indexOf('partner_owner') >= 0) ? ['partner_driver', 'partner_owner'] : ['partner_driver'];
+  var params = {
+    id: id, name: name, roles: roles.join(','),
+    phone: document.getElementById('partner-person-phone').value.trim(),
+    partner_entity_id: document.getElementById('partner-person-entity').value,
+    inn: document.getElementById('partner-person-inn').value.trim(),
+    license_number: document.getElementById('partner-person-license-num').value.trim(),
+    license_expiry: document.getElementById('partner-person-license-exp').value,
+    passport_series: document.getElementById('partner-person-passport-series').value.trim(),
+    passport_number: document.getElementById('partner-person-passport-number').value.trim(),
+    passport_issued_by: document.getElementById('partner-person-passport-issued-by').value.trim(),
+    passport_issued_at: document.getElementById('partner-person-passport-issued-at').value,
+    notes: document.getElementById('partner-person-notes').value.trim(),
+  };
+  if (partnersPersonEditId_ && partnersPersonEditSnapshot_) params.expected_updated_at = partnersPersonEditSnapshot_;
+  postToYardApi_('/sprav/partner_person', params).then(function(r) {
+    if (!r.ok) { errEl.textContent = 'Не удалось сохранить: ' + (r.data && r.data.error || 'ошибка сервера'); errEl.style.display = ''; return; }
+    p2Toast(partnersPersonEditId_ ? 'Изменения сохранены' : 'Водитель добавлен', 'green');
+    partnersPersonCloseForm_();
+    partnersLoad_();
+  }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+function partnersPersonDelete_() {
+  if (!partnersPersonEditId_) return;
+  if (!confirm('Удалить водителя партнёра? Запись переедет в архив.')) return;
+  var errEl = document.getElementById('partner-person-error');
+  postToYardApi_('/sprav/partner_person_delete', { id: partnersPersonEditId_ }).then(function(r) {
+    if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось удалить'; errEl.style.display = ''; return; }
+    p2Toast('Перемещено в архив', 'amber');
+    partnersPersonCloseForm_();
+    partnersLoad_();
+  }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+function partnersPersonRestore_(id) {
+  postToYardApi_('/sprav/partner_person_restore', { id: id }).then(function(r) {
+    if (!r.ok) { p2ToastErr((r.data && r.data.error) || 'Не удалось восстановить'); return; }
+    p2Toast('Восстановлено', 'green');
+    partnersLoad_();
+  }).catch(function(e) { p2ToastErr('Ошибка сети: ' + e.message); });
+}
+
+// ── Документы партнёров (юрлицо/физлицо/техника) - переиспользует СУЩЕСТВУЮЩУЮ файловую
+// инфраструктуру 1-в-1 (sprav_asset_documents/sprav_people_documents/
+// sprav_legal_entity_documents), просто параметризовано по виду вместо трёх копий кода
+// (legalDocsLoad_/assetDocsLoad_/drvDocsLoad_ выше их НЕ трогают - остаются как были). ──
+var PARTNER_DOC_KIND_ = {
+  asset: { param: 'asset_id', upload: '/sprav/asset_document_upload', list: '/sprav/asset_documents', file: '/sprav/asset_document_file', del: '/sprav/asset_document_delete', labels: ASSET_DOC_TYPE_LABELS_ },
+  person: { param: 'person_id', upload: '/sprav/person_document_upload', list: '/sprav/person_documents', file: '/sprav/person_document_file', del: '/sprav/person_document_delete', labels: DRV_DOC_TYPE_LABELS_ },
+  legal_entity: { param: 'legal_entity_id', upload: '/sprav/legal_entity_document_upload', list: '/sprav/legal_entity_documents', file: '/sprav/legal_entity_document_file', del: '/sprav/legal_entity_document_delete', labels: LEGAL_DOC_TYPE_LABELS_ },
+};
+function partnersDocCurrentId_(prefix) {
+  if (prefix === 'partner-entity') return partnersEntityEditId_;
+  if (prefix === 'partner-asset') return partnersAssetEditId_;
+  if (prefix === 'partner-person') return partnersPersonEditId_;
+  return null;
+}
+function partnerDocsLoad_(kind, parentId, prefix) {
+  var cfg = PARTNER_DOC_KIND_[kind];
+  var list = document.getElementById(prefix + '-docs-list');
+  list.innerHTML = '<div class="muted" style="font-size:12px">Загрузка…</div>';
+  var params = {}; params[cfg.param] = parentId;
+  fetchFromYardApi_(cfg.list, params).then(function(r) {
+    if (partnersDocCurrentId_(prefix) !== parentId) return;  // карточку успели переключить
+    if (!r.ok) { list.innerHTML = '<div style="font-size:12px;color:var(--red)">Не удалось загрузить список</div>'; return; }
+    partnerDocsPaint_(kind, parentId, prefix, r.data.documents || []);
+  }).catch(function() {
+    if (partnersDocCurrentId_(prefix) !== parentId) return;
+    list.innerHTML = '<div style="font-size:12px;color:var(--red)">Нет соединения с сервером</div>';
+  });
+}
+function partnerDocsPaint_(kind, parentId, prefix, docs) {
+  var cfg = PARTNER_DOC_KIND_[kind];
+  var list = document.getElementById(prefix + '-docs-list');
+  if (!docs.length) { list.innerHTML = '<div class="muted" style="font-size:12px">Документов пока нет</div>'; return; }
+  list.innerHTML = docs.map(function(d) {
+    var typeLabel = cfg.labels[d.doc_type] || d.doc_type || '';
+    var dt = d.uploaded_at ? new Date(d.uploaded_at).toLocaleDateString('ru-RU') : '';
+    var href = YARD_API_BASE + cfg.file + '?session_token=' + encodeURIComponent(SESSION_TOKEN) + '&id=' + encodeURIComponent(d.id);
+    return '<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;display:flex;align-items:center;gap:8px">'
+      + '<a href="' + pageEscAttr_(href) + '" target="_blank" rel="noopener" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);text-decoration:none" title="' + pageEsc_(d.original_name || '') + '">' + pageEsc_(d.original_name || 'файл') + '</a>'
+      + '<span class="muted" style="white-space:nowrap">' + pageEsc_(typeLabel) + (typeLabel ? ' · ' : '') + assetDocFmtBytes_(d.size_bytes) + ' · ' + pageEsc_(dt) + '</span>'
+      + '<button type="button" onclick="partnerDocDelete_(\'' + kind + '\',\'' + pageEscAttr_(d.id) + '\',\'' + pageEscAttr_(parentId) + '\',\'' + prefix + '\')" title="Удалить" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;line-height:1;padding:2px 4px">×</button>'
+      + '</div>';
+  }).join('');
+}
+function partnerDocUpload_(kind, parentId, prefix) {
+  var cfg = PARTNER_DOC_KIND_[kind];
+  var errEl = document.getElementById(prefix + '-doc-error');
+  errEl.style.display = 'none';
+  if (!parentId) return;
+  var fileInput = document.getElementById(prefix + '-doc-file');
+  var file = fileInput.files && fileInput.files[0];
+  if (!file) { errEl.textContent = 'Выберите файл'; errEl.style.display = ''; return; }
+  var docType = document.getElementById(prefix + '-doc-type').value;
+  var fd = new FormData();
+  fd.append('file', file);
+  var qs = cfg.param + '=' + encodeURIComponent(parentId) + '&doc_type=' + encodeURIComponent(docType);
+  fetch(YARD_API_BASE + cfg.upload + '?' + qs, { method: 'POST', headers: { 'X-Session-Token': SESSION_TOKEN }, body: fd })
+    .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); })
+    .then(function(r) {
+      if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось загрузить файл'; errEl.style.display = ''; return; }
+      fileInput.value = '';
+      p2Toast('Файл загружен', 'green');
+      partnerDocsLoad_(kind, parentId, prefix);
+    }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+function partnerDocDelete_(kind, docId, parentId, prefix) {
+  if (!confirm('Удалить файл?')) return;
+  var cfg = PARTNER_DOC_KIND_[kind];
+  var errEl = document.getElementById(prefix + '-doc-error');
+  postToYardApi_(cfg.del, { id: docId }).then(function(r) {
+    if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось удалить'; errEl.style.display = ''; return; }
+    p2Toast('Файл удалён', 'amber');
+    partnerDocsLoad_(kind, parentId, prefix);
   }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
 }
 

@@ -3158,6 +3158,10 @@ function confirmReadinessError_(o) {
   if (!o.load_address) missing.push('адрес погрузки');
   if (!o.unload_address) missing.push('адрес выгрузки');
   if (!o.cargo) missing.push('груз');
+  /* 22.09, живой случай - Котельников подтвердил 2 заявки без единой цифры цены (Влад
+     прислал скриншот, "—" в колонке "Стоим." у уже подтверждённых заявок). Тот же приём,
+     что у остальных полей выше - зеркало серверной проверки, синхронно правится там же. */
+  if (!(num(o.price) > 0)) missing.push('цена');
   if (!missing.length) return null;
   return 'Нельзя подтвердить - не заполнено: ' + missing.join(', ');
 }

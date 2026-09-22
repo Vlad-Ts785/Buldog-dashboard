@@ -5311,6 +5311,23 @@ main:has(> #page-dynamics.active){min-width:0;}
           </div></div>
       </div>
 
+      <!-- Коммерческая группа (2026-09-22, Влад: "не хардкор в коде, а выбор, где сотрудник
+           находится, у какого руководителя в команде") - показывается только при роли
+           "Менеджер" (тот же приём, что drv-reg-driver-fields ниже для роли "Водитель").
+           Список руководителей в select - из DEPT_CFG на JS-стороне (drvRegFillHeadsSelect_),
+           не литерал в разметке - единственное место, где перечислены головы групп, теперь
+           само DEPT_CFG. -->
+      <div id="drv-reg-manager-fields" style="display:none">
+        <div class="asset-form-section">Коммерческая группа</div>
+        <div class="asset-form-grid">
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Руководитель группы</label>
+            <select id="drv-reg-commercial-head"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none">
+              <option value="">— нет команды —</option>
+            </select></div>
+        </div>
+      </div>
+
       <!-- Документы водителя (права/медсправка) - показываются только при роли "водитель"
            (Влад, 30.08, по мотивам 1С:ТЛ - "система отслеживает сроки действия
            удостоверений... справок"). Паспорт - НЕ здесь (13.09, Влад тем же днём позже:
@@ -9289,6 +9306,9 @@ async function loadData() {
     hideLoginScreen();
     document.getElementById('error-block').style.display = 'none';
     applyData(fetched, { skipIfUnchanged: true });
+    // Состав коммерческих групп (2026-09-22) - тихо, в фоне, перерисовывает то, что сейчас
+    // открыто, если подтянувшиеся данные реально изменили DEPT_CFG.members (см. функцию).
+    ensureCommercialHeadTeams_(function() { if (D) render(); });
     // "Поступления" - на экране уже живые данные из основного payload (D.receipts, посчитаны
     // Apps Script), это МГНОВЕННЫЙ фолбэк. В фоне, не блокируя загрузку страницы, пробуем
     // подменить на свежий расчёт с сервера (2026-08-18, см. /api/receipts) - если сервер не
@@ -15967,6 +15987,7 @@ function drvRegChipClick_(el) {
   } else {
     el.setAttribute('aria-pressed', el.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
     if (el.getAttribute('data-value') === 'driver') drvRegToggleDriverFields_();
+    if (el.getAttribute('data-value') === 'manager') drvRegToggleManagerFields_();
   }
 }
 function drvRegStatusValue_() {
@@ -15980,6 +16001,25 @@ function drvRegToggleDriverFields_() {
   var box = document.getElementById('drv-reg-driver-fields');
   var checked = drvRegRoles_().indexOf('driver') >= 0;
   if (box) box.style.display = checked ? '' : 'none';
+}
+// Коммерческая группа (2026-09-22) - тот же приём, что drvRegToggleDriverFields_ выше, для
+// роли "Менеджер". drvRegFillHeadsSelect_ - опции select строятся ИЗ DEPT_CFG (единственное
+// место, где перечислены головы групп), не хардкод в разметке.
+function drvRegToggleManagerFields_() {
+  var box = document.getElementById('drv-reg-manager-fields');
+  var checked = drvRegRoles_().indexOf('manager') >= 0;
+  if (box) box.style.display = checked ? '' : 'none';
+}
+function drvRegFillHeadsSelect_(selectedHead) {
+  var sel = document.getElementById('drv-reg-commercial-head');
+  if (!sel) return;
+  var opts = '<option value="">— нет команды —</option>';
+  DEPT_CFG.forEach(function(cfg) {
+    if (!cfg.head || cfg.solo) return;
+    var key = cfg.head.toLowerCase();
+    opts += '<option value="' + key + '"' + (selectedHead === key ? ' selected' : '') + '>' + cfg.name + '</option>';
+  });
+  sel.innerHTML = opts;
 }
 // Дата увольнения имеет смысл только при статусе "уволен(а)" - тот же приём, что у
 // полей документов водителя выше (drvRegToggleDriverFields_).
@@ -16074,6 +16114,8 @@ function drvRegOpenForm_(id) {
     x.setAttribute('aria-pressed', roles.indexOf(x.getAttribute('data-value')) >= 0 ? 'true' : 'false');
   });
   drvRegToggleDriverFields_();
+  drvRegFillHeadsSelect_(d ? (d.commercial_head || '') : '');
+  drvRegToggleManagerFields_();
   document.getElementById('drv-reg-license-num').value = d ? (d.license_number || '') : '';
   document.getElementById('drv-reg-license-exp').value = d ? (d.license_expiry || '') : '';
   document.getElementById('drv-reg-medical-exp').value = d ? (d.medical_expiry || '') : '';
@@ -16131,6 +16173,7 @@ function drvRegSave_() {
     passport_issued_by: document.getElementById('drv-reg-passport-issued-by').value.trim(),
     passport_issued_at: document.getElementById('drv-reg-passport-issued-at').value,
     passport_department_code: document.getElementById('drv-reg-passport-dept-code').value.trim(),
+    commercial_head: document.getElementById('drv-reg-commercial-head').value,
     notes: document.getElementById('drv-reg-notes').value.trim(),
   };
   if (fleetDriversEditId_ && drvRegEditSnapshot_) params.expected_updated_at = drvRegEditSnapshot_;
@@ -16146,6 +16189,11 @@ function drvRegSave_() {
     p2Toast(fleetDriversEditId_ ? 'Изменения сохранены' : 'Сотрудник добавлен', 'green');
     drvRegCloseForm_();
     renderDirectory();
+    // Состав коммерческих групп мог измениться этим сохранением (2026-09-22) - сбрасываем
+    // клиентский кэш, следующий заход на "По менеджерам"/личную страницу руководителя
+    // подтянет уже свежий DEPT_CFG.members, не будет ждать перезагрузки всей страницы.
+    commercialHeadTeamsLoaded_ = false;
+    ensureCommercialHeadTeams_(function() { render(); });
   }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
 }
 
@@ -21716,6 +21764,17 @@ function toggleMgrToday(name) {
 // страницам руководителей групп Ахтамовой/Гусейновой (renderMyPageCommercialHead_),
 // plans/2026-08-26-ahtamova-guseinova-personal-pages.md). ПОВЕДЕНИЕ НЕ МЕНЯЛОСЬ - тот же
 // массив, просто перемещён, чтобы не жить внутри одной конкретной функции.
+// DEPT_CFG.members - СИД (2026-09-22, Влад: "не хардкор в коде, а выбор, где сотрудник
+// находится, у какого руководителя в команде") - на первую отрисовку страницы ДО того, как
+// успеет ответить сервер, совпадает с текущим составом в БД 1-в-1 (сверено построчно при
+// миграции), дальше живые данные перезаписывают members ПО МЕСТУ (см.
+// ensureCommercialHeadTeams_ ниже) - сам объект DEPT_CFG/его записи не меняют адрес, все 17
+// мест, что уже читают DEPT_CFG.members по всему файлу, продолжают работать без изменений.
+// Голова/цвет/название/solo - ОСТАЮТСЯ здесь (не переехали в БД) - это не орг.структура
+// сотрудников, а дизайн-решение "сколько сейчас плиток руководителей и какого они цвета",
+// трогается только когда заводят СОВСЕМ новую голову группы (редкое решение Влада, не то
+// же самое, что "к кому прикрепить нового менеджера"). См.
+// plans/2026-09-22-commercial-team-structure-not-hardcoded.md.
 var DEPT_CFG = [
   { color:'#1D9E75', name:'Ахтамова Лиана',   head:'Ахтамова',  members:['Ахтамова','Цегельников','Гуштюк','Дербенцева','Шейко'] },
   { color:'#378ADD', name:'Гусейнова Айнур',  head:'Гусейнова', members:['Гусейнова','Савиток','Филипчук','Котельников','Гуляева','Коньшина','Володин'] },
@@ -21729,6 +21788,33 @@ var DEPT_CFG = [
   { color:'#06B6D4', name:'Ратников Максим',  head:null,        members:['Ратников'], solo:true },
 ];
 var HEAD_FULL = { 'Цуцурин':'Цуцурин Владислав Дмитриевич','Ахтамова':'Ахтамова Лиана Анатольевна','Гусейнова':'Гусейнова Айнур','Рыщанов':'Рыщанов Рустем' };
+
+// Подтягивает живой состав коммерческих групп с сервера (GET /api/commercial_head_teams,
+// источник - sprav_people.commercial_head, Справочники) и обновляет DEPT_CFG.members ПО
+// МЕСТУ (не пересоздаёт массив/объекты - все существующие ссылки на DEPT_CFG видят
+// изменение сами, без правки 17 мест, что его используют). Вызывается один раз после
+// первой успешной загрузки данных (loadData()) - до этого страница уже отрисована по сиду
+// выше (актуален на момент этого захода), обновление - тихое, перерисовывает только то,
+// что реально сейчас открыто. Рыщанов/Ратников не трогаются - в sprav_people.commercial_head
+// пока только Ахтамова/Гусейнова (план "пока структурно коммерческий отдел").
+var commercialHeadTeamsLoaded_ = false;
+function ensureCommercialHeadTeams_(cb) {
+  if (commercialHeadTeamsLoaded_) { if (cb) cb(); return; }
+  fetchFromYardApi_('/commercial_head_teams', {}).then(function(r) {
+    commercialHeadTeamsLoaded_ = true;
+    if (r.ok && r.data && r.data.teams) {
+      var teams = r.data.teams;
+      DEPT_CFG.forEach(function(cfg) {
+        if (!cfg.head) return;
+        var key = cfg.head.toLowerCase();
+        if (teams[key] && teams[key].length) {
+          cfg.members = teams[key].map(function(s) { return s.charAt(0).toUpperCase() + s.slice(1); });
+        }
+      });
+    }
+    if (cb) cb();
+  }).catch(function() { commercialHeadTeamsLoaded_ = true; if (cb) cb(); });
+}
 
 function renderSalesMgrLegacy_() {
   if (!D || !D.orders) return;

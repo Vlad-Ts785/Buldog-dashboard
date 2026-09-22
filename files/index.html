@@ -9342,6 +9342,47 @@ function monthKeyToRangeStr_(period) {
 // выпадающий список для admin-предпросмотра, с автовыбором своей записи для ролей
 // manager/logist после входа по логину. Тело менеджера - renderMyPageManager (старая
 // вёрстка без изменений), тело логиста - новая renderMyPageLogist ниже.
+// Заявления водителей «сдал путевой» из бота MAX (22.09, plans/2026-09-22-max-bot-buttons-
+// and-driver-binding.md) - waybill_claims на сервере. Это НЕ факт из 1С: has_waybill остаётся
+// источником истины, пометка лишь показывает, что водитель отметил лист сданным (и прислал
+// ли фото). Кэш на текущий месяц; первый вызов тянет данные и перерисовывает страницу
+// колбэком, пока данных нет - пометок просто нет (таблица не ждёт).
+var waybillClaims_ = { month: null, loading: false, byName: null };
+function waybillClaimsNameKey_(s){ return String(s || '').trim().toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' '); }
+function waybillClaimsMap_(rerender){
+  var d = new Date();
+  var month = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+  if (waybillClaims_.month === month && waybillClaims_.byName) return waybillClaims_.byName;
+  if (!waybillClaims_.loading && SESSION_TOKEN){
+    waybillClaims_.loading = true;
+    fetchFromYardApi_('/waybill_claims', { month: month }).then(function(r){
+      waybillClaims_.loading = false;
+      if (!r.ok || !r.data || !Array.isArray(r.data.claims)) return;
+      var byName = {};
+      r.data.claims.forEach(function(c){
+        if (!c.order_id) return; // фото без выбранного рейса - в счёт не идёт
+        var key = waybillClaimsNameKey_(c.driver_name);
+        if (!byName[key]) byName[key] = { claimed: 0, photos: [] };
+        if (c.claimed_at) byName[key].claimed++;
+        if (c.has_photo) byName[key].photos.push(c.id);
+      });
+      waybillClaims_.month = month; waybillClaims_.byName = byName;
+      if (typeof rerender === 'function') rerender();
+    }).catch(function(){ waybillClaims_.loading = false; });
+  }
+  return null;
+}
+function waybillClaimBadge_(map, driverName){
+  if (!map) return '';
+  var c = map[waybillClaimsNameKey_(driverName)];
+  if (!c || (!c.claimed && !c.photos.length)) return '';
+  // Тот же приём открытия файла по сессии, что у сканов Справочников (person_document_file).
+  var photos = c.photos.map(function(id){
+    var href = YARD_API_BASE + '/waybill_claim_photo?session_token=' + encodeURIComponent(SESSION_TOKEN) + '&id=' + encodeURIComponent(id);
+    return '<a href="' + href.replace(/"/g, '&quot;') + '" target="_blank" rel="noopener" title="Фото листа из MAX" style="text-decoration:none">📎</a>';
+  }).join(' ');
+  return '<div class="muted" style="font-size:11px;font-weight:400">водитель отметил в MAX: сдал ' + c.claimed + (photos ? ' · фото ' + photos : '') + '</div>';
+}
 function renderMyPage() {
   if (!D || !D.orders) return;
   var el = document.getElementById('my-page-content');
@@ -12002,7 +12043,7 @@ function renderMyPageRyschanow(el, current, selectorHtml, d) {
         : noWaybillDrivers.map(function(dv) {
             var pct = dv.orders > 0 ? Math.round(dv.no_waybill/dv.orders*100) : 0;
             var pCls = pct >= 50 ? 'red' : pct >= 25 ? 'amber' : '';
-            return '<tr><td><b>'+dv.name+'</b></td><td class="num red"><b>'+dv.no_waybill+'</b></td><td class="num muted">'+dv.orders+'</td><td class="num '+pCls+'">'+pct+'%</td></tr>';
+            return '<tr><td><b>'+dv.name+'</b>'+waybillClaimBadge_(waybillClaimsMap_(renderMyPage), dv.name)+'</td><td class="num red"><b>'+dv.no_waybill+'</b></td><td class="num muted">'+dv.orders+'</td><td class="num '+pCls+'">'+pct+'%</td></tr>';
           }).join(''))+
       '</tbody></table></div>';
   } else if (myPageRyschTab === 'no_waybill_suppliers') {
@@ -12307,7 +12348,7 @@ async function renderMyPageVasin(el, current, selectorHtml) {
         var pctCls = pct >= 50 ? 'red' : pct >= 25 ? 'amber' : '';
         return '<tr>'+
           '<td class="muted" style="font-size:12px">'+(i+1)+'</td>'+
-          '<td><b>'+dr.name+'</b></td>'+
+          '<td><b>'+dr.name+'</b>'+waybillClaimBadge_(waybillClaimsMap_(renderMyPage), dr.name)+'</td>'+
           '<td class="num red"><b>'+dr.no_waybill+'</b></td>'+
           '<td class="num muted">'+dr.orders+'</td>'+
           '<td class="num '+pctCls+'">'+pct+'%</td>'+
@@ -12487,6 +12528,10 @@ function mechRows_() {
       reason: active ? (active.repair_reason || '') : '',
       setBy: active ? mechShortName_(active.created_by_name || active.created_by) : '',
       setAt: active ? mechFmtDT_(active.created_at_label) : '',
+      // статус механика из бота MAX (22.09): 'in_progress' | 'done' | '' + кто/когда
+      mechStatus: active ? (active.repair_status || '') : '',
+      mechStatusBy: active ? mechShortName_(active.repair_status_by || '') : '',
+      mechStatusAt: active && active.repair_status_at ? mechFmtDT_(active.repair_status_at) : '',
       partsCur: Math.round(c.parts || 0), fuelCur: Math.round(c.fuel || 0),
       partsPrev: Math.round(p.parts || 0), fuelPrev: Math.round(p.fuel || 0),
     };
@@ -12640,7 +12685,8 @@ function renderMyPageMechanic_() {
     return '<tr onclick="mechOpenDrawer_(\'' + mechEsc_(r.gos) + '\')"><td class="mono">' + mechEsc_(r.gos) + '</td><td>' + mechEsc_(r.marka) + (r.long ? ' <span class="muted">борт</span>' : '') + '</td>' +
       '<td><span class="mech-pill mech-pill--' + mechStatusKey_(r.status) + '">' + r.status + '</span></td><td class="mono muted">' + r.since + '</td>' +
       '<td class="num ' + mechDaysCls_(r.days) + '">' + r.days + '</td><td>' + dl + '</td>' +
-      '<td class="mech-ellip" title="' + mechEsc_(r.reason) + '">' + (r.reason ? mechEsc_(r.reason) : '<span class="muted">не указана</span>') + '</td>' +
+      '<td class="mech-ellip" title="' + mechEsc_(r.reason) + '">' + (r.reason ? mechEsc_(r.reason) : '<span class="muted">не указана</span>') +
+        (r.mechStatus ? ' <span class="muted">· ' + (r.mechStatus === 'done' ? 'готово' : 'в работе') + (r.mechStatusBy ? ' (' + mechEsc_(r.mechStatusBy) + ')' : '') + '</span>' : '') + '</td>' +
       '<td class="muted">' + mechEsc_(r.setBy || '—') + '</td></tr>';
   }).join('');
   var overdueHtml = overdue.length ? '<div class="mech-overdue">' + overdue.map(function(o) {
@@ -12780,7 +12826,8 @@ function mechRenderDrawer_() {
     (inRep ? rowH('В ремонте с', r.since, r.days + ' дн.', r.days > 7 ? 'mech-row__aux--bad' : '') +
              rowH('Плановый выход', r.deadline || '<span class="muted">не задан</span>', r.deadlineSoon ? 'скоро' : '', r.deadlineSoon ? 'mech-row__aux--warn' : '') +
              rowH('Причина', r.reason ? mechEsc_(r.reason) : '<span class="muted">не указана</span>') +
-             rowH('Поставил', mechEsc_(r.setBy || '—'), mechEsc_(r.setAt)) : '') +
+             rowH('Поставил', mechEsc_(r.setBy || '—'), mechEsc_(r.setAt)) +
+             (r.mechStatus ? rowH('Механик', (r.mechStatus === 'done' ? 'Готово' : 'В работе') + (r.mechStatusBy ? ' · ' + mechEsc_(r.mechStatusBy) : ''), mechEsc_(r.mechStatusAt)) : '') : '') +
     rowH('Водитель', mechEsc_(r.driver) || '—') + rowH('Прицеп', mechEsc_(r.trailer) || '—') +
     '<div class="mech-row mech-row--total"><span class="mech-row__label">Запчасти, месяц</span><span class="mech-row__leader"></span><span class="mech-row__value">' + mechFr_(r.partsCur) + '</span><span class="mech-row__aux">' + prevLbl + ' ' + mechFmtN_(r.partsPrev) + '</span></div>' +
     rowH('Топливо, месяц', mechFr_(r.fuelCur), prevLbl + ' ' + mechFmtN_(r.fuelPrev)) +
@@ -20624,13 +20671,15 @@ function renderSales() {
     '<tr><td colspan="7" style="color:var(--green);padding:14px">Пропавших клиентов нет ✅</td></tr>';
 
   function renderNoWaybillTable(elId, list) {
+    // Пометки «водитель отметил в MAX» - только у водителей (не у поставщиков найма).
+    var wbClaims = elId === 'cust-drivers-body' ? waybillClaimsMap_(function(){ renderNoWaybillTable(elId, list); }) : null;
     document.getElementById(elId).innerHTML = list.length
       ? list.map(function(d, i) {
           const pct = d.orders > 0 ? Math.round(d.no_waybill / d.orders * 100) : 0;
           const pctCls = pct >= 50 ? 'red' : pct >= 25 ? 'amber' : '';
           return '<tr>' +
             '<td class="muted" style="font-size:12px">' + (i+1) + '</td>' +
-            '<td><b>' + d.name + '</b></td>' +
+            '<td><b>' + d.name + '</b>' + (wbClaims ? waybillClaimBadge_(wbClaims, d.name) : '') + '</td>' +
             '<td class="num red"><b>' + d.no_waybill + '</b></td>' +
             '<td class="num muted">' + d.orders + '</td>' +
             '<td class="num ' + pctCls + '">' + pct + '%</td>' +
@@ -32392,7 +32441,20 @@ function segLabel(s){
   // не было поля ввода в самой Планировке - отсюда 0 заполненных causes из 41 живых
   // ремонтов на момент фикса.
   if ((s.kind === "repair" || s.kind === "maint") && s.repairReason) base += " · " + s.repairReason;
+  // Статус механика из бота MAX (22.09: кнопки «Взял / Готово» под уведомлением о ремонте,
+  // plan_segs.repair_status) - коротко, фамилия одним словом, плитка тесная.
+  if ((s.kind === "repair" || s.kind === "maint") && s.repairStatus) base += " · " + lpRepairStatusShort_(s);
   return base ? base + " · " + untilLabel(s) : "";
+}
+function lpRepairStatusShort_(s){
+  if (!s.repairStatus) return "";
+  var who = s.repairStatusBy ? String(s.repairStatusBy).trim().split(" ")[0] : "";
+  return (s.repairStatus === "done" ? "готово" : "в работе") + (who ? " (" + who + ")" : "");
+}
+function lpRepairStatusFull_(s){
+  if (!s.repairStatus) return "";
+  return (s.repairStatus === "done" ? "Готово" : "В работе") + (s.repairStatusBy ? " · " + s.repairStatusBy : "") +
+    (s.repairStatusAt ? " · " + s.repairStatusAt : "");
 }
 /* «Суточный»/«Дальний» режим рейса - РУЧНОЙ выбор при создании заявки (Влад,
    30.08, второй заход в тот же день: "выяснилось, что есть рейсы, которые мы
@@ -33764,7 +33826,10 @@ function applyServerSegs_(rows){
     if (vi == null) return;   /* машина выбыла из парка - строку не рисуем, но и не удаляем на сервере */
     var seg = {id:r.id, v:vi, kind:r.kind, s:parseFloat(r.start_hour), l:parseFloat(r.length_hours),
                needsData: !!Number(r.needs_data), reason: r.reason || "", repairReason: r.repair_reason || "",
-               createdByName: r.created_by_name || "", createdAt: r.created_at_label ? mechFmtDT_(r.created_at_label) : ""};
+               createdByName: r.created_by_name || "", createdAt: r.created_at_label ? mechFmtDT_(r.created_at_label) : "",
+               /* статус механика из MAX (22.09) - read-only здесь, пишет только бот */
+               repairStatus: r.repair_status || "", repairStatusBy: r.repair_status_by || "",
+               repairStatusAt: r.repair_status_at ? mechFmtDT_(r.repair_status_at) : ""};
     if (r.kind === "trip"){
       var v = STATE.vehicles[vi];
       seg.mg = personByName_(r.manager_name, MANAGERS);
@@ -34461,7 +34526,7 @@ function openDrawer(seg){
           DRIVEROFF_REASONS_.map(function(p, i){ return '<button class="chip cr-opt" data-i="' + i + '" aria-pressed="' + (i === reasonIdx) + '">' + p[1] + '</button>'; }).join("") +
         '</div></div>'
         : isRepairLike ?
-        rowsHtml([["Состояние", (seg.kind === "repair" ? "Ремонт" : "ТО")]]) +
+        rowsHtml([["Состояние", (seg.kind === "repair" ? "Ремонт" : "ТО")]].concat(seg.repairStatus ? [["Механик", lpRepairStatusFull_(seg)]] : [])) +
         '<div class="cr-field"><span class="grp-label">Причина *</span>' +
           '<input autocomplete="off" class="cr-input" id="lp-drRepairReason" placeholder="что случилось / что делаем" value="' + repairReasonVal.replace(/"/g, "&quot;") + '"></div>'
         : rowsHtml([["Состояние", segLabel(seg)]])) +

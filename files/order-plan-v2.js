@@ -1425,6 +1425,44 @@ function drawContractPdf_(o, ent, stampUrl, signUrl, idleRates, custEnt, sel, me
   doc.save('Договор-заявка №' + docNo + (meta.version > 1 ? ' ред.' + meta.version : '') + ' рейс ' + fileDate + '.pdf');
   toast('<span class="op2-tick">Договор-заявка №' + esc(docNo) + ' сформирована</span> · редакция ' + esc(meta.version || 1));
 }
+/* Клик по значку договора (22.09, Влад: «вернуться в этот день... нажать этот значок и
+   выгрузить тот договор, который у нас был») - перестраивает PDF из СОХРАНЁННОГО снимка
+   (contract_versions.snapshot), не из текущих полей заявки - именно поэтому это работает и
+   спустя недели после того, как заявку саму уже поменяли или она перенесена. Снимок несёт
+   все текстовые поля обеих сторон (contractSnapshot_/ents() - тот же набор, что читает
+   drawContractPdf_ у ent/custEnt), печать/подпись - берём АКТУАЛЬНЫЕ по тому же юрлицу
+   (id в снимке есть, сам штамп/подпись в снимке не хранится - не самостоятельный документ с
+   гарантией байт-в-байт исторической печати, а «что мы посчитали и на каких условиях» -
+   тот факт, ради которого Влад просил кнопку). Открыто ОБЕИМ таблицам (лог./мен.) - это
+   просмотр уже существующего документа, не выпуск нового (тот отдельно защищён ролью на
+   сервере, см. POST /orders/contract_version). */
+function reopenContractPdf_(o) {
+  if (!o.contract_version) return;
+  toast('Открываем сохранённую редакцию…');
+  apiGet('/orders/contract_version', { order_id: o.id, version: o.contract_version }).then(function (r) {
+    if (!r || !r.ok || !r.data || !r.data.snapshot) { logUiEvent_('save_error', 'contract_reopen', (r && r.data && r.data.error) || 'нет данных'); toast('<span class="op2-warn">Не удалось открыть редакцию договора</span>'); return; }
+    var snap = r.data.snapshot, meta = r.data;
+    var entId = snap.executor && snap.executor.id;
+    var entLookup = null;
+    (META && META.own_entities || []).forEach(function (e2) { if (String(e2.id) === String(entId)) entLookup = e2; });
+    if (!entLookup) { logUiEvent_('blocked_click', 'contract_reopen', 'исполнитель редакции не найден в справочнике'); toast('<span class="op2-warn">Не удалось открыть редакцию</span> · исполнитель этой редакции больше не в справочнике'); return; }
+    var fakeO = {
+      id: snap.order_id, day_no: snap.day_no, service_date: snap.service_date, service_time: snap.service_time,
+      cargo: snap.cargo, cargo_weight_t: snap.cargo_weight_t, cargo_dims: snap.cargo_dims, equipment_type: snap.equipment_type, gabarit: snap.gabarit,
+      load_address: snap.load_address, load_contact_name: snap.load_contact_name, load_contact_phone: snap.load_contact_phone,
+      unload_address: snap.unload_address, unload_contact_name: snap.unload_contact_name, unload_contact_phone: snap.unload_contact_phone,
+      price: snap.price, cash: snap.cash, note: snap.note, customer: snap.customer && snap.customer.full_name,
+      delivery_date: snap.delivery_date, delivery_time: snap.delivery_time,
+      executors: [{ vehicle_gos: snap.vehicle && snap.vehicle.vehicle_gos, trailer_gos: snap.vehicle && snap.vehicle.trailer_gos, driver_name: snap.vehicle && snap.vehicle.driver_name }]
+    };
+    var sel = { delivery_date: snap.delivery_date, delivery_time: snap.delivery_time, payment_mode: snap.payment_mode, payment_days: snap.payment_days };
+    var idle = snap.idle ? { hourly: snap.idle.hourly, dayRate: snap.idle.day_rate, rateName: snap.idle.rate_name } : { hourly: 0, dayRate: 0 };
+    Promise.all([fetchEntityStampDataUrl_(entLookup.id), fetchPersonSignatureDataUrl_(entLookup.signer_person_id)]).then(function (imgs) {
+      try { drawContractPdf_(fakeO, snap.executor, imgs[0], imgs[1], idle, snap.customer, sel, meta, snap.terms); }
+      catch (e) { logUiEvent_('save_error', 'contract_pdf_reopen', String((e && e.message) || e).slice(0, 100)); toast('Не удалось собрать PDF: ' + (e && e.message || e)); }
+    }).catch(function () { toast('Ошибка сети - не удалось получить печать/подпись'); });
+  }).catch(function () { toast('Ошибка сети - не удалось открыть редакцию'); });
+}
 
 /* ═════════════════════════ РАЗМЕТКА ═════════════════════════ */
 function buildDom() {
@@ -1634,6 +1672,7 @@ function buildDom() {
       '<div class="op2-stpop" id="op2-stpop" role="menu"></div>' +
       '<div class="op2-stpop" id="op2-lgpop" role="menu"></div>' +
       '<div class="op2-stpop" id="op2-mgrpop" role="menu"></div>' +
+      '<div class="op2-stpop" id="op2-eqpop" role="menu"></div>' +
       '<div class="op2-stpop" id="op2-transferpop" role="menu"></div>' +
 
       /* ── «Задание водителю» ── */
@@ -1660,10 +1699,10 @@ function buildDom() {
 /* ГОСТ: ОДНО делегирование со списком-селектором, не обработчик на каждый элемент.
    Элементы с собственным звуком результата (RESULT_SEL) из nav исключены, чтобы
    не было двойного щелчка. */
-var NAV_SEL = '.op2-tab,.op2-wchip,.op2-chip,.op2-ghost,.op2-dbtn,.op2-slot,.op2-veh,.op2-st-chip,.op2-stc,.op2-logpick,#op2-lgpop button,.op2-mgrpick,#op2-mgrpop button,.op2-sugg .op2-it,.op2-free .op2-day,.op2-stpop button,.op2-pop .op2-vi,.op2-copybtn,.op2-take,.op2-dt,.op2-mgr-tbl tbody tr,.op2-log-body tr,.op2-switch button,[data-nav-sound]';
+var NAV_SEL = '.op2-tab,.op2-wchip,.op2-chip,.op2-ghost,.op2-dbtn,.op2-slot,.op2-veh,.op2-st-chip,.op2-stc,.op2-logpick,#op2-lgpop button,.op2-mgrpick,#op2-mgrpop button,.op2-eqpick,#op2-eqpop button,.op2-contract,.op2-sugg .op2-it,.op2-free .op2-day,.op2-stpop button,.op2-pop .op2-vi,.op2-copybtn,.op2-take,.op2-dt,.op2-mgr-tbl tbody tr,.op2-log-body tr,.op2-switch button,[data-nav-sound]';
 /* #op2-wk-today - «Сегодня» гасит нав-звук из делегирования (op2-chip уже в NAV_SEL) и
    играет свой S.toggle() в собственном обработчике, тот же приём, что у #op2-snd ниже. */
-var RESULT_SEL = '#op2-f-save,#op2-rp-go,#op2-pop-ok,.op2-dok,.op2-unset-ot,.op2-slot.op2-ot,.op2-slot.op2-new,#op2-lgpop button,#op2-mgrpop button,#op2-drv-copy,#op2-drv-max,#op2-d-drv-ok,.op2-dl,.op2-copybtn,.op2-stpop button,.op2-pop .op2-vi[data-act="unset"],#op2-snd,.op2-blocked,#op2-f-ent .op2-chip,#op2-wk-today';
+var RESULT_SEL = '#op2-f-save,#op2-rp-go,#op2-pop-ok,.op2-dok,.op2-unset-ot,.op2-slot.op2-ot,.op2-slot.op2-new,#op2-lgpop button,#op2-mgrpop button,#op2-eqpop button,#op2-drv-copy,#op2-drv-max,#op2-d-drv-ok,.op2-dl,.op2-copybtn,.op2-stpop button,.op2-pop .op2-vi[data-act="unset"],#op2-snd,.op2-blocked,#op2-f-ent .op2-chip,#op2-wk-today';
 
 function wire() {
   var root = $('#op2-root');
@@ -1814,6 +1853,7 @@ function wire() {
   $('#op2-mgr-body').addEventListener('click', function (e) {
     if (e.target.closest('.op2-maplink')) return; /* ссылка на карту открывает себя сама, дровер не нужен */
     var omniB = e.target.closest('.rh-omni'); if (omniB) { onOmniBadgeClick_(omniB); return; } /* «где машина» - переход на «Навигацию», дровер не нужен */
+    var ctrB = e.target.closest('.op2-contract'); if (ctrB) { var ctrTr = e.target.closest('tr[data-oid]'); var ctrO = ctrTr ? byId(ctrTr.dataset.oid) : null; if (ctrO) reopenContractPdf_(ctrO); return; } /* значок договора - скачать сохранённую редакцию, дровер не нужен */
     var jb = e.target.closest('[data-jump]'); if (jb) { jumpToDate_(jb.dataset.jump); return; } /* «→ перенесена на...» - переход к новой заявке, не открытие дровера */
     var tr = e.target.closest('tr[data-oid]'); if (!tr) return;
     var ch = e.target.closest('.op2-stc');
@@ -1903,6 +1943,16 @@ function wire() {
     var opt = managerOptions_().filter(function (p) { return p.email === email; })[0];
     assignManager_(o, email, opt ? opt.name : email);
   });
+  /* ── поповер смены типа техники (22.09, Влад: «может менять логист» - открыто любому
+     логисту, без ограничения по команде, тем же приёмом, что и смена логиста выше) ── */
+  $('#op2-eqpop').addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b || !eqTr) return;
+    var tr = eqTr; closeEqPop();
+    if (b.classList.contains('op2-cur')) return;
+    var o = byId(tr.dataset.oid); if (!o) return;
+    var val = b.dataset.eq; if (!val) return;
+    assignEquipment_(o, val);
+  });
   /* ── поповер «Перенести» (18.09) ── */
   $('#op2-transferpop').addEventListener('click', function (e) {
     var b = e.target.closest('button[data-d]'); if (!b || !transferOrderCtx_) return;
@@ -1958,6 +2008,7 @@ function onKeyDown(e) {
   if ($('#op2-stpop').classList.contains('op2-open')) { closeStPop(); return; }
   if ($('#op2-lgpop').classList.contains('op2-open')) { closeLogPop(); return; }
   if ($('#op2-mgrpop').classList.contains('op2-open')) { closeMgrPop(); return; }
+  if ($('#op2-eqpop').classList.contains('op2-open')) { closeEqPop(); return; }
   if ($('#op2-transferpop').classList.contains('op2-open')) { closeTransferPop_(); return; }
   if ($('#op2-pop').classList.contains('op2-open')) { closePop(); return; }
   closeDrawer();
@@ -1970,6 +2021,8 @@ function onDocMouseDown(e) {
   if (lgp && lgp.classList.contains('op2-open') && !e.target.closest('#op2-lgpop') && !e.target.closest('.op2-logpick')) closeLogPop();
   var mgp = $('#op2-mgrpop');
   if (mgp && mgp.classList.contains('op2-open') && !e.target.closest('#op2-mgrpop') && !e.target.closest('.op2-mgrpick')) closeMgrPop();
+  var eqp = $('#op2-eqpop');
+  if (eqp && eqp.classList.contains('op2-open') && !e.target.closest('#op2-eqpop') && !e.target.closest('.op2-eqpick')) closeEqPop();
   var tfp = $('#op2-transferpop');
   if (tfp && tfp.classList.contains('op2-open') && !e.target.closest('#op2-transferpop')) closeTransferPop_();
   var pop = $('#op2-pop');
@@ -2513,11 +2566,31 @@ function timeCell(o) {
    см. project_order_plan_v2_native.md, запись 18.09, «с бейджем новое ты вообще не туда
    ушёл» - для истории, чтобы не повторить ту же ошибку на будущих запросах «подсветить
    новое». */
-function noCell_(o) {
-  return '<td><span class="op2-no">' + esc(oNo(o)) + '</span></td>';
+/* Значок договора (22.09, план plans/2026-09-22-contract-lifecycle-and-equipment-type-swap.md,
+   превью одобрено Владом) - под номером заявки, в той же ячейке (компоновка не растёт вширь).
+   contract_version/contract_stale считает СЕРВЕР (api/lib/plan-orders.js) - клиент только
+   красит. Три состояния: нет договора (contract_version===0 - ничего, как раньше), актуален
+   (зелёный, статичный), устарел (красный - мигание самой СТРОКИ уже навешено в cls выше по
+   renderMgr/renderLog, здесь только цвет значка). Клик - reopenContractPdf_ (скачать
+   сохранённую редакцию заново, даже спустя недели - Влад 22.09), не открывает дровер. */
+function contractBadgeHtml_(o) {
+  if (!o.contract_version) return '';
+  var stale = !!o.contract_stale;
+  var title = 'Договор v' + o.contract_version + ' от ' + (o.contract_generated_at || '?') +
+    (stale ? ' - устарел, заявка изменилась после печати. Клик - открыть эту редакцию.' : ' - клик открывает эту редакцию.');
+  return '<span class="op2-contract ' + (stale ? 'op2-cstale' : 'op2-cok') + '" title="' + esc(title) + '">' +
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M9 13h6M9 17h4"/></svg>' +
+    '</span>';
 }
-function techCell_(o) {
-  return '<td class="op2-tech">' + (o.equipment_type ? esc(o.equipment_type) : '<span class="op2-ask">уточнить</span>') + '</td>';
+function noCell_(o) {
+  return '<td><span class="op2-no">' + esc(oNo(o)) + '</span>' + contractBadgeHtml_(o) + '</td>';
+}
+/* Влад 22.09: «тип техники может менять логист» - тот же приём, что уже есть у Лог.
+   (logCodeCell_ выше) - clickable=true передаёт ТОЛЬКО renderLog, в таблице менеджера
+   это просто текст, как раньше. */
+function techCell_(o, clickable) {
+  return '<td class="op2-tech' + (clickable ? ' op2-eqpick' : '') + '"' + (clickable ? ' title="Клик - изменить тип техники"' : '') + '>' +
+    (o.equipment_type ? esc(o.equipment_type) : '<span class="op2-ask">уточнить</span>') + '</td>';
 }
 function custCell_(o, prefix) {
   return '<td class="op2-cust" title="' + esc(o.customer || '') + '">' + (prefix || '') + shyCaps_(esc(o.customer || '')) + '</td>';
@@ -2660,7 +2733,7 @@ function renderMgr() {
   langRu_();
   body.innerHTML = rows.map(function (o) {
     var k = oSt(o);
-    var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' : '');
+    var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' : '') + (o.contract_stale ? ' op2-contract-stale' : '');
     return '<tr class="' + cls + '" data-oid="' + esc(o.id) + '">' +
       noCell_(o) +
       mgrCodeCell_(o, canChangeManager_(o)) + logCodeCell_(o) +
@@ -2822,11 +2895,11 @@ function renderLog() {
   langRu_();
   body.innerHTML = rows.map(function (o) {
     var k = oSt(o);
-    var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' + (o.otboy_ack_by ? '' : ' op2-unack') : (needsAcceptBlink_(o) ? ' op2-new-unack' : '')) + (isFresh(o) ? ' op2-new-halo' : '');
+    var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' + (o.otboy_ack_by ? '' : ' op2-unack') : (needsAcceptBlink_(o) ? ' op2-new-unack' : '')) + (isFresh(o) ? ' op2-new-halo' : '') + (o.contract_stale ? ' op2-contract-stale' : '');
     return '<tr class="' + cls + '" data-oid="' + esc(o.id) + '">' +
       noCell_(o) +
       mgrCodeCell_(o, canChangeManager_(o)) + logCodeCell_(o, true) +
-      timeCell(o) + techCell_(o) +
+      timeCell(o) + techCell_(o, true) +
       custCell_(o, isFresh(o) ? '<span class="op2-st-chip op2-ok" style="margin-right:6px">новая</span>' : '') +
       routeCell(o) + cargoCell_(o) +
       '<td>' + vehCellLog(o) + transferSubHtml_(o) + '</td>' +
@@ -2960,6 +3033,49 @@ function assignLogist_(o, email, name) {
     loadOrders();
   });
 }
+
+/* ═════════════════════════ СМЕНА ТИПА ТЕХНИКИ (22.09, Влад: «борт↔трал - их рабочий
+   режим, может менять логист») ═════════════════════════
+   Квик-пикер, тот же UX-паттерн, что у Мен./Лог. выше. Сохраняет ГОЛЫЙ базовый тип, БЕЗ
+   модификаторов (Коники/8 осей/раздвижение/длинные аппарели) - eqCombine_/collapseEqRow
+   здесь намеренно не участвуют (та логика завязана на DOM полной формы, которого у
+   квик-пикера нет); если у заявки был составной тип с модификатором, он просто заменяется
+   на голый новый тип - за модификаторами всё ещё нужно открыть полную форму. Идёт через
+   тот же /orders/save, что и форма - минимальная цена и история изменений перепроверяются
+   сервером как обычно, отдельного эндпоинта не заводим. */
+var eqTr = null;
+function openEqPop(cell, tr) {
+  eqTr = tr;
+  var o = byId(tr.dataset.oid);
+  var curVal = o ? segOf(o.equipment_type || '') : '';
+  var opts = dict('equipment');
+  var sp = $('#op2-eqpop');
+  sp.innerHTML = opts.length ? opts.map(function (x) {
+    var on = segOf(x.value) === curVal;
+    return '<button data-eq="' + esc(x.value) + '" class="' + (on ? 'op2-cur' : '') + '">' + esc(x.value) +
+      (on ? '<span class="op2-dim op2-sm">сейчас</span>' : '') + '</button>';
+  }).join('') : '<button class="op2-cur">в справочнике нет типов техники</button>';
+  var r = cell.getBoundingClientRect();
+  sp.style.left = Math.min(r.left, window.innerWidth - 230) + 'px';
+  sp.style.top = (r.bottom + 4) + 'px';
+  sp.classList.add('op2-open');
+}
+function closeEqPop() { var sp = $('#op2-eqpop'); if (sp) sp.classList.remove('op2-open'); eqTr = null; }
+function assignEquipment_(o, val) {
+  var prevVal = o.equipment_type || '';
+  if (val === prevVal) return;
+  /* Тот же мягкий toast-приём, что уже есть при переносе машины между заявками
+     (executor_move, «тип заявки Х, машина с Y») - предупреждает, но не блокирует. */
+  var vs = oOwn(o);
+  apiPost('/orders/save', { id: o.id, equipment_type: val }).then(function (r) {
+    if (!ok_(r)) return;
+    S.toggle();
+    var warn = (vs.length && segOf(val) !== segOf(prevVal)) ? ' · <span class="op2-warn">на заявке уже стоит машина - проверьте, подходит ли под новый тип</span>' : '';
+    toast('Заявка №' + esc(oNo(o)) + ' - тип техники <span class="op2-tick">' + esc(val) + '</span>' + (prevVal ? ' · было: ' + esc(prevVal) : '') + warn,
+      function () { apiPost('/orders/save', { id: o.id, equipment_type: prevVal }).then(function (r2) { if (ok_(r2)) loadOrders(); }); }, warn ? 9000 : 5000);
+    loadOrders();
+  });
+}
 /* ═════════════════════════ ПЕРЕНЕСТИ (18.09, превью одобрено Владом) ═════════════════════════
    Отбой старой заявке + новая заявка на выбранную дату, одним запросом (POST /orders/transfer,
    сервер атомарно и отбой ставит, и новую создаёт со своим day_no - см. комментарий там же).
@@ -3056,8 +3172,10 @@ function setStatus(o, k) {
 function onLogClick(e) {
   if (e.target.closest('.op2-maplink')) return; /* ссылка на карту открывает себя сама, дровер не нужен */
   var omniB = e.target.closest('.rh-omni'); if (omniB) { onOmniBadgeClick_(omniB); return; } /* «где машина» - переход на «Навигацию», дровер не нужен */
+  var ctrB = e.target.closest('.op2-contract'); if (ctrB) { var ctrTr = e.target.closest('tr[data-oid]'); var ctrO = ctrTr ? byId(ctrTr.dataset.oid) : null; if (ctrO) reopenContractPdf_(ctrO); return; } /* значок договора - скачать сохранённую редакцию, дровер не нужен */
   var jb = e.target.closest('[data-jump]'); if (jb) { jumpToDate_(jb.dataset.jump); return; }
   var lg = e.target.closest('.op2-logpick');
+  var eq = e.target.closest('.op2-eqpick');
   var dk = e.target.closest('.op2-dok');
   var un = e.target.closest('.op2-unset-ot');
   var slot = e.target.closest('.op2-slot');
@@ -3066,6 +3184,11 @@ function onLogClick(e) {
   if (lg) {
     var lgTrEl = e.target.closest('tr[data-oid]'); if (!lgTrEl) return;
     openLogPop(lg, lgTrEl);
+    return;
+  }
+  if (eq) {
+    var eqTrEl = e.target.closest('tr[data-oid]'); if (!eqTrEl) return;
+    openEqPop(eq, eqTrEl);
     return;
   }
   var mg = e.target.closest('.op2-mgrpick');
@@ -3911,7 +4034,13 @@ function renderView(o, who) {
   $('#op2-d-foot').innerHTML = (isLog
     ? '<button class="op2-del" id="op2-d-otboy">Отбой по заявке</button>' + (canDone() ? '<button class="op2-ghost" id="op2-d-done">Выполнено</button>' : '')
     : '<button class="op2-del" id="op2-d-otboy">Отбой</button>' +
-      '<button class="op2-ghost" id="op2-d-contract" title="Конструктор договора-заявки: выбрать срок доставки и режим оплаты, остальное (груз, адреса, контакты, машина, реквизиты, печать и подпись) подтянется из заявки и справочника">Конструктор договора</button>' +
+      /* 22.09, Влад: «если договор был сформирован, любое изменение должно подсвечиваться -
+         кнопка Принять изменения и перевыпустить договор следующим шагом» - тот же клик
+         (genContractPdf), просто другая подпись/цвет, когда o.contract_stale (сервер уже
+         посчитал - см. CONTRACT_COMPARE_FIELDS_ в api/lib/plan-orders.js). */
+      (o.contract_stale
+        ? '<button class="op2-dbtn op2-warn" id="op2-d-contract" title="Заявка изменилась после печати договора v' + esc(o.contract_version) + ' - переиздайте">Принять изменения и перевыпустить договор</button>'
+        : '<button class="op2-ghost" id="op2-d-contract" title="Конструктор договора-заявки: выбрать срок доставки и режим оплаты, остальное (груз, адреса, контакты, машина, реквизиты, печать и подпись) подтянется из заявки и справочника">Конструктор договора</button>') +
       '<button class="op2-ghost" id="op2-d-repeat">Повторить</button>') +
     '<button class="op2-dbtn op2-primary" id="op2-d-edit">Редактировать</button>';
 

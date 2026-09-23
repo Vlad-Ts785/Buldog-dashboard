@@ -2706,7 +2706,7 @@ function hiredMarginCell_(o) {
 function stCell_(o) {
   var k = oSt(o), m = ST_V3_[k] || ST_V3_.nz;
   var why = '';
-  if (k === 'ot') why = o.otboy_ack_by ? 'принят логистом' : 'ещё не принят логистом';
+  if (k === 'ot') why = o.otboy_ack_by ? 'принят логистом' : (o.taken_by_name ? 'ещё не принят логистом' : 'отбой до назначения логиста');
   else if (k === 'nz') why = (!oOwn(o).length && !oHired(o)) ? 'машина не поставлена' : (oHired(o) ? 'ждёт подтверждения перевозчика' : 'ждёт подтверждения');
   var ttl = [ST_LABEL[k], why, o.needs_data ? 'под данные' : ''].filter(Boolean).join(' · ');
   return '<td class="op2-stc"><span class="op2-st op2-' + m.key + '" title="' + esc(ttl) + '"><span class="op2-g">' +
@@ -2950,6 +2950,16 @@ function vehCellLog(o) {
   var k = oSt(o), vs = oOwn(o);
   if (k === 'ot') {
     var g0 = vs.map(function (v) { return v.vehicle_gos || ''; }).filter(Boolean).join(' + ');
+    /* 23.09, Влад: «если логиста и не было на заявке, можно не мигать - некому принимать
+       отбой, отбой дали до назначения логиста». o.taken_by_name - тот же признак «кто-то
+       уже вёл эту заявку», что уже используется в needsAccept_ выше (executor_set/hired_set
+       сами проставляют taken_by при любой постановке машины - значит пустой taken_by_name
+       здесь гарантированно означает и пустой g0, отдельно проверять не нужно). Без логиста
+       принимать нечего и некому - просто тихая пометка, без кнопки и без мигания строки
+       (см. op2-unack в renderLog). */
+    if (!o.otboy_ack_by && !o.taken_by_name) {
+      return '<span class="op2-drv op2-dim" title="Отбой дали до того, как заявку взял логист - принимать некому">Отбой · без логиста</span>';
+    }
     if (!o.otboy_ack_by) {
       /* 20.09, Влад: "можно кнопку сделать - принять отбой и снять машину" - сервер уже
          снимает машину автоматически вместе с принятием отбоя (см. otboy_ack), кнопка
@@ -3017,7 +3027,7 @@ function renderLog() {
   langRu_();
   body.innerHTML = rows.map(function (o) {
     var k = oSt(o);
-    var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' + (o.otboy_ack_by ? '' : ' op2-unack') : (needsAcceptBlink_(o) ? ' op2-new-unack' : '')) + (isFresh(o) ? ' op2-new-halo' : '') + (o.contract_stale ? ' op2-contract-stale' : '');
+    var cls = 'op2-st-' + stKey_(o) + (k === 'ot' ? ' op2-otboy' + (o.otboy_ack_by || !o.taken_by_name ? '' : ' op2-unack') : (needsAcceptBlink_(o) ? ' op2-new-unack' : '')) + (isFresh(o) ? ' op2-new-halo' : '') + (o.contract_stale ? ' op2-contract-stale' : '');
     return '<tr class="' + cls + '" data-oid="' + esc(o.id) + '">' +
       noCell_(o) +
       mgrCodeCell_(o, canChangeManager_(o)) + logCodeCell_(o, true) +

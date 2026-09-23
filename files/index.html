@@ -24019,15 +24019,22 @@ function rpsContragentListHtml_(h) {
   // Цифры план/факт видны текстом прямо в строке (Влад, 23.09: "хочу видеть не только
   // полоски но цифры сколько планируем и сколько уже зашло") - раньше суммы были только в
   // title-подсказке mpBulletHtml_ (по наведению), полоска сама по себе числа не показывала.
+  // Two-line layout (23.09, редизайн после "переход знаков, вообще не должно быть... растяни
+  // немножко линию") - раньше суммы и полоска делили узкую 1fr-колонку 3-колоночной сетки,
+  // текст суммы переносился на вторую строку у контрагентов подлиннее. Теперь сумма - на
+  // своей строке справа (white-space:nowrap, места хватает всегда), полоска - на СВОЕЙ
+  // строке во всю ширину (flex:1) - заметно длиннее прежней.
   var rows = h.items.map(function(it) {
     var fact = it.fact_amount || 0, covered = fact >= it.planned_amount;
-    return '<div style="display:grid;grid-template-columns:1.3fr 1fr 1.3fr;gap:14px;align-items:center;padding:10px 0;border-top:1px solid var(--border)">'
-      + '<div><div style="font-size:13px;font-weight:500">' + it.contragent + '</div><div class="muted" style="font-size:11px">менеджер ' + rpsShortName_(it.manager) + '</div></div>'
-      + '<div>'
-        + '<div style="font-family:\'JetBrains Mono\',monospace;font-size:12.5px;margin-bottom:4px"><b style="color:' + (covered ? 'var(--tint-green)' : 'var(--text)') + '">' + crpFmtInt_(fact) + ' ₽</b><span class="muted"> / ' + crpFmtInt_(it.planned_amount) + ' ₽</span></div>'
-        + mpBulletHtml_(it.planned_amount, fact, true)
+    return '<div style="padding:11px 0;border-top:1px solid var(--border)">'
+      + '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:14px;margin-bottom:7px">'
+        + '<div style="min-width:0"><div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + it.contragent + '</div><div class="muted" style="font-size:11px">менеджер ' + rpsShortName_(it.manager) + '</div></div>'
+        + '<div style="font-family:\'JetBrains Mono\',monospace;font-size:13px;white-space:nowrap;flex:none;font-variant-numeric:tabular-nums"><b style="color:' + (covered ? 'var(--tint-green)' : 'var(--text)') + '">' + crpFmtInt_(fact) + ' ₽</b><span class="muted"> / ' + crpFmtInt_(it.planned_amount) + ' ₽</span></div>'
       + '</div>'
-      + '<span class="badge ' + (covered ? 'green' : 'amber') + '" style="justify-self:end">' + (covered ? 'оплачено' : 'ожидаем оплату') + '</span>'
+      + '<div style="display:flex;align-items:center;gap:12px">'
+        + '<div style="flex:1">' + mpBulletHtml_(it.planned_amount, fact, true) + '</div>'
+        + '<span class="badge ' + (covered ? 'green' : 'amber') + '" style="flex:none">' + (covered ? 'оплачено' : 'ожидаем оплату') + '</span>'
+      + '</div>'
       + '</div>';
   }).join('');
   return '<div style="margin-top:12px;padding-top:2px;border-top:1px solid var(--border-strong)" onclick="event.stopPropagation()">' + rows

@@ -1748,12 +1748,10 @@ function buildDom() {
         '<div class="op2-dh"><h3 id="op2-drv-title">Задание водителю</h3><span class="op2-dim op2-sm" id="op2-drv-sub"></span></div>' +
         '<pre id="op2-drv-txt"></pre>' +
         '<div class="op2-acts">' +
-          '<a class="op2-dbtn op2-primary" id="op2-drv-max" target="_blank" rel="noopener">Отправить в Max</a>' +
-          '<a class="op2-dbtn op2-primary" id="op2-drv-wa" target="_blank" rel="noopener">Отправить в WhatsApp</a>' +
-          '<a class="op2-ghost" id="op2-drv-tg" target="_blank" rel="noopener">Telegram</a>' +
+          '<button class="op2-dbtn op2-primary" id="op2-drv-max">Отправить в Max</button>' +
           '<button class="op2-ghost" id="op2-drv-copy">Копировать текст</button>' +
           '<button class="op2-ghost" id="op2-drv-close">Закрыть</button>' +
-          '<span class="op2-hint op2-dim op2-sm">Текст собран из заявки, звёздочек нет · водителю - в его мессенджер по номеру из справочника</span>' +
+          '<span class="op2-hint op2-dim op2-sm" id="op2-drv-hint">Текст собран из заявки, звёздочек нет · «Отправить в Max» - через бота «Логист длинномеры» (нужна привязка водителя)</span>' +
         '</div>' +
       '</div></div>' +
     '</div>';
@@ -3931,18 +3929,37 @@ function openDrv(o) {
   $('#op2-drv-title').textContent = 'Задание водителю · заявка №' + oNo(o);
   $('#op2-drv-sub').textContent = [v.driver_name, v.vehicle_gos].filter(Boolean).join(' · ');
   $('#op2-drv-txt').innerHTML = esc(txt).replace(/^(ЗАЯВКА №\d+.*|ПОГРУЗКА|ВЫГРУЗКА)$/gm, '<b>$1</b>');
-  var phone = String(v.driver_phone || '').replace(/\D/g, '');
   function sent() { if (v.id) apiPost('/orders/executor_task_sent', { executor_id: v.id }).then(function () { loadOrders(); }); }
-  var wa = $('#op2-drv-wa');
-  wa.href = 'https://wa.me/' + (phone || '') + '?text=' + encodeURIComponent(txt);
-  wa.onclick = function () { sent(); };
-  /* Max (max.ru): текст в буфер + открыть чат с водителем - прямой ссылки-шаринга у Max нет */
+  /* «Отправить в Max» (23.09, Влад: "это как раз этот бот и будет") - реальная отправка
+     через бота «Логист длинномеры», не deep-link. Работает только если ЭТОТ водитель уже
+     привязал телефон к боту - иначе понятная ошибка и предложение скопировать текст вручную
+     («Копировать текст» - ручной режим про запас, Влад: "другие кнопки типа Telegram не нужны»"). */
   var mx = $('#op2-drv-max');
-  mx.href = 'https://max.ru/';
-  mx.onclick = function () { copyText(txt, 'Текст задания скопирован · вставь в чат с ' + (v.driver_name || 'водителем') + ' в Max'); sent(); };
-  var tg = $('#op2-drv-tg');
-  tg.href = 'https://t.me/share/url?url=' + encodeURIComponent('Заявка №' + oNo(o)) + '&text=' + encodeURIComponent(txt);
-  tg.onclick = function () { sent(); };
+  var hint = $('#op2-drv-hint');
+  mx.disabled = !v.id;
+  mx.textContent = 'Отправить в Max';
+  mx.onclick = function () {
+    if (!v.id) return;
+    mx.disabled = true; mx.textContent = 'Отправляю…';
+    apiPost('/logist_long/send', { executor_id: v.id }).then(function (r) {
+      var d = r.data || {};
+      if (d.ok) {
+        mx.textContent = 'Отправлено ✓';
+        toast('<span class="op2-tick">Задание ушло в Max водителю</span>');
+        loadOrders();
+      } else {
+        mx.disabled = false; mx.textContent = 'Отправить в Max';
+        var why = d.reason === 'водитель не привязан к боту «Логист длинномеры»'
+          ? 'Водитель ещё не привязал телефон к боту - скопируй текст и отправь вручную.'
+          : ('Не отправлено: ' + (d.reason || d.error || 'неизвестная ошибка') + ' - скопируй текст и отправь вручную.');
+        if (hint) hint.textContent = why;
+        toast(esc(why));
+      }
+    }).catch(function () {
+      mx.disabled = false; mx.textContent = 'Отправить в Max';
+      toast('Не удалось отправить - скопируй текст и отправь вручную.');
+    });
+  };
   var cp = $('#op2-drv-copy');
   cp.textContent = 'Копировать текст';
   cp.onclick = function () { copyText(txt); this.textContent = 'Скопировано ✓'; sent(); };

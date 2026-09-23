@@ -5378,6 +5378,14 @@ main:has(> #page-dynamics.active){min-width:0;}
         <select id="acc-role" onchange="accessRoleHint_()"
           style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></select>
         <div id="acc-role-hint" style="font-size:12px;color:var(--muted);margin-top:4px"></div></div>
+      <!-- Колонна (24.09, этап 4) - только у начальника автоколонны: роль одна, колонны разные.
+           У механиков сегмент задаёт сама роль (длинномеров / тралов). Чипы - тот же .drv-chip,
+           что «Статус» в форме сотрудника. -->
+      <div id="acc-segment-wrap" style="display:none;margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:6px">Колонна *</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button type="button" class="drv-chip" data-seg="long" aria-pressed="false" onclick="accessSegPick_(this)">Длинномеры</button>
+          <button type="button" class="drv-chip" data-seg="tral" aria-pressed="false" onclick="accessSegPick_(this)">Тралы</button>
+        </div></div>
       <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Имя как в заказах 1С</label>
         <input autocomplete="off" id="acc-display-name" type="text" maxlength="255" placeholder="подставится из карточки сотрудника"
           style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none">
@@ -15800,7 +15808,7 @@ function accessPaintPeople_() {
       '<td style="white-space:nowrap">' + pageEsc_(nm) + '</td>' +
       '<td style="color:var(--muted);font-family:\'JetBrains Mono\',monospace;font-size:12px">' + em + '</td>' +
       '<td>' + roleCell + '</td>' +
-      '<td style="color:var(--muted);font-size:12.5px">' + pageEsc_(role.scope_label || '') + '</td>' +
+      '<td style="color:var(--muted);font-size:12.5px">' + pageEsc_(accessScopeLabel_(u, role)) + '</td>' +
       '<td>' + status + '</td>' +
       '<td class="num" style="white-space:nowrap">' + actions + '</td></tr>';
   }).join('');
@@ -15810,6 +15818,12 @@ function accessInlineRole_(sel) {
   var u = accessFindUser_(email); if (!u) return;
   var prev = u.role_key, next = sel.value;
   if (prev === next) return;
+  // Начальнику автоколонны нужна ещё и колонна - это решается в форме, не в строке.
+  if (next === 'column_head') {
+    sel.value = prev;
+    accessOpenForm_(email, 'column_head');
+    return;
+  }
   sel.disabled = true;
   accessPost_({ email: email, role_key: next }).then(function(res) {
     if (!res.ok) { sel.value = prev; sel.disabled = false; p2Toast(pageEsc_(res.error), 'red'); return; }
@@ -15902,16 +15916,21 @@ function accessFmtWhen_(v) {
 function accessDescribe_(a) {
   var parse = function(x) { if (!x) return null; if (typeof x === 'string') { try { return JSON.parse(x); } catch (e) { return null; } } return x; };
   var b = parse(a.before_json) || {}, n = parse(a.after_json) || {};
-  var role = function(k) { return pageEsc_(accessRoleLabel_(k)); };
-  if (a.action === 'seed') return 'Перенесён из листа: ' + role(n.role_key);
-  if (a.action === 'grant') return 'Выдан доступ: ' + role(n.role_key);
-  if (a.action === 'role') return role(b.role_key) + ' → ' + role(n.role_key);
+  var segName = function(s) { return s === 'long' ? 'длинномеры' : s === 'tral' ? 'тралы' : '—'; };
+  // У начальника автоколонны роль без колонны неполная - дописываем её к названию роли.
+  var role = function(k, o) { return pageEsc_(accessRoleLabel_(k)) + (k === 'column_head' && o && o.fleet_segment ? ' (' + segName(o.fleet_segment) + ')' : ''); };
+  if (a.action === 'seed') return 'Перенесён из листа: ' + role(n.role_key, n);
+  if (a.action === 'grant') return 'Выдан доступ: ' + role(n.role_key, n);
+  if (a.action === 'role') return role(b.role_key, b) + ' → ' + role(n.role_key, n);
   if (a.action === 'revoke') return 'Доступ закрыт';
-  if (a.action === 'restore') return 'Доступ открыт: ' + role(n.role_key);
+  if (a.action === 'restore') return 'Доступ открыт: ' + role(n.role_key, n);
   if (a.action === 'pages') return '«' + pageEsc_(accessPageLabel_(n.page)) + '» - ' + (n.allowed ? 'видна' : 'скрыта');
   var parts = [];
   if (b.display_name !== n.display_name) parts.push('имя в 1С: ' + pageEsc_(b.display_name || '—') + ' → ' + pageEsc_(n.display_name || '—'));
   if (b.person_id !== n.person_id) parts.push('карточка сотрудника изменена');
+  if ((b.fleet_segment || null) !== (n.fleet_segment || null) && (b.fleet_segment !== undefined || n.fleet_segment !== undefined)) {
+    parts.push('колонна: ' + segName(b.fleet_segment) + ' → ' + segName(n.fleet_segment));
+  }
   return parts.join('; ') || 'Без изменений';
 }
 function accessPaintAudit_() {
@@ -15956,9 +15975,22 @@ function accessRoleHint_() {
   var key = document.getElementById('acc-role').value;
   var r = accessState_ && accessState_.roles.filter(function(x) { return x.role_key === key; })[0];
   setText('acc-role-hint', r ? 'Что видит: ' + r.scope_label : '');
+  document.getElementById('acc-segment-wrap').style.display = key === 'column_head' ? '' : 'none';
+}
+function accessSegPick_(btn) {
+  document.querySelectorAll('#acc-segment-wrap .drv-chip').forEach(function(b) { b.setAttribute('aria-pressed', String(b === btn)); });
+}
+function accessSegValue_() {
+  var on = document.querySelector('#acc-segment-wrap .drv-chip[aria-pressed="true"]');
+  return on ? on.getAttribute('data-seg') : null;
+}
+// «Что видит» строки: у начальника автоколонны - его колонна, у остальных - охват роли.
+function accessScopeLabel_(u, role) {
+  if (u.role_key === 'column_head' && u.fleet_segment) return 'колонна ' + (u.fleet_segment === 'long' ? 'длинномеров' : 'тралов');
+  return (role && role.scope_label) || '';
 }
 function accessEditFromRow_(btn) { accessOpenForm_(btn.getAttribute('data-email')); }
-function accessOpenForm_(email) {
+function accessOpenForm_(email, presetRole) {
   if (!accessState_) return;
   accessEnsurePeople_(function() {
     accessEditEmail_ = email || null;
@@ -15976,9 +16008,11 @@ function accessOpenForm_(email) {
     roleSel.innerHTML = accessState_.roles.map(function(r) {
       return '<option value="' + pageEsc_(r.role_key) + '">' + pageEsc_(r.label) + '</option>';
     }).join('');
-    roleSel.value = u ? u.role_key : 'manager';
+    roleSel.value = presetRole || (u ? u.role_key : 'manager');
     roleSel.disabled = !!(u && u.email === accessState_.me);
     document.getElementById('acc-display-name').value = u ? (u.display_name || '') : '';
+    var seg = u && u.fleet_segment;
+    document.querySelectorAll('#acc-segment-wrap .drv-chip').forEach(function(b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-seg') === seg)); });
     accessRoleHint_();
     document.getElementById('acc-error').style.display = 'none';
     drvBlockForeignAutofill_(document.getElementById('acc-drawer'));
@@ -15999,10 +16033,15 @@ function accessSave_() {
   if (!pid) return show('Выберите сотрудника из списка Справочников');
   var email = document.getElementById('acc-email').value.trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return show('Проверьте email');
+  var roleKey = document.getElementById('acc-role').value;
   var body = {
-    email: email, person_id: pid, role_key: document.getElementById('acc-role').value,
+    email: email, person_id: pid, role_key: roleKey,
     display_name: document.getElementById('acc-display-name').value.trim() || personName,
   };
+  if (roleKey === 'column_head') {
+    body.fleet_segment = accessSegValue_();
+    if (!body.fleet_segment) return show('Укажите колонну: длинномеры или тралы');
+  }
   if (!accessEditEmail_) body.is_new = true;
   var btn = document.getElementById('acc-save-btn');
   btn.disabled = true;

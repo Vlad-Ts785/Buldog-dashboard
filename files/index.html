@@ -5329,6 +5329,22 @@ main:has(> #page-dynamics.active){min-width:0;}
         </div>
       </div>
 
+      <!-- Автоколонна (2026-09-23, зеркало "Коммерческая группа" выше, но для логистов -
+           Влад: "Феськов будет начальником у Барыльченко и Дьячкова... чтобы не захаркорить
+           в код", plans/2026-09-23-fleet-head-role-feskov.md). Показывается только при роли
+           "Логист". Список голов в select - из FLEET_HEAD_SUR_FRONT_ на JS-стороне
+           (drvRegFillFleetHeadsSelect_), тот же приём, что коммерческая группа выше. -->
+      <div id="drv-reg-logist-fields" style="display:none">
+        <div class="asset-form-section">Автоколонна</div>
+        <div class="asset-form-grid">
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Руководитель автоколонн</label>
+            <select id="drv-reg-fleet-head"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none">
+              <option value="">— нет —</option>
+            </select></div>
+        </div>
+      </div>
+
       <!-- Документы водителя (права/медсправка) - показываются только при роли "водитель"
            (Влад, 30.08, по мотивам 1С:ТЛ - "система отслеживает сроки действия
            удостоверений... справок"). Паспорт - НЕ здесь (13.09, Влад тем же днём позже:
@@ -9552,6 +9568,12 @@ function isRyschanowEntry_(entry) {
 // (renderMyPageCommercialHead_), тот же принцип, что у Рыщанова/Васина выше (не флейвор
 // renderMyPageManager). Зеркало commercialHeadTeam_ на бэкенде.
 var COMMERCIAL_HEAD_SUR_FRONT_ = ['ахтамова', 'гусейнова'];
+// Голова над начальниками автоколонн (2026-09-23, Феськов над Барыльченко+Дьячковым, см.
+// plans/2026-09-23-fleet-head-role-feskov.md) - тот же принцип, что COLUMN_HEAD_SUR_FRONT_/
+// COMMERCIAL_HEAD_SUR_FRONT_: "кто ГОЛОВА" - короткий хардкод-список, состав команды под
+// головой (fleetHeadTeams_) - из БД (/api/fleet_head_teams), не хардкод.
+var FLEET_HEAD_SUR_FRONT_ = ['феськов'];
+var FLEET_HEAD_LABELS_ = { 'феськов': 'Феськов Андрей' };
 // CRM для менеджеров - поимённо (Влад, 04.09: «открой доступ к CRM Филипчук пока только»).
 // Тот же список продублирован на сервере (CRM_MANAGER_SURNAMES в api/server.js) - фронт
 // только прячет пункт меню, право решает сервер. Расширять - в ОБЕИХ точках.
@@ -13423,13 +13445,19 @@ function applyRoleUI() {
     // ("личная станица потом планировка и потом калькулятор"), без "План задание" - в
     // отличие от обычных логистов/менеджеров, у которых он есть по умолчанию ниже.
     var isColumnHeadViewer = COLUMN_HEAD_SUR_FRONT_.indexOf(curPersonSur) >= 0;
+    // Голова над начальниками автоколонн (23.09, Феськов, plans/2026-09-23-fleet-head-role-
+    // feskov.md) - Влад: "видеть планировку логистов, технику, динамику, зарплаты водителей,
+    // пока без личной страницы" - ни одна из уже существующих ролей это не покрывает.
+    var isFleetHeadViewer = FLEET_HEAD_SUR_FRONT_.indexOf(curPersonSur) >= 0;
     // Собрано в список ОДИН раз (план 2026-08-28, Этап 1) - тот же список используется и
     // для фильтра пунктов сайдбара ниже, и для гварда навигации после него, чтобы они не
     // могли разойтись. Калькулятор не зависит от серверных данных (D.role) - считает
     // офлайн в браузере, поэтому доступен и менеджерам/логистам, а не только админ-панели.
     // 11.09, Влад: «Задание» - у всех менеджеров, старших и логистов; начальникам автоколонн - НЕ надо.
-    var allowedPages_ = ['my-page', 'calculator', 'logistics-plan'];
-    if (!isColumnHeadViewer) allowedPages_.push('order-plan');
+    // 23.09: "пока без личной страницы" у Феськова - 'my-page' в базовый набор НЕ попадает
+    // именно для него (у всех остальных менеджеров/логистов остаётся, как раньше).
+    var allowedPages_ = isFleetHeadViewer ? ['calculator', 'logistics-plan'] : ['my-page', 'calculator', 'logistics-plan'];
+    if (!isColumnHeadViewer && !isFleetHeadViewer) allowedPages_.push('order-plan');
     if (isRyschanowViewer) allowedPages_.push('ryschanow-salary');
     if (isCommercialHeadViewer) allowedPages_.push('commercial-head-salary', 'commercial-head-debt');
     // «Суды» (15.09, Влад: «открой тоже Лиане и Айнур») - руководителям коммерческих групп.
@@ -13444,8 +13472,14 @@ function applyRoleUI() {
     // "Дебиторка" (#ch-debt-hub) ведёт туда напрямую - см. chDebtOpenCourt_().
     if (isCommercialHeadViewer) allowedPages_.push('debt');
     // «Зарплата машинистов» (15.09) - отдельный пункт меню, тот же принцип, что у Рыщанова/
-    // руководителей коммерческих групп выше.
-    if (isColumnHeadViewer) allowedPages_.push('column-head-payroll');
+    // руководителей коммерческих групп выше. 23.09 - и у головы над начальниками автоколонн
+    // (chPayrollBuckets_ сама объединит оба сегмента для неё, см. ниже по файлу).
+    if (isColumnHeadViewer || isFleetHeadViewer) allowedPages_.push('column-head-payroll');
+    // «Техника»/«Динамика» (23.09) - у Феськова, курирующего ОБА сегмента, доступ ко всему
+    // парку целиком (backend /api/vehicle_timeline и payload.vehicles уже отдают ей полный
+    // набор, не по сегментам - см. api/server.js). Обычным логистам/менеджерам эти пункты
+    // по-прежнему недоступны (не входят в allowedPages_ вообще).
+    if (isFleetHeadViewer) allowedPages_.push('vehicles', 'dynamics');
     var isManagerViewer_ = previewing ? !!(viewAsEntry && viewAsEntry.type === 'manager') : (D.role === 'manager');
     if (isManagerViewer_ || CRM_MANAGER_SUR_FRONT_.indexOf(curPersonSur) >= 0) allowedPages_.push('crm');
     // «Партнёры» (22.09, plans/2026-09-22-partners-directory.md) - логист получает доступ к
@@ -13485,7 +13519,10 @@ function applyRoleUI() {
     // не входит в allowedPages_, значит showPage('my-page') сработает как и раньше.
     var activePageEl_ = document.querySelector('.page.active');
     var activePageId_ = activePageEl_ ? activePageEl_.id.replace(/^page-/, '') : null;
-    if (!activePageId_ || allowedPages_.indexOf(activePageId_) < 0) showPage('my-page');
+    // 23.09 - у Феськова нет 'my-page' в allowedPages_ ("пока без личной страницы") - дефолт
+    // для неё был бы страницей, которую сама же функция потом спрячет. Приземляем на
+    // Планировку (первый содержательный пункт её меню).
+    if (!activePageId_ || allowedPages_.indexOf(activePageId_) < 0) showPage(isFleetHeadViewer ? 'logistics-plan' : 'my-page');
   } else {
     if (sidebarLabel) sidebarLabel.textContent = 'Админ панель';
     // Персональные пункты (Зарплата/ДЗ Рыщанова и руководителей коммерческих групп) - только
@@ -15993,6 +16030,7 @@ function drvRegChipClick_(el) {
     el.setAttribute('aria-pressed', el.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
     if (el.getAttribute('data-value') === 'driver') drvRegToggleDriverFields_();
     if (el.getAttribute('data-value') === 'manager') drvRegToggleManagerFields_();
+    if (el.getAttribute('data-value') === 'logist') drvRegToggleLogistFields_();
   }
 }
 function drvRegStatusValue_() {
@@ -16023,6 +16061,28 @@ function drvRegFillHeadsSelect_(selectedHead) {
     if (!cfg.head || cfg.solo) return;
     var key = cfg.head.toLowerCase();
     opts += '<option value="' + key + '"' + (selectedHead === key ? ' selected' : '') + '>' + cfg.name + '</option>';
+  });
+  sel.innerHTML = opts;
+}
+// Автоколонна (2026-09-23) - тот же приём, что drvRegToggleManagerFields_/
+// drvRegFillHeadsSelect_ выше, для роли "Логист". FLEET_HEAD_SUR_FRONT_/FLEET_HEAD_LABELS_ -
+// короткий список "кто голова" (то же решение, что COLUMN_HEAD_SUR_FRONT_ - редкое событие,
+// заводится вручную). В отличие от коммерческой группы - фронту НЕ нужен живой состав
+// команды под головой (fleet_head влияет только на серверные ответы - allowedPages_/
+// chPayrollBuckets_ проверяют саму фамилию по FLEET_HEAD_SUR_FRONT_, не список отчитывающихся
+// ей начальников автоколонн), поэтому здесь нет аналога ensureCommercialHeadTeams_.
+function drvRegToggleLogistFields_() {
+  var box = document.getElementById('drv-reg-logist-fields');
+  var checked = drvRegRoles_().indexOf('logist') >= 0;
+  if (box) box.style.display = checked ? '' : 'none';
+}
+function drvRegFillFleetHeadsSelect_(selectedHead) {
+  var sel = document.getElementById('drv-reg-fleet-head');
+  if (!sel) return;
+  var opts = '<option value="">— нет —</option>';
+  FLEET_HEAD_SUR_FRONT_.forEach(function(sur) {
+    var label = (FLEET_HEAD_LABELS_ && FLEET_HEAD_LABELS_[sur]) || sur;
+    opts += '<option value="' + sur + '"' + (selectedHead === sur ? ' selected' : '') + '>' + label + '</option>';
   });
   sel.innerHTML = opts;
 }
@@ -16121,6 +16181,8 @@ function drvRegOpenForm_(id) {
   drvRegToggleDriverFields_();
   drvRegFillHeadsSelect_(d ? (d.commercial_head || '') : '');
   drvRegToggleManagerFields_();
+  drvRegFillFleetHeadsSelect_(d ? (d.fleet_head || '') : '');
+  drvRegToggleLogistFields_();
   document.getElementById('drv-reg-license-num').value = d ? (d.license_number || '') : '';
   document.getElementById('drv-reg-license-exp').value = d ? (d.license_expiry || '') : '';
   document.getElementById('drv-reg-medical-exp').value = d ? (d.medical_expiry || '') : '';
@@ -16179,6 +16241,7 @@ function drvRegSave_() {
     passport_issued_at: document.getElementById('drv-reg-passport-issued-at').value,
     passport_department_code: document.getElementById('drv-reg-passport-dept-code').value.trim(),
     commercial_head: document.getElementById('drv-reg-commercial-head').value,
+    fleet_head: document.getElementById('drv-reg-fleet-head').value,
     notes: document.getElementById('drv-reg-notes').value.trim(),
   };
   if (fleetDriversEditId_ && drvRegEditSnapshot_) params.expected_updated_at = drvRegEditSnapshot_;
@@ -24778,6 +24841,10 @@ function columnHeadCurrentName_() {
 // columnHeadBucketsFor_ в VPS api/server.js, держать синхронно при следующей правке сегментов.
 function chPayrollBuckets_() {
   var sur = columnHeadCurrentName_().trim().split(' ')[0].toLowerCase();
+  // 23.09 - голова над начальниками автоколонн (Феськов) видит ОБА сегмента разом - тот же
+  // класс бага, что был у TRAL_MANAGERS 22.09 (хардкод-ветвление не знало о новом человеке).
+  // Проверяем ЭТУ ветку первой, до бинарного «дьячков/остальное» ниже.
+  if (FLEET_HEAD_SUR_FRONT_.indexOf(sur) >= 0) return ['трал', 'файмонвиль', 'длинномер'];
   return sur === 'дьячков' ? ['трал', 'файмонвиль'] : ['длинномер'];
 }
 
@@ -26974,12 +27041,14 @@ function menuSur_(name) { return String(name || '').trim().split(/\s+/)[0].toLow
 // разное меню одному конкретному человеку - этой версией нельзя, осознанный компромисс
 // (Влад попросил ровно обратное - группировку, не индивидуализацию).
 var MENU_TIER_LABEL_ = { admin:'админ', manager:'все менеджеры', commercial_head:'руководители коммерческих групп',
-  logist:'все логисты', logistics_head:'руководитель логистики', column_head:'начальник автоколонны', mechanic:'механики' };
+  logist:'все логисты', logistics_head:'руководитель логистики', column_head:'начальник автоколонны',
+  fleet_head:'руководитель автоколонн', mechanic:'механики' };
 function menuTierKey_(role, sur) {
   if (role === 'admin') return 'admin';
   if (role === 'mechanic') return 'mechanic';
   if (role === 'logist') {
     if (sur === 'сильчев' || sur === 'рыщанов') return 'logistics_head'; // см. ryschanowHeadFor_
+    if (FLEET_HEAD_SUR_FRONT_.indexOf(sur) >= 0) return 'fleet_head';
     if (COLUMN_HEAD_SUR_FRONT_.indexOf(sur) >= 0) return 'column_head';
     return 'logist';
   }

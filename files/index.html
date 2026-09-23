@@ -4978,6 +4978,16 @@ main:has(> #page-dynamics.active){min-width:0;}
             <div class="hub-tile__sub">Наёмная техника - контрагенты-поставщики, их машины, их водители, документы.</div>
             <div class="hub-tile__foot"><span>наём, не свой парк</span><span class="hub-tile__go">Открыть →</span></div>
           </div>
+          <!-- «Доступ и роли» (23.09, plans/2026-09-23-access-roles-in-spravochniki.md, превью
+               examples/preview-access-roles.html) - вместо листа «Доступ». Видна ТОЛЬКО роли
+               director (Влад: «только мне»): D.access_director с сервера, скрыта в «Смотреть как»;
+               сервер сам отказывает всем, кроме директора (requireDirector_), это не только UI. -->
+          <div class="hub-tile" id="access-hub-tile" style="display:none" onclick="chooseSpravTarget_('access')">
+            <div class="hub-tile__icon hub-tile__icon--e"><svg width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="9" width="12" height="8" rx="1.6"/><path d="M7 9V6.5a3 3 0 0 1 6 0V9"/></svg></div>
+            <div class="hub-tile__name">Доступ и роли</div>
+            <div class="hub-tile__sub">Кто входит в дашборд, в какой роли и какие страницы видит. Вместо листа «Доступ».</div>
+            <div class="hub-tile__foot"><span><svg width="13" height="13" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><rect x="4" y="9" width="12" height="8" rx="1.6"/><path d="M7 9V6.5a3 3 0 0 1 6 0V9"/></svg> только директор</span><span class="hub-tile__go">Открыть →</span></div>
+          </div>
         </div>
       </div>
       <button id="sprav-back-link" class="mp-ghostbtn" onclick="showSpravHub_()" style="display:none;margin-bottom:14px">← Все разделы</button>
@@ -5269,11 +5279,115 @@ main:has(> #page-dynamics.active){min-width:0;}
             </div>
           </div>
         </div>
+
+        <!-- ── Доступ и роли (23.09) - только директор, см. плитку access-hub-tile выше ── -->
+        <div id="dir-tab-access" style="display:none">
+          <div class="kpi-grid" style="margin:16px 0 12px">
+            <div class="kpi p2-drill" onclick="accessSetView_('people')" style="cursor:pointer">
+              <div class="kpi-label">С доступом</div>
+              <div class="kpi-value" id="acc-kpi-active">—</div>
+              <svg class="p2-drill-chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5 11 8l-5 4.5"/></svg>
+            </div>
+            <div class="kpi p2-drill" onclick="accessSetView_('roles')" style="cursor:pointer">
+              <div class="kpi-label">Ролей</div>
+              <div class="kpi-value" id="acc-kpi-roles">—</div>
+              <svg class="p2-drill-chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5 11 8l-5 4.5"/></svg>
+            </div>
+            <div class="kpi p2-drill" onclick="accessSetView_('roles')" style="cursor:pointer">
+              <div class="kpi-label">Роль без людей</div>
+              <div class="kpi-value" id="acc-kpi-empty">—</div>
+              <svg class="p2-drill-chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5 11 8l-5 4.5"/></svg>
+            </div>
+            <div class="kpi p2-drill" onclick="accessSetView_('audit')" style="cursor:pointer">
+              <div class="kpi-label">Изменений за 7 дней</div>
+              <div class="kpi-value" id="acc-kpi-changes">—</div>
+              <svg class="p2-drill-chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5 11 8l-5 4.5"/></svg>
+            </div>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px" id="acc-view-chips">
+            <button class="crm-filter-chip active" data-view="people" onclick="accessSetView_('people')">Люди</button>
+            <button class="crm-filter-chip" data-view="roles" onclick="accessSetView_('roles')">Роли и страницы</button>
+            <button class="crm-filter-chip" data-view="audit" onclick="accessSetView_('audit')">Журнал изменений</button>
+          </div>
+          <div id="acc-loading" style="color:var(--muted);padding:20px 0;font-size:13px">Загрузка…</div>
+
+          <div id="acc-view-people" style="display:none">
+            <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:var(--muted);margin-right:auto">
+                <input autocomplete="off" type="checkbox" id="acc-show-closed" onchange="accessPaintPeople_()"> Показать закрытые</label>
+              <input autocomplete="off" id="acc-search" type="text" placeholder="Поиск по имени или email…" oninput="accessPaintPeople_()"
+                style="background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:6px 10px;color:var(--text);font-size:12px;width:220px;outline:none">
+              <button onclick="accessOpenForm_(null)" data-nav-sound
+                style="background:var(--green);color:#fff;border:none;border-radius:7px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer">+ Выдать доступ</button>
+            </div>
+            <div style="overflow-x:auto;max-height:560px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm)">
+              <table class="tbl">
+                <thead><tr>
+                  <th style="position:sticky;top:0;background:var(--bg2);z-index:1">Сотрудник</th>
+                  <th style="position:sticky;top:0;background:var(--bg2);z-index:1">Email</th>
+                  <th style="position:sticky;top:0;background:var(--bg2);z-index:1">Роль</th>
+                  <th style="position:sticky;top:0;background:var(--bg2);z-index:1">Что видит</th>
+                  <th style="position:sticky;top:0;background:var(--bg2);z-index:1">Статус</th>
+                  <th class="num" style="position:sticky;top:0;background:var(--bg2);z-index:1">Действия</th>
+                </tr></thead>
+                <tbody id="acc-people-body"></tbody>
+              </table>
+            </div>
+            <div style="font-size:12px;color:var(--muted);margin:10px 0 0">«Роль» меняется прямо в строке, изменение можно отменить в подсказке внизу. «Что видит» считается из роли. Команда руководителя - сотрудники, у которых он указан руководителем в Справочниках.</div>
+          </div>
+
+          <div id="acc-view-roles" style="display:none">
+            <div style="overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius-sm)">
+              <table class="tbl"><thead><tr id="acc-roles-head"></tr></thead><tbody id="acc-roles-body"></tbody></table>
+            </div>
+            <div style="font-size:12px;color:var(--muted);margin:10px 0 0">Этап 3 плана: галочки страниц заработают после переноса текущих настроек меню каждой роли - дальше меняете сами, без программиста. Сейчас у директора - всё, остальные роли видят страницы по-прежнему.</div>
+          </div>
+
+          <div id="acc-view-audit" style="display:none">
+            <div style="overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius-sm)">
+              <table class="tbl">
+                <thead><tr><th>Когда</th><th>Кто изменил</th><th>Кому</th><th>Было → стало</th></tr></thead>
+                <tbody id="acc-audit-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
     <!-- Всплывающий пикер выбора ресурса для вкладки "Сцепка" - один на страницу, как
          контекстное меню (раздел 4 DESIGN_SYSTEM.md), позиционируется под нажатым чипом. -->
     <div id="fleet-picker" class="fleet-picker"></div>
+
+    <!-- Форма «Выдать / изменить доступ» (23.09) - плавающая скруглённая шторка (ГОСТ, канон
+         12.09, .mp-drawer-float), базовая ширина: полей мало, широкая не нужна. -->
+    <div class="mp-drawer-bk" id="acc-bk" onclick="accessCloseForm_()"></div>
+    <div class="mp-drawer mp-drawer-float" id="acc-drawer">
+     <div class="mp-drawer-float-body">
+      <h3 id="acc-drawer-title">Выдать доступ</h3>
+      <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Сотрудник *</label>
+        <input autocomplete="off" id="acc-person" type="text" list="acc-person-list" placeholder="Начните вводить ФИО…" oninput="accessPersonPicked_()"
+          style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none">
+        <datalist id="acc-person-list"></datalist></div>
+      <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Email Google-аккаунта *</label>
+        <input autocomplete="off" id="acc-email" type="text" maxlength="255" placeholder="name@gmail.com"
+          style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+      <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Роль *</label>
+        <select id="acc-role" onchange="accessRoleHint_()"
+          style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></select>
+        <div id="acc-role-hint" style="font-size:12px;color:var(--muted);margin-top:4px"></div></div>
+      <div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Имя как в заказах 1С</label>
+        <input autocomplete="off" id="acc-display-name" type="text" maxlength="255" placeholder="подставится из карточки сотрудника"
+          style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none">
+        <div style="font-size:12px;color:var(--muted);margin-top:4px">По этому имени разделы дашборда узнают человека в выгрузках 1С.</div></div>
+      <div id="acc-error" style="display:none;color:var(--red);font-size:12px;margin-bottom:10px"></div>
+      <div style="display:flex;gap:10px;margin-top:6px">
+        <button type="button" id="acc-save-btn" onclick="accessSave_()" data-nav-sound
+          style="flex:1;background:var(--green);color:#fff;border:none;border-radius:8px;padding:10px;font-size:14px;font-weight:600;cursor:pointer">Сохранить</button>
+        <button type="button" onclick="accessCloseForm_()"
+          style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px 16px;font-size:14px;cursor:pointer">Отмена</button>
+      </div>
+     </div>
+    </div>
 
     <!-- Форма добавления/правки сотрудника - тот же drawer-канон, что "Пропавшие клиенты"
          (.mp-drawer/.mp-drawer-bk, дашборд-уровня, не завязан на конкретную страницу).
@@ -15448,7 +15562,7 @@ function renderDirectory() {
 // "Поступления" (showReceiptsTab) - все уже отрисованы после renderDirectory(),
 // переключение вкладки - просто показ/скрытие, без повторного похода на сервер.
 function showDirTab(tab, el) {
-  ['people', 'legal', 'assets', 'fleet', 'plans', 'playbook', 'check', 'partners'].forEach(function(t) {
+  ['people', 'legal', 'assets', 'fleet', 'plans', 'playbook', 'check', 'partners', 'access'].forEach(function(t) {
     var panel = document.getElementById('dir-tab-' + t);
     if (panel) panel.style.display = (t === tab) ? '' : 'none';
   });
@@ -15462,6 +15576,8 @@ function showDirTab(tab, el) {
   // «Партнёры» (22.09) - свой источник (/sprav/state?scope=partner), не тот срез, что уже
   // тянет renderDirectory() для остальных вкладок - грузится лениво при первом открытии.
   if (tab === 'partners' && !partnersLoadedOnce_) partnersLoad_();
+  // «Доступ и роли» - всегда свежий список при открытии (права людей - не то, что можно показывать из кэша).
+  if (tab === 'access') accessLoad_();
 }
 
 // ── «Справочники» - полноэкранный хаб-выбор раздела (13.09, тот же канон, что «Зарплата»
@@ -15473,7 +15589,7 @@ function showDirTab(tab, el) {
 var SPRAV_HUB_LABELS_ = {
   people: 'Сотрудники', legal: 'Юридические лица', assets: 'Материальные средства',
   fleet: 'Сцепка', plans: 'Планы продаж', playbook: 'Плейбук продаж', check: 'Проверка техники',
-  partners: 'Партнёры',
+  partners: 'Партнёры', access: 'Доступ и роли',
 };
 function showSpravHub_() {
   var hub = document.getElementById('sprav-hub');
@@ -15489,11 +15605,14 @@ function showSpravHub_() {
   var previewingLogist_ = !!(D && D.role === 'admin' && typeof viewAsEntry !== 'undefined' && viewAsEntry && viewAsEntry.type === 'logist');
   var logistOnly_ = !!(D && D.role === 'logist') || previewingLogist_;
   document.querySelectorAll('#sprav-hub .hub-tile').forEach(function(t) {
-    if (t.id === 'partners-hub-tile') return;
+    if (t.id === 'partners-hub-tile' || t.id === 'access-hub-tile') return;
     t.style.display = logistOnly_ ? 'none' : '';
   });
+  var accessTile_ = document.getElementById('access-hub-tile');
+  if (accessTile_) accessTile_.style.display = accessIsDirectorView_() ? '' : 'none';
 }
 function chooseSpravTarget_(tab) {
+  if (tab === 'access' && !accessIsDirectorView_()) return;
   var hub = document.getElementById('sprav-hub');
   var back = document.getElementById('sprav-back-link');
   var card = document.getElementById('sprav-panels-card');
@@ -15502,6 +15621,296 @@ function chooseSpravTarget_(tab) {
   if (card) card.style.display = '';
   showDirTab(tab, null);
   setText('page-title', 'Справочники - ' + (SPRAV_HUB_LABELS_[tab] || tab));
+}
+
+// ── «Доступ и роли» (23.09, plans/2026-09-23-access-roles-in-spravochniki.md, превью
+// examples/preview-access-roles.html) - вместо листа «Доступ». Только директор: плитка по
+// D.access_director (персональный флаг сервера), скрыта в «Смотреть как»; сервер отказывает
+// всем, кроме роли director, на КАЖДОМ запросе (requireDirector_) - UI тут не защита, а удобство.
+// Своё состояние, не часть D. Запись - postToYardApiWithBody_ (JSON: true/false доходят
+// булевыми, токен не попадает в адресную строку и логи nginx).
+var accessState_ = null;       // {me, roles:[...], users:[...], audit:[...]}
+var accessView_ = 'people';
+var accessEditEmail_ = null;   // null = форма «Выдать доступ»
+var ACCESS_PAGES_ = ['Панель', 'Справочники', 'Техника', 'Планировка', 'Навигация', 'CRM', 'Поступления',
+  'Обзор заказов', 'Зарплата', 'Задание', 'Калькулятор', 'Дебиторка'];
+function accessIsDirectorView_() {
+  return !!(D && D.access_director && !(typeof viewAsEntry !== 'undefined' && viewAsEntry));
+}
+function accessFindUser_(email) {
+  return accessState_ ? accessState_.users.filter(function(u) { return u.email === email; })[0] || null : null;
+}
+function accessRoleLabel_(key) {
+  var r = accessState_ && accessState_.roles.filter(function(x) { return x.role_key === key; })[0];
+  return r ? r.label : (key || '—');
+}
+function accessPost_(body) {
+  return postToYardApiWithBody_('/access/save', body).then(function(r) {
+    return (r.ok && r.data && r.data.ok) ? { ok: true, action: r.data.action }
+      : { ok: false, error: (r.data && r.data.error) || 'Не удалось сохранить' };
+  }).catch(function(e) { return { ok: false, error: 'Ошибка сети: ' + e.message }; });
+}
+function accessLoad_() {
+  var ld = document.getElementById('acc-loading');
+  if (ld) { ld.style.display = ''; ld.textContent = 'Загрузка…'; }
+  ['people', 'roles', 'audit'].forEach(function(v) { var el = document.getElementById('acc-view-' + v); if (el) el.style.display = 'none'; });
+  fetchFromYardApi_('/access/list', {}).then(function(r) {
+    if (!r.ok || !r.data || r.data.error) {
+      if (ld) ld.textContent = 'Не удалось загрузить: ' + ((r.data && r.data.error) || 'ошибка сервера');
+      return;
+    }
+    accessState_ = r.data;
+    if (ld) ld.style.display = 'none';
+    accessPaintKpis_();
+    accessSetView_(accessView_);
+  }).catch(function(e) { if (ld) ld.textContent = 'Ошибка сети: ' + e.message; });
+}
+function accessPaintKpis_() {
+  var s = accessState_; if (!s) return;
+  var active = s.users.filter(function(u) { return u.active; });
+  var weekAgo = Date.now() - 7 * 86400000;
+  setText('acc-kpi-active', String(active.length));
+  setText('acc-kpi-roles', String(s.roles.length));
+  setText('acc-kpi-empty', String(s.roles.filter(function(r) {
+    return !active.some(function(u) { return u.role_key === r.role_key; });
+  }).length));
+  // Перенос из листа (seed) - не «изменение», иначе в первую неделю плашка врала бы про 22 правки.
+  setText('acc-kpi-changes', String(s.audit.filter(function(a) {
+    return a.action !== 'seed' && new Date(a.changed_at).getTime() >= weekAgo;
+  }).length));
+}
+function accessSetView_(v) {
+  accessView_ = v;
+  document.querySelectorAll('#acc-view-chips .crm-filter-chip').forEach(function(b) {
+    b.classList.toggle('active', b.getAttribute('data-view') === v);
+  });
+  if (!accessState_) return;
+  ['people', 'roles', 'audit'].forEach(function(x) {
+    var el = document.getElementById('acc-view-' + x); if (el) el.style.display = x === v ? '' : 'none';
+  });
+  if (v === 'people') accessPaintPeople_();
+  else if (v === 'roles') accessPaintRoles_();
+  else accessPaintAudit_();
+}
+function accessPaintPeople_() {
+  var body = document.getElementById('acc-people-body'); if (!body || !accessState_) return;
+  var s = accessState_;
+  var showClosed = document.getElementById('acc-show-closed').checked;
+  var q = (document.getElementById('acc-search').value || '').trim().toLowerCase();
+  var rows = s.users.filter(function(u) {
+    if (!showClosed && !u.active) return false;
+    return !q || ((u.person_name || '') + ' ' + (u.display_name || '') + ' ' + u.email).toLowerCase().indexOf(q) >= 0;
+  });
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="6" style="color:var(--muted);font-size:12.5px">' + (q ? 'Никого не нашлось' : 'Список пуст') + '</td></tr>';
+    return;
+  }
+  var chev = '<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" style="position:absolute;right:9px;pointer-events:none;opacity:.55"><path d="M4 6l4 4 4-4"/></svg>';
+  body.innerHTML = rows.map(function(u) {
+    var self = u.email === s.me;
+    var em = pageEsc_(u.email);
+    var role = s.roles.filter(function(r) { return r.role_key === u.role_key; })[0] || {};
+    var roleCell = u.active
+      ? '<span style="position:relative;display:inline-flex;align-items:center">' +
+        '<select data-email="' + em + '" onchange="accessInlineRole_(this)"' + (self ? ' disabled title="Роль директора с себя снять нельзя"' : '') +
+        ' style="appearance:none;-webkit-appearance:none;background:var(--bg3);border:1px solid var(--border);border-radius:6px;' +
+        'padding:3px 26px 3px 10px;font-size:12px;color:var(--text);font-family:inherit;cursor:' + (self ? 'default' : 'pointer') + ';outline:none">' +
+        s.roles.map(function(r) {
+          return '<option value="' + pageEsc_(r.role_key) + '"' + (r.role_key === u.role_key ? ' selected' : '') + '>' + pageEsc_(r.label) + '</option>';
+        }).join('') + '</select>' + chev + '</span>'
+      : '<span style="color:var(--muted);font-size:12.5px">' + pageEsc_(role.label || u.role_key) + '</span>';
+    var status = u.active
+      ? '<span style="display:inline-flex;align-items:center;gap:6px;font-size:12px"><span style="width:7px;height:7px;border-radius:50%;background:var(--green)"></span>Активен</span>'
+      : '<span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)"><span style="width:7px;height:7px;border-radius:50%;background:var(--muted)"></span>Закрыт</span>';
+    var btn = function(label, fn) {
+      return '<button class="mp-ghostbtn" data-email="' + em + '" onclick="' + fn + '(this)" style="padding:3px 10px;font-size:12px">' + label + '</button>';
+    };
+    var actions = btn('Изменить', 'accessEditFromRow_') + ' ' + (self
+      ? '<span style="font-size:11px;color:var(--muted);margin-left:6px" title="Себе нельзя закрыть доступ и снять роль директора">защищён</span>'
+      : btn(u.active ? 'Закрыть доступ' : 'Открыть доступ', 'accessToggleActive_'));
+    var nm = u.person_name || u.display_name || u.email;
+    return '<tr' + (u.active ? '' : ' style="opacity:.6"') + '>' +
+      '<td style="white-space:nowrap">' + pageEsc_(nm) + '</td>' +
+      '<td style="color:var(--muted);font-family:\'JetBrains Mono\',monospace;font-size:12px">' + em + '</td>' +
+      '<td>' + roleCell + '</td>' +
+      '<td style="color:var(--muted);font-size:12.5px">' + pageEsc_(role.scope_label || '') + '</td>' +
+      '<td>' + status + '</td>' +
+      '<td class="num" style="white-space:nowrap">' + actions + '</td></tr>';
+  }).join('');
+}
+function accessInlineRole_(sel) {
+  var email = sel.getAttribute('data-email');
+  var u = accessFindUser_(email); if (!u) return;
+  var prev = u.role_key, next = sel.value;
+  if (prev === next) return;
+  sel.disabled = true;
+  accessPost_({ email: email, role_key: next }).then(function(res) {
+    if (!res.ok) { sel.value = prev; sel.disabled = false; p2Toast(pageEsc_(res.error), 'red'); return; }
+    p2Toast('Роль изменена: ' + pageEsc_(accessRoleLabel_(prev)) + ' → ' + pageEsc_(accessRoleLabel_(next)), 'green', {
+      label: 'Отменить',
+      fn: function() {
+        accessPost_({ email: email, role_key: prev }).then(function(r2) {
+          p2Toast(r2.ok ? 'Роль возвращена' : pageEsc_(r2.error), r2.ok ? 'green' : 'red');
+          accessLoad_();
+        });
+      }
+    });
+    accessLoad_();
+  });
+}
+function accessToggleActive_(btn) {
+  var email = btn.getAttribute('data-email');
+  var u = accessFindUser_(email); if (!u) return;
+  var name = u.person_name || u.display_name || email;
+  // Закрыть доступ - редкое и рискованное действие: подтверждение ДО (ГОСТ, запрет 16 допускает
+  // confirm() для таких - тот же приём, что «Удалить» во всех разделах Справочников).
+  if (u.active && !confirm('Закрыть доступ: ' + name + '?\nЧеловек больше не сможет войти в дашборд. Открыть доступ снова можно здесь же.')) return;
+  var target = !u.active;
+  btn.disabled = true;
+  accessPost_({ email: email, active: target }).then(function(res) {
+    if (!res.ok) { btn.disabled = false; p2Toast(pageEsc_(res.error), 'red'); return; }
+    p2Toast((target ? 'Доступ открыт: ' : 'Доступ закрыт: ') + pageEsc_(name), target ? 'green' : 'amber', {
+      label: 'Отменить',
+      fn: function() {
+        accessPost_({ email: email, active: !target }).then(function(r2) {
+          p2Toast(r2.ok ? 'Отменено' : pageEsc_(r2.error), r2.ok ? 'green' : 'red');
+          accessLoad_();
+        });
+      }
+    });
+    accessLoad_();
+  });
+}
+function accessPaintRoles_() {
+  var head = document.getElementById('acc-roles-head'), body = document.getElementById('acc-roles-body');
+  if (!head || !body || !accessState_) return;
+  var th = function(t) { return '<th style="position:sticky;top:0;background:var(--bg2);z-index:1' + (t === 'Роль' ? '' : ';text-align:center') + '">' + t + '</th>'; };
+  head.innerHTML = th('Роль') + ACCESS_PAGES_.map(th).join('');
+  var chk = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--green)"><path d="M3.5 8.5 6.5 11.5 12.5 4.5"/></svg>';
+  var box = '<span style="display:inline-block;width:14px;height:14px;border:1.5px solid var(--border);border-radius:4px"></span>';
+  body.innerHTML = accessState_.roles.map(function(r) {
+    var n = accessState_.users.filter(function(u) { return u.active && u.role_key === r.role_key; }).length;
+    return '<tr><td style="white-space:nowrap"><b>' + pageEsc_(r.label) + '</b><div style="font-size:11px;color:var(--muted);font-family:\'JetBrains Mono\',monospace">' + n + ' чел.</div></td>' +
+      ACCESS_PAGES_.map(function() { return '<td style="text-align:center">' + (r.role_key === 'director' ? chk : box) + '</td>'; }).join('') + '</tr>';
+  }).join('');
+}
+function accessFmtWhen_(v) {
+  var d = new Date(v);
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+function accessDescribe_(a) {
+  var parse = function(x) { if (!x) return null; if (typeof x === 'string') { try { return JSON.parse(x); } catch (e) { return null; } } return x; };
+  var b = parse(a.before_json) || {}, n = parse(a.after_json) || {};
+  var role = function(k) { return pageEsc_(accessRoleLabel_(k)); };
+  if (a.action === 'seed') return 'Перенесён из листа: ' + role(n.role_key);
+  if (a.action === 'grant') return 'Выдан доступ: ' + role(n.role_key);
+  if (a.action === 'role') return role(b.role_key) + ' → ' + role(n.role_key);
+  if (a.action === 'revoke') return 'Доступ закрыт';
+  if (a.action === 'restore') return 'Доступ открыт: ' + role(n.role_key);
+  var parts = [];
+  if (b.display_name !== n.display_name) parts.push('имя в 1С: ' + pageEsc_(b.display_name || '—') + ' → ' + pageEsc_(n.display_name || '—'));
+  if (b.person_id !== n.person_id) parts.push('карточка сотрудника изменена');
+  return parts.join('; ') || 'Без изменений';
+}
+function accessPaintAudit_() {
+  var body = document.getElementById('acc-audit-body'); if (!body || !accessState_) return;
+  var nameOf = function(email) {
+    if (/^migration /.test(email || '')) return 'перенос из листа «Доступ»';
+    var u = accessFindUser_(email);
+    return pageEsc_(u ? (u.person_name || u.display_name || email) : email);
+  };
+  if (!accessState_.audit.length) {
+    body.innerHTML = '<tr><td colspan="4" style="color:var(--muted);font-size:12.5px">Каждая выдача, смена роли и закрытие доступа попадает сюда автоматически - с датой, автором и значением «было → стало». Пусто, пока изменений нет.</td></tr>';
+    return;
+  }
+  body.innerHTML = accessState_.audit.map(function(a) {
+    return '<tr><td style="white-space:nowrap;font-family:\'JetBrains Mono\',monospace;font-size:12px;font-variant-numeric:tabular-nums">' + accessFmtWhen_(a.changed_at) + '</td>' +
+      '<td>' + nameOf(a.changed_by) + '</td><td>' + nameOf(a.target_email) + '</td>' +
+      '<td style="font-size:12.5px">' + accessDescribe_(a) + '</td></tr>';
+  }).join('');
+}
+// ── Форма «Выдать / изменить доступ» ─────────────────────────────────────────────────────────
+function accessEnsurePeople_(cb) {
+  if (spravPeople_) return cb();
+  fetchFromYardApi_('/sprav/state', {}).then(function(r) {
+    if (r.ok && r.data && r.data.people) spravPeople_ = r.data.people;
+    cb();
+  }).catch(function() { cb(); });
+}
+function accessActivePeople_() {
+  return (spravPeople_ || []).filter(function(p) { return !p.is_deleted && (p.employment_status || 'active') === 'active'; });
+}
+function accessFindPersonId_(name) {
+  var hits = accessActivePeople_().filter(function(p) { return p.full_name === name; });
+  return hits.length === 1 ? hits[0].id : null;
+}
+function accessPersonPicked_() {
+  var name = document.getElementById('acc-person').value.trim();
+  var dn = document.getElementById('acc-display-name');
+  if (accessFindPersonId_(name) && !dn.value.trim()) dn.value = name;
+}
+function accessRoleHint_() {
+  var key = document.getElementById('acc-role').value;
+  var r = accessState_ && accessState_.roles.filter(function(x) { return x.role_key === key; })[0];
+  setText('acc-role-hint', r ? 'Что видит: ' + r.scope_label : '');
+}
+function accessEditFromRow_(btn) { accessOpenForm_(btn.getAttribute('data-email')); }
+function accessOpenForm_(email) {
+  if (!accessState_) return;
+  accessEnsurePeople_(function() {
+    accessEditEmail_ = email || null;
+    var u = email ? accessFindUser_(email) : null;
+    setText('acc-drawer-title', u ? 'Изменить доступ' : 'Выдать доступ');
+    document.getElementById('acc-person-list').innerHTML = accessActivePeople_().map(function(p) {
+      return '<option value="' + pageEsc_(p.full_name) + '">';
+    }).join('');
+    document.getElementById('acc-person').value = u ? (u.person_name || '') : '';
+    var emailInp = document.getElementById('acc-email');
+    emailInp.value = u ? u.email : '';
+    emailInp.readOnly = !!u;
+    emailInp.style.opacity = u ? '.7' : '';
+    var roleSel = document.getElementById('acc-role');
+    roleSel.innerHTML = accessState_.roles.map(function(r) {
+      return '<option value="' + pageEsc_(r.role_key) + '">' + pageEsc_(r.label) + '</option>';
+    }).join('');
+    roleSel.value = u ? u.role_key : 'manager';
+    roleSel.disabled = !!(u && u.email === accessState_.me);
+    document.getElementById('acc-display-name').value = u ? (u.display_name || '') : '';
+    accessRoleHint_();
+    document.getElementById('acc-error').style.display = 'none';
+    drvBlockForeignAutofill_(document.getElementById('acc-drawer'));
+    document.getElementById('acc-bk').classList.add('show');
+    document.getElementById('acc-drawer').classList.add('show');
+  });
+}
+function accessCloseForm_() {
+  document.getElementById('acc-bk').classList.remove('show');
+  document.getElementById('acc-drawer').classList.remove('show');
+}
+function accessSave_() {
+  var err = document.getElementById('acc-error');
+  var show = function(m) { err.textContent = m; err.style.display = ''; };
+  err.style.display = 'none';
+  var personName = document.getElementById('acc-person').value.trim();
+  var pid = accessFindPersonId_(personName);
+  if (!pid) return show('Выберите сотрудника из списка Справочников');
+  var email = document.getElementById('acc-email').value.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return show('Проверьте email');
+  var body = {
+    email: email, person_id: pid, role_key: document.getElementById('acc-role').value,
+    display_name: document.getElementById('acc-display-name').value.trim() || personName,
+  };
+  if (!accessEditEmail_) body.is_new = true;
+  var btn = document.getElementById('acc-save-btn');
+  btn.disabled = true;
+  accessPost_(body).then(function(res) {
+    btn.disabled = false;
+    if (!res.ok) return show(res.error);
+    accessCloseForm_();
+    p2Toast((accessEditEmail_ ? 'Доступ сохранён: ' : 'Доступ выдан: ') + pageEsc_(personName), 'green');
+    accessLoad_();
+  });
 }
 
 // ── Проверка техники (12.09) - см. разбор у dir-tab-check выше и plans/2026-09-12-

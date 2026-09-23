@@ -71,6 +71,11 @@
 .op2-dbtn.op2-primary.op2-warn{background:var(--amber);border-color:var(--amber);}
 .op2-dbtn.op2-primary.op2-warn:hover{background:#f5ad3d;}
 .op2-dbtn.op2-primary.op2-blocked{background:var(--bg4);border-color:var(--border-strong);color:var(--muted);}
+/* «Принять изменения и перевыпустить договор» (22.09) - БЕЗ .op2-primary, красный, не
+   янтарный - тот же селектор-состав не конфликтует с .op2-primary.op2-warn выше (разный
+   класс-набор), превью с этим цветом уже одобрено Владом. */
+.op2-dbtn.op2-warn{background:var(--red);border-color:var(--red);color:#1a0d0d;}
+.op2-dbtn.op2-warn:hover{background:#ea5f5e;}
 
 /* ---------- sticky полоса управления ---------- */
 .op2-bar{position:sticky;top:0;z-index:30;background:var(--bg2);border:1px solid var(--border);border-radius:12px;display:flex;align-items:center;gap:8px;padding:0 10px;flex-wrap:wrap;}
@@ -193,8 +198,18 @@ table.op2-tbl{width:100%;table-layout:fixed;border-collapse:separate;border-spac
 .op2-tbl tbody tr.op2-st-off td:first-child{box-shadow:inset 3px 0 0 var(--red);}
 .op2-tbl tbody tr.op2-st-done td:first-child{box-shadow:inset 3px 0 0 var(--blue);}
 /* № заявки - главный якорь и у менеджера, и у логиста (в Google-листе был крупными цифрами) */
-.op2-no{font-family:var(--font-display);font-weight:600;font-size:19px;letter-spacing:-.01em;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--text);}
+.op2-no{font-family:var(--font-display);font-weight:600;font-size:19px;letter-spacing:-.01em;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--text);display:block;}
 .op2-tbl tr.op2-st-off .op2-no{text-decoration:line-through;color:var(--muted);}
+/* Значок договора (22.09, план plans/2026-09-22-contract-lifecycle-and-equipment-type-swap.md,
+   превью одобрено Владом) - под номером заявки, та же ячейка. Зелёный - актуален (конвенция
+   проекта: зелёный = «всё в порядке»), красный - устарел (мигание САМОЙ СТРОКИ - см.
+   .op2-contract-stale выше, здесь только цвет значка). Кликабелен - см. NAV_SEL/обработчики
+   в JS (reopenContractPdf_). */
+.op2-contract{display:inline-flex;align-items:center;justify-content:center;width:19px;height:19px;
+  border-radius:5px;margin-top:5px;cursor:pointer;}
+.op2-contract svg{width:11px;height:11px;}
+.op2-contract.op2-cok{background:rgba(29,158,117,.18);color:var(--tint-green);}
+.op2-contract.op2-cstale{background:rgba(226,75,74,.22);color:var(--tint-red);}
 .op2-tbl tr.op2-st-off td{color:var(--muted);}
 /* отбой, который логист ещё не принял: строка мигает, пока не нажмёт «принять».
    ГОСТ, запрет №9: мигание привязано к незакрытому состоянию и гаснет само.
@@ -204,6 +219,12 @@ table.op2-tbl{width:100%;table-layout:fixed;border-collapse:separate;border-spac
    заметный пульс новой заявке (op2NewPulse ниже, зелёным) - только цвет роли «отбой». */
 .op2-tbl tbody tr.op2-unack{animation:op2OtBlink 1.6s ease-in-out infinite;}
 @keyframes op2OtBlink{0%,100%{background:rgba(226,75,74,.16);}50%{background:transparent;}}
+/* Договор устарел (22.09) - заявка изменилась после печати. Тот же пульс-фон/тайминг, что
+   уже у отбоя (op2OtBlink) - переиспользуем keyframe, не заводим новый ради того же самого
+   визуального языка. Левую полоску статуса (op2-st-ok/off/...) НЕ трогаем - у неё уже есть
+   своё значение (статус заявки), путать со «договор устарел» не нужно, значка под номером
+   и мигания фона достаточно. */
+.op2-tbl tbody tr.op2-contract-stale{animation:op2OtBlink 1.6s ease-in-out infinite;}
 .op2-tbl tbody tr.op2-new-halo{animation:op2Halo .3s var(--ease-out-soft) 1;}
 @keyframes op2Halo{0%{background:rgba(29,158,117,.16);}100%{background:transparent;}}
 .op2-tbl tbody tr.op2-ch-halo{animation:op2HaloB .3s var(--ease-out-soft) 1;}
@@ -215,6 +236,14 @@ table.op2-tbl{width:100%;table-layout:fixed;border-collapse:separate;border-spac
 @keyframes op2NewPulse{0%,100%{background:rgba(29,158,117,.16);}50%{background:transparent;}}
 .op2-tbl tfoot td{border-top:1px solid var(--border-strong);background:var(--bg3);padding:9px 10px;color:var(--muted);font-size:12px;}
 .op2-tbl tfoot td.op2-num{color:var(--text);font-family:var(--font-mono);font-weight:600;font-size:13px;white-space:nowrap;}
+/* 22.09, Влад: «три цифры внизу - зелёным подтверждённых, жёлтым не подтверждённых, красным
+   отбой» - три суммы вместо одной общей, цвет = цвет статуса, как везде в таблице. */
+.op2-tbl tfoot td.op2-mfoot{overflow:hidden;text-overflow:ellipsis;}
+.op2-mfoot-n{margin-left:12px;}
+.op2-mfoot-n:first-child{margin-left:0;}
+.op2-mfoot-ok{color:var(--tint-green);}
+.op2-mfoot-nz{color:var(--tint-amber);}
+.op2-mfoot-ot{color:var(--tint-red);}
 .op2-ell{overflow:hidden;text-overflow:ellipsis;}
 /* фильтруемые колонки - один вид данных */
 .op2-tbl .op2-person{display:block;overflow:hidden;text-overflow:ellipsis;}
@@ -224,6 +253,17 @@ table.op2-tbl{width:100%;table-layout:fixed;border-collapse:separate;border-spac
 .op2-tbl td.op2-tech{font-size:12.5px;}
 .op2-tbl td.op2-cust{font-size:12px;line-height:15px;hyphens:auto;overflow-wrap:break-word;}
 .op2-money{font-family:var(--font-mono);font-size:12.5px;font-weight:500;white-space:nowrap;font-variant-numeric:tabular-nums;}
+/* Светофор факт/прайс (22.09, admin-only, plans/2026-09-22-order-price-traffic-light.md) -
+   те же токены цвета, что и у op2-mrg.op2-good/op2-bad чуть ниже, своя пара классов, чтобы
+   не путать семантику "маржа наёмника" и "факт vs авторасчёт калькулятора". */
+.op2-money.op2-price-good{color:var(--tint-green);}
+.op2-money.op2-price-warn{color:var(--tint-amber);}
+.op2-money.op2-price-bad{color:var(--tint-red);font-weight:600;}
+/* маржа наёмника - второй строкой под ценой (Влад 21.09, превью вариант A): тот же моно,
+   мельче; цвет только у процента по порогу 23% (зелёный/красный), сумма остаётся белой */
+.op2-mrg{display:block;font-family:var(--font-mono);font-size:11px;font-weight:600;line-height:15px;white-space:nowrap;font-variant-numeric:tabular-nums;letter-spacing:.02em;cursor:help;}
+.op2-mrg.op2-good{color:var(--tint-green);}
+.op2-mrg.op2-bad{color:var(--tint-red);}
 /* маршрут: город жирнее, улица muted, регион в title */
 .op2-rt{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;line-height:16px;}
 .op2-rt .op2-arr{color:var(--muted);margin-right:3px;}
@@ -250,10 +290,40 @@ table.op2-tbl{width:100%;table-layout:fixed;border-collapse:separate;border-spac
 .op2-plate.op2-ok{color:var(--tint-green);}
 .op2-plate.op2-off{color:var(--tint-red);}
 .op2-plate.op2-was{color:var(--muted);text-decoration:line-through;}
+/* Автостатус задания через бота (пилот «Длинномеры», 22.09) - без класса = белый/не
+   отправлено (в тёмной теме это и есть var(--text)), дальше жёлтый/зелёный/красный.
+   Красный отдельным классом от .op2-off - тот означает отбой по машине, разный смысл. */
+.op2-plate.op2-bot-sent{color:var(--tint-amber);}
+.op2-plate.op2-bot-accepted{color:var(--tint-green);}
+.op2-plate.op2-bot-declined{color:var(--tint-red);}
 .op2-plate[title]{cursor:help;}
 .op2-tbl .op2-drv{display:block;line-height:16px;font-size:12.5px;color:var(--text);}
 .op2-tbl .op2-drv.op2-dim{color:var(--muted);}
 .op2-src{display:block;line-height:16px;font-size:11.5px;color:var(--muted);}
+/* «Где машина» - точная копия .rh-omni из files/index.html (Планировка, Omnicomm-
+   телематика). ЗАСКОУПЛЕНО под #page-order-plan - order-plan-v2.css грузится ОДНИМ <link>
+   на весь SPA (project_preview_css_class_global_collision_gotcha в памяти проекта -
+   неймспейс-коллизия классов между файлами уже ловили один раз, здесь та же ловушка
+   исключена явным скоупом, а не совпадением имён). */
+#page-order-plan .op2-src .rh-omni{margin-left:4px;}
+/* 22.09, Влад: значок в Задании выше, чем в Планировке - сравнил в пикселях (getBoundingClientRect):
+   было 20px против 13.5px там. Разгадка - НЕ разные размеры значка (padding/font-size/border
+   байт-в-байт совпадали), а разное line-height ОКРУЖЕНИЯ: в Планировке .rh1 задаёт line-height:1
+   на весь ряд, здесь значок сидит прямо в <td> с line-height:16px от .op2-tbl - без своего
+   line-height значок наследовал чужую высоту строки. Фикс - задать line-height ПРЯМО на самом
+   значке, чтобы больше не зависеть от того, в какой ячейке/таблице он окажется. */
+#page-order-plan .rh-omni{display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:10px;
+  font-family:var(--font-mono);font-size:9.5px;font-weight:600;line-height:1;white-space:nowrap;cursor:pointer;vertical-align:1px;}
+#page-order-plan .rh-omni i{width:5px;height:5px;border-radius:50%;flex:none;display:block;}
+#page-order-plan .rh-omni.live{background:rgba(55,138,221,.16);border:1px solid rgba(55,138,221,.4);color:var(--tint-blue);}
+#page-order-plan .rh-omni.live i{background:#378ADD;animation:opRhOmniBlink 1.3s ease-in-out infinite;}
+#page-order-plan .rh-omni.idle{background:rgba(239,159,39,.14);border:1px solid rgba(239,159,39,.4);color:var(--tint-amber);}
+#page-order-plan .rh-omni.idle i{background:#EF9F27;animation:opRhOmniHazard 1s step-end infinite;}
+#page-order-plan .rh-omni.off{background:rgba(139,137,128,.12);border:1px solid rgba(139,137,128,.3);color:var(--muted);opacity:.75;}
+#page-order-plan .rh-omni.off i{background:#8b8980;}
+@keyframes opRhOmniBlink{0%,100%{opacity:1;}50%{opacity:.25;}}
+@keyframes opRhOmniHazard{0%,100%{opacity:1;}50%{opacity:.15;}}
+@media(prefers-reduced-motion:reduce){#page-order-plan .rh-omni i{animation:none;}}
 .op2-tag{display:inline-block;font-family:var(--font-mono);font-size:9.5px;font-weight:600;letter-spacing:.08em;line-height:14px;padding:0 4px;border-radius:4px;margin-right:4px;vertical-align:1px;white-space:nowrap;}
 .op2-tag.op2-tg-hire{color:var(--tint-blue);background:rgba(55,138,221,.16);}
 .op2-tag.op2-tg-own{color:var(--muted);background:var(--bg4);}
@@ -685,3 +755,58 @@ body.op2-moving .op2-veh:not(.op2-lift){cursor:grabbing;}
   .op2-root .an-kpi,.op2-root .an-money{transition:none!important;}
   .op2-root .an-kpi:hover,.op2-root .an-money:hover{transform:none!important;}
 }
+
+/* ── Конструктор договора-заявки (модальное окно поверх drawer, Влад 21.09) ── */
+/* Клонирует drawer: тот же фон/рамка/тень/скругление, свой scrim уровнем выше (1600+). */
+.op2-cc-scrim{position:fixed;inset:0;background:rgba(0,0,0,.55);opacity:0;pointer-events:none;transition:opacity .28s ease;z-index:1600;}
+.op2-cc-scrim.op2-open{opacity:1;pointer-events:auto;}
+.op2-cc{position:fixed;left:50%;top:50%;width:600px;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);transform:translate(-50%,-50%) translateY(12px) scale(.98);opacity:0;pointer-events:none;background:var(--bg3);border:1px solid var(--border-strong);border-radius:16px;box-shadow:0 2px 6px rgba(0,0,0,.35),0 20px 50px rgba(0,0,0,.35);z-index:1601;display:flex;flex-direction:column;overflow:hidden;transition:transform .32s var(--ease-overshoot),opacity .2s ease;}
+.op2-cc.op2-open{transform:translate(-50%,-50%);opacity:1;pointer-events:auto;}
+@media (prefers-reduced-motion:reduce){.op2-cc{transition:none;}}
+.op2-cc .op2-cc-hd{padding:18px 22px 12px;border-bottom:1px solid var(--border);}
+.op2-cc .op2-cc-hd h3{margin:0;font-family:var(--font-display);font-size:14px;font-weight:600;}
+.op2-cc .op2-cc-hd .op2-sub{display:block;margin-top:5px;color:var(--muted);font-size:12px;line-height:1.45;}
+.op2-cc .op2-cc-body{overflow:auto;padding:4px 22px 6px;flex:1;}
+.op2-cc-sec{padding-top:14px;}
+.op2-cc-k{display:flex;align-items:baseline;gap:8px;margin-bottom:9px;}
+.op2-cc-k .op2-n{font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:.07em;color:var(--muted);}
+.op2-cc-k .op2-t{font-size:13px;font-weight:600;}
+.op2-cc-k .op2-auto{margin-left:auto;font-size:11px;color:var(--muted);font-family:var(--font-mono);}
+.op2-cc-dl{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.op2-cc-dl .op2-hint{grid-column:1/-1;font-size:11.5px;color:var(--muted);line-height:1.5;}
+.op2-cc-dl .op2-hint.op2-warn{color:var(--tint-red);}
+.op2-cc-opts{display:flex;flex-direction:column;gap:7px;}
+.op2-cc-opt{position:relative;display:flex;flex-direction:column;gap:5px;text-align:left;background:var(--bg2);border:1.5px solid var(--border);border-radius:12px;padding:11px 13px 11px 42px;cursor:pointer;transition:border-color .15s,background .15s;color:var(--text);font:inherit;width:100%;}
+.op2-cc-opt:hover{border-color:var(--border-strong);}
+.op2-cc-opt .op2-cc-radio{position:absolute;left:13px;top:13px;width:17px;height:17px;border-radius:50%;border:1.5px solid var(--border-strong);background:var(--bg3);display:flex;align-items:center;justify-content:center;}
+.op2-cc-opt .op2-cc-radio::after{content:'';width:8px;height:8px;border-radius:50%;background:var(--green);transform:scale(0);transition:transform .18s var(--ease-overshoot);}
+.op2-cc-opt.op2-on{border-color:var(--green);background:rgba(29,158,117,.10);}
+.op2-cc-opt.op2-on .op2-cc-radio{border-color:var(--green);}
+.op2-cc-opt.op2-on .op2-cc-radio::after{transform:scale(1);}
+.op2-cc-opt .op2-row1{display:flex;align-items:baseline;justify-content:space-between;gap:10px;}
+.op2-cc-opt .op2-ttl{font-size:13px;font-weight:600;}
+.op2-cc-opt .op2-badge{font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:2px 7px;border-radius:5px;white-space:nowrap;}
+.op2-cc-opt .op2-badge.op2-safe{background:rgba(29,158,117,.14);color:var(--green);}
+.op2-cc-opt .op2-badge.op2-risk{background:rgba(239,159,39,.16);color:var(--tint-amber);}
+.op2-cc-opt .op2-desc{font-size:11.5px;color:var(--muted);line-height:1.45;}
+.op2-cc-opt .op2-cc-step{display:none;align-items:center;gap:10px;margin-top:4px;padding-top:9px;border-top:1px dashed var(--border);}
+.op2-cc-opt.op2-on .op2-cc-step{display:flex;}
+.op2-cc-step .op2-lbl{font-size:11.5px;color:var(--muted);}
+.op2-cc-step .op2-ctl{display:flex;align-items:center;border:1px solid var(--border-strong);border-radius:8px;overflow:hidden;background:var(--bg3);}
+.op2-cc-step button{width:28px;height:28px;border:0;background:transparent;color:var(--text);font-size:15px;cursor:pointer;line-height:1;}
+.op2-cc-step button:hover{background:var(--bg4);}
+.op2-cc-step button:disabled{opacity:.3;cursor:default;}
+.op2-cc-step .op2-nn{width:34px;text-align:center;font-family:var(--font-mono);font-weight:600;font-size:13.5px;font-variant-numeric:tabular-nums;}
+.op2-cc-step .op2-cap{font-size:11px;color:var(--muted);}
+.op2-cc-opt .op2-cc-warn{display:none;gap:8px;margin-top:4px;padding-top:9px;border-top:1px dashed var(--border);font-size:11.5px;color:var(--tint-amber);line-height:1.45;}
+.op2-cc-opt.op2-on .op2-cc-warn{display:flex;}
+.op2-cc-pv{margin:16px 0 6px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:9px;}
+.op2-cc-pv .op2-k{font-family:var(--font-mono);font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);}
+.op2-cc-pvr{display:grid;grid-template-columns:88px 1fr;gap:10px;font-size:12.5px;line-height:1.45;padding-top:8px;border-top:1px dashed var(--border);}
+.op2-cc-pvr:first-of-type{border-top:0;padding-top:0;}
+.op2-cc-pvr .op2-l{font-family:var(--font-mono);font-size:10.5px;color:var(--muted);padding-top:2px;letter-spacing:.03em;}
+.op2-cc-pvr b{font-weight:600;}
+.op2-cc .op2-cc-ft{border-top:1px solid var(--border);padding:12px 22px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--bg3);}
+.op2-cc .op2-cc-ft .op2-meta{font-size:11px;color:var(--muted);line-height:1.5;margin-right:auto;font-family:var(--font-mono);}
+.op2-cc .op2-dbtn:disabled{opacity:.45;cursor:not-allowed;}
+@media (max-width:520px){.op2-cc-dl{grid-template-columns:1fr;}.op2-cc-pvr{grid-template-columns:1fr;gap:3px;}}

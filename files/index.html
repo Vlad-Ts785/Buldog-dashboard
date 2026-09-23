@@ -2306,6 +2306,7 @@ main:has(> #page-crm.active){max-width:none;}
 .dr-calc-result.show{display:flex;}
 .dr-calc-total{display:flex;align-items:baseline;justify-content:space-between;font-size:11px;color:var(--muted);}
 .dr-calc-total b{font-family:var(--font-mono);font-weight:600;font-size:18px;color:var(--green);font-variant-numeric:tabular-nums;}
+.dr-calc-mode{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.02em;}
 .dr-calc-route{font-size:10.5px;color:var(--muted);}
 .dr-calc-route b{color:var(--text);font-weight:500;}
 .dr-calc-legend{display:flex;flex-direction:column;gap:3px;}
@@ -4159,6 +4160,14 @@ main:has(> #page-dynamics.active){min-width:0;}
     <div class="sidebar-nav-item" onclick="showPage('column-head-payroll',this)" data-page="column-head-payroll" style="display:none">
       <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="15" height="8" rx="1.6"/><circle cx="6.5" cy="14" r="1.6"/><circle cx="13.5" cy="14" r="1.6"/></svg></span> Зарплата машинистов
     </div>
+    <!-- «ГПБ Комплект» - быстрые ответы по ставкам (21.09.2026,
+         plans/2026-09-21-gpb-quick-price-response.md). Тот же принцип видимости, что у
+         Рыщанова/руководителей коммерческих групп выше, но по email, не по фамилии/роли -
+         реальные переговорные цены с ключевым клиентом, видит только Влад лично
+         (applyRoleUI() сверяет D.email, не просто role==='admin' - см. коммент там же). -->
+    <div class="sidebar-nav-item" onclick="showPage('gpbq',this)" data-page="gpbq" style="display:none">
+      <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10l5-6 4 4 5-6"/><path d="M13 2h4v4"/><rect x="3" y="12" width="14" height="5.5" rx="1.4"/></svg></span> ГПБ Комплект
+    </div>
     <div class="sidebar-nav-item" onclick="showPage('clients',this)" data-page="clients">
       <span class="sidebar-nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="8" height="14" rx="1.2"/><path d="M12 8h3.2a.8.8 0 0 1 .8.8V17H12"/><line x1="6.6" y1="6.5" x2="9.4" y2="6.5"/><line x1="6.6" y1="9.5" x2="9.4" y2="9.5"/><line x1="6.6" y1="12.5" x2="9.4" y2="12.5"/><line x1="4" y1="17" x2="16" y2="17"/></svg></span> Клиенты
     </div>
@@ -4935,6 +4944,18 @@ main:has(> #page-dynamics.active){min-width:0;}
             <div class="hub-tile__sub">Сверка одного госномера по всем источникам - Штатка, сцепка, заказы, ГИС.</div>
             <div class="hub-tile__foot"><span>по запросу</span><span class="hub-tile__go">Открыть →</span></div>
           </div>
+          <!-- Партнёры (22.09, plans/2026-09-22-partners-directory.md, Влад: "инструмент для
+               логистов" - заведение наёмных контрагентов/техники/водителей). Мост в те же
+               Справочники (sprav_legal_entities/sprav_assets/sprav_people с явными флагами
+               is_partner_supplier/fleet_scope='partner'/роли partner_driver|partner_owner),
+               НЕ отдельная система - см. план. Видна admin+logist (id="partners-hub-tile",
+               скрывается для остальных ролей в applyRoleUI). -->
+          <div class="hub-tile" id="partners-hub-tile" onclick="chooseSpravTarget_('partners')">
+            <div class="hub-tile__icon hub-tile__icon--d"><svg width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="10" r="5"/><circle cx="13" cy="10" r="5"/></svg></div>
+            <div class="hub-tile__name">Партнёры</div>
+            <div class="hub-tile__sub">Наёмная техника - контрагенты-поставщики, их машины, их водители, документы.</div>
+            <div class="hub-tile__foot"><span>наём, не свой парк</span><span class="hub-tile__go">Открыть →</span></div>
+          </div>
         </div>
       </div>
       <button id="sprav-back-link" class="mp-ghostbtn" onclick="showSpravHub_()" style="display:none;margin-bottom:14px">← Все разделы</button>
@@ -5167,6 +5188,65 @@ main:has(> #page-dynamics.active){min-width:0;}
           </div>
           <div id="vc-result"></div>
         </div>
+
+        <!-- ── Партнёры (22.09, plans/2026-09-22-partners-directory.md, Влад: "инструмент
+             для логистов" - наёмная техника) - реестр контрагентов-поставщиков, их машин и
+             водителей, МОСТ в те же Справочники (не хардкод, не отдельная система) - см.
+             /api/sprav/partner_entity|person|asset на сервере. Три под-вкладки внутри ОДНОЙ
+             плитки хаба - тот же tab-bar canon, что "Поступления"/"Клиенты" (showReceiptsTab/
+             showCustTab), не новый паттерн. -->
+        <div id="dir-tab-partners" style="display:none">
+          <div class="tab-bar" id="partners-tab-bar">
+            <button class="tab-btn active" onclick="showPartnersTab_('entity',this)">Контрагенты</button>
+            <button class="tab-btn" onclick="showPartnersTab_('asset',this)">Техника</button>
+            <button class="tab-btn" onclick="showPartnersTab_('person',this)">Водители</button>
+          </div>
+          <div id="partners-loading" style="color:var(--muted);padding:20px 0;font-size:13px">Загрузка…</div>
+          <div id="partners-wrap" style="display:none">
+            <div id="partners-tab-entity">
+              <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:12px 0">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:var(--muted);margin-right:auto">
+                  <input autocomplete="off" type="checkbox" id="partners-entity-show-deleted" onchange="partnersEntityPaint_()"> Показать удалённых</label>
+                <button onclick="partnersEntityOpenForm_('entity', null)" data-nav-sound
+                  style="background:var(--green);color:#fff;border:none;border-radius:7px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer">+ Добавить партнёра</button>
+              </div>
+              <div style="overflow-x:auto">
+                <table class="tbl">
+                  <thead><tr><th>Название</th><th>Тип</th><th>Контакт</th><th class="num">Действия</th></tr></thead>
+                  <tbody id="partners-entity-body"></tbody>
+                </table>
+              </div>
+            </div>
+            <div id="partners-tab-asset" style="display:none">
+              <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:12px 0">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:var(--muted);margin-right:auto">
+                  <input autocomplete="off" type="checkbox" id="partners-asset-show-deleted" onchange="partnersAssetPaint_()"> Показать удалённых</label>
+                <button onclick="partnersAssetOpenForm_(null)" data-nav-sound
+                  style="background:var(--green);color:#fff;border:none;border-radius:7px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer">+ Добавить технику</button>
+              </div>
+              <div style="overflow-x:auto">
+                <table class="tbl">
+                  <thead><tr><th>Госномер</th><th>Тип</th><th>Марка/модель</th><th>Партнёр</th><th class="num">Действия</th></tr></thead>
+                  <tbody id="partners-asset-body"></tbody>
+                </table>
+              </div>
+            </div>
+            <div id="partners-tab-person" style="display:none">
+              <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:12px 0">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:var(--muted);margin-right:auto">
+                  <input autocomplete="off" type="checkbox" id="partners-person-show-deleted" onchange="partnersPersonPaint_()"> Показать удалённых</label>
+                <button onclick="partnersPersonOpenForm_(null)" data-nav-sound
+                  style="background:var(--green);color:#fff;border:none;border-radius:7px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer">+ Добавить водителя</button>
+              </div>
+              <div style="overflow-x:auto">
+                <table class="tbl">
+                  <thead><tr><th>ФИО</th><th>Телефон</th><th>Партнёр</th><th class="num">Действия</th></tr></thead>
+                  <tbody id="partners-person-body"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
     <!-- Всплывающий пикер выбора ресурса для вкладки "Сцепка" - один на страницу, как
@@ -5235,6 +5315,39 @@ main:has(> #page-dynamics.active){min-width:0;}
             <button type="button" class="drv-chip" data-group="role" data-value="mechanic" aria-pressed="false" onclick="drvRegChipClick_(this)">Механик</button>
             <button type="button" class="drv-chip" data-group="role" data-value="logist" aria-pressed="false" onclick="drvRegChipClick_(this)">Логист</button>
           </div></div>
+      </div>
+
+      <!-- Коммерческая группа (2026-09-22, Влад: "не хардкор в коде, а выбор, где сотрудник
+           находится, у какого руководителя в команде") - показывается только при роли
+           "Менеджер" (тот же приём, что drv-reg-driver-fields ниже для роли "Водитель").
+           Список руководителей в select - из DEPT_CFG на JS-стороне (drvRegFillHeadsSelect_),
+           не литерал в разметке - единственное место, где перечислены головы групп, теперь
+           само DEPT_CFG. -->
+      <div id="drv-reg-manager-fields" style="display:none">
+        <div class="asset-form-section">Коммерческая группа</div>
+        <div class="asset-form-grid">
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Руководитель группы</label>
+            <select id="drv-reg-commercial-head"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none">
+              <option value="">— нет команды —</option>
+            </select></div>
+        </div>
+      </div>
+
+      <!-- Автоколонна (2026-09-23, зеркало "Коммерческая группа" выше, но для логистов -
+           Влад: "Феськов будет начальником у Барыльченко и Дьячкова... чтобы не захаркорить
+           в код", plans/2026-09-23-fleet-head-role-feskov.md). Показывается только при роли
+           "Логист". Список голов в select - из FLEET_HEAD_SUR_FRONT_ на JS-стороне
+           (drvRegFillFleetHeadsSelect_), тот же приём, что коммерческая группа выше. -->
+      <div id="drv-reg-logist-fields" style="display:none">
+        <div class="asset-form-section">Автоколонна</div>
+        <div class="asset-form-grid">
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Руководитель автоколонн</label>
+            <select id="drv-reg-fleet-head"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none">
+              <option value="">— нет —</option>
+            </select></div>
+        </div>
       </div>
 
       <!-- Документы водителя (права/медсправка) - показываются только при роли "водитель"
@@ -5661,6 +5774,250 @@ main:has(> #page-dynamics.active){min-width:0;}
       </div>
       <button type="button" id="asset-del-btn" onclick="assetDelete_()" data-nav-sound style="display:none;margin-top:10px;width:100%;
         background:transparent;border:1px solid rgba(226,75,74,.4);color:var(--red);border-radius:8px;padding:9px;font-size:13px;cursor:pointer">Удалить</button>
+    </div>
+
+    <!-- ═══ ПАРТНЁРЫ (22.09, plans/2026-09-22-partners-directory.md) - три drawer-формы,
+         тот же канон .mp-drawer/.mp-drawer-wide + asset-form-section/asset-form-grid, что у
+         остальных трёх реестров Справочников выше - не новый паттерн. ═══ -->
+    <!-- Контрагент - юрлицо ИЛИ физлицо-владелец, переключатель типа (чипы, как "Роли" у
+         сотрудника). Тип виден только при создании - у существующей записи заблокирован
+         (это разные таблицы/эндпоинты, менять тип задним числом означало бы удалить одну
+         запись и завести другую - не делаем скрытым переключением). -->
+    <div class="mp-drawer-bk" id="partner-entity-bk" onclick="partnersEntityCloseForm_()"></div>
+    <div class="mp-drawer mp-drawer-wide" id="partner-entity-drawer">
+      <h3 id="partner-entity-drawer-title">Добавить партнёра</h3>
+      <div class="asset-form-section">Тип партнёра</div>
+      <div class="asset-form-grid" id="partner-entity-type-chips-wrap">
+        <div class="asset-form-full">
+          <div id="partner-entity-type-chips" style="display:flex;gap:8px;flex-wrap:wrap">
+            <button type="button" class="drv-chip" data-value="entity" aria-pressed="true" onclick="partnersEntityTypeSet_('entity')">Юрлицо (ООО, ИП)</button>
+            <button type="button" class="drv-chip" data-value="person" aria-pressed="false" onclick="partnersEntityTypeSet_('person')">Физлицо (частник)</button>
+          </div>
+        </div>
+      </div>
+      <div id="partner-entity-company-fields">
+        <div class="asset-form-section">Реквизиты</div>
+        <div class="asset-form-grid">
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Название *</label>
+            <input autocomplete="off" id="partner-entity-name" type="text" maxlength="150" placeholder="ООО «Перевозчик»"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Полное название</label>
+            <input autocomplete="off" id="partner-entity-fullname" type="text" maxlength="300"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">ИНН</label>
+            <input autocomplete="off" id="partner-entity-inn" type="text" inputmode="numeric" maxlength="12"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">КПП</label>
+            <input autocomplete="off" id="partner-entity-kpp" type="text" maxlength="9"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">ОГРН</label>
+            <input autocomplete="off" id="partner-entity-ogrn" type="text" maxlength="15"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+          <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Юридический адрес</label>
+            <input autocomplete="off" id="partner-entity-address" type="text" maxlength="500"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Директор (ФИО)</label>
+            <input autocomplete="off" id="partner-entity-director-name" type="text" maxlength="200"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Должность</label>
+            <input autocomplete="off" id="partner-entity-director-post" type="text" maxlength="200"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        </div>
+      </div>
+      <div id="partner-entity-person-fields" style="display:none">
+        <div class="asset-form-section">Данные владельца</div>
+        <div class="asset-form-grid">
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">ФИО *</label>
+            <input autocomplete="off" id="partner-owner-name" type="text" maxlength="150"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Телефон</label>
+            <input autocomplete="off" id="partner-owner-phone" type="text" maxlength="64" placeholder="+7…"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">ИНН (если есть, ИП/самозанятый)</label>
+            <input autocomplete="off" id="partner-owner-inn" type="text" inputmode="numeric" maxlength="12"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+          <div style="display:flex;align-items:flex-end">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text);padding-bottom:8px">
+              <input autocomplete="off" type="checkbox" id="partner-owner-also-driver"> Сам за рулём (тоже водитель)</label></div>
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Паспорт: серия</label>
+            <input autocomplete="off" id="partner-owner-passport-series" type="text" maxlength="4"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Номер</label>
+            <input autocomplete="off" id="partner-owner-passport-number" type="text" maxlength="6"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+          <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Кем выдан</label>
+            <input autocomplete="off" id="partner-owner-passport-issued-by" type="text" maxlength="300"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+          <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Дата выдачи</label>
+            <input autocomplete="off" id="partner-owner-passport-issued-at" type="date"
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark"></div>
+        </div>
+      </div>
+      <div id="partner-entity-docs-section" style="display:none">
+        <div class="asset-form-section" style="margin-bottom:10px">Документы (договор найма и т.п.)</div>
+        <div id="partner-entity-docs-list" style="margin-bottom:8px"></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="partner-entity-doc-type" style="background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 8px;color:var(--text);font-size:12px">
+            <option value="hire_agreement">Договор найма</option>
+            <option value="rent">Договор аренды</option>
+            <option value="passport">Паспорт</option>
+            <option value="other">Другое</option>
+          </select>
+          <input autocomplete="off" id="partner-entity-doc-file" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" style="flex:1;min-width:0;font-size:12px;color:var(--muted)">
+          <button type="button" onclick="partnerDocUpload_(partnersEntityDocKind_(), partnersEntityEditId_, 'partner-entity')"
+            style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:7px 12px;font-size:12px;cursor:pointer;white-space:nowrap">Загрузить</button>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">PDF/JPG/PNG/WEBP, до 15 МБ</div>
+        <div id="partner-entity-doc-error" style="display:none;color:var(--red);font-size:12px;margin-top:6px"></div>
+      </div>
+      <div class="asset-form-section">Административное</div>
+      <div class="asset-form-grid">
+        <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Заметка</label>
+          <input autocomplete="off" id="partner-entity-notes" type="text" maxlength="300" placeholder="необязательно"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+      </div>
+      <div id="partner-entity-error" style="display:none;color:var(--red);font-size:12px;margin-bottom:10px"></div>
+      <div style="display:flex;gap:10px;margin-top:6px">
+        <button type="button" onclick="partnersEntitySave_()" data-nav-sound
+          style="flex:1;background:var(--green);color:#fff;border:none;border-radius:8px;padding:10px;font-size:14px;font-weight:600;cursor:pointer">Сохранить</button>
+        <button type="button" onclick="partnersEntityCloseForm_()"
+          style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px 16px;font-size:14px;cursor:pointer">Отмена</button>
+      </div>
+      <button type="button" id="partner-entity-del-btn" onclick="partnersEntityDelete_()" data-nav-sound style="display:none;margin-top:10px;width:100%;
+        background:transparent;border:1px solid rgba(226,75,74,.4);color:var(--red);border-radius:8px;padding:9px;font-size:13px;cursor:pointer">Удалить партнёра</button>
+    </div>
+
+    <!-- Техника партнёра - госномер, минимум характеристик, привязка к владельцу (юрлицо
+         ИЛИ физлицо из уже заведённых партнёров - тот же select-приём, что owner_person_id/
+         legal_entity_id у обычной техники, просто список сужен до партнёрских записей). -->
+    <div class="mp-drawer-bk" id="partner-asset-bk" onclick="partnersAssetCloseForm_()"></div>
+    <div class="mp-drawer mp-drawer-wide" id="partner-asset-drawer">
+      <h3 id="partner-asset-drawer-title">Добавить технику партнёра</h3>
+      <div class="asset-form-section">Идентификация</div>
+      <div class="asset-form-grid">
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Госномер *</label>
+          <input autocomplete="off" id="partner-asset-id" type="text" maxlength="20" placeholder="М 844 ЕА 797"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Тип</label>
+          <select id="partner-asset-type" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none">
+            <option value="trailer">Полуприцеп</option>
+            <option value="tractor">Тягач</option>
+          </select></div>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Марка/модель</label>
+          <input autocomplete="off" id="partner-asset-manufacturer" type="text" maxlength="100"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">VIN</label>
+          <input autocomplete="off" id="partner-asset-vin" type="text" maxlength="17"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+        <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Название/характеристики</label>
+          <input autocomplete="off" id="partner-asset-name" type="text" maxlength="150" placeholder="например: Трал Faymonville, 4 оси"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Партнёр-владелец</label>
+          <select id="partner-asset-owner" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></select></div>
+      </div>
+      <div id="partner-asset-docs-section" style="display:none">
+        <div class="asset-form-section" style="margin-bottom:10px">Документы (СТС и т.п.)</div>
+        <div id="partner-asset-docs-list" style="margin-bottom:8px"></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="partner-asset-doc-type" style="background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 8px;color:var(--text);font-size:12px">
+            <option value="sts">СТС</option>
+            <option value="hire_agreement">Договор найма</option>
+            <option value="other">Другое</option>
+          </select>
+          <input autocomplete="off" id="partner-asset-doc-file" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" style="flex:1;min-width:0;font-size:12px;color:var(--muted)">
+          <button type="button" onclick="partnerDocUpload_('asset', partnersAssetEditId_, 'partner-asset')"
+            style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:7px 12px;font-size:12px;cursor:pointer;white-space:nowrap">Загрузить</button>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">PDF/JPG/PNG/WEBP, до 15 МБ</div>
+        <div id="partner-asset-doc-error" style="display:none;color:var(--red);font-size:12px;margin-top:6px"></div>
+      </div>
+      <div class="asset-form-section">Административное</div>
+      <div class="asset-form-grid">
+        <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Заметка</label>
+          <input autocomplete="off" id="partner-asset-notes" type="text" maxlength="300" placeholder="необязательно"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+      </div>
+      <div id="partner-asset-error" style="display:none;color:var(--red);font-size:12px;margin-bottom:10px"></div>
+      <div style="display:flex;gap:10px;margin-top:6px">
+        <button type="button" onclick="partnersAssetSave_()" data-nav-sound
+          style="flex:1;background:var(--green);color:#fff;border:none;border-radius:8px;padding:10px;font-size:14px;font-weight:600;cursor:pointer">Сохранить</button>
+        <button type="button" onclick="partnersAssetCloseForm_()"
+          style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px 16px;font-size:14px;cursor:pointer">Отмена</button>
+      </div>
+      <button type="button" id="partner-asset-del-btn" onclick="partnersAssetDelete_()" data-nav-sound style="display:none;margin-top:10px;width:100%;
+        background:transparent;border:1px solid rgba(226,75,74,.4);color:var(--red);border-radius:8px;padding:9px;font-size:13px;cursor:pointer">Удалить технику</button>
+    </div>
+
+    <!-- Водитель партнёра - привязан к партнёру-ЮРЛИЦУ (partner_entity_id); физлицо-
+         владелец без юрлица, который сам за рулём, заводится через чекбокс "Сам за рулём"
+         в форме партнёра выше, отдельной записи водителя не требует (см. план, «Что НЕ
+         делаем в v1» - водитель≠владелец только через юрлицо). -->
+    <div class="mp-drawer-bk" id="partner-person-bk" onclick="partnersPersonCloseForm_()"></div>
+    <div class="mp-drawer mp-drawer-wide" id="partner-person-drawer">
+      <h3 id="partner-person-drawer-title">Добавить водителя партнёра</h3>
+      <div class="asset-form-section">Личные данные</div>
+      <div class="asset-form-grid">
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">ФИО *</label>
+          <input autocomplete="off" id="partner-person-name" type="text" maxlength="150"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Телефон</label>
+          <input autocomplete="off" id="partner-person-phone" type="text" maxlength="64" placeholder="+7…"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+        <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Работает на партнёра (юрлицо)</label>
+          <select id="partner-person-entity" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></select></div>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">ИНН (если есть)</label>
+          <input autocomplete="off" id="partner-person-inn" type="text" inputmode="numeric" maxlength="12"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Вод. удостоверение №</label>
+          <input autocomplete="off" id="partner-person-license-num" type="text" maxlength="32"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Права действительны до</label>
+          <input autocomplete="off" id="partner-person-license-exp" type="date"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark"></div>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Паспорт: серия</label>
+          <input autocomplete="off" id="partner-person-passport-series" type="text" maxlength="4"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Номер</label>
+          <input autocomplete="off" id="partner-person-passport-number" type="text" maxlength="6"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'JetBrains Mono',monospace"></div>
+        <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Кем выдан</label>
+          <input autocomplete="off" id="partner-person-passport-issued-by" type="text" maxlength="300"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+        <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Дата выдачи</label>
+          <input autocomplete="off" id="partner-person-passport-issued-at" type="date"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark"></div>
+      </div>
+      <div id="partner-person-docs-section" style="display:none">
+        <div class="asset-form-section" style="margin-bottom:10px">Документы (паспорт, права)</div>
+        <div id="partner-person-docs-list" style="margin-bottom:8px"></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="partner-person-doc-type" style="background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 8px;color:var(--text);font-size:12px">
+            <option value="passport">Паспорт</option>
+            <option value="license">Вод. удостоверение</option>
+            <option value="other">Другое</option>
+          </select>
+          <input autocomplete="off" id="partner-person-doc-file" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" style="flex:1;min-width:0;font-size:12px;color:var(--muted)">
+          <button type="button" onclick="partnerDocUpload_('person', partnersPersonEditId_, 'partner-person')"
+            style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:7px 12px;font-size:12px;cursor:pointer;white-space:nowrap">Загрузить</button>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">PDF/JPG/PNG/WEBP, до 15 МБ</div>
+        <div id="partner-person-doc-error" style="display:none;color:var(--red);font-size:12px;margin-top:6px"></div>
+      </div>
+      <div class="asset-form-section">Административное</div>
+      <div class="asset-form-grid">
+        <div class="asset-form-full"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Заметка</label>
+          <input autocomplete="off" id="partner-person-notes" type="text" maxlength="300" placeholder="необязательно"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
+      </div>
+      <div id="partner-person-error" style="display:none;color:var(--red);font-size:12px;margin-bottom:10px"></div>
+      <div style="display:flex;gap:10px;margin-top:6px">
+        <button type="button" onclick="partnersPersonSave_()" data-nav-sound
+          style="flex:1;background:var(--green);color:#fff;border:none;border-radius:8px;padding:10px;font-size:14px;font-weight:600;cursor:pointer">Сохранить</button>
+        <button type="button" onclick="partnersPersonCloseForm_()"
+          style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px 16px;font-size:14px;cursor:pointer">Отмена</button>
+      </div>
+      <button type="button" id="partner-person-del-btn" onclick="partnersPersonDelete_()" data-nav-sound style="display:none;margin-top:10px;width:100%;
+        background:transparent;border:1px solid rgba(226,75,74,.4);color:var(--red);border-radius:8px;padding:9px;font-size:13px;cursor:pointer">Удалить водителя</button>
     </div>
 
     <!-- ═══ ДИНАМИКА ════════════════════════════════════════════ -->
@@ -6717,6 +7074,15 @@ main:has(> #page-dynamics.active){min-width:0;}
           <div class="clc2-scatter-note">Цена / км с грузом. Точка легла в облако - цена в рынке своей истории.</div>
         </div>
       </div>
+    </div>
+
+    <!-- ═══ ГПБ КОМПЛЕКТ - БЫСТРЫЕ ОТВЕТЫ ПО СТАВКАМ ═════════════════
+         21.09.2026, plans/2026-09-21-gpb-quick-price-response.md. Видит только Влад (email-
+         проверка в applyRoleUI() и на сервере, НЕ просто role==='admin' - см. комментарии
+         там же и в /api/client_rates). Данные - GET /api/client_rates?client=gpb, движок в
+         window.Gpbq (namespace .gpbq-*), рендерится в #gpbq-content при первом открытии. -->
+    <div id="page-gpbq" class="page">
+      <div id="gpbq-content"><p style="color:var(--muted);padding:16px">Данные загружаются...</p></div>
     </div>
 
     <!-- ═══ КЛИЕНТЫ ══════════════════════════════════════════════ -->
@@ -7958,7 +8324,11 @@ function renderBoard_(){
     clcSetSub_('округлено до 5 000 · '+L.a2+' км с грузом'
         +(L.loopCount>1?' · '+L.loopCount+' ходки':'')
         +(L.manual?' · ручной км':'')
-        +(L.mskOnly?' · Москва, только смена':''));
+        +(L.mskOnly?' · Москва, только смена':'')
+        // Влад, 22.09: "в калькуляторе где-то должно быть отражение, как считалось" -
+        // режим mkad/base от сервера (computeQuoteAuto, plans/2026-09-22-mkad-based-
+        // local-pricing.md) виден ВСЕГДА, не только когда он необычный.
+        +(L.mode==='mkad'?' · от МКАД':L.mode==='base'?' · от базы':''));
     clcButtons_(true);
     // дельта против прошлого расчёта (нейтральная - рост цены не «плохо»)
     if(clcPrevTotal_!=null&&clcPrevTotal_!==L.total){
@@ -8313,6 +8683,170 @@ window.Clc = {
 
 </script>
 
+<!-- ═══ ГПБ КОМПЛЕКТ - движок (21.09.2026, plans/2026-09-21-gpb-quick-price-response.md) ═══
+     Данные - GET /api/client_rates?client=gpb (доступ проверен и на сервере, и здесь только
+     по видимости вкладки - см. applyRoleUI()). Поиск по тексту, БЕЗ геометрии/интерполяции -
+     сознательно (см. план, "Что НЕ делаем в v1"): честно показываем то, что реально было, не
+     считаем "примерно" для новых направлений. -->
+<script>
+(function(){
+
+var _rates = null;      // сырые строки с сервера, загружаются один раз
+var _loaded = false;
+
+function esc_(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];
+}); }
+
+function fmtPrice_(n){ return (Number(n)||0).toLocaleString('ru-RU') + ' ₽'; }
+
+function median_(arr){
+  var a = arr.slice().sort(function(x,y){return x-y;});
+  var mid = Math.floor(a.length/2);
+  return a.length % 2 ? a[mid] : Math.round((a[mid-1]+a[mid])/2);
+}
+
+function shell_(){
+  var models = Array.from(new Set((_rates||[]).map(function(r){return r.model;}).filter(Boolean))).sort();
+  var opts = models.map(function(m){ return '<option value="'+esc_(m)+'">'+esc_(m)+'</option>'; }).join('');
+  document.getElementById('gpbq-content').innerHTML =
+    '<div class="card" style="margin-bottom:16px">' +
+      '<div class="sec-header">' +
+        '<div class="sec-title">Быстрый ответ по ставке ГПБ Комплект</div>' +
+        '<div class="muted" style="font-size:11px">поиск по реальным прошлым рейсам - без округления/интерполяции, честно "не найдено", если похожего не было</div>' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">' +
+        '<select id="gpbq-model" style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-size:14px;outline:none;min-width:160px">' +
+          '<option value="">Вся техника…</option>' + opts +
+        '</select>' +
+        '<input autocomplete="off" id="gpbq-dir" type="text" placeholder="направление, например: Лесосибирск, или Забайкальск - Рязань"' +
+          ' onkeydown="if(event.key===\'Enter\'){event.preventDefault();Gpbq.search();}"' +
+          ' style="flex:1;min-width:220px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-size:14px;outline:none">' +
+        '<button type="button" onclick="Gpbq.search()" data-nav-sound' +
+          ' style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer">Найти похожие</button>' +
+      '</div>' +
+      '<label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:12px;color:var(--muted);cursor:pointer">' +
+        '<input type="checkbox" id="gpbq-short-toggle" onchange="Gpbq.search()"> показать и короткое плечо (Маньчжурия ↔ Забайкальск/граница - растаможка, на порядок дешевле)' +
+      '</label>' +
+    '</div>' +
+    '<div id="gpbq-results"></div>';
+}
+
+function matchRow_(r, model, tokens, includeShort){
+  if (model && r.model !== model) return false;
+  if (!includeShort && r.leg_type === 'short') return false;
+  if (r.leg_type === 'other') return false;
+  if (!tokens.length) return true;
+  var hay = ((r.origin||'') + ' ' + (r.destination||'')).toLowerCase();
+  return tokens.every(function(t){ return hay.indexOf(t) >= 0; });
+}
+
+function search(){
+  var model = document.getElementById('gpbq-model').value;
+  var dirRaw = document.getElementById('gpbq-dir').value.trim().toLowerCase();
+  var includeShort = document.getElementById('gpbq-short-toggle').checked;
+  var tokens = dirRaw.split(/[\s,–—-]+/).filter(function(t){ return t.length > 2; });
+
+  var found = (_rates||[]).filter(function(r){ return matchRow_(r, model, tokens, includeShort); });
+  found.sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); });
+
+  var out = document.getElementById('gpbq-results');
+  if (!found.length){
+    out.innerHTML = '<div class="card"><div class="muted">Похожих рейсов не найдено. Считать вручную через Калькулятор или уточнить у Влада - не выдумываем цифру.</div></div>';
+    return;
+  }
+
+  var fullRows = found.filter(function(r){ return r.leg_type !== 'short'; });
+  var prices = fullRows.map(function(r){ return r.price; }).filter(function(p){ return p > 0; });
+  var vatSet = Array.from(new Set(found.map(function(r){ return r.vat_note || 'не указано'; })));
+  var confidenceNote = '';
+  if (prices.length && prices.length < 3) {
+    confidenceNote = '<div class="muted" style="margin-top:6px;color:var(--red)">Мало данных (' + prices.length + ' ' + (prices.length===1?'рейс':'рейса') + ') - не усредняем вслепую, смотрите сами строки ниже.</div>';
+  }
+  var vatNote = vatSet.length > 1
+    ? '<div class="muted" style="margin-top:4px;color:var(--red)">В выборке разные пометки НДС (' + vatSet.map(esc_).join(', ') + ') - не смешивайте в одну цифру молча.</div>'
+    : '';
+
+  var statsHtml = '';
+  if (prices.length) {
+    statsHtml =
+      '<div style="display:flex;gap:24px;flex-wrap:wrap;margin:10px 0">' +
+        '<div><div class="muted" style="font-size:11px">Мин</div><div style="font-size:18px;font-weight:700">' + fmtPrice_(Math.min.apply(null, prices)) + '</div></div>' +
+        '<div><div class="muted" style="font-size:11px">Медиана</div><div style="font-size:18px;font-weight:700;color:var(--green)">' + fmtPrice_(median_(prices)) + '</div></div>' +
+        '<div><div class="muted" style="font-size:11px">Макс</div><div style="font-size:18px;font-weight:700">' + fmtPrice_(Math.max.apply(null, prices)) + '</div></div>' +
+        '<div><div class="muted" style="font-size:11px">Найдено рейсов</div><div style="font-size:18px;font-weight:700">' + prices.length + '</div></div>' +
+      '</div>' + confidenceNote + vatNote;
+  }
+
+  var rowsHtml = found.map(function(r){
+    var legBadge = r.leg_type === 'short'
+      ? '<span style="color:var(--muted);font-size:11px">короткое плечо</span>'
+      : (r.leg_type === 'full_domestic' ? '<span style="color:var(--muted);font-size:11px">нестандартный</span>' : '');
+    return '<tr>' +
+      '<td>' + esc_(r.date||'') + '</td>' +
+      '<td>' + esc_(r.model||'-') + '</td>' +
+      '<td>' + esc_(r.origin||'') + ' → ' + esc_(r.destination||'') + ' ' + legBadge + '</td>' +
+      '<td style="font-weight:600">' + fmtPrice_(r.price) + '</td>' +
+      '<td class="muted" style="font-size:12px">' + esc_(r.vat_note||'') + '</td>' +
+      '<td class="muted" style="font-size:12px">' + (r.source === '1c' ? '1С' : 'почта') + (r.n > 1 ? ' (' + r.n + ' стр.)' : '') + '</td>' +
+    '</tr>';
+  }).join('');
+
+  var draftBtn = prices.length
+    ? '<button type="button" onclick="Gpbq.copyDraft()" data-nav-sound style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer;margin-top:10px">Скопировать черновик ответа</button>'
+    : '';
+
+  out.innerHTML =
+    '<div class="card">' + statsHtml +
+      '<div style="overflow-x:auto">' +
+        '<table class="tbl"><thead><tr><th>Дата</th><th>Техника</th><th>Маршрут</th><th>Цена</th><th>НДС</th><th>Источник</th></tr></thead>' +
+        '<tbody>' + rowsHtml + '</tbody></table>' +
+      '</div>' + draftBtn +
+    '</div>';
+
+  Gpbq._lastSearch = { model: model, dir: document.getElementById('gpbq-dir').value.trim(), prices: prices, count: prices.length, lastDate: fullRows[0] && fullRows[0].date };
+}
+
+function copyDraft(){
+  var s = Gpbq._lastSearch;
+  if (!s || !s.count) return;
+  var med = median_(s.prices);
+  var text = 'По маршруту ' + (s.dir || '(уточнить)') +
+    (s.model ? ' для ' + s.model : '') +
+    ' ориентировочная ставка ' + fmtPrice_(med) +
+    ' (по данным ' + s.count + ' ' + (s.count===1?'предыдущего рейса':'предыдущих рейсов') +
+    (s.lastDate ? ', последний - ' + s.lastDate : '') + ').' +
+    ' Это цена основного плеча от границы/Забайкальска - если техника ещё в Маньчжурии, отдельно прибавьте растаможку (короткое плечо).' +
+    ' Точную цену подтвердим после уточнения деталей.';
+  navigator.clipboard.writeText(text).then(function(){
+    if (typeof toast === 'function') toast('Черновик скопирован', 0);
+  }).catch(function(){
+    if (typeof toast === 'function') toast('Не удалось скопировать - выделите текст вручную', 1);
+  });
+}
+
+async function initPage(){
+  if (_loaded) return; // как Clc.initPage() - инициализация один раз за сессию страницы
+  document.getElementById('gpbq-content').innerHTML = '<p style="color:var(--muted);padding:16px">Загрузка ставок…</p>';
+  try {
+    var url = YARD_API_BASE + '/client_rates?client=gpb&session_token=' + encodeURIComponent(SESSION_TOKEN);
+    var res = await fetch(url);
+    var data = await res.json();
+    if (!res.ok) throw new Error(data && data.error ? data.error : 'Ошибка сервера');
+    _rates = data.rates || [];
+    _loaded = true;
+    shell_();
+  } catch (e) {
+    document.getElementById('gpbq-content').innerHTML =
+      '<div class="card"><div style="color:var(--red)">Не удалось загрузить ставки: ' + esc_(e.message || e) + '</div></div>';
+  }
+}
+
+window.Gpbq = { initPage: initPage, search: search, copyDraft: copyDraft, _lastSearch: null };
+
+})();
+</script>
+
 <!-- Drawer «Пропавшие клиенты» личной страницы (превью 29.08): тяжёлый ленивый
      запрос уходит только по явному открытию, а не по клику в общем ряду вкладок. -->
 <div class="mp-drawer-bk" id="mp-lost-bk" onclick="mpCloseLostDrawer_()"></div>
@@ -8393,6 +8927,7 @@ const PAGE_TITLES = {
   'column-head-payroll': 'Зарплата машинистов',
   'order-plan': 'Задание',
   calculator: 'Калькулятор стоимости перевозки',
+  gpbq: 'ГПБ Комплект - быстрые ответы по ставкам',
   debt: 'Дебиторка',
 };
 
@@ -8797,6 +9332,9 @@ async function loadData() {
     hideLoginScreen();
     document.getElementById('error-block').style.display = 'none';
     applyData(fetched, { skipIfUnchanged: true });
+    // Состав коммерческих групп (2026-09-22) - тихо, в фоне, перерисовывает то, что сейчас
+    // открыто, если подтянувшиеся данные реально изменили DEPT_CFG.members (см. функцию).
+    ensureCommercialHeadTeams_(function() { if (D) render(); });
     // "Поступления" - на экране уже живые данные из основного payload (D.receipts, посчитаны
     // Apps Script), это МГНОВЕННЫЙ фолбэк. В фоне, не блокируя загрузку страницы, пробуем
     // подменить на свежий расчёт с сервера (2026-08-18, см. /api/receipts) - если сервер не
@@ -9035,6 +9573,15 @@ function isRyschanowEntry_(entry) {
 // (renderMyPageCommercialHead_), тот же принцип, что у Рыщанова/Васина выше (не флейвор
 // renderMyPageManager). Зеркало commercialHeadTeam_ на бэкенде.
 var COMMERCIAL_HEAD_SUR_FRONT_ = ['ахтамова', 'гусейнова'];
+// Голова над начальниками автоколонн (2026-09-23, Феськов над Барыльченко+Дьячковым, см.
+// plans/2026-09-23-fleet-head-role-feskov.md) - тот же принцип, что COLUMN_HEAD_SUR_FRONT_/
+// COMMERCIAL_HEAD_SUR_FRONT_: "кто ГОЛОВА" - короткий хардкод-список, состав команды под
+// головой (fleetHeadTeams_) - из БД (/api/fleet_head_teams), не хардкод.
+var FLEET_HEAD_SUR_FRONT_ = ['феськов'];
+var FLEET_HEAD_LABELS_ = { 'феськов': 'Феськов Андрей' };
+function isFleetHeadEntry_(entry) {
+  return !!entry && entry.type === 'logist' && FLEET_HEAD_SUR_FRONT_.indexOf(entry.name.trim().split(' ')[0].toLowerCase()) >= 0;
+}
 // CRM для менеджеров - поимённо (Влад, 04.09: «открой доступ к CRM Филипчук пока только»).
 // Тот же список продублирован на сервере (CRM_MANAGER_SURNAMES в api/server.js) - фронт
 // только прячет пункт меню, право решает сервер. Расширять - в ОБЕИХ точках.
@@ -9165,6 +9712,47 @@ function monthKeyToRangeStr_(period) {
 // выпадающий список для admin-предпросмотра, с автовыбором своей записи для ролей
 // manager/logist после входа по логину. Тело менеджера - renderMyPageManager (старая
 // вёрстка без изменений), тело логиста - новая renderMyPageLogist ниже.
+// Заявления водителей «сдал путевой» из бота MAX (22.09, plans/2026-09-22-max-bot-buttons-
+// and-driver-binding.md) - waybill_claims на сервере. Это НЕ факт из 1С: has_waybill остаётся
+// источником истины, пометка лишь показывает, что водитель отметил лист сданным (и прислал
+// ли фото). Кэш на текущий месяц; первый вызов тянет данные и перерисовывает страницу
+// колбэком, пока данных нет - пометок просто нет (таблица не ждёт).
+var waybillClaims_ = { month: null, loading: false, byName: null };
+function waybillClaimsNameKey_(s){ return String(s || '').trim().toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' '); }
+function waybillClaimsMap_(rerender){
+  var d = new Date();
+  var month = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+  if (waybillClaims_.month === month && waybillClaims_.byName) return waybillClaims_.byName;
+  if (!waybillClaims_.loading && SESSION_TOKEN){
+    waybillClaims_.loading = true;
+    fetchFromYardApi_('/waybill_claims', { month: month }).then(function(r){
+      waybillClaims_.loading = false;
+      if (!r.ok || !r.data || !Array.isArray(r.data.claims)) return;
+      var byName = {};
+      r.data.claims.forEach(function(c){
+        if (!c.order_id) return; // фото без выбранного рейса - в счёт не идёт
+        var key = waybillClaimsNameKey_(c.driver_name);
+        if (!byName[key]) byName[key] = { claimed: 0, photos: [] };
+        if (c.claimed_at) byName[key].claimed++;
+        if (c.has_photo) byName[key].photos.push(c.id);
+      });
+      waybillClaims_.month = month; waybillClaims_.byName = byName;
+      if (typeof rerender === 'function') rerender();
+    }).catch(function(){ waybillClaims_.loading = false; });
+  }
+  return null;
+}
+function waybillClaimBadge_(map, driverName){
+  if (!map) return '';
+  var c = map[waybillClaimsNameKey_(driverName)];
+  if (!c || (!c.claimed && !c.photos.length)) return '';
+  // Тот же приём открытия файла по сессии, что у сканов Справочников (person_document_file).
+  var photos = c.photos.map(function(id){
+    var href = YARD_API_BASE + '/waybill_claim_photo?session_token=' + encodeURIComponent(SESSION_TOKEN) + '&id=' + encodeURIComponent(id);
+    return '<a href="' + href.replace(/"/g, '&quot;') + '" target="_blank" rel="noopener" title="Фото листа из MAX" style="text-decoration:none">📎</a>';
+  }).join(' ');
+  return '<div class="muted" style="font-size:11px;font-weight:400">водитель отметил в MAX: сдал ' + c.claimed + (photos ? ' · фото ' + photos : '') + '</div>';
+}
 function renderMyPage() {
   if (!D || !D.orders) return;
   var el = document.getElementById('my-page-content');
@@ -11825,7 +12413,7 @@ function renderMyPageRyschanow(el, current, selectorHtml, d) {
         : noWaybillDrivers.map(function(dv) {
             var pct = dv.orders > 0 ? Math.round(dv.no_waybill/dv.orders*100) : 0;
             var pCls = pct >= 50 ? 'red' : pct >= 25 ? 'amber' : '';
-            return '<tr><td><b>'+dv.name+'</b></td><td class="num red"><b>'+dv.no_waybill+'</b></td><td class="num muted">'+dv.orders+'</td><td class="num '+pCls+'">'+pct+'%</td></tr>';
+            return '<tr><td><b>'+dv.name+'</b>'+waybillClaimBadge_(waybillClaimsMap_(renderMyPage), dv.name)+'</td><td class="num red"><b>'+dv.no_waybill+'</b></td><td class="num muted">'+dv.orders+'</td><td class="num '+pCls+'">'+pct+'%</td></tr>';
           }).join(''))+
       '</tbody></table></div>';
   } else if (myPageRyschTab === 'no_waybill_suppliers') {
@@ -12130,7 +12718,7 @@ async function renderMyPageVasin(el, current, selectorHtml) {
         var pctCls = pct >= 50 ? 'red' : pct >= 25 ? 'amber' : '';
         return '<tr>'+
           '<td class="muted" style="font-size:12px">'+(i+1)+'</td>'+
-          '<td><b>'+dr.name+'</b></td>'+
+          '<td><b>'+dr.name+'</b>'+waybillClaimBadge_(waybillClaimsMap_(renderMyPage), dr.name)+'</td>'+
           '<td class="num red"><b>'+dr.no_waybill+'</b></td>'+
           '<td class="num muted">'+dr.orders+'</td>'+
           '<td class="num '+pctCls+'">'+pct+'%</td>'+
@@ -12310,6 +12898,10 @@ function mechRows_() {
       reason: active ? (active.repair_reason || '') : '',
       setBy: active ? mechShortName_(active.created_by_name || active.created_by) : '',
       setAt: active ? mechFmtDT_(active.created_at_label) : '',
+      // статус механика из бота MAX (22.09): 'in_progress' | 'done' | '' + кто/когда
+      mechStatus: active ? (active.repair_status || '') : '',
+      mechStatusBy: active ? mechShortName_(active.repair_status_by || '') : '',
+      mechStatusAt: active && active.repair_status_at ? mechFmtDT_(active.repair_status_at) : '',
       partsCur: Math.round(c.parts || 0), fuelCur: Math.round(c.fuel || 0),
       partsPrev: Math.round(p.parts || 0), fuelPrev: Math.round(p.fuel || 0),
     };
@@ -12463,7 +13055,8 @@ function renderMyPageMechanic_() {
     return '<tr onclick="mechOpenDrawer_(\'' + mechEsc_(r.gos) + '\')"><td class="mono">' + mechEsc_(r.gos) + '</td><td>' + mechEsc_(r.marka) + (r.long ? ' <span class="muted">борт</span>' : '') + '</td>' +
       '<td><span class="mech-pill mech-pill--' + mechStatusKey_(r.status) + '">' + r.status + '</span></td><td class="mono muted">' + r.since + '</td>' +
       '<td class="num ' + mechDaysCls_(r.days) + '">' + r.days + '</td><td>' + dl + '</td>' +
-      '<td class="mech-ellip" title="' + mechEsc_(r.reason) + '">' + (r.reason ? mechEsc_(r.reason) : '<span class="muted">не указана</span>') + '</td>' +
+      '<td class="mech-ellip" title="' + mechEsc_(r.reason) + '">' + (r.reason ? mechEsc_(r.reason) : '<span class="muted">не указана</span>') +
+        (r.mechStatus ? ' <span class="muted">· ' + (r.mechStatus === 'done' ? 'готово' : 'в работе') + (r.mechStatusBy ? ' (' + mechEsc_(r.mechStatusBy) + ')' : '') + '</span>' : '') + '</td>' +
       '<td class="muted">' + mechEsc_(r.setBy || '—') + '</td></tr>';
   }).join('');
   var overdueHtml = overdue.length ? '<div class="mech-overdue">' + overdue.map(function(o) {
@@ -12603,7 +13196,8 @@ function mechRenderDrawer_() {
     (inRep ? rowH('В ремонте с', r.since, r.days + ' дн.', r.days > 7 ? 'mech-row__aux--bad' : '') +
              rowH('Плановый выход', r.deadline || '<span class="muted">не задан</span>', r.deadlineSoon ? 'скоро' : '', r.deadlineSoon ? 'mech-row__aux--warn' : '') +
              rowH('Причина', r.reason ? mechEsc_(r.reason) : '<span class="muted">не указана</span>') +
-             rowH('Поставил', mechEsc_(r.setBy || '—'), mechEsc_(r.setAt)) : '') +
+             rowH('Поставил', mechEsc_(r.setBy || '—'), mechEsc_(r.setAt)) +
+             (r.mechStatus ? rowH('Механик', (r.mechStatus === 'done' ? 'Готово' : 'В работе') + (r.mechStatusBy ? ' · ' + mechEsc_(r.mechStatusBy) : ''), mechEsc_(r.mechStatusAt)) : '') : '') +
     rowH('Водитель', mechEsc_(r.driver) || '—') + rowH('Прицеп', mechEsc_(r.trailer) || '—') +
     '<div class="mech-row mech-row--total"><span class="mech-row__label">Запчасти, месяц</span><span class="mech-row__leader"></span><span class="mech-row__value">' + mechFr_(r.partsCur) + '</span><span class="mech-row__aux">' + prevLbl + ' ' + mechFmtN_(r.partsPrev) + '</span></div>' +
     rowH('Топливо, месяц', mechFr_(r.fuelCur), prevLbl + ' ' + mechFmtN_(r.fuelPrev)) +
@@ -12859,13 +13453,19 @@ function applyRoleUI() {
     // ("личная станица потом планировка и потом калькулятор"), без "План задание" - в
     // отличие от обычных логистов/менеджеров, у которых он есть по умолчанию ниже.
     var isColumnHeadViewer = COLUMN_HEAD_SUR_FRONT_.indexOf(curPersonSur) >= 0;
+    // Голова над начальниками автоколонн (23.09, Феськов, plans/2026-09-23-fleet-head-role-
+    // feskov.md) - Влад: "видеть планировку логистов, технику, динамику, зарплаты водителей,
+    // пока без личной страницы" - ни одна из уже существующих ролей это не покрывает.
+    var isFleetHeadViewer = FLEET_HEAD_SUR_FRONT_.indexOf(curPersonSur) >= 0;
     // Собрано в список ОДИН раз (план 2026-08-28, Этап 1) - тот же список используется и
     // для фильтра пунктов сайдбара ниже, и для гварда навигации после него, чтобы они не
     // могли разойтись. Калькулятор не зависит от серверных данных (D.role) - считает
     // офлайн в браузере, поэтому доступен и менеджерам/логистам, а не только админ-панели.
     // 11.09, Влад: «Задание» - у всех менеджеров, старших и логистов; начальникам автоколонн - НЕ надо.
-    var allowedPages_ = ['my-page', 'calculator', 'logistics-plan'];
-    if (!isColumnHeadViewer) allowedPages_.push('order-plan');
+    // 23.09: "пока без личной страницы" у Феськова - 'my-page' в базовый набор НЕ попадает
+    // именно для него (у всех остальных менеджеров/логистов остаётся, как раньше).
+    var allowedPages_ = isFleetHeadViewer ? ['calculator', 'logistics-plan'] : ['my-page', 'calculator', 'logistics-plan'];
+    if (!isColumnHeadViewer && !isFleetHeadViewer) allowedPages_.push('order-plan');
     if (isRyschanowViewer) allowedPages_.push('ryschanow-salary');
     if (isCommercialHeadViewer) allowedPages_.push('commercial-head-salary', 'commercial-head-debt');
     // «Суды» (15.09, Влад: «открой тоже Лиане и Айнур») - руководителям коммерческих групп.
@@ -12880,10 +13480,22 @@ function applyRoleUI() {
     // "Дебиторка" (#ch-debt-hub) ведёт туда напрямую - см. chDebtOpenCourt_().
     if (isCommercialHeadViewer) allowedPages_.push('debt');
     // «Зарплата машинистов» (15.09) - отдельный пункт меню, тот же принцип, что у Рыщанова/
-    // руководителей коммерческих групп выше.
-    if (isColumnHeadViewer) allowedPages_.push('column-head-payroll');
+    // руководителей коммерческих групп выше. 23.09 - и у головы над начальниками автоколонн
+    // (chPayrollBuckets_ сама объединит оба сегмента для неё, см. ниже по файлу).
+    if (isColumnHeadViewer || isFleetHeadViewer) allowedPages_.push('column-head-payroll');
+    // «Техника»/«Динамика» (23.09) - у Феськова, курирующего ОБА сегмента, доступ ко всему
+    // парку целиком (backend /api/vehicle_timeline и payload.vehicles уже отдают ей полный
+    // набор, не по сегментам - см. api/server.js). Обычным логистам/менеджерам эти пункты
+    // по-прежнему недоступны (не входят в allowedPages_ вообще).
+    if (isFleetHeadViewer) allowedPages_.push('vehicles', 'dynamics');
     var isManagerViewer_ = previewing ? !!(viewAsEntry && viewAsEntry.type === 'manager') : (D.role === 'manager');
     if (isManagerViewer_ || CRM_MANAGER_SUR_FRONT_.indexOf(curPersonSur) >= 0) allowedPages_.push('crm');
+    // «Партнёры» (22.09, plans/2026-09-22-partners-directory.md) - логист получает доступ к
+    // разделу «Справочники», но внутри хаба видит ТОЛЬКО плитку «Партнёры» (см.
+    // showSpravHub_ - там же скрываются остальные 7 плиток для этой роли). Не manager -
+    // Влад подтвердил «admin + logist», не шире.
+    var isLogistViewer_ = previewing ? !!(viewAsEntry && viewAsEntry.type === 'logist') : (D.role === 'logist');
+    if (isLogistViewer_) allowedPages_.push('directory');
     // "Проверка контрагента" (05.09, Влад: "менеджерам со старшим") - всем менеджерам, включая
     // руководителей коммерческих групп (у них та же роль manager); сервер тоже пускает только
     // admin/manager (requireRole_ на /api/counterparty/*).
@@ -12915,7 +13527,10 @@ function applyRoleUI() {
     // не входит в allowedPages_, значит showPage('my-page') сработает как и раньше.
     var activePageEl_ = document.querySelector('.page.active');
     var activePageId_ = activePageEl_ ? activePageEl_.id.replace(/^page-/, '') : null;
-    if (!activePageId_ || allowedPages_.indexOf(activePageId_) < 0) showPage('my-page');
+    // 23.09 - у Феськова нет 'my-page' в allowedPages_ ("пока без личной страницы") - дефолт
+    // для неё был бы страницей, которую сама же функция потом спрячет. Приземляем на
+    // Планировку (первый содержательный пункт её меню).
+    if (!activePageId_ || allowedPages_.indexOf(activePageId_) < 0) showPage(isFleetHeadViewer ? 'logistics-plan' : 'my-page');
   } else {
     if (sidebarLabel) sidebarLabel.textContent = 'Админ панель';
     // Персональные пункты (Зарплата/ДЗ Рыщанова и руководителей коммерческих групп) - только
@@ -12928,6 +13543,12 @@ function applyRoleUI() {
       item.style.display = personalOnlyPages.indexOf(item.getAttribute('data-page')) >= 0 ? 'none' : '';
     });
     document.querySelectorAll('.sidebar-nav-section').forEach(function(s){ s.style.display = ''; });
+    // «ГПБ Комплект» (21.09.2026) - НЕ personalOnlyPages выше (та ветка для показа при
+    // "Смотреть как сотрудник"), сверяем реальный email вошедшего с /api/main_payload -
+    // единственный admin-аккаунт сегодня и есть Влад, но проверяем явно по email, не по
+    // role==='admin', чтобы не открыть цены ГПБ молча, если появится второй admin.
+    var gpbqNavItem_ = document.querySelector('.sidebar-nav-item[data-page="gpbq"]');
+    if (gpbqNavItem_) gpbqNavItem_.style.display = (D && D.email === 'dlinnomertral@gmail.com') ? '' : 'none';
   }
   applyMenuConfig_();   // кастом меню поверх ролевого фильтра (05.09), см. блок "Кастомизация меню"
   updateViewAsButton_();
@@ -13081,8 +13702,17 @@ function setViewAs(name, type) {
     // входе или смене цели предпросмотра ВСЕГДА возвращаемся на "Личную страницу" (то же
     // место, куда попадает настоящий вход manager/logist/mechanic) - независимо от того,
     // какая страница была открыта ДО переключения, её больше не унести через "Смотреть как".
-    var myPageNav_ = document.querySelector('.sidebar-nav-item[data-page="my-page"]');
-    showPage('my-page', myPageNav_);
+    // 23.09 - голова над начальниками автоколонн (Феськов) "Личной страницы" не имеет
+    // ("пока без личной страницы") - этот же безусловный переход раньше уводил её
+    // предпросмотр на несуществующую для неё страницу (тот же класс бага, что описан выше,
+    // только для нового вьюера, которого не было на момент фикса 21.09).
+    if (isFleetHeadEntry_(viewAsEntry)) {
+      var lpNav_ = document.querySelector('.sidebar-nav-item[data-page="logistics-plan"]');
+      showPage('logistics-plan', lpNav_);
+    } else {
+      var myPageNav_ = document.querySelector('.sidebar-nav-item[data-page="my-page"]');
+      showPage('my-page', myPageNav_);
+    }
   }
 }
 document.addEventListener('click', function(ev) {
@@ -14783,7 +15413,7 @@ function renderDirectory() {
 // "Поступления" (showReceiptsTab) - все уже отрисованы после renderDirectory(),
 // переключение вкладки - просто показ/скрытие, без повторного похода на сервер.
 function showDirTab(tab, el) {
-  ['people', 'legal', 'assets', 'fleet', 'plans', 'playbook', 'check'].forEach(function(t) {
+  ['people', 'legal', 'assets', 'fleet', 'plans', 'playbook', 'check', 'partners'].forEach(function(t) {
     var panel = document.getElementById('dir-tab-' + t);
     if (panel) panel.style.display = (t === tab) ? '' : 'none';
   });
@@ -14794,6 +15424,9 @@ function showDirTab(tab, el) {
   if (tab === 'plans' && !plansLoadedOnce_) plansTabLoad_(plansMonth_ || plansCurMonthKey_());
   if (tab === 'playbook' && !playbookLoadedOnce_) playbookTabLoad_();
   if (tab === 'check') vehicleCheckFillGosList_();
+  // «Партнёры» (22.09) - свой источник (/sprav/state?scope=partner), не тот срез, что уже
+  // тянет renderDirectory() для остальных вкладок - грузится лениво при первом открытии.
+  if (tab === 'partners' && !partnersLoadedOnce_) partnersLoad_();
 }
 
 // ── «Справочники» - полноэкранный хаб-выбор раздела (13.09, тот же канон, что «Зарплата»
@@ -14805,6 +15438,7 @@ function showDirTab(tab, el) {
 var SPRAV_HUB_LABELS_ = {
   people: 'Сотрудники', legal: 'Юридические лица', assets: 'Материальные средства',
   fleet: 'Сцепка', plans: 'Планы продаж', playbook: 'Плейбук продаж', check: 'Проверка техники',
+  partners: 'Партнёры',
 };
 function showSpravHub_() {
   var hub = document.getElementById('sprav-hub');
@@ -14814,6 +15448,15 @@ function showSpravHub_() {
   if (back) back.style.display = 'none';
   if (card) card.style.display = 'none';
   setText('page-title', 'Справочники');
+  // Логист (22.09, вкладка «Партнёры», см. applyRoleUI - только эта роль получает pushed
+  // 'directory' в allowedPages_) видит в этом хабе ТОЛЬКО плитку «Партнёры» - свой парк/
+  // сотрудники/юрлица ему тут не нужны и не положены (Влад: «admin + logist», не шире).
+  var previewingLogist_ = !!(D && D.role === 'admin' && typeof viewAsEntry !== 'undefined' && viewAsEntry && viewAsEntry.type === 'logist');
+  var logistOnly_ = !!(D && D.role === 'logist') || previewingLogist_;
+  document.querySelectorAll('#sprav-hub .hub-tile').forEach(function(t) {
+    if (t.id === 'partners-hub-tile') return;
+    t.style.display = logistOnly_ ? 'none' : '';
+  });
 }
 function chooseSpravTarget_(tab) {
   var hub = document.getElementById('sprav-hub');
@@ -15403,6 +16046,8 @@ function drvRegChipClick_(el) {
   } else {
     el.setAttribute('aria-pressed', el.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
     if (el.getAttribute('data-value') === 'driver') drvRegToggleDriverFields_();
+    if (el.getAttribute('data-value') === 'manager') drvRegToggleManagerFields_();
+    if (el.getAttribute('data-value') === 'logist') drvRegToggleLogistFields_();
   }
 }
 function drvRegStatusValue_() {
@@ -15416,6 +16061,47 @@ function drvRegToggleDriverFields_() {
   var box = document.getElementById('drv-reg-driver-fields');
   var checked = drvRegRoles_().indexOf('driver') >= 0;
   if (box) box.style.display = checked ? '' : 'none';
+}
+// Коммерческая группа (2026-09-22) - тот же приём, что drvRegToggleDriverFields_ выше, для
+// роли "Менеджер". drvRegFillHeadsSelect_ - опции select строятся ИЗ DEPT_CFG (единственное
+// место, где перечислены головы групп), не хардкод в разметке.
+function drvRegToggleManagerFields_() {
+  var box = document.getElementById('drv-reg-manager-fields');
+  var checked = drvRegRoles_().indexOf('manager') >= 0;
+  if (box) box.style.display = checked ? '' : 'none';
+}
+function drvRegFillHeadsSelect_(selectedHead) {
+  var sel = document.getElementById('drv-reg-commercial-head');
+  if (!sel) return;
+  var opts = '<option value="">— нет команды —</option>';
+  DEPT_CFG.forEach(function(cfg) {
+    if (!cfg.head || cfg.solo) return;
+    var key = cfg.head.toLowerCase();
+    opts += '<option value="' + key + '"' + (selectedHead === key ? ' selected' : '') + '>' + cfg.name + '</option>';
+  });
+  sel.innerHTML = opts;
+}
+// Автоколонна (2026-09-23) - тот же приём, что drvRegToggleManagerFields_/
+// drvRegFillHeadsSelect_ выше, для роли "Логист". FLEET_HEAD_SUR_FRONT_/FLEET_HEAD_LABELS_ -
+// короткий список "кто голова" (то же решение, что COLUMN_HEAD_SUR_FRONT_ - редкое событие,
+// заводится вручную). В отличие от коммерческой группы - фронту НЕ нужен живой состав
+// команды под головой (fleet_head влияет только на серверные ответы - allowedPages_/
+// chPayrollBuckets_ проверяют саму фамилию по FLEET_HEAD_SUR_FRONT_, не список отчитывающихся
+// ей начальников автоколонн), поэтому здесь нет аналога ensureCommercialHeadTeams_.
+function drvRegToggleLogistFields_() {
+  var box = document.getElementById('drv-reg-logist-fields');
+  var checked = drvRegRoles_().indexOf('logist') >= 0;
+  if (box) box.style.display = checked ? '' : 'none';
+}
+function drvRegFillFleetHeadsSelect_(selectedHead) {
+  var sel = document.getElementById('drv-reg-fleet-head');
+  if (!sel) return;
+  var opts = '<option value="">— нет —</option>';
+  FLEET_HEAD_SUR_FRONT_.forEach(function(sur) {
+    var label = (FLEET_HEAD_LABELS_ && FLEET_HEAD_LABELS_[sur]) || sur;
+    opts += '<option value="' + sur + '"' + (selectedHead === sur ? ' selected' : '') + '>' + label + '</option>';
+  });
+  sel.innerHTML = opts;
 }
 // Дата увольнения имеет смысл только при статусе "уволен(а)" - тот же приём, что у
 // полей документов водителя выше (drvRegToggleDriverFields_).
@@ -15510,6 +16196,10 @@ function drvRegOpenForm_(id) {
     x.setAttribute('aria-pressed', roles.indexOf(x.getAttribute('data-value')) >= 0 ? 'true' : 'false');
   });
   drvRegToggleDriverFields_();
+  drvRegFillHeadsSelect_(d ? (d.commercial_head || '') : '');
+  drvRegToggleManagerFields_();
+  drvRegFillFleetHeadsSelect_(d ? (d.fleet_head || '') : '');
+  drvRegToggleLogistFields_();
   document.getElementById('drv-reg-license-num').value = d ? (d.license_number || '') : '';
   document.getElementById('drv-reg-license-exp').value = d ? (d.license_expiry || '') : '';
   document.getElementById('drv-reg-medical-exp').value = d ? (d.medical_expiry || '') : '';
@@ -15567,6 +16257,8 @@ function drvRegSave_() {
     passport_issued_by: document.getElementById('drv-reg-passport-issued-by').value.trim(),
     passport_issued_at: document.getElementById('drv-reg-passport-issued-at').value,
     passport_department_code: document.getElementById('drv-reg-passport-dept-code').value.trim(),
+    commercial_head: document.getElementById('drv-reg-commercial-head').value,
+    fleet_head: document.getElementById('drv-reg-fleet-head').value,
     notes: document.getElementById('drv-reg-notes').value.trim(),
   };
   if (fleetDriversEditId_ && drvRegEditSnapshot_) params.expected_updated_at = drvRegEditSnapshot_;
@@ -15582,6 +16274,11 @@ function drvRegSave_() {
     p2Toast(fleetDriversEditId_ ? 'Изменения сохранены' : 'Сотрудник добавлен', 'green');
     drvRegCloseForm_();
     renderDirectory();
+    // Состав коммерческих групп мог измениться этим сохранением (2026-09-22) - сбрасываем
+    // клиентский кэш, следующий заход на "По менеджерам"/личную страницу руководителя
+    // подтянет уже свежий DEPT_CFG.members, не будет ждать перезагрузки всей страницы.
+    commercialHeadTeamsLoaded_ = false;
+    ensureCommercialHeadTeams_(function() { render(); });
   }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
 }
 
@@ -16284,7 +16981,7 @@ function assetRestore_(id) {
 // добавить сами эти файлы СДСКи в базу". Файлы лежат на диске сервера, не в MySQL -
 // список тянем при каждом открытии карточки существующей записи (см. assetOpenForm_),
 // не кэшируем на клиенте. ═══
-var ASSET_DOC_TYPE_LABELS_ = { sts: 'СТС', rent: 'Договор аренды', other: 'Другое' };
+var ASSET_DOC_TYPE_LABELS_ = { sts: 'СТС', rent: 'Договор аренды', hire_agreement: 'Договор найма', other: 'Другое' };
 function assetDocFmtBytes_(n) {
   n = Number(n) || 0;
   return n >= 1024 * 1024 ? (n / (1024 * 1024)).toFixed(1).replace('.', ',') + ' МБ'
@@ -16368,7 +17065,7 @@ function assetDocDelete_(id) {
 // stamp - уже встречается в данных (загружено до появления этого UI, см. reference_
 // buldog_stamp_signature_contract_template) - подпись добавлена, чтобы не показывать сырой
 // ключ вместо названия.
-var LEGAL_DOC_TYPE_LABELS_ = { rent: 'Договор аренды', stamp: 'Печать/подпись', other: 'Другое' };
+var LEGAL_DOC_TYPE_LABELS_ = { rent: 'Договор аренды', stamp: 'Печать/подпись', hire_agreement: 'Договор найма', other: 'Другое' };
 function legalDocsLoad_(legalId) {
   var list = document.getElementById('legal-docs-list');
   list.innerHTML = '<div class="muted" style="font-size:12px">Загрузка…</div>';
@@ -16424,6 +17121,507 @@ function legalDocDelete_(id) {
     if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось удалить'; errEl.style.display = ''; return; }
     p2Toast('Файл удалён', 'amber');
     legalDocsLoad_(legalId);
+  }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+
+// ═══ ПАРТНЁРЫ (22.09, plans/2026-09-22-partners-directory.md) - реестр наёмных
+// контрагентов/техники/водителей, мост в те же Справочники (не хардкод). Три под-реестра
+// внутри одной вкладки хаба - тот же CRUD-канон Paint_/OpenForm_/Save_, что у Сотрудники/
+// Юрлица/Материальные средства выше, просто на узких /sprav/partner_* маршрутах и с
+// отдельным срезом данных (scope=partner - НЕ пересекается с обычным spravPeople_/
+// spravLegalEntities_/spravAssets_, те теперь всегда исключают партнёров). ═══
+var partnersLegalEntities_ = null, partnersPeople_ = null, partnersAssets_ = null, partnersLoadedOnce_ = false;
+function showPartnersTab_(tab, el) {
+  ['entity', 'asset', 'person'].forEach(function(t) {
+    var panel = document.getElementById('partners-tab-' + t);
+    if (panel) panel.style.display = (t === tab) ? '' : 'none';
+  });
+  document.querySelectorAll('#partners-tab-bar .tab-btn').forEach(function(b) { b.classList.remove('active'); });
+  if (el) el.classList.add('active');
+}
+function partnersLoad_() {
+  partnersLoadedOnce_ = true;
+  var loadingEl = document.getElementById('partners-loading');
+  var wrapEl = document.getElementById('partners-wrap');
+  if (loadingEl) { loadingEl.style.display = ''; loadingEl.textContent = 'Загрузка…'; }
+  if (wrapEl) wrapEl.style.display = 'none';
+  fetchFromYardApi_('/sprav/state', { scope: 'partner' }).then(function(r) {
+    if (!r.ok) { if (loadingEl) loadingEl.textContent = 'Ошибка загрузки: ' + (r.data && r.data.error || 'неизвестная'); return; }
+    partnersLegalEntities_ = r.data.legal_entities || [];
+    partnersPeople_ = r.data.people || [];
+    partnersAssets_ = r.data.assets || [];
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (wrapEl) wrapEl.style.display = '';
+    partnersEntityPaint_();
+    partnersAssetPaint_();
+    partnersPersonPaint_();
+  }).catch(function(e) { if (loadingEl) loadingEl.textContent = 'Ошибка сети: ' + e.message; });
+}
+function partnersOwnerLabel_(legalEntityId, ownerPersonId) {
+  if (legalEntityId) { var le = (partnersLegalEntities_ || []).filter(function(x) { return String(x.id) === String(legalEntityId); })[0]; return le ? le.name : legalEntityId; }
+  if (ownerPersonId) { var p = (partnersPeople_ || []).filter(function(x) { return String(x.id) === String(ownerPersonId); })[0]; return p ? p.full_name : ownerPersonId; }
+  return '—';
+}
+
+// ── Контрагенты (юрлицо ИЛИ физлицо-владелец в одной таблице) ──
+function partnersEntityPaint_() {
+  var body = document.getElementById('partners-entity-body');
+  if (!body) return;
+  var showDeleted = document.getElementById('partners-entity-show-deleted').checked;
+  var entities = (partnersLegalEntities_ || []).filter(function(le) { return showDeleted || !le.is_deleted; })
+    .map(function(le) { return { kind: 'entity', id: le.id, name: le.name, contact: le.inn ? ('ИНН ' + le.inn) : '—', is_deleted: le.is_deleted, risk: le }; });
+  var owners = (partnersPeople_ || []).filter(function(p) { return (p.roles || []).indexOf('partner_owner') >= 0 && (showDeleted || !p.is_deleted); })
+    .map(function(p) { return { kind: 'person', id: p.id, name: p.full_name, contact: p.phone || '—', is_deleted: p.is_deleted, risk: null }; });
+  var rows = entities.concat(owners).sort(function(a, b) { return (a.name || '').localeCompare(b.name || '', 'ru'); });
+  if (!rows.length) { body.innerHTML = '<tr><td colspan="4" class="muted" style="padding:14px">Партнёров пока нет — добавьте первого</td></tr>'; return; }
+  body.innerHTML = rows.map(function(row) {
+    var idEsc = pageEscAttr_(row.id);
+    var typeLabel = row.kind === 'entity' ? 'Юрлицо' : 'Физлицо';
+    // Светофор Checko (22.09, Влад: "прогони партнёров через Чеко") - тот же
+    // legalRiskMarkHtml_/legalRiskTooltip_, что уже рисует точку на вкладке «Юридические
+    // лица» - не новый компонент. Точки нет вовсе, если ещё не проверяли (не серая
+    // "неизвестно"-точка - см. правило проекта про цвет только по делу).
+    var riskDot = (row.risk && row.risk.risk_light)
+      ? ' <span title="' + pageEscAttr_(legalRiskTooltip_(row.risk)) + '" style="display:inline-block;vertical-align:middle;margin-left:2px">' +
+        legalRiskMarkHtml_(row.risk.risk_light, 8, '', row.risk.risk_marker) + '</span>' : '';
+    var actions = row.is_deleted
+      ? '<button onclick="partnersEntityRestore_(\'' + row.kind + '\',\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);color:var(--green);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Восстановить</button>'
+      : '<button onclick="partnersEntityOpenForm_(\'' + row.kind + '\',\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Править</button>';
+    return '<tr' + (row.is_deleted ? spravDeletedRowStyle_() : '') + '>' +
+      '<td><b>' + pageEsc_(row.name) + '</b>' + riskDot + (row.is_deleted ? ' <span class="muted" style="font-size:11px">(удалено)</span>' : '') + '</td>' +
+      '<td class="muted">' + typeLabel + '</td>' +
+      '<td class="muted">' + pageEsc_(row.contact) + '</td>' +
+      '<td class="num">' + actions + '</td>' +
+    '</tr>';
+  }).join('');
+}
+var partnersEntityEditKind_ = null, partnersEntityEditId_ = null, partnersEntityEditSnapshot_ = null;
+function partnersEntityTypeSet_(type) {
+  document.querySelectorAll('#partner-entity-type-chips .drv-chip').forEach(function(x) {
+    x.setAttribute('aria-pressed', x.getAttribute('data-value') === type ? 'true' : 'false');
+  });
+  document.getElementById('partner-entity-company-fields').style.display = type === 'entity' ? '' : 'none';
+  document.getElementById('partner-entity-person-fields').style.display = type === 'person' ? '' : 'none';
+}
+function partnersEntityTypeGet_() {
+  var on = document.querySelector('#partner-entity-type-chips .drv-chip[aria-pressed="true"]');
+  return on ? on.getAttribute('data-value') : 'entity';
+}
+function partnersEntityDocKind_() { return partnersEntityEditKind_ === 'person' ? 'person' : 'legal_entity'; }
+function partnersEntityOpenForm_(kind, id) {
+  partnersEntityEditKind_ = id ? kind : null;  // тип свободен к выбору только для новой записи
+  partnersEntityEditId_ = id || null;
+  var rec = null;
+  if (id && kind === 'entity') rec = (partnersLegalEntities_ || []).filter(function(x) { return String(x.id) === String(id); })[0];
+  if (id && kind === 'person') rec = (partnersPeople_ || []).filter(function(x) { return String(x.id) === String(id); })[0];
+  partnersEntityEditSnapshot_ = rec ? rec.updated_at : null;
+  document.getElementById('partner-entity-drawer-title').textContent = rec ? 'Править партнёра' : 'Добавить партнёра';
+  document.getElementById('partner-entity-type-chips-wrap').style.display = rec ? 'none' : '';
+  partnersEntityTypeSet_(kind === 'person' ? 'person' : 'entity');
+  document.getElementById('partner-entity-name').value = (kind === 'entity' && rec) ? rec.name : '';
+  document.getElementById('partner-entity-fullname').value = (kind === 'entity' && rec) ? (rec.full_name || '') : '';
+  document.getElementById('partner-entity-inn').value = (kind === 'entity' && rec) ? (rec.inn || '') : '';
+  document.getElementById('partner-entity-kpp').value = (kind === 'entity' && rec) ? (rec.kpp || '') : '';
+  document.getElementById('partner-entity-ogrn').value = (kind === 'entity' && rec) ? (rec.ogrn || '') : '';
+  document.getElementById('partner-entity-address').value = (kind === 'entity' && rec) ? (rec.legal_address || '') : '';
+  document.getElementById('partner-entity-director-name').value = (kind === 'entity' && rec) ? (rec.director_name || '') : '';
+  document.getElementById('partner-entity-director-post').value = (kind === 'entity' && rec) ? (rec.director_post || '') : '';
+  document.getElementById('partner-owner-name').value = (kind === 'person' && rec) ? rec.full_name : '';
+  document.getElementById('partner-owner-phone').value = (kind === 'person' && rec) ? (rec.phone || '') : '';
+  document.getElementById('partner-owner-inn').value = (kind === 'person' && rec) ? (rec.inn || '') : '';
+  document.getElementById('partner-owner-passport-series').value = (kind === 'person' && rec) ? (rec.passport_series || '') : '';
+  document.getElementById('partner-owner-passport-number').value = (kind === 'person' && rec) ? (rec.passport_number || '') : '';
+  document.getElementById('partner-owner-passport-issued-by').value = (kind === 'person' && rec) ? (rec.passport_issued_by || '') : '';
+  document.getElementById('partner-owner-passport-issued-at').value = (kind === 'person' && rec) ? (rec.passport_issued_at || '') : '';
+  document.getElementById('partner-owner-also-driver').checked = (kind === 'person' && rec) ? ((rec.roles || []).indexOf('partner_driver') >= 0) : false;
+  document.getElementById('partner-entity-notes').value = rec ? (rec.notes || '') : '';
+  document.getElementById('partner-entity-error').style.display = 'none';
+  document.getElementById('partner-entity-doc-error').style.display = 'none';
+  document.getElementById('partner-entity-docs-section').style.display = rec ? '' : 'none';
+  if (rec) partnerDocsLoad_(kind === 'person' ? 'person' : 'legal_entity', id, 'partner-entity'); else document.getElementById('partner-entity-docs-list').innerHTML = '';
+  document.getElementById('partner-entity-del-btn').style.display = rec ? '' : 'none';
+  var bk = document.getElementById('partner-entity-bk'), dr = document.getElementById('partner-entity-drawer');
+  drvBlockForeignAutofill_(dr);
+  bk.classList.add('show');
+  setTimeout(function() { dr.classList.add('show'); }, 40);
+  setTimeout(function() { document.getElementById((kind === 'person') ? 'partner-owner-name' : 'partner-entity-name').focus(); }, 120);
+}
+function partnersEntityCloseForm_() {
+  var bk = document.getElementById('partner-entity-bk'), dr = document.getElementById('partner-entity-drawer');
+  if (bk) bk.classList.remove('show');
+  if (dr) dr.classList.remove('show');
+}
+function partnersEntitySave_() {
+  var errEl = document.getElementById('partner-entity-error');
+  errEl.style.display = 'none';
+  var type = partnersEntityEditId_ ? partnersEntityEditKind_ : partnersEntityTypeGet_();
+  if (type === 'entity') {
+    var name = document.getElementById('partner-entity-name').value.trim();
+    if (!name) { errEl.textContent = 'Название обязательно'; errEl.style.display = ''; return; }
+    var id = partnersEntityEditId_ || fleetGenId_('le_');
+    var params = {
+      id: id, name: name,
+      full_name: document.getElementById('partner-entity-fullname').value.trim(),
+      inn: document.getElementById('partner-entity-inn').value.trim(),
+      kpp: document.getElementById('partner-entity-kpp').value.trim(),
+      ogrn: document.getElementById('partner-entity-ogrn').value.trim(),
+      legal_address: document.getElementById('partner-entity-address').value.trim(),
+      director_name: document.getElementById('partner-entity-director-name').value.trim(),
+      director_post: document.getElementById('partner-entity-director-post').value.trim(),
+      notes: document.getElementById('partner-entity-notes').value.trim(),
+    };
+    if (partnersEntityEditId_ && partnersEntityEditSnapshot_) params.expected_updated_at = partnersEntityEditSnapshot_;
+    postToYardApi_('/sprav/partner_entity', params).then(function(r) {
+      if (!r.ok) { errEl.textContent = 'Не удалось сохранить: ' + (r.data && r.data.error || 'ошибка сервера'); errEl.style.display = ''; return; }
+      p2Toast(partnersEntityEditId_ ? 'Изменения сохранены' : 'Партнёр добавлен', 'green');
+      partnersEntityCloseForm_();
+      partnersLoad_();
+    }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+  } else {
+    var pname = document.getElementById('partner-owner-name').value.trim();
+    if (!pname) { errEl.textContent = 'ФИО обязательно'; errEl.style.display = ''; return; }
+    var pid = partnersEntityEditId_ || fleetGenId_('p_');
+    var roles = ['partner_owner'];
+    if (document.getElementById('partner-owner-also-driver').checked) roles.push('partner_driver');
+    var pparams = {
+      id: pid, name: pname, roles: roles.join(','),
+      phone: document.getElementById('partner-owner-phone').value.trim(),
+      inn: document.getElementById('partner-owner-inn').value.trim(),
+      passport_series: document.getElementById('partner-owner-passport-series').value.trim(),
+      passport_number: document.getElementById('partner-owner-passport-number').value.trim(),
+      passport_issued_by: document.getElementById('partner-owner-passport-issued-by').value.trim(),
+      passport_issued_at: document.getElementById('partner-owner-passport-issued-at').value,
+      notes: document.getElementById('partner-entity-notes').value.trim(),
+    };
+    if (partnersEntityEditId_ && partnersEntityEditSnapshot_) pparams.expected_updated_at = partnersEntityEditSnapshot_;
+    postToYardApi_('/sprav/partner_person', pparams).then(function(r) {
+      if (!r.ok) { errEl.textContent = 'Не удалось сохранить: ' + (r.data && r.data.error || 'ошибка сервера'); errEl.style.display = ''; return; }
+      p2Toast(partnersEntityEditId_ ? 'Изменения сохранены' : 'Партнёр добавлен', 'green');
+      partnersEntityCloseForm_();
+      partnersLoad_();
+    }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+  }
+}
+function partnersEntityDelete_() {
+  if (!partnersEntityEditId_) return;
+  var kind = partnersEntityEditKind_;
+  if (!confirm('Удалить партнёра? Запись переедет в архив - её можно будет восстановить через "Показать удалённых".')) return;
+  var errEl = document.getElementById('partner-entity-error');
+  var path = kind === 'person' ? '/sprav/partner_person_delete' : '/sprav/partner_entity_delete';
+  postToYardApi_(path, { id: partnersEntityEditId_ }).then(function(r) {
+    if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось удалить'; errEl.style.display = ''; return; }
+    p2Toast('Перемещено в архив', 'amber');
+    partnersEntityCloseForm_();
+    partnersLoad_();
+  }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+function partnersEntityRestore_(kind, id) {
+  var path = kind === 'person' ? '/sprav/partner_person_restore' : '/sprav/partner_entity_restore';
+  postToYardApi_(path, { id: id }).then(function(r) {
+    if (!r.ok) { p2ToastErr((r.data && r.data.error) || 'Не удалось восстановить'); return; }
+    p2Toast('Восстановлено', 'green');
+    partnersLoad_();
+  }).catch(function(e) { p2ToastErr('Ошибка сети: ' + e.message); });
+}
+
+// ── Техника партнёра ──
+function partnersAssetPaint_() {
+  var body = document.getElementById('partners-asset-body');
+  if (!body) return;
+  var showDeleted = document.getElementById('partners-asset-show-deleted').checked;
+  var rows = (partnersAssets_ || []).filter(function(a) { return showDeleted || !a.is_deleted; });
+  if (!rows.length) { body.innerHTML = '<tr><td colspan="5" class="muted" style="padding:14px">Техники партнёров пока нет</td></tr>'; return; }
+  body.innerHTML = rows.map(function(a) {
+    var idEsc = pageEscAttr_(a.id);
+    var owner = partnersOwnerLabel_(a.legal_entity_id, a.owner_person_id);
+    var actions = a.is_deleted
+      ? '<button onclick="partnersAssetRestore_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);color:var(--green);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Восстановить</button>'
+      : '<button onclick="partnersAssetOpenForm_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Править</button>';
+    return '<tr' + (a.is_deleted ? spravDeletedRowStyle_() : '') + '>' +
+      '<td><b>' + pageEsc_(a.id) + '</b>' + (a.is_deleted ? ' <span class="muted" style="font-size:11px">(удалено)</span>' : '') + '</td>' +
+      '<td class="muted">' + (ASSET_TYPE_LABELS_[a.asset_type] || a.asset_type) + '</td>' +
+      '<td class="muted">' + (a.name ? pageEsc_(a.name) : '—') + '</td>' +
+      '<td class="muted">' + pageEsc_(owner) + '</td>' +
+      '<td class="num">' + actions + '</td>' +
+    '</tr>';
+  }).join('');
+}
+function partnersOwnerOptions_(selectedType, selectedId) {
+  var html = '<option value="">— не указано —</option>';
+  (partnersLegalEntities_ || []).forEach(function(le) {
+    if (le.is_deleted && !(selectedType === 'entity' && String(le.id) === String(selectedId))) return;
+    var v = 'entity:' + le.id;
+    html += '<option value="' + pageEscAttr_(v) + '"' + (selectedType === 'entity' && String(le.id) === String(selectedId) ? ' selected' : '') + '>' + pageEsc_(le.name) + ' (юрлицо)</option>';
+  });
+  (partnersPeople_ || []).forEach(function(p) {
+    if ((p.roles || []).indexOf('partner_owner') < 0) return;
+    if (p.is_deleted && !(selectedType === 'person' && String(p.id) === String(selectedId))) return;
+    var v = 'person:' + p.id;
+    html += '<option value="' + pageEscAttr_(v) + '"' + (selectedType === 'person' && String(p.id) === String(selectedId) ? ' selected' : '') + '>' + pageEsc_(p.full_name) + ' (физлицо)</option>';
+  });
+  return html;
+}
+function partnersEntityOnlyOptions_(selectedId) {
+  var list = (partnersLegalEntities_ || []).filter(function(le) { return !le.is_deleted || String(le.id) === String(selectedId); });
+  return '<option value="">— без юрлица (частник) —</option>' + list.map(function(le) {
+    return '<option value="' + pageEsc_(le.id) + '"' + (String(le.id) === String(selectedId) ? ' selected' : '') + '>' + pageEsc_(le.name) + '</option>';
+  }).join('');
+}
+var partnersAssetEditId_ = null, partnersAssetEditSnapshot_ = null;
+function partnersAssetOpenForm_(id) {
+  partnersAssetEditId_ = id || null;
+  var a = id ? (partnersAssets_ || []).filter(function(x) { return String(x.id) === String(id); })[0] : null;
+  partnersAssetEditSnapshot_ = a ? a.updated_at : null;
+  document.getElementById('partner-asset-drawer-title').textContent = a ? 'Править технику партнёра' : 'Добавить технику партнёра';
+  var idInput = document.getElementById('partner-asset-id');
+  idInput.value = a ? a.id : '';
+  idInput.disabled = !!a;
+  document.getElementById('partner-asset-type').value = a ? a.asset_type : 'trailer';
+  document.getElementById('partner-asset-manufacturer').value = a ? (a.manufacturer || '') : '';
+  document.getElementById('partner-asset-vin').value = a ? (a.vin || '') : '';
+  document.getElementById('partner-asset-name').value = a ? (a.name || '') : '';
+  var ownerType = a && a.legal_entity_id ? 'entity' : (a && a.owner_person_id ? 'person' : '');
+  var ownerId = a ? (a.legal_entity_id || a.owner_person_id || '') : '';
+  document.getElementById('partner-asset-owner').innerHTML = partnersOwnerOptions_(ownerType, ownerId);
+  document.getElementById('partner-asset-notes').value = a ? (a.notes || '') : '';
+  document.getElementById('partner-asset-error').style.display = 'none';
+  document.getElementById('partner-asset-doc-error').style.display = 'none';
+  document.getElementById('partner-asset-docs-section').style.display = a ? '' : 'none';
+  if (a) partnerDocsLoad_('asset', a.id, 'partner-asset'); else document.getElementById('partner-asset-docs-list').innerHTML = '';
+  document.getElementById('partner-asset-del-btn').style.display = a ? '' : 'none';
+  var bk = document.getElementById('partner-asset-bk'), dr = document.getElementById('partner-asset-drawer');
+  drvBlockForeignAutofill_(dr);
+  bk.classList.add('show');
+  setTimeout(function() { dr.classList.add('show'); }, 40);
+  setTimeout(function() { (idInput.disabled ? document.getElementById('partner-asset-manufacturer') : idInput).focus(); }, 120);
+}
+function partnersAssetCloseForm_() {
+  var bk = document.getElementById('partner-asset-bk'), dr = document.getElementById('partner-asset-drawer');
+  if (bk) bk.classList.remove('show');
+  if (dr) dr.classList.remove('show');
+}
+function partnersAssetSave_() {
+  var errEl = document.getElementById('partner-asset-error');
+  errEl.style.display = 'none';
+  var id = partnersAssetEditId_ || document.getElementById('partner-asset-id').value.trim();
+  if (!id) { errEl.textContent = 'Госномер обязателен'; errEl.style.display = ''; return; }
+  var ownerVal = document.getElementById('partner-asset-owner').value;
+  var ownerParts = ownerVal ? ownerVal.split(':') : ['', ''];
+  var params = {
+    id: id, asset_type: document.getElementById('partner-asset-type').value,
+    manufacturer: document.getElementById('partner-asset-manufacturer').value.trim(),
+    vin: document.getElementById('partner-asset-vin').value.trim(),
+    name: document.getElementById('partner-asset-name').value.trim(),
+    legal_entity_id: ownerParts[0] === 'entity' ? ownerParts[1] : '',
+    owner_person_id: ownerParts[0] === 'person' ? ownerParts[1] : '',
+    notes: document.getElementById('partner-asset-notes').value.trim(),
+  };
+  if (partnersAssetEditId_ && partnersAssetEditSnapshot_) params.expected_updated_at = partnersAssetEditSnapshot_;
+  postToYardApi_('/sprav/partner_asset', params).then(function(r) {
+    if (!r.ok) { errEl.textContent = 'Не удалось сохранить: ' + (r.data && r.data.error || 'ошибка сервера'); errEl.style.display = ''; return; }
+    p2Toast(partnersAssetEditId_ ? 'Изменения сохранены' : 'Техника добавлена', 'green');
+    partnersAssetCloseForm_();
+    partnersLoad_();
+  }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+function partnersAssetDelete_() {
+  if (!partnersAssetEditId_) return;
+  if (!confirm('Удалить технику партнёра? Запись переедет в архив.')) return;
+  var errEl = document.getElementById('partner-asset-error');
+  postToYardApi_('/sprav/partner_asset_delete', { id: partnersAssetEditId_ }).then(function(r) {
+    if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось удалить'; errEl.style.display = ''; return; }
+    p2Toast('Перемещено в архив', 'amber');
+    partnersAssetCloseForm_();
+    partnersLoad_();
+  }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+function partnersAssetRestore_(id) {
+  postToYardApi_('/sprav/partner_asset_restore', { id: id }).then(function(r) {
+    if (!r.ok) { p2ToastErr((r.data && r.data.error) || 'Не удалось восстановить'); return; }
+    p2Toast('Восстановлено', 'green');
+    partnersLoad_();
+  }).catch(function(e) { p2ToastErr('Ошибка сети: ' + e.message); });
+}
+
+// ── Водители партнёра ──
+function partnersPersonPaint_() {
+  var body = document.getElementById('partners-person-body');
+  if (!body) return;
+  var showDeleted = document.getElementById('partners-person-show-deleted').checked;
+  var rows = (partnersPeople_ || []).filter(function(p) { return (p.roles || []).indexOf('partner_driver') >= 0 && (showDeleted || !p.is_deleted); });
+  if (!rows.length) { body.innerHTML = '<tr><td colspan="4" class="muted" style="padding:14px">Водителей партнёров пока нет</td></tr>'; return; }
+  body.innerHTML = rows.map(function(p) {
+    var idEsc = pageEscAttr_(p.id);
+    var owner = partnersOwnerLabel_(p.partner_entity_id, null);
+    var actions = p.is_deleted
+      ? '<button onclick="partnersPersonRestore_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);color:var(--green);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Восстановить</button>'
+      : '<button onclick="partnersPersonOpenForm_(\'' + idEsc + '\')" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Править</button>';
+    return '<tr' + (p.is_deleted ? spravDeletedRowStyle_() : '') + '>' +
+      '<td><b>' + pageEsc_(p.full_name) + '</b>' + (p.is_deleted ? ' <span class="muted" style="font-size:11px">(удалено)</span>' : '') + '</td>' +
+      '<td class="muted">' + (p.phone ? pageEsc_(p.phone) : '—') + '</td>' +
+      '<td class="muted">' + pageEsc_(owner) + '</td>' +
+      '<td class="num">' + actions + '</td>' +
+    '</tr>';
+  }).join('');
+}
+var partnersPersonEditId_ = null, partnersPersonEditSnapshot_ = null;
+function partnersPersonOpenForm_(id) {
+  partnersPersonEditId_ = id || null;
+  var p = id ? (partnersPeople_ || []).filter(function(x) { return String(x.id) === String(id); })[0] : null;
+  partnersPersonEditSnapshot_ = p ? p.updated_at : null;
+  document.getElementById('partner-person-drawer-title').textContent = p ? 'Править водителя партнёра' : 'Добавить водителя партнёра';
+  document.getElementById('partner-person-name').value = p ? p.full_name : '';
+  document.getElementById('partner-person-phone').value = p ? (p.phone || '') : '';
+  document.getElementById('partner-person-entity').innerHTML = partnersEntityOnlyOptions_(p ? (p.partner_entity_id || '') : '');
+  document.getElementById('partner-person-inn').value = p ? (p.inn || '') : '';
+  document.getElementById('partner-person-license-num').value = p ? (p.license_number || '') : '';
+  document.getElementById('partner-person-license-exp').value = p ? (p.license_expiry || '') : '';
+  document.getElementById('partner-person-passport-series').value = p ? (p.passport_series || '') : '';
+  document.getElementById('partner-person-passport-number').value = p ? (p.passport_number || '') : '';
+  document.getElementById('partner-person-passport-issued-by').value = p ? (p.passport_issued_by || '') : '';
+  document.getElementById('partner-person-passport-issued-at').value = p ? (p.passport_issued_at || '') : '';
+  document.getElementById('partner-person-notes').value = p ? (p.notes || '') : '';
+  document.getElementById('partner-person-error').style.display = 'none';
+  document.getElementById('partner-person-doc-error').style.display = 'none';
+  document.getElementById('partner-person-docs-section').style.display = p ? '' : 'none';
+  if (p) partnerDocsLoad_('person', p.id, 'partner-person'); else document.getElementById('partner-person-docs-list').innerHTML = '';
+  document.getElementById('partner-person-del-btn').style.display = p ? '' : 'none';
+  var bk = document.getElementById('partner-person-bk'), dr = document.getElementById('partner-person-drawer');
+  drvBlockForeignAutofill_(dr);
+  bk.classList.add('show');
+  setTimeout(function() { dr.classList.add('show'); }, 40);
+  setTimeout(function() { document.getElementById('partner-person-name').focus(); }, 120);
+}
+function partnersPersonCloseForm_() {
+  var bk = document.getElementById('partner-person-bk'), dr = document.getElementById('partner-person-drawer');
+  if (bk) bk.classList.remove('show');
+  if (dr) dr.classList.remove('show');
+}
+function partnersPersonSave_() {
+  var errEl = document.getElementById('partner-person-error');
+  errEl.style.display = 'none';
+  var name = document.getElementById('partner-person-name').value.trim();
+  if (!name) { errEl.textContent = 'ФИО обязательно'; errEl.style.display = ''; return; }
+  var id = partnersPersonEditId_ || fleetGenId_('p_');
+  // Тот же человек мог уже получить роль partner_owner через вкладку "Контрагенты" (сам за
+  // рулём своей машины) - сохранение отсюда должно её СОХРАНИТЬ, не затереть (сервер
+  // перезаписывает роли целиком по списку из params.roles, тот же принцип, что у обычного
+  // /sprav/person - см. drvRegSave_).
+  var existing = partnersPersonEditId_ ? (partnersPeople_ || []).filter(function(x) { return String(x.id) === String(partnersPersonEditId_); })[0] : null;
+  var roles = (existing && (existing.roles || []).indexOf('partner_owner') >= 0) ? ['partner_driver', 'partner_owner'] : ['partner_driver'];
+  var params = {
+    id: id, name: name, roles: roles.join(','),
+    phone: document.getElementById('partner-person-phone').value.trim(),
+    partner_entity_id: document.getElementById('partner-person-entity').value,
+    inn: document.getElementById('partner-person-inn').value.trim(),
+    license_number: document.getElementById('partner-person-license-num').value.trim(),
+    license_expiry: document.getElementById('partner-person-license-exp').value,
+    passport_series: document.getElementById('partner-person-passport-series').value.trim(),
+    passport_number: document.getElementById('partner-person-passport-number').value.trim(),
+    passport_issued_by: document.getElementById('partner-person-passport-issued-by').value.trim(),
+    passport_issued_at: document.getElementById('partner-person-passport-issued-at').value,
+    notes: document.getElementById('partner-person-notes').value.trim(),
+  };
+  if (partnersPersonEditId_ && partnersPersonEditSnapshot_) params.expected_updated_at = partnersPersonEditSnapshot_;
+  postToYardApi_('/sprav/partner_person', params).then(function(r) {
+    if (!r.ok) { errEl.textContent = 'Не удалось сохранить: ' + (r.data && r.data.error || 'ошибка сервера'); errEl.style.display = ''; return; }
+    p2Toast(partnersPersonEditId_ ? 'Изменения сохранены' : 'Водитель добавлен', 'green');
+    partnersPersonCloseForm_();
+    partnersLoad_();
+  }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+function partnersPersonDelete_() {
+  if (!partnersPersonEditId_) return;
+  if (!confirm('Удалить водителя партнёра? Запись переедет в архив.')) return;
+  var errEl = document.getElementById('partner-person-error');
+  postToYardApi_('/sprav/partner_person_delete', { id: partnersPersonEditId_ }).then(function(r) {
+    if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось удалить'; errEl.style.display = ''; return; }
+    p2Toast('Перемещено в архив', 'amber');
+    partnersPersonCloseForm_();
+    partnersLoad_();
+  }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+function partnersPersonRestore_(id) {
+  postToYardApi_('/sprav/partner_person_restore', { id: id }).then(function(r) {
+    if (!r.ok) { p2ToastErr((r.data && r.data.error) || 'Не удалось восстановить'); return; }
+    p2Toast('Восстановлено', 'green');
+    partnersLoad_();
+  }).catch(function(e) { p2ToastErr('Ошибка сети: ' + e.message); });
+}
+
+// ── Документы партнёров (юрлицо/физлицо/техника) - переиспользует СУЩЕСТВУЮЩУЮ файловую
+// инфраструктуру 1-в-1 (sprav_asset_documents/sprav_people_documents/
+// sprav_legal_entity_documents), просто параметризовано по виду вместо трёх копий кода
+// (legalDocsLoad_/assetDocsLoad_/drvDocsLoad_ выше их НЕ трогают - остаются как были). ──
+var PARTNER_DOC_KIND_ = {
+  asset: { param: 'asset_id', upload: '/sprav/asset_document_upload', list: '/sprav/asset_documents', file: '/sprav/asset_document_file', del: '/sprav/asset_document_delete', labels: ASSET_DOC_TYPE_LABELS_ },
+  person: { param: 'person_id', upload: '/sprav/person_document_upload', list: '/sprav/person_documents', file: '/sprav/person_document_file', del: '/sprav/person_document_delete', labels: DRV_DOC_TYPE_LABELS_ },
+  legal_entity: { param: 'legal_entity_id', upload: '/sprav/legal_entity_document_upload', list: '/sprav/legal_entity_documents', file: '/sprav/legal_entity_document_file', del: '/sprav/legal_entity_document_delete', labels: LEGAL_DOC_TYPE_LABELS_ },
+};
+function partnersDocCurrentId_(prefix) {
+  if (prefix === 'partner-entity') return partnersEntityEditId_;
+  if (prefix === 'partner-asset') return partnersAssetEditId_;
+  if (prefix === 'partner-person') return partnersPersonEditId_;
+  return null;
+}
+function partnerDocsLoad_(kind, parentId, prefix) {
+  var cfg = PARTNER_DOC_KIND_[kind];
+  var list = document.getElementById(prefix + '-docs-list');
+  list.innerHTML = '<div class="muted" style="font-size:12px">Загрузка…</div>';
+  var params = {}; params[cfg.param] = parentId;
+  fetchFromYardApi_(cfg.list, params).then(function(r) {
+    if (partnersDocCurrentId_(prefix) !== parentId) return;  // карточку успели переключить
+    if (!r.ok) { list.innerHTML = '<div style="font-size:12px;color:var(--red)">Не удалось загрузить список</div>'; return; }
+    partnerDocsPaint_(kind, parentId, prefix, r.data.documents || []);
+  }).catch(function() {
+    if (partnersDocCurrentId_(prefix) !== parentId) return;
+    list.innerHTML = '<div style="font-size:12px;color:var(--red)">Нет соединения с сервером</div>';
+  });
+}
+function partnerDocsPaint_(kind, parentId, prefix, docs) {
+  var cfg = PARTNER_DOC_KIND_[kind];
+  var list = document.getElementById(prefix + '-docs-list');
+  if (!docs.length) { list.innerHTML = '<div class="muted" style="font-size:12px">Документов пока нет</div>'; return; }
+  list.innerHTML = docs.map(function(d) {
+    var typeLabel = cfg.labels[d.doc_type] || d.doc_type || '';
+    var dt = d.uploaded_at ? new Date(d.uploaded_at).toLocaleDateString('ru-RU') : '';
+    var href = YARD_API_BASE + cfg.file + '?session_token=' + encodeURIComponent(SESSION_TOKEN) + '&id=' + encodeURIComponent(d.id);
+    return '<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;display:flex;align-items:center;gap:8px">'
+      + '<a href="' + pageEscAttr_(href) + '" target="_blank" rel="noopener" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);text-decoration:none" title="' + pageEsc_(d.original_name || '') + '">' + pageEsc_(d.original_name || 'файл') + '</a>'
+      + '<span class="muted" style="white-space:nowrap">' + pageEsc_(typeLabel) + (typeLabel ? ' · ' : '') + assetDocFmtBytes_(d.size_bytes) + ' · ' + pageEsc_(dt) + '</span>'
+      + '<button type="button" onclick="partnerDocDelete_(\'' + kind + '\',\'' + pageEscAttr_(d.id) + '\',\'' + pageEscAttr_(parentId) + '\',\'' + prefix + '\')" title="Удалить" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;line-height:1;padding:2px 4px">×</button>'
+      + '</div>';
+  }).join('');
+}
+function partnerDocUpload_(kind, parentId, prefix) {
+  var cfg = PARTNER_DOC_KIND_[kind];
+  var errEl = document.getElementById(prefix + '-doc-error');
+  errEl.style.display = 'none';
+  if (!parentId) return;
+  var fileInput = document.getElementById(prefix + '-doc-file');
+  var file = fileInput.files && fileInput.files[0];
+  if (!file) { errEl.textContent = 'Выберите файл'; errEl.style.display = ''; return; }
+  var docType = document.getElementById(prefix + '-doc-type').value;
+  var fd = new FormData();
+  fd.append('file', file);
+  var qs = cfg.param + '=' + encodeURIComponent(parentId) + '&doc_type=' + encodeURIComponent(docType);
+  fetch(YARD_API_BASE + cfg.upload + '?' + qs, { method: 'POST', headers: { 'X-Session-Token': SESSION_TOKEN }, body: fd })
+    .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); })
+    .then(function(r) {
+      if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось загрузить файл'; errEl.style.display = ''; return; }
+      fileInput.value = '';
+      p2Toast('Файл загружен', 'green');
+      partnerDocsLoad_(kind, parentId, prefix);
+    }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
+}
+function partnerDocDelete_(kind, docId, parentId, prefix) {
+  if (!confirm('Удалить файл?')) return;
+  var cfg = PARTNER_DOC_KIND_[kind];
+  var errEl = document.getElementById(prefix + '-doc-error');
+  postToYardApi_(cfg.del, { id: docId }).then(function(r) {
+    if (!r.ok) { errEl.textContent = (r.data && r.data.error) || 'Не удалось удалить'; errEl.style.display = ''; return; }
+    p2Toast('Файл удалён', 'amber');
+    partnerDocsLoad_(kind, parentId, prefix);
   }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
 }
 
@@ -20441,13 +21639,15 @@ function renderSales() {
     '<tr><td colspan="7" style="color:var(--green);padding:14px">Пропавших клиентов нет ✅</td></tr>';
 
   function renderNoWaybillTable(elId, list) {
+    // Пометки «водитель отметил в MAX» - только у водителей (не у поставщиков найма).
+    var wbClaims = elId === 'cust-drivers-body' ? waybillClaimsMap_(function(){ renderNoWaybillTable(elId, list); }) : null;
     document.getElementById(elId).innerHTML = list.length
       ? list.map(function(d, i) {
           const pct = d.orders > 0 ? Math.round(d.no_waybill / d.orders * 100) : 0;
           const pctCls = pct >= 50 ? 'red' : pct >= 25 ? 'amber' : '';
           return '<tr>' +
             '<td class="muted" style="font-size:12px">' + (i+1) + '</td>' +
-            '<td><b>' + d.name + '</b></td>' +
+            '<td><b>' + d.name + '</b>' + (wbClaims ? waybillClaimBadge_(wbClaims, d.name) : '') + '</td>' +
             '<td class="num red"><b>' + d.no_waybill + '</b></td>' +
             '<td class="num muted">' + d.orders + '</td>' +
             '<td class="num ' + pctCls + '">' + pct + '%</td>' +
@@ -20649,6 +21849,17 @@ function toggleMgrToday(name) {
 // страницам руководителей групп Ахтамовой/Гусейновой (renderMyPageCommercialHead_),
 // plans/2026-08-26-ahtamova-guseinova-personal-pages.md). ПОВЕДЕНИЕ НЕ МЕНЯЛОСЬ - тот же
 // массив, просто перемещён, чтобы не жить внутри одной конкретной функции.
+// DEPT_CFG.members - СИД (2026-09-22, Влад: "не хардкор в коде, а выбор, где сотрудник
+// находится, у какого руководителя в команде") - на первую отрисовку страницы ДО того, как
+// успеет ответить сервер, совпадает с текущим составом в БД 1-в-1 (сверено построчно при
+// миграции), дальше живые данные перезаписывают members ПО МЕСТУ (см.
+// ensureCommercialHeadTeams_ ниже) - сам объект DEPT_CFG/его записи не меняют адрес, все 17
+// мест, что уже читают DEPT_CFG.members по всему файлу, продолжают работать без изменений.
+// Голова/цвет/название/solo - ОСТАЮТСЯ здесь (не переехали в БД) - это не орг.структура
+// сотрудников, а дизайн-решение "сколько сейчас плиток руководителей и какого они цвета",
+// трогается только когда заводят СОВСЕМ новую голову группы (редкое решение Влада, не то
+// же самое, что "к кому прикрепить нового менеджера"). См.
+// plans/2026-09-22-commercial-team-structure-not-hardcoded.md.
 var DEPT_CFG = [
   { color:'#1D9E75', name:'Ахтамова Лиана',   head:'Ахтамова',  members:['Ахтамова','Цегельников','Гуштюк','Дербенцева','Шейко'] },
   { color:'#378ADD', name:'Гусейнова Айнур',  head:'Гусейнова', members:['Гусейнова','Савиток','Филипчук','Котельников','Гуляева','Коньшина','Володин'] },
@@ -20662,6 +21873,33 @@ var DEPT_CFG = [
   { color:'#06B6D4', name:'Ратников Максим',  head:null,        members:['Ратников'], solo:true },
 ];
 var HEAD_FULL = { 'Цуцурин':'Цуцурин Владислав Дмитриевич','Ахтамова':'Ахтамова Лиана Анатольевна','Гусейнова':'Гусейнова Айнур','Рыщанов':'Рыщанов Рустем' };
+
+// Подтягивает живой состав коммерческих групп с сервера (GET /api/commercial_head_teams,
+// источник - sprav_people.commercial_head, Справочники) и обновляет DEPT_CFG.members ПО
+// МЕСТУ (не пересоздаёт массив/объекты - все существующие ссылки на DEPT_CFG видят
+// изменение сами, без правки 17 мест, что его используют). Вызывается один раз после
+// первой успешной загрузки данных (loadData()) - до этого страница уже отрисована по сиду
+// выше (актуален на момент этого захода), обновление - тихое, перерисовывает только то,
+// что реально сейчас открыто. Рыщанов/Ратников не трогаются - в sprav_people.commercial_head
+// пока только Ахтамова/Гусейнова (план "пока структурно коммерческий отдел").
+var commercialHeadTeamsLoaded_ = false;
+function ensureCommercialHeadTeams_(cb) {
+  if (commercialHeadTeamsLoaded_) { if (cb) cb(); return; }
+  fetchFromYardApi_('/commercial_head_teams', {}).then(function(r) {
+    commercialHeadTeamsLoaded_ = true;
+    if (r.ok && r.data && r.data.teams) {
+      var teams = r.data.teams;
+      DEPT_CFG.forEach(function(cfg) {
+        if (!cfg.head) return;
+        var key = cfg.head.toLowerCase();
+        if (teams[key] && teams[key].length) {
+          cfg.members = teams[key].map(function(s) { return s.charAt(0).toUpperCase() + s.slice(1); });
+        }
+      });
+    }
+    if (cb) cb();
+  }).catch(function() { commercialHeadTeamsLoaded_ = true; if (cb) cb(); });
+}
 
 function renderSalesMgrLegacy_() {
   if (!D || !D.orders) return;
@@ -22658,11 +23896,12 @@ function crpSubmit_() {
   }).catch(function(e) { p2ToastErr('Не удалось сохранить план: ' + e.message); });
 }
 
-// ── Сводка «План поступлений» для директора (admin) - обе руководительницы разом, развёртка
-// по контрагентам по клику (канон «Разворот строки по клику», ГОСТ раздел 4 - одобрено
-// Владом на превью 14.09). GET /api/receipts_plan/summary - admin-only, уже на VPS. ──
+// ── Сводка «План поступлений» для директора (admin) - обе руководительницы разом, ОБА списка
+// контрагентов видны сразу без переключения (Влад, 23.09: "хочу сразу видеть две страницы и
+// Лианы и Айнур без переключения" - раньше был разворот по клику "Разворот строки по клику",
+// ГОСТ раздел 4, но с двумя головами вместо одной-множественной сущности это лишний шаг).
+// GET /api/receipts_plan/summary - admin-only, уже на VPS. ──
 var rpsData_ = null;   // последний ответ /receipts_plan/summary
-var rpsOpen_ = null;   // ключ головы, чья развёртка сейчас открыта ('ахтамова'/'гусейнова'/null)
 
 function renderReceiptsPlanSummaryPage_() {
   var el = document.getElementById('receipts-plan-summary-content');
@@ -22673,10 +23912,6 @@ function renderReceiptsPlanSummaryPage_() {
     rpsData_ = (r.ok && r.data && !r.data.error) ? r.data : null;
     rpsRenderInner_(week);
   }).catch(function() { rpsData_ = null; rpsRenderInner_(week); });
-}
-function rpsToggle_(headKey) {
-  rpsOpen_ = rpsOpen_ === headKey ? null : headKey;
-  rpsRenderInner_(crpCurrentWeekMonday_());
 }
 // "Фамилия И.О." из полного ФИО - Влад, 14.09: "колонка Ф - инициалы менеджера" (таблица
 // на 31 строку не должна занимать экран полными Имя+Отчество).
@@ -22690,9 +23925,12 @@ function rpsShortName_(name) {
 // вариант A «Пульс», одобрен Владом изначально). Заменяет промежуточный вариант с таблицей
 // (тот тоже был одобрен 14.09, но чуть раньше, до штурма - "мне это не нравится, как
 // сейчас" про ту же страницу и стало поводом для штурма). Ярусы: KPI-плитки (.kpi-grid,
-// уже используются на "Панели") -> карточки по руководителям -> список контрагентов
-// открывшегося руководителя с мини bullet-чартом (canon .mp-bullet). Клик по строке/карточке
-// руководителя - тот же принцип "Разворот строки по клику" (ГОСТ раздел 4), что уже был.
+// уже используются на "Панели") -> карточки по руководителям -> список контрагентов ОБЕИХ
+// руководителей СРАЗУ (23.09, Влад: "хочу сразу видеть две страницы и Лианы и Айнур без
+// переключения" - раньше список открывался по клику на карточку, теперь всегда развёрнут),
+// с мини bullet-чартом (canon .mp-bullet) И видимыми суммами план/факт текстом в каждой
+// строке (тот же день: "хочу видеть не только полоски но цифры") - раньше суммы были только
+// в title-подсказке над полоской.
 function rpsRenderInner_(week) {
   var el = document.getElementById('receipts-plan-summary-content');
   if (!el) return;
@@ -22761,14 +23999,14 @@ function rpsRenderInner_(week) {
         + '<div class="muted" style="font-size:12.5px">План на неделю ещё не подан — контрагенты и суммы появятся здесь после отправки.</div></div>';
     }
     var pctH = h.total > 0 ? Math.round((h.total_fact || 0) / h.total * 100) : 0;
-    return '<div class="card" onclick="rpsToggle_(\'' + key + '\')" style="cursor:pointer">'
+    return '<div class="card">'
       + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
       + '<div style="font-size:14px;font-weight:600">' + c.name + '</div>'
-      + '<span class="badge blue">' + h.items.length + ' контрагент' + (h.items.length === 1 ? '' : h.items.length < 5 ? 'а' : 'ов') + ' · ' + (rpsOpen_ === key ? 'свернуть' : 'открыть') + '</span></div>'
+      + '<span class="badge blue">' + h.items.length + ' контрагент' + (h.items.length === 1 ? '' : h.items.length < 5 ? 'а' : 'ов') + '</span></div>'
       + '<div style="font-family:\'JetBrains Mono\',monospace;font-size:22px;font-weight:600;margin-bottom:8px">' + crpFmtInt_(h.total) + ' ₽</div>'
       + mpBulletHtml_(h.total, h.total_fact || 0)
       + '<div class="muted" style="font-size:11.5px;margin-top:6px">факт <b style="color:' + (pctH >= 100 ? 'var(--tint-green)' : 'var(--text)') + ';font-family:\'JetBrains Mono\',monospace">' + crpFmtInt_(h.total_fact || 0) + ' ₽</b> · ' + pctH + '%</div>'
-      + (rpsOpen_ === key ? rpsContragentListHtml_(h) : '')
+      + rpsContragentListHtml_(h)
       + '</div>';
   }).join('') + '</div>';
 
@@ -22776,17 +24014,29 @@ function rpsRenderInner_(week) {
 
   el.innerHTML = html;
 }
-// Ярус 3 - развёрнутый список контрагентов открытого руководителя (мини bullet-чарт на
-// строку, тот же приём, что variant A "Пульс" - см. .va-list в дизайн-штурме). Раньше здесь
-// была таблица (тоже одобрена Владом, но до штурма) - штурм её заменил этим видом; итоги
-// колонок (Влад просил "суммы колонок") сохранены отдельной строкой внизу списка.
+// Ярус 3 - список контрагентов руководителя, ВСЕГДА развёрнут (23.09, было по клику - см.
+// комментарий у rpsRenderInner_ выше), мини bullet-чарт на строку (тот же приём, что variant
+// A "Пульс" - см. .va-list в дизайн-штурме). Раньше здесь была таблица (тоже одобрена
+// Владом, но до штурма) - штурм её заменил этим видом; итоги колонок (Влад просил "суммы
+// колонок") сохранены отдельной строкой внизу списка.
 function rpsContragentListHtml_(h) {
   if (!h.items.length) return '<div class="muted" style="font-size:12px;padding:10px 2px 0">Пока ничего не выбрано в плане.</div>';
+  // Цифры план/факт видны текстом прямо в строке (Влад, 23.09: "хочу видеть не только
+  // полоски но цифры сколько планируем и сколько уже зашло") - раньше суммы были только в
+  // title-подсказке mpBulletHtml_ (по наведению), полоска сама по себе числа не показывала.
+  // 23.09, второй заход - пробовал двухъярусную раскладку (сумма+полоска на отдельных
+  // строках), Влад: "верни как было только сделай чтобы переходов знаков не было". Вернул
+  // исходную одностроч­ную сетку 1.3/1/1.3, только у суммы white-space:nowrap (раньше не
+  // было - двузначная сумма переносилась на вторую строку в тесной 1fr-колонке) и сама
+  // колонка чуть шире (1.5fr вместо 1fr, за счёт имени и бейджа) - места хватает без переноса.
   var rows = h.items.map(function(it) {
     var fact = it.fact_amount || 0, covered = fact >= it.planned_amount;
-    return '<div style="display:grid;grid-template-columns:1.3fr 1fr 1.3fr;gap:14px;align-items:center;padding:10px 0;border-top:1px solid var(--border)">'
+    return '<div style="display:grid;grid-template-columns:1.15fr 1.5fr 1.05fr;gap:14px;align-items:center;padding:10px 0;border-top:1px solid var(--border)">'
       + '<div><div style="font-size:13px;font-weight:500">' + it.contragent + '</div><div class="muted" style="font-size:11px">менеджер ' + rpsShortName_(it.manager) + '</div></div>'
-      + mpBulletHtml_(it.planned_amount, fact, true)
+      + '<div>'
+        + '<div style="font-family:\'JetBrains Mono\',monospace;font-size:12.5px;margin-bottom:4px;white-space:nowrap;font-variant-numeric:tabular-nums"><b style="color:' + (covered ? 'var(--tint-green)' : 'var(--text)') + '">' + crpFmtInt_(fact) + ' ₽</b><span class="muted"> / ' + crpFmtInt_(it.planned_amount) + ' ₽</span></div>'
+        + mpBulletHtml_(it.planned_amount, fact, true)
+      + '</div>'
       + '<span class="badge ' + (covered ? 'green' : 'amber') + '" style="justify-self:end">' + (covered ? 'оплачено' : 'ожидаем оплату') + '</span>'
       + '</div>';
   }).join('');
@@ -23620,6 +24870,10 @@ function columnHeadCurrentName_() {
 // columnHeadBucketsFor_ в VPS api/server.js, держать синхронно при следующей правке сегментов.
 function chPayrollBuckets_() {
   var sur = columnHeadCurrentName_().trim().split(' ')[0].toLowerCase();
+  // 23.09 - голова над начальниками автоколонн (Феськов) видит ОБА сегмента разом - тот же
+  // класс бага, что был у TRAL_MANAGERS 22.09 (хардкод-ветвление не знало о новом человеке).
+  // Проверяем ЭТУ ветку первой, до бинарного «дьячков/остальное» ниже.
+  if (FLEET_HEAD_SUR_FRONT_.indexOf(sur) >= 0) return ['трал', 'файмонвиль', 'длинномер'];
   return sur === 'дьячков' ? ['трал', 'файмонвиль'] : ['длинномер'];
 }
 
@@ -25816,12 +27070,14 @@ function menuSur_(name) { return String(name || '').trim().split(/\s+/)[0].toLow
 // разное меню одному конкретному человеку - этой версией нельзя, осознанный компромисс
 // (Влад попросил ровно обратное - группировку, не индивидуализацию).
 var MENU_TIER_LABEL_ = { admin:'админ', manager:'все менеджеры', commercial_head:'руководители коммерческих групп',
-  logist:'все логисты', logistics_head:'руководитель логистики', column_head:'начальник автоколонны', mechanic:'механики' };
+  logist:'все логисты', logistics_head:'руководитель логистики', column_head:'начальник автоколонны',
+  fleet_head:'руководитель автоколонн', mechanic:'механики' };
 function menuTierKey_(role, sur) {
   if (role === 'admin') return 'admin';
   if (role === 'mechanic') return 'mechanic';
   if (role === 'logist') {
     if (sur === 'сильчев' || sur === 'рыщанов') return 'logistics_head'; // см. ryschanowHeadFor_
+    if (FLEET_HEAD_SUR_FRONT_.indexOf(sur) >= 0) return 'fleet_head';
     if (COLUMN_HEAD_SUR_FRONT_.indexOf(sur) >= 0) return 'column_head';
     return 'logist';
   }
@@ -26771,6 +28027,7 @@ function showPage(id, el) {
   // контейнеру нулевой размер - плитки карты не подтягиваются) - инициализируем/пересчитываем
   // размер только при реальном открытии вкладки.
   if (id === 'calculator' && window.Clc) Clc.initPage();
+  if (id === 'gpbq' && window.Gpbq) Gpbq.initPage();
   if (id === 'logistics-plan' && window.LP) LP.init();
   if (id === 'navigation' && window.NAV) NAV.init();
   if (id === 'ryschanow-salary') renderRyschanowSalaryPage_();
@@ -28776,11 +30033,21 @@ var CRM = (function () {
     CALC_RESULTS_[dealId] = { q: q, fromAddr: fromAddr, toAddr: toAddr, vehType: vehType };
     var pf = el(prefix + '-calcDims'); if (pf) pf.classList.remove('show');
     var box = el(prefix + '-calcResult'); if (!box) return;
-    var rows = [['Смена (' + q.rateName + ')', q.shiftEff], ['Погрузка → выгрузка', q.ldAll], ['База → погрузка', q.e1], ['Выгрузка → база', q.e2]];
+    // Влад, 22.09 (plans/2026-09-22-mkad-based-local-pricing.md): режим mkad/base от
+    // сервера (computeQuoteAuto) - подписи плеч разные ("от базы" vs "от МКАД"), сам
+    // режим виден всегда, не только когда он необычный - "чтобы было понимание".
+    var isMkad = q.mode === 'mkad';
+    var e1Label = isMkad ? 'До МКАД (погрузка)' : 'База → погрузка';
+    var e2Label = isMkad ? 'До МКАД (выгрузка)' : 'Выгрузка → база';
+    var rows = [['Смена (' + q.rateName + ')', q.shiftEff], ['Погрузка → выгрузка', q.ldAll], [e1Label, q.e1], [e2Label, q.e2]];
     if (q.esc) rows.push(['Сопровождение', q.esc]);
     if (q.escortCar) rows.push(['Машина прикрытия', q.escortCar]);
+    var routeLine = isMkad
+      ? 'От МКАД до погрузки <b>' + q.a1 + ' км</b> · с грузом (без учёта пробега внутри МКАД) <b>' + q.a2 + ' км</b> · от выгрузки до МКАД <b>' + q.a3 + ' км</b>'
+      : 'База → погрузка <b>' + q.a1 + ' км</b> · с грузом <b>' + q.a2 + ' км</b> · выгрузка → база <b>' + q.a3 + ' км</b>';
     box.innerHTML = '<div class="dr-calc-total"><span>Итого с НДС</span><b>' + money(q.total) + '</b></div>' +
-      '<div class="dr-calc-route">База → погрузка <b>' + q.a1 + ' км</b> · с грузом <b>' + q.a2 + ' км</b> · выгрузка → база <b>' + q.a3 + ' км</b></div>' +
+      '<div class="dr-calc-mode">Режим расчёта: ' + (isMkad ? 'от МКАД (локальный рейс)' : 'от базы') + '</div>' +
+      '<div class="dr-calc-route">' + routeLine + '</div>' +
       '<div class="dr-calc-legend">' + rows.map(function (r) { return '<div class="dr-calc-leg-row"><span>' + esc(r[0]) + '</span><span class="num">' + money(r[1]) + '</span></div>'; }).join('') + '</div>' +
       // Влад, 12.09: если после этого расчёта поменяют адрес/вес/технику/габариты - эта
       // цена устареет. Обе кнопки в разметке сразу, переключаются классом .is-stale на
@@ -32208,7 +33475,20 @@ function segLabel(s){
   // не было поля ввода в самой Планировке - отсюда 0 заполненных causes из 41 живых
   // ремонтов на момент фикса.
   if ((s.kind === "repair" || s.kind === "maint") && s.repairReason) base += " · " + s.repairReason;
+  // Статус механика из бота MAX (22.09: кнопки «Взял / Готово» под уведомлением о ремонте,
+  // plan_segs.repair_status) - коротко, фамилия одним словом, плитка тесная.
+  if ((s.kind === "repair" || s.kind === "maint") && s.repairStatus) base += " · " + lpRepairStatusShort_(s);
   return base ? base + " · " + untilLabel(s) : "";
+}
+function lpRepairStatusShort_(s){
+  if (!s.repairStatus) return "";
+  var who = s.repairStatusBy ? String(s.repairStatusBy).trim().split(" ")[0] : "";
+  return (s.repairStatus === "done" ? "готово" : "в работе") + (who ? " (" + who + ")" : "");
+}
+function lpRepairStatusFull_(s){
+  if (!s.repairStatus) return "";
+  return (s.repairStatus === "done" ? "Готово" : "В работе") + (s.repairStatusBy ? " · " + s.repairStatusBy : "") +
+    (s.repairStatusAt ? " · " + s.repairStatusAt : "");
 }
 /* «Суточный»/«Дальний» режим рейса - РУЧНОЙ выбор при создании заявки (Влад,
    30.08, второй заход в тот же день: "выяснилось, что есть рейсы, которые мы
@@ -33580,7 +34860,10 @@ function applyServerSegs_(rows){
     if (vi == null) return;   /* машина выбыла из парка - строку не рисуем, но и не удаляем на сервере */
     var seg = {id:r.id, v:vi, kind:r.kind, s:parseFloat(r.start_hour), l:parseFloat(r.length_hours),
                needsData: !!Number(r.needs_data), reason: r.reason || "", repairReason: r.repair_reason || "",
-               createdByName: r.created_by_name || "", createdAt: r.created_at_label ? mechFmtDT_(r.created_at_label) : ""};
+               createdByName: r.created_by_name || "", createdAt: r.created_at_label ? mechFmtDT_(r.created_at_label) : "",
+               /* статус механика из MAX (22.09) - read-only здесь, пишет только бот */
+               repairStatus: r.repair_status || "", repairStatusBy: r.repair_status_by || "",
+               repairStatusAt: r.repair_status_at ? mechFmtDT_(r.repair_status_at) : ""};
     if (r.kind === "trip"){
       var v = STATE.vehicles[vi];
       seg.mg = personByName_(r.manager_name, MANAGERS);
@@ -34279,7 +35562,7 @@ function openDrawer(seg){
           DRIVEROFF_REASONS_.map(function(p, i){ return '<button class="chip cr-opt" data-i="' + i + '" aria-pressed="' + (i === reasonIdx) + '">' + p[1] + '</button>'; }).join("") +
         '</div></div>'
         : isRepairLike ?
-        rowsHtml([["Состояние", (seg.kind === "repair" ? "Ремонт" : "ТО")]]) +
+        rowsHtml([["Состояние", (seg.kind === "repair" ? "Ремонт" : "ТО")]].concat(seg.repairStatus ? [["Механик", lpRepairStatusFull_(seg)]] : [])) +
         '<div class="cr-field"><span class="grp-label">Причина *</span>' +
           '<input autocomplete="off" class="cr-input" id="lp-drRepairReason" placeholder="что случилось / что делаем" value="' + repairReasonVal.replace(/"/g, "&quot;") + '"></div>'
         : rowsHtml([["Состояние", segLabel(seg)]])) +
@@ -35631,6 +36914,11 @@ window.LP = { init: initLP };
      модуль читает SESSION_TOKEN/YARD_API_BASE как голые идентификаторы из общей
      лексической области основного скрипта (память project_window_global_let_const_gotcha). -->
 <script src="order-plan-v2.js"></script>
+<!-- Всплывающие уведомления логисту о водителе (принял/отказался) - 23.09.2026, Влад:
+     "чтобы висели пока не нажмешь крестик". Отдельный маленький файл, НЕ внутри
+     order-plan-v2.js (тот сегодня очень активно правится параллельно) - читает те же
+     голые SESSION_TOKEN/YARD_API_BASE, тот же приём, что строкой выше. -->
+<script src="logist-push-notify.js"></script>
 <!-- Подключаем после основного скрипта, без async/defer - гарантирует, что initGoogleSignIn()
      уже объявлена к моменту, когда библиотека Google готова и мы её вызываем. -->
 <script src="https://accounts.google.com/gsi/client"></script>

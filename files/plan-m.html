@@ -577,7 +577,14 @@ function segLabel(s){
   // Влад, 17.09 (тот же фикс, что на десктопе): подстатус ЗАМЕНЯЕТ "Без водителя", не
   // дописывается к ней - segShort() ниже уже делал так, здесь просто выравниваем.
   var base = (s.kind === "driveroff" && reasonLabel(s.reason)) ? reasonLabel(s.reason) : (KIND_LABEL[s.kind] || "");
+  if (repairStatusShort(s)) base += " · " + repairStatusShort(s);
   return base + " · " + untilLabel(s);
+}
+/* Статус механика из MAX (22.09) - тот же формат, что lpRepairStatusShort_ на десктопе. */
+function repairStatusShort(s){
+  if (!s || !s.repairStatus || (s.kind !== "repair" && s.kind !== "maint")) return "";
+  var who = s.repairStatusBy ? String(s.repairStatusBy).trim().split(" ")[0] : "";
+  return (s.repairStatus === "done" ? "готово" : "в работе") + (who ? " (" + who + ")" : "");
 }
 function segShort(s, tier){ /* подпись на плитке по ширине: small = только "куда"/тип, mid/big = + заказчик */
   if (s.kind === "trip"){
@@ -586,6 +593,7 @@ function segShort(s, tier){ /* подпись на плитке по ширин�
     return to;
   }
   if (s.kind === "driveroff") return reasonLabel(s.reason) || "Без водителя";
+  if (tier !== "small" && repairStatusShort(s)) return KIND_LABEL[s.kind] + " · " + repairStatusShort(s);
   return KIND_LABEL[s.kind];
 }
 function isVacant(v){ return !v.driver; }
@@ -2217,7 +2225,9 @@ function wireRowToSeg_(r, gosIndex){
   if (vi == null) return null; // машина выбыла из парка (department и т.п.) - не рисуем, но и не трогаем на сервере
   var seg = {id:r.id, v:vi, kind:r.kind, s:parseFloat(r.start_hour), l:parseFloat(r.length_hours),
     needsData: !!Number(r.needs_data), reason:r.reason || "", updatedBy:r.updated_by || "",
-    updatedAt: r.updated_at ? wallToHour(r.updated_at) : null};
+    updatedAt: r.updated_at ? wallToHour(r.updated_at) : null,
+    /* статус механика из бота MAX (22.09, кнопки «Взял / Готово») - read-only, как на десктопе */
+    repairStatus: r.repair_status || "", repairStatusBy: r.repair_status_by || ""};
   if (r.kind === "trip"){ seg.mg = r.manager_name || ""; seg.lg = r.logist_name || ""; seg.from = r.route_from || ""; seg.to = r.route_to || ""; seg.customer = r.customer || ""; seg.tripMode = r.trip_mode || ""; }
   else seg.lg = r.logist_name || "";
   return seg;

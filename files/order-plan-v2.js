@@ -1768,7 +1768,7 @@ function buildDom() {
 var NAV_SEL = '.op2-tab,.op2-wchip,.op2-chip,.op2-ghost,.op2-dbtn,.op2-slot,.op2-veh,.op2-st-chip,.op2-stc,.op2-logpick,#op2-lgpop button,.op2-mgrpick,#op2-mgrpop button,.op2-eqpick,#op2-eqpop button,.op2-contract,.op2-sugg .op2-it,.op2-free .op2-day,.op2-stpop button,.op2-pop .op2-vi,.op2-copybtn,.op2-take,.op2-dt,.op2-mgr-tbl tbody tr,.op2-log-body tr,.op2-switch button,[data-nav-sound]';
 /* #op2-wk-today - «Сегодня» гасит нав-звук из делегирования (op2-chip уже в NAV_SEL) и
    играет свой S.toggle() в собственном обработчике, тот же приём, что у #op2-snd ниже. */
-var RESULT_SEL = '#op2-f-save,#op2-rp-go,#op2-pop-ok,.op2-dok,.op2-unset-ot,.op2-slot.op2-ot,.op2-slot.op2-new,#op2-lgpop button,#op2-mgrpop button,#op2-eqpop button,#op2-drv-copy,#op2-drv-max,#op2-d-drv-ok,.op2-dl,.op2-copybtn,.op2-stpop button,.op2-pop .op2-vi[data-act="unset"],#op2-snd,.op2-blocked,#op2-f-ent .op2-chip,#op2-wk-today';
+var RESULT_SEL = '#op2-f-save,#op2-rp-go,#op2-pop-ok,.op2-dok,.op2-unset-ot,.op2-slot.op2-ot,.op2-slot.op2-new,#op2-lgpop button,#op2-mgrpop button,#op2-eqpop button,#op2-drv-copy,#op2-drv-max,#op2-d-drv-ok,.op2-dl,.op2-copybtn,.op2-stpop button,.op2-pop .op2-vi[data-act="unset"],.op2-pop .op2-vi[data-act="unset-hired"],#op2-snd,.op2-blocked,#op2-f-ent .op2-chip,#op2-wk-today';
 
 function wire() {
   var root = $('#op2-root');
@@ -3485,12 +3485,19 @@ function openPop(anchor, o, forceAdd) {
   $('#op2-pop-back').classList.add('op2-hidden');
   $('#op2-pop-ctx').textContent = (o.equipment_type || 'техника') + ' · ' + (oTime(o) || 'время уточнить');
   var vs = oOwn(o);
+  /* 23.09, Влад: «нужна кнопка, которая может снять наёмную машину с заявки» - до этого
+     «Сейчас» и «Снять» ниже (renderPop) смотрели ТОЛЬКО на oOwn(o), поэтому заявка с
+     наёмником показывала «Сейчас: без машины» - машина явно стояла в строке заявки, а
+     пикер её не видел вообще. */
+  var hv = oHired(o);
   $('#op2-pop-cur').innerHTML = vs.length
     ? 'Сейчас: <b>' + esc(vs.map(function (v) { return v.vehicle_gos; }).join(', ')) + '</b>'
-    : 'Сейчас: <b>без машины</b>' + (o.taken_by_name ? ' · ' + takenByHtml_(o, 'взял', '') : '');
+    : hv
+      ? 'Сейчас: <b>' + esc(hv.vehicle_gos || 'наёмник') + '</b> · наём, ' + esc(hv.carrier_name || 'перевозчик уточняется')
+      : 'Сейчас: <b>без машины</b>' + (o.taken_by_name ? ' · ' + takenByHtml_(o, 'взял', '') : '');
   var ok = $('#op2-pop-ok');
   ok.className = 'op2-dbtn op2-primary op2-blocked';
-  ok.textContent = vs.length && !popAdd ? 'Выбери замену или «Снять»' : 'Выбери машину';
+  ok.textContent = (vs.length || hv) && !popAdd ? 'Выбери замену или «Снять»' : 'Выбери машину';
   $('#op2-pop-body').innerHTML = '<div class="op2-sec"><span>загружаем парк…</span><span class="op2-ln"></span></div>';
 
   var r = anchor.getBoundingClientRect();
@@ -3540,6 +3547,10 @@ function renderPop(q) {
   if (vs.length) {
     h += '<div class="op2-vi op2-act" data-act="unset"><span class="op2-gos">Снять ' + esc(vs[0].vehicle_gos || '') + '</span><span class="op2-rt">строка вернётся в «без машины»</span></div>' +
       '<div class="op2-vi op2-act' + (popAdd ? ' op2-sel' : '') + '" data-act="add"><span class="op2-gos">Добавить вторую машину</span></div>';
+  } else if (oHired(o)) {
+    /* 23.09, Влад: «нужна кнопка, которая может снять наёмную машину с заявки» - тот же
+       op2-act/unset приём, что у своей машины чуть выше, только на другом исполнителе. */
+    h += '<div class="op2-vi op2-act" data-act="unset-hired"><span class="op2-gos">Снять наёмника' + (oHired(o).vehicle_gos ? ' ' + esc(oHired(o).vehicle_gos) : '') + '</span><span class="op2-rt">строка вернётся в «без машины»</span></div>';
   }
   h += sec('Свободны ' + (oTime(o) || ''), free.length) + free.map(function (v) {
     return item(v, '<b>' + esc(v.driver || 'без водителя') + '</b>' + (v.trailer ? ' · ' + esc(v.trailer) : '') + (v.trips_today ? '<br>рейсов сегодня: ' + esc(v.trips_today) : ''));
@@ -3557,6 +3568,22 @@ function onPopBodyClick(e) {
   var o = popOrder; if (!o) return;
   var act = it.dataset.act;
   if (act === 'hired') { openHiredStep(o); return; }
+  if (act === 'unset-hired') {
+    var hv = oHired(o); if (!hv) return;
+    var gosH = hv.vehicle_gos || 'наёмника';
+    var noH = oNo(o);
+    /* без «Отменить» - в отличие от своей машины (mode:'replace' по одному госномеру),
+       у наёмника нет короткого способа восстановить снятое: нужны компания/водитель/
+       телефон/ставка целиком (форма openHiredStep), заново переспросить их дешевле и
+       честнее, чем гадать по частично помнимым данным. */
+    apiPost('/orders/executor_remove', { executor_id: hv.id }).then(function (r) {
+      if (!ok_(r)) return;
+      closePop(); S.tickDown();
+      toast('Снят наёмник ' + esc(gosH) + ' · заявка №' + esc(noH) + ' снова без машины');
+      loadOrders();
+    });
+    return;
+  }
   if (act === 'unset') {
     var vs = oOwn(o); if (!vs.length) return;
     var gos0 = vs[0].vehicle_gos;

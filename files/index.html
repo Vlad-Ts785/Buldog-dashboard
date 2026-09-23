@@ -1842,6 +1842,9 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
    кто ниже по файлу, тот и победил бы; нужен явный приоритет для открытого состояния. */
 .mp-drawer.mp-drawer-float.show{transform:translateX(0);}
 .mp-drawer-float-body{padding:22px;overflow-y:auto;flex:1;min-height:0;}
+/* Клетка матрицы «роль × страница» (Справочники -> Доступ и роли, 24.09) - отклик на наведение фоном-ступенью. */
+.acc-cell:hover{background:var(--bg3) !important;}
+.acc-cell:disabled{cursor:progress;opacity:.6;}
 .mp-drawer h3{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px;font-weight:600;}
 /* Широкий вариант дровера (30.08, Влад: "чтобы карточка техники была в два раза шире...
    поработал эргономист") - модификатор поверх .mp-drawer, НЕ замена базового класса, чтобы
@@ -5340,7 +5343,7 @@ main:has(> #page-dynamics.active){min-width:0;}
             <div style="overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius-sm)">
               <table class="tbl"><thead><tr id="acc-roles-head"></tr></thead><tbody id="acc-roles-body"></tbody></table>
             </div>
-            <div style="font-size:12px;color:var(--muted);margin:10px 0 0">Этап 3 плана: галочки страниц заработают после переноса текущих настроек меню каждой роли - дальше меняете сами, без программиста. Сейчас у директора - всё, остальные роли видят страницы по-прежнему.</div>
+            <div style="font-size:12px;color:var(--muted);margin:10px 0 0;line-height:1.6">Галочка - страница есть в меню у всех людей этой роли; изменение действует со следующего открытия дашборда у сотрудника, отменить можно в подсказке внизу. Это видимость меню: данные на странице сервер по-прежнему отдаёт по роли, поэтому чужая для роли страница может открыться пустой. Страницы с пометкой «(рук. …)» - личные, показывают данные своего руководителя. Директор видит всё всегда.</div>
           </div>
 
           <div id="acc-view-audit" style="display:none">
@@ -13561,6 +13564,7 @@ function render() {
 // свою личную страницу - сервер и так не отдаёт ему данных для остальных вкладок,
 // но скрыть пункты меню тоже нужно, чтобы интерфейс не предлагал недоступное.
 function applyRoleUI() {
+  accessMeEnsure_();   // матрица страниц с сервера (этап 3) - до ответа работает прежняя логика ниже
   const sidebarLabel = document.querySelector('.sidebar-logo-label');
   const previewing = D.role === 'admin' && !!viewAsEntry;
   // Механик (2026-09-02) - отдельная, самая узкая роль: только "Планировка" + Калькулятор
@@ -13572,14 +13576,18 @@ function applyRoleUI() {
     if (sidebarLabel) sidebarLabel.textContent = previewing ? viewAsEntry.name : (D.mechanicName || 'Механик');
     // 08.09: + личная страница (plans/2026-09-08-chief-mechanic-long-haul-page.md), она же
     // стартовая - механик открывает дашборд и первым делом видит, что стоит и почему.
-    var mechAllowed_ = ['my-page', 'calculator', 'logistics-plan'];
+    // 24.09 (этап 3): набор страниц - из матрицы ролей (Справочники -> Доступ и роли), список ниже - запасной.
+    var mechAllowed_ = accessMatrixPages_(previewing) || ['my-page', 'calculator', 'logistics-plan'];
     document.querySelectorAll('.sidebar-nav-item').forEach(function(item) {
       item.style.display = mechAllowed_.indexOf(item.getAttribute('data-page')) >= 0 ? '' : 'none';
     });
     document.querySelectorAll('.sidebar-nav-section').forEach(function(s){ s.style.display = 'none'; });
     var mechActiveEl_ = document.querySelector('.page.active');
     var mechActiveId_ = mechActiveEl_ ? mechActiveEl_.id.replace(/^page-/, '') : null;
-    if (!mechActiveId_ || mechAllowed_.indexOf(mechActiveId_) < 0) showPage('my-page', document.querySelector('.sidebar-nav-item[data-page="my-page"]'));
+    if (!mechActiveId_ || mechAllowed_.indexOf(mechActiveId_) < 0) {
+      var mechLanding_ = accessLandingPage_(mechAllowed_);
+      showPage(mechLanding_, document.querySelector('.sidebar-nav-item[data-page="' + mechLanding_ + '"]'));
+    }
     applyMenuConfig_();   // кастом меню поверх ролевого фильтра (05.09), см. блок "Кастомизация меню"
     updateViewAsButton_();
     return;
@@ -13656,6 +13664,11 @@ function applyRoleUI() {
     // менеджеров до тех же двух руководителей коммерческих групп, что и «Суды»/«Зарплата»
     // выше (isCommercialHeadViewer = Ахтамова/Гусейнова, см. COMMERCIAL_HEAD_SUR_FRONT_).
     if (isCommercialHeadViewer) allowedPages_.push('dept-trals');
+    // 24.09 (этап 3): если сервер уже прислал матрицу ролей - она главная (Справочники ->
+    // Доступ и роли, правит директор). Логика по фамилиям выше - запасная на время до ответа
+    // и при сбое; засев матрицы 24.09 ей равен, поэтому меню не «прыгает».
+    var matrixPages_ = accessMatrixPages_(previewing);
+    if (matrixPages_) allowedPages_ = matrixPages_;
     document.querySelectorAll('.sidebar-nav-item').forEach(function(item) {
       const page = item.getAttribute('data-page');
       item.style.display = allowedPages_.indexOf(page) >= 0 ? '' : 'none';
@@ -13679,7 +13692,7 @@ function applyRoleUI() {
     // 23.09 - у Феськова нет 'my-page' в allowedPages_ ("пока без личной страницы") - дефолт
     // для неё был бы страницей, которую сама же функция потом спрячет. Приземляем на
     // Планировку (первый содержательный пункт её меню).
-    if (!activePageId_ || allowedPages_.indexOf(activePageId_) < 0) showPage(isFleetHeadViewer ? 'logistics-plan' : 'my-page');
+    if (!activePageId_ || allowedPages_.indexOf(activePageId_) < 0) showPage(accessLandingPage_(allowedPages_));
   } else {
     if (sidebarLabel) sidebarLabel.textContent = 'Админ панель';
     // Персональные пункты (Зарплата/ДЗ Рыщанова и руководителей коммерческих групп) - только
@@ -15629,11 +15642,65 @@ function chooseSpravTarget_(tab) {
 // всем, кроме роли director, на КАЖДОМ запросе (requireDirector_) - UI тут не защита, а удобство.
 // Своё состояние, не часть D. Запись - postToYardApiWithBody_ (JSON: true/false доходят
 // булевыми, токен не попадает в адресную строку и логи nginx).
-var accessState_ = null;       // {me, roles:[...], users:[...], audit:[...]}
+var accessState_ = null;       // {me, roles:[...], role_pages:{role:[pages]}, users:[...], audit:[...]}
 var accessView_ = 'people';
 var accessEditEmail_ = null;   // null = форма «Выдать доступ»
-var ACCESS_PAGES_ = ['Панель', 'Справочники', 'Техника', 'Планировка', 'Навигация', 'CRM', 'Поступления',
-  'Обзор заказов', 'Зарплата', 'Задание', 'Калькулятор', 'Дебиторка'];
+
+// ── Матрица страниц (24.09, этап 3): /api/me/access говорит, какие страницы у роли текущего
+// пользователя; applyRoleUI() строит меню из неё. До ответа и при сбое - прежняя логика по
+// фамилиям (засев матрицы = она же). Директору сервер отдаёт всю матрицу + фамилия->роль -
+// для «Смотреть как». Директор сам всегда видит всё (строку не меняют).
+var accessMe_ = null, accessMeInflight_ = false;
+function accessMeEnsure_() {
+  if (accessMe_ || accessMeInflight_ || typeof SESSION_TOKEN === 'undefined' || !SESSION_TOKEN) return;
+  accessMeInflight_ = true;
+  fetchFromYardApi_('/me/access', {}).then(function(r) {
+    accessMeInflight_ = false;
+    if (!r.ok || !r.data || r.data.error || !r.data.role_key) return;
+    accessMe_ = r.data;
+    if (typeof D !== 'undefined' && D) applyRoleUI();
+  }).catch(function() { accessMeInflight_ = false; });
+}
+// Страницы для текущего вида (свой вход или «Смотреть как» у директора); null - матрицы нет, работает старая логика.
+function accessMatrixPages_(previewing) {
+  if (!accessMe_) return null;
+  if (!previewing) return Array.isArray(accessMe_.pages) ? accessMe_.pages.slice() : null;
+  if (!accessMe_.matrix || !accessMe_.people || !viewAsEntry) return null;
+  var sur = menuSur_(viewAsEntry.name);
+  var p = accessMe_.people.filter(function(x) { return x.sur === sur; })[0];
+  if (!p || p.role_key === 'director') return null;
+  return (accessMe_.matrix[p.role_key] || []).slice();
+}
+// Куда приземлить, если текущая страница роли не положена: Личная -> Планировка -> первая доступная.
+function accessLandingPage_(pages) {
+  if (pages.indexOf('my-page') >= 0) return 'my-page';
+  if (pages.indexOf('logistics-plan') >= 0) return 'logistics-plan';
+  return pages[0] || 'calculator';
+}
+// Каталог страниц для матрицы - прямо из меню (подписи не дублируются в коде). «ГПБ Комплект» -
+// личное исключение директора по email, в матрицу ролей не входит. Одинаковые подписи личных
+// страниц уточняются, чьи они.
+var ACCESS_PAGE_SUFFIX_ = { 'ryschanow-salary': ' (рук. логистики)', 'commercial-head-salary': ' (рук. группы)',
+  'commercial-head-debt': ' (рук. группы)' };
+function accessPageCatalog_() {
+  // Подпись - только текст самого пункта: во время работы меню оборачивает его в
+  // .sidebar-nav-label, а рядом живут служебные элементы (подсказка «Держи здесь ~0,5 сек...»,
+  // grip/eye кастомизации) - их textContent пункта захватил бы целиком. До обёртки - прямые
+  // текстовые узлы пункта.
+  var ownText = function(el) {
+    var lbl = el.querySelector('.sidebar-nav-label');
+    if (lbl) return lbl.textContent.replace(/\s+/g, ' ').trim();
+    return [].slice.call(el.childNodes).filter(function(n) { return n.nodeType === 3; })
+      .map(function(n) { return n.textContent; }).join(' ').replace(/\s+/g, ' ').trim();
+  };
+  return [].slice.call(document.querySelectorAll('.sidebar-nav .sidebar-nav-item[data-page]'))
+    .map(function(el) { var id = el.getAttribute('data-page'); return { id: id, label: (ownText(el) || id) + (ACCESS_PAGE_SUFFIX_[id] || '') }; })
+    .filter(function(p) { return p.id && p.id !== 'gpbq'; });
+}
+function accessPageLabel_(id) {
+  var p = accessPageCatalog_().filter(function(x) { return x.id === id; })[0];
+  return p ? p.label : id;
+}
 function accessIsDirectorView_() {
   return !!(D && D.access_director && !(typeof viewAsEntry !== 'undefined' && viewAsEntry));
 }
@@ -15655,7 +15722,7 @@ function accessLoad_() {
   if (ld) { ld.style.display = ''; ld.textContent = 'Загрузка…'; }
   ['people', 'roles', 'audit'].forEach(function(v) { var el = document.getElementById('acc-view-' + v); if (el) el.style.display = 'none'; });
   fetchFromYardApi_('/access/list', {}).then(function(r) {
-    if (!r.ok || !r.data || r.data.error) {
+    if (!r.ok || !r.data || r.data.error || !Array.isArray(r.data.users) || !Array.isArray(r.data.roles)) {
       if (ld) ld.textContent = 'Не удалось загрузить: ' + ((r.data && r.data.error) || 'ошибка сервера');
       return;
     }
@@ -15781,18 +15848,51 @@ function accessToggleActive_(btn) {
     accessLoad_();
   });
 }
+var ACCESS_CHK_SVG_ = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--green)"><path d="M3.5 8.5 6.5 11.5 12.5 4.5"/></svg>';
+var ACCESS_BOX_HTML_ = '<span style="display:inline-block;width:14px;height:14px;border:1.5px solid var(--border-strong);border-radius:4px"></span>';
 function accessPaintRoles_() {
   var head = document.getElementById('acc-roles-head'), body = document.getElementById('acc-roles-body');
   if (!head || !body || !accessState_) return;
-  var th = function(t) { return '<th style="position:sticky;top:0;background:var(--bg2);z-index:1' + (t === 'Роль' ? '' : ';text-align:center') + '">' + t + '</th>'; };
-  head.innerHTML = th('Роль') + ACCESS_PAGES_.map(th).join('');
-  var chk = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--green)"><path d="M3.5 8.5 6.5 11.5 12.5 4.5"/></svg>';
-  var box = '<span style="display:inline-block;width:14px;height:14px;border:1.5px solid var(--border);border-radius:4px"></span>';
+  var pages = accessPageCatalog_();
+  var rp = accessState_.role_pages || {};
+  head.innerHTML = '<th style="position:sticky;top:0;left:0;background:var(--bg2);z-index:2;vertical-align:bottom">Роль</th>' +
+    pages.map(function(p) {
+      return '<th title="' + pageEsc_(p.label) + '" style="position:sticky;top:0;background:var(--bg2);z-index:1;text-align:center;vertical-align:bottom;padding:8px 4px">' +
+        '<span style="writing-mode:vertical-rl;transform:rotate(180deg);white-space:nowrap;font-size:11px;font-weight:500">' + pageEsc_(p.label) + '</span></th>';
+    }).join('');
   body.innerHTML = accessState_.roles.map(function(r) {
     var n = accessState_.users.filter(function(u) { return u.active && u.role_key === r.role_key; }).length;
-    return '<tr><td style="white-space:nowrap"><b>' + pageEsc_(r.label) + '</b><div style="font-size:11px;color:var(--muted);font-family:\'JetBrains Mono\',monospace">' + n + ' чел.</div></td>' +
-      ACCESS_PAGES_.map(function() { return '<td style="text-align:center">' + (r.role_key === 'director' ? chk : box) + '</td>'; }).join('') + '</tr>';
+    var own = rp[r.role_key] || [];
+    var isDir = r.role_key === 'director';
+    return '<tr><td style="white-space:nowrap;position:sticky;left:0;background:var(--bg2);z-index:1"><b>' + pageEsc_(r.label) + '</b>' +
+      '<div style="font-size:11px;color:var(--muted);font-family:\'JetBrains Mono\',monospace;font-variant-numeric:tabular-nums">' + n + ' чел.' + (isDir ? ' · видит всё' : '') + '</div></td>' +
+      pages.map(function(p) {
+        if (isDir) return '<td style="text-align:center;opacity:.55" title="Директор видит всё - строку не меняют">' + ACCESS_CHK_SVG_ + '</td>';
+        var on = own.indexOf(p.id) >= 0;
+        return '<td style="text-align:center;padding:4px"><button type="button" class="acc-cell" data-role="' + pageEsc_(r.role_key) + '" data-page="' + pageEsc_(p.id) + '"' +
+          ' aria-pressed="' + on + '" title="' + pageEsc_(r.label + ' · ' + p.label) + '" onclick="accessTogglePage_(this)"' +
+          ' style="width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:none;border-radius:6px;cursor:pointer">' +
+          (on ? ACCESS_CHK_SVG_ : ACCESS_BOX_HTML_) + '</button></td>';
+      }).join('') + '</tr>';
   }).join('');
+}
+function accessTogglePage_(btn, silentUndo) {
+  var role = btn.getAttribute('data-role'), page = btn.getAttribute('data-page');
+  var next = btn.getAttribute('aria-pressed') !== 'true';
+  var paint = function(on) { btn.setAttribute('aria-pressed', String(on)); btn.innerHTML = on ? ACCESS_CHK_SVG_ : ACCESS_BOX_HTML_; };
+  paint(next);   // сразу на экране; при ошибке - откат
+  btn.disabled = true;
+  postToYardApiWithBody_('/access/role_pages', { role_key: role, page: page, allowed: next }).then(function(r) {
+    btn.disabled = false;
+    if (!(r.ok && r.data && r.data.ok)) { paint(!next); p2Toast(pageEsc_((r.data && r.data.error) || 'Не удалось сохранить'), 'red'); return; }
+    var rp = accessState_.role_pages = accessState_.role_pages || {};
+    var list = rp[role] = (rp[role] || []).filter(function(x) { return x !== page; });
+    if (next) list.push(page);
+    accessMe_ = null;   // матрица для «Смотреть как» - перечитать при следующем applyRoleUI
+    if (silentUndo) return;
+    p2Toast(pageEsc_(accessRoleLabel_(role)) + ': «' + pageEsc_(accessPageLabel_(page)) + '» - ' + (next ? 'видна' : 'скрыта'),
+      next ? 'green' : 'amber', { label: 'Отменить', fn: function() { accessTogglePage_(btn, true); } });
+  }).catch(function(e) { btn.disabled = false; paint(!next); p2Toast('Ошибка сети: ' + pageEsc_(e.message), 'red'); });
 }
 function accessFmtWhen_(v) {
   var d = new Date(v);
@@ -15808,6 +15908,7 @@ function accessDescribe_(a) {
   if (a.action === 'role') return role(b.role_key) + ' → ' + role(n.role_key);
   if (a.action === 'revoke') return 'Доступ закрыт';
   if (a.action === 'restore') return 'Доступ открыт: ' + role(n.role_key);
+  if (a.action === 'pages') return '«' + pageEsc_(accessPageLabel_(n.page)) + '» - ' + (n.allowed ? 'видна' : 'скрыта');
   var parts = [];
   if (b.display_name !== n.display_name) parts.push('имя в 1С: ' + pageEsc_(b.display_name || '—') + ' → ' + pageEsc_(n.display_name || '—'));
   if (b.person_id !== n.person_id) parts.push('карточка сотрудника изменена');
@@ -15817,6 +15918,7 @@ function accessPaintAudit_() {
   var body = document.getElementById('acc-audit-body'); if (!body || !accessState_) return;
   var nameOf = function(email) {
     if (/^migration /.test(email || '')) return 'перенос из листа «Доступ»';
+    if (/^role:/.test(email || '')) return 'роль «' + pageEsc_(accessRoleLabel_(email.slice(5))) + '»';
     var u = accessFindUser_(email);
     return pageEsc_(u ? (u.person_name || u.display_name || email) : email);
   };

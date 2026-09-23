@@ -9574,6 +9574,9 @@ var COMMERCIAL_HEAD_SUR_FRONT_ = ['ахтамова', 'гусейнова'];
 // головой (fleetHeadTeams_) - из БД (/api/fleet_head_teams), не хардкод.
 var FLEET_HEAD_SUR_FRONT_ = ['феськов'];
 var FLEET_HEAD_LABELS_ = { 'феськов': 'Феськов Андрей' };
+function isFleetHeadEntry_(entry) {
+  return !!entry && entry.type === 'logist' && FLEET_HEAD_SUR_FRONT_.indexOf(entry.name.trim().split(' ')[0].toLowerCase()) >= 0;
+}
 // CRM для менеджеров - поимённо (Влад, 04.09: «открой доступ к CRM Филипчук пока только»).
 // Тот же список продублирован на сервере (CRM_MANAGER_SURNAMES в api/server.js) - фронт
 // только прячет пункт меню, право решает сервер. Расширять - в ОБЕИХ точках.
@@ -13694,8 +13697,17 @@ function setViewAs(name, type) {
     // входе или смене цели предпросмотра ВСЕГДА возвращаемся на "Личную страницу" (то же
     // место, куда попадает настоящий вход manager/logist/mechanic) - независимо от того,
     // какая страница была открыта ДО переключения, её больше не унести через "Смотреть как".
-    var myPageNav_ = document.querySelector('.sidebar-nav-item[data-page="my-page"]');
-    showPage('my-page', myPageNav_);
+    // 23.09 - голова над начальниками автоколонн (Феськов) "Личной страницы" не имеет
+    // ("пока без личной страницы") - этот же безусловный переход раньше уводил её
+    // предпросмотр на несуществующую для неё страницу (тот же класс бага, что описан выше,
+    // только для нового вьюера, которого не было на момент фикса 21.09).
+    if (isFleetHeadEntry_(viewAsEntry)) {
+      var lpNav_ = document.querySelector('.sidebar-nav-item[data-page="logistics-plan"]');
+      showPage('logistics-plan', lpNav_);
+    } else {
+      var myPageNav_ = document.querySelector('.sidebar-nav-item[data-page="my-page"]');
+      showPage('my-page', myPageNav_);
+    }
   }
 }
 document.addEventListener('click', function(ev) {

@@ -23891,11 +23891,12 @@ function crpSubmit_() {
   }).catch(function(e) { p2ToastErr('Не удалось сохранить план: ' + e.message); });
 }
 
-// ── Сводка «План поступлений» для директора (admin) - обе руководительницы разом, развёртка
-// по контрагентам по клику (канон «Разворот строки по клику», ГОСТ раздел 4 - одобрено
-// Владом на превью 14.09). GET /api/receipts_plan/summary - admin-only, уже на VPS. ──
+// ── Сводка «План поступлений» для директора (admin) - обе руководительницы разом, ОБА списка
+// контрагентов видны сразу без переключения (Влад, 23.09: "хочу сразу видеть две страницы и
+// Лианы и Айнур без переключения" - раньше был разворот по клику "Разворот строки по клику",
+// ГОСТ раздел 4, но с двумя головами вместо одной-множественной сущности это лишний шаг).
+// GET /api/receipts_plan/summary - admin-only, уже на VPS. ──
 var rpsData_ = null;   // последний ответ /receipts_plan/summary
-var rpsOpen_ = null;   // ключ головы, чья развёртка сейчас открыта ('ахтамова'/'гусейнова'/null)
 
 function renderReceiptsPlanSummaryPage_() {
   var el = document.getElementById('receipts-plan-summary-content');
@@ -23906,10 +23907,6 @@ function renderReceiptsPlanSummaryPage_() {
     rpsData_ = (r.ok && r.data && !r.data.error) ? r.data : null;
     rpsRenderInner_(week);
   }).catch(function() { rpsData_ = null; rpsRenderInner_(week); });
-}
-function rpsToggle_(headKey) {
-  rpsOpen_ = rpsOpen_ === headKey ? null : headKey;
-  rpsRenderInner_(crpCurrentWeekMonday_());
 }
 // "Фамилия И.О." из полного ФИО - Влад, 14.09: "колонка Ф - инициалы менеджера" (таблица
 // на 31 строку не должна занимать экран полными Имя+Отчество).
@@ -23923,9 +23920,12 @@ function rpsShortName_(name) {
 // вариант A «Пульс», одобрен Владом изначально). Заменяет промежуточный вариант с таблицей
 // (тот тоже был одобрен 14.09, но чуть раньше, до штурма - "мне это не нравится, как
 // сейчас" про ту же страницу и стало поводом для штурма). Ярусы: KPI-плитки (.kpi-grid,
-// уже используются на "Панели") -> карточки по руководителям -> список контрагентов
-// открывшегося руководителя с мини bullet-чартом (canon .mp-bullet). Клик по строке/карточке
-// руководителя - тот же принцип "Разворот строки по клику" (ГОСТ раздел 4), что уже был.
+// уже используются на "Панели") -> карточки по руководителям -> список контрагентов ОБЕИХ
+// руководителей СРАЗУ (23.09, Влад: "хочу сразу видеть две страницы и Лианы и Айнур без
+// переключения" - раньше список открывался по клику на карточку, теперь всегда развёрнут),
+// с мини bullet-чартом (canon .mp-bullet) И видимыми суммами план/факт текстом в каждой
+// строке (тот же день: "хочу видеть не только полоски но цифры") - раньше суммы были только
+// в title-подсказке над полоской.
 function rpsRenderInner_(week) {
   var el = document.getElementById('receipts-plan-summary-content');
   if (!el) return;
@@ -23994,14 +23994,14 @@ function rpsRenderInner_(week) {
         + '<div class="muted" style="font-size:12.5px">План на неделю ещё не подан — контрагенты и суммы появятся здесь после отправки.</div></div>';
     }
     var pctH = h.total > 0 ? Math.round((h.total_fact || 0) / h.total * 100) : 0;
-    return '<div class="card" onclick="rpsToggle_(\'' + key + '\')" style="cursor:pointer">'
+    return '<div class="card">'
       + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
       + '<div style="font-size:14px;font-weight:600">' + c.name + '</div>'
-      + '<span class="badge blue">' + h.items.length + ' контрагент' + (h.items.length === 1 ? '' : h.items.length < 5 ? 'а' : 'ов') + ' · ' + (rpsOpen_ === key ? 'свернуть' : 'открыть') + '</span></div>'
+      + '<span class="badge blue">' + h.items.length + ' контрагент' + (h.items.length === 1 ? '' : h.items.length < 5 ? 'а' : 'ов') + '</span></div>'
       + '<div style="font-family:\'JetBrains Mono\',monospace;font-size:22px;font-weight:600;margin-bottom:8px">' + crpFmtInt_(h.total) + ' ₽</div>'
       + mpBulletHtml_(h.total, h.total_fact || 0)
       + '<div class="muted" style="font-size:11.5px;margin-top:6px">факт <b style="color:' + (pctH >= 100 ? 'var(--tint-green)' : 'var(--text)') + ';font-family:\'JetBrains Mono\',monospace">' + crpFmtInt_(h.total_fact || 0) + ' ₽</b> · ' + pctH + '%</div>'
-      + (rpsOpen_ === key ? rpsContragentListHtml_(h) : '')
+      + rpsContragentListHtml_(h)
       + '</div>';
   }).join('') + '</div>';
 
@@ -24009,17 +24009,24 @@ function rpsRenderInner_(week) {
 
   el.innerHTML = html;
 }
-// Ярус 3 - развёрнутый список контрагентов открытого руководителя (мини bullet-чарт на
-// строку, тот же приём, что variant A "Пульс" - см. .va-list в дизайн-штурме). Раньше здесь
-// была таблица (тоже одобрена Владом, но до штурма) - штурм её заменил этим видом; итоги
-// колонок (Влад просил "суммы колонок") сохранены отдельной строкой внизу списка.
+// Ярус 3 - список контрагентов руководителя, ВСЕГДА развёрнут (23.09, было по клику - см.
+// комментарий у rpsRenderInner_ выше), мини bullet-чарт на строку (тот же приём, что variant
+// A "Пульс" - см. .va-list в дизайн-штурме). Раньше здесь была таблица (тоже одобрена
+// Владом, но до штурма) - штурм её заменил этим видом; итоги колонок (Влад просил "суммы
+// колонок") сохранены отдельной строкой внизу списка.
 function rpsContragentListHtml_(h) {
   if (!h.items.length) return '<div class="muted" style="font-size:12px;padding:10px 2px 0">Пока ничего не выбрано в плане.</div>';
+  // Цифры план/факт видны текстом прямо в строке (Влад, 23.09: "хочу видеть не только
+  // полоски но цифры сколько планируем и сколько уже зашло") - раньше суммы были только в
+  // title-подсказке mpBulletHtml_ (по наведению), полоска сама по себе числа не показывала.
   var rows = h.items.map(function(it) {
     var fact = it.fact_amount || 0, covered = fact >= it.planned_amount;
     return '<div style="display:grid;grid-template-columns:1.3fr 1fr 1.3fr;gap:14px;align-items:center;padding:10px 0;border-top:1px solid var(--border)">'
       + '<div><div style="font-size:13px;font-weight:500">' + it.contragent + '</div><div class="muted" style="font-size:11px">менеджер ' + rpsShortName_(it.manager) + '</div></div>'
-      + mpBulletHtml_(it.planned_amount, fact, true)
+      + '<div>'
+        + '<div style="font-family:\'JetBrains Mono\',monospace;font-size:12.5px;margin-bottom:4px"><b style="color:' + (covered ? 'var(--tint-green)' : 'var(--text)') + '">' + crpFmtInt_(fact) + ' ₽</b><span class="muted"> / ' + crpFmtInt_(it.planned_amount) + ' ₽</span></div>'
+        + mpBulletHtml_(it.planned_amount, fact, true)
+      + '</div>'
       + '<span class="badge ' + (covered ? 'green' : 'amber') + '" style="justify-self:end">' + (covered ? 'оплачено' : 'ожидаем оплату') + '</span>'
       + '</div>';
   }).join('');

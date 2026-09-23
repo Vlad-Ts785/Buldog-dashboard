@@ -1032,7 +1032,17 @@ function contractSnapshot_(o, ent, custEnt, idle, sel, terms) {
   };
 }
 function genContractPdf(o) {
-  if (typeof window.jspdf === 'undefined' || !window.jspdf.jsPDF) { logUiEvent_('save_error', 'contract_pdf', 'библиотека не загрузилась'); toast('Библиотека PDF не загрузилась - обновите страницу'); return; }
+  /* jsPDF и шрифты грузятся по требованию (loadPdfLibs_ в index.html, 23.09) - догружаем и
+     вызываем себя заново, дальше код ниже работает как раньше, синхронно. */
+  if (!(window.jspdf && window.jspdf.jsPDF && window.KP_ASSETS_)) {
+    if (typeof window.loadPdfLibs_ !== 'function') { toast('Библиотека PDF не загрузилась - обновите страницу'); return; }
+    toast('Готовлю договор-заявку...');
+    window.loadPdfLibs_().then(function () { genContractPdf(o); }, function () {
+      logUiEvent_('save_error', 'contract_pdf', 'библиотека не загрузилась');
+      toast('Не удалось загрузить модуль PDF - проверьте интернет и нажмите ещё раз');
+    });
+    return;
+  }
   var ent = null;
   (META && META.own_entities || []).forEach(function (e2) { if (String(e2.id) === String(o.executor_entity_id)) ent = e2; });
   if (!ent) { logUiEvent_('blocked_click', 'contract', 'нет исполнителя'); toast('<span class="op2-warn">Конструктор договора</span> · у заявки не указан исполнитель («Исполнитель (от кого)»)'); return; }

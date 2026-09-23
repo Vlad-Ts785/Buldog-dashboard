@@ -2456,13 +2456,14 @@ function renderVerdict() {
   var withCar = rows.filter(function (o) { return oSt(o) !== 'ot' && (oOwn(o).length || oHired(o)); }).length;
   var noCar = rows.filter(function (o) { return oSt(o) !== 'ot' && !oOwn(o).length && !oHired(o); }).length;
   var ot = rows.filter(function (o) { return oSt(o) === 'ot'; }).length;
+  var confirmed = rows.filter(function (o) { return oSt(o) === 'ok'; }).length; /* Влад 23.09: «тут можно написать, где сколько подтверждённых заказов» */
   var nd = rows.filter(function (o) { return !!o.needs_data; }).length;
   var v = $('#op2-verdict');
   v.classList.toggle('op2-good', noCar === 0 && total > 0);
   $('#op2-verdict-word').textContent = total
     ? total + ' ' + plural(total, 'ЗАЯВКА', 'ЗАЯВКИ', 'ЗАЯВОК') + (TO_DATE ? ' НА НЕДЕЛЮ' : ' НА ' + (DATE === todayStr() ? 'СЕГОДНЯ' : dm(DATE)))
     : 'ЗАЯВОК НЕТ';
-  $('#op2-verdict-sub').textContent = withCar + ' с машиной · ' + noCar + ' без машины · ' + ot + ' отбой · ' + nd + ' под данные';
+  $('#op2-verdict-sub').textContent = withCar + ' с машиной · ' + noCar + ' без машины · ' + confirmed + ' подтверждено · ' + ot + ' отбой · ' + nd + ' под данные';
   $('#op2-verdict-v').textContent = noCar;
   /* формула должна сходиться по цифрам страницы: всего − с машиной − отбой
      (в превью отбоев на дне не было, и вычитаемое было одно) */

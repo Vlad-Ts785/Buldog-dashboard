@@ -502,13 +502,23 @@ var WD = ["Вс","Пн","Вт","Ср","Чт","Пт","Сб"], MON = ["янв","ф
 /* ── Эпоха ленты: КОПИЯ files/index.html:20542-20563, константа в константу. Если Фаза 2
    плана 2026-09-01-plan-segs-fixed-epoch.md изменит её на десктопе - править здесь
    синхронно, иначе одни и те же сегменты поедут по времени на одном из экранов. ── */
-var YEAR = 2026, MONTH = 7, MONTHS_RENDERED_ = 3;
+/* 23.09, Фаза 2 (как на десктопе, index.html - LP_STORE_EPOCH0_): часы в базе - от 1 августа
+   2026 НАВСЕГДА, окно ленты скользящее (прошлый + текущий + следующий месяц). Перевод - только
+   на границе данных: wireRowToSeg_ (вход) и segToWire (выход). */
+var LP_STORE_EPOCH0_ = new Date(2026, 7, 1);
+var LP_NOW0_ = new Date();
+var LP_FROM_Q_ = /[?&]lp_from=(\d{4})-(\d{2})/.exec(location.search); /* ?lp_from=ГГГГ-ММ - проверка окна заранее */
+var LP_WINDOW0_ = LP_FROM_Q_ ? new Date(+LP_FROM_Q_[1], +LP_FROM_Q_[2] - 1, 1) : new Date(LP_NOW0_.getFullYear(), LP_NOW0_.getMonth() - 1, 1);
+var YEAR = LP_WINDOW0_.getFullYear(), MONTH = LP_WINDOW0_.getMonth(), MONTHS_RENDERED_ = 3;
 var DAYS = 0;
 for (var mrI_ = 1; mrI_ <= MONTHS_RENDERED_; mrI_++) DAYS += new Date(YEAR, MONTH + mrI_, 0).getDate();
 var HOURS = DAYS * 24;
 var EPOCH0_ = new Date(YEAR, MONTH, 1);
 function hourToDate_(h){ return new Date(EPOCH0_.getTime() + Math.round(h * 60) * 60000); }
 function dateToHour_(dt){ return (dt.getTime() - EPOCH0_.getTime()) / 3600000; }
+var LP_VIEW_OFFSET_H_ = Math.round((EPOCH0_.getTime() - LP_STORE_EPOCH0_.getTime()) / 3600000);
+function lpFromStore_(h){ return h - LP_VIEW_OFFSET_H_; }
+function lpToStore_(h){ return h + LP_VIEW_OFFSET_H_; }
 function nowHour(){ return dateToHour_(new Date()); }
 function fmtTime(h){ var d = hourToDate_(h); return p2(d.getHours()) + ":" + p2(d.getMinutes()); }
 function fmtDay(h){ var d = hourToDate_(h); return WD[d.getDay()] + " " + p2(d.getDate()) + "." + p2(d.getMonth() + 1); }
@@ -1140,7 +1150,7 @@ function overlaps(v, s, l, exceptId, kind){
 }
 function segToWire(s){
   var v = M.vehicles[s.v]; if (!v) return null;
-  return {id:s.id, gos:v.gos, kind:s.kind, s:Math.round(s.s*100)/100, l:Math.round(s.l*100)/100, mg:s.mg || "", lg:s.lg || "", from:s.from || "", to:s.to || "", customer:s.customer || "", needs_data:s.needsData ? 1 : 0, reason:s.reason || "", trip_mode:s.tripMode || ""};
+  return {id:s.id, gos:v.gos, kind:s.kind, s:Math.round(lpToStore_(s.s)*100)/100, l:Math.round(s.l*100)/100, mg:s.mg || "", lg:s.lg || "", from:s.from || "", to:s.to || "", customer:s.customer || "", needs_data:s.needsData ? 1 : 0, reason:s.reason || "", trip_mode:s.tripMode || ""};
 }
 function saveSeg(s){
   var w = segToWire(s); if (!w) return Promise.resolve({ok:false});
@@ -2223,7 +2233,7 @@ $("btnMenu").addEventListener("click", openDrawer_);
 function wireRowToSeg_(r, gosIndex){
   var vi = gosIndex[normGos(r.vehicle_gos)];
   if (vi == null) return null; // машина выбыла из парка (department и т.п.) - не рисуем, но и не трогаем на сервере
-  var seg = {id:r.id, v:vi, kind:r.kind, s:parseFloat(r.start_hour), l:parseFloat(r.length_hours),
+  var seg = {id:r.id, v:vi, kind:r.kind, s:lpFromStore_(parseFloat(r.start_hour)), l:parseFloat(r.length_hours),
     needsData: !!Number(r.needs_data), reason:r.reason || "", updatedBy:r.updated_by || "",
     updatedAt: r.updated_at ? wallToHour(r.updated_at) : null,
     /* статус механика из бота MAX (22.09, кнопки «Взял / Готово») - read-only, как на десктопе */

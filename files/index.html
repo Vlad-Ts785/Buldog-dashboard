@@ -32659,7 +32659,20 @@ var ICON_CHECK = '<svg ' + SVG_ATTR + '><path d="M4 10.5l4 4 8-8"/></svg>';
    пересчёта, которая и была причиной бага; настоящее решение (нулевая точка
    часов НАВСЕГДА отдельно от видимого окна ленты) - Фаза 2, требует
    живой проверки Владом на ~30 местах кода, отложено намеренно, не забыто. */
-var YEAR = 2026, MONTH = 7;   /* август, 0-индексация месяцев JS - см. комментарий выше */
+/* 23.09, ФАЗА 2 (plans/2026-09-01-plan-segs-fixed-epoch.md, Влад на связи): смысл чисел в
+   базе и видимое окно ленты РАЗВЕДЕНЫ. LP_STORE_EPOCH0_ - нулевая точка plan_segs.start_hour
+   НАВСЕГДА (1 августа 2026 00:00 МСК - та же, что у driver.html, сводки «на сегодня»,
+   механика, plan-m.html и сервера). Окно ленты - СКОЛЬЗЯЩЕЕ: прошлый месяц + текущий +
+   следующий от сегодняшней даты. YEAR/MONTH/EPOCH0_ ниже - это уже НАЧАЛО ОКНА, весь рисующий
+   код работает в часах от него, как и раньше. Перевод часов база <-> окно - ТОЛЬКО на
+   границе данных: applyServerSegs_ и loadSegs (вход), segToWire_ (выход, он же снимок и кэш).
+   Лента больше не упирается в стену 31.10 - окно само едет вместе с календарём. */
+var LP_STORE_EPOCH0_ = new Date(2026, 7, 1);
+var LP_NOW0_ = new Date();
+/* ?lp_from=ГГГГ-ММ - открыть окно с указанного месяца (проверка сдвига окна заранее, до 1-го числа). */
+var LP_FROM_Q_ = /[?&]lp_from=(\d{4})-(\d{2})/.exec(location.search);
+var LP_WINDOW0_ = LP_FROM_Q_ ? new Date(+LP_FROM_Q_[1], +LP_FROM_Q_[2] - 1, 1) : new Date(LP_NOW0_.getFullYear(), LP_NOW0_.getMonth() - 1, 1);
+var YEAR = LP_WINDOW0_.getFullYear(), MONTH = LP_WINDOW0_.getMonth();
 var DAYS_EPOCH_MONTH_ = new Date(YEAR, MONTH + 1, 0).getDate();      /* дней в месяце эпохи - граница "маленьких" ячеек */
 /* Сколько месяцев целиком рисует лента, считая месяц эпохи - было 2 (эпоха +
    следующий), 01.09 (Фаза 1 фикса эпохи) расширено до 3 (запас на случай,
@@ -32681,6 +32694,12 @@ var EPOCH0_ = new Date(YEAR, MONTH, 1);
 function hourToDate_(h){ return new Date(EPOCH0_.getTime() + Math.round(h * 60) * 60000); }
 /* обратное преобразование - реальная дата (объект Date) в час с начала эпохи */
 function dateToHour_(dt){ return (dt.getTime() - EPOCH0_.getTime()) / 3600000; }
+/* Сдвиг окна относительно постоянной нулевой точки базы, в часах (целые сутки; в августе-
+   сентябре 2026 = 0, с 1 октября = 744). lpFromStore_ - час из базы -> час ленты,
+   lpToStore_ - обратно. Больше нигде в Планировке не применять - только на границе данных. */
+var LP_VIEW_OFFSET_H_ = Math.round((EPOCH0_.getTime() - LP_STORE_EPOCH0_.getTime()) / 3600000);
+function lpFromStore_(h){ return h - LP_VIEW_OFFSET_H_; }
+function lpToStore_(h){ return h + LP_VIEW_OFFSET_H_; }
 /* "сегодня" - через ту же эпоху, не через сравнение YEAR/MONTH с текущими (на
    момент загрузки они всегда совпадают по построению выше, но формула через
    dateToHour_ - тот же путь, что и everywhere else, единообразно). Раньше тут
@@ -33226,7 +33245,9 @@ function renderScale(){
   var out = [];
   for (var d = 0; d < DAYS; d++){
     var dt = new Date(YEAR, MONTH, d + 1);          /* new Date сама переносит день/месяц/год на границе */
-    var isNextMonth = d >= DAYS_EPOCH_MONTH_;
+    /* 23.09: приглушаем дни НЕ текущего месяца (прошлый и следующий в окне). До этого
+       приглушалось всё после месяца эпохи - в сентябре тусклым был сам текущий месяц. */
+    var isNextMonth = dt.getMonth() !== LP_NOW0_.getMonth() || dt.getFullYear() !== LP_NOW0_.getFullYear();
     var w = dt.getDay(), cls = "day" + ((w === 0 || w === 6) ? " weekend" : "") +
       (d === TODAY_D_() ? " today" : "") + (isNextMonth ? " day-next-month" : "");
     var hrs = "";
@@ -34191,7 +34212,7 @@ function monthArrowClick(dir){
      правки навигация ложно ругалась бы "не подключено" на месяц, который
      лента уже физически рисует. */
   if (target < 0 || target > MONTHS_RENDERED_ - 1){
-    toast(monthLabelFor_(targetDate) + " - дальше не подключено, лента продолжается на " + (MONTHS_RENDERED_ - 1) + " мес. вперёд от эпохи", null);
+    toast(monthLabelFor_(targetDate) + " - лента показывает прошлый, текущий и следующий месяц", null);
     return;
   }
   S.nav();
@@ -34815,7 +34836,7 @@ function segToWire_(s){
   var v = STATE.vehicles[s.v];
   if (!v || !v.gos) return null;
   return {
-    id: s.id, gos: v.gos, kind: s.kind, s: Math.round(s.s * 100) / 100, l: Math.round(s.l * 100) / 100,
+    id: s.id, gos: v.gos, kind: s.kind, s: Math.round(lpToStore_(s.s) * 100) / 100, l: Math.round(s.l * 100) / 100,
     mg: (s.mg && s.mg.full) || "", lg: (s.lg && s.lg.full) || "",
     from: s.from || "", to: s.to || "", customer: s.customer || "", nd: s.needsData ? 1 : 0, reason: s.reason || "",
     repair_reason: s.repairReason || "", trip_mode: s.tripMode || ""
@@ -34908,7 +34929,7 @@ function applyServerSegs_(rows){
   rows.forEach(function(r){
     var vi = byGos[r.vehicle_gos];
     if (vi == null) return;   /* машина выбыла из парка - строку не рисуем, но и не удаляем на сервере */
-    var seg = {id:r.id, v:vi, kind:r.kind, s:parseFloat(r.start_hour), l:parseFloat(r.length_hours),
+    var seg = {id:r.id, v:vi, kind:r.kind, s:lpFromStore_(parseFloat(r.start_hour)), l:parseFloat(r.length_hours),
                needsData: !!Number(r.needs_data), reason: r.reason || "", repairReason: r.repair_reason || "",
                createdByName: r.created_by_name || "", createdAt: r.created_at_label ? mechFmtDT_(r.created_at_label) : "",
                /* статус механика из MAX (22.09) - read-only здесь, пишет только бот */
@@ -35126,7 +35147,7 @@ function loadSegs(){
     raw.forEach(function(o){
       var vi = byGos[o.gos];
       if (vi == null) return;
-      var seg = {id:o.id, v:vi, kind:o.kind, s:o.s, l:o.l, needsData: !!o.nd, reason: o.reason || ""};
+      var seg = {id:o.id, v:vi, kind:o.kind, s:lpFromStore_(o.s), l:o.l, needsData: !!o.nd, reason: o.reason || ""};   /* кэш пишется через segToWire_ - в часах базы */
       if (o.kind === "trip"){
         var v = STATE.vehicles[vi];
         seg.mg = (o.mg && o.mg.full) ? o.mg : personByName_(o.mg, MANAGERS);

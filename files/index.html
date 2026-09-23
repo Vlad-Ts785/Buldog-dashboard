@@ -21931,6 +21931,16 @@ function ensureCommercialHeadTeams_(cb) {
           cfg.members = teams[key].map(function(s) { return s.charAt(0).toUpperCase() + s.slice(1); });
         }
       });
+      // Тот же живой состав - вкладке «Зарплата» (COMMERCIAL_DEPTS). До 23.09 она считала
+      // 0.8% руководителя по застывшему списку без Гуцу/Кимличенко и расходилась с личной
+      // страницей руководителя. Состав = серверный (уволенные там сохранены для истории),
+      // порядок строк - как был, новые люди в конце.
+      COMMERCIAL_DEPTS.forEach(function(d) {
+        var live = teams[d.head];
+        if (!live || !live.length) return;
+        d.members = d.members.filter(function(s) { return live.indexOf(s) >= 0; })
+          .concat(live.filter(function(s) { return d.members.indexOf(s) < 0; }));
+      });
     }
     if (cb) cb();
   }).catch(function() { commercialHeadTeamsLoaded_ = true; if (cb) cb(); });

@@ -1106,6 +1106,9 @@ function runAll() {
   try { mirrorManagerPlansFromServer_(); log.push('✅ Планы менеджеров: лист обновлён с сервера (зеркало)'); }
   catch(e) { errors.push('❌ Зеркало планов менеджеров с сервера: ' + e.message); }
 
+  try { var accMirrored = mirrorAccessFromServer_(); log.push(accMirrored ? '✅ Доступ: лист обновлён с сервера (зеркало), строк ' + accMirrored : '⚠️ Доступ: сервер не ответил - лист не тронут'); }
+  catch(e) { errors.push('❌ Зеркало листа «Доступ» с сервера: ' + e.message); }
+
   try { normalizeOrders();         log.push('✅ Заказы нормализованы'); }
   catch(e) { errors.push('❌ Заказы (норм.): ' + e.message); }
 
@@ -11269,6 +11272,36 @@ function fetchManagerPlansFromServer_(monthKey) {
     return null;
   }
 }
+
+// Зеркало листа «Доступ» из базы (23.09, plans/2026-09-23-access-roles-in-spravochniki.md,
+// этап 2). Доступы и роли правятся ТОЛЬКО в дашборде (Справочники -> «Доступ и роли»), лист
+// нужен лишь getAccessRole_ на запасном пути, когда сервер недоступен. Колонки A-C - как
+// раньше (email, имя как в заказах, БАЗОВАЯ роль admin/manager/logist/mechanic - её понимает
+// getAccessRole_), D - роль словами для глаз. Нет ответа / подозрительно мало строк - лист не
+// трогаем (та же защита, что была у импорта листа на сервер). Возвращает число строк или 0.
+function mirrorAccessFromServer_() {
+  var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+  if (!apiKey) return 0;
+  var resp = UrlFetchApp.fetch('https://api.yardhub.ru/api/access/export', {
+    headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true,
+  });
+  if (resp.getResponseCode() !== 200) return 0;
+  var users = (JSON.parse(resp.getContentText()) || {}).users || [];
+  if (users.length < 5) return 0;
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var sheet = ss.getSheetByName('Доступ');
+  if (!sheet) return 0;
+  var values = [['Email', 'Имя менеджера (как в заказах)', 'Роль (admin/manager)',
+    'ЗЕРКАЛО с 23.09.2026 - правки здесь НЕ действуют, доступ выдаётся в дашборде: Справочники -> Доступ и роли']];
+  users.forEach(function(u) {
+    values.push([String(u.email), String(u.display_name || ''), String(u.base_role), String(u.role_label || '')]);
+  });
+  sheet.clearContents();
+  sheet.getRange(1, 1, values.length, 4).setValues(values);
+  return users.length;
+}
+// Ручной запуск зеркала из редактора (без "_" в конце - иначе не видно в списке «Выполнить»).
+function mirrorAccessNow() { Logger.log('Доступ: строк в зеркале - ' + mirrorAccessFromServer_()); }
 
 function mirrorManagerPlansFromServer_() {
   var rows = fetchManagerPlansFromServer_(null);

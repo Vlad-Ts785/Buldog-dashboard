@@ -2635,6 +2635,25 @@ main:has(> #page-crm.active){max-width:none;}
 .bank-op-name{color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .bank-op-doc{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--muted);}
 .bank-op-sum{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right;min-width:11ch;}
+/* «Чей это?» (24.09): кнопка в строке ленты, фамилия-кнопка для переназначения, меню выбора
+   менеджера - анатомия утверждённого контекстного меню (ГОСТ раздел 4), свой экземпляр вне
+   #page-logistics-plan, где живёт исходный .ctxmenu. */
+.bank-op-act{appearance:none;background:transparent;border:1px solid var(--border-strong);color:var(--text);font-family:inherit;font-size:11px;line-height:1.4;padding:1px 8px;border-radius:6px;cursor:pointer;white-space:nowrap;}
+.bank-op-act:hover{border-color:var(--blue);color:var(--blue);}
+.bank-op-act:disabled{opacity:.5;cursor:default;}
+.bank-op-who{appearance:none;background:transparent;border:none;padding:0;cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--text);border-bottom:1px dotted var(--border-strong);}
+.bank-op-who:hover{color:var(--blue);border-bottom-color:var(--blue);}
+.bank-op-slot{display:inline-flex;gap:8px;align-items:baseline;white-space:nowrap;}
+.bank-pick{position:fixed;z-index:1000;display:none;flex-direction:column;min-width:220px;max-height:60vh;overflow:auto;background:var(--bg3);border:1px solid var(--border-strong);border-radius:10px;padding:5px;box-shadow:0 10px 26px rgba(0,0,0,.45);}
+.bank-pick.open{display:flex;}
+.bank-pick-item{appearance:none;border:none;background:transparent;color:var(--text);font-family:inherit;font-size:12.5px;text-align:left;padding:8px 10px;border-radius:7px;cursor:pointer;}
+.bank-pick-item:hover{background:var(--bg4);}
+.bank-pick-item.on{color:var(--green);}
+.bank-pick-none{color:var(--muted);border-top:1px solid var(--border);border-radius:0 0 7px 7px;margin-top:4px;}
+.bank-unres-toggle{appearance:none;background:transparent;border:none;padding:6px 0;cursor:pointer;font-family:inherit;font-size:12.5px;color:var(--muted);text-align:left;}
+.bank-unres-toggle b{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums;}
+.bank-unres-toggle:hover{color:var(--text);}
+.bank-unres-caret{color:var(--muted);margin-left:4px;}
 /* Победная сцена нового банковского поступления - перенос 1:1 из канбана уровня 5
    (examples/design-reference-kanban.html: mx-win-glow / mxKpiPop / mx-fly / confetti-canvas).
    Одобрено Владом 28.08: поступление денег = та же победа, что закрытая сделка. */
@@ -4543,6 +4562,9 @@ main:has(> #page-dynamics.active){min-width:0;}
           </div>
           <div id="bank-live-summary" style="margin-bottom:8px"></div>
           <div id="bank-live-feed"></div>
+          <!-- «Чей это?» (24.09): хвост неопознанных за 60 дней + заявки менеджеров на подтверждение -->
+          <div id="bank-unresolved-bar" style="margin-top:8px;border-top:1px solid var(--border)"></div>
+          <div id="bank-unresolved-list"></div>
         </div>
 
         <!-- Поступления этой недели vs прошлой (Влад, 2026-08-16: "ниже должно быть поступление
@@ -32523,15 +32545,132 @@ var BANK_MATCH_SOURCE_LABELS_ = {
   receipt_1c: 'по поступлению в 1С', plan_order: 'по заявке в «Задании»',
   last_deal: 'по последней сделке', legacy: 'по последней сделке'
 };
-function bankOpWhoSlot_(o) {
+BANK_MATCH_SOURCE_LABELS_.alias = 'плательщик запомнен за менеджером';
+BANK_MATCH_SOURCE_LABELS_.manual = 'назначил Влад';
+BANK_MATCH_SOURCE_LABELS_.claim = 'заявил менеджер - ждёт подтверждения';
+BANK_MATCH_SOURCE_LABELS_.claim_ok = 'заявил менеджер, подтверждено';
+// who - 'admin' (Влад: «Чей это?» / переназначить / подтвердить), 'manager' («Мой платёж» на
+// неопознанном), иначе только показ. «Чей это?» 24.09: назначает Влад, менеджер заявляет
+// только неопознанное и только на себя; сервер это же проверяет сам (/api/bank/*).
+function bankOpWhoSlot_(o, who) {
   if (o.kind === 'internal' || (o.internal && !o.kind)) return '<span class="bank-op-doc">своя компания</span>';
   if (o.kind === 'supplier') return '<span class="bank-op-doc">поставщик</span>';
-  if (!o.matched_manager) return '';
+  if (!o.matched_manager) {
+    if (who === 'admin' && o.direction === 'in') return '<button type="button" class="bank-op-act" data-bank-assign="' + o.id + '">Чей это?</button>';
+    if (who === 'manager' && o.direction === 'in') return '<button type="button" class="bank-op-act" data-bank-claim="' + o.id + '">Мой платёж</button>';
+    return '';
+  }
   var why = BANK_MATCH_SOURCE_LABELS_[o.match_source] || '';
   if (o.match_source === 'debt_doc' && o.match_doc) why += ': ' + o.match_doc;
-  return '<span class="bank-op-doc" style="color:var(--text)"' + (why ? ' title="' + bankEsc_(why) + '"' : '') + '>' +
-    bankEsc_(o.matched_manager) + '</span>';
+  var title = why ? ' title="' + bankEsc_(why) + '"' : '';
+  if (who === 'admin') {
+    var nameBtn = '<button type="button" class="bank-op-who" data-bank-assign="' + o.id + '"' + title + '>' + bankEsc_(o.matched_manager) + '</button>';
+    if (o.match_source !== 'claim') return nameBtn;
+    return '<span class="bank-op-slot">' + nameBtn +
+      '<button type="button" class="bank-op-act" data-bank-confirm="' + o.id + '">подтвердить</button></span>';
+  }
+  return '<span class="bank-op-doc" style="color:var(--text)"' + title + '>' + bankEsc_(o.matched_manager) + '</span>';
 }
+
+// ── «Чей это?»: меню выбора менеджера (анатомия утверждённого контекстного меню ГОСТ
+// раздел 4 - bg3 + border-strong + radius 10, пункты-текстовые кнопки; закрытие - клик вне,
+// Escape, прокрутка) и действия. Одна точка входа - делегированный клик по data-bank-*.
+var bankUnresolved_ = null;      // ответ /bank/unresolved (только админ)
+var bankUnresolvedOpen_ = false; // развёрнут ли список «Ждут решения»
+function bankFindOp_(id) {
+  var lists = [(BANK_OPS && BANK_OPS.ops) || [], (bankUnresolved_ && bankUnresolved_.ops) || []];
+  for (var i = 0; i < lists.length; i++) for (var j = 0; j < lists[i].length; j++) if (String(lists[i][j].id) === String(id)) return lists[i][j];
+  return null;
+}
+function bankPickClose_() { var m = document.getElementById('bank-pick-menu'); if (m) m.classList.remove('open'); }
+function bankPickOpen_(btn, id) {
+  var op = bankFindOp_(id);
+  var managers = (BANK_OPS && BANK_OPS.managers) || (bankUnresolved_ && bankUnresolved_.managers) || [];
+  var m = document.getElementById('bank-pick-menu');
+  if (!m) { m = document.createElement('div'); m.id = 'bank-pick-menu'; m.className = 'bank-pick'; document.body.appendChild(m); }
+  var cur = op && op.matched_manager ? String(op.matched_manager).split(' ')[0].toLowerCase() : '';
+  m.innerHTML = managers.map(function(name) {
+    var on = String(name).split(' ')[0].toLowerCase() === cur;
+    return '<button type="button" class="bank-pick-item' + (on ? ' on' : '') + '" data-bank-pick="' + id + '" data-manager="' + bankEsc_(name) + '">' + bankEsc_(name) + '</button>';
+  }).join('') +
+    (op && op.matched_manager ? '<button type="button" class="bank-pick-item bank-pick-none" data-bank-pick="' + id + '" data-manager="">Не определён</button>' : '') ||
+    '<div class="bank-pick-item" style="cursor:default;color:var(--muted)">Список менеджеров не загрузился</div>';
+  m.classList.add('open');
+  var r = btn.getBoundingClientRect(), mw = m.offsetWidth || 240, mh = m.offsetHeight || 300;
+  m.style.left = Math.max(8, Math.min(r.right - mw, window.innerWidth - mw - 8)) + 'px';
+  m.style.top = (r.bottom + 4 + mh > window.innerHeight - 8 ? Math.max(8, r.top - mh - 4) : r.bottom + 4) + 'px';
+}
+function bankAfterDecision_() { fetchBankOps_(); } // лента + «Ждут решения» (см. fetchBankOps_)
+function bankMorePayments_(n) {
+  if (!n) return '';
+  var w = (n % 10 === 1 && n % 100 !== 11) ? 'платёж' : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14)) ? 'платежа' : 'платежей';
+  return ' · заодно ещё ' + n + ' ' + w + ' этого плательщика';
+}
+function bankAssign_(id, manager) {
+  bankPickClose_();
+  postToYardApi_('/bank/assign', { id: id, manager: manager }).then(function(r) {
+    if (!r.ok || !r.data || r.data.error) { p2ToastErr((r.data && r.data.error) || 'Не получилось назначить'); return; }
+    p2Toast(r.data.manager ? 'Платёж назначен: ' + bankEsc_(r.data.manager) + bankMorePayments_(r.data.also_resolved) : 'Назначение снято', r.data.manager ? 'green' : 'amber');
+    bankAfterDecision_();
+  }).catch(function() { p2ToastErr('Нет связи с сервером'); });
+}
+function bankConfirmClaim_(id) {
+  postToYardApi_('/bank/confirm_claim', { id: id }).then(function(r) {
+    if (!r.ok || !r.data || r.data.error) { p2ToastErr((r.data && r.data.error) || 'Не получилось подтвердить'); return; }
+    p2Toast('Подтверждено, плательщик запомнен: ' + bankEsc_(r.data.manager) + bankMorePayments_(r.data.also_resolved), 'green');
+    bankAfterDecision_();
+  }).catch(function() { p2ToastErr('Нет связи с сервером'); });
+}
+function bankClaim_(id) {
+  postToYardApi_('/bank/claim', { id: id }).then(function(r) {
+    if (!r.ok || !r.data || r.data.error) { p2ToastErr((r.data && r.data.error) || 'Не получилось'); return; }
+    p2Toast('Записал платёж за вами. Когда Влад подтвердит - следующие платежи этого плательщика будут вашими сами', 'green');
+    fetchBankOps_();
+  }).catch(function() { p2ToastErr('Нет связи с сервером'); });
+}
+function fetchBankUnresolved_() {
+  if (!D || D.role !== 'admin' || viewAsEntry) return;
+  fetchFromYardApi_('/bank/unresolved').then(function(r) {
+    if (!r.ok || !r.data || r.data.error || !r.data.ops) return;
+    bankUnresolved_ = r.data;
+    renderBankUnresolved_();
+  }).catch(function() {});
+}
+function renderBankUnresolved_() {
+  var bar = document.getElementById('bank-unresolved-bar'), list = document.getElementById('bank-unresolved-list');
+  if (!bar || !list) return;
+  var ops = (bankUnresolved_ && bankUnresolved_.ops) || [];
+  if (!ops.length || !D || D.role !== 'admin' || viewAsEntry) { bar.innerHTML = ''; list.innerHTML = ''; return; }
+  var sum = ops.reduce(function(s, o) { return s + (Number(o.amount) || 0); }, 0);
+  var claims = ops.filter(function(o) { return o.match_source === 'claim'; }).length;
+  bar.innerHTML = '<button type="button" class="bank-unres-toggle" data-bank-unres-toggle="1">' +
+    'Ждут решения за 60 дней: <b>' + ops.length + '</b> на <b>' + fmt(sum) + '</b>' +
+    (claims ? ' · заявок менеджеров: <b>' + claims + '</b>' : '') +
+    ' <span class="bank-unres-caret">' + (bankUnresolvedOpen_ ? '▾' : '▸') + '</span></button>';
+  list.innerHTML = bankUnresolvedOpen_ ? ops.map(function(o) {
+    var d = o.occurred_at || '';
+    return '<div class="bank-op">' +
+      '<span class="bank-op-time">' + (d ? d.slice(8, 10) + '.' + d.slice(5, 7) : '—') + '</span>' +
+      '<span class="bank-op-name">' + bankEsc_(o.counterparty || 'Без названия') + '</span>' +
+      (bankOpWhoSlot_(o, 'admin') || '<span class="bank-op-doc"></span>') +
+      '<span class="bank-op-sum" style="color:var(--green)">+' + fmt(o.amount) + '</span>' +
+      '</div>';
+  }).join('') : '';
+}
+document.addEventListener('click', function(e) {
+  var t = e.target.closest ? e.target.closest('[data-bank-assign],[data-bank-claim],[data-bank-confirm],[data-bank-pick],[data-bank-unres-toggle]') : null;
+  if (!t) { if (!(e.target.closest && e.target.closest('#bank-pick-menu'))) bankPickClose_(); return; }
+  if (t.hasAttribute('data-bank-assign')) { e.stopPropagation(); bankPickOpen_(t, t.getAttribute('data-bank-assign')); return; }
+  if (t.hasAttribute('data-bank-pick')) { bankAssign_(t.getAttribute('data-bank-pick'), t.getAttribute('data-manager')); return; }
+  if (t.hasAttribute('data-bank-confirm')) { bankPickClose_(); bankConfirmClaim_(t.getAttribute('data-bank-confirm')); return; }
+  if (t.hasAttribute('data-bank-claim')) { t.disabled = true; bankClaim_(t.getAttribute('data-bank-claim')); return; }
+  if (t.hasAttribute('data-bank-unres-toggle')) { bankUnresolvedOpen_ = !bankUnresolvedOpen_; renderBankUnresolved_(); }
+});
+document.addEventListener('keydown', function(e) { if (e.key === 'Escape') bankPickClose_(); });
+window.addEventListener('scroll', function(e) {
+  if (e.target && e.target.closest && e.target.closest('#bank-pick-menu')) return; // прокрутка самого меню
+  bankPickClose_();
+}, true);
 function bankEsc_(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
@@ -32577,6 +32716,8 @@ function fetchBankOps_() {
     });
     bankOpsMaxSeenId_ = maxId;
     renderBankLive_();
+    // «Ждут решения» (24.09) - только Влад, тем же минутным циклом, что и лента.
+    if (D && D.role === 'admin' && !viewAsEntry) fetchBankUnresolved_();
     renderMgrBankLive_(); // личная страница менеджера (план Фаза 4) - no-op, если карточки сейчас нет в DOM
     // Перерисовать KPI "Сегодня" (страница Поступления) и строку на Панели - у них
     // появился/обновился банковский источник.
@@ -33115,7 +33256,7 @@ function renderBankLive_() {
       // Опознанный менеджер (план Фаза 4, 29.08) - показываем ВМЕСТО номера документа,
       // он важнее для быстрого просмотра; номер документа никуда не делся, просто не
       // дублируем два малозначимых поля рядом.
-      var docSlot = bankOpWhoSlot_(o) ||
+      var docSlot = bankOpWhoSlot_(o, 'admin') ||
         (o.doc_number ? '<span class="bank-op-doc">№' + bankEsc_(o.doc_number) + '</span>' : '<span class="bank-op-doc"></span>');
       return '<div class="bank-op">' +
         '<span class="bank-op-time">' + (o.occurred_at ? o.occurred_at.slice(11, 16) : '—') + '</span>' +
@@ -33151,9 +33292,12 @@ function renderMgrBankLive_() {
   if (valEl) valEl.textContent = fmt(total);
 
   var feedEl = document.getElementById('mgr-bank-feed');
+  // «Мой платёж» - только сам менеджер (в режиме «смотреть как» админ кнопку не видит: сервер
+  // всё равно пустит на /bank/claim только роль manager).
+  var mgrWho = (D && D.role === 'manager' && !viewAsEntry) ? 'manager' : '';
   if (feedEl) {
     feedEl.innerHTML = todayIns.map(function(o) {
-      var mgrSlot = bankOpWhoSlot_(o) || '<span class="bank-op-doc"></span>';
+      var mgrSlot = bankOpWhoSlot_(o, mgrWho) || '<span class="bank-op-doc"></span>';
       return '<div class="bank-op">' +
         '<span class="bank-op-time">' + (o.occurred_at ? o.occurred_at.slice(11, 16) : '—') + '</span>' +
         '<span class="bank-op-name">' + bankEsc_(o.counterparty || 'Без названия') + '</span>' +

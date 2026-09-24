@@ -5467,9 +5467,9 @@ main:has(> #page-dynamics.active){min-width:0;}
       <!-- Коммерческая группа (2026-09-22, Влад: "не хардкор в коде, а выбор, где сотрудник
            находится, у какого руководителя в команде") - показывается только при роли
            "Менеджер" (тот же приём, что drv-reg-driver-fields ниже для роли "Водитель").
-           Список руководителей в select - из DEPT_CFG на JS-стороне (drvRegFillHeadsSelect_),
-           не литерал в разметке - единственное место, где перечислены головы групп, теперь
-           само DEPT_CFG. -->
+           Список руководителей в select - текущие руководители (роль sales_head в «Доступ и
+           роли», drvRegFillHeadsSelect_), не литерал в разметке. 24.09 - перевод действует с
+           текущего месяца (история состава на сервере), подсказка под полем. -->
       <div id="drv-reg-manager-fields" style="display:none">
         <div class="asset-form-section">Коммерческая группа</div>
         <div class="asset-form-grid">
@@ -5477,7 +5477,8 @@ main:has(> #page-dynamics.active){min-width:0;}
             <select id="drv-reg-commercial-head"
               style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none">
               <option value="">— нет команды —</option>
-            </select></div>
+            </select>
+            <div style="font-size:12px;color:var(--muted);margin-top:4px">Перевод действует с текущего месяца. Прошлые месяцы считаются по прежнему составу.</div></div>
         </div>
       </div>
 
@@ -9574,7 +9575,7 @@ function positionLabel(name, type) {
     if (sur === 'дьячков') return 'Начальник автоколонны (тралы)';
     return 'Логист';
   }
-  return (sur === 'ахтамова' || sur === 'гусейнова') ? 'Руководитель отдела продаж' : 'Менеджер по продажам';
+  return COMMERCIAL_HEAD_SUR_FRONT_.indexOf(sur) >= 0 ? 'Руководитель отдела продаж' : 'Менеджер по продажам';
 }
 
 // Дедуп ростера дропдауна личной страницы (2026-08-13, Влад - скриншот: "Прус-Роскошный
@@ -9943,6 +9944,8 @@ function renderMyPage() {
     D.vehicles = periodEntry.vehicles || [];
     D.drivers = periodEntry.drivers || [];
   }
+  // Отделы руководителей - на месяц страницы (24.09, команды с датами), обратно в finally.
+  var teamsTok = commercialTeamsEnter_((D.orders || {}).period);
 
   try {
     // Admin-предпросмотр (viewAsEntry) считается той же ролью, что и реальный вход - прячет
@@ -10034,6 +10037,7 @@ function renderMyPage() {
       renderMyPageManager(el, current.name, selectorHtml, mgrDetailAll[current.name] || null);
     }
   } finally {
+    commercialTeamsExit_(teamsTok);
     D.orders = realOrders;
     if (D.summary) {
       D.summary.profit_long = realProfitLong;
@@ -13991,12 +13995,15 @@ function renderSalesTabsForPeriod() {
   // try/finally (аудит 29.08) - без него исключение в любом из 4 внутренних рендеров
   // навсегда оставляло бы весь дашборд на цифрах чужого периода (D.orders/D.summary не
   // возвращались бы обратно). Тот же приём, что renderMyPage выше по файлу.
+  // Отделы руководителей - на выбранный месяц (24.09, команды с датами), обратно в finally.
+  const teamsTok = commercialTeamsEnter_((D.orders || {}).period);
   try {
     renderSales();
     renderSalesMgr();
     renderSalesLog();
     renderSalesSalary();
   } finally {
+    commercialTeamsExit_(teamsTok);
     D.orders = realOrders;
     if (D.summary) D.summary.profit = realProfit;
     if (D.summary) D.summary.profit_tral = realProfitTral;
@@ -15818,6 +15825,7 @@ function accessInlineRole_(sel) {
   var u = accessFindUser_(email); if (!u) return;
   var prev = u.role_key, next = sel.value;
   if (prev === next) return;
+  if (!accessConfirmLeaveSalesHead_(u, next)) { sel.value = prev; return; }
   // Начальнику автоколонны нужна ещё и колонна - это решается в форме, не в строке.
   if (next === 'column_head') {
     sel.value = prev;
@@ -15990,6 +15998,19 @@ function accessScopeLabel_(u, role) {
   return (role && role.scope_label) || '';
 }
 function accessEditFromRow_(btn) { accessOpenForm_(btn.getAttribute('data-email')); }
+// Снять роль руководителя группы продаж (24.09, команды с датами): его люди с этого месяца не
+// входят ни в один отдел - выпадают из «Зарплаты» и «По менеджерам», пока их не переведут к
+// другому руководителю. Рискованное действие - спросить ДО (confirm, как «Закрыть доступ»).
+function accessConfirmLeaveSalesHead_(u, nextRole) {
+  if (!u || u.role_key !== 'sales_head' || nextRole === 'sales_head') return true;
+  var sur = String(u.display_name || '').trim().split(/\s+/)[0].toLowerCase();
+  var live = commercialHeadTeamsCache_[livePeriod_()];
+  var team = ((live && live.teams && live.teams[sur]) || []).filter(function(s) { return s !== sur; });
+  return confirm('Снять роль руководителя группы: ' + (u.person_name || u.display_name || u.email) + '?\n' +
+    (team.length
+      ? 'В команде ' + team.length + ' чел. (' + team.map(commercialCap_).join(', ') + ') - с этого месяца они не попадут в расчёт отдела и зарплаты, пока их не переведут к другому руководителю (Справочники → Сотрудники).'
+      : 'Прошлые месяцы останутся как были.'));
+}
 function accessOpenForm_(email, presetRole) {
   if (!accessState_) return;
   accessEnsurePeople_(function() {
@@ -16042,6 +16063,7 @@ function accessSave_() {
     body.fleet_segment = accessSegValue_();
     if (!body.fleet_segment) return show('Укажите колонну: длинномеры или тралы');
   }
+  if (accessEditEmail_ && !accessConfirmLeaveSalesHead_(accessFindUser_(accessEditEmail_), roleKey)) return;
   if (!accessEditEmail_) body.is_new = true;
   var btn = document.getElementById('acc-save-btn');
   btn.disabled = true;
@@ -16659,11 +16681,17 @@ function drvRegFillHeadsSelect_(selectedHead) {
   var sel = document.getElementById('drv-reg-commercial-head');
   if (!sel) return;
   var opts = '<option value="">— нет команды —</option>';
-  DEPT_CFG.forEach(function(cfg) {
-    if (!cfg.head || cfg.solo) return;
+  // 24.09: руководители СЕЙЧАС (роль sales_head), а не отделы просматриваемого месяца. Раньше
+  // здесь был весь DEPT_CFG - в список попадал и Рыщанов, у которого команды в этом поле нет.
+  var known = false;
+  commercialHeadCfgsNow_().forEach(function(cfg) {
     var key = cfg.head.toLowerCase();
-    opts += '<option value="' + key + '"' + (selectedHead === key ? ' selected' : '') + '>' + cfg.name + '</option>';
+    if (selectedHead === key) known = true;
+    opts += '<option value="' + pageEsc_(key) + '"' + (selectedHead === key ? ' selected' : '') + '>' + pageEsc_(cfg.name) + '</option>';
   });
+  // У человека в карточке руководитель, с которого роль уже сняли - показать как есть, а не
+  // молча сбросить на «нет команды» при следующем сохранении.
+  if (selectedHead && !known) opts += '<option value="' + pageEsc_(selectedHead) + '" selected>' + pageEsc_(commercialCap_(selectedHead)) + ' (не руководитель)</option>';
   sel.innerHTML = opts;
 }
 // Автоколонна (2026-09-23) - тот же приём, что drvRegToggleManagerFields_/
@@ -16862,7 +16890,7 @@ function drvRegSave_() {
     // Состав коммерческих групп мог измениться этим сохранением (2026-09-22) - сбрасываем
     // клиентский кэш, следующий заход на "По менеджерам"/личную страницу руководителя
     // подтянет уже свежий DEPT_CFG.members, не будет ждать перезагрузки всей страницы.
-    commercialHeadTeamsLoaded_ = false;
+    resetCommercialHeadTeams_();
     ensureCommercialHeadTeams_(function() { render(); });
   }).catch(function(e) { errEl.textContent = 'Ошибка сети: ' + e.message; errEl.style.display = ''; });
 }
@@ -22446,8 +22474,10 @@ function toggleMgrToday(name) {
 // же самое, что "к кому прикрепить нового менеджера"). См.
 // plans/2026-09-22-commercial-team-structure-not-hardcoded.md.
 var DEPT_CFG = [
-  { color:'#1D9E75', name:'Ахтамова Лиана',   head:'Ахтамова',  members:['Ахтамова','Цегельников','Гуштюк','Дербенцева','Шейко'] },
-  { color:'#378ADD', name:'Гусейнова Айнур',  head:'Гусейнова', members:['Гусейнова','Савиток','Филипчук','Котельников','Гуляева','Коньшина','Володин'] },
+  // commercial:true - отдел руководителя группы продаж: набор таких отделов перестраивается под
+  // месяц просмотра (ensureCommercialHeadTeams_ ниже), остальные записи не трогаются.
+  { color:'#1D9E75', name:'Ахтамова Лиана',   head:'Ахтамова',  members:['Ахтамова','Цегельников','Гуштюк','Дербенцева','Шейко'], commercial:true },
+  { color:'#378ADD', name:'Гусейнова Айнур',  head:'Гусейнова', members:['Гусейнова','Савиток','Филипчук','Котельников','Гуляева','Коньшина','Володин'], commercial:true },
   { color:'#BA7517', name:'Рыщанов Рустем',   head:'Рыщанов',   members:['Рыщанов','Прус-Роскошный','Суркова'] },
   // Ратников Максим (2026-08-13, Влад: "новый менеджер, не к Лиане, не к Айнур, сам по
   // себе... всё как у обычного менеджера, только он без старшего") - одиночная "плашка" без
@@ -22459,42 +22489,132 @@ var DEPT_CFG = [
 ];
 var HEAD_FULL = { 'Цуцурин':'Цуцурин Владислав Дмитриевич','Ахтамова':'Ахтамова Лиана Анатольевна','Гусейнова':'Гусейнова Айнур','Рыщанов':'Рыщанов Рустем' };
 
-// Подтягивает живой состав коммерческих групп с сервера (GET /api/commercial_head_teams,
-// источник - sprav_people.commercial_head, Справочники) и обновляет DEPT_CFG.members ПО
-// МЕСТУ (не пересоздаёт массив/объекты - все существующие ссылки на DEPT_CFG видят
-// изменение сами, без правки 17 мест, что его используют). Вызывается один раз после
-// первой успешной загрузки данных (loadData()) - до этого страница уже отрисована по сиду
-// выше (актуален на момент этого захода), обновление - тихое, перерисовывает только то,
-// что реально сейчас открыто. Рыщанов/Ратников не трогаются - в sprav_people.commercial_head
-// пока только Ахтамова/Гусейнова (план "пока структурно коммерческий отдел").
-var commercialHeadTeamsLoaded_ = false;
-function ensureCommercialHeadTeams_(cb) {
-  if (commercialHeadTeamsLoaded_) { if (cb) cb(); return; }
-  fetchFromYardApi_('/commercial_head_teams', {}).then(function(r) {
-    commercialHeadTeamsLoaded_ = true;
-    if (r.ok && r.data && r.data.teams) {
-      var teams = r.data.teams;
-      DEPT_CFG.forEach(function(cfg) {
-        if (!cfg.head) return;
-        var key = cfg.head.toLowerCase();
-        if (teams[key] && teams[key].length) {
-          cfg.members = teams[key].map(function(s) { return s.charAt(0).toUpperCase() + s.slice(1); });
-        }
-      });
-      // Тот же живой состав - вкладке «Зарплата» (COMMERCIAL_DEPTS). До 23.09 она считала
-      // 0.8% руководителя по застывшему списку без Гуцу/Кимличенко и расходилась с личной
-      // страницей руководителя. Состав = серверный (уволенные там сохранены для истории),
-      // порядок строк - как был, новые люди в конце.
-      COMMERCIAL_DEPTS.forEach(function(d) {
-        var live = teams[d.head];
-        if (!live || !live.length) return;
-        d.members = d.members.filter(function(s) { return live.indexOf(s) >= 0; })
-          .concat(live.filter(function(s) { return d.members.indexOf(s) < 0; }));
-      });
-    }
-    if (cb) cb();
-  }).catch(function() { commercialHeadTeamsLoaded_ = true; if (cb) cb(); });
+// Цвет-«личность» (ГОСТ 2.12) - ОДНА утверждённая палитра на весь дашборд: аватары CRM
+// (AVATAR_PALETTE_) и цвет отдела нового руководителя группы. Не семантический цвет.
+var IDENTITY_PALETTE_ = ['#D97757', '#C2609E', '#6FA8A0', '#B08A3E', '#7A8B99', '#9B6BC7', '#5E6FA3', '#4FA0AE', '#C9A227', '#C77D97'];
+
+// Отделы руководителей групп продаж С ДАТАМИ (24.09, plans/2026-09-24-commercial-teams-
+// effective-dating.md). Влад: «условия руководителей одинаковые» - новый руководитель (роль
+// sales_head в «Доступ и роли») получает отдел и тот же зарплатный пакет автоматически; «зарплата
+// за любой месяц - по составу того месяца». Сервер отдаёт состав на месяц просмотра
+// (D.orders.period); DEPT_CFG и COMMERCIAL_DEPTS перестраиваются ПО МЕСТУ под этот месяц (сами
+// массивы и объекты отделов не пересоздаются - 17+ мест, что их читают, работают без правок).
+// Объекты отделов живут в реестре: у Ахтамовой/Гусейновой - прежние записи (цвета/подписи как
+// были), у нового руководителя - создаются из ответа сервера (имя, «Отдел Фамилии» в род. падеже,
+// цвет из IDENTITY_PALETTE_). Рыщанов/Ратников не трогаются. До ответа сервера - сид выше.
+var COMMERCIAL_DEPT_REGISTRY_ = null;   // фамилия -> { cfg: запись DEPT_CFG, sal: запись COMMERCIAL_DEPTS }
+var commercialHeadTeamsPeriod_ = null;  // месяц, под который сейчас перестроены массивы
+var commercialHeadTeamsCache_ = {};     // месяц -> ответ сервера
+function commercialCap_(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+function commercialRegistry_() {
+  if (COMMERCIAL_DEPT_REGISTRY_) return COMMERCIAL_DEPT_REGISTRY_;
+  var reg = {};
+  DEPT_CFG.forEach(function(c) { if (c.commercial) (reg[c.head.toLowerCase()] = reg[c.head.toLowerCase()] || {}).cfg = c; });
+  COMMERCIAL_DEPTS.forEach(function(d) { (reg[d.head] = reg[d.head] || {}).sal = d; });
+  return (COMMERCIAL_DEPT_REGISTRY_ = reg);
 }
+function commercialDeptFor_(h, inf) {
+  var reg = commercialRegistry_();
+  if (reg[h] && reg[h].cfg && reg[h].sal) return reg[h];
+  var name = (inf && inf.name) || commercialCap_(h);
+  var hash = 0;
+  for (var i = 0; i < h.length; i++) hash = (hash * 31 + h.charCodeAt(i)) >>> 0;
+  var color = IDENTITY_PALETTE_[hash % IDENTITY_PALETTE_.length];
+  var rgb = [1, 3, 5].map(function(p) { return parseInt(color.substr(p, 2), 16); }).join(',');
+  reg[h] = reg[h] || {};
+  if (!reg[h].cfg) reg[h].cfg = { color: color, name: name, head: commercialCap_(h), members: [commercialCap_(h)], commercial: true };
+  if (!reg[h].sal) reg[h].sal = { color: color, bgA: rgb, label: (inf && inf.dept_label) || ('Отдел ' + commercialCap_(h)), head: h,
+    headName: name, ownSales: true, specialHead: false, members: [h] };
+  if (!FULL_NAME[h]) FULL_NAME[h] = name;
+  if (!HEAD_FULL[commercialCap_(h)]) HEAD_FULL[commercialCap_(h)] = name;
+  return reg[h];
+}
+// Текущие руководители (не месяц просмотра) - для списка в карточке сотрудника и «Плана
+// поступлений»: запись DEPT_CFG-формы на каждого.
+function commercialHeadCfgsNow_() {
+  var reg = commercialRegistry_();
+  return COMMERCIAL_HEAD_SUR_FRONT_.map(function(h) { return (reg[h] && reg[h].cfg) || commercialDeptFor_(h, null).cfg; });
+}
+function applyCommercialHeadTeams_(period, data) {
+  var teams = data.teams || {}, info = data.heads || {};
+  if (Array.isArray(data.current_heads)) {
+    COMMERCIAL_HEAD_SUR_FRONT_.splice.apply(COMMERCIAL_HEAD_SUR_FRONT_, [0, COMMERCIAL_HEAD_SUR_FRONT_.length].concat(data.current_heads));
+    // Мобильные страницы (orders-m/plan-m) строят меню руководителя по этому же списку - тот же
+    // приём, что с конфигом меню: index.html кладёт в хранилище браузера, они читают.
+    try { localStorage.setItem('yard.commercial_heads', JSON.stringify(data.current_heads)); } catch (e) {}
+    data.current_heads.forEach(function(h) { commercialDeptFor_(h, info[h]); });
+  }
+  var presetOrder = ['ахтамова', 'гусейнова'];
+  var heads = Object.keys(teams);
+  var order = presetOrder.filter(function(h) { return heads.indexOf(h) >= 0; })
+    .concat(heads.filter(function(h) { return presetOrder.indexOf(h) < 0; }).sort());
+  var cfgs = [], sals = [];
+  order.forEach(function(h) {
+    var d = commercialDeptFor_(h, info[h]), live = teams[h] || [h];
+    d.cfg.members = live.map(commercialCap_);
+    // «Зарплата»: порядок строк - как был, новые люди в конце (так было и до дат).
+    d.sal.members = d.sal.members.filter(function(s) { return live.indexOf(s) >= 0; })
+      .concat(live.filter(function(s) { return d.sal.members.indexOf(s) < 0; }));
+    cfgs.push(d.cfg); sals.push(d.sal);
+  });
+  var others = DEPT_CFG.filter(function(c) { return !c.commercial; });
+  DEPT_CFG.splice.apply(DEPT_CFG, [0, DEPT_CFG.length].concat(cfgs, others));
+  COMMERCIAL_DEPTS.splice.apply(COMMERCIAL_DEPTS, [0, COMMERCIAL_DEPTS.length].concat(sals));
+  commercialHeadTeamsPeriod_ = period;
+}
+// Загрузка состава на месяц в кэш (null в кэше = не загрузилось, повторно не просим до сброса -
+// иначе перерисовка после неудачи просила бы снова и снова). Параллельные просьбы - один запрос.
+var commercialTeamsLoading_ = {};
+function loadCommercialTeams_(period, cb) {
+  if (commercialHeadTeamsCache_[period] !== undefined) { if (cb) cb(); return; }
+  if (commercialTeamsLoading_[period]) { if (cb) commercialTeamsLoading_[period].push(cb); return; }
+  commercialTeamsLoading_[period] = cb ? [cb] : [];
+  fetchFromYardApi_('/commercial_head_teams', period ? { period: period } : {})
+    .then(function(r) { return (r.ok && r.data && r.data.teams) ? r.data : null; })
+    .catch(function() { return null; })
+    .then(function(data) {
+      commercialHeadTeamsCache_[period] = data;
+      var cbs = commercialTeamsLoading_[period] || [];
+      delete commercialTeamsLoading_[period];
+      cbs.forEach(function(f) { f(); });
+    });
+}
+function livePeriod_() { return (typeof D !== 'undefined' && D && D.orders && D.orders.period) || ''; }
+// Состав на текущий (живой) месяц - после загрузки данных (loadData) и после правки карточки.
+function ensureCommercialHeadTeams_(cb) {
+  var period = livePeriod_();
+  loadCommercialTeams_(period, function() {
+    var data = commercialHeadTeamsCache_[period];
+    if (data && livePeriod_() === period) applyCommercialHeadTeams_(period, data);
+    if (cb) cb();
+  });
+}
+// Прошлый месяц: вкладки «Продажи»/«Зарплата» и личная страница подменяют D.orders на выбранный
+// месяц только на время отрисовки (renderSalesTabsForPeriod/renderMyPage) - отделы подменяются
+// так же: enter перед отрисовкой, exit в том же finally. Состава месяца ещё нет в кэше - рисуем
+// по тому, что есть, и перерисовываем, как только он придёт.
+function commercialTeamsEnter_(period) {
+  var prev = commercialHeadTeamsPeriod_;
+  if (!period || period === prev) return null;
+  var data = commercialHeadTeamsCache_[period];
+  if (data === undefined) { loadCommercialTeams_(period, function() { if (typeof render === 'function') render(); }); return null; }
+  if (!data) return null;
+  // Что вернуть после отрисовки: состав живого месяца, а если он ещё не пришёл - то, что сейчас
+  // на экране (сид), снятое с самих массивов.
+  var restore = (prev != null && commercialHeadTeamsCache_[prev]) || commercialTeamsSnapshot_();
+  applyCommercialHeadTeams_(period, data);
+  return { prev: prev, data: restore };
+}
+function commercialTeamsExit_(tok) {
+  if (tok) applyCommercialHeadTeams_(tok.prev, tok.data);
+}
+function commercialTeamsSnapshot_() {
+  var teams = {};
+  COMMERCIAL_DEPTS.forEach(function(d) { teams[d.head] = d.members.slice(); });
+  return { teams: teams, current_heads: COMMERCIAL_HEAD_SUR_FRONT_.slice(), heads: {} };
+}
+// Состав мог измениться (сохранили карточку сотрудника) - забыть всё загруженное.
+function resetCommercialHeadTeams_() { commercialHeadTeamsCache_ = {}; commercialHeadTeamsPeriod_ = null; }
 
 function renderSalesMgrLegacy_() {
   if (!D || !D.orders) return;
@@ -24531,7 +24651,7 @@ function rpsRenderInner_(week) {
   if (!el) return;
   if (!rpsData_) { el.innerHTML = '<div class="muted" style="padding:16px">Не удалось загрузить план недели</div>'; return; }
 
-  var heads = DEPT_CFG.filter(function(c) { return !c.solo && COMMERCIAL_HEAD_SUR_FRONT_.indexOf(c.head.toLowerCase()) >= 0; });
+  var heads = commercialHeadCfgsNow_(); // руководители сейчас (план недели - всегда текущий)
   var deadlinePassed = new Date(rpsData_.deadline_at).getTime() < Date.now();
   var submittedCount = heads.filter(function(c) { return rpsData_.heads[c.head.toLowerCase()] && rpsData_.heads[c.head.toLowerCase()].submitted; }).length;
   var totalAll = heads.reduce(function(s, c) { var h = rpsData_.heads[c.head.toLowerCase()]; return s + (h ? h.total : 0); }, 0);
@@ -29383,7 +29503,7 @@ var CRM = (function () {
   // здесь смысл другой: цвет = личность, не оценка). Детерминированный хэш по добавочному
   // номеру (стабильнее имени - не меняется при исправлении опечатки в ФИО) - один и тот же
   // человек всегда получает один и тот же цвет, на любой карточке и после перезагрузки.
-  var AVATAR_PALETTE_ = ['#D97757', '#C2609E', '#6FA8A0', '#B08A3E', '#7A8B99', '#9B6BC7', '#5E6FA3', '#4FA0AE', '#C9A227', '#C77D97'];
+  var AVATAR_PALETTE_ = IDENTITY_PALETTE_; // общая палитра «личности» (объявлена у DEPT_CFG, 24.09)
   function avatarColor_(key) {
     var s = String(key || '');
     var h = 0;

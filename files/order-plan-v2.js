@@ -5116,13 +5116,20 @@ function formEq() {
   var mods = modsBox ? (modsBox.dataset.mods || '').split(',').filter(Boolean) : [];
   return eqCombine_(base, mods);
 }
+/* 25.09, найден реальный случай (мобильная форма, тот же splitContact_ там): менеджер ввёл
+   "+79262543570 Эдуард" (телефон ПЕРЕД именем, не после, как в подсказке "Имя · телефон") -
+   старая версия ловила телефон ТОЛЬКО в конце строки, вся строка целиком ушла в имя, поле
+   телефона осталось пустым - заявка ушла водителю без номера контакта, не видно было НИГДЕ.
+   Добавлен второй разбор - телефон в НАЧАЛЕ строки. */
 function splitContact(s) {
   s = String(s || '').trim();
   if (!s) return { name: '', phone: '' };
   var parts = s.split('·');
   if (parts.length >= 2) return { name: parts[0].trim(), phone: parts.slice(1).join('·').trim() };
-  var m = s.match(/([+\d][\d\s\-()]{6,})$/);
-  if (m) return { name: s.slice(0, m.index).replace(/[,\s]+$/, '').trim(), phone: m[1].trim() };
+  var mEnd = s.match(/([+\d][\d\s\-()]{6,})$/);
+  if (mEnd) return { name: s.slice(0, mEnd.index).replace(/[,\s]+$/, '').trim(), phone: mEnd[1].trim() };
+  var mStart = s.match(/^([+\d][\d\s\-()]{6,})/);
+  if (mStart) return { name: s.slice(mStart[0].length).replace(/^[,\s]+/, '').trim(), phone: mStart[1].trim() };
   return { name: s, phone: '' };
 }
 function fetchCustomers(q) {

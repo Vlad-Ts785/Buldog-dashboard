@@ -2223,6 +2223,26 @@ var PAGES_ = [
 // (park="Парк", sales="Продажи") - те же два раздела, больше в дашборде нет.
 var SECTION_LABELS_ = {park:"Парк", sales:"Продажи"};
 var NAV_COLUMN_HEAD_SUR_ = ["барыльченко", "дьячков"];
+// Роль по фамилии из «Доступ и роли» (24.09, этап 4.3) - index.html кладёт в хранилище
+// браузера свою роль (yard.my_role) и, у директора, роли всех (yard.role_people). Нет данных -
+// undefined, и проверки берут прежние списки фамилий (NAV_COLUMN_HEAD_SUR_ и т.п.).
+function navRoleOf_(sur){
+  sur = String(sur || '').toLowerCase().replace(/ё/g, 'е');
+  try {
+    var me = JSON.parse(localStorage.getItem('yard.my_role') || 'null');
+    if (me && me.sur && me.sur === sur) return me.role_key || null;
+    var people = JSON.parse(localStorage.getItem('yard.role_people') || 'null');
+    if (Array.isArray(people) && people.length) {
+      var p = people.filter(function(x){ return x.sur === sur; })[0];
+      return p ? (p.role_key || null) : null;
+    }
+  } catch(e){}
+  return undefined;
+}
+function navIsRole_(sur, roleKey, legacy){ var r = navRoleOf_(sur); return r === undefined ? !!legacy : r === roleKey; }
+// Рыщанов - руководитель логистики до 01.09, в «Доступ и роли» его нет (история).
+function navIsLogisticsHead_(sur){ return sur === 'рыщанов' || navIsRole_(sur, 'logistics_head', sur === 'сильчев'); }
+function navIsColumnHead_(sur){ return navIsRole_(sur, 'column_head', NAV_COLUMN_HEAD_SUR_.indexOf(sur) >= 0); }
 // Руководители групп продаж (24.09) - список кладёт index.html (роль sales_head в «Доступ и
 // роли»), тот же приём, что с конфигом меню. Нет в хранилище (index.html здесь ещё не
 // открывали) - прежний список.
@@ -2256,8 +2276,8 @@ function menuTierKey_(role, sur){
   if (role === 'admin') return 'admin';
   if (role === 'mechanic') return 'mechanic';
   if (role === 'logist'){
-    if (sur === 'сильчев' || sur === 'рыщанов') return 'logistics_head';
-    if (NAV_COLUMN_HEAD_SUR_.indexOf(sur) >= 0) return 'column_head';
+    if (navIsLogisticsHead_(sur)) return 'logistics_head';
+    if (navIsColumnHead_(sur)) return 'column_head';
     return 'logist';
   }
   if (role === 'manager'){
@@ -2317,9 +2337,9 @@ function navAllowedPages_(){
     var personalOnly = ['ryschanow-salary', 'commercial-head-salary', 'commercial-head-debt', 'column-head-payroll'];
     allowed = PAGES_.map(function(p){ return p.page; }).filter(function(id){ return personalOnly.indexOf(id) < 0; });
   } else {
-    var isRyschanow = sur === "сильчев" || sur === "рыщанов";
+    var isRyschanow = navIsLogisticsHead_(sur);
     var isCommercialHead = NAV_COMMERCIAL_HEAD_SUR_.indexOf(sur) >= 0;
-    var isColumnHead = NAV_COLUMN_HEAD_SUR_.indexOf(sur) >= 0;
+    var isColumnHead = navIsColumnHead_(sur);
     allowed = ["my-page", "calculator", "logistics-plan"];
     if (!isColumnHead) allowed.push("order-plan");
     if (isRyschanow) allowed.push("ryschanow-salary");

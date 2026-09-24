@@ -5570,7 +5570,7 @@ main:has(> #page-dynamics.active){min-width:0;}
       <!-- Автоколонна (2026-09-23, зеркало "Коммерческая группа" выше, но для логистов -
            Влад: "Феськов будет начальником у Барыльченко и Дьячкова... чтобы не захаркорить
            в код", plans/2026-09-23-fleet-head-role-feskov.md). Показывается только при роли
-           "Логист". Список голов в select - из FLEET_HEAD_SUR_FRONT_ на JS-стороне
+           "Логист". Список голов в select - люди с ролью fleet_head (с 24.09) на JS-стороне
            (drvRegFillFleetHeadsSelect_), тот же приём, что коммерческая группа выше. -->
       <div id="drv-reg-logist-fields" style="display:none">
         <div class="asset-form-section">Автоколонна</div>
@@ -9458,6 +9458,11 @@ function applyData(patch, opts) {
   var unchanged = !isFirstLoad && hash !== null && hash === lastAppliedHash_;
   if (hash !== null) lastAppliedHash_ = hash;
   D = isFirstLoad ? patch : Object.assign(D, patch);
+  // Роль и страницы приходят прямо в данных (24.09, этап 5.2 доступов, поле access из
+  // /api/main_payload) - известны ДО первой отрисовки: меню и личная страница сразу по роли,
+  // без второго запроса и без запасных списков фамилий. Нет поля (запасной путь Apps Script,
+  // механик) - роль догрузит accessMeEnsure_ отдельным запросом, как раньше.
+  if (D.access && D.access.role_key) accessMe_ = D.access;
   checkStaleFallbacks_(); // см. определение выше - независимо от skipIfUnchanged, дёшево
   // Список периодов - на каждый applyData, не только на первый заход (2026-09-04, Влад:
   // "куда август делся?", часть 3) - раньше пересчитывался ТОЛЬКО при первой навигации на
@@ -9659,7 +9664,7 @@ function positionLabel(name, type) {
     if (isColumnHeadSur_(sur)) return 'Начальник автоколонны (' + (columnSegmentOf_(sur) === 'tral' ? 'тралы' : 'длинномеры') + ')';
     return 'Логист';
   }
-  return COMMERCIAL_HEAD_SUR_FRONT_.indexOf(sur) >= 0 ? 'Руководитель отдела продаж' : 'Менеджер по продажам';
+  return isCommercialHeadSur_(sur) ? 'Руководитель отдела продаж' : 'Менеджер по продажам';
 }
 
 // Дедуп ростера дропдауна личной страницы (2026-08-13, Влад - скриншот: "Прус-Роскошный
@@ -9792,46 +9797,43 @@ function isVasinEntry_(entry) {
 // Начальники автоколонн (2026-08-30, новая роль, первый - Барыльченко Пётр, колонна
 // длинномеров, см. plans/2026-08-30-avtokolonna-head-personal-page.md) - Влад: "интерфейс
 // как у Васина... расчёт ЗП такой же как у Васина" - та же renderMyPageVasin, зеркало
-// isColumnHeadName_ на бэкенде. Расширяемый список (не только Барыльченко в будущем).
-var COLUMN_HEAD_SUR_FRONT_ = ['барыльченко', 'дьячков'];
+// isColumnHeadName_ на бэкенде. С 24.09 - по роли column_head (см. блок ролей ниже).
 function isColumnHeadEntry_(entry) {
   return !!entry && entry.type === 'logist' && isColumnHeadSur_(entry.name.trim().split(' ')[0].toLowerCase());
 }
 // ── Роль человека из «Доступ и роли» (24.09, этап 4.3) ─────────────────────────────────────
 // Кто начальник автоколонны / руководитель автоколонн / руководитель логистики - по РОЛИ, а не
-// по спискам фамилий. Директору известны роли всех (/api/me/access -> people), сотруднику -
-// только своя. Нет данных (ещё не загрузилось, admin без списка) - null, и проверки берут
-// прежние списки фамилий (COLUMN_HEAD_SUR_FRONT_ и соседи) как запасной путь до загрузки.
+// по спискам фамилий. Директору известны роли всех (people), сотруднику - только своя. С 24.09
+// (этап 5.2) роль приходит прямо в данных страницы (D.access -> accessMe_ до первой отрисовки),
+// поэтому запасных списков фамилий больше нет: роль неизвестна - «не руководитель» (безопасное
+// значение по умолчанию: никому не открываем лишнего, пока не знаем точно).
 function selfSur_() {
   return String((typeof D !== 'undefined' && D && (D.logistName || D.managerName)) || '').trim().split(/\s+/)[0].toLowerCase().replace(/ё/g, 'е');
 }
+var NO_ROLE_ = { role_key: null, fleet_segment: null };
 function personRole_(sur) {
   sur = String(sur || '').toLowerCase().replace(/ё/g, 'е');
-  if (!sur || typeof accessMe_ === 'undefined' || !accessMe_) return null;
+  if (!sur || typeof accessMe_ === 'undefined' || !accessMe_) return NO_ROLE_;
   if (Array.isArray(accessMe_.people)) {
     var p = accessMe_.people.filter(function(x) { return x.sur === sur; })[0];
-    return p ? { role_key: p.role_key, fleet_segment: p.fleet_segment || null } : { role_key: null, fleet_segment: null };
+    return p ? { role_key: p.role_key, fleet_segment: p.fleet_segment || null, name: p.name || null } : NO_ROLE_;
   }
   if (sur === selfSur_()) return { role_key: accessMe_.role_key, fleet_segment: accessMe_.fleet_segment || null };
-  return null;
+  return NO_ROLE_;
 }
-function roleIsOrLegacy_(sur, roleKey, legacyList) {
-  var r = personRole_(sur);
-  return r ? r.role_key === roleKey : legacyList.indexOf(sur) >= 0;
-}
-function isColumnHeadSur_(sur) { return roleIsOrLegacy_(sur, 'column_head', COLUMN_HEAD_SUR_FRONT_); }
-function isFleetHeadSur_(sur) { return roleIsOrLegacy_(sur, 'fleet_head', FLEET_HEAD_SUR_FRONT_); }
+function roleIs_(sur, roleKey) { return personRole_(sur).role_key === roleKey; }
+function isColumnHeadSur_(sur) { return roleIs_(sur, 'column_head'); }
+function isFleetHeadSur_(sur) { return roleIs_(sur, 'fleet_head'); }
+function isCommercialHeadSur_(sur) { return roleIs_(sur, 'sales_head'); }
 // Рыщанов - руководитель логистики до 01.09 (уволен ДО появления ролей, в «Доступ и роли» его
 // нет) - историческая запись, чтобы его страница за прошлые месяцы открывалась как раньше.
 var LOGISTICS_HEAD_HISTORY_ = ['рыщанов'];
 function isLogisticsHeadSur_(sur) {
-  return LOGISTICS_HEAD_HISTORY_.indexOf(sur) >= 0 || roleIsOrLegacy_(sur, 'logistics_head', ['сильчев']);
+  return LOGISTICS_HEAD_HISTORY_.indexOf(sur) >= 0 || roleIs_(sur, 'logistics_head');
 }
-// Колонна начальника автоколонны - из «Доступ и роли» (поле «Колонна»), запасной путь - как было.
+// Колонна начальника автоколонны - из «Доступ и роли» (поле «Колонна», обязательно у роли).
 function columnSegmentOf_(sur) {
-  var r = personRole_(sur);
-  if (r && r.fleet_segment) return r.fleet_segment;
-  return sur === 'дьячков' ? 'tral' : 'long';
+  return personRole_(sur).fleet_segment === 'tral' ? 'tral' : 'long';
 }
 // Рыщанов - руководитель отдела логистики (2026-08-25, см. plans/2026-08-25-ryschanow-
 // personal-page.md), не брокер найма - своя отдельная страница (renderMyPageRyschanow), как
@@ -9851,14 +9853,12 @@ function isRyschanowEntry_(entry) {
 // Ахтамова/Гусейнова - руководители коммерческих групп (2026-08-26, см.
 // plans/2026-08-26-ahtamova-guseinova-personal-pages.md) - своя отдельная страница
 // (renderMyPageCommercialHead_), тот же принцип, что у Рыщанова/Васина выше (не флейвор
-// renderMyPageManager). Зеркало commercialHeadTeam_ на бэкенде.
-var COMMERCIAL_HEAD_SUR_FRONT_ = ['ахтамова', 'гусейнова'];
+// renderMyPageManager). С 24.09 «кто руководитель» - роль sales_head (isCommercialHeadSur_),
+// а COMMERCIAL_HEAD_SUR_FRONT_ - лишь список ТЕКУЩИХ руководителей, приходит с сервера
+// (/api/commercial_head_teams -> current_heads), без стартовых фамилий.
+var COMMERCIAL_HEAD_SUR_FRONT_ = [];
 // Голова над начальниками автоколонн (2026-09-23, Феськов над Барыльченко+Дьячковым, см.
-// plans/2026-09-23-fleet-head-role-feskov.md) - тот же принцип, что COLUMN_HEAD_SUR_FRONT_/
-// COMMERCIAL_HEAD_SUR_FRONT_: "кто ГОЛОВА" - короткий хардкод-список, состав команды под
-// головой (fleetHeadTeams_) - из БД (/api/fleet_head_teams), не хардкод.
-var FLEET_HEAD_SUR_FRONT_ = ['феськов'];
-var FLEET_HEAD_LABELS_ = { 'феськов': 'Феськов Андрей' };
+// plans/2026-09-23-fleet-head-role-feskov.md) - с 24.09 по роли fleet_head (isFleetHeadSur_).
 function isFleetHeadEntry_(entry) {
   return !!entry && entry.type === 'logist' && isFleetHeadSur_(entry.name.trim().split(' ')[0].toLowerCase());
 }
@@ -9866,7 +9866,7 @@ function isFleetHeadEntry_(entry) {
 // страницы»; ей же сервер решает право на данные (isCrmAllowed_). Пустой список фамилий
 // CRM_MANAGER_SUR_FRONT_ удалён - «расширить на логиста» теперь делается галочкой, без кода.
 function isCommercialHeadEntry_(entry) {
-  return !!entry && entry.type === 'manager' && COMMERCIAL_HEAD_SUR_FRONT_.indexOf(entry.name.trim().split(' ')[0].toLowerCase()) >= 0;
+  return !!entry && entry.type === 'manager' && isCommercialHeadSur_(entry.name.trim().split(' ')[0].toLowerCase());
 }
 // Логисты "своего парка тралов" (2026-08-13, см. isOwnTralLogistName_ на бэкенде - тот же
 // фиксированный список по фамилии, не data-driven, см. план "три роли логистов"). Влад: "Три
@@ -13732,8 +13732,8 @@ function applyRoleUI() {
     // приём - матчим обоих, кто фактический руководитель решает ryschanowHeadFor_(period)).
     var isRyschanowViewer = isLogisticsHeadSur_(curPersonSur); // роль logistics_head + история (24.09)
     // Ахтамова/Гусейнова (2026-08-26) - те же два пункта, что у Рыщанова, но для руководителей
-    // коммерческих групп - см. COMMERCIAL_HEAD_SUR_FRONT_.
-    var isCommercialHeadViewer = COMMERCIAL_HEAD_SUR_FRONT_.indexOf(curPersonSur) >= 0;
+    // коммерческих групп - роль sales_head (с 24.09).
+    var isCommercialHeadViewer = isCommercialHeadSur_(curPersonSur);
     // Начальник автоколонны (2026-08-30, Барыльченко) - Влад перечислил РОВНО 3 пункта
     // ("личная станица потом планировка и потом калькулятор"), без "План задание" - в
     // отличие от обычных логистов/менеджеров, у которых он есть по умолчанию ниже.
@@ -13790,7 +13790,7 @@ function applyRoleUI() {
     // директора, но только текущий месяц и без раскрытия чужих заказов.
     // 20.09, Влад: "скрыть для менеджеров, оставить только Лиане и Айнур" - сузили с ВСЕХ
     // менеджеров до тех же двух руководителей коммерческих групп, что и «Суды»/«Зарплата»
-    // выше (isCommercialHeadViewer = Ахтамова/Гусейнова, см. COMMERCIAL_HEAD_SUR_FRONT_).
+    // выше (isCommercialHeadViewer - роль sales_head).
     if (isCommercialHeadViewer) allowedPages_.push('dept-trals');
     // 24.09 (этап 3): если сервер уже прислал матрицу ролей - она главная (Справочники ->
     // Доступ и роли, правит директор). Логика по фамилиям выше - запасная на время до ответа
@@ -16035,7 +16035,9 @@ function accessTogglePage_(btn, silentUndo) {
     var rp = accessState_.role_pages = accessState_.role_pages || {};
     var list = rp[role] = (rp[role] || []).filter(function(x) { return x !== page; });
     if (next) list.push(page);
-    accessMe_ = null;   // матрица для «Смотреть как» - перечитать при следующем applyRoleUI
+    // Матрица для «Смотреть как» - поправить на месте (24.09): обнулять accessMe_ нельзя, с этапа
+    // 5.2 по нему же решается, кто руководитель, - на время перечитывания все стали бы «не руководитель».
+    if (accessMe_ && accessMe_.matrix) accessMe_.matrix[role] = list.slice();
     if (silentUndo) return;
     p2Toast(pageEsc_(accessRoleLabel_(role)) + ': «' + pageEsc_(accessPageLabel_(page)) + '» - ' + (next ? 'видна' : 'скрыта'),
       next ? 'green' : 'amber', { label: 'Отменить', fn: function() { accessTogglePage_(btn, true); } });
@@ -16820,12 +16822,12 @@ function drvRegFillHeadsSelect_(selectedHead) {
   sel.innerHTML = opts;
 }
 // Автоколонна (2026-09-23) - тот же приём, что drvRegToggleManagerFields_/
-// drvRegFillHeadsSelect_ выше, для роли "Логист". FLEET_HEAD_SUR_FRONT_/FLEET_HEAD_LABELS_ -
-// короткий список "кто голова" (то же решение, что COLUMN_HEAD_SUR_FRONT_ - редкое событие,
-// заводится вручную). В отличие от коммерческой группы - фронту НЕ нужен живой состав
-// команды под головой (fleet_head влияет только на серверные ответы - allowedPages_/
-// chPayrollBuckets_ проверяют саму фамилию по FLEET_HEAD_SUR_FRONT_, не список отчитывающихся
-// ей начальников автоколонн), поэтому здесь нет аналога ensureCommercialHeadTeams_.
+// drvRegFillHeadsSelect_ выше, для роли "Логист".
+// «кто голова» - роль fleet_head в «Доступ и роли» (с 24.09, раньше короткий список фамилий).
+// В отличие от коммерческой группы - фронту НЕ нужен живой состав команды под головой
+// (fleet_head влияет только на серверные ответы - allowedPages_/chPayrollBuckets_ проверяют
+// саму роль, не список отчитывающихся ей начальников автоколонн), поэтому здесь нет аналога
+// ensureCommercialHeadTeams_.
 function drvRegToggleLogistFields_() {
   var box = document.getElementById('drv-reg-logist-fields');
   var checked = drvRegRoles_().indexOf('logist') >= 0;
@@ -16835,16 +16837,13 @@ function drvRegFillFleetHeadsSelect_(selectedHead) {
   var sel = document.getElementById('drv-reg-fleet-head');
   if (!sel) return;
   var opts = '<option value="">— нет —</option>';
-  // 24.09 (этап 4.3): руководители автоколонн - по роли fleet_head (директору известны роли
-  // всех), до загрузки ролей - прежний список. Подпись - известное имя или фамилия.
-  var heads = (typeof accessMe_ !== 'undefined' && accessMe_ && Array.isArray(accessMe_.people))
-    ? accessMe_.people.filter(function(p) { return p.role_key === 'fleet_head'; }).map(function(p) { return p.sur; })
-    : FLEET_HEAD_SUR_FRONT_.slice();
+  // 24.09: руководители автоколонн - по роли fleet_head (директору известны роли всех - а
+  // Справочники видит только он), подпись - имя из «Доступ и роли».
+  var people = (typeof accessMe_ !== 'undefined' && accessMe_ && Array.isArray(accessMe_.people)) ? accessMe_.people : [];
   var known = false;
-  heads.forEach(function(sur) {
-    if (selectedHead === sur) known = true;
-    var label = (FLEET_HEAD_LABELS_ && FLEET_HEAD_LABELS_[sur]) || commercialCap_(sur);
-    opts += '<option value="' + pageEsc_(sur) + '"' + (selectedHead === sur ? ' selected' : '') + '>' + pageEsc_(label) + '</option>';
+  people.filter(function(p) { return p.role_key === 'fleet_head'; }).forEach(function(p) {
+    if (selectedHead === p.sur) known = true;
+    opts += '<option value="' + pageEsc_(p.sur) + '"' + (selectedHead === p.sur ? ' selected' : '') + '>' + pageEsc_(p.name || commercialCap_(p.sur)) + '</option>';
   });
   // Руководитель в карточке, с которого роль сняли, - показать как есть, не сбросить молча.
   if (selectedHead && !known) opts += '<option value="' + pageEsc_(selectedHead) + '" selected>' + pageEsc_(commercialCap_(selectedHead)) + ' (не руководитель)</option>';
@@ -22667,7 +22666,16 @@ function commercialDeptFor_(h, inf) {
 // поступлений»: запись DEPT_CFG-формы на каждого.
 function commercialHeadCfgsNow_() {
   var reg = commercialRegistry_();
-  return COMMERCIAL_HEAD_SUR_FRONT_.map(function(h) { return (reg[h] && reg[h].cfg) || commercialDeptFor_(h, null).cfg; });
+  // Директору роли всех известны с первой отрисовки (D.access.people, 24.09) - берём оттуда;
+  // остальным - список текущих руководителей с сервера (приходит чуть позже данных).
+  var people = (typeof accessMe_ !== 'undefined' && accessMe_ && Array.isArray(accessMe_.people)) ? accessMe_.people : null;
+  var heads = people
+    ? people.filter(function(p) { return p.role_key === 'sales_head'; }).map(function(p) { return p.sur; })
+    : COMMERCIAL_HEAD_SUR_FRONT_;
+  return heads.map(function(h) {
+    var p = people && people.filter(function(x) { return x.sur === h; })[0];
+    return (reg[h] && reg[h].cfg) || commercialDeptFor_(h, p ? { name: p.name } : null).cfg;
+  });
 }
 function applyCommercialHeadTeams_(period, data) {
   var teams = data.teams || {}, info = data.heads || {};
@@ -24144,7 +24152,7 @@ function showCommercialHeadDebtHub_() {
   if (dz) dz.style.display = 'none';
   if (plan) plan.style.display = 'none';
   // «Суды» (21.09) - третья плитка этого хаба, тот же приём, что у admin-хаба debt-hub
-  // (courtCanView_ уже верен для этого тира - COMMERCIAL_HEAD_SUR_FRONT_).
+  // (courtCanView_ уже верен для этого тира - роль sales_head).
   var courtTile = document.getElementById('ch-debt-hub-tile-court');
   if (courtTile) courtTile.style.display = courtCanView_() ? '' : 'none';
   setText('page-title', 'Дебиторка');
@@ -26825,8 +26833,8 @@ function showDebtHub_() {
   courtFillHubFact_();   // подвал плитки «Суды» - живое число активных дел, не выдуманная подпись
 }
 // Кто видит суды на клиенте. Право решает СЕРВЕР (courtCanView_ в api/lib/court-cases.js);
-// здесь - только чтобы не показывать человеку то, что ему всё равно откажут. Фамилии берём
-// из уже существующего COMMERCIAL_HEAD_SUR_FRONT_, второго списка не заводим.
+// здесь - только чтобы не показывать человеку то, что ему всё равно откажут. Кто руководитель
+// группы - по роли sales_head (с 24.09), второго списка не заводим.
 function courtCanView_() {
   if (!D) return false;
   if (isEffectiveAdmin_()) return true;
@@ -26837,7 +26845,7 @@ function courtCanView_() {
   // покажи Владу, например, обычного менеджера.
   var name_ = viewAsEntry ? viewAsEntry.name : (D.managerName || D.logistName || '');
   var sur = String(name_ || '').trim().split(' ')[0].toLowerCase();
-  return !!sur && COMMERCIAL_HEAD_SUR_FRONT_.indexOf(sur) >= 0;
+  return !!sur && isCommercialHeadSur_(sur);
 }
 // «Суды» (21.09, Влад: "суды должны быть в дебиторке у всех, не отдельным пунктом меню") -
 // плитка в хабе руководителя коммерческой группы (#ch-debt-hub) ведёт СЮДА, в общий раздел
@@ -27929,7 +27937,7 @@ function menuTierKey_(role, sur) {
     return 'logist';
   }
   if (role === 'manager') {
-    if (COMMERCIAL_HEAD_SUR_FRONT_.indexOf(sur) >= 0) return 'commercial_head';
+    if (isCommercialHeadSur_(sur)) return 'commercial_head';
     return 'manager';
   }
   return role;
@@ -38316,7 +38324,7 @@ function initLP(){
      14.09 - Влад: "у Барыльченко должна быть возможность сработать в
      планировке... проверь что он может работать в планировке как Васин" -
      тот же полный режим распространён на начальников автоколонн
-     (COLUMN_HEAD_SUR_FRONT_, сейчас только Барыльченко - тот же список, что
+     (с 24.09 по роли column_head, isColumnHeadSur_; раньше список фамилий, тот же, что
      applyRoleUI()/menuTierKey_ уже используют для этой роли выше в файле,
      не отдельный хардкод). НЕ путать с фиксом того же дня на VPS
      (VASIN_FORMULA_SUR_/calcVasin) - там про конкретную ФОРМУЛУ зарплаты,

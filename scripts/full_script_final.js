@@ -3961,19 +3961,49 @@ function verifySessionToken_(token) {
 }
 
 // Ищет email в листе "Доступ", возвращает {name, role} или null.
+// 24.09.2026: лист - ЗЕРКАЛО Справочников (mirrorAccessFromServer_ в runAll, 6 раз в сутки), поэтому
+// человек, которому доступ выдали в дашборде, до ближайшего прогона в листе отсутствует - и любой
+// запрос сайта в этот doGet возвращал needLogin, сайт разлогинивал (живой случай: Руденко и Платонова
+// заведены в 12:56, зеркало - только в 15:00, «заходит и сразу выкидывает»). Теперь, если в листе
+// нет - спрашиваем источник истины (сервер, /api/access/export, кэш 2 мин). Отзыв доступа не
+// ослаблен: убранный в Справочниках исчезает из листа при следующем зеркале, как и раньше.
 function getAccessRole_(ss, email) {
   const sheet = ss.getSheetByName('Доступ');
-  if (!sheet || sheet.getLastRow() < 2) return null;
-  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
-  for (let i = 0; i < data.length; i++) {
-    const rowEmail = String(data[i][0] || '').trim().toLowerCase();
-    if (rowEmail && rowEmail === email) {
-      return {
-        name: String(data[i][1] || '').trim(),
-        role: String(data[i][2] || '').trim().toLowerCase(),
-      };
+  if (sheet && sheet.getLastRow() >= 2) {
+    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
+    for (let i = 0; i < data.length; i++) {
+      const rowEmail = String(data[i][0] || '').trim().toLowerCase();
+      if (rowEmail && rowEmail === email) {
+        return {
+          name: String(data[i][1] || '').trim(),
+          role: String(data[i][2] || '').trim().toLowerCase(),
+        };
+      }
     }
   }
+  return getAccessRoleFromServer_(email);
+}
+function getAccessRoleFromServer_(email) {
+  try {
+    var cache = CacheService.getScriptCache();
+    var raw = cache.get('access_export_v1');
+    if (!raw) {
+      var apiKey = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY');
+      if (!apiKey) return null;
+      var resp = UrlFetchApp.fetch('https://api.yardhub.ru/api/access/export', {
+        headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true,
+      });
+      if (resp.getResponseCode() !== 200) return null;
+      raw = resp.getContentText();
+      if (raw.length < 90000) cache.put('access_export_v1', raw, 120);
+    }
+    var users = (JSON.parse(raw) || {}).users || [];
+    for (var i = 0; i < users.length; i++) {
+      if (String(users[i].email || '').trim().toLowerCase() === email && users[i].base_role) {
+        return { name: String(users[i].display_name || '').trim(), role: String(users[i].base_role).trim().toLowerCase() };
+      }
+    }
+  } catch (err) { /* сервер недоступен - как раньше, только лист */ }
   return null;
 }
 

@@ -3511,7 +3511,8 @@ function openPop(anchor, o, forceAdd) {
      пикер её не видел вообще. */
   var hv = oHired(o);
   $('#op2-pop-cur').innerHTML = vs.length
-    ? 'Сейчас: <b>' + esc(vs.map(function (v) { return v.vehicle_gos; }).join(', ')) + '</b>'
+    ? 'Сейчас: <b>' + esc(vs.map(function (v) { return v.vehicle_gos; }).join(', ')) + '</b>' +
+      (hv ? ' + наём <b>' + esc(hv.vehicle_gos || '') + '</b> ' + esc(hv.carrier_name || '') : '')
     : hv
       ? 'Сейчас: <b>' + esc(hv.vehicle_gos || 'наёмник') + '</b> · наём, ' + esc(hv.carrier_name || 'перевозчик уточняется')
       : 'Сейчас: <b>без машины</b>' + (o.taken_by_name ? ' · ' + takenByHtml_(o, 'взял', '') : '');
@@ -3567,10 +3568,15 @@ function renderPop(q) {
   if (vs.length) {
     h += '<div class="op2-vi op2-act" data-act="unset"><span class="op2-gos">Снять ' + esc(vs[0].vehicle_gos || '') + '</span><span class="op2-rt">строка вернётся в «без машины»</span></div>' +
       '<div class="op2-vi op2-act' + (popAdd ? ' op2-sel' : '') + '" data-act="add"><span class="op2-gos">Добавить вторую машину</span></div>';
-  } else if (oHired(o)) {
+  }
+  if (oHired(o)) {
     /* 23.09, Влад: «нужна кнопка, которая может снять наёмную машину с заявки» - тот же
-       op2-act/unset приём, что у своей машины чуть выше, только на другом исполнителе. */
-    h += '<div class="op2-vi op2-act" data-act="unset-hired"><span class="op2-gos">Снять наёмника' + (oHired(o).vehicle_gos ? ' ' + esc(oHired(o).vehicle_gos) : '') + '</span><span class="op2-rt">строка вернётся в «без машины»</span></div>';
+       op2-act/unset приём, что у своей машины чуть выше, только на другом исполнителе.
+       24.09 (№28 ЛСК ООО): было «else if» - при своей машине рядом кнопка пропадала, а
+       наёмник продолжал показываться в строке заявки; снять его было нечем. Сервер с
+       24.09 больше не допускает обоих сразу (замена снимает второго), но уже зависшие
+       записи должны сниматься - кнопка показывается всегда, когда наёмник есть. */
+    h += '<div class="op2-vi op2-act" data-act="unset-hired"><span class="op2-gos">Снять наёмника' + (oHired(o).vehicle_gos ? ' ' + esc(oHired(o).vehicle_gos) : '') + '</span><span class="op2-rt">' + (vs.length ? 'останется ' + esc(vs[0].vehicle_gos || '') : 'строка вернётся в «без машины»') + '</span></div>';
   }
   h += sec('Свободны ' + (oTime(o) || ''), free.length) + free.map(function (v) {
     return item(v, '<b>' + esc(v.driver || 'без водителя') + '</b>' + (v.trailer ? ' · ' + esc(v.trailer) : '') + (v.trips_today ? '<br>рейсов сегодня: ' + esc(v.trips_today) : ''));
@@ -3599,7 +3605,8 @@ function onPopBodyClick(e) {
     apiPost('/orders/executor_remove', { executor_id: hv.id }).then(function (r) {
       if (!ok_(r)) return;
       closePop(); S.tickDown();
-      toast('Снят наёмник ' + esc(gosH) + ' · заявка №' + esc(noH) + ' снова без машины');
+      var ownLeft = oOwn(o).map(function (v) { return v.vehicle_gos; }).join(', ');
+      toast('Снят наёмник ' + esc(gosH) + ' · заявка №' + esc(noH) + (ownLeft ? ' · остаётся <span class="op2-tick">' + esc(ownLeft) + '</span>' : ' снова без машины'));
       loadOrders();
     });
     return;
@@ -3636,7 +3643,9 @@ function onPopBodyClick(e) {
   if (declared) {
     ok.textContent = 'Сделать основной ' + v.gos + ' · из заявленных, без нового пропуска';
   } else {
-    ok.textContent = (vs2.length && !popAdd ? 'Заменить ' + (vs2[0].vehicle_gos || '') + ' → ' : 'Поставить ') + v.gos +
+    var hv2 = oHired(o);
+    ok.textContent = (vs2.length && !popAdd ? 'Заменить ' + (vs2[0].vehicle_gos || '') + ' → '
+      : hv2 && !popAdd ? 'Заменить наёмника ' + (hv2.vehicle_gos || '') + ' → ' : 'Поставить ') + v.gos +
       (v.driver ? ' · ' + v.driver : '') + (oTime(o) ? ' на ' + oTime(o) : '') +
       (v.state === 'busy' ? ' (занята)' : '') + (outside ? ' · вне заявленных - нужен новый пропуск' : '');
   }

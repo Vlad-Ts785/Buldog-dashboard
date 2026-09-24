@@ -173,6 +173,10 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7;stroke
 .c-r3{display:flex;align-items:center;gap:8px;font-size:13px}
 .veh-info{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .veh-info .gos{font-family:var(--font-num);font-weight:700}
+/* светофор ответа водителя в боте MAX - те же цвета, что op2-bot-* на десктопе */
+.veh-info .gos.bot-sent{color:var(--tint-amber)}
+.veh-info .gos.bot-accepted{color:var(--tint-green)}
+.veh-info .gos.bot-declined{color:var(--tint-red)}
 .veh-info .drv{color:var(--text)}
 .veh-info .empty{color:var(--muted);font-style:normal}
 .veh-actions{flex:none;display:flex;align-items:center;gap:6px}
@@ -560,7 +564,9 @@ function normalizeOrder(o){
   var execs = o.executors||[];
   var main = execs.filter(function(e){return e.role==='main';})[0]||null;
   var reserve = execs.filter(function(e){return e.role==='reserve';})[0]||null;
-  var vehicle = main ? { gos:main.vehicle_gos, marka:main.vehicle_marka||'', driver:main.driver_name, phone:main.driver_phone, trailer:main.trailer_gos, own:main.kind==='own', company:main.carrier_name, confirmed:!!main.driver_confirmed_at, confirmedBy:main.driver_confirmed_by, confirmedAt:main.driver_confirmed_at, executor_id:main.id } : null;
+  var vehicle = main ? { gos:main.vehicle_gos, marka:main.vehicle_marka||'', driver:main.driver_name, phone:main.driver_phone, trailer:main.trailer_gos, own:main.kind==='own', company:main.carrier_name, confirmed:!!main.driver_confirmed_at, confirmedBy:main.driver_confirmed_by, confirmedAt:main.driver_confirmed_at, executor_id:main.id,
+    /* бот «Логист длинномеры» (24.09, как на десктопе ownLines_): 'none' - вне пилота */
+    botStatus:main.driver_bot_status||'none', botReason:main.driver_bot_decline_reason||'', botSentAt:main.driver_bot_sent_at, botAt:main.driver_bot_responded_at } : null;
   var pend = (o.pending_request && o.pending_request.status==='pending') ? o.pending_request : null;
   var createdMs = o.created_at ? new Date(o.created_at).getTime() : 0;
   return Object.assign({}, o, {
@@ -917,6 +923,14 @@ function renderLogFilters(){
    отражать отчество... достаточно фамилии и имени, чтобы было сэкономлено место») -
    только на карточке списка (тесно), в самой заявке при открытии - полное ФИО как было. */
 function shortName_(s){ var p=String(s||'').trim().split(/\s+/); return p.slice(0,2).join(' '); }
+/* подпись статуса задания в боте MAX - для подсказки на госномере и строки в карточке */
+function botLabel_(v){
+  if(!v || !v.botStatus || v.botStatus==='none') return '';
+  var t = function(x){ return x ? ' · '+new Date(x).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}) : ''; };
+  if(v.botStatus==='accepted') return 'Водитель принял задание в Max'+t(v.botAt);
+  if(v.botStatus==='declined') return 'Водитель отказался: '+(v.botReason||'причина не указана')+t(v.botAt);
+  return 'Задание отправлено в Max, ждём ответ'+t(v.botSentAt);
+}
 /* Бейдж менеджера (Влад 20.09: «нужно, чтобы была видна на заявке фамилия менеджера») -
    первые 3 буквы фамилии, цвет закреплён за человеком - тот же PERSON_COLOR, что уже
    красит точки в фильтре «Все менеджеры». Сырое o.manager_name (не показное o.manager,
@@ -947,7 +961,7 @@ function vehLineHtml(o){
     }
   } else {
     var v=o.vehicle;
-    info = '<span class="gos">'+esc(v.gos)+'</span> <span class="drv">'+esc(shortName_(v.driver)||'—')+'</span>'+
+    info = '<span class="gos'+(v.own && v.botStatus!=='none' ? ' bot-'+v.botStatus : '')+'" title="'+esc(botLabel_(v))+'">'+esc(v.gos)+'</span> <span class="drv">'+esc(shortName_(v.driver)||'—')+'</span>'+
       (!v.own && v.company ? ' <span class="empty">'+esc(v.company)+'</span>' : '');
     actions = v.own ? '<span class="tag own">СВОЯ</span>' : '<span class="tag hired">НАЁМ</span>';
     if(ROLE==='log' && o.status!=='done') actions += '<button class="c-btn rm" data-act="rm" data-id="'+o.id+'">Снять</button>';
@@ -1161,10 +1175,15 @@ function renderViewSheet(head,body,foot){
        эндпоинт сервер сам отклоняет для роли manager («отметку ставит логист»). */
     if(o.vehicle.phone) html += '<div class="frow"><div class="k">Телефон</div><a class="v" href="tel:'+esc(String(o.vehicle.phone).replace(/[^\d+]/g,''))+'" style="color:var(--blue)">'+esc(o.vehicle.phone)+'</a></div>';
     if(o.vehicle.trailer) html += '<div class="frow"><div class="k">Прицеп</div><div class="v mono">'+esc(o.vehicle.trailer)+'</div></div>';
-    html += '<div class="info"'+(o.vehicle.confirmed?' style="color:var(--tint-green)"':'')+'>'+(o.vehicle.confirmed ?
+    var botOn = o.vehicle.botStatus!=='none';
+    if(botOn){
+      /* задание ушло через бота - статус ставит сам водитель кнопкой, ручная отметка не нужна */
+      var bc = {sent:'--tint-amber', accepted:'--tint-green', declined:'--tint-red'}[o.vehicle.botStatus];
+      html += '<div class="info" style="color:var('+bc+')">'+esc(botLabel_(o.vehicle))+'</div>';
+    } else html += '<div class="info"'+(o.vehicle.confirmed?' style="color:var(--tint-green)"':'')+'>'+(o.vehicle.confirmed ?
       ('Водитель подтвердил'+(o.vehicle.confirmedBy?(' · '+esc(o.vehicle.confirmedBy)):'')+(o.vehicle.confirmedAt?(' · '+new Date(o.vehicle.confirmedAt).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})):'')) :
       'Водитель ещё не подтвердил')+'</div>';
-    if(ROLE==='log') html += '<button class="btn ghost wide" style="margin:8px 0" id="btnDrvConfirm">'+(o.vehicle.confirmed?'Снять подтверждение водителя':'Водитель подтвердил')+'</button>';
+    if(ROLE==='log' && !botOn) html += '<button class="btn ghost wide" style="margin:8px 0" id="btnDrvConfirm">'+(o.vehicle.confirmed?'Снять подтверждение водителя':'Водитель подтвердил')+'</button>';
     html += '<button class="btn ghost wide" style="margin:8px 0" id="btnCopyPass"><svg><use href="#i-copy"/></svg> Скопировать данные на пропуск</button>';
   }
   if(o.needs_data && o.nd_main){
@@ -1182,7 +1201,8 @@ function renderViewSheet(head,body,foot){
       html += '<div class="list-row" id="rowSts1"><svg><use href="#i-doc"/></svg>СТС тягача ⤓<span class="go"></span></div>';
       html += '<div class="list-row" id="rowSts2"><svg><use href="#i-doc"/></svg>СТС прицепа ⤓<span class="go"></span></div>';
       html += '<div class="list-row" id="rowPass"><svg><use href="#i-doc"/></svg>Паспортные данные текстом<span class="go"></span></div>';
-      html += '<button class="btn ghost wide" style="margin:8px 0" id="btnDrvTask"><svg><use href="#i-truck"/></svg> Задание водителю</button>';
+      if(ROLE==='log') html += '<button class="btn primary wide" style="margin:8px 0" id="btnDrvMax"><svg><use href="#i-truck"/></svg> Отправить задание в Max</button>';
+      html += '<button class="btn ghost wide" style="margin:8px 0" id="btnDrvTask"><svg><use href="#i-copy"/></svg> Скопировать задание</button>';
     }
     html += '<div class="f-label">История</div><div id="histWrap"><div class="hist-row">Загрузка…</div></div>';
     apiGet_('/orders/history', {id:o.id}).then(function(r){
@@ -1212,6 +1232,25 @@ function renderViewSheet(head,body,foot){
       sheetData = replaceOrder(r.data.order);
       toast(was?'Подтверждение снято':'Водитель подтвердил');
       render(); renderSheet();
+    });
+  });
+  /* «Отправить задание в Max» - тот же серверный путь, что кнопка на десктопе
+     (/logist_long/send, бот «Логист длинномеры»). Не привязан водитель - честно говорим
+     и предлагаем скопировать текст руками. */
+  var btnMax=$('btnDrvMax');
+  if(btnMax) btnMax.addEventListener('click', function(){
+    if(!o.vehicle || !o.vehicle.executor_id) return;
+    btnMax.disabled = true; btnMax.textContent = 'Отправляю…';
+    apiPost_('/logist_long/send', {executor_id:o.vehicle.executor_id}).then(function(r){
+      var d = r.data || {};
+      if(r.ok && d.ok){
+        vib([8,40,8]);
+        toast('Задание отправлено в Max', o.vehicle.driver ? shortName_(o.vehicle.driver) : '');
+        loadOrders().then(function(){ var fresh = findOrder(o.id); if(fresh && sheetKind==='view' && sheetData && sheetData.id===o.id){ sheetData = fresh; renderSheet(); } }).catch(function(){});
+      } else {
+        btnMax.disabled = false; btnMax.innerHTML = '<svg><use href="#i-truck"/></svg> Отправить задание в Max';
+        toast('Не отправлено', (d.reason || d.error || 'ошибка сервера') + ' - скопируйте текст вручную');
+      }
     });
   });
   var btnDrv=$('btnDrvTask');

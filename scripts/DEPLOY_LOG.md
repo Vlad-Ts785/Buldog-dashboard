@@ -9671,3 +9671,16 @@ PDF..."). Скрипт Google `gsi/client` теперь async: данные во
   (`/api/access/export`, кэш 2 мин). Отзыв доступа не ослаблен.
 - `clasp push` → версия 384 → redeploy `AKfycbxWi4...` @384. Проверено: главная загрузка Руденко и
   запрос Платоновой через `/exec` - `needLogin:false`.
+
+## 2026-09-24 - доступы, этап 5.4: Apps Script без копий ролей, мост access_list удалён (v385)
+
+- VPS `77bda2f`: `/api/access/export` отдаёт ещё `role_key`/`fleet_segment`, `/api/commercial_head_teams`
+  доступен по серверному ключу. Удалены `import/import-access-list.js`, его логи и строка крона
+  (бэкап `/root/crontab.bak-20260924-access-list`) - после превращения листа «Доступ» в зеркало
+  этот импорт откатывал бы правки доступов.
+- Apps Script v385 (`clasp pull` + сверка с HEAD - чужого нет, push, create-version, redeploy
+  `AKfycbxWi4...` @385): `serverRoleData_()` - роли и составы команд с сервера (кэш 1 ч + последний
+  удачный снимок в ScriptProperties `ROLE_DATA_LAST_GOOD`), копия `COMMERCIAL_HEAD_TEAMS_` убрана;
+  `isRyschanowLogistName_` - роль `logistics_head` (было «рыщанов» - Сильчеву ИИ-рекомендации шли как
+  логисту); `action=access_list` убран. Проверка из редактора: `checkServerRoleData`. `/exec` отвечает,
+  `access_list` больше не отдаёт список. Этап 5 и весь план доступов закрыты.

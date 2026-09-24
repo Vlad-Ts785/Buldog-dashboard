@@ -4141,13 +4141,64 @@ function issueKpNumber_(access, p) {
 // Гусейновой)/Кимличенко (к Ахтамовой) добавлены этим же заходом. Если разойдётся с БД в
 // будущем - значит фолбэк сам не сработал ни разу с 22.09, что и ожидается. См.
 // plans/2026-09-22-commercial-team-structure-not-hardcoded.md.
-var COMMERCIAL_HEAD_TEAMS_ = {
-  'ахтамова': ['ахтамова','цегельников','гуштюк','дербенцева','шейко','кимличенко'],
-  'гусейнова': ['гусейнова','савиток','филипчук','котельников','гуляева','коньшина','володин','гуцу'],
-};
+//
+// 24.09.2026 (этап 5.4 доступов, plans/2026-09-23-access-roles-in-spravochniki.md): копии
+// списка больше НЕТ - роли и составы команд берутся с сервера (единственный источник:
+// «Доступ и роли» + Справочники). Выяснилось, что ИИ-рекомендации руководителям групп строит
+// именно Apps Script (не только редкий фолбэк) - копия с ручными правками была живой бомбой:
+// новый руководитель по роли не получил бы своих рекомендаций. Кэш 1 ч (CacheService) +
+// последний удачный ответ в ScriptProperties: сервер недоступен (ровно тот случай, когда
+// включаются запасные пути) - работаем по последнему удачному снимку, а не по фамилиям в коде.
+var ROLE_DATA_MEMO_ = null; // в пределах одного запуска скрипта - без повторных обращений к кэшу
+function serverRoleData_() {
+  if (ROLE_DATA_MEMO_) return ROLE_DATA_MEMO_;
+  var CACHE_KEY = 'role_data_v1', LAST_GOOD_KEY = 'ROLE_DATA_LAST_GOOD';
+  var cache = CacheService.getScriptCache();
+  var hit = cache.get(CACHE_KEY);
+  if (hit) { try { return (ROLE_DATA_MEMO_ = JSON.parse(hit)); } catch (e) {} }
+  var props = PropertiesService.getScriptProperties();
+  var data = null;
+  try {
+    var apiKey = props.getProperty('YARD_API_KEY');
+    if (apiKey) {
+      var opts = { headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true };
+      var r1 = UrlFetchApp.fetch('https://api.yardhub.ru/api/access/export', opts);
+      var r2 = UrlFetchApp.fetch('https://api.yardhub.ru/api/commercial_head_teams', opts);
+      if (r1.getResponseCode() === 200 && r2.getResponseCode() === 200) {
+        var users = (JSON.parse(r1.getContentText()) || {}).users || [];
+        var teams = (JSON.parse(r2.getContentText()) || {}).teams || {};
+        var roles = {};
+        users.forEach(function(u) {
+          var s = String(u.display_name || '').trim().split(' ')[0].toLowerCase();
+          if (s) roles[s] = u.role_key || null;
+        });
+        if (users.length) {
+          data = { roles: roles, teams: teams };
+          props.setProperty(LAST_GOOD_KEY, JSON.stringify(data));
+        }
+      }
+    }
+  } catch (e) { Logger.log('serverRoleData_: ' + e); }
+  if (!data) {
+    var last = props.getProperty(LAST_GOOD_KEY);
+    try { data = last ? JSON.parse(last) : null; } catch (e) { data = null; }
+  }
+  data = data || { roles: {}, teams: {} };
+  cache.put(CACHE_KEY, JSON.stringify(data), 3600);
+  return (ROLE_DATA_MEMO_ = data);
+}
+// Проверка из редактора (без "_" в конце - видна в списке «Выполнить»): что Apps Script сейчас
+// знает о ролях и командах с сервера.
+function checkServerRoleData() {
+  CacheService.getScriptCache().remove('role_data_v1');
+  ROLE_DATA_MEMO_ = null;
+  var d = serverRoleData_();
+  Logger.log('ролей: ' + Object.keys(d.roles).length + '; руководители групп: ' + Object.keys(d.teams).join(', ') +
+    '; руководитель логистики: ' + Object.keys(d.roles).filter(function(s) { return d.roles[s] === 'logistics_head'; }).join(', '));
+}
 function commercialHeadTeam_(name) {
   var sur = (name||'').trim().split(' ')[0].toLowerCase();
-  return COMMERCIAL_HEAD_TEAMS_[sur] || null;
+  return serverRoleData_().teams[sur] || null;
 }
 
 function buildManagerView_(orders, managerName, ss, period) {
@@ -4336,8 +4387,12 @@ function isOwnTralLogistName_(name) {
 // Рыщанов - руководитель ВСЕГО отдела логистики (2026-08-25, Влад: "нужно сделать личную
 // страницу Рыщанову... похожа на страницу Пруса"), не брокер найма лично - фиксированная
 // фамилия, тот же принцип, что isVasinName_/isOwnTralLogistName_ выше.
+// 24.09.2026 (этап 5.4): руководитель логистики - роль logistics_head с сервера (сейчас
+// Сильчев, и.о.; Apps Script до сих пор считал им уволенного Рыщанова, и ИИ-рекомендации
+// Сильчеву строились как обычному логисту). Рыщанов - историческая запись (уволен ДО ролей).
 function isRyschanowLogistName_(name) {
-  return (name||'').trim().split(' ')[0].toLowerCase() === 'рыщанов';
+  var sur = (name||'').trim().split(' ')[0].toLowerCase();
+  return sur === 'рыщанов' || serverRoleData_().roles[sur] === 'logistics_head';
 }
 
 // Начальники автоколонн (2026-08-30, новая роль, первый - Барыльченко Пётр Иванович,
@@ -5215,33 +5270,9 @@ function doGet(e) {
   // computed напрямую, см. buildRosterFallback_/getOrdersData ниже), корень найден и
   // подтверждён числами, диагностика больше не нужна.
 
-  // ── ПОСТОЯННЫЙ мост (2026-09-01, план plans/2026-09-01-apps-script-elimination.md,
-  // этап 1.1) - список доступа ("Доступ": email/имя/роль) продолжает жить в Google
-  // Таблице (Влад правит лист руками, отзыв доступа там уже мгновенный на стороне
-  // Apps Script) - сервер зеркалирует его в access_users cron'ом раз в 5 минут (как
-  // import-debt-status.js зеркалирует статусы ДЗ). НЕ временный - это постоянный мост,
-  // пока Влад не решит перенести сам список доступа в UI Справочников. Ключ - тот же
-  // YARD_API_KEY, что и остальной server<->AppsScript обмен (не отдельный секрет).
-  if (e && e.parameter && e.parameter.action === 'access_list') {
-    var alKey = e.parameter.key || '';
-    var alExpected = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY') || '';
-    if (!alExpected || alKey !== alExpected) {
-      return ContentService.createTextOutput(JSON.stringify({ error: 'forbidden' })).setMimeType(ContentService.MimeType.JSON);
-    }
-    var alSheet = ss.getSheetByName('Доступ');
-    var alRows = [];
-    if (alSheet && alSheet.getLastRow() > 1) {
-      var alData = alSheet.getRange(2, 1, alSheet.getLastRow() - 1, 3).getValues();
-      alRows = alData.map(function(r) {
-        return {
-          email: String(r[0] || '').trim().toLowerCase(),
-          name: String(r[1] || '').trim(),
-          role: String(r[2] || '').trim().toLowerCase(),
-        };
-      }).filter(function(r) { return r.email; });
-    }
-    return ContentService.createTextOutput(JSON.stringify({ users: alRows })).setMimeType(ContentService.MimeType.JSON);
-  }
+  // action=access_list (мост «лист Доступ -> сервер», 01.09) УБРАН 24.09.2026 (этап 5.4 доступов):
+  // доступы правятся в дашборде (Справочники -> «Доступ и роли»), лист - зеркало сервера
+  // (mirrorAccessFromServer_), серверный импорт листа удалён - обратный мост стал бы откатывать правки.
 
   // ── ВРЕМЕННО (2026-08-19, перенос ДЗ на сервер) - экспорт листа "ДЗ_Статусы" (ручные
   // статусы/комментарии, НЕ из 1С). НЕ временный - это постоянный мост (гигиена 01.09,
@@ -5250,7 +5281,7 @@ function doGet(e) {
   // (cron), запись статусов из UI по-прежнему двойная (лист + сервер), лист остаётся
   // источником для сверки. Единственная правка сегодня - ключ был отдельным хардкодом в
   // открытом коде, теперь тот же YARD_API_KEY, что у остальных постоянных мостов
-  // (access_list, park_history и т.д.) - один секрет вместо россыпи разных.
+  // (park_history и т.д.) - один секрет вместо россыпи разных.
   if (e && e.parameter && e.parameter.action === 'export_debt_status') {
     var edsKey = e.parameter.key || '';
     var edsExpected = PropertiesService.getScriptProperties().getProperty('YARD_API_KEY') || '';

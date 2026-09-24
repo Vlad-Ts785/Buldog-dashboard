@@ -1,0 +1,47 @@
+<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Превью · Найм водителей</title>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;600&family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<!--
+  Локальное превью страницы «Найм» (plans/2026-09-24-driver-hiring-pipeline.md). ПРЕВЬЮ = КОНТРАКТ БЕЗ
+  ПЕРЕНОСА: страница собрана из ТЕХ ЖЕ боевых файлов, что пойдут в прод (../files/hiring.js, hiring.css),
+  стили, сайдбар и шапка приложения на лету берутся из ../files/index.html. Демо-данные и панель
+  «смотреть как» - preview-hiring-demo.js (тот же файл вшивается в ссылку для коллег, см.
+  build-preview-hiring.js). Открывать через локальный сервер от корня репозитория.
+-->
+</head><body>
+<script src="preview-hiring-demo.js"></script>
+<script>
+(async function () {
+  const html = await (await fetch('../files/index.html', { cache: 'no-cache' })).text();
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.querySelectorAll('head style, body style').forEach(function (s) {
+    const st = document.createElement('style'); st.textContent = s.textContent; document.head.appendChild(st);
+  });
+  const sidebar = doc.querySelector('aside.sidebar');
+  sidebar.querySelectorAll('[onclick]').forEach(function (e) { e.removeAttribute('onclick'); });
+  sidebar.querySelectorAll('.sidebar-nav-item').forEach(function (e) { e.classList.toggle('active', e.getAttribute('data-page') === 'hiring'); });
+  document.body.appendChild(document.importNode(sidebar, true));
+  const wrap = document.createElement('div'); wrap.className = 'main-wrap';
+  const header = document.importNode(doc.querySelector('.main-wrap .page-header'), true);
+  header.querySelector('#page-title').textContent = 'Найм водителей';
+  header.querySelectorAll('#period-selector-wrap,#range-selector-wrap').forEach(function (e) { e.remove(); });
+  wrap.appendChild(header);
+  const main = document.createElement('main');
+  main.innerHTML = '<div id="page-hiring" class="page active"></div>';
+  wrap.appendChild(main);
+  document.body.appendChild(wrap);
+  function fnSrc(name) {
+    const i = html.indexOf('function ' + name + '(');
+    let d = 0, j = html.indexOf('{', i);
+    for (let k = j; k < html.length; k++) { if (html[k] === '{') d++; else if (html[k] === '}') { d--; if (!d) return html.slice(i, k + 1); } }
+  }
+  const selM = html.match(/var LIGHT_GRID_SEL_ = '[^']+';/);
+  (0, eval)('var p2ToastEl_ = null, p2ToastTimer_ = null, cursorLightInited_ = {};\n' + selM[0] + '\n' +
+    fnSrc('p2Toast') + '\n' + fnSrc('initCursorLight_') + '\nwindow.p2Toast = p2Toast; window.initCursorLight_ = initCursorLight_;');
+  const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = '../files/hiring.css'; document.head.appendChild(css);
+  const js = document.createElement('script'); js.src = '../files/hiring.js';
+  js.onload = function () { window.HR_DEMO.mountBar(); window.HR.open(); };
+  document.body.appendChild(js);
+})().catch(function (e) { document.body.insertAdjacentHTML('beforeend', '<pre style="color:#E24B4A;padding:20px">Превью не собралось: ' + e.message + '</pre>'); });
+</script>
+</body></html>

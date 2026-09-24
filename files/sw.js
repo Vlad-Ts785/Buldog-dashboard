@@ -35,7 +35,7 @@ self.addEventListener('install', function (event) {
 // Аварийный выключатель: false + выкатка = кэш оболочки стирается, всё идёт в сеть как раньше.
 var SHELL_ENABLED = true;
 var SHELL_INDEX = '/files/index.html';
-var SHELL_FILES = [SHELL_INDEX, '/files/order-plan-v2.js', '/files/order-plan-v2.css', '/files/logist-push-notify.js'];
+var SHELL_FILES = [SHELL_INDEX, '/files/order-plan-v2.js', '/files/order-plan-v2.css', '/files/logist-push-notify.js', '/files/hiring.js', '/files/hiring.css'];
 var SHELL_PREFIX = 'app-shell-v-';
 var SHELL_META = 'app-shell-meta';
 // current - версия, из которой отдаём сейчас; pending - скачанная в фоне, включается только

@@ -2222,34 +2222,33 @@ var PAGES_ = [
 // Ключи и подписи - 1:1 с data-section/.sidebar-nav-section-label в index.html
 // (park="Парк", sales="Продажи") - те же два раздела, больше в дашборде нет.
 var SECTION_LABELS_ = {park:"Парк", sales:"Продажи"};
-var NAV_COLUMN_HEAD_SUR_ = ["барыльченко", "дьячков"];
-// Роль по фамилии из «Доступ и роли» (24.09, этап 4.3) - index.html кладёт в хранилище
-// браузера свою роль (yard.my_role) и, у директора, роли всех (yard.role_people). Нет данных -
-// undefined, и проверки берут прежние списки фамилий (NAV_COLUMN_HEAD_SUR_ и т.п.).
-function navRoleOf_(sur){
-  sur = String(sur || '').toLowerCase().replace(/ё/g, 'е');
-  try {
-    var me = JSON.parse(localStorage.getItem('yard.my_role') || 'null');
-    if (me && me.sur && me.sur === sur) return me.role_key || null;
-    var people = JSON.parse(localStorage.getItem('yard.role_people') || 'null');
-    if (Array.isArray(people) && people.length) {
-      var p = people.filter(function(x){ return x.sur === sur; })[0];
-      return p ? (p.role_key || null) : null;
-    }
-  } catch(e){}
-  return undefined;
+// ── Меню по РОЛИ (24.09, этап 5 доступов) ─────────────────────────────────────────────────
+// Та же таблица «роль -> страницы», что на компьютере (/api/me/access, «Доступ и роли» ->
+// «Роли и страницы»): галочка директора меняет меню и здесь. Никаких списков фамилий (были
+// NAV_COLUMN_HEAD_SUR_/NAV_COMMERCIAL_HEAD_SUR_ и роли из хранилища браузера от index.html -
+// на телефоне index.html часто не открывают вовсе, список был пустым или устаревшим).
+var NAV_ACCESS_ = null, navAccessLoading_ = false;
+var NAV_TIER_BY_ROLE_ = {director:'admin', sales_head:'commercial_head', manager:'manager',
+  logistics_head:'logistics_head', fleet_head:'fleet_head', column_head:'column_head', logist:'logist',
+  chief_mechanic:'mechanic', mechanic_long:'mechanic', mechanic_tral:'mechanic'};
+function navLoadAccess_(){
+  if (NAV_ACCESS_ || navAccessLoading_ || !sessionToken_()) return;
+  navAccessLoading_ = true;
+  apiGet_('/me/access', {}).then(function(r){
+    navAccessLoading_ = false;
+    if (!(r && r.ok && r.data && r.data.role_key)) return;
+    NAV_ACCESS_ = r.data;
+    if (navdrawerOpen_) openDrawer(); // меню уже открыто на «минимуме» - дорисовать по роли
+  }, function(){ navAccessLoading_ = false; });
 }
-function navIsRole_(sur, roleKey, legacy){ var r = navRoleOf_(sur); return r === undefined ? !!legacy : r === roleKey; }
-// Рыщанов - руководитель логистики до 01.09, в «Доступ и роли» его нет (история).
-function navIsLogisticsHead_(sur){ return sur === 'рыщанов' || navIsRole_(sur, 'logistics_head', sur === 'сильчев'); }
-function navIsColumnHead_(sur){ return navIsRole_(sur, 'column_head', NAV_COLUMN_HEAD_SUR_.indexOf(sur) >= 0); }
-// Руководители групп продаж (24.09) - список кладёт index.html (роль sales_head в «Доступ и
-// роли»), тот же приём, что с конфигом меню. Нет в хранилище (index.html здесь ещё не
-// открывали) - прежний список.
-var NAV_COMMERCIAL_HEAD_SUR_ = (function () {
-  try { var v = JSON.parse(localStorage.getItem('yard.commercial_heads') || 'null'); if (Array.isArray(v) && v.length) return v; } catch (e) {}
-  return ["ахтамова", "гусейнова"];
-})();
+// Роль того, кого показываем: свою - из ответа, вьювер директора - из его списка людей.
+function navRoleOfEff_(eff){
+  if (!NAV_ACCESS_) return null;
+  if (!eff.viewingAs) return NAV_ACCESS_.role_key || null;
+  var sur = (eff.name || '').trim().split(/\s+/)[0].toLowerCase().replace(/ё/g, 'е');
+  var p = (NAV_ACCESS_.people || []).filter(function(x){ return x.sur === sur; })[0];
+  return p ? p.role_key : null;
+}
 // Кого сейчас реально показываем - настоящую сессию (ME) или того, кого admin выбрал через
 // "Смотреть как сотрудник" в index.html (19.09, Влад: "если я захожу во вьювер, то я
 // полностью, как будто бы, нахожусь в этой роли"). index.html пишет выбор в localStorage
@@ -2272,19 +2271,10 @@ function effectiveIdentity_(){
 // если его ещё нет (человек ни разу не открывал index.html здесь) - просто нет кастомизации,
 // список как есть.
 var MENU_CFG_LS_ = 'yard.menu.cfg.';
-function menuTierKey_(role, sur){
-  if (role === 'admin') return 'admin';
-  if (role === 'mechanic') return 'mechanic';
-  if (role === 'logist'){
-    if (navIsLogisticsHead_(sur)) return 'logistics_head';
-    if (navIsColumnHead_(sur)) return 'column_head';
-    return 'logist';
-  }
-  if (role === 'manager'){
-    if (NAV_COMMERCIAL_HEAD_SUR_.indexOf(sur) >= 0) return 'commercial_head';
-    return 'manager';
-  }
-  return role;
+function menuTierKey_(eff){
+  if (eff.role === 'admin') return 'admin';
+  var rk = navRoleOfEff_(eff);
+  return (rk && NAV_TIER_BY_ROLE_[rk]) || eff.role; // до ответа сервера - базовая роль
 }
 // 21.09, Влад: "разное меню... порядок должен быть как в десктопе, расположение не
 // хардкод а алгоритм" - на десктопе (menuApplyCfg_ в index.html) заголовки разделов
@@ -2328,7 +2318,6 @@ function applyMenuCustomization_(allowed, tierKey){
 }
 function navAllowedPages_(){
   var eff = effectiveIdentity_();
-  var sur = (eff.name||"").trim().split(/\s+/)[0].toLowerCase();
   var allowed;
   if (eff.role === 'admin'){
     // Персональные пункты (Зарплата Рыщанова/руководителей коммерческих групп/начальника
@@ -2337,20 +2326,14 @@ function navAllowedPages_(){
     var personalOnly = ['ryschanow-salary', 'commercial-head-salary', 'commercial-head-debt', 'column-head-payroll'];
     allowed = PAGES_.map(function(p){ return p.page; }).filter(function(id){ return personalOnly.indexOf(id) < 0; });
   } else {
-    var isRyschanow = navIsLogisticsHead_(sur);
-    var isCommercialHead = NAV_COMMERCIAL_HEAD_SUR_.indexOf(sur) >= 0;
-    var isColumnHead = navIsColumnHead_(sur);
-    allowed = ["my-page", "calculator", "logistics-plan"];
-    if (!isColumnHead) allowed.push("order-plan");
-    if (isRyschanow) allowed.push("ryschanow-salary");
-    if (isCommercialHead) allowed.push("commercial-head-salary", "commercial-head-debt");
-    if (isColumnHead) allowed.push("column-head-payroll");
-    if (eff.role === "manager") allowed.push("crm", "counterparty");
-    // 20.09, Влад: "скрыть Отдел Тралы для менеджеров, оставить только Лиане и Айнур" -
-    // те же isCommercialHead (Ахтамова/Гусейнова), что commercial-head-salary/-debt выше.
-    if (isCommercialHead) allowed.push("dept-trals");
+    // По таблице ролей (24.09): своя роль - pages из /api/me/access, вьювер директора - matrix.
+    var rk = navRoleOfEff_(eff);
+    var pages = (!rk || rk === 'director') ? null : (eff.viewingAs ? (NAV_ACCESS_.matrix || {})[rk] : NAV_ACCESS_.pages);
+    // До ответа сервера - минимум, общий для всех ролей; меню дорисуется, как только роль придёт.
+    allowed = Array.isArray(pages) ? pages.slice() : ['my-page', 'calculator', 'logistics-plan'];
+    if (!NAV_ACCESS_) navLoadAccess_();
   }
-  return applyMenuCustomization_(allowed, menuTierKey_(eff.role, sur));
+  return applyMenuCustomization_(allowed, menuTierKey_(eff));
 }
 function openDrawer(){
   navdrawerOpen_=true;
@@ -2511,6 +2494,7 @@ window.addEventListener('online', function(){ $('netbar').classList.remove('on')
 function boot_(){
   buildDateCarousel();
   logUiEvent_('viewport', '', window.innerWidth+'x'+window.innerHeight);
+  navLoadAccess_(); // роль для меню - заранее, чтобы при открытии меню оно было уже по роли
   loadMeta();
   // loadCounts() больше не зовётся тут напрямую - buildDateCarousel() уже запускает
   // startLoad_()->loadOrders(), которая сама вызовет loadCounts() правильно

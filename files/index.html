@@ -15789,15 +15789,9 @@ function accessMeEnsure_() {
     accessMeInflight_ = false;
     if (!r.ok || !r.data || r.data.error || !r.data.role_key) return;
     accessMe_ = r.data;
-    // Мобильные страницы (orders-m/plan-m) решают меню начальника колонны/руководителя логистики
-    // по тем же ролям - кладём в хранилище браузера (тот же приём, что конфиг меню и список
-    // руководителей групп продаж): своя роль всегда, роли всех - только у директора.
-    try {
-      localStorage.setItem('yard.my_role', JSON.stringify({ sur: selfSur_(), role_key: accessMe_.role_key }));
-      if (Array.isArray(accessMe_.people)) {
-        localStorage.setItem('yard.role_people', JSON.stringify(accessMe_.people.map(function(p) { return { sur: p.sur, role_key: p.role_key }; })));
-      }
-    } catch (e) {}
+    // 24.09 (этап 5): мобильные страницы сами спрашивают /api/me/access - роли в хранилище
+    // браузера больше не кладём; то, что успели положить 24.09 днём, - убрать.
+    try { ['yard.my_role', 'yard.role_people', 'yard.commercial_heads'].forEach(function(k) { localStorage.removeItem(k); }); } catch (e) {}
     if (typeof D !== 'undefined' && D) {
       applyRoleUI();
       // Роли пришли - какая личная страница (начальник колонны, руководитель логистики...)
@@ -22679,9 +22673,6 @@ function applyCommercialHeadTeams_(period, data) {
   var teams = data.teams || {}, info = data.heads || {};
   if (Array.isArray(data.current_heads)) {
     COMMERCIAL_HEAD_SUR_FRONT_.splice.apply(COMMERCIAL_HEAD_SUR_FRONT_, [0, COMMERCIAL_HEAD_SUR_FRONT_.length].concat(data.current_heads));
-    // Мобильные страницы (orders-m/plan-m) строят меню руководителя по этому же списку - тот же
-    // приём, что с конфигом меню: index.html кладёт в хранилище браузера, они читают.
-    try { localStorage.setItem('yard.commercial_heads', JSON.stringify(data.current_heads)); } catch (e) {}
     data.current_heads.forEach(function(h) { commercialDeptFor_(h, info[h]); });
   }
   var presetOrder = ['ахтамова', 'гусейнова'];

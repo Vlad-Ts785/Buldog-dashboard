@@ -510,7 +510,7 @@ function openCandidate(id, keepScroll) {
     var b2 = $('.crm-drawer-body', dr); if (b2 && top) b2.scrollTop = top;
   });
 }
-var EV_TEXT = { create: 'Карточка создана', move: 'Этап', comment: 'Комментарий', edit: 'Правка карточки', import: 'Импорт из базы обзвона', attempt: 'Звонок', undo: 'Отмена перехода' };
+var EV_TEXT = { create: 'Карточка создана', move: 'Этап', comment: 'Комментарий', edit: 'Правка карточки', import: 'Импорт из базы обзвона', attempt: 'Звонок', undo: 'Отмена перехода', avito: 'Отклик на Авито' };
 function timeline(d) {
   var items = [];
   (d.events || []).forEach(function (e) { items.push({ at: e.created_at, kind: 'ev', e: e }); });
@@ -527,9 +527,9 @@ function timeline(d) {
       if (e.action === 'move' && e.to_stage === 'rejected') cls = ' is-bad';
       if (e.action === 'move' && e.to_stage === 'hired') cls = ' is-good';
       var head = EV_TEXT[e.action] || e.action;
-      if (e.action === 'move' || e.action === 'import' || e.action === 'undo') head += ': ' + (stageBy(e.from_stage) ? stageBy(e.from_stage).title + ' -> ' : '') + ((stageBy(e.to_stage) || {}).title || e.to_stage || '');
+      if (e.action === 'move' || e.action === 'import' || e.action === 'undo' || (e.action === 'avito' && e.to_stage)) head += ': ' + (stageBy(e.from_stage) ? stageBy(e.from_stage).title + ' -> ' : '') + ((stageBy(e.to_stage) || {}).title || e.to_stage || '');
       if (e.reason_key) head += ' · ' + ((reasonBy(e.reason_key) || {}).title || e.reason_key);
-      var own = e.action === 'comment' || e.action === 'attempt';
+      var own = e.action === 'comment' || e.action === 'attempt' || e.action === 'avito';
       text = '<div class="dr-tl-text' + (own ? '' : ' muted') + '">' + esc(own ? (e.comment || head) : head) + '</div>' +
         (e.comment && !own ? '<div class="dr-tl-text">' + esc(e.comment) + '</div>' : '') +
         '<div class="dr-tl-meta"><span>' + esc(fmtDateTime(it.at)) + '</span>' + (e.actor_name ? '<span>' + esc(e.actor_name) + '</span>' : '') + '</div>';

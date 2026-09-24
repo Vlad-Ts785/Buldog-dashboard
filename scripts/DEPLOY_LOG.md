@@ -9684,3 +9684,13 @@ PDF..."). Скрипт Google `gsi/client` теперь async: данные во
   `isRyschanowLogistName_` - роль `logistics_head` (было «рыщанов» - Сильчеву ИИ-рекомендации шли как
   логисту); `action=access_list` убран. Проверка из редактора: `checkServerRoleData`. `/exec` отвечает,
   `access_list` больше не отдаёт список. Этап 5 и весь план доступов закрыты.
+
+## 2026-09-24 - SSL: автопродление yardhub.ru и проверка срока (дорожная карта 0.7, только VPS)
+
+- `yardhub.ru` (до 12.12) был получен вручную через DNS и сам не продлевался. Переведён на проверку
+  файлом по порту 80 (HTTP-01 webroot, `/var/www/letsencrypt`, nginx: бэкап
+  `yardhub.ru.bak-20260924-ssl`), `certbot reconfigure` - пробное продление прошло. `api.yardhub.ru`
+  (до 15.11) продлевается плагином nginx - пробное продление прошло. Хук
+  `/etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh` перечитывает nginx после продления.
+- VPS `592d3b3`: `import/ssl-expiry-check.js`, крон 09:00 МСК - если до конца любого сертификата
+  < 14 дней или его не удалось проверить, сообщение директору в MAX (через 127.0.0.1, не через https).

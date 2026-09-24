@@ -5843,11 +5843,17 @@ main:has(> #page-dynamics.active){min-width:0;}
              Техника/Планировка), см. plans/2026-09-01-vehicle-department-field.md. Список
              открытый, как у "Сектора" полуприцепа - datalist подсказывает, не ограничивает. -->
         <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Отдел</label>
-          <input autocomplete="off" id="asset-department" type="text" maxlength="30" placeholder="пусто = Тралы" list="asset-department-list"
+          <input autocomplete="off" id="asset-department" type="text" maxlength="30" placeholder="пусто = Тралы" list="asset-department-list" oninput="assetToggleDeptSince_()"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none">
           <datalist id="asset-department-list">
             <option value="экскаваторы"><option value="в аресте"><option value="восстановление">
           </datalist></div>
+        <!-- Отдел С ДАТОЙ (24.09, план 2026-09-24-vehicle-department-effective-dating.md, правило Влада
+             23.09: «до перевода - наша»). Видно, когда машина в другом отделе или её возвращают в Тралы. -->
+        <div id="asset-department-since-wrap" style="display:none"><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">В отделе с</label>
+          <input autocomplete="off" id="asset-department-since" type="date"
+            style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark">
+          <div id="asset-department-since-hint" style="font-size:12px;color:var(--muted);margin-top:4px">До этой даты машина считается за Тралами. Месяц перевода - уже за новым отделом.</div></div>
         <div><label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">Производитель</label>
           <input autocomplete="off" id="asset-manufacturer" type="text" maxlength="100" placeholder="Faymonville, Scania…"
             style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;color:var(--text);font-size:13px;outline:none"></div>
@@ -17560,7 +17566,9 @@ function assetsPaint_() {
       // Отдел (01.09) - пусто = Тралы (тихо, без бейджа), непустое значение выводит машину из
       // расчётов - подсвечиваем, чтобы это было видно с первого взгляда, не только при клике
       // "Править". См. plans/2026-09-01-vehicle-department-field.md.
-      '<td>' + (a.department ? pctBadge_(pageEsc_(a.department), '#f59e0b') : '<span class="muted">Тралы</span>') + '</td>' +
+      '<td>' + (a.department
+        ? pctBadge_(pageEsc_(a.department), '#f59e0b') + assetDeptSinceLabel_(a)
+        : '<span class="muted">Тралы</span>') + '</td>' +
       '<td class="mono"><b>' + pageEsc_(a.id) + '</b>' + (a.is_deleted ? ' <span class="muted" style="font-size:11px">(удалено)</span>' : '') + '</td>' +
       '<td class="muted">' + modelCell + '</td>' +
       '<td class="muted">' + (specText ? pageEsc_(specText) : '—') + '</td>' +
@@ -17603,6 +17611,20 @@ function assetToggleExtendable_() {
   var on = document.getElementById('asset-extendable').checked;
   document.getElementById('asset-extendable-fields').style.display = on ? '' : 'none';
 }
+// Отдел машины С ДАТОЙ (24.09, план 2026-09-24-vehicle-department-effective-dating.md): поле «В отделе
+// с» видно, когда машина в другом отделе сейчас или её только что убрали из него (возврат в Тралы).
+var assetDeptInitial_ = { dept: '', since: '' };
+// Подпись в списке: «с 15.09» и «не подтв.» (дата-допущение по первой правке карточки).
+function assetDeptSinceLabel_(a) {
+  if (!a.department_since) return '';
+  var p = a.department_since.split('-');
+  return '<div style="font-size:11px;margin-top:3px;color:' + (a.department_since_confirmed === false ? 'var(--amber)' : 'var(--muted)') + '">с ' +
+    p[2] + '.' + p[1] + (a.department_since_confirmed === false ? ' · не подтв.' : '') + '</div>';
+}
+function assetToggleDeptSince_() {
+  var dept = document.getElementById('asset-department').value.trim();
+  document.getElementById('asset-department-since-wrap').style.display = (dept || assetDeptInitial_.dept) ? '' : 'none';
+}
 function assetOpenForm_(id) {
   assetEditId_ = id;
   var a = id ? (spravAssets_ || []).filter(function(x) { return String(x.id) === String(id); })[0] : null;
@@ -17616,6 +17638,16 @@ function assetOpenForm_(id) {
   idInput.value = a ? a.id : '';
   idInput.disabled = !!a; // госномер - естественный первичный ключ, у существующей записи не меняется
   document.getElementById('asset-department').value = a ? (a.department || '') : '';
+  // Отдел с датой (24.09): исходные значения - чтобы отправить дату, только если её (или отдел) трогали.
+  assetDeptInitial_ = { dept: a ? (a.department || '') : '', since: a ? (a.department_since || '') : '' };
+  document.getElementById('asset-department-since').value = assetDeptInitial_.since;
+  var sinceHint = document.getElementById('asset-department-since-hint');
+  var unconfirmed = !!(a && a.department && a.department_since_confirmed === false);
+  sinceHint.textContent = unconfirmed
+    ? 'Дата не подтверждена (поставлена по первой правке карточки) - поправьте, если перевод был в другой день.'
+    : 'До этой даты машина считается за Тралами. Месяц перевода - уже за новым отделом.';
+  sinceHint.style.color = unconfirmed ? 'var(--amber)' : 'var(--muted)';
+  assetToggleDeptSince_();
   document.getElementById('asset-manufacturer').value = a ? (a.manufacturer || '') : '';
   document.getElementById('asset-name').value = a ? (a.name || '') : '';
   document.getElementById('asset-vin').value = a ? (a.vin || '') : '';
@@ -17676,6 +17708,13 @@ function assetSave_() {
   var params = {
     id: id, asset_type: assetType,
     department: document.getElementById('asset-department').value.trim(),
+    // «В отделе с» - только если дату или отдел трогали (иначе обычное сохранение карточки молча
+    // «подтверждало» бы дату-допущение). Пусто при смене отдела - сервер поставит сегодня.
+    department_since: (function() {
+      var d = document.getElementById('asset-department').value.trim();
+      var s = document.getElementById('asset-department-since').value;
+      return (d !== assetDeptInitial_.dept || s !== assetDeptInitial_.since) ? s : '';
+    })(),
     manufacturer: document.getElementById('asset-manufacturer').value.trim(),
     name: document.getElementById('asset-name').value.trim(),
     vin: vin,

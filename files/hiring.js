@@ -137,9 +137,15 @@ function buildDom() {
         '<span class="hr-count" id="hr-count"></span>' +
         '<button type="button" class="crm-chip hr-add" id="hr-add" data-nav-sound>' + ico('plus') + 'Добавить кандидата</button>' +
       '</div>' +
-      '<div class="kb-hint">Кандидата двигает хозяин этапа - в карточке (открывается по клику). Назад - только с комментарием, отказ - только с причиной. Жёлтая точка - кандидат висит дольше срока этапа, красная - больше суток сверх срока.</div>' +
+      '<div class="kb-hint">Перетащите карточку в соседний этап или в самый низ экрана - снизу появятся зоны «Вышел на работу» и «Отказ». Назад - с комментарием, отказ - с причиной (откроется карточка). Двигает хозяин этапа. Жёлтая точка - кандидат висит дольше срока этапа, красная - больше суток сверх срока.</div>' +
       '<div class="kb-panel"><div class="kb-board" id="hr-board"></div></div>' +
     '</div>' +
+    // Полка во время перетаскивания и салют «Вышел на работу» - те же анатомии, что у канбана CRM (.kb-shelf, .crm-celebrate).
+    '<div class="kb-shelf" id="hr-shelf">' +
+      '<div class="kb-shelf-zone kb-shelf-zone--won" data-stage="hired">' + ico('won') + 'Вышел на работу</div>' +
+      '<div class="kb-shelf-zone kb-shelf-zone--lost" data-stage="rejected">' + ico('lost') + 'Отказ</div>' +
+    '</div>' +
+    '<canvas class="crm-celebrate" id="hr-celebrate"></canvas>' +
     '<div class="mp-drawer-bk" id="hr-bk"></div>' +
     '<div class="mp-drawer mp-drawer-float mp-drawer-wide hr-drawer" id="hr-drawer" aria-hidden="true"></div>';
   var q = $('#hr-q');
@@ -181,6 +187,7 @@ function buildDom() {
     var more = e.target.closest('[data-more]');
     if (more) { var k = more.getAttribute('data-more'); S.more[k] = (S.more[k] || 1) + 1; renderBoard(); return; }
     var card = e.target.closest('.kb-card[data-id]');
+    if (S.suppressClick) { S.suppressClick = false; return; }   // клик, завершивший перетаскивание, - не открытие
     if (card) openCandidate(Number(card.getAttribute('data-id')));
   });
   // ГОСТ запрет №20: на интерактивной поверхности - без браузерного меню.
@@ -330,7 +337,7 @@ function cardHtml(c) {
   if (c.call_attempts && !won && !lost) tags.push('<span class="hr-tag" title="Попыток дозвониться">попыток ' + c.call_attempts + '</span>');
   if (c.person_id) tags.push('<span class="hr-tag" title="Телефон совпал со справочником сотрудников">в справочнике</span>');
   var loss = lost && c.reject_reason ? '<div class="kb-card-loss">' + esc((reasonBy(c.reject_reason) || {}).title || c.reject_reason) + '</div>' : '';
-  return '<div class="kb-card' + fresh + (won ? ' kb-won-style' : '') + (lost ? ' kb-lost-style' : '') + (S.openId === c.id ? ' is-open' : '') + '" data-id="' + c.id + '">' +
+  return '<div class="kb-card' + fresh + (won ? ' kb-won-style' : '') + (lost ? ' kb-lost-style' : '') + (c.can_move ? ' hr-drag' : '') + (S.openId === c.id ? ' is-open' : '') + '" data-id="' + c.id + '">' +
     '<div class="kb-card-top"><span class="kb-client">' + esc(c.full_name || 'Без имени') + '</span>' + mark + '</div>' +
     '<div class="kb-cargo">' + esc(line) + '</div>' + loss +
     '<div class="kb-meta"><span class="kb-num">' + esc(fmtPhone(c.phone10)) + '</span><span class="kb-chan">' + esc(sourceLabel(c.source)) + '</span></div>' +
@@ -344,7 +351,7 @@ function slaText(min) {
   return min % 1440 === 0 ? (min / 1440) + ' дн' : Math.round(min / 60) + ' ч';
 }
 function renderBoard() {
-  if (!S.meta) return;
+  if (!S.meta || S.dragging) return;   // идёт перетаскивание - доску не перерисовываем (карточка сейчас в body)
   var list = S.cands.filter(matchFilter);
   $('#hr-count').textContent = list.length === S.cands.length ? 'кандидатов: ' + list.length : 'показано ' + list.length + ' из ' + S.cands.length;
   var board = $('#hr-board'), keepX = board.scrollLeft;
@@ -360,19 +367,208 @@ function renderBoard() {
       '<div class="kb-col-head"><span class="kb-stage-dot"></span><h4 class="kb-col-title" title="' + esc(st.title) + '">' + esc(st.title) + '</h4>' +
         '<span class="kb-count">' + col.length + '</span></div>' +
       (sla || over ? '<div class="hr-col-sla">' + (sla ? 'срок этапа ' + esc(sla) : '') + (over ? '<span class="hr-col-over">' + (sla ? ' · ' : '') + 'просрочено ' + over + '</span>' : '') + '</div>' : '') +
-      '<div class="kb-list">' + (cards || '<div class="kb-empty">Пусто</div>') +
+      '<div class="kb-list" data-col="' + esc(st.stage_key) + '">' + (cards || '<div class="kb-empty">Пусто</div>') +
         (rest > 0 ? '<button type="button" class="hr-more" data-more="' + esc(st.stage_key) + '">Показать ещё ' + Math.min(rest, PAGE_STEP) + ' из ' + rest + '</button>' : '') +
       '</div></div>';
   }).join('');
   board.scrollLeft = keepX;
   $$('.kb-col', board).forEach(function (c) { var l = $('.kb-list', c), t = tops[c.getAttribute('data-st')]; if (l && t) l.scrollTop = t; });
+  $$('.kb-card.hr-drag', board).forEach(bindDrag);
+}
+
+/* ───────── перетаскивание - КЛОН канбана CRM (index.html, CRM.bindCard/flip/settle), ГОСТ разд.6 ─────────
+   Физика буквально та же: порог 4px, lerp 0.28, наклон по лагу до ±7°, scale 1.03, плейсхолдер .kb-ph,
+   FLIP соседей 300ms, settle 380ms с overshoot, Esc - вернуть на место; полка .kb-shelf снизу; звуки -
+   регистр sounds5 CRM через общий uiBlip_ (выключатель звука сайдбара). Отличие от CRM - только правила
+   найма: двигает хозяин этапа (карточки без can_move не берутся), вперёд - через сервер (он проверяет
+   «следующий этап», тип техники и т.п., ошибка - откат с тостом), «Отказ» и «назад» не переносят карточку
+   сразу, а открывают её шторку с формой причины / комментария (как askLostReason в CRM), «Вышел на работу» -
+   победная сцена (салют bankCelebrate5_ + фанфара), как «Сделка успешна» в CRM.
+   Палец (pointerType=touch) не тянет: на телефоне доска прокручивается, двигают кнопками в карточке. */
+function blip(f1, f2, dur, vol, type, delay) { if (typeof uiBlip_ === 'function') uiBlip_(f1, f2, dur, vol, type, delay); }
+var snd = {
+  lift: function () { blip(1300, 950, 0.045, 0.07, 'sine'); blip(320, 260, 0.06, 0.045, 'triangle'); },
+  reorder: function () { blip(780, 820, 0.03, 0.025, 'sine'); },
+  drop: function () { blip(200, 70, 0.14, 0.12, 'sine'); blip(900, 500, 0.035, 0.045, 'triangle'); blip(140, 90, 0.1, 0.06, 'triangle', 0.01); },
+  undo: function () { blip(660, 520, 0.09, 0.06, 'sine'); blip(520, 370, 0.12, 0.05, 'sine', 0.07); },
+  open: function () { blip(280, 640, 0.18, 0.04, 'sine'); blip(140, 320, 0.18, 0.025, 'triangle'); },
+  close: function () { blip(640, 280, 0.15, 0.035, 'sine'); blip(320, 140, 0.15, 0.02, 'triangle'); }
+};
+function reduced() { return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
+function vibrate(ms) { try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) {} }
+function candById(id) { return S.cands.filter(function (c) { return c.id === id; })[0] || null; }
+function flip(containers, mutate) {
+  var before = new Map();
+  containers.forEach(function (c) { $$(':scope > .kb-card', c).forEach(function (n) { before.set(n, n.getBoundingClientRect()); }); });
+  mutate();
+  containers.forEach(function (c) {
+    $$(':scope > .kb-card', c).forEach(function (n) {
+      var b = before.get(n); if (!b || n.classList.contains('kb-lifted')) return;
+      var a = n.getBoundingClientRect(), dx = b.left - a.left, dy = b.top - a.top;
+      if (!dx && !dy) return;
+      n.style.transition = 'none'; n.style.transform = 'translate(' + dx + 'px,' + dy + 'px)'; n.getBoundingClientRect();
+      requestAnimationFrame(function () { n.style.transition = 'transform 300ms cubic-bezier(.22,.9,.28,1)'; n.style.transform = ''; });
+      n.addEventListener('transitionend', function te() { n.style.transition = ''; n.removeEventListener('transitionend', te); }, { once: true });
+    });
+  });
+}
+function bindDrag(card) {
+  card.addEventListener('pointerdown', function (e) {
+    if (e.pointerType === 'touch') return;                 // телефон - прокрутка и тап, не драг
+    if (e.button !== undefined && e.button !== 0) return;
+    var startX = e.clientX, startY = e.clientY, dragging = false, cancelled = false;
+    var placeholder = null, rectAtStart = null, fromCol = null, fromIndex = 0, rafId = null;
+    var cur = { x: 0, y: 0 }, target = { x: 0, y: 0 };
+    var board = $('#hr-board'), shelf = $('#hr-shelf'), overShelf = null;
+    try { card.setPointerCapture(e.pointerId); } catch (x) {}
+    function physics() {
+      cur.x += (target.x - cur.x) * 0.28; cur.y += (target.y - cur.y) * 0.28;
+      var tilt = Math.max(-7, Math.min(7, (target.x - cur.x) * 0.10));
+      card.style.transform = 'translate(' + cur.x + 'px,' + cur.y + 'px) rotate(' + tilt + 'deg) scale(1.03)';
+      rafId = requestAnimationFrame(physics);
+    }
+    function onMove(ev) {
+      var dx = ev.clientX - startX, dy = ev.clientY - startY;
+      if (!dragging) {
+        if (Math.hypot(dx, dy) < 4) return;
+        dragging = true; S.dragging = true;
+        rectAtStart = card.getBoundingClientRect();
+        var list0 = card.closest('.kb-list'); fromCol = list0.getAttribute('data-col');
+        fromIndex = Array.prototype.indexOf.call($$(':scope > .kb-card', list0), card);
+        placeholder = document.createElement('div'); placeholder.className = 'kb-ph'; placeholder.style.height = rectAtStart.height + 'px';
+        card.parentNode.insertBefore(placeholder, card);
+        card.style.position = 'fixed'; card.style.left = rectAtStart.left + 'px'; card.style.top = rectAtStart.top + 'px'; card.style.width = rectAtStart.width + 'px';
+        card.style.margin = '0'; card.style.zIndex = '1000'; card.style.pointerEvents = 'none'; card.style.willChange = 'transform';
+        card.classList.add('kb-lifted'); document.body.appendChild(card);
+        shelf.classList.add('is-on');
+        snd.lift(); vibrate(8);
+        if (reduced()) card.style.transform = 'translate(0,0) scale(1.03)'; else physics();
+      }
+      target.x = dx; target.y = dy;
+      if (reduced()) card.style.transform = 'translate(' + dx + 'px,' + dy + 'px) scale(1.03)';
+      // Весь стек под курсором, а не верхний элемент: тост «Кандидат: … / Отменить» 5 с висит внизу по
+      // центру ровно там, где выезжает полка, и угасающий тост перехватывает мышь - бросок в «Отказ» или
+      // «Вышел» сразу после прошлого переноса молча не срабатывал (найдено тестом 24.09; в CRM то же).
+      var stack = document.elementsFromPoint ? document.elementsFromPoint(ev.clientX, ev.clientY) : [document.elementFromPoint(ev.clientX, ev.clientY)];
+      var zone = null, list = null;
+      for (var si = 0; si < stack.length && !zone && !list; si++) {
+        var el0 = stack[si]; if (!el0 || !el0.closest) continue;
+        zone = el0.closest('.kb-shelf-zone');
+        if (!zone) list = el0.closest('.kb-list');
+      }
+      overShelf = zone ? zone.getAttribute('data-stage') : null;
+      $$('.kb-shelf-zone', shelf).forEach(function (z) { z.classList.toggle('kb-drop', z === zone); });
+      $$('.kb-col', board).forEach(function (c) { c.classList.toggle('kb-drop', !!(list && c.contains(list))); });
+      if (list && board.contains(list)) {
+        var sib = $$(':scope > .kb-card', list), ref = null;
+        for (var i = 0; i < sib.length; i++) { var r = sib[i].getBoundingClientRect(); if (ev.clientY < r.top + r.height / 2) { ref = sib[i]; break; } }
+        var same = placeholder.parentNode === list && ((ref === null && placeholder.nextElementSibling === null) || placeholder.nextElementSibling === ref);
+        if (!same) {
+          var affected = [list]; if (placeholder.parentNode && placeholder.parentNode !== list) affected.push(placeholder.parentNode);
+          flip(affected, function () { var em = $('.kb-empty', list); if (em) em.remove(); list.insertBefore(placeholder, ref); });
+          snd.reorder();
+        }
+      }
+    }
+    function finish() {
+      try { card.releasePointerCapture(e.pointerId); } catch (x) {}
+      document.removeEventListener('pointermove', onMove); document.removeEventListener('pointerup', onUp); document.removeEventListener('pointercancel', onCancel); window.removeEventListener('keydown', onKey);
+      if (rafId) cancelAnimationFrame(rafId);
+      shelf.classList.remove('is-on'); $$('.kb-shelf-zone', shelf).forEach(function (z) { z.classList.remove('kb-drop'); });
+      $$('.kb-col', board).forEach(function (c) { c.classList.remove('kb-drop'); });
+    }
+    function settle(toList) {
+      var first = reduced() ? { left: rectAtStart.left + target.x, top: rectAtStart.top + target.y } : { left: rectAtStart.left + cur.x, top: rectAtStart.top + cur.y };
+      toList.insertBefore(card, placeholder); toList.removeChild(placeholder);
+      ['position', 'left', 'top', 'width', 'margin', 'zIndex', 'pointerEvents', 'willChange'].forEach(function (p) { card.style[p] = ''; });
+      var last = card.getBoundingClientRect();
+      card.style.transition = 'none'; card.style.transform = 'translate(' + (first.left - last.left) + 'px,' + (first.top - last.top) + 'px) scale(1.03)';
+      card.classList.remove('kb-lifted'); card.getBoundingClientRect();
+      requestAnimationFrame(function () { card.style.transition = reduced() ? 'none' : 'transform 380ms cubic-bezier(.34,1.45,.5,1)'; card.style.transform = ''; });
+      card.addEventListener('transitionend', function te() { card.style.transition = ''; card.removeEventListener('transitionend', te); }, { once: true });
+      setTimeout(function () { S.dragging = false; }, 400);
+    }
+    function back() {
+      var fromList = $('.kb-list[data-col="' + fromCol + '"]', board);
+      var ref = $$(':scope > .kb-card', fromList)[fromIndex] || null;
+      if (placeholder.parentNode !== fromList) fromList.insertBefore(placeholder, ref);
+      settle(fromList);
+    }
+    function onKey(ke) { if (ke.key === 'Escape' && dragging) { cancelled = true; onUp(ke); } }
+    function onCancel(ev) { if (dragging) { cancelled = true; onUp(ev); } else finish(); }
+    function onUp() {
+      finish();
+      if (!dragging) return;                                  // простой клик - откроет обработчик click доски
+      S.suppressClick = true; setTimeout(function () { S.suppressClick = false; }, 60);
+      var id = Number(card.getAttribute('data-id')), c = candById(id);
+      if (cancelled || !c || (!overShelf && !placeholder.parentNode)) { back(); snd.undo(); return; }
+      var toList = placeholder.parentNode, toCol = overShelf || (toList ? toList.getAttribute('data-col') : null);
+      if (!toCol || toCol === fromCol) { back(); snd.drop(); return; }   // порядок в колонке считает система, не рука
+      dropTo_(c, card, fromCol, toCol, toList, back, settle);
+    }
+    document.addEventListener('pointermove', onMove); document.addEventListener('pointerup', onUp); document.addEventListener('pointercancel', onCancel); window.addEventListener('keydown', onKey);
+  });
+}
+/* Что значит бросок в колонку toCol - правила найма поверх механики CRM. */
+function dropTo_(c, card, fromCol, toCol, toList, back, settle) {
+  var st = stageBy(fromCol), ts = stageBy(toCol);
+  if (!ts) { back(); snd.undo(); return; }
+  if (toCol === 'rejected') {                                  // причина обязательна - как askLostReason в CRM
+    back(); snd.drop();
+    openCandidate(c.id, false, function () { var f = $('#hr-lost-form'); if (f) { f.hidden = false; f.scrollIntoView({ block: 'center' }); } });
+    return;
+  }
+  if (st && !st.is_terminal && !ts.is_terminal && ts.sort_order < st.sort_order) {   // назад - комментарий обязателен
+    back(); snd.drop();
+    openCandidate(c.id, false, function () {
+      var f = $('#hr-back-form'); if (!f) return;
+      f.hidden = false; $('#hr-back-to').textContent = ts.title; $('#hr-back-ok').setAttribute('data-to', toCol);
+      var inp = $('#hr-back-comment'); if (inp) inp.focus();
+    });
+    return;
+  }
+  if (toCol === 'reserve' && !c.reserve_consent_at) { back(); snd.undo(); toast('В кадровый резерв - только с согласием кандидата. Отметьте его в карточке, раздел «Согласия».', 'amber'); return; }
+  if (toCol === 'hired') { back(); hireWin_(c, card); return; }
+  // Вперёд: карточка ложится сразу, сервер подтверждает (правила - hiring-rules.js); отказ сервера - откат.
+  settle(toList); snd.drop(); vibrate(12);
+  var prev = c.stage_key; c.stage_key = toCol; c.stage_changed_at = new Date().toISOString();
+  api('/hiring/move', { id: c.id, to: toCol }).then(function (r) {
+    if (!r.ok) { c.stage_key = prev; snd.undo(); toast(r.data.error || 'Не получилось', 'red'); setTimeout(function () { reload(); }, 420); return; }
+    toast('Кандидат: ' + ts.title, 'green', { label: 'Отменить', fn: function () { undoLast_(c.id); } });
+    setTimeout(function () { reload(); }, 420);
+  });
+}
+/* «Вышел на работу» - победная сцена CRM: подсветка колонки, салют у карточки, фанфара, тост с «Отменить». */
+function hireWin_(c, card) {
+  api('/hiring/move', { id: c.id, to: 'hired' }).then(function (r) {
+    if (!r.ok) { snd.undo(); toast(r.data.error || 'Не получилось', 'red'); return; }
+    var col = $('#hr-board .kb-col[data-st="hired"]');
+    if (col) { col.classList.add('kb-win-glow'); setTimeout(function () { col.classList.remove('kb-win-glow'); }, 300); }
+    if (typeof bankWinFanfare_ === 'function') { try { bankWinFanfare_(1); } catch (e) {} }
+    var cv = $('#hr-celebrate');
+    if (cv && !reduced() && !document.hidden && typeof bankCelebrate5_ === 'function') {
+      var rect = card.getBoundingClientRect();
+      var tx = function (n, f) { return (typeof themeVar_ === 'function') ? themeVar_(n, f) : f; };
+      try { bankCelebrate5_(cv, rect.left + rect.width / 2, rect.top + 6, { colors: [tx('--green', '#1D9E75'), tx('--amber', '#EF9F27'), tx('--text', '#e8e6df'), tx('--blue', '#378ADD')] }); } catch (e) {}
+    }
+    toast((c.full_name || 'Кандидат') + ' вышел на работу', 'green', { label: 'Отменить', fn: function () { undoLast_(c.id); } });
+    setTimeout(function () { reload(); }, 600);
+  });
+}
+function undoLast_(id) {
+  api('/hiring/undo', { id: id }).then(function (r) {
+    if (!r.ok) { toast(r.data.error || 'Отменить не получилось', 'red'); return; }
+    snd.undo(); vibrate(8); toast('Отменено', 'green'); reload(S.openId === id ? id : null);
+  });
 }
 
 /* ───────── шторка: каркас ───────── */
 function openDrawer() {
+  if (!$('#hr-drawer').classList.contains('show')) snd.open();
   $('#hr-bk').classList.add('show'); $('#hr-drawer').classList.add('show'); $('#hr-drawer').setAttribute('aria-hidden', 'false');
 }
 function closeDrawer() {
+  if ($('#hr-drawer').classList.contains('show')) snd.close();
   S.mode = null; S.openId = null; S.cand = null;
   $('#hr-bk').classList.remove('show'); $('#hr-drawer').classList.remove('show'); $('#hr-drawer').setAttribute('aria-hidden', 'true');
   renderBoard();
@@ -494,7 +690,9 @@ function openCreate() {
 }
 
 /* ───────── карточка кандидата ───────── */
-function openCandidate(id, keepScroll) {
+/* after(dr) - что сделать сразу после отрисовки (бросок в «Отказ» раскрывает форму причины,
+   бросок назад - форму комментария; см. dropTo_). */
+function openCandidate(id, keepScroll, after) {
   var dr = $('#hr-drawer');
   var body = $('.crm-drawer-body', dr);
   var top = keepScroll && body && S.openId === id ? body.scrollTop : 0;
@@ -508,6 +706,7 @@ function openCandidate(id, keepScroll) {
     if (!r.ok) { dr.innerHTML = '<div class="crm-drawer-body"><div class="dr-empty">' + esc(r.data.error || 'Не удалось открыть') + '</div></div>'; return; }
     renderCandidate(r.data);
     var b2 = $('.crm-drawer-body', dr); if (b2 && top) b2.scrollTop = top;
+    if (after) { try { after(dr); } catch (e) {} }
   });
 }
 var EV_TEXT = { create: 'Карточка создана', move: 'Этап', comment: 'Комментарий', edit: 'Правка карточки', import: 'Импорт из базы обзвона', attempt: 'Звонок', undo: 'Отмена перехода', avito: 'Отклик на Авито' };

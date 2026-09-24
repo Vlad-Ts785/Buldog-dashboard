@@ -30,6 +30,10 @@ function fnSrc(name) {
   for (let k = html.indexOf("{", i); k < html.length; k++) { if (html[k] === "{") d++; else if (html[k] === "}") { d--; if (!d) return html.slice(i, k + 1); } }
 }
 const lightSel = html.match(/var LIGHT_GRID_SEL_ = '[^']+';/)[0];
+// Звук интерфейса (uiBlip_/uiSounds + выключатель) и победная сцена (фанфара, салют) - как в CRM.
+const sndStart = html.indexOf("var uiAudioCtx = null;"), sndEnd = html.indexOf("\n};", html.indexOf("var uiSounds = {")) + 3;
+if (sndStart < 0 || sndEnd < sndStart) throw new Error("не нашёл звуковой блок");
+const soundBlock = html.slice(sndStart, sndEnd);
 const read = (p) => fs.readFileSync(path.join(root, p), "utf8");
 const noClose = (s) => s.replace(/<\/script/gi, "<\\/script");
 const page = `<title>Найм водителей</title>
@@ -54,6 +58,11 @@ var p2ToastEl_ = null, p2ToastTimer_ = null, cursorLightInited_ = {};
 ${lightSel}
 ${noClose(fnSrc("p2Toast"))}
 ${noClose(fnSrc("initCursorLight_"))}
+${noClose(soundBlock)}
+${noClose(fnSrc("themeVar_"))}
+${noClose(fnSrc("bankWinLevel_"))}
+${noClose(fnSrc("bankWinFanfare_"))}
+${noClose(fnSrc("bankCelebrate5_"))}
 </script>
 <script>
 ${noClose(read("files/hiring.js"))}

@@ -3716,6 +3716,8 @@ function openHiredStep(o) {
       '<input id="op2-h-co" autocomplete="off" placeholder="Начни вводить - по первым буквам" value="' + esc(h.carrier_name || '') + '" data-entity-id="' + esc(h.carrier_id || '') + '">' +
       '<div class="op2-list" id="op2-h-colist"></div>' +
       '<span class="op2-hint">Справочник юрлиц + кого уже возили</span></div>' +
+    /* реестр партнёра (24.09) - заполняется loadHiredFleet_ после выбора компании */
+    '<div class="op2-hfleet op2-hidden" id="op2-h-fleet"></div>' +
     '<div class="op2-g2">' +
       '<div class="op2-fld"><label>Контакт у перевозчика</label><input id="op2-h-contact" autocomplete="off" placeholder="Имя · телефон" value="' + esc(h.carrier_contact || '') + '"></div>' +
       '<div class="op2-fld"><label>Статус перевозчика</label><div class="op2-cstat" id="op2-h-cs">' +
@@ -3784,6 +3786,7 @@ function openHiredStep(o) {
   $('#op2-h-co').addEventListener('input', function () {
     updateHiredBtn_();
     this.dataset.entityId = '';
+    loadHiredFleet_('');
     var v = this.value.trim(); clearTimeout(coT);
     if (v.length < 2) { $('#op2-h-cobox').classList.remove('op2-open'); return; }
     coT = setTimeout(function () { fetchCarriers(v); }, 250);
@@ -3794,6 +3797,7 @@ function openHiredStep(o) {
     var inp = $('#op2-h-co');
     inp.value = it.dataset.name || ''; inp.dataset.entityId = it.dataset.eid || '';
     updateHiredBtn_();
+    loadHiredFleet_(inp.dataset.entityId);
     $('#op2-h-cobox').classList.remove('op2-open');
   });
   $('#op2-h-cs').addEventListener('click', function (e) {
@@ -3801,8 +3805,49 @@ function openHiredStep(o) {
     $$('.op2-chip', this).forEach(function (x) { x.classList.remove('op2-on'); });
     c.classList.add('op2-on');
   });
+  $('#op2-h-fleet').addEventListener('click', function (e) {
+    var c = e.target.closest('.op2-chip'); if (!c) return;
+    e.preventDefault();
+    var d = c.dataset;
+    function put(id, v) { var el = $(id); el.value = v || ''; el.dispatchEvent(new Event('input')); }
+    if (d.fill === 'combo' || d.fill === 'gos') put('#op2-h-gos', d.gos);
+    if (d.fill === 'combo' || d.fill === 'trailer') put('#op2-h-trailer', d.trailer);
+    if (d.fill === 'combo' || d.fill === 'drv') { put('#op2-h-drv', d.drv); put('#op2-h-phone', d.phone); }
+    S.toggle();
+  });
+  loadHiredFleet_($('#op2-h-co').dataset.entityId || '');
   recalc();
   updateHiredBtn_();
+}
+/* Реестр партнёра в форме наёмника (24.09, вариант В плана plans/2026-09-24-hired-to-partners-
+   bridge.md) - «выбирать, а не печатать». «Как в прошлый раз» - связка тягач·прицеп·водитель
+   одним кликом, ниже - по отдельности. Новую машину/водителя по-прежнему можно вписать руками -
+   мост на сервере сам занесёт их в реестр. Данные - /orders/carrier_fleet (только номера, ФИО,
+   телефон; нестандартные номера из старых заявок туда не попадают). */
+function loadHiredFleet_(eid) {
+  var box = $('#op2-h-fleet'); if (!box) return;
+  box.dataset.eid = eid || '';
+  if (!eid) { box.innerHTML = ''; box.classList.add('op2-hidden'); return; }
+  apiGet('/orders/carrier_fleet', { carrier_id: eid }).then(function (r) {
+    if (box.dataset.eid !== eid) return; /* компанию успели сменить, пока шёл запрос */
+    var d = (r && r.ok && r.data) || {};
+    var combos = d.combos || [], tr = d.tractors || [], tl = d.trailers || [], dr = d.drivers || [];
+    function chip(fill, attrs, label, title) {
+      return '<button type="button" class="op2-chip" data-fill="' + fill + '"' + attrs + (title ? ' title="' + esc(title) + '"' : '') + '>' + label + '</button>';
+    }
+    function row(k, chips) { return chips.length ? '<div class="op2-hfleet-row"><span class="op2-hfleet-k">' + k + '</span><div class="op2-hfleet-chips">' + chips.join('') + '</div></div>' : ''; }
+    var h = '';
+    h += row('Как в прошлый раз', combos.map(function (c) {
+      return chip('combo', ' data-gos="' + esc(c.gos) + '" data-trailer="' + esc(c.trailer) + '" data-drv="' + esc(c.driver) + '" data-phone="' + esc(c.phone) + '"',
+        esc([c.gos, c.trailer, fioName_(c.driver)].filter(Boolean).join(' · ')), c.driver + (c.phone ? ' · ' + c.phone : ''));
+    }));
+    h += row('Тягачи', tr.map(function (a) { return chip('gos', ' data-gos="' + esc(a.id) + '"', '<span class="op2-mono">' + esc(a.id) + '</span>', a.name); }));
+    h += row('Прицепы', tl.map(function (a) { return chip('trailer', ' data-trailer="' + esc(a.id) + '"', '<span class="op2-mono">' + esc(a.id) + '</span>', a.name); }));
+    h += row('Водители', dr.map(function (p) { return chip('drv', ' data-drv="' + esc(p.name) + '" data-phone="' + esc(p.phone) + '"', esc(fioName_(p.name)), p.name + (p.phone ? ' · ' + p.phone : '')); }));
+    if (!h) h = '<span class="op2-hfleet-k">В реестре этого партнёра пока пусто - впиши машину и водителя, они заведутся сами</span>';
+    box.innerHTML = h;
+    box.classList.remove('op2-hidden');
+  }).catch(function () {});
 }
 function saveHired(o) {
   var co = $('#op2-h-co').value.trim();

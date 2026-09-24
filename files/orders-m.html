@@ -306,6 +306,11 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7;stroke
 .kv{display:grid;grid-template-columns:100px 1fr;gap:4px 10px;font-size:13px;padding:6px 0;border-bottom:1px solid var(--border)}
 .kv .k{color:var(--muted)}
 .kv .v{color:var(--text);font-weight:600}
+/* 24.09, Влад: «примечание должно мигать красным - и в белом режиме, и в тёмном, чтобы было
+   видно» - --tint-red уже свой в обеих темах (контраст проверен), тот же keyframes blink,
+   что уже мигает у c-nd/loadbar, не новый. Специфичность .kv .v.note-warn (3 класса) -
+   явно выше .kv .v (2 класса), чтобы наверняка перебить обычный color заметки. */
+.kv .v.note-warn{color:var(--tint-red);animation:blink 1.2s ease-in-out infinite}
 .hist-row{padding:6px 0;border-bottom:1px solid var(--border);font-size:12.5px;color:var(--muted)}
 .hist-row b{color:var(--text)}
 
@@ -1192,11 +1197,15 @@ function renderViewSheet(head,body,foot){
   }
   if(full){
     html += '<div class="f-label">Груз и точки</div>';
-    html += '<div class="kv"><div class="k">Груз</div><div class="v">'+esc(o.cargo||'уточнить')+'</div><div class="k">Габарит</div><div class="v">'+esc(o.gabarit)+'</div>' +
+    /* 24.09, Влад: «для логиста важно, чтобы на этой странице была информация по габаритам
+       и массе груза» - o.weight/o.cargo_dims уже приходят с сервера (маппятся строкой 579
+       выше), просто не были показаны в этой карточке. Масса - к «Грузу» (тот же формат, что
+       уже собирает copyOrderText_ ниже: "· N т"), Д×Ш×В - к «Габариту», тем же разделителем. */
+    html += '<div class="kv"><div class="k">Груз</div><div class="v">'+esc(o.cargo||'уточнить')+(o.weight?(' · '+esc(o.weight)+' т'):'')+'</div><div class="k">Габарит</div><div class="v">'+esc(o.gabarit)+(o.cargo_dims?(' · '+esc(o.cargo_dims)):'')+'</div>' +
       '<div class="k">Откуда</div><div class="v">'+esc(o.from[0]||'уточнить')+(o.from[1]?(', '+esc(o.from[1])):'')+'</div><div class="k">Куда</div><div class="v">'+esc(o.to[0]||'уточнить')+(o.to[1]?(', '+esc(o.to[1])):'')+'</div>' +
       '<div class="k">Документы</div><div class="v">'+esc(o.documents||'—')+'</div><div class="k">Переработка</div><div class="v">'+esc(o.rework)+'</div>' +
       '<div class="k">Стоимость</div><div class="v mono">'+fmtPrice(o.price)+'</div><div class="k">Оплата</div><div class="v">'+esc(o.payment_status||'—')+(o.cash?' · нал.':'')+'</div>' +
-      '<div class="k">Примечание</div><div class="v">'+esc(o.note||'—')+'</div></div>';
+      '<div class="k">Примечание</div><div class="v'+(o.note?' note-warn':'')+'">'+esc(o.note||'—')+'</div></div>';
     if(o.vehicle && o.vehicle.own){
       html += '<div class="f-label">Документы</div>';
       html += '<div class="list-row" id="rowSts1"><svg><use href="#i-doc"/></svg>СТС тягача ⤓<span class="go"></span></div>';

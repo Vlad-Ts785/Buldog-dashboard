@@ -32455,6 +32455,23 @@ var bankOpsPollTimer_ = null;
 
 // Свой экранировщик: escHtml_ калькулятора живёт внутри его замыкания, снаружи недоступен.
 // Имена контрагентов приходят из внешних СМС - в innerHTML только через экранирование.
+// Кому засчитано поступление (сервер 24.09, api/lib/receipt-attribution.js, правило Влада
+// «того, кто вёл оплаченный документ»). Свои компании и поставщики - серой меткой вместо
+// менеджера (в «Пришло» не входят); у менеджера в подсказке - как он определён.
+var BANK_MATCH_SOURCE_LABELS_ = {
+  debt_doc: 'по оплаченному документу', debt_owner: 'ведёт клиента в дебиторке',
+  receipt_1c: 'по поступлению в 1С', plan_order: 'по заявке в «Задании»',
+  last_deal: 'по последней сделке', legacy: 'по последней сделке'
+};
+function bankOpWhoSlot_(o) {
+  if (o.kind === 'internal' || (o.internal && !o.kind)) return '<span class="bank-op-doc">своя компания</span>';
+  if (o.kind === 'supplier') return '<span class="bank-op-doc">поставщик</span>';
+  if (!o.matched_manager) return '';
+  var why = BANK_MATCH_SOURCE_LABELS_[o.match_source] || '';
+  if (o.match_source === 'debt_doc' && o.match_doc) why += ': ' + o.match_doc;
+  return '<span class="bank-op-doc" style="color:var(--text)"' + (why ? ' title="' + bankEsc_(why) + '"' : '') + '>' +
+    bankEsc_(o.matched_manager) + '</span>';
+}
 function bankEsc_(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
@@ -32935,7 +32952,9 @@ function bankWinScene_(deltaToday, toastHtml, level, mgrTotal) {
 function bankAnnounceNewOps_(ops) {
   var isManagerAudience = D && D.role === 'manager';
   var today = BANK_OPS && BANK_OPS.today;
-  var ins = ops.filter(function(o) { return o.direction === 'in'; });
+  // Свои компании и поставщики (o.internal, сервер 24.09) - не выручка: не празднуем (перевод
+  // от Ярд Империала на 10 млн иначе играл «Миллионник») и не складываем в сумму тоста.
+  var ins = ops.filter(function(o) { return o.direction === 'in' && !o.internal; });
   var outs = isManagerAudience ? [] : ops.filter(function(o) { return o.direction === 'out'; });
   var insSum = ins.reduce(function(a, o) { return a + (Number(o.amount) || 0); }, 0);
   var outsSum = outs.reduce(function(a, o) { return a + (Number(o.amount) || 0); }, 0);
@@ -33036,9 +33055,8 @@ function renderBankLive_() {
       // Опознанный менеджер (план Фаза 4, 29.08) - показываем ВМЕСТО номера документа,
       // он важнее для быстрого просмотра; номер документа никуда не делся, просто не
       // дублируем два малозначимых поля рядом.
-      var docSlot = o.matched_manager
-        ? '<span class="bank-op-doc" style="color:var(--text)">' + bankEsc_(o.matched_manager) + '</span>'
-        : (o.doc_number ? '<span class="bank-op-doc">№' + bankEsc_(o.doc_number) + '</span>' : '<span class="bank-op-doc"></span>');
+      var docSlot = bankOpWhoSlot_(o) ||
+        (o.doc_number ? '<span class="bank-op-doc">№' + bankEsc_(o.doc_number) + '</span>' : '<span class="bank-op-doc"></span>');
       return '<div class="bank-op">' +
         '<span class="bank-op-time">' + (o.occurred_at ? o.occurred_at.slice(11, 16) : '—') + '</span>' +
         '<span class="bank-op-name">' + bankEsc_(o.counterparty || 'Без названия') + '</span>' +
@@ -33065,7 +33083,9 @@ function renderMgrBankLive_() {
   var todayIns = (BANK_OPS.ops || []).filter(function(o) {
     return o.direction === 'in' && o.occurred_at && o.occurred_at.slice(0, 10) === today;
   });
-  var total = todayIns.reduce(function(s, o) { return s + (Number(o.amount) || 0); }, 0);
+  // Свои компании и поставщики (o.internal, сервер) - не выручка, в сумму не входят (как и в
+  // «Пришло» у админа); строки в ленте остаются с пометкой.
+  var total = todayIns.reduce(function(s, o) { return s + (o.internal ? 0 : (Number(o.amount) || 0)); }, 0);
 
   var valEl = document.getElementById('mgr-bank-today-val');
   if (valEl) valEl.textContent = fmt(total);
@@ -33073,9 +33093,7 @@ function renderMgrBankLive_() {
   var feedEl = document.getElementById('mgr-bank-feed');
   if (feedEl) {
     feedEl.innerHTML = todayIns.map(function(o) {
-      var mgrSlot = o.matched_manager
-        ? '<span class="bank-op-doc" style="color:var(--text)">' + bankEsc_(o.matched_manager) + '</span>'
-        : '<span class="bank-op-doc"></span>';
+      var mgrSlot = bankOpWhoSlot_(o) || '<span class="bank-op-doc"></span>';
       return '<div class="bank-op">' +
         '<span class="bank-op-time">' + (o.occurred_at ? o.occurred_at.slice(11, 16) : '—') + '</span>' +
         '<span class="bank-op-name">' + bankEsc_(o.counterparty || 'Без названия') + '</span>' +

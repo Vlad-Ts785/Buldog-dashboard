@@ -6783,10 +6783,8 @@ function computeSalesFaktPlan_(ordersData) {
   // отделы (те же имена, что в DEPT_CFG на фронтенде, "По менеджерам") - иначе в сумму лезут
   // Рыщанов/Прус-Роскошный/Суркова, чей отдел больше не продаёт, и план на Панели (77.65М)
   // расходится с "По менеджерам" (75М) - см. Влад 2026-07-04.
-  const activePlanKeys = ['ахтамова','цегельников','гуштюк','дербенцева','шейко',
-    'гусейнова','савиток','филипчук','котельников','гуляева','коньшина','володин',
-    'цуцурин','внутренние','ратников',
-    'гуцу','кимличенко']; // 2026-09-22, синхронизировано с api/lib/orders-calc.js (VPS)
+  // 24.09 (этап 2.1б): список - признак «План продаж» в Справочниках, см. personListsFor_.
+  const activePlanKeys = personListsFor_((ordersData && ordersData.period) || currentMonthKey_()).activePlanKeys;
   const allPlans = (ordersData && ordersData.managerPlans) || {};
   activePlanKeys.forEach(function(k) { totalPlan += allPlans[k] || 0; });
 
@@ -7513,6 +7511,77 @@ const TRAL_LOGISTS = [
   'Прус-Роскошный', 'Рыщанов', 'Ахтамова', 'Гусейнова',
   'Горбачев', 'Свешников' // те же 2 бывших сотрудника (январь-май 2026), см. комментарий в TRAL_MANAGERS выше
 ];
+// План продаж отдела - чьи месячные планы входят в salesPlan (до 24.09 - локальный список внутри
+// computeSalesFaktPlan_). Синхронизировано с api/lib/orders-calc.js (VPS).
+const ACTIVE_PLAN_KEYS_FALLBACK_ = ['ахтамова','цегельников','гуштюк','дербенцева','шейко',
+  'гусейнова','савиток','филипчук','котельников','гуляева','коньшина','володин',
+  'цуцурин','внутренние','ратников',
+  'гуцу','кимличенко'];
+
+// 24.09 (этап 2.1б, plans/2026-09-24-stage2-directories-not-hardcode.md): TRAL_MANAGERS/TRAL_LOGISTS и
+// ACTIVE_PLAN_KEYS_FALLBACK_ выше - ЗАПАСНЫЕ. Основной источник - признаки сотрудника в Справочниках
+// (sprav_person_attrs), с сервера /api/directory/person_lists?month= - те же списки, что у серверного
+// расчёта (api/lib/orders-calc.js). Без этого первая правка в Справочниках развела бы две копии расчёта
+// (verifyServerOrdersCalc). Кэш 1 час на месяц + последний удачный ответ в ScriptProperties; нет ни
+// сервера, ни прошлого ответа - константы (как до 24.09). Внутри функций имена прежние: константы
+// затеняются локальными списками на месяц строк - остальной код функций не меняется.
+var PERSON_LISTS_MEMO_ = {};
+function personListsFor_(monthKey) {
+  var fallback = { tralManagers: TRAL_MANAGERS, tralLogists: TRAL_LOGISTS, activePlanKeys: ACTIVE_PLAN_KEYS_FALLBACK_, source: 'code' };
+  var mk = String(monthKey || '');
+  if (!/^\d{4}-\d{2}$/.test(mk)) return fallback;
+  if (PERSON_LISTS_MEMO_[mk]) return PERSON_LISTS_MEMO_[mk];
+  var CACHE_KEY = 'person_lists_v1_' + mk, LAST_GOOD_KEY = 'PERSON_LISTS_LAST_GOOD_' + mk;
+  var cache = CacheService.getScriptCache();
+  var hit = cache.get(CACHE_KEY);
+  if (hit) { try { return (PERSON_LISTS_MEMO_[mk] = JSON.parse(hit)); } catch (e) {} }
+  var props = PropertiesService.getScriptProperties();
+  var ok = function(a) { return Array.isArray(a) && a.length > 0; };
+  var data = null;
+  try {
+    var apiKey = props.getProperty('YARD_API_KEY');
+    if (apiKey) {
+      var r = UrlFetchApp.fetch('https://api.yardhub.ru/api/directory/person_lists?month=' + mk,
+        { headers: { 'X-Api-Key': apiKey }, muteHttpExceptions: true });
+      if (r.getResponseCode() === 200) {
+        var j = JSON.parse(r.getContentText()) || {};
+        if (ok(j.tral_managers) && ok(j.tral_logists) && ok(j.active_plan_keys)) {
+          data = { tralManagers: j.tral_managers, tralLogists: j.tral_logists, activePlanKeys: j.active_plan_keys, source: 'server:' + (j.source || '?') };
+          props.setProperty(LAST_GOOD_KEY, JSON.stringify(data));
+        }
+      }
+    }
+  } catch (e) { Logger.log('personListsFor_: ' + e); }
+  if (!data) {
+    var last = props.getProperty(LAST_GOOD_KEY);
+    try { data = last ? JSON.parse(last) : null; } catch (e) { data = null; }
+  }
+  if (!data) return fallback; // не кэшируем константы - при следующем вызове снова спросим сервер
+  cache.put(CACHE_KEY, JSON.stringify(data), 3600);
+  return (PERSON_LISTS_MEMO_[mk] = data);
+}
+// Месяц строк заказов (колонка 42 = month_key; из листа может прийти и Date).
+function monthOfRows_(rows) {
+  for (var i = 0; i < (rows || []).length; i++) {
+    var v = rows[i] && rows[i][42];
+    if (!v) continue;
+    if (Object.prototype.toString.call(v) === '[object Date]') return Utilities.formatDate(v, 'Europe/Moscow', 'yyyy-MM');
+    return String(v).trim().slice(0, 7);
+  }
+  return '';
+}
+function currentMonthKey_() { return Utilities.formatDate(new Date(), 'Europe/Moscow', 'yyyy-MM'); }
+// Проверка из редактора (без "_" - видна в «Выполнить»): откуда Apps Script берёт списки отдела и
+// совпадают ли они с константами этого файла.
+function checkServerPersonLists() {
+  var mk = currentMonthKey_();
+  var l = personListsFor_(mk);
+  var diff = function(a, b) { return a.filter(function(x) { return b.indexOf(x) < 0; }); };
+  Logger.log('месяц ' + mk + ', источник: ' + l.source);
+  Logger.log('продажи: только сервер ' + JSON.stringify(diff(l.tralManagers, TRAL_MANAGERS)) + ', только код ' + JSON.stringify(diff(TRAL_MANAGERS, l.tralManagers)));
+  Logger.log('снабжение: только сервер ' + JSON.stringify(diff(l.tralLogists, TRAL_LOGISTS)) + ', только код ' + JSON.stringify(diff(TRAL_LOGISTS, l.tralLogists)));
+  Logger.log('план: только сервер ' + JSON.stringify(diff(l.activePlanKeys, ACTIVE_PLAN_KEYS_FALLBACK_)) + ', только код ' + JSON.stringify(diff(ACTIVE_PLAN_KEYS_FALLBACK_, l.activePlanKeys)));
+}
 
 // ПОСТОЯННЫЙ ИНСТРУМЕНТ (не одноразовый, не удалять) - регрессионный смоук-тест. Проверяет
 // конкретные факты, которые уже ДВАЖДЫ откатывались в этом файле (порог 23% - по компании, не
@@ -7923,6 +7992,7 @@ function ordInList(name, list) {
 // col 15 = Менеджер по продажам, col 30 = Сумма) - тот же источник и методика, что и живая
 // выручка на Панели (salesFakt), чтобы сравнение было корректным.
 function sumManagerRevenueThruDay_(rows, maxDay) {
+  const TRAL_MANAGERS = personListsFor_(monthOfRows_(rows)).tralManagers; // 24.09, этап 2.1б
   let total = 0;
   rows.forEach(function(row) {
     const mgr = String(row[15] || '').trim();
@@ -9718,6 +9788,9 @@ function normalizeOrders() {
 // Не трогает листы - используется и для текущего месяца, и для разбора архивов "на лету".
 function parseOrdersRawRows(allData) {
   if (!allData || allData.length < 5) return { headers: [], rows: [] };
+  // 24.09 (этап 2.1б): старый почтовый канал - списки отдела на текущий месяц из Справочников.
+  const lists_ = personListsFor_(currentMonthKey_());
+  const TRAL_MANAGERS = lists_.tralManagers, TRAL_LOGISTS = lists_.tralLogists;
 
   // Обычно заголовки колонок - строка 4 (индекс 3), но см. findOrdersHeaderRowIndex_ -
   // ищем по содержимому, не по фиксированному индексу.
@@ -11558,6 +11631,9 @@ function argmaxLogist_(logCounts) {
 // Чистая функция: нормализованные строки заказов -> агрегированный JSON для дашборда.
 // Используется и для текущего месяца (Заказы_данные), и для архивов прошлых периодов.
 function aggregateOrdersRows(rows) {
+  // 24.09 (этап 2.1б): списки отдела - за месяц этих строк, из Справочников (personListsFor_).
+  const lists_ = personListsFor_(monthOfRows_(rows));
+  const TRAL_MANAGERS = lists_.tralManagers, TRAL_LOGISTS = lists_.tralLogists;
   const C = {
     id:0, date_c:1, date_s:2, date_e:3,
     pay_type:4, posted:5, waybill:6, realiz:7, orig:8,
@@ -12777,6 +12853,7 @@ function computeClientAnalytics_(rows, opts) {
 
 // Рейтинг менеджеров по выручке - для "место среди менеджеров" в личном профиле.
 function computeManagerRanking_(rows) {
+  const TRAL_MANAGERS = personListsFor_(currentMonthKey_()).tralManagers; // 24.09, этап 2.1б
   var byMgr = {};
   TRAL_MANAGERS.forEach(function(m) { byMgr[m] = { name: m, revenue: 0, clients: {} }; });
   rows.forEach(function(r) {

@@ -17755,6 +17755,9 @@ function assetOpenForm_(id) {
   var idInput = document.getElementById('asset-id');
   idInput.value = a ? a.id : '';
   idInput.disabled = !!a; // госномер - естественный первичный ключ, у существующей записи не меняется
+  // Стандарт госномера (24.09): пробелы на лету, тип номера - по выбранному типу техники.
+  if (window.YardPlate) YardPlate.wire(idInput, function() { return typeSelect.value; });
+  idInput.classList.remove('gos-bad'); idInput.title = '';
   document.getElementById('asset-department').value = a ? (a.department || '') : '';
   // Отдел с датой (24.09): исходные значения - чтобы отправить дату, только если её (или отдел) трогали.
   assetDeptInitial_ = { dept: a ? (a.department || '') : '', since: a ? (a.department_since || '') : '' };
@@ -17818,6 +17821,12 @@ function assetSave_() {
   errEl.style.display = 'none';
   var id = assetEditId_ || document.getElementById('asset-id').value.trim();
   if (!id) { errEl.textContent = 'Госномер обязателен'; errEl.style.display = ''; return; }
+  // Новая запись - госномер только по стандарту (24.09); сервер проверит то же самое.
+  if (!assetEditId_ && window.YardPlate) {
+    var assetPlateErr = YardPlate.check(document.getElementById('asset-id'), document.getElementById('asset-type-select').value);
+    if (assetPlateErr) { errEl.textContent = assetPlateErr; errEl.style.display = ''; return; }
+    id = document.getElementById('asset-id').value.trim();
+  }
   // VIN был жёстко обязателен на фронтенде (30.08) - Влад снял требование 01.09 (карточки
   // заводятся наспех по госномеру, VIN не всегда под рукой сразу) - поле остаётся, просто
   // необязательное, серверной блокировки для него не было и раньше.
@@ -18291,6 +18300,9 @@ function partnersAssetOpenForm_(id) {
   idInput.value = a ? a.id : '';
   idInput.disabled = !!a;
   document.getElementById('partner-asset-type').value = a ? a.asset_type : 'trailer';
+  // Стандарт госномера (24.09): пробелы на лету, тип номера - по выбранному типу техники.
+  if (window.YardPlate) YardPlate.wire(idInput, function() { return document.getElementById('partner-asset-type').value; });
+  idInput.classList.remove('gos-bad'); idInput.title = '';
   document.getElementById('partner-asset-manufacturer').value = a ? (a.manufacturer || '') : '';
   document.getElementById('partner-asset-vin').value = a ? (a.vin || '') : '';
   document.getElementById('partner-asset-name').value = a ? (a.name || '') : '';
@@ -18319,6 +18331,11 @@ function partnersAssetSave_() {
   errEl.style.display = 'none';
   var id = partnersAssetEditId_ || document.getElementById('partner-asset-id').value.trim();
   if (!id) { errEl.textContent = 'Госномер обязателен'; errEl.style.display = ''; return; }
+  if (!partnersAssetEditId_ && window.YardPlate) {
+    var partnerPlateErr = YardPlate.check(document.getElementById('partner-asset-id'), document.getElementById('partner-asset-type').value);
+    if (partnerPlateErr) { errEl.textContent = partnerPlateErr; errEl.style.display = ''; return; }
+    id = document.getElementById('partner-asset-id').value.trim();
+  }
   var ownerVal = document.getElementById('partner-asset-owner').value;
   var ownerParts = ownerVal ? ownerVal.split(':') : ['', ''];
   var params = {
@@ -38528,6 +38545,8 @@ window.LP = { init: initLP };
 <!-- «План задание v2» - объявляет window.OP2, вызывается из showPage(). Без async/defer:
      модуль читает SESSION_TOKEN/YARD_API_BASE как голые идентификаторы из общей
      лексической области основного скрипта (память project_window_global_let_const_gotcha). -->
+<!-- Стандарт госномера (24.09) - window.YardPlate, нужен «Заданию» и формам Справочников. До order-plan-v2.js. -->
+<script src="gos-plate.js"></script>
 <script src="order-plan-v2.js"></script>
 <!-- Всплывающие уведомления логисту о водителе (принял/отказался) - 23.09.2026, Влад:
      "чтобы висели пока не нажмешь крестик". Отдельный маленький файл, НЕ внутри

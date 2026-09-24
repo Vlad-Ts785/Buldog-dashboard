@@ -3740,6 +3740,9 @@ function openHiredStep(o) {
     '<div class="op2-margin"><span class="op2-k">Цена менеджера ' + esc(fmtP(o.price) || 'не указана') + ' · маржа</span><span class="op2-v" id="op2-h-margin">—</span></div>' +
     '<div class="op2-fld"><label>Комментарий</label><input id="op2-h-comment" autocomplete="off" placeholder="Что важно знать по перевозчику" value="' + esc(h.comment || '') + '"></div>';
   blockForeignAutofill_($('#op2-hstep'));
+  /* Стандарт госномера (24.09, Влад: «по-другому не вводится»): пробелы ставятся сами, в том
+     числе при вставке, латиница -> кириллица, ошибка подсвечивается. Решает сервер (hired_set). */
+  if (window.YardPlate) { YardPlate.wire($('#op2-h-gos'), 'tractor'); YardPlate.wire($('#op2-h-trailer'), 'trailer'); }
   /* Влад 12.09: «отдать наёмнику невозможно без указания цены» - та же логика, что у цены
      заявки при создании (tickState), только тут своя кнопка «Отдать наёмнику», не общий
      op2-f-save. «Нужен расчёт маржи в процентах сразу» - % от цены менеджера рядом с суммой,
@@ -3808,6 +3811,10 @@ function saveHired(o) {
      через updateHiredBtn_ (onPopOk не пропустит клик дальше), эта проверка - подстраховка
      на случай прямого вызова saveHired мимо кнопки. */
   if (!num($('#op2-h-rate').value)) { logUiEvent_('blocked_click', 'hired_save', 'нет ставки закупки'); toast('<span class="op2-warn">Укажи ставку закупки</span> · без неё маржа не считается'); return; }
+  if (window.YardPlate) {
+    var plateErr = YardPlate.check($('#op2-h-gos'), 'tractor') || YardPlate.check($('#op2-h-trailer'), 'trailer');
+    if (plateErr) { logUiEvent_('blocked_click', 'hired_save', 'госномер не по стандарту'); toast('<span class="op2-warn">' + esc(plateErr) + '</span>'); return; }
+  }
   var cs = $('#op2-h-cs .op2-chip.op2-on');
   apiPost('/orders/hired_set', {
     order_id: o.id,

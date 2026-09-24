@@ -461,6 +461,8 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7;stroke
 <div class="navdrawer" id="navdrawer"></div>
 <div class="toast" id="toast"></div>
 
+<!-- Стандарт госномера (24.09) - тот же помощник ввода, что в «Задании» на ПК. -->
+<script src="gos-plate.js"></script>
 <script>
 (function(){
 "use strict";
@@ -2065,7 +2067,11 @@ function renderHiredSheet(head,body,foot){
     var b=$('hSave'); b.disabled = !(comp && rate); b.textContent = b.disabled ? 'Укажи компанию и ставку' : 'Поставить наёмника';
   }
   ['hCompany','hRate'].forEach(function(id){ $(id).addEventListener('input', tickH); });
+  if(window.YardPlate){ YardPlate.wire($('hTruck'),'tractor'); YardPlate.wire($('hTrailer'),'trailer'); }
   $('hSave').addEventListener('click', function(){
+    // Госномер - только по стандарту (24.09); сервер проверит то же самое.
+    var plateErr = window.YardPlate ? (YardPlate.check($('hTruck'),'tractor') || YardPlate.check($('hTrailer'),'trailer')) : '';
+    if(plateErr){ toast('Госномер не по стандарту', plateErr, null, null, {err:true}); return; }
     var btn=$('hSave'); btn.disabled=true; btn.textContent='Сохраняю…';
     apiPost_('/orders/hired_set', {
       order_id:o.id, carrier_name:$('hCompany').value, carrier_contact:$('hContact').value,

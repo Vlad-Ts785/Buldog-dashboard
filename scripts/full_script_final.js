@@ -7476,6 +7476,10 @@ const INTERNAL_CLIENTS = [
 // страница/карточка на "Менеджеры" - см. files/index.html DEPT_CFG (solo:true, без группы).
 // Зарплата ему НЕ считается (formula не согласована) - см. isSalaryNotConfigured_ во
 // фронтенде; сюда, в общий ростер выручки/статистики, он добавлен как обычный менеджер.
+// Сделки вне порога 23% маржи найма по компании (выручка/прибыль/ЗП менеджера - как обычно).
+// Влад, 24.09: 000473444 (ТЛК-ЦЕНТР, маржа 0) одна утянула август с 25,25% до 22,47%.
+// Зеркало HIRE_THRESHOLD_EXCLUDED_IDS в api/lib/orders-calc.js (VPS).
+const HIRE_THRESHOLD_EXCLUDED_IDS = ['000473444'];
 const TRAL_MANAGERS = [
   'Ахтамова', 'Гусейнова', 'Цуцурин',
   'Котельников', 'Цегельников', 'Гуляева', 'Гуштюк',
@@ -11638,6 +11642,7 @@ function aggregateOrdersRows(rows) {
   let funnelTralTotal=0, funnelLongTotal=0, funnelTralProblem=0, funnelLongProblem=0;
   let tralOrders=0, tralAmount=0, longOrders=0, longAmount=0;
   let ownAmount=0, hiredAmountRev=0;
+  let hiredProfitThr=0, hiredAmountRevThr=0; // порог 23% - без HIRE_THRESHOLD_EXCLUDED_IDS
   let ownTralOrders=0, ownLongOrders=0, hiredTralOrders=0, hiredLongOrders=0;
   let ownLongAmount=0; // выручка ТОЛЬКО собственного парка длинномеров (2026-08-11, страница Васина - убрать наём)
   var noWaybillOwn=[0,0,0], noWaybillHired=[0,0,0], waybillNotPosted=[0,0,0], postedNoRealiz=[0,0,0], complete=[0,0,0];
@@ -11756,6 +11761,7 @@ function aggregateOrdersRows(rows) {
     totalBalance += balance;
     if (isHired) {
       totalHiredCost += hiredCost; hiredProfit += profit; hiredAmountRev += amount;
+      if (HIRE_THRESHOLD_EXCLUDED_IDS.indexOf(str(row,'id')) < 0) { hiredProfitThr += profit; hiredAmountRevThr += amount; }
       // Маржа найма по сегменту (Влад, 2026-07-17: карточка "Заказов" вместо "Топ грузов").
       if (equip === 'Длинномер') hiredProfitLong += profit; else hiredProfitTral += profit;
     } else { ownAmount += amount; }
@@ -12145,7 +12151,7 @@ function aggregateOrdersRows(rows) {
   // ОДИН РАЗ по итогам всех строк, затем разово раскладываем накопленный hired_margin_total
   // каждого менеджера/логиста в qualified/unqualified - весь наём месяца либо весь считается,
   // либо весь нет, единообразно для всех.
-  const companyMarginPct = hiredAmountRev > 0 ? (hiredProfit / hiredAmountRev) : 0;
+  const companyMarginPct = hiredAmountRevThr > 0 ? (hiredProfitThr / hiredAmountRevThr) : 0;
   const companyMarginQualifies = companyMarginPct >= 0.23;
   Object.values(managerMap).forEach(function(m) {
     if (companyMarginQualifies) { m.hired_margin_qualified = m.hired_margin_total; m.hired_margin_unqualified = 0; }

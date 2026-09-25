@@ -121,6 +121,11 @@ var SB_CLS = { approved: 'hr-sb-ok', rejected: 'hr-sb-bad', interview: 'hr-sb-wa
 var SB_REQ = [['full_name', 'ФИО'], ['birth_date', 'дата рождения'], ['birth_place', 'место рождения'], ['passport_no', 'серия и номер паспорта'],
   ['passport_issued_by', 'кем выдан'], ['passport_issue_date', 'дата выдачи'], ['reg_address', 'адрес регистрации'], ['phone10', 'телефон']];
 /* То же, что R.sbMissing на сервере (он и решает) - здесь только чтобы подсказка обновлялась сразу при вводе. */
+/* Кандидат на открытом этапе ПОСЛЕ «Проверки СБ», а СБ не ответила «нет компромата». */
+function pastSbUnchecked(c) {
+  var cur = stageBy(c.stage_key), sb = stageBy('security');
+  return !!cur && !!sb && !cur.is_terminal && cur.sort_order > sb.sort_order && c.sb_status !== 'approved';
+}
 function sbMissing(c) { return SB_REQ.filter(function (p) { return c[p[0]] == null || String(c[p[0]]).trim() === ''; }).map(function (p) { return p[1]; }); }
 function recallDue(c) { return !!c.recall_at && new Date(c.recall_at).getTime() <= Date.now(); }
 /* Кружок ответственного - канон CRM (.kb-ava: инициалы, цвет «личности» по стабильному ключу,
@@ -372,6 +377,9 @@ function cardHtml(c) {
   if (c.call_attempts && !won && !lost) tags.push('<span class="hr-tag" title="Попыток дозвониться">попыток ' + c.call_attempts + '</span>');
   if (c.person_id) tags.push('<span class="hr-tag" title="Телефон совпал со справочником сотрудников">в справочнике</span>');
   var onSb = c.stage_key === 'security' && c.sb_status;
+  // Ушёл дальше СБ без «нет компромата» (перенос из старой таблицы, решение руководителя) - предупреждаем словами.
+  if (pastSbUnchecked(c)) tags.unshift('<span class="hr-tag hr-tag-urgent" title="Кандидат дальше этапа «Проверка СБ», а ответа «нет компромата» нет">' +
+    esc(c.sb_status && c.sb_status !== 'approved' ? SB_TEXT[c.sb_status] || c.sb_status : 'без проверки СБ') + '</span>');
   if (onSb) tags.unshift('<span class="hr-tag hr-tag-sb ' + (SB_CLS[c.sb_status] || '') + '"' + (c.sb_comment ? ' title="' + esc(c.sb_comment) + '"' : '') + '>' + esc(SB_TEXT[c.sb_status] || c.sb_status) + '</span>');
   var loss = lost && c.reject_reason ? '<div class="kb-card-loss">' + esc((reasonBy(c.reject_reason) || {}).title || c.reject_reason) + '</div>' : '';
   return '<div class="kb-card' + fresh + (won ? ' kb-won-style' : '') + (lost ? ' kb-lost-style' : '') + (onSb && SB_CLS[c.sb_status] ? ' ' + SB_CLS[c.sb_status] : '') + (c.can_move ? ' hr-drag' : '') + (S.openId === c.id ? ' is-open' : '') + '" data-id="' + c.id + '">' +
@@ -910,12 +918,18 @@ function openDoc(docId) {
 function sbSection(c, d) {
   var hist = d.sb_history || [];
   var onSb = c.stage_key === 'security';
-  if (!c.sb_status && !hist.length && c.stage_key !== 'screening' && !onSb) return '';
+  var past = pastSbUnchecked(c);
+  if (!c.sb_status && !hist.length && c.stage_key !== 'screening' && !onSb && !past) return '';
   var now = c.sb_status ? '<div class="dr-row"><span>Сейчас</span><span><span class="hr-tag hr-tag-sb ' + (SB_CLS[c.sb_status] || '') + '">' + esc(SB_TEXT[c.sb_status] || c.sb_status) + '</span>' +
       (c.sb_comment && c.sb_status !== 'approved' ? ' <span class="aux">«' + esc(c.sb_comment) + '»</span>' : '') + (c.sb_at ? ' <span class="aux mono">' + esc(fmtDateTime(c.sb_at)) + '</span>' : '') + '</span></div>' : '';
   var miss = c.stage_key === 'screening' ? sbMissing(c) : [];   // уже отправлен - подсказка не нужна
   var rej = onSb && c.sb_status === 'rejected' && c.can_move ? '<button type="button" class="crm-chip is-bad" id="hr-sb-reject">' + ico('lost') + 'Отказ: не прошёл СБ</button>' : '';
   if (onSb && (c.sb_status === 'question' || c.sb_status === 'interview') && c.can_move) rej += '<button type="button" class="crm-chip" id="hr-sb-resend">' + ico('undo') + 'Отправить в СБ заново (паспорт поправлен)</button>';
+  // Уже дальше СБ, а проверки не было: отправить, не двигая этап (заполните паспорт - кнопка проверит).
+  if (past && c.sb_status !== 'queued' && c.sb_status !== 'pending' && (c.can_move || c.can_edit)) {
+    rej = '<div class="hr-hint-amber">Кандидат прошёл дальше без ответа СБ «нет компромата».</div>' + rej +
+      '<button type="button" class="crm-chip" id="hr-sb-resend">' + ico('undo') + 'Отправить в СБ</button>';
+  }
   var rows = hist.map(function (h) {
     var dt = h.check_date ? fmtDate(h.check_date) : (h.date_raw || '');
     return '<div class="dr-row"><span class="mono">' + esc(dt || '-') + '</span><span>' + esc(h.position || '') + ' · <span class="hr-tag hr-tag-sb ' + (SB_CLS[h.sb_status] || '') + '">' +

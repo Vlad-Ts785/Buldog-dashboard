@@ -844,9 +844,10 @@ function paintDocs(id, data) {
       ocrBlock(x, data.can_upload) + '</div>';
   }).join('');
   var hasOcrDocs = docs.some(function (x) { return !x.ocr_problem; });
-  var ocrLine = data.can_upload && hasOcrDocs ? '<div class="hr-doc-hint">' + (ocr.enabled
-    ? 'Распознавание паспорта и ВУ - пилот до ' + esc(String(ocr.until || '').split('-').reverse().join('.')) + ', в этом месяце ' + ocr.used + ' из ' + ocr.limit + '. Только по кнопке, данные потом проверяет человек.'
-    : 'Распознавание недоступно: ' + esc(ocr.reason || '')) + '</div>' : '';
+  // Распознавание выключено (Влад 25.09: «очень плохо работает, только ошибок наделаем») - о нём ни слова на экране.
+  var ocrLine = data.can_upload && hasOcrDocs && ocr.enabled ? '<div class="hr-doc-hint">Распознавание паспорта и ВУ - пилот до ' +
+    esc(String(ocr.until || '').split('-').reverse().join('.')) + ', в этом месяце ' + ocr.used + ' из ' + ocr.limit + '. Только по кнопке, данные потом проверяет человек.</div>' : '';
+  var passLink = $('#hr-pass-ocr'); if (passLink) passLink.hidden = !ocr.enabled;
   var add = data.can_upload ? '<div class="cx-chips hr-owner-pick">' + Object.keys(DOC_LABEL).map(function (k) {
     return '<button type="button" class="crm-chip" data-doc-add="' + k + '">' + ico('plus') + esc(DOC_LABEL[k]) + '</button>';
   }).join('') + '</div><div class="hr-doc-hint">PDF или фото (JPG, PNG, HEIC), до 15 МБ. Видят руководители, HR и начальник колонны кандидата, СБ.</div>' : '';
@@ -1137,7 +1138,7 @@ function renderCandidate(d) {
       '</div></div>' +
       sbSection(c, d) +
       '<div class="dr-section" id="hr-pass-sec"><div class="dr-label">Паспорт для СБ <span class="dr-saved aux">сохранено</span>' +
-        (ro ? '' : '<button type="button" class="hr-doc-open hr-link hr-label-act" id="hr-pass-ocr">взять из распознанного паспорта</button>') + '</div>' +
+        (ro ? '' : '<button type="button" class="hr-doc-open hr-link hr-label-act" id="hr-pass-ocr" hidden>взять из распознанного паспорта</button>') + '</div>' +
         '<div class="dr-grid2 hr-grid">' +
         field('Дата рождения', '<input class="dr-input mono" data-f="birth_date" type="date" value="' + esc(c.birth_date ? String(c.birth_date).slice(0, 10) : '') + '"' + dis + '>') +
         field('Место рождения', inp('birth_place', c.birth_place, ' maxlength="300"' + dis)) +

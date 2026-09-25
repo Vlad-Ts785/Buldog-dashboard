@@ -10,7 +10,7 @@
   if (!ROLES[ROLE]) { try { ROLE = sessionStorage.getItem('pv-hiring-role') || 'director'; } catch (e) { ROLE = 'director'; } }
   if (!ROLES[ROLE]) ROLE = 'director';
 
-  var STAGES = [["callbase","База для обзвона","recruiter",null,5,0],["new","Новый отклик","recruiter",15,10,0],["screening","Скрининг рекрутера","recruiter",1440,20,0],["column_interview","Собеседование с НК","column_head",1440,30,0],["security","Проверка СБ","security",1440,40,0],["onboarding","Тестовая смена / оформление","column_head",2880,50,0],["hired","Вышел на работу",null,null,60,1],["rejected","Отказ",null,null,70,1],["reserve","Кадровый резерв",null,null,80,1]]
+  var STAGES = [["callbase","База для обзвона","recruiter",null,5,0],["new","Новый отклик","recruiter",15,10,0],["screening","Скрининг рекрутера","recruiter",1440,20,0],["security","Проверка СБ","security",1440,30,0],["column_interview","Собеседование с НК","column_head",1440,40,0],["onboarding","Тестовая смена / оформление","column_head",2880,50,0],["hired","Вышел на работу",null,null,60,1],["rejected","Отказ",null,null,70,1],["reserve","Кадровый резерв",null,null,80,1]]
     .map(function (a) { return { stage_key: a[0], title: a[1], owner_role: a[2], sla_minutes: a[3], sort_order: a[4], is_terminal: a[5], active: 1 }; });
   var REASONS = [["no_ce","Нет категории CE","company"],["no_skzi","Нет карты СКЗИ","company"],["low_exp","Мало стажа","company"],["violations","Лишения / штрафы","company"],["not_fit","Не подходит по требованиям","company"],["sb_fail","Не прошёл проверку СБ","company"],["test_fail","Не прошёл тестовую смену","company"],["already_employee","Уже работает у нас","company"],["money","Не устроили деньги","candidate"],["schedule","Не устроил график","candidate"],["far","Далеко","candidate"],["other_job","Ушёл к другим","candidate"],["no_answer","Пропал / недозвон","candidate"],["bad_number","Неверный или мёртвый номер","candidate"],["declined","Отказался (причина не названа)","candidate"],["dropped_after_agree","Отказ после согласия","candidate"]]
     .map(function (a) { return { reason_key: a[0], title: a[1], side: a[2] }; });
@@ -44,7 +44,7 @@
   C.push(cand('column_interview', Object.assign({ vehicle_type: 'tral', experience_years: 4, city: 'Коломна', stage_changed_at: ago(300), column_at: ago(300) }, byHr(HR1))));
   C.push(cand('column_interview', Object.assign({ vehicle_type: 'long', experience_years: 8, stage_changed_at: ago(900), column_at: ago(900) }, byHr(HR2))));
   C.push(cand('column_interview', Object.assign({ experience_years: 10, city: 'Серпухов', stage_changed_at: ago(90), column_at: ago(90) }, byHr(HR1))));
-  C.push(cand('security', Object.assign({ vehicle_type: 'long', experience_years: 9, city: 'Тула', stage_changed_at: ago(700), column_at: ago(2000) }, byHr(HR1))));
+  C.push(cand('security', Object.assign({ vehicle_type: 'long', experience_years: 9, city: 'Тула', stage_changed_at: ago(700) }, byHr(HR1))));
   C.push(cand('onboarding', Object.assign({ vehicle_type: 'tral', experience_years: 6, stage_changed_at: ago(1500), column_at: ago(4000) }, byHr(HR2))));
   C.push(cand('hired', Object.assign({ vehicle_type: 'tral', experience_years: 6, source: 'обзвон_2026-05', person_id: 'p1', stage_changed_at: ago(60 * 24 * 5), column_at: ago(60 * 24 * 9) }, byHr(HR1))));
   C.push(cand('rejected', Object.assign({ vehicle_type: 'long', experience_years: 2, reject_reason: 'no_skzi', stage_changed_at: ago(2000) }, byHr(HR2))));

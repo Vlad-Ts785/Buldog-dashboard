@@ -905,16 +905,17 @@ function nextAction(c) {
   var ns = stageBy(nextKey); if (!ns) return null;
   var label = 'Дальше: ' + ns.title;
   if (nextKey === 'screening') label = 'Взял в работу: скрининг';
+  // Порядок этапов с 25.09 (HR): скрининг -> СБ -> собеседование с НК -> тестовая смена.
   if (nextKey === 'column_interview') {
     var heads = (S.meta && S.meta.column_heads) || {};
-    label = c.vehicle_type ? 'Передать НК' + (heads[c.vehicle_type] ? ': ' + heads[c.vehicle_type] : '') + ' (' + VT_COL[c.vehicle_type] + ')' : 'Передать начальникам колонн - колонна не определена';
+    label = c.vehicle_type ? 'СБ пройдена: к НК' + (heads[c.vehicle_type] ? ' ' + heads[c.vehicle_type] : '') + ' (' + VT_COL[c.vehicle_type] + ')' : 'СБ пройдена: к начальникам колонн (колонна не определена)';
   }
-  if (nextKey === 'security') label = 'Собеседование пройдено: в СБ';
-  if (nextKey === 'onboarding') label = 'СБ пройдена: тестовая смена';
+  if (nextKey === 'security') label = 'Скрининг пройден: на проверку СБ';
+  if (nextKey === 'onboarding') label = 'Собеседование пройдено: тестовая смена';
   if (nextKey === 'hired') label = 'Вышел на работу';
   return { key: nextKey, label: label };
 }
-/* Что не заполнено к передаче НК - мягкое предупреждение (жёстко сервер требует только тип техники). */
+/* Что HR не заполнил на скрининге (он передаёт дальше - на СБ, потом к НК) - мягкое предупреждение. */
 function missingForNk(c) {
   var m = [];
   if (!c.vehicle_type) m.push('тип техники (без него кандидата возьмёт первый свободный НК)');
@@ -932,7 +933,7 @@ function renderCandidate(d) {
   var dis = ro ? ' disabled' : '';
   var over = overdueMin(c);
   var na = c.can_move ? nextAction(c) : null;
-  var miss = na && na.key === 'column_interview' ? missingForNk(c) : [];
+  var miss = na && c.stage_key === 'screening' ? missingForNk(c) : [];
   var open = openStages();
   var curIdx = open.map(function (s) { return s.stage_key; }).indexOf(c.stage_key);
   var boss = !!me().manage_all;
@@ -1006,7 +1007,7 @@ function renderCandidate(d) {
     '<div class="crm-drawer-body">' +
       '<div class="dr-section"><div class="dr-label">Этап' + (ro ? ' <span class="aux">ведёт другой сотрудник - только просмотр</span>' : '') + '</div>' + stepper + term + backForm + lostForm +
         (na ? '<button type="button" class="dr-calc-cta" id="hr-next" data-to="' + esc(na.key) + '">' + esc(na.label) + '</button>' +
-          (miss.length ? '<div class="hr-hint-amber">Не заполнено к передаче НК: ' + esc(miss.join(', ')) + '</div>' : '') : '') +
+          (miss.length ? '<div class="hr-hint-amber">Не заполнено на скрининге: ' + esc(miss.join(', ')) + '</div>' : '') : '') +
       '</div>' + ownersSec + callSec +
       '<div class="dr-section"><div class="dr-label">Скрининг <span class="dr-saved aux">сохранено</span></div><div class="dr-grid2 hr-grid">' +
         field('Тип техники', valChips('vehicle_type', c.vehicle_type || '', [['tral', 'Трал'], ['long', 'Длинномер'], ['', 'Не указан']]), true) +
@@ -1177,10 +1178,10 @@ function refreshNext(c) {
   var nb = $('#hr-next'); if (!nb) return;
   var na = nextAction(c); if (!na) return;
   nb.textContent = na.label; nb.setAttribute('data-to', na.key);
-  nb.disabled = na.key === 'column_interview' && !c.vehicle_type;
-  var miss = na.key === 'column_interview' ? missingForNk(c) : [];
+  nb.disabled = false;   // к НК можно и без типа техники - ничью карточку возьмёт первый НК
+  var miss = c.stage_key === 'screening' ? missingForNk(c) : [];
   var h = nb.nextElementSibling && nb.nextElementSibling.classList.contains('hr-hint-amber') ? nb.nextElementSibling : null;
-  if (miss.length) { if (!h) { h = document.createElement('div'); h.className = 'hr-hint-amber'; nb.parentNode.insertBefore(h, nb.nextSibling); } h.textContent = 'Не заполнено к передаче НК: ' + miss.join(', '); }
+  if (miss.length) { if (!h) { h = document.createElement('div'); h.className = 'hr-hint-amber'; nb.parentNode.insertBefore(h, nb.nextSibling); } h.textContent = 'Не заполнено на скрининге: ' + miss.join(', '); }
   else if (h) h.remove();
 }
 function attempt(c, recallIso, ctl) {

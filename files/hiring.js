@@ -109,6 +109,7 @@ function fmtTime(iso) {
    «Просрочено» живые, без ожидания следующего опроса сервера (ГОСТ разд.0 п.6). */
 function overdueMin(c) {
   var st = stageBy(c.stage_key);
+  if (st && st.stage_key === 'security' && (c.sb_status === 'queued' || c.sb_status === 'pending')) return 0;   // ждём СБ - не просрочка HR
   if (!st || st.sla_minutes == null || st.is_terminal) return 0;
   var over = Math.floor(since(c.stage_changed_at) / 60000) - st.sla_minutes;
   return over > 0 ? over : 0;
@@ -116,8 +117,8 @@ function overdueMin(c) {
 /* Проверка СБ (таблица службы безопасности, lib/hiring-sb.js на сервере): статус у карточки и его вид.
    Цвет - только на этапе «Проверка СБ», словами - всегда (ГОСТ: цвет не говорит один). */
 var SB_TEXT = { queued: 'в очереди в таблицу СБ', pending: 'СБ проверяет', approved: 'нет компромата', rejected: 'СБ: отказано',
-  interview: 'СБ: нужно собеседование', question: 'у СБ вопрос' };
-var SB_CLS = { approved: 'hr-sb-ok', rejected: 'hr-sb-bad', interview: 'hr-sb-wait', question: 'hr-sb-wait' };
+  interview: 'СБ: нужно собеседование', question: 'у СБ вопрос', hold: 'не записался в таблицу СБ' };
+var SB_CLS = { approved: 'hr-sb-ok', rejected: 'hr-sb-bad', interview: 'hr-sb-wait', question: 'hr-sb-wait', hold: 'hr-sb-wait' };
 var SB_REQ = [['full_name', 'ФИО'], ['birth_date', 'дата рождения'], ['birth_place', 'место рождения'], ['passport_no', 'серия и номер паспорта'],
   ['passport_issued_by', 'кем выдан'], ['passport_issue_date', 'дата выдачи'], ['reg_address', 'адрес регистрации'], ['phone10', 'телефон']];
 /* То же, что R.sbMissing на сервере (он и решает) - здесь только чтобы подсказка обновлялась сразу при вводе. */
@@ -128,6 +129,19 @@ function pastSb(c) {
 }
 /* ... а СБ не ответила «нет компромата». */
 function pastSbUnchecked(c) { return pastSb(c) && c.sb_status !== 'approved'; }
+/* Копия СБ-правил сервера (hiring-rules.js, checkMove - блок «СБ»): экран не предлагает то, что сервер всё равно
+   отклонит (ревью 25.09: руководитель видел «СБ пройдена» без ответа СБ). Решает сервер - здесь только не врём. */
+function sbBlock(c, toKey) {
+  var from = stageBy(c.stage_key), to = stageBy(toKey), sb = stageBy('security'), scr = stageBy('screening');
+  if (!from || !to || !sb) return null;
+  if (from.is_terminal && !to.is_terminal && to.sort_order > (scr ? scr.sort_order : sb.sort_order - 1)) return 'Из «' + from.title + '» вернуть можно только на скрининг - дальше кандидат снова проходит СБ';
+  if (toKey === 'security' && !from.is_terminal && from.sort_order < to.sort_order && sbMissing(c).length) return 'Для проверки СБ не заполнено: ' + sbMissing(c).join(', ');
+  var beyond = toKey === 'hired' || (!to.is_terminal && to.sort_order > sb.sort_order);
+  var forward = toKey === 'hired' || !!from.is_terminal || to.sort_order > from.sort_order;
+  if (beyond && forward && c.sb_status !== 'approved') return 'Дальше «Проверки СБ» - только после ответа СБ «нет компромата»';
+  return null;
+}
+var SB_WAITING = ['queued', 'pending', 'hold'];
 function sbMissing(c) { return SB_REQ.filter(function (p) { return c[p[0]] == null || String(c[p[0]]).trim() === ''; }).map(function (p) { return p[1]; }); }
 function recallDue(c) { return !!c.recall_at && new Date(c.recall_at).getTime() <= Date.now(); }
 /* Кружок ответственного - канон CRM (.kb-ava: инициалы, цвет «личности» по стабильному ключу,
@@ -157,7 +171,11 @@ function ownersHtml(c) {
   return out ? '<span class="hr-avas">' + out + '</span>' : '';
 }
 /* «Ждут меня» - открытая карточка, которую этот человек может двигать (признак от сервера). */
-function waitsMe(c) { var st = stageBy(c.stage_key); return !!c.can_move && !!st && !st.is_terminal && st.stage_key !== 'callbase'; }
+function waitsMe(c) {
+  var st = stageBy(c.stage_key);
+  if (st && st.stage_key === 'security' && SB_WAITING.indexOf(c.sb_status) >= 0 && c.sb_status !== 'hold') return false;   // ждём СБ, не HR
+  return !!c.can_move && !!st && !st.is_terminal && st.stage_key !== 'callbase';
+}
 
 /* ───────── каркас страницы ───────── */
 function buildDom() {
@@ -180,7 +198,7 @@ function buildDom() {
         '<div class="hr-presence" id="hr-presence" hidden title="Кто сейчас в «Найме»: залит - страница открыта, мигает - что-то делает прямо сейчас"></div>' +
         '<button type="button" class="crm-chip hr-add" id="hr-add" data-nav-sound>' + ico('plus') + 'Добавить кандидата</button>' +
       '</div>' +
-      '<div class="kb-hint">Перетащите карточку в соседний этап или в самый низ экрана - снизу появятся зоны «Вышел на работу» и «Отказ». Назад - с комментарием, отказ - с причиной (откроется карточка). Двигает хозяин этапа. Жёлтая точка - кандидат висит дольше срока этапа, красная - больше суток сверх срока.</div>' +
+      '<div class="kb-hint">Перетащите карточку на следующий этап или в самый низ экрана - снизу появятся зоны «Вышел на работу» и «Отказ». Назад - с комментарием, отказ - с причиной (откроется карточка). Дальше «Проверки СБ» - только после ответа СБ «нет компромата». Двигает хозяин этапа. Жёлтая точка - кандидат висит дольше срока этапа, красная - больше суток сверх срока.</div>' +
       '<div class="kb-panel"><div class="kb-board" id="hr-board"></div></div>' +
     '</div>' +
     // Полка во время перетаскивания и салют «Вышел на работу» - те же анатомии, что у канбана CRM (.kb-shelf, .crm-celebrate).
@@ -295,7 +313,7 @@ function load() {
    СБ кандидатов не заводит - кнопки нет (сервер всё равно ответил бы отказом). */
 function applyRoleDefaults() {
   var rk = me().role_key;
-  if (rk === 'column_head' || rk === 'security') {
+  if (rk === 'column_head') {
     S.flt = 'mine';
     $$('#hr-flt .crm-chip').forEach(function (x) { x.setAttribute('aria-pressed', String(x.getAttribute('data-v') === 'mine')); });
   }
@@ -409,7 +427,8 @@ function cardHtml(c) {
   // Ушёл дальше СБ без «нет компромата» (перенос из старой таблицы, решение руководителя) - предупреждаем словами.
   // Прошёл СБ и уже дальше (у НК, тестовая смена) - зелёная метка словами, заливка карточки - только на самом этапе СБ.
   if (!pastSbUnchecked(c) && c.sb_status === 'approved' && pastSb(c)) tags.unshift('<span class="hr-tag hr-tag-sb hr-sb-ok"' + (c.sb_comment ? ' title="' + esc(c.sb_comment) + '"' : '') + '>СБ пройдена</span>');
-  if (pastSbUnchecked(c)) tags.unshift('<span class="hr-tag hr-tag-urgent" title="Кандидат дальше этапа «Проверка СБ», а ответа «нет компромата» нет">' +
+  if (c.stage_key === 'security' && !c.sb_status) tags.unshift('<span class="hr-tag hr-tag-urgent" title="Заявка в СБ не отправлена - заполните паспорт и нажмите «Отправить в СБ»">не отправлен в СБ</span>');
+  if (pastSbUnchecked(c)) tags.unshift('<span class="hr-tag ' + (c.sb_status === 'rejected' ? 'hr-tag-sb hr-sb-bad' : 'hr-tag-urgent') + '" title="Кандидат дальше этапа «Проверка СБ», а ответа «нет компромата» нет">' +
     esc(c.sb_status && c.sb_status !== 'approved' ? SB_TEXT[c.sb_status] || c.sb_status : 'без проверки СБ') + '</span>');
   if (onSb) tags.unshift('<span class="hr-tag hr-tag-sb ' + (SB_CLS[c.sb_status] || '') + '"' + (c.sb_comment ? ' title="' + esc(c.sb_comment) + '"' : '') + '>' + esc(SB_TEXT[c.sb_status] || c.sb_status) + '</span>');
   var loss = lost && c.reject_reason ? '<div class="kb-card-loss">' + esc((reasonBy(c.reject_reason) || {}).title || c.reject_reason) + '</div>' : '';
@@ -604,6 +623,12 @@ function dropTo_(c, card, fromCol, toCol, toList, back, settle) {
     return;
   }
   if (toCol === 'reserve' && !c.reserve_consent_at) { back(); snd.undo(); toast('В кадровый резерв - только с согласием кандидата. Отметьте его в карточке, раздел «Согласия».', 'amber'); return; }
+  var blk = sbBlock(c, toCol);
+  if (blk) { back(); snd.undo(); toast(blk, 'amber'); return; }
+  var naD = nextAction(c);
+  if (!me().manage_all && st && !st.is_terminal && !ts.is_terminal && ts.sort_order > st.sort_order && (!naD || naD.key !== toCol)) {
+    back(); snd.undo(); toast('Вперёд - только на следующий этап' + (naD ? ': «' + (stageBy(naD.key) || {}).title + '»' : ''), 'amber'); return;
+  }
   if (toCol === 'hired') { back(); hireWin_(c, card); return; }
   // Вперёд: карточка ложится сразу, сервер подтверждает (правила - hiring-rules.js); отказ сервера - откат.
   settle(toList); snd.drop(); vibrate(12);
@@ -779,6 +804,7 @@ function openCandidate(id, keepScroll, after) {
   openDrawer(); renderBoard();
   api('/hiring/candidate', null, { id: id }).then(function (r) {
     if (S.openId !== id) return;
+    if (r.status === 404 && same) { closeDrawer(); toast('Кандидат ушёл с ваших этапов - на вашей доске его больше нет', 'amber'); return; }
     if (!r.ok) { dr.innerHTML = '<div class="crm-drawer-body"><div class="dr-empty">' + esc(r.data.error || 'Не удалось открыть') + '</div></div>'; return; }
     renderCandidate(r.data);
     var b2 = $('.crm-drawer-body', dr); if (b2 && top) b2.scrollTop = top;
@@ -841,13 +867,12 @@ function paintDocs(id, data) {
     return '<div class="hr-doc-wrap"><div class="dr-row hr-doc"><span class="hr-doc-name"><button type="button" class="hr-doc-open" data-doc="' + x.id + '" title="Открыть">' + esc(x.original_name || 'файл') + '</button>' +
       '<span class="aux">' + esc(DOC_LABEL[x.doc_type] || 'Другое') + ' · ' + esc(fmtBytes(x.size_bytes)) + ' · ' + esc(fmtDateTime(x.uploaded_at)) + (x.uploaded_name ? ' · ' + esc(x.uploaded_name) : '') + '</span></span>' +
       ocrBtn + (x.can_delete ? '<button type="button" class="cx-ibtn" data-doc-del="' + x.id + '" title="Удалить">' + ico('close') + '</button>' : '') + '</div>' +
-      ocrBlock(x, data.can_upload) + '</div>';
+      (ocr.enabled ? ocrBlock(x, data.can_upload) : '') + '</div>';
   }).join('');
   var hasOcrDocs = docs.some(function (x) { return !x.ocr_problem; });
   // Распознавание выключено (Влад 25.09: «очень плохо работает, только ошибок наделаем») - о нём ни слова на экране.
   var ocrLine = data.can_upload && hasOcrDocs && ocr.enabled ? '<div class="hr-doc-hint">Распознавание паспорта и ВУ - пилот до ' +
     esc(String(ocr.until || '').split('-').reverse().join('.')) + ', в этом месяце ' + ocr.used + ' из ' + ocr.limit + '. Только по кнопке, данные потом проверяет человек.</div>' : '';
-  var passLink = $('#hr-pass-ocr'); if (passLink) passLink.hidden = !ocr.enabled;
   var add = data.can_upload ? '<div class="cx-chips hr-owner-pick">' + Object.keys(DOC_LABEL).map(function (k) {
     return '<button type="button" class="crm-chip" data-doc-add="' + k + '">' + ico('plus') + esc(DOC_LABEL[k]) + '</button>';
   }).join('') + '</div><div class="hr-doc-hint">PDF или фото (JPG, PNG, HEIC), до 15 МБ. Видят руководители, HR и начальник колонны кандидата, СБ.</div>' : '';
@@ -954,14 +979,19 @@ function sbSection(c, d) {
   if (!c.sb_status && !hist.length && c.stage_key !== 'screening' && !onSb && !past) return '';
   var now = c.sb_status ? '<div class="dr-row"><span>Сейчас</span><span><span class="hr-tag hr-tag-sb ' + (SB_CLS[c.sb_status] || '') + '">' + esc(SB_TEXT[c.sb_status] || c.sb_status) + '</span>' +
       (c.sb_comment && c.sb_status !== 'approved' ? ' <span class="aux">«' + esc(c.sb_comment) + '»</span>' : '') + (c.sb_at ? ' <span class="aux mono">' + esc(fmtDateTime(c.sb_at)) + '</span>' : '') + '</span></div>' : '';
-  var miss = c.stage_key === 'screening' || (onSb && !c.sb_status) ? sbMissing(c) : [];   // уже отправлен - подсказка не нужна
+  var miss = c.stage_key === 'screening' || ((onSb || past) && (!c.sb_status || c.sb_status === 'hold' || c.sb_status === 'question')) ? sbMissing(c) : [];
   var rej = onSb && c.sb_status === 'rejected' && c.can_move ? '<button type="button" class="crm-chip is-bad" id="hr-sb-reject">' + ico('lost') + 'Отказ: не прошёл СБ</button>' : '';
-  if (onSb && (c.sb_status === 'question' || c.sb_status === 'interview') && c.can_move) rej += '<button type="button" class="crm-chip" id="hr-sb-resend">' + ico('undo') + 'Отправить в СБ заново (паспорт поправлен)</button>';
+  if (onSb && c.sb_status === 'question' && c.can_move) rej += '<button type="button" class="crm-chip" id="hr-sb-resend">' + ico('undo') + 'Отправить в СБ заново (паспорт поправлен)</button>';
+  // «Собеседование» - СБ хочет встречу, паспорт тут ни при чём: повторная отправка стёрла бы их ответ.
+  if (onSb && c.sb_status === 'interview') rej += '<div class="hr-hint-amber">СБ просит собеседование с кандидатом - договоритесь со службой безопасности о встрече.</div>';
+  // Заявка не записалась в их таблицу (сбой скрипта таблицы) - повторить.
+  if ((onSb || past) && c.sb_status === 'hold' && (c.can_move || c.can_edit)) rej += '<div class="hr-hint-amber">Заявка не записалась в таблицу СБ - отправьте ещё раз.</div>' +
+    '<button type="button" class="crm-chip" id="hr-sb-resend">' + ico('undo') + 'Отправить в СБ ещё раз</button>';
   // На этапе СБ, но заявка в СБ ни разу не уходила (вернули с НК, перенос из старой таблицы) - отправить отсюда.
   if (onSb && !c.sb_status && c.can_move) rej += '<div class="hr-hint-amber">В СБ ещё не отправлен - заполните «Паспорт для СБ» и нажмите «Отправить в СБ».</div>' +
     '<button type="button" class="crm-chip" id="hr-sb-resend">' + ico('undo') + 'Отправить в СБ</button>';
   // Уже дальше СБ, а проверки не было: отправить, не двигая этап (заполните паспорт - кнопка проверит).
-  if (past && c.sb_status !== 'queued' && c.sb_status !== 'pending' && (c.can_move || c.can_edit)) {
+  if (past && SB_WAITING.indexOf(c.sb_status) < 0 && c.sb_status !== 'interview' && (c.can_move || c.can_edit)) {
     rej = '<div class="hr-hint-amber">Кандидат прошёл дальше без ответа СБ «нет компромата».</div>' + rej +
       '<button type="button" class="crm-chip" id="hr-sb-resend">' + ico('undo') + 'Отправить в СБ</button>';
   }
@@ -971,36 +1001,10 @@ function sbSection(c, d) {
       esc(SB_TEXT[h.sb_status] || h.sb_status) + '</span>' + (h.sb_comment && h.sb_status !== 'approved' ? ' <span class="aux">«' + esc(h.sb_comment) + '»</span>' : '') + '</span></div>';
   }).join('');
   return '<div class="dr-section"><div class="dr-label">Проверка СБ <span class="aux">таблица службы безопасности</span></div>' + now +
-    (miss.length ? '<div class="hr-hint-amber">Для отправки в СБ не заполнено: ' + esc(miss.join(', ')) + '</div>' : '') + rej +
+    '<div class="hr-hint-amber" id="hr-sb-miss"' + (miss.length ? '' : ' hidden') + '>Для отправки в СБ не заполнено: ' + esc(miss.join(', ')) + '</div>' + rej +
     (rows ? '<div class="hr-doc-hint">Записи о нём в таблице СБ:</div>' + rows : '') + '</div>';
 }
 function fmtDate(v) { var d = new Date(String(v).slice(0, 10) + 'T12:00:00Z'); return isNaN(d.getTime()) ? '' : d.toLocaleDateString('ru-RU'); }
-/* «Взять из распознанного паспорта»: поля проверенного (или хотя бы распознанного) паспорта -> в пустые поля карточки. */
-function passFromOcr(c, btn) {
-  btn.disabled = true;
-  api('/hiring/documents', null, { id: c.id }).then(function (r) {
-    btn.disabled = false;
-    var doc = ((r.data && r.data.documents) || []).filter(function (x) { return x.doc_type === 'passport' && x.ocr_fields && x.ocr_fields.length; })
-      .sort(function (a, b) { return (b.ocr_state === 'confirmed') - (a.ocr_state === 'confirmed'); })[0];
-    if (!doc) { toast('Нет распознанного паспорта: загрузите фото в «Документы» и нажмите «Распознать»', 'amber'); return; }
-    var g = function (k) { return ((doc.ocr_fields.filter(function (x) { return x.key === k; })[0]) || {}).value || ''; };
-    var iso = function (v) { var m = String(v || '').match(/(\d{2})\.(\d{2})\.(\d{4})/); return m ? m[3] + '-' + m[2] + '-' + m[1] : ''; };
-    /* адрес регистрации: из самого паспорта (многостраничный PDF, 25.09) или из отдельного документа «Прописка» */
-    var regDoc = ((r.data && r.data.documents) || []).filter(function (x) { return x.doc_type === 'passport_reg' && x.ocr_fields && x.ocr_fields.length; })[0];
-    var regOf = function (dd) { return dd ? ((dd.ocr_fields.filter(function (x) { return x.key === 'reg_address'; })[0]) || {}).value || '' : ''; };
-    var want = { birth_date: iso(g('birth_date')), birth_place: g('birth_place'), passport_no: g('number'),
-      passport_issued_by: [g('issued_by'), g('subdivision') ? 'код ' + g('subdivision') : ''].filter(Boolean).join(', '), passport_issue_date: iso(g('issue_date')),
-      reg_address: regOf(doc) || regOf(regDoc) };
-    var body = { id: c.id }, n = 0;
-    Object.keys(want).forEach(function (k) { if (want[k] && !c[k]) { body[k] = want[k]; n++; } });
-    if (!n) { toast('Поля паспорта уже заполнены - перенос не нужен', 'amber'); return; }
-    api('/hiring/candidate', body).then(function (r2) {
-      if (!r2.ok) { toast(r2.data.error || 'Не сохранилось', 'red'); return; }
-      toast('Из паспорта перенесено полей: ' + n + (doc.ocr_state === 'confirmed' ? '' : ' (паспорт не проверен человеком - сверьте)'), doc.ocr_state === 'confirmed' ? 'green' : 'amber');
-      openCandidate(c.id, true);
-    });
-  });
-}
 /* Главная кнопка «куда дальше» - подпись по следующему этапу; для НК - кому именно. */
 function nextAction(c) {
   var st = stageBy(c.stage_key); if (!st || st.is_terminal) return null;
@@ -1017,13 +1021,18 @@ function nextAction(c) {
     var heads = (S.meta && S.meta.column_heads) || {};
     label = c.vehicle_type ? 'СБ пройдена: к НК' + (heads[c.vehicle_type] ? ' ' + heads[c.vehicle_type] : '') + ' (' + VT_COL[c.vehicle_type] + ')' : 'СБ пройдена: к начальникам колонн (колонна не определена)';
   }
-  if (nextKey === 'security') label = 'Скрининг пройден: на проверку СБ';
-  // Дальше СБ - только после «нет компромата» (сервер проверяет так же; руководитель может и без).
-  if (st.stage_key === 'security' && c.sb_status !== 'approved' && !me().manage_all) {
+  if (nextKey === 'security') {
+    if (sbMissing(c).length) return { key: nextKey, label: 'Заполните «Паспорт для СБ» - потом на проверку СБ', disabled: true };
+    label = 'Скрининг пройден: на проверку СБ';
+  }
+  // Дальше СБ - только после «нет компромата». ДЛЯ ВСЕХ, руководителя тоже (Влад 25.09: «СБ же не пройдено - почему тут эта кнопка»).
+  if ((st.stage_key === 'security' || pastSb(c)) && c.sb_status !== 'approved') {
     var wait = { rejected: 'СБ отказала - переведите кандидата в «Отказ»', interview: 'СБ просит собеседование - ждём решения СБ',
-      question: 'У СБ вопрос - поправьте паспорт и отправьте заново' }[c.sb_status] || (c.sb_status === 'queued' ? 'Отправляется в таблицу СБ...' : !c.sb_status ? 'Сначала отправьте в СБ (кнопка в «Проверке СБ» ниже)' : 'Ждём ответа СБ');
+      question: 'У СБ вопрос - поправьте паспорт и отправьте заново', hold: 'Заявка не записалась в таблицу СБ - отправьте ещё раз (ниже)',
+      queued: 'Отправляется в таблицу СБ...', pending: 'Ждём ответа СБ' }[c.sb_status] || 'Сначала отправьте в СБ (кнопка в «Проверке СБ» ниже)';
     return { key: nextKey, label: wait, disabled: true };
   }
+  if (nextKey === 'onboarding' && !c.vehicle_type) return { key: nextKey, label: 'Укажите колонну (тип техники) - дальше ведёт её начальник', disabled: true };
   if (nextKey === 'onboarding') label = 'Собеседование пройдено: тестовая смена';
   if (nextKey === 'hired') label = 'Вышел на работу';
   return { key: nextKey, label: label };
@@ -1051,9 +1060,10 @@ function renderCandidate(d) {
   var curIdx = open.map(function (s) { return s.stage_key; }).indexOf(c.stage_key);
   var boss = !!me().manage_all;
   var stepper = '<div class="dr-stages" style="grid-template-columns:repeat(' + open.length + ',1fr)">' + open.map(function (s, i) {
-    var cls = s.stage_key === c.stage_key ? ' is-cur' : (curIdx >= 0 && i < curIdx ? ' is-done' : '');
-    // Назад - можно (с комментарием), вперёд - только на следующий этап; руководитель - любой.
-    var canClick = c.can_move && s.stage_key !== c.stage_key && (boss || (curIdx >= 0 && i < curIdx) || (na && na.key === s.stage_key));
+    var cls = s.stage_key === c.stage_key ? ' is-cur' : (curIdx >= 0 && i < curIdx && !(s.stage_key === 'security' && pastSbUnchecked(c)) ? ' is-done' : '');
+    // Назад - можно (с комментарием), вперёд - только на следующий этап; руководитель - любой, но не мимо СБ.
+    var canClick = c.can_move && s.stage_key !== c.stage_key && !sbBlock(c, s.stage_key) &&
+      (boss || (curIdx >= 0 && i < curIdx) || (na && !na.disabled && na.key === s.stage_key));
     return '<button type="button" class="dr-stage' + cls + '" style="--stage:' + stageColor(s) + '" data-stage="' + esc(s.stage_key) + '" title="' + esc(s.title) + '"' + (canClick ? ' data-nav-sound' : ' disabled') + '>' + esc(s.title) + '</button>';
   }).join('') + '</div>';
   var reasons = (S.meta.reasons || []);
@@ -1093,13 +1103,14 @@ function renderCandidate(d) {
   var colHead = headOf(c.vehicle_type);
   var colRow = c.column_at || c.vehicle_type ? '<div class="dr-row"><span>Колонна</span><span class="hr-owner">' +
       (c.vehicle_type ? ava(colHead, c.vehicle_type, colHead || VT_COL[c.vehicle_type]) + esc(VT_COL[c.vehicle_type]) + (colHead ? ' · ' + esc(colHead) : '') +
-          (c.column_at ? '' : ' <span class="aux">после скрининга</span>') :
+          (c.column_at ? '' : ' <span class="aux">после проверки СБ</span>') :
         '<span class="aux">не определена - возьмёт первый начальник колонны</span>') +
       (st0.owner_role === 'column_head' ? takeBtn : '') + '</span></div>' : '';
   // Себе ничью карточку НК берёт кнопкой «Взять себе» - «Передать» в свою же колонну не дублируем.
   var handoff = (c.can_handoff || []).filter(function (v) { return v !== me().segment; }).map(function (v) {
     var h = headOf(v);
-    return '<button type="button" class="crm-chip" data-handoff="' + esc(v) + '">' + ico('undo') + 'Передать: ' + esc(VT_COL[v]) + (h ? ' (' + esc(h) + ')' : '') + '</button>';
+    // До прихода к НК это не передача, а выбор колонны (НК ещё не видит карточку).
+    return '<button type="button" class="crm-chip" data-handoff="' + esc(v) + '">' + ico('undo') + (c.column_at ? 'Передать: ' : 'Колонна: ') + esc(VT_COL[v]) + (h ? ' (' + esc(h) + ')' : '') + '</button>';
   }).join('');
   var ownersSec = '<div class="dr-section"><div class="dr-label">Ответственные</div>' + hrRow + hrPick + colRow +
     (handoff ? '<div class="cx-chips hr-owner-pick">' + handoff + '</div>' : '') + '</div>';
@@ -1138,7 +1149,7 @@ function renderCandidate(d) {
       '</div></div>' +
       sbSection(c, d) +
       '<div class="dr-section" id="hr-pass-sec"><div class="dr-label">Паспорт для СБ <span class="dr-saved aux">сохранено</span>' +
-        (ro ? '' : '<button type="button" class="hr-doc-open hr-link hr-label-act" id="hr-pass-ocr" hidden>взять из распознанного паспорта</button>') + '</div>' +
+'</div>' +
         '<div class="dr-grid2 hr-grid">' +
         field('Дата рождения', '<input class="dr-input mono" data-f="birth_date" type="date" value="' + esc(c.birth_date ? String(c.birth_date).slice(0, 10) : '') + '"' + dis + '>') +
         field('Место рождения', inp('birth_place', c.birth_place, ' maxlength="300"' + dis)) +
@@ -1201,10 +1212,9 @@ function renderCandidate(d) {
     });
   }
   loadDocs(c.id);
-  var po = $('#hr-pass-ocr'); if (po) po.addEventListener('click', function () { passFromOcr(c, po); });
   var sbRs = $('#hr-sb-resend'); if (sbRs) sbRs.addEventListener('click', function () {
     sbRs.disabled = true;
-    api('/hiring/sb_resend', { id: c.id }).then(function (r) { sbRs.disabled = false; if (!r.ok) { toast(r.data.error || 'Не отправилось', 'red'); return; } toast('Отправлено в СБ заново - строка в их таблице обновится в течение 5 минут', 'green'); reload(c.id); });
+    api('/hiring/sb_resend', { id: c.id }).then(function (r) { sbRs.disabled = false; if (!r.ok) { toast(r.data.error || 'Не отправилось', 'red'); return; } toast('Отправлено в СБ - в таблице службы безопасности появится в течение 5 минут', 'green'); reload(c.id); });
   });
   var sbRej = $('#hr-sb-reject'); if (sbRej) sbRej.addEventListener('click', function () {
     $('#hr-back-form').hidden = true; $('#hr-lost-form').hidden = false;
@@ -1298,7 +1308,10 @@ function saveField(c, key, value, el) {
   else body[key] = value;
   api('/hiring/candidate', body).then(function (r) {
     if (r.status === 409 && r.data.id) { toast('Этот телефон уже у другого кандидата', 'amber', { label: 'Открыть', fn: function () { openCandidate(r.data.id); } }); return; }
-    if (!r.ok) { toast(r.data.error || 'Не сохранилось', 'red'); return; }
+    if (!r.ok) { toast(r.data.error || 'Не сохранилось', 'red'); openCandidate(c.id, true); return; }   // вернуть поле как было
+    var sbReset = ['full_name', 'birth_date', 'birth_place', 'passport_no', 'passport_issued_by', 'passport_issue_date', 'reg_address', 'phone'].indexOf(key) >= 0 &&
+      ['approved', 'pending', 'question', 'interview'].indexOf(c.sb_status) >= 0;
+    if (sbReset) { toast('Паспорт изменён после проверки СБ - нужно отправить в СБ заново', 'amber'); reload(c.id); return; }
     if (key === 'phone') c.phone10 = digits10(value); else c[key] = value === '' ? null : value;
     var sec = el && el.closest ? el.closest('.dr-section') : null, mark = sec ? $('.dr-saved', sec) : null;
     if (mark) { mark.classList.add('on'); clearTimeout(mark._t); mark._t = setTimeout(function () { mark.classList.remove('on'); }, 1600); }
@@ -1308,8 +1321,10 @@ function saveField(c, key, value, el) {
       'passport_issued_by', 'passport_issue_date', 'reg_address'].indexOf(key) >= 0) refreshNext(c);
   });
 }
-/* После правки полей скрининга - подпись/доступность главной кнопки и подсказка «не заполнено». */
+/* После правки полей скрининга - подпись/доступность главной кнопки и подсказки «не заполнено». */
 function refreshNext(c) {
+  var sm = $('#hr-sb-miss');
+  if (sm) { var m2 = sbMissing(c); sm.hidden = !m2.length; sm.textContent = 'Для отправки в СБ не заполнено: ' + m2.join(', '); }
   var nb = $('#hr-next'); if (!nb) return;
   var na = nextAction(c); if (!na) return;
   nb.textContent = na.label; nb.setAttribute('data-to', na.key);

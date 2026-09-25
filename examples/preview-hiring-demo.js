@@ -41,15 +41,17 @@
   C.push(cand('new', Object.assign({ vehicle_type: 'long', experience_years: 3, stage_changed_at: ago(11), created_at: ago(11) }, byHr(HR2))));
   C.push(cand('screening', Object.assign({ vehicle_type: 'long', experience_years: 12.5, city: 'Москва', stage_changed_at: ago(3000) }, byHr(HR1))));
   C.push(cand('screening', Object.assign({ experience_years: 5, stage_changed_at: ago(200), source: 'referral' }, byHr(HR2))));
-  C.push(cand('column_interview', Object.assign({ vehicle_type: 'tral', experience_years: 4, city: 'Коломна', stage_changed_at: ago(300), column_at: ago(300) }, byHr(HR1))));
-  C.push(cand('column_interview', Object.assign({ vehicle_type: 'long', experience_years: 8, stage_changed_at: ago(900), column_at: ago(900) }, byHr(HR2))));
-  C.push(cand('column_interview', Object.assign({ experience_years: 10, city: 'Серпухов', stage_changed_at: ago(90), column_at: ago(90) }, byHr(HR1))));
+  C.push(cand('column_interview', Object.assign({ vehicle_type: 'tral', experience_years: 4, city: 'Коломна', stage_changed_at: ago(300), column_at: ago(300), sb_status: 'approved', sb_comment: 'нет компромата' }, byHr(HR1))));
+  C.push(cand('column_interview', Object.assign({ vehicle_type: 'long', experience_years: 8, stage_changed_at: ago(900), column_at: ago(900), sb_status: 'approved', sb_comment: 'нет компромата' }, byHr(HR2))));
+  C.push(cand('column_interview', Object.assign({ experience_years: 10, city: 'Серпухов', stage_changed_at: ago(90), column_at: ago(90), sb_status: 'approved', sb_comment: 'нет компромата' }, byHr(HR1))));
   C.push(cand('security', Object.assign({ vehicle_type: 'long', experience_years: 9, city: 'Тула', stage_changed_at: ago(700), sb_status: 'approved', sb_comment: 'нет компромата', sb_at: ago(30) }, byHr(HR1))));
   C.push(cand('security', Object.assign({ vehicle_type: 'tral', experience_years: 3, stage_changed_at: ago(400), sb_status: 'rejected', sb_comment: 'ОТКАЗАНО', sb_at: ago(20) }, byHr(HR2))));
   C.push(cand('security', Object.assign({ vehicle_type: 'tral', experience_years: 12, stage_changed_at: ago(200), sb_status: 'question', sb_comment: 'Адрес регистрации?', sb_at: ago(10) }, byHr(HR1))));
   C.push(cand('security', Object.assign({ vehicle_type: 'long', experience_years: 5, stage_changed_at: ago(60), sb_status: 'pending', sb_at: ago(55) }, byHr(HR2))));
-  C.push(cand('onboarding', Object.assign({ vehicle_type: 'tral', experience_years: 6, stage_changed_at: ago(1500), column_at: ago(4000) }, byHr(HR2))));
-  C.push(cand('hired', Object.assign({ vehicle_type: 'tral', experience_years: 6, source: 'обзвон_2026-05', person_id: 'p1', stage_changed_at: ago(60 * 24 * 5), column_at: ago(60 * 24 * 9) }, byHr(HR1))));
+  C.push(cand('security', Object.assign({ full_name: 'Без паспорта (не отправлен в СБ)', vehicle_type: 'tral', experience_years: 7, stage_changed_at: ago(500) }, byHr(HR1))));
+  C.push(cand('security', Object.assign({ vehicle_type: 'long', experience_years: 4, stage_changed_at: ago(90), sb_status: 'hold', birth_date: '1985-03-02', birth_place: 'г. Тула', passport_no: '4510 123456', passport_issued_by: 'ОВД', passport_issue_date: '2010-05-05', reg_address: 'Тула' }, byHr(HR2))));
+  C.push(cand('onboarding', Object.assign({ vehicle_type: 'tral', experience_years: 6, stage_changed_at: ago(1500), column_at: ago(4000), sb_status: 'approved', sb_comment: 'нет компромата' }, byHr(HR2))));
+  C.push(cand('hired', Object.assign({ vehicle_type: 'tral', experience_years: 6, source: 'обзвон_2026-05', person_id: 'p1', stage_changed_at: ago(60 * 24 * 5), column_at: ago(60 * 24 * 9), sb_status: 'approved', sb_comment: 'нет компромата' }, byHr(HR1))));
   C.push(cand('rejected', Object.assign({ vehicle_type: 'long', experience_years: 2, reject_reason: 'no_skzi', stage_changed_at: ago(2000) }, byHr(HR2))));
   C.push(cand('rejected', Object.assign({ reject_reason: 'money', source: 'hh', stage_changed_at: ago(4000) }, byHr(HR1))));
   C.push(cand('rejected', { license_cat: 'E', source: 'обзвон_2026-05', reject_reason: 'bad_number', stage_changed_at: ago(60 * 3) }));
@@ -57,6 +59,12 @@
   function ev(id, e) { (EV[id] = EV[id] || []).unshift(Object.assign({ created_at: new Date().toISOString(), actor_name: ME }, e)); }
   C.forEach(function (c) { ev(c.id, { action: 'create', to_stage: c.stage_key, created_at: c.created_at, actor_name: c.source === 'обзвон_2026-05' ? 'импорт' : 'Рекрутер' }); });
 
+  // Правило СБ сервера (hiring-rules.js checkMove): дальше «Проверки СБ» вперёд - только с «нет компромата».
+  function demoSbBlock(c, to) {
+    var so = function (k) { var x = STAGES.filter(function (y) { return y.stage_key === k; })[0]; return x ? x.sort_order : 0; };
+    var fwd = to === 'hired' || so(to) > so(c.stage_key);
+    return (to === 'hired' || (so(to) > so('security') && so(to) < 60)) && fwd && c.sb_status !== 'approved' ? 'Дальше «Проверки СБ» - только после ответа СБ «нет компромата»' : null;
+  }
   // Упрощённая копия правил сервера (lib/hiring-rules.js: canSee / ownsStage / claimFor / checkColumnHandoff).
   var REC_ST = ['callbase', 'new', 'screening'];
   function canMove(c) {
@@ -135,7 +143,7 @@
       d = { ok: true, documents: (DOCS[qid] || []).map(function (x) {
         var okT = x.doc_type === 'passport' || x.doc_type === 'license', okM = /jpeg|png|pdf/.test(x.mime_type || '');
         return Object.assign({ can_delete: true, ocr_state: 'none', ocr_problem: okT && okM ? null : 'не распознаётся', can_ocr: canUp && okT && okM }, x);
-      }), can_upload: canUp, ocr: { enabled: true, reason: null, used: OCR_USED, limit: 300, until: '2026-11-17' } };
+      }), can_upload: canUp, ocr: { enabled: false, reason: 'распознавание выключено', used: OCR_USED, limit: 300, until: '2026-11-17' } };
     } else if (u.indexOf('/hiring/document_upload') >= 0) {
       var file = o.body && o.body.get ? o.body.get('file') : null, dt = (u.match(/doc_type=([a-z_]+)/) || [])[1] || 'other';
       (DOCS[qid] = DOCS[qid] || []).unshift({ id: ++docSeq, doc_type: dt, original_name: file ? file.name : 'файл', mime_type: file ? file.type : '', size_bytes: file ? file.size : 0, uploaded_name: MY.name, uploaded_at: new Date().toISOString(), _blob: file });
@@ -168,6 +176,7 @@
       if (b.take) claim(c);
       else if (b.recruiter_email !== undefined) { var h = [HR1, HR2].filter(function (x) { return x.email === b.recruiter_email; })[0]; c.recruiter_email = h ? h.email : null; c.recruiter_name = h ? h.name : null; ev(c.id, { action: 'assign', comment: h ? 'Назначен HR: ' + h.name : 'HR снят - кандидат в общем пуле' }); }
       else if (b.segment) { c.vehicle_type = b.segment; ev(c.id, { action: 'handoff', comment: 'Передан в колонну: ' + (b.segment === 'tral' ? 'тралы' : 'длинномеры') }); }
+    } else if (u.indexOf('/hiring/move') >= 0 && c && demoSbBlock(c, b.to)) { status = 400; d = { error: demoSbBlock(c, b.to) };
     } else if (u.indexOf('/hiring/move') >= 0 && c) {
       var toS = STAGES.filter(function (x) { return x.stage_key === b.to; })[0], fromS = STAGES.filter(function (x) { return x.stage_key === c.stage_key; })[0];
       if (toS && fromS && (toS.is_terminal || toS.sort_order > fromS.sort_order)) claim(c);

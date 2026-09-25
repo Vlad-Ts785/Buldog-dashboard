@@ -6,15 +6,21 @@
  *   - отдаёт строки таблицы (хранение у нас + ответы СБ из столбца «Комментарий»);
  *   - красит строку по ответу СБ: зелёный - «нет компромата», красный - отказ, жёлтый - собеседование,
  *     оранжевый - у СБ вопрос. Пустой ответ (ещё не проверили) - цвет не трогаем;
- *   - (этап 2) дописывает строки кандидатов, которых HR отправили на проверку из «Найма».
+ *   - дописывает строки кандидатов, которых HR отправили на проверку из «Найма».
  *
  * Первый запуск (один раз, делает Влад): меню «ЯРД» → «1. Ввести ключ» → «2. Проверить связь» →
  * «3. Выгрузить всю таблицу на сервер» → «4. Включить автообмен».
- * Ключ - только в свойствах скрипта (не в коде); он открывает на сервере ТОЛЬКО обмен с СБ.
+ * Ключ хранится в ЛИЧНЫХ свойствах того, кто его ввёл (UserProperties): другие редакторы таблицы его не видят,
+ * триггеры работают от имени ввёдшего. Ключ открывает на сервере ТОЛЬКО обмен с СБ.
  * Столбцы ищутся по ЗАГОЛОВКАМ первой строки, не по буквам - переставлять столбцы можно.
- * Справа скрипт один раз добавляет служебный столбец «ID ЯРД (не трогать)» - по нему строка узнаётся,
- * даже если таблицу отсортировать или вставить строки. Этот столбец можно скрыть, но не удалять.
+ * Справа один раз добавлен служебный столбец «ID ЯРД (не трогать)» - по нему строка узнаётся, даже если таблицу
+ * отсортировать или вставить строки. Столбец можно скрыть, но НЕ удалять (скрипт тогда остановится и сообщит).
  * Правило Apps Script проекта: без шаблонных строк (обратных кавычек) внутри .map.
+ *
+ * Ревью 25.09 (после 11 копий одной заявки): ID выдаётся точечно и только пустым ячейкам (не переписываем весь
+ * столбец снимком), повтор ID чинится, заявка пишется вместе с ID одним действием и запоминается, прежняя строка
+ * перед записью перепроверяется по ID, ответ СБ в ней не стирается, лист расширяется при нужде, цвета - по ID,
+ * а не по номерам строк, ошибки - на сервер (/client_error), выдача ID не мешает отправке ответов СБ.
  */
 
 var SB_API = 'https://api.yardhub.ru/api/sb';
@@ -26,7 +32,9 @@ var SB_FIELDS = {                       // поле -> заголовок сто
 };
 var SB_COLORS = { approved: '#d9ead3', rejected: '#f4cccc', interview: '#fff2cc', question: '#fce5cd' };
 var SB_CHUNK = 400;                     // строк за один запрос
-var SB_RECENT = 400;                    // сколько последних строк сверять раз в 5 минут
+var SB_TAIL = 40;                       // каждые 5 минут - последние строки (новые и свежие ответы)
+var SB_FULL = 400;                      // раз в 30 минут - последние 400 строк (экономим квоту Apps Script)
+var SB_FULL_EVERY_MS = 30 * 60 * 1000;
 
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('ЯРД')
@@ -47,8 +55,9 @@ function sbSetKey() {
   if (r.getSelectedButton() !== ui.Button.OK) return;
   var v = String(r.getResponseText() || '').trim();
   if (v.length < 32) { ui.alert('Ключ слишком короткий - проверьте, что скопирован целиком.'); return; }
-  PropertiesService.getScriptProperties().setProperty('SB_SHEET_TOKEN', v);
-  ui.alert('Ключ сохранён. Дальше - «2. Проверить связь».');
+  PropertiesService.getUserProperties().setProperty('SB_SHEET_TOKEN', v);
+  PropertiesService.getScriptProperties().deleteProperty('SB_SHEET_TOKEN');   // старое место - видно всем редакторам
+  ui.alert('Ключ сохранён (виден только вам). Дальше - «2. Проверить связь».');
 }
 
 function sbPing() {
@@ -56,7 +65,7 @@ function sbPing() {
   SpreadsheetApp.getUi().alert(r.ok ? 'Связь есть. На сервере строк: ' + r.rows : 'Нет связи: ' + (r.error || 'ошибка'));
 }
 
-// Первая выгрузка всей таблицы (и повторная - если нужно пересверить всё). Цвета не трогает.
+// Выгрузка всей таблицы (первая или повторная - пересверить всё). Цвета не трогает.
 function sbPushAll() {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(30000)) { SpreadsheetApp.getUi().alert('Идёт другая синхронизация - повторите через минуту.'); return; }
@@ -71,24 +80,35 @@ function sbPushAll() {
       saved += r.saved || 0;
     }
     SpreadsheetApp.getUi().alert('Готово: на сервер отправлено строк - ' + saved + '.');
+  } catch (err) { sbReportError_('sbPushAll', err); throw err;
   } finally { lock.releaseLock(); }
 }
 
-// Раз в 5 минут (триггер): последние строки таблицы -> сервер, покрасить по ответу. Этап 2 - ещё и заявки из «Найма».
+// Раз в 5 минут (триггер): заявки из «Найма» -> строки; ответы СБ -> сервер; цвет строк.
 function sbSyncRecent() {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(20000)) return;
   try {
     var sh = sbSheet_(), cols = sbCols_(sh);
-    sbPullQueue_(sh, cols);
-    sbEnsureIds_(sh, cols);
+    var watch = sbPullQueue_(sh, cols);
+    // Выдача ID отдельно: если она упадёт, ответы СБ всё равно уйдут на сервер (ревью 25.09).
+    try { sbEnsureIds_(sh, cols); } catch (e1) { sbReportError_('выдача ID', e1); }
     var last = sh.getLastRow();
-    var from = Math.max(2, last - SB_RECENT + 1);
     if (last < 2) return;
+    var props = PropertiesService.getScriptProperties();
+    var full = Date.now() - Number(props.getProperty('SB_LAST_FULL') || 0) > SB_FULL_EVERY_MS;
+    var from = Math.max(2, last - (full ? SB_FULL : SB_TAIL) + 1);
     var rows = sbReadRows_(sh, cols, from, last);
+    // + строки, ответа по которым ждёт «Найм» (могут быть глубоко в таблице)
+    if (watch && watch.length) {
+      var idRows = sbIdRows_(sh, cols), extra = [];
+      watch.forEach(function (u) { var rw = idRows[u]; if (rw && rw < from) extra.push(rw); });
+      rows = rows.concat(sbReadRowsAt_(sh, cols, extra));
+    }
     var r = sbCall_('post', '/rows', { rows: rows });
-    if (r.ok) sbPaint_(sh, cols, rows, r.statuses || {}, false);
-    else sbReportError_('сверка строк', r.error);
+    if (!r.ok) { sbReportError_('сверка строк', r.error); return; }
+    if (full) props.setProperty('SB_LAST_FULL', String(Date.now()));
+    sbPaint_(sh, cols, r.statuses || {}, false);
   } catch (err) { sbReportError_('sbSyncRecent', err); throw err;
   } finally { lock.releaseLock(); }
 }
@@ -99,15 +119,16 @@ function sbOnEdit(e) {
   var sh = e.range.getSheet();
   if (sh.getSheetId() !== sbSheet_().getSheetId()) return;
   var r1 = Math.max(2, e.range.getRow()), r2 = e.range.getLastRow();
-  if (r2 < 2 || r2 - r1 > 200) return;             // большие вставки подберёт сверка раз в 5 минут
+  if (r2 < 2 || r2 - r1 > 200) return;             // большие вставки подберёт сверка
   var lock = LockService.getScriptLock();
-  if (!lock.tryLock(10000)) return;
+  if (!lock.tryLock(10000)) return;                  // занято - подберёт сверка раз в 5 минут
   try {
     var cols = sbCols_(sh);
-    sbEnsureIds_(sh, cols);
+    try { sbEnsureIds_(sh, cols); } catch (e1) { sbReportError_('выдача ID (правка)', e1); }
     var rows = sbReadRows_(sh, cols, r1, r2);
+    if (!rows.length) return;
     var r = sbCall_('post', '/rows', { rows: rows });
-    if (r.ok) sbPaint_(sh, cols, rows, r.statuses || {}, false);
+    if (r.ok) sbPaint_(sh, cols, r.statuses || {}, false);
   } catch (err) { sbReportError_('sbOnEdit', err);
   } finally { lock.releaseLock(); }
 }
@@ -116,16 +137,22 @@ function sbOnEdit(e) {
 function sbColorAll() {
   var ui = SpreadsheetApp.getUi();
   if (ui.alert('Покрасить все строки таблицы по ответам СБ?', 'Зелёный - нет компромата, красный - отказ, жёлтый - собеседование, оранжевый - вопрос СБ.', ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
-  var sh = sbSheet_(), cols = sbCols_(sh);
-  sbEnsureIds_(sh, cols);
-  var last = sh.getLastRow();
-  for (var from = 2; from <= last; from += SB_CHUNK) {
-    var rows = sbReadRows_(sh, cols, from, Math.min(last, from + SB_CHUNK - 1));
-    var r = sbCall_('post', '/rows', { rows: rows });
-    if (!r.ok) { ui.alert('Сервер ответил ошибкой: ' + (r.error || '')); return; }
-    sbPaint_(sh, cols, rows, r.statuses || {}, true);
-  }
-  ui.alert('Готово.');
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) { ui.alert('Идёт другая синхронизация - повторите через минуту.'); return; }
+  try {
+    var sh = sbSheet_(), cols = sbCols_(sh);
+    sbEnsureIds_(sh, cols);
+    var last = sh.getLastRow();
+    for (var from = 2; from <= last; from += SB_CHUNK) {
+      var to = Math.min(last, from + SB_CHUNK - 1);
+      var rows = sbReadRows_(sh, cols, from, to);
+      var r = sbCall_('post', '/rows', { rows: rows });
+      if (!r.ok) { ui.alert('Сервер ответил ошибкой: ' + (r.error || '')); return; }
+      sbPaintBlock_(sh, cols, from, to, r.statuses || {}, true);
+    }
+    ui.alert('Готово.');
+  } catch (err) { sbReportError_('sbColorAll', err); throw err;
+  } finally { lock.releaseLock(); }
 }
 
 function sbInstallTriggers() {
@@ -133,29 +160,86 @@ function sbInstallTriggers() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   ScriptApp.newTrigger('sbSyncRecent').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('sbOnEdit').forSpreadsheet(ss).onEdit().create();
-  SpreadsheetApp.getUi().alert('Автообмен включён: правки уходят сразу, сверка и новые заявки - раз в 5 минут.');
+  SpreadsheetApp.getUi().alert('Автообмен включён: правки уходят сразу, новые заявки и сверка - раз в 5 минут.');
 }
 function sbRemoveTriggers(silent) {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     var f = t.getHandlerFunction();
     if (f === 'sbSyncRecent' || f === 'sbOnEdit') ScriptApp.deleteTrigger(t);
   });
-  if (silent !== true) SpreadsheetApp.getUi().alert('Автообмен выключен.');
+  if (silent !== true) SpreadsheetApp.getUi().alert('Автообмен выключен (ваши триггеры).');
+}
+
+// ───────── заявки из «Найма» ─────────
+// Новая строка внизу таблицы, либо - если СБ ещё не дала окончательного ответа - обновление ПРЕЖНЕЙ строки кандидата
+// (по ID) с очищенным «Комментарием». ЗАЩИТА ОТ ДУБЛЕЙ (25.09, 11 копий): ID берётся ДО записи и запоминается
+// (SB_REQ_<номер заявки>), строка пишется вместе с ID; повторная выдача той же заявки только подтверждается.
+// Возвращает список ID строк, ответа по которым ждёт «Найм» (для сверки).
+function sbPullQueue_(sh, cols) {
+  var r = sbCall_('get', '/queue');
+  if (!r.ok) { if (r.error) sbReportError_('очередь', r.error); return []; }
+  var items = r.items || [];
+  if (!items.length) return r.watch || [];
+  var props = PropertiesService.getScriptProperties();
+  var idRows = sbIdRows_(sh, cols), acks = [];
+  items.forEach(function (it) {
+    try {
+      var done = props.getProperty('SB_REQ_' + it.req_id);
+      if (done && idRows[done]) { acks.push({ req_id: it.req_id, uid: done, row: idRows[done] }); return; }
+      var uid = '', row = null;
+      if (it.uid && idRows[it.uid]) {
+        row = idRows[it.uid];
+        if (String(sh.getRange(row, cols.id).getValue() || '').trim() !== it.uid) row = null;   // строку сдвинули
+        else if (/компром|компрот|отказ/i.test(String(sh.getRange(row, cols.comment).getValue() || ''))) {
+          // СБ за эти минуты уже ответила окончательно - ничего не перетираем, только подтверждаем строку.
+          props.setProperty('SB_REQ_' + it.req_id, it.uid);
+          acks.push({ req_id: it.req_id, uid: it.uid, row: row });
+          return;
+        } else uid = it.uid;
+      }
+      if (!row) {
+        row = sh.getLastRow() + 1;
+        if (row > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), row - sh.getMaxRows());   // лист «впритык» - расширяем
+        uid = 'SB-' + sbTakeId_(sh, cols, props, idRows);
+      }
+      props.setProperty('SB_REQ_' + it.req_id, uid);
+      // Только ячейки наших полей и ID - соседние формулы/данные СБ в строке не трогаем.
+      Object.keys(SB_FIELDS).forEach(function (k) {
+        if (cols[k]) sh.getRange(row, cols[k]).setValue(it.cells && it.cells[k] != null ? it.cells[k] : '');
+      });
+      sh.getRange(row, cols.id).setValue(uid);
+      idRows[uid] = row;
+      acks.push({ req_id: it.req_id, uid: uid, row: row });
+      try { sh.getRange(row, 1, 1, cols.paintTo).setBackground('#ffffff'); } catch (e2) { sbReportError_('цвет строки ' + row, e2); }
+    } catch (err) { sbReportError_('заявка ' + it.req_id, err); }
+  });
+  if (acks.length) { var a = sbCall_('post', '/queue_ack', { acks: acks }); if (!a.ok) sbReportError_('queue_ack', a.error); }
+  return r.watch || [];
+}
+// Следующий номер ID: не меньше счётчика и больше самого большого ID на листе (сброс свойств не даст повторов).
+function sbTakeId_(sh, cols, props, idRows) {
+  var next = Number(props.getProperty('SB_NEXT_ID') || '0');
+  var map = idRows || sbIdRows_(sh, cols), max = 0;
+  Object.keys(map).forEach(function (u) { var m = u.match(/^SB-(\d+)$/); if (m && Number(m[1]) > max) max = Number(m[1]); });
+  if (next <= max) next = max + 1;
+  props.setProperty('SB_NEXT_ID', String(next + 1));
+  return next;
 }
 
 // ───────── служебное ─────────
 function sbSheet_() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var name = PropertiesService.getScriptProperties().getProperty('SB_SHEET_NAME');
-  var sh = name ? ss.getSheetByName(name) : null;
-  if (!sh) {
-    sh = ss.getSheets()[0];               // таблица СБ - первый лист
-    PropertiesService.getScriptProperties().setProperty('SB_SHEET_NAME', sh.getName());
-  }
+  var ss = SpreadsheetApp.getActiveSpreadsheet(), props = PropertiesService.getScriptProperties();
+  var id = props.getProperty('SB_SHEET_ID');
+  if (id) { var byId = ss.getSheets().filter(function (s) { return String(s.getSheetId()) === id; })[0]; if (byId) return byId; }
+  var name = props.getProperty('SB_SHEET_NAME');
+  var sh = (name && ss.getSheetByName(name)) || ss.getSheets()[0];   // таблица СБ - первый лист
+  props.setProperty('SB_SHEET_ID', String(sh.getSheetId()));        // дальше - по номеру листа (переименование не собьёт)
+  props.setProperty('SB_SHEET_NAME', sh.getName());
   return sh;
 }
 function sbNorm_(s) { return String(s || '').toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ').trim(); }
-// Номера столбцов (с 1) по заголовкам; служебный столбец ID создаётся справа, если его нет.
+// Номера столбцов (с 1) по заголовкам. Столбец ID создаётся ОДИН раз; если потом пропал - стоп с сообщением
+// (иначе выдали бы 11 000 новых ID и сломали связь с «Наймом»).
 function sbCols_(sh) {
   var lastCol = sh.getLastColumn();
   var head = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(sbNorm_);
@@ -165,16 +249,22 @@ function sbCols_(sh) {
     if (i >= 0) cols[k] = i + 1;
   });
   if (!cols.fio || !cols.comment) throw new Error('Не нашёл столбцы «Ф.И.О.» и «Комментарий» в первой строке');
+  var props = PropertiesService.getScriptProperties();
   var idIdx = head.indexOf(sbNorm_(SB_ID_HEADER));
   if (idIdx < 0) {
+    if (props.getProperty('SB_ID_COL_READY')) throw new Error('Пропал столбец «' + SB_ID_HEADER + '» - верните его (Правка → Отменить или история версий), без него связь с «Наймом» теряется');
+    if (lastCol >= sh.getMaxColumns()) sh.insertColumnsAfter(sh.getMaxColumns(), 1);
     idIdx = lastCol;                      // следующий свободный справа
     sh.getRange(1, idIdx + 1).setValue(SB_ID_HEADER).setFontColor('#999999');
   }
+  props.setProperty('SB_ID_COL_READY', '1');
   cols.id = idIdx + 1;
   cols.paintTo = Math.max.apply(null, Object.keys(SB_FIELDS).map(function (k) { return cols[k] || 1; }));
   return cols;
 }
-// Всем строкам с данными (ФИО, паспорт или телефон) без ID - выдать ID «SB-N» (счётчик в свойствах скрипта).
+// Строкам с данными (ФИО, паспорт или телефон) без ID - выдать ID «SB-N». Пишем ТОЧЕЧНО только выданные ячейки
+// и прямо перед записью проверяем, что ячейка всё ещё пуста (СБ могла отсортировать таблицу). Повтор ID (строку
+// скопировали вместе со скрытым столбцом) - нижней копии выдаётся новый ID.
 function sbEnsureIds_(sh, cols) {
   var last = sh.getLastRow();
   if (last < 2) return;
@@ -184,26 +274,36 @@ function sbEnsureIds_(sh, cols) {
   var pas = cols.passport ? sh.getRange(2, cols.passport, n, 1).getValues() : null;
   var ph = cols.phone ? sh.getRange(2, cols.phone, n, 1).getValues() : null;
   var props = PropertiesService.getScriptProperties();
-  var next = Number(props.getProperty('SB_NEXT_ID') || '0');
-  if (!next) {                            // первый запуск или сброс свойств - продолжаем после самого большого ID
-    next = 1;
-    ids.forEach(function (r) { var m = String(r[0] || '').match(/^SB-(\d+)$/); if (m && Number(m[1]) >= next) next = Number(m[1]) + 1; });
-  }
-  var changed = false;
+  var seen = {}, max = 0, need = [];
   for (var i = 0; i < n; i++) {
-    if (String(ids[i][0] || '').trim()) continue;
+    var u = String(ids[i][0] || '').trim();
+    var m = u.match(/^SB-(\d+)$/);
+    if (m && Number(m[1]) > max) max = Number(m[1]);
+    if (u && !seen[u]) { seen[u] = true; continue; }
     var has = String(fio[i][0] || '').trim() || (pas && String(pas[i][0] || '').trim()) || (ph && String(ph[i][0] || '').trim());
-    if (!has) continue;
-    ids[i][0] = 'SB-' + next++;
-    changed = true;
+    if (has) need.push({ row: i + 2, was: u });   // пустой ID или повтор
   }
-  if (changed) {
-    sh.getRange(2, cols.id, n, 1).setValues(ids);
-    props.setProperty('SB_NEXT_ID', String(next));
-  }
+  if (!need.length) return;
+  var next = Number(props.getProperty('SB_NEXT_ID') || '0');
+  if (next <= max) next = max + 1;
+  need.forEach(function (x) {
+    var cell = sh.getRange(x.row, cols.id);
+    if (String(cell.getValue() || '').trim() !== x.was) return;   // ячейку уже поменяли - не трогаем
+    cell.setValue('SB-' + next);
+    if (x.was) sbReportError_('повтор ID', 'строка ' + x.row + ': ' + x.was + ' -> SB-' + next);
+    next++;
+  });
+  props.setProperty('SB_NEXT_ID', String(next));
+}
+function sbIdRows_(sh, cols) {
+  var last = sh.getLastRow(), map = {};
+  if (last < 2) return map;
+  var ids = sh.getRange(2, cols.id, last - 1, 1).getValues();
+  for (var i = 0; i < ids.length; i++) { var u = String(ids[i][0] || '').trim(); if (u && !map[u]) map[u] = i + 2; }
+  return map;
 }
 function sbCell_(v) {
-  if (v instanceof Date) return Utilities.formatDate(v, 'Europe/Moscow', 'dd.MM.yyyy');
+  if (v instanceof Date) return Utilities.formatDate(v, SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone(), 'dd.MM.yyyy');
   return v === null || v === undefined ? '' : String(v);
 }
 function sbReadRows_(sh, cols, from, to) {
@@ -220,69 +320,49 @@ function sbReadRows_(sh, cols, from, to) {
   }
   return out;
 }
-// Красит строки по статусу от сервера. force=false: «на проверке» (пусто) не трогаем - не стираем чужие цвета.
-// Одним чтением и одной записью на весь блок строк - иначе 11 тысяч строк не уложатся в 6 минут Apps Script.
-function sbPaint_(sh, cols, rows, statuses, force) {
-  if (!rows.length) return;
-  var r1 = rows[0].row, r2 = rows[0].row;
-  rows.forEach(function (r) { if (r.row < r1) r1 = r.row; if (r.row > r2) r2 = r.row; });
-  var rng = sh.getRange(r1, 1, r2 - r1 + 1, cols.paintTo);
-  var bg = rng.getBackgrounds(), dirty = false;
-  rows.forEach(function (r) {
-    var color = SB_COLORS[statuses[r.uid]];
+// Отдельные строки (по списку номеров) - одним чтением на каждый непрерывный кусок.
+function sbReadRowsAt_(sh, cols, rowNums) {
+  var list = rowNums.slice().sort(function (a, b) { return a - b; }), out = [], i = 0;
+  while (i < list.length) {
+    var j = i;
+    while (j + 1 < list.length && list[j + 1] === list[j] + 1) j++;
+    out = out.concat(sbReadRows_(sh, cols, list[i], list[j]));
+    i = j + 1;
+  }
+  return out;
+}
+// Цвет по ответу СБ. Номера строк берём заново ПОСЛЕ ответа сервера (по ID), красим только те строки, где цвет
+// другой. «На проверке» (пусто) не трогаем - не стираем чужие цвета.
+function sbPaint_(sh, cols, statuses, force) {
+  var uids = Object.keys(statuses);
+  if (!uids.length) return;
+  var idRows = sbIdRows_(sh, cols);
+  uids.forEach(function (u) {
+    var color = SB_COLORS[statuses[u]];
     if (!color && !force) return;
-    var line = bg[r.row - r1], want = color || '#ffffff';
-    for (var j = 0; j < line.length; j++) { if (line[j] !== want) { line[j] = want; dirty = true; } }
+    var row = idRows[u];
+    if (!row) return;
+    var rng = sh.getRange(row, 1, 1, cols.paintTo);
+    var want = color || '#ffffff';
+    if (rng.getBackgrounds()[0].some(function (b) { return b !== want; })) rng.setBackground(want);
   });
+}
+// Блоком (для «Покрасить всю таблицу»): одно чтение и одна запись на блок, ID перечитываются прямо перед записью.
+function sbPaintBlock_(sh, cols, from, to, statuses, force) {
+  var rng = sh.getRange(from, 1, to - from + 1, cols.paintTo);
+  var ids = sh.getRange(from, cols.id, to - from + 1, 1).getValues();
+  var bg = rng.getBackgrounds(), dirty = false;
+  for (var i = 0; i < ids.length; i++) {
+    var color = SB_COLORS[statuses[String(ids[i][0] || '').trim()]];
+    if (!color && !force) continue;
+    var want = color || '#ffffff';
+    for (var j = 0; j < bg[i].length; j++) { if (bg[i][j] !== want) { bg[i][j] = want; dirty = true; } }
+  }
   if (dirty) rng.setBackgrounds(bg);
 }
-// Заявки из «Найма» (HR перевёл кандидата на «Проверку СБ»): новая строка внизу таблицы, либо - если СБ ещё не
-// ответила или задала вопрос - обновление ПРЕЖНЕЙ строки кандидата (по ID) с очищенным «Комментарием».
-// После записи сообщаем серверу ID строки - по нему потом вернётся ответ СБ.
-// ЗАЩИТА ОТ ДУБЛЕЙ (25.09, живой случай: скрипт дописывал строку и падал до подтверждения - за час 11 копий):
-// номер ID берётся ДО записи и запоминается в свойствах скрипта (SB_REQ_<номер заявки>), строка пишется сразу
-// вместе с ID одним действием. Повторная выдача той же заявки строку НЕ дописывает - только подтверждает снова.
-function sbPullQueue_(sh, cols) {
-  var r = sbCall_('get', '/queue');
-  if (!r.ok || !r.items || !r.items.length) return;
-  var props = PropertiesService.getScriptProperties();
-  var width = Math.max(cols.id, cols.paintTo);
-  var idRows = sbIdRows_(sh, cols), acks = [];
-  r.items.forEach(function (it) {
-    try {
-      var done = props.getProperty('SB_REQ_' + it.req_id);
-      if (done && idRows[done]) { acks.push({ req_id: it.req_id, uid: done, row: idRows[done] }); return; }
-      var uid = it.uid && idRows[it.uid] ? it.uid : '';
-      var row = uid ? idRows[uid] : null;
-      var vals;
-      if (!row) {
-        row = sh.getLastRow() + 1;
-        uid = 'SB-' + sbTakeId_(sh, cols, props);
-        props.setProperty('SB_REQ_' + it.req_id, uid);
-        vals = []; for (var i = 0; i < width; i++) vals.push('');
-      } else {
-        vals = sh.getRange(row, 1, 1, width).getValues()[0];
-      }
-      Object.keys(SB_FIELDS).forEach(function (k) { if (cols[k]) vals[cols[k] - 1] = it.cells && it.cells[k] != null ? it.cells[k] : ''; });
-      vals[cols.id - 1] = uid;
-      sh.getRange(row, 1, 1, width).setValues([vals]);
-      idRows[uid] = row;
-      acks.push({ req_id: it.req_id, uid: uid, row: row });
-      try { sh.getRange(row, 1, 1, cols.paintTo).setBackground('#ffffff'); } catch (e2) { sbReportError_('цвет строки ' + row, e2); }
-    } catch (err) { sbReportError_('заявка ' + it.req_id, err); }
-  });
-  if (acks.length) { var a = sbCall_('post', '/queue_ack', { acks: acks }); if (!a.ok) sbReportError_('queue_ack', a.error); }
-}
-// Следующий номер ID «SB-N» (тот же счётчик, что у sbEnsureIds_), сразу сохраняется.
-function sbTakeId_(sh, cols, props) {
-  var next = Number(props.getProperty('SB_NEXT_ID') || '0');
-  if (!next) {
-    next = 1;
-    var map = sbIdRows_(sh, cols);
-    Object.keys(map).forEach(function (u) { var m = u.match(/^SB-(\d+)$/); if (m && Number(m[1]) >= next) next = Number(m[1]) + 1; });
-  }
-  props.setProperty('SB_NEXT_ID', String(next + 1));
-  return next;
+function sbToken_() {
+  return PropertiesService.getUserProperties().getProperty('SB_SHEET_TOKEN') ||
+    PropertiesService.getScriptProperties().getProperty('SB_SHEET_TOKEN');   // старое место (до 25.09) - на переходный период
 }
 // Ошибка скрипта - на сервер ЯРД (журнал выполнений Apps Script оттуда не виден).
 function sbReportError_(where, err) {
@@ -291,15 +371,8 @@ function sbReportError_(where, err) {
     sbCall_('post', '/client_error', { where: String(where), message: String((err && (err.stack || err.message)) || err) });
   } catch (e) {}
 }
-function sbIdRows_(sh, cols) {
-  var last = sh.getLastRow(), map = {};
-  if (last < 2) return map;
-  var ids = sh.getRange(2, cols.id, last - 1, 1).getValues();
-  for (var i = 0; i < ids.length; i++) { var u = String(ids[i][0] || '').trim(); if (u) map[u] = i + 2; }
-  return map;
-}
 function sbCall_(method, path, body) {
-  var token = PropertiesService.getScriptProperties().getProperty('SB_SHEET_TOKEN');
+  var token = sbToken_();
   if (!token) return { ok: false, error: 'не введён ключ (меню ЯРД → 1. Ввести ключ)' };
   var opt = { method: method, headers: { 'X-SB-Token': token }, muteHttpExceptions: true };
   if (body) { opt.contentType = 'text/plain'; opt.payload = JSON.stringify(body); }

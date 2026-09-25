@@ -10,11 +10,11 @@
   if (!ROLES[ROLE]) { try { ROLE = sessionStorage.getItem('pv-hiring-role') || 'director'; } catch (e) { ROLE = 'director'; } }
   if (!ROLES[ROLE]) ROLE = 'director';
 
-  var STAGES = [["callbase","База для обзвона","recruiter",null,5,0],["new","Новый отклик","recruiter",15,10,0],["screening","Скрининг рекрутера","recruiter",1440,20,0],["security","Проверка СБ","security",1440,30,0],["column_interview","Собеседование с НК","column_head",1440,40,0],["onboarding","Тестовая смена / оформление","column_head",2880,50,0],["hired","Вышел на работу",null,null,60,1],["rejected","Отказ",null,null,70,1],["reserve","Кадровый резерв",null,null,80,1]]
+  var STAGES = [["callbase","База для обзвона","recruiter",null,5,0],["new","Новый отклик","recruiter",15,10,0],["screening","Скрининг рекрутера","recruiter",1440,20,0],["security","Проверка СБ","recruiter",1440,30,0],["column_interview","Собеседование с НК","column_head",1440,40,0],["onboarding","Тестовая смена / оформление","column_head",2880,50,0],["hired","Вышел на работу",null,null,60,1],["rejected","Отказ",null,null,70,1],["reserve","Кадровый резерв",null,null,80,1]]
     .map(function (a) { return { stage_key: a[0], title: a[1], owner_role: a[2], sla_minutes: a[3], sort_order: a[4], is_terminal: a[5], active: 1 }; });
   var REASONS = [["no_ce","Нет категории CE","company"],["no_skzi","Нет карты СКЗИ","company"],["low_exp","Мало стажа","company"],["violations","Лишения / штрафы","company"],["not_fit","Не подходит по требованиям","company"],["sb_fail","Не прошёл проверку СБ","company"],["test_fail","Не прошёл тестовую смену","company"],["already_employee","Уже работает у нас","company"],["money","Не устроили деньги","candidate"],["schedule","Не устроил график","candidate"],["far","Далеко","candidate"],["other_job","Ушёл к другим","candidate"],["no_answer","Пропал / недозвон","candidate"],["bad_number","Неверный или мёртвый номер","candidate"],["declined","Отказался (причина не названа)","candidate"],["dropped_after_agree","Отказ после согласия","candidate"]]
     .map(function (a) { return { reason_key: a[0], title: a[1], side: a[2] }; });
-  var OWNER = { callbase: 'recruiter', new: 'recruiter', screening: 'recruiter', column_interview: 'column_head', security: 'security', onboarding: 'column_head' };
+  var OWNER = { callbase: 'recruiter', new: 'recruiter', screening: 'recruiter', column_interview: 'column_head', security: 'recruiter', onboarding: 'column_head' };   // этап СБ ведёт HR карточки (СБ - в своей таблице)
   var now = Date.now(), ago = function (m) { return new Date(now - m * 60000).toISOString(); };
   // Кто смотрит - те же поля, что acc на сервере (lib/hiring-rules.js): роль, колонна, почта.
   var HR1 = { email: 'platonova@demo', name: 'Платонова Анна Андреевна' }, HR2 = { email: 'zherdeva@demo', name: 'Жердева Севда Гидрат Кызы' };
@@ -44,7 +44,10 @@
   C.push(cand('column_interview', Object.assign({ vehicle_type: 'tral', experience_years: 4, city: 'Коломна', stage_changed_at: ago(300), column_at: ago(300) }, byHr(HR1))));
   C.push(cand('column_interview', Object.assign({ vehicle_type: 'long', experience_years: 8, stage_changed_at: ago(900), column_at: ago(900) }, byHr(HR2))));
   C.push(cand('column_interview', Object.assign({ experience_years: 10, city: 'Серпухов', stage_changed_at: ago(90), column_at: ago(90) }, byHr(HR1))));
-  C.push(cand('security', Object.assign({ vehicle_type: 'long', experience_years: 9, city: 'Тула', stage_changed_at: ago(700) }, byHr(HR1))));
+  C.push(cand('security', Object.assign({ vehicle_type: 'long', experience_years: 9, city: 'Тула', stage_changed_at: ago(700), sb_status: 'approved', sb_comment: 'нет компромата', sb_at: ago(30) }, byHr(HR1))));
+  C.push(cand('security', Object.assign({ vehicle_type: 'tral', experience_years: 3, stage_changed_at: ago(400), sb_status: 'rejected', sb_comment: 'ОТКАЗАНО', sb_at: ago(20) }, byHr(HR2))));
+  C.push(cand('security', Object.assign({ vehicle_type: 'tral', experience_years: 12, stage_changed_at: ago(200), sb_status: 'question', sb_comment: 'Адрес регистрации?', sb_at: ago(10) }, byHr(HR1))));
+  C.push(cand('security', Object.assign({ vehicle_type: 'long', experience_years: 5, stage_changed_at: ago(60), sb_status: 'pending', sb_at: ago(55) }, byHr(HR2))));
   C.push(cand('onboarding', Object.assign({ vehicle_type: 'tral', experience_years: 6, stage_changed_at: ago(1500), column_at: ago(4000) }, byHr(HR2))));
   C.push(cand('hired', Object.assign({ vehicle_type: 'tral', experience_years: 6, source: 'обзвон_2026-05', person_id: 'p1', stage_changed_at: ago(60 * 24 * 5), column_at: ago(60 * 24 * 9) }, byHr(HR1))));
   C.push(cand('rejected', Object.assign({ vehicle_type: 'long', experience_years: 2, reject_reason: 'no_skzi', stage_changed_at: ago(2000) }, byHr(HR2))));
@@ -103,8 +106,9 @@
     if (c.has_skzi === undefined) c.has_skzi = c.stage_key === 'new' || c.stage_key === 'callbase' ? null : 1;
     if (c.pd_consent_at === undefined) c.pd_consent_at = c.stage_key === 'callbase' ? null : ago(100);
     if (c.notes === undefined) c.notes = c.source === 'обзвон_2026-05' ? 'Звонил: рекрутер · Итог: думает' : '';
+    c.sb_history = c.sb_status === 'approved' ? [{ check_date: '2025-03-12', position: 'водитель трала', sb_status: 'approved', sb_comment: 'нет компромата' }] : [];
     c.can_move = canMove(c); c.can_take = canTake(c); c.can_handoff = handoffs(c); c.can_edit = c.can_move || (MY.role === 'recruiter' && c.recruiter_email === MY.email);
-    return { ok: true, candidate: c, person: null, calls: [], events: EV[id] || [],
+    return { ok: true, candidate: c, sb_history: c.sb_history, person: null, calls: [], events: EV[id] || [],
       messages: c.source === 'avito' ? [{ channel: 'avito', direction: 'in', sender_name: 'Кандидат', text: 'Здравствуйте, вакансия ещё актуальна?', created_at: ago(70) },
                  { channel: 'avito', direction: 'out', text: 'Да, актуальна. Удобно созвониться сегодня?', created_at: ago(65) }] : [] };
   }

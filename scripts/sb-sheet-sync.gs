@@ -233,11 +233,35 @@ function sbPaint_(sh, cols, rows, statuses, force) {
   });
   if (dirty) rng.setBackgrounds(bg);
 }
-// Этап 2: заявки из «Найма» -> новые строки таблицы (пока сервер отдаёт пустой список).
+// Заявки из «Найма» (HR перевёл кандидата на «Проверку СБ»): новая строка внизу таблицы, либо - если СБ ещё не
+// ответила или задала вопрос - обновление ПРЕЖНЕЙ строки кандидата (по ID) с очищенным «Комментарием».
+// После записи сообщаем серверу ID строки - по нему потом вернётся ответ СБ.
 function sbPullQueue_(sh, cols) {
   var r = sbCall_('get', '/queue');
   if (!r.ok || !r.items || !r.items.length) return;
-  // появится на этапе 2
+  var width = Math.max(cols.id, cols.paintTo);
+  var idRows = null, acks = [];
+  r.items.forEach(function (it) {
+    var row = null;
+    if (it.uid) { if (!idRows) idRows = sbIdRows_(sh, cols); row = idRows[it.uid] || null; }
+    var isNew = !row;
+    if (isNew) row = sh.getLastRow() + 1;
+    var vals = sh.getRange(row, 1, 1, width).getValues()[0];
+    Object.keys(SB_FIELDS).forEach(function (k) { if (cols[k]) vals[cols[k] - 1] = it.cells && it.cells[k] != null ? it.cells[k] : ''; });
+    sh.getRange(row, 1, 1, width).setValues([vals]);
+    sh.getRange(row, 1, 1, cols.paintTo).setBackground(null);
+    var uid = isNew ? '' : it.uid;
+    if (!uid) { sbEnsureIds_(sh, cols); uid = String(sh.getRange(row, cols.id).getValue() || ''); }
+    if (uid) acks.push({ req_id: it.req_id, uid: uid, row: row });
+  });
+  if (acks.length) sbCall_('post', '/queue_ack', { acks: acks });
+}
+function sbIdRows_(sh, cols) {
+  var last = sh.getLastRow(), map = {};
+  if (last < 2) return map;
+  var ids = sh.getRange(2, cols.id, last - 1, 1).getValues();
+  for (var i = 0; i < ids.length; i++) { var u = String(ids[i][0] || '').trim(); if (u) map[u] = i + 2; }
+  return map;
 }
 function sbCall_(method, path, body) {
   var token = PropertiesService.getScriptProperties().getProperty('SB_SHEET_TOKEN');

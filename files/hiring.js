@@ -114,6 +114,32 @@ function overdueMin(c) {
   return over > 0 ? over : 0;
 }
 function recallDue(c) { return !!c.recall_at && new Date(c.recall_at).getTime() <= Date.now(); }
+/* Кружок ответственного - канон CRM (.kb-ava: инициалы, цвет «личности» по стабильному ключу,
+   палитра IDENTITY_PALETTE_ из index.html). Нет ответственного - «?» (.is-none). */
+function initials(name) { var p = String(name || '').trim().split(/\s+/).filter(Boolean); if (!p.length) return '?'; return (p.length === 1 ? p[0][0] : (p[0][0] + p[1][0])).toUpperCase(); }
+function avaColor(key) {
+  var pal; try { pal = IDENTITY_PALETTE_; } catch (e) { pal = null; }
+  if (!pal || !pal.length) return 'var(--bg4)';
+  var s = String(key || ''), h = 0;
+  for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return pal[h % pal.length];
+}
+function ava(name, key, title) {
+  if (!name) return '<span class="kb-ava is-none" title="' + esc(title) + '">?</span>';
+  return '<span class="kb-ava" style="background:' + avaColor(key || name) + '" title="' + esc(title) + '">' + esc(initials(name)) + '</span>';
+}
+function headOf(vt) { return vt ? (((S.meta && S.meta.column_heads) || {})[vt] || '') : ''; }
+/* Кружки на карточке: HR (с этапов рекрутера) и колонна (с момента, как карточка дошла до НК). */
+function ownersHtml(c) {
+  var st = stageBy(c.stage_key), out = '';
+  var recruiterStage = st && st.owner_role === 'recruiter';
+  if (c.recruiter_name || recruiterStage) out += ava(c.recruiter_name, c.recruiter_email, c.recruiter_name ? 'HR: ' + c.recruiter_name : 'HR: никто не взял в работу');
+  if (c.column_at) {
+    var h = headOf(c.vehicle_type);
+    out += ava(h, c.vehicle_type, c.vehicle_type ? 'Колонна: ' + VT_COL[c.vehicle_type] + (h ? ' (' + h + ')' : '') : 'Колонна не определена - возьмёт первый начальник колонны');
+  }
+  return out ? '<span class="hr-avas">' + out + '</span>' : '';
+}
 /* «Ждут меня» - открытая карточка, которую этот человек может двигать (признак от сервера). */
 function waitsMe(c) { var st = stageBy(c.stage_key); return !!c.can_move && !!st && !st.is_terminal && st.stage_key !== 'callbase'; }
 
@@ -341,7 +367,7 @@ function cardHtml(c) {
     '<div class="kb-card-top"><span class="kb-client">' + esc(c.full_name || 'Без имени') + '</span>' + mark + '</div>' +
     '<div class="kb-cargo">' + esc(line) + '</div>' + loss +
     '<div class="kb-meta"><span class="kb-num">' + esc(fmtPhone(c.phone10)) + '</span><span class="kb-chan">' + esc(sourceLabel(c.source)) + '</span></div>' +
-    '<div class="kb-card-bot"><span class="kb-num" title="Сколько кандидат на этом этапе">' + esc(agoText(since(c.stage_changed_at))) + '</span>' +
+    '<div class="kb-card-bot"><span class="hr-bot-left">' + ownersHtml(c) + '<span class="kb-num" title="Сколько кандидат на этом этапе">' + esc(agoText(since(c.stage_changed_at))) + '</span></span>' +
       (tags.length ? '<span class="hr-tags">' + tags.join('') + '</span>' : '') + '</div>' +
   '</div>';
 }
@@ -744,6 +770,69 @@ function timeline(d) {
     return '<div class="dr-tl-item"><span class="dr-tl-ico' + cls + '">' + ico(icon) + '</span><div>' + text + '</div></div>';
   }).join('') + '</div>';
 }
+/* ───────── документы кандидата (для СБ и НК). Файл открывается через blob с заголовком сессии -
+   токен в адрес НЕ кладём (в логах nginx он бы остался). Распознавания нет - решение Влада 25.09. ───────── */
+var DOC_LABEL = { passport: 'Паспорт', passport_reg: 'Прописка', license: 'Вод. удостоверение', skzi: 'Карта СКЗИ', med: 'Медсправка', other: 'Другое' };
+function fmtBytes(n) { n = Number(n) || 0; return n >= 1048576 ? (n / 1048576).toFixed(1).replace('.', ',') + ' МБ' : Math.max(1, Math.round(n / 1024)) + ' КБ'; }
+function loadDocs(id) {
+  api('/hiring/documents', null, { id: id }).then(function (r) {
+    if (S.openId !== id || !$('#hr-docs')) return;
+    if (!r.ok) { $('#hr-docs').innerHTML = '<div class="dr-empty">Не удалось загрузить список</div>'; return; }
+    paintDocs(id, r.data);
+  });
+}
+function paintDocs(id, data) {
+  var docs = data.documents || [];
+  $('#hr-docs-n').textContent = docs.length ? String(docs.length) : '';
+  var rows = docs.map(function (x) {
+    return '<div class="dr-row hr-doc"><span class="hr-doc-name"><button type="button" class="hr-doc-open" data-doc="' + x.id + '" title="Открыть">' + esc(x.original_name || 'файл') + '</button>' +
+      '<span class="aux">' + esc(DOC_LABEL[x.doc_type] || 'Другое') + ' · ' + esc(fmtBytes(x.size_bytes)) + ' · ' + esc(fmtDateTime(x.uploaded_at)) + (x.uploaded_name ? ' · ' + esc(x.uploaded_name) : '') + '</span></span>' +
+      (x.can_delete ? '<button type="button" class="cx-ibtn" data-doc-del="' + x.id + '" title="Удалить">' + ico('close') + '</button>' : '') + '</div>';
+  }).join('');
+  var add = data.can_upload ? '<div class="cx-chips hr-owner-pick">' + Object.keys(DOC_LABEL).map(function (k) {
+    return '<button type="button" class="crm-chip" data-doc-add="' + k + '">' + ico('plus') + esc(DOC_LABEL[k]) + '</button>';
+  }).join('') + '</div><div class="hr-doc-hint">PDF или фото (JPG, PNG, HEIC), до 15 МБ. Видят руководители, HR и начальник колонны кандидата, СБ.</div>' : '';
+  $('#hr-docs').innerHTML = (rows || '<div class="dr-empty">Документов пока нет</div>') + add;
+  $$('#hr-docs [data-doc]').forEach(function (b) { b.addEventListener('click', function () { openDoc(b.getAttribute('data-doc')); }); });
+  $$('#hr-docs [data-doc-del]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      if (!confirm('Удалить документ? Файл удалится с сервера.')) return;
+      api('/hiring/document_delete', { doc: Number(b.getAttribute('data-doc-del')) }).then(function (r) {
+        if (!r.ok) { toast(r.data.error || 'Не удалилось', 'red'); return; }
+        toast('Документ удалён', 'amber'); loadDocs(id);
+      });
+    });
+  });
+  var input = $('#hr-doc-file'), pickedType = 'other';
+  $$('#hr-docs [data-doc-add]').forEach(function (b) {
+    b.addEventListener('click', function () { pickedType = b.getAttribute('data-doc-add'); input.value = ''; input.click(); });
+  });
+  input.onchange = function () {
+    var f = input.files && input.files[0]; if (!f) return;
+    if (f.size > 15 * 1048576) { toast('Файл больше 15 МБ', 'red'); return; }
+    var fd = new FormData(); fd.append('file', f);
+    toast('Загружаю «' + f.name + '»...', 'amber');
+    fetch(apiBase() + '/hiring/document_upload?id=' + id + '&doc_type=' + encodeURIComponent(pickedType), { method: 'POST', headers: { 'X-Session-Token': apiToken() }, body: fd })
+      .then(function (res) { return res.json().catch(function () { return {}; }).then(function (d) { return { ok: res.ok, data: d }; }); })
+      .then(function (r) {
+        if (!r.ok) { toast(r.data.error || 'Не удалось загрузить файл', 'red'); return; }
+        toast(DOC_LABEL[pickedType] + ': загружено', 'green'); loadDocs(id);
+      })
+      .catch(function () { toast('Нет связи с сервером', 'red'); });
+  };
+}
+function openDoc(docId) {
+  // Окно открываем сразу по клику (иначе браузер телефона заблокирует всплывающее), адрес - после загрузки.
+  var w = window.open('', '_blank');
+  fetch(apiBase() + '/hiring/document_file?doc=' + encodeURIComponent(docId), { headers: { 'X-Session-Token': apiToken() } })
+    .then(function (res) { if (!res.ok) throw new Error(String(res.status)); return res.blob(); })
+    .then(function (blob) {
+      var url = URL.createObjectURL(blob);
+      if (w) w.location.href = url; else window.location.href = url;
+      setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+    })
+    .catch(function () { if (w) w.close(); toast('Не удалось открыть документ', 'red'); });
+}
 /* Главная кнопка «куда дальше» - подпись по следующему этапу; для НК - кому именно. */
 function nextAction(c) {
   var st = stageBy(c.stage_key); if (!st || st.is_terminal) return null;
@@ -757,7 +846,7 @@ function nextAction(c) {
   if (nextKey === 'screening') label = 'Взял в работу: скрининг';
   if (nextKey === 'column_interview') {
     var heads = (S.meta && S.meta.column_heads) || {};
-    label = c.vehicle_type ? 'Передать НК' + (heads[c.vehicle_type] ? ': ' + heads[c.vehicle_type] : '') + ' (' + VT_COL[c.vehicle_type] + ')' : 'Передать НК - сначала укажите тип техники';
+    label = c.vehicle_type ? 'Передать НК' + (heads[c.vehicle_type] ? ': ' + heads[c.vehicle_type] : '') + ' (' + VT_COL[c.vehicle_type] + ')' : 'Передать начальникам колонн - колонна не определена';
   }
   if (nextKey === 'security') label = 'Собеседование пройдено: в СБ';
   if (nextKey === 'onboarding') label = 'СБ пройдена: тестовая смена';
@@ -767,7 +856,7 @@ function nextAction(c) {
 /* Что не заполнено к передаче НК - мягкое предупреждение (жёстко сервер требует только тип техники). */
 function missingForNk(c) {
   var m = [];
-  if (!c.vehicle_type) m.push('тип техники');
+  if (!c.vehicle_type) m.push('тип техники (без него кандидата возьмёт первый свободный НК)');
   if (!c.license_cat) m.push('категория');
   if (c.has_skzi == null || c.has_skzi === '') m.push('карта СКЗИ');
   if (c.experience_years == null || c.experience_years === '') m.push('стаж');
@@ -816,6 +905,29 @@ function renderCandidate(d) {
       '<div class="dr-field hr-recall-field"><label>Перезвонить (дата и время)</label><input class="dr-input mono" type="datetime-local" id="hr-recall" value="' + esc(toLocalInput(c.recall_at)) + '"></div>' +
       (c.call_attempts >= 3 ? '<div class="hr-hint-amber">Три попытки без ответа - можно закрыть отказом «Пропал / недозвон».</div>' : '') +
     '</div>' : '';
+  /* Ответственные - как у менеджеров в CRM: HR (кто взял в работу) и колонна (начальник колонны).
+     Руководитель переназначает HR чипами (тот же вид, что выбор ответственного в шторке сделки CRM). */
+  var takeBtn = c.can_take ? '<button type="button" class="crm-chip" data-take="1">' + ico('user') + 'Взять себе</button>' : '';
+  var st0 = st || {};
+  var hrRow = '<div class="dr-row"><span>HR</span><span class="hr-owner">' +
+      (c.recruiter_name ? ava(c.recruiter_name, c.recruiter_email, c.recruiter_name) + esc(c.recruiter_name) : '<span class="aux">никто не взял в работу</span>') +
+      (st0.owner_role === 'recruiter' ? takeBtn : '') + '</span></div>';
+  var hrPick = boss && (S.meta.recruiters || []).length ? '<div class="cx-chips hr-owner-pick">' + (S.meta.recruiters || []).map(function (r) {
+      return '<button type="button" class="crm-chip" aria-pressed="' + (r.email === c.recruiter_email) + '" data-hr="' + esc(r.email) + '">' + ava(r.name, r.email, r.name) + esc(r.name) + '</button>';
+    }).join('') + (c.recruiter_email ? '<button type="button" class="crm-chip" data-hr="">В общий пул</button>' : '') + '</div>' : '';
+  var colHead = headOf(c.vehicle_type);
+  var colRow = c.column_at || c.vehicle_type ? '<div class="dr-row"><span>Колонна</span><span class="hr-owner">' +
+      (c.vehicle_type ? ava(colHead, c.vehicle_type, colHead || VT_COL[c.vehicle_type]) + esc(VT_COL[c.vehicle_type]) + (colHead ? ' · ' + esc(colHead) : '') +
+          (c.column_at ? '' : ' <span class="aux">после скрининга</span>') :
+        '<span class="aux">не определена - возьмёт первый начальник колонны</span>') +
+      (st0.owner_role === 'column_head' ? takeBtn : '') + '</span></div>' : '';
+  // Себе ничью карточку НК берёт кнопкой «Взять себе» - «Передать» в свою же колонну не дублируем.
+  var handoff = (c.can_handoff || []).filter(function (v) { return v !== me().segment; }).map(function (v) {
+    var h = headOf(v);
+    return '<button type="button" class="crm-chip" data-handoff="' + esc(v) + '">' + ico('undo') + 'Передать: ' + esc(VT_COL[v]) + (h ? ' (' + esc(h) + ')' : '') + '</button>';
+  }).join('');
+  var ownersSec = '<div class="dr-section"><div class="dr-label">Ответственные</div>' + hrRow + hrPick + colRow +
+    (handoff ? '<div class="cx-chips hr-owner-pick">' + handoff + '</div>' : '') + '</div>';
   var personHtml = d.person ? '<div class="dr-row"><span>В справочнике сотрудников</span><span>' + esc(d.person.full_name) + ' · ' + esc(d.person.employment_status === 'active' ? 'работает' : d.person.employment_status === 'fired' ? 'уволен' + (d.person.fired_date ? ' ' + String(d.person.fired_date).slice(0, 10) : '') : d.person.employment_status) + '</span></div>' : '';
   var consentRow = function (label, at, key) {
     return '<div class="dr-row"><span>' + label + '</span><span>' + (at ? '<span class="mono">' + esc(fmtDateTime(at)) + '</span>' : (ro ? 'нет' : '<button type="button" class="crm-chip" data-consent="' + key + '">Отметить: получено</button>')) + '</span></div>';
@@ -832,9 +944,9 @@ function renderCandidate(d) {
       '<button type="button" class="cx-ibtn" id="hr-x" title="Закрыть (Esc)">' + ico('close') + '</button></div>' +
     '<div class="crm-drawer-body">' +
       '<div class="dr-section"><div class="dr-label">Этап' + (ro ? ' <span class="aux">ведёт другой сотрудник - только просмотр</span>' : '') + '</div>' + stepper + term + backForm + lostForm +
-        (na ? '<button type="button" class="dr-calc-cta" id="hr-next" data-to="' + esc(na.key) + '"' + (na.key === 'column_interview' && !c.vehicle_type ? ' disabled' : '') + '>' + esc(na.label) + '</button>' +
+        (na ? '<button type="button" class="dr-calc-cta" id="hr-next" data-to="' + esc(na.key) + '">' + esc(na.label) + '</button>' +
           (miss.length ? '<div class="hr-hint-amber">Не заполнено к передаче НК: ' + esc(miss.join(', ')) + '</div>' : '') : '') +
-      '</div>' + callSec +
+      '</div>' + ownersSec + callSec +
       '<div class="dr-section"><div class="dr-label">Скрининг <span class="dr-saved aux">сохранено</span></div><div class="dr-grid2 hr-grid">' +
         field('Тип техники', valChips('vehicle_type', c.vehicle_type || '', [['tral', 'Трал'], ['long', 'Длинномер'], ['', 'Не указан']]), true) +
         field('Категория прав', valChips('license_cat', c.license_cat || '', [['CE', 'CE'], ['C', 'C'], ['E', 'E'], ['', 'Не знаем']])) +
@@ -868,6 +980,10 @@ function renderCandidate(d) {
         '<div class="dr-row"><span>Источник</span><span>' + esc(sourceLabel(c.source)) + (c.source_detail ? ' · ' + esc(c.source_detail) : '') + '</span></div>' +
         '<div class="dr-row"><span>Добавлен</span><span class="mono">' + esc(fmtDateTime(c.created_at)) + '</span></div>' + personHtml +
       '</div>' +
+      '<div class="dr-section" id="hr-docs-sec"><div class="dr-label">Документы <span class="aux" id="hr-docs-n"></span></div>' +
+        '<div id="hr-docs"><div class="dr-empty">Загрузка...</div></div>' +
+        '<input type="file" id="hr-doc-file" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,application/pdf,image/*" hidden>' +
+      '</div>' +
       '<div class="dr-section"><div class="dr-label">История <span class="aux">' + ((d.events || []).length + (d.messages || []).length + (d.calls || []).length) + '</span></div>' +
         '<div class="hr-inline"><input class="dr-input" id="hr-comment" maxlength="2000" placeholder="Комментарий в историю"><button type="button" class="crm-chip" id="hr-comment-add">Добавить</button></div>' +
         '<div id="hr-tl">' + timeline(d) + '</div></div>' +
@@ -886,6 +1002,25 @@ function renderCandidate(d) {
       var k = b.getAttribute('data-consent'), body = { id: c.id }; body[k === 'pd' ? 'pd_consent' : 'reserve_consent'] = true;
       api('/hiring/candidate', body).then(function (r) { if (!r.ok) { toast(r.data.error || 'Не сохранилось', 'red'); return; } toast('Согласие отмечено', 'green'); openCandidate(c.id, true); });
     });
+  });
+  function assign(body, btn, okText) {
+    if (btn) btn.disabled = true;
+    api('/hiring/assign', Object.assign({ id: c.id }, body)).then(function (r) {
+      if (btn) btn.disabled = false;
+      if (!r.ok) { toast(r.data.error || 'Не сохранилось', 'red'); return; }
+      toast(okText, 'green');
+      load();
+      // Передал в чужую колонну / вернул в пул - карточка может пропасть из моей видимости.
+      api('/hiring/candidate', null, { id: c.id }).then(function (r2) { if (!r2.ok) { closeDrawer(); return; } if (S.openId === c.id) renderCandidate(r2.data); });
+    });
+  }
+  loadDocs(c.id);
+  $$('[data-take]', dr).forEach(function (b) { b.addEventListener('click', function () { assign({ take: true }, b, 'Кандидат закреплён за вами'); }); });
+  $$('[data-hr]', dr).forEach(function (b) {
+    b.addEventListener('click', function () { var e = b.getAttribute('data-hr'); assign({ recruiter_email: e }, b, e ? 'HR назначен' : 'Кандидат возвращён в общий пул'); });
+  });
+  $$('[data-handoff]', dr).forEach(function (b) {
+    b.addEventListener('click', function () { var v = b.getAttribute('data-handoff'); assign({ segment: v }, b, 'Передан в колонну: ' + VT_COL[v]); });
   });
   $('#hr-comment-add').addEventListener('click', addComment);
   $('#hr-comment').addEventListener('keydown', function (e) { if (e.key === 'Enter') addComment(); });

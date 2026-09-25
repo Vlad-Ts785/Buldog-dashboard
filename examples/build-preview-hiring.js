@@ -30,6 +30,7 @@ function fnSrc(name) {
   for (let k = html.indexOf("{", i); k < html.length; k++) { if (html[k] === "{") d++; else if (html[k] === "}") { d--; if (!d) return html.slice(i, k + 1); } }
 }
 const lightSel = html.match(/var LIGHT_GRID_SEL_ = '[^']+';/)[0];
+const palette = html.match(/var IDENTITY_PALETTE_ = \[[^\]]+\];/)[0];   // цвета кружков ответственных (как в CRM)
 // Звук интерфейса (uiBlip_/uiSounds + выключатель) и победная сцена (фанфара, салют) - как в CRM.
 const sndStart = html.indexOf("var uiAudioCtx = null;"), sndEnd = html.indexOf("\n};", html.indexOf("var uiSounds = {")) + 3;
 if (sndStart < 0 || sndEnd < sndStart) throw new Error("не нашёл звуковой блок");
@@ -56,6 +57,7 @@ ${noClose(read("examples/preview-hiring-demo.js"))}
 <script>
 var p2ToastEl_ = null, p2ToastTimer_ = null, cursorLightInited_ = {};
 ${lightSel}
+${palette}
 ${noClose(fnSrc("p2Toast"))}
 ${noClose(fnSrc("initCursorLight_"))}
 ${noClose(soundBlock)}

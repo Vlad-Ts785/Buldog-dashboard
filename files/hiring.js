@@ -796,11 +796,17 @@ function paintDocs(id, data) {
   $$('#hr-docs [data-doc]').forEach(function (b) { b.addEventListener('click', function () { openDoc(b.getAttribute('data-doc')); }); });
   $$('#hr-docs [data-doc-del]').forEach(function (b) {
     b.addEventListener('click', function () {
-      if (!confirm('Удалить документ? Файл удалится с сервера.')) return;
-      api('/hiring/document_delete', { doc: Number(b.getAttribute('data-doc-del')) }).then(function (r) {
-        if (!r.ok) { toast(r.data.error || 'Не удалилось', 'red'); return; }
-        toast('Документ удалён', 'amber'); loadDocs(id);
-      });
+      var name = (b.closest('.hr-doc').querySelector('.hr-doc-open') || {}).textContent || 'документ';
+      var go = function (yes) {
+        if (!yes) return;
+        api('/hiring/document_delete', { doc: Number(b.getAttribute('data-doc-del')) }).then(function (r) {
+          if (!r.ok) { toast(r.data.error || 'Не удалилось', 'red'); return; }
+          toast('Документ удалён', 'amber'); loadDocs(id);
+        });
+      };
+      // Общий диалог подтверждения ГОСТа (files/yard-confirm.js); нет его (превью) - системный confirm.
+      if (window.yardConfirm_) window.yardConfirm_('Удалить «' + esc(name) + '»? Файл <b>удалится с сервера</b>, вернуть его будет нельзя.', go, 'Документ кандидата', 'Удалить');
+      else go(confirm('Удалить документ? Файл удалится с сервера.'));
     });
   });
   var input = $('#hr-doc-file'), pickedType = 'other';

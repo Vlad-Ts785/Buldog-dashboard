@@ -936,8 +936,12 @@ function passFromOcr(c, btn) {
     if (!doc) { toast('Нет распознанного паспорта: загрузите фото в «Документы» и нажмите «Распознать»', 'amber'); return; }
     var g = function (k) { return ((doc.ocr_fields.filter(function (x) { return x.key === k; })[0]) || {}).value || ''; };
     var iso = function (v) { var m = String(v || '').match(/(\d{2})\.(\d{2})\.(\d{4})/); return m ? m[3] + '-' + m[2] + '-' + m[1] : ''; };
+    /* адрес регистрации: из самого паспорта (многостраничный PDF, 25.09) или из отдельного документа «Прописка» */
+    var regDoc = ((r.data && r.data.documents) || []).filter(function (x) { return x.doc_type === 'passport_reg' && x.ocr_fields && x.ocr_fields.length; })[0];
+    var regOf = function (dd) { return dd ? ((dd.ocr_fields.filter(function (x) { return x.key === 'reg_address'; })[0]) || {}).value || '' : ''; };
     var want = { birth_date: iso(g('birth_date')), birth_place: g('birth_place'), passport_no: g('number'),
-      passport_issued_by: [g('issued_by'), g('subdivision') ? 'код ' + g('subdivision') : ''].filter(Boolean).join(', '), passport_issue_date: iso(g('issue_date')) };
+      passport_issued_by: [g('issued_by'), g('subdivision') ? 'код ' + g('subdivision') : ''].filter(Boolean).join(', '), passport_issue_date: iso(g('issue_date')),
+      reg_address: regOf(doc) || regOf(regDoc) };
     var body = { id: c.id }, n = 0;
     Object.keys(want).forEach(function (k) { if (want[k] && !c[k]) { body[k] = want[k]; n++; } });
     if (!n) { toast('Поля паспорта уже заполнены - перенос не нужен', 'amber'); return; }

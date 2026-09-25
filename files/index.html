@@ -42,6 +42,10 @@
 <link rel="stylesheet" href="order-plan-v2.css">
 <!-- «Найм» (24.09.2026, plans/2026-09-24-driver-hiring-pipeline.md) - свои стили hr-*, модуль files/hiring.js. -->
 <link rel="stylesheet" href="hiring.css">
+<!-- Общий диалог подтверждения yardConfirm_ (канон ГОСТа, любая страница) - yconf-; признаки сотрудника в
+     карточке Справочников (24.09, этап 2.1в) - spa-. -->
+<link rel="stylesheet" href="yard-confirm.css">
+<link rel="stylesheet" href="sprav-person-attrs.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <!-- jsPDF - генератор КП настоящим текстом (не HTML-под-видом-.doc), 2026-08-21, Влад:
      "генератор коммерческих предложений... текст является настоящим текстом". Работает
@@ -1127,6 +1131,8 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
    с .collapsed дублируются - на мобильном кнопки сворачивания нет (см. выше), но
    класс мог "прилипнуть" из localStorage от десктопной сессии в том же браузере. */
 @media(max-width:900px){
+  /* 24.09: ширина дровера по ГОСТу («Единая тема и меню», п.3) - 70% экрана, как plan-m/orders-m; было 220px, длинные пункты обрезались */
+  .sidebar,.sidebar.collapsed{width:70vw;min-width:0;max-width:320px;}
   .sidebar-logo,.sidebar.collapsed .sidebar-logo{padding:0;border-bottom:1px solid var(--border);}
   .sidebar-logo-row{height:52px;padding:0 14px;align-items:center;}
   .sidebar-logo-label,.sidebar.collapsed .sidebar-logo-label{
@@ -1163,7 +1169,37 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
   }
   .sidebar-refresh:hover{border-color:transparent;background:var(--bg3);color:var(--text);}
   .sidebar-refresh svg{width:18px;height:18px;color:var(--muted);}
+  .sidebar-refresh span{flex:1 1 auto;min-width:0;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 }
+
+/* «Смотреть как» (24.09): один список для попапа #view-as-panel (компьютер) и листа #va-sheet (телефон) */
+.va-sec{padding:6px 10px 2px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;}
+.va-row{padding:7px 10px;font-size:13px;cursor:pointer;border-radius:4px;color:var(--text);}
+.va-row:hover{background:var(--bg3);}
+.va-row.on{color:var(--amber);font-weight:600;}
+.va-row.exit{color:var(--red);border-bottom:1px solid var(--border);margin-bottom:4px;}
+.va-note{padding:7px 10px;font-size:12px;color:var(--muted);}
+.va-sheet,.va-sheet-scrim{display:none;}
+/* Лист на телефоне - спецификация листа мобильной Планировки (plan-m .sheet): радиус 12, ручка 44x4, кривая drawer */
+@media(max-width:900px){
+  .va-sheet-scrim{display:block;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:120;opacity:0;pointer-events:none;transition:opacity .2s ease;}
+  .va-sheet-scrim.open{opacity:1;pointer-events:auto;}
+  .va-sheet{display:flex;flex-direction:column;position:fixed;left:0;right:0;bottom:0;z-index:121;max-height:80vh;background:var(--bg2);border-radius:12px 12px 0 0;box-shadow:0 -8px 32px rgba(0,0,0,.4);transform:translateY(105%);transition:transform .32s cubic-bezier(.32,.72,0,1);padding-bottom:env(safe-area-inset-bottom,0px);}
+  .va-sheet.open{transform:none;}
+  .va-sheet-grip{flex:none;height:28px;display:flex;align-items:center;justify-content:center;}
+  .va-sheet-grip::before{content:"";width:44px;height:4px;border-radius:2px;background:var(--border-strong);}
+  .va-sheet-head{flex:none;display:flex;align-items:center;gap:8px;min-height:44px;padding:0 8px 8px 16px;}
+  .va-sheet-ttl{flex:1 1 auto;min-width:0;font-size:18px;font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .va-sheet-x{flex:none;width:44px;height:44px;display:flex;align-items:center;justify-content:center;border:0;background:transparent;color:var(--muted);border-radius:8px;cursor:pointer;}
+  .va-sheet-body{flex:1 1 auto;min-height:0;overflow-y:auto;padding:0 8px 12px;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;}
+  .va-sheet .va-sec{padding:12px 8px 4px;font-size:10.5px;font-weight:700;letter-spacing:.08em;}
+  .va-sheet .va-row{display:flex;align-items:center;min-height:44px;padding:0 8px;font-size:15px;font-weight:600;border-radius:8px;}
+  .va-sheet .va-row.exit{margin-bottom:6px;}
+  .va-sheet .va-note{padding:10px 8px;font-size:14px;}
+}
+@media(prefers-reduced-motion:reduce){.va-sheet,.va-sheet-scrim{transition:none;}}
+/* Лист модальный - плавающая кнопка уведомлений (logist-push-notify.js, слой 9000) не должна лежать поверх списка */
+body.va-sheet-open .ll-push-btn{visibility:hidden;}
 
 /* ── КАЛЬКУЛЯТОР 2.0 «Табло рейса» (plans/2026-08-28-calculator-cockpit-redesign.md) ──
    Утверждено Владом на превью 28.08 (превью = контракт). Кокпит: маршрутная строка
@@ -1254,6 +1290,8 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
    plans/2026-09-24-navigation-v2-map-first.md). Строки списка - прежние .nav-item. */
 .nav2{position:relative;height:calc(100vh - 170px);min-height:480px;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--bg2);}
 .nav2 [hidden]{display:none!important;}
+/* офисный монитор (Влад 24.09: «столько места свободного») - Навигация во всю ширину, как CRM/Планировка */
+main:has(> #page-navigation.active){max-width:none;}
 .nav2-map{position:absolute;inset:0;z-index:1;}
 .nav2-panel{position:absolute;left:12px;top:12px;bottom:12px;width:310px;z-index:500;display:flex;flex-direction:column;background:rgba(23,23,29,.95);border:1px solid var(--border-strong);border-radius:12px;overflow:hidden;}
 .nav2.panel-off .nav2-panel{display:none;}
@@ -1311,6 +1349,7 @@ main{padding:24px 28px;max-width:1400px;width:100%;}
 .nav2-ord-exec b{color:var(--text);font-weight:500;}
 .nav2-ord-warn{font-size:11px;color:var(--amber);margin-top:3px;}
 .nav2-empty{padding:16px 14px;color:var(--muted);font-size:13px;}
+@media(min-width:1700px){.nav2-panel{width:360px;}.nav2-top{left:384px;}.nav2.panel-off .nav2-top{left:110px;}.nav2-card{width:340px;}}
 @media(max-width:900px){
   .nav2{height:auto;min-height:0;display:flex;flex-direction:column;overflow:visible;border:none;background:none;}
   .nav2-top{position:relative;left:auto;right:auto;top:auto;order:1;padding-bottom:8px;}
@@ -4336,6 +4375,22 @@ main:has(> #page-dynamics.active){min-width:0;}
 <!-- Затемнение позади меню на мобильном - тап вне меню закрывает его -->
 <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeMobileSidebar()"></div>
 
+<!-- «Смотреть как сотрудник» на телефоне (24.09, Влад: «хочу пользоваться вьювером и с
+     мобильного») - нижний лист на уровне страницы, НЕ внутри .sidebar: у мобильного меню
+     transform:translateX, а position:fixed внутри transform-предка считается от предка, не
+     от экрана - лист прилип бы к шторке меню. Список - тот же viewAsListHtml_(), что у
+     настольного попапа #view-as-panel. Открывается и по ссылке index.html#viewas - так в
+     него попадают из меню мобильных «Планировки»/«Задания» (plan-m.html/orders-m.html). -->
+<div class="va-sheet-scrim" id="va-sheet-scrim" onclick="closeViewAsSheet_()"></div>
+<div class="va-sheet" id="va-sheet" role="dialog" aria-modal="true" aria-labelledby="va-sheet-ttl" aria-hidden="true">
+  <div class="va-sheet-grip"></div>
+  <div class="va-sheet-head">
+    <div class="va-sheet-ttl" id="va-sheet-ttl">Смотреть как сотрудник</div>
+    <button type="button" class="va-sheet-x" onclick="closeViewAsSheet_()" aria-label="Закрыть"><svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M5 5l10 10M15 5 5 15"/></svg></button>
+  </div>
+  <div class="va-sheet-body" id="va-sheet-body"></div>
+</div>
+
 <!-- Кнопка-гамбургер - фиксированная, вне .page-header (у "Личной страницы" он
      полностью скрыт - см. showPage(), иначе кнопка пропадала бы вместе с ним). -->
 <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="toggleMobileSidebar()" aria-label="Меню"><i class="ti ti-menu-2"></i></button>
@@ -5609,6 +5664,16 @@ main:has(> #page-dynamics.active){min-width:0;}
             <input autocomplete="off" id="drv-reg-medical-exp" type="date"
               style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;color-scheme:dark"></div>
         </div>
+      </div>
+
+      <!-- Признаки сотрудника (24.09, этап 2.1в, plans/2026-09-24-stage2-directories-not-hardcode.md) -
+           отдел тралов (продажи/снабжение), план продаж - с датами «с/по». Модуль files/sprav-person-attrs.js,
+           только у сохранённой карточки (нужен person_id), тот же принцип, что «Сканы документов» ниже. -->
+      <div id="spa-section" style="display:none">
+        <div class="asset-form-section">Признаки</div>
+        <div class="spa-hint">Кого расчёт считает отделом тралов и чей план входит в план отдела. Действует помесячно: месяц, где признак был хотя бы день, считается целиком.</div>
+        <div id="spa-list"></div>
+        <div id="spa-error" class="spa-err"></div>
       </div>
 
       <!-- Паспорт (13.09, Влад: "прикрепить к справочнику каждому водителю" сканы с Диска +
@@ -9194,6 +9259,12 @@ let D = null;
 // роли - см. проверку по display в render().
 let deepLinkPage_ = null;
 try { deepLinkPage_ = new URLSearchParams(location.hash.replace(/^#/, '')).get('page') || null; } catch (e) {}
+// «Смотреть как» по ссылке (24.09) - index.html#viewas сразу открывает выбор сотрудника. Так в
+// него попадают из меню мобильных «Планировки»/«Задания» (plan-m.html/orders-m.html): своего
+// списка сотрудников они НЕ держат - он один на всё приложение, здесь (viewAsListHtml_).
+// Тот же принцип «съедается один раз», что у deepLinkPage_ выше.
+let deepLinkViewAs_ = false;
+try { deepLinkViewAs_ = new URLSearchParams(location.hash.replace(/^#/, '')).has('viewas'); } catch (e) {}
 let vehSort = {col:'profit', dir:-1};
 let avtodorSort = {col:'total_paid', dir:-1};
 let avtodorData_ = null; // кэш /api/avtodor_summary - страница "Техника" открывается часто, грузим один раз за сессию
@@ -13670,6 +13741,17 @@ function render() {
       if (dlEl_ && dlEl_.style.display !== 'none') showPage(dlId_, dlEl_);
     } catch (e) {}
   }
+  // #viewas (24.09) - только настоящему admin (выбор сотрудника - его возможность, не
+  // контент, поэтому сырой D.role, не isEffectiveAdmin_: из «Сменить сотрудника» сюда
+  // приходят уже во время предпросмотра). Хэш убираем, чтобы обновление страницы не
+  // открывало выбор повторно.
+  if (deepLinkViewAs_) {
+    deepLinkViewAs_ = false;
+    if (D && D.role === 'admin') {
+      try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+      toggleViewAsPanel();
+    }
+  }
 
   if (isMechanicView_()) {
     // 08.09 - у механика теперь ЕСТЬ личная страница (plans/2026-09-08-chief-mechanic-long-haul-
@@ -13908,23 +13990,59 @@ function updateViewAsButton_() {
   btn.parentElement.style.display = (D.role === 'admin') ? '' : 'none';
 }
 
+// Телефон - та же граница 900px, что у мобильного скина меню (@media в <style>): там вместо
+// попапа над кнопкой (внутри прокручиваемой шторки меню, 280px высотой, строки 13px - не под
+// палец) открывается нижний лист #va-sheet на уровне страницы.
+function viewAsIsMobile_() {
+  try { return window.matchMedia('(max-width:900px)').matches; } catch (e) { return false; }
+}
+function viewAsIsOpen_() {
+  var sheet = document.getElementById('va-sheet'), panel = document.getElementById('view-as-panel');
+  return !!((sheet && sheet.classList.contains('open')) || (panel && panel.style.display === 'block'));
+}
 function toggleViewAsPanel(ev) {
   if (ev) ev.stopPropagation();
+  if (viewAsIsMobile_()) { openViewAsSheet_(); return; }
   var panel = document.getElementById('view-as-panel');
   if (!panel) return;
   if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
   renderViewAsPanel_();
   panel.style.display = 'block';
-  // Механики - лениво, только при первом реальном открытии панели (не на каждой загрузке
-  // страницы) - перерисовываем панель повторно, когда список придёт, ЕСЛИ она всё ещё
-  // открыта (админ мог успеть закрыть её раньше, чем ответит сеть).
+  viewAsEnsureRosterData_();
+}
+function openViewAsSheet_() {
+  var sheet = document.getElementById('va-sheet');
+  if (!sheet) return;
+  closeMobileSidebar();
+  // Высота - от visualViewport, не от vh (ГОСТ, «Лист заявки»: vh/dvh врут в просмотрщиках и
+  // при открытой клавиатуре), 80% - как полный лист мобильной Планировки минус запас сверху.
+  var vvh = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+  sheet.style.maxHeight = Math.round(vvh * 0.8) + 'px';
+  renderViewAsPanel_();
+  sheet.classList.add('open');
+  sheet.setAttribute('aria-hidden', 'false');
+  document.getElementById('va-sheet-scrim').classList.add('open');
+  document.body.classList.add('va-sheet-open');
+  viewAsEnsureRosterData_();
+}
+function closeViewAsSheet_() {
+  var sheet = document.getElementById('va-sheet');
+  if (sheet) { sheet.classList.remove('open'); sheet.setAttribute('aria-hidden', 'true'); }
+  var scrim = document.getElementById('va-sheet-scrim');
+  if (scrim) scrim.classList.remove('open');
+  document.body.classList.remove('va-sheet-open');
+}
+function viewAsEnsureRosterData_() {
+  // Механики - лениво, только при первом реальном открытии списка (не на каждой загрузке
+  // страницы) - перерисовываем его повторно, когда список придёт, ЕСЛИ он всё ещё открыт
+  // (админ мог успеть закрыть его раньше, чем ответит сеть).
   if (mechanicsRosterCache_ === null) {
     loadMechanicsRoster_().then(function() {
-      if (panel.style.display === 'block') renderViewAsPanel_();
+      if (viewAsIsOpen_()) renderViewAsPanel_();
     });
   }
   // 20.09, тот же приём для FLEET_PEOPLE_ (нужен buildMyPageRoster_ для фильтра уволенных,
-  // см. комментарий там) - эта панель открывается с ЛЮБОЙ страницы, не только с Планировки/
+  // см. комментарий там) - этот список открывается с ЛЮБОЙ страницы, не только с Планировки/
   // Справочников, которые обычно его и грузят (fetchFleetData_/initLP), поэтому на первый
   // заход сюда он может быть ещё пуст. Не второй источник - пишем в ту же переменную, просто
   // независимый триггер загрузки для этого конкретного входа. length===0 как "ещё не
@@ -13933,38 +14051,51 @@ function toggleViewAsPanel(ev) {
   if (!FLEET_PEOPLE_.length) {
     fetchFromYardApi_('/sprav/state', {}).then(function(r){
       if (r.ok && r.data && r.data.people) FLEET_PEOPLE_ = r.data.people;
-      if (panel.style.display === 'block') renderViewAsPanel_();
+      if (viewAsIsOpen_()) renderViewAsPanel_();
     }).catch(function(){});
   }
 }
 
-function renderViewAsPanel_() {
-  var panel = document.getElementById('view-as-panel');
-  if (!panel) return;
+// ОДИН рендер списка на оба места (попап на компьютере, лист на телефоне) - на телефоне ровно
+// тот же состав и порядок, что на компьютере. Выбор - по data-атрибутам (viewAsListClick_), не
+// склейкой имени внутрь onclick-строки: кавычка в ФИО ломала бы разметку.
+function viewAsListHtml_() {
   var roster = viewAsRoster_();
   function rowHtml(en) {
     var active = viewAsEntry && viewAsEntry.name === en.name && viewAsEntry.type === en.type;
-    var safe = en.name.replace(/'/g, "\\'");
-    return '<div onclick="setViewAs(\''+safe+'\',\''+en.type+'\')" style="padding:7px 10px;font-size:13px;cursor:pointer;border-radius:4px;color:'+(active?'var(--amber)':'var(--text)')+(active?';font-weight:600':'')+'" '+
-      'onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'\'">'+en.name+'</div>';
+    return '<div class="va-row' + (active ? ' on' : '') + '" data-va-name="' + pageEsc_(en.name) + '" data-va-type="' + pageEsc_(en.type) + '">' + pageEsc_(en.name) + '</div>';
   }
   var managers = roster.filter(function(e){ return e.type === 'manager'; });
   var logists  = roster.filter(function(e){ return e.type === 'logist'; });
   // Механики (2026-09-02) - отдельный источник (mechanicsRosterCache_, не D.orders), может
-  // быть null (ещё грузится - показываем "Загрузка…", запрос уже ушёл в toggleViewAsPanel).
+  // быть null (ещё грузится - показываем "Загрузка…", запрос уже ушёл в viewAsEnsureRosterData_).
   var mechanics = mechanicsRosterCache_ || [];
   var html = '';
-  if (viewAsEntry) {
-    html += '<div onclick="setViewAs(null,null)" style="padding:7px 10px;font-size:13px;cursor:pointer;border-radius:4px;color:var(--red);border-bottom:1px solid var(--border);margin-bottom:4px" '+
-      'onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'\'">✕ Обычный вид (админ)</div>';
-  }
-  if (managers.length) html += '<div style="padding:6px 10px 2px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Менеджеры</div>' + managers.map(rowHtml).join('');
-  if (logists.length) html += '<div style="padding:6px 10px 2px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Логисты</div>' + logists.map(rowHtml).join('');
-  if (mechanics.length) html += '<div style="padding:6px 10px 2px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Механики</div>' + mechanics.map(rowHtml).join('');
-  else if (mechanicsRosterCache_ === null) html += '<div style="padding:6px 10px 2px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Механики</div><div style="padding:7px 10px;font-size:12px;color:var(--muted)">Загрузка…</div>';
-  if (!roster.length && !mechanics.length && mechanicsRosterCache_ !== null) html += '<div style="padding:8px 10px;font-size:12px;color:var(--muted)">Нет данных</div>';
-  panel.innerHTML = html;
+  if (viewAsEntry) html += '<div class="va-row exit" data-va-exit="1">✕ Обычный вид (админ)</div>';
+  if (managers.length) html += '<div class="va-sec">Менеджеры</div>' + managers.map(rowHtml).join('');
+  if (logists.length) html += '<div class="va-sec">Логисты</div>' + logists.map(rowHtml).join('');
+  if (mechanics.length) html += '<div class="va-sec">Механики</div>' + mechanics.map(rowHtml).join('');
+  else if (mechanicsRosterCache_ === null) html += '<div class="va-sec">Механики</div><div class="va-note">Загрузка…</div>';
+  if (!roster.length && !mechanics.length && mechanicsRosterCache_ !== null) html += '<div class="va-note">Нет данных</div>';
+  return html;
 }
+function renderViewAsPanel_() {
+  var html = viewAsListHtml_();
+  var panel = document.getElementById('view-as-panel');
+  if (panel) panel.innerHTML = html;
+  var body = document.getElementById('va-sheet-body');
+  if (body) body.innerHTML = html;
+}
+function viewAsListClick_(ev) {
+  var row = ev.target.closest('.va-row');
+  if (!row) return;
+  if (row.getAttribute('data-va-exit')) { setViewAs(null, null); return; }
+  setViewAs(row.getAttribute('data-va-name'), row.getAttribute('data-va-type'));
+}
+['view-as-panel', 'va-sheet-body'].forEach(function(id) {
+  var el = document.getElementById(id);
+  if (el) el.addEventListener('click', viewAsListClick_);
+});
 
 function setViewAs(name, type) {
   viewAsEntry = name ? { name: name, type: type } : null;
@@ -13993,6 +14124,7 @@ function setViewAs(name, type) {
   crpLoaded_ = false; crpAmounts_ = {}; crpFacts_ = {}; crpCarryover_ = {}; crpLockedContragents_ = {};
   var panel = document.getElementById('view-as-panel');
   if (panel) panel.style.display = 'none';
+  closeViewAsSheet_();
   render();
   if (!viewAsEntry) {
     var mainNav = document.querySelector('.sidebar-nav-item[data-page="main"]');
@@ -16975,6 +17107,8 @@ function drvRegOpenForm_(id) {
   document.getElementById('drv-doc-section').style.display = d ? '' : 'none';
   document.getElementById('drv-doc-error').style.display = 'none';
   if (d) drvDocsLoad_(d.id); else document.getElementById('drv-doc-list').innerHTML = '';
+  // Признаки (отдел тралов, план продаж - с датами), 24.09 этап 2.1в: files/sprav-person-attrs.js.
+  if (window.sprPersonAttrsLoad_) sprPersonAttrsLoad_(d ? d.id : null);
   document.getElementById('drv-reg-notes').value = d ? (d.notes || '') : '';
   document.getElementById('drv-reg-error').style.display = 'none';
   document.getElementById('drv-reg-del-btn').style.display = d ? '' : 'none';
@@ -17637,6 +17771,9 @@ function assetOpenForm_(id) {
   var idInput = document.getElementById('asset-id');
   idInput.value = a ? a.id : '';
   idInput.disabled = !!a; // госномер - естественный первичный ключ, у существующей записи не меняется
+  // Стандарт госномера (24.09): пробелы на лету, тип номера - по выбранному типу техники.
+  if (window.YardPlate) YardPlate.wire(idInput, function() { return typeSelect.value; });
+  idInput.classList.remove('gos-bad'); idInput.title = '';
   document.getElementById('asset-department').value = a ? (a.department || '') : '';
   // Отдел с датой (24.09): исходные значения - чтобы отправить дату, только если её (или отдел) трогали.
   assetDeptInitial_ = { dept: a ? (a.department || '') : '', since: a ? (a.department_since || '') : '' };
@@ -17700,6 +17837,12 @@ function assetSave_() {
   errEl.style.display = 'none';
   var id = assetEditId_ || document.getElementById('asset-id').value.trim();
   if (!id) { errEl.textContent = 'Госномер обязателен'; errEl.style.display = ''; return; }
+  // Новая запись - госномер только по стандарту (24.09); сервер проверит то же самое.
+  if (!assetEditId_ && window.YardPlate) {
+    var assetPlateErr = YardPlate.check(document.getElementById('asset-id'), document.getElementById('asset-type-select').value);
+    if (assetPlateErr) { errEl.textContent = assetPlateErr; errEl.style.display = ''; return; }
+    id = document.getElementById('asset-id').value.trim();
+  }
   // VIN был жёстко обязателен на фронтенде (30.08) - Влад снял требование 01.09 (карточки
   // заводятся наспех по госномеру, VIN не всегда под рукой сразу) - поле остаётся, просто
   // необязательное, серверной блокировки для него не было и раньше.
@@ -18173,6 +18316,9 @@ function partnersAssetOpenForm_(id) {
   idInput.value = a ? a.id : '';
   idInput.disabled = !!a;
   document.getElementById('partner-asset-type').value = a ? a.asset_type : 'trailer';
+  // Стандарт госномера (24.09): пробелы на лету, тип номера - по выбранному типу техники.
+  if (window.YardPlate) YardPlate.wire(idInput, function() { return document.getElementById('partner-asset-type').value; });
+  idInput.classList.remove('gos-bad'); idInput.title = '';
   document.getElementById('partner-asset-manufacturer').value = a ? (a.manufacturer || '') : '';
   document.getElementById('partner-asset-vin').value = a ? (a.vin || '') : '';
   document.getElementById('partner-asset-name').value = a ? (a.name || '') : '';
@@ -18201,6 +18347,11 @@ function partnersAssetSave_() {
   errEl.style.display = 'none';
   var id = partnersAssetEditId_ || document.getElementById('partner-asset-id').value.trim();
   if (!id) { errEl.textContent = 'Госномер обязателен'; errEl.style.display = ''; return; }
+  if (!partnersAssetEditId_ && window.YardPlate) {
+    var partnerPlateErr = YardPlate.check(document.getElementById('partner-asset-id'), document.getElementById('partner-asset-type').value);
+    if (partnerPlateErr) { errEl.textContent = partnerPlateErr; errEl.style.display = ''; return; }
+    id = document.getElementById('partner-asset-id').value.trim();
+  }
   var ownerVal = document.getElementById('partner-asset-owner').value;
   var ownerParts = ownerVal ? ownerVal.split(':') : ['', ''];
   var params = {
@@ -29574,7 +29725,7 @@ function navDrawOrders_() {
 }
 function navFitOpts_(maxZoom) {
   var narrow = window.innerWidth <= 900;
-  var left = (!narrow && navUi_.panel) ? 340 : 40;
+  var left = (!narrow && navUi_.panel) ? (window.innerWidth >= 1700 ? 384 : 340) : 40;
   return { paddingTopLeft: [left, narrow ? 30 : 100], paddingBottomRight: [40, 40], maxZoom: maxZoom };
 }
 function navFitOrders_() {
@@ -38410,6 +38561,8 @@ window.LP = { init: initLP };
 <!-- «План задание v2» - объявляет window.OP2, вызывается из showPage(). Без async/defer:
      модуль читает SESSION_TOKEN/YARD_API_BASE как голые идентификаторы из общей
      лексической области основного скрипта (память project_window_global_let_const_gotcha). -->
+<!-- Стандарт госномера (24.09) - window.YardPlate, нужен «Заданию» и формам Справочников. До order-plan-v2.js. -->
+<script src="gos-plate.js"></script>
 <script src="order-plan-v2.js"></script>
 <!-- Всплывающие уведомления логисту о водителе (принял/отказался) - 23.09.2026, Влад:
      "чтобы висели пока не нажмешь крестик". Отдельный маленький файл, НЕ внутри
@@ -38418,6 +38571,8 @@ window.LP = { init: initLP };
 <script src="logist-push-notify.js"></script>
 <!-- «Найм» - объявляет window.HR, вызывается из showPage(). Без async/defer - тот же приём, что у order-plan-v2.js. -->
 <script src="hiring.js"></script>
+<script src="yard-confirm.js"></script>
+<script src="sprav-person-attrs.js"></script>
 <!-- 23.09: сначала старт приложения (данные грузятся сразу), библиотека Google - async в фоне,
      кнопку входа рисует onGsiReady_() по onload. Раньше синхронный тег держал страницу ~1,25 с. -->
 <script>initGoogleSignIn();</script>

@@ -953,9 +953,12 @@ function sbSection(c, d) {
   if (!c.sb_status && !hist.length && c.stage_key !== 'screening' && !onSb && !past) return '';
   var now = c.sb_status ? '<div class="dr-row"><span>Сейчас</span><span><span class="hr-tag hr-tag-sb ' + (SB_CLS[c.sb_status] || '') + '">' + esc(SB_TEXT[c.sb_status] || c.sb_status) + '</span>' +
       (c.sb_comment && c.sb_status !== 'approved' ? ' <span class="aux">«' + esc(c.sb_comment) + '»</span>' : '') + (c.sb_at ? ' <span class="aux mono">' + esc(fmtDateTime(c.sb_at)) + '</span>' : '') + '</span></div>' : '';
-  var miss = c.stage_key === 'screening' ? sbMissing(c) : [];   // уже отправлен - подсказка не нужна
+  var miss = c.stage_key === 'screening' || (onSb && !c.sb_status) ? sbMissing(c) : [];   // уже отправлен - подсказка не нужна
   var rej = onSb && c.sb_status === 'rejected' && c.can_move ? '<button type="button" class="crm-chip is-bad" id="hr-sb-reject">' + ico('lost') + 'Отказ: не прошёл СБ</button>' : '';
   if (onSb && (c.sb_status === 'question' || c.sb_status === 'interview') && c.can_move) rej += '<button type="button" class="crm-chip" id="hr-sb-resend">' + ico('undo') + 'Отправить в СБ заново (паспорт поправлен)</button>';
+  // На этапе СБ, но заявка в СБ ни разу не уходила (вернули с НК, перенос из старой таблицы) - отправить отсюда.
+  if (onSb && !c.sb_status && c.can_move) rej += '<div class="hr-hint-amber">В СБ ещё не отправлен - заполните «Паспорт для СБ» и нажмите «Отправить в СБ».</div>' +
+    '<button type="button" class="crm-chip" id="hr-sb-resend">' + ico('undo') + 'Отправить в СБ</button>';
   // Уже дальше СБ, а проверки не было: отправить, не двигая этап (заполните паспорт - кнопка проверит).
   if (past && c.sb_status !== 'queued' && c.sb_status !== 'pending' && (c.can_move || c.can_edit)) {
     rej = '<div class="hr-hint-amber">Кандидат прошёл дальше без ответа СБ «нет компромата».</div>' + rej +
@@ -1017,7 +1020,7 @@ function nextAction(c) {
   // Дальше СБ - только после «нет компромата» (сервер проверяет так же; руководитель может и без).
   if (st.stage_key === 'security' && c.sb_status !== 'approved' && !me().manage_all) {
     var wait = { rejected: 'СБ отказала - переведите кандидата в «Отказ»', interview: 'СБ просит собеседование - ждём решения СБ',
-      question: 'У СБ вопрос - поправьте паспорт и отправьте заново' }[c.sb_status] || (c.sb_status === 'queued' ? 'Отправляется в таблицу СБ...' : 'Ждём ответа СБ');
+      question: 'У СБ вопрос - поправьте паспорт и отправьте заново' }[c.sb_status] || (c.sb_status === 'queued' ? 'Отправляется в таблицу СБ...' : !c.sb_status ? 'Сначала отправьте в СБ (кнопка в «Проверке СБ» ниже)' : 'Ждём ответа СБ');
     return { key: nextKey, label: wait, disabled: true };
   }
   if (nextKey === 'onboarding') label = 'Собеседование пройдено: тестовая смена';

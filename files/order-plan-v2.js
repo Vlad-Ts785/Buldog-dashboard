@@ -4692,6 +4692,10 @@ function openDrawerForm(o, repeat, who, prefill) {
   renderForm();
   if (repeat && o) toast('Поля скопированы из №' + esc(oNo(o)) + ' · дата по умолчанию - завтра');
 }
+/* 25.09, Влад: «"Водитель РФ" - очень частое примечание, нужна такая же галочка, как "под
+   данные", рядом - в примечание автоматом запись должна появляться, и флаг РФ смайлик».
+   Тег - константа, чтобы галочка/чтение/запись всегда сверялись с ОДНИМ и тем же текстом. */
+var RF_DRIVER_TAG_ = 'Водитель РФ 🇷🇺';
 function renderForm() {
   var o = formOrder, repeat = formRepeat, isLog = formWho === 'log';
   var evening = false; /* Влад 11.09: «если сегодня завожу - сегодня; надо - руками нажму завтра» */
@@ -4726,6 +4730,7 @@ function renderForm() {
   }
 
   var hasContact = !!(o && (o.customer_contact_name || o.customer_contact_phone));
+  var curRfDriver = !!(o && o.note && String(o.note).indexOf(RF_DRIVER_TAG_) >= 0);
   $('#op2-d-body').innerHTML =
     '<div class="op2-cols"><div class="op2-main">' +
     '<div class="op2-sect"><div class="op2-t">Когда и для кого</div><div class="op2-grid2">' +
@@ -4779,6 +4784,7 @@ function renderForm() {
 
       '<div class="op2-fld op2-full op2-nd-fld"><label><input type="checkbox" class="op2-cb" id="op2-f-nd-cb"' + (o && o.needs_data ? ' checked' : '') + '>Под данные</label>' +
         '<button type="button" class="op2-info-dot" id="op2-f-nd-info" title="Что это">i</button></div>' +
+      '<div class="op2-fld op2-full op2-nd-fld"><label><input type="checkbox" class="op2-cb" id="op2-f-rfdrv-cb"' + (curRfDriver ? ' checked' : '') + '>Водитель РФ</label></div>' +
     '</div></div>' +
 
     '<div class="op2-sect"><div class="op2-t">Откуда - куда</div><div class="op2-grid2">' +
@@ -4989,6 +4995,25 @@ function wireForm() {
     pop.textContent = 'Заказчику нужны данные водителя заранее (пропускной режим). После планирования машину и водителя не меняют без согласования - логист заявит основную и резервную, данные обоих уйдут заказчику.';
     this.closest('.op2-nd-fld').appendChild(pop);
     requestAnimationFrame(function () { pop.classList.add('op2-open'); });
+  });
+
+  /* «Водитель РФ» - галочка сама пишет/убирает тег в «Примечание», тем же приёмом
+     присоединения через « · », что уже есть у applyCargo (характеристики из справочника).
+     Не трогает остальной текст менеджера (feedback: не переписывать чужой свободный текст) -
+     убирает ТОЛЬКО сам тег с соседним разделителем, если он там есть. */
+  var rfDrvCb = $('#op2-f-rfdrv-cb');
+  if (rfDrvCb) rfDrvCb.addEventListener('change', function () {
+    var note = $('#op2-f-note'); if (!note) return;
+    var v = note.value;
+    if (this.checked) {
+      if (v.indexOf(RF_DRIVER_TAG_) < 0) note.value = (v.trim() ? v.trim() + ' · ' : '') + RF_DRIVER_TAG_;
+    } else {
+      var s = v.split(' · ' + RF_DRIVER_TAG_).join('');
+      s = s.split(RF_DRIVER_TAG_ + ' · ').join('');
+      if (s.trim() === RF_DRIVER_TAG_) s = '';
+      note.value = s;
+    }
+    tickState();
   });
 
   /* «Контакт заказчика» - скрыт за кнопкой, пока не нажали (Влад 11.09: «почти никто

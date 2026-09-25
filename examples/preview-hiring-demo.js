@@ -22,7 +22,10 @@
     recruiter2: { role: 'recruiter', email: HR2.email, name: HR2.name }, column_head: { role: 'column_head', segment: 'tral', email: 'd@demo', name: 'Дьячков Павел Викторович' },
     column_head_long: { role: 'column_head', segment: 'long', email: 'b@demo', name: 'Барыльченко Пётр Иванович' }, security: { role: 'security', email: 'sb@demo', name: 'Служба безопасности' } }[ROLE];
   var byHr = function (h) { return { recruiter_email: h.email, recruiter_name: h.name }; };
-  var seq = 0, C = [], EV = {}, DOCS = {}, docSeq = 0;
+  var seq = 0, C = [], EV = {}, DOCS = {}, docSeq = 0, OCR_USED = 3;
+  var OCR_LABEL = { surname: 'Фамилия', name: 'Имя', middle_name: 'Отчество', birth_date: 'Дата рождения', birth_place: 'Место рождения', number: 'Серия и номер',
+    issue_date: 'Дата выдачи', issued_by: 'Кем выдан', subdivision: 'Код подразделения', expiration_date: 'Действует до', categories: 'Категории' };
+  function eachDoc(id, fn) { Object.keys(DOCS).forEach(function (k) { DOCS[k].forEach(function (x) { if (x.id === id) fn(x); }); }); }
   function cand(stage, o) {
     seq++;
     var p = '9' + String(160000000 + seq * 7919).slice(0, 9);
@@ -116,15 +119,33 @@
     var qid = Number((u.match(/[?&]id=(\d+)/) || [])[1] || 0);
     if (u.indexOf('/hiring/documents') >= 0) {
       var cc = find(qid);
-      d = { ok: true, documents: (DOCS[qid] || []).map(function (x) { return Object.assign({ can_delete: true }, x); }), can_upload: MY.role !== 'security' || (cc && cc.stage_key === 'security') };
+      var canUp = MY.role !== 'security' || (cc && cc.stage_key === 'security');
+      d = { ok: true, documents: (DOCS[qid] || []).map(function (x) {
+        var okT = x.doc_type === 'passport' || x.doc_type === 'license', okM = /jpeg|png|pdf/.test(x.mime_type || '');
+        return Object.assign({ can_delete: true, ocr_state: 'none', ocr_problem: okT && okM ? null : 'не распознаётся', can_ocr: canUp && okT && okM }, x);
+      }), can_upload: canUp, ocr: { enabled: true, reason: null, used: OCR_USED, limit: 300, until: '2026-11-17' } };
     } else if (u.indexOf('/hiring/document_upload') >= 0) {
       var file = o.body && o.body.get ? o.body.get('file') : null, dt = (u.match(/doc_type=([a-z_]+)/) || [])[1] || 'other';
-      (DOCS[qid] = DOCS[qid] || []).unshift({ id: ++docSeq, doc_type: dt, original_name: file ? file.name : 'файл', size_bytes: file ? file.size : 0, uploaded_name: MY.name, uploaded_at: new Date().toISOString(), _blob: file });
+      (DOCS[qid] = DOCS[qid] || []).unshift({ id: ++docSeq, doc_type: dt, original_name: file ? file.name : 'файл', mime_type: file ? file.type : '', size_bytes: file ? file.size : 0, uploaded_name: MY.name, uploaded_at: new Date().toISOString(), _blob: file });
       ev(qid, { action: 'doc', comment: 'Документ: ' + (file ? file.name : 'файл') }); d = { ok: true, id: docSeq };
     } else if (u.indexOf('/hiring/document_file') >= 0) {
       var did = Number((u.match(/doc=(\d+)/) || [])[1]), hit = null;
       Object.keys(DOCS).forEach(function (k) { DOCS[k].forEach(function (x) { if (x.id === did) hit = x; }); });
       return Promise.resolve(new Response(hit && hit._blob ? hit._blob : new Blob(['демо-файл'], { type: 'text/plain' }), { status: 200 }));
+    } else if (u.indexOf('/hiring/document_ocr_save') >= 0) {
+      eachDoc(b.doc, function (x) { x.ocr_fields = b.fields.map(function (ff) { return { key: ff.key, label: OCR_LABEL[ff.key] || ff.key, value: ff.value }; }); x.ocr_state = 'confirmed'; x.ocr_confirmed_name = MY.name; x.ocr_confirmed_at = new Date().toISOString(); });
+      d = { ok: true, applied: [] };
+    } else if (u.indexOf('/hiring/document_ocr') >= 0) {
+      // Демо: вымышленные данные вместо вызова Яндекса (в демо ничего никуда не отправляется).
+      OCR_USED++;
+      eachDoc(b.doc, function (x) {
+        x.ocr_state = 'draft';
+        x.ocr_fields = x.doc_type === 'license'
+          ? [['surname', 'ОБРАЗЦОВ'], ['name', 'ДЕМО'], ['middle_name', 'ТЕСТОВИЧ'], ['birth_date', '01.01.1980'], ['number', '00 00 000000'], ['issue_date', '01.01.2020'], ['expiration_date', '01.01.2030'], ['categories', 'B, C, CE']]
+          : [['surname', 'ОБРАЗЦОВ'], ['name', 'ДЕМО'], ['middle_name', 'ТЕСТОВИЧ'], ['birth_date', '01.01.1980'], ['birth_place', 'ГОР. ДЕМО'], ['number', '0000 000000'], ['issue_date', '01.01.2020'], ['issued_by', 'ОТДЕЛОМ ДЕМО'], ['subdivision', '000-000']];
+        x.ocr_fields = x.ocr_fields.map(function (p) { return { key: p[0], label: OCR_LABEL[p[0]] || p[0], value: p[1] }; });
+        d = { ok: true, fields: x.ocr_fields };
+      });
     } else if (u.indexOf('/hiring/document_delete') >= 0) {
       Object.keys(DOCS).forEach(function (k) { DOCS[k] = DOCS[k].filter(function (x) { return x.id !== b.doc; }); });
     } else if (u.indexOf('/hiring/meta') >= 0) d = { ok: true, stages: STAGES, reasons: REASONS, column_heads: { tral: 'Дьячков Павел Викторович', long: 'Барыльченко Пётр Иванович' }, recruiters: MY.role === 'director' ? [HR1, HR2] : [], me: { role_key: MY.role, segment: MY.segment || null, email: MY.email, name: MY.name, manage_all: MY.role === 'director' } };

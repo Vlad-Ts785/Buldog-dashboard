@@ -784,16 +784,49 @@ function loadDocs(id) {
 function paintDocs(id, data) {
   var docs = data.documents || [];
   $('#hr-docs-n').textContent = docs.length ? String(docs.length) : '';
+  var ocr = data.ocr || {};
   var rows = docs.map(function (x) {
-    return '<div class="dr-row hr-doc"><span class="hr-doc-name"><button type="button" class="hr-doc-open" data-doc="' + x.id + '" title="Открыть">' + esc(x.original_name || 'файл') + '</button>' +
+    var ocrBtn = x.can_ocr && x.ocr_state === 'none' && ocr.enabled ? '<button type="button" class="crm-chip" data-ocr="' + x.id + '" title="Платно: 0,71 ₽ из гранта Yandex Cloud">Распознать</button>' : '';
+    return '<div class="hr-doc-wrap"><div class="dr-row hr-doc"><span class="hr-doc-name"><button type="button" class="hr-doc-open" data-doc="' + x.id + '" title="Открыть">' + esc(x.original_name || 'файл') + '</button>' +
       '<span class="aux">' + esc(DOC_LABEL[x.doc_type] || 'Другое') + ' · ' + esc(fmtBytes(x.size_bytes)) + ' · ' + esc(fmtDateTime(x.uploaded_at)) + (x.uploaded_name ? ' · ' + esc(x.uploaded_name) : '') + '</span></span>' +
-      (x.can_delete ? '<button type="button" class="cx-ibtn" data-doc-del="' + x.id + '" title="Удалить">' + ico('close') + '</button>' : '') + '</div>';
+      ocrBtn + (x.can_delete ? '<button type="button" class="cx-ibtn" data-doc-del="' + x.id + '" title="Удалить">' + ico('close') + '</button>' : '') + '</div>' +
+      ocrBlock(x, data.can_upload) + '</div>';
   }).join('');
+  var hasOcrDocs = docs.some(function (x) { return !x.ocr_problem; });
+  var ocrLine = data.can_upload && hasOcrDocs ? '<div class="hr-doc-hint">' + (ocr.enabled
+    ? 'Распознавание паспорта и ВУ - пилот до ' + esc(String(ocr.until || '').split('-').reverse().join('.')) + ', в этом месяце ' + ocr.used + ' из ' + ocr.limit + '. Только по кнопке, данные потом проверяет человек.'
+    : 'Распознавание недоступно: ' + esc(ocr.reason || '')) + '</div>' : '';
   var add = data.can_upload ? '<div class="cx-chips hr-owner-pick">' + Object.keys(DOC_LABEL).map(function (k) {
     return '<button type="button" class="crm-chip" data-doc-add="' + k + '">' + ico('plus') + esc(DOC_LABEL[k]) + '</button>';
   }).join('') + '</div><div class="hr-doc-hint">PDF или фото (JPG, PNG, HEIC), до 15 МБ. Видят руководители, HR и начальник колонны кандидата, СБ.</div>' : '';
-  $('#hr-docs').innerHTML = (rows || '<div class="dr-empty">Документов пока нет</div>') + add;
+  $('#hr-docs').innerHTML = (rows || '<div class="dr-empty">Документов пока нет</div>') + ocrLine + add;
   $$('#hr-docs [data-doc]').forEach(function (b) { b.addEventListener('click', function () { openDoc(b.getAttribute('data-doc')); }); });
+  $$('#hr-docs [data-ocr]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      b.disabled = true; b.textContent = 'Распознаю...';
+      api('/hiring/document_ocr', { doc: Number(b.getAttribute('data-ocr')) }).then(function (r) {
+        if (!r.ok) { toast(r.data.error || 'Не распознано', 'red'); b.disabled = false; b.textContent = 'Распознать'; return; }
+        toast('Распознано - проверьте поля и сохраните', 'green'); loadDocs(id);
+      });
+    });
+  });
+  $$('#hr-docs [data-ocr-edit]').forEach(function (b) {
+    b.addEventListener('click', function () { var w = b.closest('.hr-doc-wrap'); $('.hr-ocr-view', w).hidden = true; $('.hr-ocr-form', w).hidden = false; });
+  });
+  $$('#hr-docs [data-ocr-save]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var w = b.closest('.hr-doc-wrap');
+      var fields = $$('[data-ocr-key]', w).map(function (el) { return { key: el.getAttribute('data-ocr-key'), value: el.value }; });
+      var an = $('[data-apply="name"]', w), ac = $('[data-apply="cat"]', w);
+      b.disabled = true;
+      api('/hiring/document_ocr_save', { doc: Number(b.getAttribute('data-ocr-save')), fields: fields, apply_name: !!(an && an.checked), apply_cat: !!(ac && ac.checked) }).then(function (r) {
+        b.disabled = false;
+        if (!r.ok) { toast(r.data.error || 'Не сохранилось', 'red'); return; }
+        toast('Данные документа сохранены' + ((r.data.applied || []).length ? ', карточка обновлена' : ''), 'green');
+        if ((r.data.applied || []).length) openCandidate(id, true); else loadDocs(id);
+      });
+    });
+  });
   $$('#hr-docs [data-doc-del]').forEach(function (b) {
     b.addEventListener('click', function () {
       var name = (b.closest('.hr-doc').querySelector('.hr-doc-open') || {}).textContent || 'документ';
@@ -826,6 +859,28 @@ function paintDocs(id, data) {
       })
       .catch(function () { toast('Нет связи с сервером', 'red'); });
   };
+}
+/* Распознанные поля документа: черновик - форма «проверьте и сохраните» (распознавание ошибается, особенно
+   на рукописном «кем выдан»), проверенные - строки только для чтения + «Исправить» (без нового платного вызова). */
+function ocrBlock(x, canEdit) {
+  if (x.ocr_state === 'none' || !x.ocr_fields || !x.ocr_fields.length) return '';
+  var isLicense = x.doc_type === 'license';
+  var form = '<div class="hr-ocr-form"' + (x.ocr_state === 'confirmed' ? ' hidden' : '') + '>' +
+    '<div class="hr-hint-amber">Распознано автоматически - сверьте с документом и исправьте ошибки.</div>' +
+    '<div class="dr-grid2 hr-grid">' + x.ocr_fields.map(function (f) {
+      return '<div class="dr-field"><label>' + esc(f.label) + '</label><input class="dr-input" data-ocr-key="' + esc(f.key) + '" value="' + esc(f.value) + '" maxlength="300"' + (canEdit ? '' : ' disabled') + '></div>';
+    }).join('') + '</div>' +
+    (canEdit ? '<div class="hr-inline hr-wrap hr-ocr-apply">' +
+      '<label class="hr-check"><input type="checkbox" data-apply="name"> ФИО - в карточку кандидата</label>' +
+      (isLicense ? '<label class="hr-check"><input type="checkbox" data-apply="cat" checked> Категорию (CE) - в карточку</label>' : '') +
+      '<button type="button" class="crm-chip" data-ocr-save="' + x.id + '">' + ico('check') + 'Сохранить проверенное</button></div>' : '') +
+  '</div>';
+  var view = x.ocr_state === 'confirmed' ? '<div class="hr-ocr-view">' + x.ocr_fields.map(function (f) {
+      return '<div class="dr-row"><span>' + esc(f.label) + '</span><span>' + esc(f.value) + '</span></div>';
+    }).join('') +
+    '<div class="hr-doc-hint">Проверено' + (x.ocr_confirmed_name ? ': ' + esc(x.ocr_confirmed_name) : '') + (x.ocr_confirmed_at ? ', ' + esc(fmtDateTime(x.ocr_confirmed_at)) : '') +
+      (canEdit ? ' · <button type="button" class="hr-doc-open hr-link" data-ocr-edit="' + x.id + '">Исправить</button>' : '') + '</div></div>' : '';
+  return '<div class="hr-ocr">' + view + form + '</div>';
 }
 function openDoc(docId) {
   // Окно открываем сразу по клику (иначе браузер телефона заблокирует всплывающее), адрес - после загрузки.

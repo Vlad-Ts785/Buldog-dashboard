@@ -4694,8 +4694,13 @@ function openDrawerForm(o, repeat, who, prefill) {
 }
 /* 25.09, Влад: «"Водитель РФ" - очень частое примечание, нужна такая же галочка, как "под
    данные", рядом - в примечание автоматом запись должна появляться, и флаг РФ смайлик».
-   Тег - константа, чтобы галочка/чтение/запись всегда сверялись с ОДНИМ и тем же текстом. */
-var RF_DRIVER_TAG_ = 'Водитель РФ 🇷🇺';
+   Тег - константа, чтобы галочка/чтение/запись всегда сверялись с ОДНИМ и тем же текстом.
+   Флаг убран (тот же день): на Windows флаги-эмодзи принципиально не рисуются картинкой -
+   показывается буквенный код в квадратиках («RU»), проверено - у Влада так же ломался
+   флаг, вставленный им самим вручную, не только этот тег. Не баг данных (БД - сквозной
+   utf8mb4, проверено), а ограничение шрифта Windows - без надёжной картинки флаг не нужен. */
+var RF_DRIVER_TAG_ = 'Водитель РФ';
+var RF_DRIVER_TAG_OLD_ = 'Водитель РФ 🇷🇺'; /* распознаём и подчищаем, если заявка успела сохраниться с флагом */
 function renderForm() {
   var o = formOrder, repeat = formRepeat, isLog = formWho === 'log';
   var evening = false; /* Влад 11.09: «если сегодня завожу - сегодня; надо - руками нажму завтра» */
@@ -4730,7 +4735,7 @@ function renderForm() {
   }
 
   var hasContact = !!(o && (o.customer_contact_name || o.customer_contact_phone));
-  var curRfDriver = !!(o && o.note && String(o.note).indexOf(RF_DRIVER_TAG_) >= 0);
+  var curRfDriver = !!(o && o.note && (String(o.note).indexOf(RF_DRIVER_TAG_) >= 0 || String(o.note).indexOf(RF_DRIVER_TAG_OLD_) >= 0));
   $('#op2-d-body').innerHTML =
     '<div class="op2-cols"><div class="op2-main">' +
     '<div class="op2-sect"><div class="op2-t">Когда и для кого</div><div class="op2-grid2">' +
@@ -5008,9 +5013,14 @@ function wireForm() {
     if (this.checked) {
       if (v.indexOf(RF_DRIVER_TAG_) < 0) note.value = (v.trim() ? v.trim() + ' · ' : '') + RF_DRIVER_TAG_;
     } else {
-      var s = v.split(' · ' + RF_DRIVER_TAG_).join('');
-      s = s.split(RF_DRIVER_TAG_ + ' · ').join('');
-      if (s.trim() === RF_DRIVER_TAG_) s = '';
+      /* RF_DRIVER_TAG_OLD_ - на сегодняшних заявках мог остаться тег со снятым флагом
+         (первый заход этой же фичи, до правки) - снимаем и старую форму тоже, чтобы не
+         оставлять обломок с эмодзи, который на Windows всё равно не рисуется. */
+      var s = v;
+      [RF_DRIVER_TAG_OLD_, RF_DRIVER_TAG_].forEach(function (tag) {
+        s = s.split(' · ' + tag).join('').split(tag + ' · ').join('');
+        if (s.trim() === tag) s = '';
+      });
       note.value = s;
     }
     tickState();

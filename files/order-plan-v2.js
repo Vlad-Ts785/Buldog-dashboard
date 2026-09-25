@@ -1598,7 +1598,7 @@ function buildDom() {
              table-layout:fixed + colgroup из превью (сумма 1180 = ноутбук с меню), шире -
              колонки растут пропорционально, горизонтального скролла нет. */
           '<table class="op2-tbl op2-mgr-tbl" id="op2-mgr-tbl">' +
-            '<colgroup><col style="width:46px"><col style="width:96px"><col style="width:86px"><col style="width:64px"><col style="width:88px"><col style="width:138px"><col style="width:208px"><col style="width:150px"><col style="width:164px"><col style="width:60px"><col style="width:80px"></colgroup>' +
+            '<colgroup><col style="width:46px"><col style="width:96px"><col style="width:86px"><col style="width:64px"><col style="width:88px"><col style="width:138px"><col style="width:208px"><col style="width:150px"><col class="op2-notecol" style="width:200px"><col style="width:164px"><col style="width:60px"><col style="width:80px"></colgroup>' +
             '<thead><tr>' +
               '<th>№</th>' +
               '<th data-sort="mgr">Мен.<span class="op2-s">↕</span></th>' +
@@ -1606,7 +1606,7 @@ function buildDom() {
               '<th data-sort="t" class="op2-on">Время<span class="op2-s">▲</span></th>' +
               '<th data-sort="type">Техника<span class="op2-s">↕</span></th>' +
               '<th data-sort="cust">Заказчик<span class="op2-s">↕</span></th>' +
-              '<th>Откуда → куда</th><th>Груз</th><th>Машина · водитель</th>' +
+              '<th>Откуда → куда</th><th>Груз</th><th class="op2-notecol">Примечание</th><th>Машина · водитель</th>' +
               '<th class="op2-c" data-sort="st">Статус<span class="op2-s">↕</span></th>' +
               '<th class="op2-num" data-sort="price" title="Стоимость">Стоим.<span class="op2-s">↕</span></th>' +
             '</tr></thead>' +
@@ -1662,7 +1662,7 @@ function buildDom() {
         '</div>' +
         '<div class="op2-tblwrap op2-x">' +
           '<table class="op2-tbl" id="op2-log-tbl">' +
-            '<colgroup><col style="width:46px"><col style="width:96px"><col style="width:86px"><col style="width:64px"><col style="width:88px"><col style="width:138px"><col style="width:208px"><col style="width:150px"><col style="width:164px"><col style="width:60px"><col style="width:80px"></colgroup>' +
+            '<colgroup><col style="width:46px"><col style="width:96px"><col style="width:86px"><col style="width:64px"><col style="width:88px"><col style="width:138px"><col style="width:208px"><col style="width:150px"><col class="op2-notecol" style="width:200px"><col style="width:164px"><col style="width:60px"><col style="width:80px"></colgroup>' +
             '<thead id="op2-log-head"><tr>' +
               '<th class="op2-on" data-sort="n" title="По умолчанию - по номеру заявки">№<span class="op2-s">▲</span></th>' +
               '<th data-sort="mgr">Мен.<span class="op2-s">↕</span></th>' +
@@ -1670,7 +1670,7 @@ function buildDom() {
               '<th data-sort="t">Время<span class="op2-s">↕</span></th>' +
               '<th data-sort="type">Техника<span class="op2-s">↕</span></th>' +
               '<th data-sort="cust">Заказчик<span class="op2-s">↕</span></th>' +
-              '<th>Откуда → куда</th><th>Груз</th>' +
+              '<th>Откуда → куда</th><th>Груз</th><th class="op2-notecol">Примечание</th>' +
               '<th>Машина</th>' +
               '<th class="op2-c" data-sort="st">Статус<span class="op2-s">↕</span></th>' +
               '<th class="op2-num" data-sort="price" title="Стоимость">Стоим.<span class="op2-s">↕</span></th>' +
@@ -2633,6 +2633,20 @@ function cargoCell_(o) {
     '<span class="op2-cg">' + (name ? esc(name) : '<span class="op2-ask">уточнить</span>') + '</span>' +
     (sub ? '<span class="op2-gab">' + sub + '</span>' : '') + '</td>';
 }
+/* «Примечание» (25.09, Влад: "ребята очень просят колонку примечания после груза... почти у
+   всех мониторы... на ноутбуке не впишешь") - то же поле note, что в подсказке на плитке
+   Планировки, единственный источник. Колонка видна, только когда самой ТАБЛИЦЕ хватает ширины
+   (container query на .op2-tblwrap в order-plan-v2.css), а не по ширине окна - свёрнутое/
+   развёрнутое меню и масштаб браузера учитываются сами. Ссылки (Яндекс.Карты и т.п.)
+   вырезаются, как в подсказке Планировки - в узкой колонке они только съедают строки. */
+function noteCell_(o) {
+  var t = String(o.note || '').replace(/https?:\/\/\S+/g, '').replace(/[ \t]{2,}/g, ' ').trim();
+  return '<td class="op2-notecol"' + (t ? ' title="' + esc(t) + '"' : '') + '>' +
+    (t ? '<span class="op2-note">' + esc(t) + '</span>' : '<span class="op2-dim">—</span>') + '</td>';
+}
+/* ячейка-заглушка в итоговой строке: пока колонка скрыта, её нет вовсе; когда видна - занимает
+   ровно её место, и сумма остаётся под «Стоим.». */
+var FOOT_NOTE_GAP_ = '<td class="op2-notecol"></td>';
 function timeCell(o) {
   var t = oTime(o);
   return '<td>' + (t ? '<span class="op2-time">' + esc(t) + '</span>' : '<span class="op2-time op2-ask" title="Время подачи уточняется">уточнить</span>') + '</td>';
@@ -2858,7 +2872,7 @@ function renderMgr() {
       mgrCodeCell_(o, canChangeManager_(o)) + logCodeCell_(o) +
       timeCell(o) + techCell_(o) +
       custCell_(o, WIDE && F.q ? '<span class="op2-code" style="margin-right:6px">' + esc(dm(o.service_date)) + '</span>' : '') +
-      routeCell(o) + cargoCell_(o) +
+      routeCell(o) + cargoCell_(o) + noteCell_(o) +
       '<td>' + mgrVehCell(o) + transferSubHtml_(o) + '</td>' +
       stCell_(o) + priceCell_(o) +
       '</tr>';
@@ -2874,7 +2888,7 @@ function renderMgr() {
     var k = oSt(o);
     sumByKey[k === 'ot' ? 'ot' : k === 'nz' ? 'nz' : 'ok'] += num(o.price);
   });
-  $('#op2-mgr-foot').innerHTML = '<tr><td colspan="7">' +
+  $('#op2-mgr-foot').innerHTML = '<tr><td colspan="7">' + FOOT_NOTE_GAP_ +
     (WIDE && F.q ? 'Поиск за 3 месяца · «' + esc(F.q) + '» · ' : 'Итого за ' + (TO_DATE ? 'неделю' : 'день') + ' · ') +
     rows.length + ' ' + plural(rows.length, 'заявка', 'заявки', 'заявок') + (cash ? ' · ' + cash + ' наличными' : '') +
     '</td><td colspan="4" class="op2-num op2-mfoot">' +
@@ -3043,7 +3057,7 @@ function renderLog() {
       mgrCodeCell_(o, canChangeManager_(o)) + logCodeCell_(o, true) +
       timeCell(o) + techCell_(o, true) +
       custCell_(o, isFresh(o) ? '<span class="op2-st-chip op2-ok" style="margin-right:6px">новая</span>' : '') +
-      routeCell(o) + cargoCell_(o) +
+      routeCell(o) + cargoCell_(o) + noteCell_(o) +
       '<td>' + vehCellLog(o) + transferSubHtml_(o) + '</td>' +
       stCell_(o) + priceCell_(o) +
       '</tr>';
@@ -3051,7 +3065,7 @@ function renderLog() {
   var cash = rows.filter(function (o) { return !!o.cash; }).length;
   var sum = rows.reduce(function (a, o) { return a + num(o.price); }, 0);
   $('#op2-log-foot').innerHTML = '<tr><td colspan="9">Итого за день · ' + rows.length + ' ' + plural(rows.length, 'заявка', 'заявки', 'заявок') +
-    (cash ? ' · ' + cash + ' наличными' : '') + '</td><td colspan="2" class="op2-num">' + esc(fmtP(sum) || '—') + '</td></tr>';
+    (cash ? ' · ' + cash + ' наличными' : '') + '</td>' + FOOT_NOTE_GAP_ + '<td colspan="2" class="op2-num">' + esc(fmtP(sum) || '—') + '</td></tr>';
 }
 /* «новая» - создана за последние 10 минут и ещё не разобрана */
 function isFresh(o) {

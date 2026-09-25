@@ -88,6 +88,8 @@ function sbSyncRecent() {
     var rows = sbReadRows_(sh, cols, from, last);
     var r = sbCall_('post', '/rows', { rows: rows });
     if (r.ok) sbPaint_(sh, cols, rows, r.statuses || {}, false);
+    else sbReportError_('сверка строк', r.error);
+  } catch (err) { sbReportError_('sbSyncRecent', err); throw err;
   } finally { lock.releaseLock(); }
 }
 
@@ -106,6 +108,7 @@ function sbOnEdit(e) {
     var rows = sbReadRows_(sh, cols, r1, r2);
     var r = sbCall_('post', '/rows', { rows: rows });
     if (r.ok) sbPaint_(sh, cols, rows, r.statuses || {}, false);
+  } catch (err) { sbReportError_('sbOnEdit', err);
   } finally { lock.releaseLock(); }
 }
 
@@ -236,25 +239,57 @@ function sbPaint_(sh, cols, rows, statuses, force) {
 // Заявки из «Найма» (HR перевёл кандидата на «Проверку СБ»): новая строка внизу таблицы, либо - если СБ ещё не
 // ответила или задала вопрос - обновление ПРЕЖНЕЙ строки кандидата (по ID) с очищенным «Комментарием».
 // После записи сообщаем серверу ID строки - по нему потом вернётся ответ СБ.
+// ЗАЩИТА ОТ ДУБЛЕЙ (25.09, живой случай: скрипт дописывал строку и падал до подтверждения - за час 11 копий):
+// номер ID берётся ДО записи и запоминается в свойствах скрипта (SB_REQ_<номер заявки>), строка пишется сразу
+// вместе с ID одним действием. Повторная выдача той же заявки строку НЕ дописывает - только подтверждает снова.
 function sbPullQueue_(sh, cols) {
   var r = sbCall_('get', '/queue');
   if (!r.ok || !r.items || !r.items.length) return;
+  var props = PropertiesService.getScriptProperties();
   var width = Math.max(cols.id, cols.paintTo);
-  var idRows = null, acks = [];
+  var idRows = sbIdRows_(sh, cols), acks = [];
   r.items.forEach(function (it) {
-    var row = null;
-    if (it.uid) { if (!idRows) idRows = sbIdRows_(sh, cols); row = idRows[it.uid] || null; }
-    var isNew = !row;
-    if (isNew) row = sh.getLastRow() + 1;
-    var vals = sh.getRange(row, 1, 1, width).getValues()[0];
-    Object.keys(SB_FIELDS).forEach(function (k) { if (cols[k]) vals[cols[k] - 1] = it.cells && it.cells[k] != null ? it.cells[k] : ''; });
-    sh.getRange(row, 1, 1, width).setValues([vals]);
-    sh.getRange(row, 1, 1, cols.paintTo).setBackground(null);
-    var uid = isNew ? '' : it.uid;
-    if (!uid) { sbEnsureIds_(sh, cols); uid = String(sh.getRange(row, cols.id).getValue() || ''); }
-    if (uid) acks.push({ req_id: it.req_id, uid: uid, row: row });
+    try {
+      var done = props.getProperty('SB_REQ_' + it.req_id);
+      if (done && idRows[done]) { acks.push({ req_id: it.req_id, uid: done, row: idRows[done] }); return; }
+      var uid = it.uid && idRows[it.uid] ? it.uid : '';
+      var row = uid ? idRows[uid] : null;
+      var vals;
+      if (!row) {
+        row = sh.getLastRow() + 1;
+        uid = 'SB-' + sbTakeId_(sh, cols, props);
+        props.setProperty('SB_REQ_' + it.req_id, uid);
+        vals = []; for (var i = 0; i < width; i++) vals.push('');
+      } else {
+        vals = sh.getRange(row, 1, 1, width).getValues()[0];
+      }
+      Object.keys(SB_FIELDS).forEach(function (k) { if (cols[k]) vals[cols[k] - 1] = it.cells && it.cells[k] != null ? it.cells[k] : ''; });
+      vals[cols.id - 1] = uid;
+      sh.getRange(row, 1, 1, width).setValues([vals]);
+      idRows[uid] = row;
+      acks.push({ req_id: it.req_id, uid: uid, row: row });
+      try { sh.getRange(row, 1, 1, cols.paintTo).setBackground('#ffffff'); } catch (e2) { sbReportError_('цвет строки ' + row, e2); }
+    } catch (err) { sbReportError_('заявка ' + it.req_id, err); }
   });
-  if (acks.length) sbCall_('post', '/queue_ack', { acks: acks });
+  if (acks.length) { var a = sbCall_('post', '/queue_ack', { acks: acks }); if (!a.ok) sbReportError_('queue_ack', a.error); }
+}
+// Следующий номер ID «SB-N» (тот же счётчик, что у sbEnsureIds_), сразу сохраняется.
+function sbTakeId_(sh, cols, props) {
+  var next = Number(props.getProperty('SB_NEXT_ID') || '0');
+  if (!next) {
+    next = 1;
+    var map = sbIdRows_(sh, cols);
+    Object.keys(map).forEach(function (u) { var m = u.match(/^SB-(\d+)$/); if (m && Number(m[1]) >= next) next = Number(m[1]) + 1; });
+  }
+  props.setProperty('SB_NEXT_ID', String(next + 1));
+  return next;
+}
+// Ошибка скрипта - на сервер ЯРД (журнал выполнений Apps Script оттуда не виден).
+function sbReportError_(where, err) {
+  try {
+    console.error(where, err);
+    sbCall_('post', '/client_error', { where: String(where), message: String((err && (err.stack || err.message)) || err) });
+  } catch (e) {}
 }
 function sbIdRows_(sh, cols) {
   var last = sh.getLastRow(), map = {};

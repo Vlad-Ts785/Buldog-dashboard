@@ -306,6 +306,15 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7;stroke
 .kv{display:grid;grid-template-columns:100px 1fr;gap:4px 10px;font-size:13px;padding:6px 0;border-bottom:1px solid var(--border)}
 .kv .k{color:var(--muted)}
 .kv .v{color:var(--text);font-weight:600}
+/* 24.09, Влад: «примечание должно мигать красным - и в белом режиме, и в тёмном, чтобы было
+   видно». Первый заход (opacity 1→.25 на --tint-red) на белом фоне оказался «тускловато» -
+   --tint-red нарочно приглушён для читаемости ОБЫЧНОГО текста, а простое затухание его
+   прозрачности на полпути даёт блёклый розовато-серый, не тревожный красный. Второй заход -
+   сплошной бейдж на --red (одно и то же яркое значение в обеих темах, не --tint-red) с белым
+   текстом, тот же приём, что уже .btn.danger в этом файле - мигает МЕЖДУ полностью залитым
+   состоянием и полупрозрачной красной подложкой, никогда не проваливается в блёклое. */
+.kv .v.note-warn{display:inline-block;padding:1px 8px;border-radius:6px;font-weight:700;animation:noteBlink 1.2s ease-in-out infinite}
+@keyframes noteBlink{0%,100%{background:var(--red);color:#fff}50%{background:rgba(226,75,74,.16);color:var(--tint-red)}}
 .hist-row{padding:6px 0;border-bottom:1px solid var(--border);font-size:12.5px;color:var(--muted)}
 .hist-row b{color:var(--text)}
 
@@ -395,6 +404,7 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7;stroke
     <symbol id="i-pg-people" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="7" r="3.2"/><path d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6"/></symbol>
     <symbol id="i-pg-salary" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="16" height="9" rx="1.6"/><circle cx="10" cy="10.5" r="2"/></symbol>
     <symbol id="i-pg-my-page" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="15" height="12" rx="2"/><circle cx="7" cy="9.6" r="1.7"/><line x1="11" y1="8.6" x2="15" y2="8.6"/><line x1="11" y1="11" x2="15" y2="11"/><line x1="4.6" y1="13.5" x2="9.5" y2="13.5"/></symbol>
+    <symbol id="i-view-as" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 10s3-5.3 8-5.3S18 10 18 10s-3 5.3-8 5.3S2 10 2 10z"/><circle cx="10" cy="10" r="2.3"/></symbol>
     <symbol id="i-pg-order-plan" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="12" height="14" rx="2"/><rect x="7" y="2.3" width="6" height="3" rx="1"/><line x1="7" y1="9" x2="13" y2="9"/><line x1="7" y1="12" x2="13" y2="12"/><line x1="7" y1="15" x2="11" y2="15"/></symbol>
     <symbol id="i-pg-logistics-plan" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="16" height="14" rx="1.4"/><line x1="2" y1="8" x2="18" y2="8"/><line x1="6" y1="11.3" x2="12" y2="11.3"/><line x1="6" y1="14.3" x2="15" y2="14.3"/></symbol>
     <symbol id="i-pg-calculator" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2.3" width="12" height="15.4" rx="2"/><rect x="6.2" y="4.3" width="7.6" height="3.2" rx="0.7"/><circle cx="7" cy="11" r="0.9" fill="currentColor" stroke="none"/><circle cx="10" cy="11" r="0.9" fill="currentColor" stroke="none"/><circle cx="13" cy="11" r="0.9" fill="currentColor" stroke="none"/><circle cx="7" cy="14.3" r="0.9" fill="currentColor" stroke="none"/><circle cx="10" cy="14.3" r="0.9" fill="currentColor" stroke="none"/><circle cx="13" cy="14.3" r="0.9" fill="currentColor" stroke="none"/></symbol>
@@ -451,6 +461,8 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7;stroke
 <div class="navdrawer" id="navdrawer"></div>
 <div class="toast" id="toast"></div>
 
+<!-- Стандарт госномера (24.09) - тот же помощник ввода, что в «Задании» на ПК. -->
+<script src="gos-plate.js"></script>
 <script>
 (function(){
 "use strict";
@@ -1134,11 +1146,18 @@ function passText_(o){
   return 'Тягач: '+(o.vehicle.gos?((o.vehicle.marka?o.vehicle.marka+' ':'')+o.vehicle.gos):'—')+'\nВодитель: '+(o.vehicle.driver||'—');
 }
 function driverTaskText_(o){
+  /* 25.09, Влад (срочно): «убедись, что с любого режима отправляются полные данные по
+     заданию для водителя» - этот текст (кнопка «Скопировать задание», ручной запасной путь
+     рядом с «Отправить задание в Max») не включал контакт на погрузке/выгрузке вообще,
+     хотя десктопная driverText() (order-plan-v2.js) его уже давно включает - тот же формат
+     "Имя · телефон" перенесён сюда один в один. */
   var lines=['ЗАЯВКА №'+o.day_no+' · '+(o.equipment_type||''), (o.service_time||'уточнить')+' · '+fmtDate(fromIso(o.service_date))];
   if(o.vehicle) lines.push('Машина: '+o.vehicle.gos+(o.vehicle.driver?(' · '+o.vehicle.driver):''));
   if(o.cargo) lines.push('Груз: '+o.cargo+(o.weight?(' · '+o.weight+' т'):''));
   lines.push('Погрузка: '+(o.from[0]||'уточнить')+(o.from[1]?(', '+o.from[1]):''));
+  if(o.load_contact_name||o.load_contact_phone) lines.push('Контакт: '+[o.load_contact_name,o.load_contact_phone].filter(Boolean).join(' · '));
   lines.push('Выгрузка: '+(o.to[0]||'уточнить')+(o.to[1]?(', '+o.to[1]):''));
+  if(o.unload_contact_name||o.unload_contact_phone) lines.push('Контакт: '+[o.unload_contact_name,o.unload_contact_phone].filter(Boolean).join(' · '));
   if(o.note) lines.push('Примечание: '+o.note);
   return lines.join('\n');
 }
@@ -1191,11 +1210,28 @@ function renderViewSheet(head,body,foot){
   }
   if(full){
     html += '<div class="f-label">Груз и точки</div>';
-    html += '<div class="kv"><div class="k">Груз</div><div class="v">'+esc(o.cargo||'уточнить')+'</div><div class="k">Габарит</div><div class="v">'+esc(o.gabarit)+'</div>' +
+    /* 24.09, Влад: «для логиста важно, чтобы на этой странице была информация по габаритам
+       и массе груза» - o.weight/o.cargo_dims уже приходят с сервера (маппятся строкой 579
+       выше), просто не были показаны в этой карточке. Масса - к «Грузу» (тот же формат, что
+       уже собирает copyOrderText_ ниже: "· N т"), Д×Ш×В - к «Габариту», тем же разделителем. */
+    /* 25.09, Влад (срочно): «убедись, что с любого режима отправляются полные данные по
+       заданию для водителя» - реальный случай, контакт на погрузке/выгрузке был сохранён
+       (менеджер его вводил), но не показывался НИГДЕ в этой карточке - логист физически не
+       мог его увидеть и передать водителю, хотя данные лежали в базе. contactCell_ - тот же
+       формат "Имя · телефон", что уже в десктопной driverText() (order-plan-v2.js), телефон
+       кликабелен (tel:), тот же приём, что уже у телефона водителя чуть выше в этой карточке. */
+    var contactCell_ = function(name, phone){
+      if(!name && !phone) return '—';
+      var label = [name, phone].filter(Boolean).join(' · ');
+      if(!phone) return esc(label);
+      return '<a href="tel:'+esc(String(phone).replace(/[^\d+]/g,''))+'" style="color:var(--blue)">'+esc(label)+'</a>';
+    };
+    html += '<div class="kv"><div class="k">Груз</div><div class="v">'+esc(o.cargo||'уточнить')+(o.weight?(' · '+esc(o.weight)+' т'):'')+'</div><div class="k">Габарит</div><div class="v">'+esc(o.gabarit)+(o.cargo_dims?(' · '+esc(o.cargo_dims)):'')+'</div>' +
       '<div class="k">Откуда</div><div class="v">'+esc(o.from[0]||'уточнить')+(o.from[1]?(', '+esc(o.from[1])):'')+'</div><div class="k">Куда</div><div class="v">'+esc(o.to[0]||'уточнить')+(o.to[1]?(', '+esc(o.to[1])):'')+'</div>' +
+      '<div class="k">Контакт на погрузке</div><div class="v">'+contactCell_(o.load_contact_name, o.load_contact_phone)+'</div><div class="k">Контакт на выгрузке</div><div class="v">'+contactCell_(o.unload_contact_name, o.unload_contact_phone)+'</div>' +
       '<div class="k">Документы</div><div class="v">'+esc(o.documents||'—')+'</div><div class="k">Переработка</div><div class="v">'+esc(o.rework)+'</div>' +
       '<div class="k">Стоимость</div><div class="v mono">'+fmtPrice(o.price)+'</div><div class="k">Оплата</div><div class="v">'+esc(o.payment_status||'—')+(o.cash?' · нал.':'')+'</div>' +
-      '<div class="k">Примечание</div><div class="v">'+esc(o.note||'—')+'</div></div>';
+      '<div class="k">Примечание</div><div class="v'+(o.note?' note-warn':'')+'">'+esc(o.note||'—')+'</div></div>';
     if(o.vehicle && o.vehicle.own){
       html += '<div class="f-label">Документы</div>';
       html += '<div class="list-row" id="rowSts1"><svg><use href="#i-doc"/></svg>СТС тягача ⤓<span class="go"></span></div>';
@@ -1948,13 +1984,21 @@ function renderNewSheet(head,body,foot){
   tick();
   /* «Имя · телефон» одной строкой -> {name, phone}, дословно desktop splitContact()
      (order-plan-v2.js) - тот же разбор, чтобы сервер получал те же по смыслу два поля. */
+  /* 25.09, найден реальный случай: менеджер ввёл "+79262543570 Эдуард" (телефон ПЕРЕД
+     именем, а не после, как в подсказке "Имя · телефон") - старая версия ловила телефон
+     ТОЛЬКО в конце строки (m$), поэтому вся строка целиком ушла в имя, а поле телефона
+     осталось пустым. Заявка ушла водителю без номера контакта на погрузке/выгрузке - не
+     видно было НИГДЕ (ни в карточке, ни в задании боту). Добавлен второй разбор - телефон
+     в НАЧАЛЕ строки, тот же класс проверки, что уже есть для конца. */
   function splitContact_(s){
     s = String(s||'').trim();
     if(!s) return {name:'', phone:''};
     var parts = s.split('·');
     if(parts.length>=2) return {name:parts[0].trim(), phone:parts.slice(1).join('·').trim()};
-    var m = s.match(/([+\d][\d\s\-()]{6,})$/);
-    if(m) return {name:s.slice(0,m.index).replace(/[,\s]+$/,'').trim(), phone:m[1].trim()};
+    var mEnd = s.match(/([+\d][\d\s\-()]{6,})$/);
+    if(mEnd) return {name:s.slice(0,mEnd.index).replace(/[,\s]+$/,'').trim(), phone:mEnd[1].trim()};
+    var mStart = s.match(/^([+\d][\d\s\-()]{6,})/);
+    if(mStart) return {name:s.slice(mStart[0].length).replace(/^[,\s]+/,'').trim(), phone:mStart[1].trim()};
     return {name:s, phone:''};
   }
   $('fSaveBtn').addEventListener('click', function(){
@@ -2023,7 +2067,11 @@ function renderHiredSheet(head,body,foot){
     var b=$('hSave'); b.disabled = !(comp && rate); b.textContent = b.disabled ? 'Укажи компанию и ставку' : 'Поставить наёмника';
   }
   ['hCompany','hRate'].forEach(function(id){ $(id).addEventListener('input', tickH); });
+  if(window.YardPlate){ YardPlate.wire($('hTruck'),'tractor'); YardPlate.wire($('hTrailer'),'trailer'); }
   $('hSave').addEventListener('click', function(){
+    // Госномер - только по стандарту (24.09); сервер проверит то же самое.
+    var plateErr = window.YardPlate ? (YardPlate.check($('hTruck'),'tractor') || YardPlate.check($('hTrailer'),'trailer')) : '';
+    if(plateErr){ toast('Госномер не по стандарту', plateErr, null, null, {err:true}); return; }
     var btn=$('hSave'); btn.disabled=true; btn.textContent='Сохраняю…';
     apiPost_('/orders/hired_set', {
       order_id:o.id, carrier_name:$('hCompany').value, carrier_contact:$('hContact').value,
@@ -2396,7 +2444,13 @@ function openDrawer(){
     pendingSection = null;
     html+='<div class="nd-item'+(p.page==='order-plan'?' on':'')+'" data-nav="'+p.page+'"><svg><use href="#'+p.icon+'"/></svg><span>'+esc(p.label)+'</span></div>';
   });
-  html+='<div class="nd-sec">Общее</div><div class="nd-item" data-nav="settings"><svg><use href="#i-settings"/></svg><span>Настройки</span></div>';
+  html+='<div class="nd-sec">Общее</div>';
+  // «Смотреть как сотрудник» (24.09, Влад: «хочу пользоваться вьювером и с мобильного») - только
+  // настоящему admin (ME - реальная сессия, не вьювер). Своего списка сотрудников здесь нет и
+  // быть не должно: пункт ведёт в ОБЩИЙ выбор index.html (#viewas, viewAsListHtml_) - на
+  // телефоне тот же состав, что на компьютере. Подпись и янтарный цвет - 1:1 с #view-as-btn.
+  if (ME.role === 'admin') html+='<div class="nd-item" data-nav="__viewas"'+(eff.viewingAs?' style="color:var(--amber)"':'')+'><svg><use href="#i-view-as"/></svg><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(eff.viewingAs?'Вы смотрите как: '+eff.name:'Смотреть как сотрудник')+'</span></div>';
+  html+='<div class="nd-item" data-nav="settings"><svg><use href="#i-settings"/></svg><span>Настройки</span></div>';
   html+='</div>';
   d.innerHTML=html;
   d.classList.add('open');
@@ -2407,6 +2461,7 @@ function openDrawer(){
       if(id==='order-plan'){ closeDrawer(); return; }
       if(id==='settings'){ closeDrawer(); openSheet('settings', {}, 'full'); return; }
       if(id==='__exit-viewas'){ try{ localStorage.removeItem('view_as'); }catch(e){} location.href = 'index.html'; return; }
+      if(id==='__viewas'){ location.href = 'index.html#viewas'; return; }
       location.href = 'index.html#page=' + id;
     });
   });

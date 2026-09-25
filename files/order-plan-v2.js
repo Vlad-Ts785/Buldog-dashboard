@@ -3511,7 +3511,8 @@ function openPop(anchor, o, forceAdd) {
      пикер её не видел вообще. */
   var hv = oHired(o);
   $('#op2-pop-cur').innerHTML = vs.length
-    ? 'Сейчас: <b>' + esc(vs.map(function (v) { return v.vehicle_gos; }).join(', ')) + '</b>'
+    ? 'Сейчас: <b>' + esc(vs.map(function (v) { return v.vehicle_gos; }).join(', ')) + '</b>' +
+      (hv ? ' + наём <b>' + esc(hv.vehicle_gos || '') + '</b> ' + esc(hv.carrier_name || '') : '')
     : hv
       ? 'Сейчас: <b>' + esc(hv.vehicle_gos || 'наёмник') + '</b> · наём, ' + esc(hv.carrier_name || 'перевозчик уточняется')
       : 'Сейчас: <b>без машины</b>' + (o.taken_by_name ? ' · ' + takenByHtml_(o, 'взял', '') : '');
@@ -3567,10 +3568,15 @@ function renderPop(q) {
   if (vs.length) {
     h += '<div class="op2-vi op2-act" data-act="unset"><span class="op2-gos">Снять ' + esc(vs[0].vehicle_gos || '') + '</span><span class="op2-rt">строка вернётся в «без машины»</span></div>' +
       '<div class="op2-vi op2-act' + (popAdd ? ' op2-sel' : '') + '" data-act="add"><span class="op2-gos">Добавить вторую машину</span></div>';
-  } else if (oHired(o)) {
+  }
+  if (oHired(o)) {
     /* 23.09, Влад: «нужна кнопка, которая может снять наёмную машину с заявки» - тот же
-       op2-act/unset приём, что у своей машины чуть выше, только на другом исполнителе. */
-    h += '<div class="op2-vi op2-act" data-act="unset-hired"><span class="op2-gos">Снять наёмника' + (oHired(o).vehicle_gos ? ' ' + esc(oHired(o).vehicle_gos) : '') + '</span><span class="op2-rt">строка вернётся в «без машины»</span></div>';
+       op2-act/unset приём, что у своей машины чуть выше, только на другом исполнителе.
+       24.09 (№28 ЛСК ООО): было «else if» - при своей машине рядом кнопка пропадала, а
+       наёмник продолжал показываться в строке заявки; снять его было нечем. Сервер с
+       24.09 больше не допускает обоих сразу (замена снимает второго), но уже зависшие
+       записи должны сниматься - кнопка показывается всегда, когда наёмник есть. */
+    h += '<div class="op2-vi op2-act" data-act="unset-hired"><span class="op2-gos">Снять наёмника' + (oHired(o).vehicle_gos ? ' ' + esc(oHired(o).vehicle_gos) : '') + '</span><span class="op2-rt">' + (vs.length ? 'останется ' + esc(vs[0].vehicle_gos || '') : 'строка вернётся в «без машины»') + '</span></div>';
   }
   h += sec('Свободны ' + (oTime(o) || ''), free.length) + free.map(function (v) {
     return item(v, '<b>' + esc(v.driver || 'без водителя') + '</b>' + (v.trailer ? ' · ' + esc(v.trailer) : '') + (v.trips_today ? '<br>рейсов сегодня: ' + esc(v.trips_today) : ''));
@@ -3599,7 +3605,8 @@ function onPopBodyClick(e) {
     apiPost('/orders/executor_remove', { executor_id: hv.id }).then(function (r) {
       if (!ok_(r)) return;
       closePop(); S.tickDown();
-      toast('Снят наёмник ' + esc(gosH) + ' · заявка №' + esc(noH) + ' снова без машины');
+      var ownLeft = oOwn(o).map(function (v) { return v.vehicle_gos; }).join(', ');
+      toast('Снят наёмник ' + esc(gosH) + ' · заявка №' + esc(noH) + (ownLeft ? ' · остаётся <span class="op2-tick">' + esc(ownLeft) + '</span>' : ' снова без машины'));
       loadOrders();
     });
     return;
@@ -3636,7 +3643,9 @@ function onPopBodyClick(e) {
   if (declared) {
     ok.textContent = 'Сделать основной ' + v.gos + ' · из заявленных, без нового пропуска';
   } else {
-    ok.textContent = (vs2.length && !popAdd ? 'Заменить ' + (vs2[0].vehicle_gos || '') + ' → ' : 'Поставить ') + v.gos +
+    var hv2 = oHired(o);
+    ok.textContent = (vs2.length && !popAdd ? 'Заменить ' + (vs2[0].vehicle_gos || '') + ' → '
+      : hv2 && !popAdd ? 'Заменить наёмника ' + (hv2.vehicle_gos || '') + ' → ' : 'Поставить ') + v.gos +
       (v.driver ? ' · ' + v.driver : '') + (oTime(o) ? ' на ' + oTime(o) : '') +
       (v.state === 'busy' ? ' (занята)' : '') + (outside ? ' · вне заявленных - нужен новый пропуск' : '');
   }
@@ -3707,6 +3716,8 @@ function openHiredStep(o) {
       '<input id="op2-h-co" autocomplete="off" placeholder="Начни вводить - по первым буквам" value="' + esc(h.carrier_name || '') + '" data-entity-id="' + esc(h.carrier_id || '') + '">' +
       '<div class="op2-list" id="op2-h-colist"></div>' +
       '<span class="op2-hint">Справочник юрлиц + кого уже возили</span></div>' +
+    /* реестр партнёра (24.09) - заполняется loadHiredFleet_ после выбора компании */
+    '<div class="op2-hfleet op2-hidden" id="op2-h-fleet"></div>' +
     '<div class="op2-g2">' +
       '<div class="op2-fld"><label>Контакт у перевозчика</label><input id="op2-h-contact" autocomplete="off" placeholder="Имя · телефон" value="' + esc(h.carrier_contact || '') + '"></div>' +
       '<div class="op2-fld"><label>Статус перевозчика</label><div class="op2-cstat" id="op2-h-cs">' +
@@ -3731,6 +3742,9 @@ function openHiredStep(o) {
     '<div class="op2-margin"><span class="op2-k">Цена менеджера ' + esc(fmtP(o.price) || 'не указана') + ' · маржа</span><span class="op2-v" id="op2-h-margin">—</span></div>' +
     '<div class="op2-fld"><label>Комментарий</label><input id="op2-h-comment" autocomplete="off" placeholder="Что важно знать по перевозчику" value="' + esc(h.comment || '') + '"></div>';
   blockForeignAutofill_($('#op2-hstep'));
+  /* Стандарт госномера (24.09, Влад: «по-другому не вводится»): пробелы ставятся сами, в том
+     числе при вставке, латиница -> кириллица, ошибка подсвечивается. Решает сервер (hired_set). */
+  if (window.YardPlate) { YardPlate.wire($('#op2-h-gos'), 'tractor'); YardPlate.wire($('#op2-h-trailer'), 'trailer'); }
   /* Влад 12.09: «отдать наёмнику невозможно без указания цены» - та же логика, что у цены
      заявки при создании (tickState), только тут своя кнопка «Отдать наёмнику», не общий
      op2-f-save. «Нужен расчёт маржи в процентах сразу» - % от цены менеджера рядом с суммой,
@@ -3772,6 +3786,7 @@ function openHiredStep(o) {
   $('#op2-h-co').addEventListener('input', function () {
     updateHiredBtn_();
     this.dataset.entityId = '';
+    loadHiredFleet_('');
     var v = this.value.trim(); clearTimeout(coT);
     if (v.length < 2) { $('#op2-h-cobox').classList.remove('op2-open'); return; }
     coT = setTimeout(function () { fetchCarriers(v); }, 250);
@@ -3782,6 +3797,7 @@ function openHiredStep(o) {
     var inp = $('#op2-h-co');
     inp.value = it.dataset.name || ''; inp.dataset.entityId = it.dataset.eid || '';
     updateHiredBtn_();
+    loadHiredFleet_(inp.dataset.entityId);
     $('#op2-h-cobox').classList.remove('op2-open');
   });
   $('#op2-h-cs').addEventListener('click', function (e) {
@@ -3789,8 +3805,49 @@ function openHiredStep(o) {
     $$('.op2-chip', this).forEach(function (x) { x.classList.remove('op2-on'); });
     c.classList.add('op2-on');
   });
+  $('#op2-h-fleet').addEventListener('click', function (e) {
+    var c = e.target.closest('.op2-chip'); if (!c) return;
+    e.preventDefault();
+    var d = c.dataset;
+    function put(id, v) { var el = $(id); el.value = v || ''; el.dispatchEvent(new Event('input')); }
+    if (d.fill === 'combo' || d.fill === 'gos') put('#op2-h-gos', d.gos);
+    if (d.fill === 'combo' || d.fill === 'trailer') put('#op2-h-trailer', d.trailer);
+    if (d.fill === 'combo' || d.fill === 'drv') { put('#op2-h-drv', d.drv); put('#op2-h-phone', d.phone); }
+    S.toggle();
+  });
+  loadHiredFleet_($('#op2-h-co').dataset.entityId || '');
   recalc();
   updateHiredBtn_();
+}
+/* Реестр партнёра в форме наёмника (24.09, вариант В плана plans/2026-09-24-hired-to-partners-
+   bridge.md) - «выбирать, а не печатать». «Как в прошлый раз» - связка тягач·прицеп·водитель
+   одним кликом, ниже - по отдельности. Новую машину/водителя по-прежнему можно вписать руками -
+   мост на сервере сам занесёт их в реестр. Данные - /orders/carrier_fleet (только номера, ФИО,
+   телефон; нестандартные номера из старых заявок туда не попадают). */
+function loadHiredFleet_(eid) {
+  var box = $('#op2-h-fleet'); if (!box) return;
+  box.dataset.eid = eid || '';
+  if (!eid) { box.innerHTML = ''; box.classList.add('op2-hidden'); return; }
+  apiGet('/orders/carrier_fleet', { carrier_id: eid }).then(function (r) {
+    if (box.dataset.eid !== eid) return; /* компанию успели сменить, пока шёл запрос */
+    var d = (r && r.ok && r.data) || {};
+    var combos = d.combos || [], tr = d.tractors || [], tl = d.trailers || [], dr = d.drivers || [];
+    function chip(fill, attrs, label, title) {
+      return '<button type="button" class="op2-chip" data-fill="' + fill + '"' + attrs + (title ? ' title="' + esc(title) + '"' : '') + '>' + label + '</button>';
+    }
+    function row(k, chips) { return chips.length ? '<div class="op2-hfleet-row"><span class="op2-hfleet-k">' + k + '</span><div class="op2-hfleet-chips">' + chips.join('') + '</div></div>' : ''; }
+    var h = '';
+    h += row('Как в прошлый раз', combos.map(function (c) {
+      return chip('combo', ' data-gos="' + esc(c.gos) + '" data-trailer="' + esc(c.trailer) + '" data-drv="' + esc(c.driver) + '" data-phone="' + esc(c.phone) + '"',
+        esc([c.gos, c.trailer, fioName_(c.driver)].filter(Boolean).join(' · ')), c.driver + (c.phone ? ' · ' + c.phone : ''));
+    }));
+    h += row('Тягачи', tr.map(function (a) { return chip('gos', ' data-gos="' + esc(a.id) + '"', '<span class="op2-mono">' + esc(a.id) + '</span>', a.name); }));
+    h += row('Прицепы', tl.map(function (a) { return chip('trailer', ' data-trailer="' + esc(a.id) + '"', '<span class="op2-mono">' + esc(a.id) + '</span>', a.name); }));
+    h += row('Водители', dr.map(function (p) { return chip('drv', ' data-drv="' + esc(p.name) + '" data-phone="' + esc(p.phone) + '"', esc(fioName_(p.name)), p.name + (p.phone ? ' · ' + p.phone : '')); }));
+    if (!h) h = '<span class="op2-hfleet-k">В реестре этого партнёра пока пусто - впиши машину и водителя, они заведутся сами</span>';
+    box.innerHTML = h;
+    box.classList.remove('op2-hidden');
+  }).catch(function () {});
 }
 function saveHired(o) {
   var co = $('#op2-h-co').value.trim();
@@ -3799,6 +3856,10 @@ function saveHired(o) {
      через updateHiredBtn_ (onPopOk не пропустит клик дальше), эта проверка - подстраховка
      на случай прямого вызова saveHired мимо кнопки. */
   if (!num($('#op2-h-rate').value)) { logUiEvent_('blocked_click', 'hired_save', 'нет ставки закупки'); toast('<span class="op2-warn">Укажи ставку закупки</span> · без неё маржа не считается'); return; }
+  if (window.YardPlate) {
+    var plateErr = YardPlate.check($('#op2-h-gos'), 'tractor') || YardPlate.check($('#op2-h-trailer'), 'trailer');
+    if (plateErr) { logUiEvent_('blocked_click', 'hired_save', 'госномер не по стандарту'); toast('<span class="op2-warn">' + esc(plateErr) + '</span>'); return; }
+  }
   var cs = $('#op2-h-cs .op2-chip.op2-on');
   apiPost('/orders/hired_set', {
     order_id: o.id,
@@ -5107,13 +5168,20 @@ function formEq() {
   var mods = modsBox ? (modsBox.dataset.mods || '').split(',').filter(Boolean) : [];
   return eqCombine_(base, mods);
 }
+/* 25.09, найден реальный случай (мобильная форма, тот же splitContact_ там): менеджер ввёл
+   "+79262543570 Эдуард" (телефон ПЕРЕД именем, не после, как в подсказке "Имя · телефон") -
+   старая версия ловила телефон ТОЛЬКО в конце строки, вся строка целиком ушла в имя, поле
+   телефона осталось пустым - заявка ушла водителю без номера контакта, не видно было НИГДЕ.
+   Добавлен второй разбор - телефон в НАЧАЛЕ строки. */
 function splitContact(s) {
   s = String(s || '').trim();
   if (!s) return { name: '', phone: '' };
   var parts = s.split('·');
   if (parts.length >= 2) return { name: parts[0].trim(), phone: parts.slice(1).join('·').trim() };
-  var m = s.match(/([+\d][\d\s\-()]{6,})$/);
-  if (m) return { name: s.slice(0, m.index).replace(/[,\s]+$/, '').trim(), phone: m[1].trim() };
+  var mEnd = s.match(/([+\d][\d\s\-()]{6,})$/);
+  if (mEnd) return { name: s.slice(0, mEnd.index).replace(/[,\s]+$/, '').trim(), phone: mEnd[1].trim() };
+  var mStart = s.match(/^([+\d][\d\s\-()]{6,})/);
+  if (mStart) return { name: s.slice(mStart[0].length).replace(/^[,\s]+/, '').trim(), phone: mStart[1].trim() };
   return { name: s, phone: '' };
 }
 function fetchCustomers(q) {

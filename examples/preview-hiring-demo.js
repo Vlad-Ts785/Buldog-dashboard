@@ -121,7 +121,15 @@
     if (u.indexOf('/hiring/') < 0) return realFetch(u, o);
     var d = { ok: true }, status = 200, b = o && typeof o.body === 'string' ? JSON.parse(o.body) : {}, c = b.id ? find(b.id) : null;
     var qid = Number((u.match(/[?&]id=(\d+)/) || [])[1] || 0);
-    if (u.indexOf('/hiring/documents') >= 0) {
+    if (u.indexOf('/hiring/presence') >= 0) {
+      // Демо: кто «сейчас в Найме» - вымышленные состояния для показа лампочек руководителю.
+      d = MY.role === 'director' ? { ok: true, users: [
+        { email: HR1.email, name: HR1.name, role: 'Рекрутер', seen_ago: 3, active_ago: 2 },
+        { email: HR2.email, name: HR2.name, role: 'Рекрутер', seen_ago: 5, active_ago: 60 },
+        { email: 'k@demo', name: 'Воротынцева Кристина', role: 'Рекрутер', seen_ago: null, active_ago: null },
+        { email: 'd@demo', name: 'Дьячков Павел Викторович', role: 'Начальник автоколонны (тралы)', seen_ago: 9, active_ago: null },
+        { email: 'b@demo', name: 'Барыльченко Пётр Иванович', role: 'Начальник автоколонны (длинномеры)', seen_ago: null, active_ago: null } ] } : { ok: true };
+    } else if (u.indexOf('/hiring/documents') >= 0) {
       var cc = find(qid);
       var canUp = MY.role !== 'security' || (cc && cc.stage_key === 'security');
       d = { ok: true, documents: (DOCS[qid] || []).map(function (x) {

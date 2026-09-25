@@ -69,7 +69,7 @@ function reasonBy(key) { return ((S.meta && S.meta.reasons) || []).filter(functi
 function me() { return (S.meta && S.meta.me) || {}; }
 var VT_LABEL = { tral: 'Трал', long: 'Длинномер' };
 var VT_COL = { tral: 'тралы', long: 'длинномеры' };
-var SOURCE_LABEL = { manual: 'вручную', avito: 'Авито', hh: 'hh.ru', call: 'звонок', referral: 'рекомендация', 'обзвон_2026-05': 'база обзвона' };
+var SOURCE_LABEL = { manual: 'вручную', avito: 'Авито', hh: 'hh.ru', call: 'звонок', referral: 'рекомендация', 'обзвон_2026-05': 'база обзвона', 'таблица_HR': 'таблица HR' };
 function sourceLabel(s) { return SOURCE_LABEL[s] || s || '-'; }
 /* Цвет точки этапа - по смыслу (ГОСТ разд.1): открытые - нейтральный blue, вышел - green,
    отказ - red, база/резерв - muted. */
@@ -121,11 +121,13 @@ var SB_CLS = { approved: 'hr-sb-ok', rejected: 'hr-sb-bad', interview: 'hr-sb-wa
 var SB_REQ = [['full_name', 'ФИО'], ['birth_date', 'дата рождения'], ['birth_place', 'место рождения'], ['passport_no', 'серия и номер паспорта'],
   ['passport_issued_by', 'кем выдан'], ['passport_issue_date', 'дата выдачи'], ['reg_address', 'адрес регистрации'], ['phone10', 'телефон']];
 /* То же, что R.sbMissing на сервере (он и решает) - здесь только чтобы подсказка обновлялась сразу при вводе. */
-/* Кандидат на открытом этапе ПОСЛЕ «Проверки СБ», а СБ не ответила «нет компромата». */
-function pastSbUnchecked(c) {
+/* Кандидат на открытом этапе ПОСЛЕ «Проверки СБ» (у НК, тестовая смена). */
+function pastSb(c) {
   var cur = stageBy(c.stage_key), sb = stageBy('security');
-  return !!cur && !!sb && !cur.is_terminal && cur.sort_order > sb.sort_order && c.sb_status !== 'approved';
+  return !!cur && !!sb && !cur.is_terminal && cur.sort_order > sb.sort_order;
 }
+/* ... а СБ не ответила «нет компромата». */
+function pastSbUnchecked(c) { return pastSb(c) && c.sb_status !== 'approved'; }
 function sbMissing(c) { return SB_REQ.filter(function (p) { return c[p[0]] == null || String(c[p[0]]).trim() === ''; }).map(function (p) { return p[1]; }); }
 function recallDue(c) { return !!c.recall_at && new Date(c.recall_at).getTime() <= Date.now(); }
 /* Кружок ответственного - канон CRM (.kb-ava: инициалы, цвет «личности» по стабильному ключу,
@@ -175,6 +177,7 @@ function buildDom() {
           chip('mine', 'Ждут меня') + chip('recall', 'Пора перезвонить') + chip('warm', 'Тёплые') +
         '</div>' +
         '<span class="hr-count" id="hr-count"></span>' +
+        '<div class="hr-presence" id="hr-presence" hidden title="Кто сейчас в «Найме»: залит - страница открыта, мигает - что-то делает прямо сейчас"></div>' +
         '<button type="button" class="crm-chip hr-add" id="hr-add" data-nav-sound>' + ico('plus') + 'Добавить кандидата</button>' +
       '</div>' +
       '<div class="kb-hint">Перетащите карточку в соседний этап или в самый низ экрана - снизу появятся зоны «Вышел на работу» и «Отказ». Назад - с комментарием, отказ - с причиной (откроется карточка). Двигает хозяин этапа. Жёлтая точка - кандидат висит дольше срока этапа, красная - больше суток сверх срока.</div>' +
@@ -236,6 +239,32 @@ function buildDom() {
   // Живые значения: время на этапе и точки просрочки - раз в минуту; данные с сервера - раз в 3 минуты.
   setInterval(function () { if (!document.hidden && isActive()) { renderBoard(); renderKpis(); } }, 60000);
   setInterval(function () { if (!document.hidden && isActive() && !S.mode) reload(); }, POLL_MS);
+  // «Лампочки» (как в Планировке и «Задании»): каждые 7 с - «я на странице» (+ «что-то делаю», если было действие),
+  // руководителю - кто ещё сейчас здесь. Любое нажатие/клавиша на странице = «делает прямо сейчас».
+  var root = document.getElementById(ROOT_ID);
+  ['pointerdown', 'keydown'].forEach(function (ev) { root.addEventListener(ev, function () { S.lastAct = Date.now(); }, true); });
+  setInterval(presenceBeat, 7000);
+}
+function presenceBeat() {
+  if (document.hidden || !isActive() || !S.meta) return;
+  api('/hiring/presence', { active: Date.now() - (S.lastAct || 0) < 7000 ? '1' : '0' });
+  if (!me().manage_all) return;
+  api('/hiring/presence').then(function (r) { if (r.ok) renderPresence(r.data.users || []); });
+}
+/* Плитка = три буквы фамилии (как в Планировке). Нет на странице - пустой контур; страница открыта - залита
+   своим цветом; действует сейчас (за последние 12 с) - тот же цвет и мигает. Смысл ещё и в подсказке словами. */
+function renderPresence(users) {
+  var box = $('#hr-presence'); if (!box) return;
+  box.hidden = !users.length;
+  box.innerHTML = users.map(function (u) {
+    var online = u.seen_ago != null && u.seen_ago <= 20;
+    var active = online && u.active_ago != null && u.active_ago <= 12;
+    var color = avaColor(u.email);
+    var code = String(u.name || '?').trim().split(/\s+/)[0].slice(0, 3).toUpperCase();
+    var state = active ? 'сейчас действует' : online ? 'на странице' : 'не на странице';
+    return '<span class="hr-pres' + (online ? ' is-on' : '') + (active ? ' is-active' : '') + '"' +
+      (online ? ' style="--pc:' + color + '"' : '') + ' title="' + esc(u.name + ' · ' + u.role + ' · ' + state) + '">' + esc(code) + '</span>';
+  }).join('');
 }
 function chip(v, label, on) {
   return '<button type="button" class="crm-chip" data-v="' + v + '" aria-pressed="' + (!!on) + '" data-nav-sound>' + esc(label) + '</button>';
@@ -257,7 +286,7 @@ function load() {
     }
     var firstMeta = !S.meta;
     S.meta = r[0].data; S.cands = r[1].data.candidates || []; S.stats = r[2].data;
-    if (firstMeta) applyRoleDefaults();
+    if (firstMeta) { applyRoleDefaults(); presenceBeat(); }   // лампочки - сразу, не через 7 с
     $('#hr-loading').style.display = 'none'; $('#hr-body').style.display = '';
     renderKpis(); renderBoard();
   });
@@ -378,6 +407,8 @@ function cardHtml(c) {
   if (c.person_id) tags.push('<span class="hr-tag" title="Телефон совпал со справочником сотрудников">в справочнике</span>');
   var onSb = c.stage_key === 'security' && c.sb_status;
   // Ушёл дальше СБ без «нет компромата» (перенос из старой таблицы, решение руководителя) - предупреждаем словами.
+  // Прошёл СБ и уже дальше (у НК, тестовая смена) - зелёная метка словами, заливка карточки - только на самом этапе СБ.
+  if (!pastSbUnchecked(c) && c.sb_status === 'approved' && pastSb(c)) tags.unshift('<span class="hr-tag hr-tag-sb hr-sb-ok"' + (c.sb_comment ? ' title="' + esc(c.sb_comment) + '"' : '') + '>СБ пройдена</span>');
   if (pastSbUnchecked(c)) tags.unshift('<span class="hr-tag hr-tag-urgent" title="Кандидат дальше этапа «Проверка СБ», а ответа «нет компромата» нет">' +
     esc(c.sb_status && c.sb_status !== 'approved' ? SB_TEXT[c.sb_status] || c.sb_status : 'без проверки СБ') + '</span>');
   if (onSb) tags.unshift('<span class="hr-tag hr-tag-sb ' + (SB_CLS[c.sb_status] || '') + '"' + (c.sb_comment ? ' title="' + esc(c.sb_comment) + '"' : '') + '>' + esc(SB_TEXT[c.sb_status] || c.sb_status) + '</span>');

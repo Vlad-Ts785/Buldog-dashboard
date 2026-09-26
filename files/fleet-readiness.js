@@ -171,7 +171,8 @@ function render() {
   var rs = reasonsTxt(t);
   html += '<div class="mp-status mp-status--' + verdictCls(t.readiness_pct) + '">' +
     '<div class="mp-status__l"><div class="mp-status__word">НА ЛИНИИ ' + t.on_line + ' ИЗ ' + t.total + '</div>' +
-    '<div class="mp-status__sub">в ремонте <b>' + t.repair + '</b> · без водителя <b>' + t.no_driver + '</b>' +
+    // «не в работе» - то же число, что «Всего не в работе» в отчёте собственнику (один расчёт на сервере)
+    '<div class="mp-status__sub">не в работе <b>' + (t.not_in_work != null ? t.not_in_work : t.total - t.on_line) + '</b> · в ремонте <b>' + t.repair + '</b> · без водителя <b>' + t.no_driver + '</b>' +
       (t.no_driver ? ': вакансий <b>' + t.vacant + '</b>' + (vacNote(t) ? ' (' + vacNote(t) + ')' : '') + (rs ? ', ' + esc(rs) : '') : '') + '</div></div>' +
     '<div class="mp-status__r"><div class="mp-status__cap">Готовность ' + onDay + '</div>' +
     '<div class="mp-status__lever">' + (t.readiness_pct == null ? '—' : t.readiness_pct + '%') + '</div>' +

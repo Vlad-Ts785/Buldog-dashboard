@@ -36,7 +36,8 @@ self.addEventListener('install', function (event) {
 var SHELL_ENABLED = true;
 var SHELL_INDEX = '/files/index.html';
 var SHELL_FILES = [SHELL_INDEX, '/files/gos-plate.js', '/files/order-plan-v2.js', '/files/order-plan-v2.css', '/files/logist-push-notify.js', '/files/hiring.js', '/files/hiring.css',
-  '/files/yard-confirm.js', '/files/yard-confirm.css', '/files/sprav-person-attrs.js', '/files/sprav-person-attrs.css', '/files/ux-track.js'];
+  '/files/yard-confirm.js', '/files/yard-confirm.css', '/files/sprav-person-attrs.js', '/files/sprav-person-attrs.css', '/files/ux-track.js',
+  '/files/fleet-readiness.js', '/files/fleet-readiness.css'];
 var SHELL_PREFIX = 'app-shell-v-';
 var SHELL_META = 'app-shell-meta';
 // current - версия, из которой отдаём сейчас; pending - скачанная в фоне, включается только

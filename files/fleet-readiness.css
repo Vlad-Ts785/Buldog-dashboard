@@ -1,0 +1,98 @@
+/* ══════════════════════════════════════════════════════════════════════════════
+   «Готовность парка» (25.09.2026) - состояние парка по колоннам на завтра/сегодня
+   и среднее за 30 дней. План: plans/2026-09-25-fleet-readiness-page.md.
+   Только готовые анатомии ГОСТа: вердикт-полоса .mp-status, заголовок карточки
+   .mech-head/.mech-label/.mech-badge, таблица .tbl + разворот строки по клику
+   (канон «Динамики»), точки-статусы .mech-pill, чипы .crm-chip, кнопка
+   .mech-btn--primary, подпись .mech-foot, тост p2Toast. Свои классы fr- -
+   только раскладка и мобильные карточки колонн.
+   ══════════════════════════════════════════════════════════════════════════════ */
+#page-fleet-readiness .fr-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px;}
+#page-fleet-readiness .fr-chips{display:flex;gap:6px;flex-wrap:wrap;}
+#page-fleet-readiness .fr-stamp{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;}
+#page-fleet-readiness .fr-stamp b{font-family:'JetBrains Mono',monospace;font-weight:500;color:var(--text);}
+
+/* таблица колонн: одно число в ячейке, ноль - приглушённо */
+#page-fleet-readiness .fr-card{margin-bottom:16px;min-width:0;}
+#page-fleet-readiness .fr-scroll{overflow-x:auto;}
+#page-fleet-readiness .fr-tbl{min-width:860px;}
+#page-fleet-readiness .fr-tbl th{vertical-align:bottom;}
+#page-fleet-readiness .fr-tbl th.fr-grp{text-align:center;border-bottom:1px solid var(--border);padding-bottom:5px;}
+#page-fleet-readiness .fr-tbl thead tr:first-child th[rowspan]{border-bottom:1px solid var(--border);}
+#page-fleet-readiness .fr-tbl td{vertical-align:top;}
+#page-fleet-readiness .fr-v{font-family:'JetBrains Mono',monospace;font-size:17px;font-weight:500;line-height:1.15;font-variant-numeric:tabular-nums;color:var(--text);}
+#page-fleet-readiness .fr-v.red{color:var(--tint-red);}
+#page-fleet-readiness .fr-v.amber{color:var(--tint-amber);}
+#page-fleet-readiness .fr-v--zero{color:var(--muted);}
+#page-fleet-readiness .fr-sub{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);margin-top:3px;white-space:nowrap;font-variant-numeric:tabular-nums;}
+#page-fleet-readiness .fr-name{display:flex;align-items:baseline;gap:8px;white-space:nowrap;}
+#page-fleet-readiness .fr-name b{font-size:13px;font-weight:600;color:var(--text);}
+#page-fleet-readiness .fr-name small{display:block;font-size:11px;color:var(--muted);margin-top:3px;margin-left:18px;}
+#page-fleet-readiness .fr-chev{display:inline-block;width:10px;color:var(--muted);font-size:11px;transition:transform .15s ease-out;}
+#page-fleet-readiness .fr-row[aria-expanded="true"] .fr-chev{transform:rotate(90deg);}
+#page-fleet-readiness .fr-tbl tfoot td{vertical-align:top;}
+#page-fleet-readiness .fr-tbl tfoot .fr-v{font-weight:600;}
+
+/* разворот строки: две таблицы машин рядом (ремонт / без водителя) */
+#page-fleet-readiness .fr-detail-row{display:none;}
+#page-fleet-readiness .fr-detail-row.open{display:table-row;}
+#page-fleet-readiness .fr-detail-row > td{padding:0;background:var(--bg3);}
+#page-fleet-readiness .tbl tr.fr-detail-row:hover td{background:var(--bg3);}
+#page-fleet-readiness .fr-detail-inner{padding:14px 16px 16px;animation:frFade .15s ease-out;container-type:inline-size;}
+@keyframes frFade{from{opacity:0}to{opacity:1}}
+#page-fleet-readiness .fr-dgrid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+/* два списка рядом - только когда обоим хватает места (по ширине самого блока, не окна: учитывает свёрнутое меню) */
+@container (max-width:1240px){#page-fleet-readiness .fr-dgrid{grid-template-columns:1fr;}}
+#page-fleet-readiness .fr-dsec{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px 14px;min-width:0;}
+#page-fleet-readiness .fr-dsec .mech-head{margin-bottom:8px;}
+#page-fleet-readiness .fr-dtbl{font-size:12.5px;}
+#page-fleet-readiness .fr-dtbl td{padding:7px 8px;}
+#page-fleet-readiness .fr-dtbl th{padding:6px 8px;}
+#page-fleet-readiness .fr-dtbl tr:hover td{background:var(--bg3);}
+#page-fleet-readiness .fr-nowrap{white-space:nowrap;}
+#page-fleet-readiness .fr-empty{font-size:12.5px;color:var(--muted);padding:10px 0 4px;}
+#page-fleet-readiness .fr-note{font-size:12.5px;color:var(--text);line-height:1.5;margin-top:12px;font-variant-numeric:tabular-nums;}
+#page-fleet-readiness .fr-note b{font-family:'JetBrains Mono',monospace;font-weight:500;}
+
+/* отчёт в Телеграм: текст сообщения + кнопка копирования */
+#page-fleet-readiness .fr-tg__grid{display:grid;grid-template-columns:minmax(0,560px) minmax(220px,1fr);gap:20px;align-items:start;}
+@media(max-width:900px){#page-fleet-readiness .fr-tg__grid{grid-template-columns:1fr;}}
+#page-fleet-readiness .fr-tg__msg{background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:14px 16px;
+  font-size:13px;line-height:1.5;color:var(--text);white-space:normal;max-height:560px;overflow-y:auto;font-variant-numeric:tabular-nums;}
+#page-fleet-readiness .fr-tg__msg b{font-weight:600;}
+/* вид сообщения бота (rich_html: h1 - заголовок, h6 - колонна, footer - строки мелким шрифтом), как вечерний отчёт */
+#page-fleet-readiness .fr-tg__msg--rich h1{font-size:17px;font-weight:600;line-height:1.3;margin:0 0 6px;color:var(--text);letter-spacing:0;}
+#page-fleet-readiness .fr-tg__msg--rich h6{font-size:13px;font-weight:600;line-height:1.3;margin:12px 0 3px;color:var(--text);text-transform:none;letter-spacing:0;}
+#page-fleet-readiness .fr-tg__msg--rich footer{display:block;font-size:12px;line-height:1.5;color:var(--muted);white-space:normal;}
+#page-fleet-readiness .fr-tg__side .mech-btn{margin-top:0;}
+#page-fleet-readiness .fr-tg__side .mech-foot{margin-top:10px;}
+
+/* телефон: вместо таблицы - карточки колонн */
+#page-fleet-readiness .fr-mcards{display:none;}
+#page-fleet-readiness .fr-mc{background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px;}
+#page-fleet-readiness .fr-mc__head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:6px;}
+#page-fleet-readiness .fr-mc__head b{font-size:14px;font-weight:600;color:var(--text);}
+#page-fleet-readiness .fr-mc__head small{display:block;font-size:11px;color:var(--muted);margin-top:2px;}
+#page-fleet-readiness .fr-mc__tot{font-size:12px;color:var(--muted);white-space:nowrap;}
+#page-fleet-readiness .fr-mc__tot .mono{font-family:'JetBrains Mono',monospace;font-size:17px;font-weight:500;color:var(--text);}
+#page-fleet-readiness .fr-mc .mech-row{font-size:12.5px;}
+#page-fleet-readiness .fr-mc .mech-row__value.red{color:var(--tint-red);}
+#page-fleet-readiness .fr-mc .mech-row__value.amber{color:var(--tint-amber);}
+#page-fleet-readiness .fr-mc__more{margin-top:10px;width:100%;justify-content:flex-start;}
+#page-fleet-readiness .fr-mc__more[aria-pressed="true"] .fr-chev{transform:rotate(90deg);}
+#page-fleet-readiness .fr-mc__det{margin-top:6px;}
+#page-fleet-readiness .fr-mc__sec{font-size:10.5px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:12px 0 4px;}
+#page-fleet-readiness .fr-mc__gos{color:var(--text);font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;}
+#page-fleet-readiness .fr-mc .mech-row__label{overflow:hidden;text-overflow:ellipsis;}
+#page-fleet-readiness .fr-mc .mech-row__aux:empty{min-width:0;}
+#page-fleet-readiness .fr-mc__subrow .mech-row__label{padding-left:14px;}
+#page-fleet-readiness .fr-mc__subrow{min-height:23px;}
+@media(max-width:720px){
+  #page-fleet-readiness .fr-desk{display:none;}
+  #page-fleet-readiness .fr-mcards{display:block;}
+}
+
+@media(prefers-reduced-motion:reduce){
+  #page-fleet-readiness .fr-chev{transition:none;}
+  #page-fleet-readiness .fr-detail-inner{animation:none;}
+}

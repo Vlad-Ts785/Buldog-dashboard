@@ -2705,6 +2705,10 @@ function priceLightClass_(o) {
   return ' op2-price-bad';
 }
 function priceLightTitle_(o) {
+  /* 26.09 (plans/2026-09-26-customer-addresses-and-price-geo.md, П3): белая цена - с причиной словами
+     («погрузка: в адресе несколько мест», «масса не указана»), причина уже лежала в базе, но не
+     показывалась - было непонятно, что поправить в заявке, чтобы авторасчёт заработал. */
+  if (isAdmin() && o.computed_price == null && o.computed_error) return ' title="Авторасчёт не сделан: ' + esc(o.computed_error) + '"';
   if (!isAdmin() || o.computed_price == null) return '';
   var pct = Math.round((num(o.price) / num(o.computed_price) - 1) * 100);
   var modeRu = o.computed_mode === 'mkad' ? 'от МКАД' : 'от базы';
@@ -5146,11 +5150,20 @@ function wireForm() {
   });
 
   /* подсказки заказчика */
-  var custT = null;
+  var custT = null, custHistT = null;
   $('#op2-f-cust').addEventListener('input', function () {
     tickState();
     var v = this.value.trim();
     clearTimeout(custT);
+    /* 26.09 (А2 плана адресов): точки прошлого заказчика не должны оставаться в подсказках нового -
+       список истории чистим сразу, а для напечатанного (не выбранного из списка) названия запрашиваем
+       историю после паузы: раньше она приходила только после клика по заказчику в выпадашке.
+       Выбранное из справочника юрлицо относится к выбранному названию - перепечатали название, юрлицо
+       снимаем (иначе уходила пара «текст Б + юрлицо А»). */
+    clearTimeout(custHistT);
+    ['from', 'to'].forEach(function (sd) { var hs = listSubSection_(sd, 'op2-sub-hist'); if (hs) hs.innerHTML = ''; });
+    if (this.dataset.entityId && v !== (this.dataset.entityName || '')) { delete this.dataset.entityId; delete this.dataset.entityName; }
+    if (v.length >= 3 && !/^\d+$/.test(v)) custHistT = setTimeout(function () { fetchCustomerHistory(v); }, 700);
     if (v.length < 2) { $('#op2-f-custbox').classList.remove('op2-open'); return; }
     var digits = v.replace(/\D/g, '');
     /* ИНН (10/12 цифр) - ищем контрагента по ИНН: справочник -> DaData (Влад 11.09) */
@@ -5163,7 +5176,8 @@ function wireForm() {
     var it = e.target.closest('.op2-it'); if (!it) return;
     $('#op2-f-cust').value = it.dataset.name || '';
     $('#op2-f-custbox').classList.remove('op2-open');
-    if (it.dataset.eid) $('#op2-f-cust').dataset.entityId = it.dataset.eid;
+    clearTimeout(custHistT);
+    if (it.dataset.eid) { $('#op2-f-cust').dataset.entityId = it.dataset.eid; $('#op2-f-cust').dataset.entityName = it.dataset.name || ''; }
     fetchCustomerHistory(it.dataset.name || '');
     tickState();
   });
@@ -5225,10 +5239,21 @@ function wireForm() {
     var inp = $('#op2-f-' + side);
     inp.addEventListener('focus', function () { if ($('#op2-f-' + side + 'list').querySelector('.op2-it')) $('#op2-f-' + side + 'box').classList.add('op2-open'); });
     inp.addEventListener('blur', function () { setTimeout(function () { $('#op2-f-' + side + 'box').classList.remove('op2-open'); }, 150); tickState(); tryParseAddrPaste_(side); });
-    inp.addEventListener('input', function () { fetchGeoSuggest(side, this.value); });
+    inp.addEventListener('input', function () {
+      /* 26.09 (Б4 плана адресов, Влад: «машина уехала не туда - проблема»): текст адреса правят руками
+         - прежняя точка к новому тексту уже не относится; иначе новый адрес уйдёт водителю со старой
+         ссылкой «Карта:». Как на телефоне: точку сбрасываем, её ставит выбор подсказки или ссылка/
+         координаты в тексте (разберутся при уходе из поля). */
+      if (this.dataset.lat) {
+        this.dataset.lat = ''; this.dataset.lon = '';
+        addrHint_(side, 'адрес изменён - выбери его из подсказки, чтобы поставить точку', 'op2-warn');
+      }
+      fetchGeoSuggest(side, this.value);
+    });
     $('#op2-f-' + side + 'list').addEventListener('mousedown', function (e) {
       var it = e.target.closest('.op2-it'); if (!it) return;
-      applyAddr_(side, it.dataset.address, it.dataset.lat, it.dataset.lon, 'из истории заказчика');
+      applyAddr_(side, it.dataset.address, it.dataset.lat, it.dataset.lon,
+        it.dataset.conflict ? 'в прошлых заявках у этого адреса разные точки - выбери его из подсказки адресов' : 'из истории заказчика');
       if (it.dataset.cname || it.dataset.cphone) {
         $('#op2-f-' + side + 'contact').value = [it.dataset.cname, it.dataset.cphone].filter(Boolean).join(' · ');
       }
@@ -5469,7 +5494,7 @@ function saveInn(btn) {
   btn.disabled = true; btn.textContent = 'Сохраняем…';
   apiPost('/orders/inn_save', { inn: d.inn, name: d.name, full_name: d.full, kpp: d.kpp, ogrn: d.ogrn, legal_address: d.addr, director_name: d.dir, director_post: d.post, egrul_status: d.status }).then(function (r) {
     if (!ok_(r)) { btn.disabled = false; btn.textContent = 'Сохранить в справочник и подставить'; return; }
-    var fc = $('#op2-f-cust'); fc.value = r.data.name || d.name; fc.dataset.entityId = r.data.id;
+    var fc = $('#op2-f-cust'); fc.value = r.data.name || d.name; fc.dataset.entityId = r.data.id; fc.dataset.entityName = fc.value;
     $('#op2-f-custbox').classList.remove('op2-open');
     S.tickUp();
     toast((r.data.existed ? 'Уже в справочнике: ' : 'Сохранено в справочник: ') + '<span class="op2-tick">' + esc(r.data.name || d.name) + '</span> · ИНН ' + esc(d.inn));
@@ -5544,11 +5569,16 @@ function applyCargo(d) {
 }
 function fetchCustomerHistory(name) {
   if (!name) return;
-  apiGet('/orders/customer_history', { customer: name }).then(function (r) {
+  /* 26.09 (А1): история - и по юрлицу заказчика, если оно известно (выбрано из справочника или уже
+     стоит в заявке), а не только по точному тексту названия */
+  var custInp = $('#op2-f-cust');
+  var ent = (custInp && custInp.dataset.entityId) || (formOrder && formOrder.customer === name && formOrder.customer_entity_id) || '';
+  apiGet('/orders/customer_history', { customer: name, entity: ent }).then(function (r) {
     if (!r || !r.ok || !r.data || r.data.error) return;
+    if (custInp && custInp.value.trim() !== name) return; /* пока ждали ответ, заказчика сменили */
     var d = r.data;
     var addr = (d.addresses || []).slice(0, 8).map(function (a) {
-      return '<div class="op2-it" data-address="' + esc(a.address) + '" data-lat="' + esc(a.lat || '') + '" data-lon="' + esc(a.lon || '') + '" data-cname="' + esc(a.contact_name || '') + '" data-cphone="' + esc(a.contact_phone || '') + '">' +
+      return '<div class="op2-it" data-address="' + esc(a.address) + '" data-lat="' + esc(a.lat || '') + '" data-lon="' + esc(a.lon || '') + '" data-cname="' + esc(a.contact_name || '') + '" data-cphone="' + esc(a.contact_phone || '') + '"' + (a.point_conflict ? ' data-conflict="1"' : '') + '>' +
         '<span>' + esc(a.address) + '</span><span class="op2-m">' + esc(a.n || '') + '</span></div>';
     }).join('');
     var head = addr ? '<div class="op2-sec">Точки этого заказчика</div>' : '';

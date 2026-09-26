@@ -14,6 +14,8 @@
 //  - «Работа по месту», «База», «ДМД» и пустые - не площадки заказчика.
 // Запуск на VPS: node sites-seed.js --out /root/sites-seed.json [--names] (--names - короткие названия
 // площадок обратным поиском DaData по точке; это только подсказка названия, точку не меняет).
+// --write (26.09, решение Влада «создавай только постоянные площадки»): записать в customer_sites /
+// customer_site_texts ТОЛЬКО постоянные площадки (2+ заявки). Отказывается, если таблица уже не пустая.
 "use strict";
 const path = require("path");
 const fs = require("fs");
@@ -27,6 +29,8 @@ const geocoder = require("/root/yard-dashboard/api/lib/geocoder.js");
 const args = process.argv.slice(2);
 const OUT = args[args.indexOf("--out") + 1] || "/root/sites-seed.json";
 const WITH_NAMES = args.includes("--names");
+const WRITE = args.includes("--write");
+const MIN_USES = 2; // постоянная площадка - 2 заявки и больше
 const MERGE_M = 200;      // точки ближе - одно место
 const CONFLICT_KM = 3;    // один текст с точками дальше - «точки расходятся»
 const SKIP_RE = /^\s*(работа\s+по\s+месту|база(\s*(дмд|домодедово))?|дмд)\.?\s*$/i;
@@ -43,7 +47,8 @@ const fmtD = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d
   const db = await mysql.createConnection({ host: process.env.MYSQL_HOST, user: process.env.MYSQL_USER, password: process.env.MYSQL_PASSWORD, database: process.env.MYSQL_DATABASE });
   const [orders] = await db.query(`
     SELECT id, customer, customer_entity_id ent, internal, service_date d,
-           load_address la, load_lat lla, load_lon llo, unload_address ua, unload_lat ula, unload_lon ulo
+           load_address la, load_lat lla, load_lon llo, unload_address ua, unload_lat ula, unload_lon ulo,
+           load_contact_name lcn, load_contact_phone lcp, unload_contact_name ucn, unload_contact_phone ucp
       FROM plan_orders WHERE deleted_at IS NULL AND status <> 'cancelled'`);
   const [ents] = await db.query(`SELECT id, name FROM sprav_legal_entities WHERE id IN (SELECT DISTINCT customer_entity_id FROM plan_orders WHERE customer_entity_id <> '')`);
   const entName = {}; ents.forEach((e) => { entName[e.id] = e.name; });
@@ -66,7 +71,8 @@ const fmtD = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d
         if (pt && km(pt, tp) > 1) mismatch = { orderId: o.id, km: Math.round(km(pt, tp)), stored: pt };
         if (!pt || mismatch) pt = { lat: tp.lat, lon: tp.lon, src: "текст" };
       }
-      uses.push({ cust, custName: o.ent ? (entName[o.ent] || o.customer) : o.customer, internal: !!o.internal, side, text, pt, d: fmtD(o.d), orderId: o.id, mismatch });
+      const cn = side === "load" ? o.lcn : o.ucn, cp = side === "load" ? o.lcp : o.ucp;
+      uses.push({ cust, ent: o.ent || null, custText: String(o.customer || "").trim(), custName: o.ent ? (entName[o.ent] || o.customer) : o.customer, internal: !!o.internal, side, text, pt, d: fmtD(o.d), orderId: o.id, mismatch, cn: cn || null, cp: cp || null });
     }
   }
 
@@ -104,14 +110,20 @@ const fmtD = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d
     const sites = clusters.concat(Array.from(noPt.values())).map((s) => {
       const texts = Array.from(s.texts.entries()).sort((a, b) => b[1] - a[1]);
       const ds = s.uses.map((u) => u.d).sort();
+      // контакт на месте - из самой свежей заявки этой площадки, где он был
+      const withContact = s.uses.filter((u) => u.cn || u.cp).sort((a, b) => (a.d < b.d ? 1 : -1));
+      const mism = s.uses.filter((u) => u.mismatch);
       return {
         address: texts[0][0], texts: texts.map(([t, n]) => ({ t, n })), uses: s.uses.length,
+        contact: withContact.length ? { name: withContact[0].cn, phone: withContact[0].cp } : null,
+        pointSource: s.pt ? (s.uses.find((u) => u.pt && u.pt.src === "заявка") ? "order" : "text") : null,
+        checkNote: mism.length ? "точка в заявке расходилась с координатами в тексте (" + mism.map((u) => "заявка id " + u.orderId + ", " + u.mismatch.km + " км").join("; ") + ") - взята точка из текста" : null,
         sides: s.sides, first: ds[0], last: ds[ds.length - 1],
         pt: s.pt ? { lat: +s.pt.lat.toFixed(6), lon: +s.pt.lon.toFixed(6) } : null,
         conflict: s.conflict, filledNoPt: s.filledNoPt || 0,
       };
     }).sort((a, b) => b.uses - a.uses);
-    customers.push({ cust, name: list[0].custName, internal: list[0].internal, byEntity: cust.startsWith("ent:"), uses: list.length, sites });
+    customers.push({ cust, ent: list[0].ent, custText: list[0].custText, name: list[0].custName, internal: list[0].internal, byEntity: cust.startsWith("ent:"), uses: list.length, sites });
   }
   customers.sort((a, b) => b.uses - a.uses);
 
@@ -140,5 +152,42 @@ const fmtD = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d
   };
   fs.writeFileSync(OUT, JSON.stringify({ generatedAt: new Date().toISOString(), summary, customers }, null, 1));
   console.log(JSON.stringify(summary, null, 1));
+
+  if (WRITE) {
+    // Короткое имя из текста менеджера (решение 26.09): без ссылок и хвоста «Координаты: ...», без кавычек,
+    // первая часть до запятой; человек потом переименует («Горки», «ЮВХ-6»).
+    const shortName = (t) => {
+      let x = String(t || "").replace(/https?:\/\/\S+/g, " ").replace(/координаты\s*:?\s*-?\d{1,3}\.\d+\s*[,;]\s*-?\d{1,3}\.\d+/gi, " ")
+        .replace(/-?\d{1,3}\.\d{4,}\s*[,;]\s*-?\d{1,3}\.\d{4,}/g, " ").replace(/["«»]/g, "").replace(/\s+/g, " ").trim();
+      // части до запятой; впереди стоящие «г Москва», «Московская обл», «МО» - не имя места, пропускаем
+      const REGION_ONLY = /^(г\.?\s*)?москва$|^мо$|^московская(\s+обл(асть)?\.?)?$|^россия$/i;
+      const parts = x.split(",").map((p) => p.trim()).filter(Boolean);
+      while (parts.length > 1 && REGION_ONLY.test(parts[0])) parts.shift();
+      if (!parts.length) return null;
+      const nm = parts[0].length > 25 || parts.length === 1 ? parts[0] : parts[0] + ", " + parts[1];
+      return nm.slice(0, 60);
+    };
+    const [[cnt]] = await db.query("SELECT COUNT(*) n FROM customer_sites");
+    if (cnt.n > 0) { console.error("customer_sites уже не пустая (" + cnt.n + ") - повторное наполнение запрещено"); process.exit(2); }
+    const rows = [];
+    customers.forEach((c) => c.sites.filter((s) => s.uses >= MIN_USES).forEach((s) => rows.push({ c, s })));
+    await db.beginTransaction();
+    try {
+      for (const { c, s } of rows) {
+        const [ins] = await db.query(
+          `INSERT INTO customer_sites (customer_entity_id, customer_name, name, address, lat, lon, point_source, contact_name, contact_phone,
+             load_count, unload_count, first_used, last_used, needs_check, check_note, created_by)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [c.ent, c.name || c.custText, shortName(s.address), s.address.slice(0, 500), s.pt ? s.pt.lat : null, s.pt ? s.pt.lon : null, s.pointSource,
+            s.contact ? (s.contact.name || null) : null, s.contact ? (s.contact.phone || null) : null,
+            s.sides.load, s.sides.unload, s.first || null, s.last || null, s.checkNote ? 1 : 0, s.checkNote ? s.checkNote.slice(0, 300) : null,
+            "Система (наполнение из заявок 26.09)"]);
+        for (const t of s.texts) await db.query("INSERT INTO customer_site_texts (site_id, text, uses) VALUES (?,?,?)", [ins.insertId, t.t.slice(0, 500), t.n]);
+      }
+      await db.commit();
+      const [[w]] = await db.query("SELECT COUNT(*) sites, SUM(lat IS NOT NULL) with_pt, SUM(needs_check) to_check, (SELECT COUNT(*) FROM customer_site_texts) texts FROM customer_sites");
+      console.log("ЗАПИСАНО:", JSON.stringify(w));
+    } catch (e) { await db.rollback(); throw e; }
+  }
   await db.end();
 })().catch((e) => { console.error(e); process.exit(1); });

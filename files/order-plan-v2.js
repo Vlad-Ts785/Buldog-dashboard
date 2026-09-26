@@ -5362,21 +5362,15 @@ function formEq() {
   var mods = modsBox ? (modsBox.dataset.mods || '').split(',').filter(Boolean) : [];
   return eqCombine_(base, mods);
 }
-/* 25.09, найден реальный случай (мобильная форма, тот же splitContact_ там): менеджер ввёл
-   "+79262543570 Эдуард" (телефон ПЕРЕД именем, не после, как в подсказке "Имя · телефон") -
-   старая версия ловила телефон ТОЛЬКО в конце строки, вся строка целиком ушла в имя, поле
-   телефона осталось пустым - заявка ушла водителю без номера контакта, не видно было НИГДЕ.
-   Добавлен второй разбор - телефон в НАЧАЛЕ строки. */
+/* История: 25.09 «+79262543570 Эдуард» (телефон ПЕРЕД именем) - старая резка на клиенте
+   теряла номер, заявка ушла водителю без контакта; 26.09 - то же с номером из WhatsApp. */
+/* 26.09, Влад: «система должна быть умнее менеджера». Разбор переехал на СЕРВЕР
+   (api/lib/contact-phone.js, /orders/save): любой вид номера (8/+7/7 слитно, пробелы,
+   дефисы, невидимые символы из WhatsApp), несколько номеров у одного человека и пары
+   «два человека - два номера». Клиент строку больше не режет - шлёт как ввели, в поле
+   имени; своя резка здесь путала порядок пар при двух номерах. */
 function splitContact(s) {
-  s = String(s || '').trim();
-  if (!s) return { name: '', phone: '' };
-  var parts = s.split('·');
-  if (parts.length >= 2) return { name: parts[0].trim(), phone: parts.slice(1).join('·').trim() };
-  var mEnd = s.match(/([+\d][\d\s\-()]{6,})$/);
-  if (mEnd) return { name: s.slice(0, mEnd.index).replace(/[,\s]+$/, '').trim(), phone: mEnd[1].trim() };
-  var mStart = s.match(/^([+\d][\d\s\-()]{6,})/);
-  if (mStart) return { name: s.slice(mStart[0].length).replace(/^[,\s]+/, '').trim(), phone: mStart[1].trim() };
-  return { name: s, phone: '' };
+  return { name: String(s || '').trim(), phone: '' };
 }
 function fetchCustomers(q) {
   apiGet('/orders/customers', { q: q }).then(function (r) {

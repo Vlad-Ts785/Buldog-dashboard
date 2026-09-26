@@ -1224,11 +1224,17 @@ function renderViewSheet(head,body,foot){
        мог его увидеть и передать водителю, хотя данные лежали в базе. contactCell_ - тот же
        формат "Имя · телефон", что уже в десктопной driverText() (order-plan-v2.js), телефон
        кликабелен (tel:), тот же приём, что уже у телефона водителя чуть выше в этой карточке. */
+    /* 26.09: номеров может быть несколько (сервер пишет «+7 …, +7 …» - один человек, или
+       имена «Андрей / Елена» + номера «+7 … / +7 …» - пары по порядку). Каждый номер -
+       своя ссылка для звонка: один tel: на две склеенные цифры не звонит никуда. */
+    var telA_ = function(p, label){ return '<a href="tel:'+esc(String(p).replace(/[^\d+]/g,''))+'" style="color:var(--blue)">'+esc(label)+'</a>'; };
     var contactCell_ = function(name, phone){
       if(!name && !phone) return '—';
-      var label = [name, phone].filter(Boolean).join(' · ');
-      if(!phone) return esc(label);
-      return '<a href="tel:'+esc(String(phone).replace(/[^\d+]/g,''))+'" style="color:var(--blue)">'+esc(label)+'</a>';
+      if(!phone) return esc(name);
+      var pairs = phone.indexOf(' / ')>=0, nums = phone.split(pairs ? ' / ' : ', ');
+      var names = pairs ? String(name||'').split(' / ') : [];
+      if(pairs && names.length===nums.length) return nums.map(function(p,i){ return telA_(p, names[i]+' · '+p); }).join('<br>');
+      return (name ? esc(name)+' · ' : '') + nums.map(function(p){ return telA_(p, p); }).join(', ');
     };
     html += '<div class="kv"><div class="k">Груз</div><div class="v">'+esc(o.cargo||'уточнить')+(o.weight?(' · '+esc(o.weight)+' т'):'')+'</div><div class="k">Габарит</div><div class="v">'+esc(o.gabarit)+(o.cargo_dims?(' · '+esc(o.cargo_dims)):'')+'</div>' +
       '<div class="k">Откуда</div><div class="v">'+esc(o.from[0]||'уточнить')+(o.from[1]?(', '+esc(o.from[1])):'')+'</div><div class="k">Куда</div><div class="v">'+esc(o.to[0]||'уточнить')+(o.to[1]?(', '+esc(o.to[1])):'')+'</div>' +
@@ -1986,24 +1992,16 @@ function renderNewSheet(head,body,foot){
   }
   foot.innerHTML = '<button class="btn primary wide" id="fSaveBtn"></button>';
   tick();
-  /* «Имя · телефон» одной строкой -> {name, phone}, дословно desktop splitContact()
-     (order-plan-v2.js) - тот же разбор, чтобы сервер получал те же по смыслу два поля. */
-  /* 25.09, найден реальный случай: менеджер ввёл "+79262543570 Эдуард" (телефон ПЕРЕД
-     именем, а не после, как в подсказке "Имя · телефон") - старая версия ловила телефон
-     ТОЛЬКО в конце строки (m$), поэтому вся строка целиком ушла в имя, а поле телефона
-     осталось пустым. Заявка ушла водителю без номера контакта на погрузке/выгрузке - не
-     видно было НИГДЕ (ни в карточке, ни в задании боту). Добавлен второй разбор - телефон
-     в НАЧАЛЕ строки, тот же класс проверки, что уже есть для конца. */
+  /* «Имя · телефон» одной строкой, как у desktop splitContact() (order-plan-v2.js).
+     История: 25.09 «+79262543570 Эдуард» (телефон ПЕРЕД именем) - старая резка на клиенте
+     теряла номер; 26.09 - то же с номером из WhatsApp (невидимые символы). */
+  /* 26.09, Влад: «система должна быть умнее менеджера». Разбор переехал на СЕРВЕР
+     (api/lib/contact-phone.js, /orders/save): любой вид номера (8/+7/7 слитно, пробелы,
+     дефисы, невидимые символы из WhatsApp), несколько номеров у одного человека и пары
+     «два человека - два номера». Клиент строку больше не режет - шлёт как ввели, в поле
+     имени; своя резка здесь путала порядок пар при двух номерах. */
   function splitContact_(s){
-    s = String(s||'').trim();
-    if(!s) return {name:'', phone:''};
-    var parts = s.split('·');
-    if(parts.length>=2) return {name:parts[0].trim(), phone:parts.slice(1).join('·').trim()};
-    var mEnd = s.match(/([+\d][\d\s\-()]{6,})$/);
-    if(mEnd) return {name:s.slice(0,mEnd.index).replace(/[,\s]+$/,'').trim(), phone:mEnd[1].trim()};
-    var mStart = s.match(/^([+\d][\d\s\-()]{6,})/);
-    if(mStart) return {name:s.slice(mStart[0].length).replace(/^[,\s]+/,'').trim(), phone:mStart[1].trim()};
-    return {name:s, phone:''};
+    return {name:String(s||'').trim(), phone:''};
   }
   $('fSaveBtn').addEventListener('click', function(){
     var st=currentReasonAndBtn();

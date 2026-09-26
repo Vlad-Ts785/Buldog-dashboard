@@ -219,11 +219,14 @@ function render() {
   };
   html += '<div class="card fr-card fr-tg"><div class="mech-head"><div class="mech-label">Отчёт для Телеграма</div>' +
     '<div class="fr-chips" role="radiogroup" aria-label="Вид отчёта">' + tgChip('short', 'Госномера') + tgChip('detailed', 'Госномера и дни') + '</div></div>' +
-    '<div class="fr-tg__grid"><div class="fr-tg__msg">' + tg.html + '</div>' +
+    // Окно показывает сообщение так же, как его присылает бот (Влад, 26.09: «идентично в своей красоте»):
+    // та же разметка rich_html, что уходит в sendRichMessage - заголовок, колонны, строки мелким шрифтом.
+    '<div class="fr-tg__grid"><div class="fr-tg__msg fr-tg__msg--rich">' + (tg.rich_html || tg.html) + '</div>' +
     '<div class="fr-tg__side"><button type="button" class="mech-btn mech-btn--primary fr-copy">Скопировать для Телеграма</button>' +
-    '<div class="mech-foot">Порядок строк - как в вечернем отчёте: Всего, На линии, В ремонте, Без водителя, под ним - вакансии и каждая причина отдельно. ' +
+    '<div class="mech-foot">Оформление - как у вечернего отчёта от бота: заголовок, колонны подзаголовками, строки мелким шрифтом. ' +
+      'Порядок строк: Всего, На линии, В ремонте, Без водителя, под ним - вакансии и каждая причина отдельно. ' +
       'Госномера - только у машин не в работе: три цифры, буквы - если такие цифры в парке не у одной машины; каждый номер один раз, в «Итого» - только цифры. ' +
-      'Жирным - название колонны и цифра «На линии». Жирный сохраняется, если Телеграм его принимает при вставке, иначе придёт обычным текстом.</div></div></div></div>';
+      'Сохранит ли Телеграм оформление при вставке, зависит от его приложения - если нет, придёт обычным текстом с теми же строками.</div></div></div></div>';
 
   root.innerHTML = html;
 }
@@ -260,11 +263,12 @@ function copyTelegram() {
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(tg.text).then(ok, legacy);
     else legacy();
   };
-  // Два формата сразу: text/html (жирный) и text/plain - вставляющее приложение берёт, что умеет.
+  // Два формата сразу: text/html - та же разметка, что у сообщения бота (rich_html: h1 / h6 / footer),
+  // и text/plain - вставляющее приложение берёт, что умеет.
   if (navigator.clipboard && navigator.clipboard.write && window.ClipboardItem) {
     try {
       navigator.clipboard.write([new ClipboardItem({
-        'text/html': new Blob([tg.html], { type: 'text/html' }),
+        'text/html': new Blob([tg.rich_html || tg.html], { type: 'text/html' }),
         'text/plain': new Blob([tg.text], { type: 'text/plain' })
       })]).then(ok, plain);
       return;

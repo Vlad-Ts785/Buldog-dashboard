@@ -1,0 +1,109 @@
+--- a/api/lib/plan-orders.js
++++ b/api/lib/plan-orders.js
+@@ -136,6 +136,16 @@
+   // становиться confirmed недоукомплектованной вообще никаким путём), не на сохранении
+   // формы - можно годами держать черновик пустым, но нельзя подтвердить его логисту/
+   // заказчику, не заполнив то, что реально нужно для подачи машины.
++  // Подтверждение внутри уже открытой транзакции /orders/save (26.09, И2). Пишет в журнал ту же
++  // строку, что и /orders/status («unconfirmed -> confirmed», снимок ДО смены статуса) - карточка
++  // заявки и анализ процесса не различают, какой кнопкой подтвердили, кроме времени (та же секунда,
++  // что и create/update, - так замер «до/после» и отличит новую кнопку от отдельного шага).
++  async function confirmInTx_(conn, orderId, by) {
++    const before = await loadOrder(conn, orderId);
++    if (!before || before.status !== "unconfirmed") return;
++    await conn.query(`UPDATE plan_orders SET status = 'confirmed', updated_by = ? WHERE id = ?`, [by, orderId]);
++    await history(conn, orderId, "status", before, "unconfirmed -> confirmed", by);
++  }
+   function confirmReadinessError_(o) {
+     const missing = [];
+     if (!o.service_time) missing.push("время подачи");
+@@ -192,6 +202,35 @@
+     const d = new Date(Date.now() + 3 * 3600000);
+     return d.toISOString().slice(0, 19).replace("T", " ");
+   }
++  // 26.09, «гладкая работа» (plans/2026-09-26-smooth-work-ux-analytics.md, И5): в журнал правки -
++  // только РЕАЛЬНО изменённые поля «было -> стало», а не весь присланный список: форма шлёт все
++  // ~30 полей на каждое сохранение, и 553 из 557 правок записывались как «изменено 30 полей», а
++  // 24 сохранения не меняли ничего. Полный снимок ДО правки по-прежнему лежит в snapshot - ничего
++  // не теряется. Сравнение в нормализованном виде: драйвер отдаёт DECIMAL строкой "45000.00" и
++  // TIME "10:00:00", а форма шлёт 45000 и "10:00" - иначе любое сохранение было бы «правкой».
++  function histNorm_(v) {
++    if (v === undefined || v === null) return "";
++    if (v instanceof Date) return fmtDate(v);
++    if (typeof v === "number") return String(v);
++    const s = String(v).trim();
++    if (/^-?\d+(\.\d+)?$/.test(s)) return String(Number(s));
++    const tm = s.match(/^(\d{1,2}):(\d{2})(:\d{2})?$/);
++    if (tm) return ("0" + tm[1]).slice(-2) + ":" + tm[2];
++    return s;
++  }
++  function changedKeys_(o, f, keys) { return keys.filter((k) => histNorm_(o[k]) !== histNorm_(f[k])); }
++  const HIST_NO_VALUE_ = { load_lat: 1, load_lon: 1, unload_lat: 1, unload_lon: 1 }; // координаты - только факт, без цифр
++  // detail - JSON {"c":{"поле":["было","стало"]}}, колонка VARCHAR(500): значения режем до 60, не
++  // влезло - поля без значений, совсем не влезло - старый формат (список ключей через запятую).
++  // Читает это order-plan-v2.js (humanizeHistoryDetail_), старые записи он тоже понимает.
++  function changeDetail_(o, f, changed) {
++    const c = {};
++    for (const k of changed) c[k] = HIST_NO_VALUE_[k] ? [] : [histNorm_(o[k]).slice(0, 60), histNorm_(f[k]).slice(0, 60)];
++    let out = JSON.stringify({ c });
++    if (out.length > 500) { for (const k of changed) c[k] = []; out = JSON.stringify({ c }); }
++    if (out.length > 500) out = changed.join(",").slice(0, 500);
++    return out;
++  }
+   async function history(conn, orderId, action, snapshot, detail, by) {
+     await conn.query(`INSERT INTO plan_orders_history (order_id, action, snapshot, detail, changed_by, changed_at) VALUES (?,?,?,?,?,?)`,
+       [orderId, action, snapshot ? JSON.stringify(snapshot) : null, detail ? String(detail).slice(0, 500) : null, by, mskNow_()]);
+@@ -776,18 +815,31 @@
+         // service_date НЕ в EDITABLE и особый случай выше убран (18.09) - день заявки
+         // менять нельзя вообще, только время внутри уже назначенного дня.
+         const keys = Object.keys(f).filter((k) => EDITABLE.indexOf(k) >= 0);
+-        if (!keys.length) { conn.release(); return res.json({ ok: true, id }); }
++        // 26.09, И2: «Сохранить и подтвердить» - одна кнопка вместо «сохранить» + отдельного клика
++        // по статусу (57% подтверждений автор делал в первые 2 минуты после создания). Та же
++        // проверка готовности, что у /orders/status, но на заявке С УЧЁТОМ присланных правок; не
++        // готово - не сохраняем ничего (клиент проверяет то же самое до отправки).
++        const wantConfirm = bool(p(req, "confirm")) === 1 && o.status === "unconfirmed";
++        if (wantConfirm) {
++          const merged = Object.assign({}, o); keys.forEach((k) => { merged[k] = f[k]; });
++          const ce = confirmReadinessError_(merged); if (ce) { conn.release(); return fail(res, 400, ce); }
++        }
++        if (!keys.length && !wantConfirm) { conn.release(); return res.json({ ok: true, id }); }
++        const changed = changedKeys_(o, f, keys);
+         await conn.beginTransaction();
+-        await history(conn, id, "update", o, keys.join(","), req.userEmail);
+-        const args = keys.map((k) => f[k]);
+-        args.push(req.userEmail, id);
+-        await conn.query(`UPDATE plan_orders SET ${keys.map((k) => k + " = ?").join(", ")}, updated_by = ? WHERE id = ?`, args);
++        if (changed.length) await history(conn, id, "update", o, changeDetail_(o, f, changed), req.userEmail);
++        if (keys.length) {
++          const args = keys.map((k) => f[k]);
++          args.push(req.userEmail, id);
++          await conn.query(`UPDATE plan_orders SET ${keys.map((k) => k + " = ?").join(", ")}, updated_by = ? WHERE id = ?`, args);
++        }
+         if (f.service_time !== undefined && f.service_time !== fmtTime(o.service_time)) {
+           // время изменилось - подвинуть отрезки своего парка на ленте (логисту - уведомление «подвинут рейс»)
+           const [ex] = await conn.query(`SELECT seg_id FROM plan_order_executors WHERE order_id = ? AND removed_at IS NULL AND seg_id IS NOT NULL`, [id]);
+           const nd = fmtDate(o.service_date); const nt = f.service_time;
+           for (const e of ex) await conn.query(`UPDATE plan_segs SET start_hour = ?, updated_by = ? WHERE id = ?`, [hoursFromEpoch(nd, nt), req.userEmail, e.seg_id]);
+         }
++        if (wantConfirm) await confirmInTx_(conn, id, req.userEmail);
+         await conn.commit();
+         // 18.09, фикс зависания пула: раньше здесь брали ВТОРОЕ подключение из pool, пока
+         // держали открытым первое (conn) до самого finally ниже - при нескольких
+@@ -805,6 +857,8 @@
+         if (!f.cargo_weight_t) { conn.release(); return fail(res, 400, "масса груза обязательна"); }
+         if (!f.price) { conn.release(); return fail(res, 400, "цена обязательна"); }
+         { const priceErr = minPriceError_(f.equipment_type, f.price); if (priceErr) { conn.release(); return fail(res, 400, priceErr); } }
++        const wantConfirmNew = bool(p(req, "confirm")) === 1; // 26.09, И2 - см. ветку правки выше
++        if (wantConfirmNew) { const ce = confirmReadinessError_(f); if (ce) { conn.release(); return fail(res, 400, ce); } }
+         const isMgr = req.userRole === "manager";
+         const internal = isMgr ? 0 : (f.internal || 0);
+         const managerEmail = isMgr ? req.userEmail : (internal ? null : (str(p(req, "manager_email"), 255) || null));
+@@ -824,6 +878,7 @@
+         }
+         if (!orderId) throw new Error("не удалось выдать номер дня");
+         await history(conn, orderId, "create", Object.assign({ id: orderId }, f), null, req.userEmail);
++        if (wantConfirmNew) await confirmInTx_(conn, orderId, req.userEmail);
+         await conn.commit();
+         const r = await roster(); const o2 = await loadOrder(conn, orderId); // conn, не pool - см. комментарий у ветки update выше
+         estimateAndStoreOrderPrice(pool, orderId).catch(() => {}); // fire-and-forget, не блокирует ответ

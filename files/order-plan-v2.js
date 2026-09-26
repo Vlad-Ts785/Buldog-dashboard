@@ -4202,8 +4202,19 @@ var HIST_ACTION_LABEL_ = {
   executor_set: 'поставил машину', executor_remove: 'снял машину', executor_move: 'перенёс машину',
   hired_set: 'оформил наёмника', change_request_approve: 'согласовал замену',
   change_request_reject: 'отклонил замену', needs_data_sent: 'отправил данные на пропуск',
-  transfer_out: 'перенёс на другую дату', transfer_in: 'создана переносом'
+  transfer_out: 'перенёс на другую дату', transfer_in: 'создана переносом',
+  driver_confirm: 'отметил: водитель подтвердил'
 };
+/* Подпись действия в истории. У driver_confirm смысл зависит от detail («… подтвердил» / «… снято»),
+   поэтому подпись и хвост строятся тут, а не одной строкой из словаря. Неизвестное действие - не
+   показываем служебное имя вроде driver_confirm (Влад 26.09: «не для человеческого восприятия»). */
+function histLabel_(action, detail) {
+  if (action === 'driver_confirm') return /снято\s*$/.test(String(detail || '')) ? 'снял отметку «водитель подтвердил»' : 'отметил: водитель подтвердил';
+  return HIST_ACTION_LABEL_[action] || 'действие с заявкой';
+}
+/* Кто сделал: человек - «Имя Фамилия» (fioName_), системная запись («Система (разбор телефонов)») -
+   целиком, иначе от неё оставалось «Система (разбор». */
+function histWho_(by) { by = String(by || ''); return by.indexOf('Система') === 0 ? by : fioName_(by); }
 /* detail этих действий дословно повторяет то, что уже сказано в label/по автору - не дублируем */
 var HIST_SUPPRESS_DETAIL_ = { otboy_ack: 1, delete: 1, needs_data_sent: 1 };
 var HIST_FIELD_LABEL_ = {
@@ -4255,6 +4266,7 @@ function humanizeHistoryDetail_(action, detail) {
     if (m) return (ST_LABEL[ST_UI[m[1]]] || m[1]) + ' → ' + (ST_LABEL[ST_UI[m[2]]] || m[2]);
   }
   if (action === 'executor_set') detail = detail.replace(/\bmain\b/, 'основная').replace(/\breserve\b/, 'резерв');
+  if (action === 'driver_confirm') return detail.replace(/\s*(подтвердил|снято)\s*$/, '');
   /* transfer_out/transfer_in - detail хранит "YYYY-MM-DD|order_id" (см. POST /orders/transfer,
      plan-orders.js) - не дата+номер дня, потому что история пишется ДО того, как известен
      day_no новой заявки в некоторых путях; id достаточно, а красивый номер уже виден в
@@ -4284,11 +4296,11 @@ function loadHistoryInto(o) {
     var box = $('#op2-hist-box'); if (!box) return;
     var h = r.data.history || [];
     box.innerHTML = h.length ? h.map(function (x) {
-      var label = HIST_ACTION_LABEL_[x.action] || x.action || '';
+      var label = histLabel_(x.action, x.detail);
       var detail = humanizeHistoryDetail_(x.action, x.detail);
       /* Влад 13.09: «просто делай: имя, фамилия и всё» - без отчества, тем же приёмом
          (fioName_), что уже сокращает ФИО водителя в колонке «Машина»; полное ФИО - в title. */
-      return '<li><span class="op2-tm">' + esc(humanAt_(x.at)) + '</span><span><span class="op2-who" title="' + esc(x.by || '') + '">' + esc(fioName_(x.by)) + '</span> ' + esc(label) + (detail ? ' · ' + esc(detail) : '') + '</span></li>';
+      return '<li><span class="op2-tm">' + esc(humanAt_(x.at)) + '</span><span><span class="op2-who" title="' + esc(x.by || '') + '">' + esc(histWho_(x.by)) + '</span> ' + esc(label) + (detail ? ' · ' + esc(detail) : '') + '</span></li>';
     }).join('') : '<li><span class="op2-dim">записей пока нет</span></li>';
   }).catch(function () {});
 }
@@ -5304,14 +5316,14 @@ function tickState() {
   /* 26.09, «гладкая работа» (plans/2026-09-26-smooth-work-ux-analytics.md, И2): 57% подтверждений
      автор делал отдельным шагом в первые 2 минуты после создания - нашёл строку, открыл статус,
      нажал «Подтверждено». Теперь две кнопки, и цвет говорит, с каким статусом заявка уйдёт
-     (Влад 26.09): жёлтая «Сохранить черновиком» - останется «не подтверждено», зелёная
+     (Влад 26.09): жёлтая «Сохранить не подтверждённой» - останется «не подтверждено», зелёная
      «Сохранить и подтвердить» - сразу подтверждена (та же проверка готовности, что у статуса,
      сервер её повторяет в той же транзакции). Не хватает данных для подтверждения - зелёной
      нет, под кнопкой написано, чего не хватает. */
   if (formConfirmable_()) {
     var cErr = confirmReadinessError_(formDraftForConfirm_());
     b.className = 'op2-dbtn op2-primary op2-warn';
-    b.textContent = 'Сохранить черновиком';
+    b.textContent = 'Сохранить не подтверждённой'; /* Влад 26.09: не «черновик» - слово самого статуса */
     if (!cErr && bok) { bok.classList.remove('op2-hidden'); st.textContent = ''; }
     else st.textContent = miss.length
       ? 'Не хватает: ' + miss.join(', ') + ' · сохраним, поля подсветятся «уточнить»'
@@ -5755,7 +5767,7 @@ function collectForm() {
 function saveForm(btn, confirm) {
   if (btn.classList.contains('op2-blocked')) { logUiEvent_('blocked_click', 'save', btn.textContent); toast('<span class="op2-warn">' + esc(btn.textContent) + '</span>'); return; }
   /* «незаполненные поля» - по реально пустым полям (tickState кладёт в data-miss), а не по жёлтому
-     цвету: жёлтая теперь ещё и «черновик», это не то же самое, что «не заполнено». */
+     цвету: жёлтая теперь ещё и «сохранить не подтверждённой», это не то же самое, что «не заполнено». */
   var warn = $('#op2-f-save') ? $('#op2-f-save').dataset.miss === '1' : btn.classList.contains('op2-warn');
   var payload = collectForm();
   var editing = !!(formOrder && !formRepeat && !formPrefill);

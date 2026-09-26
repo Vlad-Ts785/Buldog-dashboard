@@ -1735,6 +1735,7 @@ function buildDom() {
           '<span class="op2-cur" id="op2-pop-cur"></span>' +
           '<button class="op2-ghost op2-hidden" id="op2-pop-back">← Свой парк</button>' +
           '<button class="op2-dbtn op2-primary op2-blocked" id="op2-pop-ok">Выбери машину</button>' +
+          '<button class="op2-dbtn op2-primary op2-hidden" id="op2-pop-move"></button>' +
         '</div>' +
       '</div>' +
 
@@ -1778,7 +1779,7 @@ function buildDom() {
 var NAV_SEL = '.op2-tab,.op2-wchip,.op2-chip,.op2-ghost,.op2-dbtn,.op2-slot,.op2-veh,.op2-st-chip,.op2-stc,.op2-logpick,#op2-lgpop button,.op2-mgrpick,#op2-mgrpop button,.op2-eqpick,#op2-eqpop button,.op2-contract,.op2-sugg .op2-it,.op2-free .op2-day,.op2-stpop button,.op2-pop .op2-vi,.op2-copybtn,.op2-take,.op2-dt,.op2-mgr-tbl tbody tr,.op2-log-body tr,.op2-switch button,[data-nav-sound]';
 /* #op2-wk-today - «Сегодня» гасит нав-звук из делегирования (op2-chip уже в NAV_SEL) и
    играет свой S.toggle() в собственном обработчике, тот же приём, что у #op2-snd ниже. */
-var RESULT_SEL = '#op2-f-save,#op2-rp-go,#op2-pop-ok,.op2-dok,.op2-unset-ot,.op2-slot.op2-ot,.op2-slot.op2-new,#op2-lgpop button,#op2-mgrpop button,#op2-eqpop button,#op2-drv-copy,#op2-drv-max,#op2-d-drv-ok,.op2-dl,.op2-copybtn,.op2-stpop button,.op2-pop .op2-vi[data-act="unset"],.op2-pop .op2-vi[data-act="unset-hired"],#op2-snd,.op2-blocked,#op2-f-ent .op2-chip,#op2-wk-today';
+var RESULT_SEL = '#op2-f-save,#op2-f-saveok,#op2-pop-move,#op2-rp-go,#op2-pop-ok,.op2-dok,.op2-unset-ot,.op2-slot.op2-ot,.op2-slot.op2-new,#op2-lgpop button,#op2-mgrpop button,#op2-eqpop button,#op2-drv-copy,#op2-drv-max,#op2-d-drv-ok,.op2-dl,.op2-copybtn,.op2-stpop button,.op2-pop .op2-vi[data-act="unset"],.op2-pop .op2-vi[data-act="unset-hired"],#op2-snd,.op2-blocked,#op2-f-ent .op2-chip,#op2-wk-today';
 
 function wire() {
   var root = $('#op2-root');
@@ -1980,8 +1981,10 @@ function wire() {
     $('#op2-pop').classList.remove('op2-hired');
     this.classList.add('op2-hidden');
     var ok = $('#op2-pop-ok'); ok.className = 'op2-dbtn op2-primary op2-blocked'; ok.textContent = 'Выбери машину';
+    hidePopMove_();
   });
   $('#op2-pop-ok').addEventListener('click', onPopOk);
+  $('#op2-pop-move').addEventListener('click', onPopMove);
 
   /* ── шторка ── */
   $('#op2-d-close').addEventListener('click', closeDrawer);
@@ -3410,9 +3413,19 @@ function onLogClick(e) {
     apiPost('/orders/take', { id: oa.id }).then(function (r) {
       if (!ok_(r)) return;
       S.tickUp();
-      toast('Заявка №' + esc(oNo(oa)) + ' <span class="op2-tick">принята в работу</span>',
-        function () { apiPost('/orders/take', { id: oa.id, email: 'none' }).then(function (r2) { if (ok_(r2)) loadOrders(); }); });
-      loadOrders();
+      /* 26.09, «гладкая работа» (И3): в 77% случаев логист сразу после «Принять» сам же ставил
+         машину - кнопка превращалась в «Поставить», нужен был второй клик. Теперь выбор машины
+         открывается сам: выбрал - машина стоит, закрыл (Esc/мимо) - заявка просто принята, как
+         раньше. Строку перерисовываем из ответа сервера, чтобы выбор встал на новую кнопку. */
+      var fresh = r.data && r.data.order;
+      if (fresh) { for (var i = 0; i < ORD.length; i++) { if (String(ORD[i].id) === String(fresh.id)) { ORD[i] = fresh; break; } } renderAll(); }
+      var oAcc = byId(oa.id) || oa;
+      var anchor = document.querySelector('.op2-log-body .op2-slot[data-oid="' + oa.id + '"]');
+      var wantPick = !!(anchor && oSt(oAcc) !== 'ot' && !oHired(oAcc) && !oOwn(oAcc).length);
+      toast('Заявка №' + esc(oNo(oa)) + ' <span class="op2-tick">принята в работу</span>' + (wantPick ? ' · выбери машину или закрой выбор' : ''),
+        function () { closePop(); apiPost('/orders/take', { id: oa.id, email: 'none' }).then(function (r2) { if (ok_(r2)) loadOrders(); }); });
+      if (wantPick) openPop(anchor, oAcc);
+      else loadOrders();
     });
     return;
   }
@@ -3533,6 +3546,7 @@ function openPop(anchor, o, forceAdd) {
   var ok = $('#op2-pop-ok');
   ok.className = 'op2-dbtn op2-primary op2-blocked';
   ok.textContent = (vs.length || hv) && !popAdd ? 'Выбери замену или «Снять»' : 'Выбери машину';
+  hidePopMove_();
   $('#op2-pop-body').innerHTML = '<div class="op2-sec"><span>загружаем парк…</span><span class="op2-ln"></span></div>';
 
   var r = anchor.getBoundingClientRect();
@@ -3563,6 +3577,8 @@ function renderPop(q) {
   var nodrv = popVeh.filter(function (v) { return v.state === 'nodriver' && match(v); });
   var rep = popVeh.filter(function (v) { return v.state === 'repair' && match(v); });
   function item(v, extra, off) {
+    var elw = v.state === 'free' ? carElsewhere_(o, v.gos) : null;
+    if (elw) extra += ' · <span class="op2-warn">ещё на №' + esc(oNo(elw.order)) + (oTime(elw.order) ? ' в ' + esc(oTime(elw.order)) : '') + '</span>';
     return '<div class="op2-vi' + (off ? ' op2-off' : '') + '" data-gos="' + esc(v.gos) + '">' +
       '<span class="op2-gos">' + esc(v.gos) + '</span>' +
       '<span class="op2-ty">' + esc([v.marka, v.type].filter(Boolean).join(' · ')) + '</span>' +
@@ -3666,6 +3682,52 @@ function onPopBodyClick(e) {
   ok.dataset.gos = v.gos;
   ok.dataset.declared = declared ? '1' : '';
   ok.dataset.outside = outside ? '1' : '';
+  /* 26.09, «гладкая работа» (И4): в 34 из 76 снятий машина за 15 минут уходила на ДРУГУЮ
+     заявку - логист снимал её там и ставил здесь вручную, хотя перенос одним действием есть
+     (перетаскивание плитки), но им с 18.09 не пользовались ни разу. Здесь то же действие
+     сервера кнопкой: «Переставить с №N сюда» (там станет пусто) или «Обменять», если здесь
+     уже стоит своя. Основная кнопка в этом случае - «Поставить и сюда»: машина на двух
+     заявках за день - тоже нормальный случай. Не предлагаем: менеджеру (переносит логист),
+     «под данные» (замена там идёт через согласование менеджера - перенос его обошёл бы),
+     заявке с наёмником, выбору из заявленных и режиму «вторая машина». */
+  hidePopMove_();
+  var elw = (!declared && !popAdd && !isMgr() && !oHired(o) && !o.needs_data) ? carElsewhere_(o, v.gos) : null;
+  if (elw && !elw.order.needs_data) {
+    var mvb = $('#op2-pop-move');
+    mvb.dataset.exid = elw.ex.id; mvb.dataset.src = elw.order.id;
+    mvb.textContent = vs2.length
+      ? 'Обменять: ' + v.gos + ' сюда, ' + (vs2[0].vehicle_gos || '') + ' на №' + oNo(elw.order)
+      : 'Переставить с №' + oNo(elw.order) + ' сюда';
+    mvb.classList.remove('op2-hidden');
+    ok.className = 'op2-dbtn';
+    if (!vs2.length) ok.textContent = 'Поставить и сюда · две заявки';
+  }
+}
+function hidePopMove_() {
+  var m = $('#op2-pop-move'); if (!m) return;
+  m.classList.add('op2-hidden'); m.dataset.exid = ''; m.dataset.src = '';
+}
+/* Госномер для сравнения: без пробелов, заглавными (в заявках и в парке номер пишут по-разному) */
+function gosKey_(g) { return String(g || '').replace(/\s/g, '').toUpperCase(); }
+/* Где эта своя машина уже стоит основной на ДРУГОЙ заявке того же дня (не отбой). ORD - заявки
+   открытого дня, поэтому ищем только среди заявок той же даты, что и заявка в пикере. */
+function carElsewhere_(o, gos) {
+  var k = gosKey_(gos); if (!k || !o) return null;
+  for (var i = 0; i < ORD.length; i++) {
+    var x = ORD[i];
+    if (String(x.id) === String(o.id) || oSt(x) === 'ot' || x.service_date !== o.service_date) continue;
+    var vs = oOwn(x);
+    for (var j = 0; j < vs.length; j++) if (vs[j].role !== 'reserve' && gosKey_(vs[j].vehicle_gos) === k) return { order: x, ex: vs[j] };
+  }
+  return null;
+}
+function onPopMove() {
+  var t = popOrder; if (!t) return;
+  var src = byId(this.dataset.src); if (!src) return;
+  var ex = null, vs = oOwn(src);
+  for (var i = 0; i < vs.length; i++) if (String(vs[i].id) === String(this.dataset.exid)) ex = vs[i];
+  if (!ex) { toast('<span class="op2-warn">Машина уже не на №' + esc(oNo(src)) + ' - обнови список</span>'); loadOrders(); return; }
+  moveCarTo_(src, ex, t, true);
 }
 function onPopOk() {
   var o = popOrder; if (!o) return;
@@ -3971,8 +4033,17 @@ function onPointerUp(e) {
   S.drop();
   var v = oOwn(src)[0];
   if (!v) return;
+  moveCarTo_(src, v, t, false);
+}
+/* Перестановка своей машины на другую заявку одним вызовом (сервер: цель пустая - перенос, занята -
+   обмен). Общая для перетаскивания плитки и кнопки в выборе машины (26.09, И4). Отмена - тот же
+   вызов в обратную сторону, но НОВЫМ исполнителем: после переноса старая строка исполнителя снята,
+   и прежняя отмена у перетаскивания (слала старый id) молча не срабатывала. */
+function moveCarTo_(src, v, t, sound) {
+  closePop();
   apiPost('/orders/executor_move', { executor_id: v.id, to_order_id: t.id }).then(function (r) {
     if (!ok_(r)) { loadOrders(); return; }
+    if (sound) S.tickUp();
     var d = r.data;
     var msg = d.swapped
       ? 'Поменяли местами: <span class="op2-tick">' + esc(v.vehicle_gos || '') + '</span> → №' + esc(oNo(t)) + ', встречная машина → №' + esc(oNo(src))
@@ -3981,8 +4052,9 @@ function onPointerUp(e) {
     if (segOf(t.equipment_type) && segOf(src.equipment_type) && segOf(t.equipment_type) !== segOf(src.equipment_type)) {
       msg += ' · <span class="op2-warn">тип заявки ' + esc(t.equipment_type) + ', машина с ' + esc(src.equipment_type) + '</span>';
     }
+    var newEx = ((d.to && d.to.executors) || []).filter(function (x) { return x.kind !== 'hired' && x.role === 'main' && gosKey_(x.vehicle_gos) === gosKey_(v.vehicle_gos); })[0];
     toast(msg + ' · менеджерам ушло уведомление',
-      function () { apiPost('/orders/executor_move', { executor_id: v.id, to_order_id: src.id }).then(function (r2) { if (ok_(r2)) loadOrders(); }); }, 9000);
+      newEx ? function () { apiPost('/orders/executor_move', { executor_id: newEx.id, to_order_id: src.id }).then(function (r2) { if (ok_(r2)) loadOrders(); }); } : null, 9000);
     loadOrders();
   });
 }
@@ -4146,10 +4218,33 @@ var HIST_FIELD_LABEL_ = {
   unload_confirmed: 'адрес выгрузки подтверждён', unload_contact_name: 'контакт на выгрузке', unload_contact_phone: 'телефон на выгрузке',
   price: 'цена', payment_status: 'статус оплаты', internal: 'внутренний заказ', crm_deal_id: 'сделка CRM'
 };
+/* значение поля в истории правок: пусто - словом, цена - рублями, флажки - да/нет */
+function histVal_(k, v) {
+  v = String(v == null ? '' : v);
+  if (!v) return 'пусто';
+  if (k === 'price') return fmtP(v) || v;
+  if (k === 'cash' || k === 'needs_data' || k === 'internal') return v === '1' ? 'да' : v === '0' ? 'нет' : v;
+  return v;
+}
 function humanizeHistoryDetail_(action, detail) {
   detail = String(detail || '');
   if (!detail || HIST_SUPPRESS_DETAIL_[action]) return '';
   if (action === 'update') {
+    /* 26.09, «гладкая работа» (И5): сервер пишет только реально изменённые поля, JSON
+       {"c":{"поле":["было","стало"]}} (у координат - без значений, []). Старые записи - список
+       ключей через запятую (форма присылала все поля, и каждая правка выглядела как «изменено всё»). */
+    if (detail.charAt(0) === '{') {
+      try {
+        var ch = (JSON.parse(detail) || {}).c || {}, parts = [], seenL = {};
+        Object.keys(ch).forEach(function (k) {
+          var lab = HIST_FIELD_LABEL_[k] || k;
+          if (seenL[lab]) return; seenL[lab] = true;
+          var pair = ch[k] || [];
+          parts.push(pair.length === 2 ? lab + ' ' + histVal_(k, pair[0]) + ' → ' + histVal_(k, pair[1]) : lab);
+        });
+        return parts.join(', ');
+      } catch (e) { /* не JSON - ниже как старый формат */ }
+    }
     var seen = {};
     var fields = detail.split(',').map(function (k) { return HIST_FIELD_LABEL_[k.trim()] || k.trim(); })
       .filter(function (f) { if (!f || seen[f]) return false; seen[f] = true; return true; });
@@ -4389,6 +4484,7 @@ function onDrawerFoot(e) {
   var id = e.target.id;
   var o = drawerOrder;
   if (id === 'op2-f-save') { saveForm(e.target); return; }
+  if (id === 'op2-f-saveok') { saveForm(e.target, true); return; }
   if (id === 'op2-d-otboy' && o) { setStatus(o, 'ot'); closeDrawer(); return; }
   if (id === 'op2-d-done' && o) { setStatus(o, 'done'); closeDrawer(); return; }
   if (id === 'op2-d-contract' && o) { genContractPdf(o); return; }
@@ -4841,7 +4937,8 @@ function renderForm() {
 
   $('#op2-d-foot').innerHTML = '<button class="op2-del">' + ((editing && isAdmin()) ? 'Удалить' : 'Отмена') + '</button>' +
     '<span class="op2-dim op2-sm" id="op2-f-state"></span>' +
-    '<button class="op2-dbtn op2-primary op2-blocked" id="op2-f-save">Укажи заказчика</button>';
+    '<button class="op2-dbtn op2-primary op2-blocked" id="op2-f-save">Укажи заказчика</button>' +
+    '<button class="op2-dbtn op2-primary op2-hidden" id="op2-f-saveok">Сохранить и подтвердить</button>';
 
   wireForm();
 }
@@ -5146,6 +5243,14 @@ function wireForm() {
      (заявки, заведённые до этой правки, перенос из старого «Задания») - разбираем сразу,
      не дожидаясь клика в поле и потери фокуса. */
   if (formOrder) {
+    /* 26.09 (карта процесса «Задания»): поле адреса рисуется без data-lat/lon, а collectForm()
+       берёт координаты ТОЛЬКО из dataset - любое сохранение правки стирало точку, хотя
+       подсказка под полем её показывала. По журналу 18-26.09: 87 заявок потеряли
+       координаты погрузки, 78 - выгрузки (и ссылку «Карта:» в задании водителю вместе с
+       ними). Кладём сохранённые координаты в dataset - правка других полей их не трогает. */
+    var fIn_ = $('#op2-f-from'), tIn_ = $('#op2-f-to');
+    if (fIn_ && formOrder.load_lat && formOrder.load_lon) { fIn_.dataset.lat = formOrder.load_lat; fIn_.dataset.lon = formOrder.load_lon; }
+    if (tIn_ && formOrder.unload_lat && formOrder.unload_lon) { tIn_.dataset.lat = formOrder.unload_lat; tIn_.dataset.lon = formOrder.unload_lon; }
     if (formOrder.load_address && !formOrder.load_lat) tryParseAddrPaste_('from');
     if (formOrder.unload_address && !formOrder.unload_lat) tryParseAddrPaste_('to');
   }
@@ -5154,6 +5259,10 @@ function wireForm() {
 function tickState() {
   var b = $('#op2-f-save'), st = $('#op2-f-state');
   if (!b) return;
+  /* «Сохранить и подтвердить» видна только в конце, когда форму можно сохранить вообще -
+     любая ранняя блокировка ниже (нет заказчика/цены/массы...) оставляет одну кнопку. */
+  var bok = $('#op2-f-saveok'); if (bok) bok.classList.add('op2-hidden');
+  b.dataset.miss = '';
   var cust = ($('#op2-f-cust') || {}).value ? $('#op2-f-cust').value.trim() : '';
   if (!cust) { b.className = 'op2-dbtn op2-primary op2-blocked'; b.textContent = 'Укажи заказчика'; st.textContent = ''; return; }
   var miss = [];
@@ -5191,6 +5300,24 @@ function tickState() {
       return;
     }
   }
+  b.dataset.miss = miss.length ? '1' : '';
+  /* 26.09, «гладкая работа» (plans/2026-09-26-smooth-work-ux-analytics.md, И2): 57% подтверждений
+     автор делал отдельным шагом в первые 2 минуты после создания - нашёл строку, открыл статус,
+     нажал «Подтверждено». Теперь две кнопки, и цвет говорит, с каким статусом заявка уйдёт
+     (Влад 26.09): жёлтая «Сохранить черновиком» - останется «не подтверждено», зелёная
+     «Сохранить и подтвердить» - сразу подтверждена (та же проверка готовности, что у статуса,
+     сервер её повторяет в той же транзакции). Не хватает данных для подтверждения - зелёной
+     нет, под кнопкой написано, чего не хватает. */
+  if (formConfirmable_()) {
+    var cErr = confirmReadinessError_(formDraftForConfirm_());
+    b.className = 'op2-dbtn op2-primary op2-warn';
+    b.textContent = 'Сохранить черновиком';
+    if (!cErr && bok) { bok.classList.remove('op2-hidden'); st.textContent = ''; }
+    else st.textContent = miss.length
+      ? 'Не хватает: ' + miss.join(', ') + ' · сохраним, поля подсветятся «уточнить»'
+      : (cErr || '').replace('Нельзя подтвердить - не заполнено', 'Для подтверждения не хватает');
+    return;
+  }
   if (miss.length) {
     b.className = 'op2-dbtn op2-primary op2-warn';
     b.textContent = 'Сохранить · есть незаполненные';
@@ -5200,6 +5327,24 @@ function tickState() {
     b.textContent = 'Сохранить заявку';
     st.textContent = '';
   }
+}
+/* Можно ли подтвердить прямо из формы: экран менеджера (статусы - менеджерские, ST_M), новая
+   заявка (в т.ч. «Повторить» и из CRM) или правка ещё не подтверждённой. Подтверждённую или
+   с отбоем форма не трогает - там одна кнопка «Сохранить заявку», как раньше. */
+function formConfirmable_() {
+  if (formWho !== 'mgr') return false;
+  var editing = !!(formOrder && !formRepeat && !formPrefill);
+  return !editing || oSt(formOrder) === 'nz';
+}
+/* Черновик заявки из полей формы - ровно те поля, что проверяет confirmReadinessError_ */
+function formDraftForConfirm_() {
+  return {
+    service_time: normT(($('#op2-f-time') || {}).value || ''),
+    load_address: (($('#op2-f-from') || {}).value || '').trim(),
+    unload_address: (($('#op2-f-to') || {}).value || '').trim(),
+    cargo: (($('#op2-f-cargo') || {}).value || '').trim(),
+    price: num(($('#op2-f-price') || {}).value)
+  };
 }
 function formEq() {
   // ВАЖНО: не искать .op2-chip.op2-on - выбор из «Ещё» сворачивается назад в [Трал]
@@ -5217,21 +5362,15 @@ function formEq() {
   var mods = modsBox ? (modsBox.dataset.mods || '').split(',').filter(Boolean) : [];
   return eqCombine_(base, mods);
 }
-/* 25.09, найден реальный случай (мобильная форма, тот же splitContact_ там): менеджер ввёл
-   "+79262543570 Эдуард" (телефон ПЕРЕД именем, не после, как в подсказке "Имя · телефон") -
-   старая версия ловила телефон ТОЛЬКО в конце строки, вся строка целиком ушла в имя, поле
-   телефона осталось пустым - заявка ушла водителю без номера контакта, не видно было НИГДЕ.
-   Добавлен второй разбор - телефон в НАЧАЛЕ строки. */
+/* История: 25.09 «+79262543570 Эдуард» (телефон ПЕРЕД именем) - старая резка на клиенте
+   теряла номер, заявка ушла водителю без контакта; 26.09 - то же с номером из WhatsApp. */
+/* 26.09, Влад: «система должна быть умнее менеджера». Разбор переехал на СЕРВЕР
+   (api/lib/contact-phone.js, /orders/save): любой вид номера (8/+7/7 слитно, пробелы,
+   дефисы, невидимые символы из WhatsApp), несколько номеров у одного человека и пары
+   «два человека - два номера». Клиент строку больше не режет - шлёт как ввели, в поле
+   имени; своя резка здесь путала порядок пар при двух номерах. */
 function splitContact(s) {
-  s = String(s || '').trim();
-  if (!s) return { name: '', phone: '' };
-  var parts = s.split('·');
-  if (parts.length >= 2) return { name: parts[0].trim(), phone: parts.slice(1).join('·').trim() };
-  var mEnd = s.match(/([+\d][\d\s\-()]{6,})$/);
-  if (mEnd) return { name: s.slice(0, mEnd.index).replace(/[,\s]+$/, '').trim(), phone: mEnd[1].trim() };
-  var mStart = s.match(/^([+\d][\d\s\-()]{6,})/);
-  if (mStart) return { name: s.slice(mStart[0].length).replace(/^[,\s]+/, '').trim(), phone: mStart[1].trim() };
-  return { name: s, phone: '' };
+  return { name: String(s || '').trim(), phone: '' };
 }
 function fetchCustomers(q) {
   apiGet('/orders/customers', { q: q }).then(function (r) {
@@ -5611,29 +5750,48 @@ function collectForm() {
   else if ($('#op2-f-cust').dataset.entityId) { payload.customer_entity_id = $('#op2-f-cust').dataset.entityId; }
   return payload;
 }
-function saveForm(btn) {
+/* confirm=true - кнопка «Сохранить и подтвердить» (26.09, И2): тот же /orders/save с флагом
+   confirm, сервер сохраняет и переводит в «подтверждено» одной транзакцией. */
+function saveForm(btn, confirm) {
   if (btn.classList.contains('op2-blocked')) { logUiEvent_('blocked_click', 'save', btn.textContent); toast('<span class="op2-warn">' + esc(btn.textContent) + '</span>'); return; }
-  var warn = btn.classList.contains('op2-warn');
+  /* «незаполненные поля» - по реально пустым полям (tickState кладёт в data-miss), а не по жёлтому
+     цвету: жёлтая теперь ещё и «черновик», это не то же самое, что «не заполнено». */
+  var warn = $('#op2-f-save') ? $('#op2-f-save').dataset.miss === '1' : btn.classList.contains('op2-warn');
   var payload = collectForm();
   var editing = !!(formOrder && !formRepeat && !formPrefill);
   if (editing) payload.id = formOrder.id;
   if (formPrefill && formOrder && formOrder.crm_deal_id) payload.crm_deal_id = formOrder.crm_deal_id; /* связь с CRM-сделкой */
-  btn.disabled = true;
+  if (confirm) {
+    var cErr = confirmReadinessError_(formDraftForConfirm_());
+    if (cErr) { S.attention(); toast('<span class="op2-warn">' + esc(cErr) + '</span>'); return; }
+    payload.confirm = 1;
+  }
+  var btns = [$('#op2-f-save'), $('#op2-f-saveok')].filter(Boolean);
+  btns.forEach(function (x) { x.disabled = true; });
   apiPostJson('/orders/save', payload).then(function (r) {
-    btn.disabled = false;
+    btns.forEach(function (x) { x.disabled = false; });
     if (!ok_(r)) { logUiEvent_('save_error', 'orders/save', (r && r.data && r.data.error) || 'сервер недоступен'); return; }
     var d = r.data;
     formMode = false;
     closeDrawer();
     S.tickUp();
     var no = d.day_no != null ? d.day_no : (d.order && d.order.day_no);
+    var savedId = d.id || (d.order && d.order.id);
+    if (confirm) {
+      /* подтверждена сразу - тот же текст и та же отмена, что у ручной смены статуса (setStatus) */
+      toast('Заявка №' + esc(no) + (editing ? ' сохранена' : ' создана') + ' и <span class="op2-tick">подтверждена</span> · логисты видят сразу',
+        savedId ? function () { apiPost('/orders/status', { id: savedId, status: ST_API.nz }).then(function (r2) { if (ok_(r2)) loadOrders(); }); } : null);
+      if (payload.service_date !== DATE && !TO_DATE) { DATE = payload.service_date; TABS_WK = mondayOf_(DATE); renderAll(); }
+      loadOrders(); loadCounts(); loadFree();
+      return;
+    }
     toast('Заявка №' + esc(no) + (editing ? ' сохранена' : ' создана') +
       (payload.internal ? ' · <span class="op2-tick">внутренний заказчик</span>' + (payload.price ? ' · ' + esc(fmtP(payload.price)) : ' · <span class="op2-warn">без суммы</span>') + ' · в списке менеджеров не появится' : '') +
       (warn ? ' · <span class="op2-warn">незаполненные поля</span>' : '') +
       (editing ? '' : (payload.internal ? '' : (formWho === 'log' ? ' · менеджер увидит у себя' : ' · логисты видят сразу'))));
     if (payload.service_date !== DATE && !TO_DATE) { DATE = payload.service_date; TABS_WK = mondayOf_(DATE); renderAll(); }
     loadOrders(); loadCounts(); loadFree();
-  }).catch(function () { btn.disabled = false; logUiEvent_('save_error', 'orders/save', 'сеть'); });
+  }).catch(function () { btns.forEach(function (x) { x.disabled = false; }); logUiEvent_('save_error', 'orders/save', 'сеть'); });
 }
 
 /* ═════════════════════════ ПОВТОРИТЬ (один экран: дни × количество × время) ═════════════════════════

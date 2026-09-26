@@ -274,6 +274,21 @@ svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7;stroke
 .sugg-it:first-child{border-top:none}
 .sugg-it:active{background:var(--bg4)}
 .sugg-it .m{flex:none;color:var(--muted);font-size:12px}
+/* площадки заказчика (26.09, Б-5) - как на ПК (превью examples/preview-customer-sites.html): название +
+   метка точки, ниже адрес целиком; под полем адреса - какая площадка выбрана, без точки - «Запомнить точку» */
+.sugg-it.site{align-items:flex-start}
+.sugg-it .sl{display:flex;flex-direction:column;gap:3px;min-width:0}
+.sugg-it .stl{font-weight:600;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.sugg-it .sa{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.pt-chip{font-size:10.5px;font-weight:600;border-radius:5px;padding:1px 7px;white-space:nowrap}
+.pt-chip.ok{background:rgba(29,158,117,.16);color:var(--tint-green)}
+.pt-chip.no{background:rgba(239,159,39,.16);color:var(--tint-amber)}
+.site-row{margin:-4px 0 10px;font-size:12.5px;color:var(--muted);line-height:1.4}
+.site-row.warn{color:var(--tint-amber)}
+.site-row .pt-in{display:flex;gap:8px;margin-top:8px}
+.site-row .pt-in input{flex:1 1 auto;min-width:0;height:44px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);padding:0 12px;font-size:16px;color:var(--text);outline:none}
+.site-row .pt-in input:focus{border-color:var(--blue)}
+.site-row .pt-in .btn{height:44px;font-size:14px;flex:none}
 .info{display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border-radius:8px;background:var(--bg3);font-size:13px;color:var(--muted);margin-top:10px}
 .info.warn{background:rgba(239,159,39,.12);color:var(--amber)}
 .info.err{background:rgba(226,75,74,.12);color:var(--tint-red)}
@@ -1605,11 +1620,19 @@ function renderNewSheet(head,body,foot){
     executor_entity_id:o.executor_entity_id||'',
     /* 26.09: без этих полей правка с телефона слала пустые координаты и стирала точку - тот же баг,
        что на ПК (fix 62852cd). Правка текста адреса и так сбрасывает точку (обработчик fFrom/fTo). */
-    load_lat:o.load_lat||'', load_lon:o.load_lon||'', unload_lat:o.unload_lat||'', unload_lon:o.unload_lon||''
+    load_lat:o.load_lat||'', load_lon:o.load_lon||'', unload_lat:o.unload_lat||'', unload_lon:o.unload_lon||'',
+    /* 26.09, Б-5: ссылка на площадку заказчика (иначе правка с телефона её бы теряла) */
+    load_site_id:o.load_site_id||'', unload_site_id:o.unload_site_id||'',
+    load_site_name:(o.load_site&&o.load_site.name)||'', unload_site_name:(o.unload_site&&o.unload_site.name)||'',
+    customer_entity_id:o.customer_entity_id||null
   } : { service_date: iso(SELECTED_DATE), service_time:null, equipment_type:null, customer:'', from:['',''], to:['',''],
     cargo:'', gabarit:'Габарит', price:null, payment_status:'', cash:false, note:'', needs_data:false, internal_customer:null,
     customer_contact_name:'', customer_contact_phone:'', load_contact_name:'', load_contact_phone:'',
-    unload_contact_name:'', unload_contact_phone:'', executor_entity_id:'' };
+    unload_contact_name:'', unload_contact_phone:'', executor_entity_id:'',
+    load_site_id:'', unload_site_id:'', load_site_name:'', unload_site_name:'' };
+  /* своей точки у заявки нет, а у площадки есть (поставили позже) - точка площадки, как на ПК */
+  if(editing){ ['load','unload'].forEach(function(s){ var si=o[s+'_site'];
+    if(!F[s+'_lat'] && si && si.lat!=null && si.lon!=null){ F[s+'_lat']=si.lat; F[s+'_lon']=si.lon; } }); }
   head.innerHTML = shHeadHtml(editing ? ('Заявка №'+o.day_no) : 'Новая заявка');
   $('shCancel').addEventListener('click', function(){ closeSheet(); });
 
@@ -1697,9 +1720,11 @@ function renderNewSheet(head,body,foot){
   html += '<div class="f-label">Откуда — куда</div>';
   html += '<div class="frow"><button type="button" class="k" id="fFromBase">Откуда</button><input id="fFrom" placeholder="'+(ROLE==='log'?'База':'По месту')+'" value="'+esc((F.from&&F.from[0])||'')+(F.from&&F.from[1]?(', '+esc(F.from[1])):'')+'"></div>';
   html += '<div class="sugg" id="fFromSugg" hidden></div>';
+  html += '<div class="site-row" id="fFromSite" hidden></div>';
   html += '<div class="frow"><div class="k">Контакт</div><input id="fFromContact" placeholder="Имя · телефон" value="'+esc([F.load_contact_name,F.load_contact_phone].filter(Boolean).join(' · '))+'"></div>';
   html += '<div class="frow"><button type="button" class="k" id="fToBase">Куда</button><input id="fTo" placeholder="Адрес" value="'+esc((F.to&&F.to[0])||'')+(F.to&&F.to[1]?(', '+esc(F.to[1])):'')+'"></div>';
   html += '<div class="sugg" id="fToSugg" hidden></div>';
+  html += '<div class="site-row" id="fToSite" hidden></div>';
   html += '<div class="frow"><div class="k">Контакт</div><input id="fToContact" placeholder="Имя · телефон" value="'+esc([F.unload_contact_name,F.unload_contact_phone].filter(Boolean).join(' · '))+'"></div>';
 
   html += '<div class="f-label">Что везём</div>';
@@ -1789,6 +1814,7 @@ function renderNewSheet(head,body,foot){
     else { $(inputId).value='Работа по месту'; }
     if(side==='from'){ draft.from_raw=$(inputId).value; draft.load_lat=lat; draft.load_lon=lon; }
     else { draft.to_raw=$(inputId).value; draft.unload_lat=lat; draft.unload_lon=lon; }
+    dropSite_(side);
     sToggle(); vib(4); tick();
   }
   bindChip('#fQuick .qk', function(el){ draft.service_time=el.getAttribute('data-t'); $('fTimeVal').textContent=draft.service_time; vib(4); });
@@ -1850,8 +1876,8 @@ function renderNewSheet(head,body,foot){
     var el=$(id); if(!el) return;
     el.addEventListener('input', function(){
       if(id==='fCust') draft.customer=el.value;
-      else if(id==='fFrom'){ draft.from_raw=el.value; draft.load_lat=''; draft.load_lon=''; }
-      else if(id==='fTo'){ draft.to_raw=el.value; draft.unload_lat=''; draft.unload_lon=''; }
+      else if(id==='fFrom'){ draft.from_raw=el.value; draft.load_lat=''; draft.load_lon=''; dropSite_('from'); }
+      else if(id==='fTo'){ draft.to_raw=el.value; draft.unload_lat=''; draft.unload_lon=''; dropSite_('to'); }
       else if(id==='fCargo') draft.cargo=el.value;
       else if(id==='fWeight') draft.weight=el.value;
       else if(id==='fDims') draft.cargo_dims=el.value;
@@ -1870,9 +1896,14 @@ function renderNewSheet(head,body,foot){
      секций. Раньше поля были голыми <input> без единого обращения к серверу - "не
      подтягиваются" было буквально так, подсказок не существовало вообще. */
   var custSuggT_=null;
+  var custHistT_=null;
   $('fCust').addEventListener('input', function(){
     if(!this.readOnly){ draft.customer_entity_id=null; draft.customer_is_internal=false; }
     var v=this.value.trim(); clearTimeout(custSuggT_);
+    /* 26.09 (как на ПК, А2): точки/площадки прошлого заказчика не остаются в подсказках нового; для
+       напечатанного (не выбранного) названия история - после паузы */
+    clearTimeout(custHistT_); addrSitesHtml_.from=addrSitesHtml_.to=''; addrHistHtml_.from=addrHistHtml_.to='';
+    if(v.length>=3 && !/^\d+$/.test(v)) custHistT_=setTimeout(function(){ fetchAddrHistory_(v); }, 700);
     if(v.length<2){ $('fCustSugg').hidden=true; return; }
     custSuggT_=setTimeout(function(){ fetchCustSugg_(v); }, 250);
   });
@@ -1898,15 +1929,54 @@ function renderNewSheet(head,body,foot){
     $('fCust').value=name; draft.customer=name;
     draft.customer_entity_id=it.getAttribute('data-eid')||null; draft.customer_is_internal=false;
     $('fCustSugg').hidden=true;
+    clearTimeout(custHistT_);
     fetchAddrHistory_(name);
     tick();
   });
 
-  var addrHistHtml_={from:'',to:''}, addrGeoHtml_={from:'',to:''}, addrSuggT_={from:null,to:null};
+  var addrSitesHtml_={from:'',to:''}, addrHistHtml_={from:'',to:''}, addrGeoHtml_={from:'',to:''}, addrSuggT_={from:null,to:null};
   function renderAddrSugg_(side){
     var box=$(side==='from'?'fFromSugg':'fToSugg');
-    var html=addrHistHtml_[side]+addrGeoHtml_[side];
+    var html=addrSitesHtml_[side]+addrHistHtml_[side]+addrGeoHtml_[side];
     box.innerHTML=html; box.hidden=!html;
+  }
+  /* ── площадки заказчика (26.09, Б-5; как на ПК): выбор площадки - адрес, точка, контакт на месте и
+     ссылка на неё; под полем - какая площадка выбрана; у площадки без точки - «Запомнить точку»
+     (только ссылка Яндекс.Карт или координаты - точку ставит человек, поиск её не ставит). */
+  function sidePre_(side){ return side==='from'?'load':'unload'; }
+  function dropSite_(side){
+    var pre=sidePre_(side);
+    if(!draft[pre+'_site_id']) return;
+    draft[pre+'_site_id']=''; draft[pre+'_site_name']='';
+    renderSiteRow_(side);
+  }
+  function renderSiteRow_(side){
+    var pre=sidePre_(side), row=$(side==='from'?'fFromSite':'fToSite');
+    if(!row) return;
+    var sid=draft[pre+'_site_id'], name=draft[pre+'_site_name']||'';
+    if(!sid){ row.hidden=true; row.innerHTML=''; return; }
+    var hasPt=!!(draft[pre+'_lat'] && draft[pre+'_lon']);
+    row.hidden=false; row.className='site-row'+(hasPt?'':' warn');
+    row.innerHTML = hasPt
+      ? 'Площадка «'+esc(name)+'» · точка есть'
+      : 'Площадка «'+esc(name)+'» · нет точки. Вставьте ссылку Яндекс.Карт или координаты - точка запомнится для следующих заявок'+
+        '<div class="pt-in"><input autocomplete="off" inputmode="url" placeholder="Ссылка или 55.75, 37.62"><button type="button" class="btn ghost">Запомнить</button></div>';
+    var btn=row.querySelector('button'), inp=row.querySelector('input');
+    if(!btn) return;
+    btn.addEventListener('click', function(){
+      var txt=inp.value.trim();
+      if(!txt){ vib([12,30,12]); toast('Вставьте ссылку Яндекс.Карт или координаты'); inp.focus(); return; }
+      btn.disabled=true;
+      apiPost_('/sites/set_point', {id:sid, point_text:txt}).then(function(r){
+        btn.disabled=false;
+        if(!r.ok){ return toast((r.data&&r.data.error)||'Не сохранилось', '', null, null, {err:true}); }
+        var s=r.data.site;
+        if(String(draft[pre+'_site_id'])!==String(s.id)) return; /* пока ждали, площадку сменили */
+        draft[pre+'_lat']=s.lat; draft[pre+'_lon']=s.lon;
+        vib([8,40,8]); toast('Точка площадки «'+(s.name||'')+'» запомнена');
+        renderSiteRow_(side); fetchAddrHistory_(draft.customer||'');
+      }).catch(function(){ btn.disabled=false; toast('Нет соединения', '', null, null, {err:true}); });
+    });
   }
   function dadataAddrParts_(d){
     d=d||{};
@@ -1942,8 +2012,17 @@ function renderNewSheet(head,body,foot){
   }
   function fetchAddrHistory_(name){
     if(!name) return;
-    apiGet_('/orders/customer_history', {customer:name}).then(function(r){
+    apiGet_('/orders/customer_history', {customer:name, entity:draft.customer_entity_id||''}).then(function(r){
       if(!r.ok) return;
+      if(($('fCust').value||'').trim()!==String(name).trim()) return; /* пока ждали ответ, заказчика сменили */
+      var sites=r.data.sites||[];
+      var sh = sites.length ? '<div class="sugg-sec">Площадки заказчика</div>'+sites.map(function(s){
+        var hasPt=s.lat!=null && s.lon!=null;
+        return '<div class="sugg-it site" data-site-id="'+esc(s.id)+'" data-name="'+esc(s.name||'')+'" data-address="'+esc(s.address)+'" data-lat="'+esc(hasPt?s.lat:'')+'" data-lon="'+esc(hasPt?s.lon:'')+'" data-cname="'+esc(s.contact_name||'')+'" data-cphone="'+esc(s.contact_phone||'')+'">'+
+          '<span class="sl"><span class="stl">'+esc(s.name||s.address)+(hasPt?' <span class="pt-chip ok">точка есть</span>':' <span class="pt-chip no">нет точки</span>')+'</span>'+
+          '<span class="sa">'+esc(s.address)+'</span></span><span class="m">'+esc(s.uses||'')+'</span></div>';
+      }).join('') : '';
+      addrSitesHtml_.from=sh; addrSitesHtml_.to=sh;
       var items=(r.data.addresses||[]).slice(0,8);
       var h = items.length ? '<div class="sugg-sec">Точки этого заказчика</div>'+items.map(function(a){
         return '<div class="sugg-it" data-address="'+esc(a.address)+'" data-lat="'+esc(a.lat||'')+'" data-lon="'+esc(a.lon||'')+'"><span>'+esc(a.address)+'</span><span class="m">'+esc(a.n||'')+'×</span></div>';
@@ -1966,9 +2045,20 @@ function renderNewSheet(head,body,foot){
          клались в draft/payload (Влад 20.09, аудит формы «Редактировать»). */
       if(side==='from'){ draft.from_raw=addr; draft.load_lat=lat; draft.load_lon=lon; }
       else { draft.to_raw=addr; draft.unload_lat=lat; draft.unload_lon=lon; }
+      var pre=sidePre_(side), sid=it.getAttribute('data-site-id');
+      draft[pre+'_site_id']=sid||''; draft[pre+'_site_name']=sid?(it.getAttribute('data-name')||''):'';
+      if(sid){ /* контакт на месте - с площадки */
+        var cn=it.getAttribute('data-cname')||'', cp=it.getAttribute('data-cphone')||'';
+        if(cn||cp){ var ct=[cn,cp].filter(Boolean).join(' · '), cid=side==='from'?'fFromContact':'fToContact';
+          $(cid).value=ct; draft[pre+'_contact_raw']=ct; }
+        vib(4);
+      }
+      renderSiteRow_(side);
       $(boxId).hidden=true; tick();
     });
   });
+  renderSiteRow_('from'); renderSiteRow_('to');
+  if(editing && draft.customer) fetchAddrHistory_(draft.customer); /* площадки заказчика - в подсказках правки */
 
   function currentReasonAndBtn(){
     var MIN=25000;
@@ -2019,6 +2109,7 @@ function renderNewSheet(head,body,foot){
       load_address: draft.from_raw!==undefined ? draft.from_raw : ((draft.from&&draft.from[0])||'')+((draft.from&&draft.from[1])?(', '+draft.from[1]):''),
       unload_address: draft.to_raw!==undefined ? draft.to_raw : ((draft.to&&draft.to[0])||'')+((draft.to&&draft.to[1])?(', '+draft.to[1]):''),
       load_lat:draft.load_lat||'', load_lon:draft.load_lon||'', unload_lat:draft.unload_lat||'', unload_lon:draft.unload_lon||'',
+      load_site_id:draft.load_site_id||'', unload_site_id:draft.unload_site_id||'',
       cargo:draft.cargo||'', cargo_weight_t:draft.weight||'', gabarit:draft.gabarit, cargo_dims:draft.cargo_dims||'',
       documents:draft.documents||'', rework_terms:draft.rework||'', price:draft.price||'', payment_status:draft.payment_status||'',
       cash:draft.cash?1:0, note:draft.note||'', needs_data:draft.needs_data?1:0,

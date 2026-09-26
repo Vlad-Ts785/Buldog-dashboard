@@ -1,0 +1,365 @@
+diff --git a/api/lib/customer-sites.js b/api/lib/customer-sites.js
+index 4614a9e..032b574 100644
+--- a/api/lib/customer-sites.js
++++ b/api/lib/customer-sites.js
+@@ -29,12 +29,23 @@ function fmtDate(d) {
+   if (!d) return null; if (typeof d === "string") return d.slice(0, 10);
+   const dt = new Date(d); return dt.getFullYear() + "-" + String(dt.getMonth() + 1).padStart(2, "0") + "-" + String(dt.getDate()).padStart(2, "0");
+ }
+-// Короткое имя по умолчанию - первая часть адреса до запятой, без ссылок и координат (как при наполнении).
++// Короткое имя по умолчанию - без ссылок и координат, первая «говорящая» часть адреса до запятой. 26.09 (Б-5):
++// адрес из подсказки начинается с области/города («г Москва, ул Тестовая, д 5») - такие ведущие части
++// пропускаем, иначе все площадки звались бы «г Москва»; улица берётся вместе с домом. Человек потом переименует.
++const REGION_PART_RE_ = /(^|\s)(обл\.?|область|край|респ\.?|республика|автономный округ)(\s|$)/i;
++const LOCALITY_PART_RE_ = /^(г\.?|город|пос\.?|посёлок|поселок|п\.?|с\.?|село|д\.?|дер\.?|деревня|рп|пгт|мкр\.?|микрорайон|г\.\s?о\.?|го|городской округ|р-н|район|м\.\s?о\.?)\s/i;
++const BIG_CITY_RE_ = /^(москва|санкт-петербург|спб|мо|московская область|россия)$/i;
++const HOUSE_PART_RE_ = /^(д\.?|дом|вл\.?|влд\.?|владение|стр\.?|строение|к\.?|корп\.?|корпус)?\s*\d/i;
+ function defaultName(address) {
+-  let x = String(address || "").replace(/https?:\/\/\S+/g, " ").replace(/координаты\s*:?\s*-?\d{1,3}\.\d+\s*[,;]\s*-?\d{1,3}\.\d+/gi, " ")
++  const x = String(address || "").replace(/https?:\/\/\S+/g, " ").replace(/координаты\s*:?\s*-?\d{1,3}\.\d+\s*[,;]\s*-?\d{1,3}\.\d+/gi, " ")
+     .replace(/-?\d{1,3}\.\d{4,}\s*[,;]\s*-?\d{1,3}\.\d{4,}/g, " ").replace(/["«»]/g, "").replace(/\s+/g, " ").trim();
+-  x = x.split(",")[0].trim() || x;
+-  return x.slice(0, MAX_.name) || null;
++  const parts = x.split(",").map((s) => s.trim()).filter(Boolean);
++  if (!parts.length) return null;
++  let i = 0;
++  while (i < parts.length - 1 && (REGION_PART_RE_.test(parts[i]) || LOCALITY_PART_RE_.test(parts[i] + " ") || BIG_CITY_RE_.test(parts[i]))) i++;
++  let name = parts[i];
++  if (parts[i + 1] && HOUSE_PART_RE_.test(parts[i + 1])) name += ", " + parts[i + 1];
++  return name.slice(0, MAX_.name) || null;
+ }
+ 
+ // Точка из того, что вставил человек: ссылка Яндекс.Карт (короткая тоже - её раскрывает resolveLink) или
+@@ -146,6 +157,146 @@ async function touchUse(conn, siteId, side, date, text) {
+   else await conn.query(`INSERT INTO customer_site_texts (site_id, text, uses) VALUES (?, ?, 1)`, [siteId, t]);
+ }
+ 
++// ── Б-5 (26.09): узнать площадку по написанию, площадка со 2-й заявки, «Сохранить как площадку» ──────────
++const SKIP_ADDR_ = /^\s*работа\s+по\s+месту\s*$/i;
++const LINK_KM_ = 3;     // своя точка заявки дальше этого от точки площадки - не привязываем (правило Б3)
++const MERGE_KM_ = 0.2;  // новое написание в пределах 200 м от точки площадки заказчика - та же площадка
++const SYS_ = "Система (площадки)";
++function ptOf(lat, lon) {
++  if (lat === null || lat === undefined || lon === null || lon === undefined || lat === "" || lon === "") return null;
++  const a = Number(lat), b = Number(lon);
++  return addressPoint.inRussia(a, b) ? { lat: a, lon: b } : null;
++}
++function kmApart(p, q) {
++  const R = 6371, rad = (x) => x * Math.PI / 180;
++  const dLa = rad(q.lat - p.lat), dLo = rad(q.lon - p.lon);
++  const h = Math.sin(dLa / 2) ** 2 + Math.cos(rad(p.lat)) * Math.cos(rad(q.lat)) * Math.sin(dLo / 2) ** 2;
++  return 2 * R * Math.asin(Math.sqrt(h));
++}
++async function writeSiteHistory(db, siteId, action, detail, by) {
++  await db.query(`INSERT INTO customer_site_history (site_id, action, detail, changed_by) VALUES (?, ?, ?, ?)`,
++    [siteId, action, detail ? JSON.stringify(detail) : null, by]);
++  // общий журнал Справочников - та же строка «кто что тронул», что у юрлиц/людей/техники
++  await db.query(`INSERT INTO sprav_audit_log (entity_type, entity_id, action, changed_by) VALUES ('customer_site', ?, ?, ?)`,
++    [String(siteId), action, String(by || "").slice(0, 200)]).catch(() => {});
++}
++async function entityName_(db, ent) {
++  if (!ent) return null;
++  const [[e]] = await db.query(`SELECT name FROM sprav_legal_entities WHERE id = ?`, [ent]);
++  return e ? e.name : null;
++}
++// Новое написание к площадке (склейка по точке); уже есть - ничего.
++async function addText_(db, siteId, text, uses) {
++  const [ex] = await db.query(`SELECT text FROM customer_site_texts WHERE site_id = ?`, [siteId]);
++  if (ex.some((x) => textKey(x.text) === textKey(text))) return false;
++  await db.query(`INSERT INTO customer_site_texts (site_id, text, uses) VALUES (?, ?, ?)`, [siteId, text, uses || 0]);
++  return true;
++}
++// Создать площадку (общая часть «площадки со 2-й заявки» и «Сохранить как площадку»).
++async function insertSite_(db, s, by, detailExtra) {
++  const [ins] = await db.query(
++    `INSERT INTO customer_sites (customer_entity_id, customer_name, name, address, lat, lon, point_source, contact_name, contact_phone,
++       load_count, unload_count, first_used, last_used, needs_check, check_note, created_by, updated_by)
++     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
++    [s.customer_entity_id || null, s.customer_name, s.name || defaultName(s.address), s.address, s.lat == null ? null : s.lat, s.lon == null ? null : s.lon,
++      s.lat == null ? null : (s.point_source || "order"), s.contact_name || null, s.contact_phone || null, s.load_count || 0, s.unload_count || 0,
++      s.first_used || null, s.last_used || null, s.needs_check ? 1 : 0, s.check_note || null, String(by).slice(0, 255), String(by).slice(0, 255)]);
++  await db.query(`INSERT INTO customer_site_texts (site_id, text, uses) VALUES (?, ?, ?)`, [ins.insertId, s.address, s.text_uses || 0]);
++  await writeSiteHistory(db, ins.insertId, "create", Object.assign(diffFields(null, s), detailExtra || {}), by);
++  return ins.insertId;
++}
++// Ссылка заявки на площадку (только если ссылки ещё нет) + счётчик/даты/написание площадки.
++async function linkOrder_(conn, o, side, siteId, text) {
++  const col = side === "load" ? "load_site_id" : "unload_site_id";
++  const [u] = await conn.query(`UPDATE plan_orders SET ${col} = ? WHERE id = ? AND ${col} IS NULL`, [siteId, o.id]);
++  if (!u.affectedRows) return false;
++  await touchUse(conn, siteId, side, fmtDate(o.service_date), text);
++  return true;
++}
++
++// После сохранения заявки (любой экран): для каждой стороны без площадки -
++//  1) написание адреса совпало с написанием ЖИВОЙ площадки этого заказчика -> привязать (своя точка заявки
++//     дальше 3 км от точки площадки - не привязывать); у площадки нет точки, у заявки есть - точка площадке;
++//  2) иначе, если у заказчика есть ещё живая заявка с тем же написанием -> площадка (точки заявок расходятся
++//     > 3 км - без точки, «проверить точку»; рядом до 200 м уже есть площадка - это её новое написание).
++// Написание архивной площадки не трогаем вовсе - архив решал человек. Возвращает, что сделано (для журнала заявки).
++async function linkOrPromote(conn, orderId) {
++  const [[o]] = await conn.query(`SELECT * FROM plan_orders WHERE id = ? AND deleted_at IS NULL`, [orderId]);
++  if (!o || o.status === "cancelled") return [];
++  const ent = clean(o.customer_entity_id, MAX_.customer_entity_id) || "";
++  const out = [];
++  let sites = null, recent = null;
++  for (const side of ["load", "unload"]) {
++    if (o[side + "_site_id"]) continue;
++    const text = clean(o[side + "_address"], MAX_.address);
++    if (!text || SKIP_ADDR_.test(text)) continue;
++    const key = textKey(text), own = ptOf(o[side + "_lat"], o[side + "_lon"]);
++    if (!sites) sites = await listForCustomer(conn, o.customer, ent, { archived: true });
++    const withText = sites.filter((s) => s.texts.some((t) => textKey(t) === key));
++    if (withText.some((s) => s.archived) && !withText.some((s) => !s.archived)) continue; // место в архиве
++    const hit = withText.find((s) => !s.archived);
++    if (hit) {
++      const sp = ptOf(hit.lat, hit.lon);
++      if (own && sp && kmApart(own, sp) > LINK_KM_) { out.push({ side, site_id: hit.id, skipped: "far" }); continue; }
++      if (!(await linkOrder_(conn, o, side, hit.id, text))) continue;
++      let pointSet = false;
++      if (!sp && own) {
++        const [u] = await conn.query(`UPDATE customer_sites SET lat = ?, lon = ?, point_source = 'order', updated_by = ? WHERE id = ? AND lat IS NULL`,
++          [own.lat, own.lon, SYS_, hit.id]);
++        if (u.affectedRows) {
++          pointSet = true; hit.lat = own.lat; hit.lon = own.lon;
++          await writeSiteHistory(conn, hit.id, "set_point", { lat: ["", String(own.lat)], lon: ["", String(own.lon)] },
++            "Система (точка из заявки №" + (o.day_no != null ? o.day_no : o.id) + " на " + fmtDate(o.service_date) + ")");
++        }
++      }
++      out.push({ side, site_id: hit.id, how: "text", point_set: pointSet });
++      continue;
++    }
++    if (!recent) {
++      const [r] = await conn.query(
++        `SELECT id, service_date, load_address, load_lat, load_lon, load_contact_name, load_contact_phone,
++                unload_address, unload_lat, unload_lon, unload_contact_name, unload_contact_phone
++           FROM plan_orders WHERE deleted_at IS NULL AND status <> 'cancelled' AND id <> ?
++            AND (customer = ? OR (? <> '' AND customer_entity_id = ?))
++          ORDER BY service_date DESC, id DESC LIMIT 300`, [o.id, o.customer || "", ent, ent]);
++      recent = r;
++    }
++    const uses = [];
++    recent.forEach((r) => ["load", "unload"].forEach((s2) => {
++      if (textKey(r[s2 + "_address"]) !== key) return;
++      uses.push({ side: s2, d: fmtDate(r.service_date), pt: ptOf(r[s2 + "_lat"], r[s2 + "_lon"]), cn: r[s2 + "_contact_name"], cp: r[s2 + "_contact_phone"] });
++    }));
++    if (!uses.length) continue; // разовый адрес - площадкой станет со второй заявки
++    // точка: своя точка этой заявки (её только что поставил человек), иначе самая свежая из прошлых
++    const pts = [own].concat(uses.map((u) => u.pt)).filter(Boolean);
++    const conflict = pts.some((p) => kmApart(pts[0], p) > LINK_KM_);
++    const point = conflict ? null : (pts[0] || null);
++    const near = point ? sites.find((s) => !s.archived && ptOf(s.lat, s.lon) && kmApart(point, ptOf(s.lat, s.lon)) <= MERGE_KM_) : null;
++    if (near) { // то же место, другое написание - склейка по точке, не по буквам
++      await addText_(conn, near.id, text, uses.length);
++      await writeSiteHistory(conn, near.id, "update", { text: ["", text.slice(0, 160)] }, "Система (новое написание со 2-й заявки)");
++      near.texts.push(text);
++      if (await linkOrder_(conn, o, side, near.id, text)) out.push({ side, site_id: near.id, how: "near" });
++      continue;
++    }
++    const cur = (o[side + "_contact_name"] || o[side + "_contact_phone"]) ? { cn: o[side + "_contact_name"], cp: o[side + "_contact_phone"] }
++      : (uses.find((u) => u.cn || u.cp) || null);
++    const dates = uses.map((u) => u.d).filter(Boolean).sort();
++    const s = {
++      customer_entity_id: ent || null, customer_name: clean((ent && (await entityName_(conn, ent))) || o.customer, MAX_.customer_name) || "без названия",
++      name: defaultName(text), address: text, lat: point ? point.lat : null, lon: point ? point.lon : null, point_source: "order",
++      contact_name: cur ? clean(cur.cn, MAX_.contact_name) : null, contact_phone: cur ? clean(cur.cp, MAX_.contact_phone) : null,
++      load_count: uses.filter((u) => u.side === "load").length, unload_count: uses.filter((u) => u.side === "unload").length,
++      first_used: dates[0] || null, last_used: dates[dates.length - 1] || null, text_uses: uses.length,
++      needs_check: conflict ? 1 : 0, check_note: conflict ? "в заявках с этим адресом точки дальше 3 км друг от друга - поставьте точку вручную" : null,
++    };
++    const id = await insertSite_(conn, s, "Система (площадка со 2-й заявки)");
++    sites.push(Object.assign({ id, archived: false, texts: [text] }, s));
++    if (await linkOrder_(conn, o, side, id, text)) out.push({ side, site_id: id, how: "created" });
++  }
++  return out;
++}
++
+ function register(deps) {
+   const { app, pool, checkSession, requireRole_ } = deps;
+   const resolveLink = deps.resolveLink; // geocoder.resolveMapLink - раскрыть короткую ссылку Яндекса
+@@ -163,13 +314,7 @@ function register(deps) {
+   function fail(res, code, msg) { return res.status(code).json({ error: msg }); }
+   function p(req, k) { const b = req.body || {}; return b[k] !== undefined ? b[k] : (req.query || {})[k]; }
+   async function loadSite(db, id) { const [[s]] = await db.query(`SELECT * FROM customer_sites WHERE id = ?`, [id]); return s || null; }
+-  async function history(db, siteId, action, detail, by) {
+-    await db.query(`INSERT INTO customer_site_history (site_id, action, detail, changed_by) VALUES (?, ?, ?, ?)`,
+-      [siteId, action, detail ? JSON.stringify(detail) : null, by]);
+-    // общий журнал Справочников - та же строка «кто что тронул», что у юрлиц/людей/техники
+-    await db.query(`INSERT INTO sprav_audit_log (entity_type, entity_id, action, changed_by) VALUES ('customer_site', ?, ?, ?)`,
+-      [String(siteId), action, by]).catch(() => {});
+-  }
++  const history = writeSiteHistory;
+   async function textsOf(db, id) {
+     const [t] = await db.query(`SELECT text FROM customer_site_texts WHERE site_id = ? ORDER BY uses DESC, id`, [id]);
+     return t.map((x) => x.text);
+@@ -204,6 +349,13 @@ function register(deps) {
+         f.customer_name = clean(p(req, "customer_name"), MAX_.customer_name);
+         if (!f.customer_name) return fail(res, 400, "Не указан заказчик");
+         if (!f.address) return fail(res, 400, "Адрес площадки обязателен");
++        // то же написание у площадки этого заказчика - второй не заводим (иначе заявка не поймёт, к какой
++        // из двух привязываться; найдено сценарием Б-5 26.09)
++        {
++          const twins = (await listForCustomer(pool, f.customer_name, f.customer_entity_id, { archived: true }))
++            .filter((s) => s.texts.some((t) => textKey(t) === textKey(f.address)));
++          if (twins.length) return fail(res, 409, "Такой адрес уже есть у площадки «" + (twins[0].name || twins[0].address) + "»" + (twins[0].archived ? " (в архиве)" : ""));
++        }
+         if (!f.name) f.name = defaultName(f.address);
+         const [ins] = await pool.query(
+           `INSERT INTO customer_sites (customer_entity_id, customer_name, name, address, lat, lon, point_source, contact_name, contact_phone,
+@@ -223,6 +375,11 @@ function register(deps) {
+       if (f.lat !== undefined) f.needs_check = 0;
+       const c = diffFields(before, f);
+       if (!Object.keys(c).length) return res.json({ ok: true, site: out(before, await textsOf(pool, id)) });
++      if (c.address) { // новый адрес не должен быть написанием ДРУГОЙ площадки этого заказчика
++        const twins = (await listForCustomer(pool, before.customer_name, before.customer_entity_id, { archived: true }))
++          .filter((s) => s.id !== id && s.texts.some((t) => textKey(t) === textKey(f.address)));
++        if (twins.length) return fail(res, 409, "Такой адрес уже есть у площадки «" + (twins[0].name || twins[0].address) + "»" + (twins[0].archived ? " (в архиве)" : ""));
++      }
+       const sets = [], args = [];
+       Object.keys(c).forEach((k) => { sets.push(k + " = ?"); args.push(f[k] === undefined ? null : f[k]); });
+       if (c.lat || c.lon) { sets.push("point_source = ?"); args.push(f.lat == null ? null : "manual"); }
+@@ -244,6 +401,52 @@ function register(deps) {
+     }
+   });
+ 
++  // «Сохранить как площадку» из формы заявки (Б-5): новое постоянное место одним нажатием, не дожидаясь второй
++  // заявки. Точка - та, что стоит в заявке (её поставил человек: подсказка, ссылка, координаты). Такое
++  // написание уже есть у площадки - отдаём её; точка рядом (до 200 м) с площадкой заказчика - это её новое
++  // написание; написание площадки в архиве - отказ (архив решал администратор).
++  app.post("/api/sites/create", checkSession, requireRole_(...READ_ROLES_), async (req, res) => {
++    try {
++      const customer = clean(p(req, "customer"), MAX_.customer_name), ent = clean(p(req, "customer_entity_id"), MAX_.customer_entity_id);
++      const address = clean(p(req, "address"), MAX_.address);
++      if (!customer && !ent) return fail(res, 400, "Сначала укажите заказчика");
++      if (!address || SKIP_ADDR_.test(address)) return fail(res, 400, "Нет адреса, который можно сохранить как площадку");
++      let point = null;
++      if (p(req, "lat") !== undefined && String(p(req, "lat")) !== "") {
++        point = ptOf(p(req, "lat"), p(req, "lon"));
++        if (!point) return fail(res, 400, "Точка вне России - похоже, перепутаны широта и долгота");
++        point = { lat: Math.round(point.lat * 1e6) / 1e6, lon: Math.round(point.lon * 1e6) / 1e6 };
++      }
++      const sites = await listForCustomer(pool, customer, ent, { archived: true });
++      const key = textKey(address);
++      const same = sites.filter((s) => s.texts.some((t) => textKey(t) === key));
++      const live = same.find((s) => !s.archived);
++      if (live) return res.json({ ok: true, existed: true, site: live });
++      if (same.length) return fail(res, 409, "Эта площадка в архиве - вернуть её может администратор в Справочниках");
++      if (point) {
++        const near = sites.find((s) => !s.archived && ptOf(s.lat, s.lon) && kmApart(point, ptOf(s.lat, s.lon)) <= MERGE_KM_);
++        if (near) {
++          await addText_(pool, near.id, address, 0);
++          await history(pool, near.id, "update", { text: ["", address.slice(0, 160)] }, req.userEmail);
++          const [[s]] = await pool.query(`SELECT * FROM customer_sites WHERE id = ?`, [near.id]);
++          return res.json({ ok: true, existed: true, merged: true, site: out(s, await textsOf(pool, near.id)) });
++        }
++      }
++      const c = readContact(p(req, "contact"));
++      const id = await insertSite_(pool, {
++        customer_entity_id: ent, customer_name: clean((ent && (await entityName_(pool, ent))) || customer, MAX_.customer_name),
++        name: defaultName(address), address, lat: point ? point.lat : null, lon: point ? point.lon : null, point_source: "order",
++        contact_name: c.name, contact_phone: c.phone,
++      }, req.userEmail);
++      const [[s]] = await pool.query(`SELECT * FROM customer_sites WHERE id = ?`, [id]);
++      res.json({ ok: true, site: out(s, await textsOf(pool, id)) });
++    } catch (err) {
++      console.error("sites create:", err);
++      if (err && err.code === "ER_DATA_TOO_LONG") return fail(res, 400, "Слишком длинное значение в одном из полей - сократите текст");
++      fail(res, 500, String(err.message || err));
++    }
++  });
++
+   // Точка площадке из формы заявки («Запомнить точку для площадки»). Менеджер/логист - только площадке
+   // без точки: уже стоящую точку меняет admin в Справочниках (условие lat IS NULL - в самом UPDATE,
+   // чтобы двое одновременно не перезаписали друг друга).
+@@ -302,5 +505,6 @@ module.exports.siteInfo = siteInfo;
+ module.exports.activeIds = activeIds;
+ module.exports.touchUse = touchUse;
+ module.exports.textKey = textKey;
++module.exports.linkOrPromote = linkOrPromote;
+ // для тестов
+-module.exports._t = { parsePoint, readContact, diffFields, defaultName, clean, out };
++module.exports._t = { parsePoint, readContact, diffFields, defaultName, clean, out, ptOf, kmApart, LINK_KM_, MERGE_KM_ };
+diff --git a/api/lib/customer-sites.test.js b/api/lib/customer-sites.test.js
+index 0da4cf7..a81943b 100644
+--- a/api/lib/customer-sites.test.js
++++ b/api/lib/customer-sites.test.js
+@@ -54,6 +54,15 @@ const noNet = async () => { throw new Error("сеть в тесте запрещ
+     assert.strictEqual(T.defaultName("https://yandex.ru/maps/?pt=37.5,55.4 склад «Восток», ворота 3"), "склад Восток");
+     assert.strictEqual(T.defaultName("Координаты: 55.61234, 37.71234"), null);
+   });
++  await t("Б-5: имя не «г Москва» - ведущие область/город пропускаются, улица с домом", async () => {
++    assert.strictEqual(T.defaultName("г Москва, ул Тестовая, д 5"), "ул Тестовая, д 5");
++    assert.strictEqual(T.defaultName("Московская обл, г Домодедово, мкр Центральный, ул Промышленная, д 37"), "ул Промышленная, д 37");
++    assert.strictEqual(T.defaultName("Москва, тестовая выгрузка"), "тестовая выгрузка");
++    assert.strictEqual(T.defaultName("Горки, МО"), "Горки");
++    assert.strictEqual(T.defaultName("г Москва"), "г Москва");
++    assert.strictEqual(T.defaultName("Склад Б5, ворота 1"), "Склад Б5");
++    assert.strictEqual(T.defaultName("склад Восток, 12"), "склад Восток, 12");
++  });
+   await t("ключ написания - регистр и пробелы не различают", async () => {
+     assert.strictEqual(cs.textKey("  Горки   ленинские "), cs.textKey("горки ленинские"));
+   });
+@@ -63,5 +72,17 @@ const noNet = async () => { throw new Error("сеть в тесте запрещ
+     assert.strictEqual(o.name, "Горки"); assert.strictEqual(o.lat, 55.5); assert.strictEqual(o.uses, 5);
+     assert.strictEqual(o.last_used, "2026-09-27"); assert.strictEqual(o.archived, false); assert.strictEqual(o.needs_check, false);
+   });
++  await t("Б-5: точка заявки - только в России, пустое - нет точки", async () => {
++    assert.deepStrictEqual(T.ptOf("55.52", "37.74"), { lat: 55.52, lon: 37.74 });
++    assert.strictEqual(T.ptOf(null, null), null); assert.strictEqual(T.ptOf("", ""), null);
++    assert.strictEqual(T.ptOf("37.74", "55.52"), null, "перепутанные - не точка");
++  });
++  await t("Б-5: расстояния для правил 3 км и 200 м", async () => {
++    const gorki = { lat: 55.521563, lon: 37.746501 };
++    assert(T.kmApart(gorki, { lat: 55.5225, lon: 37.7465 }) < T.MERGE_KM_, "~100 м - та же площадка");
++    assert(T.kmApart(gorki, { lat: 55.53, lon: 37.75 }) > T.MERGE_KM_, "~1 км - уже не склейка");
++    assert(T.kmApart(gorki, { lat: 55.53, lon: 37.75 }) < T.LINK_KM_, "~1 км - привязка допустима");
++    assert(T.kmApart(gorki, { lat: 55.60, lon: 37.75 }) > T.LINK_KM_, "~9 км - не привязываем");
++  });
+   console.log("customer-sites: все " + n + " проверок прошли");
+ })().catch((e) => { console.error("ОШИБКА:", e.message); process.exit(1); });
+diff --git a/api/lib/plan-orders.js b/api/lib/plan-orders.js
+index 1a1f68d..19b97fd 100644
+--- a/api/lib/plan-orders.js
++++ b/api/lib/plan-orders.js
+@@ -711,6 +711,25 @@ module.exports = function (deps) {
+       await sitesLib.touchUse(conn, sid, side, date, text);
+     }
+   }
++  // 26.09, Б-5: после сохранения заявки с любого экрана (ПК, телефон, «Повторить») сервер сам узнаёт площадку
++  // по написанию адреса или делает площадку со 2-й заявки (customer-sites.js linkOrPromote). Своей
++  // транзакцией ПОСЛЕ основной: сбой здесь не ломает сохранение заявки - только лог (как мост наёмников).
++  async function sitesAfterSave_(conn, orderId, f, isNew) {
++    if (!isNew && f.load_address === undefined && f.unload_address === undefined && f.customer === undefined && f.customer_entity_id === undefined) return;
++    try {
++      await conn.beginTransaction();
++      const before = await loadOrder(conn, orderId);
++      const links = (await sitesLib.linkOrPromote(conn, orderId)).filter((l) => !l.skipped);
++      if (links.length) {
++        const c = {}; links.forEach((l) => { c[l.side + "_site_id"] = []; });
++        await history(conn, orderId, "update", before, JSON.stringify({ c }), "Система (площадки)");
++      }
++      await conn.commit();
++    } catch (err) {
++      try { await conn.rollback(); } catch (e) {}
++      console.error("площадки после сохранения заявки " + orderId + " (заявка сохранена, привязка - нет):", err);
++    }
++  }
+   // 21.09, конструктор договора-заявки (plans/2026-09-21-contract-request-v2-legal-draft.md):
+   // срок доставки (дата+время прибытия на выгрузку) и режим оплаты по договору. Читаются
+   // и в /orders/save (обычная правка заявки), и в /orders/contract_version (выпуск
+@@ -918,6 +937,7 @@ module.exports = function (deps) {
+         }
+         if (wantConfirm) await confirmInTx_(conn, id, req.userEmail);
+         await conn.commit();
++        await sitesAfterSave_(conn, id, f, false);
+         // 18.09, фикс зависания пула: раньше здесь брали ВТОРОЕ подключение из pool, пока
+         // держали открытым первое (conn) до самого finally ниже - при нескольких
+         // одновременных /orders/save все свободные подключения пула оказывались заняты
+@@ -961,6 +981,7 @@ module.exports = function (deps) {
+         await touchSiteUses_(conn, null, f, f.service_date);
+         if (wantConfirmNew) await confirmInTx_(conn, orderId, req.userEmail);
+         await conn.commit();
++        await sitesAfterSave_(conn, orderId, f, true);
+         const r = await roster(); const o2 = await loadOrder(conn, orderId); // conn, не pool - см. комментарий у ветки update выше
+         estimateAndStoreOrderPrice(pool, orderId).catch(() => {}); // fire-and-forget, не блокирует ответ
+         const order = serialize(o2, [], null, r.byEmail);

@@ -22,10 +22,10 @@ const q = (o) => Object.keys(o).map((k) => k + "=" + encodeURIComponent(o[k])).j
   const [[M]] = await db.query("SELECT email FROM access_users WHERE role = 'manager' ORDER BY email LIMIT 1");
   const [[A]] = await db.query("SELECT email FROM access_users WHERE role = 'admin' LIMIT 1");
   // заказчик с юрлицом, у которого есть площадка с точкой и площадка без точки
-  const [[S1]] = await db.query(`SELECT s.* FROM customer_sites s WHERE s.customer_entity_id IS NOT NULL AND s.lat IS NOT NULL
-      AND EXISTS (SELECT 1 FROM customer_sites z WHERE z.customer_entity_id = s.customer_entity_id AND z.lat IS NULL)
+  const [[S1]] = await db.query(`SELECT s.* FROM customer_sites s WHERE s.customer_entity_id IS NOT NULL AND s.lat IS NOT NULL AND s.archived_at IS NULL
+      AND EXISTS (SELECT 1 FROM customer_sites z WHERE z.customer_entity_id = s.customer_entity_id AND z.lat IS NULL AND z.archived_at IS NULL)
     ORDER BY s.load_count + s.unload_count DESC LIMIT 1`);
-  const [[S0]] = await db.query(`SELECT * FROM customer_sites WHERE customer_entity_id = ? AND lat IS NULL ORDER BY id LIMIT 1`, [S1.customer_entity_id]);
+  const [[S0]] = await db.query(`SELECT * FROM customer_sites WHERE customer_entity_id = ? AND lat IS NULL AND archived_at IS NULL ORDER BY id LIMIT 1`, [S1.customer_entity_id]);
   const ent = S1.customer_entity_id;
   const [[tpl]] = await db.query(`SELECT * FROM plan_orders WHERE customer_entity_id = ? AND deleted_at IS NULL AND price > 0 AND cargo_weight_t > 0 ORDER BY id DESC LIMIT 1`, [ent]);
   console.log("площадки: с точкой id " + S1.id + ", без точки id " + S0.id + "; шаблон заявки id " + tpl.id);
@@ -117,8 +117,8 @@ const q = (o) => Object.keys(o).map((k) => k + "=" + encodeURIComponent(o[k])).j
   check("admin: из архива", r.status === 200 && r.data.site.archived === false, r.data);
 
   // 9. новая площадка из Справочников
-  r = as(A.email, "/api/sites/save", { customer_entity_id: ent, customer_name: S1.customer_name, address: "Тестовый адрес, склад 5", point_text: "" });
-  check("admin: новая площадка, имя по умолчанию из адреса", r.status === 200 && r.data.site.name === "Тестовый адрес" && r.data.site.lat === null, r.data);
+  r = as(A.email, "/api/sites/save", { customer_entity_id: ent, customer_name: S1.customer_name, address: "Тестовый адрес " + Date.now().toString(36).slice(-5) + ", склад 5", point_text: "" });
+  check("admin: новая площадка, имя по умолчанию из адреса", r.status === 200 && /^Тестовый адрес [0-9a-z]+$/.test(r.data.site.name) && r.data.site.lat === null, r.data);
   r = as(M.email, "/api/sites/save", { customer_entity_id: ent, customer_name: "x", address: "y" });
   check("менеджер не создаёт площадку - 403", r.status === 403, r.status);
 

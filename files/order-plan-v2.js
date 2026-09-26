@@ -5301,6 +5301,30 @@ function wireForm() {
       spBtn.addEventListener('click', setSitePoint);
       spIn.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); setSitePoint(); } });
     }
+    /* Б-5: «Сохранить как площадку заказчика» - точка берётся та, что стоит в поле (её поставил человек:
+       подсказка, ссылка, координаты); такое написание уже есть / точка в 200 м от площадки - сервер отдаёт её */
+    var ssRow = $('#op2-f-' + side + 'sitesave');
+    if (ssRow) {
+      var ssBtn = ssRow.querySelector('button');
+      ssBtn.addEventListener('click', function () {
+        var cust = $('#op2-f-cust'), addr = inp.value.trim();
+        var ent = (cust && cust.dataset.entityId) || (formOrder && formOrder.customer === cust.value.trim() && formOrder.customer_entity_id) || '';
+        ssBtn.disabled = true;
+        apiPostJson('/sites/create', { customer: cust.value.trim(), customer_entity_id: ent, address: addr,
+          lat: inp.dataset.lat || '', lon: inp.dataset.lon || '', contact: $('#op2-f-' + side + 'contact').value.trim() }).then(function (r) {
+          ssBtn.disabled = false;
+          if (!r || !r.ok || !r.data || r.data.error) { toast('<span class="op2-warn">' + esc((r && r.data && r.data.error) || 'Сервер не ответил') + '</span>'); return; }
+          var s = r.data.site;
+          if (inp.value.trim() !== addr) return; /* пока ждали, адрес поменяли - к нему площадка уже не относится */
+          inp.dataset.siteId = s.id; inp.dataset.siteName = s.name || '';
+          if (!inp.dataset.lat && s.lat != null && s.lon != null) { inp.dataset.lat = s.lat; inp.dataset.lon = s.lon; }
+          siteHint_(side, false);
+          toast(r.data.existed ? 'Такая площадка уже есть - «' + esc(s.name || '') + '», заявка привязана к ней' : 'Площадка «' + esc(s.name || '') + '» сохранена');
+          fetchCustomerHistory(cust.value.trim());
+          tickState();
+        }).catch(function () { ssBtn.disabled = false; toast('<span class="op2-warn">Сервер не ответил</span>'); });
+      });
+    }
     inp.addEventListener('focus', function () { if ($('#op2-f-' + side + 'list').querySelector('.op2-it')) $('#op2-f-' + side + 'box').classList.add('op2-open'); });
     inp.addEventListener('blur', function () { setTimeout(function () { $('#op2-f-' + side + 'box').classList.remove('op2-open'); }, 150); tickState(); tryParseAddrPaste_(side); });
     inp.addEventListener('input', function () {
@@ -5380,6 +5404,7 @@ function wireForm() {
 function tickState() {
   var b = $('#op2-f-save'), st = $('#op2-f-state');
   if (!b) return;
+  siteSaveVis_('from'); siteSaveVis_('to');
   /* «Сохранить и подтвердить» видна только в конце, когда форму можно сохранить вообще -
      любая ранняя блокировка ниже (нет заказчика/цены/массы...) оставляет одну кнопку. */
   var bok = $('#op2-f-saveok'); if (bok) bok.classList.add('op2-hidden');
@@ -5833,7 +5858,19 @@ function addrHint_(side, text, cls) {
 function sitePointRow_(side) {
   return '<div class="op2-sitept" id="op2-f-' + side + 'sitept" hidden>' +
     '<input id="op2-f-' + side + 'siteptin" placeholder="Ссылка Яндекс.Карт или координаты 55.75, 37.62" autocomplete="off">' +
-    '<button type="button" class="op2-ghost">Запомнить точку</button></div>';
+    '<button type="button" class="op2-ghost">Запомнить точку</button></div>' +
+    /* Б-5: «Сохранить как площадку» - новое постоянное место одним нажатием (иначе площадка появится сама
+       со второй заявки с этим адресом) */
+    '<div class="op2-sitesave" id="op2-f-' + side + 'sitesave" hidden><button type="button" class="op2-ghost">Сохранить как площадку заказчика</button></div>';
+}
+/* кнопка видна: адрес есть и не площадка, заказчик указан, поле не в фокусе (не мигать при наборе) */
+var SITE_SKIP_RE_ = /^\s*работа\s+по\s+месту\s*$/i;
+function siteSaveVis_(side) {
+  var row = $('#op2-f-' + side + 'sitesave'), inp = $('#op2-f-' + side), cust = $('#op2-f-cust');
+  if (!row || !inp) return;
+  var v = inp.value.trim();
+  row.hidden = !!(inp.dataset.siteId || v.length < 5 || SITE_SKIP_RE_.test(v) || v === BASE_ADDRESS_ ||
+    !cust || !cust.value.trim() || document.activeElement === inp);
 }
 function siteHint_(side, contactFilled) {
   var inp = $('#op2-f-' + side), name = inp.dataset.siteName || '';

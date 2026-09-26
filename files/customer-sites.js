@@ -168,7 +168,8 @@
     }
     Object.keys(c).forEach(function (k) {
       if (k === 'lat' || k === 'lon') return;
-      if (k === 'needs_check') { if (c[k][1] === '0') parts.push('точка проверена'); return; }
+      if (k === 'needs_check') { if (c[k][1] === '0') parts.push('точка проверена'); else parts.push('нужно проверить точку'); return; }
+      if (k === 'text') { parts.push('новое написание адреса «' + c[k][1] + '»'); return; }
       parts.push((HIST_LABEL_[k] || k) + ' ' + (c[k][0] || 'пусто') + ' → ' + (c[k][1] || 'пусто'));
     });
     // у «точки» действие и так видно из текста («точка нет → 55.70, 37.60») - без повтора слова

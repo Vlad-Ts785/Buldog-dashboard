@@ -1,0 +1,668 @@
+diff --git a/api/lib/customer-sites.js b/api/lib/customer-sites.js
+new file mode 100644
+index 0000000..4614a9e
+--- /dev/null
++++ b/api/lib/customer-sites.js
+@@ -0,0 +1,306 @@
++"use strict";
++// Площадки заказчика (26.09.2026, фаза Б плана plans/2026-09-26-customer-addresses-and-price-geo.md в
++// репозитории дашборда). Место погрузки/выгрузки хранится ОДИН раз у заказчика (customer_sites), заявка
++// ссылается на него (plan_orders.load_site_id / unload_site_id) и берёт с него точку, контакт на месте и
++// пометку водителю. Таблицы - import/customer-sites-schema.sql, первое наполнение - oneoff/customer-sites-seed.js.
++//
++// Правила безопасности адресов (Влад 26.09: «уехать в другой город или другую часть Москвы - проблема»):
++//  - точку площадки ставит только человек - ссылкой Яндекс.Карт или координатами; поиск по тексту сюда
++//    не пишет никогда (resolvePoint с search:false);
++//  - менеджер и логист ставят точку только площадке БЕЗ точки (форма заявки, «Запомнить точку»); поменять
++//    уже стоящую точку может только admin в Справочниках (решение Влада 26.09: «точки ставит менеджер»);
++//  - каждая правка - в customer_site_history «было -> стало» (кто, когда); удаления нет, только архив.
++// Время в customer_site_history - UTC (DEFAULT CURRENT_TIMESTAMP), отдаётся сырым ISO, экран сам
++// переводит в МСК (правило CLAUDE.md «UTC на сервере, МСК на экране»).
++const addressPoint = require("./address-point.js");
++const { normalizeContact } = require("./contact-phone.js");
++
++const MAX_ = { customer_entity_id: 64, customer_name: 255, name: 120, address: 500, contact_name: 150, contact_phone: 64, driver_note: 300 };
++const READ_ROLES_ = ["admin", "manager", "logist"];
++const HIST_FIELDS_ = ["name", "address", "lat", "lon", "contact_name", "contact_phone", "driver_note", "customer_entity_id", "customer_name", "needs_check"];
++
++function clean(v, max) {
++  const s = String(v == null ? "" : v).replace(/\s+/g, " ").trim();
++  return s ? s.slice(0, max) : null;
++}
++// Ключ сравнения написаний адреса: регистр и лишние пробелы площадку не различают.
++function textKey(t) { return String(t || "").replace(/\s+/g, " ").trim().toLowerCase(); }
++function fmtDate(d) {
++  if (!d) return null; if (typeof d === "string") return d.slice(0, 10);
++  const dt = new Date(d); return dt.getFullYear() + "-" + String(dt.getMonth() + 1).padStart(2, "0") + "-" + String(dt.getDate()).padStart(2, "0");
++}
++// Короткое имя по умолчанию - первая часть адреса до запятой, без ссылок и координат (как при наполнении).
++function defaultName(address) {
++  let x = String(address || "").replace(/https?:\/\/\S+/g, " ").replace(/координаты\s*:?\s*-?\d{1,3}\.\d+\s*[,;]\s*-?\d{1,3}\.\d+/gi, " ")
++    .replace(/-?\d{1,3}\.\d{4,}\s*[,;]\s*-?\d{1,3}\.\d{4,}/g, " ").replace(/["«»]/g, "").replace(/\s+/g, " ").trim();
++  x = x.split(",")[0].trim() || x;
++  return x.slice(0, MAX_.name) || null;
++}
++
++// Точка из того, что вставил человек: ссылка Яндекс.Карт (короткая тоже - её раскрывает resolveLink) или
++// «широта, долгота». Пусто - { none: true }. Найденная поиском точка площадке не годится (правило Б1).
++async function parsePoint(text, resolveLink) {
++  const s = String(text == null ? "" : text).trim();
++  if (!s) return { none: true };
++  const r = await addressPoint.resolvePoint(s, { search: false, resolveLink });
++  if (!r || r.error || r.lat == null || r.lon == null) return { error: "Не вижу точки: вставьте ссылку Яндекс.Карт или координаты вида «55.75, 37.62»" };
++  if (!addressPoint.inRussia(r.lat, r.lon)) return { error: "Точка вне России - похоже, перепутаны широта и долгота" };
++  return { lat: Math.round(Number(r.lat) * 1e6) / 1e6, lon: Math.round(Number(r.lon) * 1e6) / 1e6 };
++}
++
++// «Имя · телефон» одной строкой (как поле контакта в заявке) -> тот же разбор, что у заявок (contact-phone.js).
++function readContact(raw) {
++  const s = clean(raw, 300);
++  if (!s) return { name: null, phone: null };
++  const r = normalizeContact(s, "");
++  return { name: clean(r.name, MAX_.contact_name), phone: clean(r.phone, MAX_.contact_phone) };
++}
++
++function histVal(v) {
++  if (v === undefined || v === null) return "";
++  if (typeof v === "boolean") return v ? "1" : "0";
++  const s = String(v).trim();
++  return /^-?\d+(\.\d+)?$/.test(s) ? String(Number(s)) : s;
++}
++// {поле: [было, стало]} только по реально изменённым полям из f (undefined - поле не присылали).
++function diffFields(before, f) {
++  const c = {};
++  HIST_FIELDS_.forEach((k) => {
++    if (f[k] === undefined) return;
++    const a = histVal(before ? before[k] : null), b = histVal(f[k]);
++    if (a !== b) c[k] = [a.slice(0, 160), b.slice(0, 160)];
++  });
++  return c;
++}
++
++function out(s, texts) {
++  const num = (v) => (v === null || v === undefined ? null : Number(v));
++  return {
++    id: s.id, customer_entity_id: s.customer_entity_id || null, customer_name: s.customer_name,
++    name: s.name || defaultName(s.address), address: s.address,
++    lat: num(s.lat), lon: num(s.lon), point_source: s.point_source || null,
++    contact_name: s.contact_name || null, contact_phone: s.contact_phone || null, driver_note: s.driver_note || null,
++    load_count: Number(s.load_count) || 0, unload_count: Number(s.unload_count) || 0,
++    uses: (Number(s.load_count) || 0) + (Number(s.unload_count) || 0),
++    first_used: fmtDate(s.first_used), last_used: fmtDate(s.last_used),
++    needs_check: !!Number(s.needs_check), check_note: s.check_note || null,
++    updated_at: s.updated_at ? new Date(s.updated_at).toISOString() : null,
++    archived: !!s.archived_at, texts: texts || [],
++  };
++}
++
++// Площадки заказчика: по юрлицу ИЛИ по названию (у 28 площадок заказчика без юрлица ключ - название).
++async function listForCustomer(db, customer, entity, opts) {
++  const c = clean(customer, MAX_.customer_name) || "", e = clean(entity, MAX_.customer_entity_id) || "";
++  if (!c && !e) return [];
++  const [rows] = await db.query(
++    `SELECT * FROM customer_sites
++      WHERE ${opts && opts.archived ? "1 = 1" : "archived_at IS NULL"}
++        AND ((? <> '' AND customer_entity_id = ?) OR (? <> '' AND customer_name = ?))
++      ORDER BY archived_at IS NOT NULL, (load_count + unload_count) DESC, id`, [e, e, c, c]);
++  if (!rows.length) return [];
++  const [texts] = await db.query(`SELECT site_id, text FROM customer_site_texts WHERE site_id IN (?) ORDER BY uses DESC, id`, [rows.map((r) => r.id)]);
++  const by = {}; texts.forEach((t) => { (by[t.site_id] = by[t.site_id] || []).push(t.text); });
++  return rows.map((r) => out(r, by[r.id] || [r.address]));
++}
++
++// Для списка заявок / задания водителю: id -> { id, name, driver_note, lat, lon, archived }. Точка площадки -
++// чтобы форма правки заявки, у которой своей точки нет (площадке точку поставили позже), подставила её.
++async function siteInfo(db, ids) {
++  const list = Array.from(new Set((ids || []).map(Number).filter((n) => Number.isInteger(n) && n > 0)));
++  if (!list.length) return {};
++  const [rows] = await db.query(`SELECT id, name, address, driver_note, lat, lon, archived_at FROM customer_sites WHERE id IN (?)`, [list]);
++  const by = {};
++  rows.forEach((r) => {
++    by[r.id] = { id: r.id, name: r.name || defaultName(r.address), driver_note: r.driver_note || null,
++      lat: r.lat == null ? null : Number(r.lat), lon: r.lon == null ? null : Number(r.lon), archived: !!r.archived_at };
++  });
++  return by;
++}
++
++// Какие из присланных id - живые (есть и не в архиве) площадки.
++async function activeIds(db, ids) {
++  const list = Array.from(new Set((ids || []).filter((n) => Number.isInteger(n) && n > 0)));
++  if (!list.length) return new Set();
++  const [rows] = await db.query(`SELECT id FROM customer_sites WHERE id IN (?) AND archived_at IS NULL`, [list]);
++  return new Set(rows.map((r) => r.id));
++}
++
++// Заявка стала ссылаться на площадку: счётчик стороны, первая/последняя дата, написание адреса.
++// updated_at = updated_at - счётчик не правка человека, «когда правили» не сдвигаем.
++async function touchUse(conn, siteId, side, date, text) {
++  if (!siteId) return;
++  const col = side === "load" ? "load_count" : "unload_count";
++  const d = /^\d{4}-\d{2}-\d{2}$/.test(String(date || "")) ? date : null;
++  await conn.query(
++    `UPDATE customer_sites SET ${col} = ${col} + 1,
++            first_used = CASE WHEN ? IS NULL THEN first_used ELSE LEAST(COALESCE(first_used, ?), ?) END,
++            last_used = CASE WHEN ? IS NULL THEN last_used ELSE GREATEST(COALESCE(last_used, ?), ?) END,
++            updated_at = updated_at
++      WHERE id = ?`, [d, d, d, d, d, d, siteId]);
++  const t = clean(text, MAX_.address);
++  if (!t) return;
++  const [ex] = await conn.query(`SELECT id, text FROM customer_site_texts WHERE site_id = ?`, [siteId]);
++  const hit = ex.find((x) => textKey(x.text) === textKey(t));
++  if (hit) await conn.query(`UPDATE customer_site_texts SET uses = uses + 1 WHERE id = ?`, [hit.id]);
++  else await conn.query(`INSERT INTO customer_site_texts (site_id, text, uses) VALUES (?, ?, 1)`, [siteId, t]);
++}
++
++function register(deps) {
++  const { app, pool, checkSession, requireRole_ } = deps;
++  const resolveLink = deps.resolveLink; // geocoder.resolveMapLink - раскрыть короткую ссылку Яндекса
++  pool.query(`CREATE TABLE IF NOT EXISTS customer_site_history (
++      id BIGINT NOT NULL AUTO_INCREMENT,
++      site_id INT NOT NULL,
++      action VARCHAR(20) NOT NULL,
++      detail TEXT,
++      changed_by VARCHAR(255) DEFAULT NULL,
++      changed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
++      PRIMARY KEY (id), KEY k_site (site_id)
++    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`)
++    .catch((e) => console.error("customer_site_history create:", e.message || e));
++
++  function fail(res, code, msg) { return res.status(code).json({ error: msg }); }
++  function p(req, k) { const b = req.body || {}; return b[k] !== undefined ? b[k] : (req.query || {})[k]; }
++  async function loadSite(db, id) { const [[s]] = await db.query(`SELECT * FROM customer_sites WHERE id = ?`, [id]); return s || null; }
++  async function history(db, siteId, action, detail, by) {
++    await db.query(`INSERT INTO customer_site_history (site_id, action, detail, changed_by) VALUES (?, ?, ?, ?)`,
++      [siteId, action, detail ? JSON.stringify(detail) : null, by]);
++    // общий журнал Справочников - та же строка «кто что тронул», что у юрлиц/людей/техники
++    await db.query(`INSERT INTO sprav_audit_log (entity_type, entity_id, action, changed_by) VALUES ('customer_site', ?, ?, ?)`,
++      [String(siteId), action, by]).catch(() => {});
++  }
++  async function textsOf(db, id) {
++    const [t] = await db.query(`SELECT text FROM customer_site_texts WHERE site_id = ? ORDER BY uses DESC, id`, [id]);
++    return t.map((x) => x.text);
++  }
++
++  // Площадки заказчика: форма заявки (подсказки) и карточка контрагента в Справочниках.
++  app.get("/api/sites", checkSession, requireRole_(...READ_ROLES_), async (req, res) => {
++    try {
++      const archived = req.userRole === "admin" && String(req.query.archived || "") === "1";
++      const sites = await listForCustomer(pool, req.query.customer, req.query.entity, { archived });
++      res.json({ sites, can_edit: req.userRole === "admin" });
++    } catch (err) { console.error("sites list:", err); fail(res, 500, String(err.message || err)); }
++  });
++
++  // Создать / изменить площадку - только admin (Справочники). point_text: ссылка или координаты;
++  // пустая строка - снять точку; не прислали - точку не трогаем.
++  app.post("/api/sites/save", checkSession, requireRole_("admin"), async (req, res) => {
++    try {
++      const id = Number(p(req, "id")) || 0;
++      const f = {};
++      if (p(req, "name") !== undefined) f.name = clean(p(req, "name"), MAX_.name);
++      if (p(req, "address") !== undefined) f.address = clean(p(req, "address"), MAX_.address);
++      if (p(req, "driver_note") !== undefined) f.driver_note = clean(p(req, "driver_note"), MAX_.driver_note);
++      if (p(req, "contact") !== undefined) { const c = readContact(p(req, "contact")); f.contact_name = c.name; f.contact_phone = c.phone; }
++      if (p(req, "point_text") !== undefined) {
++        const pt = await parsePoint(p(req, "point_text"), resolveLink);
++        if (pt.error) return fail(res, 400, pt.error);
++        if (pt.none) { f.lat = null; f.lon = null; } else { f.lat = pt.lat; f.lon = pt.lon; }
++      }
++      if (!id) {
++        f.customer_entity_id = clean(p(req, "customer_entity_id"), MAX_.customer_entity_id);
++        f.customer_name = clean(p(req, "customer_name"), MAX_.customer_name);
++        if (!f.customer_name) return fail(res, 400, "Не указан заказчик");
++        if (!f.address) return fail(res, 400, "Адрес площадки обязателен");
++        if (!f.name) f.name = defaultName(f.address);
++        const [ins] = await pool.query(
++          `INSERT INTO customer_sites (customer_entity_id, customer_name, name, address, lat, lon, point_source, contact_name, contact_phone,
++             driver_note, created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
++          [f.customer_entity_id, f.customer_name, f.name, f.address, f.lat == null ? null : f.lat, f.lon == null ? null : f.lon,
++            f.lat == null ? null : "manual", f.contact_name || null, f.contact_phone || null, f.driver_note || null, req.userEmail, req.userEmail]);
++        await pool.query(`INSERT INTO customer_site_texts (site_id, text, uses) VALUES (?, ?, 0)`, [ins.insertId, f.address]);
++        await history(pool, ins.insertId, "create", diffFields(null, f), req.userEmail);
++        const s = await loadSite(pool, ins.insertId);
++        return res.json({ ok: true, site: out(s, await textsOf(pool, s.id)) });
++      }
++      const before = await loadSite(pool, id);
++      if (!before) return fail(res, 404, "Площадка не найдена");
++      if (f.address === null) return fail(res, 400, "Адрес площадки обязателен");
++      if (f.name === null) f.name = defaultName(f.address || before.address);
++      // точку прислали (любую, в т.ч. ту же) - человек её посмотрел: пометка «проверить» снимается
++      if (f.lat !== undefined) f.needs_check = 0;
++      const c = diffFields(before, f);
++      if (!Object.keys(c).length) return res.json({ ok: true, site: out(before, await textsOf(pool, id)) });
++      const sets = [], args = [];
++      Object.keys(c).forEach((k) => { sets.push(k + " = ?"); args.push(f[k] === undefined ? null : f[k]); });
++      if (c.lat || c.lon) { sets.push("point_source = ?"); args.push(f.lat == null ? null : "manual"); }
++      if (c.needs_check) { sets.push("check_note = NULL"); }
++      sets.push("updated_by = ?"); args.push(req.userEmail, id);
++      await pool.query(`UPDATE customer_sites SET ${sets.join(", ")} WHERE id = ?`, args);
++      if (c.address) {
++        const known = (await textsOf(pool, id)).some((t) => textKey(t) === textKey(f.address));
++        if (!known) await pool.query(`INSERT INTO customer_site_texts (site_id, text, uses) VALUES (?, ?, 0)`, [id, f.address]);
++      }
++      const onlyPoint = Object.keys(c).every((k) => k === "lat" || k === "lon" || k === "needs_check");
++      await history(pool, id, onlyPoint ? "set_point" : "update", c, req.userEmail);
++      const s = await loadSite(pool, id);
++      res.json({ ok: true, site: out(s, await textsOf(pool, id)) });
++    } catch (err) {
++      console.error("sites save:", err);
++      if (err && err.code === "ER_DATA_TOO_LONG") return fail(res, 400, "Слишком длинное значение в одном из полей - сократите текст");
++      fail(res, 500, String(err.message || err));
++    }
++  });
++
++  // Точка площадке из формы заявки («Запомнить точку для площадки»). Менеджер/логист - только площадке
++  // без точки: уже стоящую точку меняет admin в Справочниках (условие lat IS NULL - в самом UPDATE,
++  // чтобы двое одновременно не перезаписали друг друга).
++  app.post("/api/sites/set_point", checkSession, requireRole_(...READ_ROLES_), async (req, res) => {
++    try {
++      const id = Number(p(req, "id")) || 0;
++      const before = id ? await loadSite(pool, id) : null;
++      if (!before || before.archived_at) return fail(res, 404, "Площадка не найдена");
++      const isAdmin = req.userRole === "admin";
++      if (before.lat != null && !isAdmin) return fail(res, 409, "У площадки уже есть точка - поменять её может администратор в Справочниках");
++      const pt = await parsePoint(p(req, "point_text"), resolveLink);
++      if (pt.error) return fail(res, 400, pt.error);
++      if (pt.none) return fail(res, 400, "Вставьте ссылку Яндекс.Карт или координаты вида «55.75, 37.62»");
++      const [u] = await pool.query(
++        `UPDATE customer_sites SET lat = ?, lon = ?, point_source = 'manual', needs_check = 0, check_note = NULL, updated_by = ?
++          WHERE id = ? AND archived_at IS NULL${isAdmin ? "" : " AND lat IS NULL"}`, [pt.lat, pt.lon, req.userEmail, id]);
++      if (!u.affectedRows) return fail(res, 409, "Точку площадке только что поставил кто-то другой - выберите площадку заново");
++      await history(pool, id, "set_point", diffFields(before, { lat: pt.lat, lon: pt.lon }), req.userEmail);
++      const s = await loadSite(pool, id);
++      res.json({ ok: true, site: out(s, await textsOf(pool, id)) });
++    } catch (err) { console.error("sites set_point:", err); fail(res, 500, String(err.message || err)); }
++  });
++
++  // В архив / из архива - только admin. Заявки, которые уже ссылаются на площадку, не меняются.
++  app.post("/api/sites/archive", checkSession, requireRole_("admin"), async (req, res) => {
++    try {
++      const id = Number(p(req, "id")) || 0; const on = String(p(req, "archived")) !== "0";
++      const before = id ? await loadSite(pool, id) : null;
++      if (!before) return fail(res, 404, "Площадка не найдена");
++      if (!!before.archived_at === on) return res.json({ ok: true, site: out(before, await textsOf(pool, id)) });
++      await pool.query(`UPDATE customer_sites SET archived_at = ${on ? "NOW()" : "NULL"}, updated_by = ? WHERE id = ?`, [req.userEmail, id]);
++      await history(pool, id, on ? "archive" : "restore", null, req.userEmail);
++      const s = await loadSite(pool, id);
++      res.json({ ok: true, site: out(s, await textsOf(pool, id)) });
++    } catch (err) { console.error("sites archive:", err); fail(res, 500, String(err.message || err)); }
++  });
++
++  // Журнал площадки (Справочники): кто, когда, что было -> что стало.
++  app.get("/api/sites/history", checkSession, requireRole_("admin"), async (req, res) => {
++    try {
++      const id = Number(req.query.id) || 0;
++      const [h] = await pool.query(`SELECT action, detail, changed_by, changed_at FROM customer_site_history WHERE site_id = ? ORDER BY changed_at DESC, id DESC LIMIT 100`, [id]);
++      const [u] = await pool.query(`SELECT email, name FROM access_users`);
++      const nameBy = {}; u.forEach((x) => { nameBy[x.email] = x.name || x.email; });
++      res.json({ history: h.map((x) => {
++        let detail = null; try { detail = x.detail ? JSON.parse(x.detail) : null; } catch (e) { detail = null; }
++        return { action: x.action, detail, by: nameBy[x.changed_by] || x.changed_by, at: new Date(x.changed_at).toISOString() };
++      }) });
++    } catch (err) { console.error("sites history:", err); fail(res, 500, String(err.message || err)); }
++  });
++}
++
++module.exports = register;
++module.exports.listForCustomer = listForCustomer;
++module.exports.siteInfo = siteInfo;
++module.exports.activeIds = activeIds;
++module.exports.touchUse = touchUse;
++module.exports.textKey = textKey;
++// для тестов
++module.exports._t = { parsePoint, readContact, diffFields, defaultName, clean, out };
+diff --git a/api/lib/customer-sites.test.js b/api/lib/customer-sites.test.js
+new file mode 100644
+index 0000000..0da4cf7
+--- /dev/null
++++ b/api/lib/customer-sites.test.js
+@@ -0,0 +1,67 @@
++// Тесты customer-sites.js без сети и базы (подхватывает tests/unit.js). Главное - точку площадке ставит
++// только человек: ссылка или координаты, поиск по тексту НИКОГДА (правило Б1 плана адресов 26.09).
++"use strict";
++const assert = require("assert");
++const cs = require("./customer-sites.js");
++const T = cs._t;
++
++let n = 0;
++async function t(name, fn) { await fn(); n++; console.log("ok -", name); }
++const noNet = async () => { throw new Error("сеть в тесте запрещена"); };
++
++(async () => {
++  await t("координаты «широта, долгота» - точка", async () => {
++    const r = await T.parsePoint("55.521563, 37.746501", noNet);
++    assert.deepStrictEqual(r, { lat: 55.521563, lon: 37.746501 });
++  });
++  await t("длинная ссылка Яндекса - точка из ссылки (порядок долгота,широта)", async () => {
++    const r = await T.parsePoint("https://yandex.ru/maps/?pt=37.746501%2C55.521563&z=17", noNet);
++    assert.deepStrictEqual(r, { lat: 55.521563, lon: 37.746501 });
++  });
++  await t("короткая ссылка - раскрывается и даёт точку", async () => {
++    const r = await T.parsePoint("https://yandex.ru/navi/-/CDbXyZ", async () => "https://yandex.ru/maps/?whatshere%5Bpoint%5D=37.5%2C55.4&z=16");
++    assert.deepStrictEqual(r, { lat: 55.4, lon: 37.5 });
++  });
++  await t("короткая ссылка не раскрылась - ошибка, а не поиск", async () => {
++    const r = await T.parsePoint("https://yandex.ru/navi/-/CDbXyZ", noNet);
++    assert(r.error, "ожидалась ошибка");
++  });
++  await t("просто адрес текстом - НЕ ищется, ошибка (точку ставит только человек)", async () => {
++    const r = await T.parsePoint("Москва, Тверская улица, 1", noNet);
++    assert(r.error && /ссылку Яндекс/.test(r.error), JSON.stringify(r));
++  });
++  await t("перепутанные широта и долгота - не принимаются", async () => {
++    const r = await T.parsePoint("37.746501, 55.521563", noNet);
++    assert(r.error, JSON.stringify(r));
++  });
++  await t("пусто - «точки нет», не ошибка", async () => {
++    assert.deepStrictEqual(await T.parsePoint("  ", noNet), { none: true });
++    assert.deepStrictEqual(await T.parsePoint(null, noNet), { none: true });
++  });
++  await t("контакт одной строкой - имя и телефон в стандарте", async () => {
++    const r = T.readContact("Иван 89161234567");
++    assert.strictEqual(r.name, "Иван"); assert.strictEqual(r.phone, "+7 916 123-45-67");
++    assert.deepStrictEqual(T.readContact(""), { name: null, phone: null });
++  });
++  await t("журнал - только реально изменённые поля, числа без хвостовых нулей", async () => {
++    const before = { name: "Горки", lat: "55.521563", lon: "37.746501", driver_note: null, needs_check: 1 };
++    const c = T.diffFields(before, { name: "Горки", lat: 55.521563, lon: 37.7, driver_note: "въезд с севера", needs_check: 0 });
++    assert.deepStrictEqual(c, { lon: ["37.746501", "37.7"], driver_note: ["", "въезд с севера"], needs_check: ["1", "0"] });
++    assert.deepStrictEqual(T.diffFields(before, {}), {});
++  });
++  await t("имя по умолчанию - начало адреса без ссылок и координат", async () => {
++    assert.strictEqual(T.defaultName("Горки ленинские деревня Горки, Ленинский городской округ"), "Горки ленинские деревня Горки");
++    assert.strictEqual(T.defaultName("https://yandex.ru/maps/?pt=37.5,55.4 склад «Восток», ворота 3"), "склад Восток");
++    assert.strictEqual(T.defaultName("Координаты: 55.61234, 37.71234"), null);
++  });
++  await t("ключ написания - регистр и пробелы не различают", async () => {
++    assert.strictEqual(cs.textKey("  Горки   ленинские "), cs.textKey("горки ленинские"));
++  });
++  await t("вид площадки для экрана - числа и признаки", async () => {
++    const o = T.out({ id: 5, customer_name: "ДЕКУБ ООО", name: null, address: "Горки, МО", lat: "55.5", lon: "37.7", load_count: 3, unload_count: "2",
++      needs_check: 0, archived_at: null, first_used: "2026-09-16", last_used: new Date(2026, 8, 27) }, ["Горки, МО"]);
++    assert.strictEqual(o.name, "Горки"); assert.strictEqual(o.lat, 55.5); assert.strictEqual(o.uses, 5);
++    assert.strictEqual(o.last_used, "2026-09-27"); assert.strictEqual(o.archived, false); assert.strictEqual(o.needs_check, false);
++  });
++  console.log("customer-sites: все " + n + " проверок прошли");
++})().catch((e) => { console.error("ОШИБКА:", e.message); process.exit(1); });
+diff --git a/api/lib/logist-long-bot.js b/api/lib/logist-long-bot.js
+index 862b7c0..66ea6f6 100644
+--- a/api/lib/logist-long-bot.js
++++ b/api/lib/logist-long-bot.js
+@@ -126,10 +126,20 @@ module.exports = function initLogistLongBot(deps) {
+       `SELECT e.id, e.order_id, e.vehicle_gos, e.trailer_gos, e.driver_name, e.driver_person_id, e.created_by,
+               o.day_no, o.service_date, o.service_time, o.equipment_type, o.cargo, o.cargo_weight_t,
+               o.load_address, o.load_contact_name, o.load_contact_phone, o.load_lat, o.load_lon,
+-              o.unload_address, o.unload_contact_name, o.unload_contact_phone, o.unload_lat, o.unload_lon, o.note
++              o.unload_address, o.unload_contact_name, o.unload_contact_phone, o.unload_lat, o.unload_lon, o.note,
++              ls.driver_note AS load_site_note, us.driver_note AS unload_site_note,
++              ls.lat AS load_site_lat, ls.lon AS load_site_lon, us.lat AS unload_site_lat, us.lon AS unload_site_lon
+          FROM plan_order_executors e JOIN plan_orders o ON o.id = e.order_id
++         LEFT JOIN customer_sites ls ON ls.id = o.load_site_id
++         LEFT JOIN customer_sites us ON us.id = o.unload_site_id
+         WHERE e.id = ? AND e.removed_at IS NULL`, [execId]);
+     if (!row) return null;
++    // своей точки у заявки нет, а у выбранной площадки есть (её тоже ставил человек) - «Карта:» по площадке
++    ["load", "unload"].forEach((s) => {
++      if ((row[s + "_lat"] == null || row[s + "_lon"] == null) && row[s + "_site_lat"] != null && row[s + "_site_lon"] != null) {
++        row[s + "_lat"] = Number(row[s + "_site_lat"]); row[s + "_lon"] = Number(row[s + "_site_lon"]); // DECIMAL -> без хвостовых нулей
++      }
++    });
+     const d = row.service_date ? new Date(row.service_date) : null;
+     const p2 = (n) => String(n).padStart(2, "0");
+     const dateLbl = d ? p2(d.getUTCDate()) + "." + p2(d.getUTCMonth() + 1) + "." + d.getUTCFullYear() : "уточняется";
+@@ -145,11 +155,15 @@ module.exports = function initLogistLongBot(deps) {
+     // 26.09 (А4): ссылка «Карта:» - та же, что в окне заявки и при копировании текста (driverText на сайте);
+     // только по точке, которую поставил человек (load_lat/lon заявки), найденные поиском точки сюда не идут.
+     if (row.load_lat != null && row.load_lon != null) L.push("Карта: https://yandex.ru/maps/?pt=" + row.load_lon + "," + row.load_lat + "&z=17");
++    // 26.09, площадки заказчика: пометка водителю («въезд с северной стороны») хранится у площадки, в
++    // заявке - только ссылка на неё (load_site_id), поэтому пометка всегда актуальная.
++    if (row.load_site_note) L.push("Пометка: " + row.load_site_note);
+     if (row.load_contact_name || row.load_contact_phone) L.push([row.load_contact_name, row.load_contact_phone].filter(Boolean).join(" · "));
+     L.push("");
+     L.push("ВЫГРУЗКА");
+     L.push(row.unload_address || "уточняется");
+     if (row.unload_lat != null && row.unload_lon != null) L.push("Карта: https://yandex.ru/maps/?pt=" + row.unload_lon + "," + row.unload_lat + "&z=17");
++    if (row.unload_site_note) L.push("Пометка: " + row.unload_site_note);
+     if (row.unload_contact_name || row.unload_contact_phone) L.push([row.unload_contact_name, row.unload_contact_phone].filter(Boolean).join(" · "));
+     if (row.note) { L.push(""); L.push("Примечание: " + row.note); }
+     return { text: L.join("\n"), row };
+@@ -324,5 +338,6 @@ module.exports = function initLogistLongBot(deps) {
+     } catch (err) { logErr("send_task:", err.message); res.status(500).json({ error: String(err.message || err) }); }
+   });
+ 
+-  return { sendTask_, enabled: !!BOT_TOKEN };
++  // buildTaskText_ - и для проверок текста задания без отправки (тестовая копия, 26.09 площадки)
++  return { sendTask_, buildTaskText_, enabled: !!BOT_TOKEN };
+ };
+diff --git a/api/lib/plan-orders.js b/api/lib/plan-orders.js
+index 0f674f7..1a1f68d 100644
+--- a/api/lib/plan-orders.js
++++ b/api/lib/plan-orders.js
+@@ -28,7 +28,10 @@ const { estimateAndStoreOrderPrice } = require("./order-price-estimate.js");
+ // Контакты заявки (26.09, Влад: «номер всегда записан супер-чётко»): единый разбор
+ // «имя + телефон(ы)» и канонический вид номера - на сервере, для любого пути сохранения.
+ const { normalizeOrderContacts, normalizeContact } = require("./contact-phone.js");
+-const CONTACT_FIELDS_ = ["load_contact_name", "load_contact_phone", "unload_contact_name", "unload_contact_phone"];
++// Площадки заказчика (26.09, фаза Б плана адресов): заявка ссылается на площадку (load_site_id /
++// unload_site_id), подсказки и пометка водителю берутся с неё. Маршруты /api/sites/* - в самом модуле.
++const sitesLib = require("./customer-sites.js");
++const CONTACT_FIELDS_ =["load_contact_name", "load_contact_phone", "unload_contact_name", "unload_contact_phone"];
+ 
+ module.exports = function (deps) {
+   const { app, pool, checkSession, requireRole_, normalizeGosServer_, buildFleetSummary_, FLEET_EPOCH0_MS_ } = deps;
+@@ -220,7 +223,8 @@ module.exports = function (deps) {
+     return s;
+   }
+   function changedKeys_(o, f, keys) { return keys.filter((k) => histNorm_(o[k]) !== histNorm_(f[k])); }
+-  const HIST_NO_VALUE_ = { load_lat: 1, load_lon: 1, unload_lat: 1, unload_lon: 1 }; // координаты - только факт, без цифр
++  // координаты и ссылка на площадку - только факт изменения, без цифр (номер площадки человеку ничего не скажет)
++  const HIST_NO_VALUE_ = { load_lat: 1, load_lon: 1, unload_lat: 1, unload_lon: 1, load_site_id: 1, unload_site_id: 1 };
+   // detail - JSON {"c":{"поле":["было","стало"]}}, колонка VARCHAR(500): значения режем до 60, не
+   // влезло - поля без значений, совсем не влезло - старый формат (список ключей через запятую).
+   // Читает это order-plan-v2.js (humanizeHistoryDetail_), старые записи он тоже понимает.
+@@ -397,6 +401,22 @@ module.exports = function (deps) {
+     });
+     return orders;
+   }
++  // Площадки заявки (26.09): имя и пометка водителю - для подписи в форме и текста водителю
++  // (driverText на сайте). У чужой заявки, скрытой от менеджера (can_view_details=false), пометку не
++  // отдаём - как и примечание заявки (PRIVATE_ORDER_FIELDS_).
++  async function attachSiteInfo_(db, orders) {
++    const ids = [];
++    orders.forEach((o) => { if (o.load_site_id) ids.push(o.load_site_id); if (o.unload_site_id) ids.push(o.unload_site_id); });
++    if (!ids.length) return orders;
++    const by = await sitesLib.siteInfo(db, ids);
++    orders.forEach((o) => {
++      ["load", "unload"].forEach((side) => {
++        const s = by[o[side + "_site_id"]];
++        if (s) o[side + "_site"] = { id: s.id, name: s.name, driver_note: o.can_view_details === false ? null : s.driver_note, lat: s.lat, lon: s.lon, archived: s.archived };
++      });
++    });
++    return orders;
++  }
+ 
+   // Текущий водитель/прицеп тягача - из fleet_assignments (любой открытый slot, самый свежий),
+   // имя/телефон - sprav_people. Тот же принцип, что buildFleetSummary_ (без slot=1).
+@@ -509,6 +529,7 @@ module.exports = function (deps) {
+         return (isMgrView && !visible) ? redactForeignOrder_(out) : out;
+       });
+       await attachTransferInfo_(pool, orders);
++      await attachSiteInfo_(pool, orders);
+       // Штамп версии - по ВСЕМ источникам изменений (заявки + исполнители + история), не только по
+       // plan_orders.updated_at: постановка машины тем же логистом не меняла updated_by -> MySQL не
+       // трогал timestamp -> у остальных таблица не перерисовывалась (Влад 11.09: «максимально онлайн»).
+@@ -649,6 +670,7 @@ module.exports = function (deps) {
+       const contractBy = await loadLatestContracts_(pool, [o.id]);
+       attachContractInfo_(order, execs, contractBy[o.id]);
+       await attachTransferInfo_(pool, [order]);
++      await attachSiteInfo_(pool, [order]);
+       res.json({ order });
+     } catch (err) { console.error("orders one:", err); fail(res, 500, String(err.message || err)); }
+   });
+@@ -663,7 +685,32 @@ module.exports = function (deps) {
+     "customer_contact_phone", "equipment_type", "cargo", "cargo_weight_t", "cargo_dims", "gabarit", "rework_terms", "documents", "note",
+     "cash", "load_address", "load_lat", "load_lon", "load_confirmed", "load_contact_name", "load_contact_phone", "unload_address",
+     "unload_lat", "unload_lon", "unload_confirmed", "unload_contact_name", "unload_contact_phone", "price", "payment_status", "internal", "crm_deal_id",
+-    "delivery_date", "delivery_time", "payment_mode", "payment_days"];
++    "delivery_date", "delivery_time", "payment_mode", "payment_days", "load_site_id", "unload_site_id"];
++  // 26.09, площадки заказчика: текст адреса правят, а площадку заново не выбрали (или путь без площадок -
++  // телефон, старая вкладка) - ссылка на площадку снимается, иначе к новому тексту уехали бы чужие
++  // пометка водителю и счётчик (правило Б4 плана адресов, тот же принцип, что сброс точки на сайте).
++  function dropStaleSiteLinks_(o, f) {
++    ["load", "unload"].forEach((side) => {
++      const a = side + "_address", s = side + "_site_id";
++      if (f[a] !== undefined && f[s] === undefined && o[s] && histNorm_(f[a]) !== histNorm_(o[a])) f[s] = null;
++    });
++  }
++  // Присланная площадка должна существовать и не быть в архиве.
++  async function siteLinksError_(db, f) {
++    const ids = ["load_site_id", "unload_site_id"].map((k) => f[k]).filter(Boolean);
++    if (!ids.length) return null;
++    const ok = await sitesLib.activeIds(db, ids);
++    return ids.every((i) => ok.has(i)) ? null : "Площадка не найдена или убрана в архив - выберите адрес заново";
++  }
++  // Заявка стала ссылаться на площадку (создана с ней или площадку сменили) - счётчик площадки +1.
++  async function touchSiteUses_(conn, o, f, date) {
++    for (const side of ["load", "unload"]) {
++      const s = side + "_site_id", sid = f[s];
++      if (!sid || (o && Number(o[s]) === sid)) continue;
++      const text = f[side + "_address"] !== undefined ? f[side + "_address"] : (o ? o[side + "_address"] : null);
++      await sitesLib.touchUse(conn, sid, side, date, text);
++    }
++  }
+   // 21.09, конструктор договора-заявки (plans/2026-09-21-contract-request-v2-legal-draft.md):
+   // срок доставки (дата+время прибытия на выгрузку) и режим оплаты по договору. Читаются
+   // и в /orders/save (обычная правка заявки), и в /orders/contract_version (выпуск
+@@ -803,6 +850,8 @@ module.exports = function (deps) {
+     ["load_address", "unload_address"].forEach((k) => { if (get(k) !== undefined) f[k] = str(get(k), 500); });
+     ["cargo_weight_t", "load_lat", "load_lon", "unload_lat", "unload_lon", "price", "crm_deal_id"].forEach((k) => { if (get(k) !== undefined) f[k] = num(get(k)); });
+     ["needs_data", "cash", "load_confirmed", "unload_confirmed", "internal"].forEach((k) => { if (get(k) !== undefined) f[k] = bool(get(k)); });
++    // площадка: пусто/не число - «без площадки» (null); сама проверка существования - siteLinksError_
++    ["load_site_id", "unload_site_id"].forEach((k) => { if (get(k) !== undefined) { const n = Number(get(k)); f[k] = Number.isInteger(n) && n > 0 ? n : null; } });
+     readContractFields_(get, f);
+     // номер из поля имени -> в поле телефона, любой российский номер -> «+7 999 123-45-67»,
+     // несколько номеров - через запятую (один человек) или « / » (пары). См. contact-phone.js.
+@@ -837,6 +886,8 @@ module.exports = function (deps) {
+           const priceErr = minPriceError_(effType, effPrice);
+           if (priceErr) { conn.release(); return fail(res, 400, priceErr); }
+         }
++        dropStaleSiteLinks_(o, f);
++        { const se = await siteLinksError_(conn, f); if (se) { conn.release(); return fail(res, 400, se); } }
+         // service_date НЕ в EDITABLE и особый случай выше убран (18.09) - день заявки
+         // менять нельзя вообще, только время внутри уже назначенного дня.
+         const keys = Object.keys(f).filter((k) => EDITABLE.indexOf(k) >= 0);
+@@ -857,6 +908,7 @@ module.exports = function (deps) {
+           const args = keys.map((k) => f[k]);
+           args.push(req.userEmail, id);
+           await conn.query(`UPDATE plan_orders SET ${keys.map((k) => k + " = ?").join(", ")}, updated_by = ? WHERE id = ?`, args);
++          await touchSiteUses_(conn, o, f, fmtDate(o.service_date));
+         }
+         if (f.service_time !== undefined && f.service_time !== fmtTime(o.service_time)) {
+           // время изменилось - подвинуть отрезки своего парка на ленте (логисту - уведомление «подвинут рейс»)
+@@ -874,7 +926,9 @@ module.exports = function (deps) {
+         // тем же conn, второе подключение больше не нужно.
+         const r = await roster(); const o2 = await loadOrder(conn, id);
+         estimateAndStoreOrderPrice(pool, id).catch(() => {}); // fire-and-forget, не блокирует ответ
+-        res.json({ ok: true, id, order: serialize(o2, await loadExecutors(conn, [id]), (await loadPending(conn, [id]))[0], r.byEmail) });
++        const order = serialize(o2, await loadExecutors(conn, [id]), (await loadPending(conn, [id]))[0], r.byEmail);
++        await attachSiteInfo_(conn, [order]);
++        res.json({ ok: true, id, order });
+       } else {
+         if (!isDate(f.service_date)) { conn.release(); return fail(res, 400, "service_date обязателен (YYYY-MM-DD)"); }
+         if (!f.equipment_type) { conn.release(); return fail(res, 400, "тип техники обязателен"); }
+@@ -882,6 +936,7 @@ module.exports = function (deps) {
+         if (!f.cargo_weight_t) { conn.release(); return fail(res, 400, "масса груза обязательна"); }
+         if (!f.price) { conn.release(); return fail(res, 400, "цена обязательна"); }
+         { const priceErr = minPriceError_(f.equipment_type, f.price); if (priceErr) { conn.release(); return fail(res, 400, priceErr); } }
++        { const se = await siteLinksError_(conn, f); if (se) { conn.release(); return fail(res, 400, se); } }
+         const wantConfirmNew = bool(p(req, "confirm")) === 1; // 26.09, И2 - см. ветку правки выше
+         if (wantConfirmNew) { const ce = confirmReadinessError_(f); if (ce) { conn.release(); return fail(res, 400, ce); } }
+         const isMgr = req.userRole === "manager";
+@@ -903,11 +958,14 @@ module.exports = function (deps) {
+         }
+         if (!orderId) throw new Error("не удалось выдать номер дня");
+         await history(conn, orderId, "create", Object.assign({ id: orderId }, f), null, req.userEmail);
++        await touchSiteUses_(conn, null, f, f.service_date);
+         if (wantConfirmNew) await confirmInTx_(conn, orderId, req.userEmail);
+         await conn.commit();
+         const r = await roster(); const o2 = await loadOrder(conn, orderId); // conn, не pool - см. комментарий у ветки update выше
+         estimateAndStoreOrderPrice(pool, orderId).catch(() => {}); // fire-and-forget, не блокирует ответ
+-        res.json({ ok: true, id: orderId, day_no: o2.day_no, order: serialize(o2, [], null, r.byEmail) });
++        const order = serialize(o2, [], null, r.byEmail);
++        await attachSiteInfo_(conn, [order]);
++        res.json({ ok: true, id: orderId, day_no: o2.day_no, order });
+       }
+     } catch (err) {
+       try { await conn.rollback(); } catch (e) {}
+@@ -1578,7 +1636,8 @@ module.exports = function (deps) {
+       const ent = String(req.query.entity || "").trim().slice(0, 64);
+       const [rows] = await pool.query(
+         `SELECT customer_contact_name, customer_contact_phone, load_address, load_lat, load_lon, load_contact_name, load_contact_phone,
+-                unload_address, unload_lat, unload_lon, unload_contact_name, unload_contact_phone, executor_entity_id, equipment_type
++                unload_address, unload_lat, unload_lon, unload_contact_name, unload_contact_phone, executor_entity_id, equipment_type,
++                customer_entity_id
+            FROM plan_orders WHERE deleted_at IS NULL AND status <> 'cancelled' AND (customer = ? OR (? <> '' AND customer_entity_id = ?))
+           ORDER BY service_date DESC, id DESC LIMIT 200`, [c, ent, ent]);
+       const cnt = (map, key, extra) => { if (!key) return; const it = map.get(key) || Object.assign({ n: 0 }, extra); it.n++; map.set(key, it); };
+@@ -1604,8 +1663,16 @@ module.exports = function (deps) {
+         if (l.some((p) => kmApart(l[0], p) > 3)) { it.lat = null; it.lon = null; it.point_conflict = true; return; }
+         it.lat = l[0].lat; it.lon = l[0].lon; // строки идут от свежих к старым - первая = самая свежая точка
+       });
+-      const top = (m) => Array.from(m.values()).sort((a, b) => b.n - a.n).slice(0, 8);
+-      res.json({ contacts: top(contacts), addresses: top(addrs), last_executor_entity_id: lastEntity, last_equipment_type: lastType });
++      // 26.09, площадки заказчика (фаза Б): идут в подсказках ПЕРВЫМИ, с точкой, контактом и пометкой.
++      // Юрлицо не выбрано из справочника (напечатали название) - берём юрлицо прошлых заявок с этим же
++      // названием. Адреса, которые уже стали площадками, из «точек заказчика» убираем - не дублируем.
++      const entEff = ent || ((rows.find((r) => r.customer_entity_id) || {}).customer_entity_id || "");
++      const sites = await sitesLib.listForCustomer(pool, c, entEff);
++      const siteKeys = new Set(); sites.forEach((s) => s.texts.forEach((t) => siteKeys.add(sitesLib.textKey(t))));
++      const top = (m, skip) => Array.from(m.values()).filter((it) => !skip || !skip.has(sitesLib.textKey(it.address))).sort((a, b) => b.n - a.n).slice(0, 8);
++      res.json({ contacts: top(contacts), addresses: top(addrs, siteKeys), last_executor_entity_id: lastEntity, last_equipment_type: lastType,
++        sites: sites.map((s) => ({ id: s.id, name: s.name, address: s.address, lat: s.lat, lon: s.lon, contact_name: s.contact_name,
++          contact_phone: s.contact_phone, driver_note: s.driver_note, uses: s.uses })) });
+     } catch (err) { console.error("customer_history:", err); fail(res, 500, String(err.message || err)); }
+   });
+   app.get("/api/orders/history", ...gate, async (req, res) => {
+diff --git a/api/server.js b/api/server.js
+index ad44ccd..3ef3589 100644
+--- a/api/server.js
++++ b/api/server.js
+@@ -12739,6 +12739,10 @@ require("./lib/plan-orders.js")({ app, pool, checkSession, requireRole_, normali
+   // долетают), а не снимок на момент старта сервера.
+   commercialHeadTeams: function () { return COMMERCIAL_HEAD_TEAMS_; } });
+ 
++// Площадки заказчика (26.09.2026, plans/2026-09-26-customer-addresses-and-price-geo.md, фаза Б) - /api/sites/*:
++// список для формы заявки и Справочников, правка (admin), точка площадке без точки (менеджер/логист), архив, журнал.
++require("./lib/customer-sites.js")({ app, pool, checkSession, requireRole_, resolveLink: geocoder.resolveMapLink });
++
+ // Навигация v2 «Мои заказы» (24.09, plans/2026-09-24-navigation-v2-map-first.md) - заявки
+ // «Задания» с точками и линиями маршрутов для карты. Только чтение plan_orders.
+ require("./lib/nav-orders.js")({ app, pool, checkSession, requireRole_, normalizeGosServer_, geocoder });
+diff --git a/import/customer-sites-phase-b.sql b/import/customer-sites-phase-b.sql
+new file mode 100644
+index 0000000..9cace1c
+--- /dev/null
++++ b/import/customer-sites-phase-b.sql
+@@ -0,0 +1,23 @@
++-- Площадки заказчика, фаза Б-3/Б-4 (26.09.2026, plans/2026-09-26-customer-addresses-and-price-geo.md в
++-- репозитории дашборда). Разовая миграция, запускать ОДИН раз до выката кода (ALTER не повторяемый):
++--   mysql <база> < import/customer-sites-phase-b.sql
++-- 1) Заявка ссылается на площадку: выбор площадки в форме «Задания» пишет сюда её id; точка, контакт и
++--    пометка водителю берутся с площадки. NULL - адрес без площадки (как все заявки до 26.09).
++ALTER TABLE plan_orders
++  ADD COLUMN load_site_id INT DEFAULT NULL,
++  ADD COLUMN unload_site_id INT DEFAULT NULL,
++  ADD KEY k_load_site (load_site_id),
++  ADD KEY k_unload_site (unload_site_id);
++
++-- 2) Журнал правок площадки «было -> стало» (кто, когда). Создаётся и сам при старте api/lib/customer-sites.js;
++--    здесь - чтобы схема была записана. Время - UTC (DEFAULT CURRENT_TIMESTAMP), экран переводит в МСК.
++CREATE TABLE IF NOT EXISTS customer_site_history (
++  id BIGINT NOT NULL AUTO_INCREMENT,
++  site_id INT NOT NULL,
++  action VARCHAR(20) NOT NULL,          -- create | update | set_point | archive | restore
++  detail TEXT,                          -- JSON {"поле":["было","стало"]}
++  changed_by VARCHAR(255) DEFAULT NULL, -- email
++  changed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
++  PRIMARY KEY (id),
++  KEY k_site (site_id)
++) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

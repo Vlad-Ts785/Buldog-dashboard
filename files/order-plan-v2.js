@@ -2705,6 +2705,10 @@ function priceLightClass_(o) {
   return ' op2-price-bad';
 }
 function priceLightTitle_(o) {
+  /* 26.09 (plans/2026-09-26-customer-addresses-and-price-geo.md, П3): белая цена - с причиной словами
+     («погрузка: в адресе несколько мест», «масса не указана»), причина уже лежала в базе, но не
+     показывалась - было непонятно, что поправить в заявке, чтобы авторасчёт заработал. */
+  if (isAdmin() && o.computed_price == null && o.computed_error) return ' title="Авторасчёт не сделан: ' + esc(o.computed_error) + '"';
   if (!isAdmin() || o.computed_price == null) return '';
   var pct = Math.round((num(o.price) / num(o.computed_price) - 1) * 100);
   var modeRu = o.computed_mode === 'mkad' ? 'от МКАД' : 'от базы';
@@ -4060,6 +4064,17 @@ function moveCarTo_(src, v, t, sound) {
 }
 
 /* ═════════════════════════ ТЕКСТЫ: ЗАДАНИЕ ВОДИТЕЛЮ, ПРОПУСК ═════════════════════════ */
+function sitePointFallback_(o) {
+  var c = null;
+  ['load', 'unload'].forEach(function (s) {
+    var si = o[s + '_site'];
+    if ((!o[s + '_lat'] || !o[s + '_lon']) && si && si.lat != null && si.lon != null) {
+      if (!c) { c = {}; Object.keys(o).forEach(function (k) { c[k] = o[k]; }); }
+      c[s + '_lat'] = si.lat; c[s + '_lon'] = si.lon;
+    }
+  });
+  return c || o;
+}
 function driverText(o) {
   var vs = oOwn(o);
   var h = oHired(o);
@@ -4074,14 +4089,19 @@ function driverText(o) {
   L.push('Документы: ' + (o.documents || 'уточнить'));
   L.push('Переработка: ' + String(o.rework_terms || 'по согласованию с логистом').toLowerCase());
   L.push('');
+  /* своей точки у заявки нет, а у выбранной площадки есть - «Карта» по площадке (как в задании MAX) */
+  o = sitePointFallback_(o);
   L.push('ПОГРУЗКА');
   L.push(o.load_address || 'адрес уточняется');
   if (o.load_lat && o.load_lon) L.push('Карта: https://yandex.ru/maps/?pt=' + o.load_lon + ',' + o.load_lat + '&z=17 · ' + o.load_lat + ', ' + o.load_lon);
+  /* 26.09: пометка водителю - с площадки заказчика (та же строка, что в задании MAX) */
+  if (o.load_site && o.load_site.driver_note) L.push('Пометка: ' + o.load_site.driver_note);
   if (o.load_contact_name || o.load_contact_phone) L.push([o.load_contact_name, fmtPhone(o.load_contact_phone)].filter(Boolean).join(' · '));
   L.push('');
   L.push('ВЫГРУЗКА');
   L.push(o.unload_address || 'адрес уточняется');
   if (o.unload_lat && o.unload_lon) L.push('Карта: https://yandex.ru/maps/?pt=' + o.unload_lon + ',' + o.unload_lat + '&z=17 · ' + o.unload_lat + ', ' + o.unload_lon);
+  if (o.unload_site && o.unload_site.driver_note) L.push('Пометка: ' + o.unload_site.driver_note);
   if (o.unload_contact_name || o.unload_contact_phone) L.push([o.unload_contact_name, fmtPhone(o.unload_contact_phone)].filter(Boolean).join(' · '));
   if (o.note) { L.push(''); L.push('Примечание: ' + o.note); }
   L.push('');
@@ -4202,8 +4222,19 @@ var HIST_ACTION_LABEL_ = {
   executor_set: 'поставил машину', executor_remove: 'снял машину', executor_move: 'перенёс машину',
   hired_set: 'оформил наёмника', change_request_approve: 'согласовал замену',
   change_request_reject: 'отклонил замену', needs_data_sent: 'отправил данные на пропуск',
-  transfer_out: 'перенёс на другую дату', transfer_in: 'создана переносом'
+  transfer_out: 'перенёс на другую дату', transfer_in: 'создана переносом',
+  driver_confirm: 'отметил: водитель подтвердил'
 };
+/* Подпись действия в истории. У driver_confirm смысл зависит от detail («… подтвердил» / «… снято»),
+   поэтому подпись и хвост строятся тут, а не одной строкой из словаря. Неизвестное действие - не
+   показываем служебное имя вроде driver_confirm (Влад 26.09: «не для человеческого восприятия»). */
+function histLabel_(action, detail) {
+  if (action === 'driver_confirm') return /снято\s*$/.test(String(detail || '')) ? 'снял отметку «водитель подтвердил»' : 'отметил: водитель подтвердил';
+  return HIST_ACTION_LABEL_[action] || 'действие с заявкой';
+}
+/* Кто сделал: человек - «Имя Фамилия» (fioName_), системная запись («Система (разбор телефонов)») -
+   целиком, иначе от неё оставалось «Система (разбор». */
+function histWho_(by) { by = String(by || ''); return by.indexOf('Система') === 0 ? by : fioName_(by); }
 /* detail этих действий дословно повторяет то, что уже сказано в label/по автору - не дублируем */
 var HIST_SUPPRESS_DETAIL_ = { otboy_ack: 1, delete: 1, needs_data_sent: 1 };
 var HIST_FIELD_LABEL_ = {
@@ -4216,7 +4247,8 @@ var HIST_FIELD_LABEL_ = {
   load_confirmed: 'адрес погрузки подтверждён', load_contact_name: 'контакт на погрузке', load_contact_phone: 'телефон на погрузке',
   unload_address: 'адрес выгрузки', unload_lat: 'координаты выгрузки', unload_lon: 'координаты выгрузки',
   unload_confirmed: 'адрес выгрузки подтверждён', unload_contact_name: 'контакт на выгрузке', unload_contact_phone: 'телефон на выгрузке',
-  price: 'цена', payment_status: 'статус оплаты', internal: 'внутренний заказ', crm_deal_id: 'сделка CRM'
+  price: 'цена', payment_status: 'статус оплаты', internal: 'внутренний заказ', crm_deal_id: 'сделка CRM',
+  load_site_id: 'площадка погрузки', unload_site_id: 'площадка выгрузки'
 };
 /* значение поля в истории правок: пусто - словом, цена - рублями, флажки - да/нет */
 function histVal_(k, v) {
@@ -4255,6 +4287,7 @@ function humanizeHistoryDetail_(action, detail) {
     if (m) return (ST_LABEL[ST_UI[m[1]]] || m[1]) + ' → ' + (ST_LABEL[ST_UI[m[2]]] || m[2]);
   }
   if (action === 'executor_set') detail = detail.replace(/\bmain\b/, 'основная').replace(/\breserve\b/, 'резерв');
+  if (action === 'driver_confirm') return detail.replace(/\s*(подтвердил|снято)\s*$/, '');
   /* transfer_out/transfer_in - detail хранит "YYYY-MM-DD|order_id" (см. POST /orders/transfer,
      plan-orders.js) - не дата+номер дня, потому что история пишется ДО того, как известен
      day_no новой заявки в некоторых путях; id достаточно, а красивый номер уже виден в
@@ -4284,11 +4317,11 @@ function loadHistoryInto(o) {
     var box = $('#op2-hist-box'); if (!box) return;
     var h = r.data.history || [];
     box.innerHTML = h.length ? h.map(function (x) {
-      var label = HIST_ACTION_LABEL_[x.action] || x.action || '';
+      var label = histLabel_(x.action, x.detail);
       var detail = humanizeHistoryDetail_(x.action, x.detail);
       /* Влад 13.09: «просто делай: имя, фамилия и всё» - без отчества, тем же приёмом
          (fioName_), что уже сокращает ФИО водителя в колонке «Машина»; полное ФИО - в title. */
-      return '<li><span class="op2-tm">' + esc(humanAt_(x.at)) + '</span><span><span class="op2-who" title="' + esc(x.by || '') + '">' + esc(fioName_(x.by)) + '</span> ' + esc(label) + (detail ? ' · ' + esc(detail) : '') + '</span></li>';
+      return '<li><span class="op2-tm">' + esc(humanAt_(x.at)) + '</span><span><span class="op2-who" title="' + esc(x.by || '') + '">' + esc(histWho_(x.by)) + '</span> ' + esc(label) + (detail ? ' · ' + esc(detail) : '') + '</span></li>';
     }).join('') : '<li><span class="op2-dim">записей пока нет</span></li>';
   }).catch(function () {});
 }
@@ -4894,7 +4927,8 @@ function renderForm() {
                : '<button type="button" class="op2-addr-base" data-side="from" data-kind="bymesto">По месту</button>') + '</label>' +
         '<input id="op2-f-from" placeholder="Адрес, ссылка на карту или координаты 55.75, 37.62" autocomplete="off" value="' + esc(o ? o.load_address : '') + '">' +
         '<div class="op2-list" id="op2-f-fromlist"></div>' +
-        '<span class="op2-hint op2-okc" id="op2-f-fromhint">' + (o && o.load_lat ? esc(o.load_lat + ' · ' + o.load_lon) : '') + '</span></div>' +
+        '<span class="op2-hint op2-okc" id="op2-f-fromhint">' + (o && o.load_lat ? esc(o.load_lat + ' · ' + o.load_lon) : '') + '</span>' +
+        sitePointRow_('from') + '</div>' +
       '<div class="op2-fld"><label>Контакт на погрузке</label><input id="op2-f-fromcontact" placeholder="Имя · телефон" autocomplete="off" value="' + esc(o ? [o.load_contact_name, o.load_contact_phone].filter(Boolean).join(' · ') : '') + '"></div>' +
       '<div class="op2-fld"><label>Контакт на выгрузке</label><input id="op2-f-tocontact" placeholder="Имя · телефон" autocomplete="off" value="' + esc(o ? [o.unload_contact_name, o.unload_contact_phone].filter(Boolean).join(' · ') : '') + '"></div>' +
       '<div class="op2-fld op2-full op2-sugg" id="op2-f-tobox"><label class="op2-lbl-flex"><span>Адрес выгрузки</span>' +
@@ -4902,7 +4936,8 @@ function renderForm() {
                : '<button type="button" class="op2-addr-base" data-side="to" data-kind="bymesto">По месту</button>') + '</label>' +
         '<input id="op2-f-to" placeholder="Адрес, ссылка на карту или координаты" autocomplete="off" value="' + esc(o ? o.unload_address : '') + '">' +
         '<div class="op2-list" id="op2-f-tolist"></div>' +
-        '<span class="op2-hint op2-warn" id="op2-f-tohint"></span></div>' +
+        '<span class="op2-hint op2-warn" id="op2-f-tohint"></span>' +
+        sitePointRow_('to') + '</div>' +
     '</div></div>' +
     '</div>' +
 
@@ -5134,11 +5169,20 @@ function wireForm() {
   });
 
   /* подсказки заказчика */
-  var custT = null;
+  var custT = null, custHistT = null;
   $('#op2-f-cust').addEventListener('input', function () {
     tickState();
     var v = this.value.trim();
     clearTimeout(custT);
+    /* 26.09 (А2 плана адресов): точки прошлого заказчика не должны оставаться в подсказках нового -
+       список истории чистим сразу, а для напечатанного (не выбранного из списка) названия запрашиваем
+       историю после паузы: раньше она приходила только после клика по заказчику в выпадашке.
+       Выбранное из справочника юрлицо относится к выбранному названию - перепечатали название, юрлицо
+       снимаем (иначе уходила пара «текст Б + юрлицо А»). */
+    clearTimeout(custHistT);
+    ['from', 'to'].forEach(function (sd) { listSubSection_(sd, 'op2-sub-hist').innerHTML = ''; listSubSection_(sd, 'op2-sub-sites').innerHTML = ''; });
+    if (this.dataset.entityId && v !== (this.dataset.entityName || '')) { delete this.dataset.entityId; delete this.dataset.entityName; }
+    if (v.length >= 3 && !/^\d+$/.test(v)) custHistT = setTimeout(function () { fetchCustomerHistory(v); }, 700);
     if (v.length < 2) { $('#op2-f-custbox').classList.remove('op2-open'); return; }
     var digits = v.replace(/\D/g, '');
     /* ИНН (10/12 цифр) - ищем контрагента по ИНН: справочник -> DaData (Влад 11.09) */
@@ -5151,7 +5195,8 @@ function wireForm() {
     var it = e.target.closest('.op2-it'); if (!it) return;
     $('#op2-f-cust').value = it.dataset.name || '';
     $('#op2-f-custbox').classList.remove('op2-open');
-    if (it.dataset.eid) $('#op2-f-cust').dataset.entityId = it.dataset.eid;
+    clearTimeout(custHistT);
+    if (it.dataset.eid) { $('#op2-f-cust').dataset.entityId = it.dataset.eid; $('#op2-f-cust').dataset.entityName = it.dataset.name || ''; }
     fetchCustomerHistory(it.dataset.name || '');
     tickState();
   });
@@ -5204,19 +5249,108 @@ function wireForm() {
   function applyAddr_(side, address, lat, lon, hintText) {
     var inp = $('#op2-f-' + side);
     inp.value = address || ''; inp.dataset.lat = lat || ''; inp.dataset.lon = lon || '';
+    /* любой выбор адреса не из «Площадок» - заявка больше не ссылается на площадку (applySite_ ниже
+       ставит ссылку заново сразу после этого вызова) */
+    delete inp.dataset.siteId; delete inp.dataset.siteName;
+    var spRow_ = $('#op2-f-' + side + 'sitept'); if (spRow_) spRow_.hidden = true;
     var hint = $('#op2-f-' + side + 'hint');
     if (hint) { hint.textContent = lat ? (lat + ' · ' + lon) : (hintText || ''); hint.className = 'op2-hint op2-okc'; }
     $('#op2-f-' + side + 'box').classList.remove('op2-open');
     tickState();
   }
+  /* 26.09, площадки заказчика (фаза Б плана адресов): выбор площадки - адрес, точка и контакт на месте
+     с площадки + ссылка на неё (siteId уходит в заявку как load_site_id/unload_site_id) */
+  function applySite_(side, it) {
+    var d = it.dataset;
+    applyAddr_(side, d.address, d.lat, d.lon);
+    var inp = $('#op2-f-' + side);
+    inp.dataset.siteId = d.siteId; inp.dataset.siteName = d.name || '';
+    var withContact = !!(d.cname || d.cphone);
+    if (withContact) $('#op2-f-' + side + 'contact').value = [d.cname, d.cphone].filter(Boolean).join(' · ');
+    siteHint_(side, withContact);
+  }
   ['from', 'to'].forEach(function (side) {
     var inp = $('#op2-f-' + side);
+    /* «точки ставит менеджер» (Влад 26.09): у площадки нет точки - вставил ссылку/координаты, нажал
+       «Запомнить точку» - точка у площадки на все следующие заявки и сразу в этой */
+    var spRow = $('#op2-f-' + side + 'sitept');
+    if (spRow) {
+      var spBtn = spRow.querySelector('button'), spIn = spRow.querySelector('input');
+      var setSitePoint = function () {
+        var sid = inp.dataset.siteId, txt = spIn.value.trim();
+        if (!sid) { spRow.hidden = true; return; }
+        if (!txt) { toast('<span class="op2-warn">Вставьте ссылку Яндекс.Карт или координаты</span>'); spIn.focus(); return; }
+        spBtn.disabled = true;
+        apiPostJson('/sites/set_point', { id: sid, point_text: txt }).then(function (r) {
+          spBtn.disabled = false;
+          if (!r || !r.ok || !r.data || r.data.error) { toast('<span class="op2-warn">' + esc((r && r.data && r.data.error) || 'Сервер не ответил') + '</span>'); return; }
+          var s = r.data.site;
+          /* подсказки этой площадки - уже с точкой, чтобы повторный выбор её не потерял */
+          $$('.op2-it[data-site-id="' + s.id + '"]').forEach(function (x) {
+            x.dataset.lat = s.lat; x.dataset.lon = s.lon;
+            var ch = x.querySelector('.op2-site-chip'); if (ch) { ch.className = 'op2-site-chip op2-ok'; ch.textContent = 'точка есть'; }
+          });
+          if (inp.dataset.siteId !== String(s.id)) return; /* пока ждали ответ, площадку в поле сменили */
+          inp.dataset.lat = s.lat; inp.dataset.lon = s.lon;
+          spRow.hidden = true;
+          addrHint_(side, 'Площадка «' + (s.name || '') + '» · точка ' + s.lat + ' · ' + s.lon + ' · запомнена для следующих заявок', 'op2-okc');
+          toast('Точка площадки «' + esc(s.name || '') + '» запомнена');
+          tickState();
+        }).catch(function () { spBtn.disabled = false; toast('<span class="op2-warn">Сервер не ответил</span>'); });
+      };
+      spBtn.addEventListener('click', setSitePoint);
+      spIn.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); setSitePoint(); } });
+    }
+    /* Б-5: «Сохранить как площадку заказчика» - точка берётся та, что стоит в поле (её поставил человек:
+       подсказка, ссылка, координаты); такое написание уже есть / точка в 200 м от площадки - сервер отдаёт её */
+    var ssRow = $('#op2-f-' + side + 'sitesave');
+    if (ssRow) {
+      var ssBtn = ssRow.querySelector('button');
+      ssBtn.addEventListener('click', function () {
+        var cust = $('#op2-f-cust'), addr = inp.value.trim();
+        var ent = (cust && cust.dataset.entityId) || (formOrder && formOrder.customer === cust.value.trim() && formOrder.customer_entity_id) || '';
+        ssBtn.disabled = true;
+        apiPostJson('/sites/create', { customer: cust.value.trim(), customer_entity_id: ent, address: addr,
+          lat: inp.dataset.lat || '', lon: inp.dataset.lon || '', contact: $('#op2-f-' + side + 'contact').value.trim() }).then(function (r) {
+          ssBtn.disabled = false;
+          if (!r || !r.ok || !r.data || r.data.error) { toast('<span class="op2-warn">' + esc((r && r.data && r.data.error) || 'Сервер не ответил') + '</span>'); return; }
+          var s = r.data.site;
+          if (inp.value.trim() !== addr) return; /* пока ждали, адрес поменяли - к нему площадка уже не относится */
+          inp.dataset.siteId = s.id; inp.dataset.siteName = s.name || '';
+          if (!inp.dataset.lat && s.lat != null && s.lon != null) { inp.dataset.lat = s.lat; inp.dataset.lon = s.lon; }
+          siteHint_(side, false);
+          toast(r.data.existed ? 'Такая площадка уже есть - «' + esc(s.name || '') + '», заявка привязана к ней' : 'Площадка «' + esc(s.name || '') + '» сохранена');
+          fetchCustomerHistory(cust.value.trim());
+          tickState();
+        }).catch(function () { ssBtn.disabled = false; toast('<span class="op2-warn">Сервер не ответил</span>'); });
+      });
+    }
     inp.addEventListener('focus', function () { if ($('#op2-f-' + side + 'list').querySelector('.op2-it')) $('#op2-f-' + side + 'box').classList.add('op2-open'); });
     inp.addEventListener('blur', function () { setTimeout(function () { $('#op2-f-' + side + 'box').classList.remove('op2-open'); }, 150); tickState(); tryParseAddrPaste_(side); });
-    inp.addEventListener('input', function () { fetchGeoSuggest(side, this.value); });
+    inp.addEventListener('input', function () {
+      /* 26.09 (Б4 плана адресов, Влад: «машина уехала не туда - проблема»): текст адреса правят руками
+         - прежняя точка к новому тексту уже не относится; иначе новый адрес уйдёт водителю со старой
+         ссылкой «Карта:». Как на телефоне: точку сбрасываем, её ставит выбор подсказки или ссылка/
+         координаты в тексте (разберутся при уходе из поля). */
+      if (this.dataset.lat) {
+        this.dataset.lat = ''; this.dataset.lon = '';
+        addrHint_(side, 'адрес изменён - выбери его из подсказки, чтобы поставить точку', 'op2-warn');
+      }
+      /* площадка - то же правило: текст правят руками - это уже не та площадка (её пометка водителю
+         и точка к новому тексту не относятся); сервер снимает ссылку тем же правилом */
+      if (this.dataset.siteId) {
+        var siteNm_ = this.dataset.siteName || '';
+        delete this.dataset.siteId; delete this.dataset.siteName;
+        var spr_ = $('#op2-f-' + side + 'sitept'); if (spr_) spr_.hidden = true;
+        addrHint_(side, 'адрес изменён - это уже не площадка «' + siteNm_ + '»; выбери площадку или адрес из подсказки', 'op2-warn');
+      }
+      fetchGeoSuggest(side, this.value);
+    });
     $('#op2-f-' + side + 'list').addEventListener('mousedown', function (e) {
       var it = e.target.closest('.op2-it'); if (!it) return;
-      applyAddr_(side, it.dataset.address, it.dataset.lat, it.dataset.lon, 'из истории заказчика');
+      if (it.dataset.siteId) { applySite_(side, it); return; }
+      applyAddr_(side, it.dataset.address, it.dataset.lat, it.dataset.lon,
+        it.dataset.conflict ? 'в прошлых заявках у этого адреса разные точки - выбери его из подсказки адресов' : 'из истории заказчика');
       if (it.dataset.cname || it.dataset.cphone) {
         $('#op2-f-' + side + 'contact').value = [it.dataset.cname, it.dataset.cphone].filter(Boolean).join(' · ');
       }
@@ -5251,6 +5385,17 @@ function wireForm() {
     var fIn_ = $('#op2-f-from'), tIn_ = $('#op2-f-to');
     if (fIn_ && formOrder.load_lat && formOrder.load_lon) { fIn_.dataset.lat = formOrder.load_lat; fIn_.dataset.lon = formOrder.load_lon; }
     if (tIn_ && formOrder.unload_lat && formOrder.unload_lon) { tIn_.dataset.lat = formOrder.unload_lat; tIn_.dataset.lon = formOrder.unload_lon; }
+    /* заявка ссылается на площадку - ссылку держим в поле (иначе сохранение правки её бы сняло) и
+       подписываем; у площадки без точки сразу видна строка «Запомнить точку» */
+    [['from', fIn_, 'load'], ['to', tIn_, 'unload']].forEach(function (x) {
+      var sid = formOrder[x[2] + '_site_id'], si = formOrder[x[2] + '_site'] || null;
+      if (!x[1] || !sid) return;
+      x[1].dataset.siteId = sid; x[1].dataset.siteName = (si && si.name) || '';
+      /* своей точки у заявки нет, а у площадки есть (поставили позже) - берём точку площадки, как при
+         выборе площадки из подсказки; своя точка заявки остаётся как есть */
+      if (!x[1].dataset.lat && si && si.lat != null && si.lon != null) { x[1].dataset.lat = si.lat; x[1].dataset.lon = si.lon; }
+      siteHint_(x[0], false);
+    });
     if (formOrder.load_address && !formOrder.load_lat) tryParseAddrPaste_('from');
     if (formOrder.unload_address && !formOrder.unload_lat) tryParseAddrPaste_('to');
   }
@@ -5259,6 +5404,7 @@ function wireForm() {
 function tickState() {
   var b = $('#op2-f-save'), st = $('#op2-f-state');
   if (!b) return;
+  siteSaveVis_('from'); siteSaveVis_('to');
   /* «Сохранить и подтвердить» видна только в конце, когда форму можно сохранить вообще -
      любая ранняя блокировка ниже (нет заказчика/цены/массы...) оставляет одну кнопку. */
   var bok = $('#op2-f-saveok'); if (bok) bok.classList.add('op2-hidden');
@@ -5304,14 +5450,14 @@ function tickState() {
   /* 26.09, «гладкая работа» (plans/2026-09-26-smooth-work-ux-analytics.md, И2): 57% подтверждений
      автор делал отдельным шагом в первые 2 минуты после создания - нашёл строку, открыл статус,
      нажал «Подтверждено». Теперь две кнопки, и цвет говорит, с каким статусом заявка уйдёт
-     (Влад 26.09): жёлтая «Сохранить черновиком» - останется «не подтверждено», зелёная
+     (Влад 26.09): жёлтая «Сохранить не подтверждённой» - останется «не подтверждено», зелёная
      «Сохранить и подтвердить» - сразу подтверждена (та же проверка готовности, что у статуса,
      сервер её повторяет в той же транзакции). Не хватает данных для подтверждения - зелёной
      нет, под кнопкой написано, чего не хватает. */
   if (formConfirmable_()) {
     var cErr = confirmReadinessError_(formDraftForConfirm_());
     b.className = 'op2-dbtn op2-primary op2-warn';
-    b.textContent = 'Сохранить черновиком';
+    b.textContent = 'Сохранить не подтверждённой'; /* Влад 26.09: не «черновик» - слово самого статуса */
     if (!cErr && bok) { bok.classList.remove('op2-hidden'); st.textContent = ''; }
     else st.textContent = miss.length
       ? 'Не хватает: ' + miss.join(', ') + ' · сохраним, поля подсветятся «уточнить»'
@@ -5457,7 +5603,7 @@ function saveInn(btn) {
   btn.disabled = true; btn.textContent = 'Сохраняем…';
   apiPost('/orders/inn_save', { inn: d.inn, name: d.name, full_name: d.full, kpp: d.kpp, ogrn: d.ogrn, legal_address: d.addr, director_name: d.dir, director_post: d.post, egrul_status: d.status }).then(function (r) {
     if (!ok_(r)) { btn.disabled = false; btn.textContent = 'Сохранить в справочник и подставить'; return; }
-    var fc = $('#op2-f-cust'); fc.value = r.data.name || d.name; fc.dataset.entityId = r.data.id;
+    var fc = $('#op2-f-cust'); fc.value = r.data.name || d.name; fc.dataset.entityId = r.data.id; fc.dataset.entityName = fc.value;
     $('#op2-f-custbox').classList.remove('op2-open');
     S.tickUp();
     toast((r.data.existed ? 'Уже в справочнике: ' : 'Сохранено в справочник: ') + '<span class="op2-tick">' + esc(r.data.name || d.name) + '</span> · ИНН ' + esc(d.inn));
@@ -5532,11 +5678,28 @@ function applyCargo(d) {
 }
 function fetchCustomerHistory(name) {
   if (!name) return;
-  apiGet('/orders/customer_history', { customer: name }).then(function (r) {
+  /* 26.09 (А1): история - и по юрлицу заказчика, если оно известно (выбрано из справочника или уже
+     стоит в заявке), а не только по точному тексту названия */
+  var custInp = $('#op2-f-cust');
+  var ent = (custInp && custInp.dataset.entityId) || (formOrder && formOrder.customer === name && formOrder.customer_entity_id) || '';
+  apiGet('/orders/customer_history', { customer: name, entity: ent }).then(function (r) {
     if (!r || !r.ok || !r.data || r.data.error) return;
+    if (custInp && custInp.value.trim() !== name) return; /* пока ждали ответ, заказчика сменили */
     var d = r.data;
+    /* 26.09, площадки заказчика - первыми (превью examples/preview-customer-sites.html, одобрено Владом) */
+    var sites = (d.sites || []).map(function (s) {
+      var hasPt = s.lat != null && s.lon != null;
+      return '<div class="op2-it op2-site-it" data-site-id="' + esc(s.id) + '" data-name="' + esc(s.name || '') + '" data-address="' + esc(s.address) + '"' +
+        ' data-lat="' + esc(hasPt ? s.lat : '') + '" data-lon="' + esc(hasPt ? s.lon : '') + '" data-cname="' + esc(s.contact_name || '') + '" data-cphone="' + esc(s.contact_phone || '') + '">' +
+        '<span class="op2-site-l"><span class="op2-site-t">' + esc(s.name || s.address) +
+        (hasPt ? ' <span class="op2-site-chip op2-ok">точка есть</span>' : ' <span class="op2-site-chip op2-no">нет точки</span>') + '</span>' +
+        '<span class="op2-site-a">' + esc(s.address) + '</span></span><span class="op2-m">' + esc(s.uses || '') + '</span></div>';
+    }).join('');
+    var sitesHtml = sites ? '<div class="op2-sec">Площадки заказчика</div>' + sites : '';
+    listSubSection_('from', 'op2-sub-sites').innerHTML = sitesHtml;
+    listSubSection_('to', 'op2-sub-sites').innerHTML = sitesHtml;
     var addr = (d.addresses || []).slice(0, 8).map(function (a) {
-      return '<div class="op2-it" data-address="' + esc(a.address) + '" data-lat="' + esc(a.lat || '') + '" data-lon="' + esc(a.lon || '') + '" data-cname="' + esc(a.contact_name || '') + '" data-cphone="' + esc(a.contact_phone || '') + '">' +
+      return '<div class="op2-it" data-address="' + esc(a.address) + '" data-lat="' + esc(a.lat || '') + '" data-lon="' + esc(a.lon || '') + '" data-cname="' + esc(a.contact_name || '') + '" data-cphone="' + esc(a.contact_phone || '') + '"' + (a.point_conflict ? ' data-conflict="1"' : '') + '>' +
         '<span>' + esc(a.address) + '</span><span class="op2-m">' + esc(a.n || '') + '</span></div>';
     }).join('');
     var head = addr ? '<div class="op2-sec">Точки этого заказчика</div>' : '';
@@ -5561,10 +5724,16 @@ function fetchCustomerHistory(name) {
 /* список подсказок адреса делится на два независимых подраздела - история заказчика
    (fetchCustomerHistory выше) и живой геокодинг (fetchGeoSuggest ниже) - каждый пишет
    только в свой div, не затирая другой при повторном срабатывании. */
+/* порядок подразделов постоянный: площадки -> точки заказчика -> адреса (кто бы ни ответил первым) */
+var SUB_ORDER_ = ['op2-sub-sites', 'op2-sub-hist', 'op2-sub-geo'];
 function listSubSection_(side, cls) {
   var list = $('#op2-f-' + side + 'list');
   var sub = list.querySelector('.' + cls);
-  if (!sub) { sub = document.createElement('div'); sub.className = cls; list.appendChild(sub); }
+  if (!sub) {
+    sub = document.createElement('div'); sub.className = cls;
+    var next = SUB_ORDER_.slice(SUB_ORDER_.indexOf(cls) + 1).map(function (c) { return list.querySelector('.' + c); }).filter(Boolean)[0];
+    list.insertBefore(sub, next || null);
+  }
   return sub;
 }
 /* «Адреса» - живой геокодинг DaData (Влад 12.09: подключить то же, что уже работает в
@@ -5684,6 +5853,39 @@ function addrHint_(side, text, cls) {
   var hint = $('#op2-f-' + side + 'hint');
   if (hint) { hint.textContent = text; hint.className = 'op2-hint' + (cls ? ' ' + cls : ''); }
 }
+/* 26.09, площадки заказчика: строка «поставить точку площадке» под адресом - видна, только когда
+   выбрана площадка без точки (siteHint_). Точка - только ссылкой или координатами, поиск её не ставит. */
+function sitePointRow_(side) {
+  return '<div class="op2-sitept" id="op2-f-' + side + 'sitept" hidden>' +
+    '<input id="op2-f-' + side + 'siteptin" placeholder="Ссылка Яндекс.Карт или координаты 55.75, 37.62" autocomplete="off">' +
+    '<button type="button" class="op2-ghost">Запомнить точку</button></div>' +
+    /* Б-5: «Сохранить как площадку» - новое постоянное место одним нажатием (иначе площадка появится сама
+       со второй заявки с этим адресом) */
+    '<div class="op2-sitesave" id="op2-f-' + side + 'sitesave" hidden><button type="button" class="op2-ghost">Сохранить как площадку заказчика</button></div>';
+}
+/* кнопка видна: адрес есть и не площадка, заказчик указан, поле не в фокусе (не мигать при наборе) */
+var SITE_SKIP_RE_ = /^\s*работа\s+по\s+месту\s*$/i;
+function siteSaveVis_(side) {
+  var row = $('#op2-f-' + side + 'sitesave'), inp = $('#op2-f-' + side), cust = $('#op2-f-cust');
+  if (!row || !inp) return;
+  var v = inp.value.trim();
+  row.hidden = !!(inp.dataset.siteId || v.length < 5 || SITE_SKIP_RE_.test(v) || v === BASE_ADDRESS_ ||
+    !cust || !cust.value.trim() || document.activeElement === inp);
+}
+function siteHint_(side, contactFilled) {
+  var inp = $('#op2-f-' + side), name = inp.dataset.siteName || '';
+  var row = $('#op2-f-' + side + 'sitept');
+  if (inp.dataset.lat) {
+    addrHint_(side, 'Площадка «' + name + '» · точка ' + inp.dataset.lat + ' · ' + inp.dataset.lon + (contactFilled ? ' · контакт на месте подставлен' : ''), 'op2-okc');
+    if (row) row.hidden = true;
+    return;
+  }
+  addrHint_(side, 'Площадка «' + name + '» · нет точки. Вставьте ссылку или координаты - точка запомнится для следующих заявок', 'op2-warn');
+  if (row) {
+    row.hidden = false; row.querySelector('input').value = '';
+    row.querySelector('button').textContent = 'Запомнить точку для площадки «' + name + '»';
+  }
+}
 /* только координаты в dataset - адрес в самом поле НЕ ТРОГАЕМ */
 function applyFoundCoords_(side, lat, lon) {
   var inp = $('#op2-f-' + side);
@@ -5742,6 +5944,8 @@ function collectForm() {
     unload_lon: to.dataset.lon || '',
     unload_contact_name: uc.name,
     unload_contact_phone: uc.phone,
+    load_site_id: from.dataset.siteId || '',
+    unload_site_id: to.dataset.siteId || '',
     price: num($('#op2-f-price').value) || 0,
     payment_status: $('#op2-f-pay').value
   };
@@ -5755,7 +5959,7 @@ function collectForm() {
 function saveForm(btn, confirm) {
   if (btn.classList.contains('op2-blocked')) { logUiEvent_('blocked_click', 'save', btn.textContent); toast('<span class="op2-warn">' + esc(btn.textContent) + '</span>'); return; }
   /* «незаполненные поля» - по реально пустым полям (tickState кладёт в data-miss), а не по жёлтому
-     цвету: жёлтая теперь ещё и «черновик», это не то же самое, что «не заполнено». */
+     цвету: жёлтая теперь ещё и «сохранить не подтверждённой», это не то же самое, что «не заполнено». */
   var warn = $('#op2-f-save') ? $('#op2-f-save').dataset.miss === '1' : btn.classList.contains('op2-warn');
   var payload = collectForm();
   var editing = !!(formOrder && !formRepeat && !formPrefill);
@@ -5907,6 +6111,9 @@ function runRepeat(btn, o) {
     load_contact_name: o.load_contact_name || '', load_contact_phone: o.load_contact_phone || '',
     unload_address: o.unload_address || '', unload_lat: o.unload_lat || '', unload_lon: o.unload_lon || '',
     unload_contact_name: o.unload_contact_name || '', unload_contact_phone: o.unload_contact_phone || '',
+    /* площадка в архиве - повтор без ссылки на неё (адрес и точка те же), иначе сервер отказал бы */
+    load_site_id: (o.load_site && !o.load_site.archived) ? o.load_site_id : '',
+    unload_site_id: (o.unload_site && !o.unload_site.archived) ? o.unload_site_id : '',
     price: num(o.price) || 0, payment_status: o.payment_status || '', internal: o.internal ? 1 : 0
   };
   btn.disabled = true;

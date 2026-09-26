@@ -87,6 +87,15 @@ const SH = (Date.now() % 997) * 0.004; // и точки: иначе повтор
   r = mk({ load_address: T2, load_lat: P.lat + 0.0004, load_lon: P.lon + 0.0004 });
   const [t5] = await db.query("SELECT text FROM customer_site_texts WHERE site_id = ?", [sid4]);
   check("5. другое написание в 50 м - та же площадка, новое написание", r.data.order && r.data.order.load_site_id === sid4 && t5.some((x) => x.text === T2), [r.data.order && r.data.order.load_site_id, t5.map((x) => x.text)]);
+  // 5б. счётчики: склейка добавила обе заявки второго написания (2 + 2 = 4); повторная привязка СТАРОЙ заявки
+  // (она старше площадки и уже посчитана) не прибавляет; новая заявка - +1
+  check("5б. счётчик после склейки - 4", (await siteOf(sid4)).load_count === 4, (await siteOf(sid4)).load_count);
+  const [[old1]] = await db.query("SELECT id FROM plan_orders WHERE load_address = ? ORDER BY id LIMIT 1", [T1]);
+  await db.query("UPDATE plan_orders SET load_site_id = NULL WHERE id = ?", [old1.id]); // как у заявок до площадок
+  as(M.email, "/api/orders/save", { id: old1.id, load_address: T1 });
+  check("5в. повторная привязка старой заявки - счётчик не растёт", (await orderOf(old1.id)).load_site_id === sid4 && (await siteOf(sid4)).load_count === 4, [(await orderOf(old1.id)).load_site_id, (await siteOf(sid4)).load_count]);
+  mk({ load_address: T1, load_lat: P.lat, load_lon: P.lon });
+  check("5г. новая заявка с этим адресом - счётчик +1", (await siteOf(sid4)).load_count === 5, (await siteOf(sid4)).load_count);
 
   // 6. точки заявок одного написания расходятся > 3 км - площадка без точки, «проверить точку»
   const T3 = "Объект Б5 " + RUN + ", участок 7";
